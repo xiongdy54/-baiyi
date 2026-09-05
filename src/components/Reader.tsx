@@ -44,6 +44,8 @@ export default function Reader({
     batchId?: string;
     running: boolean;
     progress?: number;
+    thinking?: number;
+    startedAt?: number;
     searching?: boolean;
     searched?: boolean;
     error?: string;
@@ -54,6 +56,15 @@ export default function Reader({
     setToast(msg);
     window.setTimeout(() => setToast(null), 1800);
   }, []);
+
+  // AI 运行中每秒跳一次已等待秒数——让用户确信程序没有卡死
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    if (!aiPanel?.running) return;
+    const t = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [aiPanel?.running]);
+  const elapsedSec = aiPanel?.running && aiPanel.startedAt ? Math.max(0, Math.round((nowTick - aiPanel.startedAt) / 1000)) : 0;
 
   // 恢复上次阅读位置
   useEffect(() => {
@@ -171,19 +182,22 @@ export default function Reader({
 
   // ---------- AI 制卡（Phase 13 主路径） ----------
   async function runAICards(text: string, webContext?: string) {
-    setAiPanel({ kind: "cards", text, running: true, progress: 0, searched: Boolean(webContext) });
+    setAiPanel({ kind: "cards", text, running: true, progress: 0, startedAt: Date.now(), thinking: 0, searched: Boolean(webContext) });
     try {
       const { batchId, result } = await cardGenerator.generateCards(
         text,
         { title: sourceTitle, section: contextLabel, webContext },
         "auto",
-        (chars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, progress: chars } : p))
+        (chars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, progress: chars } : p)),
+        (thinkChars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, thinking: thinkChars } : p))
       );
       setAiPanel({
         kind: "cards",
         text,
         running: false,
         progress: undefined,
+        startedAt: undefined,
+        thinking: undefined,
         drafts: result.cards,
         accepted: new Set<number>(),
         blockReasons: result.blockReasons,
@@ -196,6 +210,8 @@ export default function Reader({
         kind: "cards",
         text,
         running: false,
+        startedAt: undefined,
+        thinking: undefined,
         error: msg.includes("API Key")
           ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
           : msg
@@ -286,21 +302,24 @@ export default function Reader({
 
   // ---------- AI 解释（Phase 12） ----------
   async function runExplain(text: string, question: string | null) {
-    setAiPanel({ kind: "explain", text, answer: question ? undefined : "", running: true });
+    setAiPanel({ kind: "explain", text, answer: question ? undefined : "", running: true, startedAt: Date.now(), thinking: 0 });
     try {
       const answer = await cardGenerator.explain(
         text,
         `${title}${contextLabel ? " · " + contextLabel : ""}`,
         question,
-        (acc) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, answer: acc, running: true } : p))
+        (acc) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, answer: acc, running: true } : p)),
+        (thinkChars) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, thinking: thinkChars } : p))
       );
-      setAiPanel({ kind: "explain", text, answer, running: false });
+      setAiPanel({ kind: "explain", text, answer, running: false, startedAt: undefined, thinking: undefined });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel({
         kind: "explain",
         text,
         running: false,
+        startedAt: undefined,
+        thinking: undefined,
         error:
           msg.includes("API Key")
             ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
@@ -371,7 +390,7 @@ export default function Reader({
 
         {aiPanel && (
           <AIPanel
-            panel={aiPanel}
+            panel={{ ...aiPanel, elapsedSec }}
             onClose={() => {
               if (aiPanel.kind === "cards" && aiPanel.batchId && aiPanel.drafts?.length) {
                 cardsApi.setBatchStatus(aiPanel.batchId, "rejected");
@@ -538,6 +557,9 @@ function AIPanel({
     batchId?: string;
     running: boolean;
     progress?: number;
+    thinking?: number;
+    startedAt?: number;
+    elapsedSec?: number;
     searching?: boolean;
     searched?: boolean;
     error?: string;
@@ -570,11 +592,23 @@ function AIPanel({
 
         {panel.kind === "cards" && panel.running && (
           <div className="ai-streaming mono">
-            生成中… 已输出 {panel.progress ?? 0} 字（大模型生成长 JSON 通常需要 1-2 分钟，请保持窗口打开）
+            {panel.progress
+              ? `生成中… 已输出 ${panel.progress} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒（大模型生成长 JSON 通常需要 1-2 分钟，请保持窗口打开）`
+              : panel.thinking
+                ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
+                : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
           </div>
         )}
         {panel.searching && <div className="ai-streaming mono">正在联网检索事件背景…</div>}
         {panel.error && <div className="ai-error">{panel.error}</div>}
+
+        {panel.kind === "explain" && panel.running && !panel.answer && (
+          <div className="ai-streaming mono" aria-live="polite">
+            {panel.thinking
+              ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
+              : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
+          </div>
+        )}
 
         {panel.kind === "explain" && panel.answer && (
           <>

@@ -105,11 +105,18 @@ export const cardGenerator: {
     sourceText: string,
     context: { title?: string; section?: string; sourceRef?: { title?: string } | null; existingCards?: string[]; userProfile?: string; webContext?: string },
     mode: CardGenMode,
-    onProgress?: (chars: number) => void
+    onProgress?: (chars: number) => void,
+    onThinking?: (thinkChars: number) => void
   ): Promise<{ batchId: string; result: GenResult; templateId: string | null }>;
-  explain(sourceText: string, context: string, question: string | null, onDelta?: (acc: string) => void): Promise<string>;
+  explain(
+    sourceText: string,
+    context: string,
+    question: string | null,
+    onDelta?: (acc: string) => void,
+    onThinking?: (thinkChars: number) => void
+  ): Promise<string>;
 } = {
-  async generateCards(sourceText, context, mode, onProgress) {
+  async generateCards(sourceText, context, mode, onProgress, onThinking) {
     const resolved = mode === "auto" ? detectMode(sourceText) : mode;
     const tpl = await window.promptsAPI?.get(resolved);
     if (!tpl) throw new Error("提示词模板缺失");
@@ -135,7 +142,8 @@ export const cardGenerator: {
             onProgress(a.length);
           }
         : undefined,
-      0.4
+      0.4,
+      onThinking
     );
     const result = extractJson(raw || acc);
     const batch = await window.batchesAPI?.create({
@@ -153,7 +161,7 @@ export const cardGenerator: {
     return { batchId: batch?.id || "", result, templateId: tpl.id };
   },
 
-  async explain(sourceText, context, question, onDelta) {
+  async explain(sourceText, context, question, onDelta, onThinking) {
     const tpl = await window.promptsAPI?.get("reader-explain");
     const sys = tpl?.content || "你是阅读助手。";
     const user = `【选中文本】\n${sourceText}\n\n${context ? `【上下文】${context}` : ""}\n\n${question ? `【用户追问】${question}` : "请解释这段文字。"}`;
@@ -163,7 +171,8 @@ export const cardGenerator: {
         { role: "user", content: user }
       ],
       onDelta,
-      0.7
+      0.7,
+      onThinking
     );
   }
 };

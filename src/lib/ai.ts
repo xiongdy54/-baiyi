@@ -8,7 +8,7 @@ declare global {
       listModels: () => Promise<string[]>;
       websearch: (query: string) => Promise<{ title: string; snippet: string }[]>;
       chat: (requestId: string, messages: unknown[], temperature?: number) => void;
-      onStream: (cb: (requestId: string, msg: { delta?: string; done?: boolean; error?: string }) => void) => () => void;
+      onStream: (cb: (requestId: string, msg: { delta?: string; thinking?: number; done?: boolean; error?: string }) => void) => () => void;
     };
   }
 }
@@ -40,8 +40,13 @@ export const aiGateway = {
     if (!window.aiAPI) return [];
     return window.aiAPI.websearch(query);
   },
-  // 流式对话：onDelta 累积增量；resolve 返回全文
-  chat(messages: { role: string; content: string }[], onDelta?: (acc: string, delta: string) => void, temperature?: number): Promise<string> {
+  // 流式对话：onDelta 累积增量；onThinking 上报思考模型（reasoning_content）的已思考字数；resolve 返回全文
+  chat(
+    messages: { role: string; content: string }[],
+    onDelta?: (acc: string, delta: string) => void,
+    temperature?: number,
+    onThinking?: (thinkChars: number) => void
+  ): Promise<string> {
     return new Promise((resolve, reject) => {
       if (!window.aiAPI) {
         reject(new Error("AI API 不可用"));
@@ -59,6 +64,9 @@ export const aiGateway = {
             reject(new Error(msg.error));
           }
           return;
+        }
+        if (msg.thinking !== undefined) {
+          onThinking?.(msg.thinking);
         }
         if (msg.delta) {
           acc += msg.delta;

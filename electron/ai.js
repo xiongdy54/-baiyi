@@ -178,6 +178,9 @@ function chatStream({ messages, temperature }, send) {
           return;
         }
         let buf = "";
+        // 思考模型（GLM 等）先输出 reasoning_content 再输出正文；thinking 计数节流转发（v10.4）
+        let thinkAcc = 0;
+        let lastThinkSent = 0;
         res.on("data", (chunk) => {
           buf += chunk.toString("utf-8");
           let idx;
@@ -193,8 +196,17 @@ function chatStream({ messages, temperature }, send) {
             }
             try {
               const json = JSON.parse(data);
-              const delta = json.choices?.[0]?.delta?.content;
-              if (delta) send({ delta });
+              const d = json.choices?.[0]?.delta || {};
+              if (d.content) send({ delta: d.content });
+              const think = d.reasoning_content ?? d.reasoning;
+              if (typeof think === "string" && think) {
+                thinkAcc += think.length;
+                const now = Date.now();
+                if (now - lastThinkSent > 400) {
+                  send({ thinking: thinkAcc });
+                  lastThinkSent = now;
+                }
+              }
             } catch {
               /* 忽略不完整行 */
             }
