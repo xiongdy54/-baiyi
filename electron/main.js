@@ -255,6 +255,8 @@ ipcMain.on("ai:chat", (e, requestId, messages, temperature) => {
 });
 
 function createWindow() {
+  // 防重入：已存在窗口时不再创建（macOS activate 与启动路径共用此函数）
+  if (BrowserWindow.getAllWindows().length > 0) return;
   const win = new BrowserWindow({
     width: 1100,
     height: 750,
@@ -301,7 +303,7 @@ app.whenReady().then(async () => {
     }
   });
 
-  createWindow();
+  // 首个窗口已在上方先行创建（v10.2 启动优化），此处只做协议注册与生命周期挂接
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
