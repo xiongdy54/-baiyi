@@ -44,6 +44,13 @@ const PRESETS = {
 
 const LEGACY_MODELS = new Set(["glm-5.3-flash", "glm-4.6"]);
 
+// reasoning_effort 仅 GLM-5.2+ 支持（GLM-5.3 系仅接受 max/high/low，其余值报错；
+// 非 GLM 模型不认识该参数，发送会 400）——按模型名判断是否随请求发送（v10.5）
+function supportsReasoningEffort(model) {
+  const m = String(model || "").toLowerCase();
+  return /(^|\/)z-ai\/glm-5\.[2-9]/.test(m) || /(^|\/)glm-5\.[2-9]/.test(m) || /(^|\/)zai-org\/glm-5\.[2-9]/.test(m);
+}
+
 function aiConfigPath() {
   return path.join(app.getPath("userData"), "ai-config.json");
 }
@@ -88,7 +95,8 @@ function getAIConfig() {
     hasKey: Boolean(apiKey),
     keyUrl: preset.keyUrl || "",
     hint: preset.hint || "",
-    presetName: preset.name
+    presetName: preset.name,
+    reasoningEffort: cfg.reasoningEffort || "low"
   };
 }
 
@@ -121,6 +129,10 @@ function setAIConfig(partial) {
     cfg.model = partial.model;
     cfg.modelTouched = true;
   }
+  if (typeof partial.reasoningEffort === "string") {
+    // 只接受 GLM-5.3 系合法值；非法值一律回落 low
+    cfg.reasoningEffort = ["max", "high", "low"].includes(partial.reasoningEffort) ? partial.reasoningEffort : "low";
+  }
   if (partial.apiKey !== undefined) {
     if (!partial.apiKey) {
       cfg.apiKeyEnc = null;
@@ -152,12 +164,17 @@ function chatStream({ messages, temperature }, send) {
   }
   const url = new URL(cfg.baseUrl.replace(/\/$/, "") + "/chat/completions");
   const isHttps = url.protocol === "https:";
-  const body = JSON.stringify({
+  const bodyObj = {
     model: cfg.model,
     messages,
     temperature: typeof temperature === "number" ? temperature : 0.7,
     stream: true
-  });
+  };
+  // 思考强度：仅 GLM-5.2+ 接受 reasoning_effort；GLM-5.3 系思考无法关闭，low = 最轻推理档
+  if (supportsReasoningEffort(cfg.model)) {
+    bodyObj.reasoning_effort = cfg.reasoningEffort || "low";
+  }
+  const body = JSON.stringify(bodyObj);
   const headers = { "Content-Type": "application/json" };
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
   headers["Content-Length"] = Buffer.byteLength(body);

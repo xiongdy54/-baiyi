@@ -265,6 +265,30 @@ function AISection() {
           </p>
         </div>
 
+        {/glm-5\.[2-9]/i.test(cfg.model) && (
+          <div className="form-field">
+            <label>思考强度（仅 GLM-5.2+ 支持；GLM-5.3 系思考无法关闭）</label>
+            <div className="seg-tabs">
+              {[
+                { id: "low", label: "低（快）" },
+                { id: "high", label: "中" },
+                { id: "max", label: "强（慢，默认档）" }
+              ].map((o) => (
+                <button
+                  key={o.id}
+                  className={(cfg.reasoningEffort || "low") === o.id ? "active" : ""}
+                  onClick={() => save({ reasoningEffort: o.id })}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p className="form-hint">
+              低 = 最轻推理，制卡速度可快数倍；强 = 模型深度思考（你之前遇到的近 5 分钟耗时即此档）。其他模型（DeepSeek/Qwen/Gemini 等）不发送此参数。
+            </p>
+          </div>
+        )}
+
         {cfg.preset !== "local" && (
           <div className="form-field">
             <label>API Key {cfg.hasKey ? "（已保存 ✓）" : "（尚未保存 — 填好后点「保存配置」）"}</label>

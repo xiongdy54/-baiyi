@@ -2,7 +2,7 @@
 declare global {
   interface Window {
     aiAPI?: {
-      getConfig: () => Promise<{ preset: string; baseUrl: string; model: string; hasKey: boolean; keyUrl?: string; hint?: string; presetName?: string }>;
+      getConfig: () => Promise<{ preset: string; baseUrl: string; model: string; hasKey: boolean; keyUrl?: string; hint?: string; presetName?: string; reasoningEffort?: string }>;
       setConfig: (partial: unknown) => Promise<unknown>;
       test: () => Promise<{ ok: boolean; message: string }>;
       listModels: () => Promise<string[]>;
@@ -18,6 +18,7 @@ export interface AIConfig {
   baseUrl: string;
   model: string;
   hasKey: boolean;
+  reasoningEffort?: string;
 }
 
 export const aiGateway = {
