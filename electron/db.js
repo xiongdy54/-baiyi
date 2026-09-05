@@ -1,0 +1,750 @@
+// SQLite 仓储层（sql.js WASM 实现，接口与将来 better-sqlite3 原生版一致）
+// 文档数据模型：LibraryItem + Document，全部带 userId/updatedAt/syncVersion/isDeleted
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+const { app } = require("electron");
+const {
+  CARD_GEN_PROMPT,
+  CARD_FORMULA_PROMPT,
+  CARD_SEQ_PROMPT,
+  CARD_ENUM_PROMPT,
+  CARD_MNEMONIC_PROMPT,
+  CARD_CONTRAST_PROMPT,
+  CARD_WORDING_PROMPT,
+  CARD_BASIC_PROMPT,
+  READER_EXPLAIN_PROMPT,
+  LEECH_RESCUE_PROMPT
+} = require("./prompts");
+
+let db = null;
+let dbFile = null;
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS library_items (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source_type TEXT NOT NULL,
+  source_url TEXT,
+  cover TEXT,
+  progress_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY,
+  library_item_id TEXT NOT NULL,
+  markdown TEXT NOT NULL,
+  blocks_json TEXT NOT NULL DEFAULT '[]',
+  toc_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS assets (
+  id TEXT PRIMARY KEY,
+  library_item_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  path TEXT NOT NULL,
+  hash TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS extracts (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  parent_type TEXT NOT NULL,
+  parent_id TEXT NOT NULL,
+  document_id TEXT NOT NULL,
+  content_markdown TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 50,
+  topic_next_at INTEGER NOT NULL,
+  interval_days REAL NOT NULL DEFAULT 1,
+  workflow_state_json TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS cards (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  note_text TEXT NOT NULL,
+  card_type TEXT NOT NULL DEFAULT 'qa',
+  cloze_ords TEXT NOT NULL DEFAULT '[]',
+  card_ord INTEGER NOT NULL DEFAULT 0,
+  front_markdown TEXT NOT NULL,
+  back_markdown TEXT NOT NULL,
+  context_prefix TEXT,
+  context_ref_json TEXT,
+  mnemonic TEXT,
+  example TEXT,
+  source_ref_json TEXT,
+  date_stamp TEXT,
+  priority INTEGER NOT NULL DEFAULT 50,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  knowledge_point_id TEXT,
+  occlusion_json TEXT,
+  fsrs_json TEXT,
+  leech_json TEXT,
+  generated_by TEXT NOT NULL DEFAULT 'manual',
+  gen_batch_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS card_issues (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  rule_id TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  message TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'lint',
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at INTEGER NOT NULL,
+  resolved_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS ai_gen_batches (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  scope TEXT NOT NULL,
+  source_text TEXT NOT NULL,
+  context_json TEXT,
+  prompt_template_id TEXT,
+  result_json TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS prompt_templates (
+  id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL,
+  name TEXT NOT NULL,
+  content TEXT NOT NULL,
+  version INTEGER NOT NULL DEFAULT 1,
+  is_default INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_logs (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  rating TEXT NOT NULL,
+  reviewed_at INTEGER NOT NULL,
+  duration_ms INTEGER
+);
+`;
+
+async function initDb() {
+  const initSqlJs = require("sql.js");
+  const SQL = await initSqlJs();
+  dbFile = path.join(app.getPath("userData"), "library.db");
+  db = fs.existsSync(dbFile) ? new SQL.Database(fs.readFileSync(dbFile)) : new SQL.Database();
+  db.run(SCHEMA);
+  try {
+    db.run("ALTER TABLE library_items ADD COLUMN progress_json TEXT");
+  } catch {
+    /* 列已存在 */
+  }
+  db.run("INSERT OR IGNORE INTO users (id, name, created_at) VALUES ('local-user', '本地用户', ?)", [
+    Date.now()
+  ]);
+  // 修复历史 NULL fsrs_json 的卡片（一次性迁移，v10.2）
+  try {
+    db.run(
+      "UPDATE cards SET fsrs_json = ? WHERE fsrs_json IS NULL AND is_deleted = 0",
+      [JSON.stringify({ state: "new", due: Date.now(), lapses: 0 })]
+    );
+  } catch { /* 表尚不存在等场景 */ }
+  ensurePromptTemplates();
+  persist();
+}
+
+function persist() {
+  fs.writeFileSync(dbFile, Buffer.from(db.export()));
+}
+
+function listItems() {
+  const stmt = db.prepare(`
+    SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_json AS progressJson,
+           li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
+    FROM library_items li
+    LEFT JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
+    WHERE li.is_deleted = 0
+    ORDER BY li.created_at DESC
+  `);
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+function createFromPaste(title, markdown) {
+  const cleanTitle = String(title || "").trim() || firstLine(markdown) || "未命名书籍";
+  const itemId = crypto.randomUUID();
+  const docId = crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, 'paste', NULL, NULL, ?, ?, 0, 0)`,
+    [itemId, cleanTitle, now, now]
+  );
+  db.run(
+    `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, ?, ?, '[]', NULL, ?, ?, 0, 0)`,
+    [docId, itemId, String(markdown), now, now]
+  );
+  persist();
+  return { id: itemId, title: cleanTitle };
+}
+
+function deleteItem(id) {
+  const now = Date.now();
+  db.run("UPDATE library_items SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, id]);
+  db.run("UPDATE documents SET is_deleted = 1, updated_at = ? WHERE library_item_id = ?", [now, id]);
+  persist();
+  return true;
+}
+
+function addAssetRow(itemId, kind, relPath, hash, now) {
+  db.run(
+    `INSERT INTO assets (id, library_item_id, kind, path, hash, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+    [crypto.randomUUID(), itemId, kind, relPath, hash, now, now]
+  );
+}
+
+function sha256(buf) {
+  return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+function createFromEpub(title, markdown, toc, coverDataUrl, epubData, sourceName) {
+  const cleanTitle = String(title || "").trim() || "未命名书籍";
+  const itemId = crypto.randomUUID();
+  const docId = crypto.randomUUID();
+  const now = Date.now();
+
+  const dir = path.join(app.getPath("userData"), "assets", itemId);
+  fs.mkdirSync(dir, { recursive: true });
+  let coverRel = null;
+
+  if (coverDataUrl) {
+    const m = /^data:image\/(\w+);base64,(.+)$/.exec(String(coverDataUrl));
+    if (m) {
+      const ext = m[1] === "jpeg" ? "jpg" : m[1];
+      const buf = Buffer.from(m[2], "base64");
+      fs.writeFileSync(path.join(dir, `cover.${ext}`), buf);
+      coverRel = `cover.${ext}`;
+      addAssetRow(itemId, "image-cover", coverRel, sha256(buf), now);
+    }
+  }
+
+  if (epubData && epubData.length) {
+    const buf = Buffer.from(epubData);
+    fs.writeFileSync(path.join(dir, "original.epub"), buf);
+    addAssetRow(itemId, "epub-original", "original.epub", sha256(buf), now);
+  }
+
+  db.run(
+    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, 'epub', ?, ?, ?, ?, 0, 0)`,
+    [itemId, cleanTitle, sourceName || null, coverRel, now, now]
+  );
+  db.run(
+    `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, ?, ?, '[]', ?, ?, ?, 0, 0)`,
+    [docId, itemId, String(markdown), JSON.stringify(toc || []), now, now]
+  );
+  persist();
+  return { id: itemId, title: cleanTitle, cover: coverRel };
+}
+
+function firstLine(markdown) {
+  const line = String(markdown || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!line) return "";
+  return line.replace(/^#+\s*/, "").slice(0, 30);
+}
+
+// ---------- 卡片 / 制卡 / FSRS / Leech（Phase 3 + 13-16，v6/v8） ----------
+
+function normalizeFsrs(json) {
+  try {
+    const p = json ? JSON.parse(json) : null;
+    if (p && typeof p.due !== "undefined") return p;
+  } catch { /* fallthrough */ }
+  return { state: "new", due: Date.now(), lapses: 0 };
+}
+
+function mapCardRow(r) {
+  if (!r) return null;
+  return {
+    id: r.id,
+    noteText: r.note_text,
+    cardType: r.card_type,
+    clozeOrds: JSON.parse(r.cloze_ords || "[]"),
+    cardOrd: r.card_ord,
+    frontMarkdown: r.front_markdown,
+    backMarkdown: r.back_markdown,
+    contextPrefix: r.context_prefix,
+    contextRef: r.context_ref_json ? JSON.parse(r.context_ref_json) : null,
+    mnemonic: r.mnemonic,
+    example: r.example,
+    sourceRef: r.source_ref_json ? JSON.parse(r.source_ref_json) : null,
+    dateStamp: r.date_stamp,
+    priority: r.priority,
+    tags: JSON.parse(r.tags_json || "[]"),
+    knowledgePointId: r.knowledge_point_id,
+    occlusionJson: r.occlusion_json ? JSON.parse(r.occlusion_json) : null,
+    fsrs: normalizeFsrs(r.fsrs_json),
+    leech: r.leech_json ? JSON.parse(r.leech_json) : null,
+    generatedBy: r.generated_by,
+    genBatchId: r.gen_batch_id,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+
+function insertCard(card) {
+  const id = card.id || crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    `INSERT INTO cards (id, user_id, note_text, card_type, cloze_ords, card_ord, front_markdown, back_markdown,
+      context_prefix, context_ref_json, mnemonic, example, source_ref_json, date_stamp, priority, tags_json,
+      knowledge_point_id, occlusion_json, fsrs_json, leech_json, generated_by, gen_batch_id,
+      created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, 0)`,
+    [
+      id,
+      card.noteText || "",
+      card.cardType || "qa",
+      JSON.stringify(card.clozeOrds || []),
+      card.cardOrd || 0,
+      card.frontMarkdown || "",
+      card.backMarkdown || "",
+      card.contextPrefix || null,
+      card.contextRef ? JSON.stringify(card.contextRef) : null,
+      card.mnemonic || null,
+      card.example || null,
+      card.sourceRef ? JSON.stringify(card.sourceRef) : null,
+      card.dateStamp || null,
+      Number(card.priority) || 50,
+      JSON.stringify(card.tags || []),
+      card.knowledgePointId || null,
+      card.occlusionJson ? JSON.stringify(card.occlusionJson) : null,
+      card.fsrsJson || null,
+      card.generatedBy || "manual",
+      card.genBatchId || null,
+      now,
+      now
+    ]
+  );
+  return id;
+}
+
+function createCard(card) {
+  const id = insertCard({
+    ...card,
+    // 新卡初始 FSRS 状态：due=now 即立即到期（修复 NULL 导致的调度竞争）
+    fsrsJson: card.fsrsJson || JSON.stringify({ state: "new", due: Date.now(), lapses: 0 })
+  });
+  persist();
+  return { id };
+}
+
+function updateCard(card) {
+  db.run(
+    `UPDATE cards SET note_text=?, card_type=?, cloze_ords=?, card_ord=?, front_markdown=?, back_markdown=?,
+      context_prefix=?, context_ref_json=?, mnemonic=?, example=?, source_ref_json=?, date_stamp=?, priority=?,
+      tags_json=?, knowledge_point_id=?, occlusion_json=?, fsrs_json=?, leech_json=?, updated_at=? WHERE id=? AND is_deleted=0`,
+    [
+      card.noteText || "",
+      card.cardType || "qa",
+      JSON.stringify(card.clozeOrds || []),
+      card.cardOrd || 0,
+      card.frontMarkdown || "",
+      card.backMarkdown || "",
+      card.contextPrefix || null,
+      card.contextRef ? JSON.stringify(card.contextRef) : null,
+      card.mnemonic || null,
+      card.example || null,
+      card.sourceRef ? JSON.stringify(card.sourceRef) : null,
+      card.dateStamp || null,
+      Number(card.priority) || 50,
+      JSON.stringify(card.tags || []),
+      card.knowledge_point_id || card.knowledgePointId || null,
+      card.occlusion_json || (card.occlusionJson ? JSON.stringify(card.occlusionJson) : null),
+      card.fsrs_json || (card.fsrs ? JSON.stringify(card.fsrs) : null),
+      card.leech_json || (card.leech ? JSON.stringify(card.leech) : null),
+      Date.now(),
+      card.id
+    ]
+  );
+  persist();
+  return true;
+}
+
+function getCard(id) {
+  const rows = queryAll("SELECT * FROM cards WHERE id = ? AND is_deleted = 0", [id]);
+  return mapCardRow(rows[0]);
+}
+
+function listDueCards() {
+  const now = Date.now();
+  const rows = queryAll(
+    `SELECT c.*, li.title AS docTitle FROM cards c
+     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN library_items li ON li.id = d.library_item_id
+     WHERE c.is_deleted = 0
+       AND (c.leech_json IS NULL OR json_extract(c.leech_json, '$.suspended') IS NOT 1)
+     ORDER BY c.created_at ASC`
+  );
+  const mapped = rows.map(mapCardRow).map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
+  // 新卡（fsrs_json 为 NULL 视为 due=now）+ 到期 + 未挂起
+  return mapped.filter((c) => {
+    if (c.leech?.suspended) return false;
+    const due = c.fsrs?.due ?? now;
+    return due <= now;
+  });
+}
+
+function listAllCards() {
+  const rows = queryAll("SELECT * FROM cards WHERE is_deleted = 0 ORDER BY created_at DESC");
+  return rows.map(mapCardRow);
+}
+
+function deleteCard(id) {
+  db.run("UPDATE cards SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), id]);
+  db.run("UPDATE card_issues SET status = 'dismissed', resolved_at = ? WHERE card_id = ? AND status = 'open'", [Date.now(), id]);
+  persist();
+  return true;
+}
+
+function saveReview(cardId, fsrsState, rating, durationMs) {
+  db.run(
+    "INSERT INTO review_logs (id, card_id, rating, reviewed_at, duration_ms) VALUES (?, ?, ?, ?, ?)",
+    [crypto.randomUUID(), cardId, rating, Date.now(), durationMs || null]
+  );
+  db.run("UPDATE cards SET fsrs_json = ?, updated_at = ? WHERE id = ?", [
+    JSON.stringify(fsrsState),
+    Date.now(),
+    cardId
+  ]);
+  persist();
+  return true;
+}
+
+function setCardSuspended(cardId, suspended, reason) {
+  const card = getCard(cardId);
+  if (!card) return null;
+  const leech = card.leech || {};
+  leech.suspended = suspended;
+  leech.suspendedAt = suspended ? Date.now() : null;
+  if (reason) leech.reason = reason;
+  db.run("UPDATE cards SET leech_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(leech), Date.now(), cardId]);
+  persist();
+  return true;
+}
+
+function resolveLeech(cardId, resolution, updates) {
+  const card = getCard(cardId);
+  if (!card) return null;
+  const leech = { isLeech: false, resolution, resolvedAt: Date.now() };
+  db.run(
+    `UPDATE cards SET leech_json=?, front_markdown=COALESCE(?, front_markdown), back_markdown=COALESCE(?, back_markdown),
+      mnemonic=COALESCE(?, mnemonic), priority=COALESCE(?, priority), tags_json=?, fsrs_json=?,
+      updated_at=? WHERE id=?`,
+    [
+      JSON.stringify(leech),
+      updates?.frontMarkdown || null,
+      updates?.backMarkdown || null,
+      updates?.mnemonic || null,
+      updates?.priority ?? null,
+      JSON.stringify(updates?.tags || card.tags || []),
+      JSON.stringify({ state: "new", due: Date.now(), lapses: 0 }),
+      Date.now(),
+      cardId
+    ]
+  );
+  persist();
+  return true;
+}
+
+function listLeechCards() {
+  const rows = queryAll("SELECT * FROM cards WHERE is_deleted = 0");
+  return rows.map(mapCardRow).filter((c) => c.leech?.isLeech || c.leech?.suspended);
+}
+
+function addCardIssue(issue) {
+  const id = crypto.randomUUID();
+  db.run(
+    "INSERT INTO card_issues (id, card_id, rule_id, severity, message, source, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'open', ?)",
+    [id, issue.cardId, issue.ruleId, issue.severity, issue.message, issue.source || "lint", Date.now()]
+  );
+  persist();
+  return { id };
+}
+
+function listCardIssues(cardId) {
+  return queryAll("SELECT * FROM card_issues WHERE card_id = ? ORDER BY created_at DESC", [cardId]);
+}
+
+function resolveCardIssue(id) {
+  db.run("UPDATE card_issues SET status = 'fixed', resolved_at = ? WHERE id = ?", [Date.now(), id]);
+  persist();
+  return true;
+}
+
+function createAIGenBatch(batch) {
+  const id = crypto.randomUUID();
+  db.run(
+    "INSERT INTO ai_gen_batches (id, user_id, scope, source_text, context_json, prompt_template_id, result_json, status, created_at) VALUES (?, 'local-user', ?, ?, ?, ?, ?, 'draft', ?)",
+    [
+      id,
+      batch.scope,
+      batch.sourceText || "",
+      batch.context ? JSON.stringify(batch.context) : null,
+      batch.promptTemplateId || null,
+      batch.result ? JSON.stringify(batch.result) : null,
+      Date.now()
+    ]
+  );
+  persist();
+  return { id };
+}
+
+function setAIGenBatchStatus(id, status) {
+  db.run("UPDATE ai_gen_batches SET status = ? WHERE id = ?", [status, id]);
+  persist();
+  return true;
+}
+
+function ensurePromptTemplates() {
+  const count = queryAll("SELECT COUNT(*) AS n FROM prompt_templates")[0].n;
+  if (Number(count) > 0) return;
+  const now = Date.now();
+  const seed = (scope, name, content) => {
+    db.run(
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)",
+      [crypto.randomUUID(), scope, name, content, now]
+    );
+  };
+  seed("card-generation", "主制卡 v1", CARD_GEN_PROMPT);
+  seed("card-formula", "公式分解 v1", CARD_FORMULA_PROMPT);
+  seed("card-seq", "序列/背诵 v1", CARD_SEQ_PROMPT);
+  seed("card-enum", "枚举拆解 v1", CARD_ENUM_PROMPT);
+  seed("card-mnemonic", "助记双卡 v1", CARD_MNEMONIC_PROMPT);
+  seed("card-contrast", "对比卡 v1", CARD_CONTRAST_PROMPT);
+  seed("card-wording", "措辞优化 v1", CARD_WORDING_PROMPT);
+  seed("card-basic", "前置知识卡 v1", CARD_BASIC_PROMPT);
+  seed("reader-explain", "阅读解释 v1", READER_EXPLAIN_PROMPT);
+  seed("leech-rescue", "难点诊断 v1", LEECH_RESCUE_PROMPT);
+}
+
+function getPromptTemplate(scope) {
+  const rows = queryAll(
+    "SELECT * FROM prompt_templates WHERE scope = ? ORDER BY version DESC LIMIT 1",
+    [scope]
+  );
+  return rows[0] || null;
+}
+
+function listPromptTemplates() {
+  return queryAll("SELECT id, scope, name, version, is_default, created_at FROM prompt_templates ORDER BY scope, version DESC");
+}
+
+// 相似检索：n-gram + 归一化编辑距离（本地，接口的默认实现）
+function ngrams(text, n) {
+  const t = String(text || "").toLowerCase().replace(/\s+/g, "");
+  const out = new Set();
+  for (let i = 0; i <= t.length - n; i++) out.add(t.slice(i, i + n));
+  return out;
+}
+
+function similarity(a, b) {
+  const A = ngrams(a, 2);
+  const B = ngrams(b, 2);
+  if (A.size === 0 || B.size === 0) return 0;
+  let inter = 0;
+  for (const g of A) if (B.has(g)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+
+function findSimilarCards(cardText, k = 3) {
+  const all = queryAll("SELECT id, front_markdown, back_markdown FROM cards WHERE is_deleted = 0");
+  return all
+    .map((c) => ({
+      cardId: c.id,
+      score: similarity(cardText, c.front_markdown + " " + c.back_markdown),
+      front: c.front_markdown
+    }))
+    .filter((r) => r.score > 0.25)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
+}
+
+// ---------- 阅读器 / 摘录队列（Phase 2） ----------
+
+function getDocument(itemId) {
+  const stmt = db.prepare(`
+    SELECT li.title, li.progress_json AS progressJson, d.id AS documentId, d.markdown
+    FROM library_items li
+    JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
+    WHERE li.id = ? AND li.is_deleted = 0
+  `);
+  stmt.bind([itemId]);
+  let row = null;
+  while (stmt.step()) row = stmt.getAsObject();
+  stmt.free();
+  return row;
+}
+
+function updateProgress(itemId, progress) {
+  db.run("UPDATE library_items SET progress_json = ?, updated_at = ? WHERE id = ?", [
+    JSON.stringify(progress ?? {}),
+    Date.now(),
+    itemId
+  ]);
+  persist();
+  return true;
+}
+
+function queryAll(sql, params = []) {
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) rows.push(stmt.getAsObject());
+  stmt.free();
+  return rows;
+}
+
+function createExtract({ parentType, parentId, documentId, contentMarkdown, priority }) {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, priority, topic_next_at, interval_days, workflow_state_json, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, 0, 0)`,
+    [
+      id,
+      String(parentType),
+      String(parentId),
+      String(documentId),
+      String(contentMarkdown),
+      Number(priority) || 50,
+      now,
+      now,
+      now
+    ]
+  );
+  persist();
+  return { id };
+}
+
+function parentChain(extract) {
+  const chain = [];
+  let cursor = extract;
+  while (cursor && cursor.parent_type === "extract" && chain.length < 5) {
+    const rows = queryAll(
+      "SELECT id, parent_type, parent_id, content_markdown FROM extracts WHERE id = ? AND is_deleted = 0",
+      [cursor.parent_id]
+    );
+    if (rows.length === 0) break;
+    cursor = rows[0];
+    chain.unshift(String(cursor.content_markdown).slice(0, 40));
+  }
+  return chain;
+}
+
+function listDueExtracts() {
+  const rows = queryAll(
+    `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown, e.priority,
+            e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
+            li.title AS docTitle
+     FROM extracts e
+     JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
+     JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
+     WHERE e.is_deleted = 0 AND e.topic_next_at <= ?
+     ORDER BY e.priority ASC, e.topic_next_at ASC`,
+    [Date.now()]
+  );
+  return rows.map((r) => ({
+    ...r,
+    depth: r.parent_type === "extract" ? parentChain(r).length + 1 : 1
+  }));
+}
+
+function getExtract(id) {
+  const rows = queryAll(
+    `SELECT e.id, e.parent_type AS parentType, e.parent_id AS parentId,
+            e.document_id AS documentId, e.content_markdown AS contentMarkdown,
+            e.priority, e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays,
+            e.created_at AS createdAt, li.title AS docTitle
+     FROM extracts e
+     JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
+     JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
+     WHERE e.id = ? AND e.is_deleted = 0`,
+    [id]
+  );
+  if (rows.length === 0) return null;
+  return { ...rows[0], chain: parentChain(rows[0]) };
+}
+
+function postponeExtract(id) {
+  const rows = queryAll("SELECT interval_days AS intervalDays FROM extracts WHERE id = ? AND is_deleted = 0", [id]);
+  if (rows.length === 0) return null;
+  const intervalDays = Math.min((Number(rows[0].intervalDays) || 1) * 1.6, 180);
+  const nextAt = Date.now() + Math.round(intervalDays * 86400000);
+  db.run("UPDATE extracts SET interval_days = ?, topic_next_at = ?, updated_at = ? WHERE id = ?", [
+    intervalDays,
+    nextAt,
+    Date.now(),
+    id
+  ]);
+  persist();
+  return { intervalDays, nextAt };
+}
+
+module.exports = {
+  initDb,
+  listItems,
+  createFromPaste,
+  createFromEpub,
+  deleteItem,
+  getDocument,
+  updateProgress,
+  createExtract,
+  listDueExtracts,
+  getExtract,
+  postponeExtract,
+  createCard,
+  updateCard,
+  getCard,
+  listDueCards,
+  listAllCards,
+  deleteCard,
+  saveReview,
+  setCardSuspended,
+  resolveLeech,
+  listLeechCards,
+  addCardIssue,
+  listCardIssues,
+  resolveCardIssue,
+  createAIGenBatch,
+  setAIGenBatchStatus,
+  ensurePromptTemplates,
+  getPromptTemplate,
+  listPromptTemplates,
+  findSimilarCards
+};
