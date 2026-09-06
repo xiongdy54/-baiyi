@@ -4,6 +4,7 @@ import Bookshelf from "./components/Bookshelf";
 import Reader from "./components/Reader";
 import QueueView from "./components/QueueView";
 import ReviewView from "./components/ReviewView";
+import CardBrowser from "./components/CardBrowser";
 import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
 import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
@@ -22,6 +23,7 @@ type View =
   | { name: "reader"; itemId: string; doc: DocPayload }
   | { name: "queue" }
   | { name: "review" }
+  | { name: "browse" }
   | { name: "extractReader"; extractId: string };
 
 export default function App() {
@@ -200,6 +202,9 @@ export default function App() {
   } else if (view.name === "review") {
     topTitle = "复习";
     mainContent = <ReviewView />;
+  } else if (view.name === "browse") {
+    topTitle = "卡片浏览";
+    mainContent = <CardBrowser />;
   } else if (view.name === "extractReader") {
     topTitle = "摘录";
     mainContent = extractDetail ? (
@@ -257,12 +262,23 @@ export default function App() {
         <div className="topbar-right">
           <button
             className={`icon-btn${view.name === "review" ? " icon-btn-active" : ""}`}
-            title="复习"
+            title="复习（连续刷题）"
             onClick={() => setView(view.name === "review" ? { name: "shelf" } : { name: "review" })}
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z" />
               <path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z" />
+            </svg>
+          </button>
+          <button
+            className={`icon-btn${view.name === "browse" ? " icon-btn-active" : ""}`}
+            title="卡片浏览（到期 / 记忆难点）"
+            onClick={() => setView(view.name === "browse" ? { name: "shelf" } : { name: "browse" })}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="16" rx="1" />
+              <line x1="3" y1="9" x2="21" y2="9" />
+              <line x1="9" y1="9" x2="9" y2="20" />
             </svg>
           </button>
           <button
