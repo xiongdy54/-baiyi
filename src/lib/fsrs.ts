@@ -1,4 +1,7 @@
-// FSRS 调度封装（文档§1 锁定 ts-fsrs v6）
+// FSRS 调度封装（文档§1 锁定 ts-fsrs v6；§11 调度契约 v11）
+// §11.1 全量持久化：fsrs_json 含 {state,due,lapses,stability,difficulty,reps,lastReview}
+// §11.2 fuzz 锁定关闭：预览值即算法真实值
+// §11.3 预览与实际调度同源：preview() 一次算出四档完整结果，评分时取对应档
 import {
   fsrs,
   generatorParameters,
@@ -8,7 +11,7 @@ import {
   type FSRSParameters
 } from "ts-fsrs";
 
-const params: FSRSParameters = generatorParameters({ enable_fuzz: true });
+const params: FSRSParameters = generatorParameters({ enable_fuzz: false });
 const engine = fsrs(params);
 
 export type Rating = "Again" | "Hard" | "Good" | "Easy";
@@ -20,8 +23,8 @@ const GRADE_MAP: Record<Rating, Grade> = {
   Easy: 4 as Grade
 };
 
-// 数据库存的 fsrsJson <-> ts-fsrs Card 转换
-function toFsrsCard(state: { state?: string; due?: number; lapses?: number } | null | undefined): FsrsCard {
+// 数据库存的 fsrsJson <-> ts-fsrs Card 转换（§11.1 全字段往返）
+function toFsrsCard(state: Record<string, unknown> | null | undefined): FsrsCard {
   const base = createEmptyCard();
   if (!state) return base;
   const stateMap: Record<string, FsrsCard["state"]> = {
@@ -32,9 +35,15 @@ function toFsrsCard(state: { state?: string; due?: number; lapses?: number } | n
   };
   return {
     ...base,
-    state: stateMap[state.state ?? "new"] ?? 0,
-    due: state.due ? new Date(state.due) : base.due,
-    lapses: state.lapses ?? 0
+    state: stateMap[(state.state as string) ?? "new"] ?? 0,
+    due: state.due ? new Date(state.due as number) : base.due,
+    lapses: (state.lapses as number) ?? 0,
+    // 历史卡可能缺 S/D/reps（v11 前的存量数据）：缺省时以库默认基线回填，
+    // 由于历史卡调度本已失真，此回填只保证「不再二次失真」，无法还原历史
+    stability: (state.stability as number) ?? base.stability,
+    difficulty: (state.difficulty as number) ?? base.difficulty,
+    reps: (state.reps as number) ?? 0,
+    last_review: state.lastReview ? new Date(state.lastReview as number) : base.last_review
   };
 }
 
@@ -44,12 +53,16 @@ function fromFsrsCard(card: FsrsCard) {
     state: stateNames[card.state] ?? "new",
     due: card.due.getTime(),
     lapses: card.lapses,
+    stability: card.stability,
+    difficulty: card.difficulty,
+    reps: card.reps,
     lastReview: card.last_review ? card.last_review.getTime() : null
   };
 }
 
 export const fsrsEngine = {
-  preview(cardState: { state?: string; due?: number; lapses?: number } | null) {
+  // §11.3 一次计算四档完整结果；评分时复用，保证预览=落库
+  preview(cardState: Record<string, unknown> | null) {
     const card = toFsrsCard(cardState);
     const now = new Date();
     const result = engine.repeat(card, now);
@@ -57,11 +70,13 @@ export const fsrsEngine = {
       const item = result[GRADE_MAP[rating]];
       return {
         rating,
-        dueText: formatInterval(item.card.due.getTime() - now.getTime())
+        dueText: formatInterval(item.card.due.getTime() - now.getTime()),
+        // 完整落库状态（含 S/D/reps），评分时直接采用
+        fsrsState: fromFsrsCard(item.card)
       };
     });
   },
-  next(cardState: { state?: string; due?: number; lapses?: number } | null, rating: Rating) {
+  next(cardState: Record<string, unknown> | null, rating: Rating) {
     const card = toFsrsCard(cardState);
     const result = engine.repeat(card, new Date())[GRADE_MAP[rating]];
     return {

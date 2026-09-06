@@ -1859,7 +1859,7 @@ var fsrs = (params2) => {
 };
 
 // src/lib/fsrs.ts
-var params = generatorParameters({ enable_fuzz: true });
+var params = generatorParameters({ enable_fuzz: false });
 var engine = fsrs(params);
 var GRADE_MAP = {
   Again: 1,
@@ -1880,7 +1880,13 @@ function toFsrsCard(state) {
     ...base,
     state: stateMap[state.state ?? "new"] ?? 0,
     due: state.due ? new Date(state.due) : base.due,
-    lapses: state.lapses ?? 0
+    lapses: state.lapses ?? 0,
+    // 历史卡可能缺 S/D/reps（v11 前的存量数据）：缺省时以库默认基线回填，
+    // 由于历史卡调度本已失真，此回填只保证「不再二次失真」，无法还原历史
+    stability: state.stability ?? base.stability,
+    difficulty: state.difficulty ?? base.difficulty,
+    reps: state.reps ?? 0,
+    last_review: state.lastReview ? new Date(state.lastReview) : base.last_review
   };
 }
 function fromFsrsCard(card) {
@@ -1889,10 +1895,14 @@ function fromFsrsCard(card) {
     state: stateNames[card.state] ?? "new",
     due: card.due.getTime(),
     lapses: card.lapses,
+    stability: card.stability,
+    difficulty: card.difficulty,
+    reps: card.reps,
     lastReview: card.last_review ? card.last_review.getTime() : null
   };
 }
 var fsrsEngine = {
+  // §11.3 一次计算四档完整结果；评分时复用，保证预览=落库
   preview(cardState) {
     const card = toFsrsCard(cardState);
     const now = /* @__PURE__ */ new Date();
@@ -1901,7 +1911,9 @@ var fsrsEngine = {
       const item = result[GRADE_MAP[rating]];
       return {
         rating,
-        dueText: formatInterval(item.card.due.getTime() - now.getTime())
+        dueText: formatInterval(item.card.due.getTime() - now.getTime()),
+        // 完整落库状态（含 S/D/reps），评分时直接采用
+        fsrsState: fromFsrsCard(item.card)
       };
     });
   },

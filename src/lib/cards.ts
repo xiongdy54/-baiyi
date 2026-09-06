@@ -13,6 +13,7 @@ declare global {
       remove: (id: string) => Promise<boolean>;
       review: (cardId: string, fsrsState: unknown, rating: string, durationMs?: number) => Promise<boolean>;
       setSuspended: (id: string, suspended: boolean, reason?: string) => Promise<boolean>;
+      updateLeech: (id: string, patch: Record<string, unknown>) => Promise<boolean>;
       resolveLeech: (id: string, resolution: string, updates?: unknown) => Promise<boolean>;
       listLeech: () => Promise<unknown[]>;
     };
@@ -281,6 +282,8 @@ export const cardsApi = {
   },
   setSuspended: async (id: string, suspended: boolean, reason?: string) =>
     (await window.cardsAPI?.setSuspended(id, suspended, reason)) ?? false,
+  updateLeech: async (id: string, patch: Record<string, unknown>) =>
+    (await window.cardsAPI?.updateLeech(id, patch)) ?? false,
   resolveLeech: async (id: string, resolution: string, updates?: unknown) =>
     (await window.cardsAPI?.resolveLeech(id, resolution, updates)) ?? false,
   listLeech: async () => ((await window.cardsAPI?.listLeech()) ?? []) as CardRecord[],

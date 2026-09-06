@@ -93,3 +93,34 @@ tests/fsrs/audit.cjs             # L4：node tests/fsrs/audit.cjs --db <db路径
 ```
 
 修复建议优先级：F1 > F3 > F2 > F4 ≥ F5。F1 修复方向：fromFsrsCard/toFsrsCard 全字段往返（S/D/reps/last_review）；F3 修复方向：leech 分支改用 cardsApi.update 之外的字段级更新或先取最新状态再合并 leech 标记；F2 修复方向：预览与实际调度共用同一次引擎计算结果（或关闭 fuzz）。
+
+---
+
+## 附录：修复验证报告（2026-09-06，指导文档 v11 落地）
+
+### 文档修订（AI_DEVELOPMENT_GUIDE.md v10 → v11）
+- 新增 §11「FSRS 调度与复习队列契约」：§11.1 全量持久化 / §11.2 fuzz 锁定关闭 / §11.3 预览与调度同源 / §11.4 leech 禁止整卡覆写 / §11.5 due 升序+轮询 / §11.6 回归测试义务。
+- §6 硬性约束新增第 7 条（核心算法回归测试义务 + 数据模型字段禁止静默裁剪）；Phase 3 验收补 FSRS 连续性；§1 AI 行补记 v10.4/v10.5。
+- 致因分析：文档只写了字段名未写持久化契约（→F1）、验收不含调度连续性（→F1 逃逸）、对 fuzz 沉默（→F2）、leech 只写业务流未写技术边界（→F3）、无测试义务（→全部逃逸至今）。
+
+### 代码修复
+| 缺陷 | 修复 | 位置 |
+|---|---|---|
+| F1 | toFsrsCard/fromFsrsCard 全字段往返（state/due/lapses/stability/difficulty/reps/lastReview），历史卡缺字段时基线回填 | `src/lib/fsrs.ts` |
+| F2 | `enable_fuzz: false`；preview() 一次算出四档完整结果，评分复用（预览=落库） | `src/lib/fsrs.ts` + `ReviewView.tsx` |
+| F3 | 新增 `updateCardLeech`/`cards:updateLeech`/`cardsAPI.updateLeech` 字段级更新链路，ReviewView leech 分支改用 | `electron/db.js` `main.js` `preload.js` `src/lib/cards.ts` `ReviewView.tsx` |
+| F4 | listDueCards 排序改为 due 升序、同 due 按 priority 降序 | `electron/db.js` |
+| F5 | 复习视图 30s 轮询到期变化 | `ReviewView.tsx` |
+| F6（修复过程中新发现） | updateCard 未传 fsrs/leech 时保留原值（此前会置 NULL → 状态被重置为 new 卡） | `electron/db.js` |
+
+### 修复后回归结果
+- L0 参数基线：13/13 ✓（未受影响）
+- L1 适配层：15/15 ✓
+- L1 补强（长间隔决定性场景，更新为全字段模拟 + fuzz 确定性断言）：**6/6 ✓**——毕业链第4轮 Good：黄金 86.00 天 = 应用 86.00 天；Easy→逾期 Good：黄金 87.00 天 = 应用 87.00 天；同状态两次 preview 输出一致；新卡 Easy 预览精确 8 天
+- L2 数据库集成（新增 F3 修复断言 / §11.1 全字段落库断言 / F4 排序断言）：**23/23 ✓**
+- E2E（真实应用 UI）：新卡首评 Easy 预览 **8 天**（修复前 9 天，fuzz 偏差消除）；Good 评分后落库 `{"state":"learning","stability":2.3065,"difficulty":2.118,"reps":1,"lapses":0,"lastReview":…}`，S 值与黄金参考 2.307 精确一致；due=+10min 与按钮预览一致；复习列表 due 升序生效
+- 合计 **57/57 全绿**
+
+### 遗留事项
+- 历史卡（v11 前创建的 50 张 AI 卡）fsrs_json 无 S/D/reps：适配层以基线回填，调度从下一次评分起恢复正常累积；历史失真不可还原（可接受——旧数据的复习史本已失真）。
+- 测试期间发现 sql.js 内存库与磁盘文件的多进程并发冲突：应用运行期间外部脚本改库会被应用的下一次 persist() 覆盖。E2E 涉及外部数据修改时必须先关闭应用（已在测试脚本注释中注明）。

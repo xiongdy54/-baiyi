@@ -21,6 +21,7 @@ const {
   deleteCard,
   saveReview,
   setCardSuspended,
+  updateCardLeech,
   resolveLeech,
   listLeechCards,
   addCardIssue,
@@ -134,6 +135,8 @@ ipcMain.handle("cards:review", (_e, cardId, fsrsState, rating, durationMs) =>
 ipcMain.handle("cards:setSuspended", (_e, id, suspended, reason) =>
   setCardSuspended(String(id), Boolean(suspended), reason)
 );
+// §11.4（v11）：leech 字段级更新，不触碰 fsrs_json
+ipcMain.handle("cards:updateLeech", (_e, id, patch) => updateCardLeech(String(id), patch || {}));
 ipcMain.handle("cards:resolveLeech", (_e, id, resolution, updates) =>
   resolveLeech(String(id), String(resolution), updates || {})
 );

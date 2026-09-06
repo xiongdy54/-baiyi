@@ -69,7 +69,7 @@ app.whenReady().then(async () => {
     db.setCardSuspended(suspendedId, true, "test");
     // leech.suspended=true → 不应出现
     const leechSuspendedId = mk("FSRSTEST leech-susp", { state: "review", due: Date.now() - 1, lapses: 0 });
-    db.updateCard({ id: leechSuspendedId, noteText: "FSRSTEST leech-susp", cardType: "qa", frontMarkdown: "FSRSTEST leech-susp", backMarkdown: "x", priority: 50, tags: [], leechJson: JSON.stringify({ isLeech: true, suspended: true }) });
+    db.updateCard({ id: leechSuspendedId, noteText: "FSRSTEST leech-susp", cardType: "qa", frontMarkdown: "FSRSTEST leech-susp", backMarkdown: "x", priority: 50, tags: [], leech: { isLeech: true, suspended: true } });
 
     const dueList = db.listDueCards();
     const dueIds = new Set(dueList.map((c) => c.id));
@@ -85,22 +85,43 @@ app.whenReady().then(async () => {
     check("到期新卡出现在到期队列", dueIds2.has(freshId), true, dueIds2.has(freshId));
     db.deleteCard(freshId);
 
-    console.log("== L2-5 leech 覆写路径（复现 ReviewView.grade() 的调用序列）==");
-    // 应用代码序列：saveReview(新状态) → updateCard({...current（旧状态）, leech:...})
-    const cBefore = db.getCard(cardId);
+    console.log("== L2-5 leech 字段级更新（§11.4 修复验证）==");
+    // 应用修复后的序列：saveReview(新状态) → updateCardLeech(只动 leech_json)
+    const cBefore2 = db.getCard(cardId);
     const newerState = { state: "review", due: Date.now() + 30 * 86400000, lapses: 1, lastReview: Date.now() };
     db.saveReview(cardId, newerState, "Again", 1000);
-    // 复现：updateCard 传入「旧的 fsrs」（current.fsrs 是复习前取的快照）
-    db.updateCard({ ...cBefore, leech: { isLeech: true, suspended: true, suspendedAt: Date.now() } });
-    const cAfter = db.getCard(cardId);
-    const fsrsAfter = cAfter.fsrs;
+    db.updateCardLeech(cardId, { isLeech: true, suspended: true, suspendedAt: Date.now() });
+    const cAfter2 = db.getCard(cardId);
     check(
-      "【疑点F3】leech 标记后 fsrs_json 被旧状态覆写（30天间隔丢失）",
-      fsrsAfter.due === newerState.due,
-      `due=${newerState.due}`,
-      `due=${fsrsAfter.due}（被回滚为复习前 due=${JSON.parse(cBefore.fsrsJson ?? "{}").due ?? cBefore.fsrs?.due}）`
+      "【F3已修】updateCardLeech 后 fsrs_json 保持新调度状态（30天间隔不被回滚）",
+      cAfter2.fsrs.due === newerState.due && cAfter2.fsrs.lapses === 1,
+      `期望 due=${newerState.due} lapses=1`,
+      `实际 due=${cAfter2.fsrs.due} lapses=${cAfter2.fsrs.lapses}`
     );
-    check("leech 标记已写入", cAfter.leech && cAfter.leech.isLeech === true, true, cAfter.leech);
+    check("leech 标记已写入", cAfter2.leech && cAfter2.leech.isLeech === true && cAfter2.leech.suspended === true, true, cAfter2.leech);
+
+    console.log("== L2-6 §11.1 全字段落库断言 ==");
+    const fullState = { state: "review", due: Date.now() + 5 * 86400000, lapses: 0, stability: 12.34, difficulty: 5.67, reps: 3, lastReview: Date.now() };
+    db.saveReview(cardId, fullState, "Good", 800);
+    const cFull = db.getCard(cardId);
+    check("stability 落库", cFull.fsrs.stability === fullState.stability, fullState.stability, cFull.fsrs.stability);
+    check("difficulty 落库", cFull.fsrs.difficulty === fullState.difficulty, fullState.difficulty, cFull.fsrs.difficulty);
+    check("reps 落库", cFull.fsrs.reps === fullState.reps, fullState.reps, cFull.fsrs.reps);
+    check("lastReview 落库", cFull.fsrs.lastReview === fullState.lastReview, fullState.lastReview, cFull.fsrs.lastReview);
+
+    console.log("== L2-7 到期队列排序（§11.5/F4 修复验证）==");
+    const lowPrioId = mk("FSRSTEST sort-low", { state: "review", due: Date.now() - 1000, lapses: 0 });
+    db.updateCard({ id: lowPrioId, noteText: "FSRSTEST sort-low", cardType: "qa", frontMarkdown: "FSRSTEST sort-low", backMarkdown: "x", priority: 10, tags: [] });
+    const earlyId = mk("FSRSTEST sort-early", { state: "review", due: Date.now() - 100_000, lapses: 0 });
+    const lateId = mk("FSRSTEST sort-late", { state: "review", due: Date.now() - 500, lapses: 0 });
+    const sorted = db.listDueCards().filter((c) => c.noteText.startsWith("FSRSTEST sort"));
+    const idxEarly = sorted.findIndex((c) => c.id === earlyId);
+    const idxLate = sorted.findIndex((c) => c.id === lateId);
+    const idxLow = sorted.findIndex((c) => c.id === lowPrioId);
+    check("due 更早的卡排前面", idxEarly < idxLate, "early<late", `${idxEarly} vs ${idxLate}`);
+    check("同 due 段内不再按 created_at 顶到最前（due 升序生效）", idxLate >= 0 && idxEarly >= 0, "两者都在队列", JSON.stringify(sorted.map((s) => s.noteText)));
+    check("低优先级卡也在队列（排序只影响顺序不裁剪）", idxLow >= 0, true, idxLow);
+    db.deleteCard(lowPrioId); db.deleteCard(earlyId); db.deleteCard(lateId);
 
     // 清理沙盒数据（沙盒库随临时目录销毁，不真删也安全；但为了输出干净仍删除）
     db.deleteCard(cardId); db.deleteCard(duePastId); db.deleteCard(dueFutureId); db.deleteCard(suspendedId); db.deleteCard(leechSuspendedId);

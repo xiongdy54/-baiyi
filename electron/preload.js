@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   review: (cardId, fsrsState, rating, durationMs) =>
     ipcRenderer.invoke("cards:review", cardId, fsrsState, rating, durationMs),
   setSuspended: (id, suspended, reason) => ipcRenderer.invoke("cards:setSuspended", id, suspended, reason),
+  updateLeech: (id, patch) => ipcRenderer.invoke("cards:updateLeech", id, patch),
   resolveLeech: (id, resolution, updates) => ipcRenderer.invoke("cards:resolveLeech", id, resolution, updates),
   listLeech: () => ipcRenderer.invoke("cards:listLeech")
 });

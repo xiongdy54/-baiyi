@@ -365,6 +365,8 @@ function createCard(card) {
 }
 
 function updateCard(card) {
+  // §11.1（v11）：不传 fsrs/leech 时保留原值，禁止置 NULL（曾导致调度状态被清空重置为 new）
+  const prev = getCard(card.id);
   db.run(
     `UPDATE cards SET note_text=?, card_type=?, cloze_ords=?, card_ord=?, front_markdown=?, back_markdown=?,
       context_prefix=?, context_ref_json=?, mnemonic=?, example=?, source_ref_json=?, date_stamp=?, priority=?,
@@ -386,8 +388,8 @@ function updateCard(card) {
       JSON.stringify(card.tags || []),
       card.knowledge_point_id || card.knowledgePointId || null,
       card.occlusion_json || (card.occlusionJson ? JSON.stringify(card.occlusionJson) : null),
-      card.fsrs_json || (card.fsrs ? JSON.stringify(card.fsrs) : null),
-      card.leech_json || (card.leech ? JSON.stringify(card.leech) : null),
+      card.fsrs_json || (card.fsrs ? JSON.stringify(card.fsrs) : null) || (prev ? JSON.stringify(prev.fsrs) : null),
+      card.leech_json || (card.leech ? JSON.stringify(card.leech) : null) || (prev ? JSON.stringify(prev.leech) : null),
       Date.now(),
       card.id
     ]
@@ -412,12 +414,19 @@ function listDueCards() {
      ORDER BY c.created_at ASC`
   );
   const mapped = rows.map(mapCardRow).map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
-  // 新卡（fsrs_json 为 NULL 视为 due=now）+ 到期 + 未挂起
-  return mapped.filter((c) => {
-    if (c.leech?.suspended) return false;
-    const due = c.fsrs?.due ?? now;
-    return due <= now;
-  });
+  // 新卡（fsrs_json 为 NULL 视为 due=now）+ 到期 + 未挂起；§11.5（v11）due 升序、同 due 按优先级高在前
+  return mapped
+    .filter((c) => {
+      if (c.leech?.suspended) return false;
+      const due = c.fsrs?.due ?? now;
+      return due <= now;
+    })
+    .sort((a, b) => {
+      const da = a.fsrs?.due ?? now;
+      const dbb = b.fsrs?.due ?? now;
+      if (da !== dbb) return da - dbb;
+      return (b.priority ?? 50) - (a.priority ?? 50);
+    });
 }
 
 function listAllCards() {
@@ -453,6 +462,16 @@ function setCardSuspended(cardId, suspended, reason) {
   leech.suspended = suspended;
   leech.suspendedAt = suspended ? Date.now() : null;
   if (reason) leech.reason = reason;
+  db.run("UPDATE cards SET leech_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(leech), Date.now(), cardId]);
+  persist();
+  return true;
+}
+
+// §11.4（v11）：leech 标记字段级更新——只动 leech_json，绝不触碰 fsrs_json
+function updateCardLeech(cardId, leechPatch) {
+  const card = getCard(cardId);
+  if (!card) return null;
+  const leech = { ...(card.leech || {}), ...leechPatch };
   db.run("UPDATE cards SET leech_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(leech), Date.now(), cardId]);
   persist();
   return true;
@@ -736,6 +755,7 @@ module.exports = {
   deleteCard,
   saveReview,
   setCardSuspended,
+  updateCardLeech,
   resolveLeech,
   listLeechCards,
   addCardIssue,

@@ -29,6 +29,19 @@ export default function ReviewView() {
     return eventBus.on("cards/changed", refresh);
   }, [refresh]);
 
+  // §11.5（v11）：learning step（1m/10m）到期后无需切视图即应出现，30s 轮询
+  useEffect(() => {
+    const t = window.setInterval(refresh, 30_000);
+    return () => window.clearInterval(t);
+  }, [refresh]);
+
+  // 当前卡的四档预览（含同源落库状态）——§11.3：评分复用此结果，预览=落库
+  const [previews, setPreviews] = useState<ReturnType<typeof fsrsEngine.preview> | null>(null);
+
+  useEffect(() => {
+    setPreviews(current ? fsrsEngine.preview(current.fsrs) : null);
+  }, [current]);
+
   async function openCard(card: CardRecord & { docTitle?: string }) {
     setCurrent(card);
     setShowBack(false);
@@ -37,10 +50,13 @@ export default function ReviewView() {
 
   async function grade(rating: Rating) {
     if (!current) return;
-    const { fsrsState } = fsrsEngine.next(current.fsrs, rating);
+    // §11.3 同源：复用 openCard 时刻缓存的预览结果，按钮显示什么就落库什么
+    const previewItem = previews?.find((p) => p.rating === rating);
+    const fsrsState = previewItem?.fsrsState ?? fsrsEngine.next(current.fsrs, rating).fsrsState;
     const lapses = fsrsState.lapses ?? 0;
     await cardsApi.review(current.id, fsrsState, rating, Date.now() - startedAt);
     // Leech 检测（§8.7）：lapses >= 8 标记 + 暂停
+    // §11.4（v11）：只做字段级 leech 更新，禁止整卡回写（不得覆写刚落库的 fsrs 状态）
     if (fsrsEngine.isLeech(lapses, 8) && !(current.leech?.isLeech)) {
       await cardsApi.addIssue({
         cardId: current.id,
@@ -49,7 +65,7 @@ export default function ReviewView() {
         message: `连续遗忘 ${lapses} 次，已自动暂停`,
         source: "lint"
       });
-      await cardsApi.update({ ...current, leech: { isLeech: true, suspended: true, suspendedAt: Date.now() } });
+      await cardsApi.updateLeech(current.id, { isLeech: true, suspended: true, suspendedAt: Date.now() });
       eventBus.emit("leech/detected", current.id);
     }
     setCurrent(null);
@@ -89,7 +105,7 @@ export default function ReviewView() {
         {showBack && (
           <>
             <div className="grade-row">
-              {fsrsEngine.preview(current.fsrs).map((p) => (
+              {(previews ?? fsrsEngine.preview(current.fsrs)).map((p) => (
                 <button key={p.rating} className={`btn grade-${p.rating.toLowerCase()}`} onClick={() => grade(p.rating)}>
                   {p.rating}
                   <span className="grade-due mono">{p.dueText}</span>

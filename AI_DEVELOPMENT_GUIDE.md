@@ -12,6 +12,8 @@
 > **v9 变更记录（AI 制卡执行架构与联网背景检索）：** 新增 §8.13——明确 AI 制卡为「管线编排」而非内置 Agent（§8.13.1-8.13.4 步骤-执行-实现现状对照表）；新增联网事件背景检索环节（§8.14，DuckDuckGo HTML 无 Key 方案，blockReasons 触发），GOAT 预设模型名修正为 `z-ai/glm-5.3-flash`（Provider API 实测前缀）。
 >
 > **v10 变更记录（本地模型接入）：** AI 服务预设新增第三项「本地模型」（§1 表 AI 行同步）——Ollama（默认 `http://localhost:11434/v1`）与 LM Studio（1234）的 OpenAI 兼容端点，无需 Key；8GB 显存推荐 `qwen3:8b`（5.2GB，制卡质量优先）/ `qwen3:4b`（2.5GB，速度优先）/ `glm4:9b`（5.5GB，GLM 系）。本地服务连接失败时给出可操作指引；「拉取模型列表」对本地端点免 Key。
+>
+> **v11 变更记录（FSRS 调度正确性契约，v10.4/v10.5 增补并入）：** 依据 FSRS 调度正确性测试（tests/fsrs/REPORT.md）暴露的 F1-F5 缺陷，新增 §11「FSRS 调度与复习队列契约」——FSRS 状态字段全量持久化契约（§11.1，禁止部分字段往返）、fuzz 策略锁定为关闭（§11.2）、预览与实际调度同源强制（§11.3）、leech 标记禁止整卡覆盖回写（§11.4）、到期队列排序与轮询（§11.5）、核心算法回归测试义务（§11.6）。§6 硬性约束同步新增第 7 条；Phase 3 验收标准修订为含多轮调度连续性；§1 AI 行补记 v10.4（reasoning_content 思考信号转发）与 v10.5（GLM-5.2+ reasoning_effort 思考强度，默认 low）落地。
 
 ## 0. 全局原则（最高优先级）
 
@@ -41,7 +43,7 @@
 | 间隔重复 | `ts-fsrs`（FSRS v6，MIT） | 每张卡独立 `Difficulty/Stability/Retrievability/due`。Anki cloze语法 `{{c1::答案::hint}}` 正则解析，多挖空按 ordinals 分卡 |
 | 视频播放 | `iframe` 嵌入（`player.bilibili.com` + `youtube-nocookie embed`） | 不自研 DASH/WBI，不集成 `bili-kernel`（GPL+Win-only）。登录态复用 Electron session |
 | 视频AI总结 | 照搬 `Bilibili-Obsidian-Clipper MIT` 管线 | `view -> player/v2 -> subtitle body -> Markdown(章节+热评) -> OpenAI兼容流式 -> 侧边栏` + `一键加入学习`。无字幕轨则降级提示 |
-| AI制卡/助读（v6） | AIGateway 统一管线 + 制卡提示词（`PromptTemplate` 版本化，锁定基线见 §8.3）+ `CardLintEngine` 静态质检 + 本地相似检索 | AI 制卡为主路径，手动制卡为降级路径（见第 8 章）。相似卡片检索第一版纯本地（n-gram + 归一化编辑距离），不强制嵌入模型；数学公式渲染锁定 KaTeX |
+| AI制卡/助读（v6） | AIGateway 统一管线 + 制卡提示词（`PromptTemplate` 版本化，锁定基线见 §8.3）+ `CardLintEngine` 静态质检 + 本地相似检索 | AI 制卡为主路径，手动制卡为降级路径（见第 8 章）。相似卡片检索第一版纯本地（n-gram + 归一化编辑距离），不强制嵌入模型；数学公式渲染锁定 KaTeX。v10.4：思考模型 reasoning_content 经 `thinking` 信号转发至渲染层（等待期状态行）；v10.5：GLM-5.2+ 随请求发送 `reasoning_effort`（设置页思考强度，默认 low），非 GLM 模型不发送 |
 | 登录复用 | Electron版 AppSession：内嵌登录窗 + 浏览器Cookie导入 + 系统加密存储 | 抄 xiadown `sitepolicy + StableAuth` 思想，用 `safeStorage` 存 vault。Z-lib 存 `remix_userid/key`，Anna 存 `secret key` 当次透传 |
 | 背景音内置 | Moodist（MIT）裁剪/自托管 | 唯一可直接集成的。Endel/Brain.fm/myNoise/Noisli 全部只做外链跳转，不嵌入（无公开API/DRM/许可禁止） |
 | 网页剪藏 | 以 `obsidian-clipper MIT` 为交互母版 | 高亮三态、模板变量、URL自动触发，锚定参考 Hypothesis |
@@ -133,7 +135,7 @@ AI 在任何 Phase 都不得绕过这些接口直写实现：
 - **Phase 0 — 空壳启动：** Electron 空窗 + 主题地基 + SettingsStore + EventBus + 空书架页。验收：能启动、能切换亮/暗、设置持久化。可切细如 0.1只跑空窗，0.2加主题开关。
 - **Phase 1 — 手动粘贴成书（示例粒度）：** 粘贴框 -> 存 LibraryItem+Document -> 书架列表。验收：重启不丢。不做阅读器、摘录、制卡、PDF/EPUB、网络。
 - **Phase 2 — 阅读器+摘录（可重设计）：** 打开阅读，选中摘录进 Topic 队列，按 priority 推送，可继续摘录。走 `ReadingWorkflowProvider`，以后换流程不改UI。验收：摘录链可追溯。
-- **Phase 3 — 制卡+FSRS（手动基线）：** 侧边栏两模式制卡，问答/填空/多挖空，带上下文引用，进 FSRS 队列。验收：Anki cloze round-trip。手动制卡是基线与 AI 缺席时的降级路径，同样过 `CardLint`（v6 修订）；AI 主路径见 Phase 13。
+- **Phase 3 — 制卡+FSRS（手动基线）：** 侧边栏两模式制卡，问答/填空/多挖空，带上下文引用，进 FSRS 队列。验收：Anki cloze round-trip；**且 FSRS 调度连续性验收（v11）——同一张卡连续评分 ≥3 轮，每轮落库的 fsrs 状态完整（含 S/D/reps），下一轮调度以完整状态为输入，第 3 轮后的间隔与 ts-fsrs 参考引擎（enable_fuzz=false）一致（天级容差内）；到期队列仅含 due<=now 的卡且按 due 升序**。手动制卡是基线与 AI 缺席时的降级路径，同样过 `CardLint`（v6 修订）；AI 主路径见 Phase 13。
 - **Phase 4 — PDF MinerU双栏：** 本地PDF -> MinerU云 -> 右md左PDF页级同步+开关。验收：超限提示切片。
 - **Phase 4b — EPUB导入（新增）：** 直接导入.epub进书架，解析TOC+章节转md，阅读器复用Phase2，保留原文包做对照。技术见附录B。验收：大书分章加载不卡。
 - **Phase 5 — 网页剪藏插件：** 浏览器插件摘录 -> 本地收件箱。
@@ -158,6 +160,7 @@ AI 在任何 Phase 都不得绕过这些接口直写实现：
 5. 遇到文档未覆盖的选择，先停下问用户，不擅自决定。需求变更先改本文档 bump 版本再编码。
 6. **视觉风格以默认皮肤（瑞士国际主义）为基线（v4 新增，v5 修订）：** 任何新增/修改的界面、组件、样式，必须先保证在**默认皮肤**下完全符合 `docs/swiss-international-style.md`——逐界面自查"设计哲学 7 条 + 禁止清单"，完工执行"五项必查"（深色模式、键盘焦点可达、< 11px 文字、同屏多焦点色、硬编码魔法值）；色值/字号/间距/圆角/层级一律走 Design Tokens，禁止硬编码魔法值。做其他皮肤时按 §4"视觉皮肤体系"另立规范开发，不得以"换皮肤"为由绕过默认皮肤基线，也不得为适配某皮肤改动业务逻辑。唯一例外：用户按 §7 粘贴的外部 UI 代码仍按逐字还原原则处理。
 7. **AI 结果不落地原则（v6 新增）：** AI 生成的卡片/解释/助记一律先写 `AIGenBatch` 草稿，用户确认后才转正式 Card / Document 补充块；禁止 AI 结果绕过预览与 `CardLint` 直接进 FSRS 队列。提示词内容只存 `PromptTemplate` 表（默认版本以 §8.3 为锁定基线），不许写死在代码里；改提示词 = 新增版本记录，不覆盖旧版。AI 上下文注入用户已有卡片/画像时，只注入经用户确认相关的最小集合，不整库上传。
+8. **核心算法回归测试义务（v11 新增）：** 涉及 FSRS 调度、制卡质检（CardLint）、 cloze 解析、Markdown 管线的改动，必须附可重复运行的自动化测试（放 `tests/` 目录），并在完工报告里给出运行结果；FSRS 调度相关改动一律以 `tests/fsrs/` 黄金参考对照套件回归（§11.6）。文档数据模型中声明的字段（如 §2 `fsrs{D,S,R,due,lapses,state}`）不允许实现时静默裁剪——存不下、往返不了的字段等于没设计，发现冲突先改文档再编码。
 
 ## 7. 外部UI网站协作流（新增）
 
@@ -468,6 +471,42 @@ AI 制卡 = **固定顺序的管线编排**，共 7 步：
 - **触发：** 制卡结果 `blockReasons` 非空（模型判定缺事件背景/前置知识）时，预览面板出现「搜索网络补充背景后重试」按钮；用户主动点击，不自动联网。
 - **实现：** 主进程 DuckDuckGo HTML 端点抓取（无 Key、纯本地请求、截取前 6 条标题+摘要），注入提示词的【联网检索到的事件背景】段（明确标注"仅供理解，禁止编造来源"）后重新走管线。
 - **边界：** 不做自动多轮 Agent 检索；检索结果只作理解上下文，来源以原材料为准（R11）。
+
+
+## 11. FSRS 调度与复习队列契约（v11 新增，锁定设计）
+
+> 本章源于调度正确性测试（tests/fsrs/REPORT.md，2026-09-06）暴露的 F1-F5 缺陷。FSRS 是本软件的核心资产，调度错误直接摧毁产品价值；本章条款为硬性契约，任何涉及调度的改动不得违反。
+
+### 11.1 FSRS 状态全量持久化契约（修复 F1）
+
+- §2 `Card.fsrs{D,S,R,due,lapses,state}` 的**每一个字段都必须持久化、且在下一轮调度时全量回填**。ts-fsrs 的间隔计算依赖稳定性 S 与难度 D，丢任何字段 = 调度输入错误。
+- 持久化格式：`fsrs_json` 至少含 `{state, due, lapses, stability, difficulty, reps, lastReview}`（对应 ts-fsrs Card 的 state/due/lapses/stability/difficulty/reps/last_review）；库版本升级新增字段时须写一次性迁移回填历史卡。
+- 禁止「部分字段序列化 + createEmptyCard() 兜底重建」的实现——新卡兜底只允许出现在**首次创建**时。
+
+### 11.2 fuzz 策略锁定（修复 F2）
+
+- `enable_fuzz` 锁定为 **false**。理由：本应用把「预览间隔」直接展示在评分按钮上，fuzz 的随机抖动使预览值偏离算法真实值、且预览与实际调度两次计算因种子不同而互不一致，破坏「所见即所存」。
+- 若未来要开 fuzz，必须同时满足：预览与实际调度共用同一次计算结果（§11.3），且在设置中向用户明示「间隔含随机抖动」。先改本文档再改代码。
+
+### 11.3 预览与实际调度同源（修复 F2 的展示面）
+
+- 评分按钮上的预览间隔与点下按钮后实际写入的 due **必须来自同一计算结果**，禁止两次独立调用引擎（两次调用的 `new Date()` 与 fuzz 种子不同）。
+- 实现形态不限定（推荐：预览时缓存四档完整结果，评分时取对应档），但「同一轮复习内预览=落库」是验收硬条件。
+
+### 11.4 leech 标记不得覆写调度状态（修复 F3）
+
+- 复习中触发 leech 标记（自动或手动「标记并暂停」）时，只允许**字段级更新 leech/suspended 相关字段**（`leech_json`），禁止把复习前取的整卡快照（含旧 fsrs 状态）回写。
+- 一般规则：**任何「复习后附加动作」（leech 标记、issue 记录、通知）都不得修改 `fsrs_json`**；需要改卡内容时，先取数据库最新状态再合并，不用组件内存快照。
+
+### 11.5 到期队列排序与轮询（修复 F4/F5）
+
+- 到期队列（复习视图）排序 = **due 升序**（最早到期的先复习），同 due 按 priority 降序。禁止按 created_at 排序。
+- 复习视图须周期性轮询到期变化（间隔 30-60s），learning step（1m/10m）到期后无需手动切换视图即应出现。
+
+### 11.6 核心调度回归测试套件（修复「无测试义务」缺口）
+
+- `tests/fsrs/` 黄金参考对照套件为调度正确性的验收工具：L0 参数基线 + 黄金剧本（golden.json）、L1 适配层往返连续性（含长间隔决定性场景）、L2 数据库集成（沙盒 userData）、L4 review_logs 重放审计；UI 层（L3）按需手工/半自动执行。
+- 调度相关任何改动（fsrs 封装、db 卡片字段、复习视图评分链）合入前必须全绿：`node tests/fsrs/golden.cjs && node tests/fsrs/adapter.test.cjs && node tests/fsrs/adapter.long.test.cjs && npx electron tests/fsrs/db.test.cjs && node tests/fsrs/audit.cjs`。
 
 
 ## 附录A — 参考项目网址（锁定，后续开发按此查）
