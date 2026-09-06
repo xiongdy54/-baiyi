@@ -1,0 +1,443 @@
+{
+  "generatedAt": "2026-09-06T01:58:30.040Z",
+  "baseTime": 1735689600000,
+  "params": {
+    "request_retention": 0.9,
+    "learning_steps": [
+      "1m",
+      "10m"
+    ],
+    "relearning_steps": [
+      "10m"
+    ],
+    "w": [
+      0.212,
+      1.2931,
+      2.3065,
+      8.2956,
+      6.4133,
+      0.8334,
+      3.0194,
+      0.001,
+      1.8722,
+      0.1666,
+      0.796,
+      1.4835,
+      0.0614,
+      0.2629,
+      1.6483,
+      0.6014,
+      1.8729,
+      0.5425,
+      0.0912,
+      0.0658,
+      0.1542
+    ]
+  },
+  "scripts": {
+    "new-Again": {
+      "seq": [
+        "Again"
+      ],
+      "rounds": [
+        {
+          "rating": "Again",
+          "state": "Learning",
+          "dueAbs": 1735689660000,
+          "dueOffsetMs": 60000,
+          "stability": 0.212,
+          "difficulty": 6.4133,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        }
+      ]
+    },
+    "new-Hard": {
+      "seq": [
+        "Hard"
+      ],
+      "rounds": [
+        {
+          "rating": "Hard",
+          "state": "Learning",
+          "dueAbs": 1735689960000,
+          "dueOffsetMs": 360000,
+          "stability": 1.2931,
+          "difficulty": 5.11217071,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        }
+      ]
+    },
+    "new-Good": {
+      "seq": [
+        "Good"
+      ],
+      "rounds": [
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690200000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11810397,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        }
+      ]
+    },
+    "new-Easy": {
+      "seq": [
+        "Easy"
+      ],
+      "rounds": [
+        {
+          "rating": "Easy",
+          "state": "Review",
+          "dueAbs": 1736380800000,
+          "dueOffsetMs": 691200000,
+          "stability": 8.2956,
+          "difficulty": 1,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 8,
+          "elapsedDays": 0
+        }
+      ]
+    },
+    "good-x3": {
+      "seq": [
+        "Good",
+        "Good",
+        "Good"
+      ],
+      "rounds": [
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690200000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11810397,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690800000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11121424,
+          "reps": 2,
+          "lapses": 0,
+          "lastReviewAbs": 1735690200000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735691400000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.1043314,
+          "reps": 3,
+          "lapses": 0,
+          "lastReviewAbs": 1735690800000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        }
+      ]
+    },
+    "forget-chain": {
+      "seq": [
+        "Good",
+        "Good",
+        "Again",
+        "Good",
+        "Good"
+      ],
+      "rounds": [
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690200000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11810397,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690800000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11121424,
+          "reps": 2,
+          "lapses": 0,
+          "lastReviewAbs": 1735690200000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Again",
+          "state": "Learning",
+          "dueAbs": 1735690860000,
+          "dueOffsetMs": 60000,
+          "stability": 0.77508398,
+          "difficulty": 7.39223814,
+          "reps": 3,
+          "lapses": 0,
+          "lastReviewAbs": 1735690800000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735691460000,
+          "dueOffsetMs": 600000,
+          "stability": 0.8281648,
+          "difficulty": 7.38007427,
+          "reps": 4,
+          "lapses": 0,
+          "lastReviewAbs": 1735690860000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735692060000,
+          "dueOffsetMs": 600000,
+          "stability": 0.88103231,
+          "difficulty": 7.36792257,
+          "reps": 5,
+          "lapses": 0,
+          "lastReviewAbs": 1735691460000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        }
+      ]
+    },
+    "hard-chain": {
+      "seq": [
+        "Good",
+        "Hard",
+        "Hard",
+        "Good"
+      ],
+      "rounds": [
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690200000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11810397,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Hard",
+          "state": "Learning",
+          "dueAbs": 1735690560000,
+          "dueOffsetMs": 360000,
+          "stability": 2.3065,
+          "difficulty": 4.75285849,
+          "reps": 2,
+          "lapses": 0,
+          "lastReviewAbs": 1735690200000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Hard",
+          "state": "Learning",
+          "dueAbs": 1735690920000,
+          "dueOffsetMs": 360000,
+          "stability": 2.3065,
+          "difficulty": 6.50193132,
+          "reps": 3,
+          "lapses": 0,
+          "lastReviewAbs": 1735690560000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735691520000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 6.49065776,
+          "reps": 4,
+          "lapses": 0,
+          "lastReviewAbs": 1735690920000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        }
+      ]
+    },
+    "easy-chain": {
+      "seq": [
+        "Good",
+        "Easy",
+        "Good",
+        "Easy"
+      ],
+      "rounds": [
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690200000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11810397,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Easy",
+          "state": "Review",
+          "dueAbs": 1736035800000,
+          "dueOffsetMs": 345600000,
+          "stability": 3.94605407,
+          "difficulty": 1,
+          "reps": 2,
+          "lapses": 0,
+          "lastReviewAbs": 1735690200000,
+          "scheduledDays": 4,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Review",
+          "dueAbs": 1737850200000,
+          "dueOffsetMs": 1814400000,
+          "stability": 21.02452958,
+          "difficulty": 1,
+          "reps": 3,
+          "lapses": 0,
+          "lastReviewAbs": 1736035800000,
+          "scheduledDays": 21,
+          "elapsedDays": 4
+        },
+        {
+          "rating": "Easy",
+          "state": "Review",
+          "dueAbs": 1750723800000,
+          "dueOffsetMs": 12873600000,
+          "stability": 148.64226842,
+          "difficulty": 1,
+          "reps": 4,
+          "lapses": 0,
+          "lastReviewAbs": 1737850200000,
+          "scheduledDays": 149,
+          "elapsedDays": 21
+        }
+      ]
+    },
+    "crammer-relearn": {
+      "seq": [
+        "Good",
+        "Again",
+        "Again",
+        "Good",
+        "Good"
+      ],
+      "rounds": [
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690200000,
+          "dueOffsetMs": 600000,
+          "stability": 2.3065,
+          "difficulty": 2.11810397,
+          "reps": 1,
+          "lapses": 0,
+          "lastReviewAbs": 1735689600000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Again",
+          "state": "Learning",
+          "dueAbs": 1735690260000,
+          "dueOffsetMs": 60000,
+          "stability": 0.77508398,
+          "difficulty": 7.39450274,
+          "reps": 2,
+          "lapses": 0,
+          "lastReviewAbs": 1735690200000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Again",
+          "state": "Learning",
+          "dueAbs": 1735690320000,
+          "dueOffsetMs": 60000,
+          "stability": 0.27983836,
+          "difficulty": 9.12881914,
+          "reps": 3,
+          "lapses": 0,
+          "lastReviewAbs": 1735690260000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735690920000,
+          "dueOffsetMs": 600000,
+          "stability": 0.31973332,
+          "difficulty": 9.11491869,
+          "reps": 4,
+          "lapses": 0,
+          "lastReviewAbs": 1735690320000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        },
+        {
+          "rating": "Good",
+          "state": "Learning",
+          "dueAbs": 1735691520000,
+          "dueOffsetMs": 600000,
+          "stability": 0.36212625,
+          "difficulty": 9.10103214,
+          "reps": 5,
+          "lapses": 0,
+          "lastReviewAbs": 1735690920000,
+          "scheduledDays": 0,
+          "elapsedDays": 0
+        }
+      ]
+    }
+  }
+}
