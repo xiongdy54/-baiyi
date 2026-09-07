@@ -37,10 +37,19 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   remove: (id) => ipcRenderer.invoke("cards:delete", id),
   review: (cardId, fsrsState, rating, durationMs) =>
     ipcRenderer.invoke("cards:review", cardId, fsrsState, rating, durationMs),
+  skip: (cardId) => ipcRenderer.invoke("cards:skip", cardId),
   setSuspended: (id, suspended, reason) => ipcRenderer.invoke("cards:setSuspended", id, suspended, reason),
   updateLeech: (id, patch) => ipcRenderer.invoke("cards:updateLeech", id, patch),
   resolveLeech: (id, resolution, updates) => ipcRenderer.invoke("cards:resolveLeech", id, resolution, updates),
   listLeech: () => ipcRenderer.invoke("cards:listLeech")
+});
+
+contextBridge.exposeInMainWorld("readingAPI", {
+  addEvent: (itemId, charPos) => ipcRenderer.invoke("reading:event", itemId, charPos)
+});
+
+contextBridge.exposeInMainWorld("statsAPI", {
+  overview: () => ipcRenderer.invoke("stats:overview")
 });
 
 contextBridge.exposeInMainWorld("issuesAPI", {
@@ -61,6 +70,19 @@ contextBridge.exposeInMainWorld("promptsAPI", {
 
 contextBridge.exposeInMainWorld("similarityAPI", {
   find: (text, k) => ipcRenderer.invoke("similarity:find", text, k)
+});
+
+contextBridge.exposeInMainWorld("optimizerAPI", {
+  stats: () => ipcRenderer.invoke("optimizer:stats"),
+  current: () => ipcRenderer.invoke("optimizer:current"),
+  train: () => ipcRenderer.invoke("optimizer:train"),
+  apply: (weights) => ipcRenderer.invoke("optimizer:apply", weights),
+  reset: () => ipcRenderer.invoke("optimizer:reset"),
+  onProgress: (callback) => {
+    const handler = (_e, progress) => callback(progress);
+    ipcRenderer.on("optimizer:progress", handler);
+    return () => ipcRenderer.removeListener("optimizer:progress", handler);
+  }
 });
 
 contextBridge.exposeInMainWorld("aiAPI", {

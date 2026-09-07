@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { SKINS } from "../skins";
 import { aiGateway, type AIConfig } from "../lib/ai";
+import { settingsStore } from "../lib/settings";
+import { WIDGETS } from "./dashboard/widgets";
+import type { DashLayoutV2, WidgetSize } from "./dashboard/layout";
 
 export type ThemeMode = "light" | "dark";
 
@@ -23,6 +26,89 @@ const PRESET_OPTIONS = [
 
 function SkeletonBlock({ h = 40 }: { h?: number }) {
   return <div className="skeleton" style={{ height: h }} />;
+}
+
+// ---------- 统计仪表盘设置（组件可见性 + 宽窄 / 重置布局） ----------
+function DashboardSection() {
+  const [hidden, setHidden] = useState<string[]>([]);
+  const [sizes, setSizes] = useState<Record<string, WidgetSize>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    settingsStore.get<DashLayoutV2 | null>("dashboard", "layout", null).then((l) => {
+      setSizes(l?.sizes ?? {});
+      setLoaded(true);
+    });
+  }, []);
+
+  async function toggleWidget(id: string) {
+    const next = hidden.includes(id) ? hidden.filter((h) => h !== id) : [...hidden, id];
+    setHidden(next);
+    await settingsStore.set("dashboard", "hiddenWidgets", next);
+  }
+
+  async function setWidgetSize(id: string, size: WidgetSize) {
+    const next = { ...sizes, [id]: size };
+    setSizes(next);
+    // 写进现有 layout（无则建一份默认 order）
+    const cur = await settingsStore.get<DashLayoutV2 | null>("dashboard", "layout", null);
+    const base: DashLayoutV2 = cur && Array.isArray(cur.order) && cur.order.length
+      ? cur
+      : { order: WIDGETS.filter((w) => !nextHidden().includes(w.id)).map((w) => w.id), sizes: {} };
+    function nextHidden(): string[] { return hidden; }
+    await settingsStore.set("dashboard", "layout", { ...base, sizes: { ...base.sizes, [id]: size } });
+  }
+
+  async function resetLayout() {
+    await settingsStore.set("dashboard", "layout", null);
+    setSizes({});
+  }
+
+  if (!loaded) return <SkeletonBlock h={120} />;
+
+  return (
+    <>
+      <section className="settings-section" id="sec-widgets">
+        <h3>显示哪些组件</h3>
+        <div className="widget-list">
+          {WIDGETS.map((w) => (
+            <div key={w.id} className="widget-toggle">
+              <label className="widget-toggle-main">
+                <input
+                  type="checkbox"
+                  checked={!hidden.includes(w.id)}
+                  onChange={() => toggleWidget(w.id)}
+                />
+                <span>{w.title}</span>
+              </label>
+              <div className="seg-tabs seg-tabs-sm" role="group" aria-label={`${w.title}宽度`}>
+                <button
+                  className={(sizes[w.id] ?? "wide") === "wide" ? "active" : ""}
+                  onClick={() => setWidgetSize(w.id, "wide")}
+                >
+                  宽幅
+                </button>
+                <button
+                  className={sizes[w.id] === "half" ? "active" : ""}
+                  onClick={() => setWidgetSize(w.id, "half")}
+                >
+                  窄幅
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="form-hint">宽幅 = 统计页通栏一行；窄幅 = 半幅，相邻窄幅自动两两成行。所有图表显示在顶栏「统计数据」页，拖动组件标题栏可交换位置。</p>
+      </section>
+
+      <section className="settings-section" id="sec-dashreset">
+        <h3>重置布局</h3>
+        <div className="settings-row">
+          <button className="btn btn-secondary btn-sm" onClick={resetLayout}>恢复默认排列与宽度</button>
+        </div>
+      </section>
+    </>
+  );
 }
 
 function AISection() {
@@ -323,6 +409,123 @@ function AISection() {
   );
 }
 
+// FSRS 参数优化（v12）：从复习记录训练个性化权重（fsrs-rs-nodejs），应用后调度即刻生效
+function FSRSSection() {
+  const [stats, setStats] = useState<{ reviewCount: number; cardCount: number; minRecommended: number; enough: boolean } | null>(null);
+  const [appliedW, setAppliedW] = useState<number[] | null>(null);
+  const [trainedW, setTrainedW] = useState<number[] | null>(null);
+  const [metrics, setMetrics] = useState<{ logLoss: number; rmseBins: number } | null>(null);
+  const [progress, setProgress] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    (window as unknown as { optimizerAPI?: { stats: () => Promise<{ reviewCount: number; cardCount: number; minRecommended: number; enough: boolean }> } }).optimizerAPI
+      ?.stats()
+      .then(setStats)
+      .catch(() => setStats(null));
+    (window as unknown as { optimizerAPI?: { current: () => Promise<number[] | null> } }).optimizerAPI
+      ?.current()
+      .then(setAppliedW)
+      .catch(() => setAppliedW(null));
+  }, []);
+
+  async function handleTrain() {
+    setBusy(true);
+    setNotice(null);
+    setTrainedW(null);
+    setMetrics(null);
+    setProgress(0);
+    try {
+      const api = (window as unknown as {
+        optimizerAPI?: {
+          train: () => Promise<{ ok: boolean; error?: string; weights?: number[]; reviewCount?: number; cardCount?: number; logLoss?: number; rmseBins?: number }>;
+          onProgress: (cb: (p: { percent: number }) => void) => () => void;
+        };
+      }).optimizerAPI!;
+      const off = api.onProgress((p) => setProgress(Math.round(p.percent)));
+      const result = await api.train();
+      off();
+      if (result.ok && result.weights) {
+        setTrainedW(result.weights);
+        setMetrics({ logLoss: result.logLoss ?? 0, rmseBins: result.rmseBins ?? 0 });
+        setNotice({
+          ok: true,
+          text: `训练完成：${result.reviewCount} 条复习记录（${result.cardCount} 张卡）。点击「应用」后新权重立即生效。`
+        });
+      } else {
+        setNotice({ ok: false, text: result.error || "训练失败" });
+      }
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  async function handleApply() {
+    if (!trainedW) return;
+    const api = (window as unknown as { optimizerAPI?: { apply: (w: number[]) => Promise<boolean> } }).optimizerAPI!;
+    await api.apply(trainedW);
+    setAppliedW(trainedW);
+    setTrainedW(null);
+    setNotice({ ok: true, text: "已应用优化权重，复习调度即刻使用新参数。" });
+  }
+
+  async function handleReset() {
+    const api = (window as unknown as { optimizerAPI?: { reset: () => Promise<boolean> } }).optimizerAPI!;
+    await api.reset();
+    setAppliedW(null);
+    setNotice({ ok: true, text: "已恢复 FSRS 默认参数。" });
+  }
+
+  return (
+    <section className="settings-section" id="sec-fsrs">
+      <h3>FSRS 参数优化</h3>
+      <p className="form-hint">
+        根据你的真实复习记录（评分与间隔）训练出最适合你记忆规律的 FSRS
+        权重，替代默认参数，让调度预测更准。训练在本机完成，数据不上传。建议积累{" "}
+        <span className="mono">400+</span> 条复习记录后再优化。
+      </p>
+
+      {stats && (
+        <p className="form-hint">
+          当前复习记录：<span className="mono">{stats.reviewCount}</span> 条（{stats.cardCount} 张卡）
+          {stats.enough ? " — 数据量充足 ✓" : ` — 少于建议值 ${stats.minRecommended}，训练结果可能不可靠`}
+        </p>
+      )}
+      <p className="form-hint">
+        当前参数：{appliedW ? "优化权重（已应用）" : "FSRS 默认参数"}
+      </p>
+
+      <div className="settings-row" style={{ flexWrap: "wrap" }}>
+        <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleTrain}>
+          {busy ? `训练中… ${progress !== null ? progress + "%" : ""}` : "开始优化"}
+        </button>
+        {trainedW && (
+          <button className="btn btn-secondary btn-sm" onClick={handleApply}>
+            应用优化结果
+          </button>
+        )}
+        {appliedW && (
+          <button className="btn btn-outline btn-sm" onClick={handleReset}>
+            恢复默认参数
+          </button>
+        )}
+      </div>
+
+      {metrics && (
+        <p className="form-hint">
+          训练质量：logLoss <span className="mono">{metrics.logLoss.toFixed(4)}</span> · RMSE{" "}
+          <span className="mono">{metrics.rmseBins.toFixed(4)}</span>（越低越准）
+        </p>
+      )}
+      {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
+    </section>
+  );
+}
+
 export default function SettingsPanel({
   theme,
   onThemeChange,
@@ -335,7 +538,9 @@ export default function SettingsPanel({
   const [activeNav, setActiveNav] = useState("appearance");
   const sections = [
     { id: "appearance", label: "外观" },
-    { id: "ai", label: "AI 服务" }
+    { id: "dashboard", label: "统计仪表盘" },
+    { id: "ai", label: "AI 服务" },
+    { id: "fsrs", label: "FSRS 优化" }
   ];
 
   return (
@@ -403,7 +608,11 @@ export default function SettingsPanel({
               </div>
             </section>
 
+            <DashboardSection />
+
             <AISection />
+
+            <FSRSSection />
           </div>
         </div>
       </div>

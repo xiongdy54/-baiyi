@@ -484,6 +484,12 @@ function saveReview(cardId, fsrsState, rating, durationMs) {
   return true;
 }
 
+// v12：优化器读取全部复习日志（按时间升序）
+function listAllReviewLogs() {
+  const rows = queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt FROM review_logs ORDER BY reviewed_at ASC");
+  return rows;
+}
+
 function saveSkip(cardId) {
   db.run("INSERT INTO review_skips (id, card_id, skipped_at) VALUES (?, ?, ?)", [
     crypto.randomUUID(),
@@ -1094,6 +1100,7 @@ module.exports = {
   getCard,
   listDueCards,
   listAllCards,
+  listAllReviewLogs,
   deleteCard,
   saveReview,
   saveSkip,

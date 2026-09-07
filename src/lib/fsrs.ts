@@ -1,7 +1,8 @@
-// FSRS 调度封装（文档§1 锁定 ts-fsrs v6；§11 调度契约 v11）
+// FSRS 调度封装（文档§1 锁定 ts-fsrs v6；§11 调度契约 v11；§11.7 参数优化 v12）
 // §11.1 全量持久化：fsrs_json 含 {state,due,lapses,stability,difficulty,reps,lastReview}
 // §11.2 fuzz 锁定关闭：预览值即算法真实值
 // §11.3 预览与实际调度同源：preview() 一次算出四档完整结果，评分时取对应档
+// §11.7 优化器：启动时读取 settings.app.fsrsWeights（由 optimizer:apply 写入）注入权重
 import {
   fsrs,
   generatorParameters,
@@ -11,8 +12,21 @@ import {
   type FSRSParameters
 } from "ts-fsrs";
 
-const params: FSRSParameters = generatorParameters({ enable_fuzz: false });
-const engine = fsrs(params);
+const BASE_PARAMS: FSRSParameters = generatorParameters({ enable_fuzz: false });
+let engine = fsrs(BASE_PARAMS);
+
+// 异步注入优化权重：settings 就绪后重建 engine；失败静默回退默认（调度永不阻塞）
+async function initOptimizerWeights() {
+  try {
+    const w = (await window.settingsAPI?.get("app", "fsrsWeights")) as number[] | undefined;
+    if (Array.isArray(w) && w.length === 21 && w.every((x) => typeof x === "number")) {
+      engine = fsrs(generatorParameters({ enable_fuzz: false, w }));
+    }
+  } catch {
+    /* 保持默认权重 */
+  }
+}
+void initOptimizerWeights();
 
 export type Rating = "Again" | "Hard" | "Good" | "Easy";
 

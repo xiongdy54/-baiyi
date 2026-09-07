@@ -14,6 +14,8 @@
 > **v10 变更记录（本地模型接入）：** AI 服务预设新增第三项「本地模型」（§1 表 AI 行同步）——Ollama（默认 `http://localhost:11434/v1`）与 LM Studio（1234）的 OpenAI 兼容端点，无需 Key；8GB 显存推荐 `qwen3:8b`（5.2GB，制卡质量优先）/ `qwen3:4b`（2.5GB，速度优先）/ `glm4:9b`（5.5GB，GLM 系）。本地服务连接失败时给出可操作指引；「拉取模型列表」对本地端点免 Key。
 >
 > **v11 变更记录（FSRS 调度正确性契约，v10.4/v10.5 增补并入）：** 依据 FSRS 调度正确性测试（tests/fsrs/REPORT.md）暴露的 F1-F5 缺陷，新增 §11「FSRS 调度与复习队列契约」——FSRS 状态字段全量持久化契约（§11.1，禁止部分字段往返）、fuzz 策略锁定为关闭（§11.2）、预览与实际调度同源强制（§11.3）、leech 标记禁止整卡覆盖回写（§11.4）、到期队列排序与轮询（§11.5）、核心算法回归测试义务（§11.6）。§6 硬性约束同步新增第 7 条；Phase 3 验收标准修订为含多轮调度连续性；§1 AI 行补记 v10.4（reasoning_content 思考信号转发）与 v10.5（GLM-5.2+ reasoning_effort 思考强度，默认 low）落地。
+>
+> **v12 变更记录（FSRS 参数优化器）：** 新增 §11.7——集成 open-spaced-repetition/fsrs-rs-nodejs（NAPI 原生绑定，Electron 主进程直载），从 review_logs 构建时序复习序列训练个性化权重；设置页「FSRS 优化」手动触发，权重经 settings.json `app.fsrsWeights` 应用，调度引擎启动时注入；无效样本过滤（单次复习/全同日复习的卡不参与训练，防 fsrs-rs panic）；「恢复默认参数」一键回退；数据门槛 400 条仅提示不强制。
 
 ## 0. 全局原则（最高优先级）
 
@@ -507,6 +509,15 @@ AI 制卡 = **固定顺序的管线编排**，共 7 步：
 
 - `tests/fsrs/` 黄金参考对照套件为调度正确性的验收工具：L0 参数基线 + 黄金剧本（golden.json）、L1 适配层往返连续性（含长间隔决定性场景）、L2 数据库集成（沙盒 userData）、L4 review_logs 重放审计；UI 层（L3）按需手工/半自动执行。
 - 调度相关任何改动（fsrs 封装、db 卡片字段、复习视图评分链）合入前必须全绿：`node tests/fsrs/golden.cjs && node tests/fsrs/adapter.test.cjs && node tests/fsrs/adapter.long.test.cjs && npx electron tests/fsrs/db.test.cjs && node tests/fsrs/audit.cjs`。
+
+### 11.7 FSRS 参数优化器（v12 新增）
+
+- **集成对象**：`fsrs-rs-nodejs`（fsrs-rs 的 NAPI 绑定，npm 预编译分发，Electron 主进程直载；冒烟实测 ABI 兼容）。ts-fsrs 仅含调度器，优化能力一律来自本模块。
+- **数据流**：`review_logs`（rating Again/Hard/Good/Easy→1-4，间隔按天向下取整，首条 delta_t=0）+ `cards` → 每卡时序前缀序列 → `FSRSItem[]` → `computeParameters()` 异步训练 → 21 维权重。
+- **无效样本过滤（硬性）**：单次复习的卡、全同日复习（无 delta_t>0）的卡、以及不含跨天间隔的前缀子序列一律不参与训练——fsrs-rs 对此类输入会 panic，必须在其到达 Rust 层前过滤。
+- **应用路径**：优化权重写入 `settings.json` 的 `app.fsrsWeights`；渲染层 `fsrs.ts` 启动时读取并注入 `generatorParameters({ w, enable_fuzz: false })` 重建引擎；`optimizer:reset` 删除该键即回默认。权重数组长度恒为 21，非法即拒绝应用。
+- **触发方式**：仅手动（设置 → FSRS 优化 → 开始优化）；数据门槛 400 条复习记录，不足时 UI 提示但允许训练；训练质量指标（logLoss/RMSE）随结果展示。
+- **崩溃安全**：训练在主进程异步执行；任何失败（含 Rust panic 经 napi-rs 转换的异常）都以 `{ok:false,error}` 返回渲染层，不阻塞、不改变当前调度。
 
 
 ## 附录A — 参考项目网址（锁定，后续开发按此查）

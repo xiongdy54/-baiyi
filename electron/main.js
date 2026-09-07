@@ -37,6 +37,8 @@ const {
   findSimilarCards
 } = require("./db");
 const { getAIConfig, setAIConfig, chatStream, testConnection, listModels } = require("./ai");
+const dbModule = require("./db");
+const optimizer = require("./optimizer");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "bookasset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
@@ -144,6 +146,23 @@ ipcMain.handle("cards:setSuspended", (_e, id, suspended, reason) =>
 );
 // §11.4（v11）：leech 字段级更新，不触碰 fsrs_json
 ipcMain.handle("cards:updateLeech", (_e, id, patch) => updateCardLeech(String(id), patch || {}));
+
+// ---------- FSRS 参数优化器（v12） ----------
+ipcMain.handle("optimizer:stats", () => optimizer.getOptimizerStats(dbModule));
+ipcMain.handle("optimizer:current", () => optimizer.getAppliedWeights());
+ipcMain.handle("optimizer:train", async (e) => {
+  const send = (p) => {
+    if (!e.sender.isDestroyed()) e.sender.send("optimizer:progress", p);
+  };
+  try {
+    const result = await optimizer.train(dbModule, (value) => send({ current: value.current, total: value.total, percent: value.percent }));
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+ipcMain.handle("optimizer:apply", (_e, weights) => optimizer.applyWeights(weights));
+ipcMain.handle("optimizer:reset", () => optimizer.resetWeights());
 ipcMain.handle("cards:resolveLeech", (_e, id, resolution, updates) =>
   resolveLeech(String(id), String(resolution), updates || {})
 );
