@@ -117,18 +117,43 @@ export default function CardBrowser() {
 }
 
 // ---------- 卡面渲染（qa / cloze / seq / imageOcclusion；ReviewView 连续刷题共用） ----------
+// v11.1：showBack 后正面/背面支持内联编辑——点击文字任意位置即出光标（contentEditable），失焦落库。
+// 实现要点：编辑期间用 key 锁定 React 不重渲染该节点（防止光标跳动）；失焦才回调 onEdit。
 export function CardFace({
   card,
   showBack,
-  onReveal
+  onReveal,
+  onEdit
 }: {
   card: CardRecord;
   showBack: boolean;
   onReveal: () => void;
+  onEdit?: (patch: { frontMarkdown?: string; backMarkdown?: string }) => Promise<void> | void;
 }) {
   const md = (s: string) => (
     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
   );
+  // editable 元素：点击即聚焦出光标；失焦时把纯文本差异落库
+  const editableProps = (field: "frontMarkdown" | "backMarkdown", original: string) =>
+    showBack && onEdit
+      ? {
+          contentEditable: true,
+          suppressContentEditableWarning: true,
+          spellCheck: false,
+          className: "review-editable",
+          onBlur: async (e: React.FocusEvent<HTMLDivElement>) => {
+            const text = e.currentTarget.innerText.replace(/\n{3,}/g, "\n\n").trim();
+            if (text && text !== original.trim()) {
+              await onEdit({ [field]: text } as { frontMarkdown?: string; backMarkdown?: string });
+            }
+          },
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key === "Escape") (e.target as HTMLElement).blur();
+          }
+        }
+      : {};
+
+  const frontText = card.frontMarkdown || card.noteText;
 
   if (card.cardType === "imageOcclusion" && card.occlusionJson) {
     return (
@@ -153,7 +178,11 @@ export function CardFace({
             )
           )}
         </div>
-        {showBack && <div className="review-back">{card.backMarkdown}</div>}
+        {showBack && (
+          <div className="review-back" {...editableProps("backMarkdown", card.backMarkdown)}>
+            {card.backMarkdown}
+          </div>
+        )}
         {!showBack && (
           <button className="btn btn-primary" onClick={onReveal}>显示答案</button>
         )}
@@ -162,17 +191,22 @@ export function CardFace({
   }
 
   if (card.cardType === "cloze") {
-    const text = card.frontMarkdown || card.noteText;
-    const parsed = parseCloze(text);
+    const parsed = parseCloze(frontText);
     const ord = parsed.ords[card.cardOrd] ?? parsed.ords[0];
     return (
       <div className="review-face" onClick={!showBack ? onReveal : undefined}>
-        <div className="review-front">
+        <div className="review-front" {...editableProps("frontMarkdown", frontText)}>
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
           {md(parsed.render(showBack ? null : ord))}
         </div>
         {showBack && (
-          <div className="review-back">{md(extractClozeAnswer(text, ord))}</div>
+          <div className="review-back" {...editableProps("backMarkdown", card.backMarkdown)}>
+            {/* 背面上半：原文回填完整答案（含被误拆进 hint 的部分）；下半：纯答案行 */}
+            {md(parsed.render(null))}
+            {extractClozeAnswer(frontText, ord) && (
+              <div className="review-answer-line">{extractClozeAnswer(frontText, ord)}</div>
+            )}
+          </div>
         )}
       </div>
     );
@@ -180,8 +214,14 @@ export function CardFace({
 
   return (
     <div className="review-face" onClick={!showBack ? onReveal : undefined}>
-      <div className="review-front">{md(card.frontMarkdown || card.noteText)}</div>
-      {showBack && <div className="review-back">{md(card.backMarkdown)}</div>}
+      <div className="review-front" {...editableProps("frontMarkdown", frontText)}>
+        {md(frontText)}
+      </div>
+      {showBack && (
+        <div className="review-back" {...editableProps("backMarkdown", card.backMarkdown)}>
+          {md(card.backMarkdown)}
+        </div>
+      )}
     </div>
   );
 }

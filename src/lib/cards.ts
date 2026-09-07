@@ -12,6 +12,7 @@ declare global {
       listAll: () => Promise<unknown[]>;
       remove: (id: string) => Promise<boolean>;
       review: (cardId: string, fsrsState: unknown, rating: string, durationMs?: number) => Promise<boolean>;
+      skip: (cardId: string) => Promise<boolean>;
       setSuspended: (id: string, suspended: boolean, reason?: string) => Promise<boolean>;
       updateLeech: (id: string, patch: Record<string, unknown>) => Promise<boolean>;
       resolveLeech: (id: string, resolution: string, updates?: unknown) => Promise<boolean>;
@@ -46,7 +47,8 @@ export function parseCloze(text: string): ClozeParse {
     render(hiddenOrd: number | null) {
       return text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
         const ord = Number(ordStr);
-        if (hiddenOrd !== null && ord === hiddenOrd) return hint ? `[${hint}]` : "[…]";
+        // 正面一律完全遮蔽 […...]：hint 不上正面（hint 曾泄漏半个答案，用户反馈 #3）
+        if (hiddenOrd !== null && ord === hiddenOrd) return "[…]";
         return content;
       });
     }
@@ -56,7 +58,8 @@ export function parseCloze(text: string): ClozeParse {
 export function extractClozeAnswer(text: string, ord: number): string {
   const re = new RegExp(`\\{\\{c${ord}::(.*?)(?:::(.*?))?\\}\\}`);
   const m = re.exec(text);
-  return m ? (m[2] ?? "") : "";
+  // 背面 = 完整答案 content；若制卡时误将答案后半写进 hint，拼回完整（避免答案被拆两半）
+  return m ? (m[2] ?? "") + (m[3] ? `（${m[3]}）` : "") : "";
 }
 
 // ---------- CardGeneratorProvider ----------
@@ -64,6 +67,7 @@ export interface CardDraft {
   cardType: string;
   knowledgePointId?: string;
   contextPrefix?: string;
+  domain?: string[];
   front: string;
   back: string;
   cloze?: string | null;
@@ -277,8 +281,10 @@ export const cardsApi = {
   listDue: async () => ((await window.cardsAPI?.listDue()) ?? []) as (CardRecord & { docTitle?: string })[],
   listAll: async () => ((await window.cardsAPI?.listAll()) ?? []) as CardRecord[],
   remove: async (id: string) => (await window.cardsAPI?.remove(id)) ?? false,
-  review: async (cardId: string, fsrsState: unknown, rating: string, durationMs?: number) => {
-    await window.cardsAPI?.review(cardId, fsrsState, rating, durationMs);
+  review: async (cardId: string, fsrsState: unknown, rating: string, durationMs?: number) => {    await window.cardsAPI?.review(cardId, fsrsState, rating, durationMs);
+  },
+  skip: async (cardId: string) => {
+    await window.cardsAPI?.skip(cardId);
   },
   setSuspended: async (id: string, suspended: boolean, reason?: string) =>
     (await window.cardsAPI?.setSuspended(id, suspended, reason)) ?? false,
@@ -311,6 +317,7 @@ export interface CardRecord {
   dateStamp: string | null;
   priority: number;
   tags: string[];
+  domain: string[];
   knowledgePointId: string | null;
   occlusionJson: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; assetPath: string } | null;
   fsrs: { state?: string; due?: number; lapses?: number };

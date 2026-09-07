@@ -1088,15 +1088,13 @@ body.theme-dark .modal-panel {
   font-weight: 400;
   line-height: 1.5;
   letter-spacing: -0.01em;
-  text-wrap: balance;
   color: var(--text-primary);
 }
 .review-back {
-  font-size: 26px; /* 与正面同字号：翻面前后问题/答案视觉连续，不缩不跳（用户反馈 #1） */
+  font-size: 26px; /* 与正面同字号同换行：翻面前后问题视觉完全连续（用户反馈 #1） */
   font-weight: 400;
   line-height: 1.5;
   letter-spacing: -0.01em;
-  text-wrap: pretty;
   color: var(--text-primary);
   border-top: 1px solid var(--grey-2);
   padding-top: var(--sp-6);
@@ -1115,6 +1113,13 @@ body.theme-dark .modal-panel {
 .review-front li:last-child,
 .review-back li:last-child {
   margin-bottom: 0;
+}
+/* cloze 背面的纯答案行：与原文回填之间用 hairline + 字重区分 */
+.review-answer-line {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--grey-2);
+  font-weight: 600;
 }
 /* 内联编辑（用户反馈 #2）：只出光标，不加编辑框——focus/hover 均无描边 */
 .review-editable {
@@ -1157,10 +1162,14 @@ body.theme-dark .modal-panel {
   justify-content: center;
 }
 .grade-due { font-size: var(--fs-meta); font-weight: 400; opacity: 0.75; font-variant-numeric: tabular-nums; }
-/* 色彩纪律（swiss）：同屏唯一焦点色 = Good 用 accent 填充；Again/Hard/Easy 语义只以 8×4 左色条表达，
-   按钮本体统一灰底（语义色不作第二焦点）。键盘焦点环 2px accent。 */
-.grade-again, .grade-hard, .grade-easy { background: var(--grey-1); color: var(--text-primary); position: relative; }
-.grade-again::before, .grade-hard::before, .grade-easy::before {
+/* 色彩纪律（swiss + 用户反馈：四按钮样式统一）——本体全部灰底，评分语义只以左缘 4px 色条 +
+   评分词同色表达；无填充差异、无第二焦点色。键盘焦点环 2px accent。 */
+.grade-again, .grade-hard, .grade-good, .grade-easy {
+  background: var(--grey-1);
+  color: var(--text-primary);
+  position: relative;
+}
+.grade-again::before, .grade-hard::before, .grade-good::before, .grade-easy::before {
   content: "";
   position: absolute;
   left: 0;
@@ -1170,9 +1179,9 @@ body.theme-dark .modal-panel {
 }
 .grade-again::before { background: var(--error); }
 .grade-hard::before { background: var(--warning); }
+.grade-good::before { background: var(--accent); }
 .grade-easy::before { background: var(--success); }
-.grade-good { background: var(--accent); color: var(--accent-on); }
-.grade-row .btn:hover.grade-again, .grade-row .btn:hover.grade-hard, .grade-row .btn:hover.grade-easy { background: var(--grey-2); }
+.grade-row .btn:hover { background: var(--grey-2); }
 .grade-row .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .review-tools { display: flex; gap: var(--sp-3); margin-top: var(--sp-4); }
 .review-exit { position: fixed; top: var(--sp-12); right: var(--sp-4); }

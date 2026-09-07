@@ -16,6 +16,7 @@ const {
   READER_EXPLAIN_PROMPT,
   LEECH_RESCUE_PROMPT
 } = require("./prompts");
+const { sanitizeDomain, domainFromPrefix } = require("./udc");
 
 let db = null;
 let dbFile = null;
@@ -143,6 +144,17 @@ CREATE TABLE IF NOT EXISTS review_logs (
   reviewed_at INTEGER NOT NULL,
   duration_ms INTEGER
 );
+CREATE TABLE IF NOT EXISTS reading_events (
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL,
+  char_pos INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_skips (
+  id TEXT PRIMARY KEY,
+  card_id TEXT NOT NULL,
+  skipped_at INTEGER NOT NULL
+);
 `;
 
 async function initDb() {
@@ -156,6 +168,20 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  // 统计管线 v1：cards.domain（JSON 数组字符串，如 '["51","32"]'，≤2 个、首个为主）
+  try {
+    db.run("ALTER TABLE cards ADD COLUMN domain TEXT");
+  } catch {
+    /* 列已存在 */
+  }
+  // 旧卡回填：按 context_prefix 关键词映射 UDC，匹配不到留 NULL（未分类），只回填一次
+  try {
+    const backfilled = queryAll("SELECT id, context_prefix FROM cards WHERE domain IS NULL AND is_deleted = 0 AND context_prefix IS NOT NULL");
+    for (const row of backfilled) {
+      const code = domainFromPrefix(row.context_prefix);
+      if (code) db.run("UPDATE cards SET domain = ? WHERE id = ?", [JSON.stringify([code]), row.id]);
+    }
+  } catch { /* 表尚不存在等场景 */ }
   db.run("INSERT OR IGNORE INTO users (id, name, created_at) VALUES ('local-user', '本地用户', ?)", [
     Date.now()
   ]);
@@ -306,6 +332,7 @@ function mapCardRow(r) {
     dateStamp: r.date_stamp,
     priority: r.priority,
     tags: JSON.parse(r.tags_json || "[]"),
+    domain: r.domain ? JSON.parse(r.domain) : [],
     knowledgePointId: r.knowledge_point_id,
     occlusionJson: r.occlusion_json ? JSON.parse(r.occlusion_json) : null,
     fsrs: normalizeFsrs(r.fsrs_json),
@@ -322,10 +349,10 @@ function insertCard(card) {
   const now = Date.now();
   db.run(
     `INSERT INTO cards (id, user_id, note_text, card_type, cloze_ords, card_ord, front_markdown, back_markdown,
-      context_prefix, context_ref_json, mnemonic, example, source_ref_json, date_stamp, priority, tags_json,
+      context_prefix, context_ref_json, mnemonic, example, source_ref_json, date_stamp, priority, tags_json, domain,
       knowledge_point_id, occlusion_json, fsrs_json, leech_json, generated_by, gen_batch_id,
       created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, 0)`,
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, 0)`,
     [
       id,
       card.noteText || "",
@@ -342,6 +369,7 @@ function insertCard(card) {
       card.dateStamp || null,
       Number(card.priority) || 50,
       JSON.stringify(card.tags || []),
+      JSON.stringify(sanitizeDomain(card.domain || [])),
       card.knowledgePointId || null,
       card.occlusionJson ? JSON.stringify(card.occlusionJson) : null,
       card.fsrsJson || null,
@@ -370,7 +398,7 @@ function updateCard(card) {
   db.run(
     `UPDATE cards SET note_text=?, card_type=?, cloze_ords=?, card_ord=?, front_markdown=?, back_markdown=?,
       context_prefix=?, context_ref_json=?, mnemonic=?, example=?, source_ref_json=?, date_stamp=?, priority=?,
-      tags_json=?, knowledge_point_id=?, occlusion_json=?, fsrs_json=?, leech_json=?, updated_at=? WHERE id=? AND is_deleted=0`,
+      tags_json=?, domain=?, knowledge_point_id=?, occlusion_json=?, fsrs_json=?, leech_json=?, updated_at=? WHERE id=? AND is_deleted=0`,
     [
       card.noteText || "",
       card.cardType || "qa",
@@ -386,6 +414,7 @@ function updateCard(card) {
       card.dateStamp || null,
       Number(card.priority) || 50,
       JSON.stringify(card.tags || []),
+      card.domain !== undefined ? JSON.stringify(sanitizeDomain(card.domain || [])) : (prev ? JSON.stringify(prev.domain || []) : "[]"),
       card.knowledge_point_id || card.knowledgePointId || null,
       card.occlusion_json || (card.occlusionJson ? JSON.stringify(card.occlusionJson) : null),
       card.fsrs_json || (card.fsrs ? JSON.stringify(card.fsrs) : null) || (prev ? JSON.stringify(prev.fsrs) : null),
@@ -450,6 +479,28 @@ function saveReview(cardId, fsrsState, rating, durationMs) {
     JSON.stringify(fsrsState),
     Date.now(),
     cardId
+  ]);
+  persist();
+  return true;
+}
+
+function saveSkip(cardId) {
+  db.run("INSERT INTO review_skips (id, card_id, skipped_at) VALUES (?, ?, ?)", [
+    crypto.randomUUID(),
+    cardId,
+    Date.now()
+  ]);
+  persist();
+  return true;
+}
+
+// 阅读进度事件：滚动停止后记一条字符位置；当日阅读字数 = 相邻事件正增量之和
+function addReadingEvent(itemId, charPos) {
+  db.run("INSERT INTO reading_events (id, item_id, char_pos, created_at) VALUES (?, ?, ?, ?)", [
+    crypto.randomUUID(),
+    String(itemId),
+    Math.max(0, Math.round(Number(charPos) || 0)),
+    Date.now()
   ]);
   persist();
   return true;
@@ -551,25 +602,48 @@ function setAIGenBatchStatus(id, status) {
 }
 
 function ensurePromptTemplates() {
-  const count = queryAll("SELECT COUNT(*) AS n FROM prompt_templates")[0].n;
-  if (Number(count) > 0) return;
   const now = Date.now();
-  const seed = (scope, name, content) => {
+  // v3 播种：按 scope 查最新 version，低于目标版本才插入新版本（旧版本保留作留痕）
+  // v2 变更：CARD_GEN_PROMPT 新增【领域标注】段与 domain 输出字段（UDC 受控清单）
+  // v3 变更：R13 新增 hint 禁令——禁用 {{c1::答案::提示}} 第三段，禁止答案拆两半（正面曾泄漏半个答案）
+  const TARGET_VERSION = 3;
+  const seedV3 = (scope, name, content) => {
+    const rows = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope]);
+    if (Number(rows[0]?.v || 0) >= TARGET_VERSION) return;
     db.run(
-      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)",
-      [crypto.randomUUID(), scope, name, content, now]
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, ?, ?, ?, ?, 1, ?)",
+      [crypto.randomUUID(), scope, name, content, TARGET_VERSION, now]
     );
   };
-  seed("card-generation", "主制卡 v1", CARD_GEN_PROMPT);
-  seed("card-formula", "公式分解 v1", CARD_FORMULA_PROMPT);
-  seed("card-seq", "序列/背诵 v1", CARD_SEQ_PROMPT);
-  seed("card-enum", "枚举拆解 v1", CARD_ENUM_PROMPT);
-  seed("card-mnemonic", "助记双卡 v1", CARD_MNEMONIC_PROMPT);
-  seed("card-contrast", "对比卡 v1", CARD_CONTRAST_PROMPT);
-  seed("card-wording", "措辞优化 v1", CARD_WORDING_PROMPT);
-  seed("card-basic", "前置知识卡 v1", CARD_BASIC_PROMPT);
-  seed("reader-explain", "阅读解释 v1", READER_EXPLAIN_PROMPT);
-  seed("leech-rescue", "难点诊断 v1", LEECH_RESCUE_PROMPT);
+  seedV3("card-generation", "主制卡 v3", CARD_GEN_PROMPT);
+  seedV3("card-formula", "公式分解 v3", CARD_FORMULA_PROMPT);
+  seedV3("card-seq", "序列/背诵 v3", CARD_SEQ_PROMPT);
+  seedV3("card-enum", "枚举拆解 v3", CARD_ENUM_PROMPT);
+  seedV3("card-mnemonic", "助记双卡 v3", CARD_MNEMONIC_PROMPT);
+  seedV3("card-contrast", "对比卡 v3", CARD_CONTRAST_PROMPT);
+  seedV3("card-wording", "措辞优化 v3", CARD_WORDING_PROMPT);
+  seedV3("card-basic", "前置知识卡 v3", CARD_BASIC_PROMPT);
+  // v1 一次性播种（首次安装）
+  const count = queryAll("SELECT COUNT(*) AS n FROM prompt_templates")[0].n;
+  if (Number(count) === 0) {
+    const seedV1 = (scope, name, content) => {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)",
+        [crypto.randomUUID(), scope, name, content, now]
+      );
+    };
+    db.run("DELETE FROM prompt_templates");
+    seedV1("reader-explain", "阅读解释 v1", READER_EXPLAIN_PROMPT);
+    seedV1("leech-rescue", "难点诊断 v1", LEECH_RESCUE_PROMPT);
+    seedV3("card-generation", "主制卡 v3", CARD_GEN_PROMPT);
+    seedV3("card-formula", "公式分解 v3", CARD_FORMULA_PROMPT);
+    seedV3("card-seq", "序列/背诵 v3", CARD_SEQ_PROMPT);
+    seedV3("card-enum", "枚举拆解 v3", CARD_ENUM_PROMPT);
+    seedV3("card-mnemonic", "助记双卡 v3", CARD_MNEMONIC_PROMPT);
+    seedV3("card-contrast", "对比卡 v3", CARD_CONTRAST_PROMPT);
+    seedV3("card-wording", "措辞优化 v3", CARD_WORDING_PROMPT);
+    seedV3("card-basic", "前置知识卡 v3", CARD_BASIC_PROMPT);
+  }
 }
 
 function getPromptTemplate(scope) {
@@ -735,6 +809,274 @@ function postponeExtract(id) {
   return { intervalDays, nextAt };
 }
 
+// ---------- 统计聚合（stats:overview，只读，不改任何调度状态） ----------
+
+const { UDC_MAIN, UDC_LEAVES, UDC_OTHER } = require("./udc");
+
+function dayStartMs(ts) {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function getStatsOverview() {
+  const now = Date.now();
+  const today0 = dayStartMs(now);
+  const today24 = today0 + 24 * 3600_000;
+
+  // ---- KPI：今日到期 / 已完成 / 未完成 ----
+  const cards = queryAll(
+    `SELECT c.id, c.fsrs_json, c.leech_json, c.domain, c.source_ref_json, c.context_ref_json, c.created_at
+     FROM cards c WHERE c.is_deleted = 0`
+  );
+  const active = cards.filter((c) => {
+    try {
+      const l = c.leech_json ? JSON.parse(c.leech_json) : null;
+      if (l?.suspended) return false;
+    } catch { /* 忽略损坏行 */ }
+    return true;
+  });
+  const dueOf = (c) => {
+    try {
+      const f = JSON.parse(c.fsrs_json || "null");
+      return typeof f?.due === "number" ? f.due : now;
+    } catch {
+      return now;
+    }
+  };
+  const dueToday = active.filter((c) => dueOf(c) <= today24).length;
+  const reviewedToday = queryAll("SELECT DISTINCT card_id FROM review_logs WHERE reviewed_at >= ?", [today0]).length;
+  const completedToday = active.filter((c) => {
+    if (dueOf(c) > today24) return false; // 不再被推送
+    // 今日评过至少一次
+    return queryAll("SELECT 1 FROM review_logs WHERE card_id = ? AND reviewed_at >= ? LIMIT 1", [c.id, today0]).length > 0;
+  }).length;
+
+  // ---- 今日时长 / 连续天数 ----
+  const todayDur = queryAll("SELECT SUM(duration_ms) AS s FROM review_logs WHERE reviewed_at >= ?", [today0])[0]?.s || 0;
+  const dayKeys = queryAll("SELECT DISTINCT reviewed_at FROM review_logs ORDER BY reviewed_at DESC").map((r) => dayStartMs(r.reviewed_at));
+  let streak = 0;
+  if (dayKeys.length > 0) {
+    const cursor = dayKeys[0] === today0 ? today0 : today0 - 86400_000; // 今天没学则从昨天起算
+    const set = new Set(dayKeys);
+    let d = cursor;
+    while (set.has(d)) {
+      streak++;
+      d -= 86400_000;
+    }
+  }
+
+  // ---- 26 周热力（每日次数 + 时长）----
+  const heatFrom = today0 - 181 * 86400_000;
+  const heatRows = queryAll(
+    "SELECT reviewed_at, duration_ms FROM review_logs WHERE reviewed_at >= ?",
+    [heatFrom]
+  );
+  const heat = {};
+  for (const r of heatRows) {
+    const k = dayStartMs(r.reviewed_at);
+    if (!heat[k]) heat[k] = { count: 0, ms: 0 };
+    heat[k].count++;
+    heat[k].ms += r.duration_ms || 0;
+  }
+  const heatDays = [];
+  for (let d = heatFrom; d <= today0; d += 86400_000) {
+    const h = heat[d] || { count: 0, ms: 0 };
+    heatDays.push({ date: d, count: h.count, minutes: Math.round(h.ms / 60000) });
+  }
+
+  // ---- 领域分布（主领域 = domain[0]；按卡计数）----
+  const domainCount = {};
+  let unclassified = 0;
+  for (const c of cards) {
+    let d = [];
+    try { d = c.domain ? JSON.parse(c.domain) : []; } catch { /* ignore */ }
+    if (!d.length) { unclassified++; continue; }
+    domainCount[d[0]] = (domainCount[d[0]] || 0) + 1;
+  }
+  const mainLabel = {};
+  for (const m of UDC_MAIN) mainLabel[m.code] = m.label;
+  const leafMain = {};
+  for (const l of UDC_LEAVES) leafMain[l.code] = l.main;
+  const domainMain = Object.entries(domainCount).map(([code, n]) => ({
+    code,
+    label: mainLabel[leafMain[code]] || "其他",
+    leaf: (UDC_LEAVES.find((l) => l.code === code) || {}).label || code,
+    count: n
+  })).sort((a, b) => b.count - a.count);
+  const domainDetail = Object.entries(domainCount).map(([code, n]) => ({
+    code,
+    label: (UDC_LEAVES.find((l) => l.code === code) || {}).label || (code === UDC_OTHER ? "其他" : code),
+    count: n
+  })).sort((a, b) => b.count - a.count);
+
+  // ---- 评分构成（近 30 天）----
+  const ratingRows = queryAll("SELECT rating, COUNT(*) AS n FROM review_logs WHERE reviewed_at >= ? GROUP BY rating", [now - 30 * 86400_000]);
+  const ratings = ratingRows.map((r) => ({ rating: r.rating, count: r.n }));
+
+  // ---- 答题时长（近 90 天，按主领域分箱 + 全体五数概括）----
+  const durRows = queryAll(
+    `SELECT rl.duration_ms AS d, c.domain FROM review_logs rl
+     JOIN cards c ON c.id = rl.card_id AND c.is_deleted = 0
+     WHERE rl.reviewed_at >= ? AND rl.duration_ms IS NOT NULL AND rl.duration_ms > 0`,
+    [now - 90 * 86400_000]
+  );
+  const quantile = (arr, q) => {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const pos = (s.length - 1) * q, base = Math.floor(pos), rest = pos - base;
+    return s[base + 1] !== undefined ? s[base] + rest * (s[base + 1] - s[base]) : s[base];
+  };
+  const byField = {};
+  for (const r of durRows) {
+    let dom = [];
+    try { dom = r.domain ? JSON.parse(r.domain) : []; } catch { /* ignore */ }
+    const key = dom.length ? dom[0] : "none";
+    (byField[key] = byField[key] || []).push(r.d);
+  }
+  const durationByField = Object.entries(byField).map(([code, arr]) => ({
+    code,
+    label: code === "none" ? "未分类" : ((UDC_LEAVES.find((l) => l.code === code) || {}).label || code),
+    count: arr.length,
+    min: Math.min(...arr),
+    q1: Math.round(quantile(arr, 0.25)),
+    median: Math.round(quantile(arr, 0.5)),
+    q3: Math.round(quantile(arr, 0.75)),
+    max: Math.max(...arr),
+    outliers: arr.filter((v) => v > quantile(arr, 0.75) + 1.5 * (quantile(arr, 0.75) - quantile(arr, 0.25))).slice(0, 4)
+  })).filter((f) => f.count >= 5).sort((a, b) => a.median - b.median);
+  const allDur = durRows.map((r) => r.d);
+  // 直方图：5 分钟一箱 × 12 箱（0–60 分钟），前端按小时轴展示
+  const durationHist = {};
+  for (const v of allDur) {
+    const bin = Math.min(11, Math.floor(v / 300_000));
+    durationHist[bin] = (durationHist[bin] || 0) + 1;
+  }
+  const durationBins = Array.from({ length: 12 }, (_, i) => durationHist[i] || 0);
+
+  // ---- 卡片生命周期漏斗（近 90 天入队样本）----
+  const funnelFrom = now - 90 * 86400_000;
+  const cohort = cards.filter((c) => c.created_at >= funnelFrom);
+  const funnel = { drafts: cohort.length, entered: cohort.length, firstLearned: 0, reviewing: 0, consolidated: 0 };
+  for (const c of cohort) {
+    try {
+      const f = JSON.parse(c.fsrs_json || "{}");
+      if (f.state === "review" || f.state === "relearning") funnel.firstLearned++;
+      if (f.state === "review" && (f.stability ?? 0) > 21) { funnel.reviewing++; funnel.consolidated++; }
+      else if (f.state === "review") funnel.reviewing++;
+    } catch { /* ignore */ }
+  }
+
+  // ---- 新建卡来源（近 26 周，卡 → 书 × 主领域）----
+  const srcFrom = now - 182 * 86400_000;
+  const srcRows = queryAll(
+    `SELECT c.id, c.domain, c.source_ref_json, c.context_ref_json, li.title AS bookTitle
+     FROM cards c
+     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN library_items li ON li.id = d.library_item_id
+     WHERE c.is_deleted = 0 AND c.created_at >= ?`,
+    [srcFrom]
+  );
+  const sourceCards = srcRows.map((r) => {
+    let dom = [];
+    try { dom = r.domain ? JSON.parse(r.domain) : []; } catch { /* ignore */ }
+    let book = r.bookTitle;
+    if (!book) {
+      try { book = JSON.parse(r.source_ref_json || "null")?.title || null; } catch { book = null; }
+    }
+    return { book: book || "未知来源", domain: dom[0] || null };
+  });
+
+  // ---- 领域排名（近 6 个月，按月）----
+  const rankRows = queryAll(
+    `SELECT rl.reviewed_at, c.domain FROM review_logs rl
+     JOIN cards c ON c.id = rl.card_id AND c.is_deleted = 0
+     WHERE rl.reviewed_at >= ?`,
+    [now - 183 * 86400_000]
+  );
+  const monthMap = {};
+  for (const r of rankRows) {
+    let dom = [];
+    try { dom = r.domain ? JSON.parse(r.domain) : []; } catch { /* ignore */ }
+    const key = dom[0] || "none";
+    const dt = new Date(r.reviewed_at);
+    const mk = `${dt.getFullYear()}-${dt.getMonth() + 1}`;
+    (monthMap[mk] = monthMap[mk] || {});
+    monthMap[mk][key] = (monthMap[mk][key] || 0) + 1;
+  }
+  const monthKeys = Object.keys(monthMap).sort().slice(-6);
+  const allCodes = new Set();
+  for (const mk of monthKeys) for (const code of Object.keys(monthMap[mk])) allCodes.add(code);
+  const domainRank = [...allCodes].map((code) => ({
+    code,
+    label: code === "none" ? "未分类" : ((UDC_LEAVES.find((l) => l.code === code) || {}).label || code),
+    ranks: monthKeys.map((mk) => {
+      const entries = Object.entries(monthMap[mk]).sort((a, b) => b[1] - a[1]);
+      const idx = entries.findIndex(([c]) => c === code);
+      return idx < 0 ? entries.length + 1 : idx + 1;
+    })
+  })).sort((a, b) => a.ranks[a.ranks.length - 1] - b.ranks[b.ranks.length - 1]);
+
+  // ---- 月度队列水位（当月）----
+  const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+  const monthNew = cards.filter((c) => c.created_at >= monthStart).length;
+  const monthReviews = queryAll("SELECT COUNT(DISTINCT card_id) AS n FROM review_logs WHERE reviewed_at >= ?", [monthStart])[0]?.n || 0;
+  const monthSkips = queryAll("SELECT COUNT(DISTINCT card_id) AS n FROM review_skips WHERE skipped_at >= ?", [monthStart])[0]?.n || 0;
+  const queueFlow = { carriedOver: Math.max(0, dueToday - monthNew), overdue: 0, newCards: monthNew, completed: monthReviews, skipped: monthSkips, remaining: Math.max(0, dueToday - completedToday) };
+
+  // ---- 阅读字数（近 45 天，相邻正增量之和）----
+  const readFrom = now - 45 * 86400_000;
+  const readRows = queryAll("SELECT item_id, char_pos, created_at FROM reading_events WHERE created_at >= ? ORDER BY created_at ASC", [readFrom]);
+  const readByDay = {};
+  const lastPos = {};
+  for (const r of readRows) {
+    const k = dayStartMs(r.created_at);
+    const prev = lastPos[r.item_id] ?? r.char_pos;
+    const delta = r.char_pos - prev;
+    if (delta > 0) readByDay[k] = (readByDay[k] || 0) + delta;
+    lastPos[r.item_id] = r.char_pos;
+  }
+  const readingDays = [];
+  for (let d = readFrom; d <= today0; d += 86400_000) readingDays.push({ date: d, chars: readByDay[d] || 0 });
+
+  // ---- 学习节律（近 90 天：星期×时段网格 + 时刻事件采样）----
+  const rhythmRows = queryAll(
+    "SELECT reviewed_at, rating FROM review_logs WHERE reviewed_at >= ?",
+    [now - 90 * 86400_000]
+  );
+  const rhythmGrid = Array.from({ length: 7 }, () => Array(13).fill(0));
+  const rhythmEvents = [];
+  const RHYTHM_SAMPLE_MAX = 60;
+  const rhythmStride = Math.max(1, Math.ceil(rhythmRows.length / RHYTHM_SAMPLE_MAX));
+  rhythmRows.forEach((r, idx) => {
+    const dt = new Date(r.reviewed_at);
+    const weekday = (dt.getDay() + 6) % 7;
+    const hour = dt.getHours();
+    rhythmGrid[weekday][Math.min(12, Math.max(0, hour - 8))]++;
+    if (idx % rhythmStride === 0 && rhythmEvents.length < RHYTHM_SAMPLE_MAX) {
+      rhythmEvents.push({ hour, again: r.rating === "Again" });
+    }
+  });
+
+  return {
+    kpi: { dueToday, completedToday, pendingToday: Math.max(0, dueToday - completedToday), reviewedToday, streak, minutesToday: Math.round(todayDur / 60000) },
+    heatDays,
+    domainMain,
+    domainDetail,
+    unclassified,
+    ratings,
+    durationByField,
+    durationBins,
+    funnel,
+    sourceCards,
+    domainRank,
+    queueFlow,
+    readingDays,
+    rhythmGrid,
+    rhythmEvents
+  };
+}
+
 module.exports = {
   initDb,
   listItems,
@@ -754,6 +1096,9 @@ module.exports = {
   listAllCards,
   deleteCard,
   saveReview,
+  saveSkip,
+  addReadingEvent,
+  getStatsOverview,
   setCardSuspended,
   updateCardLeech,
   resolveLeech,
