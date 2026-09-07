@@ -20,6 +20,9 @@ const {
   listAllCards,
   deleteCard,
   saveReview,
+  saveSkip,
+  addReadingEvent,
+  getStatsOverview,
   setCardSuspended,
   updateCardLeech,
   resolveLeech,
@@ -132,6 +135,10 @@ ipcMain.handle("cards:delete", (_e, id) => deleteCard(String(id)));
 ipcMain.handle("cards:review", (_e, cardId, fsrsState, rating, durationMs) =>
   saveReview(String(cardId), fsrsState, String(rating), durationMs)
 );
+// 统计管线 v1：跳过事件 / 阅读进度事件 / 统计聚合
+ipcMain.handle("cards:skip", (_e, cardId) => saveSkip(String(cardId)));
+ipcMain.handle("reading:event", (_e, itemId, charPos) => addReadingEvent(String(itemId), Number(charPos)));
+ipcMain.handle("stats:overview", () => getStatsOverview());
 ipcMain.handle("cards:setSuspended", (_e, id, suspended, reason) =>
   setCardSuspended(String(id), Boolean(suspended), reason)
 );
@@ -264,19 +271,22 @@ function createWindow() {
     width: 1100,
     height: 750,
     frame: false,
+    icon: path.join(__dirname, "icon.ico"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
-  const devUrl = "http://localhost:5173";
-  if (!app.isPackaged) {
-    win.loadURL(devUrl).catch(() => {
-      win.loadFile(path.join(__dirname, "../dist/index.html"));
+  // 加载顺序（v11.2）：dist 存在则直接用（生产产物优先，避免 devURL 连接超时挂起导致白屏）；
+  // dist 不存在（纯开发场景）才走 vite dev server，失败再报错
+  const distIndex = path.join(__dirname, "../dist/index.html");
+  if (fs.existsSync(distIndex)) {
+    win.loadFile(distIndex);
+  } else if (!app.isPackaged) {
+    win.loadURL("http://localhost:5173").catch(() => {
+      win.loadFile(distIndex);
     });
-  } else {
-    win.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 }
 

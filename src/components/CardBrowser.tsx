@@ -1,6 +1,6 @@
 // 卡片浏览界面（v11.1 用户需求调整）：到期卡片 + 记忆难点 Leech 的浏览与维护入口。
 // 复习动作在连续刷题界面（ReviewView）；此处只浏览、筛选、进入 Leech 六步向导。
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -117,8 +117,58 @@ export default function CardBrowser() {
 }
 
 // ---------- 卡面渲染（qa / cloze / seq / imageOcclusion；ReviewView 连续刷题共用） ----------
-// v11.1：showBack 后正面/背面支持内联编辑——点击文字任意位置即出光标（contentEditable），失焦落库。
-// 实现要点：编辑期间用 key 锁定 React 不重渲染该节点（防止光标跳动）；失焦才回调 onEdit。
+// 内联编辑（v11.2 重写）：EditableText 是 React 不描述子节点的"裸壳"div——挂载时命令式写入纯文本，
+// 点击即出光标，失焦读回 innerText 落库。React 永远不 reconcile 它的子节点，
+// 彻底规避 contentEditable 与 ReactMarkdown 共管 DOM 导致的「优绩:」叠加与 removeChild 崩溃。
+function EditableText({
+  value,
+  onCommit,
+  className
+}: {
+  value: string;
+  onCommit: (text: string) => void;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const initial = useRef(value);
+  if (initial.current !== value) {
+    // 外部值变化（换卡）时重置壳内文本
+    initial.current = value;
+    if (ref.current && document.activeElement !== ref.current) ref.current.innerText = value;
+  }
+  useEffect(() => {
+    if (ref.current) ref.current.innerText = value;
+    // 仅挂载/换值时写入一次；编辑过程中 React 不触碰 DOM
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <div
+      ref={ref}
+      className={`review-editable${className ? " " + className : ""}`}
+      contentEditable
+      suppressContentEditableWarning
+      spellCheck={false}
+      onFocus={(e) => {
+        // 聚焦时把光标置于点击处由浏览器默认行为处理；无需干预
+        void e;
+      }}
+      onBlur={(e) => {
+        const text = e.currentTarget.innerText.replace(/\n{3,}/g, "\n\n").trim();
+        if (text && text !== initial.current.trim()) {
+          initial.current = text;
+          onCommit(text);
+        } else if (!text) {
+          // 清空不落库，恢复原值
+          e.currentTarget.innerText = initial.current;
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") (e.target as HTMLElement).blur();
+      }}
+    />
+  );
+}
+
 export function CardFace({
   card,
   showBack,
@@ -133,25 +183,6 @@ export function CardFace({
   const md = (s: string) => (
     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
   );
-  // editable 元素：点击即聚焦出光标；失焦时把纯文本差异落库
-  const editableProps = (field: "frontMarkdown" | "backMarkdown", original: string) =>
-    showBack && onEdit
-      ? {
-          contentEditable: true,
-          suppressContentEditableWarning: true,
-          spellCheck: false,
-          className: "review-editable",
-          onBlur: async (e: React.FocusEvent<HTMLDivElement>) => {
-            const text = e.currentTarget.innerText.replace(/\n{3,}/g, "\n\n").trim();
-            if (text && text !== original.trim()) {
-              await onEdit({ [field]: text } as { frontMarkdown?: string; backMarkdown?: string });
-            }
-          },
-          onKeyDown: (e: React.KeyboardEvent) => {
-            if (e.key === "Escape") (e.target as HTMLElement).blur();
-          }
-        }
-      : {};
 
   const frontText = card.frontMarkdown || card.noteText;
 
@@ -179,8 +210,12 @@ export function CardFace({
           )}
         </div>
         {showBack && (
-          <div className="review-back" {...editableProps("backMarkdown", card.backMarkdown)}>
-            {card.backMarkdown}
+          <div className="review-back">
+            {onEdit ? (
+              <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
+            ) : (
+              card.backMarkdown
+            )}
           </div>
         )}
         {!showBack && (
@@ -195,16 +230,17 @@ export function CardFace({
     const ord = parsed.ords[card.cardOrd] ?? parsed.ords[0];
     return (
       <div className="review-face" onClick={!showBack ? onReveal : undefined}>
-        <div className="review-front" {...editableProps("frontMarkdown", frontText)}>
+        {/* 问题部分：背面与正面逐字相同（挖空保持遮蔽）；contextPrefix 在可编辑区之外 */}
+        <div className="review-front">
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
           {md(parsed.render(showBack ? null : ord))}
         </div>
         {showBack && (
-          <div className="review-back" {...editableProps("backMarkdown", card.backMarkdown)}>
-            {/* 背面上半：原文回填完整答案（含被误拆进 hint 的部分）；下半：纯答案行 */}
-            {md(parsed.render(null))}
-            {extractClozeAnswer(frontText, ord) && (
-              <div className="review-answer-line">{extractClozeAnswer(frontText, ord)}</div>
+          <div className="review-back">
+            {onEdit ? (
+              <EditableText value={extractClozeAnswer(frontText, ord)} onCommit={(t) => onEdit({ backMarkdown: t })} />
+            ) : (
+              extractClozeAnswer(frontText, ord)
             )}
           </div>
         )}
@@ -214,12 +250,17 @@ export function CardFace({
 
   return (
     <div className="review-face" onClick={!showBack ? onReveal : undefined}>
-      <div className="review-front" {...editableProps("frontMarkdown", frontText)}>
+      <div className="review-front">
+        {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
         {md(frontText)}
       </div>
       {showBack && (
-        <div className="review-back" {...editableProps("backMarkdown", card.backMarkdown)}>
-          {md(card.backMarkdown)}
+        <div className="review-back">
+          {onEdit ? (
+            <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
+          ) : (
+            md(card.backMarkdown)
+          )}
         </div>
       )}
     </div>

@@ -1121,10 +1121,11 @@ body.theme-dark .modal-panel {
   border-top: 1px solid var(--grey-2);
   font-weight: 600;
 }
-/* 内联编辑（用户反馈 #2）：只出光标，不加编辑框——focus/hover 均无描边 */
+/* 内联编辑（v11.2）：EditableText 裸壳——只出光标无任何框线；纯文本编辑不产生富文本结构 */
 .review-editable {
   cursor: text;
   outline: none;
+  white-space: pre-wrap;
 }
 .review-editable:focus {
   outline: none;
