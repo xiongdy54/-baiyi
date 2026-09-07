@@ -228,12 +228,13 @@ export function CardFace({
   if (card.cardType === "cloze") {
     const parsed = parseCloze(frontText);
     const ord = parsed.ords[card.cardOrd] ?? parsed.ords[0];
+    // 背面问题区与正面共用同一 render(ord)——翻面前后逐字相同，挖空始终遮蔽（用户需求）
+    const questionText = parsed.render(ord);
     return (
       <div className="review-face" onClick={!showBack ? onReveal : undefined}>
-        {/* 问题部分：背面与正面逐字相同（挖空保持遮蔽）；contextPrefix 在可编辑区之外 */}
         <div className="review-front">
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
-          {md(parsed.render(showBack ? null : ord))}
+          {md(questionText)}
         </div>
         {showBack && (
           <div className="review-back">
