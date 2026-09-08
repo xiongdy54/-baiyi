@@ -4,9 +4,10 @@ import { eventBus } from "../lib/eventbus";
 
 interface Props {
   onOpen: (extractId: string) => void;
+  onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number }) => void;
 }
 
-export default function QueueView({ onOpen }: Props) {
+export default function QueueView({ onOpen, onJumpToDoc }: Props) {
   const [topics, setTopics] = useState<DueTopic[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -56,6 +57,23 @@ export default function QueueView({ onOpen }: Props) {
               <button onClick={(e) => handlePostpone(e, t.id)}>
                 推迟（下次 {Math.round(t.intervalDays * 1.6)} 天后）
               </button>
+              {onJumpToDoc && t.contextRef?.documentId && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // 保存摘录队列现场：返回时恢复滚动位置
+                    try {
+                      sessionStorage.setItem("queueSession", JSON.stringify({ scrollTop: window.scrollY }));
+                    } catch { /* 忽略 */ }
+                    onJumpToDoc(t.contextRef!.documentId!, {
+                      anchorText: t.contextRef!.anchorText || t.contentMarkdown,
+                      anchorRatio: t.contextRef!.anchorRatio
+                    });
+                  }}
+                >
+                  跳转原文 →
+                </button>
+              )}
               <button className="primary" onClick={() => onOpen(t.id)}>
                 打开阅读
               </button>

@@ -21,7 +21,7 @@ declare global {
 
 type View =
   | { name: "shelf" }
-  | { name: "reader"; itemId: string; doc: DocPayload; jumpAnchor?: { anchorText: string; anchorRatio?: number } }
+  | { name: "reader"; itemId: string; doc: DocPayload; jumpAnchor?: { anchorText: string; anchorRatio?: number }; returnTo?: "review" | "queue" }
   | { name: "queue" }
   | { name: "review" }
   | { name: "browse" }
@@ -160,7 +160,7 @@ export default function App() {
     });
   }, []);
 
-  // 需求2：复习卡「跳转原文」——documentId 反查书架条目，以锚点打开阅读器；返回按钮将回到复习
+  // 需求2：复习卡「跳转原文」——documentId 反查书架条目，以锚点打开阅读器；返回按钮回到来源页
   const handleJumpToDoc = useCallback(async (docId: string, anchor: { anchorText: string; anchorRatio?: number }) => {
     try {
       sessionStorage.setItem("reviewSession", JSON.stringify({ resume: true }));
@@ -168,7 +168,15 @@ export default function App() {
     const itemId = await libraryApi.getItemIdByDocumentId(docId);
     if (!itemId) return;
     const doc = await libraryApi.getDocument(itemId);
-    if (doc) setView({ name: "reader", itemId, doc, jumpAnchor: anchor });
+    if (doc) setView({ name: "reader", itemId, doc, jumpAnchor: anchor, returnTo: "review" });
+  }, []);
+
+  // 需求2（摘录版）：摘录队列「跳转原文」——返回按钮回到队列
+  const handleJumpToDocFromQueue = useCallback(async (docId: string, anchor: { anchorText: string; anchorRatio?: number }) => {
+    const itemId = await libraryApi.getItemIdByDocumentId(docId);
+    if (!itemId) return;
+    const doc = await libraryApi.getDocument(itemId);
+    if (doc) setView({ name: "reader", itemId, doc, jumpAnchor: anchor, returnTo: "queue" });
   }, []);
 
   if (!loaded) {
@@ -207,13 +215,13 @@ export default function App() {
         contextRef={{ documentId: view.doc.documentId }}
         jumpAnchor={view.jumpAnchor}
         sourceTitle={view.doc.title}
-        onBack={view.jumpAnchor ? () => setView({ name: "review" }) : backToShelf}
+        onBack={view.jumpAnchor ? () => setView({ name: view.returnTo ?? "review" } as View) : backToShelf}
         onProgress={handleDocProgress}
       />
     );
   } else if (view.name === "queue") {
     topTitle = "学习队列";
-    mainContent = <QueueView onOpen={openExtract} />;
+    mainContent = <QueueView onOpen={openExtract} onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "review") {
     topTitle = "复习";
     mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} />;

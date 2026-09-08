@@ -396,19 +396,24 @@ export default function Reader({
   // ---------- 摘录 ----------
   async function handleExtract(text: string) {
     const { readingWorkflow } = await import("../lib/readingWorkflow");
+    // 需求2：摘录同样记录选区锚点（跳转原文用）
+    rememberAnchor(text);
+    const ctx = enrichedContextRef();
     if (contextRef?.extractId) {
       await readingWorkflow.create({
         parentType: "extract",
         parentId: contextRef.extractId,
         documentId: contextRef.documentId || "",
-        contentMarkdown: text
+        contentMarkdown: text,
+        contextRef: ctx
       });
     } else if (contextRef?.documentId) {
       await readingWorkflow.create({
         parentType: "document",
         parentId: contextRef.documentId,
         documentId: contextRef.documentId,
-        contentMarkdown: text
+        contentMarkdown: text,
+        contextRef: ctx
       });
     }
     eventBus.emit("workflow/changed");

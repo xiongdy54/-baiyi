@@ -22,6 +22,7 @@ export interface DueTopic {
   docTitle: string;
   parentType: string;
   depth: number;
+  contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
 }
 
 export interface ExtractDetail extends DueTopic {
@@ -37,6 +38,7 @@ export interface ExtractInput {
   documentId: string;
   contentMarkdown: string;
   priority?: number;
+  contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
 }
 
 export interface ReadingWorkflowProvider {

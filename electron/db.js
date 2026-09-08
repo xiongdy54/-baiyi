@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS extracts (
   parent_id TEXT NOT NULL,
   document_id TEXT NOT NULL,
   content_markdown TEXT NOT NULL,
+  context_ref_json TEXT,
   priority INTEGER NOT NULL DEFAULT 50,
   topic_next_at INTEGER NOT NULL,
   interval_days REAL NOT NULL DEFAULT 1,
@@ -192,6 +193,12 @@ async function initDb() {
       [JSON.stringify({ state: "new", due: Date.now(), lapses: 0 })]
     );
   } catch { /* 表尚不存在等场景 */ }
+  // v12.3：extracts.context_ref_json（跳转原文锚点：anchorText/anchorRatio）
+  try {
+    db.run("ALTER TABLE extracts ADD COLUMN context_ref_json TEXT");
+  } catch {
+    /* 列已存在 */
+  }
   ensurePromptTemplates();
   persist();
 }
@@ -739,18 +746,19 @@ function queryAll(sql, params = []) {
   return rows;
 }
 
-function createExtract({ parentType, parentId, documentId, contentMarkdown, priority }) {
+function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef }) {
   const id = crypto.randomUUID();
   const now = Date.now();
   db.run(
-    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, priority, topic_next_at, interval_days, workflow_state_json, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, 0, 0)`,
+    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, topic_next_at, interval_days, workflow_state_json, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, 0, 0)`,
     [
       id,
       String(parentType),
       String(parentId),
       String(documentId),
       String(contentMarkdown),
+      contextRef ? JSON.stringify(contextRef) : null,
       Number(priority) || 50,
       now,
       now,
@@ -778,7 +786,7 @@ function parentChain(extract) {
 
 function listDueExtracts() {
   const rows = queryAll(
-    `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown, e.priority,
+    `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown, e.context_ref_json, e.priority,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
             li.title AS docTitle
      FROM extracts e
@@ -790,6 +798,7 @@ function listDueExtracts() {
   );
   return rows.map((r) => ({
     ...r,
+    contextRef: r.context_ref_json ? JSON.parse(r.context_ref_json) : null,
     depth: r.parent_type === "extract" ? parentChain(r).length + 1 : 1
   }));
 }
@@ -798,7 +807,7 @@ function getExtract(id) {
   const rows = queryAll(
     `SELECT e.id, e.parent_type AS parentType, e.parent_id AS parentId,
             e.document_id AS documentId, e.content_markdown AS contentMarkdown,
-            e.priority, e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays,
+            e.context_ref_json AS contextRefJson, e.priority, e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays,
             e.created_at AS createdAt, li.title AS docTitle
      FROM extracts e
      JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
