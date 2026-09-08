@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>顶栏导航概念设计 ×5</title>
+<style>
+  :root {
+    --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+    --accent:#002FA7; --accent-on:#ffffff; --accent-soft:rgba(0,47,167,.08);
+    --sans:"Inter","Segoe UI",system-ui,"Microsoft YaHei",sans-serif;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background:#e8e8e6; font-family:var(--sans); padding: var(--sp-8); display:flex; flex-direction:column; gap: var(--sp-8); }
+  .plate { background:var(--paper); outline:1px solid var(--grey-2); }
+  .plate-label { font-size:12px; font-weight:600; letter-spacing:.1em; color:var(--grey-3); margin: 0 0 var(--sp-2) 2px; text-transform:uppercase; }
+  .plate-note { font-size:12px; color:var(--grey-3); margin: var(--sp-2) 0 0 2px; }
+  /* 每块版面里放一个示意「当前页标题区」帮助判断层级 */
+  .demo-body { padding: var(--sp-6) var(--sp-8); }
+  .demo-kicker { font-size:11px; font-weight:600; letter-spacing:.14em; color:var(--grey-3); text-transform:uppercase; }
+  .demo-title { font-size:26px; font-weight:300; letter-spacing:-.02em; margin-top:2px; }
+
+  /* ===== A 直角文字导航（当前实现方向） ===== */
+  .tb-a { height:48px; display:flex; align-items:center; padding:0 var(--sp-4); gap: var(--sp-2); }
+  .tb-a .nav { display:flex; gap: var(--sp-1); }
+  .tb-a button { height:32px; padding:0 12px; border:none; background:transparent; font:500 13px var(--sans); color:var(--grey-3); cursor:pointer; }
+  .tb-a button.on { color:var(--accent); font-weight:600; box-shadow: inset 0 -2px 0 var(--accent); }
+  .tb-a .crumb { margin-left:var(--sp-3); padding-left:var(--sp-3); border-left:1px solid var(--grey-2); font-size:12px; color:var(--grey-3); }
+  .tb-a .right { margin-left:auto; display:flex; gap:var(--sp-2); }
+  .tb-a .win { display:flex; gap:var(--sp-2); }
+  .tb-a .win span { width:24px; height:24px; display:inline-block; background:var(--grey-1); }
+
+  /* ===== B 下划线式 + 大间距（出版感） ===== */
+  .tb-b { height:56px; display:flex; align-items:stretch; padding:0 var(--sp-8); gap: var(--sp-6); }
+  .tb-b button { border:none; background:transparent; font:400 13px var(--sans); letter-spacing:.06em; color:var(--grey-3); cursor:pointer; padding:0 var(--sp-2); }
+  .tb-b button.on { color:var(--ink); font-weight:600; box-shadow: inset 0 -2px 0 var(--ink); }
+  .tb-b .right { margin-left:auto; display:flex; align-items:center; gap:var(--sp-2); }
+  .tb-b .win { display:flex; align-items:center; gap:var(--sp-2); }
+  .tb-b .win span { width:24px; height:24px; display:inline-block; background:var(--grey-1); }
+
+  /* ===== C 左侧竖导航（顶栏只留窗控） ===== */
+  .shell-c { display:flex; min-height:220px; }
+  .side-c { width:160px; border-right:1px solid var(--grey-2); padding:var(--sp-6) 0; display:flex; flex-direction:column; gap:2px; }
+  .side-c .brandline { font-size:11px; font-weight:600; letter-spacing:.14em; color:var(--ink); padding:0 var(--sp-4) var(--sp-4); }
+  .side-c button { text-align:left; border:none; background:transparent; font:500 13px var(--sans); color:var(--grey-3); padding:8px var(--sp-4); cursor:pointer; }
+  .side-c button.on { color:var(--accent); background:var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+  .main-c { flex:1; }
+  .tb-c { height:48px; display:flex; align-items:center; justify-content:flex-end; padding:0 var(--sp-4); gap:var(--sp-2); border-bottom:1px solid var(--grey-2); }
+  .tb-c .win { display:flex; gap:var(--sp-2); }
+  .tb-c .win span { width:24px; height:24px; display:inline-block; background:var(--grey-1); }
+
+  /* ===== D 底部导航（顶栏极简） ===== */
+  .shell-d { display:flex; flex-direction:column; min-height:260px; }
+  .tb-d { height:40px; display:flex; align-items:center; justify-content:space-between; padding:0 var(--sp-4); border-bottom:1px solid var(--grey-2); }
+  .tb-d .path { font-size:12px; color:var(--grey-3); }
+  .tb-d .win { display:flex; gap:var(--sp-2); }
+  .tb-d .win span { width:24px; height:24px; display:inline-block; background:var(--grey-1); }
+  .demo-d { flex:1; }
+  .dock-d { border-top:1px solid var(--grey-2); display:flex; justify-content:center; gap:var(--sp-2); padding: var(--sp-2) 0; }
+  .dock-d button { border:1px solid var(--grey-2); background:var(--paper); font:500 13px var(--sans); color:var(--grey-3); padding:6px 20px; cursor:pointer; }
+  .dock-d button.on { border-color:var(--accent); color:var(--accent); font-weight:600; }
+
+  /* ===== E 单字层级：墨色大导航在页内（顶栏只剩窗控） ===== */
+  .shell-e { min-height:260px; }
+  .tb-e { height:40px; display:flex; align-items:center; justify-content:flex-end; padding:0 var(--sp-4); gap:var(--sp-2); }
+  .tb-e .win { display:flex; gap:var(--sp-2); }
+  .tb-e .win span { width:24px; height:24px; display:inline-block; background:var(--grey-1); }
+  .page-e { padding: var(--sp-8); display:flex; gap: var(--sp-8); }
+  .page-e .wordnav { display:flex; flex-direction:column; gap: var(--sp-2); min-width:120px; }
+  .page-e .wordnav button { text-align:left; border:none; background:transparent; font:300 22px/1.2 var(--sans); letter-spacing:-.02em; color:var(--grey-2); cursor:pointer; padding:0; }
+  .page-e .wordnav button.on { color:var(--ink); }
+  .page-e .wordnav button.on::after { content:""; display:block; width:24px; height:2px; background:var(--accent); margin-top:4px; }
+</style>
+</head>
+<body>
+
+<div>
+  <p class="plate-label">Concept A — 顶栏内文字导航（下划线高亮）</p>
+  <div class="plate">
+    <div class="tb-a">
+      <div class="nav">
+        <button class="on">书架</button><button>队列</button><button>复习</button><button>卡片</button><button>数据</button>
+      </div>
+      <span class="crumb">复习 · 本轮 3 张</span>
+      <div class="right"><div class="win"><span></span><span></span><span></span></div></div>
+    </div>
+    <div class="demo-body"><div class="demo-kicker">REVIEW</div><div class="demo-title">复习</div></div>
+  </div>
+  <p class="plate-note">改动最小：图标换文字，位置仍在顶栏左侧；当前项 = accent 文字 + 2px 底线。面包屑补充上下文。</p>
+</div>
+
+<div>
+  <p class="plate-label">Concept B — 加宽顶栏 · 字距拉开（编辑部风）</p>
+  <div class="plate">
+    <div class="tb-b">
+      <button class="on">书架</button><button>队列</button><button>复习</button><button>卡片</button><button>数据</button>
+      <div class="right"><div class="win"><span></span><span></span><span></span></div></div>
+    </div>
+    <div class="demo-body"><div class="demo-kicker">REVIEW</div><div class="demo-title">复习</div></div>
+  </div>
+  <p class="plate-note">顶栏加高至 56px、导航字距拉开、当前项用墨色 + 底线（不用 accent），更像书脊目录；最克制。</p>
+</div>
+
+<div>
+  <p class="plate-label">Concept C — 左侧竖导航（顶栏只留窗控）</p>
+  <div class="plate">
+    <div class="shell-c">
+      <aside class="side-c">
+        <div class="brandline">渐进阅读</div>
+        <button>书架</button><button>队列</button><button class="on">复习</button><button>卡片</button><button>数据</button>
+      </aside>
+      <div class="main-c">
+        <div class="tb-c"><div class="win"><span></span><span></span><span></span></div></div>
+        <div class="demo-body"><div class="demo-kicker">REVIEW</div><div class="demo-title">复习</div></div>
+      </div>
+    </div>
+  </div>
+  <p class="plate-note">经典工具布局：左侧 160px 竖导航（accent 软底 + 左缘条），顶栏只剩窗控按钮。阅读器宽度略减。</p>
+</div>
+
+<div>
+  <p class="plate-label">Concept D — 底部分段导航（顶栏只剩路径 + 窗控）</p>
+  <div class="plate">
+    <div class="shell-d">
+      <div class="tb-d"><span class="path">复习</span><div class="win"><span></span><span></span><span></span></div></div>
+      <div class="demo-d demo-body"><div class="demo-kicker">REVIEW</div><div class="demo-title">复习</div></div>
+      <div class="dock-d">
+        <button>书架</button><button>队列</button><button class="on">复习</button><button>卡片</button><button>数据</button>
+      </div>
+    </div>
+  </div>
+  <p class="plate-note">顶栏最干净（只剩当前位置与窗控）；导航固定底部居中，描边式分段按钮，当前项 accent 描边。</p>
+</div>
+
+<div>
+  <p class="plate-label">Concept E — 页内巨字导航（Display 级，顶栏只剩窗控）</p>
+  <div class="plate">
+    <div class="shell-e">
+      <div class="tb-e"><div class="win"><span></span><span></span><span></span></div></div>
+      <div class="page-e">
+        <div class="wordnav">
+          <button>书架</button><button>队列</button><button class="on">复习</button><button>卡片</button><button>数据</button>
+        </div>
+        <div style="flex:1">
+          <div class="demo-kicker">REVIEW</div>
+          <div class="demo-title">复习</div>
+          <div style="margin-top:16px; font-size:14px; color:var(--grey-3); max-width:520px;">当前页内容区……</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="plate-note">最具瑞士海报感：导航是页内 22px 细体大字（当前项墨色 + accent 短线），工作区左移。视觉最强，占横向空间最多。</p>
+</div>
+
+</body>
+</html>

@@ -34,13 +34,7 @@ export default function Bookshelf({ onOpenBook }: Props) {
 
   return (
     <section className="bookshelf">
-      <header className="page-header">
-        <div>
-          <div className="page-kicker">Library</div>
-          <h1 className="page-title">书架</h1>
-        </div>
-        <span className="page-count mono">{items.length} 本</span>
-      </header>
+      <div className="review-count mono">{items.length} 本</div>
       {items.length === 0 ? (
         <div className="empty-state">
           <div className="empty-deco">

@@ -6,6 +6,7 @@ import QueueView from "./components/QueueView";
 import ReviewView from "./components/ReviewView";
 import CardBrowser from "./components/CardBrowser";
 import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
+import Dashboard from "./components/dashboard/Dashboard";
 import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
 import { libraryApi, type DocPayload } from "./lib/library";
@@ -20,10 +21,11 @@ declare global {
 
 type View =
   | { name: "shelf" }
-  | { name: "reader"; itemId: string; doc: DocPayload }
+  | { name: "reader"; itemId: string; doc: DocPayload; jumpAnchor?: { anchorText: string; anchorRatio?: number } }
   | { name: "queue" }
   | { name: "review" }
   | { name: "browse" }
+  | { name: "stats" }
   | { name: "extractReader"; extractId: string };
 
 export default function App() {
@@ -158,6 +160,17 @@ export default function App() {
     });
   }, []);
 
+  // 需求2：复习卡「跳转原文」——documentId 反查书架条目，以锚点打开阅读器；返回按钮将回到复习
+  const handleJumpToDoc = useCallback(async (docId: string, anchor: { anchorText: string; anchorRatio?: number }) => {
+    try {
+      sessionStorage.setItem("reviewSession", JSON.stringify({ resume: true }));
+    } catch { /* sessionStorage 不可用时跳转仍生效，只是不恢复现场 */ }
+    const itemId = await libraryApi.getItemIdByDocumentId(docId);
+    if (!itemId) return;
+    const doc = await libraryApi.getDocument(itemId);
+    if (doc) setView({ name: "reader", itemId, doc, jumpAnchor: anchor });
+  }, []);
+
   if (!loaded) {
     return (
       <div className="app-loading">
@@ -189,10 +202,12 @@ export default function App() {
       <Reader
         title={view.doc.title}
         markdown={view.doc.markdown}
+        itemId={view.itemId}
         initialRatio={p}
         contextRef={{ documentId: view.doc.documentId }}
+        jumpAnchor={view.jumpAnchor}
         sourceTitle={view.doc.title}
-        onBack={backToShelf}
+        onBack={view.jumpAnchor ? () => setView({ name: "review" }) : backToShelf}
         onProgress={handleDocProgress}
       />
     );
@@ -201,16 +216,20 @@ export default function App() {
     mainContent = <QueueView onOpen={openExtract} />;
   } else if (view.name === "review") {
     topTitle = "复习";
-    mainContent = <ReviewView />;
+    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "browse") {
     topTitle = "卡片浏览";
     mainContent = <CardBrowser />;
+  } else if (view.name === "stats") {
+    topTitle = "统计数据";
+    mainContent = <Dashboard />;
   } else if (view.name === "extractReader") {
     topTitle = "摘录";
     mainContent = extractDetail ? (
       <Reader
         title="摘录"
         markdown={extractDetail.contentMarkdown}
+        itemId={extractDetail.documentId}
         contextLabel={
           `来自《${extractDetail.docTitle}》` +
           (extractDetail.depth > 1 ? ` · 第${extractDetail.depth}层摘录` : "")
@@ -238,65 +257,28 @@ export default function App() {
         </div>
       )}
       <header className="topbar">
-        {view.name !== "shelf" ? (
-          <>
+        {/* 文字主导航（v12.1）：常驻左侧，当前项 accent 高亮；书架视图不再渲染品牌字块 */}
+        <nav className="topbar-nav">
+          {([
+            { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
+            { key: "queue", label: "队列", match: (n: string) => n === "queue" || n === "extractReader" },
+            { key: "review", label: "复习", match: (n: string) => n === "review" },
+            { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
+            { key: "stats", label: "数据", match: (n: string) => n === "stats" }
+          ] as const).map((item) => (
             <button
-              className="icon-btn"
-              title="返回"
-              onClick={view.name === "extractReader" ? () => setView({ name: "queue" }) : backToShelf}
+              key={item.key}
+              className={`nav-item${item.match(view.name) ? " active" : ""}`}
+              onClick={() => setView({ name: item.key } as View)}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m12 19-7-7 7-7" />
-                <path d="M19 12H5" />
-              </svg>
+              {item.label}
             </button>
-            <span className="topbar-title">{topTitle}</span>
-          </>
-        ) : (
-          <div className="brand">
-            <span className="brand-mark" />
-            <span className="brand-name">渐进阅读</span>
-            <span className="brand-sub">INCREMENTAL READING</span>
-          </div>
-        )}
+          ))}
+        </nav>
+        {view.name !== "shelf" && <span className="topbar-title">{topTitle}</span>}
         <div className="topbar-right">
-          <button
-            className={`icon-btn${view.name === "review" ? " icon-btn-active" : ""}`}
-            title="复习（连续刷题）"
-            onClick={() => setView(view.name === "review" ? { name: "shelf" } : { name: "review" })}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 4h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z" />
-              <path d="M22 4h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z" />
-            </svg>
-          </button>
-          <button
-            className={`icon-btn${view.name === "browse" ? " icon-btn-active" : ""}`}
-            title="卡片浏览（到期 / 记忆难点）"
-            onClick={() => setView(view.name === "browse" ? { name: "shelf" } : { name: "browse" })}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="4" width="18" height="16" rx="1" />
-              <line x1="3" y1="9" x2="21" y2="9" />
-              <line x1="9" y1="9" x2="9" y2="20" />
-            </svg>
-          </button>
-          <button
-            className={`icon-btn${view.name === "queue" || view.name === "extractReader" ? " icon-btn-active" : ""}`}
-            title="学习队列"
-            onClick={() => setView(view.name === "queue" ? { name: "shelf" } : { name: "queue" })}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="8" y1="6" x2="21" y2="6" />
-              <line x1="8" y1="12" x2="21" y2="12" />
-              <line x1="8" y1="18" x2="21" y2="18" />
-              <line x1="3" y1="6" x2="3.01" y2="6" />
-              <line x1="3" y1="12" x2="3.01" y2="12" />
-              <line x1="3" y1="18" x2="3.01" y2="18" />
-            </svg>
-          </button>
           <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>

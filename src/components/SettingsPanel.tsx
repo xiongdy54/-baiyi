@@ -219,8 +219,7 @@ function AISection() {
 
   return (
     <section className="settings-section" id="sec-ai">
-      <h3>AI 服务（制卡 / 解释 / 诊断）</h3>
-      <p className="form-hint">制卡、解释、Leech 诊断共用此配置。Key 仅存本地加密存储。</p>
+      <h3>AI 服务</h3>
 
       <div className="skin-list">
         {PRESET_OPTIONS.map((p) => (
@@ -249,24 +248,16 @@ function AISection() {
         <p className="form-hint">
           在{" "}
           <a href="https://bigmodel.cn/apikey/platform" target="_blank" rel="noreferrer">
-            智谱开放平台 → API Keys
+            智谱开放平台
           </a>{" "}
-          创建 Key。默认 <span className="mono">glm-4.7-flash</span> 是免费模型，可点「拉取模型列表」切换
-          <span className="mono"> glm-5.3</span> / <span className="mono">glm-5.3-flash</span> 等更强模型。
+          创建 Key。<span className="mono">glm-4.7-flash</span> 免费。
         </p>
       )}
 
       {cfg.preset === "local" && (
-        <div className="ai-local-guide">
-          <p className="form-hint">
-            本地方案推荐 <strong>Ollama</strong>：安装后运行 <span className="mono">ollama pull qwen3:8b</span>（约 5GB，
-            8GB 显存最优解），保持 Ollama 运行即可。LM Studio 用户：加载模型后在开发者页开启本地服务，端口改 1234。
-          </p>
-          <p className="form-hint">
-            模型选择参考（RTX 4060 Laptop 8GB）：制卡质量优先 <span className="mono">qwen3:8b</span>（5.2GB）；
-            速度优先 <span className="mono">qwen3:4b</span>（2.5GB）；GLM 系 <span className="mono">glm4:9b</span>（5.5GB）。
-          </p>
-        </div>
+        <p className="form-hint">
+          需本机运行 Ollama（默认端口 11434）或 LM Studio（端口 1234）。
+        </p>
       )}
 
       <div className="ai-fields">
@@ -346,19 +337,16 @@ function AISection() {
               </div>
             )}
           </div>
-          <p className="form-hint">
-            可直接手输模型名（如 LM Studio 的 <span className="mono">qwen/qwen3.5-9b</span>）；拉取列表后可点选。
-          </p>
         </div>
 
         {/glm-5\.[2-9]/i.test(cfg.model) && (
           <div className="form-field">
-            <label>思考强度（仅 GLM-5.2+ 支持；GLM-5.3 系思考无法关闭）</label>
+            <label>思考强度（低更快；仅 GLM-5.2+ 生效）</label>
             <div className="seg-tabs">
               {[
-                { id: "low", label: "低（快）" },
+                { id: "low", label: "低" },
                 { id: "high", label: "中" },
-                { id: "max", label: "强（慢，默认档）" }
+                { id: "max", label: "强" }
               ].map((o) => (
                 <button
                   key={o.id}
@@ -369,9 +357,6 @@ function AISection() {
                 </button>
               ))}
             </div>
-            <p className="form-hint">
-              低 = 最轻推理，制卡速度可快数倍；强 = 模型深度思考（你之前遇到的近 5 分钟耗时即此档）。其他模型（DeepSeek/Qwen/Gemini 等）不发送此参数。
-            </p>
           </div>
         )}
 
@@ -402,9 +387,6 @@ function AISection() {
 
       {(busy === "test" || busy === "models" || busy === "save") && <SkeletonBlock h={32} />}
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
-      {cfg.preset !== "local" && cfg.hasKey && (
-        <p className="form-hint">Key 已本地加密保存。改动 Key / URL / 模型后请点「保存配置」。</p>
-      )}
     </section>
   );
 }
@@ -483,21 +465,13 @@ function FSRSSection() {
   return (
     <section className="settings-section" id="sec-fsrs">
       <h3>FSRS 参数优化</h3>
-      <p className="form-hint">
-        根据你的真实复习记录（评分与间隔）训练出最适合你记忆规律的 FSRS
-        权重，替代默认参数，让调度预测更准。训练在本机完成，数据不上传。建议积累{" "}
-        <span className="mono">400+</span> 条复习记录后再优化。
-      </p>
-
       {stats && (
         <p className="form-hint">
-          当前复习记录：<span className="mono">{stats.reviewCount}</span> 条（{stats.cardCount} 张卡）
-          {stats.enough ? " — 数据量充足 ✓" : ` — 少于建议值 ${stats.minRecommended}，训练结果可能不可靠`}
+          复习记录 <span className="mono">{stats.reviewCount}</span> 条
+          {stats.enough ? "，可优化" : `（建议 ${stats.minRecommended}+ 条后再优化）`}
         </p>
       )}
-      <p className="form-hint">
-        当前参数：{appliedW ? "优化权重（已应用）" : "FSRS 默认参数"}
-      </p>
+      <p className="form-hint">当前参数：{appliedW ? "优化权重" : "默认参数"}</p>
 
       <div className="settings-row" style={{ flexWrap: "wrap" }}>
         <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleTrain}>
@@ -510,15 +484,15 @@ function FSRSSection() {
         )}
         {appliedW && (
           <button className="btn btn-outline btn-sm" onClick={handleReset}>
-            恢复默认参数
+            恢复默认
           </button>
         )}
       </div>
 
       {metrics && (
         <p className="form-hint">
-          训练质量：logLoss <span className="mono">{metrics.logLoss.toFixed(4)}</span> · RMSE{" "}
-          <span className="mono">{metrics.rmseBins.toFixed(4)}</span>（越低越准）
+          logLoss <span className="mono">{metrics.logLoss.toFixed(4)}</span> · RMSE{" "}
+          <span className="mono">{metrics.rmseBins.toFixed(4)}</span>
         </p>
       )}
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}

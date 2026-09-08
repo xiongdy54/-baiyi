@@ -242,6 +242,37 @@ body.has-skin .topbar { background: transparent; }
 .icon-btn svg { display: block; }
 
 .win-controls { display: flex; margin-left: var(--sp-2); }
+
+/* 顶栏文字主导航（v12.1）：Meta 档小字 + accent 高亮当前项；不与右侧窗控拥挤 */
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.topbar-nav .nav-item {
+  height: var(--sp-8);
+  padding: 0 var(--sp-3);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+.topbar-nav .nav-item:hover { background: var(--grey-1); color: var(--text-primary); }
+.topbar-nav .nav-item.active {
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.topbar-title {
+  margin-left: var(--sp-4);
+  padding-left: var(--sp-4);
+  border-left: 1px solid var(--grey-2);
+  font-size: var(--fs-secondary);
+  color: var(--text-helper);
+}
 .win-controls .icon-btn { width: 40px; }
 .win-controls .win-close:hover { background: var(--error); color: #ffffff; }
 
@@ -1057,6 +1088,35 @@ body.theme-dark .modal-panel {
   flex-direction: column;
   gap: 0;
 }
+/* 页内唯一保留的状态小字：右上角计数（导航高亮已表达当前页，不再重复标题） */
+.review-count {
+  align-self: flex-end;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-helper);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: var(--sp-6);
+}
+.queue-wrap > .review-count,
+.bookshelf > .review-count {
+  align-self: flex-start;
+  padding: var(--sp-4) var(--sp-8) 0;
+}
+/* 复习卡「跳转原文」：Meta 档文字按钮，accent 色，与 meta 同行 */
+.review-jump {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--accent);
+  padding: 0;
+  margin-right: var(--sp-2);
+}
+.review-jump:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* 删除按钮：与同排工具一致，仅悬停时以 error 色提示破坏性 */
+.review-delete:hover { color: var(--error); border-color: var(--error); }
 /* 会话页头：kicker 在标题上方（swiss 对齐法则），左对齐；与卡面留出 48px 呼吸 */
 .review-session-head {
   display: flex;

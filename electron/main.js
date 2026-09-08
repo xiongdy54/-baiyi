@@ -8,6 +8,7 @@ const {
   createFromEpub,
   deleteItem,
   getDocument,
+  getItemIdByDocumentId,
   updateProgress,
   createExtract,
   listDueExtracts,
@@ -116,6 +117,7 @@ ipcMain.handle("library:createFromEpub", (_e, payload) => {
 });
 
 ipcMain.handle("library:doc", (_e, itemId) => getDocument(String(itemId)));
+ipcMain.handle("library:itemByDoc", (_e, docId) => getItemIdByDocumentId(String(docId)));
 
 ipcMain.handle("library:updateProgress", (_e, itemId, progress) => updateProgress(String(itemId), progress));
 

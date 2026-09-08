@@ -28,13 +28,7 @@ export default function QueueView({ onOpen }: Props) {
 
   return (
     <div className="queue-wrap">
-      <header className="page-header">
-        <div>
-          <div className="page-kicker">Review Queue</div>
-          <h1 className="page-title">学习队列</h1>
-        </div>
-        <span className="page-count mono">{topics.length} 条待读</span>
-      </header>
+      <div className="review-count mono">{topics.length} 条待读</div>
       {loaded && topics.length === 0 && (
         <div className="empty-state">
           <div className="empty-deco">

@@ -310,7 +310,7 @@ export interface CardRecord {
   frontMarkdown: string;
   backMarkdown: string;
   contextPrefix: string | null;
-  contextRef: { documentId?: string; extractId?: string } | null;
+  contextRef: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
   mnemonic: string | null;
   example: string | null;
   sourceRef: { title?: string; url?: string | null; page?: number | null } | null;

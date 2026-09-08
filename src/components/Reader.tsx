@@ -4,14 +4,18 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { cardGenerator, lintCard, cardsApi, similaritySearch, type CardDraft } from "../lib/cards";
+import { sanitizeDomain } from "../lib/udc";
 import { eventBus } from "../lib/eventbus";
+import { readingStats } from "../lib/stats";
 
 interface Props {
   title: string;
   markdown: string;
+  itemId?: string;
   initialRatio?: number;
   contextLabel?: string;
-  contextRef?: { documentId?: string; extractId?: string } | null;
+  contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
+  jumpAnchor?: { anchorText: string; anchorRatio?: number } | null;
   sourceTitle?: string;
   onBack: () => void;
   onProgress?: (ratio: number, lastText: string) => void;
@@ -22,9 +26,11 @@ type SelectionAction = "manual" | "ai-cards" | null;
 export default function Reader({
   title,
   markdown,
+  itemId,
   initialRatio = 0,
   contextLabel,
   contextRef,
+  jumpAnchor,
   sourceTitle,
   onBack,
   onProgress
@@ -52,6 +58,20 @@ export default function Reader({
   } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
+  // 需求2：制卡时记录选区锚点（文本 + 当时刻度），随 contextRef 落库，供复习卡「跳转原文」
+  const anchorRef = useRef<{ anchorText: string; anchorRatio: number } | null>(null);
+  function rememberAnchor(text: string) {
+    const el = scrollRef.current;
+    const denom = el ? el.scrollHeight - el.clientHeight : 0;
+    anchorRef.current = {
+      anchorText: text.slice(0, 60),
+      anchorRatio: denom > 0 && el ? Math.min(1, el.scrollTop / denom) : 0
+    };
+  }
+  function enrichedContextRef() {
+    return anchorRef.current ? { ...(contextRef || {}), ...anchorRef.current } : contextRef || null;
+  }
+
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast(null), 1800);
@@ -71,7 +91,37 @@ export default function Reader({
     if (restoredRef.current) return;
     restoredRef.current = true;
     const el = scrollRef.current;
-    if (!el || initialRatio <= 0) return;
+    if (!el) return;
+    // 优先锚点跳转（从复习卡「跳转原文」进入）：定位到含 anchorText 的块并高亮一下
+    const anchor = jumpAnchor?.anchorText || contextRef?.anchorText;
+    if (anchor) {
+      requestAnimationFrame(() => {
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        let node: Node | null;
+        while ((node = walker.nextNode())) {
+          const idx = (node.textContent || "").indexOf(anchor.slice(0, 24));
+          if (idx >= 0) {
+            const range = document.createRange();
+            range.setStart(node, idx);
+            range.collapse(true);
+            const rect = range.getBoundingClientRect();
+            el.scrollTop += rect.top - el.getBoundingClientRect().top - el.clientHeight * 0.3;
+            // 短暂高亮锚点块，帮助定位视线
+            let block: HTMLElement | null = node.parentElement;
+            while (block && !/^P$|^(H[1-3])$|^LI$|^BLOCKQUOTE$/.test(block.tagName)) block = block.parentElement;
+            if (block) {
+              block.style.background = "rgba(0, 47, 167, 0.08)";
+              window.setTimeout(() => (block!.style.background = ""), 1600);
+            }
+            return;
+          }
+        }
+        // 找不到锚点文本时退回比例定位
+        if (initialRatio > 0) el.scrollTop = initialRatio * (el.scrollHeight - el.clientHeight);
+      });
+      return;
+    }
+    if (initialRatio <= 0) return;
     requestAnimationFrame(() => {
       el.scrollTop = initialRatio * (el.scrollHeight - el.clientHeight);
     });
@@ -82,9 +132,23 @@ export default function Reader({
     if (!el || !onProgress) return;
     const denom = el.scrollHeight - el.clientHeight;
     const ratio = denom > 0 ? Math.min(1, el.scrollTop / denom) : 0;
+    // 阅读字数统计：滚动停止时按"视口顶部对齐块"在 DOM 中的累计字符偏移记事件，
+    // 当日字数 = 相邻事件正增量之和（往回滚不计；跳回重读不产生负增量）
+    if (itemId) {
+      const all = Array.from(el.querySelectorAll<HTMLElement>("h1, h2, h3, p, li, blockquote"));
+      let charPos = 0;
+      for (let i = 0; i < all.length; i++) {
+        const rect = all[i].getBoundingClientRect();
+        if (rect.top >= -rect.height && rect.top < window.innerHeight * 0.4 && all[i].textContent?.trim()) {
+          charPos = all.slice(0, i).reduce((acc, b) => acc + (b.textContent?.length || 0), 0);
+          break;
+        }
+      }
+      void readingStats.addEvent(itemId, charPos);
+    }
     let lastText = "";
-    const blocks = el.querySelectorAll<HTMLElement>("h1, h2, h3, p, li, blockquote");
-    for (const b of blocks) {
+    const blocks2 = el.querySelectorAll<HTMLElement>("h1, h2, h3, p, li, blockquote");
+    for (const b of blocks2) {
       const rect = b.getBoundingClientRect();
       if (rect.top >= 0 && rect.top < window.innerHeight * 0.4 && b.textContent?.trim()) {
         lastText = b.textContent.trim().slice(0, 140);
@@ -92,7 +156,7 @@ export default function Reader({
       }
     }
     onProgress(ratio, lastText);
-  }, [onProgress]);
+  }, [onProgress, itemId]);
 
   const saveProgressRef = useRef(saveProgress);
   useEffect(() => {
@@ -148,7 +212,7 @@ export default function Reader({
       frontMarkdown: front,
       backMarkdown: back,
       clozeOrds: [],
-      contextRef: contextRef || null,
+      contextRef: enrichedContextRef(),
       sourceRef: sourceTitle ? { title: sourceTitle } : null,
       priority,
       tags: []
@@ -252,13 +316,14 @@ export default function Reader({
       backMarkdown: d.back || "",
       clozeOrds: [],
       contextPrefix: d.contextPrefix || null,
-      contextRef: contextRef || null,
+      contextRef: enrichedContextRef(),
       mnemonic: d.mnemonic || null,
       example: d.example || null,
       sourceRef: d.sourceRef || (sourceTitle ? { title: sourceTitle } : null),
       dateStamp: d.dateStamp || null,
       priority: d.prioritySuggestion ?? 50,
       tags: [],
+      domain: d.domain ?? [],
       knowledgePointId: d.knowledgePointId || null,
       generatedBy: "ai"
     };
@@ -364,8 +429,8 @@ export default function Reader({
 
           {selection && (
             <div className="selection-menu" style={{ left: selection.x, top: Math.max(8, selection.y) }}>
-              <button onClick={() => { setManualOpen(true); clearSelection(); }}>制卡</button>
-              <button onClick={() => { const t = selection.text; clearSelection(); runAICards(t); }}>AI 制卡</button>
+              <button onClick={() => { rememberAnchor(selection.text); setManualOpen(true); clearSelection(); }}>制卡</button>
+              <button onClick={() => { rememberAnchor(selection.text); const t = selection.text; clearSelection(); runAICards(t); }}>AI 制卡</button>
               <button onClick={() => { const t = selection.text; clearSelection(); runExplain(t, null); }}>AI 解释</button>
               <button onClick={() => { const t = selection.text; clearSelection(); handleExtract(t); }}>摘录</button>
             </div>
@@ -671,6 +736,7 @@ function AIPanel({
                 back: String(rawDraft?.back ?? ""),
                 cloze: rawDraft?.cloze ? String(rawDraft.cloze) : null,
                 contextPrefix: rawDraft?.contextPrefix ? String(rawDraft.contextPrefix) : undefined,
+                domain: sanitizeDomain((rawDraft as CardDraft)?.domain),
                 ruleNotes: toList((rawDraft as CardDraft)?.ruleNotes),
                 warnings: toList((rawDraft as CardDraft)?.warnings)
               };

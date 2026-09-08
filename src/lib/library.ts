@@ -8,6 +8,7 @@ declare global {
       pickEpub: () => Promise<{ name: string; path: string; data: Uint8Array } | null>;
       remove: (id: string) => Promise<boolean>;
       getDocument: (id: string) => Promise<unknown>;
+      getItemIdByDocumentId: (docId: string) => Promise<string | null>;
       updateProgress: (id: string, progress: unknown) => Promise<boolean>;
     };
   }
@@ -59,6 +60,9 @@ export const libraryApi = {
   async getDocument(itemId: string): Promise<DocPayload | null> {
     if (!window.libraryAPI) return null;
     return (await window.libraryAPI.getDocument(itemId)) as DocPayload | null;
+  },
+  async getItemIdByDocumentId(docId: string): Promise<string | null> {
+    return (await window.libraryAPI?.getItemIdByDocumentId(docId)) ?? null;
   },
   async updateProgress(itemId: string, progress: ReadingProgress): Promise<void> {
     await window.libraryAPI?.updateProgress(itemId, progress);

@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   pickEpub: () => ipcRenderer.invoke("library:pickEpub"),
   remove: (id) => ipcRenderer.invoke("library:delete", id),
   getDocument: (id) => ipcRenderer.invoke("library:doc", id),
+  getItemIdByDocumentId: (docId) => ipcRenderer.invoke("library:itemByDoc", docId),
   updateProgress: (id, progress) => ipcRenderer.invoke("library:updateProgress", id, progress)
 });
 

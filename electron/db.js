@@ -710,6 +710,16 @@ function getDocument(itemId) {
   return row;
 }
 
+// v12.2：复习卡「跳转原文」——documentId 反查书架条目 id
+function getItemIdByDocumentId(documentId) {
+  const rows = queryAll(
+    `SELECT li.id FROM documents d JOIN library_items li ON li.id = d.library_item_id
+     WHERE d.id = ? AND d.is_deleted = 0 AND li.is_deleted = 0`,
+    [documentId]
+  );
+  return rows[0]?.id || null;
+}
+
 function updateProgress(itemId, progress) {
   db.run("UPDATE library_items SET progress_json = ?, updated_at = ? WHERE id = ?", [
     JSON.stringify(progress ?? {}),
@@ -1101,6 +1111,7 @@ module.exports = {
   listDueCards,
   listAllCards,
   listAllReviewLogs,
+  getItemIdByDocumentId,
   deleteCard,
   saveReview,
   saveSkip,

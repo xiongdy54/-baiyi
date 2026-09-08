@@ -29,13 +29,7 @@ export default function CardBrowser() {
 
   return (
     <div className="queue-wrap">
-      <header className="page-header">
-        <div>
-          <div className="page-kicker">Cards</div>
-          <h1 className="page-title">卡片浏览</h1>
-        </div>
-        <span className="page-count mono">{dueCards.length} 张到期</span>
-      </header>
+      <div className="review-count mono">{dueCards.length} 张到期</div>
 
       <div className="seg-tabs" style={{ padding: "0 var(--sp-8)" }}>
         <button className={tab === "due" ? "active" : ""} onClick={() => setTab("due")}>
