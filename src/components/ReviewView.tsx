@@ -76,7 +76,7 @@ export default function ReviewView({
   }, [current]);
 
   // 内联编辑落库（§8.2.7 渐进措辞优化）：只改文案，不动 FSRS 状态（updateCard 保留 fsrs 字段）
-  async function handleEdit(patch: { frontMarkdown?: string; backMarkdown?: string }) {
+  async function handleEdit(patch: { frontMarkdown?: string; backMarkdown?: string; noteText?: string }) {
     if (!current) return;
     const next = { ...current, ...patch };
     setCurrent(next);

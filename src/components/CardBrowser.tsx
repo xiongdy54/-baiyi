@@ -172,7 +172,7 @@ export function CardFace({
   card: CardRecord;
   showBack: boolean;
   onReveal: () => void;
-  onEdit?: (patch: { frontMarkdown?: string; backMarkdown?: string }) => Promise<void> | void;
+  onEdit?: (patch: { frontMarkdown?: string; backMarkdown?: string; noteText?: string }) => Promise<void> | void;
 }) {
   const md = (s: string) => (
     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
@@ -224,11 +224,25 @@ export function CardFace({
     const ord = parsed.ords[card.cardOrd] ?? parsed.ords[0];
     // 背面问题区与正面共用同一 render(ord)——翻面前后逐字相同，挖空始终遮蔽（用户需求）
     const questionText = parsed.render(ord);
+    // 问题区编辑（v12.4）：翻面后可改。用户编辑的是显示文本（当前挖空为[…]），
+    // 落库时把[…]还原为原挖空语法，其余挖空按显示文本保留（若被改动则该挖空降级为普通文字）
+    const questionEditable = showBack && onEdit;
+    const commitQuestion = (t: string) => {
+      const edit = onEdit;
+      if (!edit) return;
+      const originalSyntax = frontText.match(new RegExp(`\\{\\{c${ord}::(.*?)(?:::(.*?))?\\}\\}`));
+      const restored = originalSyntax ? t.replace("[…]", originalSyntax[0]) : t;
+      edit({ frontMarkdown: restored, noteText: restored });
+    };
     return (
       <div className="review-face" onClick={!showBack ? onReveal : undefined}>
         <div className="review-front">
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
-          {md(questionText)}
+          {questionEditable ? (
+            <EditableText value={questionText} onCommit={commitQuestion} />
+          ) : (
+            md(questionText)
+          )}
         </div>
         {showBack && (
           <div className="review-back">
@@ -247,7 +261,11 @@ export function CardFace({
     <div className="review-face" onClick={!showBack ? onReveal : undefined}>
       <div className="review-front">
         {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
-        {md(frontText)}
+        {showBack && onEdit ? (
+          <EditableText value={frontText} onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })} />
+        ) : (
+          md(frontText)
+        )}
       </div>
       {showBack && (
         <div className="review-back">
