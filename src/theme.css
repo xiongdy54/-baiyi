@@ -248,6 +248,7 @@ body.has-skin .topbar { background: transparent; }
   display: flex;
   align-items: center;
   gap: var(--sp-1);
+  -webkit-app-region: no-drag; /* 按钮必须可点：顶栏整体 drag，导航区豁免 */
 }
 .topbar-nav .nav-item {
   height: var(--sp-8);
@@ -259,6 +260,7 @@ body.has-skin .topbar { background: transparent; }
   font-size: var(--fs-secondary);
   font-weight: 500;
   color: var(--text-secondary);
+  -webkit-app-region: no-drag;
 }
 .topbar-nav .nav-item:hover { background: var(--grey-1); color: var(--text-primary); }
 .topbar-nav .nav-item.active {
