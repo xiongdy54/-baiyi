@@ -4,7 +4,7 @@
 // 内核可替换：未来如需更换引擎（如 epub.js 兜底 adapter，见文档可选池），业务代码与存量数据（cfi+anchorText 双锚）不受影响。
 // 表述红线：CFI 绑定特定 EPUB 结构、并非永久 ID；定位体系是「可降级恢复」（cfi → 章节索引+文本 → 全文搜索），不是零失效。
 
-export type ReaderLocation = { cfi?: string; fraction?: number };
+export type ReaderLocation = { cfi?: string; fraction?: number; pageIndex?: number };
 
 /** 阅读模式：开放配置对象（未来可扩展字段，不使用封闭枚举） */
 export type ReaderModeConfig = {
@@ -16,7 +16,10 @@ export type ReaderModeConfig = {
 /** 选区语义数据（纯语义；UI 坐标走 getSelectionGeometry） */
 export interface ReaderSelection {
   text: string;
-  cfi: string;
+  /** foliate 引擎的 CFI 定位；PDF 引擎无 CFI 时为空（用 pageIndex 定位） */
+  cfi?: string;
+  /** PDF 引擎的页码定位（0 基）；foliate 引擎为空 */
+  pageIndex?: number;
   /** 选区起点附近的原文片段（文本级兜底锚点，约 ≤60 字） */
   anchorText: string;
 }
@@ -61,7 +64,7 @@ export interface ReaderTocItem {
   subitems?: ReaderTocItem[];
 }
 
-/** 打开书的数据源：原书字节（EPUB/MOBI/FB2/CBZ） */
+/** 打开书的数据源：原书字节（EPUB/MOBI/FB2/CBZ/PDF） */
 export type BookSource = {
   kind: "bytes";
   bytes: Uint8Array;
@@ -73,7 +76,8 @@ export interface RelocateInfo {
   location: ReaderLocation;
   /** 全书进度 0-1 */
   fraction: number;
-  chapterIndex: number;
+  /** foliate 引擎的章节索引；PDF 引擎为空（按页定位） */
+  chapterIndex?: number;
   chapterHref?: string;
 }
 
@@ -84,8 +88,8 @@ export interface LinkInfo {
 
 export interface ReaderKernel {
   open(source: BookSource, init?: { location?: ReaderLocation }): Promise<void>;
-  /** 跳转：CFI 位置 / 章节索引 / 目录 href / 文本搜索定位（返回是否发生导航） */
-  goTo(target: ReaderLocation | { chapterIndex: number } | { href: string } | { search: string }): Promise<boolean>;
+  /** 跳转：CFI 位置 / 页码（PDF 引擎）/ 章节索引 / 目录 href / 文本搜索定位（返回是否发生导航） */
+  goTo(target: ReaderLocation | { pageIndex: number } | { chapterIndex: number } | { href: string } | { search: string }): Promise<boolean>;
   /** 翻页（异步：杜绝「翻页后立刻读位置拿到旧值」的竞态）；boolean=是否发生导航（书边界返回 false） */
   next(): Promise<boolean>;
   prev(): Promise<boolean>;

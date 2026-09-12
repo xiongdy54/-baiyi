@@ -7037,9 +7037,11 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           if (!found) return false;
           return Boolean(await view.goTo(found));
         }
-        const ok = Boolean(await view.goTo(target.cfi));
-        if (!ok && target.fraction != null) {
-          await view.goToFraction(target.fraction);
+        if (!("cfi" in target) && !("fraction" in target)) return false;
+        const loc = target;
+        const ok = Boolean(await view.goTo(loc.cfi));
+        if (!ok && loc.fraction != null) {
+          await view.goToFraction(loc.fraction);
           return true;
         }
         return ok;
@@ -7189,7 +7191,8 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           emitRelocate();
           return true;
         }
-        const m3 = target.cfi ? /^fake:\/6\/(\d+)$/.exec(target.cfi) : null;
+        const loc = target;
+        const m3 = loc.cfi ? /^fake:\/6\/(\d+)$/.exec(loc.cfi) : null;
         if (!m3) return false;
         const idx = (Number(m3[1]) - 2) / 4;
         if (idx < 0 || idx >= spec.chapters.length) return false;

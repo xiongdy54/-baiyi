@@ -27,9 +27,9 @@ type View =
       name: "reader";
       itemId: string;
       doc: DocPayload;
-      /** 原书文件字节（存在即走阅读内核） */
-      book?: { bytes: Uint8Array; name: string };
-      jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number };
+      /** 原书文件字节（存在即走阅读内核；engine=pdf 时走 pdf.js 内核直读） */
+      book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" };
+      jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number };
       returnTo?: "review" | "queue" | "browse";
     }
   | { name: "queue" }
@@ -137,10 +137,15 @@ export default function App() {
 
   // 阅读内核分流（v20 一切皆书）：文件书读原书字节；粘贴书惰性确定性合成 EPUB（同 generatorVersion 结构恒同，CFI 稳定）
   // M6-1（v26）：Word/TXT/Markdown 走同一 synth 分支；Word 内嵌图从 assets 取回字节随包内嵌（syn-2 图片能力）
-  const loadReaderBook = useCallback(async (itemId: string, doc: DocPayload): Promise<{ bytes: Uint8Array; name: string } | undefined> => {
+  // M6-2 修订（v28 PDF 原生阅读）：PDF 走 pdf.js 内核直读原文件（engine:"pdf"），不再合成
+  const loadReaderBook = useCallback(async (itemId: string, doc: DocPayload): Promise<{ bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" } | undefined> => {
     if (doc.sourceType === "epub") {
       const bytes = await libraryApi.readBookFile(itemId);
       return bytes ? { bytes, name: "original.epub" } : undefined;
+    }
+    if (doc.sourceType === "pdf") {
+      const bytes = await libraryApi.readPdfFile(itemId);
+      return bytes ? { bytes, name: "original.pdf", engine: "pdf" as const } : undefined;
     }
     let images: SynthImage[] | undefined;
     if (doc.sourceType === "word") {
@@ -265,6 +270,15 @@ export default function App() {
         return null;
       }
     })();
+    // v28 PDF 原生阅读：progress 页码锚点（0 基）；foliate 系走 cfi
+    const progressPageIndex = (() => {
+      try {
+        const parsed = view.doc.progressJson ? (JSON.parse(view.doc.progressJson) as { pageIndex?: number }) : null;
+        return typeof parsed?.pageIndex === "number" ? parsed.pageIndex : null;
+      } catch {
+        return null;
+      }
+    })();
     topTitle = view.doc.title;
     mainContent = (
       <Reader
@@ -273,6 +287,7 @@ export default function App() {
         itemId={view.itemId}
         initialRatio={p}
         initialCfi={progressCfi}
+        initialPageIndex={progressPageIndex}
         book={view.book}
         contextRef={{ documentId: view.doc.documentId }}
         jumpAnchor={view.jumpAnchor}

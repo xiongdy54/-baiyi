@@ -1754,6 +1754,21 @@ body.theme-dark .modal-panel {
   width: 100%;
   height: 100%;
 }
+/* v28 PDF 原生阅读：pdf.js viewer 容器（adapter 内联 position/overflow；此处保证 viewer 块级尺寸，
+   否则 PDFViewer 的可视计算全 0 不渲染页面） */
+.reader-engine-host .pdf-viewer-container {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--reader-bg, transparent);
+}
+.reader-engine-host .pdf-viewer-container .pdfViewer {
+  display: block;
+  width: 100%;
+}
+.reader-engine-host .pdf-viewer-container .pdfViewer .page {
+  margin: 0 auto 12px auto;
+}
 /* foliate paginator 的背景层（closed shadow root 经 exportparts 导出）随阅读主题 */
 .reader-engine-host foliate-paginator::part(filter) {
   background: var(--reader-bg, transparent) !important;

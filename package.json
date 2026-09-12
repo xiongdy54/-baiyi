@@ -8,7 +8,7 @@
     "dev:electron": "electron .",
     "dev": "concurrently -k \"npm run dev:renderer\" \"wait-on http://localhost:5173 && electron .\"",
     "build:renderer": "vite build",
-    "build": "npm run build:renderer",
+    "build": "npm run build:renderer && node scripts/postbuild-pdf-compat.cjs",
     "start": "electron ."
   },
   "dependencies": {

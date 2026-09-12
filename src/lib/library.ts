@@ -21,6 +21,8 @@ declare global {
       createFromMarkdown?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string } | null>;
       createFromPdf?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string; pages?: number; emptyPages?: number } | null>;
       readContentImages?: (id: string) => Promise<{ filename: string; bytes: Uint8Array }[]>;
+      // M6-2 修订（v28 PDF 原生阅读）：读 PDF 原文件字节给 pdf.js 内核打开
+      readPdfFile?: (id: string) => Promise<Uint8Array | null>;
     };
   }
 }
@@ -66,6 +68,8 @@ export interface ReadingProgress {
   /** 阅读内核（v20）：结构级定位与全书比例，恢复时优先于 ratio */
   cfi?: string;
   fraction?: number;
+  /** PDF 原生阅读（v28）：页码锚点（0 基），恢复时优先于 fraction */
+  pageIndex?: number;
 }
 
 export const libraryApi = {
@@ -83,6 +87,10 @@ export const libraryApi = {
   /** 读取原书文件字节（EPUB 等文件书）；无原书返回 null（阅读内核据此分流） */
   async readBookFile(itemId: string): Promise<Uint8Array | null> {
     return (await window.libraryAPI?.readBookFile(itemId)) ?? null;
+  },
+  /** M6-2 修订（v28 PDF 原生阅读）：读取 PDF 原文件字节；无原文件返回 null */
+  async readPdfFile(itemId: string): Promise<Uint8Array | null> {
+    return (await window.libraryAPI?.readPdfFile?.(itemId)) ?? null;
   },
   async updateProgress(itemId: string, progress: ReadingProgress): Promise<void> {
     await window.libraryAPI?.updateProgress(itemId, progress);

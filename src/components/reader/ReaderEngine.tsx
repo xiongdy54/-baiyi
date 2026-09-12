@@ -14,10 +14,12 @@ import {
 
 interface Props {
   source: BookSource;
+  /** 阅读引擎（v28 PDF 原生阅读）：默认 foliate；PDF 书传 "pdf" */
+  engine?: "foliate" | "pdf";
   /** 打开时恢复的位置（上次阅读进度；跳转访问时不传） */
   initLocation?: ReaderLocation | null;
-  /** 跳转原文（复习卡/卡片浏览）：优先 cfi，失败按 anchorText 文本搜索定位 */
-  jump?: { cfi?: string; anchorText: string } | null;
+  /** 跳转原文（复习卡/卡片浏览）：优先 cfi，其次 pageIndex（PDF），失败按 anchorText 文本搜索定位 */
+  jump?: { cfi?: string; pageIndex?: number; anchorText: string } | null;
   onRelocate: (info: RelocateInfo) => void;
   onLink: (info: LinkInfo) => void;
   onContentPointerUp: (pos: { x: number; y: number }) => void;
@@ -29,6 +31,7 @@ interface Props {
 
 export default function ReaderEngine({
   source,
+  engine = "foliate",
   initLocation,
   jump,
   onRelocate,
@@ -48,7 +51,7 @@ export default function ReaderEngine({
     let kernel: ReaderKernel | null = null;
     let disposed = false;
     (async () => {
-      const k = await createKernel(host);
+      const k = await createKernel(host, engine);
       if (disposed) {
         k.destroy();
         return;
@@ -62,8 +65,10 @@ export default function ReaderEngine({
       await k.open(source, { location: j ? undefined : (handlers.current.initLocation ?? undefined) });
       if (disposed) return;
       if (j) {
-        const ok = j.cfi ? await k.goTo({ cfi: j.cfi }) : false;
-        if (!ok) await k.goTo({ search: j.anchorText.slice(0, 30) });
+        // 跳转顺序：cfi（foliate 旧卡）→ pageIndex（PDF 新卡）→ anchorText 文本搜索
+        const okCfi = j.cfi ? await k.goTo({ cfi: j.cfi }) : false;
+        const okPage = !okCfi && j.pageIndex != null ? await k.goTo({ pageIndex: j.pageIndex }) : false;
+        if (!okCfi && !okPage) await k.goTo({ search: j.anchorText.slice(0, 30) });
       }
       handlers.current.onReady(k);
     })();
@@ -71,9 +76,9 @@ export default function ReaderEngine({
       disposed = true;
       kernel?.destroy();
     };
-    // 仅挂载/换书时重建内核；回调变化经 handlers.ref 转发，不触发重建
+    // 仅挂载/换书/换引擎时重建内核；回调变化经 handlers.ref 转发，不触发重建
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source]);
+  }, [source, engine]);
 
   return <div ref={hostRef} className="reader-engine-host" />;
 }

@@ -204,9 +204,13 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         if (!found) return false;
         return Boolean(await view.goTo(found));
       }
-      const ok = Boolean(await view.goTo(target.cfi));
-      if (!ok && target.fraction != null) {
-        await view.goToFraction(target.fraction);
+      // foliate 引擎只认 CFI/fraction：PDF 系的 {pageIndex} 在此分支不可达（ReaderEngine 按 engine 分流），
+      // 但类型上联合 → 此处收窄：非 cfi/fraction 目标直接返回 false（由 search 兜底链继续）
+      if (!("cfi" in target) && !("fraction" in target)) return false;
+      const loc = target as { cfi?: string; fraction?: number };
+      const ok = Boolean(await view.goTo(loc.cfi));
+      if (!ok && loc.fraction != null) {
+        await view.goToFraction(loc.fraction);
         return true;
       }
       return ok;

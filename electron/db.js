@@ -581,6 +581,22 @@ function readBookFile(itemId) {
   }
 }
 
+// M6-2 修订（v28 PDF 原生阅读）：读取书架条目的 PDF 原文件（kind='pdf-original' → original.pdf），
+// 供 pdf.js 内核直接打开；照抄 readBookFile 形状。
+function readPdfFile(itemId) {
+  const row = queryAll(
+    "SELECT path FROM assets WHERE library_item_id = ? AND kind = 'pdf-original' AND is_deleted = 0 LIMIT 1",
+    [String(itemId)]
+  )[0];
+  if (!row || !row.path) return null;
+  try {
+    const p = path.join(app.getPath("userData"), "assets", String(itemId), row.path);
+    return new Uint8Array(fs.readFileSync(p));
+  } catch {
+    return null;
+  }
+}
+
 // ---------- 卡片 / 制卡 / FSRS / Leech（Phase 3 + 13-16，v6/v8） ----------
 
 function normalizeFsrs(json) {
@@ -1565,6 +1581,7 @@ module.exports = {
   listDueCards,
   listAllCards,
   readBookFile,
+  readPdfFile,
   readContentImages,
   listAllReviewLogs,
   getItemIdByDocumentId,

@@ -34,7 +34,9 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   pickPdf: () => ipcRenderer.invoke("library:pickPdf"),
   createFromPdf: (payload) => ipcRenderer.invoke("library:createFromPdf", payload),
   // 读侧：某本书的内嵌图字节（[{filename, bytes:Uint8Array}]），随合成 EPUB 落包
-  readContentImages: (id) => ipcRenderer.invoke("library:readContentImages", id)
+  readContentImages: (id) => ipcRenderer.invoke("library:readContentImages", id),
+  // M6-2 修订（v28 PDF 原生阅读）：读 PDF 原文件字节给 pdf.js 内核打开
+  readPdfFile: (id) => ipcRenderer.invoke("library:readPdfFile", id)
 });
 
 contextBridge.exposeInMainWorld("workflowAPI", {

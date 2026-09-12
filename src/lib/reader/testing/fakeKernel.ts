@@ -92,8 +92,9 @@ export function createFakeKernel(spec: FakeBookSpec): ReaderKernel & {
         emitRelocate();
         return true;
       }
-      // cfi 形如 fake:/6/<chapter*4+2>——按同一算式解析回章节索引
-      const m = target.cfi ? /^fake:\/6\/(\d+)$/.exec(target.cfi) : null;
+      // cfi 形如 fake:/6/<chapter*4+2>——按同一算式解析回章节索引（PDF 系 pageIndex 在 fake 引擎不可达）
+      const loc = target as { cfi?: string };
+      const m = loc.cfi ? /^fake:\/6\/(\d+)$/.exec(loc.cfi) : null;
       if (!m) return false;
       const idx = (Number(m[1]) - 2) / 4;
       if (idx < 0 || idx >= spec.chapters.length) return false;

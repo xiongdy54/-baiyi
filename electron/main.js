@@ -205,21 +205,46 @@ ipcMain.handle("library:readContentImages", (_e, itemId) => dbModule.readContent
 
 ipcMain.handle("library:pickPdf", () => pickImportFile("pdf"));
 
+// M6-2 修订（v28 PDF 原生阅读）：导入只存原文（original.pdf 落 assets + 建册），不再跑提纯。
+// 扫描版判别改轻量规则：pdfjs 取文本层，全页无文本即拒绝（提纯函数 pdfToMarkdown 保留为全文检索备用）。
 ipcMain.handle("library:createFromPdf", async (_e, payload) => {
   const { path: filePath, name } = payload || {};
   if (!filePath) return null;
   const buf = fs.readFileSync(String(filePath));
-  const { markdown, pages, emptyPages, chapters, outlineUsed } = await pdfToMarkdown(buf);
-  if (!markdown.trim()) throw new Error("未能从该 PDF 中提取到文本内容");
-  return dbModule.createImportedDoc({
+  let pages = 0;
+  let emptyPages = 0;
+  try {
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    // pdf.js v6 无 PDFDocumentProxy.destroy（已移除），资源释放调 loadingTask.destroy()
+    const task = pdfjs.getDocument({
+      data: new Uint8Array(buf),
+      useWorkerFetch: false,
+      isEvalSupported: false
+    });
+    const doc = await task.promise;
+    pages = doc.numPages;
+    for (let i = 1; i <= pages; i++) {
+      const tc = await (await doc.getPage(i)).getTextContent();
+      if (!tc.items.some((it) => it.str && it.str.trim())) emptyPages++;
+    }
+    await task.destroy();
+  } catch (e) {
+    throw new Error(`无法解析该 PDF 文件：${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (emptyPages === pages) {
+    throw new Error("未在该 PDF 中提取到文本层——可能是扫描版/图片型 PDF。扫描版 OCR 暂不支持，请使用带文字层的 PDF。");
+  }
+  // documents.markdown 存空壳占位（阅读走原文件；占位供书架 excerpt/统计等读 markdown 的旧路径不崩）
+  const created = dbModule.createImportedDoc({
     title: titleFromFilename(name),
-    markdown,
+    markdown: "",
     sourceType: "pdf",
     sourceName: name || null,
     originalName: "original.pdf",
     originalBuf: buf,
     images: []
   });
+  return { ...created, pages, emptyPages };
 });
 
 ipcMain.handle("library:doc", (_e, itemId) => getDocument(String(itemId)));
@@ -227,6 +252,9 @@ ipcMain.handle("library:itemByDoc", (_e, docId) => getItemIdByDocumentId(String(
 
 // 阅读内核（v20）：读取书架条目的原书文件（assets/<itemId>/original.epub），供 foliate 内核打开
 ipcMain.handle("library:readBookFile", (_e, itemId) => dbModule.readBookFile(String(itemId)));
+
+// M6-2 修订（v28 PDF 原生阅读）：读取 PDF 原文件（assets/<itemId>/original.pdf），供 pdf.js 内核打开
+ipcMain.handle("library:readPdfFile", (_e, itemId) => dbModule.readPdfFile(String(itemId)));
 
 // 外链：仅允许 http/https，交系统浏览器（渲染层永不自行导航）
 ipcMain.handle("shell:openExternal", (_e, url) => {

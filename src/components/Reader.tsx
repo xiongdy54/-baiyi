@@ -36,14 +36,16 @@ interface Props {
   initialRatio?: number;
   /** 上次进度的 CFI（文件书内核恢复定位用） */
   initialCfi?: string | null;
+  /** v28 PDF 原生阅读：上次进度的页码（0 基），恢复时优先于 initialRatio */
+  initialPageIndex?: number | null;
   contextLabel?: string;
   contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
-  jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number } | null;
+  jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number } | null;
   /** 原书文件字节（存在即走阅读内核；粘贴书/摘录 R1b 合流） */
-  book?: { bytes: Uint8Array; name: string } | null;
+  book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" } | null;
   sourceTitle?: string;
   onBack: () => void;
-  onProgress?: (ratio: number, lastText: string, extra?: { cfi?: string; fraction?: number }) => void;
+  onProgress?: (ratio: number, lastText: string, extra?: { cfi?: string; fraction?: number; pageIndex?: number }) => void;
   /** 阅读主题联动整个软件（v20.1）：暗夜→软件夜间模式，纸白/羊皮→浅色 */
   onSwitchAppTheme?: (mode: "light" | "dark") => void;
 }
@@ -123,6 +125,7 @@ export default function Reader({
   itemId,
   initialRatio = 0,
   initialCfi,
+  initialPageIndex,
   contextLabel,
   contextRef,
   jumpAnchor,
@@ -224,6 +227,8 @@ export default function Reader({
 
   // ---------- 阅读内核分支（v20：文件书走 foliate 内核；粘贴书/摘录 R1b 合流） ----------
   const engineMode = Boolean(book);
+  /** v28 PDF 原生阅读：book.engine 决定内核实现（默认 foliate，存量书全走此分支） */
+  const engineKind: "foliate" | "pdf" = book?.engine === "pdf" ? "pdf" : "foliate";
   // 引擎数据源必须按引用稳定（useMemo）：内联字面量会让 ReaderEngine 每次重渲染都销毁重建内核
   const engineSource = useMemo(
     () => (book ? { kind: "bytes" as const, bytes: book.bytes, name: book.name } : null),
@@ -232,7 +237,7 @@ export default function Reader({
   const kernelRef = useRef<ReaderKernel | null>(null);
   // 引擎选区锚点：语义同 markdown 的 anchorRef——最后一次菜单动作的选区，保留到下一次覆盖
   const engineSelRef = useRef<ReaderSelection | null>(null);
-  const engineChapterRef = useRef(0);
+  const engineChapterRef = useRef<number | undefined>(0);
   const relocateTimerRef = useRef<number | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
@@ -294,7 +299,8 @@ export default function Reader({
       relocateTimerRef.current = window.setTimeout(() => {
         relocateTimerRef.current = null;
         if (itemId && onProgress) void readingStats.addEvent(itemId, Math.round(info.fraction * (markdown?.length || 0)));
-        onProgress?.(info.fraction, "", { cfi: info.location.cfi, fraction: info.fraction });
+        // v28 PDF 原生阅读：progress 携带页码锚点（pageIndex），foliate 系携带 cfi
+        onProgress?.(info.fraction, "", { cfi: info.location.cfi, fraction: info.fraction, pageIndex: info.location.pageIndex });
       }, 700);
     },
     [itemId, markdown, onProgress]
@@ -415,13 +421,13 @@ export default function Reader({
     };
   }
   function enrichedContextRef() {
-    // 引擎分支：四层可降级定位（cfi → chapterIndex → anchorText），带引擎版本便于回归归因
+    // 引擎分支：可降级定位（foliate 系 cfi → chapterIndex → anchorText；PDF 系 pageIndex → anchorText），带引擎版本便于回归归因
     if (engineMode) {
       const sel = engineSelRef.current;
       if (!sel) return contextRef || null;
       return {
         ...(contextRef || {}),
-        ...buildLocator({ cfi: sel.cfi, chapterIndex: engineChapterRef.current, anchorText: sel.anchorText })
+        ...buildLocator({ cfi: sel.cfi, chapterIndex: engineChapterRef.current, pageIndex: sel.pageIndex, anchorText: sel.anchorText })
       };
     }
     return anchorRef.current ? { ...(contextRef || {}), ...anchorRef.current } : contextRef || null;
@@ -1244,9 +1250,12 @@ export default function Reader({
             <>
               <div className="reader-engine-controls">
                 <div className="reader-engine-controls-group">
-                  <button className="btn btn-outline btn-sm" onClick={() => setTocOpen((v) => !v)}>
-                    目录
-                  </button>
+                  {/* v28 PDF 原生阅读：无大纲时目录按钮隐藏（getTOC 为空）；foliate 系恒有目录 */}
+                  {(engineKind !== "pdf" || tocItems.length > 0) && (
+                    <button className="btn btn-outline btn-sm" onClick={() => setTocOpen((v) => !v)}>
+                      目录
+                    </button>
+                  )}
                   <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
                     ‹
@@ -1288,8 +1297,9 @@ export default function Reader({
               <div className="reader-engine-viewport">
                 <ReaderEngine
                   source={engineSource}
-                  initLocation={initialCfi ? { cfi: initialCfi } : initialRatio > 0 ? { fraction: initialRatio } : null}
-                  jump={jumpAnchor ? { cfi: jumpAnchor.cfi, anchorText: jumpAnchor.anchorText } : null}
+                  engine={engineKind}
+                  initLocation={initialCfi ? { cfi: initialCfi } : initialPageIndex != null ? { pageIndex: initialPageIndex } : initialRatio > 0 ? { fraction: initialRatio } : null}
+                  jump={jumpAnchor ? { cfi: jumpAnchor.cfi, pageIndex: jumpAnchor.pageIndex, anchorText: jumpAnchor.anchorText } : null}
                   onRelocate={handleEngineRelocate}
                   onLink={(info) => {
                     // 外链：adapter 已拦截默认行为，这里交系统浏览器；内链由内核自行精确跳转
