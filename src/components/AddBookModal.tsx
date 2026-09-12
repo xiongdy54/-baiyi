@@ -40,13 +40,16 @@ export default function AddBookModal({ onSave, onClose }: Props) {
   }
 
   // M6-1（v26）：Word（含内嵌图）/ TXT / Markdown 导入——pick 取消则静默返回，转换失败弹错
-  async function handleImportFile(kind: "word" | "txt" | "markdown") {
+  async function handleImportFile(kind: "word" | "txt" | "markdown" | "pdf") {
     setImporting(true);
     try {
       const picked = await libraryApi.pickImport(kind);
       if (!picked) return;
-      const ok = await libraryApi.createImported(kind, picked);
-      if (ok) {
+      const result = await libraryApi.createImported(kind, picked);
+      if (result) {
+        if (kind === "pdf" && (result.emptyPages ?? 0) > 0) {
+          window.alert(`已导入 PDF；其中 ${result.emptyPages} 页无文本层，已按空页跳过。`);
+        }
         eventBus.emit("library/changed");
         onClose();
       } else {
@@ -106,6 +109,9 @@ export default function AddBookModal({ onSave, onClose }: Props) {
           </button>
           <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("markdown")}>
             导入 Markdown
+          </button>
+          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("pdf")}>
+            导入 PDF
           </button>
           <span className="form-actions-spacer" />
           <button className="btn btn-secondary" onClick={onClose}>取消</button>

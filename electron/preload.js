@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   createFromWord: (payload) => ipcRenderer.invoke("library:createFromWord", payload),
   createFromTxt: (payload) => ipcRenderer.invoke("library:createFromTxt", payload),
   createFromMarkdown: (payload) => ipcRenderer.invoke("library:createFromMarkdown", payload),
+  pickPdf: () => ipcRenderer.invoke("library:pickPdf"),
+  createFromPdf: (payload) => ipcRenderer.invoke("library:createFromPdf", payload),
   // 读侧：某本书的内嵌图字节（[{filename, bytes:Uint8Array}]），随合成 EPUB 落包
   readContentImages: (id) => ipcRenderer.invoke("library:readContentImages", id)
 });

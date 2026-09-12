@@ -147,3 +147,226 @@ module.exports = {
   titleFromFilename,
   MAX_WORD_IMAGES_TOTAL_BYTES,
 };
+
+// ---------- PDF 基础文本导入（M6-2，v27：pdfjs-dist 主进程提纯文本 → 合成 EPUB；扫描版 OCR 不在本批） ----------
+const path = require("path");
+const CMAP_DIR = path.join(__dirname, "..", "node_modules", "pdfjs-dist", "cmaps") + "/";
+const FONTS_DIR = path.join(__dirname, "..", "node_modules", "pdfjs-dist", "standard_fonts") + "/";
+
+const CJK_RE = /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/;
+const TERMINAL_PUNCT = /[。！？；：.!?;:]["»）)]?$/;
+const isCJKChar = (ch) => !!ch && CJK_RE.test(ch);
+
+/**
+ * pdfjs 文本 item 序列 → 行。双信号：item.hasEOL 关行 + y 坐标变化关行。
+ * 行结构：{ text, x（行左缘）, y（基线，向下递减）, h（最大字高）}
+ */
+function itemsToLines(items) {
+  const lines = [];
+  let cur = null;
+  const close = () => {
+    if (!cur || !cur.parts.length) { cur = null; return; }
+    // 行内拼接：CJK 侧直接粘连（PDF 逐字 item 不插空格），ASCII 两侧按 item 间隙补空格
+    let text = "";
+    for (let i = 0; i < cur.parts.length; i++) {
+      const part = cur.parts[i];
+      if (i > 0) {
+        const prev = cur.parts[i - 1];
+        const gap = part.x - (prev.x + prev.w);
+        const needSpace =
+          gap > (cur.h || part.h || 10) * 0.15 &&
+          !isCJKChar(prev.s.slice(-1)) && !isCJKChar(part.s.slice(0, 1)) &&
+          !/\s$/.test(text) && !/^\s/.test(part.s);
+        if (needSpace) text += " ";
+      }
+      text += part.s;
+    }
+    text = text.replace(/\s+/g, " ").trim();
+    if (text) lines.push({ text, x: cur.x0, y: cur.y, h: cur.h });
+    cur = null;
+  };
+  for (const it of items) {
+    if (it.hasEOL && (!it.str || !it.str.trim())) { close(); continue; } // 纯换行哨兵 item
+    if (!it.str || !it.str.trim()) continue;
+    const y = it.transform[5];
+    const x = it.transform[4];
+    const h = Math.abs(it.transform[3]) || it.height || 0;
+    if (cur && Math.abs(cur.y - y) > Math.max(1.5, (cur.h || h) * 0.5)) close(); // y 变化 → 新行
+    if (!cur) cur = { parts: [], x0: x, y, h: 0 };
+    cur.parts.push({ s: it.str, x, w: it.width || 0 });
+    cur.x0 = Math.min(cur.x0, x);
+    cur.h = Math.max(cur.h, h);
+    if (it.hasEOL) close();
+  }
+  close();
+  return lines;
+}
+
+/** 字号启发式标题候选：行高 ≥ 1.35×全书行高下中位数且 ≤ 60 字符（同字号文档中位数自身抬升，天然不误判；偶数取下中位防上中位污染） */
+function headingCandidates(lines) {
+  if (!lines.length) return [];
+  const hs = lines.map((l) => l.h).filter(Boolean).sort((a, b) => a - b);
+  const medianH = hs.length ? hs[Math.floor((hs.length - 1) / 2)] : 10;
+  return lines.filter((l) => l.h >= medianH * 1.35 && l.text.length <= 60);
+}
+
+/**
+ * 行序列 → 段落 markdown。
+ * 段落切分：行距 > 1.6×中位行距，或下行左缘明显缩进（> 0.9×中位字高且上行贴左缘，中文首行缩进惯例）。
+ * markHeadings=true 时按字号启发式挑出标题行并从段落中排除（供无大纲章节化用）。
+ */
+function linesToMarkdown(lines, headingSet = null) {
+  if (!lines.length) return { paragraphs: [], headingLines: [] };
+  const diffs = [];
+  for (let i = 1; i < lines.length; i++) {
+    const d = lines[i - 1].y - lines[i].y;
+    if (d > 0) diffs.push(d);
+  }
+  diffs.sort((a, b) => a - b);
+  // 25 分位数估计正文行距（中位数会被标题大间距抬高导致全文粘连）
+  const medianDiff = diffs.length ? diffs[Math.max(0, Math.floor(diffs.length * 0.25))] : 0;
+  const hs = lines.map((l) => l.h).filter(Boolean).sort((a, b) => a - b);
+  const medianH = hs.length ? hs[Math.floor(hs.length / 2)] : 10;
+  const minX = Math.min(...lines.map((l) => l.x));
+
+
+
+  const paragraphs = [];
+  const headingLines = [];
+  let buf = "";
+  const flush = () => { if (buf.trim()) paragraphs.push(buf.trim()); buf = ""; };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (headingSet && headingSet.has(line)) { flush(); headingLines.push(line); continue; }
+    if (i > 0) {
+      const prev = lines[i - 1];
+      const yGap = prev.y - line.y;
+      const indented = line.x > minX + medianH * 0.9 && prev.x <= minX + medianH * 0.35;
+      if (yGap > medianDiff * 1.6 || indented) {
+        flush();
+      } else if (buf && !isCJKChar(buf.slice(-1)) && !isCJKChar(line.text.slice(0, 1)) && !/\s$/.test(buf) && !/^\s/.test(line.text)) {
+        buf += " "; // 跨行 ASCII 补空格
+      }
+    }
+    buf += line.text;
+  }
+  flush();
+  return { paragraphs, headingLines };
+}
+
+/** 跨页段落愈合拼接：任一侧边界为 CJK 直接粘连，否则补一个空格 */
+function joinPageMarkdown(a, b) {
+  const ta = a.replace(/\s+$/, "");
+  const tb = b.replace(/^\s+/, "");
+  if (!ta) return tb;
+  if (!tb) return ta;
+  if (isCJKChar(ta.slice(-1)) || isCJKChar(tb.slice(0, 1))) return ta + tb;
+  return ta + " " + tb;
+}
+
+/** PDF 书签大纲 → [{title, level, pageIndex(0基)}]（named dest 先解析；单条失败跳过） */
+async function pdfOutline(doc) {
+  const out = [];
+  const walk = async (entries, level) => {
+    for (const e of entries || []) {
+      try {
+        let dest = e.dest;
+        if (typeof dest === "string") dest = await doc.getDestination(dest);
+        const ref = Array.isArray(dest) ? dest[0] : null;
+        if (ref) {
+          const pageIndex = await doc.getPageIndex(ref);
+          if (e.title && e.title.trim()) out.push({ title: e.title.trim(), level, pageIndex });
+        }
+      } catch { /* 单条解析失败不阻塞 */ }
+      if (e.items && e.items.length) await walk(e.items, level + 1);
+    }
+  };
+  try { await walk(await doc.getOutline(), 1); } catch { /* 大纲不可用 → 空 */ }
+  return out;
+}
+
+/**
+ * PDF → markdown（主进程入口，M6-2）。
+ * 章节化优先级：① 书签大纲（level1→`# `、level2→`## `）② 字号启发式标题（无大纲时）③ 页数>8 按每 10 页分块。
+ * 全部页面无文本层（扫描版）→ throw。
+ */
+async function pdfToMarkdown(buf) {
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const doc = await pdfjs.getDocument({
+    data: new Uint8Array(buf),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    cMapUrl: CMAP_DIR,
+    cMapPacked: true,
+    standardFontDataUrl: FONTS_DIR,
+  }).promise;
+  const pages = doc.numPages;
+
+  const pageLines = [];
+  for (let i = 1; i <= pages; i++) {
+    const page = await doc.getPage(i);
+    const tc = await page.getTextContent();
+    pageLines.push(itemsToLines(tc.items));
+  }
+  const emptyPages = pageLines.filter((l) => l.length === 0).length;
+  if (emptyPages === pages) {
+    throw new Error("未在该 PDF 中提取到文本层——可能是扫描版/图片型 PDF。扫描版 OCR 暂不支持，请使用带文字层的 PDF。");
+  }
+
+  const outline = await pdfOutline(doc);
+  const useOutline = outline.length >= 1;
+  // 字号标题候选按全书行高中位数计算（无大纲时）
+  const flagged = useOutline ? [] : headingCandidates(pageLines.flat());
+  const headingSet = new Set(flagged);
+  const useHeadings = !useOutline && flagged.length >= 2;
+  const pageMd = pageLines.map((lines) => linesToMarkdown(lines, headingSet));
+
+  // 跨页段落愈合：上页末段不以终止标点结尾 → 移出本页，与下页首段合并
+  const pageParts = pageMd.map((p) => p.paragraphs.slice());
+  for (let i = 0; i < pages - 1; i++) {
+    const cur = pageParts[i];
+    if (!cur.length) continue;
+    const last = cur[cur.length - 1];
+    if (!TERMINAL_PUNCT.test(last) && pageParts[i + 1].length) {
+      pageParts[i + 1][0] = joinPageMarkdown(last, pageParts[i + 1][0]);
+      cur.pop();
+    }
+  }
+
+  // 章节插入点：pageIndex → [{level, title}]
+  const insertAt = new Map();
+  const pushHeading = (pageIndex, level, title) => {
+    const arr = insertAt.get(pageIndex) || [];
+    arr.push({ level, title });
+    insertAt.set(pageIndex, arr);
+  };
+  if (useOutline) {
+    for (const o of outline) pushHeading(o.pageIndex, Math.min(o.level, 2), o.title);
+  } else {
+    if (useHeadings) {
+      pageMd.forEach((p, i) => p.headingLines.forEach((h) => pushHeading(i, 1, h.text)));
+    } else if (pages > 8) {
+      for (let p = 0; p < pages; p += 10) {
+        const end = Math.min(p + 10, pages);
+        pushHeading(p, 1, end - p > 1 ? `第 ${p + 1}–${end} 页` : `第 ${p + 1} 页`);
+      }
+    }
+  }
+
+  const outLines = [];
+  for (let i = 0; i < pages; i++) {
+    for (const h of insertAt.get(i) || []) outLines.push(h.level === 1 ? `# ${h.title}` : `## ${h.title}`);
+    for (const para of pageParts[i] || []) outLines.push(para);
+  }
+  const markdown = outLines.join("\n\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!markdown) throw new Error("未能从该 PDF 中提取到有效文本内容");
+  const chapters = (markdown.match(/^# /gm) || []).length;
+  return { markdown, pages, emptyPages, chapters, outlineUsed: useOutline };
+}
+
+module.exports.pdfToMarkdown = pdfToMarkdown;
+module.exports.itemsToLines = itemsToLines;
+module.exports.linesToMarkdown = linesToMarkdown;
+module.exports.pdfOutline = pdfOutline;
+module.exports.joinPageMarkdown = joinPageMarkdown;
+module.exports.headingCandidates = headingCandidates;

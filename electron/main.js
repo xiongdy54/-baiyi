@@ -48,7 +48,8 @@ const {
   decodeTextBytes,
   txtToMarkdown,
   markdownFromText,
-  titleFromFilename
+  titleFromFilename,
+  pdfToMarkdown
 } = require("./importers");
 
 protocol.registerSchemesAsPrivileged([
@@ -201,6 +202,25 @@ ipcMain.handle("library:createFromMarkdown", (_e, payload) => {
 
 // 读侧：取回某本书的内嵌图字节（合成 EPUB 时落进 OEBPS/images/）
 ipcMain.handle("library:readContentImages", (_e, itemId) => dbModule.readContentImages(String(itemId)));
+
+ipcMain.handle("library:pickPdf", () => pickImportFile("pdf"));
+
+ipcMain.handle("library:createFromPdf", async (_e, payload) => {
+  const { path: filePath, name } = payload || {};
+  if (!filePath) return null;
+  const buf = fs.readFileSync(String(filePath));
+  const { markdown, pages, emptyPages, chapters, outlineUsed } = await pdfToMarkdown(buf);
+  if (!markdown.trim()) throw new Error("未能从该 PDF 中提取到文本内容");
+  return dbModule.createImportedDoc({
+    title: titleFromFilename(name),
+    markdown,
+    sourceType: "pdf",
+    sourceName: name || null,
+    originalName: "original.pdf",
+    originalBuf: buf,
+    images: []
+  });
+});
 
 ipcMain.handle("library:doc", (_e, itemId) => getDocument(String(itemId)));
 ipcMain.handle("library:itemByDoc", (_e, docId) => getItemIdByDocumentId(String(docId)));

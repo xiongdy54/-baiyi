@@ -15,9 +15,11 @@ declare global {
       pickWord?: () => Promise<{ name: string; path: string } | null>;
       pickTxt?: () => Promise<{ name: string; path: string } | null>;
       pickMarkdown?: () => Promise<{ name: string; path: string } | null>;
+      pickPdf?: () => Promise<{ name: string; path: string } | null>;
       createFromWord?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string } | null>;
       createFromTxt?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string } | null>;
       createFromMarkdown?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string } | null>;
+      createFromPdf?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string; pages?: number; emptyPages?: number } | null>;
       readContentImages?: (id: string) => Promise<{ filename: string; bytes: Uint8Array }[]>;
     };
   }
@@ -94,23 +96,26 @@ export const libraryApi = {
     return (await window.libraryAPI.createFromEpub(payload)) !== null;
   },
   // M6-1（v26）：Word/TXT/Markdown 导入——pick 返回 null 表示用户取消；create 失败抛错由调用方提示
-  async pickImport(kind: "word" | "txt" | "markdown"): Promise<{ name: string; path: string } | null> {
+  async pickImport(kind: "word" | "txt" | "markdown" | "pdf"): Promise<{ name: string; path: string } | null> {
     const api = window.libraryAPI;
     if (!api) return null;
     if (kind === "word") return (await api.pickWord?.()) ?? null;
     if (kind === "txt") return (await api.pickTxt?.()) ?? null;
+    if (kind === "pdf") return (await api.pickPdf?.()) ?? null;
     return (await api.pickMarkdown?.()) ?? null;
   },
-  async createImported(kind: "word" | "txt" | "markdown", picked: { name: string; path: string }): Promise<boolean> {
+  async createImported(kind: "word" | "txt" | "markdown" | "pdf", picked: { name: string; path: string }): Promise<{ id: string; title: string; emptyPages?: number } | null> {
     const api = window.libraryAPI;
-    if (!api) return false;
+    if (!api) return null;
     const result =
       kind === "word"
         ? await api.createFromWord?.(picked)
         : kind === "txt"
           ? await api.createFromTxt?.(picked)
-          : await api.createFromMarkdown?.(picked);
-    return result !== null && result !== undefined;
+          : kind === "pdf"
+            ? await api.createFromPdf?.(picked)
+            : await api.createFromMarkdown?.(picked);
+    return result ?? null;
   },
   /** M6-1（v26）：读取某本书的内嵌图字节（Word 导入时落 assets kind=image-content），随合成 EPUB 内嵌 */
   async readContentImages(itemId: string): Promise<{ filename: string; bytes: Uint8Array }[]> {
