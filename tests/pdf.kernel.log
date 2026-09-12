@@ -1,0 +1,40 @@
+== PDF 内核契约测试（v28 L1 级） ==
+phase: driver bundle built
+phase: fixture page loaded
+[renderer] %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security
+  Policy set or a policy with "unsafe-eval" enabled. This exposes users of
+  this app to unnecessary security risks.
+
+For more information and help, consult
+https://electronjs.org/docs/tutorial/security.
+This warning will not show up
+once the app is packaged.
+[renderer] [pdf] PASS | P1 打开 fixture PDF（3 页）
+[renderer] [pdf] PASS | P2 文本层渲染（span 在场，可选词）
+[renderer] [pdf] PASS | P3 页面 canvas 渲染 | canvas=1
+[renderer] [pdf] PASS | P4 大纲 2 条（label 带页码后缀） | ["Chapter One ·第 1 页","Chapter Two ·第 3 页"]
+[renderer] [pdf] PASS | P5 文本层选词 → 页码锚点 + 几何 | {"text":"PDF kernel fi","pageIndex":0,"anchorText":"PDF kernel fi"}
+[renderer] [pdf] PASS | P6 goTo(pageIndex) 跳页 | before=0 after=1
+[renderer] [pdf] PASS | P7 relocate 上报 pageIndex | [{"pageIndex":0,"fraction":0.16666666666666666},{"pageIndex":0,"fraction":0.16666666666666666},{"pageIndex":1,"fraction":0.5}]
+[renderer] [pdf] PASS | P8 文本搜索定位到目标页 | page=2
+[renderer] [pdf] PASS | P9 搜索无命中返回 false | false
+[renderer] [pdf] PASS | P10 首页 prev 返回 false | false
+[renderer] [pdf] PASS | P11 末页 next 返回 false | false
+[renderer] [pdf] PASS | P12 首页 next 前进 | true
+[renderer] [pdf] PASS | P13 goTo(cfi) 返回 false（PDF 系无 CFI） | false
+[renderer] [pdf] PASS | P14 destroy 后容器清空 | canvas=0
+---- PDF (14 项) ----
+  PASS [PDF] P1 打开 fixture PDF（3 页）
+  PASS [PDF] P2 文本层渲染（span 在场，可选词）
+  PASS [PDF] P3 页面 canvas 渲染
+  PASS [PDF] P4 大纲 2 条（label 带页码后缀）
+  PASS [PDF] P5 文本层选词 → 页码锚点 + 几何
+  PASS [PDF] P6 goTo(pageIndex) 跳页
+  PASS [PDF] P7 relocate 上报 pageIndex
+  PASS [PDF] P8 文本搜索定位到目标页
+  PASS [PDF] P9 搜索无命中返回 false
+  PASS [PDF] P10 首页 prev 返回 false
+  PASS [PDF] P11 末页 next 返回 false
+  PASS [PDF] P12 首页 next 前进
+  PASS [PDF] P13 goTo(cfi) 返回 false（PDF 系无 CFI）
+  PASS [PDF] P14 destroy 后容器清空

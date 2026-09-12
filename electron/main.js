@@ -216,10 +216,17 @@ ipcMain.handle("library:createFromPdf", async (_e, payload) => {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     // pdf.js v6 无 PDFDocumentProxy.destroy（已移除），资源释放调 loadingTask.destroy()
+    // 主进程直读 node_modules 的 cMap/标准字体（file URL；缺了它每页字体加载都会刷
+    // "Ensure that the `standardFontDataUrl` API parameter is provided." 警告）
+    const { pathToFileURL } = require("url");
+    const pdfjsDir = path.join(__dirname, "..", "node_modules", "pdfjs-dist");
     const task = pdfjs.getDocument({
       data: new Uint8Array(buf),
       useWorkerFetch: false,
-      isEvalSupported: false
+      isEvalSupported: false,
+      cMapUrl: pathToFileURL(path.join(pdfjsDir, "cmaps") + path.sep).href,
+      cMapPacked: true,
+      standardFontDataUrl: pathToFileURL(path.join(pdfjsDir, "standard_fonts") + path.sep).href
     });
     const doc = await task.promise;
     pages = doc.numPages;

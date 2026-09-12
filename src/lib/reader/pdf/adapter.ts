@@ -68,7 +68,8 @@ async function outlineDestToPage(doc: { getDestination(d: string): Promise<unkno
 
 export function createPdfKernel(host: HTMLElement): ReaderKernel {
   const container = document.createElement("div");
-  container.className = "pdf-viewer-container";
+  // pdf-loading 态：大书解析+首屏渲染需要数秒，期间显示加载提示（open 完成后移除，见下）
+  container.className = "pdf-viewer-container pdf-loading";
   container.style.position = "absolute";
   container.style.inset = "0";
   container.style.overflow = "auto";
@@ -232,6 +233,7 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       } catch {
         /* 忽略 */
       }
+      container.classList.remove("pdf-loading");
       currentPage = viewer.currentPageNumber;
       lastEmittedPage = 0;
       emitRelocate(currentPage);
@@ -387,7 +389,9 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     }
   };
 
-  // 大纲缓存（getTOC 同步接口）：open 完成后异步填充
+  // 大纲缓存（getTOC 同步接口）：open 完成后异步填充。
+  // label 一律带页码后缀：部分 PDF 的大纲标题是程序生成的无意义名（实测有 l1/l2/l3），
+  // 页码是唯一可靠信息；dest 解析失败的条目跳过（点击无反应不如不显示）。
   const tocCache: ReaderTocItem[] = [];
   const fillToc = async () => {
     tocCache.length = 0;
@@ -398,11 +402,10 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
         const out: ReaderTocItem[] = [];
         for (const e of entries || []) {
           const page = e.dest != null ? await outlineDestToPage(doc as never, e.dest) : null;
-          out.push({
-            label: String(e.title || "").trim() || "未命名章节",
-            href: page != null ? `pdfpage:${page}` : "",
-            subitems: await walk(e.items)
-          });
+          if (page == null) continue; // dest 解析失败 → 跳过
+          const title = String(e.title || "").trim();
+          const label = `${title || "未命名章节"} ·第 ${page + 1} 页`;
+          out.push({ label, href: `pdfpage:${page}`, subitems: await walk(e.items) });
         }
         return out;
       };

@@ -83,7 +83,7 @@ window.__pdfTest = {
 
     // 大纲
     const toc = kernel.getTOC();
-    check("P4 大纲 2 条（Chapter One/Two）", toc.length === 2 && toc[0].label === "Chapter One" && toc[1].label === "Chapter Two", JSON.stringify(toc.map((t) => t.label)));
+    check("P4 大纲 2 条（label 带页码后缀）", toc.length === 2 && toc[0].label === "Chapter One ·第 1 页" && toc[1].label === "Chapter Two ·第 3 页", JSON.stringify(toc.map((t) => t.label)));
 
     // 选区：在文本层用 Range 选词 → getSelection 取页码
     let selOk = false;

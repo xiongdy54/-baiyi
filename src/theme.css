@@ -1769,6 +1769,19 @@ body.theme-dark .modal-panel {
 .reader-engine-host .pdf-viewer-container .pdfViewer .page {
   margin: 0 auto 12px auto;
 }
+/* v28 加载态：大书解析+首屏渲染需数秒，期间显示提示（在 container 层，不吃 viewerEl 的反色滤镜） */
+.reader-engine-host .pdf-viewer-container.pdf-loading::after {
+  content: "正在加载 PDF…";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--reader-fg, #999);
+  font-size: 14px;
+  background: var(--reader-bg, transparent);
+  z-index: 5;
+}
 /* foliate paginator 的背景层（closed shadow root 经 exportparts 导出）随阅读主题 */
 .reader-engine-host foliate-paginator::part(filter) {
   background: var(--reader-bg, transparent) !important;

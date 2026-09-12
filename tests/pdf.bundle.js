@@ -37267,7 +37267,7 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
   }
   function createPdfKernel(host) {
     const container = document.createElement("div");
-    container.className = "pdf-viewer-container";
+    container.className = "pdf-viewer-container pdf-loading";
     container.style.position = "absolute";
     container.style.inset = "0";
     container.style.overflow = "auto";
@@ -37402,6 +37402,7 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
           viewer.update();
         } catch {
         }
+        container.classList.remove("pdf-loading");
         currentPage = viewer.currentPageNumber;
         lastEmittedPage = 0;
         emitRelocate(currentPage);
@@ -37541,11 +37542,10 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
           const out = [];
           for (const e of entries || []) {
             const page = e.dest != null ? await outlineDestToPage(doc, e.dest) : null;
-            out.push({
-              label: String(e.title || "").trim() || "\u672A\u547D\u540D\u7AE0\u8282",
-              href: page != null ? `pdfpage:${page}` : "",
-              subitems: await walk(e.items)
-            });
+            if (page == null) continue;
+            const title = String(e.title || "").trim();
+            const label = `${title || "\u672A\u547D\u540D\u7AE0\u8282"} \xB7\u7B2C ${page + 1} \u9875`;
+            out.push({ label, href: `pdfpage:${page}`, subitems: await walk(e.items) });
           }
           return out;
         };
@@ -44039,7 +44039,7 @@ button.hasPopupMenu{
       }
       check("P3 \u9875\u9762 canvas \u6E32\u67D3", host.querySelectorAll("canvas").length > 0, "canvas=" + host.querySelectorAll("canvas").length);
       const toc = kernel.getTOC();
-      check("P4 \u5927\u7EB2 2 \u6761\uFF08Chapter One/Two\uFF09", toc.length === 2 && toc[0].label === "Chapter One" && toc[1].label === "Chapter Two", JSON.stringify(toc.map((t) => t.label)));
+      check("P4 \u5927\u7EB2 2 \u6761\uFF08label \u5E26\u9875\u7801\u540E\u7F00\uFF09", toc.length === 2 && toc[0].label === "Chapter One \xB7\u7B2C 1 \u9875" && toc[1].label === "Chapter Two \xB7\u7B2C 3 \u9875", JSON.stringify(toc.map((t) => t.label)));
       let selOk = false;
       let selDetail = "";
       try {
