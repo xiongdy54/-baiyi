@@ -198,15 +198,27 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       }
       const loadingTask = getDocument({
         data: source.bytes.slice(),
-        // cMap/标准字体走 public/pdfjs（Vite 构建直拷 dist，file 协议可达；CJK CID 字体必需）
-        cMapUrl: new URL("./pdfjs/cmaps/", document.baseURI).toString(),
+        // cMap/标准字体走 pdfres:// 特权协议（main.js 注册，资源=public/pdfjs 构建时拷进 dist/pdfjs）。
+        // 不能用 file:// URL：file:// 页面里 fetch/XHR file:// 子资源被 Chromium 拦截 → 字形数据加载
+        // 全部失败 → 白轮廓无文字 + 重试风暴（Firefox 快是因为其内嵌 viewer 无此限制）。
+        // 四类资源缺一不可：wasm=JPX/JBIG2 解码器（缺→封面图卡死渲染队列）、icc=色彩、cmap=CJK
+        cMapUrl: "pdfres://cmaps/",
         cMapPacked: true,
-        standardFontDataUrl: new URL("./pdfjs/standard_fonts/", document.baseURI).toString()
+        iccUrl: "pdfres://iccs/",
+        standardFontDataUrl: "pdfres://standard_fonts/",
+        wasmUrl: "pdfres://wasm/"
       } as never);
       doc = (await loadingTask.promise) as unknown as PdfDoc;
+      console.log("[pdf-dbg] doc loaded, pages:", doc.numPages);
       totalPages = doc.numPages;
       linkService.setDocument(doc as never, null);
+      console.log("[pdf-dbg] setDocument begin");
       viewer.setDocument(doc as never);
+      console.log("[pdf-dbg] setDocument returned");
+      console.log("[pdf-dbg] waiting pagesinit...");
+      eventBus.on("pagerendered", (e: unknown) => console.log("[pdf-dbg] pagerendered:", JSON.stringify((e as { pageNumber?: number }).pageNumber)));
+      eventBus.on("pageerror", (e: unknown) => console.log("[pdf-dbg] PAGE ERROR:", JSON.stringify((e as { message?: string }).message)));
+      eventBus.on("error", (e: unknown) => console.log("[pdf-dbg] bus error:", JSON.stringify(e)));
       // 等待首屏渲染完成再定位（pagesinit 后 currentPageNumber 可写）
       await new Promise<void>((resolve) => {
         const onInit = () => {
@@ -226,14 +238,17 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       } else if (loc?.fraction != null && totalPages > 0) {
         viewer.currentPageNumber = Math.min(totalPages, Math.max(1, Math.round(loc.fraction * totalPages)));
       }
-      // 定位后强制滚动目标页进入视口（恢复打开时页面可能尚未进入渲染队列，尤其直接落在非首屏页时）
       try {
         viewer.scrollPageIntoView({ pageNumber: viewer.currentPageNumber });
         viewer.update();
-      } catch {
-        /* 忽略 */
+        console.log("[pdf-dbg] scroll+update ok");
+      } catch (e) {
+        console.log("[pdf-dbg] scroll/update THREW:", String(e));
       }
+      console.log("[pdf-dbg] pagesinit wait done");
       container.classList.remove("pdf-loading");
+      // 调试钩子（__readerKernel 同模式）：暴露 viewer 内部渲染状态，供 L1/L2 探针与现场诊断
+      (window as unknown as { __pdfViewerDebug?: unknown }).__pdfViewerDebug = viewer;
       currentPage = viewer.currentPageNumber;
       lastEmittedPage = 0;
       emitRelocate(currentPage);

@@ -53,7 +53,10 @@ const {
 } = require("./importers");
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: "bookasset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+  { scheme: "bookasset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  // M6-2 修订（v28）：pdf.js 的 cMap/标准字体资源——file:// 页面里 fetch file:// 会被 Chromium 拦截
+  // （导致字形数据加载失败→白轮廓无文字+重试风暴），走特权协议供渲染进程与 worker fetch
+  { scheme: "pdfres", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
 ]);
 
 const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
@@ -216,17 +219,16 @@ ipcMain.handle("library:createFromPdf", async (_e, payload) => {
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     // pdf.js v6 无 PDFDocumentProxy.destroy（已移除），资源释放调 loadingTask.destroy()
-    // 主进程直读 node_modules 的 cMap/标准字体（file URL；缺了它每页字体加载都会刷
-    // "Ensure that the `standardFontDataUrl` API parameter is provided." 警告）
-    const { pathToFileURL } = require("url");
-    const pdfjsDir = path.join(__dirname, "..", "node_modules", "pdfjs-dist");
+    // 主进程（Node 环境）选 NodeBinaryDataFactory（fs.readFile）——必须传正斜杠普通路径 +
+    // 结尾斜杠（getFactoryUrlProp 校验）；file:// 字符串会被 fs 当路径解析必然失败
+    const pdfjsDir = path.join(__dirname, "..", "node_modules", "pdfjs-dist").replace(/\\/g, "/");
     const task = pdfjs.getDocument({
       data: new Uint8Array(buf),
       useWorkerFetch: false,
       isEvalSupported: false,
-      cMapUrl: pathToFileURL(path.join(pdfjsDir, "cmaps") + path.sep).href,
+      cMapUrl: `${pdfjsDir}/cmaps/`,
       cMapPacked: true,
-      standardFontDataUrl: pathToFileURL(path.join(pdfjsDir, "standard_fonts") + path.sep).href
+      standardFontDataUrl: `${pdfjsDir}/standard_fonts/`
     });
     const doc = await task.promise;
     pages = doc.numPages;
@@ -554,7 +556,10 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // v28：PDF 原生阅读依赖 rAF 驱动渲染循环——窗口遮挡时 Chromium 暂停 rAF 会导致
+      // pdf.js 渲染任务永远停在 RUNNING（实测白轮廓/黑屏/看似无响应），阅读器禁用节流
+      backgroundThrottling: false
     }
   });
   // 阅读内核导航防护（v20）：渲染层发起的任何页面级导航一律拦截——
@@ -614,6 +619,33 @@ app.whenReady().then(async () => {
         jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
         gif: "image/gif", webp: "image/webp", svg: "image/svg+xml"
       };
+      return new Response(data, { headers: { "content-type": types[ext] || "application/octet-stream" } });
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+  });
+
+  // M6-2 修订（v28）：pdfres:// 协议——供 pdf.js 加载 cMap/标准字体/ICC/JSXX-wasm 四类资源
+  // （host=cmaps|standard_fonts|iccs|wasm，path=文件名；缺 icc/wasm 时渲染任务会卡死在 loading 态）。
+  // 资源基目录优先 dist/pdfjs（构建产物），纯 dev（无 dist）回退 public/pdfjs。
+  const pdfjsResBase = fs.existsSync(path.join(__dirname, "../dist/pdfjs"))
+    ? path.join(__dirname, "../dist/pdfjs")
+    : path.join(__dirname, "../public/pdfjs");
+  const PDFRES_DIRS = new Set(["cmaps", "standard_fonts", "iccs", "wasm"]);
+  protocol.handle("pdfres", (request) => {
+    try {
+      const url = new URL(request.url);
+      const dir = url.hostname;
+      if (!PDFRES_DIRS.has(dir)) {
+        return new Response("bad request", { status: 400 });
+      }
+      const filename = decodeURIComponent(url.pathname).replace(/^\//, "");
+      if (!/^[A-Za-z0-9._-]+$/.test(filename)) {
+        return new Response("bad request", { status: 400 });
+      }
+      const data = fs.readFileSync(path.join(pdfjsResBase, dir, filename));
+      const ext = path.extname(filename).slice(1).toLowerCase();
+      const types = { ttf: "font/ttf", otf: "font/otf", woff: "font/woff", woff2: "font/woff2", pfb: "application/octet-stream", bcmap: "application/octet-stream" };
       return new Response(data, { headers: { "content-type": types[ext] || "application/octet-stream" } });
     } catch {
       return new Response("not found", { status: 404 });

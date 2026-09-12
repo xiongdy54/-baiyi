@@ -2,9 +2,15 @@
 // 运行：npx electron tests/pdf.kernel.cjs（须先关闭应用，§7.1.8）
 // 只证明 adapter 忠实实现 ReaderKernel 页码锚点契约；业务安全由 tests/m6-2native.gui.mjs（L2）证明。
 // driver 每次运行前重新 esbuild 打包（esbuild JS API——Windows 下 execSync+npx 有挂起问题，禁用）。
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, protocol } = require("electron");
 const path = require("path");
 const fs = require("fs");
+
+// pdfres 协议（与 electron/main.js 同构）：L1 测试的 adapter 硬编码 pdfres:// 加载 cMap/标准字体，
+// 测试 harness 必须自行注册（registerSchemesAsPrivileged 须在 app ready 前调用）
+protocol.registerSchemesAsPrivileged([
+  { scheme: "pdfres", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+]);
 
 let pass = 0;
 let fail = 0;
@@ -84,6 +90,24 @@ function buildPdfFixture() {
 }
 
 app.whenReady().then(async () => {
+  // pdfres handler：资源取 node_modules/pdfjs-dist（测试不走 dist/public）
+  const pdfjsResBase = path.join(__dirname, "..", "node_modules", "pdfjs-dist");
+  const PDFRES_DIRS = new Set(["cmaps", "standard_fonts", "iccs", "wasm"]);
+  protocol.handle("pdfres", (request) => {
+    try {
+      const url = new URL(request.url);
+      const dir = url.hostname;
+      if (!PDFRES_DIRS.has(dir)) return new Response("bad request", { status: 400 });
+      const filename = decodeURIComponent(url.pathname).replace(/^\//, "");
+      if (!/^[A-Za-z0-9._-]+$/.test(filename)) return new Response("bad request", { status: 400 });
+      const data = fs.readFileSync(path.join(pdfjsResBase, dir, filename));
+      const ext = path.extname(filename).slice(1).toLowerCase();
+      const types = { ttf: "font/ttf", otf: "font/otf", pfb: "application/octet-stream", bcmap: "application/octet-stream", icc: "application/octet-stream", wasm: "application/wasm" };
+      return new Response(data, { headers: { "content-type": types[ext] || "application/octet-stream" } });
+    } catch {
+      return new Response("not found", { status: 404 });
+    }
+  });
   fs.writeFileSync(LOG, "");
   setTimeout(() => {
     logLine("GLOBAL TIMEOUT——套件挂起");

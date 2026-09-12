@@ -37370,15 +37370,27 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
         }
         const loadingTask = getDocument({
           data: source.bytes.slice(),
-          // cMap/标准字体走 public/pdfjs（Vite 构建直拷 dist，file 协议可达；CJK CID 字体必需）
-          cMapUrl: new URL("./pdfjs/cmaps/", document.baseURI).toString(),
+          // cMap/标准字体走 pdfres:// 特权协议（main.js 注册，资源=public/pdfjs 构建时拷进 dist/pdfjs）。
+          // 不能用 file:// URL：file:// 页面里 fetch/XHR file:// 子资源被 Chromium 拦截 → 字形数据加载
+          // 全部失败 → 白轮廓无文字 + 重试风暴（Firefox 快是因为其内嵌 viewer 无此限制）。
+          // 四类资源缺一不可：wasm=JPX/JBIG2 解码器（缺→封面图卡死渲染队列）、icc=色彩、cmap=CJK
+          cMapUrl: "pdfres://cmaps/",
           cMapPacked: true,
-          standardFontDataUrl: new URL("./pdfjs/standard_fonts/", document.baseURI).toString()
+          iccUrl: "pdfres://iccs/",
+          standardFontDataUrl: "pdfres://standard_fonts/",
+          wasmUrl: "pdfres://wasm/"
         });
         doc = await loadingTask.promise;
+        console.log("[pdf-dbg] doc loaded, pages:", doc.numPages);
         totalPages = doc.numPages;
         linkService.setDocument(doc, null);
+        console.log("[pdf-dbg] setDocument begin");
         viewer.setDocument(doc);
+        console.log("[pdf-dbg] setDocument returned");
+        console.log("[pdf-dbg] waiting pagesinit...");
+        eventBus.on("pagerendered", (e) => console.log("[pdf-dbg] pagerendered:", JSON.stringify(e.pageNumber)));
+        eventBus.on("pageerror", (e) => console.log("[pdf-dbg] PAGE ERROR:", JSON.stringify(e.message)));
+        eventBus.on("error", (e) => console.log("[pdf-dbg] bus error:", JSON.stringify(e)));
         await new Promise((resolve) => {
           const onInit = () => {
             eventBus.off("pagesinit", onInit);
@@ -37400,9 +37412,13 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
         try {
           viewer.scrollPageIntoView({ pageNumber: viewer.currentPageNumber });
           viewer.update();
-        } catch {
+          console.log("[pdf-dbg] scroll+update ok");
+        } catch (e) {
+          console.log("[pdf-dbg] scroll/update THREW:", String(e));
         }
+        console.log("[pdf-dbg] pagesinit wait done");
         container.classList.remove("pdf-loading");
+        window.__pdfViewerDebug = viewer;
         currentPage = viewer.currentPageNumber;
         lastEmittedPage = 0;
         emitRelocate(currentPage);
