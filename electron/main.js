@@ -43,6 +43,13 @@ const { getAIConfig, setAIConfig, chatStream, testConnection, listModels } = req
 const dbModule = require("./db");
 const optimizer = require("./optimizer");
 const backup = require("./backup");
+const {
+  wordToMarkdown,
+  decodeTextBytes,
+  txtToMarkdown,
+  markdownFromText,
+  titleFromFilename
+} = require("./importers");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "bookasset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
@@ -118,6 +125,82 @@ ipcMain.handle("library:createFromEpub", (_e, payload) => {
   if (!markdown || !String(markdown).trim()) return null;
   return createFromEpub(title, String(markdown), toc || [], coverDataUrl, epubData, sourceName);
 });
+
+// ---------- M6-1（v26）导入格式扩展：Word（含内嵌图）/ TXT / Markdown（转换在主进程，见 importers.js） ----------
+const IMPORT_PICK_FILTERS = {
+  word: { name: "Word 文档", extensions: ["docx"] },
+  txt: { name: "文本文档", extensions: ["txt"] },
+  markdown: { name: "Markdown 文档", extensions: ["md", "markdown"] }
+};
+
+async function pickImportFile(kind) {
+  const result = await dialog.showOpenDialog({
+    filters: [IMPORT_PICK_FILTERS[kind]],
+    properties: ["openFile"]
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const filePath = result.filePaths[0];
+  return { name: path.basename(filePath), path: filePath };
+}
+
+ipcMain.handle("library:pickWord", () => pickImportFile("word"));
+ipcMain.handle("library:pickTxt", () => pickImportFile("txt"));
+ipcMain.handle("library:pickMarkdown", () => pickImportFile("markdown"));
+
+ipcMain.handle("library:createFromWord", async (_e, payload) => {
+  const { path: filePath, name } = payload || {};
+  if (!filePath) return null;
+  const buf = fs.readFileSync(String(filePath));
+  const { markdown, images } = await wordToMarkdown(buf);
+  if (!markdown.trim()) throw new Error("未能从该 Word 文档中提取到文本内容");
+  return dbModule.createImportedDoc({
+    title: titleFromFilename(name),
+    markdown,
+    sourceType: "word",
+    sourceName: name || null,
+    originalName: "original.docx",
+    originalBuf: buf,
+    images
+  });
+});
+
+ipcMain.handle("library:createFromTxt", (_e, payload) => {
+  const { path: filePath, name } = payload || {};
+  if (!filePath) return null;
+  const buf = fs.readFileSync(String(filePath));
+  const { text } = decodeTextBytes(buf);
+  const markdown = txtToMarkdown(text);
+  if (!markdown.trim()) throw new Error("该文本文件没有可导入的内容");
+  return dbModule.createImportedDoc({
+    title: titleFromFilename(name),
+    markdown,
+    sourceType: "txt",
+    sourceName: name || null,
+    originalName: "original.txt",
+    originalBuf: buf,
+    images: []
+  });
+});
+
+ipcMain.handle("library:createFromMarkdown", (_e, payload) => {
+  const { path: filePath, name } = payload || {};
+  if (!filePath) return null;
+  const buf = fs.readFileSync(String(filePath));
+  const markdown = markdownFromText(decodeTextBytes(buf).text);
+  if (!markdown.trim()) throw new Error("该 Markdown 文件没有可导入的内容");
+  return dbModule.createImportedDoc({
+    title: titleFromFilename(name),
+    markdown,
+    sourceType: "markdown",
+    sourceName: name || null,
+    originalName: "original.md",
+    originalBuf: buf,
+    images: []
+  });
+});
+
+// 读侧：取回某本书的内嵌图字节（合成 EPUB 时落进 OEBPS/images/）
+ipcMain.handle("library:readContentImages", (_e, itemId) => dbModule.readContentImages(String(itemId)));
 
 ipcMain.handle("library:doc", (_e, itemId) => getDocument(String(itemId)));
 ipcMain.handle("library:itemByDoc", (_e, docId) => getItemIdByDocumentId(String(docId)));

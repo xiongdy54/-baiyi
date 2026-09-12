@@ -39,6 +39,26 @@ export default function AddBookModal({ onSave, onClose }: Props) {
     }
   }
 
+  // M6-1（v26）：Word（含内嵌图）/ TXT / Markdown 导入——pick 取消则静默返回，转换失败弹错
+  async function handleImportFile(kind: "word" | "txt" | "markdown") {
+    setImporting(true);
+    try {
+      const picked = await libraryApi.pickImport(kind);
+      if (!picked) return;
+      const ok = await libraryApi.createImported(kind, picked);
+      if (ok) {
+        eventBus.emit("library/changed");
+        onClose();
+      } else {
+        window.alert("导入失败：未能从该文件提取到内容");
+      }
+    } catch (err) {
+      window.alert(`导入失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
@@ -76,7 +96,16 @@ export default function AddBookModal({ onSave, onClose }: Props) {
               <path d="m8 11 4 4 4-4" />
               <path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4" />
             </svg>
-            {importing ? "导入中…" : "导入 EPUB 文件"}
+            {importing ? "导入中…" : "导入 EPUB"}
+          </button>
+          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("word")}>
+            导入 Word
+          </button>
+          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("txt")}>
+            导入 TXT
+          </button>
+          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("markdown")}>
+            导入 Markdown
           </button>
           <span className="form-actions-spacer" />
           <button className="btn btn-secondary" onClick={onClose}>取消</button>

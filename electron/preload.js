@@ -23,7 +23,16 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   getItemIdByDocumentId: (docId) => ipcRenderer.invoke("library:itemByDoc", docId),
   updateProgress: (id, progress) => ipcRenderer.invoke("library:updateProgress", id, progress),
   // 阅读内核（v20）：读原书字节给 foliate 打开
-  readBookFile: (id) => ipcRenderer.invoke("library:readBookFile", id)
+  readBookFile: (id) => ipcRenderer.invoke("library:readBookFile", id),
+  // M6-1（v26）：导入格式扩展 Word/TXT/Markdown（pick 返回 {name,path}，create 在主进程完成转换与建册）
+  pickWord: () => ipcRenderer.invoke("library:pickWord"),
+  pickTxt: () => ipcRenderer.invoke("library:pickTxt"),
+  pickMarkdown: () => ipcRenderer.invoke("library:pickMarkdown"),
+  createFromWord: (payload) => ipcRenderer.invoke("library:createFromWord", payload),
+  createFromTxt: (payload) => ipcRenderer.invoke("library:createFromTxt", payload),
+  createFromMarkdown: (payload) => ipcRenderer.invoke("library:createFromMarkdown", payload),
+  // 读侧：某本书的内嵌图字节（[{filename, bytes:Uint8Array}]），随合成 EPUB 落包
+  readContentImages: (id) => ipcRenderer.invoke("library:readContentImages", id)
 });
 
 contextBridge.exposeInMainWorld("workflowAPI", {

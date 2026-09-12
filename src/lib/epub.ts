@@ -139,7 +139,7 @@ function stableHash(s: string): string {
   return h.toString(36);
 }
 
-export const SYNTH_GENERATOR_VERSION = "syn-1";
+export const SYNTH_GENERATOR_VERSION = "syn-2"; // syn-2（v26）：增图片能力（opts.images→OEBPS/images/）；无图输入与 syn-1 结构逐字节同构
 
 const synthMd: MarkdownIt = new MarkdownIt({ html: false, linkify: false, typographer: false });
 
@@ -212,12 +212,51 @@ ${bodyHtml}
  * 生成合成 EPUB 字节 + 目录（供粘贴书/摘录进入统一阅读内核）。
  * KaTeX CSS 以 author style 内嵌首页（katex.min.css 体积可控且随书分发）。
  */
+/** 合成书内嵌图片：filename 为 markdown 引用的相对名（img-0.png），bytes 为原始字节 */
+export interface SynthImage {
+  filename: string;
+  bytes: Uint8Array;
+  mediaType: string;
+}
+
+/** 章节 HTML 内 <img src> 重写：markdown 引用名 → EPUB 内部路径 images/<filename>（仅命中提供的文件名，其余原样） */
+export function rewriteImgSrcs(bodyHtml: string, filenames: Set<string>): string {
+  if (!filenames.size) return bodyHtml;
+  return bodyHtml.replace(/(<img\b[^>]*?\ssrc=)("([^"]*)"|'([^']*)')/g, (m, head, _q, dq, sq) => {
+    let src = (dq !== undefined ? dq : sq).trim();
+    if (src.startsWith("./")) src = src.slice(2);
+    if (!filenames.has(src)) return m;
+    return `${head}"images/${src}"`;
+  });
+}
+
+const imageExtMime: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp"
+};
+
+export function mediaTypeForFilename(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  return imageExtMime[ext] || "application/octet-stream";
+}
+
+/** 图片字节哈希后缀（仅有图时非空 → 无图 identifier 与 syn-1 恒等，CFI 稳定性不受影响） */
+function imageHashSuffix(images: SynthImage[]): string {
+  if (!images.length) return "";
+  const parts = images.map((im) => {
+    let h = 5381;
+    for (let i = 0; i < im.bytes.length; i++) h = ((h << 5) + h + im.bytes[i]) >>> 0;
+    return `${im.filename}:${h.toString(36)}`;
+  });
+  return "|imgs:" + parts.join(",");
+}
+
 export async function buildSyntheticEpub(
   title: string,
   markdown: string,
-  opts?: { lang?: string; embedKatexCss?: boolean }
+  opts?: { lang?: string; embedKatexCss?: boolean; images?: SynthImage[] }
 ): Promise<{ bytes: Uint8Array; toc: { label: string; href: string }[] }> {
   const lang = opts?.lang || "zh";
+  const images = (opts?.images ?? []).filter((im) => im && im.filename && im.bytes && im.bytes.length > 0);
   const chapters = splitMarkdownChapters(markdown);
   const zip = new JSZip();
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
@@ -228,11 +267,16 @@ export async function buildSyntheticEpub(
   <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
 </container>`
   );
+  // 图片资源：文件名去重集合驱动 src 重写与 manifest 条目
+  const imageNameSet = new Set(images.map((im) => im.filename));
   const manifestItems: string[] = [];
   const spineRefs: string[] = [];
   chapters.forEach((c, i) => {
     manifestItems.push(`    <item id="c${i}" href="c${i}.xhtml" media-type="application/xhtml+xml"/>`);
     spineRefs.push(`    <itemref idref="c${i}"/>`);
+  });
+  images.forEach((im, i) => {
+    manifestItems.push(`    <item id="img${i}" href="images/${escapeXml(im.filename)}" media-type="${im.mediaType || mediaTypeForFilename(im.filename)}"/>`);
   });
   manifestItems.push('    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>');
   zip.file(
@@ -240,7 +284,7 @@ export async function buildSyntheticEpub(
     `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="uid">urn:uuid:synthetic-${stableHash(title + " " + markdown)}</dc:identifier>
+    <dc:identifier id="uid">urn:uuid:synthetic-${stableHash(title + " " + markdown + imageHashSuffix(images))}</dc:identifier>
     <dc:title>${escapeXml(title)}</dc:title>
     <dc:language>${lang}</dc:language>
     <meta property="dcterms:modified">2026-09-10T00:00:00Z</meta>
@@ -268,7 +312,12 @@ ${tocLis}
   );
   const katexCss = opts?.embedKatexCss === false ? "" : katexCssText;
   chapters.forEach((c, i) => {
-    zip.file(`OEBPS/c${i}.xhtml`, xhtmlDoc(c.title || `第 ${i + 1} 章`, c.bodyHtml, lang, i === 0 ? katexCss : undefined));
+    const bodyHtml = imageNameSet.size ? rewriteImgSrcs(c.bodyHtml, imageNameSet) : c.bodyHtml;
+    zip.file(`OEBPS/c${i}.xhtml`, xhtmlDoc(c.title || `第 ${i + 1} 章`, bodyHtml, lang, i === 0 ? katexCss : undefined));
+  });
+  // 图片字节落包（OEBPS/images/，与 manifest href 对应）
+  images.forEach((im) => {
+    zip.file(`OEBPS/images/${im.filename}`, im.bytes);
   });
   const bytes = await zip.generateAsync({ type: "uint8array", mimeType: "application/epub+zip" });
   const toc = chapters.map((c, i) => ({ label: c.title || `第 ${i + 1} 章`, href: `c${i}.xhtml` }));

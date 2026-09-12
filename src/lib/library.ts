@@ -11,6 +11,14 @@ declare global {
       getItemIdByDocumentId: (docId: string) => Promise<string | null>;
       updateProgress: (id: string, progress: unknown) => Promise<boolean>;
       readBookFile: (id: string) => Promise<Uint8Array | null>;
+      // M6-1（v26）：Word/TXT/Markdown 导入（pick 返回 {name,path}；create 在主进程转换+建册）
+      pickWord?: () => Promise<{ name: string; path: string } | null>;
+      pickTxt?: () => Promise<{ name: string; path: string } | null>;
+      pickMarkdown?: () => Promise<{ name: string; path: string } | null>;
+      createFromWord?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string } | null>;
+      createFromTxt?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string } | null>;
+      createFromMarkdown?: (payload: { name: string; path: string }) => Promise<{ id: string; title: string } | null>;
+      readContentImages?: (id: string) => Promise<{ filename: string; bytes: Uint8Array }[]>;
     };
   }
 }
@@ -84,6 +92,29 @@ export const libraryApi = {
   async createFromEpub(payload: unknown): Promise<boolean> {
     if (!window.libraryAPI) return false;
     return (await window.libraryAPI.createFromEpub(payload)) !== null;
+  },
+  // M6-1（v26）：Word/TXT/Markdown 导入——pick 返回 null 表示用户取消；create 失败抛错由调用方提示
+  async pickImport(kind: "word" | "txt" | "markdown"): Promise<{ name: string; path: string } | null> {
+    const api = window.libraryAPI;
+    if (!api) return null;
+    if (kind === "word") return (await api.pickWord?.()) ?? null;
+    if (kind === "txt") return (await api.pickTxt?.()) ?? null;
+    return (await api.pickMarkdown?.()) ?? null;
+  },
+  async createImported(kind: "word" | "txt" | "markdown", picked: { name: string; path: string }): Promise<boolean> {
+    const api = window.libraryAPI;
+    if (!api) return false;
+    const result =
+      kind === "word"
+        ? await api.createFromWord?.(picked)
+        : kind === "txt"
+          ? await api.createFromTxt?.(picked)
+          : await api.createFromMarkdown?.(picked);
+    return result !== null && result !== undefined;
+  },
+  /** M6-1（v26）：读取某本书的内嵌图字节（Word 导入时落 assets kind=image-content），随合成 EPUB 内嵌 */
+  async readContentImages(itemId: string): Promise<{ filename: string; bytes: Uint8Array }[]> {
+    return (await window.libraryAPI?.readContentImages?.(itemId)) ?? [];
   },
   async remove(id: string): Promise<boolean> {
     if (!window.libraryAPI) return false;

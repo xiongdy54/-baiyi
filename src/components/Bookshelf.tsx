@@ -43,7 +43,7 @@ export default function Bookshelf({ onOpenBook }: Props) {
             <span className="empty-sq" />
           </div>
           <p className="empty-text">
-            书架还是空的。粘贴一段文本，或导入一本 EPUB，开始你的渐进阅读。
+            书架还是空的。粘贴一段文本，或导入 EPUB / Word / TXT / Markdown 文件，开始你的渐进阅读。
           </p>
           <button className="btn btn-primary" onClick={() => setAddOpen(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

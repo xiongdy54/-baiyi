@@ -509,6 +509,62 @@ function firstLine(markdown) {
   return line.replace(/^#+\s*/, "").slice(0, 30);
 }
 
+// M6-1（v26）：导入格式扩展 —— Word/TXT/Markdown 统一建册（照抄 createFromEpub 形状）。
+// source_type ∈ word|txt|markdown；原文件落 assets kind=<sourceType>-original；内嵌图落 kind=image-content
+// （文件名 img-N.ext 确定性命名，读侧 readContentImages 取回字节随合成 EPUB 内嵌，M2 备份自动覆盖）。
+function createImportedDoc({ title, markdown, sourceType, sourceName, originalName, originalBuf, images }) {
+  const cleanTitle = String(title || "").trim() || firstLine(markdown) || "未命名书籍";
+  const itemId = crypto.randomUUID();
+  const docId = crypto.randomUUID();
+  const now = Date.now();
+  const dir = path.join(app.getPath("userData"), "assets", itemId);
+  fs.mkdirSync(dir, { recursive: true });
+
+  if (originalBuf && originalBuf.length) {
+    fs.writeFileSync(path.join(dir, originalName), originalBuf);
+    addAssetRow(itemId, `${sourceType}-original`, originalName, sha256(originalBuf), now);
+  }
+  for (const im of images || []) {
+    const buf = Buffer.isBuffer(im.bytes) ? im.bytes : Buffer.from(im.bytes);
+    if (!buf.length) continue;
+    if (!/^[\w.-]+$/.test(String(im.filename))) continue; // 文件名防穿越（导入器产出的 img-N.ext 恒命中）
+    fs.writeFileSync(path.join(dir, im.filename), buf);
+    addAssetRow(itemId, "image-content", im.filename, sha256(buf), now);
+  }
+
+  db.run(
+    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, NULL, ?, ?, 0, 0)`,
+    [itemId, cleanTitle, String(sourceType), sourceName || null, now, now]
+  );
+  db.run(
+    `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, ?, ?, '[]', NULL, ?, ?, 0, 0)`,
+    [docId, itemId, String(markdown), now, now]
+  );
+  persist();
+  return { id: itemId, title: cleanTitle };
+}
+
+// M6-1（v26）：读侧取回内嵌图字节（合成 EPUB 时由 buildSyntheticEpub 落进 OEBPS/images/）
+function readContentImages(itemId) {
+  const rows = queryAll(
+    "SELECT path FROM assets WHERE library_item_id = ? AND kind = 'image-content' AND is_deleted = 0 ORDER BY path",
+    [String(itemId)]
+  );
+  const out = [];
+  for (const r of rows) {
+    if (!r.path) continue;
+    try {
+      out.push({
+        filename: r.path,
+        bytes: new Uint8Array(fs.readFileSync(path.join(app.getPath("userData"), "assets", String(itemId), r.path))),
+      });
+    } catch { /* 单图缺失不阻塞整本，合成时该 src 原样保留 */ }
+  }
+  return out;
+}
+
 // 阅读内核（v20）：读取书架条目的原书文件（assets 表 kind='epub-original' → assets/<itemId>/<path>）。
 // 返回 Uint8Array 供 foliate 内核打开；无原书（如粘贴书）返回 null。
 function readBookFile(itemId) {
@@ -1493,6 +1549,7 @@ module.exports = {
   listItems,
   createFromPaste,
   createFromEpub,
+  createImportedDoc,
   deleteItem,
   getDocument,
   updateProgress,
@@ -1508,6 +1565,7 @@ module.exports = {
   listDueCards,
   listAllCards,
   readBookFile,
+  readContentImages,
   listAllReviewLogs,
   getItemIdByDocumentId,
   deleteCard,

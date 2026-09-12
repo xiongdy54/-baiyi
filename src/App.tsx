@@ -12,7 +12,7 @@ import { settingsStore } from "./lib/settings";
 import { commandRegistry } from "./lib/commands";
 import { libraryApi, type DocPayload } from "./lib/library";
 import { readingWorkflow } from "./lib/readingWorkflow";
-import { buildSyntheticEpub } from "./lib/epub";
+import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
 
 declare global {
@@ -136,12 +136,24 @@ export default function App() {
   }
 
   // 阅读内核分流（v20 一切皆书）：文件书读原书字节；粘贴书惰性确定性合成 EPUB（同 generatorVersion 结构恒同，CFI 稳定）
+  // M6-1（v26）：Word/TXT/Markdown 走同一 synth 分支；Word 内嵌图从 assets 取回字节随包内嵌（syn-2 图片能力）
   const loadReaderBook = useCallback(async (itemId: string, doc: DocPayload): Promise<{ bytes: Uint8Array; name: string } | undefined> => {
     if (doc.sourceType === "epub") {
       const bytes = await libraryApi.readBookFile(itemId);
       return bytes ? { bytes, name: "original.epub" } : undefined;
     }
-    const syn = await buildSyntheticEpub(doc.title, doc.markdown);
+    let images: SynthImage[] | undefined;
+    if (doc.sourceType === "word") {
+      const contentImages = await libraryApi.readContentImages(itemId);
+      if (contentImages.length) {
+        images = contentImages.map((im) => ({
+          filename: im.filename,
+          bytes: im.bytes,
+          mediaType: mediaTypeForFilename(im.filename)
+        }));
+      }
+    }
+    const syn = await buildSyntheticEpub(doc.title, doc.markdown, { images });
     return { bytes: syn.bytes, name: "synthetic.epub" };
   }, []);
 
