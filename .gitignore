@@ -1,3 +1,6 @@
 node_modules/
 dist/
 .zcode/
+
+# 测试日志（用完即删纪律）
+tests/*.log
