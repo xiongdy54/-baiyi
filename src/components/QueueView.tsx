@@ -4,7 +4,7 @@ import { eventBus } from "../lib/eventbus";
 
 interface Props {
   onOpen: (extractId: string) => void;
-  onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number }) => void;
+  onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number }, returnTo?: "review" | "queue" | "browse") => void;
 }
 
 export default function QueueView({ onOpen, onJumpToDoc }: Props) {
@@ -68,7 +68,7 @@ export default function QueueView({ onOpen, onJumpToDoc }: Props) {
                     onJumpToDoc(t.contextRef!.documentId!, {
                       anchorText: t.contextRef!.anchorText || t.contentMarkdown,
                       anchorRatio: t.contextRef!.anchorRatio
-                    });
+                    }, "queue");
                   }}
                 >
                   跳转原文 →

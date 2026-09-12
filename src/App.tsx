@@ -9,24 +9,34 @@ import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
 import Dashboard from "./components/dashboard/Dashboard";
 import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
+import { commandRegistry } from "./lib/commands";
 import { libraryApi, type DocPayload } from "./lib/library";
 import { readingWorkflow } from "./lib/readingWorkflow";
+import { buildSyntheticEpub } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
 
 declare global {
   interface Window {
-    windowAPI?: { minimize(): void; maximize(): void; close(): void };
+    windowAPI?: { minimize(): void; maximize(): void; close(): void; openExternal(url: string): Promise<boolean> };
   }
 }
 
 type View =
   | { name: "shelf" }
-  | { name: "reader"; itemId: string; doc: DocPayload; jumpAnchor?: { anchorText: string; anchorRatio?: number }; returnTo?: "review" | "queue" }
+  | {
+      name: "reader";
+      itemId: string;
+      doc: DocPayload;
+      /** 原书文件字节（存在即走阅读内核） */
+      book?: { bytes: Uint8Array; name: string };
+      jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number };
+      returnTo?: "review" | "queue" | "browse";
+    }
   | { name: "queue" }
   | { name: "review" }
   | { name: "browse" }
   | { name: "stats" }
-  | { name: "extractReader"; extractId: string };
+  | { name: "extractReader"; extractId: string; book?: { bytes: Uint8Array; name: string } };
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -74,6 +84,19 @@ export default function App() {
     document.body.classList.add(theme === "dark" ? "theme-dark" : "theme-light");
   }, [theme]);
 
+  // M4：CommandRegistry 全局键位分发（§4.2-2 落地）——读覆盖键位 + 装 keydown 监听
+  useEffect(() => {
+    void commandRegistry.init();
+    commandRegistry.install();
+  }, []);
+
+  // M4：设置弹窗打开期间抑制全局快捷键（弹窗无输入焦点时按键不得触发其下层的复习/阅读动作）
+  useEffect(() => {
+    if (settingsOpen) commandRegistry.pushSuppress("settings-modal");
+    else commandRegistry.popSuppress("settings-modal");
+    return () => commandRegistry.popSuppress("settings-modal");
+  }, [settingsOpen]);
+
   useEffect(() => {
     document.body.classList.toggle("has-skin", skinId !== "none");
     document.body.classList.remove(
@@ -112,11 +135,23 @@ export default function App() {
     eventBus.emit("settings/changed", { scope: "app", key: "accentColor" });
   }
 
-  const openBook = useCallback((itemId: string) => {
-    libraryApi.getDocument(itemId).then((doc) => {
-      if (doc) setView({ name: "reader", itemId, doc });
-    });
+  // 阅读内核分流（v20 一切皆书）：文件书读原书字节；粘贴书惰性确定性合成 EPUB（同 generatorVersion 结构恒同，CFI 稳定）
+  const loadReaderBook = useCallback(async (itemId: string, doc: DocPayload): Promise<{ bytes: Uint8Array; name: string } | undefined> => {
+    if (doc.sourceType === "epub") {
+      const bytes = await libraryApi.readBookFile(itemId);
+      return bytes ? { bytes, name: "original.epub" } : undefined;
+    }
+    const syn = await buildSyntheticEpub(doc.title, doc.markdown);
+    return { bytes: syn.bytes, name: "synthetic.epub" };
   }, []);
+
+  const openBook = useCallback((itemId: string) => {
+    libraryApi.getDocument(itemId).then(async (doc) => {
+      if (!doc) return;
+      const book = await loadReaderBook(itemId, doc);
+      setView({ name: "reader", itemId, doc, book });
+    });
+  }, [loadReaderBook]);
 
   const backToShelf = useCallback(() => setView({ name: "shelf" }), []);
 
@@ -143,41 +178,46 @@ export default function App() {
   );
 
   const handleDocProgress = useCallback(
-    (ratio: number, lastText: string) => {
+    (ratio: number, lastText: string, extra?: { cfi?: string; fraction?: number }) => {
       if (view.name === "reader") {
-        libraryApi.updateProgress(view.itemId, { ratio, lastText, updatedAt: Date.now() });
+        libraryApi.updateProgress(view.itemId, { ratio, lastText, updatedAt: Date.now(), ...extra });
       }
     },
     [view]
   );
 
   const openExtract = useCallback((extractId: string) => {
-    readingWorkflow.getTopic(extractId).then((detail) => {
-      if (detail) {
-        setExtractDetail(detail);
-        setView({ name: "extractReader", extractId });
-      }
+    readingWorkflow.getTopic(extractId).then(async (detail) => {
+      if (!detail) return;
+      // 摘录统一进阅读内核（v20）：内容合成为单章 EPUB；阅读进度/统计不落库（摘录非书）
+      const syn = await buildSyntheticEpub("摘录", detail.contentMarkdown, { embedKatexCss: false });
+      setExtractDetail(detail);
+      setView({ name: "extractReader", extractId, book: { bytes: syn.bytes, name: "synthetic.epub" } });
     });
   }, []);
 
-  // 需求2：复习卡「跳转原文」——documentId 反查书架条目，以锚点打开阅读器；返回按钮回到来源页
-  const handleJumpToDoc = useCallback(async (docId: string, anchor: { anchorText: string; anchorRatio?: number }) => {
-    try {
-      sessionStorage.setItem("reviewSession", JSON.stringify({ resume: true }));
-    } catch { /* sessionStorage 不可用时跳转仍生效，只是不恢复现场 */ }
+  // 「跳转原文」（复习卡 / 队列摘录 / 卡片浏览 共用）：documentId 反查书架条目，以锚点打开阅读器，
+  // 返回按钮回到来源页。跳转属「现场查看」语义（v19）：本次阅读器会话不落阅读进度与阅读字数，
+  // 切出后软件记录的位置仍是上次真实阅读的位置，不会被跳转位置覆盖。
+  const handleJumpToDoc = useCallback(async (
+    docId: string,
+    anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number },
+    returnTo: "review" | "queue" | "browse" = "review"
+  ) => {
+    if (returnTo === "review") {
+      // 仅复习来源需要现场恢复标记（返回时恢复该卡与翻面状态）
+      try {
+        sessionStorage.setItem("reviewSession", JSON.stringify({ resume: true }));
+      } catch { /* sessionStorage 不可用时跳转仍生效，只是不恢复现场 */ }
+    }
     const itemId = await libraryApi.getItemIdByDocumentId(docId);
     if (!itemId) return;
     const doc = await libraryApi.getDocument(itemId);
-    if (doc) setView({ name: "reader", itemId, doc, jumpAnchor: anchor, returnTo: "review" });
-  }, []);
-
-  // 需求2（摘录版）：摘录队列「跳转原文」——返回按钮回到队列
-  const handleJumpToDocFromQueue = useCallback(async (docId: string, anchor: { anchorText: string; anchorRatio?: number }) => {
-    const itemId = await libraryApi.getItemIdByDocumentId(docId);
-    if (!itemId) return;
-    const doc = await libraryApi.getDocument(itemId);
-    if (doc) setView({ name: "reader", itemId, doc, jumpAnchor: anchor, returnTo: "queue" });
-  }, []);
+    if (doc) {
+      const book = await loadReaderBook(itemId, doc);
+      setView({ name: "reader", itemId, doc, book, jumpAnchor: anchor, returnTo });
+    }
+  }, [loadReaderBook]);
 
   if (!loaded) {
     return (
@@ -205,6 +245,14 @@ export default function App() {
         return 0;
       }
     })();
+    const progressCfi = (() => {
+      try {
+        const parsed = view.doc.progressJson ? (JSON.parse(view.doc.progressJson) as { cfi?: string }) : null;
+        return typeof parsed?.cfi === "string" ? parsed.cfi : null;
+      } catch {
+        return null;
+      }
+    })();
     topTitle = view.doc.title;
     mainContent = (
       <Reader
@@ -212,11 +260,16 @@ export default function App() {
         markdown={view.doc.markdown}
         itemId={view.itemId}
         initialRatio={p}
+        initialCfi={progressCfi}
+        book={view.book}
         contextRef={{ documentId: view.doc.documentId }}
         jumpAnchor={view.jumpAnchor}
         sourceTitle={view.doc.title}
         onBack={view.jumpAnchor ? () => setView({ name: view.returnTo ?? "review" } as View) : backToShelf}
-        onProgress={handleDocProgress}
+        onSwitchAppTheme={handleThemeChange}
+        // 跳转进入（jumpAnchor 存在）时不传 onProgress：Reader 的滚动/卸载保存全部失效，
+        // 阅读进度与阅读字数保持上次真实阅读的值（v19 现场查看语义）
+        onProgress={view.jumpAnchor ? undefined : handleDocProgress}
       />
     );
   } else if (view.name === "queue") {
@@ -227,7 +280,7 @@ export default function App() {
     mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "browse") {
     topTitle = "卡片浏览";
-    mainContent = <CardBrowser />;
+    mainContent = <CardBrowser onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "stats") {
     topTitle = "统计数据";
     mainContent = <Dashboard />;
@@ -237,6 +290,7 @@ export default function App() {
       <Reader
         title="摘录"
         markdown={extractDetail.contentMarkdown}
+        book={view.book}
         itemId={extractDetail.documentId}
         contextLabel={
           `来自《${extractDetail.docTitle}》` +

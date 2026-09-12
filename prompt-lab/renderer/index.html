@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>提示词测试台</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="brand">提示词测试台 <span class="mono">PROMPT LAB</span></span>
+      <span class="brand-note">调优闭环：AI 改提示词 → 手动实测 → 反馈 → 决定是否并回主软件</span>
+      <button id="configToggle" class="btn btn-outline btn-sm">AI 配置</button>
+    </header>
+
+    <section id="configPanel" class="config-panel hidden">
+      <div class="config-row">
+        <label>Base URL</label>
+        <input id="cfgBaseUrl" type="text" />
+        <label>模型</label>
+        <input id="cfgModel" type="text" />
+        <label>API Key</label>
+        <input id="cfgKey" type="password" placeholder="留空则不修改已存 Key" />
+        <button id="cfgSave" class="btn btn-primary btn-sm">保存配置</button>
+        <span id="cfgState" class="mono"></span>
+      </div>
+      <p class="config-hint">测试台配置独立于主软件（存 prompt-lab 自己的数据目录）；图片挖空（card-occlusion）需多模态模型（如 GLM）。</p>
+    </section>
+
+    <main class="layout">
+      <!-- 左：提示词库 -->
+      <aside class="pane pane-prompts">
+        <div class="pane-head">
+          <span>提示词库（本地编辑，不写回主软件）</span>
+        </div>
+        <div id="scopeList" class="scope-list"></div>
+        <div class="prompt-editor">
+          <div class="prompt-editor-head">
+            <span id="curScopeName" class="mono"></span>
+            <span id="curScopeState" class="mono"></span>
+          </div>
+          <textarea id="promptText" class="prompt-text" spellcheck="false"></textarea>
+          <div class="prompt-editor-actions">
+            <button id="promptSave" class="btn btn-primary btn-sm">保存修改</button>
+            <button id="promptDraft" class="btn btn-outline btn-sm">应用 v4 候选补丁</button>
+            <button id="promptReset" class="btn btn-outline btn-sm">还原为主软件 v3 基线</button>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 右：材料 + 运行 + 结果 -->
+      <section class="pane pane-run">
+        <div class="pane-head">
+          <span>材料与运行</span>
+          <span class="spacer"></span>
+          <select id="modeSelect" class="mode-select">
+            <option value="auto">材料类型：自动识别</option>
+            <option value="card-generation">概念论述 → 主制卡</option>
+            <option value="card-formula">公式推导 → 公式分解</option>
+            <option value="card-seq">流程背诵 → 序列/背诵</option>
+            <option value="card-enum">枚举清单 → 枚举拆解</option>
+            <option value="card-literature">文学/诗歌背诵 → 文学制卡</option>
+            <option value="card-mnemonic">助记双卡</option>
+            <option value="card-contrast">对比卡</option>
+            <option value="card-wording">措辞优化</option>
+            <option value="card-basic">前置知识卡</option>
+            <option value="card-occlusion">图片材料 → 图片挖空</option>
+          </select>
+          <label class="source-field">来源标记 <input id="sourceTitle" type="text" placeholder="书名/章节（可空）" /></label>
+        </div>
+        <textarea id="materialText" class="material-text" placeholder="粘贴待制卡的材料文本；图片材料点右侧按钮选择图片"></textarea>
+        <div class="run-row">
+          <button id="runBtn" class="btn btn-primary">运行管线</button>
+          <button id="pickImgBtn" class="btn btn-outline btn-sm">选择图片材料</button>
+          <span id="imgName" class="mono"></span>
+          <span id="statusLine" class="mono status-line"></span>
+        </div>
+        <div id="routeLine" class="mono route-line"></div>
+        <div id="errorLine" class="error-line hidden"></div>
+
+        <div class="pane-head">
+          <span>结果（JSON 容错解析 → CardLint 质检）</span>
+          <span class="spacer"></span>
+          <button id="rawToggle" class="btn btn-outline btn-sm">原始输出</button>
+        </div>
+        <pre id="rawOutput" class="raw-output hidden mono"></pre>
+        <div id="results" class="results"></div>
+        <div id="explorations" class="results"></div>
+      </section>
+    </main>
+
+    <script src="../vendor/cards.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

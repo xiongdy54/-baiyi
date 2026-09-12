@@ -14,12 +14,13 @@ function check(name, cond, expected, actual) {
   else { fail++; failures.push({ name, expected, actual }); console.log(`  ✗ ${name}\n      期望: ${JSON.stringify(expected)}\n      实际: ${JSON.stringify(actual)}`); }
 }
 
-console.log("== L0-1 参数基线（应用 generatorParameters({enable_fuzz:true}) 与库默认对照）==");
-const appParams = generatorParameters({ enable_fuzz: true });
+console.log("== L0-1 参数基线（应用 generatorParameters({enable_fuzz:false}) 与库默认对照）==");
+// v20 纠正：应用自 v11 起锁定 enable_fuzz=false（§4.4.2），此前此处断言的 fuzz=true 是 v11 修复前残留
+const appParams = generatorParameters({ enable_fuzz: false });
 const defParams = generatorParameters();
 check("request_retention=0.9", appParams.request_retention === 0.9, 0.9, appParams.request_retention);
 check("maximum_interval=36500", appParams.maximum_interval === 36500, 36500, appParams.maximum_interval);
-check("enable_fuzz=true（应用侧）", appParams.enable_fuzz === true, true, appParams.enable_fuzz);
+check("enable_fuzz=false（§4.4.2 锁定）", appParams.enable_fuzz === false, false, appParams.enable_fuzz);
 check("enable_short_term=true", appParams.enable_short_term === true, true, appParams.enable_short_term);
 check("learning_steps=[1m,10m]", JSON.stringify(appParams.learning_steps) === JSON.stringify(["1m", "10m"]), ["1m", "10m"], appParams.learning_steps);
 check("relearning_steps=[10m]", JSON.stringify(appParams.relearning_steps) === JSON.stringify(["10m"]), ["10m"], appParams.relearning_steps);

@@ -1,0 +1,27 @@
+{
+  "upstream": "johnfactotum/foliate-js",
+  "upstreamUrl": "https://github.com/johnfactotum/foliate-js",
+  "license": "MIT",
+  "commit": "78914aef4466eb960965702401634c2cb348e9b1",
+  "importedAt": "2026-09-10",
+  "snapshotNotes": [
+    "剔除 .git / tests / rollup 构建链 / eslint 配置 / reader.html+reader.js 演示页",
+    "剔除 pdf.js 与 vendor/pdfjs（~13MB，R4 批次按需引入）",
+    "vendor/zip.js、vendor/fflate.js 为 upstream 自带的运行时依赖，随快照保留"
+  ],
+  "localPatches": [
+    {
+      "file": "view.js",
+      "date": "2026-09-10",
+      "reason": "PDF 未随快照 vendor",
+      "change": "makeBook 的 isPDF 分支由动态 import('./pdf.js') 改为 throw Error（原实现以注释保留在源码内）"
+    },
+    {
+      "file": "paginator.js",
+      "date": "2026-09-12",
+      "reason": "滚轮翻页/章尾续读（upstream 无 wheel 处理，阅读器缺翻页交互）",
+      "change": "构造器新增 wheelTurn：分页/对开模式滚轮=翻页（preventDefault），滚动模式章尾续滚进下一章、章首回上一章；监听宿主元素与各章节 iframe 文档"
+    }
+  ],
+  "upgradeProcedure": "见 AI_DEVELOPMENT_GUIDE.md §7 阅读内核升级规程（vendor 更新 → API 白名单核对 → L0/L1/L2 全绿 → L3 冒烟 → 签发新 ReaderEngineVersion）"
+}

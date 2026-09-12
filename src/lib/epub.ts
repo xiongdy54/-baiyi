@@ -122,3 +122,155 @@ export async function importEpubFile(): Promise<EpubImportResult | null> {
     sourceName: picked.name
   };
 }
+
+// ---------- 合成 EPUB（v20「一切皆书」）：粘贴书/摘录的 markdown 确定性转为 EPUB 字节，走统一阅读内核 ----------
+// 确定性纪律：同 generatorVersion + 同输入必然产出字节级同构的章节结构——已存 CFI 永不因重新生成而错位。
+// generatorVersion 变更 = 结构性变更（换解析器/章节化规则），旧锚点走「可降级恢复链」。
+import MarkdownIt from "markdown-it";
+import katex from "katex";
+import JSZip from "jszip";
+// KaTeX CSS 文本（Vite ?raw）：内嵌进合成书首页，公式排版无外部依赖
+import katexCssText from "katex/dist/katex.min.css?raw";
+
+/** djb2 确定性哈希（dc:identifier 生成禁用时间戳——合成书必须字节级可复现） */
+function stableHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+export const SYNTH_GENERATOR_VERSION = "syn-1";
+
+const synthMd: MarkdownIt = new MarkdownIt({ html: false, linkify: false, typographer: false });
+
+/** markdown → 正文 HTML（KaTeX 服务端渲染为自包含 HTML+CSS，无脚本；占位符法避免被 markdown 转义） */
+export function renderMarkdownToBodyHtml(markdown: string): string {
+  const mathSlots: string[] = [];
+  const stash = (tex: string, display: boolean) => {
+    const idx = mathSlots.push(
+      katex.renderToString(tex, { displayMode: display, throwOnError: false, output: "html" })
+    ) - 1;
+    return `@@KATEX${idx}@@`;
+  };
+  // $$…$$（display，含多行）先行；再行内 $…$
+  const withSlots = markdown
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_m, tex) => stash(String(tex).trim(), true))
+    .replace(/\$([^$\n]+?)\$/g, (_m, tex) => stash(String(tex).trim(), false));
+  return synthMd.render(withSlots).replace(/@@KATEX(\d+)@@/g, (_m, i) => mathSlots[Number(i)] ?? "");
+}
+
+function escapeXml(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+export interface SyntheticChapter {
+  title: string;
+  bodyHtml: string;
+}
+
+/** 按一级标题章节化（无一级标题 = 单章）；确定性：纯字符串运算 */
+export function splitMarkdownChapters(markdown: string): SyntheticChapter[] {
+  const lines = String(markdown || "").split("\n");
+  const chapters: SyntheticChapter[] = [];
+  let cur: SyntheticChapter = { title: "", bodyHtml: "" };
+  let buf: string[] = [];
+  const flush = () => {
+    cur.bodyHtml = renderMarkdownToBodyHtml(buf.join("\n"));
+    chapters.push(cur);
+  };
+  for (const line of lines) {
+    const m = /^#\s+(.+)$/.exec(line.trim());
+    if (m) {
+      flush();
+      cur = { title: m[1].trim(), bodyHtml: "" };
+      buf = [];
+    } else {
+      buf.push(line);
+    }
+  }
+  flush();
+  if (chapters.length === 1 && !chapters[0].title) chapters[0].title = "正文";
+  return chapters;
+}
+
+const xhtmlDoc = (title: string, bodyHtml: string, lang: string, extraStyle?: string) =>
+  `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="${lang}">
+<head><title>${escapeXml(title)}</title>
+<meta charset="utf-8"/>
+${extraStyle ? `<style>${extraStyle}</style>` : ""}
+</head>
+<body>
+${bodyHtml}
+</body></html>`;
+
+/**
+ * 生成合成 EPUB 字节 + 目录（供粘贴书/摘录进入统一阅读内核）。
+ * KaTeX CSS 以 author style 内嵌首页（katex.min.css 体积可控且随书分发）。
+ */
+export async function buildSyntheticEpub(
+  title: string,
+  markdown: string,
+  opts?: { lang?: string; embedKatexCss?: boolean }
+): Promise<{ bytes: Uint8Array; toc: { label: string; href: string }[] }> {
+  const lang = opts?.lang || "zh";
+  const chapters = splitMarkdownChapters(markdown);
+  const zip = new JSZip();
+  zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+  zip.file(
+    "META-INF/container.xml",
+    `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+</container>`
+  );
+  const manifestItems: string[] = [];
+  const spineRefs: string[] = [];
+  chapters.forEach((c, i) => {
+    manifestItems.push(`    <item id="c${i}" href="c${i}.xhtml" media-type="application/xhtml+xml"/>`);
+    spineRefs.push(`    <itemref idref="c${i}"/>`);
+  });
+  manifestItems.push('    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>');
+  zip.file(
+    "OEBPS/content.opf",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="uid">urn:uuid:synthetic-${stableHash(title + " " + markdown)}</dc:identifier>
+    <dc:title>${escapeXml(title)}</dc:title>
+    <dc:language>${lang}</dc:language>
+    <meta property="dcterms:modified">2026-09-10T00:00:00Z</meta>
+  </metadata>
+  <manifest>
+${manifestItems.join("\n")}
+  </manifest>
+  <spine>
+${spineRefs.join("\n")}
+  </spine>
+</package>`
+  );
+  const tocLis = chapters
+    .map((c, i) => `      <li><a href="c${i}.xhtml">${escapeXml(c.title || `第 ${i + 1} 章`)}</a></li>`)
+    .join("\n");
+  zip.file(
+    "OEBPS/nav.xhtml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<head><title>目录</title></head><body>
+<nav epub:type="toc" id="toc"><ol>
+${tocLis}
+</ol></nav>
+</body></html>`
+  );
+  const katexCss = opts?.embedKatexCss === false ? "" : katexCssText;
+  chapters.forEach((c, i) => {
+    zip.file(`OEBPS/c${i}.xhtml`, xhtmlDoc(c.title || `第 ${i + 1} 章`, c.bodyHtml, lang, i === 0 ? katexCss : undefined));
+  });
+  const bytes = await zip.generateAsync({ type: "uint8array", mimeType: "application/epub+zip" });
+  const toc = chapters.map((c, i) => ({ label: c.title || `第 ${i + 1} 章`, href: `c${i}.xhtml` }));
+  return { bytes, toc };
+}

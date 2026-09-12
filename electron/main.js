@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const {
@@ -14,6 +14,8 @@ const {
   listDueExtracts,
   getExtract,
   postponeExtract,
+  getLastUndoableReview,
+  undoLastReview,
   createCard,
   updateCard,
   getCard,
@@ -40,6 +42,7 @@ const {
 const { getAIConfig, setAIConfig, chatStream, testConnection, listModels } = require("./ai");
 const dbModule = require("./db");
 const optimizer = require("./optimizer");
+const backup = require("./backup");
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "bookasset", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
@@ -119,6 +122,17 @@ ipcMain.handle("library:createFromEpub", (_e, payload) => {
 ipcMain.handle("library:doc", (_e, itemId) => getDocument(String(itemId)));
 ipcMain.handle("library:itemByDoc", (_e, docId) => getItemIdByDocumentId(String(docId)));
 
+// 阅读内核（v20）：读取书架条目的原书文件（assets/<itemId>/original.epub），供 foliate 内核打开
+ipcMain.handle("library:readBookFile", (_e, itemId) => dbModule.readBookFile(String(itemId)));
+
+// 外链：仅允许 http/https，交系统浏览器（渲染层永不自行导航）
+ipcMain.handle("shell:openExternal", (_e, url) => {
+  if (typeof url === "string" && /^https?:\/\//i.test(url)) {
+    return shell.openExternal(url).then(() => true).catch(() => false);
+  }
+  return false;
+});
+
 ipcMain.handle("library:updateProgress", (_e, itemId, progress) => updateProgress(String(itemId), progress));
 
 ipcMain.handle("extracts:create", (_e, payload) => createExtract(payload || {}));
@@ -136,9 +150,16 @@ ipcMain.handle("cards:get", (_e, id) => getCard(String(id)));
 ipcMain.handle("cards:listDue", () => listDueCards());
 ipcMain.handle("cards:listAll", () => listAllCards());
 ipcMain.handle("cards:delete", (_e, id) => deleteCard(String(id)));
-ipcMain.handle("cards:review", (_e, cardId, fsrsState, rating, durationMs) =>
-  saveReview(String(cardId), fsrsState, String(rating), durationMs)
+ipcMain.handle("cards:review", (_e, cardId, fsrsState, rating, durationMs, fsrsBefore) =>
+  saveReview(String(cardId), fsrsState, String(rating), durationMs, fsrsBefore)
 );
+// v23（§4.4.9）：纯持久化重试——persist 失败后 UI「重试保存」调用；只重试持久化，不重执行任何业务 mutation
+ipcMain.handle("cards:persistNow", () => dbModule.persistNow());
+// v23（D20）：当前活跃 FSRS 配置完整快照（fsrs_configs 指针行）
+ipcMain.handle("fsrs:activeConfig", () => dbModule.getActiveFsrsConfig());
+// v22 撤销评分：查询最近可撤销评分 / 执行撤销（恢复快照+移除日志+回退 leech）
+ipcMain.handle("cards:lastUndoableReview", () => getLastUndoableReview());
+ipcMain.handle("cards:undoReview", () => undoLastReview());
 // 统计管线 v1：跳过事件 / 阅读进度事件 / 统计聚合
 ipcMain.handle("cards:skip", (_e, cardId) => saveSkip(String(cardId)));
 ipcMain.handle("reading:event", (_e, itemId, charPos) => addReadingEvent(String(itemId), Number(charPos)));
@@ -149,9 +170,9 @@ ipcMain.handle("cards:setSuspended", (_e, id, suspended, reason) =>
 // §11.4（v11）：leech 字段级更新，不触碰 fsrs_json
 ipcMain.handle("cards:updateLeech", (_e, id, patch) => updateCardLeech(String(id), patch || {}));
 
-// ---------- FSRS 参数优化器（v12） ----------
+// ---------- FSRS 参数优化器（v12；v23 配置走 fsrs_configs 快照 + 指针，D20） ----------
 ipcMain.handle("optimizer:stats", () => optimizer.getOptimizerStats(dbModule));
-ipcMain.handle("optimizer:current", () => optimizer.getAppliedWeights());
+ipcMain.handle("optimizer:current", () => optimizer.getActiveConfig(dbModule));
 ipcMain.handle("optimizer:train", async (e) => {
   const send = (p) => {
     if (!e.sender.isDestroyed()) e.sender.send("optimizer:progress", p);
@@ -163,8 +184,23 @@ ipcMain.handle("optimizer:train", async (e) => {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
-ipcMain.handle("optimizer:apply", (_e, weights) => optimizer.applyWeights(weights));
-ipcMain.handle("optimizer:reset", () => optimizer.resetWeights());
+// v23：apply/reset 只移动活跃指针（不修改任何 config 内容）；提交成功后由事实层（此处）广播
+// fsrs:configChanged——渲染层 fsrs.ts 据此热重建引擎（F9），不依赖 UI 发事件
+const broadcastFsrsConfigChanged = (configId) => {
+  for (const wc of BrowserWindow.getAllWindows().map((w) => w.webContents)) {
+    if (!wc.isDestroyed()) wc.send("fsrs:configChanged", configId);
+  }
+};
+ipcMain.handle("optimizer:apply", (_e, weights) => {
+  const result = optimizer.applyWeights(dbModule, weights);
+  broadcastFsrsConfigChanged(result.configId);
+  return result;
+});
+ipcMain.handle("optimizer:reset", () => {
+  const result = optimizer.resetWeights(dbModule);
+  broadcastFsrsConfigChanged(result.configId);
+  return result;
+});
 ipcMain.handle("cards:resolveLeech", (_e, id, resolution, updates) =>
   resolveLeech(String(id), String(resolution), updates || {})
 );
@@ -177,6 +213,90 @@ ipcMain.handle("batches:setStatus", (_e, id, status) => setAIGenBatchStatus(Stri
 ipcMain.handle("prompts:list", () => listPromptTemplates());
 ipcMain.handle("prompts:get", (_e, scope) => getPromptTemplate(String(scope)));
 ipcMain.handle("similarity:find", (_e, text, k) => findSimilarCards(String(text || ""), Number(k) || 3));
+
+// ---------- M1.1 图片挖空卡（D16）：选本地图 → 落盘 assets/ → 入 assets 表 → 返回 bookasset URL + dataURL ----------
+ipcMain.handle("assets:pickOcclusionImage", async (_e, ownerKey) => {
+  const result = await dialog.showOpenDialog({
+    filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+    properties: ["openFile"]
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const p = result.filePaths[0];
+  const buf = fs.readFileSync(p);
+  const ext = path.extname(p).slice(1);
+  const asset = dbModule.createAssetForItem(String(ownerKey), "image-occlusion", ext, buf);
+  const mime = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" }[
+    ext.toLowerCase()
+  ] || "image/png";
+  return { ...asset, dataUrl: `data:${mime};base64,${buf.toString("base64")}` };
+});
+
+// v25 图片点选聚焦：渲染层已拿到的图片字节（正文图片/选区裁剪）→ 落盘 assets/ + 入 assets 表。
+// 与 pickOcclusionImage 的区别：不经文件对话框，字节来自渲染层（bookasset/blob 同源可读）。
+ipcMain.handle("assets:saveImage", (_e, ownerKey, ext, base64, kind) => {
+  try {
+    const buf = Buffer.from(String(base64 || ""), "base64");
+    return dbModule.createAssetForItem(String(ownerKey), String(kind || "image-occlusion"), String(ext || "png"), buf);
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// ---------- M2 数据备份与恢复（§9.1 M2） ----------
+const backupOpts = () => ({
+  flush: () => dbModule.persistDb(),
+  counts: dbModule.getBackupCounts(),
+  appVersion: app.getVersion()
+});
+ipcMain.handle("backup:info", () => ({
+  ...backup.getDataInfo(),
+  counts: dbModule.getBackupCounts(),
+  backupDir: backup.getBackupDir()
+}));
+ipcMain.handle("backup:create", async (_e, opts) => {
+  try {
+    return await backup.createBackup({
+      ...backupOpts(),
+      label: "manual",
+      includeAIConfig: !!(opts && opts.includeAIConfig)
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+ipcMain.handle("backup:list", () => backup.listBackups());
+ipcMain.handle("backup:pickDir", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择备份保存位置",
+    properties: ["openDirectory", "createDirectory"]
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+ipcMain.handle("backup:openDir", async () => {
+  await shell.openPath(backup.getBackupDir());
+  return true;
+});
+ipcMain.handle("backup:pickFile", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择备份文件",
+    filters: [{ name: "备份文件", extensions: ["zip"] }],
+    properties: ["openFile"]
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+ipcMain.handle("backup:restore", async (_e, file) => {
+  try {
+    return await backup.restoreBackup(String(file), backupOpts());
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+ipcMain.on("app:relaunch", () => {
+  app.relaunch();
+  app.exit(0);
+});
 
 // ---------- AI 网关 ----------
 ipcMain.handle("ai:getConfig", () => getAIConfig());
@@ -299,6 +419,18 @@ function createWindow() {
       nodeIntegration: false
     }
   });
+  // 阅读内核导航防护（v20）：渲染层发起的任何页面级导航一律拦截——
+  // EPUB 正文内的相对链接会把窗口导到不存在的 file:// 地址导致整窗白屏。
+  // 仅放行同页刷新（复习页「刷新」按钮用 location.reload()；hash 变化不触发本事件）。
+  win.webContents.on("will-navigate", (event, url) => {
+    if (url.split("#")[0] === win.webContents.getURL().split("#")[0]) return;
+    event.preventDefault();
+  });
+  // window.open / target=_blank：http(s) 交系统浏览器，其余一律拒绝开新窗口
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
+    return { action: "deny" };
+  });
   // 加载顺序（v11.2）：dist 存在则直接用（生产产物优先，避免 devURL 连接超时挂起导致白屏）；
   // dist 不存在（纯开发场景）才走 vite dev server，失败再报错
   const distIndex = path.join(__dirname, "../dist/index.html");
@@ -315,7 +447,20 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
   createWindow();
+  // M2：若有待恢复备份（restore-pending.json），先换入数据文件再初始化数据库
+  try {
+    backup.applyPendingRestore();
+  } catch (err) {
+    console.error("[backup] 应用待恢复数据失败：", err);
+  }
   await initDb();
+  // M2：每日首次启动自动滚动备份（设置可关；失败不阻塞启动）
+  try {
+    const r = await backup.autoBackupIfNeeded(backupOpts());
+    if (!r.ok) console.error("[backup] 自动备份失败：", r.error);
+  } catch (err) {
+    console.error("[backup] 自动备份失败：", err);
+  }
   protocol.handle("bookasset", (request) => {
     try {
       const url = new URL(request.url);

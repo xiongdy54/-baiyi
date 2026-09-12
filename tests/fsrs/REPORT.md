@@ -1,9 +1,9 @@
 # FSRS 调度正确性测试报告
 
-- 测试日期：2026-09-06
-- 被测版本：commit b099d8a（含启动双窗口修复、AI 状态行、思考强度设置）
-- 测试方法：黄金参考对照法（ts-fsrs 5.4.2 / FSRS-6.0，enable_fuzz=false 作为规范引擎）
-- 真实库备份：`%APPDATA%/incremental-reading-dev/library.db.backup-20260906-101221`（测试后已清理 FSRSTEST 卡，未还原必要）
+- 测试日期：2026-09-06（v11 修复验证）；2026-09-09 增补（M3 批次：L5 时间轴模拟层 + 官方做法审计 + F7/F8 修复）；2026-09-11 增补（v23 批次：FSRS 数据完整性加固 + 学习日语义，F9/F10/F11 修复）
+- 被测版本：commit b099d8a（含启动双窗口修复、AI 状态行、思考强度设置）；M3 增补基于 v20；本批次基于 v22
+- 测试方法：黄金参考对照法（ts-fsrs 5.4.2 / FSRS-6.0，enable_fuzz=false 作为规范引擎）+ 行为级独立 oracle（ReviewLog.elapsed_days）
+- 真实库备份：`%APPDATA%/incremental-reading-dev/library.db.backup-20260906-101221`（早期）；`library.db.backup-before-v21-20260910-171142`（v23 批次开工前）
 
 ## 两个核心问题的结论
 
@@ -124,3 +124,76 @@ tests/fsrs/audit.cjs             # L4：node tests/fsrs/audit.cjs --db <db路径
 ### 遗留事项
 - 历史卡（v11 前创建的 50 张 AI 卡）fsrs_json 无 S/D/reps：适配层以基线回填，调度从下一次评分起恢复正常累积；历史失真不可还原（可接受——旧数据的复习史本已失真）。
 - 测试期间发现 sql.js 内存库与磁盘文件的多进程并发冲突：应用运行期间外部脚本改库会被应用的下一次 persist() 覆盖。E2E 涉及外部数据修改时必须先关闭应用（已在测试脚本注释中注明）。
+
+---
+
+## M3 批次增补（2026-09-09，v20）：L5 时间轴模拟层 + 官方做法审计
+
+### L5 时间轴模拟（tests/fsrs/simulate.test.cjs）— 417/417 全绿
+
+- 方法：ts-fsrs 原库（fuzz=false）独立驱动全字段内存链（refChain），与应用侧「JSON 持久化往返链」（appChain，模拟 db 存取）在同一受控时间轴上逐轮对照；**refChain 绝不从 appChain 重建**（否则丢字段两侧同错、无法检出 F7 类缺陷）。时间注入经 preview/next 的可选 `now` 参数（§4.4.3 v20）。
+- 五组剧本：
+  1. **S1a 新卡首评四分支**（Again/Hard/Good/Easy，T0）；
+  2. **S1b 全生命周期单卡**（跨约 70 天：1m→10m 步进→毕业→多轮→遗忘→relearning 恢复→逾期 3 天/30 天复习→月级长间隔），逐轮八字段（state/due/lapses/stability/difficulty/reps/learningSteps/lastReview）与黄金参考**精确相等**（同库同参同 now，容差 0）+ 跨天 Good 稳定度必增哨兵；
+  3. **S2 整体时间平移不变性**：同一剧本在 T0 / T0+10 天 / T0+100 天三个基准各跑一遍，各轮相对结果完全一致（整日平移下 UTC 日历日取整不变，dateDiffInDays 语义）；
+  4. **S4 遗忘链与 leech**：毕业后 [Again,Good]×8，lapses 逐次 +1、每次 Again 后 due=+10m、`isLeech(8)` 恰好触发；
+  5. **S5 优化器训练输入链**：buildTrainSet 过滤规则（单次复习/全同日/无跨天前缀排除、delta_t 向下取整、前缀展开）+ 真实 computeParameters（21 维有限权重）+ evaluate（logLoss/rmseBins）+ applyWeights 拒非 21 维/接受 21 维/resetWeights。
+- 预览=落库同源（§4.4.3）：每一轮 `preview(card,now)[rating].fsrsState` 与 `next(card,rating,now).fsrsState` 深度相等，随 S1/S4 逐轮断言。
+
+### 新缺陷与修复（M3 审计发现）
+
+| 缺陷 | 严重度 | 位置 | 现象与实锤 | 修复 |
+|---|---|---|---|---|
+| F7 | 中-高 | `src/lib/fsrs.ts` toFsrsCard/fromFsrsCard | `learning_steps`（ts-fsrs 学习步进索引）未持久化，重建后恒为 0。learning 档第 2 步（+10m）的卡再评 Good：官方语义毕业进 Review（1 天+），应用却永回 +10m（步进归 0 → Good 永远命中最末步），**只有 Easy 能毕业**；Hard 的 next_step 簿记同样归零。新卡首评 Good 是最常见路径，L3 端到端只测单轮故未逃逸检出 | fsrs_json 增 `learningSteps` 全字段往返（§4.4.1 契约补字段，v20）；L5 S1b 哨兵断言毕业语义 |
+| F8 | 高（训练必触发） | `electron/optimizer.js` train() | fsrs-rs `evaluate` 对「样本 ≥2 条且**末条 delta_t=0（同日收尾）**」抛 InvalidInput（最小复现：`[3:0,1:0]` FAIL / `[3:0,3:1,1:1]` OK；215 样本中 13 个同日收尾样本全数触发）。真实复习日志中学习/重学步同日恢复是常态，**真实数据训练必报错**；computeParameters 不受影响 | 评估改用可评估子集（≥2 条且末条 delta_t>0），训练集不变；无可用子集时指标为 null（设置页 `?? 0` 兜底显示） |
+| 过时断言 | 低 | `tests/fsrs/golden.cjs` L0-1 | 仍断言 `enable_fuzz=true（应用侧）`——v11 修复（F2）前残留，与 §4.4.2「fuzz 锁定 false」矛盾（测试自证自默，13/13 假绿掩盖语义） | 纠正为断言 false；重新生成 golden.json |
+
+### v20 附带变更
+- `fsrsEngine.preview/next` 增可选 `now` 参数（缺省真实时间，渲染层行为不变）——M3 时间注入机制。
+- 契约 §4.4.1 补记：`elapsed_days/scheduled_days` 无需持久化（源码核对：elapsed_days 由 last_review 现场重算 `AbstractScheduler.init`；scheduled_days 调度器只写不读）。
+- CDP 冒烟（真实应用 + 新 dist）：建卡→按 ReviewView 实际链路落库含 learningSteps=1 →读回无损→清理通过（临时脚本已删）。
+- 回归结果（v20）：L0 13 ✓ / L1 15 ✓ / L1 补强 6 ✓ / L2 23 ✓ / L5 417 ✓ / L4 空集（库内无 FSRSTEST 卡，重放工具可用）。
+
+### 记录在案的接受项（不改，仅记录）
+- request_retention 固定 0.9 不可调（官方建议允许 0.8–0.95 个人化）→ 后续可选池候选。
+- ts-fsrs 返回的 ReviewLog 被弃用：自建 review_logs（card_id/rating/reviewed_at/duration_ms）满足官方「持久化评分历史」与优化器最小输入；日志+引擎可重放复原（audit.cjs 即此原理）。
+- 优化器权重注入为启动异步（initOptimizerWeights）：理论上注入完成前的首次评分用默认权重，影响一轮且自愈。
+
+---
+
+## v23 批次增补（2026-09-11）：FSRS 数据完整性加固 + 学习日语义
+
+> 经外部评审五轮收敛的加固批次（设计依据：指导文档 v23 §4.4.8-4.4.11 + D20/D21）。核心架构结论：
+> ① 优化器 delta_t 弃 floor(24h)，canonical 函数（electron/fsrsTime.js **独立实现**，不 import ts-fsrs）与调度器
+> UTC 日历日语义**精确恒等**（oracle=ReviewLog.elapsed_days 行为级对照，依赖升级红灯=触发重新审计）；
+> ② 产品学习日切点（settings.app.dayCutoffHour）仅统计口径，绝不进入调度/训练（D21）；
+> ③ fsrs_configs 不可变配置快照 + settings.app.fsrsConfigId 指针（D20），废除 fsrsWeights 双事实源；
+> ④ review 成功边界 = COMMIT + persist 成功 + IPC 成功（崩溃一致性，非跨层 ACID）。
+
+### 新缺陷与修复（v23）
+
+| 缺陷 | 严重度 | 位置 | 现象 | 修复 |
+|---|---|---|---|---|
+| F9 | 高 | SettingsPanel「已应用即刻生效」vs fsrs.ts 仅模块加载注入一次 | UI 宣称权重即刻生效，实际无任何热重建路径——apply 后不重启仍用旧参数 | 主进程 apply/reset 提交后广播 `fsrs:configChanged`（事实层发事件，非 UI）→ preload 桥 → fsrs.ts `reloadEngine()` 重建；configId 未变跳过重建；非法配置（非 21 维/enableFuzz≠false）拒绝应用 |
+| F10 | 中 | undoLastReview 以「当前 suspended」推断本次评分触发 leech | Good 评分后手动挂起再撤销 → 手动挂起被误解除 | review_logs 增 `leech_before_json` 评分前快照；触发判定复现复习端条件（after.lapses≥8 且评分前非 leech）；撤销精确恢复前置 leech 状态 |
+| F11 | 高 | persist() 直接 writeFileSync 覆盖写 | 崩溃/断电可产生半写库文件（card 与 review_log 不一致） | 同目录 tmp + fsyncSync + renameSync 原子替换；失败 throw→IPC reject→UI 封锁评分+「重试保存」（persistNow 纯持久化重试）；启动清残留 tmp；tmp 永远非事实源 |
+| 措辞 | — | 「review 成功」定义 | COMMIT 后 persist 失败时内存已提交、磁盘未更新 | 契约锁定：review 成功 = COMMIT + persist 成功 + IPC 成功；崩溃一致性措辞（非跨内存库与文件系统 ACID） |
+
+### 测试矩阵（v23）
+
+- **undo 套件 29/29**：U1-U5（v22 既有）+ U6 篡改卡状态后撤销拒绝（after 一致性不变量在选取层生效）/ U7 F10 回归（手动挂起保持）/ U8 v22 形态旧日志（无 after）不可撤销 / U9 review_seq 唯一+单调+撤销后允许复用。
+- **persist 边界套件 14/14**（新增 `tests/persist.test.cjs`）：P1 真实文件系统零 mock 原子写（Windows rename 覆盖替换语义）；P2 writeSync 失败→throw→盘上旧库逐字节未变→persistNow 重试成功；P3 renameSync 失败→旧库完整+tmp 残留；P4 启动清残留 tmp；不变量「任意时刻至少一份完整库」。
+- **L5 simulate 451/451**：v20 五组剧本保留 + **S6 时间语义**（L6-A 行为级 oracle 时间矩阵：同日/跨午夜/跨月/跨年/36h/整月/零间隔，canonical==调度器 elapsed 逐点相等；L6-B buildTrainSet delta_t==oracle，跨午夜对=1 抓 floor 分叉；负测试=构造 badCanonicalDeltaT(floor) 证明检测器必红；L6-C 学习日切点语义：cutoff=0 跨午夜为两日、cutoff=4 凌晨算前日、切点穿越、起点一致）+ **S7 参数环境**（播种 tripwire：cfg-default 权重==live ts-fsrs 默认逐位一致；apply B 存量卡 fsrs_json 与 fsrs_config_id 全部未变；cfg-default 行逐字节未变；B 下评分归属 cfg-B；undo 后 config 恢复 fsrs_before_config_id；指纹去重重指；reset 指回；无 update API）+ **S8 F9 热生效**（configId 变更重建且间隔变化/未变跳过/20 维与 enableFuzz≠false 配置拒绝）。
+- **L4 audit 升级**：按每条日志 fsrs_config_id 从 fsrs_configs 取完整快照分段构引擎重放；v23 日志逐轮 8 字段对照（due/lastReview 容差=点击延迟级 5s，其余精确）；`--weights` 覆盖。沙盒端到端验证：默认配置评分→apply 优化权重→再评分→重放 2 轮逐轮全对（真实抓出「种子引擎未随指针同步」与「伪造 after 状态」两类不一致，机制有效）。
+- **S5a 期望更新**：prefix 卡 delta_t [0,0,1]→[0,0,2]（floor→canonical 语义统一的预期变化）。
+- **CDP 冒烟**（真实应用 + 新 dist）：学习日设置读写；fsrs:activeConfig 完整快照（21 维/fuzz=false）；评分落库含 config 与 learningSteps；撤销恢复；F9 推送链路（apply→广播 cfgId→reset→广播 cfg-default→指针回位）；清理干净（临时脚本已删）。
+- **回归结果（v23）**：L0 13 ✓ / L1 15 ✓ / L1 补强 6 ✓ / L2 23 ✓ / L5 451 ✓ / L4 空集+沙盒端到端 ✓ / undo 29 ✓ / persist 14 ✓ / M1 45 ✓ / tsc ✓ / dist 重建 ✓。
+
+### 实现期发现与修复（测试抓出）
+- `fsrsStatesEqual` 对 `learningSteps: []` 数组做引用比较恒不等——撤销一致性校验失效；改为对象字段 JSON 序列化比较。
+- `getLastUndoableReview` 内 after 快照查询误用 `log.id`（应为别名 `logId`）——同批测试抓出修复。
+- `electron/fsrsConfig.js` 的 FSRS6_DEFAULT_WEIGHTS 常量首版凭记忆填写与 live ts-fsrs 不符——实测核对修正；S7 播种 tripwire 断言永久防漂移。
+
+### 记录在案的接受项（v23 增补）
+- 评分「预览时刻 T1 vs 落库时刻 T2」存在点击延迟级毫秒偏差：due/lastReview 存储值基于 T1、reviewed_at 为 T2——audit 以 5s 容差吸收；跨日界的极端点击延迟（23:59:58 预览/00:00:03 提交）属可接受罕见偏差（before/after 快照记录了事实，审计可复核）。
+- persist 失败窗口的崩溃后果 = 丢失窗口期内存变更、回到上一完整盘态（一致但可能丢最近一次评分）——全库快照自愈性质 + M2 每日自动备份兜底。

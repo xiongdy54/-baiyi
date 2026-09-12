@@ -5,7 +5,7 @@ import { statsApi, type StatsOverview } from "../../lib/stats";
 import { settingsStore } from "../../lib/settings";
 import { eventBus } from "../../lib/eventbus";
 import { WIDGETS, widgetById, normalizeChartId, rnd, type WidgetDef } from "./widgets";
-import Dropdown from "./Dropdown";
+import Dropdown from "../Dropdown";
 import {
   defaultLayoutV2, isSaneLayoutV2, toRows, reorder, syncHidden,
   type DashLayoutV2, type WidgetSize

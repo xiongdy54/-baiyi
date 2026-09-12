@@ -1,47 +1,159 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { cardGenerator, lintCard, cardsApi, similaritySearch, type CardDraft } from "../lib/cards";
-import { sanitizeDomain } from "../lib/udc";
+import { cardGenerator, lintCard, cardsApi, similaritySearch, detectMaterialType, parseFollowUps, MATERIAL_ROUTES, type CardDraft, type CardGenMode, type OcclusionRegion, type FollowUpGroup } from "../lib/cards";
+import { normalizeShape, type OcclusionRect, type OcclusionShape } from "../lib/occlusion";
+import { settingsStore } from "../lib/settings";
+import { sanitizeDomain, udcLabel, UDC_LEAVES, UDC_MAX, UDC_OTHER } from "../lib/udc";
 import { eventBus } from "../lib/eventbus";
 import { readingStats } from "../lib/stats";
+import Dropdown from "./Dropdown";
+import OcclusionShapes from "./OcclusionShapes";
+import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
+import { useCommandActions } from "../lib/useCommands";
+import ReaderEngine from "./reader/ReaderEngine";
+import TocSidebar from "./reader/TocSidebar";
+import {
+  DEFAULT_READER_SETTINGS,
+  buildLocator,
+  resolveAppearance,
+  type ReaderAppearance,
+  type ReaderImageRef,
+  type ReaderKernel,
+  type ReaderModeConfig,
+  type ReaderSelection,
+  type ReaderSettings,
+  type ReaderTocItem,
+  type RelocateInfo
+} from "../lib/reader/service";
 
 interface Props {
   title: string;
   markdown: string;
   itemId?: string;
   initialRatio?: number;
+  /** 上次进度的 CFI（文件书内核恢复定位用） */
+  initialCfi?: string | null;
   contextLabel?: string;
   contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
-  jumpAnchor?: { anchorText: string; anchorRatio?: number } | null;
+  jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number } | null;
+  /** 原书文件字节（存在即走阅读内核；粘贴书/摘录 R1b 合流） */
+  book?: { bytes: Uint8Array; name: string } | null;
   sourceTitle?: string;
   onBack: () => void;
-  onProgress?: (ratio: number, lastText: string) => void;
+  onProgress?: (ratio: number, lastText: string, extra?: { cfi?: string; fraction?: number }) => void;
+  /** 阅读主题联动整个软件（v20.1）：暗夜→软件夜间模式，纸白/羊皮→浅色 */
+  onSwitchAppTheme?: (mode: "light" | "dark") => void;
 }
 
 type SelectionAction = "manual" | "ai-cards" | null;
+
+/** v25：读取正文图片/选区图片的 dataURL（blob:/data:/bookasset: 同源可 fetch；超 12MB 拒绝） */
+async function loadImageDataUrl(src: string): Promise<string | null> {
+  try {
+    if (!src) return null;
+    if (src.startsWith("data:image/")) return src;
+    const res = await fetch(src);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob.type.startsWith("image/") || blob.size > 12 * 1024 * 1024) return null;
+    return await new Promise<string>((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result));
+      fr.onerror = () => reject(new Error("读取失败"));
+      fr.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** v25：按选区包围盒裁剪（AI 需要「只看选区内容」的图片；坐标以原图百分比给出） */
+function cropImageDataUrl(dataUrl: string, bbox: OcclusionRect): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      if (!w || !h) {
+        reject(new Error("图片尺寸不可用"));
+        return;
+      }
+      const sx = Math.max(0, Math.floor((bbox.x / 100) * w));
+      const sy = Math.max(0, Math.floor((bbox.y / 100) * h));
+      const sw = Math.max(1, Math.min(w - sx, Math.round((bbox.w / 100) * w)));
+      const sh = Math.max(1, Math.min(h - sy, Math.round((bbox.h / 100) * h)));
+      const canvas = document.createElement("canvas");
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("画布不可用"));
+        return;
+      }
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      resolve(canvas.toDataURL("image/png"));
+    };
+    img.onerror = () => reject(new Error("图片解码失败"));
+    img.src = dataUrl;
+  });
+}
+
+/** v25 手动制卡载荷（M5）：与 AI 制卡同构的字段集 + 图片选区 */
+interface ManualCardPayload {
+  mode: "qa" | "reverse" | "cloze" | "imageOcclusion";
+  front: string;
+  back: string;
+  cloze?: string;
+  reversePair?: { bFront: string; bBack: string };
+  imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
+  priority: number;
+  contextPrefix?: string;
+  domain?: string[];
+  mnemonic?: string;
+  knowledgePointId?: string;
+  dateStamp?: string | null;
+}
 
 export default function Reader({
   title,
   markdown,
   itemId,
   initialRatio = 0,
+  initialCfi,
   contextLabel,
   contextRef,
   jumpAnchor,
+  book,
   sourceTitle,
   onBack,
-  onProgress
+  onProgress,
+  onSwitchAppTheme
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
   const [selection, setSelection] = useState<{ x: number; y: number; text: string } | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  // v25：手动制卡的图片选区（从聚焦工具条「手动制卡」进入时携带）
+  const [manualImage, setManualImage] = useState<{
+    dataUrl: string;
+    alt: string;
+    shape: OcclusionShape;
+    rect: OcclusionRect;
+  } | null>(null);
+  // v25：图片聚焦（点选正文图片 → 上浮 + 周围模糊 + 选区工具条）
+  const [focusImage, setFocusImage] = useState<{
+    src: string;
+    dataUrl: string;
+    alt: string;
+    rect: OcclusionRect;
+  } | null>(null);
+  const [focusBusy, setFocusBusy] = useState(false);
   const [aiPanel, setAiPanel] = useState<{
-    kind: "explain" | "cards";
+    kind: "explain" | "cards" | "occlusion";
     text: string;
     answer?: string;
     drafts?: CardDraft[];
@@ -55,8 +167,242 @@ export default function Reader({
     searching?: boolean;
     searched?: boolean;
     error?: string;
+    // M1.2：材料类型路由展示与手动覆盖
+    mode?: CardGenMode;
+    routeLabel?: string;
+    routeForm?: string;
+    // M1.1：图片挖空面板
+    image?: { dataUrl: string; assetPath: string };
+    regions?: OcclusionRegion[];
+    // v16 递进补卡（「后续可补」注记 → 询问 AI / 直接制卡）
+    kps?: { id: string; summary: string }[];
+    supplemental?: Set<number>;
+    followUpBusy?: string[];
+    followUpStarted?: Record<string, number | undefined>;
+    followUpErrors?: Record<string, string>;
+    explorations?: {
+      id: number;
+      item: string;
+      kpTitle: string;
+      question: string;
+      answer?: string;
+      running: boolean;
+      startedAt?: number;
+      thinking?: number;
+      error?: string;
+    }[];
   } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // v25：showToast 上移到各交互回调之前（回调 deps 在渲染期求值，后置声明会触发 TDZ）
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 1800);
+  }, []);
+  // M1.2：制卡模式（材料类型路由的手动覆盖；auto=本地识别）
+  // v16：按书记忆——用户在某本书里手动选过材料类型，则该书后续制卡默认沿用（settings.app.materialTypes）
+  const [aiMode, setAiMode] = useState<CardGenMode>("auto");
+  const itemKey = itemId || contextRef?.documentId || "";
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const map = await settingsStore.get<Record<string, CardGenMode>>("app", "materialTypes", {});
+      if (!cancelled && itemKey && map[itemKey]) setAiMode(map[itemKey]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [itemKey]);
+  function changeAiMode(m: CardGenMode) {
+    setAiMode(m);
+    if (itemKey) {
+      void settingsStore.get<Record<string, CardGenMode>>("app", "materialTypes", {}).then((map) => {
+        if (map[itemKey] === m) return;
+        void settingsStore.set("app", "materialTypes", { ...map, [itemKey]: m });
+      });
+    }
+  }
+
+  // ---------- 阅读内核分支（v20：文件书走 foliate 内核；粘贴书/摘录 R1b 合流） ----------
+  const engineMode = Boolean(book);
+  // 引擎数据源必须按引用稳定（useMemo）：内联字面量会让 ReaderEngine 每次重渲染都销毁重建内核
+  const engineSource = useMemo(
+    () => (book ? { kind: "bytes" as const, bytes: book.bytes, name: book.name } : null),
+    [book]
+  );
+  const kernelRef = useRef<ReaderKernel | null>(null);
+  // 引擎选区锚点：语义同 markdown 的 anchorRef——最后一次菜单动作的选区，保留到下一次覆盖
+  const engineSelRef = useRef<ReaderSelection | null>(null);
+  const engineChapterRef = useRef(0);
+  const relocateTimerRef = useRef<number | null>(null);
+  const [tocOpen, setTocOpen] = useState(false);
+  const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
+  const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
+  const [readerSettings, setReaderSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
+  const readerSettingsRef = useRef(readerSettings);
+  readerSettingsRef.current = readerSettings;
+
+  useEffect(() => {
+    if (!engineMode) return;
+    settingsStore
+      .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
+      .then((s) => {
+        if (!s) return;
+        setReaderSettings({
+          mode: { ...DEFAULT_READER_SETTINGS.mode, ...s.mode },
+          appearance: { ...DEFAULT_READER_SETTINGS.appearance, ...s.appearance }
+        });
+      })
+      .catch(() => {});
+  }, [engineMode]);
+
+  const persistReaderSettings = (next: ReaderSettings) => {
+    setReaderSettings(next);
+    void settingsStore.set("app", "readerSettings", next);
+  };
+
+  const changeReaderMode = (mode: ReaderModeConfig) => {
+    const next = { ...readerSettingsRef.current, mode };
+    persistReaderSettings(next);
+    void kernelRef.current?.setMode(mode);
+  };
+  const changeReaderTheme = (theme: ReaderAppearance["theme"]) => {
+    const next = { ...readerSettingsRef.current, appearance: { ...readerSettingsRef.current.appearance, theme } };
+    persistReaderSettings(next);
+    kernelRef.current?.applyAppearance(resolveAppearance(next));
+    // 整体换色（v20.1）：暗夜=软件夜间模式；纸白/羊皮=浅色；自定义不动软件主题
+    if (theme === "dark") onSwitchAppTheme?.("dark");
+    else if (theme === "paper" || theme === "sepia") onSwitchAppTheme?.("light");
+  };
+
+  // 外观变量上提到滚动容器：控件/目录/背景统一随 --reader-* 变化（iframe 内由内核注入）
+  useEffect(() => {
+    if (!engineMode) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const a = resolveAppearance(readerSettings);
+    el.style.setProperty("--reader-bg", a.bgColor ?? "transparent");
+    el.style.setProperty("--reader-fg", a.fgColor ?? "inherit");
+    el.style.background = a.bgColor ?? "transparent";
+  }, [engineMode, readerSettings]);
+
+  // 引擎进度：relocate 防抖落进度 + 阅读统计（charPos = fraction × 全书字符数近似，热力图口径不变）
+  const handleEngineRelocate = useCallback(
+    (info: RelocateInfo) => {
+      engineChapterRef.current = info.chapterIndex;
+      setTocActiveHref(info.chapterHref);
+      if (relocateTimerRef.current) window.clearTimeout(relocateTimerRef.current);
+      relocateTimerRef.current = window.setTimeout(() => {
+        relocateTimerRef.current = null;
+        if (itemId && onProgress) void readingStats.addEvent(itemId, Math.round(info.fraction * (markdown?.length || 0)));
+        onProgress?.(info.fraction, "", { cfi: info.location.cfi, fraction: info.fraction });
+      }, 700);
+    },
+    [itemId, markdown, onProgress]
+  );
+
+  // 引擎选区：pointerup 时取选区语义数据并弹出菜单（坐标为宿主视口坐标，菜单用 fixed）
+  const handleEnginePointerUp = useCallback((pos: { x: number; y: number }) => {
+    const k = kernelRef.current;
+    const sel = k?.getSelection() ?? null;
+    if (sel && sel.text.trim()) {
+      engineSelRef.current = sel;
+      setSelection({ x: pos.x, y: pos.y, text: sel.text });
+    } else {
+      setSelection(null);
+    }
+  }, []);
+
+  const handleEngineReady = useCallback((k: ReaderKernel) => {
+    kernelRef.current = k;
+    setTocItems(k.getTOC());
+    void k.setMode(readerSettingsRef.current.mode);
+    k.applyAppearance(resolveAppearance(readerSettingsRef.current));
+    // 调试/测试钩子（L2 e2e 经此访问章节文档；引擎 iframe 对宿主跨源，contentDocument 不可用）
+    (window as unknown as { __readerKernel?: ReaderKernel }).__readerKernel = k;
+  }, []);
+
+  // v25 图片点选聚焦：正文图片点击 → 取字节为 dataURL → 进入聚焦覆盖层（选区工具条）
+  const handleEngineImageClick = useCallback(
+    async (img: ReaderImageRef) => {
+      if (manualOpen || aiPanel || focusImage) return; // 弹层/聚焦在场时不重复进入
+      const dataUrl = await loadImageDataUrl(img.src);
+      if (!dataUrl) {
+        showToast("无法读取这张图片的内容（可能来自外部链接）");
+        return;
+      }
+      setSelection(null);
+      engineSelRef.current = null;
+      setFocusImage({
+        src: img.src,
+        dataUrl,
+        alt: img.alt,
+        rect: { x: img.rect.x, y: img.rect.y, w: img.rect.width, h: img.rect.height }
+      });
+    },
+    [manualOpen, aiPanel, focusImage, showToast]
+  );
+
+  /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
+  const ensureImageAsset = useCallback(
+    async (dataUrl: string): Promise<string | null> => {
+      const ownerKey = itemId || contextRef?.documentId || "";
+      if (!ownerKey) {
+        showToast("无法确定图片归属的书籍");
+        return null;
+      }
+      const m = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl);
+      if (!m) {
+        showToast("图片数据不可用");
+        return null;
+      }
+      const ext = m[1] === "jpeg" ? "jpg" : m[1];
+      const saved = await window.assetsAPI?.saveImage(ownerKey, ext, m[2]);
+      if (!saved || (saved as { error?: string }).error || !saved.assetPath) {
+        showToast((saved as { error?: string } | null)?.error || "图片保存失败");
+        return null;
+      }
+      return saved.assetPath;
+    },
+    [itemId, contextRef, showToast]
+  );
+
+  const clearEngineSelection = () => {
+    kernelRef.current?.deselect();
+    setSelection(null);
+  };
+
+  // 翻页（v20.1）：内核 prev/next 自动跨章节；滚动/分页/对开三模式通用
+  const turnPage = useCallback(async (dir: 1 | -1) => {
+    const k = kernelRef.current;
+    if (!k) return;
+    if (dir === 1) await k.next();
+    else await k.prev();
+  }, []);
+
+  useEffect(() => {
+    if (!engineMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (manualOpen || aiPanel || focusImage) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (e.key === "ArrowRight" || e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
+        e.preventDefault();
+        void turnPage(1);
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp" || (e.key === " " && e.shiftKey)) {
+        e.preventDefault();
+        void turnPage(-1);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [engineMode, manualOpen, aiPanel, focusImage, turnPage]);
+
+  useEffect(
+    () => () => {
+      if (relocateTimerRef.current) window.clearTimeout(relocateTimerRef.current);
+    },
+    []
+  );
 
   // 需求2：制卡时记录选区锚点（文本 + 当时刻度），随 contextRef 落库，供复习卡「跳转原文」
   const anchorRef = useRef<{ anchorText: string; anchorRatio: number } | null>(null);
@@ -69,25 +415,32 @@ export default function Reader({
     };
   }
   function enrichedContextRef() {
+    // 引擎分支：四层可降级定位（cfi → chapterIndex → anchorText），带引擎版本便于回归归因
+    if (engineMode) {
+      const sel = engineSelRef.current;
+      if (!sel) return contextRef || null;
+      return {
+        ...(contextRef || {}),
+        ...buildLocator({ cfi: sel.cfi, chapterIndex: engineChapterRef.current, anchorText: sel.anchorText })
+      };
+    }
     return anchorRef.current ? { ...(contextRef || {}), ...anchorRef.current } : contextRef || null;
   }
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    window.setTimeout(() => setToast(null), 1800);
-  }, []);
-
-  // AI 运行中每秒跳一次已等待秒数——让用户确信程序没有卡死
+  // AI 运行中每秒跳一次已等待秒数——让用户确信程序没有卡死（含补充制卡/询问 AI 期间）
   const [nowTick, setNowTick] = useState(Date.now());
+  const anyFollowUp = (aiPanel?.followUpBusy?.length ?? 0) > 0;
+  const anyExploration = (aiPanel?.explorations ?? []).some((e) => e.running);
   useEffect(() => {
-    if (!aiPanel?.running) return;
+    if (!aiPanel?.running && !anyFollowUp && !anyExploration) return;
     const t = window.setInterval(() => setNowTick(Date.now()), 1000);
     return () => window.clearInterval(t);
-  }, [aiPanel?.running]);
+  }, [aiPanel?.running, anyFollowUp, anyExploration]);
   const elapsedSec = aiPanel?.running && aiPanel.startedAt ? Math.max(0, Math.round((nowTick - aiPanel.startedAt) / 1000)) : 0;
 
   // 恢复上次阅读位置
   useEffect(() => {
+    if (engineMode) return; // 引擎模式由内核 initLocation/CFI 恢复
     if (restoredRef.current) return;
     restoredRef.current = true;
     const el = scrollRef.current;
@@ -128,6 +481,7 @@ export default function Reader({
   }, [initialRatio, markdown]);
 
   const saveProgress = useCallback(() => {
+    if (engineMode) return; // 引擎模式进度由 kernel relocate 事件驱动，滚动比例无意义
     const el = scrollRef.current;
     if (!el || !onProgress) return;
     const denom = el.scrollHeight - el.clientHeight;
@@ -200,36 +554,68 @@ export default function Reader({
   }
 
   function clearSelection() {
+    if (engineMode) {
+      kernelRef.current?.deselect();
+      setSelection(null);
+      return;
+    }
     window.getSelection()?.removeAllRanges();
     setSelection(null);
   }
 
-  // ---------- 手动制卡（Phase 3：引用+可编辑副本模式） ----------
-  async function handleManualCard(front: string, back: string, cloze: string, priority: number) {
+  // ---------- 手动制卡（Phase 3：引用+可编辑副本模式；v16 翻转问答 = 制卡手段，产两张独立问答卡；
+  // M5（v25）：与 AI 制卡同构的字段集——类型选择 / UDC 领域标签 / contextPrefix / 助记 / 知识点分组 / 日期标记，
+  // 一律过 CardLintEngine + 相似检索；图片挖空手动卡由正文图片选区进入（front/back 可编辑） ----------
+  async function createSingleCard(p: {
+    front: string;
+    back: string;
+    cardType: string;
+    cloze?: string;
+    priority: number;
+    contextPrefix?: string | null;
+    domain?: string[];
+    mnemonic?: string | null;
+    knowledgePointId?: string | null;
+    dateStamp?: string | null;
+    occlusionJson?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; assetPath: string; shapes?: OcclusionShape[] | null } | null;
+    cardOrd?: number;
+  }): Promise<void> {
+    const sourceRef = sourceTitle ? { title: sourceTitle } : null;
     const card = {
-      noteText: front || cloze,
-      cardType: cloze ? "cloze" : "qa",
-      frontMarkdown: front,
-      backMarkdown: back,
+      noteText: p.front || p.cloze || "",
+      cardType: p.cardType,
+      frontMarkdown: p.front,
+      backMarkdown: p.back,
       clozeOrds: [],
+      cardOrd: p.cardOrd ?? 0,
+      occlusionJson: p.occlusionJson ?? null,
+      contextPrefix: p.contextPrefix || null,
       contextRef: enrichedContextRef(),
-      sourceRef: sourceTitle ? { title: sourceTitle } : null,
-      priority,
-      tags: []
+      mnemonic: p.mnemonic || null,
+      sourceRef,
+      dateStamp: p.dateStamp || null,
+      priority: p.priority,
+      tags: [],
+      domain: p.domain ?? [],
+      knowledgePointId: p.knowledgePointId || null,
+      generatedBy: "manual"
     };
     const issues = lintCard({
-      front,
-      back,
+      front: card.frontMarkdown,
+      back: card.backMarkdown,
       cardType: card.cardType,
-      cloze: cloze || null,
-      contextPrefix: null,
-      sourceRef: card.sourceRef
+      cloze: p.cloze || null,
+      contextPrefix: card.contextPrefix,
+      sourceRef,
+      dateStamp: card.dateStamp,
+      knowledgePointId: card.knowledgePointId,
+      occlusion: card.occlusionJson
     });
     const created = await cardsApi.create(card);
     for (const issue of issues) {
       await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
     }
-    const similar = await similaritySearch.findSimilar(front || cloze, 2);
+    const similar = await similaritySearch.findSimilar(p.front || p.cloze || "", 2);
     if (similar.length > 0) {
       await cardsApi.addIssue({
         cardId: created.id,
@@ -239,19 +625,177 @@ export default function Reader({
         source: "lint"
       });
     }
+  }
+
+  async function handleManualCard(p: ManualCardPayload) {
+    const meta = {
+      contextPrefix: p.contextPrefix || null,
+      domain: p.domain ?? [],
+      mnemonic: p.mnemonic || null,
+      knowledgePointId: p.knowledgePointId || null,
+      dateStamp: p.dateStamp || null,
+      priority: p.priority
+    };
+    if (p.mode === "imageOcclusion") {
+      if (!p.imageRegion) {
+        showToast("缺少图片选区，无法创建图片挖空卡");
+        return;
+      }
+      const assetPath = await ensureImageAsset(p.imageRegion.dataUrl);
+      if (!assetPath) return;
+      const shape = normalizeShape({ ...p.imageRegion.shape, ord: 0 });
+      await createSingleCard({
+        front: p.front.trim() || "图中遮挡区域对应的是什么？",
+        back: p.back,
+        cardType: "imageOcclusion",
+        cardOrd: 0,
+        occlusionJson: {
+          assetPath,
+          rects: [{ x: p.imageRegion.rect.x, y: p.imageRegion.rect.y, w: p.imageRegion.rect.w, h: p.imageRegion.rect.h, ord: 0 }],
+          shapes: [shape]
+        },
+        ...meta
+      });
+      eventBus.emit("cards/changed");
+      setManualOpen(false);
+      setManualImage(null);
+      showToast("图片挖空卡已创建（复习正面遮挡所选区域）");
+      return;
+    }
+    if (p.mode === "reverse") {
+      // 翻转问答卡（D18）：互为翻转的两张独立 qa 卡，各自有独立 FSRS 调度状态
+      await createSingleCard({ front: p.front, back: p.back, cardType: "qa", ...meta });
+      await createSingleCard({
+        front: p.reversePair?.bFront || p.back,
+        back: p.reversePair?.bBack || p.front,
+        cardType: "qa",
+        ...meta
+      });
+      eventBus.emit("cards/changed");
+      setManualOpen(false);
+      setManualImage(null);
+      showToast("已创建 2 张互为翻转的独立卡片");
+      return;
+    }
+    if (p.mode === "cloze") {
+      const cloze = p.cloze || "";
+      // F12（v25）修复：挖空卡必须把带 {{cN::}} 标记的文本存进 frontMarkdown——
+      // 此前存的是未转换的原文，复习端 parseCloze 找不到挖空 ord，挖空从未遮蔽
+      await createSingleCard({ front: cloze, back: p.back, cardType: "cloze", cloze, ...meta });
+      eventBus.emit("cards/changed");
+      setManualOpen(false);
+      setManualImage(null);
+      showToast("卡片已创建，可在复习视图查看");
+      return;
+    }
+    await createSingleCard({ front: p.front, back: p.back, cardType: "qa", ...meta });
     eventBus.emit("cards/changed");
     setManualOpen(false);
+    setManualImage(null);
     showToast("卡片已创建，可在复习视图查看");
   }
 
-  // ---------- AI 制卡（Phase 13 主路径） ----------
-  async function runAICards(text: string, webContext?: string) {
-    setAiPanel({ kind: "cards", text, running: true, progress: 0, startedAt: Date.now(), thinking: 0, searched: Boolean(webContext) });
+  // ---------- v25 图片选区提交（聚焦工具条 → AI 制卡 / 手动制卡） ----------
+  async function submitRegionCards(payload: ImageFocusSubmit) {
+    const focused = focusImage;
+    if (!focused) return;
+    setFocusBusy(true);
+    try {
+      const assetPath = await ensureImageAsset(focused.dataUrl);
+      if (!assetPath) return;
+      const cropDataUrl = await cropImageDataUrl(focused.dataUrl, payload.bbox);
+      // 图片入口无文本选区：清掉可能残留的锚点，避免把旧锚点挂到新卡上
+      anchorRef.current = null;
+      const label = `[图片选区] ${focused.alt || "正文图片"}`;
+      setFocusImage(null);
+      setAiPanel({
+        kind: "occlusion",
+        text: label,
+        image: { dataUrl: focused.dataUrl, assetPath },
+        running: true,
+        progress: 0,
+        startedAt: Date.now(),
+        thinking: 0
+      });
+      const { batchId, result } = await cardGenerator.generateOcclusionCards(
+        { dataUrl: cropDataUrl, assetPath },
+        {
+          title: sourceTitle,
+          section: contextLabel,
+          focus: "遮挡区域已由用户在图片上手动选定（矩形/圆形/多边形），本次发送的图片正是该区域的裁剪。请只识别该区域内的内容，产出 1 张卡，back 填该内容的简洁答案。",
+          presetRegion: { rect: payload.bbox, shape: payload.shape }
+        },
+        (chars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, progress: chars } : p)),
+        (thinkChars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, thinking: thinkChars } : p))
+      );
+      setAiPanel({
+        kind: "occlusion",
+        text: label,
+        image: { dataUrl: focused.dataUrl, assetPath },
+        running: false,
+        progress: undefined,
+        startedAt: undefined,
+        thinking: undefined,
+        drafts: result.cards,
+        accepted: new Set<number>(),
+        blockReasons: result.blockReasons,
+        regions: result.regions,
+        batchId
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAiPanel({
+        kind: "occlusion",
+        text: `[图片选区] ${focused.alt || "正文图片"}`,
+        image: undefined,
+        running: false,
+        startedAt: undefined,
+        thinking: undefined,
+        error: msg.includes("API Key")
+          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
+          : msg
+      });
+    } finally {
+      setFocusBusy(false);
+    }
+  }
+
+  function submitRegionManual(payload: ImageFocusSubmit) {
+    const focused = focusImage;
+    if (!focused) return;
+    setFocusImage(null);
+    setManualImage({
+      dataUrl: focused.dataUrl,
+      alt: focused.alt,
+      shape: normalizeShape({ ...payload.shape, ord: 0 }),
+      rect: payload.bbox
+    });
+    setManualOpen(true);
+  }
+
+  // ---------- AI 制卡（Phase 13 主路径；M1.2 材料类型路由） ----------
+  async function runAICards(text: string, webContext?: string, mode: CardGenMode = "auto") {
+    // 本地材料类型识别：auto 时按文本路由到对应提示词分支（概念/公式/序列/枚举），类型可手动覆盖
+    const route = detectMaterialType(text);
+    const resolved: CardGenMode = mode === "auto" ? route.scope : mode;
+    const shownRoute = mode === "auto" ? route : MATERIAL_ROUTES[resolved === "card-formula" ? "formula" : resolved === "card-seq" ? "sequence" : resolved === "card-enum" ? "enumeration" : resolved === "card-literature" ? "literature" : "concept"];
+    setAiPanel({
+      kind: "cards",
+      text,
+      running: true,
+      progress: 0,
+      startedAt: Date.now(),
+      thinking: 0,
+      searched: Boolean(webContext),
+      mode,
+      routeLabel: shownRoute.label,
+      routeForm: shownRoute.defaultForm
+    });
     try {
       const { batchId, result } = await cardGenerator.generateCards(
         text,
         { title: sourceTitle, section: contextLabel, webContext },
-        "auto",
+        resolved,
         (chars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, progress: chars } : p)),
         (thinkChars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, thinking: thinkChars } : p))
       );
@@ -266,7 +810,16 @@ export default function Reader({
         accepted: new Set<number>(),
         blockReasons: result.blockReasons,
         batchId,
-        searched: Boolean(webContext)
+        searched: Boolean(webContext),
+        mode,
+        routeLabel: shownRoute.label,
+        routeForm: shownRoute.defaultForm,
+        kps: result.knowledgePoints,
+        supplemental: new Set<number>(),
+        followUpBusy: [],
+        followUpStarted: {},
+        followUpErrors: {},
+        explorations: []
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -278,9 +831,120 @@ export default function Reader({
         thinking: undefined,
         error: msg.includes("API Key")
           ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
+          : msg,
+        mode,
+        routeLabel: shownRoute.label,
+        routeForm: shownRoute.defaultForm
+      });
+    }
+  }
+
+  // ---------- M1.1 图片挖空（D16：GLM 多模态识别遮挡区域，不做手动遮挡编辑器） ----------
+  async function runOcclusionCards() {
+    const ownerKey = itemId || contextRef?.documentId || "";
+    if (!ownerKey) {
+      showToast("无法确定图片归属的书籍");
+      return;
+    }
+    // 图片入口无文本选区：清掉可能残留的选区锚点，避免把旧锚点挂到新卡上
+    anchorRef.current = null;
+    const picked = await window.assetsAPI?.pickOcclusionImage(ownerKey);
+    if (!picked) return;
+    setAiPanel({
+      kind: "occlusion",
+      text: `[图片] ${picked.filename}`,
+      image: { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
+      running: true,
+      progress: 0,
+      startedAt: Date.now(),
+      thinking: 0
+    });
+    try {
+      const { batchId, result } = await cardGenerator.generateOcclusionCards(
+        { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
+        { title: sourceTitle, section: contextLabel },
+        (chars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, progress: chars } : p)),
+        (thinkChars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, thinking: thinkChars } : p))
+      );
+      setAiPanel({
+        kind: "occlusion",
+        text: `[图片] ${picked.filename}`,
+        image: { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
+        running: false,
+        progress: undefined,
+        startedAt: undefined,
+        thinking: undefined,
+        drafts: result.cards,
+        accepted: new Set<number>(),
+        blockReasons: result.blockReasons,
+        regions: result.regions,
+        batchId
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAiPanel({
+        kind: "occlusion",
+        text: `[图片] ${picked.filename}`,
+        image: undefined,
+        running: false,
+        startedAt: undefined,
+        thinking: undefined,
+        error: msg.includes("API Key")
+          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
           : msg
       });
     }
+  }
+
+  async function acceptOcclusionDraft(d: CardDraft, draftIndex: number) {
+    if (!d.occlusion || (aiPanel?.accepted?.has(draftIndex) ?? true)) return;
+    const ord = d.ord ?? d.occlusion.ord ?? 0;
+    const card = {
+      noteText: d.front || "图中遮挡区域对应的是什么？",
+      cardType: "imageOcclusion",
+      frontMarkdown: d.front || "图中遮挡区域对应的是什么？",
+      backMarkdown: d.back || d.occlusion.label || "",
+      clozeOrds: [],
+      cardOrd: ord,
+      // v25：形状（矩形/椭圆/多边形）随卡落库；rects 恒为包围盒（兼容旧渲染与 L11）
+      occlusionJson: {
+        rects: d.occlusion.rects,
+        assetPath: d.occlusion.assetPath,
+        shapes: d.occlusion.shapes ?? null
+      },
+      contextPrefix: d.contextPrefix || null,
+      contextRef: enrichedContextRef(),
+      sourceRef: d.sourceRef || (sourceTitle ? { title: sourceTitle } : null),
+      dateStamp: d.dateStamp || null,
+      priority: d.prioritySuggestion ?? 50,
+      tags: [],
+      domain: d.domain ?? [],
+      knowledgePointId: d.knowledgePointId || null,
+      generatedBy: "ai"
+    };
+    const issues = lintCard({
+      front: card.frontMarkdown,
+      back: card.backMarkdown,
+      cardType: card.cardType,
+      occlusion: {
+        assetPath: card.occlusionJson.assetPath,
+        rects: card.occlusionJson.rects,
+        shapes: card.occlusionJson.shapes
+      },
+      contextPrefix: card.contextPrefix,
+      sourceRef: card.sourceRef,
+      dateStamp: card.dateStamp,
+      knowledgePointId: card.knowledgePointId
+    });
+    const created = await cardsApi.create(card);
+    for (const issue of issues) {
+      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
+    }
+    setAiPanel((p) =>
+      p && p.drafts ? { ...p, accepted: new Set([...(p.accepted ?? []), draftIndex]) } : p
+    );
+    eventBus.emit("cards/changed");
+    showToast("遮挡卡已接受，进 FSRS 队列");
   }
 
   // ---------- 联网补充事件背景后重试制卡 ----------
@@ -300,6 +964,116 @@ export default function Reader({
       setAiPanel((p) =>
         p && p.kind === "cards"
           ? { ...p, searching: false, error: err instanceof Error ? err.message : String(err) }
+          : p
+      );
+    }
+  }
+
+  // ---------- v16 递进补卡：知识点「后续可补」注记 → 询问 AI / 直接制卡 ----------
+  const explorationSeqRef = useRef(0);
+
+  function patchExploration(explId: number, patch: Partial<{ answer: string; running: boolean; startedAt?: number; thinking?: number; error?: string }>) {
+    setAiPanel((p) =>
+      p ? { ...p, explorations: (p.explorations ?? []).map((e) => (e.id === explId ? { ...e, ...patch } : e)) } : p
+    );
+  }
+
+  // 询问 AI 相关内容：解释追加在面板最下方，解释末尾带「直接制卡」
+  async function runExploration(item: string, kpTitle: string) {
+    if (!aiPanel) return;
+    const explId = ++explorationSeqRef.current;
+    const question = `就这段文字中的知识点「${kpTitle}」，请解释与「${item}」直接相关的具体内容：若是原因/例子/联系类方向，给出可直接用于制卡的实质内容；若是某个出处、概念或典故，请解释它本身并说明与本段文字的联系。`;
+    setAiPanel((p) =>
+      p
+        ? {
+            ...p,
+            explorations: [
+              ...(p.explorations ?? []),
+              { id: explId, item, kpTitle, question, answer: "", running: true, startedAt: Date.now(), thinking: 0 }
+            ]
+          }
+        : p
+    );
+    try {
+      const answer = await cardGenerator.explain(
+        aiPanel.text,
+        `${sourceTitle ?? ""}${contextLabel ? " · " + contextLabel : ""}`,
+        question,
+        (acc) => patchExploration(explId, { answer: acc }),
+        (thinkChars) => patchExploration(explId, { thinking: thinkChars })
+      );
+      patchExploration(explId, { running: false, answer, startedAt: undefined, thinking: undefined });
+    } catch (err) {
+      patchExploration(explId, {
+        running: false,
+        startedAt: undefined,
+        thinking: undefined,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  }
+
+  // 直接制卡：以原选文为材料 +「本次制卡重点」指令 + 已有卡清单（防重复），
+  // 生成 1-3 张补充卡追加到卡片清单末尾；contextRef 沿用同一次选区锚点（跳转原文同一位置）
+  async function runFollowUpCards(item: string, kpTitle: string, hint?: string) {
+    const panel = aiPanel;
+    if (!panel || !panel.drafts) return;
+    if ((panel.followUpBusy ?? []).includes(item)) return;
+    setAiPanel((p) =>
+      p
+        ? {
+            ...p,
+            followUpBusy: [...(p.followUpBusy ?? []), item],
+            followUpStarted: { ...(p.followUpStarted ?? {}), [item]: Date.now() },
+            followUpErrors: { ...(p.followUpErrors ?? {}), [item]: "" }
+          }
+        : p
+    );
+    try {
+      const focus = [
+        `这是对同一段材料的补充制卡。知识点「${kpTitle}」的补充方向：「${item}」。`,
+        "请只产 1-3 张该方向的补充卡，禁止与已有卡重复或换皮。",
+        hint ? `可参考以下解释作为卡面素材（提炼为短答案，禁止照抄长句）：\n${hint.slice(0, 400)}` : ""
+      ]
+        .filter(Boolean)
+        .join("\n");
+      const { result } = await cardGenerator.generateCards(
+        panel.text,
+        {
+          title: sourceTitle,
+          section: contextLabel,
+          existingCards: panel.drafts
+            .map((d) => d.front || d.cloze || "")
+            .filter(Boolean)
+            .slice(0, 10),
+          focus
+        },
+        "card-generation"
+      );
+      setAiPanel((p) => {
+        if (!p || !p.drafts) return p;
+        const start = p.drafts.length;
+        const supplemental = new Set(p.supplemental ?? []);
+        for (let k = 0; k < result.cards.length; k++) supplemental.add(start + k);
+        return {
+          ...p,
+          drafts: [...p.drafts, ...result.cards],
+          supplemental,
+          followUpBusy: (p.followUpBusy ?? []).filter((x) => x !== item),
+          followUpStarted: { ...(p.followUpStarted ?? {}), [item]: undefined }
+        } as typeof p;
+      });
+      showToast("补充卡已生成，请确认后接受");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setAiPanel((p) =>
+        p
+          ? {
+              ...p,
+              followUpBusy: (p.followUpBusy ?? []).filter((x) => x !== item),
+              followUpStarted: { ...(p.followUpStarted ?? {}), [item]: undefined },
+              followUpErrors: { ...(p.followUpErrors ?? {}), [item]: msg }
+            }
           : p
       );
     }
@@ -420,24 +1194,150 @@ export default function Reader({
     showToast("已摘录进学习队列");
   }
 
+  // ---------- M4 快捷键动作（§9.1 M4：与下方选区菜单按钮完全同源） ----------
+  function actManualCard() {
+    if (!selection) return;
+    rememberAnchor(selection.text);
+    setManualOpen(true);
+    clearSelection();
+  }
+  function actAICards() {
+    if (!selection) return;
+    rememberAnchor(selection.text);
+    const t = selection.text;
+    clearSelection();
+    void runAICards(t, undefined, aiMode);
+  }
+  function actAIExplain() {
+    if (!selection) return;
+    const t = selection.text;
+    clearSelection();
+    void runExplain(t, null);
+  }
+  function actExtractSelection() {
+    if (!selection) return;
+    const t = selection.text;
+    clearSelection();
+    void handleExtract(t);
+  }
+
+  // 阅读场景快捷键（制卡 Ctrl+Z / AI 制卡 Ctrl+X / AI 解释 Ctrl+A / 摘录 Ctrl+S）：
+  // 仅当存在活动选区且无手动制卡弹窗、无 AI 面板时可用（弹层开着不触发新动作）
+  const readerShortcutReady = !!selection && !manualOpen && !aiPanel;
+  useCommandActions("reader", {
+    "reader.makeCard": { when: () => readerShortcutReady, run: actManualCard },
+    "reader.aiCards": { when: () => readerShortcutReady, run: actAICards },
+    "reader.aiExplain": { when: () => readerShortcutReady, run: actAIExplain },
+    "reader.extract": { when: () => readerShortcutReady, run: actExtractSelection }
+  });
+
   return (
     <div className="reader-wrap">
       <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}`}>
-        <div ref={scrollRef} className="reader-scroll" onMouseUp={handleMouseUp} onScroll={handleScroll}>
-          <article className="reader-markdown">
-            <h1 className="reader-title">{title}</h1>
-            {contextLabel && <p className="reader-context">{contextLabel}</p>}
-            <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-              {markdown}
-            </ReactMarkdown>
-          </article>
+        <div
+          ref={scrollRef}
+          className={`reader-scroll${engineMode ? " reader-scroll-engine" : ""}`}
+          onMouseUp={engineMode ? undefined : handleMouseUp}
+          onScroll={engineMode ? undefined : handleScroll}
+        >
+          {engineSource ? (
+            <>
+              <div className="reader-engine-controls">
+                <div className="reader-engine-controls-group">
+                  <button className="btn btn-outline btn-sm" onClick={() => setTocOpen((v) => !v)}>
+                    目录
+                  </button>
+                  <span className="reader-engine-divider" aria-hidden="true" />
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
+                    ‹
+                  </button>
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
+                    ›
+                  </button>
+                </div>
+                <div className="reader-engine-controls-group">
+                  <Dropdown
+                    align="left"
+                    title="阅读模式"
+                    value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
+                    options={[
+                      { value: "scrolled", label: "滚动" },
+                      { value: "paged", label: "分页" },
+                      { value: "spread", label: "对开" }
+                    ]}
+                    onChange={(v) =>
+                      changeReaderMode(
+                        v === "scrolled" ? { flow: "scrolled" } : v === "spread" ? { flow: "paged", spread: true } : { flow: "paged" }
+                      )
+                    }
+                  />
+                  <Dropdown
+                    align="left"
+                    title="阅读主题"
+                    value={readerSettings.appearance.theme}
+                    options={[
+                      { value: "paper", label: "纸白" },
+                      { value: "sepia", label: "羊皮" },
+                      { value: "dark", label: "暗夜" },
+                      { value: "custom", label: "自定义" }
+                    ]}
+                    onChange={(t) => changeReaderTheme(t as ReaderAppearance["theme"])}
+                  />
+                </div>
+              </div>
+              <div className="reader-engine-viewport">
+                <ReaderEngine
+                  source={engineSource}
+                  initLocation={initialCfi ? { cfi: initialCfi } : initialRatio > 0 ? { fraction: initialRatio } : null}
+                  jump={jumpAnchor ? { cfi: jumpAnchor.cfi, anchorText: jumpAnchor.anchorText } : null}
+                  onRelocate={handleEngineRelocate}
+                  onLink={(info) => {
+                    // 外链：adapter 已拦截默认行为，这里交系统浏览器；内链由内核自行精确跳转
+                    if (!info.internal) void window.windowAPI?.openExternal(info.href);
+                  }}
+                  onContentPointerUp={handleEnginePointerUp}
+                  onImageClick={(img) => void handleEngineImageClick(img)}
+                  onReady={handleEngineReady}
+                />
+                {readerSettings.mode.flow === "paged" && (
+                  <>
+                    <div className="reader-tap-zone reader-tap-left" title="上一页" onClick={() => void turnPage(-1)} />
+                    <div className="reader-tap-zone reader-tap-right" title="下一页" onClick={() => void turnPage(1)} />
+                  </>
+                )}
+                {tocOpen && (
+                  <TocSidebar
+                    items={tocItems}
+                    activeHref={tocActiveHref}
+                    onNavigate={(item) => {
+                      void kernelRef.current?.goTo({ href: item.href });
+                      setTocOpen(false);
+                    }}
+                    onClose={() => setTocOpen(false)}
+                  />
+                )}
+              </div>
+            </>
+          ) : (
+            <article className="reader-markdown">
+              <h1 className="reader-title">{title}</h1>
+              {contextLabel && <p className="reader-context">{contextLabel}</p>}
+              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                {markdown}
+              </ReactMarkdown>
+            </article>
+          )}
 
           {selection && (
-            <div className="selection-menu" style={{ left: selection.x, top: Math.max(8, selection.y) }}>
-              <button onClick={() => { rememberAnchor(selection.text); setManualOpen(true); clearSelection(); }}>制卡</button>
-              <button onClick={() => { rememberAnchor(selection.text); const t = selection.text; clearSelection(); runAICards(t); }}>AI 制卡</button>
-              <button onClick={() => { const t = selection.text; clearSelection(); runExplain(t, null); }}>AI 解释</button>
-              <button onClick={() => { const t = selection.text; clearSelection(); handleExtract(t); }}>摘录</button>
+            <div
+              className="selection-menu"
+              style={engineMode ? { position: "fixed", left: selection.x, top: Math.max(8, selection.y) } : { left: selection.x, top: Math.max(8, selection.y) }}
+            >
+              <button onClick={actManualCard}>制卡</button>
+              <button onClick={actAICards}>AI 制卡</button>
+              <button onClick={actAIExplain}>AI 解释</button>
+              <button onClick={actExtractSelection}>摘录</button>
+              <button onClick={() => { clearSelection(); void runOcclusionCards(); }}>图片挖空</button>
             </div>
           )}
         </div>
@@ -445,7 +1345,11 @@ export default function Reader({
         {manualOpen && selection?.text && (
           <ManualCardEditor
             quote={selection.text}
-            onCancel={() => setManualOpen(false)}
+            imageRegion={manualImage ?? undefined}
+            onCancel={() => {
+              setManualOpen(false);
+              setManualImage(null);
+            }}
             onSave={handleManualCard}
           />
         )}
@@ -453,7 +1357,11 @@ export default function Reader({
         {manualOpen && !selection?.text && (
           <ManualCardEditor
             quote=""
-            onCancel={() => setManualOpen(false)}
+            imageRegion={manualImage ?? undefined}
+            onCancel={() => {
+              setManualOpen(false);
+              setManualImage(null);
+            }}
             onSave={handleManualCard}
           />
         )}
@@ -462,7 +1370,11 @@ export default function Reader({
           <AIPanel
             panel={{ ...aiPanel, elapsedSec }}
             onClose={() => {
-              if (aiPanel.kind === "cards" && aiPanel.batchId && aiPanel.drafts?.length) {
+              if (
+                (aiPanel.kind === "cards" || aiPanel.kind === "occlusion") &&
+                aiPanel.batchId &&
+                aiPanel.drafts?.length
+              ) {
                 cardsApi.setBatchStatus(aiPanel.batchId, "rejected");
               }
               setAiPanel(null);
@@ -470,6 +1382,7 @@ export default function Reader({
             onAccept={(d, idx, edited) => {
               return acceptDraft(d, idx, edited);
             }}
+            onAcceptOcclusion={(d, idx) => acceptOcclusionDraft(d, idx)}
             onEdit={(idx, patch) => {
               setAiPanel((p) => {
                 if (!p || !p.drafts) return p;
@@ -478,37 +1391,87 @@ export default function Reader({
                 return { ...p, drafts: next };
               });
             }}
+            onSplitReverse={(idx) => {
+              // v16（D18）：「转翻转卡」= 拆为两张互为翻转的独立 qa 草稿（各自有独立 FSRS 调度）
+              setAiPanel((p) => {
+                if (!p || !p.drafts) return p;
+                const d = p.drafts[idx];
+                const a: CardDraft = { ...d, cardType: "qa", front: d.front, back: d.back };
+                const b: CardDraft = {
+                  ...d,
+                  cardType: "qa",
+                  front: (d.back || "").trim() || d.front,
+                  back: d.front,
+                  cloze: null
+                };
+                const next = [...p.drafts.slice(0, idx), a, b, ...p.drafts.slice(idx + 1)];
+                // 拆分点之后的已接受/补充标记索引整体右移一位，保持对位
+                const accepted = new Set([...(p.accepted ?? [])].map((k) => (k > idx ? k + 1 : k)));
+                const supplemental = new Set([...(p.supplemental ?? [])].map((k) => (k > idx ? k + 1 : k)));
+                return { ...p, drafts: next, accepted, supplemental };
+              });
+            }}
             onRejectAll={rejectAllDrafts}
             onExplain={(q) => runExplain(aiPanel.text, q)}
-            onMakeCards={() => runAICards(aiPanel.text)}
+            onMakeCards={() => runAICards(aiPanel.text, undefined, aiMode)}
+            onModeChange={(m) => changeAiMode(m)}
+            mode={aiMode}
             onSearchBackground={() => searchAndRetry(aiPanel.text)}
+            onFollowUpCards={(item, kpTitle, hint) => runFollowUpCards(item, kpTitle, hint)}
+            onExploration={(item, kpTitle) => runExploration(item, kpTitle)}
+            elapsedTick={nowTick}
           />
         )}
       </div>
+
+      {/* v25 图片聚焦覆盖层：位于阅读器最外层（fixed 全屏），点击模糊区域退出 */}
+      {focusImage && (
+        <ImageFocus
+          image={{ src: focusImage.src, dataUrl: focusImage.dataUrl, alt: focusImage.alt }}
+          origin={{ x: focusImage.rect.x, y: focusImage.rect.y, width: focusImage.rect.w, height: focusImage.rect.h }}
+          busy={focusBusy}
+          onClose={() => setFocusImage(null)}
+          onSubmit={(kind, payload) => {
+            if (kind === "ai") void submitRegionCards(payload);
+            else submitRegionManual(payload);
+          }}
+        />
+      )}
 
       {toast && <div className="reader-toast">{toast}</div>}
     </div>
   );
 }
 
-// ---------- 手动制卡编辑器（Phase 3：引用 + 可编辑副本） ----------
+// ---------- 手动制卡编辑器（Phase 3：引用 + 可编辑副本；M1.1 增翻转问答；M5/v25 字段对齐 AI 制卡） ----------
 function ManualCardEditor({
   quote,
+  imageRegion,
   onCancel,
   onSave
 }: {
   quote: string;
+  /** v25：来自图片聚焦选区（工具条「手动制卡」）——提供时默认进入图片挖空页签 */
+  imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
   onCancel: () => void;
-  onSave: (front: string, back: string, cloze: string, priority: number) => Promise<void>;
+  onSave: (payload: ManualCardPayload) => Promise<void>;
 }) {
-  const [mode, setMode] = useState<"qa" | "cloze">("qa");
-  const [front, setFront] = useState(mode === "qa" ? "" : quote);
+  const [mode, setMode] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
+  const [front, setFront] = useState(imageRegion ? "" : quote);
   const [back, setBack] = useState("");
+  const [bFront, setBFront] = useState("");
+  const [bBack, setBBack] = useState("");
   const [priority, setPriority] = useState(50);
   const [saving, setSaving] = useState(false);
+  // M5：与 AI 制卡同构的元数据字段（领域标签对齐 R17：≤2 个、首个为主）
+  const [domain, setDomain] = useState<string[]>([]);
+  const [contextPrefix, setContextPrefix] = useState("");
+  const [mnemonic, setMnemonic] = useState("");
+  const [knowledgePointId, setKnowledgePointId] = useState("");
+  const [dateStamped, setDateStamped] = useState(false);
 
   useEffect(() => {
-    if (mode === "qa") {
+    if (mode === "qa" || mode === "imageOcclusion") {
       setFront((f) => (f ? f : ""));
     } else {
       setFront(quote);
@@ -517,20 +1480,46 @@ function ManualCardEditor({
 
   async function save() {
     setSaving(true);
-    const cloze = mode === "cloze" ? toCloze(front) : "";
-    if (mode === "qa") await onSave(front, back, "", priority);
-    else await onSave(quote, "", cloze, priority);
+    const meta = {
+      priority,
+      contextPrefix: contextPrefix.trim(),
+      domain,
+      mnemonic: mnemonic.trim(),
+      knowledgePointId: knowledgePointId.trim(),
+      // 日期标记（R11/规则19）：易变内容勾选后写入当日日期
+      dateStamp: dateStamped ? new Date().toISOString().slice(0, 10) : null
+    };
+    const clozeText = mode === "cloze" ? toCloze(front) : undefined;
+    await onSave({
+      mode,
+      front: mode === "cloze" ? clozeText ?? "" : front,
+      back,
+      cloze: clozeText,
+      reversePair:
+        mode === "reverse"
+          ? { bFront: bFront.trim() || back, bBack: bBack.trim() || front }
+          : undefined,
+      imageRegion: mode === "imageOcclusion" ? imageRegion : undefined,
+      ...meta
+    });
     setSaving(false);
   }
 
   function toCloze(text: string): string {
-    // 简易挖空：用户用 **粗体** 或〔〕标记答案，否则挖首个句子成分
+    // 简易挖空：用户用 **粗体** 或〔〕标记答案，否则保持原文
     const bold = /\*\*(.+?)\*\*/.exec(text);
     if (bold) return text.replace(bold[0], `{{c1::${bold[1]}}}`);
     const bracket = /〔(.+?)〕/.exec(text);
     if (bracket) return text.replace(bracket[0], `{{c1::${bracket[1]}}}`);
     return text;
   }
+
+  const canSave =
+    mode === "imageOcclusion"
+      ? Boolean(imageRegion) && Boolean(back.trim())
+      : mode === "qa" || mode === "reverse"
+        ? Boolean(front.trim()) && Boolean(back.trim())
+        : Boolean(front.trim());
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
@@ -551,12 +1540,38 @@ function ManualCardEditor({
           <button className={mode === "qa" ? "active" : ""} onClick={() => setMode("qa")}>
             问答题
           </button>
+          <button className={mode === "reverse" ? "active" : ""} onClick={() => setMode("reverse")}>
+            翻转问答
+          </button>
           <button className={mode === "cloze" ? "active" : ""} onClick={() => setMode("cloze")}>
             填空题
           </button>
+          <button className={mode === "imageOcclusion" ? "active" : ""} onClick={() => setMode("imageOcclusion")}>
+            图片挖空
+          </button>
         </div>
 
-        {mode === "qa" ? (
+        {mode === "reverse" ? (
+          <>
+            <p className="form-hint">翻转问答：一次性创建两张互为翻转的独立问答卡（B 面留空则自动正反互换），各自有独立的复习调度。</p>
+            <div className="form-field">
+              <label>A 面 · 题面（建议「领域前缀: 问题」）</label>
+              <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="例：统计: 中位数是什么？" />
+            </div>
+            <div className="form-field">
+              <label>A 面 · 答案（目标 ≤15 字）</label>
+              <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：排序后位于中间位置的数" />
+            </div>
+            <div className="form-field">
+              <label>B 面 · 题面（留空则自动用 A 面答案反向提问）</label>
+              <textarea className="ta-short" value={bFront} onChange={(e) => setBFront(e.target.value)} placeholder="例：统计: 排序后位于中间位置的数叫什么？" />
+            </div>
+            <div className="form-field">
+              <label>B 面 · 答案（留空则自动用 A 面题面）</label>
+              <textarea className="ta-short" value={bBack} onChange={(e) => setBBack(e.target.value)} placeholder="例：中位数" />
+            </div>
+          </>
+        ) : mode === "qa" ? (
           <>
             <div className="form-field">
               <label>正面（问题，建议「领域前缀: 问题」）</label>
@@ -567,7 +1582,7 @@ function ManualCardEditor({
               <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：排序后位于中间位置的数" />
             </div>
           </>
-        ) : (
+        ) : mode === "cloze" ? (
           <div className="form-field">
             <label>
               挖空文本（用 **双星号** 或〔括号〕包住答案，自动转 Anki 挖空；多挖空用 c1/c2 编号语法）
@@ -575,7 +1590,67 @@ function ManualCardEditor({
             <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} />
             <p className="form-preview mono">{front.replace(/\*\*(.+?)\*\*/g, "〔$1〕")}</p>
           </div>
+        ) : (
+          <>
+            <p className="form-hint">
+              图片挖空：正面按所选区域遮挡，答案面显示原图与答案文本。区域来自阅读器中的图片选区。
+            </p>
+            {imageRegion ? (
+              <>
+                <div className="occlusion-stage occlusion-preview manual-region-preview">
+                  <img src={imageRegion.dataUrl} alt="" className="occlusion-img" />
+                  <OcclusionShapes occlusion={{ shapes: [imageRegion.shape] }} cardOrd={0} />
+                </div>
+                <div className="form-field">
+                  <label>正面（问题，默认「图中遮挡区域对应的是什么？」）</label>
+                  <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="图中遮挡区域对应的是什么？" />
+                </div>
+                <div className="form-field">
+                  <label>背面（答案，必填）</label>
+                  <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：海马体" />
+                </div>
+              </>
+            ) : (
+              <p className="form-hint">
+                尚未选择图片区域：请关闭本窗口，点击阅读材料中的图片进入聚焦，用工具条框选区域后选择「手动制卡」。
+              </p>
+            )}
+          </>
         )}
+
+        {/* M5：与 AI 制卡同构的元数据（领域标签 / 上下文前缀 / 助记 / 知识点分组 / 日期标记） */}
+        <div className="form-field">
+          <label>领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）</label>
+          <UdcPicker value={domain} onChange={setDomain} />
+        </div>
+        <div className="form-field">
+          <label>上下文前缀（可选；只能写领域/学科名，禁止泄漏答案——规则16）</label>
+          <input
+            type="text"
+            value={contextPrefix}
+            onChange={(e) => setContextPrefix(e.target.value)}
+            placeholder="例：统计:"
+          />
+        </div>
+        <div className="form-field">
+          <label>助记（可选，规则7 克制使用）</label>
+          <input type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="例：中位数的「中」= 位置在正中间" />
+        </div>
+        <div className="form-field">
+          <label>知识点分组（可选；同组卡片共享同一 knowledgePointId）</label>
+          <input
+            type="text"
+            value={knowledgePointId}
+            onChange={(e) => setKnowledgePointId(e.target.value)}
+            placeholder="例：kp-中位数"
+          />
+        </div>
+        <div className="form-field form-check">
+          <label className="backup-checkline">
+            <input type="checkbox" checked={dateStamped} onChange={(e) => setDateStamped(e.target.checked)} />
+            标注日期（规则19：统计数字/版本/价格等易变内容勾选，写入今日日期）
+          </label>
+        </div>
 
         <div className="form-field">
           <label>优先级（0-100，越高越先复习）</label>
@@ -585,16 +1660,76 @@ function ManualCardEditor({
 
         <div className="form-actions">
           <button className="btn btn-secondary" onClick={onCancel}>取消</button>
-          <button
-            className="btn btn-primary"
-            disabled={saving || (mode === "qa" ? !front.trim() || !back.trim() : !front.trim())}
-            onClick={save}
-          >
+          <button className="btn btn-primary" disabled={saving || !canSave} onClick={save}>
             {saving ? "保存中…" : "创建卡片"}
           </button>
         </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** UDC 领域多选（M5/R17）：选中的标签以 chip 展示（点击移除），菜单只列受控清单 */
+function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const options = [...UDC_LEAVES.map((l) => ({ code: l.code, label: `${l.code} ${l.label}` })), { code: UDC_OTHER, label: "其他" }];
+  return (
+    <div className="udc-picker" ref={ref}>
+      {value.length > 0 && (
+        <div className="udc-chips">
+          {value.map((code, i) => (
+            <button
+              key={code}
+              type="button"
+              className="udc-chip"
+              title={i === 0 ? "主领域（点击移除）" : "点击移除"}
+              onClick={() => onChange(value.filter((c) => c !== code))}
+            >
+              {udcLabel(code)}
+              {i === 0 && <span className="udc-chip-main mono">主</span>}
+              <span aria-hidden="true">×</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {value.length < UDC_MAX && (
+        <div className="dd">
+          <button type="button" className="dd-btn" onClick={() => setOpen((o) => !o)}>
+            {value.length === 0 ? "选择领域" : "再加一个领域"}
+            <span className="dd-caret">▾</span>
+          </button>
+          {open && (
+            <div className="dd-menu dd-menu-left udc-menu" role="listbox">
+              {options.map((o) => (
+                <button
+                  key={o.code}
+                  type="button"
+                  role="option"
+                  aria-selected={value.includes(o.code)}
+                  className="dd-item"
+                  disabled={value.includes(o.code)}
+                  onClick={() => {
+                    onChange([...value, o.code]);
+                    setOpen(false);
+                  }}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -611,14 +1746,21 @@ function AIPanel({
   panel,
   onClose,
   onAccept,
+  onAcceptOcclusion,
   onEdit,
+  onSplitReverse,
   onRejectAll,
   onExplain,
   onMakeCards,
-  onSearchBackground
+  onModeChange,
+  mode = "auto",
+  onSearchBackground,
+  onFollowUpCards,
+  onExploration,
+  elapsedTick = 0
 }: {
   panel: {
-    kind: "explain" | "cards";
+    kind: "explain" | "cards" | "occlusion";
     text: string;
     answer?: string;
     drafts?: CardDraft[];
@@ -633,22 +1775,59 @@ function AIPanel({
     searching?: boolean;
     searched?: boolean;
     error?: string;
+    mode?: CardGenMode;
+    routeLabel?: string;
+    routeForm?: string;
+    image?: { dataUrl: string; assetPath: string };
+    regions?: OcclusionRegion[];
+    kps?: { id: string; summary: string }[];
+    supplemental?: Set<number>;
+    followUpBusy?: string[];
+    followUpStarted?: Record<string, number | undefined>;
+    followUpErrors?: Record<string, string>;
+    explorations?: {
+      id: number;
+      item: string;
+      kpTitle: string;
+      question: string;
+      answer?: string;
+      running: boolean;
+      startedAt?: number;
+      thinking?: number;
+      error?: string;
+    }[];
   };
   onClose: () => void;
   onAccept: (draft: CardDraft, draftIndex: number, edited?: Partial<CardDraft>) => Promise<void>;
+  onAcceptOcclusion: (draft: CardDraft, draftIndex: number) => Promise<void>;
   onEdit: (draftIndex: number, patch: Partial<CardDraft>) => void;
+  onSplitReverse: (draftIndex: number) => void;
   onRejectAll: () => void;
   onExplain: (question: string | null) => void;
   onMakeCards: () => void;
+  onModeChange: (mode: CardGenMode) => void;
+  mode?: CardGenMode;
   onSearchBackground: () => void;
+  onFollowUpCards: (item: string, kpTitle: string, hint?: string) => void;
+  onExploration: (item: string, kpTitle: string) => void;
+  elapsedTick?: number;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, { front?: string; back?: string }>>({});
+  const isOcclusion = panel.kind === "occlusion";
+  const followUpGroups: FollowUpGroup[] = panel.kps ? parseFollowUps(panel.kps) : [];
+  const nowTick = elapsedTick;
+  const busySec = (item: string) => {
+    const started = panel.followUpStarted?.[item];
+    return started ? Math.max(0, Math.round((nowTick - started) / 1000)) : 0;
+  };
+  const explSec = (e: { startedAt?: number }) =>
+    e.startedAt ? Math.max(0, Math.round((nowTick - e.startedAt) / 1000)) : 0;
 
   return (
     <div className="ai-panel">
       <div className="ai-panel-head">
-        <span className="ai-panel-title">{panel.kind === "explain" ? "AI 解释" : "AI 制卡"}</span>
+        <span className="ai-panel-title">{panel.kind === "explain" ? "AI 解释" : isOcclusion ? "图片挖空" : "AI 制卡"}</span>
         <button className="icon-btn" title="关闭" onClick={onClose}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M18 6 6 18" />
@@ -660,7 +1839,7 @@ function AIPanel({
       <div className="ai-panel-body">
         <blockquote className="ai-quote">{panel.text}</blockquote>
 
-        {panel.kind === "cards" && panel.running && (
+        {(panel.kind === "cards" || isOcclusion) && panel.running && (
           <div className="ai-streaming mono">
             {panel.progress
               ? `生成中… 已输出 ${panel.progress} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒（大模型生成长 JSON 通常需要 1-2 分钟，请保持窗口打开）`
@@ -701,13 +1880,102 @@ function AIPanel({
           </>
         )}
 
+        {/* M1.2：材料类型路由展示 + 手动覆盖 */}
         {panel.kind === "cards" && (
+          <div className="ai-route-row">
+            <span className="mono">
+              {panel.routeLabel ? `材料类型：${panel.routeLabel} · 默认形式：${panel.routeForm}` : "材料类型：自动识别"}
+            </span>
+            <Dropdown
+              align="left"
+              title="材料类型"
+              value={mode}
+              options={[
+                { value: "auto", label: "自动识别" },
+                { value: "card-generation", label: "概念论述" },
+                { value: "card-formula", label: "公式推导" },
+                { value: "card-seq", label: "流程背诵" },
+                { value: "card-enum", label: "枚举清单" },
+                { value: "card-literature", label: "文学/诗歌背诵" }
+              ]}
+              onChange={(m) => onModeChange(m as CardGenMode)}
+            />
+            {(panel.drafts?.length || panel.error) && !panel.running && (
+              <button className="btn btn-outline btn-sm" onClick={onMakeCards}>
+                按此类型重跑
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* v16 递进补卡：知识点「后续可补」注记 → 逐项两个按钮 */}
+        {panel.kind === "cards" && followUpGroups.length > 0 && (
+          <div className="ai-kps">
+            <p className="ai-kps-title">知识点与后续可补</p>
+            {followUpGroups.map((g, gi) => (
+              <div key={gi} className="ai-kp">
+                <div className="ai-kp-title">{g.kpTitle}</div>
+                {g.items.map((item) => {
+                  const busy = (panel.followUpBusy ?? []).includes(item);
+                  const err = panel.followUpErrors?.[item];
+                  return (
+                    <div key={item} className="ai-kp-item">
+                      <span className="ai-kp-item-text">{item}</span>
+                      <button
+                        className="btn btn-outline btn-sm"
+                        disabled={busy || panel.running}
+                        onClick={() => onExploration(item, g.kpTitle)}
+                      >
+                        询问 AI 相关内容
+                      </button>
+                      <button
+                        className="btn btn-outline btn-sm"
+                        disabled={busy || panel.running}
+                        onClick={() => onFollowUpCards(item, g.kpTitle)}
+                      >
+                        直接制卡
+                      </button>
+                      {busy && <span className="mono ai-kp-busy">补充制卡中… {busySec(item)} 秒（推理模型约需 0.5-1 分钟）</span>}
+                      {err && <span className="lint lint-error">{err}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {isOcclusion && panel.image && !panel.running && (
+          <div className="occlusion-stage occlusion-preview">
+            <img src={panel.image.assetPath} alt="" className="occlusion-img" />
+            {/* v25：形状化预览（矩形/椭圆/多边形）——与复习端同口径渲染 */}
+            <OcclusionShapes
+              occlusion={{
+                rects: (panel.regions ?? []).map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, ord: r.ord })),
+                shapes: (panel.regions ?? []).map((r) => r.shape ?? null)
+              }}
+              cardOrd={0}
+              variant="proposal"
+            />
+            {(panel.regions ?? []).map((r) => (
+              <span
+                key={r.ord}
+                className="occlusion-ord mono"
+                style={{ left: `${r.x}%`, top: `${r.y}%` }}
+              >
+                {r.ord + 1}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {(panel.kind === "cards" || isOcclusion) && (
           <>
             {panel.blockReasons && panel.blockReasons.length > 0 && (
               <div className="ai-block-reasons">
-                <p>该文本依赖未建立的理解：</p>
+                <p>该{isOcclusion ? "图片" : "文本"}依赖未建立的理解：</p>
                 <ul>{panel.blockReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
-                {!panel.searched && (
+                {!isOcclusion && !panel.searched && (
                   <div className="ai-actions">
                     <button
                       className="btn btn-outline btn-sm"
@@ -718,7 +1986,7 @@ function AIPanel({
                     </button>
                   </div>
                 )}
-                {panel.searched && (
+                {!isOcclusion && panel.searched && (
                   <p className="form-hint">已注入联网检索到的事件背景；若仍提示缺背景，建议手动补充来源文本。</p>
                 )}
               </div>
@@ -745,19 +2013,30 @@ function AIPanel({
                 ruleNotes: toList((rawDraft as CardDraft)?.ruleNotes),
                 warnings: toList((rawDraft as CardDraft)?.warnings)
               };
-              const issues = lintCard({
-                front: d.front,
-                back: d.back,
-                cardType: d.cardType,
-                cloze: d.cloze || null,
-                contextPrefix: d.contextPrefix,
-                sourceRef: d.sourceRef,
-                dateStamp: d.dateStamp
-              });
+              const issues = isOcclusion
+                ? lintCard({
+                    front: d.front,
+                    back: d.back,
+                    cardType: d.cardType,
+                    occlusion: d.occlusion ? { assetPath: d.occlusion.assetPath, rects: d.occlusion.rects } : null,
+                    contextPrefix: d.contextPrefix,
+                    sourceRef: d.sourceRef,
+                    dateStamp: d.dateStamp
+                  })
+                : lintCard({
+                    front: d.front,
+                    back: d.back,
+                    cardType: d.cardType,
+                    cloze: d.cloze || null,
+                    contextPrefix: d.contextPrefix,
+                    sourceRef: d.sourceRef,
+                    dateStamp: d.dateStamp
+                  });
               const isEditing = editing === i;
               const editText = editValues[i] ?? {};
               const shownFront = editText.front !== undefined ? editText.front : (d.cardType === "cloze" ? d.cloze || d.front : d.front);
               const shownBack = editText.back !== undefined ? editText.back : d.back;
+              const occlLabel = d.occlusion?.label ? d.occlusion.label : "";
               return (
                 <div key={i} className="ai-draft">
                   {isEditing ? (
@@ -808,6 +2087,7 @@ function AIPanel({
                     <>
                       <div className="ai-draft-front">
                         <span className="ai-draft-type mono">{d.cardType}</span>
+                        {panel.supplemental?.has(i) && <span className="ai-draft-supplement mono">补充</span>}
                         {d.contextPrefix && <span className="ai-draft-prefix mono">{d.contextPrefix}</span>}
                         <div className="ai-draft-text">
                           {d.cardType === "cloze"
@@ -816,6 +2096,9 @@ function AIPanel({
                         </div>
                       </div>
                       <div className="ai-draft-back">{d.back}</div>
+                      {isOcclusion && occlLabel && (
+                        <div className="ai-draft-notes mono">区域 {(d.ord ?? d.occlusion?.ord ?? 0) + 1} · {occlLabel}</div>
+                      )}
                       {toList(d.ruleNotes).length > 0 && (
                         <div className="ai-draft-notes mono">{toList(d.ruleNotes).join(" · ")}</div>
                       )}
@@ -832,20 +2115,73 @@ function AIPanel({
                         </div>
                       )}
                       <div className="ai-actions">
-                        <button className="btn btn-primary btn-sm" onClick={() => onAccept(d, i)}>接受</button>
+                        {isOcclusion ? (
+                          <button className="btn btn-primary btn-sm" onClick={() => onAcceptOcclusion(d, i)}>接受</button>
+                        ) : (
+                          <button className="btn btn-primary btn-sm" onClick={() => onAccept(d, i)}>接受</button>
+                        )}
                         <button className="btn btn-secondary btn-sm" onClick={() => setEditing(i)}>编辑</button>
+                        {!isOcclusion && d.cardType === "qa" && (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            title="拆为两张互为翻转的独立问答卡（各自有独立 FSRS 调度状态）"
+                            onClick={() => onSplitReverse(i)}
+                          >
+                            转翻转卡
+                          </button>
+                        )}
                       </div>
                     </>
                   )}
                 </div>
               );
             })}
-            {panel.kind === "cards" && !panel.running && panel.drafts && panel.drafts.length > 0 && (
+            {(panel.kind === "cards" || isOcclusion) && !panel.running && panel.drafts && panel.drafts.length > 0 && (
               <div className="ai-actions">
                 <button className="btn btn-outline btn-sm" onClick={onRejectAll}>整批拒绝</button>
               </div>
             )}
           </>
+        )}
+
+        {/* v16：询问 AI 的解释区——追加在面板最下方，解释末尾带「直接制卡」 */}
+        {(panel.explorations ?? []).length > 0 && (
+          <div className="ai-explorations">
+            {(panel.explorations ?? []).map((e) => (
+              <div key={e.id} className="ai-exploration">
+                <div className="ai-exploration-q mono">问（{e.item}）：{e.question}</div>
+                {e.running && (
+                  <div className="ai-streaming mono">
+                    {e.thinking
+                      ? `思考中… 已思考 ${e.thinking} 字 · 已等待 ${explSec(e)} 秒`
+                      : `等待模型响应… 已等待 ${explSec(e)} 秒（推理模型约需 0.5-1 分钟）`}
+                  </div>
+                )}
+                {e.error && <div className="ai-error">{e.error}</div>}
+                {e.answer && (
+                  <div className="ai-answer">
+                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                      {e.answer}
+                    </ReactMarkdown>
+                  </div>
+                )}
+                {!e.running && e.answer && (
+                  <div className="ai-actions">
+                    <button
+                      className="btn btn-primary btn-sm"
+                      disabled={(panel.followUpBusy ?? []).includes(e.item) || panel.running}
+                      onClick={() => onFollowUpCards(e.item, e.kpTitle, e.answer)}
+                    >
+                      直接制卡
+                    </button>
+                    {(panel.followUpBusy ?? []).includes(e.item) && (
+                      <span className="mono ai-kp-busy">补充制卡中… {busySec(e.item)} 秒</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

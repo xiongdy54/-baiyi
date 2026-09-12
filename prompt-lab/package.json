@@ -1,0 +1,14 @@
+{
+  "name": "prompt-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "提示词测试台（M1.3，独立最小工具）：AI 改提示词 → 用户手动实测（文字/图片）→ 反馈 → 决定是否并回主软件。与主软件隔离，主软件内不做提示词调优试验。",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:vendor": "node ../node_modules/esbuild/bin/esbuild ../src/lib/cards.ts --bundle --format=iife --global-name=cardsLib --outfile=vendor/cards.js"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}

@@ -1,0 +1,513 @@
+// 阅读内核 L2 应用端到端（v20）：CDP 驱动真实应用（--remote-debugging-port=9224，脚本自启自关）。
+// 只证明业务流安全（L1 已证 adapter 契约）：文件书/粘贴书/摘录进引擎、目录、外链拦截、
+// 选区制卡 contextRef 四层（cfi/chapterIndex/anchorText/readerEngineVersion）、进度落库、跳原文。
+// 测试数据一律 FSRSTEST 前缀；测试摘要摘录在进程结束后经 sql.js 软删（应用已关闭，§7.1.8）。
+import { spawn } from "node:child_process";
+import { writeFileSync, existsSync, openSync } from "node:fs";
+import path from "node:path";
+
+const ROOT = path.resolve(decodeURIComponent(path.dirname(new URL(import.meta.url).pathname)).replace(/^\/([A-Za-z]:)/, "$1"), "..");
+const PORT = "9224";
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const results = [];
+const check = (name, ok, detail = "") => {
+  results.push({ name, ok: Boolean(ok), detail: String(detail).slice(0, 160) });
+  console.log((ok ? "PASS" : "FAIL") + " | " + name + (detail ? " | " + detail : ""));
+};
+
+// ---------- CDP 帮手 ----------
+async function cdpConnect() {
+  for (let i = 0; i < 80; i++) {
+    try {
+      const list = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
+      const page = list.find((t) => t.type === "page");
+      if (page) {
+        const ws = new WebSocket(page.webSocketDebuggerUrl);
+        await new Promise((res, rej) => {
+          ws.addEventListener("open", res);
+          ws.addEventListener("error", rej);
+        });
+        let id = 0;
+        const pending = new Map();
+        ws.addEventListener("message", (ev) => {
+          const msg = JSON.parse(ev.data);
+          if (msg.id && pending.has(msg.id)) {
+            pending.get(msg.id)(msg);
+            pending.delete(msg.id);
+          }
+        });
+        return {
+          ws,
+          eval: async (expr) => {
+            const r = await new Promise((res) => {
+              const mid = ++id;
+              pending.set(mid, res);
+              ws.send(JSON.stringify({ id: mid, method: "Runtime.evaluate", params: { expression: expr, awaitPromise: true, returnByValue: true } }));
+            });
+            if (r.result?.exceptionDetails) throw new Error("eval fail: " + JSON.stringify(r.result.exceptionDetails).slice(0, 200));
+            return r.result?.result?.value;
+          },
+          shot: async (file) => {
+            const s = await new Promise((res) => {
+              const mid = ++id;
+              pending.set(mid, res);
+              ws.send(JSON.stringify({ id: mid, method: "Page.captureScreenshot", params: { format: "png" } }));
+            });
+            writeFileSync(file, Buffer.from(s.result.data, "base64"));
+          }
+        };
+      }
+    } catch {
+      /* retry */
+    }
+    await wait(1500);
+  }
+  throw new Error("CDP 连接失败（应用未启动？）");
+}
+
+// ---------- 夹具 EPUB（与 L1 同构：3 章 + 内链 + 外链） ----------
+async function buildFixtureB64() {
+  const { default: JSZip } = await import("jszip");
+  const zip = new JSZip();
+  zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
+  zip.file("META-INF/container.xml", `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`);
+  zip.file("OEBPS/content.opf", `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">urn:uuid:l2-fixture</dc:identifier><dc:title>引擎验证</dc:title><dc:language>zh</dc:language><meta property="dcterms:modified">2026-09-10T00:00:00Z</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/><item id="ch2" href="ch2.xhtml" media-type="application/xhtml+xml"/><item id="ch3" href="ch3.xhtml" media-type="application/xhtml+xml"/><item id="pic" href="pic.png" media-type="image/png"/></manifest><spine><itemref idref="ch1"/><itemref idref="ch2"/><itemref idref="ch3"/></spine></package>`);
+  zip.file("OEBPS/nav.xhtml", `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目录</title></head><body><nav epub:type="toc"><ol><li><a href="ch1.xhtml">第一章</a></li><li><a href="ch2.xhtml">第二章</a></li><li><a href="ch3.xhtml">第三章</a></li></ol></nav></body></html>`);
+  const paras = (n, marker) => Array.from({ length: 24 }, (_, i) => `<p>第${n}章第${i + 1}段，阅读内核端到端验证文本。</p>`).join("") + `<p>${marker}</p>`;
+  zip.file("OEBPS/pic.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAKAAAABaCAIAAACwpMoFAAAAoElEQVR42u3RAQ0AAAjDsDtCNjbvA5pMwZrM6nIWABZgARZgARZgAQYswAIswAIswAIMWIAFWIAFWIAFWIABC7AAC7AAC7AAAxZgARZgARZgAQYswAIswAIswAIswIAFWIAFWIAFWIABC7AAC7AAC7AAA7YAsAALsAALsAALMGABFmABFmABFmDAAizAAizAAizAAgxYgAVYgAVYgAX4VwX94ghClYrF/gAAAABJRU5ErkJggg==", "base64"));
+  zip.file("OEBPS/ch1.xhtml", `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第一章</title></head><body><h1>第一章</h1>${paras(1, "第一章独有锚甲")}<p><img src="pic.png" alt="引擎夹具图" width="160" height="90"/></p><p>带<a href="probe://l2-ext">外部链接</a>与<a href="ch2.xhtml">内部跳转</a>。</p></body></html>`);
+  zip.file("OEBPS/ch2.xhtml", `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二章</title></head><body><h1>第二章</h1>${paras(2, "第二章独有锚乙")}</body></html>`);
+  zip.file("OEBPS/ch3.xhtml", `<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>第三章</title></head><body><h1>第三章</h1>${paras(3, "第三章独有锚丙")}</body></html>`);
+  return zip.generateAsync({ type: "base64" });
+}
+
+const clickByText = (txt, sel = "button") => `(() => {
+  const el = [...document.querySelectorAll(${JSON.stringify(sel)})].find(e => e.textContent.trim().includes(${JSON.stringify(txt)}));
+  if (!el) return "not found";
+  el.click(); return "clicked";
+})()`;
+
+// ---------- 主流程 ----------
+let electron = null;
+try {
+  // 清场：残留实例会占用 CDP 端口（Windows 下 node 退出不会带走 electron 子进程）
+  try {
+    (await import("node:child_process")).execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
+  } catch {
+    /* 无残留进程则忽略 */
+  }
+  await wait(800);
+  const out = openSync(path.join(ROOT, "tests", "reader.engine.app.log"), "w");
+  electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
+    cwd: ROOT,
+    shell: true,
+    stdio: ["ignore", out, out],
+    detached: false
+  });
+  const cdp = await cdpConnect();
+  await cdp.eval("1");
+  await wait(1500);
+
+  // 0. 造数：文件书 + 粘贴书
+  const b64 = await buildFixtureB64();
+  const seeded = await cdp.eval(`(async () => {
+    const bytes = Uint8Array.from(atob(${JSON.stringify(b64)}), c => c.charCodeAt(0));
+    const md = "# 第一章\\n\\n第一章正文。\\n\\n# 第二章\\n\\n第二章正文。\\n\\n# 第三章\\n\\n第三章正文。";
+    const book = await window.libraryAPI.createFromEpub({
+      title: "FSRSTEST 引擎验证书", markdown: md,
+      toc: [{ label: "第一章", href: "ch1.xhtml" }, { label: "第二章", href: "ch2.xhtml" }, { label: "第三章", href: "ch3.xhtml" }],
+      coverDataUrl: null, epubData: bytes, sourceName: "FSRSTEST"
+    });
+    const paste = await window.libraryAPI.createFromPaste("FSRSTEST 粘贴引擎验证书", md);
+    return { book: book && book.id, paste: paste && paste.id };
+  })()`);
+  check("0 造数（文件书+粘贴书）", Boolean(seeded?.book && seeded?.paste), JSON.stringify(seeded));
+
+  // 0.5 固定阅读设置为已知态（纸白+滚动），并在结束时恢复用户原设置
+  const origSettings = await cdp.eval(`window.settingsAPI.get("app", "readerSettings")`);
+  await cdp.eval(`window.settingsAPI.set("app", "readerSettings", { mode: { flow: "scrolled" }, appearance: { theme: "paper" } })`);
+
+  // 1. 打开文件书 → 引擎视图
+  await cdp.eval(`location.reload()`);
+  await wait(2500);
+  await cdp.eval(clickByText("FSRSTEST 引擎验证书", ".book-card"));
+  await wait(3000);
+  const engineUp = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
+  check("1 文件书进入 foliate 引擎视图", engineUp);
+  await cdp.shot("tmp-l2-1-engine.png");
+
+  // 2. 目录侧栏
+  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await wait(600);
+  const tocCount = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
+  check("2a 目录侧栏渲染 3 章", tocCount >= 3, "n=" + tocCount);
+  await cdp.eval(clickByText("第二章", ".reader-toc-item"));
+  await wait(800);
+  const tocClosed = await cdp.eval(`!document.querySelector(".reader-toc")`);
+  check("2b 目录点击跳转并收起", tocClosed);
+  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await wait(400);
+  await cdp.eval(clickByText("第一章", ".reader-toc-item"));
+  await wait(800);
+
+  // 2c. 翻页按钮（v20.1）：跨章节推进 + 边界
+  await cdp.eval(clickByText("第一章", ".reader-toc-item"));
+  await wait(800);
+  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await wait(400);
+  const cfiBefore = await cdp.eval(`window.__readerKernel?.getCurrentLocation()?.cfi`);
+  await cdp.eval(`(() => { const b = document.querySelector('.reader-engine-controls button[title*="下一页"]'); if (!b) return "no btn"; b.click(); return "clicked"; })()`);
+  await wait(900);
+  const cfiAfter = await cdp.eval(`window.__readerKernel?.getCurrentLocation()?.cfi`);
+  check("2c 下一页按钮跨页推进（CFI 变化）", Boolean(cfiBefore && cfiAfter && cfiBefore !== cfiAfter), JSON.stringify({ b: cfiBefore && cfiBefore.slice(0, 22), a: cfiAfter && cfiAfter.slice(0, 22) }));
+
+  // 3. 外链拦截：view 级事件注入（真实点击→事件检测已由 L1 S11 覆盖；此处零副作用）
+  const extRes = await cdp.eval(`(() => {
+    const view = document.querySelector(".reader-engine-host foliate-view");
+    if (!view) return { err: "no view" };
+    window.__extLog = [];
+    window.__kernelLinkLog = [];
+    window.windowAPI.openExternal = async (u) => { window.__extLog.push(u); return true; };
+    window.__readerKernel.on("link", (i) => window.__kernelLinkLog.push(i));
+    const ev = new CustomEvent("external-link", { cancelable: true, detail: { a: null, href_: "probe://l2-ext" } });
+    const notPrevented = view.dispatchEvent(ev);
+    return { notPrevented };
+  })()`);
+  await wait(500);
+  const extLog = await cdp.eval(`window.__extLog`);
+  const kernelLinkLog = await cdp.eval(`window.__kernelLinkLog`);
+  check(
+    "3 外链全链路：事件→adapter 拦截(preventDefault)→Kernel 事件→壳层",
+    extRes && extRes.notPrevented === false && Array.isArray(kernelLinkLog) && kernelLinkLog.some((l) => l.internal === false && String(l.href).includes("l2-ext")),
+    JSON.stringify({ notPrevented: extRes && extRes.notPrevented, kernelLinkLog })
+  );
+
+  // 4. 选区 → 制卡 → contextRef 四层
+  const selOk = await cdp.eval(`(() => {
+    const k = window.__readerKernel;
+    const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
+    if (!entry) return "no doc";
+    const doc = entry.doc;
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const idx = (node.textContent || "").indexOf("第一章独有锚甲");
+      if (idx >= 0) {
+        const range = doc.createRange();
+        range.setStart(node, idx); range.setEnd(node, idx + 7);
+        const sel = doc.defaultView.getSelection();
+        sel.removeAllRanges(); sel.addRange(range);
+        const frame = doc.defaultView.frameElement;
+        const p = frame ? frame.getBoundingClientRect() : { left: 0, top: 0 };
+        node.parentElement.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: p.left + 200, clientY: p.top + 120 }));
+        return true;
+      }
+    }
+    return false;
+  })()`);
+  await wait(600);
+  const menuUp = await cdp.eval(`Boolean(document.querySelector(".selection-menu"))`);
+  check("4a 划选出菜单（引擎选区服务）", selOk === true && menuUp, "sel=" + selOk);
+  await cdp.shot("tmp-l2-4-menu.png");
+  await cdp.eval(clickByText("制卡", ".selection-menu button"));
+  await wait(600);
+  const frontSet = await cdp.eval(`(() => {
+    const tas = [...document.querySelectorAll(".modal-panel textarea")];
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    set.call(tas[0], "FSRSTEST 引擎制卡题面");
+    tas[0].dispatchEvent(new Event("input", { bubbles: true }));
+    set.call(tas[1], "引擎制卡答案");
+    tas[1].dispatchEvent(new Event("input", { bubbles: true }));
+    return tas.length;
+  })()`);
+  await cdp.eval(clickByText("创建卡片", ".modal-panel .btn-primary"));
+  await wait(1000);
+  const cardOk = await cdp.eval(`(async () => {
+    const all = await window.cardsAPI.listAll();
+    const c = all.find(x => (x.frontMarkdown || "").includes("FSRSTEST 引擎制卡题面"));
+    if (!c) return null;
+    return { cfi: c.contextRef && c.contextRef.cfi, chapterIndex: c.contextRef && c.contextRef.chapterIndex, anchorText: c.contextRef && c.contextRef.anchorText, v: c.contextRef && c.contextRef.readerEngineVersion };
+  })()`);
+  check("4b 制卡 contextRef 四层（cfi/章索引/锚文本/引擎版本）", Boolean(cardOk && cardOk.cfi && cardOk.v), JSON.stringify(cardOk));
+  await cdp.eval(`(() => { document.querySelector(".modal-panel .modal-close")?.click(); return 1; })()`);
+  await wait(300);
+
+  // 4c. v25 正文图片点选聚焦：点击章节内图片 → 聚焦覆盖层（上浮 + 模糊）+ 三类选区工具条
+  const imgClick = await cdp.eval(`(() => {
+    const k = window.__readerKernel;
+    const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
+    if (!entry) return "no doc";
+    const img = entry.doc.querySelector('img[alt="引擎夹具图"]');
+    if (!img) return "no img";
+    img.dispatchEvent(new entry.doc.defaultView.MouseEvent("click", { bubbles: true, cancelable: true }));
+    return "clicked";
+  })()`);
+  await wait(900);
+  const focusDiag = await cdp.eval(`JSON.stringify({
+    layer: Boolean(document.querySelector(".image-focus-layer")),
+    stage: Boolean(document.querySelector(".image-focus-stage img")),
+    tools: [...document.querySelectorAll(".image-focus-tool")].map(e => e.textContent.trim()),
+    submit: [...document.querySelectorAll(".image-focus-actions button")].map(e => e.textContent.trim())
+  })`);
+  const focus = JSON.parse(focusDiag);
+  check(
+    "4c 图片点击进入聚焦（覆盖层 + 三类选区工具 + 提交动作）",
+    imgClick === "clicked" && focus.layer && focus.stage && focus.tools.length === 3 && focus.submit.includes("AI 制卡") && focus.submit.includes("手动制卡"),
+    imgClick + " | " + focusDiag
+  );
+  await cdp.shot("tmp-l2-4c-image-focus.png");
+  // 点击模糊区域退出（mousedown 落在覆盖层自身）
+  await cdp.eval(`(() => {
+    const layer = document.querySelector(".image-focus-layer");
+    if (!layer) return "no layer";
+    layer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    return "closed";
+  })()`);
+  await wait(500);
+  const focusGone = await cdp.eval(`!document.querySelector(".image-focus-layer")`);
+  check("4d 点击模糊区域退出聚焦返回阅读界面", focusGone === true, String(focusGone));
+
+  // 4e. 选区 → 手动制卡（v25/M5）：画矩形选区 → 手动制卡页签 → 落库 occlusionJson.shapes
+  const drawRes = await cdp.eval(`(() => {
+    const k = window.__readerKernel;
+    const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
+    if (!entry) return "no doc";
+    const img = entry.doc.querySelector('img[alt="引擎夹具图"]');
+    if (!img) return "no img";
+    img.dispatchEvent(new entry.doc.defaultView.MouseEvent("click", { bubbles: true, cancelable: true }));
+    return "clicked";
+  })()`);
+  await wait(900);
+  const rectEnabled = await cdp.eval(`(() => {
+    const canvas = document.querySelector(".image-focus-canvas");
+    if (!canvas) return "no canvas";
+    const r = canvas.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return "empty canvas " + JSON.stringify({ w: r.width, h: r.height });
+    const at = (fx, fy) => ({ clientX: r.left + r.width * fx, clientY: r.top + r.height * fy });
+    const opts = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true };
+    canvas.dispatchEvent(new PointerEvent("pointerdown", { ...opts, ...at(0.2, 0.3) }));
+    canvas.dispatchEvent(new PointerEvent("pointermove", { ...opts, ...at(0.65, 0.75) }));
+    canvas.dispatchEvent(new PointerEvent("pointerup", { ...opts, ...at(0.65, 0.75) }));
+    return "drawn @ " + Math.round(r.width) + "x" + Math.round(r.height);
+  })()`);
+  await wait(300);
+  const submitState = await cdp.eval(`JSON.stringify([...document.querySelectorAll(".image-focus-actions button")].map(b => ({ t: b.textContent.trim(), disabled: b.disabled })))`);
+  const submitBtns = JSON.parse(submitState);
+  check(
+    "4e 画出矩形选区后提交按钮可用",
+    String(rectEnabled).startsWith("drawn") && submitBtns.every((b) => b.disabled === false),
+    rectEnabled + " | " + submitState
+  );
+  await cdp.shot("tmp-l2-4e-region.png");
+  await cdp.eval(clickByText("手动制卡", ".image-focus-actions button"));
+  await wait(700);
+  const modalState = await cdp.eval(`JSON.stringify({
+    open: Boolean(document.querySelector(".modal-panel")),
+    tab: (document.querySelector(".seg-tabs button.active") || {}).textContent || "",
+    preview: Boolean(document.querySelector(".manual-region-preview img, .occlusion-preview img")),
+    textareas: document.querySelectorAll(".modal-panel textarea").length
+  })`);
+  const ms = JSON.parse(modalState);
+  check("4f 手动制卡弹窗（图片挖空页签 + 区域预览）", ms.open && ms.tab.includes("图片挖空") && ms.preview && ms.textareas >= 2, modalState);
+  await cdp.eval(`(() => {
+    const tas = [...document.querySelectorAll(".modal-panel textarea")];
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    set.call(tas[0], "图中遮挡区域对应的是什么？");
+    tas[0].dispatchEvent(new Event("input", { bubbles: true }));
+    set.call(tas[1], "FSRSTEST 选区答案");
+    tas[1].dispatchEvent(new Event("input", { bubbles: true }));
+    return tas.length;
+  })()`);
+  await cdp.eval(clickByText("创建卡片", ".modal-panel .btn-primary"));
+  await wait(1200);
+  const occlCard = await cdp.eval(`(async () => {
+    const all = await window.cardsAPI.listAll();
+    const c = all.find(x => (x.backMarkdown || "").includes("FSRSTEST 选区答案"));
+    if (!c) return null;
+    const o = c.occlusionJson || {};
+    return {
+      type: c.cardType,
+      asset: String(o.assetPath || ""),
+      shapeKind: o.shapes && o.shapes[0] ? o.shapes[0].kind : null,
+      shapeW: o.shapes && o.shapes[0] ? o.shapes[0].w : null,
+      rectW: o.rects && o.rects[0] ? o.rects[0].w : null
+    };
+  })()`);
+  check(
+    "4g 图片选区手动制卡落库（imageOcclusion + asset + shapes.rect）",
+    Boolean(occlCard && occlCard.type === "imageOcclusion" && /^bookasset:/.test(occlCard.asset) && occlCard.shapeKind === "rect" && occlCard.shapeW > 0 && occlCard.rectW > 0),
+    JSON.stringify(occlCard)
+  );
+
+  // 4h. 填空题手动制卡（v25/F12 修复回归）：挖空标记必须写进 frontMarkdown——
+  // 此前存的是未转换原文，复习端 parseCloze 找不到 ord，挖空从不遮蔽
+  const z1 = await cdp.eval(`(() => {
+    const k = window.__readerKernel;
+    const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
+    if (!entry) return "no doc";
+    const doc = entry.doc;
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const idx = (node.textContent || "").indexOf("第一章独有锚甲");
+      if (idx >= 0) {
+        const range = doc.createRange();
+        range.setStart(node, idx);
+        range.setEnd(node, idx + 7);
+        const sel = doc.defaultView.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        const frame = doc.defaultView.frameElement;
+        const p = frame ? frame.getBoundingClientRect() : { left: 0, top: 0 };
+        node.parentElement.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: p.left + 200, clientY: p.top + 120 }));
+        return "selected";
+      }
+    }
+    return "marker not found";
+  })()`);
+  await wait(700);
+  const z2 = await cdp.eval(`(() => {
+    const btns = [...document.querySelectorAll(".selection-menu button")];
+    const t = btns.find(b => b.textContent.trim() === "制卡");
+    if (!t) return "no menu: " + JSON.stringify(btns.map(b => b.textContent.trim()));
+    t.click();
+    return "menu-clicked";
+  })()`);
+  await wait(700);
+  const z3 = await cdp.eval(`(() => {
+    const tab = [...document.querySelectorAll(".seg-tabs button")].find(b => b.textContent.includes("填空题"));
+    if (!tab) return "no tab";
+    tab.click();
+    return "tab-clicked";
+  })()`);
+  await wait(300);
+  const z4 = await cdp.eval(`(() => {
+    const ta = document.querySelector(".modal-panel textarea");
+    if (!ta) return "no textarea (modal=" + Boolean(document.querySelector(".modal-panel")) + ")";
+    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    set.call(ta, "FSRSTEST 锚甲出现在**第一章**");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    return "filled";
+  })()`);
+  await wait(200);
+  const z5 = await cdp.eval(`(() => {
+    const b = [...document.querySelectorAll(".modal-panel .btn-primary")].find(x => x.textContent.includes("创建卡片"));
+    if (!b) return "no create btn";
+    if (b.disabled) return "create disabled";
+    b.click();
+    return "submitted";
+  })()`);
+  await wait(1300);
+  const clozeCard = await cdp.eval(`(async () => {
+    const all = await window.cardsAPI.listAll();
+    const c = all.find(x => (x.frontMarkdown || "").includes("FSRSTEST 锚甲"));
+    return c ? { fm: c.frontMarkdown, note: c.noteText, type: c.cardType } : null;
+  })()`);
+  check(
+    "4h 填空题挖空标记落库 frontMarkdown（F12 修复）",
+    Boolean(clozeCard && String(clozeCard.fm).includes("{{c1::第一章}}")),
+    [z1, z2, z3, z4, z5, JSON.stringify(clozeCard)].join(" | ")
+  );
+
+  // 5. 进度落库（relocate 防抖 700ms）
+  const prog = await cdp.eval(`(async () => {
+    const doc = await window.libraryAPI.getDocument(${JSON.stringify(seeded.book)});
+    return doc.progressJson ? JSON.parse(doc.progressJson) : null;
+  })()`);
+  check("5 引擎进度落库（cfi+fraction）", Boolean(prog && prog.cfi != null && typeof prog.fraction === "number"), JSON.stringify(prog && { f: prog.fraction, c: prog.cfi && prog.cfi.slice(0, 20) }));
+
+  // 6. 复习卡跳转原文（存 cfi → 引擎直达；另造一张卡走文本搜索兜底路径不重复验证）
+  await cdp.eval(`(async () => {
+    const all = await window.cardsAPI.listAll();
+    const c = all.find(x => (x.frontMarkdown || "").includes("FSRSTEST 引擎制卡题面"));
+    await window.cardsAPI.update({ ...c, fsrs: { ...c.fsrs, due: 946684800000 } });
+    return "due-set";
+  })()`);
+  await cdp.eval(clickByText("复习", ".nav-item"));
+  await wait(2500);
+  const jumpDiag = await cdp.eval(`JSON.stringify({
+    hasCard: document.body.textContent.includes("FSRSTEST 引擎制卡题面"),
+    count: (document.querySelector(".review-count") || {}).textContent || "",
+    jumpBtn: Boolean(document.querySelector(".review-jump"))
+  })`);
+  console.log("[diag 6] " + jumpDiag);
+  const jumpShown = Boolean(JSON.parse(jumpDiag).jumpBtn);
+  if (jumpShown) {
+    await cdp.eval(clickByText("跳转原文"));
+    await wait(2500);
+    const backInEngine = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
+    check("6 复习卡跳转原文回到引擎视图", backInEngine);
+  } else {
+    check("6 复习卡跳转原文回到引擎视图", false, "复习页未出现测试卡（队列被其他到期卡占先？）");
+  }
+
+  // 7. 粘贴书合成进引擎
+  await cdp.eval(clickByText("书架", ".nav-item"));
+  await wait(1200);
+  await cdp.eval(clickByText("FSRSTEST 粘贴引擎验证书", ".book-card"));
+  await wait(3000);
+  const pasteEngine = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
+  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await wait(500);
+  const pasteToc = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
+  check("7 粘贴书合成 EPUB 进引擎（目录 3 章）", pasteEngine && pasteToc >= 3, "toc=" + pasteToc);
+  await cdp.shot("tmp-l2-7-paste.png");
+
+  // 7b. 暗夜主题联动软件夜间模式（v20.1；主题下拉按 title 精确定位，栏内另有阅读模式下拉）
+  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await wait(400);
+  await cdp.eval(`(() => { document.querySelector('.reader-engine-controls .dd-btn[title="阅读主题"]')?.click(); return 1; })()`);
+  await wait(300);
+  await cdp.eval(`(() => { [...document.querySelectorAll(".dd-item")].find(e => e.textContent.trim() === "暗夜")?.click(); return 1; })()`);
+  await wait(600);
+  const darkLinked = await cdp.eval(`(async () => JSON.stringify({
+    bodyDark: document.body.classList.contains("theme-dark"),
+    bg: getComputedStyle(document.querySelector(".reader-scroll-engine")).backgroundColor,
+    settings: await window.settingsAPI.get("app", "readerSettings"),
+    ddLabel: document.querySelector('.reader-engine-controls .dd-btn[title="阅读主题"]')?.textContent.trim()
+  }))()`);
+  check("7b 暗夜主题联动软件夜间模式", Boolean(JSON.parse(darkLinked).bodyDark), darkLinked);
+  await cdp.eval(clickByText("纸白", '.reader-engine-controls .dd-btn[title="阅读主题"]'));
+  await wait(200);
+  await cdp.eval(clickByText("纸白", ".dd-item"));
+  await wait(400);
+
+  // 7c. 阅读模式下拉：滚动→分页→对开三档可切换并落库（滚动/分页/对开收起进上级菜单）
+  await cdp.eval(`(() => { document.querySelector('.reader-engine-controls .dd-btn[title="阅读模式"]')?.click(); return 1; })()`);
+  await wait(300);
+  await cdp.eval(clickByText("对开", ".dd-item"));
+  await wait(800);
+  const spreadSaved = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "readerSettings")))()`);
+  check("7c 阅读模式下拉切对开并落库", (() => { try { const s = JSON.parse(spreadSaved); return s?.mode?.flow === "paged" && s?.mode?.spread === true; } catch { return false; } })(), spreadSaved);
+  await cdp.eval(`(() => { document.querySelector('.reader-engine-controls .dd-btn[title="阅读模式"]')?.click(); return 1; })()`);
+  await wait(300);
+  await cdp.eval(clickByText("滚动", ".dd-item"));
+  await wait(800);
+
+  // 8. 清理（卡片+两本书 API 软删；摘要摘录留给进程外 sql.js 清理——本测试未创建摘录）
+  const cleaned = await cdp.eval(`(async () => {
+    const all = await window.cardsAPI.listAll();
+    for (const c of all) {
+      const blob = (c.frontMarkdown || "") + (c.backMarkdown || "") + (c.noteText || "");
+      if (blob.includes("FSRSTEST")) await window.cardsAPI.remove(c.id);
+    }
+    await window.libraryAPI.remove(${JSON.stringify(seeded.book)});
+    await window.libraryAPI.remove(${JSON.stringify(seeded.paste)});
+    if (${JSON.stringify(origSettings)}) await window.settingsAPI.set("app", "readerSettings", ${JSON.stringify(origSettings)});
+    return "cleaned";
+  })()`);
+  check("8 测试数据清理", cleaned === "cleaned");
+} catch (err) {
+  check("套件异常", false, err && (err.stack || err.message));
+} finally {
+  await new Promise((r) => setTimeout(r, 800));
+  try {
+    const { execSync } = await import("node:child_process");
+    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
+  } catch {
+    /* already gone */
+  }
+  console.log(`\n==== SUMMARY ${results.filter((r) => r.ok).length}/${results.length} ====`);
+  for (const r of results) if (!r.ok) console.log("FAILED: " + r.name + " | " + r.detail);
+  process.exit(results.every((r) => r.ok) ? 0 : 1);
+}

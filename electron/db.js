@@ -13,10 +13,21 @@ const {
   CARD_CONTRAST_PROMPT,
   CARD_WORDING_PROMPT,
   CARD_BASIC_PROMPT,
+  CARD_OCCLUSION_PROMPT,
   READER_EXPLAIN_PROMPT,
   LEECH_RESCUE_PROMPT
 } = require("./prompts");
 const { sanitizeDomain, domainFromPrefix } = require("./udc");
+const { calculateFsrsDeltaT, learningDayStartMs } = require("./fsrsTime");
+const { readSettings, writeSettings } = require("./settingsStore");
+const {
+  DEFAULT_CONFIG_ID,
+  ALGORITHM,
+  ALGORITHM_VERSION,
+  FSRS6_DEFAULT_WEIGHTS,
+  DEFAULT_SCHEDULER_OPTIONS,
+  configFingerprint
+} = require("./fsrsConfig");
 
 let db = null;
 let dbFile = null;
@@ -156,12 +167,25 @@ CREATE TABLE IF NOT EXISTS review_skips (
   card_id TEXT NOT NULL,
   skipped_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS fsrs_configs (
+  id TEXT PRIMARY KEY,
+  algorithm TEXT NOT NULL,
+  algorithm_version INTEGER NOT NULL,
+  weights_json TEXT NOT NULL,
+  scheduler_options_json TEXT NOT NULL,
+  config_fingerprint TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
 `;
 
 async function initDb() {
   const initSqlJs = require("sql.js");
   const SQL = await initSqlJs();
   dbFile = path.join(app.getPath("userData"), "library.db");
+  // v23/F11：启动清残留 tmp——tmp 永远不是事实源（rename 原子性保证 library.db
+  // 要么是上一份完整版要么是新完整版，半写的 tmp 只是垃圾）
+  try { fs.rmSync(dbFile + ".tmp", { force: true }); } catch { /* 忽略 */ }
   db = fs.existsSync(dbFile) ? new SQL.Database(fs.readFileSync(dbFile)) : new SQL.Database();
   db.run(SCHEMA);
   try {
@@ -199,12 +223,162 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  // v22：review_logs.fsrs_before_json（撤销评分——该次评分前的 FSRS 全字段快照；旧日志与未传快照的调用为 NULL，不可撤销）
+  try {
+    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_before_json TEXT");
+  } catch {
+    /* 列已存在 */
+  }
+  // v23：FSRS 数据完整性加固列（§4.4.9/§4.4.10）
+  try {
+    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_after_json TEXT"); // 评分后全字段快照（Undo 一致性校验/审计）
+  } catch { /* 列已存在 */ }
+  try {
+    db.run("ALTER TABLE review_logs ADD COLUMN leech_before_json TEXT"); // 评分前 leech 快照（撤销精确恢复，F10）
+  } catch { /* 列已存在 */ }
+  try {
+    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_config_id TEXT"); // 本次评分所用参数配置
+  } catch { /* 列已存在 */ }
+  try {
+    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_before_config_id TEXT"); // 评分前状态归属配置（撤销恢复）
+  } catch { /* 列已存在 */ }
+  try {
+    db.run("ALTER TABLE cards ADD COLUMN fsrs_config_id TEXT"); // 当前状态最近一次调度写入所用配置（§4.4.10 滚动语义）
+  } catch { /* 列已存在 */ }
+  try {
+    // review_seq：全局插入序（§4.4.9 排序不变量）。存量回填=rowid（精确保留既有顺序），新写入事务内 MAX+1
+    const hasSeq = queryAll("SELECT COUNT(*) AS n FROM pragma_table_info('review_logs') WHERE name='review_seq'")[0]?.n || 0;
+    if (!hasSeq) {
+      db.run("ALTER TABLE review_logs ADD COLUMN review_seq INTEGER");
+      db.run("UPDATE review_logs SET review_seq = rowid WHERE review_seq IS NULL");
+    }
+    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_review_logs_seq ON review_logs(review_seq)");
+  } catch { /* 已迁移 */ }
+  // v23（D20）：fsrs_configs 播种——无任何 config 行时插入 cfg-default（完整默认快照）
+  try {
+    const cfgCount = queryAll("SELECT COUNT(*) AS n FROM fsrs_configs")[0]?.n || 0;
+    if (!cfgCount) {
+      db.run(
+        "INSERT INTO fsrs_configs (id, algorithm, algorithm_version, weights_json, scheduler_options_json, config_fingerprint, source, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        [
+          DEFAULT_CONFIG_ID,
+          ALGORITHM,
+          ALGORITHM_VERSION,
+          JSON.stringify(FSRS6_DEFAULT_WEIGHTS),
+          JSON.stringify(DEFAULT_SCHEDULER_OPTIONS),
+          configFingerprint(FSRS6_DEFAULT_WEIGHTS, DEFAULT_SCHEDULER_OPTIONS),
+          "default",
+          Date.now()
+        ]
+      );
+    }
+  } catch { /* 表尚不存在等场景 */ }
+  // v23（D20）：存量 settings.app.fsrsWeights 迁移——播种为 optimizer config 行并设指针后删除该字段（双事实源废除）
+  try {
+    const s0 = readSettings();
+    if (Array.isArray(s0.app?.fsrsWeights) && s0.app.fsrsWeights.length === 21 && !s0.app?.fsrsConfigId) {
+      const id = insertFsrsConfig(s0.app.fsrsWeights, DEFAULT_SCHEDULER_OPTIONS, "optimizer");
+      setActiveFsrsConfig(id);
+      delete s0.app.fsrsWeights;
+      writeSettings(s0);
+    }
+  } catch { /* 迁移失败不阻塞启动（下次启动重试） */ }
+  // v15 曾为翻转问答卡加过 cards.reverse_json 列；v16 起翻转问答改为「创建两张独立问答卡」
+  // （用户决策 D18：禁止复习期形态变化的卡片，一切卡设计以 FSRS 为核心），列不再使用。
+  // 已存在的列留在旧库中无碍（SQLite 容忍多余列，INSERT 显式命名列），新库不再建列。
   ensurePromptTemplates();
   persist();
 }
 
+// v23/F11（§4.4.9）：原子持久化——同目录 tmp + fsync + rename 原子替换（Windows MOVEFILE_REPLACE_EXISTING）。
+// 任一步失败 throw → IPC reject → UI 封锁评分并经 persistNow 重试；禁止静默降级为非原子覆盖写。
+// tmp 永远不是事实源：rename 原子性保证 library.db 要么是上一份完整版要么是新完整版。
 function persist() {
-  fs.writeFileSync(dbFile, Buffer.from(db.export()));
+  const tmp = dbFile + ".tmp";
+  const buf = Buffer.from(db.export());
+  const fd = fs.openSync(tmp, "w");
+  try {
+    fs.writeSync(fd, buf);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, dbFile);
+}
+
+// v23：纯持久化重试（§4.4.9）——只重试当前内存库的持久化（重导出+原子替换），
+// 绝不重新执行任何业务 mutation；供 UI「重试保存」在 persist 失败后调用
+function persistNow() {
+  persist();
+  return true;
+}
+
+// ---------- FSRS 参数环境（v23，D20 / §4.4.10：不可变快照 + 活跃指针） ----------
+
+// 读取某配置行（解析后的完整快照）；不存在返回 null
+function getConfigRow(id) {
+  const rows = queryAll("SELECT * FROM fsrs_configs WHERE id = ?", [id]);
+  const r = rows[0];
+  if (!r) return null;
+  let weights = null;
+  let schedulerOptions = null;
+  try { weights = JSON.parse(r.weights_json); } catch { /* 损坏行按 null */ }
+  try { schedulerOptions = JSON.parse(r.scheduler_options_json); } catch { /* 损坏行按 null */ }
+  return {
+    id: r.id,
+    algorithm: r.algorithm,
+    algorithmVersion: r.algorithm_version,
+    weights,
+    schedulerOptions,
+    configFingerprint: r.config_fingerprint,
+    source: r.source,
+    createdAt: r.created_at
+  };
+}
+
+// 活跃配置 = settings.app.fsrsConfigId 指针所指行（指针缺失/悬空回退 cfg-default）
+function getActiveFsrsConfig() {
+  const s = readSettings();
+  const id = s.app?.fsrsConfigId;
+  return (id && getConfigRow(id)) || getConfigRow(DEFAULT_CONFIG_ID);
+}
+
+function getActiveConfigId() {
+  return getActiveFsrsConfig()?.id || DEFAULT_CONFIG_ID;
+}
+
+// 插入新配置（指纹去重：同一配置永远只有一个 config_id，§4.4.10）；返回 config id
+function insertFsrsConfig(weights, schedulerOptions, source) {
+  const fp = configFingerprint(weights, schedulerOptions);
+  const existing = queryAll("SELECT id FROM fsrs_configs WHERE config_fingerprint = ?", [fp])[0];
+  if (existing) return existing.id;
+  const id = crypto.randomUUID();
+  db.run(
+    "INSERT INTO fsrs_configs (id, algorithm, algorithm_version, weights_json, scheduler_options_json, config_fingerprint, source, created_at) VALUES (?,?,?,?,?,?,?,?)",
+    [id, ALGORITHM, ALGORITHM_VERSION, JSON.stringify(weights), JSON.stringify(schedulerOptions), fp, source, Date.now()]
+  );
+  return id;
+}
+
+// 移动活跃指针（切换配置只改变指针，绝不修改配置内容；§4.4.10 不可变约束）
+function setActiveFsrsConfig(id) {
+  if (!getConfigRow(id)) throw new Error(`FSRS 配置不存在: ${id}`);
+  const s = readSettings();
+  if (!s.app) s.app = {};
+  s.app.fsrsConfigId = id;
+  writeSettings(s);
+  return id;
+}
+
+// M2 备份：备份/恢复前把内存库刷盘；getBackupCounts 供备份清单展示数据规模
+function getBackupCounts() {
+  const n = (sql) => Number(queryAll(sql)[0]?.n || 0);
+  return {
+    items: n("SELECT COUNT(*) AS n FROM library_items WHERE is_deleted = 0"),
+    cards: n("SELECT COUNT(*) AS n FROM cards WHERE is_deleted = 0"),
+    extracts: n("SELECT COUNT(*) AS n FROM extracts WHERE is_deleted = 0"),
+    assets: n("SELECT COUNT(*) AS n FROM assets WHERE is_deleted = 0")
+  };
 }
 
 function listItems() {
@@ -255,6 +429,30 @@ function addAssetRow(itemId, kind, relPath, hash, now) {
      VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)`,
     [crypto.randomUUID(), itemId, kind, relPath, hash, now, now]
   );
+}
+
+// M1.1（v15）：图片挖空卡 —— 把渲染层传来的图片字节落盘 + 入 assets 表（kind=image-occlusion）。
+// ownerKey 允许传 library item id 或 documentId（摘录阅读器场景只有 documentId），统一归一到 itemId。
+function createAssetForItem(ownerKey, kind, ext, dataBuf) {
+  let itemId = null;
+  const rows = queryAll("SELECT id FROM library_items WHERE id = ? AND is_deleted = 0", [String(ownerKey)]);
+  if (rows.length > 0) {
+    itemId = rows[0].id;
+  } else {
+    itemId = getItemIdByDocumentId(String(ownerKey));
+  }
+  if (!itemId) throw new Error(`找不到归属的书籍条目（${String(ownerKey).slice(0, 12)}…）；请从书架打开对应书籍后重试`);
+  const buf = Buffer.isBuffer(dataBuf) ? dataBuf : Buffer.from(dataBuf);
+  if (!buf.length) throw new Error("图片数据为空");
+  if (buf.length > 10 * 1024 * 1024) throw new Error("图片超过 10MB，请压缩后再制卡");
+  const dir = path.join(app.getPath("userData"), "assets", itemId);
+  fs.mkdirSync(dir, { recursive: true });
+  const cleanExt = ["png", "jpg", "jpeg", "gif", "webp"].includes(String(ext).toLowerCase()) ? String(ext).toLowerCase() : "png";
+  const filename = `occl-${Date.now()}-${crypto.randomBytes(3).toString("hex")}.${cleanExt}`;
+  fs.writeFileSync(path.join(dir, filename), buf);
+  addAssetRow(itemId, kind || "image-occlusion", filename, sha256(buf), Date.now());
+  persist();
+  return { itemId, filename, assetPath: `bookasset://${itemId}/${filename}` };
 }
 
 function sha256(buf) {
@@ -311,6 +509,22 @@ function firstLine(markdown) {
   return line.replace(/^#+\s*/, "").slice(0, 30);
 }
 
+// 阅读内核（v20）：读取书架条目的原书文件（assets 表 kind='epub-original' → assets/<itemId>/<path>）。
+// 返回 Uint8Array 供 foliate 内核打开；无原书（如粘贴书）返回 null。
+function readBookFile(itemId) {
+  const row = queryAll(
+    "SELECT path FROM assets WHERE library_item_id = ? AND kind = 'epub-original' AND is_deleted = 0 LIMIT 1",
+    [String(itemId)]
+  )[0];
+  if (!row || !row.path) return null;
+  try {
+    const p = path.join(app.getPath("userData"), "assets", String(itemId), row.path);
+    return new Uint8Array(fs.readFileSync(p));
+  } catch {
+    return null;
+  }
+}
+
 // ---------- 卡片 / 制卡 / FSRS / Leech（Phase 3 + 13-16，v6/v8） ----------
 
 function normalizeFsrs(json) {
@@ -343,6 +557,7 @@ function mapCardRow(r) {
     knowledgePointId: r.knowledge_point_id,
     occlusionJson: r.occlusion_json ? JSON.parse(r.occlusion_json) : null,
     fsrs: normalizeFsrs(r.fsrs_json),
+    fsrsConfigId: r.fsrs_config_id || null,
     leech: r.leech_json ? JSON.parse(r.leech_json) : null,
     generatedBy: r.generated_by,
     genBatchId: r.gen_batch_id,
@@ -357,9 +572,9 @@ function insertCard(card) {
   db.run(
     `INSERT INTO cards (id, user_id, note_text, card_type, cloze_ords, card_ord, front_markdown, back_markdown,
       context_prefix, context_ref_json, mnemonic, example, source_ref_json, date_stamp, priority, tags_json, domain,
-      knowledge_point_id, occlusion_json, fsrs_json, leech_json, generated_by, gen_batch_id,
+      knowledge_point_id, occlusion_json, fsrs_json, fsrs_config_id, leech_json, generated_by, gen_batch_id,
       created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, 0)`,
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 0, 0)`,
     [
       id,
       card.noteText || "",
@@ -380,6 +595,8 @@ function insertCard(card) {
       card.knowledgePointId || null,
       card.occlusionJson ? JSON.stringify(card.occlusionJson) : null,
       card.fsrsJson || null,
+      // v23（§4.4.9 规则表）：createCard ✅ 写入当前活跃配置
+      getActiveConfigId(),
       card.generatedBy || "manual",
       card.genBatchId || null,
       now,
@@ -466,8 +683,14 @@ function listDueCards() {
 }
 
 function listAllCards() {
-  const rows = queryAll("SELECT * FROM cards WHERE is_deleted = 0 ORDER BY created_at DESC");
-  return rows.map(mapCardRow);
+  // v19：补 docTitle JOIN（同 listDueCards）——卡片浏览页需要展示来源书并按书筛选
+  const rows = queryAll(
+    `SELECT c.*, li.title AS docTitle FROM cards c
+     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN library_items li ON li.id = d.library_item_id
+     WHERE c.is_deleted = 0 ORDER BY c.created_at DESC`
+  );
+  return rows.map(mapCardRow).map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
 }
 
 function deleteCard(id) {
@@ -477,24 +700,168 @@ function deleteCard(id) {
   return true;
 }
 
-function saveReview(cardId, fsrsState, rating, durationMs) {
-  db.run(
-    "INSERT INTO review_logs (id, card_id, rating, reviewed_at, duration_ms) VALUES (?, ?, ?, ?, ?)",
-    [crypto.randomUUID(), cardId, rating, Date.now(), durationMs || null]
-  );
-  db.run("UPDATE cards SET fsrs_json = ?, updated_at = ? WHERE id = ?", [
-    JSON.stringify(fsrsState),
-    Date.now(),
-    cardId
-  ]);
+// v23（§4.4.9）：评分落库事务化——BEGIN → 日志+卡状态 → COMMIT → persist（COMMIT 后持久化）。
+// review 成功边界 = COMMIT + persist 成功 + IPC 成功；persist 失败 throw → IPC reject →
+// UI 停留当前卡并经 persistNow 重试（内存已提交、禁止重复评分）；禁止自动 rollback。
+// 快照集：before（v22）/after/leech_before/评分所用 config/评分前 config/review_seq。
+function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
+  const card = getCard(cardId);
+  if (!card) throw new Error("卡片不存在");
+  const now = Date.now();
+  const seq = (queryAll("SELECT COALESCE(MAX(review_seq), 0) AS m FROM review_logs")[0]?.m || 0) + 1;
+  db.run("BEGIN");
+  try {
+    db.run(
+      "INSERT INTO review_logs (id, card_id, rating, reviewed_at, duration_ms, fsrs_before_json, fsrs_after_json, leech_before_json, fsrs_config_id, fsrs_before_config_id, review_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [
+        crypto.randomUUID(),
+        cardId,
+        rating,
+        now,
+        durationMs || null,
+        // v22：评分前 FSRS 全字段快照（未传则 NULL，该条不可撤销）
+        fsrsBefore ? JSON.stringify(fsrsBefore) : null,
+        // v23：评分后全字段快照（Undo 一致性校验 + 审计事实）
+        JSON.stringify(fsrsState),
+        // v23/F10：评分前 leech 快照（撤销时精确恢复，禁止以「当前挂起」推断）
+        card.leech ? JSON.stringify(card.leech) : null,
+        // v23/D20：本次评分所用参数配置 + 评分前状态归属
+        getActiveConfigId(),
+        card.fsrsConfigId || null,
+        seq
+      ]
+    );
+    db.run("UPDATE cards SET fsrs_json = ?, fsrs_config_id = ?, updated_at = ? WHERE id = ?", [
+      JSON.stringify(fsrsState),
+      getActiveConfigId(),
+      now,
+      cardId
+    ]);
+    db.run("COMMIT");
+  } catch (e) {
+    try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
+    throw e;
+  }
   persist();
   return true;
 }
 
-// v12：优化器读取全部复习日志（按时间升序）
+// FSRS 持久化契约字段（§4.4.1）——Undo 一致性校验按此全字段逐项比较，禁止实现者自选范围
+const FSRS_PERSIST_FIELDS = ["state", "due", "lapses", "stability", "difficulty", "reps", "lastReview", "learningSteps"];
+
+// 单字段等值：数值/字符串用 ===；learningSteps 等数组/对象字段用 JSON 序列化比较
+//（数组按引用比较永远不等——learningSteps:[] 曾致一致性校验恒假）
+function fsrsFieldValueEqual(a, b) {
+  if (a === b) return true;
+  if (typeof a === "object" && a !== null && typeof b === "object" && b !== null) {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return false;
+}
+
+function fsrsStatesEqual(a, b) {
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  for (const k of FSRS_PERSIST_FIELDS) {
+    if (!fsrsFieldValueEqual(a[k] ?? null, b[k] ?? null)) return false;
+  }
+  return true;
+}
+
+// v22/v23 撤销评分：最近一条「有评分前快照且有评分后快照且卡未删且卡当前状态==评分后状态」的日志。
+// v23 起排序不变量 = review_seq（表内唯一、插入序单调；禁按 id/reviewed_at 排序）；
+// 旧日志（v22 及以前，无 fsrs_after_json）与状态不一致的日志均按 §4.4.9 不可撤销（UI 不出现撤销按钮）。
+function getLastUndoableReview() {
+  const rows = queryAll(
+    `SELECT r.id AS logId, r.card_id AS cardId, r.rating, r.reviewed_at AS reviewedAt, r.review_seq AS reviewSeq
+     FROM review_logs r JOIN cards c ON c.id = r.card_id AND c.is_deleted = 0
+     WHERE r.fsrs_before_json IS NOT NULL AND r.fsrs_after_json IS NOT NULL
+     ORDER BY r.review_seq DESC LIMIT 1`
+  );
+  const log = rows[0];
+  if (!log) return null;
+  const card = getCard(log.cardId);
+  if (!card) return null;
+  let after;
+  try {
+    after = JSON.parse(queryAll("SELECT fsrs_after_json AS a FROM review_logs WHERE id = ?", [log.logId])[0]?.a || "");
+  } catch {
+    return null;
+  }
+  if (!fsrsStatesEqual(card.fsrs, after)) return null;
+  return log;
+}
+
+// v23 撤销评分（§4.4.9：复习回退而非附加动作）——事务内恢复评分前确切状态：
+// fsrs_json←before、fsrs_config_id←before_config_id；leech 回退仅在「本次评分触发」时执行
+// （触发判定复现 ReviewView 条件：after.lapses≥8 且评分前非 leech——禁止以「当前 suspended」推断，F10）；
+// 日志物理删除（review_logs 无软删，撤销即该次复习从未发生，优化器/统计自动干净）
+function undoLastReview() {
+  const log = getLastUndoableReview();
+  if (!log) return { ok: false, reason: "没有可撤销的评分" };
+  const card = getCard(log.cardId);
+  if (!card) return { ok: false, reason: "卡片不存在" };
+  const rows = queryAll(
+    "SELECT fsrs_before_json AS snap, fsrs_after_json AS afterSnap, leech_before_json AS leechSnap, fsrs_before_config_id AS beforeCfg FROM review_logs WHERE id = ?",
+    [log.logId]
+  );
+  let before;
+  let after;
+  let leechBefore;
+  let beforeCfg;
+  try {
+    before = JSON.parse(rows[0]?.snap || "");
+    after = JSON.parse(rows[0]?.afterSnap || "");
+    leechBefore = rows[0]?.leechSnap ? JSON.parse(rows[0].leechSnap) : null;
+    beforeCfg = rows[0]?.beforeCfg || null;
+  } catch {
+    return { ok: false, reason: "评分快照损坏，无法撤销" };
+  }
+  if (!before || typeof before !== "object") return { ok: false, reason: "评分前快照损坏，无法撤销" };
+  // §4.4.9 不变量：卡当前 fsrs 必须与该日志评分后状态 8 字段全等才可撤销（防回退错版本）
+  if (!fsrsStatesEqual(card.fsrs, after)) {
+    return { ok: false, reason: "卡片当前状态与该次评分结果不一致，不可撤销" };
+  }
+  // leech 触发判定（复现复习端触发条件，评分时点数据）
+  const triggeredLeech = (after?.lapses ?? 0) >= 8 && !(leechBefore && leechBefore.isLeech === true);
+  db.run("BEGIN");
+  try {
+    db.run("UPDATE cards SET fsrs_json = ?, fsrs_config_id = ?, updated_at = ? WHERE id = ?", [
+      JSON.stringify(before),
+      beforeCfg,
+      Date.now(),
+      log.cardId
+    ]);
+    if (triggeredLeech) {
+      db.run("UPDATE cards SET leech_json = ? WHERE id = ?", [
+        leechBefore ? JSON.stringify(leechBefore) : null,
+        log.cardId
+      ]);
+      db.run(
+        "UPDATE card_issues SET status = 'dismissed', resolved_at = ? WHERE card_id = ? AND rule_id = 'LEECH' AND status = 'open'",
+        [Date.now(), log.cardId]
+      );
+    }
+    db.run("DELETE FROM review_logs WHERE id = ?", [log.logId]);
+    db.run("COMMIT");
+  } catch (e) {
+    try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
+    throw e;
+  }
+  persist();
+  return { ok: true, card: getCard(log.cardId), rating: log.rating };
+}
+
+// v12：优化器读取全部复习日志（按时间升序）；v23 附带参数归属与插入序（audit/测试用）
 function listAllReviewLogs() {
-  const rows = queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt FROM review_logs ORDER BY reviewed_at ASC");
+  const rows = queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt, fsrs_config_id AS fsrsConfigId, review_seq AS reviewSeq FROM review_logs ORDER BY reviewed_at ASC");
   return rows;
+}
+
+// v23：受限裸 SQL 出口——仅供测试（构造 v22 形态历史日志等）与一次性迁移脚本使用；
+// 业务代码禁止绕过仓储层直接写库（§7.1 sql.js 并发纪律）
+function execRawSql(sql, params = []) {
+  db.run(sql, params);
+  return true;
 }
 
 function saveSkip(cardId) {
@@ -545,9 +912,10 @@ function resolveLeech(cardId, resolution, updates) {
   const card = getCard(cardId);
   if (!card) return null;
   const leech = { isLeech: false, resolution, resolvedAt: Date.now() };
+  // §4.4.9 规则表：resolveLeech 的 reset 路径重写了 FSRS 状态 → 写入当前活跃配置
   db.run(
     `UPDATE cards SET leech_json=?, front_markdown=COALESCE(?, front_markdown), back_markdown=COALESCE(?, back_markdown),
-      mnemonic=COALESCE(?, mnemonic), priority=COALESCE(?, priority), tags_json=?, fsrs_json=?,
+      mnemonic=COALESCE(?, mnemonic), priority=COALESCE(?, priority), tags_json=?, fsrs_json=?, fsrs_config_id=?,
       updated_at=? WHERE id=?`,
     [
       JSON.stringify(leech),
@@ -557,6 +925,7 @@ function resolveLeech(cardId, resolution, updates) {
       updates?.priority ?? null,
       JSON.stringify(updates?.tags || card.tags || []),
       JSON.stringify({ state: "new", due: Date.now(), lapses: 0 }),
+      getActiveConfigId(),
       Date.now(),
       cardId
     ]
@@ -636,26 +1005,35 @@ function ensurePromptTemplates() {
   seedV3("card-contrast", "对比卡 v3", CARD_CONTRAST_PROMPT);
   seedV3("card-wording", "措辞优化 v3", CARD_WORDING_PROMPT);
   seedV3("card-basic", "前置知识卡 v3", CARD_BASIC_PROMPT);
-  // v1 一次性播种（首次安装）
-  const count = queryAll("SELECT COUNT(*) AS n FROM prompt_templates")[0].n;
-  if (Number(count) === 0) {
-    const seedV1 = (scope, name, content) => {
-      db.run(
-        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)",
-        [crypto.randomUUID(), scope, name, content, now]
-      );
-    };
-    db.run("DELETE FROM prompt_templates");
-    seedV1("reader-explain", "阅读解释 v1", READER_EXPLAIN_PROMPT);
-    seedV1("leech-rescue", "难点诊断 v1", LEECH_RESCUE_PROMPT);
-    seedV3("card-generation", "主制卡 v3", CARD_GEN_PROMPT);
-    seedV3("card-formula", "公式分解 v3", CARD_FORMULA_PROMPT);
-    seedV3("card-seq", "序列/背诵 v3", CARD_SEQ_PROMPT);
-    seedV3("card-enum", "枚举拆解 v3", CARD_ENUM_PROMPT);
-    seedV3("card-mnemonic", "助记双卡 v3", CARD_MNEMONIC_PROMPT);
-    seedV3("card-contrast", "对比卡 v3", CARD_CONTRAST_PROMPT);
-    seedV3("card-wording", "措辞优化 v3", CARD_WORDING_PROMPT);
-    seedV3("card-basic", "前置知识卡 v3", CARD_BASIC_PROMPT);
+  // M1.1（v15，D16）：card-occlusion 新分支播种（图片挖空生成链路）——新 scope，仅首次加入 v1
+  const occCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'card-occlusion'")[0]?.n || 0;
+  if (Number(occCount) === 0) {
+    db.run(
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, 'card-occlusion', '图片挖空 v1', ?, 1, 1, ?)",
+      [crypto.randomUUID(), CARD_OCCLUSION_PROMPT, now]
+    );
+  }
+  // v16：card-literature 兼管播种——文学/诗歌材料自动路由到该 scope，主软件暂由 card-seq
+  // 模板承接（v3 已含续写/开头强化条款）；v4 候选的专用文学模板经用户实测确认后播种 v2
+  const litCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'card-literature'")[0]?.n || 0;
+  if (Number(litCount) === 0) {
+    db.run(
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, 'card-literature', '文学/诗歌背诵 v1（暂由序列/背诵模板承接）', ?, 1, 1, ?)",
+      [crypto.randomUUID(), CARD_SEQ_PROMPT, now]
+    );
+  }
+  // v1 一次性播种（首次安装）：reader-explain / leech-rescue 只在此处加入
+  // （v15 修正：原来按全表 count===0 判断，全新库上主制卡模板先播种导致此块永不执行、解释/诊断模板缺失）
+  const explainCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'reader-explain'")[0]?.n || 0;
+  if (Number(explainCount) === 0) {
+    db.run(
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)",
+      [crypto.randomUUID(), "reader-explain", "阅读解释 v1", READER_EXPLAIN_PROMPT, now]
+    );
+    db.run(
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)",
+      [crypto.randomUUID(), "leech-rescue", "难点诊断 v1", LEECH_RESCUE_PROMPT, now]
+    );
   }
 }
 
@@ -705,7 +1083,7 @@ function findSimilarCards(cardText, k = 3) {
 
 function getDocument(itemId) {
   const stmt = db.prepare(`
-    SELECT li.title, li.progress_json AS progressJson, d.id AS documentId, d.markdown
+    SELECT li.title, li.progress_json AS progressJson, d.id AS documentId, d.markdown, li.source_type AS sourceType
     FROM library_items li
     JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.id = ? AND li.is_deleted = 0
@@ -838,10 +1216,15 @@ function postponeExtract(id) {
 
 const { UDC_MAIN, UDC_LEAVES, UDC_OTHER } = require("./udc");
 
+// v23（D21/§4.4.8）：统计的「学习日」起点 = 本地钟面日切点（settings.app.dayCutoffHour，默认 0）。
+// 仅统计口径使用；FSRS 调度/训练一律不受切点影响。
+function getCutoffHour() {
+  const n = Number(readSettings().app?.dayCutoffHour);
+  return Number.isInteger(n) && n >= 0 && n <= 23 ? n : 0;
+}
+
 function dayStartMs(ts) {
-  const d = new Date(ts);
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+  return learningDayStartMs(ts, getCutoffHour());
 }
 
 function getStatsOverview() {
@@ -1104,6 +1487,9 @@ function getStatsOverview() {
 
 module.exports = {
   initDb,
+  persistDb: persist,
+  persistNow,
+  getBackupCounts,
   listItems,
   createFromPaste,
   createFromEpub,
@@ -1114,11 +1500,14 @@ module.exports = {
   listDueExtracts,
   getExtract,
   postponeExtract,
+  getLastUndoableReview,
+  undoLastReview,
   createCard,
   updateCard,
   getCard,
   listDueCards,
   listAllCards,
+  readBookFile,
   listAllReviewLogs,
   getItemIdByDocumentId,
   deleteCard,
@@ -1138,5 +1527,12 @@ module.exports = {
   ensurePromptTemplates,
   getPromptTemplate,
   listPromptTemplates,
-  findSimilarCards
+  findSimilarCards,
+  createAssetForItem,
+  getActiveFsrsConfig,
+  getActiveConfigId,
+  insertFsrsConfig,
+  setActiveFsrsConfig,
+  getConfigRow,
+  execRawSql
 };

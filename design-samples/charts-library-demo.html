@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>图表库路线演示 — ECharts / Chart.js × 瑞士风</title>
+<!-- 骨架库：ECharts（Apache-2.0）/ Chart.js（MIT），均允许商用 -->
+<script src="https://cdn.jsdelivr.net/npm/echarts@6/dist/echarts.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400;600&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373;
+    --ink:#0a0a0a; --accent:#002FA7; --accent-soft:rgba(0,47,167,.08);
+    --hairline:#e0e0e0;
+    --sans:"Inter","Noto Sans SC","Helvetica Neue","Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono",Consolas,ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  .page{max-width:1280px;margin:0 auto;padding:48px 32px 64px}
+  .kicker{font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--grey-3)}
+  h1{font-size:36px;font-weight:300;letter-spacing:-.02em;line-height:1.1;margin:12px 0 0}
+  .lede{font-size:14px;line-height:1.7;color:#525252;max-width:760px;margin:16px 0 0}
+  .lede b{font-weight:600;color:var(--ink)}
+
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;margin-top:40px}
+  .kpi{border:1px solid var(--hairline);background:var(--paper);padding:24px}
+  .kpi-label{font-size:12px;font-weight:600;letter-spacing:.05em;color:var(--grey-3)}
+  .kpi-num{font-family:var(--mono);font-feature-settings:"tnum";font-size:44px;font-weight:300;line-height:1;margin-top:16px}
+  .kpi-unit{font-family:var(--sans);font-size:14px;font-weight:500;color:var(--grey-3);margin-left:4px}
+  .kpi.accent{background:var(--accent);border-color:var(--accent)}
+  .kpi.accent .kpi-label{color:rgba(255,255,255,.72)}
+  .kpi.accent .kpi-num{color:#fff}
+  .kpi.accent .kpi-unit{color:rgba(255,255,255,.72)}
+
+  section{margin-top:64px}
+  .sec-head{border-top:1px solid var(--hairline);padding-top:24px}
+  h2{font-size:26px;font-weight:300;letter-spacing:-.02em;margin:8px 0 0}
+  .sec-note{font-size:13px;color:var(--grey-3);margin-top:8px;line-height:1.6}
+  .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:24px;margin-top:24px}
+  .card{border:1px solid var(--hairline);background:var(--grey-1);padding:24px;min-width:0}
+  .s12{grid-column:span 12}.s6{grid-column:span 6}
+  .card h3{font-size:15px;font-weight:500;margin:0;letter-spacing:-.01em}
+  .card-sub{font-size:12px;font-weight:500;color:var(--grey-3);margin-top:6px}
+  .chart{margin-top:16px}
+
+  .donut-flex{display:flex;align-items:center;gap:24px;margin-top:16px}
+  .donut-chart{flex:0 0 180px;width:180px;height:180px}
+  .legend{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0}
+  .legend-row{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:500;color:#525252}
+  .sw{width:8px;height:8px;flex:0 0 8px}
+  .legend-row .v{margin-left:auto;font-family:var(--mono);font-feature-settings:"tnum";font-weight:600;color:var(--ink)}
+
+  footer{margin-top:64px;border-top:1px solid var(--hairline);padding-top:24px;font-size:12px;line-height:1.8;color:var(--grey-3)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="kicker">INCREMENTAL READING · 统计页图表路线演示</div>
+  <h1>图表库骨架 × 瑞士国际主义风格</h1>
+  <p class="lede">
+    本页所有图表为<b>从零实现的干净版本</b>：骨架来自可商用许可证的图表库
+    （<b>ECharts · Apache-2.0</b> / <b>Chart.js · MIT</b>），视觉层只依据瑞士风规范
+    （直角、发丝线、单一焦点色、越大越细越小越粗）+ 项目 token 手写配置，与任何 NC 许可证模板无关。
+    上下两组是<b>同一份数据、同一套规范</b>在两个库下的效果对照。
+  </p>
+
+  <!-- KPI 行 -->
+  <div class="kpis">
+    <div class="kpi accent"><div class="kpi-label">今日到期</div><div class="kpi-num">24</div></div>
+    <div class="kpi"><div class="kpi-label">今日已完成</div><div class="kpi-num">41</div></div>
+    <div class="kpi"><div class="kpi-label">连续打卡</div><div class="kpi-num">16<span class="kpi-unit">天</span></div></div>
+    <div class="kpi"><div class="kpi-label">今日专注时长</div><div class="kpi-num">2.5<span class="kpi-unit">小时</span></div></div>
+  </div>
+
+  <!-- ═══════════ ECharts ═══════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="kicker">A · ECHARTS 6 · APACHE-2.0</div>
+      <h2>ECharts 实现</h2>
+      <div class="sec-note">原生自带日历热力图、堆叠、端点标注；Canvas 渲染，图表内字号/字重/颜色全部显式配置。</div>
+    </div>
+    <div class="grid">
+      <div class="card s12">
+        <h3>复习节奏连续 26 周，周量逐级抬升</h3>
+        <div class="card-sub">一格 = 一天 · 颜色越深 = 当日复习张数越多 · 5 月底至 6 月初的低谷是休假</div>
+        <div class="chart" id="ec-cal" style="height:210px"></div>
+      </div>
+      <div class="card s6">
+        <h3>30 天复习量：波动上行</h3>
+        <div class="card-sub">纵轴为当日复习张数 · 深色端点 = 今日</div>
+        <div class="chart" id="ec-line" style="height:260px"></div>
+      </div>
+      <div class="card s6">
+        <h3>数学与计算机构成馆藏主体</h3>
+        <div class="card-sub">横条长度 = 该 UDC 领域的卡片张数</div>
+        <div class="chart" id="ec-bar" style="height:260px"></div>
+      </div>
+      <div class="card s6">
+        <h3>新卡占近四成</h3>
+        <div class="card-sub">按卡片状态划分 · 色序按重要性取 accent/墨/灰阶</div>
+        <div class="donut-flex">
+          <div class="donut-chart" id="ec-donut"></div>
+          <div class="legend" id="ec-donut-lg"></div>
+        </div>
+      </div>
+      <div class="card s6">
+        <h3>复习量爬坡，新卡节奏稳定</h3>
+        <div class="card-sub">近 8 周 · 按周聚合，钴蓝 = 复习，灰 = 新卡</div>
+        <div class="chart" id="ec-stack" style="height:260px"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ Chart.js ═══════════ -->
+  <section>
+    <div class="sec-head">
+      <div class="kicker">B · CHART.JS 4 · MIT</div>
+      <h2>Chart.js 实现</h2>
+      <div class="sec-note">同一数据、同一规范的另一骨架。能力边界：无原生日历热力图（需手写插件或换库），条形图数值标注需额外插件——这就是选型时要掂量的差价。</div>
+    </div>
+    <div class="grid">
+      <div class="card s6">
+        <h3>30 天复习量：波动上行</h3>
+        <div class="card-sub">纵轴为当日复习张数 · 深色端点 = 今日</div>
+        <div class="chart" style="height:260px"><canvas id="cj-line"></canvas></div>
+      </div>
+      <div class="card s6">
+        <h3>数学与计算机构成馆藏主体</h3>
+        <div class="card-sub">横条长度 = 该 UDC 领域的卡片张数</div>
+        <div class="chart" style="height:260px"><canvas id="cj-bar"></canvas></div>
+      </div>
+      <div class="card s6">
+        <h3>新卡占近四成</h3>
+        <div class="card-sub">按卡片状态划分 · 色序按重要性取 accent/墨/灰阶</div>
+        <div class="donut-flex">
+          <div class="donut-chart"><canvas id="cj-donut"></canvas></div>
+          <div class="legend" id="cj-donut-lg"></div>
+        </div>
+      </div>
+      <div class="card s6">
+        <h3>复习量爬坡，新卡节奏稳定</h3>
+        <div class="card-sub">近 8 周 · 按周聚合，钴蓝 = 复习，灰 = 新卡</div>
+        <div class="chart" style="height:260px"><canvas id="cj-stack"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    许可证说明：ECharts — Apache License 2.0；Chart.js — MIT License；Inter / Noto Sans SC / JetBrains Mono — SIL OFL 1.1。
+    以上均允许商业使用与分发（分发时按各自条款保留版权声明即可）。本页图表配置代码为基于通用图型语义与瑞士国际主义设计规范的原始实现。
+  </footer>
+</div>
+
+<script>
+/* ───────────── 共享 token 与数据（确定性，无随机） ───────────── */
+const C = {
+  paper:'#fafaf8', grey1:'#f0f0ee', grey2:'#d4d4d2', grey3:'#737373',
+  ink:'#0a0a0a', accent:'#002FA7', accentSoft:'rgba(0,47,167,.08)', hairline:'#e0e0e0'
+};
+const FONT = "'Inter','Noto Sans SC',sans-serif";
+const MONO = "'JetBrains Mono',monospace";
+const END = new Date(2026, 8, 7); // 2026-09-07
+
+/* 30 天复习量 */
+const rev30 = [32,35,31,28,40,44,38,25,30,36,42,47,39,33,29,35,41,48,52,45,38,31,27,33,39,44,50,46,41,37];
+const days30 = rev30.map((_, i) => { const d = new Date(END); d.setDate(d.getDate() - (29 - i)); return (d.getMonth()+1) + '.' + d.getDate(); });
+
+/* UDC 领域分布 */
+const udcNames = ['数学','计算机科学','物理学','语言学','历史地理','艺术'];
+const udcVals  = [86, 72, 51, 34, 22, 14];
+
+/* 卡片构成 */
+const compNames = ['新卡','复习','学习中','Leech'];
+const compVals  = [38, 31, 22, 9];
+const compCols  = [C.accent, C.ink, C.grey3, C.grey2];
+
+/* 8 周堆叠 */
+const wkLabels = ['7.20','7.27','8.3','8.10','8.17','8.24','8.31','9.7'];
+const wkReview = [180,210,195,240,260,238,275,290];
+const wkNew    = [40,52,46,60,55,48,64,58];
+
+/* 26 周日历数据（确定性伪随机 + 周末/休假塑形） */
+const hash = i => { const s = Math.sin((i + 1) * 12.9898) * 43758.5453; return s - Math.floor(s); };
+const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+const calData = [];
+const calStart = new Date(END); calStart.setDate(END.getDate() - 181);
+for (let i = 0; i < 182; i++) {
+  const d = new Date(calStart); d.setDate(calStart.getDate() + i);
+  const wd = d.getDay();
+  let v = 8 + 24 * (i / 181) + hash(i) * 14;
+  if (wd === 0 || wd === 6) v *= 0.45;
+  if (i >= 70 && i <= 83) v *= 0.12;
+  calData.push([iso(d), Math.max(0, Math.round(v))]);
+}
+
+/* 图例（HTML，8×8 直角色块） */
+function legend(el, names, vals, cols, unit) {
+  el.innerHTML = names.map((n, i) =>
+    '<div class="legend-row"><span class="sw" style="background:' + cols[i] + '"></span>' + n +
+    '<span class="v">' + vals[i] + (unit || '') + '</span></div>').join('');
+}
+
+/* ───────────── ECharts 公共配置 ───────────── */
+const AX_LBL = { color: C.grey3, fontSize: 12, fontWeight: 600, fontFamily: FONT };
+const TIP = {
+  backgroundColor: C.paper, borderColor: C.grey2, borderWidth: 1, padding: [8,12],
+  textStyle: { color: C.ink, fontSize: 12, fontFamily: FONT },
+  extraCssText: 'border-radius:0;box-shadow:none;'
+};
+
+/* 1. 日历热力 */
+echarts.init(document.getElementById('ec-cal')).setOption({
+  animationDuration: 500,
+  visualMap: { show: false, min: 0, max: 45, inRange: { color: ['#f0f0ee','#c7d2ef','#8fa5e0','#4a68c8','#002FA7'] } },
+  calendar: {
+    top: 28, left: 40, right: 8, cellSize: 16,
+    range: ['2026-03', '2026-09'],
+    itemStyle: { color: '#fafaf8', borderColor: '#fafaf8', borderWidth: 2 },
+    splitLine: { show: false },
+    dayLabel: { firstDay: 1, nameMap: ['', '一', '', '三', '', '五', ''], color: C.grey3, fontSize: 12, fontWeight: 600, fontFamily: FONT },
+    monthLabel: { color: C.grey3, fontSize: 12, fontWeight: 600, fontFamily: FONT, nameMap: 'cn' },
+    yearLabel: { show: false }
+  },
+  series: [{ type: 'heatmap', coordinateSystem: 'calendar', data: calData, itemStyle: { borderRadius: 0 } }]
+});
+
+/* 2. 30 天折线 */
+const ecLine = echarts.init(document.getElementById('ec-line'));
+ecLine.setOption({
+  animationDuration: 600,
+  grid: { left: 36, right: 48, top: 16, bottom: 28 },
+  tooltip: Object.assign({ trigger: 'axis',
+    axisPointer: { type: 'line', lineStyle: { color: C.grey2, width: 1 } },
+    formatter: p => p[0].name + '<br/>复习 <b style="font-family:' + MONO + '">' + p[0].value + '</b> 张'
+  }, TIP),
+  xAxis: { type: 'category', data: days30, boundaryGap: false,
+    axisLine: { lineStyle: { color: C.grey2 } }, axisTick: { show: false },
+    axisLabel: Object.assign({ interval: 4, formatter: v => v }, AX_LBL) },
+  yAxis: { type: 'value', min: 0, max: 60, splitNumber: 4,
+    axisLabel: AX_LBL, splitLine: { lineStyle: { color: C.hairline, width: 1 } } },
+  series: [{
+    type: 'line', data: rev30, smooth: false, symbol: 'none',
+    lineStyle: { color: C.ink, width: 2 },
+    areaStyle: { color: C.accentSoft, origin: 'start' },
+    itemStyle: { color: C.accent },
+    markPoint: { symbol: 'rect', symbolSize: 8, itemStyle: { color: C.accent },
+      label: { show: false }, data: [{ coord: [29, rev30[29]] }] },
+    endLabel: { show: true, formatter: String(rev30[29]), color: C.accent,
+      fontFamily: MONO, fontWeight: 600, fontSize: 13, distance: 8 }
+  }]
+});
+
+/* 3. UDC 横条 */
+echarts.init(document.getElementById('ec-bar')).setOption({
+  animationDuration: 600,
+  grid: { left: 8, right: 56, top: 8, bottom: 28, containLabel: true },
+  tooltip: Object.assign({ trigger: 'item', formatter: p => p.name + '<br/>卡片 <b style="font-family:' + MONO + '">' + p.value + '</b> 张' }, TIP),
+  xAxis: { type: 'value', max: 90, splitNumber: 4, axisLabel: AX_LBL,
+    splitLine: { lineStyle: { color: C.hairline, width: 1 } } },
+  yAxis: { type: 'category', data: udcNames, inverse: true,
+    axisLine: { lineStyle: { color: C.grey2 } }, axisTick: { show: false }, axisLabel: Object.assign({ color: C.ink }, AX_LBL) },
+  series: [{ type: 'bar', data: udcVals, barWidth: '55%', itemStyle: { color: C.accent, borderRadius: 0 },
+    label: { show: true, position: 'right', color: C.ink, fontFamily: MONO, fontWeight: 600, fontSize: 12 } }]
+});
+
+/* 4. 构成环 */
+echarts.init(document.getElementById('ec-donut')).setOption({
+  animationDuration: 600,
+  tooltip: Object.assign({ trigger: 'item', formatter: p => p.name + '<br/>占比 <b style="font-family:' + MONO + '">' + p.value + '%</b>' }, TIP),
+  series: [{ type: 'pie', radius: ['58%','82%'], center: ['50%','50%'],
+    data: compNames.map((n, i) => ({ name: n, value: compVals[i], itemStyle: { color: compCols[i], borderRadius: 0 } })),
+    label: { show: false }, labelLine: { show: false },
+    itemStyle: { borderColor: C.grey1, borderWidth: 2 } }]
+});
+legend(document.getElementById('ec-donut-lg'), compNames, compVals, compCols, '%');
+
+/* 5. 周堆叠 */
+echarts.init(document.getElementById('ec-stack')).setOption({
+  animationDuration: 600,
+  grid: { left: 40, right: 8, top: 16, bottom: 28 },
+  tooltip: Object.assign({ trigger: 'axis',
+    formatter: ps => ps[0].name + ' 周<br/>' + ps.map(p => p.marker.replace('10px','8px') + p.seriesName + ' <b style="font-family:' + MONO + '">' + p.value + '</b> 张').join('<br/>')
+  }, TIP),
+  xAxis: { type: 'category', data: wkLabels,
+    axisLine: { lineStyle: { color: C.grey2 } }, axisTick: { show: false }, axisLabel: AX_LBL },
+  yAxis: { type: 'value', splitNumber: 4, axisLabel: AX_LBL,
+    splitLine: { lineStyle: { color: C.hairline, width: 1 } } },
+  series: [
+    { name: '复习', type: 'bar', stack: 't', data: wkReview, barWidth: '52%', itemStyle: { color: C.accent, borderRadius: 0 } },
+    { name: '新卡', type: 'bar', stack: 't', data: wkNew, itemStyle: { color: C.grey3, borderRadius: 0 } }
+  ]
+});
+
+/* ───────────── Chart.js 公共配置 ───────────── */
+Chart.defaults.font.family = FONT;
+Chart.defaults.font.size = 12;
+Chart.defaults.font.weight = 600;
+Chart.defaults.color = C.grey3;
+Chart.defaults.borderColor = C.hairline;
+Chart.defaults.plugins.tooltip.backgroundColor = C.paper;
+Chart.defaults.plugins.tooltip.borderColor = C.grey2;
+Chart.defaults.plugins.tooltip.borderWidth = 1;
+Chart.defaults.plugins.tooltip.titleColor = C.ink;
+Chart.defaults.plugins.tooltip.bodyColor = '#525252';
+Chart.defaults.plugins.tooltip.cornerRadius = 0;
+Chart.defaults.plugins.tooltip.displayColors = false;
+Chart.defaults.plugins.tooltip.padding = 10;
+Chart.defaults.plugins.legend.display = false;
+
+/* 1. 折线 */
+new Chart(document.getElementById('cj-line'), {
+  type: 'line',
+  data: { labels: days30, datasets: [{
+    data: rev30, borderColor: C.ink, borderWidth: 2, fill: true,
+    backgroundColor: C.accentSoft, pointRadius: rev30.map((_, i) => i === 29 ? 5 : 0),
+    pointStyle: 'rect', pointBackgroundColor: C.accent, pointBorderWidth: 0,
+    tension: 0, cubicInterpolationMode: 'default'
+  }]},
+  options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { grid: { display: false }, border: { color: C.grey2 },
+        ticks: { autoSkip: true, maxTicksLimit: 7, maxRotation: 0 } },
+      y: { min: 0, max: 60, grid: { color: C.hairline }, border: { display: false }, ticks: { maxTicksLimit: 5 } }
+    },
+    plugins: { tooltip: { callbacks: { label: ctx => '复习 ' + ctx.parsed.y + ' 张' } } }
+  }
+});
+
+/* 2. 横条 */
+new Chart(document.getElementById('cj-bar'), {
+  type: 'bar',
+  data: { labels: [...udcNames].reverse(), datasets: [{
+    data: [...udcVals].reverse(), backgroundColor: C.accent,
+    borderRadius: 0, categoryPercentage: 0.62, barPercentage: 0.9
+  }]},
+  options: { indexAxis: 'y',
+    responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
+    scales: {
+      x: { min: 0, max: 90, grid: { color: C.hairline }, border: { display: false }, ticks: { maxTicksLimit: 5 } },
+      y: { grid: { display: false }, border: { color: C.grey2 }, ticks: { color: C.ink } }
+    },
+    plugins: { tooltip: { callbacks: { label: ctx => '卡片 ' + ctx.parsed.x + ' 张' } } }
+  }
+});
+
+/* 3. 构成环 */
+new Chart(document.getElementById('cj-donut'), {
+  type: 'doughnut',
+  data: { labels: compNames, datasets: [{
+    data: compVals, backgroundColor: compCols, borderColor: C.grey1,
+    borderWidth: 2, borderRadius: 0
+  }]},
+  options: { responsive: true, maintainAspectRatio: false, cutout: '62%',
+    plugins: { tooltip: { callbacks: { label: ctx => ctx.label + ' ' + ctx.parsed + '%' } } } }
+});
+legend(document.getElementById('cj-donut-lg'), compNames, compVals, compCols, '%');
+
+/* 4. 堆叠 */
+new Chart(document.getElementById('cj-stack'), {
+  type: 'bar',
+  data: { labels: wkLabels, datasets: [
+    { label: '复习', data: wkReview, backgroundColor: C.accent, borderRadius: 0 },
+    { label: '新卡', data: wkNew, backgroundColor: C.grey3, borderRadius: 0 }
+  ]},
+  options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { stacked: true, grid: { display: false }, border: { color: C.grey2 }, stacked: true },
+      y: { stacked: true, grid: { color: C.hairline }, border: { display: false }, ticks: { maxTicksLimit: 5 } }
+    },
+    plugins: { tooltip: { callbacks: {
+      label: ctx => ctx.dataset.label + ' ' + ctx.parsed.y + ' 张'
+    } } }
+  }
+});
+</script>
+</body>
+</html>

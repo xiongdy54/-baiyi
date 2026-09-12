@@ -10,6 +10,7 @@ declare global {
       getDocument: (id: string) => Promise<unknown>;
       getItemIdByDocumentId: (docId: string) => Promise<string | null>;
       updateProgress: (id: string, progress: unknown) => Promise<boolean>;
+      readBookFile: (id: string) => Promise<Uint8Array | null>;
     };
   }
 }
@@ -44,12 +45,17 @@ export interface DocPayload {
   title: string;
   markdown: string;
   progressJson: string | null;
+  /** 书籍来源类型：epub（有原书文件，走阅读内核）/ paste（粘贴快捕）等 */
+  sourceType?: string;
 }
 
 export interface ReadingProgress {
   ratio: number;
   lastText: string;
   updatedAt: number;
+  /** 阅读内核（v20）：结构级定位与全书比例，恢复时优先于 ratio */
+  cfi?: string;
+  fraction?: number;
 }
 
 export const libraryApi = {
@@ -63,6 +69,10 @@ export const libraryApi = {
   },
   async getItemIdByDocumentId(docId: string): Promise<string | null> {
     return (await window.libraryAPI?.getItemIdByDocumentId(docId)) ?? null;
+  },
+  /** 读取原书文件字节（EPUB 等文件书）；无原书返回 null（阅读内核据此分流） */
+  async readBookFile(itemId: string): Promise<Uint8Array | null> {
+    return (await window.libraryAPI?.readBookFile(itemId)) ?? null;
   },
   async updateProgress(itemId: string, progress: ReadingProgress): Promise<void> {
     await window.libraryAPI?.updateProgress(itemId, progress);

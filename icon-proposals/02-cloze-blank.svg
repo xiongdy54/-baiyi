@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- 02 挖空·完形填空 — 文本行中一处蓝色空缺：制卡与 cloze 的核心动作 -->
+  <rect width="512" height="512" fill="#fafaf8"/>
+  <rect x="96"  y="160" width="320" height="32" fill="#0a0a0a"/>
+  <rect x="96"  y="240" width="96"  height="32" fill="#0a0a0a"/>
+  <rect x="208" y="240" width="96"  height="32" fill="#002FA7"/>
+  <rect x="320" y="240" width="96"  height="32" fill="#0a0a0a"/>
+  <rect x="96"  y="320" width="192" height="32" fill="#0a0a0a"/>
+</svg>

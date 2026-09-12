@@ -21,6 +21,20 @@ export interface AIConfig {
   reasoningEffort?: string;
 }
 
+// M1.1：多模态消息（图片挖空走 GLM vision）。文本消息保持 string 形态不变
+export interface ChatTextPart {
+  type: "text";
+  text: string;
+}
+export interface ChatImagePart {
+  type: "image_url";
+  image_url: { url: string };
+}
+export interface ChatMessage {
+  role: string;
+  content: string | (ChatTextPart | ChatImagePart)[];
+}
+
 export const aiGateway = {
   async getConfig(): Promise<AIConfig | null> {
     if (!window.aiAPI) return null;
@@ -43,7 +57,7 @@ export const aiGateway = {
   },
   // 流式对话：onDelta 累积增量；onThinking 上报思考模型（reasoning_content）的已思考字数；resolve 返回全文
   chat(
-    messages: { role: string; content: string }[],
+    messages: ChatMessage[],
     onDelta?: (acc: string, delta: string) => void,
     temperature?: number,
     onThinking?: (thinkChars: number) => void

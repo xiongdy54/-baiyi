@@ -8,7 +8,9 @@ contextBridge.exposeInMainWorld("settingsAPI", {
 contextBridge.exposeInMainWorld("windowAPI", {
   minimize: () => ipcRenderer.send("win:minimize"),
   maximize: () => ipcRenderer.send("win:maximize"),
-  close: () => ipcRenderer.send("win:close")
+  close: () => ipcRenderer.send("win:close"),
+  // 外链（v20）：仅 http/https，交系统浏览器
+  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url)
 });
 
 contextBridge.exposeInMainWorld("libraryAPI", {
@@ -19,7 +21,9 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   remove: (id) => ipcRenderer.invoke("library:delete", id),
   getDocument: (id) => ipcRenderer.invoke("library:doc", id),
   getItemIdByDocumentId: (docId) => ipcRenderer.invoke("library:itemByDoc", docId),
-  updateProgress: (id, progress) => ipcRenderer.invoke("library:updateProgress", id, progress)
+  updateProgress: (id, progress) => ipcRenderer.invoke("library:updateProgress", id, progress),
+  // 阅读内核（v20）：读原书字节给 foliate 打开
+  readBookFile: (id) => ipcRenderer.invoke("library:readBookFile", id)
 });
 
 contextBridge.exposeInMainWorld("workflowAPI", {
@@ -36,8 +40,13 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   listDue: () => ipcRenderer.invoke("cards:listDue"),
   listAll: () => ipcRenderer.invoke("cards:listAll"),
   remove: (id) => ipcRenderer.invoke("cards:delete", id),
-  review: (cardId, fsrsState, rating, durationMs) =>
-    ipcRenderer.invoke("cards:review", cardId, fsrsState, rating, durationMs),
+  review: (cardId, fsrsState, rating, durationMs, fsrsBefore) =>
+    ipcRenderer.invoke("cards:review", cardId, fsrsState, rating, durationMs, fsrsBefore),
+  // v22 撤销评分
+  lastUndoableReview: () => ipcRenderer.invoke("cards:lastUndoableReview"),
+  undoReview: () => ipcRenderer.invoke("cards:undoReview"),
+  // v23（§4.4.9）：persist 失败后的纯持久化重试（绝不重执行业务 mutation）
+  persistNow: () => ipcRenderer.invoke("cards:persistNow"),
   skip: (cardId) => ipcRenderer.invoke("cards:skip", cardId),
   setSuspended: (id, suspended, reason) => ipcRenderer.invoke("cards:setSuspended", id, suspended, reason),
   updateLeech: (id, patch) => ipcRenderer.invoke("cards:updateLeech", id, patch),
@@ -73,6 +82,23 @@ contextBridge.exposeInMainWorld("similarityAPI", {
   find: (text, k) => ipcRenderer.invoke("similarity:find", text, k)
 });
 
+// M1.1 图片挖空卡：选本地图 → 落盘 + 入 assets 表 → 返回 {itemId, filename, assetPath, dataUrl}
+// v25：saveImage 供正文图片点选聚焦（字节来自渲染层，不经文件对话框）
+contextBridge.exposeInMainWorld("assetsAPI", {
+  pickOcclusionImage: (ownerKey) => ipcRenderer.invoke("assets:pickOcclusionImage", ownerKey),
+  saveImage: (ownerKey, ext, base64, kind) => ipcRenderer.invoke("assets:saveImage", ownerKey, ext, base64, kind)
+});
+
+// v23：FSRS 参数环境——活跃配置完整快照 + 主进程事实层推送的热生效通知（F9）
+contextBridge.exposeInMainWorld("fsrsAPI", {
+  getActiveConfig: () => ipcRenderer.invoke("fsrs:activeConfig"),
+  onConfigChanged: (callback) => {
+    const handler = (_e, configId) => callback(configId);
+    ipcRenderer.on("fsrs:configChanged", handler);
+    return () => ipcRenderer.removeListener("fsrs:configChanged", handler);
+  }
+});
+
 contextBridge.exposeInMainWorld("optimizerAPI", {
   stats: () => ipcRenderer.invoke("optimizer:stats"),
   current: () => ipcRenderer.invoke("optimizer:current"),
@@ -84,6 +110,18 @@ contextBridge.exposeInMainWorld("optimizerAPI", {
     ipcRenderer.on("optimizer:progress", handler);
     return () => ipcRenderer.removeListener("optimizer:progress", handler);
   }
+});
+
+// M2 数据备份与恢复
+contextBridge.exposeInMainWorld("backupAPI", {
+  info: () => ipcRenderer.invoke("backup:info"),
+  create: (opts) => ipcRenderer.invoke("backup:create", opts || {}),
+  list: () => ipcRenderer.invoke("backup:list"),
+  pickDir: () => ipcRenderer.invoke("backup:pickDir"),
+  openDir: () => ipcRenderer.invoke("backup:openDir"),
+  pickFile: () => ipcRenderer.invoke("backup:pickFile"),
+  restore: (file) => ipcRenderer.invoke("backup:restore", file),
+  relaunch: () => ipcRenderer.send("app:relaunch")
 });
 
 contextBridge.exposeInMainWorld("aiAPI", {

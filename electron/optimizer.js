@@ -1,24 +1,9 @@
-// FSRS 参数优化器（v12）— 集成 open-spaced-repetition/fsrs-rs-nodejs
-// 从 review_logs + cards 构建时序复习序列，训练个性化权重；应用/重置走 settings.json
-const path = require("path");
-const fs = require("fs");
-const { app } = require("electron");
+// FSRS 参数优化器（v12；v23 改造：配置走 fsrs_configs 不可变快照 + settings.app.fsrsConfigId 指针，D20）
+// 从 review_logs + cards 构建时序复习序列，训练个性化权重；delta_t 由 canonical 函数构建（§4.4.8，
+// 与调度器 elapsed_days 同语义）；应用/重置只移动指针、绝不修改配置内容（§4.4.10 不可变）。
 const { FSRS, FSRSItem, FSRSReview } = require("fsrs-rs-nodejs");
-
-const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
-
-function readSettings() {
-  try {
-    return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-function writeSettings(all) {
-  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(all, null, 2), "utf-8");
-}
+const { calculateFsrsDeltaT } = require("./fsrsTime");
+const { DEFAULT_CONFIG_ID, DEFAULT_SCHEDULER_OPTIONS } = require("./fsrsConfig");
 
 // 最低数据门槛：官方建议 400+ 条复习记录；低于此值训练不可靠（仍允许跑，UI 提示）
 const MIN_RECOMMENDED_REVIEWS = 400;
@@ -27,16 +12,13 @@ const DAY_MS = 86400000;
 
 // 从 review_logs 构建每卡时序序列 → FSRSItem[]
 // rating 映射：Again=1 Hard=2 Good=3 Easy=4（与应用存储一致，无需转换）
-// delta_t = 与上一条复习的间隔天数（向下取整，首条为 0）
+// delta_t = canonical 日历日差（§4.4.8，首条恒为 0；与调度器 elapsed_days 同语义）
 function buildTrainSet(db) {
   const cards = db.listAllCards();
   const logsByCard = new Map();
   for (const card of cards) {
     logsByCard.set(card.id, []);
   }
-  // review_logs 无 listAll 接口——用 db 内部导出的 queryAll 不可行，逐卡查询太慢；
-  // 这里在 db.js 增加辅助（见 main.js 接线），当前通过 cards 表 review 顺序重建：
-  // review_logs 表按 reviewed_at 排序即可。
   const allLogs = db.listAllReviewLogs();
   for (const log of allLogs) {
     const arr = logsByCard.get(log.cardId);
@@ -54,7 +36,7 @@ function buildTrainSet(db) {
     for (const log of logs) {
       const rating = RATING_MAP[log.rating];
       if (!rating) continue;
-      const deltaT = prevAt === null ? 0 : Math.max(0, Math.floor((log.reviewedAt - prevAt) / DAY_MS));
+      const deltaT = prevAt === null ? 0 : Math.max(0, calculateFsrsDeltaT(prevAt, log.reviewedAt));
       reviews.push(new FSRSReview(rating, deltaT));
       prevAt = log.reviewedAt;
       reviewCount++;
@@ -97,7 +79,12 @@ async function train(db, onProgress) {
       ? (_err, value) => onProgress(value)
       : undefined
   });
-  const evaluation = f.evaluate(items);
+  // F8（v20）：fsrs-rs evaluate 约束——样本须 ≥2 条复习且最后一条 delta_t>0，
+  // 学习/重学步同日恢复收尾的样本会被拒绝（InvalidInput）；训练不受影响，评估取可评估子集
+  const evalItems = items.filter(
+    (it) => it.reviews.length >= 2 && it.reviews[it.reviews.length - 1].deltaT > 0
+  );
+  const evaluation = evalItems.length > 0 ? f.evaluate(evalItems) : { logLoss: null, rmseBins: null };
   return {
     weights,
     reviewCount,
@@ -107,36 +94,44 @@ async function train(db, onProgress) {
   };
 }
 
-function getAppliedWeights() {
-  const s = readSettings();
-  const w = s.app && s.app.fsrsWeights;
-  return Array.isArray(w) && w.length === 21 ? w : null;
+// v23（D20）：当前活跃配置 = fsrs_configs 指针所指完整快照（weights+scheduler_options+来源）
+function getActiveConfig(db) {
+  const cfg = db.getActiveFsrsConfig();
+  if (!cfg) return null;
+  return cfg;
 }
 
-function applyWeights(weights) {
-  if (!Array.isArray(weights) || weights.length !== 21) {
+// 校验待应用权重：21 维、全部有限数值（§4.4.10）
+function validateWeights(weights) {
+  if (!Array.isArray(weights) || weights.length !== 21 || !weights.every((x) => typeof x === "number" && Number.isFinite(x))) {
     throw new Error("权重格式错误：需要 21 个数值");
   }
-  const s = readSettings();
-  if (!s.app) s.app = {};
-  s.app.fsrsWeights = weights.map(Number);
-  writeSettings(s);
-  return true;
+  return weights.map(Number);
 }
 
-function resetWeights() {
-  const s = readSettings();
-  if (s.app) delete s.app.fsrsWeights;
-  writeSettings(s);
-  return true;
+// 应用优化权重：校验 → 指纹去重插入新 config 行 → 移动活跃指针。
+// 只影响未来调度（D20），不回算任何存量卡片；configId 变化后由主进程推送 fsrs:configChanged 热重建引擎（F9）
+function applyWeights(db, weights) {
+  const w = validateWeights(weights);
+  const configId = db.insertFsrsConfig(w, DEFAULT_SCHEDULER_OPTIONS, "optimizer");
+  db.setActiveFsrsConfig(configId);
+  return { ok: true, configId };
+}
+
+// 恢复默认参数：指针回 cfg-default（普通不可变行，不插入重复 default）
+function resetWeights(db) {
+  db.setActiveFsrsConfig(DEFAULT_CONFIG_ID);
+  return { ok: true, configId: DEFAULT_CONFIG_ID };
 }
 
 module.exports = {
   MIN_RECOMMENDED_REVIEWS,
+  DAY_MS,
   buildTrainSet,
   getOptimizerStats,
   train,
-  getAppliedWeights,
+  getActiveConfig,
+  validateWeights,
   applyWeights,
   resetWeights
 };

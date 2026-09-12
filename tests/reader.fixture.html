@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>reader kernel fixture</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+    #host { position: fixed; inset: 0; }
+  </style>
+</head>
+<body>
+  <div id="host"></div>
+  <script>
+    window.addEventListener("error", (e) => console.log("[page-error] " + e.message + " @ " + (e.filename || "") + ":" + (e.lineno || "")));
+    window.addEventListener("unhandledrejection", (e) => console.log("[page-rejection] " + (e.reason && (e.reason.stack || e.reason.message || e.reason))));
+  </script>
+  <script src="./reader.bundle.js"></script>
+</body>
+</html>

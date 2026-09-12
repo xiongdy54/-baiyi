@@ -267,8 +267,8 @@ var ConvertStepUnitToMinutes = (step) => {
       );
   }
 };
-var BasicLearningStepsStrategy = (params2, state, cur_step) => {
-  const learning_steps = state === State.Relearning || state === State.Review ? params2.relearning_steps : params2.learning_steps;
+var BasicLearningStepsStrategy = (params, state, cur_step) => {
+  const learning_steps = state === State.Relearning || state === State.Review ? params.relearning_steps : params.learning_steps;
   const steps_length = learning_steps.length;
   if (steps_length === 0 || cur_step >= steps_length) return {};
   const firstStep = learning_steps[0];
@@ -668,9 +668,9 @@ var FSRSAlgorithm = class {
   param;
   intervalModifier;
   _seed;
-  constructor(params2) {
+  constructor(params) {
     this.param = new Proxy(
-      this.prepare_parameters(params2),
+      this.prepare_parameters(params),
       this.params_handler_proxy()
     );
     this.intervalModifier = this.calculate_interval_modifier(
@@ -710,8 +710,8 @@ var FSRSAlgorithm = class {
    * Set the parameters of the algorithm.
    * @param params Partial<FSRSParameters>
    */
-  set parameters(params2) {
-    this.update_parameters(params2);
+  set parameters(params) {
+    this.update_parameters(params);
   }
   params_handler_proxy() {
     const _this = this;
@@ -742,15 +742,15 @@ var FSRSAlgorithm = class {
       }
     };
   }
-  update_parameters(params2) {
-    const _params = this.prepare_parameters(params2);
+  update_parameters(params) {
+    const _params = this.prepare_parameters(params);
     for (const key in _params) {
       const paramKey = key;
       this.param[paramKey] = _params[paramKey];
     }
   }
-  prepare_parameters = (params2) => {
-    const generated = generatorParameters(params2);
+  prepare_parameters = (params) => {
+    const generated = generatorParameters(params);
     generated.w = clipParameters(
       Array.from(generated.w),
       generated.relearning_steps.length,
@@ -1854,19 +1854,64 @@ var FSRS = class extends FSRSAlgorithm {
     };
   }
 };
-var fsrs = (params2) => {
-  return new FSRS(params2 || {});
+var fsrs = (params) => {
+  return new FSRS(params || {});
 };
 
 // src/lib/fsrs.ts
-var params = generatorParameters({ enable_fuzz: false });
-var engine = fsrs(params);
+var BASE_PARAMS = generatorParameters({ enable_fuzz: false });
+var engine = fsrs(BASE_PARAMS);
+var activeConfigId = null;
+function buildEngineFromConfig(cfg) {
+  try {
+    const w = cfg?.weights;
+    const opts = cfg?.schedulerOptions ?? {};
+    if (!Array.isArray(w) || w.length !== 21 || !w.every((x) => typeof x === "number" && Number.isFinite(x))) {
+      return false;
+    }
+    if (opts.enableFuzz !== false) return false;
+    const params = generatorParameters({
+      enable_fuzz: false,
+      w,
+      request_retention: typeof opts.requestRetention === "number" ? opts.requestRetention : void 0,
+      maximum_interval: typeof opts.maximumInterval === "number" ? opts.maximumInterval : void 0,
+      enable_short_term: typeof opts.enableShortTerm === "boolean" ? opts.enableShortTerm : void 0,
+      learning_steps: Array.isArray(opts.learningSteps) ? opts.learningSteps : void 0,
+      relearning_steps: Array.isArray(opts.relearningSteps) ? opts.relearningSteps : void 0
+    });
+    engine = fsrs(params);
+    activeConfigId = cfg?.id ?? null;
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function reloadEngine() {
+  try {
+    const cfg = await window.fsrsAPI?.getActiveConfig();
+    if (!cfg) return false;
+    if (cfg.id !== void 0 && cfg.id === activeConfigId) return false;
+    return buildEngineFromConfig(cfg);
+  } catch {
+    return false;
+  }
+}
+void reloadEngine();
+if (typeof window !== "undefined" && window.fsrsAPI?.onConfigChanged) {
+  window.fsrsAPI.onConfigChanged(() => {
+    void reloadEngine();
+  });
+}
 var GRADE_MAP = {
   Again: 1,
   Hard: 2,
   Good: 3,
   Easy: 4
 };
+function toDate(now) {
+  if (now == null) return /* @__PURE__ */ new Date();
+  return now instanceof Date ? now : new Date(now);
+}
 function toFsrsCard(state) {
   const base = createEmptyCard();
   if (!state) return base;
@@ -1881,11 +1926,12 @@ function toFsrsCard(state) {
     state: stateMap[state.state ?? "new"] ?? 0,
     due: state.due ? new Date(state.due) : base.due,
     lapses: state.lapses ?? 0,
-    // 历史卡可能缺 S/D/reps（v11 前的存量数据）：缺省时以库默认基线回填，
+    // 历史卡可能缺 S/D/reps/learningSteps（v11/v20 前的存量数据）：缺省时以库默认基线回填，
     // 由于历史卡调度本已失真，此回填只保证「不再二次失真」，无法还原历史
     stability: state.stability ?? base.stability,
     difficulty: state.difficulty ?? base.difficulty,
     reps: state.reps ?? 0,
+    learning_steps: typeof state.learningSteps === "number" ? state.learningSteps : base.learning_steps,
     last_review: state.lastReview ? new Date(state.lastReview) : base.last_review
   };
 }
@@ -1898,36 +1944,41 @@ function fromFsrsCard(card) {
     stability: card.stability,
     difficulty: card.difficulty,
     reps: card.reps,
+    learningSteps: card.learning_steps ?? 0,
     lastReview: card.last_review ? card.last_review.getTime() : null
   };
 }
 var fsrsEngine = {
-  // §11.3 一次计算四档完整结果；评分时复用，保证预览=落库
-  preview(cardState) {
+  // §4.4.3 一次计算四档完整结果；评分时复用，保证预览=落库
+  preview(cardState, now) {
     const card = toFsrsCard(cardState);
-    const now = /* @__PURE__ */ new Date();
-    const result = engine.repeat(card, now);
+    const at = toDate(now);
+    const result = engine.repeat(card, at);
     return ["Again", "Hard", "Good", "Easy"].map((rating) => {
       const item = result[GRADE_MAP[rating]];
       return {
         rating,
-        dueText: formatInterval(item.card.due.getTime() - now.getTime()),
-        // 完整落库状态（含 S/D/reps），评分时直接采用
+        dueText: formatInterval(item.card.due.getTime() - at.getTime()),
+        // 完整落库状态（含 S/D/reps/learningSteps），评分时直接采用
         fsrsState: fromFsrsCard(item.card)
       };
     });
   },
-  next(cardState, rating) {
+  next(cardState, rating, now) {
     const card = toFsrsCard(cardState);
-    const result = engine.repeat(card, /* @__PURE__ */ new Date())[GRADE_MAP[rating]];
+    const at = toDate(now);
+    const result = engine.repeat(card, at)[GRADE_MAP[rating]];
     return {
       fsrsState: fromFsrsCard(result.card),
-      intervalText: formatInterval(result.card.due.getTime() - Date.now())
+      intervalText: formatInterval(result.card.due.getTime() - at.getTime())
     };
   },
   isLeech(lapses, threshold) {
     return lapses >= threshold;
-  }
+  },
+  // v23 测试/调试接口：当前引擎所属配置 id 与手动热重载（F9 断言用）
+  activeConfigId: () => activeConfigId,
+  reloadEngine: () => reloadEngine()
 };
 function formatInterval(ms) {
   const days = ms / 864e5;
