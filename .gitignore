@@ -4,3 +4,4 @@ dist/
 
 # 测试日志（用完即删纪律）
 tests/*.log
+tmp-l2-*.png
