@@ -30,7 +30,8 @@ check("带 occlusion 资产的遮挡卡不触发 L11", !occOk.some((i) => i.rule
 const occMissing = cards.lintCard({ front: "图中遮挡区域对应的是什么？", back: "海马体", cardType: "imageOcclusion", occlusion: null });
 check("缺 occlusion 资产的遮挡卡触发 L11(error)", occMissing.some((i) => i.ruleId === "L11" && i.severity === "error"), "L11/error", occMissing);
 const occEmptyRects = cards.lintCard({ front: "x", back: "y", cardType: "imageOcclusion", occlusion: { assetPath: "bookasset://x/y.png", rects: [] } });
-check("rects 为空同样触发 L11", occEmptyRects.some((i) => i.ruleId === "L11"), "L11", occEmptyRects);
+// v29 将 L11 放宽为「有 asset 即有效」，v30 D28 用户拍板定版看图问答卡（rects=[] 挂图+题面）为合法形态
+check("rects 为空的看图问答卡（有 asset）不触发 L11", !occEmptyRects.some((i) => i.ruleId === "L11"), "无 L11", occEmptyRects);
 
 console.log("== M1-3 cloze 契约不回归（Non-Goal 验证，§5.4/§7.2） ==");
 const clozeText = "线粒体是细胞的{{c1::能量工厂}}，DNA 复制发生在{{c2::细胞核}}。";
@@ -119,6 +120,46 @@ const withHead = cards.extractJson("好的，以下是制卡结果：\n" + goodJ
 check("JSON 前有导语仍能解析", withTail.cards.length === 1 && withHead.cards.length === 1, "ok");
 const truncated = cards.extractJson('{"cards":[{"cardType":"qa","front":"x","back":"y"}],"knowledgePoints":[]} 后缀 {');
 check("旧策略仍兜底可用", truncated.cards.length === 1, truncated.cards.length);
+
+console.log("== M1-9 一卡多空两形态（v30 D27：同答/分答，用户拍板） ==");
+const multiText = "中国优绩主义的两大根脉：{{c1::科举制度}}＋{{c2::儒家伦理}}——成绩即道德合法性";
+const pm = cards.parseCloze(multiText);
+check("render(number) 兼容旧签名（只遮单空、其余显示原文）", pm.render(1).includes("[…]") && pm.render(1).includes("儒家伦理"), "单空遮蔽", pm.render(1));
+const detail = pm.renderDetail([1, 2]);
+check("同答卡两空全遮蔽（正面无答案泄漏）", detail.text.includes("[…]") && !detail.text.includes("科举制度") && !detail.text.includes("儒家伦理"), "全遮", detail.text);
+check("maskedOrds 记录被遮空（默认场景）", JSON.stringify(detail.maskedOrds) === "[1,2]", "[1,2]", detail.maskedOrds);
+const reversed = cards.parseCloze("{{c2::后项}}在前，{{c1::前项}}在后");
+check("maskedOrds 按文本顺序而非 ord 升序（对位还原依据）", JSON.stringify(reversed.renderDetail([1, 2]).maskedOrds) === "[2,1]", "[2,1]", reversed.renderDetail([1, 2]).maskedOrds);
+check("extractClozeAnswers 逐空取答案（含顺序）", JSON.stringify(cards.extractClozeAnswers(multiText, [1, 2])) === JSON.stringify(["科举制度", "儒家伦理"]), '["科举制度","儒家伦理"]', cards.extractClozeAnswers(multiText, [1, 2]));
+check("extractClozeAnswers 对缺失 ord 返回空串", JSON.stringify(cards.extractClozeAnswers(multiText, [3])) === JSON.stringify([""]), '[""]', cards.extractClozeAnswers(multiText, [3]));
+const split = cards.expandClozeDraft({ cardType: "cloze", front: multiText, back: "", cloze: multiText, clozeMode: "per-blank" });
+check("per-blank 草稿拆为每空一张", split.length === 2, 2, split.length);
+check("拆卡各自带 clozeOrds=[自己的空]", JSON.stringify(split.map((s) => s.clozeOrds)) === "[[1],[2]]", "[[1],[2]]", split.map((s) => s.clozeOrds));
+check("拆卡 ord 依序编号", JSON.stringify(split.map((s) => s.ord)) === "[0,1]", "[0,1]", split.map((s) => s.ord));
+check("together（缺省）不拆卡", cards.expandClozeDraft({ cardType: "cloze", front: multiText, back: "", cloze: multiText }).length === 1, 1, 1);
+check("单空 per-blank 不拆", cards.expandClozeDraft({ cardType: "cloze", front: "a{{c1::b}}", back: "", clozeMode: "per-blank" }).length === 1, 1, 1);
+check("非 cloze 草稿原样返回", cards.expandClozeDraft({ cardType: "qa", front: "x", back: "y" }).length === 1, 1, 1);
+
+console.log("== M1-10 对比卡候选清单（v30 D29 候选增强：以当前卡为基准语义检索易混卡） ==");
+const candCards = [
+  { id: "a", cardType: "qa", frontMarkdown: "基准卡题目？", noteText: "基准卡题目？", backMarkdown: "答案A", domain: ["1"], leech: null },
+  { id: "b", cardType: "qa", frontMarkdown: "易混卡题目？", noteText: "易混卡题目？", backMarkdown: "答案B", domain: ["1"], leech: null },
+  { id: "c", cardType: "cloze", frontMarkdown: "挖空{{c1::内容}}卡", noteText: "挖空{{c1::内容}}卡", backMarkdown: "", domain: ["2"], leech: null },
+  { id: "d", cardType: "imageOcclusion", frontMarkdown: "图中遮挡区域对应的是什么？", noteText: "图中遮挡区域对应的是什么？", backMarkdown: "图卡答案", domain: ["1"], leech: null },
+  { id: "e", cardType: "qa", frontMarkdown: "挂起卡题目", noteText: "挂起卡题目", backMarkdown: "", domain: ["1"], leech: { suspended: true } }
+];
+const cands = cards.buildContrastCandidates(candCards, "a", ["1"]);
+check("排除基准卡本身", !cands.some((t) => t.includes("基准卡")), "排除", cands);
+check("挂起卡保留（用户暂停的疑似重复卡正是对比卡要找回的候选）", cands.some((t) => t.includes("挂起卡")), "保留", cands);
+check("同主领域卡排前（域1在前、域2在后）", JSON.stringify(cands) === JSON.stringify(["易混卡题目？", "[图片卡] 图卡答案", "挂起卡题目", "挖空内容卡"]), "域优先序", cands);
+check("挖空卡候选按展示文本展开", cands.some((t) => t.includes("内容")), "展开", cands);
+check("图片卡候选用 back（front 无区分度）", cands.some((t) => t.includes("[图片卡] 图卡答案")), "[图片卡]", cands);
+check("文本去重", cards.buildContrastCandidates([
+  { id: "x1", cardType: "qa", frontMarkdown: "重复文本", noteText: "重复文本", backMarkdown: "" },
+  { id: "x2", cardType: "qa", frontMarkdown: "重复文本", noteText: "重复文本", backMarkdown: "" }
+], "").length === 1, 1, "dedupe");
+check("逐条截断 ≤50 字", cards.buildContrastCandidates([{ id: "x", cardType: "qa", frontMarkdown: "长".repeat(80), noteText: "长".repeat(80), backMarkdown: "" }], "").every((t) => t.length <= 50), true, "≤50");
+check("总量 cap=500", cards.buildContrastCandidates(Array.from({ length: 800 }, (_, i) => ({ id: String(i), cardType: "qa", frontMarkdown: "卡" + i, noteText: "卡" + i, backMarkdown: "" })), "").length === 500, 500, "cap");
 
 console.log(`\nM1 完成：${pass} 通过 / ${fail} 失败`);
 process.exit(fail > 0 ? 1 : 0);

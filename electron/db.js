@@ -14,7 +14,7 @@ const {
   CARD_WORDING_PROMPT,
   CARD_BASIC_PROMPT,
   CARD_OCCLUSION_PROMPT,
-  CARD_OCCLUSION_PROMPT_V2,
+  CARD_OCCLUSION_PROMPT_V3,
   READER_EXPLAIN_PROMPT,
   LEECH_RESCUE_PROMPT
 } = require("./prompts");
@@ -598,6 +598,22 @@ function readPdfFile(itemId) {
   }
 }
 
+// M6-3（v30）：被动兼容电子书（MOBI/AZW3/FB2/CBZ）直读——返回 {bytes, name}，
+// name 为入库文件名（original.<ext>，扩展名保真：foliate makeBook 的 CBZ/FB2 判定依赖扩展名）。
+function readEbookFile(itemId) {
+  const row = queryAll(
+    "SELECT path FROM assets WHERE library_item_id = ? AND kind = 'ebook-original' AND is_deleted = 0 LIMIT 1",
+    [String(itemId)]
+  )[0];
+  if (!row || !row.path) return null;
+  try {
+    const p = path.join(app.getPath("userData"), "assets", String(itemId), row.path);
+    return { bytes: new Uint8Array(fs.readFileSync(p)), name: String(row.path) };
+  } catch {
+    return null;
+  }
+}
+
 // ---------- 卡片 / 制卡 / FSRS / Leech（Phase 3 + 13-16，v6/v8） ----------
 
 function normalizeFsrs(json) {
@@ -1058,11 +1074,15 @@ function setAIGenBatchStatus(id, status) {
 
 function ensurePromptTemplates() {
   const now = Date.now();
-  // v3 播种：按 scope 查最新 version，低于目标版本才插入新版本（旧版本保留作留痕）
+  // 播种：按 scope 查最新 version，低于目标版本才插入新版本（旧版本保留作留痕）
   // v2 变更：CARD_GEN_PROMPT 新增【领域标注】段与 domain 输出字段（UDC 受控清单）
   // v3 变更：R13 新增 hint 禁令——禁用 {{c1::答案::提示}} 第三段，禁止答案拆两半（正面曾泄漏半个答案）
-  const TARGET_VERSION = 3;
-  const seedV3 = (scope, name, content) => {
+  // v4 变更（v30 D27）：R13 新增一卡多空两形态——clozeMode together（同答，缺省）/ per-blank（分答，系统自动拆卡）；
+  //   输出 schema 增 clozeMode 字段；card-enum 注明组内挖空属同答
+  // v5 变更（v30 D29）：R19 归属锚强制——论证/理论/学说/观点性内容一律带提出者锚（front 或 contextPrefix），
+  //   内容与归属拆卡；card-occlusion v3 同步增归属锚条款
+  const TARGET_VERSION = 5;
+  const seedV5 = (scope, name, content) => {
     const rows = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope]);
     if (Number(rows[0]?.v || 0) >= TARGET_VERSION) return;
     db.run(
@@ -1070,14 +1090,16 @@ function ensurePromptTemplates() {
       [crypto.randomUUID(), scope, name, content, TARGET_VERSION, now]
     );
   };
-  seedV3("card-generation", "主制卡 v3", CARD_GEN_PROMPT);
-  seedV3("card-formula", "公式分解 v3", CARD_FORMULA_PROMPT);
-  seedV3("card-seq", "序列/背诵 v3", CARD_SEQ_PROMPT);
-  seedV3("card-enum", "枚举拆解 v3", CARD_ENUM_PROMPT);
-  seedV3("card-mnemonic", "助记双卡 v3", CARD_MNEMONIC_PROMPT);
-  seedV3("card-contrast", "对比卡 v3", CARD_CONTRAST_PROMPT);
-  seedV3("card-wording", "措辞优化 v3", CARD_WORDING_PROMPT);
-  seedV3("card-basic", "前置知识卡 v3", CARD_BASIC_PROMPT);
+  seedV5("card-generation", "主制卡 v5", CARD_GEN_PROMPT);
+  seedV5("card-formula", "公式分解 v5", CARD_FORMULA_PROMPT);
+  seedV5("card-seq", "序列/背诵 v5", CARD_SEQ_PROMPT);
+  seedV5("card-enum", "枚举拆解 v5", CARD_ENUM_PROMPT);
+  seedV5("card-mnemonic", "助记双卡 v5", CARD_MNEMONIC_PROMPT);
+  seedV5("card-contrast", "对比卡 v5", CARD_CONTRAST_PROMPT);
+  seedV5("card-wording", "措辞优化 v5", CARD_WORDING_PROMPT);
+  seedV5("card-basic", "前置知识卡 v5", CARD_BASIC_PROMPT);
+  // v30：card-literature 暂由 card-seq 模板承接——序列模板升版时同步跟进，避免漂移
+  seedV5("card-literature", "文学/诗歌背诵 v5（暂由序列/背诵模板承接）", CARD_SEQ_PROMPT);
   // M1.1（v15，D16）：card-occlusion 新分支播种（图片挖空生成链路）——新 scope，仅首次加入 v1
   const occCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'card-occlusion'")[0]?.n || 0;
   if (Number(occCount) === 0) {
@@ -1088,11 +1110,13 @@ function ensurePromptTemplates() {
   }
   // v29（D26）：card-occlusion v2——内容感知混合卡型（每卡自带 regions/qa 看图问答）。
   // 主软件直插候选版（用户真实书籍实测反馈即闭环输入，后续调优走测试台）；v1 留痕。
+  // （v2 播种块已由 v3 取代：v29 时期播种过 v2 的库自然留痕；全新库直接 v1→v3）
   const occMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'card-occlusion'")[0]?.v || 0;
-  if (Number(occMaxV) < 2) {
+  // v30（D29）：card-occlusion v3——增归属锚条款（论证/理论/学说/观点性内容标明提出者）。
+  if (Number(occMaxV) < 3) {
     db.run(
-      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, 'card-occlusion', '图片制卡内容感知 v2（候选）', ?, 2, 1, ?)",
-      [crypto.randomUUID(), CARD_OCCLUSION_PROMPT_V2, now]
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, 'card-occlusion', '图片制卡内容感知 v3（候选）', ?, 3, 1, ?)",
+      [crypto.randomUUID(), CARD_OCCLUSION_PROMPT_V3, now]
     );
   }
   // v16：card-literature 兼管播种——文学/诗歌材料自动路由到该 scope，主软件暂由 card-seq
@@ -1592,6 +1616,7 @@ module.exports = {
   listAllCards,
   readBookFile,
   readPdfFile,
+  readEbookFile,
   readContentImages,
   listAllReviewLogs,
   getItemIdByDocumentId,

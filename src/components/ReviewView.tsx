@@ -7,6 +7,7 @@ import { cardsApi, type CardRecord } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
 import { useCommandActions } from "../lib/useCommands";
 import { CardFace } from "./CardBrowser";
+import ContrastCardModal from "./ContrastCardModal";
 
 export default function ReviewView({
   onJumpToDoc
@@ -31,6 +32,8 @@ export default function ReviewView({
   const actionBusyRef = useRef(false);
   // v22 撤销评分：最近一条可撤销评分（有评分前快照且卡未删），null=当前不可撤销
   const [undoInfo, setUndoInfo] = useState<{ logId: string; cardId: string; rating: string; reviewedAt: number } | null>(null);
+  // v30（D29）：易混对比卡确认框（以当前卡为基准生成对比三件套）
+  const [contrastOpen, setContrastOpen] = useState(false);
 
   // 查询最近可撤销评分（评分/撤销后刷新；挂起/跳过/删除不产生日志无需刷新，删除他人卡由撤销时服务端兜底）
   const refreshUndo = useCallback(async () => {
@@ -423,11 +426,16 @@ export default function ReviewView({
               ))}
             </div>
             <div className="review-tools">
+              {/* v30（D29）：以当前卡为基准生成易混对比卡三件套 */}
+              <button className="btn btn-outline btn-sm" onClick={() => setContrastOpen(true)}>对比卡</button>
               <button className="btn btn-outline btn-sm" onClick={markAndSuspend}>标记并暂停</button>
               <button className="btn btn-outline btn-sm" onClick={skip}>跳过</button>
               <button className="btn btn-outline btn-sm review-delete" onClick={handleDelete}>删除</button>
             </div>
           </>
+        )}
+        {contrastOpen && current && (
+          <ContrastCardModal card={current} onClose={() => setContrastOpen(false)} />
         )}
       </div>
     </div>

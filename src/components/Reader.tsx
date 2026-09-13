@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { cardGenerator, lintCard, cardsApi, similaritySearch, detectMaterialType, parseFollowUps, MATERIAL_ROUTES, type CardDraft, type CardGenMode, type OcclusionRegion, type FollowUpGroup } from "../lib/cards";
+import { cardGenerator, lintCard, cardsApi, similaritySearch, detectMaterialType, parseFollowUps, expandClozeDraft, parseCloze, createAcceptedCard, MATERIAL_ROUTES, type CardDraft, type CardGenMode, type OcclusionRegion, type FollowUpGroup } from "../lib/cards";
 import { normalizeShape, type OcclusionRect, type OcclusionShape } from "../lib/occlusion";
 import { settingsStore } from "../lib/settings";
 import { sanitizeDomain, udcLabel, UDC_LEAVES, UDC_MAX, UDC_OTHER } from "../lib/udc";
@@ -941,10 +941,12 @@ export default function Reader({
       clozeOrds: [],
       cardOrd: ord,
       // v25：形状（矩形/椭圆/多边形）随卡落库；rects 恒为包围盒（兼容旧渲染与 L11）
+      // v30：regionScope 透传——"shared"=旧共享区域链路（单区高亮），缺省=每卡自带（全 accent）
       occlusionJson: {
         rects: d.occlusion.rects,
         assetPath: d.occlusion.assetPath,
-        shapes: d.occlusion.shapes ?? null
+        shapes: d.occlusion.shapes ?? null,
+        regionScope: d.occlusion.regionScope
       },
       contextPrefix: d.contextPrefix || null,
       contextRef: enrichedContextRef(),
@@ -1116,62 +1118,16 @@ export default function Reader({
   async function acceptDraft(draft: CardDraft, draftIndex: number, edited?: Partial<CardDraft>) {
     if (aiPanel?.accepted?.has(draftIndex)) return; // 防重复入队
     const d = { ...draft, ...edited };
-    const cloze = d.cardType === "cloze" ? d.cloze || "" : "";
-    const card = {
-      noteText: d.front || cloze,
-      cardType: d.cardType || "qa",
-      frontMarkdown: d.front || "",
-      backMarkdown: d.back || "",
-      clozeOrds: [],
-      // v29（D26）：看图问答卡随 draft 带图（occlusionJson 挂图、rects 空数组），CardFace 图文卡面渲染
-      occlusionJson: d.occlusion
-        ? { rects: d.occlusion.rects, assetPath: d.occlusion.assetPath, shapes: d.occlusion.shapes ?? null }
-        : null,
-      cardOrd: d.ord ?? null,
-      contextPrefix: d.contextPrefix || null,
-      contextRef: enrichedContextRef(),
-      mnemonic: d.mnemonic || null,
-      example: d.example || null,
-      sourceRef: d.sourceRef || (sourceTitle ? { title: sourceTitle } : null),
-      dateStamp: d.dateStamp || null,
-      priority: d.prioritySuggestion ?? 50,
-      tags: [],
-      domain: d.domain ?? [],
-      knowledgePointId: d.knowledgePointId || null,
-      generatedBy: "ai"
-    };
-    const issues = lintCard({
-      front: card.frontMarkdown,
-      back: card.backMarkdown,
-      cardType: card.cardType,
-      cloze,
-      occlusion: card.occlusionJson ? { assetPath: card.occlusionJson.assetPath, rects: card.occlusionJson.rects } : null,
-      contextPrefix: card.contextPrefix,
-      sourceRef: card.sourceRef,
-      dateStamp: card.dateStamp,
-      knowledgePointId: card.knowledgePointId
-    });
-    const created = await cardsApi.create(card);
-    for (const issue of issues) {
-      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
-    }
-    const similar = await similaritySearch.findSimilar(card.frontMarkdown || cloze, 2);
-    if (similar.length > 0) {
-      await cardsApi.addIssue({
-        cardId: created.id,
-        ruleId: "S1",
-        severity: "warn",
-        message: `与已有卡相似（${Math.round(similar[0].score * 100)}%）：「${similar[0].front.slice(0, 30)}…」`,
-        source: "lint"
-      });
-    }
+    // v30：建卡逻辑抽至 createAcceptedCard（与复习对比卡确认框共用）；per-blank 多空草稿在其内拆成每空一张
+    const expandedCount = expandClozeDraft(d).length;
+    await createAcceptedCard(d, { sourceTitle, contextRef: enrichedContextRef() });
     setAiPanel((p) =>
       p && p.drafts
         ? { ...p, accepted: new Set([...(p.accepted ?? []), draftIndex]) }
         : p
     );
     eventBus.emit("cards/changed");
-    showToast("已接受，进 FSRS 队列");
+    showToast(expandedCount > 1 ? `已接受，分答拆为 ${expandedCount} 张卡进 FSRS 队列` : "已接受，进 FSRS 队列");
   }
 
   async function rejectAllDrafts() {
@@ -2143,6 +2099,12 @@ function AIPanel({
                     <>
                       <div className="ai-draft-front">
                         <span className="ai-draft-type mono">{d.cardType}</span>
+                        {/* v30（D27）：分答多空卡徽标——接受时自动拆成每空一张 */}
+                        {d.cardType === "cloze" && d.clozeMode === "per-blank" && (
+                          <span className="ai-draft-supplement mono">
+                            分答·拆{Math.max(2, parseCloze(d.cloze || d.front || "").ords.length)}张
+                          </span>
+                        )}
                         {panel.supplemental?.has(i) && <span className="ai-draft-supplement mono">补充</span>}
                         {d.contextPrefix && <span className="ai-draft-prefix mono">{d.contextPrefix}</span>}
                         <div className="ai-draft-text">

@@ -548,6 +548,8 @@ body.has-skin .topbar { background: transparent; }
   gap: var(--sp-2);
   margin-top: var(--sp-6);
 }
+/* 按钮不参与压缩（长提示/hint 在场时曾把按钮挤成竖排文字） */
+.form-actions > button { flex: 0 0 auto; white-space: nowrap; }
 .form-actions-spacer { flex: 1; }
 
 /* ---------- 弹窗（浮层：唯一允许阴影处） ---------- */

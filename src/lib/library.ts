@@ -23,6 +23,12 @@ declare global {
       readContentImages?: (id: string) => Promise<{ filename: string; bytes: Uint8Array }[]>;
       // M6-2 修订（v28 PDF 原生阅读）：读 PDF 原文件字节给 pdf.js 内核打开
       readPdfFile?: (id: string) => Promise<Uint8Array | null>;
+      // M6-3（v30，D27）统一导入入口
+      pickImportFiles?: () => Promise<{ name: string; path: string }[] | null>;
+      readFileBytes?: (filePath: string) => Promise<Uint8Array | null>;
+      createFromHtml?: (payload: { path?: string; name?: string; title?: string; markdown: string }) => Promise<{ id: string; title: string } | null>;
+      createFromBookFile?: (payload: { path: string; name?: string; ext?: string }) => Promise<{ id: string; title: string } | null>;
+      readEbookFile?: (id: string) => Promise<{ bytes: Uint8Array; name: string } | null>;
     };
   }
 }
@@ -91,6 +97,23 @@ export const libraryApi = {
   /** M6-2 修订（v28 PDF 原生阅读）：读取 PDF 原文件字节；无原文件返回 null */
   async readPdfFile(itemId: string): Promise<Uint8Array | null> {
     return (await window.libraryAPI?.readPdfFile?.(itemId)) ?? null;
+  },
+  // M6-3（v30，D27）统一导入入口：多选对话框 + 类型路由所需的读取/建册
+  async pickImportFiles(): Promise<{ name: string; path: string }[] | null> {
+    return (await window.libraryAPI?.pickImportFiles?.()) ?? null;
+  },
+  async readFileBytes(filePath: string): Promise<Uint8Array | null> {
+    return (await window.libraryAPI?.readFileBytes?.(filePath)) ?? null;
+  },
+  async createFromHtml(payload: { path?: string; name?: string; title?: string; markdown: string }): Promise<{ id: string; title: string } | null> {
+    return (await window.libraryAPI?.createFromHtml?.(payload)) ?? null;
+  },
+  async createFromBookFile(payload: { path: string; name?: string; ext?: string }): Promise<{ id: string; title: string } | null> {
+    return (await window.libraryAPI?.createFromBookFile?.(payload)) ?? null;
+  },
+  /** M6-3（v30）：被动兼容电子书（MOBI/AZW3/FB2/CBZ）原文件字节 + 文件名（扩展名保真供 foliate 分发） */
+  async readEbookFile(itemId: string): Promise<{ bytes: Uint8Array; name: string } | null> {
+    return (await window.libraryAPI?.readEbookFile?.(itemId)) ?? null;
   },
   async updateProgress(itemId: string, progress: ReadingProgress): Promise<void> {
     await window.libraryAPI?.updateProgress(itemId, progress);

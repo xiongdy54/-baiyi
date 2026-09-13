@@ -69,7 +69,12 @@ export async function importEpubFile(): Promise<EpubImportResult | null> {
   if (!window.libraryAPI) throw new Error("API 不可用");
   const picked = await window.libraryAPI.pickEpub();
   if (!picked) return null;
+  return parseEpubBytes(picked.name, picked.data as Uint8Array);
+}
 
+/** M6-3（v30，D27）：由字节解析 EPUB（统一导入入口的 epub 分支；原 importEpubFile 保留兼容） */
+export async function parseEpubBytes(name: string, rawBytes: Uint8Array): Promise<EpubImportResult> {
+  const picked = { name: name || "book.epub", data: rawBytes };
   const raw = picked.data as Uint8Array;
   const arrayBuffer = raw.buffer.slice(
     raw.byteOffset,

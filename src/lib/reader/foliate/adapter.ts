@@ -198,8 +198,21 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
 
   const kernel: ReaderKernel = {
     async open(source: BookSource, init?: { location?: ReaderLocation }) {
-      const file = new File([source.bytes as unknown as BlobPart], source.name || "book.epub", {
-        type: "application/epub+zip"
+      // M6-3（v30）：MIME 按扩展名映射——foliate makeBook 用魔数分发 ZIP/MOBI，
+      // 但 CBZ/FB2/FBZ 的判定依赖扩展名或 MIME，故文件名与 type 都要保真
+      const fileName = source.name || "book.epub";
+      const ext = fileName.split(".").pop()?.toLowerCase() || "epub";
+      const MIME_BY_EXT: Record<string, string> = {
+        epub: "application/epub+zip",
+        cbz: "application/vnd.comicbook+zip",
+        fb2: "application/x-fictionbook+xml",
+        fbz: "application/x-zip-compressed-fb2",
+        mobi: "application/x-mobipocket-ebook",
+        azw: "application/vnd.amazon.ebook",
+        azw3: "application/vnd.amazon.ebook"
+      };
+      const file = new File([source.bytes as unknown as BlobPart], fileName, {
+        type: MIME_BY_EXT[ext] || "application/epub+zip"
       });
       await view.open(file);
       if (init?.location?.cfi) {

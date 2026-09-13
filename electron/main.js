@@ -206,6 +206,73 @@ ipcMain.handle("library:createFromMarkdown", (_e, payload) => {
 // 读侧：取回某本书的内嵌图字节（合成 EPUB 时落进 OEBPS/images/）
 ipcMain.handle("library:readContentImages", (_e, itemId) => dbModule.readContentImages(String(itemId)));
 
+// ---------- M6-3（v30，D27）统一导入入口：单对话框多选 + 按扩展名路由 ----------
+// 全部支持格式的扩展名（渲染层按扩展名决定路由到哪条管线）
+const IMPORT_ALL_EXTENSIONS = ["epub", "pdf", "docx", "txt", "md", "markdown", "html", "htm", "mobi", "azw3", "azw", "fb2", "fbz", "cbz"];
+
+ipcMain.handle("library:pickImportFiles", async () => {
+  const result = await dialog.showOpenDialog({
+    filters: [
+      { name: "全部支持的阅读材料", extensions: IMPORT_ALL_EXTENSIONS },
+      { name: "电子书", extensions: ["epub", "pdf", "mobi", "azw3", "azw", "fb2", "fbz", "cbz"] },
+      { name: "文档", extensions: ["docx", "txt", "md", "markdown", "html", "htm"] }
+    ],
+    properties: ["openFile", "multiSelections"]
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths.map((p) => ({ name: path.basename(p), path: p }));
+});
+
+// 渲染层解析用（epub/html）：读任意本地文件字节
+ipcMain.handle("library:readFileBytes", (_e, filePath) => {
+  try {
+    return new Uint8Array(fs.readFileSync(String(filePath)));
+  } catch {
+    return null;
+  }
+});
+
+// HTML 建册（渲染层已解析出 markdown；主进程按路径读原文件入库）
+ipcMain.handle("library:createFromHtml", (_e, payload) => {
+  const { path: filePath, name, title, markdown } = payload || {};
+  if (!markdown || !String(markdown).trim()) throw new Error("未能从该 HTML 文件中提取到正文内容");
+  let buf = null;
+  try {
+    buf = filePath ? fs.readFileSync(String(filePath)) : null;
+  } catch {
+    /* 原文件读取失败不阻塞（仅影响备份留存） */
+  }
+  return dbModule.createImportedDoc({
+    title: title || titleFromFilename(name),
+    markdown: String(markdown),
+    sourceType: "html",
+    sourceName: name || null,
+    originalName: "original.html",
+    originalBuf: buf,
+    images: []
+  });
+});
+
+// 被动兼容电子书（MOBI/AZW3/FB2/CBZ）建册：原文件按原扩展名入库，内核直读
+ipcMain.handle("library:createFromBookFile", (_e, payload) => {
+  const { path: filePath, name, ext } = payload || {};
+  if (!filePath) return null;
+  const cleanExt = String(ext || path.extname(String(name || filePath)).replace(/^\./, "") || "bin").toLowerCase();
+  if (!/^[a-z0-9]{1,8}$/.test(cleanExt)) throw new Error("无法识别的文件扩展名");
+  const buf = fs.readFileSync(String(filePath));
+  return dbModule.createImportedDoc({
+    title: titleFromFilename(name),
+    markdown: "",
+    sourceType: "ebook",
+    sourceName: name || null,
+    originalName: `original.${cleanExt}`,
+    originalBuf: buf,
+    images: []
+  });
+});
+
+ipcMain.handle("library:readEbookFile", (_e, itemId) => dbModule.readEbookFile(String(itemId)));
+
 ipcMain.handle("library:pickPdf", () => pickImportFile("pdf"));
 
 // M6-2 修订（v28 PDF 原生阅读）：导入只存原文（original.pdf 落 assets + 建册），不再跑提纯。

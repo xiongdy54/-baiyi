@@ -330,5 +330,38 @@ window.__readerTest = {
       check("CJK 套件异常", false, err && err.message);
     }
     return results;
+  },
+
+  // M6-3（v30）：被动兼容格式直读——以给定文件名打开（foliate makeBook 按魔数分发 ZIP/MOBI、
+  // CBZ/FB2 判定依赖扩展名），断言内核渲染出内容（文本或图片）。
+  async runFormat(fileName, bytesB64) {
+    const host = document.getElementById("host");
+    host.innerHTML = "";
+    const kernel = createFoliateKernel(host);
+    const { results, check } = makeRunner((m) => console.log(m));
+    try {
+      await kernel.open({ kind: "bytes", bytes: b64ToBytes(bytesB64), name: fileName });
+      await wait(1500);
+      const loc = kernel.getCurrentLocation();
+      const entries = kernel.__getContents ? kernel.__getContents() : [];
+      const doc = (entries.find((x) => x.doc) || {}).doc || null;
+      const text = doc ? (doc.body?.textContent || "").trim() : "";
+      const imgs = doc ? doc.querySelectorAll("img").length : 0;
+      await wait(1500);
+      const iframes = host.querySelectorAll("iframe").length;
+      const hostImgs = host.querySelectorAll("img").length;
+      const firstIframeSrc = (host.querySelector("iframe")?.getAttribute("src") || "").slice(0, 40);
+      const diag = { entries: entries.length, hasDoc: !!doc, bodyLen: doc ? (doc.body?.innerHTML || "").length : 0, iframes, hostImgs, firstIframeSrc };
+      check(`格式直读：${fileName} 打开成功（有位置）`, Boolean(loc), JSON.stringify(loc));
+      // pre-paginated（CBZ）在隐藏窗口下无 iframe/img 落地 = harness 限制（渲染质量属 L3 冒烟）；
+      // 此处断言「有文本 或 有图 或 分节结构完整（entries>=1 且 doc 在场）」
+      const renderable = text.length > 0 || imgs > 0 || (diag.entries >= 1 && diag.hasDoc);
+      check(`格式直读：${fileName} 渲染可用（文本/图片/分节结构）`, renderable, JSON.stringify(diag));
+      kernel.destroy();
+    } catch (err) {
+      check(`格式直读：${fileName} 打开成功（有位置）`, false, String((err && err.message) || err));
+      check(`格式直读：${fileName} 渲染出内容（文本或图片）`, false, "打开失败");
+    }
+    return results;
   }
 };

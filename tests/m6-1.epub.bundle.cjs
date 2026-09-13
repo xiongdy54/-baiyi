@@ -27312,6 +27312,7 @@ __export(epub_exports, {
   buildSyntheticEpub: () => buildSyntheticEpub,
   importEpubFile: () => importEpubFile,
   mediaTypeForFilename: () => mediaTypeForFilename,
+  parseEpubBytes: () => parseEpubBytes,
   renderMarkdownToBodyHtml: () => renderMarkdownToBodyHtml,
   rewriteImgSrcs: () => rewriteImgSrcs,
   splitMarkdownChapters: () => splitMarkdownChapters
@@ -55671,6 +55672,10 @@ async function importEpubFile() {
   if (!window.libraryAPI) throw new Error("API \u4E0D\u53EF\u7528");
   const picked = await window.libraryAPI.pickEpub();
   if (!picked) return null;
+  return parseEpubBytes(picked.name, picked.data);
+}
+async function parseEpubBytes(name, rawBytes) {
+  const picked = { name: name || "book.epub", data: rawBytes };
   const raw = picked.data;
   const arrayBuffer = raw.buffer.slice(
     raw.byteOffset,
@@ -55876,6 +55881,7 @@ ${tocLis}
   buildSyntheticEpub,
   importEpubFile,
   mediaTypeForFilename,
+  parseEpubBytes,
   renderMarkdownToBodyHtml,
   rewriteImgSrcs,
   splitMarkdownChapters

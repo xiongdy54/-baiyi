@@ -21,12 +21,17 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var cards_exports = {};
 __export(cards_exports, {
   MATERIAL_ROUTES: () => MATERIAL_ROUTES,
+  buildContrastCandidates: () => buildContrastCandidates,
   cardGenerator: () => cardGenerator,
   cardsApi: () => cardsApi,
+  createAcceptedCard: () => createAcceptedCard,
   detectMaterialType: () => detectMaterialType,
   detectMode: () => detectMode,
+  expandClozeDraft: () => expandClozeDraft,
   extractClozeAnswer: () => extractClozeAnswer,
+  extractClozeAnswers: () => extractClozeAnswers,
   extractJson: () => extractJson,
+  generateContrastDrafts: () => generateContrastDrafts,
   lintCard: () => lintCard,
   parseCloze: () => parseCloze,
   parseFollowUps: () => parseFollowUps,
@@ -163,14 +168,28 @@ function parseCloze(text) {
   const ords = /* @__PURE__ */ new Set();
   let m;
   while (m = re.exec(text)) ords.add(Number(m[1]));
+  const normalize = (hiddenOrd) => {
+    if (hiddenOrd === null) return null;
+    return new Set(Array.isArray(hiddenOrd) ? hiddenOrd : [hiddenOrd]);
+  };
+  const renderWith = (hiddenOrd) => {
+    const mask = normalize(hiddenOrd);
+    const maskedOrds = [];
+    const out = text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
+      const ord = Number(ordStr);
+      if (mask === null || !mask.has(ord)) return content;
+      if (!maskedOrds.includes(ord)) maskedOrds.push(ord);
+      return "[\u2026]";
+    });
+    return { text: out, maskedOrds };
+  };
   return {
     ords: [...ords].sort((a, b) => a - b),
     render(hiddenOrd) {
-      return text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
-        const ord = Number(ordStr);
-        if (hiddenOrd !== null && ord === hiddenOrd) return "[\u2026]";
-        return content;
-      });
+      return renderWith(hiddenOrd).text;
+    },
+    renderDetail(hiddenOrds) {
+      return renderWith(hiddenOrds ?? []);
     }
   };
 }
@@ -178,6 +197,16 @@ function extractClozeAnswer(text, ord) {
   const re = new RegExp(`\\{\\{c${ord}::(.*?)(?:::(.*?))?\\}\\}`);
   const m = re.exec(text);
   return m ? (m[1] ?? "") + (m[2] ? `\uFF08${m[2]}\uFF09` : "") : "";
+}
+function extractClozeAnswers(text, ords) {
+  return ords.map((o) => extractClozeAnswer(text, o));
+}
+function expandClozeDraft(d) {
+  if (d.cardType !== "cloze") return [d];
+  const text = d.cloze || d.front || "";
+  const ords = parseCloze(text).ords;
+  if (d.clozeMode !== "per-blank" || ords.length <= 1) return [d];
+  return ords.map((o, i) => ({ ...d, ord: i, clozeOrds: [o] }));
 }
 var MATERIAL_ROUTES = {
   concept: { materialType: "concept", scope: "card-generation", label: "\u6982\u5FF5\u8BBA\u8FF0", defaultForm: "\u95EE\u7B54" },
@@ -311,7 +340,7 @@ ${context.focus}` : "",
       context.webContext ? `\u3010\u8054\u7F51\u68C0\u7D22\u5230\u7684\u4E8B\u4EF6\u80CC\u666F\uFF08\u4EC5\u4F9B\u7406\u89E3\uFF0C\u7981\u6B62\u7F16\u9020\u6765\u6E90\uFF09\u3011
 ${context.webContext}` : "",
       context.existingCards?.length ? `\u3010\u7528\u6237\u5DF2\u6709\u5361\u7247\uFF08\u6CE8\u610F R10 \u8054\u60F3\u4E0E\u5E72\u6270\u63D0\u793A\uFF0C\u7981\u6B62\u91CD\u590D\u6216\u6362\u76AE\uFF09\u3011
-${context.existingCards.slice(0, 10).join("\n")}` : "",
+${context.existingCards.slice(0, context.existingCardsLimit ?? 10).join("\n")}` : "",
       context.userProfile ? `\u3010\u7528\u6237\u753B\u50CF\uFF08R9 \u4E2A\u6027\u5316\u4F8B\u5B50\u4F18\u5148\u7528\uFF09\u3011
 ${context.userProfile}` : ""
     ].filter(Boolean).join("\n\n");
@@ -329,6 +358,7 @@ ${context.userProfile}` : ""
       onThinking
     );
     const result = extractJson(raw || acc);
+    result.cards = result.cards.flatMap((c) => expandClozeDraft(c));
     const batch = await window.batchesAPI?.create({
       scope: resolved,
       sourceText,
@@ -510,7 +540,7 @@ ${context.contextText}
     for (const card of result.cards) {
       if (card.cardType === "imageOcclusion") {
         const region = regions.find((r) => r.ord === card.ord);
-        card.occlusion = { assetPath: image.assetPath, ord: card.ord ?? 0, rects, label: region?.label };
+        card.occlusion = { assetPath: image.assetPath, ord: card.ord ?? 0, rects, label: region?.label, regionScope: "shared" };
       }
     }
     const batch = await window.batchesAPI?.create({
@@ -637,15 +667,113 @@ var cardsApi = {
     await window.batchesAPI?.setStatus(id, status);
   }
 };
+function buildContrastCandidates(cards, baseId, baseDomain = [], cap = 500) {
+  const primary = baseDomain[0] || "";
+  const sameDomain = [];
+  const rest = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const c of cards) {
+    if (c.id === baseId) continue;
+    let text;
+    if (c.cardType === "cloze") text = parseCloze(c.frontMarkdown || c.noteText).render(null);
+    else if (c.cardType === "imageOcclusion") text = `[\u56FE\u7247\u5361] ${c.backMarkdown || c.noteText || ""}`;
+    else text = c.frontMarkdown || c.noteText;
+    text = text.replace(/\s+/g, " ").trim().slice(0, 50);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    (primary && c.domain && c.domain[0] === primary ? sameDomain : rest).push(text);
+  }
+  return [...sameDomain, ...rest].slice(0, cap);
+}
+async function generateContrastDrafts(base, onProgress, onThinking) {
+  const all = await cardsApi.listAll();
+  const candidates = buildContrastCandidates(all, base.id ?? "", base.domain ?? []);
+  if (candidates.length === 0) return { batchId: "", drafts: [] };
+  const material = [base.front, base.back].filter(Boolean).join("\n");
+  const focus = [
+    "\u8FD9\u662F\u5BF9\u6BD4\u5361\u751F\u6210\uFF1A\u4E0A\u9762\u7684\u3010\u6750\u6599\u3011\u662F\u57FA\u51C6\u5361\uFF08A\uFF09\u7684\u5185\u5BB9\u3002",
+    "\u8BF7\u4ECE\u3010\u7528\u6237\u5DF2\u6709\u5361\u7247\u3011\u6E05\u5355\u4E2D\u9009\u51FA\u4E0E A \u6700\u6613\u6DF7\u7684\u4E00\u5F20\u4F5C\u4E3A B\u2014\u2014\u76F8\u4F3C\u4F46\u4E0D\u76F8\u540C\u3001\u590D\u4E60\u65F6\u5BB9\u6613\u7B54\u6DF7\u7684\u6982\u5FF5/\u8BBA\u8BC1/\u5B66\u8BF4\uFF0C",
+    "\u6392\u9664 A \u7684\u540C\u4E49\u6362\u76AE\u4E0E\u8868\u8FF0\u53D8\u4F53\uFF1B\u7136\u540E\u6309\u5BF9\u6BD4\u5361\u89C4\u5219\u4EA7\u4E09\u4EF6\u5957\uFF08A \u4E0E B \u7684\u533A\u522B / A \u7684\u5173\u952E\u7279\u5F81 / B \u7684\u5173\u952E\u7279\u5F81\uFF09\u3002",
+    "\u82E5\u6E05\u5355\u4E2D\u6CA1\u6709\u4E0E A \u5B58\u5728\u771F\u5B9E\u6DF7\u6DC6\u98CE\u9669\u7684\u5361\uFF0Ccards \u8FD4\u56DE\u7A7A\u6570\u7EC4\u5E76\u5728 blockReasons \u8BF4\u660E\uFF0C\u7981\u6B62\u786C\u51D1\u3002"
+  ].join("");
+  const { batchId, result } = await cardGenerator.generateCards(
+    material,
+    { title: base.title ?? void 0, existingCards: candidates, existingCardsLimit: candidates.length, focus },
+    "card-contrast",
+    onProgress,
+    onThinking
+  );
+  return { batchId, drafts: result.cards };
+}
+async function createAcceptedCard(d, ctx = {}) {
+  const expanded = expandClozeDraft(d);
+  const ids = [];
+  for (const dd of expanded) {
+    const cloze = dd.cardType === "cloze" ? dd.cloze || "" : "";
+    const card = {
+      noteText: dd.front || cloze,
+      cardType: dd.cardType || "qa",
+      frontMarkdown: dd.front || "",
+      backMarkdown: dd.back || "",
+      // 同答卡存 []（渲染端约定空=遮全部 ord）；分答拆卡后每张带 [自己的 ord]
+      clozeOrds: dd.clozeOrds ?? [],
+      occlusionJson: dd.occlusion ? { rects: dd.occlusion.rects, assetPath: dd.occlusion.assetPath, shapes: dd.occlusion.shapes ?? null, regionScope: dd.occlusion.regionScope } : null,
+      cardOrd: dd.ord ?? null,
+      contextPrefix: dd.contextPrefix || null,
+      contextRef: ctx.contextRef ?? null,
+      mnemonic: dd.mnemonic || null,
+      example: dd.example || null,
+      sourceRef: dd.sourceRef || (ctx.sourceTitle ? { title: ctx.sourceTitle } : null),
+      dateStamp: dd.dateStamp || null,
+      priority: dd.prioritySuggestion ?? 50,
+      tags: [],
+      domain: dd.domain ?? [],
+      knowledgePointId: dd.knowledgePointId || null,
+      generatedBy: "ai"
+    };
+    const issues = lintCard({
+      front: card.frontMarkdown,
+      back: card.backMarkdown,
+      cardType: card.cardType,
+      cloze,
+      occlusion: card.occlusionJson ? { assetPath: card.occlusionJson.assetPath, rects: card.occlusionJson.rects } : null,
+      contextPrefix: card.contextPrefix,
+      sourceRef: card.sourceRef,
+      dateStamp: card.dateStamp,
+      knowledgePointId: card.knowledgePointId
+    });
+    const created = await cardsApi.create(card);
+    ids.push(created.id);
+    for (const issue of issues) {
+      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
+    }
+    const similar = await similaritySearch.findSimilar(card.frontMarkdown || cloze, 2);
+    if (similar.length > 0) {
+      await cardsApi.addIssue({
+        cardId: created.id,
+        ruleId: "S1",
+        severity: "warn",
+        message: `\u4E0E\u5DF2\u6709\u5361\u76F8\u4F3C\uFF08${Math.round(similar[0].score * 100)}%\uFF09\uFF1A\u300C${similar[0].front.slice(0, 30)}\u2026\u300D`,
+        source: "lint"
+      });
+    }
+  }
+  return ids;
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   MATERIAL_ROUTES,
+  buildContrastCandidates,
   cardGenerator,
   cardsApi,
+  createAcceptedCard,
   detectMaterialType,
   detectMode,
+  expandClozeDraft,
   extractClozeAnswer,
+  extractClozeAnswers,
   extractJson,
+  generateContrastDrafts,
   lintCard,
   parseCloze,
   parseFollowUps,

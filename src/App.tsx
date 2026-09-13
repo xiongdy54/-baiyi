@@ -147,6 +147,11 @@ export default function App() {
       const bytes = await libraryApi.readPdfFile(itemId);
       return bytes ? { bytes, name: "original.pdf", engine: "pdf" as const } : undefined;
     }
+    // M6-3（v30）：被动兼容电子书（MOBI/AZW3/FB2/CBZ）——原文件 + 原文件名（foliate 按魔数/扩展名分发）
+    if (doc.sourceType === "ebook") {
+      const file = await libraryApi.readEbookFile(itemId);
+      return file && file.bytes.length ? { bytes: file.bytes, name: file.name } : undefined;
+    }
     let images: SynthImage[] | undefined;
     if (doc.sourceType === "word") {
       const contentImages = await libraryApi.readContentImages(itemId);

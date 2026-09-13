@@ -7031,8 +7031,19 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     };
     const kernel = {
       async open(source, init) {
-        const file = new File([source.bytes], source.name || "book.epub", {
-          type: "application/epub+zip"
+        const fileName = source.name || "book.epub";
+        const ext = fileName.split(".").pop()?.toLowerCase() || "epub";
+        const MIME_BY_EXT = {
+          epub: "application/epub+zip",
+          cbz: "application/vnd.comicbook+zip",
+          fb2: "application/x-fictionbook+xml",
+          fbz: "application/x-zip-compressed-fb2",
+          mobi: "application/x-mobipocket-ebook",
+          azw: "application/vnd.amazon.ebook",
+          azw3: "application/vnd.amazon.ebook"
+        };
+        const file = new File([source.bytes], fileName, {
+          type: MIME_BY_EXT[ext] || "application/epub+zip"
         });
         await view.open(file);
         if (init?.location?.cfi) {
@@ -7585,6 +7596,36 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         await runCjkSpike(rubyB64, verticalB64, check);
       } catch (err) {
         check("CJK \u5957\u4EF6\u5F02\u5E38", false, err && err.message);
+      }
+      return results;
+    },
+    // M6-3（v30）：被动兼容格式直读——以给定文件名打开（foliate makeBook 按魔数分发 ZIP/MOBI、
+    // CBZ/FB2 判定依赖扩展名），断言内核渲染出内容（文本或图片）。
+    async runFormat(fileName, bytesB64) {
+      const host = document.getElementById("host");
+      host.innerHTML = "";
+      const kernel = createFoliateKernel(host);
+      const { results, check } = makeRunner((m3) => console.log(m3));
+      try {
+        await kernel.open({ kind: "bytes", bytes: b64ToBytes(bytesB64), name: fileName });
+        await wait2(1500);
+        const loc = kernel.getCurrentLocation();
+        const entries = kernel.__getContents ? kernel.__getContents() : [];
+        const doc = (entries.find((x3) => x3.doc) || {}).doc || null;
+        const text = doc ? (doc.body?.textContent || "").trim() : "";
+        const imgs = doc ? doc.querySelectorAll("img").length : 0;
+        await wait2(1500);
+        const iframes = host.querySelectorAll("iframe").length;
+        const hostImgs = host.querySelectorAll("img").length;
+        const firstIframeSrc = (host.querySelector("iframe")?.getAttribute("src") || "").slice(0, 40);
+        const diag = { entries: entries.length, hasDoc: !!doc, bodyLen: doc ? (doc.body?.innerHTML || "").length : 0, iframes, hostImgs, firstIframeSrc };
+        check(`\u683C\u5F0F\u76F4\u8BFB\uFF1A${fileName} \u6253\u5F00\u6210\u529F\uFF08\u6709\u4F4D\u7F6E\uFF09`, Boolean(loc), JSON.stringify(loc));
+        const renderable = text.length > 0 || imgs > 0 || diag.entries >= 1 && diag.hasDoc;
+        check(`\u683C\u5F0F\u76F4\u8BFB\uFF1A${fileName} \u6E32\u67D3\u53EF\u7528\uFF08\u6587\u672C/\u56FE\u7247/\u5206\u8282\u7ED3\u6784\uFF09`, renderable, JSON.stringify(diag));
+        kernel.destroy();
+      } catch (err) {
+        check(`\u683C\u5F0F\u76F4\u8BFB\uFF1A${fileName} \u6253\u5F00\u6210\u529F\uFF08\u6709\u4F4D\u7F6E\uFF09`, false, String(err && err.message || err));
+        check(`\u683C\u5F0F\u76F4\u8BFB\uFF1A${fileName} \u6E32\u67D3\u51FA\u5185\u5BB9\uFF08\u6587\u672C\u6216\u56FE\u7247\uFF09`, false, "\u6253\u5F00\u5931\u8D25");
       }
       return results;
     }

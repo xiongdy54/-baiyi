@@ -48,7 +48,9 @@ declare global {
 // ---------- Cloze：Anki 语法解析 ----------
 export interface ClozeParse {
   ords: number[];
-  render: (hiddenOrd: number | null) => string;
+  render(hiddenOrd: number | number[] | null): string;
+  /** v30（D27）：渲染并返回被遮 ord 的文本顺序（多空同答卡用于 […]↔ord 对位与答案排序） */
+  renderDetail(hiddenOrds: number[] | null): { text: string; maskedOrds: number[] };
 }
 
 export function parseCloze(text: string): ClozeParse {
@@ -56,15 +58,29 @@ export function parseCloze(text: string): ClozeParse {
   const ords = new Set<number>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) ords.add(Number(m[1]));
+  const normalize = (hiddenOrd: number | number[] | null): Set<number> | null => {
+    if (hiddenOrd === null) return null;
+    return new Set(Array.isArray(hiddenOrd) ? hiddenOrd : [hiddenOrd]);
+  };
+  const renderWith = (hiddenOrd: number | number[] | null) => {
+    const mask = normalize(hiddenOrd);
+    const maskedOrds: number[] = [];
+    const out = text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
+      const ord = Number(ordStr);
+      // 正面一律完全遮蔽 […...]：hint 不上正面（hint 曾泄漏半个答案，用户反馈 #3）
+      if (mask === null || !mask.has(ord)) return content;
+      if (!maskedOrds.includes(ord)) maskedOrds.push(ord);
+      return "[…]";
+    });
+    return { text: out, maskedOrds };
+  };
   return {
     ords: [...ords].sort((a, b) => a - b),
-    render(hiddenOrd: number | null) {
-      return text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
-        const ord = Number(ordStr);
-        // 正面一律完全遮蔽 […...]：hint 不上正面（hint 曾泄漏半个答案，用户反馈 #3）
-        if (hiddenOrd !== null && ord === hiddenOrd) return "[…]";
-        return content;
-      });
+    render(hiddenOrd) {
+      return renderWith(hiddenOrd).text;
+    },
+    renderDetail(hiddenOrds) {
+      return renderWith(hiddenOrds ?? []);
     }
   };
 }
@@ -77,6 +93,26 @@ export function extractClozeAnswer(text: string, ord: number): string {
   const m = re.exec(text);
   // 背面 = 完整答案 content；若制卡时误将答案后半写进 hint，拼回完整（避免答案被拆两半）
   return m ? (m[1] ?? "") + (m[2] ? `（${m[2]}）` : "") : "";
+}
+
+/** v30（D27）多空同答卡：按传入 ord 序逐个取答案（每空一条，含 hint 拼回） */
+export function extractClozeAnswers(text: string, ords: number[]): string[] {
+  return ords.map((o) => extractClozeAnswer(text, o));
+}
+
+/**
+ * v30（D27）一卡多空的形态落地：
+ * - together（缺省）：单卡同答，clozeOrds 留空（渲染端约定：空=遮全部 ord，且随编辑后的实际文本走）；
+ * - per-blank：拆成每空一张独立卡（各自独立 FSRS 调度），每张 clozeOrds=[自己的 ord]——
+ *   渲染时遮自己那空、其余空以原文显示，背面只给本空答案（用户钦定两形态）。
+ * 非 cloze 草稿或单空卡一律原样返回（包一层保持调用方逻辑统一）。
+ */
+export function expandClozeDraft(d: CardDraft): CardDraft[] {
+  if (d.cardType !== "cloze") return [d];
+  const text = d.cloze || d.front || "";
+  const ords = parseCloze(text).ords;
+  if (d.clozeMode !== "per-blank" || ords.length <= 1) return [d];
+  return ords.map((o, i) => ({ ...d, ord: i, clozeOrds: [o] }));
 }
 
 // ---------- CardGeneratorProvider ----------
@@ -99,11 +135,15 @@ export interface CardDraft {
   front: string;
   back: string;
   cloze?: string | null;
+  /** v30（D27）：一卡多空的考察形态——together=同答（一起回忆，缺省）；per-blank=分答（拆成每空一张卡） */
+  clozeMode?: "together" | "per-blank" | null;
+  /** v30（D27）：分答拆卡后本卡要遮蔽的 ord 集（同答卡留空=遮全部；落库进 cards.cloze_ords） */
+  clozeOrds?: number[];
   example?: string | null;
   mnemonic?: string | null;
   // M1.1 图片挖空卡：图片遮挡区域（随 draft 带给确认面板，接受时落 occlusionJson）
   ord?: number;
-  occlusion?: { assetPath: string; ord: number; rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: OcclusionShape[] | null; label?: string } | null;
+  occlusion?: { assetPath: string; ord: number; rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: OcclusionShape[] | null; label?: string; regionScope?: string } | null;
   sourceRef?: { title?: string; url?: string | null; page?: number | null } | null;
   dateStamp?: string | null;
   prioritySuggestion?: number;
@@ -290,7 +330,7 @@ export function extractJson(raw: string): GenResult {
 export const cardGenerator: {
   generateCards(
     sourceText: string,
-    context: { title?: string; section?: string; sourceRef?: { title?: string } | null; existingCards?: string[]; userProfile?: string; webContext?: string; focus?: string },
+    context: { title?: string; section?: string; sourceRef?: { title?: string } | null; existingCards?: string[]; existingCardsLimit?: number; userProfile?: string; webContext?: string; focus?: string },
     mode: CardGenMode,
     onProgress?: (chars: number) => void,
     onThinking?: (thinkChars: number) => void
@@ -329,7 +369,7 @@ export const cardGenerator: {
       // v16：补充制卡指令（「后续可补」递进补卡用）——提示词模板不变，仅装配请求时注入
       context.focus ? `【本次制卡重点（补充制卡）】\n${context.focus}` : "",
       context.webContext ? `【联网检索到的事件背景（仅供理解，禁止编造来源）】\n${context.webContext}` : "",
-      context.existingCards?.length ? `【用户已有卡片（注意 R10 联想与干扰提示，禁止重复或换皮）】\n${context.existingCards.slice(0, 10).join("\n")}` : "",
+      context.existingCards?.length ? `【用户已有卡片（注意 R10 联想与干扰提示，禁止重复或换皮）】\n${context.existingCards.slice(0, context.existingCardsLimit ?? 10).join("\n")}` : "",
       context.userProfile ? `【用户画像（R9 个性化例子优先用）】\n${context.userProfile}` : ""
     ]
       .filter(Boolean)
@@ -350,6 +390,8 @@ export const cardGenerator: {
       onThinking
     );
     const result = extractJson(raw || acc);
+    // v30（D27）：per-blank 多空卡在入确认面板前拆成每空一张（独立 FSRS 调度）
+    result.cards = result.cards.flatMap((c) => expandClozeDraft(c));
     const batch = await window.batchesAPI?.create({
       scope: resolved,
       sourceText,
@@ -546,7 +588,8 @@ export const cardGenerator: {
     for (const card of result.cards) {
       if (card.cardType === "imageOcclusion") {
         const region = regions.find((r) => r.ord === card.ord);
-        card.occlusion = { assetPath: image.assetPath, ord: card.ord ?? 0, rects, label: region?.label };
+        // v30：rects 为全图所有区域共享（cardOrd 选中考察区，其余 ink 高亮旧语义）——显式标记 regionScope
+        card.occlusion = { assetPath: image.assetPath, ord: card.ord ?? 0, rects, label: region?.label, regionScope: "shared" };
       }
     }
     const batch = await window.batchesAPI?.create({
@@ -740,11 +783,13 @@ export interface CardRecord {
   tags: string[];
   domain: string[];
   knowledgePointId: string | null;
-  /** v25：rects 恒为包围盒（兼容旧渲染）；shapes 为精确轮廓（矩形/椭圆/多边形） */
+  /** v25：rects 恒为包围盒（兼容旧渲染）；shapes 为精确轮廓（矩形/椭圆/多边形）；
+   *  v30：regionScope="shared"=旧 v1 共享区域链路（json 含全图所有区域，按 cardOrd 单区高亮）；缺省=每卡自带（全 accent） */
   occlusionJson: {
     rects: { x: number; y: number; w: number; h: number; ord: number }[];
     assetPath: string;
     shapes?: OcclusionShape[] | null;
+    regionScope?: string;
   } | null;
   // §4.1 契约：fsrs_json 全字段持久化（含 S/D/reps/lastReview）
   fsrs: { state?: string; due?: number; lapses?: number; reps?: number; stability?: number; difficulty?: number; lastReview?: number | null };
@@ -763,4 +808,139 @@ export interface CardIssueRecord {
   message: string;
   source: string;
   status: string;
+}
+
+// ---------- 易混对比卡（v30 D29 候选增强）：以当前卡为基准，AI 从已有卡语义检索易混卡后走对比模板产三件套 ----------
+
+/**
+ * 对比卡候选清单（纯函数供测试）：只排除基准卡本身——挂起卡保留（用户「标记并暂停」常是
+ * 「疑似重复之后处理」，正是对比卡最该找回的候选，v30 复审修正）。排序=与基准卡同主领域的卡
+ * 优先（易混是同领域现象），同域内按创建新→旧（listAll 序）；挖空卡展开显示；图片卡 front 无
+ * 区分度改用 back；逐条截断 50 字、文本去重、总量 cap 500（个人库多年一般不超此数，接近全覆盖）。
+ */
+export function buildContrastCandidates(
+  cards: {
+    id: string;
+    cardType: string;
+    frontMarkdown: string;
+    noteText: string;
+    backMarkdown: string;
+    domain?: string[] | null;
+    leech?: { suspended?: boolean } | null;
+  }[],
+  baseId: string,
+  baseDomain: string[] = [],
+  cap = 500
+): string[] {
+  const primary = baseDomain[0] || "";
+  const sameDomain: string[] = [];
+  const rest: string[] = [];
+  const seen = new Set<string>();
+  for (const c of cards) {
+    if (c.id === baseId) continue;
+    let text: string;
+    if (c.cardType === "cloze") text = parseCloze(c.frontMarkdown || c.noteText).render(null);
+    else if (c.cardType === "imageOcclusion") text = `[图片卡] ${c.backMarkdown || c.noteText || ""}`;
+    else text = c.frontMarkdown || c.noteText;
+    text = text.replace(/\s+/g, " ").trim().slice(0, 50);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    (primary && c.domain && c.domain[0] === primary ? sameDomain : rest).push(text);
+  }
+  return [...sameDomain, ...rest].slice(0, cap);
+}
+
+/**
+ * 以基准卡生成对比卡三件套（v30 D29）：候选清单经请求装配注入（existingCardsLimit 放开截断），
+ * focus 指令要求模型从清单中选出与基准卡最易混的一张作为 B；无真实混淆风险时允许返回空卡。
+ * 提示词模板用 card-contrast（front 自带「对照:A vs B」前缀），模板内容不变。
+ */
+export async function generateContrastDrafts(
+  base: { id?: string; front: string; back: string; title?: string | null; domain?: string[] | null },
+  onProgress?: (chars: number) => void,
+  onThinking?: (thinkChars: number) => void
+): Promise<{ batchId: string; drafts: CardDraft[] }> {
+  const all = await cardsApi.listAll();
+  const candidates = buildContrastCandidates(all, base.id ?? "", base.domain ?? []);
+  if (candidates.length === 0) return { batchId: "", drafts: [] };
+  const material = [base.front, base.back].filter(Boolean).join("\n");
+  const focus = [
+    "这是对比卡生成：上面的【材料】是基准卡（A）的内容。",
+    "请从【用户已有卡片】清单中选出与 A 最易混的一张作为 B——相似但不相同、复习时容易答混的概念/论证/学说，",
+    "排除 A 的同义换皮与表述变体；然后按对比卡规则产三件套（A 与 B 的区别 / A 的关键特征 / B 的关键特征）。",
+    "若清单中没有与 A 存在真实混淆风险的卡，cards 返回空数组并在 blockReasons 说明，禁止硬凑。"
+  ].join("");
+  const { batchId, result } = await cardGenerator.generateCards(
+    material,
+    { title: base.title ?? undefined, existingCards: candidates, existingCardsLimit: candidates.length, focus },
+    "card-contrast",
+    onProgress,
+    onThinking
+  );
+  return { batchId, drafts: result.cards };
+}
+
+/**
+ * AI 草稿接受入库（Reader 确认面板 / 复习对比卡确认框共用）：per-blank 展开、lint、S1 相似检索、落库。
+ * 返回新建卡 id 列表（per-blank 拆卡时多张）。sourceTitle/contextRef 供来源与跳转原文锚点。
+ */
+export async function createAcceptedCard(
+  d: CardDraft,
+  ctx: { sourceTitle?: string | null; contextRef?: CardRecord["contextRef"] } = {}
+): Promise<string[]> {
+  const expanded = expandClozeDraft(d);
+  const ids: string[] = [];
+  for (const dd of expanded) {
+    const cloze = dd.cardType === "cloze" ? dd.cloze || "" : "";
+    const card = {
+      noteText: dd.front || cloze,
+      cardType: dd.cardType || "qa",
+      frontMarkdown: dd.front || "",
+      backMarkdown: dd.back || "",
+      // 同答卡存 []（渲染端约定空=遮全部 ord）；分答拆卡后每张带 [自己的 ord]
+      clozeOrds: dd.clozeOrds ?? [],
+      occlusionJson: dd.occlusion
+        ? { rects: dd.occlusion.rects, assetPath: dd.occlusion.assetPath, shapes: dd.occlusion.shapes ?? null, regionScope: dd.occlusion.regionScope }
+        : null,
+      cardOrd: dd.ord ?? null,
+      contextPrefix: dd.contextPrefix || null,
+      contextRef: ctx.contextRef ?? null,
+      mnemonic: dd.mnemonic || null,
+      example: dd.example || null,
+      sourceRef: dd.sourceRef || (ctx.sourceTitle ? { title: ctx.sourceTitle } : null),
+      dateStamp: dd.dateStamp || null,
+      priority: dd.prioritySuggestion ?? 50,
+      tags: [],
+      domain: dd.domain ?? [],
+      knowledgePointId: dd.knowledgePointId || null,
+      generatedBy: "ai"
+    };
+    const issues = lintCard({
+      front: card.frontMarkdown,
+      back: card.backMarkdown,
+      cardType: card.cardType,
+      cloze,
+      occlusion: card.occlusionJson ? { assetPath: card.occlusionJson.assetPath, rects: card.occlusionJson.rects } : null,
+      contextPrefix: card.contextPrefix,
+      sourceRef: card.sourceRef,
+      dateStamp: card.dateStamp,
+      knowledgePointId: card.knowledgePointId
+    });
+    const created = await cardsApi.create(card);
+    ids.push(created.id);
+    for (const issue of issues) {
+      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
+    }
+    const similar = await similaritySearch.findSimilar(card.frontMarkdown || cloze, 2);
+    if (similar.length > 0) {
+      await cardsApi.addIssue({
+        cardId: created.id,
+        ruleId: "S1",
+        severity: "warn",
+        message: `与已有卡相似（${Math.round(similar[0].score * 100)}%）：「${similar[0].front.slice(0, 30)}…」`,
+        source: "lint"
+      });
+    }
+  }
+  return ids;
 }

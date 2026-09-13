@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@likecoin/epub-ts": "^0.7.2",
+    "@mozilla/readability": "^0.6.0",
     "@types/markdown-it": "^14.2.0",
     "dompurify": "^3.4.14",
     "fsrs-rs-nodejs": "^0.9.1",
@@ -39,6 +40,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^9.0.1",
     "electron": "^31.0.0",
+    "jsdom": "^30.0.1",
     "typescript": "^5.5.3",
     "vite": "^6.0.0",
     "wait-on": "^8.0.1"

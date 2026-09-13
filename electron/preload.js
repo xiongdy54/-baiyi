@@ -36,7 +36,13 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   // 读侧：某本书的内嵌图字节（[{filename, bytes:Uint8Array}]），随合成 EPUB 落包
   readContentImages: (id) => ipcRenderer.invoke("library:readContentImages", id),
   // M6-2 修订（v28 PDF 原生阅读）：读 PDF 原文件字节给 pdf.js 内核打开
-  readPdfFile: (id) => ipcRenderer.invoke("library:readPdfFile", id)
+  readPdfFile: (id) => ipcRenderer.invoke("library:readPdfFile", id),
+  // M6-3（v30，D27）统一导入入口：多选对话框 + 按扩展名路由所需的读取/建册
+  pickImportFiles: () => ipcRenderer.invoke("library:pickImportFiles"),
+  readFileBytes: (filePath) => ipcRenderer.invoke("library:readFileBytes", filePath),
+  createFromHtml: (payload) => ipcRenderer.invoke("library:createFromHtml", payload),
+  createFromBookFile: (payload) => ipcRenderer.invoke("library:createFromBookFile", payload),
+  readEbookFile: (id) => ipcRenderer.invoke("library:readEbookFile", id)
 });
 
 contextBridge.exposeInMainWorld("workflowAPI", {

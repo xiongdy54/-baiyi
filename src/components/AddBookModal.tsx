@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { importEpubFile } from "../lib/epub";
 import { libraryApi } from "../lib/library";
+import { importMany } from "../lib/importRouter";
 import { eventBus } from "../lib/eventbus";
 
 interface Props {
@@ -13,6 +13,8 @@ export default function AddBookModal({ onSave, onClose }: Props) {
   const [markdown, setMarkdown] = useState("");
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
+  // M6-3（v30，D27）：批量导入进度（第 done/total 个）
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number; current: string } | null>(null);
 
   const canSave = markdown.trim().length > 0 && !saving && !importing;
 
@@ -23,42 +25,35 @@ export default function AddBookModal({ onSave, onClose }: Props) {
     setSaving(false);
   }
 
-  async function handleImportEpub() {
+  // M6-3（v30，D27）：统一导入入口——一次多选，按扩展名自动路由；逐文件独立成败，聚合报告。
+  // 支持：EPUB / PDF / Word / TXT / Markdown / HTML / MOBI / AZW3 / FB2 / CBZ
+  async function handleImportFiles() {
     setImporting(true);
     try {
-      const result = await importEpubFile();
-      if (result) {
-        await libraryApi.createFromEpub(result);
-        eventBus.emit("library/changed");
+      const picked = await libraryApi.pickImportFiles();
+      if (!picked || picked.length === 0) return;
+      const outcomes = await importMany(picked, (done, total, current) =>
+        setImportProgress({ done, total, current })
+      );
+      const okList = outcomes.filter((o) => o.ok);
+      const failList = outcomes.filter((o) => !o.ok);
+      if (okList.length > 0) eventBus.emit("library/changed");
+      if (failList.length === 0) {
+        window.alert(`已导入 ${okList.length} 本：\n${okList.map((o) => o.title || o.name).join("\n")}`);
         onClose();
-      }
-    } catch (err) {
-      window.alert(`导入失败：${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  // M6-1（v26）：Word（含内嵌图）/ TXT / Markdown 导入——pick 取消则静默返回，转换失败弹错
-  async function handleImportFile(kind: "word" | "txt" | "markdown" | "pdf") {
-    setImporting(true);
-    try {
-      const picked = await libraryApi.pickImport(kind);
-      if (!picked) return;
-      const result = await libraryApi.createImported(kind, picked);
-      if (result) {
-        if (kind === "pdf" && (result.emptyPages ?? 0) > 0) {
-          window.alert(`已导入 PDF；其中 ${result.emptyPages} 页无文本层，已按空页跳过。`);
-        }
-        eventBus.emit("library/changed");
-        onClose();
+      } else if (okList.length === 0) {
+        window.alert(`导入失败：\n${failList.map((o) => `${o.name}（${o.error || "未知原因"}）`).join("\n")}`);
       } else {
-        window.alert("导入失败：未能从该文件提取到内容");
+        window.alert(
+          `成功导入 ${okList.length} 本：\n${okList.map((o) => o.title || o.name).join("\n")}\n\n失败 ${failList.length} 个：\n${failList
+            .map((o) => `${o.name}（${o.error || "未知原因"}）`)
+            .join("\n")}`
+        );
+        onClose();
       }
-    } catch (err) {
-      window.alert(`导入失败：${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   }
 
@@ -92,26 +87,19 @@ export default function AddBookModal({ onSave, onClose }: Props) {
             placeholder="在这里粘贴你的阅读材料…"
           />
         </div>
+        <p className="form-hint">导入支持 EPUB / PDF / Word / TXT / Markdown / HTML / MOBI / AZW3 / FB2 / CBZ，可一次多选批量导入。</p>
         <div className="form-actions">
-          <button className="btn btn-outline" disabled={importing || saving} onClick={handleImportEpub}>
+          <button className="btn btn-outline" disabled={importing || saving} onClick={handleImportFiles}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 3v12" />
               <path d="m8 11 4 4 4-4" />
               <path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4" />
             </svg>
-            {importing ? "导入中…" : "导入 EPUB"}
-          </button>
-          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("word")}>
-            导入 Word
-          </button>
-          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("txt")}>
-            导入 TXT
-          </button>
-          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("markdown")}>
-            导入 Markdown
-          </button>
-          <button className="btn btn-outline" disabled={importing || saving} onClick={() => handleImportFile("pdf")}>
-            导入 PDF
+            {importing
+              ? importProgress
+                ? `导入中… (${importProgress.done}/${importProgress.total})`
+                : "导入中…"
+              : "导入文件"}
           </button>
           <span className="form-actions-spacer" />
           <button className="btn btn-secondary" onClick={onClose}>取消</button>

@@ -32,6 +32,32 @@ function report(tag, results) {
   }
 }
 
+// ---------- M6-3（v30）被动兼容格式夹具 ----------
+// CBZ = zip 内含图片（comic-book 渲染图片而非文本）；FB2 = XML 文本（无压缩重依赖）
+async function buildCbzFixture() {
+  const JSZip = require("jszip");
+  // 1×1 纯色 PNG（确定性字节，避免依赖外部资源）
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  const zip = new JSZip();
+  zip.file("p1.png", png);
+  zip.file("p2.png", png);
+  const buf = await zip.generateAsync({ type: "nodebuffer" });
+  return buf.toString("base64");
+}
+
+function buildFb2Fixture() {
+  const xml = `<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+<body>
+<section><title><p>第一章</p></title><p>FSRSTEST 格式直读：这是 FB2 夹具正文。</p></section>
+</body>
+</FictionBook>`;
+  return Buffer.from(xml, "utf8").toString("base64");
+}
+
 // ---------- jszip 夹具构造（确定性 EPUB） ----------
 async function buildFixtures() {
   const JSZip = require("jszip");
@@ -215,6 +241,19 @@ app.whenReady().then(async () => {
     true
   );
   report("CJK", cjk);
+
+  // M6-3（v30）：被动兼容格式直读（CBZ / FB2；MOBI/AZW3 无法手工构造夹具，需真实文件冒烟）
+  const cbzB64 = await buildCbzFixture();
+  const fmt = await win.webContents.executeJavaScript(
+    `(async () => {
+      const out = [];
+      out.push(...await window.__readerTest.runFormat("fixture.cbz", ${JSON.stringify(cbzB64)}));
+      out.push(...await window.__readerTest.runFormat("fixture.fb2", ${JSON.stringify(buildFb2Fixture())}));
+      return out;
+    })()`,
+    true
+  );
+  report("FORMAT", fmt);
 
   win.destroy();
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);

@@ -6,8 +6,9 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { parseCloze, extractClozeAnswer, cardsApi, type CardRecord, type CardIssueRecord } from "../lib/cards";
+import { parseCloze, extractClozeAnswers, cardsApi, type CardRecord, type CardIssueRecord } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
+import ContrastCardModal from "./ContrastCardModal";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
 
@@ -538,6 +539,7 @@ export function CardFace({
   // v25：遮挡块支持矩形/椭圆/多边形（shapes 精确轮廓；无 shapes 的存量卡自动降级为 rects 矩形）
   if (card.cardType === "imageOcclusion" && card.occlusionJson) {
     // v29（D26）：看图问答卡（rects 空数组挂图 + frontMarkdown 题面）——正面图下方渲染题面文字
+    // v30（D28，用户拍板）：题面正反面都显示——背面 = 图 + 题面 + 答案（翻面后题面不消失）
     const hasFrontText = !!(card.frontMarkdown && card.frontMarkdown !== "图中遮挡区域对应的是什么？");
     return (
       <div className="review-face">
@@ -545,10 +547,10 @@ export function CardFace({
           <img src={card.occlusionJson.assetPath} alt="" className="occlusion-img" />
           <OcclusionShapes occlusion={card.occlusionJson} cardOrd={card.cardOrd} hidden={showBack} />
         </div>
-        {hasFrontText && !showBack && (
+        {hasFrontText && (
           <div className="review-front-text">
             {onEdit ? (
-              <EditableText value={card.frontMarkdown} onCommit={(t) => onEdit({ frontMarkdown: t })} />
+              <EditableText value={card.frontMarkdown} onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })} />
             ) : (
               card.frontMarkdown
             )}
@@ -571,20 +573,40 @@ export function CardFace({
   }
 
   if (card.cardType === "cloze") {
+    // v30（D27）同答/分答两形态（用户拍板）：
+    //   同答卡（clozeOrds 空 = 遮全部 ord；存量多空卡与「组内同时回忆」语义）——
+    //     正面所有空一起挖成[…]，背面按文本顺序列出每个空的答案；
+    //   分答卡（per-blank 拆卡后每张 clozeOrds=[自己的 ord]）——只遮自己那空，
+    //     其余空以原文正常显示在正面，背面只给本空答案。
     const parsed = parseCloze(frontText);
-    const ord = parsed.ords[card.cardOrd] ?? parsed.ords[0];
-    // 背面问题区与正面共用同一 render(ord)——翻面前后逐字相同，挖空始终遮蔽（用户需求）
-    const questionText = parsed.render(ord);
-    // 答案区（v15 修复）：用户编辑过的 backMarkdown 优先显示；否则显示挖空内容
-    const clozeAnswer = card.backMarkdown && card.backMarkdown.trim() ? card.backMarkdown : extractClozeAnswer(frontText, ord);
+    const maskOrds = card.clozeOrds && card.clozeOrds.length > 0 ? card.clozeOrds : parsed.ords;
+    const masked = parsed.renderDetail(maskOrds);
+    // 背面问题区与正面共用同一渲染——翻面前后逐字相同，挖空始终遮蔽（用户需求）
+    const questionText = masked.text;
+    const maskedOrds = masked.maskedOrds;
+    // 答案区（v15 修复）：用户编辑过的 backMarkdown 优先显示；否则按遮蔽顺序显示各空答案
+    const CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩";
+    const answers = extractClozeAnswers(frontText, maskedOrds);
+    const clozeAnswer =
+      card.backMarkdown && card.backMarkdown.trim()
+        ? card.backMarkdown
+        : answers.length > 1
+          ? answers.map((a, i) => `${CIRCLED[i] ?? "·"} ${a}`).join("　")
+          : answers[0] ?? "";
     // 问题区编辑（v12.4）：翻面后可改。用户编辑的是显示文本（当前挖空为[…]），
-    // 落库时把[…]还原为原挖空语法，其余挖空按显示文本保留（若被改动则该挖空降级为普通文字）
+    // 落库时按文本顺序把第 i 个[…]还原为第 i 个被遮 ord 的原挖空语法（多空同答卡逐个还原）；
+    // 其余挖空按显示文本保留（若被改动则该挖空降级为普通文字）
     const questionEditable = showBack && onEdit;
     const commitQuestion = (t: string) => {
       const edit = onEdit;
       if (!edit) return;
-      const originalSyntax = frontText.match(new RegExp(`\\{\\{c${ord}::(.*?)(?:::(.*?))?\\}\\}`));
-      const restored = originalSyntax ? t.replace("[…]", originalSyntax[0]) : t;
+      let restored = t;
+      for (const o of maskedOrds) {
+        const pos = restored.indexOf("[…]");
+        if (pos === -1) break;
+        const syntax = frontText.match(new RegExp(`\\{\\{c${o}::(.*?)(?:::(.*?))?\\}\\}`));
+        if (syntax) restored = restored.slice(0, pos) + syntax[0] + restored.slice(pos + "[…]".length);
+      }
       edit({ frontMarkdown: restored, noteText: restored });
     };
     return (
@@ -641,6 +663,8 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
   const [step, setStep] = useState(0);
   const [diagnosis, setDiagnosis] = useState<{ diagnosis?: string; analysis?: string; suggestions?: string[] } | null>(null);
   const [running, setRunning] = useState(false);
+  // v30（D29）：易混对比卡一键生成（与复习页共用 ContrastCardModal）
+  const [contrastOpen, setContrastOpen] = useState(false);
 
   async function runDiagnose() {
     setRunning(true);
@@ -699,6 +723,11 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
           <div className="queue-row" style={{ marginBottom: "var(--sp-4)" }}>
             <div className="queue-row-text">{card.frontMarkdown || card.noteText}</div>
             <div className="queue-row-text review-back">{card.backMarkdown}</div>
+          </div>
+
+          {/* v30（D29）：以本卡为基准生成易混对比卡三件套 */}
+          <div className="ai-actions" style={{ marginBottom: "var(--sp-4)" }}>
+            <button className="btn btn-outline btn-sm" onClick={() => setContrastOpen(true)}>生成对比卡</button>
           </div>
 
           {step === 0 && (
@@ -801,6 +830,7 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
           </div>
         </div>
       </div>
+      {contrastOpen && <ContrastCardModal card={card} onClose={() => setContrastOpen(false)} />}
     </div>
   );
 }
