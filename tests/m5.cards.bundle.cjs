@@ -149,31 +149,12 @@ function normalizeShape(shape) {
       kind: "ellipse",
       cx: round1(cx),
       cy: round1(cy),
-      rx: round1(Math.max(0, Math.min(Math.max(cx, 100 - cx), Number(shape.rx) || 0))),
-      ry: round1(Math.max(0, Math.min(Math.max(cy, 100 - cy), Number(shape.ry) || 0)))
+      // 半轴上限 = 中心到最近边界的距离（椭圆整体必须留在画面内）
+      rx: round1(Math.max(0, Math.min(Math.min(cx, 100 - cx), Math.abs(Number(shape.rx) || 0)))),
+      ry: round1(Math.max(0, Math.min(Math.min(cy, 100 - cy), Math.abs(Number(shape.ry) || 0))))
     };
   }
   return { ord: shape.ord, kind: "rect", ...shapeBBox(shape) };
-}
-function shapesFromRects(rects) {
-  return (rects ?? []).map((raw, i) => {
-    const r = raw ?? {};
-    const ord = Number(r.ord);
-    return normalizeShape({
-      ord: Number.isFinite(ord) ? ord : i,
-      kind: "rect",
-      x: Number(r.x) || 0,
-      y: Number(r.y) || 0,
-      w: Number(r.w) || 0,
-      h: Number(r.h) || 0
-    });
-  });
-}
-function occlusionShapes(occlusion) {
-  if (!occlusion) return [];
-  const shapes = (occlusion.shapes ?? []).filter((s) => Boolean(s && s.kind));
-  if (shapes.length > 0) return shapes;
-  return shapesFromRects(occlusion.rects ?? []);
 }
 
 // src/lib/cards.ts
@@ -372,6 +353,10 @@ ${context.userProfile}` : ""
       // v25：用户已手绘区域的场景——图片是用户选区的裁剪，模型只负责读出该区域内容；
       // 指令经请求装配注入（与 generateCards 的 context.focus 同机制），提示词模板不变
       context.focus ? `\u3010\u7528\u6237\u5DF2\u9009\u5B9A\u7684\u906E\u6321\u533A\u57DF\u3011${context.focus}` : "",
+      // v29（D26）：图片周边文字上下文——相关则结合出题，无关则由模型忽略
+      context.contextText ? `\u3010\u56FE\u7247\u5468\u8FB9\u6587\u5B57\u4E0A\u4E0B\u6587\uFF08\u56FE\u7247\u4E0A\u65B9 1 \u6BB5 + \u4E0B\u65B9 2 \u6BB5\uFF09\u3011
+${context.contextText}
+\uFF08\u82E5\u4E0E\u56FE\u7247\u5185\u5BB9\u76F8\u5173\uFF0C\u53EF\u7ED3\u5408\u4E0A\u4E0B\u6587\u51FA\u9898\uFF1B\u65E0\u5173\u5219\u5FFD\u7565\uFF09` : "",
       context.title ? `\u3010\u6765\u6E90\u3011\u300A${context.title}\u300B${context.section ? " \xB7 " + context.section : ""}` : ""
     ].filter(Boolean);
     const userContent = [
@@ -394,6 +379,79 @@ ${context.userProfile}` : ""
     const result = extractJson(raw || acc);
     const preset = context.presetRegion;
     if (preset) {
+      const px = clampPct(preset.rect.x);
+      const py = clampPct(preset.rect.y);
+      const pw = Math.max(1, Math.min(100 - px, clampPct(preset.rect.w)));
+      const ph = Math.max(1, Math.min(100 - py, clampPct(preset.rect.h)));
+      const toFullX = (rx, rw) => {
+        const x = px + clampPct(rx) * pw / 100;
+        const w = clampPct(rw) * pw / 100;
+        return { x, w };
+      };
+      const toFullY = (ry, rh) => {
+        const y = py + clampPct(ry) * ph / 100;
+        const h = clampPct(rh) * ph / 100;
+        return { y, h };
+      };
+      const mappedCards = [];
+      const mappedRegions = [];
+      let ordSeq = 0;
+      for (const rawCardRaw of result.cards ?? []) {
+        const rawCard = rawCardRaw;
+        if (rawCard.cardType === "qa") {
+          mappedCards.push({
+            ...rawCard,
+            cardType: "imageOcclusion",
+            ord: ordSeq,
+            occlusion: { assetPath: image.assetPath, ord: ordSeq, rects: [], shapes: null, label: "" }
+          });
+          ordSeq += 1;
+          continue;
+        }
+        const cardRegions = (rawCard.regions ?? []).map((r, i) => {
+          const fx = toFullX(Number(r.x) || 0, Number(r.w) || 0);
+          const fy = toFullY(Number(r.y) || 0, Number(r.h) || 0);
+          if (fx.w < 1 || fy.h < 1) return null;
+          const x = clampPct(fx.x);
+          const y = clampPct(fy.y);
+          return {
+            ord: i,
+            label: String(r.label ?? ""),
+            x: Math.round(x * 10) / 10,
+            y: Math.round(y * 10) / 10,
+            w: Math.round(Math.min(100 - x, fx.w) * 10) / 10,
+            h: Math.round(Math.min(100 - y, fy.h) * 10) / 10
+          };
+        }).filter((r) => r !== null);
+        if (cardRegions.length === 0) continue;
+        const rects3 = cardRegions.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, ord: r.ord }));
+        mappedCards.push({
+          ...rawCard,
+          cardType: "imageOcclusion",
+          ord: ordSeq,
+          occlusion: {
+            assetPath: image.assetPath,
+            ord: ordSeq,
+            rects: rects3,
+            shapes: null,
+            label: String(rawCard.back ?? cardRegions.map((r) => r.label).join("\uFF1B"))
+          }
+        });
+        for (const r of cardRegions) mappedRegions.push({ ...r, ord: mappedRegions.length });
+        ordSeq += 1;
+      }
+      if (mappedCards.length > 0) {
+        result.cards = mappedCards;
+        result.regions = mappedRegions;
+        const batch02 = await window.batchesAPI?.create({
+          scope: "card-occlusion",
+          sourceText: `[\u56FE\u7247\u9009\u533A] ${image.assetPath}`,
+          context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Mapped: true },
+          promptTemplateId: tpl.id,
+          result
+        });
+        return { batchId: batch02?.id || "", result, templateId: tpl.id };
+      }
       const rect = {
         x: clampPct(preset.rect.x),
         y: clampPct(preset.rect.y),
@@ -402,19 +460,22 @@ ${context.userProfile}` : ""
       };
       const shape = preset.shape ? normalizeShape({ ...preset.shape, ord: 0 }) : null;
       const rects2 = [{ x: rect.x, y: rect.y, w: rect.w, h: rect.h, ord: 0 }];
-      const cards = (result.cards ?? []).slice(0, 1);
-      if (cards.length === 0) throw new Error("\u6A21\u578B\u672A\u4EA7\u51FA\u5361\u7247\uFF0C\u8BF7\u91CD\u8BD5\u6216\u6539\u7528\u624B\u52A8\u5236\u5361");
-      for (const card of cards) {
-        card.cardType = "imageOcclusion";
-        card.ord = 0;
-        card.occlusion = {
+      const first = (result.cards ?? [])[0];
+      const fallbackCard = {
+        ...first ?? {},
+        cardType: "imageOcclusion",
+        ord: 0,
+        front: first?.front || "\u56FE\u4E2D\u906E\u6321\u533A\u57DF\u5BF9\u5E94\u7684\u662F\u4EC0\u4E48\uFF1F",
+        back: first?.back || preset.label || "",
+        occlusion: {
           assetPath: image.assetPath,
           ord: 0,
           rects: rects2,
           shapes: shape ? [shape] : null,
-          label: String(card.back ?? preset.label ?? "")
-        };
-      }
+          label: String(first?.back ?? preset.label ?? "")
+        }
+      };
+      const cards = [fallbackCard];
       result.cards = cards;
       result.regions = [
         { ord: 0, label: String(cards[0].back ?? preset.label ?? ""), ...rect, shape: shape ?? void 0 }
@@ -422,7 +483,7 @@ ${context.userProfile}` : ""
       const batch0 = await window.batchesAPI?.create({
         scope: "card-occlusion",
         sourceText: `[\u56FE\u7247\u9009\u533A] ${image.assetPath}`,
-        context: { ...context, imageAsset: image.assetPath, userRegion: true },
+        context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Fallback: true },
         promptTemplateId: tpl.id,
         result
       });
@@ -487,8 +548,8 @@ function lintCard(draft) {
   const front = draft.front || "";
   const back = draft.back || "";
   const cloze = draft.cloze || "";
-  if (draft.cardType === "imageOcclusion" && !(draft.occlusion && occlusionShapes(draft.occlusion).length > 0 && draft.occlusion.assetPath)) {
-    issues.push({ ruleId: "L11", severity: "error", message: "\u56FE\u50CF\u906E\u6321\u5361\u7F3A\u5C11\u56FE\u50CF\u8D44\u4EA7\u6216\u906E\u6321\u533A\u57DF" });
+  if (draft.cardType === "imageOcclusion" && !(draft.occlusion && draft.occlusion.assetPath)) {
+    issues.push({ ruleId: "L11", severity: "error", message: "\u56FE\u50CF\u906E\u6321\u5361\u7F3A\u5C11\u56FE\u50CF\u8D44\u4EA7" });
   }
   if (back.replace(/\s/g, "").length > 60) {
     issues.push({ ruleId: "L1", severity: "warn", message: "back \u4FE1\u606F\u8FC7\u8F7D\uFF08>60\u5B57\uFF09\uFF0C\u8003\u8651\u62C6\u5206\uFF08\u89C4\u52194 \u6700\u5C0F\u4FE1\u606F\uFF09" });

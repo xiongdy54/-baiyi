@@ -42,6 +42,9 @@ export interface ReaderImageRef {
   rect: ReaderRect;
   naturalWidth: number;
   naturalHeight: number;
+  /** v29 图片周边文字上下文（foliate 系=章节 DOM 上 1 段下 2 段；PDF 系=同页文本层文字，限长）。
+   *  供 AI 图片制卡结合上下文出题——与图片无关时由模型自行忽略。 */
+  contextText?: string;
 }
 
 export type ReaderTheme = "paper" | "sepia" | "dark" | "custom";
@@ -56,6 +59,8 @@ export interface ReaderAppearance {
   fgColor?: string;
   /** 页边距 px（分页模式生效） */
   margin?: number;
+  /** v29 PDF 引擎专用缩放：预设适应模式或百分比（50-300，100=原始大小）；foliate 引擎忽略 */
+  zoom?: "page-width" | "page-fit" | number;
 }
 
 export interface ReaderTocItem {

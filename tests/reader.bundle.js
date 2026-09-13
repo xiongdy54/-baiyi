@@ -6910,6 +6910,36 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
   }
 
   // src/lib/reader/foliate/adapter.ts
+  function extractImageContext(doc, img) {
+    try {
+      const CAP = 500;
+      const textOf = (el) => el ? (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, CAP) : "";
+      const block = img.closest("p, li, figure, blockquote, div") || img.parentElement;
+      if (!block) return void 0;
+      const parts = [];
+      const above = block.previousElementSibling;
+      if (above) {
+        const t3 = textOf(above);
+        if (t3) parts.push(t3);
+      }
+      const own = textOf(block);
+      if (own) parts.push(own);
+      let below = block.nextElementSibling;
+      let belowCount = 0;
+      while (below && belowCount < 2) {
+        const t3 = textOf(below);
+        if (t3) {
+          parts.push(t3);
+          belowCount++;
+        }
+        below = below.nextElementSibling;
+      }
+      const joined = parts.filter(Boolean).join("\n").trim();
+      return joined ? joined.slice(0, 1500) : void 0;
+    } catch {
+      return void 0;
+    }
+  }
   function createFoliateKernel(host) {
     const view = document.createElement("foliate-view");
     view.style.display = "block";
@@ -6957,7 +6987,8 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           alt: img.getAttribute("alt") || "",
           rect: { x: topLeft.x, y: topLeft.y, width: r3.width, height: r3.height },
           naturalWidth: img.naturalWidth || 0,
-          naturalHeight: img.naturalHeight || 0
+          naturalHeight: img.naturalHeight || 0,
+          contextText: extractImageContext(doc, img)
         };
         if (!image.src) return;
         imageHandlers.forEach((h3) => h3(image));

@@ -25,6 +25,10 @@ export const DEFAULT_READER_FONT_STACK =
 export function resolveAppearance(s: ReaderSettings | null): ReaderAppearance {
   const a = s?.appearance ?? DEFAULT_READER_SETTINGS.appearance;
   const preset = a.theme === "custom" ? null : PRESETS[a.theme];
+  // v29 PDF 缩放：预设字符串或 50-300 百分比，非法值回退适应宽度
+  const zoom = a.zoom === "page-width" || a.zoom === "page-fit" ? a.zoom
+    : typeof a.zoom === "number" && a.zoom >= 50 && a.zoom <= 300 ? a.zoom
+    : "page-width";
   return {
     theme: a.theme,
     fontFamily: a.fontFamily?.trim() || DEFAULT_READER_FONT_STACK,
@@ -32,7 +36,8 @@ export function resolveAppearance(s: ReaderSettings | null): ReaderAppearance {
     lineHeight: a.lineHeight && a.lineHeight >= 1.2 && a.lineHeight <= 2.4 ? a.lineHeight : 1.7,
     bgColor: a.theme === "custom" && a.bgColor ? a.bgColor : preset?.bg ?? PRESETS.paper.bg,
     fgColor: a.theme === "custom" && a.fgColor ? a.fgColor : preset?.fg ?? PRESETS.paper.fg,
-    margin: a.margin && a.margin >= 0 && a.margin <= 120 ? a.margin : 48
+    margin: a.margin && a.margin >= 0 && a.margin <= 120 ? a.margin : 48,
+    zoom
   };
 }
 

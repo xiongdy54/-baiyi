@@ -150,6 +150,16 @@ window.__pdfTest = {
     const cfiGoto = await kernel.goTo({ cfi: "epubcfi(/6/2)" });
     check("P13 goTo(cfi) 返回 false（PDF 系无 CFI）", cfiGoto === false, String(cfiGoto));
 
+    // v29 缩放：applyAppearance 的 zoom 映射 currentScale/currentScaleValue
+    kernel.applyAppearance({ theme: "paper", zoom: 150 });
+    await wait(400);
+    const scale150 = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScale : null;
+    check("P15a zoom=150 → currentScale 1.5", Math.abs(Number(scale150) - 1.5) < 0.01, String(scale150));
+    kernel.applyAppearance({ theme: "paper", zoom: "page-width" });
+    await wait(400);
+    const scalePw = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
+    check("P15b zoom=page-width → currentScaleValue 切换", scalePw === "page-width", String(scalePw));
+
     kernel.destroy();
     check("P14 destroy 后容器清空", host.querySelectorAll("canvas").length === 0, "canvas=" + host.querySelectorAll("canvas").length);
     return check.results;

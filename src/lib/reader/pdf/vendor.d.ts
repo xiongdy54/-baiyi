@@ -23,6 +23,9 @@ declare module "pdfjs-dist/web/pdf_viewer.mjs" {
     scrollPageIntoView(opts: { pageNumber: number }): void;
     /** 强制刷新可视页渲染队列（恢复打开落在非首屏页时用；官方 API，本地声明补齐） */
     update(): void;
+    /** 缩放：预设值（page-width/page-fit/...）或百分比数字（v29） */
+    currentScaleValue: string;
+    currentScale: number;
     nextPage(): boolean;
     previousPage(): boolean;
     scrollMode: number;

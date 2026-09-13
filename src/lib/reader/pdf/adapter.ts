@@ -154,7 +154,8 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       linkHandlers.forEach((h) => h({ internal: true, href }));
     }
   });
-  // 图片点击：canvas 命中 → 快照 dataURL（壳层 loadImageDataUrl 支持 data: 直取，v25 链路复用）
+  // 图片点击：canvas 命中 → 快照 dataURL（壳层 loadImageDataUrl 支持 data: 直取，v25 链路复用）。
+  // v29 上下文：PDF 无段落 DOM，降级取被点页的文本层文字（图注通常在同页，限长 ~600 字）。
   viewerEl.addEventListener("click", (ev: MouseEvent) => {
     if (imageHandlers.size === 0) return;
     const canvas = (ev.target as HTMLElement | null)?.closest?.("canvas") as HTMLCanvasElement | null;
@@ -162,12 +163,17 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     try {
       const dataUrl = canvas.toDataURL("image/png");
       const r = canvas.getBoundingClientRect();
+      const pageDiv = canvas.closest(".page") as HTMLElement | null;
+      const contextText = pageDiv
+        ? (pageDiv.querySelector(".textLayer")?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 600) || undefined
+        : undefined;
       const image: ReaderImageRef = {
         src: dataUrl,
         alt: "",
         rect: { x: r.left, y: r.top, width: r.width, height: r.height },
         naturalWidth: canvas.width,
-        naturalHeight: canvas.height
+        naturalHeight: canvas.height,
+        contextText
       };
       imageHandlers.forEach((h) => h(image));
     } catch {
@@ -182,6 +188,18 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     host.style.setProperty("--reader-bg", a.bgColor ?? "transparent");
     host.style.setProperty("--reader-fg", a.fgColor ?? "inherit");
     host.style.background = a.bgColor ?? "transparent";
+  };
+
+  // v29 缩放：预设适应模式或百分比（zoom 已由 resolveAppearance 归一）
+  const applyZoom = (a: ReaderAppearance) => {
+    if (!doc) return;
+    try {
+      if (a.zoom === "page-width") viewer.currentScaleValue = "page-width";
+      else if (a.zoom === "page-fit") viewer.currentScaleValue = "page-fit";
+      else if (typeof a.zoom === "number") viewer.currentScale = a.zoom / 100;
+    } catch {
+      /* 缩放失败不阻塞阅读 */
+    }
   };
 
   const kernel: ReaderKernel = {
@@ -336,6 +354,7 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     applyAppearance(a: ReaderAppearance) {
       appearance = a;
       applyAppearanceToHost(a);
+      applyZoom(a);
     },
 
     getTOC(): ReaderTocItem[] {

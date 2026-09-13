@@ -129,9 +129,22 @@ function txtToMarkdown(text) {
   return paras.join("\n\n");
 }
 
-/** Markdown 导入：仅做行尾与 BOM 归一，语法直通（防注入由合成管线 html:false 保证） */
+/**
+ * Markdown 导入：行尾/BOM 归一 + 非正文噪音清洗（v29）。
+ * 微信文章等网页存档类 .md 常含网页 <style> 块与底栏 data-URI 图标：
+ * - <style>/<script> 原始块：合成管线 html:false 会把它们当转义文本显示成大段代码；
+ * - ![…](data:image/…) 数据图：多为 UI 图标（阅读/赞/分享），且使 documents.markdown 膨胀。
+ * 清洗只针对这两类明确噪音，正文不做任何改写；粘贴路径不走本函数（保持直通）。
+ */
 function markdownFromText(text) {
-  return String(text || "").replace(/\r\n?/g, "\n").replace(/^\uFEFF/, "").trim();
+  return String(text || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\uFEFF/, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/!\[[^\]]*\]\(\s*data:image\/[^)]*\)/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /** 文件名 → 书名（去扩展名） */

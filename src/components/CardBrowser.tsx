@@ -537,12 +537,23 @@ export function CardFace({
   // 答案面 = 原始图片（无任何遮挡覆盖）+ 答案文本。
   // v25：遮挡块支持矩形/椭圆/多边形（shapes 精确轮廓；无 shapes 的存量卡自动降级为 rects 矩形）
   if (card.cardType === "imageOcclusion" && card.occlusionJson) {
+    // v29（D26）：看图问答卡（rects 空数组挂图 + frontMarkdown 题面）——正面图下方渲染题面文字
+    const hasFrontText = !!(card.frontMarkdown && card.frontMarkdown !== "图中遮挡区域对应的是什么？");
     return (
       <div className="review-face">
         <div className="occlusion-stage">
           <img src={card.occlusionJson.assetPath} alt="" className="occlusion-img" />
           <OcclusionShapes occlusion={card.occlusionJson} cardOrd={card.cardOrd} hidden={showBack} />
         </div>
+        {hasFrontText && !showBack && (
+          <div className="review-front-text">
+            {onEdit ? (
+              <EditableText value={card.frontMarkdown} onCommit={(t) => onEdit({ frontMarkdown: t })} />
+            ) : (
+              card.frontMarkdown
+            )}
+          </div>
+        )}
         {showBack && (
           <div className="review-back">
             {onEdit ? (

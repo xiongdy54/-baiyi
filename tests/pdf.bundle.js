@@ -37343,12 +37343,15 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
       try {
         const dataUrl = canvas.toDataURL("image/png");
         const r = canvas.getBoundingClientRect();
+        const pageDiv = canvas.closest(".page");
+        const contextText = pageDiv ? (pageDiv.querySelector(".textLayer")?.textContent || "").replace(/\s+/g, " ").trim().slice(0, 600) || void 0 : void 0;
         const image = {
           src: dataUrl,
           alt: "",
           rect: { x: r.left, y: r.top, width: r.width, height: r.height },
           naturalWidth: canvas.width,
-          naturalHeight: canvas.height
+          naturalHeight: canvas.height,
+          contextText
         };
         imageHandlers.forEach((h) => h(image));
       } catch {
@@ -37360,6 +37363,15 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
       host.style.setProperty("--reader-bg", a.bgColor ?? "transparent");
       host.style.setProperty("--reader-fg", a.fgColor ?? "inherit");
       host.style.background = a.bgColor ?? "transparent";
+    };
+    const applyZoom = (a) => {
+      if (!doc) return;
+      try {
+        if (a.zoom === "page-width") viewer.currentScaleValue = "page-width";
+        else if (a.zoom === "page-fit") viewer.currentScaleValue = "page-fit";
+        else if (typeof a.zoom === "number") viewer.currentScale = a.zoom / 100;
+      } catch {
+      }
     };
     const kernel = {
       async open(source, init) {
@@ -37497,6 +37509,7 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
       applyAppearance(a) {
         appearance = a;
         applyAppearanceToHost(a);
+        applyZoom(a);
       },
       getTOC() {
         return tocCache.map((t) => ({ ...t }));
@@ -44110,6 +44123,14 @@ button.hasPopupMenu{
       check("P12 \u9996\u9875 next \u524D\u8FDB", okNext === true && kernel.getCurrentLocation()?.pageIndex === 1, String(okNext));
       const cfiGoto = await kernel.goTo({ cfi: "epubcfi(/6/2)" });
       check("P13 goTo(cfi) \u8FD4\u56DE false\uFF08PDF \u7CFB\u65E0 CFI\uFF09", cfiGoto === false, String(cfiGoto));
+      kernel.applyAppearance({ theme: "paper", zoom: 150 });
+      await wait(400);
+      const scale150 = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScale : null;
+      check("P15a zoom=150 \u2192 currentScale 1.5", Math.abs(Number(scale150) - 1.5) < 0.01, String(scale150));
+      kernel.applyAppearance({ theme: "paper", zoom: "page-width" });
+      await wait(400);
+      const scalePw = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
+      check("P15b zoom=page-width \u2192 currentScaleValue \u5207\u6362", scalePw === "page-width", String(scalePw));
       kernel.destroy();
       check("P14 destroy \u540E\u5BB9\u5668\u6E05\u7A7A", host.querySelectorAll("canvas").length === 0, "canvas=" + host.querySelectorAll("canvas").length);
       return check.results;

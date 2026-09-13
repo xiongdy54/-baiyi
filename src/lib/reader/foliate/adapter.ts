@@ -55,6 +55,39 @@ type FoliateView = HTMLElement & {
 
 type Handler = (e: CustomEvent) => void;
 
+/**
+ * v29 图片周边文字上下文提取（D26）：从章节 DOM 取图片所属块之上 1 个块、之下 2 个块的
+ * 文字（各限长 ~500 字）。供 AI 图片制卡结合上下文出题——与图片无关时由模型忽略。
+ */
+function extractImageContext(doc: Document, img: HTMLElement): string | undefined {
+  try {
+    const CAP = 500;
+    const textOf = (el: Element | null | undefined) =>
+      el ? (el.textContent || "").replace(/\s+/g, " ").trim().slice(0, CAP) : "";
+    // 图片所属块：img 的最近块级容器（p/li/figure…），退化到直接父节点
+    const block = img.closest("p, li, figure, blockquote, div") || img.parentElement;
+    if (!block) return undefined;
+    // 用户规格：上方 1 段 + 下方 2 段（下方首段常为图注）
+    const parts: string[] = [];
+    const above = block.previousElementSibling;
+    if (above) { const t = textOf(above); if (t) parts.push(t); }
+    // 块自身文字（图独立成块时通常为空；图文同块则捕获该段）
+    const own = textOf(block);
+    if (own) parts.push(own);
+    let below = block.nextElementSibling;
+    let belowCount = 0;
+    while (below && belowCount < 2) {
+      const t = textOf(below);
+      if (t) { parts.push(t); belowCount++; }
+      below = below.nextElementSibling;
+    }
+    const joined = parts.filter(Boolean).join("\n").trim();
+    return joined ? joined.slice(0, 1500) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   const view = document.createElement("foliate-view") as unknown as FoliateView;
   view.style.display = "block";
@@ -109,7 +142,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         alt: img.getAttribute("alt") || "",
         rect: { x: topLeft.x, y: topLeft.y, width: r.width, height: r.height },
         naturalWidth: img.naturalWidth || 0,
-        naturalHeight: img.naturalHeight || 0
+        naturalHeight: img.naturalHeight || 0,
+        contextText: extractImageContext(doc, img)
       };
       if (!image.src) return;
       imageHandlers.forEach((h) => h(image));

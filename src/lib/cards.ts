@@ -304,6 +304,8 @@ export const cardGenerator: {
       focus?: string;
       /** v25：用户在图片上手动选定的区域（百分比，相对原图）——遮挡区域以它为准，模型只负责读出内容 */
       presetRegion?: { rect: { x: number; y: number; w: number; h: number }; shape?: OcclusionShape | null; label?: string };
+      /** v29（D26）：图片周边文字上下文（上 1 段下 2 段），AI 相关则用无关则忽略 */
+      contextText?: string;
     },
     onProgress?: (chars: number) => void,
     onThinking?: (thinkChars: number) => void
@@ -373,6 +375,8 @@ export const cardGenerator: {
       // v25：用户已手绘区域的场景——图片是用户选区的裁剪，模型只负责读出该区域内容；
       // 指令经请求装配注入（与 generateCards 的 context.focus 同机制），提示词模板不变
       context.focus ? `【用户已选定的遮挡区域】${context.focus}` : "",
+      // v29（D26）：图片周边文字上下文——相关则结合出题，无关则由模型忽略
+      context.contextText ? `【图片周边文字上下文（图片上方 1 段 + 下方 2 段）】\n${context.contextText}\n（若与图片内容相关，可结合上下文出题；无关则忽略）` : "",
       context.title ? `【来源】《${context.title}》${context.section ? " · " + context.section : ""}` : ""
     ].filter(Boolean);
     const userContent: ({ type: "image_url"; image_url: { url: string } } | { type: "text"; text: string })[] = [
@@ -397,8 +401,91 @@ export const cardGenerator: {
     const result = extractJson(raw || acc);
     const preset = context.presetRegion;
     if (preset) {
-      // v25 用户选区模式（图片为选区裁剪）：遮挡区域 = 用户选定区域，绝不采用模型返回的 regions——
-      // 模型看到的是裁剪图，其坐标为裁剪坐标系，写进 occlusion_json 会在原图上错位
+      // v29 D26 选区即画布：模型 cards[] 逐张处理——
+      // imageOcclusion：card.regions（选区图百分比）→ 映射全图 + 钳制 → 每卡自带 rects
+      //   （单挖空 1 块；多挖空多块同遮同答）；qa：occlusionJson 挂图、rects 空数组、front 存题面。
+      // 裁剪坐标 → 全图坐标映射：fullX = px + rx × pw / 100（D26 公式），映射后钳制 [0,100]。
+      // 0 张有效卡 → 回退 D25 旧语义（整选区单卡），流程不死路。
+      const px = clampPct(preset.rect.x);
+      const py = clampPct(preset.rect.y);
+      const pw = Math.max(1, Math.min(100 - px, clampPct(preset.rect.w)));
+      const ph = Math.max(1, Math.min(100 - py, clampPct(preset.rect.h)));
+      const toFullX = (rx: number, rw: number) => {
+        const x = px + (clampPct(rx) * pw) / 100;
+        const w = (clampPct(rw) * pw) / 100;
+        return { x, w };
+      };
+      const toFullY = (ry: number, rh: number) => {
+        const y = py + (clampPct(ry) * ph) / 100;
+        const h = (clampPct(rh) * ph) / 100;
+        return { y, h };
+      };
+      const mappedCards: CardDraft[] = [];
+      const mappedRegions: OcclusionRegion[] = [];
+      let ordSeq = 0;
+      // v2 模型输出：每卡自带 regions（选区图百分比坐标）——CardDraft 类型无此字段，经 raw 视图读取
+      type RawRegion = { ord?: number; label?: string; x?: number; y?: number; w?: number; h?: number };
+      type RawCard = CardDraft & { regions?: RawRegion[] };
+      for (const rawCardRaw of result.cards ?? []) {
+        const rawCard = rawCardRaw as RawCard;
+        if (rawCard.cardType === "qa") {
+          // 看图问答卡：挂图无遮挡（rects 空数组），front 存题面文字
+          mappedCards.push({
+            ...rawCard,
+            cardType: "imageOcclusion",
+            ord: ordSeq,
+            occlusion: { assetPath: image.assetPath, ord: ordSeq, rects: [], shapes: null, label: "" }
+          });
+          ordSeq += 1;
+          continue;
+        }
+        // 遮挡卡：模型返回的每卡 regions（选区图坐标）映射回全图坐标
+        const cardRegions = (rawCard.regions ?? []).map((r, i) => {
+          const fx = toFullX(Number(r.x) || 0, Number(r.w) || 0);
+          const fy = toFullY(Number(r.y) || 0, Number(r.h) || 0);
+          // 过滤映射后 <1% 的退化区域（含越界裁剪），再钳制入界
+          if (fx.w < 1 || fy.h < 1) return null;
+          const x = clampPct(fx.x);
+          const y = clampPct(fy.y);
+          return {
+            ord: i,
+            label: String(r.label ?? ""),
+            x: Math.round(x * 10) / 10,
+            y: Math.round(y * 10) / 10,
+            w: Math.round(Math.min(100 - x, fx.w) * 10) / 10,
+            h: Math.round(Math.min(100 - y, fy.h) * 10) / 10
+          };
+        }).filter((r): r is NonNullable<typeof r> => r !== null);
+        if (cardRegions.length === 0) continue; // 无有效区域的遮挡卡丢弃
+        const rects = cardRegions.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, ord: r.ord }));
+        mappedCards.push({
+          ...rawCard,
+          cardType: "imageOcclusion",
+          ord: ordSeq,
+          occlusion: {
+            assetPath: image.assetPath,
+            ord: ordSeq,
+            rects,
+            shapes: null,
+            label: String(rawCard.back ?? cardRegions.map((r) => r.label).join("；"))
+          }
+        });
+        for (const r of cardRegions) mappedRegions.push({ ...r, ord: mappedRegions.length });
+        ordSeq += 1;
+      }
+      if (mappedCards.length > 0) {
+        result.cards = mappedCards;
+        result.regions = mappedRegions;
+        const batch0 = await window.batchesAPI?.create({
+          scope: "card-occlusion",
+          sourceText: `[图片选区] ${image.assetPath}`,
+          context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Mapped: true },
+          promptTemplateId: tpl.id,
+          result
+        });
+        return { batchId: batch0?.id || "", result, templateId: tpl.id };
+      }
+      // 回退 D25 旧语义：模型未产出有效卡 → 整选区单卡（流程不死路）
       const rect = {
         x: clampPct(preset.rect.x),
         y: clampPct(preset.rect.y),
@@ -407,19 +494,23 @@ export const cardGenerator: {
       };
       const shape = preset.shape ? normalizeShape({ ...preset.shape, ord: 0 }) : null;
       const rects = [{ x: rect.x, y: rect.y, w: rect.w, h: rect.h, ord: 0 }];
-      const cards = (result.cards ?? []).slice(0, 1); // 一个区域一张卡（与 D16 区域-卡一一对应一致）
-      if (cards.length === 0) throw new Error("模型未产出卡片，请重试或改用手动制卡");
-      for (const card of cards) {
-        card.cardType = "imageOcclusion";
-        card.ord = 0;
-        card.occlusion = {
+      const first = (result.cards ?? [])[0];
+      // 模型零卡也产出整选区单卡（流程不死路；back 用模型内容或空）
+      const fallbackCard: CardDraft = {
+        ...(first ?? {}),
+        cardType: "imageOcclusion",
+        ord: 0,
+        front: first?.front || "图中遮挡区域对应的是什么？",
+        back: first?.back || preset.label || "",
+        occlusion: {
           assetPath: image.assetPath,
           ord: 0,
           rects,
           shapes: shape ? [shape] : null,
-          label: String(card.back ?? preset.label ?? "")
-        };
-      }
+          label: String(first?.back ?? preset.label ?? "")
+        }
+      };
+      const cards = [fallbackCard];
       result.cards = cards;
       result.regions = [
         { ord: 0, label: String(cards[0].back ?? preset.label ?? ""), ...rect, shape: shape ?? undefined }
@@ -427,7 +518,7 @@ export const cardGenerator: {
       const batch0 = await window.batchesAPI?.create({
         scope: "card-occlusion",
         sourceText: `[图片选区] ${image.assetPath}`,
-        context: { ...context, imageAsset: image.assetPath, userRegion: true },
+        context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Fallback: true },
         promptTemplateId: tpl.id,
         result
       });
@@ -511,12 +602,13 @@ export function lintCard(draft: {
   const cloze = draft.cloze || "";
 
   // L11（v15 语义修正）：遮挡卡缺的是「资产/区域」，不再误判 front 文本；
-  // v25：区域既可由 rects 表达，也可由 shapes（矩形/椭圆/多边形）表达，二者取其一即算有效
+  // v25：区域既可由 rects 表达，也可由 shapes（矩形/椭圆/多边形）表达，二者取其一即算有效；
+  // v29（D26）：放宽为「有 asset 即有效」——看图问答卡（rects 空数组挂图）合法
   if (
     draft.cardType === "imageOcclusion" &&
-    !(draft.occlusion && occlusionShapes(draft.occlusion).length > 0 && draft.occlusion.assetPath)
+    !(draft.occlusion && draft.occlusion.assetPath)
   ) {
-    issues.push({ ruleId: "L11", severity: "error", message: "图像遮挡卡缺少图像资产或遮挡区域" });
+    issues.push({ ruleId: "L11", severity: "error", message: "图像遮挡卡缺少图像资产" });
   }
   if (back.replace(/\s/g, "").length > 60) {
     issues.push({ ruleId: "L1", severity: "warn", message: "back 信息过载（>60字），考虑拆分（规则4 最小信息）" });

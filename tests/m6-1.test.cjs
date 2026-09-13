@@ -174,6 +174,29 @@ ${images.map((im, i) => `<Relationship Id="rIdImg${i}" Type="http://schemas.open
   ok(importers.titleFromFilename("三体 Ⅰ：面壁者.txt") === "三体 Ⅰ：面壁者", "文件名→书名：去扩展名");
   ok(importers.titleFromFilename("notes") === "notes", "文件名→书名：无扩展名原样");
 
+  // ---------- v29 Markdown 噪音清洗（微信网页存档类） ----------
+  section("v29 Markdown 噪音清理（微信网页存档类 .md）");
+  const wechatMd = [
+    "# 只要跑不死、就往死里跑",
+    "<style>",
+    "* { margin: 0; padding: 0; }",
+    "body { font-family: 'PingFang SC'; }",
+    "</style>",
+    "",
+    "正文第一段，讲绩效主义。",
+    "",
+    "![](data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3C/svg%3E) 赞",
+    "![](data:image/png;base64,AAAA) 分享"
+  ].join("\n");
+  const cleaned = importers.markdownFromText(wechatMd);
+  ok(!cleaned.includes("<style>") && !cleaned.includes("margin: 0"), "清洗：style 块整体剔除");
+  ok(!cleaned.includes("data:image"), "清洗：data-URI 图标行剔除");
+  ok(cleaned.includes("# 只要跑不死、就往死里跑") && cleaned.includes("正文第一段"), "清洗：正文完整保留");
+  ok(!cleaned.includes("script"), "清洗：script 块同样剔除（大小写不敏感）");
+  const scriptMd = importers.markdownFromText("正文前<SCRIPT>var x=1;</SCRIPT>正文后");
+  ok(scriptMd === "正文前正文后", "清洗：script 块（大写）剔除且不误伤正文");
+  ok(importers.markdownFromText("普通段落 a\n\n普通段落 b").includes("data:") === false, "清洗：普通内容不受影响");
+
   // ---------- M6-1-3 合成 EPUB 图片能力（syn-2） ----------
   section("M6-1-3 合成 EPUB 图片能力（syn-2）");
   ok(epub.SYNTH_GENERATOR_VERSION === "syn-2", "syn 版本：syn-2（结构变更纪律 §7.1.11）");

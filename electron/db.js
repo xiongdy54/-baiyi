@@ -14,6 +14,7 @@ const {
   CARD_WORDING_PROMPT,
   CARD_BASIC_PROMPT,
   CARD_OCCLUSION_PROMPT,
+  CARD_OCCLUSION_PROMPT_V2,
   READER_EXPLAIN_PROMPT,
   LEECH_RESCUE_PROMPT
 } = require("./prompts");
@@ -1083,6 +1084,15 @@ function ensurePromptTemplates() {
     db.run(
       "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, 'card-occlusion', '图片挖空 v1', ?, 1, 1, ?)",
       [crypto.randomUUID(), CARD_OCCLUSION_PROMPT, now]
+    );
+  }
+  // v29（D26）：card-occlusion v2——内容感知混合卡型（每卡自带 regions/qa 看图问答）。
+  // 主软件直插候选版（用户真实书籍实测反馈即闭环输入，后续调优走测试台）；v1 留痕。
+  const occMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'card-occlusion'")[0]?.v || 0;
+  if (Number(occMaxV) < 2) {
+    db.run(
+      "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, created_at) VALUES (?, 'card-occlusion', '图片制卡内容感知 v2（候选）', ?, 2, 1, ?)",
+      [crypto.randomUUID(), CARD_OCCLUSION_PROMPT_V2, now]
     );
   }
   // v16：card-literature 兼管播种——文学/诗歌材料自动路由到该 scope，主软件暂由 card-seq

@@ -153,6 +153,8 @@ export default function Reader({
     dataUrl: string;
     alt: string;
     rect: OcclusionRect;
+    /** v29 图片周边文字上下文（D26）：AI 制卡结合上下文出题 */
+    contextText?: string;
   } | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
   const [aiPanel, setAiPanel] = useState<{
@@ -246,6 +248,21 @@ export default function Reader({
   const readerSettingsRef = useRef(readerSettings);
   readerSettingsRef.current = readerSettings;
 
+  // v29 选区菜单一击消失：菜单打开时，任何落在菜单/AI 面板/弹窗之外的 mousedown 立即关闭菜单。
+  // （此前关闭只挂各 surface 的 pointerup——首点落在菜单/控制条等未跟踪元素时，文本选中已消失而菜单残留）
+  useEffect(() => {
+    if (!selection) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && typeof t.closest === "function" &&
+        (t.closest(".selection-menu") || t.closest(".ai-panel") || t.closest(".modal-panel") || t.closest(".image-focus-layer"))) return;
+      setSelection(null);
+      engineSelRef.current = null;
+    };
+    document.addEventListener("mousedown", onDocMouseDown, true);
+    return () => document.removeEventListener("mousedown", onDocMouseDown, true);
+  }, [selection]);
+
   useEffect(() => {
     if (!engineMode) return;
     settingsStore
@@ -277,6 +294,12 @@ export default function Reader({
     // 整体换色（v20.1）：暗夜=软件夜间模式；纸白/羊皮=浅色；自定义不动软件主题
     if (theme === "dark") onSwitchAppTheme?.("dark");
     else if (theme === "paper" || theme === "sepia") onSwitchAppTheme?.("light");
+  };
+  // v29 PDF 专用缩放（foliate 引擎无此控件）
+  const changeReaderZoom = (zoom: NonNullable<ReaderAppearance["zoom"]>) => {
+    const next = { ...readerSettingsRef.current, appearance: { ...readerSettingsRef.current.appearance, zoom } };
+    persistReaderSettings(next);
+    kernelRef.current?.applyAppearance(resolveAppearance(next));
   };
 
   // 外观变量上提到滚动容器：控件/目录/背景统一随 --reader-* 变化（iframe 内由内核注入）
@@ -328,6 +351,7 @@ export default function Reader({
   }, []);
 
   // v25 图片点选聚焦：正文图片点击 → 取字节为 dataURL → 进入聚焦覆盖层（选区工具条）
+  // v29：携带图片周边文字上下文（D26），供 AI 制卡结合上下文出题
   const handleEngineImageClick = useCallback(
     async (img: ReaderImageRef) => {
       if (manualOpen || aiPanel || focusImage) return; // 弹层/聚焦在场时不重复进入
@@ -342,7 +366,8 @@ export default function Reader({
         src: img.src,
         dataUrl,
         alt: img.alt,
-        rect: { x: img.rect.x, y: img.rect.y, w: img.rect.width, h: img.rect.height }
+        rect: { x: img.rect.x, y: img.rect.y, w: img.rect.width, h: img.rect.height },
+        contextText: img.contextText
       });
     },
     [manualOpen, aiPanel, focusImage, showToast]
@@ -728,8 +753,11 @@ export default function Reader({
         {
           title: sourceTitle,
           section: contextLabel,
-          focus: "遮挡区域已由用户在图片上手动选定（矩形/圆形/多边形），本次发送的图片正是该区域的裁剪。请只识别该区域内的内容，产出 1 张卡，back 填该内容的简洁答案。",
-          presetRegion: { rect: payload.bbox, shape: payload.shape }
+          // v29 D26：选区 = AI 的完整图片范围，按制卡原则识别内容类型、自选考察方式、
+          // 产出多张混合卡（含一卡多挖空）；regions 为选区图百分比坐标（cards.ts 负责映射回全图）。
+          focus: "用户已在你看到的这张图（选区裁剪）上圈定了制卡范围。请结合下方（如提供）图片周边文字上下文，识别图片内容类型与可测试点，按制卡原则自选考察方式，产出多张混合卡：单挖空遮挡卡、一卡多挖空遮挡卡（同卡多个区域同遮同答，如思维导图同分支的多个关键词）、看图问答卡（cardType=qa，正面图+题面文字）。遮挡必须留有可推断线索，禁止把整个选区作为单一遮挡（除非选区内确只有一个测试点）。所有 regions 坐标为这张选区图的百分比。",
+          presetRegion: { rect: payload.bbox, shape: payload.shape },
+          contextText: focused.contextText
         },
         (chars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, progress: chars } : p)),
         (thinkChars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, thinking: thinkChars } : p))
@@ -1095,6 +1123,11 @@ export default function Reader({
       frontMarkdown: d.front || "",
       backMarkdown: d.back || "",
       clozeOrds: [],
+      // v29（D26）：看图问答卡随 draft 带图（occlusionJson 挂图、rects 空数组），CardFace 图文卡面渲染
+      occlusionJson: d.occlusion
+        ? { rects: d.occlusion.rects, assetPath: d.occlusion.assetPath, shapes: d.occlusion.shapes ?? null }
+        : null,
+      cardOrd: d.ord ?? null,
       contextPrefix: d.contextPrefix || null,
       contextRef: enrichedContextRef(),
       mnemonic: d.mnemonic || null,
@@ -1112,6 +1145,7 @@ export default function Reader({
       back: card.backMarkdown,
       cardType: card.cardType,
       cloze,
+      occlusion: card.occlusionJson ? { assetPath: card.occlusionJson.assetPath, rects: card.occlusionJson.rects } : null,
       contextPrefix: card.contextPrefix,
       sourceRef: card.sourceRef,
       dateStamp: card.dateStamp,
@@ -1292,6 +1326,24 @@ export default function Reader({
                     ]}
                     onChange={(t) => changeReaderTheme(t as ReaderAppearance["theme"])}
                   />
+                  {engineKind === "pdf" && (
+                    <Dropdown
+                      align="left"
+                      title="缩放"
+                      value={String(readerSettings.appearance.zoom ?? "page-width")}
+                      options={[
+                        { value: "page-width", label: "适应宽度" },
+                        { value: "page-fit", label: "适应页面" },
+                        { value: "50", label: "50%" },
+                        { value: "75", label: "75%" },
+                        { value: "100", label: "100%" },
+                        { value: "125", label: "125%" },
+                        { value: "150", label: "150%" },
+                        { value: "200", label: "200%" }
+                      ]}
+                      onChange={(v) => changeReaderZoom(v === "page-width" || v === "page-fit" ? v : Number(v))}
+                    />
+                  )}
                 </div>
               </div>
               <div className="reader-engine-viewport">
@@ -2023,25 +2075,19 @@ function AIPanel({
                 ruleNotes: toList((rawDraft as CardDraft)?.ruleNotes),
                 warnings: toList((rawDraft as CardDraft)?.warnings)
               };
-              const issues = isOcclusion
-                ? lintCard({
-                    front: d.front,
-                    back: d.back,
-                    cardType: d.cardType,
-                    occlusion: d.occlusion ? { assetPath: d.occlusion.assetPath, rects: d.occlusion.rects } : null,
-                    contextPrefix: d.contextPrefix,
-                    sourceRef: d.sourceRef,
-                    dateStamp: d.dateStamp
-                  })
-                : lintCard({
-                    front: d.front,
-                    back: d.back,
-                    cardType: d.cardType,
-                    cloze: d.cloze || null,
-                    contextPrefix: d.contextPrefix,
-                    sourceRef: d.sourceRef,
-                    dateStamp: d.dateStamp
-                  });
+              // v29 D26 逐张分流：面板可混排遮挡卡与看图问答卡——按 draft 自身判断
+              // 遮挡 draft = imageOcclusion 且带非空 rects；看图问答 draft = imageOcclusion 且 rects 空（挂图无遮挡）
+              const dIsOcc = d.cardType === "imageOcclusion" && !!d.occlusion && d.occlusion.rects.length > 0;
+              const issues = lintCard({
+                front: d.front,
+                back: d.back,
+                cardType: d.cardType,
+                occlusion: d.occlusion ? { assetPath: d.occlusion.assetPath, rects: d.occlusion.rects } : null,
+                cloze: d.cloze || null,
+                contextPrefix: d.contextPrefix,
+                sourceRef: d.sourceRef,
+                dateStamp: d.dateStamp
+              });
               const isEditing = editing === i;
               const editText = editValues[i] ?? {};
               const shownFront = editText.front !== undefined ? editText.front : (d.cardType === "cloze" ? d.cloze || d.front : d.front);
@@ -2106,7 +2152,7 @@ function AIPanel({
                         </div>
                       </div>
                       <div className="ai-draft-back">{d.back}</div>
-                      {isOcclusion && occlLabel && (
+                      {dIsOcc && occlLabel && (
                         <div className="ai-draft-notes mono">区域 {(d.ord ?? d.occlusion?.ord ?? 0) + 1} · {occlLabel}</div>
                       )}
                       {toList(d.ruleNotes).length > 0 && (
@@ -2125,13 +2171,13 @@ function AIPanel({
                         </div>
                       )}
                       <div className="ai-actions">
-                        {isOcclusion ? (
+                        {dIsOcc ? (
                           <button className="btn btn-primary btn-sm" onClick={() => onAcceptOcclusion(d, i)}>接受</button>
                         ) : (
                           <button className="btn btn-primary btn-sm" onClick={() => onAccept(d, i)}>接受</button>
                         )}
                         <button className="btn btn-secondary btn-sm" onClick={() => setEditing(i)}>编辑</button>
-                        {!isOcclusion && d.cardType === "qa" && (
+                        {d.cardType === "qa" && (
                           <button
                             className="btn btn-secondary btn-sm"
                             title="拆为两张互为翻转的独立问答卡（各自有独立 FSRS 调度状态）"

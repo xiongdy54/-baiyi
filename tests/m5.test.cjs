@@ -85,13 +85,14 @@ if (cardsLint) {
     occlusion: { assetPath: "bookasset://x/y.png", rects: [], shapes: [{ ord: 0, kind: "polygon", points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: 10 }] }] }
   });
   check("只有 shapes 的遮挡卡不触发 L11", !withShapes.some((i) => i.ruleId === "L11"), "无 L11", withShapes);
+  // v29（D26）：asset + 空 rects = 看图问答卡，合法不报错（L11 放宽为有 asset 即有效）
   const noRegion = cardsLint.lintCard({
     front: "x",
     back: "y",
     cardType: "imageOcclusion",
     occlusion: { assetPath: "bookasset://x/y.png", rects: [], shapes: [] }
   });
-  check("无区域仍触发 L11（error）", noRegion.some((i) => i.ruleId === "L11" && i.severity === "error"), "L11/error", noRegion);
+  check("D26 看图问答卡（asset+空 rects）不触发 L11", !noRegion.some((i) => i.ruleId === "L11"), noRegion);
   const noAsset = cardsLint.lintCard({
     front: "x",
     back: "y",
@@ -103,21 +104,24 @@ if (cardsLint) {
   console.log("  （跳过 M5-7：m5.cards.bundle.cjs 不存在，见文件头打包命令）");
 }
 
-// ---------- M5-8 用户选区 AI 链路（crop 坐标系安全）----------
-// 关键不变量：presetRegion 场景下，遮挡区域必须取用户选区（原图百分比），
-// 绝不能用模型返回的 regions —— 模型看到的图片是「选区裁剪」，其坐标属于裁剪坐标系。
+// ---------- M5-8 用户选区 AI 链路（v29 D26：选区即画布，映射多卡 + qa + 回退）----------
 async function runRegionAI() {
-  console.log("== M5-8 用户选区 AI 链路（presetRegion = 遮挡区域唯一来源） ==");
+  console.log("== M5-8 用户选区 AI 链路（D26：映射多卡 / qa / 回退 / contextText） ==");
+  // 模型输出（选区图坐标系）：遮挡卡（2 regions 一卡多挖空）+ qa 卡 + 一张映射后 w<1 的无效卡
   const modelJson = JSON.stringify({
     knowledgePoints: [{ id: "kp1", summary: "图中内容" }],
     blockReasons: [],
-    // 模型在「裁剪图」坐标系里给区域（故意给离谱值，验证不会被采纳）
-    regions: [{ ord: 0, label: "模型标签", x: 1, y: 1, w: 5, h: 5 }],
-    cards: [{ cardType: "imageOcclusion", ord: 0, front: "图中遮挡区域对应的是什么？", back: "海马体", domain: ["57"] }]
+    cards: [
+      { cardType: "imageOcclusion", ord: 0, front: "图中遮挡区域对应的是什么？", back: "海马体；杏仁核", domain: ["57"],
+        regions: [ { ord: 0, label: "海马体", x: 50, y: 50, w: 25, h: 25 }, { ord: 1, label: "杏仁核", x: 0, y: 0, w: 25, h: 25 } ] },
+      { cardType: "qa", ord: 1, front: "根据此图说明海马体的功能", back: "记忆编码与空间导航", regions: [] },
+      { cardType: "imageOcclusion", ord: 2, front: "坏卡", back: "越界", regions: [ { ord: 0, label: "越界", x: 150, y: 150, w: 1, h: 1 } ] }
+    ]
   });
+  const createdBatches = [];
   const windowStub = {
-    promptsAPI: { get: async () => ({ id: "tpl-occ", content: "（提示词）" }) },
-    batchesAPI: { create: async () => ({ id: "batch-1" }) },
+    promptsAPI: { get: async () => ({ id: "tpl-occ", content: "（提示词 v2）" }) },
+    batchesAPI: { create: async (p) => { createdBatches.push(p); return { id: "batch-1" }; } },
     aiAPI: {
       onStream: (cb) => {
         windowStub.__cb = cb;
@@ -136,14 +140,32 @@ async function runRegionAI() {
   const rect = { x: 30, y: 40, w: 40, h: 40 };
   const { result } = await cardsLint.cardGenerator.generateOcclusionCards(
     { dataUrl: "data:image/png;base64,AAAA", assetPath: "bookasset://x/crop.png" },
-    { title: "测试书", focus: "（用户已选定区域）", presetRegion: { rect, shape } }
+    { title: "测试书", focus: "（v29 D26 文案）", presetRegion: { rect, shape }, contextText: "上方段落。下方图注。" }
   );
-  const occ = result.cards[0].occlusion;
-  check("用户选区链路：遮挡区域取用户选区而非模型 regions", occ.rects[0].x === 30 && occ.rects[0].w === 40, rect, occ.rects[0]);
-  check("用户选区链路：形状随卡落库（polygon 三顶点）", occ.shapes[0].kind === "polygon" && occ.shapes[0].points.length === 3, "polygon×3", occ.shapes[0]);
-  check("用户选区链路：资产沿用整图 assetPath", occ.assetPath === "bookasset://x/crop.png", "bookasset://x/crop.png", occ.assetPath);
-  check("用户选区链路：back 取模型读出的内容", result.cards[0].back === "海马体", "海马体", result.cards[0].back);
-  check("用户选区链路：确认面板 regions 携带形状", result.regions[0].shape && result.regions[0].shape.kind === "polygon", "polygon", result.regions[0].shape);
+  check("D26 映射：产出 2 张有效卡（遮挡+qa，无效卡被丢弃）", result.cards.length === 2, result.cards.length);
+  const occCard = result.cards[0];
+  const occ = occCard.occlusion;
+  check("D26 映射：一卡多挖空（每卡自带 2 rects）", occCard.cardType === "imageOcclusion" && occ.rects.length === 2, occ.rects.length);
+  // 裁剪坐标→全图坐标映射：region(x=50,w=25) → x=30+50*40/100=50, w=25*40/100=10
+  check("D26 映射公式：fullX = px + rx×pw/100", occ.rects[0].x === 50 && occ.rects[0].w === 10, occ.rects[0]);
+  check("D26 映射公式：region(x=0) → x=px", occ.rects[1].x === 30 && occ.rects[1].w === 10, occ.rects[1]);
+  check("D26 多挖空：regions 每卡自带（共享 rects 模式废除）", occ.rects.every(r => r.ord === 0 || r.ord === 1), occ.rects.map(r=>r.ord));
+  check("D26 资产沿用整图 assetPath", occ.assetPath === "bookasset://x/crop.png", occ.assetPath);
+  check("D26 back 取模型内容", result.cards[0].back === "海马体；杏仁核", result.cards[0].back);
+  const qaDraft = result.cards[1];
+  check("D26 qa 卡：rects 空数组挂图 + front 题面", qaDraft.occlusion.rects.length === 0 && qaDraft.front.includes("海马体的功能"), JSON.stringify(qaDraft.occlusion));
+  check("D26 contextText 注入请求上下文", createdBatches.some(b => b.context && b.context.contextText === "上方段落。下方图注。"), JSON.stringify(createdBatches.map(b=>b.context&&b.context.contextText)));
+  // 回退：模型无有效卡 → 整选区单卡（D25 旧语义保留为回退）
+  const modelJsonEmpty = JSON.stringify({ knowledgePoints: [], blockReasons: [], cards: [] });
+  windowStub.__cb2 = null;
+  windowStub.aiAPI.chat = (rid) => { setTimeout(() => { windowStub.__cb(rid, { delta: modelJsonEmpty }); windowStub.__cb(rid, { done: true }); }, 0); };
+  const fb = await cardsLint.cardGenerator.generateOcclusionCards(
+    { dataUrl: "data:image/png;base64,AAAA", assetPath: "bookasset://x/crop.png" },
+    { title: "测试书", presetRegion: { rect, shape } }
+  );
+  const fbOcc = fb.result.cards[0].occlusion;
+  check("D26 回退：无有效卡 → 整选区单卡", fb.result.cards.length === 1 && fbOcc.rects[0].x === 30 && fbOcc.rects[0].w === 40, fbOcc.rects[0]);
+  check("D26 回退：polygon 形状随卡落库", fbOcc.shapes[0].kind === "polygon", fbOcc.shapes[0]);
   delete global.window;
 }
 (async () => {
