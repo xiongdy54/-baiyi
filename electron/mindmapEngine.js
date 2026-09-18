@@ -178,11 +178,19 @@ function buildCallPayloads(params, promptOf) {
   const calls = [];
   const header = `【材料】${params.title || "材料知识导图"}\n`;
 
-  // 1) section 组：叶子分析节点按覆盖区间文本分组（同 range 兄弟一次调用，杜绝同文重复计费）
+  // 1) section 组：叶子分析节点按覆盖区间文本分组（同 range 兄弟一次调用，杜绝同文重复计费）。
+  // v48.6（用户实测：单章书零调用）——TOC 顶层塌缩后分析树可能只剩 scope 根自己（无子节点），
+  // 此时根由一次 section 调用负责全文首层分析（global 需有已分析子节点才触发，单章书不满足）。
+  const scopeRootEntry = model.flat.find((x) => keyOf(x) === scopeKey);
   const leafNodes = analyzedInScope.filter((x) => {
     const kids = (model.childrenOf.get(keyOf(x)) || []).filter((k) => analyzed.has(k));
     return kids.length === 0;
   });
+  const isSingleRootScope = leafNodes.length === 0 && scopeRootEntry && analyzed.has(scopeKey);
+  if (isSingleRootScope) {
+    // 单根 scope：把根自身当作唯一叶（覆盖其全部区间）
+    leafNodes.push(scopeRootEntry);
+  }
   const groups = new Map(); // rangeSignature → {nodeKeys:[], units:[]}
   for (const x of leafNodes) {
     const k = keyOf(x);

@@ -225,6 +225,29 @@ app.whenReady().then(async () => {
     check("重命名重生成完成", r15.status === "completed", r15.status);
     check("remap 沿锚/quoteHash 重叠命中（不依赖标题）", r15.remap && Object.values(r15.remap).length >= 2, r15.remap);
 
+    console.log("---- M15R-E13 单章书（TOC 顶层塌缩后仅剩根） ----");
+    const singleP = {
+      documentId: "doc-e10",
+      title: "单章哲学笔记",
+      tocItems: [{ anchor: "c0.xhtml", label: "正文" }],
+      unitAnchors: ["c0.xhtml"],
+      textByUnit: { "c0.xhtml": "泰勒斯认为水是万物本原。阿那克西曼德提出无定说。赫拉克利特主张万物流变。" },
+      scopeAnchor: "book",
+      granularity: "detailed"
+    };
+    const pvS = engine.preview(ctx, singleP);
+    check("单章书 preview 非零（调用与字数）", pvS.newCalls >= 1 && (pvS.charsExact || 0) > 0, { n: pvS.newCalls, c: pvS.charsExact });
+    fakeChats = [
+      { title: "早期哲学三杰", authorialRole: "grouping", expandable: false, stopReason: "atomic_structure", children: [], evidence: [{ unitAnchor: "c0.xhtml", quote: "泰勒斯认为水是万物本原", startOffset: 0 }] },
+      { ops: [], changeLog: [] },
+      { status: "pass", issues: [], summary: "ok" }
+    ];
+    const baseS = consumed;
+    const r16 = await engine.generate(ctx, singleP);
+    check("单章书生成完成（section 调用覆盖全文）", r16.status === "completed" && consumed - baseS >= 3, { status: r16.status, used: consumed - baseS });
+    const mS = db.getActiveMaterialMap("doc-e10", "book");
+    check("单章书导图落库（无「正文」伪节点）", mS && mS.structure.nodes.some((n) => n.title === "早期哲学三杰") && !mS.structure.nodes.some((n) => n.title === "正文"), mS && mS.structure.nodes.map((n) => n.title));
+
     console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
     const kpBefore = JSON.stringify(db.listKnowledgePoints());
     check("导图全程零写知识图谱", JSON.stringify(db.listKnowledgePoints()) === kpBefore, "");

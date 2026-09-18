@@ -117,9 +117,11 @@ try {
   check("文本提取完成后进入空态（尚未生成）", es.empty === true && es.desc === true, emptyState);
   check("无 Key 降级说明在场（不弹错误窗）", (await main.eval(`document.body.textContent.includes("配置 AI Key 后可生成新的材料知识导图")`)) === true, "");
 
-  // 2. 无 Key：无「发送前预览」按钮（生成入口不可达 = 不会自动调用模型）
+  // 2. 无 Key：无「发送前预览」按钮（生成入口不可达 = 不会自动调用模型）；范围选择已撤（恒整份材料）
   const noPreviewBtn = await main.eval(`(() => { return ![...document.querySelectorAll(".mindmap-sidebar button")].some((x) => x.textContent.includes("发送前预览")); })()`);
   check("无 Key 时无发送前预览按钮（生成不可达）", noPreviewBtn === true, noPreviewBtn);
+  const noScopeSelect = await main.eval(`(() => { return !document.querySelector(".mindmap-sidebar select"); })()`);
+  check("范围下拉已撤（恒整份材料）", noScopeSelect === true, noScopeSelect);
 
   // 3. 「正文」返回：工作区关闭、阅读器在场（内核保活——阅读控制条与目录按钮仍在）
   const back = await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);

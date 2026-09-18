@@ -48,7 +48,8 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [phase, setPhase] = useState<Phase>("loading");
   const [collect, setCollect] = useState<{ tocItems: { anchor: string; label: string; children?: unknown[] }[]; unitAnchors: string[]; textByUnit: Record<string, string> } | null>(null);
   const [collectMsg, setCollectMsg] = useState("");
-  const [scopeAnchor, setScopeAnchor] = useState("book");
+  // v48.6（用户拍板）：章节识别尚不精确，生成范围选择暂撤——恒为整份材料；待统一章节识别后再恢复
+  const scopeAnchor = "book";
   // v48.5（用户拍板）：覆盖粒度选项移除，系统内部恒用 detailed——详细程度是内部质量标准而非用户选项
   const granularity: "overview" | "standard" | "detailed" = "detailed";
   const [preview, setPreview] = useState<MapPreview | null>(null);
@@ -544,7 +545,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
             <div className="mindmap-canvas-hint">当前材料没有可提取的文本结构（无目录且无章节），无法生成导图。</div>
           ) : phase === "failed" ? (
             <div className="mindmap-canvas-hint mindmap-fail">{failText || "生成失败"}</div>
-          ) : (
+          ) : phase === "loading" || phase === "collecting" ? (
             <div className="mindmap-skeleton" aria-label={statusLine}>
               <div className="mindmap-skeleton-row" style={{ width: "30%" }} />
               <div className="mindmap-skeleton-row" style={{ width: "52%" }} />
@@ -552,10 +553,14 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
               <div className="mindmap-skeleton-row" style={{ width: "58%" }} />
               <p className="mindmap-status">{statusLine}</p>
             </div>
+          ) : (
+            <div className="mindmap-canvas-hint" aria-label={statusLine}>
+              {statusLine || "准备中…"}
+            </div>
           )}
         </div>
         <aside className="mindmap-sidebar">
-          {phase !== "done" && phase !== "empty" && phase !== "failed" && phase !== "review_failed" && (
+          {(phase === "loading" || phase === "collecting") && (
             <div className="mindmap-skeleton-side" aria-hidden="true">
               <div className="mindmap-skeleton-row" style={{ width: "70%" }} />
               <div className="mindmap-skeleton-row" style={{ width: "50%" }} />
@@ -567,16 +572,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
               {(phase === "empty" || phase === "preview" || phase === "done") && (
                 <section className="mindmap-side-sec">
                   <h3>生成范围与覆盖</h3>
-                  <label className="mindmap-field">
-                    <span>范围</span>
-                    <select value={scopeAnchor} onChange={(e) => setScopeAnchor(e.target.value)}>
-                      {scopeOptions.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <p className="mindmap-hint">范围：整份材料（{title}）。章节识别能力完善后将恢复范围选择。</p>
                   <p className="mindmap-hint">按「详细」标准生成：逐层深挖至作者组织单元的原子结构，永不截断所选范围内的原文。</p>
                   <button className="btn btn-primary btn-sm mindmap-wide" onClick={handlePreview} disabled={!collect}>
                     {phase === "done" ? "重新生成（先预览）" : "发送前预览"}
@@ -588,7 +584,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                   <h3>发送前预览</h3>
                   <ul className="mindmap-preview-list">
                     <li>材料：{title}</li>
-                    <li>范围：{scopeOptions.find((o) => o.value === scopeAnchor)?.label || scopeAnchor}</li>
+                    <li>范围：整份材料</li>
 <li>
                       缓存命中：{preview.cacheHits || 0} / {preview.callsTotal || 0}（另含终编辑与评审 {preview.fixedCalls || 2} 次，随缓存变动）
                     </li>
