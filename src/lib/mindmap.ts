@@ -66,6 +66,9 @@ export interface MapPreview {
   newCalls?: number;
   cacheHits?: number;
   fixedCalls?: number;
+  expandFirstWave?: number;
+  budget?: number;
+  sourceCharsExact?: number;
   charsExact?: number;
   estInputTokens?: number;
   estOutputTokens?: number;

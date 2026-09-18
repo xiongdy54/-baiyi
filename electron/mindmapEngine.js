@@ -228,6 +228,7 @@ function buildCallPayloads(params, promptOf) {
       system: promptOf("material-map-section"),
       user,
       chars: user.length,
+      sourceChars: g.units.reduce((t, u) => t + (textByUnit.get(u) || "").length, 0), // v48.7 原文精确口径
       cacheKey: { textHash: sha256(g.units.map((u) => textByUnit.get(u) || "").join("\n")) }
     });
   }
@@ -379,6 +380,7 @@ function preview(ctx, params) {
   let charsNew = 0;
   let estInput = 0;
   let estOutput = 0;
+  let sourceCharsExact = 0; // v48.7：待发送原文字数只统计 section 实际原文（merge/global 发送的是派生摘要，非原文）
   const callViews = [];
   for (const call of plan.calls) {
     const scope = RUN_KIND_SCOPE[call.runKind];
@@ -402,6 +404,7 @@ function preview(ctx, params) {
       estInput += estimateTokensOf(call.user);
       estOutput += EST_OUTPUT_TOKENS[call.runKind] || 700;
     }
+    if (call.runKind === "section") sourceCharsExact += call.sourceChars || 0;
     callViews.push({ runKind: call.runKind, label: call.label, chars: call.chars, cached: !!hit });
   }
   // 终编辑与语义评审是管线的固定尾调用（缓存键依赖最终结构 JSON，preview 阶段无法精确预估命中）——
@@ -425,6 +428,8 @@ function preview(ctx, params) {
     cacheHits,
     fixedCalls,
     expandFirstWave,
+    budget: maxCallsOf(ctx),
+    sourceCharsExact,
     charsExact: plan.calls.reduce((s, c) => s + c.chars, 0),
     estInputTokens: estInput,
     estOutputTokens: estOutput,
@@ -597,7 +602,9 @@ async function generate(ctx, params, runId) {
       if (n.id === "root") continue;
       n.sourceKind = n.sourceKind || ((n.unitAnchors && n.unitAnchors.length) ? "toc_owned" : "derived_group");
       const d = depthOfNode.get(n.id) || 0;
-      if (n.expandable === true) {
+      // 仅深挖「无子节点的叶」：section 已给出 children 的节点以该层为准（其子各自按 expandable 入队），
+      // 否则 expand 输出与 section children 双挂树（重复节点——实测抓到）
+      if (n.expandable === true && (n.childIds || []).length === 0) {
         if (d >= MAX_EXPAND_DEPTH) { n.stopReason = "max_depth"; bumpStop("max_depth"); }
         else enqueue(n, d);
       } else if (d > 0) bumpStop(n.stopReason || "atomic_structure");
@@ -632,6 +639,8 @@ async function generate(ctx, params, runId) {
         system: templateText(ctx, RUN_KIND_SCOPE.section),
         user,
         chars: user.length,
+        // v48.7：深挖的原文=被深挖节点的文本（text 已是纯原文拼接）
+        sourceChars: text.length,
         cacheKey: {
           ...common,
           unitAnchor: `exp:${job.fp.slice(0, 16)}`,

@@ -87,7 +87,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       const expanded = new Set<string>();
       const walkL = (id: string, depth: number) => {
         expanded.add(id);
-        if (depth >= 2) return;
+        if (depth >= 1) return; // 展开集 = L0/L1 → L2 可见、L3 折叠（验收树形：材料→一级→二级可见）
         for (const c of byId.get(id)?.childIds || []) walkL(c, depth + 1);
       };
       walkL(rootId, 0);

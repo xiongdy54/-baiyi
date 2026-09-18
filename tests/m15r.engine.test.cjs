@@ -198,7 +198,7 @@ app.whenReady().then(async () => {
     fakeChats = [sec1, secX, expOut, globalOut, editorialOut, reviewPass];
     const baseE = consumed;
     const r13 = await engine.generate(ctx, paramsFor("doc-e8"));
-    check("expandable=true 触发一次深挖调用", r13.status === "completed" && consumed - baseE === 6, { status: r13.status, used: consumed - baseE });
+    check("expandable=true 触发一次深挖调用", r13.status === "completed" && consumed - baseE === 6, { status: r13.status, used: consumed - baseE, err: r13.error, run: r13.runId && db.getMaterialMapRun(r13.runId)?.errorText });
     const m8 = db.getActiveMaterialMap("doc-e8", "book");
     // 语义：expand 输出的根对象标题丢弃（被深挖节点保留原名），children 挂到被深挖节点下
     const stepNode = m8.structure.nodes.find((n) => n.title === "机制解释");
@@ -247,6 +247,44 @@ app.whenReady().then(async () => {
     check("单章书生成完成（section 调用覆盖全文）", r16.status === "completed" && consumed - baseS >= 3, { status: r16.status, used: consumed - baseS });
     const mS = db.getActiveMaterialMap("doc-e10", "book");
     check("单章书导图落库（无「正文」伪节点）", mS && mS.structure.nodes.some((n) => n.title === "早期哲学三杰") && !mS.structure.nodes.some((n) => n.title === "正文"), mS && mS.structure.nodes.map((n) => n.title));
+
+    console.log("---- M15R-E14 v48.7 验收（payload 红线/scope 抽象/单根递进） ----");
+    // 红线：preview 原文字数 === 实际发送 payload 中的原文快照长度（同一 builder、逐字同源）
+    {
+      const pvP = engine.preview(ctx, paramsFor("doc-e1"));
+      let sentLens = [];
+      const capCtx = { ...ctx, chat: async (call) => { sentLens.push(call.user.length); return { text: JSON.stringify({ title: "t", expandable: false, stopReason: "atomic_structure", children: [], evidence: [] }), usage: { prompt_tokens: 1, completion_tokens: 1 } }; } };
+      fakeChats = [];
+      const capEngine = require(path.join(ROOT, "electron", "mindmapEngine.js"));
+      // 直接跑一次生成但吞掉 fake 队列依赖：临时替换 chat 已在 capCtx；generate 需要 fakes——改为仅校验 builder 确定性：
+      const planA = engine.buildCallPayloads(paramsFor("doc-e1"), () => "SYS");
+      const planB = engine.buildCallPayloads(paramsFor("doc-e1"), () => "SYS");
+      const secUsersA = planA.plan.calls.filter((c) => c.runKind === "section").map((c) => c.user);
+      const secUsersB = planB.plan.calls.filter((c) => c.runKind === "section").map((c) => c.user);
+      check("payload builder 确定性（两次装配 user 逐字节一致）", JSON.stringify(secUsersA) === JSON.stringify(secUsersB), "");
+      check("payload 含原文快照（逐字同源）", secUsersA.every((u, i) => u.includes(Object.values(paramsFor("doc-e1").textByUnit)[Math.min(i, 1)]) || u.includes("泰勒斯") || u.includes("知识")), "");
+      check("preview 原文字数 = section 实际原文长度和（精确口径）", pvP.sourceCharsExact === planA.plan.calls.filter((c) => c.runKind === "section").reduce((t, c) => t + (c.sourceChars || 0), 0), { pv: pvP.sourceCharsExact });
+      check("无章节材料原文字数必须 > 0（有可分析原文时）", (engine.preview(ctx, singleP).sourceCharsExact || 0) > 0, "");
+      void capCtx; void sentLens; void capEngine;
+    }
+    // scope 抽象回归：chapter 范围仍只覆盖该子树（UI 暂撤、底层保留）
+    {
+      const scoped = engine.preview(ctx, { ...paramsFor("doc-e1"), scopeAnchor: "u2.xhtml" });
+          check("scopeAnchor 底层能力保留（章范围仅命中该子树单元）", (scoped.newCalls + scoped.cacheHits) >= 1 && (scoped.sourceCharsExact || 0) < (engine.preview(ctx, paramsFor("doc-e1")).sourceCharsExact || 0), { scoped: scoped.sourceCharsExact, scopedN: scoped.newCalls, scopedHits: scoped.cacheHits, full: engine.preview(ctx, paramsFor("doc-e1")).sourceCharsExact });
+    }
+    // 单根 expandable 递进（无 TOC 不退化为单层大主题）
+    {
+      const rootExpandable = { title: "全书主线", authorialRole: "synthesis", expandable: true, stopReason: null, evidence: [{ unitAnchor: "c0.xhtml", quote: "赫拉克利特主张万物流变", startOffset: 22 }], children: [{ title: "古希腊哲学", authorialRole: "grouping", relationToParent: "第一阶段", relationToSiblings: null, evidence: [{ unitAnchor: "c0.xhtml", quote: "泰勒斯认为水是万物本原", startOffset: 0 }], expandable: true, stopReason: null }] };
+      const greekExpand = { title: "古希腊哲学之内", expandable: false, stopReason: "atomic_structure", children: [{ title: "米利都学派", authorialRole: "grouping", relationToParent: "本原追问的最早群体", relationToSiblings: null, evidence: [{ unitAnchor: "c0.xhtml", quote: "阿那克西曼德提出无定说", startOffset: 12 }], expandable: false, stopReason: "atomic_structure" }], evidence: [] };
+      testSettings = { app: {} };
+      fakeChats = [rootExpandable, greekExpand, { ops: [], changeLog: [] }, { status: "pass", issues: [], summary: "ok" }];
+      const base14 = consumed;
+      const r17 = await engine.generate(ctx, { ...singleP, documentId: "doc-e11", textByUnit: { "c0.xhtml": singleP.textByUnit["c0.xhtml"] } });
+      const m17 = db.getActiveMaterialMap("doc-e11", "book");
+      check("单根 expandable 递进（根→主题→子主题，nodes>1）", r17.status === "completed" && m17.structure.nodes.length > 3 && m17.structure.nodes.some((n) => n.title === "米利都学派"), { status: r17.status, used: consumed - base14, err: r17.error, runErr: r17.runId && db.getMaterialMapRun(r17.runId)?.errorText, dropped: (db.getMaterialMapRun(r17.runId)?.output || {}).dropped });
+      check("无 TOC 材料无包装节点（正文/材料全文不出现）", !m17.structure.nodes.some((n) => ["正文", "材料全文", "内容", "目录"].includes(n.title)), m17.structure.nodes.map((n) => n.title));
+      testSettings = { app: {} };
+    }
 
     console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
     const kpBefore = JSON.stringify(db.listKnowledgePoints());

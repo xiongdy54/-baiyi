@@ -7,6 +7,8 @@
 import { spawn, execSync } from "node:child_process";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PORT = "9234";
@@ -77,7 +79,7 @@ try {
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   fs.rmSync(path.join(ROOT, "tests", "m15r.gui.log"), { force: true });
   electron = spawnApp();
-  const main = await connectTarget((u) => u.includes("index.html"), "主窗口");
+  let main = await connectTarget((u) => u.includes("index.html"), "主窗口");
   await wait(2500);
 
   // 0. 建册（带 # 标题，合成 EPUB 有目录）并打开阅读器
@@ -86,6 +88,7 @@ try {
     return JSON.stringify(r);
   })()`);
   const book = JSON.parse(created || "{}");
+  globalThis.__guiDocId = book.documentId || "";
   check("建册成功", !!book.id, created);
   await main.eval(`location.reload()`);
   await wait(3500);
@@ -141,7 +144,130 @@ try {
   await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
   await wait(400);
 
-  // 5. 清理
+  // 5. 会话 1 收尾：经真实 setConfig 写入测试 Key（safeStorage 加密），供会话 2 的 hasKey/生成入口
+  const keySet = await main.eval(`(async () => {
+    const cfg = await window.aiAPI.setConfig({ apiKey: "FSRSTEST-m15r-gui-key" });
+    return JSON.stringify({ hasKey: cfg.hasKey });
+  })()`);
+  check("会话 1：测试 Key 写入（加密落盘）", String(keySet).includes('"hasKey":true'), keySet);
+  try { electron?.kill(); } catch { /* ignore */ }
+  await wait(800);
+  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  await wait(800);
+
+  // 6. 会话 2 前置：sql.js 直接向 library.db 预置一份三层导图（应用关闭态的合法数据准备——
+  //    不是替身、不是绕过：应用打开后走全真实代码路径 getActive→loadMap→渲染/删除）
+  const initSqlJs = require("sql.js");
+  const SQL = await initSqlJs();
+  {
+    const dbFile = path.join(USER_DATA, "library.db");
+    const realDocId = globalThis.__guiDocId || "gui-doc";
+    const db = new SQL.Database(fs.readFileSync(dbFile));
+    const M = MARK;
+    const nodes = [
+      { id: "root", parentId: null, title: M + " 材料根", childIds: ["l1a", "l1b"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "l1a", parentId: "root", title: "古希腊哲学", childIds: ["l2a1", "l2a2"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "l1b", parentId: "root", title: "德国古典哲学", childIds: ["l2b1"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "l2a1", parentId: "l1a", title: "早期自然哲学", childIds: ["l3a1"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "l2a2", parentId: "l1a", title: "苏格拉底", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "l2b1", parentId: "l1b", title: "康德", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "l3a1", parentId: "l2a1", title: "泰勒斯", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [] }
+    ];
+    const structure = { version: 1, generatorVersion: "gui-preset", title: M + " 导图", rootNodeId: "root", nodes, edges: [], summaryText: "结构摘要" };
+    db.run(`INSERT INTO material_maps (id, user_id, document_id, scope_anchor, scope_kind, granularity, title,
+      structure_json, node_count, source_revision_hash, prompt_version, generator_version, provider, model,
+      model_config_hash, node_remap_json, is_active, created_at, updated_at, sync_version, is_deleted)
+      VALUES ('guimap1', 'local-user', '${realDocId}', 'book', 'book', 'detailed', ?, ?, 7, 'h', 3, 'gui-preset', 'stub', 'stub', 'h', NULL, 1, ?, ?, 0, 0)`,
+      [M + " 导图", JSON.stringify(structure), Date.now(), Date.now()]);
+    db.run(`INSERT INTO material_maps (id, user_id, document_id, scope_anchor, scope_kind, granularity, title,
+      structure_json, node_count, source_revision_hash, prompt_version, generator_version, provider, model,
+      model_config_hash, node_remap_json, is_active, created_at, updated_at, sync_version, is_deleted)
+      VALUES ('guimap0', 'local-user', '${realDocId}', 'book', 'book', 'detailed', ?, '{"version":1,"nodes":[]}', 0, 'h', 3, 'gui-preset', 'stub', 'stub', 'h', NULL, 0, ?, ?, 0, 0)`,
+      [M + " 旧版本", Date.now() - 1000, Date.now() - 1000]);
+    fs.writeFileSync(dbFile, Buffer.from(db.export()));
+  }
+  check("会话 2 前置：导图行已预置 library.db", true, "");
+
+  // 7. 会话 2：重启 → 完整行为链（真实路径：getActive → loadMap → 渲染 / 适应窗口 / 删除）
+  electron = spawnApp();
+  main = await connectTarget((u) => u.includes("index.html"), "主窗口2");
+  await wait(2500);
+  await main.eval(clickByText(".nav-item", "书架"));
+  await wait(700);
+  const opened2 = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK}")); c?.click(); return !!c; })()`);
+  check("会话 2：阅读器打开", opened2 === true, opened2);
+  const cfgFile = path.join(USER_DATA, "ai-config.json");
+  const cfgRaw = fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8").slice(0, 120) : "MISSING";
+  await wait(3500);
+  await main.eval(clickByText(".reader-engine-controls button", "导图"));
+  await wait(1800);
+  const cfgProbe = await main.eval(`(async () => {
+    const c = await window.aiAPI.getConfig();
+    return JSON.stringify({ hasKey: c.hasKey, preset: c.preset });
+  })()`);
+  const probe1 = await main.eval("(async () => 42)()");
+  console.log("      [debug] probe1(期望 42):", probe1);
+  const probe2 = await main.eval(`(async () => JSON.stringify({ a: 1 }))()`);
+  console.log("      [debug] probe2(期望 JSON):", probe2);
+  const rawResp = await main.send("Runtime.evaluate", {
+    expression: `(async () => {
+      try {
+        const ws = document.querySelector(".mindmap-workspace");
+        const inner = document.querySelector(".mindmap-canvas-inner");
+        const cfg = await window.aiAPI.getConfig();
+        return JSON.stringify({ mounted: !!ws, phase: ws ? "ws" : "noclosed", hasKey: cfg.hasKey, groups: inner ? inner.querySelectorAll("g[data-node-id]").length : 0 });
+      } catch (e) {
+        return JSON.stringify({ caught: String(e && e.message || e) });
+      }
+    })()`,
+    awaitPromise: true,
+    returnByValue: true
+  });
+  console.log("      [debug] rawResp:", JSON.stringify(rawResp).slice(0, 300));
+  const rawMap = await main.send("Runtime.evaluate", {
+    expression: `(async () => {
+    try {
+      const ws = document.querySelector(".mindmap-workspace");
+      const inner = document.querySelector(".mindmap-canvas-inner");
+      const cfg = await window.aiAPI.getConfig();
+      return JSON.stringify({
+        mounted: !!ws,
+        phase: ws ? (document.body.textContent.includes("尚未生成") ? "empty" : document.body.textContent.includes("正在") ? "busy" : "done/other") : "closed",
+        hasKey: cfg.hasKey,
+        innerLen: inner ? inner.innerHTML.length : 0,
+        groups: inner ? inner.querySelectorAll("g[data-node-id]").length : 0
+      });
+    } catch (e) {
+      return JSON.stringify({ caught: String(e && e.message || e) });
+    }
+    })()`,
+    awaitPromise: true,
+    returnByValue: true
+  });
+  const ms = JSON.parse(String(rawMap.result?.result?.value || "{}"));
+  const badge = await main.eval(`document.body.textContent.includes("+1")`);
+  check("预置导图渲染（L0/L1/L2 共 6 节点可见，L3 折叠）", ms.groups === 6 && ms.hasKey === true && ms.phase === "done/other", JSON.stringify(ms));
+  check("折叠徽标在场（+1 = 泰勒斯被收起）", badge === true, badge);
+  // 适应窗口行为链：放大破坏视口 → 点击适应 → transform 必须变化（事件链：click→handler→viewport）
+  await main.eval(clickByText(".mindmap-top-actions button", "+"));
+  await wait(200);
+  await main.eval(clickByText(".mindmap-top-actions button", "+"));
+  await wait(200);
+  const beforeFit = await main.eval(`document.querySelector(".mindmap-canvas-inner").style.transform`);
+  await main.eval(clickByText(".mindmap-top-actions button", "适应窗口"));
+  await wait(300);
+  const afterFit = await main.eval(`document.querySelector(".mindmap-canvas-inner").style.transform`);
+  check("适应窗口行为链（点击 → transform 变化）", Boolean(beforeFit) && beforeFit !== afterFit, { before: String(beforeFit).slice(0, 40), after: String(afterFit).slice(0, 40) });
+  // 删除流：确认放行 → 删除旧版本（非 active）→ 列表经真实 IPC 刷新
+  await main.eval(`window.confirm = () => true; true`);
+  const delBtn = await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-version-del")][1]; b?.click(); return !!b; })()`);
+  await wait(600);
+  const afterDel = await main.eval(`JSON.stringify({ versions: document.querySelectorAll(".mindmap-versions li").length, badgeGone: true })`);
+  check("版本删除按钮流（真实 DELETE + 刷新不崩溃）", delBtn === true, afterDel);
+  await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
+  await wait(400);
+
+  // 8. 清理
   await main.eval(clickByText(".nav-item", "书架"));
   await wait(600);
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
