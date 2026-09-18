@@ -36,7 +36,11 @@ function paramsFor(documentId) {
 const sec1 = {
   title: "概念建立", authorialRole: "introduce", centralQuestion: "什么是知识", mainMove: "给出定义",
   progression: "从直觉到严格定义",
-  children: [{ title: "核心定义句", authorialRole: "introduce", relationToParent: "本节核心主张", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }] }],
+  children: [{
+    title: "核心定义句", authorialRole: "introduce", relationToParent: "本节核心主张", relationToSiblings: null,
+    evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }],
+    children: [{ title: "定义的补足语", authorialRole: "distinguish", relationToParent: "定义的构成", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "这里给出定义", startOffset: 16 }] }]
+  }],
   evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }]
 };
 const sec2 = {
@@ -107,13 +111,14 @@ app.whenReady().then(async () => {
     const map1 = db.getActiveMaterialMap("doc-e1", "book");
     check("map 落库且 active", map1 && map1.id === r1.mapId, map1 && map1.id);
     const st = map1.structure;
-    check("节点数 = material root + 书根 + 2 章 + 1 个 children 分解", st.nodes.length === 5, st.nodes.map((n) => `${n.id}:${n.title}`));
+    check("节点数 = material root + 书根 + 2 章 + 2 层 children 递归", st.nodes.length === 6, st.nodes.map((n) => `${n.id}:${n.title}`));
     const rootNode = st.nodes.find((n) => n.id === "root");
     const bookNode = st.nodes.find((n) => n.title === "从概念到机制");
     const ch1 = st.nodes.find((n) => n.title === "概念建立");
     const ch2 = st.nodes.find((n) => n.title === "机制解释");
     const def = st.nodes.find((n) => n.title === "核心定义句");
-    check("树形正确（root→书根→两章；章→children 分解）", rootNode && bookNode && bookNode.parentId === "root" && ch1.parentId === bookNode.id && ch2.parentId === bookNode.id && def.parentId === ch1.id, st.nodes.map((n) => [n.id, n.title, n.parentId]));
+    const deep = st.nodes.find((n) => n.title === "定义的补足语");
+    check("树形正确（root→书根→两章；章→children 递归两层）", rootNode && bookNode && bookNode.parentId === "root" && ch1.parentId === bookNode.id && ch2.parentId === bookNode.id && def.parentId === ch1.id && deep && deep.parentId === def.id, st.nodes.map((n) => [n.id, n.title, n.parentId]));
     check("material root 在列且为根", Boolean(rootNode) && rootNode.parentId === null, rootNode && rootNode.id);
     check("direct 证据逐字落位 + quoteHash", ch1.evidence.length === 1 && ch1.evidence[0].matchStart >= 0 && ch1.evidence[0].quoteHash.length === 64, ch1.evidence[0]);
     check("compositional 引用最终节点 id（书根→两章）", Array.isArray(bookNode.compositionalEvidence) && bookNode.compositionalEvidence.includes(ch1.id) && bookNode.compositionalEvidence.includes(ch2.id), bookNode.compositionalEvidence);

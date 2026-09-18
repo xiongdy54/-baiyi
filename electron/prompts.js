@@ -802,9 +802,15 @@ const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只�
 
 【输入块】
 【材料】：材料标题与元信息。
+【覆盖粒度】：overview（概览）/ standard（标准）/ detailed（详细）——决定你的分解深度要求（见下）。
 【结构路径】：本单元在目录树中的位置（从材料名到本单元）。
 【原文·<锚>】……【/原文】：本单元的原文（可能多块）；锚是系统定位用 ID。
 【格式修复】（仅重试时出现）：上次输出不是合法 JSON——只允许把该输出转换为合法 JSON，禁止增删改任何语义内容。
+
+【粒度→分解深度（硬要求）】
+- overview：只分主结构，children ≤5 且每个 child 不再含 children。
+- standard：主结构 + 关键子结构，children 一般 3-8 个，child 一般不再嵌套。
+- detailed：深入到论证/叙述单元——children 3-8 个，**每个 child 依其原文再带自己的 children（递归分层，直到自然终点）**；材料含大量子结构时节点总数应明显多于 standard，宁多勿漏（每个节点必须有逐字证据支撑）。
 
 【输出】只输出一个 JSON 对象（无 markdown 代码块、无解释文字）。
 若输入含**多个**【结构路径】块（它们共享同一份原文，属同组单元），输出 { "nodes": [按路径顺序每路径一个下述分析对象] }；单路径时直接输出单个分析对象：
@@ -820,7 +826,8 @@ const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只�
       "authorialRole": "<同上枚举>",
       "relationToParent": "该子结构对父单元承担什么作用（一句话）",
       "relationToSiblings": "它与相邻子结构的关系或为何并列（一句话，可为 null）",
-      "evidence": [ { "unitAnchor": "<原文块锚>", "quote": "原文逐字片段（5-60 字）", "startOffset": 0 } ]
+      "evidence": [ { "unitAnchor": "<原文块锚>", "quote": "原文逐字片段（5-30 字短句）", "startOffset": 0 } ],
+      "children": [ "<同构递归——仅 detailed 粒度且原文确有更深结构时使用；每层同样必须逐字证据>" ]
     }
   ],
   "evidence": [ { 同上格式，支撑本单元自身的判断 } ]
@@ -828,7 +835,7 @@ const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只�
 
 【硬性纪律】
 1. 只能依据【原文】块；禁止使用外部知识；禁止推测作者没有表达的观点。
-2. quote 必须从【原文】块中逐字复制（不可改写、缩写、翻译、合并）；startOffset 是你的定位提示（允许不准，系统按逐字匹配裁决）。
+2. quote 必须从【原文】块中逐字复制（不可改写、缩写、翻译、合并；取 5-30 字短句命中率最高）；startOffset 是你的定位提示（允许不准，系统按逐字匹配裁决——任何一字之差该证据即作废、节点随之被拒）。
 3. unitAnchor 必须是某个【原文·锚】块的真实锚。
 4. children 按材料实际结构划分（2-8 个为宜）；没有明显子结构时用空数组。
 5. 标题允许抽象命名，但每个语义主张必须有至少一条逐字 evidence 支撑。
@@ -837,7 +844,8 @@ const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只�
 const MATERIAL_MAP_MERGE_PROMPT = `你是材料结构归并器。任务：给定某结构单元的「自有原文」与其全部直接子节点的结构分析，恢复更高一级的作者组织逻辑——为什么这些内容被安排在一起、它们的共同作用是什么、父单元承担什么功能。禁止把子节点简单重新罗列一遍（那是低质量结果）。
 
 【输入块】
-【材料】/【结构路径】：同前。
+【材料】/【覆盖粒度】：同前（detailed 时可在输出中给出进一步细化的 children）。
+【结构路径】：同前。
 【父级自有原文·<锚>】……【/原文】：父单元除子节点覆盖范围外自身的文本（可能没有——常见且合法）。
 【子节点分析】：JSON 数组，每项含编号（n1、n2…）、title、authorialRole、progression 与 evidence 引文摘要。
 【格式修复】（仅重试时出现）：同前。
@@ -850,7 +858,8 @@ const MATERIAL_MAP_MERGE_PROMPT = `你是材料结构归并器。任务：给定
   "progression": "≤150 字",
   "groupingBasis": { "type": "<${MM_GROUPING_ENUM} 之一>", "explanation": "为什么这些子结构同属一个高级结构（≤150 字，必须有实质内容）", "evidenceRefs": ["<子节点编号>"] },
   "relationToParent": "对更上级的作用（顶层为 null）",
-  "evidence": [ { "unitAnchor": "<父级自有原文锚>", "quote": "逐字片段", "startOffset": 0 } ]
+  "evidence": [ { "unitAnchor": "<父级自有原文锚>", "quote": "逐字片段（5-30 字）", "startOffset": 0 } ],
+  "children": [ "<可选——仅 detailed 粒度且依据确凿时给出：对本级结构的进一步细化分解，同构递归，每节点必须逐字证据>" ]
 }
 
 【硬性纪律】

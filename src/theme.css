@@ -3045,6 +3045,13 @@ body.capture-body #root { height: 100vh; }
   position: relative;
   cursor: grab;
   touch-action: none;
+  /* 画板交互：拖拽平移不得触发文本选择（用户 2026-09-18 实测反馈） */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.mindmap-canvas:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .mindmap-canvas:active {
   cursor: grabbing;
@@ -3284,4 +3291,8 @@ body.capture-body #root { height: 100vh; }
   .mindmap-versions button {
     transition: none !important;
   }
+}
+/* v48 交互修复（用户 2026-09-18 实测反馈）：节点可点提示 + 折叠徽标可点 */
+.mindmap-canvas-inner g[data-node-id] {
+  cursor: pointer;
 }

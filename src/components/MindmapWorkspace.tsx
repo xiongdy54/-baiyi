@@ -64,7 +64,6 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [search, setSearch] = useState("");
   const [learnStatus, setLearnStatus] = useState<{ cardCount: number; kpExists: boolean } | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
   const phaseRef = useRef<Phase>("loading");
   phaseRef.current = phase;
 
@@ -233,16 +232,34 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase === "done", layout?.bounds.w]);
 
+  // 拖拽 vs 点击判定（批3 修复：pointerdown 一律 setPointerCapture 会把 click 的 target 吞到画布层，
+  // 导致 data-node-id 永远找不到、节点完全不可点——改为「位移超阈值才算拖拽，拖拽时才捕获」）
+  const dragRef = useRef<{ x: number; y: number; tx: number; ty: number; dragging: boolean } | null>(null);
+  const clickSuppressRef = useRef(false);
+
   const handleCanvasClick = (e: React.MouseEvent) => {
-    const el = (e.target as HTMLElement).closest("[data-node-id]") as HTMLElement | null;
-    if (el) setSelectedId(el.getAttribute("data-node-id"));
-    else setSelectedId(null);
+    if (clickSuppressRef.current) {
+      clickSuppressRef.current = false;
+      return;
+    }
+    const el = (e.target as Element).closest?.("[data-node-id]") as Element | null;
+    const id = el?.getAttribute("data-node-id") || null;
+    if (!id) {
+      setSelectedId(null);
+      return;
+    }
+    if (selectedId === id) {
+      // 单击已选中的节点 = 展开/收起（画板直觉交互；双击同样有效）
+      toggleExpand(id);
+    } else {
+      setSelectedId(id);
+    }
   };
   const handleCanvasDoubleClick = (e: React.MouseEvent) => {
-    const el = (e.target as HTMLElement).closest("[data-node-id]") as HTMLElement | null;
+    if (clickSuppressRef.current) return;
+    const el = (e.target as Element).closest?.("[data-node-id]") as Element | null;
     if (!el) return;
-    const id = el.getAttribute("data-node-id");
-    toggleExpand(id);
+    toggleExpand(el.getAttribute("data-node-id"));
   };
   const toggleExpand = (id: string | null) => {
     if (!id) return;
@@ -457,15 +474,42 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
             setView((v) => ({ ...v, zoom: Math.min(2.5, Math.max(0.15, v.zoom * (e.deltaY > 0 ? 0.92 : 1.08))) }));
           }}
           onPointerDown={(e) => {
-            dragRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
-            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            // 只记录起点；位移超阈值（真正的拖拽）才捕获指针——保住 SVG 节点的 click 目标
+            dragRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty, dragging: false };
           }}
           onPointerMove={(e) => {
             const d = dragRef.current;
-            if (d && e.buttons) setView((v) => ({ ...v, tx: d.tx + (e.clientX - d.x), ty: d.ty + (e.clientY - d.y) }));
+            if (!d || !e.buttons) return;
+            const dx = e.clientX - d.x;
+            const dy = e.clientY - d.y;
+            if (!d.dragging && Math.hypot(dx, dy) > 4) {
+              d.dragging = true;
+              try {
+                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              } catch {
+                /* 已释放则忽略 */
+              }
+            }
+            if (d.dragging) {
+              e.preventDefault();
+              setView((v) => ({ ...v, tx: d.tx + dx, ty: d.ty + dy }));
+            }
           }}
-          onPointerUp={() => {
+          onPointerUp={(e) => {
+            const d = dragRef.current;
             dragRef.current = null;
+            if (d?.dragging) {
+              // 刚结束拖拽：吞掉紧随其后的合成 click，避免松手误选节点
+              clickSuppressRef.current = true;
+              window.setTimeout(() => {
+                clickSuppressRef.current = false;
+              }, 120);
+              try {
+                (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+              } catch {
+                /* ignore */
+              }
+            }
           }}
         >
           {phase === "done" && layout ? (

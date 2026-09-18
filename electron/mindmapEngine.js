@@ -879,13 +879,17 @@ function assembleMap(params, plan, resolvedCalls, cacheContent) {
         node.unitAnchors = anchors;
       }
       if (own) {
-        for (const ch of Array.isArray(own.children) ? own.children : []) {
-          mkNode(mapId, ch, anchors);
-        }
+        const expand = (pid, list) => {
+          for (const ch of Array.isArray(list) ? list : []) {
+            const cid = mkNode(pid, ch, anchors);
+            expand(cid, ch.children);
+          }
+        };
+        expand(mapId, own.children);
       }
     });
   }
-  // 第三遍：merge 节点的 direct 证据与其自有原文锚
+  // 第三遍：merge 节点的 direct 证据、自有原文锚与可选 children 细化（detailed）
   for (const call of resolvedCalls) {
     if (call.runKind !== "merge") continue;
     const mapId = mapIdOf.get(call.nodeKey);
@@ -894,6 +898,14 @@ function assembleMap(params, plan, resolvedCalls, cacheContent) {
     if (node && content) {
       node.evidence = Array.isArray(content.evidence) ? content.evidence : [];
       node.unitAnchors = Array.isArray(call.blocks) ? call.blocks : [];
+      const anchors = Array.isArray(call.blocks) ? call.blocks : [];
+      const expand = (pid, list) => {
+        for (const ch of Array.isArray(list) ? list : []) {
+          const cid = mkNode(pid, ch, anchors);
+          expand(cid, ch.children);
+        }
+      };
+      expand(mapId, content.children);
     }
   }
   return { raw: { title: params.title || "材料知识导图", nodes: rawNodes }, mapIdOf };
