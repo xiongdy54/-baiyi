@@ -45,7 +45,9 @@ var init_eventbus = __esm({
       "leech/detected",
       "journal/changed",
       "insight/changed",
-      "memory/changed"
+      "memory/changed",
+      "mindmap/changed"
+      // v48（M15 重做，D41/D42）：导图生成进度与完成广播
     ];
     map = /* @__PURE__ */ new Map();
     eventBus = {

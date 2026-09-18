@@ -178,6 +178,8 @@ export default function Reader({
   const [aiPanel, setAiPanel] = useState<{
     kind: "explain" | "cards" | "occlusion";
     text: string;
+    /** v48（M15，D41-⑥）：本批卡片来自哪个导图节点（就此制卡溯源） */
+    mindmapNodeId?: string;
     answer?: string;
     drafts?: CardDraft[];
     accepted?: Set<number>;
@@ -956,7 +958,10 @@ export default function Reader({
   }
 
   // ---------- AI 制卡（Phase 13 主路径；M1.2 材料类型路由） ----------
-  async function runAICards(text: string, webContext?: string, mode: CardGenMode = "auto") {
+  // v48（M15，D41-⑥）：opts.focus = 导图结构摘要（注入既有【本次制卡重点】槽，≤1200 字）；
+  // opts.mindmapNodeId = 来源导图节点（卡片 context_ref 溯源 + act:mindmap-<nodeId> 同源兄弟键）。
+  // 提示词与规则完全沿用既有管线（材料类型路由/确认面板/CardLint/S1/KP 归一），不另起炉灶。
+  async function runAICards(text: string, webContext?: string, mode: CardGenMode = "auto", opts?: { focus?: string; mindmapNodeId?: string }) {
     // 本地材料类型识别：auto 时按文本路由到对应提示词分支（概念/公式/序列/枚举），类型可手动覆盖
     const route = detectMaterialType(text);
     const resolved: CardGenMode = mode === "auto" ? route.scope : mode;
@@ -971,12 +976,13 @@ export default function Reader({
       searched: Boolean(webContext),
       mode,
       routeLabel: shownRoute.label,
-      routeForm: shownRoute.defaultForm
+      routeForm: shownRoute.defaultForm,
+      mindmapNodeId: opts?.mindmapNodeId
     });
     try {
       const { batchId, result } = await cardGenerator.generateCards(
         text,
-        { title: sourceTitle, section: contextLabel, webContext, documentId: contextRef?.documentId ?? null },
+        { title: sourceTitle, section: contextLabel, webContext, documentId: contextRef?.documentId ?? null, focus: opts?.focus },
         resolved,
         (chars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, progress: chars } : p)),
         (thinkChars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, thinking: thinkChars } : p))
@@ -997,6 +1003,7 @@ export default function Reader({
         routeLabel: shownRoute.label,
         routeForm: shownRoute.defaultForm,
         kps: result.knowledgePoints,
+        mindmapNodeId: opts?.mindmapNodeId,
         supplemental: new Set<number>(),
         followUpBusy: [],
         followUpStarted: {},
@@ -1280,7 +1287,15 @@ export default function Reader({
     // v34（M12）：sourceText 参与短材料锚点键的长度门控——同一句短材料的多角度卡同日只放行一张
     // v41（K2-A，D38）：genBatchId 落库 → 簇键 batch:<id>:<kp>，接受后后台顺带 AI 抽取归一
     const expandedCount = expandClozeDraft(d).length;
-    await createAcceptedCard(d, { sourceTitle, contextRef: enrichedContextRef(), sourceText: aiPanel?.text ?? null, genBatchId: aiPanel?.batchId ?? null });
+    const mmNodeId = aiPanel?.mindmapNodeId;
+    await createAcceptedCard(d, {
+      sourceTitle,
+      contextRef: mmNodeId ? { ...enrichedContextRef(), mindmapNodeId: mmNodeId } : enrichedContextRef(),
+      sourceText: aiPanel?.text ?? null,
+      genBatchId: aiPanel?.batchId ?? null,
+      // v48（M15，D41-⑥）：同一导图节点产出的多卡同日只放行一张（M12 同源延后语义）
+      siblingKey: mmNodeId ? `act:mindmap-${mmNodeId}` : undefined
+    });
     setAiPanel((p) =>
       p && p.drafts
         ? { ...p, accepted: new Set([...(p.accepted ?? []), draftIndex]) }
@@ -1800,7 +1815,7 @@ export default function Reader({
           onBack={() => setMindmapOpen(false)}
           onMakeCardsFromNode={(payload) => {
             setMindmapOpen(false);
-            void runAICards(payload.section);
+            void runAICards(payload.section, undefined, "auto", { focus: payload.focus, mindmapNodeId: payload.nodeId });
           }}
         />
       )}

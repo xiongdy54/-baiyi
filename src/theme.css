@@ -3296,3 +3296,17 @@ body.capture-body #root { height: 100vh; }
 .mindmap-canvas-inner g[data-node-id] {
   cursor: pointer;
 }
+/* v48.2（用户反馈）：画布操作提示条 */
+.mindmap-canvas-tip {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sp-4);
+  transform: translateX(-50%);
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  padding: var(--sp-1) var(--sp-3);
+  pointer-events: none;
+  white-space: nowrap;
+}

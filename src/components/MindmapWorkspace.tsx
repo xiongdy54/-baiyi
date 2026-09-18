@@ -513,11 +513,16 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
           }}
         >
           {phase === "done" && layout ? (
-            <div
-              className="mindmap-canvas-inner"
-              style={{ transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.zoom})` }}
-              dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
-            />
+            <>
+              <div
+                className="mindmap-canvas-inner"
+                style={{ transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.zoom})` }}
+                dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
+              />
+              {!selectedId && (
+                <div className="mindmap-canvas-tip">单击节点选中 · 再击展开/收起 · 选中后在右侧「就此制卡」或「跳到正文」</div>
+              )}
+            </>
           ) : phase === "done" ? (
             <div className="mindmap-canvas-hint">此范围暂无可显示的导图。</div>
           ) : phase === "empty" ? (

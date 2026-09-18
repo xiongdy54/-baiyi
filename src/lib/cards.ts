@@ -848,6 +848,8 @@ export interface CardRecord {
     imageSource?: "engine" | "library";
     /** 正文图片锚（v35）：alt/周边文字，用于阅读器端 locateImage 找回原图 */
     imageAnchor?: { alt?: string; contextText?: string };
+    /** v48（M15，D41-⑥）：来源导图节点 id——学习状态只读映射与溯源（重生成沿 remap 解析） */
+    mindmapNodeId?: string;
   } | null;
   mnemonic: string | null;
   example: string | null;
