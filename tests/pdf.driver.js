@@ -85,6 +85,23 @@ window.__pdfTest = {
     const toc = kernel.getTOC();
     check("P4 大纲 2 条（label 带页码后缀）", toc.length === 2 && toc[0].label === "Chapter One ·第 1 页" && toc[1].label === "Chapter Two ·第 3 页", JSON.stringify(toc.map((t) => t.label)));
 
+    // v48 批1（M15 §4.19-4）：提取单元契约——逐页单元 + canonical 文本形态
+    try {
+      const anchors = kernel.getSectionAnchors ? kernel.getSectionAnchors() : [];
+      check("P4a 提取单元 = 逐页（3 单元）", anchors.length === 3, JSON.stringify(anchors));
+      const t0 = await kernel.getSectionText("pdfpage:0");
+      check("P4b 首页取文含锚词", t0.includes("anchor-marker") || t0.includes("page one"), t0.slice(0, 60));
+      const t2 = await kernel.getSectionText("pdfpage:2");
+      check("P4c 第三页取文含独有词", t2.includes("third-page-unique"), t2.slice(0, 60));
+      const t01 = await kernel.getSectionText("pdfpage:0", "pdfpage:2");
+      check("P4d [start,end) 跨页拼接不含第三页", t01.includes("Second page") && !t01.includes("third-page-unique"), t01.slice(0, 80));
+      const d1 = await kernel.getSectionText("pdfpage:1");
+      const d2 = await kernel.getSectionText("pdfpage:1");
+      check("P4e 重复抽取确定性", d1 === d2, "len " + d1.length + "/" + d2.length);
+    } catch (e) {
+      check("P4a 提取单元 = 逐页（3 单元）", false, String((e && e.message) || e));
+    }
+
     // 选区：在文本层用 Range 选词 → getSelection 取页码
     let selOk = false;
     let selDetail = "";

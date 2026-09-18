@@ -268,7 +268,68 @@ async function runCjkSpike(rubyB64, verticalB64, check) {
 }
 
 // ---------- 对外入口 ----------
+
+// v48 批1（M15 §4.19-4）：提取单元契约——fakeKernel 语义（每章 = 一个单元，anchor 与目录 href 同域）
+async function runFakeExtraction() {
+  const { results, check } = makeRunner((m) => console.log(m));
+  const kernel = createFakeKernel({
+    chapters: ["第一章 甲内容。\n第二段。", "第二章 乙内容。\n第二段。", "第三章 丙内容。"]
+  });
+  await kernel.open({ kind: "bytes", bytes: new Uint8Array(0), name: "fake.epub" }, {});
+  const anchors = kernel.getSectionAnchors ? kernel.getSectionAnchors() : [];
+  check("S17 fake 单元数 = 章数", anchors.length === 3, JSON.stringify(anchors));
+  check("S17 fake 单元锚与目录 href 同域", Boolean(anchors[1]) && anchors[1].anchor === "chapter2.xhtml", JSON.stringify(anchors[1]));
+  const t2 = await kernel.getSectionText("chapter2.xhtml");
+  check("S17 fake 单元取文含本章内容", t2.includes("乙内容") && t2.includes("第二段"), JSON.stringify(t2.slice(0, 30)));
+  check("S17 fake 单元取文不含他章内容", !t2.includes("甲内容") && !t2.includes("丙内容"), "");
+  const r12 = await kernel.getSectionText("chapter1.xhtml", "chapter3.xhtml");
+  check("S17 fake [start,end) 跨单元拼接", r12.includes("甲内容") && r12.includes("乙内容") && !r12.includes("丙内容"), JSON.stringify(r12.slice(0, 40)));
+  const tBad = await kernel.getSectionText("nope.xhtml");
+  check("S17 fake 未知锚返回空串", tBad === "", JSON.stringify(tBad));
+  kernel.destroy();
+  return results;
+}
+
+// v48 批1：提取单元契约——foliate 真夹具（spine section = 单元；canonical 文本形态与确定性）
+async function runExtraction(bytesB64) {
+  const { results, check } = makeRunner((m) => console.log(m));
+  const host = document.getElementById("host");
+  host.innerHTML = "";
+  const kernel = createFoliateKernel(host);
+  try {
+    await kernel.open({ kind: "bytes", bytes: b64ToBytes(bytesB64), name: "fixture.epub" }, {});
+    await waitFor(() => kernel.getCurrentLocation(), 8000, "extraction open");
+    const anchors = kernel.getSectionAnchors ? kernel.getSectionAnchors() : [];
+    check("S17 foliate 单元清单非空", anchors.length >= 1, "units=" + anchors.length);
+    const texts = [];
+    for (const a of anchors) texts.push(await kernel.getSectionText(a.anchor));
+    const idx2 = texts.findIndex((t) => t.includes("第二章独有锚乙"));
+    check("S17 foliate 单元文本可定位第二章", idx2 >= 0, "lens=" + texts.map((t) => t.length).join(","));
+    if (idx2 >= 0) {
+      const single = await kernel.getSectionText(anchors[idx2].anchor);
+      check("S17 foliate 单次取文与逐单元一致", single === texts[idx2], "len " + single.length + "/" + texts[idx2].length);
+      if (idx2 + 1 < anchors.length) {
+        const ranged = await kernel.getSectionText(anchors[idx2].anchor, anchors[idx2 + 1].anchor);
+        check("S17 foliate [start,end) 恰为单单元", ranged === texts[idx2], "len " + ranged.length + "/" + texts[idx2].length);
+      }
+      check("S17 foliate 引文逐字（校验同源）", texts[idx2].includes("第二章独有锚乙"), "");
+    }
+    if (anchors.length) {
+      const again = await kernel.getSectionText(anchors[0].anchor);
+      check("S17 foliate 重复抽取确定性", again === texts[0], "len " + again.length + "/" + texts[0].length);
+    }
+    kernel.destroy();
+  } catch (err) {
+    check("S17 foliate 套件异常", false, err && (err.stack || err.message));
+  } finally {
+    host.innerHTML = "";
+  }
+  return results;
+}
+
 window.__readerTest = {
+  runFakeExtraction,
+  runExtraction,
   async runFake() {
     const { results, check } = makeRunner((m) => console.log(m));
     const kernel = createFakeKernel({

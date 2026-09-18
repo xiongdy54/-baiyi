@@ -37514,24 +37514,32 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
       getTOC() {
         return tocCache.map((t) => ({ ...t }));
       },
-      // v47（M15，§4.19-3①）：章节文本抽取——逐页 getTextContent（确定性，与全文搜索同路径）
-      async getSectionText(start, end) {
-        try {
-          if (!doc) return "";
-          const from = Math.max(0, Number(start?.pageIndex ?? 0));
-          const to = end?.pageIndex != null ? Math.max(from + 1, Number(end.pageIndex)) : doc.numPages;
-          const parts = [];
-          for (let i = from; i < Math.min(to, doc.numPages); i++) {
-            try {
-              const tc = await doc.getPage(i + 1).then((p) => p.getTextContent());
-              parts.push(tc.items.map((it) => it.str).join(" "));
-            } catch {
-            }
+      // v48 批1（M15 §4.19-4）：提取单元 = 逐页（anchor = "pdfpage:<0基页码>"，与目录 href 同域）。
+      getSectionAnchors() {
+        if (!doc || totalPages <= 0) return [];
+        return Array.from({ length: totalPages }, (_, i) => ({ anchor: `pdfpage:${i}` }));
+      },
+      async getSectionText(startAnchor, endAnchor) {
+        if (!doc || totalPages <= 0) return "";
+        const parse = (a) => {
+          const m = /^pdfpage:(\d+)$/.exec(String(a ?? ""));
+          return m ? Number(m[1]) : null;
+        };
+        const s = parse(startAnchor);
+        if (s == null || s < 0 || s >= totalPages) return "";
+        const e = endAnchor != null ? parse(endAnchor) : null;
+        const last = e == null ? s : Math.max(s, Math.min(e - 1, totalPages - 1));
+        const pageText = async (p0) => {
+          try {
+            const tc = await doc.getPage(p0 + 1).then((pg) => pg.getTextContent());
+            return tc.items.map((it) => it.str + (it.hasEOL ? "\n" : "")).join("").replace(/[ \t\u00a0]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{2,}/g, "\n").trim();
+          } catch {
+            return "";
           }
-          return parts.join("\n").replace(/\s+/g, " ").trim();
-        } catch {
-          return "";
-        }
+        };
+        const parts = [];
+        for (let p = s; p <= last; p++) parts.push(await pageText(p));
+        return parts.join("\n");
       },
       getSelection() {
         const sel = window.getSelection();
@@ -44088,6 +44096,21 @@ button.hasPopupMenu{
       check("P3 \u9875\u9762 canvas \u6E32\u67D3", host.querySelectorAll("canvas").length > 0, "canvas=" + host.querySelectorAll("canvas").length);
       const toc = kernel.getTOC();
       check("P4 \u5927\u7EB2 2 \u6761\uFF08label \u5E26\u9875\u7801\u540E\u7F00\uFF09", toc.length === 2 && toc[0].label === "Chapter One \xB7\u7B2C 1 \u9875" && toc[1].label === "Chapter Two \xB7\u7B2C 3 \u9875", JSON.stringify(toc.map((t) => t.label)));
+      try {
+        const anchors = kernel.getSectionAnchors ? kernel.getSectionAnchors() : [];
+        check("P4a \u63D0\u53D6\u5355\u5143 = \u9010\u9875\uFF083 \u5355\u5143\uFF09", anchors.length === 3, JSON.stringify(anchors));
+        const t0 = await kernel.getSectionText("pdfpage:0");
+        check("P4b \u9996\u9875\u53D6\u6587\u542B\u951A\u8BCD", t0.includes("anchor-marker") || t0.includes("page one"), t0.slice(0, 60));
+        const t2 = await kernel.getSectionText("pdfpage:2");
+        check("P4c \u7B2C\u4E09\u9875\u53D6\u6587\u542B\u72EC\u6709\u8BCD", t2.includes("third-page-unique"), t2.slice(0, 60));
+        const t01 = await kernel.getSectionText("pdfpage:0", "pdfpage:2");
+        check("P4d [start,end) \u8DE8\u9875\u62FC\u63A5\u4E0D\u542B\u7B2C\u4E09\u9875", t01.includes("Second page") && !t01.includes("third-page-unique"), t01.slice(0, 80));
+        const d1 = await kernel.getSectionText("pdfpage:1");
+        const d2 = await kernel.getSectionText("pdfpage:1");
+        check("P4e \u91CD\u590D\u62BD\u53D6\u786E\u5B9A\u6027", d1 === d2, "len " + d1.length + "/" + d2.length);
+      } catch (e) {
+        check("P4a \u63D0\u53D6\u5355\u5143 = \u9010\u9875\uFF083 \u5355\u5143\uFF09", false, String(e && e.message || e));
+      }
       let selOk = false;
       let selDetail = "";
       try {

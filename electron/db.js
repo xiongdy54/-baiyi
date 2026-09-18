@@ -535,6 +535,101 @@ async function initDb() {
     )`);
     db.run("CREATE INDEX IF NOT EXISTS idx_mruns_started ON memory_runs(started_at, is_deleted)");
   } catch { /* 表已存在 */ }
+  // v48 批1（M15 重做，D41-⑤ / §4.19-7）：材料知识导图数据层（3 表）。
+  // map = 每版本一行（结构 JSON 内嵌节点+边+证据；SVG 只是视图，JSON 才是数据）；
+  // shard = 分片缓存（逻辑键含 provider+model+modelConfigHash——换模型或关键生成参数不复用旧结果）；
+  // run = 生成运行留痕（状态机 / 预计与实际 token 费用 / repair 次数 / 机读错误码）。
+  // 抽取快照文本不入库（sql.js 全量落盘防库膨胀）——只存 snapshotHash/quoteHash（D41-④）。
+  // M2 备份打包整库自动覆盖，无需登记（§8.1 D41；backup.js 无需改动）。
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS material_maps (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      scope_anchor TEXT NOT NULL DEFAULT 'book',
+      scope_kind TEXT NOT NULL DEFAULT 'book',
+      granularity TEXT NOT NULL DEFAULT 'standard',
+      title TEXT,
+      structure_json TEXT NOT NULL,
+      node_count INTEGER NOT NULL DEFAULT 0,
+      source_revision_hash TEXT,
+      prompt_version INTEGER,
+      generator_version TEXT,
+      provider TEXT,
+      model TEXT,
+      model_config_hash TEXT,
+      node_remap_json TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      sync_version INTEGER NOT NULL DEFAULT 0,
+      is_deleted INTEGER NOT NULL DEFAULT 0
+    )`);
+    db.run("CREATE INDEX IF NOT EXISTS idx_mmaps_doc ON material_maps(document_id, scope_anchor, is_deleted)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_mmaps_active ON material_maps(document_id, is_active, is_deleted)");
+  } catch { /* 表已存在 */ }
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS material_map_shards (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      unit_anchor TEXT NOT NULL,
+      run_kind TEXT NOT NULL,
+      granularity TEXT NOT NULL,
+      prompt_scope TEXT NOT NULL,
+      prompt_version INTEGER NOT NULL,
+      text_hash TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      model_config_hash TEXT NOT NULL,
+      content_json TEXT NOT NULL,
+      chars INTEGER,
+      token_used INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      sync_version INTEGER NOT NULL DEFAULT 0,
+      is_deleted INTEGER NOT NULL DEFAULT 0
+    )`);
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_mshards_key ON material_map_shards(
+      document_id, unit_anchor, run_kind, granularity, prompt_scope, prompt_version,
+      text_hash, provider, model, model_config_hash, is_deleted)`);
+  } catch { /* 表已存在 */ }
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS material_map_runs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      scope_anchor TEXT,
+      scope_kind TEXT,
+      granularity TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      stage TEXT,
+      calls_planned INTEGER,
+      calls_done INTEGER,
+      chars INTEGER,
+      est_input_tokens INTEGER,
+      est_output_tokens INTEGER,
+      est_cost REAL,
+      currency TEXT,
+      actual_prompt_tokens INTEGER,
+      actual_completion_tokens INTEGER,
+      actual_cost REAL,
+      repair_count INTEGER NOT NULL DEFAULT 0,
+      provider TEXT,
+      model TEXT,
+      model_config_hash TEXT,
+      prompt_version INTEGER,
+      error_code TEXT,
+      error_text TEXT,
+      input_json TEXT,
+      output_json TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      sync_version INTEGER NOT NULL DEFAULT 0,
+      is_deleted INTEGER NOT NULL DEFAULT 0
+    )`);
+    db.run("CREATE INDEX IF NOT EXISTS idx_mruns2_doc ON material_map_runs(document_id, created_at, is_deleted)");
+  } catch { /* 表已存在 */ }
   ensurePromptTemplates();
   persist();
 }
@@ -3756,6 +3851,353 @@ function deletePersonalMeaningCandidate(id, opts) {
   return true;
 }
 
+// ============ v48 批1（M15 重做，D41-⑤ / §4.19-7）：材料知识导图仓储 ============
+// map：每版本一行；激活切换=同 document+scope 下 isActive 互斥（新成功版本置 active，失败永不触碰旧图）。
+// shard：确定性主键 = sha256(逻辑键)；upsert 语义（同键覆盖 → 旧版本即失效）。
+// run：append-only 留痕，update 仅打补丁（状态机/进度/费用），不删不改写历史字段语义。
+
+function materialMapShardId(key) {
+  return crypto.createHash("sha256").update(key.join("\u0001")).digest("hex");
+}
+
+function mapMaterialMapRow(r, includeStructure) {
+  const base = {
+    id: r.id,
+    documentId: r.document_id,
+    scopeAnchor: r.scope_anchor,
+    scopeKind: r.scope_kind,
+    granularity: r.granularity,
+    title: r.title,
+    nodeCount: r.node_count,
+    sourceRevisionHash: r.source_revision_hash,
+    promptVersion: r.prompt_version,
+    generatorVersion: r.generator_version,
+    provider: r.provider,
+    model: r.model,
+    modelConfigHash: r.model_config_hash,
+    nodeRemap: r.node_remap_json ? JSON.parse(r.node_remap_json) : null,
+    isActive: !!r.is_active,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+  if (includeStructure) {
+    try {
+      base.structure = JSON.parse(r.structure_json);
+    } catch {
+      base.structure = null;
+    }
+  }
+  return base;
+}
+
+function saveMaterialMap({
+  documentId,
+  scopeAnchor = "book",
+  scopeKind = "book",
+  granularity = "standard",
+  title = null,
+  structure,
+  sourceRevisionHash = null,
+  promptVersion = null,
+  generatorVersion = null,
+  provider = null,
+  model = null,
+  modelConfigHash = null,
+  nodeRemap = null,
+  isActive = true
+} = {}) {
+  const now = Date.now();
+  const id = crypto.randomUUID();
+  const nodes = structure && Array.isArray(structure.nodes) ? structure.nodes : [];
+  db.run(
+    `INSERT INTO material_maps (id, user_id, document_id, scope_anchor, scope_kind, granularity, title,
+      structure_json, node_count, source_revision_hash, prompt_version, generator_version,
+      provider, model, model_config_hash, node_remap_json, is_active, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+    [
+      id,
+      String(documentId),
+      String(scopeAnchor),
+      String(scopeKind),
+      String(granularity),
+      title,
+      JSON.stringify(structure ?? { nodes: [], edges: [] }),
+      nodes.length,
+      sourceRevisionHash,
+      Number.isFinite(Number(promptVersion)) ? Number(promptVersion) : null,
+      generatorVersion,
+      provider,
+      model,
+      modelConfigHash,
+      nodeRemap ? JSON.stringify(nodeRemap) : null,
+      isActive ? 1 : 0,
+      now,
+      now
+    ]
+  );
+  if (isActive) {
+    db.run(
+      "UPDATE material_maps SET is_active = 0, updated_at = ?, sync_version = sync_version + 1 WHERE document_id = ? AND scope_anchor = ? AND id != ? AND is_active = 1 AND is_deleted = 0",
+      [now, String(documentId), String(scopeAnchor), id]
+    );
+  }
+  persist();
+  return getMaterialMap(id, { includeStructure: true });
+}
+
+function listMaterialMaps(documentId, opts = {}) {
+  const rows = queryAll(
+    "SELECT * FROM material_maps WHERE document_id = ? AND is_deleted = 0 ORDER BY created_at DESC, rowid DESC",
+    [String(documentId)]
+  );
+  return rows.map((r) => mapMaterialMapRow(r, !!opts.includeStructure));
+}
+
+function getMaterialMap(id, opts = {}) {
+  const rows = queryAll("SELECT * FROM material_maps WHERE id = ? AND is_deleted = 0", [String(id)]);
+  return rows.length ? mapMaterialMapRow(rows[0], opts.includeStructure !== false) : null;
+}
+
+function getActiveMaterialMap(documentId, scopeAnchor) {
+  const rows = queryAll(
+    "SELECT * FROM material_maps WHERE document_id = ? AND scope_anchor = ? AND is_active = 1 AND is_deleted = 0 ORDER BY created_at DESC LIMIT 1",
+    [String(documentId), String(scopeAnchor || "book")]
+  );
+  return rows.length ? mapMaterialMapRow(rows[0], true) : null;
+}
+
+function setActiveMaterialMap(id) {
+  const row = getMaterialMap(id, { includeStructure: false });
+  if (!row) return null;
+  const now = Date.now();
+  db.run(
+    "UPDATE material_maps SET is_active = 0, updated_at = ?, sync_version = sync_version + 1 WHERE document_id = ? AND scope_anchor = ? AND is_active = 1 AND is_deleted = 0",
+    [now, row.documentId, row.scopeAnchor]
+  );
+  db.run("UPDATE material_maps SET is_active = 1, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [now, String(id)]);
+  persist();
+  return getMaterialMap(id, { includeStructure: false });
+}
+
+function deleteMaterialMap(id) {
+  db.run("UPDATE material_maps SET is_deleted = 1, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [Date.now(), String(id)]);
+  persist();
+  return true;
+}
+
+function saveMaterialMapShard({
+  documentId,
+  unitAnchor,
+  runKind,
+  granularity,
+  promptScope,
+  promptVersion,
+  textHash,
+  provider,
+  model,
+  modelConfigHash,
+  content,
+  chars = null,
+  tokenUsed = null
+} = {}) {
+  const now = Date.now();
+  const id = materialMapShardId([
+    String(documentId), String(unitAnchor), String(runKind), String(granularity),
+    String(promptScope), Number(promptVersion) || 0, String(textHash),
+    String(provider), String(model), String(modelConfigHash)
+  ]);
+  const contentJson = JSON.stringify(content ?? null);
+  const existing = queryAll("SELECT id FROM material_map_shards WHERE id = ?", [id]);
+  if (existing.length) {
+    db.run(
+      `UPDATE material_map_shards SET content_json = ?, chars = COALESCE(?, chars), token_used = COALESCE(?, token_used),
+       updated_at = ?, sync_version = sync_version + 1 WHERE id = ?`,
+      [contentJson, Number.isFinite(Number(chars)) ? Number(chars) : null, Number.isFinite(Number(tokenUsed)) ? Number(tokenUsed) : null, now, id]
+    );
+  } else {
+    db.run(
+      `INSERT INTO material_map_shards (id, user_id, document_id, unit_anchor, run_kind, granularity, prompt_scope,
+        prompt_version, text_hash, provider, model, model_config_hash, content_json, chars, token_used,
+        created_at, updated_at, sync_version, is_deleted)
+       VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+      [
+        id, String(documentId), String(unitAnchor), String(runKind), String(granularity),
+        String(promptScope), Number(promptVersion) || 0, String(textHash),
+        String(provider), String(model), String(modelConfigHash),
+        contentJson,
+        Number.isFinite(Number(chars)) ? Number(chars) : null,
+        Number.isFinite(Number(tokenUsed)) ? Number(tokenUsed) : null,
+        now, now
+      ]
+    );
+  }
+  persist();
+  return getMaterialMapShard({ documentId, unitAnchor, runKind, granularity, promptScope, promptVersion, textHash, provider, model, modelConfigHash });
+}
+
+function getMaterialMapShard(key = {}) {
+  const id = materialMapShardId([
+    String(key.documentId), String(key.unitAnchor), String(key.runKind), String(key.granularity),
+    String(key.promptScope), Number(key.promptVersion) || 0, String(key.textHash),
+    String(key.provider), String(key.model), String(key.modelConfigHash)
+  ]);
+  const rows = queryAll("SELECT * FROM material_map_shards WHERE id = ? AND is_deleted = 0", [id]);
+  if (!rows.length) return null;
+  const r = rows[0];
+  let content = null;
+  try {
+    content = JSON.parse(r.content_json);
+  } catch {
+    content = null;
+  }
+  return {
+    id: r.id,
+    documentId: r.document_id,
+    unitAnchor: r.unit_anchor,
+    runKind: r.run_kind,
+    granularity: r.granularity,
+    promptScope: r.prompt_scope,
+    promptVersion: r.prompt_version,
+    textHash: r.text_hash,
+    provider: r.provider,
+    model: r.model,
+    modelConfigHash: r.model_config_hash,
+    content,
+    chars: r.chars,
+    tokenUsed: r.token_used,
+    updatedAt: r.updated_at
+  };
+}
+
+function listMaterialMapShards(documentId, filter = {}) {
+  const conds = ["document_id = ?", "is_deleted = 0"];
+  const args = [String(documentId)];
+  for (const col of ["run_kind", "granularity", "prompt_scope", "provider", "model", "model_config_hash"]) {
+    if (filter[col] != null) {
+      conds.push(`${col} = ?`);
+      args.push(String(filter[col]));
+    }
+  }
+  if (filter.promptVersion != null) {
+    conds.push("prompt_version = ?");
+    args.push(Number(filter.promptVersion) || 0);
+  }
+  const rows = queryAll(`SELECT * FROM material_map_shards WHERE ${conds.join(" AND ")}`, args);
+  return rows.map((r) => ({
+    id: r.id,
+    unitAnchor: r.unit_anchor,
+    runKind: r.run_kind,
+    granularity: r.granularity,
+    promptScope: r.prompt_scope,
+    promptVersion: r.prompt_version,
+    textHash: r.text_hash,
+    provider: r.provider,
+    model: r.model,
+    modelConfigHash: r.model_config_hash,
+    chars: r.chars,
+    tokenUsed: r.token_used,
+    updatedAt: r.updated_at
+  }));
+}
+
+function createMaterialMapRun({
+  documentId,
+  scopeAnchor = "book",
+  scopeKind = "book",
+  granularity = "standard",
+  input = null
+} = {}) {
+  const now = Date.now();
+  const id = crypto.randomUUID();
+  db.run(
+    `INSERT INTO material_map_runs (id, user_id, document_id, scope_anchor, scope_kind, granularity, status, input_json, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, 'pending', ?, ?, ?, 0, 0)`,
+    [id, String(documentId), String(scopeAnchor), String(scopeKind), String(granularity), JSON.stringify(input ?? null), now, now]
+  );
+  persist();
+  return getMaterialMapRun(id);
+}
+
+const MMRUN_FIELDS = [
+  "status", "stage", "calls_planned", "calls_done", "chars",
+  "est_input_tokens", "est_output_tokens", "est_cost", "currency",
+  "actual_prompt_tokens", "actual_completion_tokens", "actual_cost",
+  "repair_count", "provider", "model", "model_config_hash", "prompt_version",
+  "error_code", "error_text"
+];
+const MMRUN_JSON_FIELDS = new Set(["input_json", "output_json"]);
+const MMRUNcamel = {
+  status: "status", stage: "stage", callsPlanned: "calls_planned", callsDone: "calls_done",
+  chars: "chars", estInputTokens: "est_input_tokens", estOutputTokens: "est_output_tokens",
+  estCost: "est_cost", currency: "currency", actualPromptTokens: "actual_prompt_tokens",
+  actualCompletionTokens: "actual_completion_tokens", actualCost: "actual_cost",
+  repairCount: "repair_count", provider: "provider", model: "model",
+  modelConfigHash: "model_config_hash", promptVersion: "prompt_version",
+  errorCode: "error_code", errorText: "error_text", input: "input_json", output: "output_json"
+};
+
+function updateMaterialMapRun(id, patch = {}) {
+  const sets = [];
+  const args = [];
+  for (const [camel, col] of Object.entries(MMRUNcamel)) {
+    if (patch[camel] === undefined) continue;
+    sets.push(`${col} = ?`);
+    args.push(MMRUN_JSON_FIELDS.has(col) ? JSON.stringify(patch[camel] ?? null) : patch[camel]);
+  }
+  if (!sets.length) return getMaterialMapRun(id);
+  sets.push("updated_at = ?", "sync_version = sync_version + 1");
+  args.push(Date.now(), String(id));
+  db.run(`UPDATE material_map_runs SET ${sets.join(", ")} WHERE id = ?`, args);
+  persist();
+  return getMaterialMapRun(id);
+}
+
+function mapMaterialMapRunRow(r) {
+  return {
+    id: r.id,
+    documentId: r.document_id,
+    scopeAnchor: r.scope_anchor,
+    scopeKind: r.scope_kind,
+    granularity: r.granularity,
+    status: r.status,
+    stage: r.stage,
+    callsPlanned: r.calls_planned,
+    callsDone: r.calls_done,
+    chars: r.chars,
+    estInputTokens: r.est_input_tokens,
+    estOutputTokens: r.est_output_tokens,
+    estCost: r.est_cost,
+    currency: r.currency,
+    actualPromptTokens: r.actual_prompt_tokens,
+    actualCompletionTokens: r.actual_completion_tokens,
+    actualCost: r.actual_cost,
+    repairCount: r.repair_count,
+    provider: r.provider,
+    model: r.model,
+    modelConfigHash: r.model_config_hash,
+    promptVersion: r.prompt_version,
+    errorCode: r.error_code,
+    errorText: r.error_text,
+    input: r.input_json ? JSON.parse(r.input_json) : null,
+    output: r.output_json ? JSON.parse(r.output_json) : null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+
+function getMaterialMapRun(id) {
+  const rows = queryAll("SELECT * FROM material_map_runs WHERE id = ? AND is_deleted = 0", [String(id)]);
+  return rows.length ? mapMaterialMapRunRow(rows[0]) : null;
+}
+
+function listMaterialMapRuns(documentId, limit = 20) {
+  const rows = queryAll(
+    "SELECT * FROM material_map_runs WHERE document_id = ? AND is_deleted = 0 ORDER BY created_at DESC, rowid DESC LIMIT ?",
+    [String(documentId), Math.max(1, Number(limit) || 20)]
+  );
+  return rows.map(mapMaterialMapRunRow);
+}
+
 module.exports = {
   initDb,
   persistDb: persist,
@@ -3882,5 +4324,19 @@ module.exports = {
   listPersonalMeaningCandidates,
   createPersonalMeaningCandidate,
   resolvePersonalMeaningCandidate,
-  deletePersonalMeaningCandidate
+  deletePersonalMeaningCandidate,
+  // v48 批1（M15 重做，D41-⑤ / §4.19-7）：材料知识导图数据层（3 表）
+  saveMaterialMap,
+  listMaterialMaps,
+  getMaterialMap,
+  getActiveMaterialMap,
+  setActiveMaterialMap,
+  deleteMaterialMap,
+  saveMaterialMapShard,
+  getMaterialMapShard,
+  listMaterialMapShards,
+  createMaterialMapRun,
+  updateMaterialMapRun,
+  getMaterialMapRun,
+  listMaterialMapRuns
 };

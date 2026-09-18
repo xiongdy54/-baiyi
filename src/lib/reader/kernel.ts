@@ -80,6 +80,13 @@ export interface ReaderTocItem {
   subitems?: ReaderTocItem[];
 }
 
+/** 提取单元信息（v48 批1，§4.19-4）：文档序的原子文本区间锚。
+ *  foliate 引擎 = spine section（anchor 即 section href）；PDF 引擎 = 逐页（anchor = "pdfpage:<0基页码>"，与目录 href 同域）。
+ *  目录锚（可含 #fragment）经 baseOf 归一后匹配到单元；anchor 可回喂 getSectionText / goTo。 */
+export interface SectionUnitInfo {
+  anchor: string;
+}
+
 /** 打开书的数据源：原书字节（EPUB/MOBI/FB2/CBZ/PDF） */
 export type BookSource = {
   kind: "bytes";
@@ -112,6 +119,13 @@ export interface ReaderKernel {
   setMode(mode: ReaderModeConfig): Promise<void>;
   applyAppearance(appearance: ReaderAppearance): void;
   getTOC(): ReaderTocItem[];
+  /** 提取单元清单（v48 批1 §4.19-4，可选能力）：文档序单元锚数组，线性化坐标系的基础。
+   *  引擎未实现（如旧 fake）时业务侧走降级路径（无导图/预览取不到文）。 */
+  getSectionAnchors?(): SectionUnitInfo[];
+  /** 按提取单元取正文文本（v48 批1 §4.19-4，可选能力，全格式通用，确定性）：
+   *  无 endAnchor 取 start 单元自身；有 endAnchor 取 [start, end)（自 start 单元起、至 end 单元开始前，跨单元以 \n 拼接）。
+   *  文本形态（canonical）：块间 \n 分隔、块内空白折叠——AI 引文与本地逐字校验必须同用本函数输出，禁止另行归一。 */
+  getSectionText?(startAnchor: string, endAnchor?: string): Promise<string>;
   /** 当前选区语义数据（制卡管线唯一入口）；无选区返回 null */
   getSelection(): ReaderSelection | null;
   /** 正文图片定位（v35）：按 alt/周边文字找回原图并滚动到可见；命中返回宿主坐标框，未命中返回 null */

@@ -123,6 +123,25 @@ export function createFakeKernel(spec: FakeBookSpec): ReaderKernel & {
     getTOC() {
       return toc.map((t) => ({ ...t }));
     },
+    // v48 批1（M15 §4.19-4）：每章 = 一个提取单元（anchor 与目录 href 同域），文本 = 章原文
+    getSectionAnchors() {
+      return spec.chapters.map((_, i) => ({ anchor: `chapter${i + 1}.xhtml` }));
+    },
+    async getSectionText(startAnchor: string, endAnchor?: string) {
+      const idxOf = (a: string) => {
+        const m = /^chapter(\d+)\.xhtml$/.exec(String(a ?? ""));
+        return m ? Number(m[1]) - 1 : -1;
+      };
+      const s = idxOf(startAnchor);
+      if (s < 0 || s >= spec.chapters.length) return "";
+      const e = endAnchor != null ? idxOf(endAnchor) : null;
+      const last = e == null ? s : Math.max(s, Math.min(e - 1, spec.chapters.length - 1));
+      const parts: string[] = [];
+      for (let i = s; i <= last; i++) {
+        parts.push((spec.chapters[i] ?? "").replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim());
+      }
+      return parts.join("\n");
+    },
     getSelection() {
       return selection;
     },

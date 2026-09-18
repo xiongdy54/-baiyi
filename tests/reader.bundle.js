@@ -6966,6 +6966,47 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     view.style.height = "100%";
     host.appendChild(view);
     const normWs = (s3) => (s3 || "").replace(/\s+/g, " ").trim();
+    const baseOf = (h3) => {
+      const raw = String(h3 ?? "").split("#")[0];
+      try {
+        return decodeURI(raw);
+      } catch {
+        return raw;
+      }
+    };
+    const resolveSectionIndex = (anchor) => {
+      const sections = view.book?.sections ?? [];
+      const base = baseOf(anchor);
+      let i3 = sections.findIndex((s3) => baseOf(s3?.id) === base);
+      if (i3 < 0) i3 = sections.findIndex((s3) => baseOf(s3?.href) === base);
+      if (i3 < 0) {
+        try {
+          const r3 = view.book?.resolveHref?.(anchor);
+          const idx = r3 && typeof r3 === "object" ? r3.index ?? r3[0] : r3;
+          if (typeof idx === "number") i3 = idx;
+        } catch {
+        }
+      }
+      return i3;
+    };
+    const documentToText = (doc) => {
+      try {
+        const root = doc.body || doc.documentElement;
+        if (!root) return "";
+        const clone = root.cloneNode(true);
+        clone.querySelectorAll("script,style,noscript,template,svg,head").forEach((e3) => e3.remove());
+        const owner = clone.ownerDocument ?? doc;
+        clone.querySelectorAll("p,div,h1,h2,h3,h4,h5,h6,li,br,tr,blockquote,pre,figcaption,dd,dt,section,article,aside,header,footer,table,ul,ol,hr").forEach((e3) => {
+          try {
+            e3.after(owner.createTextNode("\n"));
+          } catch {
+          }
+        });
+        return (clone.textContent || "").replace(/\r\n?/g, "\n").replace(/[ \t\f\v\u00a0\u200b]+/g, " ").replace(/ ?\n ?/g, "\n").replace(/\n{2,}/g, "\n").trim();
+      } catch {
+        return "";
+      }
+    };
     const relocateHandlers = /* @__PURE__ */ new Set();
     const linkHandlers = /* @__PURE__ */ new Set();
     const pointerHandlers = /* @__PURE__ */ new Set();
@@ -7143,6 +7184,36 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         });
         return (view.book?.toc ?? []).map(mapItem).filter((t3) => t3.href);
       },
+      // v48 批1：提取单元清单（spine 顺序即文档序）。无 createDocument 的格式（如 CBZ 图片书）单元仍在列，
+      // 但 getSectionText 取到空串——由业务预览层如实显示 0 字。
+      getSectionAnchors() {
+        const sections = view.book?.sections ?? [];
+        return sections.map((s3) => ({ anchor: String(s3?.id ?? s3?.href ?? "") })).filter((u2) => u2.anchor);
+      },
+      async getSectionText(startAnchor, endAnchor) {
+        const sections = view.book?.sections ?? [];
+        const i3 = resolveSectionIndex(startAnchor);
+        if (i3 < 0 || i3 >= sections.length) return "";
+        let last = i3;
+        if (endAnchor != null) {
+          const j2 = resolveSectionIndex(endAnchor);
+          if (j2 >= 0) last = Math.max(i3, j2 - 1);
+        }
+        const parts = [];
+        for (let k3 = i3; k3 <= last && k3 < sections.length; k3++) {
+          const make = sections[k3]?.createDocument;
+          if (typeof make !== "function") {
+            parts.push("");
+            continue;
+          }
+          try {
+            parts.push(documentToText(await make.call(sections[k3])));
+          } catch {
+            parts.push("");
+          }
+        }
+        return parts.join("\n");
+      },
       getSelection() {
         const r3 = view.renderer;
         if (!r3) return null;
@@ -7315,6 +7386,25 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       },
       getTOC() {
         return toc.map((t3) => ({ ...t3 }));
+      },
+      // v48 批1（M15 §4.19-4）：每章 = 一个提取单元（anchor 与目录 href 同域），文本 = 章原文
+      getSectionAnchors() {
+        return spec.chapters.map((_2, i3) => ({ anchor: `chapter${i3 + 1}.xhtml` }));
+      },
+      async getSectionText(startAnchor, endAnchor) {
+        const idxOf = (a3) => {
+          const m3 = /^chapter(\d+)\.xhtml$/.exec(String(a3 ?? ""));
+          return m3 ? Number(m3[1]) - 1 : -1;
+        };
+        const s3 = idxOf(startAnchor);
+        if (s3 < 0 || s3 >= spec.chapters.length) return "";
+        const e3 = endAnchor != null ? idxOf(endAnchor) : null;
+        const last = e3 == null ? s3 : Math.max(s3, Math.min(e3 - 1, spec.chapters.length - 1));
+        const parts = [];
+        for (let i3 = s3; i3 <= last; i3++) {
+          parts.push((spec.chapters[i3] ?? "").replace(/[ \t]+/g, " ").replace(/\n{2,}/g, "\n").trim());
+        }
+        return parts.join("\n");
       },
       getSelection() {
         return selection;
@@ -7591,7 +7681,63 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       kernel.destroy();
     }
   }
+  async function runFakeExtraction() {
+    const { results, check } = makeRunner((m3) => console.log(m3));
+    const kernel = createFakeKernel({
+      chapters: ["\u7B2C\u4E00\u7AE0 \u7532\u5185\u5BB9\u3002\n\u7B2C\u4E8C\u6BB5\u3002", "\u7B2C\u4E8C\u7AE0 \u4E59\u5185\u5BB9\u3002\n\u7B2C\u4E8C\u6BB5\u3002", "\u7B2C\u4E09\u7AE0 \u4E19\u5185\u5BB9\u3002"]
+    });
+    await kernel.open({ kind: "bytes", bytes: new Uint8Array(0), name: "fake.epub" }, {});
+    const anchors = kernel.getSectionAnchors ? kernel.getSectionAnchors() : [];
+    check("S17 fake \u5355\u5143\u6570 = \u7AE0\u6570", anchors.length === 3, JSON.stringify(anchors));
+    check("S17 fake \u5355\u5143\u951A\u4E0E\u76EE\u5F55 href \u540C\u57DF", Boolean(anchors[1]) && anchors[1].anchor === "chapter2.xhtml", JSON.stringify(anchors[1]));
+    const t22 = await kernel.getSectionText("chapter2.xhtml");
+    check("S17 fake \u5355\u5143\u53D6\u6587\u542B\u672C\u7AE0\u5185\u5BB9", t22.includes("\u4E59\u5185\u5BB9") && t22.includes("\u7B2C\u4E8C\u6BB5"), JSON.stringify(t22.slice(0, 30)));
+    check("S17 fake \u5355\u5143\u53D6\u6587\u4E0D\u542B\u4ED6\u7AE0\u5185\u5BB9", !t22.includes("\u7532\u5185\u5BB9") && !t22.includes("\u4E19\u5185\u5BB9"), "");
+    const r12 = await kernel.getSectionText("chapter1.xhtml", "chapter3.xhtml");
+    check("S17 fake [start,end) \u8DE8\u5355\u5143\u62FC\u63A5", r12.includes("\u7532\u5185\u5BB9") && r12.includes("\u4E59\u5185\u5BB9") && !r12.includes("\u4E19\u5185\u5BB9"), JSON.stringify(r12.slice(0, 40)));
+    const tBad = await kernel.getSectionText("nope.xhtml");
+    check("S17 fake \u672A\u77E5\u951A\u8FD4\u56DE\u7A7A\u4E32", tBad === "", JSON.stringify(tBad));
+    kernel.destroy();
+    return results;
+  }
+  async function runExtraction(bytesB64) {
+    const { results, check } = makeRunner((m3) => console.log(m3));
+    const host = document.getElementById("host");
+    host.innerHTML = "";
+    const kernel = createFoliateKernel(host);
+    try {
+      await kernel.open({ kind: "bytes", bytes: b64ToBytes(bytesB64), name: "fixture.epub" }, {});
+      await waitFor(() => kernel.getCurrentLocation(), 8e3, "extraction open");
+      const anchors = kernel.getSectionAnchors ? kernel.getSectionAnchors() : [];
+      check("S17 foliate \u5355\u5143\u6E05\u5355\u975E\u7A7A", anchors.length >= 1, "units=" + anchors.length);
+      const texts = [];
+      for (const a3 of anchors) texts.push(await kernel.getSectionText(a3.anchor));
+      const idx2 = texts.findIndex((t3) => t3.includes("\u7B2C\u4E8C\u7AE0\u72EC\u6709\u951A\u4E59"));
+      check("S17 foliate \u5355\u5143\u6587\u672C\u53EF\u5B9A\u4F4D\u7B2C\u4E8C\u7AE0", idx2 >= 0, "lens=" + texts.map((t3) => t3.length).join(","));
+      if (idx2 >= 0) {
+        const single = await kernel.getSectionText(anchors[idx2].anchor);
+        check("S17 foliate \u5355\u6B21\u53D6\u6587\u4E0E\u9010\u5355\u5143\u4E00\u81F4", single === texts[idx2], "len " + single.length + "/" + texts[idx2].length);
+        if (idx2 + 1 < anchors.length) {
+          const ranged = await kernel.getSectionText(anchors[idx2].anchor, anchors[idx2 + 1].anchor);
+          check("S17 foliate [start,end) \u6070\u4E3A\u5355\u5355\u5143", ranged === texts[idx2], "len " + ranged.length + "/" + texts[idx2].length);
+        }
+        check("S17 foliate \u5F15\u6587\u9010\u5B57\uFF08\u6821\u9A8C\u540C\u6E90\uFF09", texts[idx2].includes("\u7B2C\u4E8C\u7AE0\u72EC\u6709\u951A\u4E59"), "");
+      }
+      if (anchors.length) {
+        const again = await kernel.getSectionText(anchors[0].anchor);
+        check("S17 foliate \u91CD\u590D\u62BD\u53D6\u786E\u5B9A\u6027", again === texts[0], "len " + again.length + "/" + texts[0].length);
+      }
+      kernel.destroy();
+    } catch (err) {
+      check("S17 foliate \u5957\u4EF6\u5F02\u5E38", false, err && (err.stack || err.message));
+    } finally {
+      host.innerHTML = "";
+    }
+    return results;
+  }
   window.__readerTest = {
+    runFakeExtraction,
+    runExtraction,
     async runFake() {
       const { results, check } = makeRunner((m3) => console.log(m3));
       const kernel = createFakeKernel({

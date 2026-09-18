@@ -99,6 +99,62 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
 
   const normWs = (s: string) => (s || "").replace(/\s+/g, " ").trim();
 
+  // ---------- v48 批1（M15 §4.19-4）：提取单元（全格式通用能力，业务只经 ReaderKernel 可选方法使用） ----------
+  // 单元锚归一：TOC href 可能带 #fragment，而文本区间以 spine section（整个文件）为界——
+  // 去片段 + decodeURI 后与 section.id 对比（epub.js 的 section.id = item.href；fb2/mobi/comic 同域）。
+  const baseOf = (h: unknown) => {
+    const raw = String(h ?? "").split("#")[0];
+    try {
+      return decodeURI(raw);
+    } catch {
+      return raw;
+    }
+  };
+  const resolveSectionIndex = (anchor: string): number => {
+    const sections = view.book?.sections ?? [];
+    const base = baseOf(anchor);
+    let i = sections.findIndex((s) => baseOf((s as { id?: string })?.id) === base);
+    if (i < 0) i = sections.findIndex((s) => baseOf((s as { href?: string })?.href) === base);
+    if (i < 0) {
+      // 兜底：部分格式的 book 自带 resolveHref（comic/fb2/mobi）；返回 {index} 或 [index, anchor]
+      try {
+        const r = (view.book as unknown as { resolveHref?: (h: string) => unknown })?.resolveHref?.(anchor);
+        const idx = r && typeof r === "object" ? ((r as { index?: number }).index ?? (r as unknown as number[])[0]) : r;
+        if (typeof idx === "number") i = idx;
+      } catch {
+        /* 保持 -1 */
+      }
+    }
+    return i;
+  };
+  // canonical 文本抽取（与 PDF 侧同一形态约定）：块级边界 → \n，块内空白折叠；AI 引文与逐字校验共用此输出。
+  const documentToText = (doc: Document): string => {
+    try {
+      const root = (doc.body || doc.documentElement) as Element | null;
+      if (!root) return "";
+      const clone = root.cloneNode(true) as Element;
+      clone.querySelectorAll("script,style,noscript,template,svg,head").forEach((e) => e.remove());
+      const owner = clone.ownerDocument ?? doc;
+      clone
+        .querySelectorAll("p,div,h1,h2,h3,h4,h5,h6,li,br,tr,blockquote,pre,figcaption,dd,dt,section,article,aside,header,footer,table,ul,ol,hr")
+        .forEach((e) => {
+          try {
+            e.after(owner.createTextNode("\n"));
+          } catch {
+            /* 单点失败不影响整体 */
+          }
+        });
+      return (clone.textContent || "")
+        .replace(/\r\n?/g, "\n")
+        .replace(/[ \t\f\v\u00a0\u200b]+/g, " ")
+        .replace(/ ?\n ?/g, "\n")
+        .replace(/\n{2,}/g, "\n")
+        .trim();
+    } catch {
+      return "";
+    }
+  };
+
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
   const pointerHandlers = new Set<(pos: { x: number; y: number }) => void>();
@@ -308,6 +364,41 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         subitems: Array.isArray(t.subitems) ? t.subitems.map(mapItem) : undefined
       });
       return (view.book?.toc ?? []).map(mapItem).filter((t) => t.href);
+    },
+
+    // v48 批1：提取单元清单（spine 顺序即文档序）。无 createDocument 的格式（如 CBZ 图片书）单元仍在列，
+    // 但 getSectionText 取到空串——由业务预览层如实显示 0 字。
+    getSectionAnchors() {
+      const sections = (view.book?.sections ?? []) as { id?: string; href?: string }[];
+      return sections
+        .map((s) => ({ anchor: String(s?.id ?? s?.href ?? "") }))
+        .filter((u) => u.anchor);
+    },
+
+    async getSectionText(startAnchor: string, endAnchor?: string) {
+      const sections = (view.book?.sections ?? []) as { createDocument?: () => Promise<Document> }[];
+      const i = resolveSectionIndex(startAnchor);
+      if (i < 0 || i >= sections.length) return "";
+      let last = i;
+      if (endAnchor != null) {
+        const j = resolveSectionIndex(endAnchor);
+        // 上界无法解析 → 保守只取 start 单元（宁少取不误取；调用方按单元遍历不依赖跨区间）
+        if (j >= 0) last = Math.max(i, j - 1);
+      }
+      const parts: string[] = [];
+      for (let k = i; k <= last && k < sections.length; k++) {
+        const make = sections[k]?.createDocument;
+        if (typeof make !== "function") {
+          parts.push("");
+          continue;
+        }
+        try {
+          parts.push(documentToText(await make.call(sections[k])));
+        } catch {
+          parts.push("");
+        }
+      }
+      return parts.join("\n");
     },
 
     getSelection(): ReaderSelection | null {

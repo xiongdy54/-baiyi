@@ -235,6 +235,18 @@ app.whenReady().then(async () => {
   );
   report("L1", l1);
 
+  // v48 批1（M15 §4.19-4）：提取单元契约（fake 语义 + foliate 真夹具）
+  const fakeExt = await win.webContents.executeJavaScript(
+    "window.__readerTest.runFakeExtraction()",
+    true
+  ).catch((err) => { logLine("L0-EXT dispatch error: " + err.message); return []; });
+  report("L0-EXT", fakeExt);
+  const l1ext = await win.webContents.executeJavaScript(
+    `window.__readerTest.runExtraction(${JSON.stringify(fixtures.normal)})`,
+    true
+  ).catch((err) => { logLine("L1-EXT dispatch error: " + err.message); return []; });
+  report("L1-EXT", l1ext);
+
   // CJK 专项：ruby + 竖排
   const cjk = await win.webContents.executeJavaScript(
     `window.__readerTest.runCjkSpike(${JSON.stringify(fixtures.ruby)}, ${JSON.stringify(fixtures.vertical)})`,

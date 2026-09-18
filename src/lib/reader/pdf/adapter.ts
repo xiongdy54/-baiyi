@@ -95,7 +95,7 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     getOutline(): Promise<OutlineNode[] | null>;
     getDestination(d: string): Promise<unknown>;
     getPageIndex(ref: unknown): Promise<number>;
-    getPage(n: number): Promise<{ getTextContent(): Promise<{ items: { str: string }[] }> }>;
+    getPage(n: number): Promise<{ getTextContent(): Promise<{ items: { str: string; hasEOL?: boolean }[] }> }>;
     destroy(): Promise<void>;
   };
   let doc: PdfDoc | null = null;
@@ -360,6 +360,43 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     getTOC(): ReaderTocItem[] {
       // 同步快照：open 完成时已缓存大纲（open 内异步填充，见下）
       return tocCache.map((t) => ({ ...t }));
+    },
+
+    // v48 批1（M15 §4.19-4）：提取单元 = 逐页（anchor = "pdfpage:<0基页码>"，与目录 href 同域）。
+    getSectionAnchors() {
+      if (!doc || totalPages <= 0) return [];
+      return Array.from({ length: totalPages }, (_, i) => ({ anchor: `pdfpage:${i}` }));
+    },
+
+    async getSectionText(startAnchor: string, endAnchor?: string) {
+      if (!doc || totalPages <= 0) return "";
+      const parse = (a: string) => {
+        const m = /^pdfpage:(\d+)$/.exec(String(a ?? ""));
+        return m ? Number(m[1]) : null;
+      };
+      const s = parse(startAnchor);
+      if (s == null || s < 0 || s >= totalPages) return "";
+      const e = endAnchor != null ? parse(endAnchor) : null;
+      // 上界无法解析 → 保守只取 start 页（与 foliate 侧同一保守策略）
+      const last = e == null ? s : Math.max(s, Math.min(e - 1, totalPages - 1));
+      // canonical 文本形态与 foliate 侧一致：块间（行）\n、行内空白折叠
+      const pageText = async (p0: number) => {
+        try {
+          const tc = await doc!.getPage(p0 + 1).then((pg) => pg.getTextContent());
+          return (tc.items as { str: string; hasEOL?: boolean }[])
+            .map((it) => it.str + (it.hasEOL ? "\n" : ""))
+            .join("")
+            .replace(/[ \t\u00a0]+/g, " ")
+            .replace(/ ?\n ?/g, "\n")
+            .replace(/\n{2,}/g, "\n")
+            .trim();
+        } catch {
+          return "";
+        }
+      };
+      const parts: string[] = [];
+      for (let p = s; p <= last; p++) parts.push(await pageText(p));
+      return parts.join("\n");
     },
 
     getSelection(): ReaderSelection | null {
