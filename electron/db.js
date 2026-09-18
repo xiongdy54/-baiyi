@@ -1688,21 +1688,24 @@ function ensurePromptTemplates() {
       }
     }
   } catch { /* 播种失败不阻塞启动 */ }
-  // v48 批2（M15 重做，D41-③ / §4.19-3）：material-map-* 五 scope 首版 v1——四层管线（单元分析/归并/全书/终编辑）
+  // v48 批2（M15 重做，D41-③ / §4.19-3）：material-map-* 五 scope——四层管线（单元分析/归并/全书/终编辑）
   // + 语义评审。消费引擎 = electron/mindmapEngine.js；出层校验 = electron/mindmapCore.js validateMapStructure。
+  // v48.1（用户实测「详细粒度粗略」）：粒度块传入提示词 + children 递归契约 + 短引文——升 v2 补播
+  // （MAX(version) < 2 即插新行；存量 v1 留痕，读取取最高版）。
   try {
+    const MM_TARGET = 2;
     for (const [scope, name, content] of [
-      ["material-map-section", "材料结构单元分析 v1", MATERIAL_MAP_SECTION_PROMPT],
-      ["material-map-merge", "章节归并 v1", MATERIAL_MAP_MERGE_PROMPT],
-      ["material-map-global", "全书归并 v1", MATERIAL_MAP_GLOBAL_PROMPT],
-      ["material-map-editorial", "结构终编辑 v1", MATERIAL_MAP_EDITORIAL_PROMPT],
-      ["material-map-review", "导图语义评审 v1", MATERIAL_MAP_REVIEW_PROMPT]
+      ["material-map-section", "材料结构单元分析 v2", MATERIAL_MAP_SECTION_PROMPT],
+      ["material-map-merge", "章节归并 v2", MATERIAL_MAP_MERGE_PROMPT],
+      ["material-map-global", "全书归并 v2", MATERIAL_MAP_GLOBAL_PROMPT],
+      ["material-map-editorial", "结构终编辑 v2", MATERIAL_MAP_EDITORIAL_PROMPT],
+      ["material-map-review", "导图语义评审 v2", MATERIAL_MAP_REVIEW_PROMPT]
     ]) {
-      const n = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = ?", [scope])[0]?.n || 0;
-      if (Number(n) === 0) {
+      const maxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope])[0]?.v || 0;
+      if (Number(maxV) < MM_TARGET) {
         db.run(
-          "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, 1, 1, ?, ?)",
-          [crypto.randomUUID(), scope, name, content, situationRequiredFor(scope), now]
+          "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+          [crypto.randomUUID(), scope, name, content, MM_TARGET, situationRequiredFor(scope), now]
         );
       }
     }

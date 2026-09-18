@@ -94,7 +94,8 @@ app.whenReady().then(async () => {
 
     console.log("---- M15R-E1 播种 ----");
     const scopes = ["material-map-section", "material-map-merge", "material-map-global", "material-map-editorial", "material-map-review"];
-    check("五 scope 均播种 v1", scopes.every((s) => { const t = db.getPromptTemplate(s); return t && t.version === 1; }), scopes.map((s) => { const t = db.getPromptTemplate(s); return [s, t && t.version]; }));
+    check("五 scope 均播种 v2（v48.1 粒度块+递归契约补播）", scopes.every((s) => { const t = db.getPromptTemplate(s); return t && t.version >= 2; }), scopes.map((s) => { const t = db.getPromptTemplate(s); return [s, t && t.version]; }));
+    check("v2 内容含粒度块与递归契约", (() => { const t = db.getPromptTemplate("material-map-section"); return t && t.content.includes("覆盖粒度") && t.content.includes("detailed") && t.content.includes("children"); })(), "");
 
     console.log("---- M15R-E2 预览（零调用）与全管线生成 ----");
     const pv = engine.preview(ctx, paramsFor("doc-e1"));
