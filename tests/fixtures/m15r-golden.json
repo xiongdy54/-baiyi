@@ -1,0 +1,21 @@
+{
+  "purpose": "黄金语义期望（Task 53/54）：真实 Key 冒烟时与 AI 实际产出人工比对——期望是「作者组织方式」而非主题列表。修改 material-map-* 提示词（升 v2）时必须以此为对照基准。",
+  "fixtureA_教材类": {
+    "material": "定义/解释/案例/总结类的概念教材",
+    "expectedTopLevel": ["概念建立", "概念区分", "机制解释", "案例应用", "限制与总结"],
+    "expectedRoles": ["introduce", "distinguish", "cause_effect", "example", "summary"],
+    "forbidden": ["概念A", "概念B", "概念C", "第一章", "第二章"]
+  },
+  "fixtureB_论证类": {
+    "material": "主张/证据/反例/回应/结论类的理论论证",
+    "expectedTopLevel": ["核心主张", "支持证据", "反例与回应", "结论"],
+    "expectedRoles": ["claim_evidence", "claim_evidence", "critique", "synthesis"],
+    "forbidden": ["主张一", "证据一", "作者说", "主要观点"]
+  },
+  "fixtureC_技术文档": {
+    "material": "问题/架构/步骤/注意事项/实现/限制类文档",
+    "expectedTopLevel": ["问题定义", "方案架构", "实施步骤", "注意事项与限制"],
+    "expectedRoles": ["problem_solution", "decompose", "sequence", "critique"],
+    "forbidden": ["简介", "内容", "相关知识", "其他"]
+  }
+}

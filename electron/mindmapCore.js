@@ -632,7 +632,53 @@ function deriveStructureSummary(map, maxChars) {
   return text;
 }
 
+// ---------- 质量指标（Task 52，本地统计——只用于开发测试与调优，不进用户 UI） ----------
+
+/** 导图质量统计：证据覆盖/重复节点/空洞父/目录回声/平均分支/最大深度（孤儿率恒 0——校验器拒绝孤儿） */
+function computeMapMetrics(map) {
+  const nodes = (map && map.nodes) || [];
+  const n = nodes.length;
+  if (!n) return { nodeCount: 0, evidenceCoverage: 0, duplicateNodeRate: 0, genericParentRate: 0, tocEchoRate: 0, branchingFactor: 0, maxDepth: 0 };
+  const withEvidence = nodes.filter((x) => (x.evidence || []).length > 0 || (x.compositionalEvidence || []).length > 0).length;
+  const titleCount = new Map();
+  const byParent = new Map();
+  const depthOf = new Map();
+  for (const x of nodes) {
+    titleCount.set(x.title, (titleCount.get(x.title) || 0) + 1);
+    const pk = x.parentId || "";
+    byParent.set(pk, (byParent.get(pk) || 0) + 1);
+  }
+  const depth = (id, seen) => {
+    if (depthOf.has(id)) return depthOf.get(id);
+    const node = nodes.find((x) => x.id === id);
+    if (!node || !node.parentId || seen.has(node.parentId)) {
+      depthOf.set(id, 0);
+      return 0;
+    }
+    seen.add(id);
+    const d = depth(node.parentId, seen) + 1;
+    depthOf.set(id, d);
+    return d;
+  };
+  let maxDepth = 0;
+  for (const x of nodes) maxDepth = Math.max(maxDepth, depth(x.id, new Set()));
+  const dupTitles = [...titleCount.values()].filter((c) => c >= 3).length;
+  const internal = nodes.filter((x) => (x.childIds || []).length > 0);
+  const genericParents = internal.filter((x) => UMBRELLA_TITLES.has(x.title)).length;
+  const tocEcho = internal.filter((x) => !(x.groupingBasis && x.groupingBasis.explanation)).length;
+  return {
+    nodeCount: n,
+    evidenceCoverage: Math.round((withEvidence / n) * 100) / 100,
+    duplicateNodeRate: Math.round((dupTitles / Math.max(1, byParent.size)) * 100) / 100,
+    genericParentRate: Math.round((genericParents / Math.max(1, internal.length)) * 100) / 100,
+    tocEchoRate: Math.round((tocEcho / Math.max(1, internal.length)) * 100) / 100,
+    branchingFactor: Math.round((nodes.reduce((s, x) => s + (x.childIds || []).length, 0) / Math.max(1, internal.length)) * 100) / 100,
+    maxDepth
+  };
+}
+
 module.exports = {
+  computeMapMetrics,
   AUTHORIAL_ROLES,
   GROUPING_TYPES,
   UMBRELLA_TITLES,
@@ -649,5 +695,6 @@ module.exports = {
   splitByParagraphs,
   validateMapStructure,
   remapNodes,
-  deriveStructureSummary
+  deriveStructureSummary,
+  computeMapMetrics
 };

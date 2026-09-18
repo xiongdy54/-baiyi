@@ -257,6 +257,22 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   check("超长截断并标注", long.length <= 520 && long.endsWith("（超长截断）"), long.slice(-20));
 }
 
+console.log("---- M15R-9 质量指标（Task 52，本地统计） ----");
+{
+  const map = {
+    nodes: [
+      { id: "root", parentId: null, title: "根", childIds: ["a", "b"], evidence: [], groupingBasis: { type: "sequence", explanation: "x" } },
+      { id: "a", parentId: "root", title: "甲", childIds: [], evidence: [{ quote: "q" }], compositionalEvidence: [] },
+      { id: "b", parentId: "root", title: "总结", childIds: [], evidence: [], compositionalEvidence: ["a"], groupingBasis: null }
+    ]
+  };
+  const m = core.computeMapMetrics(map);
+  check("节点计数与证据覆盖率（2/3）", m.nodeCount === 3 && m.evidenceCoverage === 0.67, m);
+  check("最大深度 1 / 分支因子 2", m.maxDepth === 1 && m.branchingFactor === 2, m);
+  check("空洞父率：伞形标题的叶子不算父（恒 0）", m.genericParentRate === 0, m);
+  check("目录回声率（缺 grouping 的内部节点=0）", m.tocEchoRate === 0, m);
+}
+
 console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
 if (fail) {
   console.log("FAILED items exist");
