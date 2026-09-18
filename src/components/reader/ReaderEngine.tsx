@@ -18,8 +18,8 @@ interface Props {
   engine?: "foliate" | "pdf";
   /** 打开时恢复的位置（上次阅读进度；跳转访问时不传） */
   initLocation?: ReaderLocation | null;
-  /** 跳转原文（复习卡/卡片浏览）：优先 cfi，其次 pageIndex（PDF），失败按 anchorText 文本搜索定位 */
-  jump?: { cfi?: string; pageIndex?: number; anchorText: string } | null;
+  /** 跳转原文（复习卡/卡片浏览）：cfi → pageIndex（PDF）→ chapterIndex → anchorText 文本搜索 */
+  jump?: { cfi?: string; pageIndex?: number; chapterIndex?: number; anchorText: string } | null;
   onRelocate: (info: RelocateInfo) => void;
   onLink: (info: LinkInfo) => void;
   onContentPointerUp: (pos: { x: number; y: number }) => void;
@@ -65,10 +65,16 @@ export default function ReaderEngine({
       await k.open(source, { location: j ? undefined : (handlers.current.initLocation ?? undefined) });
       if (disposed) return;
       if (j) {
-        // 跳转顺序：cfi（foliate 旧卡）→ pageIndex（PDF 新卡）→ anchorText 文本搜索
+        // 跳转顺序（v35）：cfi → pageIndex（PDF）→ chapterIndex → anchorText 文本搜索（判空守卫）
         const okCfi = j.cfi ? await k.goTo({ cfi: j.cfi }) : false;
         const okPage = !okCfi && j.pageIndex != null ? await k.goTo({ pageIndex: j.pageIndex }) : false;
-        if (!okCfi && !okPage) await k.goTo({ search: j.anchorText.slice(0, 30) });
+        const okChapter = !okCfi && !okPage && j.chapterIndex != null ? await k.goTo({ chapterIndex: j.chapterIndex }) : false;
+        const query = (j.anchorText || "").trim().slice(0, 30);
+        if (!okCfi && !okPage && !okChapter && query) {
+          try {
+            await k.goTo({ search: query });
+          } catch { /* 搜索失败即停留当前（已着陆）位置，不回退 */ }
+        }
       }
       handlers.current.onReady(k);
     })();

@@ -5,12 +5,17 @@ import Reader from "./components/Reader";
 import QueueView from "./components/QueueView";
 import ReviewView from "./components/ReviewView";
 import CardBrowser from "./components/CardBrowser";
+import JournalView from "./components/JournalView";
+import AddBookModal from "./components/AddBookModal";
 import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
 import Dashboard from "./components/dashboard/Dashboard";
 import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
 import { commandRegistry } from "./lib/commands";
 import { libraryApi, type DocPayload } from "./lib/library";
+import { installJournalBridge, shortcutsApi } from "./lib/journal";
+import { installInsightBridge } from "./lib/insight";
+import { installMemoryBridge } from "./lib/memory";
 import { readingWorkflow } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
@@ -29,12 +34,13 @@ type View =
       doc: DocPayload;
       /** 原书文件字节（存在即走阅读内核；engine=pdf 时走 pdf.js 内核直读） */
       book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" };
-      jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number };
+      jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } };
       returnTo?: "review" | "queue" | "browse";
     }
   | { name: "queue" }
   | { name: "review" }
   | { name: "browse" }
+  | { name: "journal" }
   | { name: "stats" }
   | { name: "extractReader"; extractId: string; book?: { bytes: Uint8Array; name: string } };
 
@@ -45,6 +51,9 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // v36（M8-A）：添加材料模态提升到 App 级——全局快捷键 Ctrl+Alt+N 与书架入口共用同一模态，
+  // 且快捷键呼出时**不切换视图**（阅读位置与复习会话原地保留，D34-⑤）
+  const [addMaterialOpen, setAddMaterialOpen] = useState(false);
   const [view, setView] = useState<View>({ name: "shelf" });
   const [extractDetail, setExtractDetail] = useState<Awaited<ReturnType<typeof readingWorkflow.getTopic>>>(null);
 
@@ -88,6 +97,16 @@ export default function App() {
   useEffect(() => {
     void commandRegistry.init();
     commandRegistry.install();
+  }, []);
+
+  // v36（M8-A）：日记事件桥（主进程写入推送 → EventBus）+ 全局快捷键「添加学习材料」的就地弹模态
+  // v40（M8-B）：洞察事件桥（主进程洞察运行/反馈推送 → EventBus）
+  // v45（M14-UM1）：记忆事件桥（主进程整理/补处理进度推送 → 设置页记忆区）
+  useEffect(() => {
+    installJournalBridge();
+    installInsightBridge();
+    installMemoryBridge();
+    return shortcutsApi.onOpenAddMaterial(() => setAddMaterialOpen(true));
   }, []);
 
   // M4：设置弹窗打开期间抑制全局快捷键（弹窗无输入焦点时按键不得触发其下层的复习/阅读动作）
@@ -223,7 +242,7 @@ export default function App() {
   // 切出后软件记录的位置仍是上次真实阅读的位置，不会被跳转位置覆盖。
   const handleJumpToDoc = useCallback(async (
     docId: string,
-    anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number },
+    anchor: NonNullable<Extract<View, { name: "reader" }>["jumpAnchor"]>,
     returnTo: "review" | "queue" | "browse" = "review"
   ) => {
     if (returnTo === "review") {
@@ -313,6 +332,9 @@ export default function App() {
   } else if (view.name === "browse") {
     topTitle = "卡片浏览";
     mainContent = <CardBrowser onJumpToDoc={handleJumpToDoc} />;
+  } else if (view.name === "journal") {
+    topTitle = "日记";
+    mainContent = <JournalView onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "stats") {
     topTitle = "统计数据";
     mainContent = <Dashboard />;
@@ -334,7 +356,7 @@ export default function App() {
       />
     ) : null;
   } else {
-    mainContent = <Bookshelf onOpenBook={openBook} />;
+    mainContent = <Bookshelf onOpenBook={openBook} onAddMaterial={() => setAddMaterialOpen(true)} />;
   }
 
   return (
@@ -358,6 +380,7 @@ export default function App() {
             { key: "queue", label: "队列", match: (n: string) => n === "queue" || n === "extractReader" },
             { key: "review", label: "复习", match: (n: string) => n === "review" },
             { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
+            { key: "journal", label: "日记", match: (n: string) => n === "journal" },
             { key: "stats", label: "数据", match: (n: string) => n === "stats" }
           ] as const).map((item) => (
             <button
@@ -398,6 +421,18 @@ export default function App() {
         </div>
       </header>
       {mainContent}
+      {addMaterialOpen && (
+        <AddBookModal
+          onSave={async (title, markdown, lang) => {
+            const created = await libraryApi.createFromPaste(title, markdown);
+            // v38（D35）：粘贴书随建册带上语言属性（空=未知）
+            if (created && lang) await libraryApi.setItemLang(created.id, lang);
+            eventBus.emit("library/changed");
+            setAddMaterialOpen(false);
+          }}
+          onClose={() => setAddMaterialOpen(false)}
+        />
+      )}
       {settingsOpen && (
         <SettingsPanel
           theme={theme}

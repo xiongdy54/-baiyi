@@ -52,6 +52,26 @@ const uncollapse = range => {
     return range
 }
 
+// [local-patch v37] setSelectionTo 守卫死节点：跨章节导航时 #anchor 可能仍指向已销毁
+// 上一章 iframe 的节点，ownerDocument/defaultView 为 null 会抛 TypeError（relocate 监听器
+// 内必现）。detached 文档没有 window，无法选区——直接跳过。
+const setSelectionTo = (target, collapse) => {
+    let range
+    if (target.startContainer) range = target.cloneRange()
+    else if (target.nodeType) {
+        range = document.createRange()
+        range.selectNode(target)
+    }
+    if (range) {
+        const sel = range.startContainer?.ownerDocument?.defaultView?.getSelection?.()
+        if (!sel) return
+        sel.removeAllRanges()
+        if (collapse === -1) range.collapse(true)
+        else if (collapse === 1) range.collapse()
+        sel.addRange(range)
+    }
+}
+
 const makeRange = (doc, node, start, end = start) => {
     const range = doc.createRange()
     range.setStart(node, start)
@@ -157,24 +177,6 @@ const selectionIsBackward = sel => {
     return range.collapsed
 }
 
-const setSelectionTo = (target, collapse) => {
-    let range
-    if (target.startContainer) range = target.cloneRange()
-    else if (target.nodeType) {
-        range = document.createRange()
-        range.selectNode(target)
-    }
-    if (range) {
-        const sel = range.startContainer.ownerDocument.defaultView.getSelection()
-        if (sel) {
-            sel.removeAllRanges()
-            if (collapse === -1) range.collapse(true)
-            else if (collapse === 1) range.collapse()
-            sel.addRange(range)
-        }
-    }
-}
-
 const getDirection = doc => {
     const { defaultView } = doc
     const { writingMode, direction } = defaultView.getComputedStyle(doc.body)
@@ -218,6 +220,10 @@ class View {
     #column = true
     #size
     #layout = {}
+    // [local-patch v37] 在途加载的 settle 句柄：iframe 被移除（并发导航换 view）或 load
+    // 监听器中途抛错时，load promise 必须立刻 settle——否则等待方（#display → #turnPage）
+    // 永久挂起、#locked 无法释放，翻页/目录/滚轮全部失灵（现场表现为阅读器整体假死）
+    #loadSettle = null
     constructor({ container, onExpand }) {
         this.container = container
         this.onExpand = onExpand
@@ -252,32 +258,39 @@ class View {
     }
     async load(src, afterLoad, beforeRender) {
         if (typeof src !== 'string') throw new Error(`${src} is not string`)
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
+            this.#loadSettle = { resolve, reject }
             this.#iframe.addEventListener('load', () => {
-                const doc = this.document
-                afterLoad?.(doc)
+                const settle = this.#loadSettle
+                this.#loadSettle = null
+                try {
+                    const doc = this.document
+                    afterLoad?.(doc)
 
-                // it needs to be visible for Firefox to get computed style
-                this.#iframe.style.display = 'block'
-                const { vertical, rtl } = getDirection(doc)
-                const background = getBackground(doc)
-                this.#iframe.style.display = 'none'
+                    // it needs to be visible for Firefox to get computed style
+                    this.#iframe.style.display = 'block'
+                    const { vertical, rtl } = getDirection(doc)
+                    const background = getBackground(doc)
+                    this.#iframe.style.display = 'none'
 
-                this.#vertical = vertical
-                this.#rtl = rtl
+                    this.#vertical = vertical
+                    this.#rtl = rtl
 
-                this.#contentRange.selectNodeContents(doc.body)
-                const layout = beforeRender?.({ vertical, rtl, background })
-                this.#iframe.style.display = 'block'
-                this.render(layout)
-                this.#observer.observe(doc.body)
+                    this.#contentRange.selectNodeContents(doc.body)
+                    const layout = beforeRender?.({ vertical, rtl, background })
+                    this.#iframe.style.display = 'block'
+                    this.render(layout)
+                    this.#observer.observe(doc.body)
 
-                // the resize observer above doesn't work in Firefox
-                // (see https://bugzilla.mozilla.org/show_bug.cgi?id=1832939)
-                // until the bug is fixed we can at least account for font load
-                doc.fonts.ready.then(() => this.expand())
+                    // the resize observer above doesn't work in Firefox
+                    // (see https://bugzilla.mozilla.org/show_bug.cgi?id=1832939)
+                    // until the bug is fixed we can at least account for font load
+                    doc.fonts.ready.then(() => this.expand())
 
-                resolve()
+                    settle?.resolve()
+                } catch (e) {
+                    settle?.reject(e)
+                }
             }, { once: true })
             this.#iframe.src = src
         })
@@ -417,6 +430,10 @@ class View {
     }
     destroy() {
         if (this.document) this.#observer.unobserve(this.document.body)
+        // [local-patch v37] view 被替换/销毁时，在途加载立刻失败，唤醒永久等待方
+        const settle = this.#loadSettle
+        this.#loadSettle = null
+        settle?.reject(new Error('view destroyed while loading section'))
     }
 }
 
@@ -986,7 +1003,9 @@ export class Paginator extends HTMLElement {
     }
     async #display(promise) {
         const { index, src, anchor, onLoad, select } = await promise
-        this.#index = index
+        // [local-patch v37] 章节加载失败时上游回退为空对象；保留当前 #index，
+        // 否则 undefined 会让 #adjacentIndex 永久失效（后续翻页全部失灵）
+        if (index != null) this.#index = index
         const hasFocus = this.#view?.document?.hasFocus()
         if (src) {
             const view = this.#createView()
@@ -1002,6 +1021,9 @@ export class Paginator extends HTMLElement {
             }
             const beforeRender = this.#beforeRender.bind(this)
             await view.load(src, afterLoad, beforeRender)
+            // [local-patch v37] 等待期间若被更新的导航替换（#createView 已换新 view），
+            // 本轮 display 已过期——不得再把旧 view 写回或滚动旧视口
+            if (this.#view !== view) return
             this.dispatchEvent(new CustomEvent('create-overlayer', {
                 detail: {
                     doc: view.document, index,
@@ -1038,7 +1060,9 @@ export class Paginator extends HTMLElement {
     async goTo(target) {
         if (this.#locked) return
         const resolved = await target
-        if (this.#canGoToIndex(resolved.index)) return this.#goTo(resolved)
+        // [local-patch v37] 目标解析失败（resolveNavigation 返回 undefined）时安静返回，
+        // 不再让 resolved.index 抛 TypeError
+        if (resolved != null && this.#canGoToIndex(resolved.index)) return this.#goTo(resolved)
     }
     #scrollPrev(distance) {
         if (!this.#view) return true
@@ -1073,17 +1097,22 @@ export class Paginator extends HTMLElement {
         for (let index = this.#index + dir; this.#canGoToIndex(index); index += dir)
             if (this.sections[index]?.linear !== 'no') return index
     }
+    // [local-patch v37] try/finally 保证 #locked 必然释放：翻页链路上任何一环抛错
+    // （章节加载失败、iframe 被并发导航替换等）若吞掉解锁，翻页/目录/滚轮将全部永久失灵
     async #turnPage(dir, distance) {
         if (this.#locked) return
         this.#locked = true
-        const prev = dir === -1
-        const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
-        if (shouldGo) await this.#goTo({
-            index: this.#adjacentIndex(dir),
-            anchor: prev ? () => 1 : () => 0,
-        })
-        if (shouldGo || !this.hasAttribute('animated')) await wait(100)
-        this.#locked = false
+        try {
+            const prev = dir === -1
+            const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
+            if (shouldGo) await this.#goTo({
+                index: this.#adjacentIndex(dir),
+                anchor: prev ? () => 1 : () => 0,
+            })
+            if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+        } finally {
+            this.#locked = false
+        }
     }
     prev(distance) {
         return this.#turnPage(-1, distance)

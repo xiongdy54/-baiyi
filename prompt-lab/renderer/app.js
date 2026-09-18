@@ -5,6 +5,18 @@
 // window.labAPI 不存在，下方守卫会显示明确的错误指引而不是「点了没反应」。
 const $ = (id) => document.getElementById(id);
 const lib = window.cardsLib || {};
+const scopesLib = window.kpScopesLib || null; // v43（K2-B）：LKM 4 scope 出层契约校验器 + 离散度守门（vendor/kpScopes.js）
+
+// v43（K2-B）：LKM 知识模型 scope——出层走封闭契约裁决， temperature 固定 0.1（§4.6 item 7）
+const LKM_SCOPES = ["material-difficulty", "knowledge-probe", "frontier-explain", "structure-analogy"];
+// 测试台沙箱用的候选领域清单（structure-analogy）：真实库接入（K9）后由已持有子图与真实候选生成
+const LKM_LAB_DOMAINS = [
+  { code: "51", label: "数学·统计" },
+  { code: "004", label: "计算机·AI" },
+  { code: "1", label: "哲学·逻辑" },
+  { code: "316", label: "社会学·人类学" },
+  { code: "8", label: "语言·文学" }
+];
 
 let prompts = [];
 let curScope = "card-generation";
@@ -40,9 +52,19 @@ async function init() {
     await loadPromptList();
     await selectScope("card-generation");
     await refreshConfigState();
+    updateLkmControls();
+    $("modeSelect").addEventListener("change", updateLkmControls);
   } catch (err) {
     fatal(err);
   }
+}
+
+// v43（K2-B）：LKM 控件随模式启用/停用（白名单输入 + ×N 离散度仅 LKM scope 可用）
+function updateLkmControls() {
+  const isLkm = LKM_SCOPES.includes($("modeSelect").value);
+  $("idWhitelist").disabled = !isLkm;
+  $("dispersionN").disabled = !isLkm;
+  $("dispersionBtn").disabled = !isLkm;
 }
 
 async function loadPromptList() {
@@ -202,18 +224,28 @@ async function runPipeline() {
   // ③ 上下文打包（材料 + 来源标记；测试台不注入已有卡/画像）
   const source = $("sourceTitle").value.trim();
   const sourceLine = source ? `\n\n【来源】《${source}》` : "";
-  const messages = [
-    { role: "system", content: tpl.content },
-    scope === "card-occlusion" && image
-      ? {
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: image.dataUrl } },
-            { type: "text", text: `【任务】识别图片中适合记忆测试的内容并给出遮挡区域（坐标为相对图片尺寸的百分比）。${sourceLine}` }
-          ]
-        }
-      : { role: "user", content: `【材料】\n${text}${sourceLine}` }
-  ];
+  // v43（K2-B）：LKM scope 走独立的合成输入载荷（白名单 id + 沙箱候选领域），温度固定 0.1
+  const isLkm = LKM_SCOPES.includes(scope);
+  let lkmInput = null;
+  let messages;
+  if (isLkm) {
+    const built = buildLkmRequest(scope, text, source);
+    messages = [{ role: "system", content: tpl.content }, { role: "user", content: built.userContent }];
+    lkmInput = built.validatorInput;
+  } else {
+    messages = [
+      { role: "system", content: tpl.content },
+      scope === "card-occlusion" && image
+        ? {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: image.dataUrl } },
+              { type: "text", text: `【任务】识别图片中适合记忆测试的内容并给出遮挡区域（坐标为相对图片尺寸的百分比）。${sourceLine}` }
+            ]
+          }
+        : { role: "user", content: `【材料】\n${text}${sourceLine}` }
+    ];
+  }
 
   // ④ 流式生成
   running = true;
@@ -231,7 +263,7 @@ async function runPipeline() {
     );
   }, 500);
   try {
-    acc = await chatStreamLocal(messages, 0.2, (n) => (thinkChars = n));
+    acc = await chatStreamLocal(messages, isLkm ? 0.1 : 0.2, (n) => (thinkChars = n));
   } catch (err) {
     showError(err.message || String(err));
     return;
@@ -239,12 +271,13 @@ async function runPipeline() {
     window.clearInterval(tick);
     running = false;
     $("runBtn").disabled = false;
+    $("dispersionBtn").disabled = !LKM_SCOPES.includes(scope);
     setStatus(`完成 · 输出 ${acc.length} 字`);
   }
   $("rawOutput").textContent = acc;
 
-  // ⑤⑥ JSON 容错 + Lint
-  renderResult(acc, scope);
+  // ⑤⑥ JSON 容错 + Lint（LKM scope 走出层契约裁决展示）
+  renderResult(acc, scope, lkmInput);
 }
 
 function chatStreamLocal(messages, temperature, onThinking) {
@@ -275,6 +308,156 @@ function chatStreamLocal(messages, temperature, onThinking) {
 function escapeHtml(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+// ═══════ v43（K2-B）：LKM 4 scope 合成输入载荷 + 出层契约裁决 + ×N 次离散度守门 ═══════
+
+// 白名单 id：测试台沙箱没有真实知识库，用可编辑的演示 id（默认 kp-demo-1）让 AI 有可引用的封闭清单，
+// 出层校验据此核查「禁编造 ID」。真实库接入（K3/K4-K5/K9 引擎）后由主进程装配真实候选。
+function lkmWhitelistIds() {
+  return ($("idWhitelist").value.trim() || "kp-demo-1")
+    .split(/[,，;；\s]+/)
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+// 每个 LKM scope 的合成 user 消息文本 + 对应校验器输入（两者共享同一份 id/数据——校验才有意义）。
+// 系统消息（模板内容）由调用方统一拼装。
+function buildLkmRequest(scope, text, source) {
+  const ids = lkmWhitelistIds();
+  const label = source || text.slice(0, 20) || "演示知识点";
+  if (scope === "material-difficulty") {
+    return {
+      userContent: `【材料标题】${source || "(无)"}\n【材料文本】\n${text}`,
+      validatorInput: { materialText: text }
+    };
+  }
+  if (scope === "knowledge-probe") {
+    return {
+      userContent: `【知识点】{"id": "${ids[0]}", "label": "${label}", "description": ""}\n【既有证据摘要（已有卡面节选）】\n${text.slice(0, 800)}`,
+      validatorInput: { kpIds: ids, cardFronts: [] }
+    };
+  }
+  if (scope === "frontier-explain") {
+    // 沙箱候选：整段材料视作一条候选（prerequisiteReady/difficultyGrade 为合成已验证字段，
+    // 供「禁编造数字」核对源使用）；真实两阶段推荐（Stage A 本地筛 → Stage B AI 重排）随 K4-K5。
+    const payload = {
+      candidates: [{ id: ids[0], title: source || "(无标题)", prerequisiteReady: true, difficultyGrade: 3, materialExcerpt: text.slice(0, 800) }]
+    };
+    return {
+      userContent: `【候选清单（本地已筛，含已验证数据字段）】\n${JSON.stringify(payload, null, 2)}\n【说明】candidateId 只能取上述清单中的 id；解释中出现的每个数字都必须来自上文。`,
+      validatorInput: { candidateIds: ids, structureDrivenIds: [], structureKpIds: ids, inputText: JSON.stringify(payload) }
+    };
+  }
+  // structure-analogy
+  const owned = ids.map((id) => ({ id, label: source || "已持有概念" }));
+  return {
+    userContent: `【已持有结构子图】\n${JSON.stringify({ kps: owned, edges: [] }, null, 2)}\n【候选领域清单】\n${JSON.stringify(LKM_LAB_DOMAINS)}\n【说明】fromKpId 只能取子图中的 id；candidateDomain 只能取候选领域清单中的 code。材料文本仅供理解语境：\n${text.slice(0, 600)}`,
+    validatorInput: { ownedKpIds: ids, domainCodes: LKM_LAB_DOMAINS.map((d) => d.code) }
+  };
+}
+
+// scope → 校验器映射；返回 { value, issues }
+function validateLkm(scope, raw, validatorInput) {
+  if (!scopesLib) return { value: null, issues: [{ code: "JSON_PARSE_FAILED", message: "kpScopes 契约校验库未加载（先跑 npm run build:kpscopes 再重启测试台）" }] };
+  const input = validatorInput || {};
+  if (scope === "material-difficulty") return scopesLib.validateMaterialDifficultyOutput(raw, input);
+  if (scope === "knowledge-probe") return scopesLib.validateKnowledgeProbeOutput(raw, input);
+  if (scope === "frontier-explain") return scopesLib.validateFrontierExplainOutput(raw, input);
+  if (scope === "structure-analogy") return scopesLib.validateStructureAnalogyOutput(raw, input);
+  return { value: null, issues: [{ code: "EMPTY", message: `未知 LKM scope：${scope}` }] };
+}
+
+// LKM 结果展示：出层契约裁决（降级/丢弃留痕）+ 处置后的规范化 JSON
+function renderLkmResult(raw, scope, validatorInput) {
+  const box = $("results");
+  const v = validateLkm(scope, raw, validatorInput);
+  lastRun = { parsed: v.value, scope, text: $("materialText").value.trim(), source: $("sourceTitle").value.trim(), image: null, values: v.value ? [v.value] : [] };
+  benchCards = [];
+  box.innerHTML = "";
+  $("explorations").innerHTML = "";
+  box.appendChild(
+    el(
+      "div",
+      "lint-list",
+      v.issues.length
+        ? v.issues.map((i) => `<span class="lint lint-warn">契约 · ${escapeHtml(i.code)}：${escapeHtml(i.message)}</span>`).join("")
+        : '<span class="lint lint-info">出层契约校验通过（0 问题）</span>'
+    )
+  );
+  const card = el("div", "result-card");
+  card.appendChild(el("div", "rc-head", `<span class="rc-type">出层裁决后 JSON（${escapeHtml(scope)}）</span>`));
+  card.appendChild(el("div", "rc-back", `<pre class="raw-output mono">${escapeHtml(JSON.stringify(v.value, null, 2))}</pre>`));
+  box.appendChild(card);
+}
+
+// ×N 次离散度守门（§4.6 item 6/7）：同材料 ×N 次运行 → 封闭字段不一致率 → 超阈提示收紧锚语或降档
+$("dispersionBtn").onclick = async () => {
+  if (running) return;
+  const scope = $("modeSelect").value;
+  if (!LKM_SCOPES.includes(scope)) {
+    showError("×N 次离散度仅用于 LKM 知识模型 scope。");
+    return;
+  }
+  const text = $("materialText").value.trim();
+  if (!text) {
+    showError("请先粘贴材料文本。");
+    return;
+  }
+  const n = Math.max(2, Math.min(10, Number($("dispersionN").value) || 3));
+  hideError();
+  $("results").innerHTML = "";
+  $("rawOutput").textContent = "";
+  const tpl = await window.labAPI.getPrompt(scope);
+  if (!tpl) {
+    showError(`提示词模板缺失：${scope}`);
+    return;
+  }
+  const { userContent, validatorInput } = buildLkmRequest(scope, text, $("sourceTitle").value.trim());
+  const messages = [{ role: "system", content: tpl.content }, { role: "user", content: userContent }];
+  running = true;
+  $("runBtn").disabled = true;
+  $("dispersionBtn").disabled = true;
+  const values = [];
+  const allIssues = [];
+  const startedAt = Date.now();
+  try {
+    for (let i = 1; i <= n; i++) {
+      setStatus(`离散度运行 ${i}/${n}…`);
+      const raw = await chatStreamLocal(messages, 0.1, () => {});
+      const v = validateLkm(scope, raw, validatorInput);
+      if (v.value) values.push(v.value);
+      allIssues.push(...v.issues.map((x) => ({ ...x, run: i })));
+      $("rawOutput").textContent += `\n===== 第 ${i} 次 =====\n${raw}`;
+    }
+    const disp = scopesLib
+      ? scopesLib.scopeDispersion(values, scopesLib.SCOPE_DISPERSION_FIELDS[scope], 0.3)
+      : { fields: [], maxRate: 0, threshold: 0.3, over: false };
+    const box = $("results");
+    const head = el("div", "result-card");
+    head.appendChild(el("div", "rc-head", `<span class="rc-type">离散度守门（${escapeHtml(scope)} × ${n}，有效 ${values.length} 包）</span>`));
+    const rows = disp.fields
+      .map(
+        (f) =>
+          `<div class="kp-item"><span class="kp-item-text mono">${escapeHtml(f.field)}</span>` +
+          `<span class="mono">不一致率 ${Math.round(f.rate * 100)}% ${Object.entries(f.values).map(([k, c]) => `${escapeHtml(k)}×${c}`).join(" / ")}</span></div>`
+      )
+      .join("");
+    head.appendChild(el("div", "rc-back", rows + `<div class="rc-notes mono">max=${Math.round(disp.maxRate * 100)}% · 阈值 ${Math.round(disp.threshold * 100)}% · ${disp.over ? "⚠ 超阈：按 §4.6 收紧锚语或降档使用" : "通过（未超阈）"}</div>`));
+    if (allIssues.length) {
+      head.appendChild(
+        el("div", "lint-list", allIssues.map((i) => `<span class="lint lint-warn">第 ${i.run || "?"} 次 · ${escapeHtml(i.code)}：${escapeHtml(i.message)}</span>`).join(""))
+      );
+    }
+    box.appendChild(head);
+    setStatus(`离散度完成 · ${Math.round((Date.now() - startedAt) / 1000)} 秒`);
+  } catch (err) {
+    showError(err.message || String(err));
+  } finally {
+    running = false;
+    $("runBtn").disabled = false;
+    $("dispersionBtn").disabled = false;
+  }
+};
 
 // v16 递进补卡状态：最近一次运行的结果 + 已展示的卡（补充卡追加到末尾，已有的永不丢失）
 let lastRun = null; // { parsed, scope, text, source }
@@ -436,7 +619,12 @@ function enrichOcclusion(parsed) {
   }
 }
 
-function renderResult(raw, scope) {
+function renderResult(raw, scope, lkmInput) {
+  // v43（K2-B）：LKM scope 走出层契约裁决展示（不做 CardLint——那是卡片管线的质检）
+  if (LKM_SCOPES.includes(scope)) {
+    renderLkmResult(raw, scope, lkmInput);
+    return;
+  }
   let parsed;
   try {
     parsed = lib.extractJson ? lib.extractJson(raw) : manualExtract(raw);

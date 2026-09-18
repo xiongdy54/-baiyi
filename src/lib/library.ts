@@ -29,6 +29,10 @@ declare global {
       createFromHtml?: (payload: { path?: string; name?: string; title?: string; markdown: string }) => Promise<{ id: string; title: string } | null>;
       createFromBookFile?: (payload: { path: string; name?: string; ext?: string }) => Promise<{ id: string; title: string } | null>;
       readEbookFile?: (id: string) => Promise<{ bytes: Uint8Array; name: string } | null>;
+      // v38（D35）：书籍语言属性（查词语言路由的书籍级信号）
+      setItemLang?: (id: string, lang: string) => Promise<boolean>;
+      // v45.1：书架悬停改名
+      setItemTitle?: (id: string, title: string) => Promise<boolean>;
     };
   }
 }
@@ -42,7 +46,23 @@ export interface LibraryItem {
   createdAt: number;
   updatedAt: number;
   markdown?: string | null;
+  /** 书籍语言（v38 D35）：BCP 主码（zh/en/ja…），空=未知；查词语言路由的书籍级信号 */
+  lang?: string;
 }
+
+/** 书籍语言选项（与 dict.ts languageLabel 的语言名映射对齐；value 空=未知） */
+export const BOOK_LANGUAGES: { value: string; label: string }[] = [
+  { value: "", label: "未知" },
+  { value: "zh", label: "中文" },
+  { value: "en", label: "英语" },
+  { value: "ja", label: "日语" },
+  { value: "ko", label: "韩语" },
+  { value: "fr", label: "法语" },
+  { value: "de", label: "德语" },
+  { value: "es", label: "西班牙语" },
+  { value: "ru", label: "俄语" },
+  { value: "la", label: "拉丁语" },
+];
 
 // Phase 2 阅读器将写入 progressJson{ lastText, chapterIndex, position }；
 // 现在无进度时回退到书籍开头作为"上次阅读位置"的占位。
@@ -118,9 +138,9 @@ export const libraryApi = {
   async updateProgress(itemId: string, progress: ReadingProgress): Promise<void> {
     await window.libraryAPI?.updateProgress(itemId, progress);
   },
-  async createFromPaste(title: string, markdown: string): Promise<boolean> {
-    if (!window.libraryAPI) return false;
-    return (await window.libraryAPI.createFromPaste(title, markdown)) !== null;
+  async createFromPaste(title: string, markdown: string): Promise<{ id: string; title: string } | null> {
+    if (!window.libraryAPI) return null;
+    return await window.libraryAPI.createFromPaste(title, markdown);
   },
   async createFromEpub(payload: unknown): Promise<boolean> {
     if (!window.libraryAPI) return false;
@@ -155,6 +175,14 @@ export const libraryApi = {
   async remove(id: string): Promise<boolean> {
     if (!window.libraryAPI) return false;
     return await window.libraryAPI.remove(id);
+  },
+  // v38（D35）：设置书籍语言；空串=未知
+  async setItemLang(id: string, lang: string): Promise<boolean> {
+    return (await window.libraryAPI?.setItemLang?.(id, lang)) ?? false;
+  },
+  // v45.1：书架悬停改名（只改标题，不动封面/进度/文档）
+  async setItemTitle(id: string, title: string): Promise<boolean> {
+    return (await window.libraryAPI?.setItemTitle?.(id, title)) ?? false;
   }
 };
 

@@ -1,15 +1,18 @@
 // CardGeneratorProvider（文档§3.17）+ Cloze 解析 + CardLintEngine（§3.18/§8.4）
 import { aiGateway } from "./ai";
+import { autoQueueKpAiProcessing } from "./kpExtract";
 import { clampPct, normalizeShape, occlusionShapes, type OcclusionShape } from "./occlusion";
+import { settingsStore } from "./settings";
 
 declare global {
   interface Window {
-    promptsAPI?: { get: (scope: string) => Promise<{ id: string; content: string } | null>; list: () => Promise<unknown[]> };
+    promptsAPI?: { get: (scope: string) => Promise<{ id: string; content: string; version?: number; situation_required?: number } | null>; list: () => Promise<unknown[]> };
     cardsAPI?: {
       create: (card: unknown) => Promise<{ id: string }>;
       update: (card: unknown) => Promise<boolean>;
       get: (id: string) => Promise<unknown>;
       listDue: () => Promise<unknown[]>;
+      todayQueue?: (now?: number) => Promise<unknown>;
       listAll: () => Promise<unknown[]>;
       remove: (id: string) => Promise<boolean>;
       review: (cardId: string, fsrsState: unknown, rating: string, durationMs?: number, fsrsBefore?: unknown) => Promise<boolean>;
@@ -149,6 +152,9 @@ export interface CardDraft {
   prioritySuggestion?: number;
   ruleNotes?: string[];
   warnings?: string[];
+  // v46（M14-UM2，R20）：AI 引用的记忆行（逐字抄录）+ 本地子串校验结果（undefined=本卡未走记忆链路）
+  memoryRef?: string | null;
+  memoryRefValid?: boolean;
 }
 
 export interface GenResult {
@@ -158,7 +164,7 @@ export interface GenResult {
   regions?: OcclusionRegion[];
 }
 
-export type CardGenMode = "auto" | "card-generation" | "card-formula" | "card-seq" | "card-enum" | "card-literature" | "card-mnemonic" | "card-contrast" | "card-wording" | "card-basic" | "card-occlusion";
+export type CardGenMode = "auto" | "card-generation" | "card-formula" | "card-seq" | "card-enum" | "card-literature" | "card-mnemonic" | "card-contrast" | "card-wording" | "card-basic" | "card-occlusion" | "card-vocab";
 
 // ---------- 材料类型路由（M1.2，本地规则先行） ----------
 // 类型→原则→提示词→默认形式映射（§6.3.10；映射表待用户确认后写入文档）：
@@ -167,7 +173,8 @@ export type CardGenMode = "auto" | "card-generation" | "card-formula" | "card-se
 //   sequence 流程背诵 → card-seq       → 问答（seq 续写）
 //   enumeration 枚举  → card-enum      → 挖空
 //   image   图片材料  → card-occlusion → 图片挖空（独立链路 generateOcclusionCards）
-export type MaterialType = "concept" | "formula" | "sequence" | "enumeration" | "image" | "literature";
+//   vocab   词汇/单词 → card-vocab     → 单词四卡（M7：看中→外/看外→中/听音/原句挖空）
+export type MaterialType = "concept" | "formula" | "sequence" | "enumeration" | "image" | "literature" | "vocab";
 
 export interface MaterialRoute {
   materialType: MaterialType;
@@ -182,7 +189,8 @@ export const MATERIAL_ROUTES: Record<MaterialType, MaterialRoute> = {
   sequence: { materialType: "sequence", scope: "card-seq", label: "流程背诵", defaultForm: "问答" },
   enumeration: { materialType: "enumeration", scope: "card-enum", label: "枚举清单", defaultForm: "挖空" },
   image: { materialType: "image", scope: "card-occlusion", label: "图片材料", defaultForm: "图片挖空" },
-  literature: { materialType: "literature", scope: "card-literature", label: "文学/诗歌背诵", defaultForm: "问答" }
+  literature: { materialType: "literature", scope: "card-literature", label: "文学/诗歌背诵", defaultForm: "问答" },
+  vocab: { materialType: "vocab", scope: "card-vocab", label: "词汇/单词", defaultForm: "单词四卡" }
 };
 
 // 模式自动路由（§8.2.3）：在 detectMode 基础上给出材料类型语义（既有正则保持一致）
@@ -240,6 +248,17 @@ function verseSignals(text: string): boolean {
 
 export function detectMaterialType(text: string): MaterialRoute {
   if (verseSignals(text)) return MATERIAL_ROUTES.literature;
+  // v32（M7）：纯单词形直判词汇（确定性本地函数）——
+  // 仅 1–2 token、无中文标点长句、无公式符号，**且含外文字符**（ASCII 字母/假名/韩文）；
+  // 纯中文短句仍走既有分支（M1 回归保护：如「列出有哪些因素」不得误判 vocab）
+  const t = String(text ?? "").normalize("NFKC").trim();
+  if (
+    t && t.length <= 34 && t.split(/\s+/).length <= 2 &&
+    !/[，。！？；：、]/.test(t) && !/[=\\$]/.test(t) && !/(公式|方程|步骤|流程|列出|有哪些)/.test(t) &&
+    /[A-Za-z\u3040-\u30ff\uac00-\ud7af]/.test(t)
+  ) {
+    return MATERIAL_ROUTES.vocab;
+  }
   const mode = detectMode(text);
   const byMode: Partial<Record<CardGenMode, MaterialType>> = {
     "card-formula": "formula",
@@ -330,7 +349,7 @@ export function extractJson(raw: string): GenResult {
 export const cardGenerator: {
   generateCards(
     sourceText: string,
-    context: { title?: string; section?: string; sourceRef?: { title?: string } | null; existingCards?: string[]; existingCardsLimit?: number; userProfile?: string; webContext?: string; focus?: string },
+    context: { title?: string; section?: string; sourceRef?: { title?: string } | null; existingCards?: string[]; existingCardsLimit?: number; userProfile?: string; webContext?: string; focus?: string; /** v46（UM-2）：本书已有卡 UDC 域分布的检索键 */ documentId?: string | null },
     mode: CardGenMode,
     onProgress?: (chars: number) => void,
     onThinking?: (thinkChars: number) => void
@@ -363,6 +382,18 @@ export const cardGenerator: {
     const tpl = await window.promptsAPI?.get(resolved);
     if (!tpl) throw new Error("提示词模板缺失");
     const sys = tpl.content;
+    // v46（M14-UM2，R20 v44 原则制）：模板 situationRequired=1 时装配【用户记忆】块
+    // （memory:retrieve 内部做开关/无 Key 检查；未命中/未开启 → block=null → 零注入零提示）
+    let memoryBlock: string | null = null;
+    if (Number((tpl as { situation_required?: number }).situation_required) === 1) {
+      const mem = await window.memoryAPI?.retrieve({
+        documentId: context.documentId ?? null,
+        title: context.title ?? "",
+        section: context.section ?? "",
+        text: sourceText
+      });
+      if (mem?.ok && mem.block) memoryBlock = mem.block;
+    }
     const user = [
       `【材料】\n${sourceText}`,
       context.title ? `【来源】《${context.title}》${context.section ? " · " + context.section : ""}` : "",
@@ -370,7 +401,8 @@ export const cardGenerator: {
       context.focus ? `【本次制卡重点（补充制卡）】\n${context.focus}` : "",
       context.webContext ? `【联网检索到的事件背景（仅供理解，禁止编造来源）】\n${context.webContext}` : "",
       context.existingCards?.length ? `【用户已有卡片（注意 R10 联想与干扰提示，禁止重复或换皮）】\n${context.existingCards.slice(0, context.existingCardsLimit ?? 10).join("\n")}` : "",
-      context.userProfile ? `【用户画像（R9 个性化例子优先用）】\n${context.userProfile}` : ""
+      context.userProfile ? `【用户画像（R9 个性化例子优先用）】\n${context.userProfile}` : "",
+      memoryBlock || ""
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -392,6 +424,14 @@ export const cardGenerator: {
     const result = extractJson(raw || acc);
     // v30（D27）：per-blank 多空卡在入确认面板前拆成每空一张（独立 FSRS 调度）
     result.cards = result.cards.flatMap((c) => expandClozeDraft(c));
+    // v46（M14-UM2，§4.18-10）：memoryRef 本地子串校验（只验存在性，非相关性判定）——
+    // 成功=「情境来自记忆」，失败=「情境来源存疑」（确认面板标注、接受时二次确认，不阻断）
+    if (memoryBlock) {
+      for (const c of result.cards) {
+        const ref = typeof c.memoryRef === "string" ? c.memoryRef.trim().slice(0, 500) : "";
+        if (ref) c.memoryRefValid = memoryBlock.includes(ref);
+      }
+    }
     const batch = await window.batchesAPI?.create({
       scope: resolved,
       sourceText,
@@ -399,7 +439,10 @@ export const cardGenerator: {
         ...context,
         // 诊断留痕：确认联网背景是否真的进入了上下文
         webContextChars: context.webContext ? context.webContext.length : 0,
-        webContextPreview: context.webContext ? context.webContext.slice(0, 200) : ""
+        webContextPreview: context.webContext ? context.webContext.slice(0, 200) : "",
+        // v46：记忆注入留痕（审计 §1.9）
+        memoryInjected: Boolean(memoryBlock),
+        memoryBlockChars: memoryBlock ? memoryBlock.length : 0
       },
       promptTemplateId: tpl.id,
       result
@@ -683,6 +726,17 @@ export function lintCard(draft: {
   if (!draft.dateStamp && CHANGEABLE.test(front + back)) {
     issues.push({ ruleId: "L12", severity: "info", message: "易变内容建议加 dateStamp（规则19）" });
   }
+  // L16 宽容度标注（M1 覆盖报告缺口 L-C，对应 R2/R5 的 G7）：集合/开放式问法必须给出
+  // 可字面判定的合格线，否则「答对」无法判定。
+  const isCollectionAsk = /(列出|列举|有哪些|分别|包括|哪几种|几种)/.test(front);
+  const hasTolerance = /(至少|最少|任一|之一|任意|不限于)/.test(front + back);
+  if (isCollectionAsk && !hasTolerance) {
+    issues.push({
+      ruleId: "L16",
+      severity: "warn",
+      message: "开放式/集合型答案缺合格线标注（R5/R2 G7）——front 注明「至少回忆 N 种」，使答对可判定"
+    });
+  }
   // L13 前缀泄题：contextPrefix 的内容词与答案重叠（文档 §8.4 v10）
   const frontClean = front.replace(/\s/g, "");
   const backClean = back.replace(/\s/g, "");
@@ -717,11 +771,25 @@ export const similaritySearch = {
 };
 
 // ---------- 卡片持久化封装 ----------
+/** v34（M12，§4.2-20）：今日队列视图——「今日该复习什么」的唯一口径（队列与统计同源） */
+export interface TodayQueue {
+  cards: (CardRecord & { docTitle?: string })[];
+  deferred: (CardRecord & {
+    docTitle?: string;
+    /** 延后原因：kind=reviewed（同源卡今日已评分）/ revealed（同组今日放行名额已被占） */
+    deferReason?: { siblingKey: string; kind: "reviewed" | "revealed"; siblingCardId: string | null; siblingFront: string };
+  })[];
+  now: number;
+}
+
 export const cardsApi = {
   create: async (card: unknown) => (await window.cardsAPI?.create(card)) ?? { id: "" },
   update: async (card: unknown) => (await window.cardsAPI?.update(card)) ?? false,
   get: async (id: string) => ((await window.cardsAPI?.get(id)) ?? null) as CardRecord | null,
   listDue: async () => ((await window.cardsAPI?.listDue()) ?? []) as (CardRecord & { docTitle?: string })[],
+  // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单；ReviewView/CardBrowser 消费）
+  todayQueue: async (now?: number) =>
+    ((await window.cardsAPI?.todayQueue?.(now)) ?? { cards: [], deferred: [], now: Date.now() }) as TodayQueue,
   listAll: async () => ((await window.cardsAPI?.listAll()) ?? []) as (CardRecord & { docTitle?: string })[],
   remove: async (id: string) => (await window.cardsAPI?.remove(id)) ?? false,
   // v22 撤销评分：review 传 fsrsBefore（评分前 FSRS 快照）方可撤销
@@ -772,8 +840,14 @@ export interface CardRecord {
     cfi?: string;
     /** 章节索引兜底 */
     chapterIndex?: number;
+    /** PDF 系页码定位（0 基，v28；v35 前类型漏声明但运行时已有） */
+    pageIndex?: number;
     /** 生成该锚点时的阅读引擎版本（回归归因用） */
     readerEngineVersion?: string;
+    /** 图片来源（v35）：engine=正文图片（可跳转）/ library=资源库选图（图不在书中，无定位锚） */
+    imageSource?: "engine" | "library";
+    /** 正文图片锚（v35）：alt/周边文字，用于阅读器端 locateImage 找回原图 */
+    imageAnchor?: { alt?: string; contextText?: string };
   } | null;
   mnemonic: string | null;
   example: string | null;
@@ -795,7 +869,13 @@ export interface CardRecord {
   fsrs: { state?: string; due?: number; lapses?: number; reps?: number; stability?: number; difficulty?: number; lastReview?: number | null };
   leech: { isLeech?: boolean; suspended?: boolean; suspendedAt?: number | null; resolution?: string } | null;
   generatedBy: string;
+  /** v34（M12，§4.16）：同源组标识——同一制卡来源单元的多张卡共享；NULL=不参与延后。只服务今日队列视图，不参与 FSRS */
+  siblingKey: string | null;
   genBatchId: string | null;
+  /** v46（M14-UM2，§4.18-10）：记忆溯源——{line: 逐字引用的记忆行, verified: 本地子串校验结果}；null=未用记忆 */
+  memoryRefJson?: { line: string; verified: boolean } | null;
+  /** v32（M7）：词典条目快照（providerId/word/normalizedWord/language/audio/kind…）——单词卡发音、溯源与按钮入位用 */
+  dictJson: { providerId?: string; word?: string; normalizedWord?: string; language?: string; audio?: string | null; kind?: string; kinds?: string[]; snapshotAt?: number } | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -881,14 +961,102 @@ export async function generateContrastDrafts(
 }
 
 /**
+ * M7 单词制卡（v32，D31）：词典条目 + 阅读原句 → card-vocab 走七步管线产四卡；
+ * 无 Key/失败时调用方可回退本地 buildVocabDrafts（Reader.acceptVocabCards 即此策略）。
+ */
+export async function generateVocabDrafts(
+  entry: { word: string; reading?: string | null; pronunciation?: string | null; definitions: string[]; partOfSpeech?: string[]; examples?: string[]; source: string },
+  sentence: string,
+  onProgress?: (chars: number) => void,
+  onThinking?: (thinkChars: number) => void
+): Promise<{ batchId: string; drafts: CardDraft[] }> {
+  const material = [
+    `【词典条目】${entry.word}${entry.reading ? `（${entry.reading}）` : ""}${entry.pronunciation ? ` ${entry.pronunciation}` : ""}`,
+    `释义：${entry.definitions.slice(0, 3).join("；")}`,
+    entry.partOfSpeech?.length ? `词性：${entry.partOfSpeech.join("/")}` : "",
+    `【阅读原句】${sentence}`,
+    `【来源】${entry.source}`,
+  ].filter(Boolean).join("\n");
+  const { batchId, result } = await cardGenerator.generateCards(
+    material,
+    { title: entry.source },
+    "card-vocab",
+    onProgress,
+    onThinking
+  );
+  return { batchId, drafts: result.cards };
+}
+
+/**
+ * v34（M12，D33/§4.16）：同源组键建立（确定性，禁 AI 判定）。
+ * 优先级：① 显式键（调用点给的结构性单元：翻转对 act:flip-* / 单词查词 / 对比动作 / 同图 img:*）
+ * → ② 来源锚点键 src:<documentId>:<extractId|hash(anchorText)>，仅当制卡源文本 ≤ limit（短材料）
+ * → ③ 无锚点但一次动作拆出多卡（per-blank 分答）→ act:split-<id>（结构性同源必须错日，与长度无关）
+ * → ④ null（不参与延后：长选区各卡锚定不同知识点；无锚点单卡无同源对象）。
+ * 纯函数：键规则矩阵由 tests/m12.test.cjs 锁定。
+ */
+export function siblingKeyFor(opts: {
+  explicitKey?: string | null;
+  contextRef?: { documentId?: string; extractId?: string; anchorText?: string } | null;
+  sourceText?: string | null;
+  limit?: number;
+  /** 一次动作拆出的卡数（per-blank 分答拆卡 >1 时即使无锚点也必须建组，§4.16 item 5） */
+  splitCount?: number;
+  genId?: () => string;
+}): string | null {
+  if (opts.explicitKey) return opts.explicitKey;
+  const genId = opts.genId ?? (() => globalThis.crypto?.randomUUID?.() ?? `r${Math.random().toString(36).slice(2)}`);
+  const ref = opts.contextRef;
+  if (ref?.documentId) {
+    const srcLen = (opts.sourceText ?? "").length;
+    const limit = Number.isInteger(opts.limit) && (opts.limit as number) > 0 ? (opts.limit as number) : 300;
+    if (srcLen > limit) return null; // 长选区不建键（§4.16 item 5：避免「每天只准学一张」的阻塞）
+    const anchorPart = ref.extractId || `h${fnv1a(ref.anchorText || "")}`;
+    return `src:${ref.documentId}:${anchorPart}`;
+  }
+  if ((opts.splitCount ?? 1) > 1) return `act:split-${genId()}`;
+  return null;
+}
+
+// FNV-1a 32 位：锚点文本 → 稳定短哈希（无 Node 依赖，渲染层/测试 bundle 通用）
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/** v34（M12）：短材料阈值（settings.app.siblingBury.sourceTextLimit，默认 300）——制卡调用点统一经此读取 */
+export async function burySourceTextLimit(): Promise<number> {
+  try {
+    const sb = await settingsStore.get<{ sourceTextLimit?: number } | null>("app", "siblingBury", null);
+    if (sb && Number.isInteger(sb.sourceTextLimit) && (sb.sourceTextLimit as number) > 0) return sb.sourceTextLimit as number;
+  } catch { /* 设置缺失用默认 */ }
+  return 300;
+}
+
+/**
  * AI 草稿接受入库（Reader 确认面板 / 复习对比卡确认框共用）：per-blank 展开、lint、S1 相似检索、落库。
- * 返回新建卡 id 列表（per-blank 拆卡时多张）。sourceTitle/contextRef 供来源与跳转原文锚点。
+ * 返回新建卡 id 列表（per-blank 拆卡时多张）。sourceTitle/contextRef 供来源与跳转原文锚点；
+ * dictJson（M7 词典快照）随插入一次写入——cards:update 是全行 UPDATE，建卡后绝不能用 partial
+ * 对象二次 update（曾把 front/back 等 17 列清空，用户实测 4 张空白卡）。
+ * v34（M12）：siblingKey=调用点显式同源键（翻转对/单词四卡/对比动作）；sourceText=本次制卡源文本
+ * （短材料锚点键的长度门控输入）；缺省时由 contextRef+sourceText 推导，per-blank 拆卡自动继承同键。
  */
 export async function createAcceptedCard(
   d: CardDraft,
-  ctx: { sourceTitle?: string | null; contextRef?: CardRecord["contextRef"] } = {}
+  ctx: { sourceTitle?: string | null; contextRef?: CardRecord["contextRef"]; dictJson?: unknown; siblingKey?: string | null; sourceText?: string | null; genBatchId?: string | null } = {}
 ): Promise<string[]> {
   const expanded = expandClozeDraft(d);
+  const siblingKey = siblingKeyFor({
+    explicitKey: ctx.siblingKey,
+    contextRef: ctx.contextRef,
+    sourceText: ctx.sourceText,
+    limit: await burySourceTextLimit(),
+    splitCount: expanded.length
+  });
   const ids: string[] = [];
   for (const dd of expanded) {
     const cloze = dd.cardType === "cloze" ? dd.cloze || "" : "";
@@ -913,6 +1081,13 @@ export async function createAcceptedCard(
       tags: [],
       domain: dd.domain ?? [],
       knowledgePointId: dd.knowledgePointId || null,
+      // v41（K2-A，D38）：批次归组——AI 抽取归一的簇键（batch:<id>:<kp>）依据，消除跨材料 kp1 碰撞
+      genBatchId: ctx.genBatchId || null,
+      dictJson: ctx.dictJson ?? null,
+      // v46（M14-UM2，§4.18-10）：记忆溯源——校验成功落 {line, verified:true}；
+      // 校验失败但用户仍接受 = {line, verified:false}（浏览页标「来源存疑」，不自动改写）
+      memoryRefJson: dd.memoryRef ? { line: dd.memoryRef, verified: dd.memoryRefValid === true } : null,
+      siblingKey,
       generatedBy: "ai"
     };
     const issues = lintCard({
@@ -942,5 +1117,31 @@ export async function createAcceptedCard(
       });
     }
   }
+  // v41（K2-A，D38 触发方式①）：制卡顺带——本批接受的卡若带知识点簇，后台静默跑一轮 AI 抽取归一
+  // （不阻塞、不弹窗、无 Key 静默跳过；结果以提案形式出现在「知识点」页签）
+  if (ids.length) {
+    const sources = expanded
+      .map((dd) => ({
+        knowledgePointId: String(dd.knowledgePointId || "").trim(),
+        genBatchId: ctx.genBatchId || null,
+        documentId: ctx.contextRef?.documentId || null
+      }))
+      .filter((s) => s.knowledgePointId);
+    if (sources.length) void autoQueueKpAiProcessing(sources);
+  }
   return ids;
+}
+
+/**
+ * 是否有可跳转的原文锚点（v35）：任一定位字段存在即 true。
+ * 资源库选图（imageSource="library"）恒 false——图不在书中，无定位锚。
+ */
+export function hasSourceAnchor(ref: CardRecord["contextRef"]): boolean {
+  if (!ref || !ref.documentId) return false;
+  if (ref.imageSource === "library") return false;
+  if (ref.cfi || ref.pageIndex != null || ref.chapterIndex != null) return true;
+  if (ref.anchorText && ref.anchorText.trim()) return true;
+  if (typeof ref.anchorRatio === "number" && ref.anchorRatio > 0) return true;
+  if (ref.imageAnchor && (ref.imageAnchor.alt || ref.imageAnchor.contextText)) return true;
+  return false;
 }

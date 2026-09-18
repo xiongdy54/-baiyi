@@ -1,18 +1,21 @@
 // 连续刷题复习界面（v11.1 连续模式；v12.2 去页内重复标题 + 跳转原文 + 删除按钮）：
-// 进入即开始；评分后自动展示下一张到期卡。每张卡都重新拉取 due 队列取队首，
-// 排序 = FSRS due 升序 + 同 due 优先级降序（electron/db.js listDueCards），学习中新到期卡实时进入队列。
+// 进入即开始；评分后自动展示下一张到期卡。每张卡都重新拉取今日队列取队首，
+// 口径 = 今日队列视图（v34/M12 §4.2-20：FSRS due 升序 + 同 due 优先级降序 + 同源卡延后），学习中新到期卡实时进入队列。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fsrsEngine, type Rating } from "../lib/fsrs";
-import { cardsApi, type CardRecord } from "../lib/cards";
+import { cardsApi, hasSourceAnchor, type CardRecord, type TodayQueue } from "../lib/cards";
+import { playVocabAudio } from "../lib/dictClient";
+import { settingsStore } from "../lib/settings";
 import { eventBus } from "../lib/eventbus";
 import { useCommandActions } from "../lib/useCommands";
 import { CardFace } from "./CardBrowser";
 import ContrastCardModal from "./ContrastCardModal";
+import ImageLightbox from "./ImageLightbox";
 
 export default function ReviewView({
   onJumpToDoc
 }: {
-  onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number }) => void;
+  onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }) => void;
 } = {}) {
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
@@ -23,6 +26,7 @@ export default function ReviewView({
   // v23（§4.4.9）：persist 失败态——停留当前卡、封锁评分/跳过/删除，提供「重试保存」
   const [saveError, setSaveError] = useState(false);
   // v23（§4.4.3）：预览携带源卡状态引用，评分提交时判废（防复用过期预览）
+  const [lightboxOpen, setLightboxOpen] = useState(false);
   const [previews, setPreviews] = useState<{
     sourceCardId: string;
     sourceFsrs: CardRecord["fsrs"];
@@ -34,6 +38,9 @@ export default function ReviewView({
   const [undoInfo, setUndoInfo] = useState<{ logId: string; cardId: string; rating: string; reviewedAt: number } | null>(null);
   // v30（D29）：易混对比卡确认框（以当前卡为基准生成对比三件套）
   const [contrastOpen, setContrastOpen] = useState(false);
+  // v34（M12，§4.16）：今日同源暂缓清单——延后不写 FSRS，此处给出可读原因（与队列同一视图口径）
+  const [deferred, setDeferred] = useState<TodayQueue["deferred"]>([]);
+  const [deferredOpen, setDeferredOpen] = useState(false);
 
   // 查询最近可撤销评分（评分/撤销后刷新；挂起/跳过/删除不产生日志无需刷新，删除他人卡由撤销时服务端兜底）
   const refreshUndo = useCallback(async () => {
@@ -44,10 +51,20 @@ export default function ReviewView({
     void refreshUndo();
   }, [refreshUndo]);
 
-  // 拉取到期队列队首（FSRS due 升序）
+  // v32（M7）自动发音：出到单词卡（有 dict_json）且设置开启时自动朗读；每卡现读设置（改开关即时生效）
+  useEffect(() => {
+    if (!current?.dictJson || showBack) return;
+    void settingsStore.get<boolean>("app", "dictAutoSpeak", false).then((on) => {
+      if (on && current?.dictJson) void playVocabAudio(current.dictJson);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
+
+  // 拉取今日队列队首（同一视图：到期 + 同源延后 + 规范序），并同步「同源暂缓」清单
   const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
-    const due = await cardsApi.listDue();
-    return due[0] ?? null;
+    const q = await cardsApi.todayQueue();
+    setDeferred(q.deferred ?? []);
+    return q.cards[0] ?? null;
   }, []);
 
   // 开场拉第一张；若 sessionStorage 有跳转前的复习现场（从阅读器返回）则恢复该卡
@@ -285,6 +302,8 @@ export default function ReviewView({
         setDoneCount((n) => Math.max(0, n - 1));
         eventBus.emit("cards/changed");
       }
+      // v34（M12）：撤销评分 → 组内当日额度自动回收（review_logs 已删），同源暂缓清单随之刷新
+      setDeferred(((await cardsApi.todayQueue()).deferred) ?? []);
       setUndoInfo((await cardsApi.lastUndoableReview()) ?? null);
     } finally {
       actionBusyRef.current = false;
@@ -305,7 +324,11 @@ export default function ReviewView({
       anchorText: c.contextRef.anchorText || c.frontMarkdown || c.noteText,
       anchorRatio: c.contextRef.anchorRatio,
       cfi: c.contextRef.cfi,
-      chapterIndex: c.contextRef.chapterIndex
+      chapterIndex: c.contextRef.chapterIndex,
+      pageIndex: c.contextRef.pageIndex,
+      imageAnchor: c.contextRef.imageAnchor,
+      // 图片卡带本卡区域，供阅读器图内高亮 / 原图对照浮层
+      occlusion: c.occlusionJson ? { rects: c.occlusionJson.rects, shapes: c.occlusionJson.shapes, regionScope: c.occlusionJson.regionScope, cardOrd: c.cardOrd, assetPath: c.occlusionJson.assetPath } : undefined
     });
   }
 
@@ -325,6 +348,31 @@ export default function ReviewView({
     "review.skip": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void skip() },
     "review.delete": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void handleDelete() }
   });
+
+  // v34（M12，§4.16）：延后原因可读化——reviewed=同源卡今日已评分；revealed=同组今日放行名额已被占
+  function deferReasonText(r?: TodayQueue["deferred"][number]["deferReason"]): string {
+    if (!r) return "同源卡今日已放行";
+    const f = r.siblingFront ? `「${r.siblingFront.slice(0, 20)}${r.siblingFront.length > 20 ? "…" : ""}」` : "";
+    return r.kind === "reviewed" ? `同源卡今日已评分：${f}` : `与今日已放行的${f || "同源卡"}同源`;
+  }
+
+  const deferredPanel = deferred.length > 0 && (
+    <div className="review-deferred">
+      <button className="review-jump" onClick={() => setDeferredOpen((v) => !v)}>
+        同源暂缓 {deferred.length} 张（明日自动解封）
+      </button>
+      {deferredOpen && (
+        <ul className="deferred-list">
+          {deferred.map((c) => (
+            <li key={c.id}>
+              <span className="deferred-reason mono">{deferReasonText(c.deferReason)}</span>
+              <span className="deferred-front">{(c.frontMarkdown || c.noteText || "").slice(0, 44)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -348,6 +396,7 @@ export default function ReviewView({
             <p className="empty-text">
               {doneCount > 0 ? "到期卡片已清空，休息一下。" : "今日到期卡片已清空。"}
             </p>
+            {deferredPanel}
             <div className="settings-row">
               {undoInfo && (
                 <button className="btn btn-secondary btn-sm" onClick={undoLastGrade}>
@@ -369,6 +418,7 @@ export default function ReviewView({
       <div className="review-session">
         {/* 页内不再重复导航文字（v12.2）：标题由顶栏高亮项表达；右上角仅剩本轮计数 */}
         <div className="review-count mono">本轮 {doneCount} 张</div>
+        {deferredPanel}
 
         {/* v23（§4.4.9）：persist 失败横幅——停留当前卡、封锁动作，重试成功后自动恢复 */}
         {saveError && (
@@ -395,15 +445,29 @@ export default function ReviewView({
           onEdit={handleEdit}
         />
         <div className="review-meta">
+          {/* v32（M7）：单词卡发音按钮已内嵌卡面右上角（CardFace，正面可点 + stopPropagation 防翻面）；
+              自动发音（settings.app.dictAutoSpeak）在出卡时经下方 effect 触发 */}
           {/* v22 撤销评分：误评后一键回退（快捷键 Z），标签展示被撤销的评分档位 */}
           {undoInfo && (
             <button className="review-jump" onClick={undoLastGrade}>
               撤销评分{undoInfo.rating ? `（${undoInfo.rating}）` : ""}
             </button>
           )}
-          {current!.contextRef?.documentId && onJumpToDoc && (
-            <button className="review-jump" onClick={handleJumpToSource}>
-              跳转原文 →
+          {current!.contextRef?.documentId && onJumpToDoc && current!.contextRef.imageSource !== "library" && (
+            // v35：资源库选图卡（imageSource="library"）隐藏跳转；旧卡无锚点置灰提示，不再跳回开头
+            hasSourceAnchor(current!.contextRef) ? (
+              <button className="review-jump" onClick={handleJumpToSource}>
+                跳转原文 →
+              </button>
+            ) : (
+              <button className="review-jump" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
+                跳转原文 →
+              </button>
+            )
+          )}
+          {current!.cardType === "imageOcclusion" && current!.occlusionJson && (
+            <button className="review-jump" onClick={() => setLightboxOpen(true)}>
+              查看原图
             </button>
           )}
           {current!.sourceRef?.title ? `来源:${current!.sourceRef.title}` : ""}
@@ -436,6 +500,16 @@ export default function ReviewView({
         )}
         {contrastOpen && current && (
           <ContrastCardModal card={current} onClose={() => setContrastOpen(false)} />
+        )}
+        {lightboxOpen && current?.occlusionJson && (
+          <ImageLightbox
+            assetPath={current.occlusionJson.assetPath}
+            rects={current.occlusionJson.rects}
+            shapes={current.occlusionJson.shapes}
+            regionScope={current.occlusionJson.regionScope}
+            cardOrd={current.cardOrd}
+            onClose={() => setLightboxOpen(false)}
+          />
         )}
       </div>
     </div>

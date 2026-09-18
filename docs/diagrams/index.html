@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>架构与算法图 · 索引</title>
+<style>
+  html { background:#fafaf8; }
+  body { margin:0; padding:56px 48px 64px; background:#fafaf8; color:#0a0a0a; font-family:"Inter","Helvetica Neue","Segoe UI Variable","Segoe UI","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+         -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1000px; margin:0 auto; }
+  .eyebrow { font-family:"JetBrains Mono","Cascadia Code","Consolas",ui-monospace,monospace; font-size:8px; letter-spacing:.18em; text-transform:uppercase;
+              color:#737373; margin:0 0 12px; }
+  h1 { font-size:28px; font-weight:600; margin:0 0 10px; }
+  .sub { font-size:12px; color:#737373; line-height:1.7; margin:0 0 32px; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { border-top:1px solid rgba(10,10,10,0.12); padding:20px 0; }
+  a { display:flex; gap:16px; align-items:baseline; text-decoration:none; color:#0a0a0a; }
+  a:hover .t { color:#002FA7; }
+  .n { font-family:"JetBrains Mono","Cascadia Code","Consolas",ui-monospace,monospace; font-size:12px; color:#737373; }
+  .t { font-size:16px; font-weight:600; }
+  li p { margin:8px 0 0 34px; font-size:12px; color:#525252; line-height:1.75; }
+  li p.src { font-family:"JetBrains Mono","Cascadia Code","Consolas",ui-monospace,monospace; font-size:8px; letter-spacing:.06em; color:#737373; }
+  footer { border-top:1px solid rgba(10,10,10,0.12); margin-top:24px; padding-top:16px; font-family:"JetBrains Mono","Cascadia Code","Consolas",ui-monospace,monospace;
+            font-size:8px; letter-spacing:.06em; color:#737373; line-height:1.9; }
+</style></head><body><div class="wrap">
+  <p class="eyebrow">Incremental Reading · Diagrams</p>
+  <h1>架构与算法图</h1>
+  <p class="sub">五张图，取自 <code>AI_DEVELOPMENT_GUIDE.md</code>（文档 v43）与当前源码；皮肤沿用项目瑞士风 token（IKB #002FA7），
+  单文件、离线可开。实线框 = 代码中已落地，虚线框 = 已定契约尚未实现。</p>
+  <ul>
+    <li>
+      <a href="01-整体架构.html"><span class="n">01</span><span class="t">整体架构：三层进程 · 一个数据真源</span></a>
+      <p>渲染层 / 主进程 / 数据真源分层，IPC 桥是唯一写入面；最上方是四条最高不变量。</p>
+      <p class="src">§1–§4 · electron/* · src/lib/reader/kernel.ts</p>
+    </li>
+    <li>
+      <a href="02-学习闭环.html"><span class="n">02</span><span class="t">算法设计思路：渐进阅读闭环</span></a>
+      <p>材料 → 摘录 → 队列 → 制卡 → FSRS → 评分事实 → 下一步推荐 → 新材料，附三层分离红线。</p>
+      <p class="src">§1.8–§1.10 · §4.5–§4.9 · §6.4</p>
+    </li>
+    <li>
+      <a href="03-AI制卡管线.html"><span class="n">03</span><span class="t">算法结构 Ⅰ：AI 制卡七步管线</span></a>
+      <p>七步里只有一步离开本地；类型路由、容错解析、CardLint 全部是确定性本地函数。</p>
+      <p class="src">§4.3 · §6.3.2–§6.3.10 · src/lib/cards.ts</p>
+    </li>
+    <li>
+      <a href="04-知识归一三层架构.html"><span class="n">04</span><span class="t">算法结构 Ⅱ：知识归一的三层确定性架构</span></a>
+      <p>本地规范化 → AI 只能产提案 → 本地裁决器；指纹幂等让「重复整理 = 零新增」。</p>
+      <p class="src">§4.6（v41 D38 / v43 K2-B）· kpNorm.js · kpScopes.js</p>
+    </li>
+    <li>
+      <a href="05-FSRS调度事实链.html"><span class="n">05</span><span class="t">算法结构 Ⅲ：FSRS 调度的事实链与不变量</span></a>
+      <p>调度 / 评分 / 参数 / 时间四类事实各归其位，撤销与优化器都只能从事实推导。</p>
+      <p class="src">§4.4（11 条契约）· fsrs.ts · optimizer.js · fsrsTime.js</p>
+    </li>
+  </ul>
+  <footer>生成方式： diagram-design skill（品牌 token 取自 docs/swiss-international-style.md）· 几何自检 0 冲突 · self_check.py 全绿</footer>
+</div></body></html>

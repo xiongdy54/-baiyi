@@ -17,6 +17,9 @@ export default function ContrastCardModal({ card, onClose }: { card: CardRecord;
   const [saving, setSaving] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const mounted = useRef(true);
+  // v34（M12，§4.16）：同一次对比动作入库的对比卡互为同源（act 键）；
+  // 显式键优先于锚点推导——对比卡不与基准卡同组（消歧用途，与基准卡同日出现有益，D29）
+  const contrastKey = useRef(`act:contrast-${crypto.randomUUID()}`);
   useEffect(() => () => { mounted.current = false; }, []);
 
   useEffect(() => {
@@ -48,7 +51,7 @@ export default function ContrastCardModal({ card, onClose }: { card: CardRecord;
   async function acceptOne(d: CardDraft, i: number) {
     setSaving(true);
     try {
-      await createAcceptedCard(d, { sourceTitle: card.sourceRef?.title ?? null, contextRef: card.contextRef });
+      await createAcceptedCard(d, { sourceTitle: card.sourceRef?.title ?? null, contextRef: card.contextRef, siblingKey: contrastKey.current });
       if (!mounted.current) return;
       setAccepted(new Set([...accepted, i]));
       eventBus.emit("cards/changed");

@@ -6,17 +6,20 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { parseCloze, extractClozeAnswers, cardsApi, type CardRecord, type CardIssueRecord } from "../lib/cards";
+import { parseCloze, extractClozeAnswers, cardsApi, hasSourceAnchor, type CardRecord, type CardIssueRecord, type TodayQueue } from "../lib/cards";
+import { playVocabAudio } from "../lib/dictClient";
 import { eventBus } from "../lib/eventbus";
 import ContrastCardModal from "./ContrastCardModal";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
+import ImageLightbox from "./ImageLightbox";
+import KnowledgeManager from "./KnowledgeManager";
 
-type Preset = "all" | "due" | "leech";
+type Preset = "all" | "due" | "leech" | "deferred" | "knowledge";
 type BrowserCard = CardRecord & { docTitle?: string };
 type JumpToDoc = (
   docId: string,
-  anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number },
+  anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } },
   returnTo?: "review" | "queue" | "browse"
 ) => void;
 
@@ -87,13 +90,23 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
+  // v46（M14-UM2，§6.7.3）：「记忆接地」筛选（情境来自记忆的卡，含存疑）
+  const [memFilter, setMemFilter] = useState(false);
   const [sortBy, setSortBy] = useState("due");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [leechTarget, setLeechTarget] = useState<BrowserCard | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // v34（M12，§4.16）：今日同源暂缓清单（与复习队列同一视图口径）——id → 延后原因
+  const [deferredMap, setDeferredMap] = useState<Map<string, NonNullable<TodayQueue["deferred"][number]["deferReason"]>>>(new Map());
 
   const refresh = useCallback(async () => {
     setAll(await cardsApi.listAll());
+    try {
+      const q = await cardsApi.todayQueue();
+      setDeferredMap(new Map((q.deferred ?? []).map((c) => [c.id, c.deferReason ?? { siblingKey: c.siblingKey || "", kind: "revealed" as const, siblingCardId: null, siblingFront: "" }])));
+    } catch {
+      setDeferredMap(new Map());
+    }
     setLoaded(true);
   }, []);
 
@@ -106,9 +119,10 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
     () => ({
       due: all.filter(isDueCard).length,
       leech: all.filter(isLeechOrSuspended).length,
-      suspended: all.filter((c) => c.leech?.suspended).length
+      suspended: all.filter((c) => c.leech?.suspended).length,
+      deferred: all.filter((c) => deferredMap.has(c.id)).length
     }),
-    [all]
+    [all, deferredMap]
   );
 
   // 类型筛选项从库内实际存在的类型动态生成（未知类型显示原文）
@@ -126,7 +140,9 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
     let list = all;
     if (preset === "due") list = list.filter(isDueCard);
     if (preset === "leech") list = list.filter(isLeechOrSuspended);
+    if (preset === "deferred") list = list.filter((c) => deferredMap.has(c.id));
     if (typeFilter !== "all") list = list.filter((c) => c.cardType === typeFilter);
+    if (memFilter) list = list.filter((c) => !!c.memoryRefJson);
     if (stateFilter !== "all") {
       list = list.filter((c) => {
         if (stateFilter === "suspended") return Boolean(c.leech?.suspended);
@@ -157,7 +173,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
     else if (sortBy === "lapses") sorted.sort((a, b) => (b.fsrs?.lapses ?? 0) - (a.fsrs?.lapses ?? 0));
     else sorted.sort((a, b) => (a.fsrs?.due ?? 0) - (b.fsrs?.due ?? 0)); // 默认到期升序，同复习队列
     return sorted;
-  }, [all, preset, typeFilter, stateFilter, query, sortBy]);
+  }, [all, preset, typeFilter, stateFilter, memFilter, query, sortBy, deferredMap]);
 
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
 
@@ -177,8 +193,22 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
         <button className={preset === "leech" ? "active" : ""} onClick={() => setPreset("leech")}>
           记忆难点 ({counts.leech})
         </button>
+        {/* v34（M12，§4.16）：今日同源暂缓——被同源卡延后到明日的卡（点开行详情可见原因） */}
+        {counts.deferred > 0 && (
+          <button className={preset === "deferred" ? "active" : ""} onClick={() => setPreset("deferred")}>
+            今日暂缓 ({counts.deferred})
+          </button>
+        )}
+        {/* v40（K1，D37）：知识地基管理面（§9.1 K1-4 最小管理页） */}
+        <button className={preset === "knowledge" ? "active" : ""} onClick={() => setPreset("knowledge")}>
+          知识点
+        </button>
       </div>
 
+      {preset === "knowledge" && <KnowledgeManager />}
+
+      {preset !== "knowledge" && (
+      <>
       <div className="cb-toolbar">
         <input
           className="cb-search"
@@ -210,6 +240,14 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
           ]}
           onChange={setSortBy}
         />
+        {/* v46（M14-UM2，§6.7.3）：记忆接地筛选——情境来自记忆的卡（含「来源存疑」） */}
+        <button
+          className={`btn btn-sm ${memFilter ? "btn-primary" : "btn-outline"}`}
+          title="只显示情境来自用户记忆的卡片"
+          onClick={() => setMemFilter((v) => !v)}
+        >
+          记忆接地
+        </button>
       </div>
 
       {loaded && filtered.length === 0 && (
@@ -269,7 +307,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
                 {frontPreview(c)}
               </span>
               <span>{typeLabel(c.cardType)}</span>
-              <span>{statusOf(c)}</span>
+              <span>{statusOf(c)}{deferredMap.has(c.id) ? " · 同源暂缓" : ""}</span>
               <span className="mono">{dueText(c)}</span>
               <span className="cb-num mono">{c.fsrs?.reps ?? 0}</span>
               <span className="cb-num mono">{c.fsrs?.lapses ?? 0}</span>
@@ -279,10 +317,20 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
           ))}
         </div>
       )}
+      </>
+      )}
 
       {detail && (
         <CardDetail
           card={detail}
+          deferredNote={
+            (() => {
+              const r = deferredMap.get(detail.id);
+              if (!r) return undefined;
+              const front = r.siblingFront ? `「${r.siblingFront.slice(0, 20)}${r.siblingFront.length > 20 ? "…" : ""}」` : "";
+              return r.kind === "reviewed" ? `同源卡今日已评分：${front}，明日解封` : `与今日已放行的${front || "同源卡"}同源，明日解封`;
+            })()
+          }
           onClose={() => setDetailId(null)}
           onJumpToDoc={onJumpToDoc}
           onOpenLeech={(c) => setLeechTarget(c)}
@@ -310,14 +358,18 @@ function CardDetail({
   card,
   onClose,
   onJumpToDoc,
-  onOpenLeech
+  onOpenLeech,
+  deferredNote
 }: {
   card: BrowserCard;
   onClose: () => void;
   onJumpToDoc?: JumpToDoc;
   onOpenLeech: (card: BrowserCard) => void;
+  /** v34（M12）：今日同源暂缓原因（不在暂缓组时为 undefined） */
+  deferredNote?: string;
 }) {
   const [issues, setIssues] = useState<CardIssueRecord[]>([]);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -366,7 +418,10 @@ function CardDetail({
         anchorText: card.contextRef.anchorText || card.frontMarkdown || card.noteText,
         anchorRatio: card.contextRef.anchorRatio,
         cfi: card.contextRef.cfi,
-        chapterIndex: card.contextRef.chapterIndex
+        chapterIndex: card.contextRef.chapterIndex,
+        pageIndex: card.contextRef.pageIndex,
+        imageAnchor: card.contextRef.imageAnchor,
+        occlusion: card.occlusionJson ? { rects: card.occlusionJson.rects, shapes: card.occlusionJson.shapes, regionScope: card.occlusionJson.regionScope, cardOrd: card.cardOrd, assetPath: card.occlusionJson.assetPath } : undefined
       },
       "browse"
     );
@@ -375,7 +430,7 @@ function CardDetail({
   const f = card.fsrs ?? {};
   const meta: [string, string][] = [
     ["类型", typeLabel(card.cardType)],
-    ["状态", statusOf(card)],
+    ["状态", statusOf(card) + (deferredNote ? `（${deferredNote}）` : "")],
     ["到期", dueText(card)],
     ["复习 / 遗忘", `${f.reps ?? 0} 次 / ${f.lapses ?? 0} 次`],
     [
@@ -385,6 +440,8 @@ function CardDetail({
     ["优先级", `P${card.priority}`],
     ["来源", srcLabel(card)],
     ["领域", (card.domain ?? []).join("、") || "—"],
+    // v40（K1）：legacy knowledge_point_id（正式 KP 之外的原值；归一提案见「知识点」页签）
+    ["知识点", card.knowledgePointId || "—"],
     ["生成方式", card.generatedBy === "ai" ? "AI 生成" : "手动"],
     ["创建时间", new Date(card.createdAt).toLocaleString()]
   ];
@@ -403,6 +460,18 @@ function CardDetail({
         </div>
         <div className="modal-scroll">
           <CardFace card={card} showBack onReveal={() => {}} onEdit={handleEdit} />
+
+          {/* v46（M14-UM2，§6.7.3）：记忆溯源——显示所引记忆行与校验状态；已入库卡不随记忆文件改动自动改写 */}
+          {card.memoryRefJson && (
+            <div className="cb-issues">
+              <span className={`lint ${card.memoryRefJson.verified ? "lint-info" : "lint-warn"}`}>
+                {card.memoryRefJson.verified ? "情境来自记忆" : "情境来源存疑（来源可能已变更）"}
+              </span>
+              <div className="mono" style={{ marginTop: "var(--sp-2)", fontSize: 12 }}>
+                引用记忆行：{card.memoryRefJson.line}
+              </div>
+            </div>
+          )}
 
           <dl className="cb-meta">
             {meta.map(([k, v]) => (
@@ -427,9 +496,21 @@ function CardDetail({
           )}
 
           <div className="cb-actions">
-            {card.contextRef?.documentId && onJumpToDoc && (
-              <button className="btn btn-outline btn-sm" onClick={jump}>
-                跳转原文 →
+            {card.contextRef?.documentId && onJumpToDoc && card.contextRef.imageSource !== "library" && (
+              // v35：资源库选图卡（imageSource="library"）隐藏跳转；旧卡无锚点置灰提示，不再跳回开头
+              hasSourceAnchor(card.contextRef) ? (
+                <button className="btn btn-outline btn-sm" onClick={jump}>
+                  跳转原文 →
+                </button>
+              ) : (
+                <button className="btn btn-outline btn-sm" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
+                  跳转原文 →
+                </button>
+              )
+            )}
+            {card.cardType === "imageOcclusion" && card.occlusionJson && (
+              <button className="btn btn-outline btn-sm" onClick={() => setLightboxOpen(true)}>
+                查看原图
               </button>
             )}
             <button className="btn btn-outline btn-sm" onClick={toggleSuspend}>
@@ -454,6 +535,16 @@ function CardDetail({
             </button>
           </div>
           <p className="form-hint">题面与答案可直接点击编辑（失焦落库，挖空卡自动回填挖空语法）；复习评分请回到「复习」页。</p>
+          {lightboxOpen && card.occlusionJson && (
+            <ImageLightbox
+              assetPath={card.occlusionJson.assetPath}
+              rects={card.occlusionJson.rects}
+              shapes={card.occlusionJson.shapes}
+              regionScope={card.occlusionJson.regionScope}
+              cardOrd={card.cardOrd}
+              onClose={() => setLightboxOpen(false)}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -533,6 +624,23 @@ export function CardFace({
   );
 
   const frontText = card.frontMarkdown || card.noteText;
+
+  // v32（M7）单词卡发音按钮：听音卡嵌题面内、其余卡嵌答案区（dict_json.kind 分流；
+  // 存量无 kind 卡按 front 前缀「发音：」判定）。stopPropagation 防触发翻面。
+  const dj = card.dictJson;
+  const isListeningVocab = !!dj && (dj.kind ? dj.kind === "listening" : frontText.startsWith("发音："));
+  const speakBtn = dj ? (
+    <button
+      className="vocab-speak-btn"
+      title="播放发音"
+      onClick={(e) => {
+        e.stopPropagation();
+        void playVocabAudio(dj);
+      }}
+    >
+      🔊
+    </button>
+  ) : null;
 
   // 图片挖空卡（v16 展示规范）：正面 = 原图 + 主题色遮挡块（考察区域 accent 色、其余区域 ink 色）；
   // 答案面 = 原始图片（无任何遮挡覆盖）+ 答案文本。
@@ -626,6 +734,8 @@ export function CardFace({
             ) : (
               clozeAnswer
             )}
+            {/* v32（M7）：单词挖空卡（非听音）发音按钮入答案字段 */}
+            {dj && !isListeningVocab && speakBtn}
           </div>
         )}
       </div>
@@ -644,6 +754,8 @@ export function CardFace({
         ) : (
           md(frontText)
         )}
+        {/* v32（M7）：听音卡发音按钮嵌入题面字段（存量无 kind 卡按 front 前缀「发音：」判定） */}
+        {dj && isListeningVocab && speakBtn}
       </div>
       {showBack && (
         <div className="review-back">
@@ -652,6 +764,8 @@ export function CardFace({
           ) : (
             md(card.backMarkdown)
           )}
+          {/* v32（M7）：其余单词卡（中→外/外→中/挖空）发音按钮入答案字段 */}
+          {dj && !isListeningVocab && speakBtn}
         </div>
       )}
     </div>

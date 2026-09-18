@@ -4,7 +4,7 @@ import { eventBus } from "../lib/eventbus";
 
 interface Props {
   onOpen: (extractId: string) => void;
-  onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number }, returnTo?: "review" | "queue" | "browse") => void;
+  onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }, returnTo?: "review" | "queue" | "browse") => void;
 }
 
 export default function QueueView({ onOpen, onJumpToDoc }: Props) {

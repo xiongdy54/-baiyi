@@ -6,7 +6,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build:vendor": "node ../node_modules/esbuild/bin/esbuild ../src/lib/cards.ts --bundle --format=iife --global-name=cardsLib --outfile=vendor/cards.js"
+    "build:vendor": "node ../node_modules/esbuild/bin/esbuild ../src/lib/cards.ts --bundle --format=iife --global-name=cardsLib --outfile=vendor/cards.js",
+    "build:kpscopes": "node ../node_modules/esbuild/bin/esbuild ../electron/kpScopes.js --bundle --format=iife --global-name=kpScopesLib --outfile=vendor/kpScopes.js"
   },
   "devDependencies": {
     "electron": "^31.0.0"

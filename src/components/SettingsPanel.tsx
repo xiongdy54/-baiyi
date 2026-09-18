@@ -2,11 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { SKINS } from "../skins";
 import { aiGateway, type AIConfig } from "../lib/ai";
 import { settingsStore } from "../lib/settings";
+import { shortcutsApi, type ShortcutStatus } from "../lib/journal";
 import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
 import Dropdown from "./Dropdown";
 import { DEFAULT_READER_SETTINGS, type ReaderSettings } from "../lib/reader/service";
 import type { DashLayoutV2, WidgetSize } from "./dashboard/layout";
+import { DICT_CATALOG, type DictCatalogItem } from "../lib/dictCatalog";
+import { DEFAULT_POPUP_FIELDS } from "../lib/dictClient";
+import { FIELD_LABELS } from "./DictPanel";
+import { eventBus } from "../lib/eventbus";
+import { memoryApi, type MemoryPendingStats, type MemoryStatus } from "../lib/memory";
 
 export type ThemeMode = "light" | "dark";
 
@@ -29,6 +35,20 @@ const PRESET_OPTIONS = [
 
 function SkeletonBlock({ h = 40 }: { h?: number }) {
   return <div className="skeleton" style={{ height: h }} />;
+}
+
+// 给可能长时间挂起的 Promise 加超时上限（v45 用户反馈：测试连接失败后按钮永久置灰）。
+// 主进程侧已有 socket 不活动超时（ai.js）双保险；渲染层超时保证 busy 状态必然恢复。
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error(`${label}超时（${Math.round(ms / 1000)} 秒无响应），已自动停止；请检查网络或服务地址后重试`));
+    }, ms);
+    p.then(
+      (v) => { window.clearTimeout(timer); resolve(v); },
+      (e) => { window.clearTimeout(timer); reject(e); }
+    );
+  });
 }
 
 // ---------- 统计仪表盘设置（组件可见性 + 宽窄 / 重置布局） ----------
@@ -175,32 +195,41 @@ function AISection() {
 
   async function handleSave(): Promise<AIConfig | null> {
     setBusy("save");
-    const next = await doSave();
-    setBusy("");
-    return next;
+    try {
+      return await doSave();
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
+      return null;
+    } finally {
+      setBusy("");
+    }
   }
 
   async function handleTest() {
     setNotice(null);
     setModelsOpen(false);
     setBusy("test");
-    const saved = await doSave();
-    if (!saved || (saved.preset !== "local" && !saved.hasKey)) {
+    try {
+      const saved = await withTimeout(doSave(), 15000, "保存配置");
+      if (!saved || (saved.preset !== "local" && !saved.hasKey)) {
+        setNotice({ ok: false, text: "请先粘贴 API Key，点击「保存配置」后再测试" });
+        return;
+      }
+      const result = await withTimeout(aiGateway.test(), 90000, "测试连接");
+      setNotice({ ok: result.ok, text: result.ok ? "✓ 连接正常，AI 制卡 / 解释可用" : `✗ ${result.message}` });
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
       setBusy("");
-      setNotice({ ok: false, text: "请先粘贴 API Key，点击「保存配置」后再测试" });
-      return;
     }
-    const result = await aiGateway.test();
-    setBusy("");
-    setNotice({ ok: result.ok, text: result.ok ? "✓ 连接正常，AI 制卡 / 解释可用" : `✗ ${result.message}` });
   }
 
   async function handleFetchModels() {
     setNotice(null);
     setBusy("models");
-    await doSave();
     try {
-      const list = await aiGateway.listModels();
+      await withTimeout(doSave(), 15000, "保存配置");
+      const list = await withTimeout(aiGateway.listModels(), 30000, "拉取模型列表");
       setModels(list);
       setModelFilter("");
       setModelsOpen(list.length > 0);
@@ -210,8 +239,9 @@ function AISection() {
       });
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy("");
     }
-    setBusy("");
   }
 
   if (!cfg) return null;
@@ -426,6 +456,305 @@ function LearningDaySection() {
         )}
       </div>
       {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，统计口径即时生效。</p>}
+    </section>
+  );
+}
+
+// 同源卡延后（v34，M12/D33/§4.16）：同一制卡来源单元的多张卡同一学习日只放行一张、其余延至次日。
+// 延后是队列视图而非调度写入——不改 FSRS 的 due/S/D，不产生复习日志，次日自动解封。
+function SiblingBurySection() {
+  const [cfg, setCfg] = useState<{ enabled: boolean; newCards: boolean; reviewCards: boolean; perDay: number; sourceTextLimit: number } | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    settingsStore
+      .get<Partial<{ enabled: boolean; newCards: boolean; reviewCards: boolean; perDay: number; sourceTextLimit: number }> | null>("app", "siblingBury", null)
+      .then((v) =>
+        setCfg({
+          enabled: v?.enabled !== false,
+          newCards: v?.newCards !== false,
+          reviewCards: v?.reviewCards !== false,
+          perDay: Number.isInteger(v?.perDay) && (v?.perDay as number) >= 1 ? (v!.perDay as number) : 1,
+          sourceTextLimit: Number.isInteger(v?.sourceTextLimit) && (v?.sourceTextLimit as number) > 0 ? (v!.sourceTextLimit as number) : 300
+        })
+      );
+  }, []);
+  async function update(patch: Partial<NonNullable<typeof cfg>>) {
+    if (!cfg) return;
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    await settingsStore.set("app", "siblingBury", next);
+    setSavedTick((t) => t + 1);
+    window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
+  }
+  return (
+    <section className="settings-section" id="sec-siblingbury">
+      <h3>同源卡延后（Anki 式 Sibling Burying）</h3>
+      <p className="form-hint">
+        同一句话/同一次动作产出的多张卡（翻转对、分答拆卡、单词四卡、同图多卡、短材料多角度卡）内容高度重叠，
+        同日互相泄题会让 FSRS 把「刚看过答案的容易」误判为记忆稳定。开启后同源组每日只放行一张，其余次日自动解封。
+        延后不改动 FSRS 调度与复习记录，被延后的卡仍可在卡片浏览页主动复习。
+      </p>
+      {cfg && (
+        <>
+          <div className="settings-row">
+            <span>同源卡延后</span>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="同源卡延后开关">
+              <button className={cfg.enabled ? "active" : ""} onClick={() => update({ enabled: true })}>开</button>
+              <button className={!cfg.enabled ? "active" : ""} onClick={() => update({ enabled: false })}>关</button>
+            </div>
+          </div>
+          <div className="settings-row">
+            <span>新卡同源延后（Bury new siblings）</span>
+            <input type="checkbox" checked={cfg.newCards} onChange={(e) => update({ newCards: e.target.checked })} />
+          </div>
+          <div className="settings-row">
+            <span>复习卡同源延后（Bury review siblings）</span>
+            <input type="checkbox" checked={cfg.reviewCards} onChange={(e) => update({ reviewCards: e.target.checked })} />
+          </div>
+          <div className="settings-row">
+            <span>同源组每日放行</span>
+            <input
+              className="mono"
+              type="number"
+              min={1}
+              max={20}
+              value={cfg.perDay}
+              style={{ width: 64, height: 32, padding: "0 var(--sp-2)" }}
+              onChange={(e) => update({ perDay: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
+            />
+            <span>张</span>
+          </div>
+          <div className="settings-row">
+            <span>短材料阈值</span>
+            <input
+              className="mono"
+              type="number"
+              min={50}
+              max={100000}
+              step={50}
+              value={cfg.sourceTextLimit}
+              style={{ width: 88, height: 32, padding: "0 var(--sp-2)" }}
+              onChange={(e) => update({ sourceTextLimit: Math.max(50, Number(e.target.value) || 300) })}
+            />
+            <span>字符以内才按「同一次选区」建组（长选区各卡锚定不同知识点，不延后）</span>
+          </div>
+        </>
+      )}
+      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，队列即时生效。</p>}
+    </section>
+  );
+}
+
+// ---------- 用户记忆（v45，M14-UM1，D39 / §6.7）：唯一入口 sec-memory ----------
+// AI 自主维护（§1.7 有界例外）→ 产品面只做「可见、可控、可停止」：不提供编辑界面（外部编辑器打开），
+// 总开关默认关；首次开启一次性说明 → 补处理预估确认 → 进度可中止（水位线推进，中止不丢进度）。
+function MemorySection() {
+  const [status, setStatus] = useState<MemoryStatus | null>(null);
+  const [introOpen, setIntroOpen] = useState(false);
+  const [preview, setPreview] = useState<MemoryPendingStats | null>(null);
+  const [resetArmed, setResetArmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  // v46（M14-UM2，§6.7.1）：注入预算可调（字；core/目录/主题按 800/1200/2400 配比缩放）
+  const [injectBudget, setInjectBudget] = useState<number | null>(null);
+
+  useEffect(() => {
+    settingsStore
+      .get<Record<string, unknown> | null>("app", "memory", null)
+      .then((m) => setInjectBudget(Number((m as { injectBudget?: number })?.injectBudget) || 4400));
+  }, []);
+
+  async function changeInjectBudget(n: number) {
+    const v = Math.max(200, Math.min(20000, Number(n) || 4400));
+    setInjectBudget(v);
+    const cur = await settingsStore.get<Record<string, unknown> | null>("app", "memory", null);
+    await settingsStore.set("app", "memory", { ...(cur || {}), injectBudget: v });
+  }
+
+  async function refresh() {
+    const st = await memoryApi.status();
+    setStatus(st);
+    return st;
+  }
+  useEffect(() => {
+    void refresh();
+    return eventBus.on("memory/changed", () => void refresh());
+  }, []);
+
+  async function toggle(on: boolean) {
+    setNotice(null);
+    if (on) {
+      const st = await refresh();
+      if (st && !st.introAcked) {
+        setIntroOpen(true);
+      } else {
+        await memoryApi.setEnabled({ enabled: true, introAcked: true });
+        await refresh();
+      }
+    } else {
+      await memoryApi.setEnabled({ enabled: false });
+      setPreview(null);
+      await refresh();
+    }
+  }
+
+  // 首次开启说明 → 确认：生效 + 拉补处理预估（§6.7.2：范围与预估先行，用户确认或取消）
+  async function confirmIntro() {
+    setBusy(true);
+    try {
+      await memoryApi.setEnabled({ enabled: true, introAcked: true });
+      const pv = await memoryApi.backfillPreview();
+      setPreview(pv && pv.entryCount > 0 ? pv : null);
+      setIntroOpen(false);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startBackfill() {
+    setBusy(true);
+    try {
+      await memoryApi.backfillStart();
+      setPreview(null);
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function tidyNow() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await memoryApi.tidyNow();
+      if (!r) setNotice({ ok: false, text: "记忆接口不可用（需重启应用）" });
+      else if (r.skipped) setNotice({ ok: false, text: `未执行：${r.skipped}` });
+      else if (!r.ok) setNotice({ ok: false, text: `整理失败：${r.error || "未知错误"}` });
+      else setNotice({ ok: true, text: `整理完成（应用 ${r.ops ?? 0} 条操作）。` });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doReset() {
+    setBusy(true);
+    try {
+      await memoryApi.reset();
+      setResetArmed(false);
+      setNotice({ ok: true, text: "记忆已清空并重建脚手架（日记与卡片不受影响）。" });
+      await refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const bf = status?.backfill;
+  return (
+    <section className="settings-section" id="sec-memory">
+      <h3>用户记忆（AI 自动维护）</h3>
+      <p className="form-hint">
+        软件把你的日记自动整理成一份本地记忆文件，将来制卡时为「应用类卡片」提供你真实经历过的情境。
+        会发送什么：日记新增/改动片段；何时发送：日记变更防抖后与启动补跑；发到哪里：你自己配置的 AI 模型；
+        不会做什么：不上传遥测、不写卡片正文、不参与复习调度。文件纯本地保存，可随时用编辑器查看修改，可随时关闭。
+      </p>
+      {status && (
+        <>
+          <div className="settings-row">
+            <span>用户记忆</span>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="用户记忆开关">
+              <button className={status.enabled ? "active" : ""} onClick={() => toggle(true)}>开</button>
+              <button className={!status.enabled ? "active" : ""} onClick={() => toggle(false)}>关</button>
+            </div>
+          </div>
+          <div className="settings-row">
+            <span>文件位置</span>
+            <span className="mono" style={{ fontSize: 12 }}>{status.memoryDir}</span>
+            <button className="btn-outline btn-sm" onClick={() => void memoryApi.openFolder()}>打开文件夹</button>
+            <button className="btn-outline btn-sm" onClick={() => void memoryApi.openFile("core.md")}>打开 core.md</button>
+          </div>
+          <div className="settings-row">
+            <span>立即整理</span>
+            <button className="btn btn-secondary btn-sm" disabled={busy || !status.enabled || status.pending.entryCount === 0} onClick={() => void tidyNow()}>
+              立即整理（待处理 {status.pending.entryCount} 条）
+            </button>
+            {!status.enabled && <span className="form-hint">开关关闭期间不整理</span>}
+            {status.enabled && status.pending.entryCount === 0 && <span className="form-hint">没有未整理的日记条目</span>}
+          </div>
+          <div className="settings-row">
+            <span>记忆用量</span>
+            <span className="mono" style={{ fontSize: 12 }}>
+              core {status.usage.core.chars} 字 / 目录 {status.usage.index.chars} 字 / 主题文件 {status.usage.topics.length} 个 · 合计 ≈ {status.usage.totals.tokens} token
+            </span>
+          </div>
+          <div className="settings-row">
+            <span>注入预算</span>
+            <input
+              className="mono"
+              type="number"
+              min={200}
+              max={20000}
+              step={200}
+              value={injectBudget ?? 4400}
+              style={{ width: 88, height: 32, padding: "0 var(--sp-2)" }}
+              onChange={(e) => void changeInjectBudget(Number(e.target.value))}
+            />
+            <span className="form-hint">字（制卡时单次注入记忆的上限；core/目录/主题按比例分配）</span>
+          </div>
+          {bf?.running && (
+            <div className="settings-row">
+              <span>补处理：已整理 {bf.done}/{bf.total || "?"} 条</span>
+              <button className="btn btn-secondary btn-sm" onClick={() => void memoryApi.backfillCancel()}>中止</button>
+            </div>
+          )}
+          <div className="settings-row">
+            <span>重置记忆</span>
+            {!resetArmed ? (
+              <button className="btn-outline btn-sm" onClick={() => setResetArmed(true)}>清空记忆文件…</button>
+            ) : (
+              <>
+                <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void doReset()}>确认清空</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setResetArmed(false)}>取消</button>
+              </>
+            )}
+          </div>
+          {resetArmed && (
+            <p className="form-hint">将删除 memory/ 下全部记忆文件并重建空脚手架。只删除记忆，不影响日记与卡片；开关状态保留。</p>
+          )}
+          {preview && (
+            <div className="restore-confirm">
+              <p className="restore-confirm-title">补处理预估</p>
+              <p className="form-hint">
+                待整理日记 {preview.entryCount} 条{preview.truncated ? "（至多统计 1000 条）" : ""}，预计 {preview.batchCount} 批 / {preview.estCalls} 次 AI 调用，
+                约 {preview.estTokens} token。按时间正序分批整理（早期记忆优先），每批完成即推进进度，可随时中止、退出不丢进度。
+              </p>
+              <div className="settings-row">
+                <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void startBackfill()}>开始补处理</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setPreview(null)}>暂不</button>
+              </div>
+            </div>
+          )}
+          {status.lastError && <p className="ai-test-fail">上次整理出错：{status.lastError}</p>}
+          {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
+        </>
+      )}
+
+      {introOpen && (
+        <div className="restore-confirm">
+          <p className="restore-confirm-title">开启用户记忆前请了解</p>
+          <p className="form-hint">
+            ① 发送什么：日记中新增/改动的片段会发送给你配置的 AI 模型，由它整理成记忆条目；
+            ② 何时发送：日记变更防抖后自动整理，以及应用启动时补跑；③ 发到哪里：仅你自己在「AI 服务」里配置的模型，
+            软件不上传遥测；④ 记忆文件在 <span className="mono">{status?.memoryDir ?? "&lt;userData&gt;/memory/"}</span>，
+            纯本地保存，可随时用外部编辑器查看修改，可随时关闭（关闭不删文件）。
+          </p>
+          <div className="settings-row">
+            <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void confirmIntro()}>已知悉，开启</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setIntroOpen(false)}>取消</button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -867,6 +1196,205 @@ function BackupSection() {
   );
 }
 
+// ---------- M7 词典/下载（v32，D31）：来源模式 + 弹窗字段 + 一键下载 + 本地导入 ----------
+function DictSection() {
+  const [mode, setMode] = useState<"local" | "online" | "auto">("auto");
+  const [fields, setFields] = useState<Record<string, boolean>>(DEFAULT_POPUP_FIELDS);
+  const [audioSource, setAudioSource] = useState<"tts" | "online">("tts");
+  const [autoSpeak, setAutoSpeak] = useState(false);
+  const [sources, setSources] = useState<{ id: string; name: string; format: string; lang?: string; enabled: number; entry_count: number }[]>([]);
+  const [progress, setProgress] = useState<Record<string, { progress: number; state: string; count?: number }>>({});
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    settingsStore.get<string>("app", "dictMode", "auto").then((v) => {
+      if (v === "local" || v === "online" || v === "auto") setMode(v);
+    });
+    settingsStore.get<Record<string, boolean>>("app", "dictPopupFields", DEFAULT_POPUP_FIELDS).then((v) => {
+      setFields({ ...DEFAULT_POPUP_FIELDS, ...(v || {}) });
+    });
+    settingsStore.get<"tts" | "online">("app", "dictAudioSource", "tts").then((v) => {
+      if (v === "tts" || v === "online") setAudioSource(v);
+    });
+    settingsStore.get<boolean>("app", "dictAutoSpeak", false).then((v) => setAutoSpeak(!!v));
+    refreshSources();
+    const off = window.dictAPI?.onDownloadProgress((msg) => {
+      setProgress((p) => ({ ...p, [msg.id]: { progress: msg.progress, state: msg.state } }));
+      if (msg.state === "done" || msg.state === "done-capped") {
+        setBusy(null);
+        setNotice(
+          msg.state === "done-capped"
+            ? `词典已下载并建好索引（已索引 ${msg.count ?? 0} 词条，达到安全上限有截断），选中单词即可查词`
+            : `词典已下载并建好索引（共 ${msg.count ?? 0} 词条），选中单词即可查词（本地优先于在线超时）`
+        );
+        refreshSources();
+      }
+      if (msg.state === "saved") {
+        setBusy(null);
+        setNotice("文件已下载，但该格式暂不支持自动建索引（已存于 dicts 目录）");
+      }
+      if (msg.state === "error") setBusy(null);
+    });
+    return off;
+  }, []);
+
+  async function refreshSources() {
+    try {
+      const list = (await window.dictAPI?.sources()) as typeof sources;
+      setSources(Array.isArray(list) ? list : []);
+    } catch { /* 忽略 */ }
+  }
+
+  async function changeMode(m: "local" | "online" | "auto") {
+    setMode(m);
+    await settingsStore.set("app", "dictMode", m);
+  }
+
+  async function toggleField(key: string) {
+    const next = { ...fields, [key]: !fields[key] };
+    setFields(next);
+    await settingsStore.set("app", "dictPopupFields", next);
+  }
+
+  async function changeAudioSource(v: "tts" | "online") {
+    setAudioSource(v);
+    await settingsStore.set("app", "dictAudioSource", v);
+  }
+
+  async function changeAutoSpeak(v: boolean) {
+    setAutoSpeak(v);
+    await settingsStore.set("app", "dictAutoSpeak", v);
+  }
+
+  async function download(item: DictCatalogItem) {
+    if (!window.dictAPI || busy) return;
+    setBusy(item.id);
+    setNotice(null);
+    setProgress((p) => ({ ...p, [item.id]: { progress: 0, state: "downloading" } }));
+    try {
+      await window.dictAPI.download({ id: item.id, url: item.url, mirrorUrl: item.mirrorUrl, format: item.format, name: item.name });
+    } catch (err) {
+      setBusy(null);
+      setProgress((p) => ({ ...p, [item.id]: { progress: 0, state: "error" } }));
+      setNotice(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function importLocal() {
+    if (!window.dictAPI) return;
+    const picked = await window.dictAPI.pickFile();
+    if (!picked) return;
+    setNotice(null);
+    try {
+      const r = await window.dictAPI.importFile(picked.path);
+      setNotice(r ? `已导入「${r.name}」（${r.count} 词条），可在阅读器选中查词` : "导入取消");
+      refreshSources();
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <section className="settings-section" id="sec-dict">
+      <h3>词典/下载</h3>
+      <p className="form-hint">选中单词 → 查词弹窗 → 一键制卡（4 张：中→外/外→中/听音/原句挖空）。查词结果必显来源；换词典不影响已存卡。</p>
+      <div className="seg-tabs" role="radiogroup" aria-label="词典来源">
+        {(["local", "online", "auto"] as const).map((m) => (
+          <button key={m} className={mode === m ? "active" : ""} onClick={() => changeMode(m)}>
+            {m === "local" ? "本地词典" : m === "online" ? "在线词典" : "自动"}
+          </button>
+        ))}
+      </div>
+      <p className="form-hint">
+        {mode === "local" ? "只查已安装/导入的本地词典，不联网。" : mode === "online" ? "使用在线词典（Free Dictionary API / Jisho）。" : "优先在线，失败/超时/无结果时自动回落本地。"}
+      </p>
+
+      <h4>弹窗显示字段</h4>
+      <div className="settings-row" style={{ flexWrap: "wrap", gap: 8 }}>
+        {FIELD_LABELS.map((f) => (
+          <label key={f.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <input type="checkbox" checked={!!fields[f.key]} onChange={() => toggleField(f.key)} />
+            {f.label}
+          </label>
+        ))}
+      </div>
+      <p className="form-hint">默认开拼写/音标/发音/释义；例句关闭不影响原句保存与挖空卡。</p>
+
+      <h4>单词卡发音</h4>
+      <div className="seg-tabs" role="radiogroup" aria-label="发音来源">
+        <button className={audioSource === "tts" ? "active" : ""} onClick={() => changeAudioSource("tts")}>系统 TTS</button>
+        <button className={audioSource === "online" ? "active" : ""} onClick={() => changeAudioSource("online")}>在线音频</button>
+      </div>
+      <p className="form-hint">
+        {audioSource === "tts"
+          ? "使用系统语音朗读单词（离线可用；Windows 需安装对应语言语音包）。"
+          : "优先播放词典在线真人音频（仅在线词典提供；缺失时回落系统 TTS）。"}
+      </p>
+      <div className="settings-row" style={{ alignItems: "center", gap: 8 }}>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <input type="checkbox" checked={autoSpeak} onChange={(e) => changeAutoSpeak(e.target.checked)} />
+          自动发音（出到单词卡即朗读，无需手动点击）
+        </label>
+      </div>
+
+      <h4>一键下载</h4>
+      {DICT_CATALOG.filter((c) => c.suitable === "download").map((c) => {
+        const pg = progress[c.id];
+        return (
+          <div key={c.id} className="dict-catalog-row">
+            <div>
+              <div><strong>{c.name}</strong> <span className="mono">{c.estSizeLabel}</span> <span className="dict-tag">{c.recommendLevel}</span></div>
+              <div className="form-hint">{c.desc}。{c.recommend}（{c.license}，{c.updateFreq}）</div>
+              {pg && (pg.state === "downloading" || pg.state === "indexing") && (
+                <div className="mono">
+                  {pg.state === "downloading" ? `下载中… ${pg.progress}%` : `建索引中… 已 ${pg.count ?? 0} 词条（期间界面保持响应）`}
+                </div>
+              )}
+            </div>
+            <button className="btn btn-outline btn-sm" disabled={busy === c.id} onClick={() => download(c)}>
+              {busy === c.id ? "下载中…" : sources.some((s) => s.name === c.name) ? "更新" : "下载"}
+            </button>
+          </div>
+        );
+      })}
+      <p className="form-hint">StarDict 朗道/牛津等第三方包版权不明，不提供下载，仅走本地导入；Wiktionary 全量数 GB，仅在线 API。</p>
+      <div className="settings-row">
+        <button className="btn btn-outline btn-sm" onClick={importLocal}>本地导入词典文件…</button>
+      </div>
+
+      {sources.length > 0 && (
+        <>
+          <h4>已安装词典</h4>
+          {sources.map((s) => (
+            <div key={s.id} className="dict-catalog-row">
+              <div>
+                <strong>{s.name}</strong> <span className="mono">{s.format}{s.lang ? ` · ${s.lang}` : ""} · {s.entry_count} 词条</span>
+                {Number(s.entry_count) === 0 && <div className="form-hint">未建索引——点右侧「更新」重新下载解析，或删除后本地导入。</div>}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn-outline btn-sm"
+                  onClick={() => window.dictAPI?.toggleSource(s.id, !s.enabled).then(refreshSources)}
+                >
+                  {s.enabled ? "停用" : "启用"}
+                </button>
+                <button
+                  className="btn btn-outline btn-sm"
+                  onClick={() => window.dictAPI?.removeSource(s.id).then(refreshSources)}
+                >
+                  删除
+                </button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+      {notice && <p className="form-hint">{notice}</p>}
+    </section>
+  );
+}
+
 // ---------- M4 快捷键自定义（§9.1 M4）：键位捕获 + 冲突检测 + 恢复默认，落 settings.app.keybindings ----------
 function ShortcutsSection() {
   const [bindings, setBindings] = useState<Record<string, string>>({});
@@ -933,8 +1461,7 @@ function ShortcutsSection() {
 
   return (
     <section className="settings-section" id="sec-shortcuts">
-      <h3>快捷键</h3>
-      <p className="form-hint">
+      <h3>快捷键</h3>      <p className="form-hint">
         点击键位框后按下新的组合键（Esc 取消）；与其他动作冲突的键位不会被保存。
         输入框内的 Ctrl+Z / Ctrl+A 等编辑键不受影响。
       </p>
@@ -976,6 +1503,235 @@ function ShortcutsSection() {
   );
 }
 
+// ---------- v36（M8-A，§5.4 / D34）：全局快捷键组（快速记录 / 添加学习材料）+ 随系统启动 ----------
+// 三条纪律：① 注册失败必须可见（`globalShortcut.register` 被占用时返回 false，静默失效最伤用户）；
+// ② 键位候选要与应用内键位（CommandRegistry）及另一全局键互不冲突——全局键会在**系统层**吞掉按键，
+//    否则「设置里看着没问题、应用内动作却静默失效」；
+// ③ 无修饰键一律拒绝（单键全局快捷键会吞掉正常输入）。
+
+interface GlobalShortcutsConfig {
+  quickCapture: { enabled: boolean; accelerator: string; hideOnBlur: boolean };
+  addMaterial: { enabled: boolean; accelerator: string };
+  autoLaunch: boolean;
+}
+
+const DEFAULT_GLOBAL_SHORTCUTS: GlobalShortcutsConfig = {
+  quickCapture: { enabled: true, accelerator: "Ctrl+Alt+Space", hideOnBlur: true },
+  addMaterial: { enabled: true, accelerator: "Ctrl+Alt+N" },
+  autoLaunch: false
+};
+
+type GlobalTarget = "quickCapture" | "addMaterial";
+
+function shortcutStateLabel(s?: { enabled: boolean; registered: boolean; error: string | null }): {
+  text: string;
+  cls: string;
+} {
+  if (!s) return { text: "—", cls: "" };
+  if (!s.enabled) return { text: "已关闭", cls: "" };
+  if (s.registered) return { text: "已注册", cls: " on" };
+  return { text: s.error ? "被占用" : "未注册", cls: " err" };
+}
+
+function GlobalShortcutsSection() {
+  const [cfg, setCfg] = useState<GlobalShortcutsConfig>(DEFAULT_GLOBAL_SHORTCUTS);
+  const [status, setStatus] = useState<ShortcutStatus | null>(null);
+  const [capturing, setCapturing] = useState<GlobalTarget | null>(null);
+  const [conflict, setConflict] = useState<{ target: GlobalTarget; message: string } | null>(null);
+  const capturingRef = useRef<GlobalTarget | null>(null);
+  capturingRef.current = capturing;
+  const cfgRef = useRef<GlobalShortcutsConfig>(DEFAULT_GLOBAL_SHORTCUTS);
+  cfgRef.current = cfg;
+
+  useEffect(() => {
+    void (async () => {
+      await commandRegistry.init();
+      const saved = await settingsStore.get<Partial<GlobalShortcutsConfig>>("app", "globalShortcuts", {});
+      const next: GlobalShortcutsConfig = {
+        quickCapture: { ...DEFAULT_GLOBAL_SHORTCUTS.quickCapture, ...(saved.quickCapture || {}) },
+        addMaterial: { ...DEFAULT_GLOBAL_SHORTCUTS.addMaterial, ...(saved.addMaterial || {}) },
+        autoLaunch: saved.autoLaunch === true
+      };
+      setCfg(next);
+      setStatus(await shortcutsApi.status());
+    })();
+  }, []);
+
+  // 捕获期间抑制应用内键位分发（否则捕获 "1" 会给弹窗下层的复习卡评分）
+  useEffect(() => {
+    if (!capturing) return;
+    commandRegistry.pushSuppress("global-kb-capture");
+    return () => commandRegistry.popSuppress("global-kb-capture");
+  }, [capturing]);
+
+  async function persist(next: GlobalShortcutsConfig, target?: GlobalTarget) {
+    setCfg(next);
+    await settingsStore.set("app", "globalShortcuts", next); // 主进程 settings:set 会即时重注册
+    const st = await shortcutsApi.status();
+    setStatus(st);
+    if (target && st) {
+      const err = target === "quickCapture" ? st.quickCapture.error : st.addMaterial.error;
+      if (err) setConflict({ target, message: err });
+    }
+  }
+
+  useEffect(() => {
+    if (!capturing) return;
+    function onKey(e: KeyboardEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      const target = capturingRef.current;
+      if (!target) return;
+      if (e.key === "Escape") {
+        setCapturing(null);
+        setConflict(null);
+        return;
+      }
+      const combo = eventToCombo(e);
+      if (!combo) return;
+      const isFnKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(combo);
+      if (!combo.includes("+") && !isFnKey) {
+        setConflict({ target, message: "需带 Ctrl / Alt / Shift 修饰键（或使用 F1–F24）" });
+        return;
+      }
+      setCapturing(null);
+      const current = cfgRef.current;
+      const other = target === "quickCapture" ? current.addMaterial.accelerator : current.quickCapture.accelerator;
+      if (combo === other) {
+        setConflict({ target, message: "与另一个全局快捷键相同" });
+        return;
+      }
+      const hit = commandRegistry.conflictWith(combo, "");
+      if (hit) {
+        setConflict({ target, message: `与应用内「${hit.title}」冲突` });
+        return;
+      }
+      setConflict(null);
+      const next: GlobalShortcutsConfig =
+        target === "quickCapture"
+          ? { ...current, quickCapture: { ...current.quickCapture, accelerator: combo } }
+          : { ...current, addMaterial: { ...current.addMaterial, accelerator: combo } };
+      void persist(next, target);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [capturing]);
+
+  const capture = shortcutStateLabel(status?.quickCapture);
+  const add = shortcutStateLabel(status?.addMaterial);
+
+  function renderKeyButton(target: GlobalTarget, enabled: boolean) {
+    const binding = target === "quickCapture" ? cfg.quickCapture.accelerator : cfg.addMaterial.accelerator;
+    const isDefault =
+      binding ===
+      (target === "quickCapture"
+        ? DEFAULT_GLOBAL_SHORTCUTS.quickCapture.accelerator
+        : DEFAULT_GLOBAL_SHORTCUTS.addMaterial.accelerator);
+    const reset = () => {
+      const current = cfgRef.current;
+      const next: GlobalShortcutsConfig =
+        target === "quickCapture"
+          ? { ...current, quickCapture: { ...current.quickCapture, accelerator: DEFAULT_GLOBAL_SHORTCUTS.quickCapture.accelerator } }
+          : { ...current, addMaterial: { ...current.addMaterial, accelerator: DEFAULT_GLOBAL_SHORTCUTS.addMaterial.accelerator } };
+      setConflict(null);
+      void persist(next, target);
+    };
+    return (
+      <>
+        <button
+          className={`kb-key mono${capturing === target ? " capturing" : ""}`}
+          title={enabled ? "点击后按下新组合键" : "该快捷键已关闭"}
+          disabled={!enabled}
+          onClick={() => {
+            setConflict(null);
+            setCapturing(target);
+          }}
+        >
+          {capturing === target ? "按下新键…" : binding}
+        </button>
+        <button className="btn btn-secondary btn-sm kb-reset" disabled={isDefault} title="恢复默认" onClick={reset}>
+          恢复
+        </button>
+      </>
+    );
+  }
+
+  return (
+    <section className="settings-section" id="sec-global">
+      <h3>全局快捷键</h3>
+      <p className="form-hint">
+        全局快捷键在软件没有焦点时也生效（软件需处于运行状态；可勾选「随系统启动」）。点击键位框后按下新组合键（Esc
+        取消）；与系统或其它软件冲突时下方会提示「被占用」，换一个组合即可。
+      </p>
+
+      <div className="kb-group">
+        <div className="kb-group-label mono">全局</div>
+
+        <div className="kb-row">
+          <label className="kb-row-title gs-check">
+            <input
+              type="checkbox"
+              checked={cfg.quickCapture.enabled}
+              onChange={(e) =>
+                void persist({ ...cfg, quickCapture: { ...cfg.quickCapture, enabled: e.target.checked } })
+              }
+            />
+            快速记录（随想随记，弹出小窗）
+          </label>
+          {conflict?.target === "quickCapture" && <span className="kb-conflict">{conflict.message}</span>}
+          {renderKeyButton("quickCapture", cfg.quickCapture.enabled)}
+          <span className={`gs-state mono${capture.cls}`}>{capture.text}</span>
+        </div>
+
+        <label className="gs-check gs-check-sub">
+          <input
+            type="checkbox"
+            checked={cfg.quickCapture.hideOnBlur}
+            onChange={(e) =>
+              void persist({ ...cfg, quickCapture: { ...cfg.quickCapture, hideOnBlur: e.target.checked } })
+            }
+          />
+          失焦时自动隐藏窗口（内容已即时保存；不勾选则需按 Esc 关闭）
+        </label>
+
+        <div className="kb-row">
+          <label className="kb-row-title gs-check">
+            <input
+              type="checkbox"
+              checked={cfg.addMaterial.enabled}
+              onChange={(e) => void persist({ ...cfg, addMaterial: { ...cfg.addMaterial, enabled: e.target.checked } })}
+            />
+            添加学习材料（弹出「添加书籍」）
+          </label>
+          {conflict?.target === "addMaterial" && <span className="kb-conflict">{conflict.message}</span>}
+          {renderKeyButton("addMaterial", cfg.addMaterial.enabled)}
+          <span className={`gs-state mono${add.cls}`}>{add.text}</span>
+        </div>
+
+        <div className="kb-row">
+          <label className="kb-row-title gs-check">
+            <input
+              type="checkbox"
+              checked={cfg.autoLaunch}
+              onChange={(e) => void persist({ ...cfg, autoLaunch: e.target.checked })}
+            />
+            随系统启动（开机自动运行，保证全局快捷键随时可用）
+          </label>
+          <span className={`gs-state mono${status?.autoLaunch ? " on" : ""}`}>
+            {status?.autoLaunch ? "已开启" : "已关闭"}
+          </span>
+        </div>
+      </div>
+
+      <div className="settings-row" style={{ marginTop: "var(--sp-3)" }}>
+        <button className="btn btn-outline btn-sm" onClick={() => void shortcutsApi.toggleCapture()}>
+          试一下快速记录
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export default function SettingsPanel({
   theme,
   onThemeChange,
@@ -989,11 +1745,17 @@ export default function SettingsPanel({
   const sections = [
     { id: "appearance", label: "外观" },
     { id: "reader", label: "阅读" },
-    { id: "dashboard", label: "统计仪表盘" },
+    // 统计仪表盘锚点＝sec-widgets（仪表盘区块由 sec-widgets + sec-dashreset 两节组成；
+    // v45 修复：原 id "dashboard" 无对应元素，scrollIntoView 静默失效——点击不跳转）
+    { id: "widgets", label: "统计仪表盘" },
     { id: "learningday", label: "学习日" },
+    { id: "siblingbury", label: "同源卡延后" },
     { id: "ai", label: "AI 服务" },
+    { id: "dict", label: "词典/下载" },
+    { id: "memory", label: "用户记忆" },
     { id: "fsrs", label: "FSRS 优化" },
     { id: "backup", label: "备份与恢复" },
+    { id: "global", label: "全局快捷键" },
     { id: "shortcuts", label: "快捷键" }
   ];
 
@@ -1068,11 +1830,19 @@ export default function SettingsPanel({
 
             <LearningDaySection />
 
+            <SiblingBurySection />
+
             <AISection />
+
+            <DictSection />
+
+            <MemorySection />
 
             <FSRSSection />
 
             <BackupSection />
+
+            <GlobalShortcutsSection />
 
             <ShortcutsSection />
           </div>

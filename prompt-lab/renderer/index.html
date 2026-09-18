@@ -65,8 +65,15 @@
             <option value="card-wording">措辞优化</option>
             <option value="card-basic">前置知识卡</option>
             <option value="card-occlusion">图片材料 → 图片挖空</option>
+            <optgroup label="LKM 知识模型（v43 K2-B）">
+              <option value="material-difficulty">材料难度画像</option>
+              <option value="knowledge-probe">维度探针</option>
+              <option value="frontier-explain">推荐解释</option>
+              <option value="structure-analogy">结构类比</option>
+            </optgroup>
           </select>
           <label class="source-field">来源标记 <input id="sourceTitle" type="text" placeholder="书名/章节（可空）" /></label>
+          <label class="source-field">KP/候选 id 白名单 <input id="idWhitelist" type="text" placeholder="kp-demo-1（逗号分隔，LKM 用）" disabled /></label>
         </div>
         <textarea id="materialText" class="material-text" placeholder="粘贴待制卡的材料文本；图片材料点右侧按钮选择图片"></textarea>
         <div class="run-row">
@@ -74,6 +81,9 @@
           <button id="pickImgBtn" class="btn btn-outline btn-sm">选择图片材料</button>
           <span id="imgName" class="mono"></span>
           <span id="statusLine" class="mono status-line"></span>
+          <span class="spacer"></span>
+          <input id="dispersionN" type="number" value="3" min="2" max="10" style="width:3.5em" disabled />
+          <button id="dispersionBtn" class="btn btn-outline btn-sm" disabled title="同材料 ×N 次运行，统计封闭字段（维度/手法/档位）不一致率——超阈提示收紧锚语或降档（§4.6）">×N 次离散度</button>
         </div>
         <div id="routeLine" class="mono route-line"></div>
         <div id="errorLine" class="error-line hidden"></div>
@@ -90,6 +100,7 @@
     </main>
 
     <script src="../vendor/cards.js"></script>
+    <script src="../vendor/kpScopes.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

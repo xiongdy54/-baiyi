@@ -32,6 +32,7 @@ function resolvePaths(opts = {}) {
     settingsFile: opts.settingsFile || path.join(dataDir, "settings.json"),
     aiConfigFile: opts.aiConfigFile || path.join(dataDir, "ai-config.json"),
     assetsDir: opts.assetsDir || path.join(dataDir, "assets"),
+    memoryDir: opts.memoryDir || path.join(dataDir, "memory"),
     stagingDir: opts.stagingDir || path.join(dataDir, "restore-staging"),
     markerFile: opts.markerFile || path.join(dataDir, "restore-pending.json")
   };
@@ -121,6 +122,14 @@ async function createBackup(opts = {}) {
           compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE"
         });
         meta.assetFiles++;
+      }
+    }
+    // v45（M14-UM1，§4.18-15）：用户记忆文件树随备份（记忆真源在 memory/，非 DB）
+    meta.memoryFiles = 0;
+    if (fs.existsSync(p.memoryDir)) {
+      for (const f of walkFiles(p.memoryDir)) {
+        zip.file(`memory/${f.rel}`, fs.readFileSync(f.full), { compression: "DEFLATE" });
+        meta.memoryFiles++;
       }
     }
     zip.file("backup-meta.json", JSON.stringify(meta, null, 2), { compression: "DEFLATE" });
@@ -301,6 +310,13 @@ function applyPendingRestore(opts = {}) {
     fs.rmSync(p.assetsDir, { recursive: true, force: true });
     fs.renameSync(stagedAssets, p.assetsDir);
     restored.push("assets");
+  }
+  // v45（M14-UM1，§4.18-15）：记忆文件树随备份恢复（整体换入，不合并）
+  const stagedMemory = path.join(p.stagingDir, "memory");
+  if (fs.existsSync(stagedMemory)) {
+    fs.rmSync(p.memoryDir, { recursive: true, force: true });
+    fs.renameSync(stagedMemory, p.memoryDir);
+    restored.push("memory");
   }
   const stagedSettings = path.join(p.stagingDir, "settings.json");
   if (fs.existsSync(stagedSettings)) {

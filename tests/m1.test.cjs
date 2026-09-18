@@ -1,7 +1,9 @@
-// M1 制卡体系升级回归测试（v15）
+// M1 制卡体系升级回归测试（v15；v31 增 M1-11/12）
 // 覆盖：材料类型路由（M1.2）、CardLint L11 语义修正（M1.1b）、cloze 契约不回归（Non-Goal 验证）、
-//       翻转问答卡（M1.1a）的字段流转约束
+//       翻转问答卡（M1.1a）的字段流转约束、CardLint L16 宽容度标注（v31 缺口 L-C；L-A 数字密度经用户反馈取消）、
+//       提示词基线 v6（取消 G9、文学模板接上、G6/G7 对齐）
 // 运行：node tests/m1.test.cjs（依赖 tests/m1.cards.bundle.cjs，由 esbuild 打包 src/lib/cards.ts 生成）
+// 重新打包：node_modules/.bin/esbuild src/lib/cards.ts --bundle --platform=node --format=cjs --outfile=tests/m1.cards.bundle.cjs
 const cards = require("./m1.cards.bundle.cjs");
 
 let pass = 0, fail = 0;
@@ -160,6 +162,67 @@ check("文本去重", cards.buildContrastCandidates([
 ], "").length === 1, 1, "dedupe");
 check("逐条截断 ≤50 字", cards.buildContrastCandidates([{ id: "x", cardType: "qa", frontMarkdown: "长".repeat(80), noteText: "长".repeat(80), backMarkdown: "" }], "").every((t) => t.length <= 50), true, "≤50");
 check("总量 cap=500", cards.buildContrastCandidates(Array.from({ length: 800 }, (_, i) => ({ id: String(i), cardType: "qa", frontMarkdown: "卡" + i, noteText: "卡" + i, backMarkdown: "" })), "").length === 500, 500, "cap");
+
+console.log("== M1-11 CardLint L16 宽容度标注（v31：M1 缺口 L-C 落地；L-A 数字密度经用户反馈取消） ==");
+// L16（=报告 L-C，对应 R2/R5 的 G7）：集合/开放式问法必须给出可字面判定的合格线
+const tolMissing = cards.lintCard({ front: "哲学: 儒家有哪些核心德目？", back: "仁、义、礼、智、信", cardType: "qa" });
+check("L16 集合问法缺合格线告警(warn)", tolMissing.some((i) => i.ruleId === "L16" && i.severity === "warn"), "L16/warn", tolMissing);
+const tolOk = cards.lintCard({ front: "哲学: 儒家核心德目至少回忆三种？", back: "仁、义、礼", cardType: "qa" });
+check("L16 已写合格线（至少）不告警", !tolOk.some((i) => i.ruleId === "L16"), "无 L16", tolOk);
+const tolNa = cards.lintCard({ front: "统计: 中位数是什么？", back: "中间位置的数", cardType: "qa" });
+check("L16 非集合问法不告警", !tolNa.some((i) => i.ruleId === "L16"), "无 L16", tolNa);
+// L15 已取消（用户 2026-09-13 反馈「≥2 个数字即不合格」过严）：确认不再产出 L15
+const noL15 = cards.lintCard({ front: "经济: GDP 增速从 3.2% 升到 5.1%？", back: "两个数字", cardType: "qa" });
+check("L15 已删除：多数字卡不再触发数字密度告警", !noL15.some((i) => i.ruleId === "L15"), "无 L15", noL15);
+
+console.log("== M1-12 提示词基线 v7（v31 定基线；v46/UM-2 组装 R20 记忆情境接地段） ==");
+const fs = require("fs");
+const path = require("path");
+const prompts = require("../electron/prompts");
+check("v7 基线含 R20 记忆接地契约与 situationRequired 注册表（card-generation/card-mnemonic/knowledge-probe=true，journal-insight 不在表）",
+  prompts.CARD_GEN_PROMPT.includes("记忆情境接地（R20") && prompts.CARD_GEN_PROMPT.includes("memoryRef")
+    && prompts.CARD_MNEMONIC_PROMPT.includes("memoryRef")
+    && prompts.SITUATION_REQUIRED_SCOPES["card-generation"] === true
+    && prompts.SITUATION_REQUIRED_SCOPES["card-mnemonic"] === true
+    && prompts.SITUATION_REQUIRED_SCOPES["knowledge-probe"] === true
+    && !prompts.SITUATION_REQUIRED_SCOPES["journal-insight"],
+  "含 R20 契约与注册表", false);
+check("v7 排除 scope 注明不适用（vocab/literature 均含 R20 不适用段）",
+  prompts.CARD_VOCAB_PROMPT.includes("本卡型不适用") && prompts.CARD_LITERATURE_PROMPT.includes("本卡型不适用"),
+  "含不适用段", false);
+check("主制卡提示词已无 G9 退出红线（取消「一张也别产」）",
+  !prompts.CARD_GEN_PROMPT.includes("退出红线") && !prompts.CARD_GEN_PROMPT.includes("一张也别产"),
+  "无 G9", prompts.CARD_GEN_PROMPT.includes("退出红线"));
+check("改为「值得记才做、可以少做但不做空」且保留下限",
+  prompts.CARD_GEN_PROMPT.includes("不做空") && prompts.CARD_GEN_PROMPT.includes("至少 2 张"),
+  "含不做空+下限", false);
+check("R18 已取消数字硬性门槛（无 ≥2 计数、无 L15 引用）",
+  !prompts.CARD_GEN_PROMPT.includes("≥2 个阿拉伯数字") && !prompts.CARD_GEN_PROMPT.includes("L15"),
+  "无硬性门槛", false);
+check("R5 合格线要求可字面判定措辞（与 L16 对齐）",
+  prompts.CARD_GEN_PROMPT.includes("可字面判定") && prompts.CARD_GEN_PROMPT.includes("L16"),
+  "含可字面判定+L16", false);
+check("R19 归属措辞要求可字面识别（含归属动词+人名）",
+  prompts.CARD_GEN_PROMPT.includes("可字面识别") && prompts.CARD_GEN_PROMPT.includes("归属动词"),
+  "含可字面识别", false);
+check("文学专用模板已存在且区别于序列模板",
+  prompts.CARD_LITERATURE_PROMPT.includes("L1 续写卡为骨架") && prompts.CARD_LITERATURE_PROMPT !== prompts.CARD_SEQ_PROMPT,
+  "含 L1 且 ≠seq", false);
+// 死代码回归防护：db.js 播种 card-literature 必须引用专用文学模板（v31 修复）
+const dbSrc = fs.readFileSync(path.join(__dirname, "..", "electron", "db.js"), "utf8");
+check("db.js 导入 CARD_LITERATURE_PROMPT", /CARD_LITERATURE_PROMPT,/.test(dbSrc), "已导入", false);
+check("db.js 播种 card-literature 使用专用文学模板（防死代码回归）",
+  /seedScope\("card-literature"[^)]*CARD_LITERATURE_PROMPT/.test(dbSrc), "引用 CARD_LITERATURE_PROMPT", false);
+check("db.js 不再用 CARD_SEQ_PROMPT 占位 card-literature",
+  !/seedV5\("card-literature"[^)]*CARD_SEQ_PROMPT/.test(dbSrc) && !/'card-literature', '文学\/诗歌背诵 v1/.test(dbSrc),
+  "无序列占位", false);
+
+console.log("== M1-13 词汇路由（v32 M7：纯单词形 → card-vocab，不误伤概念短句） ==");
+check("单个英文词 → card-vocab", cards.detectMaterialType("abandon").scope === "card-vocab", "card-vocab", cards.detectMaterialType("abandon").scope);
+check("日语单词 → card-vocab", cards.detectMaterialType("見逃す").scope === "card-vocab", "card-vocab", cards.detectMaterialType("見逃す").scope);
+check("概念短句仍走 concept（M1 回归保护）", cards.detectMaterialType("中位数是把一组数据排序后位于中间位置的数，它对极端值不敏感。").scope === "card-generation", "card-generation", true);
+check("公式短句仍走 formula", cards.detectMaterialType("质能方程 E=mc^2 揭示了质量与能量的公式关系").scope === "card-formula", "card-formula", true);
+check("映射表含词汇 → card-vocab/单词四卡", cards.MATERIAL_ROUTES.vocab.scope === "card-vocab" && cards.MATERIAL_ROUTES.vocab.defaultForm === "单词四卡", "card-vocab/单词四卡", cards.MATERIAL_ROUTES.vocab);
 
 console.log(`\nM1 完成：${pass} 通过 / ${fail} 失败`);
 process.exit(fail > 0 ? 1 : 0);

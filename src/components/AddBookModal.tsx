@@ -1,16 +1,18 @@
 import { useState } from "react";
-import { libraryApi } from "../lib/library";
+import { libraryApi, BOOK_LANGUAGES } from "../lib/library";
 import { importMany } from "../lib/importRouter";
 import { eventBus } from "../lib/eventbus";
 
 interface Props {
-  onSave: (title: string, markdown: string) => Promise<void>;
+  onSave: (title: string, markdown: string, lang: string) => Promise<void>;
   onClose: () => void;
 }
 
 export default function AddBookModal({ onSave, onClose }: Props) {
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
+  // v38（D35）：粘贴书的语言（留空=未知，查词时靠句子语境启发）；批量导入的书到书架卡片上设
+  const [lang, setLang] = useState("");
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   // M6-3（v30，D27）：批量导入进度（第 done/total 个）
@@ -21,7 +23,7 @@ export default function AddBookModal({ onSave, onClose }: Props) {
   async function handleSave() {
     if (!canSave) return;
     setSaving(true);
-    await onSave(title, markdown);
+    await onSave(title, markdown, lang);
     setSaving(false);
   }
 
@@ -78,6 +80,14 @@ export default function AddBookModal({ onSave, onClose }: Props) {
             placeholder="输入书名"
             autoFocus
           />
+        </div>
+        <div className="form-field">
+          <label>语言（可选，查词时按它路由词典；留空则查词时自动识别）</label>
+          <select value={lang} onChange={(e) => setLang(e.target.value)}>
+            {BOOK_LANGUAGES.map((l) => (
+              <option key={l.value || "unknown"} value={l.value}>{l.label}</option>
+            ))}
+          </select>
         </div>
         <div className="form-field">
           <label>正文（粘贴文本，支持 Markdown）</label>

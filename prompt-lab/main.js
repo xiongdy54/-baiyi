@@ -1,5 +1,5 @@
 // 提示词测试台（M1.3，v15）—— 独立最小 Electron 应用。
-// 复用主软件的 ai.js（AI 网关）与 prompts.js（v3 基线）；提示词编辑只落在测试台自己的
+// 复用主软件的 ai.js（AI 网关）与 prompts.js（当前基线）；提示词编辑只落在测试台自己的
 // prompts.local.json，绝不写回主软件的 prompt_templates 表——并回须由用户在主软件中播种新版本。
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
@@ -10,8 +10,8 @@ app.setName("prompt-lab");
 
 const { getAIConfig, setAIConfig, chatStream } = require("../electron/ai");
 const P = require("../electron/prompts");
-// v4 候选补丁（调优闭环「AI 改测试台」产出）：G1-G9 增强 + card-literature 文学背诵候选。
-// 仅存在于测试台；经用户实测确认后才会并回主软件（播种 prompt_templates v4）。
+// v31 起：原 v4 候选已并回主软件，测试台改为「基线直引」（见 prompts-draft.js）；
+// 调优时由 AI 把改动写成 prompts-draft.js 的显式覆盖并 bump DRAFT_TAG。
 const { DRAFT_TAG, DRAFT_SCOPES } = require("./prompts-draft");
 
 const BASELINE_SCOPES = {
@@ -19,14 +19,27 @@ const BASELINE_SCOPES = {
   "card-formula": { name: "公式分解", content: P.CARD_FORMULA_PROMPT },
   "card-seq": { name: "序列/背诵", content: P.CARD_SEQ_PROMPT },
   "card-enum": { name: "枚举拆解", content: P.CARD_ENUM_PROMPT },
-  "card-literature": { name: "文学/诗歌背诵", content: P.CARD_SEQ_PROMPT },
+  "card-literature": { name: "文学/诗歌背诵", content: P.CARD_LITERATURE_PROMPT },
   "card-mnemonic": { name: "助记双卡", content: P.CARD_MNEMONIC_PROMPT },
   "card-contrast": { name: "对比卡", content: P.CARD_CONTRAST_PROMPT },
   "card-wording": { name: "措辞优化", content: P.CARD_WORDING_PROMPT },
   "card-basic": { name: "前置知识卡", content: P.CARD_BASIC_PROMPT },
+  "card-vocab": { name: "单词制卡", content: P.CARD_VOCAB_PROMPT },
   "card-occlusion": { name: "图片挖空", content: P.CARD_OCCLUSION_PROMPT },
   "reader-explain": { name: "阅读解释", content: P.READER_EXPLAIN_PROMPT },
-  "leech-rescue": { name: "难点诊断", content: P.LEECH_RESCUE_PROMPT }
+  "leech-rescue": { name: "难点诊断", content: P.LEECH_RESCUE_PROMPT },
+  // v40/v41/v43（M8-B / K2-A / K2-B）：洞察与 LKM 知识模型 scope 基线直引。
+  // 补记：此前的 journal-insight / knowledge-extraction / knowledge-relation 只进了 DRAFT_SCOPES，
+  // 而本地表自动补齐只遍历 BASELINE_SCOPES——它们在测试台里一直不可见，v43 一并补上。
+  "journal-insight": { name: "日记洞察", content: P.JOURNAL_INSIGHT_PROMPT },
+  "knowledge-extraction": { name: "知识点抽取归一", content: P.KNOWLEDGE_EXTRACTION_PROMPT },
+  "knowledge-relation": { name: "知识关系抽取", content: P.KNOWLEDGE_RELATION_PROMPT },
+  "material-difficulty": { name: "材料难度画像", content: P.MATERIAL_DIFFICULTY_PROMPT },
+  "knowledge-probe": { name: "维度探针", content: P.KNOWLEDGE_PROBE_PROMPT },
+  "frontier-explain": { name: "推荐解释", content: P.FRONTIER_EXPLAIN_PROMPT },
+  "structure-analogy": { name: "结构类比", content: P.STRUCTURE_ANALOGY_PROMPT },
+  // v45（M14-UM1，D39）：用户记忆整理（摄入轮 + 周期整理轮共用一套契约）
+  "user-memory": { name: "用户记忆整理", content: P.USER_MEMORY_PROMPT }
 };
 
 function promptsFile() {

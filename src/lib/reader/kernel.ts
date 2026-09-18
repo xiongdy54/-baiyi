@@ -49,6 +49,17 @@ export interface ReaderImageRef {
 
 export type ReaderTheme = "paper" | "sepia" | "dark" | "custom";
 
+/** 图片定位查询（v35）：按 alt/周边文字在正文中找回原图 */
+export interface ImageLocateQuery {
+  alt?: string;
+  contextText?: string;
+}
+
+/** 图片定位命中（v35）：宿主视口坐标框，供叠加图内区域高亮 */
+export interface ImageLocateHit {
+  rect: ReaderRect;
+}
+
 export interface ReaderAppearance {
   theme: ReaderTheme;
   fontFamily?: string;
@@ -103,6 +114,8 @@ export interface ReaderKernel {
   getTOC(): ReaderTocItem[];
   /** 当前选区语义数据（制卡管线唯一入口）；无选区返回 null */
   getSelection(): ReaderSelection | null;
+  /** 正文图片定位（v35）：按 alt/周边文字找回原图并滚动到可见；命中返回宿主坐标框，未命中返回 null */
+  locateImage?(query: ImageLocateQuery): Promise<ImageLocateHit | null>;
   /** 选区几何（宿主视口坐标）；仅供浮动菜单定位，非语义数据 */
   getSelectionGeometry(): ReaderRect | null;
   /** 清除当前选区（选区菜单动作完成后由壳层调用） */

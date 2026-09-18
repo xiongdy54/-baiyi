@@ -37514,6 +37514,25 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
       getTOC() {
         return tocCache.map((t) => ({ ...t }));
       },
+      // v47（M15，§4.19-3①）：章节文本抽取——逐页 getTextContent（确定性，与全文搜索同路径）
+      async getSectionText(start, end) {
+        try {
+          if (!doc) return "";
+          const from = Math.max(0, Number(start?.pageIndex ?? 0));
+          const to = end?.pageIndex != null ? Math.max(from + 1, Number(end.pageIndex)) : doc.numPages;
+          const parts = [];
+          for (let i = from; i < Math.min(to, doc.numPages); i++) {
+            try {
+              const tc = await doc.getPage(i + 1).then((p) => p.getTextContent());
+              parts.push(tc.items.map((it) => it.str).join(" "));
+            } catch {
+            }
+          }
+          return parts.join("\n").replace(/\s+/g, " ").trim();
+        } catch {
+          return "";
+        }
+      },
       getSelection() {
         const sel = window.getSelection();
         if (!sel || sel.rangeCount === 0) return null;

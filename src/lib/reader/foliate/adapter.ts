@@ -10,6 +10,8 @@
 import "../../../../vendor/foliate-js/view.js";
 import type {
   BookSource,
+  ImageLocateHit,
+  ImageLocateQuery,
   LinkInfo,
   ReaderAppearance,
   ReaderImageRef,
@@ -94,6 +96,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   view.style.width = "100%";
   view.style.height = "100%";
   host.appendChild(view);
+
+  const normWs = (s: string) => (s || "").replace(/\s+/g, " ").trim();
 
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
@@ -186,7 +190,10 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       r.setAttribute("flow", mode.flow === "scrolled" ? "scrolled" : "paginated");
       r.setAttribute("max-column-count", mode.flow === "paged" && mode.spread ? "2" : "1");
     }
-    if (a?.margin != null) r.setAttribute("margin", String(a.margin));
+    // v37：margin 必须带 px 单位——paginator 把属性值直接写进 CSS 变量 --_margin，
+    // 无单位数字会让 minmax(var(--_margin),1fr) 整条 grid-template-rows 失效，
+    // 分页模式页面高度塌缩到内容自适应高度且形成自锁回路（实测每页只剩 ~318px）
+    if (a?.margin != null) r.setAttribute("margin", `${a.margin}px`);
   };
 
   const applyToHost = (a: ReaderAppearance) => {
@@ -307,6 +314,41 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       const r = view.renderer;
       if (!r) return null;
       return getSelectionFromContents(view, r.getContents());
+    },
+
+    // v35 正文图片定位：按 alt/周边文字在各章节 DOM 找回原图并滚到可见，返回宿主坐标框。
+    // 引擎 iframe 对宿主跨源，DOM 操作只能在本 adapter 内做（kernel.locateImage 契约）。
+    async locateImage(query: ImageLocateQuery): Promise<ImageLocateHit | null> {
+      const alt = normWs(query.alt || "");
+      const ctxKey = normWs(query.contextText || "").slice(0, 40);
+      if (!alt && !ctxKey) return null;
+      const candidates: { img: HTMLImageElement; doc: Document; score: number }[] = [];
+      docs.forEach((doc) => {
+        (Array.from(doc.querySelectorAll("img")) as HTMLImageElement[]).forEach((img) => {
+          let score = 0;
+          const imgAlt = normWs(img.getAttribute("alt") || "");
+          if (alt && imgAlt && (imgAlt === alt || imgAlt.includes(alt) || alt.includes(imgAlt))) score += 4;
+          if (ctxKey) {
+            const around = normWs(extractImageContext(doc, img) || "");
+            if (around && around.includes(ctxKey)) score += 2;
+          }
+          if (score > 0) candidates.push({ img, doc, score });
+        });
+      });
+      if (candidates.length === 0) return null;
+      candidates.sort((a, b) => b.score - a.score);
+      const { img, doc } = candidates[0];
+      try {
+        img.scrollIntoView({ block: "center" });
+      } catch {
+        return null;
+      }
+      // 等排版/滚动稳定后再取宿主坐标（分页模式下 foliate 会重排）
+      await new Promise((r) => window.setTimeout(r, 400));
+      const r = img.getBoundingClientRect();
+      if (!r || (r.width === 0 && r.height === 0)) return null;
+      const topLeft = pointerToHost(doc, r.left, r.top);
+      return { rect: { x: topLeft.x, y: topLeft.y, width: r.width, height: r.height } };
     },
 
     getSelectionGeometry(): ReaderRect | null {

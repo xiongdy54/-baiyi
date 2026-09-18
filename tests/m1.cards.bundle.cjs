@@ -3,6 +3,9 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -17,11 +20,59 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// src/lib/eventbus.ts
+var eventbus_exports = {};
+__export(eventbus_exports, {
+  ALLOWED_EVENTS: () => ALLOWED_EVENTS,
+  eventBus: () => eventBus
+});
+var ALLOWED_EVENTS, map, eventBus;
+var init_eventbus = __esm({
+  "src/lib/eventbus.ts"() {
+    "use strict";
+    ALLOWED_EVENTS = [
+      "stats/updated",
+      "library/changed",
+      "todo/changed",
+      "pomodoro/tick",
+      "pomodoro/phaseChange",
+      "theme/changed",
+      "settings/changed",
+      "ai/stream",
+      "workflow/changed",
+      "cards/changed",
+      "ai/batchDone",
+      "leech/detected",
+      "journal/changed",
+      "insight/changed",
+      "memory/changed"
+    ];
+    map = /* @__PURE__ */ new Map();
+    eventBus = {
+      on(event, fn) {
+        if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
+        let set = map.get(event);
+        if (!set) {
+          set = /* @__PURE__ */ new Set();
+          map.set(event, set);
+        }
+        set.add(fn);
+        return () => set.delete(fn);
+      },
+      emit(event, payload) {
+        if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
+        map.get(event)?.forEach((fn) => fn(payload));
+      }
+    };
+  }
+});
+
 // src/lib/cards.ts
 var cards_exports = {};
 __export(cards_exports, {
   MATERIAL_ROUTES: () => MATERIAL_ROUTES,
   buildContrastCandidates: () => buildContrastCandidates,
+  burySourceTextLimit: () => burySourceTextLimit,
   cardGenerator: () => cardGenerator,
   cardsApi: () => cardsApi,
   createAcceptedCard: () => createAcceptedCard,
@@ -32,9 +83,12 @@ __export(cards_exports, {
   extractClozeAnswers: () => extractClozeAnswers,
   extractJson: () => extractJson,
   generateContrastDrafts: () => generateContrastDrafts,
+  generateVocabDrafts: () => generateVocabDrafts,
+  hasSourceAnchor: () => hasSourceAnchor,
   lintCard: () => lintCard,
   parseCloze: () => parseCloze,
   parseFollowUps: () => parseFollowUps,
+  siblingKeyFor: () => siblingKeyFor,
   similaritySearch: () => similaritySearch
 });
 module.exports = __toCommonJS(cards_exports);
@@ -97,6 +151,150 @@ var aiGateway = {
     });
   }
 };
+
+// src/lib/knowledge.ts
+var emptyList = { points: [], total: 0 };
+var knowledgeApi = {
+  async listPoints(filter = {}) {
+    if (!window.knowledgeAPI) return emptyList;
+    return await window.knowledgeAPI.listPoints(filter) || emptyList;
+  },
+  async getPoint(id) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.getPoint(id) || null;
+  },
+  async createPoint(payload) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.createPoint(payload) || null;
+  },
+  async updatePoint(id, patch) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.updatePoint(id, patch) || null;
+  },
+  async mergePoints(sourceId, targetId) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.mergePoints(sourceId, targetId);
+  },
+  async unmergePoint(id) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.unmergePoint(id) || null;
+  },
+  async listRelations(filter = {}) {
+    if (!window.knowledgeAPI) return [];
+    return (await window.knowledgeAPI.listRelations(filter))?.relations || [];
+  },
+  async createRelation(payload) {
+    if (!window.knowledgeAPI) throw new Error("knowledgeAPI \u4E0D\u53EF\u7528");
+    return await window.knowledgeAPI.createRelation(payload);
+  },
+  async deleteRelation(id) {
+    if (!window.knowledgeAPI) return false;
+    return await window.knowledgeAPI.deleteRelation(id);
+  },
+  async listRefs(kpId) {
+    if (!window.knowledgeAPI) return [];
+    return await window.knowledgeAPI.listRefs(kpId) || [];
+  },
+  async createRef(payload) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.createRef(payload) || null;
+  },
+  async deleteRef(id) {
+    if (!window.knowledgeAPI) return false;
+    return await window.knowledgeAPI.deleteRef(id);
+  },
+  async listProposals(filter = {}) {
+    if (!window.knowledgeAPI) return [];
+    return (await window.knowledgeAPI.listProposals(filter))?.proposals || [];
+  },
+  async resolveProposal(id, accept, overridePayload) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.resolveProposal(id, accept, overridePayload);
+  },
+  async migrationSuggestions() {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.migrationSuggestions() || null;
+  },
+  // ---- v41（K2-A，D38）：AI 抽取归一与关系 ----
+  async kpClusters() {
+    if (!window.knowledgeAPI?.kpClusters) return null;
+    return await window.knowledgeAPI.kpClusters() || null;
+  },
+  async kpExtractPrepare(opts = {}) {
+    if (!window.knowledgeAPI?.kpExtractPrepare) return null;
+    return await window.knowledgeAPI.kpExtractPrepare(opts) || null;
+  },
+  async kpExtractApply(rawExtraction, rawRelations) {
+    if (!window.knowledgeAPI?.kpExtractApply) return null;
+    return await window.knowledgeAPI.kpExtractApply(rawExtraction, rawRelations) || null;
+  },
+  async acceptAllPending() {
+    if (!window.knowledgeAPI?.acceptAllPending) return null;
+    return await window.knowledgeAPI.acceptAllPending();
+  },
+  // ---- v43（K2-B）：KnowledgeLint K4/K7/K8 ----
+  async lint() {
+    if (!window.knowledgeAPI?.lint) return [];
+    return await window.knowledgeAPI.lint() || [];
+  }
+};
+
+// src/lib/kpExtract.ts
+async function runKpAiProcessing(opts = {}) {
+  if (!window.knowledgeAPI?.kpExtractPrepare) return { skipped: "unsupported", clusterCount: 0, summary: null };
+  const prep = await knowledgeApi.kpExtractPrepare(opts);
+  if (!prep || prep.clusterCount === 0) return { skipped: "no-clusters", clusterCount: 0, summary: null };
+  const cfg = await aiGateway.getConfig();
+  if (!cfg?.hasKey) return { skipped: "no-key", clusterCount: prep.clusterCount, summary: null };
+  const tplE = await window.promptsAPI?.get("knowledge-extraction");
+  if (!tplE?.content) return { skipped: "no-prompt", clusterCount: prep.clusterCount, summary: null };
+  try {
+    const rawE = await aiGateway.chat(
+      [
+        { role: "system", content: tplE.content },
+        { role: "user", content: prep.extractionInput }
+      ],
+      void 0,
+      0.1
+    );
+    let rawR = "";
+    if (prep.relationInput) {
+      const tplR = await window.promptsAPI?.get("knowledge-relation");
+      if (tplR?.content) {
+        try {
+          rawR = await aiGateway.chat(
+            [
+              { role: "system", content: tplR.content },
+              { role: "user", content: prep.relationInput }
+            ],
+            void 0,
+            0.1
+          );
+        } catch {
+          rawR = "";
+        }
+      }
+    }
+    const summary = await knowledgeApi.kpExtractApply(rawE, rawR);
+    return { skipped: null, clusterCount: prep.clusterCount, summary };
+  } catch (err) {
+    return { skipped: null, clusterCount: prep.clusterCount, summary: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+function autoQueueKpAiProcessing(sources) {
+  const valid = (sources || []).filter((s) => s && String(s.knowledgePointId || "").trim());
+  if (!valid.length) return;
+  const seen = /* @__PURE__ */ new Set();
+  const uniq = [];
+  for (const s of valid) {
+    const key = `${s.genBatchId || ""}|${s.documentId || ""}|${s.knowledgePointId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniq.push(s);
+  }
+  void runKpAiProcessing({ sources: uniq }).catch(() => {
+  });
+}
 
 // src/lib/occlusion.ts
 var clampPct = (v) => {
@@ -162,6 +360,38 @@ function normalizeShape(shape) {
   return { ord: shape.ord, kind: "rect", ...shapeBBox(shape) };
 }
 
+// src/lib/settings.ts
+var memoryFallback = /* @__PURE__ */ new Map();
+async function emitChanged(scope, key) {
+  try {
+    const { eventBus: eventBus2 } = await Promise.resolve().then(() => (init_eventbus(), eventbus_exports));
+    eventBus2.emit("settings/changed", { scope, key });
+  } catch {
+  }
+}
+var settingsStore = {
+  async get(scope, key, defaultValue) {
+    try {
+      if (!window.settingsAPI) {
+        return memoryFallback.get(`${scope}.${key}`) ?? defaultValue;
+      }
+      const v = await window.settingsAPI.get(scope, key);
+      return v ?? defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  },
+  async set(scope, key, value) {
+    if (!window.settingsAPI) {
+      memoryFallback.set(`${scope}.${key}`, value);
+      void emitChanged(scope, key);
+      return;
+    }
+    await window.settingsAPI.set(scope, key, value);
+    void emitChanged(scope, key);
+  }
+};
+
 // src/lib/cards.ts
 function parseCloze(text) {
   const re = /\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g;
@@ -214,7 +444,8 @@ var MATERIAL_ROUTES = {
   sequence: { materialType: "sequence", scope: "card-seq", label: "\u6D41\u7A0B\u80CC\u8BF5", defaultForm: "\u95EE\u7B54" },
   enumeration: { materialType: "enumeration", scope: "card-enum", label: "\u679A\u4E3E\u6E05\u5355", defaultForm: "\u6316\u7A7A" },
   image: { materialType: "image", scope: "card-occlusion", label: "\u56FE\u7247\u6750\u6599", defaultForm: "\u56FE\u7247\u6316\u7A7A" },
-  literature: { materialType: "literature", scope: "card-literature", label: "\u6587\u5B66/\u8BD7\u6B4C\u80CC\u8BF5", defaultForm: "\u95EE\u7B54" }
+  literature: { materialType: "literature", scope: "card-literature", label: "\u6587\u5B66/\u8BD7\u6B4C\u80CC\u8BF5", defaultForm: "\u95EE\u7B54" },
+  vocab: { materialType: "vocab", scope: "card-vocab", label: "\u8BCD\u6C47/\u5355\u8BCD", defaultForm: "\u5355\u8BCD\u56DB\u5361" }
 };
 function detectMode(text) {
   if (/[=\\]|\d\s*[+\-*/^]\s*\d|\$\\?/.test(text) && /(公式|方程|=\s*\S|\\frac|\\sum)/.test(text)) return "card-formula";
@@ -256,6 +487,10 @@ function verseSignals(text) {
 }
 function detectMaterialType(text) {
   if (verseSignals(text)) return MATERIAL_ROUTES.literature;
+  const t = String(text ?? "").normalize("NFKC").trim();
+  if (t && t.length <= 34 && t.split(/\s+/).length <= 2 && !/[，。！？；：、]/.test(t) && !/[=\\$]/.test(t) && !/(公式|方程|步骤|流程|列出|有哪些)/.test(t) && /[A-Za-z\u3040-\u30ff\uac00-\ud7af]/.test(t)) {
+    return MATERIAL_ROUTES.vocab;
+  }
   const mode = detectMode(text);
   const byMode = {
     "card-formula": "formula",
@@ -330,6 +565,16 @@ var cardGenerator = {
     const tpl = await window.promptsAPI?.get(resolved);
     if (!tpl) throw new Error("\u63D0\u793A\u8BCD\u6A21\u677F\u7F3A\u5931");
     const sys = tpl.content;
+    let memoryBlock = null;
+    if (Number(tpl.situation_required) === 1) {
+      const mem = await window.memoryAPI?.retrieve({
+        documentId: context.documentId ?? null,
+        title: context.title ?? "",
+        section: context.section ?? "",
+        text: sourceText
+      });
+      if (mem?.ok && mem.block) memoryBlock = mem.block;
+    }
     const user = [
       `\u3010\u6750\u6599\u3011
 ${sourceText}`,
@@ -342,7 +587,8 @@ ${context.webContext}` : "",
       context.existingCards?.length ? `\u3010\u7528\u6237\u5DF2\u6709\u5361\u7247\uFF08\u6CE8\u610F R10 \u8054\u60F3\u4E0E\u5E72\u6270\u63D0\u793A\uFF0C\u7981\u6B62\u91CD\u590D\u6216\u6362\u76AE\uFF09\u3011
 ${context.existingCards.slice(0, context.existingCardsLimit ?? 10).join("\n")}` : "",
       context.userProfile ? `\u3010\u7528\u6237\u753B\u50CF\uFF08R9 \u4E2A\u6027\u5316\u4F8B\u5B50\u4F18\u5148\u7528\uFF09\u3011
-${context.userProfile}` : ""
+${context.userProfile}` : "",
+      memoryBlock || ""
     ].filter(Boolean).join("\n\n");
     let acc = "";
     const raw = await aiGateway.chat(
@@ -359,6 +605,12 @@ ${context.userProfile}` : ""
     );
     const result = extractJson(raw || acc);
     result.cards = result.cards.flatMap((c) => expandClozeDraft(c));
+    if (memoryBlock) {
+      for (const c of result.cards) {
+        const ref = typeof c.memoryRef === "string" ? c.memoryRef.trim().slice(0, 500) : "";
+        if (ref) c.memoryRefValid = memoryBlock.includes(ref);
+      }
+    }
     const batch = await window.batchesAPI?.create({
       scope: resolved,
       sourceText,
@@ -366,7 +618,10 @@ ${context.userProfile}` : ""
         ...context,
         // 诊断留痕：确认联网背景是否真的进入了上下文
         webContextChars: context.webContext ? context.webContext.length : 0,
-        webContextPreview: context.webContext ? context.webContext.slice(0, 200) : ""
+        webContextPreview: context.webContext ? context.webContext.slice(0, 200) : "",
+        // v46：记忆注入留痕（审计 §1.9）
+        memoryInjected: Boolean(memoryBlock),
+        memoryBlockChars: memoryBlock ? memoryBlock.length : 0
       },
       promptTemplateId: tpl.id,
       result
@@ -611,6 +866,15 @@ function lintCard(draft) {
   if (!draft.dateStamp && CHANGEABLE.test(front + back)) {
     issues.push({ ruleId: "L12", severity: "info", message: "\u6613\u53D8\u5185\u5BB9\u5EFA\u8BAE\u52A0 dateStamp\uFF08\u89C4\u521919\uFF09" });
   }
+  const isCollectionAsk = /(列出|列举|有哪些|分别|包括|哪几种|几种)/.test(front);
+  const hasTolerance = /(至少|最少|任一|之一|任意|不限于)/.test(front + back);
+  if (isCollectionAsk && !hasTolerance) {
+    issues.push({
+      ruleId: "L16",
+      severity: "warn",
+      message: "\u5F00\u653E\u5F0F/\u96C6\u5408\u578B\u7B54\u6848\u7F3A\u5408\u683C\u7EBF\u6807\u6CE8\uFF08R5/R2 G7\uFF09\u2014\u2014front \u6CE8\u660E\u300C\u81F3\u5C11\u56DE\u5FC6 N \u79CD\u300D\uFF0C\u4F7F\u7B54\u5BF9\u53EF\u5224\u5B9A"
+    });
+  }
   const frontClean = front.replace(/\s/g, "");
   const backClean = back.replace(/\s/g, "");
   const prefix = (draft.contextPrefix || "").replace(/[:：\s]/g, "");
@@ -643,6 +907,8 @@ var cardsApi = {
   update: async (card) => await window.cardsAPI?.update(card) ?? false,
   get: async (id) => await window.cardsAPI?.get(id) ?? null,
   listDue: async () => await window.cardsAPI?.listDue() ?? [],
+  // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单；ReviewView/CardBrowser 消费）
+  todayQueue: async (now) => await window.cardsAPI?.todayQueue?.(now) ?? { cards: [], deferred: [], now: Date.now() },
   listAll: async () => await window.cardsAPI?.listAll() ?? [],
   remove: async (id) => await window.cardsAPI?.remove(id) ?? false,
   // v22 撤销评分：review 传 fsrsBefore（评分前 FSRS 快照）方可撤销
@@ -705,8 +971,62 @@ async function generateContrastDrafts(base, onProgress, onThinking) {
   );
   return { batchId, drafts: result.cards };
 }
+async function generateVocabDrafts(entry, sentence, onProgress, onThinking) {
+  const material = [
+    `\u3010\u8BCD\u5178\u6761\u76EE\u3011${entry.word}${entry.reading ? `\uFF08${entry.reading}\uFF09` : ""}${entry.pronunciation ? ` ${entry.pronunciation}` : ""}`,
+    `\u91CA\u4E49\uFF1A${entry.definitions.slice(0, 3).join("\uFF1B")}`,
+    entry.partOfSpeech?.length ? `\u8BCD\u6027\uFF1A${entry.partOfSpeech.join("/")}` : "",
+    `\u3010\u9605\u8BFB\u539F\u53E5\u3011${sentence}`,
+    `\u3010\u6765\u6E90\u3011${entry.source}`
+  ].filter(Boolean).join("\n");
+  const { batchId, result } = await cardGenerator.generateCards(
+    material,
+    { title: entry.source },
+    "card-vocab",
+    onProgress,
+    onThinking
+  );
+  return { batchId, drafts: result.cards };
+}
+function siblingKeyFor(opts) {
+  if (opts.explicitKey) return opts.explicitKey;
+  const genId = opts.genId ?? (() => globalThis.crypto?.randomUUID?.() ?? `r${Math.random().toString(36).slice(2)}`);
+  const ref = opts.contextRef;
+  if (ref?.documentId) {
+    const srcLen = (opts.sourceText ?? "").length;
+    const limit = Number.isInteger(opts.limit) && opts.limit > 0 ? opts.limit : 300;
+    if (srcLen > limit) return null;
+    const anchorPart = ref.extractId || `h${fnv1a(ref.anchorText || "")}`;
+    return `src:${ref.documentId}:${anchorPart}`;
+  }
+  if ((opts.splitCount ?? 1) > 1) return `act:split-${genId()}`;
+  return null;
+}
+function fnv1a(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+async function burySourceTextLimit() {
+  try {
+    const sb = await settingsStore.get("app", "siblingBury", null);
+    if (sb && Number.isInteger(sb.sourceTextLimit) && sb.sourceTextLimit > 0) return sb.sourceTextLimit;
+  } catch {
+  }
+  return 300;
+}
 async function createAcceptedCard(d, ctx = {}) {
   const expanded = expandClozeDraft(d);
+  const siblingKey = siblingKeyFor({
+    explicitKey: ctx.siblingKey,
+    contextRef: ctx.contextRef,
+    sourceText: ctx.sourceText,
+    limit: await burySourceTextLimit(),
+    splitCount: expanded.length
+  });
   const ids = [];
   for (const dd of expanded) {
     const cloze = dd.cardType === "cloze" ? dd.cloze || "" : "";
@@ -729,6 +1049,13 @@ async function createAcceptedCard(d, ctx = {}) {
       tags: [],
       domain: dd.domain ?? [],
       knowledgePointId: dd.knowledgePointId || null,
+      // v41（K2-A，D38）：批次归组——AI 抽取归一的簇键（batch:<id>:<kp>）依据，消除跨材料 kp1 碰撞
+      genBatchId: ctx.genBatchId || null,
+      dictJson: ctx.dictJson ?? null,
+      // v46（M14-UM2，§4.18-10）：记忆溯源——校验成功落 {line, verified:true}；
+      // 校验失败但用户仍接受 = {line, verified:false}（浏览页标「来源存疑」，不自动改写）
+      memoryRefJson: dd.memoryRef ? { line: dd.memoryRef, verified: dd.memoryRefValid === true } : null,
+      siblingKey,
       generatedBy: "ai"
     };
     const issues = lintCard({
@@ -758,12 +1085,30 @@ async function createAcceptedCard(d, ctx = {}) {
       });
     }
   }
+  if (ids.length) {
+    const sources = expanded.map((dd) => ({
+      knowledgePointId: String(dd.knowledgePointId || "").trim(),
+      genBatchId: ctx.genBatchId || null,
+      documentId: ctx.contextRef?.documentId || null
+    })).filter((s) => s.knowledgePointId);
+    if (sources.length) void autoQueueKpAiProcessing(sources);
+  }
   return ids;
+}
+function hasSourceAnchor(ref) {
+  if (!ref || !ref.documentId) return false;
+  if (ref.imageSource === "library") return false;
+  if (ref.cfi || ref.pageIndex != null || ref.chapterIndex != null) return true;
+  if (ref.anchorText && ref.anchorText.trim()) return true;
+  if (typeof ref.anchorRatio === "number" && ref.anchorRatio > 0) return true;
+  if (ref.imageAnchor && (ref.imageAnchor.alt || ref.imageAnchor.contextText)) return true;
+  return false;
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   MATERIAL_ROUTES,
   buildContrastCandidates,
+  burySourceTextLimit,
   cardGenerator,
   cardsApi,
   createAcceptedCard,
@@ -774,8 +1119,11 @@ async function createAcceptedCard(d, ctx = {}) {
   extractClozeAnswers,
   extractJson,
   generateContrastDrafts,
+  generateVocabDrafts,
+  hasSourceAnchor,
   lintCard,
   parseCloze,
   parseFollowUps,
+  siblingKeyFor,
   similaritySearch
 });

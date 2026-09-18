@@ -21,6 +21,18 @@
       "date": "2026-09-12",
       "reason": "滚轮翻页/章尾续读（upstream 无 wheel 处理，阅读器缺翻页交互）",
       "change": "构造器新增 wheelTurn：分页/对开模式滚轮=翻页（preventDefault），滚动模式章尾续滚进下一章、章首回上一章；监听宿主元素与各章节 iframe 文档"
+    },
+    {
+      "file": "paginator.js",
+      "date": "2026-09-15",
+      "reason": "跨章节导航后翻页/目录/滚轮整体失灵（用户现场：Moral of the Story 点 Cover 后假死）",
+      "change": "四处加固：①#turnPage 加 try/finally，链路任何异常不再永久卡死 #locked；②setSelectionTo 改为守卫式实现，跳过已销毁文档的死节点（原实现每次跨章节 relocate 必抛 TypeError）；③View.load 增加在途加载 settle 句柄，iframe 被并发导航替换或 load 监听器抛错时 promise 立即 settle（原实现永不 settle → #display→#turnPage 永久挂起）；④#display 在加载失败回退空对象时保留当前 #index（原实现写入 undefined 令 #adjacentIndex 永久失效），且等待期间被更新导航替换时提前返回不再回写旧 view；⑤Paginator.goTo 对解析失败的 target 判空"
+    },
+    {
+      "file": "src/lib/reader/foliate/adapter.ts（应用侧，随本批）",
+      "date": "2026-09-15",
+      "reason": "分页模式每页内容过少（页面高度塌缩，653px 视口仅渲染 318px）",
+      "change": "margin 属性由无单位数字改为带 px（如 48px）：paginator 把属性值直接写入 CSS 变量 --_margin，无单位数字令 minmax(var(--_margin),1fr) 及整条 grid-template-rows 失效退化为 auto 行，页高中间行按内容收缩并与 html 高度形成自锁回路"
     }
   ],
   "upgradeProcedure": "见 AI_DEVELOPMENT_GUIDE.md §7 阅读内核升级规程（vendor 更新 → API 白名单核对 → L0/L1/L2 全绿 → L3 冒烟 → 签发新 ReaderEngineVersion）"

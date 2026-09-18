@@ -1,0 +1,1129 @@
+"use strict";
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// src/lib/eventbus.ts
+var eventbus_exports = {};
+__export(eventbus_exports, {
+  ALLOWED_EVENTS: () => ALLOWED_EVENTS,
+  eventBus: () => eventBus
+});
+var ALLOWED_EVENTS, map, eventBus;
+var init_eventbus = __esm({
+  "src/lib/eventbus.ts"() {
+    "use strict";
+    ALLOWED_EVENTS = [
+      "stats/updated",
+      "library/changed",
+      "todo/changed",
+      "pomodoro/tick",
+      "pomodoro/phaseChange",
+      "theme/changed",
+      "settings/changed",
+      "ai/stream",
+      "workflow/changed",
+      "cards/changed",
+      "ai/batchDone",
+      "leech/detected",
+      "journal/changed",
+      "insight/changed",
+      "memory/changed"
+    ];
+    map = /* @__PURE__ */ new Map();
+    eventBus = {
+      on(event, fn) {
+        if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
+        let set = map.get(event);
+        if (!set) {
+          set = /* @__PURE__ */ new Set();
+          map.set(event, set);
+        }
+        set.add(fn);
+        return () => set.delete(fn);
+      },
+      emit(event, payload) {
+        if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
+        map.get(event)?.forEach((fn) => fn(payload));
+      }
+    };
+  }
+});
+
+// src/lib/cards.ts
+var cards_exports = {};
+__export(cards_exports, {
+  MATERIAL_ROUTES: () => MATERIAL_ROUTES,
+  buildContrastCandidates: () => buildContrastCandidates,
+  burySourceTextLimit: () => burySourceTextLimit,
+  cardGenerator: () => cardGenerator,
+  cardsApi: () => cardsApi,
+  createAcceptedCard: () => createAcceptedCard,
+  detectMaterialType: () => detectMaterialType,
+  detectMode: () => detectMode,
+  expandClozeDraft: () => expandClozeDraft,
+  extractClozeAnswer: () => extractClozeAnswer,
+  extractClozeAnswers: () => extractClozeAnswers,
+  extractJson: () => extractJson,
+  generateContrastDrafts: () => generateContrastDrafts,
+  generateVocabDrafts: () => generateVocabDrafts,
+  hasSourceAnchor: () => hasSourceAnchor,
+  lintCard: () => lintCard,
+  parseCloze: () => parseCloze,
+  parseFollowUps: () => parseFollowUps,
+  siblingKeyFor: () => siblingKeyFor,
+  similaritySearch: () => similaritySearch
+});
+module.exports = __toCommonJS(cards_exports);
+
+// src/lib/ai.ts
+var aiGateway = {
+  async getConfig() {
+    if (!window.aiAPI) return null;
+    return window.aiAPI.getConfig();
+  },
+  async setConfig(partial) {
+    await window.aiAPI?.setConfig(partial);
+  },
+  async test() {
+    if (!window.aiAPI) return { ok: false, message: "API \u4E0D\u53EF\u7528" };
+    return window.aiAPI.test();
+  },
+  async listModels() {
+    if (!window.aiAPI) return [];
+    return window.aiAPI.listModels();
+  },
+  async websearch(query) {
+    if (!window.aiAPI) return [];
+    return window.aiAPI.websearch(query);
+  },
+  // 流式对话：onDelta 累积增量；onThinking 上报思考模型（reasoning_content）的已思考字数；resolve 返回全文
+  chat(messages, onDelta, temperature, onThinking) {
+    return new Promise((resolve, reject) => {
+      if (!window.aiAPI) {
+        reject(new Error("AI API \u4E0D\u53EF\u7528"));
+        return;
+      }
+      const requestId = Math.random().toString(36).slice(2);
+      let acc = "";
+      let finished = false;
+      const off = window.aiAPI.onStream((rid, msg) => {
+        if (rid !== requestId) return;
+        if (msg.error) {
+          if (!finished) {
+            finished = true;
+            off();
+            reject(new Error(msg.error));
+          }
+          return;
+        }
+        if (msg.thinking !== void 0) {
+          onThinking?.(msg.thinking);
+        }
+        if (msg.delta) {
+          acc += msg.delta;
+          onDelta?.(acc, msg.delta);
+        }
+        if (msg.done && !finished) {
+          finished = true;
+          off();
+          resolve(acc);
+        }
+      });
+      window.aiAPI.chat(requestId, messages, temperature);
+    });
+  }
+};
+
+// src/lib/knowledge.ts
+var emptyList = { points: [], total: 0 };
+var knowledgeApi = {
+  async listPoints(filter = {}) {
+    if (!window.knowledgeAPI) return emptyList;
+    return await window.knowledgeAPI.listPoints(filter) || emptyList;
+  },
+  async getPoint(id) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.getPoint(id) || null;
+  },
+  async createPoint(payload) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.createPoint(payload) || null;
+  },
+  async updatePoint(id, patch) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.updatePoint(id, patch) || null;
+  },
+  async mergePoints(sourceId, targetId) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.mergePoints(sourceId, targetId);
+  },
+  async unmergePoint(id) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.unmergePoint(id) || null;
+  },
+  async listRelations(filter = {}) {
+    if (!window.knowledgeAPI) return [];
+    return (await window.knowledgeAPI.listRelations(filter))?.relations || [];
+  },
+  async createRelation(payload) {
+    if (!window.knowledgeAPI) throw new Error("knowledgeAPI \u4E0D\u53EF\u7528");
+    return await window.knowledgeAPI.createRelation(payload);
+  },
+  async deleteRelation(id) {
+    if (!window.knowledgeAPI) return false;
+    return await window.knowledgeAPI.deleteRelation(id);
+  },
+  async listRefs(kpId) {
+    if (!window.knowledgeAPI) return [];
+    return await window.knowledgeAPI.listRefs(kpId) || [];
+  },
+  async createRef(payload) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.createRef(payload) || null;
+  },
+  async deleteRef(id) {
+    if (!window.knowledgeAPI) return false;
+    return await window.knowledgeAPI.deleteRef(id);
+  },
+  async listProposals(filter = {}) {
+    if (!window.knowledgeAPI) return [];
+    return (await window.knowledgeAPI.listProposals(filter))?.proposals || [];
+  },
+  async resolveProposal(id, accept, overridePayload) {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.resolveProposal(id, accept, overridePayload);
+  },
+  async migrationSuggestions() {
+    if (!window.knowledgeAPI) return null;
+    return await window.knowledgeAPI.migrationSuggestions() || null;
+  },
+  // ---- v41（K2-A，D38）：AI 抽取归一与关系 ----
+  async kpClusters() {
+    if (!window.knowledgeAPI?.kpClusters) return null;
+    return await window.knowledgeAPI.kpClusters() || null;
+  },
+  async kpExtractPrepare(opts = {}) {
+    if (!window.knowledgeAPI?.kpExtractPrepare) return null;
+    return await window.knowledgeAPI.kpExtractPrepare(opts) || null;
+  },
+  async kpExtractApply(rawExtraction, rawRelations) {
+    if (!window.knowledgeAPI?.kpExtractApply) return null;
+    return await window.knowledgeAPI.kpExtractApply(rawExtraction, rawRelations) || null;
+  },
+  async acceptAllPending() {
+    if (!window.knowledgeAPI?.acceptAllPending) return null;
+    return await window.knowledgeAPI.acceptAllPending();
+  },
+  // ---- v43（K2-B）：KnowledgeLint K4/K7/K8 ----
+  async lint() {
+    if (!window.knowledgeAPI?.lint) return [];
+    return await window.knowledgeAPI.lint() || [];
+  }
+};
+
+// src/lib/kpExtract.ts
+async function runKpAiProcessing(opts = {}) {
+  if (!window.knowledgeAPI?.kpExtractPrepare) return { skipped: "unsupported", clusterCount: 0, summary: null };
+  const prep = await knowledgeApi.kpExtractPrepare(opts);
+  if (!prep || prep.clusterCount === 0) return { skipped: "no-clusters", clusterCount: 0, summary: null };
+  const cfg = await aiGateway.getConfig();
+  if (!cfg?.hasKey) return { skipped: "no-key", clusterCount: prep.clusterCount, summary: null };
+  const tplE = await window.promptsAPI?.get("knowledge-extraction");
+  if (!tplE?.content) return { skipped: "no-prompt", clusterCount: prep.clusterCount, summary: null };
+  try {
+    const rawE = await aiGateway.chat(
+      [
+        { role: "system", content: tplE.content },
+        { role: "user", content: prep.extractionInput }
+      ],
+      void 0,
+      0.1
+    );
+    let rawR = "";
+    if (prep.relationInput) {
+      const tplR = await window.promptsAPI?.get("knowledge-relation");
+      if (tplR?.content) {
+        try {
+          rawR = await aiGateway.chat(
+            [
+              { role: "system", content: tplR.content },
+              { role: "user", content: prep.relationInput }
+            ],
+            void 0,
+            0.1
+          );
+        } catch {
+          rawR = "";
+        }
+      }
+    }
+    const summary = await knowledgeApi.kpExtractApply(rawE, rawR);
+    return { skipped: null, clusterCount: prep.clusterCount, summary };
+  } catch (err) {
+    return { skipped: null, clusterCount: prep.clusterCount, summary: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+function autoQueueKpAiProcessing(sources) {
+  const valid = (sources || []).filter((s) => s && String(s.knowledgePointId || "").trim());
+  if (!valid.length) return;
+  const seen = /* @__PURE__ */ new Set();
+  const uniq = [];
+  for (const s of valid) {
+    const key = `${s.genBatchId || ""}|${s.documentId || ""}|${s.knowledgePointId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniq.push(s);
+  }
+  void runKpAiProcessing({ sources: uniq }).catch(() => {
+  });
+}
+
+// src/lib/occlusion.ts
+var clampPct = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+};
+var round1 = (v) => Math.round(v * 10) / 10;
+function shapeBBox(shape) {
+  if (shape.kind === "ellipse") {
+    const cx = clampPct(shape.cx);
+    const cy = clampPct(shape.cy);
+    const rx = Math.max(0, Number(shape.rx) || 0);
+    const ry = Math.max(0, Number(shape.ry) || 0);
+    const x2 = Math.max(0, cx - rx);
+    const y2 = Math.max(0, cy - ry);
+    return {
+      x: round1(x2),
+      y: round1(y2),
+      w: round1(Math.min(100 - x2, rx * 2)),
+      h: round1(Math.min(100 - y2, ry * 2))
+    };
+  }
+  if (shape.kind === "polygon") {
+    const pts = shape.points ?? [];
+    if (pts.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+    const xs = pts.map((p) => clampPct(p.x));
+    const ys = pts.map((p) => clampPct(p.y));
+    const x2 = Math.min(...xs);
+    const y2 = Math.min(...ys);
+    return { x: round1(x2), y: round1(y2), w: round1(Math.max(...xs) - x2), h: round1(Math.max(...ys) - y2) };
+  }
+  const x = clampPct(shape.x);
+  const y = clampPct(shape.y);
+  return {
+    x: round1(x),
+    y: round1(y),
+    w: round1(Math.max(0, Math.min(100 - x, Number(shape.w) || 0))),
+    h: round1(Math.max(0, Math.min(100 - y, Number(shape.h) || 0)))
+  };
+}
+function normalizeShape(shape) {
+  if (shape.kind === "polygon") {
+    return {
+      ord: shape.ord,
+      kind: "polygon",
+      points: (shape.points ?? []).map((p) => ({ x: round1(clampPct(p.x)), y: round1(clampPct(p.y)) }))
+    };
+  }
+  if (shape.kind === "ellipse") {
+    const cx = clampPct(shape.cx);
+    const cy = clampPct(shape.cy);
+    return {
+      ord: shape.ord,
+      kind: "ellipse",
+      cx: round1(cx),
+      cy: round1(cy),
+      // 半轴上限 = 中心到最近边界的距离（椭圆整体必须留在画面内）
+      rx: round1(Math.max(0, Math.min(Math.min(cx, 100 - cx), Math.abs(Number(shape.rx) || 0)))),
+      ry: round1(Math.max(0, Math.min(Math.min(cy, 100 - cy), Math.abs(Number(shape.ry) || 0))))
+    };
+  }
+  return { ord: shape.ord, kind: "rect", ...shapeBBox(shape) };
+}
+
+// src/lib/settings.ts
+var memoryFallback = /* @__PURE__ */ new Map();
+async function emitChanged(scope, key) {
+  try {
+    const { eventBus: eventBus2 } = await Promise.resolve().then(() => (init_eventbus(), eventbus_exports));
+    eventBus2.emit("settings/changed", { scope, key });
+  } catch {
+  }
+}
+var settingsStore = {
+  async get(scope, key, defaultValue) {
+    try {
+      if (!window.settingsAPI) {
+        return memoryFallback.get(`${scope}.${key}`) ?? defaultValue;
+      }
+      const v = await window.settingsAPI.get(scope, key);
+      return v ?? defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  },
+  async set(scope, key, value) {
+    if (!window.settingsAPI) {
+      memoryFallback.set(`${scope}.${key}`, value);
+      void emitChanged(scope, key);
+      return;
+    }
+    await window.settingsAPI.set(scope, key, value);
+    void emitChanged(scope, key);
+  }
+};
+
+// src/lib/cards.ts
+function parseCloze(text) {
+  const re = /\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g;
+  const ords = /* @__PURE__ */ new Set();
+  let m;
+  while (m = re.exec(text)) ords.add(Number(m[1]));
+  const normalize = (hiddenOrd) => {
+    if (hiddenOrd === null) return null;
+    return new Set(Array.isArray(hiddenOrd) ? hiddenOrd : [hiddenOrd]);
+  };
+  const renderWith = (hiddenOrd) => {
+    const mask = normalize(hiddenOrd);
+    const maskedOrds = [];
+    const out = text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
+      const ord = Number(ordStr);
+      if (mask === null || !mask.has(ord)) return content;
+      if (!maskedOrds.includes(ord)) maskedOrds.push(ord);
+      return "[\u2026]";
+    });
+    return { text: out, maskedOrds };
+  };
+  return {
+    ords: [...ords].sort((a, b) => a - b),
+    render(hiddenOrd) {
+      return renderWith(hiddenOrd).text;
+    },
+    renderDetail(hiddenOrds) {
+      return renderWith(hiddenOrds ?? []);
+    }
+  };
+}
+function extractClozeAnswer(text, ord) {
+  const re = new RegExp(`\\{\\{c${ord}::(.*?)(?:::(.*?))?\\}\\}`);
+  const m = re.exec(text);
+  return m ? (m[1] ?? "") + (m[2] ? `\uFF08${m[2]}\uFF09` : "") : "";
+}
+function extractClozeAnswers(text, ords) {
+  return ords.map((o) => extractClozeAnswer(text, o));
+}
+function expandClozeDraft(d) {
+  if (d.cardType !== "cloze") return [d];
+  const text = d.cloze || d.front || "";
+  const ords = parseCloze(text).ords;
+  if (d.clozeMode !== "per-blank" || ords.length <= 1) return [d];
+  return ords.map((o, i) => ({ ...d, ord: i, clozeOrds: [o] }));
+}
+var MATERIAL_ROUTES = {
+  concept: { materialType: "concept", scope: "card-generation", label: "\u6982\u5FF5\u8BBA\u8FF0", defaultForm: "\u95EE\u7B54" },
+  formula: { materialType: "formula", scope: "card-formula", label: "\u516C\u5F0F\u63A8\u5BFC", defaultForm: "\u95EE\u7B54" },
+  sequence: { materialType: "sequence", scope: "card-seq", label: "\u6D41\u7A0B\u80CC\u8BF5", defaultForm: "\u95EE\u7B54" },
+  enumeration: { materialType: "enumeration", scope: "card-enum", label: "\u679A\u4E3E\u6E05\u5355", defaultForm: "\u6316\u7A7A" },
+  image: { materialType: "image", scope: "card-occlusion", label: "\u56FE\u7247\u6750\u6599", defaultForm: "\u56FE\u7247\u6316\u7A7A" },
+  literature: { materialType: "literature", scope: "card-literature", label: "\u6587\u5B66/\u8BD7\u6B4C\u80CC\u8BF5", defaultForm: "\u95EE\u7B54" },
+  vocab: { materialType: "vocab", scope: "card-vocab", label: "\u8BCD\u6C47/\u5355\u8BCD", defaultForm: "\u5355\u8BCD\u56DB\u5361" }
+};
+function detectMode(text) {
+  if (/[=\\]|\d\s*[+\-*/^]\s*\d|\$\\?/.test(text) && /(公式|方程|=\s*\S|\\frac|\\sum)/.test(text)) return "card-formula";
+  if (/(步骤|流程|时间线|顺序|第一章.*第二章|首先.*然后.*最后)/.test(text)) return "card-seq";
+  if (/(列出|有哪些|分别|包括以下|：[^\n]*、[^\n]*、)/.test(text)) return "card-enum";
+  return "card-generation";
+}
+function verseSignals(text) {
+  const t = text.trim();
+  if (t.length < 20) return false;
+  if (/(第[一二三四五六七八九十\d]+\s*步|步骤\s*\d)/.test(t)) return false;
+  const strongInHead = /(词牌|宋词|唐诗|五言|七言|律诗|绝句|上阕|下阕|上片|下片|词曰|诗曰)/.test(t.slice(0, 30));
+  const strong = strongInHead || /(词牌|宋词|唐诗|五言|七言|律诗|绝句|上阕|下阕|上片|下片|词曰|诗曰)/.test(t.slice(0, 200));
+  const ciTitle = /《[^《》\n]{1,8}·[^《》\n]{1,12}》/.test(t.slice(0, 40));
+  const titled = /《[^《》\n]{1,12}》/.test(t.slice(0, 30)) || ciTitle;
+  const lines = t.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  const punctEndRate = lines.length ? lines.filter((l) => /[，。！？；：、]$/.test(l)).length / lines.length : 0;
+  if (strongInHead || ciTitle) {
+    if (lines.length >= 2 && lines.every((l) => l.length <= 34)) return true;
+  }
+  if (lines.length >= 4) {
+    const stripped = lines.map((l) => l.replace(/[\s，。！？、；：…—·""''?!]/g, ""));
+    const uniform = stripped.every((s) => s.length === 5) || stripped.every((s) => s.length === 7);
+    if (uniform && punctEndRate >= 0.5) return true;
+  }
+  if (lines.length >= (strong || titled ? 4 : 6)) {
+    const short = lines.filter(
+      (l) => l.length <= 20 && !/^\d+[.、)）]\s*/.test(l) && !/^[•●■▪○◆]\s*/.test(l)
+    ).length;
+    if (short / lines.length >= 0.8 && punctEndRate >= 0.4) return true;
+  }
+  if (strong || titled) {
+    const body = t.replace(/《[^《》]*》/g, "");
+    const sentences = body.split(/[。！？]/).map((s) => s.trim()).filter(Boolean);
+    const avg = sentences.length ? sentences.reduce((a, s) => a + s.length, 0) / sentences.length : 99;
+    if (sentences.length >= 8 && avg <= 14) return true;
+  }
+  return false;
+}
+function detectMaterialType(text) {
+  if (verseSignals(text)) return MATERIAL_ROUTES.literature;
+  const t = String(text ?? "").normalize("NFKC").trim();
+  if (t && t.length <= 34 && t.split(/\s+/).length <= 2 && !/[，。！？；：、]/.test(t) && !/[=\\$]/.test(t) && !/(公式|方程|步骤|流程|列出|有哪些)/.test(t) && /[A-Za-z\u3040-\u30ff\uac00-\ud7af]/.test(t)) {
+    return MATERIAL_ROUTES.vocab;
+  }
+  const mode = detectMode(text);
+  const byMode = {
+    "card-formula": "formula",
+    "card-seq": "sequence",
+    "card-enum": "enumeration",
+    "card-generation": "concept"
+  };
+  return MATERIAL_ROUTES[byMode[mode] ?? "concept"];
+}
+function parseFollowUps(summaries) {
+  const out = [];
+  for (const raw of Array.isArray(summaries) ? summaries : []) {
+    const s = String(raw?.summary ?? raw ?? "");
+    const m = s.match(/[（(]后续可补[:：]([^）)]*)[）)]/);
+    if (!m || !m[1].trim()) continue;
+    const items = m[1].split(/[、，,;；]/).map((x) => x.trim()).filter(Boolean);
+    if (items.length === 0) continue;
+    out.push({ kpTitle: s.replace(/[（(]后续可补[:：][^）)]*[）)]/g, "").trim(), items });
+  }
+  return out;
+}
+function extractJson(raw) {
+  const text = String(raw ?? "");
+  const candidates = [];
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start >= 0 && end > start) candidates.push(text.slice(start, end + 1));
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let objStart = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && objStart >= 0) {
+        candidates.push(text.slice(objStart, i + 1));
+        objStart = -1;
+      }
+    }
+  }
+  let lastErr = null;
+  for (const cand of candidates) {
+    try {
+      const parsed = JSON.parse(cand);
+      if (!Array.isArray(parsed.cards)) throw new Error("AI \u8FD4\u56DE\u7F3A\u5C11 cards \u6570\u7EC4");
+      return parsed;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw new Error(
+    `AI \u672A\u8FD4\u56DE\u6709\u6548 JSON\uFF1A${lastErr instanceof Error ? lastErr.message : "\u672A\u627E\u5230 JSON \u5BF9\u8C61"}`
+  );
+}
+var cardGenerator = {
+  async generateCards(sourceText, context, mode, onProgress, onThinking) {
+    const resolved = mode === "auto" ? detectMode(sourceText) : mode;
+    const tpl = await window.promptsAPI?.get(resolved);
+    if (!tpl) throw new Error("\u63D0\u793A\u8BCD\u6A21\u677F\u7F3A\u5931");
+    const sys = tpl.content;
+    let memoryBlock = null;
+    if (Number(tpl.situation_required) === 1) {
+      const mem = await window.memoryAPI?.retrieve({
+        documentId: context.documentId ?? null,
+        title: context.title ?? "",
+        section: context.section ?? "",
+        text: sourceText
+      });
+      if (mem?.ok && mem.block) memoryBlock = mem.block;
+    }
+    const user = [
+      `\u3010\u6750\u6599\u3011
+${sourceText}`,
+      context.title ? `\u3010\u6765\u6E90\u3011\u300A${context.title}\u300B${context.section ? " \xB7 " + context.section : ""}` : "",
+      // v16：补充制卡指令（「后续可补」递进补卡用）——提示词模板不变，仅装配请求时注入
+      context.focus ? `\u3010\u672C\u6B21\u5236\u5361\u91CD\u70B9\uFF08\u8865\u5145\u5236\u5361\uFF09\u3011
+${context.focus}` : "",
+      context.webContext ? `\u3010\u8054\u7F51\u68C0\u7D22\u5230\u7684\u4E8B\u4EF6\u80CC\u666F\uFF08\u4EC5\u4F9B\u7406\u89E3\uFF0C\u7981\u6B62\u7F16\u9020\u6765\u6E90\uFF09\u3011
+${context.webContext}` : "",
+      context.existingCards?.length ? `\u3010\u7528\u6237\u5DF2\u6709\u5361\u7247\uFF08\u6CE8\u610F R10 \u8054\u60F3\u4E0E\u5E72\u6270\u63D0\u793A\uFF0C\u7981\u6B62\u91CD\u590D\u6216\u6362\u76AE\uFF09\u3011
+${context.existingCards.slice(0, context.existingCardsLimit ?? 10).join("\n")}` : "",
+      context.userProfile ? `\u3010\u7528\u6237\u753B\u50CF\uFF08R9 \u4E2A\u6027\u5316\u4F8B\u5B50\u4F18\u5148\u7528\uFF09\u3011
+${context.userProfile}` : "",
+      memoryBlock || ""
+    ].filter(Boolean).join("\n\n");
+    let acc = "";
+    const raw = await aiGateway.chat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user }
+      ],
+      onProgress ? (a) => {
+        acc = a;
+        onProgress(a.length);
+      } : void 0,
+      0.4,
+      onThinking
+    );
+    const result = extractJson(raw || acc);
+    result.cards = result.cards.flatMap((c) => expandClozeDraft(c));
+    if (memoryBlock) {
+      for (const c of result.cards) {
+        const ref = typeof c.memoryRef === "string" ? c.memoryRef.trim().slice(0, 500) : "";
+        if (ref) c.memoryRefValid = memoryBlock.includes(ref);
+      }
+    }
+    const batch = await window.batchesAPI?.create({
+      scope: resolved,
+      sourceText,
+      context: {
+        ...context,
+        // 诊断留痕：确认联网背景是否真的进入了上下文
+        webContextChars: context.webContext ? context.webContext.length : 0,
+        webContextPreview: context.webContext ? context.webContext.slice(0, 200) : "",
+        // v46：记忆注入留痕（审计 §1.9）
+        memoryInjected: Boolean(memoryBlock),
+        memoryBlockChars: memoryBlock ? memoryBlock.length : 0
+      },
+      promptTemplateId: tpl.id,
+      result
+    });
+    return { batchId: batch?.id || "", result, templateId: tpl.id };
+  },
+  // M1.1（v15，D16）：图片挖空生成链路——图片已入库，把 dataURL 交 GLM 多模态识别遮挡区域，
+  // 返回 regions（归一化百分比坐标）+ 每区域一张 imageOcclusion 草稿（rects 共享同一 occlusionJson）
+  async generateOcclusionCards(image, context, onProgress, onThinking) {
+    const tpl = await window.promptsAPI?.get("card-occlusion");
+    if (!tpl) throw new Error("\u63D0\u793A\u8BCD\u6A21\u677F\u7F3A\u5931\uFF08card-occlusion\uFF09");
+    const textParts = [
+      "\u3010\u4EFB\u52A1\u3011\u8BC6\u522B\u56FE\u7247\u4E2D\u9002\u5408\u8BB0\u5FC6\u6D4B\u8BD5\u7684\u5185\u5BB9\u5E76\u7ED9\u51FA\u906E\u6321\u533A\u57DF\uFF08\u5750\u6807\u4E3A\u76F8\u5BF9\u56FE\u7247\u5C3A\u5BF8\u7684\u767E\u5206\u6BD4\uFF09\u3002",
+      // v25：用户已手绘区域的场景——图片是用户选区的裁剪，模型只负责读出该区域内容；
+      // 指令经请求装配注入（与 generateCards 的 context.focus 同机制），提示词模板不变
+      context.focus ? `\u3010\u7528\u6237\u5DF2\u9009\u5B9A\u7684\u906E\u6321\u533A\u57DF\u3011${context.focus}` : "",
+      // v29（D26）：图片周边文字上下文——相关则结合出题，无关则由模型忽略
+      context.contextText ? `\u3010\u56FE\u7247\u5468\u8FB9\u6587\u5B57\u4E0A\u4E0B\u6587\uFF08\u56FE\u7247\u4E0A\u65B9 1 \u6BB5 + \u4E0B\u65B9 2 \u6BB5\uFF09\u3011
+${context.contextText}
+\uFF08\u82E5\u4E0E\u56FE\u7247\u5185\u5BB9\u76F8\u5173\uFF0C\u53EF\u7ED3\u5408\u4E0A\u4E0B\u6587\u51FA\u9898\uFF1B\u65E0\u5173\u5219\u5FFD\u7565\uFF09` : "",
+      context.title ? `\u3010\u6765\u6E90\u3011\u300A${context.title}\u300B${context.section ? " \xB7 " + context.section : ""}` : ""
+    ].filter(Boolean);
+    const userContent = [
+      { type: "image_url", image_url: { url: image.dataUrl } },
+      { type: "text", text: textParts.join("\n") }
+    ];
+    let acc = "";
+    const raw = await aiGateway.chat(
+      [
+        { role: "system", content: tpl.content },
+        { role: "user", content: userContent }
+      ],
+      onProgress ? (a) => {
+        acc = a;
+        onProgress(a.length);
+      } : void 0,
+      0.2,
+      onThinking
+    );
+    const result = extractJson(raw || acc);
+    const preset = context.presetRegion;
+    if (preset) {
+      const px = clampPct(preset.rect.x);
+      const py = clampPct(preset.rect.y);
+      const pw = Math.max(1, Math.min(100 - px, clampPct(preset.rect.w)));
+      const ph = Math.max(1, Math.min(100 - py, clampPct(preset.rect.h)));
+      const toFullX = (rx, rw) => {
+        const x = px + clampPct(rx) * pw / 100;
+        const w = clampPct(rw) * pw / 100;
+        return { x, w };
+      };
+      const toFullY = (ry, rh) => {
+        const y = py + clampPct(ry) * ph / 100;
+        const h = clampPct(rh) * ph / 100;
+        return { y, h };
+      };
+      const mappedCards = [];
+      const mappedRegions = [];
+      let ordSeq = 0;
+      for (const rawCardRaw of result.cards ?? []) {
+        const rawCard = rawCardRaw;
+        if (rawCard.cardType === "qa") {
+          mappedCards.push({
+            ...rawCard,
+            cardType: "imageOcclusion",
+            ord: ordSeq,
+            occlusion: { assetPath: image.assetPath, ord: ordSeq, rects: [], shapes: null, label: "" }
+          });
+          ordSeq += 1;
+          continue;
+        }
+        const cardRegions = (rawCard.regions ?? []).map((r, i) => {
+          const fx = toFullX(Number(r.x) || 0, Number(r.w) || 0);
+          const fy = toFullY(Number(r.y) || 0, Number(r.h) || 0);
+          if (fx.w < 1 || fy.h < 1) return null;
+          const x = clampPct(fx.x);
+          const y = clampPct(fy.y);
+          return {
+            ord: i,
+            label: String(r.label ?? ""),
+            x: Math.round(x * 10) / 10,
+            y: Math.round(y * 10) / 10,
+            w: Math.round(Math.min(100 - x, fx.w) * 10) / 10,
+            h: Math.round(Math.min(100 - y, fy.h) * 10) / 10
+          };
+        }).filter((r) => r !== null);
+        if (cardRegions.length === 0) continue;
+        const rects3 = cardRegions.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, ord: r.ord }));
+        mappedCards.push({
+          ...rawCard,
+          cardType: "imageOcclusion",
+          ord: ordSeq,
+          occlusion: {
+            assetPath: image.assetPath,
+            ord: ordSeq,
+            rects: rects3,
+            shapes: null,
+            label: String(rawCard.back ?? cardRegions.map((r) => r.label).join("\uFF1B"))
+          }
+        });
+        for (const r of cardRegions) mappedRegions.push({ ...r, ord: mappedRegions.length });
+        ordSeq += 1;
+      }
+      if (mappedCards.length > 0) {
+        result.cards = mappedCards;
+        result.regions = mappedRegions;
+        const batch02 = await window.batchesAPI?.create({
+          scope: "card-occlusion",
+          sourceText: `[\u56FE\u7247\u9009\u533A] ${image.assetPath}`,
+          context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Mapped: true },
+          promptTemplateId: tpl.id,
+          result
+        });
+        return { batchId: batch02?.id || "", result, templateId: tpl.id };
+      }
+      const rect = {
+        x: clampPct(preset.rect.x),
+        y: clampPct(preset.rect.y),
+        w: Math.max(1, Math.min(100 - clampPct(preset.rect.x), clampPct(preset.rect.w))),
+        h: Math.max(1, Math.min(100 - clampPct(preset.rect.y), clampPct(preset.rect.h)))
+      };
+      const shape = preset.shape ? normalizeShape({ ...preset.shape, ord: 0 }) : null;
+      const rects2 = [{ x: rect.x, y: rect.y, w: rect.w, h: rect.h, ord: 0 }];
+      const first = (result.cards ?? [])[0];
+      const fallbackCard = {
+        ...first ?? {},
+        cardType: "imageOcclusion",
+        ord: 0,
+        front: first?.front || "\u56FE\u4E2D\u906E\u6321\u533A\u57DF\u5BF9\u5E94\u7684\u662F\u4EC0\u4E48\uFF1F",
+        back: first?.back || preset.label || "",
+        occlusion: {
+          assetPath: image.assetPath,
+          ord: 0,
+          rects: rects2,
+          shapes: shape ? [shape] : null,
+          label: String(first?.back ?? preset.label ?? "")
+        }
+      };
+      const cards = [fallbackCard];
+      result.cards = cards;
+      result.regions = [
+        { ord: 0, label: String(cards[0].back ?? preset.label ?? ""), ...rect, shape: shape ?? void 0 }
+      ];
+      const batch0 = await window.batchesAPI?.create({
+        scope: "card-occlusion",
+        sourceText: `[\u56FE\u7247\u9009\u533A] ${image.assetPath}`,
+        context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Fallback: true },
+        promptTemplateId: tpl.id,
+        result
+      });
+      return { batchId: batch0?.id || "", result, templateId: tpl.id };
+    }
+    const regions = (result.regions ?? []).map((r, i) => {
+      const x = clampPct(r.x);
+      const y = clampPct(r.y);
+      const w = Math.max(1, Math.min(100 - x, clampPct(r.w)));
+      const h = Math.max(1, Math.min(100 - y, clampPct(r.h)));
+      return {
+        ord: Number.isFinite(Number(r.ord)) ? Math.max(0, Math.round(Number(r.ord))) : i,
+        label: String(r.label ?? ""),
+        x: Math.round(x * 10) / 10,
+        y: Math.round(y * 10) / 10,
+        w: Math.round(w * 10) / 10,
+        h: Math.round(h * 10) / 10
+      };
+    });
+    if (result.cards?.length && regions.length === 0) {
+      throw new Error("\u6A21\u578B\u672A\u8FD4\u56DE\u906E\u6321\u533A\u57DF\uFF08regions \u4E3A\u7A7A\uFF09\uFF0C\u8BF7\u6362\u4E00\u5F20\u66F4\u6E05\u6670\u7684\u56FE\u7247\u91CD\u8BD5");
+    }
+    const rects = regions.map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, ord: r.ord }));
+    for (const card of result.cards) {
+      if (card.cardType === "imageOcclusion") {
+        const region = regions.find((r) => r.ord === card.ord);
+        card.occlusion = { assetPath: image.assetPath, ord: card.ord ?? 0, rects, label: region?.label, regionScope: "shared" };
+      }
+    }
+    const batch = await window.batchesAPI?.create({
+      scope: "card-occlusion",
+      sourceText: `[\u56FE\u7247] ${image.assetPath}`,
+      context: { ...context, imageAsset: image.assetPath, regionCount: regions.length },
+      promptTemplateId: tpl.id,
+      result
+    });
+    return { batchId: batch?.id || "", result, templateId: tpl.id };
+  },
+  async explain(sourceText, context, question, onDelta, onThinking) {
+    const tpl = await window.promptsAPI?.get("reader-explain");
+    const sys = tpl?.content || "\u4F60\u662F\u9605\u8BFB\u52A9\u624B\u3002";
+    const user = `\u3010\u9009\u4E2D\u6587\u672C\u3011
+${sourceText}
+
+${context ? `\u3010\u4E0A\u4E0B\u6587\u3011${context}` : ""}
+
+${question ? `\u3010\u7528\u6237\u8FFD\u95EE\u3011${question}` : "\u8BF7\u89E3\u91CA\u8FD9\u6BB5\u6587\u5B57\u3002"}`;
+    return aiGateway.chat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user }
+      ],
+      onDelta,
+      0.7,
+      onThinking
+    );
+  }
+};
+var CHANGEABLE = /(统计|版本|价格|政策|截至|目前|当前|最新)/;
+function lintCard(draft) {
+  const issues = [];
+  const front = draft.front || "";
+  const back = draft.back || "";
+  const cloze = draft.cloze || "";
+  if (draft.cardType === "imageOcclusion" && !(draft.occlusion && draft.occlusion.assetPath)) {
+    issues.push({ ruleId: "L11", severity: "error", message: "\u56FE\u50CF\u906E\u6321\u5361\u7F3A\u5C11\u56FE\u50CF\u8D44\u4EA7" });
+  }
+  if (back.replace(/\s/g, "").length > 60) {
+    issues.push({ ruleId: "L1", severity: "warn", message: "back \u4FE1\u606F\u8FC7\u8F7D\uFF08>60\u5B57\uFF09\uFF0C\u8003\u8651\u62C6\u5206\uFF08\u89C4\u52194 \u6700\u5C0F\u4FE1\u606F\uFF09" });
+  }
+  if (/^(是|否|对|错|正确|错误|true|false)\.?$/i.test(back.trim())) {
+    issues.push({ ruleId: "L2", severity: "warn", message: "\u662F\u5426\u9898\uFF08\u89C4\u5219\uFF1A\u907F\u514D\u5224\u65AD\u9898\uFF09" });
+  }
+  if (/(有哪些|列举|分别列出)/.test(front)) {
+    issues.push({ ruleId: "L3", severity: "warn", message: "\u96C6\u5408\u578B\u95EE\u6CD5\uFF08\u89C4\u52199 \u907F\u514D\u96C6\u5408\uFF09" });
+  }
+  if (cloze) {
+    const holes = cloze.match(/\{\{c\d+::/g);
+    if (holes && holes.length > 2) {
+      issues.push({ ruleId: "L9", severity: "warn", message: "\u5355\u5361\u6316\u7A7A >2 \u5904\uFF08\u89C4\u52194/5\uFF09" });
+    }
+  }
+  if (!draft.contextPrefix) {
+    issues.push({ ruleId: "L5", severity: "info", message: "\u7F3A contextPrefix \u4E0A\u4E0B\u6587\u524D\u7F00\uFF08\u89C4\u521916\uFF09" });
+  }
+  if (!draft.sourceRef) {
+    issues.push({ ruleId: "L6", severity: "info", message: "\u7F3A\u6765\u6E90 sourceRef\uFF08\u89C4\u521918\uFF09" });
+  }
+  if (front.length > 80) {
+    issues.push({ ruleId: "L10", severity: "warn", message: "front \u8FC7\u957F\uFF08>80\u5B57\uFF09\uFF0C\u6A21\u5F0F\u5339\u914D\u98CE\u9669\uFF08\u89C4\u521912\uFF09" });
+  }
+  if (draft.knowledgePointId && draft.clusterSize === 1) {
+    issues.push({ ruleId: "L8", severity: "info", message: "\u5B64\u513F\u5361\uFF08\u8BE5\u77E5\u8BC6\u70B9\u4E0B\u4EC5\u6B64\u4E00\u5F20\uFF09" });
+  }
+  if (!draft.dateStamp && CHANGEABLE.test(front + back)) {
+    issues.push({ ruleId: "L12", severity: "info", message: "\u6613\u53D8\u5185\u5BB9\u5EFA\u8BAE\u52A0 dateStamp\uFF08\u89C4\u521919\uFF09" });
+  }
+  const isCollectionAsk = /(列出|列举|有哪些|分别|包括|哪几种|几种)/.test(front);
+  const hasTolerance = /(至少|最少|任一|之一|任意|不限于)/.test(front + back);
+  if (isCollectionAsk && !hasTolerance) {
+    issues.push({
+      ruleId: "L16",
+      severity: "warn",
+      message: "\u5F00\u653E\u5F0F/\u96C6\u5408\u578B\u7B54\u6848\u7F3A\u5408\u683C\u7EBF\u6807\u6CE8\uFF08R5/R2 G7\uFF09\u2014\u2014front \u6CE8\u660E\u300C\u81F3\u5C11\u56DE\u5FC6 N \u79CD\u300D\uFF0C\u4F7F\u7B54\u5BF9\u53EF\u5224\u5B9A"
+    });
+  }
+  const frontClean = front.replace(/\s/g, "");
+  const backClean = back.replace(/\s/g, "");
+  const prefix = (draft.contextPrefix || "").replace(/[:：\s]/g, "");
+  if (prefix && prefix.length >= 2) {
+    if (backClean.includes(prefix) || frontClean.replace(prefix, "").includes(prefix)) {
+      issues.push({
+        ruleId: "L13",
+        severity: "warn",
+        message: "\u524D\u7F00\u6CC4\u9898\uFF1A\u524D\u7F00\u4E0E\u7B54\u6848/\u95EE\u9898\u5185\u5BB9\u91CD\u590D\uFF0C\u4F1A\u76F4\u63A5\u63D0\u793A\u7B54\u6848\uFF08\u89C4\u521916\uFF09"
+      });
+    }
+  }
+  const text = frontClean + backClean;
+  if (/[\u4e00-\u9fa5]{1}(?=(说|指出|认为|主张|提出|批评|表示|写道|在《))/.test(text) && !/[•·]|\(|（/.test(text.slice(0, 30))) {
+    issues.push({
+      ruleId: "L14",
+      severity: "warn",
+      message: "\u7591\u4F3C\u4EBA\u540D\u7F29\u7565\uFF08R16\uFF09\uFF1A\u8BF7\u786E\u8BA4\u4F7F\u7528\u5B8C\u6574\u5168\u540D\uFF08\u5982\u300C\u8FC8\u514B\u5C14\xB7\u6768\u300D\u800C\u975E\u300C\u6768\u300D\uFF09"
+    });
+  }
+  return issues;
+}
+var similaritySearch = {
+  async findSimilar(cardText, k = 3) {
+    return await window.similarityAPI?.find(cardText, k) ?? [];
+  }
+};
+var cardsApi = {
+  create: async (card) => await window.cardsAPI?.create(card) ?? { id: "" },
+  update: async (card) => await window.cardsAPI?.update(card) ?? false,
+  get: async (id) => await window.cardsAPI?.get(id) ?? null,
+  listDue: async () => await window.cardsAPI?.listDue() ?? [],
+  // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单；ReviewView/CardBrowser 消费）
+  todayQueue: async (now) => await window.cardsAPI?.todayQueue?.(now) ?? { cards: [], deferred: [], now: Date.now() },
+  listAll: async () => await window.cardsAPI?.listAll() ?? [],
+  remove: async (id) => await window.cardsAPI?.remove(id) ?? false,
+  // v22 撤销评分：review 传 fsrsBefore（评分前 FSRS 快照）方可撤销
+  review: async (cardId, fsrsState, rating, durationMs, fsrsBefore) => {
+    await window.cardsAPI?.review(cardId, fsrsState, rating, durationMs, fsrsBefore);
+  },
+  lastUndoableReview: async () => await window.cardsAPI?.lastUndoableReview(),
+  undoReview: async () => await window.cardsAPI?.undoReview(),
+  // v23（§4.4.9）：persist 失败后的纯持久化重试（只重试持久化，绝不重执行业务 mutation）
+  persistNow: async () => await window.cardsAPI?.persistNow() ?? false,
+  skip: async (cardId) => {
+    await window.cardsAPI?.skip(cardId);
+  },
+  setSuspended: async (id, suspended, reason) => await window.cardsAPI?.setSuspended(id, suspended, reason) ?? false,
+  updateLeech: async (id, patch) => await window.cardsAPI?.updateLeech(id, patch) ?? false,
+  resolveLeech: async (id, resolution, updates) => await window.cardsAPI?.resolveLeech(id, resolution, updates) ?? false,
+  listLeech: async () => await window.cardsAPI?.listLeech() ?? [],
+  addIssue: async (issue) => await window.issuesAPI?.add(issue) ?? { id: "" },
+  listIssues: async (cardId) => await window.issuesAPI?.list(cardId) ?? [],
+  resolveIssue: async (id) => await window.issuesAPI?.resolve(id) ?? false,
+  setBatchStatus: async (id, status) => {
+    await window.batchesAPI?.setStatus(id, status);
+  }
+};
+function buildContrastCandidates(cards, baseId, baseDomain = [], cap = 500) {
+  const primary = baseDomain[0] || "";
+  const sameDomain = [];
+  const rest = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const c of cards) {
+    if (c.id === baseId) continue;
+    let text;
+    if (c.cardType === "cloze") text = parseCloze(c.frontMarkdown || c.noteText).render(null);
+    else if (c.cardType === "imageOcclusion") text = `[\u56FE\u7247\u5361] ${c.backMarkdown || c.noteText || ""}`;
+    else text = c.frontMarkdown || c.noteText;
+    text = text.replace(/\s+/g, " ").trim().slice(0, 50);
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    (primary && c.domain && c.domain[0] === primary ? sameDomain : rest).push(text);
+  }
+  return [...sameDomain, ...rest].slice(0, cap);
+}
+async function generateContrastDrafts(base, onProgress, onThinking) {
+  const all = await cardsApi.listAll();
+  const candidates = buildContrastCandidates(all, base.id ?? "", base.domain ?? []);
+  if (candidates.length === 0) return { batchId: "", drafts: [] };
+  const material = [base.front, base.back].filter(Boolean).join("\n");
+  const focus = [
+    "\u8FD9\u662F\u5BF9\u6BD4\u5361\u751F\u6210\uFF1A\u4E0A\u9762\u7684\u3010\u6750\u6599\u3011\u662F\u57FA\u51C6\u5361\uFF08A\uFF09\u7684\u5185\u5BB9\u3002",
+    "\u8BF7\u4ECE\u3010\u7528\u6237\u5DF2\u6709\u5361\u7247\u3011\u6E05\u5355\u4E2D\u9009\u51FA\u4E0E A \u6700\u6613\u6DF7\u7684\u4E00\u5F20\u4F5C\u4E3A B\u2014\u2014\u76F8\u4F3C\u4F46\u4E0D\u76F8\u540C\u3001\u590D\u4E60\u65F6\u5BB9\u6613\u7B54\u6DF7\u7684\u6982\u5FF5/\u8BBA\u8BC1/\u5B66\u8BF4\uFF0C",
+    "\u6392\u9664 A \u7684\u540C\u4E49\u6362\u76AE\u4E0E\u8868\u8FF0\u53D8\u4F53\uFF1B\u7136\u540E\u6309\u5BF9\u6BD4\u5361\u89C4\u5219\u4EA7\u4E09\u4EF6\u5957\uFF08A \u4E0E B \u7684\u533A\u522B / A \u7684\u5173\u952E\u7279\u5F81 / B \u7684\u5173\u952E\u7279\u5F81\uFF09\u3002",
+    "\u82E5\u6E05\u5355\u4E2D\u6CA1\u6709\u4E0E A \u5B58\u5728\u771F\u5B9E\u6DF7\u6DC6\u98CE\u9669\u7684\u5361\uFF0Ccards \u8FD4\u56DE\u7A7A\u6570\u7EC4\u5E76\u5728 blockReasons \u8BF4\u660E\uFF0C\u7981\u6B62\u786C\u51D1\u3002"
+  ].join("");
+  const { batchId, result } = await cardGenerator.generateCards(
+    material,
+    { title: base.title ?? void 0, existingCards: candidates, existingCardsLimit: candidates.length, focus },
+    "card-contrast",
+    onProgress,
+    onThinking
+  );
+  return { batchId, drafts: result.cards };
+}
+async function generateVocabDrafts(entry, sentence, onProgress, onThinking) {
+  const material = [
+    `\u3010\u8BCD\u5178\u6761\u76EE\u3011${entry.word}${entry.reading ? `\uFF08${entry.reading}\uFF09` : ""}${entry.pronunciation ? ` ${entry.pronunciation}` : ""}`,
+    `\u91CA\u4E49\uFF1A${entry.definitions.slice(0, 3).join("\uFF1B")}`,
+    entry.partOfSpeech?.length ? `\u8BCD\u6027\uFF1A${entry.partOfSpeech.join("/")}` : "",
+    `\u3010\u9605\u8BFB\u539F\u53E5\u3011${sentence}`,
+    `\u3010\u6765\u6E90\u3011${entry.source}`
+  ].filter(Boolean).join("\n");
+  const { batchId, result } = await cardGenerator.generateCards(
+    material,
+    { title: entry.source },
+    "card-vocab",
+    onProgress,
+    onThinking
+  );
+  return { batchId, drafts: result.cards };
+}
+function siblingKeyFor(opts) {
+  if (opts.explicitKey) return opts.explicitKey;
+  const genId = opts.genId ?? (() => globalThis.crypto?.randomUUID?.() ?? `r${Math.random().toString(36).slice(2)}`);
+  const ref = opts.contextRef;
+  if (ref?.documentId) {
+    const srcLen = (opts.sourceText ?? "").length;
+    const limit = Number.isInteger(opts.limit) && opts.limit > 0 ? opts.limit : 300;
+    if (srcLen > limit) return null;
+    const anchorPart = ref.extractId || `h${fnv1a(ref.anchorText || "")}`;
+    return `src:${ref.documentId}:${anchorPart}`;
+  }
+  if ((opts.splitCount ?? 1) > 1) return `act:split-${genId()}`;
+  return null;
+}
+function fnv1a(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+async function burySourceTextLimit() {
+  try {
+    const sb = await settingsStore.get("app", "siblingBury", null);
+    if (sb && Number.isInteger(sb.sourceTextLimit) && sb.sourceTextLimit > 0) return sb.sourceTextLimit;
+  } catch {
+  }
+  return 300;
+}
+async function createAcceptedCard(d, ctx = {}) {
+  const expanded = expandClozeDraft(d);
+  const siblingKey = siblingKeyFor({
+    explicitKey: ctx.siblingKey,
+    contextRef: ctx.contextRef,
+    sourceText: ctx.sourceText,
+    limit: await burySourceTextLimit(),
+    splitCount: expanded.length
+  });
+  const ids = [];
+  for (const dd of expanded) {
+    const cloze = dd.cardType === "cloze" ? dd.cloze || "" : "";
+    const card = {
+      noteText: dd.front || cloze,
+      cardType: dd.cardType || "qa",
+      frontMarkdown: dd.front || "",
+      backMarkdown: dd.back || "",
+      // 同答卡存 []（渲染端约定空=遮全部 ord）；分答拆卡后每张带 [自己的 ord]
+      clozeOrds: dd.clozeOrds ?? [],
+      occlusionJson: dd.occlusion ? { rects: dd.occlusion.rects, assetPath: dd.occlusion.assetPath, shapes: dd.occlusion.shapes ?? null, regionScope: dd.occlusion.regionScope } : null,
+      cardOrd: dd.ord ?? null,
+      contextPrefix: dd.contextPrefix || null,
+      contextRef: ctx.contextRef ?? null,
+      mnemonic: dd.mnemonic || null,
+      example: dd.example || null,
+      sourceRef: dd.sourceRef || (ctx.sourceTitle ? { title: ctx.sourceTitle } : null),
+      dateStamp: dd.dateStamp || null,
+      priority: dd.prioritySuggestion ?? 50,
+      tags: [],
+      domain: dd.domain ?? [],
+      knowledgePointId: dd.knowledgePointId || null,
+      // v41（K2-A，D38）：批次归组——AI 抽取归一的簇键（batch:<id>:<kp>）依据，消除跨材料 kp1 碰撞
+      genBatchId: ctx.genBatchId || null,
+      dictJson: ctx.dictJson ?? null,
+      // v46（M14-UM2，§4.18-10）：记忆溯源——校验成功落 {line, verified:true}；
+      // 校验失败但用户仍接受 = {line, verified:false}（浏览页标「来源存疑」，不自动改写）
+      memoryRefJson: dd.memoryRef ? { line: dd.memoryRef, verified: dd.memoryRefValid === true } : null,
+      siblingKey,
+      generatedBy: "ai"
+    };
+    const issues = lintCard({
+      front: card.frontMarkdown,
+      back: card.backMarkdown,
+      cardType: card.cardType,
+      cloze,
+      occlusion: card.occlusionJson ? { assetPath: card.occlusionJson.assetPath, rects: card.occlusionJson.rects } : null,
+      contextPrefix: card.contextPrefix,
+      sourceRef: card.sourceRef,
+      dateStamp: card.dateStamp,
+      knowledgePointId: card.knowledgePointId
+    });
+    const created = await cardsApi.create(card);
+    ids.push(created.id);
+    for (const issue of issues) {
+      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
+    }
+    const similar = await similaritySearch.findSimilar(card.frontMarkdown || cloze, 2);
+    if (similar.length > 0) {
+      await cardsApi.addIssue({
+        cardId: created.id,
+        ruleId: "S1",
+        severity: "warn",
+        message: `\u4E0E\u5DF2\u6709\u5361\u76F8\u4F3C\uFF08${Math.round(similar[0].score * 100)}%\uFF09\uFF1A\u300C${similar[0].front.slice(0, 30)}\u2026\u300D`,
+        source: "lint"
+      });
+    }
+  }
+  if (ids.length) {
+    const sources = expanded.map((dd) => ({
+      knowledgePointId: String(dd.knowledgePointId || "").trim(),
+      genBatchId: ctx.genBatchId || null,
+      documentId: ctx.contextRef?.documentId || null
+    })).filter((s) => s.knowledgePointId);
+    if (sources.length) void autoQueueKpAiProcessing(sources);
+  }
+  return ids;
+}
+function hasSourceAnchor(ref) {
+  if (!ref || !ref.documentId) return false;
+  if (ref.imageSource === "library") return false;
+  if (ref.cfi || ref.pageIndex != null || ref.chapterIndex != null) return true;
+  if (ref.anchorText && ref.anchorText.trim()) return true;
+  if (typeof ref.anchorRatio === "number" && ref.anchorRatio > 0) return true;
+  if (ref.imageAnchor && (ref.imageAnchor.alt || ref.imageAnchor.contextText)) return true;
+  return false;
+}
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  MATERIAL_ROUTES,
+  buildContrastCandidates,
+  burySourceTextLimit,
+  cardGenerator,
+  cardsApi,
+  createAcceptedCard,
+  detectMaterialType,
+  detectMode,
+  expandClozeDraft,
+  extractClozeAnswer,
+  extractClozeAnswers,
+  extractJson,
+  generateContrastDrafts,
+  generateVocabDrafts,
+  hasSourceAnchor,
+  lintCard,
+  parseCloze,
+  parseFollowUps,
+  siblingKeyFor,
+  similaritySearch
+});

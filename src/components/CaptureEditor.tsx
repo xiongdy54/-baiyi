@@ -1,0 +1,333 @@
+// 快速记录编辑器（v36，M8-A，§6.5.2）——「草稿-发送」协议的渲染端。
+//
+// 契约（用户 2026-09-14 拍板，D34）：
+//  · 输入即自动保存（防抖 1.2s → 主进程内存库；磁盘由主进程节流落盘）——**永不丢**；
+//  · 按「发送」（或 Ctrl+Enter）→ 当前全部内容定格为日记里的**一条**，编辑器清空可继续写；
+//  · 不按发送而失焦 → 窗口隐藏，草稿保留，再呼出**继续向下写**；
+//  · 跨日：非今日的旧草稿默认不混入今天的输入，改由顶部提示条提供「继续写 / 丢弃」。
+import { useCallback, useEffect, useRef, useState } from "react";
+import { formatClock, journalDateLabel, todayJournalDate, type JournalEntry } from "../lib/journal";
+
+const AUTOSAVE_DEBOUNCE_MS = 1200;
+const TOAST_MS = 2600;
+
+type SaveState = "idle" | "typing" | "saved" | "error";
+
+// 捕获窗口是**长生命周期的单例**（首次呼出创建后只隐藏不销毁），故主题/强调色不能只在启动时读一次——
+// 每次呼出都重读（用户中途切了主题，下次呼出必须一致；main 侧同时更新窗口底色防白闪）。
+export async function applyCaptureAppearance(): Promise<void> {
+  try {
+    const mode = (await window.settingsAPI?.get("theme", "mode")) as string | undefined;
+    document.body.classList.toggle("theme-dark", mode === "dark");
+    document.body.classList.toggle("theme-light", mode !== "dark");
+    const accent = (await window.settingsAPI?.get("app", "accentColor")) as string | undefined;
+    if (typeof accent === "string" && accent.trim()) {
+      document.documentElement.style.setProperty("--accent", accent);
+      document.documentElement.style.setProperty("--interactive-accent", accent);
+    } else {
+      document.documentElement.style.removeProperty("--accent");
+      document.documentElement.style.removeProperty("--interactive-accent");
+    }
+  } catch {
+    document.body.classList.add("theme-light");
+  }
+}
+
+export default function CaptureEditor() {
+  const [text, setText] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [today, setToday] = useState(todayJournalDate());
+  const [todayCount, setTodayCount] = useState(0);
+  const [foreignDraft, setForeignDraft] = useState<JournalEntry | null>(null);
+  const [continuingForeign, setContinuingForeign] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const debounceRef = useRef<number | null>(null);
+  const toastRef = useRef<number | null>(null);
+  const textRef = useRef("");
+  const dirtyRef = useRef(false); // 有尚未送出的输入（决定失焦/隐藏前是否要补一次保存）
+  const sendingRef = useRef(false); // 发送并发闸（ref 同步，双击不会发出两条）
+
+  const focusEditor = useCallback(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.focus();
+    try {
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+    } catch {
+      /* 忽略：非致命 */
+    }
+  }, []);
+
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    if (toastRef.current) window.clearTimeout(toastRef.current);
+    toastRef.current = window.setTimeout(() => setToast(null), TOAST_MS);
+  }, []);
+
+  // 载入当日视图：条数 + 草稿。adoptDraft=呼出/首帧时把草稿内容接进编辑器（本地有未保存输入时不覆盖）
+  const reload = useCallback(async (adoptDraft: boolean) => {
+    const api = window.captureAPI;
+    if (!api) return;
+    const day = await api.day();
+    setToday(day.date);
+    setTodayCount(day.count);
+    const draft = day.draft;
+    if (draft && draft.entryDate === day.date) {
+      setForeignDraft(null);
+      setContinuingForeign(false);
+      if (adoptDraft && !dirtyRef.current) {
+        setText(draft.contentMarkdown);
+        textRef.current = draft.contentMarkdown;
+        setSaveState(draft.contentMarkdown.trim() ? "saved" : "idle");
+        setSavedAt(draft.updatedAt);
+      }
+    } else if (draft) {
+      // 跨日草稿：不混稿、但绝不隐身（顶部提示条提供继续写 / 丢弃）
+      setForeignDraft(draft);
+      setContinuingForeign(false);
+      if (adoptDraft && !dirtyRef.current) {
+        setText("");
+        textRef.current = "";
+        setSaveState("idle");
+        setSavedAt(null);
+      }
+    } else {
+      setForeignDraft(null);
+      setContinuingForeign(false);
+      if (adoptDraft && !dirtyRef.current) {
+        setText("");
+        textRef.current = "";
+        setSaveState("idle");
+        setSavedAt(null);
+      }
+    }
+  }, []);
+
+  const save = useCallback(async () => {
+    const api = window.captureAPI;
+    if (!api) return;
+    const value = textRef.current;
+    try {
+      const res = await api.draftSave(value);
+      dirtyRef.current = false;
+      setSaveState(value.trim() ? "saved" : "idle");
+      setSavedAt(Date.now());
+      if (res?.entry && res.entry.entryDate !== todayJournalDate()) setForeignDraft(res.entry);
+    } catch {
+      setSaveState("error");
+    }
+  }, []);
+
+  const flush = useCallback(async () => {
+    if (debounceRef.current) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (dirtyRef.current) await save();
+  }, [save]);
+
+  const send = useCallback(async () => {
+    const api = window.captureAPI;
+    const value = textRef.current;
+    if (!api || sendingRef.current || !value.trim()) return;
+    if (debounceRef.current) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      const res = await api.draftSend(value);
+      dirtyRef.current = false;
+      setText("");
+      textRef.current = "";
+      setSaveState("idle");
+      setSavedAt(null);
+      setForeignDraft(null);
+      setContinuingForeign(false);
+      setConfirmDiscard(false);
+      const day = await api.day();
+      setToday(day.date);
+      setTodayCount(day.count);
+      showToast(`已记入 ${journalDateLabel(res.entry.entryDate)} 日记 · ${formatClock(res.entry.sentAt || Date.now())}`);
+      focusEditor();
+    } catch {
+      setSaveState("error");
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }, [focusEditor, showToast]);
+
+  function handleChange(value: string) {
+    setText(value);
+    textRef.current = value;
+    dirtyRef.current = true;
+    setSaveState("typing");
+    setConfirmDiscard(false);
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      debounceRef.current = null;
+      void save();
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }
+
+  // Esc 隐藏（先把待保存输入补一次，绝不因隐藏而丢字）；Ctrl+Enter 发送
+  async function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      await flush();
+      await window.captureAPI?.hide();
+      return;
+    }
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      await send();
+    }
+  }
+
+  // 首帧：载入草稿（有今日草稿则继续写）→ 渲染完成 → 通知主进程「就绪」→ 主进程才显示窗口
+  useEffect(() => {
+    let cancelled = false;
+    void reload(true).then(() => {
+      if (cancelled) return;
+      requestAnimationFrame(() => window.captureAPI?.ready());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [reload]);
+
+  // 每次呼出：重读外观（主题/强调色可能已变）→ 刷新当日条数与草稿（隐藏期间可能已在主窗口编辑过）
+  // → 聚焦、光标置末尾
+  useEffect(() => {
+    const api = window.captureAPI;
+    if (!api) return;
+    return api.onShown(() => {
+      void applyCaptureAppearance()
+        .then(() => reload(true))
+        .then(() => focusEditor());
+    });
+  }, [focusEditor, reload]);
+
+  // 失焦（主进程会隐藏窗口）：立即补一次保存，不让防抖窗口吃掉最后几个字
+  useEffect(() => {
+    const onBlur = () => {
+      void flush();
+    };
+    window.addEventListener("blur", onBlur);
+    return () => window.removeEventListener("blur", onBlur);
+  }, [flush]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+      if (toastRef.current) window.clearTimeout(toastRef.current);
+    };
+  }, []);
+
+  function continueForeignDraft() {
+    if (!foreignDraft) return;
+    setText(foreignDraft.contentMarkdown);
+    textRef.current = foreignDraft.contentMarkdown;
+    dirtyRef.current = false;
+    setContinuingForeign(true);
+    setSaveState("saved");
+    setSavedAt(foreignDraft.updatedAt);
+    focusEditor();
+  }
+
+  async function discardForeignDraft() {
+    if (!foreignDraft) return;
+    if (!confirmDiscard) {
+      setConfirmDiscard(true);
+      return;
+    }
+    await window.captureAPI?.discardDraft(foreignDraft.id);
+    setForeignDraft(null);
+    setContinuingForeign(false);
+    setConfirmDiscard(false);
+    showToast("已丢弃该草稿");
+  }
+
+  const statusText =
+    saveState === "error"
+      ? "保存失败，稍后重试"
+      : saveState === "typing"
+        ? "输入中…"
+        : saveState === "saved" && savedAt
+          ? `已保存 ${formatClock(savedAt)}`
+          : "输入即自动保存";
+
+  return (
+    <div className="cap-shell">
+      <header className="cap-header">
+        <span className="cap-title">快速记录</span>
+        <span className="cap-meta mono">
+          {journalDateLabel(today)} · 今日已记 {todayCount} 条
+        </span>
+      </header>
+
+      {foreignDraft && !continuingForeign && (
+        <div className="cap-notice">
+          <span className="cap-notice-text">
+            {journalDateLabel(foreignDraft.entryDate)} 有未发送草稿
+          </span>
+          <span className="cap-notice-actions">
+            <button className="cap-link" onClick={continueForeignDraft}>
+              继续写
+            </button>
+            <button
+              className={`cap-link${confirmDiscard ? " cap-link-danger" : ""}`}
+              onClick={() => void discardForeignDraft()}
+            >
+              {confirmDiscard ? "确认丢弃" : "丢弃"}
+            </button>
+          </span>
+        </div>
+      )}
+      {continuingForeign && foreignDraft && (
+        <div className="cap-notice">
+          <span className="cap-notice-text">
+            正在续写 {journalDateLabel(foreignDraft.entryDate)} 的草稿 · 发送后归入那天
+          </span>
+        </div>
+      )}
+
+      <textarea
+        ref={taRef}
+        className="cap-editor"
+        value={text}
+        onChange={(e) => handleChange(e.target.value)}
+        onKeyDown={(e) => void handleKeyDown(e)}
+        placeholder="随手写点什么…（支持 Markdown，输入即自动保存）"
+        spellCheck={false}
+        autoFocus
+      />
+
+      <footer className="cap-footer">
+        <span className={`cap-status${saveState === "error" ? " cap-status-error" : ""}`}>
+          <span
+            className={`cap-dot${saveState === "saved" ? " on" : ""}${saveState === "typing" ? " typing" : ""}${
+              saveState === "error" ? " err" : ""
+            }`}
+          />
+          {statusText}
+        </span>
+        <span className="cap-actions">
+          {toast && <span className="cap-toast">{toast}</span>}
+          <span className="cap-hint mono">Ctrl+Enter 发送 · Esc 隐藏</span>
+          <button className="btn btn-primary btn-sm" disabled={!text.trim() || sending} onClick={() => void send()}>
+            发送
+          </button>
+        </span>
+      </footer>
+    </div>
+  );
+}

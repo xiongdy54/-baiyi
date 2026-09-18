@@ -42,7 +42,11 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   readFileBytes: (filePath) => ipcRenderer.invoke("library:readFileBytes", filePath),
   createFromHtml: (payload) => ipcRenderer.invoke("library:createFromHtml", payload),
   createFromBookFile: (payload) => ipcRenderer.invoke("library:createFromBookFile", payload),
-  readEbookFile: (id) => ipcRenderer.invoke("library:readEbookFile", id)
+  readEbookFile: (id) => ipcRenderer.invoke("library:readEbookFile", id),
+  // v38（D35）：书籍语言属性（查词语言路由的书籍级信号）
+  setItemLang: (id, lang) => ipcRenderer.invoke("library:setItemLang", id, lang),
+  // v45.1：书架悬停改名
+  setItemTitle: (id, title) => ipcRenderer.invoke("library:setItemTitle", id, title)
 });
 
 contextBridge.exposeInMainWorld("workflowAPI", {
@@ -57,6 +61,8 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   update: (card) => ipcRenderer.invoke("cards:update", card),
   get: (id) => ipcRenderer.invoke("cards:get", id),
   listDue: () => ipcRenderer.invoke("cards:listDue"),
+  // v34（M12，§4.2-20）：今日队列视图 {cards, deferred[]}（同源暂缓清单含延后原因）
+  todayQueue: (now) => ipcRenderer.invoke("cards:todayQueue", now),
   listAll: () => ipcRenderer.invoke("cards:listAll"),
   remove: (id) => ipcRenderer.invoke("cards:delete", id),
   review: (cardId, fsrsState, rating, durationMs, fsrsBefore) =>
@@ -131,6 +137,26 @@ contextBridge.exposeInMainWorld("optimizerAPI", {
   }
 });
 
+// M7 词典（v32，D31）：在线代理 + 本地查词 + 下载/导入 + 缓存（渲染层不直连外网）
+contextBridge.exposeInMainWorld("dictAPI", {
+  lookupOnline: (providerId, word) => ipcRenderer.invoke("dict:lookupOnline", providerId, word),
+  lookupLocal: (word) => ipcRenderer.invoke("dict:lookupLocal", word),
+  sources: () => ipcRenderer.invoke("dict:sources"),
+  toggleSource: (id, enabled) => ipcRenderer.invoke("dict:toggleSource", id, enabled),
+  removeSource: (id) => ipcRenderer.invoke("dict:removeSource", id),
+  cacheGet: (providerId, language, word) => ipcRenderer.invoke("dict:cacheGet", providerId, language, word),
+  cacheSet: (providerId, language, word, entry) => ipcRenderer.invoke("dict:cacheSet", providerId, language, word, entry),
+  pickFile: () => ipcRenderer.invoke("dict:pickFile"),
+  importFile: (filePath) => ipcRenderer.invoke("dict:importFile", filePath),
+  download: (item) => ipcRenderer.invoke("dict:download", item),
+  onDownloadProgress: (callback) => {
+    const handler = (_e, msg) => callback(msg);
+    ipcRenderer.on("dict:downloadProgress", handler);
+    return () => ipcRenderer.removeListener("dict:downloadProgress", handler);
+  }
+});
+
+
 // M2 数据备份与恢复
 contextBridge.exposeInMainWorld("backupAPI", {
   info: () => ipcRenderer.invoke("backup:info"),
@@ -156,3 +182,104 @@ contextBridge.exposeInMainWorld("aiAPI", {
     return () => ipcRenderer.removeListener("ai:stream", handler);
   }
 });
+
+// v36（M8-A，§4.2-21 / §6.5 / D34）：日记条目（第二输入通道读取面 + 日记页写入面）
+contextBridge.exposeInMainWorld("journalAPI", {
+  list: (filter) => ipcRenderer.invoke("journal:list", filter || {}),
+  dates: (opts) => ipcRenderer.invoke("journal:dates", opts || {}),
+  day: (date) => ipcRenderer.invoke("journal:day", date),
+  draft: () => ipcRenderer.invoke("journal:draft"),
+  create: (payload) => ipcRenderer.invoke("journal:create", payload),
+  update: (id, contentMarkdown) => ipcRenderer.invoke("journal:update", id, contentMarkdown),
+  remove: (id) => ipcRenderer.invoke("journal:delete", id),
+  // 与快速记录窗口同一条「发送」契约（日记页里的草稿行可直接发送）
+  draftSend: (contentMarkdown) => ipcRenderer.invoke("journal:draftSend", contentMarkdown),
+  flush: () => ipcRenderer.invoke("journal:flush"),
+  onChanged: (callback) => {
+    const handler = (_e, payload) => callback(payload);
+    ipcRenderer.on("journal:changed", handler);
+    return () => ipcRenderer.removeListener("journal:changed", handler);
+  }
+});
+
+// v36：全局快捷键组（快速记录 / 添加学习材料）——状态查询、重注册、以及快捷键的测试/设置页同源入口
+contextBridge.exposeInMainWorld("shortcutsAPI", {
+  status: () => ipcRenderer.invoke("shortcuts:status"),
+  apply: () => ipcRenderer.invoke("shortcuts:apply"),
+  toggleCapture: () => ipcRenderer.invoke("capture:toggle"),
+  hideCapture: () => ipcRenderer.invoke("capture:hide"),
+  requestAddMaterial: () => ipcRenderer.invoke("library:requestAdd"),
+  onOpenAddMaterial: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("library:openAddMaterial", handler);
+    return () => ipcRenderer.removeListener("library:openAddMaterial", handler);
+  }
+});
+
+// v40（K1，D37 / §4.2-23）：知识地基——KP / 关系 / 提案 / 外部 ID（KnowledgeBase 渲染层只持 API）
+contextBridge.exposeInMainWorld("knowledgeAPI", {
+  listPoints: (filter) => ipcRenderer.invoke("knowledge:listPoints", filter || {}),
+  getPoint: (id) => ipcRenderer.invoke("knowledge:getPoint", id),
+  createPoint: (payload) => ipcRenderer.invoke("knowledge:createPoint", payload),
+  updatePoint: (id, patch) => ipcRenderer.invoke("knowledge:updatePoint", id, patch),
+  mergePoints: (sourceId, targetId) => ipcRenderer.invoke("knowledge:mergePoints", sourceId, targetId),
+  unmergePoint: (id) => ipcRenderer.invoke("knowledge:unmergePoint", id),
+  listRelations: (filter) => ipcRenderer.invoke("knowledge:listRelations", filter || {}),
+  createRelation: (payload) => ipcRenderer.invoke("knowledge:createRelation", payload),
+  deleteRelation: (id) => ipcRenderer.invoke("knowledge:deleteRelation", id),
+  listRefs: (kpId) => ipcRenderer.invoke("knowledge:listRefs", kpId),
+  createRef: (payload) => ipcRenderer.invoke("knowledge:createRef", payload),
+  deleteRef: (id) => ipcRenderer.invoke("knowledge:deleteRef", id),
+  listProposals: (filter) => ipcRenderer.invoke("knowledge:listProposals", filter || {}),
+  resolveProposal: (id, accept, overridePayload) => ipcRenderer.invoke("knowledge:resolveProposal", id, accept, overridePayload || null),
+  migrationSuggestions: () => ipcRenderer.invoke("knowledge:migrationSuggestions"),
+  // v41（K2-A，D38）：AI 抽取归一与关系（输入装配/裁决在主进程；AI 调用由渲染层编排）
+  kpClusters: () => ipcRenderer.invoke("knowledge:kpClusters"),
+  kpExtractPrepare: (opts) => ipcRenderer.invoke("knowledge:kpExtractPrepare", opts || {}),
+  kpExtractApply: (rawExtraction, rawRelations) => ipcRenderer.invoke("knowledge:kpExtractApply", rawExtraction, rawRelations),
+  acceptAllPending: () => ipcRenderer.invoke("knowledge:acceptAllPending"),
+  // v43（K2-B）：KnowledgeLint K4/K7/K8 报告型检查
+  lint: () => ipcRenderer.invoke("knowledge:lint")
+});
+
+// v40（M8-B，§4.2-24）：AI 洞察 + Personal Meaning 候选（InsightEngine 渲染层编排面）
+contextBridge.exposeInMainWorld("insightsAPI", {
+  buildPackage: (opts) => ipcRenderer.invoke("insights:buildPackage", opts || {}),
+  createRun: (payload) => ipcRenderer.invoke("insights:create", payload),
+  completeRun: (id, extra) => ipcRenderer.invoke("insights:complete", id, extra || {}),
+  failRun: (id, errorText) => ipcRenderer.invoke("insights:fail", id, errorText),
+  getRun: (id) => ipcRenderer.invoke("insights:get", id),
+  listRuns: (opts) => ipcRenderer.invoke("insights:list", opts || {}),
+  setFeedback: (id, feedback) => ipcRenderer.invoke("insights:feedback", id, feedback),
+  deleteRun: (id) => ipcRenderer.invoke("insights:delete", id),
+  meaningList: (filter) => ipcRenderer.invoke("meaning:list", filter || {}),
+  meaningCreate: (payload) => ipcRenderer.invoke("meaning:create", payload),
+  meaningResolve: (id, status) => ipcRenderer.invoke("meaning:resolve", id, status),
+  meaningDelete: (id) => ipcRenderer.invoke("meaning:delete", id),
+  onChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("insight:changed", handler);
+    return () => ipcRenderer.removeListener("insight:changed", handler);
+  }
+});
+
+// v45（M14-UM1，D39 / §6.7）：用户记忆（编排与留痕在主进程；设置页 sec-memory 唯一入口）
+contextBridge.exposeInMainWorld("memoryAPI", {
+  status: () => ipcRenderer.invoke("memory:status"),
+  setEnabled: (payload) => ipcRenderer.invoke("memory:setEnabled", payload || {}),
+  backfillPreview: () => ipcRenderer.invoke("memory:backfillPreview"),
+  backfillStart: () => ipcRenderer.invoke("memory:backfillStart"),
+  backfillCancel: () => ipcRenderer.invoke("memory:backfillCancel"),
+  tidyNow: () => ipcRenderer.invoke("memory:tidyNow"),
+  openFolder: () => ipcRenderer.invoke("memory:openFolder"),
+  openFile: (name) => ipcRenderer.invoke("memory:openFile", name),
+  reset: () => ipcRenderer.invoke("memory:reset"),
+  // v46（M14-UM2）：制卡记忆接地检索（Stage A 宽召回在主进程；返回 {ok, block, hitTopics}）
+  retrieve: (payload) => ipcRenderer.invoke("memory:retrieve", payload || {}),
+  onChanged: (callback) => {
+    const handler = (_e, payload) => callback(payload);
+    ipcRenderer.on("memory:changed", handler);
+    return () => ipcRenderer.removeListener("memory:changed", handler);
+  }
+});
+

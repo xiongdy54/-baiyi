@@ -4495,7 +4495,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
   __export(paginator_exports, {
     Paginator: () => Paginator
   });
-  var wait, debounce, lerp, easeOutQuad, animate, uncollapse, makeRange, bisectNode, SHOW_ELEMENT, SHOW_TEXT, SHOW_CDATA_SECTION, FILTER_ACCEPT, FILTER_REJECT, FILTER_SKIP, filter2, getBoundingClientRect, getVisibleRange, selectionIsBackward, setSelectionTo, getDirection, getBackground, makeMarginals, setStylesImportant, View, Paginator;
+  var wait, debounce, lerp, easeOutQuad, animate, uncollapse, setSelectionTo, makeRange, bisectNode, SHOW_ELEMENT, SHOW_TEXT, SHOW_CDATA_SECTION, FILTER_ACCEPT, FILTER_REJECT, FILTER_SKIP, filter2, getBoundingClientRect, getVisibleRange, selectionIsBackward, getDirection, getBackground, makeMarginals, setStylesImportant, View, Paginator;
   var init_paginator = __esm({
     "vendor/foliate-js/paginator.js"() {
       "use strict";
@@ -4546,6 +4546,22 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         else if (endOffset > 1) range.setStart(endContainer, endOffset - 1);
         else return endContainer.parentNode;
         return range;
+      };
+      setSelectionTo = (target, collapse2) => {
+        let range;
+        if (target.startContainer) range = target.cloneRange();
+        else if (target.nodeType) {
+          range = document.createRange();
+          range.selectNode(target);
+        }
+        if (range) {
+          const sel = range.startContainer?.ownerDocument?.defaultView?.getSelection?.();
+          if (!sel) return;
+          sel.removeAllRanges();
+          if (collapse2 === -1) range.collapse(true);
+          else if (collapse2 === 1) range.collapse();
+          sel.addRange(range);
+        }
       };
       makeRange = (doc, node, start, end = start) => {
         const range = doc.createRange();
@@ -4627,23 +4643,6 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         range.setEnd(sel.focusNode, sel.focusOffset);
         return range.collapsed;
       };
-      setSelectionTo = (target, collapse2) => {
-        let range;
-        if (target.startContainer) range = target.cloneRange();
-        else if (target.nodeType) {
-          range = document.createRange();
-          range.selectNode(target);
-        }
-        if (range) {
-          const sel = range.startContainer.ownerDocument.defaultView.getSelection();
-          if (sel) {
-            sel.removeAllRanges();
-            if (collapse2 === -1) range.collapse(true);
-            else if (collapse2 === 1) range.collapse();
-            sel.addRange(range);
-          }
-        }
-      };
       getDirection = (doc) => {
         const { defaultView } = doc;
         const { writingMode, direction } = defaultView.getComputedStyle(doc.body);
@@ -4677,6 +4676,10 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         #column = true;
         #size;
         #layout = {};
+        // [local-patch v37] 在途加载的 settle 句柄：iframe 被移除（并发导航换 view）或 load
+        // 监听器中途抛错时，load promise 必须立刻 settle——否则等待方（#display → #turnPage）
+        // 永久挂起、#locked 无法释放，翻页/目录/滚轮全部失灵（现场表现为阅读器整体假死）
+        #loadSettle = null;
         constructor({ container, onExpand }) {
           this.container = container;
           this.onExpand = onExpand;
@@ -4711,23 +4714,30 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         }
         async load(src, afterLoad, beforeRender) {
           if (typeof src !== "string") throw new Error(`${src} is not string`);
-          return new Promise((resolve) => {
+          return new Promise((resolve, reject) => {
+            this.#loadSettle = { resolve, reject };
             this.#iframe.addEventListener("load", () => {
-              const doc = this.document;
-              afterLoad?.(doc);
-              this.#iframe.style.display = "block";
-              const { vertical, rtl } = getDirection(doc);
-              const background = getBackground(doc);
-              this.#iframe.style.display = "none";
-              this.#vertical = vertical;
-              this.#rtl = rtl;
-              this.#contentRange.selectNodeContents(doc.body);
-              const layout = beforeRender?.({ vertical, rtl, background });
-              this.#iframe.style.display = "block";
-              this.render(layout);
-              this.#observer.observe(doc.body);
-              doc.fonts.ready.then(() => this.expand());
-              resolve();
+              const settle = this.#loadSettle;
+              this.#loadSettle = null;
+              try {
+                const doc = this.document;
+                afterLoad?.(doc);
+                this.#iframe.style.display = "block";
+                const { vertical, rtl } = getDirection(doc);
+                const background = getBackground(doc);
+                this.#iframe.style.display = "none";
+                this.#vertical = vertical;
+                this.#rtl = rtl;
+                this.#contentRange.selectNodeContents(doc.body);
+                const layout = beforeRender?.({ vertical, rtl, background });
+                this.#iframe.style.display = "block";
+                this.render(layout);
+                this.#observer.observe(doc.body);
+                doc.fonts.ready.then(() => this.expand());
+                settle?.resolve();
+              } catch (e3) {
+                settle?.reject(e3);
+              }
             }, { once: true });
             this.#iframe.src = src;
           });
@@ -4860,6 +4870,9 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         }
         destroy() {
           if (this.document) this.#observer.unobserve(this.document.body);
+          const settle = this.#loadSettle;
+          this.#loadSettle = null;
+          settle?.reject(new Error("view destroyed while loading section"));
         }
       };
       Paginator = class extends HTMLElement {
@@ -5376,7 +5389,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         }
         async #display(promise) {
           const { index, src, anchor, onLoad, select } = await promise;
-          this.#index = index;
+          if (index != null) this.#index = index;
           const hasFocus = this.#view?.document?.hasFocus();
           if (src) {
             const view = this.#createView();
@@ -5392,6 +5405,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
             };
             const beforeRender = this.#beforeRender.bind(this);
             await view.load(src, afterLoad, beforeRender);
+            if (this.#view !== view) return;
             this.dispatchEvent(new CustomEvent("create-overlayer", {
               detail: {
                 doc: view.document,
@@ -5426,7 +5440,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         async goTo(target) {
           if (this.#locked) return;
           const resolved = await target;
-          if (this.#canGoToIndex(resolved.index)) return this.#goTo(resolved);
+          if (resolved != null && this.#canGoToIndex(resolved.index)) return this.#goTo(resolved);
         }
         #scrollPrev(distance) {
           if (!this.#view) return true;
@@ -5467,17 +5481,22 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           for (let index = this.#index + dir; this.#canGoToIndex(index); index += dir)
             if (this.sections[index]?.linear !== "no") return index;
         }
+        // [local-patch v37] try/finally 保证 #locked 必然释放：翻页链路上任何一环抛错
+        // （章节加载失败、iframe 被并发导航替换等）若吞掉解锁，翻页/目录/滚轮将全部永久失灵
         async #turnPage(dir, distance) {
           if (this.#locked) return;
           this.#locked = true;
-          const prev = dir === -1;
-          const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance));
-          if (shouldGo) await this.#goTo({
-            index: this.#adjacentIndex(dir),
-            anchor: prev ? () => 1 : () => 0
-          });
-          if (shouldGo || !this.hasAttribute("animated")) await wait(100);
-          this.#locked = false;
+          try {
+            const prev = dir === -1;
+            const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance));
+            if (shouldGo) await this.#goTo({
+              index: this.#adjacentIndex(dir),
+              anchor: prev ? () => 1 : () => 0
+            });
+            if (shouldGo || !this.hasAttribute("animated")) await wait(100);
+          } finally {
+            this.#locked = false;
+          }
         }
         prev(distance) {
           return this.#turnPage(-1, distance);
@@ -6946,6 +6965,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     view.style.width = "100%";
     view.style.height = "100%";
     host.appendChild(view);
+    const normWs = (s3) => (s3 || "").replace(/\s+/g, " ").trim();
     const relocateHandlers = /* @__PURE__ */ new Set();
     const linkHandlers = /* @__PURE__ */ new Set();
     const pointerHandlers = /* @__PURE__ */ new Set();
@@ -7022,7 +7042,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         r3.setAttribute("flow", mode.flow === "scrolled" ? "scrolled" : "paginated");
         r3.setAttribute("max-column-count", mode.flow === "paged" && mode.spread ? "2" : "1");
       }
-      if (a3?.margin != null) r3.setAttribute("margin", String(a3.margin));
+      if (a3?.margin != null) r3.setAttribute("margin", `${a3.margin}px`);
     };
     const applyToHost = (a3) => {
       host.style.setProperty("--reader-bg", a3.bgColor ?? "transparent");
@@ -7127,6 +7147,39 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         const r3 = view.renderer;
         if (!r3) return null;
         return getSelectionFromContents(view, r3.getContents());
+      },
+      // v35 正文图片定位：按 alt/周边文字在各章节 DOM 找回原图并滚到可见，返回宿主坐标框。
+      // 引擎 iframe 对宿主跨源，DOM 操作只能在本 adapter 内做（kernel.locateImage 契约）。
+      async locateImage(query) {
+        const alt = normWs(query.alt || "");
+        const ctxKey = normWs(query.contextText || "").slice(0, 40);
+        if (!alt && !ctxKey) return null;
+        const candidates = [];
+        docs.forEach((doc2) => {
+          Array.from(doc2.querySelectorAll("img")).forEach((img2) => {
+            let score = 0;
+            const imgAlt = normWs(img2.getAttribute("alt") || "");
+            if (alt && imgAlt && (imgAlt === alt || imgAlt.includes(alt) || alt.includes(imgAlt))) score += 4;
+            if (ctxKey) {
+              const around = normWs(extractImageContext(doc2, img2) || "");
+              if (around && around.includes(ctxKey)) score += 2;
+            }
+            if (score > 0) candidates.push({ img: img2, doc: doc2, score });
+          });
+        });
+        if (candidates.length === 0) return null;
+        candidates.sort((a3, b3) => b3.score - a3.score);
+        const { img, doc } = candidates[0];
+        try {
+          img.scrollIntoView({ block: "center" });
+        } catch {
+          return null;
+        }
+        await new Promise((r4) => window.setTimeout(r4, 400));
+        const r3 = img.getBoundingClientRect();
+        if (!r3 || r3.width === 0 && r3.height === 0) return null;
+        const topLeft = pointerToHost(doc, r3.left, r3.top);
+        return { rect: { x: topLeft.x, y: topLeft.y, width: r3.width, height: r3.height } };
       },
       getSelectionGeometry() {
         const r3 = view.renderer;

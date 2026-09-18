@@ -1,6 +1,32 @@
 const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
+
+// 测试隔离开关（仅 e2e/GUI 脚本设置 env 时生效）：词典导入/删除会写主库 dict_sources，
+// e2e 若共用真实 userData 会误删用户已装词典（2026-09-14 实测教训）——spawn 时传临时目录。
+// v34（M12 实测补记）：本块必须在 require("./db") **之前**——db.js 顶部 require 的 settingsStore
+// 在模块加载时固化 SETTINGS_FILE=app.getPath("userData")，晚于 setPath 会让 db 侧读默认目录的
+// settings.json、main 侧写隔离目录（M12 GUI「设置已写入但队列无响应」的根因：两侧 settings 分叉）。
+if (process.env.M7_TEST_USERDATA) {
+  app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));
+}
+
+// v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
+// 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
+let mainWindow = null;
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  });
+}
+
 const {
   initDb,
   listItems,
@@ -20,6 +46,7 @@ const {
   updateCard,
   getCard,
   listDueCards,
+  computeTodayQueue,
   listAllCards,
   deleteCard,
   saveReview,
@@ -43,6 +70,14 @@ const { getAIConfig, setAIConfig, chatStream, testConnection, listModels } = req
 const dbModule = require("./db");
 const optimizer = require("./optimizer");
 const backup = require("./backup");
+// v45（M14-UM1，D39）：用户记忆——文件树真源（memoryStore）+ 整理编排（memoryTidy，AI 调用经
+// memoryChat 包装 chatStream；提示词文本只来自播种模板 user-memory，主进程不写提示词正文）
+const memoryStore = require("./memoryStore");
+const memoryTidy = require("./memoryTidy");
+const memoryRetrieve = require("./memoryRetrieve");
+const dictStore = require("./dictStore");
+const quickCapture = require("./quickCapture");
+const { journalDateOf } = require("./journalTime");
 const {
   wordToMarkdown,
   decodeTextBytes,
@@ -85,6 +120,14 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
   writeSettings(all);
+  // v36（M8-A）：全局快捷键组改动即时生效（重注册；被占用等失败经 shortcuts:status 在设置页可见）
+  if (scope === "app" && key === "globalShortcuts") {
+    try {
+      quickCapture.applyGlobalShortcuts();
+    } catch (err) {
+      console.error("[quickCapture] 重新注册全局快捷键失败：", err);
+    }
+  }
   return true;
 });
 
@@ -112,6 +155,10 @@ ipcMain.handle("library:createFromPaste", (_e, title, markdown) => {
 });
 
 ipcMain.handle("library:delete", (_e, id) => deleteItem(String(id)));
+
+// v38（D35）：书籍语言属性——查词语言路由的书籍级信号
+ipcMain.handle("library:setItemLang", (_e, id, lang) => dbModule.setLibraryItemLang(String(id), String(lang || "")));
+ipcMain.handle("library:setItemTitle", (_e, id, title) => dbModule.setLibraryItemTitle(String(id), String(title ?? "")));
 
 ipcMain.handle("library:pickEpub", async () => {
   const result = await dialog.showOpenDialog({
@@ -355,6 +402,8 @@ ipcMain.handle("cards:create", (_e, card) => createCard(card || {}));
 ipcMain.handle("cards:update", (_e, card) => updateCard(card || {}));
 ipcMain.handle("cards:get", (_e, id) => getCard(String(id)));
 ipcMain.handle("cards:listDue", () => listDueCards());
+// v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试
+ipcMain.handle("cards:todayQueue", (_e, now) => computeTodayQueue(Number.isFinite(now) ? Number(now) : undefined));
 ipcMain.handle("cards:listAll", () => listAllCards());
 ipcMain.handle("cards:delete", (_e, id) => deleteCard(String(id)));
 ipcMain.handle("cards:review", (_e, cardId, fsrsState, rating, durationMs, fsrsBefore) =>
@@ -612,8 +661,477 @@ ipcMain.on("ai:chat", (e, requestId, messages, temperature) => {
   }
 });
 
-function createWindow() {
-  // 防重入：已存在窗口时不再创建（macOS activate 与启动路径共用此函数）
+// ---------- M7 词典（v32，D31）：在线代理 + 本地查词 + 下载/导入 + 缓存 ----------
+// 在线走主进程 net.fetch（继承系统代理；dictionaryapi.dev 实测直连超时，需代理兜底；
+// Jisho 非官方 API 已下线移除，日语由 JMDict 本地包承担）。词条存独立 dictionary.db（dictDb）。
+const dictDb = require("./dictDb");
+
+ipcMain.handle("dict:lookupOnline", async (_e, providerId, word) => {
+  return dictStore.lookupOnline(String(providerId), String(word));
+});
+
+ipcMain.handle("dict:lookupLocal", async (_e, word) => {
+  const sources = dbModule.listDictSources();
+  const enabled = new Set(sources.filter((s) => s.enabled).map((s) => s.id));
+  const nameById = new Map(sources.map((s) => [s.id, s.name]));
+  // v38（D35）：来源词典语言随命中返回，渲染层 pickLocalHit 按语言优先取命中
+  const langById = new Map(sources.map((s) => [s.id, s.lang || ""]));
+  const rows = (await dictDb.lookup(String(word))).filter((r) => enabled.has(r.source_id));
+  return rows.map((r) => {
+    // ECDICT 的 pos 列实为词频码（如「j:93/n:7」）——仅保留干净词性（n./v./adj. 等），垃圾码不入弹窗与卡面
+    const posRaw = String(r.pos || "").trim();
+    const cleanPos = /^[a-z]+(\.[a-z]+)*$/i.test(posRaw) ? posRaw : "";
+    return {
+      word: r.headword,
+      reading: null,
+      pronunciation: r.phonetic || null,
+      audio: null,
+      definitions: String(r.html || "").split(/\n|\\n/).filter(Boolean).slice(0, 6),
+      partOfSpeech: cleanPos ? [cleanPos] : [],
+      examples: [],
+      source: nameById.get(r.source_id) || "本地词典",
+      sourceLanguage: langById.get(r.source_id) || "",
+      language: "",
+      normalizedWord: String(word),
+      capabilities: ["definition", ...(r.phonetic ? ["pronunciation"] : [])],
+    };
+  });
+});
+
+ipcMain.handle("dict:sources", () => dbModule.listDictSources());
+ipcMain.handle("dict:toggleSource", (_e, id, enabled) => dbModule.setDictSourceEnabled(String(id), !!enabled));
+ipcMain.handle("dict:removeSource", async (_e, id) => {
+  await dictDb.removeSource(String(id));
+  return dbModule.removeDictSource(String(id));
+});
+ipcMain.handle("dict:cacheGet", (_e, providerId, language, word) => dbModule.getDictCache(String(providerId), String(language), String(word)));
+ipcMain.handle("dict:cacheSet", (_e, providerId, language, word, entry) => dbModule.setDictCache(String(providerId), String(language), String(word), entry));
+
+// 词典文件/目录 → 词条行（下载与手动导入共用路由）：.csv(ECDICT)/.u8(CC-CEDICT)/.gz(嗅探：kaikki JSONL/JMdict XML/ECDICT CSV)
+// /.zip(内含 db/u8/csv)/.db/.sqlite(jamdict schema 探测 → ECDICT)/.jsonl(kaikki)/StarDict 三件套目录/.dsl
+async function importDictRowsFromPath(p, onScanProgress = null) {
+  const stat = fs.statSync(p);
+  const lower = p.toLowerCase();
+  if (stat.isDirectory()) {
+    return { rows: dictStore.starDictRowsFromDir(p), format: "stardict" };
+  }
+  const ext = path.extname(lower);
+  if (ext === ".csv") {
+    return { rows: dictStore.parseEcdictCsv(fs.readFileSync(p, "utf-8")), format: "ecdict-csv" };
+  }
+  if (ext === ".u8") {
+    return { rows: dictStore.parseCedictText(fs.readFileSync(p, "utf-8")), format: "cedict" };
+  }
+  if (ext === ".jsonl") {
+    // v38（D35）：kaikki zhwiktionary 原始提取（裸 jsonl；.jsonl.gz 落 .gz 分支嗅探）
+    return { rows: dictStore.parseKaikkiJsonlFile(p, onScanProgress), format: "kaikki-jsonl" };
+  }
+  if (ext === ".gz") {
+    // v38（D35）：kaikki 原始包 216MB gz 解压后 GB 级——先小样嗅探，kaikki 走流式，其余才整体解压
+    const head = dictStore.sniffGzHead(p);
+    if (head.startsWith("{") && head.includes('"lang_code"')) {
+      return { rows: dictStore.parseKaikkiJsonlFile(p, onScanProgress), format: "kaikki-jsonl" };
+    }
+    const text = dictStore.gunzipBestEffort(fs.readFileSync(p)).toString("utf-8");
+    if (text.includes("<JMdict>") || (text.startsWith("<?xml") && text.includes("<entry>"))) {
+      return { rows: dictStore.parseJmdictXml(text), format: "jmdict-xml" };
+    }
+    return { rows: dictStore.parseEcdictCsv(text), format: "ecdict-csv" };
+  }
+  if (ext === ".zip") {
+    const JSZip = require("jszip");
+    const zip = await JSZip.loadAsync(fs.readFileSync(p));
+    const names = Object.keys(zip.files).filter((n) => !zip.files[n].dir);
+    // 优先级：sqlite(ECDICT 完整版/jamdict-cn) > u8(CC-CEDICT) > csv > stardict 三件套散件不支持（zip 内不成目录）
+    const dbN = names.find((n) => /\.(db|sqlite)$/i.test(n));
+    if (dbN) {
+      const bytes = await zip.files[dbN].async("nodebuffer");
+      return await sqliteDictRows(bytes);
+    }
+    const u8N = names.find((n) => /\.u8$/i.test(n));
+    if (u8N) {
+      return { rows: dictStore.parseCedictText(await zip.files[u8N].async("string")), format: "cedict" };
+    }
+    const csvN = names.find((n) => /\.csv$/i.test(n));
+    if (csvN) {
+      return { rows: dictStore.parseEcdictCsv(await zip.files[csvN].async("string")), format: "ecdict-csv" };
+    }
+    throw new Error("zip 内未找到可识别的词典文件（.db/.u8/.csv）");
+  }
+  if (ext === ".db" || ext === ".sqlite") {
+    return await sqliteDictRows(fs.readFileSync(p));
+  }
+  if (ext === ".dsl") {
+    let text = "";
+    try {
+      text = fs.readFileSync(p, "utf-8");
+    } catch {
+      text = fs.readFileSync(p, "utf16le");
+    }
+    return { rows: dictStore.parseDsl(text), format: "dsl" };
+  }
+  throw new Error("不支持的词典格式（支持 .csv/.u8/.gz/.jsonl/.zip/.db/.dsl/StarDict 目录）");
+}
+
+// v38（D35）：sqlite 词典库路由——jamdict schema（Entry/SenseGloss，jamdict-cn 日→中）优先，其余按 ECDICT（word/translation）
+async function sqliteDictRows(bytes) {
+  const kind = await dictStore.detectSqliteKind(bytes);
+  if (kind === "jamdict") return { rows: dictStore.iterJamdictSqlite(bytes), format: "jamdict-sqlite" };
+  return { rows: dictStore.iterEcdictSqlite(bytes), format: "ecdict-sqlite" };
+}
+
+// 词条入库 + 来源登记（按名 upsert：重复下载/更新复用同一行，旧空行自愈）。
+// 先建索引、count>0 才登记来源——解析器为 async generator 免整体物化，0 词条不产生假来源（v32 修复）。
+async function indexDictSource({ name, format, path: filePath, url, rows, onProgress }) {
+  const existing = dbModule.listDictSources().find((s) => s.name === name);
+  const id = existing ? existing.id : crypto.randomUUID();
+  const { count, capped } = await dictDb.insertRows(id, rows, 3500000, onProgress);
+  if (count > 0) {
+    dbModule.upsertDictSource({ id, name, format, path: filePath, url: url || null, enabled: true, entryCount: count });
+  }
+  return { id, name, format, count, capped };
+}
+
+ipcMain.handle("dict:pickFile", () => dictStore.pickDictFile());
+ipcMain.handle("dict:importFile", async (_e, filePath) => {
+  const p = String(filePath || "");
+  if (!p) return null;
+  const { rows, format } = await importDictRowsFromPath(p);
+  const r = await indexDictSource({ name: path.basename(p), format, path: p, rows });
+  if (r.count === 0) throw new Error("未能从该文件中解析出词条");
+  return { ...r, parsed: true };
+});
+
+// 一键下载：直链（目录档已实测核验）→ 落盘 userData/dicts → 流式解析+建索引（进度实时上报）→ count>0 登记来源；
+// 状态语义：done=已建索引可查；saved=文件已下载但 0 词条（不登记来源，按钮保持可重试）
+ipcMain.handle("dict:download", async (e, item) => {
+  const { id, url, mirrorUrl, name } = item || {};
+  if (!url) throw new Error("该词典暂无一键下载地址");
+  const send = (pct, state, count) => {
+    try {
+      if (!e.sender.isDestroyed()) e.sender.send("dict:downloadProgress", { id, progress: pct, state, count });
+    } catch { /* 忽略 */ }
+  };
+  const urls = [url, mirrorUrl].filter(Boolean);
+  let lastErr = null;
+  for (const u of urls) {
+    try {
+      send(2, "downloading");
+      const res = await net.fetch(u, {
+        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36" },
+        signal: AbortSignal.timeout(120000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const dir = path.join(app.getPath("userData"), "dicts", String(id));
+      fs.mkdirSync(dir, { recursive: true });
+      const filename = `source${path.extname(new URL(u).pathname) || ".bin"}`;
+      const file = path.join(dir, filename);
+      const buf = Buffer.from(await res.arrayBuffer());
+      fs.writeFileSync(file, buf);
+      send(55, "indexing", 0);
+      // v38：kaikki 原始包扫描阶段（GB 级解压逐行）以行数回报进度，避免长时间 0 进度像卡死
+      const { rows, format } = await importDictRowsFromPath(file, (lines) => send(55, "indexing", lines));
+      const r = await indexDictSource({
+        name: name || id, format, path: file, url: u, rows,
+        onProgress: (count) => send(55, "indexing", count),
+      });
+      if (r.count === 0) {
+        send(100, "saved", 0);
+        return { ...r, file, parsed: false };
+      }
+      send(100, r.capped ? "done-capped" : "done", r.count);
+      return { ...r, file, parsed: true };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  send(0, "error");
+  throw new Error(`下载失败：${lastErr instanceof Error ? lastErr.message : String(lastErr)}（可复制链接到浏览器手动下载后再「本地导入」）`);
+});
+
+// ---------- v36（M8-A，§6.5 / D34）：日记与快速记录 ----------
+// 写入一律经主进程（sql.js 单实例）；写入后广播 journal:changed 给其它窗口（日记页实时刷新）。
+// 快捷记录草稿的「内存即时写 + 磁盘节流」由 quickCapture 统一编排（本项目唯一持久化例外，见 D34）。
+
+// 主窗口前置（最小化则还原）：全局快捷键与「添加材料」入口共用
+function focusMainWindow() {
+  const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+  if (!win) return null;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+  return win;
+}
+
+function sendToMainWindow(channel, payload) {
+  const win = focusMainWindow();
+  if (!win) return false;
+  if (win.webContents.isLoading()) win.webContents.once("did-finish-load", () => win.webContents.send(channel, payload));
+  else win.webContents.send(channel, payload);
+  return true;
+}
+
+ipcMain.handle("journal:list", (_e, filter) => dbModule.listJournalEntries(filter || {}));
+ipcMain.handle("journal:dates", (_e, opts) => dbModule.listJournalDates(opts || {}));
+
+// 某日视图（捕获窗口用）：今日已记条数 + 全局未发送草稿（entryDate 可能不是今天=跨日草稿）
+ipcMain.handle("journal:day", (_e, date) => {
+  const day = String(date || journalDateOf(Date.now()));
+  const { entries } = dbModule.listJournalEntries({ from: day, to: day, limit: 1000 });
+  const sent = entries.filter((x) => !x.isDraft);
+  return { date: day, count: sent.length, entries: sent, draft: dbModule.getJournalDraft() };
+});
+
+ipcMain.handle("journal:draft", () => dbModule.getJournalDraft());
+
+// 草稿续写（输入中，防抖调用）：内存库即时写 + 磁盘节流
+ipcMain.handle("journal:draftSave", (e, contentMarkdown) => {
+  const entry = quickCapture.saveDraft(String(contentMarkdown ?? ""), e.sender);
+  return { ok: true, entry };
+});
+
+// 发送：定格为日记里的一条（即时落盘 + 广播）
+ipcMain.handle("journal:draftSend", (e, contentMarkdown) => {
+  const entry = quickCapture.sendDraft(String(contentMarkdown ?? ""), e.sender);
+  memoryTidy.notifyJournalChanged(memoryCtx()); // v45（M14-UM1）：草稿翻正为正式条目 → 防抖整理
+  return { ok: true, entry };
+});
+
+// 日记页：新建 / 编辑 / 删除（都是显式动作 → 即时落盘）
+ipcMain.handle("journal:create", (e, payload) => {
+  const p = payload || {};
+  const entry = dbModule.createJournalEntry({
+    contentMarkdown: p.contentMarkdown,
+    source: p.source || "app",
+    entryDate: p.entryDate
+  });
+  quickCapture.notifyJournalChanged({ kind: "created", entryId: entry.id, entryDate: entry.entryDate }, e.sender);
+  memoryTidy.notifyJournalChanged(memoryCtx()); // v45（M14-UM1）：日记变更 → 防抖整理
+  return entry;
+});
+
+ipcMain.handle("journal:update", (e, id, contentMarkdown) => {
+  const entry = dbModule.updateJournalEntry(String(id), contentMarkdown);
+  quickCapture.notifyJournalChanged({ kind: "updated", entryId: String(id) }, e.sender);
+  memoryTidy.notifyJournalChanged(memoryCtx());
+  return entry;
+});
+
+ipcMain.handle("journal:delete", (e, id) => {
+  dbModule.deleteJournalEntry(String(id));
+  quickCapture.notifyJournalChanged({ kind: "deleted", entryId: String(id) }, e.sender);
+  memoryTidy.notifyJournalChanged(memoryCtx());
+  return true;
+});
+
+ipcMain.handle("journal:flush", () => quickCapture.flushJournal());
+
+// ---------- v40（K1，D37 / §4.2-23）：知识地基 knowledge:*（KnowledgeBase 唯一读写面） ----------
+ipcMain.handle("knowledge:listPoints", (_e, filter) => dbModule.listKnowledgePoints(filter || {}));
+ipcMain.handle("knowledge:getPoint", (_e, id) => dbModule.getKnowledgePoint(String(id)));
+ipcMain.handle("knowledge:createPoint", (_e, payload) => dbModule.createKnowledgePoint(payload || {}));
+ipcMain.handle("knowledge:updatePoint", (_e, id, patch) => dbModule.updateKnowledgePoint(String(id), patch || {}));
+ipcMain.handle("knowledge:mergePoints", (_e, sourceId, targetId) => dbModule.mergeKnowledgePoints(String(sourceId), String(targetId)));
+ipcMain.handle("knowledge:unmergePoint", (_e, id) => dbModule.unmergeKnowledgePoint(String(id)));
+ipcMain.handle("knowledge:listRelations", (_e, filter) => dbModule.listKnowledgeRelations(filter || {}));
+ipcMain.handle("knowledge:createRelation", (_e, payload) => dbModule.createKnowledgeRelation(payload || {}));
+ipcMain.handle("knowledge:deleteRelation", (_e, id) => dbModule.deleteKnowledgeRelation(String(id)));
+ipcMain.handle("knowledge:listRefs", (_e, kpId) => dbModule.listKnowledgeExternalRefs(String(kpId)));
+ipcMain.handle("knowledge:createRef", (_e, payload) => dbModule.createKnowledgeExternalRef(payload || {}));
+ipcMain.handle("knowledge:deleteRef", (_e, id) => dbModule.deleteKnowledgeExternalRef(String(id)));
+ipcMain.handle("knowledge:listProposals", (_e, filter) => dbModule.listKnowledgeProposals(filter || {}));
+ipcMain.handle("knowledge:resolveProposal", (_e, id, accept, overridePayload) => dbModule.resolveKnowledgeProposal(String(id), !!accept, overridePayload || null));
+ipcMain.handle("knowledge:migrationSuggestions", () => dbModule.buildKnowledgeMigrationSuggestions());
+
+// v41（K2-A，D38）：AI 抽取归一与关系——主进程只做输入装配与裁决（AI 调用由渲染层编排）
+ipcMain.handle("knowledge:kpClusters", () => dbModule.listKpClusters());
+ipcMain.handle("knowledge:kpExtractPrepare", (_e, opts) => dbModule.buildKpExtractionInput(opts || {}));
+ipcMain.handle("knowledge:kpExtractApply", (_e, rawExtraction, rawRelations) => dbModule.applyKpExtraction(rawExtraction, rawRelations));
+ipcMain.handle("knowledge:acceptAllPending", () => dbModule.acceptAllPendingKnowledgeProposals());
+
+// v43（K2-B）：KnowledgeLint K4/K7/K8 报告型检查（只读，非阻断）
+ipcMain.handle("knowledge:lint", () => dbModule.runKnowledgeLint());
+
+// ---------- v40（M8-B，§4.2-24）：洞察 insights:* + Personal Meaning meaning:* ----------
+// InsightEngine 编排在渲染层（同制卡管线：主进程不拼提示词），主进程只做：Evidence Package 装配、
+// runs 事实记录、反馈落表；LLM 流式走既有 ai:chat/ai:stream 通道（Key 不进渲染层）。
+function broadcastInsightChanged(excludeSender) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (excludeSender && w.webContents.id === excludeSender.id) continue;
+    w.webContents.send("insight:changed");
+  }
+}
+
+ipcMain.handle("insights:buildPackage", (_e, opts) => dbModule.buildEvidencePackage(opts || {}));
+ipcMain.handle("insights:create", (_e, payload) => dbModule.createInsightRun(payload || {}));
+ipcMain.handle("insights:complete", (e, id, extra) => {
+  const run = dbModule.setInsightRunStatus(String(id), "done", extra || {});
+  broadcastInsightChanged(e.sender);
+  return run;
+});
+ipcMain.handle("insights:fail", (e, id, errorText) => {
+  const run = dbModule.setInsightRunStatus(String(id), "failed", { errorText: String(errorText || "洞察失败") });
+  broadcastInsightChanged(e.sender);
+  return run;
+});
+ipcMain.handle("insights:get", (_e, id) => dbModule.getInsightRun(String(id)));
+ipcMain.handle("insights:list", (_e, opts) => dbModule.listInsightRuns(opts || {}));
+ipcMain.handle("insights:feedback", (e, id, feedback) => {
+  const run = dbModule.setInsightRunFeedback(String(id), feedback);
+  broadcastInsightChanged(e.sender);
+  return run;
+});
+ipcMain.handle("insights:delete", (e, id) => {
+  const ok = dbModule.deleteInsightRun(String(id));
+  broadcastInsightChanged(e.sender);
+  return ok;
+});
+ipcMain.handle("meaning:list", (_e, filter) => dbModule.listPersonalMeaningCandidates(filter || {}));
+ipcMain.handle("meaning:create", (_e, payload) => dbModule.createPersonalMeaningCandidate(payload || {}));
+ipcMain.handle("meaning:resolve", (e, id, status) => {
+  const cand = dbModule.resolvePersonalMeaningCandidate(String(id), status);
+  broadcastInsightChanged(e.sender);
+  return cand;
+});
+ipcMain.handle("meaning:delete", (e, id) => {
+  const ok = dbModule.deletePersonalMeaningCandidate(String(id));
+  broadcastInsightChanged(e.sender);
+  return ok;
+});
+
+// ---------- v45（M14-UM1，D39 / §4.18）：用户记忆 memory:* ----------
+// 分工（§9.1 M14 落点预案）：memoryTidy 在主进程编排（防抖/补跑/分批——后台基础设施，与窗口
+// 生命周期解耦）；AI 调用经 memoryChat 包装既有 chatStream（Key 不进渲染层）；提示词文本只来自
+// 播种模板 user-memory。进度经 memory:changed 广播到全部窗口。
+function memoryChat(messages, { temperature } = {}) {
+  return new Promise((resolve, reject) => {
+    let acc = "";
+    let settled = false;
+    chatStream({ messages, temperature: Number(temperature) || 0.3 }, (m) => {
+      if (settled) return;
+      if (m && m.error) {
+        settled = true;
+        reject(new Error(m.error));
+      } else if (m && m.done) {
+        settled = true;
+        resolve(acc);
+      } else if (m && m.delta) {
+        acc += m.delta;
+      }
+    }).catch((err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
+  });
+}
+
+const memoryCtx = () => ({
+  db: dbModule,
+  readSettings,
+  writeSettings,
+  userData: app.getPath("userData"),
+  hasKey: () => {
+    try {
+      const cfg = getAIConfig();
+      return Boolean(cfg.hasKey) || cfg.preset === "local";
+    } catch {
+      return false;
+    }
+  },
+  chat: memoryChat,
+  broadcast: (payload) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send("memory:changed", payload);
+    }
+  }
+});
+
+ipcMain.handle("memory:status", () => memoryTidy.getStatus(memoryCtx()));
+ipcMain.handle("memory:setEnabled", (_e, payload) => {
+  const p = payload || {};
+  const patch = { enabled: !!p.enabled };
+  if (p.introAcked) patch.introAcked = true; // 一次性说明只置真不回退（关闭再开启不重弹，§6.7.2）
+  const cfg = memoryTidy.writeMemoryConfig(memoryCtx(), patch);
+  if (!p.enabled) memoryTidy.cancelBackfill(); // 关闭即停用：进行中的补处理中止（§4.18-16①）
+  return cfg;
+});
+ipcMain.handle("memory:backfillPreview", () => memoryTidy.backfillStats(memoryCtx()));
+ipcMain.handle("memory:backfillStart", () => memoryTidy.runBackfill(memoryCtx()));
+ipcMain.handle("memory:backfillCancel", () => memoryTidy.cancelBackfill());
+ipcMain.handle("memory:tidyNow", () => memoryTidy.runIngestRound(memoryCtx(), "manual"));
+ipcMain.handle("memory:openFolder", async () => {
+  const dir = memoryStore.resolveMemoryDir(app.getPath("userData"));
+  fs.mkdirSync(dir, { recursive: true });
+  await shell.openPath(dir);
+  return true;
+});
+ipcMain.handle("memory:openFile", async (_e, name) => {
+  const allowed = new Set(["core.md", "index.md"]);
+  if (!allowed.has(String(name))) throw new Error("非法文件名");
+  const dir = memoryStore.resolveMemoryDir(app.getPath("userData"));
+  memoryStore.ensureTree(dir);
+  await shell.openPath(path.join(dir, String(name)));
+  return true;
+});
+ipcMain.handle("memory:reset", () => {
+  const dir = memoryStore.resolveMemoryDir(app.getPath("userData"));
+  return { created: memoryStore.resetMemory(dir) };
+});
+
+// v46（M14-UM2，§4.18-7/8）：制卡记忆接地检索——Stage A 本地宽召回（memoryRetrieve 纯函数）。
+// 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；
+// 无 Key 也跳过（§6.7.3「无 Key 零检索」——检索结果只服务即将发出的 AI 调用）。
+ipcMain.handle("memory:retrieve", (_e, payload) => {
+  const p = payload || {};
+  const mctx = memoryCtx();
+  const cfg = memoryTidy.readMemoryConfig(mctx);
+  if (!cfg.enabled) return { ok: false, reason: "disabled", block: null, hitTopics: [] };
+  if (!mctx.hasKey()) return { ok: false, reason: "no-key", block: null, hitTopics: [] };
+  const dir = memoryStore.resolveMemoryDir(mctx.userData);
+  memoryStore.ensureTree(dir);
+  const usage = memoryStore.usageStats(dir);
+  const topicFiles = usage.topics.map((t) => ({ ...t, content: memoryStore.readText(dir, t.rel) || "" }));
+  const domains = dbModule.listCardDomainsForDocument(String(p.documentId || ""));
+  const lifeDomains = memoryRetrieve.lifeDomainsForUdc(domains);
+  const terms = memoryRetrieve.extractSignalTerms({ title: p.title, section: p.section, text: p.text });
+  const picks = memoryRetrieve.pickTopics(topicFiles, { lifeDomains, terms });
+  const built = memoryRetrieve.buildMemoryBlock({
+    coreText: memoryStore.readText(dir, memoryStore.CORE_FILE),
+    indexText: memoryStore.readText(dir, memoryStore.INDEX_FILE),
+    topicPicks: picks,
+    budgets: memoryTidy.injectBudgetsFor(cfg)
+  });
+  return {
+    ok: true,
+    block: built ? built.block : null,
+    hitTopics: built ? built.hitTopics : [],
+    usedChars: built ? built.usedChars : 0,
+    lifeDomains,
+    signals: terms.length
+  };
+});
+
+// 捕获窗口（与全局快捷键同一入口，供设置页「试一下」与端到端测试复用）
+ipcMain.handle("capture:toggle", () => {
+  quickCapture.toggleCapture();
+  return true;
+});
+ipcMain.handle("capture:hide", () => {
+  quickCapture.hideCapture();
+  return true;
+});
+ipcMain.on("capture:ready", () => quickCapture.onRendererReady());
+
+// 全局快捷键组状态 / 重注册
+ipcMain.handle("shortcuts:status", () => quickCapture.getStatus());
+ipcMain.handle("shortcuts:apply", () => quickCapture.applyGlobalShortcuts());
+
+// 「添加学习材料」：主窗口前置 + 就地弹出添加模态（不切换视图，阅读位置与复习会话原地保留）
+ipcMain.handle("library:requestAdd", () => sendToMainWindow("library:openAddMaterial"));
+
+function createWindow() {  // 防重入：已存在窗口时不再创建（macOS activate 与启动路径共用此函数）
   if (BrowserWindow.getAllWindows().length > 0) return;
   const win = new BrowserWindow({
     width: 1100,
@@ -641,6 +1159,10 @@ function createWindow() {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url).catch(() => {});
     return { action: "deny" };
   });
+  mainWindow = win;
+  win.on("closed", () => {
+    if (mainWindow === win) mainWindow = null;
+  });
   // 加载顺序（v11.2）：dist 存在则直接用（生产产物优先，避免 devURL 连接超时挂起导致白屏）；
   // dist 不存在（纯开发场景）才走 vite dev server，失败再报错
   const distIndex = path.join(__dirname, "../dist/index.html");
@@ -657,20 +1179,9 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
   createWindow();
-  // M2：若有待恢复备份（restore-pending.json），先换入数据文件再初始化数据库
-  try {
-    backup.applyPendingRestore();
-  } catch (err) {
-    console.error("[backup] 应用待恢复数据失败：", err);
-  }
-  await initDb();
-  // M2：每日首次启动自动滚动备份（设置可关；失败不阻塞启动）
-  try {
-    const r = await backup.autoBackupIfNeeded(backupOpts());
-    if (!r.ok) console.error("[backup] 自动备份失败：", r.error);
-  } catch (err) {
-    console.error("[backup] 自动备份失败：", err);
-  }
+  // v45.1（用户反馈「书架封面偶尔加载失败」）：协议注册必须先于 await initDb()——窗口先行 +
+  // 渲染层先挂载时，封面 <img> 可能抢在协议 handler 注册前发出请求而永久失败（img 无自动重试）。
+  // 两个 handler 都只读磁盘文件、不依赖数据库，提前注册无副作用。
   protocol.handle("bookasset", (request) => {
     try {
       const url = new URL(request.url);
@@ -684,7 +1195,9 @@ app.whenReady().then(async () => {
       const ext = path.extname(filename).slice(1).toLowerCase();
       const types = {
         jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
-        gif: "image/gif", webp: "image/webp", svg: "image/svg+xml"
+        gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+        // v32（M7）：词典发音音频（dict-audio 经 bookasset 播放）
+        mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav", m4a: "audio/mp4"
       };
       return new Response(data, { headers: { "content-type": types[ext] || "application/octet-stream" } });
     } catch {
@@ -718,6 +1231,38 @@ app.whenReady().then(async () => {
       return new Response("not found", { status: 404 });
     }
   });
+  // M2：若有待恢复备份（restore-pending.json），先换入数据文件再初始化数据库
+  try {
+    backup.applyPendingRestore();
+  } catch (err) {
+    console.error("[backup] 应用待恢复数据失败：", err);
+  }
+  await initDb();
+  // v36（M8-A）：全局快捷键组初始化（快速记录 / 添加学习材料）+ 随系统启动同步（失败在设置页可见）
+  try {
+    quickCapture.init({
+      db: dbModule,
+      readSettings,
+      writeSettings,
+      sendToMain: (channel) => sendToMainWindow(channel)
+    });
+  } catch (err) {
+    console.error("[quickCapture] 初始化失败：", err);
+  }
+  // M2：每日首次启动自动滚动备份（设置可关；失败不阻塞启动）
+  try {
+    const r = await backup.autoBackupIfNeeded(backupOpts());
+    if (!r.ok) console.error("[backup] 自动备份失败：", r.error);
+  } catch (err) {
+    console.error("[backup] 自动备份失败：", err);
+  }
+  // v45（M14-UM1，§4.18-11①）：启动补跑——开启 + 有未整理条目 + 距上次成功 ≥12h；失败不阻塞启动
+  try {
+    memoryTidy.startupBackfillIfDue(memoryCtx());
+  } catch (err) {
+    console.error("[memory] 启动补跑失败：", err);
+  }
+  // v45.1：bookasset / pdfres 两协议已上移到 createWindow() 之后立即注册（封面加载竞态修复），此处不再注册。
 
   // 首个窗口已在上方先行创建（v10.2 启动优化），此处只做协议注册与生命周期挂接
   app.on("activate", () => {
@@ -727,4 +1272,15 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+// v36（M8-A）：退出前把日记节流的待落盘内容强制刷盘 + 注销全局快捷键 + 放行捕获窗口关闭
+// （before-quit 早于窗口关闭；prepareQuit 置 quitting 标记，否则捕获窗口的 close 会被拦成隐藏）
+app.on("before-quit", () => {
+  quickCapture.prepareQuit();
+});
+
+// M7：词典词条库（独立 dictionary.db）退出兜底落盘（正常路径导入后已即时 save）
+app.on("will-quit", () => {
+  void dictDb.saveOnQuit();
 });

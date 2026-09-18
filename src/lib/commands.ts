@@ -22,6 +22,7 @@ export const COMMANDS: CommandDef[] = [
   { id: "reader.aiCards",     title: "AI 制卡",    scene: "阅读", defaultKey: "Ctrl+X" },
   { id: "reader.aiExplain",   title: "AI 解释",    scene: "阅读", defaultKey: "Ctrl+A" },
   { id: "reader.extract",     title: "摘录",       scene: "阅读", defaultKey: "Ctrl+S" },
+  { id: "reader.lookupWord",  title: "查词",       scene: "阅读", defaultKey: "Ctrl+D" },
   { id: "review.showAnswer",  title: "显示答案",   scene: "复习", defaultKey: "Space" },
   { id: "review.again",       title: "评分 Again", scene: "复习", defaultKey: "1" },
   { id: "review.hard",        title: "评分 Hard",  scene: "复习", defaultKey: "2" },

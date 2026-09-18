@@ -3,6 +3,8 @@
 // foliate-js 由本目录经动态 import 惰性加载（仅在真正打开阅读引擎时进内存）。
 import type {
   BookSource,
+  ImageLocateHit,
+  ImageLocateQuery,
   LinkInfo,
   ReaderAppearance,
   ReaderImageRef,
@@ -20,6 +22,8 @@ import { READER_ENGINE_VERSION, PDF_ENGINE_VERSION } from "./foliate/version";
 
 export type {
   BookSource,
+  ImageLocateHit,
+  ImageLocateQuery,
   LinkInfo,
   ReaderAppearance,
   ReaderImageRef,

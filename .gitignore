@@ -5,3 +5,7 @@ dist/
 # 测试日志（用完即删纪律）
 tests/*.log
 tmp-l2-*.png
+
+# 测试运行期临时产物（userdata 隔离目录 / 运行时下载与生成的 fixture / 打包产物）
+tests/tmp-*
+capture.html.bak

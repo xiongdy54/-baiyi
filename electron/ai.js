@@ -251,6 +251,12 @@ function chatStream({ messages, temperature }, send) {
       }
       reject(err);
     });
+    // socket 不活动超时（v45 补记）：流式响应期间任何数据都会重置计时；GLM 思考期有 reasoning_content
+    // 持续流出不会误杀。缺了它，网络黑洞（连接建立但服务端永不应答）会让 IPC 永不 resolve——
+    // 设置页「测试连接」曾因此永久置灰，只能重启设置窗口。
+    req.setTimeout(120000, () => {
+      req.destroy(new Error("AI 连接超时：120 秒无数据响应，已自动中断（请检查网络或服务地址）"));
+    });
     req.write(body);
     req.end();
   });
@@ -281,6 +287,10 @@ function requestJSON(url, headers) {
       }
     );
     req.on("error", reject);
+    // 拉取模型列表/在线词典等 JSON 请求：30 秒无数据即断（防黑洞连接挂死调用方）
+    req.setTimeout(30000, () => {
+      req.destroy(new Error("请求超时：30 秒无响应，已自动中断"));
+    });
     req.end();
   });
 }
