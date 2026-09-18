@@ -3310,3 +3310,24 @@ body.capture-body #root { height: 100vh; }
   pointer-events: none;
   white-space: nowrap;
 }
+/* v48.5：版本行删除按钮 */
+.mindmap-versions li {
+  display: flex;
+  gap: var(--sp-1);
+  align-items: stretch;
+}
+.mindmap-versions li button:first-child {
+  flex: 1;
+}
+.mindmap-version-del {
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  color: var(--text-helper);
+  font-size: var(--fs-meta);
+  padding: var(--sp-1) var(--sp-2);
+  cursor: pointer;
+}
+.mindmap-version-del:hover {
+  color: var(--error);
+  border-color: var(--error);
+}

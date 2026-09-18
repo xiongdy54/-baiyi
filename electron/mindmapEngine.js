@@ -115,7 +115,8 @@ function estimateTokensOf(text) {
  */
 function buildCallPayloads(params, promptOf) {
   const textByUnit = new Map(Object.entries(params.textByUnit || {}));
-  const tree = core.buildTocTree(params.tocItems || [], params.title || "材料知识导图");
+  // v48.5：TOC 归一唯一权威（顶层仅一项 → 塌缩为根，消除合成书「正文」包装层）
+  const tree = core.normalizeTocTree(core.buildTocTree(params.tocItems || [], params.title || "材料知识导图"), params.title || "材料知识导图");
   const model = core.buildExtractionModel(tree, params.unitAnchors || []);
   if (!model.units.length) return { error: "材料没有可提取的文本单元（无目录且无章节结构）" };
 

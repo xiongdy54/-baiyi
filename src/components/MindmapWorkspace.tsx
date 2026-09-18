@@ -49,7 +49,8 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [collect, setCollect] = useState<{ tocItems: { anchor: string; label: string; children?: unknown[] }[]; unitAnchors: string[]; textByUnit: Record<string, string> } | null>(null);
   const [collectMsg, setCollectMsg] = useState("");
   const [scopeAnchor, setScopeAnchor] = useState("book");
-  const [granularity, setGranularity] = useState<"overview" | "standard" | "detailed">("standard");
+  // v48.5（用户拍板）：覆盖粒度选项移除，系统内部恒用 detailed——详细程度是内部质量标准而非用户选项
+  const granularity: "overview" | "standard" | "detailed" = "detailed";
   const [preview, setPreview] = useState<MapPreview | null>(null);
   const [activeMap, setActiveMap] = useState<MaterialMapMeta | null>(null);
   const [versions, setVersions] = useState<MaterialMapMeta[]>([]);
@@ -80,8 +81,16 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       const full = (await mindmapApi.get(meta.id)) || meta;
       setActiveMap(full);
       const rootId = full.structure!.rootNodeId || "root";
-      const root = full.structure!.nodes.find((n) => n.id === rootId);
-      setExpandedIds(new Set([rootId, ...(root?.childIds || [])]));
+      // v48.5（用户拍板）：默认展开三层 = expanded(Level ≤ 2)——L0 材料根 / L1 一级 / L2 二级可见，L3 起折叠
+      const byId = new Map(full.structure!.nodes.map((n) => [n.id, n]));
+      const expanded = new Set<string>();
+      const walkL = (id: string, depth: number) => {
+        expanded.add(id);
+        if (depth >= 2) return;
+        for (const c of byId.get(id)?.childIds || []) walkL(c, depth + 1);
+      };
+      walkL(rootId, 0);
+      setExpandedIds(expanded);
       setSelectedId(null);
       setPhase("done");
     } else {
@@ -449,7 +458,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
         </button>
         <span className="mindmap-top-title">材料知识导图 · {title}</span>
         <div className="mindmap-top-actions">
-          <button className="btn btn-outline btn-sm" onClick={fitView} disabled={phase !== "done"}>
+          <button className="btn btn-outline btn-sm" onClick={fitView}>
             适应窗口
           </button>
           <button className="btn btn-outline btn-sm" onClick={() => setView((v) => ({ ...v, zoom: Math.min(2.5, v.zoom + 0.15) }))}>
@@ -458,7 +467,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
           <button className="btn btn-outline btn-sm" onClick={() => setView((v) => ({ ...v, zoom: Math.max(0.15, v.zoom - 0.15) }))}>
             −
           </button>
-          <button className="btn btn-outline btn-sm" onClick={exportSvg} disabled={phase !== "done"}>
+          <button className="btn btn-outline btn-sm" onClick={exportSvg}>
             导出 SVG
           </button>
         </div>
@@ -568,17 +577,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                       ))}
                     </select>
                   </label>
-                  <div className="mindmap-field">
-                    <span>覆盖粒度</span>
-                    <div className="mindmap-chips">
-                      {GRANULARITY_OPTIONS.map((g) => (
-                        <button key={g.value} className={`mindmap-chip${granularity === g.value ? " is-active" : ""}`} onClick={() => setGranularity(g.value)}>
-                          {g.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <p className="mindmap-hint">粒度控制语义分析的详细程度，永不截断所选范围内的原文。</p>
+                  <p className="mindmap-hint">按「详细」标准生成：逐层深挖至作者组织单元的原子结构，永不截断所选范围内的原文。</p>
                   <button className="btn btn-primary btn-sm mindmap-wide" onClick={handlePreview} disabled={!collect}>
                     {phase === "done" ? "重新生成（先预览）" : "发送前预览"}
                   </button>
@@ -590,8 +589,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                   <ul className="mindmap-preview-list">
                     <li>材料：{title}</li>
                     <li>范围：{scopeOptions.find((o) => o.value === scopeAnchor)?.label || scopeAnchor}</li>
-                    <li>覆盖：{GRANULARITY_OPTIONS.find((g) => g.value === granularity)?.label}</li>
-                    <li>
+<li>
                       缓存命中：{preview.cacheHits || 0} / {preview.callsTotal || 0}（另含终编辑与评审 {preview.fixedCalls || 2} 次，随缓存变动）
                     </li>
                     <li>预计新调用：{preview.newCalls || 0} + {preview.fixedCalls || 2}</li>
@@ -711,8 +709,25 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                               if (meta) await loadMap({ ...meta, structure: (await mindmapApi.get(v.id))?.structure ?? null });
                             }}
                           >
-                            {v.title || "（未命名）"} · {v.granularity} · {new Date(v.createdAt).toLocaleString()}
+                            {v.title || "（未命名）"} · {new Date(v.createdAt).toLocaleString()}
                             {v.isActive ? "（当前）" : ""}
+                          </button>
+                          <button
+                            className="mindmap-version-del"
+                            title="删除此版本"
+                            onClick={async () => {
+                              if (!window.confirm(`删除版本「${v.title || "未命名"}」？该操作不可恢复（生成缓存保留，不影响卡片）。`)) return;
+                              await mindmapApi.remove(v.id);
+                              if (v.id === activeMap?.id) {
+                                const active = await mindmapApi.getActive(documentId, "book");
+                                await refreshVersions();
+                                await loadMap(active);
+                              } else {
+                                await refreshVersions();
+                              }
+                            }}
+                          >
+                            删除
                           </button>
                         </li>
                       ))}

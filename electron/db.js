@@ -4006,8 +4006,25 @@ function setActiveMaterialMap(id) {
   return getMaterialMap(id, { includeStructure: false });
 }
 
+// v48.5（用户反馈「想删掉错误版本的导图」）：用户可见历史 = 真删（DELETE 行）；
+// material_map_shards 是缓存（用户不可见、重建可复用），保留不随删——与「已删除」语义分离。
+// 删 active 时同一持久化轮内顺延（事务语义）：同 scope 最新剩余版本升 active；历史多 active 一并纠偏。
 function deleteMaterialMap(id) {
-  db.run("UPDATE material_maps SET is_deleted = 1, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [Date.now(), String(id)]);
+  const rows = queryAll("SELECT document_id, scope_anchor, is_active FROM material_maps WHERE id = ?", [String(id)]);
+  if (!rows.length) return false;
+  const { document_id, scope_anchor, is_active } = rows[0];
+  db.run("DELETE FROM material_maps WHERE id = ?", [String(id)]);
+  if (is_active) {
+    db.run(
+      "UPDATE material_maps SET is_active = 0 WHERE document_id = ? AND scope_anchor = ? AND is_active = 1",
+      [document_id, scope_anchor]
+    );
+    const next = queryAll(
+      "SELECT id FROM material_maps WHERE document_id = ? AND scope_anchor = ? AND is_deleted = 0 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+      [document_id, scope_anchor]
+    );
+    if (next.length) db.run("UPDATE material_maps SET is_active = 1 WHERE id = ?", [next[0].id]);
+  }
   persist();
   return true;
 }

@@ -226,10 +226,11 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const m = core.remapNodes(oldNodes, newNodes);
   check("锚重叠优先配对", m.get("o1") === "w1" && m.get("o2") === "w2", [...m.entries()]);
   const m2 = core.remapNodes(
-    [{ id: "o1", unitAnchors: [], quoteHashes: [], title: "同名" }],
-    [{ id: "w9", unitAnchors: [], quoteHashes: [], title: "同名" }]
+    [{ id: "o1", unitAnchors: [], quoteHashes: [], title: "总结" }],
+    [{ id: "w9", unitAnchors: [], quoteHashes: [], title: "总结" }]
   );
-  check("标题相等兜底配对", m2.get("o1") === "w9", [...m2.entries()]);
+  // v48.5（用户审查约束 3）：标题相等仅为弱辅助信号，不得单独触发映射（同名节点遍布全书必误绑）
+  check("仅标题相等不映射（弱信号约束）", m2.size === 0, [...m2.entries()]);
   const m3 = core.remapNodes(
     [{ id: "o1", unitAnchors: ["u1.xhtml"], quoteHashes: ["h1"], title: "X" }],
     [{ id: "w1", unitAnchors: ["u9.xhtml"], quoteHashes: [], title: "Y" }]

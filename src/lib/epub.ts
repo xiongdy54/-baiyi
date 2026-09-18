@@ -178,7 +178,7 @@ export interface SyntheticChapter {
 }
 
 /** 按一级标题章节化（无一级标题 = 单章）；确定性：纯字符串运算 */
-export function splitMarkdownChapters(markdown: string): SyntheticChapter[] {
+export function splitMarkdownChapters(markdown: string, fallbackTitle?: string): SyntheticChapter[] {
   const lines = String(markdown || "").split("\n");
   const chapters: SyntheticChapter[] = [];
   let cur: SyntheticChapter = { title: "", bodyHtml: "" };
@@ -198,7 +198,9 @@ export function splitMarkdownChapters(markdown: string): SyntheticChapter[] {
     }
   }
   flush();
-  if (chapters.length === 1 && !chapters[0].title) chapters[0].title = "正文";
+  // v48.5（用户实测：导图出现「正文」伪节点）：无 # 标题的书整本成单章，标题用材料名——
+  // 粘贴/导入书每次打开都由 buildSyntheticEpub 现场重建，存量书自动生效；真实「正文」标题（# 行）不受影响
+  if (chapters.length === 1 && !chapters[0].title) chapters[0].title = (fallbackTitle || "").trim() || "正文";
   return chapters;
 }
 
@@ -262,7 +264,7 @@ export async function buildSyntheticEpub(
 ): Promise<{ bytes: Uint8Array; toc: { label: string; href: string }[] }> {
   const lang = opts?.lang || "zh";
   const images = (opts?.images ?? []).filter((im) => im && im.filename && im.bytes && im.bytes.length > 0);
-  const chapters = splitMarkdownChapters(markdown);
+  const chapters = splitMarkdownChapters(markdown, title);
   const zip = new JSZip();
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
   zip.file(

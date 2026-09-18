@@ -22,7 +22,7 @@ const GROUPING_TYPES = [
 // 笼统空盒标题（§4.19-6 警告清单；材料本身确实如此时由人工判断，故只警告不拒绝）
 const UMBRELLA_TITLES = new Set([
   "介绍", "内容", "相关知识", "其他", "总结", "基础", "核心", "重要概念", "知识", "主要内容",
-  "引言", "概述", "前言", "附录", "参考文献", "目录"
+  "引言", "概述", "前言", "附录", "参考文献", "目录", "正文"
 ]);
 
 // 覆盖粒度 → 分析深度上限（节点 depth ≤ cap 才有独立 AI 调用；更深层目录的文本并入最近已分析祖先的 owned text）
@@ -40,6 +40,18 @@ function buildTocTree(items, rootLabel) {
   });
   const roots = (items || []).map((it) => mapNode(it, 1));
   return { anchor: "book", label: String(rootLabel || "").trim() || "整书", level: 0, children: roots };
+}
+
+/** v48.5 唯一权威的 TOC 归一（引擎调用；UI 不重复实现避免规则分叉）：
+ *  TOC 顶层仅一项时该项塌缩为根（label 用材料名）——消除合成书的「正文」包装层；
+ *  用户材料真实写出的多章节结构不受影响。 */
+function normalizeTocTree(tree, rootLabel) {
+  const label = String(rootLabel || "").trim() || "材料知识导图";
+  if (tree.children && tree.children.length === 1) {
+    const only = tree.children[0];
+    return { anchor: only.anchor, label, level: 0, children: only.children || [] };
+  }
+  return { anchor: tree.anchor, label, level: 0, children: tree.children || [] };
 }
 
 /** 文档序展平（含根；parent 引用指向 flat 元素） */
@@ -567,8 +579,10 @@ function validateMapStructure(raw, ctx) {
 // ---------- 重生成 remap（D41-⑥：旧卡沿 remap 链解析，卡片永不改写） ----------
 
 /**
- * 新旧节点确定性匹配：① 提取单元覆盖重叠 → ② evidence quoteHash 重叠 → ③ 标题精确相等。
- * 得分 = anchorOverlap*100 + hashOverlap*10 + titleEqual；全体候选对按分贪心一对一。
+ * 新旧节点确定性匹配（v48.5 修订）：主条件 = ①提取单元覆盖重叠 或 ②evidence quoteHash 重叠
+ *（结构/证据同一性）；**标题相等仅为同主条件下的加权辅助信号，不得单独触发映射**——
+ *「总结/定义」类同名节点遍布全书，仅凭标题重映射必然误绑。贪心一对一；未匹配旧卡留在旧版语境（宁缺勿错）。
+ * 拆分（旧 A → 新 A1/A2）：A 只绑得分最高者，其余新节点不强行承接；合并（旧 A+B → 新 AB）：AB 只绑一方。
  * @param oldNodes [{id, unitAnchors[], quoteHashes[], title}]
  * @param newNodes 同构
  * @returns Map oldId → newId
@@ -585,11 +599,12 @@ function remapNodes(oldNodes, newNodes) {
     for (const w of newNodes || []) {
       const ao = inter(o.unitAnchors || [], w.unitAnchors || []);
       const ho = inter(o.quoteHashes || [], w.quoteHashes || []);
+      if (ao <= 0 && ho <= 0) continue; // 主条件：无结构/证据同一性不映射
       const te = o.title && o.title === w.title ? 1 : 0;
       const aNorm = Math.min(1, ao / Math.max(1, Math.min((o.unitAnchors || [1]).length, (w.unitAnchors || [1]).length)));
       const hNorm = Math.min(1, ho / Math.max(1, Math.min(Math.max(1, (o.quoteHashes || [1]).length), Math.max(1, (w.quoteHashes || [1]).length))));
       const score = aNorm * 100 + hNorm * 10 + te;
-      if (score > 0) pairs.push({ o: o.id, w: w.id, score });
+      pairs.push({ o: o.id, w: w.id, score });
     }
   }
   pairs.sort((a, b) => b.score - a.score || a.o.localeCompare(b.o) || a.w.localeCompare(b.w));
@@ -684,6 +699,7 @@ module.exports = {
   UMBRELLA_TITLES,
   GRANULARITY_CAP,
   buildTocTree,
+  normalizeTocTree,
   flattenToc,
   buildExtractionModel,
   subtractRanges,
