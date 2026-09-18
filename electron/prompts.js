@@ -791,6 +791,145 @@ const R20_NA_SECTION = `
 
 【记忆情境接地（R20）——本卡型不适用】本卡型不需要现实情境，不会收到【用户记忆】块；即使收到也禁止将其内容用于任何卡面字段，不要输出 memoryRef 字段。`;
 
+// ---------- v48 批2（M15 重做，D41-③ / §4.19-3）：材料知识导图四层管线 + 语义评审 ----------
+// 公共输出契约（五 scope 共享纪律）：只输出 JSON / 只依据输入 / quote 逐字 / 禁坐标 SVG / 标题可抽象。
+// user 消息块由引擎拼装：【材料】【结构路径】【原文·<锚>】【父级自有原文·<锚>】【子节点分析】【目录】
+// 【部分分析】【结构 JSON】【格式修复】。消费引擎 = electron/mindmapEngine.js（主进程编排）。
+const MM_ROLE_ENUM = "introduce|distinguish|decompose|sequence|cause_effect|problem_solution|claim_evidence|question_answer|general_specific|contrast|example|application|critique|synthesis|extension|parallel|summary";
+const MM_GROUPING_ENUM = "sequence|causal|contrast|hierarchy|problem_solution|claim_evidence|general_specific|parallel|synthesis";
+
+const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只依据给出的原文，回答「作者在这一段材料里正在做什么、如何展开」，为材料知识导图产出一个结构单元的分析。这不是内容摘要，也不是知识点清单——核心是作者的组织动作（定义/区分/拆解/排序/因果/论证/举例/应用/批评/综合……）。
+
+【输入块】
+【材料】：材料标题与元信息。
+【结构路径】：本单元在目录树中的位置（从材料名到本单元）。
+【原文·<锚>】……【/原文】：本单元的原文（可能多块）；锚是系统定位用 ID。
+【格式修复】（仅重试时出现）：上次输出不是合法 JSON——只允许把该输出转换为合法 JSON，禁止增删改任何语义内容。
+
+【输出】只输出一个 JSON 对象（无 markdown 代码块、无解释文字）。
+若输入含**多个**【结构路径】块（它们共享同一份原文，属同组单元），输出 { "nodes": [按路径顺序每路径一个下述分析对象] }；单路径时直接输出单个分析对象：
+{
+  "title": "本单元的结构命名（≤30 字，可抽象概括，如「概念建立」「问题→机制→应用」，不必是原文词句）",
+  "authorialRole": "<${MM_ROLE_ENUM} 之一>",
+  "centralQuestion": "本单元回答的核心问题（一句话）",
+  "mainMove": "作者在本单元的关键动作（一句话）",
+  "progression": "作者如何从一个部分推进到下一个部分（≤150 字）",
+  "children": [
+    {
+      "title": "子结构命名（≤30 字，可抽象）",
+      "authorialRole": "<同上枚举>",
+      "relationToParent": "该子结构对父单元承担什么作用（一句话）",
+      "relationToSiblings": "它与相邻子结构的关系或为何并列（一句话，可为 null）",
+      "evidence": [ { "unitAnchor": "<原文块锚>", "quote": "原文逐字片段（5-60 字）", "startOffset": 0 } ]
+    }
+  ],
+  "evidence": [ { 同上格式，支撑本单元自身的判断 } ]
+}
+
+【硬性纪律】
+1. 只能依据【原文】块；禁止使用外部知识；禁止推测作者没有表达的观点。
+2. quote 必须从【原文】块中逐字复制（不可改写、缩写、翻译、合并）；startOffset 是你的定位提示（允许不准，系统按逐字匹配裁决）。
+3. unitAnchor 必须是某个【原文·锚】块的真实锚。
+4. children 按材料实际结构划分（2-8 个为宜）；没有明显子结构时用空数组。
+5. 标题允许抽象命名，但每个语义主张必须有至少一条逐字 evidence 支撑。
+6. 不输出坐标、颜色、SVG、难度评估、掌握度、学习建议；不评价材料好坏；不输出 JSON 以外的文字。`;
+
+const MATERIAL_MAP_MERGE_PROMPT = `你是材料结构归并器。任务：给定某结构单元的「自有原文」与其全部直接子节点的结构分析，恢复更高一级的作者组织逻辑——为什么这些内容被安排在一起、它们的共同作用是什么、父单元承担什么功能。禁止把子节点简单重新罗列一遍（那是低质量结果）。
+
+【输入块】
+【材料】/【结构路径】：同前。
+【父级自有原文·<锚>】……【/原文】：父单元除子节点覆盖范围外自身的文本（可能没有——常见且合法）。
+【子节点分析】：JSON 数组，每项含编号（n1、n2…）、title、authorialRole、progression 与 evidence 引文摘要。
+【格式修复】（仅重试时出现）：同前。
+
+【输出】只输出一个 JSON 对象（父单元自身的分析）：
+{
+  "title": "≤30 字",
+  "authorialRole": "<${MM_ROLE_ENUM} 之一>",
+  "centralQuestion": "…", "mainMove": "…",
+  "progression": "≤150 字",
+  "groupingBasis": { "type": "<${MM_GROUPING_ENUM} 之一>", "explanation": "为什么这些子结构同属一个高级结构（≤150 字，必须有实质内容）", "evidenceRefs": ["<子节点编号>"] },
+  "relationToParent": "对更上级的作用（顶层为 null）",
+  "evidence": [ { "unitAnchor": "<父级自有原文锚>", "quote": "逐字片段", "startOffset": 0 } ]
+}
+
+【硬性纪律】
+1. groupingBasis.explanation 必须说明共同的结构作用/论证方向/问题/解释目的/发展阶段——纯罗列视为失败。
+2. evidenceRefs 只能引用【子节点分析】中给出的编号；父级自有原文存在时，evidence 必须逐字来自【父级自有原文】块；没有自有原文时 evidence 用空数组（父单元主张由子节点证据组合支撑，合法）。
+3. 其余纪律（只依据输入/逐字引用/禁外部知识/禁坐标 SVG/只输出 JSON）与单元分析相同。`;
+
+const MATERIAL_MAP_GLOBAL_PROMPT = `你是全书结构归并器。任务：不读全书原文，仅凭目录与各顶层部分的已完成分析，找出作者在全书层面的组织逻辑（例如：问题提出→概念建立→概念区分→机制解释→现实案例→反例→综合结论；或：理论基础→三个核心维度→逐维展开→应用→限制——由材料本身决定，不得预设套路）。输出全书根结构分析。
+
+【输入块】
+【材料】/【目录】：材料名与目录树（缩进文本）。
+【部分分析】：顶层各部分的分析（JSON 数组，含编号、title、authorialRole、groupingBasis、progression）。
+【格式修复】（仅重试时出现）：同前。
+
+【输出】只输出一个 JSON 对象（全书根）：
+{
+  "title": "全书组织逻辑命名（≤30 字）",
+  "authorialRole": "<${MM_ROLE_ENUM} 之一>",
+  "centralQuestion": "全书回答的核心问题",
+  "progression": "全书展开顺序与每个阶段的组织功能（≤300 字）",
+  "groupingBasis": { "type": "<${MM_GROUPING_ENUM} 之一>", "explanation": "…", "evidenceRefs": ["<部分编号>"] },
+  "evidence": []
+}
+
+【硬性纪律】
+1. 你看不到原文：evidence 恒为空数组——全书根的主张由各部分分析组合支撑，禁止编造引文。
+2. 必须依据【部分分析】的真实内容归纳，禁止套用与材料无关的通用模板。
+3. 只输出 JSON。`;
+
+const MATERIAL_MAP_EDITORIAL_PROMPT = `你是结构编辑。任务：对已通过本地校验的导图结构 JSON 做一次轻量终编辑。你收不到原文，只能编辑既有结构：删除重复节点、合并同义结构、修正过于笼统的节点标题、修正明显错误的层级关系。禁止重新创作导图、禁止新增任何无证据内容、禁止改变作者没有表达的关系。
+
+【输入块】
+【材料】/【目录】：同前。
+【结构 JSON】：节点清单（id/title/authorialRole/groupingBasis/evidence 引文摘要）与层级关系。
+【格式修复】（仅重试时出现）：同前。
+
+【输出】只输出一个 JSON 对象：
+{ "ops": [
+    { "op": "rename", "id": "<节点id>", "title": "<新标题（≤30 字）>" },
+    { "op": "merge", "keepId": "<保留节点id>", "dropId": "<并入节点id（必须同级同父）>" },
+    { "op": "delete", "id": "<叶子节点id>" },
+    { "op": "reparent", "id": "<节点id>", "newParentId": "<新父节点id（不得成环）>" }
+  ],
+  "changeLog": ["每条操作一句理由"]
+}
+
+【硬性纪律】
+1. 只编辑既有节点，禁止发明新 id。
+2. 无需修改时输出空 ops 数组——完全合法，宁不动不乱动。
+3. 不确定就不动。只输出 JSON。`;
+
+const MATERIAL_MAP_REVIEW_PROMPT = `你是导图质量评审。任务：判断一张材料知识导图是否真实表达了「作者的组织方式」。你收不到原文——事实性与引文一致性校验已由本地程序完成，你只评审结构质量。
+
+评审维度（仅限以下五类，不要扩大到事实核对）：
+1. 是否体现作者组织方式（authorialRole / progression / groupingBasis 是否有实质内容）
+2. 是否退化成普通主题列表（子节点只是并列名词堆砌、无组织逻辑）
+3. 是否过度依赖目录标题（与目录机械重复、无增量洞察）
+4. 是否存在笼统空洞的父节点（「概述/内容/相关知识」类标题且 grouping 无实质）
+5. 是否遗漏输入分析中明显可见的结构关系
+
+【输入块】
+【材料】/【目录】：同前。
+【结构 JSON】：节点与层级（含证据引文摘要）。
+【格式修复】（仅重试时出现）：同前。
+
+【输出】只输出一个 JSON 对象：
+{
+  "status": "<pass|review|fail>",
+  "issues": [
+    { "nodeId": "<节点id，无则空串>", "type": "<hollow_parent|topic_list|toc_echo|weak_grouping|missing_relation|other>", "severity": "<high|medium|low>", "repairScope": "<section_analysis|chapter_merge|global_merge|editorial|none>", "note": "≤60 字" }
+  ],
+  "summary": "≤100 字总评"
+}
+
+【纪律】
+1. fail 仅用于明确缺陷（空洞父节点泛滥、纯主题列表）；轻微问题用 review 并列 issues；良好用 pass。
+2. nodeId 必须来自输入结构 JSON；repairScope 只能指向受影响的最小归并阶段。
+3. 只输出 JSON。`;
+
 module.exports = {
   // v46（M14-UM2，§4.18-13）：制卡族 v6→v7——组装 R20 记忆接地段（基础文本不变，v6 行留痕）
   CARD_GEN_PROMPT: CARD_GEN_PROMPT + R20_SITUATION_SECTION,
@@ -815,6 +954,12 @@ module.exports = {
   FRONTIER_EXPLAIN_PROMPT,
   STRUCTURE_ANALOGY_PROMPT,
   USER_MEMORY_PROMPT,
+  // v48 批2（M15 重做，D41-③）：材料知识导图四层管线 + 语义评审
+  MATERIAL_MAP_SECTION_PROMPT,
+  MATERIAL_MAP_MERGE_PROMPT,
+  MATERIAL_MAP_GLOBAL_PROMPT,
+  MATERIAL_MAP_EDITORIAL_PROMPT,
+  MATERIAL_MAP_REVIEW_PROMPT,
   SITUATION_REQUIRED_SCOPES,
   situationRequiredFor
 };

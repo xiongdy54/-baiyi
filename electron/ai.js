@@ -153,7 +153,15 @@ function setAIConfig(partial) {
   return safe;
 }
 
-function chatStream({ messages, temperature }, send) {
+// v48 批2（M15 §4.19-8）：机读错误码——超时/限流/网络/HTTP/无 Key/取消，多级管线重试与失败状态机需要；
+// 中文 message 不变（渲染层展示不受影响），仅附 .code。
+function classifyHttpError(status, errText) {
+  const err = new Error(`AI 服务错误 ${status}: ${String(errText || "").slice(0, 300)}`);
+  err.code = status === 429 ? "rate_limit" : "http";
+  return err;
+}
+
+function chatStream({ messages, temperature, abortSignal }, send) {
   const cfg = getAIConfig();
   // 本地模型服务无需 Key
   const needKey = cfg.preset !== "local";
@@ -161,6 +169,11 @@ function chatStream({ messages, temperature }, send) {
     const err = new Error("尚未配置 AI API Key。请打开 设置 → AI 服务，选择服务并粘贴 API Key。");
     err.code = "AI_NO_KEY";
     throw err;
+  }
+  if (abortSignal && abortSignal.aborted) {
+    const err = new Error("已取消");
+    err.code = "cancelled";
+    return Promise.reject(err);
   }
   const url = new URL(cfg.baseUrl.replace(/\/$/, "") + "/chat/completions");
   const isHttps = url.protocol === "https:";
@@ -179,6 +192,23 @@ function chatStream({ messages, temperature }, send) {
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
   headers["Content-Length"] = Buffer.byteLength(body);
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, val) => {
+      if (settled) return;
+      settled = true;
+      fn(val);
+    };
+    const onAbort = () => {
+      const err = new Error("已取消");
+      err.code = "cancelled";
+      try {
+        req.destroy(err);
+      } catch {
+        /* 已结束则忽略 */
+      }
+      finish(reject, err);
+    };
+    if (abortSignal) abortSignal.addEventListener("abort", onAbort, { once: true });
     const req = (isHttps ? https : http).request(
       {
         hostname: url.hostname,
@@ -191,10 +221,11 @@ function chatStream({ messages, temperature }, send) {
         if (res.statusCode !== 200) {
           let errText = "";
           res.on("data", (c) => (errText += c));
-          res.on("end", () => reject(new Error(`AI 服务错误 ${res.statusCode}: ${errText.slice(0, 300)}`)));
+          res.on("end", () => finish(reject, classifyHttpError(res.statusCode, errText)));
           return;
         }
         let buf = "";
+        let usage = null; // v48：末块 usage（prompt/completion tokens；GLM 计入 reasoning）
         // 思考模型（GLM 等）先输出 reasoning_content 再输出正文；thinking 计数节流转发（v10.4）
         let thinkAcc = 0;
         let lastThinkSent = 0;
@@ -207,12 +238,13 @@ function chatStream({ messages, temperature }, send) {
             if (!line.startsWith("data:")) continue;
             const data = line.slice(5).trim();
             if (data === "[DONE]") {
-              send({ done: true });
-              resolve();
+              send({ done: true, usage });
+              finish(resolve, { usage });
               return;
             }
             try {
               const json = JSON.parse(data);
+              if (json.usage) usage = json.usage;
               const d = json.choices?.[0]?.delta || {};
               if (d.content) send({ delta: d.content });
               const think = d.reasoning_content ?? d.reasoning;
@@ -230,32 +262,42 @@ function chatStream({ messages, temperature }, send) {
           }
         });
         res.on("end", () => {
-          send({ done: true });
-          resolve();
+          send({ done: true, usage });
+          finish(resolve, { usage });
         });
-        res.on("error", reject);
+        res.on("error", (err) => finish(reject, err));
       }
     );
+    req.on("close", () => {
+      if (abortSignal && abortSignal.aborted) finish(reject, Object.assign(new Error("已取消"), { code: "cancelled" }));
+    });
     req.on("error", (err) => {
-      if (err.code === "ECONNREFUSED") {
-        if (cfg.preset === "local") {
-          reject(
-            new Error(
-              "无法连接本地模型服务（localhost 被拒绝）。请确认：① 已安装并启动 Ollama（或 LM Studio 已加载模型并开启本地服务）；② 端口正确（Ollama 11434 / LM Studio 1234）"
-            )
-          );
-          return;
-        }
-        reject(new Error(`无法连接 AI 服务（${url.host} 连接被拒绝）`));
+      if (abortSignal && abortSignal.aborted) {
+        finish(reject, Object.assign(new Error("已取消"), { code: "cancelled" }));
         return;
       }
-      reject(err);
+      if (err.code === "ECONNREFUSED") {
+        const e =
+          cfg.preset === "local"
+            ? new Error(
+                "无法连接本地模型服务（localhost 被拒绝）。请确认：① 已安装并启动 Ollama（或 LM Studio 已加载模型并开启本地服务）；② 端口正确（Ollama 11434 / LM Studio 1234）"
+              )
+            : new Error(`无法连接 AI 服务（${url.host} 连接被拒绝）`);
+        e.code = "network";
+        finish(reject, e);
+        return;
+      }
+      err.code = err.code === "ETIMEDOUT" ? "timeout" : err.code || "network";
+      finish(reject, err);
     });
     // socket 不活动超时（v45 补记）：流式响应期间任何数据都会重置计时；GLM 思考期有 reasoning_content
     // 持续流出不会误杀。缺了它，网络黑洞（连接建立但服务端永不应答）会让 IPC 永不 resolve——
     // 设置页「测试连接」曾因此永久置灰，只能重启设置窗口。
     req.setTimeout(120000, () => {
-      req.destroy(new Error("AI 连接超时：120 秒无数据响应，已自动中断（请检查网络或服务地址）"));
+      const err = new Error("AI 连接超时：120 秒无数据响应，已自动中断（请检查网络或服务地址）");
+      err.code = "timeout";
+      req.destroy(err);
+      finish(reject, err);
     });
     req.write(body);
     req.end();

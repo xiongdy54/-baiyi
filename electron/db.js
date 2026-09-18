@@ -27,6 +27,11 @@ const {
   FRONTIER_EXPLAIN_PROMPT,
   STRUCTURE_ANALOGY_PROMPT,
   USER_MEMORY_PROMPT,
+  MATERIAL_MAP_SECTION_PROMPT,
+  MATERIAL_MAP_MERGE_PROMPT,
+  MATERIAL_MAP_GLOBAL_PROMPT,
+  MATERIAL_MAP_EDITORIAL_PROMPT,
+  MATERIAL_MAP_REVIEW_PROMPT,
   SITUATION_REQUIRED_SCOPES,
   situationRequiredFor
 } = require("./prompts");
@@ -1673,6 +1678,25 @@ function ensurePromptTemplates() {
       ["knowledge-probe", "维度探针 v1", KNOWLEDGE_PROBE_PROMPT],
       ["frontier-explain", "推荐解释 v1", FRONTIER_EXPLAIN_PROMPT],
       ["structure-analogy", "结构类比 v1", STRUCTURE_ANALOGY_PROMPT]
+    ]) {
+      const n = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = ?", [scope])[0]?.n || 0;
+      if (Number(n) === 0) {
+        db.run(
+          "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, 1, 1, ?, ?)",
+          [crypto.randomUUID(), scope, name, content, situationRequiredFor(scope), now]
+        );
+      }
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // v48 批2（M15 重做，D41-③ / §4.19-3）：material-map-* 五 scope 首版 v1——四层管线（单元分析/归并/全书/终编辑）
+  // + 语义评审。消费引擎 = electron/mindmapEngine.js；出层校验 = electron/mindmapCore.js validateMapStructure。
+  try {
+    for (const [scope, name, content] of [
+      ["material-map-section", "材料结构单元分析 v1", MATERIAL_MAP_SECTION_PROMPT],
+      ["material-map-merge", "章节归并 v1", MATERIAL_MAP_MERGE_PROMPT],
+      ["material-map-global", "全书归并 v1", MATERIAL_MAP_GLOBAL_PROMPT],
+      ["material-map-editorial", "结构终编辑 v1", MATERIAL_MAP_EDITORIAL_PROMPT],
+      ["material-map-review", "导图语义评审 v1", MATERIAL_MAP_REVIEW_PROMPT]
     ]) {
       const n = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = ?", [scope])[0]?.n || 0;
       if (Number(n) === 0) {

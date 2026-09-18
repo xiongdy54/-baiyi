@@ -75,6 +75,7 @@ const backup = require("./backup");
 const memoryStore = require("./memoryStore");
 const memoryTidy = require("./memoryTidy");
 const memoryRetrieve = require("./memoryRetrieve");
+const mindmapEngine = require("./mindmapEngine");
 const dictStore = require("./dictStore");
 const quickCapture = require("./quickCapture");
 const { journalDateOf } = require("./journalTime");
@@ -1079,6 +1080,77 @@ ipcMain.handle("memory:reset", () => {
   const dir = memoryStore.resolveMemoryDir(app.getPath("userData"));
   return { created: memoryStore.resetMemory(dir) };
 });
+
+// ============ v48 批2（M15 重做，D41/D42 / §4.19）：材料知识导图编排 ============
+// 主进程编排（memoryTidy 同款偏差——后台多级管线与窗口生命周期解耦）；chat 经 chatStream 直连，
+// usage/cancel/机读错误码随 ai.js 批2 增补统一获得。进度经 mindmap:changed 广播到全部窗口。
+function mindmapChat({ system, user, abortSignal, temperature }) {
+  return new Promise((resolve, reject) => {
+    let acc = "";
+    let settled = false;
+    chatStream(
+      {
+        messages: [
+          { role: "system", content: String(system || "") },
+          { role: "user", content: String(user || "") }
+        ],
+        temperature: Number(temperature) || 0.3,
+        abortSignal
+      },
+      (m) => {
+        if (settled) return;
+        if (m && m.error) {
+          settled = true;
+          reject(new Error(m.error));
+        } else if (m && m.done) {
+          settled = true;
+          resolve({ text: acc, usage: m.usage || null });
+        } else if (m && m.delta) {
+          acc += m.delta;
+        }
+      }
+    ).catch((err) => {
+      if (!settled) {
+        settled = true;
+        reject(err);
+      }
+    });
+  });
+}
+
+const mindmapCtx = () => ({
+  db: dbModule,
+  readSettings,
+  writeSettings,
+  hasKey: () => {
+    try {
+      const cfg = getAIConfig();
+      return Boolean(cfg.hasKey) || cfg.preset === "local";
+    } catch {
+      return false;
+    }
+  },
+  chat: mindmapChat,
+  broadcast: (payload) => {
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.webContents.send("mindmap:changed", payload);
+    }
+  }
+});
+
+ipcMain.handle("mindmap:preview", (_e, params) => mindmapEngine.preview(mindmapCtx(), params || {}));
+ipcMain.handle("mindmap:generate", (_e, params) => mindmapEngine.generate(mindmapCtx(), params || {}));
+ipcMain.handle("mindmap:cancel", (_e, runId) => {
+  mindmapEngine.cancelRun(runId);
+  return true;
+});
+ipcMain.handle("mindmap:repairConfirm", (_e, runId) => mindmapEngine.repairConfirm(mindmapCtx(), runId));
+ipcMain.handle("mindmap:list", (_e, documentId) => dbModule.listMaterialMaps(documentId));
+ipcMain.handle("mindmap:get", (_e, id) => dbModule.getMaterialMap(id));
+ipcMain.handle("mindmap:getActive", (_e, documentId, scopeAnchor) => dbModule.getActiveMaterialMap(documentId, scopeAnchor || "book"));
+ipcMain.handle("mindmap:setActive", (_e, id) => dbModule.setActiveMaterialMap(id));
+ipcMain.handle("mindmap:delete", (_e, id) => dbModule.deleteMaterialMap(id));
+ipcMain.handle("mindmap:runs", (_e, documentId) => dbModule.listMaterialMapRuns(documentId));
 
 // v46（M14-UM2，§4.18-7/8）：制卡记忆接地检索——Stage A 本地宽召回（memoryRetrieve 纯函数）。
 // 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；

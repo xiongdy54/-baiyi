@@ -283,3 +283,22 @@ contextBridge.exposeInMainWorld("memoryAPI", {
   }
 });
 
+// v48 批2（M15 重做，D41/D42 / §4.19）：材料知识导图（编排/留痕在主进程；进度经 mindmap:changed 广播）
+contextBridge.exposeInMainWorld("mindmapAPI", {
+  preview: (params) => ipcRenderer.invoke("mindmap:preview", params || {}),
+  generate: (params) => ipcRenderer.invoke("mindmap:generate", params || {}),
+  cancel: (runId) => ipcRenderer.invoke("mindmap:cancel", runId),
+  repairConfirm: (runId) => ipcRenderer.invoke("mindmap:repairConfirm", runId),
+  list: (documentId) => ipcRenderer.invoke("mindmap:list", documentId),
+  get: (id) => ipcRenderer.invoke("mindmap:get", id),
+  getActive: (documentId, scopeAnchor) => ipcRenderer.invoke("mindmap:getActive", documentId, scopeAnchor || "book"),
+  setActive: (id) => ipcRenderer.invoke("mindmap:setActive", id),
+  remove: (id) => ipcRenderer.invoke("mindmap:delete", id),
+  runs: (documentId) => ipcRenderer.invoke("mindmap:runs", documentId),
+  onChanged: (callback) => {
+    const handler = (_e, payload) => callback(payload);
+    ipcRenderer.on("mindmap:changed", handler);
+    return () => ipcRenderer.removeListener("mindmap:changed", handler);
+  }
+});
+
