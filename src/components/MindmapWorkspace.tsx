@@ -24,7 +24,7 @@ interface MindmapWorkspaceProps {
   documentId: string;
   title: string;
   onBack: () => void;
-  /** 就此制卡（批5 接 Reader 既有管线；未提供时按钮隐藏） */
+  /** 就此制卡（批C：结构制卡——section=结构语义包，走 card-structure 分支；未提供时按钮隐藏） */
   onMakeCardsFromNode?: (payload: { nodeId: string; label: string; section: string; focus: string; unitAnchors: string[] }) => void;
 }
 

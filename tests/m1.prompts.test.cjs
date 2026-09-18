@@ -76,7 +76,15 @@ app.whenReady().then(async () => {
     check("R20 拒用铁律在案（答案来自材料 / 无贴合必须省略 / memoryRef 逐字抄录）",
       gen.includes("必须来自材料") && gen.includes("宁缺毋滥") && gen.includes("逐字抄录"), "含 R20 三条款", false);
 
-    console.log(`\nM1 提示词播种测试完成：${pass} 通过 / ${fail} 失败`);
+      // v48.5 批C：card-structure 结构制卡分支播种（导图节点「就此制卡」专用；auto 不路由）
+  {
+    const tpl = db.getPromptTemplate("card-structure");
+    check("P-card-structure 播种 v1", tpl && tpl.version === 1, tpl && tpl.version);
+    check("P-card-structure 契约抽查（结构关系枚举/禁事实退化/答案可推导）", tpl && tpl.content.includes("结构关系：") && tpl.content.includes("parent-child") && tpl.content.includes("禁止把结构卡退化成普通知识卡") && tpl.content.includes("完全可从结构语义包推导"), tpl && tpl.content.slice(0, 80));
+    check("P-card-structure situationRequired=0（无情境语义）", tpl && Number(tpl.situation_required) === 0, tpl && tpl.situation_required);
+  }
+
+  console.log(`\nM1 提示词播种测试完成：${pass} 通过 / ${fail} 失败`);
   } catch (err) {
     fail++;
     console.error("  ✗ 测试异常：", err && err.stack ? err.stack : err);

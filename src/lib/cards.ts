@@ -164,7 +164,7 @@ export interface GenResult {
   regions?: OcclusionRegion[];
 }
 
-export type CardGenMode = "auto" | "card-generation" | "card-formula" | "card-seq" | "card-enum" | "card-literature" | "card-mnemonic" | "card-contrast" | "card-wording" | "card-basic" | "card-occlusion" | "card-vocab";
+export type CardGenMode = "auto" | "card-generation" | "card-formula" | "card-seq" | "card-enum" | "card-literature" | "card-mnemonic" | "card-contrast" | "card-wording" | "card-basic" | "card-occlusion" | "card-vocab" | /** v48.5（M15，用户制卡语义拍板）：导图节点「就此制卡」专用——对作者组织结构出题，auto 不路由到它 */ "card-structure";
 
 // ---------- 材料类型路由（M1.2，本地规则先行） ----------
 // 类型→原则→提示词→默认形式映射（§6.3.10；映射表待用户确认后写入文档）：

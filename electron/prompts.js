@@ -791,6 +791,36 @@ const R20_NA_SECTION = `
 
 【记忆情境接地（R20）——本卡型不适用】本卡型不需要现实情境，不会收到【用户记忆】块；即使收到也禁止将其内容用于任何卡面字段，不要输出 memoryRef 字段。`;
 
+// ---------- v48.5 批C（用户 2026-09-18 制卡语义拍板）：card-structure 结构制卡 ----------
+// 导图节点「就此制卡」专用分支：对材料的**作者组织结构**出题（不考原文事实细节）。
+// 输入 = 节点结构语义包（本节点/父链/直接子结构/证据引文），不携带章节原文全文。
+// 结构关系封闭枚举随卡输出（写进 warnings 供确认面板可见），缺标注 = 可疑卡。
+const STRUCTURE_RELATION_ENUM = "parent-child|sequence|contrast|grouping|derivation|claim-evidence|problem-solution|general-specific|synthesis";
+
+const CARD_STRUCTURE_PROMPT = `你是材料结构制卡器。任务：根据给出的**节点结构语义包**（一份材料的作者组织结构片段），制作考察「作者如何组织这一部分知识」的卡片。你拿不到原文全文——这是刻意设计：结构卡考的是组织关系，不是原文事实细节。
+
+【输入块】
+【结构语义包】JSON：本节点（title/authorialRole/centralQuestion/progression/groupingBasis/relationToParent）+ 父链路径（上级主题）+ 直接子结构清单（title/authorialRole/relationToParent）+ 证据引文（作者原话片段，仅用于佐证组织方式）。
+
+【考察对象（硬约束）】只出**结构关系**卡，逐卡在 warnings 标注结构关系类型（"结构关系：<类型>"）：
+- 关系型（parent-child）：该节点之下作者分别引入/集合了什么？各子结构与它是什么关系？
+- 派生型（derivation）：为什么 X 会作为 Y 的下级结构出现？作者是如何从 Y 推导/展开到 X 的？
+- 顺序型（sequence）：作者按什么顺序从 A 展开到 B、再到 C？这种顺序承担什么作用？
+- 对比型（contrast）：作者把 A 与 B 并列比较时，比较的维度/用意是什么？
+- 分组型（grouping）：作者以什么依据把这些内容归入同一结构？
+- 证据型（claim-evidence）：作者用哪个/哪些部分支撑哪个主张的展开？
+- 问题-解决型（problem-solution）：作者先提出什么问题、再以什么结构给出回应？
+- 一般-特殊型（general-specific）：作者从一般原则深入到哪些具体对象？
+- 综合型（synthesis）：作者在此综合了此前哪些部分？
+枚举：${STRUCTURE_RELATION_ENUM}
+
+【硬性纪律】
+1. **答案必须完全可从结构语义包推导**——引入语义包之外的事实细节、或作出语义包没有的评价性判断（如「A 比 B 更合理」）即不合格。
+2. **禁止把结构卡退化成普通知识卡**：「泰勒斯认为水是本原吗」考的是原文事实，不是组织方式——除非它服务于结构关系且语义包可支撑。
+3. 卡面遵守统一制卡契约（R1-R19）：一卡一义、挖空 ≤2、答案来自材料（此处材料=结构语义包与证据引文）、归属锚（R19：考察作者组织时 front 或 contextPrefix 带「材料的作者」措辞）。
+4. 输出统一 JSON schema（与制卡族一致），每卡 warnings 必须含「结构关系：<枚举之一>」；无贴合结构关系的卡宁缺毋滥。
+5. 不输出 JSON 以外的文字。`;
+
 // ---------- v48 批2（M15 重做，D41-③ / §4.19-3）：材料知识导图四层管线 + 语义评审 ----------
 // 公共输出契约（五 scope 共享纪律）：只输出 JSON / 只依据输入 / quote 逐字 / 禁坐标 SVG / 标题可抽象。
 // user 消息块由引擎拼装：【材料】【结构路径】【原文·<锚>】【父级自有原文·<锚>】【子节点分析】【目录】
@@ -974,6 +1004,8 @@ module.exports = {
   STRUCTURE_ANALOGY_PROMPT,
   USER_MEMORY_PROMPT,
   // v48 批2（M15 重做，D41-③）：材料知识导图四层管线 + 语义评审
+  CARD_STRUCTURE_PROMPT: CARD_STRUCTURE_PROMPT + R20_NA_SECTION,
+  STRUCTURE_RELATION_ENUM,
   MATERIAL_MAP_SECTION_PROMPT,
   MATERIAL_MAP_MERGE_PROMPT,
   MATERIAL_MAP_GLOBAL_PROMPT,

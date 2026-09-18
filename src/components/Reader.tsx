@@ -1815,7 +1815,8 @@ export default function Reader({
           onBack={() => setMindmapOpen(false)}
           onMakeCardsFromNode={(payload) => {
             setMindmapOpen(false);
-            void runAICards(payload.section, undefined, "auto", { focus: payload.focus, mindmapNodeId: payload.nodeId });
+            // v48.5 批C：结构制卡——mode=card-structure（导图节点专用分支，对作者组织结构出题）
+            void runAICards(payload.section, undefined, "card-structure", { focus: payload.focus, mindmapNodeId: payload.nodeId });
           }}
         />
       )}

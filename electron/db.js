@@ -17,6 +17,7 @@ const {
   CARD_LITERATURE_PROMPT,
   CARD_OCCLUSION_PROMPT,
   CARD_OCCLUSION_PROMPT_V3,
+  CARD_STRUCTURE_PROMPT,
   READER_EXPLAIN_PROMPT,
   LEECH_RESCUE_PROMPT,
   JOURNAL_INSIGHT_PROMPT,
@@ -1710,6 +1711,17 @@ function ensurePromptTemplates() {
           [crypto.randomUUID(), scope, name, content, MM_TARGETS[scope] || 2, situationRequiredFor(scope), now]
         );
       }
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // v48.5 批C（用户制卡语义拍板）：card-structure 结构制卡分支 v1——导图节点「就此制卡」专用，
+  // 对作者组织结构出题（不考原文事实细节），走统一制卡管线与确认面板；auto 路由不选它。
+  try {
+    const csCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'card-structure'")[0]?.n || 0;
+    if (Number(csCount) === 0) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'card-structure', '结构制卡 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), CARD_STRUCTURE_PROMPT, situationRequiredFor("card-structure"), now]
+      );
     }
   } catch { /* 播种失败不阻塞启动 */ }
   // v45（M14-UM1，D39 / §4.18-13）：user-memory 新 scope 首版 v1——摄入轮与整理轮共用的整理提示词
