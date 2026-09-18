@@ -12,7 +12,10 @@
 const crypto = require("crypto");
 const core = require("./mindmapCore");
 
-const GENERATOR_VERSION = "m15r-engine-1";
+const GENERATOR_VERSION = "m15r-engine-2"; // v48.5 批B：expand 深挖管线（版本变更即整体缓存失效，宁重算不误复用）
+const EXPAND_VARIANT = "expand-1"; // 深挖调用变体（折入 modelConfigHash——变体或模板改动整体失效）
+const MAX_EXPAND_DEPTH = 8; // 安全上限（非正常终止；触达即 stopReason=max_depth 留痕）
+const REVIEW_SHARD_NODES = 120; // 语义评审分片阈值（>120 节点按顶层分支递归分片，不截断树不删证据）
 // 输出 token 估算（每类调用常数；估算口径，实际以 provider usage 为准，§4.19-8）
 const EST_OUTPUT_TOKENS = { section: 900, merge: 700, global: 1000, editorial: 800, review: 600 };
 const RUN_KIND_SCOPE = {
@@ -76,12 +79,22 @@ function readPricing(ctx) {
 }
 
 function modelConfigHashOf(ctx) {
-  // 关键生成参数指纹：模型档（reasoningEffort）+ 编排器版本（影响输出语义的参数都算）
+  // 关键生成参数指纹：模型档 + 编排器版本 + 深挖变体（prompt/变体任何改动即整体缓存失效——宁重算不误复用）
   try {
     const cfg = require("./ai").getAIConfig();
-    return sha256([cfg.model, cfg.reasoningEffort || "low", GENERATOR_VERSION].join("|"));
+    return sha256([cfg.model, cfg.reasoningEffort || "low", GENERATOR_VERSION, EXPAND_VARIANT].join("|"));
   } catch {
-    return sha256(GENERATOR_VERSION);
+    return sha256([GENERATOR_VERSION, EXPAND_VARIANT].join("|"));
+  }
+}
+
+function maxCallsOf(ctx) {
+  try {
+    const settings = ctx.readSettings();
+    const v = Number(settings && settings.app && settings.app.mindmapMaxCalls);
+    return Number.isFinite(v) && v > 0 ? Math.floor(v) : 300;
+  } catch {
+    return 300;
   }
 }
 
@@ -387,6 +400,11 @@ function preview(ctx, params) {
   // 按保守口径恒计入 2 次输出估算，UI 明示「随缓存变动」（§4.19-8 诚实预览，禁低估）
   const fixedCalls = 2;
   estOutput += EST_OUTPUT_TOKENS.editorial + EST_OUTPUT_TOKENS.review;
+  // v48.5 批B：expand 首波预估 = section 组成员叶数（模型逐节点判定 expandable，实际随深度动态；
+  // 仅作费用预期锚点，UI 明示「动态追加」——禁伪装精确值）
+  let expandFirstWave = 0;
+  for (const c of plan.calls) if (c.runKind === "section") expandFirstWave += (c.nodeKeys || []).length;
+  estOutput += expandFirstWave * (EST_OUTPUT_TOKENS.section || 900);
   const pricing = readPricing(ctx)[model] || null;
   const estCost =
     pricing && Number(pricing.input) >= 0 && Number(pricing.output) >= 0
@@ -398,6 +416,7 @@ function preview(ctx, params) {
     newCalls,
     cacheHits,
     fixedCalls,
+    expandFirstWave,
     charsExact: plan.calls.reduce((s, c) => s + c.chars, 0),
     estInputTokens: estInput,
     estOutputTokens: estOutput,
@@ -425,6 +444,7 @@ async function generate(ctx, params, runId) {
   const { provider, model } = providerModelOf();
   const cfgHash = modelConfigHashOf(ctx);
   const common = { documentId: params.documentId, granularity: params.granularity, provider, model, modelConfigHash: cfgHash };
+  const budget = maxCallsOf(ctx);
 
   const run =
     (runId && ctx.db.getMaterialMapRun(runId)) ||
@@ -433,13 +453,37 @@ async function generate(ctx, params, runId) {
       scopeAnchor: params.scopeAnchor || "book",
       scopeKind: params.scopeAnchor && params.scopeAnchor !== "book" ? "chapter" : "book",
       granularity: params.granularity,
-      input: { scope: params.scopeAnchor || "book", granularity: params.granularity }
+      input: { scope: params.scopeAnchor || "book", granularity: params.granularity, budget }
     });
   const cancelled = () => cancelledRuns.has(run.id);
-
   const usageAcc = { prompt: 0, completion: 0 };
-  const cacheContent = new Map(); // nodeKey → 分析产出（运行内复用）
-  const shards = new Map(); // nodeKey → shard content
+  const cacheContent = new Map(); // nodeKey → 调用产出（组调用每成员共享）
+  let callsMade = 0;
+  let budgetHit = false;
+
+  // 单次调用执行（缓存命中跳过；坏 JSON 一次 STRUCTURE_FORMAT_REPAIR；usage 累计；取消/预算检查）
+  const executeCall = async (call) => {
+    const hit = !params.force && ctx.db.getMaterialMapShard(call.cacheKey);
+    if (hit) return { content: hit.content, cached: true };
+    if (cancelled()) return { cancelled: true };
+    ctx.broadcast({ runId: run.id, stage: "waiting_model", label: call.label || call.runKind, calls: callsMade, budget });
+    let { text, usage } = await chatOnce(ctx, call.system, call.user, run.id);
+    usageAcc.prompt += usage.prompt;
+    usageAcc.completion += usage.completion;
+    let parsed = parseJsonLoose(text);
+    if (!parsed) {
+      const repairUser = `【格式修复】\n下面的内容不是合法 JSON。请只把它转换为合法 JSON：不得增加或删除任何节点与字段，不得修改任何语义内容。\n\n【原输出】\n${text.slice(0, 20000)}`;
+      const rep = await chatOnce(ctx, call.system + "\n\n【格式修复模式】收到【格式修复】块时：只转换格式，不得增删改语义。", repairUser, run.id);
+      usageAcc.prompt += rep.usage.prompt;
+      usageAcc.completion += rep.usage.completion;
+      parsed = parseJsonLoose(rep.text);
+      if (!parsed) return { jsonFail: true };
+    }
+    callsMade += 1;
+    const content = normalizeCallOutput(call.runKind, parsed);
+    ctx.db.saveMaterialMapShard({ ...call.cacheKey, content, chars: call.chars || null, tokenUsed: usage.prompt + usage.completion });
+    return { content };
+  };
 
   try {
     ctx.db.updateMaterialMapRun(run.id, { status: "estimating", provider, model, modelConfigHash: cfgHash });
@@ -450,7 +494,7 @@ async function generate(ctx, params, runId) {
     }
     const plan = prep.plan;
 
-    // 最终调用清单（含运行期回填的 user 消息；指纹 = 递归 callTextHash，与 preview 完全一致）
+    // 预解析管线调用（section/merge/global）的最终 user 消息与确定性缓存键（指纹与 preview 一致）
     const hashMemo = new Map();
     const resolved = [];
     for (const call of plan.calls) {
@@ -459,7 +503,7 @@ async function generate(ctx, params, runId) {
         const childSummaries = (call.childKeys || []).map((ck) => {
           const c = cacheContent.get(ck);
           return {
-            tempId: plan.nodeTempId.get(ck) || `n?`,
+            tempId: plan.nodeTempId.get(ck) || "n?",
             title: c ? c.title || c.nodeTitle || "" : "",
             authorialRole: c ? c.authorialRole || null : null,
             groupingBasis: c ? c.groupingBasis || null : null,
@@ -483,6 +527,9 @@ async function generate(ctx, params, runId) {
         }
       });
     }
+    const sectionCalls = resolved.filter((c) => c.runKind === "section");
+    const mergeCalls = resolved.filter((c) => c.runKind === "merge");
+    const globalCalls = resolved.filter((c) => c.runKind === "global");
 
     const est = preview(ctx, params);
     ctx.db.updateMaterialMapRun(run.id, {
@@ -496,67 +543,191 @@ async function generate(ctx, params, runId) {
       currency: est.currency,
       promptVersion: promptVersion(ctx, "material-map-section")
     });
-    ctx.broadcast({ runId: run.id, stage: "running", done: 0, total: est.newCalls });
+    ctx.broadcast({ runId: run.id, stage: "running", done: 0, total: est.newCalls, calls: 0, budget });
 
-    // 依序执行（section 组 → merge 自底向上 → global）
-    let done = 0;
-    for (const call of resolved) {
-      if (call.runKind === "editorial" || call.runKind === "review") continue;
-      if (cancelled()) {
-        ctx.db.updateMaterialMapRun(run.id, { status: "cancelled", errorText: "用户取消（已完成的分片已入缓存）" });
-        return { status: "cancelled", runId: run.id };
-      }
-      const hit = !params.force && ctx.db.getMaterialMapShard(call.cacheKey);
-      if (hit) {
-        cacheContent.set(call.nodeKeys[0] === undefined ? call.nodeKey : call.nodeKeys[0], hit.content);
-        // 组调用：每个成员节点共享同一产出
-        if (call.runKind === "section" && Array.isArray(call.nodeKeys)) {
-          for (const k of call.nodeKeys) cacheContent.set(k, hit.content);
-        }
-        done++;
-        continue;
-      }
-      ctx.broadcast({ runId: run.id, stage: "waiting_model", label: call.label });
-      const { text, usage } = await chatOnce(ctx, call.system, call.user, run.id);
-      usageAcc.prompt += usage.prompt;
-      usageAcc.completion += usage.completion;
-      let parsed = parseJsonLoose(text);
-      if (!parsed) {
-        // 一次 STRUCTURE_FORMAT_REPAIR（§4.19-11：不加节点/不加证据/不改语义）
-        const repairUser = `【格式修复】\n下面的内容不是合法 JSON。请只把它转换为合法 JSON：不得增加或删除任何节点与字段，不得修改任何语义内容。\n\n【原输出】\n${text.slice(0, 20000)}`;
-        const rep = await chatOnce(ctx, call.system + "\n\n【格式修复模式】收到【格式修复】块时：只转换格式，不得增删改语义。", repairUser, run.id);
-        usageAcc.prompt += rep.usage.prompt;
-        usageAcc.completion += rep.usage.completion;
-        parsed = parseJsonLoose(rep.text);
-        if (!parsed) {
-          ctx.db.updateMaterialMapRun(run.id, {
-            status: "failed_json",
-            errorCode: "json",
-            errorText: "模型输出两次均无法解析为合法 JSON（含一次格式修复）",
-            actualPromptTokens: usageAcc.prompt,
-            actualCompletionTokens: usageAcc.completion
-          });
-          return { status: "failed", code: "json", runId: run.id };
-        }
-      }
-      const content = normalizeCallOutput(call.runKind, parsed);
-      const key0 = call.runKind === "section" ? call.nodeKeys[0] : call.nodeKey;
-      ctx.db.saveMaterialMapShard({ ...call.cacheKey, content, chars: call.chars, tokenUsed: usage.prompt + usage.completion });
-      cacheContent.set(key0, content);
-      if (call.runKind === "section" && Array.isArray(call.nodeKeys)) {
-        for (const k of call.nodeKeys) cacheContent.set(k, content);
-      }
-      shards.set(call.nodeKey, content);
-      done++;
-      ctx.db.updateMaterialMapRun(run.id, { callsDone: done });
-      ctx.broadcast({ runId: run.id, stage: "running", done, total: est.newCalls });
+    // ---------- 阶段 1：section 首层（expandable/stopReason 由此产生；仅 expandable=true 的叶入深挖队） ----------
+    for (const call of sectionCalls) {
+      const r = await executeCall(call);
+      if (r.cancelled) return finishCancelled(run.id);
+      if (r.budget) { budgetHit = true; break; }
+      if (r.jsonFail) return finishJsonFail(ctx, run.id, usageAcc);
+      const key0 = call.nodeKeys[0];
+      cacheContent.set(key0, r.content);
+      for (const k of call.nodeKeys) cacheContent.set(k, r.content);
+      ctx.db.updateMaterialMapRun(run.id, { callsDone: callsMade });
+      ctx.broadcast({ runId: run.id, stage: "running", done: callsMade, total: est.newCalls, calls: callsMade, budget });
     }
 
-    // 组装 rawNodes → 本地校验
+    // ---------- 阶段 2：初装 TOC 层（TOC 节点 + section 单层 children） ----------
+    const assembled = assembleTocLayer(params, plan, sectionCalls, cacheContent);
+    const nodeById = new Map(assembled.raw.nodes.map((n) => [n.id, n]));
+    nodeByIdLookup = (id) => nodeById.get(id) || null;
+
+    // ---------- 阶段 3：expand 逐节点深挖（仅 expandable=true 的叶入队；max_depth/call_budget 为非正常终止） ----------
+    ctx.db.updateMaterialMapRun(run.id, { stage: "expand" });
+    const metrics = { expandCalls: 0, stopReasons: {} };
+    const bumpStop = (reason) => {
+      const k = reason || "unexamined";
+      metrics.stopReasons[k] = (metrics.stopReasons[k] || 0) + 1;
+    };
+    const queue = [];
+    const queued = new Set();
+    const enqueue = (node, depth) => {
+      const fp = expandFingerprint(node, depth);
+      if (queued.has(fp)) return;
+      queued.add(fp);
+      queue.push({ fp, node, depth });
+    };
+    const depthOfNode = new Map();
+    const depthWalk = (id, d) => {
+      depthOfNode.set(id, d);
+      const n = nodeById.get(id);
+      for (const c of (n && n.childIds) || []) depthWalk(c, d + 1);
+    };
+    depthWalk("root", 0);
+    for (const n of assembled.raw.nodes) {
+      if (n.id === "root") continue;
+      n.sourceKind = n.sourceKind || ((n.unitAnchors && n.unitAnchors.length) ? "toc_owned" : "derived_group");
+      const d = depthOfNode.get(n.id) || 0;
+      if (n.expandable === true) {
+        if (d >= MAX_EXPAND_DEPTH) { n.stopReason = "max_depth"; bumpStop("max_depth"); }
+        else enqueue(n, d);
+      } else if (d > 0) bumpStop(n.stopReason || "atomic_structure");
+    }
+    while (queue.length) {
+      if (cancelled()) return finishCancelled(run.id);
+      if (callsMade >= budget) {
+        budgetHit = true;
+        for (const q of queue) { q.node.stopReason = "call_budget"; bumpStop("call_budget"); }
+        queue.length = 0;
+        break;
+      }
+      const job = queue.shift();
+      const text = (job.node.unitAnchors || []).map((a) => assembled.textByUnit.get(a) || "").filter(Boolean).join("\n");
+      if (!text) {
+        job.node.stopReason = "textually_trivial";
+        bumpStop("textually_trivial");
+        continue;
+      }
+      const upper = ancestorTitles(nodeById, job.node);
+      const user =
+        `【材料】${params.title || "材料知识导图"}\n` +
+        `【覆盖粒度】detailed（详细）——逐节点深挖模式\n` +
+        `【结构路径】${upper}\n` +
+        `【深挖】以下文本属于节点「${job.node.title}」。已有上层结构如【结构路径】所示、本节点之下暂无更细结构。请给出它的直接子结构（单层 children），并按原子性判断规则给出输出的 expandable/stopReason。避免复述上层已表达的内容。\n\n` +
+        `【原文·${(job.node.unitAnchors || ["deep"])[0]}】\n${text}\n【/原文】`;
+      const call = {
+        runKind: "section",
+        nodeKey: `exp:${job.fp.slice(0, 16)}`,
+        label: `深挖 · ${job.node.title}`,
+        nodeKeys: [job.node.id],
+        system: templateText(ctx, RUN_KIND_SCOPE.section),
+        user,
+        chars: user.length,
+        cacheKey: {
+          ...common,
+          unitAnchor: `exp:${job.fp.slice(0, 16)}`,
+          runKind: "expand",
+          promptScope: RUN_KIND_SCOPE.section,
+          promptVersion: promptVersion(ctx, RUN_KIND_SCOPE.section),
+          textHash: sha256(job.fp + "|" + text)
+        }
+      };
+      const r = await executeCall(call);
+      if (r.cancelled) return finishCancelled(run.id);
+      if (r.budget) {
+        budgetHit = true;
+        job.node.stopReason = "call_budget";
+        bumpStop("call_budget");
+        for (const q of queue) { q.node.stopReason = "call_budget"; bumpStop("call_budget"); }
+        queue.length = 0;
+        break;
+      }
+      if (r.jsonFail) return finishJsonFail(ctx, run.id, usageAcc);
+      metrics.expandCalls += 1;
+      const out = r.content && Array.isArray(r.content.nodes) ? r.content.nodes : [r.content];
+      const own = out[0] || {};
+      job.node.expandable = own.expandable === true;
+      job.node.stopReason = job.node.expandable ? null : own.stopReason || "atomic_structure";
+      bumpStop(job.node.expandable ? null : job.node.stopReason);
+      for (const ch of Array.isArray(own.children) ? own.children : []) {
+        const child = {
+          id: `x${assembled.raw.nodes.length + 1}`,
+          parentId: job.node.id,
+          title: String(ch.title || "（未命名）").slice(0, 80),
+          authorialRole: ch.authorialRole || null,
+          centralQuestion: ch.centralQuestion || null,
+          mainMove: ch.mainMove || null,
+          progression: ch.progression || null,
+          relationToParent: ch.relationToParent || null,
+          relationToSiblings: ch.relationToSiblings || null,
+          groupingBasis: ch.groupingBasis || null,
+          unitAnchors: job.node.unitAnchors || [],
+          evidence: Array.isArray(ch.evidence) ? ch.evidence : [],
+          compositionalEvidence: [],
+          childIds: [],
+          expandable: ch.expandable === true,
+          stopReason: ch.expandable === true ? null : ch.stopReason || null,
+          sourceKind: "expanded"
+        };
+        nodeById.set(child.id, child);
+        assembled.raw.nodes.push(child);
+        job.node.childIds.push(child.id);
+        depthOfNode.set(child.id, job.depth + 1);
+        if (child.expandable && job.depth + 1 < MAX_EXPAND_DEPTH) enqueue(child, job.depth + 1);
+        else if (job.depth + 1 >= MAX_EXPAND_DEPTH && child.expandable) { child.stopReason = "max_depth"; bumpStop("max_depth"); }
+        else bumpStop(child.stopReason || "atomic_structure");
+      }
+      ctx.db.updateMaterialMapRun(run.id, { callsDone: callsMade });
+      ctx.broadcast({ runId: run.id, stage: "expand", done: callsMade, total: est.newCalls + queue.length + 1, calls: callsMade, budget });
+    }
+
+    // ---------- 阶段 4：merge（TOC 内部节点；细节已先扩张，此处恢复更高一级组织逻辑） ----------
+    // 执行时回填子摘要（section 产出此时已在 cacheContent；预解析阶段为空属时序必然）
+    for (const call of mergeCalls) {
+      call.user = finalizeUser(call, (call.childKeys || []).map((ck) => {
+        const c = cacheContent.get(ck);
+        return {
+          tempId: plan.nodeTempId.get(ck) || "n?",
+          title: c ? c.title || c.nodeTitle || "" : "",
+          authorialRole: c ? c.authorialRole || null : null,
+          groupingBasis: c ? c.groupingBasis || null : null,
+          progression: c ? c.progression || "" : "",
+          evidence: c ? c.evidence || [] : []
+        };
+      }));
+      const r = await executeCall(call);
+      if (r.cancelled) return finishCancelled(run.id);
+      if (r.budget) { budgetHit = true; break; }
+      if (r.jsonFail) return finishJsonFail(ctx, run.id, usageAcc);
+      cacheContent.set(call.nodeKey, r.content);
+      ctx.db.updateMaterialMapRun(run.id, { callsDone: callsMade });
+    }
+
+    // ---------- 阶段 5：global（全书根；不带原文） ----------
+    for (const call of globalCalls) {
+      call.user = finalizeUser(call, (call.childKeys || []).map((ck) => {
+        const c = cacheContent.get(ck);
+        return {
+          tempId: plan.nodeTempId.get(ck) || "n?",
+          title: c ? c.title || c.nodeTitle || "" : "",
+          authorialRole: c ? c.authorialRole || null : null,
+          groupingBasis: c ? c.groupingBasis || null : null,
+          progression: c ? c.progression || "" : "",
+          evidence: c ? c.evidence || [] : []
+        };
+      }));
+      const r = await executeCall(call);
+      if (r.cancelled) return finishCancelled(run.id);
+      if (r.budget) { budgetHit = true; break; }
+      if (r.jsonFail) return finishJsonFail(ctx, run.id, usageAcc);
+      cacheContent.set(call.nodeKey, r.content);
+    }
+
+    // ---------- 阶段 6：装配 + 本地校验 ----------
     ctx.db.updateMaterialMapRun(run.id, { stage: "validate" });
-    const assembled = assembleMap(params, plan, resolved, cacheContent);
-    const validation = core.validateMapStructure(assembled.raw, { textByUnit: plan.textByUnit, rootId: "root" });
-    // 仅剩 material root（AI 节点全灭）同样视为校验失败——空壳图不得渲染（§4.19-6）
+    attachMergeGlobal(assembled, mergeCalls, globalCalls, cacheContent);
+    const validation = core.validateMapStructure(assembled.raw, { textByUnit: assembled.textByUnit, rootId: "root" });
     const aiNodeCount = validation.nodes.filter((n) => n.id !== "root").length;
     if (!validation.ok || aiNodeCount === 0) {
       ctx.db.updateMaterialMapRun(run.id, {
@@ -565,12 +736,12 @@ async function generate(ctx, params, runId) {
         errorText: `结构校验未通过：${validation.dropped.length} 个节点被拒（${(validation.dropped[0] || {}).reason || ""}）`,
         actualPromptTokens: usageAcc.prompt,
         actualCompletionTokens: usageAcc.completion,
-        output: { dropped: validation.dropped }
+        output: { dropped: validation.dropped, metrics }
       });
       return { status: "failed", code: "validation", dropped: validation.dropped, runId: run.id };
     }
 
-    // editorial 终编辑（本地应用 ops；零变更合法）
+    // ---------- editorial 终编辑（本地应用 ops；零变更合法） ----------
     ctx.db.updateMaterialMapRun(run.id, { stage: "editorial" });
     let nodes = validation.nodes;
     const editorialShardKey = {
@@ -581,13 +752,13 @@ async function generate(ctx, params, runId) {
       promptVersion: promptVersion(ctx, RUN_KIND_SCOPE.editorial),
       textHash: sha256(JSON.stringify(nodes.map(stripEvidenceForPrompt)))
     };
-    let editorialHit = !params.force && ctx.db.getMaterialMapShard(editorialShardKey);
-    let editorialContent = editorialHit ? editorialHit.content : null;
-    if (!editorialContent) {
-      if (cancelled()) {
-        ctx.db.updateMaterialMapRun(run.id, { status: "cancelled", errorText: "用户取消（已完成的分片已入缓存）" });
-        return { status: "cancelled", runId: run.id };
-      }
+    const editorialHit = !params.force && ctx.db.getMaterialMapShard(editorialShardKey);
+    const editorialContent = editorialHit ? editorialHit.content : null;
+    if (editorialContent) {
+      const applied = applyEditorialOps(nodes, editorialContent.ops || []);
+      const revalidation = core.validateMapStructure({ title: assembled.raw.title, nodes: applied.nodes.map(toRawNode) }, { textByUnit: assembled.textByUnit, rootId: "root" });
+      if (revalidation.ok) nodes = revalidation.nodes;
+    } else if (!cancelled()) {
       const user =
         `【材料】${params.title || "材料知识导图"}\n【目录】\n${renderTocText(core.buildTocTree(params.tocItems || [], params.title))}\n\n【结构 JSON】\n` +
         JSON.stringify(nodes.map(stripEvidenceForPrompt));
@@ -595,70 +766,38 @@ async function generate(ctx, params, runId) {
       usageAcc.prompt += usage.prompt;
       usageAcc.completion += usage.completion;
       const parsed = parseJsonLoose(text);
-      if (parsed) {
-        editorialContent = parsed;
-        ctx.db.saveMaterialMapShard({ ...editorialShardKey, content: editorialContent, tokenUsed: usage.prompt + usage.completion });
-      } else {
-        editorialContent = { ops: [], changeLog: ["终编辑输出不可解析，已跳过（不影响结构正确性）"] };
-      }
-    }
-    const applied = applyEditorialOps(nodes, editorialContent.ops || []);
-    nodes = applied.nodes;
-
-    // 重新校验（editorial 只许轻量改动，防御性复检；rootId 必须与首次一致，防 material root 被拒）
-    const revalidation = core.validateMapStructure({ title: assembled.raw.title, nodes: nodes.map(toRawNode) }, { textByUnit: plan.textByUnit, rootId: "root" });
-    if (!revalidation.ok) {
-      // editorial 把结构改坏 → 回退到编辑前（宁保守）
-      nodes = validation.nodes;
-    } else {
-      nodes = revalidation.nodes;
+      const ed = parsed || { ops: [], changeLog: ["终编辑输出不可解析，已跳过（不影响结构正确性）"] };
+      ctx.db.saveMaterialMapShard({ ...editorialShardKey, content: ed, tokenUsed: usage.prompt + usage.completion });
+      const applied = applyEditorialOps(nodes, ed.ops || []);
+      const revalidation = core.validateMapStructure({ title: assembled.raw.title, nodes: applied.nodes.map(toRawNode) }, { textByUnit: assembled.textByUnit, rootId: "root" });
+      if (revalidation.ok) nodes = revalidation.nodes;
     }
 
-    // 语义评审（确认制：fail → waiting_user）
+    // ---------- 语义评审（>120 节点按顶层分支递归分片 + 根一致性复审；不截断树不删证据） ----------
     ctx.db.updateMaterialMapRun(run.id, { stage: "review" });
-    const reviewShardKey = {
-      ...common,
-      unitAnchor: "review",
-      runKind: "review",
-      promptScope: RUN_KIND_SCOPE.review,
-      promptVersion: promptVersion(ctx, RUN_KIND_SCOPE.review),
-      textHash: sha256(JSON.stringify(nodes.map(stripEvidenceForPrompt)))
-    };
-    let reviewContent = (!params.force && ctx.db.getMaterialMapShard(reviewShardKey)) || null;
-    if (!reviewContent) {
-      if (cancelled()) {
-        ctx.db.updateMaterialMapRun(run.id, { status: "cancelled", errorText: "用户取消" });
-        return { status: "cancelled", runId: run.id };
-      }
-      const user =
-        `【材料】${params.title || "材料知识导图"}\n【目录】\n${renderTocText(core.buildTocTree(params.tocItems || [], params.title))}\n\n【结构 JSON】\n` +
-        JSON.stringify(nodes.map(stripEvidenceForPrompt));
-      const { text, usage } = await chatOnce(ctx, templateText(ctx, RUN_KIND_SCOPE.review), user, run.id);
-      usageAcc.prompt += usage.prompt;
-      usageAcc.completion += usage.completion;
-      reviewContent = parseJsonLoose(text) || { status: "review", issues: [], summary: "评审输出不可解析，按待审处理" };
-      ctx.db.saveMaterialMapShard({ ...reviewShardKey, content: reviewContent, tokenUsed: usage.prompt + usage.completion });
-    }
-    if (reviewContent.status === "fail") {
+    const issues = await runReview(ctx, run, params, nodes, usageAcc, common);
+
+    if (issues.status === "fail") {
       ctx.db.updateMaterialMapRun(run.id, {
         status: "waiting_user",
         stage: "review_failed",
-        repairCount: (ctx.db.getMaterialMapRun(run.id).repairCount || 0) + 0,
         actualPromptTokens: usageAcc.prompt,
         actualCompletionTokens: usageAcc.completion,
         output: {
           staging: { params, nodes, title: assembled.raw.title },
-          issues: reviewContent.issues || [],
-          summary: reviewContent.summary || ""
+          issues: issues.list,
+          summary: issues.summary || "",
+          metrics
         }
       });
-      return { status: "review_failed", issues: reviewContent.issues || [], summary: reviewContent.summary || "", runId: run.id };
+      return { status: "review_failed", issues: issues.list, summary: issues.summary || "", runId: run.id };
     }
 
-    return finalizeMap(ctx, run.id, params, nodes, assembled.raw.title, usageAcc);
+    // ---------- 完成落库（预算触顶 → partial：存为未激活版本，旧 active 保持，不伪装完整生成） ----------
+    return finalizeMap(ctx, run.id, params, nodes, assembled.raw.title, usageAcc, { budgetHit, metrics });
   } catch (err) {
     const code = err && err.code ? err.code : err && /超时/.test(err.message || "") ? "timeout" : "network";
-    const status = code === "cancelled" ? "cancelled" : code === "rate_limit" ? "failed_rate_limit" : code === "timeout" ? "failed_timeout" : code === "http" ? "failed_network" : "failed_network";
+    const status = code === "cancelled" ? "cancelled" : code === "rate_limit" ? "failed_rate_limit" : code === "timeout" ? "failed_timeout" : "failed_network";
     ctx.db.updateMaterialMapRun(run.id, {
       status,
       errorCode: code,
@@ -668,6 +807,125 @@ async function generate(ctx, params, runId) {
     });
     return { status: code === "cancelled" ? "cancelled" : "failed", code, error: String((err && err.message) || err), runId: run.id };
   }
+}
+
+function finishCancelled(runId) {
+  cancelledRuns.delete(runId);
+  return { status: "cancelled", runId };
+}
+function finishJsonFail(ctx, runId, usageAcc) {
+  ctx.db.updateMaterialMapRun(runId, {
+    status: "failed_json",
+    errorCode: "json",
+    errorText: "模型输出两次均无法解析为合法 JSON（含一次格式修复）",
+    actualPromptTokens: usageAcc.prompt,
+    actualCompletionTokens: usageAcc.completion
+  });
+  return { status: "failed", code: "json", runId };
+}
+let nodeByIdLookup = () => null;
+function ancestorTitles(nodeById, node) {
+  const parts = [node.title];
+  let cur = nodeById.get(node.parentId);
+  const guard = new Set([node.id]);
+  while (cur && !guard.has(cur.id)) {
+    guard.add(cur.id);
+    parts.unshift(cur.title);
+    cur = nodeById.get(cur.parentId);
+  }
+  return parts.join(" › ");
+}
+function expandFingerprint(node, depth) {
+  return sha256([(node.unitAnchors || []).join("|"), node.title, depth].join("\u0001"));
+}
+
+/** 语义评审：≤120 节点一次评审；超出按顶层分支递归分片 + 根一致性复审（跨分支重复/冲突） */
+async function runReview(ctx, run, params, nodes, usageAcc, common) {
+  const reviewOnce = async (user, cacheKey) => {
+    const hit = !params.force && cacheKey && ctx.db.getMaterialMapShard(cacheKey);
+    if (hit) return hit.content;
+    const { text, usage } = await chatOnce(ctx, templateText(ctx, RUN_KIND_SCOPE.review), user, run.id);
+    usageAcc.prompt += usage.prompt;
+    usageAcc.completion += usage.completion;
+    const parsed = parseJsonLoose(text) || { status: "review", issues: [], summary: "评审输出不可解析，按待审处理" };
+    if (cacheKey) ctx.db.saveMaterialMapShard({ ...cacheKey, content: parsed, tokenUsed: usage.prompt + usage.completion });
+    return parsed;
+  };
+  const shardKeyFor = (nodesSubset, tag) => ({
+    ...common,
+    unitAnchor: `review:${tag}`,
+    runKind: "review",
+    promptScope: RUN_KIND_SCOPE.review,
+    promptVersion: promptVersion(ctx, RUN_KIND_SCOPE.review),
+    textHash: sha256(JSON.stringify(nodesSubset.map(stripEvidenceForPrompt)))
+  });
+  const rootId = "root";
+  const tops = nodes.filter((n) => n.parentId === rootId);
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const subtreeOf = (id) => {
+    const out = [];
+    const walk = (x) => { out.push(x); for (const c of nodes.filter((y) => y.parentId === x.id)) walk(c); };
+    const t = byId.get(id);
+    if (t) walk(t);
+    return out;
+  };
+  const pathOf = (n) => {
+    const parts = [n.title];
+    let cur = byId.get(n.parentId);
+    const guard = new Set([n.id]);
+    while (cur && !guard.has(cur.id)) { guard.add(cur.id); parts.unshift(cur.title); cur = byId.get(cur.parentId); }
+    return parts.join(" › ");
+  };
+  let issues = [];
+  let summary = "";
+  if (nodes.length <= REVIEW_SHARD_NODES) {
+    if (cancelledRuns.has(run.id)) return { status: "cancelled", list: [] };
+    const user =
+      `【材料】${params.title || "材料知识导图"}\n【目录】\n${renderTocText(core.buildTocTree(params.tocItems || [], params.title))}\n\n【结构 JSON】\n` +
+      JSON.stringify(nodes.map(stripEvidenceForPrompt));
+    const r = await reviewOnce(user, shardKeyFor(nodes, "whole"));
+    issues = r.issues || [];
+    summary = r.summary || "";
+  } else {
+    for (const t of tops) {
+      const sub = subtreeOf(t.id);
+      if (sub.length > REVIEW_SHARD_NODES) {
+        for (const c of nodes.filter((y) => y.parentId === t.id)) {
+          const piece = [t, ...subtreeOf(c.id)].slice(0, REVIEW_SHARD_NODES);
+          if (piece.length <= 1) continue;
+          if (cancelledRuns.has(run.id)) return { status: "cancelled", list: [] };
+          const input = piece.map((n) => ({ ...stripEvidenceForPrompt(n), parentPath: pathOf(n) }));
+          const user = `【材料】${params.title || "材料知识导图"}\n【结构 JSON（分支分片：${t.title} › ${c.title}）】\n` + JSON.stringify(input);
+          const r = await reviewOnce(user, shardKeyFor(piece, `branch:${c.id}`));
+          issues = issues.concat(r.issues || []);
+          summary = (summary ? summary + " " : "") + (r.summary || "");
+        }
+      } else {
+        if (cancelledRuns.has(run.id)) return { status: "cancelled", list: [] };
+        const input = sub.map((n) => ({ ...stripEvidenceForPrompt(n), parentPath: pathOf(n) }));
+        const user = `【材料】${params.title || "材料知识导图"}\n【结构 JSON（分支分片：${t.title}）】\n` + JSON.stringify(input);
+        const r = await reviewOnce(user, shardKeyFor(sub, `branch:${t.id}`));
+        issues = issues.concat(r.issues || []);
+        summary = (summary ? summary + " " : "") + (r.summary || "");
+      }
+    }
+    if (cancelledRuns.has(run.id)) return { status: "cancelled", list: [] };
+    const coherence = tops.map((t) => ({
+      title: t.title,
+      authorialRole: t.authorialRole,
+      groupingBasis: t.groupingBasis,
+      children: nodes.filter((y) => y.parentId === t.id).map((y) => y.title).slice(0, 20)
+    }));
+    const user2 =
+      `【材料】${params.title || "材料知识导图"}\n【全书顶层结构】\n` +
+      JSON.stringify(coherence) +
+      `\n\n除常规维度外，请特别检查：跨分支重复（不同分支把同一结构重复拆为核心节点）、顶层结构冲突、层级不一致。`;
+    const r2 = await reviewOnce(user2, shardKeyFor(tops, "coherence"));
+    issues = issues.concat(r2.issues || []);
+    summary = (summary ? summary + " " : "") + (r2.summary || "");
+  }
+  const status = issues.some((i) => i.type === "topic_list" || i.type === "hollow_parent" || i.severity === "high") ? "fail" : issues.length ? "review" : "pass";
+  return { status, list: issues, summary };
 }
 
 /** 评审 FAIL 后的用户确认修复：仅重跑对应归并阶段 + 本地校验 + 语义复审（一次，§4.19-11） */
@@ -789,13 +1047,13 @@ function normalizeCallOutput(runKind, parsed) {
   return parsed;
 }
 
-function assembleMap(params, plan, resolvedCalls, cacheContent) {
+/** 阶段 2：初装 TOC 层——TOC 分析节点（含 section 单层 children 递归容错）；merge/global 稍后 attach */
+function assembleTocLayer(params, plan, sectionCalls, cacheContent) {
   const rawNodes = [];
-  const mapIdOf = new Map(); // TOC nodeKey → 导图节点 id
+  const mapIdOf = new Map();
   let seq = 0;
   const nextId = () => `n${++seq}`;
-  const mkNode = (parentId, analysis, unitAnchors) => {
-    const id = nextId();
+  const mkNode = (id, parentId, analysis, unitAnchors) => {
     rawNodes.push({
       id,
       parentId: parentId || null,
@@ -809,58 +1067,40 @@ function assembleMap(params, plan, resolvedCalls, cacheContent) {
       groupingBasis: analysis.groupingBasis || null,
       unitAnchors: unitAnchors || [],
       evidence: Array.isArray(analysis.evidence) ? analysis.evidence : [],
-      compositionalEvidence: Array.isArray(analysis.compositionalEvidence) ? analysis.compositionalEvidence : []
+      compositionalEvidence: Array.isArray(analysis.compositionalEvidence) ? analysis.compositionalEvidence : [],
+      childIds: [],
+      expandable: analysis.expandable === true,
+      stopReason: analysis.stopReason || null
     });
     return id;
   };
-  // 顶层挂点：material root（引擎建，AI 不生成根——§4.19-3 全书根由 global 调用产出后挂 ROOT）
-  const ROOT = "root";
   rawNodes.push({
-    id: ROOT,
+    id: "root",
     parentId: null,
     title: params.title || "材料知识导图",
     authorialRole: null,
     unitAnchors: [],
     evidence: [],
-    compositionalEvidence: []
+    compositionalEvidence: [],
+    childIds: [],
+    expandable: false,
+    stopReason: null
   });
   const keyToEntry = new Map(plan.model.flat.map((f) => [plan.model.nodeKeyOf(f), f]));
   const analyzedFlat = plan.model.flat.filter((f) => plan.analyzedKeys.has(plan.model.nodeKeyOf(f)));
-  // 第一遍 a：全量分配导图 id（文档序）
   for (const f of analyzedFlat) mapIdOf.set(plan.model.nodeKeyOf(f), nextId());
-  // 第一遍 b：建节点（compositional 引用的子 id 此时已全量可知）
   for (const f of analyzedFlat) {
     const k = plan.model.nodeKeyOf(f);
     const id = mapIdOf.get(k);
     const parentKey = f.parent ? plan.model.nodeKeyOf(f.parent) : null;
-    // 挂点：TOC 父已分析 → 其导图节点；否则（scope 根及其 scope 外孤悬）→ material root
     const parentId = parentKey && plan.analyzedKeys.has(parentKey) ? mapIdOf.get(parentKey) : "root";
     const entry = keyToEntry.get(k);
     const content = cacheContent.get(k);
-    const isGroupWrap = content && Array.isArray(content.nodes); // section 组包装：自分析在第二遍回填
+    const isGroupWrap = content && Array.isArray(content.nodes);
     const analysis = isGroupWrap ? { title: entry.node.label } : content || { title: entry.node.label };
-    const call = resolvedCalls.find((c) => c.nodeKey === k && (c.runKind === "merge" || c.runKind === "global"));
-    const compositional = call && Array.isArray(call.childKeys) ? call.childKeys.map((ck) => mapIdOf.get(ck)).filter(Boolean) : [];
-    const node = {
-      id,
-      parentId: parentId || null,
-      title: String(analysis.title || entry.node.label || "（未命名）").slice(0, 80),
-      authorialRole: analysis.authorialRole || null,
-      centralQuestion: analysis.centralQuestion || null,
-      mainMove: analysis.mainMove || null,
-      progression: analysis.progression || null,
-      relationToParent: analysis.relationToParent || null,
-      relationToSiblings: analysis.relationToSiblings || null,
-      groupingBasis: analysis.groupingBasis || null,
-      unitAnchors: [],
-      evidence: Array.isArray(analysis.evidence) ? analysis.evidence : [],
-      compositionalEvidence: compositional
-    };
-    rawNodes.push(node);
+    mkNode(id, parentId, analysis, []);
   }
-  // 第二遍：section 组——叶子自分析字段回填 + children 分解产出子节点
-  for (const call of resolvedCalls) {
-    if (call.runKind !== "section") continue;
+  for (const call of sectionCalls) {
     const content = cacheContent.get(call.nodeKeys[0]);
     const arr = content && Array.isArray(content.nodes) ? content.nodes : [];
     const anchors = callBlocksAnchors(call, plan);
@@ -878,11 +1118,33 @@ function assembleMap(params, plan, resolvedCalls, cacheContent) {
         if (own.relationToParent) node.relationToParent = own.relationToParent;
         node.evidence = Array.isArray(own.evidence) ? own.evidence : [];
         node.unitAnchors = anchors;
+        node.expandable = own.expandable === true;
+        node.stopReason = own.stopReason || null;
       }
       if (own) {
         const expand = (pid, list) => {
           for (const ch of Array.isArray(list) ? list : []) {
-            const cid = mkNode(pid, ch, anchors);
+            const cid = nextId();
+            rawNodes.push({
+              id: cid,
+              parentId: pid || null,
+              title: String(ch.title || "（未命名）").slice(0, 80),
+              authorialRole: ch.authorialRole || null,
+              centralQuestion: ch.centralQuestion || null,
+              mainMove: ch.mainMove || null,
+              progression: ch.progression || null,
+              relationToParent: ch.relationToParent || null,
+              relationToSiblings: ch.relationToSiblings || null,
+              groupingBasis: ch.groupingBasis || null,
+              unitAnchors: anchors,
+              evidence: Array.isArray(ch.evidence) ? ch.evidence : [],
+              compositionalEvidence: [],
+              childIds: [],
+              expandable: ch.expandable === true,
+              stopReason: ch.stopReason || null
+            });
+            const p = rawNodes.find((n) => n.id === pid);
+            if (p) p.childIds.push(cid);
             expand(cid, ch.children);
           }
         };
@@ -890,26 +1152,58 @@ function assembleMap(params, plan, resolvedCalls, cacheContent) {
       }
     });
   }
-  // 第三遍：merge 节点的 direct 证据、自有原文锚与可选 children 细化（detailed）
-  for (const call of resolvedCalls) {
-    if (call.runKind !== "merge") continue;
+  return { raw: { title: params.title || "材料知识导图", nodes: rawNodes }, mapIdOf, textByUnit: plan.textByUnit };
+}
+
+/** 阶段 6 前置：merge/global 产出回填（compositional 引用 + merge 证据与可选 children 细化） */
+function attachMergeGlobal(assembled, mergeCalls, globalCalls, cacheContent) {
+  const { raw, mapIdOf } = assembled;
+  for (const call of [...mergeCalls, ...globalCalls]) {
     const mapId = mapIdOf.get(call.nodeKey);
-    const node = rawNodes.find((n) => n.id === mapId);
+    const node = raw.nodes.find((n) => n.id === mapId);
     const content = cacheContent.get(call.nodeKey);
-    if (node && content) {
+    if (!node || !content) continue;
+    const compositional = (call.childKeys || []).map((ck) => mapIdOf.get(ck)).filter(Boolean);
+    if (compositional.length) node.compositionalEvidence = compositional;
+    if (content.title) node.title = String(content.title).slice(0, 80);
+    if (content.authorialRole) node.authorialRole = content.authorialRole;
+    if (content.centralQuestion) node.centralQuestion = content.centralQuestion;
+    if (content.progression) node.progression = content.progression;
+    if (content.groupingBasis) node.groupingBasis = content.groupingBasis;
+    if (content.relationToParent) node.relationToParent = content.relationToParent;
+    if (call.runKind === "merge") {
       node.evidence = Array.isArray(content.evidence) ? content.evidence : [];
       node.unitAnchors = Array.isArray(call.blocks) ? call.blocks : [];
-      const anchors = Array.isArray(call.blocks) ? call.blocks : [];
+      const anchors = node.unitAnchors;
       const expand = (pid, list) => {
         for (const ch of Array.isArray(list) ? list : []) {
-          const cid = mkNode(pid, ch, anchors);
+          const cid = `m${raw.nodes.length + 1}`;
+          raw.nodes.push({
+            id: cid,
+            parentId: pid || null,
+            title: String(ch.title || "（未命名）").slice(0, 80),
+            authorialRole: ch.authorialRole || null,
+            centralQuestion: ch.centralQuestion || null,
+            mainMove: ch.mainMove || null,
+            progression: ch.progression || null,
+            relationToParent: ch.relationToParent || null,
+            relationToSiblings: ch.relationToSiblings || null,
+            groupingBasis: ch.groupingBasis || null,
+            unitAnchors: anchors,
+            evidence: Array.isArray(ch.evidence) ? ch.evidence : [],
+            compositionalEvidence: [],
+            childIds: [],
+            expandable: ch.expandable === true,
+            stopReason: ch.stopReason || null
+          });
+          const p = raw.nodes.find((n) => n.id === pid);
+          if (p) p.childIds.push(cid);
           expand(cid, ch.children);
         }
       };
       expand(mapId, content.children);
     }
   }
-  return { raw: { title: params.title || "材料知识导图", nodes: rawNodes }, mapIdOf };
 }
 
 function callBlocksAnchors(call, plan) {
@@ -1001,7 +1295,7 @@ function applyEditorialOps(nodes, ops) {
 
 // ---------- 完成落库（含 remap） ----------
 
-function finalizeMap(ctx, runId, params, nodes, title, usageAcc) {
+function finalizeMap(ctx, runId, params, nodes, title, usageAcc, opts = {}) {
   const sha = (s) => sha256(s);
   for (const n of nodes) {
     // 逐条证据落 quoteHash（D41-④：quoteHash + matchStart/matchEnd 随图入库，快照文本不入库）
@@ -1029,6 +1323,7 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc) {
     // 制卡整书把握（§4.19-10）：引擎在落库时派生有界结构摘要（≤1200 字），渲染层直读无需引入 core
     summaryText: core.deriveStructureSummary({ title: title || params.title || "材料知识导图", nodes }, 1200)
   };
+  const partial = !!opts.budgetHit;
   const saved = ctx.db.saveMaterialMap({
     documentId: params.documentId,
     scopeAnchor: params.scopeAnchor || "book",
@@ -1039,17 +1334,32 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc) {
     sourceRevisionHash: sha(JSON.stringify(nodes.map((n) => n.unitAnchors || []).flat())),
     promptVersion: promptVersion(ctx, "material-map-section"),
     generatorVersion: GENERATOR_VERSION,
-    nodeRemap: remap
+    nodeRemap: remap,
+    // 预算触顶 → 存为未激活版本（旧 active 保持，不伪装完整生成）；用户可在历史版本手动激活
+    isActive: !partial
   });
   ctx.db.updateMaterialMapRun(runId, {
-    status: "completed",
+    status: partial ? "partial" : "completed",
     stage: "done",
     actualPromptTokens: usageAcc.prompt,
     actualCompletionTokens: usageAcc.completion,
-    output: { mapId: saved.id, nodeCount: nodes.length, remapped: remap ? Object.keys(remap).length : 0 }
+    output: {
+      mapId: saved.id,
+      nodeCount: nodes.length,
+      remapped: remap ? Object.keys(remap).length : 0,
+      completeness: partial ? "partial:call_budget" : "complete",
+      metrics: opts.metrics || null
+    }
   });
-  ctx.broadcast({ runId, stage: "completed", mapId: saved.id });
-  return { status: "completed", mapId: saved.id, nodeCount: nodes.length, remap, runId };
+  ctx.broadcast({ runId, stage: partial ? "partial" : "completed", mapId: saved.id });
+  return {
+    status: partial ? "partial" : "completed",
+    mapId: saved.id,
+    nodeCount: nodes.length,
+    remap,
+    runId,
+    metrics: opts.metrics || null
+  };
 }
 
 module.exports = {
@@ -1065,5 +1375,6 @@ module.exports = {
   parseJsonLoose,
   applyEditorialOps,
   normalizeCallOutput,
-  assembleMap
+  assembleTocLayer,
+  attachMergeGlobal
 };

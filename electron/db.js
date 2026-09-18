@@ -1693,19 +1693,21 @@ function ensurePromptTemplates() {
   // v48.1（用户实测「详细粒度粗略」）：粒度块传入提示词 + children 递归契约 + 短引文——升 v2 补播
   // （MAX(version) < 2 即插新行；存量 v1 留痕，读取取最高版）。
   try {
-    const MM_TARGET = 2;
+    // v48.5 批B：section 升 v3（expandable/stopReason 原子性判断 + children 单层化——深挖由系统逐节点接管）；
+    // 其余四 scope 维持 v2。各 scope 按各自目标版本补播。
+    const MM_TARGETS = { "material-map-section": 3, "material-map-merge": 2, "material-map-global": 2, "material-map-editorial": 2, "material-map-review": 2 };
     for (const [scope, name, content] of [
-      ["material-map-section", "材料结构单元分析 v2", MATERIAL_MAP_SECTION_PROMPT],
+      ["material-map-section", "材料结构单元分析 v3", MATERIAL_MAP_SECTION_PROMPT],
       ["material-map-merge", "章节归并 v2", MATERIAL_MAP_MERGE_PROMPT],
       ["material-map-global", "全书归并 v2", MATERIAL_MAP_GLOBAL_PROMPT],
       ["material-map-editorial", "结构终编辑 v2", MATERIAL_MAP_EDITORIAL_PROMPT],
       ["material-map-review", "导图语义评审 v2", MATERIAL_MAP_REVIEW_PROMPT]
     ]) {
       const maxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope])[0]?.v || 0;
-      if (Number(maxV) < MM_TARGET) {
+      if (Number(maxV) < (MM_TARGETS[scope] || 2)) {
         db.run(
           "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-          [crypto.randomUUID(), scope, name, content, MM_TARGET, situationRequiredFor(scope), now]
+          [crypto.randomUUID(), scope, name, content, MM_TARGETS[scope] || 2, situationRequiredFor(scope), now]
         );
       }
     }

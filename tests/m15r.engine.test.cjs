@@ -35,17 +35,18 @@ function paramsFor(documentId) {
 
 const sec1 = {
   title: "概念建立", authorialRole: "introduce", centralQuestion: "什么是知识", mainMove: "给出定义",
-  progression: "从直觉到严格定义",
+  progression: "从直觉到严格定义", expandable: false, stopReason: "atomic_structure",
   children: [{
     title: "核心定义句", authorialRole: "introduce", relationToParent: "本节核心主张", relationToSiblings: null,
     evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }],
+    expandable: false, stopReason: "atomic_structure",
     children: [{ title: "定义的补足语", authorialRole: "distinguish", relationToParent: "定义的构成", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "这里给出定义", startOffset: 16 }] }]
   }],
   evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }]
 };
 const sec2 = {
   title: "机制解释", authorialRole: "cause_effect", centralQuestion: "如何运作", mainMove: "解释机制",
-  progression: "定义→机制", children: [],
+  progression: "定义→机制", children: [], expandable: false, stopReason: "atomic_structure",
   evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }]
 };
 const globalOut = {
@@ -76,9 +77,10 @@ app.whenReady().then(async () => {
 
     let fakeChats = [];
     let consumed = 0;
+    let testSettings = { app: {} };
     const ctx = {
       db,
-      readSettings: () => ({ app: {} }),
+      readSettings: () => testSettings,
       writeSettings: () => {},
       hasKey: () => true,
       chat: async (call) => {
@@ -141,7 +143,7 @@ app.whenReady().then(async () => {
     check("换粒度重跑完成", r3.status === "completed", { status: r3.status });
 
     console.log("---- M15R-E5 假证据 → 校验拒绝（旧图保留） ----");
-    const badSec = { ...sec1, evidence: [{ unitAnchor: "u1.xhtml", quote: "原文中根本不存在的句子", startOffset: 0 }], children: [] };
+    const badSec = { ...sec1, expandable: false, evidence: [{ unitAnchor: "u1.xhtml", quote: "原文中根本不存在的句子", startOffset: 0 }], children: [] };
     fakeChats = [badSec, { ...sec2, evidence: [{ unitAnchor: "u2.xhtml", quote: "不存在的引文", startOffset: 0 }] }, { ...globalOut, evidenceRefs: [] }, editorialOut, reviewPass];
     const r4 = await engine.generate(ctx, paramsFor("doc-e2"));
     check("AI 节点全灭 → failed_validation", r4.status === "failed" && r4.code === "validation", r4);
@@ -186,6 +188,42 @@ app.whenReady().then(async () => {
     const r12 = await engine.generate(ctx, paramsFor("doc-e7"));
     check("再次生成从缓存续（只补 4 次：section2/global/editorial/review）", r12.status === "completed" && consumed - base12 === 4, { status: r12.status, used: consumed - base12 });
     check("run cancelled 留痕", db.listMaterialMapRuns("doc-e7").some((r) => r.status === "cancelled"), "");
+
+    console.log("---- M15R-E10 expand 深挖（expandable 队列） ----");
+    const secX = { ...sec2, expandable: true, stopReason: null };
+    const expOut = {
+      title: "机制的分步解释", expandable: false, stopReason: "atomic_structure",
+      children: [{ title: "第一步：定义传导", authorialRole: "sequence", relationToParent: "机制首环", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }]
+    };
+    fakeChats = [sec1, secX, expOut, globalOut, editorialOut, reviewPass];
+    const baseE = consumed;
+    const r13 = await engine.generate(ctx, paramsFor("doc-e8"));
+    check("expandable=true 触发一次深挖调用", r13.status === "completed" && consumed - baseE === 6, { status: r13.status, used: consumed - baseE });
+    const m8 = db.getActiveMaterialMap("doc-e8", "book");
+    // 语义：expand 输出的根对象标题丢弃（被深挖节点保留原名），children 挂到被深挖节点下
+    const stepNode = m8.structure.nodes.find((n) => n.title === "机制解释");
+    const stepChild = m8.structure.nodes.find((n) => n.title === "第一步：定义传导");
+    check("深挖产物挂树（机制解释 ← 第一步；根对象标题丢弃）", Boolean(stepNode) && Boolean(stepChild) && stepChild.parentId === stepNode.id, m8.structure.nodes.map((n) => n.title));
+    check("expand 调用入独立缓存（run_kind=expand）", db.listMaterialMapShards("doc-e8", { run_kind: "expand" }).length === 1, "");
+    check("metrics 留痕（expandCalls=1）", (db.getMaterialMapRun(r13.runId).output || {}).metrics?.expandCalls === 1, "");
+
+    console.log("---- M15R-E11 预算触顶 → partial（旧 active 保持、新版本未激活） ----");
+    testSettings = { app: { mindmapMaxCalls: 2 } };
+    fakeChats = [sec1, secX, globalOut, editorialOut, reviewPass];
+    const r14 = await engine.generate(ctx, paramsFor("doc-e9"));
+    check("预算触顶 → partial", r14.status === "partial", r14);
+    check("partial 版本未激活（旧 active 保持）", db.getActiveMaterialMap("doc-e9", "book") === null && db.listMaterialMaps("doc-e9").some((m) => m.id === r14.mapId), db.getActiveMaterialMap("doc-e9", "book"));
+    check("run 状态 partial + completeness 留痕", db.getMaterialMapRun(r14.runId).status === "partial" && String(db.getMaterialMapRun(r14.runId).output?.completeness).includes("call_budget"), "");
+    const expandStopped = db.getMaterialMapRun(r14.runId).output?.metrics?.stopReasons || {};
+    check("被截断叶 stopReason=call_budget", (expandStopped.call_budget || 0) >= 1, expandStopped);
+    testSettings = { app: {} };
+
+    console.log("---- M15R-E12 重生成 remap（重命名沿锚/引文重映射） ----");
+    const renamed = { ...sec1, title: "早期自然哲学的本原追问" };
+    fakeChats = [renamed, { ...sec2, title: "机制解释（改）" }, { ...globalOut, title: "全书新标题" }, editorialOut, reviewPass];
+    const r15 = await engine.generate(ctx, paramsFor("doc-e8"));
+    check("重命名重生成完成", r15.status === "completed", r15.status);
+    check("remap 沿锚/quoteHash 重叠命中（不依赖标题）", r15.remap && Object.values(r15.remap).length >= 2, r15.remap);
 
     console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
     const kpBefore = JSON.stringify(db.listKnowledgePoints());

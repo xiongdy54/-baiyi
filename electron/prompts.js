@@ -808,9 +808,15 @@ const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只�
 【格式修复】（仅重试时出现）：上次输出不是合法 JSON——只允许把该输出转换为合法 JSON，禁止增删改任何语义内容。
 
 【粒度→分解深度（硬要求）】
-- overview：只分主结构，children ≤5 且每个 child 不再含 children。
-- standard：主结构 + 关键子结构，children 一般 3-8 个，child 一般不再嵌套。
-- detailed：深入到论证/叙述单元——children 3-8 个，**每个 child 依其原文再带自己的 children（递归分层，直到自然终点）**；材料含大量子结构时节点总数应明显多于 standard，宁多勿漏（每个节点必须有逐字证据支撑）。
+- overview：只分主结构，children ≤5。
+- standard：主结构 + 关键子结构，children 一般 3-8 个。
+- detailed：给出**直接子结构**（3-8 个，宁多勿漏，每个必须有逐字证据支撑）。更深层结构不由你一次给全——系统会对每个子节点逐个发起「深挖」调用（见【深挖】块），你只负责本层与原子性判断。
+
+【原子性判断（expandable / stopReason，硬字段）】
+你在输出的每个分析对象上必须给出：
+- "expandable": true/false——该节点的原文中**是否仍存在尚未被其 children 表达的、具有独立作者组织意义的结构**（如：仍可分出多个哲学家/观点/论证步骤）。true = 值得系统对其发起深挖。
+- "stopReason": 仅在 expandable=false 时给出，二选一："atomic_structure"（已经是不可再合理拆分的作者结构单元）| "textually_trivial"（原文过短或无实质结构）。expandable=true 时为 null。
+判断标准是**结构的独立组织意义**，不是字数——短文本若含多个独立单元也应 true，长文本若是单一连续论述应 false。
 
 【输出】只输出一个 JSON 对象（无 markdown 代码块、无解释文字）。
 若输入含**多个**【结构路径】块（它们共享同一份原文，属同组单元），输出 { "nodes": [按路径顺序每路径一个下述分析对象] }；单路径时直接输出单个分析对象：
@@ -820,6 +826,8 @@ const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只�
   "centralQuestion": "本单元回答的核心问题（一句话）",
   "mainMove": "作者在本单元的关键动作（一句话）",
   "progression": "作者如何从一个部分推进到下一个部分（≤150 字）",
+  "expandable": true,
+  "stopReason": null,
   "children": [
     {
       "title": "子结构命名（≤30 字，可抽象）",
@@ -827,11 +835,13 @@ const MATERIAL_MAP_SECTION_PROMPT = `你是材料结构分析器。任务：只�
       "relationToParent": "该子结构对父单元承担什么作用（一句话）",
       "relationToSiblings": "它与相邻子结构的关系或为何并列（一句话，可为 null）",
       "evidence": [ { "unitAnchor": "<原文块锚>", "quote": "原文逐字片段（5-30 字短句）", "startOffset": 0 } ],
-      "children": [ "<同构递归——仅 detailed 粒度且原文确有更深结构时使用；每层同样必须逐字证据>" ]
+      "expandable": true,
+      "stopReason": null
     }
   ],
   "evidence": [ { 同上格式，支撑本单元自身的判断 } ]
 }
+children **只给一层、不再嵌套**——更深层由系统对每个 child（按其 expandable 判断）继续深挖。
 
 【硬性纪律】
 1. 只能依据【原文】块；禁止使用外部知识；禁止推测作者没有表达的观点。
