@@ -1012,7 +1012,9 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc) {
     title: title || params.title || "材料知识导图",
     rootNodeId: "root",
     nodes: nodes.map((n) => ({ ...n, quoteHashes: undefined })),
-    edges: []
+    edges: [],
+    // 制卡整书把握（§4.19-10）：引擎在落库时派生有界结构摘要（≤1200 字），渲染层直读无需引入 core
+    summaryText: core.deriveStructureSummary({ title: title || params.title || "材料知识导图", nodes }, 1200)
   };
   const saved = ctx.db.saveMaterialMap({
     documentId: params.documentId,

@@ -10,6 +10,7 @@ import { libraryApi } from "../lib/library";
 import { DictPanel, type DictPanelState } from "./DictPanel";
 import { normalizeShape, type OcclusionRect, type OcclusionShape } from "../lib/occlusion";
 import { settingsStore } from "../lib/settings";
+import { MindmapWorkspace } from "./MindmapWorkspace";
 import { sanitizeDomain, udcLabel, UDC_LEAVES, UDC_MAX, UDC_OTHER } from "../lib/udc";
 import { eventBus } from "../lib/eventbus";
 import { readingStats } from "../lib/stats";
@@ -172,6 +173,8 @@ export default function Reader({
     contextText?: string;
   } | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
+  // v48 批3（M15，D42）：全屏导图工作区（挂 Reader 外层的 Overlay，内核保活 → 返回正文天然原位）
+  const [mindmapOpen, setMindmapOpen] = useState(false);
   const [aiPanel, setAiPanel] = useState<{
     kind: "explain" | "cards" | "occlusion";
     text: string;
@@ -1519,6 +1522,10 @@ export default function Reader({
                       目录
                     </button>
                   )}
+                  {/* v48 批3（M15，D42）：目录旁「导图」→ 全屏 Overlay 工作区（内核不销毁，正文返回原位） */}
+                  <button className="btn btn-outline btn-sm" data-mindmap-entry disabled={!contextRef?.documentId} onClick={() => setMindmapOpen(true)}>
+                    导图
+                  </button>
                   <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
                     ‹
@@ -1780,6 +1787,20 @@ export default function Reader({
           onSubmit={(kind, payload) => {
             if (kind === "ai") void submitRegionCards(payload);
             else submitRegionManual(payload);
+          }}
+        />
+      )}
+
+      {/* v48 批3（M15，D42）：全屏导图工作区——内核保活，「正文」返回即原位；节点制卡走既有 AI 制卡链路 */}
+      {mindmapOpen && engineSource && contextRef?.documentId && kernelRef.current && (
+        <MindmapWorkspace
+          kernel={kernelRef.current}
+          documentId={contextRef.documentId}
+          title={title || sourceTitle || "未命名材料"}
+          onBack={() => setMindmapOpen(false)}
+          onMakeCardsFromNode={(payload) => {
+            setMindmapOpen(false);
+            void runAICards(payload.section);
           }}
         />
       )}

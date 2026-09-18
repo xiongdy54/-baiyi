@@ -1151,6 +1151,7 @@ ipcMain.handle("mindmap:getActive", (_e, documentId, scopeAnchor) => dbModule.ge
 ipcMain.handle("mindmap:setActive", (_e, id) => dbModule.setActiveMaterialMap(id));
 ipcMain.handle("mindmap:delete", (_e, id) => dbModule.deleteMaterialMap(id));
 ipcMain.handle("mindmap:runs", (_e, documentId) => dbModule.listMaterialMapRuns(documentId));
+ipcMain.handle("mindmap:learningStatus", (_e, documentId, nodeIds) => dbModule.listMindmapLearningStatus(documentId, nodeIds || []));
 
 // v46（M14-UM2，§4.18-7/8）：制卡记忆接地检索——Stage A 本地宽召回（memoryRetrieve 纯函数）。
 // 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；

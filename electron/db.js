@@ -4214,6 +4214,26 @@ function getMaterialMapRun(id) {
   return rows.length ? mapMaterialMapRunRow(rows[0]) : null;
 }
 
+// v48 批5（M15，D41-⑥ / §4.19-10）：节点学习状态只读查询——已有 N 卡（context_ref_json.mindmapNodeId）
+// + 知识点已存在（关联卡带 knowledge_point_id）。只读，永不影响地图结构/位置/组织关系。
+function listMindmapLearningStatus(documentId, nodeIds) {
+  const out = {};
+  const ids = Array.isArray(nodeIds) ? nodeIds.slice(0, 500).map(String) : [];
+  for (const nid of ids) {
+    const needle = `%\"mindmapNodeId\":\"${nid}\"%`;
+    const cardRows = queryAll(
+      "SELECT COUNT(*) AS n FROM cards WHERE is_deleted = 0 AND context_ref_json LIKE ?",
+      [needle]
+    );
+    const kpRows = queryAll(
+      "SELECT COUNT(DISTINCT knowledge_point_id) AS n FROM cards WHERE is_deleted = 0 AND knowledge_point_id IS NOT NULL AND context_ref_json LIKE ?",
+      [needle]
+    );
+    out[nid] = { cardCount: Number(cardRows[0]?.n || 0), kpExists: Number(kpRows[0]?.n || 0) > 0 };
+  }
+  return out;
+}
+
 function listMaterialMapRuns(documentId, limit = 20) {
   const rows = queryAll(
     "SELECT * FROM material_map_runs WHERE document_id = ? AND is_deleted = 0 ORDER BY created_at DESC, rowid DESC LIMIT ?",
@@ -4362,5 +4382,6 @@ module.exports = {
   createMaterialMapRun,
   updateMaterialMapRun,
   getMaterialMapRun,
-  listMaterialMapRuns
+  listMaterialMapRuns,
+  listMindmapLearningStatus
 };

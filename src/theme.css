@@ -3000,3 +3000,288 @@ body.capture-body #root { height: 100vh; }
   background: var(--grey-0);
 }
 .mindmap-sidebar h3 { margin: var(--sp-3) 0 var(--sp-2); }
+
+/* ============ v48 批3（M15 重做，D42 / §4.19-9）：材料知识导图全屏工作区 ============ */
+/* 瑞士风：单 accent / 直角 / 无阴影渐变 / 1px hairline / 8px 基线 / 全 token 化 */
+.mindmap-workspace {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal, 200);
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+}
+.mindmap-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 48px;
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+.mindmap-top-title {
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mindmap-top-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--sp-2);
+}
+.mindmap-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.mindmap-canvas {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+}
+.mindmap-canvas:active {
+  cursor: grabbing;
+}
+.mindmap-canvas-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.mindmap-canvas-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-8);
+  color: var(--text-secondary);
+  font-size: var(--fs-body);
+  text-align: center;
+}
+.mindmap-fail {
+  color: var(--error);
+}
+.mindmap-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.mindmap-empty-mark {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--accent);
+  margin-bottom: var(--sp-2);
+}
+.mindmap-empty-title {
+  font-size: var(--fs-title-s);
+  font-weight: 400;
+  margin: 0;
+}
+.mindmap-empty-desc {
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  margin: 0;
+}
+.mindmap-skeleton {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+}
+.mindmap-skeleton-row,
+.mindmap-skeleton-side .mindmap-skeleton-row {
+  height: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--grey-1);
+}
+.mindmap-skeleton-side .mindmap-skeleton-row {
+  width: 60%;
+}
+.mindmap-status {
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  margin: var(--sp-4) 0 0;
+}
+.mindmap-sidebar {
+  width: 320px;
+  flex: none;
+  border-left: 1px solid var(--border-subtle);
+  overflow-y: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.mindmap-side-sec {
+  border: 1px solid var(--border-subtle);
+  padding: var(--sp-3);
+}
+.mindmap-side-sec h3 {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+}
+.mindmap-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+}
+.mindmap-field select,
+.mindmap-search {
+  width: 100%;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--fs-secondary);
+  padding: 0 var(--sp-2);
+}
+.mindmap-chips {
+  display: flex;
+  gap: var(--sp-1);
+}
+.mindmap-chip {
+  flex: 1;
+  height: 26px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.mindmap-chip.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.mindmap-hint {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  margin: var(--sp-2) 0;
+}
+.mindmap-wide {
+  width: 100%;
+  margin-top: var(--sp-2);
+}
+.mindmap-preview-list {
+  list-style: none;
+  margin: 0 0 var(--sp-2);
+  padding: 0;
+  font-size: var(--fs-meta);
+  color: var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.mindmap-issue-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fs-meta);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.mindmap-issue-sev {
+  display: inline-block;
+  border: 1px solid var(--error);
+  color: var(--error);
+  padding: 0 var(--sp-1);
+  margin-right: var(--sp-1);
+  font-size: var(--fs-meta);
+}
+.mindmap-issue-scope {
+  color: var(--text-helper);
+}
+.mindmap-search-results {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.mindmap-search-results button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  color: var(--ink);
+  font-size: var(--fs-secondary);
+  padding: var(--sp-1) 0;
+  cursor: pointer;
+}
+.mindmap-search-results button:hover {
+  color: var(--accent);
+}
+.mindmap-node-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  margin: 0 0 var(--sp-1);
+}
+.mindmap-meta {
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  margin: var(--sp-1) 0;
+}
+.mindmap-quote {
+  margin: var(--sp-2) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--accent);
+  font-size: var(--fs-meta);
+  color: var(--ink);
+  background: var(--grey-1);
+}
+.mindmap-node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.mindmap-versions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.mindmap-versions button {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: var(--fs-meta);
+  padding: var(--sp-1) var(--sp-2);
+  cursor: pointer;
+}
+.mindmap-versions li.is-active button {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mindmap-canvas-inner,
+  .mindmap-chip,
+  .mindmap-versions button {
+    transition: none !important;
+  }
+}

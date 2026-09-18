@@ -20,7 +20,8 @@ export const ALLOWED_EVENTS = [
   "leech/detected",
   "journal/changed",
   "insight/changed",
-  "memory/changed"
+  "memory/changed",
+  "mindmap/changed" // v48（M15 重做，D41/D42）：导图生成进度与完成广播
 ] as const;
 
 export type AppEvent = (typeof ALLOWED_EVENTS)[number];

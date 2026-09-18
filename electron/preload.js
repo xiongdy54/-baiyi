@@ -295,6 +295,7 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
   setActive: (id) => ipcRenderer.invoke("mindmap:setActive", id),
   remove: (id) => ipcRenderer.invoke("mindmap:delete", id),
   runs: (documentId) => ipcRenderer.invoke("mindmap:runs", documentId),
+  learningStatus: (documentId, nodeIds) => ipcRenderer.invoke("mindmap:learningStatus", documentId, nodeIds || []),
   onChanged: (callback) => {
     const handler = (_e, payload) => callback(payload);
     ipcRenderer.on("mindmap:changed", handler);
