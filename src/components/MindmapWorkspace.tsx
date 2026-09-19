@@ -60,6 +60,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number; label?: string } | null>(null);
   const [runStartedAt, setRunStartedAt] = useState(0);
+  const [cancelRequested, setCancelRequested] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
   const [hasKey, setHasKey] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -153,7 +154,9 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   // 进度广播（生成中）
   useEffect(() => {
     return eventBus.on("mindmap/changed", (p) => {
-      const payload = p as { stage?: string; done?: number; total?: number; label?: string };
+      const payload = p as { runId?: string; stage?: string; done?: number; total?: number; label?: string };
+      // v48.10：运行中实时捕获 runId（此前只在生成完成后回填 → 运行中点「取消」为 no-op）
+      if (payload.runId) setLastRunId(payload.runId);
       if (phaseRef.current !== "running" && phaseRef.current !== "preview") return;
       // v48.9：广播可能只带 label（waiting_model）——数字缺省时保留既有进度，不回退为 0/0
       setProgress((prev) => ({
@@ -188,6 +191,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     if (!params) return;
     setPhase("running");
     setRunStartedAt(Date.now());
+    setCancelRequested(false);
     setProgress({ done: 0, total: (preview?.newCalls || 0) + (preview?.fixedCalls || 0) });
     let result;
     try {
@@ -216,7 +220,24 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   };
 
   const handleCancel = async () => {
-    if (lastRunId) await mindmapApi.cancel(lastRunId);
+    setCancelRequested(true);
+    let rid = lastRunId;
+    if (!rid) {
+      // 兜底：按文档查最近运行中的 run（广播未达/初始窗口的保险）
+      try {
+        const runs = await mindmapApi.runs(documentId);
+        rid = (runs || []).find((r) => ["running", "pending", "estimating", "waiting_user"].includes(r.status))?.id || null;
+      } catch {
+        /* 查询失败继续下方提示 */
+      }
+    }
+    if (rid) {
+      setLastRunId(rid);
+      await mindmapApi.cancel(rid);
+      setProgress((prev) => ({ done: prev?.done ?? 0, total: prev?.total ?? 0, label: "已请求取消，等待当前调用中断…" }));
+    } else {
+      setProgress((prev) => ({ done: prev?.done ?? 0, total: prev?.total ?? 0, label: "未找到运行中的任务（可能已结束），请稍候" }));
+    }
   };
 
   const handleRepair = async () => {
@@ -646,8 +667,8 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                 <section className="mindmap-side-sec">
                   <h3>生成中</h3>
                   <p className="mindmap-status">{statusLine}</p>
-                  <button className="btn btn-outline btn-sm mindmap-wide" onClick={handleCancel}>
-                    取消生成
+                  <button className="btn btn-outline btn-sm mindmap-wide" onClick={handleCancel} disabled={cancelRequested}>
+                    {cancelRequested ? "取消中…" : "取消生成"}
                   </button>
                 </section>
               )}

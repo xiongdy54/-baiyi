@@ -884,6 +884,7 @@ async function generate(ctx, params, runId) {
     return finalizeMap(ctx, run.id, params, nodes, assembled.raw.title, usageAcc, { budgetHit, metrics });
   } catch (err) {
     const code = err && err.code ? err.code : err && /超时/.test(err.message || "") ? "timeout" : "network";
+    if (code === "cancelled") cancelledRuns.delete(run.id);
     const status = code === "cancelled" ? "cancelled" : code === "rate_limit" ? "failed_rate_limit" : code === "timeout" ? "failed_timeout" : "failed_network";
     ctx.db.updateMaterialMapRun(run.id, {
       status,
