@@ -286,6 +286,42 @@ app.whenReady().then(async () => {
       testSettings = { app: {} };
     }
 
+    console.log("---- M15R-E15 超长单章书段落分片（v48.8：单次塞全文长时挂起根因） ----");
+    {
+      // 构造约 2 万字无标题单章（每行可作 quote）
+      const lines = [];
+      for (let i = 0; i < 400; i++) lines.push(`第${i}段：泰勒斯认为水是万物本原，阿那克西曼德提出无定说，赫拉克利特主张万物流变。`);
+      const longText = lines.join(String.fromCharCode(10));
+      const chunkCount = core.splitByParagraphs(longText, 8000).length;
+      check("分片器把超长单元切成 ≥2 片", chunkCount >= 2, chunkCount);
+      const longP = {
+        documentId: "doc-e12",
+        title: "超长单章书",
+        tocItems: [{ anchor: "c0.xhtml", label: "正文" }],
+        unitAnchors: ["c0.xhtml"],
+        textByUnit: { "c0.xhtml": longText },
+        scopeAnchor: "book",
+        granularity: "detailed"
+      };
+      const pvL = engine.preview(ctx, longP);
+      check("preview 按片计数（newCalls = 片数）且原文字数精确（实际发送口径：分片边界换行不计）", pvL.newCalls === chunkCount && pvL.sourceCharsExact >= longText.length - chunkCount && pvL.sourceCharsExact <= longText.length, { n: pvL.newCalls, chunks: chunkCount, c: pvL.sourceCharsExact, full: longText.length });
+      const fakesSection = [];
+      for (let ci = 0; ci < chunkCount; ci++) {
+        fakesSection.push({
+          title: "分片分析", expandable: false, stopReason: "atomic_structure",
+          children: [{ title: `片${ci + 1}子结构`, authorialRole: "grouping", relationToParent: "片段结构", relationToSiblings: null, evidence: [{ unitAnchor: "c0.xhtml", quote: "泰勒斯认为水是万物本原" }], expandable: false, stopReason: "atomic_structure" }],
+          evidence: [{ unitAnchor: "c0.xhtml", quote: "阿那克西曼德提出无定说" }]
+        });
+      }
+      fakeChats = [...fakesSection, editorialOut, reviewPass];
+      const base15 = consumed;
+      const r18 = await engine.generate(ctx, longP);
+      check("分片生成完成（片数调用 + editorial + review）", r18.status === "completed" && consumed - base15 === chunkCount + 2, { status: r18.status, used: consumed - base15, chunks: chunkCount });
+      const m18 = db.getActiveMaterialMap("doc-e12", "book");
+      check("跨片 children 合并（每片子结构均在树）", m18 && m18.structure.nodes.filter((n) => /^片\d+子结构$/.test(n.title)).length === chunkCount, m18 && m18.structure.nodes.map((n) => n.title));
+      check("分片各自独立缓存", db.listMaterialMapShards("doc-e12", { run_kind: "section" }).length === chunkCount, db.listMaterialMapShards("doc-e12", { run_kind: "section" }).length);
+    }
+
     console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
     const kpBefore = JSON.stringify(db.listKnowledgePoints());
     check("导图全程零写知识图谱", JSON.stringify(db.listKnowledgePoints()) === kpBefore, "");

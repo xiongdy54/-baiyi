@@ -203,36 +203,48 @@ function buildCallPayloads(params, promptOf) {
   }
   const nodeTempId = new Map(); // 分析节点 key → 临时编号 n1..（merge 输入用；跨调用一致）
   let tempSeq = 0;
+  // v48.8：超长单元按段落边界分片（Task 06 契约）——整本无章节书不再一次塞全文（模型长时挂起根因）
+  const SECTION_CHUNK_CHARS = 8000;
   for (const g of groups.values()) {
-    const paths = g.nodeKeys
+    tempSeq += 1;
+    const gTempId = `n${tempSeq}`;
+    for (const k of g.nodeKeys) nodeTempId.set(k, gTempId);
+    const fullText = g.units.map((u) => textByUnit.get(u) || "").join("\n");
+    const label = g.nodeKeys.map((k) => {
+      const f = model.flat.find((x) => keyOf(x) === k);
+      return f.node.label;
+    }).join(" + ");
+    const pathLine = g.nodeKeys
       .map((k) => {
         const f = model.flat.find((x) => keyOf(x) === k);
-        tempSeq += 1;
-        nodeTempId.set(k, `n${tempSeq}`);
         return `【结构路径】${labelOf(f)}（编号 n${tempSeq}）`;
       })
       .join("\n");
-    const user =
-      header +
-      paths +
-      "\n\n" +
-      blocksOf(g.units).join("\n\n");
-    calls.push({
-      runKind: "section",
-      nodeKey: `grp:${sha256(g.nodeKeys.join("|")).slice(0, 12)}`,
-      label: g.nodeKeys.map((k) => {
-        const f = model.flat.find((x) => keyOf(x) === k);
-        return f.node.label;
-      }).join(" + "),
-      nodeKeys: g.nodeKeys,
-      system: promptOf("material-map-section"),
-      user,
-      chars: user.length,
-      sourceChars: g.units.reduce((t, u) => t + (textByUnit.get(u) || "").length, 0), // v48.7 原文精确口径
-      cacheKey: { textHash: sha256(g.units.map((u) => textByUnit.get(u) || "").join("\n")) }
+    const chunks = fullText.length > SECTION_CHUNK_CHARS
+      ? core.splitByParagraphs(fullText, SECTION_CHUNK_CHARS)
+      : [{ start: 0, end: fullText.length, text: fullText }];
+    chunks.forEach((chunk, ci) => {
+      const chunkHeader = chunks.length > 1 ? `【原文分片】第 ${ci + 1} / ${chunks.length} 片（同一单元按段落边界切分；本片只依据本片文本，勿引用其他片）\n` : "";
+      const user =
+        header +
+        chunkHeader +
+        pathLine +
+        "\n\n" +
+        `【原文·${g.units[0] || "src"}】\n${chunk.text}\n【/原文】`;
+      calls.push({
+        runKind: "section",
+        nodeKey: chunks.length > 1 ? `grp:${sha256(g.nodeKeys.join("|")).slice(0, 8)}:c${ci}` : `grp:${sha256(g.nodeKeys.join("|")).slice(0, 12)}`,
+        label: chunks.length > 1 ? `${label}（片 ${ci + 1}/${chunks.length}）` : label,
+        nodeKeys: g.nodeKeys,
+        groupKey: `grp:${sha256(g.nodeKeys.join("|")).slice(0, 12)}`,
+        system: promptOf("material-map-section"),
+        user,
+        chars: user.length,
+        sourceChars: chunk.text.length,
+        cacheKey: { textHash: sha256(chunk.text) }
+      });
     });
   }
-
   // 2) merge：由底向上（depth 降序）；输入 = 自有原文（skip=已分析子）+ 直接子节点的已完成分析摘要。
   //    子树 scope 的根也走 merge（可用自有原文）；全书 scope 的根由 3) global 接管。
   const analyzedKeys = new Set(analyzedInScope.map(keyOf));
@@ -414,7 +426,16 @@ function preview(ctx, params) {
   // v48.5 批B：expand 首波预估 = section 组成员叶数（模型逐节点判定 expandable，实际随深度动态；
   // 仅作费用预期锚点，UI 明示「动态追加」——禁伪装精确值）
   let expandFirstWave = 0;
-  for (const c of plan.calls) if (c.runKind === "section") expandFirstWave += (c.nodeKeys || []).length;
+  {
+    const seenGroups = new Set();
+    for (const c of plan.calls) {
+      if (c.runKind !== "section") continue;
+      const gk = c.groupKey || c.nodeKey;
+      if (seenGroups.has(gk)) continue;
+      seenGroups.add(gk);
+      expandFirstWave += (c.nodeKeys || []).length;
+    }
+  }
   estOutput += expandFirstWave * (EST_OUTPUT_TOKENS.section || 900);
   const pricing = readPricing(ctx)[model] || null;
   const estCost =
@@ -564,11 +585,44 @@ async function generate(ctx, params, runId) {
       if (r.cancelled) return finishCancelled(run.id);
       if (r.budget) { budgetHit = true; break; }
       if (r.jsonFail) return finishJsonFail(ctx, run.id, usageAcc);
-      const key0 = call.nodeKeys[0];
-      cacheContent.set(key0, r.content);
-      for (const k of call.nodeKeys) cacheContent.set(k, r.content);
+      // v48.8：按调用键写（分片各自独立）；阶段 1.5 再按组合并展开到 nodeKeys
+      cacheContent.set(call.nodeKey, r.content);
       ctx.db.updateMaterialMapRun(run.id, { callsDone: callsMade });
       ctx.broadcast({ runId: run.id, stage: "running", done: callsMade, total: est.newCalls, calls: callsMade, budget });
+    }
+
+    // ---------- 阶段 1.5：跨片合并（同组各片的 children 顺序拼接；expandable=any） ----------
+    {
+      const groupContents = new Map(); // groupKey → contents[]
+      for (const call of sectionCalls) {
+        const gk = call.groupKey || call.nodeKey;
+        const c = cacheContent.get(call.nodeKey);
+        if (c) {
+          if (!groupContents.has(gk)) groupContents.set(gk, []);
+          groupContents.get(gk).push(c);
+        }
+      }
+      for (const [gk, list] of groupContents) {
+        const first = sectionCalls.find((c) => (c.groupKey || c.nodeKey) === gk);
+        if (list.length === 1) {
+          cacheContent.set(gk, list[0]);
+          if (first) for (const k of first.nodeKeys || []) cacheContent.set(k, list[0]);
+        } else {
+          const mergedNodes = [];
+          for (const c of list) {
+            const arr = Array.isArray(c.nodes) ? c.nodes : [c];
+            mergedNodes.push(...arr);
+          }
+          const anyExpandable = mergedNodes.some((n) => n && n.expandable === true);
+          const merged = {
+            nodes: mergedNodes,
+            expandable: anyExpandable,
+            stopReason: anyExpandable ? null : "atomic_structure"
+          };
+          cacheContent.set(gk, merged);
+          if (first) for (const k of first.nodeKeys || []) cacheContent.set(k, merged);
+        }
+      }
     }
 
     // ---------- 阶段 2：初装 TOC 层（TOC 节点 + section 单层 children） ----------
@@ -625,49 +679,65 @@ async function generate(ctx, params, runId) {
         continue;
       }
       const upper = ancestorTitles(nodeById, job.node);
-      const user =
-        `【材料】${params.title || "材料知识导图"}\n` +
-        `【覆盖粒度】detailed（详细）——逐节点深挖模式\n` +
-        `【结构路径】${upper}\n` +
-        `【深挖】以下文本属于节点「${job.node.title}」。已有上层结构如【结构路径】所示、本节点之下暂无更细结构。请给出它的直接子结构（单层 children），并按原子性判断规则给出输出的 expandable/stopReason。避免复述上层已表达的内容。\n\n` +
-        `【原文·${(job.node.unitAnchors || ["deep"])[0]}】\n${text}\n【/原文】`;
-      const call = {
-        runKind: "section",
-        nodeKey: `exp:${job.fp.slice(0, 16)}`,
-        label: `深挖 · ${job.node.title}`,
-        nodeKeys: [job.node.id],
-        system: templateText(ctx, RUN_KIND_SCOPE.section),
-        user,
-        chars: user.length,
-        // v48.7：深挖的原文=被深挖节点的文本（text 已是纯原文拼接）
-        sourceChars: text.length,
-        cacheKey: {
-          ...common,
-          unitAnchor: `exp:${job.fp.slice(0, 16)}`,
-          runKind: "expand",
-          promptScope: RUN_KIND_SCOPE.section,
-          promptVersion: promptVersion(ctx, RUN_KIND_SCOPE.section),
-          textHash: sha256(job.fp + "|" + text)
+      // v48.8：深挖同样分片——超长节点每片一调，children 拼接、expandable=any
+      const chunks = text.length > 8000 ? core.splitByParagraphs(text, 8000) : [{ text }];
+      const childAcc = [];
+      let anyExpandable = false;
+      let stopAcc = null;
+      let expandFailed = false;
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+        const chunkHeader = chunks.length > 1 ? `【原文分片】第 ${ci + 1} / ${chunks.length} 片（同一节点按段落边界切分；本片只依据本片文本）\n` : "";
+        const user =
+          `【材料】${params.title || "材料知识导图"}\n` +
+          `【覆盖粒度】detailed（详细）——逐节点深挖模式\n` +
+          `【结构路径】${upper}\n` +
+          `【深挖】以下文本属于节点「${job.node.title}」。已有上层结构如【结构路径】所示、本节点之下暂无更细结构。请给出它的直接子结构（单层 children），并按原子性判断规则给出输出的 expandable/stopReason。避免复述上层已表达的内容。\n\n` +
+          chunkHeader +
+          `【原文·${(job.node.unitAnchors || ["deep"])[0]}】\n${chunk.text}\n【/原文】`;
+        const fpCi = sha256(job.fp + "|" + ci + "|" + chunk.text);
+        const call = {
+          runKind: "section",
+          nodeKey: `exp:${fpCi.slice(0, 16)}`,
+          label: chunks.length > 1 ? `深挖 · ${job.node.title}（片 ${ci + 1}/${chunks.length}）` : `深挖 · ${job.node.title}`,
+          nodeKeys: [job.node.id],
+          system: templateText(ctx, RUN_KIND_SCOPE.section),
+          user,
+          chars: user.length,
+          sourceChars: chunk.text.length,
+          cacheKey: {
+            ...common,
+            unitAnchor: `exp:${fpCi.slice(0, 16)}`,
+            runKind: "expand",
+            promptScope: RUN_KIND_SCOPE.section,
+            promptVersion: promptVersion(ctx, RUN_KIND_SCOPE.section),
+            textHash: sha256(job.fp + "|" + ci + "|" + chunk.text)
+          }
+        };
+        const r = await executeCall(call);
+        if (r.cancelled) return finishCancelled(run.id);
+        if (r.budget) {
+          budgetHit = true;
+          job.node.stopReason = "call_budget";
+          bumpStop("call_budget");
+          for (const q of queue) { q.node.stopReason = "call_budget"; bumpStop("call_budget"); }
+          queue.length = 0;
+          expandFailed = true;
+          break;
         }
-      };
-      const r = await executeCall(call);
-      if (r.cancelled) return finishCancelled(run.id);
-      if (r.budget) {
-        budgetHit = true;
-        job.node.stopReason = "call_budget";
-        bumpStop("call_budget");
-        for (const q of queue) { q.node.stopReason = "call_budget"; bumpStop("call_budget"); }
-        queue.length = 0;
-        break;
+        if (r.jsonFail) return finishJsonFail(ctx, run.id, usageAcc);
+        metrics.expandCalls += 1;
+        const out = r.content && Array.isArray(r.content.nodes) ? r.content.nodes : [r.content];
+        const own = out[0] || {};
+        childAcc.push(...(Array.isArray(own.children) ? own.children : []));
+        if (own.expandable === true) anyExpandable = true;
+        else stopAcc = stopAcc || own.stopReason || "atomic_structure";
       }
-      if (r.jsonFail) return finishJsonFail(ctx, run.id, usageAcc);
-      metrics.expandCalls += 1;
-      const out = r.content && Array.isArray(r.content.nodes) ? r.content.nodes : [r.content];
-      const own = out[0] || {};
-      job.node.expandable = own.expandable === true;
-      job.node.stopReason = job.node.expandable ? null : own.stopReason || "atomic_structure";
+      if (expandFailed) break;
+      job.node.expandable = anyExpandable;
+      job.node.stopReason = job.node.expandable ? null : stopAcc || "atomic_structure";
       bumpStop(job.node.expandable ? null : job.node.stopReason);
-      for (const ch of Array.isArray(own.children) ? own.children : []) {
+      for (const ch of childAcc) {
         const child = {
           id: `x${assembled.raw.nodes.length + 1}`,
           parentId: job.node.id,
@@ -1026,6 +1096,16 @@ function softDeleteShard(ctx, id) {
 async function chatOnce(ctx, system, user, runId) {
   const controller = new AbortController();
   activeControllers.set(runId, controller);
+  // 墙钟看门狗（v48.8）：120s 无数据超时会被推理流持续输出规避——单调用超过 8 分钟强制中止并给出明确失败
+  const watchdog = setTimeout(() => {
+    const err = new Error("单次调用超过 8 分钟未完成，已中止（长材料请确认网络与模型服务状态；系统已按段落分片控制单次输入规模）");
+    err.code = "timeout";
+    try {
+      controller.abort(err);
+    } catch {
+      /* ignore */
+    }
+  }, 8 * 60 * 1000);
   try {
     const r = await ctx.chat({ system, user, abortSignal: controller.signal, temperature: 0.3 });
     const usage = (r && r.usage) || {};
@@ -1034,6 +1114,7 @@ async function chatOnce(ctx, system, user, runId) {
       usage: { prompt: Number(usage.prompt_tokens) || 0, completion: Number(usage.completion_tokens) || 0 }
     };
   } finally {
+    clearTimeout(watchdog);
     activeControllers.delete(runId);
   }
 }

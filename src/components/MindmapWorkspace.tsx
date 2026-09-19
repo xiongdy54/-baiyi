@@ -59,6 +59,8 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [failText, setFailText] = useState("");
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number; label?: string } | null>(null);
+  const [runStartedAt, setRunStartedAt] = useState(0);
+  const [nowTick, setNowTick] = useState(Date.now());
   const [hasKey, setHasKey] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -157,6 +159,12 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     });
   }, []);
 
+  useEffect(() => {
+    if (phase !== "running") return;
+    const t = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [phase]);
+
   const handlePreview = async () => {
     const params = buildParams();
     if (!params) return;
@@ -174,6 +182,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     const params = buildParams();
     if (!params) return;
     setPhase("running");
+    setRunStartedAt(Date.now());
     setProgress({ done: 0, total: (preview?.newCalls || 0) + (preview?.fixedCalls || 0) });
     const result = await mindmapApi.generate(params);
     if (!result) return;
@@ -201,6 +210,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const handleRepair = async () => {
     if (!lastRunId) return;
     setPhase("running");
+    setRunStartedAt(Date.now());
     setProgress({ done: 0, total: 1 });
     const result = await mindmapApi.repairConfirm(lastRunId);
     if (!result) return;
@@ -444,10 +454,15 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const statusLine = (() => {
     if (phase === "collecting") return collectMsg || "正在提取原文…";
     if (phase === "loading") return "正在加载…";
-    if (phase === "running")
-      return progress?.total
-        ? `正在生成 ${progress.done}/${progress.total}${progress.label ? ` · ${progress.label}` : ""}（等待模型首字约 40 秒属正常）`
+    if (phase === "running") {
+      const elapsed = runStartedAt ? Math.max(0, Math.round((nowTick - runStartedAt) / 1000)) : 0;
+      const mm = elapsed >= 60 ? `${Math.floor(elapsed / 60)} 分 ${elapsed % 60} 秒` : `${elapsed} 秒`;
+      const base = progress?.total
+        ? `正在生成 ${progress.done}/${progress.total}${progress.label ? ` · ${progress.label}` : ""}`
         : "正在等待模型响应…";
+      // v48.8：长材料按段落分片逐片分析，单片通常 1–3 分钟；单调用超 8 分钟自动中止
+      return `${base} · 已等待 ${mm}（长材料已按段落分片，单片约 1–3 分钟；单次调用超 8 分钟将自动中止）`;
+    }
     return "";
   })();
 
