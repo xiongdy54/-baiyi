@@ -155,7 +155,12 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     return eventBus.on("mindmap/changed", (p) => {
       const payload = p as { stage?: string; done?: number; total?: number; label?: string };
       if (phaseRef.current !== "running" && phaseRef.current !== "preview") return;
-      setProgress({ done: payload.done || 0, total: payload.total || 0, label: payload.label });
+      // v48.9：广播可能只带 label（waiting_model）——数字缺省时保留既有进度，不回退为 0/0
+      setProgress((prev) => ({
+        done: typeof payload.done === "number" ? payload.done : prev?.done ?? 0,
+        total: typeof payload.total === "number" && payload.total > 0 ? payload.total : prev?.total ?? 0,
+        label: payload.label
+      }));
     });
   }, []);
 
@@ -184,7 +189,14 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     setPhase("running");
     setRunStartedAt(Date.now());
     setProgress({ done: 0, total: (preview?.newCalls || 0) + (preview?.fixedCalls || 0) });
-    const result = await mindmapApi.generate(params);
+    let result;
+    try {
+      result = await mindmapApi.generate(params);
+    } catch (err) {
+      setFailText(`生成调用异常：${err instanceof Error ? err.message : String(err)}`);
+      setPhase("failed");
+      return;
+    }
     if (!result) return;
     if (result.runId) setLastRunId(result.runId);
     if (result.status === "completed") {
@@ -212,7 +224,14 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     setPhase("running");
     setRunStartedAt(Date.now());
     setProgress({ done: 0, total: 1 });
-    const result = await mindmapApi.repairConfirm(lastRunId);
+    let result;
+    try {
+      result = await mindmapApi.repairConfirm(lastRunId);
+    } catch (err) {
+      setFailText(`修复调用异常：${err instanceof Error ? err.message : String(err)}`);
+      setPhase("failed");
+      return;
+    }
     if (!result) return;
     if (result.status === "completed") {
       const active = await mindmapApi.getActive(documentId, "book");

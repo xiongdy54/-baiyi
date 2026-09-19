@@ -16,6 +16,7 @@ import { libraryApi, type DocPayload } from "./lib/library";
 import { installJournalBridge, shortcutsApi } from "./lib/journal";
 import { installInsightBridge } from "./lib/insight";
 import { installMemoryBridge } from "./lib/memory";
+import { installMindmapBridge } from "./lib/mindmap";
 import { readingWorkflow } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
@@ -106,6 +107,7 @@ export default function App() {
     installJournalBridge();
     installInsightBridge();
     installMemoryBridge();
+    installMindmapBridge(); // v48.9：导图生成进度桥（批3 遗漏——进度曾永远停在初始值）
     return shortcutsApi.onOpenAddMaterial(() => setAddMaterialOpen(true));
   }, []);
 
