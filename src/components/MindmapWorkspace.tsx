@@ -1010,6 +1010,13 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                   )}
                   <section className="mindmap-side-sec">
                     <h3>历史版本</h3>
+                    {/* v48.13：空态但有版本时必须说清楚——否则「尚未生成」会让用户以为成果丢了。
+                        现场：一次失败的收尾把已发布版本置为未激活，用户重开工作区看到的就是「尚未生成」。 */}
+                    {versions.length > 0 && !mapReady && !structure && (
+                      <p className="mindmap-hint">
+                        当前没有已发布的版本，但历史里有 {versions.length} 个——点下面任意一版即可激活查看（成果没有丢）。
+                      </p>
+                    )}
                     {versions.length === 0 && <p className="mindmap-hint">暂无其他版本。</p>}
                     <ul className="mindmap-versions">
                       {versions.map((v) => (
