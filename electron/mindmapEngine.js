@@ -720,6 +720,17 @@ async function generate(ctx, params, runId) {
   // 同一节点的 depth 比整图浅一层 → 深化用掉的深挖缓存与之后的全量重生成**不共享**，那一支会被重新分析。
   // 这个取舍可接受：一次深化只花 1～2 次调用，换来的是「不必等整图跑完就能先看某一支」。
   const deepenOnly = params.onlyNodeId ? String(params.onlyNodeId) : null;
+  // v48.13：同一材料同一范围**串行化**——两个 run 并发写同一行地图，先完成的那份成果会被后写者覆盖
+  // （真实现场 2026-09-20 20:58：深挖 run 与整图续跑 run 并发，深挖结果被覆盖）。
+  // 续跑/深化传入的是**同一个** runId 时不算冲突（那正是同一轮任务的第二段）。
+  try {
+    const busy = ctx.db.findRunningMaterialMapRun(params.documentId, params.scopeAnchor || "book");
+    if (busy && busy.id !== (runId || null)) {
+      return { status: "invalid", code: "busy", error: "该材料已有一轮导图任务在进行中，请等它结束或先停止深挖" };
+    }
+  } catch {
+    /* 守卫本身失败不阻断生成 */
+  }
   // 深化以**已存地图为基底**：既不必重建（不依赖 section 缓存），也不会丢掉原图里 merge/global 产出的上层节点。
   const useStoredBase = !!(deepenOnly && Array.isArray(params.baseNodes) && params.baseNodes.length);
 
@@ -3012,8 +3023,20 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc, opts = {}) {
   //         ③ partial（预算触顶/失败）→ 永不发布（保持旧行为：不伪装完整）。
   const preserveActivation = !!(opts.preserveActivation && reuseId);
   const publishedElsewhere = !!(prevActive && prevActive.id !== reuseId);
+  const reuseIsPublished = !!(prevActive && prevActive.id === reuseId);
+  // v48.13：**已发布的版本不因一次失败而消失**。
+  // 真实现场（2026-09-20 21:03）：一次 ECONNRESET 让本轮降级 partial，而 partial 的既有规则是「不发布」——
+  // 于是**同一行**（用户手上那张已经可用的图，17:56 就已发布）在收尾瞬间被置为未发布，73 节点成果整张失联。
+  // 规则修正：本轮更新的正是当前已发布那一行时，partial 也保持发布；降级事实由 run 行的
+  // completeness=`partial:call_failed` 如实留痕（不粉饰，但也不把可用成果作废）。
   // preserveActivation（深化）：isActive 传 undefined → 仓储层保持该行原有激活状态不变
-  const publishNow = preserveActivation ? undefined : statusOverride === "section_ready" ? !publishedElsewhere : !partial;
+  const publishNow = preserveActivation
+    ? undefined
+    : statusOverride === "section_ready"
+      ? !publishedElsewhere
+      : reuseIsPublished
+        ? true
+        : !partial;
   const saved = (reuseId ? ctx.db.updateMaterialMap(reuseId, {
     documentId: params.documentId,
     scopeAnchor: params.scopeAnchor || "book",

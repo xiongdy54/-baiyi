@@ -162,5 +162,41 @@ console.log("---- M15R-A6 v48.13 P3 重启续跑：被打断 ≠ 失败（启动
   A.resetActivity();
 }
 
+console.log("---- M15R-A7 引擎子事件不得污染状态（真实现场：运行中被显示成「已取消」） ----");
+{
+  A.resetActivity();
+  // 真实 run 50074faf 现场：深挖阶段每完成一个作业就广播一次 stage=expand，
+  // 另有 coverage_audit / retry 子事件。P2 首版把 stage 直接当阶段存，
+  // describeTask 落到 default 分支 → 指示器显示「已取消」（用户在一次正常运行里看到两次）。
+  emit({ runId: "run-sub", documentId: "doc-b", title: "优绩主义", stage: "running", done: 2, total: 22 });
+  emit({ runId: "run-sub", documentId: "doc-b", title: "优绩主义", stage: "expand", done: 5, total: 22, calls: 5 });
+  {
+    const t = A.primaryTask();
+    const v = A.describeTask(t);
+    check("A7①：expand 子事件后仍是「生成中」而非「已取消」", t.phase === "running" && v.short.includes("生成中"), { phase: t.phase, short: v.short });
+  }
+  emit({ runId: "run-sub", documentId: "doc-b", stage: "coverage_audit", transitionChars: 10, structuralChars: 0, tasks: 0, gapChars: 0 });
+  emit({ runId: "run-sub", documentId: "doc-b", stage: "retry", attempt: 2 });
+  {
+    const t = A.primaryTask();
+    const v = A.describeTask(t);
+    check("A7②：coverage_audit / retry 子事件后仍是「生成中」", t.phase === "running" && v.short.includes("生成中"), { phase: t.phase, short: v.short });
+    check("A7③：进度数字保守不回退（子事件不带 done 时保留既有值）", t.done === 5 && t.total === 22, { done: t.done, total: t.total });
+  }
+  // 未知事件绝不编造状态
+  emit({ runId: "run-sub", documentId: "doc-b", stage: "something_new_from_future" });
+  {
+    const t = A.primaryTask();
+    check("A7④：未知阶段沿用上一次状态（不编造「已取消」）", t.phase === "running", t.phase);
+  }
+  // 终态仍然是终态（子事件归一没有把终态吞掉）
+  emit({ runId: "run-sub", documentId: "doc-b", stage: "completed", mapId: "m1", published: true });
+  {
+    const v = A.describeTask(A.primaryTask());
+    check("A7⑤：终态不受影响（仍能正确显示「导图已更新」）", v.short === "导图已更新", v);
+  }
+  A.resetActivity();
+}
+
 console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
 if (fail) process.exit(1);

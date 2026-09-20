@@ -73,6 +73,34 @@ var eventBus = {
 
 // src/lib/activity.ts
 var TERMINAL = ["completed", "partial", "review_failed", "failed", "cancelled"];
+var STAGE_ALIAS = {
+  waiting_model: "running",
+  expand: "running",
+  gapfill: "running",
+  coverage_audit: "running",
+  retry: "running",
+  analyze: "running",
+  deepen: "running",
+  validate: "running",
+  editorial: "running",
+  editorial_skipped: "running",
+  review: "running"
+};
+var KNOWN_PHASES = [
+  "running",
+  "section_ready",
+  "completed",
+  "partial",
+  "review_failed",
+  "failed",
+  "cancelled",
+  "interrupted"
+];
+function normalizeStage(raw, prev) {
+  if (STAGE_ALIAS[raw]) return STAGE_ALIAS[raw];
+  if (KNOWN_PHASES.includes(raw)) return raw;
+  return prev ? prev.phase : "running";
+}
 var tasks = /* @__PURE__ */ new Map();
 var listeners = /* @__PURE__ */ new Set();
 function emitChange() {
@@ -87,8 +115,7 @@ function applyProgress(p) {
   const runId = String(p.runId || "");
   if (!runId) return null;
   const prev = tasks.get(runId);
-  const rawStage = String(p.stage || (prev ? prev.phase : "running"));
-  const stage = rawStage === "waiting_model" ? "running" : rawStage;
+  const stage = normalizeStage(String(p.stage || ""), prev);
   const next = {
     runId,
     documentId: p.documentId ?? prev?.documentId ?? null,
@@ -240,8 +267,9 @@ function describeTask(t) {
         canOpen: true
       };
     case "cancelled":
-    default:
       return { short: "\u5DF2\u53D6\u6D88", heading: title, detail: "\u5DF2\u5B8C\u6210\u7684\u9636\u6BB5\u4FDD\u7559\u5728\u7F13\u5B58\uFF0C\u91CD\u65B0\u751F\u6210\u4F1A\u81EA\u52A8\u7EED\u8DD1\u3002", tone: "warn", percent: null, canOpen: false };
+    default:
+      return null;
   }
 }
 function failureReason(code) {

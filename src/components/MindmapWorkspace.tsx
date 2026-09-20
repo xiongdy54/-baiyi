@@ -81,6 +81,8 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   /** v48.13 P4（D46）：深化的进行/结果提示——与整图生成状态分离（深化只影响一支，不推翻整图） */
   const [deepenBusy, setDeepenBusy] = useState(false);
   const [deepenNote, setDeepenNote] = useState("");
+  /** v48.13：首层就绪后的说明（不再自动深挖整树，改为按需 + 显式「自动深挖全部」） */
+  const [sectionNote, setSectionNote] = useState("");
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number; label?: string } | null>(null);
   // v48.11：run 级预算与账本口径（计划/缓存命中/需发送/实际尝试），以及首波深挖计划与部分完成提示
@@ -269,6 +271,8 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       await loadMap(active);
       setMapReady(true);
       setPartialNote("");
+      setSectionNote("");
+      setExpandPlan(null);
       setPhase("done");
     } else if (result.status === "partial") {
       // 部分完成：新版本已落库但未激活（不伪装完整）；把它显示出来并明确说明缺口
@@ -284,12 +288,17 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       await loadMap(active);
       setMapReady(true);
       setExpandPlan(result.expandPlan || null);
-      setPhase("section_ready");
-      if (!opts?.resume && result.runId) {
-        const next = await runDeepen(result.runId);
-        if (next) await applyResult(next, { resume: true });
-        return;
-      }
+      setPhase("done");
+      // v48.13：**不再自动续跑整树深挖**。
+      // 真实现场（2026-09-20 20:55–21:03）：首层 73 秒就绪，随后自动深挖 22 次调用又跑了 393 秒，
+      // 用户看到图已经出来了，却还要等近 7 分钟，并且不知道为什么。用户拍板的口径是
+      // 「初始只需足够深入，最靠下的分支按需求展开」——所以深挖改为**按需**：
+      // 画布上带＋号的节点点开深化；想一次跑完的人用下方「自动深挖全部」（显式选择，不是默认）。
+      setSectionNote(
+        result.expandPlan && result.expandPlan.firstWaveNodes
+          ? `首层结构已就绪，现在就可以看。更深的枝条按需展开：点画布上带＋号的节点，用右侧「深化此节点」。`
+          : "首层结构已就绪，现在就可以看。"
+      );
     } else if (result.status === "review_failed") {
       setIssues(result.issues || []);
       setPhase("review_failed");
@@ -351,6 +360,23 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       await refreshVersions();
     } catch (err) {
       setDeepenNote(`深化异常：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDeepenBusy(false);
+    }
+  };
+
+  /**
+   * v48.13：显式的「自动深挖全部」——把原先**默认发生**的整树深挖改成用户主动选择的一次操作。
+   * 走同 runId 续跑（section 全部命中缓存），因此与「按需深化」共用同一条已缓存管线。
+   */
+  const handleDeepenAll = async () => {
+    const rid = lastRunId;
+    if (!rid || deepenBusy) return;
+    setDeepenBusy(true);
+    setSectionNote("");
+    try {
+      const next = await runDeepen(rid);
+      if (next) await applyResult(next, { resume: true });
     } finally {
       setDeepenBusy(false);
     }
@@ -648,6 +674,9 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     return items;
   }, [collect, title]);
 
+  /** v48.13：有一轮任务在跑（生成/续跑）——深化与自动深挖都要让路（引擎侧也有 busy 守卫兜底） */
+  const runInFlight = phase === "running" || phase === "section_ready";
+
   const statusLine = (() => {
     if (phase === "collecting") return collectMsg || "正在提取原文…";
     if (phase === "loading") return "正在加载…";
@@ -795,6 +824,19 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                   <button className="btn btn-primary btn-sm mindmap-wide" onClick={handlePreview} disabled={!collect}>
                     {phase === "done" ? "重新生成（先预览）" : "发送前预览"}
                   </button>
+                  {/* v48.13：整树深挖从「自动发生」改为「显式选择」——默认只到首层，够用且快 */}
+                  {phase === "done" && expandPlan && expandPlan.plannedCalls > 0 && (
+                    <button
+                      className="btn btn-outline btn-sm mindmap-wide"
+                      onClick={() => void handleDeepenAll()}
+                      disabled={deepenBusy || runInFlight || !lastRunId}
+                      title="把首层之下所有可深化节点一次跑完。不需要的话就别点——按需点节点深化更省。"
+                    >
+                      {deepenBusy ? "深挖中…" : `自动深挖全部（约 ${expandPlan.plannedCalls} 次调用）`}
+                    </button>
+                  )}
+                  {sectionNote && <p className="mindmap-hint">{sectionNote}</p>}
+                  {deepenNote && <p className="mindmap-hint">{deepenNote}</p>}
                 </section>
               )}
               {phase === "preview" && preview && (
@@ -949,7 +991,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => void deepenNode(selectedNode)}
-                            disabled={deepenBusy}
+                            disabled={deepenBusy || runInFlight}
                             title="这个节点还没有更细的结构。深化会只针对它对应的原文继续分析（不影响其他分支），可以在后台运行。"
                           >
                             {deepenBusy ? "深化中…" : "深化此节点"}

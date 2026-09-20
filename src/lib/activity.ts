@@ -55,6 +55,45 @@ export interface MindmapProgressPayload {
 }
 
 const TERMINAL: ActivityPhase[] = ["completed", "partial", "review_failed", "failed", "cancelled"];
+
+/**
+ * 引擎内部阶段 → 用户可见阶段。
+ *
+ * **这是一个真实踩过的坑**：引擎除终态外还会广播若干**子事件**（`expand` 每完成一个深挖作业发一次、
+ * `coverage_audit`、`retry`、`waiting_model`…）。P2 首版把它们直接当成「阶段」存了下来，
+ * 于是 `describeTask` 的 `default` 分支把运行中的任务显示成 **「已取消」**——用户在一次正常运行里
+ * 看到了两次「已取消」，正是这些子事件到达的时刻。
+ */
+const STAGE_ALIAS: Record<string, ActivityPhase> = {
+  waiting_model: "running",
+  expand: "running",
+  gapfill: "running",
+  coverage_audit: "running",
+  retry: "running",
+  analyze: "running",
+  deepen: "running",
+  validate: "running",
+  editorial: "running",
+  editorial_skipped: "running",
+  review: "running"
+};
+const KNOWN_PHASES: string[] = [
+  "running",
+  "section_ready",
+  "completed",
+  "partial",
+  "review_failed",
+  "failed",
+  "cancelled",
+  "interrupted"
+];
+
+function normalizeStage(raw: string, prev: ActivityTask | undefined): ActivityPhase {
+  if (STAGE_ALIAS[raw]) return STAGE_ALIAS[raw];
+  if (KNOWN_PHASES.includes(raw)) return raw as ActivityPhase;
+  // 未知事件**绝不编造状态**：沿用上一次；连上一次都没有就按「运行中」处理
+  return prev ? prev.phase : "running";
+}
 /** 「待用户处置」而非「跑完」：可继续生成/深化，指示器要长期保留入口 */
 const RESUMABLE: ActivityPhase[] = ["interrupted", "section_ready"];
 
@@ -76,9 +115,7 @@ export function applyProgress(p: MindmapProgressPayload): ActivityTask | null {
   const runId = String(p.runId || "");
   if (!runId) return null;
   const prev = tasks.get(runId);
-  // 引擎的 waiting_model 也是「运行中」（在等模型返回），归一到 running，只保留 label 区分
-  const rawStage = String(p.stage || (prev ? prev.phase : "running"));
-  const stage: ActivityPhase = (rawStage === "waiting_model" ? "running" : rawStage) as ActivityPhase;
+  const stage = normalizeStage(String(p.stage || ""), prev);
   const next: ActivityTask = {
     runId,
     documentId: p.documentId ?? prev?.documentId ?? null,
@@ -277,8 +314,10 @@ export function describeTask(t: ActivityTask | null): IndicatorView | null {
         canOpen: true
       };
     case "cancelled":
-    default:
       return { short: "已取消", heading: title, detail: "已完成的阶段保留在缓存，重新生成会自动续跑。", tone: "warn", percent: null, canOpen: false };
+    default:
+      // 阶段已由 normalizeStage 收敛；这里再兜一层：**宁可什么都不显示，也不编造状态**
+      return null;
   }
 }
 

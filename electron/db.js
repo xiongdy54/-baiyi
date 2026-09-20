@@ -4466,6 +4466,21 @@ function reconcileStaleMaterialMapRuns(maxAgeMs = 30 * 60 * 1000) {
 }
 
 /**
+ * v48.13：同一材料同一范围**是否已有一轮任务在跑**。
+ *
+ * 用途是给引擎加串行化守卫。真实现场（2026-09-20 20:58–21:03）：用户在主 run 还在续跑深挖时
+ * 又点了某节点的「深化」，两个 run 各自以不同基底装配、先后写**同一行**地图版本——
+ * 先完成的深挖成果被后收尾的主 run 覆盖，用户看到图忽大忽小。
+ */
+function findRunningMaterialMapRun(documentId, scopeAnchor = "book") {
+  const rows = queryAll(
+    "SELECT * FROM material_map_runs WHERE document_id = ? AND scope_anchor = ? AND is_deleted = 0 AND status IN ('running','estimating','pending') ORDER BY created_at DESC LIMIT 1",
+    [String(documentId), String(scopeAnchor)]
+  );
+  return rows.length ? mapMaterialMapRunRow(rows[0]) : null;
+}
+
+/**
  * v48.13 P3（D47）：**可续跑的运行**——应用重启后自动发现，供全局指示器提示「可继续生成」。
  * 两类：① `interrupted`（被关闭打断）；② `section_ready`（首层就绪、深挖待续跑，本就是可继续状态）。
  * 带上材料标题，指示器不必再回查一次。
@@ -4630,5 +4645,6 @@ module.exports = {
   listMaterialMapCalls,
   reconcileStaleMaterialMapRuns,
   listResumableMaterialMapRuns,
+  findRunningMaterialMapRun,
   listMindmapLearningStatus
 };

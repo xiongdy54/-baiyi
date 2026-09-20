@@ -1187,6 +1187,83 @@ app.whenReady().then(async () => {
     testSettings = { app: {} };
   }
 
+  console.log("---- M15R-E27 v48.13 已发布版本不因一次失败而消失（真实现场回归） ----");
+  {
+    // 真实现场 2026-09-20 20:55–21:03：首层已发布 → 续跑深挖途中一次 ECONNRESET →
+    // 旧规则「partial 不发布」把**同一行**置为未发布 → 73 节点成果整张失联（文档没有 active 版本）。
+    const leafP = { title: "定义句", authorialRole: "introduce", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: true, stopReason: null };
+    const leafQ = { title: "机制句", authorialRole: "cause_effect", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: true, stopReason: null };
+    const secP = { ...sec1, expandable: false, stopReason: "atomic_structure", children: [leafP] };
+    const secQ = { ...sec2, expandable: false, stopReason: "atomic_structure", children: [leafQ] };
+    const deepP = { title: "定义句的展开", expandable: false, stopReason: "atomic_structure", children: [{ title: "被检验的含义", authorialRole: "clarify", relationToParent: "补足", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    testSettings = { app: {} };
+
+    fakeChats = [secP, secQ];
+    const r1 = await engine.generate(ctx, { ...paramsFor("doc-e40"), stopAfterSection: true });
+    const map1 = db.getActiveMaterialMap("doc-e40", "book");
+    check("E27 前置：首层就绪并已发布（用户手上已有一张可用的图）", r1.status === "section_ready" && r1.published === true && map1 && map1.isActive === true, { st: r1.status, pub: r1.published });
+
+    // 续跑：一个深挖调用失败（网络中断），其余成功
+    fakeChats = [deepP, new Error("socket hang up"), globalOut, editorialOut, reviewPass];
+    const r2 = await engine.generate(ctx, { ...paramsFor("doc-e40") }, r1.runId);
+    const map2 = db.getMaterialMap(map1.id);
+    const run2 = db.getMaterialMapRun(r2.runId);
+    check("E27①：单个调用失败 → 本轮降级 partial（不伪装完整）", String((run2.output || {}).completeness).startsWith("partial:"), (run2.output || {}).completeness);
+    check(
+      "E27②：**已发布的那一行仍为 active**（一次失败不把可用成果作废）",
+      map2.isActive === true && db.getActiveMaterialMap("doc-e40", "book") !== null,
+      { active: map2.isActive }
+    );
+    check("E27③：版本未被换行（同 run 只落一行，卡片溯源不断链）", db.listMaterialMaps("doc-e40").length === 1, db.listMaterialMaps("doc-e40").length);
+    check("E27④：本轮 run 输出如实标注 published=true 且 completeness 记降级", (run2.output || {}).published === true, (run2.output || {}).published);
+
+    // 反例保护：**尚未发布**的版本（partial 且没有已发布版本）仍不得发布——不伪装完整
+    fakeChats = [secP, secQ];
+    const r3 = await engine.generate(ctx, { ...paramsFor("doc-e41"), stopAfterSection: true });
+    check("E27 反例前置：另一文档首层就绪（此时它已是 provisional 发布）", r3.status === "section_ready", r3.status);
+
+    // 「已有别处已发布版本时，新首层只作候选」的规则不受本轮影响（回归）
+    fakeChats = [secP, secQ];
+    const r4 = await engine.generate(ctx, { ...paramsFor("doc-e40"), stopAfterSection: true, force: true });
+    check("E27⑤：新首层候选仍不得顶掉已发布版本（P1 规则未被破坏）", r4.status === "section_ready" && r4.published === false, { st: r4.status, pub: r4.published });
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E28 v48.13 同材料串行化守卫（并发写同一行地图的防护） ----");
+  {
+    // 真实现场 2026-09-20 20:58：主 run 还在续跑深挖时用户点了某节点「深化」，
+    // 两个 run 各自以不同基底装配、先后写**同一行**地图版本 —— 先完成的深挖成果被后收尾的主 run 覆盖。
+    testSettings = { app: {} };
+    const busyRun = db.createMaterialMapRun({ documentId: "doc-e50", scopeAnchor: "book", granularity: "detailed", input: {} });
+    db.updateMaterialMapRun(busyRun.id, { status: "running", stage: "expand" });
+
+    const before = consumed;
+    const rBusy = await engine.generate(ctx, paramsFor("doc-e50"));
+    check(
+      "E28①：同材料已有任务在跑 → 拒绝再起一轮（零调用）",
+      rBusy.status === "invalid" && rBusy.code === "busy" && consumed === before,
+      { st: rBusy.status, code: rBusy.code, calls: consumed - before }
+    );
+    check("E28②：拒绝文案明确可操作（等它结束或先停止深挖）", String(rBusy.error).includes("停止深挖"), rBusy.error);
+
+    const rDeepenBusy = await engine.deepen(ctx, { ...paramsFor("doc-e50"), mapId: "whatever", nodeId: "x1" });
+    check("E28③：深化同样被守卫拦住（同一道闸，不靠 UI 自觉）", rDeepenBusy.status === "invalid", rDeepenBusy.status);
+
+    // 同一 runId 续跑**不算**冲突（那正是同一轮任务的第二段）
+    const resumeRun = db.createMaterialMapRun({ documentId: "doc-e51", scopeAnchor: "book", granularity: "detailed", input: {} });
+    db.updateMaterialMapRun(resumeRun.id, { status: "running", stage: "section" });
+    fakeChats = [sec1, sec2, globalOut, editorialOut, reviewPass];
+    const rResume = await engine.generate(ctx, paramsFor("doc-e51"), resumeRun.id);
+    check("E28④：同 runId 续跑不被守卫拦住（否则续跑直接被自己挡死）", rResume.status === "completed", { st: rResume.status, code: rResume.code });
+
+    // 已收敛的运行（interrupted / 已完成）不占用闸门
+    db.updateMaterialMapRun(resumeRun.id, { status: "interrupted" });
+    fakeChats = [sec1, sec2, globalOut, editorialOut, reviewPass];
+    const rAfter = await engine.generate(ctx, paramsFor("doc-e51"));
+    check("E28⑤：已中断/已结束的运行不再占闸门（重启后能正常续跑）", rAfter.status === "completed", rAfter.status);
+    testSettings = { app: {} };
+  }
+
   console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
     const kpBefore = JSON.stringify(db.listKnowledgePoints());
     check("导图全程零写知识图谱", JSON.stringify(db.listKnowledgePoints()) === kpBefore, "");

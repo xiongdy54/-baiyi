@@ -75,6 +75,13 @@ export function BackgroundActivity({ onOpenMap }: BackgroundActivityProps) {
     // 首层就绪的 run 不自动续跑——按需深化（P4）由用户点具体节点决定。
     const resumeRunId = task.phase === "interrupted" ? task.runId : null;
     onOpenMap(task.documentId, task.mapId, resumeRunId);
+    // v48.13：用户已经去看图了，这条提示的使命就结束了——不该继续占着右下角。
+    // （仍在运行的除外：那时用户要的是看得见的进度；而且续跑一旦开始会有新广播把它带回来。）
+    if (task.phase !== "running") {
+      setExpanded(false);
+      setPinned(false);
+      dismissTask(task.runId);
+    }
   };
   const primaryClick = () => {
     if (view.canOpen) openMap();
