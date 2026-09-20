@@ -187,6 +187,13 @@ export default function Reader({
   const [focusBusy, setFocusBusy] = useState(false);
   // v48 批3（M15，D42）：全屏导图工作区（挂 Reader 外层的 Overlay，内核保活 → 返回正文天然原位）
   const [mindmapOpen, setMindmapOpen] = useState(false);
+  /**
+   * v48.13（P3）：续跑意图要在**挂载时快照**。
+   * 原因：App 在 onMindmapOpened 里立刻清掉 view.resumeRunId（导航状态要干净），
+   * 而真正用到它的是下面那个 MindmapWorkspace 的挂载流程（要等收集完原文才续跑）——
+   * 若直接读 prop，会读到已被清空的 null，续跑静默不发生。
+   */
+  const [resumeOnce] = useState<string | null>(resumeRunId ?? null);
   // v48.13（P2）：从右下角指示器进入时自动打开（只消费一次；标记即刻回执给 App 清除）
   useEffect(() => {
     if (!openMindmapInitially) return;
@@ -1831,7 +1838,7 @@ export default function Reader({
           documentId={contextRef.documentId}
           title={title || sourceTitle || "未命名材料"}
           initialMapId={openMindmapMapId || null}
-          initialResumeRunId={resumeRunId || null}
+          initialResumeRunId={resumeOnce}
           onBack={() => setMindmapOpen(false)}
           onMakeCardsFromNode={(payload) => {
             setMindmapOpen(false);
