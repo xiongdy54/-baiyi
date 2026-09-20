@@ -636,6 +636,42 @@ async function initDb() {
     )`);
     db.run("CREATE INDEX IF NOT EXISTS idx_mruns2_doc ON material_map_runs(document_id, created_at, is_deleted)");
   } catch { /* 表已存在 */ }
+  // v48.11（D44 §3.8）：导图调用日志——**账本真源**是这里，不是分片表（分片是缓存，命中不落行）
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS material_map_calls (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      run_id TEXT NOT NULL,
+      document_id TEXT NOT NULL,
+      run_kind TEXT NOT NULL,
+      node_anchor TEXT,
+      span_hash TEXT,
+      chars INTEGER,
+      outcome TEXT NOT NULL,
+      error_code TEXT,
+      finish_reason TEXT,
+      attempt INTEGER,
+      wall_ms INTEGER,
+      prompt_tokens INTEGER,
+      completion_tokens INTEGER,
+      created_at INTEGER NOT NULL
+    )`);
+    db.run("CREATE INDEX IF NOT EXISTS idx_mcalls_run ON material_map_calls(run_id, created_at)");
+    // v48.12 P0：测量字段（守卫式 ALTER，存量库自动补齐）
+    for (const [col, type] of [
+      ["ttft_ms", "INTEGER"],
+      ["first_byte_ms", "INTEGER"],
+      ["depth", "INTEGER"],
+      ["parent_node_id", "TEXT"],
+      ["span_chars", "INTEGER"]
+    ]) {
+      try {
+        db.run(`ALTER TABLE material_map_calls ADD COLUMN ${col} ${type}`);
+      } catch {
+        /* 列已存在 */
+      }
+    }
+  } catch { /* 表已存在 */ }
   ensurePromptTemplates();
   persist();
 }
@@ -4043,6 +4079,49 @@ function deleteMaterialMap(id) {
   return true;
 }
 
+/**
+ * v48.12 修复「删掉的版本又出现」：同一个 run 的「首层就绪」与「深挖完成」两个阶段必须落在**同一行**版本上。
+ * 此前两阶段各 INSERT 一行同标题版本 → 每次生成都在历史版本里留两条，删掉其中一条后另一条看起来就是「复活」。
+ * 本函数按 id 就地更新（版本身份不变：nodeRemap / 卡片溯源沿用的就是这一行）。
+ */
+function updateMaterialMap(id, patch = {}) {
+  const cur = queryAll("SELECT * FROM material_maps WHERE id = ? AND is_deleted = 0", [String(id)]);
+  if (!cur.length) return null;
+  const row = cur[0];
+  const now = Date.now();
+  const structure = patch.structure !== undefined ? patch.structure : JSON.parse(row.structure_json || "{}");
+  const nodes = structure && Array.isArray(structure.nodes) ? structure.nodes : [];
+  db.run(
+    `UPDATE material_maps SET title = ?, structure_json = ?, node_count = ?, source_revision_hash = ?,
+      prompt_version = ?, generator_version = ?, provider = ?, model = ?, model_config_hash = ?,
+      node_remap_json = ?, is_active = ?, updated_at = ?, sync_version = sync_version + 1
+     WHERE id = ?`,
+    [
+      patch.title !== undefined ? patch.title : row.title,
+      JSON.stringify(structure ?? { nodes: [], edges: [] }),
+      nodes.length,
+      patch.sourceRevisionHash !== undefined ? patch.sourceRevisionHash : row.source_revision_hash,
+      patch.promptVersion !== undefined ? patch.promptVersion : row.prompt_version,
+      patch.generatorVersion !== undefined ? patch.generatorVersion : row.generator_version,
+      patch.provider !== undefined ? patch.provider : row.provider,
+      patch.model !== undefined ? patch.model : row.model,
+      patch.modelConfigHash !== undefined ? patch.modelConfigHash : row.model_config_hash,
+      patch.nodeRemap !== undefined ? (patch.nodeRemap ? JSON.stringify(patch.nodeRemap) : null) : row.node_remap_json,
+      patch.isActive !== undefined ? (patch.isActive ? 1 : 0) : row.is_active,
+      now,
+      String(id)
+    ]
+  );
+  if (patch.isActive) {
+    db.run(
+      "UPDATE material_maps SET is_active = 0, updated_at = ?, sync_version = sync_version + 1 WHERE document_id = ? AND scope_anchor = ? AND id != ? AND is_active = 1 AND is_deleted = 0",
+      [now, row.document_id, row.scope_anchor, String(id)]
+    );
+  }
+  persist();
+  return getMaterialMap(String(id), { includeStructure: true });
+}
+
 function saveMaterialMapShard({
   documentId,
   unitAnchor,
@@ -4276,6 +4355,109 @@ function listMaterialMapRuns(documentId, limit = 20) {
   return rows.map(mapMaterialMapRunRow);
 }
 
+// ---------- v48.11 调用日志与僵尸对账（§3.7/§3.8） ----------
+
+/** 记录一次 AI 请求尝试（含缓存命中/失败/未知结果），作为 Run 审计总账的真源 */
+function saveMaterialMapCall({
+  runId,
+  documentId,
+  runKind = "other",
+  nodeAnchor = "",
+  spanHash = null,
+  chars = null,
+  outcome = "completed",
+  errorCode = null,
+  finishReason = null,
+  attempt = 1,
+  wallMs = null,
+  ttftMs = null,
+  firstByteMs = null,
+  depth = null,
+  parentNodeId = null,
+  spanChars = null,
+  promptTokens = null,
+  completionTokens = null
+} = {}) {
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    `INSERT INTO material_map_calls (id, user_id, run_id, document_id, run_kind, node_anchor, span_hash, chars,
+      outcome, error_code, finish_reason, attempt, wall_ms, ttft_ms, first_byte_ms, depth, parent_node_id, span_chars,
+      prompt_tokens, completion_tokens, created_at)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      String(runId),
+      String(documentId),
+      String(runKind),
+      String(nodeAnchor || ""),
+      spanHash ? String(spanHash) : null,
+      Number.isFinite(Number(chars)) ? Number(chars) : null,
+      String(outcome),
+      errorCode ? String(errorCode) : null,
+      finishReason ? String(finishReason) : null,
+      Number.isFinite(Number(attempt)) ? Number(attempt) : 1,
+      Number.isFinite(Number(wallMs)) ? Number(wallMs) : null,
+      Number.isFinite(Number(ttftMs)) ? Number(ttftMs) : null,
+      Number.isFinite(Number(firstByteMs)) ? Number(firstByteMs) : null,
+      Number.isFinite(Number(depth)) ? Number(depth) : null,
+      parentNodeId ? String(parentNodeId) : null,
+      Number.isFinite(Number(spanChars)) ? Number(spanChars) : null,
+      Number.isFinite(Number(promptTokens)) ? Number(promptTokens) : null,
+      Number.isFinite(Number(completionTokens)) ? Number(completionTokens) : null,
+      now
+    ]
+  );
+  persist();
+  return id;
+}
+
+function listMaterialMapCalls(runId, limit = 2000) {
+  return queryAll(
+    "SELECT * FROM material_map_calls WHERE run_id = ? ORDER BY created_at, rowid LIMIT ?",
+    [String(runId), Math.max(1, Number(limit) || 2000)]
+  ).map((r) => ({
+    id: r.id,
+    runId: r.run_id,
+    documentId: r.document_id,
+    runKind: r.run_kind,
+    nodeAnchor: r.node_anchor,
+    spanHash: r.span_hash,
+    chars: r.chars,
+    outcome: r.outcome,
+    errorCode: r.error_code,
+    finishReason: r.finish_reason,
+    attempt: r.attempt,
+    wallMs: r.wall_ms,
+    ttftMs: r.ttft_ms,
+    firstByteMs: r.first_byte_ms,
+    depth: r.depth,
+    parentNodeId: r.parent_node_id,
+    spanChars: r.span_chars,
+    promptTokens: r.prompt_tokens,
+    completionTokens: r.completion_tokens,
+    createdAt: r.created_at
+  }));
+}
+
+/** 启动对账：把超过阈值的 running/estimating/pending 运行收敛为 failed_timeout（防永久僵尸） */
+function reconcileStaleMaterialMapRuns(maxAgeMs = 30 * 60 * 1000) {
+  const cutoff = Date.now() - Math.max(60 * 1000, Number(maxAgeMs) || 0);
+  const rows = queryAll(
+    "SELECT id FROM material_map_runs WHERE is_deleted = 0 AND status IN ('running','estimating','pending') AND updated_at < ?",
+    [cutoff]
+  );
+  for (const r of rows) {
+    db.run("UPDATE material_map_runs SET status = 'failed_timeout', error_code = 'stale_run', error_text = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [
+      "运行在应用关闭/中断后未收敛（启动对账）；已完成分片保留在缓存，重新生成将自动续跑",
+      Date.now(),
+      r.id
+    ]);
+  }
+  if (rows.length) persist();
+  return rows.length;
+}
+
 module.exports = {
   initDb,
   persistDb: persist,
@@ -4405,6 +4587,7 @@ module.exports = {
   deletePersonalMeaningCandidate,
   // v48 批1（M15 重做，D41-⑤ / §4.19-7）：材料知识导图数据层（3 表）
   saveMaterialMap,
+  updateMaterialMap,
   listMaterialMaps,
   getMaterialMap,
   getActiveMaterialMap,
@@ -4417,5 +4600,8 @@ module.exports = {
   updateMaterialMapRun,
   getMaterialMapRun,
   listMaterialMapRuns,
+  saveMaterialMapCall,
+  listMaterialMapCalls,
+  reconcileStaleMaterialMapRuns,
   listMindmapLearningStatus
 };

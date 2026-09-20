@@ -274,6 +274,166 @@ console.log("---- M15R-9 质量指标（Task 52，本地统计） ----");
   check("目录回声率（缺 grouping 的内部节点=0）", m.tocEchoRate === 0, m);
 }
 
+// ---------- M15R-10 v48.11 坐标系统与 sourceSpans（D44：深挖只读节点自身作用域） ----------
+console.log("---- M15R-10 v48.11 坐标系统与 sourceSpans ----");
+{
+  // 三单元线性化：u2 故意含 emoji（surrogate pair）与组合字符，验证 UTF-16 code unit 口径
+  const units = ["u1", "u2", "u3"];
+  const texts = new Map([
+    ["u1", "甲段落一。\n\n甲段落二。"],
+    ["u2", "带 emoji 😀 与组合 é 的段落。\n\n第二段。"],
+    ["u3", "丙。"]
+  ]);
+  const linear = core.buildLinearization(units, texts);
+  check("线性化版本常量存在", core.LINEARIZATION_VERSION === "lin-1", core.LINEARIZATION_VERSION);
+  check(
+    "unitBase 按拼接累计（含分隔符）",
+    linear.unitBase[0] === 0 && linear.unitBase[1] === texts.get("u1").length + 1,
+    linear.unitBase
+  );
+  check(
+    "slice(span) 与单元文本逐字一致（emoji/组合字符口径）",
+    linear.text.slice(linear.unitBase[1], linear.unitBase[1] + texts.get("u2").length) === texts.get("u2") &&
+      linear.text.slice(linear.unitBase[2]).length === "丙。".length,
+    linear.text.slice(linear.unitBase[1], linear.unitBase[1] + 6)
+  );
+  check("emoji 计 2 个 code unit（UTF-16 口径）", texts.get("u2").length === 27, texts.get("u2").length);
+
+  // 区间代数
+  check(
+    "normalizeSpans 合并相邻/重叠",
+    eq(core.normalizeSpans([[5, 10], [10, 12], [1, 2]]), [[1, 2], [5, 12]]),
+    core.normalizeSpans([[5, 10], [10, 12], [1, 2]])
+  );
+  check("intersectSpans 求交", eq(core.intersectSpans([[0, 10], [20, 30]], [[5, 25]]), [[5, 10], [20, 25]]), core.intersectSpans([[0, 10], [20, 30]], [[5, 25]]));
+  check("subtractSpans 区间差", eq(core.subtractSpans([[0, 100]], [[10, 20], [30, 40]]), [[0, 10], [20, 30], [40, 100]]), core.subtractSpans([[0, 100]], [[10, 20], [30, 40]]));
+  check("spanLengthOf = 并集长度（非累加）", core.spanLengthOf([[0, 10], [5, 15]]) === 15, core.spanLengthOf([[0, 10], [5, 15]]));
+  check(
+    "spanTextOf 多片段带显式片段标记",
+    core.spanTextOf(linear, [[0, 2], [10, 12]]).includes("【原文片段 1/2】") && core.spanTextOf(linear, [[0, 2], [10, 12]]).includes("【原文片段 2/2】"),
+    core.spanTextOf(linear, [[0, 2], [10, 12]])
+  );
+
+  // evidence → span（真值：u2 第二段「第二段。」的偏移）
+  const host2 = texts.get("u2");
+  const q = "第二段";
+  const off = host2.indexOf(q);
+  const evSpan = core.evidenceSpanOf(linear, { unitAnchor: "u2", matchStart: off, matchEnd: off + q.length });
+  check("evidenceSpanOf 换算到全局坐标", eq(evSpan, [linear.unitBase[1] + off, linear.unitBase[1] + off + q.length]), evSpan);
+  check("evidenceSpanOf 未命中返回 null", core.evidenceSpanOf(linear, { unitAnchor: "u2", matchStart: -1, matchEnd: -1 }) === null);
+
+  // deriveSourceSpans：聚类 + 扩边（段落边界）+ 父级钳制
+  const d1 = core.deriveSourceSpans({
+    linear,
+    evidence: [
+      { unitAnchor: "u1", matchStart: 0, matchEnd: 2 },
+      { unitAnchor: "u1", matchStart: 6, matchEnd: 8 }
+    ]
+  });
+  check("聚类：同段两条 evidence 合并为一簇", d1.spans.length === 1, d1.spans);
+  check("扩边到段落边界（含整段但不超过 contextCap）", d1.spans[0][0] === 0 && core.spanLengthOf(d1.spans) <= texts.get("u1").length + 2, d1.spans);
+  const parent = [[0, linear.length]];
+  const d2 = core.deriveSourceSpans({
+    linear,
+    evidence: [{ unitAnchor: "u2", matchStart: off, matchEnd: off + 3 }],
+    parentSpans: parent
+  });
+  check(
+    "父级钳制：子 span ⊆ 父 span（覆盖父区间时保持原样）",
+    d2.spans.length === 1 && d2.spans[0][0] >= 0 && d2.spans[0][1] <= linear.length && d2.spans[0][1] - d2.spans[0][0] >= 3,
+    d2.spans
+  );
+  const d2b = core.deriveSourceSpans({
+    linear,
+    evidence: [{ unitAnchor: "u2", matchStart: off, matchEnd: off + 3 }],
+    parentSpans: [[linear.unitBase[1], linear.unitBase[1] + off + 1]]
+  });
+  check(
+    "父级窄于证据时被截断到父边界（不泄漏父外文本）",
+    d2b.spans.length === 1 && d2b.spans[0][1] <= linear.unitBase[1] + off + 1,
+    d2b.spans
+  );
+  const d3 = core.deriveSourceSpans({
+    linear,
+    evidence: [{ unitAnchor: "u3", matchStart: 0, matchEnd: 1 }],
+    parentSpans: [[0, 10]]
+  });
+  check("钳制后为空 → 记 scopeConflict 且不产出 span", d3.spans.length === 0 && d3.conflicts === 1, d3);
+  const d4 = core.deriveSourceSpans({ linear, evidence: [] });
+  check("无 evidence → 空 span（交由校验器拒绝该节点）", d4.spans.length === 0 && d4.candidates === 0, d4);
+  // 确定性：同输入两次结果逐字节一致
+  check("span 推导字节级确定性", eq(core.deriveSourceSpans({ linear, evidence: [{ unitAnchor: "u1", matchStart: 0, matchEnd: 2 }] }).spans, core.deriveSourceSpans({ linear, evidence: [{ unitAnchor: "u1", matchStart: 0, matchEnd: 2 }] }).spans));
+
+  // residualSpans：覆盖账
+  check("residual = 父 − 子并集", eq(core.residualSpans([[0, 100]], [[[10, 20]], [[30, 40]]]), [[0, 10], [20, 30], [40, 100]]), core.residualSpans([[0, 100]], [[[10, 20]], [[30, 40]]]));
+
+  // §3.3 切分阶梯：只切不删 + 硬切带重叠
+  const longPara = "长段落文本。".repeat(300); // 1800 字，无换行 → 段落不可分 → 句边界切
+  const units2 = ["only"];
+  const lin2 = core.buildLinearization(units2, new Map([["only", `短段。\n\n${longPara}`]]));
+  const shards = core.splitSpansForPayload([[0, lin2.length]], lin2, 500, 100);
+  check("切分后每片 ≤ maxChars（硬切例外已带重叠）", shards.every((s) => s.end - s.start <= 500), shards.map((s) => s.end - s.start));
+  check("切分不丢内容：所有 shard 并集覆盖原区间", core.spanLengthOf(shards.map((s) => [s.start, s.end]).reduce((a, b) => core.normalizeSpans([...a, b]), [])) === lin2.length, shards.length);
+  check("无换行超长块走句边界或硬切并留痕", shards.some((s) => s.hard) || shards.length > 1, shards.map((s) => s.hard));
+  check("硬切片之间有重叠窗口", (() => {
+    const hard = shards.filter((s) => s.hard);
+    if (hard.length < 2) return true;
+    return hard[1].start < hard[0].end;
+  })(), shards.filter((s) => s.hard).map((s) => [s.start, s.end]));
+
+  // locateNodeEvidence：给未校验节点补偏移
+  const located = core.locateNodeEvidence(
+    { unitAnchors: ["u2"], evidence: [{ quote: "第二段", unitAnchor: "u2", startOffset: 0 }] },
+    texts
+  );
+  check("locateNodeEvidence 补齐 matchStart/matchEnd", located.length === 1 && located[0].matchStart === off && located[0].matchEnd === off + 3, located);
+}
+
+// ---------- M15R-11 v48.12 §3.1b 区间集合纪律（守护用例：不得用 min–max 包络近似） ----------
+console.log("---- M15R-11 区间集合纪律（非连续不得视为连续） ----");
+{
+  const units = ["u1"];
+  const texts = new Map([["u1", "甲".repeat(1000)]]);
+  const lin = core.buildLinearization(units, texts);
+
+  check(
+    "① 非连续区间长度 = 各段之和（≠ 包络）",
+    core.spanLengthOf([[100, 150], [900, 980]]) === 130 &&
+      core.spanLengthOf(core.normalizeSpans([[100, 150], [900, 980]])) === 130,
+    core.spanLengthOf([[100, 150], [900, 980]])
+  );
+  check(
+    "② 残余正确跨空洞（[150,900) 必须归还为未覆盖）",
+    eq(core.subtractSpans([[100, 980]], [[100, 150], [900, 980]]), [[150, 900]]),
+    core.subtractSpans([[100, 980]], [[100, 150], [900, 980]])
+  );
+  check(
+    "③ 覆盖判定不吞空洞（130/1000 而非 880/1000）",
+    Math.round((core.spanLengthOf(core.normalizeSpans([[100, 150], [900, 980]])) / lin.length) * 1000) / 1000 === 0.13,
+    core.spanLengthOf(core.normalizeSpans([[100, 150], [900, 980]])) / lin.length
+  );
+  const dMulti = core.deriveSourceSpans({
+    linear: lin,
+    evidence: [{ unitAnchor: "u1", matchStart: 400, matchEnd: 430 }],
+    parentSpans: [[100, 150], [900, 980]]
+  });
+  check(
+    "④ 多区间父节点的子 span 钳制：中间空洞内的证据不得被误纳",
+    dMulti.spans.length === 0 && dMulti.conflicts === 1,
+    dMulti
+  );
+  const dEdge = core.deriveSourceSpans({
+    linear: lin,
+    evidence: [{ unitAnchor: "u1", matchStart: 905, matchEnd: 930 }],
+    parentSpans: [[100, 150], [900, 980]]
+  });
+  check(
+    "④b 落在父区间内的证据正常纳入且不超出父边界",
+    dEdge.spans.length === 1 && dEdge.spans[0][0] >= 900 && dEdge.spans[0][1] <= 980,
+    dEdge.spans
+  );
+}
+
 console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
 if (fail) {
   console.log("FAILED items exist");

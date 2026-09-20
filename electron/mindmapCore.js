@@ -332,6 +332,368 @@ function splitByParagraphs(text, maxChars) {
   return chunks;
 }
 
+// ---------- v48.11 坐标系统与 sourceSpans（D44；§2/§3.1-§3.3） ----------
+// 核心不变式：canonicalDocOffset 是**全文一维坐标**，单位 = UTF-16 code unit（与 String.prototype.slice 严格一致）。
+// 一个节点的「真实文本作用域」= sourceSpans（多区间列表）——深挖只读这里，绝不读父级整段。
+
+const LINEARIZATION_VERSION = "lin-1"; // 拼接/分隔策略版本：变更即全体 span 与缓存失效（显式，不静默错位）
+const LINEARIZATION_SEPARATOR = "\n"; // 单元间分隔符：与既有 ownedText/rangeText 的 join 约定一致
+
+/**
+ * 文档线性化。text = units.join(SEPARATOR)；unitBase[i] = 第 i 个单元在 text 中的起始偏移。
+ * @returns { units, unitBase, text, length }
+ */
+function buildLinearization(units, textByUnit) {
+  const list = (units || []).map(String);
+  const unitBase = [];
+  let text = "";
+  list.forEach((u, i) => {
+    if (i > 0) text += LINEARIZATION_SEPARATOR;
+    unitBase.push(text.length);
+    const t = textByUnit && typeof textByUnit.get === "function" ? textByUnit.get(u) : null;
+    text += String(t || "");
+  });
+  return { units: list, unitBase, text, length: text.length };
+}
+
+/** 锚 → 线性化单元下标（base 归一后首个命中；与 buildExtractionModel 同规则） */
+function linearUnitIndexOf(linear, anchor) {
+  const base = (h) => {
+    const raw = String(h ?? "").split("#")[0];
+    try {
+      return decodeURI(raw);
+    } catch {
+      return raw;
+    }
+  };
+  const target = base(anchor);
+  for (let i = 0; i < linear.units.length; i++) if (base(linear.units[i]) === target) return i;
+  return -1;
+}
+
+/** 单元下标区间 [from, to) → 一个字符区间（含区间内单元间的分隔符） */
+function spanOfUnitRange(linear, from, to) {
+  if (!linear || !linear.units.length) return null;
+  const n = linear.units.length;
+  const f = Math.max(0, Math.min(Number(from) || 0, n - 1));
+  const t = Math.max(f + 1, Math.min(Number(to) || 0, n));
+  const start = linear.unitBase[f];
+  // 末单元结束位置：下一个单元起点回推分隔符；已是最后单元则到文末
+  const end = t < n ? linear.unitBase[t] - LINEARIZATION_SEPARATOR.length : linear.length;
+  return end > start ? [start, end] : null;
+}
+
+/** 区间集合规范化：排序 + 合并相邻/重叠（半开区间 [start, end)） */
+function normalizeSpans(spans) {
+  const list = (spans || [])
+    .filter((s) => Array.isArray(s) && Number.isFinite(s[0]) && Number.isFinite(s[1]) && s[1] > s[0])
+    .map((s) => [Math.floor(s[0]), Math.floor(s[1])])
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const out = [];
+  for (const [s, e] of list) {
+    const last = out[out.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else out.push([s, e]);
+  }
+  return out;
+}
+
+/** 区间交：spans ∩ limits（limits 为区间集合；结果规范化） */
+function intersectSpans(spans, limits) {
+  const a = normalizeSpans(spans);
+  const b = normalizeSpans(limits);
+  const out = [];
+  for (const [s, e] of a) {
+    for (const [ls, le] of b) {
+      const s2 = Math.max(s, ls);
+      const e2 = Math.min(e, le);
+      if (e2 > s2) out.push([s2, e2]);
+    }
+  }
+  return normalizeSpans(out);
+}
+
+/** 区间差：spans − cuts（§3.2 残余账的基础运算） */
+function subtractSpans(spans, cuts) {
+  const cutsN = normalizeSpans(cuts);
+  const out = [];
+  for (const [s, e] of normalizeSpans(spans)) {
+    let cursor = s;
+    for (const [cs, ce] of cutsN) {
+      if (ce <= cursor) continue;
+      if (cs >= e) break;
+      if (cs > cursor) out.push([cursor, cs]);
+      cursor = Math.max(cursor, ce);
+      if (cursor >= e) break;
+    }
+    if (cursor < e) out.push([cursor, e]);
+  }
+  return out;
+}
+
+/** 区间集合总长度（覆盖度量的唯一口径：区间的并集，禁止按标题/文本长度累加） */
+function spanLengthOf(spans) {
+  return normalizeSpans(spans).reduce((a, [s, e]) => a + (e - s), 0);
+}
+
+/** 取区间集合的文本：多片段时用显式标记分隔，避免模型误以为是连续文本 */
+function spanTextOf(linear, spans) {
+  const list = normalizeSpans(spans);
+  if (!linear || !list.length) return "";
+  if (list.length === 1) return linear.text.slice(list[0][0], list[0][1]);
+  return list
+    .map(([s, e], i) => `【原文片段 ${i + 1}/${list.length}】\n${linear.text.slice(s, e)}\n【/原文片段】`)
+    .join("\n\n");
+}
+
+/** 单条 evidence → 候选 span（依赖 locateEvidence 的 matchStart/matchEnd；未命中返回 null） */
+function evidenceSpanOf(linear, ev) {
+  if (!linear || !ev) return null;
+  const idx = linearUnitIndexOf(linear, ev.unitAnchor);
+  if (idx < 0) return null;
+  const ms = Number(ev.matchStart);
+  const me = Number(ev.matchEnd);
+  if (!Number.isFinite(ms) || !Number.isFinite(me) || me <= ms) return null;
+  const host = String((linear.text || "").slice(linear.unitBase[idx])).length;
+  const start = linear.unitBase[idx] + Math.max(0, Math.min(ms, host));
+  const end = linear.unitBase[idx] + Math.max(0, Math.min(me, host));
+  return end > start ? [start, end] : null;
+}
+
+/** 行块边界回退（extend 用）：就近对齐到最近的行边界，找不到则最多退/进 cap。
+ *  用最近的行边界（而非优先找空行）——与 splitByParagraphs 的「按 \n 分块」定义一致，避免扩边跨过单元分隔符。 */
+function blockStartAt(text, pos, cap) {
+  const floor = Math.max(0, pos - cap);
+  const seg = text.slice(floor, pos);
+  const j = seg.lastIndexOf("\n");
+  return j >= 0 ? floor + j + 1 : floor;
+}
+function blockEndAt(text, pos, cap) {
+  const ceil = Math.min(text.length, pos + cap);
+  const seg = text.slice(pos, ceil);
+  const j = seg.indexOf("\n");
+  return j >= 0 ? pos + j : ceil;
+}
+
+/**
+ * 为节点证据补偏移（§3.1 前置）：返回带 matchStart/matchEnd/positionAmbiguous 的证据数组。
+ * 与 validateMapStructure 内的逻辑同源（同一 locateEvidence 裁决），供 section 层在正式校验前就拿到偏移，
+ * 从而能在深挖之前算出各节点的 sourceSpans。
+ */
+function locateNodeEvidence(node, textByUnit) {
+  const anchors = Array.isArray(node && node.unitAnchors) ? node.unitAnchors.map(String) : [];
+  const out = [];
+  for (const e of Array.isArray(node && node.evidence) ? node.evidence : []) {
+    const quote = typeof e?.quote === "string" ? e.quote.trim() : "";
+    if (!quote) continue;
+    const declared = typeof e?.unitAnchor === "string" && anchors.includes(e.unitAnchor) ? e.unitAnchor : null;
+    const candidates = declared ? [declared] : anchors;
+    let located = null;
+    for (const a of candidates) {
+      const host = (textByUnit && textByUnit.get(a)) || "";
+      const r = locateEvidence(host, quote, typeof e?.startOffset === "number" ? e.startOffset : undefined);
+      if (r.status === "accept") {
+        located = { ...r, unitAnchor: a };
+        break;
+      }
+      if (r.status === "ambiguous" && !located) located = { ...r, unitAnchor: a };
+    }
+    if (located) out.push({ ...e, quote, unitAnchor: located.unitAnchor, matchStart: located.matchStart, matchEnd: located.matchEnd, positionAmbiguous: located.status === "ambiguous" });
+  }
+  return out;
+}
+
+/**
+ * §3.1 evidence → sourceSpans（纯函数，零 AI 决策）：
+ * ① 候选（evidence 命中区间）→ ② 聚类（间隔 ≤ clusterGap 合并）→ ③ 扩边（到段落边界，单侧 ≤ contextCap）
+ * → ④ 钳制（与 parentSpans 求交；交集为空记 conflict 并丢弃）→ ⑤ 规范化
+ * 限定：evidence 只是**锚点**，不是作用域的完整定义——覆盖完整性由 residualSpans 的 gap-fill 兜底（§3.2）。
+ * @returns { spans, conflicts, candidates, skipped }
+ */
+function deriveSourceSpans(opts) {
+  const o = opts || {};
+  const linear = o.linear;
+  const evidence = Array.isArray(o.evidence) ? o.evidence : [];
+  const clusterGap = Number.isFinite(o.clusterGap) ? o.clusterGap : 400;
+  const contextCap = Number.isFinite(o.contextCap) ? o.contextCap : 1500;
+  const parentSpans = o.parentSpans ? normalizeSpans(o.parentSpans) : null;
+  const candidates = [];
+  let skipped = 0;
+  for (const ev of evidence) {
+    const sp = evidenceSpanOf(linear, ev);
+    if (!sp) {
+      skipped += 1;
+      continue;
+    }
+    candidates.push(sp);
+  }
+  if (!candidates.length) return { spans: [], conflicts: 0, candidates: 0, skipped };
+  // ② 聚类
+  const clusters = [];
+  for (const [s, e] of normalizeSpans(candidates)) {
+    const last = clusters[clusters.length - 1];
+    if (last && s - last[1] <= clusterGap) last[1] = e;
+    else clusters.push([s, e]);
+  }
+  // ③′ 先按父范围裁剪候选（v48.12 P0 修复）：扩边必须发生在父范围之内，
+  //     否则「落在父范围之外的证据」会在扩边时长进父区间、再被钳制成父的整段——
+  //     把本应判为 scopeConflict 的情况伪造成合法归属（极端情况下子节点可"拥有"整篇材料）。
+  let pre = clusters;
+  if (parentSpans && parentSpans.length) {
+    pre = [];
+    for (const [s, e] of clusters) {
+      const inter = intersectSpans([[s, e]], parentSpans);
+      if (!inter.length) continue; // 该簇完全在父范围外：交给下方冲突计数
+      pre.push(...inter);
+    }
+    if (!pre.length) return { spans: [], conflicts: clusters.length, candidates: candidates.length, skipped };
+  }
+  // ④ 扩边（逐簇；扩边只能在**包含该簇的父区间内**进行——否则会把父区间的其他段一并吞进来）
+  const text = String(linear.text || "");
+  const expanded = pre.map(([s, e]) => {
+    let lo = 0;
+    let hi = text.length;
+    if (parentSpans && parentSpans.length) {
+      const host = parentSpans.find(([ps, pe]) => ps <= s && e <= pe);
+      if (host) {
+        lo = host[0];
+        hi = host[1];
+      }
+    }
+    const s2 = Math.max(lo, blockStartAt(text, s, contextCap));
+    const e2 = Math.min(hi, Math.max(s2, blockEndAt(text, e, contextCap)));
+    return [s2, e2];
+  });
+  // ⑤ 钳制（防父级泄漏：子节点作用域必须落在父作用域内；含扩边后的二次裁剪）
+  let conflicts = 0;
+  let kept = expanded;
+  if (parentSpans && parentSpans.length) {
+    kept = [];
+    for (const sp of expanded) {
+      const inter = intersectSpans([sp], parentSpans);
+      if (!inter.length) conflicts += 1;
+      else kept.push(...inter);
+    }
+  }
+  return { spans: normalizeSpans(kept), conflicts, candidates: candidates.length, skipped };
+}
+
+/** §3.3 单区间切分阶梯：段落 → 句 → 硬切（硬切带重叠）。只为限制单次 payload，绝不丢内容。 */
+function splitIntervalForPayload(linear, start, end, maxChars, hardOverlap) {
+  const text = String(linear.text || "");
+  const cap = Math.max(1, Number(maxChars) || 6000);
+  const overlap = Math.max(0, Number.isFinite(hardOverlap) ? hardOverlap : 200);
+  const out = [];
+  // 行块切分（与 splitByParagraphs 同一套「按 \n 分块」的边界定义）
+  const push = (s, e, hard) => {
+    if (e > s) out.push({ start: s, end: e, text: text.slice(s, e), hard: !!hard });
+  };
+  const blocks = [];
+  let pos = start;
+  while (pos < end) {
+    const nl = text.indexOf("\n", pos);
+    const e = nl < 0 || nl > end ? end : nl;
+    if (e > pos) blocks.push([pos, e]);
+    pos = e + 1;
+  }
+  let curStart = -1;
+  let curEnd = -1;
+  const flush = () => {
+    if (curStart >= 0) push(curStart, curEnd, false);
+    curStart = -1;
+    curEnd = -1;
+  };
+  for (const [bs, be] of blocks) {
+    const len = be - bs;
+    if (len > cap) {
+      flush();
+      // 句边界切分
+      const seg = text.slice(bs, be);
+      let p = 0;
+      let acc = -1;
+      let accEnd = -1;
+      const flushSent = () => {
+        if (acc >= 0) push(acc, accEnd, false);
+        acc = -1;
+        accEnd = -1;
+      };
+      while (p < seg.length) {
+        const m = /[。！？；!?;…]/g;
+        m.lastIndex = p;
+        const hit = m.exec(seg);
+        const stop = hit ? hit.index + 1 : seg.length;
+        if (acc < 0) {
+          acc = bs + p;
+          accEnd = bs + stop;
+        } else if (bs + stop - acc > cap) {
+          flushSent();
+          acc = bs + p;
+          accEnd = bs + stop;
+        } else {
+          accEnd = bs + stop;
+        }
+        p = stop;
+        if (bs + p >= be) break;
+      }
+      flushSent();
+      // 仍超限的单句 → 硬切（带重叠，保证跨边界结构至少被某一片完整看到）
+      const pieces = out.filter((x) => x.end > bs && x.start < be && x.end - x.start > cap);
+      for (const piece of pieces) {
+        const keep = out.filter((x) => x !== piece);
+        out.length = 0;
+        out.push(...keep);
+        let s = piece.start;
+        while (s < piece.end) {
+          const e = Math.min(piece.end, s + cap);
+          push(s, e, true);
+          if (e >= piece.end) break;
+          s = Math.max(s + 1, e - overlap);
+        }
+      }
+      continue;
+    }
+    if (curStart < 0) {
+      curStart = bs;
+      curEnd = be;
+      continue;
+    }
+    if (be - curStart > cap) {
+      flush();
+      curStart = bs;
+      curEnd = be;
+    } else {
+      curEnd = be;
+    }
+  }
+  flush();
+  // 连续性收尾：行块迭代会跳过空行分隔符——把每个 shard 的末端补齐到下一片的起点，
+  // 保证「切分只切不删、并集 = 原区间」（§3.3）。
+  const ordered = out.slice().sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 0; i < ordered.length - 1; i++) {
+    if (ordered[i].end < ordered[i + 1].start) {
+      ordered[i].end = ordered[i + 1].start;
+      ordered[i].text = text.slice(ordered[i].start, ordered[i].end);
+    }
+  }
+  return ordered;
+}
+
+/** §3.3 对 span 集合做 payload 切分：返回多个 shard，每个 shard 是单一区间且 ≤ maxChars（硬切例外，带重叠） */
+function splitSpansForPayload(spans, linear, maxChars, hardOverlap) {
+  const out = [];
+  for (const [s, e] of normalizeSpans(spans)) {
+    out.push(...splitIntervalForPayload(linear, s, e, maxChars, hardOverlap));
+  }
+  return out;
+}
+
+/** §3.2 残余：父 span 集合 − 所有子节点 span 集合 */
+function residualSpans(parentSpans, childSpanLists) {
+  const cuts = [];
+  for (const list of childSpanLists || []) cuts.push(...(list || []));
+  return subtractSpans(parentSpans, cuts);
+}
+
 // ---------- 结构 JSON 本地校验（§4.19-6：校验先于一切 AI 评审） ----------
 
 /**
@@ -712,5 +1074,21 @@ module.exports = {
   validateMapStructure,
   remapNodes,
   deriveStructureSummary,
-  computeMapMetrics
+  computeMapMetrics,
+  // v48.11 坐标系统与 sourceSpans（D44）
+  LINEARIZATION_VERSION,
+  LINEARIZATION_SEPARATOR,
+  buildLinearization,
+  linearUnitIndexOf,
+  spanOfUnitRange,
+  normalizeSpans,
+  intersectSpans,
+  subtractSpans,
+  spanLengthOf,
+  spanTextOf,
+  evidenceSpanOf,
+  deriveSourceSpans,
+  splitSpansForPayload,
+  residualSpans,
+  locateNodeEvidence
 };

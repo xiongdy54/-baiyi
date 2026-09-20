@@ -17,6 +17,8 @@ import { installJournalBridge, shortcutsApi } from "./lib/journal";
 import { installInsightBridge } from "./lib/insight";
 import { installMemoryBridge } from "./lib/memory";
 import { installMindmapBridge } from "./lib/mindmap";
+import { installActivityStore } from "./lib/activity";
+import { BackgroundActivity } from "./components/BackgroundActivity";
 import { readingWorkflow } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
@@ -37,6 +39,10 @@ type View =
       book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" };
       jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } };
       returnTo?: "review" | "queue" | "browse";
+      /** v48.13（P2）：从右下角指示器「打开导图」进入时置位——Reader 挂载后自动打开导图工作区 */
+      openMindmap?: boolean;
+      /** v48.13（P2）：要展示的导图版本（候选版本——按发布模型不激活，但用户点了就该看到它） */
+      openMindmapMapId?: string | null;
     }
   | { name: "queue" }
   | { name: "review" }
@@ -108,6 +114,8 @@ export default function App() {
     installInsightBridge();
     installMemoryBridge();
     installMindmapBridge(); // v48.9：导图生成进度桥（批3 遗漏——进度曾永远停在初始值）
+    // v48.13（P2）：导图广播 → 全局活动状态（右下角指示器的唯一数据源；与所在界面无关）
+    installActivityStore();
     return shortcutsApi.onOpenAddMaterial(() => setAddMaterialOpen(true));
   }, []);
 
@@ -197,6 +205,24 @@ export default function App() {
   }, [loadReaderBook]);
 
   const backToShelf = useCallback(() => setView({ name: "shelf" }), []);
+
+  // v48.13（P2）：右下角指示器「打开导图」——已在读该材料则就地打开工作区，
+  // 否则先按 documentId 找回书架条目、载入内核，再带 openMindmap 标记进入（Reader 挂载后自动打开）。
+  const openMaterialMap = useCallback(
+    async (documentId: string, mapId?: string | null) => {
+      if (view.name === "reader" && view.doc.documentId === documentId) {
+        setView({ ...view, openMindmap: true, openMindmapMapId: mapId ?? null });
+        return;
+      }
+      const itemId = await libraryApi.getItemIdByDocumentId(documentId);
+      if (!itemId) return;
+      const doc = await libraryApi.getDocument(itemId);
+      if (!doc) return;
+      const book = await loadReaderBook(itemId, doc);
+      setView({ name: "reader", itemId, doc, book, openMindmap: true, openMindmapMapId: mapId ?? null });
+    },
+    [view, loadReaderBook]
+  );
 
   const handleExtract = useCallback(
     async (text: string) => {
@@ -323,6 +349,9 @@ export default function App() {
         // 跳转进入（jumpAnchor 存在）时不传 onProgress：Reader 的滚动/卸载保存全部失效，
         // 阅读进度与阅读字数保持上次真实阅读的值（v19 现场查看语义）
         onProgress={view.jumpAnchor ? undefined : handleDocProgress}
+        openMindmapInitially={Boolean(view.openMindmap)}
+        openMindmapMapId={view.openMindmapMapId ?? null}
+        onMindmapOpened={() => setView((v) => (v.name === "reader" ? { ...v, openMindmap: false } : v))}
       />
     );
   } else if (view.name === "queue") {
@@ -423,6 +452,8 @@ export default function App() {
         </div>
       </header>
       {mainContent}
+      {/* v48.13（P2）：全局后台活动指示器——生成任务在主进程持有，与当前界面无关 */}
+      <BackgroundActivity onOpenMap={(documentId, mapId) => void openMaterialMap(documentId, mapId)} />
       {addMaterialOpen && (
         <AddBookModal
           onSave={async (title, markdown, lang) => {

@@ -8,7 +8,7 @@ import DOMPurify from "dompurify";
 import { buildMapSvg } from "../lib/mindmap/render";
 import { layoutMap, type MapNodeLike } from "../lib/mindmap/layout";
 import type { MapStructure, MapNodeRecord, MapPreview, MaterialMapMeta, MapIssue } from "../lib/mindmap";
-import { mindmapApi } from "../lib/mindmap";
+import { mindmapApi, buildStructureCardPackage } from "../lib/mindmap";
 import { eventBus } from "../lib/eventbus";
 
 const GRANULARITY_OPTIONS = [
@@ -17,7 +17,17 @@ const GRANULARITY_OPTIONS = [
   { value: "detailed", label: "详细" }
 ] as const;
 
-type Phase = "loading" | "collecting" | "unsupported" | "empty" | "preview" | "running" | "done" | "failed" | "review_failed";
+type Phase =
+  | "loading"
+  | "collecting"
+  | "unsupported"
+  | "empty"
+  | "preview"
+  | "running"
+  | "section_ready"
+  | "done"
+  | "failed"
+  | "review_failed";
 
 interface MindmapWorkspaceProps {
   kernel: import("../lib/reader/kernel").ReaderKernel;
@@ -26,6 +36,12 @@ interface MindmapWorkspaceProps {
   onBack: () => void;
   /** 就此制卡（批C：结构制卡——section=结构语义包，走 card-structure 分支；未提供时按钮隐藏） */
   onMakeCardsFromNode?: (payload: { nodeId: string; label: string; section: string; focus: string; unitAnchors: string[] }) => void;
+  /**
+   * v48.13（P2）：从全局指示器打开时指定要展示的版本 id。
+   * 用于「候选版本」——它按发布模型不激活（旧图仍是 published），但用户点了「打开导图」就该看到
+   * 刚生成的那一版，而不是被迫先看旧图再手动切换。**只切展示，不改 active**。
+   */
+  initialMapId?: string | null;
 }
 
 function resolveTheme() {
@@ -44,7 +60,7 @@ function resolveTheme() {
   };
 }
 
-export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCardsFromNode }: MindmapWorkspaceProps) {
+export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCardsFromNode, initialMapId }: MindmapWorkspaceProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [collect, setCollect] = useState<{ tocItems: { anchor: string; label: string; children?: unknown[] }[]; unitAnchors: string[]; textByUnit: Record<string, string> } | null>(null);
   const [collectMsg, setCollectMsg] = useState("");
@@ -59,6 +75,13 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [failText, setFailText] = useState("");
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number; label?: string } | null>(null);
+  // v48.11：run 级预算与账本口径（计划/缓存命中/需发送/实际尝试），以及首波深挖计划与部分完成提示
+  const [budgetInfo, setBudgetInfo] = useState<{ calls: number; budget: number } | null>(null);
+  const [expandPlan, setExpandPlan] = useState<import("../lib/mindmap").MapExpandPlan | null>(null);
+  const [partialNote, setPartialNote] = useState("");
+  const [coverageNote, setCoverageNote] = useState("");
+  const [forceRebuild, setForceRebuild] = useState(false); // v48.12：强制重算（忽略缓存，供前后对比/benchmark）
+  const [mapReady, setMapReady] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState(0);
   const [cancelRequested, setCancelRequested] = useState(false);
   const [nowTick, setNowTick] = useState(Date.now());
@@ -112,9 +135,10 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       unitAnchors: collect.unitAnchors,
       textByUnit: collect.textByUnit,
       scopeAnchor,
-      granularity
+      granularity,
+      force: forceRebuild || undefined
     };
-  }, [collect, documentId, title, scopeAnchor, granularity]);
+  }, [collect, documentId, title, scopeAnchor, granularity, forceRebuild]);
 
   // 挂载：收集 TOC + 逐单元取文（内核实测，无截断）→ 载入 active 图
   useEffect(() => {
@@ -141,23 +165,55 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       const tocItems = flattenToc(kernel.getTOC());
       if (!alive) return;
       setCollect({ tocItems, unitAnchors: anchors.map((a) => a.anchor), textByUnit });
-      const active = await mindmapApi.getActive(documentId, "book");
-      if (!alive) return;
       await refreshVersions();
+      // v48.13（P2）：指定版本优先（候选版本场景）——取不到就退回已发布版本
+      const wanted = initialMapId ? await mindmapApi.get(initialMapId) : null;
+      if (!alive) return;
+      const active = wanted && wanted.structure ? wanted : await mindmapApi.getActive(documentId, "book");
+      if (!alive) return;
       await loadMap(active);
     })();
     return () => {
       alive = false;
     };
-  }, [kernel, documentId, loadMap, refreshVersions]);
+  }, [kernel, documentId, loadMap, refreshVersions, initialMapId]);
 
   // 进度广播（生成中）
   useEffect(() => {
     return eventBus.on("mindmap/changed", (p) => {
-      const payload = p as { runId?: string; stage?: string; done?: number; total?: number; label?: string };
+      const payload = p as {
+        runId?: string;
+        stage?: string;
+        done?: number;
+        total?: number;
+        label?: string;
+        calls?: number;
+        budget?: number;
+        transitionChars?: number;
+        structuralChars?: number;
+        tasks?: number;
+        gapChars?: number;
+      };
+      // v48.12 P1：覆盖审计阶段用「可计算的量」呈现（结构性残余字数 / 补漏处数 / 未处置缺口），禁虚假百分比
+      if (payload.stage === "coverage_audit") {
+        const t = Number(payload.transitionChars) || 0;
+        const st = Number(payload.structuralChars) || 0;
+        const tasks = Number(payload.tasks) || 0;
+        const gap = Number(payload.gapChars) || 0;
+        setCoverageNote(
+          tasks > 0
+            ? `覆盖审计：过渡文本 ${t} 字已忽略 · 结构性残余 ${st} 字 → 发起 ${tasks} 处补漏`
+            : st > 0
+              ? `覆盖审计：结构性残余 ${st} 字（已按策略处置）${gap ? ` · 未处置缺口 ${gap} 字` : ""}`
+              : `覆盖审计：全部原文已进入结构（过渡文本 ${t} 字除外）`
+        );
+      }
       // v48.10：运行中实时捕获 runId（此前只在生成完成后回填 → 运行中点「取消」为 no-op）
       if (payload.runId) setLastRunId(payload.runId);
-      if (phaseRef.current !== "running" && phaseRef.current !== "preview") return;
+      if (typeof payload.calls === "number" && typeof payload.budget === "number") {
+        setBudgetInfo((prev) => ({ calls: Math.max(prev?.calls ?? 0, payload.calls as number), budget: payload.budget as number }));
+      }
+      if (phaseRef.current !== "running" && phaseRef.current !== "preview" && phaseRef.current !== "section_ready") return;
       // v48.9：广播可能只带 label（waiting_model）——数字缺省时保留既有进度，不回退为 0/0
       setProgress((prev) => ({
         done: typeof payload.done === "number" ? payload.done : prev?.done ?? 0,
@@ -186,6 +242,65 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     setPhase("preview");
   };
 
+  /** 结果落界面（v48.11：section_ready / partial 都是一等状态，禁止把部分完成伪装成失败） */
+  const applyResult = async (result: import("../lib/mindmap").MindmapGenerateResult | null | undefined, opts?: { resume?: boolean }) => {
+    if (!result) return;
+    if (result.runId) setLastRunId(result.runId);
+    if (result.status === "completed") {
+      const active = await mindmapApi.getActive(documentId, "book");
+      await refreshVersions();
+      await loadMap(active);
+      setMapReady(true);
+      setPartialNote("");
+      setPhase("done");
+    } else if (result.status === "partial") {
+      // 部分完成：新版本已落库但未激活（不伪装完整）；把它显示出来并明确说明缺口
+      await refreshVersions();
+      if (result.mapId) await loadMap(await mindmapApi.get(result.mapId));
+      setMapReady(true);
+      setPartialNote("导图已生成，部分细节未展开（预算触顶 / 个别分支调用失败 / 仍有未处置的结构性缺口）；可重新生成续跑（已完成部分走缓存）。");
+      setPhase("done");
+    } else if (result.status === "section_ready") {
+      // 首层就绪：立即显示首层结构，随后自动续跑深挖（详细生成是产品承诺；状态全程为「深挖中」而非「完成」）
+      const active = await mindmapApi.getActive(documentId, "book");
+      await refreshVersions();
+      await loadMap(active);
+      setMapReady(true);
+      setExpandPlan(result.expandPlan || null);
+      setPhase("section_ready");
+      if (!opts?.resume && result.runId) {
+        const next = await runDeepen(result.runId);
+        if (next) await applyResult(next, { resume: true });
+        return;
+      }
+    } else if (result.status === "review_failed") {
+      setIssues(result.issues || []);
+      setPhase("review_failed");
+    } else if (result.status === "cancelled") {
+      const active = await mindmapApi.getActive(documentId, "book");
+      await loadMap(active); // 旧图继续可读
+      setPhase(active ? "done" : "empty");
+    } else {
+      setFailText(result.error || `生成失败（${result.code || "unknown"}）`);
+      setPhase("failed");
+    }
+  };
+
+  /** 续跑深挖（同 runId → section 全部命中缓存，零重复计费） */
+  const runDeepen = async (runId: string) => {
+    const params = buildParams();
+    if (!params) return null;
+    setPhase("running");
+    setCancelRequested(false);
+    try {
+      return await mindmapApi.generate({ ...params, resumeRunId: runId });
+    } catch (err) {
+      setFailText(`深挖续跑异常：${err instanceof Error ? err.message : String(err)}`);
+      setPhase("failed");
+      return null;
+    }
+  };
+
   const handleGenerate = async () => {
     const params = buildParams();
     if (!params) return;
@@ -193,30 +308,19 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     setRunStartedAt(Date.now());
     setCancelRequested(false);
     setProgress({ done: 0, total: (preview?.newCalls || 0) + (preview?.fixedCalls || 0) });
+    setExpandPlan(null);
+    setPartialNote("");
+    setMapReady(false);
     let result;
     try {
-      result = await mindmapApi.generate(params);
+      // v48.11（§3.10）：先只跑首层（立即可看），随后自动续跑深挖
+      result = await mindmapApi.generate({ ...params, stopAfterSection: true });
     } catch (err) {
       setFailText(`生成调用异常：${err instanceof Error ? err.message : String(err)}`);
       setPhase("failed");
       return;
     }
-    if (!result) return;
-    if (result.runId) setLastRunId(result.runId);
-    if (result.status === "completed") {
-      const active = await mindmapApi.getActive(documentId, "book");
-      await refreshVersions();
-      await loadMap(active);
-    } else if (result.status === "review_failed") {
-      setIssues(result.issues || []);
-      setPhase("review_failed");
-    } else if (result.status === "cancelled") {
-      const active = await mindmapApi.getActive(documentId, "book");
-      await loadMap(active); // 旧图继续可读
-    } else {
-      setFailText(result.error || `生成失败（${result.code || "unknown"}）`);
-      setPhase("failed");
-    }
+    await applyResult(result);
   };
 
   const handleCancel = async () => {
@@ -457,13 +561,11 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   };
 
   const makeCards = (node: MapNodeRecord) => {
-    if (!onMakeCardsFromNode || !collect || !structure) return;
-    const section = (node.unitAnchors || [])
-      .map((a) => collect.textByUnit[a] || "")
-      .filter(Boolean)
-      .join("\n")
-      .slice(0, 2400);
-    const focus = structure.summaryText || structure.title;
+    // v48.12 修复「就此制卡发全文」：此前 section = collect.textByUnit 拼接的 ≤2400 字章节原文，
+    // 与 card-structure 提示词「你拿不到原文全文，只考作者组织方式」直接矛盾——改发**有界结构语义包**。
+    if (!onMakeCardsFromNode || !structure) return;
+    const section = buildStructureCardPackage(node, structure, 1200);
+    const focus = `结构卡：${node.title}`;
     onMakeCardsFromNode({ nodeId: node.id, label: node.title, section, focus, unitAnchors: node.unitAnchors || [] });
   };
 
@@ -494,14 +596,20 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const statusLine = (() => {
     if (phase === "collecting") return collectMsg || "正在提取原文…";
     if (phase === "loading") return "正在加载…";
-    if (phase === "running") {
+    if (phase === "running" || phase === "section_ready") {
       const elapsed = runStartedAt ? Math.max(0, Math.round((nowTick - runStartedAt) / 1000)) : 0;
       const mm = elapsed >= 60 ? `${Math.floor(elapsed / 60)} 分 ${elapsed % 60} 秒` : `${elapsed} 秒`;
-      const base = progress?.total
-        ? `正在生成 ${progress.done}/${progress.total}${progress.label ? ` · ${progress.label}` : ""}`
-        : "正在等待模型响应…";
-      // v48.8：长材料按段落分片逐片分析，单片通常 1–3 分钟；单调用超 8 分钟自动中止
-      return `${base} · 已等待 ${mm}（长材料已按段落分片，单片约 1–3 分钟；单次调用超 8 分钟将自动中止）`;
+      // v48.11：只报**可计算**的口径（已完成 N 个结构单元 + 预算用量），禁虚假百分比
+      const done = progress?.done ?? 0;
+      const budgetPart = budgetInfo ? ` · 本次预算 ${budgetInfo.calls}/${budgetInfo.budget}` : "";
+      const labelPart = progress?.label ? ` · 当前：${progress.label}` : "";
+      const head =
+        phase === "section_ready"
+          ? `首层结构已就绪（${done} 个结构单元），正在继续详细展开…`
+          : done > 0
+            ? `已完成 ${done} 个结构单元，仍有分支在展开`
+            : "正在等待模型响应…";
+      return `${head}${labelPart}${budgetPart} · 已等待 ${mm}（单次调用超 8 分钟将自动中止；失败会重试，不会静默中断）`;
     }
     return "";
   })();
@@ -577,18 +685,18 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
             }
           }}
         >
-          {phase === "done" && layout ? (
+          {(phase === "done" || mapReady) && layout ? (
             <>
               <div
                 className="mindmap-canvas-inner"
                 style={{ transform: `translate(${view.tx}px, ${view.ty}px) scale(${view.zoom})` }}
                 dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
               />
-              {!selectedId && (
+              {!selectedId && phase === "done" && (
                 <div className="mindmap-canvas-tip">单击节点选中 · 再击展开/收起 · 选中后在右侧「就此制卡」或「跳到正文」</div>
               )}
             </>
-          ) : phase === "done" ? (
+          ) : (phase === "done" || mapReady) ? (
             <div className="mindmap-canvas-hint">此范围暂无可显示的导图。</div>
           ) : phase === "empty" ? (
             <div className="mindmap-empty">
@@ -641,9 +749,25 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                     <li>材料：{title}</li>
                     <li>范围：整份材料</li>
 <li>
-                      缓存命中：{preview.cacheHits || 0} / {preview.callsTotal || 0}（另含终编辑与评审 {preview.fixedCalls || 2} 次，随缓存变动）
+                      计划调用：{(preview.callsTotal || 0) + (preview.fixedCalls || 2)}（首层结构分析 {preview.callsTotal || 0} + 终编辑与评审 {preview.fixedCalls || 2}）
                     </li>
-                    <li>预计新调用：{preview.newCalls || 0} + {preview.fixedCalls || 2}</li>
+                    <li>缓存命中：{preview.cacheHits || 0}</li>
+                    <li>需发送：{(preview.newCalls || 0) + (preview.fixedCalls || 2)}</li>
+                    <li>
+                      详细展开（深挖）：首层完成后**精确**给出首波计划；总调用上限＝本次预算 {preview.budget || 300}（全局预算，含 section/深挖/补漏/归并/评审）
+                    </li>
+                    <li>
+                      当前策略：批量深挖 {preview.strategy?.expandBatch ?? 1} 个/次 · 递归深度 {preview.strategy?.expandDepth ?? 1} · 原子启发式{" "}
+                      {preview.strategy?.atomicHeuristic ? "开" : "关"} · 单片上限 {(preview.strategy?.maxPayloadChars ?? 6000).toLocaleString()} 字 · 补漏轮次{" "}
+                      {preview.strategy?.gapFillMaxRounds ?? 2}
+                    </li>
+                    <li className="mindmap-hint">首层完成即先落一版可看的图（状态「深挖中」），深挖按预算继续并可随时中断/续跑。</li>
+                    <li>
+                      <label className="mindmap-hint" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <input type="checkbox" checked={forceRebuild} onChange={(e) => setForceRebuild(e.target.checked)} />
+                        强制重算（忽略缓存与分片复用；用于前后对比/benchmark，所有调用都实发）
+                      </label>
+                    </li>
                     <li>待发送原文字数：{preview.charsExact?.toLocaleString()}（精确）</li>
                     <li>
                       预计 Token：{preview.estInputTokens?.toLocaleString()} 输入 / {preview.estOutputTokens?.toLocaleString()} 输出（估算）
@@ -663,12 +787,25 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                   </button>
                 </section>
               )}
-              {phase === "running" && (
+              {(phase === "running" || phase === "section_ready") && (
                 <section className="mindmap-side-sec">
-                  <h3>生成中</h3>
+                  <h3>{phase === "section_ready" ? "首层已就绪" : "生成中"}</h3>
                   <p className="mindmap-status">{statusLine}</p>
+                  {coverageNote && <p className="mindmap-hint">{coverageNote}</p>}
+                  {expandPlan && (
+                    <>
+                      <p className="mindmap-hint">
+                        首波深挖：{expandPlan.firstWaveNodes} 个结构单元 · 计划调用 {expandPlan.plannedCalls} 次 ·
+                        作用域合计 {expandPlan.spanChars.toLocaleString()} 字（上限 {expandPlan.maxPayloadChars || 6000} 字/次）
+                      </p>
+                      <p className="mindmap-hint">
+                        第 2 层以后按模型判定动态追加；预算 {budgetInfo?.budget ?? preview?.budget ?? 300} 触顶会停为「部分完成」。
+                        当前已完成 {progress?.done ?? 0} 个结构单元。
+                      </p>
+                    </>
+                  )}
                   <button className="btn btn-outline btn-sm mindmap-wide" onClick={handleCancel} disabled={cancelRequested}>
-                    {cancelRequested ? "取消中…" : "取消生成"}
+                    {cancelRequested ? "取消中…" : "停止深挖"}
                   </button>
                 </section>
               )}
@@ -694,6 +831,12 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
               )}
               {phase === "done" && structure && (
                 <>
+                  {partialNote && (
+                    <section className="mindmap-side-sec">
+                      <h3>部分完成</h3>
+                      <p className="mindmap-hint">{partialNote}</p>
+                    </section>
+                  )}
                   <section className="mindmap-side-sec">
                     <h3>节点搜索</h3>
                     <input

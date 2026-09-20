@@ -77,6 +77,15 @@ export interface MapPreview {
   hasPricing?: boolean;
   provider?: string;
   model?: string;
+  /** v48.12：当前生效的深挖策略（batch/递归深度/原子启发式/单片上限/补漏轮次） */
+  strategy?: {
+    expandBatch: number;
+    expandDepth: number;
+    atomicHeuristic: boolean;
+    maxPayloadChars: number;
+    gapFillMaxRounds: number;
+    gapMinChars: number;
+  };
 }
 
 export interface MapRunRecord {
@@ -108,8 +117,27 @@ export interface MapIssue {
   note?: string;
 }
 
+/** 首波深挖计划（v48.11 §3.9 阶段 B：首层完成后**精确**给出的第 1 层计划） */
+export interface MapExpandPlan {
+  firstWaveNodes: number;
+  plannedCalls: number;
+  spanChars: number;
+  maxPayloadChars?: number;
+  expandDepth?: number;
+}
+
 export interface MindmapGenerateResult {
-  status: "completed" | "cancelled" | "failed" | "review_failed" | "failed_final" | "invalid";
+  // v48.11：新增 section_ready（首层就绪、深挖待续跑）与 partial（部分完成，含预算/失败归因）
+  status:
+    | "completed"
+    | "section_ready"
+    | "partial"
+    | "cancelled"
+    | "failed"
+    | "review_failed"
+    | "failed_final"
+    | "invalid";
+  expandPlan?: MapExpandPlan;
   mapId?: string;
   nodeCount?: number;
   code?: string;
@@ -130,6 +158,58 @@ export interface MindmapCollectParams {
   scopeAnchor: string;
   granularity: "overview" | "standard" | "detailed";
   force?: boolean;
+  /** v48.11：只跑首层（首层就绪即落一版可看的图），深挖作为可续跑的第二阶段 */
+  stopAfterSection?: boolean;
+  /** v48.11：以同一个 run 续跑（section 全部命中缓存，从深挖继续） */
+  resumeRunId?: string;
+}
+
+/**
+ * v48.12 修复「就此制卡发全文」：按 §4.19-10 组装**有界结构语义包**
+ * （本节点 → 父链 → 直接子结构 → 节点证据引文 → 材料级结构摘要，≤maxChars，**不携带章节原文**）。
+ * card-structure 提示词的【输入块】契约就是本包；此前误把 collect.textByUnit 的原文当材料发出去，
+ * 与提示词「你拿不到原文全文」直接矛盾，且把成本推高到 2400+1200 字。
+ */
+export function buildStructureCardPackage(node: MapNodeRecord, structure: MapStructure, maxChars = 1200): string {
+  const byId = new Map((structure?.nodes || []).map((n) => [n.id, n]));
+  const chain: string[] = [];
+  let cur: MapNodeRecord | undefined = node.parentId ? byId.get(node.parentId) : undefined;
+  const guard = new Set<string>([node.id]);
+  while (cur && !guard.has(cur.id)) {
+    guard.add(cur.id);
+    chain.unshift(`${cur.title}${cur.authorialRole ? `（${cur.authorialRole}）` : ""}`);
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  const kids = (node.childIds || [])
+    .map((id) => byId.get(id))
+    .filter((k): k is MapNodeRecord => Boolean(k))
+    .map((k) => ({ title: k.title, authorialRole: k.authorialRole || null, relationToParent: k.relationToParent || null }));
+  const pkg: Record<string, unknown> = {
+    本节点: {
+      title: node.title,
+      authorialRole: node.authorialRole || null,
+      centralQuestion: node.centralQuestion ?? null,
+      mainMove: node.mainMove ?? null,
+      progression: node.progression ?? null,
+      relationToParent: node.relationToParent ?? null,
+      groupingBasis: node.groupingBasis ?? null
+    },
+    父链: chain,
+    直接子结构: kids,
+    证据引文: (node.evidence || []).map((e) => e.quote).filter(Boolean).slice(0, 6),
+    材料级结构摘要: structure?.summaryText || structure?.title || ""
+  };
+  let text = `【结构语义包】
+${JSON.stringify(pkg, null, 1)}`;
+  if (text.length > maxChars) {
+    // 有界优先砍「摘要 → 证据条数」，**绝不回退去塞原文**
+    pkg.证据引文 = (pkg.证据引文 as string[]).slice(0, 3);
+    pkg.材料级结构摘要 = String(pkg.材料级结构摘要).slice(0, 240);
+    text = `【结构语义包】
+${JSON.stringify(pkg, null, 1)}`;
+    if (text.length > maxChars) text = text.slice(0, maxChars);
+  }
+  return text;
 }
 
 declare global {

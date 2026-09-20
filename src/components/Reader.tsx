@@ -64,6 +64,12 @@ interface Props {
   onProgress?: (ratio: number, lastText: string, extra?: { cfi?: string; fraction?: number; pageIndex?: number }) => void;
   /** 阅读主题联动整个软件（v20.1）：暗夜→软件夜间模式，纸白/羊皮→浅色 */
   onSwitchAppTheme?: (mode: "light" | "dark") => void;
+  /** v48.13（P2）：由全局活动指示器「打开导图」进入时置位——挂载后自动打开导图工作区 */
+  openMindmapInitially?: boolean;
+  /** 消费后通知 App 清除标记（避免返回正文再进出时重复弹出） */
+  onMindmapOpened?: () => void;
+  /** v48.13（P2）：要展示的导图版本 id（候选版本——不激活但仍应被看到） */
+  openMindmapMapId?: string | null;
 }
 
 type SelectionAction = "manual" | "ai-cards" | null;
@@ -149,7 +155,10 @@ export default function Reader({
   sourceTitle,
   onBack,
   onProgress,
-  onSwitchAppTheme
+  onSwitchAppTheme,
+  openMindmapInitially,
+  onMindmapOpened,
+  openMindmapMapId
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
@@ -175,6 +184,12 @@ export default function Reader({
   const [focusBusy, setFocusBusy] = useState(false);
   // v48 批3（M15，D42）：全屏导图工作区（挂 Reader 外层的 Overlay，内核保活 → 返回正文天然原位）
   const [mindmapOpen, setMindmapOpen] = useState(false);
+  // v48.13（P2）：从右下角指示器进入时自动打开（只消费一次；标记即刻回执给 App 清除）
+  useEffect(() => {
+    if (!openMindmapInitially) return;
+    setMindmapOpen(true);
+    onMindmapOpened?.();
+  }, [openMindmapInitially, onMindmapOpened]);
   const [aiPanel, setAiPanel] = useState<{
     kind: "explain" | "cards" | "occlusion";
     text: string;
@@ -1812,6 +1827,7 @@ export default function Reader({
           kernel={kernelRef.current}
           documentId={contextRef.documentId}
           title={title || sourceTitle || "未命名材料"}
+          initialMapId={openMindmapMapId || null}
           onBack={() => setMindmapOpen(false)}
           onMakeCardsFromNode={(payload) => {
             setMindmapOpen(false);

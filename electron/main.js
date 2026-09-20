@@ -1084,7 +1084,7 @@ ipcMain.handle("memory:reset", () => {
 // ============ v48 批2（M15 重做，D41/D42 / §4.19）：材料知识导图编排 ============
 // 主进程编排（memoryTidy 同款偏差——后台多级管线与窗口生命周期解耦）；chat 经 chatStream 直连，
 // usage/cancel/机读错误码随 ai.js 批2 增补统一获得。进度经 mindmap:changed 广播到全部窗口。
-function mindmapChat({ system, user, abortSignal, temperature }) {
+function mindmapChat({ system, user, abortSignal, temperature, retry }) {
   return new Promise((resolve, reject) => {
     let acc = "";
     let settled = false;
@@ -1095,7 +1095,8 @@ function mindmapChat({ system, user, abortSignal, temperature }) {
           { role: "user", content: String(user || "") }
         ],
         temperature: Number(temperature) || 0.3,
-        abortSignal
+        abortSignal,
+        retry
       },
       (m) => {
         if (settled) return;
@@ -1104,7 +1105,8 @@ function mindmapChat({ system, user, abortSignal, temperature }) {
           reject(new Error(m.error));
         } else if (m && m.done) {
           settled = true;
-          resolve({ text: acc, usage: m.usage || null });
+          // v48.11：finishReason（=length ⇒ 输出被截断）随结果上行，供 §3.4 溢出降级判定
+          resolve({ text: acc, usage: m.usage || null, finishReason: m.finishReason || null, ttftMs: m.ttftMs ?? null, firstByteMs: m.firstByteMs ?? null });
         } else if (m && m.delta) {
           acc += m.delta;
         }
@@ -1139,7 +1141,10 @@ const mindmapCtx = () => ({
 });
 
 ipcMain.handle("mindmap:preview", (_e, params) => mindmapEngine.preview(mindmapCtx(), params || {}));
-ipcMain.handle("mindmap:generate", (_e, params) => mindmapEngine.generate(mindmapCtx(), params || {}));
+ipcMain.handle("mindmap:generate", (_e, params) =>
+    // v48.11：resumeRunId 存在时以同一 run 续跑（section 缓存续跑，账本连续）
+    mindmapEngine.generate(mindmapCtx(), params || {}, (params && params.resumeRunId) || undefined)
+  );
 ipcMain.handle("mindmap:cancel", (_e, runId) => {
   mindmapEngine.cancelRun(runId);
   return true;
@@ -1334,6 +1339,14 @@ app.whenReady().then(async () => {
     memoryTidy.startupBackfillIfDue(memoryCtx());
   } catch (err) {
     console.error("[memory] 启动补跑失败：", err);
+  }
+  // v48.11（§3.8）：导图僵尸对账——上次运行被关闭/中断时 run 行会永远停在 running（实测两条），
+  // 启动时统一收敛为 failed_timeout；已完成分片保留在缓存，重新生成自动续跑。失败不阻塞启动。
+  try {
+    const n = dbModule.reconcileStaleMaterialMapRuns();
+    if (n) console.log(`[mindmap] 启动对账：${n} 条未收敛的运行已标记 failed_timeout`);
+  } catch (err) {
+    console.error("[mindmap] 启动对账失败：", err);
   }
   // v45.1：bookasset / pdfres 两协议已上移到 createWindow() 之后立即注册（封面加载竞态修复），此处不再注册。
 

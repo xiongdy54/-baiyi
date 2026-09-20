@@ -144,6 +144,14 @@ try {
   await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
   await wait(400);
 
+  // 4.5 v48.13（P2）：右下角全局活动指示器——**空闲时不得渲染**（常驻空浮窗会干扰阅读）
+  const idleIndicator = await main.eval(`(() => {
+    const el = document.querySelector(".bg-activity");
+    return JSON.stringify({ present: !!el, pillText: el ? (el.querySelector(".bg-activity-text")?.textContent || "") : "" });
+  })()`);
+  const ii = JSON.parse(idleIndicator || "{}");
+  check("无后台任务时右下角指示器不出现（不干扰阅读）", ii.present === false, idleIndicator);
+
   // 5. 会话 1 收尾：经真实 setConfig 写入测试 Key（safeStorage 加密），供会话 2 的 hasKey/生成入口
   const keySet = await main.eval(`(async () => {
     const cfg = await window.aiAPI.setConfig({ apiKey: "FSRSTEST-m15r-gui-key" });

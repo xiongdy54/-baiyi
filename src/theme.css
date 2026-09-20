@@ -3331,3 +3331,118 @@ body.capture-body #root { height: 100vh; }
   color: var(--error);
   border-color: var(--error);
 }
+
+/* ===== v48.13（M15 批 P2）：全局后台活动指示器（右下角）=====
+   定位 = 系统状态标记，不是 AI 助手浮窗：单一 accent、灰阶面、直角、无渐变、
+   全应用唯一允许的 shadow-float、12px metadata、8px 间距基线。
+   默认极小且安静；hover / 键盘 focus 才展开；reduced-motion 下无任何动效。 */
+.bg-activity {
+  position: fixed;
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  z-index: var(--z-toast);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  font-size: var(--fs-meta);
+}
+.bg-activity-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 22px;
+  max-width: 240px;
+  padding: 0 var(--sp-2);
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-meta);
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease);
+}
+.bg-activity-pill:hover { border-color: var(--border-strong); }
+.bg-activity-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 直角方块而非圆点：与全应用「直角是灵魂」一致 */
+.bg-activity-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--text-secondary);
+}
+.bg-activity.tone-busy .bg-activity-dot { background: var(--accent); }
+.bg-activity.tone-done .bg-activity-dot { background: var(--success); }
+.bg-activity.tone-partial .bg-activity-dot,
+.bg-activity.tone-warn .bg-activity-dot { background: var(--warning); }
+.bg-activity.tone-error .bg-activity-dot { background: var(--error); }
+
+.bg-activity-panel {
+  display: none;
+  width: 268px;
+  padding: var(--sp-3);
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-float);
+  color: var(--ink);
+}
+.bg-activity.is-expanded .bg-activity-panel { display: block; }
+.bg-activity-heading {
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+  line-height: 1.35;
+  margin-bottom: var(--sp-2);
+  overflow-wrap: anywhere;
+}
+.bg-activity-detail {
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  margin-bottom: var(--sp-2);
+}
+.bg-activity-bar {
+  height: 2px;
+  background: var(--border-subtle);
+  margin-bottom: var(--sp-3);
+}
+.bg-activity-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+.bg-activity-actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+.bg-activity-btn {
+  padding: var(--sp-1) var(--sp-2);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--fs-meta);
+  line-height: 1.3;
+  cursor: pointer;
+}
+.bg-activity-btn:hover { border-color: var(--border-strong); }
+.bg-activity-btn.is-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+.bg-activity-btn.is-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-activity-pill,
+  .bg-activity-bar > span { transition: none; }
+}

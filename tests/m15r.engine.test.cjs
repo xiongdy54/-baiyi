@@ -77,6 +77,7 @@ app.whenReady().then(async () => {
 
     let fakeChats = [];
     let consumed = 0;
+    let broadcasts = [];
     let testSettings = { app: {} };
     const ctx = {
       db,
@@ -91,7 +92,7 @@ app.whenReady().then(async () => {
         if (item instanceof Error) throw item;
         return { text: JSON.stringify(item), usage: { prompt_tokens: 100, completion_tokens: 50 } };
       },
-      broadcast: () => {}
+      broadcast: (payload) => { broadcasts.push(payload); }
     };
 
     console.log("---- M15R-E1 播种 ----");
@@ -313,16 +314,731 @@ app.whenReady().then(async () => {
           evidence: [{ unitAnchor: "c0.xhtml", quote: "阿那克西曼德提出无定说" }]
         });
       }
-      fakeChats = [...fakesSection, editorialOut, reviewPass];
+      // v48.12 P1：覆盖审计会为「结构性残余」发补漏调用（本夹具各片证据只覆盖片段 → 必然有缺口）。
+      // 这里显式准备补漏响应（返回空 children = 该残余确属过渡/无结构），并断言新口径。
+      const gapReply = { title: "残余片段", expandable: false, stopReason: "atomic_structure", children: [], evidence: [{ unitAnchor: "c0.xhtml", quote: "赫拉克利特主张万物流变" }] };
+      const gapReplies = Array.from({ length: 12 }, () => gapReply);
+      fakeChats = [...fakesSection, ...gapReplies, editorialOut, reviewPass];
       const base15 = consumed;
       const r18 = await engine.generate(ctx, longP);
-      check("分片生成完成（片数调用 + editorial + review）", r18.status === "completed" && consumed - base15 === chunkCount + 2, { status: r18.status, used: consumed - base15, chunks: chunkCount });
+      const used15 = consumed - base15;
+      check("分片生成完成（片数 + 补漏 + editorial + review）", r18.status === "completed" && used15 >= chunkCount + 2, { status: r18.status, used: used15, chunks: chunkCount });
+      check(
+        "P1：覆盖审计产生补漏调用（结构性缺口 ≥ 阈值 → 发调用，而非静默 complete）",
+        used15 > chunkCount + 2,
+        { used: used15, chunks: chunkCount }
+      );
+      const run15 = db.getMaterialMapRun(r18.runId);
+      check(
+        "P1：覆盖审计留痕（transition/structural 分类与残余账）",
+        Boolean(run15.output?.metrics?.coverageAudit) &&
+          Number.isFinite(run15.output.metrics.coverageAudit.transitionChars) &&
+          Number.isFinite(run15.output.metrics.structuralLeftoverChars),
+        run15.output?.metrics
+      );
       const m18 = db.getActiveMaterialMap("doc-e12", "book");
       check("跨片 children 合并（每片子结构均在树）", m18 && m18.structure.nodes.filter((n) => /^片\d+子结构$/.test(n.title)).length === chunkCount, m18 && m18.structure.nodes.map((n) => n.title));
       check("分片各自独立缓存", db.listMaterialMapShards("doc-e12", { run_kind: "section" }).length === chunkCount, db.listMaterialMapShards("doc-e12", { run_kind: "section" }).length);
     }
 
-    console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
+    console.log("---- M15R-E16 v48.11 作用域修复 + 分阶段（sourceSpans / section_ready / 续跑） ----");
+  {
+    // ① 深挖 payload 必须是节点自身作用域：捕获所有调用，断言深挖调用**不含**另一章原文（u1）
+    const captured = [];
+    const origChat = ctx.chat;
+    ctx.chat = async (call) => {
+      captured.push(call);
+      return origChat(call);
+    };
+    const deepOf = () => captured.filter((c) => String(c.user).includes("【深挖】"));
+    // 首层就绪（stopAfterSection）：只跑 section，落一版立即可看的图
+    fakeChats = [sec1, { ...sec2, expandable: true, stopReason: null }];
+    const baseStop = consumed;
+    const rStop = await engine.generate(ctx, { ...paramsFor("doc-e11"), stopAfterSection: true });
+    check("首层就绪：状态 section_ready（≠ completed）", rStop.status === "section_ready", rStop);
+    check("首层就绪：只跑 section（未消耗深挖/归并调用）", consumed - baseStop === 2, { used: consumed - baseStop });
+    check(
+      "首层就绪：精确首波计划（节点数与计划调用数 ≥1）",
+      rStop.expandPlan && rStop.expandPlan.firstWaveNodes >= 1 && rStop.expandPlan.plannedCalls >= 1,
+      rStop.expandPlan
+    );
+    check("首层就绪：版本立即激活（用户马上能看到图）", Boolean(db.getActiveMaterialMap("doc-e11", "book")), "");
+    check(
+      "首层就绪：completeness 留痕 section_ready（不伪装完成）",
+      String((db.getMaterialMapRun(rStop.runId).output || {}).completeness) === "section_ready",
+      (db.getMaterialMapRun(rStop.runId).output || {}).completeness
+    );
+    // ② 续跑：同一 params + 同 runId → section 全部命中缓存（零重复计费），只有深挖/归并/终编辑/评审是新的
+    const baseResume = consumed;
+    fakeChats = [
+      { ...expOut, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }] },
+      globalOut,
+      editorialOut,
+      reviewPass
+    ];
+    const rResume = await engine.generate(ctx, paramsFor("doc-e11"), rStop.runId);
+    check("续跑完成（section 缓存续跑 → 完整图）", rResume.status === "completed", { s: rResume.status, err: rResume.error });
+    check("续跑不重发 section（4 次 = 深挖+global+editorial+review）", consumed - baseResume === 4, { used: consumed - baseResume });
+    const deeps = deepOf();
+    check("深挖调用被捕获（≥1 次）", deeps.length >= 1, deeps.length);
+    const dUser = deeps.length ? String(deeps[0].user) : "";
+    check("深挖 payload < 6000 字符（单次 request 上限）", dUser.length > 0 && dUser.length < 6000, dUser.length);
+    check(
+      "深挖 payload 不含父级/整本原文（u1 原文逐字不出现）",
+      dUser.length > 0 && !dUser.includes("知识是经过检验的信念") && !dUser.includes("这里给出定义"),
+      dUser.slice(0, 200)
+    );
+    check("深挖 payload 只含节点自身作用域（u2 原文逐字出现）", dUser.includes("这个定义解释了记忆的机制"), dUser.slice(0, 200));
+    check(
+      "深挖 payload 声明作用域片段并禁止越界（含【原文片段】与作用域指令）",
+      dUser.includes("【原文片段") && dUser.includes("原文作用域"),
+      dUser.slice(0, 160)
+    );
+    ctx.chat = origChat;
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E17 v48.11 并发（同层并行 / 失败隔离） ----");
+  {
+    // 两个互不依赖的首波作业：每章一个「无子叶且 expandable」的节点；concurrency=2 → 同批并行
+    const leafA = { title: "定义句", authorialRole: "introduce", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: true, stopReason: null };
+    const leafB = { title: "机制句", authorialRole: "cause_effect", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: true, stopReason: null };
+    const secE12a = { ...sec1, expandable: false, stopReason: "atomic_structure", children: [leafA] };
+    const secE12b = { ...sec2, expandable: false, stopReason: "atomic_structure", children: [leafB] };
+    const expA = { title: "A 的细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "A1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    const expB = { title: "B 的细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "B1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    testSettings = { app: { mindmapConcurrency: 2 } };
+    fakeChats = [secE12a, secE12b, expA, expB, globalOut, editorialOut, reviewPass];
+    const baseC = consumed;
+    const rC = await engine.generate(ctx, paramsFor("doc-e12"));
+    check("并发=2 生成完成（并行批次不丢更新）", rC.status === "completed" && consumed - baseC === 7, { s: rC.status, used: consumed - baseC, err: rC.error });
+    const mC = db.getActiveMaterialMap("doc-e12", "book");
+    const hasBoth = Boolean(mC) && ["A1", "B1"].every((t) => mC.structure.nodes.some((n) => n.title === t));
+    check("两个并行作业的产物都在树（A1 / B1）", hasBoth, mC ? mC.structure.nodes.map((n) => n.title) : null);
+
+    // 失败隔离：第一个深挖作业抛网络错 → 不杀整批；同批第二个照常完成；整轮降级 partial（不伪装完整）
+    testSettings = { app: { mindmapConcurrency: 2 } };
+    fakeChats = [
+      () => ({ text: JSON.stringify(secE12a), usage: { prompt_tokens: 10, completion_tokens: 5 } }),
+      () => ({ text: JSON.stringify(secE12b), usage: { prompt_tokens: 10, completion_tokens: 5 } }),
+      () => {
+        throw Object.assign(new Error("模拟网络中断"), { code: "network" });
+      },
+      () => ({ text: JSON.stringify(expB), usage: { prompt_tokens: 10, completion_tokens: 5 } }),
+      globalOut,
+      editorialOut,
+      reviewPass
+    ];
+    const rF = await engine.generate(ctx, { ...paramsFor("doc-e13"), force: true });
+    const runF = db.getMaterialMapRun(rF.runId);
+    check("单作业失败不杀整轮（仍落库）", Boolean(rF.mapId), { s: rF.status, m: rF.mapId, err: rF.error });
+    check("失败 → 状态 partial + 归因留痕 call_failed", runF.status === "partial" && String(runF.output?.completeness) === "partial:call_failed", { st: runF.status, c: runF.output?.completeness });
+    const mapF = rF.mapId ? db.getMaterialMap(rF.mapId) : null;
+    check("失败作业不影响同批作业（B1 在树）", Boolean(mapF) && mapF.structure.nodes.some((n) => n.title === "B1"), mapF ? mapF.structure.nodes.map((n) => n.title) : null);
+    check("metrics 记 jobFailures=1", (runF.output?.metrics?.jobFailures || 0) === 1, runF.output?.metrics?.jobFailures);
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E18 v48.12 P0 测量面（作用域落库 / 覆盖摘要 / 调用日志字段 / 跨阶段账本） ----");
+  {
+    const leafP = { title: "定义句", authorialRole: "introduce", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: true, stopReason: null };
+    const leafQ = { title: "机制句", authorialRole: "cause_effect", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: true, stopReason: null };
+    const secP = { ...sec1, expandable: false, stopReason: "atomic_structure", children: [leafP] };
+    const secQ = { ...sec2, expandable: false, stopReason: "atomic_structure", children: [leafQ] };
+    const expP = { title: "P 细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "P1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    const expQ = { title: "Q 细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "Q1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    testSettings = { app: {} };
+    fakeChats = [secP, secQ, expP, expQ, globalOut, editorialOut, reviewPass];
+    const rP = await engine.generate(ctx, paramsFor("doc-e14"));
+    check("P0：一次性完整运行", rP.status === "completed", { s: rP.status, err: rP.error });
+    const logs = db.listMaterialMapCalls(rP.runId);
+    const expLogs = logs.filter((c) => c.runKind === "expand");
+    check(
+      "P0：expand 调用日志带 depth / parentNodeId",
+      expLogs.length === 2 && expLogs.every((c) => Number.isFinite(c.depth) && Boolean(c.parentNodeId)),
+      expLogs.map((c) => [c.depth, c.parentNodeId])
+    );
+    check(
+      "P0：调用日志带 spanChars 与 wallMs",
+      logs.filter((c) => c.outcome === "completed").every((c) => Number.isFinite(c.wallMs)) &&
+        logs.filter((c) => c.outcome === "completed" && (c.runKind === "section" || c.runKind === "expand")).every((c) => Number.isFinite(c.spanChars) && c.spanChars > 0),
+      logs.map((c) => [c.runKind, c.spanChars, c.wallMs])
+    );
+    check(
+      "P0：调用日志覆盖 section/expand/editorial/review 四类",
+      ["section", "expand", "editorial", "review"].every((k) => logs.some((c) => c.runKind === k)),
+      logs.map((c) => c.runKind)
+    );
+    const runP = db.getMaterialMapRun(rP.runId);
+    check(
+      "P0：账本含 successfulCalls 与 byKind 分类计数",
+      Number(runP.output?.ledger?.successfulCalls) >= 6 && Boolean(runP.output?.ledger?.byKind?.review?.calls),
+      runP.output?.ledger
+    );
+    const mapP = db.getMaterialMap(rP.mapId);
+    const cs = mapP.structure.coverageSummary;
+    check(
+      "P0：结构落库 coverageSummary（三口径 + 未归属字数）",
+      Boolean(cs) &&
+        typeof cs.structureCoverage === "number" &&
+        typeof cs.leafCoverage === "number" &&
+        typeof cs.evidenceTextCoverage === "number" &&
+        Number.isFinite(cs.unassignedChars) &&
+        cs.unassignedChars >= 0,
+      cs
+    );
+    check(
+      "P0：节点落库 sourceSpans（离线审计不再需要反推）",
+      mapP.structure.nodes.filter((n) => Array.isArray(n.sourceSpans) && n.sourceSpans.length).length >= 2,
+      mapP.structure.nodes.map((n) => (n.sourceSpans || []).length)
+    );
+    check(
+      "P0：结构覆盖率口径正确（只计 evidence 推导 span，排除播种的分析范围）",
+      cs && cs.structureCoverage > 0 && cs.structureCoverage < 1,
+      cs
+    );
+
+    // 跨阶段账本：首层 + 续跑两段必须累计到同一个 run
+    fakeChats = [secP, secQ];
+    const rS1 = await engine.generate(ctx, { ...paramsFor("doc-e15"), stopAfterSection: true });
+    check("P0：首层就绪（阶段一）", rS1.status === "section_ready", rS1.status);
+    const ledger1 = db.getMaterialMapRun(rS1.runId).output?.ledger;
+    fakeChats = [expP, expQ, globalOut, editorialOut, reviewPass];
+    const rS2 = await engine.generate(ctx, paramsFor("doc-e15"), rS1.runId);
+    const runS2 = db.getMaterialMapRun(rS1.runId);
+    check("P0：续跑完成（阶段二）", rS2.status === "completed", { s: rS2.status, err: rS2.error });
+    check(
+      "P0：跨阶段账本合并（阶段一 2 次 + 阶段二 5 次 = 7）",
+      ledger1 && ledger1.requestedCalls === 2 && runS2.output?.ledger?.requestedCalls === 7,
+      { phase1: ledger1?.requestedCalls, merged: runS2.output?.ledger?.requestedCalls }
+    );
+    check(
+      "P0：callsDone 为跨阶段累计（≥5，且不只最后一次的阶段计数）",
+      Number(runS2.callsDone) >= 5,
+      runS2.callsDone
+    );
+    check(
+      "P0：合并后用量含两段（prompt tokens > 0 且高于单一阶段）",
+      Number(runS2.actualPromptTokens) > 0 && Number(runS2.actualPromptTokens) === Number(runS2.output?.ledger ? runS2.actualPromptTokens : 0),
+      runS2.actualPromptTokens
+    );
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E19 v48.12 P1 覆盖审计（根残余 → 补漏 / 残余只读自身区段 / 轮次用尽 → partial） ----");
+  {
+    const PREFIX = "甲段标记AAAA。" + "甲".repeat(300);
+    const TAIL = "乙段标记BBBB。第一，乙段论述一。第二，乙段论述二。" + "乙".repeat(700);
+    const docText = PREFIX + "\n" + TAIL;
+    const unit = "g.xhtml";
+    const secOut = {
+      title: "单根结构",
+      authorialRole: "introduce",
+      expandable: false,
+      stopReason: "atomic_structure",
+      children: [
+        {
+          title: "前段结构",
+          authorialRole: "introduce",
+          relationToParent: "首段",
+          relationToSiblings: null,
+          evidence: [{ unitAnchor: unit, quote: "甲段标记AAAA", startOffset: 0 }],
+          expandable: false,
+          stopReason: "atomic_structure"
+        }
+      ],
+      evidence: [{ unitAnchor: unit, quote: "甲段标记AAAA", startOffset: 0 }]
+    };
+    const gapOut = {
+      title: "后段结构",
+      authorialRole: "sequence",
+      expandable: false,
+      stopReason: "atomic_structure",
+      children: [
+        {
+          title: "乙段并列结构",
+          authorialRole: "parallel",
+          relationToParent: "后段",
+          relationToSiblings: null,
+          evidence: [{ unitAnchor: unit, quote: "第一，乙段论述一", startOffset: 6 }],
+          expandable: false,
+          stopReason: "atomic_structure"
+        }
+      ],
+      evidence: [{ unitAnchor: unit, quote: "第一，乙段论述一", startOffset: 6 }]
+    };
+    const base = {
+      documentId: "doc-e16",
+      title: "覆盖审计样书",
+      tocItems: [{ anchor: unit, label: "正文" }],
+      unitAnchors: [unit],
+      textByUnit: { [unit]: docText },
+      scopeAnchor: "book",
+      granularity: "detailed"
+    };
+    const captured = [];
+    const origChat19 = ctx.chat;
+    ctx.chat = async (call) => {
+      captured.push(call);
+      return origChat19(call);
+    };
+    testSettings = { app: {} };
+    fakeChats = [secOut, gapOut, editorialOut, reviewPass];
+    const r19 = await engine.generate(ctx, base);
+    check("P1：含补漏的运行完成", r19.status === "completed", { s: r19.status, err: r19.error });
+    const gapCalls = captured.filter((c) => String(c.user).includes("【补漏】"));
+    check("P1：覆盖审计为 root 级结构性残余发起补漏调用", gapCalls.length >= 1, { n: gapCalls.length, used: captured.length });
+    const gapUser = gapCalls.length ? String(gapCalls[0].user) : "";
+    check("P1：补漏 payload 含未覆盖区段（后段）", gapUser.includes("乙段标记BBBB"), gapUser.slice(0, 120));
+    check("P1：补漏 payload 不含已覆盖区段（前段）——残余只读自身区段", !gapUser.includes("甲段标记AAAA"), gapUser.slice(0, 120));
+    const m19 = db.getActiveMaterialMap("doc-e16", "book");
+    check(
+      "P1：补漏产物挂树（乙段并列结构）",
+      Boolean(m19) && m19.structure.nodes.some((n) => n.title === "乙段并列结构"),
+      m19 && m19.structure.nodes.map((n) => n.title)
+    );
+    const run19 = db.getMaterialMapRun(r19.runId);
+    check(
+      "P1：审计留痕 tasks ≥ 1 且 structuralLeftover 已记账",
+      Number(run19.output?.metrics?.coverageAudit?.tasks) >= 1 && Number.isFinite(run19.output?.metrics?.structuralLeftoverChars),
+      run19.output?.metrics
+    );
+
+    // 轮次用尽（maxRounds=0）→ 结构性残余未处置 → 诚实记 partial:coverage_gap
+    testSettings = { app: { mindmapGapFillMaxRounds: 0 } };
+    fakeChats = [secOut, gapOut, editorialOut, reviewPass];
+    const r20 = await engine.generate(ctx, { ...base, documentId: "doc-e17", force: true });
+    const run20 = db.getMaterialMapRun(r20.runId);
+    check(
+      "P1：轮次用尽仍有结构性残余 → partial:coverage_gap（不伪装 complete）",
+      r20.status === "partial" && String(run20.output?.completeness) === "partial:coverage_gap",
+      { s: r20.status, c: run20.output?.completeness, gap: run20.output?.metrics?.coverageGapChars }
+    );
+    check(
+      "P1：缺口字数与段数留痕（>0）",
+      Number(run20.output?.metrics?.coverageGapChars) > 0 && Number(run20.output?.metrics?.coverageGapCount) > 0,
+      run20.output?.metrics?.coverageGapChars
+    );
+    testSettings = { app: {} };
+    ctx.chat = origChat19;
+  }
+
+  console.log("---- M15R-E20 v48.12 P3 批量深挖（碰撞合批 / 逐块回退 / 截断救援） ----");
+  {
+    const u = "b.xhtml";
+    const T1 = "甲行：泰勒斯认为水是万物本原。";
+    const T2 = "乙行：阿那克西曼德提出无定说。";
+    const text = T1 + String.fromCharCode(10) + T2;
+    const mkLeaf = (title, quote) => ({
+      title,
+      authorialRole: "introduce",
+      relationToParent: "并列项",
+      relationToSiblings: null,
+      evidence: [{ unitAnchor: u, quote, startOffset: 0 }],
+      expandable: true,
+      stopReason: null
+    });
+    const Q1 = "泰勒斯认为水是万物本原";
+    const Q2 = "阿那克西曼德提出无定说";
+    const sec = {
+      title: "并列结构",
+      authorialRole: "parallel",
+      expandable: false,
+      stopReason: "atomic_structure",
+      children: [mkLeaf("A项", Q1), mkLeaf("B项", Q1), mkLeaf("C项", Q2)],
+      evidence: [{ unitAnchor: u, quote: Q1, startOffset: 0 }]
+    };
+    const mkExpand = (title, childTitle, quote) => ({
+      title,
+      expandable: false,
+      stopReason: "atomic_structure",
+      children: [
+        {
+          title: childTitle,
+          authorialRole: "sequence",
+          relationToParent: "x",
+          relationToSiblings: null,
+          evidence: [{ unitAnchor: u, quote, startOffset: 0 }],
+          expandable: false,
+          stopReason: "atomic_structure"
+        }
+      ],
+      evidence: [{ unitAnchor: u, quote, startOffset: 0 }]
+    });
+    const baseP = {
+      documentId: "doc-e18",
+      title: "批量样书",
+      tocItems: [{ anchor: u, label: "正文" }],
+      unitAnchors: [u],
+      textByUnit: { [u]: text },
+      scopeAnchor: "book",
+      granularity: "detailed"
+    };
+    const captured = [];
+    const origChat20 = ctx.chat;
+    ctx.chat = async (call) => {
+      captured.push(call);
+      return origChat20(call);
+    };
+
+    // 场景 1：碰撞合批（A/B 同 span → 一批；C 单独）
+    testSettings = { app: { mindmapExpandBatch: 2 } };
+    fakeChats = [
+      sec,
+      { nodes: [mkExpand("A展开", "A1", Q1), mkExpand("B展开", "B1", Q1)] },
+      mkExpand("C展开", "C1", Q2),
+      editorialOut,
+      reviewPass
+    ];
+    const r20 = await engine.generate(ctx, baseP);
+    check("P3：批量运行完成", r20.status === "completed", { s: r20.status, err: r20.error });
+    const batchCalls = captured.filter((c) => String(c.user).includes("【批量说明】"));
+    check("P3：碰撞节点合成一次批量调用（A/B 同 span）", batchCalls.length === 1, { n: batchCalls.length, used: captured.length });
+    const bu = batchCalls.length ? String(batchCalls[0].user) : "";
+    check(
+      "P3：批量 payload 为每成员独立块且含两成员标题",
+      bu.includes("【深挖·节点 1/2】") && bu.includes("【深挖·节点 2/2】") && bu.includes("A项") && bu.includes("B项"),
+      bu.slice(0, 200)
+    );
+    const m20 = db.getActiveMaterialMap("doc-e18", "book");
+    const titles20 = m20 ? m20.structure.nodes.map((n) => n.title) : [];
+    check("P3：批内两成员的子结构都挂树（A1 / B1）", titles20.includes("A1") && titles20.includes("B1"), titles20);
+    check("P3：批外成员照常单独调用（C1）", titles20.includes("C1"), titles20);
+    const run20 = db.getMaterialMapRun(r20.runId);
+    check(
+      "P3：批量计数留痕（batchCalls=1 / batchMembers=2 / 回退=0）",
+      Number(run20.output?.metrics?.batchCalls) === 1 &&
+        Number(run20.output?.metrics?.batchMembers) === 2 &&
+        Number(run20.output?.metrics?.batchFallbacks || 0) === 0,
+      run20.output?.metrics
+    );
+
+    // 场景 2：批量响应缺一个成员 → 仅缺失成员逐块回退（不回退整批）
+    testSettings = { app: { mindmapExpandBatch: 2 } };
+    fakeChats = [
+      sec,
+      { nodes: [mkExpand("A展开", "A2", Q1)] },
+      mkExpand("B展开", "B2", Q1),
+      mkExpand("C展开", "C2", Q2),
+      editorialOut,
+      reviewPass
+    ];
+    const r21 = await engine.generate(ctx, { ...baseP, documentId: "doc-e19" });
+    const run21 = db.getMaterialMapRun(r21.runId);
+    const m21 = db.getActiveMaterialMap("doc-e19", "book");
+    const titles21 = m21 ? m21.structure.nodes.map((n) => n.title) : [];
+    check("P3：批量缺项时缺失成员逐块回退（回退计数=1）", Number(run21.output?.metrics?.batchFallbacks) === 1, run21.output?.metrics);
+    check("P3：回退后缺失成员仍产出子结构（A2 与 B2 都在树）", titles21.includes("A2") && titles21.includes("B2"), titles21);
+
+    // 场景 3：批量响应被截断（finish_reason=length）→ 救援已完整项 + 缺失项回退
+    testSettings = { app: { mindmapExpandBatch: 2 } };
+    const truncatedText = '{"nodes":[' + JSON.stringify(mkExpand("A展开", "A3", Q1)) + ',{"title":"B展开","expandable":fal';
+    fakeChats = [
+      sec,
+      () => ({ text: truncatedText, usage: { prompt_tokens: 10, completion_tokens: 5 }, finishReason: "length" }),
+      mkExpand("B展开", "B3", Q1),
+      mkExpand("C展开", "C3", Q2),
+      editorialOut,
+      reviewPass
+    ];
+    const r22 = await engine.generate(ctx, { ...baseP, documentId: "doc-e20" });
+    const run22 = db.getMaterialMapRun(r22.runId);
+    const m22 = db.getActiveMaterialMap("doc-e20", "book");
+    const titles22 = m22 ? m22.structure.nodes.map((n) => n.title) : [];
+    check("P3：截断响应被救援（已完整项 A3 采用）", titles22.includes("A3"), titles22);
+    check(
+      "P3：截断后缺失项回退成功（B3 在树）且回退计数=1",
+      titles22.includes("B3") && Number(run22.output?.metrics?.batchFallbacks) === 1,
+      { t: titles22, f: run22.output?.metrics?.batchFallbacks }
+    );
+    check("P3：溢出计数留痕（outputOverflow ≥1）", Number(run22.output?.metrics?.outputOverflow || 0) >= 1, run22.output?.metrics?.outputOverflow);
+    testSettings = { app: {} };
+    ctx.chat = origChat20;
+  }
+
+  console.log("---- M15R-E21 v48.12 P4 有界递归（depth=2 落地嵌套子树；depth=1 保持单层） ----");
+  {
+    const u = "r.xhtml";
+    const Q1 = "泰勒斯认为水是万物本原";
+    const Q2 = "阿那克西曼德提出无定说";
+    const text = "甲行：" + Q1 + "。" + String.fromCharCode(10) + "乙行：" + Q2 + "。";
+    const sec = {
+      title: "单根结构",
+      authorialRole: "introduce",
+      expandable: false,
+      stopReason: "atomic_structure",
+      children: [
+        {
+          title: "本原追问",
+          authorialRole: "decompose",
+          relationToParent: "首层",
+          relationToSiblings: null,
+          evidence: [{ unitAnchor: u, quote: Q1, startOffset: 0 }],
+          expandable: true,
+          stopReason: null
+        }
+      ],
+      evidence: [{ unitAnchor: u, quote: Q1, startOffset: 0 }]
+    };
+    // 一次调用返回「子 + 孙」两层（架构 C 允许的形态）
+    const nested = {
+      title: "本原追问展开",
+      expandable: false,
+      stopReason: "atomic_structure",
+      children: [
+        {
+          title: "泰勒斯的水",
+          authorialRole: "claim_evidence",
+          relationToParent: "人",
+          relationToSiblings: null,
+          evidence: [{ unitAnchor: u, quote: Q1, startOffset: 0 }],
+          expandable: false,
+          stopReason: "atomic_structure",
+          children: [
+            {
+              title: "水本原的论证",
+              authorialRole: "claim_evidence",
+              relationToParent: "命题",
+              relationToSiblings: null,
+              evidence: [{ unitAnchor: u, quote: Q1, startOffset: 0 }]
+            }
+          ]
+        }
+      ],
+      evidence: [{ unitAnchor: u, quote: Q1, startOffset: 0 }]
+    };
+    const baseP = {
+      documentId: "doc-e21",
+      title: "递归样书",
+      tocItems: [{ anchor: u, label: "正文" }],
+      unitAnchors: [u],
+      textByUnit: { [u]: text },
+      scopeAnchor: "book",
+      granularity: "detailed"
+    };
+
+    // 默认 depth=1：嵌套的孙层不落地（与旧行为一致）
+    testSettings = { app: {} };
+    fakeChats = [sec, nested, editorialOut, reviewPass];
+    const r23 = await engine.generate(ctx, baseP);
+    const m23 = db.getActiveMaterialMap("doc-e21", "book");
+    const t23 = m23 ? m23.structure.nodes.map((n) => n.title) : [];
+    check("P4：depth=1（默认）只落地一层子结构", t23.includes("泰勒斯的水") && !t23.includes("水本原的论证"), t23);
+
+    // depth=2：一次调用产出的嵌套子树整体落地，且逐层钳制
+    testSettings = { app: { mindmapExpandDepth: 2 } };
+    fakeChats = [sec, nested, editorialOut, reviewPass];
+    const r24 = await engine.generate(ctx, { ...baseP, documentId: "doc-e22" });
+    const m24 = db.getActiveMaterialMap("doc-e22", "book");
+    const t24 = m24 ? m24.structure.nodes.map((n) => n.title) : [];
+    check("P4：depth=2 落地嵌套子树（孙层也在树）", t24.includes("泰勒斯的水") && t24.includes("水本原的论证"), t24);
+    const grand = m24 ? m24.structure.nodes.find((n) => n.title === "水本原的论证") : null;
+    const mid = m24 ? m24.structure.nodes.find((n) => n.title === "泰勒斯的水") : null;
+    check(
+      "P4：嵌套层级父引用正确（孙 → 子）且作用域逐层钳制",
+      Boolean(grand) && Boolean(mid) && grand.parentId === mid.id &&
+        Array.isArray(mid.sourceSpans) && Array.isArray(grand.sourceSpans) &&
+        grand.sourceSpans.every(([s2, e2]) => mid.sourceSpans.some(([s1, e1]) => s2 >= s1 && e2 <= e1)),
+      { grand: grand && grand.sourceSpans, mid: mid && mid.sourceSpans }
+    );
+    check(
+      "P4：子层不再重复入队（带子节点的节点不成为深挖作业）",
+      Number(db.getMaterialMapRun(r24.runId).output?.metrics?.expandCalls || 0) === 0 ||
+        !t24.includes("（未命名）"),
+      db.getMaterialMapRun(r24.runId).output?.metrics
+    );
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E22 v48.12 版本唯一性（同一 run 两阶段只落一行；删除后不复活旧 id） ----");
+  {
+    const leafU = { title: "定义句", authorialRole: "introduce", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: true, stopReason: null };
+    const leafV = { title: "机制句", authorialRole: "cause_effect", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: true, stopReason: null };
+    const secU = { ...sec1, expandable: false, stopReason: "atomic_structure", children: [leafU] };
+    const secV = { ...sec2, expandable: false, stopReason: "atomic_structure", children: [leafV] };
+    const expU = { title: "U 细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "U1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    const expV = { title: "V 细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "V1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    testSettings = { app: {} };
+
+    fakeChats = [secU, secV];
+    const rA = await engine.generate(ctx, { ...paramsFor("doc-e23"), stopAfterSection: true });
+    check("E22：阶段一首层就绪", rA.status === "section_ready", rA.status);
+    const v1 = db.listMaterialMaps("doc-e23");
+    check("E22：阶段一后历史版本 = 1 行", v1.length === 1, v1.map((m) => m.id));
+
+    fakeChats = [expU, expV, globalOut, editorialOut, reviewPass];
+    const rB = await engine.generate(ctx, paramsFor("doc-e23"), rA.runId);
+    const v2 = db.listMaterialMaps("doc-e23");
+    check(
+      "E22：阶段二完成后历史版本仍 = 1 行（同 run 不新增同标题版本）",
+      rB.status === "completed" && v2.length === 1,
+      { st: rB.status, n: v2.length, ids: v2.map((m) => m.id), titles: v2.map((m) => m.title) }
+    );
+    check("E22：同一行被完善（版本 id 前后一致 = 卡片溯源不断链）", Boolean(v1[0]) && v2[0].id === v1[0].id, { before: v1[0] && v1[0].id, after: v2[0] && v2[0].id });
+    check("E22：最终版本为 active（布尔口径）且节点数已回填", v2[0].isActive === true && Number(v2[0].nodeCount) > 0, { active: v2[0].isActive, nodes: v2[0].nodeCount });
+
+    const deletedId = v2[0].id;
+    db.deleteMaterialMap(deletedId);
+    check("E22：删除后历史版本为空（真删）", db.listMaterialMaps("doc-e23").length === 0, "");
+
+    fakeChats = [secU, secV, expU, expV, globalOut, editorialOut, reviewPass];
+    const rC = await engine.generate(ctx, { ...paramsFor("doc-e23"), force: true });
+    const v3 = db.listMaterialMaps("doc-e23");
+    check(
+      "E22：删除后重新生成只出现 1 个**新**版本（旧 id 不复活）",
+      rC.status === "completed" && v3.length === 1 && v3[0].id !== deletedId,
+      { n: v3.length, ids: v3.map((m) => m.id), old: deletedId }
+    );
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E23 v48.13 评审闸门：severity 才是闸门，type 只是描述标签 ----");
+  {
+    // 真实 run ea70cad5 法医结论：模型返回 status=pass + type=topic_list + severity=low，
+    // 旧实现让 type 无条件 fail → 整图 72 节点被卡在 staging、用户看到「语义评审未通过」。
+    const lowTopicList = { status: "pass", issues: [{ nodeId: "", type: "topic_list", severity: "low", repairScope: "global_merge", note: "子节点逐条复述父节点证据，属轻微冗余" }], summary: "整体忠实呈现作者组织方式，非目录复刻" };
+    const lowHollow = { status: "pass", issues: [{ nodeId: "", type: "hollow_parent", severity: "low", repairScope: "editorial", note: "个别父节点偏概括" }], summary: "结构良好" };
+    const highOther = { status: "pass", issues: [{ nodeId: "", type: "other", severity: "high", repairScope: "global_merge", note: "跨分支重复拆解同一结构" }], summary: "存在高严重度缺陷" };
+    const modelFailLow = { status: "fail", issues: [{ nodeId: "", type: "topic_list", severity: "low", repairScope: "global_merge", note: "模型显式判 fail 但严重度标低" }], summary: "模型显式判失败" };
+    testSettings = { app: {} };
+
+    // ① pass + topic_list/low → 不得 fail（旧实现此处 fail，是本 bug 的判别用例）
+    fakeChats = [sec1, sec2, globalOut, editorialOut, lowTopicList];
+    const r1 = await engine.generate(ctx, paramsFor("doc-e24"));
+    const m1 = db.getActiveMaterialMap("doc-e24", "book");
+    check("E23①：pass + topic_list/low → 不失败且地图可用", r1.status === "completed" && m1 && m1.id === r1.mapId, { st: r1.status, active: m1 && m1.id });
+    check(
+      "E23①：非阻断评审意见仍留痕（不阻断但记录）",
+      (() => { const o = db.getMaterialMapRun(r1.runId).output || {}; const mm = o.metrics || {}; return mm.reviewStatus === "review" && Array.isArray(mm.reviewIssues) && mm.reviewIssues.length === 1; })(),
+      db.getMaterialMapRun(r1.runId).output
+    );
+
+    // ② pass + hollow_parent/low → 同样不得 fail
+    fakeChats = [sec1, sec2, globalOut, editorialOut, lowHollow];
+    const r2 = await engine.generate(ctx, paramsFor("doc-e25"));
+    check("E23②：pass + hollow_parent/low → 不失败", r2.status === "completed", r2.status);
+
+    // ③ severity=high 仍然阻断（与 type 无关）
+    fakeChats = [sec1, sec2, globalOut, editorialOut, highOther];
+    const r3 = await engine.generate(ctx, paramsFor("doc-e26"));
+    check("E23③：severity=high（type=other）→ 进入确认/失败", r3.status === "review_failed" && db.getMaterialMapRun(r3.runId).status === "waiting_user", r3.status);
+
+    // ④ 模型显式 status=fail 且给了 issue → 单向棘轮，仍阻断
+    fakeChats = [sec1, sec2, globalOut, editorialOut, modelFailLow];
+    const r4 = await engine.generate(ctx, paramsFor("doc-e27"));
+    check("E23④：模型显式 status=fail → 仍阻断（棘轮不放松）", r4.status === "review_failed", r4.status);
+
+    // ⑤ 对照：type=topic_list + severity=high 依旧 fail（不因放开 low 而放松真实缺陷）
+    fakeChats = [sec1, sec2, globalOut, editorialOut, reviewFail];
+    const r5 = await engine.generate(ctx, paramsFor("doc-e28r"));
+    check("E23⑤：topic_list + severity=high → 仍 fail（真实缺陷不放松）", r5.status === "review_failed", r5.status);
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E24 v48.13 发布模型：候选不得顶掉已发布版本 ----");
+  {
+    const leafP = { title: "定义句", authorialRole: "introduce", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: true, stopReason: null };
+    const leafQ = { title: "机制句", authorialRole: "cause_effect", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: true, stopReason: null };
+    const secP = { ...sec1, expandable: false, stopReason: "atomic_structure", children: [leafP] };
+    const secQ = { ...sec2, expandable: false, stopReason: "atomic_structure", children: [leafQ] };
+    const expP = { title: "P 细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "P1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    const expQ = { title: "Q 细分", expandable: false, stopReason: "atomic_structure", children: [{ title: "Q1", authorialRole: "sequence", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }] };
+    testSettings = { app: {} };
+
+    // ① 无历史地图 → 首个 section_ready 作 provisional 发布（可用）
+    fakeChats = [secP, secQ];
+    const rA = await engine.generate(ctx, { ...paramsFor("doc-e29"), stopAfterSection: true });
+    const a1 = db.getActiveMaterialMap("doc-e29", "book");
+    check("E24①：无历史地图时 section_ready 作 provisional 发布（可用）", rA.status === "section_ready" && rA.published === true && a1 && a1.id === rA.mapId, { st: rA.status, pub: rA.published, active: a1 && a1.id });
+
+    // ② 续跑完成 → 同一行发布为正式版本
+    fakeChats = [expP, expQ, globalOut, editorialOut, reviewPass];
+    const rB = await engine.generate(ctx, paramsFor("doc-e29"), rA.runId);
+    const a2 = db.getActiveMaterialMap("doc-e29", "book");
+    check("E24②：续跑完成 → 同一版本行转为正式发布且 active", rB.status === "completed" && a2 && a2.id === rA.mapId, { st: rB.status, active: a2 && a2.id });
+
+    // ③ 已发布版本存在时，新的 section_ready 只作候选，不得顶掉旧图（本 bug 的判别用例）
+    const publishedId = a2.id;
+    const publishedNodes = a2.nodeCount;
+    fakeChats = [secP, secQ];
+    const rC = await engine.generate(ctx, { ...paramsFor("doc-e29"), stopAfterSection: true, force: true });
+    const a3 = db.getActiveMaterialMap("doc-e29", "book");
+    const cand = rC.mapId ? db.getMaterialMap(rC.mapId) : null;
+    check(
+      "E24③：已发布版本不被新的 section_ready 候选顶掉",
+      rC.status === "section_ready" && rC.published === false && a3 && a3.id === publishedId && Number(a3.nodeCount) === Number(publishedNodes),
+      { st: rC.status, pub: rC.published, activeNow: a3 && a3.id, publishedId }
+    );
+    check("E24③：候选版本落库但未激活（可查看、不覆盖）", cand && cand.id !== publishedId && cand.isActive === false && db.listMaterialMaps("doc-e29").length === 2, cand && { id: cand.id, active: cand.isActive });
+    check(
+      "E24③：run 输出如实标注候选与被谁压着",
+      (() => { const o = db.getMaterialMapRun(rC.runId).output || {}; return o.candidate === true && o.published === false && o.heldByPublishedMapId === publishedId; })(),
+      db.getMaterialMapRun(rC.runId).output
+    );
+
+    // ④ 候选续跑完成后才发布，旧版本退位（发布是一次事务性切换）
+    fakeChats = [expP, expQ, globalOut, editorialOut, reviewPass];
+    const rD = await engine.generate(ctx, { ...paramsFor("doc-e29"), resumeRunId: rC.runId }, rC.runId);
+    const a4 = db.getActiveMaterialMap("doc-e29", "book");
+    check(
+      "E24④：候选续跑完成 → 事务性发布，旧版本退位不删",
+      rD.status === "completed" && a4 && a4.id === rC.mapId && db.listMaterialMaps("doc-e29").length === 2,
+      { st: rD.status, active: a4 && a4.id, cand: rC.mapId }
+    );
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E25 v48.13 P2 进度广播契约（右下角全局指示器的数据源） ----");
+  {
+    // 指示器与所在界面无关，它只吃广播——因此广播必须自足：带 documentId/title/stage/total/published，
+    // 且终态（含失败与待确认）必须广播（旧实现只把失败回给 IPC 调用方，用户离开工作区后完全看不到）。
+    testSettings = { app: {} };
+    broadcasts = [];
+    fakeChats = [sec1, sec2, globalOut, editorialOut, reviewPass];
+    const rOk = await engine.generate(ctx, paramsFor("doc-e30"));
+    check(
+      "E25①：每次广播都带 documentId（指示器要知道是哪份材料）",
+      broadcasts.length > 0 && broadcasts.every((b) => b.documentId === "doc-e30"),
+      broadcasts.map((b) => b.stage)
+    );
+    check(
+      "E25②：运行中广播带进度总量（done/total 可算百分比）",
+      broadcasts.some((b) => b.stage === "running" && Number.isFinite(b.total) && b.total > 0),
+      broadcasts.filter((b) => b.stage === "running")
+    );
+    check(
+      "E25③：完成广播带 mapId 与 published=已发布",
+      rOk.status === "completed" && broadcasts.some((b) => b.stage === "completed" && b.mapId && b.published === true),
+      broadcasts.filter((b) => b.stage === "completed")
+    );
+    check(
+      "E25④：广播带材料名（展开面板标题不靠猜）",
+      broadcasts.some((b) => b.title === BASE.title),
+      broadcasts.map((b) => b.title)
+    );
+
+    broadcasts = [];
+    fakeChats = [sec1, sec2, globalOut, editorialOut, reviewFail];
+    const rFail = await engine.generate(ctx, paramsFor("doc-e31"));
+    check(
+      "E25⑤：语义评审未通过 → 广播 review_failed（终态不静默）",
+      rFail.status === "review_failed" && broadcasts.some((b) => b.stage === "review_failed"),
+      broadcasts.map((b) => b.stage)
+    );
+
+    broadcasts = [];
+    fakeChats = [sec1, sec2];
+    const rStop = await engine.generate(ctx, { ...paramsFor("doc-e32"), stopAfterSection: true });
+    const sr = broadcasts.find((b) => b.stage === "section_ready");
+    check(
+      "E25⑥：首层就绪广播带 published（候选/已发布必须可辨）",
+      rStop.status === "section_ready" && Boolean(sr) && sr.published === true && Boolean(sr.mapId),
+      sr
+    );
+    testSettings = { app: {} };
+  }
+
+  console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
     const kpBefore = JSON.stringify(db.listKnowledgePoints());
     check("导图全程零写知识图谱", JSON.stringify(db.listKnowledgePoints()) === kpBefore, "");
 
