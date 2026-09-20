@@ -73,6 +73,9 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [versions, setVersions] = useState<MaterialMapMeta[]>([]);
   const [issues, setIssues] = useState<MapIssue[]>([]);
   const [failText, setFailText] = useState("");
+  /** v48.13 P4（D46）：深化的进行/结果提示——与整图生成状态分离（深化只影响一支，不推翻整图） */
+  const [deepenBusy, setDeepenBusy] = useState(false);
+  const [deepenNote, setDeepenNote] = useState("");
   const [lastRunId, setLastRunId] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number; label?: string } | null>(null);
   // v48.11：run 级预算与账本口径（计划/缓存命中/需发送/实际尝试），以及首波深挖计划与部分完成提示
@@ -298,6 +301,44 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       setFailText(`深挖续跑异常：${err instanceof Error ? err.message : String(err)}`);
       setPhase("failed");
       return null;
+    }
+  };
+
+  /**
+   * v48.13 P4（D46）**深化**——「展开」与「深化」严格分开：
+   *   · 展开/收起：节点已有 children，纯 UI，**零 AI 请求**（下面的按钮只在无子结构时出现）；
+   *   · 深化：节点尚无更深结构、且有原文作用域 → 创建后台任务，只对这一支做「深挖 + 增量评审」。
+   * 深化不阻塞界面：离开工作区/回正文任务照常跑（进度走全局广播与右下角指示器）。
+   */
+  const deepenNode = async (node: MapNodeRecord) => {
+    const params = buildParams();
+    if (!params || !activeMap || deepenBusy) return;
+    if ((node.childIds || []).length) return; // 已有子结构 = 展开，不是深化
+    setDeepenBusy(true);
+    setDeepenNote(`正在深化「${node.title}」…（可以离开这里，任务会在后台继续）`);
+    try {
+      const r = await mindmapApi.deepen({
+        ...params,
+        mapId: activeMap.id,
+        nodeId: node.id,
+        deepenLabel: `深化 · ${node.title}`
+      });
+      if (r.status === "review_failed") {
+        setDeepenNote(`「${node.title}」的语义评审提出 ${r.issues?.length ?? 0} 处问题，该分支未发布（其余分支不受影响）`);
+      } else if (r.status === "invalid" || r.status === "failed") {
+        setDeepenNote(r.error || "深化未完成");
+      } else if (r.status === "cancelled") {
+        setDeepenNote("深化已取消（已完成的阶段保留在缓存）");
+      } else {
+        setDeepenNote(`已深化「${node.title}」`);
+      }
+      const fresh = await mindmapApi.get(activeMap.id);
+      if (fresh) await loadMap(fresh);
+      await refreshVersions();
+    } catch (err) {
+      setDeepenNote(`深化异常：${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDeepenBusy(false);
     }
   };
 
@@ -693,7 +734,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                 dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
               />
               {!selectedId && phase === "done" && (
-                <div className="mindmap-canvas-tip">单击节点选中 · 再击展开/收起 · 选中后在右侧「就此制卡」或「跳到正文」</div>
+                <div className="mindmap-canvas-tip">单击节点选中 · 再击展开/收起（纯界面）· 带＋号的节点可「深化」（按需生成更深结构）· 选中后在右侧制卡或跳正文</div>
               )}
             </>
           ) : (phase === "done" || mapReady) ? (
@@ -888,7 +929,27 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                             {expandedIds.has(selectedNode.id) ? "收起子树" : "展开子树"}
                           </button>
                         )}
+                        {/* v48.13 P4：无子结构但有作用域 → 可深化。与「展开」是两件事：
+                            展开＝已有子结构只是折叠（纯 UI，零请求）；深化＝尚无更深结构，需要生成。 */}
+                        {!(selectedNode.childIds || []).length && (selectedNode.sourceSpans || []).length > 0 && (
+                          <button
+                            className="btn btn-outline btn-sm"
+                            onClick={() => void deepenNode(selectedNode)}
+                            disabled={deepenBusy}
+                            title="这个节点还没有更细的结构。深化会只针对它对应的原文继续分析（不影响其他分支），可以在后台运行。"
+                          >
+                            {deepenBusy ? "深化中…" : "深化此节点"}
+                          </button>
+                        )}
                       </div>
+                      {/* 「没画出来」≠「没有更深的内容」——把两者的区别写在用户看得见的地方 */}
+                      {!(selectedNode.childIds || []).length && (selectedNode.sourceSpans || []).length > 0 && (
+                        <p className="mindmap-meta">此节点尚无更细结构（图上画＋号标记）——按需深化即可，不必等整图跑完。</p>
+                      )}
+                      {!(selectedNode.childIds || []).length && !(selectedNode.sourceSpans || []).length && (
+                        <p className="mindmap-meta">此节点已是终态（原子结构/纯过渡文字），没有可继续深化的原文范围。</p>
+                      )}
+                      {deepenNote && <p className="mindmap-meta">{deepenNote}</p>}
                     </section>
                   )}
                   <section className="mindmap-side-sec">

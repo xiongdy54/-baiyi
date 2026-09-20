@@ -287,6 +287,8 @@ contextBridge.exposeInMainWorld("memoryAPI", {
 contextBridge.exposeInMainWorld("mindmapAPI", {
   preview: (params) => ipcRenderer.invoke("mindmap:preview", params || {}),
   generate: (params) => ipcRenderer.invoke("mindmap:generate", params || {}),
+  // v48.13 P4：增量深化（展开已有子结构是纯 UI，不发请求）
+  deepen: (params) => ipcRenderer.invoke("mindmap:deepen", params),
   cancel: (runId) => ipcRenderer.invoke("mindmap:cancel", runId),
   repairConfirm: (runId) => ipcRenderer.invoke("mindmap:repairConfirm", runId),
   list: (documentId) => ipcRenderer.invoke("mindmap:list", documentId),

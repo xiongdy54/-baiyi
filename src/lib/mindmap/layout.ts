@@ -10,6 +10,8 @@ export interface MapNodeLike {
   title: string;
   childIds: string[];
   authorialRole?: string | null;
+  /** v48.13 P4：节点拥有的原文作用域。非空 ∧ 无子节点 ⇒「可深化」（尚未生成更深结构，不是没有） */
+  sourceSpans?: [number, number][] | null;
 }
 
 export interface LayoutOptions {
@@ -32,6 +34,11 @@ export interface LayoutNode {
   collapsed: boolean;
   /** 折叠子树的可见后代数（徽标数字；0=无） */
   collapsedCount: number;
+  /**
+   * v48.13 P4：**可深化**——该节点尚无子结构、但拥有原文作用域。
+   * 与 collapsed 互斥（collapsed 要求有子节点）。语义：没画出来 ≠ 没有更深的内容。
+   */
+  deepenable: boolean;
 }
 
 export interface LayoutEdge {
@@ -143,7 +150,9 @@ export function layoutMap(nodesIn: MapNodeLike[], rootNodeId: string, opts: Layo
       h: NODE_H,
       hasChildren: allKids.length > 0,
       collapsed: collapsedCount.has(id),
-      collapsedCount: collapsedCount.get(id) || 0
+      collapsedCount: collapsedCount.get(id) || 0,
+      // v48.13 P4：无子结构但有原文作用域 → 可继续深化（「没画出来」≠「没有更深的内容」）
+      deepenable: allKids.length === 0 && (n?.sourceSpans || []).length > 0
     };
   });
   const layoutById = new Map(layoutNodes.map((n) => [n.id, n]));

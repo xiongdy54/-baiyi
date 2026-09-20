@@ -711,6 +711,17 @@ async function generate(ctx, params, runId) {
   const cfgHash = modelConfigHashOf(ctx);
   const common = { documentId: params.documentId, granularity: params.granularity, provider, model, modelConfigHash: cfgHash };
   const budget = maxCallsOf(ctx);
+  // v48.13 P4（D46）：「增量深化」= **以已存地图为基底的作用域受限 generate**。复用同一条管线、
+  // 同一本账、同一套本地校验与评审机制，差异只有五处（全部在此显式标注）：① 以已存结构为基底装配
+  // （不重建、不依赖 section 缓存，也不会丢掉原图里 merge/global 产出的上层节点）；② 深挖队列只播种目标节点；
+  // ③ 不做覆盖审计/补漏（不为整份材料新增自动成本）；④ 不做 editorial 终编辑（那是整树润色，
+  // 按次点击重跑不划算，且新子树结构校验照常通过）；⑤ 语义评审只覆盖本次新生成的分支 + 必要上下文。
+  // **已知代价（实测，不粉饰）**：深挖指纹 `expandFingerprint` 含 depth，而首层图没有 global 根、
+  // 同一节点的 depth 比整图浅一层 → 深化用掉的深挖缓存与之后的全量重生成**不共享**，那一支会被重新分析。
+  // 这个取舍可接受：一次深化只花 1～2 次调用，换来的是「不必等整图跑完就能先看某一支」。
+  const deepenOnly = params.onlyNodeId ? String(params.onlyNodeId) : null;
+  // 深化以**已存地图为基底**：既不必重建（不依赖 section 缓存），也不会丢掉原图里 merge/global 产出的上层节点。
+  const useStoredBase = !!(deepenOnly && Array.isArray(params.baseNodes) && params.baseNodes.length);
 
   const run =
     (runId && ctx.db.getMaterialMapRun(runId)) ||
@@ -719,7 +730,12 @@ async function generate(ctx, params, runId) {
       scopeAnchor: params.scopeAnchor || "book",
       scopeKind: params.scopeAnchor && params.scopeAnchor !== "book" ? "chapter" : "book",
       granularity: params.granularity,
-      input: { scope: params.scopeAnchor || "book", granularity: params.granularity, budget }
+      input: {
+        scope: params.scopeAnchor || "book",
+        granularity: params.granularity,
+        budget,
+        ...(deepenOnly ? { kind: "deepen", nodeId: deepenOnly, targetMapId: params.reuseMapId || null } : {})
+      }
     });
   const cancelled = () => cancelledRuns.has(run.id);
   // v48.12 P0：跨阶段合并（首层 stopAfterSection + 续跑两段各自 generate()，此前账本/用量只覆盖最后一段）
@@ -891,10 +907,12 @@ async function generate(ctx, params, runId) {
     const globalCalls = resolved.filter((c) => c.runKind === "global");
 
     const est = preview(ctx, params);
+    // v48.13 P4：深化的计划量由调用方实测给出（目标节点的分片数 + 1 次增量评审），不用全量预估充数
+    const plannedCalls = plannedCallsFor(deepenOnly, params, est);
     ctx.db.updateMaterialMapRun(run.id, {
       status: "running",
       stage: "analyze",
-      callsPlanned: est.newCalls,
+      callsPlanned: plannedCalls,
       chars: est.charsExact,
       estInputTokens: est.estInputTokens,
       estOutputTokens: est.estOutputTokens,
@@ -902,10 +920,12 @@ async function generate(ctx, params, runId) {
       currency: est.currency,
       promptVersion: promptVersion(ctx, "material-map-section")
     });
-    ctx.broadcast({ runId: run.id, documentId: params.documentId, title: params.title || null, stage: "running", done: priorCalls, total: priorCalls + est.newCalls, calls: priorCalls, budget });
+    ctx.db.updateMaterialMapRun(run.id, { stage: deepenOnly ? "deepen" : "analyze" });
+    ctx.broadcast({ runId: run.id, documentId: params.documentId, title: params.title || null, stage: "running", label: deepenOnly ? params.deepenLabel || null : null, done: priorCalls, total: priorCalls + plannedCalls, calls: priorCalls, budget });
 
     // ---------- 阶段 1：section 首层（expandable/stopReason 由此产生；仅 expandable=true 的叶入深挖队） ----------
-    for (const call of sectionCalls) {
+    // v48.13 P4：深化以已存结构为基底 → 不跑 section（不重建、不依赖缓存，也不改动未深化分支）
+    if (!useStoredBase) for (const call of sectionCalls) {
       const r = await executeCall(call);
       if (r.cancelled) return finishCancelled(ctx, run.id, runStats, prevLedger);
       if (r.budget) { budgetHit = true; break; }
@@ -913,11 +933,11 @@ async function generate(ctx, params, runId) {
       // v48.8：按调用键写（分片各自独立）；阶段 1.5 再按组合并展开到 nodeKeys
       cacheContent.set(call.nodeKey, r.content);
       ctx.db.updateMaterialMapRun(run.id, { callsDone: priorCalls + callsMade });
-      ctx.broadcast({ runId: run.id, documentId: params.documentId, title: params.title || null, stage: "running", done: priorCalls + callsMade, total: priorCalls + est.newCalls, calls: priorCalls + callsMade, budget });
+      ctx.broadcast({ runId: run.id, documentId: params.documentId, title: params.title || null, stage: "running", done: priorCalls + callsMade, total: priorCalls + plannedCalls, calls: priorCalls + callsMade, budget, label: deepenOnly ? params.deepenLabel || null : null });
     }
 
     // ---------- 阶段 1.5：跨片合并（同组各片的 children 顺序拼接；expandable=any） ----------
-    {
+    if (!useStoredBase) {
       const groupContents = new Map(); // groupKey → contents[]
       for (const call of sectionCalls) {
         const gk = call.groupKey || call.nodeKey;
@@ -979,7 +999,18 @@ async function generate(ctx, params, runId) {
     };
     // ---------- 阶段 2：初装 TOC 层（TOC 节点 + section 单层 children；每个节点携带 sourceSpans） ----------
     const tune = scopeTuningOf(ctx);
-    const assembled = assembleTocLayer(params, plan, sectionCalls, cacheContent, tune, metrics);
+    const assembled = useStoredBase
+      ? assembleFromStored(params, plan)
+      : assembleTocLayer(params, plan, sectionCalls, cacheContent, tune, metrics);
+    // v48.13 P4：深化要求「重建出来的结构」里确实有目标节点。节点 id 由 section 产出顺序确定性生成，
+    // 缓存一致时必然命中；一旦不一致（例如地图来自不同缓存/被 force 重跑过）必须明确失败，
+    // 绝不能静默「跑完但什么都没变」——那比报错更难排查。
+    if (deepenOnly && !assembled.raw.nodes.some((n) => n.id === deepenOnly)) {
+      const msg = `目标节点 ${deepenOnly} 在重建的结构中不存在（地图与分片缓存不一致，请重新生成整图后再深化）`;
+      ctx.db.updateMaterialMapRun(run.id, { status: "failed_validation", errorCode: "deepen_target_missing", errorText: msg });
+      ctx.broadcast({ runId: run.id, documentId: params.documentId, title: params.title || null, stage: "failed", code: "deepen_target_missing" });
+      return { status: "failed", code: "deepen_target_missing", error: msg, runId: run.id };
+    }
     const nodeById = new Map(assembled.raw.nodes.map((n) => [n.id, n]));
     nodeByIdLookup = (id) => nodeById.get(id) || null;
     const linear = plan.linear;
@@ -1055,6 +1086,8 @@ async function generate(ctx, params, runId) {
     for (const n of assembled.raw.nodes) {
       if (n.id === "root") continue;
       n.sourceKind = n.sourceKind || ((n.unitAnchors && n.unitAnchors.length) ? "toc_owned" : "derived_group");
+      // v48.13 P4：增量深化只播种目标节点——其余节点一律不入队（不新增自动成本）
+      if (deepenOnly && n.id !== deepenOnly) continue;
       const d = depthOfNode.get(n.id) || 0;
       // 仅深挖「无子节点的叶」且**必须有作用域**（无作用域＝证据无法定位，绝不退化为重读父级全文）
       if (n.expandable === true && (n.childIds || []).length === 0) {
@@ -1178,7 +1211,8 @@ async function generate(ctx, params, runId) {
       }
       return null;
     };
-    let auditDone = false;
+    // v48.13 P4：深化不跑覆盖审计（补漏会为整份材料补图 = 用户没要求的自动成本）
+    let auditDone = !!deepenOnly;
     while (queue.length || !auditDone) {
       if (!queue.length) {
         // ---------- 阶段 3.5（v48.12 P1）：覆盖审计（含 root；分类 transition/structural；structural → 补漏） ----------
@@ -1438,7 +1472,9 @@ function concurrencyOf(ctx) {
 
     // ---------- 阶段 4：merge（TOC 内部节点；细节已先扩张，此处恢复更高一级组织逻辑） ----------
     // 执行时回填子摘要（section 产出此时已在 cacheContent；预解析阶段为空属时序必然）
-    for (const call of mergeCalls) {
+    // v48.13 P4：深化跳过 merge/global——上层结构已经在原图里定稿，重跑只会让**未深化的分支**跟着变；
+    // 深化的语义是「长出这一支」，不是「重新综合整棵树」。
+    if (!useStoredBase) for (const call of mergeCalls) {
       call.user = finalizeUser(call, (call.childKeys || []).map((ck) => {
         const c = cacheContent.get(ck);
         return {
@@ -1459,7 +1495,7 @@ function concurrencyOf(ctx) {
     }
 
     // ---------- 阶段 5：global（全书根；不带原文） ----------
-    for (const call of globalCalls) {
+    if (!useStoredBase) for (const call of globalCalls) {
       call.user = finalizeUser(call, (call.childKeys || []).map((ck) => {
         const c = cacheContent.get(ck);
         return {
@@ -1480,7 +1516,7 @@ function concurrencyOf(ctx) {
 
     // ---------- 阶段 6：装配 + 本地校验 ----------
     ctx.db.updateMaterialMapRun(run.id, { stage: "validate" });
-    attachMergeGlobal(assembled, mergeCalls, globalCalls, cacheContent, { linear, textByUnit: plan.textByUnit, tune });
+    if (!useStoredBase) attachMergeGlobal(assembled, mergeCalls, globalCalls, cacheContent, { linear, textByUnit: plan.textByUnit, tune });
     const validation = core.validateMapStructure(assembled.raw, { textByUnit: assembled.textByUnit, rootId: "root" });
     const aiNodeCount = validation.nodes.filter((n) => n.id !== "root").length;
     // v48.11：预算触顶导致的「树不完整」不判失败——按 §3.5 落 partial（有多少收多少，绝不伪装完整）；
@@ -1499,8 +1535,14 @@ function concurrencyOf(ctx) {
     }
 
     // ---------- editorial 终编辑（本地应用 ops；零变更合法；预算/取消下跳过并留痕） ----------
-    ctx.db.updateMaterialMapRun(run.id, { stage: "editorial" });
+    // v48.13 P4：深化模式跳过终编辑——editorial 的缓存键覆盖整棵树，任何一次点击深化都会让它失效，
+    // 于是每次点击都重跑一次整树润色（实测单次 66s / 14k output token）。新子树仍走本地结构校验。
     let nodes = validation.nodes;
+    if (deepenOnly) {
+      metrics.editorialSkipped = "deepen";
+      ctx.db.updateMaterialMapRun(run.id, { stage: "editorial_skipped" });
+    } else {
+    ctx.db.updateMaterialMapRun(run.id, { stage: "editorial" });
     const editorialShardKey = {
       ...common,
       unitAnchor: "editorial",
@@ -1542,6 +1584,7 @@ function concurrencyOf(ctx) {
       const revalidation = core.validateMapStructure({ title: assembled.raw.title, nodes: applied.nodes.map(toRawNode) }, { textByUnit: assembled.textByUnit, rootId: "root" });
       if (revalidation.ok) nodes = revalidation.nodes;
     }
+    }
 
     // ---------- 语义评审（>120 节点按顶层分支递归分片 + 根一致性复审；不截断树不删证据） ----------
     // v48.11：评审同受 run 预算约束——预算耗尽则跳过评审并按 partial 落库（不伪装「已评审」）
@@ -1551,7 +1594,19 @@ function concurrencyOf(ctx) {
       budgetHit = true;
       metrics.stopReasons.call_budget = (metrics.stopReasons.call_budget || 0) + 1;
     } else {
-      issues = await runReview(ctx, run, params, nodes, usageAcc, common, { stats: runStats, log: logCall, bump: bumpKind });
+        // v48.13 P4：深化的评审范围 = 目标节点 + 本次新生成的子孙（增量评审）；其余分支不受影响
+      metrics.reviewScope = deepenOnly ? "incremental" : "full";
+      let reviewOpts = {};
+      if (deepenOnly) {
+        const newIds = [];
+        const walkNew = (id) => {
+          newIds.push(id);
+          for (const c of ((nodeById.get(id) || {}).childIds) || []) walkNew(c);
+        };
+        walkNew(deepenOnly);
+        reviewOpts = { subsetIds: newIds.filter((id) => id !== "root"), tag: deepenOnly };
+      }
+      issues = await runReview(ctx, run, params, nodes, usageAcc, common, { stats: runStats, log: logCall, bump: bumpKind }, reviewOpts);
     }
 
     if (issues.status === "fail") {
@@ -1584,9 +1639,12 @@ function concurrencyOf(ctx) {
       metrics,
       stats: runStats,
       prevLedger,
+      deepenNodeId: deepenOnly || null,
       spanIndex: buildSpanIndex(assembled),
       coverageSummary: coverageSummaryOf(assembled),
-      reuseMapId: (run.output && run.output.mapId) || null,
+      // v48.13 P4：深化显式指定要更新的版本行，并保持其激活状态不变（不因一次深化而改发布关系）
+      reuseMapId: params.reuseMapId || (run.output && run.output.mapId) || null,
+      preserveActivation: !!params.preserveActivation,
       tune
     });
   } catch (err) {
@@ -1698,7 +1756,7 @@ function expandFingerprint(node, depth, kind, spans) {
 }
 
 /** 语义评审：≤120 节点一次评审；超出按顶层分支递归分片 + 根一致性复审（跨分支重复/冲突） */
-async function runReview(ctx, run, params, nodes, usageAcc, common, hooks) {
+async function runReview(ctx, run, params, nodes, usageAcc, common, hooks, opts = {}) {
   const stats = (hooks && hooks.stats) || null;
   const log = (hooks && hooks.log) || null;
   const bump = (hooks && hooks.bump) || null;
@@ -1757,6 +1815,31 @@ async function runReview(ctx, run, params, nodes, usageAcc, common, hooks) {
     summary = (summary ? summary + " " : "") + (r.summary || "");
     if (r && r.status === "fail") modelFail = true;
   };
+  const decide = () => {
+    const hasHighIssue = issues.some((i) => i && i.severity === "high");
+    return hasHighIssue || (modelFail && issues.length) ? "fail" : issues.length ? "review" : "pass";
+  };
+  // v48.13 P4（D46）**增量评审**：只评审本次新生成的那一支 + 必要上下文（父链 / 兄弟标题），
+  // 一次调用一份判定，结果**只决定这一支能否发布**——其余分支完全不受影响。
+  // 这是「按需深化」与「整树闸门」冲突的正解：深化的子树不可能先评审再展示，只能就地评这一支。
+  if (Array.isArray(opts.subsetIds) && opts.subsetIds.length) {
+    const want = new Set(opts.subsetIds);
+    const subset = nodes.filter((n) => want.has(n.id));
+    if (!subset.length) return { status: "pass", list: [], summary: "无新增结构可评审" };
+    const anchorNode = subset[0];
+    const parentNode2 = anchorNode.parentId ? byId.get(anchorNode.parentId) : null;
+    const context = {
+      父链: parentNode2 ? pathOf(parentNode2) : null,
+      同层兄弟: nodes.filter((n) => n.parentId === anchorNode.parentId && !want.has(n.id)).map((n) => n.title).slice(0, 20)
+    };
+    const user =
+      `【材料】${params.title || "材料知识导图"}\n【增量评审】下面是本次**新生成**的一支结构；材料其余部分未改动、不在本次评审范围内。\n` +
+      `【上下文】${JSON.stringify(context)}\n【新增结构 JSON】\n` +
+      JSON.stringify(subset.map((n) => ({ ...stripEvidenceForPrompt(n), parentPath: pathOf(n) })));
+    const r = await reviewOnce(user, shardKeyFor(subset, `inc:${opts.tag || "sub"}`));
+    collect(r);
+    return { status: decide(), list: issues, summary };
+  }
   if (nodes.length <= REVIEW_SHARD_NODES) {
     if (cancelledRuns.has(run.id)) return { status: "cancelled", list: [] };
     const user =
@@ -1807,9 +1890,75 @@ async function runReview(ctx, run, params, nodes, usageAcc, common, hooks) {
   //   ① severity === "high" → fail（唯一的标签无关闸门，也是「高严重度结构缺陷」的唯一入口）；
   //   ② 模型显式 status=fail 且给了 issue → fail（单向棘轮：模型说 fail 不作废）；
   //   ③ 其余有 issue → review（记录不阻断）；无 issue → pass。
-  const hasHigh = issues.some((i) => i && i.severity === "high");
-  const status = hasHigh || (modelFail && issues.length) ? "fail" : issues.length ? "review" : "pass";
-  return { status, list: issues, summary };
+  return { status: decide(), list: issues, summary };
+}
+
+/**
+ * v48.13 P4：深化模式的计划调用量。深化只有「目标节点的分片数 + 1 次增量评审」，
+ * 用全量 preview 的估数会给出一个与眼前这次点击无关的大数字（UI 会显示成进度分母）。
+ */
+function plannedCallsFor(deepenOnly, params, est) {
+  if (!deepenOnly) return est.newCalls;
+  const n = Number(params.estimatedCalls);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : Math.max(1, est.newCalls);
+}
+
+/**
+ * v48.13 P4（D46）**增量深化**——「展开」与「深化」的严格区分：
+ *   · 展开：节点**已有** children，折叠只是 UI 状态 → 纯渲染层操作，**零 AI 请求**（与本函数无关）；
+ *   · 深化：节点**尚无**更深结构、用户明确要求继续分析其 sourceSpans → 本函数，创建后台任务。
+ * 实现＝**以已存地图为基底的作用域受限 generate**（同一管线 / 同一账本 / 同一套本地校验与评审机制）。
+ * 已知代价：深挖指纹含 depth，而首层图没有 global 根 → 深化用掉的深挖缓存与之后的全量重生成不共享，
+ * 那一支会被重新分析（详见 generate 内 P4 注释）。深化期间的进度走既有广播，全局指示器与所在界面无关。
+ */
+async function deepen(ctx, params) {
+  const documentId = String((params && params.documentId) || "");
+  const nodeId = String((params && params.nodeId) || "");
+  if (!documentId || !nodeId) return { status: "invalid", error: "缺少 documentId 或 nodeId" };
+  const scopeAnchor = params.scopeAnchor || "book";
+  const map = params.mapId ? ctx.db.getMaterialMap(params.mapId) : ctx.db.getActiveMaterialMap(documentId, scopeAnchor);
+  if (!map || !map.structure || !Array.isArray(map.structure.nodes)) return { status: "invalid", error: "找不到要深化的地图版本" };
+  const target = map.structure.nodes.find((n) => n.id === nodeId);
+  if (!target) return { status: "invalid", error: `节点 ${nodeId} 不在该地图版本中` };
+  if ((target.childIds || []).length) {
+    return { status: "invalid", code: "already_expanded", error: "该节点已有子结构——展开/收起是纯 UI 操作，不需要生成" };
+  }
+  const spans = core.normalizeSpans(target.sourceSpans || []);
+  if (!spans.length) {
+    return { status: "invalid", code: "no_scope", error: "该节点没有可分析的作用域（sourceSpans 为空），无法深化" };
+  }
+  // 计划量 = 该作用域的分片数 + 1 次增量评审（进度分母必须是眼前这一支的量，不是整本书的估数）
+  let estimatedCalls = 2;
+  try {
+    const textByUnit = new Map(Object.entries(params.textByUnit || {}));
+    const tree = core.normalizeTocTree(
+      core.buildTocTree(params.tocItems || [], params.title || "材料知识导图"),
+      params.title || "材料知识导图"
+    );
+    const model = core.buildExtractionModel(tree, params.unitAnchors || []);
+    const linear = core.buildLinearization(model.units, textByUnit);
+    estimatedCalls = Math.max(1, spanJobsFor(linear, spans, scopeTuningOf(ctx)).length) + 1;
+  } catch {
+    /* 预估失败不影响深化本身 */
+  }
+  return generate(
+    ctx,
+    {
+      ...params,
+      scopeAnchor,
+      // 粒度必须沿用**地图行记录的值**：它参与缓存键，换成调用方默认值会让 section 全片 miss → 整本重析
+      granularity: map.granularity || params.granularity || "standard",
+      onlyNodeId: nodeId,
+      // 以已存地图为基底（深化不重建），并把原图标题带过去（finalize 的 title 与 summaryText 依赖它）
+      baseNodes: map.structure.nodes,
+      baseTitle: map.structure.title,
+      reuseMapId: map.id,
+      preserveActivation: true,
+      estimatedCalls,
+      deepenLabel: target.title ? `深化 · ${target.title}` : "深化"
+    },
+    undefined
+  );
 }
 
 /** 评审 FAIL 后的用户确认修复：仅重跑对应归并阶段 + 本地校验 + 语义复审（一次，§4.19-11） */
@@ -2633,6 +2782,34 @@ function assembleTocLayer(params, plan, sectionCalls, cacheContent, tune, metric
   };
 }
 
+/**
+ * v48.13 P4：以**已存地图**为基底装配（深化专用，不做任何重建）。
+ * 与 assembleTocLayer 返回同构，供深挖作业与 finalize 复用；新节点 id 从既有 n<k> 最大值续号，避免撞号。
+ */
+function assembleFromStored(params, plan) {
+  const rawNodes = (params.baseNodes || []).map((n) => ({
+    ...n,
+    childIds: [...(n.childIds || [])],
+    unitAnchors: [...(n.unitAnchors || [])],
+    sourceSpans: core.normalizeSpans(n.sourceSpans || []),
+    evidence: (n.evidence || []).map((e) => ({ ...e }))
+  }));
+  let seq = 0;
+  for (const n of rawNodes) {
+    const m = /^n(\d+)$/.exec(String(n.id));
+    if (m) seq = Math.max(seq, Number(m[1]));
+  }
+  const nextId = () => `n${++seq}`;
+  return {
+    raw: { title: params.baseTitle || params.title || "材料知识导图", nodes: rawNodes },
+    mapIdOf: new Map(),
+    textByUnit: plan.textByUnit,
+    linear: plan.linear,
+    nextId,
+    seqOf: () => seq
+  };
+}
+
 /** 阶段 6 前置：merge/global 产出回填（compositional 引用 + merge 证据与可选 children 细化） */
 function attachMergeGlobal(assembled, mergeCalls, globalCalls, cacheContent, scopeCtx) {
   const { raw, mapIdOf } = assembled;
@@ -2833,8 +3010,10 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc, opts = {}) {
   // 新规则：① 已有**别处**发布的版本 → section_ready 只作候选（不激活），待续跑完成才发布；
   //         ② 无任何已发布版本 → 首个 section_ready 作 provisional 发布（状态由 run.status 可辨）；
   //         ③ partial（预算触顶/失败）→ 永不发布（保持旧行为：不伪装完整）。
+  const preserveActivation = !!(opts.preserveActivation && reuseId);
   const publishedElsewhere = !!(prevActive && prevActive.id !== reuseId);
-  const publishNow = statusOverride === "section_ready" ? !publishedElsewhere : !partial;
+  // preserveActivation（深化）：isActive 传 undefined → 仓储层保持该行原有激活状态不变
+  const publishNow = preserveActivation ? undefined : statusOverride === "section_ready" ? !publishedElsewhere : !partial;
   const saved = (reuseId ? ctx.db.updateMaterialMap(reuseId, {
     documentId: params.documentId,
     scopeAnchor: params.scopeAnchor || "book",
@@ -2863,6 +3042,8 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc, opts = {}) {
     isActive: publishNow
   }));
   const finalLedger = ledgerOf(stats, prevLedgerForOutput);
+  // v48.13 P4：preserve 模式下 publishNow 为 undefined，需读回该行的真实激活态再做诚实留痕
+  const activatedAfter = preserveActivation ? Boolean(((ctx.db.getMaterialMap(saved.id) || {}).isActive)) : publishNow;
   ctx.db.updateMaterialMapRun(runId, {
     status: statusOverride || (partial ? "partial" : "completed"),
     callsDone: finalLedger.successfulCalls || undefined,
@@ -2874,8 +3055,10 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc, opts = {}) {
       nodeCount: nodes.length,
       remapped: remap ? Object.keys(remap).length : 0,
       // v48.13：本次产物是「已发布」还是「候选」（候选=未顶掉旧图，等续跑完成再发布）
-      published: publishNow,
-      ...(publishNow ? {} : { candidate: true, heldByPublishedMapId: publishedElsewhere ? prevActive.id : null }),
+      published: activatedAfter,
+      // v48.13 P4：本次是否为「增量深化」，以及评审范围（整树 / 只评本次新增分支）
+      ...(opts.deepenNodeId ? { deepened: opts.deepenNodeId, reviewScope: "incremental" } : {}),
+      ...(activatedAfter ? {} : { candidate: true, heldByPublishedMapId: publishedElsewhere ? prevActive.id : null }),
       completeness:
         statusOverride === "section_ready"
           ? "section_ready"
@@ -2895,7 +3078,7 @@ function finalizeMap(ctx, runId, params, nodes, title, usageAcc, opts = {}) {
     title: params.title || structure.title || null,
     stage: statusOverride || (partial ? "partial" : "completed"),
     mapId: saved.id,
-    published: publishNow
+    published: activatedAfter
   });
   return {
     status: statusOverride || (partial ? "partial" : "completed"),
@@ -2916,6 +3099,7 @@ module.exports = {
   finalizeUser,
   preview,
   generate,
+  deepen,
   repairConfirm,
   cancelRun,
   parseJsonLoose,

@@ -112,7 +112,9 @@ function layoutMap(nodesIn, rootNodeId, opts) {
       h: NODE_H,
       hasChildren: allKids.length > 0,
       collapsed: collapsedCount.has(id),
-      collapsedCount: collapsedCount.get(id) || 0
+      collapsedCount: collapsedCount.get(id) || 0,
+      // v48.13 P4：无子结构但有原文作用域 → 可继续深化（「没画出来」≠「没有更深的内容」）
+      deepenable: allKids.length === 0 && (n?.sourceSpans || []).length > 0
     };
   });
   const layoutById = new Map(layoutNodes.map((n) => [n.id, n]));
@@ -177,6 +179,13 @@ function renderNode(n, parent, theme, opts) {
   parts.push(
     `<g data-node-id="${esc(n.id)}"><rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/><text x="${n.x + 12}" y="${n.y + n.h / 2}" dominant-baseline="central" font-size="${theme.fontSize}" fill="${textFill}">${esc(label)}</text>`
   );
+  if (n.deepenable) {
+    const bx = n.x + n.w + 6;
+    const by = n.y + n.h / 2 - 10;
+    parts.push(
+      `<rect x="${bx}" y="${by}" width="20" height="20" fill="${theme.paper}" stroke="${theme.border}" stroke-width="1"/><text x="${bx + 10}" y="${by + 10}" text-anchor="middle" dominant-baseline="central" font-size="11" fill="${theme.inkSoft}">\uFF0B</text><title>\u5C1A\u65E0\u66F4\u6DF1\u7ED3\u6784 \xB7 \u53EF\u6DF1\u5316</title>`
+    );
+  }
   if (n.collapsed) {
     const bw = 8 + String(n.collapsedCount).length * 8;
     const bx = n.x + n.w + 6;

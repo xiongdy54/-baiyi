@@ -75,6 +75,17 @@ function renderNode(n: LayoutNode, parent: LayoutNode | null, theme: MapTheme, o
       `<rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>` +
       `<text x="${n.x + 12}" y="${n.y + n.h / 2}" dominant-baseline="central" font-size="${theme.fontSize}" fill="${textFill}">${esc(label)}</text>`
   );
+  if (n.deepenable) {
+    // v48.13 P4：可深化徽标——右缘外挂小方块（与折叠徽标同槽位；二者互斥：折叠要求有子节点）。
+    // 语义＝「此处尚有更深的结构未生成」，与「已到底的叶」在视觉上必须可区分。
+    const bx = n.x + n.w + 6;
+    const by = n.y + n.h / 2 - 10;
+    parts.push(
+      `<rect x="${bx}" y="${by}" width="20" height="20" fill="${theme.paper}" stroke="${theme.border}" stroke-width="1"/>` +
+        `<text x="${bx + 10}" y="${by + 10}" text-anchor="middle" dominant-baseline="central" font-size="11" fill="${theme.inkSoft}">＋</text>` +
+        `<title>尚无更深结构 · 可深化</title>`
+    );
+  }
   if (n.collapsed) {
     // 折叠徽标：右缘外挂小方块（直角、hairline、无装饰）
     const bw = 8 + String(n.collapsedCount).length * 8;

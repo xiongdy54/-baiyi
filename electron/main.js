@@ -1145,6 +1145,8 @@ ipcMain.handle("mindmap:generate", (_e, params) =>
     // v48.11：resumeRunId 存在时以同一 run 续跑（section 缓存续跑，账本连续）
     mindmapEngine.generate(mindmapCtx(), params || {}, (params && params.resumeRunId) || undefined)
   );
+// v48.13 P4：增量深化——「展开」是纯 UI（零调用），「深化」走这里创建后台任务
+ipcMain.handle("mindmap:deepen", (_e, params) => mindmapEngine.deepen(mindmapCtx(), params || {}));
 ipcMain.handle("mindmap:cancel", (_e, runId) => {
   mindmapEngine.cancelRun(runId);
   return true;

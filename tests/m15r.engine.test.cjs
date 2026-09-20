@@ -1038,6 +1038,155 @@ app.whenReady().then(async () => {
     testSettings = { app: {} };
   }
 
+  console.log("---- M15R-E26 v48.13 P4 增量深化（展开 vs 深化 / 增量评审 / 原地发布 / 缓存跨路径复用） ----");
+  {
+    const leafP = { title: "定义句", authorialRole: "introduce", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: true, stopReason: null };
+    const leafQ = { title: "机制句", authorialRole: "cause_effect", relationToParent: "x", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: true, stopReason: null };
+    const secP = { ...sec1, expandable: false, stopReason: "atomic_structure", children: [leafP] };
+    const secQ = { ...sec2, expandable: false, stopReason: "atomic_structure", children: [leafQ] };
+    // 深化「定义句」→ 只该有这一个节点的深挖调用 + 一次增量评审
+    const deepP = { title: "定义句的展开", expandable: false, stopReason: "atomic_structure", children: [
+      { title: "被检验的含义", authorialRole: "clarify", relationToParent: "补足", relationToSiblings: null, evidence: [{ unitAnchor: "u1.xhtml", quote: "知识是经过检验的信念", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }
+    ] };
+    const deepQ = { title: "机制句的展开", expandable: false, stopReason: "atomic_structure", children: [
+      { title: "记忆的机制", authorialRole: "cause_effect", relationToParent: "展开", relationToSiblings: null, evidence: [{ unitAnchor: "u2.xhtml", quote: "这个定义解释了记忆的机制", startOffset: 6 }], expandable: false, stopReason: "atomic_structure" }
+    ] };
+    testSettings = { app: {} };
+
+    // 前置：只跑首层的图——这正是「可深化叶」的天然状态（首层就绪后等用户按需深化）
+    fakeChats = [secP, secQ];
+    const rBase = await engine.generate(ctx, { ...paramsFor("doc-e33"), stopAfterSection: true });
+    check("E26 前置：首层就绪（两个可深化的叶，尚未生成更深结构）", rBase.status === "section_ready", rBase.status);
+    const baseMap = db.getActiveMaterialMap("doc-e33", "book");
+    const baseNodes = baseMap.structure.nodes;
+    const nodeP = baseNodes.find((n) => n.title === "定义句");
+    const nodeQ = baseNodes.find((n) => n.title === "机制句");
+    check(
+      "E26 前置：两个叶均可深化（无子结构且 sourceSpans 非空）",
+      Boolean(nodeP) && Boolean(nodeQ) && (nodeP.childIds || []).length === 0 && (nodeP.sourceSpans || []).length > 0,
+      { p: nodeP && nodeP.sourceSpans, q: nodeQ && nodeQ.sourceSpans }
+    );
+    const baseNodeCount = baseNodes.length;
+
+    // ① 深化：只对目标节点发调用 + 一次增量评审；editorial 与补漏都不跑
+    let capturedReview = "";
+    fakeChats = [
+      deepP,
+      (call) => {
+        capturedReview = String(call.user || "");
+        return { text: JSON.stringify(reviewPass), usage: { prompt_tokens: 10, completion_tokens: 5 } };
+      }
+    ];
+    const consumBefore = consumed;
+    const rD = await engine.deepen(ctx, { ...paramsFor("doc-e33"), mapId: baseMap.id, nodeId: nodeP.id });
+    const usedCalls = consumed - consumBefore;
+    check("E26①：深化完成且只发 2 次调用（1 深挖 + 1 增量评审；以已存地图为基底，不重跑 section）", rD.status === "completed" && usedCalls === 2, { st: rD.status, calls: usedCalls });
+
+    const dRun = db.getMaterialMapRun(rD.runId);
+    const dMetrics = (dRun.output || {}).metrics || {};
+    check(
+      "E26①：editorial 与补漏在深化中都不跑（零新增自动成本）",
+      dMetrics.editorialSkipped === "deepen" && !dMetrics.gapFillCalls && !dMetrics.coverageAudit,
+      { ed: dMetrics.editorialSkipped, gap: dMetrics.gapFillCalls, audit: dMetrics.coverageAudit }
+    );
+
+    // ② 子树挂到目标节点下，其余分支未动
+    const stD = (db.getMaterialMap(baseMap.id) || {}).structure;
+    const dP = stD.nodes.find((n) => n.id === nodeP.id);
+    const dQ = stD.nodes.find((n) => n.id === nodeQ.id);
+    check(
+      "E26②：新子树挂在目标节点下",
+      Boolean(dP) && (dP.childIds || []).length === 1 && stD.nodes.some((n) => n.title === "被检验的含义" && n.parentId === nodeP.id),
+      dP && dP.childIds
+    );
+    check("E26②：其余分支未受影响（兄弟节点仍无子结构）", Boolean(dQ) && (dQ.childIds || []).length === 0, dQ && dQ.childIds);
+
+    // ③ 增量评审：范围只覆盖新增分支，payload 明确声明其余部分不在评审范围
+    check("E26③：评审为增量口径（metrics.reviewScope=incremental）", dMetrics.reviewScope === "incremental", dMetrics.reviewScope);
+    check(
+      "E26③：评审 payload 只含本次新增分支且声明增量口径",
+      capturedReview.includes("增量评审") && capturedReview.includes("被检验的含义") && !capturedReview.includes("机制句"),
+      capturedReview.slice(0, 220)
+    );
+    check("E26③：run 输出留痕 deepened/reviewScope", (dRun.output || {}).deepened === nodeP.id && (dRun.output || {}).reviewScope === "incremental", dRun.output);
+
+    // ④ 原地更新同一版本行，发布关系不变
+    check(
+      "E26④：同一版本行被原地更新（版本 id 不变、节点数增加）",
+      db.listMaterialMaps("doc-e33").length === 1 && stD.nodes.length > baseNodeCount,
+      { versions: db.listMaterialMaps("doc-e33").length, before: baseNodeCount, after: stD.nodes.length }
+    );
+    check(
+      "E26④：深化不改发布关系（该行仍为 active）",
+      db.getMaterialMap(baseMap.id).isActive === true && (dRun.output || {}).published === true,
+      (dRun.output || {}).published
+    );
+
+    // ⑤「展开」不是「深化」：已有子结构的节点 → 明确拒绝且零调用
+    const consumBefore2 = consumed;
+    const rExpanded = await engine.deepen(ctx, { ...paramsFor("doc-e33"), mapId: baseMap.id, nodeId: nodeP.id });
+    check(
+      "E26⑤：已有子结构的节点拒绝深化（展开是纯 UI 操作，零 AI 请求）",
+      rExpanded.status === "invalid" && rExpanded.code === "already_expanded" && consumed === consumBefore2,
+      { st: rExpanded.status, code: rExpanded.code, calls: consumed - consumBefore2 }
+    );
+
+    // ⑥ 无作用域节点 → 拒绝且零调用
+    const noScope = { ...nodeQ, id: "nos", sourceSpans: [], childIds: [] };
+    const origGet = db.getMaterialMap;
+    db.getMaterialMap = (id) => (String(id) === String(baseMap.id) ? { ...baseMap, structure: { ...baseMap.structure, nodes: [...baseMap.structure.nodes, noScope] } } : origGet.call(db, id));
+    const consumBefore3 = consumed;
+    const rNoScope = await engine.deepen(ctx, { ...paramsFor("doc-e33"), mapId: baseMap.id, nodeId: "nos" });
+    db.getMaterialMap = origGet;
+    check(
+      "E26⑥：无作用域节点拒绝深化（scope 为空 = 证据无法定位）",
+      rNoScope.status === "invalid" && rNoScope.code === "no_scope" && consumed === consumBefore3,
+      { st: rNoScope.status, code: rNoScope.code }
+    );
+
+    // ⑦ 深化成果在全量重生成后仍在；并**如实记录已知代价**（不写成「零重复计费」）
+    fakeChats = [deepP, deepQ, globalOut, editorialOut, reviewPass];
+    const consumBefore4 = consumed;
+    const rFull = await engine.generate(ctx, { ...paramsFor("doc-e33") });
+    const fullMetrics = (db.getMaterialMapRun(rFull.runId).output || {}).metrics || {};
+    check("E26⑦：全量重生成完成", rFull.status === "completed", rFull.status);
+    // 特征化断言（防止将来静默变化）：深挖指纹 expandFingerprint 含 depth，而首层图没有 global 根、
+    // 同一节点的 depth 比整图浅一层 → 两条路径的深挖缓存**不共享**，这一支会被重新分析。
+    // 取舍可接受：一次深化只花 1~2 次调用，换来「不必等整图跑完就能先看某一支」。
+    check(
+      "E26⑦：全量重生成会重新分析该分支（已知代价：首层图与整图 depth 不同 → 深挖缓存不共享）",
+      Number(fullMetrics.expandCalls || 0) === 2 && Number(fullMetrics.expandCacheHit || 0) === 0,
+      { expand: fullMetrics.expandCalls, cacheHit: fullMetrics.expandCacheHit, used: consumed - consumBefore4 }
+    );
+    const stFull = (db.getMaterialMap(rFull.mapId) || {}).structure;
+    check(
+      "E26⑦：深化成果在全量重生成后仍在（同一张图里保留）",
+      Boolean(stFull) && stFull.nodes.some((n) => n.title === "被检验的含义"),
+      stFull && stFull.nodes.filter((n) => /定义句|被检验/.test(n.title)).map((n) => n.title)
+    );
+
+    // ⑧ 增量评审未通过：只影响这一支，整图与其它分支保持原样（独立文档，避免被 ⑦ 的新版本干扰）
+    fakeChats = [secP, secQ];
+    const rBase2 = await engine.generate(ctx, { ...paramsFor("doc-e34"), stopAfterSection: true });
+    const baseMap2 = db.getActiveMaterialMap("doc-e34", "book");
+    const nodeQ2 = baseMap2.structure.nodes.find((n) => n.title === "机制句");
+    const mapBeforeFail = baseMap2.structure.nodes.length;
+    const highIssue = { status: "fail", issues: [{ nodeId: "", type: "topic_list", severity: "high", repairScope: "none", note: "该分支退化为并列列表" }], summary: "该分支不合格" };
+    fakeChats = [deepQ, highIssue];
+    const rFail = await engine.deepen(ctx, { ...paramsFor("doc-e34"), mapId: baseMap2.id, nodeId: nodeQ2.id });
+    check("E26⑧：该分支评审未通过 → run 停在确认，不发布这一支", rFail.status === "review_failed", rFail.status);
+    const mapAfterFail = db.getMaterialMap(baseMap2.id);
+    check("E26⑧：独立文档前置就绪（首层 map 已发布）", rBase2.status === "section_ready" && Boolean(nodeQ2), rBase2.status);
+    check(
+      "E26⑧：地图未被改动、其它分支不受影响（单分支失败不连坐整图）",
+      mapAfterFail.structure.nodes.length === mapBeforeFail &&
+        mapAfterFail.isActive === true &&
+        ((mapAfterFail.structure.nodes.find((n) => n.id === nodeQ2.id) || {}).childIds || []).length === 0,
+      { before: mapBeforeFail, after: mapAfterFail.structure.nodes.length, active: mapAfterFail.isActive }
+    );
+    testSettings = { app: {} };
+  }
+
   console.log("---- M15R-E9 边界：零写 knowledge_* / cards ----");
     const kpBefore = JSON.stringify(db.listKnowledgePoints());
     check("导图全程零写知识图谱", JSON.stringify(db.listKnowledgePoints()) === kpBefore, "");

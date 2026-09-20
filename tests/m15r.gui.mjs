@@ -178,7 +178,8 @@ try {
       { id: "l1b", parentId: "root", title: "德国古典哲学", childIds: ["l2b1"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
       { id: "l2a1", parentId: "l1a", title: "早期自然哲学", childIds: ["l3a1"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
       { id: "l2a2", parentId: "l1a", title: "苏格拉底", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [] },
-      { id: "l2b1", parentId: "l1b", title: "康德", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      // 康德带 sourceSpans（可深化）；苏格拉底不带（已是终态）——用于锁定「展开 vs 深化」的 UI 契约
+      { id: "l2b1", parentId: "l1b", title: "康德", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [], sourceSpans: [[0, 120]], spanOrigin: "evidence", expandable: true, stopReason: null },
       { id: "l3a1", parentId: "l2a1", title: "泰勒斯", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [] }
     ];
     const structure = { version: 1, generatorVersion: "gui-preset", title: M + " 导图", rootNodeId: "root", nodes, edges: [], summaryText: "结构摘要" };
@@ -256,6 +257,38 @@ try {
   const badge = await main.eval(`document.body.textContent.includes("+1")`);
   check("预置导图渲染（L0/L1/L2 共 6 节点可见，L3 折叠）", ms.groups === 6 && ms.hasKey === true && ms.phase === "done/other", JSON.stringify(ms));
   check("折叠徽标在场（+1 = 泰勒斯被收起）", badge === true, badge);
+  // v48.13 P4：可深化徽标（＋号）——只有「无子结构 ∧ 有作用域」的节点才带
+  const deepBadge = await main.eval(`document.querySelectorAll('.mindmap-canvas svg title').length > 0 && document.body.innerHTML.includes("尚无更深结构 · 可深化")`);
+  check("可深化徽标在场（无子结构但有作用域 = 康德）", deepBadge === true, deepBadge);
+  // 点选「康德」→ 详情面板应出现「深化此节点」，且不出现「展开子树」（展开只对有子结构的节点出现）
+  await main.eval(`(() => { const g = document.querySelector('.mindmap-canvas [data-node-id="l2b1"]'); g?.dispatchEvent(new MouseEvent('click', { bubbles: true })); return !!g; })()`);
+  await wait(300);
+  const deepPanel = await main.eval(`JSON.stringify({
+    deepen: [...document.querySelectorAll(".mindmap-node-actions button")].some((b) => b.textContent.includes("深化此节点")),
+    expand: [...document.querySelectorAll(".mindmap-node-actions button")].some((b) => b.textContent.includes("展开子树")),
+    terminalHint: document.body.textContent.includes("按需深化即可")
+  })`);
+  const dp = JSON.parse(deepPanel || "{}");
+  check("可深化节点：有「深化此节点」、无「展开子树」", dp.deepen === true && dp.expand === false, deepPanel);
+  check("可深化节点：说明「没画出来 ≠ 没有更深的内容」", dp.terminalHint === true, deepPanel);
+  // 点选「早期自然哲学」（有子结构）→ 只有「展开子树」，没有「深化此节点」
+  await main.eval(`(() => { const g = document.querySelector('.mindmap-canvas [data-node-id="l2a1"]'); g?.dispatchEvent(new MouseEvent('click', { bubbles: true })); return !!g; })()`);
+  await wait(300);
+  const expandPanel = await main.eval(`JSON.stringify({
+    deepen: [...document.querySelectorAll(".mindmap-node-actions button")].some((b) => b.textContent.includes("深化此节点")),
+    expand: [...document.querySelectorAll(".mindmap-node-actions button")].some((b) => b.textContent.includes("展开子树") || b.textContent.includes("收起子树"))
+  })`);
+  const ep = JSON.parse(expandPanel || "{}");
+  check("已有子结构的节点：只有「展开/收起子树」，没有「深化此节点」（展开是纯界面，零 AI 请求）", ep.expand === true && ep.deepen === false, expandPanel);
+  // 点选「苏格拉底」（无子结构且无作用域）→ 无深化入口，并说明已是终态
+  await main.eval(`(() => { const g = document.querySelector('.mindmap-canvas [data-node-id="l2a2"]'); g?.dispatchEvent(new MouseEvent('click', { bubbles: true })); return !!g; })()`);
+  await wait(300);
+  const termPanel = await main.eval(`JSON.stringify({
+    deepen: [...document.querySelectorAll(".mindmap-node-actions button")].some((b) => b.textContent.includes("深化此节点")),
+    hint: document.body.textContent.includes("已是终态")
+  })`);
+  const tp = JSON.parse(termPanel || "{}");
+  check("终态节点：无深化入口且明确说明（不把「没有更深内容」和「尚未生成」混为一谈）", tp.deepen === false && tp.hint === true, termPanel);
   // 适应窗口行为链：放大破坏视口 → 点击适应 → transform 必须变化（事件链：click→handler→viewport）
   await main.eval(clickByText(".mindmap-top-actions button", "+"));
   await wait(200);
