@@ -90,11 +90,21 @@ try {
   const book = JSON.parse(created || "{}");
   globalThis.__guiDocId = book.documentId || "";
   check("建册成功", !!book.id, created);
+  // v48.13：第二本材料用于「库里只有未激活版本」的空态恢复用例（用户实测：成果在库里却找不到入口）
+  // v48.13：用 String.fromCharCode(10) 拼换行——不用反斜杠转义，避免被外层工具的转义处理吃掉
+  const NL2 = String.fromCharCode(10);
+  const md2 = ["# 第一章 备份", "", "冗余是可靠性的代价。", "", "# 第二章 校验", "", "校验和用于发现位翻转。"].join(NL2);
+  const created2 = await main.eval(`(async () => {
+    const r = await window.libraryAPI.createFromPaste(${JSON.stringify(MARK + " 恢复用例")}, ${JSON.stringify(md2)});
+    return JSON.stringify(r);
+  })()`);
+  globalThis.__guiDocId2 = (JSON.parse(created2 || "{}").documentId) || "";
+  check("第二本材料建册成功（恢复用例）", !!globalThis.__guiDocId2, created2);
   await main.eval(`location.reload()`);
   await wait(3500);
   await main.eval(clickByText(".nav-item", "书架"));
   await wait(700);
-  const opened = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK}")); c?.click(); return !!c; })()`);
+  const opened = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK} 控制论入门")); c?.click(); return !!c; })()`);
   check("书架点击打开阅读器", opened === true, opened);
   await wait(3500);
 
@@ -199,9 +209,21 @@ try {
       VALUES ('guirun1', 'local-user', '${realDocId}', 'book', 'book', 'detailed', 'interrupted', 'expand',
       7, 12345, 'interrupted', '运行被应用关闭打断（启动对账）；已完成分片保留在缓存，继续生成零重复计费', ?, ?, 0, 0)`,
       [Date.now() - 60000, Date.now() - 60000]);
+    // v48.13：第二本材料只放一个**未激活**版本（is_active=0）——复现用户当时的处境
+    const doc2 = globalThis.__guiDocId2 || "gui-doc2";
+    const nodes2 = [
+      { id: "root", parentId: null, title: M + " 恢复根", childIds: ["b"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "b", parentId: "root", title: "第一章 备份", childIds: ["b1"], unitAnchors: [], evidence: [], compositionalEvidence: [] },
+      { id: "b1", parentId: "b", title: "冗余代价", childIds: [], unitAnchors: [], evidence: [], compositionalEvidence: [], sourceSpans: [[0, 16]], spanOrigin: "evidence", expandable: true, stopReason: null }
+    ];
+    db.run(`INSERT INTO material_maps (id, user_id, document_id, scope_anchor, scope_kind, granularity, title,
+      structure_json, node_count, source_revision_hash, prompt_version, generator_version, provider, model,
+      model_config_hash, node_remap_json, is_active, created_at, updated_at, sync_version, is_deleted)
+      VALUES ('guimap2', 'local-user', '${doc2}', 'book', 'book', 'detailed', ?, ?, 3, 'h', 3, 'gui-preset', 'stub', 'stub', 'h', NULL, 0, ?, ?, 0, 0)`,
+      [M + " 恢复导图", JSON.stringify({ version: 1, generatorVersion: "gui-preset", title: M + " 恢复导图", rootNodeId: "root", nodes: nodes2, edges: [], summaryText: "摘要" }), Date.now(), Date.now()]);
     fs.writeFileSync(dbFile, Buffer.from(db.export()));
   }
-  check("会话 2 前置：导图行 + 一条 interrupted 运行已预置 library.db", true, "");
+  check("会话 2 前置：导图行 + interrupted 运行 + 一个未激活版本已预置", true, "");
 
   // 7. 会话 2：重启 → 完整行为链（真实路径：getActive → loadMap → 渲染 / 适应窗口 / 删除）
   electron = spawnApp();
@@ -217,7 +239,7 @@ try {
   check("重启后可续跑运行被识别（指示器出现且非失败口径）", rp.present === true && rp.text.includes("继续") && !rp.text.includes("失败"), resumePill);
   await main.eval(clickByText(".nav-item", "书架"));
   await wait(700);
-  const opened2 = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK}")); c?.click(); return !!c; })()`);
+  const opened2 = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK} 控制论入门")); c?.click(); return !!c; })()`);
   check("会话 2：阅读器打开", opened2 === true, opened2);
   const cfgFile = path.join(USER_DATA, "ai-config.json");
   const cfgRaw = fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8").slice(0, 120) : "MISSING";
@@ -284,6 +306,12 @@ try {
   })`);
   const dp = JSON.parse(deepPanel || "{}");
   check("可深化节点：有「深化此节点」、无「展开子树」", dp.deepen === true && dp.expand === false, deepPanel);
+  // v48.13：打开已有图（不是刚生成完）时「自动深挖全部」也必须可见——按当前可深化节点数决定
+  const deepenAllBtn = await main.eval(
+    `JSON.stringify({ present: [...document.querySelectorAll(".mindmap-sidebar button")].some((b) => b.textContent.includes("自动深挖全部")), label: ([...document.querySelectorAll(".mindmap-sidebar button")].find((b) => b.textContent.includes("自动深挖全部"))||{}).textContent || "" })`
+  );
+  const dab = JSON.parse(deepenAllBtn || "{}");
+  check("打开已有图时「自动深挖全部」可见（此前只在刚生成完那一瞬可见）", dab.present === true && /可深化节点/.test(dab.label), deepenAllBtn);
   check("可深化节点：说明「没画出来 ≠ 没有更深的内容」", dp.terminalHint === true, deepPanel);
   // 点选「早期自然哲学」（有子结构）→ 只有「展开子树」，没有「深化此节点」
   await main.eval(`(() => { const g = document.querySelector('.mindmap-canvas [data-node-id="l2a1"]'); g?.dispatchEvent(new MouseEvent('click', { bubbles: true })); return !!g; })()`);
@@ -322,7 +350,35 @@ try {
   await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
   await wait(400);
 
-  // 8. 清理
+  // 8. v48.13 空态恢复用例：库里只有未激活版本时，用户必须能看到入口并自救
+  await main.eval(clickByText(".nav-item", "书架"));
+  await wait(900);
+  const openedRec = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK} 恢复用例")); c?.click(); return !!c; })()`);
+  check("恢复用例：阅读器打开", openedRec === true, openedRec);
+  await wait(3500);
+  await main.eval(clickByText(".reader-engine-controls button", "导图"));
+  await wait(2000);
+  const recEmpty = await main.eval(`JSON.stringify({
+    isEmpty: document.body.textContent.includes("尚未生成"),
+    versionSection: document.body.textContent.includes("历史版本"),
+    versionCount: document.querySelectorAll(".mindmap-versions li").length,
+    hint: document.body.textContent.includes("成果没有丢")
+  })`);
+  const re = JSON.parse(recEmpty || "{}");
+  check("空态：历史版本区可见且列出未激活版本（不再「找不到入口」）", re.versionSection === true && re.versionCount === 1, recEmpty);
+  check("空态：明确告知成果没丢、点一版即可激活", re.hint === true, recEmpty);
+  const recovered = await main.eval(`(() => { const b = document.querySelector(".mindmap-versions li .mindmap-version-pick"); if (!b) return "no-btn"; b.click(); return "clicked"; })()`);
+  await wait(1500);
+  const recAfter = await main.eval(`JSON.stringify({
+    emptyStill: document.body.textContent.includes("尚未生成"),
+    canvasNodes: document.querySelectorAll(".mindmap-canvas [data-node-id]").length
+  })`);
+  const ra = JSON.parse(recAfter || "{}");
+  check("空态：点击版本即激活并渲染出图（成果真的找得回来）", recovered === "clicked" && ra.emptyStill === false && ra.canvasNodes >= 3, recAfter);
+  await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
+  await wait(400);
+
+  // 9. 清理
   await main.eval(clickByText(".nav-item", "书架"));
   await wait(600);
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);

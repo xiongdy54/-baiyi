@@ -370,13 +370,20 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
    * 走同 runId 续跑（section 全部命中缓存），因此与「按需深化」共用同一条已缓存管线。
    */
   const handleDeepenAll = async () => {
-    const rid = lastRunId;
-    if (!rid || deepenBusy) return;
+    const params = buildParams();
+    if (!params || deepenBusy) return;
     setDeepenBusy(true);
     setSectionNote("");
+    setRunStartedAt(Date.now());
+    setCancelRequested(false);
     try {
-      const next = await runDeepen(rid);
+      // 本轮已有 run → 续跑（section 命中缓存，最省）；
+      // 打开的是旧图（本轮没有 run）→ 走完整管线（section 同样命中缓存），一样能用。
+      const next = lastRunId ? await runDeepen(lastRunId) : await mindmapApi.generate(params);
       if (next) await applyResult(next, { resume: true });
+    } catch (err) {
+      setFailText(`深挖全部异常：${err instanceof Error ? err.message : String(err)}`);
+      setPhase("failed");
     } finally {
       setDeepenBusy(false);
     }
@@ -676,6 +683,12 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
 
   /** v48.13：有一轮任务在跑（生成/续跑）——深化与自动深挖都要让路（引擎侧也有 busy 守卫兜底） */
   const runInFlight = phase === "running" || phase === "section_ready";
+  /**
+   * v48.13：当前图里**还可深化**的节点数（无子结构且有原文作用域）。
+   * 「自动深挖全部」按它决定是否出现——此前只看「刚跑完首层留下的 expandPlan」，
+   * 于是关掉工作区再进来（或打开一张旧图）时按钮永远不出现（用户实测反馈：找不到这个按钮）。
+   */
+  const deepenableCount = structure ? structure.nodes.filter((n) => !(n.childIds || []).length && (n.sourceSpans || []).length > 0).length : 0;
 
   const statusLine = (() => {
     if (phase === "collecting") return collectMsg || "正在提取原文…";
@@ -825,14 +838,14 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                     {phase === "done" ? "重新生成（先预览）" : "发送前预览"}
                   </button>
                   {/* v48.13：整树深挖从「自动发生」改为「显式选择」——默认只到首层，够用且快 */}
-                  {phase === "done" && expandPlan && expandPlan.plannedCalls > 0 && (
+                  {phase === "done" && deepenableCount > 0 && (
                     <button
                       className="btn btn-outline btn-sm mindmap-wide"
                       onClick={() => void handleDeepenAll()}
                       disabled={deepenBusy || runInFlight || !lastRunId}
-                      title="把首层之下所有可深化节点一次跑完。不需要的话就别点——按需点节点深化更省。"
+                      title="把图上所有可深化节点一次跑完（每个节点约 1 次调用）。不需要的话就别点——按需点节点深化更省。"
                     >
-                      {deepenBusy ? "深挖中…" : `自动深挖全部（约 ${expandPlan.plannedCalls} 次调用）`}
+                      {deepenBusy ? "深挖中…" : `自动深挖全部（${deepenableCount} 个可深化节点）`}
                     </button>
                   )}
                   {sectionNote && <p className="mindmap-hint">{sectionNote}</p>}
@@ -1008,49 +1021,6 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                       {deepenNote && <p className="mindmap-meta">{deepenNote}</p>}
                     </section>
                   )}
-                  <section className="mindmap-side-sec">
-                    <h3>历史版本</h3>
-                    {/* v48.13：空态但有版本时必须说清楚——否则「尚未生成」会让用户以为成果丢了。
-                        现场：一次失败的收尾把已发布版本置为未激活，用户重开工作区看到的就是「尚未生成」。 */}
-                    {versions.length > 0 && !mapReady && !structure && (
-                      <p className="mindmap-hint">
-                        当前没有已发布的版本，但历史里有 {versions.length} 个——点下面任意一版即可激活查看（成果没有丢）。
-                      </p>
-                    )}
-                    {versions.length === 0 && <p className="mindmap-hint">暂无其他版本。</p>}
-                    <ul className="mindmap-versions">
-                      {versions.map((v) => (
-                        <li key={v.id} className={v.id === activeMap?.id ? "is-active" : ""}>
-                          <button
-                            onClick={async () => {
-                              const meta = await mindmapApi.setActive(v.id);
-                              if (meta) await loadMap({ ...meta, structure: (await mindmapApi.get(v.id))?.structure ?? null });
-                            }}
-                          >
-                            {v.title || "（未命名）"} · {new Date(v.createdAt).toLocaleString()}
-                            {v.isActive ? "（当前）" : ""}
-                          </button>
-                          <button
-                            className="mindmap-version-del"
-                            title="删除此版本"
-                            onClick={async () => {
-                              if (!window.confirm(`删除版本「${v.title || "未命名"}」？该操作不可恢复（生成缓存保留，不影响卡片）。`)) return;
-                              await mindmapApi.remove(v.id);
-                              if (v.id === activeMap?.id) {
-                                const active = await mindmapApi.getActive(documentId, "book");
-                                await refreshVersions();
-                                await loadMap(active);
-                              } else {
-                                await refreshVersions();
-                              }
-                            }}
-                          >
-                            删除
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </section>
                 </>
               )}
               {phase === "empty" && <p className="mindmap-hint">生成 = 用户主动触发 + 发送前预览；无截断，全文实测发送。</p>}
@@ -1061,6 +1031,63 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
               <p className="mindmap-hint">配置 AI Key 后可生成新的材料知识导图。已有导图仍可阅读、展开、跳正文与制卡。</p>
             </section>
           )}
+          {/* v48.13：历史版本 = **只读**操作，必须任何状态都可见。
+              此前它被关在 `hasKey ? … : …` 与 `phase === "done" && structure` 两重条件里，
+              于是「无 Key」或「没有已发布版本」时用户看不到任何版本入口——
+              真实现场：一次失败的收尾把已发布版本置为未激活，用户重开工作区只看到「尚未生成」，
+              以为 73 节点的成果丢了，而版本其实就在库里、点一下就能激活。 */}
+              {/* v48.13：历史版本必须**任何阶段都可见**。此前它被关在 `phase === "done" && structure` 里，
+              于是「没有已发布版本」的空态下用户看不到任何版本——真实现场：一次失败的收尾把已发布版本
+              置为未激活，用户重开工作区只看到「尚未生成」，以为成果丢了，而版本其实就在库里。 */}
+          <section className="mindmap-side-sec">
+            <h3>历史版本</h3>
+            {/* v48.13：空态但有版本时必须说清楚——否则「尚未生成」会让用户以为成果丢了。
+            现场：一次失败的收尾把已发布版本置为未激活，用户重开工作区看到的就是「尚未生成」。 */}
+            {versions.length > 0 && !mapReady && !structure && (
+              <p className="mindmap-hint">
+            当前没有已发布的版本，但历史里有 {versions.length} 个——点下面任意一版即可激活查看（成果没有丢）。
+              </p>
+            )}
+            {versions.length === 0 && <p className="mindmap-hint">暂无其他版本。</p>}
+            <ul className="mindmap-versions">
+              {versions.map((v) => (
+            <li key={v.id} className={v.id === activeMap?.id ? "is-active" : ""}>
+              <button
+                className="mindmap-version-pick"
+                title={`${v.title || "（未命名）"} · ${new Date(v.createdAt).toLocaleString()}`}
+                onClick={async () => {
+                  const meta = await mindmapApi.setActive(v.id);
+                  if (meta) await loadMap({ ...meta, structure: (await mindmapApi.get(v.id))?.structure ?? null });
+                }}
+              >
+                <span className="mindmap-version-title">
+                  {v.title || "（未命名）"}
+                  {v.isActive ? "（当前）" : ""}
+                </span>
+                <span className="mindmap-version-time">{new Date(v.createdAt).toLocaleString()}</span>
+              </button>
+              <button
+                className="mindmap-version-del"
+                title="删除此版本"
+                onClick={async () => {
+                  if (!window.confirm(`删除版本「${v.title || "未命名"}」？该操作不可恢复（生成缓存保留，不影响卡片）。`)) return;
+                  await mindmapApi.remove(v.id);
+                  if (v.id === activeMap?.id) {
+                    const active = await mindmapApi.getActive(documentId, "book");
+                    await refreshVersions();
+                    await loadMap(active);
+                  } else {
+                    await refreshVersions();
+                  }
+                }}
+              >
+                删除
+              </button>
+            </li>
+              ))}
+            </ul>
+          </section>
+
         </aside>
       </div>
     </div>
