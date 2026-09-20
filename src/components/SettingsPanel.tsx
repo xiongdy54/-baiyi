@@ -13,6 +13,7 @@ import { DEFAULT_POPUP_FIELDS } from "../lib/dictClient";
 import { FIELD_LABELS } from "./DictPanel";
 import { eventBus } from "../lib/eventbus";
 import { memoryApi, type MemoryPendingStats, type MemoryStatus } from "../lib/memory";
+import { useDialogA11y } from "../lib/dialogA11y";
 
 export type ThemeMode = "light" | "dark";
 
@@ -1761,6 +1762,7 @@ export default function SettingsPanel({
     { id: "shortcuts", label: "快捷键" }
   ];
   const layoutRef = useRef<HTMLDivElement>(null);
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
 
   // 滚动时同步左导航高亮。此前 activeNav 只在点击时改变：14 项导航 + 单列长滚的
   // 面板里，用户滚到「备份与恢复」，左侧仍亮着「外观」—— 导航会说谎。
@@ -1816,6 +1818,7 @@ export default function SettingsPanel({
     <div className="modal-backdrop" onClick={onClose}>
       <div
         className="modal-panel modal-panel-wide"
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="设置"

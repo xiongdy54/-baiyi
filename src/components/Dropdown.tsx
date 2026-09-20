@@ -1,6 +1,7 @@
 // 直角下拉菜单（瑞士风：paper 底 + hairline + 直角 + hover grey-1；替换原生 select 的圆角弹层）
 // v19 起为共享组件（原 dashboard 专属）；align 控制弹出菜单对齐：right=右缘对齐（仪表盘默认），left=左缘对齐（AI 侧栏等左侧控件用）
 import { useEffect, useRef, useState } from "react";
+import { IconChevronDown } from "./icons";
 
 export interface DropdownOption {
   value: string;
@@ -38,7 +39,7 @@ export default function Dropdown({ value, options, onChange, title, align = "rig
         onClick={() => setOpen((v) => !v)}
       >
         {current?.label ?? value}
-        <span className="dd-caret">▾</span>
+        <IconChevronDown size={12} className="dd-caret" />
       </button>
       {open && (
         <div className={`dd-menu${align === "left" ? " dd-menu-left" : ""}`} role="listbox">

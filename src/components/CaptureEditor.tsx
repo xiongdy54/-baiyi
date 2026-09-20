@@ -7,6 +7,7 @@
 //  · 跨日：非今日的旧草稿默认不混入今天的输入，改由顶部提示条提供「继续写 / 丢弃」。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatClock, journalDateLabel, todayJournalDate, type JournalEntry } from "../lib/journal";
+import { applyAccent } from "../lib/accentVar";
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 const TOAST_MS = 2600;
@@ -21,13 +22,8 @@ export async function applyCaptureAppearance(): Promise<void> {
     document.body.classList.toggle("theme-dark", mode === "dark");
     document.body.classList.toggle("theme-light", mode !== "dark");
     const accent = (await window.settingsAPI?.get("app", "accentColor")) as string | undefined;
-    if (typeof accent === "string" && accent.trim()) {
-      document.documentElement.style.setProperty("--accent", accent);
-      document.documentElement.style.setProperty("--interactive-accent", accent);
-    } else {
-      document.documentElement.style.removeProperty("--accent");
-      document.documentElement.style.removeProperty("--interactive-accent");
-    }
+    // 与主窗口同一入口：自定义 accent 时同步反白档 --accent-on
+    applyAccent(accent);
   } catch {
     document.body.classList.add("theme-light");
   }

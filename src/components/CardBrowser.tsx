@@ -13,6 +13,8 @@ import ContrastCardModal from "./ContrastCardModal";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
 import ImageLightbox from "./ImageLightbox";
+import { IconVolume } from "./icons";
+import { useDialogA11y } from "../lib/dialogA11y";
 import KnowledgeManager from "./KnowledgeManager";
 
 type Preset = "all" | "due" | "leech" | "deferred" | "knowledge";
@@ -368,6 +370,7 @@ function CardDetail({
   /** v34（M12）：今日同源暂缓原因（不在暂缓组时为 undefined） */
   deferredNote?: string;
 }) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [issues, setIssues] = useState<CardIssueRecord[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -448,7 +451,7 @@ function CardDetail({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="卡片详情" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>卡片详情</h2>
           <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
@@ -638,7 +641,7 @@ export function CardFace({
         void playVocabAudio(dj);
       }}
     >
-      🔊
+      <IconVolume />
     </button>
   ) : null;
 
@@ -774,6 +777,7 @@ export function CardFace({
 
 // ---------- Leech 六步处理向导（§8.7） ----------
 export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClose: () => void; onDone: () => void }) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [step, setStep] = useState(0);
   const [diagnosis, setDiagnosis] = useState<{ diagnosis?: string; analysis?: string; suggestions?: string[] } | null>(null);
   const [running, setRunning] = useState(false);
@@ -815,7 +819,7 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
   const steps = ["诊断", "补卡", "问法", "取舍", "暂缓", "助记"];
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="记忆难点六步处理" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>记忆难点 · 六步处理</h2>
           <button className="icon-btn modal-close" title="关闭" onClick={onClose}>

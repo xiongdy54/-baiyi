@@ -16,6 +16,7 @@ import {
   type KnowledgeLintIssue
 } from "../lib/knowledge";
 import { UDC_LEAVES, udcLabel } from "../lib/udc";
+import { IconClose } from "./icons";
 
 type Selected = KnowledgePoint | null;
 
@@ -484,7 +485,7 @@ export default function KnowledgeManager() {
                   <span key={a} className="kmg-chip">
                     {a}
                     <button className="kmg-chip-x" title="删除别名" onClick={() => void removeAlias(a)}>
-                      ×
+                      <IconClose size={12} />
                     </button>
                   </span>
                 ))}

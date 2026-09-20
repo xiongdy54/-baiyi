@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { DictionaryEntry, ReadingContext, VocabKind } from "../lib/dict";
 import { VOCAB_KINDS, VOCAB_KIND_LABEL } from "../lib/dict";
 import { DEFAULT_POPUP_FIELDS, loadVocabKinds, playAudioUrl, saveVocabKinds, speakText } from "../lib/dictClient";
+import { IconVolume } from "./icons";
 
 export interface DictPanelState {
   selectedText: string;
@@ -157,7 +158,7 @@ export function DictPanel({
                 <span className="dict-phon mono">{entry.pronunciation}</span>
               )}
               {fields.audio && can("audio") && (
-                <button className="btn btn-outline btn-sm" title="播放发音" onClick={speak}>🔊</button>
+                <button className="btn btn-outline btn-sm" title="播放发音" aria-label="播放发音" onClick={speak}><IconVolume /></button>
               )}
             </div>
             {fields.definition && (

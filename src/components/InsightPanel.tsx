@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { aiGateway } from "../lib/ai";
 import { createAcceptedCard } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
+import { useDialogA11y } from "../lib/dialogA11y";
 import {
   evidencePackageToMessages,
   insightsApi,
@@ -41,6 +42,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
   onClose: () => void;
   onJumpToDoc?: (docId: string, anchor: { anchorText: string }, returnTo?: "browse") => void;
 }) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [step, setStep] = useState<Step>("range");
   const [rangeKind, setRangeKind] = useState<InsightRangeKind>("30d");
   const [customFrom, setCustomFrom] = useState("");
@@ -250,7 +252,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel ins-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel ins-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="洞察 · 日记与已学知识" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>洞察 · 日记 × 已学知识</h2>
           <button className="icon-btn modal-close" title="关闭" onClick={onClose}>

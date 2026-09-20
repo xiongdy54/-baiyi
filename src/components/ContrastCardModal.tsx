@@ -5,8 +5,11 @@
 import { useEffect, useRef, useState } from "react";
 import { createAcceptedCard, generateContrastDrafts, type CardDraft, type CardRecord } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
+import { useDialogA11y } from "../lib/dialogA11y";
+import { IconAlert } from "./icons";
 
 export default function ContrastCardModal({ card, onClose }: { card: CardRecord; onClose: () => void }) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [running, setRunning] = useState(true);
   const [progress, setProgress] = useState(0);
   const [thinking, setThinking] = useState(false);
@@ -71,7 +74,7 @@ export default function ContrastCardModal({ card, onClose }: { card: CardRecord;
         onClose();
       }}
     >
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="易混对比卡生成结果" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>易混对比卡 · 基于当前卡生成</h2>
           <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
@@ -89,7 +92,7 @@ export default function ContrastCardModal({ card, onClose }: { card: CardRecord;
           )}
           {!running && error && (
             <>
-              <p className="ai-draft-warnings">⚠ {error}</p>
+              <p className="ai-draft-warnings"><IconAlert size={14} /> {error}</p>
               <div className="ai-actions">
                 <button className="btn btn-secondary btn-sm" onClick={() => setReloadKey((k) => k + 1)}>重试</button>
               </div>

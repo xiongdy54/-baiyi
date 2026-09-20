@@ -10,6 +10,7 @@ import {
   defaultLayoutV2, isSaneLayoutV2, toRows, reorder, syncHidden,
   type DashLayoutV2, type WidgetSize
 } from "./layout";
+import { IconGrip } from "../icons";
 
 interface WidgetConfig {
   dataKey: string;
@@ -148,7 +149,7 @@ export default function Dashboard() {
           onDragStart={(e) => { e.dataTransfer.setData("text/widget-id", widgetId); e.dataTransfer.effectAllowed = "move"; setDragId(widgetId); }}
           onDragEnd={() => { setDragId(null); setDropTargetId(null); }}
         >
-          <span className="dash-grip" title="拖动排列">⋮⋮</span>
+          <IconGrip size={16} className="dash-grip" title="拖动排列" />
           <span className="dash-widget-title">{def.title}</span>
           <div className="dash-widget-tools" onClick={(e) => e.stopPropagation()}>
             {chartOptions.length > 1 && (

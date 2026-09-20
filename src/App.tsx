@@ -22,6 +22,7 @@ import { BackgroundActivity } from "./components/BackgroundActivity";
 import { readingWorkflow } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
+import { applyAccent } from "./lib/accentVar";
 
 declare global {
   interface Window {
@@ -157,13 +158,8 @@ export default function App() {
   }, [skinId]);
 
   useEffect(() => {
-    if (accentColor) {
-      document.documentElement.style.setProperty("--interactive-accent", accentColor);
-      document.documentElement.style.setProperty("--accent", accentColor);
-    } else {
-      document.documentElement.style.removeProperty("--interactive-accent");
-      document.documentElement.style.removeProperty("--accent");
-    }
+    // 单一入口：自定义 accent 必须同步 --accent-on，否则浅色 accent 上白字不可读
+    applyAccent(accentColor);
   }, [accentColor]);
 
   async function handleThemeChange(m: ThemeMode) {

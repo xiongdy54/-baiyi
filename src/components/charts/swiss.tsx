@@ -128,9 +128,15 @@ export function chartStreakRuler(streak: number): Box {
   // 轨道
   els.push(L(X0, Y, X0 + W, Y, P.GREY2, 2));
   els.push(L(X0, Y, xOf(streak), Y, P.ACCENT, 2));
-  // 逐日刻度（每 1/14 段一小刺）
-  for (let k = 0; k <= 14; k++) {
-    const x = X0 + (k / 14) * W;
+  // 刻度：量程容得下就逐日一刺（图注「一格 = 一天」才成立）；
+  // 否则退回 1/14 等分，并把图注改成实际的天数跨度。
+  // 原实现恒按 1/14 画刺却把图注写死成「一格 = 一天」——只有 top=14 时才对，
+  // streak≤6 → top=7（一格 0.5 天）、streak 14–29 → top=30（一格 ≈2.1 天）、
+  // streak≥100 → top=150（一格 ≈10.7 天），属于读数失真。
+  const perDay = top <= 31;
+  const tickCount = perDay ? top : 14;
+  for (let k = 0; k <= tickCount; k++) {
+    const x = X0 + (k / tickCount) * W;
     els.push(L(x, Y + 4, x, Y + (k % 7 === 0 ? 9 : 6), P.GREY2, 0.7));
   }
   // 里程碑旗标
@@ -140,7 +146,7 @@ export function chartStreakRuler(streak: number): Box {
     els.push({ ...R(x - 3, Y - 26, 6, 6, reached ? P.ACCENT : P.GREY2), title: `${m} 天里程碑` });
     els.push(T(x, Y + 30, `${m}`, { textAnchor: "middle", fontWeight: 700, fill: reached ? P.INK : P.GREY3 }));
   });
-  els.push(T(X0 + W / 2, 152, "一格 = 一天 · 蓝旗 = 已达成里程碑", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
+  els.push(T(X0 + W / 2, 152, `${perDay ? "一格 = 一天" : `一格 ≈ ${(top / 14).toFixed(1)} 天`} · 蓝旗 = 已达成里程碑`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   return { viewBox: "0 0 460 170", els };
 }
 
@@ -938,9 +944,12 @@ export function chartReadingHist(days: { date: number; chars: number }[]): Box {
 }
 
 // ────────────────────────── 通用 SVG 挂载容器 ──────────────────────────
-export function ChartSvg({ viewBox, els, maxHeight }: { viewBox: string; els: El[]; maxHeight?: number }) {
+export function ChartSvg({ viewBox, els, maxHeight, label }: { viewBox: string; els: El[]; maxHeight?: number; label?: string }) {
+  // role="img" 会把整个子树对读屏隐藏。此前无条件挂 role="img" 又没有可访问名，
+  // 读屏用户从 15 个图表里得到的信息是 0。改为：给了 label 才用 img（并配 aria-label）；
+  // 没给就不设 role，让 SVG 里已有的 <text> 数值节点正常暴露出来。
   return (
-    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid meet" style={{ maxHeight: maxHeight || 320, width: "100%", display: "block" }} role="img">
+    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid meet" style={{ maxHeight: maxHeight || 320, width: "100%", display: "block" }} {...(label ? { role: "img", "aria-label": label } : {})}>
       {els.map((e, i) =>
         e.text !== undefined && e.text !== "" ? (
           <text key={i} {...(e.attrs as object)} fontFamily="inherit">{e.text}</text>

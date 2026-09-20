@@ -1,6 +1,7 @@
 // 查看原图 lightbox（v35）：应用内全图查看——遮挡显隐切换 + 滚轮/按钮缩放 + Esc/背景关闭。
 // 第二查看交互（不进阅读器）：复习与卡片浏览的图片卡共用，遮挡渲染与复习卡面同组件（OcclusionShapes）。
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useDialogA11y } from "../lib/dialogA11y";
 import OcclusionShapes from "./OcclusionShapes";
 import type { OcclusionShape } from "../lib/occlusion";
 
@@ -21,19 +22,13 @@ export default function ImageLightbox({
 }) {
   const [scale, setScale] = useState(1);
   const [showShapes, setShowShapes] = useState(true);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // 此前本组件是全仓唯一绑定了 Esc 的模态；现统一走 useDialogA11y
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
 
   const clamp = (v: number) => Math.min(4, Math.max(0.4, v));
   return (
     <div className="modal-backdrop image-lightbox-backdrop" onClick={onClose}>
-      <div className="image-lightbox" onClick={(e) => e.stopPropagation()}>
+      <div className="image-lightbox" ref={panelRef} role="dialog" aria-modal="true" aria-label="原图查看" onClick={(e) => e.stopPropagation()}>
         <div className="image-lightbox-bar">
           <span className="image-lightbox-title">原图</span>
           <div className="image-lightbox-tools">

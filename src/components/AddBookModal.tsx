@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { libraryApi, BOOK_LANGUAGES } from "../lib/library";
 import { importMany } from "../lib/importRouter";
+import { useDialogA11y } from "../lib/dialogA11y";
 import { eventBus } from "../lib/eventbus";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function AddBookModal({ onSave, onClose }: Props) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
   // v38（D35）：粘贴书的语言（留空=未知，查词时靠句子语境启发）；批量导入的书到书架卡片上设
@@ -61,10 +63,10 @@ export default function AddBookModal({ onSave, onClose }: Props) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="添加书籍" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>添加书籍</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <button className="icon-btn modal-close" title="关闭" aria-label="关闭" onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />

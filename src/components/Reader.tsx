@@ -20,6 +20,8 @@ import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
 import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
 import TocSidebar from "./reader/TocSidebar";
+import { useDialogA11y } from "../lib/dialogA11y";
+import { IconChevronDown, IconAlert, IconClose } from "./icons";
 import {
   DEFAULT_READER_SETTINGS,
   buildLocator,
@@ -650,7 +652,9 @@ export default function Reader({
             let block: HTMLElement | null = node.parentElement;
             while (block && !/^P$|^(H[1-3])$|^LI$|^BLOCKQUOTE$/.test(block.tagName)) block = block.parentElement;
             if (block) {
-              block.style.background = "rgba(0, 47, 167, 0.08)";
+              // 走 Token：原写死 rgba(0,47,167,.08) 是浅色 IKB 的 8%，
+              // 深色模式底色是 #101010，那点蓝几乎看不见（锚点定位提示失效）
+              block.style.background = "var(--accent-soft)";
               window.setTimeout(() => (block!.style.background = ""), 1600);
             }
             return;
@@ -1686,7 +1690,7 @@ export default function Reader({
             <div className="source-peek">
               <div className="source-peek-head">
                 <span>原图对照（未在正文中定位到该图）</span>
-                <button className="source-peek-close" onClick={() => setSourcePeek(null)} title="关闭" aria-label="关闭">×</button>
+                <button className="source-peek-close" onClick={() => setSourcePeek(null)} title="关闭" aria-label="关闭"><IconClose size={16} /></button>
               </div>
               <div className="occlusion-stage source-peek-stage">
                 <img src={sourcePeek.occlusion.assetPath} alt="" className="occlusion-img" />
@@ -1866,6 +1870,7 @@ function ManualCardEditor({
   onCancel: () => void;
   onSave: (payload: ManualCardPayload) => Promise<void>;
 }) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onCancel);
   const [mode, setMode] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
   const [front, setFront] = useState(imageRegion ? "" : quote);
   const [back, setBack] = useState("");
@@ -1933,7 +1938,7 @@ function ManualCardEditor({
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="手动制卡" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>手动制卡</h2>
           <button className="icon-btn modal-close" title="关闭" onClick={onCancel}>
@@ -2107,7 +2112,7 @@ function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[
             >
               {udcLabel(code)}
               {i === 0 && <span className="udc-chip-main mono">主</span>}
-              <span aria-hidden="true">×</span>
+              <IconClose size={12} />
             </button>
           ))}
         </div>
@@ -2116,7 +2121,7 @@ function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[
         <div className="dd">
           <button type="button" className="dd-btn" onClick={() => setOpen((o) => !o)}>
             {value.length === 0 ? "选择领域" : "再加一个领域"}
-            <span className="dd-caret">▾</span>
+            <IconChevronDown size={12} className="dd-caret" />
           </button>
           {open && (
             <div className="dd-menu dd-menu-left udc-menu" role="listbox">
@@ -2515,7 +2520,7 @@ function AIPanel({
                         <div className="ai-draft-notes mono">{toList(d.ruleNotes).join(" · ")}</div>
                       )}
                       {toList(d.warnings).length > 0 && (
-                        <div className="ai-draft-warnings">⚠ {toList(d.warnings).join("；")}</div>
+                        <div className="ai-draft-warnings"><IconAlert size={14} /> {toList(d.warnings).join("；")}</div>
                       )}
                       {/* v46（M14-UM2，§6.7.3）：记忆接地轻标记——成功「情境来自记忆」（点开看引用行），
                           失败「情境来源存疑」（默认不勾选：接受按钮需二次点击确认，不阻断整批） */}

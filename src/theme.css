@@ -307,6 +307,18 @@ select option { background: var(--paper); color: var(--text-primary); }
   font-feature-settings: "tnum";
 }
 
+/* 内联图标（src/components/icons.tsx）在文字流里的基线对齐。
+   这些位置原先用字符代替图标（🔊 ⚠ ▾ × ⋮⋮），换成 SVG 后需要显式对齐。 */
+.ai-draft-warnings svg,
+.udc-chip svg,
+.kmg-chip-x svg,
+.dd-caret,
+.dash-grip {
+  vertical-align: middle;
+  flex: none;
+}
+.ai-draft-warnings svg { margin-right: var(--sp-1); }
+
 .app-shell {
   height: 100vh;
   display: flex;
@@ -1306,6 +1318,10 @@ body.theme-dark .modal-panel {
   flex-direction: column;
   animation: ai-panel-in 150ms var(--ease);
 }
+/* 动效降级：此前 .ai-panel 的入场动画不在任何 reduce 块内（全表其余四处都有） */
+@media (prefers-reduced-motion: reduce) {
+  .ai-panel { animation: none; }
+}
 @keyframes ai-panel-in {
   from { width: 0; opacity: 0.4; }
   to { width: 400px; opacity: 1; }
@@ -1397,8 +1413,8 @@ body.theme-dark .modal-panel {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px; /* 控件档位 sm（原 36px 不在 32/40/48 三档内） */
+  height: 32px;
   margin-top: var(--sp-2);
   border: 1px solid var(--border-subtle);
   background: var(--paper);
@@ -2402,8 +2418,12 @@ body.theme-dark .modal-panel {
   cursor: pointer;
 }
 .cb-row:hover { background: var(--grey-1); }
+/* 表头：规范 Meta 档 + 600 + --grey-1 底（此前只有颜色和字距，字重与底色缺失，
+   与数据行几乎分不开） */
 .cb-row-head {
   cursor: default;
+  font-weight: 600;
+  background: var(--grey-1);
   color: var(--text-helper);
   letter-spacing: 0.04em;
 }
@@ -2513,7 +2533,9 @@ body.theme-dark .modal-panel {
   color: var(--text-secondary);
 }
 
-.dash-widget svg text { font-family: var(--font-sans); }
+/* 图表数字一律 tabular-nums（规范：数字用 mono + tnum，避免轴标宽度抖动）。
+   完整 mono 化需要给数值/类目两类 <text> 分别挂 class，属后续项。 */
+.dash-widget svg text { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
 
 /* 加载骨架 */
 .dash-skeleton { display: flex; flex-direction: column; gap: var(--sp-4); }
@@ -3345,7 +3367,11 @@ body.capture-body #root { height: 100vh; }
   user-select: none;
   -webkit-user-select: none;
 }
-.mindmap-canvas:focus-visible {
+/* 焦点环必须挂在真正可聚焦的元素上：键盘焦点在 .mindmap-workspace
+   （tsx 里 tabIndex={0} + onKeyDown），而 .mindmap-canvas 没有 tabIndex，
+   原规则永不匹配 → 键盘用户在导图里看不到焦点位置。两条都留着以防回归。 */
+.mindmap-canvas:focus-visible,
+.mindmap-workspace:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
