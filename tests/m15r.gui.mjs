@@ -308,10 +308,20 @@ try {
   check("可深化节点：有「深化此节点」、无「展开子树」", dp.deepen === true && dp.expand === false, deepPanel);
   // v48.13：打开已有图（不是刚生成完）时「自动深挖全部」也必须可见——按当前可深化节点数决定
   const deepenAllBtn = await main.eval(
-    `JSON.stringify({ present: [...document.querySelectorAll(".mindmap-sidebar button")].some((b) => b.textContent.includes("自动深挖全部")), label: ([...document.querySelectorAll(".mindmap-sidebar button")].find((b) => b.textContent.includes("自动深挖全部"))||{}).textContent || "" })`
+    `(() => {
+       const b = [...document.querySelectorAll(".mindmap-sidebar button")].find((x) => x.textContent.includes("自动深挖全部"));
+       return JSON.stringify({ present: !!b, label: b ? b.textContent : "", disabled: b ? b.disabled === true : null, cursor: b ? getComputedStyle(b).cursor : "" });
+     })()`
   );
   const dab = JSON.parse(deepenAllBtn || "{}");
   check("打开已有图时「自动深挖全部」可见（此前只在刚生成完那一瞬可见）", dab.present === true && /可深化节点/.test(dab.label), deepenAllBtn);
+  // v48.13：打开已有图时 lastRunId 必然为 null（本轮没生成过）——按钮**不能**因此变灰。
+  // 真实现场：用户生成完初步导图后按钮变灰、悬停出禁止符号、点不动。
+  check(
+    "打开已有图时「自动深挖全部」可点击（不因 lastRunId 为空而禁用）",
+    dab.disabled === false && dab.cursor !== "not-allowed",
+    deepenAllBtn
+  );
   check("可深化节点：说明「没画出来 ≠ 没有更深的内容」", dp.terminalHint === true, deepPanel);
   // 点选「早期自然哲学」（有子结构）→ 只有「展开子树」，没有「深化此节点」
   await main.eval(`(() => { const g = document.querySelector('.mindmap-canvas [data-node-id="l2a1"]'); g?.dispatchEvent(new MouseEvent('click', { bubbles: true })); return !!g; })()`);

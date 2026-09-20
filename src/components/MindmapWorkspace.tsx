@@ -833,7 +833,10 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                 <section className="mindmap-side-sec">
                   <h3>生成范围与覆盖</h3>
                   <p className="mindmap-hint">范围：整份材料（{title}）。章节识别能力完善后将恢复范围选择。</p>
-                  <p className="mindmap-hint">按「详细」标准生成：逐层深挖至作者组织单元的原子结构，永不截断所选范围内的原文。</p>
+                  <p className="mindmap-hint">
+                    生成先落地**一层可用结构**（首层），更深的枝条按需深化——不为你看不到的细节预先付费；
+                    每次深挖都只读该节点对应的原文范围，永不截断。
+                  </p>
                   <button className="btn btn-primary btn-sm mindmap-wide" onClick={handlePreview} disabled={!collect}>
                     {phase === "done" ? "重新生成（先预览）" : "发送前预览"}
                   </button>
@@ -842,10 +845,18 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                     <button
                       className="btn btn-outline btn-sm mindmap-wide"
                       onClick={() => void handleDeepenAll()}
-                      disabled={deepenBusy || runInFlight || !lastRunId}
-                      title="把图上所有可深化节点一次跑完（每个节点约 1 次调用）。不需要的话就别点——按需点节点深化更省。"
+                      // v48.13：**不要**把「本次会话有没有 run」当成禁用条件——
+                      // lastRunId 只在本次会话生成/续跑过才有值，重新打开工作区看已有图时它必然是 null，
+                      // 于是按钮常驻灰色（用户实测：生成完初步导图后按钮变灰、悬停出禁止符号、点不动）。
+                      // handleDeepenAll 已经能在没有 run 时回退到完整管线，所以这里只拦「正在跑」与「正在深挖」。
+                      disabled={deepenBusy || runInFlight}
+                      title={
+                        runInFlight
+                          ? "正在生成/深挖中——等它结束再点（也可以先「停止深挖」）"
+                          : "把图上所有可深化节点一次跑完：每个节点约 1 次调用，另加终编辑与评审各 1 次（章节分析走缓存）。不需要的话就别点——按需点节点深化更省。"
+                      }
                     >
-                      {deepenBusy ? "深挖中…" : `自动深挖全部（${deepenableCount} 个可深化节点）`}
+                      {deepenBusy ? "深挖中…" : runInFlight ? "自动深挖全部（等待当前任务）" : `自动深挖全部（${deepenableCount} 个可深化节点）`}
                     </button>
                   )}
                   {sectionNote && <p className="mindmap-hint">{sectionNote}</p>}
@@ -859,12 +870,12 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                     <li>材料：{title}</li>
                     <li>范围：整份材料</li>
 <li>
-                      计划调用：{(preview.callsTotal || 0) + (preview.fixedCalls || 2)}（首层结构分析 {preview.callsTotal || 0} + 终编辑与评审 {preview.fixedCalls || 2}）
+                      首次生成（首层）：{preview.newCalls || 0} 次结构分析调用——终编辑与评审要等后续完整生成／「自动深挖全部」时才跑（{preview.fixedCalls || 2} 次）
                     </li>
                     <li>缓存命中：{preview.cacheHits || 0}</li>
-                    <li>需发送：{(preview.newCalls || 0) + (preview.fixedCalls || 2)}</li>
+                    <li>需发送：{preview.newCalls || 0}（首层）</li>
                     <li>
-                      详细展开（深挖）：首层完成后**精确**给出首波计划；总调用上限＝本次预算 {preview.budget || 300}（全局预算，含 section/深挖/补漏/归并/评审）
+                      深挖：首层完成后按需进行（点节点深化，或侧栏「自动深挖全部」）；单轮总调用上限＝本次预算 {preview.budget || 300}（全局预算，含 section/深挖/补漏/归并/评审）
                     </li>
                     <li>
                       当前策略：批量深挖 {preview.strategy?.expandBatch ?? 1} 个/次 · 递归深度 {preview.strategy?.expandDepth ?? 1} · 原子启发式{" "}
