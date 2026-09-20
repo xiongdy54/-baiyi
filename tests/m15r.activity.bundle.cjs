@@ -28,7 +28,8 @@ __export(m15r_activity_entry_exports, {
   installActivityStore: () => installActivityStore,
   listTasks: () => listTasks,
   primaryTask: () => primaryTask,
-  resetActivity: () => resetActivity
+  resetActivity: () => resetActivity,
+  seedFromRuns: () => seedFromRuns
 });
 module.exports = __toCommonJS(m15r_activity_entry_exports);
 
@@ -133,6 +134,32 @@ function primaryTask() {
   const pool = active.length ? active : all;
   return pool[pool.length - 1];
 }
+function seedFromRuns(runs) {
+  let changed = false;
+  for (const r of runs || []) {
+    if (tasks.has(r.id)) continue;
+    if (r.status !== "interrupted" && r.status !== "section_ready") continue;
+    const phase = r.status === "section_ready" ? "section_ready" : "interrupted";
+    tasks.set(r.id, {
+      runId: r.id,
+      documentId: r.documentId || null,
+      title: r.materialTitle || null,
+      phase,
+      label: null,
+      done: Number(r.callsDone) || 0,
+      total: 0,
+      calls: Number(r.callsDone) || 0,
+      budget: 0,
+      mapId: null,
+      published: phase === "section_ready",
+      issues: null,
+      code: r.status === "section_ready" ? null : "interrupted",
+      updatedAt: Number(r.updatedAt) || Date.now()
+    });
+    changed = true;
+  }
+  if (changed) emitChange();
+}
 function resetActivity() {
   tasks.clear();
   emitChange();
@@ -203,6 +230,15 @@ function describeTask(t) {
         percent: null,
         canOpen: false
       };
+    case "interrupted":
+      return {
+        short: "\u5BFC\u56FE\u751F\u6210\u88AB\u4E2D\u65AD \xB7 \u53EF\u7EE7\u7EED",
+        heading: title,
+        detail: "\u5E94\u7528\u5173\u95ED\u65F6\u8FD9\u4E00\u8F6E\u6CA1\u8DD1\u5B8C\uFF08\u4E0D\u662F\u5931\u8D25\uFF09\u3002\u5DF2\u5B8C\u6210\u7684\u9636\u6BB5\u4FDD\u7559\u5728\u7F13\u5B58\uFF0C\u7EE7\u7EED\u751F\u6210\u96F6\u91CD\u590D\u8BA1\u8D39\u3002",
+        tone: "partial",
+        percent: pct,
+        canOpen: true
+      };
     case "cancelled":
     default:
       return { short: "\u5DF2\u53D6\u6D88", heading: title, detail: "\u5DF2\u5B8C\u6210\u7684\u9636\u6BB5\u4FDD\u7559\u5728\u7F13\u5B58\uFF0C\u91CD\u65B0\u751F\u6210\u4F1A\u81EA\u52A8\u7EED\u8DD1\u3002", tone: "warn", percent: null, canOpen: false };
@@ -230,5 +266,6 @@ function failureReason(code) {
   installActivityStore,
   listTasks,
   primaryTask,
-  resetActivity
+  resetActivity,
+  seedFromRuns
 });

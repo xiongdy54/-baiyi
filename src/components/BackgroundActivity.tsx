@@ -20,7 +20,7 @@ interface BackgroundActivityProps {
    * 打开某份材料的导图（由 App 负责导航：必要时先进入阅读器）。
    * mapId = 要展示的版本——候选版本按发布模型不激活，但用户点「打开导图」就该看到刚生成的那一版。
    */
-  onOpenMap: (documentId: string, mapId?: string | null) => void;
+  onOpenMap: (documentId: string, mapId?: string | null, resumeRunId?: string | null) => void;
 }
 
 export function BackgroundActivity({ onOpenMap }: BackgroundActivityProps) {
@@ -70,7 +70,11 @@ export function BackgroundActivity({ onOpenMap }: BackgroundActivityProps) {
   if (!task || !view) return null;
 
   const openMap = () => {
-    if (task.documentId) onOpenMap(task.documentId, task.mapId);
+    if (!task.documentId) return;
+    // v48.13 P3：被应用关闭打断的 run → 打开导图的同时续跑（同 runId，缓存命中、零重复计费）；
+    // 首层就绪的 run 不自动续跑——按需深化（P4）由用户点具体节点决定。
+    const resumeRunId = task.phase === "interrupted" ? task.runId : null;
+    onOpenMap(task.documentId, task.mapId, resumeRunId);
   };
   const primaryClick = () => {
     if (view.canOpen) openMap();
@@ -115,7 +119,8 @@ export function BackgroundActivity({ onOpenMap }: BackgroundActivityProps) {
               打开导图
             </button>
           )}
-          {!["completed", "partial", "failed", "cancelled", "review_failed"].includes(task.phase) && (
+          {/* 只有**正在跑**的才谈得上取消：被中断/首层就绪的 run 已经不在运行，给「取消」是假动作 */}
+          {["running"].includes(task.phase) && (
             <button
               type="button"
               className="bg-activity-btn"

@@ -126,5 +126,41 @@ A.dismissTask("run-new");
 A.dismissAllFinished();
 check("A5③：批量清理后指示器消失（返回 null，不渲染）", A.primaryTask() === null && A.describeTask(null) === null, A.listTasks());
 
+console.log("---- M15R-A6 v48.13 P3 重启续跑：被打断 ≠ 失败（启动播种） ----");
+{
+  A.resetActivity();
+  // 模拟应用重启后从主进程取回的「可续跑运行」
+  A.seedFromRuns([
+    { id: "run-interrupted", documentId: "doc-a", status: "interrupted", materialTitle: "优绩主义", callsDone: 7, updatedAt: 2000 },
+    { id: "run-ready", documentId: "doc-a", status: "section_ready", materialTitle: "优绩主义", callsDone: 2, updatedAt: 3000 },
+    { id: "run-done", documentId: "doc-a", status: "completed", materialTitle: "优绩主义", callsDone: 9, updatedAt: 1000 }
+  ]);
+  {
+    const t = A.primaryTask();
+    check("A6①：播种后指示器出现（用户能看到「上次那轮可以继续」）", Boolean(t), t);
+    check("A6②：已完成的运行不参与播种（不反复提示已完成）", A.listTasks().every((x) => x.runId !== "run-done"), A.listTasks().map((x) => x.runId));
+  }
+  {
+    const t = A.listTasks().find((x) => x.runId === "run-interrupted");
+    check("A6③：被关闭打断 → phase=interrupted 而非 failed", t && t.phase === "interrupted", t && t.phase);
+    const v = A.describeTask(t);
+    check("A6④：文案是「被中断 · 可继续」而不是失败", v.short.includes("被中断") && v.short.includes("可继续") && v.tone === "partial", v);
+    check("A6⑤：明说不是失败、缓存保留、零重复计费", v.detail.includes("不是失败") && v.detail.includes("零重复计费"), v);
+    check("A6⑥：可打开（续跑入口）", v.canOpen === true, v);
+  }
+  {
+    const t = A.listTasks().find((x) => x.runId === "run-ready");
+    const v = A.describeTask(t);
+    check("A6⑦：首层就绪的旧 run →「可继续深化」而非失败", v.short.includes("可继续深化") && t.phase === "section_ready", { s: v.short, p: t.phase });
+  }
+  {
+    // 续跑开始后广播到达 → 同一 runId 由「被中断」变回「运行中」
+    emit({ runId: "run-interrupted", documentId: "doc-a", title: "优绩主义", stage: "running", done: 1, total: 4 });
+    const t = A.primaryTask();
+    check("A6⑧：续跑的进度广播接管同一 runId（状态回到运行中）", t.runId === "run-interrupted" && t.phase === "running", t);
+  }
+  A.resetActivity();
+}
+
 console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
 if (fail) process.exit(1);

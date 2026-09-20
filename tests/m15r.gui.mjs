@@ -193,14 +193,28 @@ try {
       model_config_hash, node_remap_json, is_active, created_at, updated_at, sync_version, is_deleted)
       VALUES ('guimap0', 'local-user', '${realDocId}', 'book', 'book', 'detailed', ?, '{"version":1,"nodes":[]}', 0, 'h', 3, 'gui-preset', 'stub', 'stub', 'h', NULL, 0, ?, ?, 0, 0)`,
       [M + " 旧版本", Date.now() - 1000, Date.now() - 1000]);
+    // v48.13 P3：预置一条「被应用关闭打断」的 run —— 重启后应被识别为可续跑（不是失败）
+    db.run(`INSERT INTO material_map_runs (id, user_id, document_id, scope_anchor, scope_kind, granularity, status, stage,
+      calls_done, chars, error_code, error_text, created_at, updated_at, sync_version, is_deleted)
+      VALUES ('guirun1', 'local-user', '${realDocId}', 'book', 'book', 'detailed', 'interrupted', 'expand',
+      7, 12345, 'interrupted', '运行被应用关闭打断（启动对账）；已完成分片保留在缓存，继续生成零重复计费', ?, ?, 0, 0)`,
+      [Date.now() - 60000, Date.now() - 60000]);
     fs.writeFileSync(dbFile, Buffer.from(db.export()));
   }
-  check("会话 2 前置：导图行已预置 library.db", true, "");
+  check("会话 2 前置：导图行 + 一条 interrupted 运行已预置 library.db", true, "");
 
   // 7. 会话 2：重启 → 完整行为链（真实路径：getActive → loadMap → 渲染 / 适应窗口 / 删除）
   electron = spawnApp();
   main = await connectTarget((u) => u.includes("index.html"), "主窗口2");
   await wait(2500);
+  // v48.13 P3：应用重启后应能发现未跑完的运行，并提示「可继续」（而不是记成失败）
+  await wait(1200);
+  const resumePill = await main.eval(`(() => {
+    const el = document.querySelector(".bg-activity .bg-activity-text");
+    return JSON.stringify({ present: !!el, text: el ? el.textContent : "" });
+  })()`);
+  const rp = JSON.parse(resumePill || "{}");
+  check("重启后可续跑运行被识别（指示器出现且非失败口径）", rp.present === true && rp.text.includes("继续") && !rp.text.includes("失败"), resumePill);
   await main.eval(clickByText(".nav-item", "书架"));
   await wait(700);
   const opened2 = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK}")); c?.click(); return !!c; })()`);

@@ -42,6 +42,11 @@ interface MindmapWorkspaceProps {
    * 刚生成的那一版，而不是被迫先看旧图再手动切换。**只切展示，不改 active**。
    */
   initialMapId?: string | null;
+  /**
+   * v48.13（P3）：以同一 run 续跑——应用重启后发现该 run 被关闭打断，用户点「继续生成」进入时携带。
+   * 收集完原文后自动续跑（同 runId → 已完成分片全部命中缓存，零重复计费）。
+   */
+  initialResumeRunId?: string | null;
 }
 
 function resolveTheme() {
@@ -60,7 +65,7 @@ function resolveTheme() {
   };
 }
 
-export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCardsFromNode, initialMapId }: MindmapWorkspaceProps) {
+export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCardsFromNode, initialMapId, initialResumeRunId }: MindmapWorkspaceProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [collect, setCollect] = useState<{ tocItems: { anchor: string; label: string; children?: unknown[] }[]; unitAnchors: string[]; textByUnit: Record<string, string> } | null>(null);
   const [collectMsg, setCollectMsg] = useState("");
@@ -175,6 +180,15 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       const active = wanted && wanted.structure ? wanted : await mindmapApi.getActive(documentId, "book");
       if (!alive) return;
       await loadMap(active);
+      // v48.13 P3：应用重启后「继续生成」——原文已收集完毕，直接以同一 run 续跑
+      if (initialResumeRunId) {
+        setPhase("running");
+        setCancelRequested(false);
+        setExpandPlan(null);
+        setPartialNote("");
+        const next = await runDeepen(initialResumeRunId);
+        if (alive && next) await applyResult(next, { resume: true });
+      }
     })();
     return () => {
       alive = false;

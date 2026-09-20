@@ -116,6 +116,22 @@ export interface MapRunRecord {
   createdAt: number;
 }
 
+/** v48.13 P3（D47）：可续跑的运行（应用重启后发现；`interrupted` = 被关闭打断，`section_ready` = 首层就绪待续跑） */
+export interface ResumableMapRun {
+  id: string;
+  documentId: string;
+  status: string;
+  stage: string | null;
+  scopeAnchor: string;
+  granularity: string;
+  callsDone: number | null;
+  chars: number | null;
+  /** 材料标题（主进程连表带出，指示器不必再回查） */
+  materialTitle: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface MapIssue {
   nodeId: string;
   type: string;
@@ -248,6 +264,8 @@ declare global {
       setActive: (id: string) => Promise<MaterialMapMeta | null>;
       remove: (id: string) => Promise<boolean>;
       runs: (documentId: string) => Promise<MapRunRecord[]>;
+  /** v48.13 P3：可续跑运行（全局，不限文档） */
+  pendingRuns: () => Promise<ResumableMapRun[]>;
       learningStatus: (documentId: string, nodeIds: string[]) => Promise<Record<string, { cardCount: number; kpExists: boolean }>>;
       onChanged: (cb: (payload: { runId?: string; stage?: string; done?: number; total?: number; label?: string; mapId?: string }) => void) => () => void;
     };
@@ -266,6 +284,7 @@ export const mindmapApi = {
   setActive: (id: string) => window.mindmapAPI?.setActive(id) ?? Promise.resolve(null),
   remove: (id: string) => window.mindmapAPI?.remove(id) ?? Promise.resolve(false),
   runs: (documentId: string) => window.mindmapAPI?.runs(documentId) ?? Promise.resolve([]),
+  pendingRuns: () => window.mindmapAPI?.pendingRuns() ?? Promise.resolve([]),
   learningStatus: (documentId: string, nodeIds: string[]) => window.mindmapAPI?.learningStatus(documentId, nodeIds) ?? Promise.resolve({}),
   onChanged: (cb: (payload: { runId?: string; stage?: string; done?: number; total?: number; label?: string; mapId?: string }) => void) =>
     window.mindmapAPI?.onChanged(cb) ?? (() => {})

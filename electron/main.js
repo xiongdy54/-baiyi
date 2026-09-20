@@ -1147,6 +1147,8 @@ ipcMain.handle("mindmap:generate", (_e, params) =>
   );
 // v48.13 P4：增量深化——「展开」是纯 UI（零调用），「深化」走这里创建后台任务
 ipcMain.handle("mindmap:deepen", (_e, params) => mindmapEngine.deepen(mindmapCtx(), params || {}));
+// v48.13 P3（D47）：可续跑运行——应用重启后发现未跑完的 run，供指示器提示「可继续生成」
+ipcMain.handle("mindmap:pendingRuns", () => dbModule.listResumableMaterialMapRuns());
 ipcMain.handle("mindmap:cancel", (_e, runId) => {
   mindmapEngine.cancelRun(runId);
   return true;
@@ -1346,7 +1348,8 @@ app.whenReady().then(async () => {
   // 启动时统一收敛为 failed_timeout；已完成分片保留在缓存，重新生成自动续跑。失败不阻塞启动。
   try {
     const n = dbModule.reconcileStaleMaterialMapRuns();
-    if (n) console.log(`[mindmap] 启动对账：${n} 条未收敛的运行已标记 failed_timeout`);
+    // v48.13 P3：收敛为 interrupted（不是 failed）——关掉应用不等于任务失败，续跑零重复计费
+    if (n) console.log(`[mindmap] 启动对账：${n} 条运行因应用关闭被标记 interrupted（可继续生成，缓存保留）`);
   } catch (err) {
     console.error("[mindmap] 启动对账失败：", err);
   }

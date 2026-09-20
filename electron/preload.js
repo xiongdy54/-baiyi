@@ -289,6 +289,8 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
   generate: (params) => ipcRenderer.invoke("mindmap:generate", params || {}),
   // v48.13 P4：增量深化（展开已有子结构是纯 UI，不发请求）
   deepen: (params) => ipcRenderer.invoke("mindmap:deepen", params),
+  // v48.13 P3：可续跑运行（应用重启后发现未跑完的 run）
+  pendingRuns: () => ipcRenderer.invoke("mindmap:pendingRuns"),
   cancel: (runId) => ipcRenderer.invoke("mindmap:cancel", runId),
   repairConfirm: (runId) => ipcRenderer.invoke("mindmap:repairConfirm", runId),
   list: (documentId) => ipcRenderer.invoke("mindmap:list", documentId),

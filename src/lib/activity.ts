@@ -15,7 +15,9 @@ export type ActivityPhase =
   | "partial"
   | "review_failed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  /** v48.13 P3：应用关闭打断（**不是失败**）——可继续生成，缓存保留 */
+  | "interrupted";
 
 export interface ActivityTask {
   runId: string;
@@ -53,6 +55,8 @@ export interface MindmapProgressPayload {
 }
 
 const TERMINAL: ActivityPhase[] = ["completed", "partial", "review_failed", "failed", "cancelled"];
+/** 「待用户处置」而非「跑完」：可继续生成/深化，指示器要长期保留入口 */
+const RESUMABLE: ActivityPhase[] = ["interrupted", "section_ready"];
 
 const tasks = new Map<string, ActivityTask>();
 const listeners = new Set<() => void>();
@@ -125,6 +129,39 @@ export function primaryTask(): ActivityTask | null {
   const active = all.filter((t) => !TERMINAL.includes(t.phase));
   const pool = active.length ? active : all;
   return pool[pool.length - 1];
+}
+
+/**
+ * v48.13 P3（D47）：应用启动时用「可续跑运行」播种指示器。
+ * 这些 run 在内存里没有对应任务（应用重启过），但用户需要看到「上次那轮可以继续」。
+ */
+export function seedFromRuns(runs: { id: string; documentId: string; status: string; materialTitle?: string | null; callsDone?: number | null; updatedAt?: number }[]) {
+  let changed = false;
+  for (const r of runs || []) {
+    if (tasks.has(r.id)) continue;
+    // 只接受「可继续」的两种状态；其余（completed/failed/...）一律不播种——
+    // 宁可少提示，也不能把已完成的图显示成「被中断可继续」。
+    if (r.status !== "interrupted" && r.status !== "section_ready") continue;
+    const phase: ActivityPhase = r.status === "section_ready" ? "section_ready" : "interrupted";
+    tasks.set(r.id, {
+      runId: r.id,
+      documentId: r.documentId || null,
+      title: r.materialTitle || null,
+      phase,
+      label: null,
+      done: Number(r.callsDone) || 0,
+      total: 0,
+      calls: Number(r.callsDone) || 0,
+      budget: 0,
+      mapId: null,
+      published: phase === "section_ready",
+      issues: null,
+      code: r.status === "section_ready" ? null : "interrupted",
+      updatedAt: Number(r.updatedAt) || Date.now()
+    });
+    changed = true;
+  }
+  if (changed) emitChange();
 }
 
 export function subscribe(fn: () => void): () => void {
@@ -229,6 +266,15 @@ export function describeTask(t: ActivityTask | null): IndicatorView | null {
         tone: "error",
         percent: null,
         canOpen: false
+      };
+    case "interrupted":
+      return {
+        short: "导图生成被中断 · 可继续",
+        heading: title,
+        detail: "应用关闭时这一轮没跑完（不是失败）。已完成的阶段保留在缓存，继续生成零重复计费。",
+        tone: "partial",
+        percent: pct,
+        canOpen: true
       };
     case "cancelled":
     default:

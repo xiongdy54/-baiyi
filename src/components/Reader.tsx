@@ -70,6 +70,8 @@ interface Props {
   onMindmapOpened?: () => void;
   /** v48.13（P2）：要展示的导图版本 id（候选版本——不激活但仍应被看到） */
   openMindmapMapId?: string | null;
+  /** v48.13（P3）：以同一 run 续跑（应用重启后发现未跑完的运行） */
+  resumeRunId?: string | null;
 }
 
 type SelectionAction = "manual" | "ai-cards" | null;
@@ -158,7 +160,8 @@ export default function Reader({
   onSwitchAppTheme,
   openMindmapInitially,
   onMindmapOpened,
-  openMindmapMapId
+  openMindmapMapId,
+  resumeRunId
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
@@ -1828,6 +1831,7 @@ export default function Reader({
           documentId={contextRef.documentId}
           title={title || sourceTitle || "未命名材料"}
           initialMapId={openMindmapMapId || null}
+          initialResumeRunId={resumeRunId || null}
           onBack={() => setMindmapOpen(false)}
           onMakeCardsFromNode={(payload) => {
             setMindmapOpen(false);

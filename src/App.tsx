@@ -16,8 +16,8 @@ import { libraryApi, type DocPayload } from "./lib/library";
 import { installJournalBridge, shortcutsApi } from "./lib/journal";
 import { installInsightBridge } from "./lib/insight";
 import { installMemoryBridge } from "./lib/memory";
-import { installMindmapBridge } from "./lib/mindmap";
-import { installActivityStore } from "./lib/activity";
+import { installMindmapBridge, mindmapApi } from "./lib/mindmap";
+import { installActivityStore, seedFromRuns } from "./lib/activity";
 import { BackgroundActivity } from "./components/BackgroundActivity";
 import { readingWorkflow } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
@@ -43,6 +43,8 @@ type View =
       openMindmap?: boolean;
       /** v48.13（P2）：要展示的导图版本（候选版本——按发布模型不激活，但用户点了就该看到它） */
       openMindmapMapId?: string | null;
+      /** v48.13（P3）：以同一 run 续跑（应用重启后发现未跑完的运行） */
+      resumeRunId?: string | null;
     }
   | { name: "queue" }
   | { name: "review" }
@@ -116,6 +118,25 @@ export default function App() {
     installMindmapBridge(); // v48.9：导图生成进度桥（批3 遗漏——进度曾永远停在初始值）
     // v48.13（P2）：导图广播 → 全局活动状态（右下角指示器的唯一数据源；与所在界面无关）
     installActivityStore();
+    // v48.13（P3）：启动时用「可续跑运行」播种指示器——上次被关闭打断的那轮，
+    // 用户需要看到「可以继续」，而不是在账本上被记成一次失败。
+    void (async () => {
+      try {
+        const pending = await mindmapApi.pendingRuns();
+        seedFromRuns(
+          (pending || []).map((r) => ({
+            id: r.id,
+            documentId: r.documentId,
+            status: r.status,
+            materialTitle: r.materialTitle,
+            callsDone: r.callsDone,
+            updatedAt: r.updatedAt
+          }))
+        );
+      } catch {
+        /* 播种失败不影响启动 */
+      }
+    })();
     return shortcutsApi.onOpenAddMaterial(() => setAddMaterialOpen(true));
   }, []);
 
@@ -209,9 +230,9 @@ export default function App() {
   // v48.13（P2）：右下角指示器「打开导图」——已在读该材料则就地打开工作区，
   // 否则先按 documentId 找回书架条目、载入内核，再带 openMindmap 标记进入（Reader 挂载后自动打开）。
   const openMaterialMap = useCallback(
-    async (documentId: string, mapId?: string | null) => {
+    async (documentId: string, mapId?: string | null, resumeRunId?: string | null) => {
       if (view.name === "reader" && view.doc.documentId === documentId) {
-        setView({ ...view, openMindmap: true, openMindmapMapId: mapId ?? null });
+        setView({ ...view, openMindmap: true, openMindmapMapId: mapId ?? null, resumeRunId: resumeRunId ?? null });
         return;
       }
       const itemId = await libraryApi.getItemIdByDocumentId(documentId);
@@ -219,7 +240,7 @@ export default function App() {
       const doc = await libraryApi.getDocument(itemId);
       if (!doc) return;
       const book = await loadReaderBook(itemId, doc);
-      setView({ name: "reader", itemId, doc, book, openMindmap: true, openMindmapMapId: mapId ?? null });
+      setView({ name: "reader", itemId, doc, book, openMindmap: true, openMindmapMapId: mapId ?? null, resumeRunId: resumeRunId ?? null });
     },
     [view, loadReaderBook]
   );
@@ -351,7 +372,8 @@ export default function App() {
         onProgress={view.jumpAnchor ? undefined : handleDocProgress}
         openMindmapInitially={Boolean(view.openMindmap)}
         openMindmapMapId={view.openMindmapMapId ?? null}
-        onMindmapOpened={() => setView((v) => (v.name === "reader" ? { ...v, openMindmap: false } : v))}
+        resumeRunId={view.resumeRunId ?? null}
+        onMindmapOpened={() => setView((v) => (v.name === "reader" ? { ...v, openMindmap: false, resumeRunId: null } : v))}
       />
     );
   } else if (view.name === "queue") {
@@ -453,7 +475,7 @@ export default function App() {
       </header>
       {mainContent}
       {/* v48.13（P2）：全局后台活动指示器——生成任务在主进程持有，与当前界面无关 */}
-      <BackgroundActivity onOpenMap={(documentId, mapId) => void openMaterialMap(documentId, mapId)} />
+      <BackgroundActivity onOpenMap={(documentId, mapId, resumeRunId) => void openMaterialMap(documentId, mapId, resumeRunId)} />
       {addMaterialOpen && (
         <AddBookModal
           onSave={async (title, markdown, lang) => {

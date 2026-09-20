@@ -4440,7 +4440,14 @@ function listMaterialMapCalls(runId, limit = 2000) {
   }));
 }
 
-/** 启动对账：把超过阈值的 running/estimating/pending 运行收敛为 failed_timeout（防永久僵尸） */
+/**
+ * 启动对账：把超过阈值的 running/estimating/pending 运行收敛为 **interrupted**（防永久僵尸）。
+ *
+ * v48.13 P3（D47）：**不得把正常退出等价于任务失败**——此前收敛为 `failed_timeout`，
+ * 于是「关掉应用」在账本上被记成超时失败，用户看到的也是失败。现改为 `interrupted`：
+ * 语义是「被应用关闭打断」，已完成分片保留在缓存，续跑零重复计费，并且可被 P3 的
+ * 「发现未完成 run 并继续」重新拾起（`listResumableMaterialMapRuns`）。
+ */
 function reconcileStaleMaterialMapRuns(maxAgeMs = 30 * 60 * 1000) {
   const cutoff = Date.now() - Math.max(60 * 1000, Number(maxAgeMs) || 0);
   const rows = queryAll(
@@ -4448,14 +4455,33 @@ function reconcileStaleMaterialMapRuns(maxAgeMs = 30 * 60 * 1000) {
     [cutoff]
   );
   for (const r of rows) {
-    db.run("UPDATE material_map_runs SET status = 'failed_timeout', error_code = 'stale_run', error_text = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [
-      "运行在应用关闭/中断后未收敛（启动对账）；已完成分片保留在缓存，重新生成将自动续跑",
+    db.run("UPDATE material_map_runs SET status = 'interrupted', error_code = 'interrupted', error_text = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [
+      "运行被应用关闭打断（启动对账）；已完成分片保留在缓存，继续生成零重复计费",
       Date.now(),
       r.id
     ]);
   }
   if (rows.length) persist();
   return rows.length;
+}
+
+/**
+ * v48.13 P3（D47）：**可续跑的运行**——应用重启后自动发现，供全局指示器提示「可继续生成」。
+ * 两类：① `interrupted`（被关闭打断）；② `section_ready`（首层就绪、深挖待续跑，本就是可继续状态）。
+ * 带上材料标题，指示器不必再回查一次。
+ */
+function listResumableMaterialMapRuns(limit = 20) {
+  const rows = queryAll(
+    `SELECT r.*, i.title AS material_title
+       FROM material_map_runs r
+       LEFT JOIN documents d ON d.id = r.document_id AND d.is_deleted = 0
+       LEFT JOIN library_items i ON i.id = d.library_item_id
+      WHERE r.is_deleted = 0 AND r.status IN ('interrupted','section_ready')
+      ORDER BY r.updated_at DESC
+      LIMIT ?`,
+    [Math.max(1, Number(limit) || 20)]
+  );
+  return rows.map((r) => ({ ...mapMaterialMapRunRow(r), materialTitle: r.material_title || null }));
 }
 
 module.exports = {
@@ -4603,5 +4629,6 @@ module.exports = {
   saveMaterialMapCall,
   listMaterialMapCalls,
   reconcileStaleMaterialMapRuns,
+  listResumableMaterialMapRuns,
   listMindmapLearningStatus
 };

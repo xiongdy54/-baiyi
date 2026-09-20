@@ -6,6 +6,7 @@ export {
   listTasks,
   dismissTask,
   dismissAllFinished,
-  resetActivity
+  resetActivity,
+  seedFromRuns
 } from "../src/lib/activity";
 export { eventBus } from "../src/lib/eventbus";

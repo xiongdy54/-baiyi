@@ -99,6 +99,33 @@ app.whenReady().then(async () => {
     check("导图写路径零改 review_logs（FSRS 证据）", JSON.stringify(db.listAllReviewLogs()) === logsBefore, "");
     check("导图写路径零写 knowledge_points（用户知识图谱）", JSON.stringify(db.listKnowledgePoints()) === kpBefore, "");
 
+    console.log("---- M15R-DB-P3 v48.13 重启续跑：被打断 ≠ 失败 ----");
+    {
+      // 造一条「应用被关闭时还在跑」的 run：状态 running 且 updated_at 已过期（对账阈值 30 分钟）
+      const item = db.createFromPaste("续跑测试材料", "# 第一章"+String.fromCharCode(10)+"正文");
+      const realDocId = item && item.documentId ? item.documentId : "doc-resume";
+      const stale = db.createMaterialMapRun({ documentId: realDocId, scopeAnchor: "book", granularity: "detailed", input: { scope: "book" } });
+      db.updateMaterialMapRun(stale.id, { status: "running", stage: "expand", callsDone: 7, chars: 1234 });
+      // 把 updated_at 拨到 2 小时前（对账阈值默认 30 分钟）——真正走一遍启动对账路径
+      db.execRawSql("UPDATE material_map_runs SET updated_at = ? WHERE id = ?", [Date.now() - 2 * 60 * 60 * 1000, stale.id]);
+      const n = db.reconcileStaleMaterialMapRuns();
+      check("对账收敛过期运行", n >= 1, ">=1", n);
+      const after = db.getMaterialMapRun(stale.id);
+      check("被打断的运行记为 interrupted（**不是**失败）", after.status === "interrupted" && after.errorCode === "interrupted", "interrupted", { s: after.status, c: after.errorCode });
+      check("错误文案说明可继续且零重复计费", String(after.errorText).includes("继续生成零重复计费"), "含「继续生成零重复计费」", after.errorText);
+      const resumable = db.listResumableMaterialMapRuns();
+      const hit = resumable.find((r) => r.id === stale.id);
+      check("可续跑列表含该 run（应用重启后可发现）", Boolean(hit), "含 stale", resumable.map((r) => [r.id, r.status]));
+      check("可续跑列表带材料标题（指示器不必回查）", hit && hit.materialTitle === "续跑测试材料", "续跑测试材料", hit && hit.materialTitle);
+
+      // section_ready 也属于「可继续」：首层就绪、深挖待续跑
+      const ready = db.createMaterialMapRun({ documentId: realDocId, scopeAnchor: "book", granularity: "detailed", input: {} });
+      db.updateMaterialMapRun(ready.id, { status: "section_ready", stage: "section_ready" });
+      check("首层就绪的运行也在可续跑列表中", db.listResumableMaterialMapRuns().some((r) => r.id === ready.id && r.status === "section_ready"), "含 section_ready", db.listResumableMaterialMapRuns().map((r) => r.status));
+      db.updateMaterialMapRun(ready.id, { status: "completed" });
+      check("已完成的运行不出现在可续跑列表（不反复提示已完成的图）", !db.listResumableMaterialMapRuns().some((r) => r.id === ready.id), "不含 completed", db.listResumableMaterialMapRuns().map((r) => r.status));
+    }
+
     console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
     if (fail) {
       console.log("FAILED items exist");
