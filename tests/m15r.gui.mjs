@@ -367,6 +367,36 @@ try {
   const re = JSON.parse(recEmpty || "{}");
   check("空态：历史版本区可见且列出未激活版本（不再「找不到入口」）", re.versionSection === true && re.versionCount === 1, recEmpty);
   check("空态：明确告知成果没丢、点一版即可激活", re.hint === true, recEmpty);
+  // v48.13：**几何断言**——只断言「元素存在」会漏掉尺寸错误。
+  // 真实现场（用户截图）：`.mindmap-versions button{width:100%}`（0-1-1）压过 `.mindmap-version-del`（0-1-0），
+  // 两个按钮都想要整行宽 → 标题格被挤成一条竖条、删除按钮撑满并溢出区域边界。
+  const geo = await main.eval(`(() => {
+    const row = document.querySelector(".mindmap-versions");
+    const sec = row?.closest(".mindmap-side-sec");
+    const pick = document.querySelector(".mindmap-versions .mindmap-version-pick");
+    const del = document.querySelector(".mindmap-versions .mindmap-version-del");
+    if (!row || !sec || !pick || !del) return JSON.stringify({ missing: true });
+    const r = (el) => el.getBoundingClientRect();
+    const rr = r(row), sr = r(sec), pr = r(pick), dr = r(del);
+    // rowW = 行容器的**内容**宽度（已扣区域 padding），标题格应吃掉「行宽 − 删除格 − 间距」
+    return JSON.stringify({
+      rowW: Math.round(rr.width), pickW: Math.round(pr.width), delW: Math.round(dr.width),
+      delRightOverflow: Math.round(dr.right - sr.right),
+      pickRightOverflow: Math.round(pr.right - sr.right),
+      pickOverDel: pr.right <= dr.left + 1
+    });
+  })()`);
+  const g = JSON.parse(geo || "{}");
+  check(
+    "版本行几何：删除按钮只占两个字的地方（≤56px）且不溢出区域",
+    typeof g.delW === "number" && g.delW <= 56 && g.delRightOverflow <= 1,
+    geo
+  );
+  check(
+    "版本行几何：标题格拿到应得的宽度（≥ 剩余空间，且不溢出）",
+    typeof g.pickW === "number" && g.pickW >= g.rowW - g.delW - 8 && g.pickRightOverflow <= 1 && g.pickOverDel === true,
+    geo
+  );
   const recovered = await main.eval(`(() => { const b = document.querySelector(".mindmap-versions li .mindmap-version-pick"); if (!b) return "no-btn"; b.click(); return "clicked"; })()`);
   await wait(1500);
   const recAfter = await main.eval(`JSON.stringify({

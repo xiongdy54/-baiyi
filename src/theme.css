@@ -3271,8 +3271,12 @@ body.capture-body #root { height: 100vh; }
   flex-direction: column;
   gap: var(--sp-1);
 }
-.mindmap-versions button {
-  width: 100%;
+/* v48.13：这条规则原本写成 `.mindmap-versions button`（0-1-1），把**删除按钮**也一起打包了——
+   它的 width:100% 特异性高于 `.mindmap-version-del`（0-1-0），于是两个按钮都想要整行宽：
+   标题格被压成 min-content（时间逐字断行成一条竖条），删除按钮撑满整行并溢出区域边界。
+   现在只作用于「选择版本」那一格。 */
+.mindmap-versions .mindmap-version-pick {
+  width: auto;
   text-align: left;
   border: 1px solid var(--border-subtle);
   background: var(--paper);
@@ -3281,7 +3285,7 @@ body.capture-body #root { height: 100vh; }
   padding: var(--sp-1) var(--sp-2);
   cursor: pointer;
 }
-.mindmap-versions li.is-active button {
+.mindmap-versions li.is-active .mindmap-version-pick {
   border-color: var(--accent);
   color: var(--accent);
 }
