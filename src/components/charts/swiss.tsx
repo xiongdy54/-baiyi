@@ -17,8 +17,35 @@ function palette() {
     GREY3: v("--grey-3", "#737373"),
     GRID: v("--border-subtle", "#e0e0e0"),
     ACCENT: v("--accent", "#002fa7"),
-    SOFT: v("--accent-soft", "rgba(0,47,167,.08)")
+    SOFT: v("--accent-soft", "rgba(0,47,167,.08)"),
+    /* 固定深/浅色：不随主题反转（:root 里的 --overlay-* 一档）。
+       段内文字必须在任何主题下都与其底色反向，用会反转的 --ink/--paper 会算错。 */
+    ON_DARK: v("--overlay-text", "#f5f5f2"),
+    ON_LIGHT: v("--overlay-ink", "#0a0a0a")
   };
+}
+
+/* 段内/块内文字取色：按底色实际亮度，选与它对比更高的那一个固定色。
+   原实现把反白硬编码成 "#ffffff"，而 --ink / --accent 在深色模式会提亮翻转，
+   导致「遗忘 Again」等百分比标签压在近白底上不可见（深色下 ≈1.05:1）。
+   本函数在浅色模式下的判定与原硬编码逐点一致，只修深色。 */
+function relLum(color: string): number {
+  const h = color.trim();
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(h);
+  if (!m) return NaN; // 非 hex（rgba() / var() 等）→ 交回调用方保守处理
+  const n = m[1].length === 3 ? 1 : 2;
+  const chan = (i: number) => parseInt(h.slice(1 + i * n, 1 + (i + 1) * n), 16) / (n === 1 ? 15 : 255);
+  const toLin = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * toLin(chan(0)) + 0.7152 * toLin(chan(1)) + 0.0722 * toLin(chan(2));
+}
+function contrast(a: number, b: number): number {
+  const [hi, lo] = a > b ? [a, b] : [b, a];
+  return (hi + 0.05) / (lo + 0.05);
+}
+function textOn(bg: string, P: ReturnType<typeof palette>): string {
+  const l = relLum(bg);
+  if (Number.isNaN(l)) return P.ON_DARK; // 底色不可解析时退回原硬编码行为（反白）
+  return contrast(l, relLum(P.ON_DARK)) >= contrast(l, relLum(P.ON_LIGHT)) ? P.ON_DARK : P.ON_LIGHT;
 }
 
 export type El = { tag: string; attrs: Record<string, string | number>; text?: string; title?: string };
@@ -74,7 +101,7 @@ export function chartQueueBar(kpi: { completedToday: number; dueToday: number })
   if (done > 0) els.push({ ...R(X0, Y, wDone, H, P.ACCENT), title: `已完成 ${done} 张` });
   if (left > 0) els.push({ ...R(X0 + wDone, Y, W - wDone, H, P.GREY2), title: `未完成 ${left} 张` });
   // 段上数值
-  if (wDone > 34) els.push(T(X0 + wDone / 2, Y + H / 2 + 4, `${done}`, { textAnchor: "middle", fontWeight: 700, fill: "#ffffff", fontSize: 12 }));
+  if (wDone > 34) els.push(T(X0 + wDone / 2, Y + H / 2 + 4, `${done}`, { textAnchor: "middle", fontWeight: 700, fill: textOn(P.ACCENT, P), fontSize: 12 }));
   if (W - wDone > 34) els.push(T(X0 + wDone + (W - wDone) / 2, Y + H / 2 + 4, `${left}`, { textAnchor: "middle", fontWeight: 700, fill: P.INK, fontSize: 12 }));
   // 图例
   els.push(R(X0, Y + H + 16, 10, 10, P.ACCENT));
@@ -396,7 +423,7 @@ export function chartDivergingPair(kpi: { completedToday: number; dueToday: numb
   els.push(L(CX, Y - 42, CX, Y + H + 18, P.GRID, 0.9, { strokeDasharray: "3 3" }));
   els.push({ ...R(CX - wDone, Y, wDone, H, P.ACCENT), title: `已完成 ${done} 张` });
   els.push({ ...R(CX, Y, wLeft, H, P.GREY2), title: `未完成 ${left} 张` });
-  els.push(T(CX - wDone / 2, Y + H / 2 + 4, `${done}`, { textAnchor: "middle", fontWeight: 700, fill: "#ffffff", fontSize: 13 }));
+  els.push(T(CX - wDone / 2, Y + H / 2 + 4, `${done}`, { textAnchor: "middle", fontWeight: 700, fill: textOn(P.ACCENT, P), fontSize: 13 }));
   els.push(T(CX + wLeft / 2, Y + H / 2 + 4, `${left}`, { textAnchor: "middle", fontWeight: 700, fontSize: 13 }));
   els.push(T(CX - wDone / 2, Y - 12, "已完成", { textAnchor: "middle", fontWeight: 600, fill: P.ACCENT }));
   els.push(T(CX + wLeft / 2, Y - 12, "未完成", { textAnchor: "middle", fontWeight: 600, fill: P.GREY3 }));
@@ -470,9 +497,10 @@ export function chartDomainTreemap(items: { label: string; count: number }[], un
     });
     const wide = rc.w > 64 && rc.h > 40;
     if (wide) {
-      const dark = rc.rank === 0;
-      els.push(T(rc.x + 10, rc.y + 22, rc.item.label.length <= 5 ? rc.item.label : rc.item.label.slice(0, 4) + "…", { fontSize: 12, fontWeight: 700, fill: dark ? "#ffffff" : P.INK }));
-      els.push(T(rc.x + 10, rc.y + 38, `${Math.round((rc.item.count / total) * 100)}%`, { fontSize: 11, fontWeight: 600, fill: dark ? "rgba(255,255,255,.8)" : P.GREY3 }));
+      const onAccent = rc.rank === 0;
+      const on = textOn(fill, P);
+      els.push(T(rc.x + 10, rc.y + 22, rc.item.label.length <= 5 ? rc.item.label : rc.item.label.slice(0, 4) + "…", { fontSize: 12, fontWeight: 700, fill: onAccent ? on : P.INK }));
+      els.push(T(rc.x + 10, rc.y + 38, `${Math.round((rc.item.count / total) * 100)}%`, { fontSize: 11, fontWeight: 600, fill: onAccent ? on : P.GREY3 }));
     }
   });
   els.push(T(230, 292, `面积 = ${unit}数 · 面积越大占比越高`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
@@ -500,7 +528,7 @@ export function chartRatingColumn(ratings: { rating: string; count: number }[]):
     const h = (d.pct / 100) * H;
     y -= h;
     if (h > 0.5) els.push({ ...R(CX, y, W, h, SHADE[i]), title: `${ZH[d.name]} ${d.pct.toFixed(1)}%` });
-    if (h > 22) els.push(T(CX + W / 2, y + h / 2 + 4, `${Math.round(d.pct)}%`, { textAnchor: "middle", fontWeight: 700, fontSize: 12, fill: i === 3 ? P.INK : "#ffffff" }));
+    if (h > 22) els.push(T(CX + W / 2, y + h / 2 + 4, `${Math.round(d.pct)}%`, { textAnchor: "middle", fontWeight: 700, fontSize: 12, fill: textOn(SHADE[i], P) }));
   });
   els.push(L(CX - 8, Y0 + H + 2, CX + W + 8, Y0 + H + 2, P.GRID, 0.9));
   els.push(T(CX + W / 2, Y0 + H + 20, "近 30 天", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));

@@ -314,7 +314,7 @@ function AISection() {
               onChange={(e) => setCfg({ ...cfg, baseUrl: e.target.value })}
             />
             {!/\/v\d+$/.test(cfg.baseUrl.trim()) && (
-              <p className="ai-test-fail" style={{ marginTop: "var(--sp-1)" }}>
+              <p className="ai-test-fail">
                 地址缺少 /v1 后缀 —— OpenAI 兼容端点通常需要它（如 http://127.0.0.1:1234/v1）
               </p>
             )}
@@ -406,7 +406,7 @@ function AISection() {
         )}
       </div>
 
-      <div className="settings-row" style={{ flexWrap: "wrap" }}>
+      <div className="settings-row settings-row-wrap">
         <button className="btn btn-primary btn-sm" disabled={busy !== ""} onClick={handleSave}>
           {busy === "save" ? "保存中…" : "保存配置"}
         </button>
@@ -514,29 +514,27 @@ function SiblingBurySection() {
           <div className="settings-row">
             <span>同源组每日放行</span>
             <input
-              className="mono"
+              className="mono input-num"
               type="number"
               min={1}
               max={20}
               value={cfg.perDay}
-              style={{ width: 64, height: 32, padding: "0 var(--sp-2)" }}
               onChange={(e) => update({ perDay: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
             />
             <span>张</span>
           </div>
-          <div className="settings-row">
+          <div className="settings-row settings-row-wrap">
             <span>短材料阈值</span>
             <input
-              className="mono"
+              className="mono input-num input-num-md"
               type="number"
               min={50}
               max={100000}
               step={50}
               value={cfg.sourceTextLimit}
-              style={{ width: 88, height: 32, padding: "0 var(--sp-2)" }}
               onChange={(e) => update({ sourceTextLimit: Math.max(50, Number(e.target.value) || 300) })}
             />
-            <span>字符以内才按「同一次选区」建组（长选区各卡锚定不同知识点，不延后）</span>
+            <span className="form-hint">字符以内才按「同一次选区」建组（长选区各卡锚定不同知识点，不延后）</span>
           </div>
         </>
       )}
@@ -670,7 +668,7 @@ function MemorySection() {
           </div>
           <div className="settings-row">
             <span>文件位置</span>
-            <span className="mono" style={{ fontSize: 12 }}>{status.memoryDir}</span>
+            <span className="mono fs-meta">{status.memoryDir}</span>
             <button className="btn-outline btn-sm" onClick={() => void memoryApi.openFolder()}>打开文件夹</button>
             <button className="btn-outline btn-sm" onClick={() => void memoryApi.openFile("core.md")}>打开 core.md</button>
           </div>
@@ -684,20 +682,19 @@ function MemorySection() {
           </div>
           <div className="settings-row">
             <span>记忆用量</span>
-            <span className="mono" style={{ fontSize: 12 }}>
+            <span className="mono fs-meta">
               core {status.usage.core.chars} 字 / 目录 {status.usage.index.chars} 字 / 主题文件 {status.usage.topics.length} 个 · 合计 ≈ {status.usage.totals.tokens} token
             </span>
           </div>
           <div className="settings-row">
             <span>注入预算</span>
             <input
-              className="mono"
+              className="mono input-num input-num-md"
               type="number"
               min={200}
               max={20000}
               step={200}
               value={injectBudget ?? 4400}
-              style={{ width: 88, height: 32, padding: "0 var(--sp-2)" }}
               onChange={(e) => void changeInjectBudget(Number(e.target.value))}
             />
             <span className="form-hint">字（制卡时单次注入记忆的上限；core/目录/主题按比例分配）</span>
@@ -711,10 +708,12 @@ function MemorySection() {
           <div className="settings-row">
             <span>重置记忆</span>
             {!resetArmed ? (
-              <button className="btn-outline btn-sm" onClick={() => setResetArmed(true)}>清空记忆文件…</button>
+              <button className="btn btn-danger-outline btn-sm" onClick={() => setResetArmed(true)}>清空记忆文件…</button>
             ) : (
               <>
-                <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void doReset()}>确认清空</button>
+                {/* 不可逆删除：瑞士风要求破坏性操作用 error 填充，而不是把全屏唯一
+                    的高饱和焦点色（accent）用在最危险的动作上 */}
+                <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void doReset()}>确认清空</button>
                 <button className="btn btn-secondary btn-sm" onClick={() => setResetArmed(false)}>取消</button>
               </>
             )}
@@ -851,7 +850,7 @@ function FSRSSection() {
       )}
       <p className="form-hint">当前参数：{activeSource === "optimizer" ? "优化权重" : "默认参数"}</p>
 
-      <div className="settings-row" style={{ flexWrap: "wrap" }}>
+      <div className="settings-row settings-row-wrap">
         <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleTrain}>
           {busy ? `训练中… ${progress !== null ? progress + "%" : ""}` : "开始优化"}
         </button>
@@ -906,7 +905,7 @@ function ReaderSection() {
       </p>
       <div className="settings-row">
         <span>主题预设</span>
-        <div className="seg-tabs" style={{ padding: 0 }}>
+        <div className="seg-tabs">
           {(["paper", "sepia", "dark", "custom"] as const).map((t) => (
             <button key={t} className={a.theme === t ? "active" : ""} onClick={() => save({ ...cfg, appearance: { ...a, theme: t } })}>
               {t === "paper" ? "纸白" : t === "sepia" ? "羊皮" : t === "dark" ? "暗夜" : "自定义"}
@@ -934,7 +933,7 @@ function ReaderSection() {
       <div className="settings-row">
         <span>正文字体</span>
         <input
-          style={{ flex: 1 }}
+          className="row-fill"
           value={a.fontFamily ?? ""}
           placeholder="留空使用默认多语言衬线栈"
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontFamily: e.target.value } })}
@@ -1111,12 +1110,12 @@ function BackupSection() {
         <button className="btn btn-outline btn-sm" onClick={changeDir}>更改备份位置</button>
       </div>
       {list && (
-        <p className="form-hint" style={{ marginTop: "var(--sp-2)" }}>
+        <p className="form-hint settings-block">
           备份位置：<span className="mono">{list.backupDir}</span>
         </p>
       )}
 
-      <div className="backup-toolbar" style={{ marginTop: "var(--sp-3)" }}>
+      <div className="backup-toolbar settings-block">
         <span className="backup-row-title">每日首次启动自动备份</span>
         <div className="seg-tabs seg-tabs-sm" role="group" aria-label="自动备份开关">
           <button className={autoOn ? "active" : ""} onClick={() => toggleAuto(true)}>开</button>
@@ -1124,12 +1123,11 @@ function BackupSection() {
         </div>
         <span className="backup-row-title">保留</span>
         <input
-          className="mono"
+          className="mono input-num"
           type="number"
           min={1}
           max={90}
           value={keep}
-          style={{ width: 64, height: 32, padding: "0 var(--sp-2)" }}
           onChange={(e) => changeKeep(Number(e.target.value))}
         />
         <span className="backup-row-title">份（超出删最旧）</span>
@@ -1143,7 +1141,7 @@ function BackupSection() {
             恢复前会自动安全备份当前数据；完成后需重启应用生效，重启前请勿继续使用软件。
           </p>
           <div className="settings-row">
-            <button className="btn btn-primary btn-sm" disabled={busy !== ""} onClick={doRestore}>
+            <button className="btn btn-danger btn-sm" disabled={busy !== ""} onClick={doRestore}>
               {busy === "restore" ? "恢复中…" : "确认恢复"}
             </button>
             <button className="btn btn-secondary btn-sm" onClick={() => setConfirmFile(null)}>取消</button>
@@ -1153,7 +1151,7 @@ function BackupSection() {
 
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
       {restored && (
-        <div className="settings-row" style={{ marginTop: "var(--sp-2)" }}>
+        <div className="settings-row settings-block">
           <button className="btn btn-primary btn-sm" onClick={() => backupAPI().relaunch()}>重启应用</button>
         </div>
       )}
@@ -1176,7 +1174,7 @@ function BackupSection() {
                 </span>
               </div>
               <button
-                className="btn btn-secondary btn-sm"
+                className="btn btn-danger-outline btn-sm"
                 disabled={busy !== "" || restored}
                 onClick={() => setConfirmFile({ path: b.path, name: b.file })}
               >
@@ -1187,8 +1185,8 @@ function BackupSection() {
         </div>
       )}
 
-      <div className="settings-row" style={{ marginTop: "var(--sp-3)" }}>
-        <button className="btn btn-outline btn-sm" disabled={restored} onClick={pickRestoreFile}>
+      <div className="settings-row settings-block">
+        <button className="btn btn-danger-outline btn-sm" disabled={restored} onClick={pickRestoreFile}>
           从备份文件恢复…
         </button>
       </div>
@@ -1311,9 +1309,9 @@ function DictSection() {
       </p>
 
       <h4>弹窗显示字段</h4>
-      <div className="settings-row" style={{ flexWrap: "wrap", gap: 8 }}>
+      <div className="settings-row check-row">
         {FIELD_LABELS.map((f) => (
-          <label key={f.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <label key={f.key} className="check-inline">
             <input type="checkbox" checked={!!fields[f.key]} onChange={() => toggleField(f.key)} />
             {f.label}
           </label>
@@ -1331,8 +1329,8 @@ function DictSection() {
           ? "使用系统语音朗读单词（离线可用；Windows 需安装对应语言语音包）。"
           : "优先播放词典在线真人音频（仅在线词典提供；缺失时回落系统 TTS）。"}
       </p>
-      <div className="settings-row" style={{ alignItems: "center", gap: 8 }}>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+      <div className="settings-row">
+        <label className="check-inline">
           <input type="checkbox" checked={autoSpeak} onChange={(e) => changeAutoSpeak(e.target.checked)} />
           自动发音（出到单词卡即朗读，无需手动点击）
         </label>
@@ -1372,7 +1370,7 @@ function DictSection() {
                 <strong>{s.name}</strong> <span className="mono">{s.format}{s.lang ? ` · ${s.lang}` : ""} · {s.entry_count} 词条</span>
                 {Number(s.entry_count) === 0 && <div className="form-hint">未建索引——点右侧「更新」重新下载解析，或删除后本地导入。</div>}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
+              <div className="row-actions">
                 <button
                   className="btn btn-outline btn-sm"
                   onClick={() => window.dictAPI?.toggleSource(s.id, !s.enabled).then(refreshSources)}
@@ -1465,7 +1463,7 @@ function ShortcutsSection() {
         点击键位框后按下新的组合键（Esc 取消）；与其他动作冲突的键位不会被保存。
         输入框内的 Ctrl+Z / Ctrl+A 等编辑键不受影响。
       </p>
-      <div className="settings-row" style={{ marginBottom: "var(--sp-3)" }}>
+      <div className="settings-row settings-block-b">
         <button className="btn btn-outline btn-sm" onClick={resetAllBindings}>全部恢复默认</button>
       </div>
       {groups.map(([label, defs]) => (
@@ -1723,7 +1721,7 @@ function GlobalShortcutsSection() {
         </div>
       </div>
 
-      <div className="settings-row" style={{ marginTop: "var(--sp-3)" }}>
+      <div className="settings-row settings-block">
         <button className="btn btn-outline btn-sm" onClick={() => void shortcutsApi.toggleCapture()}>
           试一下快速记录
         </button>
@@ -1742,8 +1740,12 @@ export default function SettingsPanel({
   onClose
 }: Props) {
   const [activeNav, setActiveNav] = useState("appearance");
+  // 必须与 .settings-content 里的 section id 一一对应：此前「皮肤」「强调色」
+  // 两节在 DOM 里存在却没有导航入口，滚轮能碰到、导航点不到。
   const sections = [
     { id: "appearance", label: "外观" },
+    { id: "skin", label: "皮肤" },
+    { id: "accent", label: "强调色" },
     { id: "reader", label: "阅读" },
     // 统计仪表盘锚点＝sec-widgets（仪表盘区块由 sec-widgets + sec-dashreset 两节组成；
     // v45 修复：原 id "dashboard" 无对应元素，scrollIntoView 静默失效——点击不跳转）
@@ -1758,13 +1760,70 @@ export default function SettingsPanel({
     { id: "global", label: "全局快捷键" },
     { id: "shortcuts", label: "快捷键" }
   ];
+  const layoutRef = useRef<HTMLDivElement>(null);
+
+  // 滚动时同步左导航高亮。此前 activeNav 只在点击时改变：14 项导航 + 单列长滚的
+  // 面板里，用户滚到「备份与恢复」，左侧仍亮着「外观」—— 导航会说谎。
+  // 只跟踪有导航项的 section（sec-dashreset 是「统计仪表盘」的第二节，无独立入口，
+  // 跳过它可让高亮停留在 widgets）。
+  useEffect(() => {
+    const root = layoutRef.current;
+    if (!root) return;
+    const navIds = new Set(sections.map((s) => `sec-${s.id}`));
+    // 每次现取：仪表盘等区块在数据加载后才从骨架换成真内容，挂载时快照会漏节
+    const listItems = () =>
+      Array.from(root.querySelectorAll<HTMLElement>(".settings-section[id]")).filter((el) => navIds.has(el.id));
+    const measure = () => {
+      const items = listItems();
+      if (!items.length) return;
+      // 已滚到底：最后一节再怎么滚也到不了顶部，最近判据会停在倒数第二节 → 兜底
+      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 8) {
+        setActiveNav(items[items.length - 1].id.replace(/^sec-/, ""));
+        return;
+      }
+      const rt = root.getBoundingClientRect().top;
+      // 判据取「距容器顶最近的一节」而不是「最后一条越过判定线的节」：
+      // 平滑滚动落点前约 40px 就不再触发 scroll，越线判据会稳定地慢一节。
+      let best = items[0];
+      let bestD = Infinity;
+      for (const el of items) {
+        const d = Math.abs(el.getBoundingClientRect().top - rt);
+        if (d < bestD) { bestD = d; best = el; }
+      }
+      setActiveNav(best.id.replace(/^sec-/, ""));
+    };
+    // 平滑滚动的最后一帧不保证送达 scroll 事件（实测停在落点前约 40px），
+    // 故每次滚动事件后再尾随测一次，保证最终收敛到落点。
+    let tail = 0;
+    const onScroll = () => {
+      measure();
+      window.clearTimeout(tail);
+      tail = window.setTimeout(measure, 220);
+    };
+    root.addEventListener("scroll", onScroll, { passive: true });
+    root.addEventListener("scrollend", onScroll);
+    measure();
+    return () => {
+      window.clearTimeout(tail);
+      root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("scrollend", onScroll);
+    };
+    // sections 是本组件内的常量数组，逐次渲染新建，故以长度作依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sections.length]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel modal-panel-wide" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal-panel modal-panel-wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="设置"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <h2>设置</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <button className="icon-btn modal-close" title="关闭" aria-label="关闭设置" onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -1772,12 +1831,13 @@ export default function SettingsPanel({
           </button>
         </div>
 
-        <div className="settings-layout modal-scroll">
-          <nav className="settings-nav">
+        <div className="settings-layout modal-scroll" ref={layoutRef}>
+          <nav className="settings-nav" aria-label="设置分区">
             {sections.map((s) => (
               <button
                 key={s.id}
                 className={activeNav === s.id ? "active" : ""}
+                aria-current={activeNav === s.id ? "true" : undefined}
                 onClick={() => {
                   setActiveNav(s.id);
                   document.getElementById(`sec-${s.id}`)?.scrollIntoView({ behavior: "smooth" });
