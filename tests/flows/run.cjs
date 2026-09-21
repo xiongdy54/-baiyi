@@ -125,6 +125,7 @@ function main() {
       return true;
     });
     appendLine("CYCLE", `第 ${cycle} 轮 · ${flows.length} 条流程 · 累计 pass=${state.pass} fail=${state.fail}`);
+    touchLock(); // 阻塞式串行跑流程时 setInterval 挤不进事件循环，锁的心跳改在轮首打
     for (const f of flows) {
       let r = null;
       let s = null;

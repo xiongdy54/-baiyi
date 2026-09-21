@@ -1,0 +1,42 @@
+# 缺陷登记（全流程测试层发现）
+
+登记人：`tests/flows/` 全流程测试层 · 分支 `test/flow-coverage` · 起始 2026-09-21
+每条都可 `npx electron tests/flows/<对应流程>.cjs` 一键复现，秒级。
+「严重度」按用户把这份工作区当成品在用的立场评估：会不会丢用户数据、会不会让用户误判。
+
+| 编号 | 严重度 | 一句话 | 违反条款 | 复现 | 状态 |
+|---|---|---|---|---|---|
+| D-TEST-01 | 中 · 会静默丢用户数据 | 「FSRS 优化 → 应用权重」提示成功后，新参数环境只活在内存里；若此后应用被关/崩溃且中间没有任何其他写库动作，重启即静默回退默认参数 | §7.2 L874 每次落库即落盘；§7.1.4 L858 重启不丢数据；§4.4.10 指针与配置行同生共死 | `npx electron tests/flows/f03-scheduling-conservation.cjs` 看 S3 矩阵与 S10 两行 `✗(已知)` | 长跑每轮稳定复现 |
+| D-TEST-02 | 低 · 语义歧义 | `prompt_templates.is_default` 恒为 1，从未有代码置 0；全新库里 `card-occlusion` 有两行同时「默认」 | §6.3.4 L561 版本化播种（默认版本应唯一）；§7.2 | `npx electron tests/flows/f06-ai-card-contract.cjs` A1 | 运行期靠 `getPromptTemplate` 的 `ORDER BY version DESC` 侥幸取对，暂未构成用户可见故障 |
+| D-TEST-03 | 低 · consent 卫生 | `settings.app.memory.enabled` 未做布尔归一：手写 `settings.json` 里填字符串 `"yes"` 即被当成开启 | §4.18 L358 默认关闭是 consent 纪律；同文件对数值项都做了 clamp，唯独布尔漏了 | `npx electron tests/flows/f07-memory-privacy.cjs` D1 | 需用户手改配置文件才触发 |
+| D-TEST-04 | 观察项（非缺陷） | 僵尸 run 对账 `reconcileStaleMaterialMapRuns` 不在 `initDb` 内，只在 `electron/main.js:1351` 启动时调一次 | — | F04 G5 | 行为正确（阈值 30 分钟 + 60 秒下限 + 幂等），登记只为说明分层 |
+| D-TEST-05 | 中 · 主旅程断链（在当前工作树） | 书架上**鼠标点不开书**：真实 `Input.dispatchMouseEvent` 分别点封面中心与图注书名各一次，界面仍停在书架；同一张卡用键盘 `Enter` 立刻进阅读器 | §6.1 L519 主旅程第一环「书架 → 阅读器」；§5.4 D51 书卡设计 | `node tests/flows/f01-golden-journey.cjs` 看 K4 的 `✗(已知)` 与随后 `键盘后是否进入阅读器 = true` | **待确认**：本次是在带有未提交的 D51 书架重设计（`src/components/Bookshelf.tsx` 工作树改动）的 `dist` 上测得的；`Bookshelf.tsx` 里 `onOpenBook` 只出现在 `onCardKeyDown`（Enter/Space）分支，全部 `onClick` 无一处调用它。需与并行开发会话确认是 WIP 未完成还是已合入主干的回归 |
+
+## D-TEST-01 细节
+
+`electron/db.js:737 insertFsrsConfig()` 只做 `db.run(INSERT)`，不调 `persist()`；
+`electron/optimizer.js:115 applyWeights()` = `insertFsrsConfig()` + `setActiveFsrsConfig()`，
+而后者只写 `settings.json`（`writeSettings`）。于是：
+
+1. 内存库里多了新配置行、`settings.app.fsrsConfigId` 已指向它；
+2. 磁盘上的 `library.db` 里那一行还不存在；
+3. 若在这之后没有任何其他写库动作就退出/崩溃 → 重启后 `getActiveFsrsConfig()` 查不到该 id，
+   静默回退 `cfg-default`，用户与设置页都还以为在用优化后的参数。
+
+F03 的 S3 矩阵把 13 个写库函数逐个测了一遍，**只有这一个**不合格（其余 12 个即时落盘），
+所以这不是普遍现象，而是该函数的孤立遗漏。
+
+疑似修复点（**未改代码，等用户拍板**）：`insertFsrsConfig` 结尾补 `persist()`；
+或 `applyWeights` 在移动指针后调 `db.persistNow()`。前者更守纪律（仓储层自己保证落盘）。
+
+## 文档↔代码漂移（F06/PLAN §6 一并核出，属文档问题，未改动）
+
+1. 表数量：L90 写「23 张」、L56 写「17 张表」，`electron/db.js` 实建 **27** 张。
+2. `cards.memory_ref_json`：L100 写五字段形状，代码实际是 `{line, verified}`（`db.js:472`、`src/lib/cards.ts:1091`）。
+3. `memory:*` 通道：L150 列 7 个，`preload.js:267` 实际 10 个（名字也不同）。
+4. §7.3 L883 与 L884 是同一条 M6-1 测试义务的两份副本，且断言数互相矛盾（49 vs 43）；§7.6 整节重复（L915/L923）。
+5. §9.2 状态表：L1517 标 M8 ❌、L1421 标 M14 未实现，与 §6.5/§6.7、代码及既有决策号相矛盾。
+6. §7.2 L869「所有业务表软删除」与 `deleteMaterialMap` 的真删（v48.5 用户可见历史=真删，`db.js:4059`）之间没有登记例外。
+7. §4.1 未列出 `material_map_*` 与 `dict_sources`/`dictionary_cache`，但 `getBackupCounts`、导图表都依赖它们。
+
+按既有约定（文档打架改文档不动代码），这 7 条要用户拍板后一次性收口（bump + 决策号），本轮不改。
