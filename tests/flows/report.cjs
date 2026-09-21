@@ -90,12 +90,12 @@ let out = `# 全流程测试长跑报告
 | 流程 | 指南依据 | 运行 | 现行运行 | 现行判红 | 现行失败断言 | 已知缺陷触发 | 崩溃(全程) | 时长 min–max |
 |---|---|---|---|---|---|---|---|---|
 `;
-const ORDER = ["F01", "F02", "F03", "F04", "F05", "F06", "F07", "F08", "F09", "F10", "F11"];
+const ORDER = ["F01", "F02", "F03", "F04", "F05", "F06", "F07", "F08", "F09", "F10", "F11", "F12"];
 for (const id of ORDER) {
   const a = agg[id];
   if (!a) continue;
   const c = cur[id] || { n: 0, red: 0, fail: 0, known: 0, crash: 0 };
-  out += `| ${id} ${a.title} | ${(a.cites || []).join(" ")} | ${a.runs} | ${c.n} | ${c.red} | ${c.fail} | ${c.known} | ${a.crash} | ${a.minMs}–${a.maxMs}ms | — |\n`;
+  out += `| ${id} ${a.title} | ${a.runs} | ${c.n} | ${c.red} | ${c.fail} | ${c.known} | ${a.crash} | ${a.minMs}–${a.maxMs}ms | ${(a.cites || []).join(" ")} |\n`;
 }
 out += `\n## 3. 现行仍红的断言（逐条）\n\n`;
 let any = false;
