@@ -1,0 +1,151 @@
+// F09 表现层与设计系统契约流程（静态扫描 + 基线棘轮）
+// @runtime: node  @tier: 2  @gui: false  @id: F09  @timeout: 120
+// 运行：node tests/flows/f09-presentation-contract.cjs   （或 node tests/flows/run.cjs --only F09）
+//
+// 角度：设计系统的承诺（§7.1.6「色值/字号/间距一律走 Token，禁止硬编码魔法值」、§5.1 瑞士风基线、
+//       v48.14 派生 Token 求值层修复）绝大部分**不看运行时就能证伪**——扫源码即可。
+//       这条流程用「棘轮」写法：第一次跑记录基线，之后只允许变好不允许变坏。
+//       这样既能当回归闸门，又不会因为并行开发中的正常改动天天误报。
+//
+// 依据：§7.1.6 L860、§5.1 L457–465、§5.3 L474–484、§5.4 L485–506、
+//       docs/swiss-international-style.md（禁止玻璃拟态/状态设计 empty 规则）、§8.1 D50。
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const { Flow, runFlow, ROOT } = require("./lib/harness.cjs");
+
+const BASELINE_FILE = path.join(ROOT, "tests", "flows", "fixtures", "f09-presentation-baseline.json");
+
+const flow = new Flow({
+  id: "F09",
+  title: "表现层与设计系统契约",
+  angle: "设计系统承诺的静态可证伪部分（棘轮基线）",
+  cites: ["§7.1.6", "§5.1", "§5.3", "§5.4", "docs/swiss-international-style.md", "D50"],
+  tier: 2,
+  gui: false,
+});
+
+function walk(dir, filter, acc = []) {
+  for (const name of fs.readdirSync(dir)) {
+    if (["node_modules", "dist", "build", ".git", "vendor", "foliate"].includes(name)) continue;
+    const full = path.join(dir, name);
+    const st = fs.statSync(full);
+    if (st.isDirectory()) walk(full, filter, acc);
+    else if (filter(name)) acc.push(full);
+  }
+  return acc;
+}
+const rel = (p) => path.relative(ROOT, p).replace(/\\/g, "/");
+const read = (p) => fs.readFileSync(p, "utf8");
+
+/** 棘轮：越界即失败，方向明确（worse 表示数值只许降不许升） */
+function ratchet(f, key, value, opts = {}) {
+  const bl = flow.baseline || {};
+  const base = bl[key];
+  const direction = opts.direction || "down";
+  if (base === undefined) {
+    flow.record(`${key}（首次记录基线）`, value);
+    flow.check(`棘轮基线建立：${key}`, true, true, true);
+    return { first: true };
+  }
+  const bad = direction === "down" ? value > base : value < base;
+  flow.check(`${key} 不超过基线 ${base}（只许变好）`, !bad, `≤${base}`, value);
+  if (!bad && value !== base) flow.record(`${key} 变好`, `${base} → ${value}`);
+  return { base, value };
+}
+
+app_main();
+
+function app_main() {
+  const css = walk(path.join(ROOT, "src"), (n) => n.endsWith(".css")).map((p) => ({ p, t: read(p) }));
+  const tsx = walk(path.join(ROOT, "src"), (n) => /\.(tsx|ts)$/.test(n)).map((p) => ({ p, t: read(p) }));
+  const allCss = css.map((c) => c.t).join("\n");
+  const allTsx = tsx.map((c) => c.t).join("\n");
+
+  runFlow(flow, async () => {
+    flow.baseline = fs.existsSync(BASELINE_FILE) ? JSON.parse(read(BASELINE_FILE)) : {};
+    const newBaseline = { ...flow.baseline };
+
+    // ---------- E1 Token 有定义才有引用 ----------
+    flow.section("E1 Token 引用的每个变量必须有定义（§5.1 Token 体系 / v48.14 派生层缺陷）");
+    const defined = new Set([...allCss.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+    const used = [...allCss.matchAll(/var\(\s*(--[\w-]+)\s*([,)])/g)];
+    const undefinedTokens = new Map();
+    for (const m of used) {
+      const [, name, sep] = m;
+      if (defined.has(name)) continue;
+      if (sep === ",") continue; // 带 fallback 的 var() 允许外部注入
+      undefinedTokens.set(name, (undefinedTokens.get(name) || 0) + 1);
+    }
+    flow.record("Token 定义数 / 引用数", `${defined.size} / ${used.length}`);
+    flow.check("无「引用了却从未定义、且无 fallback」的 Token（会静默失效）", undefinedTokens.size === 0, "无", [...undefinedTokens.keys()]);
+    const unused = [...defined].filter((d) => !used.some((m) => m[1] === d) && !allTsx.includes(d));
+    flow.record("定义但无人引用的 Token 数（死 Token，v48.14 清理对象）", unused.length);
+    newBaseline.unusedTokens = Math.min(newBaseline.unusedTokens ?? Infinity, unused.length);
+
+    // ---------- E2 硬编码色值 ----------
+    flow.section("E2 禁止硬编码色值（§7.1.6 L860）");
+    const hexHits = tsx.filter((f) => /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/.test(f.t)).map((f) => rel(f.p));
+    for (const h of hexHits) console.log(`    · ${h}`);
+    ratchet(flow, "hardcodedHexFiles", hexHits.length, { direction: "down" });
+    newBaseline.hardcodedHexFiles = Math.min(newBaseline.hardcodedHexFiles ?? Infinity, hexHits.length);
+
+    // ---------- E3 魔法数字与 !important ----------
+    flow.section("E3 间距/字号魔法值与 !important 棘轮（§5.3 网格纪律）");
+    const important = (allCss.match(/!important/g) || []).length;
+    console.log(`    · theme !important = ${important}`);
+    flow.record("!important 出现次数", important);
+    newBaseline.importantCount = Math.min(newBaseline.importantCount ?? Infinity, important);
+    if (flow.baseline.importantCount !== undefined) {
+      flow.check("!important 不超过基线（每加一处都要写清受控例外）", important <= flow.baseline.importantCount, `≤${flow.baseline.importantCount}`, important);
+    } else {
+      flow.check("棘轮基线建立：importantCount", true, true, true);
+    }
+    const inlinePx = (allTsx.match(/style=\{\{[^}]*\d+px/g) || []).length;
+    console.log(`    · 内联 px 计数 = ${inlinePx}`);
+    newBaseline.inlinePxCount = Math.min(newBaseline.inlinePxCount ?? Infinity, inlinePx);
+    if (flow.baseline.inlinePxCount !== undefined) {
+      flow.check("内联 style 里的 px 魔法值不超过基线", inlinePx <= flow.baseline.inlinePxCount, `≤${flow.baseline.inlinePxCount}`, inlinePx);
+    } else {
+      flow.check("棘轮基线建立：inlinePxCount", true, true, true);
+    }
+
+    // ---------- E4 玻璃拟态已下线 ----------
+    flow.section("E4 第二皮肤（玻璃拟态）不得复活（v48.14 删除、swiss 规范禁止）");
+    const glass = [...css, ...tsx].filter((f) => /backdrop-filter|下蛋|Dream.*glass|glassmorphism/i.test(f.t)).map((f) => rel(f.p));
+    flow.check("src 内不得出现 backdrop-filter/玻璃拟态", glass.length === 0, "无", glass);
+    const skinsDir = path.join(ROOT, "src", "skins");
+    const skins = fs.existsSync(skinsDir) ? fs.readdirSync(skinsDir) : [];
+    flow.record("src/skins 内容", skins.join(" "));
+
+    // ---------- E5 可达性静态面 ----------
+    flow.section("E5 模态与图标的一致性（v48.14 P3.5–3.7 收口项）");
+    const modalOpens = [...allTsx.matchAll(/className=\{?[`"'][^`"']*\bmodal\b/g)].length;
+    const ariaModal = (allTsx.match(/aria-modal/g) || []).length;
+    flow.record("modal 类出现次数 / aria-modal 次数", `${modalOpens} / ${ariaModal}`);
+    flow.check("出现 modal 容器就必须有 aria-modal 声明（可达性不回退）", modalOpens === 0 || ariaModal >= 1, "≥1", ariaModal);
+    const alertDlg = (allTsx.match(/window\.(alert|confirm|prompt)\s*\(/g) || []).length;
+    flow.check("原生弹窗不得回归（v48.14 改内联反馈）", alertDlg, 0);
+    const rawSvg = (allTsx.match(/<svg[\s>]/g) || []).length;
+    flow.record("业务代码内联 <svg> 次数（应走 icons.tsx）", rawSvg);
+    newBaseline.rawSvgCount = Math.min(newBaseline.rawSvgCount ?? Infinity, rawSvg);
+    if (flow.baseline.rawSvgCount !== undefined) {
+      flow.check("内联 svg 不超过基线", rawSvg <= flow.baseline.rawSvgCount, `≤${flow.baseline.rawSvgCount}`, rawSvg);
+    } else {
+      flow.check("棘轮基线建立：rawSvgCount", true, true, true);
+    }
+    flow.check("icons.tsx 存在且导出图标函数", /export const Icon/.test(allTsx), true, false);
+
+    // ---------- E6 文档承诺的具体数值仍成立 ----------
+    flow.section("E6 指南锁死的版面数字（§5.3 补 2px 半档 / §5.4 动作条 40px）");
+    const guide = read(path.join(ROOT, "AI_DEVELOPMENT_GUIDE.md"));
+    flow.check("指南仍是单一版本标题（无正文/标题版本不一致）", /^# .*v(\d+\.\d+)/m.test(guide.slice(0, 300)), true, guide.slice(0, 60));
+    const themeTxt = read(path.join(ROOT, "src", "theme.css"));
+    flow.check("theme.css 仍定义强调色基线 #002fa7（§accent 默认值）", /#002fa7/i.test(themeTxt), true, false);
+    const accentTxt = read(path.join(ROOT, "src", "lib", "accentVar.ts"));
+    flow.check("applyAccent 同时写 body（780ea84 修复不回退：只写 :root 会被 body.theme-dark 盖掉）", /document\.body/.test(accentTxt) && /setProperty\("--accent"/.test(accentTxt), true, { body: /document\.body/.test(accentTxt) });
+
+    fs.mkdirSync(path.dirname(BASELINE_FILE), { recursive: true });
+    fs.writeFileSync(BASELINE_FILE, JSON.stringify(newBaseline, null, 2), "utf8");
+  }).then((s) => process.exit(s.fail > 0 || s.aborted || s.crash ? 1 : 0));
+}
