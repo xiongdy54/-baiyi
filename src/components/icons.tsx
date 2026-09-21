@@ -149,3 +149,70 @@ export const IconImport = (p: IconProps) => (
     <path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4" />
   </Svg>
 );
+
+/* ---------- v48.15 / D51 书架重设计新增（全部为 Lucide 路径内联） ---------- */
+
+/** 书籍语言（v38 D35 的语言路由信号；v48.15 起由卡面原生 select 换成图标 + 菜单） */
+export const IconLanguages = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m5 8 6 6" />
+    <path d="m4 14 6-6 2-3" />
+    <path d="M22 10l-4 6-4-6" />
+    <path d="M14 18h4" />
+  </Svg>
+);
+
+/** 视图：封面墙 */
+export const IconLayoutGrid = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="7" height="7" />
+    <rect x="14" y="3" width="7" height="7" />
+    <rect x="3" y="14" width="7" height="7" />
+    <rect x="14" y="14" width="7" height="7" />
+  </Svg>
+);
+
+/** 视图：目录表 */
+export const IconList = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 6h13" />
+    <path d="M8 12h13" />
+    <path d="M8 18h13" />
+    <path d="M3 6h.01" />
+    <path d="M3 12h.01" />
+    <path d="M3 18h.01" />
+  </Svg>
+);
+
+/** 文件夹（打开文件夹 / 空文件夹示意） */
+export const IconFolder = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+  </Svg>
+);
+
+/** 归入文件夹 / 新建文件夹并放入 */
+export const IconFolderPlus = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    <path d="M12 10v6" />
+    <path d="M9 13h6" />
+  </Svg>
+);
+
+/** 文件夹操作菜单（SVG 三点，替代被禁止的「⋮」字符） */
+export const IconEllipsis = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
+/** 返回书架 */
+export const IconArrowLeft = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M19 12H5" />
+    <path d="m12 19-7-7 7-7" />
+  </Svg>
+);

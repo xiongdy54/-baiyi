@@ -663,7 +663,7 @@ tr.zone-group{background:var(--accent-soft); box-shadow:inset 0 var(--hair) 0 va
       <thead><tr><th style="width:18%">环节</th><th>定下来的做法</th></tr></thead>
       <tbody>
         <tr><td>什么时候能拖</td><td>排序 = <b>手动顺序</b>（默认值）时把手在场；其余三种排序下把手不渲染，工具条给一句可点的「改回手动顺序」。不出现"看着能拖、拖了没反应"的歧义。</td></tr>
-        <tr><td>鼠标路径</td><td>按住卡片或左上把手拖动；<code>dragover</code> 时实时重排（与仪表盘同一手感），松手即落库。</td></tr>
+        <tr><td>鼠标路径</td><td>按住卡片或左上把手拖动，松手即落库。<b>落地采信的反馈方式</b>：目标卡进入三区态（竖条 / 整块描边 + 浮标），松手执行——与仪表盘重排一致（<code>dragover</code> 只记落点、不改 DOM）；样张里演示的"边拖边换位的实时重排"是同一套三区判定的另一种反馈，实现时<b>不采用</b>，因为 React 下在 <code>dragover</code> 里重排会让被拖节点身份不稳定，且实测合成事件必须分三个 tick 发才测得准（见 §7 教训）。</td></tr>
         <tr><td>键盘路径</td><td>聚焦卡片 &rarr; <code>Alt+&larr;/&rarr;</code>（<code>&uarr;/&darr;</code> 同义）逐格移动，与 <code>Dashboard.tsx:93-116</code> <b>同一条语义、同一个 <code>reorder()</code></b>；<code>aria-live</code> 播报「《书名》移到第 3 位」。规范依据：瑞士风「键盘可达 —— 所有交互元素 Tab 可达并可完成同一件事」。</td></tr>
         <tr><td>持久化</td><td><code>settings.app.shelfOrder: string[]</code>（<code>SettingsStore</code> 的 app 层）。<b>不加数据库列</b>：备份包本就含 <code>settings.json</code>（<code>electron/backup.js:2</code>），仪表盘布局也是同一存法（<code>settingsStore.set("dashboard","layout")</code>），因此 M2 备份/恢复天然覆盖，且零迁移成本。新书不在数组里时按 <code>created_at DESC</code> 插到队首并高亮 1.2s（样张里点「添加材料」就是演示这个落位）。</td></tr>
         <tr><td>读取顺序</td><td>主进程 <code>listItems()</code> 一行不改；渲染层按 <code>shelfOrder</code> 索引排序，数组外的 id 用 <code>created_at</code> 兜底。<code>library/changed</code> 的既有刷新路径（§4.2-1）保持不变。</td></tr>

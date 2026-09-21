@@ -64,6 +64,8 @@ export default function App() {
   // v36（M8-A）：添加材料模态提升到 App 级——全局快捷键 Ctrl+Alt+N 与书架入口共用同一模态，
   // 且快捷键呼出时**不切换视图**（阅读位置与复习会话原地保留，D34-⑤）
   const [addMaterialOpen, setAddMaterialOpen] = useState(false);
+  /* v48.15 / D51：顶栏「书架」被点时自增——已在书架时点它也要能退出文件夹回顶层（Bookshelf 的第二条出路） */
+  const [shelfTopTick, setShelfTopTick] = useState(0);
   const [view, setView] = useState<View>({ name: "shelf" });
   const [extractDetail, setExtractDetail] = useState<Awaited<ReturnType<typeof readingWorkflow.getTopic>>>(null);
 
@@ -408,7 +410,13 @@ export default function App() {
       />
     ) : null;
   } else {
-    mainContent = <Bookshelf onOpenBook={openBook} onAddMaterial={() => setAddMaterialOpen(true)} />;
+    mainContent = (
+      <Bookshelf
+        onOpenBook={openBook}
+        onAddMaterial={() => setAddMaterialOpen(true)}
+        topLevelSignal={shelfTopTick}
+      />
+    );
   }
 
   return (
@@ -438,7 +446,10 @@ export default function App() {
             <button
               key={item.key}
               className={`nav-item${item.match(view.name) ? " active" : ""}`}
-              onClick={() => setView({ name: item.key } as View)}
+              onClick={() => {
+                setView({ name: item.key } as View);
+                if (item.key === "shelf") setShelfTopTick((t) => t + 1);
+              }}
             >
               {item.label}
             </button>
