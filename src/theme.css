@@ -149,7 +149,7 @@ body { accent-color: var(--accent); }
 /* accent 派生档在 body 上重算一次，不是冗余。
    自定义属性里的 var() 在**声明所在元素**上求值：:root 里写的
    --accent-soft: color-mix(... var(--accent) ...) 会被 :root 自己的 --accent(IKB)
-   钉死，再继承给 body。于是皮肤层(body.skin-xiadown)改 --accent 时，
+   钉死，再继承给 body。于是皮肤层(body.skin-<id>)改 --accent 时，
    --accent / --accent-on 换成了皮肤色，而 --accent-soft/-hover/-pressed
    仍是 IKB 蓝 —— 同一界面出现两个焦点色，违反瑞士风"全应用唯一 accent"。
    在 body 上重新声明后，皮肤只需覆盖 --accent，派生档自动跟随。

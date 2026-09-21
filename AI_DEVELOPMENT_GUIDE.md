@@ -79,7 +79,7 @@ src/                 渲染层（React + TS）
                      occlusion（图片选区几何：像素↔百分比/包围盒/形状归一化/SVG 图元）/
                      journal（v36 日记客户端 + journal/changed 事件桥）/ readingWorkflow（SM19 Provider）/
                      library / settings / eventbus / epub / stats / udc
-  skins/             皮肤注册表（默认 + xiadown）
+  skins/             皮肤注册表（当前仅默认皮肤）
 tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / §7.3）
 ```
 
@@ -493,7 +493,7 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 
 ## 5.5 皮肤体系
 
-默认皮肤 = 瑞士风（`skinId:"none"` 即基线本体）；已注册 xiadown 玻璃拟态为第二皮肤（表现层覆盖，不影响业务逻辑）。新皮肤按 §4.15 规范另立，先规范后代码。
+默认皮肤 = 瑞士风（`skinId:"none"` 即基线本体）；注册表当前仅登记这一支（原第二皮肤「下蛋 Dream 玻璃拟态」已下线删除）。新皮肤按 §4.15 规范另立，先规范后代码。
 
 ---
 
@@ -1555,7 +1555,7 @@ M6-1 已于 v26 实现完毕（Word（.docx 含内嵌图）/ TXT / Markdown 导�
 
 ## 附录A — 参考项目网址（锁定）
 
-- xiadown：https://github.com/arnoldhao/xiadown ；Bili.Copilot：https://github.com/Richasy/Bili.Copilot
+- Bili.Copilot：https://github.com/Richasy/Bili.Copilot
 - Bilibili-Obsidian-Clipper：https://github.com/haixiong1997/Bilibili-Obsidian-Clipper
 - MinerU：https://mineru.net/apiManage/docs ；https://github.com/opendatalab/MinerU
 - FSRS：https://github.com/open-spaced-repetition （ts-fsrs / fsrs-rs / fsrs-rs-nodejs / fsrs-browser）

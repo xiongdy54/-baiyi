@@ -149,12 +149,15 @@ export default function App() {
   }, [settingsOpen]);
 
   useEffect(() => {
-    document.body.classList.toggle("has-skin", skinId !== "none");
+    // 以**解析后**的皮肤为准，而不是持久化的原始 skinId：注册表里已删除的旧 id 会回落到
+    // 默认皮肤，此时若仍按原始值挂 has-skin，body 与顶栏背景被清空却没有皮肤层垫在下面，
+    // 整页会透出窗口底色。
+    const resolvedSkin = getSkin(skinId);
+    document.body.classList.toggle("has-skin", resolvedSkin.id !== "none");
     document.body.classList.remove(
       ...SKINS.filter((s) => s.bodyClass).map((s) => s.bodyClass as string)
     );
-    const bodyClass = getSkin(skinId).bodyClass;
-    if (bodyClass) document.body.classList.add(bodyClass);
+    if (resolvedSkin.bodyClass) document.body.classList.add(resolvedSkin.bodyClass);
   }, [skinId]);
 
   useEffect(() => {
@@ -416,7 +419,7 @@ export default function App() {
           <button onClick={() => setLoadError(null)}>知道了</button>
         </div>
       )}
-      {skinId !== "none" && (
+      {skin.id !== "none" && (
         <div className="skin-layer">
           <SkinComponent {...skin.props} />
         </div>
