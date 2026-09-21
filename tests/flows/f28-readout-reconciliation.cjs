@@ -147,7 +147,7 @@ app
       flow.eq("listAllCards 与磁盘行数同源", next.all, next.disk);
 
       // ---------- X6 软删一本书后各处一致 ----------
-      flow.section("X6 删掉一本书：它的卡不能再出现在任何读数里（§7.2 软删一致性）");
+      flow.section("X6 删掉一本书之后：五处读数的反应必须同幅同向（§7.2 软删；卡留在原地是既定决策）");
       const before6 = { all: db.listAllCards().length, queue: db.computeTodayQueue(now).cards.length, kpi: db.getStatsOverview().kpi.dueToday };
       db.deleteItem(doomedItem.id);
       const after6 = { all: db.listAllCards().length, queue: db.computeTodayQueue(now).cards.length, kpi: db.getStatsOverview().kpi.dueToday };
@@ -159,8 +159,12 @@ app
       const aud6 = await audit(dbFile);
       const cardRow = aud6.all("cards").find((c) => c.id === idDeletedBook);
       const itemRow = aud6.all("library_items").find((i) => i.id === doomedItem.id);
-      flow.record("删书落盘形态", `书 is_deleted=${itemRow && itemRow.is_deleted}；它的卡 is_deleted=${cardRow && cardRow.is_deleted}（卡没被连带标记 = 队列继续催它）`);
-      flow.known("删掉一本书后，它的卡必须一并退出复习与浏览（否则永远催一张点不开来源的卡）", Number(cardRow && cardRow.is_deleted) === 1, "D-TEST-20", "卡也被软删", { 书: itemRow && itemRow.is_deleted, 卡: cardRow && cardRow.is_deleted, 队列: inQueue, 卡片浏览: inAll });
+      flow.record("删书落盘形态", `书 is_deleted=${itemRow && itemRow.is_deleted}；它的卡 is_deleted=${cardRow && cardRow.is_deleted}`);
+      // 「删书只软删书目、卡与摘录留在原地」是既定决策（§7.2 L869 + 用户资产观，F02 I6 已把它当期望值断言），
+      // 所以这里**不判红**，只把残留的用户可见面登记成观察：卡还在催，但来源已经点不开、卡面 docTitle 为空。
+      flow.check("卡留在原地是既定行为（与 F02 I6 同口径，不能一边当期望一边当缺陷）", Number(cardRow && cardRow.is_deleted) === 0 && inQueue, "卡仍可复习", { 卡: cardRow && cardRow.is_deleted, 队列: inQueue });
+      const orphan = db.computeTodayQueue(now).cards.find((c) => c.id === idDeletedBook);
+      flow.record("观察：来源已删的卡在卡面上的样子", `docTitle=${J(orphan && orphan.docTitle)}（队列继续催它，界面上没有「来源已删」标记）`);
       aud6.close();
     });
 
