@@ -100,17 +100,36 @@ runFlow(flow, async () => {
     // 用真实鼠标事件序列（Input.dispatchMouseEvent）而非 element.click()——
     // 区分「自动化打不开」与「产品点不开」必须靠真事件，否则结论不成立。
     let opened = "no-el";
+    // 先测「只点图注上的书名」能不能开：D51 把图注画在封面之外，用户最自然的落点恰是书名
+    let capOpened = false;
+    try {
+      const cp = await val(h, `const card=document.querySelector('.book-card');const c=(card&&card.parentElement&&card.parentElement.querySelector('.cap,.cap-title'))||document.querySelector('.cap,.cap-title');if(!c) return 'no-cap-el';const r=c.getBoundingClientRect();return JSON.stringify({x:Math.round(r.x+Math.min(40,r.width/2)),y:Math.round(r.y+r.height/2),cls:String(c.className).slice(0,36),在书卡可点区内:!!(card&&card.contains(c))});`);
+      flow.record("图注落点探测", cp);
+      const q = JSON.parse(String(cp || "{}"));
+      if (Number.isFinite(q.x)) {
+        await h.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: q.x, y: q.y, button: "none" });
+        await wait(120);
+        await h.send("Input.dispatchMouseEvent", { type: "mousePressed", x: q.x, y: q.y, button: "left", clickCount: 1, buttons: 1 });
+        await h.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: q.x, y: q.y, button: "left", clickCount: 1, buttons: 0 });
+        await wait(2600);
+        capOpened = (await val(h, `return !!document.querySelector("[class*=reader],[class*=Reader],iframe,webview,[class*=foliate]")`, false)) === true;
+      }
+    } catch { /* 探不到就当未命中 */ }
+    flow.record("只点图注书名能否开书", capOpened);
     try {
       const rect = await val(h, `
-        const cs=[...document.querySelectorAll('*')].filter(e=>(e.textContent||'').includes(${JSON.stringify(TITLE)}));
-        const t=cs[cs.length-1]; if(!t) return 'no-el';
-        const card=t.closest('[class*=shelf] > *')||t.parentElement||t;
-        card.scrollIntoView({block:'center'});
-        const r=card.getBoundingClientRect();
-        return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),cls:String(card.className).slice(0,44)});`);
+        const cards=[...document.querySelectorAll('.book-card,[class*="book-card"]')];
+        const t=cards.find(e=>(e.textContent||'').includes(${JSON.stringify(TITLE)})||e.getAttribute('title')===${JSON.stringify(TITLE)})||cards[0];
+        if(!t) return 'no-el';
+        const cap=t.querySelector('.cap,.cap-title');
+        t.scrollIntoView({block:'center'});
+        const r=t.getBoundingClientRect();
+        return JSON.stringify({x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),cls:String(t.className).slice(0,44),图注在卡内:!!(cap&&t.contains(cap))});`);
       flow.record("书本卡片矩形", rect);
       const p = JSON.parse(String(rect || "{}"));
       if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
+        await h.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: p.x, y: p.y, button: "none" });
+        await wait(120);
         await h.send("Input.dispatchMouseEvent", { type: "mousePressed", x: p.x, y: p.y, button: "left", clickCount: 1, buttons: 1 });
         await h.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: p.x, y: p.y, button: "left", clickCount: 1, buttons: 0 });
         opened = `real-click@${p.x},${p.y} ${p.cls}`;
@@ -139,6 +158,7 @@ runFlow(flow, async () => {
     const paras = await val(h, `return ${countOf("p")}`, 0);
     flow.record("正文段落数", paras);
     let readerMounted = await val(h, `return !!document.querySelector("[class*=reader],[class*=Reader],iframe,webview,[class*=foliate]")`, false);
+    const mouseOpened = readerMounted === true;
     if (!readerMounted) {
       // 第二次尝试：直接点图注里的书名（D51 把封面与图注分工，打开动作可能挂在书名而非封面）
       const p2 = await val(h, `const cs=[...document.querySelectorAll("*")].filter(e=>(e.textContent||"").trim().startsWith(TITLE_TXT)); const t2=cs[cs.length-1]; if(!t2) return "no-title-el"; const r=t2.getBoundingClientRect(); return JSON.stringify({x:Math.round(r.x+Math.min(30,r.width/2)),y:Math.round(r.y+r.height/2),cls:String(t2.className).slice(0,40)});`.replace("TITLE_TXT", JSON.stringify(TITLE)));
@@ -153,9 +173,22 @@ runFlow(flow, async () => {
       await wait(4200);
       readerMounted = await val(h, `return !!document.querySelector("[class*=reader],[class*=Reader],iframe,webview,[class*=foliate]")`, false);
       flow.record("第二次尝试后界面文本", String((await val(h, `return document.body.innerText.replace(/s+/g," ").slice(0,150)`, "")) || ""));
+      // 两次真实鼠标事件都没开：把「点不开」拆成三种可能——命中的不是书卡 / 书卡没挂 onClick / onClick 有但被上层拦截
+      if (!readerMounted) {
+        const diag = await val(h, `const card=document.querySelector(".book-card")||document.querySelector("[data-entry] .book-card");if(!card) return "no-card-el";const r=card.getBoundingClientRect();const x=Math.round(r.x+r.width/2),y=Math.round(r.y+r.height/2);const hit=document.elementFromPoint(x,y);const chain=[];let el=hit;for(let i=0;i<4&&el;i++){const c=typeof el.className==="string"?el.className:"";chain.push(el.tagName+"."+(c.trim().split(/\\s+/).slice(0,2).join(".")));el=el.parentElement;}const pk=Object.keys(card).find(k=>k.indexOf("__reactProps$")===0);const props=pk?card[pk]:null;return JSON.stringify({cardRect:[Math.round(r.width),Math.round(r.height)],命中链:chain,书卡有onClick:!(!props||!props.onClick),命中动作条:!!(hit&&hit.closest&&hit.closest(".card-acts")),封面子元素:card.children.length});`, false);
+        flow.record("点不开的定位诊断", diag);
+        await val(h, `const c=document.querySelector(".book-card")||document.querySelector("[data-entry] .book-card");if(c)c.click();return "synthetic";`, false);
+        await wait(4000);
+        const byClick = await val(h, `return !!document.querySelector("[class*=reader],[class*=Reader],iframe,webview,[class*=foliate]")`, false);
+        flow.record("element.click() 后是否进入阅读器", byClick);
+        if (byClick === true && readerMounted !== true) flow.record("结论细化", "DOM click() 能开、真实鼠标不能开 → 不是缺 onClick，而是命中测试被上层元素挡掉（诊断里的「命中链」就是挡住它的那个）");
+        readerMounted = byClick;
+      }
     }
     flow.record("阅读器容器是否挂载", readerMounted);
-    flow.known("点书后进入阅读视图（阅读器容器在场）", readerMounted === true, "D-TEST-05", true, readerMounted);
+    flow.check("真实鼠标点书卡封面能打开书（§6.1 主旅程第一环；D-TEST-05 已撤销——原判为测试打点打错，6a0e3b0 后鼠标路径本来是好的）", mouseOpened === true, true, mouseOpened);
+    flow.known("只点图注上的书名也能开书（图注是书卡的一部分，却是页面上最自然的落点）", capOpened === true, "D-TEST-16", true, capOpened);
+    flow.check("兜底路径（图注/键盘/DOM click）最终进入了阅读器", readerMounted === true, true, readerMounted);
 
     // 鼠标路径没开时，再用键盘 Enter 试一次：能开就说明「点不开」只出在鼠标路径上
     if (readerMounted !== true) {
