@@ -66,8 +66,13 @@ class Flow {
     console.log(`\n---- ${this.id} · ${name} ----`);
   }
 
-  /** 主断言：失败不中断（长跑要尽量多收集信号） */
+  /** 主断言：失败不中断（长跑要尽量多收集信号）
+   *  参数陷阱防护：check(name, 布尔量, true/false) 这种「只给三个参数且第三个是布尔」的写法，
+   *  本意都是等值断言——按 eq 处理，否则 cond=false 会被误判为失败（本套流程踩过四次）。 */
   check(name, cond, expected, actual) {
+    if (arguments.length === 3 && typeof expected === "boolean") {
+      return this.eq(name, cond, expected);
+    }
     const ok = !!cond;
     this.results.push({ section: this.sectionName, name, ok, expected, actual });
     if (ok) {
