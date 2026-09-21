@@ -93,7 +93,8 @@ runFlow(flow, async () => {
     const shrunk = (BASE.uncovered || []).filter((id) => !uncoveredIds.includes(id));
     flow.check("不得出现新的未测节（文档加了承诺就必须有流程接住）", grown.length === 0, `≤基线 ${(BASE.uncovered || []).length} 个`, grown);
     if (shrunk.length) flow.record("缺口已缩小，基线可收紧", `新覆盖 ${shrunk.join(" ")}`);
-    flow.eq("基线记录的流程总数与实际一致（有流程被删要在这里发现）", Object.keys(cites).length, BASE.flowCount);
+    // 方向要摆对：这条抓的是「有流程被删掉」，所以流程数**只许不减**；新增流程是好事，要把基线抬高。
+    flow.check("流程总数不得少于基线（有流程被删要在这里发现）", Object.keys(cites).length >= (BASE.flowCount || 0), `≥${BASE.flowCount} 条`, Object.keys(cites).length);
   }
 
   flow.section("R3 每条流程都要真的写明依据（零 cites 的流程＝不知道自己在测什么）");
@@ -129,7 +130,7 @@ runFlow(flow, async () => {
   flow.check("§4/§5/§6/§7 四章都要有流程按章引用", missingChapters.length === 0, "四章全覆盖", missingChapters);
 
   // ---------- 基线落盘（只在首次或缺口收窄时收紧，永不放松） ----------
-  const needWrite = !BASE || uncoveredIds.length < (BASE.uncovered || []).length || unmentionedIds.length < (BASE.unmentionedMilestones || []).length;
+  const needWrite = !BASE || uncoveredIds.length < (BASE.uncovered || []).length || unmentionedIds.length < (BASE.unmentionedMilestones || []).length || Object.keys(cites).length > (BASE.flowCount || 0);
   if (needWrite) {
     fs.mkdirSync(path.dirname(BASELINE_FILE), { recursive: true });
     fs.writeFileSync(BASELINE_FILE, JSON.stringify({ uncovered: uncoveredIds, unmentionedMilestones: unmentionedIds, flowCount: Object.keys(cites).length, perChapter }, null, 2), "utf8");
