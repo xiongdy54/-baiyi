@@ -176,6 +176,34 @@ function app_main() {
     flow.check("吸顶工具条五件套齐（计数 · 视图 · 密度 · 排序 · 主行动在右）", /position\s*:\s*sticky/.test(barCss) && /shelf-bar/.test(shelfTxt) && ["视图", "密度", "排序"].every((w) => shelfTxt.includes(w)), ".shelf-bar 吸顶 + 三个选择器", { css: barCss.slice(0, 70) || "（没抓到 .shelf-bar）", sticky: /position\s*:\s*sticky/.test(barCss), 视图: shelfTxt.includes("视图"), 密度: shelfTxt.includes("密度"), 排序: shelfTxt.includes("排序") });
     flow.check("卡片动作不在卡面永久挂控件（靠 hover/focus 显形）", /:hover[^{]*\{[^}]*opacity\s*:\s*1|hover[^{]*\{[^}]*opacity\s*:\s*1/.test(themeTxt), "hover 显形", (themeTxt.match(/\.shelf-act[^\n]*\{[^}]*\}/) || ["（没抓到动作条样式）"])[0]?.slice(0, 90));
 
+    // ---------- E8 极窄窗口的单调退让阶梯 + 键盘可达补口（v48.15/D51 与 v48.14/D50） ----------
+    flow.section("E8 工具条退让阶梯必须单调、焦点陷阱必须挂在 dialog 上（§5.3 阶梯 / §5.4 D51 / D50 键盘可达）");
+    const ladder = [...themeTxt.matchAll(/@container\s+shelf\s*\(\s*max-width:\s*(\d+)px\s*\)\s*\{([^}]*)\}/g)]
+      .map((m) => ({ w: Number(m[1]), hides: [...m[2].matchAll(/\.\s*([\w-]+)[^{]*?\{\s*display:\s*none/g)].map((x) => x[1]) }));
+    flow.record("退让阶梯", ladder.map((l) => `${l.w}px→[${l.hides.join(",")}]`).join(" ") || "（没抓到 @container shelf 规则）");
+    flow.check("阶梯有三档且宽度互不相同（900 / 1100 / 1280）", ladder.length === 3 && new Set(ladder.map((l) => l.w)).size === 3, "三档", ladder.map((l) => l.w));
+    const byWidth = [...ladder].sort((a, b) => a.w - b.w);
+    const monotonic = byWidth.every((l, i) => i === 0 || l.hides.length >= byWidth[i - 1].hides.length);
+    flow.check("窗口越窄隐藏项只能越多（单调退让；阈值各回各的会让中段挤成两行，实测踩过）", monotonic && byWidth.length === 3 && byWidth[2].w > byWidth[0].w, "单调递增", ladder.map((l) => `${l.w}px:${l.hides.length} 项`));
+    const rebound = [...themeTxt.matchAll(/\.(shelf-label|shelf-hint|shelf-kbd|shelf-kbd-in)[^{]*\{\s*display:\s*(flex|block|inline-flex|grid)/g)].map((m) => m[0].slice(0, 46));
+    flow.check("不得有把已退让元素又显示回来的规则（阶梯会回弹）", rebound.length === 0, "无回弹", rebound);
+
+    const dlgFiles = tsx.filter((f) => /=\s*useDialogA11y\s*[<(]/.test(f.t) && !f.p.endsWith("dialogA11y.ts"));
+    flow.record("挂焦点陷阱的文件数", String(dlgFiles.length));
+    const unhooked = dlgFiles.filter((f) => !/role="dialog"|aria-modal/.test(f.t)).map((f) => rel(f.p));
+    flow.check("每个用 useDialogA11y 的模态都必须把容器标成 dialog（否则陷阱挂了屏幕阅读器也读不到）", unhooked.length === 0, "全部标注", unhooked);
+    const panels = dlgFiles.reduce((n, f) => n + (f.t.match(/role="dialog"|aria-modal/g) || []).length, 0);
+    flow.check("D50 承诺的模态焦点陷阱量级仍在（≥8 个面板）", panels >= 8, "≥8", panels);
+    const altNav = ["src/components/dashboard/Dashboard.tsx", "src/components/Bookshelf.tsx"].filter((want) => tsx.some((f) => rel(f.p) === want && /altKey/.test(f.t)));
+    flow.check("Alt+方向键重排（仪表盘卡片与书架书卡）两处补口都还在", altNav.length === 2, "两处都在", altNav);
+    const escOwn = tsx.filter((f) => /addEventListener\(\s*["']keydown["'][\s\S]{0,400}?Escape/.test(f.t)).map((f) => rel(f.p)).length;
+    if (flow.baseline.escHandlers !== undefined) {
+      flow.check("自己监听 Escape 的组件数不超过基线（关闭栈应集中在一处）", escOwn <= flow.baseline.escHandlers, `≤${flow.baseline.escHandlers}`, escOwn);
+    } else {
+      flow.check("棘轮基线建立：escHandlers", true, true, true);
+    }
+    newBaseline.escHandlers = Math.min(flow.baseline.escHandlers ?? Infinity, escOwn);
+
     fs.mkdirSync(path.dirname(BASELINE_FILE), { recursive: true });
     fs.writeFileSync(BASELINE_FILE, JSON.stringify(newBaseline, null, 2), "utf8");
   }).then((s) => process.exit(s.fail > 0 || s.aborted || s.crash ? 1 : 0));
