@@ -102,7 +102,9 @@ export default function ContrastCardModal({ card, onClose }: { card: CardRecord;
             <p className="form-hint">AI 认为现有卡片中没有与这张卡存在真实混淆风险的内容，未产对比卡。</p>
           )}
           {!running && !error && (drafts ?? []).map((d, i) => (
-            <div key={i} className="ai-draft" style={{ opacity: accepted.has(i) || skipped.has(i) ? 0.5 : 1 }}>
+            /* 已处理态走既有 .ai-draft-accepted（opacity .6 + grey-1 底）；
+               此前用内联 opacity:0.5 重写，同一语义在两处取值不同且丢掉了灰底 */
+            <div key={i} className={`ai-draft ${accepted.has(i) || skipped.has(i) ? "card-fill ai-draft-accepted" : "card-outlined"}`}>
               <div className="ai-draft-front">
                 <span className="ai-draft-type mono">{d.cardType}</span>
                 {d.contextPrefix && <span className="ai-draft-prefix mono">{d.contextPrefix}</span>}
@@ -111,7 +113,7 @@ export default function ContrastCardModal({ card, onClose }: { card: CardRecord;
               <div className="ai-draft-back">{d.back}</div>
               <div className="ai-actions">
                 {accepted.has(i) ? (
-                  <span className="form-hint">已入库 ✓</span>
+                  <span className="form-hint state-ok">已入库</span>
                 ) : skipped.has(i) ? (
                   <span className="form-hint">已放弃</span>
                 ) : (

@@ -222,14 +222,14 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
         {ids.diaryEntryId && (
           <details>
             <summary><RefChip kind="diary" id={ids.diaryEntryId} /> 日记原文</summary>
-            <blockquote className="ins-quote">{diaryById.get(ids.diaryEntryId)?.text || "（原文不在本次证据包内）"}</blockquote>
+            <blockquote className="ins-quote card-marked">{diaryById.get(ids.diaryEntryId)?.text || "（原文不在本次证据包内）"}</blockquote>
           </details>
         )}
         {ids.knowledgePointId && <RefChip kind="kp" id={ids.knowledgePointId} />}
         {ids.cardId && (
           <details>
             <summary><RefChip kind="card" id={ids.cardId} /> 卡面</summary>
-            <blockquote className="ins-quote">
+            <blockquote className="ins-quote card-marked">
               正面：{cardById.get(ids.cardId)?.front || "—"}<br />
               背面：{cardById.get(ids.cardId)?.back || "—"}
             </blockquote>
@@ -238,12 +238,12 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
         {ids.extractId && (
           <details>
             <summary><RefChip kind="extract" id={ids.extractId} /> 摘录原文</summary>
-            <blockquote className="ins-quote">{extractById.get(ids.extractId)?.text || "—"}</blockquote>
+            <blockquote className="ins-quote card-marked">{extractById.get(ids.extractId)?.text || "—"}</blockquote>
           </details>
         )}
         {ids.documentId && (
           <button className="journal-link" onClick={() => openDoc(ids.documentId, cardById.get(ids.cardId ?? "")?.front || "")}>
-            打开来源 →
+            打开来源
           </button>
         )}
       </div>
@@ -278,7 +278,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
           {step === "range" && (
             <div className="ins-step">
               <p className="ins-step-hint">选择洞察范围（按需触发，不会自动分析）：</p>
-              <div className="seg-tabs" style={{ padding: 0 }}>
+              <div className="seg-tabs seg-tabs-flush">
                 {RANGE_OPTIONS.map((o) => (
                   <button key={o.value} className={rangeKind === o.value ? "active" : ""} onClick={() => setRangeKind(o.value)}>
                     {o.label}
@@ -402,7 +402,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                             {(it.evidence ?? []).map((ev, j) => <p key={j} className="mono ins-ev">依据：{ev}</p>)}
                             <div className="ins-item-actions">
                               <button className="journal-link" onClick={() => void saveFeedback({ chosenInterpretation: i })}>
-                                {feedback.chosenInterpretation === i ? "已选 ✓" : "选它"}
+                                {feedback.chosenInterpretation === i ? "已选" : "选它"}
                               </button>
                               <button className="journal-link" onClick={() => void makeCard(it.claim, it.evidence)}>就此制卡</button>
                               <button className="journal-link" onClick={() => void saveMeaning(it.claim, (it.evidence ?? []).map((e) => ({ diaryEntryId: undefined, note: e })))}>沉淀为个人意义</button>

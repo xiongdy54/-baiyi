@@ -884,7 +884,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                     </li>
                     <li className="mindmap-hint">首层完成即先落一版可看的图（状态「深挖中」），深挖按预算继续并可随时中断/续跑。</li>
                     <li>
-                      <label className="mindmap-hint" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <label className="mindmap-hint check-inline">
                         <input type="checkbox" checked={forceRebuild} onChange={(e) => setForceRebuild(e.target.checked)} />
                         强制重算（忽略缓存与分片复用；用于前后对比/benchmark，所有调用都实发）
                       </label>

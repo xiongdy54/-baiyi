@@ -21,7 +21,7 @@ import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
 import TocSidebar from "./reader/TocSidebar";
 import { useDialogA11y } from "../lib/dialogA11y";
-import { IconChevronDown, IconAlert, IconClose } from "./icons";
+import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
 import {
   DEFAULT_READER_SETTINGS,
   buildLocator,
@@ -1572,10 +1572,10 @@ export default function Reader({
                   </button>
                   <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
-                    ‹
+                    <IconChevronLeft />
                   </button>
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
-                    ›
+                    <IconChevronRight />
                   </button>
                 </div>
                 <div className="reader-engine-controls-group">
@@ -1949,7 +1949,7 @@ function ManualCardEditor({
           </button>
         </div>
         <div className="modal-scroll">
-        {quote && <blockquote className="card-quote">{quote}</blockquote>}
+        {quote && <blockquote className="card-quote card-marked">{quote}</blockquote>}
 
         <div className="seg-tabs">
           <button className={mode === "qa" ? "active" : ""} onClick={() => setMode("qa")}>
@@ -2411,8 +2411,8 @@ function AIPanel({
             {panel.drafts?.map((rawDraft, i) => {
               if (panel.accepted?.has(i)) {
                 return (
-                  <div key={i} className="ai-draft ai-draft-accepted">
-                    <div className="ai-draft-accepted-badge">✓ 已加入 FSRS 队列</div>
+                  <div key={i} className="ai-draft card-fill ai-draft-accepted">
+                    <div className="ai-draft-accepted-badge">已加入 FSRS 队列</div>
                     <div className="ai-draft-front">
                       <div className="ai-draft-text">{String(rawDraft?.front ?? "")}</div>
                     </div>

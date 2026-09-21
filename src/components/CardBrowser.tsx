@@ -185,7 +185,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
         共 {all.length} 张 · 到期 {counts.due} · 难点 {counts.leech} · 暂停 {counts.suspended}
       </div>
 
-      <div className="seg-tabs" style={{ padding: "0 var(--sp-8)" }}>
+      <div className="seg-tabs seg-tabs-pad">
         <button className={preset === "all" ? "active" : ""} onClick={() => setPreset("all")}>
           全部卡片
         </button>
@@ -470,7 +470,7 @@ function CardDetail({
               <span className={`lint ${card.memoryRefJson.verified ? "lint-info" : "lint-warn"}`}>
                 {card.memoryRefJson.verified ? "情境来自记忆" : "情境来源存疑（来源可能已变更）"}
               </span>
-              <div className="mono" style={{ marginTop: "var(--sp-2)", fontSize: 12 }}>
+              <div className="mono fs-meta mt-2">
                 引用记忆行：{card.memoryRefJson.line}
               </div>
             </div>
@@ -503,11 +503,11 @@ function CardDetail({
               // v35：资源库选图卡（imageSource="library"）隐藏跳转；旧卡无锚点置灰提示，不再跳回开头
               hasSourceAnchor(card.contextRef) ? (
                 <button className="btn btn-outline btn-sm" onClick={jump}>
-                  跳转原文 →
+                  跳转原文
                 </button>
               ) : (
                 <button className="btn btn-outline btn-sm" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
-                  跳转原文 →
+                  跳转原文
                 </button>
               )
             )}
@@ -830,7 +830,7 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
           </button>
         </div>
         <div className="modal-scroll">
-          <div className="seg-tabs" style={{ marginBottom: "var(--sp-4)" }}>
+          <div className="seg-tabs mb-4">
             {steps.map((s, i) => (
               <button key={s} className={step === i ? "active" : ""} onClick={() => setStep(i)}>
                 {s}
@@ -838,13 +838,13 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
             ))}
           </div>
 
-          <div className="queue-row" style={{ marginBottom: "var(--sp-4)" }}>
+          <div className="queue-row mb-4">
             <div className="queue-row-text">{card.frontMarkdown || card.noteText}</div>
             <div className="queue-row-text review-back">{card.backMarkdown}</div>
           </div>
 
           {/* v30（D29）：以本卡为基准生成易混对比卡三件套 */}
-          <div className="ai-actions" style={{ marginBottom: "var(--sp-4)" }}>
+          <div className="ai-actions mb-4">
             <button className="btn btn-outline btn-sm" onClick={() => setContrastOpen(true)}>生成对比卡</button>
           </div>
 
@@ -855,11 +855,11 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
                 {running ? "诊断中…" : "AI 诊断"}
               </button>
               {diagnosis && (
-                <div className="review-mnemonic" style={{ marginTop: "var(--sp-3)" }}>
+                <div className="review-mnemonic mt-3">
                   <span className="book-card-label">诊断</span>
                   {diagnosis.diagnosis || diagnosis.analysis}
                   {diagnosis.suggestions && diagnosis.suggestions.length > 0 && (
-                    <ul style={{ margin: "var(--sp-2) 0 0", paddingLeft: "1.2em" }}>
+                    <ul className="plain-list">
                       {diagnosis.suggestions.map((s, i) => <li key={i}>{s}</li>)}
                     </ul>
                   )}
@@ -923,7 +923,7 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
             </div>
           )}
 
-          <div className="settings-row" style={{ marginTop: "var(--sp-5)" }}>
+          <div className="settings-row mt-4">
             <button
               className="btn btn-secondary btn-sm"
               onClick={async () => {

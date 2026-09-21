@@ -217,7 +217,7 @@ function AISection() {
         return;
       }
       const result = await withTimeout(aiGateway.test(), 90000, "测试连接");
-      setNotice({ ok: result.ok, text: result.ok ? "✓ 连接正常，AI 制卡 / 解释可用" : `✗ ${result.message}` });
+      setNotice({ ok: result.ok, text: result.ok ? "连接正常，AI 制卡 / 解释可用" : result.message });
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -396,7 +396,7 @@ function AISection() {
 
         {cfg.preset !== "local" && (
           <div className="form-field">
-            <label>API Key {cfg.hasKey ? "（已保存 ✓）" : "（尚未保存 — 填好后点「保存配置」）"}</label>
+            <label>API Key {cfg.hasKey ? "（已保存）" : "（尚未保存 — 填好后点「保存配置」）"}</label>
             <input
               type="password"
               value={apiKey}

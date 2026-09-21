@@ -592,9 +592,9 @@ export default function KnowledgeManager() {
       {/* v43（K2-B）：KnowledgeLint K4/K7/K8 检查结果（只读；点知识点名可跳详情） */}
       {lintIssues !== null && (
         <div>
-          <p className="kmg-sec" style={{ margin: "0 0 var(--sp-1)" }}>
+          <p className="kmg-sec mb-1">
             质量检查结果（KnowledgeLint）
-            <button className="journal-link" style={{ marginLeft: "var(--sp-3)" }} onClick={() => setLintIssues(null)}>
+            <button className="journal-link ml-3" onClick={() => setLintIssues(null)}>
               收起
             </button>
           </p>
@@ -619,7 +619,7 @@ export default function KnowledgeManager() {
       <p className="kmg-sec">
         归一提案（pending {proposals.length}）
         {proposals.length > 0 && (
-          <button className="btn btn-primary btn-sm" style={{ marginLeft: "var(--sp-3)" }} onClick={() => void acceptAll()}>
+          <button className="btn btn-primary btn-sm ml-3" onClick={() => void acceptAll()}>
             全部接受（{proposals.length}）
           </button>
         )}
@@ -639,7 +639,7 @@ export default function KnowledgeManager() {
             (id && points.find((x) => x.id === id)?.canonicalLabel) || fallback || (id ? id.slice(0, 8) : "?");
           const unresolvedRel = p.proposalKind === "relation" && (!pay.fromKnowledgePointId || !pay.toKnowledgePointId);
           return (
-            <div key={p.id} className="kmg-prop-card">
+            <div key={p.id} className="kmg-prop-card card-outlined">
               <div className="kmg-prop-head">
                 <span className="kmg-chip">{kindTag}</span>
                 {p.proposalKind === "point" && (

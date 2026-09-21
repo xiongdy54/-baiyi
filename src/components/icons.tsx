@@ -55,6 +55,27 @@ export const IconChevronDown = (p: IconProps) => (
   </Svg>
 );
 
+/** 翻页：上一页（阅读器工具栏） */
+export const IconChevronLeft = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m15 18-6-6 6-6" />
+  </Svg>
+);
+
+/** 翻页：下一页（阅读器工具栏） */
+export const IconChevronRight = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m9 18 6-6-6-6" />
+  </Svg>
+);
+
+/** 成功确认（用于状态文字前，尺寸跟随字号；规范：状态优先用颜色+文字，图标可选） */
+export const IconCheck = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M20 6 9 17l-5-5" />
+  </Svg>
+);
+
 /** 播放发音 */
 export const IconVolume = (p: IconProps) => (
   <Svg {...p}>

@@ -42,7 +42,7 @@ export default function TocSidebar({ items, activeHref, onNavigate, onClose }: P
           <button
             key={`${item.href}-${i}`}
             className={`reader-toc-item${item.href && item.href === activeHref ? " active" : ""}`}
-            style={{ paddingLeft: 12 + level * 16 }}
+            style={{ paddingLeft: `calc(var(--sp-3) + ${level} * var(--sp-4))` }}
             onClick={() => onNavigate(item)}
             title={item.label}
           >

@@ -457,11 +457,11 @@ export default function ReviewView({
             // v35：资源库选图卡（imageSource="library"）隐藏跳转；旧卡无锚点置灰提示，不再跳回开头
             hasSourceAnchor(current!.contextRef) ? (
               <button className="review-jump" onClick={handleJumpToSource}>
-                跳转原文 →
+                跳转原文
               </button>
             ) : (
               <button className="review-jump" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
-                跳转原文 →
+                跳转原文
               </button>
             )
           )}

@@ -136,7 +136,7 @@ export default function Dashboard() {
     return (
       <div
         key={widgetId}
-        className={`dash-widget dash-widget-${size}`}
+        className={`dash-widget card-fill dash-widget-${size}`}
         data-widget={widgetId}
         data-dragging={dragId === widgetId || undefined}
         data-drop={dropTargetId === widgetId || undefined}
@@ -206,8 +206,8 @@ export default function Dashboard() {
     return (
       <section className="dashboard dash-page">
         <div className="dash-skeleton">
-          <div className="skeleton" style={{ height: 96 }} />
-          <div className="skeleton" style={{ height: 300 }} />
+          <div className="skeleton skeleton-kpi" />
+          <div className="skeleton skeleton-chart" />
         </div>
       </section>
     );

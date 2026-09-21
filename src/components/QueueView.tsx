@@ -71,7 +71,7 @@ export default function QueueView({ onOpen, onJumpToDoc }: Props) {
                     }, "queue");
                   }}
                 >
-                  跳转原文 →
+                  跳转原文
                 </button>
               )}
               <button className="primary" onClick={() => onOpen(t.id)}>

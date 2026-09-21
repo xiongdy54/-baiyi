@@ -136,15 +136,15 @@ export function DictPanel({
           <div className="ai-error">
             {panel.error}
             {installed.length > 0 && (
-              <div className="dict-meta" style={{ marginTop: 6 }}>
+              <div className="dict-meta mt-2">
                 已装词典：{installed.map((s) => `${s.name}（${s.entry_count} 词条）`).join("、")}
                 {installed.every((s) => s.format.startsWith("cedict")) && " —— CC-CEDICT 是中→英词典（头词为中文），查英文单词请安装 ECDICT 完整版"}
               </div>
             )}
             {installed.length === 0 && (
-              <div className="dict-meta" style={{ marginTop: 6 }}>尚未安装任何本地词典——设置 → 词典/下载 一键安装。</div>
+              <div className="dict-meta mt-2">尚未安装任何本地词典——设置 → 词典/下载 一键安装。</div>
             )}
-            <div className="ai-actions" style={{ marginTop: 8 }}>
+            <div className="ai-actions mt-2">
               <button className="btn btn-outline btn-sm" onClick={onRetry}>重试</button>
               <button className="btn btn-outline btn-sm" onClick={onUseLocal}>使用本地词典</button>
             </div>
@@ -187,11 +187,11 @@ export function DictPanel({
               <div className="dict-meta">原句：{reading.sentence}</div>
             )}
             <div className="dict-meta mono">来源：{entry.source}{panel.providerId ? `（${panel.providerId}）` : ""}{panel.mode ? ` · ${panel.mode}` : ""}</div>
-            <div className="ai-actions" style={{ marginTop: 8, flexDirection: "column", alignItems: "stretch" }}>
+            <div className="ai-actions ai-actions-stack mt-2">
               <div className="dict-meta">单词卡形式（{entry.language || "?"} · 按语言记忆）：</div>
-              <div className="settings-row" style={{ flexWrap: "wrap", gap: 8 }}>
+              <div className="settings-row check-row">
                 {VOCAB_KINDS.map((k) => (
-                  <label key={k} style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                  <label key={k} className="check-inline">
                     <input type="checkbox" checked={kinds.includes(k)} onChange={() => toggleKind(k)} />
                     {VOCAB_KIND_LABEL[k]}
                   </label>
