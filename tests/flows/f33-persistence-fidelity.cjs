@@ -211,6 +211,35 @@ app
       flow.check("磁盘行里 leech_json 真的是 true 的暂停标记（不是靠内存兜住）", !!row && /"suspended":\s*true/.test(String(row.l)), "含 suspended:true", String(row && row.l).slice(0, 80));
       const pjRow = aud.one("SELECT progress_json AS p FROM library_items WHERE id = ?", [itemId]);
       flow.check("磁盘 progress_json 里 pageIndex=7 确实在（阅读器重开能回到同一页）", /"pageIndex":\s*7/.test(String(pjRow && pjRow.p)), "含 pageIndex:7", String(pjRow && pjRow.p).slice(0, 120));
+
+      // ---------- R7 全库 JSON 列普查（不写死列清单，跟 F31 同一个思路）----------
+      flow.section("R7 全库 *_json 列普查：产品写出去的每一段 JSON 文本都必须 parse 得开（D-TEST-06 的根因就是有一列 parse 不开）");
+      const t3 = aud.tables().filter((x) => !x.startsWith("sqlite_"));
+      const jsonCols = [];
+      for (const t of t3) for (const c of aud.columns(t)) if (/json$/i.test(c)) jsonCols.push([t, c]);
+      let parsed = 0;
+      const unparsable = [];
+      for (const [t, c] of jsonCols) {
+        let rows = [];
+        try {
+          rows = aud.rows(`SELECT "${c}" AS v FROM "${t}" WHERE "${c}" IS NOT NULL AND "${c}" <> '' AND "${c}" <> 'null' LIMIT 30`);
+        } catch {
+          continue;
+        }
+        for (const r of rows) {
+          parsed++;
+          try {
+            const o = JSON.parse(r.v);
+            if (o === null || o === undefined) unparsable.push(`${t}.${c} 内容是 ${String(r.v).slice(0, 12)}`);
+          } catch {
+            unparsable.push(`${t}.${c} = ${String(r.v).slice(0, 40)}`);
+          }
+        }
+      }
+      flow.record("扫到的 JSON 列 / 文本值", `${jsonCols.length} 列，${parsed} 个非空值`);
+      flow.record("JSON 列清单", jsonCols.map(([t, c]) => `${t}.${c}`).join(" "));
+      flow.check("JSON 列覆盖面不得缩水（少于 20 列说明普查逻辑瞎了一块）", jsonCols.length >= 20, "≥20 列", jsonCols.length);
+      flow.check("产品自己写下的 JSON 文本全部可 parse（有一条 parse 不开，队列/统计/卡片浏览就会整片抛错）", unparsable.length === 0, "全部可 parse", unparsable.length ? unparsable.slice(0, 6).join(" ；") : "全部可 parse");
       aud.close();
     });
 
