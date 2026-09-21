@@ -1,12 +1,12 @@
 # 全流程测试长跑报告
 
-> 由 `node tests/flows/report.cjs` 生成于 2026-09-21 21:12:55Z。数据源 `tests/flows/results/history.jsonl`（4667 条运行记录）。
+> 由 `node tests/flows/report.cjs` 生成于 2026-09-21 21:18:45Z。数据源 `tests/flows/results/history.jsonl`（4857 条运行记录）。
 > 分支 `test/flow-coverage`；设计见 [PLAN.md](PLAN.md)，缺陷见 [DEFECTS.md](DEFECTS.md)。
 
 ## 1. 窗口与总量
 
-- 首次记录：2026-09-21 17:01:00Z　最近记录：2026-09-21 21:12:51Z　跨度 **4.20 小时**
-- 累计流程运行：**4667 轮次**；累计断言执行 **157,515 条**（通过 151,803）
+- 首次记录：2026-09-21 17:01:00Z　最近记录：2026-09-21 21:18:44Z　跨度 **4.30 小时**
+- 累计流程运行：**4857 轮次**；累计断言执行 **163,458 条**（通过 157,446）
 - 编排器：`node tests/flows/run.cjs --hours 7.4 --gap 20`（每轮重扫 `tests/flows/f*.cjs`，新流程自动加入）
 
 ## 2. 各流程累计与现行状态
@@ -16,26 +16,27 @@
 | 流程 | 指南依据 | 运行 | 现行运行 | 现行判红 | 现行失败断言 | 已知缺陷触发 | 崩溃(全程) | 时长 min–max |
 |---|---|---|---|---|---|---|---|---|
 | F01 黄金路径全旅程 | 10 | 1 | 0 | 0 | 1 | 0 | 33–70813ms | §6.1 §7.1.4 §6.2 §5.2 |
-| F02 导入格式矩阵与锚点反查 | 345 | 334 | 0 | 0 | 0 | 4 | 241–791ms | §4.2 §6.1 §6.2 §7.2 |
-| F03 复习调度与数据守恒 | 607 | 603 | 0 | 0 | 1809 | 2 | 144–1352ms | §4.4.5 §4.4.9 §4.4.10 §4.2-20 §4.16 §7.2 §7.1.4 |
-| F04 崩溃与恢复 | 355 | 343 | 0 | 0 | 0 | 5 | 169–797ms | §4.4.8 §4.4.9 §7.1.8 §7.2 §9.1 M15 v48.13 |
-| F05 备份—恢复—升级生命周期 | 375 | 367 | 0 | 0 | 0 | 1 | 161–1070ms | §9.1 M2 §7.2 §7.6 §4.18 §4.4.9 §7.1.4 |
-| F06 AI 制卡契约与闸门 | 380 | 373 | 0 | 0 | 373 | 0 | 153–1293ms | §6.3.1 §6.3.4 §6.3.5 §4.16 §7.1.3 §7.4 §4.18 |
-| F07 用户记忆与隐私边界 | 362 | 346 | 0 | 0 | 346 | 7 | 128–698ms | §4.18 §6.7 §7.5 §7.6 §7.2 |
-| F08 材料知识导图：版本模型、隔离性与确定性 | 338 | 320 | 0 | 0 | 0 | 8 | 208–905ms | §4.19 D41-④ D45 §4.2-24 |
-| F09 表现层与设计系统契约 | 356 | 353 | 0 | 0 | 0 | 0 | 18–31ms | §7.1.6 §5.1 §5.3 §5.4 docs/swiss-international-style.md D50 |
-| F10 规模、长稳与性能棘轮 | 342 | 175 | 0 | 0 | 0 | 0 | 2219–9743ms | §7.1.8 §9.1 M15 v48.10 §4.2-20 §7.2 §6.4 |
-| F11 指导文档↔代码一致性 | 245 | 222 | 0 | 0 | 888 | 5 | 10–512ms | §7.1.5 §7.3 §7.4 §8.1 §8.3 §4.1 |
-| F12 时间语义一致性 | 194 | 189 | 0 | 0 | 0 | 0 | 208–825ms | §4.12-4 §4.4.4 §4.16 §4.18 §6.5 §7.1.7 |
-| F13 异常输入与数据卫生 | 174 | 120 | 0 | 0 | 720 | 40 | 164–1532ms | §7.2 §4.2-20 §7.4 §4.16 §6.5 §4.18 §7.5 |
-| F14 三十天使用史演进 | 116 | 112 | 0 | 0 | 0 | 0 | 2087–4168ms | §4.2-20 §4.16 §6.2 §4.4.9 §6.3.6 |
-| F15 幂等与重放矩阵 | 109 | 106 | 0 | 0 | 0 | 3 | 297–1605ms | §4.2-24 §4.6 §4.4.9 §4.16 §4.4.10 §6.4 §7.2 |
-| F16 安全与信任边界 | 102 | 98 | 0 | 0 | 98 | 0 | 21–31ms | §7.5 §7.6 §7.1.3 §7.2 §6.2 §4.18 |
-| F17 词典数据面隔离与来源生命周期 | 94 | 89 | 0 | 0 | 0 | 3 | 374–1134ms | §7.4 v32②③④ §4.2 §7.1.8 |
-| F18 设置项生效矩阵与孤儿设置 | 92 | 54 | 0 | 0 | 324 | 3 | 195–4100ms | §7.1.3 §7.4 §4.16 §4.18 §6.5 §7.2 §7.6 |
-| F19 只读清单与分页边界矩阵 | 43 | 32 | 0 | 0 | 128 | 0 | 309–1522ms | §7.1.3 §7.6 §7.2 §4.2-20 §6.5 §9.1 M15 |
-| F20 键盘命令契约 | 22 | 13 | 0 | 0 | 65 | 1 | 180–789ms | §9.1 M4 §4.2-2 §6.5 §7.1.3 §6.1 |
-| F21 进程间桥面对账 | 6 | 1 | 0 | 0 | 1 | 0 | 23–24ms | §4 接口清单 §7.5 §7.1.3 §4.18 §9.1 M2 |
+| F02 导入格式矩阵与锚点反查 | 354 | 343 | 0 | 0 | 0 | 4 | 241–791ms | §4.2 §6.1 §6.2 §7.2 |
+| F03 复习调度与数据守恒 | 616 | 612 | 0 | 0 | 1836 | 2 | 144–1352ms | §4.4.5 §4.4.9 §4.4.10 §4.2-20 §4.16 §7.2 §7.1.4 |
+| F04 崩溃与恢复 | 364 | 352 | 0 | 0 | 0 | 5 | 169–797ms | §4.4.8 §4.4.9 §7.1.8 §7.2 §9.1 M15 v48.13 |
+| F05 备份—恢复—升级生命周期 | 384 | 376 | 0 | 0 | 0 | 1 | 161–1070ms | §9.1 M2 §7.2 §7.6 §4.18 §4.4.9 §7.1.4 |
+| F06 AI 制卡契约与闸门 | 389 | 382 | 0 | 0 | 382 | 0 | 153–1293ms | §6.3.1 §6.3.4 §6.3.5 §4.16 §7.1.3 §7.4 §4.18 |
+| F07 用户记忆与隐私边界 | 371 | 355 | 0 | 0 | 355 | 7 | 128–698ms | §4.18 §6.7 §7.5 §7.6 §7.2 |
+| F08 材料知识导图：版本模型、隔离性与确定性 | 347 | 329 | 0 | 0 | 0 | 8 | 208–905ms | §4.19 D41-④ D45 §4.2-24 |
+| F09 表现层与设计系统契约 | 365 | 362 | 0 | 0 | 0 | 0 | 18–31ms | §7.1.6 §5.1 §5.3 §5.4 docs/swiss-international-style.md D50 |
+| F10 规模、长稳与性能棘轮 | 352 | 185 | 0 | 0 | 0 | 0 | 2219–9743ms | §7.1.8 §9.1 M15 v48.10 §4.2-20 §7.2 §6.4 |
+| F11 指导文档↔代码一致性 | 254 | 231 | 0 | 0 | 924 | 5 | 10–512ms | §7.1.5 §7.3 §7.4 §8.1 §8.3 §4.1 |
+| F12 时间语义一致性 | 203 | 198 | 0 | 0 | 0 | 0 | 208–825ms | §4.12-4 §4.4.4 §4.16 §4.18 §6.5 §7.1.7 |
+| F13 异常输入与数据卫生 | 183 | 129 | 0 | 0 | 774 | 40 | 164–1532ms | §7.2 §4.2-20 §7.4 §4.16 §6.5 §4.18 §7.5 |
+| F14 三十天使用史演进 | 126 | 122 | 0 | 0 | 0 | 0 | 2087–4168ms | §4.2-20 §4.16 §6.2 §4.4.9 §6.3.6 |
+| F15 幂等与重放矩阵 | 118 | 115 | 0 | 0 | 0 | 3 | 297–1605ms | §4.2-24 §4.6 §4.4.9 §4.16 §4.4.10 §6.4 §7.2 |
+| F16 安全与信任边界 | 111 | 107 | 0 | 0 | 107 | 0 | 21–31ms | §7.5 §7.6 §7.1.3 §7.2 §6.2 §4.18 |
+| F17 词典数据面隔离与来源生命周期 | 104 | 99 | 0 | 0 | 0 | 3 | 374–1134ms | §7.4 v32②③④ §4.2 §7.1.8 |
+| F18 设置项生效矩阵与孤儿设置 | 101 | 63 | 0 | 0 | 378 | 3 | 195–4100ms | §7.1.3 §7.4 §4.16 §4.18 §6.5 §7.2 §7.6 |
+| F19 只读清单与分页边界矩阵 | 52 | 41 | 0 | 0 | 164 | 0 | 309–1522ms | §7.1.3 §7.6 §7.2 §4.2-20 §6.5 §9.1 M15 |
+| F20 键盘命令契约 | 31 | 22 | 0 | 0 | 110 | 1 | 180–789ms | §9.1 M4 §4.2-2 §6.5 §7.1.3 §6.1 |
+| F21 进程间桥面对账 | 15 | 10 | 0 | 0 | 10 | 0 | 22–25ms | §4 接口清单 §7.5 §7.1.3 §4.18 §9.1 M2 |
+| F22 书架视图组织契约 | 7 | 3 | 0 | 0 | 0 | 1 | 300–845ms | §5.4 §4.2-3 §4.2-20 §6.2 §9.1 M2 D51 |
 
 ## 3. 现行仍红的断言（逐条）
 
@@ -375,21 +376,40 @@
 
 - （无失败断言记录，只有环境干扰导致的进程被杀）
 
+### F22 · 书架视图组织契约
+
+累计判红 4 轮（其中现行版本 0 轮），崩溃 1 次
+
+- [P3 解散≠删除、空文件夹保留、删书两处同摘（用户数据不悄悄消失）] 全部移回书架：成员出去、空文件夹保留
+  - 期望 "空夹保留" 实际 {"order":["f1","b1","b2","b3","b9"],"folders":[{"id":"f1","name":"语言","items":[],"created":"2026-09-22"}]}
+- [P4 库里新增的书插到队首，消失的条目同步清干净，且幂等（避免「导入完找不到」）] 未入册的新书排在最前
+  - 期望 "b5,b4" 实际 "b4,b5"
+- [P5 四种排序口径稳定，文件夹用聚合时间与成员数参与同列排序（§5.4）] recent 按最近阅读（含文件夹聚合 latest）
+  - 期望 "b3,b2" 实际 "b2,b3,f1"
+- [P8 视图组织不进数据库：主库零 shelf 列，listItems 排序口径一字不改（D51 边界②）] listItems() 仍是 ORDER BY created_at DESC（文档明写「一字不改」）
+  - 期望 "口径未变" 实际 "ORDER BY li.created_at DESC\r"
+- [P9 统计 / 今日队列 / FSRS 都不感知 order 与 folders（D51 边界①）] 今日队列逐字节不变
+  - 期望 "{\"cards\":[{\"id\":\"0597cb95-2d9c-4c46-8230-4a024ff15150\",\"noteText\":\"F22 卡 0\",\"cardType\":\"qa\",\"clozeOrds\":[],\"cardOrd\":0,\"frontMarkdown\":\"问 0\",\"backMarkdown\":\"答 0\",\"contextPrefix\":null,\"contextRef\":null,\"mnemonic\":null,\"example\":null,\"sourceRef\":null,\"dateStamp\":null,\"priority\":50,\"tags\":[\"f22\"],\"domain\":[],\"knowledgePointId\":null,\"occlusionJson\":null,\"fsrs\":{\"state\":\"new\",\"due\":1790025390140,\"lapses\":0},\"fsrsConfigId\":\"cfg-default\",\"leech\":null,\"generatedBy\":\"manual\",\"genBatchId\":null,\"dictJson\":null,\"memoryRefJson\":null,\"siblingKey\":\"act:f22\",\"createdAt\":1790025390140,\"updatedAt\":1790025390140,\"docTitle\":null}],\"deferred\":[{\"id\":\"ea6bb41e-e832-4665-8abf-a2b3debd0084\",\"noteText\":\"F22 卡 1\",\"cardType\":\"qa\",\"clozeOrds\":[],\"cardOrd\":0,\"frontMarkdown\":\"问 1\",\"backMarkdown\":\"答 1\",\"contextPrefix\":null,\"contextRef\":null,\"mnemonic\":null,\"example\":null,\"sourceRef\":null,\"dateStamp\":null,\"priority\":50,\"tags\":[\"f22\"],\"domain\":[],\"knowledgePointId\":null,\"occlusionJson\":null,\"fsrs\":{\"state\":\"new\",\"due\":1790025390147,\"lapses\":0},\"fsrsConfigId\":\"cfg-default\",\"leech\":null,\"generatedBy\":\"manual\",\"genBatchId\":null,\"dictJson\":null,\"memoryRefJson\":null,\"siblingKey\":\"act:f22\",\"createdAt\":1790025390147,\"updatedAt\":1790025390147,\"docTitle\":null,\"deferReason\":{\"siblingKey\":\"act:f22\",\"kind\":\"revealed\",\"siblingCardId\":\"0597cb95-2d9c-4c46-8230-4a024ff15150\",\"siblingFront\":\"问 0\"}},{\"id\":\"3621554c-1f02-4f27-925e-3030363a8b2d\",\"noteText\":\"F22 卡 2\",\"cardType\":\"qa\",\"clozeOrds\":[],\"cardOrd\":0,\"frontMarkdown\":\"问 2\",\"backMarkdown\":\"答 2\",\"contextPrefix\":null,\"contextRef\":null,\"mnemonic\":null,\"example\":null,\"sourceRef\":null,\"dateStamp\":null,\"priority\":50,\"tags\":[\"f22\"],\"domain\":[],\"knowledgePointId\":null,\"occlusionJson\":null,\"fsrs\":{\"state\":\"new\",\"due\":1790025390152,\"lapses\":0},\"fsrsConfigId\":\"cfg-default\",\"leech\":null,\"generatedBy\":\"manual\",\"genBatchId\":null,\"dictJson\":null,\"memoryRefJson\":null,\"siblingKey\":\"act:f22\",\"createdAt\":1790025390152,\"updatedAt\":1790025390152,\"docTitle\":null,\"deferReason\":{\"siblingKey\":\"act:f22\",\"kind\":\"revealed\",\"siblingCardId\":\"0597cb95-2d9c-4c46-8230-4a024ff15150\",\"siblingFront\":\"问 0\"}},{\"id\":\"69d54af7-753b-4b38-b63a-732ea659374e\",\"noteText\":\"F22 卡 3\",\"cardType\":\"qa\",\"clozeOrds\":[],\"cardOrd\":0,\"frontMarkdown\":\"问 3\",\"backMarkdown\":\"答 3\",\"contextPrefix\":null,\"contextRef\":null,\"mnemonic\":null,\"example\":null,\"sourceRef\":null,\"dateStamp\":null,\"priority\":50,\"tags\":[\"f22\"],\"domain\":[],\"knowledgePointId\":null,\"occlusionJson\":null,\"fsrs\":{\"state\":\"new\",\"due\":1790025390156,\"lapses\":0},\"fsrsConfigId\":\"cfg-default\",\"leech\":null,\"generatedBy\":\"manual\",\"genBatchId\":null,\"dictJson\":null,\"memoryRefJson\":null,\"siblingKey\":\"act:f22\",\"createdAt\":1790025390156,\"updatedAt\":1790025390156,\"docTitle\":null,\"deferReason\":{\"siblingKey\":\"act:f22\",\"kind\":\"revealed\",\"siblingCardId\":\"0597cb95-2d9c-4c46-8230-4a024ff15150\",\"siblingFront\":\"问 0\"}}],\"now\":1790025390168}" 实际 "{\"cards\":[{\"id\":\"0597cb95-2d9c-4c46-8230-4a024ff15150\",\"noteText\":\"F22 卡 0\",\"cardType\":\"qa\",\"clozeOrds\":[],\"cardOrd\":0,\"frontMarkdown\":\"问 
+- [P9 统计 / 今日队列 / FSRS 都不感知 order 与 folders（D51 边界①）] 统计概览逐字节不变
+  - 期望 "{\"kpi\":{\"dueToday\":1,\"completedToday\":0,\"pendingToday\":1,\"reviewedToday\":0,\"streak\":0,\"minutesToday\":0,\"siblingDeferred\":3},\"heatDays\":[{\"date\":1774368000000,\"count\":0,\"minutes\":0},{\"date\":1774454400000,\"count\":0,\"minutes\":0},{\"date\":1774540800000,\"count\":0,\"minutes\":0},{\"date\":1774627200000,\"count\":0,\"minutes\":0},{\"date\":1774713600000,\"count\":0,\"minutes\":0},{\"date\":1774800000000,\"count\":0,\"minutes\":0},{\"date\":1774886400000,\"count\":0,\"minutes\":0},{\"date\":1774972800000,\"count\":0,\"minutes\":0},{\"date\":1775059200000,\"count\":0,\"minutes\":0},{\"date\":1775145600000,\"count\":0,\"minutes\":0},{\"date\":1775232000000,\"count\":0,\"minutes\":0},{\"date\":1775318400000,\"count\":0,\"minutes\":0},{\"date\":1775404800000,\"count\":0,\"minutes\":0},{\"date\":1775491200000,\"count\":0,\"minutes\":0},{\"date\":1775577600000,\"count\":0,\"minutes\":0},{\"date\":1775664000000,\"count\":0,\"minutes\":0},{\"date\":1775750400000,\"count\":0,\"minutes\":0},{\"date\":1775836800000,\"count\":0,\"minutes\":0},{\"date\":1775923200000,\"count\":0,\"minutes\":0},{\"date\":1776009600000,\"count\":0,\"minutes\":0},{\"date\":1776096000000,\"count\":0,\"minutes\":0},{\"date\":1776182400000,\"count\":0,\"minutes\":0},{\"date\":1776268800000,\"count\":0,\"minutes\":0},{\"date\":1776355200000,\"count\":0,\"minutes\":0},{\"date\":1776441600000,\"count\":0,\"minutes\":0},{\"date\":1776528000000,\"count\":0,\"minutes\":0},{\"date\":1776614400000,\"count\":0,\"minutes\":0},{\"date\":1776700800000,\"count\":0,\"minutes\":0},{\"date\":1776787200000,\"count\":0,\"minutes\":0},{\"date\":1776873600000,\"count\":0,\"minutes\":0},{\"date\":1776960000000,\"count\":0,\"minutes\":0},{\"date\":1777046400000,\"count\":0,\"minutes\":0},{\"date\":1777132800000,\"count\":0,\"minutes\":0},{\"date\":1777219200000,\"count\":0,\"minutes\":0},{\"date\":1777305600000,\"count\":0,\"minutes\":0},{\"date\":1777392000000,\"count\":0,\"minutes\":0},{\"date\":1777478400000,\"count\":0,\"minutes\":0},{\"date\":1777564800000,\"count\":0,\"minutes\":0},{\"date\":1777651200000,\"count\":0,\"minutes\":0},{\"date\":1777737600000,\"count\":0,\"minutes\":0},{\"date\":1777824000000,\"count\":0,\"minutes\":0},{\"date\":1777910400000,\"count\":0,\"minutes\":0},{\"date\":1777996800000,\"count\":0,\"minutes\":0},{\"date\":1778083200000,\"count\":0,\"minutes\":0},{\"date\":1778169600000,\"count\":0,\"minutes\":0},{\"date\":1778256000000,\"count\":0,\"minutes\":0},{\"date\":1778342400000,\"count\":0,\"minutes\":0},{\"date\":1778428800000,\"count\":0,\"minutes\":0},{\"date\":1778515200000,\"count\":0,\"minutes\":0},{\"date\":1778601600000,\"count\":0,\"minutes\":0},{\"date\":1778688000000,\"count\":0,\"minutes\":0},{\"date\":1778774400000,\"count\":0,\"minutes\":0},{\"date\":1778860800000,\"count\":0,\"minutes\":0},{\"date\":1778947200000,\"count\":0,\"minutes\":0},{\"date\":1779033600000,\"count\":0,\"minutes\":0},{\"date\":1779120000000,\"count\":0,\"minutes\":0},{\"date\":1779206400000,\"count\":0,\"minutes\":0},{\"date\":1779292800000,\"count\":0,\"minutes\":0},{\"date\":1779379200000,\"count\":0,\"minutes\":0},{\"date\":1779465600000,\"count\":0,\"minutes\":0},{\"date\":1779552000000,\"count\":0,\"minutes\":0},{\"date\":1779638400000,\"count\":0,\"minutes\":0},{\"date\":1779724800000,\"count\":0,\"minutes\":0},{\"date\":1779811200000,\"count\":0,\"minutes\":0},{\"date\":1779897600000,\"count\":0,\"minutes\":0},{\"date\":1779984000000,\"count\":0,\"minutes\":0},{\"date\":1780070400000,\"count\":0,\"minutes\":0},{\"date\":1780156800000,\"count\":0,\"minutes\":0},{\"date\":1780243200000,\"count\":0,\"minutes\":0},{\"date\":1780329600000,\"count\":0,\"minutes\":0},{\"date\":1780416000000,\"count\":0,\"minutes\":0},{\"date\":1780502400000,\"count\":0,\"minutes\":0},{\"date\":1780588800000,\"count\":0,\"minutes\":0},{\"date\":1780675200000,\"count\":0,\"minutes\":0},{\"date\":1780761600000,\"count\":0,\"minutes\":0},{\"date\":1780848000000,\"count\":0,\"minutes\":0},{\"date\":1780934400000,\"count\":0,\"minutes\":0},{\"date\":1781020800000,\"count\":0,\"minutes\":0},{\"date\":1781107200000,\"count\":0,\"minutes\":0},{\"date\":1781193600000,\"count\":0,\"minutes\":0},{\"date\":1781280000000,\"count\":0,\"minutes\":0},{\"date\":1781366400000,\"count\":0,\"minutes\":0},{\"date\":1781452800000,\"count\":0,\"minutes\":0},{\"date\":1781539200000,\"count\":0,\"minutes\":0},{\"date\":1781625600000,\"count\":0,\"minutes\":0},{\"date\":1781712000000,\"count\":0,\"minutes\":0},{\"date\":1781798400000,\"count\":0,\"minutes\":0},{\"date\":1781884800000,\"count\":0,\"minutes\":0},{\"date\":1781971200000,\"count\":0,\"minutes\":0},{\"date\":1782057600000,\"count\":0,\"minutes\":0},{\"date\":1782144000000,\"count\":0,\"minutes\":0},{\"date\":1782230400000,\"count\":0,\"minutes\":0},{\"date\":1782316800000,\"count\":0,\"minutes\":0},{\"date\":1782403200000,\"count\":0,\"minutes\":0},{\"date\":1782489600000,\"count\":0,\"minutes\":0},{\"date\":1782576000000,\"count\":0,\"minutes\":0},{\"date\":1782662400000,\"count\":0,\"minutes\":0},{\"date\":1782748800000,\"count\":0,\"minutes\":0},{\"date\":1782835200000,\"count\":0,\"minutes\":0},{\"date\":1782921600000,\"count\":0,\"minutes\":0},{\"date\":1783008000000,\"count\":0,\"minutes\":0},{\"date\":1783094400000,\"count\":0,\"minutes\":0},{\"date\":1783180800000,\"count\":0,\"minutes\":0},{\"date\":1783267200000,\"count\":0,\"minutes\":0},{\"date\":1783353600000,\"count\":0,\"minutes\":0},{\"date\":1783440000000,\"count\":0,\"minutes\":0},{\"date\":1783526400000,\"count\":0,\"minutes\":0},{\"date\":1783612800000,\"count\":0,\"minutes\":0},{\"date\":1783699200000,\"count\":0,\"minutes\":0},{\"date\":1783785600000,\"count\":0,\"minutes\":0},{\"date\":1783872000000,\"count\":0,\"minutes\":0},{\"date\":1783958400000,\"count\":0,\"minutes\":0},{\"date\":1784044800000,\"count\":0,\"minutes\":0},{\"date\":1784131200000,\"count\":0,\"minutes\":0},{\"date\":1784217600000,\"count\":0,\"minutes\":0},{\"date\":1784304000000,\"count\":0,\"minutes\":0},{\"date\":1784390400000,\"count\":0,\"minutes\":0},{\"date\":1784476800000,\"count\":0,\"minutes\":0},{\"date\":1784563200000,\"count\":0,\"minutes\":0},{\"date\":1784649600000,\"count\":0,\"minutes\":0},{\"date\":1784736000000,\"count\":0,\"minutes\":0},{\"date\":1784822400000,\"count\":0,\"minutes\":0},{\"date\":1784908800000,\"count\":0,\"minutes\":0},{\"date\":1784995200000,\"count\":0,\"minutes\":0},{\"date\":1785081600000,\"count\":0,\"minutes\":0},{\"date\":1785168000000,\"count\":0,\"minutes\":0},{\"date\":1785254400000,\"count\":0,\"minutes\":0},{\"date\":1785340800000,\"count\":0,\"minutes\":0},{\"date\":1785427200000,\"count\":0,\"minutes\":0},{\"date\":1785513600000,\"count\":0,\"minutes\":0},{\"date\":1785600000000,\"count\":0,\"minutes\":0},{\"date\":1785686400000,\"count\":0,\"minutes\":0},{\"date\":1785772800000,\"count\":0,\"minutes\":0},{\"date\":1785859200000,\"count\":0,\"minutes\":0},{\"date\":1785945600000,\"count\":0,\"minutes\":0},{\"date\":1786032000000,\"count\":0,\"minutes\":0},{\"date\":1786118400000,\"count\":0,\"minutes\":0},{\"date\":1786204800000,\"count\":0,\"minutes\":0},{\"date\":1786291200000,\"count\":0,\"minutes\":0},{\"date\":1786377600000,\"count\":0,\"minutes\":0},{\"date\":1786464000000,\"count\":0,\"minutes\":0},{\"date\":1786550400000,\"count\":0,\"minutes\":0},{\"date\":1786636800000,\"count\":0,\"minutes\":0},{\"date\":1786723200000,\"count\":0,\"minutes\":0},{\"date\":1786809600000,\"count\":0,\"minutes\":0},{\"date\":1786896000000,\"count\":0,\"minutes\":0},{\"date\":1786982400000,\"count\":0,\"minutes\":0},{\"date\":1787068800000,\"count\":0,\"minutes\":0},{\"date\":1787155200000,\"count\":0,\"minutes\":0},{\"date\":1787241600000,\"count\":0,\"minutes\":0},{\"date\":1787328000000,\"count\":0,\"minutes\":0},{\"date\":1787414400000,\"count\":0,\"minutes\":0},{\"date\":1787500800000,\"count\":0,\"minutes\":0},{\"date\":1787587200000,\"count\":0,\"minutes\":0},{\"date\":1787673600000,\"count\":0,\"minutes\":0},{\"date\":1787760000000,\"count\":0,\"minutes\":0},{\"date\":1787846400000,\"count\":0,\"minutes\":0},{\"date\":1787932800000,\"count\":0,\"minutes\":0},{\"date\":1788019200000,\"count\":0,\"minutes\":0},{\"date\":1788105600000,\"count\":0,\"minutes\":0},{\"date\":1788192000000,\"count\":0,\"minutes\":0},{\"date\":1788278400000,\"count\":0,\"minutes\":0},{\"date\":1788364800000,\"count\":0,\"minutes\":0},{\"date\":1788451200000,\"count\":0,\"minutes\":0},{\"date\":1788537600000,\"count\":0,\"minutes\":0},{\"date\":1788624000000,\"count\":0,\"minutes\":0},{\"date\":1788710400000,\"count\":0,\"minutes\":0},{\"date\":1788796800000,\"count\":0,\"minutes\":0},{\"date\":1788883200000,\"count\":0,\"minutes\":0},{\"date\":1788969600000,\"count\":0,\"minutes\":0},{\"date\":1789056000000,\"count\":0,\"minutes\":0},{\"date\":1789142400000,\"count\":0,\"minutes\":0},{\"date\":1789228800000,\"count\":0,\"minutes\":0},{\"date\":1789315200000,\"count\":0,\"minutes\":0},{\"date\":1789401600000,\"count\":0,\"minutes\":0},{\"date\":1789488000000,\"count\":0,\"minutes\":0},{\"date\":1789574400000,\"count\":0,\"minutes\":0},{\"date\":1789660800000,\"count\":0,\"minutes\":0},{\"date\":1789747200000,\"count\":0,\"minutes\":0},{\"date\":1789833600000,\"count\":0,\"minutes\":0},{\"date\":1789920000000,\"count\":0,\"minutes\":0},{\"date\":1790006400000,\"count\":0,\"minutes\":0}],\"domainMain\":[],\"domainDetail\":[],\"unclassified\":4,\"ratings\":[],\"durationByField\":[],\"durationBins\":[0,0,0,0,0,0,0,0,0,0,0,0],\"funnel\":{\"drafts\":4,\"entered\":4,\"firstLearned\":0,\"reviewing\":0,\"consolidated\":0},\"sourceCards\":[{\"book\":\"未知来源\",\"domain\":null},{\"book\":\"未知来源\",\"domain\":null},{\"book\":\"未知来源\",\"domain\":null},{\"book\":\"未知来源\",\"domain\":null}],\"domainRank\":[],\"queueFlow\":{\"carriedOver\":0,\"overdue\":0,\"newCards\":4,\"completed\":0,\"skipped\":0,\"remaining\":1},\"readingDays\":[{\"date\":1786137390170,\"chars\":0},{\"date\":1786223790170,\"chars\":0},{\"date\":1786310190170,\"chars\":0},{\"date\":1786396590170,\"chars\":0},{\"date\":1786482990170,\"chars\":0},{\"date\":1786569390170,\"chars\":0},{\"date\":1786655790170,\"chars\":0},{\"date\":1786742190170,\"chars\":0},{\"date\":1786828590170,\"chars\":0},{\"date\":1786914990170,\"chars\":0},{\"date\":1787001390170,\"chars\":0},{\"date\":1787087790170,\"chars\":0},{\"date\":1787174190170,\"chars\":0},{\"date\":1787260590170,\"chars\":0},{\"date\":1787346990170,\"chars\":0},{\"date\":1787433390170,\"chars\":0},{\"date\":1787519790170,\"chars\":0},{\"date\":1787606190170,\"chars\":0},{\"date\":1787692590170,\"chars\":0},{\"date\":1787778990170,\"chars\":0},{\"date\":1787865390170,\"chars\":0},{\"date\":1787951790170,\"chars\":0},{\"date\":1788038190170,\"chars\":0},{\"date\":1788124590170,\"chars\":0},{\"date\":1788210990170,\"chars\":0},{\"date\":1788297390170,\"chars\":0},{\"date\":1788383790170,\"chars\":0},{\"date\":1788470190170,\"chars\":0},{\"date\":1788556590170,\"chars\":0},{\"date\":1788642990170,\"chars\":0},{\"date\":1788729390170,\"chars\":0},{\"date\":1788815790170,\"chars\":0},{\"date\":1788902190170,\"chars\":0},{\"date\":1788988590170,\"chars\":0},{\"date\":1789074990170,\"chars\":0},{\"date\":1789161390170,\"chars\":0},{\"date\":1789247790170,\"chars\":0},{\"date\":1789334190170,\"chars\":0},{\"date\":1789420590170,\"chars\":0},{\"date\":1789506990170,\"chars\":0},{\"date\":1789593390170,\"chars\":0},{\"date\":1789679790170,\"chars\":0},{\"date\":1789766190170,\"chars\":0},{\"date\":1789852590170,\"chars\":0},{\"date\":1789938990170,\"chars\":0}],\"rhythmGrid\":[[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0,0]],\"rhythmEvents\":[]}" 实际 "{\"kpi\":{\"dueToday\":1,\"completedToday\":0,\"pendingToday\":1,\"reviewedToday\":0,\"streak\":0,\"minutesToday\":0,\"siblingDeferred\":3},\"heatDays\":[{\"da
+- [P9 统计 / 今日队列 / FSRS 都不感知 order 与 folders（D51 边界①）] 引用了不存在的书 id 也只是被忽略（不产幽灵条目、不报错）
+  - 期望 "全部忽略" 实际 [{"kind":"folder","id":"f1","folder":{"id":"f1","name":"x","items":["ghost"],"created":"2026-09-22"}}]
+
 ## 4. 性能棘轮（F10，逐轮记录的关键耗时）
 
 | 指标 | 轮数 | 最小 | 中位 | 最大 |
 |---|---|---|---|---|
-| 12 次推迟后的间隔天数 | 342 | 180 | 180 | 180 |
-| queueP50ms | 175 | 7.27 | 12.59 | 23.51 |
-| queueP95ms | 175 | 8.13 | 15.33 | 28.63 |
-| listAllCardsMs | 175 | 6.46 | 10.01 | 21.39 |
-| statsMs | 175 | 13.01 | 21.7 | 38.86 |
-| cardsSeeded | 175 | 420 | 514 | 596 |
-| reviewP50ms | 175 | 3.05 | 5.37 | 8.39 |
-| reviewP95ms | 175 | 3.29 | 7.13 | 11.06 |
-| persistP50ms | 175 | 2.45 | 4.96 | 7.77 |
-| persistP95ms | 175 | 2.77 | 5.34 | 8.17 |
-| dbKb | 175 | 784 | 836 | 888 |
+| 12 次推迟后的间隔天数 | 352 | 180 | 180 | 180 |
+| queueP50ms | 185 | 7.27 | 12.41 | 23.51 |
+| queueP95ms | 185 | 8.13 | 15.27 | 28.63 |
+| listAllCardsMs | 185 | 6.46 | 9.89 | 21.39 |
+| statsMs | 185 | 13.01 | 21.27 | 38.86 |
+| cardsSeeded | 185 | 420 | 514 | 597 |
+| reviewP50ms | 185 | 3.05 | 5.32 | 8.39 |
+| reviewP95ms | 185 | 3.29 | 7.04 | 11.06 |
+| persistP50ms | 185 | 2.45 | 4.83 | 7.77 |
+| persistP95ms | 185 | 2.77 | 5.3 | 8.17 |
+| dbKb | 185 | 784 | 836 | 888 |
 
 ## 5. 结论口径
 
