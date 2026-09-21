@@ -118,6 +118,12 @@ app
       const st = await timed(() => db.getStatsOverview());
       const du = await timed(() => db.listDueExtracts());
       flow.record("computeTodayQueue p50/p95", `${ms2(pct(qSamples, 0.5))} / ${ms2(pct(qSamples, 0.95))} ms`);
+      // 纯数字键：报告生成器靠它们算跨轮的 min/中位/max（性能趋势）
+      flow.record("queueP50ms", ms2(pct(qSamples, 0.5)));
+      flow.record("queueP95ms", ms2(pct(qSamples, 0.95)));
+      flow.record("listAllCardsMs", ms2(lb.ms));
+      flow.record("statsMs", ms2(st.ms));
+      flow.record("cardsSeeded", nCards);
       flow.record("listDueCards", `${ms2(lq.ms)}ms`);
       flow.record("listAllCards", `${ms2(lb.ms)}ms`);
       flow.record("getStatsOverview", `${ms2(st.ms)}ms`);
@@ -151,6 +157,11 @@ app
       }
       flow.record("saveReview p50/p95", `${ms2(pct(writeSamples, 0.5))} / ${ms2(pct(writeSamples, 0.95))} ms`);
       flow.record("persistNow p50/p95（含全量导出）", `${ms2(pct(persistSamples, 0.5))} / ${ms2(pct(persistSamples, 0.95))} ms`);
+      flow.record("reviewP50ms", ms2(pct(writeSamples, 0.5)));
+      flow.record("reviewP95ms", ms2(pct(writeSamples, 0.95)));
+      flow.record("persistP50ms", ms2(pct(persistSamples, 0.5)));
+      flow.record("persistP95ms", ms2(pct(persistSamples, 0.95)));
+      flow.record("dbKb", Math.round(fs.statSync(dbFile).size / 1024));
       nb.reviewP95 = Math.min(nb.reviewP95 ?? Infinity, ms2(pct(writeSamples, 0.95)));
       nb.persistP95 = Math.min(nb.persistP95 ?? Infinity, ms2(pct(persistSamples, 0.95)));
       gate("reviewP95", ms2(pct(writeSamples, 0.95)), 800);
