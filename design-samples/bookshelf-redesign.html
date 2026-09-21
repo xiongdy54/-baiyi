@@ -1,0 +1,1457 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>书架页重设计方案 · 增量阅读</title>
+<style>
+/* ============================================================
+   Design Token —— 逐字取自 src/theme.css（瑞士风基线 / IKB 蓝）
+   本文件是设计样张，不进构建、不进 src/，因此 Token 内联一份。
+   ============================================================ */
+:root{
+  --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+  --text-primary:var(--ink); --text-secondary:#525252; --text-helper:var(--grey-3); --text-placeholder:#8a8a8a;
+  --border-subtle:#e0e0e0; --border-strong:#a3a3a3;
+  --accent:#002fa7; --accent-on:#ffffff;
+  --accent-soft:color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #000000);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #000000);
+  --success:#1a7f37; --warning:#9a6700; --error:#b42318;
+  --error-on:#ffffff; --warning-on:#ffffff;
+  --error-soft:color-mix(in srgb, var(--error) 10%, transparent);
+  --overlay-ink:#0a0a0a; --overlay-text:#f5f5f2; --overlay-helper:#a3a3a3;
+  --font-sans:"Inter","Helvetica Neue","Helvetica","Arial","Segoe UI Variable","Segoe UI",system-ui,
+    "PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --font-mono:"JetBrains Mono","IBM Plex Mono","SF Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+  --fs-display:44px; --fs-title-l:26px; --fs-title-s:18px; --fs-body:14px; --fs-secondary:13px; --fs-meta:12px;
+  --lh-prose:1.7;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px; --sp-12:48px; --sp-16:64px;
+  --z-dropdown:100; --z-sticky:200; --z-drawer:300; --z-modal:400; --z-toast:500;
+  --shadow-float:0 8px 24px rgba(10,10,10,.12);
+  --shadow-panel:0 8px 24px rgba(10,10,10,.12);
+  --radius:0; --radius-panel:0; --radius-pill:0;
+  --ease:cubic-bezier(.2,0,.38,.9); --dur:120ms;
+  --hair:calc(var(--sp-1) / 2); /* §5.3 v48.14：2px 半档一律这样写，不写裸 2px */
+}
+body.theme-dark{
+  --paper:#101010; --grey-1:#1c1c1a; --grey-2:#33332f; --grey-3:#8a8a86; --ink:#f5f5f2;
+  --text-primary:var(--ink); --text-secondary:#b5b5b0; --text-helper:var(--grey-3); --text-placeholder:#7a7a76;
+  --border-subtle:#2a2a27; --border-strong:#4a4a46;
+  --accent:#5b7fe8; --accent-on:#0a0a0a;
+  --accent-soft:color-mix(in srgb, var(--accent) 16%, transparent);
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #ffffff);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #ffffff);
+  --success:#3fb950; --warning:#d29922; --error:#f85149;
+  --error-on:#0a0a0a; --warning-on:#0a0a0a;
+  --error-soft:color-mix(in srgb, var(--error) 18%, transparent);
+  --shadow-float:0 8px 24px rgba(0,0,0,.5);
+  --shadow-panel:0 8px 24px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--paper); color:var(--text-primary);
+  font-family:var(--font-sans); font-size:var(--fs-body); line-height:1.6;
+  -webkit-font-smoothing:antialiased; accent-color:var(--accent);
+}
+.mono{font-family:var(--font-mono); font-feature-settings:"tnum"; font-variant-numeric:tabular-nums}
+:focus-visible{outline:var(--hair) solid var(--accent); outline-offset:2px}
+
+/* ---------- 文档 chrome ---------- */
+.doc{max-width:1320px; margin:0 auto; padding:var(--sp-12) var(--sp-8) var(--sp-16)}
+.doc > section{margin-top:var(--sp-16)}
+.kicker{font-size:var(--fs-meta); font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--text-helper)}
+h1{font-size:var(--fs-display); font-weight:300; letter-spacing:-.03em; line-height:1.05; margin:var(--sp-2) 0 var(--sp-3)}
+h2{font-size:var(--fs-title-s); font-weight:500; letter-spacing:-.01em; margin:0}
+h3{font-size:var(--fs-body); font-weight:600; margin:0 0 var(--sp-2)}
+.lede{font-size:var(--fs-title-s); font-weight:300; line-height:1.5; color:var(--text-secondary); max-width:74ch; margin:0}
+.sec-head{border-bottom:1px solid var(--border-strong); padding-bottom:var(--sp-2); margin-bottom:var(--sp-6)}
+p{margin:0 0 var(--sp-3)}
+.note{font-size:var(--fs-secondary); color:var(--text-secondary); max-width:82ch; line-height:1.6}
+code{font-family:var(--font-mono); font-size:var(--fs-meta); background:var(--grey-1); padding:1px var(--sp-1)}
+pre{background:var(--grey-1); border-left:var(--hair) solid var(--accent); padding:var(--sp-4); overflow-x:auto; margin:0 0 var(--sp-4)}
+pre code{background:none; padding:0; font-size:var(--fs-secondary); line-height:1.6; display:block}
+ul.plain{margin:0; padding-left:var(--sp-4)}
+ul.plain li{font-size:var(--fs-secondary); color:var(--text-secondary); line-height:1.6; margin-bottom:var(--sp-1)}
+.cols{display:grid; gap:var(--sp-8)}
+@media (min-width:1040px){ .cols-2{grid-template-columns:1fr 1fr} }
+
+/* 文档表格：只画横向 hairline，不画竖线、不画四边格 */
+table{border-collapse:collapse; width:100%; font-size:var(--fs-secondary)}
+thead th{font-size:var(--fs-meta); font-weight:600; text-align:left; color:var(--text-secondary);
+  background:var(--grey-1); border-bottom:1px solid var(--border-strong); padding:var(--sp-2) var(--sp-3)}
+tbody td{border-bottom:1px solid var(--border-subtle); padding:var(--sp-3); vertical-align:top; line-height:1.6}
+tbody tr:last-child td{border-bottom:none}
+td.n,th.n{font-family:var(--font-mono); font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap}
+.dead{color:var(--error); font-weight:600}
+.zero{color:var(--text-primary); font-weight:600}
+.tag{display:inline-block; font-size:var(--fs-meta); font-weight:600; letter-spacing:.06em;
+  border:1px solid var(--border-strong); padding:1px var(--sp-2); white-space:nowrap}
+.tag-ink{background:var(--ink); color:var(--paper); border-color:var(--ink)}
+.tag-acc{background:var(--accent-soft); border-color:var(--accent); color:var(--accent)}
+
+/* ---------- 原型实验台 ---------- */
+.lab-bar{display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-2) var(--sp-6); margin-bottom:var(--sp-3)}
+.grp{display:flex; align-items:baseline; gap:var(--sp-3)}
+.lb{font-size:var(--fs-meta); font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--text-helper)}
+.seg{display:flex; gap:var(--sp-1); border:1px solid var(--border-subtle)}
+.seg button{position:relative; height:32px; padding:0 var(--sp-3); background:transparent; border:none;
+  border-radius:var(--radius); font-family:inherit; font-size:var(--fs-secondary); font-weight:500;
+  color:var(--text-helper); cursor:pointer;
+  transition:background-color var(--dur) var(--ease), color var(--dur) var(--ease)}
+.seg button:hover{background:var(--grey-1); color:var(--text-primary)}
+.seg button[aria-pressed="true"]{background:var(--accent-soft); color:var(--accent)}
+.seg button[aria-pressed="true"]::before{content:""; position:absolute; left:0; top:0; bottom:0;
+  width:var(--hair); background:var(--accent)}
+.frame{resize:horizontal; overflow:hidden; width:100%; min-width:360px; max-width:100%;
+  border:1px solid var(--border-strong); background:var(--paper)}
+.frame-readout{display:flex; flex-wrap:wrap; gap:var(--sp-2) var(--sp-6); font-size:var(--fs-meta);
+  font-weight:600; letter-spacing:.04em; color:var(--text-helper)}
+.frame-readout b{color:var(--text-primary)}
+.presets{display:flex; gap:var(--sp-2); flex-wrap:wrap}
+.presets button{height:32px; padding:0 var(--sp-3); background:var(--grey-1); border:none; border-radius:var(--radius);
+  font-family:var(--font-mono); font-size:var(--fs-meta); color:var(--text-primary); cursor:pointer}
+.presets button:hover{background:var(--grey-2)}
+
+/* ---------- 仿应用外壳 ---------- */
+.app-shell{height:640px; display:flex; flex-direction:column; background:var(--paper); overflow:hidden}
+.topbar{height:var(--sp-12); display:flex; align-items:center; justify-content:space-between;
+  padding:0 var(--sp-2) 0 var(--sp-4); background:var(--paper); border-bottom:1px solid var(--border-subtle);
+  user-select:none; flex:none}
+.topbar-nav{display:flex; align-items:center; gap:var(--sp-1)}
+.nav-item{height:var(--sp-8); padding:0 var(--sp-3); background:transparent; border:none; cursor:pointer;
+  font-family:inherit; font-size:var(--fs-secondary); font-weight:500; color:var(--text-secondary)}
+.nav-item:hover{background:var(--grey-1); color:var(--text-primary)}
+.nav-item.on{color:var(--text-primary); outline:var(--hair) solid var(--accent); outline-offset:-1px}
+.topbar-title{font-size:var(--fs-secondary); font-weight:600; letter-spacing:-.01em; color:var(--text-helper);
+  border-left:1px solid var(--border-subtle); padding-left:var(--sp-3); margin-left:var(--sp-2)}
+.topbar-right{display:flex; align-items:center; gap:var(--sp-1)}
+.wctl{width:44px; height:32px; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border:none; color:var(--text-secondary); cursor:pointer}
+.wctl:hover{background:var(--grey-1)}
+.icon-btn{width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border:none; border-radius:var(--radius); color:var(--text-secondary); cursor:pointer;
+  transition:background-color var(--dur) var(--ease), color var(--dur) var(--ease)}
+.icon-btn:hover{background:var(--grey-1); color:var(--text-primary)}
+
+/* 书架容器（对应 .bookshelf）—— 容器查询负责"窄了就少显示装饰性文字" */
+.bookshelf{flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column;
+  container-type:inline-size; container-name:shelf; --shelf-min:200px}
+.bookshelf.dens-sm{--shelf-min:152px}
+.bookshelf.dens-lg{--shelf-min:248px}
+/* 逐级退让（阈值按容器宽，= 窗口宽 − 内边距 64 − 滚动条约 15）：
+   主按钮 / 计数 / 视图 / 排序 恒在；密度 >900、提示文字 >1100、小标签 >1280 才回来。
+   阶梯必须单调：三档控件若在不同点回归，会在中间宽度段挤成两行（实测踩过 760/900 两处）。 */
+@container shelf (max-width:1280px){ .tb-lb{display:none} }
+@container shelf (max-width:1100px){ .kbd-hint,.kbd-in{display:none} }
+@container shelf (max-width:900px){ .tb-grp.dens-grp{display:none} }
+
+/* ★ 吸顶工具条：本次重设计的新增面。计数在左、主行动在右，滚动时常驻 */
+.shelf-bar{position:sticky; top:0; z-index:var(--z-sticky); background:var(--paper);
+  border-bottom:1px solid var(--border-subtle); display:flex; align-items:center;
+  gap:var(--sp-2) var(--sp-4); flex-wrap:wrap; padding:var(--sp-3) var(--sp-8)}
+.shelf-count{font-size:var(--fs-meta); font-weight:600; letter-spacing:.1em; color:var(--text-helper); white-space:nowrap}
+.shelf-count b{font-size:var(--fs-body); color:var(--text-primary)}
+.shelf-bar .spacer{flex:1 1 var(--sp-6)}
+.hint{font-size:var(--fs-meta); font-weight:500; color:var(--text-helper); white-space:nowrap}
+.kbd{font-family:var(--font-mono); font-size:var(--fs-meta); color:var(--text-secondary);
+  border:1px solid var(--border-subtle); padding:1px var(--sp-1); white-space:nowrap}
+/* 快捷键当钮标的一部分，不占工具条额外一格（accent 底上用 accent-on 的半透 hairline，不引第二色） */
+.kbd-in{margin-left:var(--sp-2); color:var(--accent-on); border-color:color-mix(in srgb, var(--accent-on) 45%, transparent)}
+.btn{height:40px; padding:0 var(--sp-4); display:inline-flex; align-items:center; justify-content:center;
+  gap:var(--sp-2); font-family:inherit; font-size:var(--fs-body); font-weight:500;
+  border:1px solid transparent; border-radius:var(--radius); cursor:pointer;
+  transition:background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease)}
+.btn-sm{height:32px; padding:0 var(--sp-3); font-size:var(--fs-secondary)}
+.btn-xs{height:26px; padding:0 var(--sp-2); font-size:var(--fs-meta)}
+.btn-primary{background:var(--accent); color:var(--accent-on)}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-primary:active{background:var(--accent-pressed)}
+.btn-secondary{background:var(--grey-1); color:var(--text-primary)}
+.btn-secondary:hover{background:var(--grey-2)}
+.btn-outline{background:transparent; border-color:var(--border-strong); color:var(--text-primary)}
+.btn-outline:hover{background:var(--grey-1)}
+.btn-danger{background:var(--error); color:var(--error-on)}
+
+/* ★ 网格：本次修复的核心一行 —— minmax(下限, 1fr) 让剩余宽度被列吸收 */
+.shelf-grid{display:grid; gap:var(--sp-6);
+  grid-template-columns:repeat(auto-fill, minmax(min(100%, var(--shelf-min)), 1fr));
+  align-content:start; padding:var(--sp-6) var(--sp-8) var(--sp-8)}
+.shelf-body{padding:var(--sp-6) var(--sp-8) var(--sp-8)}
+.shelf-item{display:flex; flex-direction:column; min-width:0}
+
+/* 图注卡：封面 → 2px 进度轨 → 书名 / meta（不再整块黑幕盖住封面） */
+.book-card{position:relative; aspect-ratio:2 / 3; background:var(--grey-1); overflow:hidden; cursor:pointer}
+.book-card svg.cover,.book-card img.cover{position:absolute; inset:0; width:100%; height:100%; display:block}
+.c-paper{fill:var(--paper)} .c-g1{fill:var(--grey-1)} .c-g2{fill:var(--grey-2)}
+.c-g3{fill:var(--grey-3)} .c-ink{fill:var(--ink)} .c-acc{fill:var(--accent)} .c-accon{fill:var(--accent-on)}
+.s-g2{stroke:var(--grey-2)} .cover-t{font-family:var(--font-sans); font-weight:600; letter-spacing:-.01em}
+.no-cover-title{position:absolute; left:var(--sp-4); right:var(--sp-4); bottom:var(--sp-4); margin:0;
+  font-size:var(--fs-secondary); font-weight:500; line-height:1.35; letter-spacing:-.01em;
+  display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden}
+.sq{position:absolute; top:var(--sp-4); left:var(--sp-4); width:var(--sp-2); height:var(--sp-2); background:var(--accent)}
+
+/* hover / focus 动作条：压在封面底缘 40px，图注区不动、书名始终可读 */
+.card-acts{position:absolute; left:0; right:0; bottom:0; height:var(--sp-12); display:flex; align-items:center;
+  gap:var(--sp-1); padding:0 var(--sp-2); background:var(--overlay-ink); opacity:0;
+  transition:opacity var(--dur) var(--ease)}
+.book-card:hover .card-acts,.book-card:focus-within .card-acts{opacity:1}
+.act{width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border:none; border-radius:var(--radius); color:var(--overlay-text); cursor:pointer;
+  transition:background-color var(--dur) var(--ease)}
+.act:hover{background:var(--accent); color:var(--accent-on)}
+.act-warn:hover{background:var(--error); color:var(--error-on)}
+.act-spacer{flex:1}
+.confirm{position:absolute; left:0; right:0; bottom:0; display:flex; flex-direction:column; gap:var(--sp-2);
+  padding:var(--sp-3); background:var(--overlay-ink); color:var(--overlay-text);
+  font-size:var(--fs-secondary); line-height:1.4}
+.confirm .row{display:flex; gap:var(--sp-2)}
+.confirm .btn-outline{border-color:color-mix(in srgb, var(--overlay-text) 40%, transparent); color:var(--overlay-text)}
+.confirm .btn-outline:hover{background:color-mix(in srgb, var(--overlay-text) 14%, transparent)}
+
+/* 拖拽把手：只在「手动顺序」下在场 */
+.grip{position:absolute; top:var(--sp-2); left:var(--sp-2); width:28px; height:28px;
+  display:inline-flex; align-items:center; justify-content:center; background:var(--overlay-ink);
+  color:var(--overlay-text); border:none; border-radius:var(--radius); opacity:0; cursor:grab;
+  transition:opacity var(--dur) var(--ease)}
+.book-card:hover .grip,.grip:focus-visible{opacity:1}
+.grip:active{cursor:grabbing}
+.shelf-item.dragging .book-card{background:var(--accent-soft); outline:var(--hair) solid var(--accent); outline-offset:-1px}
+.shelf-item.dragging .book-card > *:not(.grip){opacity:.45}
+.shelf-item.fresh .book-card,.shelf-item.fresh .cap-rail i{background:var(--accent-soft)}
+
+/* 图注区 */
+.cap-rail{height:var(--hair); background:var(--grey-2)}
+.cap-rail i{display:block; height:100%; background:var(--accent)}
+.cap{padding:var(--sp-2) 0 0; display:flex; flex-direction:column; gap:var(--sp-1)}
+.cap-title{font-size:var(--fs-body); font-weight:500; line-height:1.4; letter-spacing:-.01em; margin:0;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+.cap-meta{display:flex; align-items:center; gap:var(--sp-2); font-size:var(--fs-meta); font-weight:500;
+  color:var(--text-helper); white-space:nowrap; overflow:hidden}
+.cap-meta .pct{color:var(--text-primary)}
+.cap-meta .sep{width:var(--sp-1); height:var(--sp-1); background:var(--grey-2); flex:none}
+.cap-meta .lang,.row .lang{border:1px solid var(--border-subtle); padding:0 var(--sp-1); font-weight:600}
+.cap-input{width:100%; height:32px; padding:0 var(--sp-2); font-family:var(--font-mono); font-size:var(--fs-secondary);
+  color:var(--text-primary); background:var(--paper); border:1px solid var(--accent); border-radius:var(--radius); outline:none}
+
+/* 直角下拉（复用 .dd 词汇）：语言从卡面永久挂出的 select 收进来；画在卡内，避免被 overflow 裁掉 */
+.dd{position:relative}
+.dd-menu{position:absolute; bottom:calc(var(--sp-12) + var(--sp-1)); right:var(--sp-2); z-index:var(--z-dropdown);
+  min-width:96px; background:var(--paper); border:1px solid var(--border-subtle);
+  box-shadow:var(--shadow-float); display:none}
+.dd.open .dd-menu{display:block}
+.dd-menu button{display:block; width:100%; text-align:left; padding:var(--sp-2) var(--sp-3); background:none;
+  border:none; border-radius:var(--radius); font-family:inherit; font-size:var(--fs-secondary);
+  color:var(--text-primary); cursor:pointer}
+.dd-menu button:hover{background:var(--grey-1)}
+.dd-menu button[aria-checked="true"]{background:var(--accent-soft); color:var(--accent)}
+/* 表格里菜单往下方开；卡片的菜单朝上开（受封面容器 overflow 限制） */
+.col-act .dd-menu{bottom:auto; top:calc(100% + var(--sp-1)); right:0}
+
+/* 目录表视图 */
+.shelf-table{width:100%; border-collapse:collapse}
+.shelf-table thead th{font-size:var(--fs-meta); font-weight:600; text-align:left; background:var(--grey-1);
+  border-bottom:1px solid var(--border-strong); padding:var(--sp-2) var(--sp-3); white-space:nowrap}
+.shelf-table tbody td{border-bottom:1px solid var(--border-subtle); padding:var(--sp-3)}
+.shelf-table tbody tr:last-child td{border-bottom:none}
+.shelf-table tbody tr:hover{background:var(--grey-1)}
+.col-open,.col-th{width:44px}
+.col-cov{width:52px}
+.col-num{width:88px; text-align:right; font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+.col-act{width:88px; text-align:right}
+.thumb{width:36px; height:54px; display:block; background:var(--grey-1); overflow:hidden; position:relative}
+.row-grip{visibility:hidden}
+tr:hover .row-grip,.row-grip:focus-visible{visibility:visible}
+tr.dragging{background:var(--accent-soft); outline:var(--hair) solid var(--accent); outline-offset:-1px}
+.t-title{font-size:var(--fs-body); font-weight:500; line-height:1.4}
+.t-sub{font-size:var(--fs-meta); color:var(--text-helper); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.bar{height:var(--hair); background:var(--grey-2); margin-top:var(--sp-2)}
+.bar i{display:block; height:100%; background:var(--accent)}
+
+/* 内联反馈（对应 .notice-bar：不弹原生窗） */
+.inline-bar{display:flex; align-items:center; gap:var(--sp-3); margin:var(--sp-4) var(--sp-8) 0;
+  padding:var(--sp-3) var(--sp-4); background:var(--grey-1); border-left:var(--hair) solid var(--accent);
+  font-size:var(--fs-secondary)}
+.inline-bar svg{flex:none; color:var(--text-helper)}
+.empty-state{display:flex; flex-direction:column; align-items:center; gap:var(--sp-4);
+  padding:var(--sp-16) var(--sp-8); text-align:center}
+.empty-deco{display:flex; gap:var(--sp-2)}
+.empty-sq{width:var(--sp-2); height:var(--sp-2); background:var(--grey-2)}
+.empty-sq-accent{background:var(--accent)}
+.empty-text{max-width:44ch; color:var(--text-secondary); font-size:var(--fs-secondary); line-height:var(--lh-prose); margin:0}
+
+/* ---------- 工具条内的分组：视图 / 密度 / 排序 ---------- */
+.tb-grp{display:flex; align-items:center; gap:var(--sp-2)}
+.tb-lb{font-size:var(--fs-meta); font-weight:600; letter-spacing:.1em; text-transform:uppercase; color:var(--text-helper)}
+.tb-seg{display:flex; border:1px solid var(--border-subtle)}
+.tb-seg button{position:relative; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center;
+  background:transparent; border:none; border-radius:var(--radius); color:var(--text-helper); cursor:pointer;
+  transition:background-color var(--dur) var(--ease), color var(--dur) var(--ease)}
+.tb-seg button + button{border-left:1px solid var(--border-subtle)}
+.tb-seg button:hover{background:var(--grey-1); color:var(--text-primary)}
+.tb-seg button[aria-pressed="true"]{background:var(--accent-soft); color:var(--accent)}
+.tb-seg.tb-text button{width:auto; padding:0 var(--sp-2); font-family:inherit; font-size:var(--fs-meta); font-weight:500}
+/* 排序：当前值 + 下拉（复用 .dd 词汇，菜单画在工具条下方，不受 overflow 裁切） */
+.sort-dd{position:relative}
+.sort-dd > button{height:32px; display:inline-flex; align-items:center; gap:var(--sp-2); padding:0 var(--sp-3);
+  background:var(--grey-1); border:none; border-radius:var(--radius); font-family:inherit; font-size:var(--fs-meta);
+  font-weight:600; color:var(--text-primary); cursor:pointer}
+.sort-dd > button:hover{background:var(--grey-2)}
+.sort-dd .dd-menu{top:calc(100% + var(--sp-1)); bottom:auto; right:auto; left:0; min-width:132px}
+.sort-dd .dd-menu button{display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3)}
+.sort-dd .dd-menu button .mark{font-size:var(--fs-meta); color:var(--accent); font-weight:600}
+/* 面包屑：进入文件夹后的当前位置。回退用显式按钮 + 顶栏导航 + Esc 三条路，不只靠一个灰色小字 */
+.crumb{display:flex; align-items:center; gap:var(--sp-2); font-size:var(--fs-secondary)}
+.crumb .btn-xs{gap:var(--sp-1)}
+.crumb button{background:transparent; border:none; border-radius:var(--radius); padding:calc(var(--sp-1) / 2) var(--sp-1);
+  font-family:inherit; font-size:var(--fs-secondary); font-weight:500; color:var(--text-helper); cursor:pointer}
+.crumb button:hover{background:var(--grey-1); color:var(--text-primary)}
+.crumb .here{color:var(--text-primary); font-weight:600}
+.crumb .sb{width:var(--sp-1); height:var(--sp-1); background:var(--grey-2); flex:none}
+.crumb button.hot{background:var(--accent-soft); color:var(--accent); outline:var(--hair) solid var(--accent); outline-offset:-1px}
+.f-spines i.rest,.mini-spines i.rest{display:flex; align-items:center; justify-content:center;
+  background:var(--grey-2); font-family:var(--font-mono); font-size:var(--fs-meta); font-weight:600; color:var(--text-primary)}
+
+/* ---------- 文件夹卡：一排书脊 + 标签页 + 成员数。与单张封面一眼可分 ---------- */
+.f-face{position:absolute; inset:0; background:var(--grey-1); overflow:hidden}
+.f-tab{position:absolute; top:0; left:0; width:calc(var(--sp-12) + var(--sp-2)); height:var(--sp-3);
+  background:var(--paper); border:1px solid var(--border-strong); border-top:none}
+.f-tab span{position:absolute; left:var(--sp-2); top:calc(var(--sp-1) / 2); font-size:var(--fs-meta);
+  font-weight:600; letter-spacing:.1em; color:var(--text-helper)}
+.f-spines{position:absolute; left:var(--sp-4); right:var(--sp-4); top:calc(var(--sp-3) + var(--sp-4));
+  bottom:calc(var(--sp-12) + var(--sp-4)); display:flex; justify-content:flex-start; gap:var(--sp-1)}
+.f-spines i{position:relative; flex:1 1 0; min-width:0; max-width:calc(var(--sp-8) + var(--sp-4)); overflow:hidden;
+  background:var(--paper); outline:1px solid var(--border-subtle)}
+.f-spines i svg{position:absolute; inset:0; width:100%; height:100%; display:block}
+.f-spines i.rest{display:flex; align-items:center; justify-content:center; background:var(--grey-2);
+  font-family:var(--font-mono); font-size:var(--fs-meta); font-weight:600; color:var(--text-primary)}
+.f-sum{position:absolute; left:var(--sp-4); right:var(--sp-4); bottom:var(--sp-3);
+  display:flex; align-items:baseline; gap:var(--sp-2)}
+.f-sum .n{font-size:var(--fs-title-l); font-weight:300; letter-spacing:-.02em; line-height:1;
+  font-family:var(--font-mono); font-feature-settings:"tnum"; font-variant-numeric:tabular-nums}
+.f-sum .u{font-size:var(--fs-meta); font-weight:600; color:var(--text-helper)}
+.f-sum .avg{margin-left:auto; font-size:var(--fs-meta); font-weight:500; color:var(--text-helper);
+  font-family:var(--font-mono); font-feature-settings:"tnum"}
+.folder-empty{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:var(--sp-2); color:var(--text-helper); text-align:center; padding:var(--sp-4)}
+.folder-empty .et{font-size:var(--fs-meta); font-weight:500; line-height:1.5}
+/* hover / focus：整块翻成 ink 名册，成员书名当场可读（动作条留在底部 40px，两者不打架） */
+.f-roster{position:absolute; left:0; right:0; top:0; bottom:var(--sp-12); padding:var(--sp-4);
+  background:var(--overlay-ink); color:var(--overlay-text); display:flex; flex-direction:column;
+  gap:var(--sp-1); opacity:0; transition:opacity var(--dur) var(--ease); overflow:hidden}
+.book-card:hover .f-roster,.book-card:focus-within .f-roster{opacity:1}
+.f-roster .rh{font-size:var(--fs-meta); font-weight:600; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--overlay-helper); margin-bottom:var(--sp-1)}
+.f-roster ol{margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:var(--sp-1)}
+.f-roster li{display:flex; gap:var(--sp-2); align-items:flex-start; font-size:var(--fs-secondary); line-height:1.4}
+.f-roster li .ix{font-family:var(--font-mono); font-size:var(--fs-meta); color:var(--overlay-helper);
+  min-width:calc(var(--sp-1) * 4); flex:none; font-feature-settings:"tnum"}
+.f-roster li .tt{overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical}
+.f-roster .more{font-size:var(--fs-meta); color:var(--overlay-helper); margin-top:var(--sp-1)}
+.cap-meta .cnt{color:var(--text-primary)}
+/* 目录表里的文件夹行：常态报"N 本 · 均值"，悬停当场列出成员 */
+.t-members{display:none; font-size:var(--fs-meta); color:var(--text-secondary); line-height:1.6}
+tr:hover .t-sub{display:none}
+tr:hover .t-members{display:block}
+.mini-spines{display:flex; gap:1px; height:100%}
+.mini-spines i{flex:1; background:var(--paper); outline:1px solid var(--border-subtle); position:relative; overflow:hidden}
+.mini-spines i svg{position:absolute; inset:0; width:100%; height:100%}
+
+/* ---------- 拖拽落点的三种态：前 / 归入 / 后 ---------- */
+.shelf-item.zone-before .book-card::before,.shelf-item.zone-after .book-card::after{
+  content:""; position:absolute; top:0; bottom:0; width:var(--hair); background:var(--accent); z-index:2}
+.shelf-item.zone-before .book-card::before{left:calc(var(--sp-3) * -1)}
+.shelf-item.zone-after .book-card::after{right:calc(var(--sp-3) * -1)}
+.shelf-item.zone-group .book-card{background:var(--accent-soft); outline:var(--hair) solid var(--accent); outline-offset:-1px}
+.shelf-item.zone-group .book-card > *:not(.zone-tip){opacity:.45}
+.zone-tip{position:absolute; left:50%; top:var(--sp-6); transform:translateX(-50%); z-index:3;
+  background:var(--overlay-ink); color:var(--overlay-text); font-size:var(--fs-meta); font-weight:600;
+  letter-spacing:.04em; padding:var(--sp-1) var(--sp-2); white-space:nowrap; max-width:calc(100% - var(--sp-2));
+  overflow:hidden; text-overflow:ellipsis}
+tr.zone-before,tr.zone-after{box-shadow:inset var(--hair) 0 0 var(--accent)}
+tr.zone-after{box-shadow:inset calc(var(--hair) * -1) 0 0 var(--accent)}
+tr.zone-group{background:var(--accent-soft); box-shadow:inset 0 var(--hair) 0 var(--accent)}
+
+/* ---------- 解剖标注 ---------- */
+.anatomy{display:grid; gap:var(--sp-8); grid-template-columns:1fr}
+@media (min-width:1080px){ .anatomy{grid-template-columns:minmax(220px,300px) 1fr} }
+.spec-list{border-top:1px solid var(--border-subtle); margin:0}
+.spec-list .r{display:grid; grid-template-columns:120px 1fr; gap:var(--sp-4); padding:var(--sp-3) 0;
+  border-bottom:1px solid var(--border-subtle); font-size:var(--fs-secondary); line-height:1.6}
+.spec-list dt{font-weight:600; margin:0}
+.spec-list dd{margin:0; color:var(--text-secondary)}
+.mini{width:260px}
+
+/* 1:1 视口切片：灰底 = 不属于内容的区域，右侧灰带就是那块空白 */
+.strip{background:var(--grey-2); position:relative}
+.strip-old{display:grid; grid-template-columns:repeat(auto-fill, 200px); justify-content:start;
+  gap:var(--sp-6); padding:var(--sp-4) var(--sp-8)}
+.strip-new{display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));
+  gap:var(--sp-6); padding:var(--sp-4) var(--sp-8)}
+.strip i{display:block; height:96px; background:var(--grey-1); outline:1px solid var(--border-subtle)}
+.slab{flex:none}
+.slab-cap{font-family:var(--font-mono); font-size:var(--fs-meta); color:var(--text-helper); margin-bottom:var(--sp-1)}
+.slab-box{border:1px solid var(--border-subtle)}
+.slab-row{display:flex; gap:var(--sp-1); align-items:center; margin-bottom:var(--sp-2)}
+.slab-tag{font-size:var(--fs-meta); font-weight:600; color:var(--text-secondary); width:44px; flex:none}
+.sr-only{position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap}
+@media (prefers-reduced-motion:reduce){*{transition:none !important; animation:none !important}}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <header>
+    <div class="kicker">设计方案 · 待拍板 · 基线 v48.14</div>
+    <h1>书架页重设计</h1>
+    <p class="lede">你分两轮提的七处诉求：留白、拖拽排序、添加按钮上移、封面形态按钮难看、视图/密度/排序收进工具条、
+      空态去掉重复主按钮、以及文件夹（拖到书上成组 + 自定义命名）。逐条给了根因定位、一个可改宽度可拖拽的仿真原型、
+      以及按规范落地的改动清单。本页是独立样张：<code>src/</code> 与 <code>electron/</code> 零改动，
+      Token 逐字抄自 <code>src/theme.css</code>。</p>
+  </header>
+
+  <section>
+    <div class="sec-head"><h2>1 问题定位</h2></div>
+    <table>
+      <thead><tr><th style="width:24%">你反馈的问题</th><th style="width:41%">代码里的根因（已核对）</th><th>本方案处置</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>窗口缩放时右侧总空一大块</b></td>
+          <td><code>src/theme.css:617</code> 列宽写死 <code>repeat(auto-fill, 200px)</code>，
+            紧接 <code>:618</code> <code>justify-content:start</code>。每行按 200px 取整放列，
+            余下的 0–223px 全甩到右边，卡片自身永远不涨。</td>
+          <td>一行改完：列改 <code>minmax(下限, 1fr)</code>，剩余宽度被各列<b>等分吸收</b>，
+            任意窗口宽度下右侧富余恒为 0。另配「紧凑 / 标准 / 宽松」三档密度，缩放时列数自然增减。</td>
+        </tr>
+        <tr>
+          <td><b>书籍无法拖动排序</b></td>
+          <td><code>Bookshelf.tsx</code> 只按 <code>db.js:777</code> 的
+            <code>ORDER BY created_at DESC</code> 渲染 —— 库里没有任何顺序字段，也没有写回通道。</td>
+          <td>复用<b>仪表盘组件重排</b>的既有实现（<code>Dashboard.tsx:69-116</code>：拖拽与
+            <code>Alt+方向键</code> 共用同一条 <code>reorder()</code>），顺序存
+            <code>settings.app.shelfOrder</code>，零 schema 变更。手感与应用内已有的那处重排完全一致，不发明第二套。</td>
+        </tr>
+        <tr>
+          <td><b>添加按钮在最末尾，每次要划到底</b></td>
+          <td><code>Bookshelf.tsx:234</code> 把 <code>.book-add-card</code> 作为网格最后一个子节点渲染，
+            永远跟在全部书之后。</td>
+          <td>升级为<b>吸顶工具条</b>右侧的 accent 主按钮（<code>position:sticky</code> +
+            <code>--z-sticky</code>），滚动时常驻在视口顶部；网格内不再放任何假封面。
+            同行给出 <span class="kbd">Ctrl</span>+<span class="kbd">Alt</span>+<span class="kbd">N</span>
+            提示，与既有全局入口共用 App 级同一模态。</td>
+        </tr>
+        <tr>
+          <td><b>书籍封面形式的按钮难看</b></td>
+          <td><code>theme.css:798</code> 让添加钮按 200&times;300 的实体书比例画一个 hairline 空心块 ——
+            一个不是书的空盒子混进书墙，怎么看都别扭。同一套卡片本体也用整块黑幕盖掉封面
+            （<code>:670</code>），并在卡面永久挂一个原生 <code>select</code>（<code>:781</code>）。</td>
+          <td>添加钮改回<b>按钮</b>该有的样子；卡片改「封面 + 排印图注」：书名与进度常驻可读，
+            操作只在 hover 时以 40px ink 动作条压住封面底缘；语言选择收进动作条的直角下拉。</td>
+        </tr>
+        <tr>
+          <td><b>视图 / 密度 / 排序要在工具条上</b></td>
+          <td>这三项本来就不在应用里（第一版样张把它们放在了仿窗口外面的实验台上，那只是样张控件，不是界面元素）。
+            工具条此前只有计数 + 主按钮。</td>
+          <td>三项全部收进<b>吸顶工具条</b>：视图 = 图标分段（24px Lucide）；密度 = 文字分段（Meta 档）；
+            排序 = 当前值 + 下拉（复用 <code>.dd</code>）。省空间的取舍写在 §9 自检里：视图用图标、密度用文字、排序用下拉，
+            三档控件总宽约 300px，1100px 起一行放得下，窄窗口按 <code>flex-wrap</code> 换行、主按钮恒在最右。</td>
+        </tr>
+        <tr>
+          <td><b>空架时不要中间那个「添加第一本书」</b></td>
+          <td><code>Bookshelf.tsx:115</code> 空态里放了一个 <code>.btn-primary</code>，与工具条主按钮同一屏两个主行动。</td>
+          <td>删掉空态按钮，文案直接指过去：「用右上角的『添加材料』，或按 <code>Ctrl+Alt+N</code>」，
+            保留几何装饰 + 一句话。<b>与样张文档冲突需同修订</b>：<code>swiss-international-style.md</code>
+            「状态设计 · empty」与「布局模式库 · 空状态」都写着「几何装饰 + 一句话 + 一个主行动」，
+            须补一句"主行动已在吸顶工具条常驻时，空态不再重复"，否则这处会被下一轮审查改回去。</td>
+        </tr>
+        <tr>
+          <td><b>没有文件夹，书只能平铺</b></td>
+          <td>书架是扁平一层，<code>library_items</code> 没有归属字段，也没有任何分组概念。</td>
+          <td>新增文件夹：拖一本书到另一本书上即成组，命名走就地输入框；点文件夹进到它内部（面包屑返回），
+            不弹模态。详规见 §6。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>2 可交互原型</h2></div>
+    <p class="note">仿窗口右边界可以用鼠标拖（CSS <code>resize</code>），也可点下方预设宽度。
+      工具条分段、卡片拖拽、<code>Alt</code>+方向键、就地改名、就地二次确认、语言下拉、目录表视图、深色模式都是真的。
+      预设里的 1600 会被本文档版心（1320px）夹住 —— 要看更宽的效果，把浏览器窗口拉大或直接缩放页面。</p>
+
+    <p class="note" style="margin-bottom:var(--sp-2)"><b>下面两项是样张自己的控件</b>（造数据 / 看配色），不进应用；
+      视图、密度、排序这三项已经按你的要求搬进了仿窗口里那条吸顶工具条。</p>
+    <div class="lab-bar">
+      <div class="grp"><span class="lb">藏书量</span>
+        <div class="seg" id="seg-count">
+          <button data-c="all" aria-pressed="true">13 本</button>
+          <button data-c="few" aria-pressed="false">3 本</button>
+          <button data-c="empty" aria-pressed="false">空架</button>
+        </div></div>
+      <div class="grp"><span class="lb">主题</span>
+        <div class="seg" id="seg-theme">
+          <button data-t="light" aria-pressed="true">浅色</button>
+          <button data-t="dark" aria-pressed="false">深色</button>
+        </div></div>
+    </div>
+
+    <div class="frame" id="frame">
+      <div class="app-shell">
+        <div class="topbar">
+          <div class="topbar-nav">
+            <button class="nav-item on">书架</button>
+            <button class="nav-item">队列</button>
+            <button class="nav-item">复习</button>
+            <button class="nav-item">卡片</button>
+            <button class="nav-item">日记</button>
+            <button class="nav-item">数据</button>
+            <span class="topbar-title">书架</span>
+          </div>
+          <div class="topbar-right">
+            <button class="icon-btn" title="设置" aria-label="设置" id="btn-gear"></button>
+            <button class="wctl" aria-label="最小化"><svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor"/></svg></button>
+            <button class="wctl" aria-label="最大化"><svg width="10" height="10" viewBox="0 0 10 10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button>
+            <button class="wctl" aria-label="关闭"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1 9 9M9 1 1 9" stroke="currentColor"/></svg></button>
+          </div>
+        </div>
+
+        <section class="bookshelf" id="shelf">
+          <!-- ★ 吸顶工具条：计数 / 面包屑 / 视图 / 密度 / 排序 在左，主行动恒在最右 -->
+          <div class="shelf-bar">
+            <span class="shelf-count mono" id="cnt-wrap"></span>
+            <span class="crumb" id="crumb" hidden></span>
+            <span class="tb-grp"><span class="tb-lb">视图</span>
+              <span class="tb-seg" id="tb-view" role="group" aria-label="视图">
+                <button data-v="wall" aria-pressed="true" title="封面墙" aria-label="封面墙"><span data-ico="grid"></span></button>
+                <button data-v="table" aria-pressed="false" title="目录表" aria-label="目录表"><span data-ico="list"></span></button>
+              </span></span>
+            <span class="tb-grp dens-grp"><span class="tb-lb">密度</span>
+              <span class="tb-seg tb-text" id="tb-dens" role="group" aria-label="密度">
+                <button data-d="152" aria-pressed="false">紧凑</button>
+                <button data-d="200" aria-pressed="true">标准</button>
+                <button data-d="248" aria-pressed="false">宽松</button>
+              </span></span>
+            <span class="tb-grp"><span class="tb-lb">排序</span>
+              <span class="sort-dd dd" id="tb-sort">
+                <button id="tb-sort-btn" aria-haspopup="true" aria-expanded="false"><span id="tb-sort-val">手动顺序</span><span data-ico="chev"></span></button>
+                <span class="dd-menu" id="tb-sort-menu" role="menu" aria-label="排序方式"></span>
+              </span></span>
+            <span class="spacer"></span>
+            <span class="hint kbd-hint" id="bar-hint"></span>
+            <button class="btn btn-primary btn-sm" id="btn-add"><span id="add-ico"></span>添加材料<span class="kbd kbd-in" id="add-kbd">Ctrl+Alt+N</span></button>
+          </div>
+          <div id="feedback"></div>
+          <div id="list"></div>
+        </section>
+      </div>
+    </div>
+    <div class="presets" id="presets" style="margin-top:var(--sp-3)"></div>
+    <div class="frame-readout" id="readout" style="margin-top:var(--sp-2)"></div>
+
+    <p class="note" style="margin-top:var(--sp-4)">
+      <b>建议试四件事。</b>
+      一，拖右边框从窄拉宽，盯住 <code>右侧富余</code> 读数：全程 0.0px，而同一宽度下现状算法会余 0–223px。
+      二，把一本书拖到另一本书的<b>中央</b> —— 目标卡整块描出 accent 框、浮出「归入《…》」，松手即成文件夹并立刻弹出命名框；
+      拖到目标的<b>左缘 / 右缘</b> 则是排到它前面 / 后面，两种意图的反馈长得不一样，不用记快捷键。
+      三，鼠标停在文件夹卡上 —— 封面区翻成成员名册（序号 + 书名），不进去也知道里有谁；点卡片进到内部后，
+      工具条左侧有 <code>返回书架</code> 钮，顶栏「书架」与 <code>Esc</code> 同样能出来，出来时焦点落回那张文件夹卡。
+      不想用拖拽的话，动作条的「归入文件夹」菜单和键盘 <code>Alt+←/→</code> 走的是同一批函数。
+      四，把排序切到「最近阅读」—— 把手消失、工具条写明拖拽已停用，不出现"看着能拖、拖了没反应"的歧义。
+    </p>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>3 留白实测</h2></div>
+    <p class="note">同一批卡片、同一套间距（gap 24px、左右内边距 32px），把两种列算法在若干窗口宽度下各算一遍。
+      「右侧富余」就是你现在看到的那块空白。口径：内容宽 = 窗口宽 &minus; 内边距 64px &minus; 纵向滚动条约 15px；
+      数字由本页脚本按该口径与真实公式计算，会跟着上方的密度档变化，并与原型里的实测读数（<code>新方案右侧富余</code>）一致。</p>
+    <table id="proof">
+      <thead><tr>
+        <th class="n">窗口宽</th><th class="n">现状 · 列数</th><th class="n">现状 · 右侧富余</th>
+        <th class="n">新方案 · 列数</th><th class="n">新方案 · 单列宽</th><th class="n">新方案 · 右侧富余</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="note" style="margin-top:var(--sp-6)"><b>1:1 视口切片</b>（灰底 = 不属于内容的区域；右侧那条灰带就是空白本身）。</p>
+    <div class="slabs" id="slabs" style="margin-top:var(--sp-3)"></div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>4 卡片本体：从「黑幕盖封面」改成「图注卡」</h2></div>
+    <div class="anatomy">
+      <div>
+        <div class="mini" id="anatomy-card"></div>
+        <p class="note" style="margin-top:var(--sp-3)">鼠标移上去看 hover 态：动作条只占封面底缘 40px，
+          封面主体与书名始终在场。此图为解剖示意，按钮不响应点击。</p>
+      </div>
+      <dl class="spec-list">
+        <div class="r"><dt>封面</dt><dd>2:3 直角、<code>object-fit:cover</code>。无封面时沿用现有骨架：灰底 + 8&times;8 accent 方块 + 左下标题，不另发明一套。</dd></div>
+        <div class="r"><dt>进度轨</dt><dd>封面与图注之间 2px 全宽轨（<code>--grey-2</code> 槽 / <code>--accent</code> 填），读到哪一眼可见。2px 按 §5.3 v48.14 写成 <code>calc(var(--sp-1) / 2)</code>，不写裸值。</dd></div>
+        <div class="r"><dt>图注</dt><dd>书名 Body 14 / 1.4 / weight 500，两行截断；第二行 Meta 12 mono：<span class="mono">84% · 09-21 · EN</span>。书名从「只有 hover 才看得见」变成常驻，扫架速度差别很大。</dd></div>
+        <div class="r"><dt>动作条</dt><dd>hover 与 <code>:focus-within</code> 显形的 40px <code>--overlay-ink</code> 条：打开 · 重命名 · 语言 · 删除（Lucide 16 / stroke 1.5）。只用 <code>opacity</code>、不动 <code>visibility</code>，按钮保持可聚焦 —— 与现有键盘行为一致。</dd></div>
+        <div class="r"><dt>删除确认</dt><dd>保留现有「就地二次确认」（D50 收口的行为，不弹原生 <code>confirm</code>），进入确认态后焦点默认落「取消」，不让一次误按 Enter 删书。</dd></div>
+        <div class="r"><dt>语言选择</dt><dd>卡面上那个永久挂出的原生 <code>select</code> 收进动作条，点开复用 <code>.dd</code> 直角下拉（菜单画在卡内，避开封面容器的 <code>overflow:hidden</code>）。原生控件压在任意封面图上非常跳 —— 这是当前"难看"的另一半来源。</dd></div>
+        <div class="r"><dt>卡片类型</dt><dd>图注区坐在 <code>--paper</code> 上，灰底封面 + hairline，不叠描边（卡片四类互斥）。添加钮改回 <code>.btn-primary</code>，网格不再需要第四类。</dd></div>
+        <div class="r"><dt>拖拽态</dt><dd>拖动中的卡 = <code>--accent-soft</code> 底 + 2px accent <code>outline</code>（<code>outline-offset:-1px</code> 压在框内，不撑布局）+ 内容降到 45% 不透明度。<b>不倾斜、不漂浮阴影、不做幽灵图</b>；<code>dragover</code> 实时重排，落点即所见。</dd></div>
+        <div class="r"><dt>工具条</dt><dd>吸顶一行：计数 / 面包屑 · 视图（图标分段）· 密度（文字分段）· 排序（当前值 + 下拉）· 弹性空隙 · 拖拽提示 · 添加材料（快捷键 <code>Ctrl+Alt+N</code> 作钮标的一部分，不单占一格）。主按钮恒在最右，滚动时不消失。<b>窄窗口用容器查询逐级退让</b>（<code>container-name:shelf</code>，阈值按容器宽 = 窗口 &minus; 内边距 64 &minus; 滚动条约 15）：900 以下收起密度档、1100 以下收起提示文字、1280 以下收起三个小标签 —— 阶梯必须单调，中间档位若各回各的会在中段挤成两行（样张实测踩过 760/900 两处）。逐宽扫描 420–1620px 的结论：<b>只有 500px 以下才出现第二行</b>，540px 起全程单行 59px。代价说清楚：控件会消失 = 可发现性下降，所以极窄时建议默认改走目录表；要长期用窄窗就把这三档收进齿轮的「显示」区，那是另一个决策。</dd></div>
+        <div class="r"><dt>文件夹卡</dt><dd>不是一张封面，是<b>一册带标签页的合集</b>：顶部 12px 高的 <code>FOLDER</code> 标签页（paper 底 + <code>--border-strong</code> hairline，压住卡顶边）；中段一排<b>书脊</b>（最多 5 条，每条用成员的封面裁成竖窄条，成员不足 5 就少画几条，第 5 条放不下时写成 <code>+N</code> 的 grey-2 计数块；单条封顶 56px 并左对齐 —— 不封顶的话一本成员的文件夹会画成一大块灰板，反而不像"一排书"）；底部成员数 <span class="mono">4</span> 用 Title L 26 / 300 + Meta 档「本」+ 右对齐 <code>均值 62%</code>。图注区与书卡同规格（名称 + <span class="mono">4 本 · 均值 62% · 09-21</span>），网格节奏不乱。<b>识别度靠形状（标签页 + 多脊）而不是靠颜色</b>：零新色、零阴影、零圆角。</dd></div>
+        <div class="r"><dt>文件夹 hover</dt><dd>整块封面区翻成 <code>--overlay-ink</code> 名册：顶行 <code>成员 4 本</code>（Meta 档 overlay-helper），下面按序列出前 6 本书名（序号 mono + 两行截断），超出写「还有 N 本，进去看全部」。底部 40px 留给动作条，两者不打架。<code>:focus-within</code> 同样触发，键盘用户 Tab 进去也看得到。目录表里对应地：常态那行报 <code>4 本 · 均值 62%</code>，悬停换成成员清单。</dd></div>
+        <div class="r"><dt>三区落点</dt><dd>拖动时目标卡分左缘 / 中央 / 右缘三区：两侧画 2px accent 竖条（重排），中央整块 <code>accent-soft</code> + 描边 + 「归入《X》」浮标（成组），两种意图不同形，松手才落库。文件夹内部不再给中央区（一层为限）。</dd></div>
+        <div class="r"><dt>空态</dt><dd>几何装饰 + 一句话，<b>不再放主按钮</b>；文案直接指过去：「用右上角的『添加材料』，或按 <span class="kbd">Ctrl</span>+<span class="kbd">Alt</span>+<span class="kbd">N</span>」。需同步修订样张文档那条（见 §7）。</dd></div>
+        <div class="r"><dt>目录表视图</dt><dd>同一份数据、同一套排序能力的第二种形态：列天然填满宽度，<b>只画横向 hairline</b>，数字列 mono + <code>tnum</code> 右对齐。窗口很窄或书很多时，它比封面墙省事；把手、<code>Alt+方向键</code>、就地改名、就地确认、归组菜单在行内同样可用，文件夹在表里是一行带叠角的条目。</dd></div>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>5 关键改动：CSS 层面就这三块</h2></div>
+    <div class="cols cols-2">
+      <div>
+        <h3>现状 · <code>src/theme.css:615</code></h3>
+<pre><code>.bookshelf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 200px);
+  justify-content: start;        /* 余数全落右边 */
+  gap: var(--sp-6);
+  padding: 0 var(--sp-8) var(--sp-8);
+}
+.book-card  { width: 200px; aspect-ratio: 2 / 3 }
+.book-card-overlay { inset: 0; background: var(--overlay-ink) }
+.book-card-lang    { /* 原生 select 永久挂在卡面 */ }
+.book-add-card     { width: 200px; aspect-ratio: 2 / 3;
+                     border: 1px solid var(--border-subtle) }</code></pre>
+      </div>
+      <div>
+        <h3>建议</h3>
+<pre><code>/* 1 密度档：JS 只在容器上换一个 Token */
+.bookshelf        { --shelf-min: 200px }
+.bookshelf.dens-sm{ --shelf-min: 152px }
+.bookshelf.dens-lg{ --shelf-min: 248px }
+
+/* 2 填满：1fr 把剩余宽度等分给各列，右侧富余恒 0 */
+.bookshelf-grid {
+  display: grid;
+  gap: var(--sp-6);
+  grid-template-columns: repeat(auto-fill,
+    minmax(min(100%, var(--shelf-min)), 1fr));
+  align-content: start;
+  padding: var(--sp-6) var(--sp-8) var(--sp-8);
+}
+.book-card { width: auto; aspect-ratio: 2 / 3 }  /* 去定宽 */
+
+/* 3 添加钮上移 + 吸顶 */
+.shelf-bar {
+  position: sticky; top: 0; z-index: var(--z-sticky);
+  background: var(--paper);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex; align-items: center; gap: var(--sp-6);
+  padding: var(--sp-3) var(--sp-8);
+}
+/* .book-add-card 整条规则删除（含 reduced-motion 块里的引用） */</code></pre>
+      </div>
+    </div>
+    <p class="note"><code>min(100%, …)</code> 是必要的下限保护：窗口窄到放不下一列下限时，轨道不会被撑破容器。
+      删掉 <code>justify-content</code> 是因为 <code>1fr</code> 已经吃满剩余空间，留着它只会在极窄时留下第二条空隙。
+      列数由 <code>auto-fill</code> 按容器宽度决定，不需要 JS、不需要 <code>@container</code> 断点表。</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>6 排序、拖拽与文件夹的契约</h2></div>
+    <table>
+      <thead><tr><th style="width:18%">环节</th><th>定下来的做法</th></tr></thead>
+      <tbody>
+        <tr><td>什么时候能拖</td><td>排序 = <b>手动顺序</b>（默认值）时把手在场；其余三种排序下把手不渲染，工具条给一句可点的「改回手动顺序」。不出现"看着能拖、拖了没反应"的歧义。</td></tr>
+        <tr><td>鼠标路径</td><td>按住卡片或左上把手拖动；<code>dragover</code> 时实时重排（与仪表盘同一手感），松手即落库。</td></tr>
+        <tr><td>键盘路径</td><td>聚焦卡片 &rarr; <code>Alt+&larr;/&rarr;</code>（<code>&uarr;/&darr;</code> 同义）逐格移动，与 <code>Dashboard.tsx:93-116</code> <b>同一条语义、同一个 <code>reorder()</code></b>；<code>aria-live</code> 播报「《书名》移到第 3 位」。规范依据：瑞士风「键盘可达 —— 所有交互元素 Tab 可达并可完成同一件事」。</td></tr>
+        <tr><td>持久化</td><td><code>settings.app.shelfOrder: string[]</code>（<code>SettingsStore</code> 的 app 层）。<b>不加数据库列</b>：备份包本就含 <code>settings.json</code>（<code>electron/backup.js:2</code>），仪表盘布局也是同一存法（<code>settingsStore.set("dashboard","layout")</code>），因此 M2 备份/恢复天然覆盖，且零迁移成本。新书不在数组里时按 <code>created_at DESC</code> 插到队首并高亮 1.2s（样张里点「添加材料」就是演示这个落位）。</td></tr>
+        <tr><td>读取顺序</td><td>主进程 <code>listItems()</code> 一行不改；渲染层按 <code>shelfOrder</code> 索引排序，数组外的 id 用 <code>created_at</code> 兜底。<code>library/changed</code> 的既有刷新路径（§4.2-1）保持不变。</td></tr>
+        <tr><td>代价（不藏着）</td><td>顺序存设置而非列，好处是零迁移、备份已覆盖；代价是将来真接 <code>AccountSyncProvider</code> 时，id 数组的跨设备合并比"列排序"复杂（同一本书在两台设备各自被挪动）。当前是 <code>LocalNoopAccount</code>，不构成立即的约束；到那天把数组一次性折算成 <code>sort_order</code> 列即可，升级路径保留。</td></tr>
+        <tr><td>拖拽的三种落点</td><td>拖动时目标卡按横向分三区：<b>左缘 28%</b> = 排到它前面（画 2px accent 竖条）、<b>中央 44%</b> = 归入 / 成组（整块 <code>accent-soft</code> + 2px accent 描边 + 浮出「归入《X》」标签）、<b>右缘 28%</b> = 排到它后面。两种意图长得不一样，不需要记修饰键；<code>dragover</code> 时实时判定，松手才落库。</td></tr>
+        <tr><td>成组（两本书）</td><td>把 A 拖到 B 的中央 → 立刻生成文件夹，成员序 <span class="mono">[B, A]</span>（被落在前面的先），文件夹占据 B 原来的位置，A 从顶层移除；<b>命名框随即弹出</b>，回车落名、Esc 取消并解散回原位（不留下没人认领的空盒子）。</td></tr>
+        <tr><td>归入（已有文件夹）</td><td>目标是文件夹卡时同样走中央区；书若已在别的文件夹里，就是<b>从旧文件夹移到新文件夹</b>——不做隐式合并（合并两个文件夹只发生在把整个文件夹拖到另一个上？不：那被禁止）。旧文件夹若空了<b>保留并显示「空文件夹 · 把书拖进来」</b>（标签页仍在，书脊区换成一枚 folder 图标 + 两行提示），用户数据不悄悄消失。</td></tr>
+        <tr><td>命名</td><td>就地改名，与书名同一条 <code>rename()</code> 路径（图注区变输入框、Enter/失焦提交、Esc 取消、无框线）。默认名固定「未命名文件夹」——不拿目标书名自动命名，也不让 AI 起名：这是用户的组织行为，名字得他自己给（与 §1.7「AI 输出必须人工确认」同一条纪律）。</td></tr>
+        <tr><td>进入与返回</td><td>点文件夹卡 = 进到它内部，工具条左侧出现面包屑。<b>回顶层给三条路，不只靠一个灰色小字</b>（第一版只留了「书架」两字，实测不够显眼）：① 最前端的 <code>返回书架</code> 描边钮（Lucide 左箭头 + 文字，32px，与工具条其余控件同档）；② 顶栏导航「书架」（本来就在那儿，且是 §5.2 的常驻面）；③ <code>Esc</code>。任一方式退出后焦点回到那张文件夹卡上，不丢上下文。同一行里不再并存第二个「书架」小字 —— 两种写法一起出现，读的人要猜哪个才是出口。这个钮兼任<b>拖出落点</b>：在文件夹里把书拖到「返回书架」上松手 = 移回书架。<b>不弹模态</b>（书架本身就是列表，再套一层窗口只会丢掉密度与滚动位置）。文件夹内继续可拖拽重排。</td></tr>
+        <tr><td>非鼠标路径</td><td>卡片动作条的「归入文件夹」按钮打开菜单：新建文件夹并放入 / 逐个列出已有文件夹（带成员数）/ 移出当前文件夹。键盘与触屏都不依赖拖拽精度；<code>Alt+方向键</code> 仍然只管重排。</td></tr>
+        <tr><td>解散与"删除"</td><td>文件夹<b>只有「解散」和「全部移回书架」，没有「删除」</b>——避免一次误点连着软删一串书和它们的进度。菜单里两行文字都写清结果，解散后成员回到文件夹原来的位置。</td></tr>
+        <tr><td>一层为限</td><td>不做嵌套：文件夹不能装文件夹。理由与 §4.5「知识三层分离」同构——书架是<b>视图组织层</b>，多一层嵌套只让归属变模糊；要做层次请用阅读器的目录（那是材料自己的结构）。文件夹卡拖到书或文件夹的中央一律拒绝并给内联提示。</td></tr>
+        <tr><td>归属不是所有权</td><td>文件夹只决定书架上怎么摆，<b>不改变任何数据归属</b>：卡、摘录、进度、领域标签仍各自挂在那本书上（<code>library_items</code> 一个字段都不动）；统计、今日队列、FSRS 调度、导图与记忆全部不感知文件夹。将来若要"按文件夹批量制卡/批量复习"，那是一个新单元，须先立规范。</td></tr>
+        <tr><td>数据落点</td><td><code>settings.app.shelfFolders</code>：<span class="mono">{ folders:[{id,name,items[],created}] }</span>，顶层 <code>shelfOrder</code> 里放文件夹 id 占一个条目位。与排序同样存设置、同样被 M2 备份包覆盖、零 schema 变更；渲染层负责按数组排布，主进程 <code>listItems()</code> 不动。</td></tr>
+        <tr><td>删除与软删</td><td>从数组里摘掉被软删的 id（顶层数组与各文件夹的 <code>items</code> 都要摘，留着也无害，查询本就带 <code>is_deleted=0</code>）。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>7 落地清单与规范程序</h2></div>
+    <div class="cols cols-2">
+      <div>
+        <p><span class="tag">纯表现层 · 可单独先做一批</span></p>
+        <ul class="plain">
+          <li><code>theme.css</code>：网格算法、去定宽、删 <code>.book-add-card</code> / <code>.book-card-overlay</code> / <code>.book-card-lang</code>，新增 <code>.shelf-bar</code> 及其控件组 / <code>.cap</code> / <code>.card-acts</code> / <code>.f-face</code>·<code>.f-tab</code>·<code>.f-spines</code>·<code>.f-roster</code>（文件夹合集面与名册）/ 三区落点态；同步清掉 <code>reduced-motion</code> 块里对已删类的引用。</li>
+          <li><code>Bookshelf.tsx</code>：图注结构、动作条、语言与归组改用 <code>.dd</code>、工具条与主按钮、空态去掉主按钮。</li>
+          <li>工具条三个控件<b>复用现成组件</b>，不新造：分段沿用设置页的 <code>.seg-tabs</code> 语汇（或 <code>components/Dropdown.tsx</code> 的 <code>.dd</code>），排序下拉直接走 <code>Dropdown</code>——它已经处理过"下拉落在滚动容器里"的定位问题，样张里自造一份只为看形状。</li>
+          <li>行为保持不变：就地二次确认、<code>library/changed</code> 刷新、封面重试至多 3 次、改名与语言的落库调用、<code>onAddMaterial</code> 的模态归属。</li>
+        </ul>
+      </div>
+      <div>
+        <p><span class="tag tag-acc">功能/交互级 · 须先改文档再编码</span></p>
+        <ul class="plain">
+          <li>拖拽排序、<code>Alt+方向键</code>、新增工具条控件、<code>shelfOrder</code> 设置项 —— 按 §8.2 的复核结论，<b>新增 UI 元素与新增键盘能力不在"纯样式"豁免里</b>。</li>
+          <li>程序：指南 §5.3 补「书架工具条（视图 / 密度 / 排序 / 主行动）」、§5.4 补「图注卡 + 动作条 + 文件夹卡」与三区落点、§6.2 书架那条改写字段清单（含文件夹与空态不再放主按钮），bump 到 <b>v48.15</b>，在 §8.1 登记 <b>D51</b>，再动代码。</li>
+          <li>连带修订 <code>docs/swiss-international-style.md</code>：「状态设计 · empty」与「布局模式库 · 空状态」现写着「几何装饰 + 一句话 + 一个主行动」，要补上"主行动已在吸顶工具条常驻时不再重复"，否则空态这处会被下一轮审查按旧规改回去。</li>
+          <li>回归：书架既有 GUI 断言（改名 / 语言 / 就地删除确认 / 封面重试）差分实测，另加拖拽重排、键盘重排、成组与命名、进入与返回、解散这几条断言；顺带把「右侧富余 = 0」写成一条几何断言，防回归。</li>
+          <li>样张里能演示的都已实现；<b>样张没有、落地要补的</b>：文件夹与顺序写入 <code>settingsStore</code>（样张只走内存 + 注释处标注了对应调用）、真拖拽的观感（样张用同一套 DOM 逻辑，鼠标真实拖动仍需人眼过一遍）。</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note" style="margin-top:var(--sp-4)"><span class="tag tag-ink">明确不碰</span>
+      &nbsp;<code>electron/db.js</code> 的查询与表结构、FSRS 与今日队列口径、阅读器、<code>AddBookModal</code> 的保存逻辑、
+      <code>Ctrl+Alt+N</code> 的全局快捷键注册。主按钮仍只调 <code>onAddMaterial()</code>，与快捷键共用 App 级同一模态
+      （§6.2「书架」那条规格一字不改）。</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>8 落选方案与理由</h2></div>
+    <table>
+      <thead><tr><th style="width:26%">备选</th><th>为什么不用</th></tr></thead>
+      <tbody>
+        <tr><td>Masonry 瀑布流（按封面原始比例排）</td><td>能消空隙，但行边界不齐、视觉噪声大，和 8px 基线网格正面冲突；跨列拖拽的落点也会变得难以预测。本应用封面一律按 2:3 裁，用不上真实比例带来的信息量。</td></tr>
+        <tr><td><code>justify-content: space-between</code> 均摊余数</td><td>空白改由列之间承担，卡片间距随窗口宽度连续变化，等于把"右侧一条空白"换成"间距不守 Token"。网格间距必须是常量。</td></tr>
+        <tr><td>定宽卡片 + 整块居中</td><td>违反瑞士风「左对齐 + 非对称留白」；书架是内容面，不是 720px 单列版心，居中会让计数与工具条一起漂移。</td></tr>
+        <tr><td>整块封面继续做点击靶 + hover 黑幕（现状）</td><td>黑幕一闪就把身份（封面）整块抹掉，书名、进度、语言、操作全挤在同一层，是"难看"的直接来源。图注卡把常驻信息与临时操作分层，读起来稳定得多。</td></tr>
+        <tr><td>卡片上常驻按钮行</td><td>每格 4 个按钮 &times; N 本书，工作区噪声大，违反「装饰克制、工作区保持纯净」。保持 hover / focus 显形 + 键盘可达。</td></tr>
+        <tr><td>新增 <code>sort_order</code> 数据库列</td><td>要迁移、要改 <code>listItems()</code> 的排序口径、要接进备份一致性验证；相比"存设置"没有多给任何当下需要的能力。列为向 M11 / 云同步演进时的升级项。</td></tr>
+        <tr><td>把「添加材料」放顶栏右侧</td><td>§5.2 锁定顶栏右侧只有设置齿轮 + 窗控三键，且顶栏是 <code>drag</code> 区。工具条才是它该在的位置。</td></tr>
+        <tr><td>点文件夹弹出模态窗口列成员</td><td>书架本来就是列表，再套一层窗口只会丢掉密度、滚动位置与吸顶工具条；面包屑 + 就地换列表能沿用同一套卡片与拖拽代码。</td></tr>
+        <tr><td>自动用目标书名当文件夹名 / 让 AI 起名</td><td>成组是用户的组织动作，名字得他自己给；自动命名会造出一堆"看起来不用改"的名字，反而没人再改。折中：默认「未命名文件夹」+ 成组瞬间弹出输入框，命名只多一次回车。</td></tr>
+        <tr><td>文件夹多层嵌套</td><td>见 §6「一层为限」。真需要层次就用阅读器目录——那是材料自带的结构，不该在书架上再编一套。</td></tr>
+        <tr><td>加修饰键才进入归组态（如按住 <code>Alt</code> 拖）</td><td>要背、要在拖拽中途改键盘状态（浏览器 drag 期间拿不到可靠的 modifier 变化），且看不到反馈。三区分命中是"看得见的手势"，代价是中央区要够大——200px 卡的中央 44% 约 88px，够用。</td></tr>
+        <tr><td>空态仍保留「添加第一本书」</td><td>你已否掉：与工具条主按钮同屏两个主行动。这里不是把代码改回去，而是把样张文档那条「空状态含一个主行动」修订掉（§7 已列）。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>9 交付前自检（瑞士风七条 + 五项必查）</h2></div>
+    <table>
+      <thead><tr><th style="width:30%">检查项</th><th style="width:9%">结论</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>单一焦点色</td><td>通过</td><td>界面只有 IKB 一档 accent：进度轨、selected 态、拖拽态、主按钮同一来源。占位封面的 accent 色块属内容层（真实封面是图片），不计入界面焦点色；本样张全程不出现第二支高饱和色，error 只在删除确认与"富余非 0"标注里作状态用。</td></tr>
+        <tr><td>极致字号对比 / 越大越细</td><td>通过</td><td>样张标题 44/300，卡片书名 14/500，meta 12/500-600。工作区不放 Display 大字。</td></tr>
+        <tr><td>无衬线</td><td>通过</td><td>chrome 全部 <code>--font-sans</code>，无衬线出现（阅读正文的衬线例外不涉及本页）。</td></tr>
+        <tr><td>直角、零渐变</td><td>通过</td><td><code>--radius</code> 恒 0；全页无 <code>linear-gradient</code>。阴影只出现在两处合规位置：语言下拉浮层的 <code>--shadow-float</code>，以及"留白可视化"切片里当内容底色的用法。</td></tr>
+        <tr><td>8px 网格 / hairline</td><td>通过</td><td>间距全取 Token；2px 一律 <code>calc(var(--sp-1) / 2)</code>（本样张起别名 <code>--hair</code>，落地时按 §5.3 直接写 calc）；1px 只作描边与分隔线。</td></tr>
+        <tr><td>克制优于炫技</td><td>通过</td><td>空态几何装饰不外溢进工作区；卡片不做倾斜、漂浮、玻璃。</td></tr>
+        <tr><td>深色模式</td><td>已试</td><td>切「深色」查看：accent 走 <code>#5b7fe8</code> 提亮档、<code>--accent-on</code> 换纯黑；动作条 <code>--overlay-ink</code> 为固定深色层，两种主题下文字对比都不依赖主题反转。实测主按钮底色随 <code>body.theme-dark</code> 的 <code>--accent</code> 正确翻转（隐藏页里 CSS transition 不走时，<code>getComputedStyle</code> 会读到旧值，得触发一次重算才看得到新值 —— 真机切换不会残留旧蓝）。</td></tr>
+        <tr><td>键盘焦点可达</td><td>已试</td><td>卡片、四个动作、语言下拉项、工具条分段、主按钮全部 Tab 可达；<code>:focus-visible</code> 为 2px accent 环 + offset 2px；<code>Alt+方向键</code> 在卡片上完成与拖拽同一件事（把手只做鼠标的视觉提示，<code>aria-hidden</code> + <code>tabindex="-1"</code>，不占 Tab 序，键盘路径不依赖它）；<code>:focus-within</code> 让动作条显形（不用 <code>visibility</code>，按钮保持可聚焦）。</td></tr>
+        <tr><td>文字不小于 11px</td><td>通过</td><td>全页最小为 Meta 12px。</td></tr>
+        <tr><td>无字符充当图标 / 无 emoji</td><td>通过</td><td>图标一律 16/20/24 内嵌 Lucide 路径、stroke 1.5、<code>currentColor</code>；窗控三键是 SVG 图元；文档正文里的方向键符号用 HTML 实体写在 <code>code</code> 语境，界面上不出现 &times; / &#8942; / &#10003; 之类字符。</td></tr>
+        <tr><td>无硬编码魔法值</td><td>通过</td><td>色 / 字号 / 间距 / 层级 / 阴影全走 Token；结构层 CSS 实测零彩色字面量（<code>#hex</code> / <code>rgb()</code> 只出现在开头的 Token 声明块里）。三档密度是 <code>--shelf-min</code> 的三个取值，属 Token 而非裸写值。Token 块整份抄自 <code>theme.css</code>，含深色档与零消费者的预留档（<code>--shadow-panel</code> / <code>--radius-pill</code> 等），样张不删减，便于与落地时一字对照。已按 §5.1 的配方跑过「<code>var()</code> 引用集 − <code>--x:</code> 声明集 = 空集」，43 个引用无一未定义。</td></tr>
+        <tr><td>卡片四类不混用</td><td>通过</td><td>图注卡为灰底 + hairline，不叠描边；表格只画横向 hairline、末行不画线；主按钮 accent 填充，破坏性确认才用 error 填充。</td></tr>
+        <tr><td>页内不重复导航文字</td><td>通过</td><td>按 §5.2，内容区不设「书架 / SHELF」大标题，工具条左侧只留计数（顶层 <span class="mono">11 本 · 1 个文件夹</span>，进文件夹后 <span class="mono">2 本</span> + 面包屑）。进了文件夹就不重复列已归组的书，总数由文件夹卡上的 <span class="mono">2 本</span> 自己报。</td></tr>
+        <tr><td>空态只有一个主行动</td><td>通过（需同修订规范）</td><td>空态按你的要求只剩几何装饰 + 一句话，主行动由吸顶工具条承担。这与 <code>swiss-international-style.md</code>「状态设计 · empty」「布局模式库 · 空状态」现写的"几何装饰 + 一句话 + 一个主行动"字面冲突，落地时须一并补上"主行动已在吸顶工具条常驻时不重复"的例外，见 §7。</td></tr>
+        <tr><td>prefers-reduced-motion</td><td>通过</td><td>样张末尾统一关闭过渡；落地时同步删掉 <code>.card-acts</code> 与新按钮的 transition 项。</td></tr>
+        <tr><td>对齐法则</td><td>通过</td><td>工具条与网格共用同一左右内边距 <code>--sp-8</code>，子元素不再叠加水平 padding；卡片之间只用 grid gap，不逐个写 margin。</td></tr>
+        <tr><td>密度档位不混档</td><td>通过</td><td>工具条内所有控件同取 32px（分段钮、排序下拉、主按钮 <code>.btn-sm</code>），与顶栏的 32px 导航同档；40px 只留给模态与页面级表单按钮。规范允许"个别数据密集页局部降为 compact"，本条按同一档走完整条工具条，不在同一行里混 32 与 40。</td></tr>
+        <tr><td>命中区尺寸</td><td>已量</td><td>三区命中在标准档（200px 卡）下：左/右缘各 56px 用于重排，中央 88px 用于归组；紧凑档（152px）下中央仍有 67px。卡片动作钮 28&times;28 与现状一致，桌面端可接受（规范的 44&times;44 是移动端底线）。归组中央区取"宽 > 两侧之和"是有意的：成组是更省力的默认，重排才需要贴边。</td></tr>
+        <tr><td>文件夹卡不引新语言</td><td>通过</td><td>识别度全部靠<b>形状</b>：标签页 + 一排书脊 + Title L 档成员数，色值只用已有的 <code>--grey-1/2</code>、<code>--paper</code>、<code>--border-strong</code>、hover 名册沿用书卡同一块 <code>--overlay-ink</code>。零新色、零阴影、零圆角、不用 emoji、不引第二焦点色。文件夹只有解散与移回书架，没有删除，破坏性色（<code>--error</code>）仍只出现在真删书那一处。</td></tr>
+        <tr><td>状态可退出</td><td>通过</td><td>进了文件夹必须出得来：显式「返回书架」钮 + 顶栏「书架」+ <code>Esc</code> 三条路，退出后焦点落回那张文件夹卡（<code>aria-live</code> 同步播报）。同类问题一并修掉的还有工具条计数把「2 本」+「 本」拼成「2 本 本」——整串（含单位）现在由一处脚本出，HTML 里不留裸单位。</td></tr>
+        <tr><td>组织层不污染数据层</td><td>通过</td><td>样张里文件夹只影响排布与显示，进度、语言、上次阅读文本都仍挂在书上；<code>library_items</code> / FSRS / 今日队列 / 统计口径零改动（§6「归属不是所有权」）。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>10 一句话结论</h2></div>
+    <p class="lede">建议分两批：<b>第一批</b>留白（一行 CSS）+ 卡片改图注制 + 工具条收纳视图/密度/排序 + 空态去重复主按钮 ——
+      纯表现层，当天可见收益；<b>第二批</b>拖拽重排与文件夹（三区落点、就地命名、面包屑、解散语义）—— 交互与组织层，
+      按 §8.2 的口径须先 bump 指南 v48.15 + 登记 D51 再动代码。两批都不碰数据归属：文件夹只是书架的摆法。</p>
+  </section>
+</div>
+
+<div class="sr-only" aria-live="polite" id="live"></div>
+
+<script>
+/* ===================== 图标：Lucide path 内联，16 / stroke 1.5 / currentColor ===================== */
+const ic = d => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${d}</svg>`;
+const ICO = {
+  plus:  ic('<path d="M5 12h14"/><path d="M12 5v14"/>'),
+  open:  ic('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'),
+  pencil:ic('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
+  lang:  ic('<circle cx="12" cy="12" r="9"/><path d="M3 9h18M3 15h18"/><path d="M12 3c2.5 2.6 2.5 15.4 0 18M12 3c-2.5 2.6-2.5 15.4 0 18"/>'),
+  trash: ic('<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/>'),
+  grip:  ic('<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>'),
+  cog:   ic('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 7 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 14a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9-1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21 10a2 2 0 1 1 0 4Z"/>'),
+  info:  ic('<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/>'),
+  grid:  ic('<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>'),
+  list:  ic('<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>'),
+  chev:  ic('<path d="m6 9 6 6 6-6"/>'),
+  folderPlus: ic('<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10v6"/><path d="M9 13h6"/>'),
+  ellipsis: ic('<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>'),
+  folder: ic('<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>'),
+  arrowLeft: ic('<path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>'),
+};
+
+/* ===================== 假数据：13 本，含长英文名 / 无封面 / 零进度 ===================== */
+let seq = 0;
+const B = (title,lang,kind,progress,last,updated,created,type)=>
+  ({id:'b'+(++seq), title, lang, kind, progress, last, updated, created, type});
+const books = [
+  B('平面设计中的网格系统','zh','grid',.62,'网格一旦定下来，分栏、字号、图注的位置就都不必再犹豫了','09-20','2026-07-11','epub'),
+  B('字体设计指南','zh','band',.31,'先看清字形骨架，再谈装饰','09-19','2026-08-02','pdf'),
+  B('The Elements of Typographic Style','en','ink',.84,'whitespace is the active breathing machine of a page','09-21','2026-05-19','epub'),
+  B('色彩艺术','de','dots',.12,'歌德说补色是眼睛自己造出来的要求','09-16','2026-08-21','epub'),
+  B('字型散步','zh','diag',.47,'印刷厂的老师傅认字体的方式，是先看它的重心','09-14','2026-09-01','md'),
+  B('西文字体的故事','zh','band',.05,'罗马正体的斜轴来自蘸水笔的书写角度','09-12','2026-09-05','paste'),
+  B('今日文字设计','ja','grid',.73,'器が定まれば内容が見える','09-11','2026-06-24','epub'),
+  B('卡片笔记写作法','zh','none',.91,'卡片盒不是收藏室，是思想的辩论场','09-21','2026-04-30','epub'),
+  B('如何阅读一部百科全书','zh','none',0,'','','2026-09-20','paste'),
+  B('间隔重复与 FSRS 算法笔记','zh','acc',.28,'稳定性与难度是一对互相拉扯的量','09-18','2026-09-09','md'),
+  B('A Long English Title To Check Two Line Clamping Behaviour','en','ink',.55,'clamping and hyphenation behave quite differently','09-10','2026-07-28','epub'),
+  B('Unix 编程艺术','en','dots',.18,'Rule 3: Design and build programs for the next user','09-08','2026-08-15','epub'),
+  B('深色的房间与光：摄影笔记','zh','diag',.07,'曝光不是亮度问题，是分布问题','09-05','2026-09-12','epub'),
+];
+
+/* 占位封面：纯色 + 几何 + 排印，全页零渐变（真实应用里这里是 EPUB 封面图，属内容层） */
+function coverSVG(b){
+  const t = b.title.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const s = t.length > 13 ? t.slice(0,13) : t;
+  const K = {
+    grid:`<rect class="c-g1" width="200" height="300"/>
+      ${Array.from({length:5},(_,i)=>`<rect class="c-g2" x="${i*40}" width="1" height="300"/>`).join('')}
+      ${Array.from({length:7},(_,i)=>`<rect class="c-g2" y="${i*44}" width="200" height="1"/>`).join('')}
+      <rect class="c-ink" x="16" y="16" width="120" height="8"/>
+      <text class="c-ink cover-t" x="16" y="252" font-size="15">${s}</text>`,
+    band:`<rect class="c-g2" width="200" height="300"/><rect class="c-ink" y="96" width="200" height="56"/>
+      <text class="c-paper cover-t" x="16" y="130" font-size="14">${s}</text>
+      <rect class="c-ink" x="16" y="240" width="60" height="6"/>`,
+    ink:`<rect class="c-ink" width="200" height="300"/><rect class="c-g3" x="120" y="48" width="56" height="56"/>
+      <rect class="c-paper" x="16" y="16" width="168" height="1"/>
+      <text class="c-paper cover-t" x="16" y="252" font-size="15">${s}</text>`,
+    dots:`<rect class="c-paper" width="200" height="300"/>
+      ${Array.from({length:5},(_,r)=>Array.from({length:4},(_,c)=>`<rect class="c-g3" x="${32+c*40}" y="${36+r*36}" width="8" height="8"/>`).join('')).join('')}
+      <rect class="c-g1" y="208" width="200" height="92"/>
+      <text class="c-ink cover-t" x="16" y="252" font-size="15">${s}</text>`,
+    diag:`<rect class="c-g1" width="200" height="300"/><polygon class="c-ink" points="0,300 200,0 200,112 78,300"/>
+      <text class="c-ink cover-t" x="16" y="252" font-size="15">${s}</text>`,
+    acc:`<rect class="c-acc" width="200" height="300"/><rect class="c-accon" x="16" y="224" width="120" height="8"/>
+      <text class="c-accon cover-t" x="16" y="200" font-size="15">${s}</text>`,
+    none:'',
+  };
+  return K[b.kind] || K.none;
+}
+
+const LANGS = [['zh','中文'],['en','英语'],['ja','日语'],['de','德语'],['fr','法语'],['','未知']];
+const SORTS = [['manual','手动顺序'],['recent','最近阅读'],['added','添加时间'],['title','标题']];
+const langLabel = b => (b.lang || '').toUpperCase() || '—';
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+/* ===================== 状态 ===================== */
+let fseq = 0;
+const state = { view:'wall', dens:200, sort:'manual', theme:'light', count:'all',
+  order: books.map(b=>b.id), folders:[], open:null, renameId:null,
+  fresh:null, focus:null, drag:null };
+const $ = s => document.querySelector(s);
+const byId = id => books.find(b=>b.id===id);
+const byFolder = id => state.folders.find(f=>f.id===id);
+const isFolderId = id => /^f\d+$/.test(id);
+const entry = id => isFolderId(id) ? {kind:'folder', o:byFolder(id)} : {kind:'book', o:byId(id)};
+const shelf = $('#shelf'), list = $('#list');
+$('#add-ico').innerHTML = ICO.plus;
+$('#btn-gear').innerHTML = ICO.cog;
+document.querySelectorAll('[data-ico]').forEach(s=>{ s.innerHTML = ICO[s.dataset.ico] || ''; });
+const folderOf = bookId => state.folders.find(f=>f.items.includes(bookId)) || null;
+/* 顶层条目：order 里的书若已归进文件夹，就只在文件夹卡里出现 */
+function topEntries(){
+  return state.order.map(entry).filter(e => e.o && (e.kind==='folder' || !folderOf(e.o.id)));
+}
+const agg = f => {
+  const ms = f.items.map(byId).filter(Boolean);
+  return { n: ms.length,
+    prog: ms.length ? Math.round(ms.reduce((s,m)=>s+(m.progress||0),0)/ms.length*100) : 0,
+    latest: ms.map(m=>m.updated).filter(Boolean).sort().slice(-1)[0] || '',
+    created: f.created };
+};
+const sortKey = e => e.kind==='folder'
+  ? { title:e.o.name, ...agg(e.o) }
+  : { title:e.o.title, updated:e.o.updated, created:e.o.created };
+function currentArr(){ return state.open ? byFolder(state.open).items : state.order }
+function saveArr(a){ if (state.open) byFolder(state.open).items = a; else state.order = a }
+function entries(){
+  let l = state.open ? byFolder(state.open).items.map(entry).filter(e=>e.o) : topEntries();
+  const cmp = {
+    recent:(a,b)=>sortKey(b).updated.localeCompare(sortKey(a).updated),
+    added: (a,b)=>sortKey(b).created.localeCompare(sortKey(a).created),
+    title: (a,b)=>sortKey(a).title.localeCompare(sortKey(b).title,'zh'),
+  }[state.sort];
+  if (cmp) l = [...l].sort(cmp);
+  if (state.count==='few')   l = l.slice(0,3);
+  if (state.count==='empty') l = [];
+  return l;
+}
+const manual = () => state.sort === 'manual';
+const langMenuHTML = b => `<div class="dd-menu" role="menu" aria-label="书籍语言">
+  ${LANGS.map(([v,l])=>`<button role="menuitemradio" aria-checked="${v===(b.lang||'')}" data-l="${v}">${l}</button>`).join('')}</div>`;
+/* 「归入文件夹」菜单：键盘与鼠标共用的一条路径，不需要拖拽精度 */
+function groupMenuHTML(b){
+  const inF = folderOf(b.id);
+  return `<div class="dd-menu" role="menu" aria-label="归入文件夹">
+    <button role="menuitem" data-g="new">新建文件夹并放入</button>
+    ${state.folders.map(f=>`<button role="menuitemradio" aria-checked="${inF&&inF.id===f.id}" data-g="${f.id}">${esc(f.name)}<span class="mark mono">${f.items.length}</span></button>`).join('')}
+    ${inF?`<button role="menuitem" data-g="out">移出「${esc(inF.name)}」</button>`:''}
+  </div>`;
+}
+
+function cardHTML(b){
+  const pct = Math.round((b.progress||0)*100);
+  return `<div class="shelf-item" data-id="${b.id}"${manual()?' draggable="true"':''}>
+    <div class="book-card" tabindex="0" role="button" aria-label="打开《${esc(b.title)}》">
+      ${b.kind!=='none'
+        ? `<svg class="cover" viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">${coverSVG(b)}</svg>`
+        : `<span class="sq"></span><p class="no-cover-title">${esc(b.title)}</p>`}
+      ${manual()?`<button class="grip" tabindex="-1" aria-hidden="true" title="拖拽排序（Alt+方向键）">${ICO.grip}</button>`:''}
+      <div class="card-acts">
+        <button class="act" data-a="rename" title="重命名" aria-label="重命名">${ICO.pencil}</button>
+        <span class="dd"><button class="act" data-a="lang" title="书籍语言（查词按它路由）" aria-label="书籍语言">${ICO.lang}</button>${langMenuHTML(b)}</span>
+        <span class="dd"><button class="act" data-a="group" title="归入文件夹" aria-label="归入文件夹">${ICO.folderPlus}</button>${groupMenuHTML(b)}</span>
+        <span class="act-spacer"></span>
+        <button class="act act-warn" data-a="del" title="删除" aria-label="删除">${ICO.trash}</button>
+      </div>
+    </div>
+    <div class="cap-rail"><i style="width:${pct}%"></i></div>
+    <div class="cap">
+      <p class="cap-title">${esc(b.title)}</p>
+      <p class="cap-meta mono"><span class="pct">${pct}%</span><span class="sep"></span>
+        <span>${b.updated||'未读'}</span><span class="sep"></span><span class="lang">${langLabel(b)}</span></p>
+    </div></div>`;
+}
+function folderHTML(f){
+  const a = agg(f), ms = f.items.map(byId).filter(Boolean);
+  const shown = ms.slice(0,5), rest = ms.length - shown.length;
+  const spines = shown.map(b => `<i>${b.kind!=='none'
+      ? `<svg class="cover" viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">${coverSVG(b)}</svg>`
+      : `<span class="sq"></span>`}</i>`).join('')
+    + (rest>0 ? `<i class="rest mono">+${rest}</i>` : '');
+  const roster = ms.length ? `<div class="f-roster">
+      <span class="rh">成员 ${a.n} 本</span>
+      <ol>${ms.slice(0,6).map((b,i)=>`<li><span class="ix mono">${i+1}</span><span class="tt">${esc(b.title)}</span></li>`).join('')}</ol>
+      ${ms.length>6?`<span class="more">还有 ${ms.length-6} 本，进去看全部</span>`:''}
+    </div>` : '';
+  const face = ms.length
+    ? `<div class="f-face"><span class="f-tab"><span>FOLDER</span></span>
+        <div class="f-spines">${spines}</div>
+        <div class="f-sum"><span class="n">${a.n}</span><span class="u">本</span>
+          <span class="avg">均值 ${a.prog}%</span></div>
+        ${roster}</div>`
+    : `<div class="f-face"><span class="f-tab"><span>FOLDER</span></span>
+        <div class="folder-empty">${ICO.folder}<span class="et">空文件夹<br>把书拖进来，或用卡片动作条的「归入文件夹」</span></div></div>`;
+  return `<div class="shelf-item" data-id="${f.id}"${manual()?' draggable="true"':''}>
+    <div class="book-card" tabindex="0" role="button" aria-label="打开文件夹「${esc(f.name)}」，含 ${a.n} 本">
+      ${face}
+      ${manual()?`<button class="grip" tabindex="-1" aria-hidden="true" title="拖拽排序（Alt+方向键）">${ICO.grip}</button>`:''}
+      <div class="card-acts">
+        <button class="act" data-a="rename" title="重命名文件夹" aria-label="重命名文件夹">${ICO.pencil}</button>
+        <span class="dd"><button class="act" data-a="fmenu" title="文件夹操作" aria-label="文件夹操作">${ICO.ellipsis}</button>
+          <div class="dd-menu" role="menu" aria-label="文件夹操作">
+            <button role="menuitem" data-f="out-all">把 ${a.n} 本全部移回书架</button>
+            <button role="menuitem" data-f="dissolve">解散文件夹（不删书记录）</button>
+          </div></span>
+        <span class="act-spacer"></span>
+      </div>
+    </div>
+    <div class="cap-rail"><i style="width:${a.prog}%"></i></div>
+    <div class="cap">
+      <p class="cap-title">${esc(f.name)}</p>
+      <p class="cap-meta mono"><span class="cnt">${a.n} 本</span><span class="sep"></span>
+        <span>均值 ${a.prog}%</span><span class="sep"></span><span>${a.latest||'未读'}</span></p>
+    </div></div>`;
+}
+function entryHTML(e){ return e.kind==='folder' ? folderHTML(e.o) : cardHTML(e.o) }
+function entryRowHTML(e){ return e.kind==='folder' ? folderRowHTML(e.o) : rowHTML(e.o) }
+function folderRowHTML(f){
+  const a = agg(f), ms = f.items.map(byId).filter(Boolean);
+  const strips = ms.slice(0,4).map(b=>`<i>${b.kind!=='none'
+      ? `<svg class="cover" viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">${coverSVG(b)}</svg>`:''}</i>`).join('')
+    + (ms.length>4?`<i class="rest mono">+${ms.length-4}</i>`:'');
+  return `<tr data-id="${f.id}"${manual()?' draggable="true"':''}>
+    <td class="col-open"><button class="icon-btn" data-a="openf" title="打开文件夹" aria-label="打开文件夹">${ICO.folder}</button></td>
+    <td class="col-th">${manual()?`<button class="icon-btn row-grip" tabindex="-1" aria-hidden="true" title="拖拽排序（Alt+方向键）">${ICO.grip}</button>`:''}</td>
+    <td class="col-cov"><span class="thumb"><span class="mini-spines">${strips}</span></span></td>
+    <td><div class="t-title">${esc(f.name)}</div>
+      <div class="t-sub">${a.n} 本 · 均值 ${a.prog}% · 悬停看成员</div>
+      <div class="t-members">${ms.map(b=>esc(b.title)).join(' · ')}</div>
+      <div class="bar"><i style="width:${a.prog}%"></i></div></td>
+    <td class="col-num">${a.prog}%</td>
+    <td class="col-num">—</td>
+    <td class="col-num">${a.latest||'—'}</td>
+    <td class="col-num">${a.created}</td>
+    <td class="col-act"><button class="icon-btn" data-a="rename" title="重命名文件夹" aria-label="重命名文件夹">${ICO.pencil}</button>
+      <span class="dd"><button class="icon-btn" data-a="fmenu" title="文件夹操作" aria-label="文件夹操作">${ICO.ellipsis}</button>
+        <div class="dd-menu" role="menu"><button role="menuitem" data-f="out-all">全部移回书架</button>
+        <button role="menuitem" data-f="dissolve">解散文件夹</button></div></span></td></tr>`;
+}
+function rowHTML(b){
+  const pct = Math.round((b.progress||0)*100);
+  return `<tr data-id="${b.id}"${manual()?' draggable="true"':''}>
+    <td class="col-open"><button class="icon-btn" data-a="open" title="打开" aria-label="打开《${esc(b.title)}》">${ICO.open}</button></td>
+    <td class="col-th">${manual()?`<button class="icon-btn row-grip" tabindex="-1" aria-hidden="true" title="拖拽排序（Alt+方向键）">${ICO.grip}</button>`:''}</td>
+    <td class="col-cov"><span class="thumb">${b.kind!=='none'?`<svg class="cover" viewBox="0 0 200 300" preserveAspectRatio="xMidYMid slice">${coverSVG(b)}</svg>`:''}</span></td>
+    <td><div class="t-title">${esc(b.title)}</div>
+      <div class="t-sub">${b.last?esc(b.last):'尚未开始 · 全文开头'}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div></td>
+    <td class="col-num">${pct}%</td>
+    <td class="col-num"><span class="lang">${langLabel(b)}</span></td>
+    <td class="col-num">${b.updated||'—'}</td>
+    <td class="col-num">${b.created}</td>
+    <td class="col-act"><button class="icon-btn" data-a="rename" title="重命名" aria-label="重命名">${ICO.pencil}</button>
+      <span class="dd"><button class="icon-btn" data-a="group" title="归入文件夹" aria-label="归入文件夹">${ICO.folderPlus}</button>${groupMenuHTML(b)}</span>
+      <button class="icon-btn" data-a="del" title="删除" aria-label="删除">${ICO.trash}</button></td></tr>`;
+}
+const emptyHTML = `<div class="empty-state">
+  <div class="empty-deco"><span class="empty-sq empty-sq-accent"></span><span class="empty-sq"></span><span class="empty-sq"></span></div>
+  <p class="empty-text">书架还是空的。用右上角的「添加材料」，或按 <span class="kbd">Ctrl</span>+<span class="kbd">Alt</span>+<span class="kbd">N</span>，
+    粘贴一段文本、导入 EPUB / Word / TXT / Markdown，开始你的渐进阅读。</p></div>`;
+
+function render(){
+  /* 重绘前记下焦点是否在场内：innerHTML 一换，activeElement 就退回 body，
+     事后再判断"是否曾聚焦"已经来不及 —— 键盘重排必须能连续按 */
+  const hadFocus = !!document.activeElement && document.activeElement !== document.body;
+  const items = entries();
+  /* 计数说的是"这一屏摆着什么"：进了文件夹的书由文件夹卡自己报成员数，不在顶层重复计入。
+     整串（含"本"）由这里出，HTML 里不再留裸「本」字 —— 否则进文件夹就成了"2 本本" */
+  const nf = items.filter(e=>e.kind==='folder').length, nb = items.length - nf;
+  $('#cnt-wrap').innerHTML = state.open
+    ? `<b>${items.length}</b> 本`
+    : `<b>${nb}</b> 本${nf?` · <b>${nf}</b> 个文件夹`:''}`;
+  const crumb = $('#crumb');
+  if (state.open){
+    const f = byFolder(state.open);
+    crumb.hidden = false;
+    /* 「返回书架」钮兼任拖出落点：把书拖到它上面 = 移回书架。不再额外摆一个灰色「书架」小字，
+       否则同一行里"返回书架 / 书架"两种写法并存，读的人得猜哪个才是出口 */
+    crumb.innerHTML = `<button class="btn btn-outline btn-sm" id="crumb-back"
+        title="返回书架顶层；把书拖到这里 = 移回书架">${ICO.arrowLeft}返回书架</button>
+      <span class="sb"></span><span class="here">${esc(f.name)}</span>`;
+    const back = $('#crumb-back');
+    const goBack = ()=>{ state.open=null; state.focus=f.id; render() };
+    back.addEventListener('click', goBack);
+    back.addEventListener('dragover', e=>{ if(state.drag){ e.preventDefault(); back.classList.add('hot') } });
+    back.addEventListener('dragleave', ()=>back.classList.remove('hot'));
+    back.addEventListener('drop', e=>{ e.preventDefault(); back.classList.remove('hot'); if(state.drag) ungroup(state.drag.id) });
+  } else { crumb.hidden = true; crumb.innerHTML = ''; }
+  shelf.classList.toggle('dens-sm', state.dens===152);
+  shelf.classList.toggle('dens-lg', state.dens===248);
+  shelf.style.setProperty('--shelf-min', state.dens+'px');
+  $('#bar-hint').innerHTML = manual()
+    ? '拖到书上成组 · <span class="kbd">Alt</span>+<span class="kbd">&larr;</span><span class="kbd">&rarr;</span> 重排'
+    : '非手动顺序，拖拽已停用';
+  $('#tb-sort-val').textContent = SORTS.find(s=>s[0]===state.sort)[1];
+  $('#tb-sort-menu').innerHTML = SORTS.map(([v,l])=>
+    `<button role="menuitemradio" aria-checked="${v===state.sort}" data-s="${v}">${l}${v===state.sort?'<span class="mark">当前</span>':''}</button>`).join('');
+  if (!items.length){ list.className=''; list.innerHTML = emptyHTML; }
+  else if (state.view==='wall'){
+    list.className='shelf-grid';
+    list.innerHTML = items.map(entryHTML).join('');
+  } else {
+    list.className='shelf-body';
+    list.innerHTML = `<table class="shelf-table"><thead><tr>
+      <th class="col-open"></th><th class="col-th"></th><th class="col-cov"></th>
+      <th>书名 / 上次阅读</th><th class="n">进度</th><th class="n">语言</th>
+      <th class="n">最近</th><th class="n">添加</th><th class="col-act"></th>
+      </tr></thead><tbody>${items.map(entryRowHTML).join('')}</tbody></table>`;
+  }
+  wire(hadFocus);
+  if (state.renameId){ const t=state.renameId; state.renameId=null; const el=list.querySelector(`[data-id="${t}"]`); if (el) rename(el, entry(t).o, true) }
+  if (state.fresh){
+    const el = list.querySelector(`[data-id="${state.fresh}"]`);
+    if (el){ el.classList.add('fresh'); setTimeout(()=>el.classList.remove('fresh'), 1200); }
+    state.fresh = null;
+  }
+  buildProof(); measure();
+}
+function announce(t){ $('#live').textContent = t; }
+function feedback(msg){
+  $('#feedback').innerHTML = `<div class="inline-bar">${ICO.info}<span>${msg}</span></div>`;
+  clearTimeout(feedback._t);
+  feedback._t = setTimeout(()=>{ $('#feedback').innerHTML=''; }, 3200);
+}
+const label = id => { const e=entry(id); return e.kind==='folder' ? `「${e.o.name}」` : `《${e.o.title}》` };
+/* 键盘重排：与 Dashboard.tsx 同一语义（Alt+方向键，逐格移动，立即持久化） */
+function step(id, dir){
+  if (!manual()) return;
+  const o=[...currentArr()], i=o.indexOf(id), j=i+dir;
+  if (i<0 || j<0 || j>=o.length) return;
+  o.splice(i,1); o.splice(j,0,id); saveArr(o); state.focus=id;
+  render(); announce(`${label(id)} 移到第 ${j+1} 位`);
+}
+/* ---------- 文件夹：建 / 归入 / 移出 / 解散 ---------- */
+function newFolder(items, atId){
+  const f = { id:'f'+(++fseq), name:'未命名文件夹', items, created:new Date().toISOString().slice(0,10) };
+  state.folders.push(f);
+  const i = state.order.indexOf(atId);
+  const o = state.order.filter(x=>!items.includes(x));
+  o.splice(Math.max(0, i), 0, f.id);   // 文件夹落在目标书原来的位置
+  state.order = o;
+  return f;
+}
+function dropFromArrays(id){
+  state.order = state.order.filter(x=>x!==id);
+  state.folders.forEach(f=>{ f.items = f.items.filter(x=>x!==id) });
+}
+function groupInto(srcId, tgtId){
+  if (!srcId || !tgtId || srcId===tgtId) return;
+  const s = entry(srcId), t = entry(tgtId);
+  if (!s.o || !t.o) return;
+  if (s.kind==='folder'){ feedback('暂不支持文件夹互相嵌套（一层是有意为之，见 §6）'); return }
+  if (!manual()){ state.sort='manual'; syncSortSeg(); }
+  if (t.kind==='folder'){
+    dropFromArrays(srcId); t.o.items.push(srcId);
+    state.open = null; render(); announce(`${label(srcId)} 已归入「${t.o.name}」`);
+    return;
+  }
+  const srcFolder = folderOf(srcId), tgtFolder = folderOf(tgtId);
+  if (srcFolder && tgtFolder && srcFolder.id===tgtFolder.id){ feedback(`${label(srcId)} 与 ${label(tgtId)} 已在同一文件夹里`); return }
+  /* 两本书成组：默认名 + 立刻进入改名态（不替用户决定名字） */
+  dropFromArrays(srcId);
+  if (tgtFolder){ tgtFolder.items.push(srcId); state.renameId = tgtFolder.id; render();
+    announce(`${label(srcId)} 已归入「${tgtFolder.name}」`); return }
+  const f = newFolder([tgtId, srcId], tgtId);
+  state.renameId = f.id; state.focus = f.id; render();
+  announce(`已建文件夹，含 ${label(tgtId)} 与 ${label(srcId)}，请命名`);
+}
+function ungroup(id){
+  const f = folderOf(id); if (!f) return;
+  f.items = f.items.filter(x=>x!==id);
+  const o=[...state.order]; o.splice(o.indexOf(f.id)+1, 0, id); state.order=o;
+  render(); announce(`${label(id)} 已移回书架`);
+}
+function dissolve(f){
+  const o=[...state.order]; const i=o.indexOf(f.id);
+  o.splice(i,1,...f.items); state.order=o;
+  state.folders = state.folders.filter(x=>x.id!==f.id);
+  if (state.open===f.id) state.open=null;
+  render(); announce(`「${f.name}」已解散，${f.items.length} 本回到原位置（一本书都没删）`);
+}
+function moveAllOut(f){
+  const n=f.items.length, o=[...state.order];
+  o.splice(o.indexOf(f.id)+1, 0, ...f.items); state.order=o;
+  f.items=[]; render(); announce(`「${f.name}」已清空，${n} 本回到它原来的位置后面；空文件夹仍留在书架上（不悄悄删东西）`);
+}
+/* 松手后按 DOM 顺序提交（实时重排只做 DOM 移动，不重绘，避免打断原生拖拽） */
+function commitDOM(){
+  const z = state.drag && state.drag.zone==='group' ? state.drag : null;
+  state.drag = null;
+  const host = state.view==='wall' ? list : list.querySelector('tbody');
+  if (!host) return;
+  if (z){ groupInto(z.id, z.target); return }
+  const ids = [...host.querySelectorAll('[data-id]')].map(e=>e.dataset.id);
+  const cur = entries().map(e=>e.o.id);
+  if (ids.join()===cur.join()) return;
+  const outside = currentArr().filter(x=>!ids.includes(x));
+  saveArr([...ids, ...outside]);
+  render(); announce('顺序已保存');
+}
+
+function openFolder(id){ state.open=id; state.focus=null; render(); announce(`进入「${byFolder(id).name}」，${agg(byFolder(id)).n} 本`) }
+
+function wire(hadFocus){
+  list.querySelectorAll('[data-id]').forEach(el=>{
+    const id = el.dataset.id;
+    el.addEventListener('dragstart', e=>{
+      if (!manual()) return e.preventDefault();
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('text/shelf-id', id);
+      state.drag = { id, target:null, zone:null };
+      requestAnimationFrame(()=>el.classList.add('dragging'));
+    });
+    el.addEventListener('dragend', ()=>{ el.classList.remove('dragging'); clearZones(); commitDOM(); });
+    const onKey = e=>{
+      if (!e.altKey && (e.key==='Enter' || e.key===' ')){
+        e.preventDefault();
+        return entry(id).kind==='folder' ? openFolder(id)
+          : feedback(`打开《${byId(id).title}》 —— 真实应用走阅读器，样张不演示`);
+      }
+      if (!e.altKey) return;
+      const dir = (e.key==='ArrowLeft'||e.key==='ArrowUp') ? -1 : (e.key==='ArrowRight'||e.key==='ArrowDown') ? 1 : null;
+      if (dir===null) return;
+      e.preventDefault(); e.stopPropagation(); step(id, dir);
+    };
+    /* 只挂在容器上：卡片内的 keydown 冒泡到这里，一条路径处理完，避免同一事件被处理两次 */
+    el.addEventListener('keydown', onKey);
+    const focusable = el.querySelector('.book-card') || el;
+    if (state.view === 'table') focusable.tabIndex = 0;
+    focusable.addEventListener('focus', ()=>{ state.focus=id });
+  });
+  /* 动作按钮：重命名 / 语言 / 归入文件夹 / 文件夹菜单 / 删除 */
+  list.querySelectorAll('.act,.icon-btn').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      const host = btn.closest('[data-id]'), id = host.dataset.id, a = btn.dataset.a;
+      if (a==='open')   return feedback(`打开《${byId(id).title}》 —— 真实应用走阅读器，样张不演示`);
+      if (a==='rename') return rename(host, entry(id).o);
+      if (a==='del')    return confirmDelete(host, byId(id));
+      if (a==='openf')  return openFolder(id);
+      if (a==='lang'||a==='group'||a==='fmenu') return btn.closest('.dd').classList.toggle('open');
+    });
+  });
+  /* 下拉项派发：语言（data-l）/ 归组目标（data-g）/ 文件夹操作（data-f），三张菜单共用一条路径 */
+  list.querySelectorAll('.dd-menu button').forEach(opt=>{
+    opt.addEventListener('click', e=>{
+      e.stopPropagation();
+      const host = opt.closest('[data-id]'); if (!host) return;
+      const id = host.dataset.id;
+      if (opt.dataset.l){ byId(id).lang = opt.dataset.l; render();
+        return announce(`${label(id)} 语言已设为 ${opt.textContent.trim()}`) }
+      if (opt.dataset.g){
+        const g = opt.dataset.g;
+        if (g==='new'){ const f=newFolder([id], id); state.renameId=f.id; state.focus=id; render();
+          return announce(`已建文件夹并放入 ${label(id)}，请命名`) }
+        if (g==='out') return ungroup(id);
+        dropFromArrays(id); byFolder(g).items.push(id); state.focus=id; render();
+        return announce(`${label(id)} 已归入「${byFolder(g).name}」`);
+      }
+      if (opt.dataset.f){
+        const f = byFolder(id);
+        return opt.dataset.f==='dissolve' ? dissolve(f) : moveAllOut(f);
+      }
+    });
+  });
+  list.querySelectorAll('.book-card').forEach(c=>{
+    c.addEventListener('click', ()=>{
+      const id = c.closest('[data-id]').dataset.id;
+      if (entry(id).kind==='folder') return openFolder(id);
+      feedback(`打开《${byId(id).title}》 —— 真实应用走阅读器，样张不演示`);
+    });
+  });
+  if (state.focus && hadFocus){
+    const el = list.querySelector(`[data-id="${state.focus}"]`);
+    const f = el && (el.querySelector('.book-card') || el);
+    if (f) f.focus();
+  }
+}
+/* 改名：图注区内联（Enter / 失焦提交，Esc 取消），无框线。书名与文件夹名共用一条路径 */
+function rename(host, b){
+  const cap = host.querySelector('.cap-title') || host.querySelector('.t-title');
+  if (!cap) return;
+  const isFolder = Array.isArray(b.items);
+  const field = isFolder ? 'name' : 'title';
+  const old = b[field];
+  const inp = document.createElement('input');
+  inp.className='cap-input'; inp.value=old;
+  inp.setAttribute('aria-label', isFolder?'修改文件夹名':'修改书名');
+  inp.title = '回车保存，Esc 取消';
+  cap.replaceWith(inp); inp.focus(); inp.select();
+  let closed = false;
+  const done = keep=>{
+    if (closed) return; closed = true;
+    const v = inp.value.trim();
+    if (keep && v && v!==old){ b[field] = v; announce(`${isFolder?'文件夹':'书名'}已保存：${v}`) }
+    else if (!keep && isFolder && !b.items.length){
+      /* 建完就 Esc：不留一个没人认领的空文件夹，但成员一本不少 */
+      state.folders = state.folders.filter(x=>x!==b);
+      const o=[...state.order]; o.splice(o.indexOf(b.id), 0, ...b.items); state.order=o;
+    }
+    render();
+  };
+  inp.addEventListener('keydown', e=>{
+    e.stopPropagation();
+    if (e.key==='Enter'){ e.preventDefault(); done(true) }
+    else if (e.key==='Escape'){ e.preventDefault(); done(false) }
+  });
+  inp.addEventListener('blur', ()=>done(true));
+  inp.addEventListener('click', e=>e.stopPropagation());
+}
+/* 删除：就地二次确认；焦点默认落「取消」，不让误按 Enter 删书（沿用 D50 行为） */
+function confirmDelete(host, b){
+  const short = b.title.length>12 ? b.title.slice(0,12)+'…' : b.title;
+  const box = `<span>确定删除《${esc(short)}》吗？</span><span class="row">
+    <button class="btn btn-danger btn-sm" data-ok>确认删除</button>
+    <button class="btn btn-outline btn-sm" data-no>取消</button></span>`;
+  let ok, no;
+  if (state.view==='wall'){
+    const acts = host.querySelector('.card-acts');
+    acts.innerHTML = `<div class="confirm">${box}</div>`;
+    acts.style.opacity = 1;
+    ok = acts.querySelector('[data-ok]'); no = acts.querySelector('[data-no]');
+  } else {
+    host.innerHTML = `<td colspan="9"><div style="display:flex;gap:var(--sp-3);align-items:center;font-size:var(--fs-secondary)">${box}</div></td>`;
+    ok = host.querySelector('[data-ok]'); no = host.querySelector('[data-no]');
+  }
+  no.focus();
+  no.addEventListener('click', e=>{ e.stopPropagation(); render() });
+  no.addEventListener('keydown', e=>{ if (e.key==='Escape'){ e.preventDefault(); render() } });
+  ok.addEventListener('click', e=>{
+    e.stopPropagation();
+    const i = books.findIndex(x=>x.id===b.id); if (i>=0) books.splice(i,1);
+    dropFromArrays(b.id);
+    render(); announce(`《${b.title}》已删除`);
+  });
+}
+/* ---------- 拖拽落点：左缘=排到其前 / 中央=归入 / 右缘=排到其后 ---------- */
+const trunc = s => s.length>12 ? s.slice(0,12)+'…' : s;
+function clearZones(){
+  list.querySelectorAll('.zone-before,.zone-after,.zone-group').forEach(el=>
+    el.classList.remove('zone-before','zone-after','zone-group'));
+  list.querySelectorAll('.zone-tip').forEach(t=>t.remove());
+}
+const zoneOf = (r,x)=>{ const t=(x-r.left)/r.width; return t<0.28?'before' : t>0.72?'after' : 'group' };
+function dragover(e){
+  if (!manual() || !state.drag) return;
+  const drag = list.querySelector('.dragging'); if (!drag) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const host = state.view==='wall' ? list : list.querySelector('tbody');
+  const items = [...host.querySelectorAll('[data-id]:not(.dragging)')];
+  let best=null, bd=Infinity;
+  for (const el of items){
+    const r = el.getBoundingClientRect();
+    const d = Math.hypot(e.clientX-(r.left+r.width/2), e.clientY-(r.top+r.height/2));
+    if (d < bd){ bd = d; best = el }
+  }
+  clearZones();
+  if (!best){ state.drag.zone='append'; return host.appendChild(drag) }
+  const zone = state.open
+    ? (e.clientX < best.getBoundingClientRect().left + best.offsetWidth/2 ? 'before' : 'after')
+    : zoneOf(best.getBoundingClientRect(), e.clientX);
+  state.drag.target = best.dataset.id; state.drag.zone = zone;
+  const tgt = entry(best.dataset.id), src = entry(state.drag.id);
+  if (zone === 'group'){
+    best.classList.add('zone-group');
+    /* 归组意图：只做反馈、不动 DOM —— 与重排在视觉上就是两件事 */
+    if (state.view==='wall'){
+      const tip = document.createElement('span'); tip.className='zone-tip';
+      tip.textContent = src.kind==='folder' ? '暂不支持文件夹嵌套'
+        : tgt.kind==='folder' ? `归入「${trunc(tgt.o.name)}」` : `与《${trunc(tgt.o.title)}》成组`;
+      const holder = best.querySelector('.book-card'); if (holder) holder.appendChild(tip);
+    }
+    return;
+  }
+  host.insertBefore(drag, zone==='after' ? best.nextSibling : best);
+  best.classList.add(zone==='before' ? 'zone-before' : 'zone-after');
+}
+list.addEventListener('dragover', dragover);
+document.addEventListener('click', ()=>{ list.querySelectorAll('.dd.open').forEach(d=>d.classList.remove('open')); $('#tb-sort').classList.remove('open') });
+
+/* ---------- 工具条控件（视图 / 密度 / 排序都在应用内那条上） ---------- */
+function setSeg(sel, key, val){
+  document.querySelector(sel).querySelectorAll('button')
+    .forEach(b=>b.setAttribute('aria-pressed', String(b.dataset[key]===val)));
+}
+function syncSortSeg(){ $('#tb-sort-val').textContent = SORTS.find(s=>s[0]===state.sort)[1] }
+$('#tb-view').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b)return;
+  state.view=b.dataset.v; setSeg('#tb-view','v',b.dataset.v); render(); });
+$('#tb-dens').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b)return;
+  state.dens=+b.dataset.d; setSeg('#tb-dens','d',b.dataset.d); render(); });
+$('#tb-sort-btn').addEventListener('click', e=>{ e.stopPropagation();
+  const open = $('#tb-sort').classList.toggle('open');
+  $('#tb-sort-btn').setAttribute('aria-expanded', String(open)); });
+$('#tb-sort-menu').addEventListener('click', e=>{ const b=e.target.closest('button[data-s]'); if(!b)return;
+  e.stopPropagation(); state.sort=b.dataset.s; $('#tb-sort').classList.remove('open'); render(); });
+$('#seg-count').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b)return;
+  state.count=b.dataset.c; setSeg('#seg-count','c',b.dataset.c); render(); });
+$('#seg-theme').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b)return;
+  state.theme=b.dataset.t;
+  document.body.classList.toggle('theme-dark', state.theme==='dark');
+  setSeg('#seg-theme','t',state.theme); measure(); });
+function addBook(){
+  const b = B('新入库 · 粘贴文本 '+(++seq),'zh','none',0,'','','2026-09-21','paste');
+  books.push(b); state.order.unshift(b.id); state.fresh=b.id; state.open=null;
+  if (state.count!=='all'){ state.count='all'; setSeg('#seg-count','c','all'); }
+  if (!manual()) state.sort='manual';
+  render();
+  feedback('点「添加材料」时真实应用打开 App 级模态（与 Ctrl+Alt+N 同一入口）。样张在此演示新书插到队首并高亮 1.2 秒。');
+}
+$('#btn-add').addEventListener('click', addBook);
+$('#btn-gear').addEventListener('click', ()=>feedback('设置 —— 顶栏右侧按 §5.2 只放设置齿轮与窗控三键，添加材料的入口在页面工具条。'));
+
+/* ---------- 回书架顶层的三条路：显式返回钮 / 顶栏「书架」/ Esc ---------- */
+document.querySelectorAll('.topbar-nav .nav-item').forEach((b,i)=>{
+  b.addEventListener('click', ()=>{
+    if (i===0){
+      if (state.open){ const f=byFolder(state.open); state.open=null; state.focus=f.id; render(); announce('已返回书架顶层') }
+      else feedback('已经在书架。顶栏导航本身就是第二条退路。');
+      return;
+    }
+    feedback(`${b.textContent} —— 样张只做书架页，其余视图不演示`);
+  });
+});
+document.addEventListener('keydown', e=>{
+  if (e.key !== 'Escape') return;
+  const openMenus = document.querySelectorAll('.dd.open').length;
+  if (openMenus){ document.querySelectorAll('.dd.open').forEach(d=>d.classList.remove('open')); return }
+  if (state.open){
+    const f = byFolder(state.open);
+    state.open = null; state.focus = f.id; render();
+    announce(`已返回书架顶层，焦点回到「${f.name}」`);
+  }
+});
+
+/* ---------- 实测读数：真实量出来的，不是算给看的 ---------- */
+const PAD=64, SB=15, GAP=24, OLD=200;
+function deadAt(cw, min, fixed){
+  const n = Math.max(1, Math.floor((cw+GAP)/(min+GAP)));
+  const used = fixed ? n*min+(n-1)*GAP : cw;
+  return { n, track: fixed ? min : (cw-(n-1)*GAP)/n, dead: Math.max(0, cw-used) };
+}
+function measure(){
+  const isGrid = list.classList.contains('shelf-grid');
+  const cs = getComputedStyle(list);
+  const box = list.getBoundingClientRect();
+  const padL = parseFloat(cs.paddingLeft)||0, padR = parseFloat(cs.paddingRight)||0;
+  const content = box.width - padL - padR;
+  const tracks = isGrid ? cs.gridTemplateColumns.split(' ').filter(Boolean) : [];
+  const n = tracks.length;
+  const used = n ? tracks.reduce((s,t)=>s+parseFloat(t),0) + (n-1)*(parseFloat(cs.columnGap)||0) : 0;
+  const dead = n ? Math.max(0, content-used) : 0;
+  const old = deadAt(content, OLD, true);
+  $('#readout').innerHTML =
+    `框宽 <b class="mono">${Math.round($('#frame').getBoundingClientRect().width)}px</b>` +
+    (n ? ` · 列数 <b class="mono">${n}</b> · 单列实测 <b class="mono">${Math.round(parseFloat(tracks[0]))}px</b>` : '') +
+    ` · 新方案右侧富余 <b class="mono">${dead.toFixed(1)}px</b>` +
+    (content ? ` · 现状算法同宽会余 <b class="mono">${Math.round(old.dead)}px</b>` : '');
+}
+function buildProof(){
+  $('#proof').querySelector('tbody').innerHTML = [520,780,1000,1280,1600,1920,2560].map(W=>{
+    const cw = W-PAD-SB;
+    const o = deadAt(cw, OLD, true), k = deadAt(cw, state.dens, false);
+    return `<tr><td class="n">${W}</td><td class="n">${o.n}</td>
+      <td class="n"><span class="dead">${Math.round(o.dead)}px</span></td>
+      <td class="n">${k.n}</td><td class="n">${Math.round(k.track)}px</td>
+      <td class="n"><span class="zero">${k.dead.toFixed(1)}px</span></td></tr>`;
+  }).join('');
+}
+function buildSlabs(){
+  const tiles = n => Array.from({length:n},()=>'<i></i>').join('');
+  $('#slabs').innerHTML = [760,1180].map(W=>{
+    const cw=W-PAD;
+    const o=deadAt(cw,OLD,true), k=deadAt(cw,state.dens,false);
+    return `<div class="slab" style="width:${W}px">
+      <div class="slab-cap">视口 ${W}px（切片内容宽 ${W-PAD}px，不含滚动条）</div>
+      <div class="slab-box">
+        <div class="slab-row"><span class="slab-tag">现状</span>
+          <div class="strip" style="flex:1"><div class="strip-old" style="padding:var(--sp-2) var(--sp-8)">${tiles(Math.min(o.n,10))}</div></div></div>
+        <div class="slab-cap" style="padding:0 var(--sp-8)">右余 ${Math.round(o.dead)}px（${o.n} 列定宽 200px，余数无处可去）</div>
+        <div class="slab-row" style="margin-top:var(--sp-3)"><span class="slab-tag">新方案</span>
+          <div class="strip" style="flex:1"><div class="strip-new" style="padding:var(--sp-2) var(--sp-8)">${tiles(Math.min(k.n,10))}</div></div></div>
+        <div class="slab-cap" style="padding:0 var(--sp-8)">右余 0px（${k.n} 列，单列 ${Math.round(k.track)}px，余宽被等分吸收）</div>
+      </div></div>`;
+  }).join('');
+}
+function buildAnatomy(){
+  const b = byId('b3');
+  $('#anatomy-card').innerHTML = `<div class="shelf-grid" style="padding:0;grid-template-columns:1fr">${cardHTML(b)}</div>`;
+}
+$('#presets').innerHTML = [420,640,900,1200,1600,'全部'].map(w=>`<button data-w="${w}">${w==='全部'?'撑满':w+'px'}</button>`).join('');
+$('#presets').addEventListener('click', e=>{ const b=e.target.closest('button'); if(!b)return;
+  $('#frame').style.width = b.dataset.w==='全部' ? '100%' : b.dataset.w+'px';
+  requestAnimationFrame(measure); });
+new ResizeObserver(()=>measure()).observe($('#frame'));
+
+buildAnatomy();
+render();
+buildSlabs();
+</script>
+</body>
+</html>
