@@ -145,6 +145,37 @@ function app_main() {
     const accentTxt = read(path.join(ROOT, "src", "lib", "accentVar.ts"));
     flow.check("applyAccent 同时写 body（780ea84 修复不回退：只写 :root 会被 body.theme-dark 盖掉）", /document\.body/.test(accentTxt) && /setProperty\("--accent"/.test(accentTxt), true, { body: /document\.body/.test(accentTxt) });
 
+    // ---------- E7 书墙与空态两条新规则（v48.15 / D51）----------
+    flow.section("E7 书墙网格与空态两条例外不得回退（docs/swiss-international-style.md「画廊 / 状态设计」，正本 §5.3/§5.4）");
+    const shelfTxt = read(path.join(ROOT, "src", "components", "Bookshelf.tsx"));
+    flow.check("书墙用 repeat(auto-fill, minmax(下限, 1fr))，不是定宽列", /repeat\(\s*auto-fill\s*,\s*minmax\(/.test(themeTxt), "auto-fill 网格", (themeTxt.match(/grid-template-columns:[^\n]*/) || ["（没抓到网格声明）"])[0]);
+    flow.check("网格下限走 Token，不把像素写死", /--shelf-min\s*:/.test(themeTxt) && !/minmax\(\s*min\(100%,\s*\d+px\)/.test(themeTxt), "--shelf-min", (themeTxt.match(/--shelf-min\s*:[^\n]*/) || ["（缺 Token）"])[0]);
+    const wallBlocks = (themeTxt.match(/[^{}]*\{[^}]*auto-fill[^}]*\}/g) || []);
+    const badJustify = wallBlocks.filter((b) => /justify-content\s*:\s*(start|space-between|flex-start)/.test(b)).map((b) => (b.match(/[^{\n]+/) || ["?"])[0].trim());
+    flow.check("同一规则块内禁止 justify-content: start / space-between（把余量甩成右侧空白、间距不守 Token）", badJustify.length === 0, "无", badJustify);
+    /** 从 JSX 里按 div 配对取出某个 className 的整块 */
+    const jsxBlock = (src, marker) => {
+      const start = src.indexOf(marker);
+      if (start < 0) return "";
+      let depth = 0;
+      const re = /<\/?\s*div\b/g;
+      re.lastIndex = start;
+      let m;
+      while ((m = re.exec(src))) {
+        if (m[0][1] === "/") { depth--; if (depth === 0) return src.slice(start, m.index + m[0].length); }
+        else depth++;
+      }
+      return src.slice(start, start + 1500);
+    };
+    const emptyBlock = jsxBlock(shelfTxt, '<div className="empty-state"');
+    flow.record("空态块长度", `${emptyBlock.length} 字符`);
+    flow.check("空态存在且带几何装饰 + 一句话说明", /empty-deco/.test(emptyBlock) && /empty-text/.test(emptyBlock), "装饰 + 文案", emptyBlock.slice(0, 60) || "（没找到 empty-state）");
+    flow.check("该屏主行动已常驻吸顶工具条，空态不再重复放主按钮（同屏两个主行动会让人不知点哪个）", !/<button|onClick=/.test(emptyBlock), "空态内无按钮", (emptyBlock.match(/<button[^>]*>/g) || []).join(" "));
+    flow.check("空态文案直接指出主行动的位置（而不是再放一个按钮）", /右上角|Ctrl\+Alt\+N/.test(emptyBlock), "指过去", (emptyBlock.match(/书架还是空的[^"']{0,40}/) || ["（没抓到文案）"])[0]);
+    const barCss = (themeTxt.match(/\.shelf-bar\s*\{[^}]*\}/) || [""])[0];
+    flow.check("吸顶工具条五件套齐（计数 · 视图 · 密度 · 排序 · 主行动在右）", /position\s*:\s*sticky/.test(barCss) && /shelf-bar/.test(shelfTxt) && ["视图", "密度", "排序"].every((w) => shelfTxt.includes(w)), ".shelf-bar 吸顶 + 三个选择器", { css: barCss.slice(0, 70) || "（没抓到 .shelf-bar）", sticky: /position\s*:\s*sticky/.test(barCss), 视图: shelfTxt.includes("视图"), 密度: shelfTxt.includes("密度"), 排序: shelfTxt.includes("排序") });
+    flow.check("卡片动作不在卡面永久挂控件（靠 hover/focus 显形）", /:hover[^{]*\{[^}]*opacity\s*:\s*1|hover[^{]*\{[^}]*opacity\s*:\s*1/.test(themeTxt), "hover 显形", (themeTxt.match(/\.shelf-act[^\n]*\{[^}]*\}/) || ["（没抓到动作条样式）"])[0]?.slice(0, 90));
+
     fs.mkdirSync(path.dirname(BASELINE_FILE), { recursive: true });
     fs.writeFileSync(BASELINE_FILE, JSON.stringify(newBaseline, null, 2), "utf8");
   }).then((s) => process.exit(s.fail > 0 || s.aborted || s.crash ? 1 : 0));
