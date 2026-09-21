@@ -90,6 +90,31 @@ export default function Dashboard() {
     setDropTargetId(null);
   }, [dragId, handleMove]);
 
+  /** 键盘重排：`draggable` 只有鼠标能拖，键盘用户此前完全没有等价路径
+   * （规范：键盘可达 —— 所有交互元素 Tab 可达并可完成同一件事）。
+   * Alt + ←/→（↑/↓ 同义）把当前组件在 order 里前移/后移一格，
+   * 与拖拽走同一条 reorder + persistLayout，不产生第二套排序逻辑。 */
+  const moveStep = useCallback((widgetId: string, dir: -1 | 1) => {
+    setLayout((prev) => {
+      if (!prev) return prev;
+      const i = prev.order.indexOf(widgetId);
+      const target = prev.order[i + dir];
+      if (i < 0 || target === undefined) return prev;
+      const next = reorder(prev, widgetId, target);
+      persistLayout(next);
+      return next;
+    });
+  }, [persistLayout]);
+
+  const onWidgetHeadKeyDown = useCallback((widgetId: string) => (e: React.KeyboardEvent) => {
+    if (!e.altKey) return;
+    const dir = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : null;
+    if (dir === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    moveStep(widgetId, dir);
+  }, [moveStep]);
+
   const getConfig = useCallback((w: WidgetDef): WidgetConfig => {
     const raw = configs[w.id] || { dataKey: w.defaultData, chart: w.defaultChart };
     // 存量配置里的旧 chart id 归一化为新图型 id（渲染与下拉显示一致）
@@ -149,7 +174,17 @@ export default function Dashboard() {
           onDragStart={(e) => { e.dataTransfer.setData("text/widget-id", widgetId); e.dataTransfer.effectAllowed = "move"; setDragId(widgetId); }}
           onDragEnd={() => { setDragId(null); setDropTargetId(null); }}
         >
-          <IconGrip size={16} className="dash-grip" title="拖动排列" />
+          {/* 键盘重排的落点做成真正的 <button>，而不是给 head 挂 role="button"：
+              head 里嵌着两个 Dropdown 按钮，role="button" 套可聚焦子元素是无效 ARIA。
+              把手本身也从此有了焦点环，Alt + 方向键即可换位。 */}
+          <button
+            type="button"
+            className="icon-btn dash-widget-reorder"
+            aria-label={`${def.title} · 重新排列：Alt + 左/右方向键前移或后移`}
+            onKeyDown={onWidgetHeadKeyDown(widgetId)}
+          >
+            <IconGrip size={16} className="dash-grip" />
+          </button>
           <span className="dash-widget-title">{def.title}</span>
           <div className="dash-widget-tools" onClick={(e) => e.stopPropagation()}>
             {chartOptions.length > 1 && (
@@ -183,7 +218,7 @@ export default function Dashboard() {
         </div>
       </div>
     );
-  }, [overview, getConfig, setConfig, dragId, dropTargetId, onLeafDragOver, onLeafDrop, layout]);
+  }, [overview, getConfig, setConfig, dragId, dropTargetId, onLeafDragOver, onLeafDrop, onWidgetHeadKeyDown, layout]);
 
   // 可见组件行分解（Hooks 规则：useMemo 在条件 return 之前）
   const rows = useMemo(() => {

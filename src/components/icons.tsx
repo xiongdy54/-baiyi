@@ -107,3 +107,45 @@ export const IconGrip = (p: IconProps) => (
     </g>
   </Svg>
 );
+
+/**
+ * 以下四个从「组件里各写一份裸 <svg>」收编而来：
+ * 同一支书架加号在 App/Bookshelf/AddBookModal 里被手写了三遍，
+ * 线宽分别 1.5 / 1.5 / 2、尺寸 15 / 16 / 24 混着用 —— 图标一致性（P3.6）的缺口就在这。
+ */
+
+/** 新建 / 添加 */
+export const IconPlus = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+    <path d="M12 5v14" />
+  </Svg>
+);
+
+/** 改名 / 编辑 */
+export const IconPencil = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+    <path d="m15 5 4 4" />
+  </Svg>
+);
+
+/** 删除 */
+export const IconTrash = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 6h18" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+  </Svg>
+);
+
+/** 导入文件 */
+export const IconImport = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3v12" />
+    <path d="m8 11 4 4 4-4" />
+    <path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4" />
+  </Svg>
+);

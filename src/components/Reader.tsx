@@ -284,6 +284,16 @@ export default function Reader({
     [book]
   );
   const kernelRef = useRef<ReaderKernel | null>(null);
+  /** v48.14：引擎打开失败的可见错误态。此前 createKernel / k.open 抛出的异常
+   * 没人接（未处理的 Promise rejection），界面只剩一片空白正文区，
+   * 用户既不知道是书坏了还是软件挂了，也没有重试入口。 */
+  const [engineError, setEngineError] = useState<string | null>(null);
+  /** 重试计数：作为 ReaderEngine 的 key，改一次就重建一次内核 */
+  const [engineRetry, setEngineRetry] = useState(0);
+  // 换书（含换引擎格式）时清掉上一本的失败态，否则错误块会盖在新书上
+  useEffect(() => {
+    setEngineError(null);
+  }, [engineSource]);
   // 引擎选区锚点：语义同 markdown 的 anchorRef——最后一次菜单动作的选区，保留到下一次覆盖
   const engineSelRef = useRef<ReaderSelection | null>(null);
   const engineChapterRef = useRef<number | undefined>(0);
@@ -403,6 +413,7 @@ export default function Reader({
 
   const handleEngineReady = useCallback((k: ReaderKernel) => {
     kernelRef.current = k;
+    setEngineError(null);
     setTocItems(k.getTOC());
     void k.setMode(readerSettingsRef.current.mode);
     k.applyAppearance(resolveAppearance(readerSettingsRef.current));
@@ -1627,7 +1638,33 @@ export default function Reader({
                 </div>
               </div>
               <div className="reader-engine-viewport">
+                {engineError ? (
+                  <div className="reader-engine-error" role="alert">
+                    <p className="reader-engine-error-title">
+                      这本书没能打开
+                    </p>
+                    <p className="reader-engine-error-msg mono">{engineError}</p>
+                    <div className="reader-engine-error-actions">
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => {
+                          setEngineError(null);
+                          setEngineRetry((n) => n + 1);
+                        }}
+                      >
+                        重试
+                      </button>
+                      <button className="btn btn-outline btn-sm" onClick={() => setEngineError(null)}>
+                        关闭提示
+                      </button>
+                    </div>
+                    <p className="reader-engine-error-hint">
+                      常见原因：文件格式不受支持、文件本身损坏，或导出时缺失资源。
+                    </p>
+                  </div>
+                ) : (
                 <ReaderEngine
+                  key={engineRetry}
                   source={engineSource}
                   engine={engineKind}
                   initLocation={initialCfi ? { cfi: initialCfi } : initialPageIndex != null ? { pageIndex: initialPageIndex } : initialRatio > 0 ? { fraction: initialRatio } : null}
@@ -1640,7 +1677,9 @@ export default function Reader({
                   onContentPointerUp={handleEnginePointerUp}
                   onImageClick={(img) => void handleEngineImageClick(img)}
                   onReady={handleEngineReady}
+                  onError={(msg) => setEngineError(msg)}
                 />
+                )}
                 {readerSettings.mode.flow === "paged" && (
                   <>
                     <div className="reader-tap-zone reader-tap-left" title="上一页" onClick={() => void turnPage(-1)} />

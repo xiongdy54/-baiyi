@@ -734,6 +734,37 @@ body.has-skin .topbar { background: transparent; }
   transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .book-card-rename:hover { background: var(--accent); color: var(--accent-on); }
+
+/* 悬停显形改由按钮自己接管：它们原本是 .book-card-overlay 的子节点，靠父级
+   opacity 0→1 一起显形。改成卡片的直接子节点后，「就地二次确认」才能整块替换
+   overlay 的内容，而不把按钮自己的落点一起换掉。
+   仍然只用 opacity、不用 visibility —— 按钮必须保持可聚焦，键盘 Tab 到它时
+   .book-card:focus-within 会把浮层显出来，这是改动前后一致的键盘行为。 */
+.book-card-rename,
+.book-card-delete {
+  z-index: 1;
+  opacity: 0;
+  transition:
+    opacity var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+.book-card:hover .book-card-rename,
+.book-card:hover .book-card-delete,
+.book-card:focus-within .book-card-rename,
+.book-card:focus-within .book-card-delete { opacity: 1; }
+
+/* 确认态的两个按钮坐在 --overlay-ink 深色浮层上：.btn-outline 的默认描边与文字
+   取自浅色主题 Token（#e0e0e0 / #0a0a0a），不覆盖就是黑字压黑底、边框也看不见。 */
+.book-card-overlay .btn-outline {
+  border-color: color-mix(in srgb, var(--overlay-text) 40%, transparent);
+  color: var(--overlay-text);
+}
+.book-card-overlay .btn-outline:hover {
+  background: color-mix(in srgb, var(--overlay-text) 14%, transparent);
+  border-color: var(--overlay-text);
+  color: var(--overlay-text);
+}
 .book-card-rename-input {
   width: 100%;
   height: 32px;
@@ -1093,6 +1124,58 @@ body.theme-dark .modal-panel {
   align-items: center;
   gap: var(--sp-2);
 }
+
+/* ---------- 内联反馈条（替代 window.alert / window.confirm） ----------
+   原生弹窗的三个硬伤：① 样式不受主题控制，深色模式下弹出系统白框；
+   ② 它把焦点抢出模态的焦点陷阱，Esc/Tab 行为断掉；③ 读屏下是一处未预期的
+   模态中断。反馈属于界面，就该长在界面里。 */
+.notice-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  /* 表面（error-soft 底 + 左缘 2px error 条）由 .card-marked-error 提供，
+     本类只管版面与图标着色 —— 同一个「标记面」不在两处重复定义 */
+  color: var(--text-primary);
+  font-size: var(--fs-secondary);
+  line-height: 1.5;
+}
+.notice-bar svg { flex: none; color: var(--error); }
+.notice-bar-actions { margin-left: auto; display: flex; gap: var(--sp-2); flex: none; }
+
+/* 批量导入结果：成功/失败分开列，失败带原因，替代原先三段 window.alert */
+.import-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-4);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 2px solid var(--border-strong);
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+}
+.import-report.has-fail { border-left-color: var(--error); }
+.import-report-title { font-size: var(--fs-meta); font-weight: 600; color: var(--text-primary); }
+.import-report ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
+.import-report .bad { color: var(--error); }
+
+/* 书架卡片的就地二次确认：确认态必须常驻可见（不能只在 hover 时显形），
+   否则用户点完"删除"后什么都不会发生 —— 这正是原生 confirm 被拿掉后的坑。 */
+.book-card-overlay.is-confirming { opacity: 1; }
+.book-card-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: auto;
+}
+.book-card-confirm-title {
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.book-card-confirm-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 
 /* 12px 辅助文字（原内联 fontSize: 12） */
 .fs-meta { font-size: var(--fs-meta); }
@@ -2129,10 +2212,14 @@ body.theme-dark .modal-panel {
 }
 .dash-widget-head:active { cursor: grabbing; }
 
+/* 键盘重排把手： draggable 只对鼠标有效，这个按钮是它的无障碍等价物 */
+.dash-widget-reorder {
+  width: 24px;
+  height: 24px;
+  cursor: grab;
+}
 .dash-grip {
-  font-size: var(--fs-meta);
   color: var(--text-helper);
-  letter-spacing: -2px;
 }
 
 .dash-widget-title {
@@ -2196,6 +2283,39 @@ body.theme-dark .modal-panel {
 .reader-wrap:has(.reader-scroll-engine) {
   background: var(--reader-bg, var(--paper));
 }
+/* 引擎打开失败的可见错误态（替代此前的"空白正文区 + 静默异常"）。
+   读它的是用户不是开发者，所以按 empty-state 的版面走，不做成红底告警条 ——
+   整屏错误条会把唯一焦点色换成 error，违反「语义色只用于状态提示、不当装饰」。 */
+.reader-engine-error {
+  max-width: 560px;
+  margin: var(--sp-12) auto 0;
+  padding: 0 var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.reader-engine-error-title {
+  margin: 0;
+  font-size: var(--fs-title-s);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.reader-engine-error-msg {
+  margin: 0;
+  font-size: var(--fs-secondary);
+  line-height: 1.6;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.reader-engine-error-actions { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+.reader-engine-error-hint {
+  margin: 0;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-helper);
+}
+
 .reader-engine-host {
   position: absolute;
   inset: 0;
@@ -3683,7 +3803,7 @@ body.capture-body #root { height: 100vh; }
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 22px;
+  height: var(--sp-6); /* 24px：原 22px 既不在 8px 网格上，也低于 WCAG 2.2 的 24×24 最小目标 */
   max-width: 240px;
   padding: 0 var(--sp-2);
   background: var(--paper);

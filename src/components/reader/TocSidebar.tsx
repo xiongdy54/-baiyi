@@ -1,6 +1,7 @@
 // 目录侧栏（v20）：共享壳层组件——数据可来自引擎 book.toc，未来摘录/粘贴书同构。
 // 瑞士风：paper 底 + hairline 右缘 + 直角 + 层级缩进 + 当前项 accent 左条。
 import type { ReaderTocItem } from "../../lib/reader/service";
+import { IconClose } from "../icons";
 
 interface FlatItem {
   item: ReaderTocItem;
@@ -26,14 +27,11 @@ interface Props {
 export default function TocSidebar({ items, activeHref, onNavigate, onClose }: Props) {
   const flat = flatten(items);
   return (
-    <div className="reader-toc">
+    <nav className="reader-toc" aria-label="本书目录">
       <div className="reader-toc-head">
         <span className="reader-toc-title">目录</span>
-        <button className="icon-btn" title="关闭目录" onClick={onClose}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
+        <button className="icon-btn" title="关闭目录" aria-label="关闭目录" onClick={onClose}>
+          <IconClose />
         </button>
       </div>
       <div className="reader-toc-list">
@@ -45,11 +43,12 @@ export default function TocSidebar({ items, activeHref, onNavigate, onClose }: P
             style={{ paddingLeft: `calc(var(--sp-3) + ${level} * var(--sp-4))` }}
             onClick={() => onNavigate(item)}
             title={item.label}
+            aria-current={item.href && item.href === activeHref ? "location" : undefined}
           >
             {item.label || "(无标题)"}
           </button>
         ))}
       </div>
-    </div>
+    </nav>
   );
 }
