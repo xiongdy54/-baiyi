@@ -1,0 +1,3 @@
+# 长跑产物不入库（soak.log / history.jsonl / failures/ 每轮都在长），
+# 结论文档在 docs/test-flows/，需要留证据时从那里引用。
+results/
