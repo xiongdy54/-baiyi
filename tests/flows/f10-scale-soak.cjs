@@ -24,7 +24,7 @@ const flow = new Flow({
   id: "F10",
   title: "规模、长稳与性能棘轮",
   angle: "时间和体量维度（退化只能靠闸门发现）",
-  cites: ["§7.1.8", "§9.1 M15 v48.10", "§4.2-20", "§7.2", "§6.4"],
+  cites: ["§7.1.8", "§9.1 M15 v48.10", "§4.2-20", "§7.2", "§6.4", "§4.4.8"],
   tier: 3,
   gui: false,
 });
@@ -203,6 +203,18 @@ app
       flow.record("本轮结束库体积", `${kb} KB / ${nCards} 卡`);
       fs.writeFileSync(BASELINE_FILE, JSON.stringify(nb, null, 2), "utf8");
       flow.check("库体积在合理范围（sql.js 全量回写的上限预警）", kb < 120000, "<120000 KB", kb);
+
+      // ---------- H6 压力写盘后的磁盘形状（§4.4.8 原子写，与 F04 不同角度） ----------
+      flow.section("H6 连写六轮后不留临时文件，主库只有一个真源（§4.4.8 tmp+fsync+rename）");
+      for (let i = 0; i < 6; i++) db.persistNow();
+      const leftovers = fs.readdirSync(dir).filter((n) => /\.tmp$|\.bak$|~$|\.swp$/.test(n));
+      flow.check("userData 根目录不留临时/备份文件（半截写入会被下次启动读到）", leftovers.length === 0, "无残留", leftovers);
+      const dbFiles = fs.readdirSync(dir).filter((n) => /^library\.db/.test(n)).sort();
+      flow.eq("主库只有一个文件真源", dbFiles.join(","), "library.db");
+      const aud6 = await audit(dbFile);
+      flow.check("连写六轮后仍可只读打开且表数不变", aud6.tables().length > 20, ">20 张表", aud6.tables().length);
+      flow.eq("连写六轮不改变行数（只重写文件）", aud6.count("cards"), nCards);
+      aud6.close();
     });
 
     quit(s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length > 0 ? 1 : 0);

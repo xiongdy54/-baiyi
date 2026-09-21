@@ -21,7 +21,7 @@ const flow = new Flow({
   id: "F14",
   title: "三十天使用史演进",
   angle: "长期维度：饥饿、爆仓、leech 联动、撤销不污染后续",
-  cites: ["§4.2-20", "§4.16", "§6.2", "§4.4.9", "§6.3.6"],
+  cites: ["§4.2-20", "§4.16", "§6.2", "§4.4.9", "§6.3.6", "§4.12", "§4.4.4"],
   tier: 3,
   gui: false,
 });
@@ -193,6 +193,17 @@ app
       flow.eq("重启后卡数不变", a6.count("cards"), N_CARDS);
       flow.record("重启后统计", JSON.stringify(db2.getStatsOverview().kpi).slice(0, 160));
       flow.check("重启后仍可撤销（跨进程账本完好）", Boolean(db2.getLastUndoableReview()), true);
+
+      // ---------- G7 跨口径复核：热力图的日界必须整齐（与 F12 不同角度，§4.12-4 / §4.4.4） ----------
+      flow.section("G7 热力图日界必须整齐划一（§4.12-4 自然日 / §4.4.4 复习记录）");
+      const heat = db2.getStatsOverview().heatDays || [];
+      flow.check("热力图天数在合理窗口", heat.length >= 30 && heat.length <= 400, "30–400 天", `${heat.length} 天`);
+      const deltas = [...new Set(heat.slice(1).map((d, i) => d.date - heat[i].date))];
+      flow.eq("相邻日桶间隔恒为一天（不得有 23/25 小时的漂移桶）", deltas.join(","), "86400000");
+      const hours = [...new Set(heat.map((d) => new Date(d.date).getHours()))];
+      flow.eq("所有日桶都落在同一小时（日切点全局统一）", hours.join(","), String(new Date(heat[0].date).getHours()));
+      flow.check("不得出现未来日期的日桶", heat.every((d) => d.date <= Date.now() + 1000), "全部为过去或今天", heat.filter((d) => d.date > Date.now() + 1000).map((d) => d.date));
+      flow.record("热力图计数合计 / 磁盘日志行数", `${heat.reduce((a, d) => a + (d.count || 0), 0)} / ${(await audit(dbFile)).count("review_logs")}（窗口不同，只作对照）`);
     });
 
     quit(s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length > 0 ? 1 : 0);

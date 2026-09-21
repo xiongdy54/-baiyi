@@ -200,7 +200,10 @@ function clip(v, n = 240) {
 // 后者会被其他会话/脚本按通配清理（实测发生过），长跑期间被删就是假失败。
 const os = require("os");
 function tmpUserDataDir(label) {
-  return path.join(os.tmpdir(), "incremental-reading-flows", `flow-${label}-userdata`);
+  // FLOW_INSTANCE 让手工调试与长跑各用各的沙箱：同一 label 的两个进程共用目录时，
+  // 后起的一方 freshDir() 会把前一方正在写的库抹掉，制造出与产品无关的假失败（实测踩过）。
+  const inst = String(process.env.FLOW_INSTANCE || "").replace(/[^A-Za-z0-9_-]/g, "");
+  return path.join(os.tmpdir(), "incremental-reading-flows", `flow-${label}${inst ? "-" + inst : ""}-userdata`);
 }
 
 function freshDir(p) {
