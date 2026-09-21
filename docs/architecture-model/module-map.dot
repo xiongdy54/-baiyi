@@ -1,0 +1,207 @@
+// ============================================================================
+// 增量阅读 · 主进程耦合与写入归属稠密图（Graphviz DOT）
+// ----------------------------------------------------------------------------
+// 回答的问题：改哪个文件会牵到谁？谁有权写哪一组表？哪些关系只存在于契约里？
+// 为什么不用 C4：C4 组件视图按容器分组，无法同时表达「依赖汇聚点」与
+//              「写入归属」两层信息；这里用稠密有向图 + 度量属性表达。
+// 生产方式：architecture-visualization:system-modeler（+ graphviz 格式约定）
+// 状态：current-state @ 780ea84 / 2026-09-21；行号证据见 system-model.evidence.md
+// 渲染：本机无 graphviz（`command -v dot` 未命中）。用 Qoder 的 DOT 查看器，
+//       或 `dot -Tsvg module-map.dot -o module-map.svg`
+// 布局：rankdir=TB（稠密图纵向展开，避免超宽横向条带）
+// 图例：实线=运行期 require ｜ 点线=构建期打包 ｜ 虚线橙=契约/未接线
+//       粗红=全量回写落盘 ｜ 蓝=写入归属（模块 → 表组）｜ 灰=跨层读
+// ============================================================================
+
+digraph module_map {
+
+  // ---------- 全局排版 ----------
+  rankdir=TB;
+  splines=ortho;
+  nodesep=0.34;
+  ranksep=0.62;
+  fontname="Helvetica Neue, Helvetica, Microsoft YaHei, sans-serif";
+  labelloc="t";
+  label=<<b>增量阅读 · 主进程耦合与写入归属</b><br/><font point-size="11">current-state @ 780ea84 (2026-09-21) · 实线=运行期 require · 蓝=写入归属 · 虚线橙=契约存在但生产未接线 · 粗红=sql.js 全量回写</font>>;
+
+  node [shape=box, style="rounded,filled", fontname="Helvetica Neue, Microsoft YaHei, sans-serif", fontsize=11, color="#2b2b2b", fillcolor="#f4f4f1", margin="0.16,0.09"];
+  edge [fontname="Helvetica Neue, Microsoft YaHei, sans-serif", fontsize=9, color="#6b6b6b", fontcolor="#3a3a3a"];
+
+  // ======================================================================
+  // 簇 1：主进程模块（标注 LOC；边为 require 方向）
+  // ======================================================================
+  subgraph cluster_main {
+    label=<<b>electron/ 主进程</b> <font point-size="9">nodeIntegration 关闭 · 唯一可触达 fs 与 SQLite 的进程</font>>;
+    style=rounded; color="#bdbdbd"; fontcolor="#3a3a3a"; fontsize=12; labelloc="t";
+
+    main_js        [label=<<b>main.js</b><br/>1377 · 159 ipcMain.handle<br/>24 通道前缀 · 窗口 · 协议>, fillcolor="#d8cfa8"];
+    db_js          [label=<<b>db.js（仓储层）</b><br/><b>4650</b> · 27 表 · persist() 64 处<br/><i>依赖汇聚点：7 个叶子</i>>, fillcolor="#3d5a3e", fontcolor="#ffffff", penwidth=3.2, color="#b04a2f"];
+    ai_js          [label=<<b>ai.js</b><br/>464 · 唯一 LLM 出口<br/>safeStorage 凭据>, fillcolor="#6b4a7a", fontcolor="#ffffff"];
+    prompts_js     [label=<<b>prompts.js</b><br/>1016>, fillcolor="#eef0ee"];
+    kp_norm        [label=<<b>kpNorm.js</b><br/>归一/聚类键/幂等指纹<br/><i>生产已接线</i>>, fillcolor="#eef0ee"];
+    kp_scopes      [label=<<b>kpScopes.js</b><br/>414 出层契约校验<br/><b>生产 require 扇入 = 0</b>>, shape=box, style="rounded,filled,dashed", penwidth=2.4, color="#c8963c", fillcolor="#ffffff"];
+    fsrs_cfg       [label=<<b>fsrsConfig.js</b><br/>权重须逐位对齐>, fillcolor="#2f5d7a", fontcolor="#ffffff"];
+    fsrs_time      [label=<<b>fsrsTime.js</b><br/>ts-fsrs 时间语义手工复刻<br/><i>绝不 import ts-fsrs</i>>, fillcolor="#2f5d7a", fontcolor="#ffffff"];
+    optimizer_js   [label=<<b>optimizer.js</b><br/>137 · fsrs-rs-nodejs>, fillcolor="#2f5d7a", fontcolor="#ffffff"];
+    mind_engine    [label=<<b>mindmapEngine.js</b><br/><b>3133</b> · material_map_* 唯一作者>, fillcolor="#6b4a7a", fontcolor="#ffffff"];
+    mind_core      [label=<<b>mindmapCore.js</b><br/>1094 · 纯函数叶子<br/><i>main-only（.d.ts 称渲染层可用，实为 0 命中）</i>>, fillcolor="#eef0ee", style="rounded,filled,dashed", color="#c8963c"];
+    mem_store      [label=<<b>memoryStore.js</b><br/>420 · 文件真源>, fillcolor="#4a4f55", fontcolor="#ffffff"];
+    mem_tidy       [label=<memoryTidy.js>, fillcolor="#4a4f55", fontcolor="#ffffff"];
+    mem_retr       [label=<memoryRetrieve.js>, fillcolor="#4a4f55", fontcolor="#ffffff"];
+    importers_js   [label=<<b>importers.js</b><br/>385>, fillcolor="#eef0ee"];
+    backup_js      [label=<<b>backup.js</b><br/>366 · 重启时换入>, fillcolor="#eef0ee"];
+    quickcap_js    [label=<<b>quickCapture.js</b><br/>400 · db 经 ctx 注入<br/><i>deferPersist 节流破例</i>>, fillcolor="#d8cfa8"];
+    dict_store     [label=<<b>dictStore.js</b><br/>496 · 下载+建索引>, fillcolor="#eef0ee"];
+    dict_db        [label=<dictDb.js>, fillcolor="#3d5a3e", fontcolor="#ffffff"];
+    settings_store [label=<<b>settingsStore.js</b><br/>21 · <i>与 main.js 内联实现并存</i>>, style="rounded,filled,dashed", color="#c8963c", fillcolor="#ffffff"];
+    journal_time   [label=<journalTime.js>, fillcolor="#eef0ee"];
+    udc_js         [label=<udc.js<br/>97>, fillcolor="#eef0ee"];
+  }
+
+  // ---------- 运行期 require（实测扇入见 evidence §1.1）----------
+  main_js -> db_js        [label="require", penwidth=2.2];
+  main_js -> ai_js;
+  main_js -> optimizer_js;
+  main_js -> mind_engine  [penwidth=2.2];
+  main_js -> mem_store;
+  main_js -> mem_tidy;
+  main_js -> mem_retr;
+  main_js -> importers_js;
+  main_js -> backup_js;
+  main_js -> quickcap_js  [label="init(ctx) 注入", style=dashed];
+  main_js -> dict_store;
+  main_js -> dict_db;
+  main_js -> journal_time;
+
+  mind_engine -> mind_core [label="require", penwidth=2.2];
+  mind_engine -> ai_js     [label="第 2 个调用方", color="#6b4a7a", fontcolor="#6b4a7a", penwidth=2.2];
+
+  // db.js 是「依赖汇聚点」：7 个叶子被它吸入
+  db_js -> prompts_js     [color="#3d5a3e"];
+  db_js -> kp_norm        [color="#3d5a3e", penwidth=2.2];
+  db_js -> settings_store [color="#c8963c", style=dashed, label="第二份实现？"];
+  db_js -> udc_js         [color="#3d5a3e"];
+  db_js -> fsrs_cfg       [color="#3d5a3e", penwidth=2.2];
+  db_js -> fsrs_time      [color="#3d5a3e", penwidth=2.2];
+  db_js -> journal_time   [color="#3d5a3e"];
+
+  optimizer_js -> fsrs_cfg [color="#2f5d7a"];
+  optimizer_js -> fsrs_time[color="#2f5d7a"];
+  mem_tidy -> mem_store;
+
+  // ======================================================================
+  // 簇 2：数据真源与写入归属
+  // ======================================================================
+  subgraph cluster_data {
+    label=<<b>数据真源</b> <font point-size="9">每组只有一个作者 · 蓝边=写入归属</font>>;
+    style=rounded; color="#bdbdbd"; fontcolor="#3a3a3a"; fontsize=12;
+
+    t_core [label=<<b>材料与阅读</b><br/>library_items · documents<br/>assets · extracts>, shape=cylinder, fillcolor="#e8efe9"];
+    t_card [label=<<b>卡片与复习</b><br/>cards · card_issues · ai_gen_batches<br/>review_logs<i>(append-only 事实)</i><br/>review_skips · reading_events · fsrs_configs>, shape=cylinder, fillcolor="#e8efe9", penwidth=2];
+    t_know [label=<<b>知识层</b><br/>knowledge_points <i>active|merged|deprecated</i><br/>knowledge_relations · _external_refs<br/>knowledge_proposals <i>(AI 提案区)</i>>, shape=cylinder, fillcolor="#e8efe9"];
+    t_derive [label=<<b>派生与推荐</b><br/>insight_runs<br/>personal_meaning_candidates<br/>memory_runs>, shape=cylinder, fillcolor="#e8efe9"];
+    t_map [label=<<b>导图</b><br/>material_maps · _shards<br/>_runs · _calls>, shape=cylinder, fillcolor="#efe9f2", penwidth=2.6, color="#b04a2f"];
+    t_journal [label=<<b>日记</b><br/>journal_entries<br/>+ dict_sources · dictionary_cache · users>, shape=cylinder, fillcolor="#e8efe9"];
+    dictdb [label=<<b>dictionary.db</b><br/>dict_entries<br/><i>故意分库：340 万行会拖垮全量回写</i>>, shape=cylinder, fillcolor="#e8efe9", penwidth=2];
+    files [label=<<b>userData 文件树</b><br/>settings.json · ai-config.json<br/>assets/ · <b>memory/（非 DB 真源）</b><br/>backups/ · dicts/ · restore-staging>, shape=folder, fillcolor="#4a4f55", fontcolor="#ffffff"];
+    libdb_file [label=<<b>library.db 文件</b><br/><i>sql.js 内存库 + 全量回写</i><br/>tmp → fsync → rename>, shape=note, fillcolor="#b04a2f", fontcolor="#ffffff", penwidth=2.6];
+  }
+
+  db_js -> t_core   [color="#2f5d7a", label="写"];
+  db_js -> t_card   [color="#2f5d7a", label="写", penwidth=2.2];
+  db_js -> t_know   [color="#2f5d7a", label="写"];
+  db_js -> t_derive [color="#2f5d7a", label="写"];
+  db_js -> t_journal[color="#2f5d7a", label="写"];
+  db_js -> libdb_file [label="persist() 全量导出\n64 处调用全在本文件", color="#b04a2f", fontcolor="#b04a2f", penwidth=4];
+
+  mind_engine -> t_map [color="#2f5d7a", label="唯一作者", penwidth=2.6];
+  quickcap_js -> t_journal [color="#2f5d7a", label="经 ctx.db 写\ndeferPersist", style=dashed];
+  dict_store -> dictdb [color="#2f5d7a", label="写"];
+  dict_db   -> dictdb [color="#2f5d7a"];
+  mem_store -> files  [color="#2f5d7a", label="memory/ 唯一作者", penwidth=2.2];
+  settings_store -> files [color="#2f5d7a"];
+  main_js -> files [color="#2f5d7a", label="settings.json / ai-config.json"];
+  backup_js -> libdb_file [color="#b04a2f", style=dashed, label="打包 / 重启时换入\n（运行期禁止直接换文件）"];
+  optimizer_js -> t_card [color="#2f5d7a", label="产 fsrs_configs 不可变快照"];
+
+  // ======================================================================
+  // 簇 3：渲染层与跨进程面（本图只画到边界，细节见 C4 L3-renderer）
+  // ======================================================================
+  subgraph cluster_renderer {
+    label=<<b>渲染层（无出网 · 无 fs · 无 require）</b>>;
+    style=rounded; color="#bdbdbd"; fontcolor="#3a3a3a"; fontsize=12;
+
+    preload_js [label=<<b>preload.js</b><br/>309 · 23 个 window.*API 命名空间<br/><i>跨进程唯一入口</i>>, fillcolor="#d8cfa8", penwidth=2.6, color="#b04a2f"];
+    ts_fsrs    [label=<<b>src/lib/fsrs.ts</b><br/>运行时唯一 import ts-fsrs<br/><i>调度在渲染进程跑</i>>, fillcolor="#2f5d7a", fontcolor="#ffffff"];
+    cards_ts   [label=<<b>src/lib/cards.ts</b><br/>1149 制卡/质检>, fillcolor="#5a6b7a", fontcolor="#ffffff"];
+    foliate_acl[label=<<b>src/lib/reader/foliate/**</b><br/>全仓唯一可 import vendor/foliate-js>, fillcolor="#7a6a4a", fontcolor="#ffffff"];
+    mind_ts    [label=<<b>src/lib/mindmap/*</b><br/>渲染层确定性布局 + 出图<br/><i>不经主进程</i>>, fillcolor="#5a6b7a", fontcolor="#ffffff"];
+  }
+  preload_js -> main_js [label="159 invoke", color="#b04a2f", penwidth=3.2, dir=both, arrowtail=normal, arrowhead=normal];
+  ts_fsrs  -> db_js     [label="fsrs:* IPC 落库\n（写仍在主进程）", color="#2f5d7a", style=dashed];
+  ts_fsrs  -> fsrs_time [label="时间语义须与复刻版一致\nS7 / L6-A 断言把关", color="#c8963c", style=dotted, penwidth=2.2];
+  ts_fsrs  -> fsrs_cfg  [label="权重逐位对齐", color="#c8963c", style=dotted, penwidth=2.2];
+
+  // ======================================================================
+  // 簇 4：外部依赖
+  // ======================================================================
+  llm [label=<<b>AI 网关</b><br/>OpenAI 兼容 /chat/completions<br/>SSE · 含本机 Ollama>, shape=component, fillcolor="#b8b2a7"];
+  search [label=<<b>搜索</b><br/>Bing/DDG/Baidu 结果页抓取>, shape=component, fillcolor="#b8b2a7"];
+  dictdl [label=<<b>词典源</b><br/>url + mirror>, shape=component, fillcolor="#b8b2a7"];
+
+  ai_js  -> llm    [color="#6b4a7a", fontcolor="#6b4a7a", label="HTTPS", penwidth=2.6];
+  main_js -> search [color="#7a7a7a", style=dashed, label="net.fetch 之一"];
+  dict_store -> dictdl [color="#7a7a7a", style=dashed, label="net.fetch 之一"];
+
+  // ======================================================================
+  // 簇 5：提示词测试台（独立程序，构建期复用 + 数据隔离）
+  // ======================================================================
+  subgraph cluster_lab {
+    label=<<b>prompt-lab/  独立 Electron 应用（不随产品发布）</b> <font point-size="9">独立 userData %APPDATA%/prompt-lab · 9 个 lab:* 通道 · 对 library.db 零引用</font>>;
+    style=rounded; color="#8a8a8a"; fontcolor="#3a3a3a"; fontsize=12; penwidth=1.6;
+
+    lab_main [label=<<b>prompt-lab/main.js</b><br/>222>, fillcolor="#6b6b6b", fontcolor="#ffffff"];
+    lab_ui   [label=<<b>renderer/app.js</b><br/>764 原生 JS（非 React）>, fillcolor="#6b6b6b", fontcolor="#ffffff"];
+    lab_vendor [label=<<b>prompt-lab/vendor/kpScopes.js</b><br/>443 · <i>已提交的 esbuild 产物</i><br/>缺产物有守卫，陈旧无守卫>, shape=note, style="filled,dashed", color="#c8963c", fillcolor="#fffaf0"];
+  }
+  lab_main -> ai_js      [color="#c8963c", style=dotted, label="构建期 require ../electron/ai"];
+  lab_main -> prompts_js [color="#c8963c", style=dotted, label="require ../electron/prompts"];
+  lab_vendor -> kp_scopes[color="#c8963c", style=dotted, penwidth=2.6, label="esbuild 打包\nkpScopes 的<b>真实消费方在这里</b>"];
+  lab_ui -> lab_vendor   [color="#c8963c", style=dotted, label="<script> 引入"];
+  lab_ui -> lab_main     [color="#d8cfa8"];
+  lab_main -> llm        [color="#6b4a7a", style=dashed, label="实测调用"];
+
+  // ======================================================================
+  // 契约未接线：kpScopes 在生产侧孤立
+  // ======================================================================
+  db_js -> kp_scopes [color="#c8963c", style=dotted, penwidth=2.6, label="仅注释：\"本批只定契约\"\n(db.js:1709)"];
+
+  // 注释里宣称的共用（实际未接线）
+  mind_core -> kp_scopes [color="#c8963c", style=dotted, label="mindmapCore.js:2 注释称\n\"三方共用单一真源\""];
+
+  // ======================================================================
+  // 图例
+  // ======================================================================
+  subgraph cluster_legend {
+    label=<<b>图例 / 未知项</b>>;
+    style=rounded; color="#e0e0e0"; fontcolor="#3a3a3a"; fontsize=11; penwidth=1;
+
+    lg [shape=plain, label=<<table border="0" cellspacing="4" cellpadding="0">
+      <tr><td align="left"><font face="monospace">——</font> 实线：运行期 require / 调用</td></tr>
+      <tr><td align="left"><font face="monospace">╌╌</font> 虚线：注入 / 惰性 / 打包产物 / 非运行期</td></tr>
+      <tr><td align="left"><font face="monospace">┄┄</font> 点线橙：契约存在但生产未接线（唯一此类节点：kpScopes）</td></tr>
+      <tr><td align="left"><font color="#b04a2f">粗红</font>：全量回写与写边界 ｜ <font color="#2f5d7a">蓝</font>：写入归属</td></tr>
+      <tr><td align="left"> </td></tr>
+      <tr><td align="left"><b>度量结论（非猜测，见 evidence §1.1）</b></td></tr>
+      <tr><td align="left">db.js 扇入=1（只被 main 引），但它吸入 7 个叶子 → 依赖汇聚点</td></tr>
+      <tr><td align="left">高扇入：ai.js=2（main + 导图引擎）、fsrsConfig/fsrsTime/journalTime=2</td></tr>
+      <tr><td align="left">material_map_* 只有一个作者：mindmapEngine</td></tr>
+      <tr><td align="left"> </td></tr>
+      <tr><td align="left"><b>本图不回答</b>（越界，属其他 scene skill）</td></tr>
+      <tr><td align="left">质量风险 / 技术债评级 → risk-quality-reviewer</td></tr>
+      <tr><td align="left">改动影响面清单 → dependency-impact-analyzer</td></tr>
+      <tr><td align="left">端到端业务流程 → flow-visualizer</td></tr>
+      <tr><td align="left">演进与迁移顺序 → evolution-planner</td></tr>
+    </table>>];
+  }
+}

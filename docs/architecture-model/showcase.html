@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>结构主线：谁能写库、谁能出网</title>
+<style>
+  html { background: #fafaf8; }
+  body { margin:0; padding:56px 48px 40px; background:#fafaf8; color:#0a0a0a;
+         font-family:"Inter","Helvetica Neue","Segoe UI Variable","Segoe UI","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1360px; margin:0 auto; }
+  .eyebrow { font-family:"JetBrains Mono","Cascadia Code","Consolas",ui-monospace,monospace; font-size:8px; letter-spacing:.18em; text-transform:uppercase;
+              color:#737373; margin:0 0 12px; }
+  h1 { font-size:28px; font-weight:600; letter-spacing:-.01em; margin:0 0 10px; }
+  .sub { font-size:12px; color:#737373; margin:0 0 32px; line-height:1.7; }
+  .figure { margin:0 0 40px; }
+  .cards { display:flex; gap:24px; margin:0 0 32px; }
+  .card { background:#fff; border:1px solid rgba(10,10,10,0.12); border-radius:6px; padding:20px; }
+  .card .eyebrow { margin-bottom:8px; }
+  .card h3 { font-size:16px; font-weight:600; margin:0 0 12px; }
+  .card ul { margin:0; padding-left:18px; }
+  .card li { font-size:12px; color:#525252; line-height:1.75; }
+  .card code { font-family:"JetBrains Mono","Cascadia Code","Consolas",ui-monospace,monospace; font-size:11px; }
+  footer { border-top:1px solid rgba(10,10,10,0.10); padding-top:16px; font-family:"JetBrains Mono","Cascadia Code","Consolas",ui-monospace,monospace; font-size:8px;
+            letter-spacing:.06em; color:#737373; line-height:1.9; }
+</style></head>
+<body><div class="wrap">
+  <p class="eyebrow">INCREMENTAL READING · 结构主线</p>
+  <h1>结构主线：谁能写库、谁能出网</h1>
+  <p class="sub">四道泳道一条纪律：渲染层拿不到文件与网络，写入收在 db.js 一处，出网收在主进程三处。蓝框＝产品运行时，灰框＝不随产品发布的工具，虚线＝契约存在但生产未接线。</p>
+
+  <div class="figure"><svg viewBox="0 0 1360 792" width="100%" role="img" aria-labelledby="t-d" xmlns="http://www.w3.org/2000/svg">
+  <title id="t-d">增量阅读当前态容器视图：进程边界、写入归属与网络出口</title>
+  <defs>
+    <marker id="md" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#525252"/></marker>
+    <marker id="ma" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#002FA7"/></marker>
+    <marker id="mr" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#B04A2F"/></marker>
+    <marker id="mg" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#9A9A9A"/></marker>
+  </defs>
+  <rect width="1360" height="792" fill="#fafaf8"/>
+
+  <!-- ==================== 泳道底线与标签 ==================== -->
+  <text x="48" y="42" fill="#737373" font-size="8" font-family="'JetBrains Mono',ui-monospace,monospace" letter-spacing="0.14em">LANE A · 渲染进程（无 fs · 无 net · 无 require）</text>
+  <line x1="48" y1="196" x2="1312" y2="196" stroke="rgba(10,10,10,0.10)" stroke-width="0.8"/>
+  <text x="48" y="238" fill="#737373" font-size="8" font-family="'JetBrains Mono',ui-monospace,monospace" letter-spacing="0.14em">LANE B · 主进程（唯一可触达文件与网络）</text>
+  <line x1="48" y1="440" x2="1312" y2="440" stroke="rgba(10,10,10,0.10)" stroke-width="0.8"/>
+  <text x="48" y="482" fill="#737373" font-size="8" font-family="'JetBrains Mono',ui-monospace,monospace" letter-spacing="0.14em">LANE C · 数据真源（每组一个作者）</text>
+  <line x1="48" y1="624" x2="1312" y2="624" stroke="rgba(10,10,10,0.10)" stroke-width="0.8"/>
+  <text x="48" y="666" fill="#737373" font-size="8" font-family="'JetBrains Mono',ui-monospace,monospace" letter-spacing="0.14em">LANE D · 外部依赖（三条，全部可选、可失败）</text>
+
+  <!-- ==================== LANE A ==================== -->
+  <!-- 主窗口渲染进程 -->
+  <rect x="48" y="60" width="392" height="116" rx="6" fill="#ffffff" stroke="#0a0a0a" stroke-width="1"/>
+  <text x="64" y="82" fill="#0a0a0a" font-size="16" font-weight="600">主窗口渲染进程</text>
+  <text x="64" y="102" fill="#737373" font-size="12" font-family="'JetBrains Mono',ui-monospace,monospace">index.html → src/main.tsx</text>
+  <text x="64" y="122" fill="#525252" font-size="12">React 18 · 无路由库：App.tsx 判别联合切视图</text>
+  <text x="64" y="142" fill="#525252" font-size="12">FSRS 调度在此进程内跑（ts-fsrs 唯一入口）</text>
+  <text x="64" y="162" fill="#525252" font-size="12">导图布局与出图也在渲染层，不经主进程</text>
+
+  <!-- 捕捉窗 -->
+  <rect x="464" y="60" width="330" height="116" rx="6" fill="#ffffff" stroke="#0a0a0a" stroke-width="1"/>
+  <text x="480" y="82" fill="#0a0a0a" font-size="16" font-weight="600">捕捉窗渲染进程</text>
+  <text x="480" y="102" fill="#737373" font-size="12" font-family="'JetBrains Mono',ui-monospace,monospace">capture.html → src/capture.tsx</text>
+  <text x="480" y="122" fill="#525252" font-size="12">560×380 · frameless · blur 即隐藏</text>
+  <text x="480" y="142" fill="#002FA7" font-size="12">最小权限：只给只读设置 + 日记草稿协议</text>
+  <text x="480" y="162" fill="#525252" font-size="12">拿不到 cards / library / ai / knowledge</text>
+
+  <!-- prompt-lab -->
+  <rect x="818" y="60" width="284" height="116" rx="6" fill="rgba(82,82,82,0.10)" stroke="#737373" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="834" y="82" fill="#0a0a0a" font-size="16" font-weight="600">提示词测试台</text>
+  <text x="834" y="102" fill="#737373" font-size="12" font-family="'JetBrains Mono',ui-monospace,monospace">prompt-lab/ · 独立 Electron 应用</text>
+  <text x="834" y="122" fill="#525252" font-size="12">不随产品发布 · 独立 userData</text>
+  <text x="834" y="142" fill="#525252" font-size="12">9 个 lab:* 通道 · 原生 JS 界面</text>
+  <text x="834" y="162" fill="#525252" font-size="12">对 library.db 零引用</text>
+
+  <!-- userData of lab note -->
+  <rect x="1126" y="60" width="186" height="116" rx="6" fill="rgba(10,10,10,0.05)" stroke="#525252" stroke-width="1"/>
+  <text x="1142" y="82" fill="#0a0a0a" font-size="13" font-weight="600">隔离的数据</text>
+  <text x="1142" y="104" fill="#525252" font-size="12">%APPDATA%/</text>
+  <text x="1142" y="120" fill="#525252" font-size="12">prompt-lab/</text>
+  <text x="1142" y="142" fill="#525252" font-size="12">prompts.local.json</text>
+  <text x="1142" y="162" fill="#737373" font-size="11">AI Key 需在此另配一次</text>
+
+  <!-- ==================== LANE B ==================== -->
+  <!-- preload 桥 -->
+  <rect x="48" y="256" width="392" height="76" rx="6" fill="rgba(0,47,167,0.07)" stroke="#002FA7" stroke-width="1"/>
+  <text x="64" y="280" fill="#0a0a0a" font-size="16" font-weight="600">跨进程唯一入口 · preload 桥</text>
+  <text x="64" y="302" fill="#002FA7" font-size="12" font-family="'JetBrains Mono',ui-monospace,monospace">23 个 window.*API 命名空间</text>
+  <text x="64" y="322" fill="#002FA7" font-size="12" font-family="'JetBrains Mono',ui-monospace,monospace">159 个 ipcMain.handle · 24 通道前缀</text>
+
+  <!-- db.js -->
+  <rect x="464" y="256" width="280" height="146" rx="6" fill="#ffffff" stroke="#B04A2F" stroke-width="2.2"/>
+  <text x="480" y="280" fill="#0a0a0a" font-size="16" font-weight="600">db.js 仓储层</text>
+  <text x="480" y="300" fill="#B04A2F" font-size="12" font-family="'JetBrains Mono',ui-monospace,monospace">4650 行 · 27 表</text>
+  <text x="480" y="322" fill="#525252" font-size="12">persist() 64 处调用全在本文件</text>
+  <text x="480" y="340" fill="#525252" font-size="12">tmp → fsync → 原子 rename</text>
+  <text x="480" y="362" fill="#002FA7" font-size="12">唯一写入口；业务码不得绕过</text>
+  <text x="480" y="382" fill="#737373" font-size="11">它吸入 7 个叶子 → 依赖汇聚点</text>
+
+  <!-- ai.js -->
+  <rect x="768" y="256" width="240" height="106" rx="6" fill="rgba(0,47,167,0.07)" stroke="#002FA7" stroke-width="1"/>
+  <text x="784" y="280" fill="#0a0a0a" font-size="16" font-weight="600">ai.js</text>
+  <text x="784" y="300" fill="#002FA7" font-size="12">全应用唯一 LLM 出口</text>
+  <text x="784" y="320" fill="#525252" font-size="12">chat/completions + SSE</text>
+  <text x="784" y="340" fill="#525252" font-size="12">safeStorage 加密凭据</text>
+  <text x="784" y="356" fill="#737373" font-size="11">第 2 调用方＝导图引擎</text>
+
+  <!-- mindmapEngine -->
+  <rect x="1032" y="256" width="280" height="106" rx="6" fill="#ffffff" stroke="#0a0a0a" stroke-width="1"/>
+  <text x="1048" y="280" fill="#0a0a0a" font-size="16" font-weight="600">mindmapEngine + Core</text>
+  <text x="1048" y="300" fill="#737373" font-size="12" font-family="'JetBrains Mono',ui-monospace,monospace">3133 + 1094 行</text>
+  <text x="1048" y="322" fill="#525252" font-size="12">AI 分层生成 / 加深 / 修复 / 取消</text>
+  <text x="1048" y="342" fill="#002FA7" font-size="12">material_map_* 四表唯一作者</text>
+
+  <!-- quickCapture service -->
+  <rect x="768" y="386" width="240" height="46" rx="6" fill="rgba(10,10,10,0.05)" stroke="#525252" stroke-width="1"/>
+  <text x="784" y="406" fill="#0a0a0a" font-size="12" font-weight="600">quickCapture.js · 400</text>
+  <text x="784" y="424" fill="#525252" font-size="11">db 经 ctx 注入 · deferPersist 节流</text>
+
+  <rect x="1032" y="386" width="280" height="46" rx="6" fill="rgba(10,10,10,0.05)" stroke="#525252" stroke-width="1"/>
+  <text x="1048" y="406" fill="#0a0a0a" font-size="12" font-weight="600">optimizer · dictStore · memoryStore …</text>
+  <text x="1048" y="424" fill="#525252" font-size="11">fsrs-rs-nodejs 优化 ｜ 独立词库 ｜ memory/ 文件真源</text>
+
+  <!-- ==================== LANE C ==================== -->
+  <rect x="48" y="500" width="286" height="112" rx="6" fill="#ffffff" stroke="#0a0a0a" stroke-width="1"/>
+  <text x="64" y="524" fill="#0a0a0a" font-size="15" font-weight="600">library.db</text>
+  <text x="64" y="544" fill="#737373" font-size="11" font-family="'JetBrains Mono',ui-monospace,monospace">sql.js（WASM）· 27 表</text>
+  <text x="64" y="566" fill="#B04A2F" font-size="12">内存库 + 全量回写</text>
+  <text x="64" y="584" fill="#525252" font-size="11">运行期外部改文件会被覆盖</text>
+  <text x="64" y="600" fill="#525252" font-size="11">恢复只在重启时换入</text>
+
+  <rect x="358" y="500" width="216" height="112" rx="6" fill="#ffffff" stroke="#0a0a0a" stroke-width="1"/>
+  <text x="374" y="524" fill="#0a0a0a" font-size="15" font-weight="600">dictionary.db</text>
+  <text x="374" y="544" fill="#737373" font-size="11" font-family="'JetBrains Mono',ui-monospace,monospace">dict_entries</text>
+  <text x="374" y="566" fill="#002FA7" font-size="12">故意分库</text>
+  <text x="374" y="586" fill="#525252" font-size="11">340 万行并入主库会</text>
+  <text x="374" y="602" fill="#525252" font-size="11">拖垮全量回写的复习路径</text>
+
+  <rect x="598" y="500" width="286" height="112" rx="6" fill="rgba(10,10,10,0.05)" stroke="#525252" stroke-width="1"/>
+  <text x="614" y="524" fill="#0a0a0a" font-size="15" font-weight="600">userData 文件树</text>
+  <text x="614" y="544" fill="#737373" font-size="11" font-family="'JetBrains Mono',ui-monospace,monospace">settings.json · assets/ · backups/</text>
+  <text x="614" y="566" fill="#002FA7" font-size="12">memory/ ＝ 非 DB 用户数据真源</text>
+  <text x="614" y="586" fill="#525252" font-size="11">永不整文件重写、永不原地改写</text>
+  <text x="614" y="602" fill="#525252" font-size="11">只看 27 张表会漏掉它</text>
+
+  <rect x="908" y="500" width="404" height="112" rx="6" fill="rgba(154,103,0,0.06)" stroke="#9A6700" stroke-width="1" stroke-dasharray="5,3"/>
+  <text x="924" y="524" fill="#0a0a0a" font-size="15" font-weight="600">表结构预留，但机制不存在</text>
+  <text x="924" y="546" fill="#525252" font-size="12">users 只播种一行 'local-user'</text>
+  <text x="924" y="562" fill="#525252" font-size="12">17 表带 user_id，另有 sync_version / is_deleted</text>
+  <text x="924" y="580" fill="#9A6700" font-size="12">未见任何同步、鉴权或并发写入的调用方</text>
+  <text x="924" y="600" fill="#B04A2F" font-size="12">→ user_id 不是租户边界</text>
+
+  <!-- ==================== LANE D ==================== -->
+  <rect x="48" y="684" width="392" height="72" rx="6" fill="rgba(82,82,82,0.10)" stroke="#737373" stroke-width="1"/>
+  <text x="64" y="708" fill="#0a0a0a" font-size="15" font-weight="600">AI 网关（OpenAI 兼容）</text>
+  <text x="64" y="728" fill="#525252" font-size="11">commandcode.ai ｜ bigmodel.cn ｜ localhost:11434 Ollama ｜ 自定义</text>
+  <text x="64" y="746" fill="#737373" font-size="11">无 Key 时 hasKey:false，功能降级而非报错</text>
+
+  <rect x="464" y="684" width="280" height="72" rx="6" fill="rgba(82,82,82,0.10)" stroke="#737373" stroke-width="1"/>
+  <text x="480" y="708" fill="#0a0a0a" font-size="15" font-weight="600">公网搜索引擎</text>
+  <text x="480" y="728" fill="#525252" font-size="11">Bing / DuckDuckGo / Baidu 结果页抓取</text>
+  <text x="480" y="746" fill="#737373" font-size="11">逐引擎降级，失败不阻断制卡</text>
+
+  <rect x="768" y="684" width="240" height="72" rx="6" fill="rgba(82,82,82,0.10)" stroke="#737373" stroke-width="1"/>
+  <text x="784" y="708" fill="#0a0a0a" font-size="15" font-weight="600">离线词典数据源</text>
+  <text x="784" y="728" fill="#525252" font-size="11">url + mirrorUrl 双源回退</text>
+  <text x="784" y="746" fill="#737373" font-size="11">下载后本地建索引</text>
+
+  <rect x="1032" y="684" width="280" height="72" rx="6" fill="#ffffff" stroke="#002FA7" stroke-width="1"/>
+  <text x="1048" y="708" fill="#0a0a0a" font-size="15" font-weight="600">出网总览</text>
+  <text x="1048" y="728" fill="#002FA7" font-size="12">渲染层：0 条 ｜ 主进程：3 条</text>
+  <text x="1048" y="746" fill="#525252" font-size="11">src/ 内零 require / node: / ipcRenderer</text>
+
+  <!-- ==================== 边 ==================== -->
+  <!-- renderer → preload -->
+  <path d="M 244,176 V 256" fill="none" stroke="#002FA7" stroke-width="1.4" marker-end="url(#ma)"/>
+  <rect x="250" y="204" width="72" height="16" rx="2" fill="#fafaf8"/>
+  <text x="286" y="216" fill="#002FA7" font-size="11" text-anchor="middle" font-family="'JetBrains Mono',ui-monospace,monospace">invoke</text>
+  <!-- capture → preload -->
+  <path d="M 629,176 V 220 Q 629,228 621,228 H 452 Q 444,228 444,236 V 256" fill="none" stroke="#525252" stroke-width="1.1" stroke-dasharray="4,3" marker-end="url(#md)"/>
+  <rect x="470" y="216" width="124" height="16" rx="2" fill="#fafaf8"/>
+  <text x="532" y="228" fill="#525252" font-size="11" text-anchor="middle">只走受限 2 个通道</text>
+  <!-- lab → ai.js 构建期复用 -->
+  <path d="M 960,176 V 220 Q 960,228 952,228 H 896 Q 888,228 888,236 V 256" fill="none" stroke="#9A9A9A" stroke-width="1.1" stroke-dasharray="2,3" marker-end="url(#mg)"/>
+  <rect x="900" y="216" width="150" height="16" rx="2" fill="#fafaf8"/>
+  <text x="975" y="228" fill="#737373" font-size="11" text-anchor="middle">构建期 require 复用同一份</text>
+  <!-- preload → db.js -->
+  <path d="M 440,294 H 464" fill="none" stroke="#525252" stroke-width="1.1" marker-end="url(#md)"/>
+  <!-- preload ← main 广播（双向标注） -->
+  <path d="M 244,332 V 372 H 464" fill="none" stroke="#525252" stroke-width="1.1" stroke-dasharray="4,3" marker-end="url(#md)"/>
+  <rect x="248" y="344" width="188" height="16" rx="2" fill="#fafaf8"/>
+  <text x="342" y="356" fill="#525252" font-size="11">webContents.send 主动推送 ×5 通道</text>
+  <!-- db.js → library.db -->
+  <path d="M 604,402 V 452 Q 604,460 596,460 H 198 Q 190,460 190,468 V 500" fill="none" stroke="#B04A2F" stroke-width="3" marker-end="url(#mr)"/>
+  <rect x="200" y="452" width="196" height="16" rx="2" fill="#fafaf8"/>
+  <text x="298" y="464" fill="#B04A2F" font-size="11">全量回写（唯一写入者）</text>
+  <!-- dictStore → dictionary.db -->
+  <path d="M 1172,432 V 460 Q 1172,468 1164,468 H 478 Q 470,468 470,476 V 500" fill="none" stroke="#525252" stroke-width="1.1" marker-end="url(#md)"/>
+  <rect x="486" y="452" width="120" height="16" rx="2" fill="#fafaf8"/>
+  <text x="546" y="464" fill="#525252" font-size="11" text-anchor="middle">独立作者</text>
+  <!-- memoryStore → 文件树 -->
+  <path d="M 1032,409 H 760 Q 752,409 752,417 V 500" fill="none" stroke="#525252" stroke-width="1.1" marker-end="url(#md)"/>
+  <rect x="766" y="418" width="120" height="16" rx="2" fill="#fafaf8"/>
+  <text x="826" y="430" fill="#525252" font-size="11" text-anchor="middle">memory/ 唯一作者</text>
+  <!-- mindmapEngine → 导图表（落在 library.db 同一条，改为标注） -->
+  <path d="M 1172,362 V 380 Q 1172,388 1164,388 H 756 Q 748,388 748,396 V 402" fill="none" stroke="#002FA7" stroke-width="1.1" marker-end="url(#ma)"/>
+  <text x="1180" y="378" fill="#002FA7" font-size="11">经 db.js 写 material_map_*</text>
+  <!-- ai.js → 网关 -->
+  <path d="M 888,352 V 660 Q 888,668 880,668 H 256 Q 248,668 248,676 V 684" fill="none" stroke="#002FA7" stroke-width="1.8" marker-end="url(#ma)"/>
+  <rect x="300" y="652" width="212" height="16" rx="2" fill="#fafaf8"/>
+  <text x="406" y="664" fill="#002FA7" font-size="11">唯一的模型调用通道（SSE）</text>
+  <!-- main → 搜索 -->
+  <path d="M 244,196 M 440,294" fill="none" stroke="none"/>
+  <path d="M 440,300 H 452 Q 460,300 460,308 V 660 Q 460,668 452,668 H 604 Q 612,668 612,676 V 684" fill="none" stroke="#9A9A9A" stroke-width="1.1" stroke-dasharray="4,3" marker-end="url(#mg)"/>
+  <rect x="466" y="652" width="140" height="16" rx="2" fill="#fafaf8"/>
+  <text x="536" y="664" fill="#737373" font-size="11" text-anchor="middle">net.fetch 之一</text>
+  <!-- dictStore → 词典源 -->
+  <path d="M 960,668 H 888" fill="none" stroke="#9A9A9A" stroke-width="0" />
+  <path d="M 1032,409 H 1010 Q 1002,409 1002,417 V 652 Q 1002,660 994,660 H 894 Q 886,660 886,668 V 684" fill="none" stroke="#9A9A9A" stroke-width="1.1" stroke-dasharray="4,3" marker-end="url(#mg)"/>
+  <rect x="1008" y="652" width="140" height="16" rx="2" fill="#fafaf8"/>
+  <text x="1078" y="664" fill="#737373" font-size="11" text-anchor="middle">下载 + 建索引</text>
+
+  <!-- ==================== LEGEND ==================== -->
+  <line x1="48" y1="778" x2="1312" y2="778" stroke="rgba(10,10,10,0.10)" stroke-width="0.8"/>
+  <text x="48" y="770" fill="#737373" font-size="8" font-family="'JetBrains Mono',ui-monospace,monospace" letter-spacing="0.14em">LEGEND</text>
+
+  <rect x="120" y="742" width="26" height="14" rx="2" fill="#ffffff" stroke="#0a0a0a"/>
+  <text x="154" y="754" fill="#525252" font-size="11">产品运行时</text>
+  <rect x="234" y="742" width="26" height="14" rx="2" fill="rgba(0,47,167,0.07)" stroke="#002FA7"/>
+  <text x="268" y="754" fill="#525252" font-size="11">边界 / 唯一出口</text>
+  <rect x="386" y="742" width="26" height="14" rx="2" fill="rgba(82,82,82,0.10)" stroke="#737373" stroke-dasharray="4,3"/>
+  <text x="420" y="754" fill="#525252" font-size="11">工具，不随产品发布</text>
+  <rect x="556" y="742" width="26" height="14" rx="2" fill="rgba(154,103,0,0.06)" stroke="#9A6700" stroke-dasharray="4,3"/>
+  <text x="590" y="754" fill="#525252" font-size="11">结构预留但机制未证实</text>
+  <line x1="742" y1="749" x2="768" y2="749" stroke="#B04A2F" stroke-width="3"/>
+  <text x="776" y="754" fill="#525252" font-size="11">全量回写</text>
+  <line x1="862" y1="749" x2="888" y2="749" stroke="#002FA7" stroke-width="1.8"/>
+  <text x="896" y="754" fill="#525252" font-size="11">跨进程 / 出网</text>
+  <line x1="1000" y1="749" x2="1026" y2="749" stroke="#9A9A9A" stroke-width="1.1" stroke-dasharray="4,3"/>
+  <text x="1034" y="754" fill="#525252" font-size="11">构建期复用（非运行期调用）</text>
+
+  </svg></div>
+
+  <div class="cards">
+    <div class="card" style="flex:1"><p class="eyebrow">写纪律</p><h3>一处写，全量落</h3><ul>
+      <li><code>library.db</code> 的 <code>persist()</code> 共 64 个调用点<b>全部在 <code>db.js</code> 内</b>；文件注释即写明业务码不得绕过仓储层。</li>
+      <li>因为是<b>内存库 + 全量回写</b>，运行期被外部脚本改动的 <code>library.db</code> 会被下一次落盘整体覆盖 —— 所以恢复只能"重启时换入"。</li>
+      <li><code>dictionary.db</code> 分库不是整洁性偏好，是为了让 340 万行词条不抬高主库的每次写成本。</li>
+      <li>第二真源在库里看不见：<code>userData/memory/</code> 是 Markdown 文件树，契约要求永不整文件重写。</li>
+    </ul></div>
+    <div class="card" style="flex:1"><p class="eyebrow">边界纪律</p><h3>渲染层是纯客户端</h3><ul>
+      <li><code>nodeIntegration:false</code> + <code>contextIsolation:true</code>；出网与读文件在结构上不可能发生在渲染层。</li>
+      <li>实测 <code>src/</code> 内<b>零处</b> <code>require</code> / <code>node:</code> / <code>ipcRenderer</code>。跨进程只经 23 个 <code>window.*API</code> ↔ 159 个 handler。</li>
+      <li>捕捉窗连 cards / library / ai 都拿不到 —— 它是能力子集，不是缩小版主窗口。</li>
+      <li>读本地文件走两条自定义 scheme（<code>bookasset:</code> / <code>pdfres:</code>），且必须在 app ready 前注册，否则封面图与 pdf 字形会永久失败。</li>
+    </ul></div>
+    <div class="card" style="flex:1"><p class="eyebrow">容易改错的地方</p><h3>图上看不见的契约</h3><ul>
+      <li>FSRS 有<b>三份实现</b>：渲染层调度用 <code>ts-fsrs</code>，主进程优化用 <code>fsrs-rs-nodejs</code>，<code>fsrsTime.js</code> 是手工复刻且<b>绝不 import</b> 前者。三者无代码依赖，只靠版本锁定与 S7/L6-A 断言维持一致。</li>
+      <li><code>kpScopes.js</code> 的出层契约校验在生产侧<b>零 require</b>，真实消费方是测试台与测试。卡片与归一的确定性护栏已生效，出层 schema 校验尚未接入主进程。</li>
+      <li>深色模式下自定义强调色必须写 <code>body</code>：深色档声明在 <code>body.theme-dark</code>，胜过从 <code>:root</code> 继承的值。</li>
+      <li><code>capSvc</code> 的 db 是<b>注入</b>的 <code>ctx</code>，不走 require —— 按 require 图估它的影响面会偏小。</li>
+    </ul></div>
+  </div>
+
+  <footer>来源：system-model.structurizr.dsl（事实源，C4 L2 容器视图）· 逐条 file:line 证据见 system-model.evidence.md · 模型说明见 architecture-understanding.md<br>
+  生成：2026-09-21 @ commit 780ea84 · 生产方式：architecture-visualization system-modeler + c4model · 本 SVG 为派生交付物，改图请改 DSL · 未知项 V1–V9 已在此图以黄框标出，不作已确认架构阅读</footer>
+</div></body></html>
