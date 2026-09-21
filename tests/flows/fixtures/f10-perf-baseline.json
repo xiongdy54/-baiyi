@@ -1,8 +1,8 @@
 {
-  "queueP95": 8.91,
+  "queueP95": 8.36,
   "statsMs": 13.6,
   "listAllCardsMs": 6.64,
-  "reviewP95": 4.16,
-  "persistP95": 3.03,
+  "reviewP95": 3.96,
+  "persistP95": 2.87,
   "dbKbAtCards": 784
 }
