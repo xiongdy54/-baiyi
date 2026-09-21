@@ -16,16 +16,19 @@ class RootErrorBoundary extends React.Component<
   }
   render() {
     if (this.state.error) {
+      // 崩溃兜底：这段必须在 theme.css 本身加载失败时也能显示，所以样式只能内联 ——
+      // 是「未 Token 化硬编码」规则的**已记录例外**，做设计债扫描时请勿当成漏改。
+      // 颜色仍优先取 Token（CSS 在时跟随主题），取不到才落到字面量。
       return (
-        <div style={{ padding: 24, fontFamily: "sans-serif" }}>
-          <h2 style={{ fontSize: 18 }}>界面出现异常，已停止渲染以防数据损坏</h2>
-          <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", color: "#b42318" }}>
+        <div style={{ padding: 24, fontFamily: "var(--font-sans, sans-serif)" }}>
+          <h2 style={{ fontSize: "var(--fs-title-s, 18px)" }}>界面出现异常，已停止渲染以防数据损坏</h2>
+          <pre style={{ fontSize: "var(--fs-meta, 12px)", whiteSpace: "pre-wrap", color: "var(--error, #b42318)" }}>
             {this.state.error.message}
             {"\n\n"}
             {this.state.error.stack}
           </pre>
           <button onClick={() => this.setState({ error: null })}>重试</button>
-          <button onClick={() => window.location.reload()} style={{ marginLeft: 8 }}>
+          <button onClick={() => window.location.reload()} style={{ marginLeft: "var(--sp-2, 8px)" }}>
             重新加载
           </button>
         </div>
