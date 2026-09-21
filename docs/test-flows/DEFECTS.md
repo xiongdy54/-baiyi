@@ -10,7 +10,7 @@
 | D-TEST-02 | 低 · 语义歧义 | `prompt_templates.is_default` 恒为 1，从未有代码置 0；全新库里 `card-occlusion` 有两行同时「默认」 | §6.3.4 L561 版本化播种（默认版本应唯一）；§7.2 | `npx electron tests/flows/f06-ai-card-contract.cjs` A1 | 运行期靠 `getPromptTemplate` 的 `ORDER BY version DESC` 侥幸取对，暂未构成用户可见故障 |
 | D-TEST-03 | 低 · consent 卫生 | `settings.app.memory.enabled` 未做布尔归一：手写 `settings.json` 里填字符串 `"yes"` 即被当成开启 | §4.18 L358 默认关闭是 consent 纪律；同文件对数值项都做了 clamp，唯独布尔漏了 | `npx electron tests/flows/f07-memory-privacy.cjs` D1 | 需用户手改配置文件才触发 |
 | D-TEST-04 | 观察项（非缺陷） | 僵尸 run 对账 `reconcileStaleMaterialMapRuns` 不在 `initDb` 内，只在 `electron/main.js:1351` 启动时调一次 | — | F04 G5 | 行为正确（阈值 30 分钟 + 60 秒下限 + 幂等），登记只为说明分层 |
-| D-TEST-05 | 中 · 主旅程断链（在当前工作树） | 书架上**鼠标点不开书**：真实 `Input.dispatchMouseEvent` 分别点封面中心与图注书名各一次，界面仍停在书架；同一张卡用键盘 `Enter` 立刻进阅读器 | §6.1 L519 主旅程第一环「书架 → 阅读器」；§5.4 D51 书卡设计 | `node tests/flows/f01-golden-journey.cjs` 看 K4 的 `✗(已知)` 与随后 `键盘后是否进入阅读器 = true` | **待确认**：本次是在带有未提交的 D51 书架重设计（`src/components/Bookshelf.tsx` 工作树改动）的 `dist` 上测得的；`Bookshelf.tsx` 里 `onOpenBook` 只出现在 `onCardKeyDown`（Enter/Space）分支，全部 `onClick` 无一处调用它。需与并行开发会话确认是 WIP 未完成还是已合入主干的回归 |
+| D-TEST-05 | 中 · 主旅程断链（在当前工作树） | 书架上**鼠标点不开书**：真实 `Input.dispatchMouseEvent` 分别点封面中心与图注书名各一次，界面仍停在书架；同一张卡用键盘 `Enter` 立刻进阅读器 | §6.1 L519 主旅程第一环「书架 → 阅读器」；§5.4 D51 书卡设计 | `node tests/flows/f01-golden-journey.cjs` 看 K4 的 `✗(已知)` 与随后 `键盘后是否进入阅读器 = true` | **待确认**：测得时 `dist` 构建自 D51 书架重设计的 `src/components/Bookshelf.tsx`（该改动已于 2026-09-22 02:5x 随提交 6a0e3b0 落到本分支，不再是未提交工作树）；`Bookshelf.tsx` 里 `onOpenBook` 只出现在 `onCardKeyDown`（Enter/Space）分支，全部 `onClick` 无一处调用它。需与并行开发会话确认是 WIP 未完成还是已合入主干的回归 |
 
 ## D-TEST-01 细节
 
