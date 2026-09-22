@@ -531,7 +531,7 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 | D-TEST-18 | 低（备份与回收语义） | 软删书只标 items/documents，assets 行与盘上字节都不动 → 已删书的字节永久进备份 | F25 V6 | §7.2 软删除、§9.1 M2 备份清单 |
 | ~~D-TEST-20~~ 已撤销 | — | 「删书后卡仍被催」先被我误登记成缺陷，自查发现本层 F02 I6 早已把「卡与摘录留在原地」当**期望值**断言（§7.2 L869 + 用户资产观）——同一事实只能有一种判定。改为功能建议：这类卡 `docTitle` 为 null，界面缺「来源已删」标记 | F28 X6 | 撤销 |
 | D-TEST-16 | 低（可点区与视觉单元不一致） | 图注（书名文字）渲染在带 onClick 的 `.book-card` 之外，点书名不开书、点封面才开；键盘与表视图按钮正常 | F01 K4「只点图注书名能否开书 = false」 | §5.4 D51 书卡为一个视觉单元 |
-| D-TEST-06 | 中高（无出口的整页不可用） | 卡片任一 JSON 列脏 → 复习页与仪表盘整体抛异常，且卡片浏览页同崩，界面上删不掉这行 | F13 P1（含逐列定位与自愈路径） | §4.2-20「损坏行在队列与统计中一致跳过」 |
+| D-TEST-06 | 中高（无出口的整页不可用） | 卡片任一 JSON 列脏 → 复习页与仪表盘整体抛异常，且卡片浏览页同崩，界面上删不掉这行。**复核补充**：`mapCardRow` 里共 9 处裸 `JSON.parse`（只有 `fsrs_json` 有兜底），F13 的逐列矩阵目前只覆盖 4 列，其余 5 列是同类地雷 | F13 P1（含逐列定位与自愈路径） | §4.2-20「损坏行在队列与统计中一致跳过」 |
 | D-TEST-07 | 低-中（数据卫生） | `createJournalEntry` 不校验 `entry_date`，`"2026-13-45"` 之类原样入库，日记分组/记忆水位线漂出 | F13 P5 | §6.5 自然日归类、§7.2 |
 | D-TEST-08 | 中-高（安全红线） | `getAIConfig()` 把解密后的明文 apiKey 经 IPC 送进渲染层 | F16 U4 | §7.5「渲染层不持有明文 Key」 |
 | D-TEST-09 | 中（一个字节让应用起不来） | `settings.json` 内容为合法 JSON 但非对象（`null`）时 `readSettings()` 原样返回，`initDb()` 抛 TypeError → 应用打不开 | F18 Y3 逐档 + Y7 冷启动逐档 | §7.6 读失败要兜底留痕；§7.1.4 启动验收线 |
@@ -542,10 +542,10 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 | D-TEST-14 | 低（残缺串能进设置） | `eventToCombo({key:"",ctrlKey:true})` 生成 `"Ctrl+"`：匹配不到任何键，却能写进 `settings.app.keybindings` 并被 `conflictWith` 当占用 | F20 W2 | §9.1 M4「存储串 = 展示串 = 匹配串」 |
 | D-TEST-15 | 中低（写入口零校验 + 假成功） | `updateProgress` 不校验值形状也不校验 id 存在：`"字符串"`/`42`/`true`/`[]` 原样进 `progress_json`，给不存在的书写进度返回 `true`；`addReadingEvent` 能给不存在的书插一条 5000 字的幽灵记录。当前被读侧 try 网兜住没爆成界面故障。**F32 全量清点后升格为「一类」**：28 条探针里 15 个针对既有行的函数返回真值，诚实抛错的只有 5 个；`card_issues`/`extracts`/`reading_events` 三族都接受幽灵父 id；`createCard({})` 连正文都不要求就落一行。同时给出清白结论：27 张表逐行差分**零越界改写** | F23 Q3 + Q4；F32 W2/W3/W6 | §7.2 数据完整性、§7.1.3 |
 
-| D-TEST-19 | 低（展示层无兜底） | 三个纯展示函数对非有限数/非法日产出用户可见 junk：`dayLabel(NaN)`→"NaN-NaN"、`pct(Infinity)`→"Infinity%"、`journalDateLabel("2026-02-30")` 静默进位成「标签写 02-30、星期是 3/2」 | F26 P2 | §7.1.3、§6.5、§5.4 |
+| D-TEST-19 | 低（展示层无兜底） | 展示函数对非有限数/非法日产出用户可见 junk：`dayLabel(Infinity)`／`dayLabel(1e18)`→"NaN-NaN"、`pct(NaN)`→"NaN%"、`pct(Infinity)`→"Infinity%"、`journalDateLabel("2026-02-30")` 静默进位成「02-30 周一」、`udcLabel`／`relationLabel` 对 `null` 入参返回 null/undefined。（复核更正：`dayLabel(NaN)` 其实安全——`!ms` 兜住返回空串；空串也不再算 junk） | F26 P2（7 个展示函数 × 边界值 + 02-30 进位断言） | §7.1.3、§6.5、§5.4 |
 | D-TEST-21 | 中（自己的排序不变量被自己的读口破了） | `db.js:1404` 声明「不变量 = review_seq，禁按 reviewed_at 排序」，`listAllReviewLogs:1489` 仍是 `ORDER BY reviewed_at ASC`；时钟倒退时撤销面板要撤的那条与清单末条不是同一条 | F29 T2/T3/T4 | §4.4.9、§4.4.10、§6.6.6 |
 | D-TEST-22 | 中（清洗越界吃掉正文） | `markdownFromText` 无上下文清洗，围栏代码块内的 `<style>…</style>` 被整段删掉，违反文档自述的「正文不做任何改写」 | F30 S3 | §9.1 M6-1、§4.2、§7.2 |
-| D-TEST-23 | 低（潜在，当前被 D-TEST-12 遮蔽） | 阅读字数取数（`db.js:2243`）不带任何 `is_deleted` 条件，`deleteItem` 又不软删 `reading_events` → 已删书的事件仍进统计输入集；一旦按 D-TEST-12 修好日桶，成长面板就开始替读不到的书涨字数（两条须同批修） | F31 J5 | §7.2 L869「查询一律带 is_deleted=0」、§6.2、§4.12-4 |
+| D-TEST-23 | 低（潜在，当前被 D-TEST-12 遮蔽） | 阅读字数取数（`db.js:2242`，复核更正行号）不带任何 is_deleted 条件——且该表建表时（`db.js:181-186`）根本没有这一列，所以修法只能是 JOIN 父表而不是加列条件，`deleteItem` 又不软删 `reading_events` → 已删书的事件仍进统计输入集；一旦按 D-TEST-12 修好日桶，成长面板就开始替读不到的书涨字数（两条须同批修） | F31 J5 | §7.2 L869「查询一律带 is_deleted=0」、§6.2、§4.12-4 |
 
 复现（约 1 秒）：`npx electron tests/flows/f03-scheduling-conservation.cjs`，看 S3 矩阵与 S10 两行 `✗(已知)`。
 疑似修复点（仅报告，未改代码）：`electron/db.js:737 insertFsrsConfig` 结尾补 `persist()`，
