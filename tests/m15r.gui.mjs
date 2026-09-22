@@ -221,6 +221,17 @@ try {
       model_config_hash, node_remap_json, is_active, created_at, updated_at, sync_version, is_deleted)
       VALUES ('guimap2', 'local-user', '${doc2}', 'book', 'book', 'detailed', ?, ?, 3, 'h', 3, 'gui-preset', 'stub', 'stub', 'h', NULL, 0, ?, ?, 0, 0)`,
       [M + " 恢复导图", JSON.stringify({ version: 1, generatorVersion: "gui-preset", title: M + " 恢复导图", rootNodeId: "root", nodes: nodes2, edges: [], summaryText: "摘要" }), Date.now(), Date.now()]);
+    // v48.17（D53）：同一份材料再放一条**更旧**的可续跑运行 —— 去重后它不该再被播种
+    // （用户实测「关闭要点两次」的根因就是这种历史运行会轮流顶上来）
+    db.run(`INSERT INTO material_map_runs (id, user_id, document_id, scope_anchor, scope_kind, granularity, status, stage,
+      calls_done, chars, error_code, error_text, created_at, updated_at, sync_version, is_deleted)
+      VALUES ('guirun0', 'local-user', '${realDocId}', 'book', 'book', 'detailed', 'section_ready', 'section_ready',
+      3, 1000, NULL, '', ?, ?, 0, 0)`, [Date.now() - 120000, Date.now() - 120000]);
+    // 另一份材料的一条可续跑运行 —— 去重不得跨材料，它必须出现（指示器 = 多任务容器，两条各占一行）
+    db.run(`INSERT INTO material_map_runs (id, user_id, document_id, scope_anchor, scope_kind, granularity, status, stage,
+      calls_done, chars, error_code, error_text, created_at, updated_at, sync_version, is_deleted)
+      VALUES ('guirun2', 'local-user', '${doc2}', 'book', 'book', 'detailed', 'section_ready', 'section_ready',
+      17, 9000, NULL, '', ?, ?, 0, 0)`, [Date.now() - 30000, Date.now() - 30000]);
     fs.writeFileSync(dbFile, Buffer.from(db.export()));
   }
   check("会话 2 前置：导图行 + interrupted 运行 + 一个未激活版本已预置", true, "");
@@ -236,7 +247,118 @@ try {
     return JSON.stringify({ present: !!el, text: el ? el.textContent : "" });
   })()`);
   const rp = JSON.parse(resumePill || "{}");
-  check("重启后可续跑运行被识别（指示器出现且非失败口径）", rp.present === true && rp.text.includes("继续") && !rp.text.includes("失败"), resumePill);
+  check("重启后可续跑运行被识别（指示器出现且非失败口径）", rp.present === true && rp.text.includes("继续") && !rp.text.includes("失败"), resumePill);  // v48.17（D53）右下角指示器 = 多任务容器（版式 D）：一任务一行、各自关闭、关过就不再回来
+  const ind1 = await main.eval(`(() => {
+    const root = document.querySelector(".bg-activity");
+    if (!root) return "no-root";
+    const card = root.querySelector(".bg-activity-card");
+    const tasks = [...root.querySelectorAll(".bg-activity-task")];
+    return JSON.stringify({
+      collapsedH: Math.round(card.getBoundingClientRect().height),
+      visibleRows: tasks.filter((t) => getComputedStyle(t).display !== "none").length,
+      totalRows: tasks.length,
+      primaryIsLast: tasks.length ? tasks[tasks.length - 1].classList.contains("is-primary") : false,
+      titles: tasks.map((t) => t.querySelector(".bg-activity-title")?.textContent || ""),
+      extraVisibilityCollapsed: getComputedStyle(root.querySelector(".bg-activity-extra")).visibility,
+      rowH: Math.round(root.querySelector(".bg-activity-task.is-primary .bg-activity-row").getBoundingClientRect().height)
+    });
+  })()`);
+  const i1 = JSON.parse(ind1 || "{}");
+  check("跨材料不去重：两份材料的可续跑运行各占一行（同材料那条更旧的已被折掉）",
+    i1.totalRows === 2 && i1.titles.length === 2 && !String(i1.titles[0]).includes("undefined"), ind1);
+  check("恒等式②：收起态只留一行，卡片高 = 24 + 边框 = 26（分隔线与其余行不得占位）",
+    i1.collapsedH === 26 && i1.visibleRows === 1 && i1.rowH === 24, ind1);
+  check("收起态那一行就是最新那条（版式 D：最新在最下）", i1.primaryIsLast === true, ind1);
+  check("行上常驻书名，且两行各自不同（不靠 hover 猜这条详情属于哪本书）",
+    i1.titles.length === 2 && !!i1.titles[0] && !!i1.titles[1] && i1.titles[0] !== i1.titles[1], ind1);
+  // 点第一行展开 → 记高；再点第二行 → 恒等式①：切换展开行时卡片总高不得变化
+  const h1 = await main.eval(`(() => { const t = document.querySelectorAll(".bg-activity-task")[0]; t.querySelector(".bg-activity-row").click(); return 1; })()`);
+  await wait(300);
+  const g1 = await main.eval(`(() => {
+    const root = document.querySelector(".bg-activity");
+    const card = root.querySelector(".bg-activity-card");
+    const open = root.querySelector(".bg-activity-task.is-expanded .bg-activity-extra");
+    const cr = card.getBoundingClientRect();
+    return JSON.stringify({ H: Math.round(cr.height), top: Math.round(cr.top), extraH: open ? Math.round(open.getBoundingClientRect().height) : -1,
+      openIsFirst: root.querySelector(".bg-activity-task.is-expanded") === root.querySelectorAll(".bg-activity-task")[0],
+      visibleRows: [...root.querySelectorAll(".bg-activity-task")].filter((t) => getComputedStyle(t).display !== "none").length });
+  })()`);
+  await main.eval(`(() => { const t = document.querySelectorAll(".bg-activity-task")[1]; t.querySelector(".bg-activity-row").click(); return 1; })()`);
+  await wait(300);
+  const g2 = await main.eval(`(() => {
+    const root = document.querySelector(".bg-activity");
+    const card = root.querySelector(".bg-activity-card");
+    const open = root.querySelector(".bg-activity-task.is-expanded .bg-activity-extra");
+    const cr = card.getBoundingClientRect();
+    return JSON.stringify({ H: Math.round(cr.height), extraH: open ? Math.round(open.getBoundingClientRect().height) : -1, top: Math.round(cr.top),
+      openIsSecond: root.querySelector(".bg-activity-task.is-expanded") === root.querySelectorAll(".bg-activity-task")[1] });
+  })()`);
+  const a = JSON.parse(g1 || "{}"), b = JSON.parse(g2 || "{}");
+  check("展开态：详情块定高 120px（切行的前提）", a.extraH === 120 && b.extraH === 120, g1 + " | " + g2);
+  check("恒等式①：切换展开行时卡片总高与顶边都不动（否则光标会被甩出热区 → 抖收）",
+    a.H === b.H && b.H > 0 && h1 === 1 && a.top === b.top && a.openIsFirst === true && b.openIsSecond === true, g1 + " | " + g2);
+  // 逐行关闭两条 → 浮窗整个消失；runId 落进 settings.json（下次启动播种要跳过）
+  // ---- 真鼠标取证：你报的抖动只在真实 hover 下复现（上面用 click 走的是另一条路径）----
+  // 先把上一条断言点出来的 pinned 撤掉（再点一次同一行 = 取消钉住），否则卡片会一直开着
+  await main.eval(`(() => { const t = document.querySelectorAll(".bg-activity-task")[1]; t && t.querySelector(".bg-activity-row").click(); return 1; })()`);
+  await wait(300);
+  // 注意：指针如果从没进过卡片，浏览器不会派发 mouseleave，React 合成的 onMouseLeave 也就不会触发
+  // —— 直接"把鼠标放到别处再测收起态"是测不出收起的（实测 geoIdle 停在 open:true）。归零放在下面做。
+  const cardGeo = () => main.eval(`(() => {
+    const root = document.querySelector(".bg-activity");
+    if (!root) return "no-root";
+    const r = root.querySelector(".bg-activity-card").getBoundingClientRect();
+    return JSON.stringify({ H: Math.round(r.height), top: Math.round(r.top), open: root.classList.contains("is-expanded"),
+      expandedRow: [...root.querySelectorAll(".bg-activity-task")].findIndex((t) => t.classList.contains("is-expanded")) });
+  })()`);
+  const rowCenter = (n) => main.eval(`(() => {
+    const el = document.querySelectorAll(".bg-activity-task")[__N__].querySelector(".bg-activity-row").getBoundingClientRect();
+    return JSON.stringify({ x: Math.round(el.left + el.width / 2), y: Math.round(el.top + el.height / 2) });
+  })()`.replace("__N__", String(n)));
+  const J = async (x) => JSON.parse((await x) || "{}");
+  // 先做一次真实的「进 → 出」把展开态归零，再测收起态
+  const pill0 = await J(rowCenter(1));
+  await main.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pill0.x, y: pill0.y });
+  await wait(350);
+  await main.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 8, y: 8 });
+  await wait(500);
+  const geoIdle = await J(cardGeo());
+  const pBottom = await J(rowCenter(1));
+  await main.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pBottom.x, y: pBottom.y });
+  await wait(450);
+  const geoPill = await J(cardGeo());
+  const pTop = await J(rowCenter(0));
+  await main.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pTop.x, y: pTop.y });
+  await wait(450);
+  const geoTop = await J(cardGeo());
+  check("真鼠标：hover 小浮窗就地展开，展开的正是我指着的那一行",
+    geoIdle.H === 26 && geoIdle.open === false && geoIdle.expandedRow === -1 && geoPill.H > 100 && geoPill.open === true && geoPill.expandedRow === 1,
+    JSON.stringify([geoIdle, geoPill]));
+  check("真鼠标：从下往上换行 hover，卡片总高与顶边都不动、且不自动收起（你报的「展开最上行时整块缩短→鼠标掉出框外→抖收」）",
+    geoTop.H === geoPill.H && geoTop.top === geoPill.top && geoTop.open === true && geoTop.expandedRow === 0,
+    JSON.stringify([geoPill, geoTop]));
+  await main.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 8, y: 8 });
+  await wait(600);
+  const geoLeft = await J(cardGeo());
+  check("真鼠标：指针离开后自动收回一行，不残留上次展开的详情",
+    geoLeft.open === false && geoLeft.H === 26 && geoLeft.expandedRow === -1, JSON.stringify(geoLeft));
+
+  const closeOne = `(() => { const t = document.querySelector(".bg-activity-task"); if (!t) return "no-task"; const btns = t.querySelectorAll(".bg-activity-btn"); const b = btns[btns.length - 1]; b?.click(); return t.querySelector(".bg-activity-title")?.textContent || "?"; })()`;
+  const c1 = await main.eval(closeOne);
+  await wait(350);
+  const c2 = await main.eval(closeOne);
+  await wait(350);
+  check("逐条关闭：两次点击各关掉一行（不是「点两次才关掉一条」）", c1 !== "no-task" && c2 !== "no-task" && c1 !== c2, c1 + " | " + c2);
+  const gone = await main.eval(`JSON.stringify({ present: !!document.querySelector(".bg-activity") })`);
+  check("两条各自关闭后浮窗消失（全部关完 = 容器消失）", gone === '{"present":false}', gone);
+  await wait(500);
+  const setFile = path.join(USER_DATA, "settings.json");
+  const setTxt = fs.existsSync(setFile) ? fs.readFileSync(setFile, "utf-8") : "MISSING";
+  let dismissedIds = [];
+  try { dismissedIds = JSON.parse(setTxt).activity.dismissedRuns || []; } catch { /* 断言里如实报告 */ }
+  check("关闭已持久化到 settings.json → activity.dismissedRuns（关过的下次启动不再出现的前提）",
+    dismissedIds.includes("guirun1") && dismissedIds.includes("guirun2"), setTxt.slice(0, 200));
+
   await main.eval(clickByText(".nav-item", "书架"));
   await wait(700);
   const opened2 = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK} 控制论入门")); c?.click(); return !!c; })()`);
@@ -417,6 +539,19 @@ try {
   check("空态：点击版本即激活并渲染出图（成果真的找得回来）", recovered === "clicked" && ra.emptyStill === false && ra.canvasNodes >= 3, recAfter);
   await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
   await wait(400);
+
+  // v48.17（D53）会话 3：再次启动 → 上一步关过的两条**不该再回来**（这是用户报的「每次开机都出现」的正面回收）
+  try { electron?.kill(); } catch { /* ignore */ }
+  await wait(800);
+  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  await wait(800);
+  electron = spawnApp();
+  main = await connectTarget((u) => u.includes("index.html"), "主窗口3");
+  await wait(3000);
+  const backAgain = await main.eval(`JSON.stringify({ present: !!document.querySelector(".bg-activity") })`);
+  check("重启后：已关闭的可续跑运行不再播种（同材料的历史运行也不会顶上来）", backAgain === '{"present":false}', backAgain);
+  await main.eval(clickByText(".nav-item", "书架"));
+  await wait(600);
 
   // 9. 清理
   await main.eval(clickByText(".nav-item", "书架"));

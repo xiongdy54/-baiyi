@@ -171,14 +171,36 @@ export function primaryTask(): ActivityTask | null {
 /**
  * v48.13 P3（D47）：应用启动时用「可续跑运行」播种指示器。
  * 这些 run 在内存里没有对应任务（应用重启过），但用户需要看到「上次那轮可以继续」。
+ *
+ * **同材料只留最新一条**（v48.17，D53）：`listResumableMaterialMapRuns()` 会把库里**所有**
+ * `section_ready` / `interrupted` 一次返回，而一份材料反复生成就会留下多条历史 `section_ready`。
+ * 指示器一次只显示一条，于是「关掉新的那条、旧的又顶上来」——用户看到的就是「关闭要点两次」。
+ * 去重放在这里而不是让界面只显示一条：否则被折掉的那条仍占着 store，任何取用全量的入口都会再犯。
+ *
+ * `isDismissed`（v48.17，D53）判定用户是否已把该条处置掉。**必须在去重之后**再问：
+ * 先过滤的话，最新那条一旦被关过，同材料更旧的历史运行就会递补上来重新提示——GUI 实测复现过
+ * （关掉 guirun1 后重启，`present` 又变 true，顶上来的正是被折掉的 guirun0）。
+ * 递补上来不该提示，但**新跑的一轮该提示**：新 run 的 updatedAt 更大，它赢得去重且不在已关清单里。
  */
-export function seedFromRuns(runs: { id: string; documentId: string; status: string; materialTitle?: string | null; callsDone?: number | null; updatedAt?: number }[]) {
+export function seedFromRuns(
+  runs: { id: string; documentId: string; status: string; materialTitle?: string | null; callsDone?: number | null; updatedAt?: number }[],
+  isDismissed?: (runId: string) => boolean
+) {
+  // 只接受「可继续」的两种状态，其余（completed/failed/…）一律不播种——宁可少提示，
+  // 也不能把已完成的图显示成「被中断可继续」。**必须先筛后折**：反过来的话，一条更晚的
+  // completed 会在去重时把同材料那条仍可续跑的 run 折掉，提示就彻底消失了。
+  const resumable = (runs || []).filter((r) => r.status === "interrupted" || r.status === "section_ready");
+  const newestPerDoc = new Map<string, (typeof runs)[number]>();
+  for (const r of resumable) {
+    // documentId 缺失时退化成按 runId 各自成组，避免把无主运行互相折掉
+    const key = r.documentId || r.id;
+    const cur = newestPerDoc.get(key);
+    if (!cur || (Number(r.updatedAt) || 0) >= (Number(cur.updatedAt) || 0)) newestPerDoc.set(key, r);
+  }
   let changed = false;
-  for (const r of runs || []) {
+  for (const r of newestPerDoc.values()) {
     if (tasks.has(r.id)) continue;
-    // 只接受「可继续」的两种状态；其余（completed/failed/...）一律不播种——
-    // 宁可少提示，也不能把已完成的图显示成「被中断可继续」。
-    if (r.status !== "interrupted" && r.status !== "section_ready") continue;
+    if (isDismissed && isDismissed(r.id)) continue;
     const phase: ActivityPhase = r.status === "section_ready" ? "section_ready" : "interrupted";
     tasks.set(r.id, {
       runId: r.id,

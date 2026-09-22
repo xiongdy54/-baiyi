@@ -3,6 +3,9 @@ var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
@@ -17,6 +20,55 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// src/lib/eventbus.ts
+var eventbus_exports = {};
+__export(eventbus_exports, {
+  ALLOWED_EVENTS: () => ALLOWED_EVENTS,
+  eventBus: () => eventBus
+});
+var ALLOWED_EVENTS, map, eventBus;
+var init_eventbus = __esm({
+  "src/lib/eventbus.ts"() {
+    "use strict";
+    ALLOWED_EVENTS = [
+      "stats/updated",
+      "library/changed",
+      "todo/changed",
+      "pomodoro/tick",
+      "pomodoro/phaseChange",
+      "theme/changed",
+      "settings/changed",
+      "ai/stream",
+      "workflow/changed",
+      "cards/changed",
+      "ai/batchDone",
+      "leech/detected",
+      "journal/changed",
+      "insight/changed",
+      "memory/changed",
+      "mindmap/changed"
+      // v48（M15 重做，D41/D42）：导图生成进度与完成广播
+    ];
+    map = /* @__PURE__ */ new Map();
+    eventBus = {
+      on(event, fn) {
+        if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
+        let set = map.get(event);
+        if (!set) {
+          set = /* @__PURE__ */ new Set();
+          map.set(event, set);
+        }
+        set.add(fn);
+        return () => set.delete(fn);
+      },
+      emit(event, payload) {
+        if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
+        map.get(event)?.forEach((fn) => fn(payload));
+      }
+    };
+  }
+});
+
 // tests/m15r.activity.entry.ts
 var m15r_activity_entry_exports = {};
 __export(m15r_activity_entry_exports, {
@@ -24,54 +76,21 @@ __export(m15r_activity_entry_exports, {
   describeTask: () => describeTask,
   dismissAllFinished: () => dismissAllFinished,
   dismissTask: () => dismissTask,
+  ensureDismissalsLoaded: () => ensureDismissalsLoaded,
   eventBus: () => eventBus,
   installActivityStore: () => installActivityStore,
+  isDismissed: () => isDismissed,
   listTasks: () => listTasks,
   primaryTask: () => primaryTask,
+  rememberDismissed: () => rememberDismissed,
   resetActivity: () => resetActivity,
+  resetDismissalsForTests: () => resetDismissalsForTests,
   seedFromRuns: () => seedFromRuns
 });
 module.exports = __toCommonJS(m15r_activity_entry_exports);
 
-// src/lib/eventbus.ts
-var ALLOWED_EVENTS = [
-  "stats/updated",
-  "library/changed",
-  "todo/changed",
-  "pomodoro/tick",
-  "pomodoro/phaseChange",
-  "theme/changed",
-  "settings/changed",
-  "ai/stream",
-  "workflow/changed",
-  "cards/changed",
-  "ai/batchDone",
-  "leech/detected",
-  "journal/changed",
-  "insight/changed",
-  "memory/changed",
-  "mindmap/changed"
-  // v48（M15 重做，D41/D42）：导图生成进度与完成广播
-];
-var map = /* @__PURE__ */ new Map();
-var eventBus = {
-  on(event, fn) {
-    if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
-    let set = map.get(event);
-    if (!set) {
-      set = /* @__PURE__ */ new Set();
-      map.set(event, set);
-    }
-    set.add(fn);
-    return () => set.delete(fn);
-  },
-  emit(event, payload) {
-    if (!ALLOWED_EVENTS.includes(event)) throw new Error(`unknown event: ${event}`);
-    map.get(event)?.forEach((fn) => fn(payload));
-  }
-};
-
 // src/lib/activity.ts
+init_eventbus();
 var TERMINAL = ["completed", "partial", "review_failed", "failed", "cancelled"];
 var STAGE_ALIAS = {
   waiting_model: "running",
@@ -161,11 +180,18 @@ function primaryTask() {
   const pool = active.length ? active : all;
   return pool[pool.length - 1];
 }
-function seedFromRuns(runs) {
+function seedFromRuns(runs, isDismissed2) {
+  const resumable = (runs || []).filter((r) => r.status === "interrupted" || r.status === "section_ready");
+  const newestPerDoc = /* @__PURE__ */ new Map();
+  for (const r of resumable) {
+    const key = r.documentId || r.id;
+    const cur = newestPerDoc.get(key);
+    if (!cur || (Number(r.updatedAt) || 0) >= (Number(cur.updatedAt) || 0)) newestPerDoc.set(key, r);
+  }
   let changed = false;
-  for (const r of runs || []) {
+  for (const r of newestPerDoc.values()) {
     if (tasks.has(r.id)) continue;
-    if (r.status !== "interrupted" && r.status !== "section_ready") continue;
+    if (isDismissed2 && isDismissed2(r.id)) continue;
     const phase = r.status === "section_ready" ? "section_ready" : "interrupted";
     tasks.set(r.id, {
       runId: r.id,
@@ -284,16 +310,98 @@ function failureReason(code) {
   };
   return map2[code] || "\u751F\u6210\u4E2D\u65AD";
 }
+
+// src/lib/settings.ts
+var memoryFallback = /* @__PURE__ */ new Map();
+async function emitChanged(scope, key) {
+  try {
+    const { eventBus: eventBus2 } = await Promise.resolve().then(() => (init_eventbus(), eventbus_exports));
+    eventBus2.emit("settings/changed", { scope, key });
+  } catch {
+  }
+}
+var settingsStore = {
+  async get(scope, key, defaultValue) {
+    try {
+      if (!window.settingsAPI) {
+        return memoryFallback.get(`${scope}.${key}`) ?? defaultValue;
+      }
+      const v = await window.settingsAPI.get(scope, key);
+      return v ?? defaultValue;
+    } catch {
+      return defaultValue;
+    }
+  },
+  async set(scope, key, value) {
+    if (!window.settingsAPI) {
+      memoryFallback.set(`${scope}.${key}`, value);
+      void emitChanged(scope, key);
+      return;
+    }
+    await window.settingsAPI.set(scope, key, value);
+    void emitChanged(scope, key);
+  }
+};
+
+// src/lib/activityDismiss.ts
+var SCOPE = "activity";
+var KEY = "dismissedRuns";
+var CAP = 200;
+var ids = [];
+var index = /* @__PURE__ */ new Set();
+var loaded = false;
+var dirty = false;
+function add(runId) {
+  if (!runId || index.has(runId)) return;
+  index.add(runId);
+  ids.push(runId);
+  if (ids.length > CAP) {
+    for (const dropped of ids.splice(0, ids.length - CAP)) index.delete(dropped);
+  }
+  dirty = true;
+}
+function flush() {
+  dirty = false;
+  void settingsStore.set(SCOPE, KEY, [...ids]).catch(() => {
+  });
+}
+async function ensureDismissalsLoaded() {
+  if (loaded) return;
+  const stored = await settingsStore.get(SCOPE, KEY, []);
+  loaded = true;
+  if (Array.isArray(stored)) for (const id of stored.map(String).filter(Boolean)) add(id);
+  if (dirty) flush();
+}
+function isDismissed(runId) {
+  return index.has(runId);
+}
+function rememberDismissed(runId) {
+  add(runId);
+  if (loaded && dirty) flush();
+}
+function resetDismissalsForTests() {
+  ids.length = 0;
+  index.clear();
+  loaded = false;
+  dirty = false;
+}
+
+// tests/m15r.activity.entry.ts
+init_eventbus();
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   applyProgress,
   describeTask,
   dismissAllFinished,
   dismissTask,
+  ensureDismissalsLoaded,
   eventBus,
   installActivityStore,
+  isDismissed,
   listTasks,
   primaryTask,
+  rememberDismissed,
   resetActivity,
+  resetDismissalsForTests,
   seedFromRuns
 });
