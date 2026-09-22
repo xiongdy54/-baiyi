@@ -120,8 +120,13 @@ app
         ["createExtract", () => {
           const items = db.listItems();
           const it = items.find((x) => x.title === "FLOWTEST 粘贴书") || items[0];
-          const docId = aud0.one("SELECT id FROM documents WHERE library_item_id = ?", [it.id])?.id;
-          return db.createExtract({ parentType: "document", parentId: docId, documentId: docId, contentMarkdown: "FLOWTEST 摘录内容", priority: 60 });
+          // 批次 E（D-TEST-15 T3 档）配套改夹具：aud0 是本矩阵开始**之前**打开的快照，看不到同一轮里
+          // createFromPaste 刚建出来的文档 → documentId 取到 undefined，而 createExtract 现在会先验
+          // 父文档存在（幽灵父行不再入库），于是这一格变成"没写库"。改走内存里的真实文档 id
+          // （getDocument 返回的是 documentId，不是 id），测的还是"这条写函数是否即时落盘"。
+          const doc = db.getDocument(it.id);
+          const docId = (doc && (doc.documentId || doc.id)) || null;
+          return db.createExtract({ parentType: "document", parentId: it.id, documentId: docId, contentMarkdown: "FLOWTEST 摘录内容", priority: 60 });
         }],
         ["saveReview", () => db.saveReview(mk("MUT-REVIEW", fsrs()), { ...fsrs(), reps: 9 }, "Easy", 500, fsrs())],
         ["saveSkip", () => db.saveSkip(mk("MUT-SKIP", fsrs()))],
