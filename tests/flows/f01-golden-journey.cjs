@@ -187,7 +187,7 @@ runFlow(flow, async () => {
     }
     flow.record("阅读器容器是否挂载", readerMounted);
     flow.check("真实鼠标点书卡封面能打开书（§6.1 主旅程第一环；D-TEST-05 已撤销——原判为测试打点打错，6a0e3b0 后鼠标路径本来是好的）", mouseOpened === true, true, mouseOpened);
-    flow.known("只点图注上的书名也能开书（图注是书卡的一部分，却是页面上最自然的落点）", capOpened === true, "D-TEST-16", true, capOpened);
+    flow.check("只点图注上的书名也能开书（图注是书卡的一部分，却是页面上最自然的落点；D-TEST-16 批次 D 给 .cap 补 role=button/onClick/键盘后，真实鼠标实测已通）", capOpened === true, true, capOpened);
     flow.check("兜底路径（图注/键盘/DOM click）最终进入了阅读器", readerMounted === true, true, readerMounted);
 
     // 鼠标路径没开时，再用键盘 Enter 试一次：能开就说明「点不开」只出在鼠标路径上

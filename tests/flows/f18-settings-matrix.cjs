@@ -159,11 +159,15 @@ app
         const stray = live.filter((h) => !h.rel.startsWith("src/") && !isMigrationHit(h));
         retiredShape.push(`${k}: ${hits.length} 处（活引用 ${live.length}／注释 ${hits.length - live.length}）`);
         retiredLeaks.push(...[...new Set([...inRenderer, ...stray].map((h) => `${h.rel}:${h.n}`))]);
-        retiredComments.push(...[...new Set(hits.filter((h) => h.comment).map((h) => `${h.rel}:${h.n}`))]);
+        // 批次 F（D-DOC-07 收口时对齐判据）：注释侧要用本流程自己的 `isMigrationHit`（命中行上下 6 行内写明
+        // 「迁移」或真的 delete 掉该键）作豁免——`db.js` 的 initDb 一次性迁移注释正是本条允许的形态。
+        // 原写法把**所有**含该键的注释都算进去，等于要求代码里不许出现这个字段名，与 D-DOC-07 的登记文字不符。
+        retiredComments.push(...[...new Set(hits.filter((h) => h.comment && !isMigrationHit(h))
+          .map((h) => `${h.rel}:${h.n}`))]);
       }
       flow.record("退役键的引用形态", retiredShape.join("；"));
       flow.check("已废除的键不得有活的消费者（渲染层零引用，主进程仅限迁移代码）", retiredLeaks.length === 0, "只在迁移块里出现", retiredLeaks);
-      flow.known("代码注释不得把已废除的键描述成现行读取路径", retiredComments.length === 0, "D-DOC-07", "注释同步收口", retiredComments);
+      flow.check("代码注释不得把已废除的键描述成现行读取路径", retiredComments.length === 0, "注释同步收口", retiredComments);
 
       // 文档自洽：§4.4.10/D22 说废除，就别在别处（§7.4 配置清单）把它当现行键列
       const advertisedLive = [];
@@ -174,19 +178,21 @@ app
           advertisedLive.push(`L${i + 1}:${k}`);
         });
       }
-      flow.known("指导文档不得把已废除的键当现行配置项列出（文档自洽）", advertisedLive.length === 0, "D-DOC-07", "只在废除/迁移语境出现", advertisedLive);
+      flow.check("指导文档不得把已废除的键当现行配置项列出（文档自洽）", advertisedLive.length === 0, "只在废除/迁移语境出现", advertisedLive);
 
       // 反向：代码在读的键必须在文档里登记（§7.4 配置必须集中、可审）
       const undocumented = [...codeKeys.keys()].filter((id) => !new RegExp(`\\b${id.split(".")[1]}\\b`).test(guideText)).sort();
       flow.record("代码在读的层.键总数", `${codeKeys.size}（文档未登记 ${undocumented.length}）`);
-      flow.known("代码在读的每个设置键都要在指导文档里登记", undocumented.length === 0, "D-DOC-08", "全部登记", undocumented);
+      flow.check("代码在读的每个设置键都要在指导文档里登记", undocumented.length === 0, "全部登记", undocumented);
 
-      // 反向：设置层本身也只有 app / theme / plugin.<id> 三层是登记过的
+      // 反向：设置层本身也只有 §4.2-3 登记的那四层在用
       const scopes = [...new Set([...codeKeys.keys()].map((id) => id.split(".")[0]))].sort();
-      const DOCUMENTED_SCOPES = /^app$|^theme$|^plugin\./;
+      // 批次 F（D-DOC-08 收口）：`dashboard` 层已按 §4.2-3 登记为第四个设置层（§7.4 的 v48.16/D52 条目），
+      // 所以允许集合同步加上它——登记动作在文档侧完成，闸门合同步是登记的一部分，不是放宽判据。
+      const DOCUMENTED_SCOPES = /^app$|^theme$|^plugin\.|^dashboard$/;
       const rogueScopes = scopes.filter((s) => !DOCUMENTED_SCOPES.test(s));
       flow.record("代码用到的设置层", scopes.join(" "));
-      flow.known("设置层必须限于 §4.2-3 登记的 app / theme / plugin.<id>", rogueScopes.length === 0, "D-DOC-08", "三层之内", rogueScopes);
+      flow.check("设置层必须限于 §4.2-3 登记的 app / theme / plugin.<id> / dashboard", rogueScopes.length === 0, "四层之内", rogueScopes);
       flow.record("文档键总数 / 未实现 / 退役", `${DOC_KEYS.length} + ${DOC_UNIMPLEMENTED.length} + ${DOC_RETIRED.length}`);
 
       // ---------- Y2 按真实层写入-读回-重启往返 ----------

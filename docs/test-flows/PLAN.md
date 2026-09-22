@@ -518,7 +518,8 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 
 > 本页记录「测出了什么」；**先修哪个、怎么修、修的时候谁守着**见 [FIXPLAN.md](FIXPLAN.md)。
 
-完整清单见 [`DEFECTS.md`](DEFECTS.md)（D-TEST-01…23 二十三条产品侧，其中 D-TEST-05、D-TEST-20 已撤销 + D-DOC-01…09 文档↔代码漂移，全部只报告未改代码）。摘要：
+完整清单见 [`DEFECTS.md`](DEFECTS.md)（D-TEST-01…23 二十三条产品侧，其中 D-TEST-05、D-TEST-20 已撤销 + D-DOC-01…09 文档↔代码漂移）。
+**处置状态（2026-09-22，实施规格 `docs/impl-spec/` 批次 A–F 执行完毕）**：23 条产品侧里 **19 条已修**（批次 A/B/C/D/E 各一个 commit，逐条标在下表「✅已修复（批次 x）」）+ D-TEST-05/20 两条撤销 + D-TEST-04 观察项 + D-TEST-13 代码已改、机检已硬断言，只剩「真实键盘在用户自己应用里的端到端确认」待用户在场跑 `tests/m4.gui.mjs`（原因与命令见该行）；D-TEST-16 已于 08:36Z 用隔离实例的真实应用鼠标实测确认并降级。9 条文档↔代码漂移 + 2 条未编号漂移已在批次 F 全量收口（`v48.16` / `D52`，只改文档不动行为）。下表保留原始登记，不追改：
 
 | 编号 | 严重度 | 现象 | 证据 | 违反条款 |
 |---|---|---|---|---|
@@ -530,7 +531,7 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 | D-TEST-17 ✅已修复（批次 C） | 低-中（潜在任意写，当前无活路径） | `createImportedDoc` 的原书文件名不净化（同函数图片名却有防护）：`../`、`..\`、`../../` 都能写到 `assets/<itemId>/` 之外，`../../settings.json` 可被一次导入改写且没人修回来；当前六个调用点都传硬编码名，故为 API 层缺口 | F25 V1+V2+V7 | §7.5 不可信内容进得来、越界的事做不了；§7.2 |
 | D-TEST-18 ✅已修复（批次 C） | 低（备份与回收语义） | 软删书只标 items/documents，assets 行与盘上字节都不动 → 已删书的字节永久进备份 | F25 V6 | §7.2 软删除、§9.1 M2 备份清单 |
 | ~~D-TEST-20~~ 已撤销 | — | 「删书后卡仍被催」先被我误登记成缺陷，自查发现本层 F02 I6 早已把「卡与摘录留在原地」当**期望值**断言（§7.2 L869 + 用户资产观）——同一事实只能有一种判定。改为功能建议：这类卡 `docTitle` 为 null，界面缺「来源已删」标记 | F28 X6 | 撤销 |
-| D-TEST-16 ⏳代码已改（批次 D），GUI 实测待补 | 低（可点区与视觉单元不一致） | 图注（书名文字）渲染在带 onClick 的 `.book-card` 之外，点书名不开书、点封面才开；键盘与表视图按钮正常 | F01 K4「只点图注书名能否开书 = false」 | §5.4 D51 书卡为一个视觉单元 |
+| D-TEST-16 ✅已修复（批次 D 代码 + 2026-09-22 08:36Z 真实应用 GUI 实测确认，known 已降级） | 低（可点区与视觉单元不一致） | 图注（书名文字）渲染在带 onClick 的 `.book-card` 之外，点书名不开书、点封面才开；键盘与表视图按钮正常 | F01 K4「只点图注书名能否开书 = false」 | §5.4 D51 书卡为一个视觉单元 |
 | D-TEST-06 ✅已修复（批次 A） | 中高（无出口的整页不可用） | 卡片任一 JSON 列脏 → 复习页与仪表盘整体抛异常，且卡片浏览页同崩，界面上删不掉这行。**复核补充**：`mapCardRow` 里共 9 处裸 `JSON.parse`（只有 `fsrs_json` 有兜底），F13 的逐列矩阵目前只覆盖 4 列，其余 5 列是同类地雷 | F13 P1（含逐列定位与自愈路径） | §4.2-20「损坏行在队列与统计中一致跳过」 |
 | D-TEST-07 ✅已修复（批次 D） | 低-中（数据卫生） | `createJournalEntry` 不校验 `entry_date`，`"2026-13-45"` 之类原样入库，日记分组/记忆水位线漂出 | F13 P5 | §6.5 自然日归类、§7.2 |
 | D-TEST-08 ✅已修复（批次 C） | 中-高（安全红线） | `getAIConfig()` 把解密后的明文 apiKey 经 IPC 送进渲染层 | F16 U4 | §7.5「渲染层不持有明文 Key」 |
@@ -538,7 +539,7 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 | D-TEST-10 ✅已修复（批次 D） | 低（口径不一致） | 词典/制卡侧做 NFKC 折叠，日记与知识库搜索不做：搜 `ＡＢＣ` 命中 0，搜 `ABC` 命中 5 | F19 Z4 | §6.5、§7.4 同类归一化应同源 |
 | D-TEST-11 ✅已修复（批次 A） | 中（一个越界参数让整页白屏） | `limit: 1.5` 直穿 SQL → `datatype mismatch` 抛异常，9 个清单函数全中招；同族函数遇显式 `null` 入参同样崩（默认值只兜 `undefined`） | F19 Z2（1376 次调用矩阵） | §7.1.3 边界输入不得穿透到崩溃、§7.6 |
 | D-TEST-12 ✅已修复（批次 B） | 中（一张图恒为 0） | 阅读历史日桶取值用 `now - n×86400000`（带当天毫秒）去查以 `dayStartMs()` 为键的表 → 永不命中，`chars` 恒为 0；日桶数量还随调用时刻在 45/46 间跳 | F19 Z7（推进 500 字后合计仍 0 字） | §6.2 学习仪表盘、§4.12-4 自然日口径 |
-| D-TEST-13 ⏳代码已改（批次 D），GUI 实测待补 | 中（承诺过的安全边界没实现） | 注释与指南两处写「输入焦点内绝不劫持」，`dispatchKey`/`install` 里没有任何焦点判断；实测焦点在 `INPUT` 内的 `Ctrl+Z` 照样执行动作 | F20 W3（行为 + 静态双证） | §9.1 M4 键位三不变量、§7.1.3 |
+| D-TEST-13 ✅代码已改（批次 D）· 机检硬断言 · 真实键盘端到端待用户在场的 m4.gui | 中（承诺过的安全边界没实现） | 注释与指南两处写「输入焦点内绝不劫持」，`dispatchKey`/`install` 里没有任何焦点判断；实测焦点在 `INPUT` 内的 `Ctrl+Z` 照样执行动作 | F20 W3（行为 + 静态双证） | §9.1 M4 键位三不变量、§7.1.3 |
 | D-TEST-14 ✅已修复（批次 D） | 低（残缺串能进设置） | `eventToCombo({key:"",ctrlKey:true})` 生成 `"Ctrl+"`：匹配不到任何键，却能写进 `settings.app.keybindings` 并被 `conflictWith` 当占用 | F20 W2 | §9.1 M4「存储串 = 展示串 = 匹配串」 |
 | D-TEST-15 ✅已修复（批次 E） | 中低（写入口零校验 + 假成功） | `updateProgress` 不校验值形状也不校验 id 存在：`"字符串"`/`42`/`true`/`[]` 原样进 `progress_json`，给不存在的书写进度返回 `true`；`addReadingEvent` 能给不存在的书插一条 5000 字的幽灵记录。当前被读侧 try 网兜住没爆成界面故障。**F32 全量清点后升格为「一类」**：28 条探针里 15 个针对既有行的函数返回真值，诚实抛错的只有 5 个；`card_issues`/`extracts`/`reading_events` 三族都接受幽灵父 id；`createCard({})` 连正文都不要求就落一行。同时给出清白结论：27 张表逐行差分**零越界改写** | F23 Q3 + Q4；F32 W2/W3/W6 | §7.2 数据完整性、§7.1.3 |
 
@@ -547,20 +548,24 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 | D-TEST-22 ✅已修复（批次 D） | 中（清洗越界吃掉正文） | `markdownFromText` 无上下文清洗，围栏代码块内的 `<style>…</style>` 被整段删掉，违反文档自述的「正文不做任何改写」 | F30 S3 | §9.1 M6-1、§4.2、§7.2 |
 | D-TEST-23 ✅已修复（批次 B） | 低（潜在，当前被 D-TEST-12 遮蔽） | 阅读字数取数（`db.js:2242`，复核更正行号）不带任何 is_deleted 条件——且该表建表时（`db.js:181-186`）根本没有这一列，所以修法只能是 JOIN 父表而不是加列条件，`deleteItem` 又不软删 `reading_events` → 已删书的事件仍进统计输入集；一旦按 D-TEST-12 修好日桶，成长面板就开始替读不到的书涨字数（两条须同批修） | F31 J5 | §7.2 L869「查询一律带 is_deleted=0」、§6.2、§4.12-4 |
 
-复现（约 1 秒）：`npx electron tests/flows/f03-scheduling-conservation.cjs`，看 S3 矩阵与 S10 两行 `✗(已知)`。
-疑似修复点（仅报告，未改代码）：`electron/db.js:737 insertFsrsConfig` 结尾补 `persist()`，
-或 `electron/optimizer.js:115 applyWeights` 在 `setActiveFsrsConfig` 后调 `db.persistNow()`。
+复现：`node tests/flows/run.cjs --only F03`（S3 落盘矩阵 + S10 应用权重后重启回退）——批次 C 后这两条已是硬断言，不再有 `✗(已知)`。
+修复落点（批次 C，2026-09-22）：仓储层自己保证落盘——`electron/optimizer.js` 的 `applyWeights` 与 `resetWeights`
+在改完指针后各调一次 `db.persistNow()`；`insertFsrsConfig` **刻意不加** `persist()`（同批多条快照写入时避免半程落盘）。
 
-## 6. 文档自身待办（本次核验发现，未改动）
+## 6. 文档自身待办（本次核验发现；**批次 F 已按 v48.16 / D52 全量收口**）
 
-- 表数量口径不一致：L90 写「23 张」、L56 写「17 张表」，`electron/db.js` 实建 **27** 张（`material_map_*`、`dict_sources`、`dictionary_cache`、`reading_events` 未列入 §4.1）。
-- `cards.memory_ref_json` 形状：L100 写 `{itemText,itemDate,topicPath,runId,verified}`，代码实为 `{line,verified}`（`db.js:472`、`src/lib/cards.ts:1091`）。
-- `memory:*` 通道名：L150 列的 7 个与 `preload.js:267` 实际 10 个不一致。
-- §7.3 L883/L884 同一条 M6-1 测试义务重复两遍（断言数 49 与 43 互相矛盾）；§7.6 整节重复（L915 与 L923）；§1 原则 8–10、§4.2-23/24 等多段逐字重复。
-- §9.2 状态表与正文矛盾：L1517 标 M8 ❌、L1421 标 M14 未实现，但 §6.5/§6.7 与代码显示 M8-A/B、M14 均已实现。
-- 设置面未收口两处（F18 Y1 机检）：§4.2-3 L128 说 SettingsStore 只有 `app / theme / plugin.<id>` 三层，代码实际还在用 `dashboard` 层，且 11 个在读键（`app.dictMode`、`app.autoBackupEnabled`、`app.globalShortcuts`、`app.mindmap*` 四项等）文档从未登记；§7.4 L901 又把 §4.4.10/D22 明令废除的 `app.fsrsWeights` 当现行配置项列出，`src/lib/fsrs.ts:6` 注释同样停留在旧路径。
+> 下面 6 条即 DEFECTS.md 的 D-DOC-01…09 + 2 条未编号漂移，逐条收口结果见
+> [`DEFECTS.md` 的「文档↔代码漂移」表](DEFECTS.md) 新增「收口」列。改文档不动行为，
+> 除 `src/lib/fsrs.ts` 那行注释外 `electron/*`、`src/*` 零改动。
 
-这些属于「文档↔代码漂移」，按既有约定应改文档不动代码，需要用户拍板后再收口。
+✅ 已收口（D-DOC-03）：L90 写「23 张」、L56 写「17 张表」，`electron/db.js` 实建 **27** 张（`material_map_*`、`dict_sources`、`dictionary_cache`、`reading_events` 未列入 §4.1）。
+⚠️ **未收口**（规格 §F 清单外，收口时才发现；改它等于改写 §4.18 字段契约，等单独拍板；详见 DEFECTS.md「批次 F 范围外」行）：L100 写 `{itemText,itemDate,topicPath,runId,verified}`，代码实为 `{line,verified}`（`db.js:472`、`src/lib/cards.ts:1091`）。
+✅ 已收口（D-DOC-04/05）：L150 列的 7 个与 `preload.js:267` 实际 10 个不一致。
+✅ 已收口（D-DOC-01/02）： M6-1 测试义务重复两遍（断言数 49 与 43 互相矛盾）；§7.6 整节重复（L915 与 L923）；§1 原则 8–10、§4.2-23/24 等多段逐字重复。
+✅ 已收口（未编号·一）：L1517 标 M8 ❌、L1421 标 M14 未实现，但 §6.5/§6.7 与代码显示 M8-A/B、M14 均已实现。
+✅ 已收口（D-DOC-07/08）：§4.2-3 L128 说 SettingsStore 只有 `app / theme / plugin.<id>` 三层，代码实际还在用 `dashboard` 层，且 11 个在读键（`app.dictMode`、`app.autoBackupEnabled`、`app.globalShortcuts`、`app.mindmap*` 四项等）文档从未登记；§7.4 L901 又把 §4.4.10/D22 明令废除的 `app.fsrsWeights` 当现行配置项列出，`src/lib/fsrs.ts:6` 注释同样停留在旧路径。
+
+除上面标 ⚠️ 的那条（`memory_ref_json` 形状，规格清单外）之外，其余全部收口完毕；机检闸门侧同步把 12 处 `known` 降级为常规断言，F11 / F18 / F20 / F21 / F24 / F27 六道闸门 0 已知、0「意外转绿」。
 
 ## 7. 既有套件回归基线（2026-09-22 03:55 本地 / 19:55Z）
 
