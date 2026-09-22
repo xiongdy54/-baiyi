@@ -1,7 +1,10 @@
 # Implementation Specification — 全量批次 A–F（一次性交付版）
 
 > **交付对象**：另一个 Coding Agent。本文件 + `docs/impl-spec/BATCH-A-READ-ROBUSTNESS.md`（批次 A 的完整细节与探针）合起来是一份可以直接执行的规格。
-> **目标分支**：`test/flow-coverage`（`tests/flows/`、`docs/test-flows/` 只存在于该分支；`electron/`、`src/` 两分支逐字节一致）。
+> **基线（2026-09-22，用户已批准并执行）**：`main` 已**快进**合并到 `test/flow-coverage`，两分支同处 `c48f0b0`
+> （70 个文件 / +16189 行：D51 书架重设计实现、33 条流程与 harness、`docs/test-flows/`、本规格书、UI优化 的文档与样张）。
+> 因此**本规格里的文件与行号引用现在在 `main` 上同样成立**（此前 `src/lib/shelf.ts`、`.cap`/`cap-rail` 结构、`tests/flows/` 在 main 上并不存在）。
+> **执行方式**：从 `main` 拉一个工作分支（推荐 `fix/read-robustness`）执行本规格；**执行期间 `main` 保持不动**，做完并通过 §统一验收 后再合回。
 > **产出方式**：批次化执行、每批一个 commit、每批独立验收；**要么按批全部完成，要么停在批次边界如实报告**——不允许"半批"（改了代码没改断言、或改了断言没跑回归）。
 > 所有"现状"结论都由 Principal Architect 在 2026-09-22 通过读实现（带行号）+ 跑探针实测确认；未确认项集中在 §Q。
 
@@ -17,7 +20,7 @@
    流程总数口径：**32 条自动 + `F01`（`@gui:true`，需人工在场）= 33 条**。
    ⚠️ **不要用 `--cycles 1`**——`run.cjs` 的内层 break 会让它只跑第一条流程就收工（实测只跑了 F03）。
 4. **`git status` 里 `tests/*.bundle.cjs`、`tests/fsrs/golden.json` 变脏是既有套件的副产物**，不要提交；提交一律用显式路径（别 `git add -A`，也别 `git add .`）。
-5. **`main` 分支不许动**；本批全部在 `test/flow-coverage` 上做。
+5. **`main` 在执行期间不许动**（2026-09-22 已批准执行的 `main` 快进是唯一例外，见顶部基线说明）；批次改动全部落在工作分支上。
 6. **Windows/Git Bash 写文件**：多行替换用 Edit 工具或 `python -X utf8`，**不要用 shell heredoc 传含反斜杠的代码**（会吞字符，已踩）。`node -e` 里的反引号会被 shell 吃掉，改用文件或 python。
 7. **批次 F 是文档批次**：按本项目约定「文档↔代码矛盾时改文档不动代码」，且要**全量收口（bump 版本 + 决策号）**——执行前必须让用户拍板。
 8. **不许顺手重构**：只动本规格点名的文件与函数；看到别的可疑代码，写进报告，不要改。
@@ -514,9 +517,16 @@ function rowExists(table, id, hasSoftDelete = true) {
 3. **两处实传载荷必须先记录在案，再定校验 predicate**（否则会静默丢数据）：
    ① `src/App.tsx:274` 的 `handleDocProgress` 实传 `{ ratio, lastText, updatedAt: Date.now(), ...extra }`（**已核实**：普通对象，字段都是 number/string）——
    `updateProgress` 的形状校验只拒"非对象 / 数组 / `null`"，**不要拒合法字段组合**（这个调用是 fire-and-forget，拒错了等于把用户的全部阅读进度静默丢掉）；
-   ② **AI 批量制卡路径**：grep `createCard(` 在 AI 生成链路（`main.js` 的 batches 相关 handler 与 `src/lib/cards.ts`）上的调用，
-   确认是**逐卡 `try/catch`** 还是整批中断——若不是逐卡兜底，`createCard` 拒绝空白卡的抛错会污染整批，
-   必须先改调用方再收紧（这也是"AI 输出不确定性"的一条边界）。
+   ② **AI 批量制卡路径（普查已完成，2026-09-22）**：`createCard` 的生产入口只有一条——`main.js:402` `ipcMain.handle("cards:create", (_e, card) => createCard(card || {}))`；
+   渲染层统一走 `createAcceptedCard`（`src/lib/cards.ts:1050`），而**多草稿是循环 `await` 且没有逐卡 `try/catch`**
+   （实例：`Reader.tsx:1525-1546` 的 `acceptVocabCards`，`for (const v of drafts) { … await createAcceptedCard(…) }`）。
+   → **结论：T3 的"拒绝空白卡"不要用抛错实现**——一张坏草稿会中断整批（后面的卡全不落库、toast 也不出现）；
+   改成**返回 `null`/`false` 且不落库**（与 T1/T2 档"可判失败"一致），调用方零改动即可继续。
+   若确实要抛错，必须先把上面那类循环逐个改成逐卡 `try/catch`——那是另一个改动，不要顺手做。
+   ③ **空白卡的判据必须把 occlusion 与 cloze 算作"有内容"**（否则会误拒合法卡）：
+   `createAcceptedCard` 对图片挖空卡会传 `occlusionJson`（`src/lib/cards.ts:1072`），且 `:491` 注明"qa：occlusionJson 挂图、rects 空数组、front 存题面"；
+   挖空卡的 `noteText` 取 `dd.front || cloze`（`:1066`）。
+   → 判据必须是：`frontMarkdown` / `backMarkdown` / `noteText` **全空** 且 `occlusionJson` 为空 且 `clozeOrds` 为空 且未提供 `cloze`，才算空白卡。
 **不变量**：正常路径（id 存在）返回 `true` 的行为逐值不变；`saveReview` 等三族抛错语义不变；`deleteCard` 连带置 `card_issues` 为 dismissed 的既有行为不变。
 **必须新增断言**：`f32` W2/W3/W6 三条 known 提为硬断言（幽灵 id 一律 `false`/抛错；三族不再收幽灵父 id；`createCard({})` 抛错）；`f23` Q3/Q4 同步。
 **known 降级**（**落成行号**）：`f32` 的三条（W2「点名清单外不得新增假成功」/ W3「诚实性棘轮」/ W6「幽灵父行与空白卡」）
@@ -600,7 +610,7 @@ npm run build                                     # 批次 D3 改了渲染层
 
 ## Q. 需要进一步确认（执行前必须落实，不要自行假设）
 
-- **Q1**：`f18-settings-matrix.cjs` 里 `Y3`/`Y7` 的**确切断言名**（`grep -n "known(" tests/flows/f18-settings-matrix.cjs` 逐条核对后再降级）。
+- ~~Q1~~ **已确认（2026-09-22，快进后逐行核对）**：`f18-settings-matrix.cjs:276`「合法 JSON 但非对象（null/0/true/字符串）也必须回退为默认对象」（Y3 段 `:256` 起）与 `:369`「非对象设置（null/0/true/字符串）下应用必须仍能启动」（Y7 段 `:335` 起）——**这两条就是批次 A 要降级的 known，别动该文件里的其它 known**（`:166`/`:177` 属 D-DOC-07、`:182`/`:189` 属 D-DOC-08，都归批次 F）。
 - **Q2**：**规范级依据缺失**——全指南检索「损坏行 / 一致跳过 / 不得穿透」**零命中**，批次 A 的口径只写在 `db.js:2051` 的代码注释里。提交信息里**不得**写成"指南 §x 要求"。
 - **Q3**：批次 E3 要求的**调用点普查**结果（见 E3 步骤 1）；发现依赖即停手上报。
 - **Q4**：批次 E2 的 `is_default` **语义**（① 默认版本 / ② 系统播种标记）——需用户拍板。
