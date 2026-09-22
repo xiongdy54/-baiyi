@@ -1049,38 +1049,77 @@ function normalizeFsrs(json) {
   return { state: "new", due: Date.now(), lapses: 0 };
 }
 
+// 清单族统一入参归一（批次 A）：不得让分数/负数/字符串/NaN/±Infinity 直达 SQL 的 LIMIT/OFFSET。
+// 语义沿用既有 `Number(x) || DEF`（0 / 空 / 非数 → 默认值，**不改这个语义**），
+// 只补 Math.floor 保证整数——实测：limit 1.5 与 offset 1.5 都会让 sql.js 抛 datatype mismatch。
+function clampLimit(limit, def, cap) {
+  const n = Math.floor(Number(limit) || def);
+  return Math.max(1, Math.min(cap, n)); // 有 cap 兜住 ±Infinity
+}
+function clampOffset(offset) {
+  // ⚠️ 不能写成 Math.max(0, Math.floor(Number(offset) || 0))：Number(Infinity) 是 truthy，
+  // Math.floor 后仍是 Infinity，Math.max(0, Infinity) 还是 Infinity → OFFSET Infinity 照样 datatype mismatch。
+  // offset 没有 cap，必须显式判有限性并给上限。
+  const n = Number(offset);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1e9, Math.floor(n))) : 0;
+}
+
 function mapCardRow(r) {
   if (!r) return null;
+  // 批次 A：9 个 JSON 列文本损坏时回落空值并记录列名，绝不抛（"空"比"错"安全）。
+  // 只有致命列（fsrs_json / leech_json = 调度与挂起状态无法判定）才把行标为 damaged。
+  const bad = [];
+  const j = (text, fallback, col) => {
+    if (text === null || text === undefined || text === "") return fallback;
+    try {
+      const v = JSON.parse(text);
+      return v === null || v === undefined ? fallback : v;
+    } catch {
+      bad.push(col);
+      return fallback;
+    }
+  };
+  let fsrsBad = false;
+  if (r.fsrs_json) {
+    try {
+      JSON.parse(r.fsrs_json);
+    } catch {
+      fsrsBad = true;
+    }
+  }
+  const damagedColumns = fsrsBad ? ["fsrs_json", ...bad] : bad;
   return {
     id: r.id,
     noteText: r.note_text,
     cardType: r.card_type,
-    clozeOrds: JSON.parse(r.cloze_ords || "[]"),
+    clozeOrds: j(r.cloze_ords, [], "cloze_ords"),
     cardOrd: r.card_ord,
     frontMarkdown: r.front_markdown,
     backMarkdown: r.back_markdown,
     contextPrefix: r.context_prefix,
-    contextRef: r.context_ref_json ? JSON.parse(r.context_ref_json) : null,
+    contextRef: j(r.context_ref_json, null, "context_ref_json"),
     mnemonic: r.mnemonic,
     example: r.example,
-    sourceRef: r.source_ref_json ? JSON.parse(r.source_ref_json) : null,
+    sourceRef: j(r.source_ref_json, null, "source_ref_json"),
     dateStamp: r.date_stamp,
     priority: r.priority,
-    tags: JSON.parse(r.tags_json || "[]"),
-    domain: r.domain ? JSON.parse(r.domain) : [],
+    tags: j(r.tags_json, [], "tags_json"),
+    domain: j(r.domain, [], "domain"),
     knowledgePointId: r.knowledge_point_id,
-    occlusionJson: r.occlusion_json ? JSON.parse(r.occlusion_json) : null,
+    occlusionJson: j(r.occlusion_json, null, "occlusion_json"),
     fsrs: normalizeFsrs(r.fsrs_json),
     fsrsConfigId: r.fsrs_config_id || null,
-    leech: r.leech_json ? JSON.parse(r.leech_json) : null,
+    leech: j(r.leech_json, null, "leech_json"),
     generatedBy: r.generated_by,
     genBatchId: r.gen_batch_id,
-    dictJson: r.dict_json ? JSON.parse(r.dict_json) : null,
+    dictJson: j(r.dict_json, null, "dict_json"),
     // v46（M14-UM2，§4.18-10）：记忆溯源（{line, verified}；NULL=未用记忆）
-    memoryRefJson: r.memory_ref_json ? JSON.parse(r.memory_ref_json) : null,
+    memoryRefJson: j(r.memory_ref_json, null, "memory_ref_json"),
     siblingKey: r.sibling_key || null,
     createdAt: r.created_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    damaged: fsrsBad || damagedColumns.includes("leech_json"),
+    damagedColumns
   };
 }
 
@@ -1283,7 +1322,7 @@ function computeSiblingDeferred(cards, now) {
 }
 
 const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle FROM cards c
-     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0
      ORDER BY c.created_at ASC`;
@@ -1295,8 +1334,14 @@ const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle FROM cards c
 function computeTodayQueue(now = Date.now()) {
   const nowMs = Number.isFinite(now) ? now : Date.now();
   const rows = queryAll(TODAY_QUEUE_SQL);
-  const mapped = rows.map(mapCardRow).map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
-  const candidates = mapped.filter((c) => {
+  // 批次 A（D-TEST-06）：调度/挂起状态无法判定的行（fsrs_json 或 leech_json 损坏）从队列缺席，
+  // 但经 damaged 字段照常可见——卡片浏览与 getCard 仍给出口，用户不会以为卡丢了。
+  const mapped = rows.map(mapCardRow);
+  const damaged = mapped.filter((c) => c && c.damaged);
+  const ok = mapped
+    .filter((c) => c && !c.damaged)
+    .map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
+  const candidates = ok.filter((c) => {
     if (c.leech?.suspended) return false;
     return (c.fsrs?.due ?? nowMs) <= nowMs;
   });
@@ -1306,7 +1351,7 @@ function computeTodayQueue(now = Date.now()) {
     .filter((c) => deferredMap.has(c.id))
     .sort(queueMemberOrder)
     .map((c) => ({ ...c, deferReason: deferredMap.get(c.id) }));
-  return { cards, deferred, now: nowMs };
+  return { cards, deferred, damaged, now: nowMs };
 }
 
 function listDueCards(now) {
@@ -1319,7 +1364,7 @@ function listAllCards() {
   // v19：补 docTitle JOIN（同 listDueCards）——卡片浏览页需要展示来源书并按书筛选
   const rows = queryAll(
     `SELECT c.*, li.title AS docTitle FROM cards c
-     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0 ORDER BY c.created_at DESC`
   );
@@ -2051,10 +2096,11 @@ function getStatsOverview() {
   // 损坏行（fsrs/leech JSON 解析失败）在队列与统计中一致跳过，不再两处口径不同。
   const kpiCards = [];
   for (const row of queryAll(TODAY_QUEUE_SQL)) {
-    try {
-      const mapped = mapCardRow(row);
-      kpiCards.push({ ...mapped, docTitle: mapped.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null });
-    } catch { /* 忽略损坏行 */ }
+    const mapped = mapCardRow(row);
+    // mapCardRow 已不抛（批次 A），原来的 try/catch 会变成永不触发的死代码；
+    // 换成显式跳过 damaged 行，否则坏行会被算进 KPI（与 computeTodayQueue 同一口径）。
+    if (!mapped || mapped.damaged) continue;
+    kpiCards.push({ ...mapped, docTitle: mapped.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null });
   }
   const active = kpiCards.filter((c) => !c.leech?.suspended);
   const dueTodayCandidates = active.filter((c) => (c.fsrs?.due ?? now) <= today24);
@@ -2185,7 +2231,7 @@ function getStatsOverview() {
   const srcRows = queryAll(
     `SELECT c.id, c.domain, c.source_ref_json, c.context_ref_json, li.title AS bookTitle
      FROM cards c
-     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0 AND c.created_at >= ?`,
     [srcFrom]
@@ -2339,7 +2385,8 @@ function getJournalDraft() {
 
 // 列表：{from,to} 日期闭区间（'YYYY-MM-DD'；含端点）、{query} 内容子串、{limit,offset} 分页。
 // 排序固定 = `entry_date DESC, created_at ASC`（日期倒序 / 日组内正序，§6.5.3）；total=同条件总数（分页用）。
-function listJournalEntries({ from, to, query, limit = 200, offset = 0 } = {}) {
+function listJournalEntries(opts) {
+  const { from, to, query, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (from) {
@@ -2357,8 +2404,8 @@ function listJournalEntries({ from, to, query, limit = 200, offset = 0 } = {}) {
   }
   const sqlWhere = where.join(" AND ");
   const total = queryAll(`SELECT COUNT(*) AS n FROM journal_entries WHERE ${sqlWhere}`, params)[0]?.n || 0;
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM journal_entries WHERE ${sqlWhere} ORDER BY entry_date DESC, created_at ASC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -2367,8 +2414,9 @@ function listJournalEntries({ from, to, query, limit = 200, offset = 0 } = {}) {
 }
 
 // 有内容的日期清单（倒序）+ 每日条数（日记页日期分组与「今日已记 N 条」同源）
-function listJournalDates({ limit = 400 } = {}) {
-  const lim = Math.max(1, Math.min(4000, Number(limit) || 400));
+function listJournalDates(opts) {
+  const { limit = 400 } = opts ?? {};
+  const lim = clampLimit(limit, 400, 4000);
   const rows = queryAll(
     `SELECT entry_date AS entryDate, COUNT(*) AS count FROM journal_entries WHERE is_deleted = 0
      GROUP BY entry_date ORDER BY entry_date DESC LIMIT ?`,
@@ -2456,8 +2504,9 @@ function deleteJournalEntry(id, opts) {
 
 // v45（M14-UM1，§4.18-11/-16）：水位线增量读取——`updated_at > since` 的已发送条目，时间正序
 // （早期记忆珍贵，补处理先建早期处境）。since=null ⇒ 全部历史（首次开启窗口）。草稿永不入包（§4.18-11①）。
-function listJournalEntriesSince({ sinceUpdatedAt = null, limit = 30 } = {}) {
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 30));
+function listJournalEntriesSince(opts) {
+  const { sinceUpdatedAt = null, limit = 30 } = opts ?? {};
+  const lim = clampLimit(limit, 30, 1000);
   const params = [];
   let where = "is_deleted = 0 AND is_draft = 0";
   if (sinceUpdatedAt != null && Number.isFinite(Number(sinceUpdatedAt))) {
@@ -2569,7 +2618,8 @@ function resolveKpFamily(id) {
 
 // 列表：{query} 命中 canonical_label 或任一 alias（LIKE 子串）；{domainId}/{status} 过滤；
 // 排序 = canonical_label 升序（管理面稳定序）；total=同条件总数。
-function listKnowledgePoints({ query, domainId, status, limit = 200, offset = 0 } = {}) {
+function listKnowledgePoints(opts) {
+  const { query, domainId, status, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (status) {
@@ -2588,8 +2638,8 @@ function listKnowledgePoints({ query, domainId, status, limit = 200, offset = 0 
   }
   const sqlWhere = where.join(" AND ");
   const total = queryAll(`SELECT COUNT(*) AS n FROM knowledge_points WHERE ${sqlWhere}`, params)[0]?.n || 0;
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM knowledge_points WHERE ${sqlWhere} ORDER BY canonical_label ASC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -2744,7 +2794,8 @@ function wouldCreatePrerequisiteCycle(fromId, toId) {
   return { cycle: false, path: [] };
 }
 
-function listKnowledgeRelations({ kpId, relationType, limit = 500, offset = 0 } = {}) {
+function listKnowledgeRelations(opts) {
+  const { kpId, relationType, limit = 500, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (kpId) {
@@ -2758,8 +2809,8 @@ function listKnowledgeRelations({ kpId, relationType, limit = 500, offset = 0 } 
     params.push(String(relationType));
   }
   const sqlWhere = where.join(" AND ");
-  const lim = Math.max(1, Math.min(2000, Number(limit) || 500));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 500, 2000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM knowledge_relations WHERE ${sqlWhere} ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -2853,14 +2904,15 @@ function deleteKnowledgeExternalRef(id, opts) {
 
 // ---------- 提案暂存（staging，§1.7） ----------
 
-function listKnowledgeProposals({ status = "pending", proposalKind, limit = 200, offset = 0 } = {}) {
+function listKnowledgeProposals(opts) {
+  const { status = "pending", proposalKind, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (status) { where.push("status = ?"); params.push(String(status)); }
   if (proposalKind) { where.push("proposal_kind = ?"); params.push(String(proposalKind)); }
   const sqlWhere = where.join(" AND ");
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM knowledge_proposals WHERE ${sqlWhere} ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -3613,9 +3665,10 @@ function getInsightRun(id) {
 }
 
 // 洞察历史（列表默认只回 runs 的轻量视图：不含 evidence_package 全文，防 UI 拉爆）
-function listInsightRuns({ limit = 50, offset = 0, includePackage = false } = {}) {
-  const lim = Math.max(1, Math.min(500, Number(limit) || 50));
-  const off = Math.max(0, Number(offset) || 0);
+function listInsightRuns(opts) {
+  const { limit = 50, offset = 0, includePackage = false } = opts ?? {};
+  const lim = clampLimit(limit, 50, 500);
+  const off = clampOffset(offset);
   const rows = queryAll(
     "SELECT * FROM insight_runs WHERE is_deleted = 0 ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?",
     [lim, off]
@@ -3716,8 +3769,9 @@ function getLastMemoryRunSuccess() {
   return rows.length ? mapMemoryRunRow(rows[0]) : null;
 }
 
-function listMemoryRuns({ limit = 50 } = {}) {
-  const lim = Math.max(1, Math.min(500, Number(limit) || 50));
+function listMemoryRuns(opts) {
+  const { limit = 50 } = opts ?? {};
+  const lim = clampLimit(limit, 50, 500);
   return queryAll(
     "SELECT * FROM memory_runs WHERE is_deleted = 0 ORDER BY started_at DESC, id ASC LIMIT ?",
     [lim]
@@ -3875,13 +3929,14 @@ function mapPmcRow(r) {
   };
 }
 
-function listPersonalMeaningCandidates({ status, limit = 200, offset = 0 } = {}) {
+function listPersonalMeaningCandidates(opts) {
+  const { status, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (status) { where.push("status = ?"); params.push(String(status)); }
   const sqlWhere = where.join(" AND ");
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM personal_meaning_candidates WHERE ${sqlWhere} ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]

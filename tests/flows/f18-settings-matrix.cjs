@@ -273,10 +273,31 @@ app
         if (note) (nonObj.has(b) ? unsafeNonObj : unsafeOther).push(`${b.slice(0, 10)} →${note}`);
       }
       flow.check("损坏配置（语法坏/类型不对的 JSON）一律安全回退且消费方不崩", unsafeOther.length === 0, "全部安全", unsafeOther);
-      flow.known("合法 JSON 但非对象（null/0/true/字符串）也必须回退为默认对象", unsafeNonObj.length === 0, "D-TEST-09", "全部安全", unsafeNonObj);
+      flow.check("合法 JSON 但非对象（null/0/true/字符串）也必须回退为默认对象", unsafeNonObj.length === 0, "全部安全", unsafeNonObj);
       fs.writeFileSync(settingsFile, goodBackup);
       st = reopenStore();
       flow.eq("恢复文件后读取正常", st.readSettings().app.dayCutoffHour, 6);
+
+      // ---------- Y3b 三个读设置入口在 settings 非对象时必须可用（批次 A / D-TEST-09） ----------
+      // 规格 §B 的探针实测：settings.json = null 时崩点是「首个读设置的口子」——
+      // getActiveFsrsConfig(db.js:728) / getStatsOverview→getCutoffHour(:2035) / computeTodayQueue→siblingBuryConfig(:1189)。
+      // 这里把它固化成流程，防的是"只修了门面、没修消费方"。
+      flow.section("Y3b settings 非对象时三个读设置入口都不抛（把批次 A 的探针固化成流程）");
+      const goodBackup3b = fs.readFileSync(settingsFile, "utf8");
+      const entryErr = [];
+      for (const b of ["null", "0", "true", '"设置"', "[]", "[1,2,", ""]) {
+        fs.writeFileSync(settingsFile, b, "utf8");
+        for (const fn of ["getActiveFsrsConfig", "getStatsOverview", "computeTodayQueue"]) {
+          try {
+            if (typeof db[fn] !== "function") entryErr.push(`${b}/${fn}: db 未导出该函数`);
+            else if (db[fn]() === undefined) entryErr.push(`${b}/${fn}: 返回 undefined`);
+          } catch (e) {
+            entryErr.push(`${b}/${fn}: ${String((e && e.message) || e).slice(0, 40)}`);
+          }
+        }
+      }
+      fs.writeFileSync(settingsFile, goodBackup3b, "utf8");
+      flow.check("settings.json 为 null/0/true/字符串/数组/语法坏时，三个读设置入口全部可用", entryErr.length === 0, "全部不抛", entryErr);
 
       // ---------- Y4 非法值回落（真实消费路径） ----------
       flow.section("Y4 非法值经真实消费路径必须回落（§4.16 矩阵 / §4.18 默认关 / §6.5 归一化）");
@@ -366,7 +387,7 @@ app
       flow.record("冷启动逐档结果", `${broken.length - bootNonObj.length - bootOther.length}/${broken.length} 档能起来`);
       fs.writeFileSync(settingsFile, goodBackup);
       delete require.cache[path.join(ROOT, "electron", "settingsStore.js")];
-      flow.known("非对象设置（null/0/true/字符串）下应用必须仍能启动", bootNonObj.length === 0, "D-TEST-09", "仍可启动", bootNonObj);
+      flow.check("非对象设置（null/0/true/字符串）下应用必须仍能启动", bootNonObj.length === 0, "仍可启动", bootNonObj);
       flow.check("语法损坏设置下应用必须仍能启动", bootOther.length === 0, "仍可启动", bootOther);
       flow.eq("冷启动探测不改写磁盘数据（全库行数守恒）", await volumeOf(), volBefore);
     });

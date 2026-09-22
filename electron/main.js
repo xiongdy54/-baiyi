@@ -99,11 +99,17 @@ const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
 
 function readSettings() {
   try {
-    return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+    const v = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+    // 批次 A（D-TEST-09）：合法 JSON 但非对象时同样兜底。保留 { app, theme } 形状——
+    // settings:set 的 all[scope][key] = value 依赖它。不做自愈写回，不覆盖用户文件。
+    return v && typeof v === "object" && !Array.isArray(v) ? v : { app: {}, theme: {} };
   } catch {
     return { app: {}, theme: {} };
   }
 }
+
+// 注意：electron/settingsStore.js 另有一份 readSettings（db.js 与各仓储路径用它），
+// 两份长期分叉待后续批次合并。
 
 function writeSettings(all) {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
