@@ -74,17 +74,23 @@ runFlow(flow, async () => {
   // ---------- P2 边界值不得产出 junk ----------
   flow.section("P2 格式化函数喂边界与非法值：不抛、不空、不 NaN、不 undefined（§7.1.3）");
   const junk = [];
+  // 空串单列：非法输入下「什么都不显示」是合理语义（dayLabel 自己的 `if (!ms) return ""` 就是这个设计），
+  // 有效性由 P3 的五个合法时间戳守。复核修正：原来把空串也算 junk，等于把正确行为报成缺陷。
+  const empties = [];
+  // 复核修正：JSON.stringify(NaN) 与 JSON.stringify(Infinity) 都是 "null"，证据里分不清是谁——改用能区分的标签
+  const lab = (x) => (typeof x === "number" ? String(x) : x === undefined ? "undefined" : JSON.stringify(x));
   const probe = (label, fn, args) => {
     for (const x of args) {
       let out;
       try {
         out = fn(x);
       } catch (e) {
-        junk.push(`${label}(${JSON.stringify(x === undefined ? "undefined" : x)}): 抛错 ${String((e && e.message) || e).slice(0, 22)}`);
+        junk.push(`${label}(${lab(x)}): 抛错 ${String((e && e.message) || e).slice(0, 22)}`);
         continue;
       }
-      if (out === undefined || out === null) junk.push(`${label}(${JSON.stringify(x)}): 返回 ${out}`);
-      else if (typeof out === "string" && (!out.trim() || /NaN|Infinity|undefined|\[object/.test(out))) junk.push(`${label}(${JSON.stringify(x)}): 产出「${out}」`);
+      if (out === undefined || out === null) junk.push(`${label}(${lab(x)}): 返回 ${out}`);
+      else if (typeof out === "string" && /NaN|Infinity|undefined|\[object/.test(out)) junk.push(`${label}(${lab(x)}): 产出「${out}」`);
+      else if (typeof out === "string" && !out.trim()) empties.push(`${label}(${lab(x)})`);
     }
   };
   const times = [0, -1, 1, 0.5, 59999, 60000, 3600000, 86399999, 86400000, 2592000000, 31536000000, 1e18, NaN, -86400000, Infinity, -Infinity];
@@ -97,8 +103,15 @@ runFlow(flow, async () => {
   probe("library.lastReadDisplay", (x) => library.lastReadDisplay(x), [{ progressJson: "{坏" }, { progressJson: '{"lastText":"一句"}' }, {}, null, undefined]);
   probe("kpNorm.normalizeKpLabel", (x) => kpNorm.normalizeKpLabel(x), ["  间隔  重复  ", "", null, undefined, "ＡＢＣ", "___", "1".repeat(500)]);
   flow.record("探针取值组数", `七个展示函数 × 边界/非法值`);
+  flow.record("空串结果（非法输入下允许沉默）", empties.length ? empties.join(" ") : "（无）");
   void times;
-  flow.known("展示函数对非法数值与非零长度串不得产出 junk（空串 / undefined / NaN / Infinity / [object）", junk.filter((j) => !/lastReadDisplay\(null\)/.test(j)).length === 0, "D-TEST-19", "全部可展示", junk);
+  flow.known("展示函数对非法数值不得产出 junk（NaN / Infinity / undefined / [object；空串不算，那是「不显示」的合理语义）", junk.filter((j) => !/lastReadDisplay\(null\)/.test(j)).length === 0, "D-TEST-19", "全部可展示", junk);
+  // 复核补测（2026-09-22）：无效日期必须在展示层被拒，否则会印出自相矛盾的标签——
+  // 实现里只有格式正则（journal.ts:174），"2026-02-30" 通过正则后交给 new Date(2026,1,30) 静默进位到 3/2，
+  // 于是标签写「02-30」而星期取的是 3 月 2 日的。这条原来是静态推断、没有断言，复核时补上。
+  const roll = journal.journalDateLabel("2026-02-30");
+  flow.record("不存在的一天 2026-02-30 的展示", JSON.stringify(roll));
+  flow.known("不存在的日子（2026-02-30）必须被展示层拒绝，而不是静默进位成别人的星期", roll === "", "D-TEST-19", "空串", JSON.stringify(roll));
 
   // ---------- P3 同一时间戳跨页同口径 ----------
   flow.section("P3 同一个时间戳，书架「上次阅读」与日记日期标签必须说同一个日子（§4.12-4 / §7.1.6）");
