@@ -18,6 +18,7 @@ import { installInsightBridge } from "./lib/insight";
 import { installMemoryBridge } from "./lib/memory";
 import { installMindmapBridge, mindmapApi } from "./lib/mindmap";
 import { installActivityStore, seedFromRuns } from "./lib/activity";
+import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
 import { BackgroundActivity } from "./components/BackgroundActivity";
 import { readingWorkflow } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
@@ -126,6 +127,9 @@ export default function App() {
     void (async () => {
       try {
         const pending = await mindmapApi.pendingRuns();
+        // v48.17（D53）：用户点过「关闭」的那些不再回来。判定交给 seedFromRuns，
+        // 由它在同材料去重**之后**再问——先去重再问会让更旧的历史运行递补上来（GUI 实测复现过）。
+        await ensureDismissalsLoaded();
         seedFromRuns(
           (pending || []).map((r) => ({
             id: r.id,
@@ -134,7 +138,8 @@ export default function App() {
             materialTitle: r.materialTitle,
             callsDone: r.callsDone,
             updatedAt: r.updatedAt
-          }))
+          })),
+          isDismissed
         );
       } catch {
         /* 播种失败不影响启动 */

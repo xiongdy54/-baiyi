@@ -126,38 +126,54 @@ A.dismissTask("run-new");
 A.dismissAllFinished();
 check("A5③：批量清理后指示器消失（返回 null，不渲染）", A.primaryTask() === null && A.describeTask(null) === null, A.listTasks());
 
-console.log("---- M15R-A6 v48.13 P3 重启续跑：被打断 ≠ 失败（启动播种） ----");
+console.log("---- M15R-A6 重启续跑：被打断 ≠ 失败（D47） + 同材料去重（v48.17 D53）----");
 {
   A.resetActivity();
-  // 模拟应用重启后从主进程取回的「可续跑运行」
+  // 同一份材料（doc-a）三条运行：一条已完成、两条可续跑且 section_ready 更晚
   A.seedFromRuns([
     { id: "run-interrupted", documentId: "doc-a", status: "interrupted", materialTitle: "优绩主义", callsDone: 7, updatedAt: 2000 },
     { id: "run-ready", documentId: "doc-a", status: "section_ready", materialTitle: "优绩主义", callsDone: 2, updatedAt: 3000 },
     { id: "run-done", documentId: "doc-a", status: "completed", materialTitle: "优绩主义", callsDone: 9, updatedAt: 1000 }
   ]);
-  {
-    const t = A.primaryTask();
-    check("A6①：播种后指示器出现（用户能看到「上次那轮可以继续」）", Boolean(t), t);
-    check("A6②：已完成的运行不参与播种（不反复提示已完成）", A.listTasks().every((x) => x.runId !== "run-done"), A.listTasks().map((x) => x.runId));
-  }
-  {
-    const t = A.listTasks().find((x) => x.runId === "run-interrupted");
-    check("A6③：被关闭打断 → phase=interrupted 而非 failed", t && t.phase === "interrupted", t && t.phase);
-    const v = A.describeTask(t);
-    check("A6④：文案是「被中断 · 可继续」而不是失败", v.short.includes("被中断") && v.short.includes("可继续") && v.tone === "partial", v);
-    check("A6⑤：明说不是失败、缓存保留、零重复计费", v.detail.includes("不是失败") && v.detail.includes("零重复计费"), v);
-    check("A6⑥：可打开（续跑入口）", v.canOpen === true, v);
-  }
+  const ids = A.listTasks().map((x) => x.runId);
+  check("A6①：播种后指示器出现（用户能看到「上次那轮可以继续」）", Boolean(A.primaryTask()), ids);
+  check("A6②：已完成的运行不参与播种（不反复提示已完成）", !ids.includes("run-done"), ids);
+  check("A6③：同材料只留最新一条可续跑运行（这就是「关闭要点两次」的根因）", ids.length === 1 && ids[0] === "run-ready", ids);
   {
     const t = A.listTasks().find((x) => x.runId === "run-ready");
     const v = A.describeTask(t);
-    check("A6⑦：首层就绪的旧 run →「可继续深化」而非失败", v.short.includes("可继续深化") && t.phase === "section_ready", { s: v.short, p: t.phase });
+    check("A6④：首层就绪的 run →「可继续深化」而非失败", v.short.includes("可继续深化") && t.phase === "section_ready", { s: v.short, p: t.phase });
+  }
+  A.resetActivity();
+}
+{
+  A.resetActivity();
+  // 反方向：被中断那条才是最新的 → 它必须活下来（去重取「最新」而不是「先来」），且文案不得是失败
+  A.seedFromRuns([
+    { id: "run-ready-old", documentId: "doc-a", status: "section_ready", materialTitle: "优绩主义", callsDone: 2, updatedAt: 3000 },
+    { id: "run-interrupted", documentId: "doc-a", status: "interrupted", materialTitle: "优绩主义", callsDone: 7, updatedAt: 4000 }
+  ]);
+  const ids = A.listTasks().map((x) => x.runId);
+  check("A6⑤：去重取的是「最新」而不是「先来」", ids.length === 1 && ids[0] === "run-interrupted", ids);
+  {
+    const t = A.listTasks().find((x) => x.runId === "run-interrupted");
+    check("A6⑥：被关闭打断 → phase=interrupted 而非 failed", t.phase === "interrupted", t && t.phase);
+    const v = A.describeTask(t);
+    check("A6⑦：文案是「被中断 · 可继续」而不是失败", v.short.includes("被中断") && v.short.includes("可继续") && v.tone === "partial", v);
+    check("A6⑧：明说不是失败、缓存保留、零重复计费", v.detail.includes("不是失败") && v.detail.includes("零重复计费"), v);
+    check("A6⑨：可打开（续跑入口）", v.canOpen === true, v);
   }
   {
     // 续跑开始后广播到达 → 同一 runId 由「被中断」变回「运行中」
     emit({ runId: "run-interrupted", documentId: "doc-a", title: "优绩主义", stage: "running", done: 1, total: 4 });
     const t = A.primaryTask();
-    check("A6⑧：续跑的进度广播接管同一 runId（状态回到运行中）", t.runId === "run-interrupted" && t.phase === "running", t);
+    check("A6⑩：续跑的进度广播接管同一 runId（状态回到运行中）", t.runId === "run-interrupted" && t.phase === "running", t);
+  }
+  // 去重不得跨材料：另一份材料的可续跑运行照常播种，同材料那条已被接管也照常保留
+  A.seedFromRuns([{ id: "run-b", documentId: "doc-b", status: "interrupted", materialTitle: "混沌", callsDone: 3, updatedAt: 5000 }]);
+  {
+    const ids = A.listTasks().map((x) => x.runId);
+    check("A6⑪：不同材料的可续跑运行互不折掉", ids.includes("run-b") && ids.includes("run-interrupted"), ids);
   }
   A.resetActivity();
 }
@@ -198,5 +214,55 @@ console.log("---- M15R-A7 引擎子事件不得污染状态（真实现场：运
   A.resetActivity();
 }
 
-console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
-if (fail) process.exit(1);
+// ---- M15R-A8 v48.17（D53）处置持久化 + 播种口径：关过的不再回来，历史运行也不许递补 ----
+// A8 是异步的（要先保证已关清单读盘完成），所以 SUMMARY 挪到链尾再打印。
+(async () => {
+  const SEED = [
+    { id: "r1", documentId: "d1", status: "section_ready", materialTitle: "书一", updatedAt: 300 },
+    { id: "r2", documentId: "d2", status: "interrupted", materialTitle: "书二", updatedAt: 200 },
+    { id: "r3", documentId: "d3", status: "completed", materialTitle: "书三", updatedAt: 100 }
+  ];
+  const ids = () => A.listTasks().map((x) => x.runId);
+  A.resetDismissalsForTests();
+  await A.ensureDismissalsLoaded();
+  A.resetActivity();
+  A.seedFromRuns(SEED, A.isDismissed);
+  check("A8①：没关过时按材料各播一条（已完成的照常不播）", ids().length === 2 && !ids().includes("r3"), ids());
+  A.rememberDismissed("r2");
+  check("A8②：点「关闭」后当次会话立即生效（不等落盘完成）", A.isDismissed("r2") === true && A.isDismissed("r1") === false);
+  A.resetActivity();
+  A.seedFromRuns(SEED, A.isDismissed);
+  check("A8③：下次启动播种跳过已关过的（关过就不再出现）", ids().length === 1 && ids()[0] === "r1", ids());
+  {
+    // GUI 端到端实测复现过的缺陷：先过滤后去重时，关掉最新那条会让同材料更旧的历史运行递补上来
+    const SAME = [
+      { id: "hist-old", documentId: "dA", status: "section_ready", materialTitle: "同一本书", updatedAt: 100 },
+      { id: "hist-new", documentId: "dA", status: "section_ready", materialTitle: "同一本书", updatedAt: 500 }
+    ];
+    A.resetActivity();
+    A.seedFromRuns(SAME, A.isDismissed);
+    check("A8④：同材料只播种最新那一条", ids().length === 1 && ids()[0] === "hist-new", ids());
+    A.rememberDismissed("hist-new");
+    A.resetActivity();
+    A.seedFromRuns(SAME, A.isDismissed);
+    check("A8⑤：关掉最新那条后，同材料更旧的历史运行不得顶上来（「关一次又冒出来」的最后一环）", ids().length === 0, ids());
+    // 但也不能过头：这本书后来真的又跑了一轮 → 新 run 该提示
+    A.resetActivity();
+    A.seedFromRuns(SAME.concat([{ id: "hist-newest", documentId: "dA", status: "interrupted", materialTitle: "同一本书", updatedAt: 900 }]), A.isDismissed);
+    check("A8⑥：同材料后来新跑的一轮仍然提示（去重按最新，不是按「有没有被关过」永久静音）", ids().length === 1 && ids()[0] === "hist-newest", ids());
+  }
+  {
+    // 上限只防无界增长：超限从最旧的一端丢，被丢的那条最坏是再提示一次（不会把刚记的静默丢掉）
+    A.resetDismissalsForTests();
+    await A.ensureDismissalsLoaded();
+    for (let n = 0; n < 205; n++) A.rememberDismissed("c" + n);
+    check("A8⑦：清单上限 200，从最旧的一端让位", A.isDismissed("c204") === true && A.isDismissed("c4") === false, [A.isDismissed("c204"), A.isDismissed("c4")]);
+    A.rememberDismissed("r1");
+    check("A8⑧：重复关闭同一条不产生重复记录", A.isDismissed("r1") === true);
+    A.resetDismissalsForTests();
+  }
+  A.resetActivity();
+})().finally(() => {
+  console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
+  if (fail) process.exit(1);
+});

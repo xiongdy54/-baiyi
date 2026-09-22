@@ -4134,97 +4134,151 @@ body.capture-body #root { height: 100vh; }
   border-color: var(--error);
 }
 
-/* ===== v48.13（M15 批 P2）：全局后台活动指示器（右下角）=====
+/* ===== v48.13（M15 批 P2）/ v48.17（D53）：全局后台活动指示器（右下角 · 多任务容器）=====
    定位 = 系统状态标记，不是 AI 助手浮窗：单一 accent、灰阶面、直角、无渐变、
    全应用唯一允许的 shadow-float、12px metadata、8px 间距基线。
-   默认极小且安静；hover / 键盘 focus 才展开；reduced-motion 下无任何动效。 */
+   一个盒子两种状态：收起态只有一行（最新那条），hover / 键盘 focus 就地向上、向左长成详情卡。
+   两条几何恒等式（改样式前先实测，别只看注释）：
+     ① 详情块**定高** --ba-extra-h → 切换展开行时卡片总高不变、顶边不动；
+        否则顶边带着整块位移，光标被甩出卡片 → mouseleave 自动收起（用户实测报过）。
+     ② 收起态只剩**一行** → 非最新的行、行分隔线、「另有 N 项」必须一并藏掉。 */
 .bg-activity {
+  --ba-row-h: var(--sp-6); /* 24px：既是 8px 网格，也是 WCAG 2.2 最小目标 */
+  /* 8 + 3×18.6（文案 3 行）+ 8 + 2（进度槽）+ 8 + 26（按钮）+ 12 ≈ 120：
+     实测 describeTask 各阶段文案最长 40 字 = 2.39 行，108px 会真截断，故给到 3 行 */
+  --ba-extra-h: 120px;
   position: fixed;
   right: var(--sp-4);
   bottom: var(--sp-4);
   z-index: var(--z-toast);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-2);
   font-size: var(--fs-meta);
 }
-.bg-activity-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: var(--sp-6); /* 24px：原 22px 既不在 8px 网格上，也低于 WCAG 2.2 的 24×24 最小目标 */
-  max-width: 240px;
-  padding: 0 var(--sp-2);
+.bg-activity-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: max-content;
+  max-width: 240px; /* 收起态：随内容变宽，最长 240（原 .bg-activity-pill 的口径） */
   background: var(--paper);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
-  color: var(--text-secondary);
+  color: var(--ink);
+  transition: width var(--dur) var(--ease), max-width var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.bg-activity.is-expanded .bg-activity-card {
+  width: 272px; /* 8px 网格 */
+  max-width: 272px;
+  box-shadow: var(--shadow-float);
+}
+
+/* 恒等式②：收起态只留最新那一行，其余整条（含详情、分隔线、"另有 N 项"）都不得占位 */
+.bg-activity:not(.is-expanded) .bg-activity-task:not(.is-primary) { display: none; }
+.bg-activity:not(.is-expanded) .bg-activity-more { display: none; }
+.bg-activity:not(.is-expanded) .bg-activity-extra { height: 0; visibility: hidden; transition: none; }
+
+.bg-activity-task {
+  display: flex;
+  flex-direction: column;
+  /* 主题色竖线常驻占位，展开时才上色 → 上色这一瞬间不会产生 2px 位移。
+     它同时穿过书名行与详情块，多任务同时在场时看得出详情属于哪一行。 */
+  border-left: 2px solid transparent;
+}
+.bg-activity-task.is-expanded { border-left-color: var(--accent); }
+/* 行间分隔线交给 CSS 而不是 DOM：收起态那条不能被它多撑 1px */
+.bg-activity-task + .bg-activity-task { border-top: 1px solid var(--border-subtle); }
+.bg-activity:not(.is-expanded) .bg-activity-task { border-top: none; }
+
+.bg-activity-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: var(--ba-row-h);
+  padding: 0 var(--sp-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  text-align: left;
+  cursor: pointer;
   font-family: var(--font-sans);
   font-size: var(--fs-meta);
   line-height: 1;
-  cursor: pointer;
-  transition: border-color var(--dur) var(--ease);
+  color: var(--text-secondary);
 }
-.bg-activity-pill:hover { border-color: var(--border-strong); }
-.bg-activity-text {
+.bg-activity-row:hover { background: var(--grey-1); }
+.bg-activity-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 书名（主）+ 竖线 + 状态（次）。空间不够时书名先省略号、状态文案不截——状态才是"要不要去看一眼"的依据 */
+.bg-activity-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  overflow: hidden;
+}
+.bg-activity-title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-/* 直角方块而非圆点：与全应用「直角是灵魂」一致 */
-.bg-activity-dot {
-  flex: none;
-  width: var(--sp-2); /* 8×8 直角小方块（规范：以方块替代圆点装饰；原 6px 脱离网格） */
-  height: var(--sp-2);
-  background: var(--text-secondary);
-}
-.bg-activity.tone-busy .bg-activity-dot { background: var(--accent); }
-.bg-activity.tone-done .bg-activity-dot { background: var(--success); }
-.bg-activity.tone-partial .bg-activity-dot,
-.bg-activity.tone-warn .bg-activity-dot { background: var(--warning); }
-.bg-activity.tone-error .bg-activity-dot { background: var(--error); }
-
-.bg-activity-panel {
-  display: none;
-  width: 272px; /* 8px 网格（原 268） */
-  padding: var(--sp-3);
-  background: var(--paper);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-float);
   color: var(--ink);
-}
-.bg-activity.is-expanded .bg-activity-panel { display: block; }
-.bg-activity-heading {
-  font-size: var(--fs-secondary);
   font-weight: 600;
-  line-height: 1.35;
-  margin-bottom: var(--sp-2);
-  overflow-wrap: anywhere;
+}
+.bg-activity-vr { flex: none; width: 1px; height: 10px; background: var(--border-strong); }
+.bg-activity-text {
+  flex: none;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+.bg-activity-count { flex: none; opacity: 0.75; font-variant-numeric: tabular-nums; }
+/* 直角方块而非圆点：与全应用「直角是灵魂」一致 */
+.bg-activity-dot { flex: none; width: var(--sp-2); height: var(--sp-2); background: var(--text-secondary); }
+.bg-activity-task.tone-busy .bg-activity-dot { background: var(--accent); }
+.bg-activity-task.tone-done .bg-activity-dot { background: var(--success); }
+.bg-activity-task.tone-partial .bg-activity-dot,
+.bg-activity-task.tone-warn .bg-activity-dot { background: var(--warning); }
+.bg-activity-task.tone-error .bg-activity-dot { background: var(--error); }
+
+/* 详情块：定高 + 只 transition height，切行时 Δ总高恒等于 0（恒等式①） */
+.bg-activity-extra {
+  height: 0;
+  overflow: hidden;
+  visibility: hidden; /* 收起的行不可 Tab 进入其按钮（可见性延后一个动效周期） */
+  transition: height var(--dur) var(--ease), visibility 0s linear var(--dur);
+}
+.bg-activity-task.is-expanded .bg-activity-extra {
+  height: var(--ba-extra-h);
+  visibility: visible;
+  transition: height var(--dur) var(--ease), visibility 0s;
+}
+/* 左边界 24px + 竖线 2px = 26px，与书名行的文字同列（点 10 → 文字 26）→ 缩进即"这是上面那行的下级" */
+.bg-activity-extra-in {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: var(--sp-2) var(--sp-3) var(--sp-3) var(--sp-6);
 }
 .bg-activity-detail {
+  margin: 0 0 var(--sp-2);
   color: var(--text-secondary);
   font-size: var(--fs-meta);
-  line-height: 1.5;
-  margin-bottom: var(--sp-2);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
-.bg-activity-bar {
-  height: 2px;
-  background: var(--border-subtle);
-  margin-bottom: var(--sp-3);
+.bg-activity-bar { flex: none; height: 2px; margin-bottom: var(--sp-2); background: var(--border-subtle); }
+/* 进度未知也要占这一行：省掉它就是 10px 的高度变化，恒等式①就破了 */
+.bg-activity-bar.is-unknown {
+  background: repeating-linear-gradient(90deg, var(--border-strong) 0 2px, transparent 2px 6px);
 }
-.bg-activity-bar > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width var(--dur) var(--ease);
-}
-.bg-activity-actions {
-  display: flex;
-  gap: var(--sp-2);
-  justify-content: flex-end;
-}
+.bg-activity-bar > span { display: block; height: 100%; background: var(--accent); transition: width var(--dur) var(--ease); }
+.bg-activity-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; margin-top: auto; }
 .bg-activity-btn {
   padding: var(--sp-1) var(--sp-2);
   background: transparent;
@@ -4237,14 +4291,27 @@ body.capture-body #root { height: 100vh; }
   cursor: pointer;
 }
 .bg-activity-btn:hover { border-color: var(--border-strong); }
-.bg-activity-btn.is-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-on);
-}
+.bg-activity-btn.is-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
 .bg-activity-btn.is-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
+/* 超过 8 条时折到「另有 N 项」后面（卡片高 = 行高×N + 详情高，不封顶会顶出屏幕）。
+   灰带而不是分隔线：它可能出现在列表任一端，画线会在另一端多出一道孤线。 */
+.bg-activity-more {
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--grey-1);
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.bg-activity-more:hover { color: var(--ink); box-shadow: inset 0 0 0 1px var(--border-strong); }
+
 @media (prefers-reduced-motion: reduce) {
-  .bg-activity-pill,
+  .bg-activity-card,
+  .bg-activity-extra,
   .bg-activity-bar > span { transition: none; }
 }
