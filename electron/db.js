@@ -785,6 +785,8 @@ function listItems() {
 // v38（D35）：书籍语言属性（''=未知）。查词语言路由的书籍级信号；不参与其他逻辑。
 function setLibraryItemLang(id, lang) {
   const t = String(lang ?? "").trim().toLowerCase();
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("library_items", id)) return false;
   db.run("UPDATE library_items SET lang=?, updated_at=? WHERE id=? AND is_deleted=0", [t, Date.now(), String(id)]);
   persist();
   return true;
@@ -795,6 +797,8 @@ function setLibraryItemTitle(id, title) {
   const t = String(title ?? "").trim();
   if (!t) throw new Error("书名不能为空");
   if (t.length > 300) throw new Error("书名过长（至多 300 字符）");
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("library_items", id)) return false;
   db.run("UPDATE library_items SET title=?, updated_at=? WHERE id=? AND is_deleted=0", [t, Date.now(), String(id)]);
   persist();
   return true;
@@ -842,6 +846,8 @@ function createFromPaste(title, markdown) {
 }
 
 function deleteItem(id) {
+  // 批次 E（D-TEST-15 T1 档）：书目不存在或已软删时返回 false（重复删除第二次就是 false）。
+  if (!rowExists("library_items", id)) return false;
   const now = Date.now();
   db.run("UPDATE library_items SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, id]);
   db.run("UPDATE documents SET is_deleted = 1, updated_at = ? WHERE library_item_id = ?", [now, id]);
@@ -1191,6 +1197,20 @@ function insertCard(card) {
 }
 
 function createCard(card) {
+  // 批次 E（D-TEST-15 T3 档）：拒收「正文什么也没有」的空白卡。
+  // 判据必须把 occlusionJson / clozeOrds / cloze 都算作"有内容"——图片挖空卡的 front 可能天然是空的
+  // （src/lib/cards.ts:1072 传 occlusionJson、:1066 的 noteText 取 dd.front || cloze），拒宽了会误删合法卡。
+  // **不抛错**：AI 批量制卡是多草稿循环 await 且没有逐卡 try/catch（Reader.tsx:1525-1546），
+  // 抛错会中断整批；返回 false 让调用方零改动即可继续。
+  const c = card || {};
+  const hasContent =
+    Boolean(String(c.frontMarkdown ?? "").trim()) ||
+    Boolean(String(c.backMarkdown ?? "").trim()) ||
+    Boolean(String(c.noteText ?? "").trim()) ||
+    Boolean(c.occlusionJson || c.occlusion_json) ||
+    (Array.isArray(c.clozeOrds) ? c.clozeOrds.length > 0 : Boolean(c.clozeOrds)) ||
+    Boolean(c.cloze);
+  if (!hasContent) return false;
   const id = insertCard({
     ...card,
     // 新卡初始 FSRS 状态：due=now 即立即到期（修复 NULL 导致的调度竞争）
@@ -1203,6 +1223,9 @@ function createCard(card) {
 function updateCard(card) {
   // §11.1（v11）：不传 fsrs/leech 时保留原值，禁止置 NULL（曾导致调度状态被清空重置为 new）
   const prev = getCard(card.id);
+  // 批次 E（D-TEST-15 T1 档）：卡不存在（或已软删）时 UPDATE 影响 0 行却仍然 return true 是假成功。
+  // 复用上面已经取出的 prev，不额外查一次库；返回 false，调用方零改动。
+  if (!prev) return false;
   db.run(
     `UPDATE cards SET note_text=?, card_type=?, cloze_ords=?, card_ord=?, front_markdown=?, back_markdown=?,
       context_prefix=?, context_ref_json=?, mnemonic=?, example=?, source_ref_json=?, date_stamp=?, priority=?,
@@ -1394,6 +1417,8 @@ function listAllCards() {
 }
 
 function deleteCard(id) {
+  // 批次 E（D-TEST-15 T1 档）：卡不存在或已软删时返回 false（原来无条件 true = 假"已删除"）。
+  if (!rowExists("cards", id)) return false;
   db.run("UPDATE cards SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), id]);
   db.run("UPDATE card_issues SET status = 'dismissed', resolved_at = ? WHERE card_id = ? AND status = 'open'", [Date.now(), id]);
   persist();
@@ -1578,6 +1603,9 @@ function saveSkip(cardId) {
 
 // 阅读进度事件：滚动停止后记一条字符位置；当日阅读字数 = 相邻事件正增量之和
 function addReadingEvent(itemId, charPos) {
+  // 批次 E（D-TEST-15 T1 档）：reading_events 自己没有软删位，校验挂在父表 library_items 上；
+  // 任意 itemId 都能插事件的话，统计侧迟早出现无人认领的字数。返回 false 不抛错。
+  if (!rowExists("library_items", itemId)) return false;
   db.run("INSERT INTO reading_events (id, item_id, char_pos, created_at) VALUES (?, ?, ?, ?)", [
     crypto.randomUUID(),
     String(itemId),
@@ -1642,6 +1670,9 @@ function listLeechCards() {
 }
 
 function addCardIssue(issue) {
+  // 批次 E（D-TEST-15 T3 档）：card_issues 没有软删位，父卡必须真实存在才收（幽灵父行会留下
+  // 无人认领的待办）。返回 false 不抛错——lint 侧是批量写入。
+  if (!rowExists("cards", issue && issue.cardId)) return false;
   const id = crypto.randomUUID();
   db.run(
     "INSERT INTO card_issues (id, card_id, rule_id, severity, message, source, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'open', ?)",
@@ -1680,6 +1711,8 @@ function createAIGenBatch(batch) {
 }
 
 function setAIGenBatchStatus(id, status) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在时不再返回真的「已删除 / 已保存」（该表没有软删位，rowExists 传 false）。
+  if (!rowExists("ai_gen_batches", id, false)) return false;
   db.run("UPDATE ai_gen_batches SET status = ? WHERE id = ?", [status, id]);
   persist();
   return true;
@@ -1840,11 +1873,23 @@ function ensurePromptTemplates() {
       );
     }
   } catch { /* 播种失败不阻塞启动 */ }
+  // 批次 E（D-TEST-02；语义由用户 2026-09-22 拍板为 ①「该 scope 的默认/启用版本」）：
+  // 历史上每条播种 INSERT 都把 is_default 写死 1，同 scope 于是多行同时"默认"
+  // （实例：card-occlusion v1 与 v3），该列不承载任何信息。这里做一次**幂等数据订正**：
+  // 每个 scope 只有最高 version 保留 is_default=1，其余置 0。新库播种后立即收敛，
+  // 存量库下次启动收敛。不改 schema、不删历史行；反向语句就是把该行的 0 改回 1。
+  try {
+    db.run(
+      `UPDATE prompt_templates SET is_default = CASE WHEN version = (
+           SELECT MAX(p2.version) FROM prompt_templates p2 WHERE p2.scope = prompt_templates.scope
+         ) THEN 1 ELSE 0 END`
+    );
+  } catch { /* 订正失败下次启动重试 */ }
 }
 
 function getPromptTemplate(scope) {
   const rows = queryAll(
-    "SELECT * FROM prompt_templates WHERE scope = ? ORDER BY version DESC LIMIT 1",
+    "SELECT * FROM prompt_templates WHERE scope = ? ORDER BY is_default DESC, version DESC LIMIT 1",
     [scope]
   );
   return rows[0] || null;
@@ -1932,12 +1977,16 @@ function upsertDictSource(src) {
 }
 
 function setDictSourceEnabled(id, enabled) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("dict_sources", id)) return false;
   db.run("UPDATE dict_sources SET enabled=?, updated_at=? WHERE id=?", [enabled ? 1 : 0, Date.now(), String(id)]);
   persist();
   return true;
 }
 
 function removeDictSource(id) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("dict_sources", id)) return false;
   db.run("UPDATE dict_sources SET is_deleted=1, updated_at=? WHERE id=?", [Date.now(), String(id)]);
   persist();
   return true;
@@ -1987,7 +2036,23 @@ function getItemIdByDocumentId(documentId) {
   return rows[0]?.id || null;
 }
 
+// 批次 E（D-TEST-15）：内部助手——「针对既有行」的写入口先确认这一行真的还在。
+// ⚠️ is_deleted 不是每张表都有（全库 27 张表里只有 17 张带软删位）：目标表有软删位时
+// 必须连带过滤，否则会把「已软删的行」当成存在，等于白校验。
+function rowExists(table, id, hasSoftDelete = true) {
+  const sql = hasSoftDelete
+    ? `SELECT 1 AS ok FROM "${table}" WHERE id = ? AND is_deleted = 0 LIMIT 1`
+    : `SELECT 1 AS ok FROM "${table}" WHERE id = ? LIMIT 1`;
+  return Boolean(queryAll(sql, [String(id)])[0]);
+}
+
 function updateProgress(itemId, progress) {
+  // 批次 E（D-TEST-15 T1 档）：载荷形状与目标行存在性都要判，否则调用方拿到的 true 是假的
+  // （阅读器/设置页据此显示「已保存」）。返回 false 而不是抛错——本函数是 fire-and-forget。
+  // 形状判据只拒「非对象 / 数组 / null」：App.tsx:274 实传的是 {ratio,lastText,updatedAt,...extra}
+  // 这类普通对象，拒宽了会静默丢掉用户的全部阅读进度。
+  if (!progress || typeof progress !== "object" || Array.isArray(progress)) return false;
+  if (!rowExists("library_items", itemId)) return false;
   db.run("UPDATE library_items SET progress_json = ?, updated_at = ? WHERE id = ?", [
     JSON.stringify(progress ?? {}),
     Date.now(),
@@ -2007,6 +2072,9 @@ function queryAll(sql, params = []) {
 }
 
 function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef }) {
+  // 批次 E（D-TEST-15 T3 档）：extracts 是「挂在文档上的行」，父文档不存在就别插
+  // （插进去就是日后没人踩得到的悬空行）。返回 false 不抛错，与 T1/T2 档一致。
+  if (!rowExists("documents", documentId)) return false;
   const id = crypto.randomUUID();
   const now = Date.now();
   db.run(
@@ -2537,6 +2605,8 @@ function sendJournalDraft(contentMarkdown) {
 
 // 删除（软删）；草稿的「丢弃」复用同一条路径。软删同时清 is_draft 位（释放全局唯一草稿槽）。
 function deleteJournalEntry(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("journal_entries", id)) return false;
   db.run("UPDATE journal_entries SET is_deleted = 1, is_draft = 0, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   markJournalPersist(opts);
   return true;
@@ -2900,6 +2970,8 @@ function createKnowledgeRelation(payload, opts) {
 }
 
 function deleteKnowledgeRelation(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("knowledge_relations", id)) return false;
   db.run("UPDATE knowledge_relations SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   persist();
   return true;
@@ -2939,6 +3011,8 @@ function createKnowledgeExternalRef(payload, opts) {
 }
 
 function deleteKnowledgeExternalRef(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("knowledge_external_refs", id)) return false;
   db.run("UPDATE knowledge_external_refs SET is_deleted = 1 WHERE id = ?", [String(id)]);
   persist();
   return true;
@@ -3735,6 +3809,8 @@ function setInsightRunFeedback(id, feedback, opts) {
 }
 
 function deleteInsightRun(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("insight_runs", id)) return false;
   db.run("UPDATE insight_runs SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   persist();
   return true;
@@ -4020,6 +4096,8 @@ function resolvePersonalMeaningCandidate(id, status, opts) {
 }
 
 function deletePersonalMeaningCandidate(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("personal_meaning_candidates", id)) return false;
   db.run("UPDATE personal_meaning_candidates SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   persist();
   return true;

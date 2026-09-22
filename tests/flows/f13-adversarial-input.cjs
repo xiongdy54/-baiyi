@@ -301,7 +301,7 @@ app
       writeSettings(dir, { "app.siblingBury": null, "app.dayCutoffHour": 0 });
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       const cfgWeird = mem.readMemoryConfig({ readSettings: () => ({ app: { memory: { enabled: "yes" } } }) });
-      flow.known("memory.enabled 非法值归一为布尔", cfgWeird.enabled === true || cfgWeird.enabled === false, "D-TEST-03", "布尔", cfgWeird.enabled);
+      flow.check("memory.enabled 非法值归一为布尔", cfgWeird.enabled === true || cfgWeird.enabled === false, "布尔", cfgWeird.enabled);
 
       // ---------- P8 悬空引用 ----------
       flow.section("P8 悬空引用反查不得崩（跳转原文的降级底线）");

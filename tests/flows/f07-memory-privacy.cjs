@@ -77,13 +77,16 @@ app
       const cfgOff = TIDY.readMemoryConfig({ readSettings: () => ({}) });
       flow.eq("无设置文件时 enabled 为 false", cfgOff.enabled, false);
       const cfgGarbage = TIDY.readMemoryConfig({ readSettings: () => ({ app: { memory: { enabled: "yes", tidyDebounceMinutes: -5, inputTokenBudget: 1 } } }) });
-      flow.known(
+      // 批次 E（D-TEST-03，§4.18 默认关闭是 consent 纪律）：布尔只认字面量 true。
+      // 原来判据只要求"是个布尔"，现在按语义收紧：字符串 "yes" 与数字 1 都**不得**当开启。
+      flow.eq(
         "非法 enabled 归一为布尔（不得把字符串「yes」当开启）",
-        cfgGarbage.enabled === true || cfgGarbage.enabled === false,
-        "D-TEST-03",
-        "true / false",
-        cfgGarbage.enabled
+        cfgGarbage.enabled,
+        false
       );
+      flow.eq("数字 1 不得视为同意（consent 只认字面量 true）", TIDY.readMemoryConfig({ readSettings: () => ({ app: { memory: { enabled: 1, introAcked: 1 } } }) }).enabled, false);
+      flow.eq("introAcked 同样只认 true", TIDY.readMemoryConfig({ readSettings: () => ({ app: { memory: { introAcked: "yes" } } }) }).introAcked, false);
+      flow.eq("字面量 true 仍然开启（归一不得误伤 UI 写入路径）", TIDY.readMemoryConfig({ readSettings: () => ({ app: { memory: { enabled: true } } }) }).enabled, true);
       flow.check("非法数值回落默认而非照收", cfgGarbage.inputTokenBudget >= 2000, "≥2000", cfgGarbage.inputTokenBudget);
       flow.check("非法防抖回落默认区间", cfgGarbage.tidyDebounceMinutes >= 1, "≥1", cfgGarbage.tidyDebounceMinutes);
 

@@ -130,14 +130,14 @@ app
       const retGhost = db.updateProgress(noSuch, { ratio: 0.5 });
       const ghostPersisted = db.listItems().some((i) => i.id === noSuch);
       flow.record("给不存在的 id 写进度", `返回 ${retGhost}，库里 ${ghostPersisted ? "竟有此行" : "没有这一行"}`);
-      flow.known("写不存在的书必须返回失败（现在无条件 true，界面会显示「已保存」）", retGhost === false || retGhost === undefined, "D-TEST-15", "返回假", retGhost);
+      flow.check("写不存在的书必须返回失败（现在无条件 true，界面会显示「已保存」）", retGhost === false || retGhost === undefined, "返回假", retGhost);
       const nonObj = [];
       for (const v of ["字符串", 42, true, [], null, undefined]) {
         db.updateProgress(it1.id, v);
         const raw = db.getDocument(it1.id).progressJson;
         if (!/^\{.*\}$/.test(String(raw))) nonObj.push(`${J(v)} → 入库 ${raw}`);
       }
-      flow.known("非对象进度值必须被拒绝或归一成对象（列里不该出现 \"字符串\" / [] / null）", nonObj.length === 0, "D-TEST-15", "全部归一", nonObj);
+      flow.check("非对象进度值必须被拒绝或归一成对象（列里不该出现 \"字符串\" / [] / null）", nonObj.length === 0, "全部归一", nonObj);
       const sizeBefore = fs.statSync(dbFile).size;
       db.updateProgress(noSuch, { ratio: 0.1 });
       flow.eq("给不存在的书写进度不得触发整文件重写（sql.js 全量落盘，§9.1 M15 写路径成本）", fs.statSync(dbFile).size, sizeBefore);
@@ -162,7 +162,7 @@ app
       flow.eq("负数 charPos 被夹到 0", db.addReadingEvent(itA.id, -900), true);
       db.addReadingEvent(noSuch, 5000);
       const ghosts = (await audit(dbFile)).all("reading_events").filter((e) => e.item_id === noSuch);
-      flow.known("给不存在的书加阅读事件必须被拒（否则统计里出现无人认领的字数）", ghosts.length === 0, "D-TEST-15", "零行", ghosts.length);
+      flow.check("给不存在的书加阅读事件必须被拒（否则统计里出现无人认领的字数）", ghosts.length === 0, "零行", ghosts.length);
 
       // ---------- Q5 两份事实必须说同一件事 ----------
       flow.section("Q5 进度条与「今日阅读字数」不得各说各话（§6.2 同一本书记了两份事实）");
