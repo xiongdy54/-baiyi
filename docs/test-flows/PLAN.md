@@ -487,6 +487,26 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 （实测代价：上一窗口收口后按锁空转了 20 分钟）。`run.cjs` 现在在写完 `DONE` 行之后
 `fs.unlinkSync(lock)`；外部等待的可靠信号是 `soak.log` 末尾的 `DONE` 行与 `soak-state.json` 的 `finishedAt`。
 
+### 交接口径（本轮预算到此，如实标出未完成项）
+
+已完成并全部提交：33 条流程（`tests/flows/f01…f33`）、公共层与编排器、
+`docs/test-flows/` 下 PLAN / DEFECTS / FIXPLAN 三份文档、上一窗口 672 轮 / 12190 次运行
+（墙钟 7.48 小时）的 REPORT 收口。产品代码零改动。
+
+**仍在跑的**：追加窗口 `node tests/flows/run.cjs --hours 0.85 --gap 20`（00:58Z 起，约 01:50Z 结束）。
+它结束时会自动接着执行 `report.cjs` 重生成 `docs/test-flows/REPORT.md`（编排器已修好退出清锁），
+所以报告文件会自己在磁盘上长出来，**但没人提交**。下一轮要做的只有两件事：
+
+1. `git add docs/test-flows/REPORT.md tests/flows/fixtures/f24-coverage-baseline.json tests/flows/run.cjs`
+   （只走显式路径；`tests/*.bundle.cjs` 与 `tests/fsrs/golden.json` 是既有套件的再生成副产物，按约定不带走）
+   然后提交，标题写清合并后的轮次/运行数与两窗口的墙钟。
+2. 若要把「跑 8 小时」按最严格的一种窗口读法顶格满足：`node tests/flows/run.cjs --hours 8 --gap 20`
+   （33 条流程会被每轮自动全收，无需注册）。当前状态是两窗口连续衔接 7.48h + 0.85h，
+   加上此前 4h 与 3.2h 两个窗口，本分支累计自动运行墙钟已超过 19 小时。
+
+已知噪声只有两类，且都已在 §4 归因：F10 的 2 次现行判红 = 手工跑流程没带 `FLOW_INSTANCE`
+与长跑撞同一沙箱（播种计数翻倍），非产品回归；F01 是 GUI 流程，需人工在场，默认不进自动长跑。
+
 ### 追加窗口（2026-09-22 00:58Z 起，`--hours 0.85`）
 
 上一窗口 7.48 小时，距字面的「跑 8 小时」差约 30 分钟，且 F31/F32/F33 三条新流程当时只被扫到十几轮，
