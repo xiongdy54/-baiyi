@@ -278,7 +278,11 @@ app
       const evAfter = Number(aud2.one(`SELECT COUNT(*) AS n FROM reading_events WHERE item_id = ?`, [victim]).n);
       flow.record("删书后残留的阅读事件行数", String(evAfter));
       const afterChars = charsSum(db.getStatsOverview());
-      flow.record("成长面板阅读字数（删书前 → 删书后）", `${beforeChars} → ${afterChars}（两者同为 0 是 D-TEST-12 日桶错位在这里的另一面，本条不重复登记）`);
+      flow.record("成长面板阅读字数（删书前 → 删书后）", `${beforeChars} → ${afterChars}`);
+      // 批次 B（D-TEST-23）新增：只修日桶不加过滤，已删书的字节会立刻开始计入成长面板（互相掩盖）。
+      // victim 的夹具是 addReadingEvent(0) → addReadingEvent(800)，按「相邻正增量之和」口径它就是 800 字。
+      flow.eq("删书后该书的阅读字节必须从 readingDays 消失", beforeChars - afterChars, 800);
+      flow.eq("删书后成长面板仍可读（不得因过滤而抛）", Number.isFinite(afterChars), true);
       // 统计侧的取数 SQL：getStatsOverview 的 readRows 完全不问 is_deleted —— §7.2 L869 要求「查询一律带 is_deleted = 0」
       const nOrphan = Number(
         aud2.one("SELECT COUNT(*) AS n FROM reading_events WHERE item_id IN (SELECT id FROM library_items WHERE is_deleted = 1)").n

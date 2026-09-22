@@ -366,8 +366,12 @@ app
       db.addReadingEvent(seedItem.id, 500);
       const rd = db.getStatsOverview().readingDays || [];
       const chars = rd.reduce((acc, x) => acc + (x.chars || 0), 0);
-      flow.record("推进 500 字后 readingDays 合计", `${chars} 字（${rd.length} 个日桶，日桶键非日切对齐时恒为 0）`);
-      flow.known("当日阅读的 500 字必须出现在阅读历史里", chars === 500, "D-TEST-12", "500 字", chars);
+      flow.record("推进 500 字后 readingDays 合计", `${chars} 字（${rd.length} 个日桶）`);
+      flow.check("当日阅读的 500 字必须出现在阅读历史里", chars === 500, "500 字", chars);
+      // 批次 B（D-TEST-12）新增：桶轴与桶键必须同一坐标系（今日桶 = 轴末端），桶数固定不随时刻漂
+      flow.eq("这 500 字落在**今日桶**（轴末端那格，不是随便某个桶）", rd.length ? rd[rd.length - 1].chars : null, 500);
+      flow.eq("日桶数固定为 46（近 45 天**含今日**，两次读数不得差一格）", rd.length, 46);
+      flow.check("每个桶的 date 都是日切点（相邻两格恰好差一天）", rd.every((x, i) => i === 0 || x.date - rd[i - 1].date === 86400000), "轴步长恒为 86400000", rd.slice(0, 3).map((x) => x.date).join(","));
       const vol = (await audit(dbFile)).tables().length;
       flow.check("只读扫描后库仍然完好可开", vol > 20, ">20 张表", vol);
     });

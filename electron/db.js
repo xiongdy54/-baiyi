@@ -1529,9 +1529,11 @@ function undoLastReview() {
   return { ok: true, card: getCard(log.cardId), rating: log.rating };
 }
 
-// v12：优化器读取全部复习日志（按时间升序）；v23 附带参数归属与插入序（audit/测试用）
+// v12：优化器读取全部复习日志；v23 附带参数归属与插入序（audit/测试用）
+// 批次 B（D-TEST-21）：排序不变量 = review_seq（§4.4.9：表内唯一、插入序单调，禁按 id/reviewed_at 排序）。
+// 墙钟一跳（NTP 校时 / 改时区 / 恢复旧备份）时按 reviewed_at 会给出错序，审计分段与「首次达成」随之偏。
 function listAllReviewLogs() {
-  const rows = queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt, fsrs_config_id AS fsrsConfigId, review_seq AS reviewSeq FROM review_logs ORDER BY reviewed_at ASC");
+  const rows = queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt, fsrs_config_id AS fsrsConfigId, review_seq AS reviewSeq FROM review_logs ORDER BY review_seq ASC");
   return rows;
 }
 
@@ -2283,9 +2285,18 @@ function getStatsOverview() {
   const monthSkips = queryAll("SELECT COUNT(DISTINCT card_id) AS n FROM review_skips WHERE skipped_at >= ?", [monthStart])[0]?.n || 0;
   const queueFlow = { carriedOver: Math.max(0, dueToday - monthNew), overdue: 0, newCards: monthNew, completed: monthReviews, skipped: monthSkips, remaining: Math.max(0, dueToday - completedToday) };
 
-  // ---- 阅读字数（近 45 天，相邻正增量之和）----
-  const readFrom = now - 45 * 86400_000;
-  const readRows = queryAll("SELECT item_id, char_pos, created_at FROM reading_events WHERE created_at >= ? ORDER BY created_at ASC", [readFrom]);
+  // ---- 阅读字数（近 45 天**含今日** = 46 个日桶，相邻正增量之和）----
+  // 批次 B（D-TEST-12）：桶轴必须与 readByDay 的键（dayStartMs）同一坐标系——
+  // 原来用 now - 45·day（带当天毫秒）去取日切点键的表，恒取不到，图此恒为 0。
+  // 批次 B（D-TEST-23）：JOIN 父表过滤已删书（§7.2 L869「查询一律带 is_deleted = 0」）；
+  // reading_events 表本身没有软删位，绝不能写 re.is_deleted。
+  const readFrom = today0 - 45 * 86400_000;
+  const readRows = queryAll(
+    `SELECT re.item_id, re.char_pos, re.created_at FROM reading_events re
+     JOIN library_items li ON li.id = re.item_id AND li.is_deleted = 0
+     WHERE re.created_at >= ? ORDER BY re.created_at ASC`,
+    [readFrom]
+  );
   const readByDay = {};
   const lastPos = {};
   for (const r of readRows) {

@@ -171,7 +171,7 @@ app
       const charsToday = (st.readingDays || []).reduce((a, d) => a + (d.chars || 0), 0);
       const ratioToday = db.listItems().map((i) => sh.itemProgress(i)).reduce((a, b) => Math.max(a, b), 0);
       flow.record("读了 62% 的一本书", `进度 ${ratioToday}，仪表盘今日字数 ${charsToday}`);
-      flow.known("书读过（进度>0）时，仪表盘今日字数必须跟着非零", !(ratioToday > 0 && charsToday === 0), "D-TEST-12", "两处都非零", { 进度: ratioToday, 字数: charsToday });
+      flow.check("书读过（进度>0）时，仪表盘今日字数必须跟着非零", !(ratioToday > 0 && charsToday === 0), "两处都非零", { 进度: ratioToday, 字数: charsToday });
 
       // ---------- Q6 删书后的历史 ----------
       flow.section("Q6 删掉一本书：列表里消失，历史与统计不得因此抛错（§7.2 软删）");
