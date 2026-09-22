@@ -128,7 +128,16 @@ app
       }
       flow.check("归一化结果与 §9.1 M4 约定逐档一致", comboBad.length === 0, "全部一致", comboBad);
       const emptyKey = eventToCombo({ key: "", ctrlKey: true, altKey: false, shiftKey: false, metaKey: false });
-      flow.known("空 key 不得生成残缺组合串（现在产出 \"Ctrl+\"，存进设置后既匹配不上也清不掉）", emptyKey !== "Ctrl+", "D-TEST-14", "返回 null", emptyKey);
+      flow.check("空 key 不得生成残缺组合串（现在产出 \"Ctrl+\"，存进设置后既匹配不上也清不掉）", emptyKey !== "Ctrl+", "返回 null", emptyKey);
+      // 批次 D（D-TEST-14）新增：所有「无实体键」的入参形态都必须产出 null——null 是 setOverride
+      // 唯一的拒绝点（SettingsPanel:1229 的 `if (!combo) return;`），所以 null 之外没有任何串
+      // 能进 settings.app.keybindings 占位。
+      const emptyShapes = [{ key: "" }, { key: undefined }, { key: null }, { key: "", ctrlKey: true }, { key: "", metaKey: true, shiftKey: true }];
+      const badEmpty = emptyShapes.filter((ev) => {
+        const got = eventToCombo({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...ev });
+        return got !== null;
+      });
+      flow.check("空 key 的各种形态一律返回 null（残缺串没有任何入口能进设置）", badEmpty.length === 0, "全部 null", badEmpty.map((ev) => JSON.stringify(ev)));
       flow.check("修饰符顺序固定 Ctrl→Alt→Shift→Meta（同一组合只有一个写法）", (() => {
         const a = eventToCombo({ key: "k", ctrlKey: true, altKey: true, shiftKey: true, metaKey: true });
         return a === "Ctrl+Alt+Shift+Meta+K" && a === eventToCombo({ key: "K", metaKey: true, shiftKey: true, altKey: true, ctrlKey: true });
@@ -144,7 +153,7 @@ app
       const staticGuard = /activeElement|isContentEditable|tagName\s*===?\s*["'](INPUT|TEXTAREA)| closest\(["']input/.test(cmdSrc);
       flow.record("行为证据", `焦点内的 Ctrl+Z 触发了 ${ran} 次动作`);
       flow.record("静态证据", `commands.ts 里${staticGuard ? "有" : "找不到"}焦点判断`);
-      flow.known("焦点在输入框时命令分发必须放行给原生行为", guardedInDispatch && staticGuard, "D-TEST-13", "不劫持", `dispatchKey 无焦点判断（${ran} 次触发），文件里${staticGuard ? "有" : "也没有"}静态守卫`);
+      flow.check("焦点在输入框时命令分发必须放行给原生行为", guardedInDispatch && staticGuard, "不劫持", `dispatchKey 无焦点判断（${ran} 次触发），文件里${staticGuard ? "有" : "也没有"}静态守卫`);
       commandRegistry.setActionSource("f20", null);
 
       // ---------- W4 分发语义 ----------

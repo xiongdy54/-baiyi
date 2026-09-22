@@ -136,15 +136,46 @@ function txtToMarkdown(text) {
  * - ![…](data:image/…) 数据图：多为 UI 图标（阅读/赞/分享），且使 documents.markdown 膨胀。
  * 清洗只针对这两类明确噪音，正文不做任何改写；粘贴路径不走本函数（保持直通）。
  */
+/**
+ * 批次 D（D-TEST-22）：清洗必须**围栏感知**。原来的三个全局正则没有上下文，
+ * 用户 .md 里代码块内的 <style>/<script> 示例会被整段吃掉（F30 S3 实测），
+ * 而 documents.markdown 是唯一正文真源、坏了没有第二份可回滚。
+ * 围栏内原样保留；围栏外照旧清洗（不得因为加了围栏感知就放过正文噪音）。
+ * 未闭合围栏 → 其后全文按代码保护（合理降级）。CommonMark 的缩进代码/列表内围栏不在此实现范围。
+ */
 function markdownFromText(text) {
-  return String(text || "")
-    .replace(/\r\n?/g, "\n")
-    .replace(/^\uFEFF/, "")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
-    .replace(/!\[[^\]]*\]\(\s*data:image\/[^)]*\)/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const src = String(text || "").replace(/\r\n?/g, "\n").replace(/^\uFEFF/, "");
+  const cleanSegment = (s) =>
+    s
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, "")
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, "")
+      .replace(/!\[[^\]]*\]\(\s*data:image\/[^)]*\)/g, "")
+      .replace(/\n{3,}/g, "\n\n");
+  const lines = src.split("\n");
+  const out = [];
+  let buf = [];
+  let fence = null; // 当前围栏字符（` 或 ~）
+  const flush = () => {
+    if (buf.length) {
+      out.push(cleanSegment(buf.join("\n")));
+      buf = [];
+    }
+  };
+  for (const line of lines) {
+    const m = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence === null) {
+      if (m) {
+        flush();
+        fence = m[1][0];
+        out.push(line);
+      } else buf.push(line);
+      continue;
+    }
+    out.push(line); // 围栏内：原样保留
+    if (m && m[1][0] === fence) fence = null; // 闭合（允许更长围栏）
+  }
+  flush();
+  return out.join("\n").trim();
 }
 
 /** 文件名 → 书名（去扩展名） */

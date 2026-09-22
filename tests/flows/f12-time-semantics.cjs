@@ -116,6 +116,19 @@ app
       const before = db.getCard(cards[0]).fsrs;
       db.saveReview(cards[0], { ...before, reps: 3, due: Date.now() + 2 * DAY }, "Good", 500, before);
       db.createJournalEntry({ contentMarkdown: "F12 日记 " + flow.rng.seed, source: "app" });
+      // 批次 D（D-TEST-07）新增：写入侧收紧后，**合法**的显式 entryDate 必须照常入库（收紧不许误伤）
+      db.createJournalEntry({ contentMarkdown: "F12 指定合法日期", source: "app", entryDate: "2026-03-04" });
+      const legalList = db.listJournalEntries({ from: "2026-03-04", to: "2026-03-04" });
+      const legalArr = Array.isArray(legalList) ? legalList : legalList.entries || legalList.rows || [];
+      flow.check("显式合法日期照常入库并按日检索得到", legalArr.some((e) => /F12 指定合法日期/.test(String(e.contentMarkdown))), true, legalArr.length);
+      flow.check("非零填充日期（2026-3-5）被拒且不入库", (() => {
+        try {
+          db.createJournalEntry({ contentMarkdown: "F12 非法日期", entryDate: "2026-3-5" });
+          return false;
+        } catch {
+          return true;
+        }
+      })(), true, "被接受（会漂出分组）");
       db.saveJournalDraft("F12 草稿");
       db.sendJournalDraft("F12 发送");
       db.addReadingEvent(db.listItems()[0] ? db.listItems()[0].id : "none", 42);

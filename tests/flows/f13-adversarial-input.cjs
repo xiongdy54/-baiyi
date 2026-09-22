@@ -248,13 +248,15 @@ app
       }
       flow.record("非法 entry_date 被显式拒绝的", p5errs.join(" ") || "（全部被静默接受/回退）");
       const dates = (await audit(dbFile)).rows("SELECT entry_date FROM journal_entries").map((r) => r.entry_date);
-      flow.known(
+      flow.check(
         "落库 entry_date 只能是合法日期串或空（isJournalDate 已存在却未用在写入路径）",
         dates.every((d) => d == null || J.isJournalDate(String(d))),
-        "D-TEST-07",
         "全部合法",
         dates
       );
+      // 批次 D（D-TEST-07）新增：五档非法值必须**当场抛错且一行不落**（原来全部原样入库）
+      flow.eq("五档非法 entryDate 全部当场抛错", JSON.stringify(p5errs), JSON.stringify(["2026-3-5", "abc", "2026-13-45", "2026-02-30", "12345678901234"]));
+      flow.eq("被拒的日期一行都没进表", dates.length, 0);
       const st5 = db.getStatsOverview();
       flow.check("streak / 今日时长不被脏日期打成 NaN", Number.isFinite(st5.kpi.streak) && Number.isFinite(st5.kpi.minutesToday), true, { s: st5.kpi.streak, m: st5.kpi.minutesToday });
 

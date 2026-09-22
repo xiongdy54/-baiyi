@@ -38,7 +38,7 @@ const {
 } = require("./prompts");
 const { sanitizeDomain, domainFromPrefix } = require("./udc");
 const { calculateFsrsDeltaT, learningDayStartMs } = require("./fsrsTime");
-const { journalDateOf } = require("./journalTime");
+const { journalDateOf, isJournalDate } = require("./journalTime");
 // v41（K2-A，D38）：知识归一纯函数（规范化 / 批次簇键 / 提案幂等指纹）
 const { normalizeKpLabel, kpClusterKeyFor, kpProposalFingerprint, isOpaqueClusterId } = require("./kpNorm");
 const { readSettings, writeSettings } = require("./settingsStore");
@@ -2430,7 +2430,9 @@ function listJournalEntries(opts) {
     where.push("entry_date <= ?");
     params.push(String(to));
   }
-  const q = String(query ?? "").trim();
+  // 批次 D（D-TEST-10）：查询词做 NFKC 归一，与词典侧 normalizeWord / cards.ts 同一口径。
+  // 顺序钉死：先 normalize 再转义 %_\（NFKC 不产出这三个字符，写反了会留坑给将来的归一规则）。
+  const q = String(query ?? "").trim().normalize("NFKC");
   if (q) {
     where.push("content_markdown LIKE ? ESCAPE '\\'");
     params.push(`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
@@ -2464,13 +2466,18 @@ function createJournalEntry({ contentMarkdown, source = "app", entryDate, isDraf
   if (!content.trim()) throw new Error("日记内容为空");
   const now = Date.now();
   const created = Number(createdAt) || now;
+  // 批次 D（D-TEST-07，§6.5 自然日归类 + §7.2 数据完整性）：entry_date 只能是合法日历日。
+  // isJournalDate 早就在 journalTime.js 里、本文件也早就 require 了它，只是写入前一直没调。
+  // 收紧点：非零填充（"2026-3-5"）与不存在的日子（"2026-02-30"）从此拒写；不传时行为逐字节不变。
+  const day = entryDate === undefined || entryDate === null || entryDate === "" ? journalDateOf(created) : String(entryDate);
+  if (!isJournalDate(day)) throw new Error(`日记日期非法: ${day}`);
   const id = crypto.randomUUID();
   db.run(
     `INSERT INTO journal_entries (id, user_id, entry_date, content_markdown, source, is_draft, created_at, updated_at, sent_at, sync_version, is_deleted)
      VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
     [
       id,
-      String(entryDate || journalDateOf(created)),
+      day,
       content,
       String(source),
       isDraft ? 1 : 0,
@@ -2663,7 +2670,9 @@ function listKnowledgePoints(opts) {
     where.push("domain_id = ?");
     params.push(String(domainId));
   }
-  const q = String(query ?? "").trim();
+  // 批次 D（D-TEST-10）：查询词做 NFKC 归一，与词典侧 normalizeWord / cards.ts 同一口径。
+  // 顺序钉死：先 normalize 再转义 %_\（NFKC 不产出这三个字符，写反了会留坑给将来的归一规则）。
+  const q = String(query ?? "").trim().normalize("NFKC");
   if (q) {
     where.push("(canonical_label LIKE ? ESCAPE '\\' OR alias_json LIKE ? ESCAPE '\\')");
     const pat = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;

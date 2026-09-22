@@ -303,7 +303,7 @@ app
       const half = db.listJournalEntries({ query: "ABC" });
       flow.record("全角 ＡＢＣ 命中 / 半角 ABC 命中", `${wide.total} / ${half.total}`);
       flow.check("半角关键词能搜到（证明种子数据在库里，下一条不是空转）", half.total === 5, "5 行", half.total);
-      flow.known("搜索词的归一化口径要与词典侧一致（NFKC 全半角，词典查询做、日记/知识库搜索不做）", wide.total === half.total, "D-TEST-10", "两侧命中一致", { 全角: wide.total, 半角: half.total });
+      flow.check("搜索词的归一化口径要与词典侧一致（NFKC 全半角，词典查询做、日记/知识库搜索不做）", wide.total === half.total, "两侧命中一致", { 全角: wide.total, 半角: half.total });
       const kqBad = [];
       for (const q of ["'", "''", "--", ";DROP TABLE cards;--", "100%", "_", "%_%"]) {
         try {
