@@ -90,6 +90,9 @@ F11（`tests/flows/f11-doc-code-drift.cjs`，45ms 一轮）把下面这些做成
 | 状态表 | 「§9.2 标 M14 未实现」 | M14 的"未实现"字样在 §9.1 标题 L1422；§9.2 M8 ❌ 的矛盾成立 |
 | D-DOC-01 | 「34 处逐字重复」 | 行级重复抽样证实 ≥18 行（含 5 对整段），49/43 矛盾在 L883/L884；精确总数未逐行复核 |
 | D-DOC-02 | L915 / L923 | L916 / L924（重复属实） |
+| D-TEST-09（批次 A 实测更正） | 「`initDb()` 直接崩，应用打不开」 | **机制写错了**：`settings.json = null` 时 `initDb()` 通过（探针实测），真正的崩点是首个读设置的口子——`getActiveFsrsConfig()`（`db.js:728`）、`getStatsOverview()→getCutoffHour`（`:2035`）、`computeTodayQueue()→siblingBuryConfig`（`:1189`）三处抛 `Cannot read properties of null (reading 'app')`。修法不变（两份 `readSettings` 各补对象形状兜底），**措辞按此更正**；本行原「用户自救：用记事本把 settings.json 改成 {}」已随批次 A 修复作废。 |
+| D-TEST-06（规范依据出处） | 把「损坏行在队列与统计中一致跳过」记成 §4.2-20 L330 的承诺 | **出处写错了**：全指南检索「损坏行 / 一致跳过 / 不得穿透」零命中，这条口径只写在 `electron/db.js:2051` 的代码注释里；§4.2-20 L330 讲的是「口径唯一」。批次 A 以该注释 + §4.2-20 口径唯一为设计依据落地，提交信息里不得写成「指南 §x 要求」；**指南级条款属 D-DOC 系列收口**（待批次 F）。 |
+| D-TEST-21（影响面写重了） | 「用户点撤销撤走的不是他刚看到的那张卡」，严重度记为「中」 | **影响面写重了**：撤销面板用的是 `getLastUndoableReview()`（`db.js:1451`，本来就按 `review_seq DESC`），**面板本身是对的**；错的是 `listAllReviewLogs` 这个清单口（消费者只有 `optimizer.js:22` 与测试/审计）。严重度按 **低–中** 理解（自证不变量被破 + 未来读口的陷阱），不是用户可见的撤销错卡。批次 B 已把 `ORDER BY` 收成 `review_seq ASC`；`optimizer.js:33` 自己按 `reviewedAt` 重排属另一议题、未动。 |
 
 **行号校准表**（原引用 → 当前实际）
 
