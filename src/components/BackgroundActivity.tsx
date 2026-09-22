@@ -1,6 +1,6 @@
 // BackgroundActivity——右下角全局后台任务指示器（v48.13 起，v48.17 改多任务容器 / D53）。
 //
-// 定位（§4.19-12）：它不是「导图工作区的进度条」，而是**整个软件的后台活动状态标记**。
+// 定位（§4.19 v48.13 收口块 ⑥「入口与呈现」；此处原文标注的「4.19 第 12 项」是悬空引用——那一项是「合规」）：它不是「导图工作区的进度条」，而是**整个软件的后台活动状态标记**。
 // 生成任务由主进程持有，用户在正文/其他界面时它照常推进；本组件只订阅全局广播并如实呈现。
 //
 // v48.17 版式 D（用户从四版样张里选的，见 design-samples/bg-activity-expand.html）：
@@ -86,7 +86,7 @@ export function BackgroundActivity({ onOpenMap }: BackgroundActivityProps) {
 
   useEffect(() => () => cancelCollapse(), [cancelCollapse]);
 
-  // describeTask 对未知阶段返回 null → 那条**不显示**，而不是编个状态出来（§4.19-12 的既有兜底）
+  // describeTask 对未知阶段返回 null → 那条**不显示**，而不是编个状态出来（收口块 ⑥ 的既有兜底）
   const rows = tasks.flatMap((t) => {
     const v = describeTask(t);
     return v ? [{ t, v }] : [];
