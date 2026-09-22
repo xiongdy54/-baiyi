@@ -1,6 +1,6 @@
 # 缺陷登记（全流程测试层发现）
 
-登记人：`tests/flows/` 全流程测试层 · 分支 `test/flow-coverage` · 起始 2026-09-21
+登记人：`tests/flows/` 全流程测试层 · 分支 `fix/read-robustness`（原登记于 `test/flow-coverage`）· 起始 2026-09-21
 每条都可 `npx electron tests/flows/<对应流程>.cjs` 一键复现，秒级。
 「严重度」按用户把这份工作区当成品在用的立场评估：会不会丢用户数据、会不会让用户误判。
 修复顺序、最小修法、必须同批改动的配对、以及修完怎么用本层闸门回验，见 [FIXPLAN.md](FIXPLAN.md)。
@@ -129,3 +129,21 @@ F11（`tests/flows/f11-doc-code-drift.cjs`，45ms 一轮）把下面这些做成
 | D-DOC-07 | §7.4 L903 | §7.4 **L901**（`app.fsrsWeights` 那行）；§4.4.10 L173 与 D22 L965 是"废除"侧 |
 | §7.2 例外 | — | §7.2（L867-875）只登记了日记防抖（L874）与记忆文件树（L875）；`material_maps` 真删只在 §4.19 L404 / D43 L981 追记，且 L446 又写它"具软删除与审计列"，自相冲突 |
 | 批次 F 范围外（收口时新发现，**未动**） | 收口 9+2 条时按 PLAN §6 逐条对表，多出一条规格清单里没有的漂移：`cards.memory_ref_json` 文档写 `{itemText,itemDate,topicPath,runId,verified}`，代码实为 `{line,verified}`（`db.js:472`、`src/lib/cards.ts:1091`）。改它等于改写 §4.18 的字段契约（不只是措辞），超出「只改文档、不动行为」的授权口径 → 登记不修，等用户单独拍板；D52 第 ⑨ 条已把本批范围钉死为「已登记的 9 + 2」 |
+
+## 复核新发现（2026-09-22 合入前独立评审，**未动代码**）
+
+独立评审（`main..fix/read-robustness` 全量 diff + 现树复验，含 53→3 处 `known` 逐条对账）**未发现 Critical 级问题**：
+没有能丢用户数据、写坏健康库或挡住回滚的改动。下面 5 条是评审提出的口径/稳健性小项，本层不擅自改动，留用户裁定。
+
+| # | 位置 | 现象 | 影响 | 建议 |
+|---|---|---|---|---|
+| 1 | `electron/db.js:2320-2352` | `getStatsOverview` 的「新建卡来源」与「领域排名」没按 `damaged` 过滤，而 `BATCH-A-READ-ROBUSTNESS.md` §C2 状态图写「KPI **与来源统计**排除 damaged」（Step 6 文字只点了 KPI 循环） | 规格内部口径不一致导致的**半收口**：fsrs/leech 坏卡从 KPI 与队列消失，却仍计入来源图与领域排名。不改就与状态图对不上，改了就是动用户可见统计 → 需裁定 | 二选一：① 按状态图把两张图也排除 damaged；② 在规格侧把口径写明为「只有 KPI/队列排除」 |
+| 2 | `tests/flows/f20-command-contract.cjs:123-126` | 形状判据要求同一行**同时**出现 `when` 与 `keybinding` 才算红；抓不到 §4.2-2 第 2 项那行时**直接判绿** | 文档若回退成「`when` 是 CommandDef 字段」而该行措辞变化，闸门会静默放行 | 补一条「必须抓到该锚点行」的前置断言 |
+| 3 | `tests/flows/f03-scheduling-conservation.cjs:126` | 夹具把 `parentType:"document"` 的 `parentId` 填成 item id（生产调用点与 f04 都填 document id） | 对「是否即时落盘」考点无影响（`parent_id` 只在 `parent_type==="extract"` 链上被读），但夹具语义与约定不符 | 与生产调用点对齐 |
+| 4 | `src/components/Reader.tsx:1390` | 传 `documentId: contextRef.documentId \|\| ""`：批次 E 的新守卫会静默拒收（返回 false），UI 仍 `showToast("已摘录进学习队列")` | 与已登记的 `journal:delete` 硬编码 true 同族的**假成功**；改前那条路径写出的行因 `JOIN documents` 本就不可见，故非新增数据丢失 | 登记；要修就按「toast 依据返回值」单独一批（属改 UI 语义） |
+| 5 | `electron/db.js:1882-1887` | `ensurePromptTemplates` 末尾的 `is_default` 订正每次启动对全表 UPDATE | 安全、幂等、可逆（已核 `scope TEXT NOT NULL` + 全仓无第二写入者）；只是每次启动都改写该表 | 可加 `WHERE is_default != <计算值>` 省掉空写 |
+
+另核一条**不是问题**：`electron/importers.js` 的围栏闭合只比字符、不比长度（4 反引号块里出现 3 反引号示例会提前结束保护）——
+这是规格 §D4 自己给的算法（`IMPLEMENTATION-SPEC.md:351`「闭合（允许更长围栏）」）与 **Q8 明示的 CommonMark 简化**，属照规格实现，不算偏离。
+
+**本轮已照评审修掉的**：`electron/memoryTidy.js` 的 `injectBudget` 上限被批次 E 顺手从 20000 改成 60000（不在规格 scope、无断言守护、与设置页 `max=20000` 矛盾）→ 已回退 20000（复验 F07 40/40、F18 46/46）。

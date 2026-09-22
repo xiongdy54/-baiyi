@@ -571,7 +571,7 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 
 新流程层不替代既有套件；同时把它们全量跑一遍，确认「新层没把老层跑坏、老层也没被新层测出的问题掩盖」。
 本轮只跑 **node 运行时**那一批（零冲突）；electron 与 GUI 批次因既有 harness 会 `taskkill /IM electron.exe /F`
-（会连带杀掉长跑进程与用户开着的应用）而未在此窗口内跑，留待无人会话结束后单独跑。
+（会连带杀掉长跑进程与用户开着的应用）而未在此窗口内跑。**后续已单独补跑，见 §7.1。**
 
 | 套件 | 结果 | 套件 | 结果 |
 |---|---|---|---|
@@ -586,3 +586,24 @@ D-TEST-12（日桶键未对齐日切点 → 阅读历史图恒为 0）、D-TEST-
 
 副作用：跑 m6-1/m6-3/golden 会重写 `tests/*.bundle.cjs` 与 `tests/fsrs/golden.json`（本就是测试产物），
 这些改动未提交、留在工作树里；提交本层时一律用显式路径，避免把别人的 WIP 一起带走。
+
+### 7.1 最终验收（2026-09-22 12:25Z，批次 A–F 全部收口后）
+
+按 `docs/impl-spec/IMPLEMENTATION-SPEC.md` §统一验收 逐条实测（命令与数字均来自本轮窗口）：
+
+- **流程层**：`node tests/flows/run.cjs --hours 0.05 --gap 0` → **8 轮 / 32 条流程 / 18,854 次运行，
+  0 FAIL / 0 崩溃 / 0「意外转绿」**；33 份 `results/F*.last.json` 里判红与 aborted 全为 0，
+  仅 F19 / F26 / F31 各 1 条**登记残余**被触发（D-TEST-11 / D-TEST-19 / D-TEST-23）。报告见 [REPORT.md](REPORT.md)。
+- **GUI**：`FLOW_INSTANCE=manual node tests/flows/f01-golden-journey.cjs`（隔离 userData 的真实应用 + 真实鼠标）
+  **17/17 断言 · 已知 0 · 意外转绿 0**；`node tests/shelf.gui.mjs` **70 通过 / 0 失败**。
+- **既有套件全量补跑**（含 electron 侧，逐个 `npx electron tests/<suite>.test.cjs`，不触发 `taskkill`）：
+  **29 套件 28 绿**。唯一红 `tests/m7.prompts.test.cjs:28`（期望主制卡 `v6`，而 `TARGET_VERSION` 自 v46 起为 `7`）——
+  已核 `main@4c9a72e` 同为 7 且分支未碰该行/该套件，属**先于本分支的陈旧断言**，不是本层回归。
+- **静态与构建**：`npx tsc --noEmit` 干净；`npm run build` 通过。
+- **规格命令勘误**：§统一验收 写的 `node tests/undo.test.cjs tests/m12.test.cjs` 在 `node` 下起不来（两个套件都
+  `require("electron")`），必须 `npx electron`——实测 `undo` 29/0、`m12` 42/42。
+- **合入前评审的处置**：独立评审（`main..fix/read-robustness` 全量 diff）判为「无 Critical、可合入（需先处理 3 项小改）」。
+  已处置：① `electron/memoryTidy.js` 的 `injectBudget` 上限被批次 E 顺手从 20000 改到 60000（不在规格 scope、无断言守护、
+  与设置页 `max={20000}` 矛盾）→ **回退 20000**，复验 F07 40/40、F18 46/46；② 本节与 FIXPLAN/DEFECTS 的过期表述同步；
+  ③ D-TEST-13 的**真实键盘**端到端仍待用户在场补 `tests/m4.gui.mjs`（规格 §D1 的硬要求，本轮只给出静态判定 + 隔离实例证据）。
+  评审另提 5 条口径/稳健性小项，已登记在 [DEFECTS.md](DEFECTS.md)「复核新发现」，本层未擅自改。
