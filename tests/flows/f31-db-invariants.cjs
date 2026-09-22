@@ -236,10 +236,9 @@ app
       const aud2 = await audit(dbFile);
       const assetRows = aud2.rows("SELECT is_deleted AS d, COUNT(*) AS n FROM assets GROUP BY 1");
       flow.record("assets 软删位分布", assetRows.map((r) => `${r.d}×${r.n}`).join(" ") || "（空表）");
-      flow.known(
+      flow.check(
         "删书要把它的 assets 一并标记（否则备份与同步永久带着已删材料的字节）",
         assetRows.every((r) => Number(r.d) === 1),
-        "D-TEST-18",
         "全部标记",
         assetRows.map((r) => `is_deleted=${r.d}×${r.n}`).join(" ")
       );

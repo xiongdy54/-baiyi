@@ -845,8 +845,16 @@ function deleteItem(id) {
   const now = Date.now();
   db.run("UPDATE library_items SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, id]);
   db.run("UPDATE documents SET is_deleted = 1, updated_at = ? WHERE library_item_id = ?", [now, id]);
+  // 批次 C（D-TEST-18）：资产行一并软删。字节保留在盘上（回收是显式清理的事，不在本批），
+  // 但备份打包按 item 目录整份带走，标记后 backup.js 才能把它挡在备份外。
+  db.run("UPDATE assets SET is_deleted = 1, updated_at = ? WHERE library_item_id = ?", [now, id]);
   persist();
   return true;
+}
+
+// 只读：已软删的书目 id（备份侧用来跳过它们的 assets 目录；缺省不传 = 行为与今天一致）
+function listDeletedItemIds() {
+  return queryAll("SELECT id FROM library_items WHERE is_deleted = 1").map((r) => String(r.id));
 }
 
 function addAssetRow(itemId, kind, relPath, hash, now) {
@@ -938,6 +946,14 @@ function firstLine(markdown) {
 // M6-1（v26）：导入格式扩展 —— Word/TXT/Markdown 统一建册（照抄 createFromEpub 形状）。
 // source_type ∈ word|txt|markdown；原文件落 assets kind=<sourceType>-original；内嵌图落 kind=image-content
 // （文件名 img-N.ext 确定性命名，读侧 readContentImages 取回字节随合成 EPUB 内嵌，M2 备份自动覆盖）。
+// 批次 C（D-TEST-17）：落盘文件名净化收在 **sink** 侧，不指望调用方传对。
+// 用 split(/[\\/]/) 而不是 path.basename（Windows 反斜杠会穿透 basename）；
+// 纯点名字必须拒（`..` 过了 basename 仍是 `..`，path.join(dir,"..") 就出目录了）。
+function safeAssetFileName(name, fallback) {
+  const base = String(name || "").split(/[\\/]/).pop().replace(/[^\w.()-]/g, "_");
+  return base && !/^\.+$/.test(base) ? base : fallback;
+}
+
 function createImportedDoc({ title, markdown, sourceType, sourceName, originalName, originalBuf, images }) {
   const cleanTitle = String(title || "").trim() || firstLine(markdown) || "未命名书籍";
   const itemId = crypto.randomUUID();
@@ -947,15 +963,21 @@ function createImportedDoc({ title, markdown, sourceType, sourceName, originalNa
   fs.mkdirSync(dir, { recursive: true });
 
   if (originalBuf && originalBuf.length) {
-    fs.writeFileSync(path.join(dir, originalName), originalBuf);
-    addAssetRow(itemId, `${sourceType}-original`, originalName, sha256(originalBuf), now);
+    // 写盘名与 assets.path 必须是同一个变量：读侧按 assets.path 取文件
+    const safeName = safeAssetFileName(originalName, "original.bin");
+    fs.writeFileSync(path.join(dir, safeName), originalBuf);
+    addAssetRow(itemId, `${sourceType}-original`, safeName, sha256(originalBuf), now);
   }
   for (const im of images || []) {
     const buf = Buffer.isBuffer(im.bytes) ? im.bytes : Buffer.from(im.bytes);
     if (!buf.length) continue;
     if (!/^[\w.-]+$/.test(String(im.filename))) continue; // 文件名防穿越（导入器产出的 img-N.ext 恒命中）
-    fs.writeFileSync(path.join(dir, im.filename), buf);
-    addAssetRow(itemId, "image-content", im.filename, sha256(buf), now);
+    // 批次 C（D-TEST-17）：这道护栏漏了「合法却危险」的名字——`..` 过 [\w.-]+ 后
+    // writeFileSync(dir/..) 抛 EISDIR，整本导入失败。同一套净化在这里再过一遍，纯点名字直接跳过。
+    const safeImg = safeAssetFileName(im.filename, "");
+    if (!safeImg) continue;
+    fs.writeFileSync(path.join(dir, safeImg), buf);
+    addAssetRow(itemId, "image-content", safeImg, sha256(buf), now);
   }
 
   db.run(
@@ -4575,6 +4597,7 @@ module.exports = {
   createFromEpub,
   createImportedDoc,
   deleteItem,
+  listDeletedItemIds,
   getDocument,
   updateProgress,
   createExtract,

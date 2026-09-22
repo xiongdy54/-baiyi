@@ -509,6 +509,9 @@ ipcMain.handle("assets:saveImage", (_e, ownerKey, ext, base64, kind) => {
 const backupOpts = () => ({
   flush: () => dbModule.persistDb(),
   counts: dbModule.getBackupCounts(),
+  // 批次 C（D-TEST-18）：已软删书的 id 交给备份侧，打包时跳过它们的 assets 目录。
+  // backup.js 不 require db 层（它的依赖注入一直是 opts.*），所以在这里塞进来。
+  deletedItemIds: new Set(dbModule.listDeletedItemIds()),
   appVersion: app.getVersion()
 });
 ipcMain.handle("backup:info", () => ({
@@ -562,7 +565,12 @@ ipcMain.on("app:relaunch", () => {
 });
 
 // ---------- AI 网关 ----------
-ipcMain.handle("ai:getConfig", () => getAIConfig());
+// §7.5「渲染层不持有明文 Key」：解密只发生在主进程，返回体剥掉 apiKey
+// （ai:setConfig 早就是 `const { apiKey, ...safe }` 的剥法，这里对齐；hasKey/preset/baseUrl/model 照旧）。
+ipcMain.handle("ai:getConfig", () => {
+  const { apiKey, ...safe } = getAIConfig();
+  return safe;
+});
 ipcMain.handle("ai:setConfig", (_e, partial) => setAIConfig(partial || {}));
 ipcMain.handle("ai:test", () => testConnection());
 ipcMain.handle("ai:listModels", () => listModels());

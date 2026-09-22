@@ -136,6 +136,10 @@ app
       ];
       const aud0 = await audit(dbFile);
       const notFlushed = [];
+      // 批次 C（D-TEST-01）落盘责任挪到 optimizer 边界后，insertFsrsConfig 成为**已登记的例外**：
+      // 它的两个生产调用方（optimizer.applyWeights 与 initDb 迁移块）各自在边界上 persistNow，
+      // 在 insertFsrsConfig 内部补 persist 反而会在 initDb 迁移途中动到还没就绪的落盘路径。
+      const EXEMPT_PERSIST = /^insertFsrsConfig/;
       for (const [label, fn] of mutations) {
         let flushed = true;
         let err = null;
@@ -152,11 +156,14 @@ app
         if (!flushed) notFlushed.push(label + (err ? `(抛错:${err.slice(0, 60)})` : ""));
         console.log(`    ${flushed ? "✓" : "✗"} ${label} 即时落盘`);
       }
-      flow.known(
-        "全部写库函数即时落盘（日记防抖例外不在本表）",
-        notFlushed.length === 0,
-        "D-TEST-01",
-        "全部落盘",
+      // 批次 C（D-TEST-01）：这条从 known 降级为 check + 显式例外。
+      // 规格 §C2 给的写法是「保留 known 只加 EXEMPT 过滤」，实测那样会以**意外转绿**反向报警
+      // （notFlushed 里只剩 insertFsrsConfig 这一格，过滤后判据成立）→ 本层的闸门会直接判红。
+      // 例外已在上面注释登记：insertFsrsConfig 的两个生产调用方各自在边界落盘，它本身不落盘是设计。
+      flow.check(
+        "全部写库函数即时落盘（日记防抖 + insertFsrsConfig 两条例外不在本表）",
+        notFlushed.filter((l) => !EXEMPT_PERSIST.test(l)).length === 0,
+        "除已登记例外外全部落盘",
         notFlushed
       );
       // 日记草稿的防抖例外必须**确实**是例外：saveJournalDraft 不得立即刷盘（§7.2 L874 / D34）
@@ -323,23 +330,34 @@ app
       flow.check("applyWeights 返回 ok 且给出 configId", res?.ok === true && !!res.configId, "ok", res);
       flow.eq("应用后活跃指针指向新配置", db2.getActiveConfigId(), res?.configId);
       const onDiskIds = (await audit(dbFile)).rows("SELECT id FROM fsrs_configs").map((r) => r.id);
-      flow.known(
+      flow.check(
         "新配置行当场落盘（指针与内容同生共死）",
         onDiskIds.includes(res.configId),
-        "D-TEST-01",
         "磁盘含该行",
         `磁盘 ${onDiskIds.length} 行，无新 id`
       );
       delete require.cache[dbPath];
       const db3 = require(dbPath);
       await db3.initDb();
-      flow.known(
+      flow.check(
         "重启后仍在用刚应用的优化参数",
         db3.getActiveConfigId() === res.configId,
-        "D-TEST-01",
         res.configId,
         db3.getActiveConfigId()
       );
+      // 批次 C（D-TEST-01）新增：幂等——同一权重集合连应用两次不得产生第二行、第二次不得报错
+      const rowsBeforeIdem = (await audit(dbFile)).rows("SELECT id FROM fsrs_configs").length;
+      let idemErr = null;
+      let res2 = null;
+      try {
+        res2 = opt.applyWeights(db3, wApplied);
+      } catch (e) {
+        idemErr = String((e && e.message) || e).slice(0, 40);
+      }
+      const rowsAfterIdem = (await audit(dbFile)).rows("SELECT id FROM fsrs_configs").length;
+      flow.eq("重复应用同一权重不报错", idemErr, null);
+      flow.eq("重复应用同一权重不产生第二行（指纹去重仍生效）", rowsAfterIdem, rowsBeforeIdem);
+      flow.eq("重复应用后指针仍指向那一行", res2 && res2.configId, res.configId);
       flow.record("重启后卡数", db3.listAllCards().length);
     });
 

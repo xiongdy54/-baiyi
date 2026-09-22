@@ -117,7 +117,14 @@ async function createBackup(opts = {}) {
       zip.file("ai-config.json", fs.readFileSync(p.aiConfigFile), { compression: "DEFLATE" });
     }
     if (fs.existsSync(p.assetsDir)) {
+      // 批次 C（D-TEST-18）：已软删书的 item 目录不再进备份（字节仍留在磁盘，回收是显式清理的事）。
+      // 只按「一级目录名 = item id」跳过；assets/ 根下散落的历史文件照旧打包，别误删。
+      // 依赖注入照本模块既有模式（opts.dataDir / opts.backupDir / opts.flush()）：
+      // backup.js 不 require db 层，deletedItemIds 由 main.js 的 backupOpts() 塞进来，缺省空集合
+      // → 未传时行为与今天完全一致。
+      const deleted = opts.deletedItemIds instanceof Set ? opts.deletedItemIds : new Set(opts.deletedItemIds || []);
       for (const f of walkFiles(p.assetsDir)) {
+        if (deleted.has(String(f.rel).split(/[\\/]/)[0])) continue;
         zip.file(`assets/${f.rel}`, fs.readFileSync(f.full), {
           compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE"
         });
