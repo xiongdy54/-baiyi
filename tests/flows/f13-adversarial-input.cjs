@@ -73,20 +73,49 @@ app
         }).id;
 
       // ---------- P1 损坏 JSON ----------
-      flow.section("P1 损坏 JSON 列：文档承诺「一致跳过」，实测按列分叉（§4.2-20 L330）");
+      flow.section("P1 损坏 JSON 列：逐列矩阵（10 列）+ 致命列一致跳过 + 非致命列不得少卡");
       const okCard = mk("健康卡");
-      const cFsrs = mk("坏fsrs");
-      const cLeech = mk("坏leech");
-      const cTags = mk("坏tags");
-      const cCtx = mk("坏contextRef");
-      const a1 = await audit(dbFile);
-      a1.exec("UPDATE cards SET fsrs_json = '{\"state\":\"review\", due:' WHERE id = ?", [cFsrs]);
-      a1.exec("UPDATE cards SET leech_json = 'not json at all' WHERE id = ?", [cLeech]);
-      a1.exec("UPDATE cards SET tags_json = '\"不是数组\"' WHERE id = ?", [cTags]);
-      a1.exec("UPDATE cards SET context_ref_json = '[1,2,' WHERE id = ?", [cCtx]);
-      a1.save();
-      a1.close();
-      db = await open();
+      // 逐列一张卡：损坏只发生在该列，读口的表现才能归因到那一列
+      const badIds = {
+        fsrs_json: mk("坏fsrs"),
+        leech_json: mk("坏leech"),
+        tags_json: mk("坏tags"),
+        context_ref_json: mk("坏contextRef"),
+        cloze_ords: mk("坏clozeOrds"),
+        source_ref_json: mk("坏sourceRef"),
+        domain: mk("坏domain"),
+        occlusion_json: mk("坏occlusion"),
+        dict_json: mk("坏dict"),
+        memory_ref_json: mk("坏memoryRef"),
+      };
+      // ⚠️ 每档都必须是**真·解析失败**的文本：原 tags 档 '"不是数组"' 是合法 JSON（字符串），
+      // 走不到 parse 抛错那条分支（批次 A §K2-6 要守的就是那条分支）。
+      const corrupt = {
+        fsrs_json: '{"state":"review", due:',
+        leech_json: "not json at all",
+        tags_json: '["未闭合',
+        context_ref_json: "[1,2,",
+        cloze_ords: "[0,",
+        source_ref_json: "{title:",
+        domain: '["51"',
+        occlusion_json: '{"rects":[',
+        dict_json: '{"word"',
+        memory_ref_json: "{line:",
+      };
+      const restore = {
+        fsrs_json: null, leech_json: null, tags_json: "[]", context_ref_json: null, cloze_ords: "[]",
+        source_ref_json: null, domain: null, occlusion_json: null, dict_json: null, memory_ref_json: null,
+      };
+      /** 把库恢复到「只有 cols 这几列损坏」的状态并重开 db（cols 为空 = 全部干净） */
+      async function setCorrupt(cols) {
+        const a = await audit(dbFile);
+        for (const c of Object.keys(corrupt)) a.exec(`UPDATE cards SET ${c} = ?`, [restore[c]]);
+        for (const c of cols) a.exec(`UPDATE cards SET ${c} = ? WHERE id = ?`, [corrupt[c], badIds[c]]);
+        a.save();
+        a.close();
+        return open();
+      }
+      const probeOut = {};
       const probe = (label) => {
         const out = {};
         for (const fn of ["computeTodayQueue", "getStatsOverview", "listAllCards"]) {
@@ -99,44 +128,66 @@ app
         flow.record(label, Object.entries(out).map(([k, v]) => `${k}=${v === "ok" ? "ok" : "崩"}`).join(" "));
         return out;
       };
-      const first = probe("四列同时损坏时");
-      flow.known("损坏行不导致队列抛异常（§4.2-20 L330 承诺一致跳过）", first.computeTodayQueue === "ok", "D-TEST-06", "ok", first.computeTodayQueue);
-      flow.known("损坏行不导致统计抛异常", first.getStatsOverview === "ok", "D-TEST-06", "ok", first.getStatsOverview);
-      flow.known("损坏行不导致卡片浏览抛异常", first.listAllCards === "ok", "D-TEST-06", "ok", first.listAllCards);
+      db = await setCorrupt(Object.keys(corrupt));
+      const first = probe("十列同时损坏时");
+      flow.check("损坏行不导致队列抛异常（§4.2-20 L330 承诺一致跳过）", first.computeTodayQueue === "ok", "ok", first.computeTodayQueue);
+      flow.check("损坏行不导致统计抛异常", first.getStatsOverview === "ok", "ok", first.getStatsOverview);
+      flow.check("损坏行不导致卡片浏览抛异常", first.listAllCards === "ok", "ok", first.listAllCards);
       // 逐列定位：到底是哪一列打断整块读（决定这是「一处漏兜底」还是「普遍不兜底」）
-      const corrupt = { fsrs_json: '{"state":"review", due:', leech_json: "not json at all", tags_json: '"不是数组"', context_ref_json: "[1,2," };
-      const restore = { fsrs_json: null, leech_json: null, tags_json: "[]", context_ref_json: null };
       const perCol = {};
+      const colAllThree = {};
       for (const col of Object.keys(corrupt)) {
-        const a = await audit(dbFile);
-        for (const c of Object.keys(corrupt)) a.exec(`UPDATE cards SET ${c} = ?`, [restore[c]]);
-        a.exec(`UPDATE cards SET ${col} = ? WHERE id = ?`, [corrupt[col], { fsrs_json: cFsrs, leech_json: cLeech, tags_json: cTags, context_ref_json: cCtx }[col]]);
-        a.save();
-        a.close();
-        db = await open();
-        perCol[col] = (() => {
-          try {
-            db.computeTodayQueue();
-            return "ok";
-          } catch {
-            return "崩";
-          }
-        })();
+        db = await setCorrupt([col]);
+        colAllThree[col] = probe(`只有 ${col} 损坏时`);
+        perCol[col] = colAllThree[col].computeTodayQueue === "ok" ? "ok" : "崩";
         flow.record(`只有 ${col} 损坏时队列`, perCol[col]);
       }
+      db = await setCorrupt([]);
       flow.check("fsrs_json 损坏确实被跳过（文档那半句成立）", perCol.fsrs_json === "ok", "ok", perCol.fsrs_json);
       const hardCols = Object.entries(perCol).filter(([, v]) => v === "崩").map(([c]) => c);
-      flow.known(
+      flow.check(
         "其余 JSON 列损坏也必须跳过而不是打断整块读（§4.2-20 L330 承诺的是「一致跳过」）",
         hardCols.length === 0,
-        "D-TEST-06",
         "全部跳过",
         hardCols
       );
+      // §K2-2 专测 SQL 层守卫：坏 JSON 打到 json_extract 上是 SQLite 抛 malformed JSON，
+      // 只修 JS 层（mapCardRow）三处仍然全崩——这条断言就是为了拦住"只改一半"。
+      const sqlCols = ["context_ref_json", "leech_json", "tags_json", "fsrs_json"];
+      const sqlThrows = [];
+      for (const col of sqlCols) {
+        for (const [fn, got] of Object.entries(colAllThree[col])) {
+          if (got !== "ok") sqlThrows.push(`${col}×${fn}：${got}`);
+        }
+      }
+      flow.check("JSON 列损坏时队列/统计/卡片浏览的 SQL 路径一律不抛（json_valid 守卫）", sqlThrows.length === 0, "全部不抛", sqlThrows);
+      db = await setCorrupt(["context_ref_json"]);
+      const ctxCard = db.getCard(badIds.context_ref_json);
+      flow.eq("损坏列名可观测（damagedColumns 记录 context_ref_json）", JSON.stringify(ctxCard.damagedColumns), JSON.stringify(["context_ref_json"]));
+      flow.eq("来源引用损坏不是致命列 → damaged=false", ctxCard.damaged, false);
+      flow.check("来源引用损坏的卡仍在卡片浏览里（有出口）", db.listAllCards().some((c) => c.id === badIds.context_ref_json), true, "该行不见了");
+      // §K2-3 致命列（fsrs_json）：队列与统计同时缺席，但 getCard 仍取得到——先取干净态做对照
+      const dbClean = await setCorrupt([]);
+      const clean = { kpi: dbClean.getStatsOverview().kpi.dueToday, queue: dbClean.computeTodayQueue().cards.length };
+      db = await setCorrupt(["fsrs_json"]);
+      const fsrsQueue = db.computeTodayQueue();
+      const fsrsKpi = db.getStatsOverview().kpi.dueToday;
+      flow.eq("fsrs_json 损坏：队列少一张（与统计同口径）", fsrsQueue.cards.length, clean.queue - 1);
+      flow.eq("fsrs_json 损坏：KPI 今日到期同步少一张", fsrsKpi, clean.kpi - 1);
+      flow.check("fsrs_json 损坏的卡不在队列成员里", !fsrsQueue.cards.some((c) => c.id === badIds.fsrs_json), true, "仍在队列");
+      flow.check("fsrs_json 损坏的卡经 computeTodayQueue().damaged 可见（静默但不隐形）", fsrsQueue.damaged.some((c) => c.id === badIds.fsrs_json), true, fsrsQueue.damaged.map((c) => c.id));
+      flow.check("fsrs_json 损坏的卡仍能在卡片浏览取得到（可删、有出口）", !!db.getCard(badIds.fsrs_json) && db.listAllCards().some((c) => c.id === badIds.fsrs_json), true, "取不到 = 用户丢卡");
+      // §K2-6 非致命列不得牵连可见性（否则 A2 被修成"任何一列坏就少一张卡"）
+      db = await setCorrupt(["tags_json"]);
+      const tagsQueue = db.computeTodayQueue();
+      flow.check("仅 tags_json 损坏（非致命列）的卡必须仍出现在今日队列里", tagsQueue.cards.some((c) => c.id === badIds.tags_json), true, "被过度跳过：卡片从队列消失");
+      flow.eq("仅非致命列损坏时 damaged 为空", tagsQueue.damaged.length, 0);
+      flow.eq("损坏的 tags 回落空数组而不是抛", JSON.stringify(db.getCard(badIds.tags_json).tags), JSON.stringify([]));
+      db = await setCorrupt([]);
       // 出口：脏行能不能被清掉从而自愈（用户视角：卡片浏览页也崩 = 没有出口）
       let recovered = "未测";
       try {
-        for (const id of [cLeech, cTags, cCtx]) db.deleteCard(id);
+        for (const id of Object.values(badIds)) db.deleteCard(id);
         db.computeTodayQueue();
         db.getStatsOverview();
         db.listAllCards();
@@ -197,13 +248,15 @@ app
       }
       flow.record("非法 entry_date 被显式拒绝的", p5errs.join(" ") || "（全部被静默接受/回退）");
       const dates = (await audit(dbFile)).rows("SELECT entry_date FROM journal_entries").map((r) => r.entry_date);
-      flow.known(
+      flow.check(
         "落库 entry_date 只能是合法日期串或空（isJournalDate 已存在却未用在写入路径）",
         dates.every((d) => d == null || J.isJournalDate(String(d))),
-        "D-TEST-07",
         "全部合法",
         dates
       );
+      // 批次 D（D-TEST-07）新增：五档非法值必须**当场抛错且一行不落**（原来全部原样入库）
+      flow.eq("五档非法 entryDate 全部当场抛错", JSON.stringify(p5errs), JSON.stringify(["2026-3-5", "abc", "2026-13-45", "2026-02-30", "12345678901234"]));
+      flow.eq("被拒的日期一行都没进表", dates.length, 0);
       const st5 = db.getStatsOverview();
       flow.check("streak / 今日时长不被脏日期打成 NaN", Number.isFinite(st5.kpi.streak) && Number.isFinite(st5.kpi.minutesToday), true, { s: st5.kpi.streak, m: st5.kpi.minutesToday });
 
@@ -248,7 +301,7 @@ app
       writeSettings(dir, { "app.siblingBury": null, "app.dayCutoffHour": 0 });
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       const cfgWeird = mem.readMemoryConfig({ readSettings: () => ({ app: { memory: { enabled: "yes" } } }) });
-      flow.known("memory.enabled 非法值归一为布尔", cfgWeird.enabled === true || cfgWeird.enabled === false, "D-TEST-03", "布尔", cfgWeird.enabled);
+      flow.check("memory.enabled 非法值归一为布尔", cfgWeird.enabled === true || cfgWeird.enabled === false, "布尔", cfgWeird.enabled);
 
       // ---------- P8 悬空引用 ----------
       flow.section("P8 悬空引用反查不得崩（跳转原文的降级底线）");

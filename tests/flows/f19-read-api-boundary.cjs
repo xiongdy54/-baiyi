@@ -31,6 +31,13 @@ const flow = new Flow({
 /** 首启动就非空的播种类读函数（§6.3.4 提示词按 scope 播种；只要求形状，不要求为空） */
 const SEEDED_AT_BOOT = ["listPromptTemplates"];
 
+/** 批次 A（D-TEST-11）点名的 9 个清单函数：入参归一的直接对象，不走基线探测的 args */
+const BATCH_A_LIST_FAMILIES = [
+  "listJournalEntries", "listJournalDates", "listJournalEntriesSince",
+  "listKnowledgePoints", "listKnowledgeRelations", "listKnowledgeProposals",
+  "listInsightRuns", "listMemoryRuns", "listPersonalMeaningCandidates",
+];
+
 /** 递归找非法数值（NaN/Infinity）与 undefined 泄漏 */
 function findBadNumbers(v, trail, out, depth) {
   if (depth > 4 || out.length > 6) return out;
@@ -115,6 +122,8 @@ app
         ["limitHuge", { limit: 1e9 }], ["limitNull", { limit: null }], ["limitTrue", { limit: true }],
         ["limitArr", { limit: [] }],
         ["offsetNeg", { offset: -1 }], ["offsetHuge", { offset: 1e9 }], ["offsetStr", { offset: "x" }],
+        // 批次 A（D-TEST-11）新增三档：分数 offset 与两种「floor 后仍是 Infinity」的非有限 offset
+        ["offsetFrac", { offset: 1.5 }], ["offsetInf", { offset: Infinity }], ["offset1e21", { offset: 1e21 }],
         ["qPct", { query: "%" }], ["qUnder", { query: "_" }], ["qBack", { query: "\\" }],
         ["qQuote", { query: "' OR 1=1--" }], ["qWide", { query: "ＡＢＣ" }], ["qHalf", { query: "ABC" }],
         ["qPctNum", { query: "100%" }], ["qSpace", { query: "   " }], ["qEmoji", { query: "🎯" }],
@@ -132,6 +141,10 @@ app
       const otherThrows = [];
       const fracThrows = [];
       const nullThrows = [];
+      // 整参 null 的「族外残余」：矩阵打的是全部 43 个读函数，D-TEST-11 登记的范围只有清单 9 族，
+      // 批次 A 也只收口那 9 族（§N 明写其它面记录在案、待单独批次）。残余单独一档，不许被顺手丢掉。
+      const nullResidual = [];
+      const D11_SCOPE = new Set(BATCH_A_LIST_FAMILIES);
       const oversize = [];
       const badShape = [];
       let calls = 0;
@@ -158,13 +171,21 @@ app
             }
           } catch (e) {
             const msg = `${b.name}/${tag}: ${String((e && e.message) || e).slice(0, 30)}`;
-            (tag === "limitFrac" ? fracThrows : tag === "scalarNull" ? nullThrows : otherThrows).push(msg);
+            (tag === "limitFrac" ? fracThrows : tag !== "scalarNull" ? otherThrows : D11_SCOPE.has(b.name) ? nullThrows : nullResidual).push(msg);
           }
         }
       }
       flow.record("矩阵调用次数", `${calls} 次（${baseline.length} 函数 × ${HOSTILE.length} 档）`);
-      flow.known("分数 limit 必须归一为整数（现在直穿 SQL → datatype mismatch，整页白屏）", fracThrows.length === 0, "D-TEST-11", "全部不抛", fracThrows);
-      flow.known("显式传 null 必须等同于未传（默认值只兜 undefined，null 会绕过）", nullThrows.length === 0, "D-TEST-11", "全部不抛", nullThrows);
+      flow.check("分数 limit 必须归一为整数（现在直穿 SQL → datatype mismatch，整页白屏）", fracThrows.length === 0, "全部不抛", fracThrows);
+      flow.check("显式传 null 必须等同于未传（默认值只兜 undefined，null 会绕过）", nullThrows.length === 0, "全部不抛", nullThrows);
+      flow.record("整参 null 的族外残余（不在 D-TEST-11 登记范围、批次 A §N 也不修）", nullResidual.join(" ") || "（无）");
+      flow.known(
+        "清单 9 族之外的读函数整参传 null 仍抛（同类缺口，批次 A 只收口 9 族）",
+        nullResidual.length === 0,
+        "D-TEST-11",
+        "全部不抛",
+        nullResidual
+      );
       flow.check("其余畸形参数不得让任何读函数抛异常", otherThrows.length === 0, "零抛错", otherThrows);
       flow.check("返回值形状不得随参数漂移", badShape.length === 0, "形状稳定", badShape);
       flow.check("单次读取不得越界（≤5000 行）", oversize.length === 0, "有上限", oversize);
@@ -227,6 +248,46 @@ app
       flow.record("不分页（limit 被忽略）", notPaged.join(" ") || "（无）");
       flow.check("分页读取必须无重无漏", wrong.length === 0, "逐页 == 全量", wrong);
 
+      // ---------- Z2b 批次 A 新增：清单族入参归一的等价语义（§K2-4） ----------
+      flow.section("Z2b 分数/非有限 offset 与显式 null limit 的归一语义（批次 A / D-TEST-11，直接打 9 族）");
+      const callOne = (name, patch) => {
+        try {
+          return { ok: true, out: JSON.stringify(db[name](patch)) };
+        } catch (e) {
+          return { ok: false, out: String((e && e.message) || e).slice(0, 44) };
+        }
+      };
+      const normFail = [];
+      let normChecked = 0;
+      for (const name of BATCH_A_LIST_FAMILIES) {
+        if (typeof db[name] !== "function") {
+          normFail.push(`${name}: db 未导出`);
+          continue;
+        }
+        normChecked++;
+        // 分数入参的期望是 **floor**（1.5 → 1），不是回落默认值；非有限 offset 归零、超界收到 1e9。
+        for (const [tag, patch, ref] of [
+          ["limitFrac", { limit: 1.5 }, callOne(name, { limit: 1 })],
+          ["limitNull", { limit: null }, callOne(name, {})],
+          ["offsetFrac", { offset: 1.5 }, callOne(name, { offset: 1 })],
+          ["offsetInf", { offset: Infinity }, callOne(name, { offset: 0 })],
+          ["offsetOver", { offset: 1e21 }, callOne(name, { offset: 1e9 })],
+        ]) {
+          const got = callOne(name, patch);
+          if (!got.ok) {
+            normFail.push(`${name}/${tag} 抛错：${got.out}`);
+            continue;
+          }
+          if (!ref.ok) {
+            normFail.push(`${name}/${tag} 对照调用本身抛错：${ref.out}`);
+            continue;
+          }
+          if (got.out !== ref.out) normFail.push(`${name}/${tag} 结果与对照不一致（归一语义漂了）`);
+        }
+      }
+      flow.eq("9 族全部进矩阵（漏一族会让本断言自证为空）", normChecked, BATCH_A_LIST_FAMILIES.length);
+      flow.check("分数/非有限/越界入参一律不抛，且归一结果与整数对照逐字节一致", normFail.length === 0, "全部一致", normFail);
+
       // ---------- Z4 搜索语义：转义已做，归一化未做 ----------
       flow.section("Z4 搜索语义：LIKE 通配符必须被转义，全角/半角与大小写的口径要一致（§6.5）");
       const all = db.listJournalEntries({}).total;
@@ -242,7 +303,7 @@ app
       const half = db.listJournalEntries({ query: "ABC" });
       flow.record("全角 ＡＢＣ 命中 / 半角 ABC 命中", `${wide.total} / ${half.total}`);
       flow.check("半角关键词能搜到（证明种子数据在库里，下一条不是空转）", half.total === 5, "5 行", half.total);
-      flow.known("搜索词的归一化口径要与词典侧一致（NFKC 全半角，词典查询做、日记/知识库搜索不做）", wide.total === half.total, "D-TEST-10", "两侧命中一致", { 全角: wide.total, 半角: half.total });
+      flow.check("搜索词的归一化口径要与词典侧一致（NFKC 全半角，词典查询做、日记/知识库搜索不做）", wide.total === half.total, "两侧命中一致", { 全角: wide.total, 半角: half.total });
       const kqBad = [];
       for (const q of ["'", "''", "--", ";DROP TABLE cards;--", "100%", "_", "%_%"]) {
         try {
@@ -305,8 +366,12 @@ app
       db.addReadingEvent(seedItem.id, 500);
       const rd = db.getStatsOverview().readingDays || [];
       const chars = rd.reduce((acc, x) => acc + (x.chars || 0), 0);
-      flow.record("推进 500 字后 readingDays 合计", `${chars} 字（${rd.length} 个日桶，日桶键非日切对齐时恒为 0）`);
-      flow.known("当日阅读的 500 字必须出现在阅读历史里", chars === 500, "D-TEST-12", "500 字", chars);
+      flow.record("推进 500 字后 readingDays 合计", `${chars} 字（${rd.length} 个日桶）`);
+      flow.check("当日阅读的 500 字必须出现在阅读历史里", chars === 500, "500 字", chars);
+      // 批次 B（D-TEST-12）新增：桶轴与桶键必须同一坐标系（今日桶 = 轴末端），桶数固定不随时刻漂
+      flow.eq("这 500 字落在**今日桶**（轴末端那格，不是随便某个桶）", rd.length ? rd[rd.length - 1].chars : null, 500);
+      flow.eq("日桶数固定为 46（近 45 天**含今日**，两次读数不得差一格）", rd.length, 46);
+      flow.check("每个桶的 date 都是日切点（相邻两格恰好差一天）", rd.every((x, i) => i === 0 || x.date - rd[i - 1].date === 86400000), "轴步长恒为 86400000", rd.slice(0, 3).map((x) => x.date).join(","));
       const vol = (await audit(dbFile)).tables().length;
       flow.check("只读扫描后库仍然完好可开", vol > 20, ">20 张表", vol);
     });

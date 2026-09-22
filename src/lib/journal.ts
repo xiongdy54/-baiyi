@@ -175,6 +175,9 @@ export function journalDateLabel(dateStr: string, opts: { withYear?: boolean } =
   if (!m) return String(dateStr || "");
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const date = new Date(y, mo - 1, d);
+  // 批次 D（D-TEST-19）：形状对了不等于日子存在。"2026-02-30" 原来会静默进位到 3/2，
+  // 于是标签写着「02-30」而星期是 3/2 的——那是 D-TEST-07（写入侧不校验）在显示层的落点。
+  if (date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) return "";
   const label = `${pad2(mo)}-${pad2(d)} 周${"日一二三四五六"[date.getDay()]}`;
   return opts.withYear ? `${y}-${label}` : label;
 }

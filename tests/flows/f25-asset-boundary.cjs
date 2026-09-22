@@ -18,6 +18,7 @@ const crypto = require("crypto");
 const { app } = require("electron");
 const { Flow, runFlow, tmpUserDataDir, freshDir, ROOT } = require("./lib/harness.cjs");
 const { audit, quit } = require("./lib/dbenv.cjs");
+const JSZip = require("jszip");
 
 const flow = new Flow({
   id: "F25",
@@ -76,9 +77,20 @@ app
       }
       const escapedOnDisk = fs.existsSync(path.join(dir, "evil-1.md")) || fs.existsSync(path.join(parentOfUserData, "evil-2.md")) || fs.existsSync(path.join(parentOfUserData, "evil-3.md")) || fs.existsSync(path.join(parentOfUserData, "evil-4.md")) || fs.existsSync("/tmp/evil-5.md");
       flow.record("新增文件分布", tree(dir).filter((r) => !before.has(r)).map((r) => r.split("/").slice(0, 2).join("/")).slice(0, 6).join(" ") || "（无新增）");
-      flow.known("畸形 originalName 的两个表现都必须被堵住：静默写到卡目录之外 / 直接抛错让整本导入失败",
-        wroteOutside.length === 0 && !escapedOnDisk && threwHard.length === 0, "D-TEST-17", "全部关在卡目录内且不抛",
+      flow.check("畸形 originalName 的两个表现都必须被堵住：静默写到卡目录之外 / 直接抛错让整本导入失败",
+        wroteOutside.length === 0 && !escapedOnDisk && threwHard.length === 0, "全部关在卡目录内且不抛",
         { 越界文件: wroteOutside, 探针命中: escapedOnDisk, 抛错: threwHard });
+      // 批次 C（D-TEST-17）新增：净化后的名字必须真落在自己的 item 目录内（path.resolve 前缀校验，
+      // 而不是只看相对路径长什么样）
+      const insideDirs = tree(dir)
+        .filter((r) => !before.has(r) && /^assets\/[^/]+\/[^/]+$/.test(r))
+        .map((r) => {
+          const parts = r.split("/");
+          const itemDirAbs = path.resolve(dir, parts[0], parts[1]);
+          return { r, inside: path.resolve(dir, r).startsWith(itemDirAbs + path.sep) };
+        });
+      flow.check("净化后的每个落盘点都在该 item 目录内（resolve 前缀校验）", insideDirs.length > 0 && insideDirs.every((x) => x.inside), "全部在内", insideDirs.filter((x) => !x.inside).map((x) => x.r));
+      flow.check("没有任何净化后的名字仍带路径分隔符或纯点", insideDirs.every((x) => !/[\\/]/.test(x.r.split("/").pop()) && !/^\.+$/.test(x.r.split("/").pop())), "名字干净", insideDirs.map((x) => x.r.split("/").pop()).filter((n) => /^\.+$/.test(n)));
 
       // ---------- V2 图片名防护的另一半 ----------
       flow.section("V2 内嵌图有文件名防护，但要防住「合法却危险」的名字（db.js:956）");
@@ -91,7 +103,7 @@ app
           imgBad.push(`${JSON.stringify(fn)}: ${String((e && e.message) || e).slice(0, 30)}`);
         }
       }
-      flow.known("图片名防护得覆盖「合法却危险」的名字：`..` 过 [\w.-]+ 正则后写目录抛 EISDIR，整本导入失败", imgBad.length === 0, "D-TEST-17", "不抛", imgBad);
+      flow.check("图片名防护得覆盖「合法却危险」的名字：`..` 过 [\w.-]+ 正则后写目录抛 EISDIR，整本导入失败", imgBad.length === 0, "不抛", imgBad);
       const strayAfterImg = tree(dir).filter((r) => !beforeImg.has(r) && !/^assets\/[^/]+\/[^/]+$/.test(r));
       flow.check("图片写入也不得落到卡目录之外", strayAfterImg.length === 0, "全部在内", strayAfterImg);
 
@@ -149,8 +161,22 @@ app
       const audD = await audit(path.join(dir, "library.db"));
       const assetRows = audD.all("assets").filter((a) => a.library_item_id === r3.id);
       flow.record("删书后 assets 行数与 is_deleted", `${assetRows.length} 行，is_deleted=${[...new Set(assetRows.map((a) => a.is_deleted))].join("/")}`);
-      flow.known("删书后资源行应随之标记（否则备份/同步会永久带着已删书的字节）", assetRows.every((a) => a.is_deleted === 1), "D-TEST-18", "全部标记", assetRows.map((a) => `${a.kind}:${a.is_deleted}`).join(","));
+      flow.check("删书后资源行应随之标记（否则备份/同步会永久带着已删书的字节）", assetRows.every((a) => a.is_deleted === 1), "全部标记", assetRows.map((a) => `${a.kind}:${a.is_deleted}`).join(","));
       audD.close();
+      // 批次 C（D-TEST-18）新增：备份**内容**必须真的不含已删书的 item 目录，未删书逐份照旧；
+      // 并且不传 deletedItemIds 时行为与今天完全一致（缺省不改语义）。
+      db.persistNow();
+      const bk = require(path.join(ROOT, "electron", "backup.js"));
+      const aliveDirs = [...new Set(tree(dir).filter((r) => r.startsWith("assets/")).map((r) => r.split("/")[1]))].filter((id) => id && id !== r3.id);
+      const withFilter = await bk.createBackup({ dataDir: dir, backupDir: freshDir(tmpUserDataDir("f25bk")), flush: () => db.persistNow(), deletedItemIds: new Set(db.listDeletedItemIds()), label: "probe" });
+      const zipFiles = (a) => a.filter((n) => n.slice(-1) !== "/"); // JSZip 也列目录条目，计数只认文件
+      const namesWith = zipFiles(withFilter.ok ? Object.keys((await JSZip.loadAsync(fs.readFileSync(withFilter.file))).files) : []);
+      const noFilter = await bk.createBackup({ dataDir: dir, backupDir: freshDir(tmpUserDataDir("f25bk2")), flush: () => db.persistNow(), label: "probe2" });
+      const namesWithout = zipFiles(noFilter.ok ? Object.keys((await JSZip.loadAsync(fs.readFileSync(noFilter.file))).files) : []);
+      flow.check("两次备份探针都成功（前置条件）", Boolean(withFilter.ok && noFilter.ok), "ok", { 带过滤: withFilter.error || "ok", 缺省: noFilter.error || "ok" });
+      flow.eq("已删书的 assets 不进备份", namesWith.filter((n) => n.indexOf("assets/" + r3.id + "/") === 0).length, 0);
+      flow.eq("未删书的 assets 逐份照旧进备份", aliveDirs.filter((id) => !namesWith.some((n) => n.indexOf("assets/" + id + "/") === 0)), []);
+      flow.eq("不传 deletedItemIds 时打包行为与今天一致（缺省 = 该书的字节全部照旧进包）", namesWithout.filter((n) => n.indexOf("assets/" + r3.id + "/") === 0).length, tree(dir).filter((r) => r.indexOf("assets/" + r3.id + "/") === 0).length);
       flow.eq("删书后队列与统计仍可算", typeof db.computeTodayQueue() === "object" && typeof db.getStatsOverview() === "object", true);
       // 只记录不判红：指南没有明文「删书后按 id 直读必须失败」，这条留给用户裁定
       flow.record("删书后仍能用 id 直读书面", db.getDocument(r3.id) ? "读得到（getDocument 不看 is_deleted）" : "读不到");
@@ -174,7 +200,7 @@ app
       const settingsOutcome = probeOf("settings.json");
       flow.record("覆盖 library.db 的结果", dbOutcome + "（import 末尾的 persist 会把主库整文件重写回来，所以销毁被掩盖）");
       flow.record("覆盖 settings.json 的结果", settingsOutcome);
-      flow.known("一次导入不得能改写 userData 根下的 settings.json（用户全部偏好，且不会被任何写路径修回来）", settingsOutcome !== "已被覆盖", "D-TEST-17", "盖不掉", settingsOutcome);
+      flow.check("一次导入不得能改写 userData 根下的 settings.json（用户全部偏好，且不会被任何写路径修回来）", settingsOutcome !== "已被覆盖", "盖不掉", settingsOutcome);
     });
 
     quit(s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length > 0 ? 1 : 0);

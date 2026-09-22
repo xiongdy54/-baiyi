@@ -36,6 +36,10 @@ function readMemoryConfig(ctx) {
   cfg.inputTokenBudget = clampNum(cfg.inputTokenBudget, 2000, 60000, TIDY_DEFAULTS.inputTokenBudget);
   cfg.consolidateEveryRounds = clampNum(cfg.consolidateEveryRounds, 1, 200, TIDY_DEFAULTS.consolidateEveryRounds);
   cfg.injectBudget = clampNum(cfg.injectBudget, 200, 20000, TIDY_DEFAULTS.injectBudget);
+  // 批次 E（D-TEST-03，§4.18 默认关闭是 consent 纪律）：布尔字段只认字面量 true。
+  // 数值项都 clamp 了，布尔以前是直接展开的——手写 settings.json 里 "yes" / 1 会被当成"用户已同意"。
+  cfg.enabled = cfg.enabled === true;
+  cfg.introAcked = cfg.introAcked === true;
   return cfg;
 }
 

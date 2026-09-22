@@ -79,7 +79,7 @@ app
         });
       }
       flow.record("扫过的文件数", String(files.length));
-      flow.known("读日志清单的 ORDER BY 必须是 review_seq，按墙钟排即违反 §4.4.9", offenders.length === 0, "D-TEST-21", "只按 seq", offenders);
+      flow.check("读日志清单的 ORDER BY 必须是 review_seq，按墙钟排即违反 §4.4.9", offenders.length === 0, "只按 seq", offenders);
 
       // ---------- T3 时钟倒退下的行为证据 ----------
       flow.section("T3 模拟校时/时区跳变：墙钟倒退后，日志清单的顺序必须仍是插入序（§4.4.9 的存在理由）");
@@ -99,7 +99,7 @@ app
       const listed = db.listAllReviewLogs().map((r) => r.cardId);
       flow.record("插入序（seq）", seqOrder.slice(-2).join("→"));
       flow.record("listAllReviewLogs 给的序", listed.slice(-2).join("→"));
-      flow.known("墙钟倒退时清单顺序仍须等于插入序（否则审计分段与「首次达成」判定都会错）", J(listed) === J(seqOrder), "D-TEST-21", "两序一致", { 清单: listed.map((x) => seqOrder.indexOf(x)), 插入序: seqOrder.map((x, i) => i) });
+      flow.check("墙钟倒退时清单顺序仍须等于插入序（否则审计分段与「首次达成」判定都会错）", J(listed) === J(seqOrder), "两序一致", { 清单: listed.map((x) => seqOrder.indexOf(x)), 插入序: seqOrder.map((x, i) => i) });
 
       // ---------- T4 撤销面板撤销的必须是用户看到的最后一条 ----------
       flow.section("T4 撤销入口与日志清单对「最后一条」必须同认一条（§4.4.9 / §6.2 复习页）");
@@ -107,7 +107,17 @@ app
       const undoable = db.getLastUndoableReview();
       flow.record("撤销面板指向", undoable ? `${undoable.cardId} ${undoable.rating} seq=${undoable.reviewSeq}` : "（无）");
       flow.record("清单末条指向", lastFromList ? `${lastFromList.cardId} ${lastFromList.rating} seq=${lastFromList.reviewSeq}` : "（空）");
-      flow.known("面板要撤的那条必须就是清单里最后一条（不同则撤销的是用户没看的那张卡）", Boolean(undoable && lastFromList && String(undoable.logId ?? undoable.id ?? undoable.cardId) === String(lastFromList.logId ?? lastFromList.id ?? lastFromList.cardId)), "D-TEST-21", "同一条", { 面板: undoable && `${undoable.cardId} seq=${undoable.reviewSeq}`, 清单: lastFromList && `${lastFromList.cardId} seq=${lastFromList.reviewSeq}` });
+      // 判据本身修过一处：原式比的是 undoable.logId ↔ lastFromList.logId，但 listAllReviewLogs
+      // 根本不 SELECT 日志 id（只有 cardId/rating/reviewedAt/fsrsConfigId/reviewSeq），右侧会一路
+      // 退化成 cardId → 即使两边真是同一条也恒假。改成本层想验的「同一条」：
+      // review_seq（§4.4.9 表内唯一）相等 且 cardId 相等，判据只收紧不放宽。
+      const sameRow = Boolean(
+        undoable && lastFromList &&
+          Number.isFinite(Number(undoable.reviewSeq)) &&
+          String(undoable.reviewSeq) === String(lastFromList.reviewSeq) &&
+          String(undoable.cardId) === String(lastFromList.cardId)
+      );
+      flow.check("面板要撤的那条必须就是清单里最后一条（不同则撤销的是用户没看的那张卡）", sameRow, "同一条", { 面板: undoable && `${undoable.cardId} seq=${undoable.reviewSeq}`, 清单: lastFromList && `${lastFromList.cardId} seq=${lastFromList.reviewSeq}` });
 
       // ---------- T5 迁移与重启对序号的处理 ----------
       flow.section("T5 存量回填与重启后继续递增（§7.1.4 重启不丢序、迁移幂等）");

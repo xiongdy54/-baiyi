@@ -99,11 +99,17 @@ const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
 
 function readSettings() {
   try {
-    return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+    const v = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+    // 批次 A（D-TEST-09）：合法 JSON 但非对象时同样兜底。保留 { app, theme } 形状——
+    // settings:set 的 all[scope][key] = value 依赖它。不做自愈写回，不覆盖用户文件。
+    return v && typeof v === "object" && !Array.isArray(v) ? v : { app: {}, theme: {} };
   } catch {
     return { app: {}, theme: {} };
   }
 }
+
+// 注意：electron/settingsStore.js 另有一份 readSettings（db.js 与各仓储路径用它），
+// 两份长期分叉待后续批次合并。
 
 function writeSettings(all) {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
@@ -503,6 +509,9 @@ ipcMain.handle("assets:saveImage", (_e, ownerKey, ext, base64, kind) => {
 const backupOpts = () => ({
   flush: () => dbModule.persistDb(),
   counts: dbModule.getBackupCounts(),
+  // 批次 C（D-TEST-18）：已软删书的 id 交给备份侧，打包时跳过它们的 assets 目录。
+  // backup.js 不 require db 层（它的依赖注入一直是 opts.*），所以在这里塞进来。
+  deletedItemIds: new Set(dbModule.listDeletedItemIds()),
   appVersion: app.getVersion()
 });
 ipcMain.handle("backup:info", () => ({
@@ -556,7 +565,12 @@ ipcMain.on("app:relaunch", () => {
 });
 
 // ---------- AI 网关 ----------
-ipcMain.handle("ai:getConfig", () => getAIConfig());
+// §7.5「渲染层不持有明文 Key」：解密只发生在主进程，返回体剥掉 apiKey
+// （ai:setConfig 早就是 `const { apiKey, ...safe }` 的剥法，这里对齐；hasKey/preset/baseUrl/model 照旧）。
+ipcMain.handle("ai:getConfig", () => {
+  const { apiKey, ...safe } = getAIConfig();
+  return safe;
+});
 ipcMain.handle("ai:setConfig", (_e, partial) => setAIConfig(partial || {}));
 ipcMain.handle("ai:test", () => testConnection());
 ipcMain.handle("ai:listModels", () => listModels());

@@ -346,13 +346,19 @@ export const SHELF_DENSITIES: { value: ShelfDensity; label: string }[] = [
 ];
 
 export function pct(n: number): string {
-  return `${Math.round(n * 100)}%`;
+  // 批次 D（D-TEST-19）：非有限数按 0 处理。返回值同时用于 CSS 宽度
+  // （Bookshelf.tsx 里多处 width: pct(progress)），所以不能返回 "—" 之类的非长度值。
+  const x = Number(n);
+  return Number.isFinite(x) ? `${Math.round(x * 100)}%` : "0%";
 }
 
 /** 'MM-DD'；与既有 lastReadDisplay 的口径一致（书架只到日粒度） */
 export function dayLabel(ms: number): string {
-  if (!ms) return "";
+  // 批次 D（D-TEST-19）：原来只挡 !ms，Infinity 与 1e18 会穿过并渲染成 "NaN-NaN"。
+  // 1e18 是**有限数**但超出 Date 的取值范围（±8.64e15），所以要连 Invalid Date 一起挡。
+  if (!Number.isFinite(ms) || ms <= 0) return "";
   const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "";
   const p = (x: number) => String(x).padStart(2, "0");
   return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }

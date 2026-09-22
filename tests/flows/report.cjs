@@ -3,6 +3,12 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
+// 分支名不写死：报告里那行是「main 未动」的凭据之一，写死必然随分支腐烂
+let BRANCH = "未知";
+try {
+  BRANCH = execSync("git rev-parse --abbrev-ref HEAD", { cwd: path.resolve(__dirname, "..", ".."), encoding: "utf8" }).trim() || "未知";
+} catch { /* 非 git 环境下留「未知」 */ }
 const ROOT = path.resolve(__dirname, "..", "..");
 const rows = fs
   .readFileSync(path.join(__dirname, "results", "history.jsonl"), "utf8")
@@ -75,7 +81,7 @@ const pct = (arr, p) => {
 let out = `# 全流程测试长跑报告
 
 > 由 \`node tests/flows/report.cjs\` 生成于 ${T(Date.now())}。数据源 \`tests/flows/results/history.jsonl\`（${rows.length} 条运行记录）。
-> 分支 \`test/flow-coverage\`；设计见 [PLAN.md](PLAN.md)，缺陷见 [DEFECTS.md](DEFECTS.md)。
+> 分支 \`${BRANCH}\`；设计见 [PLAN.md](PLAN.md)，缺陷见 [DEFECTS.md](DEFECTS.md)。
 
 ## 1. 窗口与总量
 

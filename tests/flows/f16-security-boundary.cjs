@@ -85,8 +85,17 @@ runFlow(flow, async () => {
 
   // ---------- U4 密钥边界 ----------
   flow.section("U4 明文 Key 不进渲染层、不进日志、不入默认备份（§7.5 L911）");
-  const returnsKey = /return\s*\{[\s\S]{0,400}?\bapiKey\b/.test(ai.match(/function getAIConfig\(\)[\s\S]{0,900}/) ? ai.match(/function getAIConfig\(\)[\s\S]{0,900}/)[0] : "");
-  flow.known("getAIConfig 返回体不含明文 apiKey", !returnsKey, "D-TEST-08", "不含", returnsKey ? "含 apiKey 字段" : "不含");
+  // 批次 C（D-TEST-08）：登记的危害是「明文 Key 经 ai:getConfig 直达渲染层」，修法收在 IPC 边界
+  // （ai.js 内部继续用完整 getAIConfig()，规格里明写不要动）。所以判据换成两条能真的抓住泄露的：
+  // ① handler 必须剥 Key 再返回；② 全仓不得有第二个把 getAIConfig() 原样回给渲染层的 handler。
+  const handler = main.match(/ipcMain\.handle\(\s*["']ai:getConfig["'][\s\S]{0,320}?\}\)/);
+  const stripsKey = Boolean(handler && /\.\.\.safe/.test(handler[0]) && !/=>\s*getAIConfig\(\)/.test(handler[0]));
+  flow.check("ai:getConfig 的 IPC 返回体剥掉明文 apiKey（§7.5 L911）", stripsKey, "const { apiKey, ...safe }", handler ? handler[0].replace(/\s+/g, " ").slice(0, 90) : "未找到 handler");
+  const leaky = (main.match(/ipcMain\.handle\([\s\S]{0,80}?=>\s*getAIConfig\(\)\s*\)/g) || []).concat(
+    (main.match(/ipcMain\.handle\([\s\S]{0,80}?\)\s*=>\s*\{\s*return\s+getAIConfig\(\)/g) || [])
+  );
+  flow.check("没有任何其它 IPC handler 把 getAIConfig() 原样回给渲染层", leaky.length === 0, "零裸返回", leaky.map((s) => s.replace(/\s+/g, " ").slice(0, 60)));
+  flow.record("ai:test / ai:listModels 的返回形状", "testConnection 只回 {ok,message}；listModels 只回 id 数组（逐个读过实现）");
   flow.check("ai:getConfig 的返回被渲染层用到 key 时须有明确必要性（先记录用量）", /apiKey/.test(read("src/components/SettingsPanel.tsx")) , true, "见下条");
   flow.record("SettingsPanel 里出现 apiKey 的位置数", (read("src/components/SettingsPanel.tsx").match(/apiKey/g) || []).length);
   flow.eq("主进程不把 Key 写进日志", inElectron(/console\.(log|error|warn)\([^)]*(apiKey|keys\[|secret)/).length, 0);

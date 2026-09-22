@@ -115,7 +115,17 @@ app
       a4a.close();
       const seenBeforePersist = (await audit(dbFile)).one("SELECT id FROM extracts WHERE id = ?", [externalId]);
       flow.check("外部写入此刻在盘上可见", !!seenBeforePersist, true, !!seenBeforePersist);
-      db.createExtract({ parentType: "document", parentId: "in-app", documentId: "in-app", contentMarkdown: "应用内摘录", priority: 60 });
+      // 批次 E（D-TEST-15 T3 档）配套改夹具：这里要的是「应用内一次写触发 persist」这个副作用，
+      // 而 createExtract 现在会先验父文档存在（幽灵 documentId 会被拒、也就不再 persist）。
+      // 所以传真实文档 id；没有文档就先造一本——测的东西不变，只是不再依赖「门口没设防」。
+      let appDocId = doc0 && doc0.id;
+      if (!appDocId) {
+        const made = db.createFromPaste("F04 外部写对照书", "# 章\n\n用于触发一次应用内写库。");
+        const d = db.getDocument(made.id);
+        appDocId = (d && d.id) || (d && d.documentId) || null;
+      }
+      flow.check("本条前置：拿到了一份真实文档（否则测不到应用内写库）", Boolean(appDocId), true, appDocId);
+      db.createExtract({ parentType: "document", parentId: appDocId, documentId: appDocId, contentMarkdown: "应用内摘录", priority: 60 });
       const afterAppWrite = (await audit(dbFile)).one("SELECT id FROM extracts WHERE id = ?", [externalId]);
       flow.eq("应用一次 persist 即覆盖外部改动（所以外部操作必须先关应用）", afterAppWrite, null);
       db.deleteExtractIfPresent?.(externalId);

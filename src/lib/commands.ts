@@ -50,6 +50,9 @@ const PURE_MODIFIER = new Set([
 // 该串同时是存储格式与设置页展示格式。纯修饰键返回 null。
 export function eventToCombo(e: ComboInput): string | null {
   let key = e.key || "";
+  // 批次 D（D-TEST-14）：key 为空（部分 IME 组合过程、少数键盘）会拼出 "Ctrl+" 这种残缺串——
+  // 它匹配不到任何键，却能被 setOverride 写进设置并被 conflictWith 当一条占用。
+  if (!key) return null;
   if (key === " ") key = "Space";
   if (PURE_MODIFIER.has(key)) return null;
   if (key.length === 1 && key.toLowerCase() !== key.toUpperCase()) key = key.toUpperCase();
@@ -137,8 +140,13 @@ function pushSuppress(reason: string): void { suppressions.add(reason); }
 function popSuppress(reason: string): void { suppressions.delete(reason); }
 
 // 纯逻辑分发（供 install 与测试共用）：命中并执行返回 true
-function dispatchKey(e: ComboInput & { repeat?: boolean }): boolean {
+function dispatchKey(e: ComboInput & { repeat?: boolean; target?: unknown }): boolean {
   if (suppressions.size > 0) return false;
+  // 批次 D（D-TEST-13）：本文件开头与指南 §9.1 M4 都把「输入焦点内绝不劫持」写成硬约束，
+  // 但分发此前没有任何焦点判断——焦点在 INPUT/TEXTAREA/contentEditable 里时一律放行给原生行为。
+  // target 用 unknown：真实 KeyboardEvent 的 EventTarget 与测试投喂的字面量对象都能传进来。
+  const t = e.target as { tagName?: string; isContentEditable?: boolean } | null | undefined;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return false;
   if (e.repeat) return false;
   const combo = eventToCombo(e);
   if (!combo) return false;

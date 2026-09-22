@@ -68,8 +68,9 @@ const PROBES = [
 const ADMITTED_FAKE = ["updateProgress", "addReadingEvent"];
 // 已登记在 D-TEST-15 范围内、实测会收幽灵父 id 的三张子表（超出即新的写入口缺口）
 const GHOST_OK = new Set(["card_issues", "extracts", "reading_events"]);
-// 假成功总数棘轮：只许降不许升（首轮实测后收紧到观测值）
-const FAKE_BUDGET = Number(process.env.F32_FAKE_BUDGET || 18);
+// 假成功总数棘轮：只许降不许升。批次 E（D-TEST-15）T1+T2+T3 全部落地后实测为 0
+// （28 条探针：5 个诚实抛错、23 个可判失败或合法造新行），故按统一验收的要求收紧到观测值。
+const FAKE_BUDGET = Number(process.env.F32_FAKE_BUDGET || 0);
 
 function shapeOf(v) {
   if (v === undefined) return "undefined";
@@ -180,17 +181,16 @@ app
       flow.record("探针逐条结果", outcomes.join("\n      "));
       if (missing.length) flow.record("db.js 未导出、本轮跳过的探针", missing.join(" "));
       flow.check("写在幽灵 id 上不得越界改写既有行", crossed.length === 0, "零越界", crossed.length ? crossed.join(" ；") : "零越界");
-      flow.known(
+      flow.check(
         "幽灵 id 的假成功函数不得超出点名清单（D-TEST-15 登记的「写入口零校验 + 假成功」是一类问题：除点名的 2 个外，实测还有 13 个针对既有行的函数返回真值）",
         fake.length === 0,
-        "D-TEST-15",
         "仅 " + ADMITTED_FAKE.join("/"),
         fake.length ? fake.join(" ") : "无新增"
       );
       flow.check(
-        "已点名的两个假成功入口仍在矩阵里（清单悄悄变化也要看得见）",
-        ADMITTED_FAKE.every((f) => outcomes.some((o) => o.startsWith(f + " → ") && /假成功候选/.test(o))),
-        "updateProgress + addReadingEvent 仍为假成功",
+        "已点名的两个写入口现在必须给可判失败（清单悄悄变化也要看得见）",
+        ADMITTED_FAKE.every((f) => outcomes.some((o) => o.startsWith(f + " → ") && !/假成功候选/.test(o))),
+        "updateProgress + addReadingEvent 已可判失败",
         outcomes.filter((o) => ADMITTED_FAKE.some((f) => o.startsWith(f + " → "))).join(" ; ")
       );
 
@@ -207,14 +207,20 @@ app
       // ---------- W4 点名 D-TEST-15 的两个写入口 ----------
       flow.section("W4 已登记的 D-TEST-15：两个写入口对幽灵 id 必须给可判失败（修好了这条会反向报警）");
       const r1 = db.updateProgress(NOPE, { ratio: 0.3 });
-      flow.known("给不存在的书写进度必须返回可判失败（现在返回 true，界面显示「已保存」）", r1 !== true && r1 !== undefined, "D-TEST-15", "false / 抛错", shapeOf(r1));
+      flow.check("给不存在的书写进度必须返回可判失败（现在返回 true，界面显示「已保存」）", r1 !== true && r1 !== undefined, "false / 抛错", shapeOf(r1));
       let r2 = "（未抛错）";
       try {
         r2 = shapeOf(db.addReadingEvent(NOPE, 500));
       } catch (e) {
         r2 = "throw:" + String(e.message).slice(0, 30);
       }
-      flow.known("给不存在的书加阅读事件必须被拒（现在照样插一行无人认领的字数）", /throw:/.test(r2), "D-TEST-15", "抛错", r2);
+      flow.check("给不存在的书加阅读事件必须被拒（现在照样插一行无人认领的字数）", /可判失败|throw:/.test(r2), "false / 抛错", r2);
+      // 批次 E（D-TEST-15 T3 档）新增：空白卡拒收，但**不抛错**（AI 批量制卡是多草稿循环 await、
+      // 没有逐卡 try/catch，抛错会中断整批），且拒空白不得误伤有正文的卡。
+      const r3 = shapeOf(db.createCard({}));
+      flow.check("createCard({}) 空白卡必须被拒（返回可判失败，不抛错）", /可判失败/.test(r3), "false", r3);
+      const r4 = shapeOf(db.createCard({ noteText: "F32 最小合法卡", frontMarkdown: "问", backMarkdown: "答" }));
+      flow.check("有正文的卡照常入库（收紧不得误伤正常路径）", /^object\{id\}/.test(r4), "返回 {id}", r4);
 
       // ---------- W5 打过幽灵之后，库还得能用 ----------
       flow.section("W5 一轮幽灵写之后库仍可用（不得把异常状态留在内存里）");
@@ -251,10 +257,9 @@ app
         if (n) dangling.push(`${t}.${c} 有 ${n} 行指向不存在的 ${parent}`);
       }
       flow.record("幽灵写一轮后的悬空行数", dangling.join(" ；") || "（零悬空）");
-      flow.known(
+      flow.check(
         "写入口不得创建指向不存在父行的行（幽灵 id 必须挡在门口，而不是插进库里等人日后踩）—— 已登记同类 D-TEST-15 只点名了 reading_events，实测三族都收：card_issues / extracts / reading_events",
         dangling.length === 0,
-        "D-TEST-15",
         "零悬空",
         dangling.length ? dangling.join(" ；") : "零悬空"
       );

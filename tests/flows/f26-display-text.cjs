@@ -105,13 +105,37 @@ runFlow(flow, async () => {
   flow.record("探针取值组数", `七个展示函数 × 边界/非法值`);
   flow.record("空串结果（非法输入下允许沉默）", empties.length ? empties.join(" ") : "（无）");
   void times;
-  flow.known("展示函数对非法数值不得产出 junk（NaN / Infinity / undefined / [object；空串不算，那是「不显示」的合理语义）", junk.filter((j) => !/lastReadDisplay\(null\)/.test(j)).length === 0, "D-TEST-19", "全部可展示", junk);
+  // 批次 D（D-TEST-19）的登记范围只有三个展示函数（shelf.pct / shelf.dayLabel /
+  // journal.journalDateLabel，见规格附录第 4 条）；P2 的探针打的是七个函数。
+  // 所以判据按登记范围分档：那三个 → 硬断言；其余四个（udc/knowledge/library/dict 对
+  // null|undefined 返回 null|undefined）→ 继续挂 D-TEST-19 名下报已知，不许顺手丢掉。
+  const d19 = (j) => /^(shelf|journal)\./.test(j);
+  const d19Junk = junk.filter((j) => !/lastReadDisplay\(null\)/.test(j) && d19(j));
+  const otherJunk = junk.filter((j) => !/lastReadDisplay\(null\)/.test(j) && !d19(j));
+  flow.check("展示函数对非法数值不得产出 junk（NaN / Infinity / undefined / [object；空串不算，那是「不显示」的合理语义）", d19Junk.length === 0, "全部可展示", d19Junk);
+  flow.record("登记范围外的 junk（同族，批次 D 未点名）", otherJunk.join(" ") || "（无）");
+  flow.known(
+    "shelf/journal 之外的展示函数对 null/undefined 仍返回 null/undefined（D-TEST-19 只登记三个，批次 D 只修三个）",
+    otherJunk.length === 0,
+    "D-TEST-19",
+    "全部可展示",
+    otherJunk
+  );
   // 复核补测（2026-09-22）：无效日期必须在展示层被拒，否则会印出自相矛盾的标签——
   // 实现里只有格式正则（journal.ts:174），"2026-02-30" 通过正则后交给 new Date(2026,1,30) 静默进位到 3/2，
   // 于是标签写「02-30」而星期取的是 3 月 2 日的。这条原来是静态推断、没有断言，复核时补上。
   const roll = journal.journalDateLabel("2026-02-30");
   flow.record("不存在的一天 2026-02-30 的展示", JSON.stringify(roll));
-  flow.known("不存在的日子（2026-02-30）必须被展示层拒绝，而不是静默进位成别人的星期", roll === "", "D-TEST-19", "空串", JSON.stringify(roll));
+  flow.check("不存在的日子（2026-02-30）必须被展示层拒绝，而不是静默进位成别人的星期", roll === "", "空串", JSON.stringify(roll));
+  // 批次 D（D-TEST-19）新增两条：
+  // ① pct 的返回值同时被当 CSS 宽度用（Bookshelf 里 width: pct(progress)），
+  //    所以**非有限**输入必须回落成合法长度；负数是合法入参、既有输出 "-100%" 不在本条范围内。
+  flow.eq("pct 对非有限入参产出合法 CSS 长度（/^\\d+%$/）", [NaN, Infinity, -Infinity, "abc", null, undefined].every((v) => /^\d+%$/.test(shelf.pct(v))), true);
+  // ② 合法入参的输出逐字不变 + dayLabel(0)/dayLabel(NaN) 仍返回 ""（不回归）
+  flow.eq("dayLabel 合法毫秒仍产出 MM-DD", /^\d{2}-\d{2}$/.test(shelf.dayLabel(1758500000000)), true);
+  flow.eq("dayLabel(0) / dayLabel(NaN) 保持空串（原有语义不回归）", JSON.stringify([shelf.dayLabel(0), shelf.dayLabel(NaN)]), JSON.stringify(["", ""]));
+  flow.eq("journalDateLabel 合法日期仍产出「MM-DD 周X」形状", /^\d{2}-\d{2} 周[日一二三四五六]$/.test(journal.journalDateLabel("2026-09-22")), true);
+  flow.eq("星期与日子自洽（标签里的周几必须取自同一天，不得进位）", journal.journalDateLabel("2026-09-22").slice(-1), "日一二三四五六"[new Date(2026, 8, 22).getDay()]);
 
   // ---------- P3 同一时间戳跨页同口径 ----------
   flow.section("P3 同一个时间戳，书架「上次阅读」与日记日期标签必须说同一个日子（§4.12-4 / §7.1.6）");

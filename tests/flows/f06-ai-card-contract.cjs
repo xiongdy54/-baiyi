@@ -68,13 +68,22 @@ app
       }
       const multiDefault = [...byScope.entries()].filter(([, v]) => v.filter((x) => x.is_default).length !== 1).map(([k]) => k);
       // is_default 恒为 1（播种全写 1、无人置 0）→ 该列不承载信息；靠 version DESC 侥幸取对
-      flow.known(
+      // 批次 E（D-TEST-02，语义①）：播种后做一次幂等订正，每个 scope 只有最高 version 留 1。
+      flow.check(
         "每个 scope 恰有一个默认版本",
         multiDefault.length === 0,
-        "D-TEST-02",
         "无异常",
         multiDefault
       );
+      // 新增：默认行必须就是最高 version 那一行（不是"随便挑一行当默认"）
+      const defNotMax = [...byScope.entries()]
+        .filter(([, v]) => {
+          const defs = v.filter((x) => x.is_default);
+          return defs.length !== 1 || defs[0].version !== Math.max(...v.map((r) => r.version));
+        })
+        .map(([k, v]) => `${k}(${v.map((r) => `v${r.version}:${r.is_default}`).join(",")})`);
+      flow.check("默认行 = 该 scope 内最高 version 那一行（逐 scope）", defNotMax.length === 0, "全部对齐", defNotMax.slice(0, 3));
+      flow.eq("订正是幂等的：默认行总数 == scope 数", rows.filter((r) => r.is_default).length, byScope.size);
       const defPick = db.getPromptTemplate("card-occlusion");
       const maxVer = Math.max(...(byScope.get("card-occlusion") || []).map((r) => r.version));
       flow.eq("运行期实际取到的是最新版（version DESC 兜住了歧义 default）", defPick?.version, maxVer);

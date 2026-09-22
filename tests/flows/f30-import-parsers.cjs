@@ -79,9 +79,15 @@ app
       const cleaned = im.markdownFromText(noise);
       flow.check("两类噪音都被清掉", !/<style|<script|data:image/.test(cleaned), "清掉", J(cleaned));
       flow.check("正文句子原样保留", cleaned.includes("正文一段。") && cleaned.includes("结尾。") && cleaned.startsWith("# 标题"), "正文未动", J(cleaned));
-      const fenced = "正文\n\n``-html\n<style>代码块里的 style 是内容，不是噪音</style>\n```\n\n后文";
+      // 夹具本身修过一处：原文是 "``-html"（两个反引号 + 连字符），那不是合法的围栏开栏，
+      // 修好实现后这一档依旧会被当正文吃掉 —— 断言测的从来不是"围栏内"。改成三反引号带信息串。
+      const fenced = "正文\n\n```html\n<style>代码块里的 style 是内容，不是噪音</style>\n```\n\n后文";
       const fencedOut = im.markdownFromText(fenced);
-      flow.known("围栏代码块内的 <style> 属于正文，不得被清洗吃掉（文档写明「正文不做任何改写」）", fencedOut.includes("代码块里的 style"), "D-TEST-22", "保留在代码块内", J(fencedOut).slice(0, 120));
+      flow.check("围栏代码块内的 <style> 属于正文，不得被清洗吃掉（文档写明「正文不做任何改写」）", fencedOut.includes("代码块里的 style"), "保留在代码块内", J(fencedOut).slice(0, 120));
+      // 批次 D（D-TEST-22）新增：反向护栏——加了围栏感知之后，围栏**外**的噪音仍必须被清掉
+      const mixed = "正文里的 <style>x{color:red}</style> 是噪音\n\n```\n<style>围栏内的要留下</style>\n```\n\n后面又有 <script>y()</script> 与 ![i](data:image/png;base64,AA) 噪音";
+      const mixedOut = im.markdownFromText(mixed);
+      flow.check("围栏外的 style/script/data-URI 一律照旧清掉（不得反向漏掉正文噪音）", !/<style>x\{|<script>y\(\)|data:image/.test(mixedOut) && mixedOut.includes("围栏内的要留下"), "外清内留", J(mixedOut).slice(0, 150));
       const inlineScript = "他说：<script> 不是闭合标签；正文继续。";
       flow.check("未闭合的尖括号不得触发跨段吞文", im.markdownFromText(inlineScript).includes("正文继续"), "不吞正文", J(im.markdownFromText(inlineScript)));
       flow.eq("多次清洗结果稳定（幂等）", im.markdownFromText(cleaned), cleaned);

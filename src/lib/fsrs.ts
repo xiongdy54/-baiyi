@@ -3,7 +3,7 @@
 //   （v20/F7 补 learningSteps＝ts-fsrs 学习步进索引：缺失会使 learning 档第 2 步的 Good 永不毕业）
 // §4.4.2 fuzz 锁定关闭：预览值即算法真实值
 // §4.4.3 预览与实际调度同源：preview() 一次算出四档完整结果，评分时取对应档
-// §4.4.7 优化器：启动时读取 settings.app.fsrsWeights（由 optimizer:apply 写入）注入权重
+// §4.4.7 优化器：活跃参数环境 = settings.app.fsrsConfigId 指针所指的 fsrs_configs 快照行（v23/D22 起该字段已废除，仅 initDb 一次性迁移读它）
 import {
   fsrs,
   generatorParameters,

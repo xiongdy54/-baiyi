@@ -38,7 +38,7 @@ const {
 } = require("./prompts");
 const { sanitizeDomain, domainFromPrefix } = require("./udc");
 const { calculateFsrsDeltaT, learningDayStartMs } = require("./fsrsTime");
-const { journalDateOf } = require("./journalTime");
+const { journalDateOf, isJournalDate } = require("./journalTime");
 // v41（K2-A，D38）：知识归一纯函数（规范化 / 批次簇键 / 提案幂等指纹）
 const { normalizeKpLabel, kpClusterKeyFor, kpProposalFingerprint, isOpaqueClusterId } = require("./kpNorm");
 const { readSettings, writeSettings } = require("./settingsStore");
@@ -785,6 +785,8 @@ function listItems() {
 // v38（D35）：书籍语言属性（''=未知）。查词语言路由的书籍级信号；不参与其他逻辑。
 function setLibraryItemLang(id, lang) {
   const t = String(lang ?? "").trim().toLowerCase();
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("library_items", id)) return false;
   db.run("UPDATE library_items SET lang=?, updated_at=? WHERE id=? AND is_deleted=0", [t, Date.now(), String(id)]);
   persist();
   return true;
@@ -795,6 +797,8 @@ function setLibraryItemTitle(id, title) {
   const t = String(title ?? "").trim();
   if (!t) throw new Error("书名不能为空");
   if (t.length > 300) throw new Error("书名过长（至多 300 字符）");
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("library_items", id)) return false;
   db.run("UPDATE library_items SET title=?, updated_at=? WHERE id=? AND is_deleted=0", [t, Date.now(), String(id)]);
   persist();
   return true;
@@ -842,11 +846,21 @@ function createFromPaste(title, markdown) {
 }
 
 function deleteItem(id) {
+  // 批次 E（D-TEST-15 T1 档）：书目不存在或已软删时返回 false（重复删除第二次就是 false）。
+  if (!rowExists("library_items", id)) return false;
   const now = Date.now();
   db.run("UPDATE library_items SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, id]);
   db.run("UPDATE documents SET is_deleted = 1, updated_at = ? WHERE library_item_id = ?", [now, id]);
+  // 批次 C（D-TEST-18）：资产行一并软删。字节保留在盘上（回收是显式清理的事，不在本批），
+  // 但备份打包按 item 目录整份带走，标记后 backup.js 才能把它挡在备份外。
+  db.run("UPDATE assets SET is_deleted = 1, updated_at = ? WHERE library_item_id = ?", [now, id]);
   persist();
   return true;
+}
+
+// 只读：已软删的书目 id（备份侧用来跳过它们的 assets 目录；缺省不传 = 行为与今天一致）
+function listDeletedItemIds() {
+  return queryAll("SELECT id FROM library_items WHERE is_deleted = 1").map((r) => String(r.id));
 }
 
 function addAssetRow(itemId, kind, relPath, hash, now) {
@@ -938,6 +952,14 @@ function firstLine(markdown) {
 // M6-1（v26）：导入格式扩展 —— Word/TXT/Markdown 统一建册（照抄 createFromEpub 形状）。
 // source_type ∈ word|txt|markdown；原文件落 assets kind=<sourceType>-original；内嵌图落 kind=image-content
 // （文件名 img-N.ext 确定性命名，读侧 readContentImages 取回字节随合成 EPUB 内嵌，M2 备份自动覆盖）。
+// 批次 C（D-TEST-17）：落盘文件名净化收在 **sink** 侧，不指望调用方传对。
+// 用 split(/[\\/]/) 而不是 path.basename（Windows 反斜杠会穿透 basename）；
+// 纯点名字必须拒（`..` 过了 basename 仍是 `..`，path.join(dir,"..") 就出目录了）。
+function safeAssetFileName(name, fallback) {
+  const base = String(name || "").split(/[\\/]/).pop().replace(/[^\w.()-]/g, "_");
+  return base && !/^\.+$/.test(base) ? base : fallback;
+}
+
 function createImportedDoc({ title, markdown, sourceType, sourceName, originalName, originalBuf, images }) {
   const cleanTitle = String(title || "").trim() || firstLine(markdown) || "未命名书籍";
   const itemId = crypto.randomUUID();
@@ -947,15 +969,21 @@ function createImportedDoc({ title, markdown, sourceType, sourceName, originalNa
   fs.mkdirSync(dir, { recursive: true });
 
   if (originalBuf && originalBuf.length) {
-    fs.writeFileSync(path.join(dir, originalName), originalBuf);
-    addAssetRow(itemId, `${sourceType}-original`, originalName, sha256(originalBuf), now);
+    // 写盘名与 assets.path 必须是同一个变量：读侧按 assets.path 取文件
+    const safeName = safeAssetFileName(originalName, "original.bin");
+    fs.writeFileSync(path.join(dir, safeName), originalBuf);
+    addAssetRow(itemId, `${sourceType}-original`, safeName, sha256(originalBuf), now);
   }
   for (const im of images || []) {
     const buf = Buffer.isBuffer(im.bytes) ? im.bytes : Buffer.from(im.bytes);
     if (!buf.length) continue;
     if (!/^[\w.-]+$/.test(String(im.filename))) continue; // 文件名防穿越（导入器产出的 img-N.ext 恒命中）
-    fs.writeFileSync(path.join(dir, im.filename), buf);
-    addAssetRow(itemId, "image-content", im.filename, sha256(buf), now);
+    // 批次 C（D-TEST-17）：这道护栏漏了「合法却危险」的名字——`..` 过 [\w.-]+ 后
+    // writeFileSync(dir/..) 抛 EISDIR，整本导入失败。同一套净化在这里再过一遍，纯点名字直接跳过。
+    const safeImg = safeAssetFileName(im.filename, "");
+    if (!safeImg) continue;
+    fs.writeFileSync(path.join(dir, safeImg), buf);
+    addAssetRow(itemId, "image-content", safeImg, sha256(buf), now);
   }
 
   db.run(
@@ -1049,38 +1077,77 @@ function normalizeFsrs(json) {
   return { state: "new", due: Date.now(), lapses: 0 };
 }
 
+// 清单族统一入参归一（批次 A）：不得让分数/负数/字符串/NaN/±Infinity 直达 SQL 的 LIMIT/OFFSET。
+// 语义沿用既有 `Number(x) || DEF`（0 / 空 / 非数 → 默认值，**不改这个语义**），
+// 只补 Math.floor 保证整数——实测：limit 1.5 与 offset 1.5 都会让 sql.js 抛 datatype mismatch。
+function clampLimit(limit, def, cap) {
+  const n = Math.floor(Number(limit) || def);
+  return Math.max(1, Math.min(cap, n)); // 有 cap 兜住 ±Infinity
+}
+function clampOffset(offset) {
+  // ⚠️ 不能写成 Math.max(0, Math.floor(Number(offset) || 0))：Number(Infinity) 是 truthy，
+  // Math.floor 后仍是 Infinity，Math.max(0, Infinity) 还是 Infinity → OFFSET Infinity 照样 datatype mismatch。
+  // offset 没有 cap，必须显式判有限性并给上限。
+  const n = Number(offset);
+  return Number.isFinite(n) ? Math.max(0, Math.min(1e9, Math.floor(n))) : 0;
+}
+
 function mapCardRow(r) {
   if (!r) return null;
+  // 批次 A：9 个 JSON 列文本损坏时回落空值并记录列名，绝不抛（"空"比"错"安全）。
+  // 只有致命列（fsrs_json / leech_json = 调度与挂起状态无法判定）才把行标为 damaged。
+  const bad = [];
+  const j = (text, fallback, col) => {
+    if (text === null || text === undefined || text === "") return fallback;
+    try {
+      const v = JSON.parse(text);
+      return v === null || v === undefined ? fallback : v;
+    } catch {
+      bad.push(col);
+      return fallback;
+    }
+  };
+  let fsrsBad = false;
+  if (r.fsrs_json) {
+    try {
+      JSON.parse(r.fsrs_json);
+    } catch {
+      fsrsBad = true;
+    }
+  }
+  const damagedColumns = fsrsBad ? ["fsrs_json", ...bad] : bad;
   return {
     id: r.id,
     noteText: r.note_text,
     cardType: r.card_type,
-    clozeOrds: JSON.parse(r.cloze_ords || "[]"),
+    clozeOrds: j(r.cloze_ords, [], "cloze_ords"),
     cardOrd: r.card_ord,
     frontMarkdown: r.front_markdown,
     backMarkdown: r.back_markdown,
     contextPrefix: r.context_prefix,
-    contextRef: r.context_ref_json ? JSON.parse(r.context_ref_json) : null,
+    contextRef: j(r.context_ref_json, null, "context_ref_json"),
     mnemonic: r.mnemonic,
     example: r.example,
-    sourceRef: r.source_ref_json ? JSON.parse(r.source_ref_json) : null,
+    sourceRef: j(r.source_ref_json, null, "source_ref_json"),
     dateStamp: r.date_stamp,
     priority: r.priority,
-    tags: JSON.parse(r.tags_json || "[]"),
-    domain: r.domain ? JSON.parse(r.domain) : [],
+    tags: j(r.tags_json, [], "tags_json"),
+    domain: j(r.domain, [], "domain"),
     knowledgePointId: r.knowledge_point_id,
-    occlusionJson: r.occlusion_json ? JSON.parse(r.occlusion_json) : null,
+    occlusionJson: j(r.occlusion_json, null, "occlusion_json"),
     fsrs: normalizeFsrs(r.fsrs_json),
     fsrsConfigId: r.fsrs_config_id || null,
-    leech: r.leech_json ? JSON.parse(r.leech_json) : null,
+    leech: j(r.leech_json, null, "leech_json"),
     generatedBy: r.generated_by,
     genBatchId: r.gen_batch_id,
-    dictJson: r.dict_json ? JSON.parse(r.dict_json) : null,
+    dictJson: j(r.dict_json, null, "dict_json"),
     // v46（M14-UM2，§4.18-10）：记忆溯源（{line, verified}；NULL=未用记忆）
-    memoryRefJson: r.memory_ref_json ? JSON.parse(r.memory_ref_json) : null,
+    memoryRefJson: j(r.memory_ref_json, null, "memory_ref_json"),
     siblingKey: r.sibling_key || null,
     createdAt: r.created_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    damaged: fsrsBad || damagedColumns.includes("leech_json"),
+    damagedColumns
   };
 }
 
@@ -1130,6 +1197,20 @@ function insertCard(card) {
 }
 
 function createCard(card) {
+  // 批次 E（D-TEST-15 T3 档）：拒收「正文什么也没有」的空白卡。
+  // 判据必须把 occlusionJson / clozeOrds / cloze 都算作"有内容"——图片挖空卡的 front 可能天然是空的
+  // （src/lib/cards.ts:1072 传 occlusionJson、:1066 的 noteText 取 dd.front || cloze），拒宽了会误删合法卡。
+  // **不抛错**：AI 批量制卡是多草稿循环 await 且没有逐卡 try/catch（Reader.tsx:1525-1546），
+  // 抛错会中断整批；返回 false 让调用方零改动即可继续。
+  const c = card || {};
+  const hasContent =
+    Boolean(String(c.frontMarkdown ?? "").trim()) ||
+    Boolean(String(c.backMarkdown ?? "").trim()) ||
+    Boolean(String(c.noteText ?? "").trim()) ||
+    Boolean(c.occlusionJson || c.occlusion_json) ||
+    (Array.isArray(c.clozeOrds) ? c.clozeOrds.length > 0 : Boolean(c.clozeOrds)) ||
+    Boolean(c.cloze);
+  if (!hasContent) return false;
   const id = insertCard({
     ...card,
     // 新卡初始 FSRS 状态：due=now 即立即到期（修复 NULL 导致的调度竞争）
@@ -1142,6 +1223,9 @@ function createCard(card) {
 function updateCard(card) {
   // §11.1（v11）：不传 fsrs/leech 时保留原值，禁止置 NULL（曾导致调度状态被清空重置为 new）
   const prev = getCard(card.id);
+  // 批次 E（D-TEST-15 T1 档）：卡不存在（或已软删）时 UPDATE 影响 0 行却仍然 return true 是假成功。
+  // 复用上面已经取出的 prev，不额外查一次库；返回 false，调用方零改动。
+  if (!prev) return false;
   db.run(
     `UPDATE cards SET note_text=?, card_type=?, cloze_ords=?, card_ord=?, front_markdown=?, back_markdown=?,
       context_prefix=?, context_ref_json=?, mnemonic=?, example=?, source_ref_json=?, date_stamp=?, priority=?,
@@ -1283,7 +1367,7 @@ function computeSiblingDeferred(cards, now) {
 }
 
 const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle FROM cards c
-     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0
      ORDER BY c.created_at ASC`;
@@ -1295,8 +1379,14 @@ const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle FROM cards c
 function computeTodayQueue(now = Date.now()) {
   const nowMs = Number.isFinite(now) ? now : Date.now();
   const rows = queryAll(TODAY_QUEUE_SQL);
-  const mapped = rows.map(mapCardRow).map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
-  const candidates = mapped.filter((c) => {
+  // 批次 A（D-TEST-06）：调度/挂起状态无法判定的行（fsrs_json 或 leech_json 损坏）从队列缺席，
+  // 但经 damaged 字段照常可见——卡片浏览与 getCard 仍给出口，用户不会以为卡丢了。
+  const mapped = rows.map(mapCardRow);
+  const damaged = mapped.filter((c) => c && c.damaged);
+  const ok = mapped
+    .filter((c) => c && !c.damaged)
+    .map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
+  const candidates = ok.filter((c) => {
     if (c.leech?.suspended) return false;
     return (c.fsrs?.due ?? nowMs) <= nowMs;
   });
@@ -1306,7 +1396,7 @@ function computeTodayQueue(now = Date.now()) {
     .filter((c) => deferredMap.has(c.id))
     .sort(queueMemberOrder)
     .map((c) => ({ ...c, deferReason: deferredMap.get(c.id) }));
-  return { cards, deferred, now: nowMs };
+  return { cards, deferred, damaged, now: nowMs };
 }
 
 function listDueCards(now) {
@@ -1319,7 +1409,7 @@ function listAllCards() {
   // v19：补 docTitle JOIN（同 listDueCards）——卡片浏览页需要展示来源书并按书筛选
   const rows = queryAll(
     `SELECT c.*, li.title AS docTitle FROM cards c
-     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0 ORDER BY c.created_at DESC`
   );
@@ -1327,6 +1417,8 @@ function listAllCards() {
 }
 
 function deleteCard(id) {
+  // 批次 E（D-TEST-15 T1 档）：卡不存在或已软删时返回 false（原来无条件 true = 假"已删除"）。
+  if (!rowExists("cards", id)) return false;
   db.run("UPDATE cards SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), id]);
   db.run("UPDATE card_issues SET status = 'dismissed', resolved_at = ? WHERE card_id = ? AND status = 'open'", [Date.now(), id]);
   persist();
@@ -1484,9 +1576,11 @@ function undoLastReview() {
   return { ok: true, card: getCard(log.cardId), rating: log.rating };
 }
 
-// v12：优化器读取全部复习日志（按时间升序）；v23 附带参数归属与插入序（audit/测试用）
+// v12：优化器读取全部复习日志；v23 附带参数归属与插入序（audit/测试用）
+// 批次 B（D-TEST-21）：排序不变量 = review_seq（§4.4.9：表内唯一、插入序单调，禁按 id/reviewed_at 排序）。
+// 墙钟一跳（NTP 校时 / 改时区 / 恢复旧备份）时按 reviewed_at 会给出错序，审计分段与「首次达成」随之偏。
 function listAllReviewLogs() {
-  const rows = queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt, fsrs_config_id AS fsrsConfigId, review_seq AS reviewSeq FROM review_logs ORDER BY reviewed_at ASC");
+  const rows = queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt, fsrs_config_id AS fsrsConfigId, review_seq AS reviewSeq FROM review_logs ORDER BY review_seq ASC");
   return rows;
 }
 
@@ -1509,6 +1603,9 @@ function saveSkip(cardId) {
 
 // 阅读进度事件：滚动停止后记一条字符位置；当日阅读字数 = 相邻事件正增量之和
 function addReadingEvent(itemId, charPos) {
+  // 批次 E（D-TEST-15 T1 档）：reading_events 自己没有软删位，校验挂在父表 library_items 上；
+  // 任意 itemId 都能插事件的话，统计侧迟早出现无人认领的字数。返回 false 不抛错。
+  if (!rowExists("library_items", itemId)) return false;
   db.run("INSERT INTO reading_events (id, item_id, char_pos, created_at) VALUES (?, ?, ?, ?)", [
     crypto.randomUUID(),
     String(itemId),
@@ -1573,6 +1670,9 @@ function listLeechCards() {
 }
 
 function addCardIssue(issue) {
+  // 批次 E（D-TEST-15 T3 档）：card_issues 没有软删位，父卡必须真实存在才收（幽灵父行会留下
+  // 无人认领的待办）。返回 false 不抛错——lint 侧是批量写入。
+  if (!rowExists("cards", issue && issue.cardId)) return false;
   const id = crypto.randomUUID();
   db.run(
     "INSERT INTO card_issues (id, card_id, rule_id, severity, message, source, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'open', ?)",
@@ -1611,6 +1711,8 @@ function createAIGenBatch(batch) {
 }
 
 function setAIGenBatchStatus(id, status) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在时不再返回真的「已删除 / 已保存」（该表没有软删位，rowExists 传 false）。
+  if (!rowExists("ai_gen_batches", id, false)) return false;
   db.run("UPDATE ai_gen_batches SET status = ? WHERE id = ?", [status, id]);
   persist();
   return true;
@@ -1771,11 +1873,23 @@ function ensurePromptTemplates() {
       );
     }
   } catch { /* 播种失败不阻塞启动 */ }
+  // 批次 E（D-TEST-02；语义由用户 2026-09-22 拍板为 ①「该 scope 的默认/启用版本」）：
+  // 历史上每条播种 INSERT 都把 is_default 写死 1，同 scope 于是多行同时"默认"
+  // （实例：card-occlusion v1 与 v3），该列不承载任何信息。这里做一次**幂等数据订正**：
+  // 每个 scope 只有最高 version 保留 is_default=1，其余置 0。新库播种后立即收敛，
+  // 存量库下次启动收敛。不改 schema、不删历史行；反向语句就是把该行的 0 改回 1。
+  try {
+    db.run(
+      `UPDATE prompt_templates SET is_default = CASE WHEN version = (
+           SELECT MAX(p2.version) FROM prompt_templates p2 WHERE p2.scope = prompt_templates.scope
+         ) THEN 1 ELSE 0 END`
+    );
+  } catch { /* 订正失败下次启动重试 */ }
 }
 
 function getPromptTemplate(scope) {
   const rows = queryAll(
-    "SELECT * FROM prompt_templates WHERE scope = ? ORDER BY version DESC LIMIT 1",
+    "SELECT * FROM prompt_templates WHERE scope = ? ORDER BY is_default DESC, version DESC LIMIT 1",
     [scope]
   );
   return rows[0] || null;
@@ -1863,12 +1977,16 @@ function upsertDictSource(src) {
 }
 
 function setDictSourceEnabled(id, enabled) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("dict_sources", id)) return false;
   db.run("UPDATE dict_sources SET enabled=?, updated_at=? WHERE id=?", [enabled ? 1 : 0, Date.now(), String(id)]);
   persist();
   return true;
 }
 
 function removeDictSource(id) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("dict_sources", id)) return false;
   db.run("UPDATE dict_sources SET is_deleted=1, updated_at=? WHERE id=?", [Date.now(), String(id)]);
   persist();
   return true;
@@ -1918,7 +2036,23 @@ function getItemIdByDocumentId(documentId) {
   return rows[0]?.id || null;
 }
 
+// 批次 E（D-TEST-15）：内部助手——「针对既有行」的写入口先确认这一行真的还在。
+// ⚠️ is_deleted 不是每张表都有（全库 27 张表里只有 17 张带软删位）：目标表有软删位时
+// 必须连带过滤，否则会把「已软删的行」当成存在，等于白校验。
+function rowExists(table, id, hasSoftDelete = true) {
+  const sql = hasSoftDelete
+    ? `SELECT 1 AS ok FROM "${table}" WHERE id = ? AND is_deleted = 0 LIMIT 1`
+    : `SELECT 1 AS ok FROM "${table}" WHERE id = ? LIMIT 1`;
+  return Boolean(queryAll(sql, [String(id)])[0]);
+}
+
 function updateProgress(itemId, progress) {
+  // 批次 E（D-TEST-15 T1 档）：载荷形状与目标行存在性都要判，否则调用方拿到的 true 是假的
+  // （阅读器/设置页据此显示「已保存」）。返回 false 而不是抛错——本函数是 fire-and-forget。
+  // 形状判据只拒「非对象 / 数组 / null」：App.tsx:274 实传的是 {ratio,lastText,updatedAt,...extra}
+  // 这类普通对象，拒宽了会静默丢掉用户的全部阅读进度。
+  if (!progress || typeof progress !== "object" || Array.isArray(progress)) return false;
+  if (!rowExists("library_items", itemId)) return false;
   db.run("UPDATE library_items SET progress_json = ?, updated_at = ? WHERE id = ?", [
     JSON.stringify(progress ?? {}),
     Date.now(),
@@ -1938,6 +2072,9 @@ function queryAll(sql, params = []) {
 }
 
 function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef }) {
+  // 批次 E（D-TEST-15 T3 档）：extracts 是「挂在文档上的行」，父文档不存在就别插
+  // （插进去就是日后没人踩得到的悬空行）。返回 false 不抛错，与 T1/T2 档一致。
+  if (!rowExists("documents", documentId)) return false;
   const id = crypto.randomUUID();
   const now = Date.now();
   db.run(
@@ -2051,10 +2188,11 @@ function getStatsOverview() {
   // 损坏行（fsrs/leech JSON 解析失败）在队列与统计中一致跳过，不再两处口径不同。
   const kpiCards = [];
   for (const row of queryAll(TODAY_QUEUE_SQL)) {
-    try {
-      const mapped = mapCardRow(row);
-      kpiCards.push({ ...mapped, docTitle: mapped.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null });
-    } catch { /* 忽略损坏行 */ }
+    const mapped = mapCardRow(row);
+    // mapCardRow 已不抛（批次 A），原来的 try/catch 会变成永不触发的死代码；
+    // 换成显式跳过 damaged 行，否则坏行会被算进 KPI（与 computeTodayQueue 同一口径）。
+    if (!mapped || mapped.damaged) continue;
+    kpiCards.push({ ...mapped, docTitle: mapped.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null });
   }
   const active = kpiCards.filter((c) => !c.leech?.suspended);
   const dueTodayCandidates = active.filter((c) => (c.fsrs?.due ?? now) <= today24);
@@ -2185,7 +2323,7 @@ function getStatsOverview() {
   const srcRows = queryAll(
     `SELECT c.id, c.domain, c.source_ref_json, c.context_ref_json, li.title AS bookTitle
      FROM cards c
-     LEFT JOIN documents d ON d.id = json_extract(c.context_ref_json, '$.documentId')
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0 AND c.created_at >= ?`,
     [srcFrom]
@@ -2237,9 +2375,18 @@ function getStatsOverview() {
   const monthSkips = queryAll("SELECT COUNT(DISTINCT card_id) AS n FROM review_skips WHERE skipped_at >= ?", [monthStart])[0]?.n || 0;
   const queueFlow = { carriedOver: Math.max(0, dueToday - monthNew), overdue: 0, newCards: monthNew, completed: monthReviews, skipped: monthSkips, remaining: Math.max(0, dueToday - completedToday) };
 
-  // ---- 阅读字数（近 45 天，相邻正增量之和）----
-  const readFrom = now - 45 * 86400_000;
-  const readRows = queryAll("SELECT item_id, char_pos, created_at FROM reading_events WHERE created_at >= ? ORDER BY created_at ASC", [readFrom]);
+  // ---- 阅读字数（近 45 天**含今日** = 46 个日桶，相邻正增量之和）----
+  // 批次 B（D-TEST-12）：桶轴必须与 readByDay 的键（dayStartMs）同一坐标系——
+  // 原来用 now - 45·day（带当天毫秒）去取日切点键的表，恒取不到，图此恒为 0。
+  // 批次 B（D-TEST-23）：JOIN 父表过滤已删书（§7.2 L869「查询一律带 is_deleted = 0」）；
+  // reading_events 表本身没有软删位，绝不能写 re.is_deleted。
+  const readFrom = today0 - 45 * 86400_000;
+  const readRows = queryAll(
+    `SELECT re.item_id, re.char_pos, re.created_at FROM reading_events re
+     JOIN library_items li ON li.id = re.item_id AND li.is_deleted = 0
+     WHERE re.created_at >= ? ORDER BY re.created_at ASC`,
+    [readFrom]
+  );
   const readByDay = {};
   const lastPos = {};
   for (const r of readRows) {
@@ -2339,7 +2486,8 @@ function getJournalDraft() {
 
 // 列表：{from,to} 日期闭区间（'YYYY-MM-DD'；含端点）、{query} 内容子串、{limit,offset} 分页。
 // 排序固定 = `entry_date DESC, created_at ASC`（日期倒序 / 日组内正序，§6.5.3）；total=同条件总数（分页用）。
-function listJournalEntries({ from, to, query, limit = 200, offset = 0 } = {}) {
+function listJournalEntries(opts) {
+  const { from, to, query, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (from) {
@@ -2350,15 +2498,17 @@ function listJournalEntries({ from, to, query, limit = 200, offset = 0 } = {}) {
     where.push("entry_date <= ?");
     params.push(String(to));
   }
-  const q = String(query ?? "").trim();
+  // 批次 D（D-TEST-10）：查询词做 NFKC 归一，与词典侧 normalizeWord / cards.ts 同一口径。
+  // 顺序钉死：先 normalize 再转义 %_\（NFKC 不产出这三个字符，写反了会留坑给将来的归一规则）。
+  const q = String(query ?? "").trim().normalize("NFKC");
   if (q) {
     where.push("content_markdown LIKE ? ESCAPE '\\'");
     params.push(`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
   }
   const sqlWhere = where.join(" AND ");
   const total = queryAll(`SELECT COUNT(*) AS n FROM journal_entries WHERE ${sqlWhere}`, params)[0]?.n || 0;
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM journal_entries WHERE ${sqlWhere} ORDER BY entry_date DESC, created_at ASC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -2367,8 +2517,9 @@ function listJournalEntries({ from, to, query, limit = 200, offset = 0 } = {}) {
 }
 
 // 有内容的日期清单（倒序）+ 每日条数（日记页日期分组与「今日已记 N 条」同源）
-function listJournalDates({ limit = 400 } = {}) {
-  const lim = Math.max(1, Math.min(4000, Number(limit) || 400));
+function listJournalDates(opts) {
+  const { limit = 400 } = opts ?? {};
+  const lim = clampLimit(limit, 400, 4000);
   const rows = queryAll(
     `SELECT entry_date AS entryDate, COUNT(*) AS count FROM journal_entries WHERE is_deleted = 0
      GROUP BY entry_date ORDER BY entry_date DESC LIMIT ?`,
@@ -2383,13 +2534,18 @@ function createJournalEntry({ contentMarkdown, source = "app", entryDate, isDraf
   if (!content.trim()) throw new Error("日记内容为空");
   const now = Date.now();
   const created = Number(createdAt) || now;
+  // 批次 D（D-TEST-07，§6.5 自然日归类 + §7.2 数据完整性）：entry_date 只能是合法日历日。
+  // isJournalDate 早就在 journalTime.js 里、本文件也早就 require 了它，只是写入前一直没调。
+  // 收紧点：非零填充（"2026-3-5"）与不存在的日子（"2026-02-30"）从此拒写；不传时行为逐字节不变。
+  const day = entryDate === undefined || entryDate === null || entryDate === "" ? journalDateOf(created) : String(entryDate);
+  if (!isJournalDate(day)) throw new Error(`日记日期非法: ${day}`);
   const id = crypto.randomUUID();
   db.run(
     `INSERT INTO journal_entries (id, user_id, entry_date, content_markdown, source, is_draft, created_at, updated_at, sent_at, sync_version, is_deleted)
      VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
     [
       id,
-      String(entryDate || journalDateOf(created)),
+      day,
       content,
       String(source),
       isDraft ? 1 : 0,
@@ -2449,6 +2605,8 @@ function sendJournalDraft(contentMarkdown) {
 
 // 删除（软删）；草稿的「丢弃」复用同一条路径。软删同时清 is_draft 位（释放全局唯一草稿槽）。
 function deleteJournalEntry(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("journal_entries", id)) return false;
   db.run("UPDATE journal_entries SET is_deleted = 1, is_draft = 0, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   markJournalPersist(opts);
   return true;
@@ -2456,8 +2614,9 @@ function deleteJournalEntry(id, opts) {
 
 // v45（M14-UM1，§4.18-11/-16）：水位线增量读取——`updated_at > since` 的已发送条目，时间正序
 // （早期记忆珍贵，补处理先建早期处境）。since=null ⇒ 全部历史（首次开启窗口）。草稿永不入包（§4.18-11①）。
-function listJournalEntriesSince({ sinceUpdatedAt = null, limit = 30 } = {}) {
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 30));
+function listJournalEntriesSince(opts) {
+  const { sinceUpdatedAt = null, limit = 30 } = opts ?? {};
+  const lim = clampLimit(limit, 30, 1000);
   const params = [];
   let where = "is_deleted = 0 AND is_draft = 0";
   if (sinceUpdatedAt != null && Number.isFinite(Number(sinceUpdatedAt))) {
@@ -2569,7 +2728,8 @@ function resolveKpFamily(id) {
 
 // 列表：{query} 命中 canonical_label 或任一 alias（LIKE 子串）；{domainId}/{status} 过滤；
 // 排序 = canonical_label 升序（管理面稳定序）；total=同条件总数。
-function listKnowledgePoints({ query, domainId, status, limit = 200, offset = 0 } = {}) {
+function listKnowledgePoints(opts) {
+  const { query, domainId, status, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (status) {
@@ -2580,7 +2740,9 @@ function listKnowledgePoints({ query, domainId, status, limit = 200, offset = 0 
     where.push("domain_id = ?");
     params.push(String(domainId));
   }
-  const q = String(query ?? "").trim();
+  // 批次 D（D-TEST-10）：查询词做 NFKC 归一，与词典侧 normalizeWord / cards.ts 同一口径。
+  // 顺序钉死：先 normalize 再转义 %_\（NFKC 不产出这三个字符，写反了会留坑给将来的归一规则）。
+  const q = String(query ?? "").trim().normalize("NFKC");
   if (q) {
     where.push("(canonical_label LIKE ? ESCAPE '\\' OR alias_json LIKE ? ESCAPE '\\')");
     const pat = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
@@ -2588,8 +2750,8 @@ function listKnowledgePoints({ query, domainId, status, limit = 200, offset = 0 
   }
   const sqlWhere = where.join(" AND ");
   const total = queryAll(`SELECT COUNT(*) AS n FROM knowledge_points WHERE ${sqlWhere}`, params)[0]?.n || 0;
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM knowledge_points WHERE ${sqlWhere} ORDER BY canonical_label ASC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -2744,7 +2906,8 @@ function wouldCreatePrerequisiteCycle(fromId, toId) {
   return { cycle: false, path: [] };
 }
 
-function listKnowledgeRelations({ kpId, relationType, limit = 500, offset = 0 } = {}) {
+function listKnowledgeRelations(opts) {
+  const { kpId, relationType, limit = 500, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (kpId) {
@@ -2758,8 +2921,8 @@ function listKnowledgeRelations({ kpId, relationType, limit = 500, offset = 0 } 
     params.push(String(relationType));
   }
   const sqlWhere = where.join(" AND ");
-  const lim = Math.max(1, Math.min(2000, Number(limit) || 500));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 500, 2000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM knowledge_relations WHERE ${sqlWhere} ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -2807,6 +2970,8 @@ function createKnowledgeRelation(payload, opts) {
 }
 
 function deleteKnowledgeRelation(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("knowledge_relations", id)) return false;
   db.run("UPDATE knowledge_relations SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   persist();
   return true;
@@ -2846,6 +3011,8 @@ function createKnowledgeExternalRef(payload, opts) {
 }
 
 function deleteKnowledgeExternalRef(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("knowledge_external_refs", id)) return false;
   db.run("UPDATE knowledge_external_refs SET is_deleted = 1 WHERE id = ?", [String(id)]);
   persist();
   return true;
@@ -2853,14 +3020,15 @@ function deleteKnowledgeExternalRef(id, opts) {
 
 // ---------- 提案暂存（staging，§1.7） ----------
 
-function listKnowledgeProposals({ status = "pending", proposalKind, limit = 200, offset = 0 } = {}) {
+function listKnowledgeProposals(opts) {
+  const { status = "pending", proposalKind, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (status) { where.push("status = ?"); params.push(String(status)); }
   if (proposalKind) { where.push("proposal_kind = ?"); params.push(String(proposalKind)); }
   const sqlWhere = where.join(" AND ");
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM knowledge_proposals WHERE ${sqlWhere} ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -3613,9 +3781,10 @@ function getInsightRun(id) {
 }
 
 // 洞察历史（列表默认只回 runs 的轻量视图：不含 evidence_package 全文，防 UI 拉爆）
-function listInsightRuns({ limit = 50, offset = 0, includePackage = false } = {}) {
-  const lim = Math.max(1, Math.min(500, Number(limit) || 50));
-  const off = Math.max(0, Number(offset) || 0);
+function listInsightRuns(opts) {
+  const { limit = 50, offset = 0, includePackage = false } = opts ?? {};
+  const lim = clampLimit(limit, 50, 500);
+  const off = clampOffset(offset);
   const rows = queryAll(
     "SELECT * FROM insight_runs WHERE is_deleted = 0 ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?",
     [lim, off]
@@ -3640,6 +3809,8 @@ function setInsightRunFeedback(id, feedback, opts) {
 }
 
 function deleteInsightRun(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("insight_runs", id)) return false;
   db.run("UPDATE insight_runs SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   persist();
   return true;
@@ -3716,8 +3887,9 @@ function getLastMemoryRunSuccess() {
   return rows.length ? mapMemoryRunRow(rows[0]) : null;
 }
 
-function listMemoryRuns({ limit = 50 } = {}) {
-  const lim = Math.max(1, Math.min(500, Number(limit) || 50));
+function listMemoryRuns(opts) {
+  const { limit = 50 } = opts ?? {};
+  const lim = clampLimit(limit, 50, 500);
   return queryAll(
     "SELECT * FROM memory_runs WHERE is_deleted = 0 ORDER BY started_at DESC, id ASC LIMIT ?",
     [lim]
@@ -3875,13 +4047,14 @@ function mapPmcRow(r) {
   };
 }
 
-function listPersonalMeaningCandidates({ status, limit = 200, offset = 0 } = {}) {
+function listPersonalMeaningCandidates(opts) {
+  const { status, limit = 200, offset = 0 } = opts ?? {};
   const where = ["is_deleted = 0"];
   const params = [];
   if (status) { where.push("status = ?"); params.push(String(status)); }
   const sqlWhere = where.join(" AND ");
-  const lim = Math.max(1, Math.min(1000, Number(limit) || 200));
-  const off = Math.max(0, Number(offset) || 0);
+  const lim = clampLimit(limit, 200, 1000);
+  const off = clampOffset(offset);
   const rows = queryAll(
     `SELECT * FROM personal_meaning_candidates WHERE ${sqlWhere} ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -3923,6 +4096,8 @@ function resolvePersonalMeaningCandidate(id, status, opts) {
 }
 
 function deletePersonalMeaningCandidate(id, opts) {
+  // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
+  if (!rowExists("personal_meaning_candidates", id)) return false;
   db.run("UPDATE personal_meaning_candidates SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), String(id)]);
   persist();
   return true;
@@ -4509,6 +4684,7 @@ module.exports = {
   createFromEpub,
   createImportedDoc,
   deleteItem,
+  listDeletedItemIds,
   getDocument,
   updateProgress,
   createExtract,

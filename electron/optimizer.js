@@ -115,12 +115,17 @@ function applyWeights(db, weights) {
   const w = validateWeights(weights);
   const configId = db.insertFsrsConfig(w, DEFAULT_SCHEDULER_OPTIONS, "optimizer");
   db.setActiveFsrsConfig(configId);
+  // 批次 C（D-TEST-01）：指针（settings.json）与内容（fsrs_configs 行）必须同生共死。
+  // 落盘责任放在这条边界上而不是 insertFsrsConfig 内——initDb 的迁移块也调它，
+  // 而 initDb 的落盘时机在末尾，迁移途中提前 persist 会动到还没就绪的落盘路径。
+  db.persistNow();
   return { ok: true, configId };
 }
 
 // 恢复默认参数：指针回 cfg-default（普通不可变行，不插入重复 default）
 function resetWeights(db) {
   db.setActiveFsrsConfig(DEFAULT_CONFIG_ID);
+  db.persistNow(); // 同上：移动指针即落盘
   return { ok: true, configId: DEFAULT_CONFIG_ID };
 }
 

@@ -160,7 +160,7 @@ runFlow(flow, async () => {
   const domains = new Set([...registered.keys()].map((c) => c.split(":")[0]));
   const missing = docChannels.filter((c) => domains.has(c.split(":")[0]) && !registered.has(c));
   flow.record("文档点名且域已存在的通道数", `${docChannels.filter((c) => domains.has(c.split(":")[0])).length}（抓到的候选 ${docChannels.length}）`);
-  flow.known("文档括号点名的通道都要能在主进程找到注册（含 §4.18 的 memory:* 一族）", missing.length === 0, "D-DOC-04", "全部落地", missing);
+  flow.check("文档括号点名的通道都要能在主进程找到注册（含 §4.18 的 memory:* 一族）", missing.length === 0, "全部落地", missing);
 }).then((s) => {
   process.exit(s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length ? 1 : 0);
 });

@@ -128,16 +128,15 @@ runFlow(flow, async () => {
     else seen.set(key, i);
   });
   flow.record("≥120 字符的逐字重复行数", dup.length);
-  flow.known(
+  flow.check(
     "文档无逐字重复段（已知 §1 原则 8–10、§4.1 KP 块、§7.3 M6-1、§7.6 整节各重复一份）",
     dup.length === 0,
-    "D-DOC-01",
     "0 处",
     dup.slice(0, 8)
   );
   const h2 = g.filter((l) => /^##\s/.test(l));
   const h2dup = [...new Set(h2.filter((v, i) => h2.indexOf(v) !== i))];
-  flow.known("小节标题不重复（§7.6 整节出现两次）", h2dup.length === 0, "D-DOC-02", "无重复", h2dup);
+  flow.check("小节标题不重复（§7.6 整节出现两次）", h2dup.length === 0, "无重复", h2dup);
 
   // ---------- L6 数据模型清单 ----------
   flow.section("L6 §4.1 声明的表与代码实建表一致（§7.1.7「字段不许静默裁剪」的文档侧）");
@@ -148,16 +147,15 @@ runFlow(flow, async () => {
     .filter((m) => /表/.test(guide.slice(Math.max(0, m.index - 40), m.index + 40)))
     .map((m) => Number(m[1]));
   flow.record("文档写明的表数量", [...new Set(docClaims)].join(" / "));
-  flow.known(
+  flow.check(
     "文档声明的表数量与实建一致（文档写 17/23，实建 27）",
     docClaims.includes(built.length),
-    "D-DOC-03",
     built.length,
     [...new Set(docClaims)]
   );
   const neverMentioned = ALL_TABLES.filter((t) => !new RegExp(`\\b${t}\\b`).test(guide));
   flow.record("代码建了但文档从未点名的表", neverMentioned.join(" ") || "（无）");
-  flow.known("实建表都在文档里出现（导图 4 表与阅读/词典表未列入 §4.1）", neverMentioned.length === 0, "D-DOC-03", "全部有名", neverMentioned);
+  flow.check("实建表都在文档里出现（导图 4 表与阅读/词典表未列入 §4.1）", neverMentioned.length === 0, "全部有名", neverMentioned);
 
   // ---------- L7 IPC 通道 ----------
   flow.section("L7 文档点名的 IPC 通道在代码里存在（§4 接口抽象是可调用清单）");

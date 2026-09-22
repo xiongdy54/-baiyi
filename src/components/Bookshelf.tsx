@@ -553,7 +553,18 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           )}
         </div>
         <div className="cap-rail"><i style={{ width: pct(progress) }} /></div>
-        <div className="cap">
+        {/* 批次 D（D-TEST-16）：图注（书名）此前渲染在带 onClick 的 .book-card **之外**，
+            于是"点书名不开书、点封面才开"。点击与键盘行为与书卡同源（不改 .shelf-item，
+            那会与拖拽三区语义打架）；改名态下 .cap 里是 cap-input，它自带 stopPropagation，
+            所以点输入框不会误开书。 */}
+        <div
+          className="cap"
+          role="button"
+          tabIndex={0}
+          aria-label={isFolder ? `打开文件夹「${title}」，含 ${agg!.n} 本` : `打开《${title}》`}
+          onClick={() => (isFolder ? openInto(entry.id) : onOpenBook(entry.id))}
+          onKeyDown={onCardKeyDown(entry)}
+        >
           {caption(entry, title, isFolder
             ? [`${agg!.n} 本`, `均值 ${pct(agg!.progress)}`, agg!.latest ? dayLabel(agg!.latest) : "未读"]
             : [pct(progress), dayLabel(entry.item.updatedAt) || "未读", (entry.item.lang || "").toUpperCase() || "—"])}

@@ -95,10 +95,16 @@ app
       const codeKeys = COMMANDS.map((c) => c.defaultKey);
       const codeNotInDoc = codeKeys.filter((k) => !docKeys.includes(k));
       flow.record("文档表里的键位串", docKeys.join(" ") || "（没抓到表）");
-      flow.known("代码里每个默认键都必须在文档锁定表里出现（改了键位要同步文档）", codeNotInDoc.length === 0, "D-DOC-09", "全部在册", codeNotInDoc);
+      flow.check("代码里每个默认键都必须在文档锁定表里出现（改了键位要同步文档）", codeNotInDoc.length === 0, "全部在册", codeNotInDoc);
       const docSays12 = /12\s*条/.test(table) || /12\s*条/.test(guide);
-      flow.known("文档不得声明一个与代码不符的命令条数", !docSays12, "D-DOC-09", "条数已同步", docSays12 ? "文档仍写「命令表 12 条」，代码 COMMANDS 实为 14 条" : "（已同步）");
-      flow.known("文档声明的接口形状要与代码一致（§4.2-2 写 {id,title,when,keybinding}）", !/keybinding/.test(guide), "D-DOC-09", "形状一致", "§4.2-2 L127 说 CommandDef 有 when/keybinding 两字段；代码实为 scene/defaultKey，when 挂在动作侧");
+      flow.check("文档不得声明一个与代码不符的命令条数", !docSays12, "条数已同步", docSays12 ? "文档仍写「命令表 12 条」，代码 COMMANDS 实为 14 条" : "（已同步）");
+        // 批次 F（D-DOC-09 收口时对齐判据）：原式 `!/keybinding/.test(guide)` 扫全文，会命中真实存在的设置键
+  // `settings.app.keybindings`（D-DOC-08 还要求它必须在文档里登记），两条闸门互斥、任何诚实文档都拿不到绿。
+  // 本条登记的现象是「§4.2-2 把 CommandDef 的字段写成 {id,title,when,键位}」，判据收窄到那一行：
+  // 该行不得再把 when / 键位当 CommandDef 的字段（代码实为 scene/defaultKey，when 随动作给出）。
+  const shapeLine = (guide.split(/\r?\n/).find((l) => /^\s*2\.\s+`CommandRegistry`/.test(l)) || "");
+  const shapeBad = /when/.test(shapeLine) && /keybinding/i.test(shapeLine);
+  flow.check("文档声明的接口形状要与代码一致（§4.2-2 写 {id,title,when,keybinding}）", !shapeBad, "形状一致", shapeLine.slice(0, 130) || "没抓到 §4.2-2 第 2 项");
 
       // ---------- W2 组合键归一化 ----------
       flow.section("W2 eventToCombo 归一化矩阵（存储串 = 展示串 = 匹配串，§9.1 M4）");
@@ -128,7 +134,16 @@ app
       }
       flow.check("归一化结果与 §9.1 M4 约定逐档一致", comboBad.length === 0, "全部一致", comboBad);
       const emptyKey = eventToCombo({ key: "", ctrlKey: true, altKey: false, shiftKey: false, metaKey: false });
-      flow.known("空 key 不得生成残缺组合串（现在产出 \"Ctrl+\"，存进设置后既匹配不上也清不掉）", emptyKey !== "Ctrl+", "D-TEST-14", "返回 null", emptyKey);
+      flow.check("空 key 不得生成残缺组合串（现在产出 \"Ctrl+\"，存进设置后既匹配不上也清不掉）", emptyKey !== "Ctrl+", "返回 null", emptyKey);
+      // 批次 D（D-TEST-14）新增：所有「无实体键」的入参形态都必须产出 null——null 是 setOverride
+      // 唯一的拒绝点（SettingsPanel:1229 的 `if (!combo) return;`），所以 null 之外没有任何串
+      // 能进 settings.app.keybindings 占位。
+      const emptyShapes = [{ key: "" }, { key: undefined }, { key: null }, { key: "", ctrlKey: true }, { key: "", metaKey: true, shiftKey: true }];
+      const badEmpty = emptyShapes.filter((ev) => {
+        const got = eventToCombo({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...ev });
+        return got !== null;
+      });
+      flow.check("空 key 的各种形态一律返回 null（残缺串没有任何入口能进设置）", badEmpty.length === 0, "全部 null", badEmpty.map((ev) => JSON.stringify(ev)));
       flow.check("修饰符顺序固定 Ctrl→Alt→Shift→Meta（同一组合只有一个写法）", (() => {
         const a = eventToCombo({ key: "k", ctrlKey: true, altKey: true, shiftKey: true, metaKey: true });
         return a === "Ctrl+Alt+Shift+Meta+K" && a === eventToCombo({ key: "K", metaKey: true, shiftKey: true, altKey: true, ctrlKey: true });
@@ -144,7 +159,7 @@ app
       const staticGuard = /activeElement|isContentEditable|tagName\s*===?\s*["'](INPUT|TEXTAREA)| closest\(["']input/.test(cmdSrc);
       flow.record("行为证据", `焦点内的 Ctrl+Z 触发了 ${ran} 次动作`);
       flow.record("静态证据", `commands.ts 里${staticGuard ? "有" : "找不到"}焦点判断`);
-      flow.known("焦点在输入框时命令分发必须放行给原生行为", guardedInDispatch && staticGuard, "D-TEST-13", "不劫持", `dispatchKey 无焦点判断（${ran} 次触发），文件里${staticGuard ? "有" : "也没有"}静态守卫`);
+      flow.check("焦点在输入框时命令分发必须放行给原生行为", guardedInDispatch && staticGuard, "不劫持", `dispatchKey 无焦点判断（${ran} 次触发），文件里${staticGuard ? "有" : "也没有"}静态守卫`);
       commandRegistry.setActionSource("f20", null);
 
       // ---------- W4 分发语义 ----------

@@ -159,11 +159,15 @@ app
         const stray = live.filter((h) => !h.rel.startsWith("src/") && !isMigrationHit(h));
         retiredShape.push(`${k}: ${hits.length} 处（活引用 ${live.length}／注释 ${hits.length - live.length}）`);
         retiredLeaks.push(...[...new Set([...inRenderer, ...stray].map((h) => `${h.rel}:${h.n}`))]);
-        retiredComments.push(...[...new Set(hits.filter((h) => h.comment).map((h) => `${h.rel}:${h.n}`))]);
+        // 批次 F（D-DOC-07 收口时对齐判据）：注释侧要用本流程自己的 `isMigrationHit`（命中行上下 6 行内写明
+        // 「迁移」或真的 delete 掉该键）作豁免——`db.js` 的 initDb 一次性迁移注释正是本条允许的形态。
+        // 原写法把**所有**含该键的注释都算进去，等于要求代码里不许出现这个字段名，与 D-DOC-07 的登记文字不符。
+        retiredComments.push(...[...new Set(hits.filter((h) => h.comment && !isMigrationHit(h))
+          .map((h) => `${h.rel}:${h.n}`))]);
       }
       flow.record("退役键的引用形态", retiredShape.join("；"));
       flow.check("已废除的键不得有活的消费者（渲染层零引用，主进程仅限迁移代码）", retiredLeaks.length === 0, "只在迁移块里出现", retiredLeaks);
-      flow.known("代码注释不得把已废除的键描述成现行读取路径", retiredComments.length === 0, "D-DOC-07", "注释同步收口", retiredComments);
+      flow.check("代码注释不得把已废除的键描述成现行读取路径", retiredComments.length === 0, "注释同步收口", retiredComments);
 
       // 文档自洽：§4.4.10/D22 说废除，就别在别处（§7.4 配置清单）把它当现行键列
       const advertisedLive = [];
@@ -174,19 +178,21 @@ app
           advertisedLive.push(`L${i + 1}:${k}`);
         });
       }
-      flow.known("指导文档不得把已废除的键当现行配置项列出（文档自洽）", advertisedLive.length === 0, "D-DOC-07", "只在废除/迁移语境出现", advertisedLive);
+      flow.check("指导文档不得把已废除的键当现行配置项列出（文档自洽）", advertisedLive.length === 0, "只在废除/迁移语境出现", advertisedLive);
 
       // 反向：代码在读的键必须在文档里登记（§7.4 配置必须集中、可审）
       const undocumented = [...codeKeys.keys()].filter((id) => !new RegExp(`\\b${id.split(".")[1]}\\b`).test(guideText)).sort();
       flow.record("代码在读的层.键总数", `${codeKeys.size}（文档未登记 ${undocumented.length}）`);
-      flow.known("代码在读的每个设置键都要在指导文档里登记", undocumented.length === 0, "D-DOC-08", "全部登记", undocumented);
+      flow.check("代码在读的每个设置键都要在指导文档里登记", undocumented.length === 0, "全部登记", undocumented);
 
-      // 反向：设置层本身也只有 app / theme / plugin.<id> 三层是登记过的
+      // 反向：设置层本身也只有 §4.2-3 登记的那四层在用
       const scopes = [...new Set([...codeKeys.keys()].map((id) => id.split(".")[0]))].sort();
-      const DOCUMENTED_SCOPES = /^app$|^theme$|^plugin\./;
+      // 批次 F（D-DOC-08 收口）：`dashboard` 层已按 §4.2-3 登记为第四个设置层（§7.4 的 v48.16/D52 条目），
+      // 所以允许集合同步加上它——登记动作在文档侧完成，闸门合同步是登记的一部分，不是放宽判据。
+      const DOCUMENTED_SCOPES = /^app$|^theme$|^plugin\.|^dashboard$/;
       const rogueScopes = scopes.filter((s) => !DOCUMENTED_SCOPES.test(s));
       flow.record("代码用到的设置层", scopes.join(" "));
-      flow.known("设置层必须限于 §4.2-3 登记的 app / theme / plugin.<id>", rogueScopes.length === 0, "D-DOC-08", "三层之内", rogueScopes);
+      flow.check("设置层必须限于 §4.2-3 登记的 app / theme / plugin.<id> / dashboard", rogueScopes.length === 0, "四层之内", rogueScopes);
       flow.record("文档键总数 / 未实现 / 退役", `${DOC_KEYS.length} + ${DOC_UNIMPLEMENTED.length} + ${DOC_RETIRED.length}`);
 
       // ---------- Y2 按真实层写入-读回-重启往返 ----------
@@ -273,10 +279,31 @@ app
         if (note) (nonObj.has(b) ? unsafeNonObj : unsafeOther).push(`${b.slice(0, 10)} →${note}`);
       }
       flow.check("损坏配置（语法坏/类型不对的 JSON）一律安全回退且消费方不崩", unsafeOther.length === 0, "全部安全", unsafeOther);
-      flow.known("合法 JSON 但非对象（null/0/true/字符串）也必须回退为默认对象", unsafeNonObj.length === 0, "D-TEST-09", "全部安全", unsafeNonObj);
+      flow.check("合法 JSON 但非对象（null/0/true/字符串）也必须回退为默认对象", unsafeNonObj.length === 0, "全部安全", unsafeNonObj);
       fs.writeFileSync(settingsFile, goodBackup);
       st = reopenStore();
       flow.eq("恢复文件后读取正常", st.readSettings().app.dayCutoffHour, 6);
+
+      // ---------- Y3b 三个读设置入口在 settings 非对象时必须可用（批次 A / D-TEST-09） ----------
+      // 规格 §B 的探针实测：settings.json = null 时崩点是「首个读设置的口子」——
+      // getActiveFsrsConfig(db.js:728) / getStatsOverview→getCutoffHour(:2035) / computeTodayQueue→siblingBuryConfig(:1189)。
+      // 这里把它固化成流程，防的是"只修了门面、没修消费方"。
+      flow.section("Y3b settings 非对象时三个读设置入口都不抛（把批次 A 的探针固化成流程）");
+      const goodBackup3b = fs.readFileSync(settingsFile, "utf8");
+      const entryErr = [];
+      for (const b of ["null", "0", "true", '"设置"', "[]", "[1,2,", ""]) {
+        fs.writeFileSync(settingsFile, b, "utf8");
+        for (const fn of ["getActiveFsrsConfig", "getStatsOverview", "computeTodayQueue"]) {
+          try {
+            if (typeof db[fn] !== "function") entryErr.push(`${b}/${fn}: db 未导出该函数`);
+            else if (db[fn]() === undefined) entryErr.push(`${b}/${fn}: 返回 undefined`);
+          } catch (e) {
+            entryErr.push(`${b}/${fn}: ${String((e && e.message) || e).slice(0, 40)}`);
+          }
+        }
+      }
+      fs.writeFileSync(settingsFile, goodBackup3b, "utf8");
+      flow.check("settings.json 为 null/0/true/字符串/数组/语法坏时，三个读设置入口全部可用", entryErr.length === 0, "全部不抛", entryErr);
 
       // ---------- Y4 非法值回落（真实消费路径） ----------
       flow.section("Y4 非法值经真实消费路径必须回落（§4.16 矩阵 / §4.18 默认关 / §6.5 归一化）");
@@ -366,7 +393,7 @@ app
       flow.record("冷启动逐档结果", `${broken.length - bootNonObj.length - bootOther.length}/${broken.length} 档能起来`);
       fs.writeFileSync(settingsFile, goodBackup);
       delete require.cache[path.join(ROOT, "electron", "settingsStore.js")];
-      flow.known("非对象设置（null/0/true/字符串）下应用必须仍能启动", bootNonObj.length === 0, "D-TEST-09", "仍可启动", bootNonObj);
+      flow.check("非对象设置（null/0/true/字符串）下应用必须仍能启动", bootNonObj.length === 0, "仍可启动", bootNonObj);
       flow.check("语法损坏设置下应用必须仍能启动", bootOther.length === 0, "仍可启动", bootOther);
       flow.eq("冷启动探测不改写磁盘数据（全库行数守恒）", await volumeOf(), volBefore);
     });
