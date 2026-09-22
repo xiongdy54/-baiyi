@@ -192,6 +192,13 @@ function main() {
   state.wallMs = Date.now() - Date.parse(state.startedAt);
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf8");
   appendLine("DONE", `轮次=${state.cycles} 运行=${state.runs} 通过=${state.pass} 失败=${state.fail} 墙钟=${Math.round(state.wallMs / 60000)} 分钟`);
+  // 正常退出必须清掉心跳锁：锁的语义是「90 秒内有心跳＝还活着」，留着会让外部等待误判成仍在运行
+  // （实测代价：上一窗口收口后按「锁还在」等了 20 分钟空转）。
+  try {
+    fs.unlinkSync(lock);
+  } catch {
+    /* 已被清理 */
+  }
 }
 
 function sleepSec(n) {
