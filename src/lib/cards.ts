@@ -57,7 +57,9 @@ export interface ClozeParse {
 }
 
 export function parseCloze(text: string): ClozeParse {
-  const re = /\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g;
+  // B-6（审计）：原正则缺 s 标志，`.` 不跨行 → 答案含换行的挖空**一个都匹配不到**：
+  // ords 为空（L9 lint 也数不到空、不报警）、正面原样吐出 {{c1::答案}}（直接泄题）、背面为空串。
+  const re = /\{\{c(\d+)::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g;
   const ords = new Set<number>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) ords.add(Number(m[1]));
@@ -68,7 +70,7 @@ export function parseCloze(text: string): ClozeParse {
   const renderWith = (hiddenOrd: number | number[] | null) => {
     const mask = normalize(hiddenOrd);
     const maskedOrds: number[] = [];
-    const out = text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
+    const out = text.replace(/\{\{c(\d+)::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g, (_s, ordStr, content, hint) => {
       const ord = Number(ordStr);
       // 正面一律完全遮蔽 […...]：hint 不上正面（hint 曾泄漏半个答案，用户反馈 #3）
       if (mask === null || !mask.has(ord)) return content;
@@ -92,10 +94,15 @@ export function extractClozeAnswer(text: string, ord: number): string {
   // 注意：ord 内联进正则后没有 (\d+) 组——m[1]=content、m[2]=hint（与 parseCloze 的
   // replace 回调组序不同，后者多一个 (\d+) 组；v15 前错按 replace 组序取 m[2]/m[3]，
   // 导致无 hint 的 v3 卡背面恒为空串，违反「答案区只含挖空内容」契约）
-  const re = new RegExp(`\\{\\{c${ord}::(.*?)(?:::(.*?))?\\}\\}`);
-  const m = re.exec(text);
-  // 背面 = 完整答案 content；若制卡时误将答案后半写进 hint，拼回完整（避免答案被拆两半）
-  return m ? (m[1] ?? "") + (m[2] ? `（${m[2]}）` : "") : "";
+  // B-6（审计）：同上补跨行；B-9（审计）：同卡重复 ord 时用非全局正则只取第一个，
+  // 导致「被要求填两个空、却只看得到第一个空的答案」—— 第二个空的答案永久丢失。
+  // 改为全局取全并按出现顺序拼接。
+  const re = new RegExp(`\\{\\{c${ord}::([\\s\\S]*?)(?:::([\\s\\S]*?))?\\}\\}`, "g");
+  // B-9（审计）：同卡重复 ord 时逐次取全，拼接返回，避免后来的空答案丢失。
+  const parts: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) parts.push((m[1] ?? "") + (m[2] ? `（${m[2]}）` : ""));
+  return parts.join(" / ");
 }
 
 /** v30（D27）多空同答卡：按传入 ord 序逐个取答案（每空一条，含 hint 拼回） */

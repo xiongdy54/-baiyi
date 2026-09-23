@@ -70,6 +70,7 @@ app
         ["ensureOrder", () => sh.ensureOrder({ order: ["b1", "b2"], folders: [] }, ["b1", "b2", "b3"])],
         ["moveTo", () => sh.moveTo(["b1", "b2", "b3"], "b3", "b1")],
         ["moveStep", () => sh.moveStep(["b1", "b2", "b3"], "b2", 1)],
+        ["moveRelativeTo", () => sh.moveRelativeTo(["b1", "b2", "b3"], "b1", "b2", "after")],
         ["groupInto", () => sh.groupInto({ order: ["b1", "b2"], folders: [] }, "b2", "b1", null)],
         ["createFolderWith", () => sh.createFolderWith({ order: ["b1", "b2"], folders: [] }, "b1")],
         ["ungroup", () => sh.ungroup({ order: ["f1"], folders: [{ id: "f1", name: "x", items: ["b1"], created: "2026-09-22" }] }, "b1")],
@@ -91,7 +92,7 @@ app
       const frozenState = Object.freeze({ order: Object.freeze(["b1", "b2", "b3"]), folders: Object.freeze([]) });
       const leaked = [];
       for (const [name] of mutators) {
-        if (["moveTo", "moveStep", "sortEntries", "withCurrentArray"].includes(name)) continue;
+        if (["moveTo", "moveStep", "moveRelativeTo", "sortEntries", "withCurrentArray"].includes(name)) continue;
         try {
           const fn = sh[name];
           if (name === "ensureOrder") fn(frozenState, ["b1", "b2", "b3", "b4"]);
@@ -210,6 +211,19 @@ app
       }
       flow.check("六档损坏设置 loadShelf 全部净化且不抛", loadBad.length === 0, "全部净化", loadBad);
       writeRaw([], []);
+
+      // ---------- P7b moveRelativeTo：落点方位必须决定插入侧（v48.18 / D54） ----------
+      flow.section("P7b 右缘落点必须真的「插到目标之后」——旧代码只调 moveTo（只会插到之前），于是拖不动");
+      {
+        const eq = (name, got, want) => flow.check(name, got.join(",") === want, want, got.join(","));
+        eq("before：把 b1 放到 b2 之前 = 原本就在前面，顺序不变", sh.moveRelativeTo(["b1", "b2", "b3"], "b1", "b2", "before"), "b1,b2,b3");
+        eq("after：把 b1 放到 b2 之后", sh.moveRelativeTo(["b1", "b2", "b3"], "b1", "b2", "after"), "b2,b1,b3");
+        eq("after 末位：落到最后一格之后 = 移到末尾", sh.moveRelativeTo(["b1", "b2", "b3"], "b1", "b3", "after"), "b2,b3,b1");
+        eq("before 首格：把 b3 放到 b1 之前", sh.moveRelativeTo(["b1", "b2", "b3"], "b3", "b1", "before"), "b3,b1,b2");
+        eq("自指：after 也要原样返回（不能把自己插到自己后面）", sh.moveRelativeTo(["b1", "b2", "b3"], "b2", "b2", "after"), "b1,b2,b3");
+        eq("目标不存在：after 分支原样返回", sh.moveRelativeTo(["b1", "b2", "b3"], "b1", "zzz", "after"), "b1,b2,b3");
+        eq("源不存在：原样返回", sh.moveRelativeTo(["b1", "b2", "b3"], "zzz", "b1", "after"), "b1,b2,b3");
+      }
 
       // ---------- P8 不进数据库（D51 边界②） ----------
       flow.section("P8 视图组织不进数据库：主库零 shelf 列，listItems 排序口径一字不改（D51 边界②）");

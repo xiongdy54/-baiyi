@@ -241,6 +241,133 @@ try {
   r = JSON.parse(await page.eval(`return JSON.stringify({wall: !!document.querySelector('.bookshelf-grid')})`));
   check("能切回封面墙", r.wall, JSON.stringify(r));
 
+  console.log("\n[4b] 目录表：不横向溢出 + 打开入口在书名/封面本身（v48.18 / D54）");
+  const toTable = `${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][1].click(); return '1'`;
+  const toWall = `${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][0].click(); return '1'`;
+  await page.eval(toTable);
+  await wait(700);
+  // 夹具是「尚未开始」的新书，副文本天生一行——不注入长文本就测不到溢出（假绿）。
+  // 按最长口径（lastReadDisplay 无上限 / 摘录 160 字）把副文本撑满再量。
+  const injected = await page.eval(`
+    ${PRELUDE}
+    const subs=[...document.querySelectorAll('.shelf-table .t-sub')];
+    subs.forEach((el) => { el.textContent = '这'.repeat(160); });
+    return subs.length;`);
+  check("[4b] 四行副文本已撑到最长口径", injected === 4, injected);
+  for (const w of [900, 1100, 1280, 1600]) {
+    await page.send("Emulation.setDeviceMetricsOverride", { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+    await wait(420);
+    const t = JSON.parse(await page.eval(`return (() => {
+      const box = document.querySelector('.bookshelf');
+      const tb = document.querySelector('.shelf-table');
+      const acts = [...document.querySelectorAll('.shelf-table .col-act .act')];
+      const act = acts[acts.length - 1];   // 最右那枚（删除）——原先取第一枚，差值是假富余
+      const sub = document.querySelector('.shelf-table .t-sub');
+      const cs = sub ? getComputedStyle(sub) : null;
+      return JSON.stringify({
+        overflowX: box ? box.scrollWidth - box.clientWidth : -1,
+        tableOverflow: tb ? Math.round(tb.scrollWidth - tb.clientWidth) : -1,
+        actOverflows: act && box ? Math.round(act.getBoundingClientRect().right - box.getBoundingClientRect().right) : 9999,
+        clamp: cs ? cs.webkitLineClamp : null,
+        subOverflow: sub ? sub.scrollHeight - sub.clientHeight : -1
+      });
+    })()`));
+    check(`目录表 @${w}px：撑满副文本也不产生横向滚动（容器 ${t.overflowX}px / 表 ${t.tableOverflow}px）`,
+      t.overflowX <= 1 && t.tableOverflow <= 1, JSON.stringify(t));
+    check(`目录表 @${w}px：最右动作按钮完整可见（超出容器右边界 ${t.actOverflows}px）`, t.actOverflows <= 1, JSON.stringify(t));
+    if (w === 1280) check("副文本是 2 行截断而不是 nowrap 撑列（旧写法这里 clamp 为空且列被撑爆）",
+      t.clamp === "2" && t.subOverflow >= 0, JSON.stringify(t));
+  }
+  // 差分自证（本文件的既有规矩，见 [3] 段的「旧算法此处会余 Npx」）：同一夹具、同一帧里把副文本
+  // 改回旧写法（nowrap 不截断）量一次——旧写法必须真的溢出，否则上面那四条视口断言是空的。
+  const oldWay = JSON.parse(await page.eval(`
+    ${PRELUDE}
+    const st = document.createElement('style');
+    st.textContent = '.shelf-table .t-sub{white-space:nowrap;display:block;-webkit-line-clamp:unset;}';
+    document.head.appendChild(st);
+    const box = document.querySelector('.bookshelf');
+    const tb = document.querySelector('.shelf-table');
+    const out = JSON.stringify({ overflowX: box.scrollWidth - box.clientWidth, table: Math.round(tb.scrollWidth - tb.clientWidth) });
+    st.remove();
+    void box.scrollWidth;
+    return out;`));
+  check(`差分自证：旧写法（副文本 nowrap 不截断）在同一夹具下确实横向溢出（实测 ${oldWay.overflowX}px / 表 ${oldWay.table}px）`,
+    oldWay.overflowX > 200 || oldWay.table > 200, JSON.stringify(oldWay));
+
+  await page.send("Emulation.clearDeviceMetricsOverride");
+  await wait(450);
+  const struct = JSON.parse(await page.eval(`
+    ${PRELUDE}
+    const btn = document.querySelector('.shelf-table .t-open');
+    return JSON.stringify({
+      openCol: !!document.querySelector('.col-open'),
+      gripCol: !!document.querySelector('.col-grip'),
+      gripInCard: !!document.querySelector('.shelf-grip'),
+      ths: document.querySelectorAll('.shelf-table thead th').length,
+      tag: btn ? btn.tagName : null,
+      type: btn ? btn.getAttribute('type') : null,
+      label: btn ? btn.getAttribute('aria-label') : null,
+      title: btn ? (btn.querySelector('.t-title').textContent || '').slice(0, 10) : null,
+      tabIndex: btn ? btn.tabIndex : null
+    });`));
+  check("「打开」列与拖拽把手列都已撤除（卡片视图的 .shelf-grip 同样撤除），表头 7 列",
+    struct.openCol === false && struct.gripCol === false && struct.gripInCard === false && struct.ths === 7,
+    JSON.stringify(struct));
+  check("书名本身是真可激活控件（<button type=button>、tabIndex 0、aria-label 带书名）",
+    struct.tag === "BUTTON" && struct.type === "button" && struct.tabIndex === 0 &&
+    !!struct.label && struct.label.indexOf("打开《") === 0 && struct.label.indexOf(struct.title) > 0,
+    JSON.stringify(struct));
+  // 真的点一次：会离开书架进阅读器，所以放在本段最后，随后导航回来恢复状态
+  await page.eval(`return document.querySelector('.shelf-table .t-open').click() || '1'`);
+  await wait(2400);
+  const opened = JSON.parse(await page.eval(`return JSON.stringify({
+    shelf: !!document.querySelector('.bookshelf'),
+    reader: !!document.querySelector('.reader-engine-host, .reader-markdown, [class*="reader-"]')
+  })`));
+  check("点目录表的书名就开书（不再需要独立的「打开」按钮）",
+    opened.shelf === false && opened.reader === true, JSON.stringify(opened));
+  await page.eval(`return [...document.querySelectorAll('.topbar-nav .nav-item')][0].click() || '1'`);
+  await wait(1400);
+  await page.eval(toWall);
+  await wait(650);
+  const restored = JSON.parse(await page.eval(`return JSON.stringify({wall: !!document.querySelector('.bookshelf-grid')})`));
+  check("回到书架并恢复封面墙（不打扰后续段落）", restored.wall === true, JSON.stringify(restored));
+  // #1 回归：旧规则 `tr:hover .t-sub{display:none}` 没限定文件夹行，书行的那行文字会被整块藏掉，
+  //    下面的进度条因此往上跳（实测 barTop 246 → 209）。真鼠标悬停量一次位移。
+  await page.eval(`${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][1].click(); return 1;`);
+  await wait(700);
+  const bar0 = JSON.parse(await page.eval(`
+    const tr=[...document.querySelectorAll('.shelf-table tbody tr')].find(r=>!r.classList.contains('is-folder'));
+    if(!tr) return 'NO-BOOK-ROW';
+    window.__trb=tr;
+    const bar=tr.querySelector('.bar'); const r=bar?bar.getBoundingClientRect():null;
+    return JSON.stringify({h:Math.round(tr.getBoundingClientRect().height), barTop:r?Math.round(r.top):null});`));
+  const pt = JSON.parse(await page.eval(`
+    const r=window.__trb.getBoundingClientRect();
+    return JSON.stringify({x:Math.round(r.left+r.width*0.4), y:Math.round(r.top+r.height*0.5)});`));
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pt.x, y: pt.y });
+  await wait(450);
+  const bar1 = JSON.parse(await page.eval(`
+    const tr=window.__trb; const bar=tr.querySelector('.bar'); const r=bar?bar.getBoundingClientRect():null;
+    return JSON.stringify({h:Math.round(tr.getBoundingClientRect().height), barTop:r?Math.round(r.top):null,
+      sub:getComputedStyle(tr.querySelector('.t-sub')).display});`));
+  check("悬停书行时进度条不位移、行高不变、副文本不隐藏（#1）",
+    bar0.barTop === bar1.barTop && bar0.h === bar1.h && bar1.sub !== "none", JSON.stringify([bar0, bar1]));
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 6, y: 6 });
+  await wait(350);
+  await page.eval(`${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][0].click(); return 1;`);
+  await wait(700);
+  const backWall = JSON.parse(await page.eval(`return JSON.stringify({wall: !!document.querySelector('.bookshelf-grid')});`));
+  check("量完 #1 后恢复封面墙（不给后续段落留脏状态）", backWall.wall === true, JSON.stringify(backWall));
+
   console.log("\n[5] 密度三档：只换一个 Token，列数随之变化");
   r = JSON.parse(await page.eval(`
     ${PRELUDE}
@@ -284,13 +411,13 @@ try {
     const after=window.__S.items().map(e=>e.querySelector('.cap-title').textContent);
     return JSON.stringify({
       after, draggable:[...document.querySelectorAll('.shelf-item')].filter(e=>e.getAttribute('draggable')==='true').length,
-      grips: document.querySelectorAll('.shelf-grip').length,
+      grab: [...document.querySelectorAll('.shelf-item')].filter(e => getComputedStyle(e).cursor === 'grab').length,
       hint: document.querySelector('.shelf-hint')?.textContent.trim(),
       dropdownValue: document.querySelector('.shelf-bar .dd-btn')?.textContent.trim(),
     });`));
   check("排序下拉列出四档", /手动顺序/.test(r.dropdownValue || "") === false && /标题/.test(r.dropdownValue || ""), r.dropdownValue);
   check("「标题」排序按字典序生效", r.after.join() === [...r.after].sort((a, b) => a.localeCompare(b, "zh")).join(), JSON.stringify(r.after));
-  check("非手动顺序下把手与 draggable 全部撤场", r.draggable === 0 && r.grips === 0, JSON.stringify(r));
+  check("非手动顺序下 draggable 与 grab 光标全部撤场", r.draggable === 0 && r.grab === 0, JSON.stringify(r));
   check("工具条写明拖拽已停用", /停用/.test(r.hint || ""), r.hint);
   await page.eval(`
     ${PRELUDE}
@@ -302,8 +429,10 @@ try {
   await wait(600);
   r = JSON.parse(await page.eval(`
     ${PRELUDE}
-    return JSON.stringify({grips: document.querySelectorAll('.shelf-grip').length, draggable:[...document.querySelectorAll('.shelf-item')].filter(e=>e.getAttribute('draggable')==='true').length});`));
-  check("切回手动顺序：把手回到 4 张卡上", r.grips === 4 && r.draggable === 4, JSON.stringify(r));
+    return JSON.stringify({grips: document.querySelectorAll('.shelf-grip').length, cur:[...new Set([...document.querySelectorAll('.shelf-item')].map(e=>getComputedStyle(e).cursor))].join(','), draggable:[...document.querySelectorAll('.shelf-item')].filter(e=>e.getAttribute('draggable')==='true').length});`));
+  // v48.18 / D54：把手图形撤除了（它本来就没有任何处理器），可拖性改由 cursor: grab + 落点高亮承担
+  check("切回手动顺序：4 张卡可拖、卡片光标统一 pointer、把手图形不再渲染",
+    r.draggable === 4 && r.cur === "pointer" && r.grips === 0, JSON.stringify(r));
 
   console.log("\n[7] 键盘重排：聚焦卡片 Alt+→ 逐格移动，可连续按");
   const ids0 = await page.eval(`${PRELUDE} return window.__S.ids()`);
@@ -329,6 +458,77 @@ try {
     !!label0 && label0 === label1 && label1 === label2 && ids2.split(",")[2] === a0,
     `${label0} / ${label1} / ${label2} · ${ids2}`);
 
+  console.log("\n[7b] 目录表视图的键盘重排：焦点要跟着行走（v48.18 修：原先硬查 .book-card，表里没有 → 连按不动）");
+  await page.eval(toTable);
+  await wait(700);
+  const tids = () => page.eval(`return [...document.querySelectorAll('.shelf-table tbody tr')].map(x => x.dataset.entry).join(',')`);
+  const t0 = await tids();
+  await page.eval(`return document.querySelector('.shelf-table .t-open').focus() || '1'`);
+  await wait(250);
+  const tstep = async () => {
+    await page.eval(`return document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',altKey:true,bubbles:true})) || '1'`);
+    await wait(520);
+    return {
+      ids: await tids(),
+      label: await page.eval(`return document.activeElement.getAttribute('aria-label') || 'NO-FOCUS:' + document.activeElement.tagName`)
+    };
+  };
+  const s1 = await tstep();
+  const s2 = await tstep();
+  const moved = (t0 || "").split(",")[0];
+  check("目录表 Alt+→ 生效：第一行挪到第二格", !!s1.ids && s1.ids !== t0 && s1.ids.split(",")[1] === moved, `${t0} → ${s1.ids}`);
+  check("焦点跟着那一行走，第二次连按仍生效（原先就是这里坏的）",
+    !!s1.label && s1.label.indexOf("打开《") === 0 && s1.label === s2.label && s2.ids.split(",")[2] === moved,
+    `${s1.label} / ${s2.label} · ${s2.ids}`);
+  await page.eval(toWall);
+  await wait(650);
+
+  // #3：右缘（zone-after）过去只画高亮不改顺序——reorderTo 压根没读 zone，只会 moveTo（插到之前），
+  //     而「把第 1 本插到第 2 本之前」＝原地不动，用户看到的就是「拖不动，只有中间会成组」。
+  const ord0 = await page.eval(`${PRELUDE} return window.__S.items().map(e=>e.querySelector('.cap-title').textContent).join(',');`);
+  await page.eval(`${PRELUDE}
+    const it=window.__S.items(); const dr=it[1].getBoundingClientRect(), sr=it[0].getBoundingClientRect();
+    window.__ptA={sx:sr.left+sr.width/2, sy:sr.top+8, ax:dr.right-8, ay:dr.top+dr.height*0.5};
+    const e=new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:window.__S.drag(),clientX:window.__ptA.sx,clientY:window.__ptA.sy});
+    it[0].dispatchEvent(e); return 1;`);
+  await wait(180);
+  await page.eval(`${PRELUDE}
+    const it=window.__S.items(); const p=window.__ptA;
+    it[1].dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.__S.drag(),clientX:p.ax,clientY:p.ay})); return 1;`);
+  await wait(180);
+  await page.eval(`${PRELUDE}
+    const it=window.__S.items(); const p=window.__ptA;
+    it[1].dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:window.__S.drag(),clientX:p.ax,clientY:p.ay}));
+    it[0].dispatchEvent(new DragEvent('dragend',{bubbles:true,cancelable:true,dataTransfer:window.__S.drag(),clientX:0,clientY:0})); return 1;`);
+  await wait(900);
+  const ord1 = await page.eval(`${PRELUDE} return window.__S.items().map(e=>e.querySelector('.cap-title').textContent).join(',');`);
+  // #2：一个条目内部只允许一种光标。旧写法（卡片封面 pointer，而 2px 进度轨与图注 grab）
+  //    会让两条光标夹着一根 2px 分界，鼠标停在边缘就在 pointer↔grab 之间反复翻。
+  const cursorUniform = await page.eval(`${PRELUDE}
+    const it=window.__S.items()[0];
+    const picks=[it.querySelector('.book-card-cover'), it.querySelector('.cap-rail'), it.querySelector('.cap-title'), it];
+    const vals=picks.map(e=>e?getComputedStyle(e).cursor:'MISSING');
+    return JSON.stringify({vals, uniq:[...new Set(vals)].join(',')});`);
+  const cu = JSON.parse(cursorUniform);
+  check("卡片内部光标只有一个值（#2 不再来回跳）", cu.uniq === "pointer", JSON.stringify(cu));
+  const rowCursor = await page.eval(`${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][1].click(); return 1;`);
+  await wait(700);
+  const rc = JSON.parse(await page.eval(`
+    const tr=document.querySelector('.shelf-table tbody tr');
+    const vals=[getComputedStyle(tr).cursor, getComputedStyle(tr.querySelector('.col-num')).cursor, getComputedStyle(tr.querySelector('.t-open')).cursor];
+    return JSON.stringify({row:vals[0], cell:vals[1], titleBtn:vals[2]});`));
+  check("目录表行与单元格统一 grab、只有书名 button 是 pointer（表格靠空白处拖动）",
+    rc.row === "grab" && rc.cell === "grab" && rc.titleBtn === "pointer", JSON.stringify(rc));
+  await page.eval(`${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][0].click(); return 1;`);
+  await wait(700);
+
+  check("右缘落点真的把这条挪到目标之后（#3「拖不动」）",
+    ord1 !== ord0 && ord1.split(",")[1] === ord0.split(",")[0], `${ord0} → ${ord1}`);
+
   console.log("\n[8] 三区落点：中央＝归组、两侧＝重排，两种反馈不同形");
   // 页内 eval 返回值解析失败时打印原始串，别让整个套件因为一处 JSON.parse 崩掉
   const J = async (expr, label) => {
@@ -348,9 +548,14 @@ try {
   const dragover = async (fx) => {
     await fire(`const b=window.__S.items()[1]; const [x,y]=window.__S.pt(b,${fx}); window.__S.fire(b,'dragover',x,y); return 1;`);
     await wait(380);
-    return J(`const b=window.__S.items()[1]; return JSON.stringify({
+    return J(`const b=window.__S.items()[1]; const f=b?.querySelector('.shelf-face');
+      const pb=f?getComputedStyle(f,'::before'):null, pa=f?getComputedStyle(f,'::after'):null;
+      const on = pb && pb.content.startsWith('"') ? pb : pa;
+      return JSON.stringify({
       cls: b ? b.className : null, tip: b?.querySelector('.zone-tip')?.textContent || null,
-      bar: b ? getComputedStyle(b, '::before').backgroundColor : null, items: window.__S.items().length });`, "zone");
+      bar: on ? on.backgroundColor : null, barH: on ? on.height : null,
+      faceH: f ? Math.round(f.getBoundingClientRect().height) : null,
+      items: window.__S.items().length });`, "zone");
   };
   await dragstart();
   const center = await dragover(0.5);
@@ -360,7 +565,25 @@ try {
   check("左缘区：zone-before（画 accent 竖条，不提示成组）", /zone-before/.test(left.cls) && !left.tip, JSON.stringify(left));
   check("右缘区：zone-after", /zone-after/.test(right.cls) && !right.tip, JSON.stringify(right));
 
+  check("两侧竖条与高亮框同量度：条高 = 封面 + 进度轨那一块",
+    !!left.faceH && Math.abs(parseFloat(left.barH) - left.faceH) <= 1 && Math.abs(parseFloat(right.barH) - right.faceH) <= 1,
+    JSON.stringify({ left, right }));
+
   await dragover(0.5);
+  // 高亮框必须罩住「封面 + 进度轨」整块（用户实测：框只到封面底、把 2px 轨落在框外，看着短一截）
+  r = await J(`${PRELUDE}
+    const it=window.__S.items()[1], face=it.querySelector('.shelf-face');
+    const card=it.querySelector('.book-card'), rail=it.querySelector('.cap-rail');
+    const fr=face.getBoundingClientRect(), cr=card.getBoundingClientRect(), rr=rail.getBoundingClientRect();
+    const cs=getComputedStyle(face);
+    return JSON.stringify({ faceH:Math.round(fr.height), cardH:Math.round(cr.height), railH:Math.round(rr.height),
+      faceBottom:Math.round(fr.bottom), railBottom:Math.round(rr.bottom),
+      outline:\`\${cs.outlineStyle} \${cs.outlineWidth} \${cs.outlineColor}\`,
+      zone:/zone-group/.test(it.className) });`, "face-align");
+  check("中央区处于 zone-group 且框画在 .shelf-face 上", r.zone === true && /solid/.test(r.outline) && /2px/.test(r.outline), JSON.stringify(r));
+  check("高亮框高度 = 封面 + 进度轨，下沿落在轨下方（不再短一截）",
+    r.faceH === r.cardH + r.railH && r.faceBottom === r.railBottom, JSON.stringify(r));
+
   await fire(`const a=window.__S.items()[0], b=window.__S.items()[1];
     const [x,y]=window.__S.pt(b,0.5);
     window.__S.fire(b,'drop',x,y); window.__S.fire(a,'dragend'); return 1;`);
@@ -514,6 +737,30 @@ try {
       count: window.__S.count(), ids: window.__S.ids()});`, "after-reload");
   check("重启后书架条目、文件夹与顺序都还在", r.items === 4 && r.folders === 1 && r.ids === ids, JSON.stringify(r));
   check("重启后计数口径不变（3 本 · 1 个文件夹）", /^3 本 · 1 个文件夹$/.test(r.count || ""), r.count);
+
+  console.log("\n[12b] 工具条状态记忆（#5）：视图 / 密度 / 排序要跨开书、返回与重载保持");
+  await page.eval(`${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][1].click(); return 1;`);
+  await wait(700);
+  await page.eval(`return document.querySelector('.shelf-table .t-open').click() || '1';`);
+  await wait(2400);
+  await page.eval(`return [...document.querySelectorAll('.topbar-nav .nav-item')][0].click() || '1';`);
+  await wait(1700);
+  const kept = JSON.parse(await page.eval(`return JSON.stringify({table: !!document.querySelector('.shelf-table'), grid: !!document.querySelector('.bookshelf-grid')});`));
+  check("开一本书再返回书架，仍是目录表（不弹回封面墙）", kept.table === true && kept.grid === false, JSON.stringify(kept));
+  await page.eval(`location.reload(); return 1;`);
+  await wait(4800);
+  const rl = JSON.parse(await page.eval(`${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    return JSON.stringify({table: !!document.querySelector('.shelf-table'),
+      pressed: seg ? [...seg.querySelectorAll('button')].map(b=>b.getAttribute('aria-pressed')).join(',') : null});`));
+  check("整页重载后视图仍是目录表，且分段按钮 aria-pressed 对得上",
+    rl.table === true && rl.pressed === "false,true", JSON.stringify(rl));
+  await page.eval(`${PRELUDE}
+    const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
+    [...seg.querySelectorAll('button')][0].click(); return 1;`);
+  await wait(700);
 
   console.log("\n[13] 全局纪律扫描：字号下限 / 圆角 / 硬编码焦点色");
   r = await J(`const small=[]; const rad=[];

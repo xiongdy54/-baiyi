@@ -160,7 +160,10 @@ export function renderMarkdownToBodyHtml(markdown: string): string {
   // $$…$$（display，含多行）先行；再行内 $…$
   const withSlots = markdown
     .replace(/\$\$([\s\S]+?)\$\$/g, (_m, tex) => stash(String(tex).trim(), true))
-    .replace(/\$([^$\n]+?)\$/g, (_m, tex) => stash(String(tex).trim(), false));
+    // A-6（审计）：原写法会把 `costs $5 and the box $10` 整段当行内公式，两个 $ 号被吞、正文被改写
+    // （违反 §9.1 M6-1「正文不做任何改写」）。加边界守卫：开 $ 后不得紧跟数字或空白，闭 $ 前不得是空白。
+    // 于是货币写法与裸 $ 不再被吞，`$x$` 这类真行内公式照旧。
+    .replace(/\$(?![0-9\s])([^$\n]*?[^\s$])\$/g, (_m, tex) => stash(String(tex).trim(), false));
   return synthMd.render(withSlots).replace(/@@KATEX(\d+)@@/g, (_m, i) => mathSlots[Number(i)] ?? "");
 }
 
@@ -320,7 +323,10 @@ ${tocLis}
   const katexCss = opts?.embedKatexCss === false ? "" : katexCssText;
   chapters.forEach((c, i) => {
     const bodyHtml = imageNameSet.size ? rewriteImgSrcs(c.bodyHtml, imageNameSet) : c.bodyHtml;
-    zip.file(`OEBPS/c${i}.xhtml`, xhtmlDoc(c.title || `第 ${i + 1} 章`, bodyHtml, lang, i === 0 ? katexCss : undefined));
+    // A-5（审计）：原来只在 `i === 0` 注入 KaTeX 样式，而第 0 章恒是合成出来的空壳章
+    // （§9.4 已登记的「粘贴书空首章」）→ 真实章节一个都拿不到样式，公式渲染成堆叠裸字形。
+    // 样式表只有几十 KB，且每章是独立 xhtml，逐章注入才自包含。
+    zip.file(`OEBPS/c${i}.xhtml`, xhtmlDoc(c.title || `第 ${i + 1} 章`, bodyHtml, lang, katexCss));
   });
   // 图片字节落包（OEBPS/images/，与 manifest href 对应）
   images.forEach((im) => {

@@ -56,6 +56,7 @@ class Flow {
     this.results = [];
     this.sectionName = "(未分节)";
     this.aborted = null;
+    this.crash = null;
     this.notes = [];
     this.knownFired = [];
     this.knownHealed = [];
@@ -133,8 +134,11 @@ class Flow {
     const known = this.results.filter((r) => r.known && !r.ok);
     const healed = this.results.filter((r) => r.known && r.ok);
     const dur = Date.now() - this.startedAt;
+    // F-审计：崩溃必须在**状态位**上体现。原来 runFlow 只把 crash 塞进 extra，
+    // 而 summary() 早已算完状态 → 「跑完第 1 条断言就崩」的流程会打印 PASS、fail=0。
+    const crashed = !!this.crash;
     console.log(
-      `\n==== ${this.id} ${this.aborted ? "ABORTED" : failed.length || healed.length ? "FAIL" : "PASS"} ` +
+      `\n==== ${this.id} ${this.aborted ? "ABORTED" : crashed || failed.length || healed.length ? "FAIL" : "PASS"} ` +
         `${pass}/${this.results.length} 断言 · 已知缺陷 ${known.length} · 意外转绿 ${healed.length} · ${dur}ms · seed=${this.rng.seed} cycle=${this.cycle} ====`
     );
     for (const f of failed) console.log(`  失败: [${f.section}] ${f.name}`);
@@ -155,6 +159,7 @@ class Flow {
       total: this.results.length,
       durationMs: dur,
       aborted: this.aborted,
+      crash: this.crash ? String(this.crash) : null,
       failures: failed,
       notes: this.notes,
       startedAt: this.startedAt,
@@ -229,9 +234,8 @@ async function runFlow(flow, body) {
       console.log(`  ! 未捕获异常：${e && e.stack ? e.stack.split("\n").slice(0, 4).join("\n    ") : e}`);
     }
   }
-  const extra = {};
-  if (crash) extra.crash = String(crash.message || crash);
-  const s = flow.writeResult(extra);
+  if (crash) flow.crash = String(crash.message || crash);
+  const s = flow.writeResult();
   // 零断言 = 该轮什么都没验证到，按失败处理（长跑里这是最常见的静默失效）
   if (s.total === 0) {
     console.log("  ! 本轮零断言：视为失败");

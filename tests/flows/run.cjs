@@ -182,7 +182,10 @@ function main() {
         appendLine("DUMP", dump.replace(ROOT, "."));
       }
       if (Date.now() >= deadline) break;
-      if (Number.isFinite(args.cycles) && cycle >= args.cycles) break;
+      // F-审计：`cycle >= args.cycles` 的 break **不能**放在这个 for 里 —— 它会让 `--cycles 1`
+      // 跑完第一条流程就跳出内外两层，而 DONE 行又用跨会话累计计数，
+      // 于是一条 1 秒的命令打印出「运行=19263 墙钟=1443 分钟」，看起来像跑满 24 小时。
+      // 轮次判断只留在下面的 while 里。
     }
     if (Date.now() >= deadline) break;
     if (Number.isFinite(args.cycles) && cycle >= args.cycles) break;

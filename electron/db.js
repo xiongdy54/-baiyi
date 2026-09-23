@@ -686,10 +686,20 @@ function persist() {
   try {
     fs.writeSync(fd, buf);
     fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
+  } catch (e) {
+    // D-9（审计 F37）：写/刷失败必须清掉半成品 tmp。原来 finally 只 closeSync，
+    // 一次落盘失败就在盘上留一份与库同尺寸的残库（实测 528 KB），直到下次成功落盘才被覆盖。
+    try { fs.closeSync(fd); } catch { /* 已被系统关闭 */ }
+    try { fs.rmSync(tmp, { force: true }); } catch { /* 尽力而为 */ }
+    throw e;
   }
-  fs.renameSync(tmp, dbFile);
+  fs.closeSync(fd);
+  try {
+    fs.renameSync(tmp, dbFile);
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* 尽力而为 */ }
+    throw e;
+  }
 }
 
 // v23：纯持久化重试（§4.4.9）——只重试当前内存库的持久化（重导出+原子替换），
@@ -1110,7 +1120,26 @@ function mapCardRow(r) {
   let fsrsBad = false;
   if (r.fsrs_json) {
     try {
-      JSON.parse(r.fsrs_json);
+      const f = JSON.parse(r.fsrs_json);
+      // A-2（审计 F34）：只验「能否 parse」不够。stability:-1 / difficulty:99 这类**形状合法但值域非法**
+      // 的行会一路进队列，直到渲染层 fsrsEngine 抛 Invalid memory state 才炸，而唯一的错误边界在根上
+      // → 整应用停止渲染。值域非法一律按损坏处理，走既有 damaged 降级链（卡片浏览仍看得到）。
+      if (f === null || typeof f !== "object") {
+        fsrsBad = true;
+      } else {
+        const lr = f.lastReview === null || f.lastReview === undefined ? null : Number(f.lastReview);
+        const S = Number(f.stability), D = Number(f.difficulty), due = Number(f.due);
+        const bad =
+          (f.stability !== undefined && !(Number.isFinite(S) && S > 0)) ||
+          (f.difficulty !== undefined && !(Number.isFinite(D) && D >= 1 && D <= 10)) ||
+          (f.due !== undefined && !Number.isFinite(due)) ||
+          (lr !== null && !Number.isFinite(lr)) ||
+          (f.lapses !== undefined && !(Number(f.lapses) >= 0)) ||
+          (f.reps !== undefined && !(Number(f.reps) >= 0)) ||
+          // 未来 lastReview（时钟回拨留下的存量形态）会让调度器算负 delta_t 直接抛错 → 视为损坏
+          (lr !== null && lr > Date.now() + 24 * 3600 * 1000);
+        if (bad) fsrsBad = true;
+      }
     } catch {
       fsrsBad = true;
     }
@@ -1151,6 +1180,23 @@ function mapCardRow(r) {
   };
 }
 
+// A-9（审计 F36）：原写法 `Number(x) || 50` 把**合法值 0** 当假值改成 50，
+// 却同时放行 −5 / 9999 这类越界值（实测原样入库）。UI 明写「优先级（0-100，越高越先复习）」，
+// 故归一为：有限数 → 四舍五入并钳进 [0,100]；非有限 → 回默认 50。
+const PRIORITY_DEFAULT = 50;
+const PRIORITY_MIN = 0;
+const PRIORITY_MAX = 100;
+function normPriority(v) {
+  // 只认「真正的数」与「非空数字字符串」。null / "" / [] / false 经 Number() 会变成 0，
+  // 若直接采信就会被当成**合法的 0**，而 F13 的 P3 矩阵明确要求「非法类型回落 50」。
+  let num;
+  if (typeof v === "number") num = v;
+  else if (typeof v === "string" && v.trim() !== "") num = Number(v);
+  else return PRIORITY_DEFAULT;
+  if (!Number.isFinite(num)) return PRIORITY_DEFAULT;
+  return Math.min(PRIORITY_MAX, Math.max(PRIORITY_MIN, Math.round(num)));
+}
+
 function insertCard(card) {
   const id = card.id || crypto.randomUUID();
   const now = Date.now();
@@ -1174,7 +1220,7 @@ function insertCard(card) {
       card.example || null,
       card.sourceRef ? JSON.stringify(card.sourceRef) : null,
       card.dateStamp || null,
-      Number(card.priority) || 50,
+      normPriority(card.priority),
       JSON.stringify(card.tags || []),
       JSON.stringify(sanitizeDomain(card.domain || [])),
       card.knowledgePointId || null,
@@ -1243,7 +1289,7 @@ function updateCard(card) {
       card.example || null,
       card.sourceRef ? JSON.stringify(card.sourceRef) : null,
       card.dateStamp || null,
-      Number(card.priority) || 50,
+      normPriority(card.priority),
       JSON.stringify(card.tags || []),
       card.domain !== undefined ? JSON.stringify(sanitizeDomain(card.domain || [])) : (prev ? JSON.stringify(prev.domain || []) : "[]"),
       card.knowledge_point_id || card.knowledgePointId || null,
@@ -1432,6 +1478,23 @@ function deleteCard(id) {
 function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
   const card = getCard(cardId);
   if (!card) throw new Error("卡片不存在");
+  // A-7（审计 F35）：写入口必须挡住「同一次呈现被计入两次」。
+  // persist() 是在 COMMIT **之后**才调的（见本函数尾部），磁盘满/杀软占用会让它抛错，而那时行已提交；
+  // 渲染层据此停在原卡，用户点「重试保存」清掉错误位后能再评一次 —— 它手里握的还是**评分前**快照，
+  // 于是多出一条 review_logs，且 cards.fsrs.reps 与日志行数从此不再相等（实测 1 vs 2）。
+  // review_logs 是 FSRS 参数优化的训练数据（§4.4.8），会被污染。
+  // 判据取「卡态是否已前进」而非逐字段全等，避免把浮点表示差异误判成陈旧写。
+  // A-1 的写侧校验**刻意不做**：§4.4.3 v20 明确支持「时间注入」（fsrsEngine.preview/next 可传显式 now），
+  // M3 时间轴模拟正是靠它把历史推到未来数月（F14 的月桶模拟即此用法）。
+  // 在这里拒绝未来 lastReview 会直接废掉那条文档化的能力（实测 F14/F34 双双崩）。
+  // 生产路径不可能产出未来值（引擎已把未来 last_review 钳到 now），读侧另有 A-2 值域闸门兜底。
+  if (fsrsBefore) {
+    const cur = card.fsrs || {};
+    const advanced =
+      (Number(cur.reps) || 0) > (Number(fsrsBefore.reps) || 0) ||
+      (Number(cur.lastReview) || 0) > (Number(fsrsBefore.lastReview) || 0);
+    if (advanced) throw new Error("评分被拒：该卡的调度状态已前进（同一次呈现被重复提交）。请刷新后重试。");
+  }
   const now = Date.now();
   const seq = (queryAll("SELECT COALESCE(MAX(review_seq), 0) AS m FROM review_logs")[0]?.m || 0) + 1;
   db.run("BEGIN");
@@ -1642,11 +1705,16 @@ function resolveLeech(cardId, resolution, updates) {
   const card = getCard(cardId);
   if (!card) return null;
   const leech = { isLeech: false, resolution, resolvedAt: Date.now() };
-  // §4.4.9 规则表：resolveLeech 的 reset 路径重写了 FSRS 状态 → 写入当前活跃配置
+  // A-3（审计）：原注释写「resolveLeech 的 reset 路径重写了 FSRS 状态」，但代码是**无条件**重写，
+  // 而两个调用方传的是 "reworded"（改写后恢复）与 "resumed"（仅恢复·不重置）—— 都不该重置排期。
+  // 结果：一张积累数月排期的卡，点「仅恢复」就回到新卡 / 复习次数清零 / due 变成现在，无确认无撤销。
+  // 改为只在显式 "reset" 时重写 fsrs_json；其余路径保留原排期（这正是「不重置」的字面承诺）。
+  const leechResetsSchedule = resolution === "reset";
   db.run(
     `UPDATE cards SET leech_json=?, front_markdown=COALESCE(?, front_markdown), back_markdown=COALESCE(?, back_markdown),
-      mnemonic=COALESCE(?, mnemonic), priority=COALESCE(?, priority), tags_json=?, fsrs_json=?, fsrs_config_id=?,
-      updated_at=? WHERE id=?`,
+      mnemonic=COALESCE(?, mnemonic), priority=COALESCE(?, priority), tags_json=?` +
+      (leechResetsSchedule ? ", fsrs_json=?, fsrs_config_id=?" : "") +
+      `, updated_at=? WHERE id=?`,
     [
       JSON.stringify(leech),
       updates?.frontMarkdown || null,
@@ -1654,8 +1722,7 @@ function resolveLeech(cardId, resolution, updates) {
       updates?.mnemonic || null,
       updates?.priority ?? null,
       JSON.stringify(updates?.tags || card.tags || []),
-      JSON.stringify({ state: "new", due: Date.now(), lapses: 0 }),
-      getActiveConfigId(),
+      ...(leechResetsSchedule ? [JSON.stringify({ state: "new", due: Date.now(), lapses: 0 }), getActiveConfigId()] : []),
       Date.now(),
       cardId
     ]
@@ -1708,6 +1775,40 @@ function createAIGenBatch(batch) {
   );
   persist();
   return { id };
+}
+
+// A-10（审计 F36）：ai_gen_batches 此前只有 INSERT/UPDATE —— 全仓零 SELECT、无 IPC、preload 无出口，
+// 于是用户关掉生成窗口后，那批**已经花过钱**的草稿在库里却永远取不回来（违反 §4.3-⑦ 与 §7.1.4）。
+// 补两个只读出口：按 id 取单条、按状态列最近若干条。
+function mapAIGenBatchRow(r) {
+  const j = (text, fallback) => {
+    if (!text) return fallback;
+    try { const v = JSON.parse(text); return v === null || v === undefined ? fallback : v; } catch { return fallback; }
+  };
+  return {
+    id: r.id,
+    scope: r.scope,
+    sourceText: r.source_text,
+    context: j(r.context_json, null),
+    promptTemplateId: r.prompt_template_id || null,
+    result: j(r.result_json, null),
+    status: r.status,
+    createdAt: r.created_at,
+  };
+}
+
+function getAIGenBatch(id) {
+  const row = queryAll("SELECT * FROM ai_gen_batches WHERE id = ?", [String(id)])[0];
+  return row ? mapAIGenBatchRow(row) : null;
+}
+
+function listAIGenBatches(opts = {}) {
+  const lim = clampLimit(opts.limit, 50, 500);
+  const status = opts.status ? String(opts.status) : null;
+  const rows = status
+    ? queryAll("SELECT * FROM ai_gen_batches WHERE status = ? ORDER BY created_at DESC LIMIT ?", [status, lim])
+    : queryAll("SELECT * FROM ai_gen_batches ORDER BY created_at DESC LIMIT ?", [lim]);
+  return rows.map(mapAIGenBatchRow);
 }
 
 function setAIGenBatchStatus(id, status) {
@@ -2087,7 +2188,7 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
       String(documentId),
       String(contentMarkdown),
       contextRef ? JSON.stringify(contextRef) : null,
-      Number(priority) || 50,
+      normPriority(priority),
       now,
       now,
       now
@@ -4623,12 +4724,24 @@ function listMaterialMapCalls(runId, limit = 2000) {
  * 语义是「被应用关闭打断」，已完成分片保留在缓存，续跑零重复计费，并且可被 P3 的
  * 「发现未完成 run 并继续」重新拾起（`listResumableMaterialMapRuns`）。
  */
-function reconcileStaleMaterialMapRuns(maxAgeMs = 30 * 60 * 1000) {
+function reconcileStaleMaterialMapRuns(maxAgeMs = 30 * 60 * 1000, opts = {}) {
+  // A-8（审计）：`{ all: true }` = **无视年龄，全部收敛**。启动时必须用这个模式 ——
+  // 应用刚起来，不可能有引擎挂在任何 running/estimating/pending 的 run 上，它们全是上个进程留下的孤儿。
+  // 原来一律按「updated_at < now − 30min」收敛，于是硬杀（崩溃 / 断电 / 强杀）不到 30 分钟的 run
+  // 仍停在 running：串行化守卫 findRunningMaterialMapRun（不看年龄）照旧拒绝新的生成请求，
+  // 而可续跑清单只收 interrupted/section_ready → 该材料既不能重生、也不提示可续，最长锁死 30 分钟。
+  // ⚠️ 刻意**不**复用 `maxAgeMs === 0` 表达这个语义：既有语义里 0 表示「极小阈值，受 60 秒下限保护」，
+  // F04 G5 明确钉住那条（`reconcileStaleMaterialMapRuns(0)` 不得误杀 0 秒龄的运行行）。
+  const all = opts.all === true;
   const cutoff = Date.now() - Math.max(60 * 1000, Number(maxAgeMs) || 0);
-  const rows = queryAll(
-    "SELECT id FROM material_map_runs WHERE is_deleted = 0 AND status IN ('running','estimating','pending') AND updated_at < ?",
-    [cutoff]
-  );
+  const rows = all
+    ? queryAll(
+        "SELECT id FROM material_map_runs WHERE is_deleted = 0 AND status IN ('running','estimating','pending')"
+      )
+    : queryAll(
+        "SELECT id FROM material_map_runs WHERE is_deleted = 0 AND status IN ('running','estimating','pending') AND updated_at < ?",
+        [cutoff]
+      );
   for (const r of rows) {
     db.run("UPDATE material_map_runs SET status = 'interrupted', error_code = 'interrupted', error_text = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [
       "运行被应用关闭打断（启动对账）；已完成分片保留在缓存，继续生成零重复计费",
@@ -4736,6 +4849,8 @@ module.exports = {
   listCardIssues,
   resolveCardIssue,
   createAIGenBatch,
+  getAIGenBatch,
+  listAIGenBatches,
   setAIGenBatchStatus,
   ensurePromptTemplates,
   getPromptTemplate,

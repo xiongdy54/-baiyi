@@ -473,6 +473,9 @@ ipcMain.handle("issues:list", (_e, cardId) => listCardIssues(String(cardId)));
 ipcMain.handle("issues:resolve", (_e, id) => resolveCardIssue(String(id)));
 ipcMain.handle("batches:create", (_e, batch) => createAIGenBatch(batch || {}));
 ipcMain.handle("batches:setStatus", (_e, id, status) => setAIGenBatchStatus(String(id), String(status)));
+// A-10（审计）：补两个只读出口，让关窗后已付费的草稿能被取回
+ipcMain.handle("batches:get", (_e, id) => getAIGenBatch(String(id)));
+ipcMain.handle("batches:list", (_e, opts) => listAIGenBatches(opts || {}));
 ipcMain.handle("prompts:list", () => listPromptTemplates());
 ipcMain.handle("prompts:get", (_e, scope) => getPromptTemplate(String(scope)));
 ipcMain.handle("similarity:find", (_e, text, k) => findSimilarCards(String(text || ""), Number(k) || 3));
@@ -1329,7 +1332,11 @@ app.whenReady().then(async () => {
   });
   // M2：若有待恢复备份（restore-pending.json），先换入数据文件再初始化数据库
   try {
-    backup.applyPendingRestore();
+    // B-12（审计）：返回值原来被整个丢掉 —— 恢复静默空转时用户得不到任何提示。
+    const applied = backup.applyPendingRestore();
+    if (applied && applied.ok === false) {
+      console.error("[backup] 恢复未完成：暂存区为空或不可用，已保留标记以便下次启动重试（restored=0）");
+    }
   } catch (err) {
     console.error("[backup] 应用待恢复数据失败：", err);
   }
@@ -1361,7 +1368,8 @@ app.whenReady().then(async () => {
   // v48.11（§3.8）：导图僵尸对账——上次运行被关闭/中断时 run 行会永远停在 running（实测两条），
   // 启动时统一收敛为 failed_timeout；已完成分片保留在缓存，重新生成自动续跑。失败不阻塞启动。
   try {
-    const n = dbModule.reconcileStaleMaterialMapRuns();
+    // A-8（审计）：{ all: true } = 无视年龄全部收敛（启动时所有 running/estimating/pending 都是上个进程的孤儿）
+    const n = dbModule.reconcileStaleMaterialMapRuns(undefined, { all: true });
     // v48.13 P3：收敛为 interrupted（不是 failed）——关掉应用不等于任务失败，续跑零重复计费
     if (n) console.log(`[mindmap] 启动对账：${n} 条运行因应用关闭被标记 interrupted（可继续生成，缓存保留）`);
   } catch (err) {

@@ -41,6 +41,11 @@ export const DEFAULT_FOLDER_NAME = "未命名文件夹";
 const SETTINGS_SCOPE = "app";
 const KEY_ORDER = "shelfOrder";
 const KEY_FOLDERS = "shelfFolders";
+// v48.18 / D54：工具条三档状态（视图 / 密度 / 排序）也要记。原先只存 order/folders，
+// 切到目录表后一开书再回来就打回封面墙，用户每次都得重切一遍
+const KEY_VIEW = "shelfView";
+const KEY_DENSITY = "shelfDensity";
+const KEY_SORT = "shelfSort";
 
 /* ------------------------------------------------------------------ 持久化 */
 
@@ -61,6 +66,56 @@ export async function loadShelf(): Promise<ShelfState> {
 export function saveShelf(state: ShelfState): void {
   void settingsStore.set(SETTINGS_SCOPE, KEY_ORDER, state.order);
   void settingsStore.set(SETTINGS_SCOPE, KEY_FOLDERS, state.folders);
+}
+
+export interface ShelfViewPrefs {
+  mode: ShelfViewMode;
+  density: ShelfDensity;
+  sort: ShelfSort;
+}
+export const DEFAULT_VIEW_PREFS: ShelfViewPrefs = { mode: "wall", density: "md", sort: "manual" };
+const VIEW_MODES: ShelfViewMode[] = ["wall", "table"];
+const DENSITIES: ShelfDensity[] = ["sm", "md", "lg"];
+const SORTS: ShelfSort[] = ["manual", "recent", "added", "title"];
+
+/** 读工具条状态。磁盘值一律不可信任：不在枚举内就回落默认——
+ *  一个坏字符串不该让书架渲染成工具条对不上号的视图 */
+export async function loadViewPrefs(): Promise<ShelfViewPrefs> {
+  const [mode, density, sort] = await Promise.all([
+    settingsStore.get<string>(SETTINGS_SCOPE, KEY_VIEW, DEFAULT_VIEW_PREFS.mode),
+    settingsStore.get<string>(SETTINGS_SCOPE, KEY_DENSITY, DEFAULT_VIEW_PREFS.density),
+    settingsStore.get<string>(SETTINGS_SCOPE, KEY_SORT, DEFAULT_VIEW_PREFS.sort),
+  ]);
+  const pick = <T extends string>(v: string, allowed: readonly T[], fallback: T): T =>
+    allowed.includes(v as T) ? (v as T) : fallback;
+  return {
+    mode: pick(mode, VIEW_MODES, DEFAULT_VIEW_PREFS.mode),
+    density: pick(density, DENSITIES, DEFAULT_VIEW_PREFS.density),
+    sort: pick(sort, SORTS, DEFAULT_VIEW_PREFS.sort),
+  };
+}
+
+/** 与 saveShelf 同口径：写入即忘，落盘失败不打断界面 */
+export function saveViewPrefs(prefs: ShelfViewPrefs): void {
+  void settingsStore.set(SETTINGS_SCOPE, KEY_VIEW, prefs.mode);
+  void settingsStore.set(SETTINGS_SCOPE, KEY_DENSITY, prefs.density);
+  void settingsStore.set(SETTINGS_SCOPE, KEY_SORT, prefs.sort);
+}
+
+/** 按落点方位插入：before ＝插到目标之前，after ＝插到目标之后。
+ *  moveTo 只会「插到之前」，于是拖到右邻居的左半区等于原地不动——
+ *  右半区（zone-after）必须有「之后」这个动作才有意义（v48.18 / D54 修「拖不动」）*/
+export function moveRelativeTo(arr: string[], id: string, targetId: string, side: "before" | "after"): string[] {
+  if (side === "before") return moveTo(arr, id, targetId);
+  if (id === targetId) return arr;
+  const out = [...arr];
+  const from = out.indexOf(id);
+  if (from < 0) return arr;
+  out.splice(from, 1);
+  const to = out.indexOf(targetId);
+  if (to < 0) return arr;
+  out.splice(to + 1, 0, id);
+  return out;
 }
 
 /* ---------------------------------------------------------------- 派生数据 */

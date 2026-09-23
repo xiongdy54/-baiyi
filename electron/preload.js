@@ -95,7 +95,10 @@ contextBridge.exposeInMainWorld("issuesAPI", {
 
 contextBridge.exposeInMainWorld("batchesAPI", {
   create: (batch) => ipcRenderer.invoke("batches:create", batch),
-  setStatus: (id, status) => ipcRenderer.invoke("batches:setStatus", id, status)
+  setStatus: (id, status) => ipcRenderer.invoke("batches:setStatus", id, status),
+  // A-10（审计）：只读出口——关窗后取回已付费生成的草稿
+  get: (id) => ipcRenderer.invoke("batches:get", id),
+  list: (opts) => ipcRenderer.invoke("batches:list", opts || {})
 });
 
 contextBridge.exposeInMainWorld("promptsAPI", {

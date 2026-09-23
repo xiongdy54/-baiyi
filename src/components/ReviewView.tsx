@@ -12,6 +12,12 @@ import { CardFace } from "./CardBrowser";
 import ContrastCardModal from "./ContrastCardModal";
 import ImageLightbox from "./ImageLightbox";
 
+// A-1（审计）：渲染期调用不得抛。原写法 `previews?.items ?? fsrsEngine.preview(current!.fsrs)`
+// 在 previews 为 null 时会同步抛，被根错误边界接管 → 整应用停止渲染。这里降级为空列表。
+function safePreviewItems(fsrs: unknown): ReturnType<typeof fsrsEngine.preview> {
+  try { return fsrsEngine.preview(fsrs as never); } catch { return []; }
+}
+
 export default function ReviewView({
   onJumpToDoc
 }: {
@@ -111,13 +117,22 @@ export default function ReviewView({
     };
   }, [nextCard]);
 
+  // A-1（审计）：preview 在 React 生命周期里抛错会被**根**错误边界接管 → 整应用停止渲染。
+  // 这里把爆炸半径收回一张卡：失败即置错误态、不渲染四档按钮、并在页内说明原因。
+  const [previewError, setPreviewError] = useState<string | null>(null);
   // 当前卡四档预览（§4.4.3 同源：评分复用，预览=落库）
   useEffect(() => {
-    setPreviews(
-      current
-        ? { sourceCardId: current.id, sourceFsrs: current.fsrs, items: fsrsEngine.preview(current.fsrs) }
-        : null
-    );
+    try {
+      setPreviews(
+        current
+          ? { sourceCardId: current.id, sourceFsrs: current.fsrs, items: fsrsEngine.preview(current.fsrs) }
+          : null
+      );
+      setPreviewError(null);
+    } catch (e) {
+      setPreviews(null);
+      setPreviewError(e instanceof Error ? e.message : String(e));
+    }
   }, [current]);
 
   // 内联编辑落库（§8.2.7 渐进措辞优化）：只改文案，不动 FSRS 状态（updateCard 保留 fsrs 字段）
@@ -134,7 +149,7 @@ export default function ReviewView({
   }
 
   async function grade(rating: Rating) {
-    if (!current || actionBusyRef.current || saveError) return;
+    if (!current || actionBusyRef.current || saveError || previewError) return;
     actionBusyRef.current = true;
     try {
       // 过期判废（§4.4.3 v23）：源卡状态与预览生成时不一致 → 现场重算，绝不复用过期预览
@@ -417,7 +432,12 @@ export default function ReviewView({
     <div className="review-wrap">
       <div className="review-session">
         {/* 页内不再重复导航文字（v12.2）：标题由顶栏高亮项表达；右上角仅剩本轮计数 */}
-        <div className="review-count mono">本轮 {doneCount} 张</div>
+        <div className="review-count mono">
+          本轮 {doneCount} 张
+          {/* E-2（审计）：此前初始态既无按钮也无任何操作提示，新用户会以为卡住了。
+              复用既有 review-count 类，不新增 CSS、不写硬编码样式值。 */}
+          {!showBack && current && !previewError ? "　·　点击卡片或按空格显示答案" : ""}
+        </div>
         {deferredPanel}
 
         {/* v23（§4.4.9）：persist 失败横幅——停留当前卡、封锁动作，重试成功后自动恢复 */}
@@ -435,6 +455,12 @@ export default function ReviewView({
             >
               重试保存
             </button>
+          </div>
+        )}
+
+        {previewError && (
+          <div className="save-error" role="alert">
+            <span>这张卡的调度状态无法解析，已暂停对它评分：{previewError}</span>
           </div>
         )}
 
@@ -482,7 +508,7 @@ export default function ReviewView({
         {showBack && (
           <>
             <div className="grade-row">
-              {(previews?.items ?? fsrsEngine.preview(current!.fsrs)).map((p) => (
+              {(previews?.items ?? safePreviewItems(current!.fsrs)).map((p) => (
                 <button key={p.rating} className={`btn grade-${p.rating.toLowerCase()}`} disabled={saveError} onClick={() => grade(p.rating)}>
                   {p.rating}
                   <span className="grade-due mono">{p.dueText}</span>

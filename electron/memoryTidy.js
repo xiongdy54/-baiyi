@@ -219,7 +219,10 @@ async function runRound(ctx, { kind, trigger, entries = null, topicRels = null }
       maxUpdatedAt = entries.reduce((a, e) => Math.max(a, Number(e.updatedAt) || 0), 0);
     }
     if (kind === "ingest" && maxUpdatedAt) {
-      writeMemoryConfig(ctx, { lastCoveredAt: maxUpdatedAt });
+      // A-11（审计）：水位线必须钳到「现在」。时钟曾走到未来（双系统 RTC / NTP 校时 / 手动改表）时，
+      // 本批条目的 updated_at 落在未来，水位线被推上去后 listJournalEntriesSince 的
+      // `updated_at > since` 永不命中 → 记忆整理永久静默停摆，而设置页还显示「没有未整理的日记条目」。
+      writeMemoryConfig(ctx, { lastCoveredAt: Math.min(maxUpdatedAt, Date.now()) });
     }
     if (kind === "ingest") {
       const cur = readMemoryConfig(ctx);
