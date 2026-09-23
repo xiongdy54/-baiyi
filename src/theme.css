@@ -731,12 +731,15 @@ body.has-skin .topbar { background: transparent; }
 .shelf-item { display: flex; flex-direction: column; min-width: 0; }
 
 /* 图注卡：封面 → 2px 进度轨 → 书名 / meta。书名与进度常驻可读，
-   操作只在 hover / focus-within 时压住封面底缘（旧版整块黑幕会把封面整块抹掉） */
+   操作只在 hover / 键盘焦点时压住封面底缘（旧版整块黑幕会把封面整块抹掉）。
+   **不裁自己的浮层**（v48.20 / D56）：动作条菜单挂在卡内、按需向卡片外展开，
+   `overflow: hidden` 会把菜单越界的那截直接切掉（实测 10 个选项全不可点）。
+   卡内需要裁的东西各自有裁剪（`.f-face` / `.f-roster` / `.zone-tip` / 封面图按框取景），
+   撤掉后实测无一处溢出。 */
 .book-card {
   position: relative;
   aspect-ratio: 2 / 3;
   background: var(--grey-1);
-  overflow: hidden;
   cursor: pointer;
 }
 
@@ -829,8 +832,12 @@ body.has-skin .topbar { background: transparent; }
   color: var(--text-helper);
 }
 
-/* hover / focus 动作条：压在封面底缘 40px，图注区不动、书名始终在场。
-   只用 opacity 不用 visibility——按钮必须保持可聚焦，键盘 Tab 到时 :focus-within 会把它显出来 */
+/* hover / 键盘焦点动作条：压在封面底缘 40px，图注区不动、书名始终在场。
+   只用 opacity 不用 visibility——按钮必须保持可聚焦，键盘 Tab 到时它会显出来。
+   **只认 `:focus-visible`，不认 `:focus-within`**（v48.20 / D56）：卡片是 `div[tabindex=0]`，
+   鼠标按下就会拿到焦点，而拖拽会吃掉那次 click → 焦点滞留在被拖的那张卡上，
+   `:focus-within` 于是把动作条钉在屏上，必须点别处才消失（用户实测第 3 条）。
+   鼠标拿到的焦点不算「键盘可达」，Tab 与 Alt+方向键后的程序化聚焦仍会显形。 */
 .card-acts {
   position: absolute;
   left: 0;
@@ -845,8 +852,13 @@ body.has-skin .topbar { background: transparent; }
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
 }
-.book-card:hover .card-acts,
-.book-card:focus-within .card-acts { opacity: 1; }
+/* 拖拽刚结束、指针还没动过：浏览器不会重判 `:hover`（拖动期间 hover 不更新），被拖那张卡会顶着
+   起手那一刻的 hover 一直显着动作条与成员名册。这段窗口里 hover 是假的，所以只把 **hover 这一路**
+   关上（`.is-hover-frozen` 由 Bookshelf 在 dragend 时挂上、第一次真实 mousemove 时摘掉）；
+   键盘两路（`:focus-visible` / `:has(:focus-visible)`）照旧——鼠标的假 hover 不得盖过真键盘焦点。 */
+.bookshelf:not(.is-hover-frozen) .book-card:hover .card-acts,
+.book-card:focus-visible .card-acts,
+.book-card:has(:focus-visible) .card-acts { opacity: 1; }
 .act {
   position: relative;
   width: 28px;
@@ -893,8 +905,12 @@ body.has-skin .topbar { background: transparent; }
   border-color: var(--overlay-text);
   color: var(--overlay-text);
 }
-/* 卡内菜单向上开（封面容器 overflow:hidden，往下会被裁掉） */
-.dd-menu-up { top: auto; bottom: calc(100% + var(--sp-1)); }
+/* 卡内菜单的方向由开菜单时实测决定（Bookshelf.tsx 的 CardMenu）：动作条压在封面底缘，默认向上开，
+   上方放不下（吸顶工具条 / 滚动容器顶边会裁）时才翻向下。两个变体必须带 `.dd-menu` 前缀——
+   基础规则 `.dd-menu` 在本文档更靠后，同权重下会把 `top: auto` 覆盖掉，
+   于是 `top` 与 `bottom` 同时非 auto、盒子塌成 0 高，内容只朝下溢流再被裁光（v48.20 / D56）。 */
+.dd-menu.dd-menu-up { top: auto; bottom: calc(100% + var(--sp-1)); }
+.dd-menu.dd-menu-down { top: calc(100% + var(--sp-1)); bottom: auto; }
 .dd-item .n { color: var(--text-helper); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 /* 可拖性不再靠把手图形提示（v48.18 / D54）：`.shelf-grip`（卡片）与 `.row-grip`（目录表）都删了——
@@ -1068,8 +1084,9 @@ body.has-skin .topbar { background: transparent; }
   overflow: hidden;
   transition: opacity var(--dur) var(--ease);
 }
-.book-card:hover .f-roster,
-.book-card:focus-within .f-roster { opacity: 1; }
+.bookshelf:not(.is-hover-frozen) .book-card:hover .f-roster,
+.book-card:focus-visible .f-roster,
+.book-card:has(:focus-visible) .f-roster { opacity: 1; }
 .f-roster .rh {
   font-size: var(--fs-meta);
   font-weight: 600;
