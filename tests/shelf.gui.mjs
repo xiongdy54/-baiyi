@@ -777,6 +777,107 @@ try {
   check("书架里没有非 0 圆角", r.rad.length === 0, JSON.stringify(r.rad.slice(0, 6)));
   check("容器查询宿主在场（工具条逐级退让依赖它）", /inline-size/.test(r.container || ""), r.container);
 
+  console.log("\n[14] 封面墙三条交互缺陷回归（v48.20 / D56）");
+  const bookCard = `window.__S.items().find(e=>e.querySelector('.book-card-cover'))`;
+  const bookId = await page.eval(`${PRELUDE} return ${bookCard}.dataset.entry;`);
+
+  // ① 卡内菜单：整体在滚动容器可视区内、选项全部可命中。
+  //    改前 `.dd-menu`（更靠后、同权重）覆盖掉 `.dd-menu-up` 的 top:auto → top/bottom 双非 auto、
+  //    盒高按约束解成 0，内容只朝下溢流再被 `.book-card{overflow:hidden}` 剪掉 → 10 个选项命中 0/10。
+  await fire(`const card=${bookCard};
+    card.querySelector('button[aria-label="书籍语言"]').click(); return 1;`);
+  await wait(450);
+  r = await J(`${PRELUDE}
+    const menu=document.querySelector('.dd-menu');
+    if(!menu) return JSON.stringify({err:'菜单没开'});
+    const sr=menu.closest('.bookshelf').getBoundingClientRect(), mr=menu.getBoundingClientRect();
+    const items=[...menu.querySelectorAll('.dd-item')];
+    const hits=items.filter(el=>{ const b=el.getBoundingClientRect();
+      return document.elementFromPoint(b.left+b.width/2, b.top+b.height/2)===el; }).length;
+    return JSON.stringify({ cls:menu.className, items:items.length, hits,
+      inShelf: mr.top>=sr.top-0.5 && mr.bottom<=sr.bottom+0.5 && mr.left>=sr.left-0.5 && mr.right<=sr.right+0.5,
+      box:{top:Math.round(mr.top), bottom:Math.round(mr.bottom), left:Math.round(mr.left), right:Math.round(mr.right)}});`, "card-menu");
+  check(`卡内菜单整体落在滚动容器可视区内（按可视区实测翻边：${r.cls}）`, r.inShelf === true, JSON.stringify(r));
+  check(`卡内菜单 10 个选项全部可命中（${r.hits}/${r.items}）`, r.items === 10 && r.hits === r.items, JSON.stringify(r));
+  await fire(`const jp=[...document.querySelectorAll('.dd-menu .dd-item')].find(b=>b.textContent.trim()==='日语');
+    if (jp) jp.click(); return !!jp;`);
+  await wait(700);
+  const lang = await page.eval(`const list=await window.libraryAPI.list(); const it=list.find(i=>i.id==='${bookId}'); return it?(it.lang||''):'MISS';`);
+  r = await J(`${PRELUDE}
+    const it=window.__S.items().find(e=>e.dataset.entry==='${bookId}');
+    return JSON.stringify({ menuOpen: !!document.querySelector('.dd-menu'),
+      meta: it?.querySelector('.cap-meta')?.textContent.replace(/\\s+/g,' ').trim() });`, "lang-set");
+  check(`真点选项生效：语言写库（${lang}）且菜单收起、图注同步`, lang === "ja" && r.menuOpen === false && /JA/.test(r.meta || ""), JSON.stringify({ lang, ...r }));
+
+  // ② 拖到两卡之间的空白：dragover 要被接受、drop 要产生、顺序要真的变。
+  //    改前空白命中 `.bookshelf-grid` 本身，而容器上没有任何拖拽处理器 → 不 preventDefault → 无 drop。
+  const idsB = await page.eval(`${PRELUDE} return window.__S.ids()`);
+  const gapPt = `const c0=window.__S.items()[0].querySelector('.shelf-face').getBoundingClientRect();
+    const c1=window.__S.items()[1].querySelector('.shelf-face').getBoundingClientRect();
+    return [(c0.right+c1.left)/2, c0.top+c0.height/2];`;
+  await fire(`const a=window.__S.items()[3]; return window.__S.fire(a,'dragstart', ...window.__S.pt(a,0.5));`);
+  await wait(420);
+  const accepted = await fire(`${PRELUDE} const [x,y]=(()=>{${gapPt}})();
+    return window.__S.fire(window.__S.grid(),'dragover',x,y);`);
+  await wait(420);
+  r = await J(`${PRELUDE} return JSON.stringify({ zones: window.__S.items().map(e=>(e.className.match(/zone-\\w+/)||[null])[0]) });`, "gap-zone");
+  await fire(`const [x,y]=(()=>{${gapPt}})(); const a=window.__S.items()[3];
+    window.__S.fire(window.__S.grid(),'drop',x,y); window.__S.fire(a,'dragend'); return 1;`);
+  await wait(700);
+  const idsA = await page.eval(`${PRELUDE} return window.__S.ids()`);
+  const arrB = idsB.split(",");
+  check("两卡之间空白处的 dragover 被接受（改前不被 accepted → 指针变禁止图标、松开不产生 drop）", accepted === true, accepted);
+  check("空白处的落点高亮画在最近的一格上", r.zones?.filter(Boolean).length === 1, JSON.stringify(r));
+  check("在空白处松手完成重排：第 4 条落到第 1、2 条之间",
+    idsA === [arrB[0], arrB[3], arrB[1], arrB[2]].join(","), JSON.stringify({ before: idsB, after: idsA }));
+
+  // ③ 拖/长按之后的动作条残留：显形判据是 `:focus-visible`，鼠标按下的焦点不算。
+  //    改前焦点滞留在卡上（`div[tabindex=0]` + 拖拽吃掉 click）→ `:focus-within` 把 40px ink 条钉住。
+  const cp = JSON.parse(await page.eval(`${PRELUDE}
+    const c=window.__S.items()[0].querySelector('.book-card').getBoundingClientRect();
+    return JSON.stringify({ x:Math.round(c.left+c.width/2), y:Math.round(c.top+c.height*0.4) });`));
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cp.x, y: cp.y });
+  await wait(200);
+  await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: cp.x, y: cp.y, button: "left", buttons: 1, clickCount: 1 });
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cp.x + 14, y: cp.y + 8, button: "left", buttons: 1 });
+  await wait(150);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 6, y: 300, button: "left", buttons: 1 });
+  await wait(200);
+  await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: 6, y: 300, button: "left", buttons: 0, clickCount: 1 });
+  await wait(500);
+  r = await J(`${PRELUDE}
+    const cards=window.__S.items().map(e=>e.querySelector('.book-card'));
+    return JSON.stringify({
+      op: window.__S.items().map(e=>getComputedStyle(e.querySelector('.card-acts')).opacity),
+      focusWithin: cards.some(c=>c.matches(':focus-within')),
+      focusVisible: cards.some(c=>c.matches(':focus-visible')) });`, "residue");
+  check("拖/长按之后动作条不残留（焦点还在也不显形——改前 :focus-within 会把它钉在屏上）",
+    r.op.every(v => v === "0") && r.focusVisible === false, JSON.stringify(r));
+
+  // 键盘可达不回退：必须由**真实 Tab 键**把焦点送进卡片（程序化 focus() 的 `:focus-visible`
+  // 取决于浏览器记录的输入模态，CDP 合成键不保证翻转它——实测会得到假红）。
+  // 焦点可能落在卡本身（`.book-card:focus-visible`）或卡内按钮（`:has(:focus-visible)`），两条都算显形。
+  let kbdHit = null;
+  for (let i = 0; i < 30 && !kbdHit?.onCard; i++) {
+    await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    await wait(90);
+    kbdHit = await J(`${PRELUDE}
+      const el=document.activeElement, c=el?.closest?.('.book-card');
+      return JSON.stringify({ onCard: !!c, active:(el?.className||el?.tagName||'').toString().slice(0,40),
+        elFv: el ? el.matches(':focus-visible') : null,
+        fv: c ? c.matches(':focus-visible') : null,
+        hasFv: c ? c.matches(':has(:focus-visible)') : null,
+        acts: c ? getComputedStyle(c.querySelector('.card-acts')).opacity : null });`, "kbd");
+  }
+  await wait(260); // 等 opacity 过渡走完（--dur 量级）
+  const kbdSettled = kbdHit?.onCard ? await J(`${PRELUDE}
+    const el=document.activeElement, c=el?.closest?.('.book-card');
+    return JSON.stringify({ onCard: !!c, acts: c ? getComputedStyle(c.querySelector('.card-acts')).opacity : null });`, "kbd-settled") : null;
+  check("键盘 Tab 走到卡片时动作条显形（`:focus-visible` 成立、opacity=1，键盘可达不回退）",
+    kbdHit?.onCard === true && (kbdHit.elFv === true || kbdHit.fv === true || kbdHit.hasFv === true) && kbdSettled?.acts === "1",
+    JSON.stringify({ kbdHit, kbdSettled }));
+
   console.log(`\nShelf GUI: ${pass} 通过 / ${fail} 失败`);
   process.exit(fail > 0 ? 1 : 0);
 } catch (e) {

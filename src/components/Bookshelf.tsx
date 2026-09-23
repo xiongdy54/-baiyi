@@ -4,7 +4,7 @@
 // 本文件只负责「书架上怎么摆」：视图组织与交互。一行都不碰数据归属——
 // 卡、摘录、进度、语言、领域标签仍各挂各书，写库调用与 v48.14 之前逐字相同
 // （setItemTitle / setItemLang / remove），顺序与文件夹走 SettingsStore app 层。
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from "../lib/library";
 import { eventBus } from "../lib/eventbus";
 import {
@@ -44,6 +44,49 @@ function CoverImg({ itemId, filename, title }: { itemId: string; filename: strin
   );
 }
 
+/* 卡内动作条菜单（书籍语言 / 归入文件夹 / 文件夹操作）的弹出位置。
+   动作条压在封面底缘，所以默认向上开；但两个方向都不天然放得下——
+   滚动容器顶边与吸顶工具条会切掉越界部分（目录表首行实测向上缺 178px，10 个语言选项一个都点不到，
+   用户实测第 1 条），长列表最后一行的向下菜单同样会被容器底边切掉；横向同理：
+   「把 N 本全部移回书架」这类宽菜单右缘对齐时，最左一列会整体越到容器外（实测左越 72px）。
+   所以开菜单时按默认位置量一次，哪一侧放不下就翻到另一侧（都放不下时保留默认＝越界最少的那侧）。 */
+function CardMenu({ label, children }: { label: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState({ down: false, left: false });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const shelf = el?.closest<HTMLElement>(".bookshelf");
+    const dd = el?.parentElement; // .dd：触发按钮的定位盒
+    if (!el || !shelf || !dd) return;
+    const area = shelf.getBoundingClientRect();
+    const bar = shelf.querySelector<HTMLElement>(".shelf-bar");
+    const safeTop = bar ? bar.getBoundingClientRect().bottom : area.top;
+    const box = el.getBoundingClientRect();
+    const w = box.width;
+    const dr = dd.getBoundingClientRect();
+    // 越界量（0 = 放得下）：上方还要躲开吸顶工具条，所以基准是工具条下沿而不是容器顶
+    const overUp = Math.max(0, safeTop - box.top);
+    const overDown = Math.max(0, dr.bottom + 4 + box.height - area.bottom);
+    const overRightAnchored = Math.max(0, area.left - (dr.right - w)); // 默认「右缘对齐触发钮」的左侧越界
+    const overLeftAnchored = Math.max(0, dr.left + w - area.right); // 改「左缘对齐」后的右侧越界
+    setPlace({
+      down: overUp > 0 && overDown < overUp,
+      left: overRightAnchored > 0 && overLeftAnchored <= overRightAnchored,
+    });
+  }, []);
+  const { down, left } = place;
+  return (
+    <div
+      ref={ref}
+      className={`dd-menu dd-menu-${down ? "down" : "up"}${left ? " dd-menu-left" : ""}`}
+      role="menu"
+      aria-label={label}
+    >
+      {children}
+    </div>
+  );
+}
+
 interface Props {
   onOpenBook: (itemId: string) => void;
   /** 添加材料模态（v36）：由 App 级持有——书架入口与全局快捷键 Ctrl+Alt+N 共用同一模态 */
@@ -72,6 +115,16 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ id: string; kind: MenuKind } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
+  // 原生拖拽结束后浏览器不重判 :hover（拖动期间 hover 不更新）→ 被拖那张卡会顶着起手那一刻的
+  // hover 状态，动作条留在屏上直到下一次真实鼠标移动。这段时间里 hover 是「假」的，先按下不表，
+  // 收到第一次真实 mousemove（浏览器此时已重判过 hover）再交还给它。
+  const [hoverFrozen, setHoverFrozen] = useState(false);
+  useEffect(() => {
+    if (!hoverFrozen) return;
+    const thaw = () => setHoverFrozen(false);
+    document.addEventListener("mousemove", thaw, { once: true });
+    return () => document.removeEventListener("mousemove", thaw);
+  }, [hoverFrozen]);
   const [error, setError] = useState<string | null>(null);
   // v48.18 / D54：视图/密度/排序是组件内状态，进出阅读器会重挂载 → 必须落 SettingsStore
   const [prefsReady, setPrefsReady] = useState(false);
@@ -280,6 +333,42 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     if (d.zone === "group") group(d.id, id);
     else reorderTo(d.id, id, d.zone === "after" ? "after" : "before");
   };
+
+  /* 条目之间的空白（列间距 / 行间距 / 网格四周内边距）也是落点（v48.20 / D56，用户实测第 2 条）。
+     这些位置的命中目标是网格容器本身，而容器原先没有任何拖拽处理器 → dragover 不被 preventDefault，
+     浏览器判定「此处不可放」→ 指针变禁止图标、松开也根本不产生 drop。
+     落点取最近的一格（中心距）再按指针在它左/右半判前后，与卡内两区同序、与刚才看到的高亮一致；
+     只处理落在容器**本身**上的那一层，卡/行内的落点仍归各自的处理器。 */
+  const nearestEntry = (clientX: number, clientY: number) => {
+    let best: { id: string; cx: number; d: number } | null = null;
+    for (const el of listRef.current?.querySelectorAll<HTMLElement>("[data-entry]") || []) {
+      const r = (el.querySelector(".shelf-face") ?? el).getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const d = Math.hypot(clientX - cx, clientY - (r.top + r.height / 2));
+      if (!best || d < best.d) best = { id: el.dataset.entry!, cx, d };
+    }
+    return best;
+  };
+  const onGridDragOver = (e: React.DragEvent) => {
+    const d = dragRef.current;
+    if (!d || !manual || e.target !== e.currentTarget) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const near = nearestEntry(e.clientX, e.clientY);
+    if (!near || near.id === d.id) return;
+    const zone = e.clientX < near.cx ? "before" : "after";
+    if (d.target !== near.id || d.zone !== zone) setDrag({ ...d, target: near.id, zone });
+  };
+  const onGridDrop = (e: React.DragEvent) => {
+    if (e.target !== e.currentTarget) return;
+    e.preventDefault();
+    const d = dragRef.current;
+    setDrag(null);
+    // 落在空白处时 target 由上一次 dragover 定下；没路过任何一格就松开 = 原地不动
+    if (!d?.target || !d.zone || d.target === d.id) return;
+    if (d.zone === "group") group(d.id, d.target);
+    else reorderTo(d.id, d.target, d.zone === "after" ? "after" : "before");
+  };
   const itemProps = (entry: ShelfEntry) => ({
     draggable: manual,
     onDragStart: (e: React.DragEvent) => {
@@ -290,7 +379,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     },
     onDragOver: onItemDragOver(entry.id),
     onDrop: onItemDrop(entry.id),
-    onDragEnd: () => setDrag(null),
+    onDragEnd: () => { setDrag(null); setHoverFrozen(true); },
   });
   const zoneClass = (id: string) =>
     drag && drag.id !== id && drag.target === id && drag.zone
@@ -365,7 +454,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
   );
 
   const langMenu = (item: LibraryItem) => (
-    <div className="dd-menu dd-menu-up" role="menu" aria-label="书籍语言">
+    <CardMenu label="书籍语言">
       {BOOK_LANGUAGES.map((l) => (
         <button
           key={l.value || "unknown"}
@@ -378,13 +467,13 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           {l.label}
         </button>
       ))}
-    </div>
+    </CardMenu>
   );
 
   const groupMenu = (entry: ShelfEntry) => {
     const inFolder = entry.kind === "book" ? folderOf(shelf, entry.id) : null;
     return (
-      <div className="dd-menu dd-menu-up" role="menu" aria-label="归入文件夹">
+      <CardMenu label="归入文件夹">
         {entry.kind === "book" && (
           <button type="button" role="menuitem" className="dd-item" onClick={() => createFolder(entry.id)}>
             新建文件夹并放入
@@ -407,19 +496,19 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
             移出「{inFolder.name}」
           </button>
         )}
-      </div>
+      </CardMenu>
     );
   };
 
   const folderMenu = (f: ShelfFolder) => (
-    <div className="dd-menu dd-menu-up" role="menu" aria-label="文件夹操作">
+    <CardMenu label="文件夹操作">
       <button type="button" role="menuitem" className="dd-item" onClick={() => { setMenu(null); commit(moveAllOut(shelf, f.id)); }}>
         把 {f.items.length} 本全部移回书架
       </button>
       <button type="button" role="menuitem" className="dd-item" onClick={() => { setMenu(null); commit(dissolveFolder(shelf, f.id)); }}>
         解散文件夹（不删书记录）
       </button>
-    </div>
+    </CardMenu>
   );
 
   const confirmBox = (id: string, title: string) => (
@@ -775,7 +864,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
   );
 
   return (
-    <section className={`bookshelf ${DENSITY_CLASS[density]}`}>
+    <section className={`bookshelf ${DENSITY_CLASS[density]}${hoverFrozen ? " is-hover-frozen" : ""}`}>
       {bar}
       {error && (
         <p className="notice-bar card-marked-error" role="alert">
@@ -804,9 +893,9 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           </p>
         </div>
       ) : mode === "wall" ? (
-        <div className="bookshelf-grid" ref={listRef}>{entries.map(wallCard)}</div>
+        <div className="bookshelf-grid" ref={listRef} onDragOver={onGridDragOver} onDrop={onGridDrop}>{entries.map(wallCard)}</div>
       ) : (
-        <div className="shelf-body" ref={listRef}>
+        <div className="shelf-body" ref={listRef} onDragOver={onGridDragOver} onDrop={onGridDrop}>
           <table className="shelf-table">
             <thead>
               <tr>
