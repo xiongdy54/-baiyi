@@ -82,7 +82,17 @@ try {
       bodyCls: body ? String(body.className) : null,
       // 修复判据：目录打开时正文左缘不得落在目录右缘左侧
       overlapPx: tr && sr ? Math.round(tr.right - sr.left) : null,
-      scrollMarginLeft: scroll ? getComputedStyle(scroll).marginLeft : null,
+      // ⚠️ rect 断言**量不到 overflow:hidden 裁剪**：被剪掉的元素 rect 依然正确。
+      // 所以必须加**遵守裁剪**的判据 —— elementFromPoint 打不中被剪掉的元素。
+      hitTopLeft: (() => { const e = document.elementFromPoint(140, 130); return e ? e.tagName + "." + String(e.className).slice(0, 34) : null; })(),
+      hitList: (() => { const e = document.elementFromPoint(140, 200); return e ? e.tagName + "." + String(e.className).slice(0, 34) : null; })(),
+      tocInHit: (() => {
+        const a = document.elementFromPoint(140, 130), b = document.elementFromPoint(140, 200);
+        const inside = (el) => !!el && !!document.querySelector('.reader-toc') && document.querySelector('.reader-toc').contains(el);
+        return inside(a) || inside(b);
+      })(),
+      hostPadLeft: (() => { const h = document.querySelector('.reader-engine-host'); return h ? getComputedStyle(h).paddingLeft : null; })(),
+      hostContentLeft: (() => { const h = document.querySelector('.reader-engine-host'); if (!h) return null; const b = h.getBoundingClientRect(); const cs = getComputedStyle(h); return Math.round(b.left + parseFloat(cs.paddingLeft || '0')); })(),
     });
   })()`) || "{}");
 
@@ -98,11 +108,22 @@ try {
   console.log(`（点击结果 ${opened}）`);
 
   t("目录确实打开了（toc 节点存在）", !!open.toc, "未找到 .reader-toc");
-  t("正文让位：reader-scroll.left ≥ reader-toc.right（E-1 的修复判据）",
-    open.overlapPx != null && open.overlapPx <= 0,
-    `目录右缘 ${open.toc?.right} 仍压住正文左缘 ${open.scroll?.left}，重叠 ${open.overlapPx}px`);
+  // 判据已更新：让位由 .reader-engine-host 的 padding-left 承担（不是移动 .reader-scroll），
+  // 所以量的是**宿主内容左缘**而不是滚动盒左缘。
+  t("正文让位：宿主内容左缘 ≥ reader-toc.right（E-1 的修复判据）",
+    open.hostContentLeft != null && open.toc?.right != null && open.hostContentLeft >= open.toc.right - 1,
+    `目录右缘 ${open.toc?.right} 仍压住正文内容左缘 ${open.hostContentLeft}`);
   t("body 带上了 reader-body-toc-open 类", String(open.bodyCls || "").includes("reader-body-toc-open"), String(open.bodyCls));
   t("目录关闭时不加左移（不影响原布局）", !String(closed.bodyCls || "").includes("reader-body-toc-open"), String(closed.bodyCls));
+  // 关键：遵守裁剪的判据 —— 面板必须真的能被点到（被 overflow:hidden 剪掉的元素点不中）
+  t("目录面板可被命中（未被裁剪掉）：elementFromPoint 落在 .reader-toc 内",
+    open.tocInHit === true,
+    `命中 ${JSON.stringify(open.hitTopLeft)} / ${JSON.stringify(open.hitList)} —— 面板被裁剪或未绘制`);
+  t("正文内容区起点 ≥ 面板右缘（内容确实让出了面板宽度）",
+    open.hostContentLeft != null && open.toc?.right != null && open.hostContentLeft >= open.toc.right - 1,
+    `宿主内容左缘 ${open.hostContentLeft} vs 面板右缘 ${open.toc?.right}`);
+  t("由 .reader-engine-host 承担让位（padding-left 生效）",
+    String(open.hostPadLeft || "") !== "0px", `hostPadLeft=${open.hostPadLeft}`);
 
   console.log(red === 0 ? "\n>>> E-1 修复已验证通过" : `\n>>> 判红 ${red} 条`);
   fs.writeFileSync(path.join(SHOTS, "result.json"), JSON.stringify({ closed, open, red }, null, 2));

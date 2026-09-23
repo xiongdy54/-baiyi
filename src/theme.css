@@ -1659,21 +1659,14 @@ body.theme-dark .modal-panel {
   flex: 1 1 calc(100% - 400px);
 }
 /* E-1（审计）：目录面板是 position:absolute 的浮层（left:0 / width:280px / z-index:7），
-   正文此前不让位 —— 打开目录后正文左缘被压在面板底下，行首被吃掉约 5 个汉字
-   （同会话 A/B 截图实测：关目录时整句完整，开目录后「中锋用笔是」被遮）。
-   复用既有 reader-body-shifted 的思路，让正文按面板宽度右移。 */
-.reader-body.reader-body-toc-open .reader-scroll {
-  margin-left: 280px;
-}
-/* E-1：TOC 的包含块是 .reader-engine-viewport，而它在 .reader-scroll **内部** ——
-   所以正文右移时 TOC 会跟着右移（实测 toc.left 0→280，重叠量没变）。
-   用等量负偏移把它锚回视口左缘，净效果：正文让位、面板不动。 */
-.reader-body.reader-body-toc-open .reader-toc {
-  left: -280px;
-}
-/* 目录与 AI 面板同时打开：两者叠加（400px 面板走 flex-basis，280px 目录走 margin） */
-.reader-body.reader-body-shifted.reader-body-toc-open .reader-scroll {
-  flex: 1 1 calc(100% - 400px - 280px);
+   正文此前不让位 —— 打开目录后正文左缘被压在面板底下，行首被吃掉约 5 个汉字。
+   修法：**不动面板**（它本就在正确位置），只让引擎内容让出面板宽度。
+   ⚠️ 曾试过「把 .reader-scroll 左移 + 给面板等量负偏移」，那是错的：
+   .reader-toc 的包含块 .reader-engine-viewport 是 overflow:hidden，
+   负偏移会把它推到裁剪框外（rect 仍正确但画不出来）——所以断言必须用 elementFromPoint 这类
+   遵守裁剪的判据，不能只看 getBoundingClientRect。 */
+.reader-body.reader-body-toc-open .reader-engine-host {
+  padding-left: 280px;
 }
 .reader-scroll {
   flex: 1;
