@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>书架拖拽落点 · 方案 3 修正版 v3（插槽占满缝隙 + 成组真建夹 + 跟随窗口缩放）</title>
+<style>
+  /* 令牌取自 src/theme.css；卡片结构按 .book-card / .cap-rail / .cap 还原 */
+  :root {
+    --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+    --text-secondary:#525252; --text-helper:#6b6b6b; --border-subtle:#e0e0e0; --border-strong:#a3a3a3;
+    --accent:#002fa7; --accent-on:#fff; --accent-soft:rgba(0,47,167,.08);
+    --font-sans:"Inter","Segoe UI","Microsoft YaHei",sans-serif; --font-mono:ui-monospace,Consolas,monospace;
+    --fs-body:14px; --fs-secondary:13px; --fs-meta:12px; --fs-title-s:16px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px;
+    --radius:0; --ease:cubic-bezier(.2,0,.38,.9); --dur:120ms; --gap:var(--sp-6);
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#e8e8e6;font-family:var(--font-sans);color:var(--ink);padding:var(--sp-8);display:flex;flex-direction:column;gap:var(--sp-6)}
+  body.notx *,body.notx *::before,body.notx *::after{transition:none !important}
+  h1{font-size:20px;font-weight:400;letter-spacing:-.01em}
+  .lede{font-size:var(--fs-secondary);color:var(--text-secondary);line-height:1.7;max-width:92ch}
+  .lede b{color:var(--ink);font-weight:600}
+  .lede code{font:var(--fs-meta) var(--font-mono);background:var(--grey-1);padding:1px 4px}
+  .bar{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center;font-size:var(--fs-meta);color:var(--text-secondary)}
+  .bar button{height:28px;padding:0 var(--sp-3);background:var(--paper);border:1px solid var(--border-subtle);color:var(--ink);font:var(--fs-meta) var(--font-sans);cursor:pointer}
+  .bar button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
+  .plates{display:grid;grid-template-columns:repeat(auto-fit,minmax(470px,1fr));gap:var(--sp-8);align-items:start}
+  .plate{display:flex;flex-direction:column;gap:var(--sp-2)}
+  .plate-label{font-size:var(--fs-meta);font-weight:600;letter-spacing:.1em;color:var(--grey-3);text-transform:uppercase}
+  .note{font-size:var(--fs-meta);color:var(--text-secondary);line-height:1.65;max-width:62ch}
+  .note b{color:var(--ink);font-weight:600}
+  .stage{background:var(--paper);outline:1px solid var(--border-strong);padding:var(--sp-6);position:relative}
+  .readout{font:var(--fs-meta) var(--font-mono);color:var(--text-secondary);min-height:16px}
+
+  /* ---------- 卡片 ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:var(--gap);position:relative}
+  .item{position:relative;display:flex;flex-direction:column;min-width:0;cursor:grab}
+  .card{position:relative;aspect-ratio:2/3;background-color:var(--grey-1);overflow:hidden}
+  .card .ttl{position:absolute;left:0;bottom:0;padding:var(--sp-4);font-size:var(--fs-title-s);line-height:1.35;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .card .sq{position:absolute;top:var(--sp-4);left:var(--sp-4);width:8px;height:8px;background:var(--accent)}
+  /* 进度轨：初稿留 8px 间隙（掉到封面下方一段），修正版贴住封面下沿 */
+  .rail{height:2px;background:var(--grey-2)}
+  .v0 .rail{margin-top:var(--sp-2)}
+  .v1 .rail{margin-top:0}
+  .rail i{display:block;height:100%;background:var(--accent)}
+  .cap{padding-top:var(--sp-2);display:flex;flex-direction:column;gap:var(--sp-1)}
+  .cap .t{font-size:var(--fs-body);font-weight:500;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cap .m{font:var(--fs-meta) var(--font-mono);color:var(--text-helper);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tab{position:absolute;top:calc(var(--sp-2)*-1);left:0;height:var(--sp-4);background:var(--grey-2);
+    display:flex;align-items:center;gap:var(--sp-1);padding:0 var(--sp-2);font-size:11px;letter-spacing:.06em;color:var(--text-secondary)}
+  .tab b{font-weight:600;color:var(--ink)}
+  .stack{position:absolute;top:var(--sp-4);right:var(--sp-4);width:26px;height:34px;background:var(--grey-2);
+    box-shadow:5px 5px 0 var(--paper),5px 5px 0 1px var(--grey-2)}
+
+  /* ---------- 落点插槽：一个缝隙一个矩形，占满两封面之间的空白，绝不动任何卡片 ---------- */
+  .slot{position:absolute;border:2px solid var(--accent);pointer-events:none;z-index:6;display:none;
+    background:repeating-linear-gradient(135deg,var(--accent-soft) 0 4px,transparent 4px 8px)}
+  .rowbar{position:absolute;background:var(--accent);pointer-events:none;z-index:6;display:none;height:4px}
+  .dragging-src{outline:2px dashed var(--border-strong);outline-offset:2px}
+
+  /* ---------- 成组：与「挤开」完全不同的语言 ---------- */
+  .item.zone-group .card{background-color:var(--accent-soft);outline:2px solid var(--accent);outline-offset:-2px}
+  .item.zone-group::after{content:"→ 成为文件夹成员";position:absolute;left:0;bottom:calc(100% + var(--sp-1));
+    font:600 var(--fs-meta) var(--font-sans);color:var(--accent);white-space:nowrap;z-index:7}
+  .row.zone-group{background-color:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .row.zone-group::after{content:"→ 成为文件夹成员";margin-left:auto;color:var(--accent);font-weight:600;font-size:var(--fs-meta)}
+  .v0 .item.zone-group::after{display:none}
+
+  /* ---------- 初稿（问题版）：padding 腾位 → 卡面被压窄，缝隙里仍是 🚫 ---------- */
+  .v0 .item.zone-before{padding-left:28px} .v0 .item.zone-after{padding-right:28px}
+  .v0 .item.zone-before::before,.v0 .item.zone-after::before{content:"";position:absolute;top:0;bottom:var(--sp-8);width:24px;
+    border:2px solid var(--accent);background:repeating-linear-gradient(135deg,var(--accent-soft) 0 4px,transparent 4px 8px)}
+  .v0 .item.zone-before::before{left:0} .v0 .item.zone-after::before{right:0}
+  .v0 .row.zone-before{box-shadow:inset 0 2px 0 var(--accent)} .v0 .row.zone-after{box-shadow:inset 0 -2px 0 var(--accent)}
+
+  /* ---------- 目录表行 ---------- */
+  .rows{margin-top:var(--sp-4);border-top:1px solid var(--border-strong);position:relative}
+  .row{display:flex;align-items:center;gap:var(--sp-3);height:var(--sp-8);padding:0 var(--sp-2);
+    border-bottom:1px solid var(--border-subtle);font-size:var(--fs-meta);cursor:grab;position:relative}
+  .row .cov{width:24px;height:36px;background:var(--grey-1);flex:none;position:relative}
+  .row .cov.folder::after{content:"";position:absolute;inset:0;border:1px solid var(--grey-3);background:var(--grey-2)}
+  .row .rt{font-size:var(--fs-body);font-weight:500}
+  .row .rm{color:var(--text-helper);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+</style>
+</head>
+<body>
+<h1>书架拖拽落点 · 方案 3 修正版 v3</h1>
+<p class="lede">
+  三条改动：<b>① 插槽占满缝隙</b>——不再画 14px 窄条、也不再分「之前 / 之后」两种位置。
+  一个缝隙就是一个矩形：左右缘谁挨着它，它就把<b>两封之间的空白整格填满</b>，所以「拖到上一本的后方」与「拖到下一本的前方」
+  看到的是<b>同一个槽</b>（本来就是同一个落点），文字标签一并去掉。
+  <b>② 成组松手真建夹</b>：压在中央松手 → 当场生成文件夹卡（表视图同步出「N 本」行），再压一本进去 → 并入已有夹。
+  <b>③ 跟随缩放</b>：插槽是按两个邻居的实时矩形算出来的，缩放窗口时它自己跟着变宽变窄；拖动过程中缩放也会立刻重算。
+  换行处与首尾没有左右邻居的缝隙，取「插入点旁边那块真实空白」：行末画成整行宽度的横带，首格画成左外边距那一格。
+</p>
+
+<div class="bar">
+  <span>成组带宽度</span>
+  <button class="band on" data-band="44">44%</button>
+  <button class="band" data-band="24">24%</button>
+  <button id="notx">关掉动效对比</button>
+  <button id="reset">恢复初始顺序</button>
+  <span id="hint">压在封面左右两半看同一个插槽换缝隙；压在中央松手建夹；再压中央并入。</span>
+</div>
+
+<div class="plates" id="plates"></div>
+
+<script>
+/* ---------- 数据：与 src/lib/shelf.ts 同构（order 存顶层 id，folders 存成员） ---------- */
+const BOOKS = {
+  b1: { title: "网格系统", pct: 41 }, b2: { title: "字体设计", pct: 66 }, b3: { title: "色彩艺术", pct: 0 },
+  b4: { title: "字型散步", pct: 100 }, b5: { title: "控制论", pct: 28 },
+};
+let order = [], folders = {}, seq = 0;
+function seed() { order = Object.keys(BOOKS); folders = {}; seq = 0; }
+seed();
+
+function entries() {
+  return order.map((id) => folders[id]
+    ? { id, kind: "folder", name: folders[id].name, items: folders[id].items }
+    : { id, kind: "book", title: BOOKS[id].title, pct: BOOKS[id].pct });
+}
+function titleOf(id) { return folders[id] ? folders[id].name : (BOOKS[id] || {}).title || "?"; }
+function pctOf(e) {
+  if (e.kind === "book") return e.pct;
+  const xs = e.items.map((i) => BOOKS[i].pct);
+  return Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
+}
+function membersOf(e) { return e.kind === "folder" ? e.items.map((i) => BOOKS[i].title).join("、") : ""; }
+
+/* ---------- 落点动作：缝隙插入 / 中央成组（对齐 shelf.ts 的 moveTo + groupInto） ---------- */
+function moveIntoSeam(srcId, index) {
+  const from = order.indexOf(srcId);
+  if (from < 0) return "没有这个条目";
+  order.splice(from, 1);
+  if (from < index) index -= 1;
+  if (index < 0 || index > order.length) index = order.length;
+  order.splice(index, 0, srcId);
+  return null;
+}
+function groupInto(srcId, targetId) {
+  if (srcId === targetId) return null;
+  if (folders[srcId]) return "暂不支持文件夹互相嵌套（一层为限）";
+  const tgt = folders[targetId];
+  if (tgt) { if (tgt.items.includes(srcId)) return null; order.splice(order.indexOf(srcId), 1); tgt.items.push(srcId); return null; }
+  const owner = Object.keys(folders).find((f) => folders[f].items.includes(targetId));
+  if (owner) return groupInto(srcId, owner);
+  const id = "f" + (++seq);
+  folders[id] = { name: "新文件夹 " + seq, items: [targetId, srcId] };
+  order.splice(order.indexOf(srcId), 1);
+  order.splice(order.indexOf(targetId), 1, id);
+  return null;
+}
+
+/* ---------- 节点渲染 ---------- */
+function itemNode(e) {
+  const el = document.createElement("div");
+  el.className = "item"; el.dataset.id = e.id; el.draggable = true;
+  const pct = pctOf(e);
+  el.innerHTML = `<div class="card">${e.kind === "folder"
+    ? `<span class="tab">文件夹 <b>${e.items.length}</b></span><span class="stack"></span>`
+    : '<span class="sq"></span>'}<span class="ttl">${titleOf(e.id)}</span></div>
+    <div class="rail"><i style="width:${pct}%"></i></div>
+    <div class="cap"><span class="t">${titleOf(e.id)}</span>
+      <span class="m">${e.kind === "folder" ? e.items.length + " 本 · 均值 " + pct + "%" : pct + "% · 9-18"}</span></div>`;
+  return el;
+}
+function rowNode(e) {
+  const el = document.createElement("div");
+  el.className = "row"; el.dataset.id = e.id; el.draggable = true;
+  const pct = pctOf(e);
+  el.innerHTML = `<span class="cov${e.kind === "folder" ? " folder" : ""}"></span><span class="rt">${titleOf(e.id)}</span>
+    <span class="rm">${e.kind === "folder" ? e.items.length + " 本 · " + membersOf(e) : pct + "%"}</span>
+    <span style="color:var(--text-helper);margin-left:auto">9-${(pct + 10) % 30}</span>`;
+  return el;
+}
+
+function plate(kind) {
+  const p = document.createElement("div");
+  p.className = "plate " + kind;
+  p.innerHTML = `<div class="plate-label">${kind === "v0" ? "初稿 · 问题版（对照）" : "方案 3 · 修正版 v3"}</div>
+    <div class="stage"><div class="grid"></div><div class="rows"></div></div>
+    <div class="readout">&nbsp;</div>
+    <p class="note">${kind === "v0"
+      ? "① 缝隙（卡片之间、行与行之间）不属于任何可拖元素 → 没人 preventDefault → 浏览器判<b>不可放置 🚫</b>；② 插槽用 <code>padding-left:28px</code> 腾位 → <b>右边那张卡被压窄</b>、与其他封面错线；③ before / after 各画一处，同一个缝隙两种说法。"
+      : "插槽＝缝隙那一格本身（宽 = 两封面之间的实际空白，高 = 封面那一段），<b>before / after 合并成一个落点语言</b>；成组松手<b>真建夹</b>，卡片与表行同步刷新；插槽按邻居实时矩形算，<b>缩放窗口自动跟</b>。"}</p>`;
+  const grid = p.querySelector(".grid"), rows = p.querySelector(".rows");
+  entries().forEach((e) => { grid.appendChild(itemNode(e)); rows.appendChild(rowNode(e)); });
+  if (kind === "v1") {
+    const slot = document.createElement("div"); slot.className = "slot"; grid.appendChild(slot);
+    const bar = document.createElement("div"); bar.className = "rowbar"; rows.appendChild(bar);
+    p._slot = slot; p._bar = bar;
+  }
+  wire(p, kind);
+  return p;
+}
+
+/* ---------- 命中：缝隙用 index（插到第 index 个之前），中央用 group ---------- */
+function inRect(r, x, y) { return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; }
+function hitAxis(nodes, x, y, axis) {
+  const b0 = (1 - band) / 2;
+  const v = axis === "x" ? x : y;
+  for (let i = 0; i < nodes.length; i++) {
+    const r = nodes[i].getBoundingClientRect();
+    if (!inRect(r, x, y)) continue;
+    const f = (v - (axis === "x" ? r.left : r.top)) / (axis === "x" ? r.width : r.height);
+    if (f < b0) return { seam: i, idx: i, side: "before" };
+    if (f > 1 - b0) return { seam: i + 1, idx: i, side: "after" };
+    return { group: nodes[i].dataset.id };
+  }
+  // 不在任何节点上 = 缝隙 / 外边距：按「离哪条边界近」定缝隙。
+  // 缝隙两侧的两条边界必然给出同一个 index（i 的右缘 = i+1 的左缘 = 第 i+1 条缝隙），这正是「一个缝隙一个落点」的根据。
+  let best = null;
+  const c = axis === "x" ? y : x;
+  nodes.forEach((el, i) => {
+    const r = el.getBoundingClientRect();
+    const [c0, c1] = axis === "x" ? [r.top, r.bottom] : [r.left, r.right];
+    if (c < c0 - 8 || c > c1 + 8) return;
+    const edges = axis === "x" ? [[r.left, i, "before"], [r.right, i + 1, "after"]] : [[r.top, i, "before"], [r.bottom, i + 1, "after"]];
+    for (const [edge, seam, side] of edges) {
+      const d = Math.abs(v - edge);
+      if (!best || d < best.d) best = { d, seam, idx: i, side };
+    }
+  });
+  if (!best) return null;
+  return { seam: Math.max(0, Math.min(nodes.length, best.seam)), idx: best.idx, side: best.side };
+}
+
+function wire(p, kind) {
+  const grid = p.querySelector(".grid"), rows = p.querySelector(".rows"), readout = p.querySelector(".readout");
+  const clear = () => {
+    for (const n of p.querySelectorAll(".zone-before,.zone-after,.zone-group")) n.classList.remove("zone-before", "zone-after", "zone-group");
+    if (p._slot) p._slot.style.display = "none";
+    if (p._bar) p._bar.style.display = "none";
+  };
+  let srcId = null, last = null;
+
+  /* 缝隙矩形 = 插入点旁边那块真实空白。同一行取两封面之间那一格；换行取两行之间那一横带。
+     横带用 item（含图注）的上下缘算，不用封面：从封面下沿量到下一行封面上沿会把上一行的书名盖住。 */
+  function seamRect(nodes, index) {
+    const a = nodes[index - 1], b = nodes[index];
+    if (!a && !b) return null;
+    const cov = (el) => el.querySelector(".card").getBoundingClientRect();
+    const it = (el) => el.getBoundingClientRect();
+    const gr = grid.getBoundingClientRect();
+    const gap = parseFloat(getComputedStyle(grid).gap || "24") || 24;
+    if (a && b) {
+      const ra = cov(a), rb = cov(b);
+      if (Math.abs(ra.top - rb.top) < 2) return { x: ra.right, y: ra.top, w: rb.left - ra.right, h: ra.height };
+      const ia = it(a), ib = it(b);
+      return { x: gr.left, y: ia.bottom, w: gr.width, h: ib.top - ia.bottom };
+    }
+    if (!a) {
+      const rb = cov(b);
+      return { x: rb.left - gap, y: rb.top, w: gap, h: rb.height };
+    }
+    const ra = cov(a);
+    if (ra.right + 2 < gr.right) return { x: ra.right, y: ra.top, w: gr.right - ra.right, h: ra.height };
+    return { x: gr.left, y: it(a).bottom, w: gr.width, h: gap };
+  }
+  function paintSlot(index) {
+    const nodes = [...grid.querySelectorAll(".item")];
+    const r = seamRect(nodes, index);
+    const s = p._slot;
+    if (!r || r.w < 1 || r.h < 1) { s.style.display = "none"; return null; }
+    const gr = grid.getBoundingClientRect();
+    s.style.display = "block";
+    s.style.left = Math.round(r.x - gr.left) + "px";
+    s.style.top = Math.round(r.y - gr.top) + "px";
+    s.style.width = Math.round(r.w) + "px";
+    s.style.height = Math.round(r.h) + "px";
+    return r;
+  }
+  function paintBar(index) {
+    const nodes = [...rows.querySelectorAll(".row")];
+    const a = nodes[index - 1], b = nodes[index];
+    const bar = p._bar;
+    const rr = rows.getBoundingClientRect();
+    const one = (a || b).getBoundingClientRect();
+    const y = a && b ? (a.getBoundingClientRect().bottom + b.getBoundingClientRect().top) / 2
+      : a ? a.getBoundingClientRect().bottom : b.getBoundingClientRect().top - 1;
+    bar.style.display = "block";
+    bar.style.left = (one.left - rr.left) + "px";
+    bar.style.width = one.width + "px";
+    bar.style.top = Math.round(y - rr.top - 2) + "px";
+  }
+
+  const show = (e) => {
+    const rr = rows.getBoundingClientRect();
+    const inRows = rr.height > 0 && inRect(rr, e.clientX, e.clientY);
+    const nodes = inRows ? [...rows.querySelectorAll(".row")] : [...grid.querySelectorAll(".item")];
+    const h = hitAxis(nodes, e.clientX, e.clientY, inRows ? "y" : "x");
+    clear();
+    last = { e: { x: e.clientX, y: e.clientY }, inRows, h };
+    if (!h) { readout.textContent = kind === "v0" ? "缝隙：没人 preventDefault → 🚫" : "缝隙：按最近的边界定缝隙"; return null; }
+    if (h.group) {
+      const el = nodes.find((n) => n.dataset.id === h.group);
+      el.classList.add("zone-group");
+      readout.textContent = "松手 → 并入《" + titleOf(h.group) + "》" + (folders[h.group] ? "（已有夹）" : "（新建夹）");
+      return h;
+    }
+    const es = entries();
+    const label = h.seam === 0 ? "插到最前" : h.seam >= order.length ? "插到最后"
+      : "插到《" + titleOf(es[h.seam - 1].id) + "》与《" + titleOf(es[h.seam].id) + "》之间";
+    const inside = nodes.some((n) => inRect(n.getBoundingClientRect(), e.clientX, e.clientY));
+    readout.textContent = "松手 → " + label + (inside || inRows ? "" : "（缝隙里也算）");
+    if (kind === "v1") { if (inRows) paintBar(h.seam); else paintSlot(h.seam); }
+    else if (nodes[h.idx]) nodes[h.idx].classList.add("zone-" + h.side);   // 初稿：靠 padding 腾位，于是右边那张被压窄
+    return h;
+  };
+
+  const onStart = (e) => { srcId = e.currentTarget.dataset.id; e.currentTarget.classList.add("dragging-src"); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", srcId); };
+  const onEnd = () => { srcId = null; last = null; for (const n of p.querySelectorAll(".dragging-src")) n.classList.remove("dragging-src"); clear(); readout.textContent = "已松手"; };
+  const onOver = (e) => {
+    if (!srcId) return;
+    const h = show(e);
+    if (!h && kind === "v0") return;          // 初稿：缝隙里不 preventDefault → 浏览器显示 🚫
+    e.preventDefault(); e.dataTransfer.dropEffect = "move";
+  };
+  const onDrop = (e) => {
+    if (!srcId) return;
+    const h = show(e);
+    e.preventDefault();
+    if (!h) return;
+    const src = srcId;
+    if (h.group) {
+      if (h.group === src) return;
+      const why = groupInto(src, h.group);
+      rerender(why ? "成组被拒：" + why : "已建夹 / 并入《" + titleOf(h.group) + "》");
+      return;
+    }
+    const why = moveIntoSeam(src, h.seam);
+    rerender(why ? "移动失败：" + why : "已插到第 " + (h.seam + 1) + " 格");
+  };
+  for (const el of [...grid.querySelectorAll(".item"), ...rows.querySelectorAll(".row")]) {
+    el.addEventListener("dragstart", onStart); el.addEventListener("dragend", onEnd);
+    el.addEventListener("dragover", onOver); el.addEventListener("drop", onDrop);
+  }
+  // 只有修正版把命中判定挂到容器上；初稿保持与真 app 一致（缝隙没人 preventDefault → 🚫）
+  if (kind === "v1") {
+    for (const box of [grid, rows]) {
+      box.addEventListener("dragover", onOver); box.addEventListener("drop", onDrop);
+      box.addEventListener("dragleave", (e) => { if (!box.contains(e.relatedTarget)) clear(); });
+    }
+    // ③ 拖动途中缩放窗口：用上一次指针位置立刻重算，插槽不会停在旧尺寸
+    window.addEventListener("resize", () => {
+      if (!srcId || !last || !last.h || kind !== "v1") return;
+      const nodes = last.inRows ? [...rows.querySelectorAll(".row")] : [...grid.querySelectorAll(".item")];
+      const h = hitAxis(nodes, last.e.x, last.e.y, last.inRows ? "y" : "x");
+      if (!h || h.group) return;
+      if (last.inRows) paintBar(h.seam); else paintSlot(h.seam);
+    });
+  }
+}
+
+let band = 0.44;
+const platesEl = document.getElementById("plates");
+function rerender(msg) {
+  platesEl.innerHTML = "";
+  platesEl.appendChild(plate("v0"));
+  platesEl.appendChild(plate("v1"));
+  if (msg) document.getElementById("hint").textContent = msg;
+}
+rerender();
+document.querySelectorAll(".band").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".band").forEach((x) => x.classList.remove("on")); b.classList.add("on"); band = Number(b.dataset.band) / 100;
+}));
+document.getElementById("notx").addEventListener("click", (e) => { const on = document.body.classList.toggle("notx"); e.target.classList.toggle("on", on); e.target.textContent = on ? "恢复动效" : "关掉动效对比"; });
+document.getElementById("reset").addEventListener("click", () => { seed(); rerender("已恢复初始顺序。"); });
+</script>
+</body>
+</html>

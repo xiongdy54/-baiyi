@@ -1560,7 +1560,8 @@ export default function Reader({
 
   return (
     <div className="reader-wrap">
-      <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}`}>
+      {/* E-1（审计）：目录是 absolute 浮层，打开时正文必须让位，否则行首被压在面板下 */}
+      <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}${tocOpen ? " reader-body-toc-open" : ""}`}>
         <div
           ref={scrollRef}
           className={`reader-scroll${engineMode ? " reader-scroll-engine" : ""}`}

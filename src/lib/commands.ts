@@ -145,8 +145,14 @@ function dispatchKey(e: ComboInput & { repeat?: boolean; target?: unknown }): bo
   // 批次 D（D-TEST-13）：本文件开头与指南 §9.1 M4 都把「输入焦点内绝不劫持」写成硬约束，
   // 但分发此前没有任何焦点判断——焦点在 INPUT/TEXTAREA/contentEditable 里时一律放行给原生行为。
   // target 用 unknown：真实 KeyboardEvent 的 EventTarget 与测试投喂的字面量对象都能传进来。
-  const t = e.target as { tagName?: string; isContentEditable?: boolean } | null | undefined;
+  const t = e.target as { tagName?: string; isContentEditable?: boolean; closest?: (sel: string) => Element | null } | null | undefined;
   if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return false;
+  // A-12（审计）：焦点在**模态子树内**时，页面命令一律不命中。
+  // 背景：install() 把 keydown 挂在 window 的**捕获相**（第三参 true），模态组件自己写
+  // stopPropagation 也来不及；而全仓只有设置模态调过 pushSuppress。
+  // 实测：对比卡向导开着时按「1」，背后那张看不见的卡被评了分（reps 0→1、队列 3→2、本轮 0→1）。
+  // 用 closest 判一次即覆盖全部 8 个模态，不必逐个模态接线。
+  if (t && typeof t.closest === "function" && t.closest('[role="dialog"],[aria-modal="true"]')) return false;
   if (e.repeat) return false;
   const combo = eventToCombo(e);
   if (!combo) return false;

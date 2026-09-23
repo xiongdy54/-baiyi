@@ -36,6 +36,8 @@ const DOC_KEYS = [
   "app.dictAudioSource", "app.dictAutoSpeak", "app.dictVocabKinds", "app.materialTypes", // §7.4 v32 追记
   "app.fsrsConfigId", "app.keybindings", "app.memory", "app.mindmapMaxCalls", "app.readerSettings", // §4.4.10 / §6.5 / §4.18 / §4.19 / §6.1
   "app.shelfFolders", "app.shelfOrder", "app.siblingBury", "app.skinId", // §5.4 D51 / §4.16 / §5.3
+  "app.shelfDensity", "app.shelfSort", "app.shelfView", // §7.4 v48.18 / D54（书架工具条状态记忆）
+  "activity.dismissedRuns", // §4.2-3 / §4.19 收口块 ⑥（v48.17 / D53 指示器已关清单）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -189,7 +191,8 @@ app
       const scopes = [...new Set([...codeKeys.keys()].map((id) => id.split(".")[0]))].sort();
       // 批次 F（D-DOC-08 收口）：`dashboard` 层已按 §4.2-3 登记为第四个设置层（§7.4 的 v48.16/D52 条目），
       // 所以允许集合同步加上它——登记动作在文档侧完成，闸门合同步是登记的一部分，不是放宽判据。
-      const DOCUMENTED_SCOPES = /^app$|^theme$|^plugin\.|^dashboard$/;
+      // v48.18 / D54：`activity` 层（指示器已关清单）按 §4.2-3 登记为第五个设置层，允许集合同步。
+      const DOCUMENTED_SCOPES = /^app$|^theme$|^plugin\.|^dashboard$|^activity$/;
       const rogueScopes = scopes.filter((s) => !DOCUMENTED_SCOPES.test(s));
       flow.record("代码用到的设置层", scopes.join(" "));
       flow.check("设置层必须限于 §4.2-3 登记的 app / theme / plugin.<id> / dashboard", rogueScopes.length === 0, "四层之内", rogueScopes);
@@ -209,6 +212,10 @@ app
         ["app", "dictVocabKinds", { en: ["cn2en", "en2cn"], ja: ["audio"] }],
         ["app", "materialTypes", { "doc-1": "formula" }],
         ["app", "shelfOrder", ["a", "b", "c"]],
+        ["app", "shelfView", "table"],                    // v48.18 / D54 书架工具条状态记忆
+        ["app", "shelfDensity", "lg"],
+        ["app", "shelfSort", "title"],
+        ["activity", "dismissedRuns", ["run-1", "run-2"]], // v48.17 / D53 指示器已关清单
         ["app", "shelfFolders", [{ id: "f1", name: "语言类", items: ["a"], created: "2026-09-22" }]],
         ["app", "keybindings", { capture: "Command+Control+Space", reviewGrade1: "1" }],
         ["app", "globalShortcuts", { quickCapture: { enabled: true, bindings: ["Command+Shift+K"] } }],

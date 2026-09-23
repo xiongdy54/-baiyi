@@ -16,6 +16,11 @@ import {
 const BASE_PARAMS: FSRSParameters = generatorParameters({ enable_fuzz: false });
 let engine = fsrs(BASE_PARAMS);
 let activeConfigId: string | null = null;
+// C-1（审计 F34）：出层再钳一次 due 用。ts-fsrs 的 next_interval 自身会把区间钳到
+// maximum_interval，但 repeat() 在钳制**之后**又叠加 +1/+2 的档位修正 → 实际落库的 due
+// 会越过配置值（实测 S≥5e4 时 Good→36501、Easy→36502 天，50 年正常使用的闰日链即可自然抵达）。
+// §4.4.10 要求 scheduler_options 涵盖所有影响调度结果的 option，故这里必须兜住。
+let activeMaxIntervalDays = 36500;
 
 interface FsrsConfigSnapshot {
   id?: string;
@@ -42,6 +47,7 @@ function buildEngineFromConfig(cfg: FsrsConfigSnapshot | null | undefined): bool
       learning_steps: Array.isArray(opts.learningSteps) ? (opts.learningSteps as unknown as FSRSParameters["learning_steps"]) : undefined,
       relearning_steps: Array.isArray(opts.relearningSteps) ? (opts.relearningSteps as unknown as FSRSParameters["relearning_steps"]) : undefined
     });
+    activeMaxIntervalDays = typeof opts.maximumInterval === "number" && opts.maximumInterval > 0 ? opts.maximumInterval : 36500;
     engine = fsrs(params);
     activeConfigId = cfg?.id ?? null;
     return true;
@@ -87,6 +93,14 @@ function toDate(now?: Date | number): Date {
 }
 
 // 数据库存的 fsrsJson <-> ts-fsrs Card 转换（§4.4.1 全字段往返）
+// A-2 的第二道防线（审计 F34）：即使调用方绕过队列闸门把值域非法的 state 送进来
+// （单测 / 迁移脚本 / 手工改库），引擎也不该抛 —— ts-fsrs 会对 S<=0 或 D∉[1,10] 抛
+// Invalid memory state，而调用点在 React 生命周期里，抛出即被根错误边界接管。
+function numOr(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function toFsrsCard(state: Record<string, unknown> | null | undefined): FsrsCard {
   const base = createEmptyCard();
   if (!state) return base;
@@ -96,19 +110,36 @@ function toFsrsCard(state: Record<string, unknown> | null | undefined): FsrsCard
     review: 2,
     relearning: 3
   };
+  const st = stateMap[(state.state as string) ?? "new"] ?? 0;
   return {
     ...base,
-    state: stateMap[(state.state as string) ?? "new"] ?? 0,
-    due: state.due ? new Date(state.due as number) : base.due,
-    lapses: (state.lapses as number) ?? 0,
+    state: st,
+    due: state.due && Number.isFinite(Number(state.due)) ? new Date(Number(state.due)) : base.due,
+    lapses: Math.max(0, numOr(state.lapses, 0)),
     // 历史卡可能缺 S/D/reps/learningSteps（v11/v20 前的存量数据）：缺省时以库默认基线回填，
     // 由于历史卡调度本已失真，此回填只保证「不再二次失真」，无法还原历史
-    stability: (state.stability as number) ?? base.stability,
-    difficulty: (state.difficulty as number) ?? base.difficulty,
-    reps: (state.reps as number) ?? 0,
+    // 注意：**新卡的 S/D 合法为 0**（首评前），不能无条件钳进 [1,10] —— 那会把 0 变成 1
+    // 并让 ts-fsrs 的新卡路径抛 Invalid memory state。只在「值存在且非法」时归一。
+    // A-2 第二道防线：**新卡的 S/D 恒为 0**（首评前还没有记忆状态），一律取 base ——
+    // 若按传入值钳制，一个非法 state 名会被归一成 new 却带着 D=10，ts-fsrs 会抛
+    // Invalid memory state { difficulty: 10, stability: 0 }。
+    // 非新卡才做值域归一：S 必须 >0、D 必须 ∈[1,10]，否则 ts-fsrs 同样会拒
+    // （那类语义自相矛盾的行由 A-2 的值域闸门挡在队列外，见 F34）。
+    stability:
+      st === 0 || state.stability === undefined || state.stability === null
+        ? base.stability
+        : (() => { const v = numOr(state.stability, base.stability); return v > 0 ? v : base.stability; })(),
+    difficulty:
+      st === 0 || state.difficulty === undefined || state.difficulty === null
+        ? base.difficulty
+        : Math.min(10, Math.max(1, numOr(state.difficulty, base.difficulty))),
+    reps: Math.max(0, numOr(state.reps, 0)),
     learning_steps:
       typeof state.learningSteps === "number" ? state.learningSteps : base.learning_steps,
-    last_review: state.lastReview ? new Date(state.lastReview as number) : base.last_review
+    last_review:
+      state.lastReview && Number.isFinite(Number(state.lastReview))
+        ? new Date(Number(state.lastReview))
+        : base.last_review
   };
 }
 
@@ -126,14 +157,31 @@ function fromFsrsCard(card: FsrsCard) {
   };
 }
 
+// A-1（审计 F34）：存量脏数据里的 lastReview 可能落在未来（时钟回拨 / 从时钟超前的机器恢复备份）。
+// ts-fsrs 据此算出负 delta_t 会抛 FSRSValidationError，而调用点在 React 生命周期里
+// （ReviewView 的 useEffect 与渲染期）→ 抛出即被根错误边界接管，整应用停止渲染。
+// 这里把未来时间戳**钳到当前时刻**，让调度器对存量脏数据降级而非抛错（elapsed_days 取 0）。
+function clampFutureTime(card: FsrsCard, at: Date): FsrsCard {
+  const t = at.getTime();
+  if (card.last_review && card.last_review.getTime() > t) return { ...card, last_review: at };
+  return card;
+}
+
+// C-1：把超出 maximum_interval 的 due 钳回来（只动 due，不动 S/D/reps）
+function clampItemDue<T extends { card: FsrsCard }>(item: T, at: Date): T {
+  const maxDue = at.getTime() + activeMaxIntervalDays * 86400000;
+  if (item.card.due.getTime() <= maxDue) return item;
+  return { ...item, card: { ...item.card, due: new Date(maxDue) } };
+}
+
 export const fsrsEngine = {
   // §4.4.3 一次计算四档完整结果；评分时复用，保证预览=落库
   preview(cardState: Record<string, unknown> | null, now?: Date | number) {
-    const card = toFsrsCard(cardState);
+    const card = clampFutureTime(toFsrsCard(cardState), toDate(now));
     const at = toDate(now);
     const result = engine.repeat(card, at);
     return (["Again", "Hard", "Good", "Easy"] as Rating[]).map((rating) => {
-      const item = result[GRADE_MAP[rating]];
+      const item = clampItemDue(result[GRADE_MAP[rating]], at);
       return {
         rating,
         dueText: formatInterval(item.card.due.getTime() - at.getTime()),
@@ -143,9 +191,9 @@ export const fsrsEngine = {
     });
   },
   next(cardState: Record<string, unknown> | null, rating: Rating, now?: Date | number) {
-    const card = toFsrsCard(cardState);
+    const card = clampFutureTime(toFsrsCard(cardState), toDate(now));
     const at = toDate(now);
-    const result = engine.repeat(card, at)[GRADE_MAP[rating]];
+    const result = clampItemDue(engine.repeat(card, at)[GRADE_MAP[rating]], at);
     return {
       fsrsState: fromFsrsCard(result.card),
       intervalText: formatInterval(result.card.due.getTime() - at.getTime())

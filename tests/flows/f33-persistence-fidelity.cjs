@@ -127,7 +127,12 @@ app
           .id;
       const cardIds = [mk(0, {}), mk(1, { leech: { suspended: true, suspendedAt: Date.now() - 1000, count: 2 } }), mk(2, { occlusionJson: { img: "assets/x.png", rects: [{ x: 1, y: 2, w: 3, h: 4 }], answer: "挖空答案" } })];
       db.setCardSuspended(cardIds[2], true, "F33 暂停理由");
-      for (const id of cardIds) db.saveReview(id, { state: "review", due: Date.now() + 2 * DAY, stability: 6, difficulty: 6, reps: 3, lapses: 0, learning_steps: [] }, "Good", 1234, { state: "new", due: Date.now(), lapses: 0 });
+      // A-7（审计 F35）：saveReview 现在会拒绝与卡片当前状态不符的 fsrsBefore。
+      // 本流程的意图是「字段往返保真」，所以取每张卡**真实的**当前状态作 before，而不是伪造一个。
+      for (const id of cardIds) {
+        const cur = db.getCard(id).fsrs;
+        db.saveReview(id, { state: "review", due: Date.now() + 2 * DAY, stability: 6, difficulty: 6, reps: 3, lapses: 0, learning_steps: [] }, "Good", 1234, cur);
+      }
       db.createJournalEntry({ contentMarkdown: "F33 日记：今天读了两章，「引号」与 emoji 😀", source: "app" });
       db.addCardIssue({ cardId: cardIds[0], ruleId: "r-f33", severity: "warning", message: "F33 提示", source: "lint" });
       if (db.createKnowledgePoint) {

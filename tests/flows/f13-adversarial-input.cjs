@@ -221,8 +221,15 @@ app
         flow.check(`priority=${name} 不抛异常`, err === null, "不抛", err);
       }
       const rows3 = (await audit(dbFile)).rows("SELECT priority FROM cards WHERE front_markdown LIKE 'F13 问题 P3%'");
-      flow.record("越界 priority 的落库值（负数与 1e9 未被钳制；abc/null/NaN 回落 50）", rows3.map((r) => r.priority).join(","));
-      flow.check("非法类型 priority 回落到默认 50", rows3.filter((r) => [-9999, 1e9].includes(Number(r.priority))).length, 2);
+      flow.record("越界 priority 的落库值（A-9 修复后：钳进 [0,100]、非法类型回落 50、小数四舍五入）", rows3.map((r) => r.priority).join(","));
+      // A-9（审计 F36）：原断言是「−9999 与 1e9 **未被钳制**」——那等于把缺陷写成预期。
+      // 修复后的契约：越界值一律钳进 [0,100]；非法类型回落 50；小数四舍五入。
+      const vals3 = rows3.map((r) => Number(r.priority));
+      flow.check("越界 priority 一律钳进 [0,100]（不再原样入库 −9999 / 1e9）",
+        vals3.length === 6 && vals3.every((v) => v >= 0 && v <= 100), "6 个值全在 [0,100]", JSON.stringify(vals3));
+      flow.check("非法类型（abc / null / NaN）回落到默认 50",
+        vals3.filter((v) => v === 50).length >= 3, "≥3 个 50", JSON.stringify(vals3));
+      flow.check("小数 37.5 四舍五入为 38", vals3.includes(38), "含 38", JSON.stringify(vals3));
       flow.check("非法 tags/domain 读回形状安全", db.listAllCards().filter((c) => /P3-/.test(c.frontMarkdown || "")).every((c) => (Array.isArray(c.tags) || c.tags == null) && (Array.isArray(c.domain) || c.domain == null)), true, "形状异常");
 
       // ---------- P4 超长文本 ----------

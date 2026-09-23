@@ -10,6 +10,11 @@ const JSZip = require("jszip");
 const APP_TAG = "incremental-reading-dev";
 const FORMAT = 1;
 const AUTO_RE = /^backup-auto-\d{4}-\d{2}-\d{2}\.zip$/;
+// A-13（审计）：safety 备份此前**不在任何清理路径里**（AUTO_RE 只认 backup-auto-*），
+// 而它每执行一次「恢复」就产出一份 —— 实测连恢复 4 次即累积 4 份，永久留存。
+// 给 safety 单独一个上限（保留最近 5 份，足够回退几次误恢复）。
+const SAFETY_RE = /^backup-safety-\d{8}-\d{6}(-\d+)?\.zip$/;
+const SAFETY_KEEP = 5;
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -33,6 +38,11 @@ function resolvePaths(opts = {}) {
     aiConfigFile: opts.aiConfigFile || path.join(dataDir, "ai-config.json"),
     assetsDir: opts.assetsDir || path.join(dataDir, "assets"),
     memoryDir: opts.memoryDir || path.join(dataDir, "memory"),
+    // A-4（审计）：词条本体在独立的 dictionary.db、原始包在 dicts/，而登记表 dict_sources 在主库。
+    // 此前这两项**完全不在备份清单里**，于是恢复任意备份后，设置页仍列「ECDICT · 340 万词条 · 启用」，
+    // 选中任何词一律「未找到释义」（§7.2 L857 的「新增表一律进主库」前提被第二个库文件绕开了）。
+    dictDbFile: opts.dictDbFile || path.join(dataDir, "dictionary.db"),
+    dictsDir: opts.dictsDir || path.join(dataDir, "dicts"),
     stagingDir: opts.stagingDir || path.join(dataDir, "restore-staging"),
     markerFile: opts.markerFile || path.join(dataDir, "restore-pending.json")
   };
@@ -70,6 +80,46 @@ function walkFiles(dir, base, out) {
 // 图片/epub 等已是压缩格式，STORE 直存更快；db/json 走 DEFLATE
 function isAlreadyCompressed(rel) {
   return /\.(png|jpe?g|gif|webp|epub|pdf|zip|mp3|mp4|m4a|ogg|woff2?|ttf)$/i.test(rel);
+}
+
+// A-13（审计）：ai-config.json 里可能含**明文** Key（electron/ai.js 在 safeStorage 不可用时的兜底分支
+// 会写 apiKeyPlain 与 keys[preset]="plain:…"）。本文件头注释假定它「含加密 Key」，
+// 所以「恢复前强制带一份」看起来无害 —— 那个假定不成立。打包前统一剥掉明文形态，只留 safeStorage 密文。
+function sanitizeAIConfigForBackup(text) {
+  try {
+    const cfg = JSON.parse(text);
+    let touched = false;
+    if (cfg && typeof cfg === "object") {
+      if (cfg.apiKeyPlain !== undefined) { delete cfg.apiKeyPlain; touched = true; }
+      if (cfg.keys && typeof cfg.keys === "object") {
+        for (const k of Object.keys(cfg.keys)) {
+          const v = cfg.keys[k];
+          if (typeof v === "string" && v.startsWith("plain:")) { delete cfg.keys[k]; touched = true; }
+        }
+      }
+    }
+    return touched ? Buffer.from(JSON.stringify(cfg, null, 2), "utf8") : Buffer.from(text, "utf8");
+  } catch {
+    return Buffer.from(text, "utf8"); // 解析不了就原样（宁可备份一份坏配置，也不静默丢）
+  }
+}
+
+// A-14（审计）：把「先 rmSync 线上、再 renameSync 挪进来」换成**先让位、再换入、成功才清理**。
+// 原写法两步非原子：rename 一旦失败（跨设备 / 杀软实时扫描占用 / 权限 / 磁盘抖动），
+// 线上数据已被删掉而备份又没进去 —— 实测 library.db / assets / memory 三处都会因此被清空。
+// 返回让位文件路径（供整体成功后统一清理，或失败时回滚）。
+function swapIn(stagedPath, livePath) {
+  const aside = livePath + ".pre-restore";
+  try { fs.rmSync(aside, { recursive: true, force: true }); } catch { /* 清上次残留 */ }
+  const hadLive = fs.existsSync(livePath);
+  if (hadLive) fs.renameSync(livePath, aside); // 原子让位；这一步失败则线上分毫未动
+  try {
+    fs.renameSync(stagedPath, livePath);       // 换入
+  } catch (e) {
+    if (hadLive) { try { fs.renameSync(aside, livePath); } catch { /* 回滚尽力 */ } }
+    throw e;
+  }
+  return hadLive ? aside : null;
 }
 
 async function createBackup(opts = {}) {
@@ -114,7 +164,19 @@ async function createBackup(opts = {}) {
       zip.file("settings.json", fs.readFileSync(p.settingsFile), { compression: "DEFLATE" });
     }
     if (includeAIConfig && fs.existsSync(p.aiConfigFile)) {
-      zip.file("ai-config.json", fs.readFileSync(p.aiConfigFile), { compression: "DEFLATE" });
+      // A-13：剥掉明文形态再打包（safeStorage 密文原样保留）
+      zip.file("ai-config.json", sanitizeAIConfigForBackup(fs.readFileSync(p.aiConfigFile, "utf8")), { compression: "DEFLATE" });
+    }
+    // A-4：词典本体随备份走
+    if (fs.existsSync(p.dictDbFile)) {
+      zip.file("dictionary.db", fs.readFileSync(p.dictDbFile), { compression: "DEFLATE" });
+    }
+    if (fs.existsSync(p.dictsDir)) {
+      for (const f of walkFiles(p.dictsDir)) {
+        zip.file(`dicts/${f.rel}`, fs.readFileSync(f.full), {
+          compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE"
+        });
+      }
     }
     if (fs.existsSync(p.assetsDir)) {
       // 批次 C（D-TEST-18）：已软删书的 item 目录不再进备份（字节仍留在磁盘，回收是显式清理的事）。
@@ -145,6 +207,8 @@ async function createBackup(opts = {}) {
     const tmp = destFile + ".part";
     fs.writeFileSync(tmp, buf);
     fs.renameSync(tmp, destFile);
+    // A-13（审计）：safety 备份纳入滚动清理，否则每执行一次「恢复」就多一份且永不删除
+    if (label === "safety") rotateSafetyBackups(destDir, opts.safetyKeep || SAFETY_KEEP);
     return { ok: true, file: destFile, meta };
   } catch (err) {
     try { fs.rmSync(destFile + ".part", { force: true }); } catch { /* 忽略 */ }
@@ -230,6 +294,19 @@ async function autoBackupIfNeeded(opts = {}) {
   return r;
 }
 
+// safety 备份的滚动清理（按文件名字典序 = 时间序，与 auto 同策略）
+function rotateSafetyBackups(dir, keep = SAFETY_KEEP) {
+  let safeties;
+  try {
+    safeties = fs.readdirSync(dir).filter((f) => SAFETY_RE.test(f)).sort();
+  } catch {
+    return;
+  }
+  for (const f of safeties.slice(0, Math.max(0, safeties.length - keep))) {
+    try { fs.rmSync(path.join(dir, f), { force: true }); } catch { /* 单个删除失败不影响其余 */ }
+  }
+}
+
 function rotateAutoBackups(dir, keep) {
   let autos;
   try {
@@ -270,7 +347,11 @@ async function restoreBackup(file, opts = {}) {
   // 恢复保护：先对当前数据做一次安全备份（防误恢复本身丢数据）
   let safetyFile = null;
   if (!opts.skipSafety) {
-    const safety = await createBackup({ ...opts, label: "safety", includeAIConfig: true });
+    // A-13（审计）：原来硬编码 includeAIConfig: true，**覆盖了**用户在设置里对
+    // 「包含 AI Key（默认不备）」的选择 —— 勾没勾都无所谓，只要执行一次恢复就被塞进备份目录，
+    // 而 backup-safety-* 不匹配 rotateAutoBackups 的 AUTO_RE、永不清理（实测连恢复 4 次 → 4 份含明文密钥的 zip）。
+    // 尊重用户选择即可；明文形态另有 sanitizeAIConfigForBackup 兜底。
+    const safety = await createBackup({ ...opts, label: "safety", includeAIConfig: !!opts.includeAIConfig });
     if (!safety.ok) return { ok: false, error: `恢复前安全备份失败，已中止恢复：${safety.error}` };
     safetyFile = safety.file;
   }
@@ -306,38 +387,70 @@ function applyPendingRestore(opts = {}) {
     return false;
   }
   const restored = [];
-  const stagedDb = path.join(p.stagingDir, "library.db");
-  if (fs.existsSync(stagedDb)) {
-    fs.rmSync(p.dbFile, { force: true });
-    fs.renameSync(stagedDb, p.dbFile);
-    restored.push("library.db");
+  const asides = []; // A-14：已让位的线上数据；全部换入成功后才清理，中途失败要回滚
+  try {
+    const stagedDb = path.join(p.stagingDir, "library.db");
+    if (fs.existsSync(stagedDb)) {
+      const a = swapIn(stagedDb, p.dbFile);
+      if (a) asides.push({ live: p.dbFile, aside: a });
+      restored.push("library.db");
+    }
+    const stagedAssets = path.join(p.stagingDir, "assets");
+    if (fs.existsSync(stagedAssets)) {
+      const a = swapIn(stagedAssets, p.assetsDir);
+      if (a) asides.push({ live: p.assetsDir, aside: a });
+      restored.push("assets");
+    }
+    // v45（M14-UM1，§4.18-15）：记忆文件树随备份恢复（整体换入，不合并）
+    const stagedMemory = path.join(p.stagingDir, "memory");
+    if (fs.existsSync(stagedMemory)) {
+      const a = swapIn(stagedMemory, p.memoryDir);
+      if (a) asides.push({ live: p.memoryDir, aside: a });
+      restored.push("memory");
+    }
+    // A-4（审计）：词典本体一并换入
+    const stagedDictDb = path.join(p.stagingDir, "dictionary.db");
+    if (fs.existsSync(stagedDictDb)) {
+      const a = swapIn(stagedDictDb, p.dictDbFile);
+      if (a) asides.push({ live: p.dictDbFile, aside: a });
+      restored.push("dictionary.db");
+    }
+    const stagedDicts = path.join(p.stagingDir, "dicts");
+    if (fs.existsSync(stagedDicts)) {
+      const a = swapIn(stagedDicts, p.dictsDir);
+      if (a) asides.push({ live: p.dictsDir, aside: a });
+      restored.push("dicts");
+    }
+    // settings / ai-config 用 copyFileSync 覆盖，没有「先删后挪」的破坏窗口，保持原样
+    const stagedSettings = path.join(p.stagingDir, "settings.json");
+    if (fs.existsSync(stagedSettings)) {
+      fs.copyFileSync(stagedSettings, p.settingsFile);
+      restored.push("settings.json");
+    }
+    const stagedAI = path.join(p.stagingDir, "ai-config.json");
+    if (fs.existsSync(stagedAI)) {
+      fs.copyFileSync(stagedAI, p.aiConfigFile);
+      restored.push("ai-config.json");
+    }
+  } catch (e) {
+    // A-14（审计）：换入是**多步事务**。任何一步失败都要把已换入的退回，
+    // 否则会留下「库来自备份、资源已被清空」这种更难诊断的半套状态。
+    for (const { live, aside } of asides.reverse()) {
+      try { fs.rmSync(live, { recursive: true, force: true }); fs.renameSync(aside, live); } catch { /* 回滚尽力 */ }
+    }
+    throw e; // 标记与暂存区保留 → 下次启动可重试（见下面的 B-12）
   }
-  const stagedAssets = path.join(p.stagingDir, "assets");
-  if (fs.existsSync(stagedAssets)) {
-    fs.rmSync(p.assetsDir, { recursive: true, force: true });
-    fs.renameSync(stagedAssets, p.assetsDir);
-    restored.push("assets");
+  for (const { aside } of asides) { try { fs.rmSync(aside, { recursive: true, force: true }); } catch { /* 尽力 */ } }
+
+  // B-12（审计）：只有在**真的换入过东西**时才清理标记与暂存区。
+  // 原来无条件清 —— 暂存区被清理工具/杀软/手工删掉时，返回 {restored: []} 却把标记也删了，
+  // 而 main.js 又把返回值整个丢掉 → 用户主动发起恢复、重启、什么都没变、零提示、也无法重试。
+  const ok = restored.length > 0;
+  if (ok) {
+    fs.rmSync(p.stagingDir, { recursive: true, force: true });
+    fs.rmSync(p.markerFile, { force: true });
   }
-  // v45（M14-UM1，§4.18-15）：记忆文件树随备份恢复（整体换入，不合并）
-  const stagedMemory = path.join(p.stagingDir, "memory");
-  if (fs.existsSync(stagedMemory)) {
-    fs.rmSync(p.memoryDir, { recursive: true, force: true });
-    fs.renameSync(stagedMemory, p.memoryDir);
-    restored.push("memory");
-  }
-  const stagedSettings = path.join(p.stagingDir, "settings.json");
-  if (fs.existsSync(stagedSettings)) {
-    fs.copyFileSync(stagedSettings, p.settingsFile);
-    restored.push("settings.json");
-  }
-  const stagedAI = path.join(p.stagingDir, "ai-config.json");
-  if (fs.existsSync(stagedAI)) {
-    fs.copyFileSync(stagedAI, p.aiConfigFile);
-    restored.push("ai-config.json");
-  }
-  fs.rmSync(p.stagingDir, { recursive: true, force: true });
-  fs.rmSync(p.markerFile, { force: true });
-  return { restored, meta: marker?.meta || null, source: marker?.source || null };
+  return { restored, ok, meta: marker?.meta || null, source: marker?.source || null };
 }
 
 // 当前数据量（设置页展示用）
@@ -367,6 +480,7 @@ module.exports = {
   applyPendingRestore,
   autoBackupIfNeeded,
   rotateAutoBackups,
+  rotateSafetyBackups,
   getBackupDir,
   getDataInfo,
   readBackupMeta

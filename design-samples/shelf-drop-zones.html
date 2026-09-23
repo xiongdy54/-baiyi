@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>书架拖拽落点反馈 · 现状 + 三方案</title>
+<style>
+  /* 令牌取自 src/theme.css；卡片外观按 .book-card / .cap-rail / .cap 的真实结构还原 */
+  :root {
+    --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+    --text-secondary:#525252; --text-helper:#6b6b6b;
+    --border-subtle:#e0e0e0; --border-strong:#a3a3a3;
+    --accent:#002fa7; --accent-on:#fff; --accent-soft:rgba(0,47,167,.08);
+    --font-sans:"Inter","Segoe UI","Microsoft YaHei",sans-serif; --font-mono:ui-monospace,Consolas,monospace;
+    --fs-body:14px; --fs-secondary:13px; --fs-meta:12px; --fs-title-s:16px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px;
+    --radius:0; --ease:cubic-bezier(.2,0,.38,.9); --dur:120ms;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:#e8e8e6;font-family:var(--font-sans);color:var(--ink);padding:var(--sp-8);display:flex;flex-direction:column;gap:var(--sp-6)}
+  h1{font-size:20px;font-weight:400;letter-spacing:-.01em}
+  .lede{font-size:var(--fs-secondary);color:var(--text-secondary);line-height:1.7;max-width:92ch}
+  .lede b{color:var(--ink);font-weight:600}
+  .bar{display:flex;flex-wrap:wrap;gap:var(--sp-4);align-items:center;font-size:var(--fs-meta);color:var(--text-secondary)}
+  .bar button{height:28px;padding:0 var(--sp-3);background:var(--paper);border:1px solid var(--border-subtle);color:var(--ink);font:var(--fs-meta) var(--font-sans);cursor:pointer}
+  .bar button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
+
+  .plates{display:grid;grid-template-columns:repeat(auto-fit,minmax(460px,1fr));gap:var(--sp-8);align-items:start}
+  .plate{display:flex;flex-direction:column;gap:var(--sp-2)}
+  .plate-label{font-size:var(--fs-meta);font-weight:600;letter-spacing:.1em;color:var(--grey-3);text-transform:uppercase}
+  .note{font-size:var(--fs-meta);color:var(--text-secondary);line-height:1.65;max-width:60ch}
+  .note b{color:var(--ink);font-weight:600}
+  .stage{background:var(--paper);outline:1px solid var(--border-strong);padding:var(--sp-6);min-height:300px}
+  .readout{font:var(--fs-meta) var(--font-mono);color:var(--text-secondary);height:16px}
+
+  /* ---------- 卡片本体（三套方案共用） ---------- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--sp-6)}
+  .item{position:relative;display:flex;flex-direction:column;min-width:0;cursor:grab}
+  .item.dragging-src{opacity:.42}
+  .card{position:relative;aspect-ratio:2/3;background-color:var(--grey-1);overflow:hidden}
+  .card .ttl{position:absolute;left:0;bottom:0;padding:var(--sp-4);font-size:var(--fs-title-s);line-height:1.35;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .card .sq{position:absolute;top:var(--sp-4);left:var(--sp-4);width:8px;height:8px;background:var(--accent)}
+  .rail{height:2px;background:var(--grey-2);margin-top:var(--sp-2)}
+  .rail i{display:block;height:100%;background:var(--accent)}
+  .cap{padding-top:var(--sp-2);display:flex;flex-direction:column;gap:var(--sp-1)}
+  .cap .t{font-size:var(--fs-body);font-weight:500;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cap .m{font:var(--fs-meta) var(--font-mono);color:var(--text-helper)}
+  .item[data-kind="folder"] .card{background-color:var(--grey-1)}
+  .tab{position:absolute;top:calc(var(--sp-2)*-1);left:0;width:64px;height:var(--sp-4);background:var(--grey-2);
+    display:flex;align-items:center;padding:0 var(--sp-1);font-size:11px;letter-spacing:.06em;color:var(--text-secondary)}
+
+  /* ---------- 现状（theme.css:921-967 原样） ---------- */
+  .s0 .item.zone-before::before,.s0 .item.zone-after::before{content:"";position:absolute;top:0;bottom:0;width:2px;background:var(--accent);z-index:2}
+  .s0 .item.zone-before::before{left:-12px} .s0 .item.zone-after::before{right:-12px}
+  .s0 .item.zone-group .card{background:var(--accent-soft);outline:2px solid var(--accent);outline-offset:-1px}
+  .s0 .item.dragging-src .card{background:var(--accent-soft);outline:2px solid var(--accent);outline-offset:-1px}  /* ← 与成组同款，读不出区别 */
+  .tip{position:absolute;left:50%;top:var(--sp-6);transform:translateX(-50%);z-index:3;background:var(--accent);color:var(--accent-on);
+    padding:var(--sp-1) var(--sp-2);font-size:var(--fs-meta);white-space:nowrap}
+
+  /* ---------- 方案 1 · 缝 vs 抬盒 ---------- */
+  /* 重排＝目标卡让位、缝里一条带端点的插入线；成组＝目标卡抬起 + 中央 ⊕；拖动源＝虚线，绝不与目标撞样 */
+  .s1 .item.zone-before .card,.s1 .item.zone-after .card{box-shadow:none}
+  /* 让位用 transform（不动布局、不压列宽）；真实现里也不该用 margin——那会触发整层重排 */
+  .s1 .item.zone-before{transform:translateX(24px)} .s1 .item.zone-after{transform:translateX(-24px)}
+  .s1 .item{transition:transform var(--dur) var(--ease)}
+  .s1 .item.zone-before::before,.s1 .item.zone-after::before{content:"";position:absolute;top:-4px;bottom:-4px;width:4px;background:var(--accent);z-index:4}
+  .s1 .item.zone-before::before{left:-14px} .s1 .item.zone-after::before{right:-14px}
+  .s1 .item.zone-before::after,.s1 .item.zone-after::after{content:"";position:absolute;width:12px;height:12px;border:2px solid var(--accent);background:var(--paper);z-index:5}
+  .s1 .item.zone-before::after{left:-18px;top:-8px} .s1 .item.zone-after::after{right:-18px;top:-8px}
+  .s1 .item.zone-group .card{outline:2px solid var(--accent);outline-offset:-2px;transform:translateY(-4px)}
+  .s1 .item.zone-group::after{content:"⊕ 合入";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(250,250,248,.72);color:var(--accent);font-size:var(--fs-secondary);font-weight:600;letter-spacing:.04em;z-index:4}
+  .s1 .item.dragging-src{outline:2px dashed var(--border-strong);outline-offset:2px}
+
+  /* ---------- 方案 2 · 让位插槽（虚线占位）+ 成组描面 ---------- */
+  .s2 .item.zone-before,.s2 .item.zone-after{outline:2px dashed var(--accent);outline-offset:var(--sp-1)}
+  .s2 .item.zone-before::after,.s2 .item.zone-after::after{position:absolute;top:-22px;font:600 var(--fs-meta) var(--font-mono);color:var(--accent);white-space:nowrap}
+  .s2 .item.zone-before::after{content:var(--lbl-before,"之前");left:0} .s2 .item.zone-after::after{content:var(--lbl-after,"之后");right:0}
+  .s2 .item.zone-group .card{background:var(--accent-soft)}
+  .s2 .item.zone-group::after{content:"⊕";position:absolute;right:var(--sp-2);bottom:calc(100% - 40px);width:var(--sp-6);height:var(--sp-6);
+    background:var(--accent);color:var(--accent-on);display:flex;align-items:center;justify-content:center;font-size:var(--fs-body);z-index:4}
+  .s2 .item.dragging-src{outline:2px dashed var(--border-strong);outline-offset:2px}
+
+  /* ---------- 方案 3 · 结果预览（成组=长出标签页；重排=空出插槽） ---------- */
+  .s3 .item.zone-before,.s3 .item.zone-after{margin-left:0}
+  .s3 .item.zone-before{padding-left:28px} .s3 .item.zone-after{padding-right:28px}
+  .s3 .item.zone-before::before{content:"";position:absolute;left:0;top:0;bottom:0;width:24px;border:2px solid var(--accent);background:repeating-linear-gradient(135deg,var(--accent-soft) 0 4px,transparent 4px 8px)}
+  .s3 .item.zone-after::before{content:"";position:absolute;right:0;top:0;bottom:0;width:24px;border:2px solid var(--accent);background:repeating-linear-gradient(135deg,var(--accent-soft) 0 4px,transparent 4px 8px)}
+  .s3 .item.zone-group .tab{top:calc(var(--sp-6)*-1);background:var(--accent);color:var(--accent-on)}
+  .s3 .item.zone-group .card{outline:2px solid var(--accent);outline-offset:-2px}
+  .s3 .item.zone-group::after{content:"→ 成为文件夹成员";position:absolute;left:0;bottom:calc(100% + var(--sp-1));font:600 var(--fs-meta) var(--font-sans);color:var(--accent);white-space:nowrap}
+  .s3 .item.dragging-src{outline:2px dashed var(--border-strong);outline-offset:2px}
+
+  /* ---------- 目录表行的同款语言（每块版面下方一条） ---------- */
+  .rows{margin-top:var(--sp-4);border-top:1px solid var(--border-strong)}
+  .row{display:flex;align-items:center;gap:var(--sp-3);height:var(--sp-8);padding:0 var(--sp-2);border-bottom:1px solid var(--border-subtle);
+    font-size:var(--fs-meta);cursor:grab;position:relative}
+  .row .cov{width:24px;height:36px;background:var(--grey-1);flex:none}
+  .row .rt{font-size:var(--fs-body);font-weight:500}
+  .row.dragging-src{opacity:.42}
+  .s0 .row.zone-before{box-shadow:inset 2px 0 0 var(--accent)} .s0 .row.zone-after{box-shadow:inset -2px 0 0 var(--accent)}
+  .s0 .row.zone-group{background:var(--accent-soft);box-shadow:inset 0 2px 0 var(--accent)}
+  .s1 .row.zone-before{padding-left:32px} .s1 .row.zone-after{padding-right:32px}
+  .s1 .row.zone-before::before{content:"";position:absolute;left:6px;top:0;bottom:0;width:4px;background:var(--accent)}
+  .s1 .row.zone-after::before{content:"";position:absolute;right:6px;top:0;bottom:0;width:4px;background:var(--accent)}
+  .s1 .row.zone-group{background:var(--accent-soft);outline:2px solid var(--accent);outline-offset:-2px}
+  .s1 .row.zone-group::after{content:"⊕ 合入";color:var(--accent);font-weight:600;margin-left:auto}
+  .s2 .row.zone-before::after,.s2 .row.zone-after::after{content:var(--lbl);font-weight:600;color:var(--accent);margin-left:auto;white-space:nowrap}
+  .s2 .row.zone-before,.s2 .row.zone-after{outline:2px dashed var(--accent);outline-offset:-2px}
+  .s2 .row.zone-group{background:var(--accent-soft)}
+  .s2 .row.zone-group::after{content:"⊕";margin-left:auto;color:var(--accent);font-weight:700}
+  .s3 .row.zone-before{padding-left:28px} .s3 .row.zone-after{padding-right:28px}
+  .s3 .row.zone-before::before{content:"";position:absolute;left:0;top:0;bottom:0;width:22px;border:2px solid var(--accent);
+    background:repeating-linear-gradient(135deg,var(--accent-soft) 0 4px,transparent 4px 8px)}
+  .s3 .row.zone-after::before{content:"";position:absolute;right:0;top:0;bottom:0;width:22px;border:2px solid var(--accent);
+    background:repeating-linear-gradient(135deg,var(--accent-soft) 0 4px,transparent 4px 8px)}
+  .s3 .row.zone-group{background:var(--accent-soft);box-shadow:inset 0 3px 0 var(--accent)}
+  .s3 .row.zone-group::after{content:"→ 成为文件夹成员";margin-left:auto;color:var(--accent);font-weight:600}
+
+  /* 分带辅助线：按当前成组带宽度画出两条边界 hairline（帮用户建立「哪里=成组 / 哪里=重排」的位置感） */
+  body.guide .card{background-image:
+    linear-gradient(90deg,transparent calc(var(--b) - 1px),var(--grey-3) var(--b),transparent calc(var(--b) + 1px)),
+    linear-gradient(90deg,transparent calc(100% - var(--b) - 1px),var(--grey-3) calc(100% - var(--b)),transparent calc(100% - var(--b) + 1px))}
+  body.guide .row{background-image:
+    linear-gradient(90deg,transparent calc(var(--b) - 1px),var(--grey-3) var(--b),transparent calc(var(--b) + 1px)),
+    linear-gradient(90deg,transparent calc(100% - var(--b) - 1px),var(--grey-3) calc(100% - var(--b)),transparent calc(100% - var(--b) + 1px))}
+  body.notx *,body.notx *::before,body.notx *::after{transition:none !important}
+</style>
+</head>
+<body>
+<h1>书架拖拽落点反馈 · 现状对照 + 三套方案</h1>
+<p class="lede">
+  <b>拖动任意一张卡到另一张卡上</b>（真的 HTML5 拖拽，指针在目标上的左右位置决定意图）。每块版面下面还有一条<b>目录表行</b>的同一套语言。
+  现状的问题不是"没有反馈"，而是<b>反馈撞样</b>：被拖动的那张源卡用 <code>accent-soft 底 + 2px accent 描边</code>，
+  而"成组"目标卡用的是<b>一模一样</b>的两条（theme.css:921 vs 942）→ 场上同时出现两个同款高亮，分不清谁合进谁；
+  重排只有一根贴在卡片<b>外侧 12px</b> 的 2px 竖线，拖拽时几乎看不见，也没有文字。
+  三套方案共同守住两条：<b>① 源卡与目标卡永不撞样；② 重排与成组用两种不同的形状语言（线/槽 vs 面/标记）。</b>
+</p>
+
+<div class="bar">
+  <span>成组带宽度（现值＝中央 44%）</span>
+  <button class="band on" data-band="44">44%</button>
+  <button class="band" data-band="24">24%</button>
+  <span style="margin-left:var(--sp-4)">分带辅助线（拖拽时显示 28%/72% 边界，帮你建立肌肉记忆）</span>
+  <button id="guide">开 / 关</button>
+  <button id="reset" style="margin-left:var(--sp-4)">恢复初始顺序</button>
+  <button id="notx">关掉动效对比</button>
+</div>
+
+<div class="plates" id="plates"></div>
+
+<script>
+const TITLES = ["网格系统", "字体设计", "色彩艺术", "字型散步", "控制论"];
+const SCHEMES = [
+  { cls: "s0", name: "现状（对照）", note: "重排＝卡外侧 12px 一根 2px 线；成组＝accent-soft + 描边。<b>源卡与成组目标同款</b>，且重排没有文字说明。" },
+  { cls: "s1", name: "方案 1 · 缝 vs 抬盒", note: "重排＝目标卡<b>让位 24px</b>，缝里一条 <b>4px 带端点方块</b>的插入线；成组＝目标卡<b>抬起 4px + 中央 ⊕合入</b>；源卡＝灰色虚线框。三件事三种形状，互不撞。" },
+  { cls: "s2", name: "方案 2 · 虚线插槽 + 角标", note: "重排＝目标整条目套<b>accent 虚线框</b>并在上方写明「插到〈目标书名〉之前 / 之后」（文字随悬停目标变）（<b>文字直接跟着目标书名走</b>）；成组＝accent-soft 面 + 右下 ⊕ 实心块；源卡灰色虚线。" },
+  { cls: "s3", name: "方案 3 · 结果预览", note: "重排＝在缝隙处<b>空出一个 24px 插槽</b>（斜纹＝这里将出现一格）；成组＝目标卡<b>当场长出文件夹标签页</b>（松手后就长这样）+「→ 成为文件夹成员」。语义最直白，位移也最大。" }
+];
+let band = 0.44, guide = false;
+const syncBand = () => document.documentElement.style.setProperty("--b", ((1 - band) / 2 * 100).toFixed(2) + "%");
+syncBand();
+const platesEl = document.getElementById("plates");
+
+function card(item) {
+  const el = document.createElement("div");
+  el.className = "item"; el.dataset.id = item.id; el.dataset.kind = item.kind; el.draggable = true;
+  el.innerHTML = `<div class="card">${item.kind === "folder" ? '<span class="tab">FOLDER</span>' : '<span class="sq"></span>'}
+    <span class="ttl">${item.title}</span></div>
+    <div class="rail"><i style="width:${item.pct}%"></i></div>
+    <div class="cap"><span class="t">${item.title}</span><span class="m">${item.kind === "folder" ? "2 本 · 均值 41%" : item.pct + "% · 9-18"}</span></div>`;
+  return el;
+}
+
+function buildPlate(s) {
+  const plate = document.createElement("div");
+  plate.className = "plate " + s.cls;
+  plate.innerHTML = `<div class="plate-label">${s.name}</div><div class="stage"><div class="grid"></div>
+    <div class="rows"></div></div><div class="readout">&nbsp;</div><p class="note">${s.note}</p>`;
+  const grid = plate.querySelector(".grid");
+  const rows = plate.querySelector(".rows");
+  model.forEach((it) => {
+    grid.appendChild(card(it));
+    const tr = document.createElement("div");
+    tr.className = "row"; tr.dataset.id = it.id; tr.draggable = true;
+    tr.innerHTML = `<span class="cov"></span><span class="rt">${it.title}</span><span style="color:var(--text-helper)">${it.kind === "folder" ? "2 本" : it.pct + "%"}</span>`;
+    rows.appendChild(tr);
+  });
+  wire(plate);
+  return plate;
+}
+
+let model = TITLES.map((t, i) => ({ id: "c" + i, title: t, kind: i === 0 ? "folder" : "book", pct: [41, 66, 0, 100, 28][i] }));
+let dragId = null;
+
+function zoneOf(el, x) {
+  const r = el.getBoundingClientRect();
+  const t = (x - r.left) / r.width;
+  const b = (1 - band) / 2;
+  if (t < b) return "before";
+  if (t > 1 - b) return "after";
+  return "group";
+}
+
+function wire(plate) {
+  const readout = plate.querySelector(".readout");
+  const setZone = (el, z) => {
+    for (const n of plate.querySelectorAll(".zone-before,.zone-after,.zone-group")) n.classList.remove("zone-before", "zone-after", "zone-group");
+    for (const n of plate.querySelectorAll(".tip")) n.remove();
+    if (z) {
+      const title = model.find((m) => m.id === el.dataset.id).title;
+      el.style.setProperty("--lbl-before", "\"插到「" + title + "」之前\"");
+      el.style.setProperty("--lbl-after", "\"插到「" + title + "」之后\"");
+      el.style.setProperty("--lbl", z === "before" ? "插到「" + title + "」之前" : z === "after" ? "插到「" + title + "」之后" : "");
+      el.classList.add("zone-" + z);
+      if (plate.classList.contains("s0") && z === "group") {
+        const tip = document.createElement("span"); tip.className = "tip";
+        tip.textContent = "与《" + model.find((m) => m.id === el.dataset.id).title + "》成组";
+        el.querySelector(".card").appendChild(tip);
+      }
+    }
+  };
+  const onOver = (e) => {
+    const el = e.currentTarget;
+    if (!dragId || el.dataset.id === dragId) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const z = zoneOf(el, e.clientX);
+    setZone(el, z);
+    const title = model.find((m) => m.id === el.dataset.id).title;
+    readout.textContent = z === "group" ? "松手 → 与《" + title + "》成组（建夹 / 并入）"
+      : z === "before" ? "松手 → 插到《" + title + "》之前（纯重排）"
+      : "松手 → 插到《" + title + "》之后（纯重排）";
+  };
+  const onLeave = (e) => { const el = e.currentTarget; if (!el.contains(e.relatedTarget)) setZone(el, null); };
+  const onDrop = (e) => {
+    e.preventDefault();
+    const el = e.currentTarget;
+    const z = zoneOf(el, e.clientX);
+    const from = model.findIndex((m) => m.id === dragId), to = model.findIndex((m) => m.id === el.dataset.id);
+    if (from < 0 || to < 0 || from === to) return;
+    const [it] = model.splice(from, 1);
+    let idx = model.findIndex((m) => m.id === el.dataset.id);
+    model.splice(z === "after" ? idx + 1 : idx, 0, it);
+    if (z === "group") { it.groupedInto = el.dataset.id; }
+    rerender();
+    readout.textContent = "已执行：" + (z === "group" ? "《" + it.title + "》合入" : "《" + it.title + "》移到" + (z === "before" ? "前" : "后"));
+  };
+  const onStart = (e) => {
+    dragId = e.currentTarget.dataset.id;
+    e.currentTarget.classList.add("dragging-src");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", dragId);
+  };
+  const onEnd = () => { dragId = null; for (const n of plate.querySelectorAll(".dragging-src")) n.classList.remove("dragging-src"); };
+  for (const el of plate.querySelectorAll(".item,.row")) {
+    el.addEventListener("dragstart", onStart);
+    el.addEventListener("dragend", onEnd);
+    el.addEventListener("dragover", onOver);
+    el.addEventListener("dragleave", onLeave);
+    el.addEventListener("drop", onDrop);
+  }
+}
+
+function rerender() { platesEl.innerHTML = ""; for (const s of SCHEMES) platesEl.appendChild(buildPlate(s)); }
+rerender();
+
+document.querySelectorAll(".band").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".band").forEach((x) => x.classList.remove("on"));
+  b.classList.add("on"); band = Number(b.dataset.band) / 100; syncBand();
+}));
+document.getElementById("guide").addEventListener("click", (e) => {
+  guide = !guide; e.target.classList.toggle("on", guide);
+  document.body.classList.toggle("guide", guide);
+});
+document.getElementById("notx").addEventListener("click", (e) => {
+  const on = document.body.classList.toggle("notx");
+  e.target.classList.toggle("on", on); e.target.textContent = on ? "恢复动效" : "关掉动效对比";
+});
+document.getElementById("reset").addEventListener("click", () => {
+  model = TITLES.map((t, i) => ({ id: "c" + i, title: t, kind: i === 0 ? "folder" : "book", pct: [41, 66, 0, 100, 28][i] })); rerender();
+});
+</script>
+</body>
+</html>

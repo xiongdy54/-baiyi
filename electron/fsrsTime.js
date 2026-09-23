@@ -27,12 +27,30 @@ function learningDayIndex(ms, cutoffHour = 0) {
 }
 
 // 该时刻所属学习日的起点（本地 cutoff 点）
+// B-4（审计 F34）：原实现用「传入时刻 ms 的时区偏移」去还原日界，在 DST 切换日会失效 ——
+// 春进那天日切点落进被跳过的那一小时，于是 learningDayIndex(learningDayStartMs(t)) !== learningDayIndex(t)，
+// 日桶凭空错位（实测 TZ=America/New_York 下 2026-03-09 复现，cutoff 0/1/2 三档全中）。
+// 改为**迭代求不动点**：用候选时刻自身的偏移而不是 ms 的偏移，让返回的时刻真正落回同一学习日。
 function learningDayStartMs(ms, cutoffHour = 0) {
-  return (
-    learningDayIndex(ms, cutoffHour) * 86400000 +
-    cutoffHour * 3600000 +
-    new Date(ms).getTimezoneOffset() * 60000
-  );
+  const idx = learningDayIndex(ms, cutoffHour);
+  const base = idx * 86400000 + cutoffHour * 3600000;
+  let guess = base + new Date(ms).getTimezoneOffset() * 60000;
+  for (let i = 0; i < 4; i++) {
+    const off = new Date(guess).getTimezoneOffset() * 60000;
+    const next = base + off;
+    if (next === guess) break;
+    guess = next;
+  }
+  // 春进日 corner case：cutoff 落在**被跳过的那一小时**（如 America/New_York 3 月 2:00→3:00）时，
+  // 本地根本不存在 02:00，迭代没有精确解、可能落到相邻学习日。此时在候选附近搜一个仍属 idx 的时刻 ——
+  // 契约要的是「返回的时刻属于该学习日」，而不是「本地钟面正好等于 cutoff」。
+  if (learningDayIndex(guess, cutoffHour) !== idx) {
+    for (const delta of [3600000, -3600000, 7200000, -7200000, 10800000, -10800000]) {
+      const cand = guess + delta;
+      if (learningDayIndex(cand, cutoffHour) === idx) { guess = cand; break; }
+    }
+  }
+  return guess;
 }
 
 module.exports = { calculateFsrsDeltaT, learningDayIndex, learningDayStartMs };

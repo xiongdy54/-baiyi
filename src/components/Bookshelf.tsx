@@ -8,14 +8,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from "../lib/library";
 import { eventBus } from "../lib/eventbus";
 import {
-  IconAlert, IconArrowLeft, IconEllipsis, IconFolder, IconFolderPlus, IconGrip, IconLanguages,
+  IconAlert, IconArrowLeft, IconEllipsis, IconFolder, IconFolderPlus, IconLanguages,
   IconLayoutGrid, IconList, IconPencil, IconPlus, IconTrash,
 } from "./icons";
 import Dropdown from "./Dropdown";
 import {
   createFolderWith, dayLabel, dissolveFolder, ensureOrder, folderAggregate, folderEntries, findFolder,
-  folderOf, forgetItem, groupInto, itemProgress, loadShelf, moveAllOut, moveTo, moveStep, renameFolder,
-  saveShelf, sortEntries, topEntries, ungroup, withCurrentArray,
+  folderOf, forgetItem, groupInto, itemProgress, loadShelf, moveAllOut, moveStep, renameFolder,
+  saveShelf, saveViewPrefs, loadViewPrefs, moveRelativeTo, sortEntries, topEntries, ungroup, withCurrentArray,
   EMPTY_SHELF, pct,
   SHELF_DENSITIES, SHELF_SORTS,
   type ShelfDensity, type ShelfEntry, type ShelfFolder, type ShelfSort, type ShelfState, type ShelfViewMode,
@@ -73,12 +73,30 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
   const [menu, setMenu] = useState<{ id: string; kind: MenuKind } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // v48.18 / D54：视图/密度/排序是组件内状态，进出阅读器会重挂载 → 必须落 SettingsStore
+  const [prefsReady, setPrefsReady] = useState(false);
   const [freshId, setFreshId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
   dragRef.current = drag;
 
   const manual = sort === "manual";
+
+  /* v48.18 / D54：视图 / 密度 / 排序的记忆
+     这三个是组件内状态，而 Bookshelf 会在「进阅读器 → 回书架」时重挂载，
+     所以不持久化就会每次被打回封面墙（用户实测的第 5 条）。
+     写入不在首帧发生：否则挂载时那份默认值会把刚从磁盘读回来的存档盖掉。 */
+  useEffect(() => {
+    void loadViewPrefs().then((p) => {
+      setMode(p.mode);
+      setDensity(p.density);
+      setSort(p.sort);
+      setPrefsReady(true);
+    });
+  }, []);
+  useEffect(() => {
+    if (prefsReady) saveViewPrefs({ mode, density, sort });
+  }, [prefsReady, mode, density, sort]);
 
   /* 新入库的材料插到队首并高亮 1.2s（避免"导入完找不到"，§5.4）。
      首帧不算新增——否则开机就整墙闪一遍。 */
@@ -205,9 +223,10 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
 
   /* ---------------- 顺序与归组 ---------------- */
 
-  const reorderTo = (id: string, targetId: string) => {
+  // 落点方位必须传进来：只画 zone-after 的高亮却不执行「之后插入」，用户看到的就是拖不动
+  const reorderTo = (id: string, targetId: string, side: "before" | "after") => {
     const arr = currentArr();
-    const next = moveTo(arr, id, targetId);
+    const next = moveRelativeTo(arr, id, targetId, side);
     if (next !== arr) commit(withCurrentArray(shelf, openFolderId, next));
   };
   const step = (id: string, dir: -1 | 1) => {
@@ -259,7 +278,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     setDrag(null);
     if (!d || d.id === id) return;
     if (d.zone === "group") group(d.id, id);
-    else reorderTo(d.id, id);
+    else reorderTo(d.id, id, d.zone === "after" ? "after" : "before");
   };
   const itemProps = (entry: ShelfEntry) => ({
     draggable: manual,
@@ -280,13 +299,10 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
 
   /* ---------------- 卡片键盘：Enter 打开 / Alt+方向键逐格移动 ---------------- */
 
-  const onCardKeyDown = (entry: ShelfEntry) => (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      if (entry.kind === "folder") openInto(entry.id);
-      else onOpenBook(entry.id);
-      return;
-    }
+  // 拆开两件事：Enter/Space 只在**非原生**的可激活元素（.book-card / .cap 是 div[role=button]）上需要手写；
+  // 目录表的书名现在是真 <button>，浏览器自己会把 Enter/Space 变成 click 并冒泡到 <td> 的 onClick——
+  // 若两条路径都调 onOpenBook，回车一次会开两次书。所以目录表只挂「重排」这半截。
+  const onReorderKeyDown = (entry: ShelfEntry) => (e: React.KeyboardEvent) => {
     if (!e.altKey) return;
     const dir = e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : null;
     if (dir === null) return;
@@ -294,10 +310,20 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     e.stopPropagation();
     if (!manual) { setError("拖拽与逐格移动仅在「手动顺序」下可用"); return; }
     step(entry.id, dir);
-    // 重排后焦点跟着这张卡走（否则列表重渲染会把焦点丢回 body，连按不动）
+    // 重排后焦点要跟着这一条走（否则列表重渲染把焦点丢回 body，连按不动）。
+    // 原先这里硬查 `.book-card`——目录表里没有它，于是**目录表视图的 Alt+方向键一直连按不了**（v48.18 修）。
     requestAnimationFrame(() => {
-      listRef.current?.querySelector<HTMLElement>(`[data-entry="${entry.id}"] .book-card`)?.focus();
+      listRef.current?.querySelector<HTMLElement>(`[data-entry="${entry.id}"] .book-card, [data-entry="${entry.id}"] .t-open`)?.focus();
     });
+  };
+  const onCardKeyDown = (entry: ShelfEntry) => (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (entry.kind === "folder") openInto(entry.id);
+      else onOpenBook(entry.id);
+      return;
+    }
+    onReorderKeyDown(entry)(e);
   };
 
   /* ---------------- 渲染片段 ---------------- */
@@ -488,6 +514,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
         className={`shelf-item${zoneClass(entry.id)}${drag?.id === entry.id ? " is-dragging" : ""}${freshId === entry.id ? " is-fresh" : ""}`}
         {...itemProps(entry)}
       >
+        {/* .shelf-face = 封面 + 进度轨那一整块，拖拽/新入库的高亮框画在它身上（§5.4） */}
+        <div className="shelf-face">
         <div
           className="book-card"
           tabIndex={0}
@@ -542,7 +570,6 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           ) : (
             <div className="book-card-cover">{bookFace(entry.item)}</div>
           )}
-          {manual && <span className="shelf-grip" aria-hidden="true"><IconGrip /></span>}
           {actionsOf(entry)}
           {drag?.target === entry.id && drag.zone === "group" && (
             <span className="zone-tip">
@@ -553,6 +580,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           )}
         </div>
         <div className="cap-rail"><i style={{ width: pct(progress) }} /></div>
+        </div>
         {/* 批次 D（D-TEST-16）：图注（书名）此前渲染在带 onClick 的 .book-card **之外**，
             于是"点书名不开书、点封面才开"。点击与键盘行为与书卡同源（不改 .shelf-item，
             那会与拖拽三区语义打架）；改名态下 .cap 里是 cap-input，它自带 stopPropagation，
@@ -579,21 +607,21 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
     const progress = isFolder ? agg!.progress : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
+    // 打开只有一条路径：格子的 onClick（封面格与书名格共用）；键盘经 .t-open 的原生 click 冒泡上来
+    const open = () => (isFolder ? openInto(entry.id) : onOpenBook(entry.id));
+    const openLabel = isFolder ? `打开文件夹「${title}」，含 ${agg!.n} 本` : `打开《${title}》`;
     return (
       <tr
         key={entry.id}
         data-entry={entry.id}
-        className={`${zoneClass(entry.id)}${drag?.id === entry.id ? " is-dragging" : ""}`}
+        className={`${zoneClass(entry.id)}${drag?.id === entry.id ? " is-dragging" : ""}${isFolder ? " is-folder" : ""}`}
         {...itemProps(entry)}
       >
-        <td className="col-open">
-          <button className="act" title={isFolder ? "打开文件夹" : "打开"} aria-label={isFolder ? "打开文件夹" : "打开"}
-            onClick={() => (isFolder ? openInto(entry.id) : onOpenBook(entry.id))}>
-            {isFolder ? <IconFolder /> : <IconArrowLeft />}
-          </button>
-        </td>
-        <td className="col-grip">{manual && <button className="act row-grip" tabIndex={-1} aria-hidden="true" title="拖拽排序（Alt+方向键）"><IconGrip /></button>}</td>
-        <td className="col-cov">
+        {/* v48.18：撤掉「打开」列与拖拽把手列。打开的入口改到**封面与书名本身**（与卡片视图同一套语言：
+            卡片视图本来就点封面/图注开书，目录表此前却点书名不开书——标题格只有 onKeyDown、没有 onClick）。
+            拖拽本来就把 draggable 挂在整行上，两个把手都只是没有任何处理器的视觉提示 → 删掉后
+            「按住条目空白处拖动」自然成立，可拖性改由 cursor: grab + 落点高亮承担。 */}
+        <td className="col-cov" onClick={open} title={openLabel}>
           {isFolder ? (
             <span className="thumb">
               <span className="f-spines">
@@ -607,8 +635,12 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
             <span className="thumb">{entry.item.cover ? <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true" /> : <span className="book-card-spine" />}</span>
           )}
         </td>
-        <td onKeyDown={onCardKeyDown(entry)} tabIndex={0}>
-          <div className="t-title" title={title}>{title}</div>
+        <td className="col-main" onClick={open}>
+          {/* 真 <button>：读屏会报「打开《书名》」并带出可激活语义；Enter/Space 的原生 click 冒泡到上面的 td，
+              所以这里**不再挂 onClick**（挂了就是开两次）。 */}
+          <button type="button" className="t-open" aria-label={openLabel} title={title} onKeyDown={onReorderKeyDown(entry)}>
+            <span className="t-title">{title}</span>
+          </button>
           {isFolder ? (
             <>
               <div className="t-sub">{agg!.n} 本 · 均值 {pct(agg!.progress)} · 悬停看成员</div>
@@ -778,8 +810,6 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           <table className="shelf-table">
             <thead>
               <tr>
-                <th className="col-open"><span className="shelf-label">打开</span></th>
-                <th className="col-grip" />
                 <th className="col-cov" />
                 <th>书名 / 上次阅读</th>
                 <th className="col-num">进度</th>

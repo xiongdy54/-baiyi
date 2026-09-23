@@ -897,38 +897,44 @@ body.has-skin .topbar { background: transparent; }
 .dd-menu-up { top: auto; bottom: calc(100% + var(--sp-1)); }
 .dd-item .n { color: var(--text-helper); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
-/* 拖拽把手：仅「手动顺序」下渲染；纯提示性，键盘路径在卡片上（Alt+方向键） */
-.shelf-grip {
-  position: absolute;
-  top: var(--sp-2);
-  left: var(--sp-2);
-  width: 28px;
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--overlay-ink);
-  color: var(--overlay-text);
-  border: none;
-  border-radius: var(--radius);
-  opacity: 0;
-  cursor: grab;
-  transition: opacity var(--dur) var(--ease);
-}
-.book-card:hover .shelf-grip,
-.shelf-grip:focus-visible { opacity: 1; }
-.shelf-grip:active { cursor: grabbing; }
-.shelf-item.is-dragging .book-card {
-  background: var(--accent-soft);
+/* 可拖性不再靠把手图形提示（v48.18 / D54）：`.shelf-grip`（卡片）与 `.row-grip`（目录表）都删了——
+   它们本来就没有任何处理器，真正的 draggable 一直挂在整张卡 / 整行上，把手只是装饰。
+   改由光标承担提示：手动顺序下条目 = grab、按住 = grabbing，落点高亮仍走 .zone-* 那一套。
+   cursor 只加在容器上，里面的可交互控件（.t-open / .act / 改名输入框）保留各自的 cursor。
+   键盘路径不变：Alt+方向键（焦点现在两种视图都跟得住，见 Bookshelf.tsx 的 onReorderKeyDown）。 */
+/* 一个条目只允许一种光标（v48.18 / D54，用户实测第 2 条）：
+   原先卡片是「封面 pointer + 2px 进度轨与图注 grab」——两条光标夹着一根 2px 的分界线，
+   鼠标停在边缘就在 pointer 与 grab 之间反复翻。
+   现在：卡片整块都可点（封面与图注都开书）→ 统一 pointer；目录表的正文不是可点区 → 统一 grab；
+   两种视图里只有真正的控件（动作条按钮、书名 button、下拉）保留 pointer。
+   代价如实登记：卡片上「可拖」不再有静态视觉提示（把手图形已按用户要求撤除），
+   落点高亮与拖拽中的 grabbing 仍在。 */
+.shelf-item[draggable="true"] { cursor: pointer; }
+.shelf-table tr[draggable="true"] { cursor: grab; }
+.shelf-item[draggable="true"]:active,
+.shelf-table tr[draggable="true"]:active { cursor: grabbing; }
+.shelf-item[draggable="true"] .act,
+.shelf-item[draggable="true"] .t-open,
+.shelf-table tr[draggable="true"] .act,
+.shelf-table tr[draggable="true"] .t-open { cursor: pointer; }
+/* 「封面 + 进度轨」是一整块（.shelf-face 是它在 DOM 上的载体）：拖拽的两态高亮框都画在这一块上，
+   所以下沿落在进度轨之下、不含下面的书名与 meta。进度轨虽只有 2px，但它属于封面那一叠，
+   框若只圈到封面底，视觉上就像框短了一截。 */
+.shelf-face { position: relative; }
+.shelf-item.is-dragging .shelf-face {
   outline: calc(var(--sp-1) / 2) solid var(--accent);
   outline-offset: -1px;
 }
+.shelf-item.is-dragging .book-card { background: var(--accent-soft); }
 .shelf-item.is-dragging .book-card > * { opacity: 0.45; }
 
 /* 拖拽落点的三种态：两侧＝重排（2px accent 竖条）／中央＝归组（整块描边 + 浮标）。
-   两种意图必须长得不一样，用户不用记修饰键。 */
-.shelf-item.zone-before::before,
-.shelf-item.zone-after::before {
+   两种意图必须长得不一样，用户不用记修饰键。
+   竖条也画在 .shelf-face 上：它与高亮框共用「封面 + 进度轨」这一个量度，
+   不然框到轨下、条却顺着书名一路到底，同一块卡上出现两套高度。 */
+.shelf-item { position: relative; }
+.shelf-item.zone-before .shelf-face::before,
+.shelf-item.zone-after .shelf-face::after {
   content: "";
   position: absolute;
   top: 0;
@@ -937,14 +943,13 @@ body.has-skin .topbar { background: transparent; }
   background: var(--accent);
   z-index: 2;
 }
-.shelf-item { position: relative; }
-.shelf-item.zone-before::before { left: calc(var(--sp-3) * -1); }
-.shelf-item.zone-after::before { right: calc(var(--sp-3) * -1); }
-.shelf-item.zone-group .book-card {
-  background: var(--accent-soft);
+.shelf-item.zone-before .shelf-face::before { left: calc(var(--sp-3) * -1); }
+.shelf-item.zone-after .shelf-face::after { right: calc(var(--sp-3) * -1); }
+.shelf-item.zone-group .shelf-face {
   outline: calc(var(--sp-1) / 2) solid var(--accent);
   outline-offset: -1px;
 }
+.shelf-item.zone-group .book-card { background: var(--accent-soft); }
 .shelf-item.zone-group .book-card > *:not(.zone-tip) { opacity: 0.45; }
 .zone-tip {
   position: absolute;
@@ -1126,9 +1131,11 @@ body.has-skin .topbar { background: transparent; }
 .shelf-table td { border-bottom: 1px solid var(--border-subtle); padding: var(--sp-3); vertical-align: top; }
 .shelf-table tbody tr:last-child td { border-bottom: none; }
 .shelf-table tbody tr:hover { background: var(--grey-1); }
-.shelf-table .col-open,
-.shelf-table .col-grip { width: 44px; }
-.shelf-table .col-cov { width: 52px; }
+/* 列宽按 border-box 复算过：内容 min-content + 左右 padding 24px（* { box-sizing: border-box }）。
+   原声明是系统性欠配的——col-cov 52 装不下 36+24=60，col-act 104 装不下 4×28+24=136，
+   这正是「最右边的按钮非滚不可」的直接原因。v48.18 撤掉 col-open / col-grip 两列（各 44px，
+   合计释放 88px）后，余下各列按下表取实际所需值。 */
+.shelf-table .col-cov { width: 60px; cursor: pointer; }
 .shelf-table .col-num {
   width: 88px;
   text-align: right;
@@ -1136,19 +1143,49 @@ body.has-skin .topbar { background: transparent; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.shelf-table .col-act { width: 104px; text-align: right; }
+.shelf-table .col-act { width: 136px; text-align: right; } /* 4 枚 28px 图标 + 24px padding */
 .shelf-table .t-title { font-size: var(--fs-body); font-weight: 500; line-height: 1.4; }
-.shelf-table .t-sub {
+/* 「上次阅读」那一行原先是 white-space: nowrap + text-overflow: ellipsis —— **ellipsis 永远不生效**：
+   nowrap 让这个节点的 min-content 等于整行文字宽，而表格是 auto 布局（全仓没有 table-layout: fixed），
+   列宽只能取 max(声明值, min-content) → 一列被 160 字摘要（或无上限的 lastText）撑到 ~1000px，
+   整张表 1700px+ → 横向滚动条。改成按行截断，min-content 塌回一个字，列才真的收缩得动。
+   定高 2 行：一是让 hover 时换成成员清单不跳行高（下面 .t-members 同一条），二是行高可预期。 */
+.shelf-table .t-sub,
+.shelf-table .t-members {
   font-size: var(--fs-meta);
-  color: var(--text-helper);
+  line-height: 1.55;
+  height: calc(var(--fs-meta) * 1.55 * 2);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
-.shelf-table .t-members { display: none; font-size: var(--fs-meta); color: var(--text-secondary); line-height: 1.6; }
-/* 悬停文件夹行时把"N 本 · 均值"换成成员清单——两种形态都只在原地替换，不引起行高跳动 */
-.shelf-table tr:hover .t-sub { display: none; }
-.shelf-table tr:hover .t-members { display: block; }
+.shelf-table .t-sub { color: var(--text-helper); }
+.shelf-table .t-members { display: none; color: var(--text-secondary); }
+/* 打开入口：撤掉独立按钮后，书名本身必须是**真正的可激活元素**（读屏才报得出「打开《书名》」）。
+   外观保持纯排印——无框无底，只有焦点环；点格子其余区域（摘要/进度条/留白）也开，靠 td 的 onClick。 */
+.shelf-table .t-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.shelf-table .t-open:hover .t-title { color: var(--accent); }
+.shelf-table .t-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* 悬停**文件夹行**时才把"N 本 · 均值"换成成员清单。必须限定 .is-folder：
+   原先写成 tr:hover，书行也跟着隐藏 .t-sub——而书行没有 .t-members 来补位，
+   于是悬停时那一行文字整块消失、下面的进度条往上跳（实测 bar top 246 → 209、行高 94 → 79）。
+   两种形态都定高 2 行，替换只在原地发生，不引起行高跳动。 */
+.shelf-table tr.is-folder:hover .t-sub { display: none; }
+/* 必须显式回到 -webkit-box：写成 block 会让上面那条 line-clamp 失效，成员多的时候就是硬裁没有省略号 */
+.shelf-table tr.is-folder:hover .t-members { display: -webkit-box; }
 .shelf-table .bar { height: calc(var(--sp-1) / 2); background: var(--grey-2); margin-top: var(--sp-2); }
 .shelf-table .bar i { display: block; height: 100%; background: var(--accent); }
 .shelf-table .thumb {
@@ -1163,14 +1200,12 @@ body.has-skin .topbar { background: transparent; }
 .shelf-table .thumb .f-spines { inset: 2px; top: 2px; bottom: 2px; left: 2px; right: 2px; gap: 1px; }
 .shelf-table .thumb .f-spines i { max-width: 12px; }
 .shelf-table .thumb .f-spines .rest { padding: 0 2px; font-size: var(--fs-meta); }
-/* 新入库的材料：outline 高亮 1.2s（不受封面色影响，深浅两主题都看得见） */
-.shelf-item.is-fresh .book-card {
+/* 新入库的材料：outline 高亮 1.2s（不受封面色影响，深浅两主题都看得见），
+   框与拖拽高亮同一块口径＝封面 + 进度轨 */
+.shelf-item.is-fresh .shelf-face {
   outline: calc(var(--sp-1) / 2) solid var(--accent);
   outline-offset: 2px;
 }
-.shelf-table .row-grip { visibility: hidden; }
-.shelf-table tr:hover .row-grip,
-.shelf-table .row-grip:focus-visible { visibility: visible; }
 .shelf-table .col-act .dd { display: inline-block; }
 .shelf-table .col-act .act { color: var(--text-secondary); }
 .shelf-table .col-act .act:hover { background: var(--grey-2); color: var(--text-primary); }
@@ -1584,7 +1619,6 @@ body.theme-dark .modal-panel {
   .modal-backdrop { animation: none; }
   .card-acts,
   .f-roster,
-  .shelf-grip,
   .shelf-seg button,
   .icon-btn,
   .btn,
@@ -1623,6 +1657,23 @@ body.theme-dark .modal-panel {
 }
 .reader-body.reader-body-shifted .reader-scroll {
   flex: 1 1 calc(100% - 400px);
+}
+/* E-1（审计）：目录面板是 position:absolute 的浮层（left:0 / width:280px / z-index:7），
+   正文此前不让位 —— 打开目录后正文左缘被压在面板底下，行首被吃掉约 5 个汉字
+   （同会话 A/B 截图实测：关目录时整句完整，开目录后「中锋用笔是」被遮）。
+   复用既有 reader-body-shifted 的思路，让正文按面板宽度右移。 */
+.reader-body.reader-body-toc-open .reader-scroll {
+  margin-left: 280px;
+}
+/* E-1：TOC 的包含块是 .reader-engine-viewport，而它在 .reader-scroll **内部** ——
+   所以正文右移时 TOC 会跟着右移（实测 toc.left 0→280，重叠量没变）。
+   用等量负偏移把它锚回视口左缘，净效果：正文让位、面板不动。 */
+.reader-body.reader-body-toc-open .reader-toc {
+  left: -280px;
+}
+/* 目录与 AI 面板同时打开：两者叠加（400px 面板走 flex-basis，280px 目录走 margin） */
+.reader-body.reader-body-shifted.reader-body-toc-open .reader-scroll {
+  flex: 1 1 calc(100% - 400px - 280px);
 }
 .reader-scroll {
   flex: 1;

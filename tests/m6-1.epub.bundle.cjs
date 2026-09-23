@@ -55747,7 +55747,7 @@ function renderMarkdownToBodyHtml(markdown) {
 function escapeXml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-function splitMarkdownChapters(markdown) {
+function splitMarkdownChapters(markdown, fallbackTitle) {
   const lines = String(markdown || "").split("\n");
   const chapters = [];
   let cur = { title: "", bodyHtml: "" };
@@ -55767,7 +55767,7 @@ function splitMarkdownChapters(markdown) {
     }
   }
   flush();
-  if (chapters.length === 1 && !chapters[0].title) chapters[0].title = "\u6B63\u6587";
+  if (chapters.length === 1 && !chapters[0].title) chapters[0].title = (fallbackTitle || "").trim() || "\u6B63\u6587";
   return chapters;
 }
 var xhtmlDoc = (title, bodyHtml, lang, extraStyle) => `<?xml version="1.0" encoding="UTF-8"?>
@@ -55813,7 +55813,7 @@ function imageHashSuffix(images) {
 async function buildSyntheticEpub(title, markdown, opts) {
   const lang = opts?.lang || "zh";
   const images = (opts?.images ?? []).filter((im) => im && im.filename && im.bytes && im.bytes.length > 0);
-  const chapters = splitMarkdownChapters(markdown);
+  const chapters = splitMarkdownChapters(markdown, title);
   const zip = new import_jszip2.default();
   zip.file("mimetype", "application/epub+zip", { compression: "STORE" });
   zip.file(
