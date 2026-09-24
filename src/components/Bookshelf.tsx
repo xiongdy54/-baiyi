@@ -95,7 +95,7 @@ interface Props {
   topLevelSignal: number;
 }
 
-type MenuKind = "lang" | "group" | "folder";
+type MenuKind = "lang" | "group" | "folder" | "priority";
 interface DragState { id: string; target: string | null; zone: "before" | "group" | "after" | null }
 
 const ZONE_BEFORE = 0.28;
@@ -250,6 +250,19 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, lang } : it)));
     } catch (err) {
       setError(`设置语言失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // v48.22（D58 §6.8-2）：书级默认优先级——新建摘录继承；**继承型摘录实时跟随**（用户单条改过的 'user' 不动）
+  async function handleSetPriority(id: string, priority: number) {
+    setMenu(null);
+    setError(null);
+    try {
+      const r = await libraryApi.setPriority(id, priority);
+      if (!r?.ok) throw new Error("设置失败");
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, priority } : it)));
+    } catch (err) {
+      setError(`设置优先级失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -470,6 +483,25 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     </CardMenu>
   );
 
+  // v48.22（D58 §6.8-2）：书级默认优先级（新建摘录继承；继承型摘录实时跟随）
+  const priorityMenu = (item: LibraryItem) => (
+    <CardMenu label="优先级">
+      {[10, 30, 50, 70, 90].map((p) => (
+        <button
+          key={p}
+          type="button"
+          role="menuitemradio"
+          aria-checked={(item.priority ?? 50) === p}
+          className={`dd-item${(item.priority ?? 50) === p ? " dd-item-on" : ""}`}
+          onClick={() => void handleSetPriority(item.id, p)}
+        >
+          优先级 {p}
+        </button>
+      ))}
+      <div className="dd-note">新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。</div>
+    </CardMenu>
+  );
+
   const groupMenu = (entry: ShelfEntry) => {
     const inFolder = entry.kind === "book" ? folderOf(shelf, entry.id) : null;
     return (
@@ -563,6 +595,20 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
             <IconLanguages />
           </button>
           {menu?.id === item.id && menu.kind === "lang" && langMenu(item)}
+        </span>
+        {/* v48.22（D58 §6.8-2）：书级优先级（用户要求：书架上为书籍手动设置优先级） */}
+        <span className="dd">
+          <button
+            className="act act-text"
+            title="书级默认优先级（新建摘录继承；继承型摘录实时跟随）"
+            aria-label="优先级"
+            aria-haspopup="true"
+            data-book-priority
+            onClick={() => setMenu(menu?.id === item.id && menu.kind === "priority" ? null : { id: item.id, kind: "priority" })}
+          >
+            优先
+          </button>
+          {menu?.id === item.id && menu.kind === "priority" && priorityMenu(item)}
         </span>
         <span className="dd">
           <button className="act" title="归入文件夹" aria-label="归入文件夹" aria-haspopup="true"
@@ -764,8 +810,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
                       onClick={() => setMenu(menu?.id === entry.id && menu.kind === "lang" ? null : { id: entry.id, kind: "lang" })}>
                       <IconLanguages />
                     </button>
-                    {menu?.id === entry.id && menu.kind === "lang" && langMenu(entry.item)}
-                  </span>
+                    {menu?.id === entry.id && menu.kind === "lang" && langMenu(entry.item)}                  </span>
                   <span className="dd">
                     <button className="act" title="归入文件夹" aria-label="归入文件夹" aria-haspopup="true"
                       onClick={() => setMenu(menu?.id === entry.id && menu.kind === "group" ? null : { id: entry.id, kind: "group" })}>

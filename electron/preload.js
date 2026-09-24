@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   getDocument: (id) => ipcRenderer.invoke("library:doc", id),
   getItemIdByDocumentId: (docId) => ipcRenderer.invoke("library:itemByDoc", docId),
   updateProgress: (id, progress) => ipcRenderer.invoke("library:updateProgress", id, progress),
+  // v48.22（D58 §6.8-2）：书级默认优先级（新建摘录继承；继承型摘录实时跟随）
+  setPriority: (id, priority) => ipcRenderer.invoke("library:setPriority", id, priority),
   // 阅读内核（v20）：读原书字节给 foliate 打开
   readBookFile: (id) => ipcRenderer.invoke("library:readBookFile", id),
   // M6-1（v26）：导入格式扩展 Word/TXT/Markdown（pick 返回 {name,path}，create 在主进程完成转换与建册）

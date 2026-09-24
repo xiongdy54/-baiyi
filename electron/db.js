@@ -849,7 +849,7 @@ function getBackupCounts() {
 function listItems() {
   const stmt = db.prepare(`
     SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_json AS progressJson,
-           li.lang, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
+           li.lang, li.priority, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
     FROM library_items li
     LEFT JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.is_deleted = 0

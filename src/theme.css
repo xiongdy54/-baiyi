@@ -4460,3 +4460,20 @@ body.capture-body #root { height: 100vh; }
   font-size: var(--fs-meta);
   color: var(--text-helper);
 }
+
+/* ---------- 书级优先级菜单（v48.22 / D58 §6.8-2） ---------- */
+.act.act-text {
+  width: auto;
+  min-width: 34px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-meta);
+  letter-spacing: 0;
+}
+.dd-note {
+  padding: var(--sp-2) var(--sp-3);
+  max-width: 240px;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  line-height: 1.5;
+  border-top: 1px solid var(--border-subtle);
+}

@@ -207,6 +207,21 @@ try {
   check("浏览器：批量暂停已落库（3 张全部挂起）", sr.suspended === 3 && sr.total === 3, suspRes);
   check("浏览器：批量后选中态被清空", String(await cdp.eval(`document.querySelector("[data-sel-count]")?.textContent || ""`)) === "", "未清空");
 
+  // 11) 书架书级优先级（§6.8-2）：改一次书优先级 → 继承型摘录实时跟随
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1800);
+  const openedPriority = await cdp.eval(`(() => { const btn = document.querySelector("[data-book-priority]"); btn?.click(); return !!btn; })()`);
+  check("书架：书卡动作条有「优先级」入口", openedPriority === true, openedPriority);
+  await wait(700);
+  const picked30 = await cdp.eval(`(() => { const items = [...document.querySelectorAll(".dd-item")]; const b2 = items.find((x) => x.textContent.trim() === "优先级 30"); b2?.click(); return !!b2; })()`);
+  check("书架：可选「优先级 30」", picked30 === true, picked30);
+  await wait(1600);
+  const libRow = await cdp.eval(`(async () => { const items = await window.libraryAPI.list(); const bk = items.find((x) => String(x.title || "").includes("GUI 摘录测试书")); return JSON.stringify({ p: bk?.priority }); })()`);
+  check("书架：书级优先级已落库（=30）", JSON.parse(libRow || "{}").p === 30, libRow);
+  const followedRow = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(b.id)}); return JSON.stringify({ p: d?.priority, src: d?.prioritySource }); })()`);
+  const fr = JSON.parse(followedRow || "{}");
+  check("继承型摘录实时跟随到 30（priority_source=book）", fr.p === 30 && fr.src === "book", followedRow);
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);
