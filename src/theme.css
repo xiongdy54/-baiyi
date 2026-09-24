@@ -4477,3 +4477,6 @@ body.capture-body #root { height: 100vh; }
   line-height: 1.5;
   border-top: 1px solid var(--border-subtle);
 }
+.cb-deck-name { max-width: 220px; }
+.cb-deck { display: inline-flex; gap: var(--sp-1); align-items: center; }
+.cb-deck .n { color: var(--text-helper); font-size: var(--fs-meta); }

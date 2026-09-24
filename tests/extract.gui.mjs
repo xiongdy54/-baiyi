@@ -222,6 +222,37 @@ try {
   const fr = JSON.parse(followedRow || "{}");
   check("继承型摘录实时跟随到 30（priority_source=book）", fr.p === 30 && fr.src === "book", followedRow);
 
+  // 12) 筛选牌组（§6.8-5）：保存当前筛选 → 列表可见 → 集中复习路由 → 删除
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => {
+    const inp = document.querySelector("[data-deck-name]");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(inp, "GUI 牌组");
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  await wait(500);
+  const savedDeck = await cdp.eval(`(() => { document.querySelector("[data-deck-save]")?.click(); return true; })()`);
+  check("筛选牌组：保存按钮在位可点", savedDeck === true, savedDeck);
+  await wait(1500);
+  const deckStored = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "reviewScopes") || []))()`);
+  check("筛选牌组：已落盘 settings.app.reviewScopes", String(deckStored).includes("GUI 牌组"), String(deckStored).slice(0, 160));
+  const deckChip = await cdp.eval(`document.querySelector("[data-deck-item]")?.textContent || ""`);
+  check("筛选牌组：列表出现该牌组", String(deckChip).includes("GUI 牌组"), deckChip);
+  const startBtn = await cdp.eval(`(() => { const b = document.querySelector("[data-deck-start]"); b?.click(); return !!b; })()`);
+  check("筛选牌组：「集中复习」按钮在位可点", startBtn === true, startBtn);
+  await wait(1800);
+  const inSession = await cdp.eval(`!!document.querySelector(".review-wrap") || !!document.querySelector(".extract-page")`);
+  check("筛选牌组：集中复习已进入会话页（复习/摘录）", inSession === true, inSession);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
+  await wait(1500);
+  const delBtn = await cdp.eval(`(() => { const b = document.querySelector("[data-deck-delete]"); b?.click(); return !!b; })()`);
+  check("筛选牌组：删除按钮在位可点", delBtn === true, delBtn);
+  await wait(1500);
+  const afterDel = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "reviewScopes") || []))()`);
+  check("筛选牌组：删除后已从设置里移除", !String(afterDel).includes("GUI 牌组"), String(afterDel).slice(0, 160));
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);

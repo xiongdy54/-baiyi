@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import "./theme.css";
 import Bookshelf from "./components/Bookshelf";
 import Reader from "./components/Reader";
-import QueueView from "./components/QueueView";
+import ExtractReviewView from "./components/ExtractReviewView";
 import ReviewView from "./components/ReviewView";
 import CardBrowser from "./components/CardBrowser";
 import JournalView from "./components/JournalView";
@@ -49,7 +49,9 @@ type View =
       resumeRunId?: string | null;
     }
   | { name: "queue" }
-  | { name: "review" }
+  // v48.22（D58 §6.8-8）：本书范围的集中复习（阅读器「复习摘录 / 复习闪卡」入口）
+  | { name: "extractSession"; bookItemIds: string[]; title: string }
+  | { name: "review"; bookItemIds?: string[]; title?: string }
   | { name: "browse" }
   | { name: "journal" }
   | { name: "stats" }
@@ -379,18 +381,43 @@ export default function App() {
         openMindmapInitially={Boolean(view.openMindmap)}
         openMindmapMapId={view.openMindmapMapId ?? null}
         resumeRunId={view.resumeRunId ?? null}
+        onReviewExtracts={() => setView({ name: "extractSession", bookItemIds: [view.itemId], title: view.doc.title })}
+        onReviewCards={() => setView({ name: "review", bookItemIds: [view.itemId], title: view.doc.title })}
         onMindmapOpened={() => setView((v) => (v.name === "reader" ? { ...v, openMindmap: false, resumeRunId: null } : v))}
       />
     );
   } else if (view.name === "queue") {
-    topTitle = "学习队列";
-    mainContent = <QueueView onOpen={openExtract} onJumpToDoc={handleJumpToDoc} />;
+    // v48.22（D58 §6.8）：原「学习队列」列表页退役——列表职能迁入卡片浏览器，
+    // 本页改为**沉浸式摘录连续处理页**（一屏一条、连续推进、正文可就地编辑）
+    topTitle = "摘录";
+    mainContent = <ExtractReviewView onOpen={openExtract} onJumpToDoc={handleJumpToDoc} />;
+  } else if (view.name === "extractSession") {
+    // 本书范围会话（阅读器「复习摘录」入口）：只处理该书摘录，退出回阅读
+    topTitle = "摘录";
+    mainContent = (
+      <ExtractReviewView
+        onOpen={openExtract}
+        onJumpToDoc={handleJumpToDoc}
+        bookItemIds={view.bookItemIds}
+        header={`集中复习：《${view.title}》`}
+        onExit={() => setView({ name: "shelf" })}
+      />
+    );
   } else if (view.name === "review") {
-    topTitle = "复习";
-    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} />;
+    topTitle = view.title ? `复习 · ${view.title}` : "复习";
+    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} bookItemIds={view.bookItemIds} />;
   } else if (view.name === "browse") {
     topTitle = "卡片浏览";
-    mainContent = <CardBrowser onJumpToDoc={handleJumpToDoc} />;
+    mainContent = (
+      <CardBrowser
+        onJumpToDoc={handleJumpToDoc}
+        onStartSession={({ bookItemIds, kinds, name }) => {
+          // v48.22（D58 §6.8-5）：从筛选牌组进入集中复习——摘录范围走沉浸式摘录页，闪卡范围走复习页
+          if (!kinds.includes("card")) setView({ name: "extractSession", bookItemIds, title: name });
+          else setView({ name: "review", bookItemIds, title: name });
+        }}
+      />
+    );
   } else if (view.name === "journal") {
     topTitle = "日记";
     mainContent = <JournalView onJumpToDoc={handleJumpToDoc} />;
@@ -442,7 +469,7 @@ export default function App() {
         <nav className="topbar-nav">
           {([
             { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
-            { key: "queue", label: "队列", match: (n: string) => n === "queue" || n === "extractReader" },
+            { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractReader" || n === "extractSession" },
             { key: "review", label: "复习", match: (n: string) => n === "review" },
             { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
             { key: "journal", label: "日记", match: (n: string) => n === "journal" },

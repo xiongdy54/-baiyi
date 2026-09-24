@@ -20,6 +20,16 @@ import KnowledgeManager from "./KnowledgeManager";
 import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
 import { extractStatusLabel } from "../lib/sessionQueue";
 import { nextAtText } from "./ExtractCardFace";
+import { settingsStore } from "../lib/settings";
+
+/** v48.22（D58 §6.8-5）：筛选牌组（复习范围）——保存的过滤条件，零 schema 变更 */
+interface SavedScope {
+  id: string;
+  name: string;
+  bookItemIds: string[];
+  kinds: string[];
+  limits?: unknown;
+}
 
 type Preset = "all" | "due" | "leech" | "deferred" | "knowledge";
 type BrowserCard = CardRecord & { docTitle?: string };
@@ -95,7 +105,14 @@ function srcLabel(c: CardRecord & { docTitle?: string }): string {
   return t.startsWith("《") ? t : `《${t}》`;
 }
 
-export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }) {
+export default function CardBrowser({
+  onJumpToDoc,
+  onStartSession
+}: {
+  onJumpToDoc?: JumpToDoc;
+  /** v48.22（D58 §6.8-5）：从筛选牌组进入「集中复习」（按范围开会话；App 负责路由） */
+  onStartSession?: (scope: { bookItemIds: string[]; kinds: string[]; name: string }) => void;
+}) {
   const [all, setAll] = useState<BrowserCard[]>([]);
   const [preset, setPreset] = useState<Preset>("all");
   const [query, setQuery] = useState("");
@@ -118,6 +135,9 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
   const [bookScope, setBookScope] = useState<string>("all");
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchNote, setBatchNote] = useState<string | null>(null);
+  // v48.22（D58 §6.8-5）：筛选牌组（复习范围）——存 settings.app.reviewScopes，零 schema 变更（D51 先例）
+  const [scopes, setScopes] = useState<SavedScope[]>([]);
+  const [deckName, setDeckName] = useState("");
 
   const refresh = useCallback(async () => {
     setAll(await cardsApi.listAll());
@@ -125,6 +145,12 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
       setExtracts((await readingWorkflow.getAllTopics()) as DueTopic[]);
     } catch {
       setExtracts([]);
+    }
+    try {
+      const saved = await settingsStore.get<SavedScope[]>("app", "reviewScopes", []);
+      setScopes(Array.isArray(saved) ? saved.filter((s) => s && typeof s.id === "string") : []);
+    } catch {
+      setScopes([]);
     }
     try {
       const q = await cardsApi.todayQueue();
@@ -307,6 +333,34 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
     }
   }
 
+  // v48.22（D58 §6.8-5）：筛选牌组——保存当前筛选为复习范围 / 应用 / 集中复习 / 删除
+  async function saveDeck() {
+    const fallback = kindFilter === "card" ? "闪卡" : kindFilter === "extract" ? "摘录" : "全部";
+    const name = deckName.trim() || `筛选牌组 · ${fallback}`;
+    const scope: SavedScope = {
+      id: crypto.randomUUID(),
+      name,
+      bookItemIds: bookScope === "all" ? [] : [bookScope],
+      kinds: kindFilter === "both" ? ["card", "extract"] : [kindFilter],
+      limits: null
+    };
+    const next = [...scopes, scope];
+    await settingsStore.set("app", "reviewScopes", next);
+    setScopes(next);
+    setDeckName("");
+    flashNote(`已保存筛选牌组「${name}」`);
+  }
+  function applyDeck(scope: SavedScope) {
+    setKindFilter(scope.kinds.length === 2 ? "both" : scope.kinds[0] === "extract" ? "extract" : "card");
+    setBookScope(scope.bookItemIds[0] || "all");
+    flashNote(`已应用「${scope.name}」`);
+  }
+  async function deleteDeck(id: string) {
+    const next = scopes.filter((s) => s.id !== id);
+    await settingsStore.set("app", "reviewScopes", next);
+    setScopes(next);
+  }
+
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
 
   return (
@@ -452,6 +506,43 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
           </>
         )}
         {batchNote && <span className="form-hint" data-batch-note>{batchNote}</span>}
+      </div>
+
+      {/* v48.22（D58 §6.8-5）：筛选牌组＝保存下来的复习范围（不移动卡片，故复习记录照常入 FSRS） */}
+      <div className="cb-batch" data-deck-bar>
+        <span className="mono">筛选牌组</span>
+        <input
+          className="cb-search cb-deck-name"
+          data-deck-name
+          placeholder="牌组名称（可留空自动命名）"
+          value={deckName}
+          onChange={(e) => setDeckName(e.target.value)}
+        />
+        <button className="btn btn-outline btn-sm" data-deck-save onClick={() => void saveDeck()}>
+          保存当前筛选
+        </button>
+        {scopes.map((s) => (
+          <span className="cb-deck" data-deck-item key={s.id}>
+            <button className="btn btn-outline btn-sm" data-deck-apply title="把浏览器的筛选切到该范围" onClick={() => applyDeck(s)}>
+              {s.name}
+              <span className="n"> {s.kinds.join("/")}{s.bookItemIds.length ? " · 单书" : ""}</span>
+            </button>
+            {onStartSession && (
+              <button
+                className="btn btn-outline btn-sm"
+                data-deck-start
+                title="按该范围开始集中复习（记录照常计入 FSRS）"
+                onClick={() => onStartSession({ bookItemIds: s.bookItemIds, kinds: s.kinds, name: s.name })}
+              >
+                集中复习
+              </button>
+            )}
+            <button className="btn btn-outline btn-sm" data-deck-delete onClick={() => void deleteDeck(s.id)}>
+              删除
+            </button>
+          </span>
+        ))}
+        {scopes.length === 0 && <span className="form-hint">把当前「类别 + 来源书」筛选存下来，即可反复进入同一复习范围。</span>}
       </div>
 
       {loaded && viewCards.length === 0 && viewExtracts.length === 0 && (
