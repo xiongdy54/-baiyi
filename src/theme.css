@@ -4376,3 +4376,87 @@ body.capture-body #root { height: 100vh; }
   .bg-activity-extra,
   .bg-activity-bar > span { transition: none; }
 }
+
+/* ---------- 摘录复习（v48.22 / D58 §6.8）：沉浸式连续处理页 + 摘录卡面 ---------- */
+.extract-page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-12) var(--sp-16) var(--sp-8);
+  display: flex;
+  flex-direction: column;
+}
+.extract-page-head {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto var(--sp-4);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
+.extract-page-head .review-count { align-self: auto; }
+.extract-page-header { color: var(--text-primary); }
+.extract-page-hint { margin-left: auto; }
+.extract-flash { color: var(--accent); }
+.extract-exit { margin-left: var(--sp-4); }
+.extract-face {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.extract-face-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: var(--sp-2);
+}
+.extract-face-tags { display: flex; gap: var(--sp-3); align-items: center; }
+.badge-experimental {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-meta);
+}
+.extract-face-body { font-size: var(--fs-body); line-height: 1.8; color: var(--text-primary); min-height: 120px; }
+.extract-face-text { white-space: pre-wrap; }
+.extract-face-derived { font-size: var(--fs-meta); color: var(--text-helper); }
+.extract-face-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-4);
+}
+.extract-postpone, .extract-priority { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-meta); color: var(--text-helper); }
+.extract-postpone input { width: 64px; }
+.extract-face-hints { display: flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-meta); color: var(--text-helper); }
+
+/* ---------- 卡片浏览器 2.0（v48.22 / D58 §6.8-6）：多选列 + 批量动作条 ---------- */
+.cb-pick {
+  width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 22px;
+}
+.cb-pick input { margin: 0; }
+.cb-row.is-selected { border-color: var(--accent); }
+.cb-batch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}

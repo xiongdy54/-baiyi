@@ -168,6 +168,45 @@ try {
   check("硬边界：违规值被拒且未落盘", limitsBefore === limitsAfter, `before=${limitsBefore} after=${limitsAfter}`);
   check("硬边界：就地给出解释文案", String(errText).includes("5 倍"), errText);
 
+  // 10) 卡片浏览器 2.0（§6.8-6）：统一数据源 + 摘录表 + 多选/全选 + 批量落库
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
+  await wait(1800);
+  const created3 = await cdp.eval(`(async () => {
+    const ids = [];
+    for (const n of ["甲", "乙", "丙"]) {
+      const r = await window.cardsAPI.create({ noteText: "EXTRACTSTEST BROWSER " + n, cardType: "qa", frontMarkdown: "浏览器批量 " + n, backMarkdown: "答" + n, priority: 50, tags: [] });
+      ids.push(r?.id);
+    }
+    return ids;
+  })()`);
+  check("浏览器：建 3 张卡用于批量", Array.isArray(created3) && created3.length === 3 && created3.every(Boolean), created3);
+  await cdp.eval(`(() => { document.querySelector("[data-kind-extract]")?.click(); return true; })()`);
+  await wait(1300);
+  const exTable = await cdp.eval(`document.querySelector("[data-extract-table]")?.textContent || ""`);
+  check("浏览器：摘录类别渲染出摘录表（毕业后仍在浏览器可见 = 统一数据源）", String(exTable).includes("GUI 摘录样本"), String(exTable).slice(0, 140));
+  await cdp.eval(`(() => { document.querySelector("[data-sel-all-extracts]")?.click(); return true; })()`);
+  await wait(900);
+  const selCount1 = await cdp.eval(`document.querySelector("[data-sel-count]")?.textContent || ""`);
+  check("浏览器：全选摘录 → 选中计数可见", String(selCount1).includes("摘录 1"), selCount1);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll("[data-batch-bar] button")].find((x) => x.textContent.trim() === "召回"); b?.click(); return !!b; })()`);
+  await wait(1700);
+  const recallNote = await cdp.eval(`document.querySelector("[data-batch-note]")?.textContent || ""`);
+  check("浏览器：批量召回提示可见", String(recallNote).includes("已处理"), recallNote);
+  const statusAfterRecall = await cdp.eval(`(async () => (await window.workflowAPI.get(${JSON.stringify(b.id)}))?.status)()`);
+  check("浏览器：批量召回已落库（status=open）", statusAfterRecall === "open", statusAfterRecall);
+  await cdp.eval(`(() => { document.querySelector("[data-kind-card]")?.click(); return true; })()`);
+  await wait(1200);
+  await cdp.eval(`(() => { document.querySelector("[data-sel-all-cards]")?.click(); return true; })()`);
+  await wait(900);
+  const selCount2 = await cdp.eval(`document.querySelector("[data-sel-count]")?.textContent || ""`);
+  check("浏览器：全选闪卡 → 选中计数可见", String(selCount2).includes("闪卡"), selCount2);
+  await cdp.eval(`(() => { const btns = [...document.querySelectorAll("[data-batch-bar] button")]; const b2 = btns.find((x) => x.textContent.trim() === "批量暂停"); b2?.click(); return !!b2; })()`);
+  await wait(1800);
+  const suspRes = await cdp.eval(`(async () => { const all = await window.cardsAPI.listAll(); const mine = all.filter((c) => String(c.noteText || "").includes("EXTRACTSTEST BROWSER")); return JSON.stringify({ total: mine.length, suspended: mine.filter((c) => c.leech?.suspended).length }); })()`);
+  const sr = JSON.parse(suspRes || "{}");
+  check("浏览器：批量暂停已落库（3 张全部挂起）", sr.suspended === 3 && sr.total === 3, suspRes);
+  check("浏览器：批量后选中态被清空", String(await cdp.eval(`document.querySelector("[data-sel-count]")?.textContent || ""`)) === "", "未清空");
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);

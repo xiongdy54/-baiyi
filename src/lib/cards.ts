@@ -21,6 +21,8 @@ declare global {
       persistNow: () => Promise<boolean>;
       skip: (cardId: string) => Promise<boolean>;
       setSuspended: (id: string, suspended: boolean, reason?: string) => Promise<boolean>;
+      /** v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete） */
+      batch: (op: string, ids: string[], payload?: unknown) => Promise<unknown>;
       updateLeech: (id: string, patch: Record<string, unknown>) => Promise<boolean>;
       resolveLeech: (id: string, resolution: string, updates?: unknown) => Promise<boolean>;
       listLeech: () => Promise<unknown[]>;
@@ -816,6 +818,9 @@ export const cardsApi = {
   },
   setSuspended: async (id: string, suspended: boolean, reason?: string) =>
     (await window.cardsAPI?.setSuspended(id, suspended, reason)) ?? false,
+  /** v48.22（D58 §6.8-6）：卡片批量（单事务 + 单次落盘） */
+  batch: async (op: string, ids: string[], payload?: unknown): Promise<{ ok: boolean; count?: number; reason?: string }> =>
+    ((await window.cardsAPI?.batch(op, ids, payload)) ?? { ok: false, reason: "API 不可用" }) as { ok: boolean; count?: number; reason?: string },
   updateLeech: async (id: string, patch: Record<string, unknown>) =>
     (await window.cardsAPI?.updateLeech(id, patch)) ?? false,
   resolveLeech: async (id: string, resolution: string, updates?: unknown) =>

@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld("libraryAPI", {
 contextBridge.exposeInMainWorld("workflowAPI", {
   create: (payload) => ipcRenderer.invoke("extracts:create", payload),
   listDue: () => ipcRenderer.invoke("extracts:listDue"),
+  listAll: () => ipcRenderer.invoke("extracts:listAll"),
   get: (id) => ipcRenderer.invoke("extracts:get", id),
   postpone: (id) => ipcRenderer.invoke("extracts:postpone", id),
   // v48.22（D58 §6.8）：摘录调度内核写面
@@ -100,6 +101,8 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   persistNow: () => ipcRenderer.invoke("cards:persistNow"),
   skip: (cardId) => ipcRenderer.invoke("cards:skip", cardId),
   setSuspended: (id, suspended, reason) => ipcRenderer.invoke("cards:setSuspended", id, suspended, reason),
+  // v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete）
+  batch: (op, ids, payload) => ipcRenderer.invoke("cards:batch", op, ids, payload),
   updateLeech: (id, patch) => ipcRenderer.invoke("cards:updateLeech", id, patch),
   resolveLeech: (id, resolution, updates) => ipcRenderer.invoke("cards:resolveLeech", id, resolution, updates),
   listLeech: () => ipcRenderer.invoke("cards:listLeech")

@@ -21,6 +21,7 @@ declare global {
     workflowAPI?: {
       create: (payload: unknown) => Promise<{ id: string }>;
       listDue: () => Promise<unknown[]>;
+      listAll: () => Promise<unknown[]>;
       get: (id: string) => Promise<unknown>;
       postpone: (id: string) => Promise<unknown>;
       postponeDays: (id: string, days: number) => Promise<unknown>;
@@ -32,7 +33,11 @@ declare global {
       batch: (op: string, ids: string[], payload?: unknown) => Promise<unknown>;
       switchEngine: (to: string, from?: string) => Promise<unknown>;
     };
-    limitsAPI?: { usage: (now?: number) => Promise<unknown> };
+    limitsAPI?: {
+      usage: (now?: number) => Promise<unknown>;
+      state: (now?: number) => Promise<unknown>;
+      validate: (patch: unknown) => Promise<unknown>;
+    };
     undoAPI?: { last: () => Promise<unknown>; info: () => Promise<unknown> };
   }
 }
@@ -51,6 +56,8 @@ export interface DueTopic {
   postponeCount?: number;
   processCount?: number;
   prioritySource?: "book" | "user" | string;
+  /** v48.22（D58 §6.8-6）：所属书架条目（按书范围会话与浏览器分组用） */
+  libraryItemId?: string | null;
   contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
 }
 
@@ -86,6 +93,8 @@ export interface ReadingWorkflowProvider {
   name: ExtractEngine;
   create(input: ExtractInput): Promise<{ id: string }>;
   getDueTopics(): Promise<DueTopic[]>;
+  /** 全量摘录（浏览器统一数据源；含已毕业/已归档，便于管理与召回） */
+  getAllTopics(): Promise<DueTopic[]>;
   getTopic(id: string): Promise<ExtractDetail | null>;
   /** 按算法推迟（间隔 × a_factor，封顶 180 天） */
   postpone(id: string): Promise<void>;
@@ -134,6 +143,10 @@ const sm19Provider: ReadingWorkflowProvider = {
   async getDueTopics() {
     if (!window.workflowAPI) return [];
     return (await window.workflowAPI.listDue()) as DueTopic[];
+  },
+  async getAllTopics() {
+    if (!window.workflowAPI) return [];
+    return (await window.workflowAPI.listAll()) as DueTopic[];
   },
   async getTopic(id) {
     if (!window.workflowAPI) return null;

@@ -2379,6 +2379,35 @@ function listDueExtracts(nowTs) {
   }));
 }
 
+/** 全量摘录（卡片浏览器用；**含已毕业/已归档/已推迟**，便于管理与召回——§6.8-6 统一数据源） */
+function listAllExtracts() {
+  const rows = queryAll(
+    `SELECT e.id, e.parent_type AS parentType, e.parent_id AS parentId, e.document_id AS documentId,
+            e.content_markdown AS contentMarkdown, e.context_ref_json AS contextRefJson,
+            e.priority, e.priority_source AS prioritySource, e.status, e.status_version AS statusVersion,
+            e.status_detail_json AS statusDetailJson, e.a_factor AS aFactor,
+            e.postpone_count AS postponeCount, e.process_count AS processCount,
+            e.engine_state_json AS engineStateJson,
+            e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
+            li.title AS docTitle, li.id AS libraryItemId
+     FROM extracts e
+     JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
+     JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
+     WHERE e.is_deleted = 0
+     ORDER BY e.priority ASC, e.topic_next_at ASC`
+  );
+  return rows.map((r) => {
+    let contextRef = null;
+    try {
+      contextRef = r.contextRefJson ? JSON.parse(r.contextRefJson) : null;
+    } catch {
+      contextRef = null; // 坏 JSON 不抛：浏览器仍可展示行，只是没有跳转锚点
+    }
+    const { contextRefJson, ...rest } = r;
+    return { ...rest, contextRef };
+  });
+}
+
 function getExtract(id) {
   const rows = queryAll(
     `SELECT e.id, e.parent_type AS parentType, e.parent_id AS parentId,
@@ -2821,6 +2850,46 @@ function batchExtractOps(op, ids, payload) {
       ]);
     }
     return { ok: true, count: applied, skipped, batchId };
+  });
+}
+
+/** 卡片批量操作（v48.22 §6.8-6）：**单事务 + 单次 persist**，逐条列级写（不整行回写，避免 v32 式静默清列）。
+ *  支持：suspend / resume / postpone(days) / delete。**重置为新卡不在批内**——它要重写 fsrs 全字段，
+ *  §4.4.1 下须单独评审（保持单卡路径不变）。 */
+const CARD_BATCH_OPS = ["suspend", "resume", "postpone", "delete"];
+function batchCardOps(op, ids, payload) {
+  if (!CARD_BATCH_OPS.includes(op)) return { ok: false, reason: `不支持的批量操作：${op}` };
+  const list = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string" && x);
+  if (list.length === 0) return { ok: false, reason: "未选中任何条目" };
+  const days = Math.max(1, Math.min(Number(payload && payload.days) || 1, 36500));
+  const rows = [];
+  for (const id of list) {
+    const card = getCard(id);
+    if (!card) return { ok: false, reason: "存在已删除或不存在的卡片，整批未执行" };
+    rows.push(card);
+  }
+  return withTransaction(() => {
+    const now = Date.now();
+    let applied = 0;
+    for (const card of rows) {
+      if (op === "suspend" || op === "resume") {
+        // 只动 leech_json（与 setCardSuspended 同列；§4.4.10：挂起/恢复不写 fsrs_config_id）
+        const leech = { ...(card.leech || {}) };
+        leech.suspended = op === "suspend";
+        leech.suspendedAt = op === "suspend" ? now : null;
+        db.run("UPDATE cards SET leech_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(leech), now, card.id]);
+      } else if (op === "postpone") {
+        // 只动 fsrs_json.due（其余字段原样保留；不写 fsrs_config_id，与单卡推迟同语义）
+        const fsrs = { ...(card.fsrs || {}) };
+        fsrs.due = now + days * DAY_MS;
+        db.run("UPDATE cards SET fsrs_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(fsrs), now, card.id]);
+      } else if (op === "delete") {
+        db.run("UPDATE cards SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, card.id]);
+        db.run("UPDATE card_issues SET status = 'dismissed', resolved_at = ? WHERE card_id = ? AND status = 'open'", [now, card.id]);
+      }
+      applied += 1;
+    }
+    return { ok: true, count: applied, days: op === "postpone" ? days : undefined };
   });
 }
 
@@ -5699,6 +5768,7 @@ module.exports = {
   updateProgress,
   createExtract,
   listDueExtracts,
+  listAllExtracts,
   getExtract,
   postponeExtract,
   // v48.22（D58）：摘录调度内核（SM 语义 + 双引擎子空间 + 操作日志与撤销）
@@ -5709,6 +5779,7 @@ module.exports = {
   setExtractStatus,
   deleteExtract,
   batchExtractOps,
+  batchCardOps,
   switchExtractEngine,
   undoLast,
   getUndoInfo,

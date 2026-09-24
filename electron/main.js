@@ -42,6 +42,7 @@ const {
   updateProgress,
   createExtract,
   listDueExtracts,
+  listAllExtracts,
   getExtract,
   postponeExtract,
   // v48.22（D58）：摘录调度内核（写 API + 引擎切换 + 派生用量 + 跨类撤销）
@@ -52,6 +53,7 @@ const {
   setExtractStatus,
   deleteExtract,
   batchExtractOps,
+  batchCardOps,
   switchExtractEngine,
   setLibraryItemPriority,
   getDailyUsage,
@@ -457,6 +459,7 @@ ipcMain.handle("library:updateProgress", (_e, itemId, progress) => updateProgres
 ipcMain.handle("extracts:create", (_e, payload) => createExtract(payload || {}));
 
 ipcMain.handle("extracts:listDue", () => listDueExtracts());
+ipcMain.handle("extracts:listAll", () => listAllExtracts());
 
 ipcMain.handle("extracts:get", (_e, id) => getExtract(String(id)));
 
@@ -486,6 +489,7 @@ ipcMain.handle("library:setPriority", (_e, itemId, priority) => setLibraryItemPr
 // ---------- 卡片 / FSRS / Leech / AI 制卡 ----------
 ipcMain.handle("cards:create", (_e, card) => createCard(card || {}));
 ipcMain.handle("cards:update", (_e, card) => updateCard(card || {}));
+ipcMain.handle("cards:batch", (_e, op, ids, payload) => batchCardOps(String(op), ids, payload));
 ipcMain.handle("cards:get", (_e, id) => getCard(String(id)));
 ipcMain.handle("cards:listDue", () => listDueCards());
 // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试

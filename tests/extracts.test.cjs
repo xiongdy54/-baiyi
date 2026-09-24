@@ -372,6 +372,33 @@ app.whenReady().then(async () => {
     const backOrder = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
     check("切回默认引擎：排序逐 id 复原（排序层面无损）", eq(backOrder.extracts.map((e) => e.id), defOrder.extracts.map((e) => e.id)), defOrder.extracts.map((e) => e.id).join(","), backOrder.extracts.map((e) => e.id).join(","));
 
+    // ---------------------------------------------------------------- E17
+    console.log("== E17 卡片批量（§6.8-6）：单事务 + 列级写 + 整批拒绝 ==");
+    const mkBatchCard = (n) => {
+      const fsrs11 = { state: "review", due: Date.now() + DAY, lapses: 1, stability: 3, difficulty: 5, reps: 3, lastReview: Date.now() - DAY, learningSteps: [] };
+      return db.createCard({ noteText: `EXTRACTSTEST 批量卡 ${n}`, cardType: "qa", frontMarkdown: `批量题 ${n}`, backMarkdown: "答", priority: 50, tags: [], fsrsJson: JSON.stringify(fsrs11) }).id;
+    };
+    const bIds17 = [0, 1, 2].map(mkBatchCard);
+    const fsrsBefore17 = bIds17.map((id) => JSON.stringify(db.getCard(id).fsrs));
+    const rb17 = db.batchCardOps("suspend", bIds17, {});
+    check("批量暂停：命中 3 张", rb17.ok === true && rb17.count === 3, "ok/3", rb17);
+    check("批量暂停：三张都挂起", bIds17.every((id) => db.getCard(id).leech?.suspended === true), true, bIds17.map((id) => db.getCard(id).leech?.suspended));
+    check("批量暂停：fsrs_json 逐字节未被触碰（只写 leech_json）", bIds17.every((id, i) => JSON.stringify(db.getCard(id).fsrs) === fsrsBefore17[i]), "fsrs 不变", "fsrs 被改");
+    db.batchCardOps("resume", bIds17, {});
+    check("批量恢复：三张都取消挂起", bIds17.every((id) => db.getCard(id).leech?.suspended === false), true, bIds17.map((id) => db.getCard(id).leech?.suspended));
+    const t17 = Date.now();
+    const rp17 = db.batchCardOps("postpone", bIds17, { days: 5 });
+    check("批量推迟：interval 语义为 due = now + N 天", rp17.ok === true && bIds17.every((id) => Math.abs(Number(db.getCard(id).fsrs.due) - (t17 + 5 * DAY)) < 5000), "≈now+5d", bIds17.map((id) => db.getCard(id).fsrs.due));
+    check("批量推迟：其余 fsrs 字段原样保留", bIds17.every((id) => db.getCard(id).fsrs.stability === 3 && db.getCard(id).fsrs.reps === 3), true, bIds17.map((id) => `${db.getCard(id).fsrs.stability}/${db.getCard(id).fsrs.reps}`));
+    const bad17 = db.batchCardOps("suspend", [bIds17[0], "no-such-card"], {});
+    check("批量含不存在卡片：整批拒绝", bad17.ok === false, false, bad17);
+    check("批量拒绝后首张未被改动", db.getCard(bIds17[0]).leech?.suspended !== true, "未挂起", db.getCard(bIds17[0]).leech?.suspended);
+    check("未知批量操作被拒", db.batchCardOps("explode", bIds17, {}).ok === false, false, db.batchCardOps("explode", bIds17, {}));
+    const rd17 = db.batchCardOps("delete", bIds17, {});
+    check("批量删除：命中 3 张", rd17.ok === true && rd17.count === 3, "ok/3", rd17);
+    check("批量删除：三张都取不到（软删）", bIds17.every((id) => db.getCard(id) === null), true, bIds17.map((id) => db.getCard(id)));
+    check("批量删除后队列不含它们", db.listAllCards().every((c) => !bIds17.includes(c.id)), true, bIds17.length);
+
     console.log(`\n==== extracts.test：${pass} 通过 / ${fail} 失败 ====`);
   } catch (e) {
     console.error("测试异常：", e && e.stack || e);

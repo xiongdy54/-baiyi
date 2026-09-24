@@ -16,6 +16,10 @@ import ImageLightbox from "./ImageLightbox";
 import { IconVolume } from "./icons";
 import { useDialogA11y } from "../lib/dialogA11y";
 import KnowledgeManager from "./KnowledgeManager";
+// v48.22（D58 §6.8-6）：浏览器 2.0——摘录行数据源 + 状态/推送文案
+import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
+import { extractStatusLabel } from "../lib/sessionQueue";
+import { nextAtText } from "./ExtractCardFace";
 
 type Preset = "all" | "due" | "leech" | "deferred" | "knowledge";
 type BrowserCard = CardRecord & { docTitle?: string };
@@ -105,9 +109,23 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
   const [loaded, setLoaded] = useState(false);
   // v34（M12，§4.16）：今日同源暂缓清单（与复习队列同一视图口径）——id → 延后原因
   const [deferredMap, setDeferredMap] = useState<Map<string, NonNullable<TodayQueue["deferred"][number]["deferReason"]>>>(new Map());
+  // v48.22（D58 §6.8-6）：浏览器 2.0——统一数据源（闪卡 + 摘录）、多选/全选/反选、批量、按书分组
+  const [kindFilter, setKindFilter] = useState<"card" | "extract" | "both">("card");
+  const [extracts, setExtracts] = useState<DueTopic[]>([]);
+  const [selCards, setSelCards] = useState<Set<string>>(new Set());
+  const [selExtracts, setSelExtracts] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [bookScope, setBookScope] = useState<string>("all");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchNote, setBatchNote] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setAll(await cardsApi.listAll());
+    try {
+      setExtracts((await readingWorkflow.getAllTopics()) as DueTopic[]);
+    } catch {
+      setExtracts([]);
+    }
     try {
       const q = await cardsApi.todayQueue();
       setDeferredMap(new Map((q.deferred ?? []).map((c) => [c.id, c.deferReason ?? { siblingKey: c.siblingKey || "", kind: "revealed" as const, siblingCardId: null, siblingFront: "" }])));
@@ -183,6 +201,112 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
     return sorted;
   }, [all, preset, typeFilter, stateFilter, memFilter, query, sortBy, deferredMap]);
 
+  // ---- v48.22（D58 §6.8-6）：按书分组 + 多选 + 批量（唯一数据源＝cardsApi.listAll + workflowAPI.listAll）
+  const bookOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of all) {
+      const id = (c as { libraryItemId?: string | null }).libraryItemId;
+      if (id) m.set(String(id), String((c as { docTitle?: string }).docTitle || "未知材料"));
+    }
+    for (const e of extracts) if (e.libraryItemId) m.set(String(e.libraryItemId), String(e.docTitle || "未知材料"));
+    return [{ value: "all", label: "全部来源书" }, ...[...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }))];
+  }, [all, extracts]);
+
+  const scopeCards = useMemo(
+    () => (bookScope === "all" ? filtered : filtered.filter((c) => String((c as { libraryItemId?: string | null }).libraryItemId || "") === bookScope)),
+    [filtered, bookScope]
+  );
+
+  const scopeExtracts = useMemo(() => {
+    const q = foldSearch(query);
+    let list = extracts;
+    if (bookScope !== "all") list = list.filter((e) => String(e.libraryItemId || "") === bookScope);
+    if (q) list = list.filter((e) => foldSearch(e.contentMarkdown || "").includes(q) || foldSearch(e.docTitle || "").includes(q));
+    if (preset === "due") list = list.filter((e) => Number(e.topicNextAt) <= Date.now());
+    return list;
+  }, [extracts, bookScope, query, preset]);
+
+  const viewCards = kindFilter === "extract" ? [] : scopeCards;
+  const viewExtracts = kindFilter === "card" ? [] : scopeExtracts;
+
+  interface MouseMod {
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+  }
+  function toggleSel(kind: "card" | "extract", id: string, e: MouseMod) {
+    const set = kind === "card" ? selCards : selExtracts;
+    const ids = (kind === "card" ? scopeCards.map((c) => c.id) : scopeExtracts.map((x) => x.id));
+    const next = new Set(set);
+    if (e.shiftKey && anchorId && ids.includes(anchorId)) {
+      const a = ids.indexOf(anchorId);
+      const b = ids.indexOf(id);
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(ids[i]);
+    } else if (e.ctrlKey || e.metaKey) {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      if (next.size === 1 && next.has(id)) next.clear();
+      else {
+        next.clear();
+        next.add(id);
+      }
+    }
+    setAnchorId(id);
+    if (kind === "card") setSelCards(next);
+    else setSelExtracts(next);
+  }
+  function selectAllOf(kind: "card" | "extract") {
+    if (kind === "card") setSelCards(new Set(scopeCards.map((c) => c.id)));
+    else setSelExtracts(new Set(scopeExtracts.map((e) => e.id)));
+  }
+  function invertOf(kind: "card" | "extract") {
+    if (kind === "card") setSelCards(new Set(scopeCards.filter((c) => !selCards.has(c.id)).map((c) => c.id)));
+    else setSelExtracts(new Set(scopeExtracts.filter((e) => !selExtracts.has(e.id)).map((e) => e.id)));
+  }
+  function flashNote(text: string) {
+    setBatchNote(text);
+    window.setTimeout(() => setBatchNote(null), 2400);
+  }
+  async function runCardBatch(op: string, payload?: unknown) {
+    const ids = [...selCards];
+    if (ids.length === 0) return;
+    if (op === "delete" && !window.confirm(`删除选中的 ${ids.length} 张卡？（软删，可在备份中找回）`)) return;
+    setBatchBusy(true);
+    try {
+      const r = await cardsApi.batch(op, ids, payload);
+      if (r?.ok) {
+        setSelCards(new Set());
+        flashNote(`已处理 ${r.count ?? ids.length} 张卡`);
+        eventBus.emit("cards/changed");
+        await refresh();
+      } else {
+        flashNote(r?.reason || "批量操作失败，整批未执行");
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+  async function runExtractBatch(op: string, payload?: unknown) {
+    const ids = [...selExtracts];
+    if (ids.length === 0) return;
+    if (op === "delete" && !window.confirm(`删除选中的 ${ids.length} 条摘录？（软删，可在备份中找回）`)) return;
+    setBatchBusy(true);
+    try {
+      const r = (await readingWorkflow.batch(op as never, ids, payload as never)) as { ok?: boolean; count?: number; skipped?: Array<{ reason: string }>; reason?: string };
+      if (r?.ok) {
+        setSelExtracts(new Set());
+        const skipped = Array.isArray(r.skipped) && r.skipped.length ? `（${r.skipped.length} 条按规则跳过）` : "";
+        flashNote(`已处理 ${r.count ?? ids.length} 条摘录${skipped}`);
+        await refresh();
+      } else {
+        flashNote(r?.reason || "批量操作失败，整批未执行");
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
 
   return (
@@ -256,9 +380,81 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
         >
           记忆接地
         </button>
+        {/* v48.22（D58 §6.8-6）：类别切换（闪卡 / 摘录 / 全部） + 按来源书筛选 */}
+        <div className="seg-tabs seg-tabs-sm" role="group" aria-label="条目类别">
+          <button className={kindFilter === "card" ? "active" : ""} data-kind-card onClick={() => setKindFilter("card")}>
+            闪卡
+          </button>
+          <button className={kindFilter === "extract" ? "active" : ""} data-kind-extract onClick={() => setKindFilter("extract")}>
+            摘录
+          </button>
+          <button className={kindFilter === "both" ? "active" : ""} data-kind-both onClick={() => setKindFilter("both")}>
+            全部
+          </button>
+        </div>
+        <Dropdown title="按来源书筛选" value={bookScope} options={bookOptions} onChange={setBookScope} />
       </div>
 
-      {loaded && filtered.length === 0 && (
+      {/* v48.22（D58 §6.8-6）：多选与批量动作条（选择态常驻，动作在选中 ≥1 条时出现） */}
+      <div className="cb-batch" data-batch-bar>
+        {kindFilter !== "extract" && (
+          <>
+            <button className="btn btn-outline btn-sm" data-sel-all-cards onClick={() => selectAllOf("card")}>
+              全选闪卡
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => invertOf("card")}>
+              反选闪卡
+            </button>
+          </>
+        )}
+        {kindFilter !== "card" && (
+          <>
+            <button className="btn btn-outline btn-sm" data-sel-all-extracts onClick={() => selectAllOf("extract")}>
+              全选摘录
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => invertOf("extract")}>
+              反选摘录
+            </button>
+          </>
+        )}
+        {selCards.size + selExtracts.size > 0 && (
+          <>
+            <span className="mono" data-sel-count>
+              已选 闪卡 {selCards.size} · 摘录 {selExtracts.size}
+            </span>
+            {selCards.size > 0 && (
+              <>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>删除</button>
+              </>
+            )}
+            {selExtracts.size > 0 && (
+              <>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-extracts onClick={() => void runExtractBatch("postponeDays", { days: 7 })}>推迟 7 天</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 30 })}>优先级 30</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 70 })}>优先级 70</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>毕业</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>召回</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>删除</button>
+              </>
+            )}
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => {
+                setSelCards(new Set());
+                setSelExtracts(new Set());
+              }}
+            >
+              清除选择
+            </button>
+          </>
+        )}
+        {batchNote && <span className="form-hint" data-batch-note>{batchNote}</span>}
+      </div>
+
+      {loaded && viewCards.length === 0 && viewExtracts.length === 0 && (
         <div className="empty-state">
           <div className="empty-deco">
             <span className="empty-sq empty-sq-accent" />
@@ -300,6 +496,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
       ) : (
         <div className="cb-table" role="table">
           <div className="cb-row cb-row-head" role="row">
+            <span className="cb-pick">选</span>
             <span>题面</span>
             <span>类型</span>
             <span>状态</span>
@@ -309,8 +506,22 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
             <span className="cb-num">优先</span>
             <span>来源</span>
           </div>
-          {filtered.map((c) => (
-            <div key={c.id} className="cb-row" role="row" onClick={() => setDetailId(c.id)}>
+          {viewCards.map((c) => (
+            <div
+              key={c.id}
+              className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
+              role="row"
+              onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : setDetailId(c.id))}
+              title="Ctrl/⌘ 点击多选 · Shift 点击范围选"
+            >
+              <span className="cb-pick">
+                <input
+                  type="checkbox"
+                  checked={selCards.has(c.id)}
+                  onClick={(ev) => ev.stopPropagation()}
+                  onChange={() => toggleSel("card", c.id, { shiftKey: false, ctrlKey: false, metaKey: false })}
+                />
+              </span>
               <span className="cb-front" title={frontPreview(c)}>
                 {frontPreview(c)}
               </span>
@@ -329,6 +540,55 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
         </div>
       )}
       </>
+      )}
+
+      {/* v48.22（D58 §6.8-6）：摘录表——与闪卡同页管理（状态/优先级/下次推送/来源书） */}
+      {kindFilter !== "card" && (
+        <div className="cb-table" role="table" data-extract-table>
+          <div className="cb-row cb-row-head" role="row">
+            <span className="cb-pick">选</span>
+            <span>摘录内容</span>
+            <span>状态</span>
+            <span className="cb-num">优先</span>
+            <span>下次推送</span>
+            <span>来源</span>
+          </div>
+          {viewExtracts.map((e) => (
+            <div
+              key={e.id}
+              className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
+              role="row"
+              onClick={(ev) => toggleSel("extract", e.id, ev)}
+              title="点击选择 · Ctrl/⌘ 多选 · Shift 范围选（摘录行不展开详情，管理动作走批量条）"
+            >
+              <span className="cb-pick">
+                <input
+                  type="checkbox"
+                  checked={selExtracts.has(e.id)}
+                  onClick={(ev) => ev.stopPropagation()}
+                  onChange={() => toggleSel("extract", e.id, { shiftKey: false, ctrlKey: false, metaKey: false })}
+                />
+              </span>
+              <span className="cb-front" title={e.contentMarkdown}>
+                {(e.contentMarkdown || "").slice(0, 90)}
+              </span>
+              <span>{extractStatusLabel(e.status)}</span>
+              <span className="cb-num mono">
+                {e.priority}
+                {e.prioritySource === "user" ? " ·改" : ""}
+              </span>
+              <span className="mono">{nextAtText(e.topicNextAt)}</span>
+              <span className="cb-src" title={e.docTitle}>
+                {e.docTitle}
+              </span>
+            </div>
+          ))}
+          {viewExtracts.length === 0 && (
+            <div className="cb-row" role="row">
+              <span className="cb-front">没有符合筛选条件的摘录。</span>
+            </div>
+          )}
+        </div>
       )}
 
       {detail && (
