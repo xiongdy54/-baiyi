@@ -352,6 +352,26 @@ app.whenReady().then(async () => {
     check("范围不能放宽：取全局与范围的最小值", widen.limits.extractReviewsPerDay === 30, 30, widen.limits.extractReviewsPerDay);
     check("范围存储零 schema 变更（settings.app.reviewScopes 可读）", Array.isArray(db.readReviewScopes()), true, typeof db.readReviewScopes());
 
+    // ---------------------------------------------------------------- E16
+    console.log("== E16 引擎切换影响会话队列排序（E1 本地因子，§6.4.1） ==");
+    setLimits({});
+    const e16Ids = [0, 1, 2].map((i) => mkExtract(bookA.documentId, `E16 同书摘录 ${i}`, 50));
+    e16Ids.push(mkExtract(bookB.documentId, "E16 异书摘录", 50));
+    e16Ids.forEach((id) => makeDue(id, T - 1000));
+    db.switchExtractEngine("sm19-default", "ai-next-extract");
+    const defOrder = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    check("默认引擎：条目不带引擎评分字段", defOrder.extracts.every((e) => e.engineScore === undefined), true, defOrder.extracts.map((e) => e.engineScore).join(","));
+    db.switchExtractEngine("ai-next-extract");
+    const aiOrder = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    check("实验引擎生效（会话队列回报 engine 字段）", aiOrder.engine === "ai-next-extract", "ai-next-extract", aiOrder.engine);
+    check("实验引擎：每条都带 engineScore 与可验证理由", aiOrder.extracts.every((e) => Number.isFinite(e.engineScore) && typeof e.engineReason === "string" && e.engineReason.length > 0), true, aiOrder.extracts.slice(0, 2).map((e) => e.engineReason));
+    check("实验引擎：理由含该条自身数字（未编造）", aiOrder.extracts.every((e) => e.engineReason.includes(`优先级 ${e.priority}`)), true, aiOrder.extracts.map((e) => e.engineReason).slice(0, 2));
+    check("实验引擎：评分非递增（排序自洽）", aiOrder.extracts.every((e, i, arr) => i === 0 || arr[i - 1].engineScore >= e.engineScore), true, aiOrder.extracts.map((e) => e.engineScore));
+    check("实验引擎：同书连击降权确实生效（理由里出现「同书第 2 条（已降权）」）", aiOrder.extracts.some((e) => String(e.engineReason).includes("同书第 2 条（已降权）")), true, aiOrder.extracts.map((e) => e.engineReason).slice(0, 3));
+    db.switchExtractEngine("sm19-default", "ai-next-extract");
+    const backOrder = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    check("切回默认引擎：排序逐 id 复原（排序层面无损）", eq(backOrder.extracts.map((e) => e.id), defOrder.extracts.map((e) => e.id)), defOrder.extracts.map((e) => e.id).join(","), backOrder.extracts.map((e) => e.id).join(","));
+
     console.log(`\n==== extracts.test：${pass} 通过 / ${fail} 失败 ====`);
   } catch (e) {
     console.error("测试异常：", e && e.stack || e);

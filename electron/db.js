@@ -42,6 +42,8 @@ const { journalDateOf, isJournalDate } = require("./journalTime");
 // v41（K2-A，D38）：知识归一纯函数（规范化 / 批次簇键 / 提案幂等指纹）
 const { normalizeKpLabel, kpClusterKeyFor, kpProposalFingerprint, isOpaqueClusterId } = require("./kpNorm");
 const { readSettings, writeSettings } = require("./settingsStore");
+// v48.22（D58 §6.4.1 E1）：实验推送引擎的本地因子层（纯函数，零 IO）
+const { rankExtracts } = require("./aiNextExtract");
 const {
   DEFAULT_CONFIG_ID,
   ALGORITHM,
@@ -2354,7 +2356,7 @@ function listDueExtracts(nowTs) {
   // v48.22（D58）：now 可注入（测试与跨日场景，同 §4.4.4 时间注入精神）；缺省取真实时间
   const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
   const rows = queryAll(
-    `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown, e.context_ref_json, e.priority,
+    `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown AS contentMarkdown, e.context_ref_json, e.priority,
             e.status, e.status_version AS statusVersion, e.status_detail_json AS statusDetailJson,
             e.a_factor AS aFactor, e.postpone_count AS postponeCount, e.process_count AS processCount,
             e.priority_source AS prioritySource, e.engine_state_json AS engineStateJson,
@@ -3084,9 +3086,15 @@ function computeSessionQueue(nowTs, opts) {
 
   const extracts = [];
   const blockedExtracts = [];
+  const sessionEngine = getActiveEngine(o.engine);
   if (mergeIntoReview || scope) {
+    let due = applyScope(listDueExtracts(now), scope, "extract");
+    // v48.22（D58/D59）：实验引擎生效时按**本地因子**重排（§6.4.1 两段式 E1，确定性、零 IO）；
+    // 默认引擎保持 SQL 原序（priority ASC, topic_next_at ASC），存量行为零变更
+    if (sessionEngine === ENGINE_AI) due = rankExtracts(due, now);
     let extractBudget = remaining.extractReviews;
-    let newExtractBudget = newBlocked ? 0 : remaining.newExtracts;    for (const e of applyScope(listDueExtracts(now), scope, "extract")) {
+    let newExtractBudget = newBlocked ? 0 : remaining.newExtracts;
+    for (const e of due) {
       if (extracts.length >= extractBudget) { blockedExtracts.push(e); continue; }
       if ((Number(e.processCount) || 0) === 0) {
         if (newExtractBudget <= 0) { blockedExtracts.push(e); continue; }
@@ -3131,7 +3139,8 @@ function computeSessionQueue(nowTs, opts) {
     deferred: q.deferred, damaged: q.damaged,
     blocked: { cards: blockedCards, extracts: blockedExtracts },
     mergeIntoReview, interleave, scope,
-    limits, usage, remaining, newBlocked, now
+    limits, usage, remaining, newBlocked, now,
+    engine: sessionEngine
   };
 }
 
