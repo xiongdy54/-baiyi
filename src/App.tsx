@@ -50,8 +50,8 @@ type View =
     }
   | { name: "queue" }
   // v48.22（D58 §6.8-8）：本书范围的集中复习（阅读器「复习摘录 / 复习闪卡」入口）
-  | { name: "extractSession"; bookItemIds: string[]; title: string }
-  | { name: "review"; bookItemIds?: string[]; title?: string }
+  | { name: "extractSession"; bookItemIds: string[]; title: string; limits?: Record<string, number> | null }
+  | { name: "review"; bookItemIds?: string[]; title?: string; limits?: Record<string, number> | null }
   | { name: "browse" }
   | { name: "journal" }
   | { name: "stats" }
@@ -399,22 +399,24 @@ export default function App() {
         onOpen={openExtract}
         onJumpToDoc={handleJumpToDoc}
         bookItemIds={view.bookItemIds}
+        scopeLimits={view.limits ?? null}
         header={`集中复习：《${view.title}》`}
         onExit={() => setView({ name: "shelf" })}
       />
     );
   } else if (view.name === "review") {
     topTitle = view.title ? `复习 · ${view.title}` : "复习";
-    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} bookItemIds={view.bookItemIds} />;
+    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} bookItemIds={view.bookItemIds} scopeLimits={view.limits ?? null} />;
   } else if (view.name === "browse") {
     topTitle = "卡片浏览";
     mainContent = (
       <CardBrowser
         onJumpToDoc={handleJumpToDoc}
-        onStartSession={({ bookItemIds, kinds, name }) => {
-          // v48.22（D58 §6.8-5）：从筛选牌组进入集中复习——摘录范围走沉浸式摘录页，闪卡范围走复习页
-          if (!kinds.includes("card")) setView({ name: "extractSession", bookItemIds, title: name });
-          else setView({ name: "review", bookItemIds, title: name });
+        onStartSession={({ bookItemIds, kinds, name, limits }) => {
+          // v48.22（D58 §6.8-5）：从筛选牌组进入集中复习——摘录范围走沉浸式摘录页，闪卡范围走复习页；
+          // 牌组的上限覆写随视图带过去（只收紧，不另开预算）
+          if (!kinds.includes("card")) setView({ name: "extractSession", bookItemIds, title: name, limits: limits ?? null });
+          else setView({ name: "review", bookItemIds, title: name, limits: limits ?? null });
         }}
       />
     );

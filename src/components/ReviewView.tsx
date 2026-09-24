@@ -23,11 +23,14 @@ function safePreviewItems(fsrs: unknown): ReturnType<typeof fsrsEngine.preview> 
 
 export default function ReviewView({
   onJumpToDoc,
-  bookItemIds
+  bookItemIds,
+  scopeLimits
 }: {
   onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }) => void;
   /** v48.22（D58 §6.8-8）：本书范围内的集中复习（阅读器「复习闪卡」入口） */
   bookItemIds?: string[];
+  /** 筛选牌组的上限覆写（§6.8-5：只收紧，不另开预算） */
+  scopeLimits?: Record<string, number> | null;
 } = {}) {
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
@@ -81,7 +84,9 @@ export default function ReviewView({
   const extractHeadRef = useRef<DueTopic | null>(null);
 
   const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
-    const scope = bookItemIds && bookItemIds.length ? { bookItemIds } : undefined;
+    const scope = bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length)
+      ? { bookItemIds: bookItemIds ?? undefined, limits: scopeLimits ?? undefined }
+      : undefined;
     const session = await fetchSessionQueue({ scope });
     if (session) {
       setDeferred((session.deferred ?? []) as unknown as TodayQueue["deferred"]);
@@ -100,7 +105,7 @@ export default function ReviewView({
     const q = await cardsApi.todayQueue();
     setDeferred(q.deferred ?? []);
     return q.cards[0] ?? null;
-  }, [bookItemIds]);
+  }, [bookItemIds, scopeLimits]);
 
   // 开场拉第一张；若 sessionStorage 有跳转前的复习现场（从阅读器返回）则恢复该卡
   useEffect(() => {

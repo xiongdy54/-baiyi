@@ -112,7 +112,7 @@ export default function CardBrowser({
 }: {
   onJumpToDoc?: JumpToDoc;
   /** v48.22（D58 §6.8-5）：从筛选牌组进入「集中复习」（按范围开会话；App 负责路由） */
-  onStartSession?: (scope: { bookItemIds: string[]; kinds: string[]; name: string }) => void;
+  onStartSession?: (scope: { bookItemIds: string[]; kinds: string[]; name: string; limits?: Record<string, number> | null }) => void;
 }) {
   const [all, setAll] = useState<BrowserCard[]>([]);
   const [preset, setPreset] = useState<Preset>("all");
@@ -139,6 +139,9 @@ export default function CardBrowser({
   // v48.22（D58 §6.8-5）：筛选牌组（复习范围）——存 settings.app.reviewScopes，零 schema 变更（D51 先例）
   const [scopes, setScopes] = useState<SavedScope[]>([]);
   const [deckName, setDeckName] = useState("");
+  // 上限覆写（§6.8-5：范围只能收紧、不能另开预算；0 = 继承全局）
+  const [deckCapExtracts, setDeckCapExtracts] = useState(0);
+  const [deckCapNewCards, setDeckCapNewCards] = useState(0);
   // v48.22（D58 §6.8-6 / O-8 裁定）：摘录正文查找替换（仅选中项、仅正文、纯文本，不做正则）
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
@@ -396,7 +399,9 @@ export default function CardBrowser({
       name,
       bookItemIds: bookScope === "all" ? [] : [bookScope],
       kinds: kindFilter === "both" ? ["card", "extract"] : [kindFilter],
-      limits: null
+      limits: deckCapExtracts > 0 || deckCapNewCards > 0
+        ? { ...(deckCapExtracts > 0 ? { extractReviewsPerDay: deckCapExtracts } : {}), ...(deckCapNewCards > 0 ? { newCardsPerDay: deckCapNewCards } : {}) }
+        : null
     };
     const next = [...scopes, scope];
     await settingsStore.set("app", "reviewScopes", next);
@@ -620,6 +625,29 @@ export default function CardBrowser({
         <button className="btn btn-outline btn-sm" data-deck-save onClick={() => void saveDeck()}>
           保存当前筛选
         </button>
+        <span className="mono">上限覆写</span>
+        <input
+          className="mono input-num"
+          data-deck-cap-extracts
+          type="number"
+          min={0}
+          max={9999}
+          title="该范围的摘录处理上限（0=继承全局；只能收紧）"
+          value={deckCapExtracts}
+          onChange={(e) => setDeckCapExtracts(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))}
+        />
+        <span className="form-hint">摘录/日</span>
+        <input
+          className="mono input-num"
+          data-deck-cap-newcards
+          type="number"
+          min={0}
+          max={9999}
+          title="该范围的新卡上限（0=继承全局；只能收紧）"
+          value={deckCapNewCards}
+          onChange={(e) => setDeckCapNewCards(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))}
+        />
+        <span className="form-hint">新卡/日</span>
         {scopes.map((s) => (
           <span className="cb-deck" data-deck-item key={s.id}>
             <button className="btn btn-outline btn-sm" data-deck-apply title="把浏览器的筛选切到该范围" onClick={() => applyDeck(s)}>
@@ -631,7 +659,7 @@ export default function CardBrowser({
                 className="btn btn-outline btn-sm"
                 data-deck-start
                 title="按该范围开始集中复习（记录照常计入 FSRS）"
-                onClick={() => onStartSession({ bookItemIds: s.bookItemIds, kinds: s.kinds, name: s.name })}
+                onClick={() => onStartSession({ bookItemIds: s.bookItemIds, kinds: s.kinds, name: s.name, limits: (s.limits as Record<string, number> | null) ?? null })}
               >
                 集中复习
               </button>

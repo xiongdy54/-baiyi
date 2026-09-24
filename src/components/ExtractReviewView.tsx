@@ -3,7 +3,7 @@ import ExtractCardFace from "./ExtractCardFace";
 import { cardsApi } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
 import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow";
-import { extractSettings, fetchSessionQueue, type ExtractEngine, type ScopeFilter } from "../lib/sessionQueue";
+import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
 
 interface Props {
   onOpen: (extractId: string) => void;
@@ -14,6 +14,8 @@ interface Props {
   ) => void;
   /** 本书范围（阅读器入口）；缺省＝全部到期摘录（顶栏「摘录」入口） */
   bookItemIds?: string[];
+  /** 筛选牌组的上限覆写（§6.8-5：只收紧，不另开预算） */
+  scopeLimits?: Record<string, number> | null;
   /** 顶部一行上下文（如「集中复习：《书名》」） */
   header?: string;
   onExit?: () => void;
@@ -24,7 +26,7 @@ interface Props {
  * 与复习页共用同一张卡面组件；调度语义＝SuperMemo（下一条＝读后推进、推迟＝指定天数）。
  * 只消费 §4.2-26 的会话队列（禁止自行归并）。
  */
-export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, header, onExit }: Props) {
+export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, scopeLimits, header, onExit }: Props) {
   const [items, setItems] = useState<DueTopic[]>([]);
   const [engine, setEngine] = useState<ExtractEngine>("sm19-default");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
@@ -34,8 +36,12 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, he
   const [undoAvailable, setUndoAvailable] = useState(false);
 
   const scope = useMemo<ScopeFilter>(
-    () => ({ kinds: ["extract"], bookItemIds: bookItemIds && bookItemIds.length ? bookItemIds : undefined }),
-    [bookItemIds]
+    () => ({
+      kinds: ["extract"],
+      bookItemIds: bookItemIds && bookItemIds.length ? bookItemIds : undefined,
+      limits: scopeLimits && Object.keys(scopeLimits).length ? (scopeLimits as Partial<Limits>) : undefined
+    }),
+    [bookItemIds, scopeLimits]
   );
 
   const refresh = useCallback(async () => {

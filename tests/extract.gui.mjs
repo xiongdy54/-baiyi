@@ -249,11 +249,24 @@ try {
     return true;
   })()`);
   await wait(500);
+  // 上限覆写（§6.8-5）：摘录/日 = 1（0 默认 = 继承全局）
+  await cdp.eval(`(() => {
+    const inp = document.querySelector("[data-deck-cap-extracts]");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(inp, "1");
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`);
+  await wait(400);
   const savedDeck = await cdp.eval(`(() => { document.querySelector("[data-deck-save]")?.click(); return true; })()`);
   check("筛选牌组：保存按钮在位可点", savedDeck === true, savedDeck);
   await wait(1500);
   const deckStored = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "reviewScopes") || []))()`);
   check("筛选牌组：已落盘 settings.app.reviewScopes", String(deckStored).includes("GUI 牌组"), String(deckStored).slice(0, 160));
+  check("筛选牌组：上限覆写随牌组落盘（摘录/日=1）", String(deckStored).includes('"extractReviewsPerDay":1'), String(deckStored).slice(0, 200));
+  const cappedSession = await cdp.eval(`(async () => { const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"], limits: { extractReviewsPerDay: 1 } } }); return JSON.stringify({ lim: q.limits.extractReviewsPerDay, n: q.extracts.length }); })()`);
+  const cs = JSON.parse(cappedSession || "{}");
+  check("筛选牌组：会话按覆写上限截断（摘录/日=1 ⇒ 至多 1 条）", cs.lim === 1 && Number(cs.n) <= 1, cappedSession);
   const deckChip = await cdp.eval(`document.querySelector("[data-deck-item]")?.textContent || ""`);
   check("筛选牌组：列表出现该牌组", String(deckChip).includes("GUI 牌组"), deckChip);
   const startBtn = await cdp.eval(`(() => { const b = document.querySelector("[data-deck-start]"); b?.click(); return !!b; })()`);

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>摘录复习：沉浸式页 + 浏览器批量条（v48.22 落地样张）</title>
+<!--
+  说明（v48.22 / D58）：
+  本样张**不是提案**，而是把已落地的两个界面按真实令牌复刻出来，供评审与后续迭代。
+  令牌取自 src/theme.css（亮/暗两套），结构层不出现彩色字面量；交互可直接点。
+  实测数字来自 tests/browser.perf.mjs（3000 卡 + 500 摘录，本机 Win11）：
+    全量取数 IPC 129ms · 进入卡片页首屏 301ms · 筛选重绘 361ms · 切摘录页 406ms
+    DOM 行数被 200 行窗口钉在 ≤201 行（摘录 500 条同样只画 201 行）
+-->
+<style>
+  :root{
+    --paper:#ffffff; --ink:#111111; --text-primary:#111111; --text-helper:#6b6b6b;
+    --border-subtle:#e2e2e2; --border-strong:#9a9a9a; --accent:#0057ff;
+    --fs-body:15px; --fs-meta:12px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-8:32px; --sp-12:48px; --sp-16:64px;
+    --dur:.16s; --ease:cubic-bezier(.2,.6,.2,1);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --paper:#121212; --ink:#f2f2f2; --text-primary:#f2f2f2; --text-helper:#a0a0a0;
+           --border-subtle:#2c2c2c; --border-strong:#5a5a5a; --accent:#7aa2ff; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--text-primary);
+       font:var(--fs-body)/1.7 -apple-system,"Segoe UI","Noto Sans CJK SC",sans-serif}
+  .mono{font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-variant-numeric:tabular-nums}
+  h1{font-size:20px;margin:var(--sp-8) var(--sp-8) var(--sp-2);letter-spacing:-.01em}
+  h2{font-size:var(--fs-meta);text-transform:uppercase;letter-spacing:.12em;color:var(--text-helper);
+     margin:var(--sp-8) var(--sp-8) var(--sp-2);font-weight:600}
+  .note{margin:0 var(--sp-8) var(--sp-4);color:var(--text-helper);font-size:var(--fs-meta);max-width:76ch}
+  button{font:inherit;color:inherit;background:transparent;border:1px solid var(--border-subtle);
+         padding:3px 10px;cursor:pointer;transition:border-color var(--dur) var(--ease)}
+  button:hover{border-color:var(--border-strong)}
+  button.primary{border-color:var(--accent);color:var(--accent)}
+  input[type=number],input.cb-search{border:1px solid var(--border-subtle);background:transparent;
+         color:inherit;font:inherit;padding:3px 6px;min-width:60px}
+  .seg-tabs{display:inline-flex;gap:0}
+  .seg-tabs button{border-right:none}
+  .seg-tabs button:last-child{border-right:1px solid var(--border-subtle)}
+  .seg-tabs button.active{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent)}
+
+  /* ---------- 摘录卡面（src/theme.css 同名块） ---------- */
+  .extract-page{flex:1;min-height:0;overflow-y:auto;padding:var(--sp-12) var(--sp-16) var(--sp-8);display:flex;flex-direction:column}
+  .extract-page-head{width:100%;max-width:720px;margin:0 auto var(--sp-4);display:flex;align-items:center;
+    gap:var(--sp-4);font-size:var(--fs-meta);color:var(--text-helper)}
+  .extract-page-header{color:var(--text-primary)}
+  .extract-page-hint{margin-left:auto}
+  .extract-face{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:var(--sp-4)}
+  .extract-face-meta{display:flex;justify-content:space-between;gap:var(--sp-4);font-size:var(--fs-meta);
+    color:var(--text-helper);border-bottom:1px solid var(--border-subtle);padding-bottom:var(--sp-2)}
+  .extract-face-tags{display:flex;gap:var(--sp-3);align-items:center}
+  .badge-experimental{border:1px solid var(--accent);color:var(--accent);padding:0 var(--sp-2);font-size:var(--fs-meta)}
+  .extract-face-body{font-size:var(--fs-body);line-height:1.8;color:var(--text-primary);min-height:120px}
+  .extract-face-text{white-space:pre-wrap}
+  .extract-face-derived{font-size:var(--fs-meta);color:var(--text-helper)}
+  .extract-face-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;
+    border-top:1px solid var(--border-subtle);padding-top:var(--sp-4)}
+  .extract-postpone,.extract-priority{display:inline-flex;align-items:center;gap:var(--sp-2);
+    font-size:var(--fs-meta);color:var(--text-helper)}
+  .extract-postpone input{width:64px}
+  .extract-face-hints{display:flex;gap:var(--sp-2);align-items:center;font-size:var(--fs-meta);color:var(--text-helper)}
+
+  /* ---------- 浏览器批量条与多选列（src/theme.css 同名块） ---------- */
+  .cb-table{border-top:1px solid var(--border-subtle)}
+  .cb-row{display:grid;grid-template-columns:22px 1fr 90px 70px 110px 140px 96px;gap:var(--sp-3);
+    align-items:center;padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--border-subtle);font-size:var(--fs-meta)}
+  .cb-row-head{color:var(--text-helper);text-transform:uppercase;letter-spacing:.08em}
+  .cb-row.is-selected{border-color:var(--accent)}
+  .cb-pick{width:22px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 22px}
+  .cb-pick input{margin:0}
+  .cb-batch{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;
+    padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--border-subtle);
+    font-size:var(--fs-meta);color:var(--text-helper)}
+  .cb-front{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cb-src{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-helper)}
+  .cb-num{text-align:right}
+  .wrap{padding:0 var(--sp-8)}
+</style>
+</head>
+<body>
+  <h1>摘录复习：沉浸式页 + 浏览器批量条</h1>
+  <p class="note">
+    令牌逐条取自 <span class="mono">src/theme.css</span>（亮/暗随系统）。以下为**已落地**形态的可交互复刻：
+    沉浸式摘录页（一屏一条、正文可就地编辑、动作集固定）与卡片浏览器的批量条 + 摘录表（多选/全选/批量/查找替换）。
+    实测（3000 卡 + 500 摘录）：全量取数 129ms · 首屏 301ms · 筛选重绘 361ms · 切摘录页 406ms；DOM 行数被 200 行窗口钉在 ≤201。
+  </p>
+
+  <h2>一 · 沉浸式摘录连续处理页（顶栏「摘录」）</h2>
+  <div class="extract-page">
+    <div class="extract-page-head">
+      <span class="mono">3 条待处理</span>
+      <span class="mono extract-page-header">集中复习：《认知负荷与学习》</span>
+      <span class="extract-page-hint mono">空格＝下一条 · Z＝撤销 · 正文可直接编辑</span>
+    </div>
+    <div class="extract-face">
+      <div class="extract-face-meta">
+        <span>来自《认知负荷与学习》 · 第2层摘录</span>
+        <span class="extract-face-tags">
+          <span class="mono">在读</span><span class="mono">优先级 30</span><span class="mono">16 天后推送</span>
+          <span class="badge-experimental">实验引擎</span>
+        </span>
+      </div>
+      <div class="extract-face-body" contenteditable="true" spellcheck="false">
+内在负荷由材料本身的结构决定，外在负荷才是设计要削减的对象——把两者混为一谈，会让「降低难度」变成「删掉内容」。
+      </div>
+      <div class="extract-face-derived mono">已就此摘录制卡 2 张</div>
+      <div class="extract-face-actions">
+        <button class="primary" onclick="alert('下一条 = 读后推进：interval ×= a_factor（默认 1.6），process_count++')">下一条</button>
+        <span class="extract-postpone"><input type="number" value="7" /><span class="mono">天后</span><button onclick="alert('推迟为覆盖式：next_at = now + N 天')">推迟</button></span>
+        <span class="extract-priority"><button>优先级 30</button></span>
+        <button onclick="alert('在阅读器中打开这条摘录（可就地制卡）')">打开摘录</button>
+        <button onclick="alert('跳回材料原位置；跳转不写阅读进度（§H.1）')">跳转原文</button>
+        <button onclick="alert('毕业后不再推送，但保留在卡片浏览器里')">毕业</button>
+        <button onclick="alert('撤销最近一次操作（跨卡片与摘录）')">撤销</button>
+      </div>
+      <div class="extract-face-hints mono">
+        快捷推迟：<button>1 天</button><button>3 天</button><button>7 天</button><button>30 天</button>
+      </div>
+    </div>
+  </div>
+
+  <h2>二 · 卡片浏览器：批量条 + 摘录表（顶栏「卡片」）</h2>
+  <div class="wrap">
+    <div class="cb-batch">
+      <div class="seg-tabs"><button>闪卡</button><button class="active">摘录</button><button>全部</button></div>
+      <button>全选摘录</button><button>反选摘录</button>
+      <span class="mono">已选 闪卡 0 · 摘录 2</span>
+      <button>推迟 7 天</button><button>优先级 30</button><button>优先级 70</button>
+      <button>毕业</button><button>召回</button><button>归档</button><button>不再关心</button><button>删除</button>
+      <input class="cb-search" placeholder="查找" style="max-width:120px" />
+      <input class="cb-search" placeholder="替换为" style="max-width:120px" />
+      <button>正文查找替换</button>
+    </div>
+    <div class="cb-table">
+      <div class="cb-row cb-row-head">
+        <span class="cb-pick">选</span><span>摘录内容</span><span>状态</span>
+        <span class="cb-num">优先</span><span>下次推送</span><span>来源</span><span>操作</span>
+      </div>
+      <div class="cb-row is-selected">
+        <span class="cb-pick"><input type="checkbox" checked /></span>
+        <span class="cb-front">内在负荷由材料本身的结构决定，外在负荷才是设计要削减的对象…</span>
+        <span>在读</span><span class="cb-num mono">30 ·改</span><span class="mono">16 天后推送</span>
+        <span class="cb-src">认知负荷与学习</span><button>跳转原文</button>
+      </div>
+      <div class="cb-row is-selected">
+        <span class="cb-pick"><input type="checkbox" checked /></span>
+        <span class="cb-front">提取练习的收益大于重复阅读，但两者常被学习者的主观流畅感颠倒…</span>
+        <span>待处理</span><span class="cb-num mono">50</span><span class="mono">现已到期</span>
+        <span class="cb-src">认知负荷与学习</span><button>跳转原文</button>
+      </div>
+      <div class="cb-row">
+        <span class="cb-pick"><input type="checkbox" /></span>
+        <span class="cb-front">间隔效应的边界：间隔长度应与保持时间同阶…</span>
+        <span>已毕业</span><span class="cb-num mono">70</span><span class="mono">—</span>
+        <span class="cb-src">记忆的边界</span><span class="mono">—</span>
+      </div>
+      <div class="cb-row">
+        <span class="cb-front" style="grid-column:2 / -1">
+          <button>显示更多（还有 297 行）</button>
+        </span>
+      </div>
+    </div>
+    <p class="note" style="margin-left:0">
+      多选：行内复选框 · Ctrl/⌘ 点选 · Shift 范围选 · 全选/反选 · 清除。批量＝单事务（摘录带单 batch_id，Ctrl+Z 整批回退）。
+      查询语法：<span class="mono">-乙</span> 排除 · <span class="mono">kind:extract</span> 切页签 · <span class="mono">book:书名</span> ·
+      <span class="mono">priority&lt;=30</span>；未实现 <span class="mono">type:</span> / <span class="mono">tag:</span> / or / 括号 / 通配（文档已标注）。
+    </p>
+  </div>
+</body>
+</html>
