@@ -584,6 +584,9 @@ export default function CardBrowser({
                 <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 70 })}>优先级 70</button>
                 <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>毕业</button>
                 <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>召回</button>
+                {/* v48.22（D58 §6.4.2）：状态机另两个出口——归档（留痕）/ 不再关心（可召回） */}
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive onClick={() => void runExtractBatch("set_status", { status: "archived" })}>归档</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "dismissed" })}>不再关心</button>
                 <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>删除</button>
                 <input className="cb-search cb-find" data-find-input placeholder="查找" value={findText} onChange={(e) => setFindText(e.target.value)} />
                 <input className="cb-search cb-find" data-replace-input placeholder="替换为" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} />

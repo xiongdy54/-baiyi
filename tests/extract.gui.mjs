@@ -194,6 +194,22 @@ try {
   check("浏览器：批量召回提示可见", String(recallNote).includes("已处理"), recallNote);
   const statusAfterRecall = await cdp.eval(`(async () => (await window.workflowAPI.get(${JSON.stringify(b.id)}))?.status)()`);
   check("浏览器：批量召回已落库（status=open）", statusAfterRecall === "open", statusAfterRecall);
+  // 归档出口（§6.4.2）：状态落 archived 且不再进到期队列；随后召回还原
+  await cdp.eval(`(() => { document.querySelector("[data-sel-all-extracts]")?.click(); return true; })()`);
+  await wait(700);
+  const archClicked = await cdp.eval(`(() => { const btns = [...document.querySelectorAll("[data-batch-bar] button")]; const b2 = btns.find((x) => x.textContent.trim() === "归档"); b2?.click(); return !!b2; })()`);
+  check("浏览器：「归档」按钮在位可点", archClicked === true, archClicked);
+  await wait(1600);
+  const archState = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(b.id)}); const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"] } }); return JSON.stringify({ status: d?.status, inQueue: q.extracts.some((e) => e.id === ${JSON.stringify(b.id)}) }); })()`);
+  const as = JSON.parse(archState || "{}");
+  check("浏览器：归档后状态=archived 且不进到期队列", as.status === "archived" && as.inQueue === false, archState);
+  // 还原（后续步骤依赖该摘录在到期队列里）
+  await cdp.eval(`(() => { document.querySelector("[data-sel-all-extracts]")?.click(); return true; })()`);
+  await wait(700);
+  await cdp.eval(`(() => { const btns = [...document.querySelectorAll("[data-batch-bar] button")]; const b3 = btns.find((x) => x.textContent.trim() === "召回"); b3?.click(); return !!b3; })()`);
+  await wait(1600);
+  const restored = await cdp.eval(`(async () => (await window.workflowAPI.get(${JSON.stringify(b.id)}))?.status)()`);
+  check("浏览器：归档后召回还原为 open（供后续步骤使用）", restored === "open", restored);
   await cdp.eval(`(() => { document.querySelector("[data-kind-card]")?.click(); return true; })()`);
   await wait(1200);
   await cdp.eval(`(() => { document.querySelector("[data-sel-all-cards]")?.click(); return true; })()`);
