@@ -24,7 +24,7 @@ import {
   type LimitsState,
   type InterleaveMode
 } from "../lib/sessionQueue";
-import type { ExtractEngine } from "../lib/readingWorkflow";
+import { rerankExtractsNow, type ExtractEngine } from "../lib/readingWorkflow";
 
 export type ThemeMode = "light" | "dark";
 
@@ -561,6 +561,22 @@ function SiblingBurySection() {
 function ExtractReviewSection() {
   const [cfg, setCfg] = useState<{ mergeIntoReview: boolean; interleave: InterleaveMode; engine: ExtractEngine } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
+  const [rerankNote, setRerankNote] = useState<string | null>(null);
+  const [busyRerank, setBusyRerank] = useState(false);
+  async function runRerank() {
+    setBusyRerank(true);
+    setRerankNote(null);
+    try {
+      const r = await rerankExtractsNow();
+      if (!r.ok) setRerankNote(`未能重排：${r.reason || "未知原因"}`);
+      else if (r.usedAI) setRerankNote(`已按 AI 重排 ${r.count} 条（之后的摘录写操作会自动刷新）`);
+      else setRerankNote(`未采用 AI 结果：${r.reason || "输出未通过本地裁决"}——当前用本地因子序`);
+    } catch (e) {
+      setRerankNote(`重排失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusyRerank(false);
+    }
+  }
   useEffect(() => {
     void extractSettings.read().then(setCfg);
   }, []);
@@ -614,12 +630,21 @@ function ExtractReviewSection() {
             />
           </div>
           {cfg.engine === "ai-next-extract" && (
-            <p className="form-hint">
-              实验功能 · 早期开发阶段：实验引擎当前按**本地因子**对到期摘录重排（优先级 / 逾期时长 / 搁置次数 / 同书连击降权）
-              并给出逐条可验证理由（数字取自该条自身，禁编造）。**AI 语义重排与知识前置（Frontier）因子尚未接入**——
-              它们需要 K4–K5 的知识模型数据才有依据，在那之前不做无依据的重排。切换为无损操作：两套引擎各自记账，
-              切回 SuperMemo 时调度状态逐字段复原，不会丢数据。
-            </p>
+            <>
+              <div className="settings-row">
+                <span>AI 重排</span>
+                <button className="btn btn-outline btn-sm" data-rerank-now disabled={busyRerank} onClick={() => void runRerank()}>
+                  立即重排（对当前到期批）
+                </button>
+              </div>
+              {rerankNote && <p className="form-hint">{rerankNote}</p>}
+              <p className="form-hint">
+                实验功能 · 早期开发阶段：实验引擎按**本地因子**排序（优先级 / 逾期时长 / 搁置次数 / 同书连击降权）并给逐条可验证理由；
+                配置 AI Key 后还可跑一次 **AI 重排**——它只影响**处理顺序**，输出经本地裁决器过滤（越界 id 丢弃、理由里编造的数字清空、任何失败回退本地序），
+                因此不会污染调度字段。**知识前置（Frontier）因子仍未接入**（需 K4–K5 的知识模型数据）。
+                切回 SuperMemo 是无损操作：两套引擎各自记账，调度状态逐字段复原。
+              </p>
+            </>
           )}
         </>
       )}

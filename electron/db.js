@@ -33,6 +33,8 @@ const {
   MATERIAL_MAP_GLOBAL_PROMPT,
   MATERIAL_MAP_EDITORIAL_PROMPT,
   MATERIAL_MAP_REVIEW_PROMPT,
+  // v48.22（D58 / E1）：摘录重排 scope
+  EXTRACT_RERANK_PROMPT,
   SITUATION_REQUIRED_SCOPES,
   situationRequiredFor
 } = require("./prompts");
@@ -43,7 +45,7 @@ const { journalDateOf, isJournalDate } = require("./journalTime");
 const { normalizeKpLabel, kpClusterKeyFor, kpProposalFingerprint, isOpaqueClusterId } = require("./kpNorm");
 const { readSettings, writeSettings } = require("./settingsStore");
 // v48.22（D58 §6.4.1 E1）：实验推送引擎的本地因子层（纯函数，零 IO）
-const { rankExtracts } = require("./aiNextExtract");
+const { rankExtracts, rerankFingerprint } = require("./aiNextExtract");
 const {
   DEFAULT_CONFIG_ID,
   ALGORITHM,
@@ -1983,6 +1985,17 @@ function ensurePromptTemplates() {
   // v29（D26）：card-occlusion v2——内容感知混合卡型（每卡自带 regions/qa 看图问答）。
   // 主软件直插候选版（用户真实书籍实测反馈即闭环输入，后续调优走测试台）；v1 留痕。
   // （v2 播种块已由 v3 取代：v29 时期播种过 v2 的库自然留痕；全新库直接 v1→v3）
+  // v48.22（D58 §6.8-4，E1）：**新 scope** `extract-rerank` 首版 v1——摘录到期批的 AI 重排与解释。
+  // 与制卡族 TARGET_VERSION 无关（不动它，避免整族重播）；出层契约见 kpScopes.validateExtractRerankOutput。
+  try {
+    const rerankCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'extract-rerank'")[0]?.n || 0;
+    if (Number(rerankCount) === 0) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'extract-rerank', '摘录重排 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), EXTRACT_RERANK_PROMPT, situationRequiredFor("extract-rerank"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
   const occMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'card-occlusion'")[0]?.v || 0;
   // v30（D29）：card-occlusion v3——增归属锚条款（论证/理论/学说/观点性内容标明提出者）。
   if (Number(occMaxV) < 3) {
@@ -3113,6 +3126,49 @@ function applyScope(items, scope, kind) {
   return out;
 }
 
+/** AI 重排缓存（派生缓存、可重算；**不是调度真源**）：存 settings.app.extracts.aiRerank */
+function readAiRerank() {
+  try {
+    const cache = readSettings().app?.extracts?.aiRerank;
+    if (!cache || typeof cache !== "object") return null;
+    if (typeof cache.fingerprint !== "string" || !Array.isArray(cache.order)) return null;
+    const order = cache.order
+      .filter((o) => o && typeof o.id === "string")
+      .map((o) => ({ id: String(o.id), reason: typeof o.reason === "string" ? o.reason : "" }));
+    if (order.length === 0) return null;
+    return { fingerprint: cache.fingerprint, at: Number(cache.at) || 0, order };
+  } catch {
+    return null;
+  }
+}
+
+/** 写入 AI 重排缓存（由主进程在 AI 调用成功后调用；指纹不匹配即视为失效） */
+function saveAiRerank(fingerprint, order) {
+  const all = readSettings();
+  const appLayer = all.app && typeof all.app === "object" && !Array.isArray(all.app) ? { ...all.app } : {};
+  const exLayer = appLayer.extracts && typeof appLayer.extracts === "object" && !Array.isArray(appLayer.extracts) ? { ...appLayer.extracts } : {};
+  exLayer.aiRerank = {
+    fingerprint: String(fingerprint),
+    at: Date.now(),
+    order: (Array.isArray(order) ? order : []).slice(0, 40).map((o) => ({ id: String(o.id), reason: String(o.reason ?? "").slice(0, 120) }))
+  };
+  appLayer.extracts = exLayer;
+  all.app = appLayer;
+  writeSettings(all);
+  return exLayer.aiRerank;
+}
+
+/** 应用 AI 重排：只认指纹匹配的缓存；未提及的条目按本地序追加（不丢条） */
+function applyAiRerank(items, cache) {
+  if (!cache || cache.fingerprint !== rerankFingerprint(items)) return items;
+  const pos = new Map(cache.order.map((o, i) => [o.id, i]));
+  const reason = new Map(cache.order.filter((o) => o.reason).map((o) => [o.id, o.reason]));
+  return items
+    .map((e, i) => ({ e, key: pos.has(e.id) ? pos.get(e.id) : Number.MAX_SAFE_INTEGER, i }))
+    .sort((a, b) => a.key - b.key || a.i - b.i)
+    .map(({ e }) => (reason.has(e.id) ? { ...e, aiReason: reason.get(e.id), engineReason: `AI：${reason.get(e.id)}｜${e.engineReason}` } : e));
+}
+
 /**
  * 会话队列（§6.8-3）：卡片 ∪ 摘录的**唯一装配面**（§4.2-26）。
  * **只影响展示、零调度写入**——未放行的条目在库内仍 due（先例＝§4.16 同源延后）。
@@ -3160,7 +3216,11 @@ function computeSessionQueue(nowTs, opts) {
     let due = applyScope(listDueExtracts(now), scope, "extract");
     // v48.22（D58/D59）：实验引擎生效时按**本地因子**重排（§6.4.1 两段式 E1，确定性、零 IO）；
     // 默认引擎保持 SQL 原序（priority ASC, topic_next_at ASC），存量行为零变更
-    if (sessionEngine === ENGINE_AI) due = rankExtracts(due, now);
+    if (sessionEngine === ENGINE_AI) {
+      due = rankExtracts(due, now);
+      // E1 的 AI 层：消费主进程写下的重排缓存（指纹不符＝候选已变 ⇒ 忽略，回退本地序）
+      due = applyAiRerank(due, readAiRerank());
+    }
     let extractBudget = remaining.extractReviews;
     let newExtractBudget = newBlocked ? 0 : remaining.newExtracts;
     for (const e of due) {
@@ -5790,6 +5850,9 @@ module.exports = {
   readLimits,
   readReviewScopes,
   readSessionPrefs,
+  readAiRerank,
+  saveAiRerank,
+  getActiveExtractEngine: () => getActiveEngine(),
   computeSessionQueue,
   setLibraryItemPriority,
   getLastUndoableReview,

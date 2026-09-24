@@ -32,6 +32,7 @@ declare global {
       remove: (id: string) => Promise<unknown>;
       batch: (op: string, ids: string[], payload?: unknown) => Promise<unknown>;
       switchEngine: (to: string, from?: string) => Promise<unknown>;
+      rerankNow: () => Promise<{ ok: boolean; usedAI?: boolean; count?: number; reason?: string; issues?: unknown[] }>;
     };
     limitsAPI?: {
       usage: (now?: number) => Promise<unknown>;
@@ -196,6 +197,12 @@ export const readingWorkflow: ReadingWorkflowProvider = sm19Provider;
 export async function getLimitsUsage(now?: number): Promise<ExtractDailyUsage | null> {
   if (!window.limitsAPI) return null;
   return (await window.limitsAPI.usage(now)) as ExtractDailyUsage;
+}
+
+/** 手动跑一次 AI 重排（E1；实验引擎生效时才有意义；无 Key 会如实返回 reason） */
+export async function rerankExtractsNow(): Promise<{ ok: boolean; usedAI?: boolean; count?: number; reason?: string }> {
+  if (!window.workflowAPI?.rerankNow) return { ok: false, reason: "API 不可用" };
+  return (await window.workflowAPI.rerankNow()) as { ok: boolean; usedAI?: boolean; count?: number; reason?: string };
 }
 
 export interface UndoInfo {

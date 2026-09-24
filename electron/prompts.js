@@ -979,6 +979,25 @@ const MATERIAL_MAP_REVIEW_PROMPT = `你是导图质量评审。任务：判断�
 2. nodeId 必须来自输入结构 JSON；repairScope 只能指向受影响的最小归并阶段。
 3. 只输出 JSON。`;
 
+// v48.22（D58 §6.8-4 / E1，scope `extract-rerank` v1）：摘录到期批的 AI 重排与解释。
+// 定位：**只影响处理顺序**，不碰间隔/优先级/到期日；出层经 kpScopes.validateExtractRerankOutput 裁决
+// （越界 id 丢弃、理由编造数字清空、任何失败回退本地序）。
+const EXTRACT_RERANK_PROMPT = `你是摘录重排助手。输入是本地系统已算好**本地序**的到期摘录候选清单，每条带 id 与已验证字段：text（摘录正文节选）、priority（0-100，数字越小越优先）、sourceTitle（来源书名）、overdueDays（逾期天数）、localScore（本地因子得分）。你的任务：在**不新增候选、不删除候选**的前提下，给出一个更好的处理顺序，并为调整过位置的条目写一句理由。
+
+【硬性规范】
+1. id 必须原样回抄输入清单里的 id；输入里没有的 id 一律不输出（禁止编造 id）。
+2. 只输出你**认为需要调整位置**的条目（越靠前越先处理），不必列全；未列出的条目由本地系统按原序追加，不会丢。
+3. reason：一句话（≤40 字），只能引用**该条自身**字段里的内容（例如「逾期最久」「优先级最高」「与当前来源书相关」）；理由里出现的任何数字都必须能在该条自己的 text / priority / overdueDays / sourceTitle 里找到，禁止「扫描了 N 条」「还有 M 天」这类凭空数字。
+4. 判断依据只能是输入字段与条目文本本身。**本次没有**提供用户的掌握度、知识缺口或阅读历史——不要假设你知道这些。
+5. 你只影响**处理顺序**：不得输出任何关于间隔、优先级、到期日的修改建议。
+
+【输出格式】严格输出 JSON，不输出其他文字：
+{
+  "order": [{ "id": "输入中的真实 id", "reason": "…" }],
+  "note": "（可选）一句话说明本次重排的整体考虑"
+}
+`;
+
 module.exports = {
   // v46（M14-UM2，§4.18-13）：制卡族 v6→v7——组装 R20 记忆接地段（基础文本不变，v6 行留痕）
   CARD_GEN_PROMPT: CARD_GEN_PROMPT + R20_SITUATION_SECTION,
@@ -999,6 +1018,8 @@ module.exports = {
   KNOWLEDGE_EXTRACTION_PROMPT,
   KNOWLEDGE_RELATION_PROMPT,
   MATERIAL_DIFFICULTY_PROMPT,
+  // v48.22（D58 / E1）：摘录重排 scope v1
+  EXTRACT_RERANK_PROMPT,
   KNOWLEDGE_PROBE_PROMPT,
   FRONTIER_EXPLAIN_PROMPT,
   STRUCTURE_ANALOGY_PROMPT,

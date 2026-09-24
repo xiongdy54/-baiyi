@@ -65,7 +65,9 @@ contextBridge.exposeInMainWorld("workflowAPI", {
   setStatus: (id, status, detail, opType) => ipcRenderer.invoke("extracts:setStatus", id, status, detail, opType),
   remove: (id) => ipcRenderer.invoke("extracts:delete", id),
   batch: (op, ids, payload) => ipcRenderer.invoke("extracts:batch", op, ids, payload),
-  switchEngine: (to, from) => ipcRenderer.invoke("extracts:switchEngine", to, from)
+  switchEngine: (to, from) => ipcRenderer.invoke("extracts:switchEngine", to, from),
+  // v48.22（D58 §6.4.1 E1）：手动跑一次 AI 重排（写路径后另有自动刷新）
+  rerankNow: () => ipcRenderer.invoke("extracts:rerankNow")
 });
 
 // v48.22（D58 §6.8-5/§6.8-7）：只读用量 + 跨类撤销（卡片评分与摘录操作共用一个撤销栈）

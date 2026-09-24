@@ -416,6 +416,29 @@ app.whenReady().then(async () => {
     check("批量删除：三张都取不到（软删）", bIds17.every((id) => db.getCard(id) === null), true, bIds17.map((id) => db.getCard(id)));
     check("批量删除后队列不含它们", db.listAllCards().every((c) => !bIds17.includes(c.id)), true, bIds17.length);
 
+    // ---------------------------------------------------------------- E19
+    console.log("== E19 AI 重排缓存（E1 第二半）：指纹匹配才生效、过期即忽略 ==");
+    setLimits({});
+    const e19Ids = [0, 1, 2].map((i) => mkExtract(bookA.documentId, `E19 摘录 ${i}`, 50));
+    e19Ids.forEach((id) => makeDue(id, T - 1000));
+    db.switchExtractEngine("ai-next-extract");
+    const { rerankFingerprint } = require(path.join(ROOT, "electron", "aiNextExtract.js"));
+    const pool19 = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    const ids19 = pool19.extracts.map((e) => e.id);
+    check("前置：至少 2 条可重排（防空转）", ids19.length >= 2, ">=2", ids19.length);
+    const fp19 = rerankFingerprint(db.listDueExtracts(T));
+    db.saveAiRerank(fp19, [{ id: ids19[1], reason: "先做这条" }, { id: ids19[0], reason: "再做这条" }]);
+    const applied19 = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    check("指纹匹配：按 AI 缓存重排（前两位交换）", applied19.extracts[0].id === ids19[1] && applied19.extracts[1].id === ids19[0], `${ids19[1]},${ids19[0]}`, applied19.extracts.slice(0, 2).map((e) => e.id).join(","));
+    check("AI 理由已带出（engineReason 以 AI：开头）", String(applied19.extracts[0].engineReason).startsWith("AI："), applied19.extracts[0].engineReason);
+    check("未提及的条目仍保留（不丢条）", applied19.extracts.length === pool19.extracts.length, pool19.extracts.length, applied19.extracts.length);
+    db.saveAiRerank("stale-fingerprint", [{ id: ids19[1], reason: "x" }]);
+    const ignored19 = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    check("指纹不符：缓存被忽略（回退本地序）", !String(ignored19.extracts[0].engineReason).startsWith("AI："), "本地理由", ignored19.extracts[0].engineReason);
+    db.saveAiRerank(fp19, []);
+    check("缓存清空后 readAiRerank 返回 null（空序不算缓存）", db.readAiRerank() === null, null, db.readAiRerank());
+    db.switchExtractEngine("sm19-default", "ai-next-extract");
+
     console.log(`\n==== extracts.test：${pass} 通过 / ${fail} 失败 ====`);
   } catch (e) {
     console.error("测试异常：", e && e.stack || e);

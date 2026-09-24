@@ -60,6 +60,9 @@ const {
   getLimitsState,
   validateLimits,
   computeSessionQueue,
+  readAiRerank,
+  saveAiRerank,
+  getActiveExtractEngine,
   undoLast,
   getUndoInfo,
   getLastUndoableReview,
@@ -89,6 +92,8 @@ const {
   findSimilarCards
 } = require("./db");
 const { getAIConfig, setAIConfig, chatStream, testConnection, listModels } = require("./ai");
+// v48.22（D58 / E1）：AI 重排的本地裁决与指纹（与 db 侧同一份实现）
+const { rankWithAI, rerankFingerprint } = require("./aiNextExtract");
 const dbModule = require("./db");
 const optimizer = require("./optimizer");
 const backup = require("./backup");
@@ -469,15 +474,61 @@ ipcMain.handle("extracts:postpone", (_e, id) => postponeExtract(String(id)));
 // 写路径纪律沿用 §4.4.9：BEGIN/COMMIT → COMMIT 后 persist → IPC 成功，三者齐才算成功；
 // 失败一律以 reject 上抛，渲染层按既有「保存失败横幅 + 重试」处理，禁止静默降级。
 ipcMain.handle("extracts:postponeDays", (_e, id, days) => postponeExtractDays(String(id), days));
-ipcMain.handle("extracts:advance", (_e, id, now) => advanceExtract(String(id), now));
+// v48.22（D58 §6.8-4）：写路径后置一次「过期即刷新」（只在实验引擎生效时真正发起）
+const extractWrite = (fn) => (...args) => {
+  const out = fn(...args);
+  maybeRefreshAiRerank();
+  return out;
+};
+ipcMain.handle("extracts:advance", extractWrite((_e, id, now) => advanceExtract(String(id), now)));
 ipcMain.handle("extracts:update", (_e, id, patch) => updateExtract(String(id), patch || {}));
 ipcMain.handle("extracts:setPriority", (_e, id, priority) => setExtractPriority(String(id), priority));
-ipcMain.handle("extracts:setStatus", (_e, id, status, detail, opType) =>
+ipcMain.handle("extracts:setStatus", extractWrite((_e, id, status, detail, opType) =>
   setExtractStatus(String(id), String(status), detail || null, opType ? String(opType) : undefined)
-);
+));
 ipcMain.handle("extracts:delete", (_e, id) => deleteExtract(String(id)));
-ipcMain.handle("extracts:batch", (_e, op, ids, payload) => batchExtractOps(String(op), ids, payload));
-ipcMain.handle("extracts:switchEngine", (_e, to, from) => switchExtractEngine(to, from));
+ipcMain.handle("extracts:batch", extractWrite((_e, op, ids, payload) => batchExtractOps(String(op), ids, payload)));
+ipcMain.handle("extracts:switchEngine", extractWrite((_e, to, from) => switchExtractEngine(to, from)));
+
+// v48.22（D58 §6.4.1 E1）：AI 重排（到期批 → 模型 → 本地裁决 → 写缓存；缓存由会话队列同步读取）。
+// 任何失败都不影响主流程：会话队列在无缓存/指纹不符时用本地因子序。
+async function runExtractRerank() {
+  const due = listDueExtracts();
+  if (due.length === 0) return { ok: false, usedAI: false, reason: "当前没有到期的摘录" };
+  const tpl = getPromptTemplate("extract-rerank");
+  const sys = typeof tpl === "string" ? tpl : tpl && tpl.content;
+  if (!sys) return { ok: false, usedAI: false, reason: "未播种 extract-rerank 提示词" };
+  const cfg = getAIConfig();
+  if (cfg.preset !== "local" && !cfg.apiKey) return { ok: false, usedAI: false, reason: "未配置 AI Key（保持本地因子序）" };
+  const callAI = async ({ candidates }) => {
+    const reply = await mindmapChat({ system: sys, user: JSON.stringify({ candidates }), temperature: 0.1 });
+    return reply.text;
+  };
+  const { items, usedAI, issues } = await rankWithAI(due, Date.now(), callAI);
+  if (usedAI) {
+    saveAiRerank(
+      rerankFingerprint(due),
+      items.filter((e) => e.aiReason).map((e) => ({ id: e.id, reason: e.aiReason }))
+    );
+  }
+  return { ok: true, usedAI, count: items.length, issues };
+}
+
+ipcMain.handle("extracts:rerankNow", () => runExtractRerank());
+
+/** 写路径后的后台刷新：仅在实验引擎生效且缓存过期时触发一次（绝不阻塞主流程） */
+function maybeRefreshAiRerank() {
+  try {
+    if (getActiveExtractEngine() !== "ai-next-extract") return;
+    const due = listDueExtracts();
+    if (due.length === 0) return;
+    const cache = readAiRerank();
+    if (cache && cache.fingerprint === rerankFingerprint(due)) return;
+    void runExtractRerank().catch(() => {});
+  } catch {
+    /* 后台刷新失败不影响主流程 */
+  }
+}
 ipcMain.handle("limits:usage", (_e, now) => getDailyUsage(now));
 ipcMain.handle("limits:state", (_e, now) => getLimitsState(now));
 ipcMain.handle("limits:validate", (_e, patch) => validateLimits(patch));

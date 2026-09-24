@@ -7,6 +7,8 @@
 //    前者若在无 K4–K5 知识模型数据时硬做，就是没有依据的重排，违反本项目「AI 只提议、须有依据」的纪律；
 //    故两者一并等 K4–K5 落地后按 E2 补齐（设置页已如实标注）。
 
+const { validateExtractRerankOutput } = require("./kpScopes");
+
 const DAY = 86400000;
 const STALE_WINDOW_DAYS = 30;   // 逾期加成窗口：30 天封顶（本项目产品选择，无外部依据）
 const POSTPONE_SATURATION = 10; // 推迟计数饱和点（之后不再加分）
@@ -82,4 +84,60 @@ function rankExtracts(items, nowTs) {
   }));
 }
 
-module.exports = { scoreExtracts, explainExtract, rankExtracts, STALE_WINDOW_DAYS, DIVERSITY_PENALTY };
+/** 候选指纹：用于判断缓存的 AI 重排是否还新鲜（候选集合或关键字段一变即失效） */
+function rerankFingerprint(items) {
+  const list = Array.isArray(items) ? items : [];
+  return list
+    .map((e) => `${e.id}:${e.priority}:${Number(e.topicNextAt) || 0}:${String(e.contentMarkdown ?? "").length}`)
+    .sort()
+    .join("|");
+}
+
+/**
+ * E1 的 AI 层（§6.4.1 两段式）：把**本地序**交给模型重排并要一句理由，全部经本地裁决器过滤。
+ * callAI 由调用方注入（主进程传真实网关、测试传假函数）⇒ 本函数本身仍是纯逻辑、可单测。
+ * 任何失败（调用异常 / 输出不可解析 / 全员越界）**一律回退本地序**，并如实回报 issues。
+ */
+async function rankWithAI(items, nowTs, callAI) {
+  const now = Number(nowTs) || Date.now();
+  const local = rankExtracts(items, now);
+  if (typeof callAI !== "function" || local.length === 0) {
+    return { items: local, usedAI: false, issues: [{ code: "AI_UNAVAILABLE", message: "未提供 AI 调用或候选为空" }] };
+  }
+  const candidates = local.slice(0, 20).map((e) => ({
+    id: e.id,
+    text: String(e.contentMarkdown ?? "").slice(0, 160),
+    priority: e.priority,
+    sourceTitle: e.docTitle ?? "",
+    overdueDays: Math.max(0, Math.round((now - (Number(e.topicNextAt) || now)) / DAY)),
+    localScore: e.engineScore
+  }));
+  let raw = null;
+  try {
+    raw = await callAI({ candidates });
+  } catch (err) {
+    return { items: local, usedAI: false, issues: [{ code: "AI_CALL_FAILED", message: String((err && err.message) || err) }] };
+  }
+  const { value, issues } = validateExtractRerankOutput(raw, { candidates });
+  if (!value) return { items: local, usedAI: false, issues };
+  // AI 只重排「它看过的那 20 条」；没提到的按本地序追加（**不丢条**），超出 20 条的一律保持本地序
+  const pos = new Map(value.order.map((o, i) => [o.id, i]));
+  const aiReason = new Map(value.order.filter((o) => o.reason).map((o) => [o.id, o.reason]));
+  const out = local
+    .map((e, i) => ({ e, key: pos.has(e.id) ? pos.get(e.id) : Number.MAX_SAFE_INTEGER, i }))
+    .sort((a, b) => a.key - b.key || a.i - b.i)
+    .map(({ e }) =>
+      aiReason.has(e.id) ? { ...e, aiReason: aiReason.get(e.id), engineReason: `AI：${aiReason.get(e.id)}｜${e.engineReason}` } : e
+    );
+  return { items: out, usedAI: true, issues };
+}
+
+module.exports = {
+  scoreExtracts,
+  explainExtract,
+  rankExtracts,
+  rankWithAI,
+  rerankFingerprint,
+  STALE_WINDOW_DAYS,
+  DIVERSITY_PENALTY
+};
