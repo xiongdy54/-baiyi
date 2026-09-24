@@ -1207,9 +1207,14 @@ function mapCardRow(r) {
       } else {
         const lr = f.lastReview === null || f.lastReview === undefined ? null : Number(f.lastReview);
         const S = Number(f.stability), D = Number(f.difficulty), due = Number(f.due);
+        // v48.22 修正（实测逼出）：**新卡豁免值域下界**——ts-fsrs 的新卡 S/D 恒为 0
+        // （src/lib/fsrs.ts 明写「新卡的 S/D 合法为 0（首评前），不能无条件钳进 [1,10]」），
+        // 而原判据不区分 state，会把这种合法新卡判成 damaged 并从队列**静默缺席**
+        // （m12 夹具 17 条断言因此全红）。非新卡仍按原值域严格判定，F34 的保护不变。
+        const isNewState = f.state === "new" || f.state === undefined || f.state === null;
         const bad =
-          (f.stability !== undefined && !(Number.isFinite(S) && S > 0)) ||
-          (f.difficulty !== undefined && !(Number.isFinite(D) && D >= 1 && D <= 10)) ||
+          (f.stability !== undefined && !(Number.isFinite(S) && (isNewState ? S >= 0 : S > 0))) ||
+          (f.difficulty !== undefined && !(Number.isFinite(D) && D >= (isNewState ? 0 : 1) && D <= 10)) ||
           (f.due !== undefined && !Number.isFinite(due)) ||
           (lr !== null && !Number.isFinite(lr)) ||
           (f.lapses !== undefined && !(Number(f.lapses) >= 0)) ||
