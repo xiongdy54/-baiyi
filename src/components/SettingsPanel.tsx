@@ -14,6 +14,17 @@ import { FIELD_LABELS } from "./DictPanel";
 import { eventBus } from "../lib/eventbus";
 import { memoryApi, type MemoryPendingStats, type MemoryStatus } from "../lib/memory";
 import { useDialogA11y } from "../lib/dialogA11y";
+// v48.22（D58 §6.8）：摘录复习开关 / 每日上限（写路径经主进程硬边界校验）
+import {
+  extractSettings,
+  fetchLimitsState,
+  validateLimits,
+  EXTRACT_ENGINE_LABEL,
+  type Limits,
+  type LimitsState,
+  type InterleaveMode
+} from "../lib/sessionQueue";
+import type { ExtractEngine } from "../lib/readingWorkflow";
 
 export type ThemeMode = "light" | "dark";
 
@@ -539,6 +550,166 @@ function SiblingBurySection() {
           </div>
         </>
       )}
+      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，队列即时生效。</p>}
+    </section>
+  );
+}
+
+// ---------- 摘录复习（v48.22，D58/§6.8）：并入复习队列 / 混编模式 / 推送引擎 ----------
+// 实验项必须带「实验功能 · 早期开发阶段」标识与说明（用户口径）；切换推送引擎为**无损**操作
+// （每引擎私有子空间互不覆盖，A→B→A 往返逐字段等值，指南 §6.8-4）。
+function ExtractReviewSection() {
+  const [cfg, setCfg] = useState<{ mergeIntoReview: boolean; interleave: InterleaveMode; engine: ExtractEngine } | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    void extractSettings.read().then(setCfg);
+  }, []);
+  async function update(patch: Partial<NonNullable<typeof cfg>>) {
+    if (!cfg) return;
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    await extractSettings.write(patch);
+    setSavedTick((t) => t + 1);
+    window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
+  }
+  return (
+    <section className="settings-section" id="sec-extracts">
+      <h3>摘录复习</h3>
+      <p className="form-hint">
+        摘录与闪卡是同一份学习材料的两面。开启「并入复习队列」后，复习时会按混编规则推送摘录卡片，
+        可就地处理、阅读或制卡；关闭时两类分开复习，摘录在顶栏「摘录」页连续处理。
+      </p>
+      {cfg && (
+        <>
+          <div className="settings-row">
+            <span>并入复习队列（传统 SuperMemo 方式）</span>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="摘录并入复习队列">
+              <button className={cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: true })}>开</button>
+              <button className={!cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: false })}>关</button>
+            </div>
+          </div>
+          <div className="settings-row">
+            <span>混编规则</span>
+            <Dropdown
+              value={cfg.interleave}
+              align="left"
+              options={[
+                { value: "quota-1-4", label: "上限 1:4（每 4 张卡至多 1 条摘录，SuperMemo 口径）" },
+                { value: "by-due", label: "按到期时间自然混排" }
+              ]}
+              onChange={(v) => void update({ interleave: v as InterleaveMode })}
+            />
+          </div>
+          <p className="form-hint">两种混编规则可随时切换，**不写任何调度状态**：未放行的摘录仍在库内到期，切换后立即可见。</p>
+          <div className="settings-row">
+            <span>摘录推送引擎</span>
+            <Dropdown
+              value={cfg.engine}
+              align="left"
+              options={[
+                { value: "sm19-default", label: EXTRACT_ENGINE_LABEL["sm19-default"] },
+                { value: "ai-next-extract", label: EXTRACT_ENGINE_LABEL["ai-next-extract"] }
+              ]}
+              onChange={(v) => void update({ engine: v as ExtractEngine })}
+            />
+          </div>
+          {cfg.engine === "ai-next-extract" && (
+            <p className="form-hint">
+              实验功能 · 早期开发阶段：AI 推送目前只对**当前到期的那一批**摘录做重排与解释，
+              知识前置（Frontier）因子尚未接入（等 K4–K5 落地补全）。切换为无损操作——两套引擎各自记账，
+              切回 SuperMemo 时调度状态逐字段复原，不会丢数据。
+            </p>
+          )}
+        </>
+      )}
+      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，队列即时生效。</p>}
+    </section>
+  );
+}
+
+// ---------- 每日上限（v48.22，D58/§6.8-5）：四类上限 + 三层限幅 ----------
+// 硬边界（复习上限 ≥ 新上限 × 5）由**主进程 settings:set 兜底拒写**，此处只做即时提示；
+// 用量为派生值（review_logs / extract_ops），重启不漂移。
+function LimitsSection() {
+  const [limits, setLimits] = useState<Limits | null>(null);
+  const [state, setState] = useState<LimitsState | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [advisory, setAdvisory] = useState<string[]>([]);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    void (async () => {
+      setLimits(await extractSettings.readLimits());
+      setState(await fetchLimitsState());
+    })();
+  }, []);
+  async function save(patch: Partial<Limits>) {
+    if (!limits) return;
+    const next = { ...limits, ...patch };
+    const verdict = await validateLimits(next);
+    setErrors(verdict.errors);
+    setAdvisory(verdict.advisory);
+    if (!verdict.ok) return; // 硬边界：拒绝保存并就地解释（主进程另有一道兜底）
+    setLimits(next);
+    try {
+      await extractSettings.writeLimits(next);
+      setState(await fetchLimitsState());
+      setSavedTick((t) => t + 1);
+      window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
+    } catch (e) {
+      setErrors([e instanceof Error ? e.message : String(e)]);
+    }
+  }
+  const num = (label: string, key: keyof Limits, hint: string) => (
+    <div className="settings-row settings-row-wrap" key={key}>
+      <span>{label}</span>
+      <input
+        className="mono input-num input-num-md"
+        type="number"
+        min={0}
+        max={9999}
+        value={limits ? Number(limits[key]) : 0}
+        onChange={(e) => void save({ [key]: Math.max(0, Math.min(9999, Number(e.target.value) || 0)) } as Partial<Limits>)}
+      />
+      <span className="form-hint">{hint}</span>
+    </div>
+  );
+  return (
+    <section className="settings-section" id="sec-limits">
+      <h3>每日上限</h3>
+      <p className="form-hint">
+        四类上限按**学习日**（设置里的「新一天开始时刻」）计算，全部范围共享同一份额度；
+        填 0 表示不限制。硬边界：复习上限不得低于新上限的 5 倍（防旧内容积压还在学新卡）；
+        低于 10 倍时给出提示（Anki 官方经验：20 张新卡约带来 200 次复习/日）。
+      </p>
+      {limits && (
+        <>
+          {num("每日新卡片上限", "newCardsPerDay", "首次作答的卡片张数")}
+          {num("每日卡片复习上限", "cardReviewsPerDay", "卡片作答总次数（新卡与复习卡共用）")}
+          {num("每日新摘录上限", "newExtractsPerDay", "新引入的摘录条数")}
+          {num("每日摘录处理上限", "extractReviewsPerDay", "到期摘录的处理条数")}
+          <div className="settings-row">
+            <span>复习上限用尽后仍发新卡与新摘录</span>
+            <input
+              type="checkbox"
+              checked={limits.ignoreReviewLimitForNew}
+              onChange={(e) => void save({ ignoreReviewLimitForNew: e.target.checked })}
+            />
+          </div>
+          <p className="form-hint">
+            关闭（默认）时，复习上限用尽即停发新卡与新摘录——这是防积压的结构闸（对齐 Anki 同名选项）。
+          </p>
+          {state && (
+            <p className="form-hint">
+              今日已用：新卡 {state.usage.newCards}/{state.limits.newCardsPerDay || "∞"} · 复习 {state.usage.cardReviews}/
+              {state.limits.cardReviewsPerDay || "∞"} · 新摘录 {state.usage.newExtracts}/{state.limits.newExtractsPerDay || "∞"} ·
+              摘录处理 {state.usage.extractReviews}/{state.limits.extractReviewsPerDay || "∞"}
+              {state.newBlocked ? "（复习额度已用尽，新卡与新摘录已停发）" : ""}
+            </p>
+          )}
+        </>
+      )}
+      {errors.length > 0 && <p className="ai-test-err">{errors.join("；")}</p>}
+      {errors.length === 0 && advisory.length > 0 && <p className="form-hint">提示：{advisory.join("；")}</p>}
       {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，队列即时生效。</p>}
     </section>
   );
@@ -1894,6 +2065,9 @@ export default function SettingsPanel({
             <LearningDaySection />
 
             <SiblingBurySection />
+            {/* v48.22（D58 §6.8）：摘录复习与每日上限 */}
+            <ExtractReviewSection />
+            <LimitsSection />
 
             <AISection />
 
