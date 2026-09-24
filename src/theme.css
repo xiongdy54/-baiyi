@@ -4480,3 +4480,4 @@ body.capture-body #root { height: 100vh; }
 .cb-deck-name { max-width: 220px; }
 .cb-deck { display: inline-flex; gap: var(--sp-1); align-items: center; }
 .cb-deck .n { color: var(--text-helper); font-size: var(--fs-meta); }
+.cb-find { max-width: 120px; }

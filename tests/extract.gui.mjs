@@ -309,6 +309,30 @@ try {
   const rs = JSON.parse(reviewScoped || "{}");
   check("阅读器：进入本书闪卡集中复习（复习页 + 标题带书名）", rs.wrap === true && String(rs.title).includes("GUI 摘录测试书"), reviewScoped);
 
+  // 16) 摘录正文查找替换（O-8 裁定：仅选中项、纯文本）
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { document.querySelector("[data-kind-extract]")?.click(); return true; })()`);
+  await wait(1200);
+  await cdp.eval(`(() => { document.querySelector("[data-sel-all-extracts]")?.click(); return true; })()`);
+  await wait(900);
+  const fill = (sel, val) => `(() => {
+    const inp = document.querySelector("${sel}");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(inp, "${val}");
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`;
+  await cdp.eval(fill("[data-find-input]", "GUI 摘录样本"));
+  await wait(400);
+  await cdp.eval(fill("[data-replace-input]", "GUI 摘录样本·已替换"));
+  await wait(400);
+  const replaceClicked = await cdp.eval(`(() => { const b = document.querySelector("[data-find-replace]"); b?.click(); return !!b; })()`);
+  check("查找替换：按钮在位可点", replaceClicked === true, replaceClicked);
+  await wait(1800);
+  const replacedText = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(b.id)}); return d?.contentMarkdown || ""; })()`);
+  check("查找替换：正文已落库替换", String(replacedText).includes("已替换"), String(replacedText).slice(0, 80));
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);

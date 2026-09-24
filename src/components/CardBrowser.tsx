@@ -138,6 +138,9 @@ export default function CardBrowser({
   // v48.22（D58 §6.8-5）：筛选牌组（复习范围）——存 settings.app.reviewScopes，零 schema 变更（D51 先例）
   const [scopes, setScopes] = useState<SavedScope[]>([]);
   const [deckName, setDeckName] = useState("");
+  // v48.22（D58 §6.8-6 / O-8 裁定）：摘录正文查找替换（仅选中项、仅正文、纯文本，不做正则）
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
 
   const refresh = useCallback(async () => {
     setAll(await cardsApi.listAll());
@@ -361,6 +364,39 @@ export default function CardBrowser({
     setScopes(next);
   }
 
+  /** 查找替换（O-8：仅选中项、仅正文、纯文本；逐条落 edit 操作日志，撤销按次回退） */
+  async function runFindReplace() {
+    const needle = findText;
+    if (!needle) {
+      flashNote("请先填写要查找的文字");
+      return;
+    }
+    const ids = [...selExtracts];
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    try {
+      let changed = 0;
+      for (const id of ids) {
+        const cur = extracts.find((e) => e.id === id);
+        const text = String(cur?.contentMarkdown ?? "");
+        if (!text.includes(needle)) continue;
+        await readingWorkflow.updateContent(id, text.split(needle).join(replaceText));
+        changed += 1;
+      }
+      flashNote(changed > 0 ? `已替换 ${changed} 条摘录的正文` : "选中的摘录里没有该文字");
+      await refresh();
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  // v48.22（D58 §6.8-6）：行数窗口——真实库可达上万行，全量渲染会让筛选/滚动卡顿；
+  // 先渲染 200 行 + 「显示更多」增量放行（真正的虚拟滚动留待后续批次，此处是可用性下限保障）
+  const [rowLimit, setRowLimit] = useState(200);
+  useEffect(() => {
+    setRowLimit(200);
+  }, [query, typeFilter, stateFilter, preset, kindFilter, bookScope, memFilter, sortBy]);
+
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
 
   return (
@@ -492,6 +528,9 @@ export default function CardBrowser({
                 <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>毕业</button>
                 <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>召回</button>
                 <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>删除</button>
+                <input className="cb-search cb-find" data-find-input placeholder="查找" value={findText} onChange={(e) => setFindText(e.target.value)} />
+                <input className="cb-search cb-find" data-replace-input placeholder="替换为" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} />
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-find-replace onClick={() => void runFindReplace()}>正文查找替换</button>
               </>
             )}
             <button
@@ -597,7 +636,7 @@ export default function CardBrowser({
             <span className="cb-num">优先</span>
             <span>来源</span>
           </div>
-          {viewCards.map((c) => (
+          {viewCards.slice(0, rowLimit).map((c) => (
             <div
               key={c.id}
               className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
@@ -628,6 +667,15 @@ export default function CardBrowser({
               <span className="cb-src" title={srcLabel(c)}>{srcLabel(c)}</span>
             </div>
           ))}
+          {viewCards.length > rowLimit && (
+            <div className="cb-row" role="row">
+              <span className="cb-front">
+                <button className="btn btn-outline btn-sm" data-more-rows onClick={() => setRowLimit((n) => n + 200)}>
+                  显示更多（还有 {viewCards.length - rowLimit} 行）
+                </button>
+              </span>
+            </div>
+          )}
         </div>
       )}
       </>
@@ -644,7 +692,7 @@ export default function CardBrowser({
             <span>下次推送</span>
             <span>来源</span>
           </div>
-          {viewExtracts.map((e) => (
+          {viewExtracts.slice(0, rowLimit).map((e) => (
             <div
               key={e.id}
               className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
@@ -674,6 +722,15 @@ export default function CardBrowser({
               </span>
             </div>
           ))}
+          {viewExtracts.length > rowLimit && (
+            <div className="cb-row" role="row">
+              <span className="cb-front">
+                <button className="btn btn-outline btn-sm" data-more-rows-extract onClick={() => setRowLimit((n) => n + 200)}>
+                  显示更多（还有 {viewExtracts.length - rowLimit} 行）
+                </button>
+              </span>
+            </div>
+          )}
           {viewExtracts.length === 0 && (
             <div className="cb-row" role="row">
               <span className="cb-front">没有符合筛选条件的摘录。</span>

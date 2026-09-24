@@ -335,6 +335,23 @@ app.whenReady().then(async () => {
     const vUn = db.validateLimits({ newCardsPerDay: 20, cardReviewsPerDay: 0 });
     check("0 = 不限制，不参与关系约束", vUn.ok === true, true, vUn.errors);
 
+    // E18：预算**共享**——范围只能收紧，不能另开预算（§6.8-5 关键取舍）
+    // 注意：额度必须设为 0（不限制），否则两侧都被额度截断、条数变化看不出来
+    setLimits({ extractReviewsPerDay: 0, newExtractsPerDay: 0, newCardsPerDay: 0, cardReviewsPerDay: 0 });
+    const before18 = db.computeSessionQueue(T, { mergeIntoReview: true });
+    check("前置：至少 2 条摘录可放行（防空转）", before18.extracts.length >= 2, ">=2", before18.extracts.length);
+    const scoped18 = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    check("范围与默认范围共用同一份额度（命中集合相同）", scoped18.extracts.length === before18.extracts.length, before18.extracts.length, scoped18.extracts.length);
+    db.advanceExtract(before18.extracts[0].id, T);
+    const after18 = db.computeSessionQueue(T, { mergeIntoReview: true });
+    check("预算是共享的：范围里处理一条，默认范围同步少一条（不另开预算）", after18.extracts.length === before18.extracts.length - 1, before18.extracts.length - 1, after18.extracts.length);
+    setLimits({ extractReviewsPerDay: 4 });
+    const tight = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { limits: { extractReviewsPerDay: 999 } } });
+    check("范围覆写取最小值（全局 4、范围 999 ⇒ 4）", tight.limits.extractReviewsPerDay === 4, 4, tight.limits.extractReviewsPerDay);
+    setLimits({ extractReviewsPerDay: 0 });
+    const loose = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { limits: { extractReviewsPerDay: 5 } } });
+    check("全局不限时用范围的收紧值（全局 0、范围 5 ⇒ 5）", loose.limits.extractReviewsPerDay === 5, 5, loose.limits.extractReviewsPerDay);
+
     // ---------------------------------------------------------------- E15
     console.log("== E15 复习范围（筛选牌组）：按书 / 按类别 / 只能收紧 ==");
     setLimits({});
