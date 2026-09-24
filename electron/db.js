@@ -1256,6 +1256,8 @@ function mapCardRow(r) {
     // v46（M14-UM2，§4.18-10）：记忆溯源（{line, verified}；NULL=未用记忆）
     memoryRefJson: j(r.memory_ref_json, null, "memory_ref_json"),
     siblingKey: r.sibling_key || null,
+    // v48.22（D58 §6.8-5）：卡片所属书（按书范围会话与浏览分组用；无来源卡为 null）
+    libraryItemId: r.library_item_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     damaged: fsrsBad || damagedColumns.includes("leech_json"),
@@ -1495,7 +1497,7 @@ function computeSiblingDeferred(cards, now) {
   return deferred;
 }
 
-const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle FROM cards c
+const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
      LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0
@@ -2348,14 +2350,16 @@ function parentChain(extract) {
   return chain;
 }
 
-function listDueExtracts() {
+function listDueExtracts(nowTs) {
+  // v48.22（D58）：now 可注入（测试与跨日场景，同 §4.4.4 时间注入精神）；缺省取真实时间
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
   const rows = queryAll(
     `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown, e.context_ref_json, e.priority,
             e.status, e.status_version AS statusVersion, e.status_detail_json AS statusDetailJson,
             e.a_factor AS aFactor, e.postpone_count AS postponeCount, e.process_count AS processCount,
             e.priority_source AS prioritySource, e.engine_state_json AS engineStateJson,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
-            li.title AS docTitle
+            li.title AS docTitle, li.id AS libraryItemId
      FROM extracts e
      JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
      JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
@@ -2364,7 +2368,7 @@ function listDueExtracts() {
        -- 写成包含式（status IN (...)）会把未知状态误排除，违反前向兼容
        AND COALESCE(e.status,'open') NOT IN ('resolved','dismissed','archived')
      ORDER BY e.priority ASC, e.topic_next_at ASC`,
-    [Date.now()]
+    [now]
   );
   return rows.map((r) => ({
     ...r,
@@ -2912,6 +2916,222 @@ function getDailyUsage(nowTs) {
     cardReviews,
     newExtracts,
     extractReviews
+  };
+}
+
+// ---------- v48.22（D58）：每日上限（§6.8-5）与会话队列（§6.8-3） ----------
+
+const LIMIT_DEFAULTS = { newCardsPerDay: 20, cardReviewsPerDay: 200, newExtractsPerDay: 10, extractReviewsPerDay: 50 };
+const LIMIT_HARD_FACTOR = 5;      // 硬边界（用户 2026-09-24 裁定）：复习上限 ≥ 新上限 × 5
+const LIMIT_ADVISORY_FACTOR = 10; // 建议档（Anki 文档口径「20 新卡 ≈ 200 复习/日」，非阻断）
+const LIMIT_MAX = 9999;
+
+/** 读上限（0 = 不限制；非法值回落默认；ignoreReviewLimitForNew 默认关） */
+function readLimits() {
+  const raw = (readSettings().app || {}).limits || {};
+  const pick = (name) => {
+    const v = Number(raw[name]);
+    if (!Number.isInteger(v) || v < 0 || v > LIMIT_MAX) return LIMIT_DEFAULTS[name];
+    return v;
+  };
+  return {
+    newCardsPerDay: pick("newCardsPerDay"),
+    cardReviewsPerDay: pick("cardReviewsPerDay"),
+    newExtractsPerDay: pick("newExtractsPerDay"),
+    extractReviewsPerDay: pick("extractReviewsPerDay"),
+    ignoreReviewLimitForNew: raw.ignoreReviewLimitForNew === true
+  };
+}
+
+/** 三层限幅的前两层（§6.8-5）：硬边界拒存 + 建议档提示；结构闸在会话队列里生效 */
+function validateLimits(patch) {
+  const merged = { ...readLimits(), ...(patch || {}) };
+  const errors = [];
+  const advisory = [];
+  for (const name of Object.keys(LIMIT_DEFAULTS)) {
+    const v = Number(merged[name]);
+    if (!Number.isInteger(v) || v < 0 || v > LIMIT_MAX) {
+      errors.push(`${name} 必须是 0（不限制）或 1–${LIMIT_MAX} 的整数`);
+    }
+  }
+  const pair = (revName, newName, label) => {
+    const rev = Number(merged[revName]);
+    const nw = Number(merged[newName]);
+    if (!Number.isInteger(rev) || !Number.isInteger(nw) || rev === 0 || nw === 0) return; // 0＝不限制，不参与关系约束
+    if (rev < nw * LIMIT_HARD_FACTOR) {
+      errors.push(`${label}复习上限不得低于${label}新上限的 ${LIMIT_HARD_FACTOR} 倍（当前 ${rev} < ${nw}×${LIMIT_HARD_FACTOR}）`);
+    } else if (rev < nw * LIMIT_ADVISORY_FACTOR) {
+      advisory.push(`${label}复习上限低于新上限的 ${LIMIT_ADVISORY_FACTOR} 倍，旧内容可能积压（Anki 官方经验：20 张新卡约带来 200 次复习/日）`);
+    }
+  };
+  pair("cardReviewsPerDay", "newCardsPerDay", "卡片");
+  pair("extractReviewsPerDay", "newExtractsPerDay", "摘录");
+  return { ok: errors.length === 0, errors, advisory, limits: merged };
+}
+
+/** 用量 + 上限 + 余额（§6.8-5；纯派生、零写路径） */
+function getLimitsState(nowTs) {
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
+  const usage = getDailyUsage(now);
+  const limits = readLimits();
+  const remaining = limitsRemaining(limits, usage);
+  const newBlocked = !limits.ignoreReviewLimitForNew && remaining.cardReviews <= 0;
+  return { usage, limits, remaining, newBlocked, learningDayStart: usage.learningDayStart };
+}
+
+function limitsRemaining(limits, usage) {
+  const left = (cap, used) => (cap === 0 ? Infinity : Math.max(0, cap - used));
+  return {
+    newCards: left(limits.newCardsPerDay, usage.newCards),
+    cardReviews: left(limits.cardReviewsPerDay, usage.cardReviews),
+    newExtracts: left(limits.newExtractsPerDay, usage.newExtracts),
+    extractReviews: left(limits.extractReviewsPerDay, usage.extractReviews)
+  };
+}
+
+const INTERLEAVE_MODES = ["quota-1-4", "by-due"];
+const DEFAULT_INTERLEAVE = "quota-1-4";
+const EXTRACT_QUOTA_EVERY = 4; // SM 文档口径「limit the inflow of topics to 1:4 or less」
+
+function readSessionPrefs() {
+  const ex = (readSettings().app || {}).extracts || {};
+  return {
+    mergeIntoReview: ex.mergeIntoReview === true, // 默认关（用户裁定）
+    interleave: INTERLEAVE_MODES.includes(ex.interleave) ? ex.interleave : DEFAULT_INTERLEAVE
+  };
+}
+
+/** 复习范围（筛选牌组）：结构化过滤（书 / 类别）+ 可选上限覆写。零 schema 变更（D51 先例） */
+function readReviewScopes() {
+  const raw = (readSettings().app || {}).reviewScopes;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((s) => s && typeof s === "object" && typeof s.id === "string" && s.id)
+    .map((s) => ({
+      id: String(s.id),
+      name: String(s.name || "未命名范围"),
+      bookItemIds: Array.isArray(s.bookItemIds) ? s.bookItemIds.map(String).filter(Boolean) : [],
+      kinds: Array.isArray(s.kinds) ? s.kinds.filter((k) => k === "card" || k === "extract") : [],
+      limits: s.limits && typeof s.limits === "object" ? s.limits : null
+    }));
+}
+
+/** 范围只能**收紧**上限，不能另开预算（§6.8-5 关键取舍：范围互相重叠，各开配额会被多入口绕过） */
+function limitsForScope(base, scope) {
+  if (!scope || !scope.limits) return base;
+  const out = { ...base };
+  for (const name of Object.keys(LIMIT_DEFAULTS)) {
+    const v = Number(scope.limits[name]);
+    if (!Number.isInteger(v) || v < 0 || v > LIMIT_MAX) continue;
+    if (out[name] === 0) out[name] = v;                    // 全局不限 ⇒ 用范围的收紧值
+    else if (v !== 0) out[name] = Math.min(out[name], v);
+  }
+  if (scope.limits.ignoreReviewLimitForNew === true) out.ignoreReviewLimitForNew = true;
+  return out;
+}
+
+/** 范围过滤（书 / 类别；无 scope 时原样返回） */
+function applyScope(items, scope, kind) {
+  if (!scope) return items;
+  let out = items;
+  if (Array.isArray(scope.bookItemIds) && scope.bookItemIds.length > 0) {
+    const allowed = new Set(scope.bookItemIds.map(String));
+    out = out.filter((x) => allowed.has(String(x.libraryItemId ?? "")));
+  }
+  if (Array.isArray(scope.kinds) && scope.kinds.length > 0 && !scope.kinds.includes(kind)) out = [];
+  return out;
+}
+
+/**
+ * 会话队列（§6.8-3）：卡片 ∪ 摘录的**唯一装配面**（§4.2-26）。
+ * **只影响展示、零调度写入**——未放行的条目在库内仍 due（先例＝§4.16 同源延后）。
+ * 退化保证：`scope` 为空且余额充足时，`cards` 与 `computeTodayQueue().cards` 逐 id 相等。
+ */
+function computeSessionQueue(nowTs, opts) {
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
+  const o = opts || {};
+  const prefs = readSessionPrefs();
+  const mergeIntoReview = o.mergeIntoReview === undefined ? prefs.mergeIntoReview : o.mergeIntoReview === true;
+  const interleave = INTERLEAVE_MODES.includes(o.interleave) ? o.interleave : prefs.interleave;
+  const scope = o.scope || null;
+  const limits = limitsForScope(readLimits(), scope);
+
+  const usage = getDailyUsage(now);
+  const remaining = limitsRemaining(limits, usage);
+  const newBlocked = !limits.ignoreReviewLimitForNew && remaining.cardReviews <= 0;
+
+  const q = computeTodayQueue(now);
+  const isNewCard = (c) => (c.fsrs?.reps ?? 0) === 0 || (c.fsrs?.state ?? "new") === "new";
+  const cards = [];
+  const blockedCards = [];
+  let cardBudget = remaining.cardReviews;              // 卡片作答总预算（新卡与复习卡共用）
+  let newCardBudget = remaining.newCards;              // 其中「首次作答」的额度
+  const ignore = limits.ignoreReviewLimitForNew;
+  for (const c of applyScope(q.cards, scope, "card")) {
+    if (isNewCard(c)) {
+      // 新卡：受新卡额度约束；总预算用尽时**除 ignore 开启外一律停发**（结构闸，Anki 同名选项语义）
+      if (newCardBudget <= 0) { blockedCards.push(c); continue; }
+      if (cardBudget <= 0 && !ignore) { blockedCards.push(c); continue; }
+      newCardBudget -= 1;
+      if (cardBudget > 0) cardBudget -= 1;
+      cards.push(c);
+      continue;
+    }
+    if (cardBudget <= 0) { blockedCards.push(c); continue; }
+    cardBudget -= 1;
+    cards.push(c);
+  }
+
+  const extracts = [];
+  const blockedExtracts = [];
+  if (mergeIntoReview || scope) {
+    let extractBudget = remaining.extractReviews;
+    let newExtractBudget = newBlocked ? 0 : remaining.newExtracts;    for (const e of applyScope(listDueExtracts(now), scope, "extract")) {
+      if (extracts.length >= extractBudget) { blockedExtracts.push(e); continue; }
+      if ((Number(e.processCount) || 0) === 0) {
+        if (newExtractBudget <= 0) { blockedExtracts.push(e); continue; }
+        newExtractBudget -= 1;
+      }
+      extracts.push(e);
+    }
+  }
+
+  const items = [];
+  if (!mergeIntoReview) {
+    for (const c of cards) items.push({ kind: "card", id: c.id, card: c });
+  } else if (interleave === "by-due") {
+    const merged = [
+      ...cards.map((c) => ({ kind: "card", id: c.id, sortAt: Number(c.fsrs?.due ?? now) || now, card: c })),
+      ...extracts.map((e) => ({ kind: "extract", id: e.id, sortAt: Number(e.topicNextAt) || now, extract: e }))
+    ].sort(
+      (a, b) =>
+        a.sortAt - b.sortAt ||
+        (a.kind === b.kind ? 0 : a.kind === "card" ? -1 : 1) ||
+        String(a.id).localeCompare(String(b.id))
+    );
+    for (const { sortAt, ...rest } of merged) items.push(rest);
+  } else {
+    // quota-1-4：每 4 张卡至多插 1 条摘录；卡片耗尽后按序追加（防「卡片不够就永远看不到摘录」死角）
+    let ei = 0;
+    cards.forEach((c, i) => {
+      items.push({ kind: "card", id: c.id, card: c });
+      if ((i + 1) % EXTRACT_QUOTA_EVERY === 0 && ei < extracts.length) {
+        const e = extracts[ei++];
+        items.push({ kind: "extract", id: e.id, extract: e });
+      }
+    });
+    while (ei < extracts.length) {
+      const e = extracts[ei++];
+      items.push({ kind: "extract", id: e.id, extract: e });
+    }
+  }
+
+  return {
+    items, cards, extracts,
+    deferred: q.deferred, damaged: q.damaged,
+    blocked: { cards: blockedCards, extracts: blockedExtracts },
+    mergeIntoReview, interleave, scope,
+    limits, usage, remaining, newBlocked, now
   };
 }
 
@@ -5484,6 +5704,13 @@ module.exports = {
   undoLast,
   getUndoInfo,
   getDailyUsage,
+  // v48.22（D58）：每日上限与会话队列（§6.8-3/§6.8-5）
+  getLimitsState,
+  validateLimits,
+  readLimits,
+  readReviewScopes,
+  readSessionPrefs,
+  computeSessionQueue,
   setLibraryItemPriority,
   getLastUndoableReview,
   undoLastReview,

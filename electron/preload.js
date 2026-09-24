@@ -67,7 +67,14 @@ contextBridge.exposeInMainWorld("workflowAPI", {
 
 // v48.22（D58 §6.8-5/§6.8-7）：只读用量 + 跨类撤销（卡片评分与摘录操作共用一个撤销栈）
 contextBridge.exposeInMainWorld("limitsAPI", {
-  usage: (now) => ipcRenderer.invoke("limits:usage", now)
+  usage: (now) => ipcRenderer.invoke("limits:usage", now),
+  state: (now) => ipcRenderer.invoke("limits:state", now),
+  validate: (patch) => ipcRenderer.invoke("limits:validate", patch)
+});
+
+// v48.22（D58 §6.8-3）：会话队列（卡片 ∪ 摘录；只影响展示、零调度写入）
+contextBridge.exposeInMainWorld("sessionAPI", {
+  queue: (now, opts) => ipcRenderer.invoke("session:queue", now, opts)
 });
 
 contextBridge.exposeInMainWorld("undoAPI", {

@@ -39,6 +39,8 @@ const DOC_KEYS = [
   "app.shelfDensity", "app.shelfSort", "app.shelfView", // §7.4 v48.18 / D54（书架工具条状态记忆）
   "activity.dismissedRuns", // §4.2-3 / §4.19 收口块 ⑥（v48.17 / D53 指示器已关清单）
   "app.extracts", // §6.8-1 / §7.4（v48.22 / D58 摘录复习改版：mergeIntoReview / interleave / engine 三键）
+  "app.limits", // §6.8-1 / §6.8-5（v48.22 / D58 四类每日上限 + ignoreReviewLimitForNew）
+  "app.reviewScopes", // §6.8-5（v48.22 / D58 复习范围/筛选牌组；零 schema 变更）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -225,6 +227,8 @@ app
         ["app", "readerSettings", { fontSize: 19, lineHeight: 1.75, width: 720 }],
         ["app", "skinId", "none"],
         ["app", "extracts", { mergeIntoReview: false, interleave: "quota-1-4", engine: "sm19-default" }], // v48.22 / D58
+        ["app", "limits", { newCardsPerDay: 20, cardReviewsPerDay: 200, newExtractsPerDay: 10, extractReviewsPerDay: 50, ignoreReviewLimitForNew: false }], // v48.22 / D58
+        ["app", "reviewScopes", [{ id: "scope-1", name: "测试范围", bookItemIds: ["item-1"], kinds: ["card", "extract"], limits: { extractReviewsPerDay: 5 } }]], // v48.22 / D58
         ["app", "accentColor", "#0057ff"],
         ["app", "mindmapMaxCalls", 40],
         ["app", "mindmapPricing", { input: 1.5, output: 6 }],

@@ -55,6 +55,9 @@ const {
   switchExtractEngine,
   setLibraryItemPriority,
   getDailyUsage,
+  getLimitsState,
+  validateLimits,
+  computeSessionQueue,
   undoLast,
   getUndoInfo,
   getLastUndoableReview,
@@ -155,6 +158,16 @@ ipcMain.handle("settings:get", (_e, scope, key) => {
 });
 
 ipcMain.handle("settings:set", (_e, scope, key, value) => {
+  // v48.22（D58 §6.8-5）：每日上限的**硬边界**在主进程侧兜底——渲染层校验只负责即时提示，
+  // 这里拒绝违规写入（否则绕过 UI 就能把「复习上限 < 新上限×5」落盘，积压立刻发生）
+  if (scope === "app" && key === "limits") {
+    const verdict = validateLimits(value || {});
+    if (!verdict.ok) {
+      const err = new Error(verdict.errors.join("；"));
+      err.errors = verdict.errors;
+      throw err;
+    }
+  }
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
@@ -463,6 +476,9 @@ ipcMain.handle("extracts:delete", (_e, id) => deleteExtract(String(id)));
 ipcMain.handle("extracts:batch", (_e, op, ids, payload) => batchExtractOps(String(op), ids, payload));
 ipcMain.handle("extracts:switchEngine", (_e, to, from) => switchExtractEngine(to, from));
 ipcMain.handle("limits:usage", (_e, now) => getDailyUsage(now));
+ipcMain.handle("limits:state", (_e, now) => getLimitsState(now));
+ipcMain.handle("limits:validate", (_e, patch) => validateLimits(patch));
+ipcMain.handle("session:queue", (_e, now, opts) => computeSessionQueue(now, opts || {}));
 ipcMain.handle("undo:last", () => undoLast());
 ipcMain.handle("undo:info", () => getUndoInfo());
 ipcMain.handle("library:setPriority", (_e, itemId, priority) => setLibraryItemPriority(String(itemId), priority));

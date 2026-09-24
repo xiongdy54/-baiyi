@@ -270,6 +270,88 @@ app.whenReady().then(async () => {
     check("四类计数齐备且为数字", [usage.newCards, usage.cardReviews, usage.newExtracts, usage.extractReviews].every((n) => Number.isInteger(n)), "int×4", usage);
     check("摘录处理数 ≥ 1（本测试有过 advance/postpone）", usage.extractReviews >= 1, ">=1", usage.extractReviews);
 
+    // ---------------------------------------------------------------- E13
+    console.log("== E13 会话队列（§6.8-3）：退化 / 混编 / 零写库 ==");
+    const settingsStore = require(path.join(ROOT, "electron", "settingsStore.js"));
+    const T = Date.now() + 3 * DAY; // 未来时刻：该学习日用量为 0，隔离前面用例写下的复习日志
+    const NO_LIMITS = { newCardsPerDay: 0, cardReviewsPerDay: 0, newExtractsPerDay: 0, extractReviewsPerDay: 0, ignoreReviewLimitForNew: false };
+    const setLimits = (patch) => {
+      const all = settingsStore.readSettings();
+      all.app = { ...(all.app || {}), limits: { ...NO_LIMITS, ...patch } };
+      settingsStore.writeSettings(all);
+    };
+    setLimits({});
+    const rawQ = db.computeTodayQueue(T);
+    const degraded = db.computeSessionQueue(T, { mergeIntoReview: false });
+    check("退化：关闭合并时 cards 与 computeTodayQueue().cards 逐 id 相等", eq(degraded.cards.map((c) => c.id), rawQ.cards.map((c) => c.id)), rawQ.cards.map((c) => c.id).join(","), degraded.cards.map((c) => c.id).join(","));
+    check("退化：items 全为卡片", degraded.items.every((i) => i.kind === "card"), true, degraded.items.map((i) => i.kind).join(","));
+    const e13Ids = [0, 1, 2, 3, 4].map((i) => mkExtract(bookB.documentId, `E13 摘录 ${i}`, undefined));
+    e13Ids.forEach((id) => makeDue(id, T - 1000));
+    const mergedQ = db.computeSessionQueue(T, { mergeIntoReview: true, interleave: "quota-1-4" });
+    check("前置对照：本场景至少有 1 张卡与 1 条摘录（防止空转通过）", mergedQ.cards.length >= 1 && mergedQ.extracts.length >= 1, ">=1/>=1", `${mergedQ.cards.length}/${mergedQ.extracts.length}`);
+    check("quota-1-4：条目总数 = 卡片数 + 摘录数（不丢条）", mergedQ.items.length === mergedQ.cards.length + mergedQ.extracts.length, mergedQ.cards.length + mergedQ.extracts.length, mergedQ.items.length);
+    let seenCards = 0;
+    let quotaOk = true;
+    let tailStarted = false;
+    for (const it of mergedQ.items) {
+      if (it.kind === "card") {
+        if (tailStarted) quotaOk = false;
+        seenCards += 1;
+        continue;
+      }
+      if (seenCards >= mergedQ.cards.length && mergedQ.cards.length > 0) { tailStarted = true; continue; }
+      if (seenCards === 0 || seenCards % 4 !== 0) quotaOk = false;
+    }
+    check("quota-1-4：摘录只出现在第 4/8/… 张卡之后或卡片耗尽后的追加段", quotaOk, true, mergedQ.items.map((i) => i.kind).join(","));
+    const byDue = db.computeSessionQueue(T, { mergeIntoReview: true, interleave: "by-due" });
+    const times = byDue.items.map((it) => (it.kind === "card" ? Number(it.card.fsrs?.due ?? T) : Number(it.extract.topicNextAt)));
+    check("by-due：条目按到期时间非递减", times.every((t, i) => i === 0 || t >= times[i - 1]), "非递减", times.join(","));
+    const snapBefore13 = JSON.stringify(db.listAllCards().map((c) => [c.id, c.fsrs?.due, c.fsrs?.reps, c.priority])) + "|" + JSON.stringify(e13Ids.map((id) => { const e = db.getExtract(id); return [e.topicNextAt, e.intervalDays, e.postponeCount, e.processCount, e.priority, e.status]; }));
+    db.computeSessionQueue(T, { mergeIntoReview: true, interleave: "quota-1-4" });
+    db.computeSessionQueue(T, { mergeIntoReview: true, interleave: "by-due" });
+    const snapAfter13 = JSON.stringify(db.listAllCards().map((c) => [c.id, c.fsrs?.due, c.fsrs?.reps, c.priority])) + "|" + JSON.stringify(e13Ids.map((id) => { const e = db.getExtract(id); return [e.topicNextAt, e.intervalDays, e.postponeCount, e.processCount, e.priority, e.status]; }));
+    check("会话队列零写库（切换混编模式不改任何调度状态）", snapBefore13 === snapAfter13, "逐字段相等", snapBefore13 === snapAfter13 ? "相等" : "有变化");
+
+    // ---------------------------------------------------------------- E14
+    console.log("== E14 每日上限（§6.8-5）：余额截断 / 结构闸 / 硬边界 / 建议档 ==");
+    setLimits({ newCardsPerDay: 1, cardReviewsPerDay: 100 });
+    const lim1 = db.computeSessionQueue(T, { mergeIntoReview: false });
+    const newServed = lim1.cards.filter((c) => (c.fsrs?.reps ?? 0) === 0).length;
+    check("新卡额度 1 ⇒ 会话至多放 1 张新卡", newServed <= 1, "<=1", newServed);
+    check("被截断的卡片在库内仍 due（零写库）", lim1.blocked.cards.every((c) => Number(c.fsrs?.due ?? 0) <= T), true, lim1.blocked.cards.length);
+    setLimits({ newCardsPerDay: 0, cardReviewsPerDay: 1, ignoreReviewLimitForNew: false });
+    const gateNow = Date.now();
+    const gated = db.computeSessionQueue(gateNow, { mergeIntoReview: true });
+    check("结构闸：总预算用尽 ⇒ 卡片零放行", gated.cards.length === 0, 0, gated.cards.length);
+    check("结构闸：新摘录一并停发（未处理过的摘录不出现）", gated.extracts.every((e) => (Number(e.processCount) || 0) > 0), true, gated.extracts.length);
+    setLimits({ newCardsPerDay: 0, cardReviewsPerDay: 1, ignoreReviewLimitForNew: true });
+    const gated2 = db.computeSessionQueue(gateNow, { mergeIntoReview: true });
+    check("ignore 开启：新卡可突破已用尽的总预算（Anki 同名语义）", gated2.cards.some((c) => (c.fsrs?.reps ?? 0) === 0), true, gated2.cards.length);
+    const vBad = db.validateLimits({ newCardsPerDay: 20, cardReviewsPerDay: 50 });
+    check("硬边界：复习上限 < 新上限×5 ⇒ 拒绝", vBad.ok === false && vBad.errors.length > 0, false, vBad.errors);
+    const vOk = db.validateLimits({ newCardsPerDay: 20, cardReviewsPerDay: 100 });
+    check("硬边界：×5 刚好通过", vOk.ok === true, true, vOk.errors);
+    check("建议档：低于 ×10 给非阻断提示（有提示、无错误）", vOk.advisory.length > 0 && vOk.errors.length === 0, "有提示无错误", vOk.advisory);
+    const vUn = db.validateLimits({ newCardsPerDay: 20, cardReviewsPerDay: 0 });
+    check("0 = 不限制，不参与关系约束", vUn.ok === true, true, vUn.errors);
+
+    // ---------------------------------------------------------------- E15
+    console.log("== E15 复习范围（筛选牌组）：按书 / 按类别 / 只能收紧 ==");
+    setLimits({});
+    const allPool = db.computeSessionQueue(T, { mergeIntoReview: true });
+    const scopedBook = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { bookItemIds: [bookB.id] } });
+    check("按书范围：卡片全部来自该书", scopedBook.cards.every((c) => c.libraryItemId === bookB.id), true, scopedBook.cards.map((c) => c.libraryItemId).join(","));
+    check("按书范围：摘录全部来自该书", scopedBook.extracts.every((e) => e.libraryItemId === bookB.id), true, scopedBook.extracts.map((e) => e.libraryItemId).join(","));
+    check("按书范围：范围外卡片一条不留", scopedBook.cards.length < allPool.cards.length, `<${allPool.cards.length}`, scopedBook.cards.length);
+    const onlyExtract = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { kinds: ["extract"] } });
+    check("按类别范围：只出摘录", onlyExtract.items.length > 0 && onlyExtract.items.every((i) => i.kind === "extract"), true, onlyExtract.items.map((i) => i.kind).join(","));
+    setLimits({ extractReviewsPerDay: 30 });
+    const tighten = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { limits: { extractReviewsPerDay: 3 } } });
+    check("范围只能收紧：覆盖为更小值生效", tighten.limits.extractReviewsPerDay === 3, 3, tighten.limits.extractReviewsPerDay);
+    const widen = db.computeSessionQueue(T, { mergeIntoReview: true, scope: { limits: { extractReviewsPerDay: 999 } } });
+    check("范围不能放宽：取全局与范围的最小值", widen.limits.extractReviewsPerDay === 30, 30, widen.limits.extractReviewsPerDay);
+    check("范围存储零 schema 变更（settings.app.reviewScopes 可读）", Array.isArray(db.readReviewScopes()), true, typeof db.readReviewScopes());
+
     console.log(`\n==== extracts.test：${pass} 通过 / ${fail} 失败 ====`);
   } catch (e) {
     console.error("测试异常：", e && e.stack || e);
