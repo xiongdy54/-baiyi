@@ -333,6 +333,37 @@ try {
   const replacedText = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(b.id)}); return d?.contentMarkdown || ""; })()`);
   check("查找替换：正文已落库替换", String(replacedText).includes("已替换"), String(replacedText).slice(0, 80));
 
+  // 17) 浏览器查询语法（§6.8-6）：负号排除 + kind: 字段切类别 + priority 比较
+  const qFill = (val) => `(() => {
+    const inp = document.querySelector(".cb-toolbar .cb-search");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(inp, "${val}");
+    inp.dispatchEvent(new Event("input", { bubbles: true }));
+    return true;
+  })()`;
+  await cdp.eval(`(() => { document.querySelector("[data-kind-card]")?.click(); return true; })()`);
+  await wait(1000);
+  await cdp.eval(qFill(""));
+  await wait(900);
+  const rowsBefore17 = await cdp.eval(`document.querySelectorAll(".cb-table .cb-row:not(.cb-row-head)").length`);
+  check("查询语法：前置对照——闪卡表至少 3 行（防空转）", Number(rowsBefore17) >= 3, rowsBefore17);
+  await cdp.eval(qFill("-乙"));
+  await wait(1100);
+  const rowsAfter17 = await cdp.eval(`document.querySelectorAll(".cb-table .cb-row:not(.cb-row-head)").length`);
+  const hasYi = await cdp.eval(`document.body.textContent.includes("浏览器批量 乙")`);
+  check("查询语法：-乙 缩小结果集", Number(rowsAfter17) < Number(rowsBefore17), `${rowsBefore17} → ${rowsAfter17}`);
+  check("查询语法：-乙 后结果里没有该卡", hasYi === false, hasYi);
+  await cdp.eval(qFill("kind:extract"));
+  await wait(1200);
+  const kindSwitch = await cdp.eval(`JSON.stringify({ table: !!document.querySelector("[data-extract-table]"), kindBtn: !!document.querySelector("[data-kind-extract].active") })`);
+  const ks = JSON.parse(kindSwitch || "{}");
+  check("查询语法：kind:extract 切到摘录页签并出表", ks.table === true && ks.kindBtn === true, kindSwitch);
+  await cdp.eval(qFill("priority<=100"));
+  await wait(1100);
+  const priRows = await cdp.eval(`document.querySelectorAll(".cb-table .cb-row:not(.cb-row-head)").length`);
+  check("查询语法：priority<=100 命中（不误伤）", Number(priRows) >= 1, priRows);
+  await cdp.eval(qFill(""));
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);

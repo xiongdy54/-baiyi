@@ -359,6 +359,8 @@ async function seed() {
     });
     if (!r || !r.id) flow.check(`第 ${k} 条摘录入库`, false, "id", JSON.stringify(r));
   }
+  // v48.22（D58 §6.8-2）：新建摘录次日进队——种子要的是「当日到期队列」，显式置为已到期
+  db.execRawSql("UPDATE extracts SET topic_next_at = ? WHERE is_deleted = 0", [Date.now() - 3600000]);
   let ev = 0;
   for (const bi of [0, 1, 2, 3, 9]) {
     let pos = 200;

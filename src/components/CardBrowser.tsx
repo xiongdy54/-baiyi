@@ -21,6 +21,7 @@ import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
 import { extractStatusLabel } from "../lib/sessionQueue";
 import { nextAtText } from "./ExtractCardFace";
 import { settingsStore } from "../lib/settings";
+import { parseCardQuery, extractMatches, textMatches } from "../lib/cardQuery";
 
 /** v48.22（D58 §6.8-5）：筛选牌组（复习范围）——保存的过滤条件，零 schema 变更 */
 interface SavedScope {
@@ -191,6 +192,7 @@ export default function CardBrowser({
 
   const filtered = useMemo(() => {
     const q = foldSearch(query);
+    const parsed = parseCardQuery(query);
     let list = all;
     if (preset === "due") list = list.filter(isDueCard);
     if (preset === "leech") list = list.filter(isLeechOrSuspended);
@@ -206,8 +208,8 @@ export default function CardBrowser({
       });
     }
     if (q) {
-      list = list.filter((c) =>
-        [
+      list = list.filter((c) => {
+        const hay = [
           c.frontMarkdown,
           c.backMarkdown,
           c.noteText,
@@ -218,9 +220,37 @@ export default function CardBrowser({
         ]
           .join("\n")
           .normalize("NFKC")
-          .toLowerCase()
-          .includes(q)
-      );
+          .toLowerCase();
+        // v48.22（D58 §6.8-6）：查询语法——主串 + 负号排除（字段前缀由下面的独立过滤处理）
+        if (!hay.includes(q)) return false;
+        return textMatches({ ...parsed, text: "" }, hay);
+      });
+    }
+    // 查询语法里的字段前缀（kind/book/status/priority）——与下拉筛选叠加生效
+    if (parsed.kind === "extract") list = [];
+    if (parsed.book) {
+      const bk = foldSearch(parsed.book);
+      list = list.filter((c) => foldSearch(String(c.docTitle || "")).includes(bk));
+    }
+    if (parsed.status) {
+      list = list.filter((c) => {
+        const suspended = Boolean(c.leech?.suspended);
+        const s = suspended ? "suspended" : c.fsrs?.state ?? "new";
+        return String(s).toLowerCase() === parsed.status;
+      });
+    }
+    if (parsed.priority || parsed.priorityNot !== undefined) {
+      list = list.filter((c) => {
+        const p = Number(c.priority) || 0;
+        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
+        if (!parsed.priority) return true;
+        const { op, value } = parsed.priority;
+        if (op === "<=") return p <= value;
+        if (op === ">=") return p >= value;
+        if (op === "<") return p < value;
+        if (op === ">") return p > value;
+        return p === value;
+      });
     }
     const sorted = [...list];
     if (sortBy === "created") sorted.sort((a, b) => b.createdAt - a.createdAt);
@@ -248,9 +278,30 @@ export default function CardBrowser({
 
   const scopeExtracts = useMemo(() => {
     const q = foldSearch(query);
+    const parsed = parseCardQuery(query);
+    if (parsed.kind === "card") return [];
     let list = extracts;
     if (bookScope !== "all") list = list.filter((e) => String(e.libraryItemId || "") === bookScope);
-    if (q) list = list.filter((e) => foldSearch(e.contentMarkdown || "").includes(q) || foldSearch(e.docTitle || "").includes(q));
+    if (parsed.book) {
+      const bk = foldSearch(parsed.book);
+      list = list.filter((e) => foldSearch(String(e.docTitle || "")).includes(bk));
+    }
+    if (q || parsed.exclude.length || parsed.status || parsed.priority || parsed.priorityNot !== undefined) {
+      list = list.filter((e) => {
+        if (!extractMatches(parsed, e)) return false;
+        const p = Number(e.priority) || 0;
+        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
+        if (parsed.priority) {
+          const { op, value } = parsed.priority;
+          if (op === "<=" && !(p <= value)) return false;
+          if (op === ">=" && !(p >= value)) return false;
+          if (op === "<" && !(p < value)) return false;
+          if (op === ">" && !(p > value)) return false;
+          if (op === "=" && p !== value) return false;
+        }
+        return true;
+      });
+    }
     if (preset === "due") list = list.filter((e) => Number(e.topicNextAt) <= Date.now());
     return list;
   }, [extracts, bookScope, query, preset]);
@@ -397,6 +448,12 @@ export default function CardBrowser({
     setRowLimit(200);
   }, [query, typeFilter, stateFilter, preset, kindFilter, bookScope, memFilter, sortBy]);
 
+  // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）
+  useEffect(() => {
+    const parsed = parseCardQuery(query);
+    if (parsed.kind) setKindFilter(parsed.kind);
+  }, [query]);
+
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
 
   return (
@@ -434,7 +491,7 @@ export default function CardBrowser({
       <div className="cb-toolbar">
         <input
           className="cb-search"
-          placeholder="搜索题面、答案、前缀、来源、领域、标签…"
+          placeholder='搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）'
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -691,6 +748,7 @@ export default function CardBrowser({
             <span className="cb-num">优先</span>
             <span>下次推送</span>
             <span>来源</span>
+            <span>操作</span>
           </div>
           {viewExtracts.slice(0, rowLimit).map((e) => (
             <div
@@ -719,6 +777,26 @@ export default function CardBrowser({
               <span className="mono">{nextAtText(e.topicNextAt)}</span>
               <span className="cb-src" title={e.docTitle}>
                 {e.docTitle}
+              </span>
+              <span>
+                {/* 原「学习队列」页的管理动作之一：跳转回原文位置（§6.8-8 进度安全：跳转不写阅读进度） */}
+                {onJumpToDoc && e.contextRef?.documentId ? (
+                  <button
+                    className="btn btn-outline btn-sm"
+                    data-extract-jump
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onJumpToDoc(e.contextRef!.documentId!, {
+                        anchorText: e.contextRef!.anchorText || e.contentMarkdown,
+                        anchorRatio: e.contextRef!.anchorRatio
+                      }, "browse");
+                    }}
+                  >
+                    跳转原文
+                  </button>
+                ) : (
+                  <span className="form-hint">—</span>
+                )}
               </span>
             </div>
           ))}
