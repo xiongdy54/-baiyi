@@ -393,6 +393,28 @@ try {
   check("查询语法：priority<=100 命中（不误伤）", Number(priRows) >= 1, priRows);
   await cdp.eval(qFill(""));
 
+  // 18) AI 重排入口（E1 第二半）：切到实验引擎 → 「立即重排」在位；无 Key 时如实回报（不静默）
+  await cdp.eval(`(() => { const b = document.querySelector('button[title="设置"]'); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { const s = document.querySelector("#sec-extracts"); const dd = [...s.querySelectorAll("button")].find((x) => x.textContent.includes("SuperMemo 传统推送")); dd?.click(); return !!dd; })()`);
+  await wait(700);
+  const aiPicked = await cdp.eval(`(() => { const items = [...document.querySelectorAll(".dd-item")]; const b = items.find((x) => x.textContent.includes("AI 推送")); b?.click(); return !!b; })()`);
+  check("设置：可切到实验引擎（AI 推送）", aiPicked === true, aiPicked);
+  await wait(1400);
+  const engineSaved = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "extracts") || {}))()`);
+  check("设置：引擎已落盘 ai-next-extract", String(engineSaved).includes('"engine":"ai-next-extract"'), String(engineSaved).slice(0, 160));
+  const rerankBtn = await cdp.eval(`(() => { const b = document.querySelector("[data-rerank-now]"); const ok = !!b; b?.click(); return ok; })()`);
+  check("设置：实验引擎下出现「立即重排」按钮且可点", rerankBtn === true, rerankBtn);
+  await wait(2000);
+  const rerankNote = await cdp.eval(`(() => { const s = document.querySelector("#sec-extracts"); const ps = [...s.querySelectorAll("p")].map((p) => p.textContent); return ps.find((t) => t.includes("重排")) || ""; })()`);
+  const honestOutcome = ["未能重排", "未采用", "已按 AI 重排"].some((k) => String(rerankNote).includes(k));
+  check("设置：立即重排给出可读结果（无 Key 时如实回报，不静默）", honestOutcome, String(rerankNote).slice(0, 160));
+  // 还原为默认引擎（后续无依赖，但保持状态干净）
+  await cdp.eval(`(() => { const s = document.querySelector("#sec-extracts"); const dd = [...s.querySelectorAll("button")].find((x) => x.textContent.includes("AI 推送")); dd?.click(); return !!dd; })()`);
+  await wait(700);
+  await cdp.eval(`(() => { const items = [...document.querySelectorAll(".dd-item")]; const b = items.find((x) => x.textContent.includes("SuperMemo 传统推送")); b?.click(); return !!b; })()`);
+  await wait(1200);
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);
