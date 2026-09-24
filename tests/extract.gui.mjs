@@ -286,6 +286,29 @@ try {
   check("合并复习：复习页渲染出摘录卡面（不再跳过摘录条目）", mf.wrap === true && mf.face === true, mergedFace);
   check("合并复习：卡面内容为那条摘录", String(mf.text).includes("GUI 摘录样本"), mergedFace);
 
+  // 15) 阅读器两个集中复习按钮（§6.8-8，需求 ⑦）
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title")][0]; t?.click(); return !!t; })()`);
+  await wait(2800);
+  const btnExtract = await cdp.eval(`(() => { const b = document.querySelector("[data-review-extracts]"); const ok = b && !b.disabled; b?.click(); return ok; })()`);
+  check("阅读器：「复习摘录」按钮在位可用", btnExtract === true, btnExtract);
+  await wait(2000);
+  const sessionPage = await cdp.eval(`(() => { const page = document.querySelector(".extract-page"); return JSON.stringify({ page: !!page, header: document.querySelector(".extract-page-header")?.textContent || "" }); })()`);
+  const sp = JSON.parse(sessionPage || "{}");
+  check("阅读器：进入本书摘录集中复习（页面 + 书名上下文）", sp.page === true && String(sp.header).includes("GUI 摘录测试书"), sessionPage);
+  // 返回书架 → 再开书 → 「复习闪卡」
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1500);
+  await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title")][0]; t?.click(); return !!t; })()`);
+  await wait(2800);
+  const btnCards = await cdp.eval(`(() => { const b = document.querySelector("[data-review-cards]"); const ok = b && !b.disabled; b?.click(); return ok; })()`);
+  check("阅读器：「复习闪卡」按钮在位可用", btnCards === true, btnCards);
+  await wait(2000);
+  const reviewScoped = await cdp.eval(`(() => { const w = document.querySelector(".review-wrap"); const title = document.querySelector(".topbar-title")?.textContent || ""; return JSON.stringify({ wrap: !!w, title }); })()`);
+  const rs = JSON.parse(reviewScoped || "{}");
+  check("阅读器：进入本书闪卡集中复习（复习页 + 标题带书名）", rs.wrap === true && String(rs.title).includes("GUI 摘录测试书"), reviewScoped);
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);
