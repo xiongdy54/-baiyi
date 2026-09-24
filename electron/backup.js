@@ -105,6 +105,36 @@ function sanitizeAIConfigForBackup(text) {
 }
 
 // A-14（审计）：把「先 rmSync 线上、再 renameSync 挪进来」换成**先让位、再换入、成功才清理**。
+// 换入前的内容校验（D-TEST-85/87）：SQLite 头部 + 页大小/页数 与文件长度是否自洽。
+// 0 字节、垃圾字节、以及"头部还在但正文被截断"三类都能被这一步拦下，且不引入第二个 WASM 实例。
+// 边界：不校验应用 schema（那需要真开库），本函数只回答"它是不是一个完整的 SQLite 文件"。
+function isIntactSqliteFile(file) {
+  let buf;
+  try {
+    buf = fs.readFileSync(file);
+  } catch {
+    return false;
+  }
+  if (buf.length < 512) return false;
+  if (buf.subarray(0, 16).toString("latin1") !== "SQLite format 3\u0000") return false;
+  let pageSize = (buf[16] << 8) | buf[17];
+  if (pageSize === 1) pageSize = 65536;
+  if (pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) return false;
+  const pageCount = (buf[28] << 24) | (buf[29] << 16) | (buf[30] << 8) | buf[31];
+  if (pageCount <= 0) return false;
+  return buf.length >= pageSize * pageCount;
+}
+
+// settings.json / ai-config.json 这类必须是"JSON 对象整体"才允许覆盖（D-TEST-87）
+function isJsonObjectFile(file) {
+  try {
+    const v = JSON.parse(fs.readFileSync(file, "utf-8"));
+    return !!v && typeof v === "object" && !Array.isArray(v);
+  } catch {
+    return false;
+  }
+}
+
 // 原写法两步非原子：rename 一旦失败（跨设备 / 杀软实时扫描占用 / 权限 / 磁盘抖动），
 // 线上数据已被删掉而备份又没进去 —— 实测 library.db / assets / memory 三处都会因此被清空。
 // 返回让位文件路径（供整体成功后统一清理，或失败时回滚）。
@@ -296,24 +326,34 @@ async function autoBackupIfNeeded(opts = {}) {
 
 // safety 备份的滚动清理（按文件名字典序 = 时间序，与 auto 同策略）
 function rotateSafetyBackups(dir, keep = SAFETY_KEEP) {
-  let safeties;
-  try {
-    safeties = fs.readdirSync(dir).filter((f) => SAFETY_RE.test(f)).sort();
-  } catch {
-    return;
-  }
+  const safeties = listByMtimeAsc(dir, SAFETY_RE);
   for (const f of safeties.slice(0, Math.max(0, safeties.length - keep))) {
     try { fs.rmSync(path.join(dir, f), { force: true }); } catch { /* 单个删除失败不影响其余 */ }
   }
 }
 
-function rotateAutoBackups(dir, keep) {
-  let autos;
+// D-TEST-35：按**文件修改时间**排序，不按文件名。文件名里的日期来自系统时钟，时钟回拨（用户改时间、
+// 同步服务拉回旧时间、跨时区迁移）会产出"看起来更旧"的新备份，字典序把它排到最前当"最旧"删掉——
+// 于是越新的备份越先被清。mtime 由文件系统给，不受文件名里那个日期影响。
+function listByMtimeAsc(dir, re) {
+  let names;
   try {
-    autos = fs.readdirSync(dir).filter((f) => AUTO_RE.test(f)).sort();
+    names = fs.readdirSync(dir).filter((f) => re.test(f));
   } catch {
-    return;
+    return [];
   }
+  return names
+    .map((f) => {
+      let m = 0;
+      try { m = fs.statSync(path.join(dir, f)).mtimeMs; } catch { /* 取不到就排最前，让它先被清 */ }
+      return { f, m };
+    })
+    .sort((a, b) => a.m - b.m)
+    .map((x) => x.f);
+}
+
+function rotateAutoBackups(dir, keep) {
+  const autos = listByMtimeAsc(dir, AUTO_RE);
   for (const f of autos.slice(0, Math.max(0, autos.length - keep))) {
     try {
       fs.rmSync(path.join(dir, f), { force: true });
@@ -383,20 +423,28 @@ function applyPendingRestore(opts = {}) {
   try {
     marker = JSON.parse(fs.readFileSync(p.markerFile, "utf-8"));
   } catch {
-    fs.rmSync(p.markerFile, { force: true });
-    return false;
+    // D-TEST-86：原来这里静默删掉标记并返回 false，而 false 与"本来就没有待恢复"无法区分，
+    // 于是"用户点了恢复 → 重启 → 什么都没发生 → 零提示"永远不会被发现。
+    // 现在保留标记（不销毁现场）并把失败如实报给调用方，main.js 的 ok===false 分支会打日志。
+    return { ok: false, error: "恢复标记（restore-pending.json）损坏，本次未执行恢复；标记已保留待排查", markerFile: p.markerFile, stagingDir: p.stagingDir };
   }
   const restored = [];
   const asides = []; // A-14：已让位的线上数据；全部换入成功后才清理，中途失败要回滚
   try {
     const stagedDb = path.join(p.stagingDir, "library.db");
     if (fs.existsSync(stagedDb)) {
+      // D-TEST-85：暂存库被截成 0 字节或换成垃圾字节时，原逻辑照样换入并返回 ok:true
+      // ⇒ 目标机（可能已有真实数据）被替换成一个打不开或空白的库，且零提示。
+      if (!isIntactSqliteFile(stagedDb)) {
+        throw new Error("备份包里的 library.db 不是完整可读的 SQLite 文件；已中止恢复，线上数据保持原样");
+      }
       const a = swapIn(stagedDb, p.dbFile);
       if (a) asides.push({ live: p.dbFile, aside: a });
       restored.push("library.db");
     }
     const stagedAssets = path.join(p.stagingDir, "assets");
     if (fs.existsSync(stagedAssets)) {
+      if (!fs.statSync(stagedAssets).isDirectory()) throw new Error("备份包里的 assets 不是目录；已中止恢复");
       const a = swapIn(stagedAssets, p.assetsDir);
       if (a) asides.push({ live: p.assetsDir, aside: a });
       restored.push("assets");
@@ -404,6 +452,8 @@ function applyPendingRestore(opts = {}) {
     // v45（M14-UM1，§4.18-15）：记忆文件树随备份恢复（整体换入，不合并）
     const stagedMemory = path.join(p.stagingDir, "memory");
     if (fs.existsSync(stagedMemory)) {
+      // D-TEST-87：包里用一个**文件**冒充 memory 目录时，原来会把本地整棵记忆树换掉并报成功
+      if (!fs.statSync(stagedMemory).isDirectory()) throw new Error("备份包里的 memory 不是目录；已中止恢复");
       const a = swapIn(stagedMemory, p.memoryDir);
       if (a) asides.push({ live: p.memoryDir, aside: a });
       restored.push("memory");
@@ -411,24 +461,30 @@ function applyPendingRestore(opts = {}) {
     // A-4（审计）：词典本体一并换入
     const stagedDictDb = path.join(p.stagingDir, "dictionary.db");
     if (fs.existsSync(stagedDictDb)) {
+      // D-TEST-87：包里用一段 JSON 冒充 dictionary.db 时，原来会覆盖掉可用词典库并报成功
+      if (!isIntactSqliteFile(stagedDictDb)) throw new Error("备份包里的 dictionary.db 不是完整可读的 SQLite 文件；已中止恢复");
       const a = swapIn(stagedDictDb, p.dictDbFile);
       if (a) asides.push({ live: p.dictDbFile, aside: a });
       restored.push("dictionary.db");
     }
     const stagedDicts = path.join(p.stagingDir, "dicts");
     if (fs.existsSync(stagedDicts)) {
+      if (!fs.statSync(stagedDicts).isDirectory()) throw new Error("备份包里的 dicts 不是目录；已中止恢复");
       const a = swapIn(stagedDicts, p.dictsDir);
       if (a) asides.push({ live: p.dictsDir, aside: a });
       restored.push("dicts");
     }
-    // settings / ai-config 用 copyFileSync 覆盖，没有「先删后挪」的破坏窗口，保持原样
+    // settings / ai-config 用 copyFileSync 覆盖，没有「先删后挪」的破坏窗口，保持原样；
+    // 但内容必须是 JSON 对象才允许覆盖（D-TEST-87：二进制垃圾覆盖 settings 会让偏好静默损坏）
     const stagedSettings = path.join(p.stagingDir, "settings.json");
     if (fs.existsSync(stagedSettings)) {
+      if (!isJsonObjectFile(stagedSettings)) throw new Error("备份包里的 settings.json 不是合法 JSON 对象；已中止恢复");
       fs.copyFileSync(stagedSettings, p.settingsFile);
       restored.push("settings.json");
     }
     const stagedAI = path.join(p.stagingDir, "ai-config.json");
     if (fs.existsSync(stagedAI)) {
+      if (!isJsonObjectFile(stagedAI)) throw new Error("备份包里的 ai-config.json 不是合法 JSON 对象；已中止恢复");
       fs.copyFileSync(stagedAI, p.aiConfigFile);
       restored.push("ai-config.json");
     }

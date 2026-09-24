@@ -534,7 +534,10 @@ export function chartRatingColumn(ratings: { rating: string; count: number }[]):
     const h = (d.pct / 100) * H;
     y -= h;
     if (h > 0.5) els.push({ ...R(CX, y, W, h, SHADE[i]), title: `${ZH[d.name]} ${d.pct.toFixed(1)}%` });
-    if (h > 22) els.push(T(CX + W / 2, y + h / 2 + 4, `${Math.round(d.pct)}%`, { textAnchor: "middle", fontWeight: 700, fontSize: 12, fill: textOn(SHADE[i], P) }));
+    // D-TEST-81：柱内标签原来用 Math.round(d.pct)，而同一段的悬浮值（上一行）与右侧图例（下方）
+    // 用 d.pct.toFixed(1) —— 同一张图里同一个量出现两种精度（67% 与 67.4% 并存），用户会以为
+    // 是两个不同的量。统一到 toFixed(1)。
+    if (h > 22) els.push(T(CX + W / 2, y + h / 2 + 4, `${d.pct.toFixed(1)}%`, { textAnchor: "middle", fontWeight: 700, fontSize: 12, fill: textOn(SHADE[i], P) }));
   });
   els.push(L(CX - 8, Y0 + H + 2, CX + W + 8, Y0 + H + 2, P.GRID, 0.9));
   els.push(T(CX + W / 2, Y0 + H + 20, "近 30 天", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));

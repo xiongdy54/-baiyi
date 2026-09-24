@@ -794,7 +794,18 @@ function listItems() {
 
 // v38（D35）：书籍语言属性（''=未知）。查词语言路由的书籍级信号；不参与其他逻辑。
 function setLibraryItemLang(id, lang) {
-  const t = String(lang ?? "").trim().toLowerCase();
+  const rawInput = String(lang ?? "");
+  const raw = rawInput.trim();
+  // D-TEST-75：原来只 trim+toLowerCase 后原样落盘——"not-a-lang"、"中文"、"EN"、"12" 都能写进
+  // 这个字段，而它正是词典 D35 语言优先级链的**第四档取值来源**（解析出的脏值会直接进路由判断）。
+  // 现在按 BCP-47 形状校验：空串允许（显式清空），纯空白按非法拒收（否则手滑一次就把语言清掉）。
+  // 边界：形状校验拦不住"形似合法但不存在的码"（如 not-a-lang），那需要语言注册表 —— 主进程没有
+  // 权威清单，与 D-TEST-77 同一情形，记为渲染层侧的后续项。
+  if (rawInput !== "" && raw === "") return false;
+  const t = raw.toLowerCase();
+  // 子标签允许 1 个字符：BCP-47 的单字符子标签是合法的（如 en-US-x 的私有段 x），
+  // 早先写成 {2,8} 会把这类合法值误拒 —— 形状校验要宽、存在性校验才该严（后者主进程做不了）。
+  if (raw !== "" && !/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(t)) return false;
   // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
   if (!rowExists("library_items", id)) return false;
   db.run("UPDATE library_items SET lang=?, updated_at=? WHERE id=? AND is_deleted=0", [t, Date.now(), String(id)]);
@@ -1695,7 +1706,16 @@ function setCardSuspended(cardId, suspended, reason) {
 function updateCardLeech(cardId, leechPatch) {
   const card = getCard(cardId);
   if (!card) return null;
-  const leech = { ...(card.leech || {}), ...leechPatch };
+  // D-TEST-74：原来把任意 patch 原样合并落盘——实测 lapses:-999、hitCount:1e15、非布尔的 isLeech
+  // 都能写进去，而下游是靠这些字段做判定（lapses >= 阈值 ⇒ 判为遗忘卡；hitCount 进统计），
+  // 脏值会把判定整体带偏且无任何报错。对已知字段做值域校验，非法即拒绝。
+  const patch = leechPatch && typeof leechPatch === "object" ? leechPatch : null;
+  if (!patch) return null;
+  const NUM_MAX = 1e6;
+  const numOk = (v) => v === undefined || (typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 0 && v <= NUM_MAX);
+  const boolOk = (v) => v === undefined || typeof v === "boolean";
+  if (!numOk(patch.lapses) || !numOk(patch.hitCount) || !boolOk(patch.isLeech) || !boolOk(patch.suspended)) return null;
+  const leech = { ...(card.leech || {}), ...patch };
   db.run("UPDATE cards SET leech_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(leech), Date.now(), cardId]);
   persist();
   return true;
@@ -2103,9 +2123,28 @@ function getDictCache(providerId, language, word) {
   }
 }
 
+// 单条词典缓存上限（D-TEST-78）：真实词条远小于此，超限一律拒收
+const DICT_ENTRY_MAX_BYTES = 64 * 1024;
+
 function setDictCache(providerId, language, word, entry, version) {
+  // D-TEST-77 更正后按**实际可用的判据**修：provider 是渲染层对象（src/lib/dict.ts 的 provider.id），
+  // 主进程没有它的权威清单 ⇒ 存在性校验属于渲染层，这里不做；但原来连格式都不看，
+  // providerId 传 "不存在的provider" 照样落盘，长出一个没人认领的孤儿分组。
+  // D-TEST-78：单条结果必须有上限——线上 dictionary.db 实测已 835 MB，一条异常 payload 能无上限撑大缓存。
+  const pid = String(providerId ?? "").trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(pid)) return false;
+  const lang = String(language ?? "").trim();
+  if (!/^[A-Za-z]{2,3}([-_][A-Za-z0-9]{2,8})*$/.test(lang)) return false;
+  if (!String(word ?? "").trim()) return false;
+  let json;
+  try {
+    json = JSON.stringify(entry);
+  } catch {
+    return false;
+  }
+  if (json === undefined || Buffer.byteLength(json, "utf-8") > DICT_ENTRY_MAX_BYTES) return false;
   db.run("INSERT OR REPLACE INTO dictionary_cache (provider_id, language, normalized_word, result_json, fetched_at, version) VALUES (?,?,?,?,?,?)", [
-    String(providerId), String(language), String(word), JSON.stringify(entry), Date.now(), version || null,
+    pid, lang, String(word), json, Date.now(), version || null,
   ]);
   persist();
   return true;
@@ -2472,8 +2511,11 @@ function getStatsOverview() {
   // ---- 月度队列水位（当月）----
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
   const monthNew = kpiCards.filter((c) => c.createdAt >= monthStart).length;
-  const monthReviews = queryAll("SELECT COUNT(DISTINCT card_id) AS n FROM review_logs WHERE reviewed_at >= ?", [monthStart])[0]?.n || 0;
-  const monthSkips = queryAll("SELECT COUNT(DISTINCT card_id) AS n FROM review_skips WHERE skipped_at >= ?", [monthStart])[0]?.n || 0;
+  // D-TEST-59/69：这两条按 §7.2 L869「查询一律带 is_deleted = 0」应排除软删卡，原来漏了——
+  // 删掉的卡只要当月中被复习/跳过一次，就仍被计进"已完成/已跳过"，月度队列水位因此虚高。
+  // 照下方阅读字数那两条的既有写法 JOIN 父表过滤（review_logs/review_skips 自身没有软删位）。
+  const monthReviews = queryAll("SELECT COUNT(DISTINCT r.card_id) AS n FROM review_logs r JOIN cards c ON c.id = r.card_id WHERE r.reviewed_at >= ? AND c.is_deleted = 0", [monthStart])[0]?.n || 0;
+  const monthSkips = queryAll("SELECT COUNT(DISTINCT s.card_id) AS n FROM review_skips s JOIN cards c ON c.id = s.card_id WHERE s.skipped_at >= ? AND c.is_deleted = 0", [monthStart])[0]?.n || 0;
   const queueFlow = { carriedOver: Math.max(0, dueToday - monthNew), overdue: 0, newCards: monthNew, completed: monthReviews, skipped: monthSkips, remaining: Math.max(0, dueToday - completedToday) };
 
   // ---- 阅读字数（近 45 天**含今日** = 46 个日桶，相邻正增量之和）----
@@ -2585,6 +2627,14 @@ function getJournalDraft() {
   return rows.length ? mapJournalRow(rows[0]) : null;
 }
 
+// 检索折叠（D-TEST-82/83/84）：NFKC 折叠全/半角与兼容字符、合成浊点，再 trim + ASCII 小写。
+// 约定：查询侧与被查侧必须用**同一个** fold；渲染层（CardBrowser）用的是它的等价实现，
+// 两侧行为一致由 F79 的"两条路径命中集必须相同"守着。
+// 这是**匹配用**的折叠，不改用户可见文本——日记与卡片正文逐字不动。
+function foldSearch(s) {
+  return String(s ?? "").normalize("NFKC").trim().toLowerCase();
+}
+
 // 列表：{from,to} 日期闭区间（'YYYY-MM-DD'；含端点）、{query} 内容子串、{limit,offset} 分页。
 // 排序固定 = `entry_date DESC, created_at ASC`（日期倒序 / 日组内正序，§6.5.3）；total=同条件总数（分页用）。
 function listJournalEntries(opts) {
@@ -2599,17 +2649,21 @@ function listJournalEntries(opts) {
     where.push("entry_date <= ?");
     params.push(String(to));
   }
-  // 批次 D（D-TEST-10）：查询词做 NFKC 归一，与词典侧 normalizeWord / cards.ts 同一口径。
-  // 顺序钉死：先 normalize 再转义 %_\（NFKC 不产出这三个字符，写反了会留坑给将来的归一规则）。
-  const q = String(query ?? "").trim().normalize("NFKC");
-  if (q) {
-    where.push("content_markdown LIKE ? ESCAPE '\\'");
-    params.push(`%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
-  }
+  // D-TEST-82/83/84：改成**查询侧与被查侧用同一个 fold**。
+  // 原来只在 SQL 侧把查询词 NFKC 归一、却不归一列里的正文，于是"分解浊点 / 半角片假名 / 全角数字"
+  // 这些写法只要不是按同一种形状存的就永远搜不到；而渲染层又是另一套（只 toLowerCase），
+  // 同一个词在卡片浏览与日记里给出不同结果。SQLite 没有 NFKC，所以折叠后匹配放到 JS 里做
+  // （日记/知识点是数百行量级，与 CardBrowser 客户端过滤同量级）。
+  const q = foldSearch(query);
   const sqlWhere = where.join(" AND ");
-  const total = queryAll(`SELECT COUNT(*) AS n FROM journal_entries WHERE ${sqlWhere}`, params)[0]?.n || 0;
   const lim = clampLimit(limit, 200, 1000);
   const off = clampOffset(offset);
+  if (q) {
+    const all = queryAll(`SELECT * FROM journal_entries WHERE ${sqlWhere} ORDER BY entry_date DESC, created_at ASC, id ASC`, params);
+    const hit = all.filter((r) => foldSearch(r.content_markdown).includes(q));
+    return { entries: hit.slice(off, off + lim).map(mapJournalRow), total: hit.length };
+  }
+  const total = queryAll(`SELECT COUNT(*) AS n FROM journal_entries WHERE ${sqlWhere}`, params)[0]?.n || 0;
   const rows = queryAll(
     `SELECT * FROM journal_entries WHERE ${sqlWhere} ORDER BY entry_date DESC, created_at ASC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -2841,18 +2895,18 @@ function listKnowledgePoints(opts) {
     where.push("domain_id = ?");
     params.push(String(domainId));
   }
-  // 批次 D（D-TEST-10）：查询词做 NFKC 归一，与词典侧 normalizeWord / cards.ts 同一口径。
-  // 顺序钉死：先 normalize 再转义 %_\（NFKC 不产出这三个字符，写反了会留坑给将来的归一规则）。
-  const q = String(query ?? "").trim().normalize("NFKC");
-  if (q) {
-    where.push("(canonical_label LIKE ? ESCAPE '\\' OR alias_json LIKE ? ESCAPE '\\')");
-    const pat = `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
-    params.push(pat, pat);
-  }
+  // D-TEST-82/83：与 listJournalEntries 同一处理——查询侧与被查侧共用 foldSearch；
+  // 只看 canonical_label 与 alias_json 两列（language_variants_json 仍不参与检索，见 F85 的登记）。
+  const q = foldSearch(query);
   const sqlWhere = where.join(" AND ");
-  const total = queryAll(`SELECT COUNT(*) AS n FROM knowledge_points WHERE ${sqlWhere}`, params)[0]?.n || 0;
   const lim = clampLimit(limit, 200, 1000);
   const off = clampOffset(offset);
+  if (q) {
+    const all = queryAll(`SELECT * FROM knowledge_points WHERE ${sqlWhere} ORDER BY canonical_label ASC, id ASC`, params);
+    const hit = all.filter((r) => foldSearch(r.canonical_label).includes(q) || foldSearch(r.alias_json).includes(q));
+    return { points: hit.slice(off, off + lim).map(mapKpRow), total: hit.length };
+  }
+  const total = queryAll(`SELECT COUNT(*) AS n FROM knowledge_points WHERE ${sqlWhere}`, params)[0]?.n || 0;
   const rows = queryAll(
     `SELECT * FROM knowledge_points WHERE ${sqlWhere} ORDER BY canonical_label ASC, id ASC LIMIT ? OFFSET ?`,
     [...params, lim, off]
@@ -4788,6 +4842,7 @@ function listResumableMaterialMapRuns(limit = 20) {
 }
 
 module.exports = {
+  foldSearch,
   initDb,
   persistDb: persist,
   persistNow,
