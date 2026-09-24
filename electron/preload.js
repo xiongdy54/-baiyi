@@ -53,7 +53,26 @@ contextBridge.exposeInMainWorld("workflowAPI", {
   create: (payload) => ipcRenderer.invoke("extracts:create", payload),
   listDue: () => ipcRenderer.invoke("extracts:listDue"),
   get: (id) => ipcRenderer.invoke("extracts:get", id),
-  postpone: (id) => ipcRenderer.invoke("extracts:postpone", id)
+  postpone: (id) => ipcRenderer.invoke("extracts:postpone", id),
+  // v48.22（D58 §6.8）：摘录调度内核写面
+  postponeDays: (id, days) => ipcRenderer.invoke("extracts:postponeDays", id, days),
+  advance: (id, now) => ipcRenderer.invoke("extracts:advance", id, now),
+  update: (id, patch) => ipcRenderer.invoke("extracts:update", id, patch),
+  setPriority: (id, priority) => ipcRenderer.invoke("extracts:setPriority", id, priority),
+  setStatus: (id, status, detail, opType) => ipcRenderer.invoke("extracts:setStatus", id, status, detail, opType),
+  remove: (id) => ipcRenderer.invoke("extracts:delete", id),
+  batch: (op, ids, payload) => ipcRenderer.invoke("extracts:batch", op, ids, payload),
+  switchEngine: (to, from) => ipcRenderer.invoke("extracts:switchEngine", to, from)
+});
+
+// v48.22（D58 §6.8-5/§6.8-7）：只读用量 + 跨类撤销（卡片评分与摘录操作共用一个撤销栈）
+contextBridge.exposeInMainWorld("limitsAPI", {
+  usage: (now) => ipcRenderer.invoke("limits:usage", now)
+});
+
+contextBridge.exposeInMainWorld("undoAPI", {
+  last: () => ipcRenderer.invoke("undo:last"),
+  info: () => ipcRenderer.invoke("undo:info")
 });
 
 contextBridge.exposeInMainWorld("cardsAPI", {

@@ -44,6 +44,19 @@ const {
   listDueExtracts,
   getExtract,
   postponeExtract,
+  // v48.22（D58）：摘录调度内核（写 API + 引擎切换 + 派生用量 + 跨类撤销）
+  postponeExtractDays,
+  advanceExtract,
+  updateExtract,
+  setExtractPriority,
+  setExtractStatus,
+  deleteExtract,
+  batchExtractOps,
+  switchExtractEngine,
+  setLibraryItemPriority,
+  getDailyUsage,
+  undoLast,
+  getUndoInfo,
   getLastUndoableReview,
   undoLastReview,
   createCard,
@@ -435,6 +448,24 @@ ipcMain.handle("extracts:listDue", () => listDueExtracts());
 ipcMain.handle("extracts:get", (_e, id) => getExtract(String(id)));
 
 ipcMain.handle("extracts:postpone", (_e, id) => postponeExtract(String(id)));
+
+// v48.22（D58 §6.8）：摘录写 API + 引擎切换 + 只读用量 + 跨类撤销。
+// 写路径纪律沿用 §4.4.9：BEGIN/COMMIT → COMMIT 后 persist → IPC 成功，三者齐才算成功；
+// 失败一律以 reject 上抛，渲染层按既有「保存失败横幅 + 重试」处理，禁止静默降级。
+ipcMain.handle("extracts:postponeDays", (_e, id, days) => postponeExtractDays(String(id), days));
+ipcMain.handle("extracts:advance", (_e, id, now) => advanceExtract(String(id), now));
+ipcMain.handle("extracts:update", (_e, id, patch) => updateExtract(String(id), patch || {}));
+ipcMain.handle("extracts:setPriority", (_e, id, priority) => setExtractPriority(String(id), priority));
+ipcMain.handle("extracts:setStatus", (_e, id, status, detail, opType) =>
+  setExtractStatus(String(id), String(status), detail || null, opType ? String(opType) : undefined)
+);
+ipcMain.handle("extracts:delete", (_e, id) => deleteExtract(String(id)));
+ipcMain.handle("extracts:batch", (_e, op, ids, payload) => batchExtractOps(String(op), ids, payload));
+ipcMain.handle("extracts:switchEngine", (_e, to, from) => switchExtractEngine(to, from));
+ipcMain.handle("limits:usage", (_e, now) => getDailyUsage(now));
+ipcMain.handle("undo:last", () => undoLast());
+ipcMain.handle("undo:info", () => getUndoInfo());
+ipcMain.handle("library:setPriority", (_e, itemId, priority) => setLibraryItemPriority(String(itemId), priority));
 
 // ---------- 卡片 / FSRS / Leech / AI 制卡 ----------
 ipcMain.handle("cards:create", (_e, card) => createCard(card || {}));

@@ -205,12 +205,13 @@ CREATE TABLE IF NOT EXISTS op_counter (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   next INTEGER NOT NULL
 );
--- 迁移：INSERT INTO op_counter(id, next) SELECT 1, COALESCE(MAX(review_seq),0)+1 FROM review_logs
--- 分配：事务内 UPDATE op_counter SET next = next + 1 后取回（禁读 MAX(review_seq) 推算）
+-- 播种：INSERT OR IGNORE INTO op_counter(id, next) VALUES (1, 1)
+-- 分配：事务内 UPDATE op_counter SET next = next + 1 后取回
 ```
 
-此后 `saveReview` 的 `review_seq` 与 `extract_ops.seq` **同取此计数器**（替换 `db.js:1510` 的 `MAX+1`）。
-- **必须核对的行为差异**：现有语义「撤销删除后序号允许复用」（指南 §4.4.9）在计数器下变为**不复用**。`review_logs` 内仍严格单调递增，唯一索引与排序不变量均成立；但若有测试断言「撤销后重评得到同一 seq」，该断言属**需要随本次契约变更更新的旧断言**（记入 §K 清单，执行时必须差分确认，不得默默改）。
+`op_journal.seq` 与 `extract_ops.seq` **同取此计数器**——它是跨类撤销排序的来源。
+- **与 `review_logs.review_seq` 相互独立**（2026-09-25 修正）：`review_seq` 的分配语义**一字未改**（仍 `MAX(review_seq)+1`、表内唯一单调、撤销删除后**允许复用**，§4.4.9 排序不变量完整保留）。曾试过让两者共享计数器，实测会破坏「撤销只删最大 seq ⇒ 序号稠密」这一既有可测性质（`f38-write-fuzz.cjs` 的 F38-8j 即其代理断言，差分实测新增 4 条失败），故回退为独立计数器——跨类排序由 `op_journal` 承担，`review_seq` 无需参与。
+- **不再需要「行为差异核对」**（2026-09-25 修正）：因两者独立，`review_logs` 的分配与撤销语义、`f03`（队列口径）、`f38-8j`（序号稠密）等既有断言**全部不受影响**——差分实测已确认。
 
 ### C.4 状态机（落地 §6.4.2 v1，一次到位）
 

@@ -38,6 +38,7 @@ const DOC_KEYS = [
   "app.shelfFolders", "app.shelfOrder", "app.siblingBury", "app.skinId", // §5.4 D51 / §4.16 / §5.3
   "app.shelfDensity", "app.shelfSort", "app.shelfView", // §7.4 v48.18 / D54（书架工具条状态记忆）
   "activity.dismissedRuns", // §4.2-3 / §4.19 收口块 ⑥（v48.17 / D53 指示器已关清单）
+  "app.extracts", // §6.8-1 / §7.4（v48.22 / D58 摘录复习改版：mergeIntoReview / interleave / engine 三键）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -223,6 +224,7 @@ app
         ["app", "memory", { enabled: false, injectBudget: 3000, minIntervalMinutes: 30, consolidateEvery: 20, lastCoveredAt: 1758500000000 }],
         ["app", "readerSettings", { fontSize: 19, lineHeight: 1.75, width: 720 }],
         ["app", "skinId", "none"],
+        ["app", "extracts", { mergeIntoReview: false, interleave: "quota-1-4", engine: "sm19-default" }], // v48.22 / D58
         ["app", "accentColor", "#0057ff"],
         ["app", "mindmapMaxCalls", 40],
         ["app", "mindmapPricing", { input: 1.5, output: 6 }],
