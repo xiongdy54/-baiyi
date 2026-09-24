@@ -9,6 +9,9 @@ import { settingsStore } from "../lib/settings";
 import { eventBus } from "../lib/eventbus";
 import { useCommandActions } from "../lib/useCommands";
 import { CardFace } from "./CardBrowser";
+import { fetchSessionQueue, type SessionItem } from "../lib/sessionQueue";
+import ExtractCardFace from "./ExtractCardFace";
+import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow";
 import ContrastCardModal from "./ContrastCardModal";
 import ImageLightbox from "./ImageLightbox";
 
@@ -19,9 +22,12 @@ function safePreviewItems(fsrs: unknown): ReturnType<typeof fsrsEngine.preview> 
 }
 
 export default function ReviewView({
-  onJumpToDoc
+  onJumpToDoc,
+  bookItemIds
 }: {
   onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }) => void;
+  /** v48.22（D58 §6.8-8）：本书范围内的集中复习（阅读器「复习闪卡」入口） */
+  bookItemIds?: string[];
 } = {}) {
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
@@ -66,12 +72,35 @@ export default function ReviewView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
-  // 拉取今日队列队首（同一视图：到期 + 同源延后 + 规范序），并同步「同源暂缓」清单
+  // 拉取今日队列队首（同一视图：到期 + 同源延后 + 规范序），并同步「同源暂缓」清单。
+  // v48.22（D58 §6.8-3）：改为消费**会话队列**（§4.2-26 唯一装配面）——它同样受每日上限与
+  // 按书范围约束；混编出的摘录条目由「摘录」页处理，本页只取其中的卡片（摘录不会因此丢失：
+  // 未处理即仍 due，摘录页照常可见）。
+  // v48.22（D58 §6.8-3）：合并会话里推送到的摘录——与摘录页共用同一张卡面就地处理
+  const [currentExtract, setCurrentExtract] = useState<DueTopic | null>(null);
+  const extractHeadRef = useRef<DueTopic | null>(null);
+
   const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
+    const scope = bookItemIds && bookItemIds.length ? { bookItemIds } : undefined;
+    const session = await fetchSessionQueue({ scope });
+    if (session) {
+      setDeferred((session.deferred ?? []) as unknown as TodayQueue["deferred"]);
+      const head = session.items[0];
+      // 队首是摘录 → 交给摘录卡面（本页不跳过它：跳过会让合并模式名存实亡）
+      if (head && head.kind === "extract" && head.extract) {
+        extractHeadRef.current = head.extract;
+        setCurrentExtract(head.extract);
+        return null;
+      }
+      extractHeadRef.current = null;
+      setCurrentExtract(null);
+      const firstCard = session.items.find((it: SessionItem) => it.kind === "card");
+      return (firstCard?.card as (CardRecord & { docTitle?: string })) ?? null;
+    }
     const q = await cardsApi.todayQueue();
     setDeferred(q.deferred ?? []);
     return q.cards[0] ?? null;
-  }, []);
+  }, [bookItemIds]);
 
   // 开场拉第一张；若 sessionStorage 有跳转前的复习现场（从阅读器返回）则恢复该卡
   useEffect(() => {
@@ -393,6 +422,47 @@ export default function ReviewView({
     return (
       <div className="review-wrap">
         <div className="empty-state"><p className="empty-text">加载中…</p></div>
+      </div>
+    );
+  }
+
+  // v48.22（D58 §6.8-3）：合并会话推送到摘录时，用**与摘录页同一张卡面**就地处理
+  if (currentExtract) {
+    const ex = currentExtract;
+    const after = async () => {
+      const nx = await nextCard();
+      setCurrent(nx ?? null);
+      if (nx) {
+        setShowBack(false);
+        setStartedAt(Date.now());
+      }
+      setSessionDone(!nx && extractHeadRef.current === null);
+    };
+    return (
+      <div className="review-wrap">
+        <div className="review-session">
+          <div className="review-count mono">摘录 · 合并复习</div>
+          <ExtractCardFace
+            key={ex.id}
+            extract={ex}
+            handlers={{
+              onAdvance: () => void readingWorkflow.advance(ex.id).then(after),
+              onPostpone: (days) => void readingWorkflow.postponeDays(ex.id, days).then(after),
+              onPriority: (p) => void readingWorkflow.setPriority(ex.id, p),
+              onGraduate: () => void readingWorkflow.graduate(ex.id).then(after),
+              onEdit: (text) => void readingWorkflow.updateContent(ex.id, text),
+              onJumpToSource:
+                onJumpToDoc && ex.contextRef?.documentId
+                  ? () =>
+                      onJumpToDoc(ex.contextRef!.documentId!, {
+                        anchorText: ex.contextRef!.anchorText || ex.contentMarkdown,
+                        anchorRatio: ex.contextRef!.anchorRatio
+                      })
+                  : undefined,
+              onUndo: () => void undoApi.last().then(after)
+            }}
+          />
+        </div>
       </div>
     );
   }

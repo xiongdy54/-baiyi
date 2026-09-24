@@ -253,6 +253,39 @@ try {
   const afterDel = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "reviewScopes") || []))()`);
   check("筛选牌组：删除后已从设置里移除", !String(afterDel).includes("GUI 牌组"), String(afterDel).slice(0, 160));
 
+  // 13) §H.1 跳转原文不写阅读进度（差分实测：往返 progress_json 逐字节相等）
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title")][0]; t?.click(); return !!t; })()`);
+  await wait(2800);
+  check("真实阅读：书可正常打开（阅读器挂载）", (await cdp.eval(`!!document.querySelector(".reader-wrap")`)) === true, "未挂载");
+  await cdp.eval(`(() => { const w = document.querySelector(".reader-wrap"); if (w) w.scrollTop = 600; w?.dispatchEvent(new Event("scroll", { bubbles: true })); return true; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "返回"); b?.click(); return !!b; })()`);
+  await wait(2000);
+  const progressBaseline = await cdp.eval(`(async () => { const items = await window.libraryAPI.list(); const bk = items.find((x) => String(x.title || "").includes("GUI 摘录测试书")); return bk?.progressJson ?? null; })()`);
+  check("真实阅读确实写入了进度（基线非空，防空转）", typeof progressBaseline === "string" && progressBaseline.length > 2, progressBaseline);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "摘录"); b?.click(); return !!b; })()`);
+  await wait(1700);
+  const jumpOk = await cdp.eval(`(() => { const b = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim() === "跳转原文"); b?.click(); return !!b; })()`);
+  check("跳转原文：按钮在位可点", jumpOk === true, jumpOk);
+  await wait(2800);
+  check("跳转原文：阅读器已打开（现场查看语义）", (await cdp.eval(`!!document.querySelector(".reader-wrap")`)) === true, "未打开");
+  await cdp.eval(`(() => { const w = document.querySelector(".reader-wrap"); if (w) w.scrollTop = 1200; w?.dispatchEvent(new Event("scroll", { bubbles: true })); return true; })()`);
+  await wait(1400);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "返回"); b?.click(); return !!b; })()`);
+  await wait(2000);
+  const progressAfter = await cdp.eval(`(async () => { const items = await window.libraryAPI.list(); const bk = items.find((x) => String(x.title || "").includes("GUI 摘录测试书")); return bk?.progressJson ?? null; })()`);
+  check("跳转往返后 progress_json 逐字节相等（跳转不写进度，需求 ③）", progressAfter === progressBaseline, `before=${String(progressBaseline).slice(0, 80)} after=${String(progressAfter).slice(0, 80)}`);
+
+  // 14) 合并复习（§6.8-3）：开关开启且摘录到期时，复习页用同一张摘录卡面就地处理
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "复习"); b?.click(); return !!b; })()`);
+  await wait(2000);
+  const mergedFace = await cdp.eval(`(() => { const w = document.querySelector(".review-wrap"); const f = document.querySelector(".extract-face"); return JSON.stringify({ wrap: !!w, face: !!f, text: (f?.textContent || "").slice(0, 60) }); })()`);
+  const mf = JSON.parse(mergedFace || "{}");
+  check("合并复习：复习页渲染出摘录卡面（不再跳过摘录条目）", mf.wrap === true && mf.face === true, mergedFace);
+  check("合并复习：卡面内容为那条摘录", String(mf.text).includes("GUI 摘录样本"), mergedFace);
+
   console.log(`\n==== extract.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {
   console.error("测试异常：", (e && e.stack) || e);
