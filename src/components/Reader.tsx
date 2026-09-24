@@ -74,6 +74,9 @@ interface Props {
   openMindmapMapId?: string | null;
   /** v48.13（P3）：以同一 run 续跑（应用重启后发现未跑完的运行） */
   resumeRunId?: string | null;
+  /** v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡（按书范围会话） */
+  onReviewExtracts?: () => void;
+  onReviewCards?: () => void;
 }
 
 type SelectionAction = "manual" | "ai-cards" | null;
@@ -163,7 +166,9 @@ export default function Reader({
   openMindmapInitially,
   onMindmapOpened,
   openMindmapMapId,
-  resumeRunId
+  resumeRunId,
+  onReviewExtracts,
+  onReviewCards
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
@@ -1581,6 +1586,25 @@ export default function Reader({
                   {/* v48 批3（M15，D42）：目录旁「导图」→ 全屏 Overlay 工作区（内核不销毁，正文返回原位） */}
                   <button className="btn btn-outline btn-sm" data-mindmap-entry disabled={!contextRef?.documentId} onClick={() => setMindmapOpen(true)}>
                     导图
+                  </button>
+                  {/* v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡——按书范围会话，遵循共享每日预算 */}
+                  <button
+                    className="btn btn-outline btn-sm"
+                    data-review-extracts
+                    disabled={!itemId || !onReviewExtracts}
+                    title="集中复习本书的摘录（遵循每日上限）"
+                    onClick={() => onReviewExtracts?.()}
+                  >
+                    复习摘录
+                  </button>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    data-review-cards
+                    disabled={!itemId || !onReviewCards}
+                    title="集中复习本书的闪卡（遵循每日上限）"
+                    onClick={() => onReviewCards?.()}
+                  >
+                    复习闪卡
                   </button>
                   <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
