@@ -17,6 +17,10 @@ let mainWindow = null;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
+  // D-TEST-24/25：这里必须**立即返回**。原来只调 app.quit() 就往下走，
+  // 于是第二个实例仍然会走完整启动流程（initDb 末尾必然整库落盘一次），
+  // 实测 12 次里有 3 次改动了在线实例的库文件——覆盖式整库写，等于静默吞掉对方的数据。
+  return;
 } else {
   app.on("second-instance", () => {
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
@@ -103,7 +107,19 @@ function readSettings() {
     // 批次 A（D-TEST-09）：合法 JSON 但非对象时同样兜底。保留 { app, theme } 形状——
     // settings:set 的 all[scope][key] = value 依赖它。不做自愈写回，不覆盖用户文件。
     return v && typeof v === "object" && !Array.isArray(v) ? v : { app: {}, theme: {} };
-  } catch {
+  } catch (err) {
+    // D-TEST-30：与 settingsStore.js 同源的一处（两份长期分叉，见下方注释）。
+    // 解析失败原来是静默兜底，随后任何一次设置写入都会覆盖掉用户原有偏好且现场不可追；
+    // 这里把损坏文件改名留证，行为与 settingsStore 保持一致。
+    try {
+      if (err && err.code !== "ENOENT") {
+        const keep = SETTINGS_FILE + ".corrupt";
+        fs.rmSync(keep, { force: true });
+        fs.renameSync(SETTINGS_FILE, keep);
+      }
+    } catch {
+      /* 留证失败不影响兜底 */
+    }
     return { app: {}, theme: {} };
   }
 }
@@ -113,7 +129,10 @@ function readSettings() {
 
 function writeSettings(all) {
   fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(all, null, 2), "utf-8");
+  // D-TEST-30：同上——裸 writeFileSync 写一半就是截断文件，改为 .tmp + 原子 rename。
+  const tmp = SETTINGS_FILE + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(all, null, 2), "utf-8");
+  fs.renameSync(tmp, SETTINGS_FILE);
 }
 
 ipcMain.handle("settings:get", (_e, scope, key) => {
@@ -277,10 +296,23 @@ ipcMain.handle("library:pickImportFiles", async () => {
   return result.filePaths.map((p) => ({ name: path.basename(p), path: p }));
 });
 
-// 渲染层解析用（epub/html）：读任意本地文件字节
+// D-TEST-26：把「任意本地文件读」收窄为「只读用户在本会话里通过系统对话框选中的文件」。
+// 集中劫持 showOpenDialog 记录返回值，避免逐个选择点散改（main.js 6 处 + dictStore 1 处）；
+// 现有唯一生产者是 AddBookModal → pickImportFiles，所以这条白名单覆盖了全部合法用途。
+const pickedReadAllowlist = new Set();
+const _rawShowOpenDialog = dialog.showOpenDialog.bind(dialog);
+dialog.showOpenDialog = async (...args) => {
+  const r = await _rawShowOpenDialog(...args);
+  if (r && !r.canceled && Array.isArray(r.filePaths)) for (const f of r.filePaths) pickedReadAllowlist.add(path.resolve(f));
+  return r;
+};
+
+// 渲染层解析用（epub/html）：只许读上面登记过的路径
 ipcMain.handle("library:readFileBytes", (_e, filePath) => {
+  const abs = path.resolve(String(filePath));
+  if (!pickedReadAllowlist.has(abs)) return null;
   try {
-    return new Uint8Array(fs.readFileSync(String(filePath)));
+    return new Uint8Array(fs.readFileSync(abs));
   } catch {
     return null;
   }

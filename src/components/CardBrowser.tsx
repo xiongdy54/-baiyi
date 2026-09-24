@@ -80,6 +80,11 @@ function frontPreview(c: CardRecord): string {
 }
 
 // 来源展示：书名可能自带《》（导入时保留原书名），已带则不再包一层
+// 与主进程 electron/db.js 的 foldSearch **逐字一致**（渲染层与主进程无法共享模块，
+// 靠 F79「两条检索路径命中集必须相同」这条闸门守着）。D-TEST-84：原来这里是
+// query.trim().toLowerCase()，少了 NFKC 这一步，于是同一个词在卡片浏览与日记/知识点给出不同结果。
+const foldSearch = (s: unknown) => String(s ?? "").normalize("NFKC").trim().toLowerCase();
+
 function srcLabel(c: CardRecord & { docTitle?: string }): string {
   const t = c.docTitle || c.sourceRef?.title || "";
   if (!t) return "—";
@@ -138,7 +143,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
   }, [all]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = foldSearch(query);
     let list = all;
     if (preset === "due") list = list.filter(isDueCard);
     if (preset === "leech") list = list.filter(isLeechOrSuspended);
@@ -165,6 +170,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
           ...(c.tags ?? [])
         ]
           .join("\n")
+          .normalize("NFKC")
           .toLowerCase()
           .includes(q)
       );
@@ -314,7 +320,10 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
               <span className="cb-num mono">{c.fsrs?.reps ?? 0}</span>
               <span className="cb-num mono">{c.fsrs?.lapses ?? 0}</span>
               <span className="cb-num mono">{c.priority}</span>
-              <span className="cb-src">{srcLabel(c)}</span>
+              {/* D-TEST-80：来源列会被 CSS 单行裁切（theme.css .cb-src），却不带 title，
+                  而同一行的题面列（上方 .cb-front）一直带着——实测 12033 行里 597 处全文不可达。
+                  这里补上与题面同样的 title，让被省略号吃掉的尾部可以悬停读到。 */}
+              <span className="cb-src" title={srcLabel(c)}>{srcLabel(c)}</span>
             </div>
           ))}
         </div>

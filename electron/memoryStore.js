@@ -125,8 +125,45 @@ function ensureTree(dir) {
 
 // 重置（设置页「重置记忆」，用户主动触发；二次确认在 UI 层）——清空整个 memory/ 并重建脚手架
 function resetMemory(dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
+  // D-TEST-76：原来是 `rmSync(dir)` 直接抹掉——手写区是这个功能里**唯一不可再生**的内容
+  // （其余都由 AI 重新生成），而它此前没有任何备份路径（实测 reset 前 3 个文件、之后只剩 2 个，
+  // core.md 里的手写段还被削掉 132 字节，userData 下也没有任何备份目录）。
+  // 现在先整体改名留证（保留最近 3 份），再重建空树；留证失败也要继续重建，不能因此卡住重置。
+  try {
+    if (fs.existsSync(dir) && fs.readdirSync(dir).length > 0) {
+      const stamp = new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+      const keep = `${dir}-reset-${stamp}`;
+      fs.rmSync(keep, { recursive: true, force: true });
+      fs.renameSync(dir, keep);
+      pruneResetBackups(dir, 3);
+    }
+  } catch {
+    /* 留证失败不阻断重置 */
+  }
   return ensureTree(dir);
+}
+
+// 只保留最近 keep 份 <dir>-reset-* 留证（按 mtime，不按名字——与 D-TEST-35 同一纪律）
+function pruneResetBackups(dir, keep) {
+  const base = path.dirname(dir);
+  const prefix = path.basename(dir) + "-reset-";
+  let names;
+  try {
+    names = fs.readdirSync(base).filter((f) => f.startsWith(prefix));
+  } catch {
+    return;
+  }
+  names
+    .map((f) => {
+      let m = 0;
+      try { m = fs.statSync(path.join(base, f)).mtimeMs; } catch { /* 取不到排最前 */ }
+      return { f, m };
+    })
+    .sort((a, b) => a.m - b.m)
+    .slice(0, Math.max(0, names.length - keep))
+    .forEach(({ f }) => {
+      try { fs.rmSync(path.join(base, f), { recursive: true, force: true }); } catch { /* 忽略 */ }
+    });
 }
 
 // ---------- 基础读写（追加式） ----------
