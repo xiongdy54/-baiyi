@@ -98,6 +98,7 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 - `cards.memory_ref_json`（v42，§4.18）：**记忆接地溯源（只记来源，不承担判定）**——`{itemText, itemDate, topicPath, runId, verified}`；`itemText` 是卡片情境所引记忆行的**逐字抄录**，本地只做「该文本确实存在于记忆文件中」的子串存在性校验（**不是相关性判定**），失败时 `verified=false` 并在确认面板标「情境来源存疑」；空/NULL＝该卡情境未来自记忆。不改卡面语义、不参与调度（§1.10）
 - （v16 移除 `cards.reverse_json`：翻转问答卡改为创建两张独立问答卡，见 D18；已建过该列的旧库残留列无碍，新库不再建列）
 - `extracts.context_ref_json`：同上（v12.3 新增，含旧库迁移）
+- `extracts` 增 5 列（v48.23 / D61）：批注化摘录——`comment`（读者自己的批注文字）· `annotation_type`（v1 只 `highlight`/`underline`）· `annotation_color`（8 色板）· `tag_json`（批注标签）· `quote_range_json`（`[{start,end},…]` 高亮范围锚；**`null` ＝ 从未标过范围 · `'[]'` ＝ 标过但被删空**，两者不可混）。区间随正文编辑在写入口 `db.updateExtract` 自动重映射（端点规则见 §6.8-11），撤销 `extractSnapshot` 一并回退
 - `library_items.priority`（v48.22 / D58）：**书级默认优先级**（0-100，默认 50＝与摘录默认同值，故存量语义零变更）；书架书卡动作条可改（共享 `Dropdown`，档位 10/30/50/70/90）。新建摘录继承所属书**当前**值：`extracts.priority_source='book'` 时**实时跟随**书的改动，用户单条改过即置 `'user'` 固定不再跟随。
 - `extracts` 增 8 列（v48.22 / D58）：`status` / `status_version` / `status_detail_json`（§6.4.2 v1 状态机**本次落地**；**未知状态一律按 `open` 对待**——队列过滤必须写成排除式 `COALESCE(status,'open') NOT IN ('resolved','dismissed','archived')`，写成包含式会把未知值误排除）、`a_factor`（REAL，SM 间隔倍率，默认 **1.6** ＝与既有 `postponeExtract` 的 ×1.6 逐值等值，故存量行为零变更）、`postpone_count`、`process_count`（读后推进次数＝SM 主题的重复次数）、`priority_source`（`book` / `user`）、`engine_state_json`（双引擎私有子空间，§4.2-9）。`workflow_state_json` 是历史死列，**保留不删**（零消费者；不得复用其语义）。
 - `extract_ops`（v48.22 / D58）：**摘录操作日志（append-only）**——`{id, seq, extract_id, op_type(edit|advance|postpone|graduate|ungraduate|set_priority|set_status|delete), batch_id, before_json, after_json, created_at}`。撤销＝恢复 `before_json` 确切前置状态 + **物理删除**该行（镜像 `review_logs` 撤销语义）；批量共用一个 `batch_id`，整批按 seq 降序回退。
@@ -118,7 +119,7 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 - `memory_runs`（v42 M14，§4.18 / §9.1 M14（UM-1））：**记忆整理运行留痕（append-only）**——`{id, user_id, kind('ingest'|'consolidate'), trigger('auto'|'startup'|'manual'|'backfill'), covered_from_ts, covered_to_ts, entry_ids_json(本次窗口的日记条目 id 清单), entry_count, snapshot_json(整理前 core.md + index.md + 被触及主题文件全文快照，供复现与回滚判断), model, prompt_scope('user-memory'), prompt_version, output_json(AI 原始输出), applied_json(实际操作与跳过原因逐条留痕), status('running'|'done'|'failed'|'skipped'), error_text, created_at, updated_at, sync_version, is_deleted}`。**记忆正文不在本表**——本表只记录「哪一轮整理动了什么、跳过了什么」，文件本身是唯一真源（§4.18-2）；未整理水位线 `lastCoveredAt`（§4.18-16，补处理依据）由本表成功记录推进。
 - **用户记忆文件树（v42，§4.18——本项目首个非 DB 的用户数据真源）**：`<userData>/memory/` 下的 `core.md`（恒定注入，≤800 字）+ `index.md`（目录，恒定注入，≤1,200 字）+ `topics/<生活域>/<主题>.md`（按需注入，单文件 ≤1,200 字）。**AI 自主维护、用户可外部编辑**（§1.7 有界例外，六条护栏见 §4.18-14）；DB 侧只留 `memory_runs` 运行留痕与 `cards.memory_ref_json` 溯源。**备份（M2）必须包含 `memory/` 目录**；遥测 / 出错一键上传白名单（§7.6）永不包含其内容（该通道与 AI 调用的区分见 §4.18-15）。
 
-### 4.2 必须保留的接口/抽象（26 项：v48.22 / D58 增第 26 项；任何 Phase 不得绕过）
+### 4.2 必须保留的接口/抽象（27 项：v48.22 / D58 增第 26 项，v48.23 / D61 增第 27 项；任何 Phase 不得绕过）
 
 1. `EventBus`：唯一事实通道。锁定事件：`stats/updated, library/changed, todo/changed, pomodoro/tick, pomodoro/phaseChange, theme/changed, settings/changed, ai/stream, workflow/changed, cards/changed, ai/batchDone, leech/detected`（**v36 增 `journal/changed`**：主进程日记写入后经 `journal:changed` 推送到各窗口，渲染层桥接为 EventBus 事件，日记页订阅刷新）
 2. `CommandRegistry`：动作注册 `{id,title,scene,defaultKey}`（`when` 不在定义里，挂在注册动作时由调用方随动作给出）（✅ M4 落地：`src/lib/commands.ts` + `src/lib/useCommands.ts`，§9.1 M4）
@@ -147,6 +148,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 25. `UserMemory`（v42，📐 规范，未实现；§4.18）：**用户记忆的唯一读写与检索面**——`{ read() / applyRun(ops) / selectForMaterial(materialCtx) / validateRef(draft) / reset() / status() }`，实现落 `electron/memoryStore.js`（文件树读写 + op 执行）+ `electron/memoryRetrieve.js`（纯函数：领域映射与宽召回，两侧同源 esbuild 打包进测试）+ `memory:*` IPC（`memory:status / read / maintain / selectForMaterial / reset / openPath`）。独占四件事：① **文件树是唯一真源**（`core.md` / `index.md` / `topics/<生活域>/<主题>.md`），任何组件不得自行读写记忆文件；② **整理轮执行**（精确文本匹配 + 不删不改写原则 + 手写区保护 + 预算校验，§4.18-11/12）；③ **检索装配**（Stage A 宽召回 + 目录恒定注入的注入块渲染，§4.18-7/8）；④ **溯源校验**（`validateRef` 只做子串存在性，不做相关性判定，§4.18-10）。渲染层只持 API 与展示，禁止在组件内自拼记忆上下文或直调 LLM。
    - **主进程实际注册的 `memory:*` 通道（v48.16 / D52 按 `electron/main.js` 列全，共 10 个）**：`memory:status`、`memory:setEnabled`、`memory:backfillPreview`、`memory:backfillStart`、`memory:backfillCancel`、`memory:tidyNow`、`memory:openFolder`、`memory:openFile`、`memory:reset`、`memory:retrieve`；此外渲染进程另有 `memory:changed` 事件（主进程 → 渲染层，非 invoke 通道）。文档此前的并列式写法（「memory:status / read / …」）只列了 6 个且含不存在的名字，属 D-DOC-04。
 26. `SessionQueueComposer`（**v48.22 / D58 新增**，📐 规范）：**会话队列的唯一装配面**——`computeSessionQueue(now, {scopeQuery?, mergeIntoReview, interleave, limits}) → {items:[{kind:'card'|'extract', id, …}], deferred[], blocked[]}`：① 卡片部分**恒等于** `computeTodayQueue().cards`（`mergeIntoReview=false` 时整个函数退化为它，可差分证明）；② 摘录部分＝`listDueExtracts()` 加状态过滤；③ 按 `interleave` 归并（`quota-1-4` 零写库配额，先例同 §4.16；`by-due` 按到期混排）；④ 按 §6.8-5 的当日余额截断；⑤ 按筛选牌组 query 过滤。**只影响展示、零调度写入**——未放行的条目在库内仍 due。复习页、沉浸式摘录页、筛选牌组会话一律消费本项输出，**禁止各自归并**。
+
+27. `AnnotationRange`（**v48.23 / D61 新增**，📐 规范 + 内核已落地）：**高亮范围锚的唯一实现面**——`electron/annotationRange.js` 导出 `{diffEdits(old,new), transformRange(range,edit), transformRanges(ranges,old,new)→{ranges,dropped}, normalizeRanges(ranges,len), normalizeSpans(spans), buildSpanPayload(spans,sep)→{text,quoteRange,rects,count}}`。① 锚＝字符区间 `[{start,end},…]`（一条批注可多段），**不是那段文字**；② 编辑重映射由写入口 `db.updateExtract` 一处调用，渲染层不参与；③ 端点规则：插入点落在 `[start,end]` 闭区间一律继承（用户 2026-09-25 拍死）；④ 区间被删空即 `dropped`，全部落空＝显式无锚（`'[]'`）；⑤ 多段选择由 `buildSpanPayload` 装配成"一条批注多段区间 + 多组 rects"。测试义务：`tests/annotation-range.test.cjs`（35 项）。
 
 ### 4.3 AI 制卡执行架构
 
@@ -1598,6 +1601,10 @@ Non-Goals：无排行榜 / 分享 / 推送通知 / 虚拟货币 / 经验值 / �
 **验收标准**（注：其中「选范围与粒度」两条入口已在 v48.5/v48.6 撤销——范围恒为整份材料、粒度恒为 detailed；**当前入口与运行口径以 §4.19 v48.13 收口块为准**）：按 §4.19 v48 十二条逐项，并落实：① 选范围与粒度后生成，画布出现导图且可回看、「正文」返回原位；② 重复生成只补缺失/失效分片（缓存断言，含换模型不复用）；③ 编造证据 / 孤儿 / 成环被本地校验拒绝渲染；④ 语义审查 FAIL 停在确认、确认后仅重跑对应阶段、一次上限、旧图始终保留；⑤ 节点制卡走确认面板 + CardLint，卡片可溯源到导图节点，重生成后沿 remap 解析；⑥ 无 Key 可读降级（生成禁用 + 说明，不弹错误）；⑦ 备份/恢复含三表（整库自动覆盖）；⑧ 取消/失败后旧图与缓存分片保留；⑨ 本批不触 FSRS 调度字段、零写 `knowledge_*`。
 
 ### M16 — 摘录复习改版（v48.22 定契约 D58–D60；完整规格 `docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`；位置：用户 2026-09-24 指定，先于 M15 剩余批次与 K 系列推进）
+
+> **v48.23 追加（2026-09-25，D61–D65）：批注化摘录另立规格 `docs/impl-spec/ANNOTATION-MULTISELECT.md`，契约见 §6.8-11。**
+> 进度：批 6 内核 ✅ `45ea3e5`（范围锚 + `extracts` 五列 + 编辑自动重映射 + 撤销含区间）· 文档收口 ✅ `f4b68c3`（D61–D65 + §6.8-11 + §5.5）· 多段载荷装配 ✅ `a78d5b0`（35/35）。
+> **仍未做**：采集层（Ctrl/Cmd 加选）· CSS Custom Highlights 渲染 · 动作层收 `{spans}` · `app.multiSelectKey` 设置键（须同步 §7.4 与 f18 用例）· 文中留痕（PDF 矩形层 / EPUB highlights）· 面包屑 · 图片粘贴与 `EditableText` 序列化改造 · Zotero 借鉴 ①–⑤ 落点。
 
 > **唯一实现依据＝`docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`**（含 20 条必须新增的断言、12 个必须保持绿的既有闸门、9 条非目标）。契约正文见 §6.8（设置面 / SM 调度语义 / 混编 / 双引擎无损 / 范围与上限 / 浏览器 2.0 / 撤销 / 进度不变量）。
 
