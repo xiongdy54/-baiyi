@@ -1,5 +1,6 @@
 // 批注范围锚（规格 §2.2 / 待登记 D61）单元测试——纯 node，无 electron
 // @runtime: node  @tier: 1  @gui: false  @id: ANNORANGE  @timeout: 120
+// 运行：node tests/annotation-range.test.cjs
 // 契约：① 编辑脚本正确（相隔两处编辑拆两条）；② §2.2 变换表逐行成立；
 //       ③ 端点规则＝插入点落在 [start,end] 闭区间一律继承（用户 2026-09-25 拍死）；
 //       ④ 区间被删空必须 dropped（不许谎称还有锚）；⑤ 入参不被修改。

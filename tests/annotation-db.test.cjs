@@ -1,5 +1,6 @@
 // 批注化摘录 · db 层接线回归（规格 §1.1 / §2.2，待登记 D61）
 // @runtime: electron  @tier: 2  @gui: false  @id: ANNOTDB  @timeout: 300
+// 运行：npx electron tests/annotation-db.test.cjs   （须先关应用）
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 覆盖：新列往返 / 新建时范围规范化 / 正文编辑自动重映射（含端点继承）/ 显式覆写 /
 //       区间被删空降级为 '[]' / 老数据 null 不写回 / 撤销把范围一起退回去。
