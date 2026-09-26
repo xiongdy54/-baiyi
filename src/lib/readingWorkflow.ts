@@ -62,7 +62,19 @@ export interface DueTopic {
   prioritySource?: "book" | "user" | string;
   /** v48.22（D58 §6.8-6）：所属书架条目（按书范围会话与浏览器分组用） */
   libraryItemId?: string | null;
-  contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
+  contextRef?: ExtractContextRef | null;
+}
+
+/** 摘录/卡片的上下文引用（§4.2-16 上下文引用）。层级身份（规格 §1.1）：parentExtractId / rootExtractId */
+export interface ExtractContextRef {
+  documentId?: string;
+  extractId?: string;
+  anchorText?: string;
+  anchorRatio?: number;
+  /** 子摘录＝父摘录 id；根摘录无此键 */
+  parentExtractId?: string;
+  /** 根摘录＝自身 id；子摘录＝继承父的（缺省回退父 id） */
+  rootExtractId?: string;
 }
 
 export interface ExtractDetail extends DueTopic {
@@ -70,6 +82,25 @@ export interface ExtractDetail extends DueTopic {
   parentExtractId?: string;
   chain: string[];
   createdAt: number;
+  /** db.getExtract 读回的是**原始 JSON 字符串**（contextRef 未解析），面包屑/查看态按需解析 */
+  contextRefJson?: string | null;
+  /** 同上：该条摘录自己的高亮范围（原始 JSON 字符串，null＝从未标过） */
+  quoteRangeJson?: string | null;
+}
+
+/**
+ * contextRef 的安全解析（db 读侧给的是 JSON 字符串；坏 JSON/空值一律 null，不抛）。
+ * 面包屑落点与子摘录的 rootExtractId 继承都从它取（规格 §1.1）。
+ */
+export function parseContextRef(raw: unknown): Record<string, unknown> | null {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as Record<string, unknown>;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  try {
+    const o = JSON.parse(raw) as unknown;
+    return o && typeof o === "object" && !Array.isArray(o) ? (o as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface ExtractInput {
@@ -78,7 +109,7 @@ export interface ExtractInput {
   documentId: string;
   contentMarkdown: string;
   priority?: number;
-  contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
+  contextRef?: ExtractContextRef | null;
   /**
    * v48.23（D61 §6.8-11）：多段不相邻选择的原始段（`{text, rects?}`，DOM 顺序即落库顺序）。
    * **渲染层只采集、不装配**——文本与 `quote_range_json` 由主进程 buildSpanPayload 算（spans 优先）。

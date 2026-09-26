@@ -948,7 +948,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
   | 旧数据 | `anchorText` + `anchorRatio` | 沿用 `hasSourceAnchor` |
 - **编辑重映射**（`electron/annotationRange.js`，写入口 `db.updateExtract` 一处实现，渲染层不参与）：正文一变即求编辑脚本（公共前后缀 + 最长公共子串递归拆分，相隔两处编辑可拆两条）并逐区间变换——
   **插入点落在 `[start,end]` 闭区间一律继承（用户 2026-09-25 拍死）；`p<start` 整体右移；`p>end` 不动**；删除按交集裁剪；区间被删空即 `dropped`。
-- **跳转语义**（D62，含对同日早先裁定的撤销）：根摘录 → 源文档锚点；**子摘录 → 父摘录卡片并把该层高亮范围居中**；面包屑 `原文 › 第1层 › …`（超 4 级折叠）逐级同理，当前层不可点。撤销一次正文编辑必须把区间一起退回去（`extractSnapshot` 已纳入 `quoteRangeJson`）。
+- **跳转语义**（D62，含对同日早先裁定的撤销）：根摘录 → 源文档锚点；**子摘录 → 父摘录卡片并把该层高亮范围居中**；面包屑 `原文 › 第1层 › …` 逐级同理，当前层不可点。**折叠口径（用户 2026-09-25 修订，取代原「超 4 级折叠」）：层级 ≤ 6 级全显示；> 6 级才折叠**，形态 `原文 › 第1层 › …N 级 › 末两级 › 当前`（N＝被隐藏层级数＝总级数−3）；**折叠段自身可点开**——弹出被隐藏层级列表（每项＝层级序号 + 正文前若干字），**每一项都可点击跳到对应卡片**：折叠只压缩占位，不减少可达性。撤销一次正文编辑必须把区间一起退回去（`extractSnapshot` 已纳入 `quoteRangeJson`）。
 - **多段不相邻选择（v48.24 实现批落地）**：选中文字后按住修饰键（`app.multiSelectKey`，默认 `Ctrl`／macOS 建议 `Meta`）再选不相邻的另一段＝**加选**；重复选同一段＝移出；`Esc` 清空。落库＝**一条批注多组区间**（Zotero 的多矩形同构）。
   - **采集层**（`src/components/Reader.tsx`）：`handleEnginePointerUp` 把本次选区采成 `{text, rects}`（rects＝宿主视口包围盒），修饰位来自**指针事件本身**（`contentPointerUp` 载荷扩 `ctrlKey/altKey/shiftKey/metaKey`；iframe 内 `keyup` 不转发宿主，故不能靠宿主 keydown 跟踪）；`selection` 状态扩为携带 `spans`，而 `text` 恒为**各段拼接后的文本**——菜单与 5 个动作（制卡/AI 制卡/AI 解释/摘录/查词）因此一行未改，多段对所有动作自动生效。
   - **集合运算的唯一实现面＝`electron/annotationRange.js`**：渲染层不 require（沙箱 preload 不能 require 本地模块），也不复制其逻辑——经**只读通道 `extracts:spanSet`** 把 `{current, incoming, modifier}` 过桥，由主进程 `updateSpanSet` + `buildSpanPayload` 返回 `{spans, action, text}`（`text` 与落库文本同源）；渲染层按 `action` 让内核重画高亮。串行化（promise 队列）保证连续两次拖选的往返按序应用。
@@ -958,9 +958,11 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
   - **设置面**：`app.multiSelectKey`（§7.4 已登记；设置页「阅读」区有下拉）。取值域封闭（`Ctrl`/`Alt`/`Shift`/`Meta`），主进程 `settings:set` 侧归一（`db.normalizeMultiSelectKey`，非法值不落盘），渲染层读侧同样净化。
   - **本轮不做**：跨章多段（换章即清，见清理契约；两段须在同一篇文档里）；文中留痕（PDF 矩形层 / EPUB 常驻 highlights 与 hover 浮层）、面包屑、图片粘贴与 `EditableText` 序列化改造（后续批次）。
 - **描边**（D63）：`--field-line` 默认 `transparent`，登记为 §5.5 皮肤扩展点，**选型搁置**；**不得用 `outline`** 承载皮肤框（与 `:focus-visible` 焦点环同属性，实测会被挤掉）。
+- **面包屑与查看态（按上式口径已落地于摘录页）**：层级链出口 `db.getExtractChain(id)`（自根到当前，封顶 20 级）→ `extracts:chain` → `readingWorkflow.getChain`；层级名＝该层正文**首 10 字**（Meta 档，超出省略），当前层＝`--text-primary` + 600 字重且**不可点**（渲染成 `span[aria-current]`，非按钮）。点任一层＝**切到那张卡**（`readingWorkflow.getTopic(id)` 取回后渲染，查看态**只读**：不出调度动作、空格/Z 不作用、零写库零改队列），出口＝面包屑右侧「返回队列」（Esc 同义）；落点＝该层 `quote_range_json` 在卡面上以 `--hl-multi` 高亮并滚到可视区中部。面包屑行与计数/状态行同一区域（`.extract-page-head`，不新增浮层）且**吸顶**（滚动卡面不被带走，查看态的出口始终可达）。
+- **摘录页就地另立子摘录**：`ExtractReviewView` 持有队列头 ⇒ `onExtract(text, {parentExtractId})` → `App.handleExtract` 第三分支（`queue` / `extractSession`）以 `parentType:"extract"` 落库；`contextRef` 在**这一处**补 `parentExtractId` 与 `rootExtractId`（根摘录的 `rootExtractId`＝**自身 id**，由 `db.createExtract` 在 id 生成后补；子摘录＝继承父的、缺省回退父 id）。文本＝卡面正文里选中的那段，未选中＝整条正文。
 - **图片粘贴**（D65，待做）：三处编辑器统一 paste 处理 → `ensureImageAsset`；连带必须把 `EditableText` 的 `innerText` 落库改为结构化序列化（否则图片静默丢失）；聚焦制卡入口改为"点任意图片都进聚焦层"。
-- **测试义务**：`tests/annotation-range.test.cjs`（纯 node 25 项，表驱动）与 `tests/annotation-db.test.cjs`（electron 15 项，含撤销一致性）必须保持绿；`tests/extracts.test.cjs` 存量 137 项零回归。
-- **本批未做（后续批次）**：多段选择的 UI 与动作层载荷、文中留痕（PDF 矩形层 / EPUB highlights + hover 浮层）、面包屑、图片粘贴与 `EditableText` 序列化改造、Zotero 借鉴 ①–⑤ 的落点。
+- **测试义务**：`tests/annotation-range.test.cjs`（纯 node 25 项，表驱动）与 `tests/annotation-db.test.cjs`（electron 15 项，含撤销一致性）必须保持绿；`tests/extracts.test.cjs` 存量 137 项零回归。面包屑与查看态由 `tests/breadcrumb.gui.mjs`（真键鼠 CDP，42 项：3/6/8 级链夹具 ⇒ 层级名、折叠 `…N 级`、折叠项逐项可达、当前层不可点、落点高亮与居中几何、就地另立子摘录的 `parentExtractId`/`rootExtractId`）锁死。
+- **本批未做（后续批次）**：文中留痕（PDF 矩形层 / EPUB highlights + hover 浮层）、图片粘贴与 `EditableText` 序列化改造、Zotero 借鉴 ①–⑤ 的落点；**「子摘录」卡面「跳转原文」按钮仍跳源文档**（D62 的「子→父」只落在面包屑逐级上）、落点居中的对照仅覆盖「该层自身范围锚」（正文无锚的老数据不显示高亮）。
 
 ---
 
@@ -1611,7 +1613,7 @@ Non-Goals：无排行榜 / 分享 / 推送通知 / 虚拟货币 / 经验值 / �
 
 > **v48.23 追加（2026-09-25，D61–D65）：批注化摘录另立规格 `docs/impl-spec/ANNOTATION-MULTISELECT.md`，契约见 §6.8-11。**
 > 进度：批 6 内核 ✅ `45ea3e5` · 文档收口 ✅ `f4b68c3` · 多段载荷装配 ✅ `a78d5b0` · 加选集合语义 ✅ `9f46c94` · **多段选择端到端 ✅ `6e67eb7`**（采集 + CSS Highlights + 动作层收 `spans` + `app.multiSelectKey`；GUI 真键鼠 20/20）。
-> **仍未做**：文中留痕（PDF 矩形层 / EPUB highlights）· 面包屑（子摘录逐级落点＝高亮范围居中）· 图片粘贴与 `EditableText` 序列化改造 · Zotero 借鉴 ①–⑤ 落点。
+> **仍未做**：文中留痕（PDF 矩形层 / EPUB highlights）· 图片粘贴与 `EditableText` 序列化改造 · Zotero 借鉴 ①–⑤ 落点。（**面包屑已落地**：≤6 级全显 / >6 级折叠段可点开逐项跳转 + 查看态，见 §6.8-11 与 `tests/breadcrumb.gui.mjs`。）
 
 > **唯一实现依据＝`docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`**（含 20 条必须新增的断言、12 个必须保持绿的既有闸门、9 条非目标）。契约正文见 §6.8（设置面 / SM 调度语义 / 混编 / 双引擎无损 / 范围与上限 / 浏览器 2.0 / 撤销 / 进度不变量）。
 

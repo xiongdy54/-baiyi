@@ -4399,20 +4399,81 @@ body.capture-body #root { height: 100vh; }
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--sp-12) var(--sp-16) var(--sp-8);
+  /* 上内边距交给吸顶的头行承担：否则粘住时留出一条透明缝，滚动正文会从缝里透出来 */
+  padding: 0 var(--sp-16) var(--sp-8);
   display: flex;
   flex-direction: column;
 }
+/* 空态没有头行（计数直接挂在页上）：把那一段上边距补回来 */
+.extract-page > .review-count { padding-top: var(--sp-12); }
 .extract-page-head {
   width: 100%;
   max-width: 720px;
   margin: 0 auto var(--sp-4);
+  padding-top: var(--sp-12);
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--sp-4);
   font-size: var(--fs-meta);
   color: var(--text-helper);
+  /* 面包屑是该页的导航，滚动卡面时**不得**被带走（查看态还需从这里「返回队列」）。
+     吸顶与书架工具条同规（§5.3）：--paper 底 + z-sticky；无新增圆角/阴影。 */
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  background: var(--paper);
 }
+/* 面包屑（规格 §1.2 R13）：与计数/状态行**同一区域**（不新增浮层），独占第一行＝左上角。
+   样式纪律：只走 Token；层级名 Meta 档；分隔符 --text-helper；无圆角/阴影/accent 填充
+   （当前层用 --text-primary + 600 字重表达，与 .shelf-crumb 的 .crumb-here 同规）。 */
+.extract-crumbs {
+  flex: 1 1 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
+.crumb-sep { color: var(--text-helper); flex: none; }
+.crumb-item,
+.crumb-more-btn {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  cursor: pointer;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.crumb-item:hover,
+.crumb-more-btn:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+.crumb-here { color: var(--text-primary); font-weight: 600; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 折叠段：…N 级（可点开逐项跳转——折叠只压缩占位，不减少可达性） */
+.crumb-more { position: relative; display: inline-flex; }
+.crumb-menu-item { display: flex; align-items: center; gap: var(--sp-2); text-align: left; white-space: nowrap; }
+.crumb-menu-name { color: var(--text-primary); }
+.crumb-exit {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-helper);
+  cursor: pointer;
+}
+.crumb-exit:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+/* 查看态落点：该层的高亮范围（与多段选择的 --hl-multi 同一支高亮色） */
+.extract-quote-hl { background-color: var(--hl-multi); color: inherit; }
 .extract-page-head .review-count { align-self: auto; }
 .extract-page-header { color: var(--text-primary); }
 .extract-page-hint { margin-left: auto; }

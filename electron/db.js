@@ -2353,6 +2353,18 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
   const rangeJson = Array.isArray(quoteRange) && quoteRange.length
     ? JSON.stringify(annotationRange.normalizeRanges(quoteRange, String(contentMarkdown).length))
     : null;
+  // 层级身份（规格 §1.1 / §1.2）：**根摘录 rootExtractId ＝ 自身 id**——id 在这里才生成，故在落库前补；
+  // 子摘录的 parentExtractId / rootExtractId 由调用方（渲染层写 contextRef 的唯一一处）注入，不在这里臆造。
+  // 既有字段一律不动（原样往返）；只在「已有 contextRef 且缺 rootExtractId」时补一个键。
+  const refJson = (() => {
+    if (!contextRef || typeof contextRef !== "object" || Array.isArray(contextRef)) {
+      return contextRef ? JSON.stringify(contextRef) : null;
+    }
+    if (String(parentType) === "document" && !contextRef.rootExtractId) {
+      return JSON.stringify({ ...contextRef, rootExtractId: id });
+    }
+    return JSON.stringify(contextRef);
+  })();
   db.run(
     `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, priority_source, topic_next_at, interval_days, a_factor, workflow_state_json, comment, annotation_type, annotation_color, tag_json, quote_range_json, created_at, updated_at, sync_version, is_deleted)
      VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1.6, NULL, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
@@ -2362,7 +2374,7 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
       String(parentId),
       String(documentId),
       String(contentMarkdown),
-      contextRef ? JSON.stringify(contextRef) : null,
+      refJson,
       finalPriority,
       hasExplicit ? "user" : "book",
       nextAt,

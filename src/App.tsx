@@ -20,7 +20,7 @@ import { installMindmapBridge, mindmapApi } from "./lib/mindmap";
 import { installActivityStore, seedFromRuns } from "./lib/activity";
 import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
 import { BackgroundActivity } from "./components/BackgroundActivity";
-import { readingWorkflow, type ExtractSpan } from "./lib/readingWorkflow";
+import { readingWorkflow, parseContextRef, type ExtractSpan } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
 import { applyAccent } from "./lib/accentVar";
@@ -255,8 +255,11 @@ export default function App() {
 
   // v48.23（D61 §6.8-11）：多段不相邻选择时，spans 与 contentMarkdown 一起过桥——
   // 主进程按 spans 优先装配文本与 quote_range_json（≥2 段才传；单段路径载荷不变）。
+  // 规格 §1.2：摘录复习页（queue / extractSession）里也能就地另立**子摘录**——
+  // 当前摘录 id 由 ExtractReviewView 从队列头带上来（ctx.parentExtractId），
+  // contextRef 在此**唯一一处**补 parentExtractId / rootExtractId（根＝自身 id 由 db 侧补，子＝继承父的、缺省回退父 id）。
   const handleExtract = useCallback(
-    async (text: string, spans?: ExtractSpan[]) => {
+    async (text: string, spans?: ExtractSpan[], ctx?: { parentExtractId?: string }) => {
       const multi = spans && spans.length >= 2 ? spans : undefined;
       if (view.name === "reader") {
         await readingWorkflow.create({
@@ -273,6 +276,24 @@ export default function App() {
           documentId: extractDetail.documentId,
           contentMarkdown: text,
           spans: multi
+        });
+      } else if ((view.name === "queue" || view.name === "extractSession") && ctx?.parentExtractId) {
+        // 复习中从父建（R11）：父摘录的 documentId / rootExtractId 从库里取回，不靠渲染层猜
+        const parent = await readingWorkflow.getTopic(ctx.parentExtractId);
+        if (!parent) return;
+        const parentRef = parseContextRef(parent.contextRefJson);
+        await readingWorkflow.create({
+          parentType: "extract",
+          parentId: parent.id,
+          documentId: parent.documentId,
+          contentMarkdown: text,
+          spans: multi,
+          contextRef: {
+            documentId: parent.documentId,
+            extractId: parent.id,
+            parentExtractId: parent.id,
+            rootExtractId: String(parentRef?.rootExtractId || parent.id)
+          }
         });
       }
       eventBus.emit("workflow/changed");
@@ -395,7 +416,13 @@ export default function App() {
     // v48.22（D58 §6.8）：原「学习队列」列表页退役——列表职能迁入卡片浏览器，
     // 本页改为**沉浸式摘录连续处理页**（一屏一条、连续推进、正文可就地编辑）
     topTitle = "摘录";
-    mainContent = <ExtractReviewView onOpen={openExtract} onJumpToDoc={handleJumpToDoc} />;
+    mainContent = (
+      <ExtractReviewView
+        onOpen={openExtract}
+        onJumpToDoc={handleJumpToDoc}
+        onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
+      />
+    );
   } else if (view.name === "extractSession") {
     // 本书范围会话（阅读器「复习摘录」入口）：只处理该书摘录，退出回阅读
     topTitle = "摘录";
@@ -407,6 +434,7 @@ export default function App() {
         scopeLimits={view.limits ?? null}
         header={`集中复习：《${view.title}》`}
         onExit={() => setView({ name: "shelf" })}
+        onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
       />
     );
   } else if (view.name === "review") {
