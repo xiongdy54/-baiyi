@@ -20,6 +20,8 @@ declare global {
   interface Window {
     workflowAPI?: {
       create: (payload: unknown) => Promise<{ id: string }>;
+      /** v48.23（D61 §6.8-11）：多段选择的集合运算（主进程算；见本文件 resolveSpanSet） */
+      spanSet: (current: unknown, incoming: unknown, opts: unknown) => Promise<unknown>;
       listDue: () => Promise<unknown[]>;
       listAll: () => Promise<unknown[]>;
       get: (id: string) => Promise<unknown>;
@@ -76,6 +78,25 @@ export interface ExtractInput {
   contentMarkdown: string;
   priority?: number;
   contextRef?: { documentId?: string; extractId?: string; anchorText?: string; anchorRatio?: number } | null;
+  /**
+   * v48.23（D61 §6.8-11）：多段不相邻选择的原始段（`{text, rects?}`，DOM 顺序即落库顺序）。
+   * **渲染层只采集、不装配**——文本与 `quote_range_json` 由主进程 buildSpanPayload 算（spans 优先）。
+   * 单段选择不传（既有路径逐字节不变）；≥2 段时传，落库为「一条批注、多段区间、多组矩形」。
+   */
+  spans?: ExtractSpan[];
+}
+
+/** 一段选区的原始采集物（rects = 宿主视口坐标的包围盒，可缺省） */
+export interface ExtractSpan {
+  text: string;
+  rects?: { x: number; y: number; w: number; h: number }[];
+}
+
+/** spanSet 的返回：由主进程 updateSpanSet + buildSpanPayload 装配（text 与落库文本同源） */
+export interface SpanSetResult {
+  spans: ExtractSpan[];
+  action: "replace" | "append" | "remove" | "none";
+  text: string;
 }
 
 export interface ExtractDailyUsage {
@@ -134,6 +155,41 @@ function call<K extends keyof NonNullable<Window["workflowAPI"]>>(
   const api = window.workflowAPI;
   if (!api) throw new Error("API 不可用");
   return (api[method] as (...a: unknown[]) => Promise<unknown>)(...args);
+}
+
+/**
+ * 多段选择的集合运算（§6.8-11 / D61）：把「当前已积累的 spans + 本次新选区 + 修饰键」交给主进程，
+ * 由 electron/annotationRange.js 的 `updateSpanSet` 决定 replace/append/remove，并给出拼接文本。
+ * **渲染层不复制该逻辑**（沙箱 preload 不能 require 本地模块，模块共享的唯一正解＝过桥由主进程算）。
+ */
+export async function resolveSpanSet(
+  current: ExtractSpan[],
+  incoming: ExtractSpan,
+  modifier: boolean
+): Promise<SpanSetResult> {
+  return (await call("spanSet", current, incoming, { modifier })) as SpanSetResult;
+}
+
+/** 多段选择的修饰键（§7.4 `app.multiSelectKey`）：默认 Ctrl，macOS 建议 Meta；非法值回落平台默认。 */
+export const MULTI_SELECT_KEYS = ["Ctrl", "Alt", "Shift", "Meta"] as const;
+export type MultiSelectKey = (typeof MULTI_SELECT_KEYS)[number];
+export const DEFAULT_MULTI_SELECT_KEY: MultiSelectKey =
+  typeof navigator !== "undefined" && /Mac/i.test(navigator.platform) ? "Meta" : "Ctrl";
+
+export async function readMultiSelectKey(): Promise<MultiSelectKey> {
+  const v = await settingsStore.get<string>("app", "multiSelectKey", DEFAULT_MULTI_SELECT_KEY);
+  return (MULTI_SELECT_KEYS as readonly string[]).includes(v) ? (v as MultiSelectKey) : DEFAULT_MULTI_SELECT_KEY;
+}
+
+/** 键名 → 指针事件的修饰位（contentPointerUp 载荷里的 ctrlKey/altKey/shiftKey/metaKey） */
+export function modifierFlagOf(
+  key: MultiSelectKey,
+  ev: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }
+): boolean {
+  if (key === "Alt") return Boolean(ev.altKey);
+  if (key === "Shift") return Boolean(ev.shiftKey);
+  if (key === "Meta") return Boolean(ev.metaKey);
+  return Boolean(ev.ctrlKey);
 }
 
 const sm19Provider: ReadingWorkflowProvider = {

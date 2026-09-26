@@ -26,6 +26,7 @@ import {
   DEFAULT_READER_SETTINGS,
   buildLocator,
   resolveAppearance,
+  type ContentPointerUpInfo,
   type ImageLocateHit,
   type ReaderAppearance,
   type ReaderImageRef,
@@ -37,6 +38,15 @@ import {
   type ReaderTocItem,
   type RelocateInfo
 } from "../lib/reader/service";
+// v48.23（D61 §6.8-11）：多段选择的集合运算与修饰键——纯逻辑在 electron/annotationRange.js，
+// 渲染层经主进程算（resolveSpanSet），本层不复制任何 span 归并/装配逻辑。
+import {
+  modifierFlagOf,
+  readMultiSelectKey,
+  resolveSpanSet,
+  type ExtractSpan,
+  type MultiSelectKey
+} from "../lib/readingWorkflow";
 
 interface Props {
   title: string;
@@ -173,7 +183,17 @@ export default function Reader({
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
-  const [selection, setSelection] = useState<{ x: number; y: number; text: string } | null>(null);
+  /**
+   * v48.23（D61 §6.8-11）：选区菜单状态扩为携带 `spans`（多段不相邻选择的原始采集物）。
+   * `text` 恒为各段经主进程拼接后的文本——菜单与 5 个动作只读 text，故多段对所有动作自动生效。
+   */
+  const [selection, setSelection] = useState<{ x: number; y: number; text: string; spans: ExtractSpan[] } | null>(null);
+  /** 多段选择集合（与主进程 updateSpanSet 同步的权威列表；DOM 顺序＝落库顺序） */
+  const multiSpansRef = useRef<ExtractSpan[]>([]);
+  /** 修饰键（settings.app.multiSelectKey；读侧归一，默认 Ctrl / macOS Meta） */
+  const multiKeyRef = useRef<MultiSelectKey>("Ctrl");
+  /** 选中态更新串行化：指针抬起是高频事件，主进程往返按序应用（避免两次拖选交错） */
+  const spanQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [manualOpen, setManualOpen] = useState(false);
   // v25：手动制卡的图片选区（从聚焦工具条「手动制卡」进入时携带）
   const [manualImage, setManualImage] = useState<{
@@ -324,18 +344,59 @@ export default function Reader({
 
   // v29 选区菜单一击消失：菜单打开时，任何落在菜单/AI 面板/弹窗之外的 mousedown 立即关闭菜单。
   // （此前关闭只挂各 surface 的 pointerup——首点落在菜单/控制条等未跟踪元素时，文本选中已消失而菜单残留）
+  // v48.23（D61 §6.8-11）：点菜单内不清空集合；点外面＝清空整组（高亮一并撤掉）。
   useEffect(() => {
     if (!selection) return;
     const onDocMouseDown = (e: MouseEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && typeof t.closest === "function" &&
-        (t.closest(".selection-menu") || t.closest(".ai-panel") || t.closest(".modal-panel") || t.closest(".image-focus-layer"))) return;
+        (t.closest(".selection-menu") || t.closest(".ai-panel") || t.closest(".modal-panel") || t.closest(".image-focus-layer") ||
+          // v48.23（§6.8-11）：正文内容区（PDF 文本层就落在宿主 DOM 里）不算「外面」——
+          // 在那里按下鼠标常是「加选第二段」的起手，清集合会让多段选择在 PDF 上永远只剩最后一段。
+          // foliate 的章节在 iframe 里，事件根本不冒泡到宿主，本项只影响 PDF 与宿主侧正文。
+          t.closest(".reader-engine-host"))) return;
+      clearMultiSelect();
       setSelection(null);
       engineSelRef.current = null;
     };
     document.addEventListener("mousedown", onDocMouseDown, true);
     return () => document.removeEventListener("mousedown", onDocMouseDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection]);
+
+  // v48.23（D61 §6.8-11）：Esc 清空整个多段集合（含菜单与高亮；无集合时按旧行为只收菜单）
+  useEffect(() => {
+    if (!selection) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (manualOpen || aiPanel) return; // 弹层自己处理 Esc
+      clearMultiSelect();
+      clearSelection();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, manualOpen, aiPanel]);
+
+  // 多段选择的修饰键：settings.app.multiSelectKey（读侧归一；设置页改动即时生效）
+  useEffect(() => {
+    let alive = true;
+    void readMultiSelectKey().then((k) => {
+      if (alive) multiKeyRef.current = k;
+    });
+    const off = eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload && payload.scope === "app" && payload.key === "multiSelectKey") {
+        void readMultiSelectKey().then((k) => {
+          if (alive) multiKeyRef.current = k;
+        });
+      }
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
 
   useEffect(() => {
     if (!engineMode) return;
@@ -390,7 +451,14 @@ export default function Reader({
   // 引擎进度：relocate 防抖落进度 + 阅读统计（charPos = fraction × 全书字符数近似，热力图口径不变）
   const handleEngineRelocate = useCallback(
     (info: RelocateInfo) => {
+      const prevChapter = engineChapterRef.current;
       engineChapterRef.current = info.chapterIndex;
+      // v48.23（D61 §6.8-11）：换章＝阅读内容变了，旧 Range 全部失效——
+      // 先把多段集合与高亮清掉再收菜单（§6.8-11 的清理义务；滚动同章 relocate 不清）
+      if (prevChapter !== undefined && info.chapterIndex !== undefined && prevChapter !== info.chapterIndex) {
+        clearMultiSelect();
+        setSelection(null);
+      }
       setTocActiveHref(info.chapterHref);
       setImgOverlay(null); // v35：翻页/滚动即清除图内高亮（坐标系随视口失效）
       if (relocateTimerRef.current) window.clearTimeout(relocateTimerRef.current);
@@ -405,16 +473,40 @@ export default function Reader({
   );
 
   // 引擎选区：pointerup 时取选区语义数据并弹出菜单（坐标为宿主视口坐标，菜单用 fixed）
-  const handleEnginePointerUp = useCallback((pos: { x: number; y: number }) => {
+  // v48.23（D61 §6.8-11）：按住修饰键（app.multiSelectKey，默认 Ctrl）再选＝加选：
+  // 集合运算与拼接文本一律交主进程（resolveSpanSet → electron/annotationRange.js），
+  // 本层只负责采集「这一段」并画高亮；不带修饰键＝替换（普通拖选覆盖旧集合）。
+  const handleEnginePointerUp = useCallback((pos: ContentPointerUpInfo) => {
     const k = kernelRef.current;
     const sel = k?.getSelection() ?? null;
-    if (sel && sel.text.trim()) {
-      engineSelRef.current = sel;
-      setSelection({ x: pos.x, y: pos.y, text: sel.text });
-    } else {
+    if (!sel || !sel.text.trim()) {
+      // 空白处点击/折叠选区：沿用旧语义收菜单，并把整组多段集合清掉（高亮一并撤）
+      clearMultiSelect();
       setSelection(null);
+      return;
     }
-  }, []);
+    engineSelRef.current = sel;
+    const geom = k?.getSelectionGeometry();
+    const incoming: ExtractSpan = {
+      text: sel.text,
+      rects: geom ? [{ x: geom.x, y: geom.y, w: geom.width, h: geom.height }] : []
+    };
+    const withModifier = modifierFlagOf(multiKeyRef.current, pos);
+    // 串行化：两次拖选的往返按序应用，后者永远读到前者落定的集合
+    spanQueueRef.current = spanQueueRef.current
+      .then(async () => {
+        const r = await resolveSpanSet(multiSpansRef.current, incoming, withModifier);
+        if (r.action === "none") return; // 空白新选区：集合不动（内核 updateSpanSet 的语义）
+        multiSpansRef.current = r.spans;
+        kernelRef.current?.multiSelectHighlight?.(r.action);
+        (window as unknown as { __readerMultiSpans?: ExtractSpan[] }).__readerMultiSpans = r.spans;
+        setSelection({ x: pos.x, y: pos.y, text: r.text, spans: r.spans });
+      })
+      .catch(() => {
+        // 主进程往返失败（理论上不可达）：不静默改集合，避免菜单与库不一致
+        showToast("多段选择暂不可用");
+      });
+  }, [showToast]);
 
   const handleEngineReady = useCallback((k: ReaderKernel) => {
     kernelRef.current = k;
@@ -759,13 +851,26 @@ export default function Reader({
     setSelection({
       x,
       y,
-      text
+      text,
+      // 粘贴书/摘录的 markdown 分支没有内核（不会走到多段选择），恒为单段
+      spans: [{ text }]
     });
+  }
+
+  /**
+   * v48.23（D61 §6.8-11）：清空多段选择集合——权威列表、内核高亮、测试钩子三处一起清。
+   * 调用点：点菜单外 / Esc / 菜单动作完成 / 换章（阅读内容变化）/ 空选区 pointerup。
+   */
+  function clearMultiSelect() {
+    multiSpansRef.current = [];
+    (window as unknown as { __readerMultiSpans?: ExtractSpan[] }).__readerMultiSpans = [];
+    kernelRef.current?.clearMultiSelectHighlight?.();
   }
 
   function clearSelection() {
     if (engineMode) {
       kernelRef.current?.deselect();
+      clearMultiSelect();
       setSelection(null);
       return;
     }
@@ -1384,18 +1489,25 @@ export default function Reader({
   }
 
   // ---------- 摘录 ----------
-  async function handleExtract(text: string) {
+  /**
+   * v48.23（D61 §6.8-11）：多段不相邻选择时把原始 spans 一并交给工作流——主进程按 spans 优先
+   * 装配 content_markdown 与 quote_range_json（一条批注、多段区间、多组矩形）。
+   * 只在**真多段（≥2）**时传：单段路径保持既有载荷逐字节不变。
+   */
+  async function handleExtract(text: string, spans?: ExtractSpan[]) {
     const { readingWorkflow } = await import("../lib/readingWorkflow");
     // 需求2：摘录同样记录选区锚点（跳转原文用）
     rememberAnchor(text);
     const ctx = enrichedContextRef();
+    const multi = spans && spans.length >= 2 ? spans : undefined;
     if (contextRef?.extractId) {
       await readingWorkflow.create({
         parentType: "extract",
         parentId: contextRef.extractId,
         documentId: contextRef.documentId || "",
         contentMarkdown: text,
-        contextRef: ctx
+        contextRef: ctx,
+        spans: multi
       });
     } else if (contextRef?.documentId) {
       await readingWorkflow.create({
@@ -1403,7 +1515,8 @@ export default function Reader({
         parentId: contextRef.documentId,
         documentId: contextRef.documentId,
         contentMarkdown: text,
-        contextRef: ctx
+        contextRef: ctx,
+        spans: multi
       });
     }
     eventBus.emit("workflow/changed");
@@ -1433,8 +1546,9 @@ export default function Reader({
   function actExtractSelection() {
     if (!selection) return;
     const t = selection.text;
+    const spans = selection.spans;
     clearSelection();
-    void handleExtract(t);
+    void handleExtract(t, spans);
   }
 
   // ---------- M7 查词（v32，D31）：选中单词 → DictPanel（原文即显→Loading→填充/错误），在线绝不阻塞 ----------

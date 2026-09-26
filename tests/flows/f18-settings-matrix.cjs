@@ -223,6 +223,7 @@ app
         ["app", "keybindings", { capture: "Command+Control+Space", reviewGrade1: "1" }],
         ["app", "globalShortcuts", { quickCapture: { enabled: true, bindings: ["Command+Shift+K"] } }],
         ["app", "siblingBury", { enabled: true, newCards: false, reviewCards: true, perDay: 2, sourceTextLimit: 240 }],
+        ["app", "multiSelectKey", "Alt"],                 // v48.23 / D61 多段选择的修饰键（非默认值，才验得出往返）
         ["app", "memory", { enabled: false, injectBudget: 3000, minIntervalMinutes: 30, consolidateEvery: 20, lastCoveredAt: 1758500000000 }],
         ["app", "readerSettings", { fontSize: 19, lineHeight: 1.75, width: 720 }],
         ["app", "skinId", "none"],

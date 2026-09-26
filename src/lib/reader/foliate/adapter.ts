@@ -10,6 +10,7 @@
 import "../../../../vendor/foliate-js/view.js";
 import type {
   BookSource,
+  ContentPointerUpInfo,
   ImageLocateHit,
   ImageLocateQuery,
   LinkInfo,
@@ -25,6 +26,7 @@ import type {
 } from "../kernel";
 import { fixSvgAspect, injectAppearanceStyle } from "./appearance";
 import { getSelectionFromContents, getSelectionGeometryFromContents, pointerToHost } from "./selection";
+import { createMultiHighlight, MULTI_HIGHLIGHT_NAME } from "../multiHighlight";
 
 interface TocNode {
   label?: string;
@@ -157,12 +159,28 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
 
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
-  const pointerHandlers = new Set<(pos: { x: number; y: number }) => void>();
+  const pointerHandlers = new Set<(pos: ContentPointerUpInfo) => void>();
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   const docs = new Map<number, Document>();
   let lastRelocate: RelocateInfo | null = null;
   let appearance: ReaderAppearance | null = null;
   let currentFlow: "scrolled" | "paged" = "scrolled";
+  // v48.23（D61 §6.8-11）：多段选择高亮——两个引擎共用的实现（见 ../multiHighlight.ts）。
+  // iframe 文档拿不到宿主的 Token，故把 --hl-multi 的求值结果以字面值注入该文档的 <style>
+  // （与外观注入同一做法；宿主侧则直接吃 src/theme.css 的 ::highlight(multi-select) 规则）。
+  const multiHighlight = createMultiHighlight({
+    currentDoc() {
+      for (const { doc } of view.renderer?.getContents() ?? []) {
+        const sel = doc.defaultView?.getSelection();
+        if (sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim()) return doc;
+      }
+      return null;
+    },
+    styleFor() {
+      const value = getComputedStyle(document.body).getPropertyValue("--hl-multi").trim();
+      return `::highlight(${MULTI_HIGHLIGHT_NAME}){background-color:${value || "color-mix(in srgb, #002fa7 22%, transparent)"};}`;
+    }
+  });
 
   const on = (event: string, handler: Handler) => {
     view.addEventListener(event, handler as EventListener);
@@ -183,9 +201,13 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       );
     });
     // iframe 内的 pointer 事件不会冒泡到宿主文档——adapter 中继并换算为宿主坐标
+    // （v48.23 / D61 §6.8-11：连同指针事件的修饰位一起转发——多段选择靠它判定「按住 Ctrl 加选」；
+    //   iframe 内的 keyup 不会转发到宿主，故修饰键状态只能从指针事件本身取，不能靠宿主 keydown 跟踪）
     doc.addEventListener("pointerup", (ev: PointerEvent) => {
       const pos = pointerToHost(doc, ev.clientX, ev.clientY);
-      pointerHandlers.forEach((h) => h(pos));
+      pointerHandlers.forEach((h) =>
+        h({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+      );
     });
     // v25 图片点选：正文图片点击 → 语义化为 ReaderImageRef（src + 宿主坐标框）。
     // 链接内的图片让位给链接（foliate 自带的 click 处理器负责导航），不dual触发图片聚焦。
@@ -452,11 +474,22 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       view.deselect();
     },
 
+    // v48.23（D61 §6.8-11）：多段选择高亮（CSS Custom Highlight API，不碰正文 DOM）
+    multiSelectHighlight(action) {
+      multiHighlight.update(action);
+    },
+
+    clearMultiSelectHighlight() {
+      multiHighlight.clear();
+    },
+
     getCurrentLocation(): ReaderLocation | null {
       return lastRelocate?.location ?? null;
     },
 
     destroy() {
+      // 高亮画在各章节文档上，销毁内核时一并撤掉（否则残影跟着下一个内核）
+      multiHighlight.clear();
       try {
         view.close();
       } catch {
@@ -486,7 +519,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         imageHandlers.add(h);
         return () => imageHandlers.delete(h);
       }
-      const h = handler as (pos: { x: number; y: number }) => void;
+      const h = handler as (pos: ContentPointerUpInfo) => void;
       pointerHandlers.add(h);
       return () => pointerHandlers.delete(h);
     }

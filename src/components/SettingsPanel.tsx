@@ -24,7 +24,7 @@ import {
   type LimitsState,
   type InterleaveMode
 } from "../lib/sessionQueue";
-import { rerankExtractsNow, type ExtractEngine } from "../lib/readingWorkflow";
+import { rerankExtractsNow, readMultiSelectKey, MULTI_SELECT_KEYS, DEFAULT_MULTI_SELECT_KEY, type ExtractEngine, type MultiSelectKey } from "../lib/readingWorkflow";
 
 export type ThemeMode = "light" | "dark";
 
@@ -1078,6 +1078,8 @@ function FSRSSection() {
 // ---------- 阅读外观（v20 R1b）：与阅读器快捷控件共用 settings.app.readerSettings ----------
 function ReaderSection() {
   const [cfg, setCfg] = useState<ReaderSettings | null>(null);
+  // v48.23（D61 §6.8-11）：多段选择的修饰键（app.multiSelectKey；默认 Ctrl / macOS 建议 Meta）
+  const [multiKey, setMultiKey] = useState<MultiSelectKey | null>(null);
   useEffect(() => {
     settingsStore
       .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
@@ -1088,10 +1090,15 @@ function ReaderSection() {
         })
       )
       .catch(() => setCfg(DEFAULT_READER_SETTINGS));
+    void readMultiSelectKey().then(setMultiKey);
   }, []);
   const save = (next: ReaderSettings) => {
     setCfg(next);
     void settingsStore.set("app", "readerSettings", next);
+  };
+  const saveMultiKey = (key: MultiSelectKey) => {
+    setMultiKey(key);
+    void settingsStore.set("app", "multiSelectKey", key);
   };
   if (!cfg) return null;
   const a = cfg.appearance;
@@ -1100,6 +1107,22 @@ function ReaderSection() {
       <h3>阅读（书与摘录的阅读视图）</h3>
       <p className="form-hint">
         阅读器顶栏的「主题」快捷菜单与本区块读写同一份设置；自定义色直接作用于正文背景与文字。
+      </p>
+      <div className="settings-row">
+        <span>多段选择修饰键</span>
+        <Dropdown
+          value={multiKey ?? DEFAULT_MULTI_SELECT_KEY}
+          align="left"
+          options={MULTI_SELECT_KEYS.map((k) => ({
+            value: k,
+            label: k === "Meta" ? "Meta（macOS 的 Command）" : k
+          }))}
+          onChange={(v) => saveMultiKey(v as MultiSelectKey)}
+        />
+      </div>
+      <p className="form-hint">
+        选中一段文字后按住它再选不相邻的另一段＝加选（两段同时高亮，再执行制卡/摘录等同一动作）；
+        重复选同一段＝移出，Esc 清空。Ctrl+Z/X/S/A/D 这类纯键盘组合不受影响。
       </p>
       <div className="settings-row">
         <span>主题预设</span>

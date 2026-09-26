@@ -13,6 +13,7 @@ import { EventBus, PDFLinkService, PDFViewer, ScrollMode, SpreadMode } from "pdf
 import "pdfjs-dist/web/pdf_viewer.css";
 import type {
   BookSource,
+  ContentPointerUpInfo,
   LinkInfo,
   ReaderAppearance,
   ReaderImageRef,
@@ -24,6 +25,7 @@ import type {
   ReaderTocItem,
   RelocateInfo
 } from "../kernel";
+import { createMultiHighlight } from "../multiHighlight";
 import { PDF_ENGINE_VERSION } from "../foliate/version";
 
 // 兼容层（pdf.js v6 要求 ES2025，Electron 31/Chromium 126 缺失，清单见 tests/pdf.compat.js）。
@@ -106,10 +108,18 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
 
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
-  const pointerHandlers = new Set<(pos: { x: number; y: number }) => void>();
+  const pointerHandlers = new Set<(pos: ContentPointerUpInfo) => void>();
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   let appearance: ReaderAppearance | null = null;
   let darkFilterOn = false;
+  // v48.23（D61 §6.8-11）：多段选择高亮——PDF 的选区在宿主文档里，::highlight(multi-select)
+  // 规则直接来自 src/theme.css 的 --hl-multi Token（无需注入），故 styleFor 不传。
+  const multiHighlight = createMultiHighlight({
+    currentDoc() {
+      const sel = window.getSelection();
+      return sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim() ? document : null;
+    }
+  });
 
   const fractionOf = (page1Based: number) => (totalPages > 0 ? Math.min(1, Math.max(0, page1Based / totalPages)) : 0);
 
@@ -135,9 +145,11 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     if (typeof p === "number") emitRelocate(p);
   });
 
-  // 文本层 pointerup → 壳层取选区（与 foliate adapter 的中继同构）
+  // 文本层 pointerup → 壳层取选区（与 foliate adapter 的中继同构；修饰位一并转发，多段选择判定用）
   viewerEl.addEventListener("pointerup", (ev: PointerEvent) => {
-    pointerHandlers.forEach((h) => h({ x: ev.clientX, y: ev.clientY }));
+    pointerHandlers.forEach((h) =>
+      h({ x: ev.clientX, y: ev.clientY, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+    );
   });
   // 链接：annotation 层 <a> 点击拦截（外链走系统浏览器，内链按 dest 跳页）
   viewerEl.addEventListener("click", (ev: MouseEvent) => {
@@ -424,6 +436,15 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       window.getSelection()?.removeAllRanges();
     },
 
+    // v48.23（D61 §6.8-11）：多段选择高亮（CSS Custom Highlight API，不碰正文 DOM）
+    multiSelectHighlight(action) {
+      multiHighlight.update(action);
+    },
+
+    clearMultiSelectHighlight() {
+      multiHighlight.clear();
+    },
+
     getCurrentLocation(): ReaderLocation | null {
       if (!doc) return null;
       return { pageIndex: viewer.currentPageNumber - 1 };
@@ -431,6 +452,8 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
 
     destroy() {
       destroyed = true;
+      // 高亮注册在宿主文档上，销毁内核时一并撤掉（否则残影跟着下一个内核）
+      multiHighlight.clear();
       try {
         viewer.setDocument(null as never);
       } catch {

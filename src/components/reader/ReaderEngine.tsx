@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import {
   createKernel,
   type BookSource,
+  type ContentPointerUpInfo,
   type LinkInfo,
   type ReaderImageRef,
   type ReaderKernel,
@@ -22,7 +23,7 @@ interface Props {
   jump?: { cfi?: string; pageIndex?: number; chapterIndex?: number; anchorText: string } | null;
   onRelocate: (info: RelocateInfo) => void;
   onLink: (info: LinkInfo) => void;
-  onContentPointerUp: (pos: { x: number; y: number }) => void;
+  onContentPointerUp: (pos: ContentPointerUpInfo) => void;
   /** 正文图片点击（v25 图片点选聚焦） */
   onImageClick: (image: ReaderImageRef) => void;
   /** 内核就绪（open 完成）：父层在此保存引用并应用初始模式/外观 */

@@ -11,6 +11,10 @@ if (process.env.M7_TEST_USERDATA) {
   app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));
 }
 
+// v48.23（D61 §6.8-11）：多段选择的纯函数内核（唯一实现面，见 electron/annotationRange.js 头注）。
+// 主进程用它装配 spans 载荷（extracts:spanSet 与 db.createExtract 同一模块）。
+const annotationRange = require("./annotationRange");
+
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
 let mainWindow = null;
@@ -59,6 +63,8 @@ const {
   getDailyUsage,
   getLimitsState,
   validateLimits,
+  // v48.23（D61 §6.8-11）：多段选择修饰键的写侧归一（取值域封闭，非法值不落盘）
+  normalizeMultiSelectKey,
   computeSessionQueue,
   readAiRerank,
   saveAiRerank,
@@ -175,6 +181,8 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
       throw err;
     }
   }
+  // v48.23（D61 §6.8-11）：多段选择修饰键取值域封闭（Ctrl/Alt/Shift/Meta），非法写入就地归一
+  if (scope === "app" && key === "multiSelectKey") value = normalizeMultiSelectKey(value);
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
@@ -462,6 +470,14 @@ ipcMain.handle("shell:openExternal", (_e, url) => {
 ipcMain.handle("library:updateProgress", (_e, itemId, progress) => updateProgress(String(itemId), progress));
 
 ipcMain.handle("extracts:create", (_e, payload) => createExtract(payload || {}));
+
+// v48.23（D61 §6.8-11）：多段选择的集合运算 + 拼接文本——渲染层不 require electron/、
+// 也不复制 annotationRange 的纯逻辑，只把 spans 原样过桥，由主进程用同一实现面算
+// （与 createExtract 落库时的装配完全同源）。纯计算、零写库。
+ipcMain.handle("extracts:spanSet", (_e, current, incoming, opts) => {
+  const step = annotationRange.updateSpanSet(current, incoming, opts || {});
+  return { spans: step.spans, action: step.action, text: annotationRange.buildSpanPayload(step.spans).text };
+});
 
 ipcMain.handle("extracts:listDue", () => listDueExtracts());
 ipcMain.handle("extracts:listAll", () => listAllExtracts());

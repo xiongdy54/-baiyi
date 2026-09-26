@@ -109,6 +109,16 @@ export interface LinkInfo {
   href: string;
 }
 
+/** 正文内指针抬起载荷（宿主视口坐标 + 指针事件的修饰位；修饰位供多段选择判定，见 §6.8-11） */
+export interface ContentPointerUpInfo {
+  x: number;
+  y: number;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
+  metaKey?: boolean;
+}
+
 export interface ReaderKernel {
   open(source: BookSource, init?: { location?: ReaderLocation }): Promise<void>;
   /** 跳转：CFI 位置 / 页码（PDF 引擎）/ 章节索引 / 目录 href / 文本搜索定位（返回是否发生导航） */
@@ -134,14 +144,23 @@ export interface ReaderKernel {
   getSelectionGeometry(): ReaderRect | null;
   /** 清除当前选区（选区菜单动作完成后由壳层调用） */
   deselect(): void;
+  /**
+   * 多段选择高亮（v48.23 / D61 §6.8-11）：以 CSS Custom Highlight API 在当前选区文档上
+   * 并入/移除一段高亮，**不碰正文 DOM**（EditableText 的「React 不接管子节点」契约不受影响）。
+   * action 由壳层按修饰键语义给出（replace/append/remove），内核只负责「画到哪一篇文档上」。
+   * 引擎不支持时可不实现（壳层按可选能力调用）——此时多段采集与载荷落库仍然成立。
+   */
+  multiSelectHighlight?(action: "replace" | "append" | "remove"): void;
+  /** 清空多段选择高亮（选区清空 / 菜单动作完成 / Esc / 章切换） */
+  clearMultiSelectHighlight?(): void;
   getCurrentLocation(): ReaderLocation | null;
   destroy(): void;
   /** 重定位（进度/统计/目录高亮数据源） */
   on(event: "relocate", handler: (info: RelocateInfo) => void): () => void;
   /** 链接点击（internal=false 为外链，壳层负责系统浏览器打开并已拦截默认行为） */
   on(event: "link", handler: (info: LinkInfo) => void): () => void;
-  /** 正文内指针抬起（宿主坐标；壳层在此刻调用 getSelection 决定是否弹菜单） */
-  on(event: "contentPointerUp", handler: (pos: { x: number; y: number }) => void): () => void;
+  /** 正文内指针抬起（宿主坐标 + 指针事件的修饰位——多段选择按住 Ctrl 再选时判定用） */
+  on(event: "contentPointerUp", handler: (pos: ContentPointerUpInfo) => void): () => void;
   /** 正文图片点击（v25）：壳层据此进入图片聚焦（上浮 + 周围模糊 + 选区工具条） */
   on(event: "imageClick", handler: (image: ReaderImageRef) => void): () => void;
 }

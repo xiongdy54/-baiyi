@@ -20,7 +20,7 @@ import { installMindmapBridge, mindmapApi } from "./lib/mindmap";
 import { installActivityStore, seedFromRuns } from "./lib/activity";
 import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
 import { BackgroundActivity } from "./components/BackgroundActivity";
-import { readingWorkflow } from "./lib/readingWorkflow";
+import { readingWorkflow, type ExtractSpan } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
 import { applyAccent } from "./lib/accentVar";
@@ -253,21 +253,26 @@ export default function App() {
     [view, loadReaderBook]
   );
 
+  // v48.23（D61 §6.8-11）：多段不相邻选择时，spans 与 contentMarkdown 一起过桥——
+  // 主进程按 spans 优先装配文本与 quote_range_json（≥2 段才传；单段路径载荷不变）。
   const handleExtract = useCallback(
-    async (text: string) => {
+    async (text: string, spans?: ExtractSpan[]) => {
+      const multi = spans && spans.length >= 2 ? spans : undefined;
       if (view.name === "reader") {
         await readingWorkflow.create({
           parentType: "document",
           parentId: view.doc.documentId,
           documentId: view.doc.documentId,
-          contentMarkdown: text
+          contentMarkdown: text,
+          spans: multi
         });
       } else if (view.name === "extractReader" && extractDetail) {
         await readingWorkflow.create({
           parentType: "extract",
           parentId: extractDetail.id,
           documentId: extractDetail.documentId,
-          contentMarkdown: text
+          contentMarkdown: text,
+          spans: multi
         });
       }
       eventBus.emit("workflow/changed");

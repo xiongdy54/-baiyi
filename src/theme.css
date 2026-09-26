@@ -84,6 +84,11 @@
   /* 胶囊档：基线不用（=0），供确实需要圆形/胶囊的控件与皮肤引用，
      避免皮肤直接写 border-radius: 999px 绕过 Token 体系 */
   --radius-pill: 0;
+  /* 多段选择高亮（v48.23 / D61 §6.8-11）：::highlight(multi-select) 只能用色值，
+     故单列一个 Token 供它取（CSS Custom Highlight API 的高亮底色，比 --accent-soft 略重：
+     它是「用户刚划出的选区」，要让多段同时可见）。派生自 --accent ⇒ 必须在
+     body / body.theme-dark 各重算一次（§5.1 求值层纪律，理由同 --accent-soft）。 */
+  --hl-multi: color-mix(in srgb, var(--accent) 22%, transparent);
   /* 动效 */
   --ease: cubic-bezier(0.2, 0, 0.38, 0.9);
   --dur: 120ms;
@@ -158,6 +163,8 @@ body {
   --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #000000);
   --accent-pressed: color-mix(in srgb, var(--accent) 78%, #000000);
+  /* 多段选择高亮：派生自 --accent，必须在所有会被上层改 --accent 的层各声明一次 */
+  --hl-multi: color-mix(in srgb, var(--accent) 22%, transparent);
   /* 同理：--text-primary/--text-helper 在 :root 里是 var(--ink)/var(--grey-3)，
      皮肤只改 --ink 或 --grey-3 时必须能在 body 这一层重新取到，
      否则文字色会停在基础主题值上，与皮肤色板错位。 */
@@ -169,6 +176,16 @@ body.theme-dark {
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
   --accent-pressed: color-mix(in srgb, var(--accent) 78%, #ffffff);
+  /* 深底上高亮同色相提亮一档（与 --accent-soft 的 8%→16% 同规） */
+  --hl-multi: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* 多段选择高亮（v48.23 / D61 §6.8-11）：CSS Custom Highlight API 只画绘制层——
+   正文 DOM、markdown 管线、导出全都不动（EditableText 的「React 不接管子节点」契约不受影响）。
+   PDF 引擎的选区就在宿主文档里，直接吃这条规则；foliate 的章节 iframe 拿不到宿主 Token，
+   由 adapter 把 --hl-multi 的求值结果以字面值注入该文档（见 src/lib/reader/multiHighlight.ts）。 */
+::highlight(multi-select) {
+  background-color: var(--hl-multi);
 }
 
 /* 文本类输入的基础外观。此前 theme.css 里只有 `.form-field input` 一条带作用域的

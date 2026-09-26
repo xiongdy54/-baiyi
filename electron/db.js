@@ -2321,10 +2321,20 @@ function queryAll(sql, params = []) {
 }
 
 function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef,
-  comment, annotationType, annotationColor, tags, quoteRange }) {
+  comment, annotationType, annotationColor, tags, quoteRange, spans }) {
   // 批次 E（D-TEST-15 T3 档）：extracts 是「挂在文档上的行」，父文档不存在就别插
   // （插进去就是日后没人踩得到的悬空行）。返回 false 不抛错，与 T1/T2 档一致。
   if (!rowExists("documents", documentId)) return false;
+  // v48.23（D61 §6.8-11）：多段不相邻选择——渲染层只把 spans 原样过桥（不做归一），
+  // 文本与区间都由 annotationRange 在这里装配（**spans 优先**，与单段路径同一实现面）。
+  // 仅在 spans 真给出内容时启用，既有单段调用（不传 spans）逐字节不变。
+  if (Array.isArray(spans) && spans.length > 0) {
+    const payload = annotationRange.buildSpanPayload(spans);
+    if (payload.text.trim()) {
+      contentMarkdown = payload.text;
+      quoteRange = payload.quoteRange;
+    }
+  }
   const id = crypto.randomUUID();
   const now = Date.now();
   // v48.22（D58，§6.8-2）：**次日进队**——新摘录落下一个学习日切点（对齐 SM「只展示过去导入的文章」），
@@ -3133,6 +3143,16 @@ function limitsRemaining(limits, usage) {
 const INTERLEAVE_MODES = ["quota-1-4", "by-due"];
 const DEFAULT_INTERLEAVE = "quota-1-4";
 const EXTRACT_QUOTA_EVERY = 4; // SM 文档口径「limit the inflow of topics to 1:4 or less」
+
+// ---------- v48.23（D61 §6.8-11）：多段选择的修饰键（§7.4 新键 app.multiSelectKey） ----------
+// 取值域封闭（Ctrl/Alt/Shift/Meta）；主进程在读侧与 settings:set 写侧都归一（非法值不落盘）。
+const MULTI_SELECT_KEYS = ["Ctrl", "Alt", "Shift", "Meta"];
+const DEFAULT_MULTI_SELECT_KEY = "Ctrl"; // macOS 的建议值是 Meta（渲染层按平台取默认，这里只管合法性）
+
+/** 归一多段选择修饰键：非枚举值一律回落默认（渲染层读侧与 settings:set 写侧共用） */
+function normalizeMultiSelectKey(v) {
+  return MULTI_SELECT_KEYS.includes(v) ? v : DEFAULT_MULTI_SELECT_KEY;
+}
 
 function readSessionPrefs() {
   const ex = (readSettings().app || {}).extracts || {};
@@ -5886,6 +5906,8 @@ module.exports = {
   createExtract,
   listDueExtracts,
   listAllExtracts,
+  // v48.23（D61 §6.8-11）：多段选择修饰键的写侧归一（settings:set 兜底，非法值不落盘）
+  normalizeMultiSelectKey,
   getExtract,
   postponeExtract,
   // v48.22（D58）：摘录调度内核（SM 语义 + 双引擎子空间 + 操作日志与撤销）

@@ -53,6 +53,8 @@ contextBridge.exposeInMainWorld("libraryAPI", {
 
 contextBridge.exposeInMainWorld("workflowAPI", {
   create: (payload) => ipcRenderer.invoke("extracts:create", payload),
+  // v48.23（D61 §6.8-11）：多段选择的集合运算/拼接文本（只读计算，逻辑在主进程；渲染层不复制）
+  spanSet: (current, incoming, opts) => ipcRenderer.invoke("extracts:spanSet", current, incoming, opts),
   listDue: () => ipcRenderer.invoke("extracts:listDue"),
   listAll: () => ipcRenderer.invoke("extracts:listAll"),
   get: (id) => ipcRenderer.invoke("extracts:get", id),
