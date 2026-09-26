@@ -3,6 +3,7 @@
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const annotationRange = require("./annotationRange");
 const { app } = require("electron");
 const {
   CARD_GEN_PROMPT,
@@ -292,7 +293,14 @@ async function initDb() {
     ["postpone_count", "INTEGER NOT NULL DEFAULT 0"],
     ["process_count", "INTEGER NOT NULL DEFAULT 0"],
     ["priority_source", "TEXT NOT NULL DEFAULT 'book'"],
-    ["engine_state_json", "TEXT"]
+    ["engine_state_json", "TEXT"],
+    // 批注化摘录（规格 docs/impl-spec/ANNOTATION-MULTISELECT.md §1.1）：批注文字 / 型别 / 色板 / 标签 /
+    // 正文里的高亮范围锚（quote_range_json ＝ [{start,end},…]，多段选择即多区间）
+    ["comment", "TEXT"],
+    ["annotation_type", "TEXT"],
+    ["annotation_color", "TEXT"],
+    ["tag_json", "TEXT"],
+    ["quote_range_json", "TEXT"]
   ]) {
     try {
       db.run(`ALTER TABLE extracts ADD COLUMN ${col} ${type}`);
@@ -2312,7 +2320,8 @@ function queryAll(sql, params = []) {
   return rows;
 }
 
-function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef }) {
+function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef,
+  comment, annotationType, annotationColor, tags, quoteRange }) {
   // 批次 E（D-TEST-15 T3 档）：extracts 是「挂在文档上的行」，父文档不存在就别插
   // （插进去就是日后没人踩得到的悬空行）。返回 false 不抛错，与 T1/T2 档一致。
   if (!rowExists("documents", documentId)) return false;
@@ -2329,9 +2338,14 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
   )[0];
   const bookPriority = bookRow && Number.isFinite(Number(bookRow.p)) ? Number(bookRow.p) : PRIORITY_DEFAULT;
   const finalPriority = normPriority(hasExplicit ? priority : bookPriority);
+  // 批注字段（§1.1）：标签与范围锚都规范化后再落；范围锚为空即"未标范围"（null），与"曾标过但被删空"（'[]'）区分
+  const tagsJson = Array.isArray(tags) && tags.length ? JSON.stringify(tags.map(String)) : null;
+  const rangeJson = Array.isArray(quoteRange) && quoteRange.length
+    ? JSON.stringify(annotationRange.normalizeRanges(quoteRange, String(contentMarkdown).length))
+    : null;
   db.run(
-    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, priority_source, topic_next_at, interval_days, a_factor, workflow_state_json, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1.6, NULL, ?, ?, 0, 0)`,
+    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, priority_source, topic_next_at, interval_days, a_factor, workflow_state_json, comment, annotation_type, annotation_color, tag_json, quote_range_json, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1.6, NULL, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
     [
       id,
       String(parentType),
@@ -2342,6 +2356,11 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
       finalPriority,
       hasExplicit ? "user" : "book",
       nextAt,
+      comment != null && comment !== "" ? String(comment) : null,
+      annotationType ? String(annotationType) : null,
+      annotationColor ? String(annotationColor) : null,
+      tagsJson,
+      rangeJson,
       now,
       now
     ]
@@ -2373,6 +2392,8 @@ function listDueExtracts(nowTs) {
             e.status, e.status_version AS statusVersion, e.status_detail_json AS statusDetailJson,
             e.a_factor AS aFactor, e.postpone_count AS postponeCount, e.process_count AS processCount,
             e.priority_source AS prioritySource, e.engine_state_json AS engineStateJson,
+            e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
+            e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
             li.title AS docTitle, li.id AS libraryItemId
      FROM extracts e
@@ -2401,6 +2422,8 @@ function listAllExtracts() {
             e.status_detail_json AS statusDetailJson, e.a_factor AS aFactor,
             e.postpone_count AS postponeCount, e.process_count AS processCount,
             e.engine_state_json AS engineStateJson,
+            e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
+            e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
             li.title AS docTitle, li.id AS libraryItemId
      FROM extracts e
@@ -2429,6 +2452,8 @@ function getExtract(id) {
             e.status, e.status_version AS statusVersion, e.status_detail_json AS statusDetailJson,
             e.a_factor AS aFactor, e.postpone_count AS postponeCount, e.process_count AS processCount,
             e.engine_state_json AS engineStateJson,
+            e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
+            e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
             li.title AS docTitle
      FROM extracts e
@@ -2499,7 +2524,19 @@ const EXTRACT_COLS = `id, parent_type AS parentType, parent_id AS parentId, docu
   priority, priority_source AS prioritySource, status, status_version AS statusVersion,
   status_detail_json AS statusDetailJson, topic_next_at AS topicNextAt, interval_days AS intervalDays,
   a_factor AS aFactor, postpone_count AS postponeCount, process_count AS processCount,
-  engine_state_json AS engineStateJson, created_at AS createdAt, updated_at AS updatedAt`;
+  engine_state_json AS engineStateJson, created_at AS createdAt, updated_at AS updatedAt,
+  comment, annotation_type AS annotationType, annotation_color AS annotationColor,
+  tag_json AS tagJson, quote_range_json AS quoteRangeJson`;
+
+/** 范围锚解析：坏 JSON / 非数组一律当"无区间"，绝不因脏数据抛（§2.2 末行：无锚要显式，不能瞎猜） */
+function parseQuoteRanges(json) {
+  try {
+    const v = JSON.parse(json || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
 
 function readExtractRow(id) {
   return queryAll(`SELECT ${EXTRACT_COLS} FROM extracts WHERE id = ? AND is_deleted = 0`, [id])[0] || null;
@@ -2580,7 +2617,9 @@ function extractSnapshot(row) {
     prioritySource: row.prioritySource,
     isDeleted: 0,
     schedule: scheduleOfRow(row),
-    engineStateJson: row.engineStateJson ?? null
+    engineStateJson: row.engineStateJson ?? null,
+    // 撤销一次正文编辑必须把范围锚一起退回去，否则区间与文本对不上（§2.2）
+    quoteRangeJson: row.quoteRangeJson ?? null
   };
 }
 
@@ -2620,13 +2659,13 @@ function restoreExtractSnapshot(snapshotRow, snap) {
   db.run(
     `UPDATE extracts SET content_markdown = ?, status = ?, status_detail_json = ?, priority = ?,
        priority_source = ?, topic_next_at = ?, interval_days = ?, postpone_count = ?, process_count = ?,
-       a_factor = ?, engine_state_json = ?, is_deleted = 0, updated_at = ? WHERE id = ?`,
+       a_factor = ?, engine_state_json = ?, quote_range_json = ?, is_deleted = 0, updated_at = ? WHERE id = ?`,
     [
       snap.contentMarkdown, snap.status, snap.statusDetailJson ?? null,
       Number(s.priority), snap.prioritySource,
       Number(s.nextAt) || 0, Number(s.intervalDays) || 1, Number(s.postponeCount) || 0,
       Number(s.processCount) || 0, Number(s.aFactor) || DEFAULT_A_FACTOR,
-      snap.engineStateJson ?? null, Date.now(), snapshotRow.id
+      snap.engineStateJson ?? null, snap.quoteRangeJson ?? null, Date.now(), snapshotRow.id
     ]
   );
 }
@@ -2697,15 +2736,33 @@ function postponeExtractDays(id, days) {
 function updateExtract(id, patch) {
   const row = readExtractRow(id);
   if (!row) return null;
-  const contentMarkdown = patch && Object.prototype.hasOwnProperty.call(patch, "contentMarkdown")
-    ? String(patch.contentMarkdown ?? "")
-    : row.contentMarkdown;
-  if (contentMarkdown === row.contentMarkdown) return { ok: true, unchanged: true };
+  const p = patch || {};
+  const hasContent = Object.prototype.hasOwnProperty.call(p, "contentMarkdown");
+  const hasRange = Object.prototype.hasOwnProperty.call(p, "quoteRange");
+  if (!hasContent && !hasRange) return { ok: true, unchanged: true };
+  const contentMarkdown = hasContent ? String(p.contentMarkdown ?? "") : row.contentMarkdown;
+  if (contentMarkdown === row.contentMarkdown && !hasRange) return { ok: true, unchanged: true };
   const before = extractSnapshot(row);
   return withTransaction(() => {
-    db.run("UPDATE extracts SET content_markdown = ?, updated_at = ? WHERE id = ?", [contentMarkdown, Date.now(), id]);
-    logExtractOp(row, "edit", before, { contentMarkdown }, null);
-    return { ok: true };
+    // 范围锚（规格 §2.2 / D61）：正文一变就按编辑脚本把区间重映射过去——
+    // 锚的是"区间"不是"文字"，所以卡片怎么编辑都不会找不到原文。
+    // null＝从未标过范围（老数据，不写回，免生 '[]' 噪音）；'[]'＝标过但被删空（§2.2 末行：显式无锚）。
+    const prevRanges = parseQuoteRanges(row.quoteRangeJson);
+    let nextRanges = prevRanges;
+    if (hasContent && contentMarkdown !== row.contentMarkdown) {
+      nextRanges = annotationRange.transformRanges(prevRanges, row.contentMarkdown, contentMarkdown).ranges;
+    }
+    if (hasRange) nextRanges = annotationRange.normalizeRanges(p.quoteRange, contentMarkdown.length);
+    const writeRanges = row.quoteRangeJson != null || hasRange;
+    const sets = ["content_markdown = ?", "updated_at = ?"];
+    const args = [contentMarkdown, Date.now()];
+    if (writeRanges) {
+      sets.splice(1, 0, "quote_range_json = ?");
+      args.splice(1, 0, JSON.stringify(nextRanges));
+    }
+    db.run(`UPDATE extracts SET ${sets.join(", ")} WHERE id = ?`, [...args, id]);
+    logExtractOp(row, "edit", before, writeRanges ? { contentMarkdown, quoteRange: nextRanges } : { contentMarkdown }, null);
+    return writeRanges ? { ok: true, quoteRange: nextRanges } : { ok: true };
   });
 }
 
