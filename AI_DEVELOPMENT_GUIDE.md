@@ -1610,8 +1610,8 @@ Non-Goals：无排行榜 / 分享 / 推送通知 / 虚拟货币 / 经验值 / �
 ### M16 — 摘录复习改版（v48.22 定契约 D58–D60；完整规格 `docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`；位置：用户 2026-09-24 指定，先于 M15 剩余批次与 K 系列推进）
 
 > **v48.23 追加（2026-09-25，D61–D65）：批注化摘录另立规格 `docs/impl-spec/ANNOTATION-MULTISELECT.md`，契约见 §6.8-11。**
-> 进度：批 6 内核 ✅ `45ea3e5`（范围锚 + `extracts` 五列 + 编辑自动重映射 + 撤销含区间）· 文档收口 ✅ `f4b68c3`（D61–D65 + §6.8-11 + §5.5）· 多段载荷装配 ✅ `a78d5b0`（35/35）。
-> **仍未做**：采集层（Ctrl/Cmd 加选）· CSS Custom Highlights 渲染 · 动作层收 `{spans}` · `app.multiSelectKey` 设置键（须同步 §7.4 与 f18 用例）· 文中留痕（PDF 矩形层 / EPUB highlights）· 面包屑 · 图片粘贴与 `EditableText` 序列化改造 · Zotero 借鉴 ①–⑤ 落点。
+> 进度：批 6 内核 ✅ `45ea3e5` · 文档收口 ✅ `f4b68c3` · 多段载荷装配 ✅ `a78d5b0` · 加选集合语义 ✅ `9f46c94` · **多段选择端到端 ✅ `6e67eb7`**（采集 + CSS Highlights + 动作层收 `spans` + `app.multiSelectKey`；GUI 真键鼠 20/20）。
+> **仍未做**：文中留痕（PDF 矩形层 / EPUB highlights）· 面包屑（子摘录逐级落点＝高亮范围居中）· 图片粘贴与 `EditableText` 序列化改造 · Zotero 借鉴 ①–⑤ 落点。
 
 > **唯一实现依据＝`docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`**（含 20 条必须新增的断言、12 个必须保持绿的既有闸门、9 条非目标）。契约正文见 §6.8（设置面 / SM 调度语义 / 混编 / 双引擎无损 / 范围与上限 / 浏览器 2.0 / 撤销 / 进度不变量）。
 
