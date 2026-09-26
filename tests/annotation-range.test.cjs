@@ -4,7 +4,7 @@
 // 契约：① 编辑脚本正确（相隔两处编辑拆两条）；② §2.2 变换表逐行成立；
 //       ③ 端点规则＝插入点落在 [start,end] 闭区间一律继承（用户 2026-09-25 拍死）；
 //       ④ 区间被删空必须 dropped（不许谎称还有锚）；⑤ 入参不被修改。
-const { diffEdits, transformRange, transformRanges, normalizeRanges } = require("../electron/annotationRange.js");
+const { diffEdits, transformRange, transformRanges, normalizeRanges, normalizeSpans, buildSpanPayload, SPAN_SEP } = require("../electron/annotationRange.js");
 
 let pass = 0, fail = 0;
 function check(name, cond, expected, actual) {
@@ -91,6 +91,54 @@ console.log("== E 不修改入参 / 连续编辑稳定 ==");
 {
   const got = transformRange(R(2, 5), { start: 0, end: 0, text: "XX" });
   check("E3 单条编辑作用单区间（纯插入在区间前）", eq(got, R(4, 7)), R(4, 7), got);
+}
+
+console.log("== F 多段不相邻选择 → 一条批注载荷 ==");
+{
+  const p = buildSpanPayload([{ text: "abc", rects: [{ x: 1, y: 2, w: 3, h: 4, ord: 0 }] }]);
+  check("F1 单段：文本与区间不退化", p.text === "abc" && eq(p.quoteRange, [R(0, 3)]) && p.count === 1, { t: "abc", r: [R(0, 3)] }, p);
+}
+{
+  const p = buildSpanPayload([{ text: "abc" }, { text: "DEF" }]);
+  check("F2 两段：分隔符长度计入偏移", p.text === "abc" + SPAN_SEP + "DEF" && eq(p.quoteRange, [R(0, 3), R(5, 8)]), [R(0, 3), R(5, 8)], p.quoteRange);
+}
+{
+  const p = buildSpanPayload([{ text: "abc" }, { text: "DEF" }, { text: "ghi" }]);
+  check("F3 三段：每段各占一个区间", eq(p.quoteRange, [R(0, 3), R(5, 8), R(10, 13)]), [R(0, 3), R(5, 8), R(10, 13)], p.quoteRange);
+}
+{
+  const p = buildSpanPayload([{ text: "  " }, { text: " abc " }, { text: "" }]);
+  check("F4 空白段被丢弃、保留段被 trim", p.text === "abc" && p.count === 1, { t: "abc", c: 1 }, { t: p.text, c: p.count });
+}
+{
+  const p = buildSpanPayload([{ text: "abc", rects: [{ x: 0, y: 0, w: 1, h: 1 }] }, { text: "abc", rects: [{ x: 0, y: 0, w: 1, h: 1 }] }]);
+  check("F5 同一段重复采集 → 去重为一段", p.count === 1 && eq(p.quoteRange, [R(0, 3)]), 1, p.count);
+}
+{
+  const p = buildSpanPayload([]);
+  check("F6 空输入 → 空载荷（不是半成品）", p.text === "" && eq(p.quoteRange, []) && p.count === 0, { t: "", r: [], c: 0 }, p);
+}
+{
+  const p = buildSpanPayload([
+    { text: "aa", rects: [{ x: 1 }, { x: 2 }] },
+    { text: "bb", rects: [{ x: 3 }] }
+  ]);
+  check("F7 rects 按段序展开并重编 ord", eq(p.rects.map((r) => r.ord), [0, 1, 2]) && eq(p.rects.map((r) => r.x), [1, 2, 3]), [0, 1, 2], p.rects.map((r) => r.ord));
+}
+{
+  const input = [{ text: "aa", rects: [{ x: 1 }] }, { text: "" }];
+  const snap = JSON.stringify(input);
+  buildSpanPayload(input);
+  check("F8 入参未被改写", JSON.stringify(input) === snap, snap, JSON.stringify(input));
+}
+{
+  const p = buildSpanPayload([{ text: "aa" }, { text: "bb" }], "|");
+  check("F9 自定义分隔符长度同样计入偏移", eq(p.quoteRange, [R(0, 2), R(3, 5)]) && p.text === "aa|bb", [R(0, 2), R(3, 5)], p.quoteRange);
+}
+{
+  const raw = [{ text: "  bb  " }, { text: "aa" }];
+  const norm = normalizeSpans(raw);
+  check("F10 归一不排序（顺序由采集层按文档序保证）", eq(norm.map((s) => s.text), ["bb", "aa"]), ["bb", "aa"], norm.map((s) => s.text));
 }
 
 console.log(`\n${pass} 通过 / ${fail} 失败`);

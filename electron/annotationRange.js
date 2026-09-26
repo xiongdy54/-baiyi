@@ -121,4 +121,48 @@ function transformRanges(ranges, oldText, newText) {
   return { ranges: after, dropped: Math.max(0, before.length - after.length) };
 }
 
-module.exports = { diffEdits, transformRange, transformRanges, normalizeRanges, longestCommonSubstring };
+/**
+ * 多段不相邻选择 → 一条批注的载荷（规格 §3 / D61）。
+ * 渲染层只负责采集 spans（每段：{text, rects?}，DOM 顺序不必保证），装配一律在这里做，
+ * 于是"多段"与"单段"共用同一条区间语义（一条批注可有多组 rects + 多段区间）。
+ * 段间分隔符：默认两个换行——单 \n 在 markdown 里是软换行（同一段），
+ * 而"两处不相邻的文字"在语义上是两段，故取段落边界。分隔符长度计入区间偏移。
+ */
+const SPAN_SEP = "\n\n";
+
+/** 归一：去空白段、按文本+首矩形去重（同一段被重复采集）；不改写入参 */
+function normalizeSpans(spans) {
+  const seen = new Set();
+  const out = [];
+  for (const s of Array.isArray(spans) ? spans : []) {
+    const text = String((s && s.text) ?? "").trim();
+    if (!text) continue;
+    const key = text + "|" + JSON.stringify((s && s.rects) ? s.rects[0] || null : null);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ text, rects: Array.isArray(s && s.rects) ? s.rects : [] });
+  }
+  return out;
+}
+
+/**
+ * 装配载荷：{ text, quoteRange, rects, count }。
+ * quoteRange 是相对**拼接后文本**的区间（正是 db 侧要落的 quote_range_json）；
+ * rects 按段序展开并带 ord，跳原文时多组矩形一次全高亮。
+ */
+function buildSpanPayload(spans, sep = SPAN_SEP) {
+  const list = normalizeSpans(spans);
+  const quoteRange = [];
+  const rects = [];
+  let cursor = 0;
+  let ord = 0;
+  for (const s of list) {
+    quoteRange.push({ start: cursor, end: cursor + s.text.length });
+    for (const r of s.rects) rects.push({ ...r, ord: ord++ });
+    cursor += s.text.length + sep.length;
+  }
+  const text = list.map((s) => s.text).join(sep);
+  return { text, quoteRange: normalizeRanges(quoteRange, text.length), rects, count: list.length };
+}
+
+module.exports = { diffEdits, transformRange, transformRanges, normalizeRanges, longestCommonSubstring, normalizeSpans, buildSpanPayload, SPAN_SEP };
