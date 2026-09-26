@@ -165,4 +165,27 @@ function buildSpanPayload(spans, sep = SPAN_SEP) {
   return { text, quoteRange: normalizeRanges(quoteRange, text.length), rects, count: list.length };
 }
 
-module.exports = { diffEdits, transformRange, transformRanges, normalizeRanges, longestCommonSubstring, normalizeSpans, buildSpanPayload, SPAN_SEP };
+/**
+ * 加选的集合运算（规格 §3）：给定「已积累的 spans」与「本次新选区」，按修饰键决定动作。
+ * 不持有 DOM：调用方（渲染层）只管把 kernel 给的选区语义对象传进来，返回的 spans 由它去渲染高亮。
+ * 语义：不带修饰键＝替换（普通拖选覆盖旧集合）；带修饰键＝追加；**新选区与已有一段等价时＝取消那一段**（再次点同一段＝移出）。
+ * 等价判据＝文本 + 首个矩形（同一段被采集两次必然文本与首矩形一致）。
+ */
+function spanKey(s) {
+  const r = s && Array.isArray(s.rects) && s.rects.length ? s.rects[0] : null;
+  return String((s && s.text) ?? "").trim() + "|" + JSON.stringify(r);
+}
+
+function updateSpanSet(current, incoming, opts = {}) {
+  const withModifier = Boolean(opts.modifier);
+  const cur = normalizeSpans(current);
+  const next = normalizeSpans([incoming]);
+  if (!next.length) return { spans: cur, action: "none" };
+  if (!withModifier) return { spans: next, action: "replace" };
+  const key = spanKey(next[0]);
+  const hit = cur.findIndex((s) => spanKey(s) === key);
+  if (hit >= 0) return { spans: cur.filter((_, i) => i !== hit), action: "remove" };
+  return { spans: [...cur, next[0]], action: "append" };
+}
+
+module.exports = { diffEdits, transformRange, transformRanges, normalizeRanges, longestCommonSubstring, normalizeSpans, buildSpanPayload, updateSpanSet, SPAN_SEP };

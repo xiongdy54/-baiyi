@@ -4,7 +4,7 @@
 // 契约：① 编辑脚本正确（相隔两处编辑拆两条）；② §2.2 变换表逐行成立；
 //       ③ 端点规则＝插入点落在 [start,end] 闭区间一律继承（用户 2026-09-25 拍死）；
 //       ④ 区间被删空必须 dropped（不许谎称还有锚）；⑤ 入参不被修改。
-const { diffEdits, transformRange, transformRanges, normalizeRanges, normalizeSpans, buildSpanPayload, SPAN_SEP } = require("../electron/annotationRange.js");
+const { diffEdits, transformRange, transformRanges, normalizeRanges, normalizeSpans, buildSpanPayload, updateSpanSet, SPAN_SEP } = require("../electron/annotationRange.js");
 
 let pass = 0, fail = 0;
 function check(name, cond, expected, actual) {
@@ -139,6 +139,29 @@ console.log("== F 多段不相邻选择 → 一条批注载荷 ==");
   const raw = [{ text: "  bb  " }, { text: "aa" }];
   const norm = normalizeSpans(raw);
   check("F10 归一不排序（顺序由采集层按文档序保证）", eq(norm.map((s) => s.text), ["bb", "aa"]), ["bb", "aa"], norm.map((s) => s.text));
+}
+
+console.log("== G 加选的集合运算（修饰键语义） ==");
+{
+  const a = { text: "aa", rects: [{ x: 1 }] }, b = { text: "bb", rects: [{ x: 2 }] };
+  const r1 = updateSpanSet([a], b, { modifier: false });
+  check("G1 不带修饰键 → 替换（普通拖选覆盖旧集合）", r1.action === "replace" && r1.spans.length === 1 && r1.spans[0].text === "bb", "replace", r1.action);
+  const r2 = updateSpanSet([a], b, { modifier: true });
+  check("G2 带修饰键 → 追加（多段成立）", r2.action === "append" && r2.spans.length === 2 && r2.spans[1].text === "bb", "append", r2.action);
+  const r3 = updateSpanSet(r2.spans, a, { modifier: true });
+  check("G3 带修饰键再点同一段 → 取消那一段", r3.action === "remove" && r3.spans.length === 1 && r3.spans[0].text === "bb", "remove", r3.action);
+  const r4 = updateSpanSet([a], a, { modifier: true });
+  check("G4 取消到空 → 集合为空（不是残留一段）", r4.action === "remove" && eq(r4.spans, []), { a: "remove", n: 0 }, { a: r4.action, n: r4.spans.length });
+  const r5 = updateSpanSet([a], { text: "   " }, { modifier: true });
+  check("G5 空白新选区 → 不动集合（action=none）", r5.action === "none" && r5.spans.length === 1, "none", r5.action);
+  const r6 = updateSpanSet([{ text: "x", rects: [{ x: 1 }] }], { text: "x", rects: [{ x: 9 }] }, { modifier: true });
+  check("G6 同文本但不同矩形 → 视为另一段（追加，不误删）", r6.action === "append", "append", r6.action);
+}
+{
+  const cur = [{ text: "aa", rects: [{ x: 1 }] }];
+  const snap = JSON.stringify(cur);
+  updateSpanSet(cur, { text: "bb" }, { modifier: true });
+  check("G7 入参未被改写", JSON.stringify(cur) === snap, snap, JSON.stringify(cur));
 }
 
 console.log(`\n${pass} 通过 / ${fail} 失败`);
