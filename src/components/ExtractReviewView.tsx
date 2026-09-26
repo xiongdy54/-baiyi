@@ -20,10 +20,13 @@ interface Props {
   header?: string;
   onExit?: () => void;
   /**
-   * 规格 §1.2：在摘录页就地另立子摘录——**当前摘录 id 由本组件补上**（它持有队列头）。
-   * App 拿到 parentExtractId 后解析父摘录的 documentId 与 rootExtractId 再落库（唯一一处写 contextRef）。
+   * 规格 §1.2：在摘录页就地另立子摘录——**当前摘录 id 与所选文字在本卡里的偏移由卡面采集**（它持有队列头与正文 DOM）。
+   * App 拿到 parentExtractId / parentRange 后解析父摘录的 documentId 与 rootExtractId 再落库（唯一一处写 contextRef）。
    */
-  onExtract?: (text: string, ctx: { parentExtractId: string }) => void;
+  onExtract?: (
+    text: string,
+    ctx: { parentExtractId: string; parentRange: Array<{ start: number; end: number }> }
+  ) => void;
 }
 
 /** 面包屑折叠口径（用户 2026-09-25 修订，取代原「超 4 级」）：≤6 级全显示；>6 级才折叠 */
@@ -72,6 +75,11 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
   const [chain, setChain] = useState<Array<{ id: string; text: string; depth: number }>>([]);
   /** 查看态：面包屑点开的某层卡片（不在队列里也照样渲染；null＝正常会话） */
   const [viewing, setViewing] = useState<ExtractDetail | null>(null);
+  /**
+   * 查看态的「要呈现的范围」（工单 ②）：来自子摘录 contextRef.parentRange（子卡「跳转原文」回父卡时）。
+   * null＝用该层**自身**的 quote_range_json（面包屑逐级保持既有行为）。
+   */
+  const [viewRanges, setViewRanges] = useState<Array<{ start: number; end: number }> | null>(null);
   const [crumbOpen, setCrumbOpen] = useState(false);
   const crumbRef = useRef<HTMLDivElement | null>(null);
 
@@ -138,6 +146,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
   // 队列头一变（处理完一条 / 撤销召回）就退出查看态：查看态只是「回看某层」，不驻留
   useEffect(() => {
     setViewing(null);
+    setViewRanges(null);
     setCrumbOpen(false);
   }, [current?.id]);
 
@@ -183,6 +192,12 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
     }
   }, [refresh, viewing]);
 
+  /** 查看态的唯一出口：回队列（同时清掉「要看的范围」，避免下次查看串档） */
+  const closeViewing = useCallback(() => {
+    setViewing(null);
+    setViewRanges(null);
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -191,7 +206,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
       if (viewing) {
         if (e.key === "Escape") {
           e.preventDefault();
-          setViewing(null);
+          closeViewing();
         }
         return; // 查看态：空格/Z 都不作用（不推进调度、不改队列）
       }
@@ -207,18 +222,40 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [advance, undo, viewing]);
+  }, [advance, undo, viewing, closeViewing]);
 
-  /** 面包屑点某层：切到那张卡（查看态）。当前层不可点——渲染成 span，且这里再拦一道 */
+  /** 面包屑点某层：切到那张卡（查看态）。当前层不可点——渲染成 span，且这里再拦一道。
+   *  不带「要看的范围」：高亮该层自身的 quote_range_json（既有行为，规格 §1.2 R13）。 */
   const openLevel = useCallback(
     async (id: string) => {
       setCrumbOpen(false);
       if (!id || id === shownId) return;
       const detail = await readingWorkflow.getTopic(id);
-      if (detail) setViewing(detail);
+      if (detail) {
+        setViewRanges(null);
+        setViewing(detail);
+      }
     },
     [shownId]
   );
+
+  /**
+   * 子摘录「跳转原文」（工单 ① / D62）：**父摘录卡片**，并把「本子摘录所引的那一段」居中高亮。
+   * 父卡不必在队列里——getTopic 直接取回、走查看态（只读、不推进调度、不改队列）；
+   * 范围来自子摘录 contextRef.parentRange（父卡坐标，无此键的老数据回退父卡自身区间）。
+   */
+  const openParentCard = useCallback(async (child: DueTopic): Promise<boolean> => {
+    const parentId = child.contextRef?.parentExtractId;
+    if (!parentId) return false;
+    const detail = await readingWorkflow.getTopic(parentId);
+    if (!detail) return false;
+    setCrumbOpen(false);
+    // 老数据（无 parentRange）＝查看方没带范围 → null，回退父卡自身区间（不退化成整卡无高亮）
+    const brought = parseQuoteRanges(child.contextRef?.parentRange);
+    setViewRanges(brought.length ? brought : null);
+    setViewing(detail);
+    return true;
+  }, []);
 
   if (!loaded) return <div className="extract-page" />;
 
@@ -323,7 +360,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
           {viewing ? "查看态：只读 · 不推进调度 · Esc 返回队列" : "空格＝下一条 · Z＝撤销 · 正文可直接编辑"}
         </span>
         {viewing && (
-          <button className="crumb-exit" data-crumb-exit onClick={() => setViewing(null)} title="回到摘录会话（Esc）">
+          <button className="crumb-exit" data-crumb-exit onClick={closeViewing} title="回到摘录会话（Esc）">
             返回队列
           </button>
         )}
@@ -340,7 +377,8 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
           extract={viewing}
           madeCardCount={cardCounts[viewing.id]}
           viewOnly
-          quoteRanges={parseQuoteRanges(viewing.quoteRangeJson)}
+          // 调用方带了「要看的范围」（子摘录的 parentRange）就高亮它；否则高亮该层自身区间
+          quoteRanges={viewRanges ?? parseQuoteRanges(viewing.quoteRangeJson)}
           handlers={{}}
         />
       ) : (
@@ -356,10 +394,26 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
             onPriority: (p) => void run(() => readingWorkflow.setPriority(current!.id, p), `优先级改为 ${p}`),
             onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), "已毕业：不再推送，仍保留在卡片浏览器"),
             onEdit: (text) => void run(() => readingWorkflow.updateContent(current!.id, text), "正文已保存"),
-            onExtract: onExtract ? (text) => onExtract(text, { parentExtractId: current!.id }) : undefined,
+            onExtract: onExtract
+              ? (payload) => onExtract(payload.text, { parentExtractId: current!.id, parentRange: payload.ranges })
+              : undefined,
             onOpenExtract: () => onOpen(current!.id),
-            onJumpToSource:
-              onJumpToDoc && current!.contextRef?.documentId
+            // 「跳转原文」按层级分流（规格 §1.2 D62）：有父摘录＝回父卡（查看态 + 高亮所引那段），
+            // 根摘录＝跳源文档（逐字保持既有行为，含 returnTo="queue" 现场恢复语义）
+            onJumpToSource: current!.contextRef?.parentExtractId
+              ? () => {
+                  void openParentCard(current!).then((ok) => {
+                    if (!ok && onJumpToDoc && current!.contextRef?.documentId) {
+                      // 父卡已被删/不可取回：退回源文档，不给一个死按钮
+                      onJumpToDoc(
+                        current!.contextRef!.documentId!,
+                        { anchorText: current!.contextRef!.anchorText || current!.contentMarkdown, anchorRatio: current!.contextRef!.anchorRatio },
+                        "queue"
+                      );
+                    }
+                  });
+                }
+              : onJumpToDoc && current!.contextRef?.documentId
                 ? () =>
                     onJumpToDoc(
                       current!.contextRef!.documentId!,

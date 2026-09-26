@@ -40,6 +40,75 @@ export function parseQuoteRanges(raw: unknown): Array<{ start: number; end: numb
 }
 
 /**
+ * DOM 文本坐标（规格 §1.2 / 工单 ②）：自 root 起按文档序累加文本节点长度，`<br>` 计 1 个换行。
+ * `EditableText` 的落库口径是 `innerText`，而 Chromium 的 innerText setter 把 `\n` 落成 `<br>`
+ * （实测：`"a\n\nb"` → `a<br><br>b`，见 tests/breadcrumb.gui.mjs 的多段正文用例）——
+ * 因此「文本节点长度 + br 计 1」与 `content_markdown` 逐字符同构，选区偏移可直接当范围锚用。
+ */
+function domTextOffset(root: Node, container: Node, offset: number): number | null {
+  let acc = 0;
+  let hit: number | null = null;
+  const visit = (node: Node): void => {
+    if (hit !== null) return;
+    if (node === container) {
+      if (node.nodeType === 3 /* TEXT_NODE */) {
+        hit = acc + offset;
+        return;
+      }
+      // 元素容器：点＝「第 offset 个子节点之前」，先把之前的兄弟累加完再落点
+      const kids = node.childNodes;
+      for (let i = 0; i < offset && i < kids.length; i++) visit(kids[i]);
+      if (hit === null) hit = acc;
+      return;
+    }
+    if (node.nodeType === 3) {
+      acc += (node.textContent || "").length;
+      return;
+    }
+    if (node.nodeType === 1 && (node as Element).tagName === "BR") {
+      acc += 1;
+      return;
+    }
+    if (node.nodeType === 1) {
+      const kids = node.childNodes;
+      for (let i = 0; i < kids.length; i++) visit(kids[i]);
+    }
+  };
+  visit(root);
+  return hit;
+}
+
+/**
+ * 当前选区在**该卡正文**里的字符偏移（纯函数式，不写 DOM、不落库；工单 ②「采集父侧偏移」）。
+ * 多段不相邻选择＝多组偏移（`selection.rangeCount > 1` 时逐段取；与阅读器侧 spans 集合同构），
+ * 选区落在正文之外（如卡面元信息行）或塌缩时返回空数组——调用方据此回退「整条正文」。
+ */
+export function selectionOffsetsInBody(root: HTMLElement): Array<{ start: number; end: number }> {
+  const sel = typeof window !== "undefined" ? window.getSelection() : null;
+  if (!sel || !sel.rangeCount) return [];
+  const out: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const r = sel.getRangeAt(i);
+    if (!root.contains(r.commonAncestorContainer)) continue;
+    const s = domTextOffset(root, r.startContainer, r.startOffset);
+    const e = domTextOffset(root, r.endContainer, r.endOffset);
+    if (s === null || e === null || e <= s) continue;
+    out.push({ start: s, end: e });
+  }
+  return out.sort((a, b) => a.start - b.start);
+}
+
+/**
+ * 「摘录」动作的载荷（工单 ②）：文本＝卡面里选中的那段（无选区＝整条正文），
+ * ranges＝选区在**本卡 content_markdown** 里的字符偏移（父卡坐标，逐段对应；多段选择即多组）。
+ * 文本取 `slice` 而非 `selection.toString()`：落库文本与范围锚逐字符对齐（父卡跳回来高亮的就是它）。
+ */
+export interface ExtractPickPayload {
+  text: string;
+  ranges: Array<{ start: number; end: number }>;
+}
+
+/**
  * 把正文按高亮区间切成交错节点（只读渲染用，规格 §1.2 R13 落点）。
  * 区间超出正文长度一律裁剪；重叠区间按游标裁剪，保证不重复输出同一段文字。
  */
@@ -79,10 +148,11 @@ export interface ExtractFaceHandlers {
   onJumpToSource?: () => void;
   onUndo?: () => void;
   /**
-   * 规格 §1.2：就地另立子摘录——文本＝卡面里**选中的那段**，没有选区时＝整条正文。
-   * 由外层（ExtractReviewView → App.handleExtract）补 parentExtractId 后落库。
+   * 规格 §1.2：就地另立子摘录——载荷＝卡面里**选中的那段**（文本 + 该段在本卡正文里的字符偏移），
+   * 没有选区时＝整条正文（`ranges` ＝整条区间）。父侧偏移由外层写进子摘录 contextRef.parentRange，
+   * 子卡「跳转原文」据此回到父卡并高亮所选那句。
    */
-  onExtract?: (text: string) => void;
+  onExtract?: (payload: ExtractPickPayload) => void;
 }
 
 /**
@@ -110,9 +180,53 @@ export default function ExtractCardFace({
   handlers: ExtractFaceHandlers;
 }) {
   const [postponeDays, setPostponeDays] = useState(7);
+  /**
+   * 选区的**快照**（工单 ②「多段不相邻选择＝多组偏移，复用既有的多段集合状态」在摘录页的落点）：
+   * 选区一做出就在 mouseup / keyup 采集下来，作为「摘录」的兜底载荷——
+   * 点按钮/别处点击**可能**动到 DOM 选区，而快照保证「选中哪段就摘哪段」不依赖那个时刻的活选区。
+   * 优先级：实时选区 > 快照 > 整条正文（见 pickExtractPayload）。
+   */
+  const [picked, setPicked] = useState<ExtractPickPayload | null>(null);
   const depth = Number(extract.depth) || 1;
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const hlRef = useRef<HTMLElement | null>(null);
+
+  // 换卡即清快照（偏移是相对**这一版正文**的，跨卡复用会把范围锚写歪）
+  useEffect(() => {
+    setPicked(null);
+  }, [extract.id]);
+
+  useEffect(() => {
+    if (viewOnly) return;
+    const body = bodyRef.current;
+    if (!body) return;
+    const face = body.closest(".extract-face");
+    const capture = () => {
+      const full = String(extract.contentMarkdown || "");
+      const ok = selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length);
+      const text = ok.map((r) => full.slice(r.start, r.end)).join("\n\n");
+      setPicked(ok.length && text.trim() ? { text, ranges: ok } : null);
+    };
+    const onUp = (e: Event) => {
+      const t = e.target as Node | null;
+      if (t && body.contains(t)) {
+        capture();
+        return;
+      }
+      // 卡外落下＝旧快照已失效；卡内按钮（如「摘录」）自身的 mouseup 不算，快照要活到 onClick
+      if (!(t && face && face.contains(t))) setPicked(null);
+    };
+    const onKey = () => {
+      const a = document.activeElement;
+      if (a && (a === body || body.contains(a))) capture();
+    };
+    document.addEventListener("mouseup", onUp);
+    document.addEventListener("keyup", onKey);
+    return () => {
+      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("keyup", onKey);
+    };
+  }, [extract.id, extract.contentMarkdown, viewOnly]);
 
   // 落点（尽力而为）：高亮段落在卡面上可见即滚到可视区中部（容器不可滚时是一次 no-op）
   useEffect(() => {
@@ -120,14 +234,21 @@ export default function ExtractCardFace({
     hlRef.current?.scrollIntoView({ block: "center" });
   }, [viewOnly, extract.id]);
 
-  /** 「摘录」取的文本：卡面正文里的当前选区优先，无选区＝整条正文 */
-  const pickExtractText = () => {
-    const sel = typeof window !== "undefined" ? window.getSelection() : null;
-    const picked = sel ? String(sel.toString()).trim() : "";
-    const node = sel && sel.anchorNode ? sel.anchorNode : null;
-    const el = node ? (node.nodeType === 1 ? (node as Element) : node.parentElement) : null;
-    if (picked && el && bodyRef.current && bodyRef.current.contains(el)) return picked;
-    return String(extract.contentMarkdown || "").trim();
+  /**
+   * 「摘录」取的载荷：**实时选区优先、快照兜底**（含父卡坐标的范围），两者皆无＝整条正文。
+   * 选区在正文之外（元信息行等）时同样回退整条——不用外部选区当锚，避免把范围锚写歪。
+   */
+  const pickExtractPayload = (): ExtractPickPayload => {
+    const body = bodyRef.current;
+    const full = String(extract.contentMarkdown || "");
+    const live = body ? selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length) : [];
+    const fresh: ExtractPickPayload | null = live.length
+      ? { text: live.map((r) => full.slice(r.start, r.end)).join("\n\n"), ranges: live }
+      : null;
+    for (const cand of [fresh, picked]) {
+      if (cand && cand.ranges.length && cand.text.trim()) return cand;
+    }
+    return { text: full.trim(), ranges: [{ start: 0, end: full.length }] };
   };
 
   return (
@@ -207,8 +328,8 @@ export default function ExtractCardFace({
           {handlers.onExtract && (
             <button
               disabled={busy}
-              onClick={() => handlers.onExtract?.(pickExtractText())}
-              title="就此另立一条子摘录（正文里选中哪段就摘哪段；未选中＝整条）"
+              onClick={() => handlers.onExtract?.(pickExtractPayload())}
+              title="就此另立一条子摘录（正文里选中哪段就摘哪段、并记下它在本卡里的位置；未选中＝整条）"
               data-extract-child
             >
               摘录
@@ -220,7 +341,15 @@ export default function ExtractCardFace({
             </button>
           )}
           {handlers.onJumpToSource && (
-            <button disabled={busy} onClick={() => handlers.onJumpToSource?.()} title="跳回材料中的原位置（不写入阅读进度）">
+            <button
+              disabled={busy}
+              onClick={() => handlers.onJumpToSource?.()}
+              title={
+                extract.contextRef?.parentExtractId
+                  ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
+                  : "跳回材料中的原位置（不写入阅读进度）"
+              }
+            >
               跳转原文
             </button>
           )}

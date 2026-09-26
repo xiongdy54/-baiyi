@@ -1,8 +1,9 @@
-// M16 批注化摘录 · 面包屑 GUI 端到端（真键鼠 CDP，规格 §1.2 R13 / 契约 §6.8-11）
+// M16 批注化摘录 · 面包屑 + 跳转语义分流 GUI 端到端（真键鼠 CDP，规格 §1.2 R13 / 契约 §6.8-11）
 // @runtime: node  @tier: 2  @gui: true  @id: BREADCRUMB  @timeout: 300
 // 运行：npm run build 之后 `node tests/breadcrumb.gui.mjs`（CDP 驱动 dist 上的真实应用，自启自关、可 taskkill electron）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-breadcrumb-userdata（先清空；播种植入夹具，绝不触碰真实库 §7.3）。
-// 夹具（tests/breadcrumb.gui.seed.cjs）：链甲 3 级（孙＝队列头）· 链乙 6 级 · 链丙 8 级 + 各层范围锚。
+// 夹具（tests/breadcrumb.gui.seed.cjs）：链甲 3 级（孙＝队列头）· 链乙 6 级 · 链丙 8 级 + 各层范围锚 ·
+//   链丁 2 级（子卡到期、**父卡不置为到期**＝父卡在队列里不可达，供跳转语义用例）。
 // 断言链（本次口径：**≤6 级全显示；>6 级才折叠**，折叠只压缩占位、不减少可达性）：
 //   ① 3 级链 → 面包屑 3 层且层级名＝该层正文首 10 字（超出省略）
 //   ② 点第 1 级 → 切到根卡（查看态，只读不写调度）→ 点「返回队列」回到原卡
@@ -11,6 +12,10 @@
 //   ⑤ 当前层不可点（不是按钮；真鼠标点它不改变当前卡）
 //   ⑥ 摘录页「摘录」＝就地另立子摘录（parent_type=extract / parent_id=当前摘录），
 //      contextRef 带 parentExtractId 与 rootExtractId（根摘录 rootExtractId＝自身 id）
+//   ⑦ 跳转语义分流（工单 ①②）：真鼠标在父卡正文里选一段 → 摘录 → 子卡 contextRef.parentRange
+//      覆盖所选的文字（落库断言）+ 子卡自身 quote_range_json＝[{0,len}]；点子卡「跳转原文」→
+//      切到**父卡**（不是阅读器）且高亮落在那句上（文本+几何正向对照）；父卡不在队列也能走查看态到位、
+//      且与「返回队列」出口不冲突。
 import { spawn, execSync } from "node:child_process";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
@@ -23,6 +28,9 @@ const BOOK_TITLE = "面包屑 GUI 夹具书";
 const A = (level) => `甲3级-${level}稿：`;
 const B = (level) => `乙6层-${level}稿：`;
 const C = (level) => `丙8层-${level}稿：`;
+/** 链丁：D1TARG ＝父卡正文里被引的那句（子卡 parentRange 指它）；D2PICK ＝待真鼠标选中的短语（与 seed 同字面量） */
+const D1TARG = "D1TARG 这句是丁链子摘录所引的原文";
+const D2PICK = "D2PICK这个短语";
 const NAME_LEN = 10; // 层级名取正文首 10 字（规格 §1.2 的 8–12 字区间内）
 
 let pass = 0, fail = 0;
@@ -106,6 +114,19 @@ try {
     await clickAt(r.x, r.y);
     return true;
   };
+  /** 按动作文案点卡面动作行里的按钮（真鼠标；找不到返回 false） */
+  const clickAction = async (label) => {
+    const raw = await cdp.eval(`(() => {
+      const b = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
+      if (!b) return "";
+      const r = b.getBoundingClientRect();
+      return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+    })()`);
+    if (!String(raw).startsWith("{")) return false;
+    const r = JSON.parse(String(raw));
+    await clickAt(r.x, r.y);
+    return true;
+  };
   /** 摘录页现状：显示的是哪张卡、面包屑各段文本、动作是否存在 */
   const pageState = () => cdp.eval(`(() => {
     const page = document.querySelector(".extract-page");
@@ -145,9 +166,10 @@ try {
   const fx = {
     A1: row(A(1)), A2: row(A(2)), A3: row(A(3)),
     B6: row(B(6)), C3: row(C(3)), C7: row(C(7)), C8: row(C(8)),
+    D1: row("丁链根-1稿："), D2: row("丁4级-2稿："),
     B: (i) => row(B(i)), C: (i) => row(C(i))
   };
-  check("夹具播种到位（3 / 6 / 8 三条链共 17 条摘录）", rows.length === 17 && fx.A1 && fx.A3 && fx.B6 && fx.C8, `rows=${rows.length}`);
+  check("夹具播种到位（3 / 6 / 8 / 2 四条链共 19 条摘录）", rows.length === 19 && fx.A1 && fx.A3 && fx.B6 && fx.C8 && fx.D1 && fx.D2, `rows=${rows.length}`);
 
   // 3) 顶栏「摘录」进入沉浸式页（队列头＝链甲第 3 层）
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "摘录"); b?.click(); return !!b; })()`);
@@ -327,6 +349,152 @@ try {
   await wait(1200);
   st = JSON.parse(String(await pageState()) || "{}");
   check("④ 返回队列回到链丙第 8 层（查看态只有一个出口，语义不漂）", st.viewing === false && st.showing === fx.C8?.id, JSON.stringify({ viewing: st.viewing, showing: st.showing }));
+
+  // ---------- ⑦ 跳转语义分流：子卡「跳转原文」→ 父卡（工单 ①②，D62/R13）----------
+  // 前进到链丁第 2 层：它是子卡（contextRef 带 parentExtractId），父卡 D1 **不置为到期** ⇒ 队列里不可达
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim() === "下一条"); b?.click(); return !!b; })()`);
+  await wait(2000);
+  st = JSON.parse(String(await pageState()) || "{}");
+  check("⑦ 边界前置：队列头切到链丁第 2 层（子卡；父卡不在队列）", st.showing === fx.D2?.id && st.viewing === false, `showing=${st.showing} D2=${fx.D2?.id}`);
+  const qIds = await cdp.eval(`(async () => {
+    const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"] } });
+    return JSON.stringify((q.extracts || []).map((e) => e.id));
+  })()`);
+  const inQueue = JSON.parse(String(qIds) || "[]");
+  check(
+    "⑦ 正/负对照：子卡 D2 在队列、父卡 D1 不在（「父卡不可达」场景成立）",
+    inQueue.includes(fx.D2?.id) && !inQueue.includes(fx.D1?.id),
+    `D2=${inQueue.includes(fx.D2?.id)} D1=${inQueue.includes(fx.D1?.id)} n=${inQueue.length}`
+  );
+
+  // 真鼠标在**父卡（D2）正文**里拖选第 2 段的引文句（多行正文 ⇒ 偏移必须把 <br> 换行计进去）
+  await cdp.eval(`(() => { document.querySelector(".extract-face-body")?.scrollIntoView({ block: "center" }); return true; })()`);
+  await wait(400);
+  const pickGeo = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-face-body");
+    if (!body) return "";
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) {
+      const i = (n.textContent || "").indexOf(${JSON.stringify(D2PICK)});
+      if (i < 0) continue;
+      const r = document.createRange();
+      r.setStart(n, i);
+      r.setEnd(n, i + ${D2PICK.length});
+      const rs = r.getClientRects();
+      const first = rs[0], last = rs[rs.length - 1];
+      if (!first || !last || !first.height) return "EMPTY_RECT";
+      return JSON.stringify({
+        start: { x: first.left + 2, y: first.top + first.height / 2 },
+        end: { x: last.right - 2, y: last.top + last.height / 2 },
+        sameLine: Math.abs(first.top - last.top) < 2
+      });
+    }
+    return "";
+  })()`);
+  const pg = JSON.parse(String(pickGeo) || "{}");
+  check("⑦ 待选短语在卡面正文里（坐标可计算、同一行）", String(pickGeo).startsWith("{") && pg.sameLine === true, pickGeo);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pg.start.x, y: pg.start.y, modifiers: 0 });
+  await wait(60);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: pg.start.x, y: pg.start.y, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+  for (let i = 1; i <= 6; i++) {
+    await cdp.send("Input.dispatchMouseEvent", {
+      type: "mouseMoved",
+      x: pg.start.x + ((pg.end.x - pg.start.x) * i) / 6,
+      y: pg.start.y,
+      button: "left",
+      buttons: 1,
+      modifiers: 0
+    });
+    await wait(40);
+  }
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pg.end.x, y: pg.end.y, button: "left", buttons: 0, clickCount: 1, modifiers: 0 });
+  await wait(500);
+  const selText = await cdp.eval(`String(window.getSelection()).trim()`);
+  check("⑦ 真鼠标拖选命中该短语（选区正向对照）", String(selText) === D2PICK, `选区=${selText}`);
+
+  // 真鼠标点「摘录」→ 落一条子摘录（D3）：文本＝所选文字，父侧偏移＝所选文字在父卡里的位置
+  const d2Before = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(fx.D2?.id)}); return JSON.stringify({ pc: d?.processCount, ivl: d?.intervalDays }); })()`);
+  check("⑦ 卡面「摘录」按钮可点（真鼠标命中）", (await clickAction("摘录")) === true, "未命中");
+  await wait(1500);
+  const kidRow = await cdp.eval(`(async () => {
+    const all = await window.workflowAPI.listAll();
+    const parent = (all || []).find((e) => e.id === ${JSON.stringify(fx.D2?.id)}) || {};
+    const kids = (all || []).filter((e) => e.parentType === "extract" && e.parentId === ${JSON.stringify(fx.D2?.id)});
+    const k = kids[0] || null;
+    const md = String(parent.contentMarkdown || "");
+    const pr = k && k.contextRef ? k.contextRef.parentRange : null;
+    let qr = null;
+    if (k) { try { qr = JSON.parse(k.quoteRangeJson || "null"); } catch { qr = "PARSE_ERR"; } }
+    return JSON.stringify({
+      n: kids.length,
+      idx: md.indexOf(${JSON.stringify(D2PICK)}),
+      childMd: k ? k.contentMarkdown : null,
+      parentRange: pr,
+      slices: Array.isArray(pr) ? pr.map((r) => md.slice(r.start, r.end)) : null,
+      quoteRange: qr
+    });
+  })()`);
+  const k2 = JSON.parse(String(kidRow) || "{}");
+  check("⑦ 子摘录正文＝真鼠标所选文字", k2.n === 1 && k2.childMd === D2PICK, JSON.stringify({ n: k2.n, childMd: k2.childMd }));
+  check(
+    "⑦ 子摘录 contextRef.parentRange 覆盖所选的文字（父卡坐标，落库断言）",
+    Array.isArray(k2.parentRange) && k2.parentRange.length === 1 && JSON.stringify(k2.slices) === JSON.stringify([D2PICK]),
+    `parentRange=${JSON.stringify(k2.parentRange)} slices=${JSON.stringify(k2.slices)}`
+  );
+  check(
+    "⑦ 偏移＝content_markdown 坐标（与 indexOf 逐字节相等；漏算 <br> 会停在第 1 段）",
+    Array.isArray(k2.parentRange) && k2.parentRange[0]?.start === k2.idx,
+    `start=${k2.parentRange?.[0]?.start} idx=${k2.idx}`
+  );
+  check(
+    "⑦ 子摘录自身 quote_range_json ＝ [{0,len}]（整条正文都是引文，单段也不空）",
+    Array.isArray(k2.quoteRange) && k2.quoteRange.length === 1 && k2.quoteRange[0].start === 0 && k2.quoteRange[0].end === String(k2.childMd || "").length,
+    JSON.stringify(k2.quoteRange)
+  );
+
+  // 子卡「跳转原文」→ 父卡（不是阅读器）+ 高亮所引那句 + 落点居中 + 返回队列
+  check("⑦ 「跳转原文」按钮可点（真鼠标命中）", (await clickAction("跳转原文")) === true, "未命中");
+  await wait(1600);
+  st = JSON.parse(String(await pageState()) || "{}");
+  const wentReader = await cdp.eval(`!!document.querySelector(".reader-wrap")`);
+  check(
+    "⑦ 分流：没去阅读器，而是切到**父卡**（查看态、只读、不推进调度）",
+    wentReader === false && st.viewing === true && st.showing === fx.D1?.id && st.faceId === fx.D1?.id && !st.actions.includes("下一条"),
+    `reader=${wentReader} ${JSON.stringify({ viewing: st.viewing, showing: st.showing, actions: st.actions })}`
+  );
+  check(
+    "⑦ 高亮＝子卡 parentRange 所指那句（不是父卡自身区间；D1 自身无锚）",
+    st.hl.length === 1 && st.hl[0] === D1TARG,
+    JSON.stringify({ hl: st.hl, want: D1TARG })
+  );
+  const geo2 = await cdp.eval(`(() => {
+    const page = document.querySelector(".extract-page");
+    const hl = document.querySelector(".extract-face-body .extract-quote-hl");
+    if (!page || !hl) return "";
+    const pr = page.getBoundingClientRect();
+    const hr = hl.getBoundingClientRect();
+    return JSON.stringify({
+      scrollable: Math.round(page.scrollHeight - page.clientHeight),
+      scrollTop: Math.round(page.scrollTop),
+      pageTop: Math.round(pr.top), pageBottom: Math.round(pr.bottom), pageH: Math.round(pr.height),
+      hlTop: Math.round(hr.top), hlBottom: Math.round(hr.bottom),
+      centerDelta: Math.round(Math.abs(hr.top + hr.height / 2 - (pr.top + pr.height / 2)))
+    });
+  })()`);
+  const g2 = JSON.parse(String(geo2) || "{}");
+  check("⑦ 正对照：父卡长于容器（滚动量 > 200px，量测非空转）", Number(g2.scrollable) > 200 && Number(g2.scrollTop) > 100, geo2);
+  check("⑦ 落点：高亮句在可视区内", Number(g2.hlTop) >= Number(g2.pageTop) - 2 && Number(g2.hlBottom) <= Number(g2.pageBottom) + 2, geo2);
+  check(`⑦ 落点居中：高亮句中心与可视区中心差 ≤ 1/4 视高（实测 Δ=${g2.centerDelta}px / 视高 ${g2.pageH}px）`, Number(g2.centerDelta) <= Math.round(Number(g2.pageH) / 4), geo2);
+  check("⑦ 「返回队列」出口仍在位（与上一批出口不冲突）", (await clickSel("[data-crumb-exit]")) === true, "未命中");
+  await wait(1200);
+  st = JSON.parse(String(await pageState()) || "{}");
+  const d2After = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(fx.D2?.id)}); return JSON.stringify({ pc: d?.processCount, ivl: d?.intervalDays }); })()`);
+  check(
+    "⑦ 返回后仍是子卡 D2 的会话态（动作行回来；回看父卡零写调度）",
+    st.viewing === false && st.showing === fx.D2?.id && st.actions.includes("下一条") && String(d2After) === String(d2Before),
+    JSON.stringify({ viewing: st.viewing, showing: st.showing, before: d2Before, after: d2After })
+  );
 
   console.log(`\n==== breadcrumb.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {

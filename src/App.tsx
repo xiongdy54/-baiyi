@@ -256,10 +256,14 @@ export default function App() {
   // v48.23（D61 §6.8-11）：多段不相邻选择时，spans 与 contentMarkdown 一起过桥——
   // 主进程按 spans 优先装配文本与 quote_range_json（≥2 段才传；单段路径载荷不变）。
   // 规格 §1.2：摘录复习页（queue / extractSession）里也能就地另立**子摘录**——
-  // 当前摘录 id 由 ExtractReviewView 从队列头带上来（ctx.parentExtractId），
-  // contextRef 在此**唯一一处**补 parentExtractId / rootExtractId（根＝自身 id 由 db 侧补，子＝继承父的、缺省回退父 id）。
+  // 当前摘录 id 与「所选文字在父卡正文里的偏移」由 ExtractReviewView 的卡面采集（ctx.parentRange），
+  // contextRef 在此**唯一一处**补 parentExtractId / rootExtractId / parentRange（根＝自身 id 由 db 侧补）。
   const handleExtract = useCallback(
-    async (text: string, spans?: ExtractSpan[], ctx?: { parentExtractId?: string }) => {
+    async (
+      text: string,
+      spans?: ExtractSpan[],
+      ctx?: { parentExtractId?: string; parentRange?: Array<{ start: number; end: number }> }
+    ) => {
       const multi = spans && spans.length >= 2 ? spans : undefined;
       if (view.name === "reader") {
         await readingWorkflow.create({
@@ -292,7 +296,9 @@ export default function App() {
             documentId: parent.documentId,
             extractId: parent.id,
             parentExtractId: parent.id,
-            rootExtractId: String(parentRef?.rootExtractId || parent.id)
+            rootExtractId: String(parentRef?.rootExtractId || parent.id),
+            // 工单 ②：父卡坐标下的引文范围——子卡「跳转原文」回父卡时高亮的就是它（零迁移，JSON 列）
+            ...(Array.isArray(ctx.parentRange) && ctx.parentRange.length ? { parentRange: ctx.parentRange } : {})
           }
         });
       }

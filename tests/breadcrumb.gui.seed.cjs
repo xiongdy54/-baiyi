@@ -82,12 +82,42 @@ app.whenReady().then(async () => {
     parentTypeC = "extract";
   }
 
-  // 生产路径新摘录是**次日进队**；本测试要当日可见 ⇒ 显式置为已到期
+  // ---------- 链丁：跳转语义（子卡「跳转原文」→ 父卡 + 高亮所引那段）----------
+  // D1＝根，**不置为到期**（留在应用播种的「下一个学习日」）⇒ 父卡在队列里不可达，走查看态到达才有意义；
+  // 正文刻意写长（引文在中段、远超一屏）⇒ 落点「居中」有可测的几何意义，且 D1 自身无范围锚
+  // （高亮只可能来自子卡的 parentRange，防止拿父卡自身区间冒充）。
+  const D1TARG = "D1TARG 这句是丁链子摘录所引的原文";
+  const D1TXT =
+    "丁链根-1稿：" +
+    "上游铺垫：" +
+    PAD.repeat(60) +
+    "，其中 " +
+    D1TARG +
+    "。" +
+    PAD.repeat(60) +
+    "收尾：范围之后还有一点文字。";
+  const D1 = add("document", book.documentId, D1TXT, 90, null, { documentId: book.documentId });
+  // D2＝子卡（到期；优先级 40 ⇒ 排在乙6层 / 丙8层之后当队列头）。
+  // 正文多行：第 2 段的引文句要能被真鼠标选中 ⇒ 偏移必须把 EditableText 落库口径里的 `<br>` 换行计进去，
+  // 少算就会让 parentRange 停在第 1 段（GUI 侧用「切片＝选中文字」正向对照钉死这一点）。
+  const D2PICK = "D2PICK这个短语";
+  const D2TXT = line("丁4级", 2) + "\n\n" + "第二段：从这里 " + D2PICK + " 到那里，这段要被引。\n\n第三段：尾部不选。";
+  const D2 = add("extract", D1, D2TXT, 40, null, {
+    documentId: book.documentId,
+    extractId: D1,
+    parentExtractId: D1,
+    rootExtractId: D1,
+    parentRange: rangeOf(D1TXT, D1TARG)
+  });
+
+  // 生产路径新摘录是**次日进队**；本测试要当日可见 ⇒ 显式置为已到期。
+  // 链丁的 D1 **刻意不在名单里**（父卡不可达场景），D2 在。
+  const due = ids.filter((x) => x !== D1);
   db.execRawSql(
-    `UPDATE extracts SET topic_next_at = ? WHERE id IN (${ids.map(() => "?").join(",")})`,
-    [Date.now() - 60000, ...ids]
+    `UPDATE extracts SET topic_next_at = ? WHERE id IN (${due.map(() => "?").join(",")})`,
+    [Date.now() - 60000, ...due]
   );
   db.persistDb();
-  console.log("SEEDED", JSON.stringify({ A1, A2, A3, rootB, rootC, count: ids.length }));
+  console.log("SEEDED", JSON.stringify({ A1, A2, A3, rootB, rootC, D1, D2, D1TARG, D2PICK, count: ids.length, due: due.length }));
   app.quit();
 });

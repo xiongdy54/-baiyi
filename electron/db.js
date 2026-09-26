@@ -2335,6 +2335,13 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
       quoteRange = payload.quoteRange;
     }
   }
+  // 工单 ②（§6.8-11）：**子摘录的整条正文都是引文**——父卡里选中的那段就是子卡的全部内容，
+  // 而单段选择不经过 spans 装配（渲染层只在 ≥2 段时传 spans）→ 这里补默认区间 [{0, len}]，
+  // 修掉「单段子摘录无落点高亮」。只对 `parentType === "extract"` 成立；根摘录语义不变
+  // （区间由选择跨度决定），且**显式传入的范围优先**（含 spans 装配出的多段区间）。
+  if (String(parentType) === "extract" && !(Array.isArray(quoteRange) && quoteRange.length)) {
+    quoteRange = [{ start: 0, end: String(contentMarkdown ?? "").length }];
+  }
   const id = crypto.randomUUID();
   const now = Date.now();
   // v48.22（D58，§6.8-2）：**次日进队**——新摘录落下一个学习日切点（对齐 SM「只展示过去导入的文章」），

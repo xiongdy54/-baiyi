@@ -75,6 +75,11 @@ export interface ExtractContextRef {
   parentExtractId?: string;
   /** 根摘录＝自身 id；子摘录＝继承父的（缺省回退父 id） */
   rootExtractId?: string;
+  /**
+   * 子摘录在**父卡 `content_markdown`** 里的引文范围（`[{start,end},…]`，多段选择即多组；工单 ②）。
+   * 子卡「跳转原文」回父卡时高亮的就是它（D62/R13）；无此键＝本批之前的老数据。
+   */
+  parentRange?: Array<{ start: number; end: number }>;
 }
 
 export interface ExtractDetail extends DueTopic {
