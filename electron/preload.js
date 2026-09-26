@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld("workflowAPI", {
   listDue: () => ipcRenderer.invoke("extracts:listDue"),
   listAll: () => ipcRenderer.invoke("extracts:listAll"),
   get: (id) => ipcRenderer.invoke("extracts:get", id),
+  // v48.23（D61 §6.8-11）：层级链（面包屑用，自根到当前逐级 {id,text,depth}）
+  chain: (id) => ipcRenderer.invoke("extracts:chain", id),
   postpone: (id) => ipcRenderer.invoke("extracts:postpone", id),
   // v48.22（D58 §6.8）：摘录调度内核写面
   postponeDays: (id, days) => ipcRenderer.invoke("extracts:postponeDays", id, days),

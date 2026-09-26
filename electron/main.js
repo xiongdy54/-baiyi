@@ -48,6 +48,7 @@ const {
   listDueExtracts,
   listAllExtracts,
   getExtract,
+  getExtractChain,
   postponeExtract,
   // v48.22（D58）：摘录调度内核（写 API + 引擎切换 + 派生用量 + 跨类撤销）
   postponeExtractDays,
@@ -483,6 +484,8 @@ ipcMain.handle("extracts:listDue", () => listDueExtracts());
 ipcMain.handle("extracts:listAll", () => listAllExtracts());
 
 ipcMain.handle("extracts:get", (_e, id) => getExtract(String(id)));
+// v48.23（D61 §6.8-11）：层级链（面包屑点击跳转要 id；getExtract 自带的 chain 只有文本前缀）
+ipcMain.handle("extracts:chain", (_e, id) => getExtractChain(String(id)));
 
 ipcMain.handle("extracts:postpone", (_e, id) => postponeExtract(String(id)));
 

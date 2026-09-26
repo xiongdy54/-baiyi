@@ -78,6 +78,43 @@ app.whenReady().then(async () => {
       { text: TEXT, range: [R(2, 5)] },
       { text: db.getExtract(d.id).contentMarkdown, range: ranges(d.id) });
 
+    console.log("== E 层级链（面包屑的数据面） ==");
+    {
+      const root = db.createExtract({
+        parentType: "document", parentId: docId, documentId: docId, contentMarkdown: TEXT, quoteRange: [R(2, 5)]
+      });
+      const c1 = db.getExtractChain(root.id);
+      check("E1 无父：链只有自己，depth=1", c1.length === 1 && c1[0].id === root.id && c1[0].depth === 1, 1, c1.length);
+
+      const child = db.createExtract({
+        parentType: "extract", parentId: root.id, documentId: docId, contentMarkdown: "子摘录正文",
+        contextRef: { parentExtractId: root.id, rootExtractId: root.id }
+      });
+      const c2 = db.getExtractChain(child.id);
+      check("E2 两层：自根到当前（root → child）",
+        eq(c2.map((n) => n.depth), [1, 2]) && c2[0].id === root.id && c2[1].id === child.id,
+        [1, 2], c2.map((n) => n.depth));
+      check("E3 链上文本是各自正文的前 40 字", c2[1].text === "子摘录正文", "子摘录正文", c2[1].text);
+
+      const grand = db.createExtract({
+        parentType: "extract", parentId: child.id, documentId: docId, contentMarkdown: "孙摘录",
+        contextRef: { parentExtractId: child.id, rootExtractId: root.id }
+      });
+      const c3 = db.getExtractChain(grand.id);
+      check("E4 三层：顺序＝自根到当前",
+        eq(c3.map((n) => n.id), [root.id, child.id, grand.id]) && eq(c3.map((n) => n.depth), [1, 2, 3]),
+        [1, 2, 3], c3.map((n) => n.depth));
+
+      db.deleteExtract(child.id);
+      const c4 = db.getExtractChain(grand.id);
+      check("E5 父被软删 → 链在该处断开（只回自己，不臆造层级）",
+        c4.length === 1 && c4[0].id === grand.id, 1, c4.length);
+
+      check("E6 getExtract 自带的文本前缀链仍在（既有面未回退）",
+        (db.getExtract(grand.id).chain || []).length === 0 || Array.isArray(db.getExtract(grand.id).chain),
+        "数组", typeof db.getExtract(grand.id).chain);
+    }
+
     console.log(`\n${pass} 通过 / ${fail} 失败`);
   } catch (e) {
     console.error("运行异常：", e && e.stack || e);

@@ -22,6 +22,7 @@ declare global {
       create: (payload: unknown) => Promise<{ id: string }>;
       /** v48.23（D61 §6.8-11）：多段选择的集合运算（主进程算；见本文件 resolveSpanSet） */
       spanSet: (current: unknown, incoming: unknown, opts: unknown) => Promise<unknown>;
+      chain: (id: string) => Promise<Array<{ id: string; text: string; depth: number }>>;
       listDue: () => Promise<unknown[]>;
       listAll: () => Promise<unknown[]>;
       get: (id: string) => Promise<unknown>;
@@ -118,6 +119,8 @@ export interface ReadingWorkflowProvider {
   /** 全量摘录（浏览器统一数据源；含已毕业/已归档，便于管理与召回） */
   getAllTopics(): Promise<DueTopic[]>;
   getTopic(id: string): Promise<ExtractDetail | null>;
+  /** v48.23（D61 §6.8-11）：层级链——自根到当前逐级 {id, text, depth}，面包屑点击用它拿 id */
+  getChain(id: string): Promise<Array<{ id: string; text: string; depth: number }>>;
   /** 按算法推迟（间隔 × a_factor，封顶 180 天） */
   postpone(id: string): Promise<void>;
   /** 用户指定天数推迟（沉浸式页「推迟」按钮；覆盖式） */
@@ -208,6 +211,10 @@ const sm19Provider: ReadingWorkflowProvider = {
   async getTopic(id) {
     if (!window.workflowAPI) return null;
     return (await window.workflowAPI.get(id)) as ExtractDetail | null;
+  },
+  async getChain(id) {
+    if (!window.workflowAPI) return [];
+    return (await window.workflowAPI.chain(id)) as Array<{ id: string; text: string; depth: number }>;
   },
   async postpone(id) {
     await window.workflowAPI?.postpone(id);

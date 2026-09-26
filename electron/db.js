@@ -2379,6 +2379,26 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
   return { id, topicNextAt: nextAt, priority: finalPriority, prioritySource: hasExplicit ? "user" : "book" };
 }
 
+/** 摘录的层级链（面包屑用，§6.8-11）：自根到当前逐级 {id, text, depth}。
+ *  与 parentChain 的分工：那个只回文本前缀（上下文前缀用）且封顶 5 级；
+ *  本函数回 **id**（面包屑点击要切到那张卡）且封顶 20 级。 */
+function getExtractChain(id) {
+  const out = [];
+  let cursorId = String(id);
+  for (let i = 0; i < 20; i++) {
+    const rows = queryAll(
+      "SELECT id, parent_type, parent_id, content_markdown FROM extracts WHERE id = ? AND is_deleted = 0",
+      [cursorId]
+    );
+    if (rows.length === 0) break;
+    const row = rows[0];
+    out.unshift({ id: String(row.id), text: String(row.content_markdown).slice(0, 40) });
+    if (row.parent_type !== "extract") break;
+    cursorId = String(row.parent_id);
+  }
+  return out.map((n, i) => ({ ...n, depth: i + 1 }));
+}
+
 function parentChain(extract) {
   const chain = [];
   let cursor = extract;
@@ -5909,6 +5929,7 @@ module.exports = {
   // v48.23（D61 §6.8-11）：多段选择修饰键的写侧归一（settings:set 兜底，非法值不落盘）
   normalizeMultiSelectKey,
   getExtract,
+  getExtractChain,
   postponeExtract,
   // v48.22（D58）：摘录调度内核（SM 语义 + 双引擎子空间 + 操作日志与撤销）
   postponeExtractDays,
