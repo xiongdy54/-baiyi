@@ -41,6 +41,7 @@ const DOC_KEYS = [
   "app.extracts", // §6.8-1 / §7.4（v48.22 / D58 摘录复习改版：mergeIntoReview / interleave / engine 三键）
   "app.limits", // §6.8-1 / §6.8-5（v48.22 / D58 四类每日上限 + ignoreReviewLimitForNew）
   "app.reviewScopes", // §6.8-5（v48.22 / D58 复习范围/筛选牌组；零 schema 变更）
+  "app.annotateMode", "app.annotatePalette", "app.annotateCustomEnabled", "app.annotationFilter", // 批 4 / §9.2（就地批注四键）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -224,6 +225,10 @@ app
         ["app", "globalShortcuts", { quickCapture: { enabled: true, bindings: ["Command+Shift+K"] } }],
         ["app", "siblingBury", { enabled: true, newCards: false, reviewCards: true, perDay: 2, sourceTextLimit: 240 }],
         ["app", "multiSelectKey", "Alt"],                 // v48.23 / D61 多段选择的修饰键（非默认值，才验得出往返）
+        ["app", "annotateMode", "extract"],               // 批 4 / §9.2 就地批注四键（非默认值）
+        ["app", "annotatePalette", ["teal", "red", "#aabbcc"]],
+        ["app", "annotateCustomEnabled", false],
+        ["app", "annotationFilter", "highlight"],
         ["app", "memory", { enabled: false, injectBudget: 3000, minIntervalMinutes: 30, consolidateEvery: 20, lastCoveredAt: 1758500000000 }],
         ["app", "readerSettings", { fontSize: 19, lineHeight: 1.75, width: 720 }],
         ["app", "skinId", "none"],
@@ -331,6 +336,10 @@ app
         { mindmapConcurrency: 0 }, { mindmapConcurrency: "很多" }, { mindmapRetryMax: -1 },
         { mindmapSectionChunkChars: 0 }, { mindmapPricing: "免费" }, { globalShortcuts: null },
         { accentColor: "不色" }, { skinId: 42 },
+        // 批 4 / §9.2：就地批注四键——枚举越界、色板非数组/含非法项，都必须不致崩
+        { annotateMode: "乱写" }, { annotateMode: 7 }, { annotationFilter: [] },
+        { annotateCustomEnabled: "yes" }, { annotatePalette: "不是数组" },
+        { annotatePalette: ["bogus", "red", "red", "#aabbcc", 42] },
       ];
       for (const b of bad) {
         let err = null;
@@ -344,7 +353,25 @@ app
         }
         flow.check(`非法 ${Object.keys(b)[0]} 不致崩`, err === null, "不抛", err);
       }
-      write({ dayCutoffHour: 0, siblingBury: null, memory: null, materialTypes: null, shelfOrder: null, dictVocabKinds: null, dictMode: null, autoBackupEnabled: null, autoBackupKeep: null, mindmapConcurrency: null, mindmapRetryMax: null, mindmapSectionChunkChars: null, mindmapPricing: null, globalShortcuts: null, accentColor: null, skinId: null });
+      write({ dayCutoffHour: 0, siblingBury: null, memory: null, materialTypes: null, shelfOrder: null, dictVocabKinds: null, dictMode: null, autoBackupEnabled: null, autoBackupKeep: null, mindmapConcurrency: null, mindmapRetryMax: null, mindmapSectionChunkChars: null, mindmapPricing: null, globalShortcuts: null, accentColor: null, skinId: null, annotateMode: null, annotatePalette: null, annotateCustomEnabled: null, annotationFilter: null });
+      // 批 4：四键读侧归一——非法值必须回落默认，且合法值必须原样保留（非空转对照）
+      write({ annotateMode: "乱写", annotationFilter: "乱写", annotateCustomEnabled: "yes", annotatePalette: ["bogus", "red", "red", "#aabbcc", 42] });
+      const normBad = db.readAnnotationSettings();
+      flow.eq("非法 annotateMode 回落默认", normBad.annotateMode, "highlight");
+      flow.eq("非法 annotationFilter 回落默认", normBad.annotationFilter, "all");
+      flow.eq("非法 annotateCustomEnabled 归一为 false（仅 true 为真）", normBad.annotateCustomEnabled, false);
+      flow.eq("色板净化：剔非法、去重、留 #hex", JSON.stringify(normBad.annotatePalette), JSON.stringify(["red", "#aabbcc"]));
+      write({ annotateMode: "extract", annotationFilter: "highlight", annotateCustomEnabled: true, annotatePalette: ["teal", "red"] });
+      const normOk = db.readAnnotationSettings();
+      // 逐字段比对（JSON.stringify 受键序影响，与 readAnnotationSettings 的返回序未必一致）
+      flow.eq("合法值原样保留：annotateMode（对照，防空转）", normOk.annotateMode, "extract");
+      flow.eq("合法值原样保留：annotationFilter", normOk.annotationFilter, "highlight");
+      flow.eq("合法值原样保留：annotateCustomEnabled", normOk.annotateCustomEnabled, true);
+      flow.eq("合法值原样保留：annotatePalette", JSON.stringify(normOk.annotatePalette), JSON.stringify(["teal", "red"]));
+      // 色板空 ⇒ 回落默认 6 支（不是空数组——调色排不该空着）
+      write({ annotatePalette: [] });
+      flow.eq("色板空回落默认 6 支", db.readAnnotationSettings().annotatePalette.length, 6);
+
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       flow.eq("清空后记忆总开关回到默认关", mem.readMemoryConfig({ readSettings: () => st.readSettings() }).enabled, false);
       flow.eq("清空后同源延后回到默认开", db.computeTodayQueue() && (st.readSettings().app?.siblingBury?.enabled !== false), true);

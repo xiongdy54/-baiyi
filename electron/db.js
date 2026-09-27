@@ -3248,6 +3248,64 @@ function normalizeMultiSelectKey(v) {
   return MULTI_SELECT_KEYS.includes(v) ? v : DEFAULT_MULTI_SELECT_KEY;
 }
 
+// ---------- 批 4（规格 §9.2）：就地批注的四个设置键 ----------
+// 读侧归一（脏值不落盘、也不进渲染层）：枚举回落默认 / 数组净化去重限 8 / 色值 id 或 #hex。
+const ANNOT_MODES = ["highlight", "extract"];
+const DEFAULT_ANNOT_MODE = "highlight";
+const ANNOTATION_FILTERS = ["all", "extract", "highlight"];
+const DEFAULT_ANNOTATION_FILTER = "all";
+/** 色板 id 值域（与渲染层 --annot-* Token 同名）；也接受 #hex 自定义色 */
+const ANNOT_COLOR_IDS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "magenta"];
+const ANNOT_PALETTE_MAX = 8;
+/** 6 支标准色（§9.2 默认值；与 Zotero 数量对齐但值域自定） */
+const DEFAULT_ANNOT_PALETTE = ["yellow", "red", "green", "blue", "purple", "magenta"];
+
+/** 归一标注模式：非枚举值回落默认 */
+function normalizeAnnotateMode(v) {
+  return ANNOT_MODES.includes(v) ? v : DEFAULT_ANNOT_MODE;
+}
+
+/** 归一筛选：非枚举值回落 all */
+function normalizeAnnotationFilter(v) {
+  return ANNOTATION_FILTERS.includes(v) ? v : DEFAULT_ANNOTATION_FILTER;
+}
+
+/** 归一布尔（读侧与写侧共用）：非真值一律 false */
+function normalizeAnnotateCustomEnabled(v) {
+  return v === true || v === "true";
+}
+
+/**
+ * 归一色板：逐项必须是色板 id 或 #hex；**有序去重**、截到上限 8；空/非法 ⇒ 回落默认 6 支。
+ * 不抛错（脏数据不该让设置页打不开）。
+ */
+function normalizeAnnotatePalette(v) {
+  const isColor = (x) =>
+    (typeof x === "string" && ANNOT_COLOR_IDS.includes(x)) ||
+    (typeof x === "string" && /^#[0-9a-fA-F]{3,8}$/.test(x));
+  const list = Array.isArray(v) ? v.filter(isColor) : [];
+  const seen = new Set();
+  const out = [];
+  for (const c of list) {
+    if (seen.has(c)) continue;
+    seen.add(c);
+    out.push(c);
+    if (out.length >= ANNOT_PALETTE_MAX) break;
+  }
+  return out.length ? out : DEFAULT_ANNOT_PALETTE;
+}
+
+/** 读侧取四个键的当前值（渲染层经 settingsStore.get("app", …) 读；此处供主进程一致性检查与测试） */
+function readAnnotationSettings() {
+  const app = readSettings().app || {};
+  return {
+    annotateMode: normalizeAnnotateMode(app.annotateMode),
+    annotatePalette: normalizeAnnotatePalette(app.annotatePalette),
+    annotateCustomEnabled: app.annotateCustomEnabled === undefined ? true : normalizeAnnotateCustomEnabled(app.annotateCustomEnabled),
+    annotationFilter: normalizeAnnotationFilter(app.annotationFilter)
+  };
+}
+
 function readSessionPrefs() {
   const ex = (readSettings().app || {}).extracts || {};
   return {
@@ -6002,6 +6060,12 @@ module.exports = {
   listAllExtracts,
   // v48.23（D61 §6.8-11）：多段选择修饰键的写侧归一（settings:set 兜底，非法值不落盘）
   normalizeMultiSelectKey,
+  // 批 4（规格 §9.2）：四个批注设置键的读/写侧归一
+  normalizeAnnotateMode,
+  normalizeAnnotationFilter,
+  normalizeAnnotateCustomEnabled,
+  normalizeAnnotatePalette,
+  readAnnotationSettings,
   getExtract,
   getExtractChain,
   postponeExtract,

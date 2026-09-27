@@ -3,6 +3,7 @@ import ExtractCardFace, { parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
+import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import { cardsApi } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
 import { readingWorkflow, undoApi, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
@@ -114,9 +115,11 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
     anchor: { x: number; y: number; width: number; height: number };
   } | null>(null);
 
-  /** 批 4 Task 10：选区菜单的标注模式与色板（Task 12 接设置键；本轮本地态 + 全 8 色） */
-  const [annotMode, setAnnotMode] = useState<AnnotMode>("highlight");
-  const ANNOT_PALETTE: readonly AnnotColor[] = ANNOT_COLORS;
+  /** 批 4 Task 12：模式与色板取自设置键（与阅读器同一份读侧；改设置即时生效） */
+  const annotSettings = useAnnotationSettings();
+  const annotMode = annotSettings.annotateMode;
+  const setAnnotMode = (m: AnnotMode) => void writeAnnotationSetting("annotateMode", m);
+  const ANNOT_PALETTE: readonly AnnotColor[] = annotSettings.annotatePalette as readonly AnnotColor[];
 
   const scope = useMemo<ScopeFilter>(
     () => ({
@@ -588,6 +591,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
           anchor={editing.anchor}
           container={pageRef.current?.getBoundingClientRect() ?? null}
           palette={ANNOT_PALETTE}
+          customEnabled={annotSettings.annotateCustomEnabled}
           onSaveComment={(c) => selActions.saveAnnotationComment(editing.id, c)}
           onSaveColor={async (c) => {
             await selActions.saveAnnotationColor(editing.id, c);

@@ -19,6 +19,7 @@ import ReaderEngine from "./reader/ReaderEngine";
 import MarkPopover from "./reader/MarkPopover";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
+import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import TocSidebar from "./reader/TocSidebar";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
@@ -1063,10 +1064,12 @@ export default function Reader({
     closeMarkPop();
   }
 
-  // 批 4 Task 9：选区菜单的标注模式（Task 12 接设置键 app.annotateMode 持久化；本轮先本地态）
-  const [annotMode, setAnnotMode] = useState<AnnotMode>("highlight");
-  /** 用户配好的色板（Task 12 接 app.annotatePalette；本轮给全 8 色） */
-  const ANNOT_PALETTE: readonly AnnotColor[] = ANNOT_COLORS;
+  // 批 4 Task 12：标注模式与色板取自设置键（app.annotateMode / annotatePalette / annotateCustomEnabled）
+  // ——模式持久记忆、色板由用户配；改设置有 settings/changed 即时生效（统一走 useAnnotationSettings）
+  const annotSettings = useAnnotationSettings();
+  const annotMode = annotSettings.annotateMode;
+  const setAnnotMode = (m: AnnotMode) => void writeAnnotationSetting("annotateMode", m);
+  const ANNOT_PALETTE: readonly AnnotColor[] = annotSettings.annotatePalette as readonly AnnotColor[];
 
   /**
    * 多段选择修饰键按住期（规格 §6.8-11 与 R22 的冲突调和）：菜单**让路**不接管指针。

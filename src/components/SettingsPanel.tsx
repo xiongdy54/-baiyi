@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { SKINS } from "../skins";
 import { aiGateway, type AIConfig } from "../lib/ai";
 import { settingsStore } from "../lib/settings";
+import {
+  DEFAULT_ANNOTATE_MODE,
+  DEFAULT_ANNOTATE_PALETTE,
+  DEFAULT_ANNOTATION_FILTER,
+  ANNOT_PALETTE_MAX,
+  readAnnotationSettings,
+  writeAnnotationSetting,
+  type AnnotationSettings
+} from "../lib/annotationSettings";
+import { ANNOT_COLORS } from "./SelectionMenu";
 import { shortcutsApi, type ShortcutStatus } from "../lib/journal";
 import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
@@ -1075,11 +1085,28 @@ function FSRSSection() {
   );
 }
 
+/** 批 4：四键的初值（与 lib/annotationSettings 的默认值同源） */
+const DEFAULT_ANNOT_SETTINGS: AnnotationSettings = {
+  annotateMode: DEFAULT_ANNOTATE_MODE,
+  annotatePalette: [...DEFAULT_ANNOTATE_PALETTE],
+  annotateCustomEnabled: true,
+  annotationFilter: DEFAULT_ANNOTATION_FILTER
+};
+
+/** 色板增删：已选则移出，未选则加入（上限 8；主进程写侧还会再净化一次） */
+function togglePaletteColor(current: string[], color: string): string[] {
+  if (current.includes(color)) return current.filter((c) => c !== color);
+  if (current.length >= ANNOT_PALETTE_MAX) return current;
+  return [...current, color];
+}
+
 // ---------- 阅读外观（v20 R1b）：与阅读器快捷控件共用 settings.app.readerSettings ----------
 function ReaderSection() {
   const [cfg, setCfg] = useState<ReaderSettings | null>(null);
   // v48.23（D61 §6.8-11）：多段选择的修饰键（app.multiSelectKey；默认 Ctrl / macOS 建议 Meta）
   const [multiKey, setMultiKey] = useState<MultiSelectKey | null>(null);
+  // 批 4（规格 §9.2）：就地批注四键——读侧统一走 lib/annotationSettings（与两宿主同一份归一）
+  const [annot, setAnnot] = useState<AnnotationSettings>(DEFAULT_ANNOT_SETTINGS);
   useEffect(() => {
     settingsStore
       .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
@@ -1091,6 +1118,7 @@ function ReaderSection() {
       )
       .catch(() => setCfg(DEFAULT_READER_SETTINGS));
     void readMultiSelectKey().then(setMultiKey);
+    void readAnnotationSettings().then(setAnnot);
   }, []);
   const save = (next: ReaderSettings) => {
     setCfg(next);
@@ -1099,6 +1127,11 @@ function ReaderSection() {
   const saveMultiKey = (key: MultiSelectKey) => {
     setMultiKey(key);
     void settingsStore.set("app", "multiSelectKey", key);
+  };
+  /** 写单键：本地态先动（UI 即时），主进程写侧还会再归一一次 */
+  const saveAnnot = <K extends keyof AnnotationSettings>(key: K, value: AnnotationSettings[K]) => {
+    setAnnot((prev) => ({ ...prev, [key]: value }));
+    void writeAnnotationSetting(key, value);
   };
   if (!cfg) return null;
   const a = cfg.appearance;
@@ -1124,6 +1157,75 @@ function ReaderSection() {
         选中一段文字后按住它再选不相邻的另一段＝加选（两段同时高亮，再执行制卡/摘录等同一动作）；
         重复选同一段＝移出，Esc 清空。Ctrl+Z/X/S/A/D 这类纯键盘组合不受影响。
       </p>
+      <div className="settings-row">
+        <span>默认标注模式</span>
+        <div className="seg-tabs">
+          {([["highlight", "高亮"], ["extract", "摘录+高亮"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              className={annot.annotateMode === id ? "active" : ""}
+              data-annot-mode={id}
+              onClick={() => saveAnnot("annotateMode", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="form-hint">选中文字后选区菜单里预选的模式；两种模式都可随时在菜单里临时切换。</p>
+      <div className="settings-row">
+        <span>批注色板</span>
+        <div className="annot-palette-pick" data-annot-palette>
+          {ANNOT_COLORS.map((c) => {
+            const on = annot.annotatePalette.includes(c);
+            return (
+              <button
+                key={c}
+                type="button"
+                className={`swatch${on ? " on" : ""}`}
+                data-palette-color={c}
+                aria-pressed={on}
+                title={on ? `${c}（点击移出色板）` : `${c}（点击加入色板，最多 8 支）`}
+                style={{ background: `var(--annot-${c})` }}
+                onClick={() => saveAnnot("annotatePalette", togglePaletteColor(annot.annotatePalette, c))}
+              />
+            );
+          })}
+        </div>
+      </div>
+      <p className="form-hint">调色排里出现的颜色（按此处顺序）；点色即完成当前模式的动作。</p>
+      <div className="settings-row">
+        <span>自定义取色</span>
+        <div className="seg-tabs">
+          {([[true, "显示"], [false, "隐藏"]] as const).map(([id, label]) => (
+            <button
+              key={String(id)}
+              className={annot.annotateCustomEnabled === id ? "active" : ""}
+              data-annot-custom={String(id)}
+              onClick={() => saveAnnot("annotateCustomEnabled", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="form-hint">调色排末位是否显示「自定义…」（可任取一色）。</p>
+      <div className="settings-row">
+        <span>批注栏默认筛选</span>
+        <div className="seg-tabs">
+          {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              className={annot.annotationFilter === id ? "active" : ""}
+              data-annot-filter={id}
+              onClick={() => saveAnnot("annotationFilter", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="form-hint">批注栏打开时的筛选状态（栏顶段控与本键同一份设置）。</p>
       <div className="settings-row">
         <span>主题预设</span>
         <div className="seg-tabs">
