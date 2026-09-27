@@ -2057,6 +2057,140 @@ body.theme-dark .modal-panel {
 .annot-palette-pick .swatch { width: 12px; height: 12px; border: 1px solid var(--border-subtle); padding: 0; cursor: pointer; }
 .annot-palette-pick .swatch.on { box-shadow: 0 0 0 2px var(--accent); }
 
+/* ---------- 批注栏（批 4 Task 13 / 规格 §5.3–5.4） ---------- */
+/* 类名与尺寸照 design-samples/annotation-two-modes.html（.zitem/.dot/.zq/.zn/.zmeta/.palette/.filter） */
+.annot-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-subtle);
+  background: var(--paper);
+  min-height: 0;
+}
+.annot-side-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.annot-side-body { flex: 1; overflow: auto; min-height: 0; }
+/* Zotero 式条目的尺度与配色在下方 .zitem 段（Task 13 共用） */
+.annot-side .zitem { cursor: default; }
+.annot-side .zitem.on { background: var(--grey-1); }
+.annot-side .annot-body { min-width: 0; flex: 1; }
+.annot-empty { padding: var(--sp-3); color: var(--text-helper); margin: 0; }
+.annot-edit {
+  width: 100%;
+  min-height: 56px;
+  height: auto;
+  padding: var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+}
+.annot-acts { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+.annot-dot { width: 8px; height: 8px; border: 1px solid var(--border-subtle); padding: 0; cursor: pointer; }
+.annot-act {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-helper);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.annot-act:hover { text-decoration: underline; }
+.annot-del {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--error);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.annot-del:hover { text-decoration: underline; }
+/* 色点下拉：与调色排同尺度（12px 方块） */
+.annot-side .palette { display: flex; gap: var(--sp-1); margin-top: var(--sp-2); }
+.annot-side .palette button {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-subtle);
+  padding: 0;
+  cursor: pointer;
+}
+
+/* Zotero 式注解条目（栏内与后续阅读器侧栏共用）：
+   左竖线（段锚＝批注色实色 / 整卡＝主题色）+ 方点 + 引文 + 批注 + 时间 */
+.zitem {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--zline, transparent);
+}
+/* 整卡批注（R32）：恒置顶 + 整块 --accent-soft 底 + 左缘 2px --accent */
+.zitem.whole { background: var(--accent-soft); border-left-color: var(--accent); }
+.zitem.whole .dot { background: var(--accent); }
+.dot { width: 8px; height: 8px; flex: none; margin-top: 5px; cursor: pointer; }
+.zitem .zq {
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  margin: 0 0 var(--sp-1);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.zitem .zn {
+  font-size: var(--fs-secondary);
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.zitem .zmeta {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  margin-top: var(--sp-1);
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.tag-whole { font-size: var(--fs-meta); color: var(--accent); }
+/* 两类可辨（R39）：摘录＝实心方点 / 纯高亮＝空心方点；「高亮」标签用默认色（不抢批注色） */
+.mark-kind { width: 8px; height: 8px; flex: none; margin-top: 5px; }
+.mark-kind.k-extract { border: 1px solid var(--text-secondary); }
+.mark-kind.k-extract.filled { background: currentColor; border-color: transparent; }
+.kind-tag {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  border: 1px solid var(--border-subtle);
+  padding: 0 4px;
+}
+.kind-tag.t-extract { color: var(--text-primary); border-color: var(--border-strong); }
+/* 筛选 / 排序段控（栏顶） */
+.filter,
+.sort { display: flex; border: 1px solid var(--border-subtle); }
+.filter button,
+.sort button {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: none;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.filter button.on,
+.sort button.on { background: var(--grey-1); color: var(--text-primary); }
+.sort { margin-left: auto; }
+
 .reader-toast {
   position: fixed;
   bottom: var(--sp-8);
@@ -4692,6 +4826,19 @@ body.capture-body #root { height: 100vh; }
 }
 
 /* ---------- 摘录复习（v48.22 / D58 §6.8）：沉浸式连续处理页 + 摘录卡面 ---------- */
+/* 批 4 Task 14：摘录页两列（卡面 + 批注栏）。栏出现时页面本体不再整页滚动，
+   改由两列各自滚动——否则栏会跟着正文滚走，「栏内定位」就失去意义。 */
+.extract-page-cols {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+.extract-page-cols.with-annot > .extract-face,
+.extract-page-cols.with-annot > .extract-page,
+.extract-page-cols.with-annot > *:not(.annot-side) { flex: 1; min-width: 0; overflow-y: auto; }
+
 .extract-page {
   flex: 1;
   min-height: 0;

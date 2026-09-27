@@ -3,6 +3,7 @@ import ExtractCardFace, { parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
+import AnnotationPanel, { type AnnotItem, type AnnotFilter } from "./reader/AnnotationPanel";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import { cardsApi } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
@@ -105,6 +106,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
     });
   }
 
+
   /** 批 4 Task 11：正在编辑的批注（新建或点已有条目进入；null＝无浮层） */
   const [editing, setEditing] = useState<{
     id: string;
@@ -120,6 +122,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
   const annotMode = annotSettings.annotateMode;
   const setAnnotMode = (m: AnnotMode) => void writeAnnotationSetting("annotateMode", m);
   const ANNOT_PALETTE: readonly AnnotColor[] = annotSettings.annotatePalette as readonly AnnotColor[];
+  const annotFilter: AnnotFilter = annotSettings.annotationFilter;
 
   const scope = useMemo<ScopeFilter>(
     () => ({
@@ -165,6 +168,63 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
   /** 面包屑描述的是**正在显示**的那张卡：会话态＝队列头；查看态＝被点开的那层 */
   const shown = viewing ?? current;
   const shownId = shown?.id ?? null;
+
+  /** 批 4 Task 13/14：当前卡的注解清单（含纯高亮）；栏的出现条件＝≥1 条 */
+  const [annots, setAnnots] = useState<AnnotItem[]>([]);
+  const annotsFor = shown?.id ?? null;
+  useEffect(() => {
+    if (!annotsFor) {
+      setAnnots([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      const all = (await readingWorkflow.getAllTopics()) as unknown as Array<Record<string, unknown>>;
+      if (cancelled) return;
+      const rows = all.map((r) => ({
+        id: String(r.id),
+        kind: (r.kind === "highlight" ? "highlight" : "extract") as "highlight" | "extract",
+        quote: String(r.contentMarkdown ?? ""),
+        comment: (r.comment as string | null) ?? null,
+        color: (r.annotationColor as string | null) ?? null,
+        time: Number(r.createdAt ?? 0),
+        parentId: String((r as { parentId?: unknown }).parentId ?? ""),
+        hasRange: parseQuoteRanges(r.quoteRangeJson).length > 0
+      }));
+      // 段锚注解＝挂在本卡名下的子行（R33）；本卡自身的行另算（整卡批注）
+      const children = rows
+        .filter((r) => r.parentId === annotsFor)
+        .sort((a, b) => a.time - b.time);
+      // 整卡批注（R32/§5.4）＝**本卡自身**的批注文字：它是「本条是什么」的元批注，恒置顶。
+      // 注意：本卡自身那一行**本身带 quoteRangeJson**（它就是一条摘录），不能按 hasRange 判——
+      // 判据是「id === 当前卡」。
+      const self = rows.find((r) => r.id === annotsFor);
+      const wholeItem = self && self.comment
+        ? [{
+            id: self.id,
+            kind: self.kind,
+            quote: self.quote,
+            comment: self.comment,
+            color: self.color,
+            time: self.time,
+            anchorWhole: true
+          }]
+        : [];
+      setAnnots([
+        ...wholeItem,
+        ...children.map((r) => ({ ...r, anchorWhole: false }))
+      ]);
+    };
+    void load();
+    const off = eventBus.on("workflow/changed", () => void load());
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [annotsFor]);
+
+  /** 批 4 Task 14：栏的出现条件＝当前卡 ≥1 条注解（出现即占位 280px） */
+  const annotPanelVisible = annots.length > 0 && !viewing;
 
   /**
    * 批 4 Task 10（规格 §3 / §4）：摘录页的选区动作编排与阅读器复用同一个钩子。
@@ -498,6 +558,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
         )}
       </div>
 
+      <div className={`extract-page-cols${annotPanelVisible ? " with-annot" : ""}`} data-annot-cols={annotPanelVisible ? "1" : undefined}>
       {viewing ? (
         <ExtractCardFace
           key={viewing.id}
@@ -557,6 +618,37 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
           }}
         />
       )}
+
+      {/* 批 4 Task 13/14（规格 §5.3）：批注栏——出现条件＝当前卡 ≥1 条注解；出现即占位 280px */}
+      {annotPanelVisible && (
+        <AnnotationPanel
+          items={annots}
+          currentId={null}
+          filter={annotFilter}
+          onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
+          palette={ANNOT_PALETTE}
+          onJump={(it) => {
+            // 点条目 → 文中滚动到锚点并短暂强调（合成 EPUB 的「文中」＝本条正文里，故滚到卡面正文）
+            document.querySelector(".extract-face-body")?.scrollIntoView({ block: "center", behavior: "smooth" });
+            setEditing({
+              id: it.id,
+              kind: it.kind,
+              comment: it.comment,
+              color: it.color,
+              quote: it.quote,
+              anchor: { x: 0, y: 0, width: 0, height: 0 }
+            });
+          }}
+          onEdit={(it, comment) => void selActions.saveAnnotationComment(it.id, comment)}
+          onColor={(it, color) => void selActions.saveAnnotationColor(it.id, color)}
+          onDelete={(it) => {
+            // 整卡批注（锚在整卡）＝本卡自身：删它只清批注，不动用户的卡
+            if (it.anchorWhole) void selActions.saveAnnotationComment(it.id, null);
+            else void selActions.removeAnnotation(it.id);
+          }}
+        />
+      )}
+      </div>
 
       {/* 批 4 Task 10（规格 §3.3）：选区菜单——摘录页无图片挖空（卡面正文的图片能力属批 5） */}
       {faceSel && !viewing && (

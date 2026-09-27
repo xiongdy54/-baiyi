@@ -1397,6 +1397,10 @@ function createWindow() {  // 防重入：已存在窗口时不再创建（macOS
   const win = new BrowserWindow({
     width: 1100,
     height: 750,
+    // 批 4 Task 14（规格 §5.3）：摘录页出现批注栏时是「卡面 + 280px 栏」两列，
+    // 窄于此版心会挤压正文——给窗口一个下限（1120/640 与两列布局同批裁定）。
+    minWidth: 1120,
+    minHeight: 640,
     frame: false,
     icon: path.join(__dirname, "icon.ico"),
     webPreferences: {
