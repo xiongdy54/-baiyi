@@ -213,20 +213,56 @@ button{font-family:inherit;}
 .threads rect{fill:var(--accent);}
 /* 选区框（样张里用虚线示意"这里是选区"；真实现是 CSS Custom Highlight 的底色） */
 .selbox{position:absolute;background:var(--hl-multi);border:1px dashed var(--accent);pointer-events:none;}
-/* 选区菜单：**fixed 定位**（坐标＝视口坐标，与 placeMenu 的取值同域；用 absolute 会与容器偏移混用） */
-.menu{position:fixed;display:flex;background:var(--accent);box-shadow:var(--shadow-float);z-index:var(--z-sticky);}
-.menu button{height:32px;padding:0 var(--sp-3);background:var(--accent);color:var(--accent-on);border:none;font-size:var(--fs-secondary);font-weight:500;cursor:pointer;white-space:nowrap;}
-.menu button:hover{background:var(--accent-hover);}
+/* 选区菜单：**fixed 定位**（坐标＝视口坐标，与 placeMenu 的取值同域；用 absolute 会与容器偏移混用）。
+   本轮重排为两行**面板**：第一行＝模式段控（高亮 / 摘录）+ 调色排（点色即落地）；第二行＝既有动作。 */
+.menu{position:fixed;display:flex;flex-direction:column;background:var(--paper);border:1px solid var(--border-subtle);box-shadow:var(--shadow-float);z-index:var(--z-sticky);}
+.menu .mrow{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2);border-bottom:1px solid var(--border-subtle);}
+.menu .mrow:last-child{border-bottom:none;}
+/* 模式段控：两枚互斥（与 Zotero 侧栏页签同规——当前项 accent 下划线） */
+.seg{display:flex;border:1px solid var(--border-subtle);}
+.seg button{height:28px;padding:0 var(--sp-2);background:none;border:none;border-bottom:2px solid transparent;font-size:var(--fs-secondary);color:var(--text-secondary);cursor:pointer;white-space:nowrap;}
+.seg button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:500;}
+.seg button:hover{background:var(--grey-1);}
+/* 调色排：色块即动作（点一下＝用这支色完成当前模式的操作） */
+.swatches{display:flex;gap:var(--sp-1);align-items:center;}
+.swatch{width:20px;height:20px;border:1px solid var(--border-subtle);cursor:pointer;padding:0;}
+.swatch.on{outline:2px solid var(--accent);outline-offset:1px;}
+.swatch.custom{background:conic-gradient(from 0deg, var(--annot-red), var(--annot-yellow), var(--annot-green), var(--annot-teal), var(--annot-blue), var(--annot-purple), var(--annot-red));}
+.menu .mhint{font-size:var(--fs-meta);color:var(--text-helper);margin-left:auto;white-space:nowrap;}
+/* 既有动作行（原菜单按钮） */
+.menu .macts{display:flex;background:var(--accent);}
+.menu .macts button{height:32px;padding:0 var(--sp-3);background:var(--accent);color:var(--accent-on);border:none;font-size:var(--fs-secondary);font-weight:500;cursor:pointer;white-space:nowrap;}
+.menu .macts button:hover{background:var(--accent-hover);}
+.menu .macts button.pick{background:var(--paper);color:var(--text-primary);border:1px solid var(--border-subtle);}
 .menu.legacy{background:var(--error);}
 .menu.legacy button{background:var(--error);color:var(--error-on);}
-/* 批注编辑浮层（增 / 改 / 删） */
+/* 批注编辑浮层（**即时生效**：无保存/取消；批注文字清空＝该条批注被删除） */
 .editor{position:absolute;width:320px;background:var(--paper);border:1px solid var(--border-subtle);box-shadow:var(--shadow-float);padding:var(--sp-3);z-index:var(--z-sticky);}
 .editor .eq{font-size:var(--fs-secondary);color:var(--text-helper);margin:0 0 var(--sp-2);padding-left:var(--sp-2);border-left:2px solid var(--accent);background:var(--accent-soft);}
 .editor textarea{width:100%;min-height:56px;padding:var(--sp-2);border:1px solid var(--border-subtle);background:var(--paper);color:var(--text-primary);font-family:inherit;font-size:var(--fs-secondary);resize:vertical;}
 .editor textarea:focus{outline:2px solid var(--accent);outline-offset:1px;}
+/* 底行：左＝颜色方块（点开取色，含自定义）· 中＝保存态 · 右＝删除（标签按类型变） */
 .editor .ebar{display:flex;align-items:center;gap:var(--sp-2);margin-top:var(--sp-2);}
-.editor .ebar .btn{height:32px;padding:0 var(--sp-3);border:1px solid var(--border-subtle);background:var(--paper);color:var(--text-primary);cursor:pointer;}
-.editor .ebar .del{margin-left:auto;background:none;border:none;padding:0;color:var(--error);font-size:var(--fs-meta);cursor:pointer;}
+.editor .ebar .save-state{font-size:var(--fs-meta);color:var(--text-helper);}
+.editor .ebar .clear-hint{margin-left:auto;font-size:var(--fs-meta);color:var(--text-helper);}
+.editor .ebar .del{background:none;border:none;padding:0;color:var(--error);font-size:var(--fs-meta);cursor:pointer;white-space:nowrap;}
+.editor .ebar .del:hover{text-decoration:underline;}
+.colorbtn{width:20px;height:20px;border:1px solid var(--border-subtle);cursor:pointer;padding:0;flex:none;}
+.colorpop{position:absolute;display:flex;flex-direction:column;gap:var(--sp-2);padding:var(--sp-2);background:var(--paper);border:1px solid var(--border-subtle);box-shadow:var(--shadow-float);z-index:var(--z-sticky);}
+.colorpop .row{display:flex;gap:var(--sp-1);}
+.colorpop .customrow{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);color:var(--text-helper);}
+.colorpop input[type=color]{width:28px;height:20px;padding:0;border:1px solid var(--border-subtle);background:none;}
+
+/* 侧栏：两类视觉区分（摘录＝实心方块 + 「摘录」标签；纯高亮＝空心方块 + 「高亮」标签）+ 筛选段控 */
+.mark-kind{width:8px;height:8px;flex:none;margin-top:5px;}
+.mark-kind.k-extract{border:1px solid var(--text-secondary);}                     /* 空心＝纯高亮 */
+.mark-kind.k-extract::after{content:"";}                                          /* 占位，保持同尺寸 */
+.mark-kind.k-extract.filled{background:currentColor;border-color:transparent;}     /* 实心＝摘录 */
+.kind-tag{font-size:var(--fs-meta);color:var(--text-helper);border:1px solid var(--border-subtle);padding:0 4px;}
+.kind-tag.t-extract{color:var(--text-primary);border-color:var(--border-strong);}
+.filter{display:flex;border:1px solid var(--border-subtle);}
+.filter button{height:24px;padding:0 var(--sp-2);background:none;border:none;font-size:var(--fs-meta);color:var(--text-helper);cursor:pointer;}
+.filter button.on{background:var(--grey-1);color:var(--text-primary);}
 table{border-collapse:collapse;width:100%;font-size:var(--fs-secondary);}
 th,td{border:1px solid var(--border-subtle);padding:var(--sp-1) var(--sp-2);text-align:left;vertical-align:top;}
 th{font-weight:500;color:var(--text-secondary);background:var(--grey-1);}
@@ -280,42 +316,42 @@ td.rowhead{color:var(--text-secondary);white-space:nowrap;}
             <svg class="threads" data-threads></svg>
           </div></div>
           <aside class="side" data-side>
-            <div class="side-head"><span data-count>注解 4</span><span class="sort"><button class="on" data-sort="pos">位置</button><button data-sort="time">时间</button></span></div>
+            <div class="side-head"><span data-count>注解 4</span><span class="filter" data-filter><button data-f="all" class="on">全部</button><button data-f="extract">摘录</button><button data-f="highlight">高亮</button></span><span class="sort"><button class="on" data-sort="pos">位置</button><button data-sort="time">时间</button></span></div>
             <div class="side-body" data-zlist>
               <!-- 整卡批注：恒置顶 + 整卡主题色高亮 -->
-              <div class="zitem whole" data-zitem="whole" data-time="09-25 09:10" data-whole="1">
-                <i class="dot"></i>
+              <div class="zitem whole" data-zitem="whole" data-kind="extract" data-time="09-25 09:10" data-whole="1">
+                <i class="mark-kind k-extract filled" data-kindmark style="color:var(--accent)"></i>
                 <div style="min-width:0">
                   <p class="zq tag-whole">本条批注 · 锚在整卡</p>
                   <p class="zn">整条摘录是「塑性变形的微观机制」，重点在第 2 层。</p>
-                  <p class="zmeta mono"><span>09-25 09:10</span><span>·</span><span>整卡</span></p>
+                  <p class="zmeta mono"><span>09-25 09:10</span><span class="kind-tag t-extract">摘录</span><span>整卡</span></p>
                 </div>
               </div>
-              <div class="zitem" data-zitem="a1" data-time="09-27 14:02" data-anchor="a1" style="--zline:var(--annot-yellow)">
-                <i class="dot" style="background:var(--annot-yellow)"></i>
+              <div class="zitem" data-zitem="a1" data-kind="extract" data-time="09-27 14:02" data-anchor="a1" style="--zline:var(--annot-yellow)">
+                <i class="mark-kind k-extract filled" data-kindmark style="color:var(--annot-yellow)"></i>
                 <div style="min-width:0">
                   <p class="zq">位错沿滑移面运动</p>
                   <p class="zn">这是整条摘录里最关键的一句：后面 Schmid 定律只是它的量化形式。</p>
-                  <p class="zmeta mono"><span>09-27 14:02</span><span>·</span><span>段锚</span></p>
+                  <p class="zmeta mono"><span>09-27 14:02</span><span class="kind-tag t-extract">摘录</span><span>段锚</span></p>
                   <div class="palette" data-palette="a1">
                     <i style="background:var(--annot-red)"></i><i style="background:var(--annot-orange)"></i><i style="background:var(--annot-yellow)"></i><i style="background:var(--annot-green)"></i><i style="background:var(--annot-teal)"></i><i style="background:var(--annot-blue)"></i><i style="background:var(--annot-purple)"></i><i style="background:var(--annot-magenta)"></i>
                   </div>
                 </div>
               </div>
-              <div class="zitem" data-zitem="a2" data-time="09-27 14:12" data-anchor="a2" style="--zline:var(--annot-teal)">
-                <i class="dot" style="background:var(--annot-teal)"></i>
+              <div class="zitem" data-zitem="a2" data-kind="extract" data-time="09-27 14:12" data-anchor="a2" style="--zline:var(--annot-teal)">
+                <i class="mark-kind k-extract filled" data-kindmark style="color:var(--annot-teal)"></i>
                 <div style="min-width:0">
                   <p class="zq">平面滑移与形变孪生为主</p>
                   <p class="zn">低层错能材料（如奥氏体不锈钢）靠这一条与高层错能材料区分。</p>
-                  <p class="zmeta mono"><span>09-27 14:12</span><span>·</span><span>段锚</span></p>
+                  <p class="zmeta mono"><span>09-27 14:12</span><span class="kind-tag t-extract">摘录</span><span>段锚</span></p>
                 </div>
               </div>
-              <div class="zitem" data-zitem="hl" data-time="09-25 09:10" data-anchor="hl" style="--zline:var(--border-strong)">
-                <i class="dot" style="background:var(--border-strong)"></i>
+              <div class="zitem" data-zitem="hl" data-kind="highlight" data-time="09-25 09:10" data-anchor="hl" style="--zline:var(--annot-green)">
+                <i class="mark-kind k-extract" data-kindmark style="color:var(--annot-green)"></i>
                 <div style="min-width:0">
                   <p class="zq">高层错能材料</p>
                   <p class="zn znone">（未写批注 · 纯高亮）</p>
-                  <p class="zmeta mono"><span>09-25 09:10</span><span>·</span><span>段锚</span></p>
+                  <p class="zmeta mono"><span>09-25 09:10</span><span class="kind-tag">高亮</span><span>段锚</span></p>
                 </div>
               </div>
             </div>
@@ -353,12 +389,12 @@ td.rowhead{color:var(--text-secondary);white-space:nowrap;}
               <button class="toc-item" style="padding-left:calc(var(--sp-3) + 0px)">第二章 塑性变形<span class="pg mono">第 88 页</span></button>
             </div>
             <div class="panel on" data-panel="annot">
-              <div class="zitem" data-zitem="r1" data-anchor="r1" style="--zline:var(--annot-yellow)">
-                <i class="dot" style="background:var(--annot-yellow)"></i>
+              <div class="zitem" data-zitem="r1" data-kind="extract" data-anchor="r1" style="--zline:var(--annot-yellow)">
+                <i class="mark-kind k-extract filled" data-kindmark style="color:var(--annot-yellow)"></i>
                 <div style="min-width:0"><p class="zq">滑移系由 {111} 面与 &lt;110&gt; 方向组成</p><p class="zn">12 个滑移系要背下来（FCC）。</p><p class="zmeta mono"><span>09-27 14:10</span><span>·</span><span>第 12 页</span></p></div>
               </div>
-              <div class="zitem" data-zitem="r2" data-anchor="r2" style="--zline:var(--annot-teal)">
-                <i class="dot" style="background:var(--annot-teal)"></i>
+              <div class="zitem" data-zitem="r2" data-kind="extract" data-anchor="r2" style="--zline:var(--annot-teal)">
+                <i class="mark-kind k-extract filled" data-kindmark style="color:var(--annot-teal)"></i>
                 <div style="min-width:0"><p class="zq">临界分切应力随温度升高而下降</p><p class="zn">与 Peierls 势垒那句连起来看。</p><p class="zmeta mono"><span>09-27 14:12</span><span>·</span><span>第 12 页</span></p></div>
               </div>
             </div>
@@ -419,18 +455,21 @@ td.rowhead{color:var(--text-secondary);white-space:nowrap;}
 
   <h2 class="doc-h2">四 · 选区菜单（R22 定位判据）与批注编辑浮层</h2>
   <p class="doc-note">
-    左：选区在容器<b>上半</b> → 菜单落选区<b>下方</b>居中；右：选区在<b>下半</b> → 菜单落<b>上方</b>居中。
-    红色菜单＝<b>对照 C1</b>（旧口径：按鼠标松开点定位，实测与选区相交 &gt; 0——正是要修掉的"盖住文字"）。
-    菜单项＝制卡 / AI 制卡 / AI 解释 / 摘录 / 查词 / 批注（阅读器另有图片挖空）。
+    上方：选区在容器<b>上半</b> → 菜单落选区<b>下方</b>居中；下方：选区在<b>下半</b> → 菜单落<b>上方</b>居中。
+    <b>菜单已按本轮口径重排</b>：第一行＝<b>模式段控</b>（<code>高亮</code> / <code>摘录+高亮</code>，**状态持久记忆**）
+    ＋ <b>调色排</b>（点色即完成当前模式的操作；末位是自定义取色）；第二行＝既有动作（制卡 / AI 制卡 / AI 解释 / 查词）
+    与「精细编辑…（写批注）」。<b>颜色不记</b>：每次选色都是一次明确动作。<b>不存在"单独的摘录不带高亮"</b>——
+    摘录必带高亮（用户裁定）。
   </p>
   <div class="stage-wrap" data-stage="menu">
-    <div class="stage-head"><span class="stage-name">选区菜单 · 上/下半两种落位 + 旧口径对照</span><span class="stage-tag target">规格 §3.2</span></div>
+    <div class="stage-head"><span class="stage-name">选区菜单 · 模式段控 + 调色排 + 上/下半两种落位</span><span class="stage-tag target">规格 §3.2 / §3.5</span></div>
     <div class="app" style="height:300px">
       <div class="app-body" style="position:relative">
         <div class="col-main" data-colmain style="align-items:flex-start"><div class="measure" style="width:640px" data-menubox>
-          <p class="doc-note" style="margin:0 0 var(--sp-2)">上半区（选区中心在上半 → 菜单在下）</p>
+          <p class="doc-note" style="margin:0 0 var(--sp-2)">上半区（选区中心在上半 → 菜单落在它下方）</p>
           <p style="font-size:15px;line-height:2.2" data-line1>晶体塑性变形的主要机制是<span data-sel="s1">位错沿滑移面运动</span>，其临界分切应力由 Schmid 定律给出。</p>
-          <p class="doc-note" style="margin:var(--sp-6) 0 var(--sp-2)">下半区（选区中心在下半 → 菜单在上）</p>
+          <div style="height:120px" aria-hidden="true"></div>
+          <p class="doc-note" style="margin:0 0 var(--sp-2)">下半区（选区中心在下半 → 菜单落在它上方；这一段的选区在容器下半）</p>
           <p style="font-size:15px;line-height:2.2" data-line2>高层错能材料倾向形成胞状亚结构，低层错能材料以平面滑移与形变孪生为主。</p>
         </div></div>
       </div>
@@ -438,15 +477,41 @@ td.rowhead{color:var(--text-secondary);white-space:nowrap;}
   </div>
 
   <div class="stage-wrap" data-stage="editor">
-    <div class="stage-head"><span class="stage-name">批注编辑浮层（增 / 改 / 删都在这里）</span><span class="stage-tag target">规格 §3.4 / §5.2</span></div>
+    <div class="stage-head"><span class="stage-name">批注编辑浮层（左＝摘录条 / 右＝纯高亮条：无保存取消、清空即删、颜色方块可展开含自定义、删除标签按类型）</span><span class="stage-tag target">规格 §3.4 / §5.3</span></div>
     <div class="app" style="height:260px">
       <div class="app-body" style="position:relative">
         <div class="col-main" style="align-items:flex-start"><div class="measure" style="width:640px;position:relative" data-editbox>
           <p style="font-size:15px;line-height:2.2" data-line3>…… 低层错能材料则以<span class="q" data-anchor="e1" style="--qcol:var(--annot-blue-soft);--qline:var(--annot-blue)">平面滑移与形变孪生为主</span>。</p>
-          <div class="editor" data-editor>
+          <div class="editor" data-editor data-editor-kind="extract">
             <p class="eq">平面滑移与形变孪生为主</p>
             <textarea rows="3">低层错能材料（如奥氏体不锈钢）靠这一条与高层错能材料区分。</textarea>
-            <div class="ebar"><button class="btn">保存</button><button class="btn">取消</button><button class="del">删除批注</button></div>
+            <div class="ebar">
+              <button class="colorbtn" data-colorbtn style="background:var(--annot-teal)" title="高亮颜色"></button>
+              <span class="save-state" data-savestate>已保存</span>
+              <span class="clear-hint">清空文字＝删除批注</span>
+              <button class="del" data-del>删除摘录</button>
+            </div>
+            <div class="colorpop" data-colorpop style="display:none">
+              <div class="row" data-colorrow>
+                <button class="swatch" style="background:var(--annot-red)"></button>
+                <button class="swatch" style="background:var(--annot-orange)"></button>
+                <button class="swatch on" style="background:var(--annot-yellow)"></button>
+                <button class="swatch" style="background:var(--annot-green)"></button>
+                <button class="swatch" style="background:var(--annot-teal)"></button>
+                <button class="swatch" style="background:var(--annot-blue)"></button>
+              </div>
+              <div class="customrow"><span>自定义</span><input type="color" value="#a16207" data-customcolor><span class="mono" data-customhex>#a16207</span></div>
+            </div>
+          </div>
+          <div class="editor" data-editor data-editor-kind="highlight" style="left:352px;top:118px">
+            <p class="eq">平面滑移与形变孪生为主</p>
+            <textarea rows="3">低层错能材料（如奥氏体不锈钢）靠这一条与高层错能材料区分。</textarea>
+            <div class="ebar">
+              <button class="colorbtn" data-colorbtn style="background:var(--annot-teal)" title="高亮颜色"></button>
+              <span class="save-state" data-savestate>已保存</span>
+              <span class="clear-hint">清空文字＝删除批注</span>
+              <button class="del" data-del>删除高亮</button>
+            </div>
           </div>
         </div></div>
       </div>
@@ -576,13 +641,66 @@ function placeMenuLegacy(menu, releasePoint, box) {
   menu.style.left = Math.max(box.left, releasePoint.x) + "px";
   menu.style.top = Math.max(box.top, releasePoint.y) + "px";
 }
-function buildMenu(stage) {
+/* 选区菜单（本轮重排）：
+   第一行＝**模式段控**（高亮 / 摘录+高亮）＋ **调色排**（点色即完成；末位是自定义取色）；
+   第二行＝既有动作（制卡 / AI 制卡 / AI 解释 / 查词，以及"精细编辑…"给出批注输入框）。
+   模式**持久记忆**（写入设置键），**颜色不记**（每次选色都是一次明确动作）。 */
+function buildMenu(stage, mode = window.__hlMode || "highlight") {
   stage.querySelectorAll("div.menu").forEach((m) => m.remove());
   const menu = document.createElement("div");
   menu.className = "menu";
-  for (const t of ["制卡", "AI 制卡", "AI 解释", "摘录", "查词", "批注"]) {
-    const b = document.createElement("button"); b.textContent = t; menu.appendChild(b);
+  const mrow = document.createElement("div");
+  mrow.className = "mrow";
+  const seg = document.createElement("div");
+  seg.className = "seg";
+  for (const [val, label] of [["highlight", "高亮"], ["extract", "摘录+高亮"]]) {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = label; b.dataset.mode = val;
+    if (val === mode) b.classList.add("on");
+    seg.appendChild(b);
   }
+  mrow.appendChild(seg);
+  const sw = document.createElement("div");
+  sw.className = "swatches";
+  for (const col of ["--annot-red", "--annot-orange", "--annot-yellow", "--annot-green", "--annot-teal", "--annot-blue"]) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "swatch"; b.style.background = "var(" + col + ")";
+    b.dataset.color = col; b.title = "用这支色完成：" + (mode === "highlight" ? "高亮" : "摘录 + 高亮");
+    sw.appendChild(b);
+  }
+  const cc = document.createElement("button");
+  cc.type = "button"; cc.className = "swatch custom"; cc.dataset.custom = "1"; cc.title = "自定义颜色…";
+  sw.appendChild(cc);
+  mrow.appendChild(sw);
+  const hint = document.createElement("span");
+  hint.className = "mhint";
+  hint.textContent = mode === "highlight" ? "点色＝高亮" : "点色＝摘录+高亮";
+  mrow.appendChild(hint);
+  menu.appendChild(mrow);
+
+  const acts = document.createElement("div");
+  acts.className = "macts";
+  for (const t of ["制卡", "AI 制卡", "AI 解释", "查词"]) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = t; acts.appendChild(b);
+  }
+  const fine = document.createElement("button");
+  fine.type = "button"; fine.className = "pick"; fine.textContent = "精细编辑…（写批注）";
+  acts.appendChild(fine);
+  menu.appendChild(acts);
+
+  menu.addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    if (btn.dataset.mode) {
+      window.__hlMode = btn.dataset.mode;                    // 模式持久（真实实现写 settings 键）
+      seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+      return;
+    }
+    if (btn.classList.contains("swatch")) {
+      // 点色即完成：按当前模式落地（此处只标注，真实现走落库 + 重画）
+      window.__lastPick = { mode: window.__hlMode || "highlight", color: btn.dataset.color || "custom" };
+    }
+  });
   stage.appendChild(menu);
   return menu;
 }
@@ -593,12 +711,18 @@ function rows(tbody, list) {
 }
 
 function measure() {
+  if (window.__measuring) return;                 // 防重入：本函数内部会点按钮，按钮处理器又会调它
+  window.__measuring = true;
+  try { measureInner(); } finally { window.__measuring = false; }
+}
+function measureInner() {
   const judge = [];
   const near = (a, b, tol) => Math.abs(a - b) <= tol;
   const stEx = document.querySelector('[data-stage="extract-annot"]');
   const stTabs = document.querySelector('[data-stage="reader-tabs"]');
   const stMap = document.querySelector('[data-stage="map-tree"]');
   const stMenu = document.querySelector('[data-stage="menu"]');
+  stMenu.querySelectorAll("div.menu").forEach((m) => m.remove());   // 幂等：先清上一轮演示菜单
   [stEx, stTabs, stMap].forEach((st) => repaint(st));
 
   /* ---- 判据① 整卡批注置顶（含"切到按时间排序后仍置顶"） ---- */
@@ -722,11 +846,12 @@ function measure() {
     judge.push(["⑦c 落位（" + c.name + "，选在" + (inUpper ? "上" : "下") + "半）", below ? "菜单在下" : above ? "菜单在上" : "?（相交/居中）", inUpper ? below : above]);
   }
   {
-    const menu = buildMenu(box);
+    const menu = buildMenu(box, window.__hlMode || "highlight", true);   // keep：别清掉上面两个演示菜单（实测踩过）
+    menu.classList.add("legacy");
     const selR = R(cases[0].sel);
     placeMenuLegacy(menu, { x: selR.left + selR.width * 0.62, y: selR.top + selR.height * 0.6 }, boxR);
     const a = interArea(R(menu), selR);
-    judge.push(["C1 对照：旧口径（鼠标松开点）与选区交集", a.toFixed(1) + "px²（应 > 0）", a > 0]);
+    judge.push(["C1 对照：旧口径（鼠标松开点）与选区交集（图中红色那个菜单）", a.toFixed(1) + "px²（应 > 0）", a > 0]);
   }
 
   /* ---- 判据⑧ 绘制幂等 ---- */
@@ -768,6 +893,89 @@ function measure() {
   judge.push(["⑩b 图谱：同级节点区间两两不重叠（交集 ＝ 0）", overlapPairs + " 对相交（应 = 0）", overlapPairs === 0]);
   judge.push(["⑩c 图谱：缩进随层级递增（子缩进 > 父缩进）", indentOk ? "成立" : "不成立", indentOk]);
   judge.push(["⑩d 有图谱才有「图谱」页签（本情境在场）", tabs.some((t) => t.dataset.tab === "map") ? "在场" : "缺", tabs.some((t) => t.dataset.tab === "map")]);
+
+  /* ---- 判据⑪ 选区菜单新结构：模式段控 + 调色排 + 动作行 ---- */
+  {
+    const box0 = stMenu.querySelector("[data-menubox]");
+    const menu = buildMenu(box0, "highlight");
+    const rowsN = menu.querySelectorAll(".mrow, .macts").length;   // 模式行 + 动作行（类名不同，别只数 .mrow）
+    const segs = [...menu.querySelectorAll(".seg button")].map((b) => b.textContent.trim());
+    const onSeg = menu.querySelector(".seg button.on");
+    const swN = menu.querySelectorAll(".swatches .swatch").length;
+    const hasCustom = !!menu.querySelector(".swatches .swatch.custom");
+    const acts = [...menu.querySelectorAll(".macts button")].map((b) => b.textContent.trim());
+    judge.push(["⑪ 菜单＝两行（模式行 + 动作行）", rowsN + " 行（应 = 2）", rowsN === 2]);
+    judge.push(["⑪b 模式段控两枚且当前项唯一", segs.join(" / ") + "，当前＝" + (onSeg ? onSeg.textContent.trim() : "无"), segs.length === 2 && segs.includes("高亮") && segs.includes("摘录+高亮") && !!onSeg]);
+    judge.push(["⑪c 调色排＝6 支 + 自定义取色", swN + " 枚（含自定义：" + hasCustom + "）", swN === 7 && hasCustom]);
+    judge.push(["⑪d 动作行保留既有动作 + 精细编辑入口", acts.join(" / "), acts.includes("制卡") && acts.includes("AI 制卡") && acts.includes("AI 解释") && acts.includes("查词") && acts.some((x) => x.includes("精细编辑"))]);
+    // 点色即完成：按当前模式记录
+    window.__hlMode = "highlight";
+    menu.querySelector(".swatches .swatch").click();
+    const pick1 = JSON.stringify(window.__lastPick);
+    window.__hlMode = "extract";
+    menu.querySelectorAll(".swatches .swatch")[1].click();
+    const pick2 = JSON.stringify(window.__lastPick);
+    judge.push(["⑪e 点色即完成（落地动作随模式而变，无需二次确认）",
+      pick1 + " → " + pick2,
+      pick1.includes('"mode":"highlight"') && pick2.includes('"mode":"extract"')]);
+    // 模式切换后重建菜单：选中项跟着走（＝持久记忆的可见后果）
+    const menu2 = buildMenu(box0, "extract");
+    const onSeg2 = menu2.querySelector(".seg button.on");
+    judge.push(["⑪f 模式切换被记住（重建菜单时选中项仍为摘录+高亮）", onSeg2 ? onSeg2.textContent.trim() : "无", !!onSeg2 && onSeg2.textContent.trim() === "摘录+高亮"]);
+    judge.push(["⑪g 颜色**不**被记住（重建菜单无任何预选色块）", menu2.querySelectorAll(".swatches .swatch.on").length + " 枚预选（应 = 0）", menu2.querySelectorAll(".swatches .swatch.on").length === 0]);
+    window.__hlMode = "highlight";
+    box0.scrollIntoView({ block: "center" });                 // 菜单按视口坐标摆放，演示前先滚进来（截图判读用）
+    const shown = buildMenu(box0, "highlight", true);
+    placeMenu(shown, R(box0.querySelector('[data-sel="s1"]')), R(box0));
+  }
+
+  /* ---- 判据⑫ 批注编辑浮层：无保存/取消、清空即删、颜色方块+取色、删除标签按类型 ---- */
+  {
+    const eds = [...document.querySelectorAll('[data-stage="editor"] [data-editor]')];
+    const btnsInEditor = eds.flatMap((e) => [...e.querySelectorAll("button")].map((b) => b.textContent.trim()));
+    judge.push(["⑫ 编辑浮层无「保存」「取消」按钮", btnsInEditor.join(" / "), !btnsInEditor.includes("保存") && !btnsInEditor.includes("取消")]);
+    const kindOf = (e) => e.dataset.editorKind;
+    const delLabel = (e) => (e.querySelector("[data-del]") || {}).textContent || "";
+    judge.push(["⑫b 删除按钮标签按类型（纯高亮＝删除高亮 / 摘录＝删除摘录）",
+      eds.map((e) => kindOf(e) + "→" + delLabel(e)).join("；"),
+      eds.length === 2 && delLabel(eds[0]) === "删除摘录" && delLabel(eds[1]) === "删除高亮"]);
+    const hintOk = eds.every((e) => (e.querySelector(".clear-hint") || {}).textContent.includes("清空"));
+    judge.push(["⑫c 明示「清空文字＝删除批注」（即时生效口径）", hintOk ? "两条都有提示" : "缺提示", hintOk]);
+    const stateOk = eds.every((e) => /已保存/.test((e.querySelector("[data-savestate]") || {}).textContent || ""));
+    judge.push(["⑫d 有保存态指示（即时保存的可见反馈）", stateOk ? "已保存" : "缺", stateOk]);
+    const cb = eds[0].querySelector("[data-colorbtn]");
+    const pop = eds[0].querySelector("[data-colorpop]");
+    const custom = eds[0].querySelector("[data-customcolor]");
+    judge.push(["⑫e 颜色方块按钮（色＝当前高亮色）+ 可展开取色（含自定义）",
+      (cb ? getComputedStyle(cb).backgroundColor : "无") + " / 取色浮层 " + (pop ? (getComputedStyle(pop).display === "none" ? "折叠待点开" : "展开") : "缺") + " / 自定义输入 " + (custom ? custom.type : "缺"),
+      !!cb && !!pop && !!custom && custom.type === "color"]);
+  }
+
+  /* ---- 判据⑬ 侧栏两类可辨 + 筛选可切 ---- */
+  {
+    const items = [...stEx.querySelectorAll("[data-zlist] .zitem")];
+    const kinds = items.map((x) => x.dataset.kind || "?");
+    const marks = items.map((x) => (x.querySelector("[data-kindmark]") || {}).className || "");
+    const tags = items.map((x) => (x.querySelector(".kind-tag") || {}).textContent || "");
+    const extractFilled = items.filter((x) => (x.dataset.kind === "extract") && /filled/.test((x.querySelector("[data-kindmark]") || {}).className || "")).length;
+    const hlHollow = items.filter((x) => (x.dataset.kind === "highlight") && !/filled/.test((x.querySelector("[data-kindmark]") || {}).className || "")).length;
+    judge.push(["⑬ 两类在栏内可辨（实心方块＝摘录 / 空心＝纯高亮）",
+      "摘录实心 " + extractFilled + " 条 / 纯高亮空心 " + hlHollow + " 条", extractFilled === 3 && hlHollow === 1]);
+    judge.push(["⑬b 每条都带类型标签（摘录 / 高亮）", tags.join(" / "), tags.filter((t) => t === "摘录").length === 3 && tags.filter((t) => t === "高亮").length === 1]);
+    const filt = stEx.querySelector("[data-filter]");
+    const fbtns = filt ? [...filt.querySelectorAll("button")].map((b) => b.textContent.trim()) : [];
+    judge.push(["⑬c 有筛选段控（全部 / 摘录 / 高亮）", fbtns.join(" / "), fbtns.join("/") === "全部/摘录/高亮"]);
+    if (filt) {
+      const click = (label) => { const b = [...filt.querySelectorAll("button")].find((x) => x.textContent.trim() === label); if (b) b.click(); };
+      click("高亮");
+      const visHl = [...stEx.querySelectorAll("[data-zlist] .zitem")].filter((x) => getComputedStyle(x).display !== "none").length;
+      click("摘录");
+      const visEx = [...stEx.querySelectorAll("[data-zlist] .zitem")].filter((x) => getComputedStyle(x).display !== "none").length;
+      click("全部");
+      const visAll = [...stEx.querySelectorAll("[data-zlist] .zitem")].filter((x) => getComputedStyle(x).display !== "none").length;
+      judge.push(["⑬d 筛选真的生效（高亮 1 条 / 摘录 3 条 / 全部 4 条）", visHl + " / " + visEx + " / " + visAll, visHl === 1 && visEx === 3 && visAll === 4]);
+    }
+  }
 
   /* ---- 对照 C2：模拟"层级规则失效"（把整卡条目挪到末尾）→ ① 必须变红 ---- */
   const list = stEx.querySelector("[data-zlist]");
@@ -821,6 +1029,33 @@ for (const [id, key] of [["btn-sort-pos", "pos"], ["btn-sort-time", "time"]]) {
     measure();
   });
 }
+document.querySelectorAll("[data-filter]").forEach((filt) => {
+  filt.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-f]");
+    if (!btn) return;
+    filt.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b === btn));
+    const list = filt.closest("[data-side]").querySelector("[data-zlist]");
+    const want = btn.dataset.f;
+    list.querySelectorAll(".zitem").forEach((it) => {
+      const kind = it.dataset.whole === "1" ? "extract" : (it.dataset.kind || "extract");
+      it.style.display = want === "all" || want === kind ? "" : "none";
+    });
+    measure();
+  });
+});
+document.querySelectorAll("[data-editor]").forEach((ed) => {
+  const cb = ed.querySelector("[data-colorbtn]"), pop = ed.querySelector("[data-colorpop]");
+  if (cb && pop) cb.addEventListener("click", () => { pop.style.display = pop.style.display === "none" ? "flex" : "none"; });
+  const custom = ed.querySelector("[data-customcolor]");
+  if (custom) custom.addEventListener("input", () => {
+    const hex = ed.querySelector("[data-customhex]");
+    if (hex) hex.textContent = custom.value;
+    if (cb) cb.style.background = custom.value;
+  });
+  const ta = ed.querySelector("textarea");
+  const st = ed.querySelector("[data-savestate]");
+  if (ta && st) ta.addEventListener("input", () => { st.textContent = ta.value.trim() ? "已保存" : "批注已删除（清空即删）"; });
+});
 document.querySelectorAll("[data-tabs]").forEach((tabs) => {
   tabs.addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-tab]");
