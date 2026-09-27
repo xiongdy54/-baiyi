@@ -54,8 +54,7 @@ type View =
   | { name: "review"; bookItemIds?: string[]; title?: string; limits?: Record<string, number> | null }
   | { name: "browse" }
   | { name: "journal" }
-  | { name: "stats" }
-  | { name: "extractReader"; extractId: string; book?: { bytes: Uint8Array; name: string } };
+  | { name: "stats" };
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -273,14 +272,6 @@ export default function App() {
           contentMarkdown: text,
           spans: multi
         });
-      } else if (view.name === "extractReader" && extractDetail) {
-        await readingWorkflow.create({
-          parentType: "extract",
-          parentId: extractDetail.id,
-          documentId: extractDetail.documentId,
-          contentMarkdown: text,
-          spans: multi
-        });
       } else if ((view.name === "queue" || view.name === "extractSession") && ctx?.parentExtractId) {
         // 复习中从父建（R11）：父摘录的 documentId / rootExtractId 从库里取回，不靠渲染层猜
         const parent = await readingWorkflow.getTopic(ctx.parentExtractId);
@@ -315,16 +306,6 @@ export default function App() {
     },
     [view]
   );
-
-  const openExtract = useCallback((extractId: string) => {
-    readingWorkflow.getTopic(extractId).then(async (detail) => {
-      if (!detail) return;
-      // 摘录统一进阅读内核（v20）：内容合成为单章 EPUB；阅读进度/统计不落库（摘录非书）
-      const syn = await buildSyntheticEpub("摘录", detail.contentMarkdown, { embedKatexCss: false });
-      setExtractDetail(detail);
-      setView({ name: "extractReader", extractId, book: { bytes: syn.bytes, name: "synthetic.epub" } });
-    });
-  }, []);
 
   // 「跳转原文」（复习卡 / 队列摘录 / 卡片浏览 共用）：documentId 反查书架条目，以锚点打开阅读器，
   // 返回按钮回到来源页。跳转属「现场查看」语义（v19）：本次阅读器会话不落阅读进度与阅读字数，
@@ -424,7 +405,6 @@ export default function App() {
     topTitle = "摘录";
     mainContent = (
       <ExtractReviewView
-        onOpen={openExtract}
         onJumpToDoc={handleJumpToDoc}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
       />
@@ -434,7 +414,6 @@ export default function App() {
     topTitle = "摘录";
     mainContent = (
       <ExtractReviewView
-        onOpen={openExtract}
         onJumpToDoc={handleJumpToDoc}
         bookItemIds={view.bookItemIds}
         scopeLimits={view.limits ?? null}
@@ -465,23 +444,6 @@ export default function App() {
   } else if (view.name === "stats") {
     topTitle = "统计数据";
     mainContent = <Dashboard />;
-  } else if (view.name === "extractReader") {
-    topTitle = "摘录";
-    mainContent = extractDetail ? (
-      <Reader
-        title="摘录"
-        markdown={extractDetail.contentMarkdown}
-        book={view.book}
-        itemId={extractDetail.documentId}
-        contextLabel={
-          `来自《${extractDetail.docTitle}》` +
-          (extractDetail.depth > 1 ? ` · 第${extractDetail.depth}层摘录` : "")
-        }
-        contextRef={{ documentId: extractDetail.documentId, extractId: extractDetail.id }}
-        sourceTitle={extractDetail.docTitle}
-        onBack={() => setView({ name: "queue" })}
-      />
-    ) : null;
   } else {
     mainContent = (
       <Bookshelf
@@ -510,7 +472,7 @@ export default function App() {
         <nav className="topbar-nav">
           {([
             { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
-            { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractReader" || n === "extractSession" },
+            { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractSession" },
             { key: "review", label: "复习", match: (n: string) => n === "review" },
             { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
             { key: "journal", label: "日记", match: (n: string) => n === "journal" },

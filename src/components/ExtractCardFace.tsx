@@ -144,7 +144,6 @@ export interface ExtractFaceHandlers {
   onPriority?: (priority: number) => void;
   onGraduate?: () => void;
   onEdit?: (text: string) => void;
-  onOpenExtract?: () => void;
   onJumpToSource?: () => void;
   onUndo?: () => void;
   /**
@@ -164,7 +163,8 @@ export interface ExtractFaceHandlers {
 
 /**
  * 摘录卡面（v48.22 / D58 §6.8）：沉浸式连续处理页与复习页**共用同一组件**。
- * 正文与闪卡一样可就地编辑（EditableText）；动作集＝下一条 / 推迟 / 优先级 / 毕业 / 打开摘录 / 跳转原文 / 摘录。
+ * 正文与闪卡一样可就地编辑（EditableText）；动作集＝下一条 / 推迟 / 优先级 / 毕业 / 跳转原文 / 摘录。
+ * **批 4 Task 18（R29）**：`extractReader` 专用页已退役——「打开摘录」动作随之删除。
  * `viewOnly` ＝面包屑查看态（只读渲染 + 高亮该层范围，不出现任何调度动作）。
  */
 export default function ExtractCardFace({
@@ -361,11 +361,6 @@ export default function ExtractCardFace({
               data-extract-child
             >
               摘录
-            </button>
-          )}
-          {handlers.onOpenExtract && (
-            <button disabled={busy} onClick={() => handlers.onOpenExtract?.()} title="在阅读器中打开这条摘录（可就地制卡）">
-              打开摘录
             </button>
           )}
           {handlers.onJumpToSource && (

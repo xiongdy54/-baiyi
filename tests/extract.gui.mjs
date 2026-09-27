@@ -77,7 +77,13 @@ try {
   const face = await cdp.eval(`document.querySelector(".extract-face")?.textContent || ""`);
   check("沉浸式摘录页渲染出卡面", face.includes("GUI 摘录样本"), face.slice(0, 120));
   check("卡面显示来源书名", face.includes("GUI 摘录测试书"), face.slice(0, 120));
-  check("动作齐全（下一条/推迟/毕业/打开摘录/跳转原文）", ["下一条", "推迟", "毕业", "打开摘录", "跳转原文"].every((t) => face.includes(t)), face.slice(0, 200));
+  // 批 4 Task 18（R29）：`extractReader` 专用页退役 →「打开摘录」动作不再是动作集成员。
+  // 契约变更：动作集去掉了「打开摘录」（其余不变）。
+  check(
+    "动作齐全（下一条/推迟/毕业/跳转原文；**不含**已退役的「打开摘录」）",
+    ["下一条", "推迟", "毕业", "跳转原文"].every((t) => face.includes(t)) && !face.includes("打开摘录"),
+    face.slice(0, 200)
+  );
   check("正文可编辑（EditableText 裸壳在位）", (await cdp.eval(`!!document.querySelector(".extract-face .review-editable")`)) === true, "无 .review-editable");
 
   // 4) 正文就地编辑 → 落库

@@ -291,7 +291,10 @@ try {
   await cdp.eval(`(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur(); return true; })()`);
   let focusedCrumb = "";
   let tabPresses = 0;
-  for (let i = 0; i < 30 && !focusedCrumb; i++) {
+  // 预算 40 次：批 4 起摘录页多了**批注栏**（Task 13）——它自己就贡献 8 个可聚焦控件
+  // （筛选 3 + 排序 2 + 色点/定位/删除），把面包屑推到第 31~33 次 Tab。
+  // 判据仍是「Tab 能停在面包屑层级项上」（可达性），不是「30 次以内」（那是旧 UI 的巧合）。
+  for (let i = 0; i < 40 && !focusedCrumb; i++) {
     tabPresses = i + 1;
     await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9, modifiers: 0 });
     await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, nativeVirtualKeyCode: 9, modifiers: 0 });

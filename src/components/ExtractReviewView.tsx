@@ -16,7 +16,6 @@ import { createMultiHighlight } from "../lib/reader/multiHighlight";
 type FaceSelection = { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null;
 
 interface Props {
-  onOpen: (extractId: string) => void;
   onJumpToDoc?: (
     docId: string,
     anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number },
@@ -73,7 +72,7 @@ export function splitChain(chain: Array<{ id: string; text: string; depth: numbe
  * 规格 §1.2 R13（面包屑）：左上角面包屑「原文 › 第1层 › … › 当前」——点任一层＝切到该层卡片
  * （查看态，只读、不推进调度、不改队列，出口＝「返回队列」）；>6 级折叠成「…N 级」，点开逐项可达。
  */
-export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, scopeLimits, header, onExit, onExtract }: Props) {
+export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, header, onExit, onExtract }: Props) {
   const [items, setItems] = useState<DueTopic[]>([]);
   const [engine, setEngine] = useState<ExtractEngine>("sm19-default");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
@@ -585,7 +584,6 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
             onExtract: onExtract
               ? (payload) => onExtract(payload.text, { parentExtractId: current!.id, parentRange: payload.ranges })
               : undefined,
-            onOpenExtract: () => onOpen(current!.id),
             // 「跳转原文」按层级分流（规格 §1.2 D62）：有父摘录＝回父卡（查看态 + 高亮所引那段），
             // 根摘录＝跳源文档（逐字保持既有行为，含 returnTo="queue" 现场恢复语义）
             onJumpToSource: current!.contextRef?.parentExtractId
