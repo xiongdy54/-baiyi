@@ -19,6 +19,8 @@ type ExtractRow = {
   id?: unknown;
   contentMarkdown?: unknown;
   comment?: unknown;
+  annotationColor?: unknown;
+  kind?: unknown;
   contextRef?: (Record<string, unknown> & { sourceAnchor?: AnchorLike; parentExtractId?: unknown }) | null;
 };
 
@@ -73,15 +75,18 @@ export function buildDocMarks(
     const text = String(raw?.contentMarkdown ?? "");
     if (!text.trim()) continue;
     const comment = raw?.comment != null && String(raw.comment).trim() ? String(raw.comment) : null;
+    // 批 4 Task 16：角标跟色（§5.2 硬约束①）与分族（纯高亮不画角标，§5.4）
+    const color = raw?.annotationColor != null && String(raw.annotationColor).trim() ? String(raw.annotationColor) : null;
+    const kind: "highlight" | "extract" = raw?.kind === "highlight" ? "highlight" : "extract";
     if (engine === "pdf") {
       const pageIndex = Number(anchor?.pageIndex ?? ctx.pageIndex);
       const rects = normalizeMarkRects(anchor?.rects);
       if (!Number.isFinite(pageIndex) || pageIndex < 0 || rects.length === 0) continue;
-      out.push({ id, text, comment, cardCount: cardCounts[id] ?? 0, pageIndex, rects });
+      out.push({ id, text, comment, color, kind, cardCount: cardCounts[id] ?? 0, pageIndex, rects });
     } else {
       const cfi = String(anchor?.cfi ?? ctx.cfi ?? "");
       if (!cfi) continue;
-      out.push({ id, text, comment, cardCount: cardCounts[id] ?? 0, cfi });
+      out.push({ id, text, comment, color, kind, cardCount: cardCounts[id] ?? 0, cfi });
     }
   }
   return out;

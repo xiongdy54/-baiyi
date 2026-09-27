@@ -3127,6 +3127,17 @@ body.theme-dark .modal-panel {
   pointer-events: none;
   z-index: 1;
 }
+
+/* 批 4 Task 16（规格 §5.2）：角标绘制层——与标记层同规（纯绘制、不吃指针）。
+   **不得**在这里写 `rect{fill:…}`：CSS 会盖掉元素的 fill **属性**，角标会恒为同一色
+   （实测踩过：恒为 IKB 蓝）。颜色一律由 drawBadges 内联 style.fill 给。 */
+.pdf-badge-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  z-index: 3;
+}
 .reader-doc-mark {
   position: absolute;
   display: none; /* 定位成功才显形（layoutMarks 置 block），避免首帧堆在左上角 */

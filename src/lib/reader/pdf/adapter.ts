@@ -29,6 +29,7 @@ import type {
   SourceAnchorGeometry
 } from "../kernel";
 import { createMultiHighlight } from "../multiHighlight";
+import { drawBadges } from "../badges";
 // 百分比换算的唯一实现面（v25 M5）：选区像素框 → 页内百分比走 pxShapeToPct，不另造一套换算
 import { pxShapeToPct } from "../../occlusion";
 import { PDF_ENGINE_VERSION } from "../foliate/version";
@@ -138,6 +139,12 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
   const markLayer = document.createElement("div");
   markLayer.className = "pdf-mark-layer";
   host.appendChild(markLayer);
+  // 批 4 Task 16（规格 §5.2）：角标绘制层（与标记层同规：不吃 pointer-events 的纯绘制层）。
+  // 颜色一律内联 style.fill（见 src/lib/reader/badges.ts 的两条硬约束）。
+  const badgeLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  badgeLayer.setAttribute("class", "pdf-badge-layer");
+  badgeLayer.setAttribute("aria-hidden", "true");
+  host.appendChild(badgeLayer);
   type MarkEntry = { mark: ReaderDocMark; ord: number; el: HTMLElement };
   let markEntries: MarkEntry[] = [];
   let docMarks: ReaderDocMark[] = [];
@@ -189,6 +196,33 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       e.el.style.width = `${Math.max(1, (rect.w / 100) * p.width)}px`;
       e.el.style.height = `${Math.max(1, (rect.h / 100) * p.height)}px`;
     }
+    drawMarkBadges();
+  };
+
+  /**
+   * 角标（批 4 Task 16 / §5.2）：只画**有批注的段锚摘录**（纯高亮与整卡不画，§5.4）；
+   * 位置＝该标记首行矩形（PDF 标记本身就是一条 rect，即首行片段）的右上角；
+   * 颜色＝该条的批注色（--annot-* 实色）——**内联 style.fill**，不写 CSS 规则。
+   */
+  const drawMarkBadges = () => {
+    const hostRect = viewerEl.getBoundingClientRect();
+    badgeLayer.setAttribute("width", String(hostRect.width));
+    badgeLayer.setAttribute("height", String(hostRect.height));
+    const targets: { right: number; top: number; color: string }[] = [];
+    for (const e of markEntries) {
+      if (!e.mark.comment) continue;
+      if (e.mark.kind === "highlight") continue;
+      if (e.el.style.display === "none" || e.ord !== 0) continue;
+      const r = e.el.getBoundingClientRect();
+      if (!(r.width > 0) || !(r.height > 0)) continue;
+      const color = e.mark.color
+        ? e.mark.color.startsWith("#")
+          ? e.mark.color
+          : `var(--annot-${e.mark.color})`
+        : "var(--annot-yellow)";
+      targets.push({ right: r.right, top: r.top, color });
+    }
+    drawBadges(badgeLayer, viewerEl, targets, { left: hostRect.left, top: hostRect.top });
   };
 
   const syncMarks = () => {
@@ -584,6 +618,7 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
 
     clearMultiSelectHighlight() {
       multiHighlight.clear();
+      badgeLayer.textContent = "";
     },
 
     // v48.24 批3（§4）：文中留痕——文本层之上的矩形覆盖层（数据面由壳层给）

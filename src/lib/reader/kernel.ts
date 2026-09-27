@@ -137,6 +137,10 @@ export interface ReaderDocMark {
   text: string;
   /** 读者批注（有则 PDF 加角标、浮层多一行） */
   comment?: string | null;
+  /** 批 4（R33/Task 16）：批注色（色板 id 或 #hex）——角标**必须**跟随它（§5.2 硬约束①） */
+  color?: string | null;
+  /** 批 4（R39/Task 16）：分族——`highlight`＝纯高亮（**不画角标**，§5.4） */
+  kind?: "highlight" | "extract";
   /** 已制卡数（浮层信息行） */
   cardCount?: number;
   /** EPUB：根锚 cfi（cfi → Range 画 ::highlight） */
