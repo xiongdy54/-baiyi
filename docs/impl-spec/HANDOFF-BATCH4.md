@@ -2,16 +2,16 @@
 
 > 分支 `摘录复习改版`。**主计划** `docs/impl-spec/INLINE-ANNOTATION-PLAN.md`（20 Task / 5 批，逐 Task 步骤齐全，直接照它做）。
 > **契约** `docs/impl-spec/INLINE-ANNOTATION.md`（裁定 R21–R40）。**视觉基准** `design-samples/annotation-two-modes.html`（对版用；页内自带量测，双击可开）。
-> 新会话第一步：`git log --oneline -3` 确认 HEAD ≥ `8df246e`，然后从 **Task 2** 继续。
+> 新会话第一步：`git log --oneline -3` 确认 HEAD ≥ `9b71ce4`，然后从 **Task 4** 继续。
 
 ## 一、批 4 进度（20 Task）
 
 | Task | 状态 | 说明 |
 |---|---|---|
 | 1 `extracts.kind` 分族 + 队列/计数过滤 | ✅ **已提交 `8df246e`** | 取证：annotation-db 29/29（新增 K 段 8 条）· extracts 137/137 · f18 46/46 · undo 29/29 |
-| 2 `updateExtract` 扩 `comment`/`annotationColor`/`kind` + 快照与 ops | ⬜ 待做 | 计划 Task 2 有 L1–L5 完整用例代码（含"清空即删批注""降级为纯高亮"） |
-| 3 `readingWorkflow.create/update` 透传三键 | ⬜ | |
-| 4 搬 `ManualCardEditor` → 独立文件 | ⬜ | 纯移动。跑 extract.gui 76 + reader.kernel |
+| 2 `updateExtract` 扩 `comment`/`annotationColor`/`kind` + 快照与 ops | ✅ **已提交 `742e7d9`** | 取证：annotation-db **37/37**（新增 L 段 8 条：批注落库/撤销退回上一版/清空即删/颜色落库/非法色忽略/降级纯高亮/降级后出队/越界 kind 忽略）· extracts 137/137 · undo 29/29。另补 `restoreExtractSnapshot` 三键 undefined-跳过式复原 |
+| 3 `readingWorkflow.create/update` 透传三键 | ✅ **已提交 `9b71ce4`** | 取证：tsc 零错误 · extracts 137/137。实际形态：`ExtractInput` 加 `kind?/comment?/annotationColor?`；新增 provider 方法 `updateAnnotations(id, patch)`（渲染层原先没有 typed 的 update 通道，这是新增写面） |
+| 4 搬 `ManualCardEditor` → 独立文件 | ⬜ **下一个** | 纯移动。跑 extract.gui 76 + reader.kernel |
 | 5 搬 `AIPanel` → 独立文件 | ⬜ | 纯移动。跑 m6-2native.gui 20 |
 | 6 建卡链抽 `src/lib/manualCard.ts` | ⬜ | |
 | 7 抽 `src/lib/useSelectionActions.ts`（**风险最大**） | ⬜ | 阅读器主链；L1/L2 必跑，未跑要在 commit 里点名 |
@@ -42,6 +42,12 @@
 - **批 6 Zotero 借鉴 ①–⑤**：① 8 色板（批 4 已含色板与 `annotation_color` 写入，**已覆盖大半**）；② 批注标签 + 侧栏列表 + 搜索命中 `comment`（侧栏在批 4；**标签与搜索仍缺**）；③ 模板变量 `{{highlight}}/{{comment}}/{{citation}}/{{color}}/{{tags}}`（**零命中**）；④ 导出含锚点 Markdown（**零命中**）；⑤ 只借标签（无需改动）。
 - **合并复习页（`ReviewView` 的摘录卡面）**：其「跳转原文」仍**只跳源文档**，未按 `parentExtractId` 分流（`grep parentExtractId src/components/ReviewView.tsx` ＝ **0 命中**）。批 4 未纳入范围，如需要请单开一条。
 - **批 4 §12 已明确不做**：Zotero 多标签侧栏 / 导出 / 拖拽重排；复习页接选区菜单与批注栏；批注写回源文件；模糊重锚定。
+
+## 三·五、跨会话派活的有效手法（本会话实测）
+
+用 `create_chat_session` 派新会话时，**指路式工单会失败**（本会话连派两次、次次停在"探索/验证前提"就耗尽轮次，一行代码未改）；
+**把改法确定化（含要插入的代码原文、行号参考、"以文本为准"）+ 明写"不要探索/不要读规格与记忆"** 才跑得动（两次都一次过）。
+派完必须**独立复核**：`git show --stat <sha>` 看 diff 是否照做、自己重跑测试取数字（不看它的自述）。
 
 ## 四、跨会话必须知道的坑（都在样张实测里踩过）
 
