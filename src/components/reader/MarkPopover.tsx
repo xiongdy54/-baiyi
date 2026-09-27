@@ -1,12 +1,10 @@
 // 文中标记的浮层（v48.24 批3 §4 文中留痕）：原文 + 批注文字 + 已制卡数 + 「就此制卡」。
 // 只读语义：浮层不改正文、不改摘录（编辑永远在卡片上进行），动作只有「就此制卡」（走既有手动制卡链）。
-// 位置：优先钉在标记下方，下方放不下翻到上方，左右夹在视口内（8px 留白）——实测后再定位，
-// 先渲染在视口外一帧（left:-9999）等测量，避免首帧闪到错误位置。
+// 位置（批 4 Task 8 起）：放置算法统一走 src/lib/popoverPlace.ts（与 SelectionMenu、AnnotationEditor 同一份）——
+// 实测后再定位，先渲染在视口外一帧（left:-9999）等测量，避免首帧闪到错误位置。
 import { useLayoutEffect, useRef, useState } from "react";
+import { placePopover } from "../../lib/popoverPlace";
 import type { ReaderDocMark, ReaderRect } from "../../lib/reader/service";
-
-/** 视口留白：与 8px 网格同档（--sp-2），浮层不贴边 */
-const VIEWPORT_MARGIN = 8;
 
 export default function MarkPopover({
   mark,
@@ -32,15 +30,12 @@ export default function MarkPopover({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = Math.min(anchor.x, vw - VIEWPORT_MARGIN - w);
-    left = Math.max(VIEWPORT_MARGIN, left);
-    let top = anchor.y + anchor.height + VIEWPORT_MARGIN;
-    if (top + h > vh - VIEWPORT_MARGIN) top = anchor.y - h - VIEWPORT_MARGIN; // 下方放不下 → 翻到上方
-    if (top < VIEWPORT_MARGIN) top = Math.max(VIEWPORT_MARGIN, Math.min(vh - VIEWPORT_MARGIN - h, VIEWPORT_MARGIN));
+    // prefer="below"：标记浮层恒优先钉在标记下方（下方放不下才翻到上方），左右夹在视口内
+    const { left, top } = placePopover({
+      anchor,
+      size: { width: el.offsetWidth, height: el.offsetHeight },
+      prefer: "below"
+    });
     setPos({ left, top });
   }, [mark.id, mark.comment, mark.cardCount, anchor.x, anchor.y, anchor.width, anchor.height]);
 
