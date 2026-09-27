@@ -2684,7 +2684,10 @@ function extractSnapshot(row) {
     schedule: scheduleOfRow(row),
     engineStateJson: row.engineStateJson ?? null,
     // 撤销一次正文编辑必须把范围锚一起退回去，否则区间与文本对不上（§2.2）
-    quoteRangeJson: row.quoteRangeJson ?? null
+    quoteRangeJson: row.quoteRangeJson ?? null,
+    comment: row.comment ?? null,
+    annotationColor: row.annotationColor ?? null,
+    kind: row.kind ?? "extract"
   };
 }
 
@@ -2733,6 +2736,15 @@ function restoreExtractSnapshot(snapshotRow, snap) {
       snap.engineStateJson ?? null, snap.quoteRangeJson ?? null, Date.now(), snapshotRow.id
     ]
   );
+  // 批 4（Task 2）：批注文字 / 颜色 / 分族逐字段复原；旧快照无这三键 ⇒ undefined，跳过不动现有值
+  const annoSets = [];
+  const annoArgs = [];
+  if (snap.comment !== undefined) { annoSets.push("comment = ?"); annoArgs.push(snap.comment); }
+  if (snap.annotationColor !== undefined) { annoSets.push("annotation_color = ?"); annoArgs.push(snap.annotationColor); }
+  if (snap.kind !== undefined) { annoSets.push("kind = ?"); annoArgs.push(snap.kind); }
+  if (annoSets.length) {
+    db.run(`UPDATE extracts SET ${annoSets.join(", ")} WHERE id = ?`, [...annoArgs, snapshotRow.id]);
+  }
 }
 
 /** 读后推进（§6.8-2「下一条」）：interval ×= a_factor；next_at = now + interval；process_count++ */
@@ -2804,9 +2816,13 @@ function updateExtract(id, patch) {
   const p = patch || {};
   const hasContent = Object.prototype.hasOwnProperty.call(p, "contentMarkdown");
   const hasRange = Object.prototype.hasOwnProperty.call(p, "quoteRange");
-  if (!hasContent && !hasRange) return { ok: true, unchanged: true };
+  // 批 4（Task 2）：批注文字 / 颜色 / 分族可写（清空 comment 即删除批注；非法颜色与越界 kind 一律忽略）
+  const hasComment = Object.prototype.hasOwnProperty.call(p, "comment");
+  const hasColor = Object.prototype.hasOwnProperty.call(p, "annotationColor");
+  const hasKind = Object.prototype.hasOwnProperty.call(p, "kind");
+  if (!hasContent && !hasRange && !hasComment && !hasColor && !hasKind) return { ok: true, unchanged: true };
   const contentMarkdown = hasContent ? String(p.contentMarkdown ?? "") : row.contentMarkdown;
-  if (contentMarkdown === row.contentMarkdown && !hasRange) return { ok: true, unchanged: true };
+  if (contentMarkdown === row.contentMarkdown && !hasRange && !hasComment && !hasColor && !hasKind) return { ok: true, unchanged: true };
   const before = extractSnapshot(row);
   return withTransaction(() => {
     // 范围锚（规格 §2.2 / D61）：正文一变就按编辑脚本把区间重映射过去——
@@ -2825,8 +2841,28 @@ function updateExtract(id, patch) {
       sets.splice(1, 0, "quote_range_json = ?");
       args.splice(1, 0, JSON.stringify(nextRanges));
     }
+    if (hasComment) {
+      const v = p.comment == null || String(p.comment).trim() === "" ? null : String(p.comment);
+      sets.push("comment = ?"); args.push(v);
+    }
+    if (hasColor && /^([a-z]{3,12}|#[0-9a-fA-F]{3,8})$/.test(String(p.annotationColor ?? ""))) {
+      sets.push("annotation_color = ?"); args.push(String(p.annotationColor));
+    }
+    if (hasKind && (p.kind === "highlight" || p.kind === "extract")) {
+      sets.push("kind = ?"); args.push(p.kind);
+    }
     db.run(`UPDATE extracts SET ${sets.join(", ")} WHERE id = ?`, [...args, id]);
-    logExtractOp(row, "edit", before, writeRanges ? { contentMarkdown, quoteRange: nextRanges } : { contentMarkdown }, null);
+    logExtractOp(
+      row, "edit", before,
+      {
+        ...(writeRanges ? { quoteRange: nextRanges } : {}),
+        contentMarkdown,
+        ...(hasComment ? { comment: p.comment == null || String(p.comment).trim() === "" ? null : String(p.comment) } : {}),
+        ...(hasColor ? { annotationColor: p.annotationColor } : {}),
+        ...(hasKind ? { kind: p.kind } : {})
+      },
+      null
+    );
     return writeRanges ? { ok: true, quoteRange: nextRanges } : { ok: true };
   });
 }

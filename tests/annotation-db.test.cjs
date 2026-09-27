@@ -146,6 +146,29 @@ app.whenReady().then(async () => {
         usageAfter.newExtracts === usageBefore.newExtracts + 1, usageBefore.newExtracts + 1, usageAfter.newExtracts);
     }
 
+    // ---------- L：批注文字 / 颜色 / 分族的可写与可撤销（批 4 Task 2） ----------
+    console.log("== L 批注可写与撤销 ==");
+    {
+      const doc3 = db.createFromPaste("L 段夹具", "正文").documentId;
+      const a = db.createExtract({ parentType: "document", parentId: doc3, documentId: doc3, contentMarkdown: "L 样本正文" });
+      db.updateExtract(a.id, { comment: "第一版批注" });
+      check("L1 批注文字落库", db.getExtract(a.id).comment === "第一版批注", "第一版批注", db.getExtract(a.id).comment);
+      db.updateExtract(a.id, { comment: "第二版批注" });
+      db.undoLast();
+      check("L2 撤销退回上一版批注", db.getExtract(a.id).comment === "第一版批注", "第一版批注", db.getExtract(a.id).comment);
+      db.updateExtract(a.id, { comment: "" });
+      check("L3 清空 ⇒ comment 为 null（条目仍在）", db.getExtract(a.id).comment == null && !!db.getExtract(a.id), "null", db.getExtract(a.id).comment);
+      db.updateExtract(a.id, { annotationColor: "teal" });
+      check("L4 颜色落库", db.getExtract(a.id).annotationColor === "teal", "teal", db.getExtract(a.id).annotationColor);
+      db.updateExtract(a.id, { annotationColor: "NOT A COLOR!!" });
+      check("L5 非法颜色被忽略（保留原值）", db.getExtract(a.id).annotationColor === "teal", "teal", db.getExtract(a.id).annotationColor);
+      db.updateExtract(a.id, { kind: "highlight" });
+      check("L6 降级为纯高亮", db.getExtract(a.id).kind === "highlight", "highlight", db.getExtract(a.id).kind);
+      check("L7 降级后不再进 due 队列", !db.listDueExtracts(Date.now() + 30 * 86400000).some((x) => x.id === a.id), false, true);
+      db.updateExtract(a.id, { kind: "sneaky" });
+      check("L8 越界 kind 被忽略", db.getExtract(a.id).kind === "highlight", "highlight", db.getExtract(a.id).kind);
+    }
+
     console.log(`\n${pass} 通过 / ${fail} 失败`);
   } catch (e) {
     console.error("运行异常：", e && e.stack || e);
