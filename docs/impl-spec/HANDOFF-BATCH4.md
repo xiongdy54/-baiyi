@@ -2,8 +2,8 @@
 
 > 分支 `摘录复习改版`。**主计划** `docs/impl-spec/INLINE-ANNOTATION-PLAN.md`（20 Task / 5 批，逐 Task 步骤齐全，直接照它做）。
 > **契约** `docs/impl-spec/INLINE-ANNOTATION.md`（裁定 R21–R40）。**视觉基准** `design-samples/annotation-two-modes.html`（对版用；页内自带量测，双击可开）。
-> 新会话第一步：`git log --oneline -3` 确认 HEAD ≥ `84d2061`，然后从 **Task 6** 继续。
-> **本会话（上一轮）已完成 Task 4 / Task 5**（搬 ManualCardEditor / AIPanel，都是纯移动）。
+> 新会话第一步：`git log --oneline -3` 确认 HEAD ≥ `47f13e9`，然后从 **Task 9** 继续。
+> **本会话（上一轮）已完成 Task 6 / 7 / 8**。
 
 ## 一、批 4 进度（20 Task）
 
@@ -14,10 +14,10 @@
 | 3 `readingWorkflow.create/update` 透传三键 | ✅ **已提交 `9b71ce4`** | 取证：tsc 零错误 · extracts 137/137。实际形态：`ExtractInput` 加 `kind?/comment?/annotationColor?`；新增 provider 方法 `updateAnnotations(id, patch)`（渲染层原先没有 typed 的 update 通道，这是新增写面） |
 | 4 搬 `ManualCardEditor` → 独立文件 | ✅ **已提交 `97477a5`** | 纯移动。取证：tsc 0 · extract.gui 76/76 · reader.kernel 60/60。Reader.tsx 3006→2715 行 |
 | 5 搬 `AIPanel` → 独立文件 | ✅ **已提交 `84d2061`** | 纯移动。取证：tsc 0 · extract.gui 76/76（复跑确认）· reader.kernel 60/60。Reader.tsx 2715→2240 行 |
-| 6 建卡链抽 `src/lib/manualCard.ts` | ⬜ **下一个** | 把 Reader 内 `createSingleCard` 的「lint → 写库 → 相似检索」三步搬进 lib |
-| 7 抽 `src/lib/useSelectionActions.ts`（**风险最大**） | ⬜ | 阅读器主链；L1/L2 必跑，未跑要在 commit 里点名 |
-| 8 抽 `src/lib/popoverPlace.ts`（上/下居中 + 夹紧） | ⬜ | R22 定位修正的落点；marks.gui 56 不退 |
-| 9 `SelectionMenu`（模式段控 + 调色排 / 动作行） | ⬜ | 类名尺寸照样张 |
+| 6 建卡链抽 `src/lib/manualCard.ts` | ✅ **已提交 `259a360`** | 取证：tsc 0 · 差分实测 14/14（stub window 捕获真实调用序列：lint 逐条 addIssue / S1 文案逐字 / 缺省回落 / 异常冒泡）· extract.gui 76/76 |
+| 7 抽 `src/lib/useSelectionActions.ts`（**风险最大**） | ✅ **已提交 `83ef4d1`** | 取证：tsc 0 · **逐函数比对**（去注释空白后逐行 diff，差异**全部**是 adapter 替换）· reader.kernel 60/60 · reader.engine 20/20 · extract.gui 76/76 · multiselect.gui 20/20 · marks.gui 56/56 · m6-2native 19/20（唯一红项是**既有过时断言**：写死 `listDue()`，改 `listAll()` 复跑即 20/20，非回归）。Reader.tsx 2229→1443 行，钩子 1071 行 |
+| 8 抽 `src/lib/popoverPlace.ts` | ✅ **已提交 `47f13e9`** | 取证：tsc 0 · 差分实测 17/17（A 段 6 例与旧算法坐标**完全相等**；B 段 §3.2 四判据且上下互为对照；C 段翻转/夹紧分支非空转自检）· marks.gui 56/56。**MarkPopover 传 `prefer:"below"`**（保持其"恒优先下方"旧语义，非 auto） |
+| 9 `SelectionMenu`（模式段控 + 调色排 / 动作行） | ⬜ **下一个** | 类名尺寸照样张 |
 | 10 摘录页接选区菜单 + 高亮 + 五动作 | ⬜ | 卡面暴露选区 rect |
 | 11 `AnnotationEditor`（R37/R40） | ⬜ | 无保存/取消；失焦即落库；清空＝删批注；删除标签按 kind |
 | 12 四个设置键 + 设置页 + f18 往返 | ⬜ | `annotateMode/Palette/CustomEnabled/annotationFilter` |
