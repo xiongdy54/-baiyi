@@ -23,7 +23,7 @@ import AnnotationEditor from "./AnnotationEditor";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
-import { mapTree, readReaderTab, type MapTreeItem } from "../lib/reader/mapTree";
+import { type MapTreeItem } from "../lib/reader/mapTree";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
 import {
@@ -358,14 +358,12 @@ export default function Reader({
   /** 从浮层「就此制卡」进入时，本次制卡的 contextRef 覆盖值（挂到该摘录上——已制卡数按 extractId 派生） */
   const markCardRefOverrideRef = useRef<Record<string, unknown> | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
-  /** 批 4 Task 15：侧栏页签（会话内记忆）与图谱目录（只消费主进程算好的区间） */
+  /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规）
+   *  与图谱目录（只消费主进程算好的区间） */
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
   const [mapItems, setMapItems] = useState<MapTreeItem[] | null>(null);
   const [mapUnitCount, setMapUnitCount] = useState(0);
   const mapUnitAnchorsRef = useRef<string[]>([]);
-  useEffect(() => {
-    void readReaderTab().then(setSidebarTab);
-  }, []);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
 

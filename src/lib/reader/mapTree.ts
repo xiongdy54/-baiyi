@@ -4,7 +4,6 @@
 // **纪律（规格 §8 / Task 15）**：本模块**只消费、不切分**——区间一律来自主进程
 // `mapTree`（内部走 `mindmapCore.buildExtractionModel`，与生成/深挖同一份实现面）。
 // 渲染层不复制任何区间算法（复制＝两份漂移，先例见 §4「动作栈唯一编排面」）。
-import { settingsStore } from "../settings";
 
 export interface MapTreeItem {
   id: string;
@@ -40,11 +39,4 @@ export async function mapTree(documentId: string): Promise<MapTree | null> {
 /** 节点点击 → 跳该节点自有区间起点（复用既有导图跳转所需的最小信息） */
 export function firstUnitOf(item: MapTreeItem): number {
   return Math.max(0, Math.floor(item.start));
-}
-
-/** 侧栏用：阅读器设置里记着的页签（会话内记忆；不新增设置键——与 §5.3 排序同规） */
-export const READER_TAB_KEY = "readerSidebarTab";
-export async function readReaderTab(): Promise<"toc" | "extracts" | "map"> {
-  const v = await settingsStore.get<string>("app", READER_TAB_KEY, "toc");
-  return v === "extracts" || v === "map" ? v : "toc";
 }

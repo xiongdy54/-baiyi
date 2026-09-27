@@ -1,6 +1,6 @@
 # 批注化摘录 · 批 4：就地批注与批注栏（规格 v1）
 
-> 状态：**批 0（样张）已交付待评**；`src/` 与 `electron/` 仍是一行未改。
+> 状态：**已落地（批 4 全部 20 Task 完成，2026-09-28；契约 R21–R40 全部实装）**。实现取证见 `AI_DEVELOPMENT_GUIDE.md` §6.8-12 与 §9.1 M16 的 v48.25 追加块：`tests/annotations.gui.mjs` 42/42 · marks.gui 56/56 · extract.gui 76/76 · breadcrumb.gui 60/60 · multiselect.gui 20/20 · f18 61/61 · f11 17/17 · `tsc --noEmit` 0。
 > 批 0 样张：`design-samples/annotation-two-modes.html`（自包含、页内量测；`measure()` 现场读 `getBoundingClientRect()`，零写死值）。
 > 前置：`docs/impl-spec/ANNOTATION-MULTISELECT.md`（批 0–3 已落地：范围锚内核 / 多段选择 / 面包屑 / 文中留痕）、`AI_DEVELOPMENT_GUIDE.md` §6.8-11（D61–D65）。
 > 决策来源：用户 2026-09-27 四轮裁定（逐条见 §0）。**Zotero 为 AGPL-3.0：只研究行为与官方文档，零代码搬运**（同 D64 / Anki 处置）。
