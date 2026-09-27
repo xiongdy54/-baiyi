@@ -3,7 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { cardGenerator, lintCard, cardsApi, similaritySearch, detectMaterialType, parseFollowUps, expandClozeDraft, parseCloze, createAcceptedCard, siblingKeyFor, burySourceTextLimit, MATERIAL_ROUTES, type CardDraft, type CardGenMode, type OcclusionRegion, type FollowUpGroup } from "../lib/cards";
+import { cardGenerator, lintCard, cardsApi, detectMaterialType, parseFollowUps, expandClozeDraft, parseCloze, createAcceptedCard, siblingKeyFor, burySourceTextLimit, MATERIAL_ROUTES, type CardDraft, type CardGenMode, type OcclusionRegion, type FollowUpGroup } from "../lib/cards";
+import { createManualCard } from "../lib/manualCard";
 import { VOCAB_KIND_LABEL, buildVocabDrafts, isVocabSelection, type DictionaryEntry, type ReadingContext, type VocabKind } from "../lib/dict";
 import { buildReadingContext, loadDictSettings, lookupWord } from "../lib/dictClient";
 import { libraryApi } from "../lib/library";
@@ -1088,34 +1089,23 @@ export default function Reader({
       tags: [],
       domain: p.domain ?? [],
       knowledgePointId: p.knowledgePointId || null,
-      siblingKey: p.siblingKey ?? null,
-      generatedBy: "manual"
+      siblingKey: p.siblingKey ?? null
     };
-    const issues = lintCard({
-      front: card.frontMarkdown,
-      back: card.backMarkdown,
-      cardType: card.cardType,
-      cloze: p.cloze || null,
-      contextPrefix: card.contextPrefix,
-      sourceRef,
-      dateStamp: card.dateStamp,
-      knowledgePointId: card.knowledgePointId,
-      occlusion: card.occlusionJson
+    await createManualCard({
+      card,
+      lint: {
+        front: card.frontMarkdown,
+        back: card.backMarkdown,
+        cardType: card.cardType,
+        cloze: p.cloze || null,
+        contextPrefix: card.contextPrefix,
+        sourceRef,
+        dateStamp: card.dateStamp,
+        knowledgePointId: card.knowledgePointId,
+        occlusion: card.occlusionJson
+      },
+      similarity: { text: p.front || p.cloze || "" }
     });
-    const created = await cardsApi.create(card);
-    for (const issue of issues) {
-      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
-    }
-    const similar = await similaritySearch.findSimilar(p.front || p.cloze || "", 2);
-    if (similar.length > 0) {
-      await cardsApi.addIssue({
-        cardId: created.id,
-        ruleId: "S1",
-        severity: "warn",
-        message: `与已有卡相似（${Math.round(similar[0].score * 100)}%）：「${similar[0].front.slice(0, 30)}…」`,
-        source: "lint"
-      });
-    }
   }
 
   async function handleManualCard(p: ManualCardPayload) {
