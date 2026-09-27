@@ -2,8 +2,8 @@
 
 > 分支 `摘录复习改版`。**主计划** `docs/impl-spec/INLINE-ANNOTATION-PLAN.md`（20 Task / 5 批，逐 Task 步骤齐全，直接照它做）。
 > **契约** `docs/impl-spec/INLINE-ANNOTATION.md`（裁定 R21–R40）。**视觉基准** `design-samples/annotation-two-modes.html`（对版用；页内自带量测，双击可开）。
-> 新会话第一步：`git log --oneline -3` 确认 HEAD ≥ `47f13e9`，然后从 **Task 9** 继续。
-> **本会话（上一轮）已完成 Task 6 / 7 / 8**。
+> 新会话第一步：`git log --oneline -3` 确认 HEAD ≥ `2acd208`，然后从 **Task 10** 继续。
+> **本会话已完成 Task 6 / 7 / 8 / 9**。
 
 ## 一、批 4 进度（20 Task）
 
@@ -17,7 +17,7 @@
 | 6 建卡链抽 `src/lib/manualCard.ts` | ✅ **已提交 `259a360`** | 取证：tsc 0 · 差分实测 14/14（stub window 捕获真实调用序列：lint 逐条 addIssue / S1 文案逐字 / 缺省回落 / 异常冒泡）· extract.gui 76/76 |
 | 7 抽 `src/lib/useSelectionActions.ts`（**风险最大**） | ✅ **已提交 `83ef4d1`** | 取证：tsc 0 · **逐函数比对**（去注释空白后逐行 diff，差异**全部**是 adapter 替换）· reader.kernel 60/60 · reader.engine 20/20 · extract.gui 76/76 · multiselect.gui 20/20 · marks.gui 56/56 · m6-2native 19/20（唯一红项是**既有过时断言**：写死 `listDue()`，改 `listAll()` 复跑即 20/20，非回归）。Reader.tsx 2229→1443 行，钩子 1071 行 |
 | 8 抽 `src/lib/popoverPlace.ts` | ✅ **已提交 `47f13e9`** | 取证：tsc 0 · 差分实测 17/17（A 段 6 例与旧算法坐标**完全相等**；B 段 §3.2 四判据且上下互为对照；C 段翻转/夹紧分支非空转自检）· marks.gui 56/56。**MarkPopover 传 `prefer:"below"`**（保持其"恒优先下方"旧语义，非 auto） |
-| 9 `SelectionMenu`（模式段控 + 调色排 / 动作行） | ⬜ **下一个** | 类名尺寸照样张 |
+| 9 `SelectionMenu`（模式段控 + 调色排 / 动作行） | ✅ **已提交 `2acd208`** | 取证：tsc 0 · multiselect.gui 20/20（×3）· extract.gui 76/76（×2）· marks.gui 56/56。**三条新查明的坑见下**。模式/色板待 Task 12 接设置键 |
 | 10 摘录页接选区菜单 + 高亮 + 五动作 | ⬜ | 卡面暴露选区 rect |
 | 11 `AnnotationEditor`（R37/R40） | ⬜ | 无保存/取消；失焦即落库；清空＝删批注；删除标签按 kind |
 | 12 四个设置键 + 设置页 + f18 往返 | ⬜ | `annotateMode/Palette/CustomEnabled/annotationFilter` |
@@ -58,6 +58,21 @@
    `listAll()` 或注入 now。extract.gui 里也有同类断言（同因）。
 2. **`tests/reader.bundle.js` 会被测试跑脏**（副产物）：提交时**别带它**（用显式路径 add），脏了就
    `git checkout -- tests/reader.bundle.js`。
+
+## 三·七、Task 9 新查明（后续 Task 会再踩，务必先读）
+
+1. **两行菜单会盖住下一行的拖选线**：菜单高 79px，按 R22 落在选区下方时，multiselect.gui 实测
+   菜单 y 195–274 正好盖住第二段 y=267 → Ctrl 加选落空、该套件 6 条判据全红。
+   现解法＝**按住多段修饰键期间菜单让路**（`.menu.selection-menu.menu-locked` 关指针事件）。
+   凡后续往菜单里加内容（Task 11 批注项、Task 12 更多色板）都要重跑 `multiselect.gui`。
+2. **让路状态只能从指针事件取，不能靠宿主 keydown/keyup**：foliate 章节在 iframe 里，
+   其 keyup 不转发到宿主（adapter 已注明）→ 宿主跟踪会卡在按住态，菜单永久不接指针、
+   点不动「摘录」。用 `pointerdown/move/up` 捕获（iframe 内的由 adapter 中继）。
+3. **给菜单加全局类名规则必须限定作用域**：`.menu-locked *` 这种通配规则会波及无关组件——
+   实测让 extract.gui「正文编辑落库」稳定变红（带规则 75/76 ×2；去掉 76/76 ×2，确定性 A/B）。
+   一律写全 `.menu.selection-menu.xxx`。
+4. **两个 GUI 套件绝不能并行跑**：本次并行时 marks.gui 假性 38/56（串行复跑 56/56）。
+   套件会 `taskkill` 全局 electron。
 
 ## 四、跨会话必须知道的坑（都在样张实测里踩过）
 
