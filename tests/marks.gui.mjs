@@ -499,6 +499,36 @@ try {
   pop = JSON.parse(String(await cdp.eval(popoverState)) || "{}");
   check("hover 带批注标记 → 浮层显示批注文字", pop.comment === "MARKGUI 批注样本", JSON.stringify(pop).slice(0, 300));
 
+  // 标记层的两条承重路径：滚动跟随 / 缩放重算（位置都在 syncMarks 里按当前页矩形重算）
+  const scrollBefore = await cdp.eval(`document.querySelector(".pdf-viewer-container").scrollTop`);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: 550, y: 400, deltaX: 0, deltaY: 180 });
+  await wait(600);
+  const scrollAfter = await cdp.eval(`document.querySelector(".pdf-viewer-container").scrollTop`);
+  check("（自证）滚动确实发生（scrollTop 变大）", typeof scrollAfter === "number" && scrollAfter > (scrollBefore ?? 0) + 100, `${scrollBefore} → ${scrollAfter}`);
+  const geoScroll = JSON.parse(String(await cdp.eval(markGeometry(ipcEx.id, JSON.stringify([{ x: 60, y: 40, w: 25, h: 3 }])))) || "{}");
+  check("滚动后标记仍贴合文字（Δ ≤ 2px；层不吃滚动偏移）", typeof geoScroll.dExact === "number" && geoScroll.dExact <= 2, JSON.stringify(geoScroll).slice(0, 300));
+
+  const wBefore = await cdp.eval(`document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width`);
+  const zoomOpened = await cdp.eval(`(() => {
+    const group = [...document.querySelectorAll(".reader-engine-controls .dd")];
+    for (const g of group) {
+      const b = g.querySelector("button");
+      if (b && /适应宽度|适应页面|%/.test(b.textContent)) { b.click(); return "opened"; }
+    }
+    return "no dropdown";
+  })()`);
+  await wait(400);
+  const zoomPick = await cdp.eval(`(() => {
+    const it = [...document.querySelectorAll(".dd-menu .dd-item")].find((x) => x.textContent.includes("75%"));
+    if (!it) return "no item";
+    it.click(); return "clicked";
+  })()`);
+  await wait(1500);
+  const wAfter = await cdp.eval(`document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width`);
+  check("（自证）缩放确实生效（页宽变了）", zoomOpened === "opened" && zoomPick === "clicked" && Math.abs((wAfter ?? 0) - (wBefore ?? 0)) > 50, `${zoomOpened}/${zoomPick} ${wBefore} → ${wAfter}`);
+  const geoZoom = JSON.parse(String(await cdp.eval(markGeometry(ipcEx.id, JSON.stringify([{ x: 60, y: 40, w: 25, h: 3 }])))) || "{}");
+  check("缩放后标记仍按百分比贴合（Δ ≤ 2px；百分比与缩放无关，框随页重算）", typeof geoZoom.dExact === "number" && geoZoom.dExact <= 2, JSON.stringify(geoZoom).slice(0, 300));
+
   // 深浅两档：切到暗夜
   const visLight = JSON.parse(String(await cdp.eval(visibilityProbe(ipcEx.id))) || "{}");
   const themeToggle = await cdp.eval(`(() => {
