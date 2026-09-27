@@ -351,8 +351,13 @@ try {
   await makeDrag(cdp)({ x: pick.x1, y: pick.y }, { x: pick.x2, y: pick.y });
   await wait(900);
   check("真鼠标拖选后选区菜单出现", (await cdp.eval(`!!document.querySelector(".selection-menu")`)) === true, "无菜单");
-  const btn = JSON.parse(String(await cdp.eval(centerOf(".selection-menu button:nth-child(4)"))) || "{}");
-  check("选区菜单含「摘录」按钮（第 4 项）", typeof btn.x === "number", JSON.stringify(btn));
+  const btn = JSON.parse(String(await cdp.eval(`(() => {
+    const b = [...document.querySelectorAll(".selection-menu .macts button")].find((x) => x.textContent.trim() === "摘录");
+    if (!b) return "";
+    const r = b.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  check("选区菜单含「摘录」按钮（动作行内，按文本定位）", typeof btn.x === "number", JSON.stringify(btn));
   await clickAt(cdp, btn.x, btn.y);
   await wait(1500);
 
@@ -582,8 +587,13 @@ try {
   check("EPUB 目标文字可定位（坐标可算）", typeof epSel.x1 === "number" && epSel.text === EPUB_MARK, JSON.stringify(epSel));
   await makeDrag(cdp)({ x: epSel.x1, y: epSel.y }, { x: epSel.x2, y: epSel.y });
   await wait(900);
-  const epBtn = JSON.parse(String(await cdp.eval(centerOf(".selection-menu button:nth-child(4)"))) || "{}");
-  check("EPUB 拖选后选区菜单出现", typeof epBtn.x === "number", JSON.stringify(epBtn));
+  const epBtn = JSON.parse(String(await cdp.eval(`(() => {
+    const b = [...document.querySelectorAll(".selection-menu .macts button")].find((x) => x.textContent.trim() === "摘录");
+    if (!b) return "";
+    const r = b.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  check("EPUB 拖选后选区菜单出现（动作行可定位）", typeof epBtn.x === "number", JSON.stringify(epBtn));
   await clickAt(cdp, epBtn.x, epBtn.y);
   await wait(1500);
   const epExRaw = await cdp.eval(fetchExtract(EPUB_MARK));

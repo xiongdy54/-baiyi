@@ -820,6 +820,15 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
    * 只在**真多段（≥2）**时传：单段路径保持既有载荷逐字节不变。
    */
   async function handleExtract(text: string, spans?: ExtractSpan[]) {
+    await writeExtract(text, spans);
+  }
+
+  /** 摘录/高亮落库的公共装配（kind 分族 + 批注色 + 批注文字；四条落库分支的唯一实现面） */
+  async function writeExtract(
+    text: string,
+    spans?: ExtractSpan[],
+    opts?: { kind?: "highlight" | "extract"; color?: string | null; comment?: string | null }
+  ) {
     const { readingWorkflow } = await import("./readingWorkflow");
     // 需求2：摘录同样记录选区锚点（跳转原文用）
     A().rememberAnchor(text);
@@ -830,6 +839,11 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const sc = A().sourceContext();
     const sourceAnchor = sc.extractId ? null : A().buildSourceAnchor(text);
     const ctxWithAnchor = sourceAnchor ? { ...(ctx || {}), sourceAnchor } : ctx;
+    const extra = {
+      ...(opts?.kind ? { kind: opts.kind } : {}),
+      ...(opts?.color ? { annotationColor: opts.color } : {}),
+      ...(opts?.comment ? { comment: opts.comment } : {})
+    };
     if (sc.extractId) {
       await readingWorkflow.create({
         parentType: "extract",
@@ -837,7 +851,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         documentId: sc.documentId || "",
         contentMarkdown: text,
         contextRef: ctxWithAnchor,
-        spans: multi
+        spans: multi,
+        ...extra
       });
     } else if (sc.documentId) {
       await readingWorkflow.create({
@@ -846,11 +861,56 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         documentId: sc.documentId,
         contentMarkdown: text,
         contextRef: ctxWithAnchor,
-        spans: multi
+        spans: multi,
+        ...extra
       });
     }
     eventBus.emit("workflow/changed");
     showToast("已摘录进学习队列");
+  }
+
+  /**
+   * R38/R40 点色落库：高亮＝只建纯高亮（kind="highlight"，不进队列）；摘录+高亮＝建摘录。
+   * 返回新条目 id 供 AnnotationEditor 挂批注；库侧无 documentId 时返回 null。
+   */
+  async function createAnnotation(
+    text: string,
+    spans: ExtractSpan[] | undefined,
+    color: string,
+    mode: "highlight" | "extract"
+  ): Promise<string | null> {
+    const { readingWorkflow } = await import("./readingWorkflow");
+    A().rememberAnchor(text);
+    const ctx = A().contextRef();
+    const multi = spans && spans.length >= 2 ? spans : undefined;
+    const sc = A().sourceContext();
+    const sourceAnchor = sc.extractId ? null : A().buildSourceAnchor(text);
+    const ctxWithAnchor = sourceAnchor ? { ...(ctx || {}), sourceAnchor } : ctx;
+    const payload = {
+      contentMarkdown: text,
+      contextRef: ctxWithAnchor,
+      spans: multi,
+      kind: mode,
+      annotationColor: color
+    };
+    let created: { id: string } | null = null;
+    if (sc.extractId) {
+      created = await readingWorkflow.create({
+        parentType: "extract",
+        parentId: sc.extractId,
+        documentId: sc.documentId || "",
+        ...payload
+      });
+    } else if (sc.documentId) {
+      created = await readingWorkflow.create({
+        parentType: "document",
+        parentId: sc.documentId,
+        documentId: sc.documentId,
+        ...payload
+      });
+    }
+    eventBus.emit("workflow/changed");
+    return created?.id ?? null;
   }
 
   // ---------- M4 快捷键动作（§9.1 M4：与下方选区菜单按钮完全同源） ----------
@@ -1058,6 +1118,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         void runOcclusionCards();
       }
     },
+    // 批注（R38/R40：点色落库 + 摘录/高亮共面）
+    createAnnotation,
+    writeExtract,
     // 浮层
     submitRegionCards,
     submitRegionManual,

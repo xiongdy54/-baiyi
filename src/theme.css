@@ -89,6 +89,26 @@
      它是「用户刚划出的选区」，要让多段同时可见）。派生自 --accent ⇒ 必须在
      body / body.theme-dark 各重算一次（§5.1 求值层纪律，理由同 --accent-soft）。 */
   --hl-multi: color-mix(in srgb, var(--accent) 22%, transparent);
+  /* 批注色板（批 4，规格 §2 色板 / §9.2）：8 色，与 Zotero 数量对齐（本项目自定值域，不抄色值）。
+     颜色**不承载调度语义**；渲染取 --annot-<name>（实色：竖线/色点/角标）与
+     --annot-<name>-soft（透明档：文中高亮，浅档 12% / 深档 26%）。
+     -soft 派生自实色 ⇒ 必须与实色一起在 :root / body / body.theme-dark 三处各声明一次。 */
+  --annot-red: #c0392b;
+  --annot-orange: #c2410c;
+  --annot-yellow: #a16207;
+  --annot-green: #1a7f37;
+  --annot-teal: #0f766e;
+  --annot-blue: #002fa7;
+  --annot-purple: #6d28d9;
+  --annot-magenta: #a21caf;
+  --annot-red-soft: color-mix(in srgb, var(--annot-red) 12%, transparent);
+  --annot-orange-soft: color-mix(in srgb, var(--annot-orange) 12%, transparent);
+  --annot-yellow-soft: color-mix(in srgb, var(--annot-yellow) 12%, transparent);
+  --annot-green-soft: color-mix(in srgb, var(--annot-green) 12%, transparent);
+  --annot-teal-soft: color-mix(in srgb, var(--annot-teal) 12%, transparent);
+  --annot-blue-soft: color-mix(in srgb, var(--annot-blue) 12%, transparent);
+  --annot-purple-soft: color-mix(in srgb, var(--annot-purple) 12%, transparent);
+  --annot-magenta-soft: color-mix(in srgb, var(--annot-magenta) 12%, transparent);
   /* 动效 */
   --ease: cubic-bezier(0.2, 0, 0.38, 0.9);
   --dur: 120ms;
@@ -126,6 +146,24 @@ body.theme-dark {
   /* 必须与 --shadow-float 各写一次：自定义属性里的 var() 在声明元素上求值，
      若 :root 写成 var(--shadow-float)，深色模式下 --shadow-panel 仍会取到浅色值 */
   --shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.5);
+  /* 批注色板深色档：实色提亮（对比不足的同因处理，同 --accent），透明档加深到 26%
+     以便与深底拉开——浅档 12% 在 #101010 上几乎看不见（样张实测口径）。 */
+  --annot-red: #f87171;
+  --annot-orange: #fb923c;
+  --annot-yellow: #eab308;
+  --annot-green: #3fb950;
+  --annot-teal: #2dd4bf;
+  --annot-blue: #5b7fe8;
+  --annot-purple: #a78bfa;
+  --annot-magenta: #e879f9;
+  --annot-red-soft: color-mix(in srgb, var(--annot-red) 26%, transparent);
+  --annot-orange-soft: color-mix(in srgb, var(--annot-orange) 26%, transparent);
+  --annot-yellow-soft: color-mix(in srgb, var(--annot-yellow) 26%, transparent);
+  --annot-green-soft: color-mix(in srgb, var(--annot-green) 26%, transparent);
+  --annot-teal-soft: color-mix(in srgb, var(--annot-teal) 26%, transparent);
+  --annot-blue-soft: color-mix(in srgb, var(--annot-blue) 26%, transparent);
+  --annot-purple-soft: color-mix(in srgb, var(--annot-purple) 26%, transparent);
+  --annot-magenta-soft: color-mix(in srgb, var(--annot-magenta) 26%, transparent);
 }
 
 /* ---------- 基础 ---------- */
@@ -165,6 +203,24 @@ body {
   --accent-pressed: color-mix(in srgb, var(--accent) 78%, #000000);
   /* 多段选择高亮：派生自 --accent，必须在所有会被上层改 --accent 的层各声明一次 */
   --hl-multi: color-mix(in srgb, var(--accent) 22%, transparent);
+  /* 批注色板：-soft 派生自实色，同样必须在 body 这一层重取一次（§5.1 求值层纪律；
+     否则皮肤在 body 上改 --annot-* 时，-soft 会停在 :root 的实色上） */
+  --annot-red: #c0392b;
+  --annot-orange: #c2410c;
+  --annot-yellow: #a16207;
+  --annot-green: #1a7f37;
+  --annot-teal: #0f766e;
+  --annot-blue: #002fa7;
+  --annot-purple: #6d28d9;
+  --annot-magenta: #a21caf;
+  --annot-red-soft: color-mix(in srgb, var(--annot-red) 12%, transparent);
+  --annot-orange-soft: color-mix(in srgb, var(--annot-orange) 12%, transparent);
+  --annot-yellow-soft: color-mix(in srgb, var(--annot-yellow) 12%, transparent);
+  --annot-green-soft: color-mix(in srgb, var(--annot-green) 12%, transparent);
+  --annot-teal-soft: color-mix(in srgb, var(--annot-teal) 12%, transparent);
+  --annot-blue-soft: color-mix(in srgb, var(--annot-blue) 12%, transparent);
+  --annot-purple-soft: color-mix(in srgb, var(--annot-purple) 12%, transparent);
+  --annot-magenta-soft: color-mix(in srgb, var(--annot-magenta) 12%, transparent);
   /* 同理：--text-primary/--text-helper 在 :root 里是 var(--ink)/var(--grey-3)，
      皮肤只改 --ink 或 --grey-3 时必须能在 body 这一层重新取到，
      否则文字色会停在基础主题值上，与皮肤色板错位。 */
@@ -1821,20 +1877,70 @@ body.theme-dark .modal-panel {
   gap: var(--sp-2);
 }
 
-/* ---------- 选中菜单 / Toast（Phase 3/12/13） ---------- */
+/* ---------- 选区菜单（批 4 Task 9 / 规格 §3.3：两行面板）/ Toast ---------- */
 
+/* 类名与尺寸照 design-samples/annotation-two-modes.html（对版基准）。
+   **fixed 定位**：坐标＝视口坐标，与 placePopover 的取值同域（用 absolute 会与容器偏移混用）。
+   定位算法在 src/lib/popoverPlace.ts（R22：锚点＝选区包围盒，不用 pointerup 点）。 */
+.menu,
 .selection-menu {
-  position: absolute;
-  transform: translateX(-50%);
+  position: fixed;
   display: flex;
-  gap: 1px; /* 1px 缝 = 让 accent 底色透出来当分隔线，非间距档 */
-  background: var(--accent);
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-float);
   z-index: var(--z-sticky);
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
-.selection-menu button {
+.selection-menu { transform: none; }
+.menu .mrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* 模式段控：两枚互斥（与 Zotero 侧栏页签同规——当前项 accent 下划线） */
+.seg {
+  display: flex;
+  border: 1px solid var(--border-subtle);
+}
+.seg button {
+  height: 28px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg button.on {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 500;
+}
+.seg button:hover { background: var(--grey-1); }
+/* 调色排：色块即动作（点一下＝用这支色完成当前模式的操作） */
+.swatches { display: flex; gap: var(--sp-1); align-items: center; }
+.swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  padding: 0;
+}
+.swatch.custom {
+  background: conic-gradient(from 0deg, var(--annot-red), var(--annot-yellow), var(--annot-green), var(--annot-teal), var(--annot-blue), var(--annot-purple), var(--annot-red));
+}
+/* 既有动作行（原菜单按钮） */
+.menu .macts,
+.selection-menu .macts { display: flex; background: var(--accent); }
+.menu .macts button,
+.selection-menu .macts button {
   height: 32px;
   padding: 0 var(--sp-3);
   background: var(--accent);
@@ -1847,7 +1953,14 @@ body.theme-dark .modal-panel {
   -webkit-app-region: no-drag;
   pointer-events: auto;
 }
-.selection-menu button:hover { background: var(--accent-hover); }
+.menu .macts button:hover,
+.selection-menu .macts button:hover { background: var(--accent-hover); }
+
+/* 多段选择修饰键按住期间菜单「让路」：必须连子元素一起关掉指针事件——
+   动作行按钮有自己的 pointer-events:auto（上一条规则），只关容器会被它翻回来。
+   作用域限定到选区菜单自身（不加 .selection-menu 时，这条通配规则会波及无关组件）。 */
+.menu.selection-menu.menu-locked,
+.menu.selection-menu.menu-locked * { pointer-events: none !important; }
 
 .reader-toast {
   position: fixed;

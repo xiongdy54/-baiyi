@@ -21,6 +21,7 @@ import ReaderEngine from "./reader/ReaderEngine";
 import MarkPopover from "./reader/MarkPopover";
 import ManualCardEditor from "./ManualCardEditor";
 import AIPanel from "./AIPanel";
+import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import TocSidebar from "./reader/TocSidebar";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
@@ -177,7 +178,14 @@ export default function Reader({
    * v48.23（D61 §6.8-11）：选区菜单状态扩为携带 `spans`（多段不相邻选择的原始采集物）。
    * `text` 恒为各段经主进程拼接后的文本——菜单与 5 个动作只读 text，故多段对所有动作自动生效。
    */
-  const [selection, setSelection] = useState<{ x: number; y: number; text: string; spans: ExtractSpan[] } | null>(null);
+  const [selection, setSelection] = useState<{
+    x: number;
+    y: number;
+    text: string;
+    spans: ExtractSpan[];
+    /** 选区包围盒（视口坐标）——菜单定位的锚点（R22 判据 4：不再用 pointerup 点） */
+    rect: ReaderRect;
+  } | null>(null);
   /** 多段选择集合（与主进程 updateSpanSet 同步的权威列表；DOM 顺序＝落库顺序） */
   const multiSpansRef = useRef<ExtractSpan[]>([]);
   /** 修饰键（settings.app.multiSelectKey；读侧归一，默认 Ctrl / macOS Meta） */
@@ -288,7 +296,8 @@ export default function Reader({
     submitRegionManual,
     handleManualCard,
     startManualWith,
-    closeManual
+    closeManual,
+    createAnnotation
   } = selActions;
 
   // ---------- 阅读内核分支（v20：文件书走 foliate 内核；粘贴书/摘录 R1b 合流） ----------
@@ -494,7 +503,14 @@ export default function Reader({
         multiSpansRef.current = r.spans;
         kernelRef.current?.multiSelectHighlight?.(r.action);
         (window as unknown as { __readerMultiSpans?: ExtractSpan[] }).__readerMultiSpans = r.spans;
-        setSelection({ x: pos.x, y: pos.y, text: r.text, spans: r.spans });
+        setSelection({
+          x: pos.x,
+          y: pos.y,
+          text: r.text,
+          spans: r.spans,
+          // 选区几何（视口坐标）优先；内核未给几何时退化为 pointerup 点（宽高 0）
+          rect: geom ? { x: geom.x, y: geom.y, width: geom.width, height: geom.height } : { x: pos.x, y: pos.y, width: 0, height: 0 }
+        });
       })
       .catch(() => {
         // 主进程往返失败（理论上不可达）：不静默改集合，避免菜单与库不一致
@@ -893,7 +909,8 @@ export default function Reader({
       y,
       text,
       // 粘贴书/摘录的 markdown 分支没有内核（不会走到多段选择），恒为单段
-      spans: [{ text }]
+      spans: [{ text }],
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
     });
   }
 
@@ -1047,6 +1064,50 @@ export default function Reader({
     };
     startManualWith(mark.text);
     closeMarkPop();
+  }
+
+  // 批 4 Task 9：选区菜单的标注模式（Task 12 接设置键 app.annotateMode 持久化；本轮先本地态）
+  const [annotMode, setAnnotMode] = useState<AnnotMode>("highlight");
+  /** 用户配好的色板（Task 12 接 app.annotatePalette；本轮给全 8 色） */
+  const ANNOT_PALETTE: readonly AnnotColor[] = ANNOT_COLORS;
+
+  /**
+   * 多段选择修饰键按住期（规格 §6.8-11 与 R22 的冲突调和）：菜单**让路**不接管指针。
+   * 实测因果：两行菜单高 79px，按 R22 落在选区下方时会盖住下一行的拖选线
+   * （multiselect.gui：菜单 y 195–274 盖住第二段 y=267）→ 不给让路则该套件 6 条判据全红；
+   * 差分确认（把菜单临时改成 prefer="above" 复跑即 20/20）后定为「按住修饰键期间菜单不接指针」。
+   */
+  const [multiKeyHeld, setMultiKeyHeld] = useState(false);
+  useEffect(() => {
+    // 修饰键状态一律从**指针事件**取（与内核 modifierFlagOf 同一信号源）：
+    // foliate 章节在 iframe 里，其 keyup 不转发到宿主（adapter 已注明），靠宿主 keydown/keyup
+    // 跟踪会在「拖完松手」时卡在按住态——实测该残留态会让菜单永久不接指针、点不动「摘录」。
+    // 指针事件则两处都有：宿主正文直接冒泡，iframe 内的由 adapter 中继。
+    const sync = (e: PointerEvent) => setMultiKeyHeld(modifierFlagOf(multiKeyRef.current, e));
+    const reset = () => setMultiKeyHeld(false);
+    document.addEventListener("pointerdown", sync, true);
+    document.addEventListener("pointermove", sync, true);
+    document.addEventListener("pointerup", sync, true);
+    window.addEventListener("blur", reset);
+    return () => {
+      document.removeEventListener("pointerdown", sync, true);
+      document.removeEventListener("pointermove", sync, true);
+      document.removeEventListener("pointerup", sync, true);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+
+  /**
+   * R38/R40：点色＝完成当前模式的动作（颜色不记）。
+   * 高亮＝建 kind="highlight" 的纯高亮；摘录+高亮＝建 kind="extract" 的摘录；两者都带 annotationColor。
+   * 随后弹 AnnotationEditor 写批注（Task 11 接；本轮只落库不带批注）。
+   */
+  async function handlePickColor(color: AnnotColor) {
+    if (!selection) return;
+    const text = selection.text;
+    const spans = selection.spans;
+    clearSelection();
+    await createAnnotation(text, spans, color, annotMode);
   }
 
   // 阅读场景快捷键（制卡 Ctrl+Z / AI 制卡 Ctrl+X / AI 解释 Ctrl+A / 摘录 Ctrl+S / 查词 Ctrl+D）：
@@ -1268,17 +1329,23 @@ export default function Reader({
           )}
 
           {selection && (
-            <div
-              className="selection-menu"
-              style={engineMode ? { position: "fixed", left: selection.x, top: Math.max(8, selection.y) } : { left: selection.x, top: Math.max(8, selection.y) }}
-            >
-              <button onClick={selAct.manual}>制卡</button>
-              <button onClick={selAct.aiCards}>AI 制卡</button>
-              <button onClick={selAct.explain}>AI 解释</button>
-              <button onClick={selAct.extract}>摘录</button>
-              <button onClick={selAct.lookup}>查词</button>
-              <button onClick={selAct.occlusion}>图片挖空</button>
-            </div>
+            <SelectionMenu
+              anchor={selection.rect}
+              container={scrollRef.current?.getBoundingClientRect() ?? null}
+              mode={annotMode}
+              onModeChange={setAnnotMode}
+              colors={ANNOT_PALETTE}
+              onPick={handlePickColor}
+              byLocked={multiKeyHeld}
+              actions={[
+                { key: "manual", label: "制卡", onClick: selAct.manual },
+                { key: "ai-cards", label: "AI 制卡", onClick: selAct.aiCards },
+                { key: "explain", label: "AI 解释", onClick: selAct.explain },
+                { key: "extract", label: "摘录", onClick: selAct.extract },
+                { key: "lookup", label: "查词", onClick: selAct.lookup },
+                { key: "occlusion", label: "图片挖空", onClick: selAct.occlusion }
+              ]}
+            />
           )}
         </div>
 
