@@ -5,8 +5,6 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { cardsApi, parseCloze, type CardDraft } from "../lib/cards";
 import { useSelectionActions } from "../lib/useSelectionActions";
-import type { DictionaryEntry, ReadingContext, VocabKind } from "../lib/dict";
-import { DictPanel } from "./DictPanel";
 import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
 import { settingsStore } from "../lib/settings";
 import { MindmapWorkspace } from "./MindmapWorkspace";
@@ -19,9 +17,8 @@ import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
 import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
 import MarkPopover from "./reader/MarkPopover";
-import ManualCardEditor from "./ManualCardEditor";
-import AIPanel from "./AIPanel";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
+import SelectionPanels from "./SelectionPanels";
 import TocSidebar from "./reader/TocSidebar";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
@@ -1349,95 +1346,7 @@ export default function Reader({
           )}
         </div>
 
-        {manualOpen && (
-          <ManualCardEditor
-            quote={manualQuote ?? selection?.text ?? ""}
-            imageRegion={manualImage ?? undefined}
-            onCancel={closeManual}
-            onSave={async (p) => {
-              try {
-                await handleManualCard(p);
-              } finally {
-                closeManual();
-              }
-            }}
-          />
-        )}
-
-        {dictPanel && (
-          <DictPanel
-            panel={dictPanel}
-            reading={dictReading}
-            popupFields={dictFields}
-            manualLang={dictManualLang}
-            onClose={() => setDictPanel(null)}
-            onRetry={() => void runLookup(false, dictPanel.selectedText)}
-            onUseLocal={() => void runLookup(true, dictPanel.selectedText)}
-            // v38（D35）：面板语言切换——以对应语言重查（"auto"=清除手动选择走自动路由）
-            onSelectLanguage={(lang) => {
-              setDictManualLangBoth(lang === "auto" ? null : lang);
-              void runLookup(false, dictPanel.selectedText);
-            }}
-            onMakeCards={(entry: DictionaryEntry, ctx: ReadingContext, kinds: VocabKind[]) => void acceptVocabCards(entry, ctx, kinds)}
-          />
-        )}
-
-        {aiPanel && (
-          <AIPanel
-            panel={{ ...aiPanel, elapsedSec }}
-            onClose={() => {
-              if (
-                (aiPanel.kind === "cards" || aiPanel.kind === "occlusion") &&
-                aiPanel.batchId &&
-                aiPanel.drafts?.length
-              ) {
-                cardsApi.setBatchStatus(aiPanel.batchId, "rejected");
-              }
-              setAiPanel(null);
-            }}
-            onAccept={(d, idx, edited) => {
-              return acceptDraft(d, idx, edited);
-            }}
-            onAcceptOcclusion={(d, idx) => acceptOcclusionDraft(d, idx)}
-            onEdit={(idx, patch) => {
-              setAiPanel((p) => {
-                if (!p || !p.drafts) return p;
-                const next = [...p.drafts];
-                next[idx] = { ...next[idx], ...patch };
-                return { ...p, drafts: next };
-              });
-            }}
-            onSplitReverse={(idx) => {
-              // v16（D18）：「转翻转卡」= 拆为两张互为翻转的独立 qa 草稿（各自有独立 FSRS 调度）
-              setAiPanel((p) => {
-                if (!p || !p.drafts) return p;
-                const d = p.drafts[idx];
-                const a: CardDraft = { ...d, cardType: "qa", front: d.front, back: d.back };
-                const b: CardDraft = {
-                  ...d,
-                  cardType: "qa",
-                  front: (d.back || "").trim() || d.front,
-                  back: d.front,
-                  cloze: null
-                };
-                const next = [...p.drafts.slice(0, idx), a, b, ...p.drafts.slice(idx + 1)];
-                // 拆分点之后的已接受/补充标记索引整体右移一位，保持对位
-                const accepted = new Set([...(p.accepted ?? [])].map((k) => (k > idx ? k + 1 : k)));
-                const supplemental = new Set([...(p.supplemental ?? [])].map((k) => (k > idx ? k + 1 : k)));
-                return { ...p, drafts: next, accepted, supplemental };
-              });
-            }}
-            onRejectAll={rejectAllDrafts}
-            onExplain={(q) => runExplain(aiPanel.text, q)}
-            onMakeCards={() => runAICards(aiPanel.text, undefined, aiMode)}
-            onModeChange={(m) => changeAiMode(m)}
-            mode={aiMode}
-            onSearchBackground={() => searchAndRetry(aiPanel.text)}
-            onFollowUpCards={(item, kpTitle, hint) => runFollowUpCards(item, kpTitle, hint)}
-            onExploration={(item, kpTitle) => runExploration(item, kpTitle)}
-            elapsedTick={nowTick}
-          />
-        )}
+        <SelectionPanels sel={selActions} selectionText={selection?.text ?? null} nowTick={nowTick} elapsedSec={elapsedSec} />
       </div>
 
       {/* v25 图片聚焦覆盖层：位于阅读器最外层（fixed 全屏），点击模糊区域退出 */}

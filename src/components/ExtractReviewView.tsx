@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ExtractCardFace, { parseQuoteRanges } from "./ExtractCardFace";
+import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
+import SelectionPanels from "./SelectionPanels";
 import { cardsApi } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
 import { readingWorkflow, undoApi, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
 import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
+import { useSelectionActions } from "../lib/useSelectionActions";
+import { createMultiHighlight } from "../lib/reader/multiHighlight";
+
+/** 选区快照（卡面 onSelection 回调的载荷；null＝无选区） */
+type FaceSelection = { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null;
 
 interface Props {
   onOpen: (extractId: string) => void;
@@ -82,6 +89,23 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
   const [viewRanges, setViewRanges] = useState<Array<{ start: number; end: number }> | null>(null);
   const [crumbOpen, setCrumbOpen] = useState(false);
   const crumbRef = useRef<HTMLDivElement | null>(null);
+  /** 批 4 Task 10：卡面正文里的当前选区（菜单锚点与动作文本都取自它；无选区＝null） */
+  const [faceSel, setFaceSel] = useState<FaceSelection>(null);
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  // 选区高亮＝CSS Custom Highlight API（宿主文档实例：本页正文就在宿主里，不碰 DOM——§3.3b）
+  const multiHighlightRef = useRef<ReturnType<typeof createMultiHighlight> | null>(null);
+  if (!multiHighlightRef.current) {
+    multiHighlightRef.current = createMultiHighlight({
+      currentDoc() {
+        const sel = window.getSelection();
+        return sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim() ? document : null;
+      }
+    });
+  }
+
+  /** 批 4 Task 10：选区菜单的标注模式与色板（Task 12 接设置键；本轮本地态 + 全 8 色） */
+  const [annotMode, setAnnotMode] = useState<AnnotMode>("highlight");
+  const ANNOT_PALETTE: readonly AnnotColor[] = ANNOT_COLORS;
 
   const scope = useMemo<ScopeFilter>(
     () => ({
@@ -127,6 +151,84 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
   /** 面包屑描述的是**正在显示**的那张卡：会话态＝队列头；查看态＝被点开的那层 */
   const shown = viewing ?? current;
   const shownId = shown?.id ?? null;
+
+  /**
+   * 批 4 Task 10（规格 §3 / §4）：摘录页的选区动作编排与阅读器复用同一个钩子。
+   * 宿主注入面按摘录页的实际能力给：正文＝卡面（不是内核），故 selectionText/spans 取自卡面回调，
+   * 定位锚用卡面正文的 documentId/extractId；图片挖空在摘录页不存在（不注入 focus）。
+   */
+  const sourceTextRef = useRef("");
+  const selActions = useSelectionActions({
+    selectionText: () => faceSel?.text ?? null,
+    selectionSpans: () => faceSel?.ranges.map((r) => ({ text: "" })),
+    contextRef: () => (shown?.contextRef ? { ...shown.contextRef } : null),
+    sourceContext: () => ({
+      documentId: shown?.contextRef?.documentId,
+      extractId: shown?.contextRef?.extractId ?? undefined
+    }),
+    labels: { title: shown?.docTitle, sourceTitle: shown?.docTitle, section: undefined },
+    ownerKey: () => shown?.contextRef?.documentId ?? "",
+    itemId: null,
+    sourceTextRef,
+    bodyText: String(shown?.contentMarkdown ?? ""),
+    lookupLocator: () => ({ cfi: null, pageIndex: null }),
+    anchorText: () => shown?.contextRef?.anchorText ?? null,
+    rememberAnchor: () => {
+      /* 摘录页不落跳转锚：正文就是本条摘录本身，跳转目标由 contextRef 决定 */
+    },
+    clearSelection: () => {
+      window.getSelection()?.removeAllRanges();
+      multiHighlightRef.current?.clear();
+      setFaceSel(null);
+    },
+    clearAnchor: () => {
+      /* 摘录页无制卡锚点（正文即锚） */
+    },
+    occlusionSourceRef: { current: "engine" },
+    showToast: (msg) => {
+      setFlash(msg);
+      window.setTimeout(() => setFlash(null), 1800);
+    },
+    // 摘录页的选区就是「卡面里选中的那段」：快照面由卡面 onSelection 提供（faceSel），
+    // 但菜单/面板的点击会先触发卡面 mouseup——动作面点击已豁免（见 ExtractCardFace.onUp）。
+    buildSourceAnchor: () => null,
+    /** 规格 §3.4：摘录页的批注/高亮恒挂在**当前卡**上（parentRange＝所选区间） */
+    annotateParent: () => {
+      if (!shown?.id || !shown.contextRef?.documentId) return null;
+      return {
+        parentType: "extract" as const,
+        parentId: shown.id,
+        documentId: shown.contextRef.documentId,
+        ranges: faceSel?.ranges
+      };
+    },
+    focus: {
+      get: () => null,
+      close: () => {},
+      setBusy: () => {}
+    }
+  });
+  const { createAnnotation } = selActions;
+  // 卡面选区变化：画/撤选区高亮（绘制层，不碰正文 DOM——§3.3b）
+  useEffect(() => {
+    const mh = multiHighlightRef.current;
+    if (!mh) return;
+    if (faceSel) mh.update("replace");
+    else mh.clear();
+  }, [faceSel]);
+
+  /**
+   * R38/R40：点色＝完成当前模式的动作（颜色不记）。
+   * 摘录页按规格 §3.4 把批注/高亮挂在当前卡上（annotateParent 已在适配器里给定）。
+   */
+  async function handlePickColor(color: AnnotColor) {
+    const sel = faceSel;
+    if (!sel) return;
+    multiHighlightRef.current?.clear();
+    setFaceSel(null);
+    window.getSelection()?.removeAllRanges();
+    await createAnnotation(sel.text, undefined, color, annotMode);
+  }
 
   // 层级链随显示中的卡片刷新（getExtractChain 自根到当前，封顶 20 级）
   useEffect(() => {
@@ -348,7 +450,7 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
   }
 
   return (
-    <div className="extract-page" data-showing-extract-id={shownId ?? ""} data-viewing={viewing ? "1" : undefined}>
+    <div className="extract-page" ref={pageRef} data-showing-extract-id={shownId ?? ""} data-viewing={viewing ? "1" : undefined}>
       <div className="extract-page-head">
         <div className="extract-crumbs" data-extract-crumbs>
           {parts}
@@ -424,10 +526,34 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
                       "queue"
                     )
                 : undefined,
-            onUndo: () => void undo()
+            onUndo: () => void undo(),
+            // 批 4 Task 10：把正文里的选区报给外层（菜单锚点 + 五动作的取材）
+            onSelection: setFaceSel
           }}
         />
       )}
+
+      {/* 批 4 Task 10（规格 §3.3）：选区菜单——摘录页无图片挖空（卡面正文的图片能力属批 5） */}
+      {faceSel && !viewing && (
+        <SelectionMenu
+          anchor={faceSel.rect}
+          container={pageRef.current?.getBoundingClientRect() ?? null}
+          mode={annotMode}
+          onModeChange={setAnnotMode}
+          colors={ANNOT_PALETTE}
+          onPick={handlePickColor}
+          actions={[
+            { key: "manual", label: "制卡", onClick: () => selActions.actions.manual() },
+            { key: "ai-cards", label: "AI 制卡", onClick: () => selActions.actions.aiCards() },
+            { key: "explain", label: "AI 解释", onClick: () => selActions.actions.explain() },
+            { key: "extract", label: "摘录", onClick: () => selActions.actions.extract() },
+            { key: "lookup", label: "查词", onClick: () => selActions.actions.lookup() }
+          ]}
+        />
+      )}
+
+      {/* 批 4 Task 10：三个面板与阅读器共用同一份实现（SelectionPanels） */}
+      <SelectionPanels sel={selActions} selectionText={faceSel?.text ?? null} elapsedSec={0} />
     </div>
   );
 }

@@ -65,6 +65,18 @@ export interface SelectionActionsAdapter {
   showToast: (msg: string) => void;
   /** 标记浮层「就此制卡」用的源锚装配（宿主持有内核选区几何） */
   buildSourceAnchor: (text: string) => Record<string, unknown> | null;
+  /**
+   * 批注/高亮的落库父级（规格 §3.4 两宿主不同）：
+   * 阅读器＝按 sourceContext 分流（根摘录 anchor 到 document、子摘录 anchor 到父摘录）；
+   * 摘录页＝**恒挂在当前卡上**（parentType:"extract"、parentId＝当前卡 id、parentRange＝所选区间）。
+   * 不传则回落到阅读器口径。
+   */
+  annotateParent?: () => {
+    parentType: "document" | "extract";
+    parentId: string;
+    documentId: string;
+    ranges?: Array<{ start: number; end: number }>;
+  } | null;
   /** 手动制卡浮层提交/取消后的一次性收尾（宿主清 contextRef 覆盖值） */
   onManualSettled?: () => void;
   /** 图片聚焦层（宿主状态）：动作从这里取聚焦图，并回写忙态/关闭 */
@@ -149,6 +161,8 @@ export interface AiPanelState {
     error?: string;
   }[];
 }
+
+export type SelectionActions = ReturnType<typeof useSelectionActions>;
 
 export function useSelectionActions(adapter: SelectionActionsAdapter) {
   const { showToast, sourceTextRef, occlusionSourceRef } = adapter;
@@ -894,7 +908,17 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       annotationColor: color
     };
     let created: { id: string } | null = null;
-    if (sc.extractId) {
+    // 宿主给定的落库父级优先（摘录页恒挂当前卡；规格 §3.4 表）
+    const parent = A().annotateParent?.();
+    if (parent) {
+      created = await readingWorkflow.create({
+        parentType: parent.parentType,
+        parentId: parent.parentId,
+        documentId: parent.documentId,
+        ...(parent.ranges?.length ? { quoteRange: parent.ranges } : {}),
+        ...payload
+      });
+    } else if (sc.extractId) {
       created = await readingWorkflow.create({
         parentType: "extract",
         parentId: sc.extractId,

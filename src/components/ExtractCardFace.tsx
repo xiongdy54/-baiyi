@@ -153,6 +153,13 @@ export interface ExtractFaceHandlers {
    * 子卡「跳转原文」据此回到父卡并高亮所选那句。
    */
   onExtract?: (payload: ExtractPickPayload) => void;
+  /**
+   * 批 4 Task 10（规格 §3）：把「正文里的这次选区」报给外层，供选区菜单定位与动作取文本。
+   * 采集时机与 `picked` 快照同源（mouseup/keyup），载荷含 rect（视口坐标，菜单锚点 R22）、
+   * 各段在本卡正文里的偏移、以及按偏移切出的文本（与落库文本逐字符对齐）。
+   * 选区落到正文之外或塌缩 ⇒ 报 null（外层据此收起菜单）。
+   */
+  onSelection?: (payload: { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null) => void;
 }
 
 /**
@@ -194,6 +201,8 @@ export default function ExtractCardFace({
   // 换卡即清快照（偏移是相对**这一版正文**的，跨卡复用会把范围锚写歪）
   useEffect(() => {
     setPicked(null);
+    handlers.onSelection?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extract.id]);
 
   useEffect(() => {
@@ -205,7 +214,16 @@ export default function ExtractCardFace({
       const full = String(extract.contentMarkdown || "");
       const ok = selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length);
       const text = ok.map((r) => full.slice(r.start, r.end)).join("\n\n");
-      setPicked(ok.length && text.trim() ? { text, ranges: ok } : null);
+      const live = ok.length && text.trim() ? { text, ranges: ok } : null;
+      setPicked(live);
+      // 批 4 Task 10：同一采集点把选区报给外层（含视口坐标 rect＝菜单锚点；R22 不用 pointerup 点）
+      const sel = typeof window !== "undefined" ? window.getSelection() : null;
+      const r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
+      handlers.onSelection?.(
+        live && r && (r.width || r.height)
+          ? { rect: { x: r.left, y: r.top, width: r.width, height: r.height }, ranges: live.ranges, text: live.text }
+          : null
+      );
     };
     const onUp = (e: Event) => {
       const t = e.target as Node | null;
@@ -213,8 +231,18 @@ export default function ExtractCardFace({
         capture();
         return;
       }
-      // 卡外落下＝旧快照已失效；卡内按钮（如「摘录」）自身的 mouseup 不算，快照要活到 onClick
-      if (!(t && face && face.contains(t))) setPicked(null);
+      // 卡外落下＝旧快照已失效；卡内按钮（如「摘录」）自身的 mouseup 不算，快照要活到 onClick。
+      // 批 4 Task 10：选区菜单与三个面板渲染在**卡面之外**（页级），点它们同样是「动作面」而非
+      // 「点别处」——不豁免的话，mouseup 会先清掉快照/选区，按钮的 onClick 再读就晚了（实测三动作全哑）。
+      const el = t as HTMLElement | null;
+      const inActionSurface =
+        !!el && typeof el.closest === "function" &&
+        !!(el.closest(".selection-menu") || el.closest(".modal-panel") || el.closest(".dict-panel") || el.closest(".ai-panel"));
+      if (inActionSurface) return;
+      if (!(t && face && face.contains(t))) {
+        setPicked(null);
+        handlers.onSelection?.(null);
+      }
     };
     const onKey = () => {
       const a = document.activeElement;
@@ -226,7 +254,7 @@ export default function ExtractCardFace({
       document.removeEventListener("mouseup", onUp);
       document.removeEventListener("keyup", onKey);
     };
-  }, [extract.id, extract.contentMarkdown, viewOnly]);
+  }, [extract.id, extract.contentMarkdown, viewOnly, handlers]);
 
   // 落点（尽力而为）：高亮段落在卡面上可见即滚到可视区中部（容器不可滚时是一次 no-op）
   useEffect(() => {
