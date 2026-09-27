@@ -300,13 +300,23 @@ async function initDb() {
     ["annotation_type", "TEXT"],
     ["annotation_color", "TEXT"],
     ["tag_json", "TEXT"],
-    ["quote_range_json", "TEXT"]
+    ["quote_range_json", "TEXT"],
+    // v48.25 / 批 4（规格 INLINE-ANNOTATION §1.4，R35）：高亮与摘录**分族**——
+    // 'highlight'＝纯高亮（不进队列/不计上限/不进 FSRS，但进浏览器与搜索）；
+    // 'extract'＝摘录（现有语义不变）。存量行 NULL ⇒ 一律按摘录对待（零语义变更）。
+    ["kind", "TEXT"]
   ]) {
     try {
       db.run(`ALTER TABLE extracts ADD COLUMN ${col} ${type}`);
     } catch {
       /* 列已存在 */
     }
+  }
+  // 存量回填：NULL 一律按摘录（幂等，重复执行无副作用）
+  try {
+    db.run("UPDATE extracts SET kind = 'extract' WHERE kind IS NULL OR kind = ''");
+  } catch {
+    /* 列不存在等异常不阻塞启动 */
   }
   try {
     // 书级默认优先级（默认 50 ＝与摘录默认同值，存量语义零变更）
@@ -2321,7 +2331,7 @@ function queryAll(sql, params = []) {
 }
 
 function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef,
-  comment, annotationType, annotationColor, tags, quoteRange, spans }) {
+  comment, annotationType, annotationColor, tags, quoteRange, spans, kind }) {
   // 批次 E（D-TEST-15 T3 档）：extracts 是「挂在文档上的行」，父文档不存在就别插
   // （插进去就是日后没人踩得到的悬空行）。返回 false 不抛错，与 T1/T2 档一致。
   if (!rowExists("documents", documentId)) return false;
@@ -2373,8 +2383,8 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
     return JSON.stringify(contextRef);
   })();
   db.run(
-    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, priority_source, topic_next_at, interval_days, a_factor, workflow_state_json, comment, annotation_type, annotation_color, tag_json, quote_range_json, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1.6, NULL, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, priority_source, topic_next_at, interval_days, a_factor, workflow_state_json, comment, annotation_type, annotation_color, tag_json, quote_range_json, kind, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1.6, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
     [
       id,
       String(parentType),
@@ -2390,6 +2400,8 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
       annotationColor ? String(annotationColor) : null,
       tagsJson,
       rangeJson,
+      // 分族（R35）：只认白名单两值，其余一律按摘录（前向兼容）
+      String(kind) === "highlight" ? "highlight" : "extract",
       now,
       now
     ]
@@ -2443,12 +2455,13 @@ function listDueExtracts(nowTs) {
             e.priority_source AS prioritySource, e.engine_state_json AS engineStateJson,
             e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
             e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
+            COALESCE(e.kind,'extract') AS kind,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
             li.title AS docTitle, li.id AS libraryItemId
      FROM extracts e
      JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
      JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
-     WHERE e.is_deleted = 0 AND e.topic_next_at <= ?
+     WHERE e.is_deleted = 0 AND COALESCE(e.kind,'extract') = 'extract' AND e.topic_next_at <= ?
        -- v48.22（D58，§6.4.2）：未知状态一律按 open 对待 ⇒ 必须写成**排除式**白名单；
        -- 写成包含式（status IN (...)）会把未知状态误排除，违反前向兼容
        AND COALESCE(e.status,'open') NOT IN ('resolved','dismissed','archived')
@@ -2473,6 +2486,7 @@ function listAllExtracts() {
             e.engine_state_json AS engineStateJson,
             e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
             e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
+            COALESCE(e.kind,'extract') AS kind,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
             li.title AS docTitle, li.id AS libraryItemId
      FROM extracts e
@@ -2503,6 +2517,7 @@ function getExtract(id) {
             e.engine_state_json AS engineStateJson,
             e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
             e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
+            COALESCE(e.kind,'extract') AS kind,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
             li.title AS docTitle
      FROM extracts e
@@ -2575,7 +2590,8 @@ const EXTRACT_COLS = `id, parent_type AS parentType, parent_id AS parentId, docu
   a_factor AS aFactor, postpone_count AS postponeCount, process_count AS processCount,
   engine_state_json AS engineStateJson, created_at AS createdAt, updated_at AS updatedAt,
   comment, annotation_type AS annotationType, annotation_color AS annotationColor,
-  tag_json AS tagJson, quote_range_json AS quoteRangeJson`;
+  tag_json AS tagJson, quote_range_json AS quoteRangeJson,
+  COALESCE(kind,'extract') AS kind`;
 
 /** 范围锚解析：坏 JSON / 非数组一律当"无区间"，绝不因脏数据抛（§2.2 末行：无锚要显式，不能瞎猜） */
 function parseQuoteRanges(json) {
@@ -3086,16 +3102,19 @@ function getDailyUsage(nowTs) {
      ) t WHERE t.firstAt >= ? AND t.firstAt < ?`,
     [dayStart, dayStart + DAY_MS]
   )[0]?.n || 0;
+  // 摘录类计数只数**摘录**（kind='extract'）：纯高亮不进队列，自然也不该占每日上限（R35）
   const extractReviews = queryAll(
-    `SELECT COUNT(*) AS n FROM extract_ops
-     WHERE created_at >= ? AND created_at < ? AND op_type IN ('advance','postpone','graduate')`,
+    `SELECT COUNT(*) AS n FROM extract_ops o JOIN extracts e ON e.id = o.extract_id
+     WHERE o.created_at >= ? AND o.created_at < ? AND o.op_type IN ('advance','postpone','graduate')
+       AND COALESCE(e.kind,'extract') = 'extract'`,
     [dayStart, dayStart + DAY_MS]
   )[0]?.n || 0;
   // 新摘录＝当日发生「首次处理」（该摘录最早一条 advance/postpone）的条数
   const newExtracts = queryAll(
     `SELECT COUNT(*) AS n FROM (
-       SELECT MIN(seq) AS firstSeq FROM extract_ops
-       WHERE op_type IN ('advance','postpone') GROUP BY extract_id
+       SELECT MIN(o.seq) AS firstSeq FROM extract_ops o JOIN extracts e ON e.id = o.extract_id
+       WHERE o.op_type IN ('advance','postpone') AND COALESCE(e.kind,'extract') = 'extract'
+       GROUP BY o.extract_id
      ) f JOIN extract_ops o ON o.seq = f.firstSeq
      WHERE o.created_at >= ? AND o.created_at < ?`,
     [dayStart, dayStart + DAY_MS]

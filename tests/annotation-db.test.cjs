@@ -115,6 +115,37 @@ app.whenReady().then(async () => {
         "数组", typeof db.getExtract(grand.id).chain);
     }
 
+    // ---------- K：高亮与摘录分族（批 4 规格 §1.4 / R35） ----------
+    console.log("== K 高亮/摘录分族 ==");
+    {
+      const doc2 = db.createFromPaste("K 段夹具", "正文").documentId;
+      const hl = db.createExtract({
+        parentType: "document", parentId: doc2, documentId: doc2,
+        contentMarkdown: "K 纯高亮样本", kind: "highlight",
+        quoteRange: [{ start: 0, end: 5 }]
+      });
+      const ex2 = db.createExtract({
+        parentType: "document", parentId: doc2, documentId: doc2, contentMarkdown: "K 摘录样本"
+      });
+      check("K1 kind 落库为 highlight", db.getExtract(hl.id).kind === "highlight", "highlight", db.getExtract(hl.id).kind);
+      const due = db.listDueExtracts(Date.now() + 30 * 86400000).map((x) => x.id);
+      check("K2 纯高亮不进 due 队列", !due.includes(hl.id), false, due.includes(hl.id));
+      check("K3 摘录照常进 due 队列", due.includes(ex2.id), true, due.includes(ex2.id));
+      const all = db.listAllExtracts();
+      check("K4 纯高亮进 listAll（浏览器/搜索可见）", all.some((x) => x.id === hl.id), true, all.length);
+      check("K5 listAll 带 kind 字段", all.find((x) => x.id === hl.id).kind === "highlight", "highlight", all.find((x) => x.id === hl.id).kind);
+      const exOld = db.createExtract({ parentType: "document", parentId: doc2, documentId: doc2, contentMarkdown: "K 未传 kind" });
+      check("K6 未传 kind ⇒ extract（存量语义）", db.getExtract(exOld.id).kind === "extract", "extract", db.getExtract(exOld.id).kind);
+      const bad = db.createExtract({ parentType: "document", parentId: doc2, documentId: doc2, contentMarkdown: "K 越界值", kind: "sneaky" });
+      check("K7 越界 kind 归一为 extract", db.getExtract(bad.id).kind === "extract", "extract", db.getExtract(bad.id).kind);
+      const usageBefore = db.getDailyUsage(Date.now());
+      db.advanceExtract(hl.id, Date.now());
+      db.advanceExtract(ex2.id, Date.now());
+      const usageAfter = db.getDailyUsage(Date.now());
+      check("K8 纯高亮不占每日摘录计数（advance 只对摘录计数）",
+        usageAfter.newExtracts === usageBefore.newExtracts + 1, usageBefore.newExtracts + 1, usageAfter.newExtracts);
+    }
+
     console.log(`\n${pass} 通过 / ${fail} 失败`);
   } catch (e) {
     console.error("运行异常：", e && e.stack || e);
