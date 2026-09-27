@@ -119,6 +119,40 @@ export interface ContentPointerUpInfo {
   metaKey?: boolean;
 }
 
+/** 源文档锚点几何（v48.24 批3 §4「文中留痕」的写入侧）：当前选区在**源文档**里的落点。
+ *  PDF＝0 基页码 + 该页内**百分比矩形**（0-100，与 occlusion 同一坐标口径，换算走同一实现面）；
+ *  EPUB 不回矩形（cfi 已表达位置，见 ReaderSelection.cfi）。 */
+export interface SourceAnchorGeometry {
+  pageIndex?: number;
+  rects?: { x: number; y: number; w: number; h: number; ord: number }[];
+}
+
+/** 文中留痕（v48.24 批3 §4）：一条根摘录在**文档正文里**的只读标记。
+ *  数据面由壳层给（源＝根摘录 `contextRef.sourceAnchor`），**绘制与命中全在内核**——
+ *  页容器/章节 iframe 的 DOM 只在 adapter 里碰（防腐层纪律），业务层拿不到。 */
+export interface ReaderDocMark {
+  /** 摘录 id：指针事件与浮层都按它回查数据 */
+  id: string;
+  /** 标记原文（浮层第一行）＝摘录正文 */
+  text: string;
+  /** 读者批注（有则 PDF 加角标、浮层多一行） */
+  comment?: string | null;
+  /** 已制卡数（浮层信息行） */
+  cardCount?: number;
+  /** EPUB：根锚 cfi（cfi → Range 画 ::highlight） */
+  cfi?: string;
+  /** PDF：0 基页码 + 该页内百分比矩形 */
+  pageIndex?: number;
+  rects?: { x: number; y: number; w: number; h: number; ord?: number }[];
+}
+
+/** 文中标记的指针事件载荷（宿主视口坐标；rect＝命中标记的包围盒，浮层按它定位） */
+export interface MarkPointerInfo {
+  /** 指针进入的标记 id；null＝离开了全部标记（markHover 专用） */
+  id: string | null;
+  rect: ReaderRect | null;
+}
+
 export interface ReaderKernel {
   open(source: BookSource, init?: { location?: ReaderLocation }): Promise<void>;
   /** 跳转：CFI 位置 / 页码（PDF 引擎）/ 章节索引 / 目录 href / 文本搜索定位（返回是否发生导航） */
@@ -153,6 +187,17 @@ export interface ReaderKernel {
   multiSelectHighlight?(action: "replace" | "append" | "remove"): void;
   /** 清空多段选择高亮（选区清空 / 菜单动作完成 / Esc / 章切换） */
   clearMultiSelectHighlight?(): void;
+  /**
+   * 文中留痕（v48.24 批3 §4，可选能力）：把「本文档的根摘录标记」交给内核绘制。
+   * PDF＝文本层之上的矩形覆盖层；EPUB＝cfi→Range 的 CSS Custom Highlight。两者都不碰正文 DOM。
+   * 壳层只给数据；引擎不支持时可不实现（壳层按可选能力调用）。
+   */
+  setDocumentMarks?(marks: ReaderDocMark[]): void;
+  /**
+   * 源锚几何采集（v48.24 批3 §4，可选能力）：当前选区在源文档里的落点（PDF 回页内百分比矩形），
+   * 供摘录的 `contextRef.sourceAnchor` 落库——留痕据此重画。无选区/引擎无几何概念时返回 null。
+   */
+  getSourceAnchor?(): SourceAnchorGeometry | null;
   getCurrentLocation(): ReaderLocation | null;
   destroy(): void;
   /** 重定位（进度/统计/目录高亮数据源） */
@@ -163,4 +208,8 @@ export interface ReaderKernel {
   on(event: "contentPointerUp", handler: (pos: ContentPointerUpInfo) => void): () => void;
   /** 正文图片点击（v25）：壳层据此进入图片聚焦（上浮 + 周围模糊 + 选区工具条） */
   on(event: "imageClick", handler: (image: ReaderImageRef) => void): () => void;
+  /** 指针进入/离开文中标记（v48.24 批3 §4）：壳层据此出浮层（原文 + 批注 + 已制卡数 + 就此制卡） */
+  on(event: "markHover", handler: (info: MarkPointerInfo) => void): () => void;
+  /** 点中文中标记（v48.24 批3 §4）：壳层据此钉住浮层（标记只读，编辑永远在卡片上做） */
+  on(event: "markClick", handler: (info: MarkPointerInfo) => void): () => void;
 }

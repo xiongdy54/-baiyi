@@ -7,7 +7,9 @@ import type {
   ImageLocateHit,
   ImageLocateQuery,
   LinkInfo,
+  MarkPointerInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -16,7 +18,8 @@ import type {
   ReaderSelection,
   ReaderTocItem,
   ReaderTheme,
-  RelocateInfo
+  RelocateInfo,
+  SourceAnchorGeometry
 } from "./kernel";
 import { DEFAULT_READER_SETTINGS, resolveAppearance, type ReaderSettings } from "./foliate/appearance";
 import { READER_ENGINE_VERSION, PDF_ENGINE_VERSION } from "./foliate/version";
@@ -27,7 +30,9 @@ export type {
   ImageLocateHit,
   ImageLocateQuery,
   LinkInfo,
+  MarkPointerInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -36,7 +41,8 @@ export type {
   ReaderSelection,
   ReaderTocItem,
   ReaderTheme,
-  RelocateInfo
+  RelocateInfo,
+  SourceAnchorGeometry
 };
 export { READER_ENGINE_VERSION, PDF_ENGINE_VERSION, DEFAULT_READER_SETTINGS, resolveAppearance };
 export type { ReaderSettings };

@@ -15,7 +15,9 @@ import type {
   BookSource,
   ContentPointerUpInfo,
   LinkInfo,
+  MarkPointerInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -23,9 +25,12 @@ import type {
   ReaderRect,
   ReaderSelection,
   ReaderTocItem,
-  RelocateInfo
+  RelocateInfo,
+  SourceAnchorGeometry
 } from "../kernel";
 import { createMultiHighlight } from "../multiHighlight";
+// 百分比换算的唯一实现面（v25 M5）：选区像素框 → 页内百分比走 pxShapeToPct，不另造一套换算
+import { pxShapeToPct } from "../../occlusion";
 import { PDF_ENGINE_VERSION } from "../foliate/version";
 
 // 兼容层（pdf.js v6 要求 ES2025，Electron 31/Chromium 126 缺失，清单见 tests/pdf.compat.js）。
@@ -120,6 +125,142 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       return sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim() ? document : null;
     }
   });
+
+  // ---------- v48.24 批3（§4 文中留痕）：PDF 的只读标记层 ----------
+  // 为什么不是塞进 `.page` 里：深色模式的反色滤镜挂在**整个 viewerEl** 上，塞进去的标记会被
+  // invert + hue-rotate 连色相一起转掉（IKB 蓝会被转成另一个色相＝凭空第二个焦点色）。
+  // 为什么挂在 host 而不是 container（滚动容器）：绝对定位在滚动容器里的层会**跟着内容一起滚**
+  // （inset:0 的参考系是滚动内容原点，实测层顶边比容器视口高一个 scrollTop）——挂 host 上
+  // 才能用「页矩形 − 容器视口矩形」直接换算。
+  // 代价：位置要跟着滚动/缩放自己重算（syncMarks）；命中判定一律走自算矩形，标记不吃 pointer-events
+  // （与 foliate 自带 Overlayer 同做法：pointer-events:none + 手工 hitTest），
+  // 于是标记底下的正文照样可以划选/制卡——「只读」不挡路。
+  const markLayer = document.createElement("div");
+  markLayer.className = "pdf-mark-layer";
+  host.appendChild(markLayer);
+  type MarkEntry = { mark: ReaderDocMark; ord: number; el: HTMLElement };
+  let markEntries: MarkEntry[] = [];
+  let docMarks: ReaderDocMark[] = [];
+  let hoveredMarkId: string | null = null;
+  let syncRaf = 0;
+
+  /**
+   * 页内容框（**百分比坐标的参考系**）：pdf.js 的 `.page` 带一圈透明边框（`--page-border`，
+   * 默认 9px，实测随缩放 8.8px），canvas/文本层都从**内容框**起算。用边框盒当参考系会
+   * 系统性偏移一个边框宽（实测 8.4px），采集与绘制必须同用这一个框。
+   */
+  const pageContentRect = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const bt = parseFloat(cs.borderTopWidth) || 0;
+    const bl = parseFloat(cs.borderLeftWidth) || 0;
+    const br = parseFloat(cs.borderRightWidth) || 0;
+    const bb = parseFloat(cs.borderBottomWidth) || 0;
+    return {
+      left: r.left + bl,
+      top: r.top + bt,
+      width: Math.max(0, r.width - bl - br),
+      height: Math.max(0, r.height - bt - bb)
+    };
+  };
+
+  const layoutMarks = () => {
+    if (markEntries.length === 0) return;
+    const cRect = container.getBoundingClientRect();
+    for (const e of markEntries) {
+      const pageIdx = Number(e.mark.pageIndex);
+      const rect = e.mark.rects?.[e.ord];
+      const pageEl = Number.isFinite(pageIdx)
+        ? (viewerEl.querySelector(`.page[data-page-number="${pageIdx + 1}"]`) as HTMLElement | null)
+        : null;
+      if (!pageEl || !rect) {
+        e.el.style.display = "none";
+        continue;
+      }
+      const p = pageContentRect(pageEl);
+      if (!(p.width > 0)) {
+        e.el.style.display = "none";
+        continue;
+      }
+      // 页内百分比 → 像素：不做取整，浮点 px 让实测矩形与换算值对齐（几何断言才有意义）
+      e.el.style.display = "block";
+      e.el.style.left = `${p.left - cRect.left + (rect.x / 100) * p.width}px`;
+      e.el.style.top = `${p.top - cRect.top + (rect.y / 100) * p.height}px`;
+      e.el.style.width = `${Math.max(1, (rect.w / 100) * p.width)}px`;
+      e.el.style.height = `${Math.max(1, (rect.h / 100) * p.height)}px`;
+    }
+  };
+
+  const syncMarks = () => {
+    if (syncRaf || markEntries.length === 0) return;
+    syncRaf = window.requestAnimationFrame(() => {
+      syncRaf = 0;
+      layoutMarks();
+    });
+  };
+
+  const rebuildMarks = () => {
+    markLayer.textContent = "";
+    markEntries = [];
+    for (const mark of docMarks) {
+      (mark.rects ?? []).forEach((_, i) => {
+        const el = document.createElement("div");
+        el.className = "reader-doc-mark card-marked";
+        el.dataset.markId = mark.id;
+        if (mark.comment) el.dataset.hasComment = "1";
+        markLayer.appendChild(el);
+        markEntries.push({ mark, ord: i, el });
+      });
+    }
+    markLayer.dataset.count = String(markEntries.length);
+    hoveredMarkId = null;
+    layoutMarks();
+  };
+
+  const hitMark = (clientX: number, clientY: number): { id: string; rect: ReaderRect } | null => {
+    for (let i = markEntries.length - 1; i >= 0; i--) {
+      const el = markEntries[i].el;
+      if (el.style.display === "none") continue;
+      const r = el.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+        return { id: markEntries[i].mark.id, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
+      }
+    }
+    return null;
+  };
+
+  const markHoverHandlers = new Set<(info: MarkPointerInfo) => void>();
+  const markClickHandlers = new Set<(info: MarkPointerInfo) => void>();
+  const onMarkMove = (ev: MouseEvent) => {
+    if (markEntries.length === 0) return;
+    const hit = hitMark(ev.clientX, ev.clientY);
+    const id = hit?.id ?? null;
+    if (id === hoveredMarkId) return; // 只报「进入/离开」的翻转，移动本身不刷事件
+    hoveredMarkId = id;
+    markHoverHandlers.forEach((h) => h(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+  };
+  const onMarkLeave = () => {
+    if (hoveredMarkId === null) return;
+    hoveredMarkId = null;
+    markHoverHandlers.forEach((h) => h({ id: null, rect: null }));
+  };
+  const onMarkClick = (ev: MouseEvent) => {
+    if (markEntries.length === 0) return;
+    const hit = hitMark(ev.clientX, ev.clientY);
+    if (!hit) return;
+    // 捕获相位处理 + 阻止传播：点标记＝浮层，不连带触发底下的链接/图片聚焦
+    ev.preventDefault();
+    ev.stopPropagation();
+    markClickHandlers.forEach((h) => h({ id: hit.id, rect: hit.rect }));
+  };
+  container.addEventListener("mousemove", onMarkMove);
+  container.addEventListener("mouseleave", onMarkLeave);
+  container.addEventListener("click", onMarkClick, true);
+  container.addEventListener("scroll", syncMarks, { passive: true });
+  window.addEventListener("resize", syncMarks);
+  eventBus.on("pagerendered", syncMarks);
+  eventBus.on("scalechanging", syncMarks);
+  eventBus.on("scalechanged", syncMarks);
 
   const fractionOf = (page1Based: number) => (totalPages > 0 ? Math.min(1, Math.max(0, page1Based / totalPages)) : 0);
 
@@ -445,6 +586,43 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       multiHighlight.clear();
     },
 
+    // v48.24 批3（§4）：文中留痕——文本层之上的矩形覆盖层（数据面由壳层给）
+    setDocumentMarks(marks) {
+      docMarks = Array.isArray(marks) ? marks : [];
+      rebuildMarks();
+      syncMarks();
+    },
+
+    // v48.24 批3（§4，写入侧）：选区在**本页**里的百分比矩形——摘录 sourceAnchor.rects 的来源。
+    // 参考系＝页**内容框**（见 pageContentRect，绘制侧同一个框）；换算复用 occlusion 的 pxShapeToPct
+    // （唯一的像素↔百分比实现面，含钳制与一位小数归一）。
+    getSourceAnchor(): SourceAnchorGeometry | null {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return null;
+      const range = sel.getRangeAt(0);
+      if (range.collapsed) return null;
+      const startEl = (range.startContainer as Node).parentElement?.closest?.(".page") as HTMLElement | null;
+      const pageNum = Number(startEl?.dataset?.pageNumber);
+      if (!startEl || !Number.isFinite(pageNum)) return null;
+      const p = pageContentRect(startEl);
+      if (!(p.width > 0) || !(p.height > 0)) return null;
+      const rects: NonNullable<SourceAnchorGeometry["rects"]> = [];
+      for (const r of Array.from(range.getClientRects())) {
+        if (!(r.width > 0) || !(r.height > 0)) continue;
+        // 跨页选区只收落在起始页内的矩形：sourceAnchor 的 rects 与 pageIndex 同页才自洽
+        if (r.right < p.left + 1 || r.left > p.left + p.width - 1) continue;
+        const s = pxShapeToPct(
+          { kind: "rect", x: r.left - p.left, y: r.top - p.top, w: r.width, h: r.height },
+          p.width,
+          p.height,
+          rects.length
+        );
+        rects.push({ x: Number(s.x) || 0, y: Number(s.y) || 0, w: Number(s.w) || 0, h: Number(s.h) || 0, ord: rects.length });
+      }
+      if (rects.length === 0) return null;
+      return { pageIndex: pageNum - 1, rects };
+    },
+
     getCurrentLocation(): ReaderLocation | null {
       if (!doc) return null;
       return { pageIndex: viewer.currentPageNumber - 1 };
@@ -454,6 +632,17 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       destroyed = true;
       // 高亮注册在宿主文档上，销毁内核时一并撤掉（否则残影跟着下一个内核）
       multiHighlight.clear();
+      // 标记层与它的监听一并撤掉（滚动/缩放监听挂在 window/container 上，不撤会跟着下一个内核）
+      container.removeEventListener("mousemove", onMarkMove);
+      container.removeEventListener("mouseleave", onMarkLeave);
+      container.removeEventListener("click", onMarkClick, true);
+      container.removeEventListener("scroll", syncMarks);
+      window.removeEventListener("resize", syncMarks);
+      if (syncRaf) window.cancelAnimationFrame(syncRaf);
+      syncRaf = 0;
+      markLayer.remove();
+      markEntries = [];
+      docMarks = [];
       try {
         viewer.setDocument(null as never);
       } catch {
@@ -474,6 +663,8 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
         : event === "link" ? linkHandlers
         : event === "contentPointerUp" ? pointerHandlers
         : event === "imageClick" ? imageHandlers
+        : event === "markHover" ? markHoverHandlers
+        : event === "markClick" ? markClickHandlers
         : null;
       if (!set) throw new Error(`未知事件: ${event}`);
       set.add(handler as never);
