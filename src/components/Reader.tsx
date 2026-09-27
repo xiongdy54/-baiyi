@@ -19,6 +19,7 @@ import ReaderEngine from "./reader/ReaderEngine";
 import MarkPopover from "./reader/MarkPopover";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
+import AnnotationEditor from "./AnnotationEditor";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
@@ -340,6 +341,16 @@ export default function Reader({
   const [sourcePeek, setSourcePeek] = useState<{ occlusion: NonNullable<Props["jumpAnchor"]>["occlusion"] } | null>(null);
   // v48.24 批3（§4 文中留痕）：本文档的根摘录标记 + 命中后的浮层（只读；编辑永远在卡片上进行）
   const [markPop, setMarkPop] = useState<{ id: string; rect: ReaderRect } | null>(null);
+  /** 批 4 Task 17：点标记 → 批注编辑浮层（形态唯一，与摘录页共用 AnnotationEditor；
+   *  hover 浮层保留——点击是「要改」的显式意图，hover 只是「看一眼」） */
+  const [markEditor, setMarkEditor] = useState<{
+    id: string;
+    kind: "highlight" | "extract";
+    comment: string | null;
+    color: string | null;
+    quote: string;
+    anchor: ReaderRect;
+  } | null>(null);
   const marksRef = useRef<ReaderDocMark[]>([]);
   /** 浮层被点住（钉住）后不再随 pointerleave 收起；点别处/Esc 解除 */
   const markPinnedRef = useRef(false);
@@ -600,6 +611,19 @@ export default function Reader({
         markHideTimerRef.current = null;
       }
       setMarkPop({ id: info.id, rect: info.rect });
+      // 批 4 Task 17（规格 §5.2「点高亮 → 弹出 AnnotationEditor（改/删）」）：
+      // 点击＝明确的「要改」意图，直接开编辑浮层；hover 浮层留在旁边不动。
+      const m = marksRef.current.find((x) => x.id === info.id);
+      if (m) {
+        setMarkEditor({
+          id: m.id,
+          kind: m.kind === "highlight" ? "highlight" : "extract",
+          comment: m.comment ?? null,
+          color: m.color ?? null,
+          quote: m.text,
+          anchor: info.rect
+        });
+      }
     });
     // 数据先到（marksRef 已填）而内核后到：这里补推一次；反之由标记 effect 自己推
     if (marksRef.current.length) k.setDocumentMarks?.(marksRef.current);
@@ -1453,6 +1477,35 @@ export default function Reader({
                 setMarkPop(null);
               }, 160);
             }}
+          />
+        );
+      })()}
+
+      {/* 批 4 Task 17：标记的批注编辑浮层（形态唯一；无保存/取消，失焦即落库） */}
+      {markEditor && (() => {
+        const m = marksRef.current.find((x) => x.id === markEditor.id);
+        if (!m) return null;
+        return (
+          <AnnotationEditor
+            extractId={markEditor.id}
+            kind={markEditor.kind}
+            comment={markEditor.comment}
+            color={markEditor.color}
+            quote={markEditor.quote}
+            anchor={markEditor.anchor}
+            palette={annotSettings.annotatePalette}
+            customEnabled={annotSettings.annotateCustomEnabled}
+            onSaveComment={(c) => selActions.saveAnnotationComment(markEditor.id, c)}
+            onSaveColor={async (c) => {
+              await selActions.saveAnnotationColor(markEditor.id, c);
+              setMarkEditor((prev) => (prev ? { ...prev, color: c } : prev));
+            }}
+            onDelete={async () => {
+              await selActions.removeAnnotation(markEditor.id);
+              setMarkEditor(null);
+              closeMarkPop();
+            }}
+            onClose={() => setMarkEditor(null)}
           />
         );
       })()}
