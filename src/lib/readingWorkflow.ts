@@ -121,6 +121,12 @@ export interface ExtractInput {
    * 单段选择不传（既有路径逐字节不变）；≥2 段时传，落库为「一条批注、多段区间、多组矩形」。
    */
   spans?: ExtractSpan[];
+  /** 批 4（规格 R35）：分族——`highlight`＝纯高亮（不进队列/不计上限）；缺省 ＝ `extract`（摘录） */
+  kind?: "highlight" | "extract";
+  /** 批 4（R8）：读者的批注文字（可空＝只标不评） */
+  comment?: string | null;
+  /** 批 4（R33）：批注色板 id（或 `#hex`），与文中高亮/角标同色 */
+  annotationColor?: string | null;
 }
 
 /** 一段选区的原始采集物（rects = 宿主视口坐标的包围盒，可缺省） */
@@ -165,6 +171,8 @@ export interface ReadingWorkflowProvider {
   advance(id: string, now?: number): Promise<void>;
   /** 改正文（与闪卡一样可内联编辑） */
   updateContent(id: string, contentMarkdown: string): Promise<void>;
+  /** 批 4（Task 3）：批注文字 / 颜色 / 分族可写（清空 comment 即删批注；主进程裁决归一） */
+  updateAnnotations(id: string, patch: { comment?: string | null; annotationColor?: string | null; kind?: "highlight" | "extract" }): Promise<void>;
   setPriority(id: string, priority: number): Promise<void>;
   /** 状态变更：毕业（resolved）/ 召回（open）/ 搁置 / 归档 */
   setStatus(id: string, status: ExtractStatusPatch, detail?: Record<string, unknown>, opType?: string): Promise<void>;
@@ -263,6 +271,9 @@ const sm19Provider: ReadingWorkflowProvider = {
   },
   async updateContent(id, contentMarkdown) {
     await call("update", id, { contentMarkdown });
+  },
+  async updateAnnotations(id, patch) {
+    await call("update", id, patch);
   },
   async setPriority(id, priority) {
     await call("setPriority", id, priority);
