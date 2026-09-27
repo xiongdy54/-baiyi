@@ -1144,6 +1144,24 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     },
     // 批注（R38/R40：点色落库 + 摘录/高亮共面）
     createAnnotation,
+    /** 批注文字落库（Task 11 AnnotationEditor）：null ＝ 清空＝删除批注（条目保留） */
+    saveAnnotationComment: async (id: string, comment: string | null) => {
+      const { readingWorkflow } = await import("./readingWorkflow");
+      await readingWorkflow.updateAnnotations(id, { comment: comment ?? null });
+      eventBus.emit("workflow/changed");
+    },
+    /** 批注颜色落库 */
+    saveAnnotationColor: async (id: string, color: string) => {
+      const { readingWorkflow } = await import("./readingWorkflow");
+      await readingWorkflow.updateAnnotations(id, { annotationColor: color });
+      eventBus.emit("workflow/changed");
+    },
+    /** 删除整条（高亮/摘录；UI 侧已含二次确认） */
+    removeAnnotation: async (id: string) => {
+      const { readingWorkflow } = await import("./readingWorkflow");
+      await readingWorkflow.remove(id);
+      eventBus.emit("workflow/changed");
+    },
     writeExtract,
     // 浮层
     submitRegionCards,

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import ExtractCardFace, { parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
+import AnnotationEditor from "./AnnotationEditor";
 import { cardsApi } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
 import { readingWorkflow, undoApi, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
@@ -102,6 +103,16 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
       }
     });
   }
+
+  /** 批 4 Task 11：正在编辑的批注（新建或点已有条目进入；null＝无浮层） */
+  const [editing, setEditing] = useState<{
+    id: string;
+    kind: "highlight" | "extract";
+    comment: string | null;
+    color: string | null;
+    quote: string;
+    anchor: { x: number; y: number; width: number; height: number };
+  } | null>(null);
 
   /** 批 4 Task 10：选区菜单的标注模式与色板（Task 12 接设置键；本轮本地态 + 全 8 色） */
   const [annotMode, setAnnotMode] = useState<AnnotMode>("highlight");
@@ -219,7 +230,8 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
 
   /**
    * R38/R40：点色＝完成当前模式的动作（颜色不记）。
-   * 摘录页按规格 §3.4 把批注/高亮挂在当前卡上（annotateParent 已在适配器里给定）。
+   * 摘录页按规格 §3.4 把批注/高亮挂在当前卡上（annotateParent 已在适配器里给定）；
+   * 落库后**接着弹批注编辑浮层**（R40：写了批注 → 落带批注那条；没写 → 失焦即落无批注那条）。
    */
   async function handlePickColor(color: AnnotColor) {
     const sel = faceSel;
@@ -227,7 +239,17 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
     multiHighlightRef.current?.clear();
     setFaceSel(null);
     window.getSelection()?.removeAllRanges();
-    await createAnnotation(sel.text, undefined, color, annotMode);
+    const newId = await createAnnotation(sel.text, undefined, color, annotMode);
+    if (newId) {
+      setEditing({
+        id: newId,
+        kind: annotMode,
+        comment: null,
+        color,
+        quote: sel.text,
+        anchor: sel.rect
+      });
+    }
   }
 
   // 层级链随显示中的卡片刷新（getExtractChain 自根到当前，封顶 20 级）
@@ -554,6 +576,31 @@ export default function ExtractReviewView({ onOpen, onJumpToDoc, bookItemIds, sc
 
       {/* 批 4 Task 10：三个面板与阅读器共用同一份实现（SelectionPanels） */}
       <SelectionPanels sel={selActions} selectionText={faceSel?.text ?? null} elapsedSec={0} />
+
+      {/* 批 4 Task 11（R37/R40）：批注编辑浮层——无保存/取消，失焦即落库；清空＝删批注 */}
+      {editing && (
+        <AnnotationEditor
+          extractId={editing.id}
+          kind={editing.kind}
+          comment={editing.comment}
+          color={editing.color}
+          quote={editing.quote}
+          anchor={editing.anchor}
+          container={pageRef.current?.getBoundingClientRect() ?? null}
+          palette={ANNOT_PALETTE}
+          onSaveComment={(c) => selActions.saveAnnotationComment(editing.id, c)}
+          onSaveColor={async (c) => {
+            await selActions.saveAnnotationColor(editing.id, c);
+            // 浮层是受控的：落库后必须把本地态一并更新，否则色块显示停在旧色（实测）
+            setEditing((prev) => (prev ? { ...prev, color: c } : prev));
+          }}
+          onDelete={async () => {
+            await selActions.removeAnnotation(editing.id);
+            setEditing(null);
+          }}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 }

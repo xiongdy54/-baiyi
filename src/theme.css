@@ -1962,6 +1962,94 @@ body.theme-dark .modal-panel {
 .menu.selection-menu.menu-locked,
 .menu.selection-menu.menu-locked * { pointer-events: none !important; }
 
+/* ---------- 批注编辑浮层（批 4 Task 11 / 规格 §3.4 R37/R40） ---------- */
+/* 类名与尺寸照 design-samples/annotation-two-modes.html。
+   即时生效：无保存/取消按钮（失焦 + 400ms 防抖落库）；清空文字＝删除批注。
+   定位走 src/lib/popoverPlace.ts（与 MarkPopover / SelectionMenu 同一份实现）。
+   焦点样式沿用全局 :focus-visible（不用 outline 另起一套）。 */
+.editor {
+  position: fixed;
+  width: 320px;
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  padding: var(--sp-3);
+  z-index: var(--z-sticky);
+}
+.editor .eq {
+  font-size: var(--fs-secondary);
+  color: var(--text-helper);
+  margin: 0 0 var(--sp-2);
+  padding-left: var(--sp-2);
+  border-left: 2px solid var(--accent);
+  background: var(--accent-soft);
+}
+.editor textarea {
+  width: 100%;
+  min-height: 56px;
+  height: auto;
+  padding: var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+  resize: vertical;
+}
+/* 底行：左＝颜色方块（点开取色，含自定义）· 中＝保存态 · 右＝删除（标签按 kind 变） */
+.editor .ebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.editor .ebar .save-state {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
+.editor .ebar .del,
+.editor .ebar .del-cancel {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--error);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.editor .ebar .del-cancel { margin-left: 0; color: var(--text-helper); }
+.editor .ebar .del:hover,
+.editor .ebar .del-cancel:hover { text-decoration: underline; }
+.colorbtn {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+}
+.colorpop {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  z-index: var(--z-sticky);
+}
+.colorpop .row { display: flex; gap: var(--sp-1); }
+.colorpop .customrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
+.colorpop input[type="color"] { width: 28px; height: 20px; padding: 0; border: 1px solid var(--border-subtle); background: none; }
+
 .reader-toast {
   position: fixed;
   bottom: var(--sp-8);
