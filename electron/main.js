@@ -1336,6 +1336,94 @@ ipcMain.handle("mindmap:repairConfirm", (_e, runId) => mindmapEngine.repairConfi
 ipcMain.handle("mindmap:list", (_e, documentId) => dbModule.listMaterialMaps(documentId));
 ipcMain.handle("mindmap:get", (_e, id) => dbModule.getMaterialMap(id));
 ipcMain.handle("mindmap:getActive", (_e, documentId, scopeAnchor) => dbModule.getActiveMaterialMap(documentId, scopeAnchor || "book"));
+
+/**
+ * 批 4 Task 15（规格 §5.3「图谱页签」）：把已发布导图读成侧栏用的**目录树**（节点标题 + 自有区间 + 层级）。
+ * **只消费不切分**：区间一律经 `mindmapCore.buildExtractionModel` 算（与生成/深挖同一实现面），
+ * 渲染层不复制任何区间算法。结点自身展示用 `nodeRange`（父扣子后的**净区间**）——
+ * 这与「父卡覆盖区间」不同：目录树要的是"这个节点自己讲哪一段"。
+ * 参数：documentId + 内核给的两样东西（TOC 项与提取单元锚）——渲染层持有内核，故由它传入。
+ * 无已发布导图 ⇒ 返回 null（侧栏据此不渲染该页签）。
+ */
+ipcMain.handle("mindmap:mapTree", (_e, documentId, tocItems, unitAnchors) => {
+  try {
+    const map = dbModule.getActiveMaterialMap(String(documentId), "book");
+    if (!map || !map.structure) return null;
+    const toc = Array.isArray(tocItems) ? tocItems : [];
+    const units = Array.isArray(unitAnchors) ? unitAnchors.map(String) : [];
+    // 无内核锚（如 PDF 无目录/未就绪）⇒ 没有坐标系，宁可不显示也不给假数据
+    if (!units.length) return null;
+    const core = require("./mindmapCore");
+    const nodes = Array.isArray(map.structure.nodes) ? map.structure.nodes : [];
+    // 把已发布导图的节点树映射回 TOC 结构：节点带 anchor 时按锚挂回，缺则按标题兜底
+    const byAnchor = new Map();
+    for (const n of nodes) {
+      const a = String(n.anchor || "").split("#")[0];
+      if (a) byAnchor.set(a, n);
+    }
+    // 两项实测要点：
+    // ① 内核 TOC 用 `href`（子项字段名 `subitems`），而 buildTocTree 读 `anchor`——字段名不先适配就全算成 [0,0]；
+    // ② **层级来自导图自身**（节点的 parentId 链），不是 TOC 的嵌套——目录通常是平铺的
+    //    （合成书 4 章全在一层），照 TOC 的 depth 走会让所有节点都是第 0 层、缩进恒等（实测踩过）。
+    const depthOf = (n) => {
+      let d = 0;
+      let cur = n;
+      const seen = new Set();
+      while (cur && cur.parentId && cur.parentId !== "root" && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        cur = nodes.find((x) => String(x.id) === String(cur.parentId));
+        if (!cur) break;
+        d += 1;
+        if (d > 32) break;
+      }
+      return d;
+    };
+    const items = [];
+    const walk = (list) => {
+      for (const t of list) {
+        const rawHref = String(t.href || t.anchor || "");
+        const key = rawHref.split("#")[0];
+        const hit = byAnchor.get(key) || nodes.find((n) => String(n.title || "") === String(t.label || ""));
+        if (hit) {
+          items.push({
+            id: String(hit.id ?? key ?? t.label ?? ""),
+            label: String(hit.title || t.label || "(无标题)"),
+            anchor: rawHref,
+            depth: depthOf(hit)
+          });
+        }
+        const kids = Array.isArray(t.subitems) ? t.subitems : Array.isArray(t.children) ? t.children : [];
+        if (kids.length) walk(kids);
+      }
+    };
+    walk(toc);
+    if (!items.length) return null;
+    // 区间：仅对能解析出锚的条目算（无锚条目 range 为空 ⇒ 不显示占比条）。
+    // 注意：内核 TOC 用 `href`，而 buildTocTree 读的是 `anchor`——必须**先适配字段名**再喂给共享实现，
+    // 否则所有区间都会算成 [0,0]（实测：页签出得来但占比条全为 0）。
+    const adapter = (list) =>
+      (Array.isArray(list) ? list : []).map((t) => ({
+        anchor: String(t.href || t.anchor || ""),
+        label: String(t.label || ""),
+        children: adapter(t.subitems || t.children)
+      }));
+    const tocForCore = adapter(toc);
+    const tree = core.normalizeTocTree(core.buildTocTree(tocForCore, String(map.title || "地图")), String(map.title || "地图"));
+    const model = core.buildExtractionModel(tree, units);
+    const withRange = items.map((it) => {
+      const f = model.flat.find((x) => {
+        const b = String(x.node.anchor || "").split("#")[0];
+        return b && b === String(it.anchor || "").split("#")[0];
+      });
+      const r = f ? model.nodeRange.get(model.nodeKeyOf(f)) : null;
+      return { ...it, start: r ? r[0] : 0, end: r ? r[1] : 0 };
+    });
+    return { title: String(map.title || ""), items: withRange, unitCount: units.length };
+  } catch {
+    // 图谱目录是增强信息：算不出来就不显示该页签，不影响阅读
+    return null;
+  }
+});
 ipcMain.handle("mindmap:setActive", (_e, id) => dbModule.setActiveMaterialMap(id));
 ipcMain.handle("mindmap:delete", (_e, id) => dbModule.deleteMaterialMap(id));
 ipcMain.handle("mindmap:runs", (_e, documentId) => dbModule.listMaterialMapRuns(documentId));

@@ -20,7 +20,9 @@ import MarkPopover from "./reader/MarkPopover";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
-import TocSidebar from "./reader/TocSidebar";
+import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
+import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
+import { mapTree, readReaderTab, type MapTreeItem } from "../lib/reader/mapTree";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
 import {
@@ -345,8 +347,57 @@ export default function Reader({
   /** 从浮层「就此制卡」进入时，本次制卡的 contextRef 覆盖值（挂到该摘录上——已制卡数按 extractId 派生） */
   const markCardRefOverrideRef = useRef<Record<string, unknown> | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
+  /** 批 4 Task 15：侧栏页签（会话内记忆）与图谱目录（只消费主进程算好的区间） */
+  const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
+  const [mapItems, setMapItems] = useState<MapTreeItem[] | null>(null);
+  const [mapUnitCount, setMapUnitCount] = useState(0);
+  const mapUnitAnchorsRef = useRef<string[]>([]);
+  useEffect(() => {
+    void readReaderTab().then(setSidebarTab);
+  }, []);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
+
+  /**
+   * 图谱目录载入（批 4 Task 15）：有内核 + 有已发布导图才取。
+   * 区间由主进程按 buildExtractionModel 算（本层**只消费不切分**）；无导图 ⇒ null ⇒ 不渲染页签。
+   */
+  useEffect(() => {
+    const documentId = contextRef?.documentId;
+    if (!engineMode || !documentId) {
+      setMapItems(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const k = kernelRef.current;
+      const anchors = (k?.getSectionAnchors?.() ?? []).map((a) => a.anchor);
+      const toc = k?.getTOC?.() ?? [];
+      if (!anchors.length || !toc.length) {
+        if (!cancelled) setMapItems(null);
+        return;
+      }
+      const api = (window as unknown as { mindmapAPI?: { mapTree?: (d: string, t: unknown, u: string[]) => Promise<{ items: MapTreeItem[]; unitCount: number } | null> } }).mindmapAPI;
+      const r = await api?.mapTree?.(documentId, toc, anchors);
+      if (cancelled) return;
+      mapUnitAnchorsRef.current = anchors;
+      setMapUnitCount(Number(r?.unitCount ?? anchors.length));
+      setMapItems(r?.items?.length ? r.items : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [engineMode, contextRef?.documentId, tocItems]);
+
+  /** 摘录面板的「跳转原文」：把该条摘录的锚点交给引擎定位（复用既有 jumpAnchor 通道） */
+  function jumpToExtractAnchor(anchorText: string, pageIndex?: number, cfi?: string) {
+    setTocOpen(false);
+    if (!anchorText) return;
+    requestAnimationFrame(() => {
+      void kernelRef.current?.goTo?.({ href: "", cfi, pageIndex, anchorText } as never);
+    });
+  }
+
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const readerSettingsRef = useRef(readerSettings);
   readerSettingsRef.current = readerSettings;
@@ -1270,14 +1321,26 @@ export default function Reader({
                   </>
                 )}
                 {tocOpen && (
-                  <TocSidebar
-                    items={tocItems}
+                  <ReaderSidebar
+                    tocItems={tocItems}
                     activeHref={tocActiveHref}
                     onNavigate={(item) => {
                       void kernelRef.current?.goTo({ href: item.href });
                       setTocOpen(false);
                     }}
                     onClose={() => setTocOpen(false)}
+                    tab={sidebarTab}
+                    onTabChange={setSidebarTab}
+                    extractsPanel={<ReaderExtractsPanel documentId={contextRef?.documentId ?? null} onJump={jumpToExtractAnchor} />}
+                    mapItems={mapItems}
+                    mapUnitCount={mapUnitCount}
+                    mapAvailable={mapItems !== null}
+                    onMapNavigate={(it) => {
+                      // 节点点击 → 跳该节点自有区间起点（复用既有导图跳转：区间起点 → 该单元锚 → goTo）
+                      const anchor = mapUnitAnchorsRef.current[it.start];
+                      if (anchor) void kernelRef.current?.goTo({ href: anchor });
+                      setTocOpen(false);
+                    }}
                   />
                 )}
               </div>

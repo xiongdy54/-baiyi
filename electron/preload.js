@@ -336,6 +336,8 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
   list: (documentId) => ipcRenderer.invoke("mindmap:list", documentId),
   get: (id) => ipcRenderer.invoke("mindmap:get", id),
   getActive: (documentId, scopeAnchor) => ipcRenderer.invoke("mindmap:getActive", documentId, scopeAnchor || "book"),
+  // 批 4 Task 15：图谱目录（只读；区间由主进程按 buildExtractionModel 算）
+  mapTree: (documentId, tocItems, unitAnchors) => ipcRenderer.invoke("mindmap:mapTree", documentId, tocItems, unitAnchors),
   setActive: (id) => ipcRenderer.invoke("mindmap:setActive", id),
   remove: (id) => ipcRenderer.invoke("mindmap:delete", id),
   runs: (documentId) => ipcRenderer.invoke("mindmap:runs", documentId),
