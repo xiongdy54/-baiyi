@@ -2768,6 +2768,95 @@ body.theme-dark .modal-panel {
 .reader-engine-host .pdf-viewer-container .pdfViewer .page {
   margin: 0 auto 12px auto;
 }
+
+/* ---------- 文中留痕（v48.24 批3 §4）：阅读器里的只读摘录标记 ---------- */
+/* EPUB：cfi → Range → ::highlight（只画绘制层、不碰正文 DOM；iframe 侧由 adapter 注入求值后的
+   字面值，与宿主同一枚 Token --accent-soft）。宿主侧这条规则是「值来自 Token」的单一出处。 */
+::highlight(extract-mark) {
+  background-color: var(--accent-soft);
+}
+/* PDF：文本层之上的矩形覆盖层。层是 viewerEl 的**兄弟**（活在深色 canvas 反色滤镜之外，
+   否则 IKB 蓝会被连色相一起转掉、凭空多出第二个焦点色）；命中判定走自算矩形（同 foliate
+   自带 Overlayer 的做法），故整层 pointer-events:none——标记不吃鼠标，底下的正文照常可划选/制卡。 */
+.pdf-mark-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+.reader-doc-mark {
+  position: absolute;
+  display: none; /* 定位成功才显形（layoutMarks 置 block），避免首帧堆在左上角 */
+  pointer-events: none;
+  /* 表面沿用 .card-marked（accent-soft 底 + 左缘 2px accent 条），见「卡片四类」 */
+}
+/* 有批注的摘录：右上角一枚 accent 角标（形状而非装饰字符） */
+.reader-doc-mark[data-has-comment="1"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--sp-2);
+  height: var(--sp-2);
+  background: var(--accent);
+}
+
+/* 标记浮层：原文 + 批注 + 已制卡数 + 「就此制卡」（fixed 定位由组件实测后给） */
+.reader-mark-pop {
+  position: fixed;
+  z-index: var(--z-sticky);
+  width: 320px;
+  max-width: calc(100vw - var(--sp-4));
+  padding: var(--sp-3);
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.reader-mark-pop-quote {
+  margin: 0;
+  padding: var(--sp-2);
+  font-size: var(--fs-secondary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  /* 只展示前 4 行：浮层是「看一眼」的面板，长摘录回卡片上看 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.reader-mark-pop-comment {
+  margin: 0;
+  font-size: var(--fs-secondary);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.reader-mark-pop-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.reader-mark-pop-meta {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.reader-mark-pop-actions { display: flex; align-items: center; gap: var(--sp-2); }
+.reader-mark-pop-close {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  cursor: pointer;
+}
+.reader-mark-pop-close:hover { color: var(--text-primary); }
 /* v28 加载态：大书解析+首屏渲染需数秒，期间显示提示（在 container 层，不吃 viewerEl 的反色滤镜） */
 .reader-engine-host .pdf-viewer-container.pdf-loading::after {
   content: "正在加载 PDF…";

@@ -19,6 +19,7 @@ import OcclusionShapes from "./OcclusionShapes";
 import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
 import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
+import MarkPopover from "./reader/MarkPopover";
 import TocSidebar from "./reader/TocSidebar";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
@@ -29,6 +30,7 @@ import {
   type ContentPointerUpInfo,
   type ImageLocateHit,
   type ReaderAppearance,
+  type ReaderDocMark,
   type ReaderImageRef,
   type ReaderKernel,
   type ReaderModeConfig,
@@ -36,8 +38,11 @@ import {
   type ReaderSelection,
   type ReaderSettings,
   type ReaderTocItem,
-  type RelocateInfo
+  type RelocateInfo,
+  type SourceAnchorGeometry
 } from "../lib/reader/service";
+// v48.24 批3（§4 文中留痕）：标记的数据面（哪些根摘录要画、浮层显示什么）——纯函数，零 DOM
+import { buildDocMarks } from "../lib/reader/marks";
 // v48.23（D61 §6.8-11）：多段选择的集合运算与修饰键——纯逻辑在 electron/annotationRange.js，
 // 渲染层经主进程算（resolveSpanSet），本层不复制任何 span 归并/装配逻辑。
 import {
@@ -322,6 +327,9 @@ export default function Reader({
   // 引擎选区锚点：语义同 markdown 的 anchorRef——最后一次菜单动作的选区，保留到下一次覆盖
   const engineSelRef = useRef<ReaderSelection | null>(null);
   const engineChapterRef = useRef<number | undefined>(0);
+  /** v48.24 批3（§4 写入侧）：与选区同时采集的源锚几何（PDF 页内百分比矩形；EPUB 为 null，cfi 在选区里）。
+   *  必须在 `actXxx` 清选区**之前**采集——handleExtract 跑起来时选区已被 clearSelection 撤掉了 */
+  const engineAnchorGeomRef = useRef<SourceAnchorGeometry | null>(null);
   // v35 正文图片锚点：点击正文图片时快照（当前 locator+章节+alt/周边文字），供图片卡 contextRef
   const imageAnchorRef = useRef<{
     locator: { cfi?: string; pageIndex?: number } | null;
@@ -335,6 +343,15 @@ export default function Reader({
   // v35 跳转图片卡：图内区域高亮叠加（宿主视口坐标，短暂显示）/ 原图对照浮层（定位失败或 PDF 系）
   const [imgOverlay, setImgOverlay] = useState<{ rect: ReaderRect; occlusion: NonNullable<Props["jumpAnchor"]>["occlusion"] } | null>(null);
   const [sourcePeek, setSourcePeek] = useState<{ occlusion: NonNullable<Props["jumpAnchor"]>["occlusion"] } | null>(null);
+  // v48.24 批3（§4 文中留痕）：本文档的根摘录标记 + 命中后的浮层（只读；编辑永远在卡片上进行）
+  const [markPop, setMarkPop] = useState<{ id: string; rect: ReaderRect } | null>(null);
+  const marksRef = useRef<ReaderDocMark[]>([]);
+  /** 浮层被点住（钉住）后不再随 pointerleave 收起；点别处/Esc 解除 */
+  const markPinnedRef = useRef(false);
+  const markHideTimerRef = useRef<number | null>(null);
+  /** 从浮层「就此制卡」进入时，本次制卡的 contextRef 覆盖值（挂到该摘录上——已制卡数按 extractId 派生） */
+  const markCardRefOverrideRef = useRef<Record<string, unknown> | null>(null);
+  const [markCardText, setMarkCardText] = useState<string | null>(null);
   const [tocOpen, setTocOpen] = useState(false);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
@@ -351,6 +368,8 @@ export default function Reader({
       const t = e.target as HTMLElement | null;
       if (t && typeof t.closest === "function" &&
         (t.closest(".selection-menu") || t.closest(".ai-panel") || t.closest(".modal-panel") || t.closest(".image-focus-layer") ||
+          // v48.24 批3（§4 文中留痕）：标记浮层是「就此制卡」的动作面，点它不算点外面
+          t.closest(".reader-mark-pop") ||
           // v48.23（§6.8-11）：正文内容区（PDF 文本层就落在宿主 DOM 里）不算「外面」——
           // 在那里按下鼠标常是「加选第二段」的起手，清集合会让多段选择在 PDF 上永远只剩最后一段。
           // foliate 的章节在 iframe 里，事件根本不冒泡到宿主，本项只影响 PDF 与宿主侧正文。
@@ -482,10 +501,13 @@ export default function Reader({
     if (!sel || !sel.text.trim()) {
       // 空白处点击/折叠选区：沿用旧语义收菜单，并把整组多段集合清掉（高亮一并撤）
       clearMultiSelect();
+      engineAnchorGeomRef.current = null;
       setSelection(null);
       return;
     }
     engineSelRef.current = sel;
+    // v48.24 批3（§4 写入侧）：源锚几何与选区同时采集（handleExtract 跑时选区已被清掉）
+    engineAnchorGeomRef.current = k?.getSourceAnchor?.() ?? null;
     const geom = k?.getSelectionGeometry();
     const incoming: ExtractSpan = {
       text: sel.text,
@@ -516,6 +538,34 @@ export default function Reader({
     k.applyAppearance(resolveAppearance(readerSettingsRef.current));
     // 调试/测试钩子（L2 e2e 经此访问章节文档；引擎 iframe 对宿主跨源，contentDocument 不可用）
     (window as unknown as { __readerKernel?: ReaderKernel }).__readerKernel = k;
+    // v48.24 批3（§4 文中留痕）：指针进出/点中标记 → 浮层。标记本身只读，
+    // 这里只做「显示/延时收起/钉住」三件事；数据一律按 id 回查 marksRef（不信任事件带的内容）。
+    k.on("markHover", (info) => {
+      if (info.id && info.rect) {
+        if (markHideTimerRef.current) {
+          window.clearTimeout(markHideTimerRef.current);
+          markHideTimerRef.current = null;
+        }
+        setMarkPop({ id: info.id, rect: info.rect });
+      } else if (!markPinnedRef.current && markHideTimerRef.current === null) {
+        // 留 240ms 让指针从标记走到浮层（浮层在标记下方 8px）
+        markHideTimerRef.current = window.setTimeout(() => {
+          markHideTimerRef.current = null;
+          setMarkPop(null);
+        }, 240);
+      }
+    });
+    k.on("markClick", (info) => {
+      if (!info.id || !info.rect) return;
+      markPinnedRef.current = true;
+      if (markHideTimerRef.current) {
+        window.clearTimeout(markHideTimerRef.current);
+        markHideTimerRef.current = null;
+      }
+      setMarkPop({ id: info.id, rect: info.rect });
+    });
+    // 数据先到（marksRef 已填）而内核后到：这里补推一次；反之由标记 effect 自己推
+    if (marksRef.current.length) k.setDocumentMarks?.(marksRef.current);
     // v35 图片卡跳转：跳转着陆后再找原图叠图内高亮；找不到/PDF 系 → 原图对照浮层
     if (jumpAnchor?.occlusion) window.setTimeout(() => void tryLocateJumpImage(), 800);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -694,6 +744,9 @@ export default function Reader({
     };
   }
   function enrichedContextRef() {
+    // v48.24 批3（§4）：从标记浮层「就此制卡」进入时，contextRef 直接取该摘录（挂 extractId，
+    // 别串到「当前选区」——浮层出现时选区可能已经不在或换了地方）
+    if (markCardRefOverrideRef.current) return markCardRefOverrideRef.current;
     // 引擎分支：可降级定位（foliate 系 cfi → chapterIndex → anchorText；PDF 系 pageIndex → anchorText），带引擎版本便于回归归因
     if (engineMode) {
       const sel = engineSelRef.current;
@@ -876,6 +929,138 @@ export default function Reader({
     }
     window.getSelection()?.removeAllRanges();
     setSelection(null);
+  }
+
+  // ---------- v48.24 批3（§4 文中留痕）：数据结构与绘制 ----------
+  const closeMarkPop = useCallback(() => {
+    markPinnedRef.current = false;
+    if (markHideTimerRef.current) {
+      window.clearTimeout(markHideTimerRef.current);
+      markHideTimerRef.current = null;
+    }
+    setMarkPop(null);
+  }, []);
+
+  /**
+   * 本文档要画的标记：数据面＝buildDocMarks（纯函数，吃 workflowAPI.listAll() 与按 extractId 派生的
+   * 已制卡数），绘制面＝内核 setDocumentMarks（PDF 矩形层 / EPUB cfi→Range 高亮）。
+   * 只在**真文档**上画：摘录阅读视图（contextRef.extractId）读的是合成 EPUB，画上去会张冠李戴。
+   * 摘录/制卡一变就重算（workflow/changed、cards/changed），于是「刚摘完就出现留痕、刚制完卡计数+1」。
+   */
+  useEffect(() => {
+    const documentId = contextRef?.documentId;
+    if (!engineMode || !documentId || contextRef?.extractId) {
+      marksRef.current = [];
+      kernelRef.current?.setDocumentMarks?.([]);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [rows, cards] = await Promise.all([
+          window.workflowAPI?.listAll?.() ?? Promise.resolve([]),
+          cardsApi.listAll().catch(() => [])
+        ]);
+        if (cancelled) return;
+        const counts: Record<string, number> = {};
+        for (const c of cards as Array<{ contextRef?: { extractId?: string } | null; isDeleted?: number }>) {
+          const id = c?.contextRef?.extractId;
+          if (id && !c.isDeleted) counts[id] = (counts[id] || 0) + 1;
+        }
+        const marks = buildDocMarks(rows, documentId, engineKind, counts);
+        marksRef.current = marks;
+        kernelRef.current?.setDocumentMarks?.(marks);
+      } catch {
+        /* 标记是增强信息：取不到就不画，阅读/制卡链路不受影响 */
+      }
+    };
+    void load();
+    const offWorkflow = eventBus.on("workflow/changed", () => void load());
+    const offCards = eventBus.on("cards/changed", () => void load());
+    // 主题/强调色一变，注入 iframe 的高亮字面值要重算——但**必须在主题真正落地之后**：
+    // changeReaderTheme 是先 applyAppearance 再 onSwitchAppTheme，此刻 body 还是旧档，
+    // 在 applyAppearance 里重算会拿到旧色（实测：切回纸白后 iframe 里仍是深色档的蓝）。
+    // 统一挂到 theme/changed（App 在 setTheme 落定后发出）与 accentColor 变更上，重推一次标记。
+    const offTheme = eventBus.on("theme/changed", () => kernelRef.current?.setDocumentMarks?.(marksRef.current));
+    const offAccent = eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload?.key === "accentColor") kernelRef.current?.setDocumentMarks?.(marksRef.current);
+    });
+    return () => {
+      cancelled = true;
+      offWorkflow();
+      offCards();
+      offTheme();
+      offAccent();
+    };
+  }, [engineMode, engineKind, contextRef?.documentId, contextRef?.extractId]);
+
+  // 浮层的两条退出：点别处（含正文）/ Esc——钉住态一并解除
+  useEffect(() => {
+    if (!markPop) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && typeof t.closest === "function" && t.closest(".reader-mark-pop")) return;
+      closeMarkPop();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMarkPop();
+    };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [markPop, closeMarkPop]);
+
+  /**
+   * 源锚装配（§6.8-11 三条腿的容器形态，批3 写入侧）：摘录落 `contextRef.sourceAnchor`，
+   * 文中留痕据此重画。rects 是**页内百分比**（内核在选区还活着时采集），cfi 表达 EPUB 位置；
+   * anchorText + anchorRatio 是位置只记录不重找的兜底（与 Zotero 一致：不做模糊重锚定）。
+   */
+  function buildSourceAnchor(text: string): Record<string, unknown> | null {
+    const documentId = contextRef?.documentId;
+    if (!documentId) return null;
+    const sel = engineSelRef.current;
+    const geom = engineAnchorGeomRef.current;
+    const loc = buildLocator({
+      cfi: sel?.cfi,
+      chapterIndex: sel ? engineChapterRef.current : undefined,
+      pageIndex: geom?.pageIndex ?? sel?.pageIndex,
+      anchorText: sel?.anchorText || text.slice(0, 60)
+    });
+    const el = scrollRef.current;
+    const denom = el ? el.scrollHeight - el.clientHeight : 0;
+    return {
+      documentId,
+      ...loc,
+      ...(geom?.rects?.length ? { rects: geom.rects } : {}),
+      anchorRatio: denom > 0 && el ? Math.min(1, el.scrollTop / denom) : 0,
+      capturedAt: Date.now()
+    };
+  }
+
+  /** 浮层「就此制卡」（§4）：复用既有手动制卡链（ManualCardEditor → createSingleCard），
+   *  contextRef 挂到该摘录上（extractId）——「已制卡数」就是按它派生的。 */
+  function startMarkCard(mark: ReaderDocMark) {
+    const documentId = contextRef?.documentId;
+    if (!documentId) return;
+    markCardRefOverrideRef.current = {
+      documentId,
+      extractId: mark.id,
+      ...buildLocator({ cfi: mark.cfi, pageIndex: mark.pageIndex, anchorText: mark.text.slice(0, 60) })
+    };
+    sourceTextRef.current = mark.text;
+    const el = scrollRef.current;
+    const denom = el ? el.scrollHeight - el.clientHeight : 0;
+    anchorRef.current = {
+      anchorText: mark.text.slice(0, 60),
+      anchorRatio: denom > 0 && el ? Math.min(1, el.scrollTop / denom) : 0
+    };
+    setMarkCardText(mark.text);
+    setManualOpen(true);
+    closeMarkPop();
   }
 
   // ---------- 手动制卡（Phase 3：引用+可编辑副本模式；v16 翻转问答 = 制卡手段，产两张独立问答卡；
@@ -1500,13 +1685,17 @@ export default function Reader({
     rememberAnchor(text);
     const ctx = enrichedContextRef();
     const multi = spans && spans.length >= 2 ? spans : undefined;
+    // v48.24 批3（§4 写入侧）：**根摘录**额外落 `sourceAnchor`（三条腿的容器形态）——文中留痕据此重画。
+    // 子摘录（contextRef.extractId）锚在父卡文本里（parentRange），不写源锚。
+    const sourceAnchor = contextRef?.extractId ? null : buildSourceAnchor(text);
+    const ctxWithAnchor = sourceAnchor ? { ...(ctx || {}), sourceAnchor } : ctx;
     if (contextRef?.extractId) {
       await readingWorkflow.create({
         parentType: "extract",
         parentId: contextRef.extractId,
         documentId: contextRef.documentId || "",
         contentMarkdown: text,
-        contextRef: ctx,
+        contextRef: ctxWithAnchor,
         spans: multi
       });
     } else if (contextRef?.documentId) {
@@ -1515,7 +1704,7 @@ export default function Reader({
         parentId: contextRef.documentId,
         documentId: contextRef.documentId,
         contentMarkdown: text,
-        contextRef: ctx,
+        contextRef: ctxWithAnchor,
         spans: multi
       });
     }
@@ -1899,27 +2088,25 @@ export default function Reader({
           )}
         </div>
 
-        {manualOpen && selection?.text && (
+        {manualOpen && (
           <ManualCardEditor
-            quote={selection.text}
+            quote={markCardText ?? selection?.text ?? ""}
             imageRegion={manualImage ?? undefined}
             onCancel={() => {
+              markCardRefOverrideRef.current = null;
+              setMarkCardText(null);
               setManualOpen(false);
               setManualImage(null);
             }}
-            onSave={handleManualCard}
-          />
-        )}
-
-        {manualOpen && !selection?.text && (
-          <ManualCardEditor
-            quote=""
-            imageRegion={manualImage ?? undefined}
-            onCancel={() => {
-              setManualOpen(false);
-              setManualImage(null);
+            onSave={async (p) => {
+              try {
+                await handleManualCard(p);
+              } finally {
+                // v48.24 批3（§4）：标记浮层进来的 contextRef 覆盖值用完即清（别串给下一张卡）
+                markCardRefOverrideRef.current = null;
+                setMarkCardText(null);
+              }
             }}
-            onSave={handleManualCard}
           />
         )}
 
@@ -2012,6 +2199,34 @@ export default function Reader({
           }}
         />
       )}
+
+      {/* v48.24 批3（§4 文中留痕）：标记浮层——原文 + 批注 + 已制卡数 + 「就此制卡」。
+          hover 出现、点标记钉住、点别处/Esc 收起；「就此制卡」走既有手动制卡链。 */}
+      {markPop && (() => {
+        const mark = marksRef.current.find((m) => m.id === markPop.id);
+        if (!mark) return null;
+        return (
+          <MarkPopover
+            mark={mark}
+            anchor={markPop.rect}
+            onMakeCard={() => startMarkCard(mark)}
+            onClose={closeMarkPop}
+            onKeepOpen={() => {
+              if (markHideTimerRef.current) {
+                window.clearTimeout(markHideTimerRef.current);
+                markHideTimerRef.current = null;
+              }
+            }}
+            onRelease={() => {
+              if (markPinnedRef.current || markHideTimerRef.current !== null) return;
+              markHideTimerRef.current = window.setTimeout(() => {
+                markHideTimerRef.current = null;
+                setMarkPop(null);
+              }, 160);
+            }}
+          />
+        );
+      })()}
 
       {/* v48 批3（M15，D42）：全屏导图工作区——内核保活，「正文」返回即原位；节点制卡走既有 AI 制卡链路 */}
       {mindmapOpen && engineSource && contextRef?.documentId && kernelRef.current && (
