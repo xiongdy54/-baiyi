@@ -3337,15 +3337,17 @@ body.theme-dark .modal-panel {
   border: none;
   border-bottom: 2px solid transparent;
   font-size: var(--fs-secondary);
-  color: var(--text-secondary);
+  color: var(--reader-fg, var(--text-secondary));
+  opacity: 0.7;
   cursor: pointer;
 }
 .reader-sidebar .tabs > button[role="tab"].on {
   color: var(--accent);
   border-bottom-color: var(--accent);
   font-weight: 500;
+  opacity: 1;
 }
-.reader-sidebar .tabs > button[role="tab"]:hover { background: var(--grey-1); }
+.reader-sidebar .tabs > button[role="tab"]:hover { background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent); }
 .reader-sidebar-close { flex: none; height: 32px; }
 .reader-side-panel { flex: 1; min-height: 0; overflow: auto; }
 /* 图谱目录条目：标题 + 层级缩进（由行内 paddingLeft 给）+ 占比条 */
@@ -3358,10 +3360,12 @@ body.theme-dark .modal-panel {
   border: none;
   padding: var(--sp-1) var(--sp-3);
   font-size: var(--fs-secondary);
-  color: var(--text-primary);
+  /* 用 --reader-fg（阅读外观的正文色）而不是 --text-primary（应用主题色）：
+     侧栏底色是 --reader-bg，两者必须同一套档，否则应用主题切深时浅字落浅底（实测踩过）。 */
+  color: var(--reader-fg, var(--text-primary));
   cursor: pointer;
 }
-.map-item:hover { background: var(--grey-1); }
+.map-item:hover { background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent); }
 .map-item-label { display: block; overflow-wrap: anywhere; }
 .map-bar {
   display: block;
@@ -3382,10 +3386,10 @@ body.theme-dark .modal-panel {
   border-bottom: 1px solid var(--border-subtle);
   padding: var(--sp-2) var(--sp-3);
   font-size: var(--fs-secondary);
-  color: var(--text-primary);
+  color: var(--reader-fg, var(--text-primary));
   cursor: pointer;
 }
-.reader-extract-item:hover { background: var(--grey-1); }
+.reader-extract-item:hover { background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent); }
 .reader-extract-text {
   display: -webkit-box;
   -webkit-line-clamp: 2;
