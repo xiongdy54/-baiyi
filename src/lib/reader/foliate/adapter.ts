@@ -29,6 +29,7 @@ import type {
 import { fixSvgAspect, injectAppearanceStyle } from "./appearance";
 import { getSelectionFromContents, getSelectionGeometryFromContents, pointerToHost } from "./selection";
 import { createMultiHighlight, MULTI_HIGHLIGHT_NAME } from "../multiHighlight";
+import { annotKey, annotSoft } from "../annotColor";
 
 interface TocNode {
   label?: string;
@@ -195,6 +196,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   /** 各章节文档当前的标记段（命中判定用；绘制与命中都不靠 pointer-events） */
   const markRanges = new Map<Document, { id: string; range: Range }[]>();
   const markStyles = new Map<Document, HTMLStyleElement>();
+  /** 本档已注册的高亮名（按色分组；重画时先全撤再重建） */
+  const registeredHighlightNames = new Map<Document, string[]>();
   let hoveredMarkId: string | null = null;
   const markHoverHandlers = new Set<(info: MarkPointerInfo) => void>();
   const markClickHandlers = new Set<(info: MarkPointerInfo) => void>();
@@ -205,17 +208,33 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   };
   const winOf = (doc: Document) => (doc.defaultView ?? null) as HighlightWin | null;
 
-  const markStyleCss = () => {
-    // iframe 拿不到宿主 Token：把 --accent-soft **求值成一个具体颜色**再注入。
-    // 不直接注入 getPropertyValue 的原文（那是 token 流，进了没有 --accent 的 iframe 就是废声明），
-    // 用一个隐藏探针让它按本档求值后读回 computed 颜色——深浅两档在各自的时刻求值，各拿各的。
+  /** 把任意 CSS 颜色表达式在**宿主侧**求值成字面颜色（iframe 里没有那些 Token） */
+  const evalColor = (css: string, fallback: string) => {
     const probe = document.createElement("div");
-    probe.style.cssText = "position:absolute;width:0;height:0;display:none;background:var(--accent-soft);";
+    probe.style.cssText = `position:absolute;width:0;height:0;display:none;background:${css};`;
     document.body.appendChild(probe);
     const value = getComputedStyle(probe).backgroundColor;
     probe.remove();
-    return `::highlight(${MARK_HIGHLIGHT_NAME}){background-color:${value && value !== "rgba(0, 0, 0, 0)" ? value : "color-mix(in srgb, #002fa7 8%, transparent)"};}`;
+    return value && value !== "rgba(0, 0, 0, 0)" ? value : fallback;
   };
+  /**
+   * 按**色键**分组的注入规则（批 4 修正，规格 §5.4「颜色对应」）：
+   * 文中高亮＝该条批注色的透明档，与栏内竖线/色点/角标同色。
+   * `::highlight` 一个注册名只能一种底色 ⇒ 按色开多条规则（`extract-mark` 保给默认色，
+   * 其余 `extract-mark-<色键>`）——这样批 3 的既有断言（无色的标记走 `extract-mark`）不破。
+   */
+  const markStyleCss = () => {
+    const keys = new Set<string>(["default"]);
+    for (const m of docMarks) keys.add(annotKey(m.color));
+    return [...keys]
+      .map((k) => {
+        const soft = k === "default" ? "var(--accent-soft)" : annotSoft(k.startsWith("hex-") ? `#${k.slice(4)}` : k);
+        const value = evalColor(soft, "color-mix(in srgb, #002fa7 8%, transparent)");
+        return `::highlight(${highlightNameFor(k)}){background-color:${value};}`;
+      })
+      .join("\n");
+  };
+  const highlightNameFor = (key: string) => (key === "default" ? MARK_HIGHLIGHT_NAME : `${MARK_HIGHLIGHT_NAME}-${key.replace(/[^a-z0-9-]/gi, "")}`);
   /** 注入/更新该文档的标记高亮规则（主题切换后要重算：值派生自 --accent，两档不同） */
   const ensureMarkStyle = (doc: Document) => {
     const css = markStyleCss();
@@ -253,12 +272,28 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     markRanges.set(doc, entries);
     const win = winOf(doc);
     if (!win?.CSS?.highlights || typeof win.Highlight !== "function") return; // 环境不支持 → 静默降级（阅读不受影响）
-    if (entries.length === 0) {
-      win.CSS.highlights.delete(MARK_HIGHLIGHT_NAME);
+    // 先撤掉本档此前注册过的全部色组（重画＝清空 + 全量重建，禁增量补丁）
+    for (const name of registeredHighlightNames.get(doc) ?? []) win.CSS.highlights.delete(name);
+    const byKey = new Map<string, Range[]>();
+    for (const mark of docMarks) {
+      if (!mark.cfi) continue;
+      const hit = entries.find((e) => e.id === mark.id);
+      if (!hit) continue;
+      const k = annotKey(mark.color);
+      byKey.set(k, [...(byKey.get(k) ?? []), hit.range]);
+    }
+    if (byKey.size === 0) {
+      registeredHighlightNames.set(doc, []);
       return;
     }
     ensureMarkStyle(doc);
-    win.CSS.highlights.set(MARK_HIGHLIGHT_NAME, new win.Highlight(...entries.map((e) => e.range)));
+    const names: string[] = [];
+    for (const [k, ranges] of byKey) {
+      const name = highlightNameFor(k);
+      win.CSS.highlights.set(name, new win.Highlight(...ranges));
+      names.push(name);
+    }
+    registeredHighlightNames.set(doc, names);
   };
   const paintAllMarks = () => {
     for (const index of docs.keys()) paintMarksForDoc(index);

@@ -2072,12 +2072,15 @@ body.theme-dark .modal-panel {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
+  /* 照样张 .side-head：上多一档、下少一档；字号与色都取 meta/helper 档 */
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
   border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
 }
-.annot-side-body { flex: 1; overflow: auto; min-height: 0; }
+.annot-side-body { flex: 1; overflow: auto; min-height: 0; padding: var(--sp-2) 0; }
 /* Zotero 式条目的尺度与配色在下方 .zitem 段（Task 13 共用） */
-.annot-side .zitem { cursor: default; }
+.annot-side .zitem { cursor: pointer; }
 .annot-side .zitem.on { background: var(--grey-1); }
 .annot-side .annot-body { min-width: 0; flex: 1; }
 .annot-empty { padding: var(--sp-3); color: var(--text-helper); margin: 0; }
@@ -2091,9 +2094,15 @@ body.theme-dark .modal-panel {
   color: var(--text-primary);
   font-family: inherit;
   font-size: var(--fs-secondary);
+  cursor: text;
 }
-.annot-acts { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
-.annot-dot { width: 8px; height: 8px; border: 1px solid var(--border-subtle); padding: 0; cursor: pointer; }
+/* 动作区（删除）默认**不显形**：样张的条目静态形态只有「时间 · 标签 · 段锚」三项，
+   常驻动作会把「高亮」标签挤成竖排（实测）。hover / 键盘聚焦时显形。 */
+.annot-acts { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; opacity: 0; }
+.annot-side .zitem:hover .annot-acts,
+.annot-side .zitem:focus-within .annot-acts { opacity: 1; }
+/* 色点＝条目的那枚类型方点（样张里条目上只有它一个色块），点它改色 */
+.annot-side .mark-kind[data-annot-color] { cursor: pointer; }
 .annot-act {
   background: none;
   border: none;

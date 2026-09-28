@@ -30,6 +30,7 @@ import type {
 } from "../kernel";
 import { createMultiHighlight } from "../multiHighlight";
 import { drawBadges } from "../badges";
+import { annotSoft, annotSolid } from "../annotColor";
 // 百分比换算的唯一实现面（v25 M5）：选区像素框 → 页内百分比走 pxShapeToPct，不另造一套换算
 import { pxShapeToPct } from "../../occlusion";
 import { PDF_ENGINE_VERSION } from "../foliate/version";
@@ -215,12 +216,7 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       if (e.el.style.display === "none" || e.ord !== 0) continue;
       const r = e.el.getBoundingClientRect();
       if (!(r.width > 0) || !(r.height > 0)) continue;
-      const color = e.mark.color
-        ? e.mark.color.startsWith("#")
-          ? e.mark.color
-          : `var(--annot-${e.mark.color})`
-        : "var(--annot-yellow)";
-      targets.push({ right: r.right, top: r.top, color });
+      targets.push({ right: r.right, top: r.top, color: annotSolid(e.mark.color, "var(--annot-yellow)") });
     }
     drawBadges(badgeLayer, viewerEl, targets, { left: hostRect.left, top: hostRect.top });
   };
@@ -242,6 +238,11 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
         el.className = "reader-doc-mark card-marked";
         el.dataset.markId = mark.id;
         if (mark.comment) el.dataset.hasComment = "1";
+        // 批 4 修正（规格 §5.4「颜色对应」）：文中高亮＝**该条批注色**的透明档 + 同色左缘条，
+        // 与栏内竖线/色点/角标同色。此前一律 accent，导致「角标跟色、高亮不跟色」自相矛盾。
+        // 无 annotation_color（老数据/没选过色）回落 accent —— 保持批 3 既有观感与断言。
+        el.style.background = annotSoft(mark.color);
+        el.style.borderLeftColor = annotSolid(mark.color);
         markLayer.appendChild(el);
         markEntries.push({ mark, ord: i, el });
       });

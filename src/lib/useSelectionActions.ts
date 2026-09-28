@@ -75,7 +75,13 @@ export interface SelectionActionsAdapter {
     parentType: "document" | "extract";
     parentId: string;
     documentId: string;
-    ranges?: Array<{ start: number; end: number }>;
+    /**
+     * 追加到 contextRef 的层级身份键（与既有的「子摘录」同形）：
+     * `{extractId, parentExtractId, rootExtractId, parentRange}`。
+     * **父卡坐标下的引文范围必须走 `parentRange`**，不能当成本行自己的 `quoteRange`——
+     * 后者是**本条正文**的坐标（落库按本条长度归一，父坐标会被当作越界整段丢掉，实测踩过）。
+     */
+    contextRefPatch?: Record<string, unknown>;
   } | null;
   /** 手动制卡浮层提交/取消后的一次性收尾（宿主清 contextRef 覆盖值） */
   onManualSettled?: () => void;
@@ -911,12 +917,13 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     // 宿主给定的落库父级优先（摘录页恒挂当前卡；规格 §3.4 表）
     const parent = A().annotateParent?.();
     if (parent) {
+      const patched = parent.contextRefPatch ? { ...(ctxWithAnchor || {}), ...parent.contextRefPatch } : ctxWithAnchor;
       created = await readingWorkflow.create({
         parentType: parent.parentType,
         parentId: parent.parentId,
         documentId: parent.documentId,
-        ...(parent.ranges?.length ? { quoteRange: parent.ranges } : {}),
-        ...payload
+        ...payload,
+        contextRef: patched
       });
     } else if (sc.extractId) {
       created = await readingWorkflow.create({

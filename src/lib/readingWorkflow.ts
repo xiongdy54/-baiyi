@@ -127,12 +127,6 @@ export interface ExtractInput {
   comment?: string | null;
   /** 批 4（R33）：批注色板 id（或 `#hex`），与文中高亮/角标同色 */
   annotationColor?: string | null;
-  /**
-   * 批 4 Task 10（规格 §3.4）：摘录页的批注/高亮锚在**当前卡正文**里的字符区间
-   * （单段路径用；多段走 `spans`，由主进程装配，二者不同时给）。
-   * 摘录页写批注时用它标出「批的是这句」；阅读器路径不传。
-   */
-  quoteRange?: Array<{ start: number; end: number }>;
 }
 
 /** 一段选区的原始采集物（rects = 宿主视口坐标的包围盒，可缺省） */

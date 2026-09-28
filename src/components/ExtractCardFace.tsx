@@ -3,6 +3,7 @@ import Dropdown from "./Dropdown";
 import EditableText from "./EditableText";
 import { extractStatusLabel, type ExtractEngine } from "../lib/sessionQueue";
 import type { DueTopic } from "../lib/readingWorkflow";
+import { paintBodyAnnotations, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
 
 const DAY = 86400000;
 const PRIORITY_OPTIONS = [10, 30, 50, 70, 90];
@@ -174,6 +175,7 @@ export default function ExtractCardFace({
   busy,
   viewOnly,
   quoteRanges,
+  bodyAnnotations,
   handlers
 }: {
   extract: DueTopic;
@@ -184,6 +186,11 @@ export default function ExtractCardFace({
   viewOnly?: boolean;
   /** 要呈现为高亮的区间（相对本条正文；落点用） */
   quoteRanges?: Array<{ start: number; end: number }> | null;
+  /**
+   * 批 4 修正（样张 `.q` 同规）：挂在本卡上的**段锚批注**——按色画在正文绘制层里
+   * （CSS Custom Highlight API，不碰 DOM）。栏内条目与文中那段据此对上。
+   */
+  bodyAnnotations?: BodyAnnotationGroup[];
   handlers: ExtractFaceHandlers;
 }) {
   const [postponeDays, setPostponeDays] = useState(7);
@@ -255,6 +262,17 @@ export default function ExtractCardFace({
       document.removeEventListener("keyup", onKey);
     };
   }, [extract.id, extract.contentMarkdown, viewOnly, handlers]);
+
+  /**
+   * 卡面正文里的批注痕迹（批 4 修正，样张 `.q` 同规）：按**该条批注色**画在绘制层
+   * （CSS Custom Highlight API）——栏内条目与文中那段据此对上（R33）。
+   * 只画**段锚**批注；整卡批注是元批注，文中不画（§5.4）。重画幂等（内部先撤后建）。
+   */
+  useEffect(() => {
+    if (viewOnly) return;
+    paintBodyAnnotations(bodyRef.current, bodyAnnotations ?? []);
+    return () => paintBodyAnnotations(null, []);
+  }, [viewOnly, extract.id, extract.contentMarkdown, bodyAnnotations]);
 
   // 落点（尽力而为）：高亮段落在卡面上可见即滚到可视区中部（容器不可滚时是一次 no-op）
   useEffect(() => {

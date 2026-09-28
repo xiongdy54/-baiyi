@@ -132,9 +132,37 @@ export default function AnnotationPanel({
               data-kind={it.kind}
               data-whole={isWhole ? "1" : undefined}
               style={{ "--zline": lineCss } as React.CSSProperties}
+              role="button"
+              tabIndex={0}
+              title="点击条目：文中跳到锚点并短暂强调"
+              onClick={() => {
+                // 点条目＝跳转（样张 §5.3「点击条目 → 文中滚动到锚点并短暂强调」）；
+                // 点色点/删除/输入区不触发（各自 stopPropagation）
+                if (confirmId !== it.id && editingId !== it.id) onJump(it);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onJump(it);
+                }
+              }}
             >
-              {/* R39：摘录＝实心方点；纯高亮＝空心方点（不靠颜色区分——颜色已被批注色占用） */}
-              <i className={`mark-kind${it.kind === "extract" ? " k-extract filled" : " k-extract"}`} data-kindmark="" style={{ color: dotCss }} />
+              {/* R39：摘录＝实心方点；纯高亮＝空心方点（不靠颜色区分——颜色已被批注色占用）。
+                  这枚方点同时是**色点**：样张的条目上只有它一个色块，点它＝改色。 */}
+              <i
+                className={`mark-kind${it.kind === "extract" ? " k-extract filled" : " k-extract"}`}
+                data-kindmark=""
+                data-annot-color
+                role="button"
+                tabIndex={0}
+                aria-label="改高亮颜色"
+                title="改高亮颜色"
+                style={{ color: dotCss }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setColorFor(colorFor === it.id ? null : it.id);
+                }}
+              />
               <div className="annot-body">
                 <p className={`zq${isWhole ? " tag-whole" : ""}`} data-zq>
                   {isWhole ? "本条批注 · 锚在整卡" : it.quote}
@@ -147,6 +175,7 @@ export default function AnnotationPanel({
                     rows={3}
                     value={draft}
                     autoFocus
+                    onClick={(e) => e.stopPropagation()}
                     onChange={(e) => setDraft(e.target.value)}
                     onBlur={() => commitEdit(it)}
                     onKeyDown={(e) => {
@@ -162,7 +191,8 @@ export default function AnnotationPanel({
                     className="zn"
                     data-zn
                     title="点一下改批注"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       setEditingId(it.id);
                       setDraft(it.comment ?? "");
                     }}
@@ -170,6 +200,9 @@ export default function AnnotationPanel({
                     {it.comment}
                   </p>
                 ) : null}
+                {/* meta 行严格照样张：时间 · 类型标签 · 段锚/整卡（三项）。
+                    删除只在 hover/键盘聚焦时显形——样张的静态形态里没有动作按钮，
+                    常驻会把「高亮」标签挤成竖排（实测）。 */}
                 <p className="zmeta mono">
                   <span>{fmtTime(it.time)}</span>
                   <span className={`kind-tag${it.kind === "extract" ? " t-extract" : ""}`} data-kindtag>
@@ -177,30 +210,42 @@ export default function AnnotationPanel({
                   </span>
                   <span>{isWhole ? "整卡" : "段锚"}</span>
                   <span className="annot-acts">
-                    {/* 色点：点开用户色板改色（复用调色排尺度） */}
-                    <button
-                      type="button"
-                      className="annot-dot"
-                      data-annot-color
-                      title="改高亮颜色"
-                      aria-label="改高亮颜色"
-                      style={{ background: dotCss }}
-                      onClick={() => setColorFor(colorFor === it.id ? null : it.id)}
-                    />
-                    <button type="button" className="annot-act" data-annot-jump onClick={() => onJump(it)}>
-                      定位
-                    </button>
                     {confirmId === it.id ? (
                       <>
-                        <button type="button" className="annot-del" data-annot-del-confirm onClick={() => { onDelete(it); setConfirmId(null); }}>
+                        <button
+                          type="button"
+                          className="annot-del"
+                          data-annot-del-confirm
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete(it);
+                            setConfirmId(null);
+                          }}
+                        >
                           确认删除
                         </button>
-                        <button type="button" className="annot-act" data-annot-del-cancel onClick={() => setConfirmId(null)}>
+                        <button
+                          type="button"
+                          className="annot-act"
+                          data-annot-del-cancel
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmId(null);
+                          }}
+                        >
                           取消
                         </button>
                       </>
                     ) : (
-                      <button type="button" className="annot-del" data-annot-del onClick={() => setConfirmId(it.id)}>
+                      <button
+                        type="button"
+                        className="annot-del"
+                        data-annot-del
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmId(it.id);
+                        }}
+                      >
                         {/* 整卡批注＝本卡自身的元批注：删它＝**清掉这条批注**，绝不删用户的卡
                             （R36 的「删除摘录/删除高亮」说的是段锚注解那条独立行） */}
                         {isWhole ? "删除批注" : it.kind === "highlight" ? "删除高亮" : "删除摘录"}
@@ -209,7 +254,7 @@ export default function AnnotationPanel({
                   </span>
                 </p>
                 {colorFor === it.id && (
-                  <div className="palette" data-annot-palette>
+                  <div className="palette" data-annot-palette onClick={(e) => e.stopPropagation()}>
                     {palette.map((c) => (
                       <button
                         key={c}

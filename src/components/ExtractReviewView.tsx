@@ -7,10 +7,11 @@ import AnnotationPanel, { type AnnotItem, type AnnotFilter } from "./reader/Anno
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import { cardsApi } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
-import { readingWorkflow, undoApi, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
+import { readingWorkflow, parseContextRef, undoApi, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
 import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
 import { useSelectionActions } from "../lib/useSelectionActions";
 import { createMultiHighlight } from "../lib/reader/multiHighlight";
+import { type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
 
 /** 选区快照（卡面 onSelection 回调的载荷；null＝无选区） */
 type FaceSelection = { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null;
@@ -170,10 +171,13 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
 
   /** 批 4 Task 13/14：当前卡的注解清单（含纯高亮）；栏的出现条件＝≥1 条 */
   const [annots, setAnnots] = useState<AnnotItem[]>([]);
+  /** 正文痕迹（段锚批注，按色分组；样张 `.q` 同规）——只喂给卡面的绘制层 */
+  const [bodyGroups, setBodyGroups] = useState<BodyAnnotationGroup[]>([]);
   const annotsFor = shown?.id ?? null;
   useEffect(() => {
     if (!annotsFor) {
       setAnnots([]);
+      setBodyGroups([]);
       return;
     }
     let cancelled = false;
@@ -188,7 +192,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         color: (r.annotationColor as string | null) ?? null,
         time: Number(r.createdAt ?? 0),
         parentId: String((r as { parentId?: unknown }).parentId ?? ""),
-        hasRange: parseQuoteRanges(r.quoteRangeJson).length > 0
+        hasRange: parseQuoteRanges(r.quoteRangeJson).length > 0,
+        // 正文痕迹用**父卡坐标**的区间：子注解的 quoteRangeJson 是「本条正文」坐标（整条即引文），
+        // 拿它去画父卡正文会错位——父卡坐标在 contextRef.parentRange（与「跳转原文回父卡」同一来源）。
+        // 注意：`listAll` 返回的是**已解析**的 contextRef（原始 JSON 键被剥掉，实测踩过）
+        ranges: parseQuoteRanges(parseContextRef(r.contextRef ?? r.contextRefJson)?.parentRange)
       }));
       // 段锚注解＝挂在本卡名下的子行（R33）；本卡自身的行另算（整卡批注）
       const children = rows
@@ -213,6 +221,12 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         ...wholeItem,
         ...children.map((r) => ({ ...r, anchorWhole: false }))
       ]);
+      // 批 4 修正：正文痕迹＝挂在本卡上的**段锚**批注（按各自的批注色画；整卡批注不画，§5.4）
+      setBodyGroups(
+        children
+          .filter((r) => r.hasRange && r.ranges.length > 0)
+          .map((r) => ({ color: r.color, ranges: r.ranges }))
+      );
     };
     void load();
     const off = eventBus.on("workflow/changed", () => void load());
@@ -265,14 +279,21 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     // 摘录页的选区就是「卡面里选中的那段」：快照面由卡面 onSelection 提供（faceSel），
     // 但菜单/面板的点击会先触发卡面 mouseup——动作面点击已豁免（见 ExtractCardFace.onUp）。
     buildSourceAnchor: () => null,
-    /** 规格 §3.4：摘录页的批注/高亮恒挂在**当前卡**上（parentRange＝所选区间） */
+    /** 规格 §3.4：摘录页的批注/高亮恒挂在**当前卡**上；所选区间走 contextRef.parentRange
+     *  （父卡坐标，与既有「子摘录」同一套语义）。 */
     annotateParent: () => {
       if (!shown?.id || !shown.contextRef?.documentId) return null;
+      const rootId = String(shown.contextRef.rootExtractId || shown.id);
       return {
         parentType: "extract" as const,
         parentId: shown.id,
         documentId: shown.contextRef.documentId,
-        ranges: faceSel?.ranges
+        contextRefPatch: {
+          extractId: shown.id,
+          parentExtractId: shown.id,
+          rootExtractId: rootId,
+          ...(faceSel?.ranges?.length ? { parentRange: faceSel.ranges } : {})
+        }
       };
     },
     focus: {
@@ -298,10 +319,12 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   async function handlePickColor(color: AnnotColor) {
     const sel = faceSel;
     if (!sel) return;
+    // **先落库、后清选区**：adapter 的 annotateParent() 读的就是 faceSel 里的偏移，
+    // 提前清掉会让落库区间退化成「整条正文」（[{0,len}]）——栏内条目与文中那段就对不上了（实测踩过）。
+    const newId = await createAnnotation(sel.text, undefined, color, annotMode);
     multiHighlightRef.current?.clear();
     setFaceSel(null);
     window.getSelection()?.removeAllRanges();
-    const newId = await createAnnotation(sel.text, undefined, color, annotMode);
     if (newId) {
       setEditing({
         id: newId,
@@ -575,6 +598,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           madeCardCount={cardCounts[current!.id]}
           engine={engine}
           busy={busy}
+          bodyAnnotations={bodyGroups}
           handlers={{
             onAdvance: () => void advance(),
             onPostpone: (days) => void run(() => readingWorkflow.postponeDays(current!.id, days), `已推迟 ${days} 天`),

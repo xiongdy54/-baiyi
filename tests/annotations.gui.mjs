@@ -247,6 +247,87 @@ try {
   await screenshot(cdp, "tmp-annot-reader-menu.png");
 
   // ============================================================
+  // ⑥ 文中痕迹与角标（阅读器侧）：颜色跟随 + 不画规则 + 幂等
+  // ============================================================
+  console.log("\n== ⑥ 文中高亮与角标（阅读器） ==");
+  // 点色 → 在文档上建一条带色的注解（kind=highlight＝纯高亮）
+  await cdp.eval(`(() => { document.querySelector(".selection-menu .swatch[data-color='green']")?.click(); return true; })()`);
+  await wait(1500);
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await wait(1200);
+
+  const markState = `(() => {
+    const el = document.querySelector(".pdf-mark-layer .reader-doc-mark");
+    if (!el) return JSON.stringify({ up: false });
+    const cs = getComputedStyle(el);
+    const probe = (v) => { const d = document.createElement("span"); d.style.color = v; document.body.appendChild(d); const c = getComputedStyle(d).color; d.remove(); return c; };
+    const svg = document.querySelector(".pdf-badge-layer");
+    const badges = svg ? [...svg.querySelectorAll("rect[data-badge]")] : [];
+    return JSON.stringify({
+      up: true,
+      bg: cs.backgroundColor,
+      bgTok: probe("var(--annot-green-soft)"),
+      line: cs.borderLeftColor,
+      lineTok: probe("var(--annot-green)"),
+      accentTok: probe("var(--accent)"),
+      badges: badges.length,
+      badgeFillInline: badges.map((b) => b.style.fill),
+      badgeComputed: badges.map((b) => getComputedStyle(b).fill),
+      badgeGeom: badges.map((b) => { const r = b.getBoundingClientRect(); return { w: r.width, h: r.height }; }),
+      notches: svg ? svg.querySelectorAll("polygon[data-badge-notch]").length : 0
+    });
+  })()`;
+  const mk1 = JSON.parse(String(await cdp.eval(markState)) || "{}");
+  check("文中痕迹在场（本文档的注解画出了矩形）", mk1.up === true, JSON.stringify(mk1).slice(0, 160));
+  check("文中高亮＝该条批注色的**透明档**（与栏内同色，R33/§5.4）", mk1.bg === mk1.bgTok, JSON.stringify({ bg: mk1.bg, tok: mk1.bgTok }));
+  check("文中高亮左缘＝该条批注色**实色**", mk1.line === mk1.lineTok && mk1.line !== mk1.accentTok, JSON.stringify({ line: mk1.line, tok: mk1.lineTok, accent: mk1.accentTok }));
+  check("纯高亮**不画角标**（§5.4）", mk1.badges === 0, JSON.stringify(mk1.badges));
+
+  // 加批注（走 IPC 造数据：批注编辑在读者已由 Task 17 的套件覆盖）→ 角标出现且**跟色**
+  await cdp.eval(`(async () => {
+    const all = await window.workflowAPI.listAll();
+    const row = all.find((x) => x.annotationColor === "green" && !x.comment && x.kind === "highlight");
+    if (!row) return "NO_ROW";
+    // 角标只给**段锚摘录**画（纯高亮不画，§5.4）→ 先把这条升为 extract 再加批注
+    await window.workflowAPI.update(row.id, { comment: "ANNOT 角标样本", kind: "extract" });
+    return row.id;
+  })()`);
+  // 重推标记（等价于渲染层 load() 的落点）：直调 IPC 不经渲染层封装、不广播 workflow/changed，
+  // 故这里显式重推——本段验的是「数据→绘制」这一跳，不是刷新时机（刷新由既有监听保证）。
+  await cdp.eval(`(async () => {
+    const k = window.__readerKernel;
+    const rows = await window.workflowAPI.listAll();
+    const marks = rows
+      .filter((r) => !(r.contextRef || {}).parentExtractId)
+      .map((r) => {
+        const c = r.contextRef || {};
+        const a = c.sourceAnchor || {};
+        return Object.assign({}, {
+          id: r.id, text: r.contentMarkdown, comment: r.comment ?? null,
+          color: r.annotationColor ?? null, kind: r.kind === "highlight" ? "highlight" : "extract", cardCount: 0
+        }, a);
+      });
+    k.setDocumentMarks(marks);
+    return marks.length;
+  })()`);
+  await wait(1600);
+  const mk2 = JSON.parse(String(await cdp.eval(markState)) || "{}");
+  check("有批注 ⇒ 出现角标", mk2.badges === 1, JSON.stringify(mk2.badges));
+  check("角标 8×8 + 缺角（形状而非字符）", mk2.badgeGeom?.[0]?.w === 8 && mk2.badgeGeom?.[0]?.h === 8 && mk2.notches === 1, JSON.stringify({ g: mk2.badgeGeom, n: mk2.notches }));
+  check("角标**颜色跟随**该条批注色（computed fill ＝ --annot-green）", mk2.badgeComputed?.[0] === mk2.lineTok, JSON.stringify({ fill: mk2.badgeComputed, tok: mk2.lineTok }));
+  check("角标颜色走**内联 style.fill**（不得靠 CSS 规则——CSS 会盖掉 fill 属性）", typeof mk2.badgeFillInline?.[0] === "string" && mk2.badgeFillInline[0].length > 0, JSON.stringify(mk2.badgeFillInline));
+
+  // 幂等：反复重画不累积
+  for (let i = 0; i < 3; i++) {
+    await cdp.eval(`(() => { const c = document.querySelector(".pdf-viewer-container"); if (c) { c.scrollTop += 1; c.scrollTop -= 1; } return true; })()`);
+    await wait(320);
+  }
+  const mk3 = JSON.parse(String(await cdp.eval(markState)) || "{}");
+  check("重画幂等：多次重画后角标数不累积", mk3.badges === 1 && mk3.notches === 1, JSON.stringify({ b: mk3.badges, n: mk3.notches }));
+  await screenshot(cdp, "tmp-annot-reader-mark.png");
+
+  // ============================================================
   // ② 摘录页五动作（拖选 → 菜单五项 → 落库）
   // ============================================================
   console.log("\n== ② 摘录页五动作 ==");
@@ -345,7 +426,14 @@ try {
   check("改批注：库中 comment 变化", editRes === "clicked" && sy.db === true, JSON.stringify(sy));
   check("改批注：栏内显示同步", String(sy.shown).includes("ANNOT 栏内改过的批注"), sy.shown);
 
-  const colorBefore = await cdp.eval(`(() => { const d = document.querySelector("[data-annot-panel] [data-annot-color]"); return d ? getComputedStyle(d).backgroundColor : null; })()`);
+  // 改色的观测点＝**条目左竖线**（R33：竖线＝批注色实色；样张 `--zline` 同规）。
+  // 不用方点：样张的纯高亮方点按 `.mark-kind.k-extract` 是**灰色空心**（颜色不落在它身上）。
+  const readLine = () =>
+    cdp.eval(`(() => {
+      const el = [...document.querySelectorAll("[data-annot-panel] [data-zitem]")].find((x) => x.dataset.whole !== "1");
+      return el ? getComputedStyle(el).borderLeftColor : null;
+    })()`);
+  const colorBefore = await readLine();
   await cdp.eval(`(() => { document.querySelector("[data-annot-panel] [data-annot-color]")?.click(); return true; })()`);
   await wait(600);
   const palUp = await cdp.eval(`document.querySelectorAll("[data-annot-panel] [data-annot-palette] [data-annot-pick]").length`);
@@ -360,9 +448,30 @@ try {
     return row?.annotationColor ?? null;
   })()`);
   check("改色：annotation_color 已落库（blue，取自默认色板）", colorPersisted === "blue", colorPersisted);
-  const colorAfter = await cdp.eval(`(() => { const d = document.querySelector("[data-annot-panel] [data-annot-color]"); return d ? getComputedStyle(d).backgroundColor : null; })()`);
+  const colorAfter = await readLine();
   const blueTok = await cdp.eval(tokenValue("--annot-blue"));
-  check("改色：色点 computed 变且＝--annot-blue（另配「与改前不同」对照）", colorAfter === blueTok && colorAfter !== colorBefore, JSON.stringify({ colorBefore, colorAfter, blueTok }));
+  check("改色：段锚条目左竖线 ＝ --annot-blue（R33；另配「与改前不同」对照）", colorAfter === blueTok && colorAfter !== colorBefore, JSON.stringify({ colorBefore, colorAfter, blueTok }));
+
+  // 正文痕迹（样张 `.q` 同规）：段锚批注按**自己的批注色**画在绘制层里
+  // （CSS Custom Highlight API；不碰 DOM——EditableText 是裸壳）。
+  const hlState = await cdp.eval(`(() => {
+    const st = document.getElementById("annot-body-highlight-style");
+    const reg = window.CSS && CSS.highlights;
+    const names = reg ? [...reg.keys()] : [];
+    const name = names.find((n) => String(n).startsWith("annot-body-"));
+    const hl = name ? reg.get(name) : null;
+    const ranges = hl ? [...hl] : [];
+    return JSON.stringify({
+      style: st ? st.textContent : null,
+      names,
+      texts: ranges.map((r) => r.toString())
+    });
+  })()`);
+  const hl = JSON.parse(String(hlState) || "{}");
+  check("正文痕迹：按批注色注册了高亮（annot-body-<色>）", (hl.names || []).some((n) => String(n).startsWith("annot-body-")), JSON.stringify(hl.names));
+  check("正文痕迹：注入规则的底色 ＝ 该批注色的透明档", String(hl.style || "").includes("--annot-blue-soft"), hl.style);
+  // 选取的是「这一段的含义」的前 5 字（faceProbe(5)），痕迹必须与所选**逐字一致**
+  check("正文痕迹：Range 文本 ＝ 所选那段（栏内条目与文中对得上）", (hl.texts || []).includes("这一段的含"), JSON.stringify(hl.texts));
 
   // 先留证：此刻栏内有条目（段锚那条改了批注+改了色）——这是规格 ⑨ 要判读的「摘录页批注栏」形态
   await screenshot(cdp, "tmp-annot-extract-light.png");
