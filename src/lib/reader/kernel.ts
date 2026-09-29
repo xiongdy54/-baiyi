@@ -161,6 +161,8 @@ export interface ReaderKernel {
   open(source: BookSource, init?: { location?: ReaderLocation }): Promise<void>;
   /** 跳转：CFI 位置 / 页码（PDF 引擎）/ 章节索引 / 目录 href / 文本搜索定位（返回是否发生导航） */
   goTo(target: ReaderLocation | { pageIndex: number } | { chapterIndex: number } | { href: string } | { search: string }): Promise<boolean>;
+  /** 按标记 id 精确定位；仅使用匹配标记的 CFI，无匹配或无 CFI 时返回 false，不回退到文本搜索。 */
+  goToMark(id: string): Promise<boolean>;
   /** 翻页（异步：杜绝「翻页后立刻读位置拿到旧值」的竞态）；boolean=是否发生导航（书边界返回 false） */
   next(): Promise<boolean>;
   prev(): Promise<boolean>;
@@ -195,6 +197,7 @@ export interface ReaderKernel {
    * 文中留痕（v48.24 批3 §4，可选能力）：把「本文档的根摘录标记」交给内核绘制。
    * PDF＝文本层之上的矩形覆盖层；EPUB＝cfi→Range 的 CSS Custom Highlight。两者都不碰正文 DOM。
    * 壳层只给数据；引擎不支持时可不实现（壳层按可选能力调用）。
+   * 每次调用整体替换当前标记列表；标记导航只精确匹配 id 和 CFI，不回退到文本搜索。
    */
   setDocumentMarks?(marks: ReaderDocMark[]): void;
   /**

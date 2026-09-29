@@ -5,6 +5,7 @@ import type {
   BookSource,
   LinkInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -37,6 +38,7 @@ export function createFakeKernel(spec: FakeBookSpec): ReaderKernel & {
   let chapter = 0;
   let selection: ReaderSelection | null = null;
   let geometry: ReaderRect | null = null;
+  let documentMarks: ReaderDocMark[] = [];
   let mode: ReaderModeConfig = { flow: "scrolled" };
   let appearance: ReaderAppearance | null = null;
 
@@ -102,6 +104,11 @@ export function createFakeKernel(spec: FakeBookSpec): ReaderKernel & {
       emitRelocate();
       return true;
     },
+    async goToMark(id) {
+      const mark = documentMarks.find((entry) => entry.id === id);
+      if (!mark?.cfi) return false;
+      return kernel.goTo({ cfi: mark.cfi });
+    },
     async next() {
       if (chapter >= spec.chapters.length - 1) return false;
       chapter += 1;
@@ -122,6 +129,9 @@ export function createFakeKernel(spec: FakeBookSpec): ReaderKernel & {
     },
     getTOC() {
       return toc.map((t) => ({ ...t }));
+    },
+    setDocumentMarks(marks) {
+      documentMarks = marks.map((mark) => ({ ...mark, rects: mark.rects?.map((rect) => ({ ...rect })) }));
     },
     // v48 批1（M15 §4.19-4）：每章 = 一个提取单元（anchor 与目录 href 同域），文本 = 章原文
     getSectionAnchors() {
@@ -156,6 +166,7 @@ export function createFakeKernel(spec: FakeBookSpec): ReaderKernel & {
     },
     destroy() {
       opened = false;
+      documentMarks = [];
       relocateHandlers.clear();
       linkHandlers.clear();
       pointerHandlers.clear();
