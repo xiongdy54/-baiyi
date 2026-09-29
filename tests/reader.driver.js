@@ -229,6 +229,54 @@ async function runSemantics(kernel, opts, check) {
   check("S14 分页模式切换后导航仍可用", okAfterMode === true);
   await kernel.setMode({ flow: "scrolled" });
 
+  // S17（D67 / §6.8-13）：侧栏注解按 id 导航（EPUB adapter L1）。
+  // L0 语义（替换 / 清理）由 tests/reader.fake-marks.test.cjs 覆盖；文本与几何级「到位」由 L2 套件覆盖。
+  if (!fake) {
+    const hasMarkNav = typeof kernel.setDocumentMarks === "function" && typeof kernel.goToMark === "function";
+    check("S17pre 内核支持按标记 id 导航", hasMarkNav);
+    if (!hasMarkNav) {
+      check("S17a 精确 id 导航到目标章（按 CFI）", false, "goToMark/setDocumentMarks 缺失");
+      check("S17b 另一条标记导航到它自己的章", false, "goToMark 缺失");
+      check("S17c 未知 id 返回 false 且位置不变", false, "goToMark 缺失");
+      check("S17d 不可解析 CFI 返回 false", false, "goToMark 缺失");
+      check("S17e 标记列表替换后旧 id 返回 false 且位置不变", false, "goToMark 缺失");
+    } else {
+      // 用真实选区取得两条标记的 CFI（不手写 CFI 字面量）
+      await kernel.goTo({ chapterIndex: 1 });
+      await wait(500);
+      check("S17pre1 第二章选区注入（取标记 CFI）", injectSelection(kernel, opts.marker2));
+      await wait(150);
+      const cfiSecond = kernel.getSelection()?.cfi;
+      await kernel.goTo({ chapterIndex: 2 });
+      await wait(500);
+      check("S17pre2 第三章选区注入（取标记 CFI）", injectSelection(kernel, opts.marker1));
+      await wait(150);
+      const cfiThird = kernel.getSelection()?.cfi;
+      check("S17pre3 两条标记 CFI 均已取到", typeof cfiSecond === "string" && typeof cfiThird === "string");
+      kernel.setDocumentMarks([
+        { id: "epub-mark-second", text: opts.marker2, cfi: cfiSecond, kind: "extract" },
+        { id: "epub-mark-third", text: opts.marker1, cfi: cfiThird, kind: "highlight" },
+        { id: "epub-mark-bogus", text: "坏锚", cfi: typeof cfiThird === "string" ? `${cfiThird}/999999` : "epubcfi(/6/2!/4/999999)", kind: "extract" }
+      ]);
+      await kernel.goTo({ chapterIndex: 0 });
+      await wait(500);
+      const navThird = await kernel.goToMark("epub-mark-third");
+      await waitFor(() => relocate && relocate.chapterIndex === 2, 8000, "S17a mark nav").catch(() => null);
+      check("S17a 精确 id 导航到目标章（按 CFI）", navThird === true && relocate && relocate.chapterIndex === 2, `nav=${navThird} chapter=${relocate && relocate.chapterIndex}`);
+      const navSecond = await kernel.goToMark("epub-mark-second");
+      await waitFor(() => relocate && relocate.chapterIndex === 1, 8000, "S17b mark nav").catch(() => null);
+      check("S17b 另一条标记导航到它自己的章", navSecond === true && relocate && relocate.chapterIndex === 1, `nav=${navSecond} chapter=${relocate && relocate.chapterIndex}`);
+      const chapterBeforeMissing = relocate && relocate.chapterIndex;
+      const navMissing = await kernel.goToMark("missing-mark");
+      check("S17c 未知 id 返回 false 且位置不变", navMissing === false && relocate && relocate.chapterIndex === chapterBeforeMissing, `nav=${navMissing} chapter=${relocate && relocate.chapterIndex}`);
+      const navBogus = await kernel.goToMark("epub-mark-bogus");
+      check("S17d 不可解析 CFI 返回 false", navBogus === false, String(navBogus));
+      kernel.setDocumentMarks([{ id: "epub-mark-second", text: opts.marker2, cfi: cfiSecond, kind: "extract" }]);
+      const navRemoved = await kernel.goToMark("epub-mark-third");
+      check("S17e 标记列表替换后旧 id 返回 false 且位置不变", navRemoved === false && relocate && relocate.chapterIndex === chapterBeforeMissing, `nav=${navRemoved} chapter=${relocate && relocate.chapterIndex}`);
+    }
+  }
+
   // S15 destroy
   kernel.destroy();
   check("S15 destroy 不抛错", true);

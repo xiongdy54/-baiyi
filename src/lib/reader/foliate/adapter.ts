@@ -303,6 +303,15 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     markStyles.forEach((_, doc) => ensureMarkStyle(doc));
   };
 
+  /** 该 id 当前可解析到的标记段（跨已加载文档；命中即证明目标位置可解析） */
+  const hasResolvedMark = (id: string): boolean => {
+    for (const entries of markRanges.values()) {
+      const hit = entries.find((entry) => entry.id === id);
+      if (hit && hit.range.startContainer.isConnected) return true;
+    }
+    return false;
+  };
+
   /** 命中判定：标记不吃 pointer-events（正文照常可划选），改按各段 Range 的实时矩形自算 */
   const hitMarkIn = (doc: Document, clientX: number, clientY: number) => {
     const entries = markRanges.get(doc) ?? [];
@@ -655,6 +664,28 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     setDocumentMarks(marks) {
       docMarks = Array.isArray(marks) ? marks : [];
       paintAllMarks();
+    },
+
+    // D67（§6.8-13）：侧栏注解按 id 导航——只认精确 id 与该条的 CFI；
+    // 不承诺章节内像素位置，也不回退文本搜索。
+    async goToMark(id: string) {
+      const mark = docMarks.find((candidate) => candidate.id === id);
+      const cfi = typeof mark?.cfi === "string" ? mark.cfi : "";
+      if (!cfi) return false;
+      let ok = false;
+      try {
+        ok = await kernel.goTo({ cfi });
+      } catch {
+        return false; // 坏 CFI 属存储边界输入：按契约失败，不上抛
+      }
+      if (!ok) return false;
+      // 导航后目标必须解析成已加载章节的 Range（标记重画在 'load' 上完成）
+      const deadline = Date.now() + 3000;
+      for (;;) {
+        if (hasResolvedMark(id)) return true;
+        if (Date.now() > deadline) return false;
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
     },
 
     getCurrentLocation(): ReaderLocation | null {

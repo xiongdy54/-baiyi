@@ -629,6 +629,29 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       syncMarks();
     },
 
+    // D67（§6.8-13）：侧栏注解按 id 导航——只认精确 id 与已存的页锚（pageIndex + rects）；
+    // 不承诺恢复页内垂直位置，也不回退文本搜索。
+    // 成功判据＝**到达所属页且该标记已按该页几何布局完成**（display 由 layoutMarks 置 block，
+    // 而 layoutMarks 只在页内容框有宽度时才置 block）。绘制矩形的最终落点还依赖图层 CSS
+    // （theme.css 的 .pdf-mark-layer/.reader-doc-mark），那是 L2（marks.gui.mjs）的几何断言面——
+    // 本方法只判「条目在该页上」，不把 CSS 缺失/滚动未稳误判成导航失败。
+    async goToMark(id: string) {
+      const mark = docMarks.find((candidate) => candidate.id === id);
+      const pageIndex = Number(mark?.pageIndex);
+      if (!mark || !Number.isFinite(pageIndex) || pageIndex < 0 || !(mark.rects?.length)) return false;
+      const ok = await kernel.goTo({ pageIndex });
+      if (!ok) return false;
+      // 等目标页渲染：pagerendered → syncMarks → layoutMarks 才会给该页的标记条目显形。
+      const deadline = Date.now() + 10000;
+      for (;;) {
+        const pageEl = viewerEl.querySelector(`.page[data-page-number="${pageIndex + 1}"]`) as HTMLElement | null;
+        const entry = markEntries.find((e) => e.mark.id === id);
+        if (pageEl && entry && entry.el.style.display === "block") return true;
+        if (Date.now() > deadline) return false;
+        await new Promise((resolve) => window.setTimeout(resolve, 60));
+      }
+    },
+
     // v48.24 批3（§4，写入侧）：选区在**本页**里的百分比矩形——摘录 sourceAnchor.rects 的来源。
     // 参考系＝页**内容框**（见 pageContentRect，绘制侧同一个框）；换算复用 occlusion 的 pxShapeToPct
     // （唯一的像素↔百分比实现面，含钳制与一位小数归一）。
