@@ -109,6 +109,10 @@ export function createFakeKernel(spec: FakeBookSpec): ReaderKernel & {
       if (!mark?.cfi) return false;
       return kernel.goTo({ cfi: mark.cfi });
     },
+    // D67 §3：fake 无几何/章节 DOM，位置序＝有锚标记的**安装序**（只用来验语义：无锚的不在列）
+    getMarkOrder() {
+      return documentMarks.filter((mark) => mark.cfi || (mark.pageIndex != null && mark.rects?.length)).map((mark) => mark.id);
+    },
     async next() {
       if (chapter >= spec.chapters.length - 1) return false;
       chapter += 1;

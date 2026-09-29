@@ -274,6 +274,27 @@ async function runSemantics(kernel, opts, check) {
       kernel.setDocumentMarks([{ id: "epub-mark-second", text: opts.marker2, cfi: cfiSecond, kind: "extract" }]);
       const navRemoved = await kernel.goToMark("epub-mark-third");
       check("S17e 标记列表替换后旧 id 返回 false 且位置不变", navRemoved === false && relocate && relocate.chapterIndex === chapterBeforeMissing, `nav=${navRemoved} chapter=${relocate && relocate.chapterIndex}`);
+
+      // S18（D67 §3）：注解栏「位置」序＝内核 resolve 出的**文档序**——不是安装序，也不含解不动的锚。
+      if (typeof kernel.getMarkOrder !== "function") {
+        check("S18a 文档序＝章节序（与安装序相反）", false, "getMarkOrder 缺失");
+        check("S18b 不可解析/无锚的标记不在位置序里", false, "getMarkOrder 缺失");
+      } else {
+        kernel.setDocumentMarks([
+          { id: "epub-order-third", text: opts.marker1, cfi: cfiThird, kind: "extract" },
+          { id: "epub-order-second", text: opts.marker2, cfi: cfiSecond, kind: "highlight" },
+          { id: "epub-order-bogus", text: "坏锚", cfi: `${cfiThird}/999999`, kind: "extract" },
+          { id: "epub-order-no-anchor", text: "无锚", kind: "extract" }
+        ]);
+        // 两章各访问一次，让两侧文档都进 contents 并各自 resolve 出标记段
+        await kernel.goTo({ chapterIndex: 1 });
+        await wait(600);
+        await kernel.goTo({ chapterIndex: 2 });
+        await wait(600);
+        const order = kernel.getMarkOrder();
+        check("S18a 文档序＝章节序（与安装序相反）", Array.isArray(order) && order.join(",") === "epub-order-second,epub-order-third", JSON.stringify(order));
+        check("S18b 不可解析/无锚的标记不在位置序里", Array.isArray(order) && !order.includes("epub-order-bogus") && !order.includes("epub-order-no-anchor"), JSON.stringify(order));
+      }
     }
   }
 

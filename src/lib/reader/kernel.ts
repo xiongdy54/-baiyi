@@ -203,6 +203,13 @@ export interface ReaderKernel {
    */
   setDocumentMarks?(marks: ReaderDocMark[]): void;
   /**
+   * **引擎侧位置序**（D67 §3，可选能力）：当前可解析成段的标记 id，按文档序（EPUB＝章节序 + Range
+   * 文档序）。CFI 只在引擎里 resolve，数据面比不了——PDF 的位置序由数据面算（pageIndex + 首矩形
+   * 几何，见 buildAnnotationItems），故 PDF 内核不需要实现它。
+   * 不在列＝当前不可解析（老 CFI / 章节未加载）／根本没有锚；调用方按稳定回退接在已定位之后。
+   */
+  getMarkOrder?(): string[];
+  /**
    * 源锚几何采集（v48.24 批3 §4，可选能力）：当前选区在源文档里的落点（PDF 回页内百分比矩形），
    * 供摘录的 `contextRef.sourceAnchor` 落库——留痕据此重画。无选区/引擎无几何概念时返回 null。
    */

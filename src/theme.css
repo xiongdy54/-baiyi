@@ -2182,6 +2182,8 @@ body.theme-dark .modal-panel {
   padding: 0 4px;
 }
 .kind-tag.t-extract { color: var(--text-primary); border-color: var(--border-strong); }
+/* 中性态（D67 §3）：无锚/导航失败——虚线框、helper 色，不用 accent、不像「成功」 */
+.kind-tag.t-unlocated { color: var(--text-helper); border-style: dashed; }
 /* 筛选 / 排序段控（栏顶） */
 .filter,
 .sort { display: flex; border: 1px solid var(--border-subtle); }

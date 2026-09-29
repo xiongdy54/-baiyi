@@ -357,6 +357,12 @@ export default function Reader({
   const markHideTimerRef = useRef<number | null>(null);
   /** 从浮层「就此制卡」进入时，本次制卡的 contextRef 覆盖值（挂到该摘录上——已制卡数按 extractId 派生） */
   const markCardRefOverrideRef = useRef<Record<string, unknown> | null>(null);
+  /** 批注栏（D67 §3）：刚跳中的条目短时强调（不落库、不持久）＋导航有界失败的条目（中性态） */
+  const [annotFocus, setAnnotFocus] = useState<string | null>(null);
+  const [annotUnavailable, setAnnotUnavailable] = useState<Record<string, true>>({});
+  const annotFocusTimerRef = useRef<number | null>(null);
+  /** 内核标记文档序的版本号：安装/重画标记后 +1，侧栏注解栏据此重新取序 */
+  const [marksOrderKey, setMarksOrderKey] = useState(0);
   const [tocOpen, setTocOpen] = useState(false);
   /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规）
    *  与图谱目录（只消费主进程算好的区间） */
@@ -398,12 +404,34 @@ export default function Reader({
     };
   }, [engineMode, contextRef?.documentId, tocItems]);
 
-  /** 摘录面板的「跳转原文」：把该条摘录的锚点交给引擎定位（复用既有 jumpAnchor 通道） */
-  function jumpToExtractAnchor(anchorText: string, pageIndex?: number, cfi?: string) {
-    setTocOpen(false);
-    if (!anchorText) return;
-    requestAnimationFrame(() => {
-      void kernelRef.current?.goTo?.({ href: "", cfi, pageIndex, anchorText } as never);
+  /**
+   * 注解栏条目的「定位到该注解」（D67 §3）：只走内核 `goToMark(id)` 的精确锚
+   * （EPUB＝该条 CFI；PDF＝pageIndex + rects），**不**回退 anchorText 文本搜索。
+   * 成功＝栏内短时强调该条；有界失败＝该条显示中性「不可定位」，不假装跳转成功。
+   */
+  function jumpToMark(id: string) {
+    const k = kernelRef.current;
+    if (!k?.goToMark) {
+      setAnnotUnavailable((m) => ({ ...m, [id]: true }));
+      return;
+    }
+    void k.goToMark(id).then((ok) => {
+      if (!ok) {
+        setAnnotUnavailable((m) => ({ ...m, [id]: true }));
+        return;
+      }
+      setAnnotUnavailable((m) => {
+        if (!m[id]) return m;
+        const next = { ...m };
+        delete next[id];
+        return next;
+      });
+      setAnnotFocus(id);
+      if (annotFocusTimerRef.current) window.clearTimeout(annotFocusTimerRef.current);
+      annotFocusTimerRef.current = window.setTimeout(() => {
+        annotFocusTimerRef.current = null;
+        setAnnotFocus(null);
+      }, 2500);
     });
   }
 
@@ -1045,6 +1073,8 @@ export default function Reader({
         const marks = buildDocMarks(rows, documentId, engineKind, counts);
         marksRef.current = marks;
         kernelRef.current?.setDocumentMarks?.(marks);
+        // 文档序只能问内核（EPUB 的 CFI 只有引擎 resolve 得动）——装完标记通知侧栏重取
+        setMarksOrderKey((v) => v + 1);
       } catch {
         /* 标记是增强信息：取不到就不画，阅读/制卡链路不受影响 */
       }
@@ -1353,7 +1383,23 @@ export default function Reader({
                     onClose={() => setTocOpen(false)}
                     tab={sidebarTab}
                     onTabChange={setSidebarTab}
-                    extractsPanel={<ReaderExtractsPanel documentId={contextRef?.documentId ?? null} onJump={jumpToExtractAnchor} />}
+                    extractsPanel={
+                      <ReaderExtractsPanel
+                        documentId={contextRef?.documentId ?? null}
+                        engine={engineKind}
+                        orderKey={marksOrderKey}
+                        getMarkOrder={() => kernelRef.current?.getMarkOrder?.() ?? []}
+                        filter={annotSettings.annotationFilter}
+                        onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
+                        palette={annotSettings.annotatePalette}
+                        currentId={annotFocus}
+                        unavailableIds={Object.keys(annotUnavailable)}
+                        onJump={jumpToMark}
+                        onEdit={(id, comment) => void selActions.saveAnnotationComment(id, comment)}
+                        onColor={(id, color) => void selActions.saveAnnotationColor(id, color)}
+                        onDelete={(id) => void selActions.removeAnnotation(id)}
+                      />
+                    }
                     mapItems={mapItems}
                     mapUnitCount={mapUnitCount}
                     mapAvailable={mapItems !== null}

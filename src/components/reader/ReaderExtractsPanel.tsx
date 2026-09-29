@@ -1,30 +1,52 @@
-// 阅读器侧栏「摘录」页签（批 4 Task 15，规格 §5.3）：本文档的摘录清单，点条目跳回原文锚点。
-// 与摘录页的批注栏（AnnotationPanel）分属两处：这里列的是**本文档的根摘录**（阅读器视角），
-// 栏内编辑/改色/删除属批注栏的职责，本面板只做「看 + 跳」。
-import { useEffect, useState } from "react";
+// 阅读器侧栏「注解」页签（D67 §3 / 样张 annotation-two-modes 对版）：本文档的**根摘录**清单，
+// 形态＝与摘录页同一套批注栏（AnnotationPanel：筛选/排序/内联改批注/改色/二次确认删除）。
+// 与摘录页的差别只有两处语义：①条目锚在**文档位置**上（整卡批注是摘录页的语义）；
+// ②点条目走内核**精确 id 导航**（goToMark），不借 anchorText 文本搜索——老数据（无
+// pageIndex+rects / 无 CFI）留在栏内、显示中性「不可定位」，不假称跳转成功。
+import { useEffect, useMemo, useRef, useState } from "react";
 import { eventBus } from "../../lib/eventbus";
 import { readingWorkflow } from "../../lib/readingWorkflow";
-
-interface DocExtract {
-  id: string;
-  text: string;
-  comment: string | null;
-  color: string | null;
-  kind: "highlight" | "extract";
-  anchorText: string;
-  pageIndex?: number;
-  cfi?: string;
-}
+import { buildAnnotationItems, type ReaderAnnotItem } from "../../lib/reader/marks";
+import AnnotationPanel, { type AnnotFilter } from "./AnnotationPanel";
 
 export default function ReaderExtractsPanel({
   documentId,
-  onJump
+  engine,
+  orderKey,
+  getMarkOrder,
+  filter,
+  onFilter,
+  palette,
+  currentId,
+  unavailableIds,
+  onJump,
+  onEdit,
+  onColor,
+  onDelete
 }: {
   documentId: string | null;
-  /** 点条目的落点：锚点文本/页码/CFI（由宿主交给引擎定位） */
-  onJump: (anchorText: string, pageIndex?: number, cfi?: string) => void;
+  /** 引擎族：位置序策略不同（PDF 用数据面几何；EPUB 用内核文档序） */
+  engine: "pdf" | "foliate";
+  /** 内核文档序的版本号（安装/重画标记后 +1）——变了才重新取序 */
+  orderKey: number;
+  /** 内核文档序（EPUB：resolve 后的章节序 + Range 文档序） */
+  getMarkOrder: () => string[];
+  filter: AnnotFilter;
+  onFilter: (f: AnnotFilter) => void;
+  palette: readonly string[];
+  /** 栏内高亮（刚跳过的条目，短时强调；不落库） */
+  currentId?: string | null;
+  /** 导航有界失败的条目 id（中性态显示，不假称成功） */
+  unavailableIds?: readonly string[];
+  /** 点条目：宿主走内核 goToMark(id) 精确导航 */
+  onJump: (id: string) => void;
+  onEdit: (id: string, comment: string | null) => void;
+  onColor: (id: string, color: string) => void;
+  onDelete: (id: string) => void;
 }) {
-  const [items, setItems] = useState<DocExtract[]>([]);
+  const [items, setItems] = useState<ReaderAnnotItem[]>([]);
+  const getOrderRef = useRef(getMarkOrder);
+  getOrderRef.current = getMarkOrder;
 
   useEffect(() => {
     if (!documentId) {
@@ -35,25 +57,7 @@ export default function ReaderExtractsPanel({
     const load = async () => {
       const all = (await readingWorkflow.getAllTopics()) as unknown as Array<Record<string, unknown>>;
       if (cancelled) return;
-      const mine = all
-        .filter((r) => {
-          const ctx = (r.contextRef ?? null) as { documentId?: string } | null;
-          return String(ctx?.documentId ?? r.documentId ?? "") === documentId;
-        })
-        .map((r) => {
-          const ctx = (r.contextRef ?? null) as { anchorText?: string; pageIndex?: number; cfi?: string } | null;
-          return {
-            id: String(r.id),
-            text: String(r.contentMarkdown ?? ""),
-            comment: (r.comment as string | null) ?? null,
-            color: (r.annotationColor as string | null) ?? null,
-            kind: (r.kind === "highlight" ? "highlight" : "extract") as "highlight" | "extract",
-            anchorText: String(ctx?.anchorText ?? r.contentMarkdown ?? "").slice(0, 60),
-            pageIndex: ctx?.pageIndex,
-            cfi: ctx?.cfi
-          };
-        });
-      setItems(mine);
+      setItems(buildAnnotationItems(all, documentId, engine, getOrderRef.current()));
     };
     void load();
     const off = eventBus.on("workflow/changed", () => void load());
@@ -61,24 +65,25 @@ export default function ReaderExtractsPanel({
       cancelled = true;
       off();
     };
-  }, [documentId]);
+  }, [documentId, engine, orderKey]);
+
+  const shown = useMemo(() => {
+    if (!unavailableIds?.length) return items;
+    const bad = new Set(unavailableIds);
+    return items.map((it) => (bad.has(it.id) ? { ...it, locatable: false } : it));
+  }, [items, unavailableIds]);
 
   return (
-    <div className="reader-extracts" data-reader-extracts>
-      {items.length === 0 && <p className="reader-toc-empty">本文档还没有摘录。</p>}
-      {items.map((it) => (
-        <button
-          key={it.id}
-          type="button"
-          className="reader-extract-item"
-          data-reader-extract={it.id}
-          onClick={() => onJump(it.anchorText, it.pageIndex, it.cfi)}
-          title={it.text}
-        >
-          <span className={`mark-kind${it.kind === "extract" ? " k-extract filled" : " k-extract"}`} aria-hidden="true" />
-          <span className="reader-extract-text">{it.text || it.anchorText || "(无正文)"}</span>
-        </button>
-      ))}
-    </div>
+    <AnnotationPanel
+      items={shown}
+      currentId={currentId ?? null}
+      filter={filter}
+      onFilter={onFilter}
+      palette={palette}
+      onJump={(it) => onJump(it.id)}
+      onEdit={(it, comment) => onEdit(it.id, comment)}
+      onColor={(it, color) => onColor(it.id, color)}
+      onDelete={(it) => onDelete(it.id)}
+    />
   );
 }

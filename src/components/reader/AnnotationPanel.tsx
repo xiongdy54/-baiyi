@@ -21,6 +21,8 @@ export interface AnnotItem {
   time: number;
   /** 锚在整卡（无区间）＝自身的批注，恒置顶 */
   anchorWhole: boolean;
+  /** 有可解析的定位锚（D67 §3）：false＝栏内显示中性「不可定位」（老数据/导航有界失败） */
+  locatable?: boolean;
 }
 
 export type AnnotFilter = "all" | "extract" | "highlight";
@@ -208,7 +210,13 @@ export default function AnnotationPanel({
                   <span className={`kind-tag${it.kind === "extract" ? " t-extract" : ""}`} data-kindtag>
                     {it.kind === "extract" ? "摘录" : "高亮"}
                   </span>
-                  <span>{isWhole ? "整卡" : "段锚"}</span>
+                  {it.locatable === false ? (
+                    <span className="kind-tag t-unlocated" data-annot-unlocated title="这条没有可定位的锚点（老数据或导航失败）">
+                      不可定位
+                    </span>
+                  ) : (
+                    <span>{isWhole ? "整卡" : "段锚"}</span>
+                  )}
                   <span className="annot-acts">
                     {confirmId === it.id ? (
                       <>

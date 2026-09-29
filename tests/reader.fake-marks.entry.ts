@@ -37,6 +37,15 @@ export async function run(): Promise<Result[]> {
   const removed = await kernel.goToMark("mark-two");
   check("替换标记列表后旧 id 不再导航", removed === false && kernel.getCurrentLocation()?.cfi === beforeUnknown, kernel.getCurrentLocation()?.cfi);
 
+  kernel.setDocumentMarks([
+    { id: "order-second", text: "第二章", cfi: "fake:/6/10", kind: "extract" },
+    { id: "order-first", text: "第一章", cfi: "fake:/6/6", kind: "highlight" },
+    { id: "order-no-anchor", text: "无锚", kind: "extract" }
+  ]);
+  const order = typeof kernel.getMarkOrder === "function" ? kernel.getMarkOrder() : null;
+  check("位置序列出有锚标记（fake＝安装序）", order != null && order.join(",") === "order-second,order-first", order && order.join(","));
+  check("无锚标记不在位置序里", order != null && !order.includes("order-no-anchor"), order && order.join(","));
+
   kernel.setDocumentMarks([{ id: "destroyed-mark", text: "第三章", cfi: "fake:/6/10", kind: "extract" }]);
   kernel.destroy();
   await kernel.open({ kind: "bytes", bytes: new Uint8Array(0), name: "fake.epub" });
@@ -47,6 +56,7 @@ export async function run(): Promise<Result[]> {
     destroyedMark === false && kernel.getCurrentLocation()?.cfi === beforeDestroyedLookup,
     kernel.getCurrentLocation()?.cfi
   );
+  check("destroy 后位置序清空", (kernel.getMarkOrder?.() ?? []).length === 0, JSON.stringify(kernel.getMarkOrder?.()));
   kernel.destroy();
   return results;
 }

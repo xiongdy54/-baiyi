@@ -141,6 +141,58 @@ const spanRectInPdf = (text) => `(() => {
   return JSON.stringify({ x1: first.left + 2, y: first.top + first.height / 2, x2: last.right - 2, y: last.top + last.height / 2, text: ${JSON.stringify(text)} });
 })()`;
 
+// EPUB 章节里的目标文字（宿主坐标；与 marks.gui 同款：跨已加载 contents 找文本）
+const spanRectInEpub = (mark) => `(() => {
+  const k = window.__readerKernel;
+  const entries = (k && k.__getContents ? k.__getContents() : []).filter((e) => e.doc && e.doc.defaultView && e.doc.defaultView.frameElement);
+  for (const { doc } of entries) {
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const idx = (node.textContent || "").indexOf(${JSON.stringify(mark)});
+      if (idx < 0) continue;
+      const range = doc.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx + ${mark.length});
+      const rects = range.getClientRects();
+      const first = rects[0], last = rects[rects.length - 1];
+      if (!first || !last || !first.height) continue;
+      const fr = doc.defaultView.frameElement.getBoundingClientRect();
+      return JSON.stringify({ x1: fr.left + first.left + 2, x2: fr.left + last.right - 2, y: fr.top + first.top + first.height / 2, text: range.toString() });
+    }
+  }
+  return "";
+})()`;
+
+// 栏内条目（阅读器注解栏：DOM 顺序＝面板展示顺序）
+const annotRows = `(() => {
+  const p = document.querySelector("[data-annot-panel]");
+  if (!p) return JSON.stringify({ up: false });
+  const rows = [...p.querySelectorAll("[data-zitem]")].map((el) => ({
+    id: el.dataset.annotId, kind: el.dataset.kind, unlocated: !!el.querySelector("[data-annot-unlocated]"),
+    on: el.classList.contains("on"), comment: el.querySelector("[data-zn]")?.textContent ?? null,
+    lineColor: getComputedStyle(el).borderLeftColor
+  }));
+  return JSON.stringify({ up: true, rows, count: p.querySelector("[data-annot-count]")?.textContent ?? "", filters: [...p.querySelectorAll("[data-annot-filterseg] button")].map((b) => ({ f: b.dataset.f, on: b.classList.contains("on") })), sorts: [...p.querySelectorAll("[data-annot-sortseg] button")].map((b) => ({ s: b.dataset.sort, on: b.classList.contains("on") })) });
+})()`;
+
+/** 栏内某条目的中心坐标（真实鼠标点击用） */
+const rowCenter = (id) => `(() => {
+  const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(id)} + '"]');
+  if (!el) return "";
+  const r = el.getBoundingClientRect();
+  // 落在引文行（顶部）而非左侧色点/底部动作行——那些各有自己的点击语义
+  return JSON.stringify({ x: r.left + r.width * 0.6, y: r.top + Math.min(14, r.height / 2) });
+})()`;
+
+/** 菜单动作按钮中心（真实鼠标点击用） */
+const menuActionCenter = (label) => `(() => {
+  const b = [...document.querySelectorAll(".selection-menu button")].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
+  if (!b) return "";
+  const r = b.getBoundingClientRect();
+  return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+})()`;
+
 const menuState = `(() => {
   const m = document.querySelector(".selection-menu");
   if (!m) return JSON.stringify({ up: false });
@@ -581,6 +633,203 @@ try {
   const retire = await cdp.eval(`(() => { const txt = document.body.innerText || ""; return JSON.stringify({ openExtract: txt.includes("打开摘录") }); })()`);
   const rt = JSON.parse(String(retire) || "{}");
   check("全应用内无「打开摘录」字样（R29 退役）", rt.openExtract === false, retire);
+
+  // ============================================================
+  // ⑩ 阅读器注解栏（D67 §3）：本文档根摘录 → 精确 id 导航 / 位置序 / 不可定位中性态
+  // ============================================================
+  console.log("\n== ⑩ 阅读器注解栏（D67 §3） ==");
+  // 前置：图谱书（EPUB）的三章正文里取一段真选区 → 菜单「摘录」落库（拿到真实 CFI 锚）
+  const mapDoc = JSON.parse(String(await cdp.eval(`(async () => {
+    const items = await window.libraryAPI.list();
+    const it = items.find((x) => String(x.title || "").includes("GUI 图谱测试书"));
+    const doc = it ? await window.libraryAPI.getDocument(it.id) : null;
+    return JSON.stringify({ docId: doc && doc.documentId });
+  })()`)) || "{}");
+  check("⑩pre 图谱书 documentId 可取（前置自查，防空转）", typeof mapDoc.docId === "string" && mapDoc.docId.length > 8, JSON.stringify(mapDoc));
+  // 老数据（无 sourceAnchor 的根摘录）**先**落库：位置序把它排在可定位条目之后 ⇒ 与 listAll 序不同（对照非空转）
+  const oldRowId = await cdp.eval(`(async () => {
+    const r = await window.workflowAPI.create({ parentType: "document", parentId: ${JSON.stringify(mapDoc.docId ?? "")}, documentId: ${JSON.stringify(mapDoc.docId ?? "")}, contentMarkdown: "ANNOT-OLD 无锚样本：老数据仍留在栏内。", contextRef: { documentId: ${JSON.stringify(mapDoc.docId ?? "")}, anchorText: "无锚样本" } });
+    return r && r.id;
+  })()`);
+  check("⑩pre2 老数据（无 sourceAnchor 的根摘录）已落库", typeof oldRowId === "string" && oldRowId.length > 8, String(oldRowId));
+  // 合成书由正文标题切章（实测 TOC: 第 1 章/第一章/第二章/第三章）⇒「第二章正文」在第 2 章（索引 2）
+  await cdp.eval(`(async () => { await window.__readerKernel.goTo({ chapterIndex: 2 }); return 1; })()`);
+  await wait(1600);
+  const epPick = JSON.parse(String(await cdp.eval(spanRectInEpub("第二章正文"))) || "{}");
+  const epLoaded = await cdp.eval(`(() => {
+    const k = window.__readerKernel;
+    return JSON.stringify((k.__getContents ? k.__getContents() : []).map((e) => ({ i: e.index, t: (e.doc.body?.innerText || "").slice(0, 24) })));
+  })()`);
+  check("⑩pre3 EPUB 目标文字可定位（坐标可算）", typeof epPick.x1 === "number", JSON.stringify({ pick: epPick, loaded: epLoaded }));
+  await drag({ x: epPick.x1, y: epPick.y }, { x: epPick.x2, y: epPick.y });
+  await wait(900);
+  const epBtn = JSON.parse(String(await cdp.eval(menuActionCenter("摘录"))) || "{}");
+  if (typeof epBtn.x === "number") await clickAt(cdp, epBtn.x, epBtn.y);
+  await wait(1600);
+  const epAnchor = JSON.parse(String(await cdp.eval(`(async () => {
+    const all = await window.workflowAPI.listAll();
+    const hit = (all || []).find((e) => String(e.contentMarkdown || "").includes("第二章正文"));
+    if (!hit) return JSON.stringify({ found: false, n: (all || []).length });
+    return JSON.stringify({ found: true, id: hit.id, cfi: hit.contextRef && hit.contextRef.sourceAnchor && hit.contextRef.sourceAnchor.cfi });
+  })()`)) || "{}");
+  check("⑩pre4 EPUB 摘录落库且带真实 CFI 锚", epAnchor.found === true && typeof epAnchor.cfi === "string" && epAnchor.cfi.startsWith("epubcfi"), JSON.stringify(epAnchor));
+
+  // 侧栏在 ⑤ 已是打开态（目录按钮是开合开关，再点会关掉——实测踩过）；仅在缺席时打开
+  const sbUp = (await cdp.eval(`!!document.querySelector("[data-reader-sidebar]")`)) === true;
+  if (!sbUp) {
+    await cdp.eval(`(() => { const b = [...document.querySelectorAll(".reader-engine-controls button")].find((x) => x.textContent.trim() === "目录"); b?.click(); return !!b; })()`);
+    await wait(1500);
+  }
+  check("⑩pre5 侧栏可开且切换到「摘录」页签（＝注解栏）", (await cdp.eval(`!!document.querySelector("[data-reader-sidebar]")`)) === true, `sbUp=${sbUp}`);
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="extracts"]')?.click(); return true; })()`);
+  await wait(1400);
+  const ar1 = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
+  const listAllOrder = String(await cdp.eval(`(async () => {
+    const all = await window.workflowAPI.listAll();
+    const mine = (all || []).filter((e) => { const c = e.contextRef || {}; const a = c.sourceAnchor || {}; return String(a.documentId || c.documentId || "") === ${JSON.stringify(mapDoc.docId ?? "")} && !c.parentExtractId; });
+    return mine.map((e) => e.id).join(",");
+  })()`));
+  check("⑩a 注解栏在场且列出本文档根摘录（与库一致）", ar1.up === true && (ar1.rows || []).map((r) => r.id).sort().join(",") === String(listAllOrder).split(",").sort().join(",") && ar1.rows.length >= 2, JSON.stringify({ rows: ar1.rows, listAll: listAllOrder }));
+  const domOrder = (ar1.rows || []).map((r) => r.id).join(",");
+  check("⑩b 位置序：可定位在前、老数据在后（与 listAll 序不同＝对照非空转）", domOrder === `${epAnchor.id},${oldRowId}` && listAllOrder === `${oldRowId},${epAnchor.id}`, JSON.stringify({ domOrder, listAllOrder }));
+  check("⑩c 无锚老数据显示中性「不可定位」", (ar1.rows || []).some((r) => r.id === oldRowId && r.unlocated === true), JSON.stringify(ar1.rows));
+
+  // 点可定位条目 → 内核精确 id 导航（CFI/位置真的变到目标章）＋ 栏内短时强调
+  await cdp.eval(`(async () => { await window.__readerKernel.goTo({ chapterIndex: 0 }); return 1; })()`);
+  await wait(1400);
+  const locBefore = JSON.parse(String(await cdp.eval(`JSON.stringify(window.__readerKernel.getCurrentLocation() || {})`)) || "{}");
+  const rowPt = JSON.parse(String(await cdp.eval(rowCenter(String(epAnchor.id)))) || "{}");
+  if (typeof rowPt.x === "number") await clickAt(cdp, rowPt.x, rowPt.y);
+  await wait(1500);
+  const locAfter = JSON.parse(String(await cdp.eval(`JSON.stringify(window.__readerKernel.getCurrentLocation() || {})`)) || "{}");
+  const ar2 = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
+  // 判据：CFI 真的变了，且落在**目标 CFI 的同一章节**（section 前缀＝epubcfi(/6/N) 那段；
+  // 位置对象只有 cfi（adapter 的 location 就是 {cfi}），故按章节前缀判同源位置）
+  const secOf = (cfi) => String(cfi || "").split("!")[0];
+  check(
+    "⑩d 点条目 → 真实导航到该条 CFI（CFI 变、章节前缀同源；非文本搜索）",
+    typeof locAfter.cfi === "string" && locAfter.cfi !== locBefore.cfi && secOf(locAfter.cfi) === secOf(epAnchor.cfi),
+    JSON.stringify({ before: locBefore, after: locAfter, target: epAnchor.cfi })
+  );
+  check("⑩e 导航成功 ⇒ 栏内该条短时强调（.on，不落库）", (ar2.rows || []).some((r) => r.id === epAnchor.id && r.on === true), JSON.stringify(ar2.rows));
+
+  // 不可定位条目：点它不得假装成功、位置不变
+  const locBeforeBad = JSON.parse(String(await cdp.eval(`JSON.stringify(window.__readerKernel.getCurrentLocation() || {})`)) || "{}");
+  const badPt = JSON.parse(String(await cdp.eval(rowCenter(String(oldRowId)))) || "{}");
+  if (typeof badPt.x === "number") await clickAt(cdp, badPt.x, badPt.y);
+  await wait(1200);
+  const locAfterBad = JSON.parse(String(await cdp.eval(`JSON.stringify(window.__readerKernel.getCurrentLocation() || {})`)) || "{}");
+  const ar3 = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
+  check(
+    "⑩f 点不可定位条目：位置不变且有界失败（不显示成功）",
+    locAfterBad.cfi === locBeforeBad.cfi && (ar3.rows || []).some((r) => r.id === oldRowId && r.unlocated === true && r.on !== true),
+    JSON.stringify({ before: locBeforeBad, after: locAfterBad, rows: ar3.rows })
+  );
+
+  // 筛选/排序段控（与摘录页同一组件，同规行为）
+  await cdp.eval(`(() => { document.querySelector('[data-annot-panel] [data-annot-filterseg] [data-f="highlight"]')?.click(); return true; })()`);
+  await wait(500);
+  const arHl = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
+  check("⑩g 筛选「高亮」后仅剩高亮条目（本文档无高亮 ⇒ 空且提示在场）", (arHl.rows || []).length === 0, JSON.stringify(arHl.rows));
+  await cdp.eval(`(() => { document.querySelector('[data-annot-panel] [data-annot-filterseg] [data-f="all"]')?.click(); document.querySelector('[data-annot-panel] [data-annot-sortseg] [data-sort="time"]')?.click(); return true; })()`);
+  await wait(600);
+  const arTime = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
+  check("⑩h 时间序＝创建先后（与位置序相反＝对照非空转）", (arTime.rows || []).map((r) => r.id).join(",") === `${oldRowId},${epAnchor.id}`, JSON.stringify(arTime.rows));
+
+  // 栏内动作（与摘录页同源：改批注 / 改色 / 二次确认删除）——在老数据行上做，完事即删
+  // 内联编辑的入口是**已有批注文字**（批 4 的既定形态）⇒ 先用 IPC 给这条加一条批注，再切页签强制重挂面板
+  await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(oldRowId)}, { comment: "ANNOT-OLD 初始批注" }); return 1; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return true; })()`);
+  await wait(600);
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="extracts"]')?.click(); return true; })()`);
+  await wait(1200);
+  const panelEditRes = await cdp.eval(`(() => {
+    const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-zn]');
+    if (!el) return "no-comment-el";
+    el.click();
+    return "clicked";
+  })()`);
+  await wait(500);
+  await cdp.eval(`(() => {
+    const ta = document.querySelector('[data-annot-panel] [data-annot-edit]');
+    if (!ta) return 0;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    setter.call(ta, "ANNOT 栏内改过的批注（阅读器）");
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.blur();
+    return 1;
+  })()`);
+  await wait(1200);
+  const editDb = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); const hit = (all || []).find((e) => e.id === ${JSON.stringify(oldRowId)}); return hit ? String(hit.comment ?? "") : "MISSING"; })()`);
+  check("⑩i 栏内改批注：库中 comment 变化", panelEditRes === "clicked" && editDb === "ANNOT 栏内改过的批注（阅读器）", `${panelEditRes} / ${editDb}`);
+
+  // 改色入口是条目上的方点（点它出色板）
+  const dotPt = JSON.parse(String(await cdp.eval(`(() => {
+    const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-annot-color]');
+    if (!el) return "";
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  if (typeof dotPt.x === "number") await clickAt(cdp, dotPt.x, dotPt.y);
+  await wait(600);
+  const pickPt = JSON.parse(String(await cdp.eval(`(() => {
+    const b = document.querySelector('[data-annot-panel] [data-annot-palette] [data-annot-pick="green"]');
+    if (!b) return "";
+    const r = b.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  if (typeof pickPt.x === "number") await clickAt(cdp, pickPt.x, pickPt.y);
+  await wait(1200);
+  const colorDb = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); const hit = (all || []).find((e) => e.id === ${JSON.stringify(oldRowId)}); return hit ? String(hit.annotationColor ?? "") : "MISSING"; })()`);
+  check("⑩j 栏内改色：annotation_color 落库（green）", colorDb === "green", String(colorDb));
+
+  const p10DelBefore = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); return (all || []).length; })()`);
+  const delPt = JSON.parse(String(await cdp.eval(`(() => {
+    const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-annot-del]');
+    if (!el) return "";
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  if (typeof delPt.x === "number") await clickAt(cdp, delPt.x, delPt.y);
+  await wait(600);
+  const confirmUp = (await cdp.eval(`!!document.querySelector('[data-annot-panel] [data-annot-del-confirm]')`)) === true;
+  const p10MidCount = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); return (all || []).length; })()`);
+  const confirmPt = JSON.parse(String(await cdp.eval(`(() => {
+    const el = document.querySelector('[data-annot-panel] [data-annot-del-confirm]');
+    if (!el) return "";
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  if (typeof confirmPt.x === "number") await clickAt(cdp, confirmPt.x, confirmPt.y);
+  await wait(1400);
+  const p10AfterDel = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); return (all || []).length; })()`);
+  const arDel = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
+  check("⑩k 二次确认前不删（计数不变）", confirmUp === true && p10MidCount === p10DelBefore, `${p10DelBefore} → ${p10MidCount} confirm=${confirmUp}`);
+  check("⑩l 确认后该条软删（库 -1 且栏内消失）", p10AfterDel === Number(p10DelBefore) - 1 && !(arDel.rows || []).some((r) => r.id === oldRowId), `${p10DelBefore} → ${p10AfterDel}`);
+
+  // ⑩m 回归：正文标记 hover 出浮层 / 真点开批注编辑器（本轮改动了 Reader 的接线；PDF 侧夹具）
+  // 说明：PDF 书当前**没有大纲** ⇒ 工具栏不显示侧栏入口，annotation-only PDF 的入口可用性是
+  // Task 5 的可用性矩阵范围（规格 D2），故本段只做绘制层回归，不在这里验 PDF 注解栏。
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title, .book-card")].find((x) => x.textContent.includes(${JSON.stringify(PDF_TITLE)})); (t?.closest(".book-card") || t)?.click(); return true; })()`);
+  await wait(3200);
+  // 标记画在页首附近——先滚到顶，避免 hover 落在视口外（空转）
+  await cdp.eval(`(() => { const c = document.querySelector(".pdf-viewer-container"); if (c) c.scrollTop = 0; return 1; })()`);
+  await wait(900);
+  const markRect = JSON.parse(String(await cdp.eval(`(() => {
+    const el = document.querySelector(".pdf-mark-layer .reader-doc-mark");
+    if (!el || el.style.display === "none") return "";
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  if (typeof markRect.x === "number") await hoverAt(cdp, markRect.x, markRect.y);
+  await wait(700);
+  const popUp = (await cdp.eval(`!!document.querySelector(".reader-mark-pop")`)) === true;
+  if (typeof markRect.x === "number") await clickAt(cdp, markRect.x, markRect.y);
+  await wait(800);
+  const editorUp = await cdp.eval(`!!document.querySelector("[data-editor-for]")`);
+  check("⑩m 正文标记 hover 出浮层、真点开批注编辑器（接线回归）", popUp === true && editorUp === true, JSON.stringify({ popUp, editorUp, markRect }));
 
   // ============================================================
   // ⑨ 截图判读（浅/深）

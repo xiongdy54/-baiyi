@@ -303,6 +303,33 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     markStyles.forEach((_, doc) => ensureMarkStyle(doc));
   };
 
+  /**
+   * D67 §3：注解栏「位置」序的引擎侧来源——各已加载文档按**章节序**，文档内按 Range 文档序。
+   * CFI 字符串序不是文档序（不许拿它比较），只能在引擎里 resolve 后用 Range 比。
+   */
+  const collectMarkOrder = (): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const bySection = [...docs.entries()].sort((a, b) => a[0] - b[0]);
+    for (const [, doc] of bySection) {
+      const entries = (markRanges.get(doc) ?? []).filter((e) => e.range.startContainer.isConnected);
+      // Range 只能在同文档内比较（跨文档 throws）；同文档内按起点序＝文档序
+      entries.sort((a, b) => {
+        try {
+          return a.range.compareBoundaryPoints(Range.START_TO_START, b.range);
+        } catch {
+          return 0; // 已分离/不可比的段保持现有序（稳定回退，不臆造先后）
+        }
+      });
+      for (const e of entries) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        out.push(e.id);
+      }
+    }
+    return out;
+  };
+
   /** 该 id 当前可解析到的标记段（跨已加载文档；命中即证明目标位置可解析） */
   const hasResolvedMark = (id: string): boolean => {
     for (const entries of markRanges.values()) {
@@ -664,6 +691,11 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     setDocumentMarks(marks) {
       docMarks = Array.isArray(marks) ? marks : [];
       paintAllMarks();
+    },
+
+    // D67 §3：注解栏「位置」序——当前可解析标记的文档序（见 collectMarkOrder）
+    getMarkOrder() {
+      return collectMarkOrder();
     },
 
     // D67（§6.8-13）：侧栏注解按 id 导航——只认精确 id 与该条的 CFI；
