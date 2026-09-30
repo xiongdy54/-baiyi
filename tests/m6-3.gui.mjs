@@ -211,7 +211,7 @@ async function openBookProbe(cdp, title) {
   await wait(2500);
   await cdp.eval(clickCardByTitle("绩效与工作节奏"));
   await wait(4000);
-  await cdp.eval(`(() => { const b=[...document.querySelectorAll('.reader-engine-controls button')].find(x=>x.textContent.includes('目录')); b?.click(); return 1; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-reader-sidebar-toggle]')?.click(); return 1; })()`);
   await wait(700);
   await cdp.eval(`(() => { const el=[...document.querySelectorAll('.reader-toc-item')].find(e=>e.textContent.includes('只要跑不死')); el?.click(); return 1; })()`);
   await wait(1500);
