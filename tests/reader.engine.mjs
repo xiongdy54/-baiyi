@@ -416,6 +416,47 @@ try {
   })()`);
   check("5 引擎进度落库（cfi+fraction）", Boolean(prog && prog.cfi != null && typeof prog.fraction === "number"), JSON.stringify(prog && { f: prog.fraction, c: prog.cfi && prog.cfi.slice(0, 20) }));
 
+  // 5b. D2/§7（Task 7）：侧栏开合＝布局变更——不写进度、位置不漂；用户翻页照常写（正对照）
+  const readProg = `(async () => { const doc = await window.libraryAPI.getDocument(${JSON.stringify(seeded.book)}); return doc.progressJson || ""; })()`;
+  const readLoc = `JSON.stringify(window.__readerKernel?.getCurrentLocation?.() || {})`;
+  const secOf = (cfi) => String(cfi || "").split("!")[0];
+  await wait(1400); // 先让此前的用户动作把防抖进度落定，再把基线记下来
+  const progBefore = String(await cdp.eval(readProg));
+  const locBefore = JSON.parse(String(await cdp.eval(readLoc)) || "{}");
+  const progPoll = `(async () => { const doc = await window.libraryAPI.getDocument(${JSON.stringify(seeded.book)}); return doc.progressJson || ""; })()`;
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  // 轮询记录首次变化出现在何时（自证：若真写了进度，能说出它在窗口内的哪一刻）
+  let firstChangeMs = -1;
+  for (let i = 0; i < 12; i++) {
+    await wait(400);
+    if (String(await cdp.eval(progPoll)) !== progBefore) { firstChangeMs = (i + 1) * 400; break; }
+  }
+  await wait(600);
+  const progOpen = String(await cdp.eval(readProg));
+  const locOpen = JSON.parse(String(await cdp.eval(readLoc)) || "{}");
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  await wait(2300);
+  const progClosed = String(await cdp.eval(readProg));
+  const locClosed = JSON.parse(String(await cdp.eval(readLoc)) || "{}");
+  check(
+    "5b 开合侧栏不写进度（布局变更 ≠ 用户翻页）",
+    progBefore !== "" && progOpen === progBefore && progClosed === progBefore,
+    JSON.stringify({ firstChangeMs, before: progBefore.slice(0, 70), open: progOpen.slice(0, 70), closed: progClosed.slice(0, 70) })
+  );
+  check(
+    "5b2 开合侧栏后位置不漂（同章 CFI；CFI 仍可解析）",
+    secOf(locBefore.cfi) === secOf(locClosed.cfi) && secOf(locOpen.cfi) === secOf(locBefore.cfi) && Boolean(locClosed.cfi),
+    JSON.stringify({ before: locBefore.cfi, open: locOpen.cfi, closed: locClosed.cfi })
+  );
+  await cdp.eval(`(() => { const b = document.querySelector('.reader-engine-controls button[title*="下一页"]'); b?.click(); return !!b; })()`);
+  await wait(2200);
+  const progAfterTurn = String(await cdp.eval(readProg));
+  check(
+    "5b3 用户翻页照常写进度（正对照：守卫不吞真实导航）",
+    progAfterTurn !== "" && progAfterTurn !== progClosed,
+    JSON.stringify({ closed: progClosed.slice(0, 70), after: progAfterTurn.slice(0, 70) })
+  );
+
   // 6. 复习卡跳转原文（存 cfi → 引擎直达；另造一张卡走文本搜索兜底路径不重复验证）
   await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();

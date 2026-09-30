@@ -210,6 +210,15 @@ export interface ReaderKernel {
    */
   getMarkOrder?(): string[];
   /**
+   * 视口**页内锚点**快照/还原（D2/§7，可选能力，仅 PDF 数值缩放需要）：
+   * 侧栏开合会改变引擎容器宽度——fit 模式（page-width/page-fit）由 pdf.js 自适应重算 scale，
+   * 按契约只保「当前页」；而数值缩放下容器变窄会把正看着的页内那一点挤出视口。
+   * 快照＝当前页 + 视口左上角落在**该页内容框**里的点（px，与 sourceAnchor.rects 同一参考系）；
+   * 还原＝按当前几何把该点推回视口左上角（越界时尽力而为）。
+   */
+  captureViewPoint?(): { pageIndex: number; x: number; y: number } | null;
+  restoreViewPoint?(point: { pageIndex: number; x: number; y: number }): boolean;
+  /**
    * 源锚几何采集（v48.24 批3 §4，可选能力）：当前选区在源文档里的落点（PDF 回页内百分比矩形），
    * 供摘录的 `contextRef.sourceAnchor` 落库——留痕据此重画。无选区/引擎无几何概念时返回 null。
    */

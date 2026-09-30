@@ -295,6 +295,41 @@ async function runSemantics(kernel, opts, check) {
         check("S18a 文档序＝章节序（与安装序相反）", Array.isArray(order) && order.join(",") === "epub-order-second,epub-order-third", JSON.stringify(order));
         check("S18b 不可解析/无锚的标记不在位置序里", Array.isArray(order) && !order.includes("epub-order-bogus") && !order.includes("epub-order-no-anchor"), JSON.stringify(order));
       }
+
+      // S19（D2/§7，Task 7）：容器变窄/变宽（＝侧栏开合的布局变更）后，位置与文本不漂。
+      // 判据：同一段文字重新选中得到的 CFI 与变更前一致，且选区几何仍在宿主视口内。
+      await kernel.goTo({ chapterIndex: 1 });
+      await wait(700);
+      check("S19pre 变更前在目标章注入选区", injectSelection(kernel, opts.marker2));
+      await wait(200);
+      const cfiBefore = kernel.getSelection()?.cfi ?? null;
+      const hostEl = document.getElementById("host");
+      const widthBefore = hostEl.getBoundingClientRect().width;
+      hostEl.style.width = "62%"; // 模拟右侧栏占位：正文区变窄
+      await wait(300);
+      const widthNarrow = hostEl.getBoundingClientRect().width;
+      await waitFor(() => kernel.getCurrentLocation()?.cfi != null, 6000, "resize settle").catch(() => null);
+      await wait(900); // 真实 relocated 结算窗口（不做唯一裁判，下面还有 CFI 与几何双判据）
+      const cfiAfter = kernel.getCurrentLocation()?.cfi ?? null;
+      const reselect = kernel.getSelection();
+      hostEl.style.width = "";
+      await wait(600);
+      const widthAfter = hostEl.getBoundingClientRect().width;
+      check(
+        "S19a 变窄后位置不漂：当前 CFI 仍在同一章",
+        typeof cfiBefore === "string" && typeof cfiAfter === "string" && cfiBefore.split("!")[0] === cfiAfter.split("!")[0],
+        JSON.stringify({ cfiBefore, cfiAfter })
+      );
+      check(
+        "S19b 变窄后同一段文字仍可解析（选区文本一致）",
+        reselect != null && reselect.text === opts.marker2,
+        JSON.stringify({ text: reselect?.text, want: opts.marker2 })
+      );
+      check(
+        "S19c 变窄与复原都真实发生（自证：布局变更真实发生）",
+        widthNarrow < widthBefore - 100 && Math.abs(widthAfter - widthBefore) <= 1,
+        JSON.stringify({ widthBefore, widthNarrow, widthAfter })
+      );
     }
   }
 

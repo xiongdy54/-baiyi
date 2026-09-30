@@ -235,6 +235,57 @@ window.__pdfTest = {
     const scalePw = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
     check("P15b zoom=page-width → currentScaleValue 切换", scalePw === "page-width", String(scalePw));
 
+    // D2/§7（Task 7）：侧栏开合＝容器变窄（这里用 host.right 收窄模拟）。
+    // 数值缩放要保「正看着的页内那一点」；fit 模式按契约只保当前页（scale 由 pdf.js 自适应）。
+    const hasViewPoint = typeof kernel.captureViewPoint === "function" && typeof kernel.restoreViewPoint === "function";
+    check("P16pre 内核支持视口页内锚点快照/还原", hasViewPoint);
+    const cont = document.querySelector(".pdf-viewer-container");
+    if (!hasViewPoint) {
+      check("P16a 数值缩放：变窄后页内锚点还原（≤2px）", false, "captureViewPoint/restoreViewPoint 缺失");
+      check("P16b fit 模式：保 preset 与当前页", false, "captureViewPoint/restoreViewPoint 缺失");
+    } else {
+      kernel.applyAppearance({ theme: "paper", zoom: 150 });
+      await wait(500);
+      await kernel.goTo({ pageIndex: 0 });
+      await wait(600);
+      cont.scrollTop = 300; // 滚到页中部，让「页内那一点」真的需要被还原
+      await wait(400);
+      const pt = kernel.captureViewPoint();
+      const pageBefore = kernel.getCurrentLocation()?.pageIndex;
+      const scrollBefore = cont.scrollTop;
+      host.style.right = "300px"; // 收窄正文区（等价于右侧栏占位）
+      await wait(800);
+      const drifted = kernel.captureViewPoint();
+      // 正对照：变窄确实把页内锚点挪走了（不还原也能过的那种断言被排除）
+      const driftY = pt && drifted ? Math.abs(drifted.y - pt.y) + Math.abs(drifted.x - pt.x) : 0;
+      const restored = kernel.restoreViewPoint(pt);
+      await wait(400);
+      const scrollAfter = cont.scrollTop;
+      const pageAfter = kernel.getCurrentLocation()?.pageIndex;
+      check(
+        "P16a 数值缩放：变窄漂移可见，还原后页内锚点回位（≤2px）",
+        drifted !== null && driftY > 2 && restored === true && Math.abs(scrollAfter - scrollBefore) <= 2 && pageAfter === pageBefore,
+        JSON.stringify({ pt, drifted, driftY, scrollBefore, scrollAfter, pageBefore, pageAfter })
+      );
+      // fit 模式：契约＝保 preset + 当前页不变（页宽**不**强制自适应：pdf.js 只在 window resize
+      // 时重算 page-width/page-fit，容器变窄/变宽不触发——实测，故这里只如实记录页宽读数）
+      kernel.applyAppearance({ theme: "paper", zoom: "page-width" });
+      await wait(500);
+      const contNarrow = cont.getBoundingClientRect().width;
+      const wFitNarrow = document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width;
+      host.style.right = ""; // 放开宽度（等价于关栏）
+      await wait(800);
+      const contWide = cont.getBoundingClientRect().width;
+      const wFitWide = document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width;
+      const scaleValue = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
+      const pageFit = kernel.getCurrentLocation()?.pageIndex;
+      check(
+        "P16b fit 模式：容器确实变宽、preset 保留、当前页不变",
+        scaleValue === "page-width" && pageFit === pageBefore && Math.abs(contWide - contNarrow) > 200,
+        JSON.stringify({ scaleValue, pageFit, pageBefore, contNarrow, contWide, wFitNarrow, wFitWide })
+      );
+    }
+
     kernel.destroy();
     check("P14 destroy 后容器清空", host.querySelectorAll("canvas").length === 0, "canvas=" + host.querySelectorAll("canvas").length);
     return check.results;

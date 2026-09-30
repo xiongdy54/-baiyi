@@ -452,6 +452,7 @@ export default function Reader({
    * 成功＝栏内短时强调该条；有界失败＝该条显示中性「不可定位」，不假装跳转成功。
    */
   function jumpToMark(id: string) {
+    clearReflowGuard();
     const k = kernelRef.current;
     if (!k?.goToMark) {
       setAnnotUnavailable((m) => ({ ...m, [id]: true }));
@@ -576,6 +577,31 @@ export default function Reader({
     el.style.background = a.bgColor ?? "transparent";
   }, [engineMode, readerSettings]);
 
+  /**
+   * D2/§7（Task 7）：侧栏开合＝**布局变更**，不是用户翻页。
+   * 布局引起的 relocate 不写进度（否则开一次侧栏就把进度挪一格）；PDF 数值缩放下还要把页内锚点
+   * 一并还原（fit 模式由 pdf.js 自适应重算 scale，按契约只保当前页）。
+   * 守卫是**瞬时**的（不落设置、不进数据库），三个确定性出口清除它：还原自己的 relocate 落地、
+   * 兜底时限、或用户的下一次导航动作（turnPage / 各类跳转）。
+   */
+  type ReflowGuard = {
+    restore?: () => void;
+    restoring: boolean;
+    clearTimer: number | null;
+    /** 用户手势的即时出口：布局窗口里一旦有真实输入，就不再压制它的 relocate */
+    endOnGesture: () => void;
+  };
+  const reflowGuardRef = useRef<ReflowGuard | null>(null);
+  const clearReflowGuard = useCallback(() => {
+    const g = reflowGuardRef.current;
+    if (!g) return;
+    if (g.clearTimer !== null) window.clearTimeout(g.clearTimer);
+    window.removeEventListener("wheel", g.endOnGesture);
+    window.removeEventListener("pointerdown", g.endOnGesture);
+    window.removeEventListener("keydown", g.endOnGesture);
+    reflowGuardRef.current = null;
+  }, []);
+
   // 引擎进度：relocate 防抖落进度 + 阅读统计（charPos = fraction × 全书字符数近似，热力图口径不变）
   const handleEngineRelocate = useCallback(
     (info: RelocateInfo) => {
@@ -589,6 +615,23 @@ export default function Reader({
       }
       setTocActiveHref(info.chapterHref);
       setImgOverlay(null); // v35：翻页/滚动即清除图内高亮（坐标系随视口失效）
+      const guard = reflowGuardRef.current;
+      if (guard) {
+        // 布局变更期间的 relocate：撤掉可能已排队的进度写入，再决定是否做一次性还原
+        if (relocateTimerRef.current) {
+          window.clearTimeout(relocateTimerRef.current);
+          relocateTimerRef.current = null;
+        }
+        if (!guard.restoring && guard.restore) {
+          const run = guard.restore;
+          guard.restore = undefined;
+          guard.restoring = true;
+          run();
+        }
+        // 抑制一直持续到守卫的**确定性出口**（用户手势 / 有界兜底）：reflow 与还原自己的
+        // settle relocate 都属布局生成，一个都不写进度（早放行会让「开一次侧栏挪一格进度」漏进来）
+        return;
+      }
       if (relocateTimerRef.current) window.clearTimeout(relocateTimerRef.current);
       relocateTimerRef.current = window.setTimeout(() => {
         relocateTimerRef.current = null;
@@ -597,8 +640,44 @@ export default function Reader({
         onProgress?.(info.fraction, "", { cfi: info.location.cfi, fraction: info.fraction, pageIndex: info.location.pageIndex });
       }, 700);
     },
-    [itemId, markdown, onProgress]
+    [itemId, markdown, onProgress, clearReflowGuard]
   );
+
+  /** 侧栏开合（D5-B 入口）：先快照+布防，再改宽度——布局引起的 relocate 不写进度 */
+  const toggleSidebar = useCallback(() => {
+    const k = kernelRef.current;
+    const zoom = readerSettingsRef.current.appearance.zoom;
+    const cfi = k?.getCurrentLocation?.()?.cfi ?? null;
+    // 数值缩放才需要页内锚点还原；fit 模式只保当前页（引擎自适应）
+    const point = typeof zoom === "number" ? k?.captureViewPoint?.() ?? null : null;
+    const restore = () => {
+      if (point) k?.restoreViewPoint?.(point);
+      else if (cfi) void k?.goTo?.({ cfi });
+    };
+    // 用户手势＝布局窗口结束（之后属于用户自己的导航，照常写进度）
+    const endOnGesture = () => clearReflowGuard();
+    const guard: ReflowGuard = { restore, restoring: false, clearTimer: null, endOnGesture };
+    clearReflowGuard();
+    reflowGuardRef.current = guard;
+    window.addEventListener("wheel", endOnGesture, { passive: true });
+    window.addEventListener("pointerdown", endOnGesture);
+    window.addEventListener("keydown", endOnGesture);
+    setSidebarOpen((v) => !v);
+    if (point) {
+      // PDF 数值缩放：宽度变化不产生 relocate（页码没变）⇒ 布局落地后自己还原（两帧足够）
+      window.requestAnimationFrame(() =>
+        window.requestAnimationFrame(() => {
+          if (reflowGuardRef.current !== guard || !guard.restore) return;
+          guard.restore = undefined;
+          guard.restoring = true;
+          restore();
+        })
+      );
+    }
+    // 兜底（有界）：还原的 relocate 迟迟不来（引擎无 relocate / 位置本就未变）时也要收掉守卫，
+    // 不让它长期压制用户后续的进度写入
+    guard.clearTimer = window.setTimeout(() => clearReflowGuard(), 3000);
+  }, [clearReflowGuard]);
 
   // 引擎选区：pointerup 时取选区语义数据并弹出菜单（坐标为宿主视口坐标，菜单用 fixed）
   // v48.23（D61 §6.8-11）：按住修饰键（app.multiSelectKey，默认 Ctrl）再选＝加选：
@@ -830,6 +909,8 @@ export default function Reader({
   const turnPage = useCallback(async (dir: 1 | -1) => {
     const k = kernelRef.current;
     if (!k) return;
+    // 用户主动翻页＝真实导航：先收掉布局守卫（否则紧接着的 relocate 会被当成布局变更而漏记进度）
+    clearReflowGuard();
     if (dir === 1) await k.next();
     else await k.prev();
   }, []);
@@ -1319,7 +1400,7 @@ export default function Reader({
                     aria-controls="reader-sidebar"
                     disabled={!sidebarAvailable}
                     title={sidebarAvailable ? "侧栏：目录 / 摘录 / 图谱" : "本书没有目录、注解或图谱"}
-                    onClick={() => setSidebarOpen((v) => !v)}
+                    onClick={toggleSidebar}
                   >
                     侧栏
                   </button>

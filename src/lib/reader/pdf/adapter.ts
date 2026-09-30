@@ -687,6 +687,30 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       return { pageIndex: viewer.currentPageNumber - 1 };
     },
 
+    // D2/§7（Task 7）：侧栏开合改变容器宽度 ⇒ 数值缩放下页内锚点会漂（pdf.js 只保比例，
+    // 不保你正看着的那一点）。快照/还原都用**页内容框**参考系（与 sourceAnchor.rects 同一框）。
+    captureViewPoint() {
+      const pageEl = viewerEl.querySelector(`.page[data-page-number="${viewer.currentPageNumber}"]`) as HTMLElement | null;
+      if (!pageEl) return null;
+      const p = pageContentRect(pageEl);
+      if (!(p.width > 0 && p.height > 0)) return null;
+      const c = container.getBoundingClientRect();
+      // 视口左上角落在页内容框里的点（可为负/超出页高——那是「页边留白/已滚过页首」的真实状态）
+      return { pageIndex: viewer.currentPageNumber - 1, x: c.left - p.left, y: c.top - p.top };
+    },
+
+    restoreViewPoint(point) {
+      const pageEl = viewerEl.querySelector(`.page[data-page-number="${point.pageIndex + 1}"]`) as HTMLElement | null;
+      if (!pageEl) return false;
+      const p = pageContentRect(pageEl);
+      if (!(p.width > 0 && p.height > 0)) return false;
+      const c = container.getBoundingClientRect();
+      // 把该点推回视口左上角：scroll 与视口位移 1:1（横向同样处理，容器可横向滚动时才有意义）
+      container.scrollTop += p.top + point.y - c.top;
+      container.scrollLeft += p.left + point.x - c.left;
+      return true;
+    },
+
     destroy() {
       destroyed = true;
       // 高亮注册在宿主文档上，销毁内核时一并撤掉（否则残影跟着下一个内核）
