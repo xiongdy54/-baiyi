@@ -3389,10 +3389,11 @@ body.theme-dark .modal-panel {
 .reader-sidebar .tabs > button[role="tab"]:hover { background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent); }
 .reader-sidebar-close { flex: none; height: 32px; }
 .reader-side-panel { flex: 1; min-height: 0; overflow: auto; }
-/* 图谱目录条目：标题 + 层级缩进（由行内 paddingLeft 给）+ 占比条 */
+/* 图谱目录条目（D4）：标题 + 区间文字 + 层级缩进（由行内 paddingLeft 给）。
+   **不画占比条**：条的宽度＝自有区间÷全书单元数，是同一份区间的冗余编码，用户明确不要。 */
 .map-item {
-  position: relative;
-  display: block;
+  display: flex;
+  align-items: baseline;
   width: 100%;
   text-align: left;
   background: none;
@@ -3405,14 +3406,10 @@ body.theme-dark .modal-panel {
   cursor: pointer;
 }
 .map-item:hover { background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent); }
-.map-item-label { display: block; overflow-wrap: anywhere; }
-.map-bar {
-  display: block;
-  height: 2px;
-  margin-top: 2px;
-  background: var(--accent-soft);
-  border-left: 2px solid var(--accent);
-}
+.map-item-label { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* 区间与层级：mono、helper 色——与样张 .mm-item .rng/.lvl 同规（区间紧跟标题，层级贴右缘） */
+.map-item-range { margin-left: var(--sp-2); color: var(--text-helper); font-size: var(--fs-meta); }
+.map-item-level { margin-left: auto; color: var(--text-helper); font-size: var(--fs-meta); }
 /* 摘录页签里的条目（阅读器视角：只做「看 + 跳」） */
 .reader-extract-item {
   display: flex;
@@ -5061,6 +5058,10 @@ body.capture-body #root { height: 100vh; }
   font-size: var(--fs-meta);
 }
 .extract-face-body { font-size: var(--fs-body); line-height: 1.8; color: var(--text-primary); min-height: 120px; }
+/* D1（批注样张对齐）：**摘录页**的正文按样张放大到 26px/1.5——作用域只到 .extract-page 之下。
+   复习页（ReviewView）与其它宿主仍用上面的基线（--fs-body/1.8），故用后代选择器而不是改基线。
+   可编辑态（.review-editable）与只读文本都没有自带字号，随父级继承，无需另写规则。 */
+.extract-page .extract-face-body { font-size: var(--fs-title-l); line-height: 1.5; }
 .extract-face-text { white-space: pre-wrap; }
 .extract-face-derived { font-size: var(--fs-meta); color: var(--text-helper); }
 .extract-face-actions {

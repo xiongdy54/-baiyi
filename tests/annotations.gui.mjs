@@ -568,7 +568,10 @@ try {
     const nodes = [...sb.querySelectorAll("[data-map-node]")].map((b) => ({
       id: b.dataset.mapNode, label: b.querySelector(".map-item-label")?.textContent,
       padLeft: parseFloat(getComputedStyle(b).paddingLeft) || 0,
-      barW: b.querySelector("[data-map-bar]")?.getBoundingClientRect().width ?? 0
+      range: b.querySelector("[data-map-range]")?.textContent ?? null,
+      level: b.querySelector("[data-map-level]")?.textContent ?? null,
+      start: Number(b.dataset.mapStart), end: Number(b.dataset.mapEnd), depth: Number(b.dataset.mapDepth),
+      bars: b.querySelectorAll("[data-map-bar], .map-bar").length
     }));
     return JSON.stringify({
       up: true, tabs, panels, nodes,
@@ -593,7 +596,30 @@ try {
   const nParent = nd.find((n) => String(n.label).includes("第一章"));
   const nChild = nd.find((n) => String(n.label).includes("1.1"));
   check("子节点缩进大于父节点（层级缩进）", nParent && nChild ? nChild.padLeft > nParent.padLeft + 4 : false, JSON.stringify({ p: nParent?.padLeft, c: nChild?.padLeft }));
-  check("节点带占比条", nd.length > 0 && nd.every((n) => n.barW > 0), JSON.stringify(nd.map((n) => ({ l: n.label, w: n.barW }))));
+  // D4：图谱行只出「标题 + 区间 + 层级」，**没有占比条**（用户明确不要）
+  check("图谱行无占比条（D4）", nd.length > 0 && nd.every((n) => n.bars === 0), JSON.stringify(nd.map((n) => ({ l: n.label, bars: n.bars }))));
+  check(
+    "图谱行出「单元 s–e」区间与层级文字，且与主进程载荷一致",
+    nd.length > 0 && nd.every((n) => n.range === `单元 ${n.start}–${n.end}` && n.level === `L${n.depth}` && Number.isFinite(n.start) && Number.isFinite(n.end)),
+    JSON.stringify(nd.map((n) => ({ l: n.label, r: n.range, lvl: n.level })))
+  );
+  // D4：切页签只改视图，**不碰图谱数据**——打开/切换前后各取一次主进程载荷并逐字段比
+  const mapPayload = `(async () => {
+    const items = await window.libraryAPI.list();
+    const it = items.find((x) => String(x.title || "").includes("GUI 图谱测试书"));
+    const doc = it ? await window.libraryAPI.getDocument(it.id) : null;
+    const k = window.__readerKernel;
+    const r = await window.mindmapAPI.mapTree(doc.documentId, k?.getTOC?.() ?? [], (k?.getSectionAnchors?.() ?? []).map((a) => a.anchor));
+    return JSON.stringify((r?.items ?? []).map((n) => [n.id, n.label, n.start, n.end, n.depth]));
+  })()`;
+  const payloadBefore = String(await cdp.eval(mapPayload));
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="extracts"]')?.click(); return 1; })()`);
+  await wait(700);
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return 1; })()`);
+  await wait(700);
+  const payloadAfter = String(await cdp.eval(mapPayload));
+  check("图谱载荷在开合/切页签前后逐字段不变（只改视图不改数据）", payloadBefore.length > 4 && payloadBefore === payloadAfter, JSON.stringify({ before: payloadBefore.slice(0, 160), after: payloadAfter.slice(0, 160) }));
+
   const rangeCheck = await cdp.eval(`(async () => {
     const items = await window.libraryAPI.list();
     const it = items.find((x) => String(x.title || "").includes("GUI 图谱测试书"));

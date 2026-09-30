@@ -412,7 +412,6 @@ export default function Reader({
    *  与图谱目录（只消费主进程算好的区间） */
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
   const [mapItems, setMapItems] = useState<MapTreeItem[] | null>(null);
-  const [mapUnitCount, setMapUnitCount] = useState(0);
   const mapUnitAnchorsRef = useRef<string[]>([]);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
@@ -440,7 +439,6 @@ export default function Reader({
       const r = await api?.mapTree?.(documentId, toc, anchors);
       if (cancelled) return;
       mapUnitAnchorsRef.current = anchors;
-      setMapUnitCount(Number(r?.unitCount ?? anchors.length));
       setMapItems(r?.items?.length ? r.items : null);
     })();
     return () => {
@@ -1526,7 +1524,6 @@ export default function Reader({
                       ) : null
                     }
                     mapItems={mapItems}
-                    mapUnitCount={mapUnitCount}
                     mapAvailable={mapAvailable}
                     onMapNavigate={(it) => {
                       // 节点点击 → 跳该节点自有区间起点（复用既有导图跳转：区间起点 → 该单元锚 → goTo）

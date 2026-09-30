@@ -1,6 +1,6 @@
 // 阅读器侧栏（批 4 Task 15，规格 §5.3）：三页签**目录 / 摘录 / 图谱**，同刻只显示一个面板。
 // 由 TocSidebar 升级而来（页签行 .tabs：当前项 accent 下划线，与 Zotero 侧栏同规）。
-// 「图谱」页签：无已发布导图时**不渲染**（规格 §5.3 明写）；节点行＝标题 + 层级缩进 + 占比条，
+// 「图谱」页签：无已发布导图时**不渲染**（规格 §5.3 明写）；节点行＝标题 + 区间文字 + 层级缩进（D4 起不再画占比条），
 // 区间一律来自主进程（只消费不切分，见 src/lib/reader/mapTree.ts）。
 import type { ReaderTocItem } from "../../lib/reader/service";
 import { IconClose } from "../icons";
@@ -33,7 +33,6 @@ export interface ReaderSidebarProps {
   extractsPanel?: React.ReactNode;
   /** 图谱目录（null＝无导图 ⇒ **不渲染**「图谱」页签） */
   mapItems?: MapTreeItem[] | null;
-  mapUnitCount?: number;
   onMapNavigate?: (item: MapTreeItem) => void;
   /** 图谱页签是否**可用**（无图则整个页签不出现） */
   mapAvailable?: boolean;
@@ -48,7 +47,6 @@ export default function ReaderSidebar({
   onTabChange,
   extractsPanel,
   mapItems,
-  mapUnitCount = 0,
   onMapNavigate,
   mapAvailable = false
 }: ReaderSidebarProps) {
@@ -116,19 +114,20 @@ export default function ReaderSidebar({
               key={it.id}
               className="map-item"
               data-map-node={it.id}
+              data-map-start={it.start}
+              data-map-end={it.end}
+              data-map-depth={it.depth}
               style={{ paddingLeft: `calc(var(--sp-3) + ${it.depth} * var(--sp-4))` }}
               onClick={() => onMapNavigate?.(it)}
-              title={`${it.label}（区间 ${it.start}–${it.end}）`}
+              title={`${it.label}（单元 ${it.start}–${it.end}，L${it.depth}）`}
             >
+              {/* D4：只出「节点 + 区间 + 层级」文字，**不画占比条**（用户明确：占比条不好看）。
+                  区间口径＝主进程给的净区间（父扣掉子），与样张行里的「单元 start–end」同形。 */}
               <span className="map-item-label">{it.label}</span>
-              {mapUnitCount > 0 && it.end > it.start && (
-                <span
-                  className="map-bar"
-                  data-map-bar
-                  aria-hidden="true"
-                  style={{ width: `${Math.max(2, Math.round(((it.end - it.start) / mapUnitCount) * 100))}%` }}
-                />
-              )}
+              <span className="map-item-meta mono">
+                <span className="map-item-range" data-map-range>{`单元 ${it.start}–${it.end}`}</span>
+                <span className="map-item-level" data-map-level>{`L${it.depth}`}</span>
+              </span>
             </button>
           ))}
         </div>

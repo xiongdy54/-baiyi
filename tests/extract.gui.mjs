@@ -114,6 +114,22 @@ try {
   check("撤销回退：process_count 复原", Number(u.pc) === 0, u.pc);
   check("撤销后卡面重新出现（队列已刷新）", (await cdp.eval(`!!document.querySelector(".extract-face")`)) === true, "未出现");
 
+  // D1：摘录页正文 26px/1.5（作用域只到 .extract-page；复习页基线不动——见 15) 的差分对照）
+  const exTypo = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-page .extract-face-body");
+    if (!body) return JSON.stringify({ up: false });
+    const cs = getComputedStyle(body);
+    const text = body.querySelector(".extract-face-text") || body.querySelector(".review-editable");
+    const probe = (v) => { const d = document.createElement("span"); d.style.fontSize = v; document.body.appendChild(d); const s = getComputedStyle(d).fontSize; d.remove(); return s; };
+    return JSON.stringify({ up: true, fontSize: cs.fontSize, lineHeight: cs.lineHeight, tok: probe("var(--fs-title-l)"), child: text ? getComputedStyle(text).fontSize : null, childLine: text ? getComputedStyle(text).lineHeight : null });
+  })()`);
+  const et = JSON.parse(String(exTypo) || "{}");
+  check(
+    "摘录页正文 26px/1.5 且子级继承（D1）",
+    et.up === true && et.fontSize === "26px" && et.fontSize === et.tok && et.lineHeight === "39px" && et.child === "26px",
+    exTypo
+  );
+
   // 7) 推迟 N 天（用「快捷推迟 3 天」）→ 状态 postponed
   const postponeClicked = await cdp.eval(`(() => { const btn = [...document.querySelectorAll(".extract-face-hints button")].find((x) => x.textContent.includes("3 天")); btn?.click(); return !!btn; })()`);
   check("快捷推迟按钮在位可点", postponeClicked === true, postponeClicked);
@@ -320,6 +336,19 @@ try {
   const mf = JSON.parse(mergedFace || "{}");
   check("合并复习：复习页渲染出摘录卡面（不再跳过摘录条目）", mf.wrap === true && mf.face === true, mergedFace);
   check("合并复习：卡面内容为那条摘录", String(mf.text).includes("GUI 摘录样本"), mergedFace);
+
+  // D1 对照：合并复习页的摘录卡面**不**吃摘录页的 26px——仍是基线 --fs-body（差分非空转）
+  const revTypo = await cdp.eval(`(() => {
+    const body = document.querySelector(".review-wrap .extract-face-body");
+    const probe = (v) => { const d = document.createElement("span"); d.style.fontSize = v; document.body.appendChild(d); const s = getComputedStyle(d).fontSize; d.remove(); return s; };
+    return JSON.stringify({ body: body ? getComputedStyle(body).fontSize : null, base: probe("var(--fs-body)"), title: probe("var(--fs-title-l)"), line: body ? getComputedStyle(body).lineHeight : null, baseLine: (() => { const d = document.createElement("span"); d.style.lineHeight = "1.8"; d.style.fontSize = "var(--fs-body)"; document.body.appendChild(d); const s = getComputedStyle(d).lineHeight; d.remove(); return s; })() });
+  })()`);
+  const rt = JSON.parse(String(revTypo) || "{}");
+  check(
+    "复习页摘录卡面保持基线字号/行高（D1 对照）",
+    rt.body === rt.base && rt.body !== rt.title && rt.line === rt.baseLine,
+    revTypo
+  );
 
   // 15) 阅读器两个集中复习按钮（§6.8-8，需求 ⑦）
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
