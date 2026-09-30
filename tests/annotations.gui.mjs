@@ -557,7 +557,7 @@ try {
     return true;
   })()`);
   await wait(3200);
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".reader-engine-controls button")].find((x) => x.textContent.trim() === "目录"); b?.click(); return !!b; })()`);
+  await cdp.eval(`(() => { const b = document.querySelector("[data-reader-sidebar-toggle]"); b?.click(); return !!b; })()`);
   await wait(1800);
   const sidebar = `(() => {
     const sb = document.querySelector("[data-reader-sidebar]");
@@ -577,7 +577,9 @@ try {
     });
   })()`;
   const sb1 = JSON.parse(String(await cdp.eval(sidebar)) || "{}");
-  check("侧栏在场且三枚页签齐（目录/摘录/图谱）", sb1.up === true && ["toc", "extracts", "map"].every((k) => (sb1.tabs || []).some((t) => t.id === k)), JSON.stringify(sb1.tabs));
+  // D2：页签按**自己的数据**在场——此刻图谱书还没有注解 ⇒ 只有目录+图谱；
+  // 「三枚齐」的形态由 ⑪i 在有了注解之后验（那里才是三枚同时在场）
+  check("侧栏在场且页签按数据在场（此刻无注解 ⇒ 目录+图谱）", sb1.up === true && JSON.stringify((sb1.tabs || []).map((t) => t.id)) === JSON.stringify(["toc", "map"]), JSON.stringify(sb1.tabs));
   check("同刻只有一个面板可见", (sb1.panels || []).length === 1, JSON.stringify(sb1.panels));
   const accentTok = await cdp.eval(tokenValue("--accent"));
   check("当前页签 accent 下划线（色＝--accent、宽 2px）", sb1.underlineColor === accentTok && sb1.underlineW === "2px", JSON.stringify({ c: sb1.underlineColor, w: sb1.underlineW, acc: accentTok }));
@@ -677,7 +679,7 @@ try {
   // 侧栏在 ⑤ 已是打开态（目录按钮是开合开关，再点会关掉——实测踩过）；仅在缺席时打开
   const sbUp = (await cdp.eval(`!!document.querySelector("[data-reader-sidebar]")`)) === true;
   if (!sbUp) {
-    await cdp.eval(`(() => { const b = [...document.querySelectorAll(".reader-engine-controls button")].find((x) => x.textContent.trim() === "目录"); b?.click(); return !!b; })()`);
+    await cdp.eval(`(() => { const b = document.querySelector("[data-reader-sidebar-toggle]"); b?.click(); return !!b; })()`);
     await wait(1500);
   }
   check("⑩pre5 侧栏可开且切换到「摘录」页签（＝注解栏）", (await cdp.eval(`!!document.querySelector("[data-reader-sidebar]")`)) === true, `sbUp=${sbUp}`);
@@ -749,19 +751,26 @@ try {
     el.click();
     return "clicked";
   })()`);
-  await wait(500);
-  await cdp.eval(`(() => {
+  await wait(800);
+  // 自诊断：点开编辑框（正文 → 失焦保存）。编辑框没出现时如实报告，不把「没找到」当成「存过了」
+  const typeRes = await cdp.eval(`(() => {
     const ta = document.querySelector('[data-annot-panel] [data-annot-edit]');
-    if (!ta) return 0;
+    if (!ta) return JSON.stringify({ ta: false });
+    const focused = document.activeElement === ta;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
     setter.call(ta, "ANNOT 栏内改过的批注（阅读器）");
     ta.dispatchEvent(new Event("input", { bubbles: true }));
+    ta.focus();
     ta.blur();
-    return 1;
+    return JSON.stringify({ ta: true, focused, value: String(ta.value).slice(0, 12) });
   })()`);
-  await wait(1200);
+  await wait(1400);
   const editDb = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); const hit = (all || []).find((e) => e.id === ${JSON.stringify(oldRowId)}); return hit ? String(hit.comment ?? "") : "MISSING"; })()`);
-  check("⑩i 栏内改批注：库中 comment 变化", panelEditRes === "clicked" && editDb === "ANNOT 栏内改过的批注（阅读器）", `${panelEditRes} / ${editDb}`);
+  check(
+    "⑩i 栏内改批注：库中 comment 变化",
+    panelEditRes === "clicked" && editDb === "ANNOT 栏内改过的批注（阅读器）",
+    `${panelEditRes} / ${editDb} / ${typeRes}`
+  );
 
   // 改色入口是条目上的方点（点它出色板）
   const dotPt = JSON.parse(String(await cdp.eval(`(() => {
@@ -830,6 +839,121 @@ try {
   await wait(800);
   const editorUp = await cdp.eval(`!!document.querySelector("[data-editor-for]")`);
   check("⑩m 正文标记 hover 出浮层、真点开批注编辑器（接线回归）", popUp === true && editorUp === true, JSON.stringify({ popUp, editorUp, markRect }));
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await wait(400);
+
+  // ============================================================
+  // ⑪ 右侧栏停靠 + 工具栏 B 方案（D2/D5）
+  // ============================================================
+  console.log("\n== ⑪ 右侧栏停靠 + 工具栏 B 方案 ==");
+  const geom = `(() => {
+    const main = document.querySelector(".reader-engine-main");
+    const sb = document.querySelector("[data-reader-sidebar]");
+    const mr = main ? main.getBoundingClientRect() : null;
+    const sr = sb ? sb.getBoundingClientRect() : null;
+    return JSON.stringify({
+      mainW: mr ? Math.round(mr.width * 10) / 10 : null, mainR: mr ? mr.right : null,
+      sbW: sr ? Math.round(sr.width * 10) / 10 : null, sbL: sr ? sr.left : null,
+      overlap: mr && sr ? Math.round((mr.right - sr.left) * 10) / 10 : null,
+      tabs: [...document.querySelectorAll("[data-sidebar-tab]")].map((b) => b.dataset.sidebarTab)
+    });
+  })()`;
+  const toggleState = `(() => {
+    const b = document.querySelector("[data-reader-sidebar-toggle]");
+    return JSON.stringify({ up: !!b, disabled: !!b && b.disabled, expanded: b ? b.getAttribute("aria-expanded") : null, label: b ? b.textContent.trim() : null });
+  })()`;
+
+  // (a)(c) PDF 无大纲但有注解：入口可用；打开后只有「摘录」页签且注解栏在场（Task 4 后移的 PDF 用例）
+  const tg0 = JSON.parse(String(await cdp.eval(toggleState)) || "{}");
+  const gClosed = JSON.parse(String(await cdp.eval(geom)) || "{}");
+  check("⑪a PDF 无大纲但有注解 ⇒ 侧栏入口可用（不再是「有目录才有入口」）", tg0.up === true && tg0.disabled === false && tg0.label === "侧栏", JSON.stringify(tg0));
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  await wait(1200);
+  const gOpen = JSON.parse(String(await cdp.eval(geom)) || "{}");
+  const arPdf = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
+  const pdfDocId = String(await cdp.eval(`(async () => {
+    const items = await window.libraryAPI.list();
+    const it = items.find((x) => String(x.title || "").includes(${JSON.stringify(PDF_TITLE)}));
+    const doc = it ? await window.libraryAPI.getDocument(it.id) : null;
+    return (doc && doc.documentId) || "";
+  })()`));
+  const pdfRootIds = String(await cdp.eval(`(async () => {
+    const all = await window.workflowAPI.listAll();
+    return (all || []).filter((e) => { const c = e.contextRef || {}; const a = c.sourceAnchor || {}; return String(a.documentId || c.documentId || "") === ${JSON.stringify(pdfDocId)} && !c.parentExtractId; }).map((e) => e.id).join(",");
+  })()`));
+  check(
+    "⑪b 打开侧栏：正文让宽 280±1px 且与栏不相交",
+    gClosed.mainW != null && gOpen.mainW != null && Math.abs(gClosed.mainW - gOpen.mainW - 280) <= 1 && Math.abs(gOpen.overlap) <= 1 && Math.abs(gOpen.sbW - 280) <= 1,
+    JSON.stringify({ closed: gClosed, open: gOpen })
+  );
+  check(
+    "⑪c PDF 侧栏＝仅「摘录」页签（无目录页签）且列出本文档根摘录",
+    JSON.stringify(gOpen.tabs) === JSON.stringify(["extracts"]) && arPdf.up === true && (arPdf.rows || []).map((r) => r.id).sort().join(",") === String(pdfRootIds).split(",").sort().join(","),
+    JSON.stringify({ tabs: gOpen.tabs, rows: (arPdf.rows || []).length, db: pdfRootIds.split(",").length })
+  );
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  await wait(1000);
+  const gReClosed = JSON.parse(String(await cdp.eval(geom)) || "{}");
+  check("⑪d 关闭侧栏：正文宽度复原（±1px）", gReClosed.mainW != null && Math.abs(gReClosed.mainW - gClosed.mainW) <= 1 && gReClosed.sbW == null, JSON.stringify({ closed: gClosed.mainW, reopened: gReClosed.mainW }));
+
+  // (b) 有图谱的书＝三页签；工具栏 B 方案：常驻侧栏+翻页，「更多」「阅读设置」成组且互斥
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title, .book-card")].find((x) => x.textContent.includes("GUI 图谱测试书")); (t?.closest(".book-card") || t)?.click(); return true; })()`);
+  await wait(3200);
+  const toolBtns = await cdp.eval(`JSON.stringify([...document.querySelectorAll(".reader-engine-controls button")].map((b) => b.textContent.trim()))`);
+  check(
+    "⑪e 工具栏＝精简常驻行（侧栏 + 翻页 + 更多 + 阅读设置；导图/复习不再常驻）",
+    (() => {
+      const labels = JSON.parse(String(toolBtns) || "[]");
+      return labels.includes("侧栏") && labels.includes("更多") && labels.includes("阅读设置") && !labels.includes("导图") && !labels.includes("复习摘录");
+    })(),
+    toolBtns
+  );
+  await cdp.eval(`(() => { document.querySelector('[data-tool-menu-btn="more"]')?.click(); return 1; })()`);
+  await wait(500);
+  const morePanel = await cdp.eval(`JSON.stringify({
+    open: !!document.querySelector('[data-tool-menu-panel="more"]'),
+    acts: [...document.querySelectorAll('[data-tool-menu-panel="more"] .dd-item')].map((b) => b.textContent.trim()),
+    expanded: document.querySelector('[data-tool-menu-btn="more"]')?.getAttribute("aria-expanded")
+  })`);
+  await cdp.eval(`(() => { document.querySelector('[data-tool-menu-btn="settings"]')?.click(); return 1; })()`);
+  await wait(500);
+  const settingsPanel = await cdp.eval(`JSON.stringify({
+    settingsOpen: !!document.querySelector('[data-tool-menu-panel="settings"]'),
+    moreOpen: !!document.querySelector('[data-tool-menu-panel="more"]'),
+    rows: [...document.querySelectorAll('[data-tool-menu-panel="settings"] .reader-tool-menu-label')].map((s) => s.textContent.trim()),
+    expandedMore: document.querySelector('[data-tool-menu-btn="more"]')?.getAttribute("aria-expanded")
+  })`);
+  const mp = JSON.parse(String(morePanel) || "{}");
+  const sp = JSON.parse(String(settingsPanel) || "{}");
+  check("⑪f 「更多」＝导图/复习摘录/复习闪卡三枚动作", mp.open === true && ["导图", "复习摘录", "复习闪卡"].every((x) => (mp.acts || []).includes(x)), morePanel);
+  check("⑪g 两组弹出互斥（开设置即关更多）且 aria-expanded 同步", sp.settingsOpen === true && sp.moreOpen === false && sp.expandedMore === "false" && (sp.rows || []).includes("模式") && (sp.rows || []).includes("主题"), JSON.stringify(sp));
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await wait(400);
+  check("⑪h Esc 收起弹出组", (await cdp.eval(`!document.querySelector('[data-tool-menu-panel="settings"]')`)) === true, "仍在场");
+  // (b) 三页签（图谱书）
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  await wait(1300);
+  const gMap = JSON.parse(String(await cdp.eval(geom)) || "{}");
+  check("⑪i 有图谱的书＝三页签（目录/摘录/图谱）", JSON.stringify(gMap.tabs) === JSON.stringify(["toc", "extracts", "map"]), JSON.stringify(gMap.tabs));
+
+  // (d) 既无目录/注解/图谱的书：入口禁用（新导入的无大纲 PDF）
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  const barePath = path.join(FIXDIR, "annot-bare-no-outline.pdf");
+  fs.writeFileSync(barePath, buildPdfFixture());
+  await cdp.eval(`(async () => { await window.libraryAPI.createFromPdf({ name: "ANNOT 无目录无注解.pdf", path: ${JSON.stringify(barePath)} }); return 1; })()`);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "数据"); b?.click(); return !!b; })()`);
+  await wait(900);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title, .book-card")].find((x) => x.textContent.includes("ANNOT 无目录无注解")); (t?.closest(".book-card") || t)?.click(); return true; })()`);
+  await wait(3200);
+  const tgBare = JSON.parse(String(await cdp.eval(toggleState)) || "{}");
+  check("⑪j 无目录/无注解/无图谱 ⇒ 入口禁用（如实不可用，不是点了没反应）", tgBare.up === true && tgBare.disabled === true, JSON.stringify(tgBare));
 
   // ============================================================
   // ⑨ 截图判读（浅/深）
@@ -847,7 +971,7 @@ try {
       return true;
     })()`);
     await wait(3200);
-    await cdp.eval(`(() => { const b = [...document.querySelectorAll(".reader-engine-controls button")].find((x) => x.textContent.trim() === "目录"); b?.click(); return !!b; })()`);
+    await cdp.eval(`(() => { const b = document.querySelector("[data-reader-sidebar-toggle]"); b?.click(); return !!b; })()`);
     await wait(1700);
     await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return true; })()`);
     await wait(1200);

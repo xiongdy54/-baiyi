@@ -1748,16 +1748,8 @@ body.theme-dark .modal-panel {
 .reader-body.reader-body-shifted .reader-scroll {
   flex: 1 1 calc(100% - 400px);
 }
-/* E-1（审计）：目录面板是 position:absolute 的浮层（left:0 / width:280px / z-index:7），
-   正文此前不让位 —— 打开目录后正文左缘被压在面板底下，行首被吃掉约 5 个汉字。
-   修法：**不动面板**（它本就在正确位置），只让引擎内容让出面板宽度。
-   ⚠️ 曾试过「把 .reader-scroll 左移 + 给面板等量负偏移」，那是错的：
-   .reader-toc 的包含块 .reader-engine-viewport 是 overflow:hidden，
-   负偏移会把它推到裁剪框外（rect 仍正确但画不出来）——所以断言必须用 elementFromPoint 这类
-   遵守裁剪的判据，不能只看 getBoundingClientRect。 */
-.reader-body.reader-body-toc-open .reader-engine-host {
-  padding-left: 280px;
-}
+/* E-1 时期的「正文靠 padding-left 给浮层让位」随左侧浮层退役（D2 改为右侧停靠栏，
+   让位由 flex 布局天然完成：正文区的宽度里根本没有栏那 280px）。 */
 .reader-scroll {
   flex: 1;
   overflow-y: auto;
@@ -3326,12 +3318,48 @@ body.theme-dark .modal-panel {
   border-left-color: var(--reader-fg, var(--accent));
   color: var(--reader-fg, var(--text-primary));
 }
-/* 内容视口：工具栏之下独立定位上下文——引擎/热区/目录侧栏只在此范围内绝对定位，盖不住顶栏 */
+/* 工具栏弹出组（D5-B）：内容＝动作行（更多）或设置行（阅读设置）。
+   面板走 .dd-menu 默认（right:0 贴按钮右缘 → 与工具条右端一致，不顶出窗口）；
+   组内的设置下拉沿用同一套 .dd（值是既有 Dropdown，不新增设置键）。 */
+.reader-tool-menu {
+  min-width: 200px;
+}
+.reader-tool-menu .dd-item {
+  width: 100%;
+}
+.reader-tool-menu .dd-item:disabled {
+  color: var(--text-placeholder);
+  cursor: not-allowed;
+}
+.reader-tool-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-1) var(--sp-3);
+}
+.reader-tool-menu-label {
+  font-size: var(--fs-meta);
+  color: var(--reader-fg, var(--text-helper));
+  opacity: 0.7;
+}
+.reader-tool-menu-row .dd-menu {
+  min-width: 148px;
+}
+/* 内容视口：工具栏之下独立定位上下文——引擎/热区/侧栏只在此范围内绝对定位，盖不住顶栏。
+   停靠布局（D2）：一行两格——正文区（.reader-engine-main）吃剩余宽度，侧栏固定 280px 不收缩。 */
 .reader-engine-viewport {
   position: relative;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  align-items: stretch;
+}
+.reader-engine-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 /* ---------- 阅读器侧栏三页签（批 4 Task 15 / 规格 §5.3） ---------- */
 /* 页签行：与 Zotero 侧栏同规——三枚页签、当前项 accent 下划线、直角。
@@ -3409,31 +3437,18 @@ body.theme-dark .modal-panel {
   overflow-wrap: anywhere;
 }
 
-.reader-toc {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 280px;
+/* D2（批注样张对齐）：侧栏从「左侧绝对定位浮层」改为**右侧停靠栏**——flex 兄弟，
+   .reader-engine-main 占其余宽度。左侧浮层的定位/阴影/压正文那套（且正文靠 padding-left 让位）
+   已随 TocSidebar 一起退役：那是浮层时代的补偿手法，停靠布局里不再需要。 */
+.reader-sidebar {
+  flex: 0 0 280px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--reader-bg, var(--paper));
-  border-right: 1px solid color-mix(in srgb, var(--reader-fg, #1a1a1a) 18%, transparent);
-  box-shadow: var(--shadow-float);
-  z-index: 7;
-}
-.reader-toc-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--border-subtle);
-}
-.reader-toc-title {
-  font-size: var(--fs-meta);
-  letter-spacing: 0.04em;
-  color: var(--reader-fg, var(--text-helper));
-  opacity: 0.7;
+  color: var(--reader-fg, var(--text-primary));
+  border-left: 1px solid color-mix(in srgb, var(--reader-fg, #1a1a1a) 18%, transparent);
+  z-index: 2;
 }
 .reader-toc-list {
   flex: 1;

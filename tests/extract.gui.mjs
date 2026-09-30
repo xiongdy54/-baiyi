@@ -326,6 +326,10 @@ try {
   await wait(1600);
   await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title")][0]; t?.click(); return !!t; })()`);
   await wait(2800);
+  // D5-B：两个集中复习入口收进工具栏「更多」弹出组——先开组再取按钮
+  const openMore = `(() => { if (!document.querySelector('[data-tool-menu-panel="more"]')) document.querySelector('[data-tool-menu-btn="more"]')?.click(); return 1; })()`;
+  await cdp.eval(openMore);
+  await wait(500);
   const btnExtract = await cdp.eval(`(() => { const b = document.querySelector("[data-review-extracts]"); const ok = b && !b.disabled; b?.click(); return ok; })()`);
   check("阅读器：「复习摘录」按钮在位可用", btnExtract === true, btnExtract);
   await wait(2000);
@@ -337,6 +341,8 @@ try {
   await wait(1500);
   await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title")][0]; t?.click(); return !!t; })()`);
   await wait(2800);
+  await cdp.eval(openMore);
+  await wait(500);
   const btnCards = await cdp.eval(`(() => { const b = document.querySelector("[data-review-cards]"); const ok = b && !b.disabled; b?.click(); return ok; })()`);
   check("阅读器：「复习闪卡」按钮在位可用", btnCards === true, btnCards);
   await wait(2000);

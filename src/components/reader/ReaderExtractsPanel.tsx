@@ -84,6 +84,8 @@ export default function ReaderExtractsPanel({
       onEdit={(it, comment) => onEdit(it.id, comment)}
       onColor={(it, color) => onColor(it.id, color)}
       onDelete={(it) => onDelete(it.id)}
+      /* 栏宽由右侧栏给（280px 的栏内容宽 279）：面板随栏宽，不写死 280 */
+      width="100%"
     />
   );
 }

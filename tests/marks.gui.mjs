@@ -514,6 +514,9 @@ try {
   check("滚动后标记仍贴合文字（Δ ≤ 2px；层不吃滚动偏移）", typeof geoScroll.dExact === "number" && geoScroll.dExact <= 2, JSON.stringify(geoScroll).slice(0, 300));
 
   const wBefore = await cdp.eval(`document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width`);
+  // D5-B：缩放/主题收进「阅读设置」弹出组——先开组，组内的 .dd 才在场
+  await cdp.eval(`(() => { document.querySelector('[data-tool-menu-btn="settings"]')?.click(); return 1; })()`);
+  await wait(500);
   const zoomOpened = await cdp.eval(`(() => {
     const group = [...document.querySelectorAll(".reader-engine-controls .dd")];
     for (const g of group) {
@@ -536,6 +539,9 @@ try {
 
   // 深浅两档：切到暗夜
   const visLight = JSON.parse(String(await cdp.eval(visibilityProbe(ipcEx.id))) || "{}");
+  // 切主题前若设置组已收（上一步的缩放改完可能还在），确保它在场
+  await cdp.eval(`(() => { if (!document.querySelector('[data-tool-menu-panel="settings"]')) document.querySelector('[data-tool-menu-btn="settings"]')?.click(); return 1; })()`);
+  await wait(400);
   const themeToggle = await cdp.eval(`(() => {
     const group = [...document.querySelectorAll(".reader-engine-controls .dd")];
     for (const g of group) {
@@ -628,7 +634,9 @@ try {
   check("EPUB hover 出浮层且原文 ＝ 所选文字", epPop.open === true && epPop.quote === EPUB_MARK, JSON.stringify(epPop).slice(0, 300));
   await screenshot(cdp, "tmp-marks-epub-dark.png");
 
-  // 两档：切回纸白 → 注入字面值应变浅档
+  // 两档：切回纸白 → 注入字面值应变浅档（主题下拉在「阅读设置」弹出组里，先确保组在场）
+  await cdp.eval(`(() => { if (!document.querySelector('[data-tool-menu-panel="settings"]')) document.querySelector('[data-tool-menu-btn="settings"]')?.click(); return 1; })()`);
+  await wait(400);
   const backToPaper = await cdp.eval(`(() => {
     const group = [...document.querySelectorAll(".reader-engine-controls .dd")];
     for (const g of group) {

@@ -64,7 +64,8 @@ export default function AnnotationPanel({
   onDelete: (item: AnnotItem) => void;
   /** 用户色板（设置键 annotatePalette） */
   palette: readonly string[];
-  width?: number;
+  /** 占位宽度：摘录页＝280（规格 §5.3）；阅读器右侧栏里传 "100%" 随栏宽 */
+  width?: number | string;
 }) {
   const [sort, setSort] = useState<AnnotSort>("pos");
   const [editingId, setEditingId] = useState<string | null>(null);

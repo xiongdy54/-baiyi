@@ -160,7 +160,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   if (!engineUp) return { click, engineUp };
   // Word 书首章为空是既有技术债（§9.4 空首章，本批 Non-Goal）：经目录跳到实际章节再断言
   if (navTitle) {
-    await cdp.eval(`(() => { const b = [...document.querySelectorAll('.reader-engine-controls button')].find(x => x.textContent.includes('目录')); b?.click(); return b ? 'ok' : 'no btn'; })()`);
+    await cdp.eval(`(() => { const b = document.querySelector('[data-reader-sidebar-toggle]'); b?.click(); return b ? 'ok' : 'no btn'; })()`);
     await wait(700);
     const jump = await cdp.eval(`(() => {
       const el = [...document.querySelectorAll('.reader-toc-item')].find(e => e.textContent.includes(${JSON.stringify(navTitle)}));
@@ -256,7 +256,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   await cdp.eval(clickCardByTitle("FSRSTEST-M6 Word导测"));
   await wait(3000);
   // 目录跳到非空章（空首章技术债）
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll('.reader-engine-controls button')].find(x => x.textContent.includes('目录')); b?.click(); return b ? 'ok' : 'no btn'; })()`);
+  await cdp.eval(`(() => { const b = document.querySelector('[data-reader-sidebar-toggle]'); b?.click(); return b ? 'ok' : 'no btn'; })()`);
   await wait(700);
   await cdp.eval(`(() => { const el = [...document.querySelectorAll('.reader-toc-item')].find(e => e.textContent.includes('FSRSTEST Word 起源章')); el?.click(); return el ? 'clicked' : 'not found'; })()`);
   await wait(1500);

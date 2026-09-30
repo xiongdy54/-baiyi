@@ -45,7 +45,7 @@ import {
   type SourceAnchorGeometry
 } from "../lib/reader/service";
 // v48.24 批3（§4 文中留痕）：标记的数据面（哪些根摘录要画、浮层显示什么）——纯函数，零 DOM
-import { buildDocMarks } from "../lib/reader/marks";
+import { buildAnnotationItems, buildDocMarks } from "../lib/reader/marks";
 // v48.23（D61 §6.8-11）：多段选择的集合运算与修饰键——纯逻辑在 electron/annotationRange.js，
 // 渲染层经主进程算（resolveSpanSet），本层不复制任何 span 归并/装配逻辑。
 import {
@@ -149,6 +149,45 @@ function cropImageDataUrl(dataUrl: string, bbox: OcclusionRect): Promise<string>
 }
 
 /** v25 手动制卡载荷（M5）：与 AI 制卡同构的字段集 + 图片选区 */
+
+/**
+ * 工具栏弹出组（D5-B）：按钮 + 面板。开合状态由宿主持有——两个组互斥、
+ * 点外部/Esc 收起（见 Reader 的 mousedown/keydown effect），故这里不做内部开关。
+ */
+function ReaderToolMenu({
+  id,
+  label,
+  open,
+  onToggle,
+  children
+}: {
+  id: "more" | "settings";
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="dd" data-reader-tool-menu={id}>
+      <button
+        type="button"
+        className="dd-btn"
+        data-tool-menu-btn={id}
+        aria-expanded={open}
+        aria-controls={`reader-tool-menu-${id}`}
+        onClick={onToggle}
+      >
+        {label}
+        <IconChevronDown size={12} className="dd-caret" />
+      </button>
+      {open && (
+        <div className="dd-menu reader-tool-menu" id={`reader-tool-menu-${id}`} data-tool-menu-panel={id}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Reader({
   title,
@@ -363,7 +402,12 @@ export default function Reader({
   const annotFocusTimerRef = useRef<number | null>(null);
   /** 内核标记文档序的版本号：安装/重画标记后 +1，侧栏注解栏据此重新取序 */
   const [marksOrderKey, setMarksOrderKey] = useState(0);
-  const [tocOpen, setTocOpen] = useState(false);
+  /** 本文档的根注解条数（侧栏「摘录」页签与入口可用性的依据；与注解栏同一个 VM 口径） */
+  const [docAnnotCount, setDocAnnotCount] = useState(0);
+  /** 右侧栏开合（D2：入口可用＝目录/注解/图谱任一在场；不合用时自动收起） */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** 工具栏两个弹出组（更多 / 阅读设置）：同刻只开一个，点外部/Esc 收起（D5-B） */
+  const [toolMenu, setToolMenu] = useState<"more" | "settings" | null>(null);
   /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规）
    *  与图谱目录（只消费主进程算好的区间） */
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
@@ -1055,6 +1099,7 @@ export default function Reader({
     if (!engineMode || !documentId || contextRef?.extractId) {
       marksRef.current = [];
       kernelRef.current?.setDocumentMarks?.([]);
+      setDocAnnotCount(0);
       return;
     }
     let cancelled = false;
@@ -1075,6 +1120,8 @@ export default function Reader({
         kernelRef.current?.setDocumentMarks?.(marks);
         // 文档序只能问内核（EPUB 的 CFI 只有引擎 resolve 得动）——装完标记通知侧栏重取
         setMarksOrderKey((v) => v + 1);
+        // 侧栏「摘录」页签与入口可用性用同一个 VM 口径（含无锚老数据——它们也在栏里）
+        setDocAnnotCount(buildAnnotationItems(rows, documentId, engineKind).length);
       } catch {
         /* 标记是增强信息：取不到就不画，阅读/制卡链路不受影响 */
       }
@@ -1224,10 +1271,38 @@ export default function Reader({
     "reader.lookupWord": { when: () => readerShortcutReady, run: () => selAct.lookup() }
   });
 
+  /**
+   * 侧栏可用性（D2）：目录 / 本文档注解 / 已发布图谱**任一在场**就可用——
+   * PDF 无大纲但有注解也要能开（此前按钮挂在「有目录」上，注解无处可看）。
+   */
+  const tocAvailable = tocItems.length > 0;
+  const mapAvailable = mapItems !== null;
+  const sidebarAvailable = tocAvailable || docAnnotCount > 0 || mapAvailable;
+  useEffect(() => {
+    if (!sidebarAvailable) setSidebarOpen(false);
+  }, [sidebarAvailable]);
+  /** 工具栏弹出组：点外部（含正文/侧栏）或 Esc 收起；组内点击不算外部 */
+  useEffect(() => {
+    if (!toolMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && typeof t.closest === "function" && t.closest("[data-reader-tool-menu]")) return;
+      setToolMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setToolMenu(null);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [toolMenu]);
+
   return (
     <div className="reader-wrap">
-      {/* E-1（审计）：目录是 absolute 浮层，打开时正文必须让位，否则行首被压在面板下 */}
-      <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}${tocOpen ? " reader-body-toc-open" : ""}`}>
+      <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}`}>
         <div
           ref={scrollRef}
           className={`reader-scroll${engineMode ? " reader-scroll-engine" : ""}`}
@@ -1236,36 +1311,19 @@ export default function Reader({
         >
           {engineSource ? (
             <>
+              {/* D5-B：常驻＝侧栏入口 + 翻页；其余收进「更多」「阅读设置」两组弹出（同刻只开一个） */}
               <div className="reader-engine-controls">
                 <div className="reader-engine-controls-group">
-                  {/* v28 PDF 原生阅读：无大纲时目录按钮隐藏（getTOC 为空）；foliate 系恒有目录 */}
-                  {(engineKind !== "pdf" || tocItems.length > 0) && (
-                    <button className="btn btn-outline btn-sm" onClick={() => setTocOpen((v) => !v)}>
-                      目录
-                    </button>
-                  )}
-                  {/* v48 批3（M15，D42）：目录旁「导图」→ 全屏 Overlay 工作区（内核不销毁，正文返回原位） */}
-                  <button className="btn btn-outline btn-sm" data-mindmap-entry disabled={!contextRef?.documentId} onClick={() => setMindmapOpen(true)}>
-                    导图
-                  </button>
-                  {/* v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡——按书范围会话，遵循共享每日预算 */}
                   <button
                     className="btn btn-outline btn-sm"
-                    data-review-extracts
-                    disabled={!itemId || !onReviewExtracts}
-                    title="集中复习本书的摘录（遵循每日上限）"
-                    onClick={() => onReviewExtracts?.()}
+                    data-reader-sidebar-toggle
+                    aria-expanded={sidebarOpen}
+                    aria-controls="reader-sidebar"
+                    disabled={!sidebarAvailable}
+                    title={sidebarAvailable ? "侧栏：目录 / 摘录 / 图谱" : "本书没有目录、注解或图谱"}
+                    onClick={() => setSidebarOpen((v) => !v)}
                   >
-                    复习摘录
-                  </button>
-                  <button
-                    className="btn btn-outline btn-sm"
-                    data-review-cards
-                    disabled={!itemId || !onReviewCards}
-                    title="集中复习本书的闪卡（遵循每日上限）"
-                    onClick={() => onReviewCards?.()}
-                  >
-                    复习闪卡
+                    侧栏
                   </button>
                   <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
@@ -1276,54 +1334,117 @@ export default function Reader({
                   </button>
                 </div>
                 <div className="reader-engine-controls-group">
-                  <Dropdown
-                    align="left"
-                    title="阅读模式"
-                    value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
-                    options={[
-                      { value: "scrolled", label: "滚动" },
-                      { value: "paged", label: "分页" },
-                      { value: "spread", label: "对开" }
-                    ]}
-                    onChange={(v) =>
-                      changeReaderMode(
-                        v === "scrolled" ? { flow: "scrolled" } : v === "spread" ? { flow: "paged", spread: true } : { flow: "paged" }
-                      )
-                    }
-                  />
-                  <Dropdown
-                    align="left"
-                    title="阅读主题"
-                    value={readerSettings.appearance.theme}
-                    options={[
-                      { value: "paper", label: "纸白" },
-                      { value: "sepia", label: "羊皮" },
-                      { value: "dark", label: "暗夜" },
-                      { value: "custom", label: "自定义" }
-                    ]}
-                    onChange={(t) => changeReaderTheme(t as ReaderAppearance["theme"])}
-                  />
-                  {engineKind === "pdf" && (
-                    <Dropdown
-                      align="left"
-                      title="缩放"
-                      value={String(readerSettings.appearance.zoom ?? "page-width")}
-                      options={[
-                        { value: "page-width", label: "适应宽度" },
-                        { value: "page-fit", label: "适应页面" },
-                        { value: "50", label: "50%" },
-                        { value: "75", label: "75%" },
-                        { value: "100", label: "100%" },
-                        { value: "125", label: "125%" },
-                        { value: "150", label: "150%" },
-                        { value: "200", label: "200%" }
-                      ]}
-                      onChange={(v) => changeReaderZoom(v === "page-width" || v === "page-fit" ? v : Number(v))}
-                    />
-                  )}
+                  <ReaderToolMenu
+                    id="more"
+                    label="更多"
+                    open={toolMenu === "more"}
+                    onToggle={() => setToolMenu((v) => (v === "more" ? null : "more"))}
+                  >
+                    {/* v48 批3（M15，D42）：导图 → 全屏 Overlay 工作区（内核不销毁，正文返回原位） */}
+                    <button
+                      type="button"
+                      className="dd-item"
+                      data-mindmap-entry
+                      disabled={!contextRef?.documentId}
+                      onClick={() => {
+                        setToolMenu(null);
+                        setMindmapOpen(true);
+                      }}
+                    >
+                      导图
+                    </button>
+                    {/* v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡——按书范围会话，遵循共享每日预算 */}
+                    <button
+                      type="button"
+                      className="dd-item"
+                      data-review-extracts
+                      disabled={!itemId || !onReviewExtracts}
+                      title="集中复习本书的摘录（遵循每日上限）"
+                      onClick={() => {
+                        setToolMenu(null);
+                        onReviewExtracts?.();
+                      }}
+                    >
+                      复习摘录
+                    </button>
+                    <button
+                      type="button"
+                      className="dd-item"
+                      data-review-cards
+                      disabled={!itemId || !onReviewCards}
+                      title="集中复习本书的闪卡（遵循每日上限）"
+                      onClick={() => {
+                        setToolMenu(null);
+                        onReviewCards?.();
+                      }}
+                    >
+                      复习闪卡
+                    </button>
+                  </ReaderToolMenu>
+                  <ReaderToolMenu
+                    id="settings"
+                    label="阅读设置"
+                    open={toolMenu === "settings"}
+                    onToggle={() => setToolMenu((v) => (v === "settings" ? null : "settings"))}
+                  >
+                    <div className="reader-tool-menu-row">
+                      <span className="reader-tool-menu-label mono">模式</span>
+                      <Dropdown
+                        title="阅读模式"
+                        value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
+                        options={[
+                          { value: "scrolled", label: "滚动" },
+                          { value: "paged", label: "分页" },
+                          { value: "spread", label: "对开" }
+                        ]}
+                        onChange={(v) =>
+                          changeReaderMode(
+                            v === "scrolled" ? { flow: "scrolled" } : v === "spread" ? { flow: "paged", spread: true } : { flow: "paged" }
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="reader-tool-menu-row">
+                      <span className="reader-tool-menu-label mono">主题</span>
+                      <Dropdown
+                        title="阅读主题"
+                        value={readerSettings.appearance.theme}
+                        options={[
+                          { value: "paper", label: "纸白" },
+                          { value: "sepia", label: "羊皮" },
+                          { value: "dark", label: "暗夜" },
+                          { value: "custom", label: "自定义" }
+                        ]}
+                        onChange={(t) => changeReaderTheme(t as ReaderAppearance["theme"])}
+                      />
+                    </div>
+                    {engineKind === "pdf" && (
+                      <div className="reader-tool-menu-row">
+                        <span className="reader-tool-menu-label mono">缩放</span>
+                        <Dropdown
+                          title="缩放"
+                          value={String(readerSettings.appearance.zoom ?? "page-width")}
+                          options={[
+                            { value: "page-width", label: "适应宽度" },
+                            { value: "page-fit", label: "适应页面" },
+                            { value: "50", label: "50%" },
+                            { value: "75", label: "75%" },
+                            { value: "100", label: "100%" },
+                            { value: "125", label: "125%" },
+                            { value: "150", label: "150%" },
+                            { value: "200", label: "200%" }
+                          ]}
+                          onChange={(v) => changeReaderZoom(v === "page-width" || v === "page-fit" ? v : Number(v))}
+                        />
+                      </div>
+                    )}
+                  </ReaderToolMenu>
                 </div>
               </div>
               <div className="reader-engine-viewport">
+                {/* D2：正文区与右侧栏是 flex 兄弟——栏开着时正文让宽度，不是压在正文上；
+                    翻页热区只覆盖正文区（.reader-engine-main），不盖到栏上 */}
+                <div className="reader-engine-main">
                 {engineError ? (
                   <div className="reader-engine-error" role="alert">
                     <p className="reader-engine-error-title">
@@ -1372,18 +1493,21 @@ export default function Reader({
                     <div className="reader-tap-zone reader-tap-right" title="下一页" onClick={() => void turnPage(1)} />
                   </>
                 )}
-                {tocOpen && (
+                </div>
+                {sidebarOpen && sidebarAvailable && (
                   <ReaderSidebar
                     tocItems={tocItems}
                     activeHref={tocActiveHref}
                     onNavigate={(item) => {
                       void kernelRef.current?.goTo({ href: item.href });
-                      setTocOpen(false);
+                      setSidebarOpen(false);
                     }}
-                    onClose={() => setTocOpen(false)}
+                    onClose={() => setSidebarOpen(false)}
                     tab={sidebarTab}
                     onTabChange={setSidebarTab}
                     extractsPanel={
+                      /* D2：页签各自按自己的数据在场——本文档没有注解就不出现「摘录」页签 */
+                      docAnnotCount > 0 ? (
                       <ReaderExtractsPanel
                         documentId={contextRef?.documentId ?? null}
                         engine={engineKind}
@@ -1399,15 +1523,16 @@ export default function Reader({
                         onColor={(id, color) => void selActions.saveAnnotationColor(id, color)}
                         onDelete={(id) => void selActions.removeAnnotation(id)}
                       />
+                      ) : null
                     }
                     mapItems={mapItems}
                     mapUnitCount={mapUnitCount}
-                    mapAvailable={mapItems !== null}
+                    mapAvailable={mapAvailable}
                     onMapNavigate={(it) => {
                       // 节点点击 → 跳该节点自有区间起点（复用既有导图跳转：区间起点 → 该单元锚 → goTo）
                       const anchor = mapUnitAnchorsRef.current[it.start];
                       if (anchor) void kernelRef.current?.goTo({ href: anchor });
-                      setTocOpen(false);
+                      setSidebarOpen(false);
                     }}
                   />
                 )}

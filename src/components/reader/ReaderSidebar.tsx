@@ -53,16 +53,18 @@ export default function ReaderSidebar({
   mapAvailable = false
 }: ReaderSidebarProps) {
   const flat = flatten(tocItems);
+  // D2：每个页签按**自己的数据**在场——目录也照此（PDF 无大纲、EPUB 无 nav 时没有目录页签）；
+  // 不是禁用，是不出现（规格 §5.3 对图谱页签的口径，本轮推广到三枚）
   const tabs: Array<[ReaderTab, string]> = [
-    ["toc", "目录"],
+    ...(flat.length > 0 ? ([["toc", "目录"]] as Array<[ReaderTab, string]>) : []),
     ...(extractsPanel ? ([["extracts", "摘录"]] as Array<[ReaderTab, string]>) : []),
-    // 规格 §5.3：无图谱 ⇒ 不渲染该页签（不是禁用，是不出现）
     ...(mapAvailable ? ([["map", "图谱"]] as Array<[ReaderTab, string]>) : [])
   ];
-  const shown = tabs.some(([id]) => id === tab) ? tab : "toc";
+  // 会话记忆的页签此刻不在场时，落到**第一个在场**的页签（不是硬回目录）
+  const shown = tabs.some(([id]) => id === tab) ? tab : (tabs[0]?.[0] ?? "toc");
 
   return (
-    <nav className="reader-toc reader-sidebar" aria-label="阅读器侧栏" data-reader-sidebar>
+    <nav className="reader-sidebar" id="reader-sidebar" aria-label="阅读器侧栏" data-reader-sidebar>
       <div className="tabs" role="tablist" data-sidebar-tabs>
         {tabs.map(([id, label]) => (
           <button
