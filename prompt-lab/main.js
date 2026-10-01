@@ -38,6 +38,8 @@ const BASELINE_SCOPES = {
   "knowledge-probe": { name: "维度探针", content: P.KNOWLEDGE_PROBE_PROMPT },
   "frontier-explain": { name: "推荐解释", content: P.FRONTIER_EXPLAIN_PROMPT },
   "structure-analogy": { name: "结构类比", content: P.STRUCTURE_ANALOGY_PROMPT },
+  // v48.22（M16 / D58，E1）：摘录重排（AI 只重排处理顺序；出层经 kpScopes.validateExtractRerankOutput 裁决）
+  "extract-rerank": { name: "摘录重排", content: P.EXTRACT_RERANK_PROMPT },
   // v45（M14-UM1，D39）：用户记忆整理（摄入轮 + 周期整理轮共用一套契约）
   "user-memory": { name: "用户记忆整理", content: P.USER_MEMORY_PROMPT }
 };

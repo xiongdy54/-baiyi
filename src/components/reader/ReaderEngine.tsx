@@ -5,7 +5,9 @@ import { useEffect, useRef } from "react";
 import {
   createKernel,
   type BookSource,
+  type ContentPointerUpInfo,
   type LinkInfo,
+  type MarkPointerInfo,
   type ReaderImageRef,
   type ReaderKernel,
   type ReaderLocation,
@@ -22,9 +24,13 @@ interface Props {
   jump?: { cfi?: string; pageIndex?: number; chapterIndex?: number; anchorText: string } | null;
   onRelocate: (info: RelocateInfo) => void;
   onLink: (info: LinkInfo) => void;
-  onContentPointerUp: (pos: { x: number; y: number }) => void;
+  onContentPointerUp: (pos: ContentPointerUpInfo) => void;
   /** 正文图片点击（v25 图片点选聚焦） */
   onImageClick: (image: ReaderImageRef) => void;
+  /** 指针进入/离开文中标记（v48.24 批3 §4 文中留痕；id=null 为离开） */
+  onMarkHover?: (info: MarkPointerInfo) => void;
+  /** 点中文中标记（v48.24 批3 §4）：壳层钉住浮层 */
+  onMarkClick?: (info: MarkPointerInfo) => void;
   /** 内核就绪（open 完成）：父层在此保存引用并应用初始模式/外观 */
   onReady: (kernel: ReaderKernel) => void;
   /**
@@ -45,13 +51,15 @@ export default function ReaderEngine({
   onLink,
   onContentPointerUp,
   onImageClick,
+  onMarkHover,
+  onMarkClick,
   onReady,
   onError
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   // 回调经 ref 转发，避免父层每轮渲染的新函数触发内核重建
-  const handlers = useRef({ onRelocate, onLink, onContentPointerUp, onImageClick, onReady, onError, jump, initLocation });
-  handlers.current = { onRelocate, onLink, onContentPointerUp, onImageClick, onReady, onError, jump, initLocation };
+  const handlers = useRef({ onRelocate, onLink, onContentPointerUp, onImageClick, onMarkHover, onMarkClick, onReady, onError, jump, initLocation });
+  handlers.current = { onRelocate, onLink, onContentPointerUp, onImageClick, onMarkHover, onMarkClick, onReady, onError, jump, initLocation };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -70,6 +78,8 @@ export default function ReaderEngine({
         k.on("link", (i) => handlers.current.onLink(i));
         k.on("contentPointerUp", (p) => handlers.current.onContentPointerUp(p));
         k.on("imageClick", (i) => handlers.current.onImageClick(i));
+        k.on("markHover", (i) => handlers.current.onMarkHover?.(i));
+        k.on("markClick", (i) => handlers.current.onMarkClick?.(i));
         const j = handlers.current.jump;
         await k.open(source, { location: j ? undefined : (handlers.current.initLocation ?? undefined) });
         if (disposed) return;

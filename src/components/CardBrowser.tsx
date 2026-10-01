@@ -16,6 +16,21 @@ import ImageLightbox from "./ImageLightbox";
 import { IconVolume } from "./icons";
 import { useDialogA11y } from "../lib/dialogA11y";
 import KnowledgeManager from "./KnowledgeManager";
+// v48.22（D58 §6.8-6）：浏览器 2.0——摘录行数据源 + 状态/推送文案
+import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
+import { extractStatusLabel } from "../lib/sessionQueue";
+import { nextAtText } from "./ExtractCardFace";
+import { settingsStore } from "../lib/settings";
+import { parseCardQuery, extractMatches, textMatches } from "../lib/cardQuery";
+
+/** v48.22（D58 §6.8-5）：筛选牌组（复习范围）——保存的过滤条件，零 schema 变更 */
+interface SavedScope {
+  id: string;
+  name: string;
+  bookItemIds: string[];
+  kinds: string[];
+  limits?: unknown;
+}
 
 type Preset = "all" | "due" | "leech" | "deferred" | "knowledge";
 type BrowserCard = CardRecord & { docTitle?: string };
@@ -91,7 +106,14 @@ function srcLabel(c: CardRecord & { docTitle?: string }): string {
   return t.startsWith("《") ? t : `《${t}》`;
 }
 
-export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }) {
+export default function CardBrowser({
+  onJumpToDoc,
+  onStartSession
+}: {
+  onJumpToDoc?: JumpToDoc;
+  /** v48.22（D58 §6.8-5）：从筛选牌组进入「集中复习」（按范围开会话；App 负责路由） */
+  onStartSession?: (scope: { bookItemIds: string[]; kinds: string[]; name: string; limits?: Record<string, number> | null }) => void;
+}) {
   const [all, setAll] = useState<BrowserCard[]>([]);
   const [preset, setPreset] = useState<Preset>("all");
   const [query, setQuery] = useState("");
@@ -105,9 +127,38 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
   const [loaded, setLoaded] = useState(false);
   // v34（M12，§4.16）：今日同源暂缓清单（与复习队列同一视图口径）——id → 延后原因
   const [deferredMap, setDeferredMap] = useState<Map<string, NonNullable<TodayQueue["deferred"][number]["deferReason"]>>>(new Map());
+  // v48.22（D58 §6.8-6）：浏览器 2.0——统一数据源（闪卡 + 摘录）、多选/全选/反选、批量、按书分组
+  const [kindFilter, setKindFilter] = useState<"card" | "extract" | "both">("card");
+  const [extracts, setExtracts] = useState<DueTopic[]>([]);
+  const [selCards, setSelCards] = useState<Set<string>>(new Set());
+  const [selExtracts, setSelExtracts] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
+  const [bookScope, setBookScope] = useState<string>("all");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchNote, setBatchNote] = useState<string | null>(null);
+  // v48.22（D58 §6.8-5）：筛选牌组（复习范围）——存 settings.app.reviewScopes，零 schema 变更（D51 先例）
+  const [scopes, setScopes] = useState<SavedScope[]>([]);
+  const [deckName, setDeckName] = useState("");
+  // 上限覆写（§6.8-5：范围只能收紧、不能另开预算；0 = 继承全局）
+  const [deckCapExtracts, setDeckCapExtracts] = useState(0);
+  const [deckCapNewCards, setDeckCapNewCards] = useState(0);
+  // v48.22（D58 §6.8-6 / O-8 裁定）：摘录正文查找替换（仅选中项、仅正文、纯文本，不做正则）
+  const [findText, setFindText] = useState("");
+  const [replaceText, setReplaceText] = useState("");
 
   const refresh = useCallback(async () => {
     setAll(await cardsApi.listAll());
+    try {
+      setExtracts((await readingWorkflow.getAllTopics()) as DueTopic[]);
+    } catch {
+      setExtracts([]);
+    }
+    try {
+      const saved = await settingsStore.get<SavedScope[]>("app", "reviewScopes", []);
+      setScopes(Array.isArray(saved) ? saved.filter((s) => s && typeof s.id === "string") : []);
+    } catch {
+      setScopes([]);
+    }
     try {
       const q = await cardsApi.todayQueue();
       setDeferredMap(new Map((q.deferred ?? []).map((c) => [c.id, c.deferReason ?? { siblingKey: c.siblingKey || "", kind: "revealed" as const, siblingCardId: null, siblingFront: "" }])));
@@ -144,6 +195,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
 
   const filtered = useMemo(() => {
     const q = foldSearch(query);
+    const parsed = parseCardQuery(query);
     let list = all;
     if (preset === "due") list = list.filter(isDueCard);
     if (preset === "leech") list = list.filter(isLeechOrSuspended);
@@ -159,8 +211,8 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
       });
     }
     if (q) {
-      list = list.filter((c) =>
-        [
+      list = list.filter((c) => {
+        const hay = [
           c.frontMarkdown,
           c.backMarkdown,
           c.noteText,
@@ -171,9 +223,37 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
         ]
           .join("\n")
           .normalize("NFKC")
-          .toLowerCase()
-          .includes(q)
-      );
+          .toLowerCase();
+        // v48.22（D58 §6.8-6）：查询语法——主串 + 负号排除（字段前缀由下面的独立过滤处理）
+        if (!hay.includes(q)) return false;
+        return textMatches({ ...parsed, text: "" }, hay);
+      });
+    }
+    // 查询语法里的字段前缀（kind/book/status/priority）——与下拉筛选叠加生效
+    if (parsed.kind === "extract") list = [];
+    if (parsed.book) {
+      const bk = foldSearch(parsed.book);
+      list = list.filter((c) => foldSearch(String(c.docTitle || "")).includes(bk));
+    }
+    if (parsed.status) {
+      list = list.filter((c) => {
+        const suspended = Boolean(c.leech?.suspended);
+        const s = suspended ? "suspended" : c.fsrs?.state ?? "new";
+        return String(s).toLowerCase() === parsed.status;
+      });
+    }
+    if (parsed.priority || parsed.priorityNot !== undefined) {
+      list = list.filter((c) => {
+        const p = Number(c.priority) || 0;
+        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
+        if (!parsed.priority) return true;
+        const { op, value } = parsed.priority;
+        if (op === "<=") return p <= value;
+        if (op === ">=") return p >= value;
+        if (op === "<") return p < value;
+        if (op === ">") return p > value;
+        return p === value;
+      });
     }
     const sorted = [...list];
     if (sortBy === "created") sorted.sort((a, b) => b.createdAt - a.createdAt);
@@ -182,6 +262,202 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
     else sorted.sort((a, b) => (a.fsrs?.due ?? 0) - (b.fsrs?.due ?? 0)); // 默认到期升序，同复习队列
     return sorted;
   }, [all, preset, typeFilter, stateFilter, memFilter, query, sortBy, deferredMap]);
+
+  // ---- v48.22（D58 §6.8-6）：按书分组 + 多选 + 批量（唯一数据源＝cardsApi.listAll + workflowAPI.listAll）
+  const bookOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of all) {
+      const id = (c as { libraryItemId?: string | null }).libraryItemId;
+      if (id) m.set(String(id), String((c as { docTitle?: string }).docTitle || "未知材料"));
+    }
+    for (const e of extracts) if (e.libraryItemId) m.set(String(e.libraryItemId), String(e.docTitle || "未知材料"));
+    return [{ value: "all", label: "全部来源书" }, ...[...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }))];
+  }, [all, extracts]);
+
+  const scopeCards = useMemo(
+    () => (bookScope === "all" ? filtered : filtered.filter((c) => String((c as { libraryItemId?: string | null }).libraryItemId || "") === bookScope)),
+    [filtered, bookScope]
+  );
+
+  const scopeExtracts = useMemo(() => {
+    const q = foldSearch(query);
+    const parsed = parseCardQuery(query);
+    if (parsed.kind === "card") return [];
+    let list = extracts;
+    if (bookScope !== "all") list = list.filter((e) => String(e.libraryItemId || "") === bookScope);
+    if (parsed.book) {
+      const bk = foldSearch(parsed.book);
+      list = list.filter((e) => foldSearch(String(e.docTitle || "")).includes(bk));
+    }
+    if (q || parsed.exclude.length || parsed.status || parsed.priority || parsed.priorityNot !== undefined) {
+      list = list.filter((e) => {
+        if (!extractMatches(parsed, e)) return false;
+        const p = Number(e.priority) || 0;
+        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
+        if (parsed.priority) {
+          const { op, value } = parsed.priority;
+          if (op === "<=" && !(p <= value)) return false;
+          if (op === ">=" && !(p >= value)) return false;
+          if (op === "<" && !(p < value)) return false;
+          if (op === ">" && !(p > value)) return false;
+          if (op === "=" && p !== value) return false;
+        }
+        return true;
+      });
+    }
+    if (preset === "due") list = list.filter((e) => Number(e.topicNextAt) <= Date.now());
+    return list;
+  }, [extracts, bookScope, query, preset]);
+
+  const viewCards = kindFilter === "extract" ? [] : scopeCards;
+  const viewExtracts = kindFilter === "card" ? [] : scopeExtracts;
+
+  interface MouseMod {
+    shiftKey: boolean;
+    ctrlKey: boolean;
+    metaKey: boolean;
+  }
+  function toggleSel(kind: "card" | "extract", id: string, e: MouseMod) {
+    const set = kind === "card" ? selCards : selExtracts;
+    const ids = (kind === "card" ? scopeCards.map((c) => c.id) : scopeExtracts.map((x) => x.id));
+    const next = new Set(set);
+    if (e.shiftKey && anchorId && ids.includes(anchorId)) {
+      const a = ids.indexOf(anchorId);
+      const b = ids.indexOf(id);
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(ids[i]);
+    } else if (e.ctrlKey || e.metaKey) {
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+    } else {
+      if (next.size === 1 && next.has(id)) next.clear();
+      else {
+        next.clear();
+        next.add(id);
+      }
+    }
+    setAnchorId(id);
+    if (kind === "card") setSelCards(next);
+    else setSelExtracts(next);
+  }
+  function selectAllOf(kind: "card" | "extract") {
+    if (kind === "card") setSelCards(new Set(scopeCards.map((c) => c.id)));
+    else setSelExtracts(new Set(scopeExtracts.map((e) => e.id)));
+  }
+  function invertOf(kind: "card" | "extract") {
+    if (kind === "card") setSelCards(new Set(scopeCards.filter((c) => !selCards.has(c.id)).map((c) => c.id)));
+    else setSelExtracts(new Set(scopeExtracts.filter((e) => !selExtracts.has(e.id)).map((e) => e.id)));
+  }
+  function flashNote(text: string) {
+    setBatchNote(text);
+    window.setTimeout(() => setBatchNote(null), 2400);
+  }
+  async function runCardBatch(op: string, payload?: unknown) {
+    const ids = [...selCards];
+    if (ids.length === 0) return;
+    if (op === "delete" && !window.confirm(`删除选中的 ${ids.length} 张卡？（软删，可在备份中找回）`)) return;
+    setBatchBusy(true);
+    try {
+      const r = await cardsApi.batch(op, ids, payload);
+      if (r?.ok) {
+        setSelCards(new Set());
+        flashNote(`已处理 ${r.count ?? ids.length} 张卡`);
+        eventBus.emit("cards/changed");
+        await refresh();
+      } else {
+        flashNote(r?.reason || "批量操作失败，整批未执行");
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+  async function runExtractBatch(op: string, payload?: unknown) {
+    const ids = [...selExtracts];
+    if (ids.length === 0) return;
+    if (op === "delete" && !window.confirm(`删除选中的 ${ids.length} 条摘录？（软删，可在备份中找回）`)) return;
+    setBatchBusy(true);
+    try {
+      const r = (await readingWorkflow.batch(op as never, ids, payload as never)) as { ok?: boolean; count?: number; skipped?: Array<{ reason: string }>; reason?: string };
+      if (r?.ok) {
+        setSelExtracts(new Set());
+        const skipped = Array.isArray(r.skipped) && r.skipped.length ? `（${r.skipped.length} 条按规则跳过）` : "";
+        flashNote(`已处理 ${r.count ?? ids.length} 条摘录${skipped}`);
+        await refresh();
+      } else {
+        flashNote(r?.reason || "批量操作失败，整批未执行");
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  // v48.22（D58 §6.8-5）：筛选牌组——保存当前筛选为复习范围 / 应用 / 集中复习 / 删除
+  async function saveDeck() {
+    const fallback = kindFilter === "card" ? "闪卡" : kindFilter === "extract" ? "摘录" : "全部";
+    const name = deckName.trim() || `筛选牌组 · ${fallback}`;
+    const scope: SavedScope = {
+      id: crypto.randomUUID(),
+      name,
+      bookItemIds: bookScope === "all" ? [] : [bookScope],
+      kinds: kindFilter === "both" ? ["card", "extract"] : [kindFilter],
+      limits: deckCapExtracts > 0 || deckCapNewCards > 0
+        ? { ...(deckCapExtracts > 0 ? { extractReviewsPerDay: deckCapExtracts } : {}), ...(deckCapNewCards > 0 ? { newCardsPerDay: deckCapNewCards } : {}) }
+        : null
+    };
+    const next = [...scopes, scope];
+    await settingsStore.set("app", "reviewScopes", next);
+    setScopes(next);
+    setDeckName("");
+    flashNote(`已保存筛选牌组「${name}」`);
+  }
+  function applyDeck(scope: SavedScope) {
+    setKindFilter(scope.kinds.length === 2 ? "both" : scope.kinds[0] === "extract" ? "extract" : "card");
+    setBookScope(scope.bookItemIds[0] || "all");
+    flashNote(`已应用「${scope.name}」`);
+  }
+  async function deleteDeck(id: string) {
+    const next = scopes.filter((s) => s.id !== id);
+    await settingsStore.set("app", "reviewScopes", next);
+    setScopes(next);
+  }
+
+  /** 查找替换（O-8：仅选中项、仅正文、纯文本；逐条落 edit 操作日志，撤销按次回退） */
+  async function runFindReplace() {
+    const needle = findText;
+    if (!needle) {
+      flashNote("请先填写要查找的文字");
+      return;
+    }
+    const ids = [...selExtracts];
+    if (ids.length === 0) return;
+    setBatchBusy(true);
+    try {
+      let changed = 0;
+      for (const id of ids) {
+        const cur = extracts.find((e) => e.id === id);
+        const text = String(cur?.contentMarkdown ?? "");
+        if (!text.includes(needle)) continue;
+        await readingWorkflow.updateContent(id, text.split(needle).join(replaceText));
+        changed += 1;
+      }
+      flashNote(changed > 0 ? `已替换 ${changed} 条摘录的正文` : "选中的摘录里没有该文字");
+      await refresh();
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
+  // v48.22（D58 §6.8-6）：行数窗口——真实库可达上万行，全量渲染会让筛选/滚动卡顿；
+  // 先渲染 200 行 + 「显示更多」增量放行（真正的虚拟滚动留待后续批次，此处是可用性下限保障）
+  const [rowLimit, setRowLimit] = useState(200);
+  useEffect(() => {
+    setRowLimit(200);
+  }, [query, typeFilter, stateFilter, preset, kindFilter, bookScope, memFilter, sortBy]);
+
+  // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）
+  useEffect(() => {
+    const parsed = parseCardQuery(query);
+    if (parsed.kind) setKindFilter(parsed.kind);
+  }, [query]);
 
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
 
@@ -220,7 +496,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
       <div className="cb-toolbar">
         <input
           className="cb-search"
-          placeholder="搜索题面、答案、前缀、来源、领域、标签…"
+          placeholder='搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）'
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -256,9 +532,147 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
         >
           记忆接地
         </button>
+        {/* v48.22（D58 §6.8-6）：类别切换（闪卡 / 摘录 / 全部） + 按来源书筛选 */}
+        <div className="seg-tabs seg-tabs-sm" role="group" aria-label="条目类别">
+          <button className={kindFilter === "card" ? "active" : ""} data-kind-card onClick={() => setKindFilter("card")}>
+            闪卡
+          </button>
+          <button className={kindFilter === "extract" ? "active" : ""} data-kind-extract onClick={() => setKindFilter("extract")}>
+            摘录
+          </button>
+          <button className={kindFilter === "both" ? "active" : ""} data-kind-both onClick={() => setKindFilter("both")}>
+            全部
+          </button>
+        </div>
+        <Dropdown title="按来源书筛选" value={bookScope} options={bookOptions} onChange={setBookScope} />
       </div>
 
-      {loaded && filtered.length === 0 && (
+      {/* v48.22（D58 §6.8-6）：多选与批量动作条（选择态常驻，动作在选中 ≥1 条时出现） */}
+      <div className="cb-batch" data-batch-bar>
+        {kindFilter !== "extract" && (
+          <>
+            <button className="btn btn-outline btn-sm" data-sel-all-cards onClick={() => selectAllOf("card")}>
+              全选闪卡
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => invertOf("card")}>
+              反选闪卡
+            </button>
+          </>
+        )}
+        {kindFilter !== "card" && (
+          <>
+            <button className="btn btn-outline btn-sm" data-sel-all-extracts onClick={() => selectAllOf("extract")}>
+              全选摘录
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => invertOf("extract")}>
+              反选摘录
+            </button>
+          </>
+        )}
+        {selCards.size + selExtracts.size > 0 && (
+          <>
+            <span className="mono" data-sel-count>
+              已选 闪卡 {selCards.size} · 摘录 {selExtracts.size}
+            </span>
+            {selCards.size > 0 && (
+              <>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>删除</button>
+              </>
+            )}
+            {selExtracts.size > 0 && (
+              <>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-extracts onClick={() => void runExtractBatch("postponeDays", { days: 7 })}>推迟 7 天</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 30 })}>优先级 30</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 70 })}>优先级 70</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>毕业</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>召回</button>
+                {/* v48.22（D58 §6.4.2）：状态机另两个出口——归档（留痕）/ 不再关心（可召回） */}
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive onClick={() => void runExtractBatch("set_status", { status: "archived" })}>归档</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "dismissed" })}>不再关心</button>
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>删除</button>
+                <input className="cb-search cb-find" data-find-input placeholder="查找" value={findText} onChange={(e) => setFindText(e.target.value)} />
+                <input className="cb-search cb-find" data-replace-input placeholder="替换为" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} />
+                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-find-replace onClick={() => void runFindReplace()}>正文查找替换</button>
+              </>
+            )}
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => {
+                setSelCards(new Set());
+                setSelExtracts(new Set());
+              }}
+            >
+              清除选择
+            </button>
+          </>
+        )}
+        {batchNote && <span className="form-hint" data-batch-note>{batchNote}</span>}
+      </div>
+
+      {/* v48.22（D58 §6.8-5）：筛选牌组＝保存下来的复习范围（不移动卡片，故复习记录照常入 FSRS） */}
+      <div className="cb-batch" data-deck-bar>
+        <span className="mono">筛选牌组</span>
+        <input
+          className="cb-search cb-deck-name"
+          data-deck-name
+          placeholder="牌组名称（可留空自动命名）"
+          value={deckName}
+          onChange={(e) => setDeckName(e.target.value)}
+        />
+        <button className="btn btn-outline btn-sm" data-deck-save onClick={() => void saveDeck()}>
+          保存当前筛选
+        </button>
+        <span className="mono">上限覆写</span>
+        <input
+          className="mono input-num"
+          data-deck-cap-extracts
+          type="number"
+          min={0}
+          max={9999}
+          title="该范围的摘录处理上限（0=继承全局；只能收紧）"
+          value={deckCapExtracts}
+          onChange={(e) => setDeckCapExtracts(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))}
+        />
+        <span className="form-hint">摘录/日</span>
+        <input
+          className="mono input-num"
+          data-deck-cap-newcards
+          type="number"
+          min={0}
+          max={9999}
+          title="该范围的新卡上限（0=继承全局；只能收紧）"
+          value={deckCapNewCards}
+          onChange={(e) => setDeckCapNewCards(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))}
+        />
+        <span className="form-hint">新卡/日</span>
+        {scopes.map((s) => (
+          <span className="cb-deck" data-deck-item key={s.id}>
+            <button className="btn btn-outline btn-sm" data-deck-apply title="把浏览器的筛选切到该范围" onClick={() => applyDeck(s)}>
+              {s.name}
+              <span className="n"> {s.kinds.join("/")}{s.bookItemIds.length ? " · 单书" : ""}</span>
+            </button>
+            {onStartSession && (
+              <button
+                className="btn btn-outline btn-sm"
+                data-deck-start
+                title="按该范围开始集中复习（记录照常计入 FSRS）"
+                onClick={() => onStartSession({ bookItemIds: s.bookItemIds, kinds: s.kinds, name: s.name, limits: (s.limits as Record<string, number> | null) ?? null })}
+              >
+                集中复习
+              </button>
+            )}
+            <button className="btn btn-outline btn-sm" data-deck-delete onClick={() => void deleteDeck(s.id)}>
+              删除
+            </button>
+          </span>
+        ))}
+        {scopes.length === 0 && <span className="form-hint">把当前「类别 + 来源书」筛选存下来，即可反复进入同一复习范围。</span>}
+      </div>
+
+      {loaded && viewCards.length === 0 && viewExtracts.length === 0 && (
         <div className="empty-state">
           <div className="empty-deco">
             <span className="empty-sq empty-sq-accent" />
@@ -300,6 +714,7 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
       ) : (
         <div className="cb-table" role="table">
           <div className="cb-row cb-row-head" role="row">
+            <span className="cb-pick">选</span>
             <span>题面</span>
             <span>类型</span>
             <span>状态</span>
@@ -309,8 +724,22 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
             <span className="cb-num">优先</span>
             <span>来源</span>
           </div>
-          {filtered.map((c) => (
-            <div key={c.id} className="cb-row" role="row" onClick={() => setDetailId(c.id)}>
+          {viewCards.slice(0, rowLimit).map((c) => (
+            <div
+              key={c.id}
+              className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
+              role="row"
+              onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : setDetailId(c.id))}
+              title="Ctrl/⌘ 点击多选 · Shift 点击范围选"
+            >
+              <span className="cb-pick">
+                <input
+                  type="checkbox"
+                  checked={selCards.has(c.id)}
+                  onClick={(ev) => ev.stopPropagation()}
+                  onChange={() => toggleSel("card", c.id, { shiftKey: false, ctrlKey: false, metaKey: false })}
+                />
+              </span>
               <span className="cb-front" title={frontPreview(c)}>
                 {frontPreview(c)}
               </span>
@@ -326,9 +755,97 @@ export default function CardBrowser({ onJumpToDoc }: { onJumpToDoc?: JumpToDoc }
               <span className="cb-src" title={srcLabel(c)}>{srcLabel(c)}</span>
             </div>
           ))}
+          {viewCards.length > rowLimit && (
+            <div className="cb-row" role="row">
+              <span className="cb-front">
+                <button className="btn btn-outline btn-sm" data-more-rows onClick={() => setRowLimit((n) => n + 200)}>
+                  显示更多（还有 {viewCards.length - rowLimit} 行）
+                </button>
+              </span>
+            </div>
+          )}
         </div>
       )}
       </>
+      )}
+
+      {/* v48.22（D58 §6.8-6）：摘录表——与闪卡同页管理（状态/优先级/下次推送/来源书） */}
+      {kindFilter !== "card" && (
+        <div className="cb-table" role="table" data-extract-table>
+          <div className="cb-row cb-row-head" role="row">
+            <span className="cb-pick">选</span>
+            <span>摘录内容</span>
+            <span>状态</span>
+            <span className="cb-num">优先</span>
+            <span>下次推送</span>
+            <span>来源</span>
+            <span>操作</span>
+          </div>
+          {viewExtracts.slice(0, rowLimit).map((e) => (
+            <div
+              key={e.id}
+              className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
+              role="row"
+              onClick={(ev) => toggleSel("extract", e.id, ev)}
+              title="点击选择 · Ctrl/⌘ 多选 · Shift 范围选（摘录行不展开详情，管理动作走批量条）"
+            >
+              <span className="cb-pick">
+                <input
+                  type="checkbox"
+                  checked={selExtracts.has(e.id)}
+                  onClick={(ev) => ev.stopPropagation()}
+                  onChange={() => toggleSel("extract", e.id, { shiftKey: false, ctrlKey: false, metaKey: false })}
+                />
+              </span>
+              <span className="cb-front" title={e.contentMarkdown}>
+                {(e.contentMarkdown || "").slice(0, 90)}
+              </span>
+              <span>{extractStatusLabel(e.status)}</span>
+              <span className="cb-num mono">
+                {e.priority}
+                {e.prioritySource === "user" ? " ·改" : ""}
+              </span>
+              <span className="mono">{nextAtText(e.topicNextAt)}</span>
+              <span className="cb-src" title={e.docTitle}>
+                {e.docTitle}
+              </span>
+              <span>
+                {/* 原「学习队列」页的管理动作之一：跳转回原文位置（§6.8-8 进度安全：跳转不写阅读进度） */}
+                {onJumpToDoc && e.contextRef?.documentId ? (
+                  <button
+                    className="btn btn-outline btn-sm"
+                    data-extract-jump
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onJumpToDoc(e.contextRef!.documentId!, {
+                        anchorText: e.contextRef!.anchorText || e.contentMarkdown,
+                        anchorRatio: e.contextRef!.anchorRatio
+                      }, "browse");
+                    }}
+                  >
+                    跳转原文
+                  </button>
+                ) : (
+                  <span className="form-hint">—</span>
+                )}
+              </span>
+            </div>
+          ))}
+          {viewExtracts.length > rowLimit && (
+            <div className="cb-row" role="row">
+              <span className="cb-front">
+                <button className="btn btn-outline btn-sm" data-more-rows-extract onClick={() => setRowLimit((n) => n + 200)}>
+                  显示更多（还有 {viewExtracts.length - rowLimit} 行）
+                </button>
+              </span>
+            </div>
+          )}
+          {viewExtracts.length === 0 && (
+            <div className="cb-row" role="row">
+              <span className="cb-front">没有符合筛选条件的摘录。</span>
+            </div>
+          )}
+        </div>
       )}
 
       {detail && (
@@ -624,7 +1141,8 @@ export function CardFace({
 }: {
   card: CardRecord;
   showBack: boolean;
-  onReveal: () => void;
+  /** 翻面回调（可缺省：复习页改成只走底栏「显示答案」按钮，点卡面不翻面——2026-10-01） */
+  onReveal?: () => void;
   onEdit?: (patch: {
     frontMarkdown?: string;
     backMarkdown?: string;
@@ -730,7 +1248,7 @@ export function CardFace({
       edit({ frontMarkdown: restored, noteText: restored });
     };
     return (
-      <div className="review-face" onClick={!showBack ? onReveal : undefined}>
+      <div className="review-face" onClick={!showBack && onReveal ? onReveal : undefined}>
         <div className="review-front">
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
           {questionEditable ? (
@@ -758,7 +1276,7 @@ export function CardFace({
   // 不存在复习期形态变化的卡片类型，一切卡设计以 FSRS 为核心。
 
   return (
-    <div className="review-face" onClick={!showBack ? onReveal : undefined}>
+    <div className="review-face" onClick={!showBack && onReveal ? onReveal : undefined}>
       <div className="review-front">
         {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
         {showBack && onEdit ? (

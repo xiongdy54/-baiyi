@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   getDocument: (id) => ipcRenderer.invoke("library:doc", id),
   getItemIdByDocumentId: (docId) => ipcRenderer.invoke("library:itemByDoc", docId),
   updateProgress: (id, progress) => ipcRenderer.invoke("library:updateProgress", id, progress),
+  // v48.22（D58 §6.8-2）：书级默认优先级（新建摘录继承；继承型摘录实时跟随）
+  setPriority: (id, priority) => ipcRenderer.invoke("library:setPriority", id, priority),
   // 阅读内核（v20）：读原书字节给 foliate 打开
   readBookFile: (id) => ipcRenderer.invoke("library:readBookFile", id),
   // M6-1（v26）：导入格式扩展 Word/TXT/Markdown（pick 返回 {name,path}，create 在主进程完成转换与建册）
@@ -51,9 +53,43 @@ contextBridge.exposeInMainWorld("libraryAPI", {
 
 contextBridge.exposeInMainWorld("workflowAPI", {
   create: (payload) => ipcRenderer.invoke("extracts:create", payload),
+  // v48.23（D61 §6.8-11）：多段选择的集合运算/拼接文本（只读计算，逻辑在主进程；渲染层不复制）
+  spanSet: (current, incoming, opts) => ipcRenderer.invoke("extracts:spanSet", current, incoming, opts),
   listDue: () => ipcRenderer.invoke("extracts:listDue"),
+  listAll: () => ipcRenderer.invoke("extracts:listAll"),
   get: (id) => ipcRenderer.invoke("extracts:get", id),
-  postpone: (id) => ipcRenderer.invoke("extracts:postpone", id)
+  // v48.23（D61 §6.8-11）：层级链（面包屑用，自根到当前逐级 {id,text,depth}）
+  chain: (id) => ipcRenderer.invoke("extracts:chain", id),
+  postpone: (id) => ipcRenderer.invoke("extracts:postpone", id),
+  // v48.22（D58 §6.8）：摘录调度内核写面
+  postponeDays: (id, days) => ipcRenderer.invoke("extracts:postponeDays", id, days),
+  advance: (id, now) => ipcRenderer.invoke("extracts:advance", id, now),
+  update: (id, patch) => ipcRenderer.invoke("extracts:update", id, patch),
+  setPriority: (id, priority) => ipcRenderer.invoke("extracts:setPriority", id, priority),
+  setStatus: (id, status, detail, opType) => ipcRenderer.invoke("extracts:setStatus", id, status, detail, opType),
+  remove: (id) => ipcRenderer.invoke("extracts:delete", id),
+  batch: (op, ids, payload) => ipcRenderer.invoke("extracts:batch", op, ids, payload),
+  switchEngine: (to, from) => ipcRenderer.invoke("extracts:switchEngine", to, from),
+  // v48.22（D58 §6.4.1 E1）：手动跑一次 AI 重排（写路径后另有自动刷新）
+  rerankNow: () => ipcRenderer.invoke("extracts:rerankNow")
+});
+
+// v48.22（D58 §6.8-5/§6.8-7）：只读用量 + 跨类撤销（卡片评分与摘录操作共用一个撤销栈）
+contextBridge.exposeInMainWorld("limitsAPI", {
+  usage: (now) => ipcRenderer.invoke("limits:usage", now),
+  state: (now) => ipcRenderer.invoke("limits:state", now),
+  validate: (patch) => ipcRenderer.invoke("limits:validate", patch)
+});
+
+// v48.22（D58 §6.8-3）：会话队列（卡片 ∪ 摘录；只影响展示、零调度写入）
+contextBridge.exposeInMainWorld("sessionAPI", {
+  queue: (now, opts) => ipcRenderer.invoke("session:queue", now, opts),
+  counts: (now, opts) => ipcRenderer.invoke("session:counts", now, opts)
+});
+
+contextBridge.exposeInMainWorld("undoAPI", {
+  last: () => ipcRenderer.invoke("undo:last"),
+  info: () => ipcRenderer.invoke("undo:info")
 });
 
 contextBridge.exposeInMainWorld("cardsAPI", {
@@ -74,6 +110,8 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   persistNow: () => ipcRenderer.invoke("cards:persistNow"),
   skip: (cardId) => ipcRenderer.invoke("cards:skip", cardId),
   setSuspended: (id, suspended, reason) => ipcRenderer.invoke("cards:setSuspended", id, suspended, reason),
+  // v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete）
+  batch: (op, ids, payload) => ipcRenderer.invoke("cards:batch", op, ids, payload),
   updateLeech: (id, patch) => ipcRenderer.invoke("cards:updateLeech", id, patch),
   resolveLeech: (id, resolution, updates) => ipcRenderer.invoke("cards:resolveLeech", id, resolution, updates),
   listLeech: () => ipcRenderer.invoke("cards:listLeech")
@@ -299,6 +337,8 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
   list: (documentId) => ipcRenderer.invoke("mindmap:list", documentId),
   get: (id) => ipcRenderer.invoke("mindmap:get", id),
   getActive: (documentId, scopeAnchor) => ipcRenderer.invoke("mindmap:getActive", documentId, scopeAnchor || "book"),
+  // 批 4 Task 15：图谱目录（只读；区间由主进程按 buildExtractionModel 算）
+  mapTree: (documentId, tocItems, unitAnchors) => ipcRenderer.invoke("mindmap:mapTree", documentId, tocItems, unitAnchors),
   setActive: (id) => ipcRenderer.invoke("mindmap:setActive", id),
   remove: (id) => ipcRenderer.invoke("mindmap:delete", id),
   runs: (documentId) => ipcRenderer.invoke("mindmap:runs", documentId),

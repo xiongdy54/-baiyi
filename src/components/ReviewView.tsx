@@ -8,7 +8,12 @@ import { playVocabAudio } from "../lib/dictClient";
 import { settingsStore } from "../lib/settings";
 import { eventBus } from "../lib/eventbus";
 import { useCommandActions } from "../lib/useCommands";
+import { bindingHint } from "../lib/commands";
+import { fetchCardCounts, type CardCounts } from "../lib/sessionQueue";
 import { CardFace } from "./CardBrowser";
+import { fetchSessionQueue, type SessionItem } from "../lib/sessionQueue";
+import ExtractCardFace from "./ExtractCardFace";
+import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow";
 import ContrastCardModal from "./ContrastCardModal";
 import ImageLightbox from "./ImageLightbox";
 
@@ -19,12 +24,25 @@ function safePreviewItems(fsrs: unknown): ReturnType<typeof fsrsEngine.preview> 
 }
 
 export default function ReviewView({
-  onJumpToDoc
+  onJumpToDoc,
+  bookItemIds,
+  scopeLimits
 }: {
   onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }) => void;
+  /** v48.22（D58 §6.8-8）：本书范围内的集中复习（阅读器「复习闪卡」入口） */
+  bookItemIds?: string[];
+  /** 筛选牌组的上限覆写（§6.8-5：只收紧，不另开预算） */
+  scopeLimits?: Record<string, number> | null;
 } = {}) {
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
+  /** 顶栏三档计数（今日可用口径；每次换卡/评完刷新） */
+  const [counts, setCounts] = useState<CardCounts>({ new: 0, learning: 0, review: 0 });
+  /** 底栏「更多」弹层（向上弹；点外部/Esc 收起） */
+  const [barMoreOpen, setBarMoreOpen] = useState(false);
+  const barMoreRef = useRef<HTMLSpanElement | null>(null);
+  /** 显示答案的**生效**快捷键（随设置变化；不许把「空格」写死） */
+  const hint = bindingHint("review.showAnswer");
   const [startedAt, setStartedAt] = useState(Date.now());
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
@@ -66,12 +84,37 @@ export default function ReviewView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id]);
 
-  // 拉取今日队列队首（同一视图：到期 + 同源延后 + 规范序），并同步「同源暂缓」清单
+  // 拉取今日队列队首（同一视图：到期 + 同源延后 + 规范序），并同步「同源暂缓」清单。
+  // v48.22（D58 §6.8-3）：改为消费**会话队列**（§4.2-26 唯一装配面）——它同样受每日上限与
+  // 按书范围约束；混编出的摘录条目由「摘录」页处理，本页只取其中的卡片（摘录不会因此丢失：
+  // 未处理即仍 due，摘录页照常可见）。
+  // v48.22（D58 §6.8-3）：合并会话里推送到的摘录——与摘录页共用同一张卡面就地处理
+  const [currentExtract, setCurrentExtract] = useState<DueTopic | null>(null);
+  const extractHeadRef = useRef<DueTopic | null>(null);
+
   const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
+    const scope = bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length)
+      ? { bookItemIds: bookItemIds ?? undefined, limits: scopeLimits ?? undefined }
+      : undefined;
+    const session = await fetchSessionQueue({ scope });
+    if (session) {
+      setDeferred((session.deferred ?? []) as unknown as TodayQueue["deferred"]);
+      const head = session.items[0];
+      // 队首是摘录 → 交给摘录卡面（本页不跳过它：跳过会让合并模式名存实亡）
+      if (head && head.kind === "extract" && head.extract) {
+        extractHeadRef.current = head.extract;
+        setCurrentExtract(head.extract);
+        return null;
+      }
+      extractHeadRef.current = null;
+      setCurrentExtract(null);
+      const firstCard = session.items.find((it: SessionItem) => it.kind === "card");
+      return (firstCard?.card as (CardRecord & { docTitle?: string })) ?? null;
+    }
     const q = await cardsApi.todayQueue();
     setDeferred(q.deferred ?? []);
     return q.cards[0] ?? null;
-  }, []);
+  }, [bookItemIds, scopeLimits]);
 
   // 开场拉第一张；若 sessionStorage 有跳转前的复习现场（从阅读器返回）则恢复该卡
   useEffect(() => {
@@ -347,6 +390,40 @@ export default function ReviewView({
     });
   }
 
+  // 顶栏计数：换卡/评完/跳过/删除/撤销后各刷一次（只读、同队列口径）
+  useEffect(() => {
+    let alive = true;
+    void fetchCardCounts()
+      .then((c) => {
+        if (alive) setCounts(c);
+      })
+      .catch(() => {
+        /* 计数是增强信息：取不到就保持上一次的值，不打断复习 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [current?.id, doneCount]);
+
+  // 「更多」弹层：点弹层外 / Esc 收起（同刻只开这一个）
+  useEffect(() => {
+    if (!barMoreOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && barMoreRef.current?.contains(t)) return;
+      setBarMoreOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setBarMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [barMoreOpen]);
+
   // ---------- M4 复习快捷键（§9.1 M4）：空格翻面 / 1-4 评分 / z 撤销评分 / q 标记暂停 / w 跳过 / d 删除 ----------
   // 口径：翻面只对正面生效；评分只对背面（评分按钮在场时）生效；z 需存在可撤销评分；
   // q/w/d 与翻面状态无关，只要当前有卡即可触发（删除仍走 confirm 确认）。
@@ -397,6 +474,47 @@ export default function ReviewView({
     );
   }
 
+  // v48.22（D58 §6.8-3）：合并会话推送到摘录时，用**与摘录页同一张卡面**就地处理
+  if (currentExtract) {
+    const ex = currentExtract;
+    const after = async () => {
+      const nx = await nextCard();
+      setCurrent(nx ?? null);
+      if (nx) {
+        setShowBack(false);
+        setStartedAt(Date.now());
+      }
+      setSessionDone(!nx && extractHeadRef.current === null);
+    };
+    return (
+      <div className="review-wrap">
+        <div className="review-session">
+          <div className="review-count mono">摘录 · 合并复习</div>
+          <ExtractCardFace
+            key={ex.id}
+            extract={ex}
+            handlers={{
+              onAdvance: () => void readingWorkflow.advance(ex.id).then(after),
+              onPostpone: (days) => void readingWorkflow.postponeDays(ex.id, days).then(after),
+              onPriority: (p) => void readingWorkflow.setPriority(ex.id, p),
+              onGraduate: () => void readingWorkflow.graduate(ex.id).then(after),
+              onEdit: (text) => void readingWorkflow.updateContent(ex.id, text),
+              onJumpToSource:
+                onJumpToDoc && ex.contextRef?.documentId
+                  ? () =>
+                      onJumpToDoc(ex.contextRef!.documentId!, {
+                        anchorText: ex.contextRef!.anchorText || ex.contentMarkdown,
+                        anchorRatio: ex.contextRef!.anchorRatio
+                      })
+                  : undefined,
+              onUndo: () => void undoApi.last().then(after)
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (!current && sessionDone) {
     return (
       <div className="review-wrap">
@@ -431,12 +549,12 @@ export default function ReviewView({
   return (
     <div className="review-wrap">
       <div className="review-session">
-        {/* 页内不再重复导航文字（v12.2）：标题由顶栏高亮项表达；右上角仅剩本轮计数 */}
-        <div className="review-count mono">
-          本轮 {doneCount} 张
-          {/* E-2（审计）：此前初始态既无按钮也无任何操作提示，新用户会以为卡住了。
-              复用既有 review-count 类，不新增 CSS、不写硬编码样式值。 */}
-          {!showBack && current && !previewError ? "　·　点击卡片或按空格显示答案" : ""}
+        {/* 顶栏＝Anki 式三档计数（今日可用口径，见 sessionAPI.counts）；不再有「本轮 N 张」与
+            「点击卡片或按空格显示答案」那行提示（2026-10-01 用户裁定：翻面改按钮、提示并入按钮 hover） */}
+        <div className="review-count mono" data-review-counts>
+          <span>未学习 <b>{counts.new}</b></span>
+          <span>学习中 <b>{counts.learning}</b></span>
+          <span>待复习 <b>{counts.review}</b></span>
         </div>
         {deferredPanel}
 
@@ -464,38 +582,10 @@ export default function ReviewView({
           </div>
         )}
 
-        <CardFace
-          card={current!}
-          showBack={showBack}
-          onReveal={() => setShowBack(true)}
-          onEdit={handleEdit}
-        />
+        {/* 翻面只走底栏按钮（2026-10-01）：卡面不再吃点击（onReveal 不传＝点卡面不翻面） */}
+        <CardFace card={current!} showBack={showBack} onEdit={handleEdit} />
+        {/* 来源/日期是**信息行**（动作都在底栏）：跳转原文/查看原图/撤销评分已搬进底栏（2026-10-01） */}
         <div className="review-meta">
-          {/* v32（M7）：单词卡发音按钮已内嵌卡面右上角（CardFace，正面可点 + stopPropagation 防翻面）；
-              自动发音（settings.app.dictAutoSpeak）在出卡时经下方 effect 触发 */}
-          {/* v22 撤销评分：误评后一键回退（快捷键 Z），标签展示被撤销的评分档位 */}
-          {undoInfo && (
-            <button className="review-jump" onClick={undoLastGrade}>
-              撤销评分{undoInfo.rating ? `（${undoInfo.rating}）` : ""}
-            </button>
-          )}
-          {current!.contextRef?.documentId && onJumpToDoc && current!.contextRef.imageSource !== "library" && (
-            // v35：资源库选图卡（imageSource="library"）隐藏跳转；旧卡无锚点置灰提示，不再跳回开头
-            hasSourceAnchor(current!.contextRef) ? (
-              <button className="review-jump" onClick={handleJumpToSource}>
-                跳转原文
-              </button>
-            ) : (
-              <button className="review-jump" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
-                跳转原文
-              </button>
-            )
-          )}
-          {current!.cardType === "imageOcclusion" && current!.occlusionJson && (
-            <button className="review-jump" onClick={() => setLightboxOpen(true)}>
-              查看原图
-            </button>
-          )}
           {current!.sourceRef?.title ? `来源:${current!.sourceRef.title}` : ""}
           {current!.dateStamp ? ` · ${current!.dateStamp}` : ""}
         </div>
@@ -505,38 +595,98 @@ export default function ReviewView({
             {current!.mnemonic}
           </div>
         )}
-        {showBack && (
-          <>
-            <div className="grade-row">
+        <div className="review-bar" data-review-bar>
+          {!showBack ? (
+            <button
+              className="bar-btn primary grow"
+              data-reveal
+              disabled={saveError || !current}
+              title={`显示答案（快捷键：${hint || "未绑定"}，可在设置里改）`}
+              onClick={() => setShowBack(true)}
+            >
+              显示答案{hint ? <span className="kbd mono">{hint}</span> : null}
+            </button>
+          ) : (
+            <div className="grade-row grade-grid">
               {(previews?.items ?? safePreviewItems(current!.fsrs)).map((p) => (
-                <button key={p.rating} className={`btn grade-${p.rating.toLowerCase()}`} disabled={saveError} onClick={() => grade(p.rating)}>
+                <button key={p.rating} className={`grade grade-${p.rating.toLowerCase()}`} disabled={saveError} onClick={() => grade(p.rating)}>
                   {p.rating}
                   <span className="grade-due mono">{p.dueText}</span>
                 </button>
               ))}
             </div>
-            <div className="review-tools">
-              {/* v30（D29）：以当前卡为基准生成易混对比卡三件套 */}
-              <button className="btn btn-outline btn-sm" onClick={() => setContrastOpen(true)}>对比卡</button>
-              <button className="btn btn-outline btn-sm" onClick={markAndSuspend}>标记并暂停</button>
-              <button className="btn btn-outline btn-sm" onClick={skip}>跳过</button>
-              <button className="btn btn-outline btn-sm review-delete" onClick={handleDelete}>删除</button>
-            </div>
-          </>
-        )}
-        {contrastOpen && current && (
-          <ContrastCardModal card={current} onClose={() => setContrastOpen(false)} />
-        )}
-        {lightboxOpen && current?.occlusionJson && (
-          <ImageLightbox
-            assetPath={current.occlusionJson.assetPath}
-            rects={current.occlusionJson.rects}
-            shapes={current.occlusionJson.shapes}
-            regionScope={current.occlusionJson.regionScope}
-            cardOrd={current.cardOrd}
-            onClose={() => setLightboxOpen(false)}
-          />
-        )}
+          )}
+          <span className="review-bar-side">
+            {current!.contextRef?.documentId && onJumpToDoc && current!.contextRef.imageSource !== "library" && (
+              hasSourceAnchor(current!.contextRef) ? (
+                <button className="bar-btn ghost" onClick={handleJumpToSource} title="跳转原文（不写入阅读进度）">
+                  跳转原文
+                </button>
+              ) : (
+                <button className="bar-btn ghost" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
+                  跳转原文
+                </button>
+              )
+            )}
+            {current!.cardType === "imageOcclusion" && current!.occlusionJson && (
+              <button className="bar-btn ghost" onClick={() => setLightboxOpen(true)}>
+                查看原图
+              </button>
+            )}
+            <span className="bar-more" data-menu ref={barMoreRef}>
+              <button className="bar-btn ghost" data-toggle aria-expanded={barMoreOpen} onClick={() => setBarMoreOpen((v) => !v)}>
+                更多<span className="caret">▲</span>
+              </button>
+              {barMoreOpen && (
+                <div className="bar-pop" data-pop>
+                  {undoInfo && (
+                    <button
+                      onClick={() => {
+                        setBarMoreOpen(false);
+                        undoLastGrade();
+                      }}
+                    >
+                      撤销评分{undoInfo.rating ? `（${undoInfo.rating}）` : ""}<span className="k mono">Z</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setBarMoreOpen(false);
+                      setContrastOpen(true);
+                    }}
+                  >
+                    对比卡
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBarMoreOpen(false);
+                      markAndSuspend();
+                    }}
+                  >
+                    标记并暂停<span className="k mono">Q</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBarMoreOpen(false);
+                      skip();
+                    }}
+                  >
+                    跳过<span className="k mono">W</span>
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      setBarMoreOpen(false);
+                      handleDelete();
+                    }}
+                  >
+                    删除<span className="k mono">D</span>
+                  </button>
+                </div>
+              )}
+            </span>
+          </span>
+        </div>
       </div>
     </div>
   );

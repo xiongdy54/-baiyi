@@ -1,0 +1,895 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>定高坞 · 复习页 5 版 + 摘录页 5 版（未动项目代码）</title>
+<!--
+  交付性质：设计样张。**src/ 与 electron/ 一行未改**；本文件不进构建、不被任何源码引用。
+
+  本轮命题（用户 2026-09-25）：摘录页与复习页**都改成「定高坞」**（顶栏 / 计数行 / 正文区 1fr 内滚 / 动作坞钉底），
+  各做 5 版看效果。
+
+  两页的争点不同，所以两组各切各的轴：
+    复习页 R1–R5 ＝ **坞在「正面 / 背面」两态之间怎么处理**（翻面时评分区从无到有，是现状最大的位移源）。
+    摘录页 E1–E5 ＝ **坞内动作档 + 分区手段**（摘录页只有一态，没有两态问题；但摘录动作天然比复习少一档，
+                    于是产生一个新问题：跨页切换时坞顶会不会跳——本表用「与 R1 坞顶差」这一列把它量出来）。
+
+  硬判据（全部由页面脚本现场量，写死值不出现）：
+    Δy(坞顶) ＝ 状态变化后坞顶的位移。复习页＝正面→背面；摘录页＝短正文→长正文。定高坞的立论就是它必须为 0。
+    Δy(正文顶) ＝ 阅读起点是否漂移。
+    与 R1 坞顶差 ＝ 跨页切换（复习 ↔ 摘录）时动作区跳多少。
+  对照组：rv0 / xv0 ＝ 两页现状原样复刻，它们的 Δy 必须**不为 0**，否则量测空转、整表作废。
+-->
+<style>
+/* ================= TOKEN-BEGIN（逐条抄 src/theme.css:7-124，不删减） ================= */
+:root{
+  --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+  --text-primary:var(--ink); --text-secondary:#525252; --text-helper:var(--grey-3); --text-placeholder:#8a8a8a;
+  --border-subtle:#e0e0e0; --border-strong:#a3a3a3;
+  --accent:#002fa7; --accent-on:#ffffff;
+  --accent-soft:color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #000000);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #000000);
+  --success:#1a7f37; --warning:#9a6700; --error:#b42318;
+  --error-on:#ffffff; --warning-on:#ffffff;
+  --error-soft:color-mix(in srgb, var(--error) 10%, transparent);
+  --error-hover:color-mix(in srgb, var(--error) 88%, #000000);
+  --error-pressed:color-mix(in srgb, var(--error) 78%, #000000);
+  --overlay-ink:#0a0a0a; --overlay-text:#f5f5f2; --overlay-helper:#a3a3a3;
+  --font-sans:"Inter","Helvetica Neue","Helvetica","Arial","Segoe UI Variable","Segoe UI",system-ui,
+    "PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --font-mono:"JetBrains Mono","IBM Plex Mono","SF Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+  --fs-display:44px; --fs-title-l:26px; --fs-title-s:18px; --fs-body:14px; --fs-secondary:13px; --fs-meta:12px;
+  --lh-prose:1.7;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px; --sp-12:48px; --sp-16:64px;
+  --z-dropdown:100; --z-sticky:200; --z-drawer:300; --z-modal:400; --z-toast:500;
+  --shadow-float:0 8px 24px rgba(10,10,10,0.12);
+  --shadow-panel:0 8px 24px rgba(10,10,10,0.12);
+  --radius:0; --radius-panel:0; --radius-pill:0;
+  /* 内联编辑器的描边：默认透明＝当前默认皮肤（瑞士风）的视觉处理；将来皮肤把它改成实色即显形。
+     这是新增 Token，登记位置见交付说明（§5.5 皮肤扩展点）。 */
+  --field-line:transparent;
+  --ease:cubic-bezier(0.2,0,0.38,0.9); --dur:120ms;
+}
+body{
+  --accent-soft:color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #000000);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #000000);
+  --text-primary:var(--ink); --text-helper:var(--grey-3);
+}
+body.theme-dark{
+  --paper:#101010; --grey-1:#1c1c1a; --grey-2:#33332f; --grey-3:#8a8a86; --ink:#f5f5f2;
+  --text-primary:var(--ink); --text-secondary:#b5b5b0; --text-helper:var(--grey-3); --text-placeholder:#7a7a76;
+  --border-subtle:#2a2a27; --border-strong:#4a4a46;
+  --accent:#5b7fe8; --accent-on:#0a0a0a;
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #ffffff);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #ffffff);
+  --success:#3fb950; --warning:#d29922; --error:#f85149;
+  --error-on:#0a0a0a; --warning-on:#0a0a0a;
+  --error-hover:color-mix(in srgb, var(--error) 88%, #ffffff);
+  --error-pressed:color-mix(in srgb, var(--error) 78%, #ffffff);
+  --shadow-float:0 8px 24px rgba(0,0,0,0.5);
+  --shadow-panel:0 8px 24px rgba(0,0,0,0.5);
+}
+/* 派生档与被依赖的 Token 必须声明在同一层（§5.1 Token 求值层纪律）：
+   --border-subtle 在 body.theme-dark 上被改写，所以 --field-line 的显形值也必须挂在 body 上，
+   否则深色档会拿到浅色的 --border-subtle（写成 :root 内联 var() 就会踩这个坑）。 */
+body.line-ring, body.line-border{--field-line:var(--border-subtle)}
+/* ================= TOKEN-END ================= */
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--grey-1);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--fs-body);
+  line-height:1.6;-webkit-font-smoothing:antialiased;accent-color:var(--accent)}
+button{font-family:inherit}
+.mono{font-family:var(--font-mono);font-feature-settings:"tnum"}
+
+/* ---------- 样张文档外壳 ---------- */
+.doc{padding:var(--sp-8) var(--sp-2) var(--sp-16)}
+.doc-inner{max-width:1160px;margin:0 auto}
+.doc-h1{font-size:var(--fs-display);font-weight:200;line-height:1.02;letter-spacing:-.03em;margin:0 0 var(--sp-4)}
+.doc-h1 b{font-weight:600}
+.doc-lead{max-width:78ch;font-size:var(--fs-secondary);line-height:var(--lh-prose);color:var(--text-secondary);margin:0 0 var(--sp-4)}
+.doc-h2{font-size:var(--fs-secondary);font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-helper);margin:var(--sp-12) 0 var(--sp-3);padding-top:var(--sp-4);border-top:1px solid var(--border-subtle)}
+.doc-note{max-width:104ch;font-size:var(--fs-secondary);line-height:1.65;color:var(--text-secondary);margin:0 0 var(--sp-4)}
+.doc-note code,.mono-inline{font-family:var(--font-mono);font-size:var(--fs-meta);background:var(--grey-1);
+  padding:calc(var(--sp-1) / 2) var(--sp-1);border:1px solid var(--border-subtle)}
+.ctrl{display:flex;flex-wrap:wrap;gap:var(--sp-6);align-items:flex-end;padding:var(--sp-4);
+  background:var(--paper);border:1px solid var(--border-subtle);margin-bottom:var(--sp-4)}
+.ctrl-group{display:flex;flex-direction:column;gap:var(--sp-2)}
+.ctrl-label{font-size:var(--fs-meta);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-helper)}
+.ctrl-row{display:flex}
+.ctrl-row button{height:32px;padding:0 var(--sp-3);background:var(--paper);border:1px solid var(--border-subtle);
+  border-left-width:0;color:var(--text-secondary);font-size:var(--fs-secondary);font-weight:500;cursor:pointer;
+  transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+.ctrl-row button:first-child{border-left-width:1px}
+.ctrl-row button:hover{background:var(--grey-1);color:var(--text-primary)}
+.ctrl-row button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.flash-line{font-size:var(--fs-meta);color:var(--accent);font-weight:600;min-height:18px;margin:0 0 var(--sp-4)}
+table.grid{width:100%;border-collapse:collapse;font-size:var(--fs-meta);background:var(--paper)}
+table.grid th,table.grid td{border-bottom:1px solid var(--border-subtle);padding:var(--sp-2) var(--sp-3);text-align:left;vertical-align:top}
+table.grid th{font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-helper);background:var(--grey-1)}
+table.grid td.num{text-align:right;font-family:var(--font-mono);font-feature-settings:"tnum";white-space:nowrap}
+table.grid td.good{color:var(--success);font-weight:600}
+table.grid td.bad{color:var(--error);font-weight:600}
+table.grid td.warn{color:var(--warning);font-weight:600}
+table.grid th.rowhead,table.grid td.rowhead{font-weight:600;color:var(--text-primary);white-space:nowrap}
+.tbl-wrap{border:1px solid var(--border-subtle);overflow:auto}
+ul.tight{margin:0;padding-left:var(--sp-4);font-size:var(--fs-secondary);line-height:1.65;color:var(--text-secondary)}
+ul.tight li{margin-bottom:var(--sp-2)}
+
+/* ---------- 仿窗口舞台（定宽：viewport=0×0 时 max-width:100% 会把版心压成 0，量测会全表作废） ---------- */
+.stage-wrap{margin-bottom:var(--sp-8);overflow-x:auto}
+.stage-head{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:baseline;margin-bottom:var(--sp-2)}
+.stage-name{font-size:var(--fs-title-s);font-weight:500;letter-spacing:-.01em}
+.stage-tag{font-size:var(--fs-meta);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-helper)}
+.stage-tag.control{border:1px solid var(--error);color:var(--error);padding:0 var(--sp-2)}
+.stage-diff{font-size:var(--fs-secondary);color:var(--text-secondary);max-width:104ch;margin:0 0 var(--sp-3);line-height:1.6}
+.frame{--fw:1100px;--fh:750px;container-type:inline-size;
+  width:var(--fw);min-width:var(--fw);max-width:var(--fw);height:var(--fh);display:flex;flex-direction:column;
+  background:var(--paper);border:1px solid var(--border-subtle);overflow:hidden;position:relative}
+.topbar{height:var(--sp-12);display:flex;align-items:center;justify-content:space-between;
+  padding:0 var(--sp-2) 0 var(--sp-4);background:var(--paper);border-bottom:1px solid var(--border-subtle);flex:none}
+.topbar-nav{display:flex;align-items:center;gap:var(--sp-1)}
+.nav-item{height:var(--sp-8);padding:0 var(--sp-3);background:transparent;border:none;cursor:pointer;
+  font-family:inherit;font-size:var(--fs-secondary);font-weight:500;color:var(--text-secondary)}
+.nav-item:hover{background:var(--grey-1);color:var(--text-primary)}
+.nav-item.active{color:var(--accent);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+.topbar-title{margin-left:var(--sp-4);padding-left:var(--sp-4);border-left:1px solid var(--grey-2);
+  font-size:var(--fs-secondary);color:var(--text-helper)}
+.topbar-right{display:flex;gap:var(--sp-1);align-items:center}
+.icon-btn{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;
+  background:transparent;border:none;color:var(--text-secondary);cursor:pointer}
+.icon-btn:hover{background:var(--grey-1);color:var(--text-primary)}
+.app-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+
+/* ---------- 复习页 / 摘录页既有规则（照抄 theme.css，供现状对照组与对齐读数） ---------- */
+.review-wrap{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;align-items:stretch;
+  padding:var(--sp-12) var(--sp-16) var(--sp-8)}
+.review-session{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column}
+.review-count{align-self:flex-end;font-size:var(--fs-meta);font-weight:500;color:var(--text-helper);
+  font-variant-numeric:tabular-nums;margin-bottom:var(--sp-6)}
+.review-face{position:relative;width:100%;display:flex;flex-direction:column;gap:var(--sp-6)}
+.review-prefix{display:block;font-size:var(--fs-meta);font-weight:600;letter-spacing:.04em;color:var(--text-helper);margin-bottom:var(--sp-2)}
+.review-front{font-size:var(--fs-title-l);font-weight:400;line-height:1.5;letter-spacing:-.01em;color:var(--text-primary);white-space:pre-wrap}
+.review-back{font-size:var(--fs-title-l);font-weight:400;line-height:1.5;letter-spacing:-.01em;color:var(--text-primary);
+  border-top:1px solid var(--grey-2);padding-top:var(--sp-6)}
+.review-editable{cursor:text;white-space:pre-wrap}
+.review-editable:focus{outline:none}
+.review-editable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* ---------- 描边机制（两套都做，按版式选） ----------
+   A 环形：box-shadow 内描边，**零布局影响**，且与 :focus-visible 的焦点环互不抢占
+     （不能用 outline 做这件事：`:focus-visible` 的焦点环也是 outline，同一属性会被覆盖，
+      实测过特异性：把皮肤框写在 outline 上会让键盘焦点环消失，违反「不得移除焦点环」）。
+      先例：顶栏当前项 .nav-item.active 就是这么用 box-shadow inset 当 2px 底线的。
+   B 边框：常驻 1px border（默认透明也占位），皮肤只换颜色 → 显形/隐藏零位移；代价是正文宽少 2px。
+   两套的 --field-line 默认都是 transparent，即当前默认皮肤的外观不变。 */
+body.line-ring .review-editable{box-shadow:inset 0 0 0 1px var(--field-line)}
+body.line-border .review-editable{border:1px solid var(--field-line)}
+.review-meta{font-size:var(--fs-meta);font-weight:500;color:var(--text-helper);font-variant-numeric:tabular-nums}
+.review-jump{background:transparent;border:none;cursor:pointer;font-family:inherit;font-size:var(--fs-meta);
+  font-weight:500;color:var(--accent);padding:0;margin-right:var(--sp-2)}
+.review-jump:hover{text-decoration:underline;text-underline-offset:3px}
+.grade-row{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-4);margin-top:var(--sp-12)}
+.grade-row .btn{flex-direction:column;height:auto;min-height:56px;padding:var(--sp-2) var(--sp-4);gap:var(--sp-1);align-items:center;justify-content:center}
+.grade-due{font-size:var(--fs-meta);font-weight:600;color:var(--text-helper);font-variant-numeric:tabular-nums}
+.bar{position:relative}
+.bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+.bar-a::before{background:var(--error)} .bar-b::before{background:var(--warning)}
+.bar-c::before{background:var(--accent)} .bar-d::before{background:var(--success)}
+.btn-again,.btn-hard,.btn-good,.btn-easy{background:var(--grey-1);color:var(--text-primary);position:relative}
+.btn-again::before,.btn-hard::before,.btn-good::before,.btn-easy::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+.btn-again::before{background:var(--error)} .btn-hard::before{background:var(--warning)}
+.btn-good::before{background:var(--accent)} .btn-easy::before{background:var(--success)}
+.btn-again:hover,.btn-hard:hover,.btn-good:hover,.btn-easy:hover{background:var(--grey-2)}
+.review-tools{display:flex;gap:var(--sp-3);margin-top:var(--sp-4);flex-wrap:wrap}
+.btn{height:40px;padding:0 var(--sp-4);display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);
+  font-size:var(--fs-body);font-weight:500;border:1px solid transparent;cursor:pointer;border-radius:var(--radius);
+  transition:background-color var(--dur) var(--ease),border-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+.btn-sm{height:32px;padding:0 var(--sp-3);font-size:var(--fs-secondary)}
+.btn-secondary{background:var(--grey-1);color:var(--text-primary)}
+.btn-secondary:hover{background:var(--grey-2)}
+.btn-outline{background:transparent;border-color:var(--border-subtle);color:var(--text-primary)}
+.btn-outline:hover{background:var(--grey-1)}
+.btn:disabled{color:var(--grey-2);border-color:var(--grey-2);background:transparent;cursor:not-allowed}
+.btn:focus-visible,.xa:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input.num{height:32px;width:64px;padding:0 var(--sp-2);border:1px solid var(--border-subtle);background:var(--paper);
+  color:var(--text-primary);font-family:var(--font-mono);font-size:var(--fs-meta);border-radius:var(--radius)}
+.seg{display:inline-flex}
+.seg button{height:32px;padding:0 var(--sp-3);background:var(--paper);border:1px solid var(--border-subtle);
+  border-left-width:0;color:var(--text-secondary);font-size:var(--fs-meta);font-weight:600;cursor:pointer}
+.seg button:first-child{border-left-width:1px}
+.seg button:hover{background:var(--grey-1);color:var(--text-primary)}
+.seg button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.badge-experimental{border:1px solid var(--accent);color:var(--accent);padding:0 var(--sp-2);font-size:var(--fs-meta);font-weight:600}
+.extract-page{flex:1;min-height:0;overflow-y:auto;padding:var(--sp-12) var(--sp-16) var(--sp-8);display:flex;flex-direction:column}
+.extract-page-head{width:100%;max-width:720px;margin:0 auto var(--sp-4);display:flex;align-items:center;gap:var(--sp-4);
+  font-size:var(--fs-meta);color:var(--text-helper)}
+.extract-page-head .review-count{align-self:auto}
+.extract-page-header{color:var(--text-primary)}
+.extract-page-hint{margin-left:auto}
+.extract-face{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:var(--sp-4)}
+.extract-face-meta{display:flex;justify-content:space-between;gap:var(--sp-4);font-size:var(--fs-meta);color:var(--text-helper);
+  border-bottom:1px solid var(--border-subtle);padding-bottom:var(--sp-2)}
+.extract-face-body{font-size:var(--fs-body);line-height:1.8;color:var(--text-primary);min-height:120px}
+.extract-face-derived{font-size:var(--fs-meta);color:var(--text-helper)}
+.extract-face-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;border-top:1px solid var(--border-subtle);padding-top:var(--sp-4)}
+.extract-postpone{display:inline-flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);color:var(--text-helper)}
+
+/* ---------- 定高坞骨架（两页共用同一套 band 结构，这样"统一"是可核对的） ---------- */
+.dk-page{flex:1;min-height:0;display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+.dk-band{min-height:0;display:flex;flex-direction:column}
+.dk-scroll{overflow-y:auto;padding:var(--sp-6) 0}
+/* 表面分区版：只换底色，**不加 padding**——加过 24/16 之后正文左缘从 190 掉到 206、正文顶从 146 掉到 194，
+   等于为了分区把对齐契约丢了。分区由底色 + 坞的 hairline 承担，位置一律不动。 */
+.dk-page.surf .dk-scroll{background:var(--grey-1)}
+.dk-session{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column}
+/* 坞的分界线有两种，且必须真的不一样：
+   默认＝hairline 只走版心宽（挂在 .dk-inner 上，格线在 x=190 与 x=910 收住）；
+   .bleed＝hairline 通栏（挂在 .dk-dock 上，读作"一条带"）。 */
+.dk-dock{background:var(--paper);padding:0 var(--sp-16) var(--sp-6)}
+.dk-inner{width:100%;max-width:720px;margin:0 auto;
+  border-top:1px solid var(--border-subtle);padding-top:var(--sp-3)}
+.dk-dock.bleed{border-top:1px solid var(--border-subtle);padding-top:var(--sp-3)}
+.dk-dock.bleed .dk-inner{border-top:none;padding-top:0}
+/* 坞内的评分网格不再有 margin-top（间距由坞的 padding-top 承担），否则两态高度不等 */
+.dk-inner .grade-row{margin-top:0}
+.dk-inner .review-tools{margin-top:var(--sp-3)}
+/* 两态等高的"空位槽"：正面一颗居中按钮，背面两层内容（56 + 12 + 32 = 100）。
+   min-height 必须写 100 + 12 = 112：.dk-inner 带 padding-top 12 且全局 box-sizing:border-box，
+   写 100 会让背面被内衬挤到 112、正面停在 100 → 实测 Δy(坞) 冒出 −12.8。 */
+.dk-slot{display:flex;flex-direction:column;min-height:112px;justify-content:center}
+.dk-slot.front{align-items:center}
+
+/* ---------- 动作区构件（与上一轮样张同一套语言） ---------- */
+.meta-line{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:baseline}
+.meta-sep{color:var(--grey-2)}
+.act-row{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center}
+.act-row.flush{gap:var(--sp-2)}
+.xa{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;
+  font-size:var(--fs-meta);font-weight:500;color:var(--text-secondary)}
+.xa:hover{color:var(--text-primary);text-decoration:underline;text-underline-offset:3px}
+.xa:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.xa-lead{color:var(--text-primary);font-weight:600}
+.act-key{font-size:var(--fs-meta);font-weight:600;color:var(--text-helper);font-variant-numeric:tabular-nums}
+.act-bar{display:flex;flex-wrap:wrap;gap:var(--sp-4);align-items:center;justify-content:space-between}
+.act-bar .grp{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center}
+.act-block{display:flex;flex-direction:column;gap:var(--sp-2)}
+.act-block .act-row{margin-top:0}
+.act-lab{font-size:var(--fs-meta);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-helper);min-width:56px}
+.x-post{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;margin-top:var(--sp-3);font-size:var(--fs-meta);color:var(--text-helper)}
+.x-post .lab{font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-helper)}
+.derived-row{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:baseline;margin-top:var(--sp-3);
+  font-size:var(--fs-meta);color:var(--text-helper);font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="doc"><div class="doc-inner">
+
+  <h1 class="doc-h1">定高坞 <b>两页各五版</b></h1>
+  <p class="doc-lead">
+    两页统一成四段骨架：<b>顶栏 48 → 计数行 auto → 阅读区 1fr（内部滚动）→ 动作坞 auto（钉底）</b>。
+    复习页五版争的是<b>坞在「正面 / 背面」两态之间怎么处理</b>（现状：评分区翻面才出现，整页被推下去）；
+    摘录页五版争的是<b>坞内动作档与分区手段</b>（摘录只有一态，但动作比复习少一档 → 跨页切换时坞顶会跳多少，本表量出来了）。
+    <b>src/ 与 electron/ 一行未改。</b>
+  </p>
+  <p class="doc-note">
+    阅读提示：仿窗口按应用默认窗口 <b>1100×750</b>（<span class="mono-inline">electron/main.js:1370</span>）1:1 渲染。
+    切「复习卡状态＝正面/背面」可以当场看坞跳不跳；切「当前条目」看摘录页换条目时坞跳不跳。量测表自动重量。
+    单栏全屏看：<span class="mono-inline">?only=r1</span> … <span class="mono-inline">?only=e5</span>。
+  </p>
+
+  <div class="ctrl">
+    <div class="ctrl-group"><span class="ctrl-label">主题</span>
+      <div class="ctrl-row" id="theme-ctrl"><button data-theme="light" class="on">浅色</button><button data-theme="dark">深色</button></div></div>
+    <div class="ctrl-group"><span class="ctrl-label">仿窗口宽</span>
+      <div class="ctrl-row" id="width-ctrl"><button data-w="1100" class="on">1100 默认</button><button data-w="1280">1280</button><button data-w="860">860</button></div></div>
+    <div class="ctrl-group"><span class="ctrl-label">复习卡状态</span>
+      <div class="ctrl-row" id="face-ctrl"><button data-face="front" class="on">正面（未翻面）</button><button data-face="back">背面（已翻面）</button></div></div>
+    <div class="ctrl-group"><span class="ctrl-label">摘录当前条目</span>
+      <div class="ctrl-row" id="item-ctrl"><button data-i="0" class="on">短（28 字）</button><button data-i="1">中（66 字）</button><button data-i="2">长（216 字）</button></div></div>
+    <div class="ctrl-group"><span class="ctrl-label">量测</span>
+      <div class="ctrl-row"><button id="remeasure">重新量测全表</button></div></div>
+    <div class="ctrl-group"><span class="ctrl-label">内联编辑器描边（皮肤显形预览）</span>
+      <div class="ctrl-row" id="line-ctrl">
+        <button data-line="none" class="on">透明（现状）</button>
+        <button data-line="ring">环形显形</button>
+        <button data-line="border">边框显形</button>
+      </div></div>
+  </div>
+  <p class="flash-line" id="doc-flash"></p>
+
+  <h2 class="doc-h2">一 · 复习页 · 现状对照</h2>
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">rv0 · 复习页现状（流式）</span><span class="stage-tag control">对照组</span></div>
+    <p class="stage-diff">照 theme.css:2016-2226 原样：卡面 → 元数据 → 评分网格（<b>仅背面渲染</b>）→ 工具行（仅背面渲染）。翻面时下方凭空长出 100px，整页被推走——这就是定高坞要吃掉的那段位移。</p>
+    <div class="frame" data-frame="rv0"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <h2 class="doc-h2">二 · 复习页 · 定高坞五版</h2>
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">R1 · 等高双态 · 禁用置灰</span><span class="stage-tag">Δy(坞)＝0</span></div>
+    <p class="stage-diff">坞内两层（四档评分 56 + 工具行 32）<b>两态都在场</b>，正面时四档与工具一律 disabled（文字与边框走 --grey-2，符合规范「disabled」态）。翻面时坞顶与坞内每颗按钮的坐标<b>一动不动</b>，肌肉记忆最强。代价：正面时满排灰按钮，视觉上像"坏了"，且禁用态常驻会稀释真正的禁用信号。</p>
+    <div class="frame" data-frame="r1"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">R2 · 等高双态 · 空位居中</span><span class="stage-tag">Δy(坞)＝0</span></div>
+    <p class="stage-diff">坞高锁在同一档（槽 min-height 112px）：正面时坞内只有一颗居中的「显示答案」，背面时换成两层内容。<b>没有禁用态</b>，靠"坞里有没有内容"直接表达当前能不能评分。代价一：正面时坞内左右各空一大块，100px 高的空坞看着浪费；代价二：那颗「显示答案」孤零零居中，权重反而被抬高。实测 Δy(坞)＝<b>−0.8px</b>（不是精确 0：槽写死 112，而背面内容实测 112.4，亚像素差）——落地若要求精确归零，得让正面用"与背面同结构的占位"而不是 min-height。</p>
+    <div class="frame" data-frame="r2"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">R3 · 变高坞 · 阅读起点钉死</span><span class="stage-tag">Δy(正文顶)＝0</span></div>
+    <p class="stage-diff">承认坞会变高（正面一层 40、背面两层 100），但把变高量全部让阅读区吸收，且阅读区<b>顶对齐</b> → 题面永远从同一 y 开始，翻面只是坞往上吃掉 60px 可视高度。代价：坞顶会动 60px（Δy(坞)＝+60），长答案时正文可视区被压缩、需要滚。</p>
+    <div class="frame" data-frame="r3"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">R4 · 评分钉底 · 工具随行</span><span class="stage-tag">Δy(坞)＝0</span></div>
+    <p class="stage-diff">只有四档评分进坞（坞高恒 56），工具行（对比卡/标记并暂停/跳过/删除）留在阅读区里跟着卡面走。坞最矮、留白最多，评分位置恒定。代价：一次翻页里有<b>两个东西在动</b>（卡面高度 + 工具行），Δy(工具) 不为 0；且工具与评分分属两区，"删除"离"评分"隔了一段。</p>
+    <div class="frame" data-frame="r4"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">R5 · 等高双态 · 表面分区</span><span class="stage-tag">Δy(坞)＝0</span></div>
+    <p class="stage-diff">同 R1 的等高策略，但阅读面整体铺 <code>--grey-1</code>、坞保持 <code>--paper</code>，两者之间只用一条 hairline 分界——把"读的地方"和"按的地方"用表面差显式分开。代价：多一种表面（灰底），与 §5.1「克制优于炫技」有轻微张力。底色分界实测<b>浅色 1.09:1、深色 1.11:1</b>（自检表两档各测一次）——
+      两档都只是"勉强分得开"，所以这条分界<b>不足以独立承担</b>，本版仍与坞的 hairline 并存；我原先猜"深色下会看不见"，实测深色反而高 0.02，猜测已作废。
+      本版<b>刻意不给灰底加 padding</b>：加过 24/16 之后正文左缘从 190 掉到 206、正文顶掉 72px——为了分区把对齐契约丢了，得不偿失。分区只由底色与坞的 hairline 承担。</p>
+    <div class="frame" data-frame="r5"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <h2 class="doc-h2">三 · 摘录页 · 现状对照</h2>
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">xv0 · 摘录页现状（流式）</span><span class="stage-tag control">对照组</span></div>
+    <p class="stage-diff">照 theme.css:4381-4441 + ExtractCardFace 原样。含两处真实缺陷：<code>.primary</code> 零规则 → 「下一条」是浏览器默认按钮（圆角、rgb(240,240,240) 底）；头部五要素挤同一横排 → 计数不再独占右上。换条目时动作条位移见量测表。</p>
+    <div class="frame" data-frame="xv0"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <h2 class="doc-h2">四 · 摘录页 · 定高坞五版</h2>
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">E1 · 一行 32px 描边</span><span class="stage-tag">复用复习页既有档</span></div>
+    <p class="stage-diff">六个动作一律 <code>.btn-sm.btn-outline</code>（复习页工具行同档），一行排开，坞高 32。零新构件。代价：坞只有复习页坞高的三分之一，<b>复习 ↔ 摘录来回切时动作区会跳</b>（差值见表）。</p>
+    <div class="frame" data-frame="e1"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">E2 · hairline 左右分栏</span><span class="stage-tag">一档之差表达主次</span></div>
+    <p class="stage-diff">坞内左右分栏：左＝次级文字钮组，右＝唯一 40px 描边「下一条」（不给 accent 填充），主按钮恒在最右。代价：坞高 40，跨页差仍在。</p>
+    <div class="frame" data-frame="e2"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">E3 · 纯文字钮一行</span><span class="stage-tag">最轻</span></div>
+    <p class="stage-diff">六个动作全降为无边框 Meta 文字钮，「·」分隔，主次只靠字重与顺序。整页除正文外无第二块视觉重量。代价：坞高仅 18px，跨页差最大；点击目标小于桌面 32px 档。</p>
+    <div class="frame" data-frame="e3"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">E4 · 两行分组（调度 / 导航）</span><span class="stage-tag">按语义分组</span></div>
+    <p class="stage-diff">坞内两行：调度＝下一条/推迟/优先级/毕业，导航＝撤销/返回阅读，行首小标签。等权只发生在组内。坞高 72，与复习页 R1 的 100 最接近。代价：两行 32px 描边是本页最重的一块。</p>
+    <div class="frame" data-frame="e4"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <div class="stage-wrap"><div class="stage-head"><span class="stage-name">E5 · 动作行 + 派生信息行 + 表面分区</span><span class="stage-tag">凑等高</span></div>
+    <p class="stage-diff">把原本挂在正文下方的派生信息（已制卡 N 张 · 优先级 · 下次推送）<b>下移进坞</b>，与动作行叠成两层，再用 R5 的灰底阅读面分区。意图很直白：<b>让摘录坞长到复习坞那一档</b>，跨页切换不跳。实测只补到 <b>+35.2px</b>（反而不如 E4 的 +28px 近），因为派生行只有 18px 而复习坞第二层是 32px 按钮行——<b>凑高度这件事本身是倒果为因，且凑不准</b>。代价还有一条：坞内混进一行只读信息，"坞＝动作区"的语义被稀释。</p>
+    <div class="frame" data-frame="e5"><div class="topbar"></div><div class="app-body"></div></div></div>
+
+  <h2 class="doc-h2">五 · 实测表（脚本现场量，非人工填写）</h2>
+  <p class="doc-note">
+    量法：每栏 <code>getBoundingClientRect()</code> 减去<b>本栏仿窗口</b>矩形（文档坐标必须归零到仿窗口）。
+    <b>Δy(坞顶)</b>：复习栏＝正面→背面；摘录栏＝短正文→长正文。定高坞的立论就是它必须为 0。
+    <b>Δy(正文顶)</b>：阅读起点漂移量。<b>与 R1 坞顶差</b>：跨页（复习 ↔ 摘录）切换时动作区的跳量，0＝两页坞同位。
+    正向对照：rv0 / xv0 两个对照组的 Δy 必须<b>不为 0</b>；若读出 0，说明量测空转，整表作废。
+  </p>
+  <div class="tbl-wrap"><table class="grid" id="tbl-measure">
+    <thead><tr>
+      <th class="rowhead">栏</th><th>计数行 y</th><th>正文顶 y</th><th>正文底 y</th><th>坞顶 y</th><th>坞高</th>
+      <th>Δy 坞顶</th><th>Δy 正文顶</th><th>Δy 工具行</th><th>版心 x / 宽</th><th>与 R1<br />坞顶差</th><th>最小<br />字号</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="flash-line" id="measure-verdict"></p>
+
+  <h2 class="doc-h2">五之二 · 内联编辑器描边：三机制现场对照</h2>
+  <p class="doc-note">
+    三种机制跑同一栏、同一份数据：<b>透明</b>（现状＝默认皮肤，`--field-line: transparent`）、
+    <b>环形显形</b>（`box-shadow: inset 0 0 0 1px var(--field-line)`）、<b>边框显形</b>（`border: 1px solid var(--field-line)`）。
+    「行数」= 正文行盒数（`getClientRects().length`）——它比宽度更能说明问题：**宽度只差 2px，但换行可能整行挪位**。
+    判据：环形显形的宽度与行数必须与「透明」逐位相同（零布局影响）；边框显形会少 2px，行数是否变化当场看。
+    注意环形用 `box-shadow` 而不是 `outline`：`:focus-visible` 的键盘焦点环也是 outline，
+    把皮肤框写在 outline 上会按特异性把焦点环挤掉（实测过），而规范明令「不得移除焦点环且无替代」。
+  </p>
+  <div class="tbl-wrap"><table class="grid" id="tbl-line">
+    <thead><tr><th class="rowhead">机制</th>
+      <th>复习栏 正文宽</th><th>复习栏 行数</th><th>摘录栏 正文宽</th><th>摘录栏 行数</th>
+      <th>与「透明」的差</th><th>皮肤可显形</th><th>键盘焦点环</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h2 class="doc-h2">六 · 版式矩阵</h2>
+  <div class="tbl-wrap"><table class="grid" id="tbl-matrix">
+    <thead><tr><th class="rowhead">轴</th><th>rv0 现状</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>R5</th>
+      <th>xv0 现状</th><th>E1</th><th>E2</th><th>E3</th><th>E4</th><th>E5</th></tr></thead>
+    <tbody>
+      <tr><td class="rowhead">骨架</td><td>流式</td><td colspan="4">四段 grid（auto 1fr auto）</td><td>四段 + 灰底面</td>
+        <td>流式</td><td colspan="4">四段 grid（auto 1fr auto）</td><td>四段 + 灰底面</td></tr>
+      <tr><td class="rowhead">坞内内容</td><td>评分+工具<br />（仅背面）</td><td>评分+工具<br />（常驻，正面禁用）</td><td>正面一颗钮<br />背面两层</td><td>正面一层<br />背面两层</td><td>仅评分层</td><td>同 R1</td>
+        <td>7 钮+快捷行<br />（UA 按钮）</td><td>6 钮 32px</td><td>左钮组/右 40px</td><td>6 文字钮</td><td>调度 4 + 导航 2</td><td>动作行 + 派生信息行</td></tr>
+      <tr><td class="rowhead">Δy(坞顶) 立论</td><td colspan="11">不在本表填数——一律看第五节量测表的「Δy 坞顶 / 正文顶 / 工具行」三列（本表任何写死的数字都可能与实测不一致，那就是假账）</td></tr>
+      <tr><td class="rowhead">阅读起点</td><td>固定</td><td>固定</td><td>固定</td><td>固定（唯一卖点）</td><td>固定</td><td>固定</td>
+        <td>漂移</td><td>固定</td><td>固定</td><td>固定</td><td>固定</td><td>固定</td></tr>
+      <tr><td class="rowhead">accent 填充</td><td>无（.primary 失效）</td><td colspan="4">一律无（推进动作不给填充色）</td><td>无</td>
+        <td>无</td><td colspan="4">一律无</td><td>无</td></tr>
+      <tr><td class="rowhead">分区手段</td><td>hairline</td><td>hairline</td><td>hairline</td><td>hairline</td><td>hairline</td><td>hairline + 表面差</td>
+        <td>hairline ×2</td><td>hairline</td><td>hairline</td><td>hairline</td><td>hairline</td><td>hairline + 表面差</td></tr>
+      <tr><td class="rowhead">主要代价</td><td>—</td><td>正面满排灰钮像坏了</td><td>正面坞空 100px</td><td>坞会动、可视区被压</td><td>工具行仍会动</td><td>深色下分区近失效</td>
+        <td>—</td><td>跨页坞顶跳</td><td>跨页坞顶跳</td><td>跨页跳最大 + 目标 &lt;32px</td><td>本页最重一块</td><td>凑高度＝倒果为因</td></tr>
+      <tr><td class="rowhead">新增 CSS</td><td>—</td><td>6 条</td><td>8 条</td><td>7 条</td><td>7 条</td><td>9 条</td>
+        <td>—</td><td>6 条</td><td>9 条</td><td>7 条</td><td>8 条</td><td>11 条</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2 class="doc-h2">七 · 规范自检</h2>
+  <div class="tbl-wrap"><table class="grid" id="tbl-audit">
+    <thead><tr><th class="rowhead">检查项</th><th>判据</th><th>结果</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h2 class="doc-h2">八 · 这轮看图/量图时发现的三件事</h2>
+  <ul class="tight">
+    <li><b>「定高坞」在两页上的收益不对等。</b>复习页收益最大——现状翻面时长出 100px（实测 rv0 Δy(坞)＝新增一整层），一天要翻几百次；摘录页收益小得多——它只有一态，换条目的位移来自正文长度（xv0 实测 +56px），而正文长度本来就该被读到，钉底只是把位移从"坞上移"换成"正文区内部滚"。也就是说：<b>摘录页上坞的真正理由不是消除位移，而是让两页的动作区同位</b>——而这件事只有坞等高才成立，见下一条。</li>
+    <li><b>跨页等高是个新约束，且摘录页天然矮一档。</b>复习坞＝四档 56 + gap 12 + 工具 32 ＝ 137（含坞的上下 padding）；摘录页六个动作一行只有 69。量测表「与 R1 坞顶差」那一列就是这笔账（正数＝摘录坞顶比复习低多少）：<b>E1 +68 · E2 +60 · E3 +77.6 · E4 +28 · E5 +34.8</b>。
+      真要"复习↔摘录切换时手不动"，只有三条路：给复习页减一层（把工具行挪出坞＝R4，坞降到 93、差 +44，且工具行自己会动）、
+      给摘录页加一层（E4 两行分组最接近，+28；E5 塞派生信息反而更远，+35.2）、或接受跳量。
+      <b>这是本轮唯一需要你先裁定的事</b>，其余各版的取舍都能各看各的。</li>
+    <li><b>禁用态常驻有代价。</b>R1 的正面满排 disabled 按钮最"稳"，但规范里 disabled 是"这个控件此刻不可用"的信号；如果每次正面都满排灰，等真正需要禁用（例如 persist 失败锁分）时就没有对比度可用了。R2 用"坞里空着"表达同一件事，把 disabled 留给真异常——代价是 100px 的空坞。</li>
+  </ul>
+
+  <h2 class="doc-h2">九 · 若要落地，属于哪一级变更</h2>
+  <p class="doc-note">
+    定高坞改的是<b>布局骨架</b>，不是配色：两页都要动 <code>.review-wrap</code> / <code>.extract-page</code> 的 grid 定义，
+    并新增一条跨页契约「坞等高」。按仓库口径需先 bump 指南 + 登记决策号（D61 起），给 §5.3 增「定高坞」一节、§6.8 增摘录页排版一节，
+    并同步 <code>tests/review.gui.mjs</code> 与 <code>tests/extract.gui.mjs</code> 里按元素定位的断言（坞钉底后，"评分按钮在卡面下方 N px"这类判据全部要改）。
+    连带要一起处理的既有事实两条：① <code>.primary</code> 在 theme.css 零规则（全仓 <code>className="primary"</code> 都要普查）；
+    ② <code>.review-face{min-height:200px}</code> 在只有一段正文时会空托 119.8px——本样张已按落地口径置 0。
+  </p>
+
+</div></div>
+
+<script>
+/* ================= 数据 ================= */
+const DOC1="认知负荷与学习", DOC2="记忆的边界";
+const EX=[
+  { id:"x1", doc:DOC1, depth:2, status:"在读", pri:30, next:"16 天后推送", cards:2,
+    body:"提取练习的收益大于重复阅读，但两者常被学习者的主观流畅感颠倒。",
+    back:"间隔效应：保持时间 ∝ 间隔长度，而非重复次数。" },
+  { id:"x2", doc:DOC1, depth:1, status:"待处理", pri:50, next:"现已到期", cards:0,
+    body:"内在负荷由材料本身的结构决定，外在负荷才是设计要削减的对象——把两者混为一谈，会让「降低难度」变成「删掉内容」。",
+    back:"削减外在负荷不等于降低难度：去掉装饰、去掉来回对照，材料与目标的距离不变。" },
+  { id:"x3", doc:DOC2, depth:3, status:"在读", pri:70, next:"3 天后推送", cards:5,
+    body:"间隔效应的边界在于：间隔长度应与期望保持时间同阶，而不是与学习量同阶。\n\n一周后要记住，间隔取一天；一年后要记住，间隔取一周。用「今天多学几遍」去换「明年还记得」，换来的只是重复阅读带来的流畅错觉——它在学习者自己的判断里像掌握，在保持曲线里不是。\n\n这也就解释了为什么把复习排到考前集中进行，成绩看似没有变差：变差的是两个月后的留存率，而那恰好是没有任何人测量的时段。",
+    back:"同阶，不是等长：保持一年 ↔ 间隔一周；保持一周 ↔ 间隔一天。" }
+];
+let cur=0, face="front";
+const esc=s=>String(s).replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+const e=()=>EX[cur];
+let postOpen={};
+
+/* ================= 共用片段 ================= */
+function topbar(active){
+  return `<nav class="topbar-nav">${["书架","摘录","复习","卡片","日记","数据"].map(n=>
+      `<button class="nav-item${n===active?" active":""}">${n}</button>`).join("")}</nav>`
+    + `<span class="topbar-title">${active==="摘录"?"摘录 · 连续处理":"复习 · 连续复习"}</span>`
+    + `<div class="topbar-right"><button class="icon-btn" title="设置">⚙</button></div>`;
+}
+function countLine(key,txt){
+  return `<div class="review-count mono" data-el="count">${txt}<span class="x-flash mono" data-flash="${key}"></span></div>`;
+}
+const ACTS=[
+  {k:"next",t:"下一条",key:"空格"},{k:"postpone-toggle",t:"推迟",key:"P"},
+  {k:"pri-toggle",t:"优先级",key:"1–5"},{k:"graduate",t:"毕业",key:"G"},
+  {k:"undo",t:"撤销",key:"Z"},{k:"exit",t:"返回阅读",key:"Esc"}
+];
+function xMetaLine(withDerived){
+  const seg=`<div class="review-meta meta-line">`
+    + `<button class="review-jump" data-act="jump">跳转原文</button><span class="meta-sep">·</span>`
+    + `<button class="review-jump" data-act="open">打开摘录</button><span class="meta-sep">·</span>`
+    + `<span>${e().status}</span><span class="meta-sep">·</span><span>优先级 ${e().pri}</span><span class="meta-sep">·</span><span>${e().next}</span>`
+    + `<span class="badge-experimental">实验引擎</span></div>`;
+  return withDerived ? "" : seg;
+}
+function derivedRow(){
+  return `<div class="derived-row" data-el="derived"><span>已就此${e().cards>0?`制卡 ${e().cards} 张`:"未制卡"}</span>`
+    + `<span class="meta-sep">·</span><span>${e().status}</span><span class="meta-sep">·</span>`
+    + `<span>优先级 ${e().pri}</span><span class="meta-sep">·</span><span>${e().next}</span>`
+    + `<span class="badge-experimental">实验引擎</span></div>`;
+}
+function postponeRow(key){
+  return `<div class="x-post"><span class="lab">推迟到</span><span class="seg">${DAYS.map(d=>
+      `<button data-act="postpone" data-days="${d}">${d} 天</button>`).join("")}</span>`
+    + `<input class="num" type="number" min="1" value="7" aria-label="推迟天数" /><span class="mono">天后</span>`
+    + `<button class="btn btn-sm btn-secondary" data-act="postpone-confirm">确认</button>`
+    + `<button class="btn btn-sm btn-outline" data-act="postpone-close">收起</button></div>`;
+}
+const DAYS=[1,3,7,30];
+function expRow(key){ return postOpen[key]?postponeRow(key):""; }
+function xBody(){ return `<div class="review-front"><span class="review-prefix mono">摘录 · 来自《${esc(e().doc)}》 · 第${e().depth}层</span>`
+  + `<div class="review-editable" contenteditable="true" spellcheck="false" data-el="body">${esc(e().body)}</div></div>`; }
+function rCard(){
+  return `<div class="review-face"><div class="review-front"><span class="review-prefix mono">来自《${esc(e().doc)}》</span>`
+    + `<div class="review-editable" contenteditable="false" data-el="body">${esc(e().body)}</div></div>`
+    + (face==="back"?`<div class="review-back">${esc(e().back)}</div>`:"")
+    + `</div>`;
+}
+function gradeRow(dis){
+  const d=dis?" disabled":"";
+  return `<div class="grade-row">`
+    + `<button class="btn btn-again"${d}>Again<span class="grade-due mono">10 min</span></button>`
+    + `<button class="btn btn-hard"${d}>Hard<span class="grade-due mono">4 d</span></button>`
+    + `<button class="btn btn-good"${d} data-el="primary">Good<span class="grade-due mono">16 d</span></button>`
+    + `<button class="btn btn-easy"${d}>Easy<span class="grade-due mono">42 d</span></button></div>`;
+}
+function toolsRow(dis){
+  const d=dis?" disabled":"";
+  return `<div class="review-tools">`
+    + `<button class="btn btn-sm btn-outline"${d}>对比卡</button>`
+    + `<button class="btn btn-sm btn-outline"${d}>标记并暂停</button>`
+    + `<button class="btn btn-sm btn-outline"${d}>跳过</button>`
+    + `<button class="btn btn-sm btn-outline"${d}>删除</button></div>`;
+}
+/* 四段骨架的公共外壳：计数行与阅读区各自套一层 720 版心（不套则计数右缘基线落到整窗，量测必判无效） */
+function dkTop(key,page){
+  return `<div class="dk-band"><div class="dk-session" data-el="session">${countWrap(key,page)}</div></div>`;
+}
+function dkMid(inner){
+  return `<div class="dk-band dk-scroll"><div class="dk-session" data-el="session">${inner}</div></div>`;
+}
+function dkDock(inner){
+  return `<div class="dk-band"><div class="dk-dock" data-el="dock"><div class="dk-inner">${inner}</div></div></div>`;
+}
+/* 摘录坞内动作档 */
+function actsRow(kind){
+  if(kind==="text") return `<div class="act-row flush">${ACTS.map((a,i)=>
+      `${i?'<span class="meta-sep">·</span>':""}<button class="xa${i===0?" xa-lead":""}"${i===0?' data-el="primary"':""} data-act="${a.k}">${a.t}</button>`).join("")}</div>`;
+  if(kind==="bar") return `<div class="act-bar"><span class="grp">${ACTS.slice(1).map(a=>
+      `<button class="xa" data-act="${a.k}">${a.t}</button>`).join('<span class="meta-sep">·</span>')}</span>`
+    + `<span class="grp"><span class="act-key mono">空格＝下一条</span><button class="btn btn-outline" data-el="primary" data-act="next">下一条</button></span></div>`;
+  if(kind==="group") return `<div class="act-block">`
+    + `<div class="act-row"><span class="act-lab">调度</span>${ACTS.slice(0,4).map((a,i)=>`<button class="btn btn-sm btn-outline"${i===0?' data-el="primary"':""} data-act="${a.k}">${a.t}</button>`).join("")}</div>`
+    + `<div class="act-row"><span class="act-lab">导航</span>${ACTS.slice(4).map(a=>`<button class="btn btn-sm btn-outline" data-act="${a.k}">${a.t}</button>`).join("")}</div></div>`;
+  return `<div class="act-row">${ACTS.map((a,i)=>`<button class="btn btn-sm btn-outline"${i===0?' data-el="primary"':""} data-act="${a.k}">${a.t}</button>`).join("")}</div>`;
+}
+
+/* ================= 模板 ================= */
+const TPL={
+  rv0(){ return `<main class="review-wrap"><div class="review-session" data-el="session">
+      ${countLine("rv0","本轮 12 张　·　"+(face==="front"?"点击卡片或按空格显示答案":"1–4 评分 · Z 撤销"))}
+      ${rCard()}
+      <div class="review-meta"><button class="review-jump">跳转原文</button>来源:${esc(e().doc)} · 2026-09-25</div>
+      ${face==="back"?gradeRow(false)+`<div data-el="tools">${toolsRow(false)}</div>`:`<div data-el="tools"></div>`}
+    </div></main>`; },
+
+  r1(){ return `<main class="dk-page">${dkTop("r1","review")}${dkMid(rCard()
+      + `<div class="review-meta"><button class="review-jump">跳转原文</button>来源:${esc(e().doc)} · 2026-09-25</div>`)}
+      ${dkDock(gradeRow(face==="front")+`<div data-el="tools">${toolsRow(face==="front")}</div>`)}</main>`; },
+
+  r2(){ return `<main class="dk-page">${dkTop("r2","review")}${dkMid(rCard()
+      + `<div class="review-meta"><button class="review-jump">跳转原文</button>来源:${esc(e().doc)} · 2026-09-25</div>`)}
+      <div class="dk-band"><div class="dk-dock" data-el="dock"><div class="dk-inner dk-slot${face==="front"?" front":""}">
+        ${face==="front"
+          ? `<button class="btn btn-outline" data-act="reveal" data-el="primary">显示答案（空格）</button>`
+          : gradeRow(false)+`<div data-el="tools">${toolsRow(false)}</div>`}
+      </div></div></div></main>`; },
+
+  r3(){ return `<main class="dk-page">${dkTop("r3","review")}${dkMid(rCard()
+      + `<div class="review-meta"><button class="review-jump">跳转原文</button>来源:${esc(e().doc)} · 2026-09-25</div>`)}
+      <div class="dk-band"><div class="dk-dock" data-el="dock"><div class="dk-inner">
+        ${face==="front"
+          ? `<button class="btn btn-outline" data-act="reveal" data-el="primary">显示答案（空格）</button>`
+          : gradeRow(false)+`<div data-el="tools">${toolsRow(false)}</div>`}
+      </div></div></div></main>`; },
+
+  r4(){ return `<main class="dk-page">${dkTop("r4","review")}${dkMid(rCard()
+      + `<div class="review-meta"><button class="review-jump">跳转原文</button>来源:${esc(e().doc)} · 2026-09-25</div>`
+      + `<div data-el="tools">${face==="back"?toolsRow(false):""}</div>`)}
+      ${dkDock(gradeRow(face==="front"))}</main>`; },
+
+  r5(){ return `<main class="dk-page surf">${dkTop("r5","review")}${dkMid(rCard()
+      + `<div class="review-meta"><button class="review-jump">跳转原文</button>来源:${esc(e().doc)} · 2026-09-25</div>`)}
+      <div class="dk-band"><div class="dk-dock bleed" data-el="dock"><div class="dk-inner">
+        ${gradeRow(face==="front")}<div data-el="tools">${toolsRow(face==="front")}</div>
+      </div></div></div></main>`; },
+
+  xv0(){ return `<main class="extract-page">
+      <div class="extract-page-head">
+        <span class="review-count mono" data-el="count">3 条待处理</span>
+        <span class="mono extract-page-header">集中复习：《${esc(e().doc)}》</span>
+        <span class="extract-page-hint mono">空格＝下一条 · Z＝撤销 · 正文可直接编辑</span>
+        <button>返回阅读</button>
+      </div>
+      <div class="extract-face" data-el="session">
+        <div class="extract-face-meta"><span>来自《${esc(e().doc)}》 · 第${e().depth}层摘录</span>
+          <span><span class="mono">${e().status}</span> <span class="mono">优先级 ${e().pri}</span> <span class="mono">${e().next}</span></span></div>
+        <div class="extract-face-body"><div class="review-editable" contenteditable="true" spellcheck="false" data-el="body">${esc(e().body)}</div></div>
+        <div class="extract-face-derived">已就此摘录制卡 ${e().cards} 张</div>
+        <div class="extract-face-actions" data-el="dock">
+          <button class="primary" data-act="next" data-el="primary">下一条</button>
+          <span class="extract-postpone"><input class="num" type="number" value="7" /><span class="mono">天后</span><button data-act="postpone-toggle">推迟</button></span>
+          <button data-act="pri-toggle">优先级 ${e().pri} ▾</button><button data-act="open">打开摘录</button>
+          <button data-act="jump">跳转原文</button><button data-act="graduate">毕业</button><button data-act="undo">撤销</button>
+        </div>
+      </div></main>`; },
+
+  e1(){ return xDock("e1", actsRow("btn"), false); },
+  e2(){ return xDock("e2", actsRow("bar"), false); },
+  e3(){ return xDock("e3", actsRow("text"), false); },
+  e4(){ return xDock("e4", actsRow("group"), false); },
+  e5(){ return xDock("e5", actsRow("btn")+derivedRow(), true); }
+};
+function countWrap(key,page){
+  return page==="review"
+    ? countLine(key,"本轮 12 张　·　"+(face==="front"?"空格＝显示答案":"1–4 评分 · Z 撤销"))
+    : countLine(key,"3 条待处理 · 空格＝下一条 · Z＝撤销 · 正文可编辑");
+}
+function xDock(key,acts,surf){
+  const meta = surf
+    ? `<div class="review-meta"><button class="review-jump" data-act="jump">跳转原文</button><button class="review-jump" data-act="open">打开摘录</button></div>`
+    : xMetaLine(false);
+  return `<main class="dk-page${surf?" surf":""}">${dkTop(key,"x")}${dkMid(xBody()+meta)}
+    <div class="dk-band"><div class="dk-dock${surf?" bleed":""}" data-el="dock"><div class="dk-inner">${acts}${expRow(key)}</div></div></div></main>`;
+}
+
+/* ================= 挂载 ================= */
+const RKEYS=["rv0","r1","r2","r3","r4","r5"], XKEYS=["xv0","e1","e2","e3","e4","e5"];
+const KEYS=[...RKEYS,...XKEYS];
+function mount(){
+  for(const k of KEYS){
+    const fr=document.querySelector(`[data-frame="${k}"]`);
+    fr.querySelector(".topbar").innerHTML=topbar(RKEYS.includes(k)?"复习":"摘录");
+    fr.querySelector(".app-body").innerHTML=TPL[k]();
+  }
+  document.querySelectorAll("#item-ctrl [data-i]").forEach(b=>b.classList.toggle("on",+b.dataset.i===cur));
+  document.querySelectorAll("#face-ctrl [data-face]").forEach(b=>b.classList.toggle("on",b.dataset.face===face));
+}
+function docFlash(m){ const el=document.getElementById("doc-flash"); el.textContent=m;
+  clearTimeout(docFlash._t); docFlash._t=setTimeout(()=>el.textContent="",2600); }
+
+/* ================= 交互 ================= */
+const MSG={ next:"下一条＝读后推进：next_interval = 当前间隔 × A-Factor(1.6)，process_count++",
+  jump:"跳回材料原位置；跳转不写阅读进度（§6.8-7 / D58）", open:"在阅读器中打开这条摘录（可就地制卡）",
+  graduate:"毕业＝不再推送，条目仍留在卡片浏览器", undo:"撤销最近一次操作（Z，跨闪卡与摘录同一条撤销链）",
+  exit:"返回阅读：离开连续处理页", reveal:"翻面：显示答案（空格）",
+  "postpone-confirm":"推迟为覆盖式：next_at = now + N 天（不写 A-Factor）",
+  "pri-toggle":"优先级 10/30/50/70/90，越大越靠后" };
+document.addEventListener("click",ev=>{
+  const b=ev.target.closest("[data-act]"); if(!b) return;
+  const a=b.dataset.act, fr=b.closest("[data-frame]"), key=fr?fr.dataset.frame:"doc";
+  if(a==="next"){ cur=(cur+1)%EX.length; postOpen={}; mount(); docFlash(MSG.next); return; }
+  if(a==="reveal"){ face=face==="front"?"back":"front"; mount(); docFlash(MSG.reveal); return; }
+  if(a==="postpone-toggle"){ postOpen={}; postOpen[key]=!postOpen[key]; mount(); return; }
+  if(a==="postpone-close"){ postOpen={}; mount(); return; }
+  if(a==="postpone"){ e().next=`${b.dataset.days} 天后推送`; postOpen={}; mount(); docFlash("已推迟 "+b.dataset.days+" 天"); return; }
+  if(MSG[a]) docFlash(MSG[a]);
+});
+document.addEventListener("keydown",ev=>{
+  const t=ev.target,tag=(t&&t.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="textarea"||tag==="select"||(t&&t.isContentEditable)) return;
+  if(ev.key===" "||ev.key==="Enter"){ ev.preventDefault();
+    if(t&&t.closest&&t.closest('[data-frame^="r"]')){ face=face==="front"?"back":"front"; }
+    else cur=(cur+1)%EX.length;
+    postOpen={}; mount(); docFlash("空格：复习页＝翻面 / 摘录页＝下一条"); }
+});
+
+/* ================= 控件 ================= */
+function bindRow(id,fn){ document.getElementById(id).addEventListener("click",ev=>{
+  const b=ev.target.closest("button"); if(!b) return;
+  [...ev.currentTarget.children].forEach(x=>x.classList.toggle("on",x===b)); fn(b); setTimeout(runMeasure,0); }); }
+bindRow("theme-ctrl",b=>document.body.classList.toggle("theme-dark",b.dataset.theme==="dark"));
+bindRow("width-ctrl",b=>document.querySelectorAll("[data-frame]").forEach(f=>f.style.setProperty("--fw",b.dataset.w+"px")));
+bindRow("item-ctrl",b=>{ cur=+b.dataset.i; postOpen={}; mount(); });
+bindRow("face-ctrl",b=>{ face=b.dataset.face; mount(); });
+/* 描边机制：只切 body 上的类，--field-line 的显形值由 CSS 在同一层声明（见 Token 求值层纪律） */
+let lineMode="none";
+function setLineMode(m){
+  lineMode=m;
+  document.body.classList.toggle("line-ring", m==="ring");
+  document.body.classList.toggle("line-border", m==="border");
+  document.querySelectorAll("#line-ctrl [data-line]").forEach(b=>b.classList.toggle("on",b.dataset.line===m));
+}
+bindRow("line-ctrl",b=>{ setLineMode(b.dataset.line); });
+document.getElementById("remeasure").addEventListener("click",()=>runMeasure());
+
+/* ================= 量测 ================= */
+const px=s=>{const m=/(-?[\d.]+)px/.exec(s||"");return m?parseFloat(m[1]):null;};
+function rel(fr,el){ if(!el) return null; const f=fr.getBoundingClientRect(),r=el.getBoundingClientRect();
+  return {x:r.left-f.left,y:r.top-f.top,w:r.width,h:r.height,bottom:r.bottom-f.top}; }
+function colGap(el){ const col=el.parentElement.getBoundingClientRect(),r=el.getBoundingClientRect();
+  return Math.round((col.right-r.right)*10)/10; }
+function fontStats(fr){ const set=new Set(); let min=null;
+  fr.querySelectorAll("*").forEach(n=>{ if(!n.textContent||!n.textContent.trim())return;
+    const s=px(getComputedStyle(n).fontSize); if(s==null)return; set.add(Math.round(s*10)/10); if(min===null||s<min)min=s; });
+  return {min,sizes:[...set].sort((a,b)=>a-b)}; }
+function rowFor(key){
+  const fr=document.querySelector(`[data-frame="${key}"]`);
+  const body=rel(fr,fr.querySelector('[data-el="body"]')),
+        dock=rel(fr,fr.querySelector('[data-el="dock"]')),
+        tools=rel(fr,fr.querySelector('[data-el="tools"]')),
+        ses=rel(fr,fr.querySelector('[data-el="session"]')),
+        cntEl=fr.querySelector('[data-el="count"]'),
+        band=fr.querySelector('.dk-band');
+  const cnt=rel(fr,cntEl);
+  return { key,
+    countGap: cntEl?colGap(cntEl):null,
+    countY: cnt?Math.round(cnt.y*10)/10:null,
+    bodyY: body?Math.round(body.y*10)/10:null,
+    bodyBottom: body?Math.round(body.bottom*10)/10:null,
+    bodyX: body?Math.round(body.x*10)/10:null,
+    bodyFs: body?getComputedStyle(fr.querySelector('[data-el="body"]')).fontSize:null,
+    dockY: dock?Math.round(dock.y*10)/10:null,
+    dockH: dock?Math.round(dock.h*10)/10:null,
+    toolsY: tools?Math.round(tools.y*10)/10:null,
+    sesW: ses?Math.round(ses.w):null,
+    bandX: band?Math.round(band.getBoundingClientRect().left-fr.getBoundingClientRect().left):null,
+    minFs: fontStats(fr).min };
+}
+function contrast(fg,bg){ const p=s=>(s.match(/\d+(\.\d+)?/g)||[]).slice(0,3).map(Number);
+  const lin=v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)};
+  const L=c=>0.2126*lin(c[0])+0.7152*lin(c[1])+0.0722*lin(c[2]);
+  const a=L(p(fg)),b=L(p(bg)),hi=Math.max(a,b),lo=Math.min(a,b);
+  return Math.round(((hi+0.05)/(lo+0.05))*100)/100; }
+function snap(){ const o={}; for(const k of KEYS) o[k]=rowFor(k);
+  const fr=document.querySelector('[data-frame="r1"]');
+  o._c={ count:contrast(getComputedStyle(fr.querySelector('.review-count')).color,getComputedStyle(fr).backgroundColor),
+         body:contrast(getComputedStyle(fr.querySelector('.review-front')).color,getComputedStyle(fr).backgroundColor),
+         disabled:contrast(getComputedStyle(fr.querySelector('.grade-row .btn')).color,getComputedStyle(fr).backgroundColor) };
+  return o; }
+function fmt(v,u){ return v==null||Number.isNaN(v)?'<span class="bad">N/A</span>':(typeof v==="number"?v.toFixed(1).replace(/\.0$/,""):v)+(u||""); }
+function runMeasure(){
+  const saved={cur,face};
+  face="front"; cur=0; mount(); const A=snap();          // 复习：正面 / 摘录：短
+  face="back";  cur=0; mount(); const B=snap();          // 复习：背面
+  face="back";  cur=2; mount(); const C=snap();          // 摘录：长
+  cur=saved.cur; face=saved.face; mount();
+  const ref=A.r1;
+  const controlOk = ref.bodyFs==="26px" && Math.abs(ref.sesW-720)<=1 && ref.dockH>=100 && Math.abs(ref.countGap)<=1;
+  /* 两个对照组各自必须"动过"，缺一即判空转（用 && 不用 ||：一个过了不能替另一个背书） */
+  const ctrlRv0 = A.rv0.dockY==null ? true : Math.abs(B.rv0.dockY-A.rv0.dockY)>4;
+  const ctrlXv0 = Math.abs(C.xv0.dockY-B.xv0.dockY)>4;
+  const ctrlMoved = ctrlRv0 && ctrlXv0;
+  const LABEL={rv0:"rv0 复习现状",r1:"R1 等高·禁用",r2:"R2 等高·空位",r3:"R3 变高·起点钉死",r4:"R4 仅评分钉底",r5:"R5 等高·表面分区",
+    xv0:"xv0 摘录现状",e1:"E1 32px 一行",e2:"E2 hairline 分栏",e3:"E3 文字钮",e4:"E4 两行分组",e5:"E5 凑等高+分区"};
+  const d=(a,b)=> (a==null||b==null)?'<span class="bad">N/A</span>':(Math.abs(a-b)<0.6?'<span class="good">0</span>':`<span class="bad">${(a-b>0?"+":"")}${(Math.round((a-b)*10)/10)}</span>`);
+  const dy=(s,l)=> (s==null&&l==null)?"—":(s==null?'<span class="bad">新增</span>':(l==null?'<span class="bad">消失</span>':(Math.abs(l-s)<0.6?'<span class="good">0</span>':`<span class="bad">${(l-s>0?"+":"")}${(Math.round((l-s)*10)/10)}</span>`)));
+  document.querySelector("#tbl-measure tbody").innerHTML=KEYS.map(k=>{
+    const isR=RKEYS.includes(k);
+    const s=isR?A[k]:B[k], l=isR?B[k]:C[k];
+    const dockDiff = l.dockY==null?d(ref.dockY,null):d(l.dockY,ref.dockY);
+    return `<tr><td class="rowhead">${LABEL[k]}</td>
+      <td class="num">${fmt(s.countY,"px")}</td>
+      <td class="num">${fmt(s.bodyY,"px")}</td>
+      <td class="num">${fmt(s.bodyBottom,"px")}</td>
+      <td class="num">${s.dockY==null?'<span class="bad">不存在</span>':fmt(s.dockY,"px")}</td>
+      <td class="num">${s.dockH==null?'<span class="bad">不存在</span>':fmt(s.dockH,"px")}</td>
+      <td class="num">${dy(s.dockY,l.dockY)}</td>
+      <td class="num">${dy(s.bodyY,l.bodyY)}</td>
+      <td class="num">${dy(s.toolsY,l.toolsY)}</td>
+      <td class="num">${fmt(s.bodyX,"px")} / ${fmt(s.sesW,"px")}</td>
+      <td class="num">${k==="r1"?"—":dockDiff}</td>
+      <td class="num">${s.minFs<11?'<span class="bad">'+s.minFs+'px</span>':fmt(s.minFs,"px")}</td></tr>`;
+  }).join("");
+  const v=document.getElementById("measure-verdict");
+  if(!controlOk||!ctrlMoved){
+    v.innerHTML=`<span style="color:var(--error)">量测无效：对照未通过（R1 读数 ${JSON.stringify({fs:ref.bodyFs,ses:ref.sesW,dock:ref.dockH,gap:ref.countGap})}；rv0 坞顶 ${A.rv0.dockY}，xv0 短 ${A.xv0.dockY} / 长 ${C.xv0.dockY}）。上表数字不得作为结论使用。</span>`;
+  }else{
+    const zero=RKEYS.slice(1).filter(k=>Math.abs(B[k].dockY-A[k].dockY)<0.6).concat(XKEYS.slice(1).filter(k=>Math.abs(C[k].dockY-B[k].dockY)<0.6));
+    v.innerHTML=`对照通过：R1 读到 ${ref.bodyFs} / 版心 ${ref.sesW}px / 坞高 ${ref.dockH}px / 计数右缘余量 ${ref.countGap}px；`
+      +`对照组 rv0 翻面 Δy(坞)＝${A.rv0.dockY==null?"坞从无到有（新增一层）":Math.round((B.rv0.dockY-A.rv0.dockY)*10)/10+"px"}，xv0 换条目 Δy(坞)＝${(Math.round((C.xv0.dockY-B.xv0.dockY)*10)/10)}px（均非零 → 量测在测东西）。`
+      +`Δy(坞)＝0 的提案版：${zero.join(" · ")}。R1 栏对比度：计数 ${A._c.count}:1 · 正文 ${A._c.body}:1 · 正面禁用按钮 ${A._c.disabled}:1（禁用态规范允许低于 4.5:1）。`;
+  }
+  renderAudit();
+  runLineMeasure();
+}
+
+/* ---------- 描边机制对照：同一栏三种机制各量一次（行盒数比宽度更能说明换行是否被扰动） ---------- */
+function runLineMeasure(){
+  const saved=lineMode, o={};
+  for(const m of ["none","ring","border"]){
+    setLineMode(m); mount();
+    for(const k of ["r1","e4"]){
+      const fr=document.querySelector(`[data-frame="${k}"]`);
+      const b=fr.querySelector('[data-el="body"]');
+      /* 两个口径都不能想当然：块级元素的 getBoundingClientRect().width 含 border
+         （全局 box-sizing:border-box → 加边框后读数仍是 720，看不出任何差别），要用 clientWidth；
+         行数要用 Range 取行盒——元素自身的 getClientRects() 对块级恒返回 1 个矩形。 */
+      const rng=document.createRange(); rng.selectNodeContents(b);
+      (o[m]=o[m]||{})[k]={ w:b.clientWidth, lines:rng.getClientRects().length };
+    }
+  }
+  setLineMode(saved); mount();
+  const base=o.none;
+  const dcell=(v,b)=> (Math.abs(v-b)<0.05?'<span class="good">0</span>':`<span class="bad">${(v-b>0?"+":"")}${Math.round((v-b)*10)/10}</span>`);
+  const LAB={none:"透明（现状＝默认皮肤）",ring:"环形显形 box-shadow inset",border:"边框显形 1px border"};
+  document.querySelector("#tbl-line tbody").innerHTML=["none","ring","border"].map(m=>{
+    const v=o[m];
+    return `<tr><td class="rowhead">${LAB[m]}</td>
+      <td class="num">${v.r1.w}px</td><td class="num">${v.r1.lines}</td>
+      <td class="num">${v.e4.w}px</td><td class="num">${v.e4.lines}</td>
+      <td class="num">宽 ${dcell(v.r1.w,base.r1.w)} · 行 ${dcell(v.r1.lines,base.r1.lines)}</td>
+      <td class="num">${m==="none"?"—":'<span class="good">是</span>'}</td>
+      <td class="num"><span class="good">保留</span>${m==="ring"?"（不与焦点环抢 outline）":""}</td></tr>`;
+  }).join("");
+}
+
+/* ================= 规范自检 ================= */
+function renderAudit(){
+  const css=[...document.querySelectorAll("style")].map(s=>s.textContent).join("\n");
+  const nonToken=css.replace(/\/\* =+ TOKEN-BEGIN[\s\S]*?TOKEN-END =+ \*\//,"");
+  const used=new Set([...css.matchAll(/var\(\s*(--[a-z0-9-]+)/g)].map(m=>m[1]));
+  const decl=new Set([...css.matchAll(/(^|[{;\s])(--[a-z0-9-]+)\s*:/g)].map(m=>m[2]));
+  const missing=[...used].filter(x=>!decl.has(x));
+  const hexOutside=[...nonToken.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m=>m[0]);
+  const radius=[...css.matchAll(/border-radius\s*:\s*([^;}]+)/g)].map(m=>m[1].trim()).filter(v=>!/^\s*var\(--radius/.test(v));
+  const shadow=[...css.matchAll(/([^{}]+)\{[^{}]*box-shadow\s*:[^;}]+/g)].map(m=>m[m.length-1].trim().split("\n").pop());
+  const badShadow=shadow.filter(s=>!/nav-item\.active|line-ring/.test(s));
+  let minFs=null; document.querySelectorAll(".frame").forEach(fr=>{const f=fontStats(fr); if(f.min!=null&&(minFs===null||f.min<minFs))minFs=f.min;});
+  function resolve(fr,t){ const p=document.createElement("div"); p.style.cssText="display:none;background:var("+t+")";
+    fr.appendChild(p); const c=getComputedStyle(p).backgroundColor; p.remove(); return c; }
+  const TOKEN_LIST=["--paper","--grey-1","--grey-2","--grey-3","--ink","--text-primary","--text-secondary","--text-helper",
+    "--text-placeholder","--border-subtle","--border-strong","--accent","--accent-on","--accent-hover","--accent-soft",
+    "--success","--warning","--error","--error-on","--error-soft","--overlay-ink","--overlay-text","--overlay-helper"];
+  const chroma=c=>{const n=(c.match(/\d+(\.\d+)?/g)||[]).slice(0,3).map(Number);return n.length<3?0:Math.max(...n)-Math.min(...n);};
+  function paintScan(keys){ let total=0; const stray=new Set(),sat=new Set();
+    for(const k of keys){ const fr=document.querySelector(`[data-frame="${k}"]`);
+      const tok=new Map(); TOKEN_LIST.forEach(t=>{const c=resolve(fr,t); if(c&&!tok.has(c))tok.set(c,t);});
+      const feed=(c,w)=>{ if(!c||c==="rgba(0, 0, 0, 0")return;
+        const p=/\(([^)]+)\)/.exec(c),parts=p?p[1].split(","):[];
+        if(parts.length>3&&parseFloat(parts[3])<1)return; total++;
+        const nm=tok.get(c); if(!nm)stray.add(c+"（"+k+"·"+w+"）"); if(chroma(c)>60)sat.add(nm||c); };
+      fr.querySelectorAll("*").forEach(n=>{ const s=getComputedStyle(n); feed(s.backgroundColor,"底"); feed(s.color,"字色");
+        for(const pe of ["::before","::after"]){ const q=getComputedStyle(n,pe); feed(q.backgroundColor,pe+"底"); } }); }
+    return {total,stray:[...stray],sat:[...sat]}; }
+  const proposed=paintScan(["r1","r2","r3","r4","r5","e1","e2","e3","e4","e5"]);
+  const ctrl=paintScan(["rv0","xv0"]);
+  /* 表面分区在两档主题下各测一次（只测当前档＝假判据：文案里说的是"深色下看不见"） */
+  const surfRatios=(()=>{ const fr=document.querySelector('[data-frame="r5"]');
+    const wasDark=document.body.classList.contains("theme-dark");
+    const read=()=>contrast(resolve(fr,"--grey-1"),resolve(fr,"--paper"));
+    const light=read(); document.body.classList.add("theme-dark"); const dark=read();
+    if(!wasDark) document.body.classList.remove("theme-dark");
+    return {light,dark}; })();
+  const rows=[
+    ["var() 引用 ⊆ 声明","差集为空（§5.1：引用未定义变量＝整条声明作废 IACVT）",
+      missing.length?`<span class="bad">缺 ${missing.length} 个：${missing.join(", ")}</span>`:`<span class="good">通过</span>（引用 ${used.size} 个）`],
+    ["结构层无彩色字面量","TOKEN 块之外不得出现 hex",hexOutside.length?`<span class="bad">${hexOutside.length} 处</span>`:`<span class="good">通过</span>`],
+    ["直角","border-radius 只能取 var(--radius*)",radius.length?`<span class="bad">${radius.join(" / ")}</span>`:`<span class="good">通过</span>`],
+    ["阴影只在浮层","box-shadow 只允许顶栏当前项的 2px inset 下划线与描边环 box-shadow inset（两处都是「拿阴影当边框」，非投影）",badShadow.length?`<span class="bad">${badShadow.join(" / ")}</span>`:`<span class="good">通过</span>（${shadow.length} 处均在白名单）`],
+    ["无 <11px 文字","十栏含文字元素最小 computed font-size",minFs<11?`<span class="bad">${minFs}px</span>`:`<span class="good">通过</span>（最小 ${minFs}px）`],
+    ["上色全部来自 Token","R1–R5 + E1–E5 内元素/伪元素的背景与字色逐个反查 Token",
+      proposed.stray.length?`<span class="bad">越界 ${proposed.stray.length} 档：${proposed.stray.join(" · ")}</span>`
+        :`<span class="good">通过</span>（扫描 ${proposed.total} 处，0 处不属于 Token）；对照组 rv0/xv0 越界 ${ctrl.stray.length} 处${ctrl.stray.length?"："+ctrl.stray.join(" · "):""}`],
+    ["无 accent 填充","十栏不得出现 accent 实底控件",
+      (()=>{ const acc=resolve(document.querySelector('[data-frame="r1"]'),"--accent");
+        const bad=[...document.querySelectorAll('.frame:not([data-frame="rv0"]):not([data-frame="xv0"]) button')]
+          .filter(b=>getComputedStyle(b).backgroundColor===acc).map(b=>b.textContent.trim().slice(0,6));
+        return bad.length?`<span class="bad">${bad.join(" / ")}</span>`:`<span class="good">通过</span>（一律无填充）`; })()],
+    ["单一高饱和焦点色","同屏高饱和（RGB 极差 >60）只允许 --accent 与四档语义色条",
+      (()=>{ const ok=["--accent","--success","--warning","--error","--accent-hover"];
+        const extra=proposed.sat.filter(s=>!ok.includes(s));
+        return extra.length?`<span class="bad">${extra.join(" · ")}</span>`:`<span class="good">通过</span>（在场：${proposed.sat.join(" · ")||"无"}）`; })()],
+    ["R5/E5 表面分区在两档主题下是否可见","grey-1 与 paper 的 WCAG 对比 ≥1.06 才算肉眼分得开；两档各测一次",
+      (()=>{ const cell=(n,v)=> v<1.06?`<span class="bad">${n} ${v}:1 分不开</span>`:`<span class="good">${n} ${v}:1</span>`;
+        return cell("浅色",surfRatios.light)+" · "+cell("深色",surfRatios.dark)
+          +"　→ 若只有浅色档过，深色档下这条分界就得靠 hairline 而不是底色承担。"; })()],
+    ["键盘焦点可达","凡 outline:none 的选择器必须有同前缀 :focus-visible 替代环",
+      (()=>{ const kills=[...css.matchAll(/([^{}]+)\{[^{}]*outline\s*:\s*none[^{}]*\}/g)].map(m=>m[1].trim().split(/\s*,\s*/)).flat();
+        const unc=kills.map(s=>s.replace(/:focus(?!-visible)/,"")).filter(b=>!css.includes(b+":focus-visible"));
+        return unc.length?`<span class="bad">${unc.join(" / ")}</span>`:`<span class="good">通过</span>（${kills.length} 处均有 2px accent 替代环）`; })()],
+    ["禁用态仍可读","R1/R5 正面时 disabled 按钮的字色对比（规范允许 disabled 降到 --grey-2，但需可辨）",
+      (()=>{ const fr=document.querySelector('[data-frame="r1"]');
+        const savedFace=face; face="front"; mount();
+        const b=document.querySelector('[data-frame="r1"] .grade-row .btn');
+        const r=b?contrast(getComputedStyle(b).color,getComputedStyle(fr).backgroundColor):null;
+        face=savedFace; mount();
+        return r==null?`<span class="bad">N/A</span>`:`<span class="warn">${r}:1 — 低于正文 4.5:1，属规范允许的 disabled 档；若嫌弱可把 disabled 文字改 --text-helper</span>`; })()]
+  ];
+  document.querySelector("#tbl-audit tbody").innerHTML=rows.map(r=>`<tr><td class="rowhead">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("");
+}
+
+/* ================= 启动（含 ?only= 单栏模式与 ?face= / ?i= 状态预设，便于逐栏截图与分享） ================= */
+const Q=new URLSearchParams(location.search);
+const ONLY=Q.get("only");
+if(Q.get("face")==="back") face="back";
+if(Q.get("line")) setLineMode(Q.get("line"));
+if(Q.get("i")!==null && +Q.get("i")>=0 && +Q.get("i")<EX.length) cur=+Q.get("i");
+mount();
+if(ONLY&&KEYS.includes(ONLY)){
+  const inner=document.querySelector(".doc-inner");
+  [...inner.children].forEach(n=>{ const fr=n.matches(".stage-wrap")?n.querySelector("[data-frame]"):null;
+    if(!fr||fr.dataset.frame!==ONLY) n.style.display="none"; });
+  document.body.style.background="var(--paper)";
+}
+runMeasure();
+</script>
+</body>
+</html>

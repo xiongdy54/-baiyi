@@ -280,6 +280,44 @@ function validateFrontierExplainOutput(raw, input = {}) {
 
 // ── 4. structure-analogy（结构类比）──
 // input: { ownedKpIds: [], domainCodes: [] }
+// ── v48.22（D58 §6.8-4 / E1）：摘录重排出层契约 ──
+// 输入 candidates＝[{id, text, priority, sourceTitle, overdueDays, localScore}]（**本地序**已算好）；
+// 输出的 order 只允许引用输入清单里的 id；理由里的数字必须能在**该候选自身**的字段里找到。
+// 越界 id 丢弃留痕；理由编造数字则清空该条理由（座位保留，用本地理由兜底）；全空 ⇒ value=null（保持本地序）。
+function validateExtractRerankOutput(raw, input = {}) {
+  const issues = [];
+  const obj = parseJsonLoose(raw);
+  if (!obj) return { value: null, issues: [issue("JSON_PARSE_FAILED", "输出不是可解析的 JSON 对象")] };
+  const candidates = Array.isArray(input.candidates) ? input.candidates : [];
+  const byId = new Map(candidates.map((c) => [String(c?.id ?? ""), c]));
+  const order = [];
+  const seen = new Set();
+  for (const item of Array.isArray(obj.order) ? obj.order : []) {
+    const id = String(item?.id ?? "");
+    if (!byId.has(id)) {
+      issues.push(issue("UNKNOWN_ID", `越界 id 已丢弃：${id || "(空)"}`));
+      continue;
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const cand = byId.get(id) || {};
+    let reason = String(item?.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+    // 禁编造数字：理由中的数字必须能在该候选的文本/优先级/逾期天数/来源书名里找到
+    const hay = `${cand.text ?? ""} ${cand.priority ?? ""} ${cand.overdueDays ?? ""} ${cand.sourceTitle ?? ""}`;
+    const allowed = new Set(hay.match(/\d+/g) || []);
+    const fabricated = (reason.match(/\d+/g) || []).filter((n) => !allowed.has(n));
+    if (fabricated.length > 0) {
+      issues.push(issue("FABRICATED_NUMBER", `理由含该条素材里没有的数字 ${fabricated.join(",")}，已清空该条理由`));
+      reason = "";
+    }
+    order.push({ id, reason });
+  }
+  if (order.length === 0) {
+    return { value: null, issues: [...issues, issue("EMPTY_ORDER", "没有任何合法条目（保持本地排序）")] };
+  }
+  return { value: { order }, issues };
+}
+
 function validateStructureAnalogyOutput(raw, input = {}) {
   const issues = [];
   const obj = parseJsonLoose(raw);
@@ -410,5 +448,6 @@ module.exports = {
   validateKnowledgeProbeOutput,
   validateFrontierExplainOutput,
   validateStructureAnalogyOutput,
+  validateExtractRerankOutput,
   scopeDispersion
 };

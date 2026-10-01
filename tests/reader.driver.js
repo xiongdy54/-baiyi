@@ -229,6 +229,110 @@ async function runSemantics(kernel, opts, check) {
   check("S14 分页模式切换后导航仍可用", okAfterMode === true);
   await kernel.setMode({ flow: "scrolled" });
 
+  // S17（D67 / §6.8-13）：侧栏注解按 id 导航（EPUB adapter L1）。
+  // L0 语义（替换 / 清理）由 tests/reader.fake-marks.test.cjs 覆盖；文本与几何级「到位」由 L2 套件覆盖。
+  if (!fake) {
+    const hasMarkNav = typeof kernel.setDocumentMarks === "function" && typeof kernel.goToMark === "function";
+    check("S17pre 内核支持按标记 id 导航", hasMarkNav);
+    if (!hasMarkNav) {
+      check("S17a 精确 id 导航到目标章（按 CFI）", false, "goToMark/setDocumentMarks 缺失");
+      check("S17b 另一条标记导航到它自己的章", false, "goToMark 缺失");
+      check("S17c 未知 id 返回 false 且位置不变", false, "goToMark 缺失");
+      check("S17d 不可解析 CFI 返回 false", false, "goToMark 缺失");
+      check("S17e 标记列表替换后旧 id 返回 false 且位置不变", false, "goToMark 缺失");
+    } else {
+      // 用真实选区取得两条标记的 CFI（不手写 CFI 字面量）
+      await kernel.goTo({ chapterIndex: 1 });
+      await wait(500);
+      check("S17pre1 第二章选区注入（取标记 CFI）", injectSelection(kernel, opts.marker2));
+      await wait(150);
+      const cfiSecond = kernel.getSelection()?.cfi;
+      await kernel.goTo({ chapterIndex: 2 });
+      await wait(500);
+      check("S17pre2 第三章选区注入（取标记 CFI）", injectSelection(kernel, opts.marker1));
+      await wait(150);
+      const cfiThird = kernel.getSelection()?.cfi;
+      check("S17pre3 两条标记 CFI 均已取到", typeof cfiSecond === "string" && typeof cfiThird === "string");
+      kernel.setDocumentMarks([
+        { id: "epub-mark-second", text: opts.marker2, cfi: cfiSecond, kind: "extract" },
+        { id: "epub-mark-third", text: opts.marker1, cfi: cfiThird, kind: "highlight" },
+        { id: "epub-mark-bogus", text: "坏锚", cfi: typeof cfiThird === "string" ? `${cfiThird}/999999` : "epubcfi(/6/2!/4/999999)", kind: "extract" }
+      ]);
+      await kernel.goTo({ chapterIndex: 0 });
+      await wait(500);
+      const navThird = await kernel.goToMark("epub-mark-third");
+      await waitFor(() => relocate && relocate.chapterIndex === 2, 8000, "S17a mark nav").catch(() => null);
+      check("S17a 精确 id 导航到目标章（按 CFI）", navThird === true && relocate && relocate.chapterIndex === 2, `nav=${navThird} chapter=${relocate && relocate.chapterIndex}`);
+      const navSecond = await kernel.goToMark("epub-mark-second");
+      await waitFor(() => relocate && relocate.chapterIndex === 1, 8000, "S17b mark nav").catch(() => null);
+      check("S17b 另一条标记导航到它自己的章", navSecond === true && relocate && relocate.chapterIndex === 1, `nav=${navSecond} chapter=${relocate && relocate.chapterIndex}`);
+      const chapterBeforeMissing = relocate && relocate.chapterIndex;
+      const navMissing = await kernel.goToMark("missing-mark");
+      check("S17c 未知 id 返回 false 且位置不变", navMissing === false && relocate && relocate.chapterIndex === chapterBeforeMissing, `nav=${navMissing} chapter=${relocate && relocate.chapterIndex}`);
+      const navBogus = await kernel.goToMark("epub-mark-bogus");
+      check("S17d 不可解析 CFI 返回 false", navBogus === false, String(navBogus));
+      kernel.setDocumentMarks([{ id: "epub-mark-second", text: opts.marker2, cfi: cfiSecond, kind: "extract" }]);
+      const navRemoved = await kernel.goToMark("epub-mark-third");
+      check("S17e 标记列表替换后旧 id 返回 false 且位置不变", navRemoved === false && relocate && relocate.chapterIndex === chapterBeforeMissing, `nav=${navRemoved} chapter=${relocate && relocate.chapterIndex}`);
+
+      // S18（D67 §3）：注解栏「位置」序＝内核 resolve 出的**文档序**——不是安装序，也不含解不动的锚。
+      if (typeof kernel.getMarkOrder !== "function") {
+        check("S18a 文档序＝章节序（与安装序相反）", false, "getMarkOrder 缺失");
+        check("S18b 不可解析/无锚的标记不在位置序里", false, "getMarkOrder 缺失");
+      } else {
+        kernel.setDocumentMarks([
+          { id: "epub-order-third", text: opts.marker1, cfi: cfiThird, kind: "extract" },
+          { id: "epub-order-second", text: opts.marker2, cfi: cfiSecond, kind: "highlight" },
+          { id: "epub-order-bogus", text: "坏锚", cfi: `${cfiThird}/999999`, kind: "extract" },
+          { id: "epub-order-no-anchor", text: "无锚", kind: "extract" }
+        ]);
+        // 两章各访问一次，让两侧文档都进 contents 并各自 resolve 出标记段
+        await kernel.goTo({ chapterIndex: 1 });
+        await wait(600);
+        await kernel.goTo({ chapterIndex: 2 });
+        await wait(600);
+        const order = kernel.getMarkOrder();
+        check("S18a 文档序＝章节序（与安装序相反）", Array.isArray(order) && order.join(",") === "epub-order-second,epub-order-third", JSON.stringify(order));
+        check("S18b 不可解析/无锚的标记不在位置序里", Array.isArray(order) && !order.includes("epub-order-bogus") && !order.includes("epub-order-no-anchor"), JSON.stringify(order));
+      }
+
+      // S19（D2/§7，Task 7）：容器变窄/变宽（＝侧栏开合的布局变更）后，位置与文本不漂。
+      // 判据：同一段文字重新选中得到的 CFI 与变更前一致，且选区几何仍在宿主视口内。
+      await kernel.goTo({ chapterIndex: 1 });
+      await wait(700);
+      check("S19pre 变更前在目标章注入选区", injectSelection(kernel, opts.marker2));
+      await wait(200);
+      const cfiBefore = kernel.getSelection()?.cfi ?? null;
+      const hostEl = document.getElementById("host");
+      const widthBefore = hostEl.getBoundingClientRect().width;
+      hostEl.style.width = "62%"; // 模拟右侧栏占位：正文区变窄
+      await wait(300);
+      const widthNarrow = hostEl.getBoundingClientRect().width;
+      await waitFor(() => kernel.getCurrentLocation()?.cfi != null, 6000, "resize settle").catch(() => null);
+      await wait(900); // 真实 relocated 结算窗口（不做唯一裁判，下面还有 CFI 与几何双判据）
+      const cfiAfter = kernel.getCurrentLocation()?.cfi ?? null;
+      const reselect = kernel.getSelection();
+      hostEl.style.width = "";
+      await wait(600);
+      const widthAfter = hostEl.getBoundingClientRect().width;
+      check(
+        "S19a 变窄后位置不漂：当前 CFI 仍在同一章",
+        typeof cfiBefore === "string" && typeof cfiAfter === "string" && cfiBefore.split("!")[0] === cfiAfter.split("!")[0],
+        JSON.stringify({ cfiBefore, cfiAfter })
+      );
+      check(
+        "S19b 变窄后同一段文字仍可解析（选区文本一致）",
+        reselect != null && reselect.text === opts.marker2,
+        JSON.stringify({ text: reselect?.text, want: opts.marker2 })
+      );
+      check(
+        "S19c 变窄与复原都真实发生（自证：布局变更真实发生）",
+        widthNarrow < widthBefore - 100 && Math.abs(widthAfter - widthBefore) <= 1,
+        JSON.stringify({ widthBefore, widthNarrow, widthAfter })
+      );
+    }
+  }
+
   // S15 destroy
   kernel.destroy();
   check("S15 destroy 不抛错", true);

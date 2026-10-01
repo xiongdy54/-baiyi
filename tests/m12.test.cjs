@@ -150,12 +150,15 @@ app.whenReady().then(async () => {
     // doc3 2 复习卡→1放1延、doc4 步进卡已评→新卡弟延(reviewed)、doc5 挂起卡不计→弟正常放行
     check("kpi 含 siblingDeferred 字段", typeof overview.kpi.siblingDeferred === "number", "number", typeof overview.kpi.siblingDeferred);
     check("同源延后合计 = doc1:2 + doc2:2 + doc3:1 + doc4:1 = 6", overview.kpi.siblingDeferred === 6, 6, overview.kpi.siblingDeferred);
-    // 口径不变量：dueToday + siblingDeferred == 未挂起且 due ≤ 学习日末的总数（与 KPI 同一 dayStartMs）
-    const { learningDayStartMs } = require(path.join(ROOT, "electron", "fsrsTime.js"));
+    // 口径不变量：dueToday + siblingDeferred == 未挂起且**已到期（≤ 同一 now）**的总数。
+    // 注意（2026-09-25 修正）：原写法用「学习日末 today24」做窗口，与 KPI 的「已到期」窗口不是同一个，
+    // 夹具里那张 due = NOW+10min 的学习卡在**凌晨时段**仍落在 today24 内 ⇒ 两侧恒差 1
+    // （即 DEFECTS D-TEST-38 记录在案的双窗口差异，与时刻相关的低占空比闸门）。
+    // 本断言的真正目的是「延后不得让卡从当日视图里消失」，故两侧一律取同一 now 窗口。
+    const now2 = Date.now();
     const allCards = db.listAllCards().filter((c) => !c.leech?.suspended);
-    const today24 = learningDayStartMs(NOW, 0) + 86400000;
-    const expectedWindow = allCards.filter((c) => (c.fsrs?.due ?? NOW) <= today24).length;
-    check("dueToday + siblingDeferred == 到期窗口总数（口径自洽，不静默少卡）", overview.kpi.dueToday + overview.kpi.siblingDeferred === expectedWindow, expectedWindow, { sum: overview.kpi.dueToday + overview.kpi.siblingDeferred, window: expectedWindow });
+    const expectedWindow = allCards.filter((c) => (c.fsrs?.due ?? now2) <= now2).length;
+    check("dueToday + siblingDeferred == 已到期总数（口径自洽，不静默少卡）", overview.kpi.dueToday + overview.kpi.siblingDeferred === expectedWindow, expectedWindow, { sum: overview.kpi.dueToday + overview.kpi.siblingDeferred, window: expectedWindow });
 
     console.log("== M12-11 siblingKeyFor 键规则矩阵（§4.16 item 5） ==");
     const cards = require(path.join(ROOT, "tests", "m12.cards.bundle.cjs"));

@@ -1,6 +1,6 @@
-// 诊断：E-1 修复后 TOC 面板内**内容**是否还在（而不是只剩一层纸底）
-// 上一张截图里 0–280 区域是空白纸面；本探针把 .reader-toc 的 innerText / 子节点数 /
-// 各子元素 rect 全部读出来，区分「内容没渲染」与「内容被推出了可视区」。
+// 诊断（D2 起是右侧停靠栏）：栏内**内容**是否真的画出来了——把 .reader-sidebar 的子节点、
+// 页签与各面板 rect 全部读出来，区分「内容没渲染」与「内容被推出了可视区」。
+// 栏在右侧：量它的矩形落在视口右缘以内，且其子节点（页签行 + 当前面板）非空。
 // 运行：node tests/visual-audit11.mjs
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -51,27 +51,40 @@ try {
   await main.ev(`(()=>{const b=[...document.querySelectorAll('.nav-item')].find(x=>x.textContent.trim()==="书架");b?.click();return !!b})()`); await wait(1500);
   await main.ev(`(()=>{const c=[...document.querySelectorAll('.book-card')].find(x=>(x.title||x.textContent).includes("VIS11"));c?.click();return !!c})()`); await wait(6000);
 
-  await main.ev(`(()=>{const b=[...document.querySelectorAll('.reader-engine-controls button')].find(x=>x.textContent.includes("目录"));b?.click();return !!b})()`);
+  // D2：入口是否可用取决于数据（目录/注解/图谱任一在场）——等它就绪再点，别点在 disabled 的按钮上
+  for (let i = 0; i < 24; i++) {
+    const st = asObj(await main.ev(`(() => { const b = document.querySelector("[data-reader-sidebar-toggle]"); return JSON.stringify({ up: !!b, disabled: !!b && b.disabled, tabs: [...document.querySelectorAll('[data-reader-sidebar-toggle]')].length }); })()`));
+    if (st.up && st.disabled === false) break;
+    await wait(500);
+  }
+  const clicked = await main.ev(`(() => { const b = document.querySelector("[data-reader-sidebar-toggle]"); if (!b) return "no-btn"; if (b.disabled) return "disabled"; b.click(); return "clicked"; })()`);
+  console.log(`
+[入口点击] ${clicked}`);
   for (const w of [1000, 2000, 4000]) {
     await wait(w === 1000 ? 1000 : 1000);
     const info = asObj(await main.ev(`(() => {
-      const toc = document.querySelector('.reader-toc');
-      if (!toc) return JSON.stringify({ found: false });
-      const cs = getComputedStyle(toc);
-      const kids = [...toc.children].map((c) => { const b = c.getBoundingClientRect(); return { cls: String(c.className).slice(0, 30), left: Math.round(b.left), top: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height), text: (c.innerText || "").replace(/\\s+/g, " ").slice(0, 40) }; });
-      const b = toc.getBoundingClientRect();
+      const side = document.querySelector('.reader-sidebar');
+      if (!side) return JSON.stringify({ found: false });
+      const cs = getComputedStyle(side);
+      const kids = [...side.children].map((c) => { const b = c.getBoundingClientRect(); return { cls: String(c.className).slice(0, 30), left: Math.round(b.left), top: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height), text: String(c.innerText || "").slice(0, 40) }; });
+      const b = side.getBoundingClientRect();
+      const panels = [...side.querySelectorAll('[data-panel]')].map((p) => p.dataset.panel);
+      const tabs = [...side.querySelectorAll('[data-sidebar-tab]')].map((x) => x.dataset.sidebarTab);
+      const mainRight = Math.round((document.querySelector('.reader-engine-main')?.getBoundingClientRect().right) ?? -1);
       return JSON.stringify({
-        found: true, navRect: { left: Math.round(b.left), top: Math.round(b.top), w: Math.round(b.width), h: Math.round(b.height) },
+        found: true, sideRect: { left: Math.round(b.left), top: Math.round(b.top), right: Math.round(b.right), w: Math.round(b.width), h: Math.round(b.height) },
+        mainRight, inViewport: b.right <= window.innerWidth + 1,
         css: { left: cs.left, position: cs.position, overflow: cs.overflow, zIndex: cs.zIndex, visibility: cs.visibility, opacity: cs.opacity, transform: cs.transform },
-        innerText: (toc.innerText || "").replace(/\\s+/g, " ").slice(0, 120),
-        childCount: toc.children.length, kids,
+        innerText: String(side.innerText || "").slice(0, 120),
+        tabs, panels, childCount: side.children.length, kids,
       });
     })()`) || "{}");
-    console.log(`\n[等待累计 ${w === 1000 ? 1 : w === 2000 ? 2 : 4}s] navRect=${JSON.stringify(info.navRect)} 子节点=${info.childCount}`);
+    if (info.found !== true) console.log("   raw=" + JSON.stringify(info).slice(0, 400));
+    console.log(`\n[等待累计 ${w === 1000 ? 1 : w === 2000 ? 2 : 4}s] sideRect=${JSON.stringify(info.sideRect)} 子节点=${info.childCount} 页签=${JSON.stringify(info.tabs)} 面板=${JSON.stringify(info.panels)} 正文右缘=${info.mainRight} 栏在视口内=${info.inViewport}`);
     console.log(`  css=${JSON.stringify(info.css)}`);
     console.log(`  innerText=${JSON.stringify(info.innerText)}`);
     for (const k of (info.kids || [])) console.log(`    · ${k.cls} rect=${k.left},${k.top} ${k.w}x${k.h} text=${JSON.stringify(k.text)}`);
-    if (w === 4000) await shot(main, "110-目录打开-4s");
+    if (w === 4000) await shot(main, "110-侧栏打开-4s");
   }
 } catch (e) {
   console.error("HARNESS ERROR:", e?.stack || e);

@@ -4,16 +4,19 @@
 //
 // 使用的 foliate API 白名单（升级 vendor 快照时逐项核对，详见 MANIFEST.json 升级规程）：
 //   view.js: <foliate-view> 自定义元素；open/init/goTo/goToFraction/next/prev/search/clearSearch/
-//            getCFI/close；'relocate'|'load'|'link'|'external-link' 事件；renderer.setAttribute；
+//            getCFI/resolveCFI/close；'relocate'|'load'|'link'|'external-link' 事件；renderer.setAttribute；
 //            renderer.getContents() → [{doc, index}]；book.toc；book.sections[i].id
 //   paginator.js: 属性 flow/gap/margin/max-column-count/max-inline-size
 import "../../../../vendor/foliate-js/view.js";
 import type {
   BookSource,
+  ContentPointerUpInfo,
   ImageLocateHit,
   ImageLocateQuery,
   LinkInfo,
+  MarkPointerInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -25,6 +28,8 @@ import type {
 } from "../kernel";
 import { fixSvgAspect, injectAppearanceStyle } from "./appearance";
 import { getSelectionFromContents, getSelectionGeometryFromContents, pointerToHost } from "./selection";
+import { createMultiHighlight, MULTI_HIGHLIGHT_NAME } from "../multiHighlight";
+import { annotKey, annotSoft } from "../annotColor";
 
 interface TocNode {
   label?: string;
@@ -53,6 +58,8 @@ type FoliateView = HTMLElement & {
   clearSearch(): void;
   deselect(): void;
   getCFI(index: number, range?: Range): string;
+  /** CFI → {章节索引, anchor}（anchor 是 Range 或 doc→Range 的函数）；文中留痕据此把 cfi 画成高亮 */
+  resolveCFI?(cfi: string): { index: number; anchor: unknown };
 };
 
 type Handler = (e: CustomEvent) => void;
@@ -157,12 +164,197 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
 
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
-  const pointerHandlers = new Set<(pos: { x: number; y: number }) => void>();
+  const pointerHandlers = new Set<(pos: ContentPointerUpInfo) => void>();
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   const docs = new Map<number, Document>();
   let lastRelocate: RelocateInfo | null = null;
   let appearance: ReaderAppearance | null = null;
   let currentFlow: "scrolled" | "paged" = "scrolled";
+  // v48.23（D61 §6.8-11）：多段选择高亮——两个引擎共用的实现（见 ../multiHighlight.ts）。
+  // iframe 文档拿不到宿主的 Token，故把 --hl-multi 的求值结果以字面值注入该文档的 <style>
+  // （与外观注入同一做法；宿主侧则直接吃 src/theme.css 的 ::highlight(multi-select) 规则）。
+  const multiHighlight = createMultiHighlight({
+    currentDoc() {
+      for (const { doc } of view.renderer?.getContents() ?? []) {
+        const sel = doc.defaultView?.getSelection();
+        if (sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim()) return doc;
+      }
+      return null;
+    },
+    styleFor() {
+      const value = getComputedStyle(document.body).getPropertyValue("--hl-multi").trim();
+      return `::highlight(${MULTI_HIGHLIGHT_NAME}){background-color:${value || "color-mix(in srgb, #002fa7 22%, transparent)"};}`;
+    }
+  });
+
+  // ---------- v48.24 批3（§4 文中留痕）：EPUB 的常驻标记（cfi → Range → CSS Custom Highlight） ----------
+  // 与多段选择同一套做法（只画绘制层、不碰正文 DOM），只是高亮名与来源不同：
+  // 多段＝当前选区（活对象，换章即清），标记＝落库的根摘录 cfi（换章后按 'load' 重画）。
+  // iframe 拿不到宿主 Token，故同样把 --accent-soft 的求值结果以字面值注入该文档的 <style>。
+  const MARK_HIGHLIGHT_NAME = "extract-mark";
+  let docMarks: ReaderDocMark[] = [];
+  /** 各章节文档当前的标记段（命中判定用；绘制与命中都不靠 pointer-events） */
+  const markRanges = new Map<Document, { id: string; range: Range }[]>();
+  const markStyles = new Map<Document, HTMLStyleElement>();
+  /** 本档已注册的高亮名（按色分组；重画时先全撤再重建） */
+  const registeredHighlightNames = new Map<Document, string[]>();
+  let hoveredMarkId: string | null = null;
+  const markHoverHandlers = new Set<(info: MarkPointerInfo) => void>();
+  const markClickHandlers = new Set<(info: MarkPointerInfo) => void>();
+
+  type HighlightWin = Window & {
+    CSS?: { highlights?: { set(name: string, hl: unknown): void; delete(name: string): boolean; has?(name: string): boolean } };
+    Highlight?: new (...ranges: Range[]) => unknown;
+  };
+  const winOf = (doc: Document) => (doc.defaultView ?? null) as HighlightWin | null;
+
+  /** 把任意 CSS 颜色表达式在**宿主侧**求值成字面颜色（iframe 里没有那些 Token） */
+  const evalColor = (css: string, fallback: string) => {
+    const probe = document.createElement("div");
+    probe.style.cssText = `position:absolute;width:0;height:0;display:none;background:${css};`;
+    document.body.appendChild(probe);
+    const value = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return value && value !== "rgba(0, 0, 0, 0)" ? value : fallback;
+  };
+  /**
+   * 按**色键**分组的注入规则（批 4 修正，规格 §5.4「颜色对应」）：
+   * 文中高亮＝该条批注色的透明档，与栏内竖线/色点/角标同色。
+   * `::highlight` 一个注册名只能一种底色 ⇒ 按色开多条规则（`extract-mark` 保给默认色，
+   * 其余 `extract-mark-<色键>`）——这样批 3 的既有断言（无色的标记走 `extract-mark`）不破。
+   */
+  const markStyleCss = () => {
+    const keys = new Set<string>(["default"]);
+    for (const m of docMarks) keys.add(annotKey(m.color));
+    return [...keys]
+      .map((k) => {
+        const soft = k === "default" ? "var(--accent-soft)" : annotSoft(k.startsWith("hex-") ? `#${k.slice(4)}` : k);
+        const value = evalColor(soft, "color-mix(in srgb, #002fa7 8%, transparent)");
+        return `::highlight(${highlightNameFor(k)}){background-color:${value};}`;
+      })
+      .join("\n");
+  };
+  const highlightNameFor = (key: string) => (key === "default" ? MARK_HIGHLIGHT_NAME : `${MARK_HIGHLIGHT_NAME}-${key.replace(/[^a-z0-9-]/gi, "")}`);
+  /** 注入/更新该文档的标记高亮规则（主题切换后要重算：值派生自 --accent，两档不同） */
+  const ensureMarkStyle = (doc: Document) => {
+    const css = markStyleCss();
+    let el = markStyles.get(doc);
+    if (!el || !el.isConnected) {
+      el = doc.createElement("style");
+      el.setAttribute("data-reader-extract-mark", "1");
+      (doc.head ?? doc.documentElement)?.appendChild(el);
+      markStyles.set(doc, el);
+    }
+    if (el.textContent !== css) el.textContent = css;
+  };
+
+  const resolveMarkRange = (cfi: string, index: number, doc: Document): Range | null => {
+    try {
+      const res = view.resolveCFI?.(cfi);
+      if (!res || Number(res.index) !== index) return null; // 这一段 cfi 不属于本篇文档
+      const anchor = res.anchor;
+      const range = typeof anchor === "function" ? (anchor as (d: Document) => Range)(doc) : (anchor as Range | undefined);
+      return range && range.startContainer?.isConnected ? range : null;
+    } catch {
+      return null; // cfi 解不动（结构变了/非文本书）→ 静默跳过这一条，别的标记照画
+    }
+  };
+
+  const paintMarksForDoc = (index: number) => {
+    const doc = docs.get(index);
+    if (!doc) return;
+    const entries: { id: string; range: Range }[] = [];
+    for (const mark of docMarks) {
+      if (!mark.cfi) continue;
+      const range = resolveMarkRange(mark.cfi, index, doc);
+      if (range) entries.push({ id: mark.id, range });
+    }
+    markRanges.set(doc, entries);
+    const win = winOf(doc);
+    if (!win?.CSS?.highlights || typeof win.Highlight !== "function") return; // 环境不支持 → 静默降级（阅读不受影响）
+    // 先撤掉本档此前注册过的全部色组（重画＝清空 + 全量重建，禁增量补丁）
+    for (const name of registeredHighlightNames.get(doc) ?? []) win.CSS.highlights.delete(name);
+    const byKey = new Map<string, Range[]>();
+    for (const mark of docMarks) {
+      if (!mark.cfi) continue;
+      const hit = entries.find((e) => e.id === mark.id);
+      if (!hit) continue;
+      const k = annotKey(mark.color);
+      byKey.set(k, [...(byKey.get(k) ?? []), hit.range]);
+    }
+    if (byKey.size === 0) {
+      registeredHighlightNames.set(doc, []);
+      return;
+    }
+    ensureMarkStyle(doc);
+    const names: string[] = [];
+    for (const [k, ranges] of byKey) {
+      const name = highlightNameFor(k);
+      win.CSS.highlights.set(name, new win.Highlight(...ranges));
+      names.push(name);
+    }
+    registeredHighlightNames.set(doc, names);
+  };
+  const paintAllMarks = () => {
+    for (const index of docs.keys()) paintMarksForDoc(index);
+  };
+  /** 主题切换后重算各文档的注入样式（值派生自 --accent，深浅两档不同） */
+  const refreshMarkStyles = () => {
+    markStyles.forEach((_, doc) => ensureMarkStyle(doc));
+  };
+
+  /**
+   * D67 §3：注解栏「位置」序的引擎侧来源——各已加载文档按**章节序**，文档内按 Range 文档序。
+   * CFI 字符串序不是文档序（不许拿它比较），只能在引擎里 resolve 后用 Range 比。
+   */
+  const collectMarkOrder = (): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const bySection = [...docs.entries()].sort((a, b) => a[0] - b[0]);
+    for (const [, doc] of bySection) {
+      const entries = (markRanges.get(doc) ?? []).filter((e) => e.range.startContainer.isConnected);
+      // Range 只能在同文档内比较（跨文档 throws）；同文档内按起点序＝文档序
+      entries.sort((a, b) => {
+        try {
+          return a.range.compareBoundaryPoints(Range.START_TO_START, b.range);
+        } catch {
+          return 0; // 已分离/不可比的段保持现有序（稳定回退，不臆造先后）
+        }
+      });
+      for (const e of entries) {
+        if (seen.has(e.id)) continue;
+        seen.add(e.id);
+        out.push(e.id);
+      }
+    }
+    return out;
+  };
+
+  /** 该 id 当前可解析到的标记段（跨已加载文档；命中即证明目标位置可解析） */
+  const hasResolvedMark = (id: string): boolean => {
+    for (const entries of markRanges.values()) {
+      const hit = entries.find((entry) => entry.id === id);
+      if (hit && hit.range.startContainer.isConnected) return true;
+    }
+    return false;
+  };
+
+  /** 命中判定：标记不吃 pointer-events（正文照常可划选），改按各段 Range 的实时矩形自算 */
+  const hitMarkIn = (doc: Document, clientX: number, clientY: number) => {
+    const entries = markRanges.get(doc) ?? [];
+    const frame = doc.defaultView?.frameElement?.getBoundingClientRect() ?? null;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      for (const r of Array.from(entries[i].range.getClientRects())) {
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+          return {
+            id: entries[i].id,
+            rect: { x: (frame?.left ?? 0) + r.left, y: (frame?.top ?? 0) + r.top, width: r.width, height: r.height }
+          };
+        }
+      }
+    }
+    return null;
+  };
 
   const on = (event: string, handler: Handler) => {
     view.addEventListener(event, handler as EventListener);
@@ -183,10 +375,42 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       );
     });
     // iframe 内的 pointer 事件不会冒泡到宿主文档——adapter 中继并换算为宿主坐标
+    // （v48.23 / D61 §6.8-11：连同指针事件的修饰位一起转发——多段选择靠它判定「按住 Ctrl 加选」；
+    //   iframe 内的 keyup 不会转发到宿主，故修饰键状态只能从指针事件本身取，不能靠宿主 keydown 跟踪）
     doc.addEventListener("pointerup", (ev: PointerEvent) => {
       const pos = pointerToHost(doc, ev.clientX, ev.clientY);
-      pointerHandlers.forEach((h) => h(pos));
+      pointerHandlers.forEach((h) =>
+        h({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+      );
     });
+    // v48.24 批3（§4）：文中留痕的进入/离开与点击（只报翻转；坐标换算与选区同规）
+    doc.addEventListener("mousemove", (ev: MouseEvent) => {
+      if (markRanges.size === 0) return;
+      const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
+      const id = hit?.id ?? null;
+      if (id === hoveredMarkId) return;
+      hoveredMarkId = id;
+      markHoverHandlers.forEach((h) => h(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+    });
+    doc.addEventListener("mouseleave", () => {
+      if (hoveredMarkId === null) return;
+      hoveredMarkId = null;
+      markHoverHandlers.forEach((h) => h({ id: null, rect: null }));
+    });
+    // 捕获相位 + 阻止传播：点标记＝浮层，不让 foliate 的链接处理器顺手跳走（标记只读）
+    doc.addEventListener(
+      "click",
+      (ev: MouseEvent) => {
+        if (markRanges.size === 0) return;
+        const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
+        if (!hit) return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        markClickHandlers.forEach((h) => h({ id: hit.id, rect: hit.rect }));
+      },
+      true
+    );
+    paintMarksForDoc(index);
     // v25 图片点选：正文图片点击 → 语义化为 ReaderImageRef（src + 宿主坐标框）。
     // 链接内的图片让位给链接（foliate 自带的 click 处理器负责导航），不dual触发图片聚焦。
     doc.addEventListener("click", (ev: MouseEvent) => {
@@ -355,6 +579,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         injectAppearanceStyle(doc, a, currentFlow);
         if (currentFlow !== "paged") fixSvgAspect(doc);
       });
+      // 阅读主题联动软件主题（暗夜/纸白），accent 派生档跟着变——标记的注入色要重算
+      refreshMarkStyles();
     },
 
     getTOC(): ReaderTocItem[] {
@@ -452,11 +678,60 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       view.deselect();
     },
 
+    // v48.23（D61 §6.8-11）：多段选择高亮（CSS Custom Highlight API，不碰正文 DOM）
+    multiSelectHighlight(action) {
+      multiHighlight.update(action);
+    },
+
+    clearMultiSelectHighlight() {
+      multiHighlight.clear();
+    },
+
+    // v48.24 批3（§4）：文中留痕——cfi → Range → CSS Custom Highlight（数据面由壳层给）
+    setDocumentMarks(marks) {
+      docMarks = Array.isArray(marks) ? marks : [];
+      paintAllMarks();
+    },
+
+    // D67 §3：注解栏「位置」序——当前可解析标记的文档序（见 collectMarkOrder）
+    getMarkOrder() {
+      return collectMarkOrder();
+    },
+
+    // D67（§6.8-13）：侧栏注解按 id 导航——只认精确 id 与该条的 CFI；
+    // 不承诺章节内像素位置，也不回退文本搜索。
+    async goToMark(id: string) {
+      const mark = docMarks.find((candidate) => candidate.id === id);
+      const cfi = typeof mark?.cfi === "string" ? mark.cfi : "";
+      if (!cfi) return false;
+      let ok = false;
+      try {
+        ok = await kernel.goTo({ cfi });
+      } catch {
+        return false; // 坏 CFI 属存储边界输入：按契约失败，不上抛
+      }
+      if (!ok) return false;
+      // 导航后目标必须解析成已加载章节的 Range（标记重画在 'load' 上完成）
+      const deadline = Date.now() + 3000;
+      for (;;) {
+        if (hasResolvedMark(id)) return true;
+        if (Date.now() > deadline) return false;
+        await new Promise((resolve) => window.setTimeout(resolve, 50));
+      }
+    },
+
     getCurrentLocation(): ReaderLocation | null {
       return lastRelocate?.location ?? null;
     },
 
     destroy() {
+      // 高亮画在各章节文档上，销毁内核时一并撤掉（否则残影跟着下一个内核）
+      multiHighlight.clear();
+      markRanges.forEach((_, doc) => winOf(doc)?.CSS?.highlights?.delete(MARK_HIGHLIGHT_NAME));
+      markRanges.clear();
+      markStyles.clear();
+      docMarks = [];
+      hoveredMarkId = null;
       try {
         view.close();
       } catch {
@@ -468,6 +743,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       linkHandlers.clear();
       pointerHandlers.clear();
       imageHandlers.clear();
+      markHoverHandlers.clear();
+      markClickHandlers.clear();
     },
 
     on(event, handler) {
@@ -486,7 +763,17 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         imageHandlers.add(h);
         return () => imageHandlers.delete(h);
       }
-      const h = handler as (pos: { x: number; y: number }) => void;
+      if (event === "markHover") {
+        const h = handler as (info: MarkPointerInfo) => void;
+        markHoverHandlers.add(h);
+        return () => markHoverHandlers.delete(h);
+      }
+      if (event === "markClick") {
+        const h = handler as (info: MarkPointerInfo) => void;
+        markClickHandlers.add(h);
+        return () => markClickHandlers.delete(h);
+      }
+      const h = handler as (pos: ContentPointerUpInfo) => void;
       pointerHandlers.add(h);
       return () => pointerHandlers.delete(h);
     }

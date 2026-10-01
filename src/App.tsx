@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import "./theme.css";
 import Bookshelf from "./components/Bookshelf";
 import Reader from "./components/Reader";
-import QueueView from "./components/QueueView";
+import ExtractReviewView from "./components/ExtractReviewView";
 import ReviewView from "./components/ReviewView";
 import CardBrowser from "./components/CardBrowser";
 import JournalView from "./components/JournalView";
@@ -20,7 +20,7 @@ import { installMindmapBridge, mindmapApi } from "./lib/mindmap";
 import { installActivityStore, seedFromRuns } from "./lib/activity";
 import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
 import { BackgroundActivity } from "./components/BackgroundActivity";
-import { readingWorkflow } from "./lib/readingWorkflow";
+import { readingWorkflow, parseContextRef, type ExtractSpan } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
 import { applyAccent } from "./lib/accentVar";
@@ -49,11 +49,12 @@ type View =
       resumeRunId?: string | null;
     }
   | { name: "queue" }
-  | { name: "review" }
+  // v48.22（D58 §6.8-8）：本书范围的集中复习（阅读器「复习摘录 / 复习闪卡」入口）
+  | { name: "extractSession"; bookItemIds: string[]; title: string; limits?: Record<string, number> | null }
+  | { name: "review"; bookItemIds?: string[]; title?: string; limits?: Record<string, number> | null }
   | { name: "browse" }
   | { name: "journal" }
-  | { name: "stats" }
-  | { name: "extractReader"; extractId: string; book?: { bytes: Uint8Array; name: string } };
+  | { name: "stats" };
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -251,21 +252,45 @@ export default function App() {
     [view, loadReaderBook]
   );
 
+  // v48.23（D61 §6.8-11）：多段不相邻选择时，spans 与 contentMarkdown 一起过桥——
+  // 主进程按 spans 优先装配文本与 quote_range_json（≥2 段才传；单段路径载荷不变）。
+  // 规格 §1.2：摘录复习页（queue / extractSession）里也能就地另立**子摘录**——
+  // 当前摘录 id 与「所选文字在父卡正文里的偏移」由 ExtractReviewView 的卡面采集（ctx.parentRange），
+  // contextRef 在此**唯一一处**补 parentExtractId / rootExtractId / parentRange（根＝自身 id 由 db 侧补）。
   const handleExtract = useCallback(
-    async (text: string) => {
+    async (
+      text: string,
+      spans?: ExtractSpan[],
+      ctx?: { parentExtractId?: string; parentRange?: Array<{ start: number; end: number }> }
+    ) => {
+      const multi = spans && spans.length >= 2 ? spans : undefined;
       if (view.name === "reader") {
         await readingWorkflow.create({
           parentType: "document",
           parentId: view.doc.documentId,
           documentId: view.doc.documentId,
-          contentMarkdown: text
+          contentMarkdown: text,
+          spans: multi
         });
-      } else if (view.name === "extractReader" && extractDetail) {
+      } else if ((view.name === "queue" || view.name === "extractSession") && ctx?.parentExtractId) {
+        // 复习中从父建（R11）：父摘录的 documentId / rootExtractId 从库里取回，不靠渲染层猜
+        const parent = await readingWorkflow.getTopic(ctx.parentExtractId);
+        if (!parent) return;
+        const parentRef = parseContextRef(parent.contextRefJson);
         await readingWorkflow.create({
           parentType: "extract",
-          parentId: extractDetail.id,
-          documentId: extractDetail.documentId,
-          contentMarkdown: text
+          parentId: parent.id,
+          documentId: parent.documentId,
+          contentMarkdown: text,
+          spans: multi,
+          contextRef: {
+            documentId: parent.documentId,
+            extractId: parent.id,
+            parentExtractId: parent.id,
+            rootExtractId: String(parentRef?.rootExtractId || parent.id),
+            // 工单 ②：父卡坐标下的引文范围——子卡「跳转原文」回父卡时高亮的就是它（零迁移，JSON 列）
+            ...(Array.isArray(ctx.parentRange) && ctx.parentRange.length ? { parentRange: ctx.parentRange } : {})
+          }
         });
       }
       eventBus.emit("workflow/changed");
@@ -281,16 +306,6 @@ export default function App() {
     },
     [view]
   );
-
-  const openExtract = useCallback((extractId: string) => {
-    readingWorkflow.getTopic(extractId).then(async (detail) => {
-      if (!detail) return;
-      // 摘录统一进阅读内核（v20）：内容合成为单章 EPUB；阅读进度/统计不落库（摘录非书）
-      const syn = await buildSyntheticEpub("摘录", detail.contentMarkdown, { embedKatexCss: false });
-      setExtractDetail(detail);
-      setView({ name: "extractReader", extractId, book: { bytes: syn.bytes, name: "synthetic.epub" } });
-    });
-  }, []);
 
   // 「跳转原文」（复习卡 / 队列摘录 / 卡片浏览 共用）：documentId 反查书架条目，以锚点打开阅读器，
   // 返回按钮回到来源页。跳转属「现场查看」语义（v19）：本次阅读器会话不落阅读进度与阅读字数，
@@ -379,41 +394,56 @@ export default function App() {
         openMindmapInitially={Boolean(view.openMindmap)}
         openMindmapMapId={view.openMindmapMapId ?? null}
         resumeRunId={view.resumeRunId ?? null}
+        onReviewExtracts={() => setView({ name: "extractSession", bookItemIds: [view.itemId], title: view.doc.title })}
+        onReviewCards={() => setView({ name: "review", bookItemIds: [view.itemId], title: view.doc.title })}
         onMindmapOpened={() => setView((v) => (v.name === "reader" ? { ...v, openMindmap: false, resumeRunId: null } : v))}
       />
     );
   } else if (view.name === "queue") {
-    topTitle = "学习队列";
-    mainContent = <QueueView onOpen={openExtract} onJumpToDoc={handleJumpToDoc} />;
+    // v48.22（D58 §6.8）：原「学习队列」列表页退役——列表职能迁入卡片浏览器，
+    // 本页改为**沉浸式摘录连续处理页**（一屏一条、连续推进、正文可就地编辑）
+    topTitle = "摘录";
+    mainContent = (
+      <ExtractReviewView
+        onJumpToDoc={handleJumpToDoc}
+        onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
+      />
+    );
+  } else if (view.name === "extractSession") {
+    // 本书范围会话（阅读器「复习摘录」入口）：只处理该书摘录，退出回阅读
+    topTitle = "摘录";
+    mainContent = (
+      <ExtractReviewView
+        onJumpToDoc={handleJumpToDoc}
+        bookItemIds={view.bookItemIds}
+        scopeLimits={view.limits ?? null}
+        header={`集中复习：《${view.title}》`}
+        onExit={() => setView({ name: "shelf" })}
+        onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
+      />
+    );
   } else if (view.name === "review") {
-    topTitle = "复习";
-    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} />;
+    topTitle = view.title ? `复习 · ${view.title}` : "复习";
+    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} bookItemIds={view.bookItemIds} scopeLimits={view.limits ?? null} />;
   } else if (view.name === "browse") {
     topTitle = "卡片浏览";
-    mainContent = <CardBrowser onJumpToDoc={handleJumpToDoc} />;
+    mainContent = (
+      <CardBrowser
+        onJumpToDoc={handleJumpToDoc}
+        onStartSession={({ bookItemIds, kinds, name, limits }) => {
+          // v48.22（D58 §6.8-5）：从筛选牌组进入集中复习——摘录范围走沉浸式摘录页，闪卡范围走复习页；
+          // 牌组的上限覆写随视图带过去（只收紧，不另开预算）
+          if (!kinds.includes("card")) setView({ name: "extractSession", bookItemIds, title: name, limits: limits ?? null });
+          else setView({ name: "review", bookItemIds, title: name, limits: limits ?? null });
+        }}
+      />
+    );
   } else if (view.name === "journal") {
     topTitle = "日记";
     mainContent = <JournalView onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "stats") {
     topTitle = "统计数据";
     mainContent = <Dashboard />;
-  } else if (view.name === "extractReader") {
-    topTitle = "摘录";
-    mainContent = extractDetail ? (
-      <Reader
-        title="摘录"
-        markdown={extractDetail.contentMarkdown}
-        book={view.book}
-        itemId={extractDetail.documentId}
-        contextLabel={
-          `来自《${extractDetail.docTitle}》` +
-          (extractDetail.depth > 1 ? ` · 第${extractDetail.depth}层摘录` : "")
-        }
-        contextRef={{ documentId: extractDetail.documentId, extractId: extractDetail.id }}
-        sourceTitle={extractDetail.docTitle}
-        onBack={() => setView({ name: "queue" })}
-      />
-    ) : null;
   } else {
     mainContent = (
       <Bookshelf
@@ -442,7 +472,7 @@ export default function App() {
         <nav className="topbar-nav">
           {([
             { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
-            { key: "queue", label: "队列", match: (n: string) => n === "queue" || n === "extractReader" },
+            { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractSession" },
             { key: "review", label: "复习", match: (n: string) => n === "review" },
             { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
             { key: "journal", label: "日记", match: (n: string) => n === "journal" },

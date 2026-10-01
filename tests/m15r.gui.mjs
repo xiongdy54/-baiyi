@@ -72,6 +72,11 @@ function spawnApp() {
 
 const clickByText = (sel, text) =>
   `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`;
+/** D5-B：导图入口收进工具栏「更多」弹出组——先确保组在场（再点组内的动作行） */
+const openMoreMenu = `(() => {
+  if (!document.querySelector('[data-tool-menu-panel="more"]')) document.querySelector('[data-tool-menu-btn="more"]')?.click();
+  return 1;
+})()`;
 
 try {
   try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
@@ -108,9 +113,12 @@ try {
   check("书架点击打开阅读器", opened === true, opened);
   await wait(3500);
 
-  // 1. 工具栏「导图」按钮（目录旁）→ 全屏工作区挂载
-  const btn = await main.eval(clickByText(".reader-engine-controls button", "导图"));
-  check("工具栏含「导图」按钮（目录旁）", btn === true, btn);
+  // 1. 工具栏「更多」弹出组（导图入口收进去）→ 打开组并点「导图」→ 全屏工作区挂载
+  const moreBtn = await main.eval(`!!document.querySelector('[data-tool-menu-btn="more"]')`);
+  check("工具栏含「更多」弹出组（导图已收进去）", moreBtn === true, moreBtn);
+  await main.eval(openMoreMenu);
+  await wait(400);
+  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
   await wait(600);
   const collecting = await main.eval(`JSON.stringify({
     mounted: !!document.querySelector(".mindmap-workspace"),
@@ -141,13 +149,15 @@ try {
   await wait(600);
   const backState = await main.eval(`JSON.stringify({
     closed: !document.querySelector(".mindmap-workspace"),
-    readerAlive: !!document.querySelector(".reader-engine-controls") && [...document.querySelectorAll(".reader-engine-controls button")].some((x) => x.textContent.includes("导图"))
+    readerAlive: !!document.querySelector(".reader-engine-controls") && !!document.querySelector('[data-tool-menu-btn="more"]')
   })`);
   const bs = JSON.parse(backState || "{}");
   check("「正文」返回阅读器（原位保持）", back === true && bs.closed === true && bs.readerAlive === true, backState);
 
   // 4. 再入工作区（空态保持、无残留）
-  await main.eval(clickByText(".reader-engine-controls button", "导图"));
+  await main.eval(openMoreMenu);
+  await wait(400);
+  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
   await wait(1500);
   const reenter = await main.eval(`!!document.querySelector(".mindmap-workspace") && document.body.textContent.includes("尚未生成")`);
   check("再入工作区（空态保持）", reenter === true, reenter);
@@ -366,7 +376,9 @@ try {
   const cfgFile = path.join(USER_DATA, "ai-config.json");
   const cfgRaw = fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8").slice(0, 120) : "MISSING";
   await wait(3500);
-  await main.eval(clickByText(".reader-engine-controls button", "导图"));
+  await main.eval(openMoreMenu);
+  await wait(400);
+  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
   await wait(1800);
   const cfgProbe = await main.eval(`(async () => {
     const c = await window.aiAPI.getConfig();
@@ -488,7 +500,9 @@ try {
   const openedRec = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK} 恢复用例")); c?.click(); return !!c; })()`);
   check("恢复用例：阅读器打开", openedRec === true, openedRec);
   await wait(3500);
-  await main.eval(clickByText(".reader-engine-controls button", "导图"));
+  await main.eval(openMoreMenu);
+  await wait(400);
+  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
   await wait(2000);
   const recEmpty = await main.eval(`JSON.stringify({
     isEmpty: document.body.textContent.includes("尚未生成"),

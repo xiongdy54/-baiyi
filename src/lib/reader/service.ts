@@ -3,10 +3,13 @@
 // foliate-js 由本目录经动态 import 惰性加载（仅在真正打开阅读引擎时进内存）。
 import type {
   BookSource,
+  ContentPointerUpInfo,
   ImageLocateHit,
   ImageLocateQuery,
   LinkInfo,
+  MarkPointerInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -15,17 +18,21 @@ import type {
   ReaderSelection,
   ReaderTocItem,
   ReaderTheme,
-  RelocateInfo
+  RelocateInfo,
+  SourceAnchorGeometry
 } from "./kernel";
 import { DEFAULT_READER_SETTINGS, resolveAppearance, type ReaderSettings } from "./foliate/appearance";
 import { READER_ENGINE_VERSION, PDF_ENGINE_VERSION } from "./foliate/version";
 
 export type {
   BookSource,
+  ContentPointerUpInfo,
   ImageLocateHit,
   ImageLocateQuery,
   LinkInfo,
+  MarkPointerInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -34,7 +41,8 @@ export type {
   ReaderSelection,
   ReaderTocItem,
   ReaderTheme,
-  RelocateInfo
+  RelocateInfo,
+  SourceAnchorGeometry
 };
 export { READER_ENGINE_VERSION, PDF_ENGINE_VERSION, DEFAULT_READER_SETTINGS, resolveAppearance };
 export type { ReaderSettings };

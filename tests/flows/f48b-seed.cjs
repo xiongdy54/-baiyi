@@ -424,6 +424,9 @@ async function seed() {
     if (r && r.id) extracts++;
   }
   flow.check("摘录队列有 13 条一层 + 3 条二层", extracts, 16);
+  // v48.22（D58 §6.8-2）：新建摘录**次日进队**（SM 语义）——种子要的是「当日到期队列」，
+  // 故显式把它们置为已到期（生产路径不这么做，这是种子夹具对语义变更的适配）
+  db.execRawSql("UPDATE extracts SET topic_next_at = ? WHERE is_deleted = 0", [Date.now() - 3600000]);
 
   let journals = 0;
   const jDays = [0, 1, 2, 4, 6, 9, 12, 15, 19, 23, 28, 33, 38, 44];

@@ -327,8 +327,9 @@ app
       db2.persistNow();
       const aud3 = await audit(path.join(dir2, "library.db"));
       // 出厂播种白名单：prompt_templates（内置提示词）、fsrs_configs（当前参数指纹）、
-      // knowledge_domains（§4.19 内置领域树）、users（§4.2 所有业务行都挂 'local-user'，必须有这行）
-      const SEED_OK = /^prompt_templates$|^fsrs_configs$|^knowledge_domains$|^users$/;
+      // knowledge_domains（§4.19 内置领域树）、users（§4.2 所有业务行都挂 'local-user'，必须有这行）、
+      // op_counter（v48.22 / D58 §4.1：全局操作序计数器，单行、必须存在，否则首写回落 MAX(review_seq)+1）
+      const SEED_OK = /^prompt_templates$|^fsrs_configs$|^knowledge_domains$|^users$|^op_counter$/;
       const emptyBad = [];
       for (const t of aud3.tables()) {
         if (t.startsWith("sqlite_")) continue;

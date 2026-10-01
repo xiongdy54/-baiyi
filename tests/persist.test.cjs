@@ -3,7 +3,7 @@
 // 覆盖（§4.4.9 / F11）：
 //   P1 原子写 happy path（真实文件系统：tmp+fsync+rename 覆盖替换，无 .tmp 残留）
 //   P2 writeSync 失败 → saveReview throw → 盘上旧库完整可读 → persistNow 重试成功
-//   P3 renameSync 失败 → throw → 旧库完整 + tmp 残留（启动清理兜底）
+//   P3 renameSync 失败 → throw → 旧库完整 + **不留半成品 tmp**（D-9 修复后的口径：写/刷/换名任一失败都清 tmp）
 //   P4 启动清残留 tmp（tmp 永远不是事实源）
 //   P5 persist 失败窗口「任意时刻至少一份完整库」不变量
 const { app } = require("electron");
@@ -89,7 +89,7 @@ app.whenReady().then(async () => {
     }
     check("rename 失败向上抛", renameThrew, "ok:false", renameThrew);
     check("rename 失败后盘上旧库完整", sha(fs.readFileSync(dbPath)) === hashBeforeRenameFail, "unchanged", "changed");
-    check("rename 失败后 tmp 残留（属预期，启动清理兜底）", fs.existsSync(dbPath + ".tmp"), "存在", "不存在");
+    check("rename 失败后不留半成品 tmp（D-9：写/刷/换名任一失败都必须清掉 tmp）", !fs.existsSync(dbPath + ".tmp"), "无 tmp", fs.existsSync(dbPath + ".tmp") ? "存在" : "无");
 
     console.log("== P4 启动清残留 tmp（tmp 永远不是事实源） ==");
     fs.writeFileSync(dbPath + ".tmp", "garbage-from-crashed-write");

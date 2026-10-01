@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>摘录页瑞士风重排 · 五版对照（未动项目代码）</title>
+<!--
+  交付性质：设计样张。**src/ 与 electron/ 一行未改**；本文件不进构建、不被任何源码引用。
+
+  第二轮口径（用户 2026-09-25 更正）：
+    摘录页**不照搬**复习页的 4 等分动作网格——四档评分是复习里最重要的元素，摘录页所有按钮没有那个量级。
+    等分网格会把「毕业 / 撤销」抬到与「下一条」同宽同高，制造虚假等权。
+    于是本轮把「动作区形态」当作唯一的争点轴，切五版；与复习页统一的部分收窄为：
+    版心 720 居中 · 页面内边距 48/64/32 · 右上角计数独占一行（含键盘提示）· kicker 在上 · 正文 26px/1.5 · 元数据行在下 · 动作区在元数据之下。
+    上一轮的「刻度带 / 左元数据栏」两版撤回（它们争的是元数据方位，且左栏会让正文横移 +192px），见文末落选清单。
+
+  规范依据：
+    · AI_DEVELOPMENT_GUIDE §5.1 瑞士风基线（唯一视觉规范 docs/swiss-international-style.md）
+    · §5.2「页内禁止重复导航文字；页内只保留右上角/左上角计数（review-count）」
+    · §5.3「内容版心 720px 长文单列测量宽，8px 基线」「复习页卡面统一 26px / 1.5」
+    · §5.4「跳转原文＝accent 色 Meta 档文字按钮」
+    · swiss-international-style「对齐法则」：kicker/meta 小标签在主标题**上方**（上下结构），不压成左右两列
+  现状根因（实测，非推断）：
+    · src/theme.css 里 `.primary` **零条规则**（grep `\.primary` = 0 命中），而 ExtractReviewView/ExtractCardFace
+      用 `<button className="primary">` → 「下一条」渲染成浏览器默认按钮（实测带圆角、底色 rgb(240,240,240)、高 23px），
+      与复习页 .btn 体系脱节，同时违背「直角」。
+    · .extract-face-body 取 14px/1.8，复习页 .review-front 取 26px/1.5 → 同为「读一段文字」差 12px。
+    · .extract-page-head 把 计数 + 上下文 + 回执 + 键盘提示 + 返回阅读挤在同一横排（theme.css:4389-4403）
+      → 计数不再独占右上（实测差 657.9px）。
+  下方所有数字由页面 JS 现场 getComputedStyle / getBoundingClientRect 量出，写死值一律不出现；
+  「量测」一节自带对照有效性断言，对照不过则整表标红为「量测无效」。
+-->
+<style>
+/* ================= TOKEN-BEGIN（逐条抄 src/theme.css:7-124，不删减） ================= */
+:root{
+  --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+  --text-primary:var(--ink); --text-secondary:#525252; --text-helper:var(--grey-3); --text-placeholder:#8a8a8a;
+  --border-subtle:#e0e0e0; --border-strong:#a3a3a3;
+  --accent:#002fa7; --accent-on:#ffffff;
+  --accent-soft:color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #000000);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #000000);
+  --success:#1a7f37; --warning:#9a6700; --error:#b42318;
+  --error-on:#ffffff; --warning-on:#ffffff;
+  --error-soft:color-mix(in srgb, var(--error) 10%, transparent);
+  --error-hover:color-mix(in srgb, var(--error) 88%, #000000);
+  --error-pressed:color-mix(in srgb, var(--error) 78%, #000000);
+  --overlay-ink:#0a0a0a; --overlay-text:#f5f5f2; --overlay-helper:#a3a3a3;
+  --font-sans:"Inter","Helvetica Neue","Helvetica","Arial","Segoe UI Variable","Segoe UI",system-ui,
+    "PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --font-mono:"JetBrains Mono","IBM Plex Mono","SF Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+  --fs-display:44px; --fs-title-l:26px; --fs-title-s:18px; --fs-body:14px; --fs-secondary:13px; --fs-meta:12px;
+  --lh-prose:1.7;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px; --sp-12:48px; --sp-16:64px;
+  --z-dropdown:100; --z-sticky:200; --z-drawer:300; --z-modal:400; --z-toast:500;
+  --shadow-float:0 8px 24px rgba(10,10,10,0.12);
+  --shadow-panel:0 8px 24px rgba(10,10,10,0.12);
+  --radius:0; --radius-panel:0; --radius-pill:0;
+  --ease:cubic-bezier(0.2,0,0.38,0.9); --dur:120ms;
+}
+/* 派生档在承载主题的这一层重算一次（§5.1 Token 求值层纪律：var() 在声明所在元素求值） */
+body{
+  --accent-soft:color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #000000);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #000000);
+  --text-primary:var(--ink); --text-helper:var(--grey-3);
+}
+body.theme-dark{
+  --paper:#101010; --grey-1:#1c1c1a; --grey-2:#33332f; --grey-3:#8a8a86; --ink:#f5f5f2;
+  --text-primary:var(--ink); --text-secondary:#b5b5b0; --text-helper:var(--grey-3); --text-placeholder:#7a7a76;
+  --border-subtle:#2a2a27; --border-strong:#4a4a46;
+  --accent:#5b7fe8; --accent-on:#0a0a0a;
+  --accent-hover:color-mix(in srgb, var(--accent) 88%, #ffffff);
+  --accent-pressed:color-mix(in srgb, var(--accent) 78%, #ffffff);
+  --success:#3fb950; --warning:#d29922; --error:#f85149;
+  --error-on:#0a0a0a; --warning-on:#0a0a0a;
+  --error-hover:color-mix(in srgb, var(--error) 88%, #ffffff);
+  --error-pressed:color-mix(in srgb, var(--error) 78%, #ffffff);
+  --shadow-float:0 8px 24px rgba(0,0,0,0.5);
+  --shadow-panel:0 8px 24px rgba(0,0,0,0.5);
+}
+/* ================= TOKEN-END ================= */
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--grey-1);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--fs-body);
+  line-height:1.6;-webkit-font-smoothing:antialiased;accent-color:var(--accent)}
+button{font-family:inherit}
+.mono{font-family:var(--font-mono);font-feature-settings:"tnum"}
+
+/* ---------- 样张文档外壳（非应用；只用 Token） ---------- */
+.doc{padding:var(--sp-8) var(--sp-2) var(--sp-16)}
+.doc-inner{max-width:1160px;margin:0 auto}
+.doc-h1{font-size:var(--fs-display);font-weight:200;line-height:1.02;letter-spacing:-.03em;margin:0 0 var(--sp-4)}
+.doc-h1 b{font-weight:600}
+.doc-lead{max-width:78ch;font-size:var(--fs-secondary);line-height:var(--lh-prose);color:var(--text-secondary);margin:0 0 var(--sp-4)}
+.doc-h2{font-size:var(--fs-secondary);font-weight:600;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--text-helper);margin:var(--sp-12) 0 var(--sp-3);padding-top:var(--sp-4);border-top:1px solid var(--border-subtle)}
+.doc-note{max-width:100ch;font-size:var(--fs-secondary);line-height:1.65;color:var(--text-secondary);margin:0 0 var(--sp-4)}
+.doc-note code,.mono-inline{font-family:var(--font-mono);font-size:var(--fs-meta);background:var(--grey-1);
+  padding:calc(var(--sp-1) / 2) var(--sp-1);border:1px solid var(--border-subtle)}
+.ctrl{display:flex;flex-wrap:wrap;gap:var(--sp-6);align-items:flex-end;
+  padding:var(--sp-4);background:var(--paper);border:1px solid var(--border-subtle);margin-bottom:var(--sp-4)}
+.ctrl-group{display:flex;flex-direction:column;gap:var(--sp-2)}
+.ctrl-label{font-size:var(--fs-meta);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-helper)}
+.ctrl-row{display:flex}
+.ctrl-row button{height:32px;padding:0 var(--sp-3);background:var(--paper);border:1px solid var(--border-subtle);
+  color:var(--text-secondary);font-size:var(--fs-secondary);font-weight:500;cursor:pointer;
+  border-left-width:0;transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+.ctrl-row button:first-child{border-left-width:1px}
+.ctrl-row button:hover{background:var(--grey-1);color:var(--text-primary)}
+.ctrl-row button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.flash-line{font-size:var(--fs-meta);color:var(--accent);font-weight:600;min-height:18px;margin:0 0 var(--sp-4)}
+
+table.grid{width:100%;border-collapse:collapse;font-size:var(--fs-meta);background:var(--paper)}
+table.grid th,table.grid td{border-bottom:1px solid var(--border-subtle);padding:var(--sp-2) var(--sp-3);text-align:left;vertical-align:top}
+table.grid th{font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-helper);background:var(--grey-1)}
+table.grid td.num{text-align:right;font-family:var(--font-mono);font-feature-settings:"tnum";white-space:nowrap}
+table.grid td.good{color:var(--success);font-weight:600}
+table.grid td.bad{color:var(--error);font-weight:600}
+table.grid th.rowhead,table.grid td.rowhead{font-weight:600;color:var(--text-primary);white-space:nowrap}
+.tbl-wrap{border:1px solid var(--border-subtle);overflow:auto}
+ul.tight{margin:0;padding-left:var(--sp-4);font-size:var(--fs-secondary);line-height:1.65;color:var(--text-secondary)}
+ul.tight li{margin-bottom:var(--sp-2)}
+
+/* ---------- 仿窗口舞台 ----------
+   仿窗口一律**定宽**（不随文档宽度收缩）。取证时背景文档 viewport=0×0，
+   `max-width:100%` 会把版心压成 0 → 页面自带的量测表全表作废；
+   量测必须与视口无关，故 width/min/max 钉成同一个值，窗口窄时由舞台横向滚动。 */
+.stage-wrap{margin-bottom:var(--sp-8);overflow-x:auto}
+.stage-head{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:baseline;margin-bottom:var(--sp-2)}
+.stage-name{font-size:var(--fs-title-s);font-weight:500;letter-spacing:-.01em}
+.stage-tag{font-size:var(--fs-meta);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-helper)}
+.stage-tag.control{border:1px solid var(--error);color:var(--error);padding:0 var(--sp-2)}
+.stage-tag.target{border:1px solid var(--success);color:var(--success);padding:0 var(--sp-2)}
+.stage-diff{font-size:var(--fs-secondary);color:var(--text-secondary);max-width:104ch;margin:0 0 var(--sp-3);line-height:1.6}
+.frame{--fw:1100px;--fh:750px;container-type:inline-size;
+  width:var(--fw);min-width:var(--fw);max-width:var(--fw);height:var(--fh);display:flex;flex-direction:column;
+  background:var(--paper);border:1px solid var(--border-subtle);overflow:hidden;position:relative}
+.topbar{height:var(--sp-12);display:flex;align-items:center;justify-content:space-between;
+  padding:0 var(--sp-2) 0 var(--sp-4);background:var(--paper);border-bottom:1px solid var(--border-subtle);flex:none}
+.topbar-nav{display:flex;align-items:center;gap:var(--sp-1)}
+.nav-item{height:var(--sp-8);padding:0 var(--sp-3);background:transparent;border:none;cursor:pointer;
+  font-family:inherit;font-size:var(--fs-secondary);font-weight:500;color:var(--text-secondary)}
+.nav-item:hover{background:var(--grey-1);color:var(--text-primary)}
+.nav-item.active{color:var(--accent);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+.topbar-title{margin-left:var(--sp-4);padding-left:var(--sp-4);border-left:1px solid var(--grey-2);
+  font-size:var(--fs-secondary);color:var(--text-helper)}
+.topbar-right{display:flex;gap:var(--sp-1);align-items:center}
+.icon-btn{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;
+  background:transparent;border:none;color:var(--text-secondary);cursor:pointer}
+.icon-btn:hover{background:var(--grey-1);color:var(--text-primary)}
+.app-body{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+
+/* ---------- 复习页既有规则（照抄 theme.css:2016-2226，作为「统一」的目标锚） ---------- */
+.review-wrap{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;align-items:stretch;gap:0;
+  padding:var(--sp-12) var(--sp-16) var(--sp-8)}
+.review-session,.session{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:0}
+.review-count{align-self:flex-end;font-size:var(--fs-meta);font-weight:500;color:var(--text-helper);
+  font-variant-numeric:tabular-nums;margin-bottom:var(--sp-6)}
+.review-face{position:relative;max-width:720px;width:100%;min-height:200px;display:flex;flex-direction:column;gap:var(--sp-6);cursor:default}
+.review-prefix{display:inline-block;font-size:var(--fs-meta);font-weight:600;letter-spacing:.04em;color:var(--text-helper);margin-bottom:var(--sp-2)}
+.review-front{font-size:var(--fs-title-l);font-weight:400;line-height:1.5;letter-spacing:-.01em;color:var(--text-primary);white-space:pre-wrap}
+.review-back{font-size:var(--fs-title-l);font-weight:400;line-height:1.5;letter-spacing:-.01em;color:var(--text-primary);
+  border-top:1px solid var(--grey-2);padding-top:var(--sp-6)}
+.review-editable{cursor:text;white-space:pre-wrap}
+.review-editable:focus{outline:none}
+.review-editable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.review-meta{font-size:var(--fs-meta);font-weight:500;color:var(--text-helper);font-variant-numeric:tabular-nums}
+.review-jump{background:transparent;border:none;cursor:pointer;font-family:inherit;font-size:var(--fs-meta);
+  font-weight:500;color:var(--accent);padding:0;margin-right:var(--sp-2)}
+.review-jump:hover{text-decoration:underline;text-underline-offset:3px}
+.grade-row{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-4);margin-top:var(--sp-12)}
+.grade-row .btn{flex-direction:column;height:auto;min-height:56px;padding:var(--sp-2) var(--sp-4);gap:var(--sp-1);align-items:center;justify-content:center}
+.grade-due{font-size:var(--fs-meta);font-weight:600;color:var(--text-helper);font-variant-numeric:tabular-nums}
+.bar{position:relative}
+.bar::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px}
+.bar-a::before{background:var(--error)} .bar-b::before{background:var(--warning)}
+.bar-c::before{background:var(--accent)} .bar-d::before{background:var(--success)}
+.grade-row .btn:hover{background:var(--grey-2)}
+.review-tools{display:flex;gap:var(--sp-3);margin-top:var(--sp-4);flex-wrap:wrap}
+.btn{height:40px;padding:0 var(--sp-4);display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);
+  font-size:var(--fs-body);font-weight:500;border:1px solid transparent;cursor:pointer;border-radius:var(--radius);
+  transition:background-color var(--dur) var(--ease),border-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+.btn-sm{height:32px;padding:0 var(--sp-3);font-size:var(--fs-secondary)}
+.btn-primary{background:var(--accent);color:var(--accent-on)}
+.btn-primary:hover{background:var(--accent-hover)}
+.btn-secondary{background:var(--grey-1);color:var(--text-primary)}
+.btn-secondary:hover{background:var(--grey-2)}
+.btn-outline{background:transparent;border-color:var(--border-subtle);color:var(--text-primary)}
+.btn-outline:hover{background:var(--grey-1)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+input.num{height:32px;width:64px;padding:0 var(--sp-2);border:1px solid var(--border-subtle);background:var(--paper);
+  color:var(--text-primary);font-family:var(--font-mono);font-size:var(--fs-meta);border-radius:var(--radius)}
+.seg{display:inline-flex}
+.seg button{height:32px;padding:0 var(--sp-3);background:var(--paper);border:1px solid var(--border-subtle);
+  border-left-width:0;color:var(--text-secondary);font-size:var(--fs-meta);font-weight:600;cursor:pointer}
+.seg button:first-child{border-left-width:1px}
+.seg button:hover{background:var(--grey-1);color:var(--text-primary)}
+.seg button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.badge-experimental{border:1px solid var(--accent);color:var(--accent);padding:0 var(--sp-2);font-size:var(--fs-meta);font-weight:600}
+
+/* ---------- V0 现状复刻（theme.css:4381-4441 原样，含 .primary 零规则这一事实） ---------- */
+.extract-page{flex:1;min-height:0;overflow-y:auto;padding:var(--sp-12) var(--sp-16) var(--sp-8);display:flex;flex-direction:column}
+.extract-page-head{width:100%;max-width:720px;margin:0 auto var(--sp-4);display:flex;align-items:center;gap:var(--sp-4);
+  font-size:var(--fs-meta);color:var(--text-helper)}
+.extract-page-head .review-count{align-self:auto}
+.extract-page-header{color:var(--text-primary)}
+.extract-page-hint{margin-left:auto}
+.extract-exit{margin-left:var(--sp-4)}
+.extract-face{width:100%;max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:var(--sp-4)}
+.extract-face-meta{display:flex;justify-content:space-between;gap:var(--sp-4);font-size:var(--fs-meta);color:var(--text-helper);
+  border-bottom:1px solid var(--border-subtle);padding-bottom:var(--sp-2)}
+.extract-face-tags{display:flex;gap:var(--sp-3);align-items:center}
+.extract-face-body{font-size:var(--fs-body);line-height:1.8;color:var(--text-primary);min-height:120px}
+.extract-face-derived{font-size:var(--fs-meta);color:var(--text-helper)}
+.extract-face-actions{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;border-top:1px solid var(--border-subtle);padding-top:var(--sp-4)}
+.extract-postpone,.extract-priority{display:inline-flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);color:var(--text-helper)}
+.extract-face-hints{display:flex;gap:var(--sp-2);align-items:center;font-size:var(--fs-meta);color:var(--text-helper)}
+
+/* ---------- 五版共用的新构件（本轮唯一争点：动作区形态） ---------- */
+/* kicker 改上下结构：规范「对齐法则」写明 kicker/meta 在主标题上方、不压成左右两列。
+   复习页现状是 inline-block 与正文同流（见「复习页参照」栏「来自《…》提取练习…」的连排），
+   这是本次唯一一处「复习页也应一起改」的连带建议。 */
+.frame:not([data-frame="ref"]) .review-prefix{display:block}
+/* 复习页的 .review-face{min-height:200px} 是给"正面+背面"两块留的托底；摘录页只有一段正文，
+   短正文时会被空托到 200px（实测吸收 119.8px 竖向位移）。这是缺陷不是设计，样张按落地后的口径置 0。 */
+.frame:not([data-frame="ref"]):not([data-frame="v0"]) .review-face{min-height:0}
+.meta-line{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:baseline}
+.meta-sep{color:var(--grey-2)}
+.x-flash{color:var(--accent);font-weight:600}
+/* 动作区容器：位置与复习页一致（元数据行之下、贴版心左缘起排），内部构成各版不同 */
+.act-row{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center;margin-top:var(--sp-6)}
+.act-row.flush{gap:var(--sp-2)}
+/* A 档：无边框文字按钮（与 .review-jump 同族，但语义是命令不是链接 → 用 text-secondary） */
+.xa{background:none;border:none;padding:0;cursor:pointer;font-family:inherit;
+  font-size:var(--fs-meta);font-weight:500;color:var(--text-secondary)}
+.xa:hover{color:var(--text-primary);text-decoration:underline;text-underline-offset:3px}
+.xa:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.xa-lead{color:var(--text-primary);font-weight:600}
+/* 动作区里的键位小注（比 .grade-due 更轻一档：只在 hover/focus 时才需要的信息不必常驻） */
+.act-key{font-size:var(--fs-meta);font-weight:600;color:var(--text-helper);font-variant-numeric:tabular-nums}
+/* C 档：hairline 底栏，左次级 / 右推进 */
+.act-bar{display:flex;flex-wrap:wrap;gap:var(--sp-4);align-items:center;justify-content:space-between;
+  border-top:1px solid var(--border-subtle);margin-top:var(--sp-6);padding-top:var(--sp-3)}
+.act-bar .grp{display:flex;flex-wrap:wrap;gap:var(--sp-3);align-items:center}
+/* D 档：两行的外层块（margin-top 只挂外层，否则量「动作区高」会把外边距算进去） */
+.act-block{display:flex;flex-direction:column;gap:var(--sp-2);margin-top:var(--sp-6)}
+.act-block .act-row{margin-top:0}
+/* 行首分组标签 */
+.act-lab{font-size:var(--fs-meta);font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-helper);min-width:56px}
+/* 推迟展开行（各版共用） */
+.x-post{display:flex;flex-wrap:wrap;gap:var(--sp-2);align-items:center;margin-top:var(--sp-3);
+  font-size:var(--fs-meta);color:var(--text-helper)}
+.x-post .lab{font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-helper)}
+/* E 档：定高三段（三段内部仍套 720 版心，否则正文会贴 padding 左缘——实测踩过 x 从 190 掉到 64） */
+.v5-wrap{flex:1;min-height:0;display:grid;grid-template-rows:auto 1fr auto;
+  padding:var(--sp-12) var(--sp-16) var(--sp-8);overflow:hidden}
+.v5-row{min-height:0;display:flex;flex-direction:column}
+.v5-scroll{overflow-y:auto}
+.v5-dock{border-top:1px solid var(--border-subtle);padding-top:var(--sp-3)}
+.v5-dock .act-row{margin-top:0}
+
+/* ---------- 队列轨（正交开关，可挂到任一版） ----------
+   主列必须与复习页逐像素同位，所以不能让"720+轨"整块居中（那会把主列往左推 (轨+gap)/2）。
+   做法：块左缘钉在 720 版心左缘（margin-left = 50% − 360），轨长进右侧留白（非对称留白）。
+   占位 = 720+24+168 = 912；需 版心左偏移 + 912 ≤ 内容宽，内容宽 = 容器 − 128 →
+   解得容器 ≥ 1232。应用默认窗口实测 1100×750（electron/main.js:1370）→ 默认状态下轨收起。 */
+.shell-rail{display:grid;grid-template-columns:minmax(0,720px) 168px;gap:var(--sp-6);
+  width:min(100%,912px);margin-left:max(0px,calc(50% - 360px))}
+.shell-main{display:flex;flex-direction:column;gap:0;min-width:0}
+.rail{display:flex;flex-direction:column;border-left:1px solid var(--border-subtle);padding-left:var(--sp-4)}
+.rail-h{font-size:var(--fs-meta);font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text-helper);margin-bottom:var(--sp-3)}
+.rail-i{display:flex;flex-direction:column;gap:var(--sp-1);padding:var(--sp-2) 0 var(--sp-2) var(--sp-4);
+  border-bottom:1px solid var(--border-subtle);border-left:2px solid transparent;margin-left:calc(var(--sp-4) * -1);cursor:pointer}
+.rail-i:hover{background:var(--grey-1)}
+.rail-i.on{border-left-color:var(--accent);background:var(--accent-soft)}
+.rail-t{font-size:var(--fs-secondary);line-height:1.4;color:var(--text-primary);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rail-m{font-size:var(--fs-meta);color:var(--text-helper);display:flex;justify-content:space-between;gap:var(--sp-1);
+  font-family:var(--font-mono);font-feature-settings:"tnum"}
+/* 退让阶梯（沿 §5.3「阈值必须单调」，单一档位）：容器 <1232 收起轨 → 几何回落到无轨形态 */
+@container (max-width: 1231px){
+  .shell-rail{grid-template-columns:minmax(0,720px);gap:0;width:100%;max-width:720px;margin:0 auto}
+  .rail{display:none}
+}
+</style>
+</head>
+<body>
+<div class="doc"><div class="doc-inner">
+
+  <h1 class="doc-h1">摘录页 <b>瑞士风重排</b> · 五版对照</h1>
+  <p class="doc-lead">
+    第二轮。上一轮五版共用复习页的「4 等分动作网格」，这条被推翻：<b>四档评分是复习里最重要的元素，摘录页的按钮没有那个量级</b>，
+    等分网格会把「毕业 / 撤销」抬到与「下一条」同宽同高，制造虚假等权。本轮把<b>动作区形态</b>作为唯一争点轴切五版；
+    与复习页统一的范围收窄到硬锚点：版心 720 居中 · 内边距 48/64/32 · 右上角计数独占一行 · kicker 在上 · 正文 26px/1.5 · 元数据行在下 · 动作区在元数据之下。
+    <b>src/ 与 electron/ 一行未改。</b>
+  </p>
+  <p class="doc-note">
+    阅读提示：仿窗口按应用默认窗口 <b>1100×750</b>（<span class="mono-inline">electron/main.js:1370</span>）等比 1:1 渲染，
+    浏览器窗口窄于 1100 时该栏会横向滚动——把浏览器缩放调到 75% 可一屏看全一栏。
+    三档宽度（1100 / 1280 / 860）与深浅色、当前处理条都可切换，切换后量测表自动重量。
+  </p>
+
+  <div class="ctrl">
+    <div class="ctrl-group">
+      <span class="ctrl-label">主题</span>
+      <div class="ctrl-row" id="theme-ctrl">
+        <button data-theme="light" class="on">浅色</button>
+        <button data-theme="dark">深色</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">仿窗口宽</span>
+      <div class="ctrl-row" id="width-ctrl">
+        <button data-w="1100" class="on">1100 默认</button>
+        <button data-w="1280">1280</button>
+        <button data-w="860">860</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">当前处理条（同一份数据驱动全部七栏）</span>
+      <div class="ctrl-row" id="item-ctrl">
+        <button data-i="0" class="on">第 1 条 · 短（28 字）</button>
+        <button data-i="1">第 2 条 · 中（66 字）</button>
+        <button data-i="2">第 3 条 · 长（216 字）</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">队列轨（正交开关，挂到任一版）</span>
+      <div class="ctrl-row" id="rail-ctrl">
+        <button data-rail="0" class="on">关</button>
+        <button data-rail="1">开</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">量测</span>
+      <div class="ctrl-row"><button id="remeasure">重新量测全表</button></div>
+    </div>
+  </div>
+  <p class="flash-line" id="doc-flash"></p>
+
+  <h2 class="doc-h2">〇 · 统一基线（从复习页实测取得，不写死）</h2>
+  <p class="doc-note">
+    下表由脚本现场读复习页参照栏的 computed style 与几何值，作为「统一」的靶子；若这一行读不出正确值，
+    后面所有对比数字一律作废（页面会显式打红字说明）。
+    <b>注意最后两行</b>：4 等分网格与 56px 复合按钮是复习页特有的「四档评分」构件，本轮<b>刻意不对齐</b>——
+    对齐的是位置，不是内部构成。
+  </p>
+  <div class="tbl-wrap"><table class="grid" id="tbl-baseline">
+    <thead><tr><th class="rowhead">锚点</th><th>复习页实测</th><th>摘录页是否照搬</th><th>Token / 规则出处</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h2 class="doc-h2">一 · 复习页参照（硬锚点的来源）</h2>
+  <div class="stage-wrap">
+    <div class="stage-head"><span class="stage-name">复习页 · 闪卡背面态</span><span class="stage-tag target">靶子</span></div>
+    <p class="stage-diff">把现有复习页规则原样渲染出来（26px 正文、右上计数独占、4 等分灰底色条评分网格、32px 描边工具行）。这一栏不是提案，它只负责提供对齐读数。</p>
+    <div class="frame" data-frame="ref"><div class="topbar"></div><div class="app-body"></div></div>
+  </div>
+
+  <h2 class="doc-h2">二 · V0 现状（对照项，非提案）</h2>
+  <div class="stage-wrap">
+    <div class="stage-head"><span class="stage-name">摘录页 · 当前实现</span><span class="stage-tag control">对照组</span></div>
+    <p class="stage-diff">照 <code>src/theme.css:4381-4441</code> + <code>ExtractCardFace.tsx</code> 原样复刻，含两处真实缺陷：① <code>.primary</code> 在 theme.css 里没有任何规则 → 「下一条」是浏览器默认按钮（带圆角、高 23px、底色 rgb(240,240,240)）；② 头部五要素挤同一横排 → 计数不再独占右上。它的数字就是本次要消掉的差值。</p>
+    <div class="frame" data-frame="v0"><div class="topbar"></div><div class="app-body"></div></div>
+  </div>
+
+  <h2 class="doc-h2">三 · 五版提案（唯一争点＝动作区形态）</h2>
+  <p class="doc-note">
+    七栏共用同一份数据、同一套硬锚点；每栏的注释只写它自己那条差异。动作集合固定为六个：
+    下一条 / 推迟 / 优先级 / 毕业 / 撤销 / 返回阅读；「跳转原文」「打开摘录」按复习页既有做法留在元数据行（<code>.review-jump</code> accent 文字钮），不进动作区。
+  </p>
+
+  <div class="stage-wrap">
+    <div class="stage-head"><span class="stage-name">A · 纯文字钮一行</span><span class="stage-tag">最轻</span></div>
+    <p class="stage-diff">
+      六个动作全部降为 Meta 档无边框文字钮（与 <code>.review-jump</code> 同族，但用 <code>--text-secondary</code>，把 accent 留给「跳转原文」这一既有语义），
+      用「·」分隔排成一行；主次只由<b>字重与顺序</b>表达（下一条 600 且居首）。整页除正文外没有第二块视觉重量——最贴合「按钮重要程度不突出」。
+      代价：按钮边界不可见，鼠标用户要点下去或 hover 才知道能点；推进控件实测高 18px，触控/点击目标小于桌面 32px 档。
+    </p>
+    <div class="frame" data-frame="v1"><div class="topbar"></div><div class="app-body"></div></div>
+  </div>
+
+  <div class="stage-wrap">
+    <div class="stage-head"><span class="stage-name">B · 一行 32px 描边</span><span class="stage-tag">复用复习页既有档</span></div>
+    <p class="stage-diff">
+      六个动作一律 <code>.btn.btn-sm.btn-outline</code>（32px，与复习页 <code>.review-tools</code> 的「对比卡 / 标记并暂停 / 跳过 / 删除」同一档），等宽内容自适应、不拉伸。
+      <b>零新构件</b>：复习页早就用这一档放"次要但有边界"的命令，摘录页整体套用即可，新增 CSS 只有动作容器一条。
+      代价：六个 32px 描边框并排，边框本身的视觉重量加起来仍偏重；是否折行看量测表「动作区内容宽×行数」。
+    </p>
+    <div class="frame" data-frame="v2"><div class="topbar"></div><div class="app-body"></div></div>
+  </div>
+
+  <div class="stage-wrap">
+    <div class="stage-head"><span class="stage-name">C · hairline 底栏（左次级 / 右推进）</span><span class="stage-tag">一档之差表达主次</span></div>
+    <p class="stage-diff">
+      动作区上缘一条 hairline，内部左右分栏：左＝次级命令（文字钮组），右＝唯一的「下一条」40px <b>描边</b>按钮（不给 accent 填充）。
+      主次由<b>尺寸差一档</b>（32/40 与有框/无框）表达，不靠颜色、不靠等分网格。推进动作恒在最右，与 §5.3「主按钮恒在最右」一致。
+      代价：动作区从一行变成一条"栏"，纵向多占 hairline + padding；左右分栏使两组按钮之间的空白被读成"两个区"，需要习惯。
+    </p>
+    <div class="frame" data-frame="v3"><div class="topbar"></div><div class="app-body"></div></div>
+  </div>
+
+  <div class="stage-wrap">
+    <div class="stage-head"><span class="stage-name">D · 两行分组（调度 / 导航）</span><span class="stage-tag">按语义分组</span></div>
+    <p class="stage-diff">
+      动作按语义拆两行，行首各挂一个 12px/600 大写小标签：<b>调度</b>＝下一条 / 推迟 / 优先级 / 毕业，<b>导航</b>＝撤销 / 返回阅读。
+      两行同取 32px 描边档，等权只发生在<b>组内</b>——这正是对"不该等分"的另一种回答：不是把尺寸拉平，而是把语义分开。
+      代价：纵向占两行（比 A/B 多 44px 一档）；标签本身是新的视觉元素，复习页没有同类先例。
+    </p>
+    <div class="frame" data-frame="v4"><div class="topbar"></div><div class="app-body"></div></div>
+  </div>
+
+  <div class="stage-wrap">
+    <div class="stage-head"><span class="stage-name">E · 定高坞 + 一行 32px</span><span class="stage-tag">唯一零位移</span></div>
+    <p class="stage-diff">
+      整屏 <code>grid-template-rows: auto 1fr auto</code>：计数行 / 正文区（内部滚动）/ 动作坞（hairline 上缘，内装 B 档一行）。
+      连续处理时动作坞<b>永不移动</b>（量测表 Δy 应为 0，其余四版为正数），手和眼停在固定位置。
+      代价：与复习页的流式排列不统一（复习页评分区跟着卡面上下走）；短正文时中段留白；坞常驻会长期吃掉约 88px 竖向空间。
+    </p>
+    <div class="frame" data-frame="v5"><div class="topbar"></div><div class="app-body"></div></div>
+  </div>
+
+  <h2 class="doc-h2">四 · 版式矩阵（轴 × 版）</h2>
+  <div class="tbl-wrap"><table class="grid" id="tbl-matrix">
+    <thead><tr>
+      <th class="rowhead">轴</th><th>V0 现状</th><th>A 文字钮</th><th>B 32px 一行</th><th>C hairline 底栏</th><th>D 两行分组</th><th>E 定高坞</th>
+    </tr></thead>
+    <tbody>
+      <tr><td class="rowhead">版心</td><td>720 居中</td><td colspan="5">720 居中（五版同值，与复习页同位）</td></tr>
+      <tr><td class="rowhead">状态行</td><td>五要素同横排</td><td colspan="5">右上计数独占一行（键盘提示并入同行，同复习页）</td></tr>
+      <tr><td class="rowhead">正文字号</td><td>14 / 1.8</td><td colspan="5">26 / 1.5（= 复习页）</td></tr>
+      <tr><td class="rowhead">kicker</td><td>正文上方 space-between + 下横线</td><td colspan="5">正文正上方上下结构（规范「对齐法则」；复习页现状是同流，建议连带改）</td></tr>
+      <tr><td class="rowhead">元数据方位</td><td>上方一行 + 下方孤儿行「已制卡」</td><td colspan="5">统一收到正文<b>下方</b>一行：跳转原文 · 打开摘录 · 已制卡 · 优先级 · 下次推送</td></tr>
+      <tr><td class="rowhead">动作区构成</td><td>7 钮 flex-wrap + UA 默认按钮</td><td>6 个无边框文字钮，「·」分隔</td><td>6 个 32px 描边，一行</td><td>左文字钮组 / 右唯一 40px 描边</td><td>两行：调度 4 钮 / 导航 2 钮，行首标签</td><td>一行 32px 描边，钉在底部坞</td></tr>
+      <tr><td class="rowhead">推进控件档</td><td>UA 默认（实测 23px）</td><td>18px 文字</td><td>32px 描边</td><td>40px 描边（其余 18px 文字）</td><td>32px 描边</td><td>32px 描边</td></tr>
+      <tr><td class="rowhead">等权程度</td><td>等权且拥挤</td><td>最低（靠字重与顺序）</td><td>组内等权，有框</td><td>一档之差</td><td>组内等权 + 语义分组</td><td>组内等权，常驻</td></tr>
+      <tr><td class="rowhead">accent 填充</td><td>无（.primary 失效）</td><td>无</td><td>无</td><td>无</td><td>无</td><td>无</td></tr>
+      <tr><td class="rowhead">推迟天数</td><td>常驻 number + 按钮</td><td colspan="5">点「推迟」就地展开：seg 1/3/7/30 + 自定义天数输入（同一构件）</td></tr>
+      <tr><td class="rowhead">竖向定高</td><td>否</td><td>否</td><td>否</td><td>否</td><td>否</td><td>是（坞）</td></tr>
+      <tr><td class="rowhead">新增 CSS</td><td>—</td><td>3 条</td><td>1 条</td><td>5 条</td><td>5 条</td><td>9 条</td></tr>
+      <tr><td class="rowhead">与既有条款冲突</td><td>3 处（计数独占 / 26px / .btn 体系）</td><td>1 处（点击目标 &lt; 32px 档）</td><td>0</td><td>0</td><td>1 处（新构件：动作分组标签）</td><td>1 处（流式 → 定高）</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2 class="doc-h2">五 · 实测表（脚本现场量，非人工填写）</h2>
+  <p class="doc-note">
+    量法：每栏取 <code>getBoundingClientRect()</code> 减去<b>同一栏仿窗口</b>的矩形（文档坐标必须归零到仿窗口，否则读数不可比）。
+    「计数右缘差」基线取<b>本版心右缘</b>，不是仿窗口右缘（仿窗口有 64px 内边距，拿窗口右缘会把这 64px 混进读数）。
+    「动作条 Δy」＝先把当前条切到最长正文量一次，再切回最短正文量一次取差，量完自动恢复你选的条目。
+    「与复习页差」＝该栏读数减复习页参照读数，<b>0 = 对齐</b>。
+    「最宽一行跨度×行数」按按钮<b>垂直中心</b>聚簇得出（不是按 top：同一行里 <code>align-items:center</code> 会让不同高度的按钮 top 差 0.4px，实测把 V0 的「优先级」因 ▾ 字形误判成两行）；
+    D 版的 2 行是设计如此，其余版出现 2 行才叫折行。
+    两处读数请这样理解：五版「动作条顶 y」比靶子高 118.4px，是因为<b>摘录页没有背面答案块</b>（内容差异，不是版式偏差）；
+    而靶子 Δy +319 小于五版 +351，差的 32px 正是复习页 <code>min-height:200px</code> 的托底——样张已在摘录栏按落地口径置 0，所以 +351 才是真实的正文位移量。
+    正向对照：V0 的推进控件高与「计数右缘差」必须<b>不为</b> 0（它现在就是错的）；若 V0 也读出 0，说明量测空转，整表作废。
+  </p>
+  <div class="tbl-wrap"><table class="grid" id="tbl-measure">
+    <thead><tr>
+      <th class="rowhead">栏</th>
+      <th>计数右缘<br />与版心差</th>
+      <th>正文<br />左缘 x</th>
+      <th>正文<br />顶 y</th>
+      <th>正文<br />字号</th>
+      <th>动作条<br />顶 y</th>
+      <th>动作条 Δy<br />（短→长）</th>
+      <th>动作区<br />高</th>
+      <th>推进控件<br />高</th>
+      <th>最宽一行跨度<br />× 行数</th>
+      <th>版心<br />宽</th>
+      <th>最小<br />字号</th>
+      <th>与复习页差<br />（左缘 / 正文顶 / 动作条）</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p class="flash-line" id="measure-verdict"></p>
+
+  <h2 class="doc-h2">六 · 规范自检（禁止清单 + Token 纪律）</h2>
+  <div class="tbl-wrap"><table class="grid" id="tbl-audit">
+    <thead><tr><th class="rowhead">检查项</th><th>判据</th><th>结果</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+
+  <h2 class="doc-h2">七 · 落选方案与代价（含本轮被推翻的那条）</h2>
+  <ul class="tight">
+    <li><b>【本轮推翻】把复习页的 4 等分动作网格搬到摘录页。</b>上一轮五版共用此骨架，用户 2026-09-25 指出：四档评分是复习中最重要的元素，摘录页所有按钮的重要程度都没有那么突出。等分网格的语义是「四者同权且都是主行动」，用在摘录页会把「毕业 / 撤销」抬到与「下一条」同宽同高（实测每格 168×56px，占版心 100%），既虚增权重，又让动作区成为全页最重的一块——比正文还重。本轮五版全部改从这条出发。</li>
+    <li><b>【本轮撤回】刻度带（元数据摊成与动作网格同列的 4 等分标尺）。</b>依附于上面那条被推翻的网格；且看图时暴露新问题：标尺带与动作列同宽会形成上下配对，「下次推送」压在「优先级」按钮上方，容易被读成一组。</li>
+    <li><b>【本轮撤回】左元数据栏（168px 侧栏竖排调度信息）。</b>实测正文左缘从 190px 移到 382px（+192），「复习 ↔ 摘录」来回切时正文横移一整栏宽，与本轮「位置统一」的口径正面冲突。</li>
+    <li><b>正文用 18px（Title S）折中。</b>否决：复习页 26px 与它都不同，等于制造第三种字号，两页仍不对齐，只是差值从 12px 缩到 8px。</li>
+    <li><b>右侧竖排常驻动作栏。</b>否决：主行动落到右缘，与复习页「动作区在正文正下方、贴版心左缘起排」的位置契约冲突；且正文测量宽被压到 528px。</li>
+    <li><b>用 accent 填充表达「下一条」。</b>否决：摘录页唯一的高饱和焦点应当留给导航与链接（顶栏高亮、跳转原文、焦点环）；给一个每 3–5 秒就要按一次的推进动作上填充色，等于把全页最重的色块放在最机械的动作上。本轮五版一律<b>无 accent 填充</b>（量测表「上色全部来自 Token」行同时核对）。</li>
+    <li><b>卡片容器（灰底 / 描边框）包住摘录。</b>否决：复习页卡面无容器装饰；瑞士风四类卡片在此场景没有角色，hairline 与留白已足够分区（规范「网格线不可见」「克制优于炫技」）。</li>
+    <li><b>E 的定高改成「正文区高度取队列里最长那条」。</b>否决：需要预渲染全部条目量高度或写死 min-height 魔法值，两者都会随队列内容抖动，反而制造位移。</li>
+    <li><b>把摘录并回复习页、删掉独立摘录页。</b>否决：合并模式下复习页要同时承担评分与摘录推进两套动作集，四档网格会被挤成八格；摘录的「正文就地编辑 + 制卡数 + 优先级」在闪卡语义里没有位置。</li>
+  </ul>
+
+  <h2 class="doc-h2">八 · 若要落地，属于哪一级变更</h2>
+  <p class="doc-note">
+    这不是纯样式改动：它改到 §5.2「页内只保留右上角计数」的执行方式、§5.3「复习页卡面 26px/1.5」是否扩到摘录页、
+    以及「摘录页动作区用哪一档控件」这一条全新契约。按仓库既有口径：<b>采纳任一版都要先 bump 指南 + 登记决策号（D61 起）</b>，
+    给 §6.8 补一节「摘录页排版」，并同步 <code>tests/extract.gui.mjs</code> 的几何断言（现有 76 步里凡按 <code>.extract-face-actions</code> 定位按钮的用例都要改判据）。
+    另外三处连带项，无论选哪版都要一起做：
+    ① <code>.primary</code> 零规则 → 全仓 <code>&lt;button className="primary"&gt;</code> 都拿不到样式（本轮实测到摘录页 1 处，需普查其余页面）；
+    ② <code>.review-face{min-height:200px}</code> 在摘录页短正文时会空托 119.8px（实测），落地时应显式去掉或按内容定高——
+    <b>样张已按落地后的口径把它置 0</b>，所以量测表里的 Δy 是「去掉托底之后」的真实位移；
+    ③ kicker 的 inline-block 同流排法与规范「对齐法则」矛盾，复习页与摘录页宜一并改为上下结构。
+  </p>
+
+</div></div>
+
+<script>
+/* ================= 数据（七栏共用同一份，杜绝"对比不成立"） ================= */
+const DOC1 = "认知负荷与学习", DOC2 = "记忆的边界";
+const EX = [
+  { id:"x1", doc:DOC1, depth:2, status:"在读", pri:30, next:"16 天后推送", cards:2,
+    body:"提取练习的收益大于重复阅读，但两者常被学习者的主观流畅感颠倒。" },
+  { id:"x2", doc:DOC1, depth:1, status:"待处理", pri:50, next:"现已到期", cards:0,
+    body:"内在负荷由材料本身的结构决定，外在负荷才是设计要削减的对象——把两者混为一谈，会让「降低难度」变成「删掉内容」。" },
+  { id:"x3", doc:DOC2, depth:3, status:"在读", pri:70, next:"3 天后推送", cards:5,
+    body:"间隔效应的边界在于：间隔长度应与期望保持时间同阶，而不是与学习量同阶。\n\n一周后要记住，间隔取一天；一年后要记住，间隔取一周。用「今天多学几遍」去换「明年还记得」，换来的只是重复阅读带来的流畅错觉——它在学习者自己的判断里像掌握，在保持曲线里不是。\n\n这也就解释了为什么把复习排到考前集中进行，成绩看似没有变差：变差的是两个月后的留存率，而那恰好是没有任何人测量的时段。" }
+];
+let cur = 0, RAIL = false;
+const DAYS = [1,3,7,30];
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c]));
+const e = () => EX[cur];
+let postOpen = {};
+
+/* ================= 顶栏 ================= */
+function topbar(active){
+  const nav = ["书架","摘录","复习","卡片","日记","数据"].map(n =>
+    `<button class="nav-item${n===active?" active":""}">${n}</button>`).join("");
+  return `<nav class="topbar-nav">${nav}</nav><span class="topbar-title">${active==="摘录"?"摘录 · 连续处理":"复习 · 连续复习"}</span>`
+    + `<div class="topbar-right"><button class="icon-btn" title="设置">⚙</button></div>`;
+}
+
+/* ================= 共用片段 ================= */
+function countLine(key, extra){
+  return `<div class="review-count mono" data-el="count">${EX.length} 条待处理 · 空格＝下一条 · Z＝撤销 · 正文可编辑${extra||""}<span class="x-flash mono" data-flash="${key}"></span></div>`;
+}
+function metaLine(){
+  return `<div class="review-meta meta-line">`
+    + `<button class="review-jump" data-act="jump">跳转原文</button>`
+    + `<span class="meta-sep">·</span><button class="review-jump" data-act="open">打开摘录</button>`
+    + `<span class="meta-sep">·</span><span>已就此${e().cards>0?`制卡 ${e().cards} 张`:"未制卡"}</span>`
+    + `<span class="meta-sep">·</span><span>优先级 ${e().pri}</span>`
+    + `<span class="meta-sep">·</span><span>${e().next}</span>`
+    + `<span class="badge-experimental">实验引擎</span></div>`;
+}
+function kicker(){ return `<span class="review-prefix mono">摘录 · 来自《${esc(e().doc)}》 · 第${e().depth}层</span>`; }
+function bodyEl(){ return `<span class="review-editable" contenteditable="true" spellcheck="false" data-el="body">${esc(e().body)}</span>`; }
+function postponeRow(key){
+  return `<div class="x-post"><span class="lab">推迟到</span><span class="seg">${
+    DAYS.map(d=>`<button data-act="postpone" data-days="${d}">${d} 天</button>`).join("")
+  }</span><input class="num" type="number" min="1" value="7" aria-label="推迟天数" />
+  <span class="mono">天后</span><button class="btn btn-sm btn-secondary" data-act="postpone-confirm">确认</button>
+  <button class="btn btn-sm btn-outline" data-act="postpone-close">收起</button></div>`;
+}
+function expRow(key){ return postOpen[key]?postponeRow(key):""; }
+function railHtml(){
+  if(!RAIL) return "";
+  const items = EX.map((x,i)=>`<div class="rail-i${i===cur?" on":""}" data-act="pick" data-i="${i}">
+    <span class="rail-t">${esc(x.body.slice(0,34))}…</span>
+    <span class="rail-m"><span>${esc(x.doc.slice(0,6))}</span><span>P${x.pri} · ${x.next==="现已到期"?"到期":x.next.replace(" 天后推送","d")}</span></span>
+  </div>`).join("");
+  return `<aside class="rail"><div class="rail-h">队列 ${EX.length} 条</div>${items}</aside>`;
+}
+/* 版心包装：轨是正交开关，挂到任一版都不改主列几何 */
+function wrap(inner){
+  return RAIL
+    ? `<div class="shell-rail"><div class="session shell-main" data-el="session">${inner}</div>${railHtml()}</div>`
+    : `<div class="session" data-el="session">${inner}</div>`;
+}
+
+/* 六个动作（顺序即权重：下一条居首）。跳转原文/打开摘录按复习页先例留在元数据行。 */
+const ACTS = [
+  { k:"next", t:"下一条", key:"空格" },
+  { k:"postpone-toggle", t:"推迟", key:"P" },
+  { k:"pri-toggle", t:"优先级", key:"1–5" },
+  { k:"graduate", t:"毕业", key:"G" },
+  { k:"undo", t:"撤销", key:"Z" },
+  { k:"exit", t:"返回阅读", key:"Esc" }
+];
+
+/* ================= 各版模板（唯一差异＝动作区） ================= */
+const TPL = {
+  /* 复习页参照：现规则原样 */
+  ref(){
+    return `<main class="review-wrap"><div class="review-session" data-el="session">
+      <div class="review-count mono" data-el="count">本轮 12 张　·　点击卡片或按空格显示答案</div>
+      <div class="review-face">
+        <div class="review-front"><span class="review-prefix mono">来自《${esc(e().doc)}》</span><span data-el="body">${esc(e().body)}</span></div>
+        <div class="review-back">间隔效应：保持时间 ∝ 间隔长度，而非重复次数。</div>
+      </div>
+      <div class="review-meta"><button class="review-jump">跳转原文</button>来源:${esc(e().doc)} · 2026-09-25</div>
+      <div class="grade-row" data-el="actions">
+        <button class="btn btn-secondary bar bar-a">Again<span class="grade-due mono">10 min</span></button>
+        <button class="btn btn-secondary bar bar-b">Hard<span class="grade-due mono">4 d</span></button>
+        <button class="btn btn-secondary bar bar-c" data-el="primary">Good<span class="grade-due mono">16 d</span></button>
+        <button class="btn btn-secondary bar bar-d">Easy<span class="grade-due mono">42 d</span></button>
+      </div>
+      <div class="review-tools">
+        <button class="btn btn-sm btn-outline">对比卡</button>
+        <button class="btn btn-sm btn-outline">标记并暂停</button>
+        <button class="btn btn-sm btn-outline">跳过</button>
+        <button class="btn btn-sm btn-outline">删除</button>
+      </div>
+    </div></main>`;
+  },
+
+  /* V0 现状复刻 */
+  v0(){
+    return `<main class="extract-page">
+      <div class="extract-page-head">
+        <span class="review-count mono" data-el="count">${EX.length} 条待处理</span>
+        <span class="mono extract-page-header">集中复习：《${esc(e().doc)}》</span>
+        <span class="extract-page-hint mono">空格＝下一条 · Z＝撤销 · 正文可直接编辑</span>
+        <button class="extract-exit">返回阅读</button>
+      </div>
+      <div class="extract-face" data-el="session">
+        <div class="extract-face-meta">
+          <span>来自《${esc(e().doc)}》 · 第${e().depth}层摘录</span>
+          <span class="extract-face-tags"><span class="mono">${e().status}</span><span class="mono">优先级 ${e().pri}</span>
+            <span class="mono">${e().next}</span><span class="badge-experimental">实验引擎</span></span>
+        </div>
+        <div class="extract-face-body"><div class="review-editable" contenteditable="true" spellcheck="false" data-el="body">${esc(e().body)}</div></div>
+        <div class="extract-face-derived">${e().cards>0?`已就此摘录制卡 ${e().cards} 张`:"尚未就此制卡"}</div>
+        <div class="extract-face-actions" data-el="actions">
+          <button class="primary" data-act="next" data-el="primary">下一条</button>
+          <span class="extract-postpone"><input class="num" type="number" value="7" /><span class="mono">天后</span><button data-act="postpone-toggle">推迟</button></span>
+          <button data-act="pri-toggle">优先级 ${e().pri} ▾</button>
+          <button data-act="open">打开摘录</button>
+          <button data-act="jump">跳转原文</button>
+          <button data-act="graduate">毕业</button>
+          <button data-act="undo">撤销</button>
+        </div>
+        <div class="extract-face-hints">快捷推迟：<button data-act="postpone">1 天</button><button data-act="postpone">3 天</button><button data-act="postpone">7 天</button><button data-act="postpone">30 天</button></div>
+      </div>
+    </main>`;
+  },
+
+  /* A · 纯文字钮一行 */
+  v1(){
+    return `<main class="review-wrap">${wrap(`
+      ${countLine("v1")}
+      <div class="review-face"><div class="review-front">${kicker()}${bodyEl()}</div></div>
+      ${metaLine()}
+      <div class="act-row flush" data-el="actions">${
+        ACTS.map((a,i)=>`${i?'<span class="meta-sep">·</span>':""}<button class="xa${i===0?" xa-lead":""}"${i===0?' data-el="primary"':""} data-act="${a.k}">${a.t}</button>`).join("")
+      }</div>${expRow("v1")}`)}</main>`;
+  },
+
+  /* B · 一行 32px 描边 */
+  v2(){
+    return `<main class="review-wrap">${wrap(`
+      ${countLine("v2")}
+      <div class="review-face"><div class="review-front">${kicker()}${bodyEl()}</div></div>
+      ${metaLine()}
+      <div class="act-row" data-el="actions">${
+        ACTS.map((a,i)=>`<button class="btn btn-sm btn-outline"${i===0?' data-el="primary"':""} data-act="${a.k}">${a.t}</button>`).join("")
+      }</div>${expRow("v2")}`)}</main>`;
+  },
+
+  /* C · hairline 底栏：左次级文字钮 / 右唯一 40px 描边推进 */
+  v3(){
+    const lead = ACTS[0], rest = ACTS.slice(1);
+    return `<main class="review-wrap">${wrap(`
+      ${countLine("v3")}
+      <div class="review-face"><div class="review-front">${kicker()}${bodyEl()}</div></div>
+      ${metaLine()}
+      <div class="act-bar" data-el="actions">
+        <span class="grp">${rest.map(a=>`<button class="xa" data-act="${a.k}">${a.t}</button>`).join('<span class="meta-sep">·</span>')}</span>
+        <span class="grp"><span class="act-key mono">${lead.key}＝${lead.t}</span>
+          <button class="btn btn-outline" data-el="primary" data-act="${lead.k}">${lead.t}</button></span>
+      </div>${expRow("v3")}`)}</main>`;
+  },
+
+  /* D · 两行分组：调度 / 导航 */
+  v4(){
+    const SCHED = ACTS.slice(0,4), NAV = ACTS.slice(4);
+    const row=(lab,list)=>`<div class="act-row">
+      <span class="act-lab">${lab}</span>${list.map((a,i)=>`<button class="btn btn-sm btn-outline"${i===0&&lab==="调度"?' data-el="primary"':""} data-act="${a.k}">${a.t}</button>`).join("")}</div>`;
+    return `<main class="review-wrap">${wrap(`
+      ${countLine("v4")}
+      <div class="review-face"><div class="review-front">${kicker()}${bodyEl()}</div></div>
+      ${metaLine()}
+      <div class="act-block" data-el="actions">${row("调度",SCHED)}${row("导航",NAV)}</div>${expRow("v4")}`)}</main>`;
+  },
+
+  /* E · 定高坞 + 一行 32px */
+  v5(){
+    return `<main class="v5-wrap">
+      <div class="v5-row">${wrap(countLine("v5"))}</div>
+      <div class="v5-row v5-scroll">${wrap(`
+        <div class="review-face"><div class="review-front">${kicker()}${bodyEl()}</div></div>
+        ${metaLine()}`)}</div>
+      <div class="v5-row"><div class="v5-dock"><div class="session" data-el="session">
+        <div class="act-row" data-el="actions">${
+          ACTS.map((a,i)=>`<button class="btn btn-sm btn-outline"${i===0?' data-el="primary"':""} data-act="${a.k}">${a.t}</button>`).join("")
+        }</div>${expRow("v5")}</div></div></div>
+    </main>`;
+  }
+};
+
+/* ================= 挂载 ================= */
+const KEYS = ["ref","v0","v1","v2","v3","v4","v5"];
+function mount(){
+  for (const k of KEYS){
+    const fr = document.querySelector(`[data-frame="${k}"]`);
+    fr.querySelector(".topbar").innerHTML = topbar(k==="ref"?"复习":"摘录");
+    fr.querySelector(".app-body").innerHTML = TPL[k]();
+  }
+  document.querySelectorAll("#item-ctrl [data-i]").forEach(b=>b.classList.toggle("on", +b.dataset.i===cur));
+  document.querySelectorAll(".rail-i").forEach(b=>b.classList.toggle("on", +b.dataset.i===cur));
+}
+function docFlash(msg){
+  const el = document.getElementById("doc-flash");
+  el.textContent = msg;
+  clearTimeout(docFlash._t);
+  docFlash._t = setTimeout(()=>{ el.textContent=""; }, 2600);
+}
+function frameFlash(key,msg){
+  const el = document.querySelector(`[data-frame="${key}"] [data-flash="${key}"]`);
+  if(el) el.textContent = msg? "　·　"+msg : "";
+}
+
+/* ================= 交互 ================= */
+const MSG = {
+  next:"下一条＝读后推进：next_interval = 当前间隔 × A-Factor(1.6)，process_count++（空格）",
+  jump:"跳回材料原位置；跳转不写阅读进度（§6.8-7 / D58）",
+  open:"在阅读器中打开这条摘录（可就地制卡）",
+  graduate:"毕业＝不再推送，条目仍留在卡片浏览器",
+  undo:"撤销最近一次操作（Z，跨闪卡与摘录同一条撤销链）",
+  exit:"返回阅读：离开连续处理页",
+  "postpone-confirm":"推迟为覆盖式：next_at = now + N 天（不写 A-Factor）",
+  "pri-toggle":"优先级 10/30/50/70/90，越大越靠后（同到期时间内排序用）"
+};
+document.addEventListener("click", (ev)=>{
+  const btn = ev.target.closest("[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const fr = btn.closest("[data-frame]");
+  const key = fr ? fr.dataset.frame : "doc";
+  if (act==="next"){ cur=(cur+1)%EX.length; postOpen={}; mount(); docFlash(MSG.next); return; }
+  if (act==="pick"){ cur=+btn.dataset.i; postOpen={}; mount(); docFlash("队列轨：直接处理第 "+(cur+1)+" 条（不改调度）"); return; }
+  if (act==="postpone-toggle"){ postOpen={}; postOpen[key]=!postOpen[key]; mount(); return; }
+  if (act==="postpone-close"){ postOpen={}; mount(); return; }
+  if (act==="postpone"){ e().next=`${btn.dataset.days} 天后推送`; postOpen={}; mount(); docFlash("已推迟 "+btn.dataset.days+" 天：next_at = now + N 天"); return; }
+  if (act==="pri"){ e().pri=+btn.dataset.pri; postOpen={}; mount(); docFlash("优先级改为 "+btn.dataset.pri); return; }
+  if (MSG[act]) docFlash(MSG[act]);
+});
+/* 优先级用 1–5 键快选（本轮新加的键位，只在样张里演示语义，不代表最终键位） */
+document.addEventListener("PRI", ()=>{});
+document.addEventListener("keydown",(ev)=>{
+  const t=ev.target, tag=(t&&t.tagName||"").toLowerCase();
+  if (tag==="input"||tag==="textarea"||tag==="select"||(t&&t.isContentEditable)) return;
+  if (ev.key===" "||ev.key==="Enter"){ ev.preventDefault(); cur=(cur+1)%EX.length; postOpen={}; mount(); docFlash(MSG.next); }
+  else if (ev.key==="z"||ev.key==="Z"){ ev.preventDefault(); docFlash(MSG.undo); }
+});
+
+/* ================= 控件 ================= */
+document.getElementById("theme-ctrl").addEventListener("click",(ev)=>{
+  const b=ev.target.closest("button"); if(!b) return;
+  document.body.classList.toggle("theme-dark", b.dataset.theme==="dark");
+  [...ev.currentTarget.children].forEach(x=>x.classList.toggle("on",x===b));
+  setTimeout(runMeasure,0);
+});
+document.getElementById("width-ctrl").addEventListener("click",(ev)=>{
+  const b=ev.target.closest("button"); if(!b) return;
+  document.querySelectorAll("[data-frame]").forEach(f=>f.style.setProperty("--fw", b.dataset.w+"px"));
+  [...ev.currentTarget.children].forEach(x=>x.classList.toggle("on",x===b));
+  setTimeout(runMeasure,0);
+});
+document.getElementById("item-ctrl").addEventListener("click",(ev)=>{
+  const b=ev.target.closest("button"); if(!b) return;
+  cur=+b.dataset.i; postOpen={}; mount(); setTimeout(runMeasure,0);
+});
+document.getElementById("rail-ctrl").addEventListener("click",(ev)=>{
+  const b=ev.target.closest("button"); if(!b) return;
+  RAIL = b.dataset.rail==="1";
+  [...ev.currentTarget.children].forEach(x=>x.classList.toggle("on",x===b));
+  mount(); setTimeout(runMeasure,0);
+});
+document.getElementById("remeasure").addEventListener("click",()=>runMeasure());
+
+/* ================= 量测 ================= */
+const px = s => { const m=/(-?[\d.]+)px/.exec(s||""); return m?parseFloat(m[1]):null; };
+function rel(fr, el){
+  if(!el) return null;
+  const f = fr.getBoundingClientRect(), r = el.getBoundingClientRect();
+  return { x: r.left-f.left, y: r.top-f.top, w: r.width, h: r.height, right:r.right, bottom:r.bottom };
+}
+/* 状态行是否"与本版心右缘对齐"：基线取它所在栏的右缘，不是仿窗口右缘 */
+function colGap(el){
+  const col = el.parentElement.getBoundingClientRect(), r = el.getBoundingClientRect();
+  return Math.round((col.right-r.right)*10)/10;
+}
+function fontStats(fr){
+  const set = new Set(); let min = null;
+  fr.querySelectorAll("*").forEach(n=>{
+    if (!n.textContent || !n.textContent.trim()) return;
+    const s = px(getComputedStyle(n).fontSize);
+    if (s==null) return;
+    set.add(Math.round(s*10)/10);
+    if (min===null || s<min) min=s;
+  });
+  return { min, sizes:[...set].sort((a,b)=>a-b) };
+}
+function rowFor(key){
+  const fr = document.querySelector(`[data-frame="${key}"]`);
+  const bodyEl = fr.querySelector('[data-el="body"]'),
+        countEl = fr.querySelector('[data-el="count"]'),
+        actEl = fr.querySelector('[data-el="actions"]'),
+        sesEl = fr.querySelector('[data-el="session"]');
+  const body = rel(fr, bodyEl), act = rel(fr, actEl), ses = rel(fr, sesEl);
+  const prim = fr.querySelector('[data-el="primary"]');
+  /* 动作区行数＝按钮按**垂直中心**聚簇后的档数（不是 top：同一行里 align-items:center 会让
+     高度不同的按钮 top 不同，实测 V0 的「优先级」因 ▾ 字形高 0.4px 就被误判成两行）。
+     每行跨度＝该行最右减最左，直接读"离撑满版心还差多少"，不用外加 gap 算术。 */
+  let actContent = null;
+  if (actEl){
+    const kids=[...actEl.querySelectorAll("button")].filter(b=>b.offsetParent!==null);
+    if (kids.length){
+      const clusters=new Map();
+      for(const b of kids){
+        const r=b.getBoundingClientRect(), c=Math.round((r.top+r.height/2)/4);
+        const cur=clusters.get(c);
+        clusters.set(c, cur? {l:Math.min(cur.l,r.left), rt:Math.max(cur.rt,r.right)} : {l:r.left, rt:r.right});
+      }
+      const spans=[...clusters.values()].map(v=>Math.round(v.rt-v.l));
+      actContent = { rows: clusters.size, span: Math.max(...spans) };
+    }
+  }
+  const fs = fontStats(fr);
+  return {
+    key,
+    countGap: countEl? colGap(countEl) : null,
+    bodyX: body? Math.round(body.x*10)/10 : null,
+    bodyY: body? Math.round(body.y*10)/10 : null,
+    bodyFs: body? getComputedStyle(fr.querySelector('[data-el="body"]')).fontSize : null,
+    actY: act? Math.round(act.y*10)/10 : null,
+    actH: act? Math.round(act.h*10)/10 : null,
+    actW: act? Math.round(act.w*10)/10 : null,
+    actSpan: actContent? actContent.span : null,
+    actRows: actContent? actContent.rows : null,
+    primH: prim? Math.round(prim.getBoundingClientRect().height*10)/10 : null,
+    sesW: ses? Math.round(ses.w) : null,
+    minFs: fs.min, sizes: fs.sizes.length
+  };
+}
+function contrast(fg,bg){
+  const p = s => (s.match(/\d+(\.\d+)?/g)||[]).slice(0,3).map(Number);
+  const lin = v => { v/=255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4); };
+  const L = c => 0.2126*lin(c[0])+0.7152*lin(c[1])+0.0722*lin(c[2]);
+  const a=L(p(fg)), b=L(p(bg)); const hi=Math.max(a,b), lo=Math.min(a,b);
+  return Math.round(((hi+0.05)/(lo+0.05))*100)/100;
+}
+function collect(){
+  const o={}; for (const k of KEYS) o[k]=rowFor(k);
+  const fr = document.querySelector('[data-frame="v1"]');
+  const bg = getComputedStyle(fr).backgroundColor;
+  const xs = [...fr.querySelectorAll('.xa')];
+  o._contrast = {
+    count: contrast(getComputedStyle(fr.querySelector('.review-count')).color, bg),
+    body: contrast(getComputedStyle(fr.querySelector('.review-front')).color, bg),
+    lead: contrast(getComputedStyle(xs[0]).color, bg),
+    secondary: contrast(getComputedStyle(xs[xs.length-1]).color, bg)
+  };
+  return o;
+}
+function fmt(v,unit){ return v===null||v===undefined||Number.isNaN(v) ? '<span class="bad">N/A</span>' : (typeof v==="number"? v.toFixed(1).replace(/\.0$/,""):v)+(unit||""); }
+function runMeasure(){
+  mount();
+  const shortSnap = collect();                                  // 基线：最短正文（第 1 条）
+  cur = 2; mount();
+  const longSnap  = collect();                                  // 动作后：最长正文（第 3 条）
+  cur = 0; mount();                                             // 恢复
+  const ref = shortSnap.ref;
+  const controlOk = ref.bodyFs==="26px" && Math.abs(ref.sesW-720)<=1 && ref.primH>=56 && Math.abs(ref.countGap)<=1;
+  const v0Shifted = Math.abs(shortSnap.v0.primH-ref.primH)>4;   // 正向对照：V0 必须读得出差值
+  const LABEL = { ref:"复习页（靶）", v0:"V0 现状", v1:"A 文字钮", v2:"B 32px 一行", v3:"C hairline 底栏", v4:"D 两行分组", v5:"E 定高坞" };
+  const d = (a,b)=> (a==null||b==null)?'<span class="bad">N/A</span>' :
+    (Math.abs(a-b)<0.6? '<span class="good">0</span>' : `<span class="bad">${(a-b>0?"+":"")}${(Math.round((a-b)*10)/10)}</span>`);
+  document.querySelector("#tbl-measure tbody").innerHTML = KEYS.map(k=>{
+    const s=shortSnap[k], l=longSnap[k], isRef = k==="ref";
+    const dy = (s.actY!=null&&l.actY!=null)? Math.round((l.actY-s.actY)*10)/10 : null;
+    return `<tr>
+      <td class="rowhead">${LABEL[k]}</td>
+      <td class="num">${isRef?fmt(s.countGap,"px"):d(s.countGap,ref.countGap)+(Math.abs(s.countGap-ref.countGap)>=0.6?" ("+fmt(s.countGap,"px")+")":"")}</td>
+      <td class="num">${fmt(s.bodyX,"px")}</td>
+      <td class="num">${fmt(s.bodyY,"px")}</td>
+      <td class="num">${fmt(s.bodyFs)}</td>
+      <td class="num">${fmt(s.actY,"px")}</td>
+      <td class="num">${dy===null?'<span class="bad">N/A</span>':(Math.abs(dy)<0.6?'<span class="good">0</span>':'<span class="bad">'+(dy>0?"+":"")+dy+'</span>')}</td>
+      <td class="num">${fmt(s.actH,"px")}</td>
+      <td class="num">${fmt(s.primH,"px")}</td>
+      <td class="num">${s.actSpan==null?'<span class="bad">N/A</span>':s.actSpan+"px × "+s.actRows+"行"+(s.actSpan>s.sesW?' <span class="bad">撑满</span>':"")}</td>
+      <td class="num">${fmt(s.sesW,"px")}</td>
+      <td class="num">${s.minFs<11?'<span class="bad">'+s.minFs+'px</span>':fmt(s.minFs,"px")}</td>
+      <td class="num">${isRef?"—":d(s.bodyX,ref.bodyX)+" / "+d(s.bodyY,ref.bodyY)+" / "+d(s.actY,ref.actY)}</td>
+    </tr>`;
+  }).join("");
+  const verdict = document.getElementById("measure-verdict");
+  if (!controlOk || !v0Shifted){
+    verdict.innerHTML = `<span style="color:var(--error)">量测无效：对照未通过（复习页参照读数 ${JSON.stringify({fs:ref.bodyFs,ses:ref.sesW,prim:ref.primH,gap:ref.countGap})}，V0 推进控件差 ${Math.abs(shortSnap.v0.primH-ref.primH)}px）。上表数字不得作为结论使用。</span>`;
+  } else {
+    verdict.innerHTML = `对照通过：复习页参照读到 ${ref.bodyFs} / 版心 ${ref.sesW}px / 评分按钮 ${ref.primH}px / 计数右缘余量 ${ref.countGap}px；`
+      + `V0 推进控件 ${shortSnap.v0.primH}px（与靶差 ${Math.abs(shortSnap.v0.primH-ref.primH)}px，非零 → 量测在测东西）。`
+      + `五版推进控件档：A ${shortSnap.v1.primH} · B ${shortSnap.v2.primH} · C ${shortSnap.v3.primH} · D ${shortSnap.v4.primH} · E ${shortSnap.v5.primH}px。`
+      + `A 栏实测对比度：状态行 ${shortSnap._contrast.count}:1 · 正文 ${shortSnap._contrast.body}:1 · 文字钮（加粗首项）${shortSnap._contrast.lead}:1 · 文字钮（次级）${shortSnap._contrast.secondary}:1（AA 正文线 4.5:1、大字 3:1）。`;
+  }
+  renderBaseline(shortSnap);
+  renderAudit();
+}
+
+/* ================= 基线表 ================= */
+function renderBaseline(s){
+  const fr=document.querySelector('[data-frame="ref"]');
+  const cs=el=>getComputedStyle(el);
+  const cnt=fr.querySelector('.review-count'), body=fr.querySelector('.review-front'), grid=fr.querySelector('.grade-row'),
+        page=fr.querySelector('.review-wrap'), ses=fr.querySelector('.review-session'), btn=fr.querySelector('.grade-row .btn');
+  const Y="照搬", N="刻意不照搬";
+  const rows=[
+    ["页面内边距","top "+px(cs(page).paddingTop)+" · 左右 "+px(cs(page).paddingLeft)+" · 底 "+px(cs(page).paddingBottom)+"px",Y,"theme.css:2024 · --sp-12/--sp-16/--sp-8"],
+    ["版心宽 / 水平位","max-width "+cs(ses).maxWidth+" · 实测 "+s.ref.sesW+"px · 左缘 x="+s.ref.bodyX,Y,"theme.css:2026-2033 · §5.3"],
+    ["状态行","右上独占（距本版心右缘 "+s.ref.countGap+"px）· "+cs(cnt).fontSize+"/"+cs(cnt).fontWeight+" · margin-bottom "+cs(cnt).marginBottom,Y,"theme.css:2035-2042 · §5.2"],
+    ["正文字号 / 行高","title-l "+cs(body).fontSize+" · 实测行高 "+Math.round(px(cs(body).lineHeight)/px(cs(body).fontSize)*100)/100,Y,"theme.css:2120-2124 · §5.3"],
+    ["kicker","meta "+cs(fr.querySelector('.review-prefix')).fontSize+"/"+cs(fr.querySelector('.review-prefix')).fontWeight+" · 现状 display:"+cs(fr.querySelector('.review-prefix')).display,N+" → 改上下结构","theme.css:2111-2118 · 规范「对齐法则」"],
+    ["元数据行","meta "+cs(fr.querySelector('.review-meta')).fontSize+" · --text-helper · tnum",Y,"theme.css:2171-2176"],
+    ["动作区位置","元数据行之下、margin-top "+cs(grid).marginTop+" · 贴版心左缘",Y,"theme.css:2187-2192"],
+    ["动作区构成","grid "+cs(grid).gridTemplateColumns.split(" ").length+" 等分 · gap "+cs(grid).gap+" · 按钮 min-height "+cs(btn).minHeight+"（实测 "+s.ref.primH+"px）",N+" → 五版各给一档","§5.3「四按钮样式统一」只对四档评分成立"],
+    ["次级工具",".review-tools gap "+cs(fr.querySelector('.review-tools')).gap+" · .btn-sm 32px",Y+"（B/D/E 取这一档）","theme.css:2226 · 547"]
+  ];
+  document.querySelector("#tbl-baseline tbody").innerHTML =
+    rows.map(r=>`<tr><td class="rowhead">${r[0]}</td><td>${r[1]}</td><td>${r[2]==="照搬"?'<span class="good">照搬</span>':`<span class="bad">${r[2]}</span>`}</td><td><span class="mono-inline">${r[3]}</span></td></tr>`).join("");
+}
+
+/* ================= 规范自检（真的去扫 CSS 文本与渲染结果） ================= */
+function renderAudit(){
+  const css=[...document.querySelectorAll("style")].map(s=>s.textContent).join("\n");
+  const nonToken=css.replace(/\/\* =+ TOKEN-BEGIN[\s\S]*?TOKEN-END =+ \*\//,"");
+  const used=new Set([...css.matchAll(/var\(\s*(--[a-z0-9-]+)/g)].map(m=>m[1]));
+  const decl=new Set([...css.matchAll(/(^|[{;\s])(--[a-z0-9-]+)\s*:/g)].map(m=>m[2]));
+  const missing=[...used].filter(x=>!decl.has(x));
+  const hexOutside=[...nonToken.matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map(m=>m[0]);
+  const radius=[...css.matchAll(/border-radius\s*:\s*([^;}]+)/g)].map(m=>m[1].trim()).filter(v=>!/^\s*var\(--radius/.test(v));
+  const shadow=[...css.matchAll(/([^{}]+)\{[^{}]*box-shadow\s*:[^;}]+/g)].map(m=>m[m.length-1].trim().split("\n").pop());
+  const badShadow=shadow.filter(s=>!/\.dd-menu|\.nav-item\.active/.test(s));
+  let minFs=null; document.querySelectorAll(".frame").forEach(fr=>{ const f=fontStats(fr); if(f.min!=null&&(minFs===null||f.min<minFs)) minFs=f.min; });
+  function resolve(fr, token){
+    const p=document.createElement("div");
+    p.style.cssText="display:none;background:var("+token+")";
+    fr.appendChild(p); const c=getComputedStyle(p).backgroundColor; p.remove(); return c;
+  }
+  const TOKEN_LIST=["--paper","--grey-1","--grey-2","--grey-3","--ink","--text-primary","--text-secondary",
+    "--text-helper","--text-placeholder","--border-subtle","--border-strong","--accent","--accent-on",
+    "--accent-hover","--accent-pressed","--accent-soft","--success","--warning","--error","--error-on",
+    "--error-soft","--overlay-ink","--overlay-text","--overlay-helper"];
+  const chroma = c => { const n=(c.match(/\d+(\.\d+)?/g)||[]).slice(0,3).map(Number);
+    return n.length<3? 0 : Math.max(...n)-Math.min(...n); };
+  function paintScan(keys){
+    let total=0; const stray=new Set(), sat=new Set();
+    for(const k of keys){
+      const fr=document.querySelector(`[data-frame="${k}"]`);
+      const tok=new Map(); TOKEN_LIST.forEach(t=>{ const c=resolve(fr,t); if(c&&!tok.has(c)) tok.set(c,t); });
+      const feed=(c,where)=>{
+        if(!c||c==="rgba(0, 0, 0, 0") return;
+        const list=/\(([^)]+)\)/.exec(c); const parts=list? list[1].split(","):[];
+        if(parts.length>3 && parseFloat(parts[3])<1) return;
+        total++;
+        const nm=tok.get(c);
+        if(!nm) stray.add(c+"（"+k+"·"+where+"）");
+        if(chroma(c)>60) sat.add(nm||c);
+      };
+      fr.querySelectorAll("*").forEach(n=>{
+        const s=getComputedStyle(n); feed(s.backgroundColor,"元素底"); feed(s.color,"字色");
+        for(const pe of ["::before","::after"]){ const q=getComputedStyle(n,pe); feed(q.backgroundColor,pe+"底"); }
+      });
+    }
+    return { total, stray:[...stray], sat:[...sat] };
+  }
+  const proposed = paintScan(["v1","v2","v3","v4","v5"]);
+  const v0 = paintScan(["v0"]);
+  const rows=[
+    ["var() 引用 ⊆ 声明","差集为空（§5.1 Token 求值纪律：引用未定义变量＝整条声明作废 IACVT）",
+      missing.length? `<span class="bad">缺 ${missing.length} 个：${missing.join(", ")}</span>` : `<span class="good">通过</span>（引用 ${used.size} 个，未声明 0 个）`],
+    ["结构层无彩色字面量","TOKEN 块之外不得出现 hex 色值",
+      hexOutside.length? `<span class="bad">${hexOutside.length} 处：${[...new Set(hexOutside)].join(" ")}</span>` : `<span class="good">通过</span>`],
+    ["直角（圆角=0）","border-radius 只能取 var(--radius*)",
+      radius.length? `<span class="bad">${radius.join(" / ")}</span>` : `<span class="good">通过</span>（全部 var(--radius) 系）`],
+    ["阴影只在浮层","box-shadow 只允许下拉浮层与顶栏当前项的 2px inset 下划线",
+      badShadow.length? `<span class="bad">${badShadow.join(" / ")}</span>` : `<span class="good">通过</span>（${shadow.length} 处均在白名单）`],
+    ["无 <11px 文字","七栏仿窗口内所有含文字元素的最小 computed font-size",
+      minFs!==null&&minFs<11? `<span class="bad">${minFs}px</span>` : `<span class="good">通过</span>（最小 ${minFs}px）`],
+    ["上色全部来自 Token","A–E 五栏内所有元素/伪元素的背景与字色，逐个反查 Token 解析值",
+      proposed.stray.length? `<span class="bad">越界 ${proposed.stray.length} 档：${proposed.stray.join(" · ")}</span>`
+        : `<span class="good">通过</span>（扫描 ${proposed.total} 处上色，0 处不属于 Token）；对照组 V0 越界 ${v0.stray.length} 处${v0.stray.length?"："+v0.stray.join(" · ")+" ← <code>.primary</code> 无规则，落到浏览器默认按钮面（含圆角）":""}`],
+    ["无 accent 填充（本轮硬约束）","A–E 五栏不得出现 accent 实底按钮；accent 只用于导航高亮、链接、焦点环、徽标描边",
+      (()=>{ const filled=[...document.querySelectorAll('.frame:not([data-frame="ref"]) .btn-primary, .frame:not([data-frame="ref"]) [data-el="primary"]')]
+          .filter(b=>getComputedStyle(b).backgroundColor===resolve(document.querySelector('[data-frame="v1"]'),'--accent')).map(b=>b.textContent.trim().slice(0,8));
+        return filled.length? `<span class="bad">发现 accent 填充：${filled.join(" / ")}</span>` : `<span class="good">通过</span>（五栏推进控件一律无填充）`; })()],
+    ["单一高饱和焦点色","同屏高饱和（RGB 极差 >60）取值只允许 --accent 与四档语义色",
+      (()=>{ const ok=["--accent","--success","--warning","--error","--accent-hover"]; const extra=proposed.sat.filter(s=>!ok.includes(s));
+        return extra.length? `<span class="bad">多出的高饱和色：${extra.join(" · ")}</span>`
+          : `<span class="good">通过</span>（在场高饱和色：${proposed.sat.join(" · ")||"无"}）`; })()],
+    ["键盘焦点可达","凡写 outline:none 的选择器必须有同前缀的 :focus-visible 替代环",
+      (()=>{ const kills=[...css.matchAll(/([^{}]+)\{[^{}]*outline\s*:\s*none[^{}]*\}/g)].map(m=>m[1].trim().split(/\s*,\s*/)).flat();
+        const uncovered=kills.map(s=>s.replace(/:focus(?!-visible)/,"")).filter(b=>!css.includes(b+":focus-visible"));
+        return uncovered.length? `<span class="bad">${uncovered.join(" / ")}</span>`
+          : `<span class="good">通过</span>（${kills.length} 处关默认环，全部有 2px accent 替代环）`; })()],
+    ["深色模式","Token 层整体覆盖，布局/字号/组件规则不变",
+      `<span class="good">在场</span>（控制条「深色」可逐版核对，量测表会自动重量）`]
+  ];
+  document.querySelector("#tbl-audit tbody").innerHTML =
+    rows.map(r=>`<tr><td class="rowhead">${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("");
+}
+
+/* ================= 启动 ================= */
+/* ?only=<ref|v0|v1|v2|v3|v4|v5> → 单栏模式：只留那一栏，其余文档块全部隐去。
+   既方便逐版全屏看，也让无头浏览器能一次截一栏。 */
+const ONLY = new URLSearchParams(location.search).get("only");
+if (ONLY && KEYS.includes(ONLY)){
+  const inner=document.querySelector(".doc-inner");
+  [...inner.children].forEach(n=>{
+    const fr = n.matches(".stage-wrap") ? n.querySelector("[data-frame]") : null;
+    if (!fr || fr.dataset.frame!==ONLY) n.style.display="none";
+  });
+  document.body.style.background="var(--paper)";
+}
+mount();
+runMeasure();
+</script>
+</body>
+</html>

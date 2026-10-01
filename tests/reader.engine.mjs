@@ -137,15 +137,15 @@ try {
   await cdp.shot("tmp-l2-1-engine.png");
 
   // 2. 目录侧栏
-  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
   await wait(600);
   const tocCount = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
   check("2a 目录侧栏渲染 3 章", tocCount >= 3, "n=" + tocCount);
   await cdp.eval(clickByText("第二章", ".reader-toc-item"));
   await wait(800);
-  const tocClosed = await cdp.eval(`!document.querySelector(".reader-toc")`);
+  const tocClosed = await cdp.eval(`!document.querySelector(".reader-sidebar")`);
   check("2b 目录点击跳转并收起", tocClosed);
-  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
   await wait(400);
   await cdp.eval(clickByText("第一章", ".reader-toc-item"));
   await wait(800);
@@ -153,7 +153,7 @@ try {
   // 2c. 翻页按钮（v20.1）：跨章节推进 + 边界
   await cdp.eval(clickByText("第一章", ".reader-toc-item"));
   await wait(800);
-  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
   await wait(400);
   const cfiBefore = await cdp.eval(`window.__readerKernel?.getCurrentLocation()?.cfi`);
   await cdp.eval(`(() => { const b = document.querySelector('.reader-engine-controls button[title*="下一页"]'); if (!b) return "no btn"; b.click(); return "clicked"; })()`);
@@ -416,6 +416,47 @@ try {
   })()`);
   check("5 引擎进度落库（cfi+fraction）", Boolean(prog && prog.cfi != null && typeof prog.fraction === "number"), JSON.stringify(prog && { f: prog.fraction, c: prog.cfi && prog.cfi.slice(0, 20) }));
 
+  // 5b. D2/§7（Task 7）：侧栏开合＝布局变更——不写进度、位置不漂；用户翻页照常写（正对照）
+  const readProg = `(async () => { const doc = await window.libraryAPI.getDocument(${JSON.stringify(seeded.book)}); return doc.progressJson || ""; })()`;
+  const readLoc = `JSON.stringify(window.__readerKernel?.getCurrentLocation?.() || {})`;
+  const secOf = (cfi) => String(cfi || "").split("!")[0];
+  await wait(1400); // 先让此前的用户动作把防抖进度落定，再把基线记下来
+  const progBefore = String(await cdp.eval(readProg));
+  const locBefore = JSON.parse(String(await cdp.eval(readLoc)) || "{}");
+  const progPoll = `(async () => { const doc = await window.libraryAPI.getDocument(${JSON.stringify(seeded.book)}); return doc.progressJson || ""; })()`;
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  // 轮询记录首次变化出现在何时（自证：若真写了进度，能说出它在窗口内的哪一刻）
+  let firstChangeMs = -1;
+  for (let i = 0; i < 12; i++) {
+    await wait(400);
+    if (String(await cdp.eval(progPoll)) !== progBefore) { firstChangeMs = (i + 1) * 400; break; }
+  }
+  await wait(600);
+  const progOpen = String(await cdp.eval(readProg));
+  const locOpen = JSON.parse(String(await cdp.eval(readLoc)) || "{}");
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  await wait(2300);
+  const progClosed = String(await cdp.eval(readProg));
+  const locClosed = JSON.parse(String(await cdp.eval(readLoc)) || "{}");
+  check(
+    "5b 开合侧栏不写进度（布局变更 ≠ 用户翻页）",
+    progBefore !== "" && progOpen === progBefore && progClosed === progBefore,
+    JSON.stringify({ firstChangeMs, before: progBefore.slice(0, 70), open: progOpen.slice(0, 70), closed: progClosed.slice(0, 70) })
+  );
+  check(
+    "5b2 开合侧栏后位置不漂（同章 CFI；CFI 仍可解析）",
+    secOf(locBefore.cfi) === secOf(locClosed.cfi) && secOf(locOpen.cfi) === secOf(locBefore.cfi) && Boolean(locClosed.cfi),
+    JSON.stringify({ before: locBefore.cfi, open: locOpen.cfi, closed: locClosed.cfi })
+  );
+  await cdp.eval(`(() => { const b = document.querySelector('.reader-engine-controls button[title*="下一页"]'); b?.click(); return !!b; })()`);
+  await wait(2200);
+  const progAfterTurn = String(await cdp.eval(readProg));
+  check(
+    "5b3 用户翻页照常写进度（正对照：守卫不吞真实导航）",
+    progAfterTurn !== "" && progAfterTurn !== progClosed,
+    JSON.stringify({ closed: progClosed.slice(0, 70), after: progAfterTurn.slice(0, 70) })
+  );
+
   // 6. 复习卡跳转原文（存 cfi → 引擎直达；另造一张卡走文本搜索兜底路径不重复验证）
   await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();
@@ -447,15 +488,21 @@ try {
   await cdp.eval(clickByText("FSRSTEST 粘贴引擎验证书", ".book-card"));
   await wait(3000);
   const pasteEngine = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
-  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
   await wait(500);
   const pasteToc = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
   check("7 粘贴书合成 EPUB 进引擎（目录 3 章）", pasteEngine && pasteToc >= 3, "toc=" + pasteToc);
   await cdp.shot("tmp-l2-7-paste.png");
 
   // 7b. 暗夜主题联动软件夜间模式（v20.1；主题下拉按 title 精确定位，栏内另有阅读模式下拉）
-  await cdp.eval(clickByText("目录", ".reader-engine-controls button"));
+  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
   await wait(400);
+  // D5-B：模式/主题/缩放收进「阅读设置」弹出组——先开组，组内的 Dropdown 照旧
+  // 点击与断言分两次 —— React 重渲染是异步的，同一个 eval 里「点完立刻查」必然读到旧 DOM
+  await cdp.eval(`(() => { document.querySelector('[data-tool-menu-btn="settings"]')?.click(); return 1; })()`);
+  await wait(500);
+  const settingsOpen = await cdp.eval(`!!document.querySelector('[data-tool-menu-panel="settings"]')`);
+  check("7bpre 阅读设置弹出组可开（工具栏 B 方案）", settingsOpen === true, String(settingsOpen));
   await cdp.eval(`(() => { document.querySelector('.reader-engine-controls .dd-btn[title="阅读主题"]')?.click(); return 1; })()`);
   await wait(300);
   await cdp.eval(`(() => { [...document.querySelectorAll(".dd-item")].find(e => e.textContent.trim() === "暗夜")?.click(); return 1; })()`);

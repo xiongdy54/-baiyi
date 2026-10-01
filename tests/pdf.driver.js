@@ -167,6 +167,64 @@ window.__pdfTest = {
     const cfiGoto = await kernel.goTo({ cfi: "epubcfi(/6/2)" });
     check("P13 goTo(cfi) 返回 false（PDF 系无 CFI）", cfiGoto === false, String(cfiGoto));
 
+    // D67：侧栏注解按精确 id 导航到所属 PDF 页，不伪称有已存的页内 y 坐标。
+    const hasMarkNav = typeof kernel.setDocumentMarks === "function" && typeof kernel.goToMark === "function";
+    check("P13pre PDF 内核支持按标记 id 导航", hasMarkNav);
+    if (!hasMarkNav) {
+      check("P13a 标记 id 导航到其 PDF 页", false, "goToMark/setDocumentMarks 缺失");
+      check("P13b 目标标记自算几何落在对应页内容框内", false, "goToMark 缺失");
+      check("P13c 未知标记 id 返回 false 且页码不变", false, "goToMark 缺失");
+      check("P13d 无 pageIndex/rects 的标记返回 false", false, "goToMark 缺失");
+    } else {
+      kernel.setDocumentMarks([
+        { id: "pdf-mark-page-one", text: "anchor-marker", pageIndex: 0, rects: [{ x: 12, y: 20, w: 18, h: 4 }], kind: "extract" },
+        { id: "pdf-mark-page-three", text: "third-page-unique", pageIndex: 2, rects: [{ x: 8, y: 26, w: 24, h: 4 }], kind: "highlight" }
+      ]);
+      // L1 判 **adapter 自算几何**（内联 px，参考系＝容器视口；与 adapter 的 pageContentRect 同定义）。
+      // 绘制落点另依赖 theme.css 的图层定位规则，而本夹具只加载 pdf_viewer.css——那半张契约
+      // 由 L2（tests/marks.gui.mjs 实测 .pdf-mark-layer 矩形）覆盖，两层合起来才是「矩形落在页内」。
+      const containerEl = document.querySelector(".pdf-viewer-container");
+      const pageContentFrame = (pageEl) => {
+        const cs = getComputedStyle(pageEl);
+        const bl = parseFloat(cs.borderLeftWidth) || 0, bt = parseFloat(cs.borderTopWidth) || 0;
+        const br = parseFloat(cs.borderRightWidth) || 0, bb = parseFloat(cs.borderBottomWidth) || 0;
+        const pr = pageEl.getBoundingClientRect();
+        const cr = containerEl.getBoundingClientRect();
+        return { left: pr.left - cr.left + bl, top: pr.top - cr.top + bt, width: Math.max(0, pr.width - bl - br), height: Math.max(0, pr.height - bt - bb) };
+      };
+      const markInlineFrame = (markId, pageIdx) => {
+        const el = host.querySelector('.pdf-mark-layer [data-mark-id="' + markId + '"]');
+        const pageEl = window.__pdfViewerDebug?.getPageView(pageIdx)?.div;
+        const vals = el ? { left: parseFloat(el.style.left), top: parseFloat(el.style.top), width: parseFloat(el.style.width), height: parseFloat(el.style.height), display: el.style.display } : null;
+        const frame = pageEl ? pageContentFrame(pageEl) : null;
+        const inside = !!(vals && frame && vals.display === "block" &&
+          [vals.left, vals.top, vals.width, vals.height].every(Number.isFinite) &&
+          vals.width > 0 && vals.height > 0 &&
+          vals.left >= frame.left - 1 && vals.left + vals.width <= frame.left + frame.width + 1 &&
+          vals.top >= frame.top - 1 && vals.top + vals.height <= frame.top + frame.height + 1);
+        return { inside, vals, frame };
+      };
+      const beforeMarkNav = kernel.getCurrentLocation()?.pageIndex;
+      const markNav = await kernel.goToMark("pdf-mark-page-three");
+      await waitFor(() => (markInlineFrame("pdf-mark-page-three", 2).inside ? true : null), 10000, "target mark laid out on its page").catch(() => null);
+      const afterMarkNav = kernel.getCurrentLocation()?.pageIndex;
+      const target = markInlineFrame("pdf-mark-page-three", 2);
+      // 正对照：另一页的标记同时在场（证明几何不是常量、两页参考系不同）
+      const offPage = markInlineFrame("pdf-mark-page-one", 0);
+      check("P13a 标记 id 导航到其 PDF 页", markNav === true && afterMarkNav === 2 && beforeMarkNav !== 2, `before=${beforeMarkNav} after=${afterMarkNav}`);
+      check("P13b 目标标记自算几何落在对应页内容框内", target.inside, JSON.stringify({
+        target, offPage,
+        layerCount: document.querySelectorAll(".pdf-mark-layer").length,
+        markCount: document.querySelectorAll(".pdf-mark-layer .reader-doc-mark").length
+      }));
+      const beforeMissingMark = kernel.getCurrentLocation()?.pageIndex;
+      const missingMark = await kernel.goToMark("missing-mark");
+      check("P13c 未知标记 id 返回 false 且页码不变", missingMark === false && kernel.getCurrentLocation()?.pageIndex === beforeMissingMark, `before=${beforeMissingMark} after=${kernel.getCurrentLocation()?.pageIndex}`);
+      kernel.setDocumentMarks([{ id: "pdf-mark-no-anchor", text: "no anchor", kind: "extract" }]);
+      const unlocatedMark = await kernel.goToMark("pdf-mark-no-anchor");
+      check("P13d 无 pageIndex/rects 的标记返回 false", unlocatedMark === false && kernel.getCurrentLocation()?.pageIndex === beforeMissingMark, `result=${unlocatedMark} page=${kernel.getCurrentLocation()?.pageIndex}`);
+    }
+
     // v29 缩放：applyAppearance 的 zoom 映射 currentScale/currentScaleValue
     kernel.applyAppearance({ theme: "paper", zoom: 150 });
     await wait(400);
@@ -176,6 +234,57 @@ window.__pdfTest = {
     await wait(400);
     const scalePw = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
     check("P15b zoom=page-width → currentScaleValue 切换", scalePw === "page-width", String(scalePw));
+
+    // D2/§7（Task 7）：侧栏开合＝容器变窄（这里用 host.right 收窄模拟）。
+    // 数值缩放要保「正看着的页内那一点」；fit 模式按契约只保当前页（scale 由 pdf.js 自适应）。
+    const hasViewPoint = typeof kernel.captureViewPoint === "function" && typeof kernel.restoreViewPoint === "function";
+    check("P16pre 内核支持视口页内锚点快照/还原", hasViewPoint);
+    const cont = document.querySelector(".pdf-viewer-container");
+    if (!hasViewPoint) {
+      check("P16a 数值缩放：变窄后页内锚点还原（≤2px）", false, "captureViewPoint/restoreViewPoint 缺失");
+      check("P16b fit 模式：保 preset 与当前页", false, "captureViewPoint/restoreViewPoint 缺失");
+    } else {
+      kernel.applyAppearance({ theme: "paper", zoom: 150 });
+      await wait(500);
+      await kernel.goTo({ pageIndex: 0 });
+      await wait(600);
+      cont.scrollTop = 300; // 滚到页中部，让「页内那一点」真的需要被还原
+      await wait(400);
+      const pt = kernel.captureViewPoint();
+      const pageBefore = kernel.getCurrentLocation()?.pageIndex;
+      const scrollBefore = cont.scrollTop;
+      host.style.right = "300px"; // 收窄正文区（等价于右侧栏占位）
+      await wait(800);
+      const drifted = kernel.captureViewPoint();
+      // 正对照：变窄确实把页内锚点挪走了（不还原也能过的那种断言被排除）
+      const driftY = pt && drifted ? Math.abs(drifted.y - pt.y) + Math.abs(drifted.x - pt.x) : 0;
+      const restored = kernel.restoreViewPoint(pt);
+      await wait(400);
+      const scrollAfter = cont.scrollTop;
+      const pageAfter = kernel.getCurrentLocation()?.pageIndex;
+      check(
+        "P16a 数值缩放：变窄漂移可见，还原后页内锚点回位（≤2px）",
+        drifted !== null && driftY > 2 && restored === true && Math.abs(scrollAfter - scrollBefore) <= 2 && pageAfter === pageBefore,
+        JSON.stringify({ pt, drifted, driftY, scrollBefore, scrollAfter, pageBefore, pageAfter })
+      );
+      // fit 模式：契约＝保 preset + 当前页不变（页宽**不**强制自适应：pdf.js 只在 window resize
+      // 时重算 page-width/page-fit，容器变窄/变宽不触发——实测，故这里只如实记录页宽读数）
+      kernel.applyAppearance({ theme: "paper", zoom: "page-width" });
+      await wait(500);
+      const contNarrow = cont.getBoundingClientRect().width;
+      const wFitNarrow = document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width;
+      host.style.right = ""; // 放开宽度（等价于关栏）
+      await wait(800);
+      const contWide = cont.getBoundingClientRect().width;
+      const wFitWide = document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width;
+      const scaleValue = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
+      const pageFit = kernel.getCurrentLocation()?.pageIndex;
+      check(
+        "P16b fit 模式：容器确实变宽、preset 保留、当前页不变",
+        scaleValue === "page-width" && pageFit === pageBefore && Math.abs(contWide - contNarrow) > 200,
+        JSON.stringify({ scaleValue, pageFit, pageBefore, contNarrow, contWide, wFitNarrow, wFitWide })
+      );
+    }
 
     kernel.destroy();
     check("P14 destroy 后容器清空", host.querySelectorAll("canvas").length === 0, "canvas=" + host.querySelectorAll("canvas").length);

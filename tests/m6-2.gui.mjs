@@ -148,7 +148,7 @@ async function openBookToChapter(cdp, title, navTitle) {
   const engineUp = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
   if (!engineUp) return { click, engineUp };
   // 空首章技术债：markdown 以 # 开头 → 目录跳到实际章节
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll('.reader-engine-controls button')].find(x => x.textContent.includes('目录')); b?.click(); return b ? 'ok' : 'no btn'; })()`);
+  await cdp.eval(`(() => { const b = document.querySelector('[data-reader-sidebar-toggle]'); b?.click(); return b ? 'ok' : 'no btn'; })()`);
   await wait(700);
   const jump = await cdp.eval(`(() => {
     const el = [...document.querySelectorAll('.reader-toc-item')].find(e => e.textContent.includes(${JSON.stringify(navTitle)}));
@@ -225,7 +225,7 @@ const BOOK = "FSRSTEST-M6-2 导测";
   console.log("== 4) PDF 书选区制卡（contextRef 锚点落库） ==");
   await cdp.eval(clickCardByTitle(BOOK));
   await wait(3000);
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll('.reader-engine-controls button')].find(x => x.textContent.includes('目录')); b?.click(); return 1; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-reader-sidebar-toggle]')?.click(); return 1; })()`);
   await wait(700);
   await cdp.eval(`(() => { const el = [...document.querySelectorAll('.reader-toc-item')].find(e => e.textContent.includes('FSRSTEST Chapter One')); el?.click(); return 1; })()`);
   await wait(1500);

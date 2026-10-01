@@ -3,6 +3,7 @@
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const annotationRange = require("./annotationRange");
 const { app } = require("electron");
 const {
   CARD_GEN_PROMPT,
@@ -33,6 +34,8 @@ const {
   MATERIAL_MAP_GLOBAL_PROMPT,
   MATERIAL_MAP_EDITORIAL_PROMPT,
   MATERIAL_MAP_REVIEW_PROMPT,
+  // v48.22（D58 / E1）：摘录重排 scope
+  EXTRACT_RERANK_PROMPT,
   SITUATION_REQUIRED_SCOPES,
   situationRequiredFor
 } = require("./prompts");
@@ -42,6 +45,8 @@ const { journalDateOf, isJournalDate } = require("./journalTime");
 // v41（K2-A，D38）：知识归一纯函数（规范化 / 批次簇键 / 提案幂等指纹）
 const { normalizeKpLabel, kpClusterKeyFor, kpProposalFingerprint, isOpaqueClusterId } = require("./kpNorm");
 const { readSettings, writeSettings } = require("./settingsStore");
+// v48.22（D58 §6.4.1 E1）：实验推送引擎的本地因子层（纯函数，零 IO）
+const { rankExtracts, rerankFingerprint } = require("./aiNextExtract");
 const {
   DEFAULT_CONFIG_ID,
   ALGORITHM,
@@ -111,6 +116,34 @@ CREATE TABLE IF NOT EXISTS extracts (
   updated_at INTEGER NOT NULL,
   sync_version INTEGER NOT NULL DEFAULT 0,
   is_deleted INTEGER NOT NULL DEFAULT 0
+);
+-- v48.22（D58）：摘录操作日志（append-only）。撤销＝恢复 before_json 确切前置状态 + 物理删除该行，
+-- 镜像 review_logs 的撤销语义；批量共用一个 batch_id，整批按 seq 降序回退。
+CREATE TABLE IF NOT EXISTS extract_ops (
+  id TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL,
+  extract_id TEXT NOT NULL,
+  op_type TEXT NOT NULL,
+  batch_id TEXT,
+  before_json TEXT NOT NULL,
+  after_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+-- v48.22（D58）：全局操作序计数器（单行）。review_seq 与 extract_ops.seq 同取此值，
+-- 使「最近一次操作是卡片评分还是摘录操作」可跨表比较；撤销删除尾条后序号不再复用。
+CREATE TABLE IF NOT EXISTS op_counter (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  next INTEGER NOT NULL
+);
+-- v48.22（D58）：跨类撤销排序纯索引。载荷仍在 review_logs / extract_ops，本表只回答
+-- 「最近一次操作是哪一类」；kind=card_grade 时 ref=review_logs.id，kind=extract_op 时
+-- ref=extract_ops 单条 id 或批量共享的 batch_id。
+CREATE TABLE IF NOT EXISTS op_journal (
+  seq INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  ref TEXT NOT NULL,
+  undoable INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS cards (
   id TEXT PRIMARY KEY,
@@ -251,6 +284,53 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  // v48.22（D58）：摘录复习改版的数据面——摘录状态机 / A-Factor / 计数 / 书级优先级 / 双引擎子空间
+  for (const [col, type] of [
+    ["status", "TEXT NOT NULL DEFAULT 'open'"],
+    ["status_version", "INTEGER NOT NULL DEFAULT 1"],
+    ["status_detail_json", "TEXT"],
+    ["a_factor", "REAL NOT NULL DEFAULT 1.6"],
+    ["postpone_count", "INTEGER NOT NULL DEFAULT 0"],
+    ["process_count", "INTEGER NOT NULL DEFAULT 0"],
+    ["priority_source", "TEXT NOT NULL DEFAULT 'book'"],
+    ["engine_state_json", "TEXT"],
+    // 批注化摘录（规格 docs/impl-spec/ANNOTATION-MULTISELECT.md §1.1）：批注文字 / 型别 / 色板 / 标签 /
+    // 正文里的高亮范围锚（quote_range_json ＝ [{start,end},…]，多段选择即多区间）
+    ["comment", "TEXT"],
+    ["annotation_type", "TEXT"],
+    ["annotation_color", "TEXT"],
+    ["tag_json", "TEXT"],
+    ["quote_range_json", "TEXT"],
+    // v48.25 / 批 4（规格 INLINE-ANNOTATION §1.4，R35）：高亮与摘录**分族**——
+    // 'highlight'＝纯高亮（不进队列/不计上限/不进 FSRS，但进浏览器与搜索）；
+    // 'extract'＝摘录（现有语义不变）。存量行 NULL ⇒ 一律按摘录对待（零语义变更）。
+    ["kind", "TEXT"]
+  ]) {
+    try {
+      db.run(`ALTER TABLE extracts ADD COLUMN ${col} ${type}`);
+    } catch {
+      /* 列已存在 */
+    }
+  }
+  // 存量回填：NULL 一律按摘录（幂等，重复执行无副作用）
+  try {
+    db.run("UPDATE extracts SET kind = 'extract' WHERE kind IS NULL OR kind = ''");
+  } catch {
+    /* 列不存在等异常不阻塞启动 */
+  }
+  try {
+    // 书级默认优先级（默认 50 ＝与摘录默认同值，存量语义零变更）
+    db.run("ALTER TABLE library_items ADD COLUMN priority INTEGER NOT NULL DEFAULT 50");
+  } catch {
+    /* 列已存在 */
+  }
+  try {
+    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_extract_ops_seq ON extract_ops(seq)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_extract_ops_batch ON extract_ops(batch_id)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_extract_ops_extract ON extract_ops(extract_id)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_extracts_topic_next ON extracts(topic_next_at)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_extracts_status ON extracts(status)");
+  } catch { /* 表尚不存在等场景 */ }
   // v22：review_logs.fsrs_before_json（撤销评分——该次评分前的 FSRS 全字段快照；旧日志与未传快照的调用为 NULL，不可撤销）
   try {
     db.run("ALTER TABLE review_logs ADD COLUMN fsrs_before_json TEXT");
@@ -282,6 +362,15 @@ async function initDb() {
     }
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_review_logs_seq ON review_logs(review_seq)");
   } catch { /* 已迁移 */ }
+  try {
+    // v48.22（D58）：操作序计数器播种（op_journal / extract_ops 的 seq 来源，单行、必须存在）。
+    // **与 review_logs.review_seq 相互独立**——跨类撤销排序靠 op_journal，不靠 review_seq，
+    // 故这里不依赖 review_seq，起点固定为 1；INSERT OR IGNORE 保护已有行。
+    const hasCounter = queryAll("SELECT COUNT(*) AS n FROM op_counter")[0]?.n || 0;
+    if (!hasCounter) {
+      db.run("INSERT OR IGNORE INTO op_counter (id, next) VALUES (1, 1)");
+    }
+  } catch { /* 表尚不存在等场景 */ }
   // v23（D20）：fsrs_configs 播种——无任何 config 行时插入 cfg-default（完整默认快照）
   try {
     const cfgCount = queryAll("SELECT COUNT(*) AS n FROM fsrs_configs")[0]?.n || 0;
@@ -780,7 +869,7 @@ function getBackupCounts() {
 function listItems() {
   const stmt = db.prepare(`
     SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_json AS progressJson,
-           li.lang, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
+           li.lang, li.priority, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
     FROM library_items li
     LEFT JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.is_deleted = 0
@@ -1140,9 +1229,14 @@ function mapCardRow(r) {
       } else {
         const lr = f.lastReview === null || f.lastReview === undefined ? null : Number(f.lastReview);
         const S = Number(f.stability), D = Number(f.difficulty), due = Number(f.due);
+        // v48.22 修正（实测逼出）：**新卡豁免值域下界**——ts-fsrs 的新卡 S/D 恒为 0
+        // （src/lib/fsrs.ts 明写「新卡的 S/D 合法为 0（首评前），不能无条件钳进 [1,10]」），
+        // 而原判据不区分 state，会把这种合法新卡判成 damaged 并从队列**静默缺席**
+        // （m12 夹具 17 条断言因此全红）。非新卡仍按原值域严格判定，F34 的保护不变。
+        const isNewState = f.state === "new" || f.state === undefined || f.state === null;
         const bad =
-          (f.stability !== undefined && !(Number.isFinite(S) && S > 0)) ||
-          (f.difficulty !== undefined && !(Number.isFinite(D) && D >= 1 && D <= 10)) ||
+          (f.stability !== undefined && !(Number.isFinite(S) && (isNewState ? S >= 0 : S > 0))) ||
+          (f.difficulty !== undefined && !(Number.isFinite(D) && D >= (isNewState ? 0 : 1) && D <= 10)) ||
           (f.due !== undefined && !Number.isFinite(due)) ||
           (lr !== null && !Number.isFinite(lr)) ||
           (f.lapses !== undefined && !(Number(f.lapses) >= 0)) ||
@@ -1184,6 +1278,8 @@ function mapCardRow(r) {
     // v46（M14-UM2，§4.18-10）：记忆溯源（{line, verified}；NULL=未用记忆）
     memoryRefJson: j(r.memory_ref_json, null, "memory_ref_json"),
     siblingKey: r.sibling_key || null,
+    // v48.22（D58 §6.8-5）：卡片所属书（按书范围会话与浏览分组用；无来源卡为 null）
+    libraryItemId: r.library_item_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     damaged: fsrsBad || damagedColumns.includes("leech_json"),
@@ -1423,7 +1519,7 @@ function computeSiblingDeferred(cards, now) {
   return deferred;
 }
 
-const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle FROM cards c
+const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
      LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0
@@ -1507,13 +1603,18 @@ function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
     if (advanced) throw new Error("评分被拒：该卡的调度状态已前进（同一次呈现被重复提交）。请刷新后重试。");
   }
   const now = Date.now();
-  const seq = (queryAll("SELECT COALESCE(MAX(review_seq), 0) AS m FROM review_logs")[0]?.m || 0) + 1;
   db.run("BEGIN");
   try {
+    // review_seq 分配**保持原语义不变**（§4.4.9 排序不变量：表内唯一、插入序单调、撤销删除后允许复用）。
+    // 注意：v48.22 起 op_journal 另用独立的 op_counter 计数器——跨类撤销排序靠 journal，
+    // 不靠 review_seq，因此这里**不共享计数器**（共享会在 review_logs 里留下空洞，
+    // 破坏「撤销只删最大 seq ⇒ 序号稠密」这一既有可测性质，F38-8j 即其代理断言）。
+    const seq = (queryAll("SELECT COALESCE(MAX(review_seq), 0) AS m FROM review_logs")[0]?.m || 0) + 1;
+    const logId = crypto.randomUUID();
     db.run(
       "INSERT INTO review_logs (id, card_id, rating, reviewed_at, duration_ms, fsrs_before_json, fsrs_after_json, leech_before_json, fsrs_config_id, fsrs_before_config_id, review_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
-        crypto.randomUUID(),
+        logId,
         cardId,
         rating,
         now,
@@ -1530,6 +1631,13 @@ function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
         seq
       ]
     );
+    // v48.22（D58）：跨类撤销排序索引（载荷仍在 review_logs，本表只排「最近一次操作是哪一类」）。
+    // journal 的 seq 取独立计数器，**不复用 review_seq**——两者语义相互独立（见 nextOpSeq 注释）
+    db.run("INSERT INTO op_journal (seq, kind, ref, undoable, created_at) VALUES (?, 'card_grade', ?, 1, ?)", [
+      nextOpSeq(),
+      logId,
+      now
+    ]);
     db.run("UPDATE cards SET fsrs_json = ?, fsrs_config_id = ?, updated_at = ? WHERE id = ?", [
       JSON.stringify(fsrsState),
       getActiveConfigId(),
@@ -1895,6 +2003,17 @@ function ensurePromptTemplates() {
   // v29（D26）：card-occlusion v2——内容感知混合卡型（每卡自带 regions/qa 看图问答）。
   // 主软件直插候选版（用户真实书籍实测反馈即闭环输入，后续调优走测试台）；v1 留痕。
   // （v2 播种块已由 v3 取代：v29 时期播种过 v2 的库自然留痕；全新库直接 v1→v3）
+  // v48.22（D58 §6.8-4，E1）：**新 scope** `extract-rerank` 首版 v1——摘录到期批的 AI 重排与解释。
+  // 与制卡族 TARGET_VERSION 无关（不动它，避免整族重播）；出层契约见 kpScopes.validateExtractRerankOutput。
+  try {
+    const rerankCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'extract-rerank'")[0]?.n || 0;
+    if (Number(rerankCount) === 0) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'extract-rerank', '摘录重排 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), EXTRACT_RERANK_PROMPT, situationRequiredFor("extract-rerank"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
   const occMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'card-occlusion'")[0]?.v || 0;
   // v30（D29）：card-occlusion v3——增归属锚条款（论证/理论/学说/观点性内容标明提出者）。
   if (Number(occMaxV) < 3) {
@@ -2211,30 +2330,104 @@ function queryAll(sql, params = []) {
   return rows;
 }
 
-function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef }) {
+function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef,
+  comment, annotationType, annotationColor, tags, quoteRange, spans, kind }) {
   // 批次 E（D-TEST-15 T3 档）：extracts 是「挂在文档上的行」，父文档不存在就别插
   // （插进去就是日后没人踩得到的悬空行）。返回 false 不抛错，与 T1/T2 档一致。
   if (!rowExists("documents", documentId)) return false;
+  // v48.23（D61 §6.8-11）：多段不相邻选择——渲染层只把 spans 原样过桥（不做归一），
+  // 文本与区间都由 annotationRange 在这里装配（**spans 优先**，与单段路径同一实现面）。
+  // 仅在 spans 真给出内容时启用，既有单段调用（不传 spans）逐字节不变。
+  if (Array.isArray(spans) && spans.length > 0) {
+    const payload = annotationRange.buildSpanPayload(spans);
+    if (payload.text.trim()) {
+      contentMarkdown = payload.text;
+      quoteRange = payload.quoteRange;
+    }
+  }
+  // 工单 ②（§6.8-11）：**子摘录的整条正文都是引文**——父卡里选中的那段就是子卡的全部内容，
+  // 而单段选择不经过 spans 装配（渲染层只在 ≥2 段时传 spans）→ 这里补默认区间 [{0, len}]，
+  // 修掉「单段子摘录无落点高亮」。只对 `parentType === "extract"` 成立；根摘录语义不变
+  // （区间由选择跨度决定），且**显式传入的范围优先**（含 spans 装配出的多段区间）。
+  if (String(parentType) === "extract" && !(Array.isArray(quoteRange) && quoteRange.length)) {
+    quoteRange = [{ start: 0, end: String(contentMarkdown ?? "").length }];
+  }
   const id = crypto.randomUUID();
   const now = Date.now();
+  // v48.22（D58，§6.8-2）：**次日进队**——新摘录落下一个学习日切点（对齐 SM「只展示过去导入的文章」），
+  // 存量行一律不动；该时刻同时是「新摘录」派生计数的锚点（首次处理日）
+  const nextAt = dayStartMs(now) + DAY_MS;
+  // 优先级继承（§4.1）：显式传入 → 用户指定；未传 → 跟随所属书的 library_items.priority
+  const hasExplicit = priority !== undefined && priority !== null && priority !== "";
+  const bookRow = queryAll(
+    "SELECT li.priority AS p FROM documents d JOIN library_items li ON li.id = d.library_item_id WHERE d.id = ?",
+    [documentId]
+  )[0];
+  const bookPriority = bookRow && Number.isFinite(Number(bookRow.p)) ? Number(bookRow.p) : PRIORITY_DEFAULT;
+  const finalPriority = normPriority(hasExplicit ? priority : bookPriority);
+  // 批注字段（§1.1）：标签与范围锚都规范化后再落；范围锚为空即"未标范围"（null），与"曾标过但被删空"（'[]'）区分
+  const tagsJson = Array.isArray(tags) && tags.length ? JSON.stringify(tags.map(String)) : null;
+  const rangeJson = Array.isArray(quoteRange) && quoteRange.length
+    ? JSON.stringify(annotationRange.normalizeRanges(quoteRange, String(contentMarkdown).length))
+    : null;
+  // 层级身份（规格 §1.1 / §1.2）：**根摘录 rootExtractId ＝ 自身 id**——id 在这里才生成，故在落库前补；
+  // 子摘录的 parentExtractId / rootExtractId 由调用方（渲染层写 contextRef 的唯一一处）注入，不在这里臆造。
+  // 既有字段一律不动（原样往返）；只在「已有 contextRef 且缺 rootExtractId」时补一个键。
+  const refJson = (() => {
+    if (!contextRef || typeof contextRef !== "object" || Array.isArray(contextRef)) {
+      return contextRef ? JSON.stringify(contextRef) : null;
+    }
+    if (String(parentType) === "document" && !contextRef.rootExtractId) {
+      return JSON.stringify({ ...contextRef, rootExtractId: id });
+    }
+    return JSON.stringify(contextRef);
+  })();
   db.run(
-    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, topic_next_at, interval_days, workflow_state_json, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?, 0, 0)`,
+    `INSERT INTO extracts (id, user_id, parent_type, parent_id, document_id, content_markdown, context_ref_json, priority, priority_source, topic_next_at, interval_days, a_factor, workflow_state_json, comment, annotation_type, annotation_color, tag_json, quote_range_json, kind, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 1, 1.6, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
     [
       id,
       String(parentType),
       String(parentId),
       String(documentId),
       String(contentMarkdown),
-      contextRef ? JSON.stringify(contextRef) : null,
-      normPriority(priority),
-      now,
+      refJson,
+      finalPriority,
+      hasExplicit ? "user" : "book",
+      nextAt,
+      comment != null && comment !== "" ? String(comment) : null,
+      annotationType ? String(annotationType) : null,
+      annotationColor ? String(annotationColor) : null,
+      tagsJson,
+      rangeJson,
+      // 分族（R35）：只认白名单两值，其余一律按摘录（前向兼容）
+      String(kind) === "highlight" ? "highlight" : "extract",
       now,
       now
     ]
   );
   persist();
-  return { id };
+  return { id, topicNextAt: nextAt, priority: finalPriority, prioritySource: hasExplicit ? "user" : "book" };
+}
+
+/** 摘录的层级链（面包屑用，§6.8-11）：自根到当前逐级 {id, text, depth}。
+ *  与 parentChain 的分工：那个只回文本前缀（上下文前缀用）且封顶 5 级；
+ *  本函数回 **id**（面包屑点击要切到那张卡）且封顶 20 级。 */
+function getExtractChain(id) {
+  const out = [];
+  let cursorId = String(id);
+  for (let i = 0; i < 20; i++) {
+    const rows = queryAll(
+      "SELECT id, parent_type, parent_id, content_markdown FROM extracts WHERE id = ? AND is_deleted = 0",
+      [cursorId]
+    );
+    if (rows.length === 0) break;
+    const row = rows[0];
+    out.unshift({ id: String(row.id), text: String(row.content_markdown).slice(0, 40) });
+    if (row.parent_type !== "extract") break;
+    cursorId = String(row.parent_id);
+  }
+  return out.map((n, i) => ({ ...n, depth: i + 1 }));
 }
 
 function parentChain(extract) {
@@ -2252,17 +2445,28 @@ function parentChain(extract) {
   return chain;
 }
 
-function listDueExtracts() {
+function listDueExtracts(nowTs) {
+  // v48.22（D58）：now 可注入（测试与跨日场景，同 §4.4.4 时间注入精神）；缺省取真实时间
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
   const rows = queryAll(
-    `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown, e.context_ref_json, e.priority,
+    `SELECT e.id, e.parent_type, e.parent_id, e.document_id, e.content_markdown AS contentMarkdown, e.context_ref_json, e.priority,
+            e.status, e.status_version AS statusVersion, e.status_detail_json AS statusDetailJson,
+            e.a_factor AS aFactor, e.postpone_count AS postponeCount, e.process_count AS processCount,
+            e.priority_source AS prioritySource, e.engine_state_json AS engineStateJson,
+            e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
+            e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
+            COALESCE(e.kind,'extract') AS kind,
             e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
-            li.title AS docTitle
+            li.title AS docTitle, li.id AS libraryItemId
      FROM extracts e
      JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
      JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
-     WHERE e.is_deleted = 0 AND e.topic_next_at <= ?
+     WHERE e.is_deleted = 0 AND COALESCE(e.kind,'extract') = 'extract' AND e.topic_next_at <= ?
+       -- v48.22（D58，§6.4.2）：未知状态一律按 open 对待 ⇒ 必须写成**排除式**白名单；
+       -- 写成包含式（status IN (...)）会把未知状态误排除，违反前向兼容
+       AND COALESCE(e.status,'open') NOT IN ('resolved','dismissed','archived')
      ORDER BY e.priority ASC, e.topic_next_at ASC`,
-    [Date.now()]
+    [now]
   );
   return rows.map((r) => ({
     ...r,
@@ -2271,12 +2475,51 @@ function listDueExtracts() {
   }));
 }
 
+/** 全量摘录（卡片浏览器用；**含已毕业/已归档/已推迟**，便于管理与召回——§6.8-6 统一数据源） */
+function listAllExtracts() {
+  const rows = queryAll(
+    `SELECT e.id, e.parent_type AS parentType, e.parent_id AS parentId, e.document_id AS documentId,
+            e.content_markdown AS contentMarkdown, e.context_ref_json AS contextRefJson,
+            e.priority, e.priority_source AS prioritySource, e.status, e.status_version AS statusVersion,
+            e.status_detail_json AS statusDetailJson, e.a_factor AS aFactor,
+            e.postpone_count AS postponeCount, e.process_count AS processCount,
+            e.engine_state_json AS engineStateJson,
+            e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
+            e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
+            COALESCE(e.kind,'extract') AS kind,
+            e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
+            li.title AS docTitle, li.id AS libraryItemId
+     FROM extracts e
+     JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
+     JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
+     WHERE e.is_deleted = 0
+     ORDER BY e.priority ASC, e.topic_next_at ASC`
+  );
+  return rows.map((r) => {
+    let contextRef = null;
+    try {
+      contextRef = r.contextRefJson ? JSON.parse(r.contextRefJson) : null;
+    } catch {
+      contextRef = null; // 坏 JSON 不抛：浏览器仍可展示行，只是没有跳转锚点
+    }
+    const { contextRefJson, ...rest } = r;
+    return { ...rest, contextRef };
+  });
+}
+
 function getExtract(id) {
   const rows = queryAll(
     `SELECT e.id, e.parent_type AS parentType, e.parent_id AS parentId,
             e.document_id AS documentId, e.content_markdown AS contentMarkdown,
-            e.context_ref_json AS contextRefJson, e.priority, e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays,
-            e.created_at AS createdAt, li.title AS docTitle
+            e.context_ref_json AS contextRefJson, e.priority, e.priority_source AS prioritySource,
+            e.status, e.status_version AS statusVersion, e.status_detail_json AS statusDetailJson,
+            e.a_factor AS aFactor, e.postpone_count AS postponeCount, e.process_count AS processCount,
+            e.engine_state_json AS engineStateJson,
+            e.comment, e.annotation_type AS annotationType, e.annotation_color AS annotationColor,
+            e.tag_json AS tagJson, e.quote_range_json AS quoteRangeJson,
+            COALESCE(e.kind,'extract') AS kind,
+            e.topic_next_at AS topicNextAt, e.interval_days AS intervalDays, e.created_at AS createdAt,
+            li.title AS docTitle
      FROM extracts e
      JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
      JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
@@ -2287,19 +2530,1012 @@ function getExtract(id) {
   return { ...rows[0], chain: parentChain(rows[0]) };
 }
 
-function postponeExtract(id) {
-  const rows = queryAll("SELECT interval_days AS intervalDays FROM extracts WHERE id = ? AND is_deleted = 0", [id]);
-  if (rows.length === 0) return null;
-  const intervalDays = Math.min((Number(rows[0].intervalDays) || 1) * 1.6, 180);
-  const nextAt = Date.now() + Math.round(intervalDays * 86400000);
-  db.run("UPDATE extracts SET interval_days = ?, topic_next_at = ?, updated_at = ? WHERE id = ?", [
-    intervalDays,
-    nextAt,
-    Date.now(),
-    id
+// ---------- v48.22（D58）：摘录调度内核（SM 语义 + 双引擎子空间 + 操作日志与撤销） ----------
+// 契约：§6.8-2（SM 调度语义）/ §6.8-4（无损切换）/ §6.8-7（撤销）。规格：docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md
+
+const ENGINE_SM = "sm19-default";
+const ENGINE_AI = "ai-next-extract";
+const ENGINES = [ENGINE_SM, ENGINE_AI];
+const DEFAULT_A_FACTOR = 1.6;   // ＝旧 postponeExtract 的 ×1.6，存量行为零变更的锚点
+const POSTPONE_CAP_DAYS = 180;
+const DAY_MS = 86400000;
+// 批量推迟的跳过条件（SM 文档口径；仅批量生效，单条不受限 —— §6.8-2）
+const POSTPONE_SKIP = { maxIntervalDays: 2500, minAFactor: 1.01, maxPostponeCount: 250 };
+
+function postponeSkipReason(row) {
+  const cur = scheduleOfRow(row);
+  if (cur.intervalDays > POSTPONE_SKIP.maxIntervalDays) return "间隔已超过 2500 天";
+  if (cur.aFactor < POSTPONE_SKIP.minAFactor) return "A-Factor 低于 1.01";
+  if (cur.postponeCount > POSTPONE_SKIP.maxPostponeCount) return "已推迟超过 250 次";
+  return null;
+}
+
+// 生效引擎：显式参数优先；否则读 settings.app.extracts.engine（§6.8-1，默认 sm19-default）。
+// 非法值一律回落默认——切换是幂等的设置写入，不引入第三套命名（§4.2-9）
+function getActiveEngine(explicit) {
+  if (ENGINES.includes(explicit)) return explicit;
+  try {
+    const v = readSettings().app?.extracts?.engine;
+    return ENGINES.includes(v) ? v : ENGINE_SM;
+  } catch {
+    return ENGINE_SM;
+  }
+}
+
+function setActiveEngineValue(engine) {
+  const all = readSettings();
+  const appLayer = all.app && typeof all.app === "object" && !Array.isArray(all.app) ? { ...all.app } : {};
+  const exLayer = appLayer.extracts && typeof appLayer.extracts === "object" && !Array.isArray(appLayer.extracts)
+    ? { ...appLayer.extracts }
+    : {};
+  exLayer.engine = engine;
+  appLayer.extracts = exLayer;
+  all.app = appLayer;
+  writeSettings(all);
+}
+
+function parseEngineState(raw) {
+  try {
+    const o = JSON.parse(raw || "");
+    return o && typeof o === "object" && !Array.isArray(o) ? o : {};
+  } catch {
+    return {};
+  }
+}
+
+const EXTRACT_COLS = `id, parent_type AS parentType, parent_id AS parentId, document_id AS documentId,
+  content_markdown AS contentMarkdown, context_ref_json AS contextRefJson,
+  priority, priority_source AS prioritySource, status, status_version AS statusVersion,
+  status_detail_json AS statusDetailJson, topic_next_at AS topicNextAt, interval_days AS intervalDays,
+  a_factor AS aFactor, postpone_count AS postponeCount, process_count AS processCount,
+  engine_state_json AS engineStateJson, created_at AS createdAt, updated_at AS updatedAt,
+  comment, annotation_type AS annotationType, annotation_color AS annotationColor,
+  tag_json AS tagJson, quote_range_json AS quoteRangeJson,
+  COALESCE(kind,'extract') AS kind`;
+
+/** 范围锚解析：坏 JSON / 非数组一律当"无区间"，绝不因脏数据抛（§2.2 末行：无锚要显式，不能瞎猜） */
+function parseQuoteRanges(json) {
+  try {
+    const v = JSON.parse(json || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+function readExtractRow(id) {
+  return queryAll(`SELECT ${EXTRACT_COLS} FROM extracts WHERE id = ? AND is_deleted = 0`, [id])[0] || null;
+}
+
+// 撤销删除时必须能读到已软删的行（否则「撤销＝取消软删」永远失败）
+function readExtractRowAny(id) {
+  return queryAll(`SELECT ${EXTRACT_COLS} FROM extracts WHERE id = ?`, [id])[0] || null;
+}
+
+/** 公共投影列（= 生效引擎的值）→ 调度状态对象 */
+function scheduleOfRow(row) {
+  return {
+    nextAt: Number(row.topicNextAt) || 0,
+    intervalDays: Number(row.intervalDays) || 1,
+    aFactor: Number(row.aFactor) || DEFAULT_A_FACTOR,
+    postponeCount: Number(row.postponeCount) || 0,
+    processCount: Number(row.processCount) || 0,
+    priority: Number(row.priority)
+  };
+}
+
+/** 下一个操作序（op_journal / extract_ops 共用；与 review_logs.review_seq 相互独立）。
+ *  必须在事务内调用；计数器缺失时以 1 兜底播种并回读。 */
+function nextOpSeq() {
+  const row = queryAll("SELECT next AS n FROM op_counter WHERE id = 1")[0];
+  if (!row) {
+    // 计数器缺失（异常库/迁移未跑）：以 1 兜底播一次，再回读。
+    // 必须用 INSERT OR IGNORE —— OR REPLACE 会把已推进的 next 打回起点，造成 seq 重复
+    db.run("INSERT OR IGNORE INTO op_counter (id, next) VALUES (1, 1)");
+  }
+  const cur = queryAll("SELECT next AS n FROM op_counter WHERE id = 1")[0];
+  const seq = Number(cur?.n) || 1;
+  db.run("UPDATE op_counter SET next = ? WHERE id = 1", [seq + 1]);
+  return seq;
+}
+
+/** 调度写入：先更新生效引擎的私有子空间，再投影到公共列（§6.8-4 无损切换的载体） */
+function writeExtractSchedule(id, patch, engine) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  const eng = getActiveEngine(engine);
+  const state = parseEngineState(row.engineStateJson);
+  const merged = { ...scheduleOfRow(row), ...patch };
+  state[eng] = merged;
+  db.run(
+    `UPDATE extracts SET topic_next_at = ?, interval_days = ?, priority = ?, postpone_count = ?,
+       process_count = ?, a_factor = ?, engine_state_json = ?, updated_at = ? WHERE id = ?`,
+    [
+      merged.nextAt, merged.intervalDays, merged.priority, merged.postponeCount,
+      merged.processCount, merged.aFactor, JSON.stringify(state), Date.now(), id
+    ]
+  );
+  return merged;
+}
+
+function writeExtractStatus(id, status, detailPatch) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  let detail = {};
+  try {
+    const parsed = JSON.parse(row.statusDetailJson || "");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) detail = parsed;
+  } catch { /* 坏 JSON 按空对象处理 */ }
+  const nextDetail = { ...detail, ...(detailPatch || {}) };
+  db.run("UPDATE extracts SET status = ?, status_version = 1, status_detail_json = ?, updated_at = ? WHERE id = ?", [
+    String(status), JSON.stringify(nextDetail), Date.now(), id
   ]);
-  persist();
-  return { intervalDays, nextAt };
+  return { status, detail: nextDetail };
+}
+
+/** 撤销用：摘录的可逆快照（含引擎子空间原文，保证逐字段可复原） */
+function extractSnapshot(row) {
+  return {
+    contentMarkdown: row.contentMarkdown,
+    status: row.status,
+    statusDetailJson: row.statusDetailJson,
+    prioritySource: row.prioritySource,
+    isDeleted: 0,
+    schedule: scheduleOfRow(row),
+    engineStateJson: row.engineStateJson ?? null,
+    // 撤销一次正文编辑必须把范围锚一起退回去，否则区间与文本对不上（§2.2）
+    quoteRangeJson: row.quoteRangeJson ?? null,
+    comment: row.comment ?? null,
+    annotationColor: row.annotationColor ?? null,
+    kind: row.kind ?? "extract"
+  };
+}
+
+/** 写操作日志 + 跨类排序索引（同一事务内调用）。批量共用一个 batch_id，journal.ref 记 batch_id */
+function logExtractOp(row, opType, before, after, batchId, skipJournal) {
+  const seq = nextOpSeq();
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    "INSERT INTO extract_ops (id, seq, extract_id, op_type, batch_id, before_json, after_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, seq, row.id, opType, batchId || null, JSON.stringify(before), JSON.stringify(after), now]
+  );
+  if (!skipJournal) {
+    db.run("INSERT INTO op_journal (seq, kind, ref, undoable, created_at) VALUES (?, 'extract_op', ?, 1, ?)", [
+      seq, batchId || id, now
+    ]);
+  }
+  return { id, seq };
+}
+
+function withTransaction(fn) {
+  db.run("BEGIN");
+  try {
+    const out = fn();
+    db.run("COMMIT");
+    persist();
+    return out;
+  } catch (e) {
+    try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
+    throw e;
+  }
+}
+
+/** 恢复一条摘录到快照（撤销的唯一写入口；不写日志、不写 journal） */
+function restoreExtractSnapshot(snapshotRow, snap) {
+  const s = snap.schedule || {};
+  db.run(
+    `UPDATE extracts SET content_markdown = ?, status = ?, status_detail_json = ?, priority = ?,
+       priority_source = ?, topic_next_at = ?, interval_days = ?, postpone_count = ?, process_count = ?,
+       a_factor = ?, engine_state_json = ?, quote_range_json = ?, is_deleted = 0, updated_at = ? WHERE id = ?`,
+    [
+      snap.contentMarkdown, snap.status, snap.statusDetailJson ?? null,
+      Number(s.priority), snap.prioritySource,
+      Number(s.nextAt) || 0, Number(s.intervalDays) || 1, Number(s.postponeCount) || 0,
+      Number(s.processCount) || 0, Number(s.aFactor) || DEFAULT_A_FACTOR,
+      snap.engineStateJson ?? null, snap.quoteRangeJson ?? null, Date.now(), snapshotRow.id
+    ]
+  );
+  // 批 4（Task 2）：批注文字 / 颜色 / 分族逐字段复原；旧快照无这三键 ⇒ undefined，跳过不动现有值
+  const annoSets = [];
+  const annoArgs = [];
+  if (snap.comment !== undefined) { annoSets.push("comment = ?"); annoArgs.push(snap.comment); }
+  if (snap.annotationColor !== undefined) { annoSets.push("annotation_color = ?"); annoArgs.push(snap.annotationColor); }
+  if (snap.kind !== undefined) { annoSets.push("kind = ?"); annoArgs.push(snap.kind); }
+  if (annoSets.length) {
+    db.run(`UPDATE extracts SET ${annoSets.join(", ")} WHERE id = ?`, [...annoArgs, snapshotRow.id]);
+  }
+}
+
+/** 读后推进（§6.8-2「下一条」）：interval ×= a_factor；next_at = now + interval；process_count++ */
+function advanceExtract(id, nowTs) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  const now = Number(nowTs) || Date.now();
+  const cur = scheduleOfRow(row);
+  const intervalDays = cur.intervalDays * cur.aFactor;
+  const next = {
+    intervalDays,
+    nextAt: now + Math.round(intervalDays * DAY_MS),
+    processCount: cur.processCount + 1
+  };
+  const before = extractSnapshot(row);
+  const statusPatch = row.status === "open" ? { status: "reading" } : {};
+  const out = withTransaction(() => {
+    const merged = writeExtractSchedule(id, next);
+    const st = Object.keys(statusPatch).length ? writeExtractStatus(id, statusPatch.status) : { status: row.status };
+    logExtractOp(row, "advance", before, { ...next, status: st.status }, null);
+    return { ...merged, status: st.status };
+  });
+  return out;
+}
+
+/** 推迟（两条路径共用）：mode='days' 覆盖式指定天数；mode='factor' 乘 a_factor（封顶 180 天） */
+function postponeExtractInternal(id, mode, days, nowTs) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  const now = Number(nowTs) || Date.now();
+  const cur = scheduleOfRow(row);
+  let intervalDays;
+  if (mode === "days") {
+    const n = Number(days);
+    // 契约：至少 1 天（对齐 SM「推迟后间隔至少比今天多 1 天」）
+    intervalDays = Math.max(1, Math.min(Number.isFinite(n) ? n : 1, 36500));
+  } else {
+    intervalDays = Math.min(cur.intervalDays * cur.aFactor, POSTPONE_CAP_DAYS);
+  }
+  const next = {
+    intervalDays,
+    nextAt: now + Math.round(intervalDays * DAY_MS),
+    postponeCount: cur.postponeCount + 1
+  };
+  const before = extractSnapshot(row);
+  const out = withTransaction(() => {
+    const merged = writeExtractSchedule(id, next);
+    const st = writeExtractStatus(id, "postponed");
+    logExtractOp(row, "postpone", before, { ...next, status: st.status, mode }, null);
+    return { ...merged, status: st.status, mode };
+  });
+  return out;
+}
+
+/** 旧签名保留（×a_factor 路径）：既有调用方与 f10/f15 的 ×1.6 / 180 天上限断言不变 */
+function postponeExtract(id) {
+  const out = postponeExtractInternal(id, "factor", null);
+  return out ? { intervalDays: out.intervalDays, nextAt: out.nextAt } : null;
+}
+
+/** 用户指定天数推迟（沉浸式页「推迟」按钮） */
+function postponeExtractDays(id, days) {
+  return postponeExtractInternal(id, "days", days);
+}
+
+function updateExtract(id, patch) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  const p = patch || {};
+  const hasContent = Object.prototype.hasOwnProperty.call(p, "contentMarkdown");
+  const hasRange = Object.prototype.hasOwnProperty.call(p, "quoteRange");
+  // 批 4（Task 2）：批注文字 / 颜色 / 分族可写（清空 comment 即删除批注；非法颜色与越界 kind 一律忽略）
+  const hasComment = Object.prototype.hasOwnProperty.call(p, "comment");
+  const hasColor = Object.prototype.hasOwnProperty.call(p, "annotationColor");
+  const hasKind = Object.prototype.hasOwnProperty.call(p, "kind");
+  if (!hasContent && !hasRange && !hasComment && !hasColor && !hasKind) return { ok: true, unchanged: true };
+  const contentMarkdown = hasContent ? String(p.contentMarkdown ?? "") : row.contentMarkdown;
+  if (contentMarkdown === row.contentMarkdown && !hasRange && !hasComment && !hasColor && !hasKind) return { ok: true, unchanged: true };
+  const before = extractSnapshot(row);
+  return withTransaction(() => {
+    // 范围锚（规格 §2.2 / D61）：正文一变就按编辑脚本把区间重映射过去——
+    // 锚的是"区间"不是"文字"，所以卡片怎么编辑都不会找不到原文。
+    // null＝从未标过范围（老数据，不写回，免生 '[]' 噪音）；'[]'＝标过但被删空（§2.2 末行：显式无锚）。
+    const prevRanges = parseQuoteRanges(row.quoteRangeJson);
+    let nextRanges = prevRanges;
+    if (hasContent && contentMarkdown !== row.contentMarkdown) {
+      nextRanges = annotationRange.transformRanges(prevRanges, row.contentMarkdown, contentMarkdown).ranges;
+    }
+    if (hasRange) nextRanges = annotationRange.normalizeRanges(p.quoteRange, contentMarkdown.length);
+    const writeRanges = row.quoteRangeJson != null || hasRange;
+    const sets = ["content_markdown = ?", "updated_at = ?"];
+    const args = [contentMarkdown, Date.now()];
+    if (writeRanges) {
+      sets.splice(1, 0, "quote_range_json = ?");
+      args.splice(1, 0, JSON.stringify(nextRanges));
+    }
+    if (hasComment) {
+      const v = p.comment == null || String(p.comment).trim() === "" ? null : String(p.comment);
+      sets.push("comment = ?"); args.push(v);
+    }
+    if (hasColor && /^([a-z]{3,12}|#[0-9a-fA-F]{3,8})$/.test(String(p.annotationColor ?? ""))) {
+      sets.push("annotation_color = ?"); args.push(String(p.annotationColor));
+    }
+    if (hasKind && (p.kind === "highlight" || p.kind === "extract")) {
+      sets.push("kind = ?"); args.push(p.kind);
+    }
+    db.run(`UPDATE extracts SET ${sets.join(", ")} WHERE id = ?`, [...args, id]);
+    logExtractOp(
+      row, "edit", before,
+      {
+        ...(writeRanges ? { quoteRange: nextRanges } : {}),
+        contentMarkdown,
+        ...(hasComment ? { comment: p.comment == null || String(p.comment).trim() === "" ? null : String(p.comment) } : {}),
+        ...(hasColor ? { annotationColor: p.annotationColor } : {}),
+        ...(hasKind ? { kind: p.kind } : {})
+      },
+      null
+    );
+    return writeRanges ? { ok: true, quoteRange: nextRanges } : { ok: true };
+  });
+}
+
+/** 单条改优先级：置 priority_source='user'（此后不再跟随书级优先级，§4.1） */
+function setExtractPriority(id, priority) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  const value = normPriority(priority);
+  if (value === row.priority && row.prioritySource === "user") return { ok: true, unchanged: true };
+  const before = extractSnapshot(row);
+  return withTransaction(() => {
+    writeExtractSchedule(id, { priority: value });
+    db.run("UPDATE extracts SET priority_source = 'user', updated_at = ? WHERE id = ?", [Date.now(), id]);
+    logExtractOp(row, "set_priority", before, { priority: value, prioritySource: "user" }, null);
+    return { ok: true, priority: value };
+  });
+}
+
+/** 状态变更（毕业 / 召回 / 搁置 / 归档）。opType 由调用方语义决定，缺省 set_status */
+function setExtractStatus(id, status, detailPatch, opType) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  const detail = { ...(detailPatch || {}) };
+  if (status === "resolved") detail.graduatedAt = detail.graduatedAt || Date.now();
+  const before = extractSnapshot(row);
+  return withTransaction(() => {
+    const st = writeExtractStatus(id, status, detail);
+    logExtractOp(row, opType || "set_status", before, { status, detail }, null);
+    return { ok: true, status: st.status };
+  });
+}
+
+function deleteExtract(id) {
+  const row = readExtractRow(id);
+  if (!row) return null;
+  const before = extractSnapshot(row);
+  return withTransaction(() => {
+    db.run("UPDATE extracts SET is_deleted = 1, updated_at = ? WHERE id = ?", [Date.now(), id]);
+    logExtractOp(row, "delete", before, { isDeleted: 1 }, null);
+    return { ok: true };
+  });
+}
+
+/** 撤销分发：**只能撤销最近一次操作**；跳过不可撤销者（线性撤销栈语义） */
+function undoLast() {
+  for (let guard = 0; guard < 200; guard++) {
+    const tail = queryAll("SELECT seq, kind, ref, undoable FROM op_journal ORDER BY seq DESC LIMIT 1")[0];
+    if (!tail) break;
+    if (tail.kind === "card_grade") {
+      // 先摘掉排序索引条目，再走既有 undoLastReview（逐字复用）。两者不在同一事务内：
+      // op_journal 只是排序索引、不是事实源，索引丢失时 getUndoInfo 会回退既有路径，属可接受的降级
+      db.run("DELETE FROM op_journal WHERE seq = ?", [Number(tail.seq)]);
+      const r = undoLastReview();
+      if (r && r.ok) return r;
+      // 该条不可撤销（前置快照缺失 / 状态已变）——继续向前找
+      continue;
+    }
+    if (tail.kind === "extract_op") {
+      const ops = opsForJournalRef(String(tail.ref));
+      if (ops.length === 0) {
+        db.run("DELETE FROM op_journal WHERE seq = ?", [Number(tail.seq)]);
+        continue;
+      }
+      return withTransaction(() => {
+        for (const op of ops) {
+          const row = readExtractRowAny(op.extract_id);
+          if (!row) continue;
+          restoreExtractSnapshot(row, JSON.parse(op.before_json));
+          db.run("DELETE FROM extract_ops WHERE id = ?", [op.id]);
+        }
+        db.run("DELETE FROM op_journal WHERE seq = ?", [Number(tail.seq)]);
+        return { ok: true, kind: "extract_op", count: ops.length, opType: ops[0].op_type };
+      });
+    }
+    db.run("DELETE FROM op_journal WHERE seq = ?", [Number(tail.seq)]);
+  }
+  return { ok: false, reason: "没有可撤销的操作" };
+}
+
+/** 撤销可用性（UI 用：Ctrl+Z 会撤销哪一类、撤什么） */
+function getUndoInfo() {
+  const tail = queryAll("SELECT seq, kind, ref FROM op_journal ORDER BY seq DESC LIMIT 1")[0];
+  if (!tail) {
+    const log = getLastUndoableReview();
+    return log
+      ? { available: true, kind: "card_grade", rating: log.rating, source: "legacy" }
+      : { available: false, kind: null };
+  }
+  if (tail.kind === "card_grade") {
+    const log = getLastUndoableReview();
+    return { available: Boolean(log), kind: "card_grade", rating: log?.rating ?? null };
+  }
+  const ops = opsForJournalRef(String(tail.ref));
+  return { available: ops.length > 0, kind: "extract_op", opType: ops[0]?.op_type ?? null, count: ops.length };
+}
+
+/** 批量摘录操作：单事务 + 单 batch_id + 单 journal 条目（Ctrl+Z 整批回退） */
+const BATCH_OPS = ["postpone", "postponeDays", "set_priority", "set_status", "delete"];
+function batchExtractOps(op, ids, payload) {
+  if (!BATCH_OPS.includes(op)) return { ok: false, reason: `不支持的批量操作：${op}` };
+  const list = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string" && x);
+  if (list.length === 0) return { ok: false, reason: "未选中任何条目" };
+  const batchId = crypto.randomUUID();
+  const now = Date.now();
+  // 先做可读性检查（任一条不存在 → 整批不落库）
+  const rows = [];
+  for (const id of list) {
+    const r = readExtractRow(id);
+    if (!r) return { ok: false, reason: "存在已删除或不存在的条目，整批未执行" };
+    rows.push(r);
+  }
+  return withTransaction(() => {
+    let applied = 0;
+    let lastSeq = 0;
+    const skipped = [];
+    for (const row of rows) {
+      const cur = scheduleOfRow(row);
+      const before = extractSnapshot(row);
+      if (op === "postpone" || op === "postponeDays") {
+        const reason = postponeSkipReason(row);
+        if (reason) {
+          skipped.push({ id: row.id, reason });
+          continue;
+        }
+      }
+      if (op === "postpone") {
+        const intervalDays = Math.min(cur.intervalDays * cur.aFactor, POSTPONE_CAP_DAYS);
+        writeExtractSchedule(row.id, { intervalDays, nextAt: now + Math.round(intervalDays * DAY_MS), postponeCount: cur.postponeCount + 1 });
+        writeExtractStatus(row.id, "postponed");
+        lastSeq = logExtractOp(row, "postpone", before, { intervalDays }, batchId, true).seq;
+      } else if (op === "postponeDays") {
+        const n = Math.max(1, Math.min(Number(payload && payload.days) || 1, 36500));
+        writeExtractSchedule(row.id, { intervalDays: n, nextAt: now + Math.round(n * DAY_MS), postponeCount: cur.postponeCount + 1 });
+        writeExtractStatus(row.id, "postponed");
+        lastSeq = logExtractOp(row, "postpone", before, { intervalDays: n, mode: "days" }, batchId, true).seq;
+      } else if (op === "set_priority") {
+        const value = normPriority(payload && payload.priority);
+        writeExtractSchedule(row.id, { priority: value });
+        db.run("UPDATE extracts SET priority_source = 'user', updated_at = ? WHERE id = ?", [now, row.id]);
+        lastSeq = logExtractOp(row, "set_priority", before, { priority: value, prioritySource: "user" }, batchId, true).seq;
+      } else if (op === "set_status") {
+        const status = String((payload && payload.status) || "open");
+        writeExtractStatus(row.id, status, status === "resolved" ? { graduatedAt: now } : null);
+        lastSeq = logExtractOp(row, "set_status", before, { status }, batchId, true).seq;
+      } else if (op === "delete") {
+        db.run("UPDATE extracts SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, row.id]);
+        lastSeq = logExtractOp(row, "delete", before, { isDeleted: 1 }, batchId, true).seq;
+      }
+      applied += 1;
+    }
+    // 整批一条 journal 条目（ref=batch_id）：Ctrl+Z 一次回退整批，且不留自愈型残留条目
+    if (applied > 0) {
+      db.run("INSERT INTO op_journal (seq, kind, ref, undoable, created_at) VALUES (?, 'extract_op', ?, 1, ?)", [
+        lastSeq, batchId, now
+      ]);
+    }
+    return { ok: true, count: applied, skipped, batchId };
+  });
+}
+
+/** 卡片批量操作（v48.22 §6.8-6）：**单事务 + 单次 persist**，逐条列级写（不整行回写，避免 v32 式静默清列）。
+ *  支持：suspend / resume / postpone(days) / delete。**重置为新卡不在批内**——它要重写 fsrs 全字段，
+ *  §4.4.1 下须单独评审（保持单卡路径不变）。 */
+const CARD_BATCH_OPS = ["suspend", "resume", "postpone", "delete"];
+function batchCardOps(op, ids, payload) {
+  if (!CARD_BATCH_OPS.includes(op)) return { ok: false, reason: `不支持的批量操作：${op}` };
+  const list = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string" && x);
+  if (list.length === 0) return { ok: false, reason: "未选中任何条目" };
+  const days = Math.max(1, Math.min(Number(payload && payload.days) || 1, 36500));
+  const rows = [];
+  for (const id of list) {
+    const card = getCard(id);
+    if (!card) return { ok: false, reason: "存在已删除或不存在的卡片，整批未执行" };
+    rows.push(card);
+  }
+  return withTransaction(() => {
+    const now = Date.now();
+    let applied = 0;
+    for (const card of rows) {
+      if (op === "suspend" || op === "resume") {
+        // 只动 leech_json（与 setCardSuspended 同列；§4.4.10：挂起/恢复不写 fsrs_config_id）
+        const leech = { ...(card.leech || {}) };
+        leech.suspended = op === "suspend";
+        leech.suspendedAt = op === "suspend" ? now : null;
+        db.run("UPDATE cards SET leech_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(leech), now, card.id]);
+      } else if (op === "postpone") {
+        // 只动 fsrs_json.due（其余字段原样保留；不写 fsrs_config_id，与单卡推迟同语义）
+        const fsrs = { ...(card.fsrs || {}) };
+        fsrs.due = now + days * DAY_MS;
+        db.run("UPDATE cards SET fsrs_json = ?, updated_at = ? WHERE id = ?", [JSON.stringify(fsrs), now, card.id]);
+      } else if (op === "delete") {
+        db.run("UPDATE cards SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, card.id]);
+        db.run("UPDATE card_issues SET status = 'dismissed', resolved_at = ? WHERE card_id = ? AND status = 'open'", [now, card.id]);
+      }
+      applied += 1;
+    }
+    return { ok: true, count: applied, days: op === "postpone" ? days : undefined };
+  });
+}
+
+/** 按 journal.ref 取回该次操作的 op 行（批量优先按 batch_id；单条按 id） */
+function opsForJournalRef(ref) {
+  const byBatch = queryAll("SELECT * FROM extract_ops WHERE batch_id = ? ORDER BY seq DESC", [ref]);
+  if (byBatch.length > 0) return byBatch;
+  return queryAll("SELECT * FROM extract_ops WHERE id = ?", [ref]);
+}
+
+/**
+ * 引擎切换（§6.8-4）：源引擎子空间缺失时用当前投影冷启动播种（老库首切），
+ * 目标引擎子空间缺失时同样以当前投影播种（coldStart），随后投影目标引擎的值到公共列，
+ * 最后落 settings.app.extracts.engine（生效引擎的唯一真源）。
+ */
+function switchExtractEngine(to, from) {
+  const target = getActiveEngine(to);
+  const source = getActiveEngine(from);
+  const rows = queryAll(`SELECT ${EXTRACT_COLS} FROM extracts WHERE is_deleted = 0`);
+  let coldStart = 0;
+  withTransaction(() => {
+    for (const row of rows) {
+      const state = parseEngineState(row.engineStateJson);
+      const cur = scheduleOfRow(row);
+      // 源引擎冷启动播种：子空间缺失（升版后首次切换）时把当前投影冻结进去，
+      // 否则切走之后就再也回不到这套值——这是「无损」的关键一步
+      if (!state[source]) state[source] = cur;
+      let targetCold = false;
+      if (!state[target]) {
+        state[target] = cur;
+        targetCold = true;
+        coldStart += 1;
+      }
+      const t = state[target];
+      db.run(
+        `UPDATE extracts SET topic_next_at = ?, interval_days = ?, priority = ?, postpone_count = ?,
+           process_count = ?, a_factor = ?, engine_state_json = ?, updated_at = ? WHERE id = ?`,
+        [t.nextAt, t.intervalDays, t.priority, t.postponeCount, t.processCount, t.aFactor,
+         JSON.stringify(state), Date.now(), row.id]
+      );
+    }
+  });
+  setActiveEngineValue(target);
+  return { ok: true, engine: target, from: source, total: rows.length, coldStart };
+}
+
+/** 书级默认优先级（§4.1 / G1）：写库 + **实时跟随**该书下 priority_source='book' 的摘录 */
+function setLibraryItemPriority(libraryItemId, priority) {
+  if (!rowExists("library_items", libraryItemId)) return null;
+  const value = normPriority(priority);
+  const rows = queryAll(
+    `SELECT e.id FROM extracts e JOIN documents d ON d.id = e.document_id
+     WHERE d.library_item_id = ? AND e.is_deleted = 0 AND COALESCE(e.priority_source,'book') = 'book'`,
+    [libraryItemId]
+  );
+  return withTransaction(() => {
+    db.run("UPDATE library_items SET priority = ?, updated_at = ? WHERE id = ?", [value, Date.now(), libraryItemId]);
+    for (const r of rows) writeExtractSchedule(r.id, { priority: value });
+    return { ok: true, priority: value, followedExtracts: rows.length };
+  });
+}
+
+/** 每日用量（派生，零新状态）：四类计数按学习日口径 */
+function getDailyUsage(nowTs) {
+  const now = Number(nowTs) || Date.now();
+  const dayStart = dayStartMs(now);
+  const cardReviews = queryAll(
+    "SELECT COUNT(*) AS n FROM review_logs WHERE reviewed_at >= ? AND reviewed_at < ?",
+    [dayStart, dayStart + DAY_MS]
+  )[0]?.n || 0;
+  // 新卡＝当日出现其首条复习日志的卡（reps 0→1 的派生口径）
+  const newCards = queryAll(
+    `SELECT COUNT(*) AS n FROM (
+       SELECT card_id, MIN(reviewed_at) AS firstAt FROM review_logs GROUP BY card_id
+     ) t WHERE t.firstAt >= ? AND t.firstAt < ?`,
+    [dayStart, dayStart + DAY_MS]
+  )[0]?.n || 0;
+  // 摘录类计数只数**摘录**（kind='extract'）：纯高亮不进队列，自然也不该占每日上限（R35）
+  const extractReviews = queryAll(
+    `SELECT COUNT(*) AS n FROM extract_ops o JOIN extracts e ON e.id = o.extract_id
+     WHERE o.created_at >= ? AND o.created_at < ? AND o.op_type IN ('advance','postpone','graduate')
+       AND COALESCE(e.kind,'extract') = 'extract'`,
+    [dayStart, dayStart + DAY_MS]
+  )[0]?.n || 0;
+  // 新摘录＝当日发生「首次处理」（该摘录最早一条 advance/postpone）的条数
+  const newExtracts = queryAll(
+    `SELECT COUNT(*) AS n FROM (
+       SELECT MIN(o.seq) AS firstSeq FROM extract_ops o JOIN extracts e ON e.id = o.extract_id
+       WHERE o.op_type IN ('advance','postpone') AND COALESCE(e.kind,'extract') = 'extract'
+       GROUP BY o.extract_id
+     ) f JOIN extract_ops o ON o.seq = f.firstSeq
+     WHERE o.created_at >= ? AND o.created_at < ?`,
+    [dayStart, dayStart + DAY_MS]
+  )[0]?.n || 0;
+  return {
+    learningDayStart: dayStart,
+    newCards,
+    cardReviews,
+    newExtracts,
+    extractReviews
+  };
+}
+
+// ---------- v48.22（D58）：每日上限（§6.8-5）与会话队列（§6.8-3） ----------
+
+const LIMIT_DEFAULTS = { newCardsPerDay: 20, cardReviewsPerDay: 200, newExtractsPerDay: 10, extractReviewsPerDay: 50 };
+const LIMIT_HARD_FACTOR = 5;      // 硬边界（用户 2026-09-24 裁定）：复习上限 ≥ 新上限 × 5
+const LIMIT_ADVISORY_FACTOR = 10; // 建议档（Anki 文档口径「20 新卡 ≈ 200 复习/日」，非阻断）
+const LIMIT_MAX = 9999;
+
+/** 读上限（0 = 不限制；非法值回落默认；ignoreReviewLimitForNew 默认关） */
+function readLimits() {
+  const raw = (readSettings().app || {}).limits || {};
+  const pick = (name) => {
+    const v = Number(raw[name]);
+    if (!Number.isInteger(v) || v < 0 || v > LIMIT_MAX) return LIMIT_DEFAULTS[name];
+    return v;
+  };
+  return {
+    newCardsPerDay: pick("newCardsPerDay"),
+    cardReviewsPerDay: pick("cardReviewsPerDay"),
+    newExtractsPerDay: pick("newExtractsPerDay"),
+    extractReviewsPerDay: pick("extractReviewsPerDay"),
+    ignoreReviewLimitForNew: raw.ignoreReviewLimitForNew === true
+  };
+}
+
+/** 三层限幅的前两层（§6.8-5）：硬边界拒存 + 建议档提示；结构闸在会话队列里生效 */
+function validateLimits(patch) {
+  const merged = { ...readLimits(), ...(patch || {}) };
+  const errors = [];
+  const advisory = [];
+  for (const name of Object.keys(LIMIT_DEFAULTS)) {
+    const v = Number(merged[name]);
+    if (!Number.isInteger(v) || v < 0 || v > LIMIT_MAX) {
+      errors.push(`${name} 必须是 0（不限制）或 1–${LIMIT_MAX} 的整数`);
+    }
+  }
+  const pair = (revName, newName, label) => {
+    const rev = Number(merged[revName]);
+    const nw = Number(merged[newName]);
+    if (!Number.isInteger(rev) || !Number.isInteger(nw) || rev === 0 || nw === 0) return; // 0＝不限制，不参与关系约束
+    if (rev < nw * LIMIT_HARD_FACTOR) {
+      errors.push(`${label}复习上限不得低于${label}新上限的 ${LIMIT_HARD_FACTOR} 倍（当前 ${rev} < ${nw}×${LIMIT_HARD_FACTOR}）`);
+    } else if (rev < nw * LIMIT_ADVISORY_FACTOR) {
+      advisory.push(`${label}复习上限低于新上限的 ${LIMIT_ADVISORY_FACTOR} 倍，旧内容可能积压（Anki 官方经验：20 张新卡约带来 200 次复习/日）`);
+    }
+  };
+  pair("cardReviewsPerDay", "newCardsPerDay", "卡片");
+  pair("extractReviewsPerDay", "newExtractsPerDay", "摘录");
+  return { ok: errors.length === 0, errors, advisory, limits: merged };
+}
+
+/** 用量 + 上限 + 余额（§6.8-5；纯派生、零写路径） */
+function getLimitsState(nowTs) {
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
+  const usage = getDailyUsage(now);
+  const limits = readLimits();
+  const remaining = limitsRemaining(limits, usage);
+  const newBlocked = !limits.ignoreReviewLimitForNew && remaining.cardReviews <= 0;
+  return { usage, limits, remaining, newBlocked, learningDayStart: usage.learningDayStart };
+}
+
+function limitsRemaining(limits, usage) {
+  const left = (cap, used) => (cap === 0 ? Infinity : Math.max(0, cap - used));
+  return {
+    newCards: left(limits.newCardsPerDay, usage.newCards),
+    cardReviews: left(limits.cardReviewsPerDay, usage.cardReviews),
+    newExtracts: left(limits.newExtractsPerDay, usage.newExtracts),
+    extractReviews: left(limits.extractReviewsPerDay, usage.extractReviews)
+  };
+}
+
+const INTERLEAVE_MODES = ["quota-1-4", "by-due"];
+const DEFAULT_INTERLEAVE = "quota-1-4";
+const EXTRACT_QUOTA_EVERY = 4; // SM 文档口径「limit the inflow of topics to 1:4 or less」
+
+// ---------- v48.23（D61 §6.8-11）：多段选择的修饰键（§7.4 新键 app.multiSelectKey） ----------
+// 取值域封闭（Ctrl/Alt/Shift/Meta）；主进程在读侧与 settings:set 写侧都归一（非法值不落盘）。
+const MULTI_SELECT_KEYS = ["Ctrl", "Alt", "Shift", "Meta"];
+const DEFAULT_MULTI_SELECT_KEY = "Ctrl"; // macOS 的建议值是 Meta（渲染层按平台取默认，这里只管合法性）
+
+/** 归一多段选择修饰键：非枚举值一律回落默认（渲染层读侧与 settings:set 写侧共用） */
+function normalizeMultiSelectKey(v) {
+  return MULTI_SELECT_KEYS.includes(v) ? v : DEFAULT_MULTI_SELECT_KEY;
+}
+
+// ---------- 批 4（规格 §9.2）：就地批注的四个设置键 ----------
+// 读侧归一（脏值不落盘、也不进渲染层）：枚举回落默认 / 数组净化去重限 8 / 色值 id 或 #hex。
+const ANNOT_MODES = ["highlight", "extract"];
+const DEFAULT_ANNOT_MODE = "highlight";
+const ANNOTATION_FILTERS = ["all", "extract", "highlight"];
+const DEFAULT_ANNOTATION_FILTER = "all";
+/** 色板 id 值域（与渲染层 --annot-* Token 同名）；也接受 #hex 自定义色 */
+const ANNOT_COLOR_IDS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "magenta"];
+const ANNOT_PALETTE_MAX = 8;
+/** 6 支标准色（§9.2 默认值；与 Zotero 数量对齐但值域自定） */
+const DEFAULT_ANNOT_PALETTE = ["yellow", "red", "green", "blue", "purple", "magenta"];
+
+/** 归一标注模式：非枚举值回落默认 */
+function normalizeAnnotateMode(v) {
+  return ANNOT_MODES.includes(v) ? v : DEFAULT_ANNOT_MODE;
+}
+
+/** 归一筛选：非枚举值回落 all */
+function normalizeAnnotationFilter(v) {
+  return ANNOTATION_FILTERS.includes(v) ? v : DEFAULT_ANNOTATION_FILTER;
+}
+
+/** 归一布尔（读侧与写侧共用）：非真值一律 false */
+function normalizeAnnotateCustomEnabled(v) {
+  return v === true || v === "true";
+}
+
+/**
+ * 归一色板：逐项必须是色板 id 或 #hex；**有序去重**、截到上限 8；空/非法 ⇒ 回落默认 6 支。
+ * 不抛错（脏数据不该让设置页打不开）。
+ */
+function normalizeAnnotatePalette(v) {
+  const isColor = (x) =>
+    (typeof x === "string" && ANNOT_COLOR_IDS.includes(x)) ||
+    (typeof x === "string" && /^#[0-9a-fA-F]{3,8}$/.test(x));
+  const list = Array.isArray(v) ? v.filter(isColor) : [];
+  const seen = new Set();
+  const out = [];
+  for (const c of list) {
+    if (seen.has(c)) continue;
+    seen.add(c);
+    out.push(c);
+    if (out.length >= ANNOT_PALETTE_MAX) break;
+  }
+  return out.length ? out : DEFAULT_ANNOT_PALETTE;
+}
+
+/** 读侧取四个键的当前值（渲染层经 settingsStore.get("app", …) 读；此处供主进程一致性检查与测试） */
+function readAnnotationSettings() {
+  const app = readSettings().app || {};
+  return {
+    annotateMode: normalizeAnnotateMode(app.annotateMode),
+    annotatePalette: normalizeAnnotatePalette(app.annotatePalette),
+    annotateCustomEnabled: app.annotateCustomEnabled === undefined ? true : normalizeAnnotateCustomEnabled(app.annotateCustomEnabled),
+    annotationFilter: normalizeAnnotationFilter(app.annotationFilter)
+  };
+}
+
+function readSessionPrefs() {
+  const ex = (readSettings().app || {}).extracts || {};
+  return {
+    mergeIntoReview: ex.mergeIntoReview === true, // 默认关（用户裁定）
+    interleave: INTERLEAVE_MODES.includes(ex.interleave) ? ex.interleave : DEFAULT_INTERLEAVE
+  };
+}
+
+/** 复习范围（筛选牌组）：结构化过滤（书 / 类别）+ 可选上限覆写。零 schema 变更（D51 先例） */
+function readReviewScopes() {
+  const raw = (readSettings().app || {}).reviewScopes;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((s) => s && typeof s === "object" && typeof s.id === "string" && s.id)
+    .map((s) => ({
+      id: String(s.id),
+      name: String(s.name || "未命名范围"),
+      bookItemIds: Array.isArray(s.bookItemIds) ? s.bookItemIds.map(String).filter(Boolean) : [],
+      kinds: Array.isArray(s.kinds) ? s.kinds.filter((k) => k === "card" || k === "extract") : [],
+      limits: s.limits && typeof s.limits === "object" ? s.limits : null
+    }));
+}
+
+/** 范围只能**收紧**上限，不能另开预算（§6.8-5 关键取舍：范围互相重叠，各开配额会被多入口绕过） */
+function limitsForScope(base, scope) {
+  if (!scope || !scope.limits) return base;
+  const out = { ...base };
+  for (const name of Object.keys(LIMIT_DEFAULTS)) {
+    const v = Number(scope.limits[name]);
+    if (!Number.isInteger(v) || v < 0 || v > LIMIT_MAX) continue;
+    if (out[name] === 0) out[name] = v;                    // 全局不限 ⇒ 用范围的收紧值
+    else if (v !== 0) out[name] = Math.min(out[name], v);
+  }
+  if (scope.limits.ignoreReviewLimitForNew === true) out.ignoreReviewLimitForNew = true;
+  return out;
+}
+
+/** 范围过滤（书 / 类别；无 scope 时原样返回） */
+function applyScope(items, scope, kind) {
+  if (!scope) return items;
+  let out = items;
+  if (Array.isArray(scope.bookItemIds) && scope.bookItemIds.length > 0) {
+    const allowed = new Set(scope.bookItemIds.map(String));
+    out = out.filter((x) => allowed.has(String(x.libraryItemId ?? "")));
+  }
+  if (Array.isArray(scope.kinds) && scope.kinds.length > 0 && !scope.kinds.includes(kind)) out = [];
+  return out;
+}
+
+/** AI 重排缓存（派生缓存、可重算；**不是调度真源**）：存 settings.app.extracts.aiRerank */
+function readAiRerank() {
+  try {
+    const cache = readSettings().app?.extracts?.aiRerank;
+    if (!cache || typeof cache !== "object") return null;
+    if (typeof cache.fingerprint !== "string" || !Array.isArray(cache.order)) return null;
+    const order = cache.order
+      .filter((o) => o && typeof o.id === "string")
+      .map((o) => ({ id: String(o.id), reason: typeof o.reason === "string" ? o.reason : "" }));
+    if (order.length === 0) return null;
+    return { fingerprint: cache.fingerprint, at: Number(cache.at) || 0, order };
+  } catch {
+    return null;
+  }
+}
+
+/** 写入 AI 重排缓存（由主进程在 AI 调用成功后调用；指纹不匹配即视为失效） */
+function saveAiRerank(fingerprint, order) {
+  const all = readSettings();
+  const appLayer = all.app && typeof all.app === "object" && !Array.isArray(all.app) ? { ...all.app } : {};
+  const exLayer = appLayer.extracts && typeof appLayer.extracts === "object" && !Array.isArray(appLayer.extracts) ? { ...appLayer.extracts } : {};
+  exLayer.aiRerank = {
+    fingerprint: String(fingerprint),
+    at: Date.now(),
+    order: (Array.isArray(order) ? order : []).slice(0, 40).map((o) => ({ id: String(o.id), reason: String(o.reason ?? "").slice(0, 120) }))
+  };
+  appLayer.extracts = exLayer;
+  all.app = appLayer;
+  writeSettings(all);
+  return exLayer.aiRerank;
+}
+
+/** 应用 AI 重排：只认指纹匹配的缓存；未提及的条目按本地序追加（不丢条） */
+function applyAiRerank(items, cache) {
+  if (!cache || cache.fingerprint !== rerankFingerprint(items)) return items;
+  const pos = new Map(cache.order.map((o, i) => [o.id, i]));
+  const reason = new Map(cache.order.filter((o) => o.reason).map((o) => [o.id, o.reason]));
+  return items
+    .map((e, i) => ({ e, key: pos.has(e.id) ? pos.get(e.id) : Number.MAX_SAFE_INTEGER, i }))
+    .sort((a, b) => a.key - b.key || a.i - b.i)
+    .map(({ e }) => (reason.has(e.id) ? { ...e, aiReason: reason.get(e.id), engineReason: `AI：${reason.get(e.id)}｜${e.engineReason}` } : e));
+}
+
+/**
+ * 会话队列（§6.8-3）：卡片 ∪ 摘录的**唯一装配面**（§4.2-26）。
+ * **只影响展示、零调度写入**——未放行的条目在库内仍 due（先例＝§4.16 同源延后）。
+ * 退化保证：`scope` 为空且余额充足时，`cards` 与 `computeTodayQueue().cards` 逐 id 相等。
+ */
+/**
+ * 复习页顶栏的**今日可用**三档计数（与 computeSessionQueue 同一预算口径，唯一真源在 db 侧）：
+ * 未学习＝今天还会发的新卡（受 newCards 额度与结构闸约束）；学习中/待复习＝今天还会发的
+ * learning/relearning 与 review 卡。额度用尽的部分**不计**——这三个数回答的是「今天还能刷多少」，
+ * 不是「库里有多少」（用户 2026-10-01 选定）。
+ */
+function computeCardCounts(nowTs, opts) {
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
+  const o = opts || {};
+  const scope = o.scope || null;
+  const limits = limitsForScope(readLimits(), scope);
+  const remaining = limitsRemaining(limits, getDailyUsage(now));
+  const ignore = limits.ignoreReviewLimitForNew;
+  const q = computeTodayQueue(now);
+  let cardBudget = remaining.cardReviews;
+  let newBudget = remaining.newCards;
+  const out = { new: 0, learning: 0, review: 0 };
+  for (const c of applyScope(q.cards, scope, "card")) {
+    const reps = Number(c.fsrs && c.fsrs.reps) || 0;
+    const state = String((c.fsrs && c.fsrs.state) || "new");
+    if (reps === 0 || state === "new") {
+      if (newBudget <= 0) continue;
+      if (cardBudget <= 0 && !ignore) continue;
+      newBudget -= 1;
+      if (cardBudget > 0) cardBudget -= 1;
+      out.new += 1;
+      continue;
+    }
+    if (cardBudget <= 0) continue;
+    cardBudget -= 1;
+    if (state === "learning" || state === "relearning") out.learning += 1;
+    else out.review += 1;
+  }
+  return out;
+}
+
+function computeSessionQueue(nowTs, opts) {
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
+  const o = opts || {};
+  const prefs = readSessionPrefs();
+  const mergeIntoReview = o.mergeIntoReview === undefined ? prefs.mergeIntoReview : o.mergeIntoReview === true;
+  const interleave = INTERLEAVE_MODES.includes(o.interleave) ? o.interleave : prefs.interleave;
+  const scope = o.scope || null;
+  const limits = limitsForScope(readLimits(), scope);
+
+  const usage = getDailyUsage(now);
+  const remaining = limitsRemaining(limits, usage);
+  const newBlocked = !limits.ignoreReviewLimitForNew && remaining.cardReviews <= 0;
+
+  const q = computeTodayQueue(now);
+  const isNewCard = (c) => (c.fsrs?.reps ?? 0) === 0 || (c.fsrs?.state ?? "new") === "new";
+  const cards = [];
+  const blockedCards = [];
+  let cardBudget = remaining.cardReviews;              // 卡片作答总预算（新卡与复习卡共用）
+  let newCardBudget = remaining.newCards;              // 其中「首次作答」的额度
+  const ignore = limits.ignoreReviewLimitForNew;
+  for (const c of applyScope(q.cards, scope, "card")) {
+    if (isNewCard(c)) {
+      // 新卡：受新卡额度约束；总预算用尽时**除 ignore 开启外一律停发**（结构闸，Anki 同名选项语义）
+      if (newCardBudget <= 0) { blockedCards.push(c); continue; }
+      if (cardBudget <= 0 && !ignore) { blockedCards.push(c); continue; }
+      newCardBudget -= 1;
+      if (cardBudget > 0) cardBudget -= 1;
+      cards.push(c);
+      continue;
+    }
+    if (cardBudget <= 0) { blockedCards.push(c); continue; }
+    cardBudget -= 1;
+    cards.push(c);
+  }
+
+  const extracts = [];
+  const blockedExtracts = [];
+  const sessionEngine = getActiveEngine(o.engine);
+  if (mergeIntoReview || scope) {
+    let due = applyScope(listDueExtracts(now), scope, "extract");
+    // v48.22（D58/D59）：实验引擎生效时按**本地因子**重排（§6.4.1 两段式 E1，确定性、零 IO）；
+    // 默认引擎保持 SQL 原序（priority ASC, topic_next_at ASC），存量行为零变更
+    if (sessionEngine === ENGINE_AI) {
+      due = rankExtracts(due, now);
+      // E1 的 AI 层：消费主进程写下的重排缓存（指纹不符＝候选已变 ⇒ 忽略，回退本地序）
+      due = applyAiRerank(due, readAiRerank());
+    }
+    let extractBudget = remaining.extractReviews;
+    let newExtractBudget = newBlocked ? 0 : remaining.newExtracts;
+    for (const e of due) {
+      if (extracts.length >= extractBudget) { blockedExtracts.push(e); continue; }
+      if ((Number(e.processCount) || 0) === 0) {
+        if (newExtractBudget <= 0) { blockedExtracts.push(e); continue; }
+        newExtractBudget -= 1;
+      }
+      extracts.push(e);
+    }
+  }
+
+  const items = [];
+  if (!mergeIntoReview) {
+    for (const c of cards) items.push({ kind: "card", id: c.id, card: c });
+  } else if (interleave === "by-due") {
+    const merged = [
+      ...cards.map((c) => ({ kind: "card", id: c.id, sortAt: Number(c.fsrs?.due ?? now) || now, card: c })),
+      ...extracts.map((e) => ({ kind: "extract", id: e.id, sortAt: Number(e.topicNextAt) || now, extract: e }))
+    ].sort(
+      (a, b) =>
+        a.sortAt - b.sortAt ||
+        (a.kind === b.kind ? 0 : a.kind === "card" ? -1 : 1) ||
+        String(a.id).localeCompare(String(b.id))
+    );
+    for (const { sortAt, ...rest } of merged) items.push(rest);
+  } else {
+    // quota-1-4：每 4 张卡至多插 1 条摘录；卡片耗尽后按序追加（防「卡片不够就永远看不到摘录」死角）
+    let ei = 0;
+    cards.forEach((c, i) => {
+      items.push({ kind: "card", id: c.id, card: c });
+      if ((i + 1) % EXTRACT_QUOTA_EVERY === 0 && ei < extracts.length) {
+        const e = extracts[ei++];
+        items.push({ kind: "extract", id: e.id, extract: e });
+      }
+    });
+    while (ei < extracts.length) {
+      const e = extracts[ei++];
+      items.push({ kind: "extract", id: e.id, extract: e });
+    }
+  }
+
+  return {
+    items, cards, extracts,
+    deferred: q.deferred, damaged: q.damaged,
+    blocked: { cards: blockedCards, extracts: blockedExtracts },
+    mergeIntoReview, interleave, scope,
+    limits, usage, remaining, newBlocked, now,
+    engine: sessionEngine
+  };
 }
 
 // ---------- 统计聚合（stats:overview，只读，不改任何调度状态） ----------
@@ -4857,8 +6093,43 @@ module.exports = {
   updateProgress,
   createExtract,
   listDueExtracts,
+  listAllExtracts,
+  // v48.23（D61 §6.8-11）：多段选择修饰键的写侧归一（settings:set 兜底，非法值不落盘）
+  normalizeMultiSelectKey,
+  // 批 4（规格 §9.2）：四个批注设置键的读/写侧归一
+  normalizeAnnotateMode,
+  normalizeAnnotationFilter,
+  normalizeAnnotateCustomEnabled,
+  normalizeAnnotatePalette,
+  readAnnotationSettings,
   getExtract,
+  getExtractChain,
   postponeExtract,
+  // v48.22（D58）：摘录调度内核（SM 语义 + 双引擎子空间 + 操作日志与撤销）
+  postponeExtractDays,
+  advanceExtract,
+  updateExtract,
+  setExtractPriority,
+  setExtractStatus,
+  deleteExtract,
+  batchExtractOps,
+  batchCardOps,
+  switchExtractEngine,
+  undoLast,
+  getUndoInfo,
+  getDailyUsage,
+  // v48.22（D58）：每日上限与会话队列（§6.8-3/§6.8-5）
+  getLimitsState,
+  validateLimits,
+  readLimits,
+  readReviewScopes,
+  readSessionPrefs,
+  readAiRerank,
+  saveAiRerank,
+  getActiveExtractEngine: () => getActiveEngine(),
+  computeSessionQueue,
+  computeCardCounts,
+  setLibraryItemPriority,
   getLastUndoableReview,
   undoLastReview,
   createCard,

@@ -11,6 +11,10 @@ if (process.env.M7_TEST_USERDATA) {
   app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));
 }
 
+// v48.23（D61 §6.8-11）：多段选择的纯函数内核（唯一实现面，见 electron/annotationRange.js 头注）。
+// 主进程用它装配 spans 载荷（extracts:spanSet 与 db.createExtract 同一模块）。
+const annotationRange = require("./annotationRange");
+
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
 let mainWindow = null;
@@ -42,8 +46,37 @@ const {
   updateProgress,
   createExtract,
   listDueExtracts,
+  listAllExtracts,
   getExtract,
+  getExtractChain,
   postponeExtract,
+  // v48.22（D58）：摘录调度内核（写 API + 引擎切换 + 派生用量 + 跨类撤销）
+  postponeExtractDays,
+  advanceExtract,
+  updateExtract,
+  setExtractPriority,
+  setExtractStatus,
+  deleteExtract,
+  batchExtractOps,
+  batchCardOps,
+  switchExtractEngine,
+  setLibraryItemPriority,
+  getDailyUsage,
+  getLimitsState,
+  validateLimits,
+  // v48.23（D61 §6.8-11）：多段选择修饰键的写侧归一（取值域封闭，非法值不落盘）
+  normalizeMultiSelectKey,
+  normalizeAnnotateMode,
+  normalizeAnnotationFilter,
+  normalizeAnnotateCustomEnabled,
+  normalizeAnnotatePalette,
+  computeSessionQueue,
+  computeCardCounts,
+  readAiRerank,
+  saveAiRerank,
+  getActiveExtractEngine,
+  undoLast,
+  getUndoInfo,
   getLastUndoableReview,
   undoLastReview,
   createCard,
@@ -71,6 +104,8 @@ const {
   findSimilarCards
 } = require("./db");
 const { getAIConfig, setAIConfig, chatStream, testConnection, listModels } = require("./ai");
+// v48.22（D58 / E1）：AI 重排的本地裁决与指纹（与 db 侧同一份实现）
+const { rankWithAI, rerankFingerprint } = require("./aiNextExtract");
 const dbModule = require("./db");
 const optimizer = require("./optimizer");
 const backup = require("./backup");
@@ -142,6 +177,23 @@ ipcMain.handle("settings:get", (_e, scope, key) => {
 });
 
 ipcMain.handle("settings:set", (_e, scope, key, value) => {
+  // v48.22（D58 §6.8-5）：每日上限的**硬边界**在主进程侧兜底——渲染层校验只负责即时提示，
+  // 这里拒绝违规写入（否则绕过 UI 就能把「复习上限 < 新上限×5」落盘，积压立刻发生）
+  if (scope === "app" && key === "limits") {
+    const verdict = validateLimits(value || {});
+    if (!verdict.ok) {
+      const err = new Error(verdict.errors.join("；"));
+      err.errors = verdict.errors;
+      throw err;
+    }
+  }
+  // v48.23（D61 §6.8-11）：多段选择修饰键取值域封闭（Ctrl/Alt/Shift/Meta），非法写入就地归一
+  if (scope === "app" && key === "multiSelectKey") value = normalizeMultiSelectKey(value);
+  // 批 4（规格 §9.2）：四个批注设置键同样在写侧归一（枚举回落默认 / 色板净化去重限 8）
+  if (scope === "app" && key === "annotateMode") value = normalizeAnnotateMode(value);
+  if (scope === "app" && key === "annotationFilter") value = normalizeAnnotationFilter(value);
+  if (scope === "app" && key === "annotateCustomEnabled") value = normalizeAnnotateCustomEnabled(value);
+  if (scope === "app" && key === "annotatePalette") value = normalizeAnnotatePalette(value);
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
@@ -430,15 +482,95 @@ ipcMain.handle("library:updateProgress", (_e, itemId, progress) => updateProgres
 
 ipcMain.handle("extracts:create", (_e, payload) => createExtract(payload || {}));
 
+// v48.23（D61 §6.8-11）：多段选择的集合运算 + 拼接文本——渲染层不 require electron/、
+// 也不复制 annotationRange 的纯逻辑，只把 spans 原样过桥，由主进程用同一实现面算
+// （与 createExtract 落库时的装配完全同源）。纯计算、零写库。
+ipcMain.handle("extracts:spanSet", (_e, current, incoming, opts) => {
+  const step = annotationRange.updateSpanSet(current, incoming, opts || {});
+  return { spans: step.spans, action: step.action, text: annotationRange.buildSpanPayload(step.spans).text };
+});
+
 ipcMain.handle("extracts:listDue", () => listDueExtracts());
+ipcMain.handle("extracts:listAll", () => listAllExtracts());
 
 ipcMain.handle("extracts:get", (_e, id) => getExtract(String(id)));
+// v48.23（D61 §6.8-11）：层级链（面包屑点击跳转要 id；getExtract 自带的 chain 只有文本前缀）
+ipcMain.handle("extracts:chain", (_e, id) => getExtractChain(String(id)));
 
 ipcMain.handle("extracts:postpone", (_e, id) => postponeExtract(String(id)));
+
+// v48.22（D58 §6.8）：摘录写 API + 引擎切换 + 只读用量 + 跨类撤销。
+// 写路径纪律沿用 §4.4.9：BEGIN/COMMIT → COMMIT 后 persist → IPC 成功，三者齐才算成功；
+// 失败一律以 reject 上抛，渲染层按既有「保存失败横幅 + 重试」处理，禁止静默降级。
+ipcMain.handle("extracts:postponeDays", (_e, id, days) => postponeExtractDays(String(id), days));
+// v48.22（D58 §6.8-4）：写路径后置一次「过期即刷新」（只在实验引擎生效时真正发起）
+const extractWrite = (fn) => (...args) => {
+  const out = fn(...args);
+  maybeRefreshAiRerank();
+  return out;
+};
+ipcMain.handle("extracts:advance", extractWrite((_e, id, now) => advanceExtract(String(id), now)));
+ipcMain.handle("extracts:update", (_e, id, patch) => updateExtract(String(id), patch || {}));
+ipcMain.handle("extracts:setPriority", (_e, id, priority) => setExtractPriority(String(id), priority));
+ipcMain.handle("extracts:setStatus", extractWrite((_e, id, status, detail, opType) =>
+  setExtractStatus(String(id), String(status), detail || null, opType ? String(opType) : undefined)
+));
+ipcMain.handle("extracts:delete", (_e, id) => deleteExtract(String(id)));
+ipcMain.handle("extracts:batch", extractWrite((_e, op, ids, payload) => batchExtractOps(String(op), ids, payload)));
+ipcMain.handle("extracts:switchEngine", extractWrite((_e, to, from) => switchExtractEngine(to, from)));
+
+// v48.22（D58 §6.4.1 E1）：AI 重排（到期批 → 模型 → 本地裁决 → 写缓存；缓存由会话队列同步读取）。
+// 任何失败都不影响主流程：会话队列在无缓存/指纹不符时用本地因子序。
+async function runExtractRerank() {
+  const due = listDueExtracts();
+  if (due.length === 0) return { ok: false, usedAI: false, reason: "当前没有到期的摘录" };
+  const tpl = getPromptTemplate("extract-rerank");
+  const sys = typeof tpl === "string" ? tpl : tpl && tpl.content;
+  if (!sys) return { ok: false, usedAI: false, reason: "未播种 extract-rerank 提示词" };
+  const cfg = getAIConfig();
+  if (cfg.preset !== "local" && !cfg.apiKey) return { ok: false, usedAI: false, reason: "未配置 AI Key（保持本地因子序）" };
+  const callAI = async ({ candidates }) => {
+    const reply = await mindmapChat({ system: sys, user: JSON.stringify({ candidates }), temperature: 0.1 });
+    return reply.text;
+  };
+  const { items, usedAI, issues } = await rankWithAI(due, Date.now(), callAI);
+  if (usedAI) {
+    saveAiRerank(
+      rerankFingerprint(due),
+      items.filter((e) => e.aiReason).map((e) => ({ id: e.id, reason: e.aiReason }))
+    );
+  }
+  return { ok: true, usedAI, count: items.length, issues };
+}
+
+ipcMain.handle("extracts:rerankNow", () => runExtractRerank());
+
+/** 写路径后的后台刷新：仅在实验引擎生效且缓存过期时触发一次（绝不阻塞主流程） */
+function maybeRefreshAiRerank() {
+  try {
+    if (getActiveExtractEngine() !== "ai-next-extract") return;
+    const due = listDueExtracts();
+    if (due.length === 0) return;
+    const cache = readAiRerank();
+    if (cache && cache.fingerprint === rerankFingerprint(due)) return;
+    void runExtractRerank().catch(() => {});
+  } catch {
+    /* 后台刷新失败不影响主流程 */
+  }
+}
+ipcMain.handle("limits:usage", (_e, now) => getDailyUsage(now));
+ipcMain.handle("limits:state", (_e, now) => getLimitsState(now));
+ipcMain.handle("limits:validate", (_e, patch) => validateLimits(patch));
+ipcMain.handle("session:queue", (_e, now, opts) => computeSessionQueue(now, opts || {}));
+ipcMain.handle("session:counts", (_e, now, opts) => computeCardCounts(now, opts || {}));
+ipcMain.handle("undo:last", () => undoLast());
+ipcMain.handle("undo:info", () => getUndoInfo());
+ipcMain.handle("library:setPriority", (_e, itemId, priority) => setLibraryItemPriority(String(itemId), priority));
 
 // ---------- 卡片 / FSRS / Leech / AI 制卡 ----------
 ipcMain.handle("cards:create", (_e, card) => createCard(card || {}));
 ipcMain.handle("cards:update", (_e, card) => updateCard(card || {}));
+ipcMain.handle("cards:batch", (_e, op, ids, payload) => batchCardOps(String(op), ids, payload));
 ipcMain.handle("cards:get", (_e, id) => getCard(String(id)));
 ipcMain.handle("cards:listDue", () => listDueCards());
 // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试
@@ -1206,6 +1338,94 @@ ipcMain.handle("mindmap:repairConfirm", (_e, runId) => mindmapEngine.repairConfi
 ipcMain.handle("mindmap:list", (_e, documentId) => dbModule.listMaterialMaps(documentId));
 ipcMain.handle("mindmap:get", (_e, id) => dbModule.getMaterialMap(id));
 ipcMain.handle("mindmap:getActive", (_e, documentId, scopeAnchor) => dbModule.getActiveMaterialMap(documentId, scopeAnchor || "book"));
+
+/**
+ * 批 4 Task 15（规格 §5.3「图谱页签」）：把已发布导图读成侧栏用的**目录树**（节点标题 + 自有区间 + 层级）。
+ * **只消费不切分**：区间一律经 `mindmapCore.buildExtractionModel` 算（与生成/深挖同一实现面），
+ * 渲染层不复制任何区间算法。结点自身展示用 `nodeRange`（父扣子后的**净区间**）——
+ * 这与「父卡覆盖区间」不同：目录树要的是"这个节点自己讲哪一段"。
+ * 参数：documentId + 内核给的两样东西（TOC 项与提取单元锚）——渲染层持有内核，故由它传入。
+ * 无已发布导图 ⇒ 返回 null（侧栏据此不渲染该页签）。
+ */
+ipcMain.handle("mindmap:mapTree", (_e, documentId, tocItems, unitAnchors) => {
+  try {
+    const map = dbModule.getActiveMaterialMap(String(documentId), "book");
+    if (!map || !map.structure) return null;
+    const toc = Array.isArray(tocItems) ? tocItems : [];
+    const units = Array.isArray(unitAnchors) ? unitAnchors.map(String) : [];
+    // 无内核锚（如 PDF 无目录/未就绪）⇒ 没有坐标系，宁可不显示也不给假数据
+    if (!units.length) return null;
+    const core = require("./mindmapCore");
+    const nodes = Array.isArray(map.structure.nodes) ? map.structure.nodes : [];
+    // 把已发布导图的节点树映射回 TOC 结构：节点带 anchor 时按锚挂回，缺则按标题兜底
+    const byAnchor = new Map();
+    for (const n of nodes) {
+      const a = String(n.anchor || "").split("#")[0];
+      if (a) byAnchor.set(a, n);
+    }
+    // 两项实测要点：
+    // ① 内核 TOC 用 `href`（子项字段名 `subitems`），而 buildTocTree 读 `anchor`——字段名不先适配就全算成 [0,0]；
+    // ② **层级来自导图自身**（节点的 parentId 链），不是 TOC 的嵌套——目录通常是平铺的
+    //    （合成书 4 章全在一层），照 TOC 的 depth 走会让所有节点都是第 0 层、缩进恒等（实测踩过）。
+    const depthOf = (n) => {
+      let d = 0;
+      let cur = n;
+      const seen = new Set();
+      while (cur && cur.parentId && cur.parentId !== "root" && !seen.has(cur.id)) {
+        seen.add(cur.id);
+        cur = nodes.find((x) => String(x.id) === String(cur.parentId));
+        if (!cur) break;
+        d += 1;
+        if (d > 32) break;
+      }
+      return d;
+    };
+    const items = [];
+    const walk = (list) => {
+      for (const t of list) {
+        const rawHref = String(t.href || t.anchor || "");
+        const key = rawHref.split("#")[0];
+        const hit = byAnchor.get(key) || nodes.find((n) => String(n.title || "") === String(t.label || ""));
+        if (hit) {
+          items.push({
+            id: String(hit.id ?? key ?? t.label ?? ""),
+            label: String(hit.title || t.label || "(无标题)"),
+            anchor: rawHref,
+            depth: depthOf(hit)
+          });
+        }
+        const kids = Array.isArray(t.subitems) ? t.subitems : Array.isArray(t.children) ? t.children : [];
+        if (kids.length) walk(kids);
+      }
+    };
+    walk(toc);
+    if (!items.length) return null;
+    // 区间：仅对能解析出锚的条目算（无锚条目 range 为空 ⇒ 不显示占比条）。
+    // 注意：内核 TOC 用 `href`，而 buildTocTree 读的是 `anchor`——必须**先适配字段名**再喂给共享实现，
+    // 否则所有区间都会算成 [0,0]（实测：页签出得来但占比条全为 0）。
+    const adapter = (list) =>
+      (Array.isArray(list) ? list : []).map((t) => ({
+        anchor: String(t.href || t.anchor || ""),
+        label: String(t.label || ""),
+        children: adapter(t.subitems || t.children)
+      }));
+    const tocForCore = adapter(toc);
+    const tree = core.normalizeTocTree(core.buildTocTree(tocForCore, String(map.title || "地图")), String(map.title || "地图"));
+    const model = core.buildExtractionModel(tree, units);
+    const withRange = items.map((it) => {
+      const f = model.flat.find((x) => {
+        const b = String(x.node.anchor || "").split("#")[0];
+        return b && b === String(it.anchor || "").split("#")[0];
+      });
+      const r = f ? model.nodeRange.get(model.nodeKeyOf(f)) : null;
+      return { ...it, start: r ? r[0] : 0, end: r ? r[1] : 0 };
+    });
+    return { title: String(map.title || ""), items: withRange, unitCount: units.length };
+  } catch {
+    // 图谱目录是增强信息：算不出来就不显示该页签，不影响阅读
+    return null;
+  }
+});
 ipcMain.handle("mindmap:setActive", (_e, id) => dbModule.setActiveMaterialMap(id));
 ipcMain.handle("mindmap:delete", (_e, id) => dbModule.deleteMaterialMap(id));
 ipcMain.handle("mindmap:runs", (_e, documentId) => dbModule.listMaterialMapRuns(documentId));
@@ -1267,6 +1487,10 @@ function createWindow() {  // 防重入：已存在窗口时不再创建（macOS
   const win = new BrowserWindow({
     width: 1100,
     height: 750,
+    // 批 4 Task 14（规格 §5.3）：摘录页出现批注栏时是「卡面 + 280px 栏」两列，
+    // 窄于此版心会挤压正文——给窗口一个下限（1120/640 与两列布局同批裁定）。
+    minWidth: 1120,
+    minHeight: 640,
     frame: false,
     icon: path.join(__dirname, "icon.ico"),
     webPreferences: {

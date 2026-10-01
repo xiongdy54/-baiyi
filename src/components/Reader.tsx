@@ -3,12 +3,9 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { cardGenerator, lintCard, cardsApi, similaritySearch, detectMaterialType, parseFollowUps, expandClozeDraft, parseCloze, createAcceptedCard, siblingKeyFor, burySourceTextLimit, MATERIAL_ROUTES, type CardDraft, type CardGenMode, type OcclusionRegion, type FollowUpGroup } from "../lib/cards";
-import { VOCAB_KIND_LABEL, buildVocabDrafts, isVocabSelection, type DictionaryEntry, type ReadingContext, type VocabKind } from "../lib/dict";
-import { buildReadingContext, loadDictSettings, lookupWord } from "../lib/dictClient";
-import { libraryApi } from "../lib/library";
-import { DictPanel, type DictPanelState } from "./DictPanel";
-import { normalizeShape, type OcclusionRect, type OcclusionShape } from "../lib/occlusion";
+import { cardsApi, parseCloze, type CardDraft } from "../lib/cards";
+import { useSelectionActions } from "../lib/useSelectionActions";
+import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
 import { settingsStore } from "../lib/settings";
 import { MindmapWorkspace } from "./MindmapWorkspace";
 import { sanitizeDomain, udcLabel, UDC_LEAVES, UDC_MAX, UDC_OTHER } from "../lib/udc";
@@ -19,15 +16,24 @@ import OcclusionShapes from "./OcclusionShapes";
 import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
 import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
-import TocSidebar from "./reader/TocSidebar";
+import MarkPopover from "./reader/MarkPopover";
+import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
+import SelectionPanels from "./SelectionPanels";
+import AnnotationEditor from "./AnnotationEditor";
+import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
+import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
+import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
+import { type MapTreeItem } from "../lib/reader/mapTree";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
 import {
   DEFAULT_READER_SETTINGS,
   buildLocator,
   resolveAppearance,
+  type ContentPointerUpInfo,
   type ImageLocateHit,
   type ReaderAppearance,
+  type ReaderDocMark,
   type ReaderImageRef,
   type ReaderKernel,
   type ReaderModeConfig,
@@ -35,8 +41,20 @@ import {
   type ReaderSelection,
   type ReaderSettings,
   type ReaderTocItem,
-  type RelocateInfo
+  type RelocateInfo,
+  type SourceAnchorGeometry
 } from "../lib/reader/service";
+// v48.24 批3（§4 文中留痕）：标记的数据面（哪些根摘录要画、浮层显示什么）——纯函数，零 DOM
+import { buildAnnotationItems, buildDocMarks } from "../lib/reader/marks";
+// v48.23（D61 §6.8-11）：多段选择的集合运算与修饰键——纯逻辑在 electron/annotationRange.js，
+// 渲染层经主进程算（resolveSpanSet），本层不复制任何 span 归并/装配逻辑。
+import {
+  modifierFlagOf,
+  readMultiSelectKey,
+  resolveSpanSet,
+  type ExtractSpan,
+  type MultiSelectKey
+} from "../lib/readingWorkflow";
 
 interface Props {
   title: string;
@@ -74,9 +92,10 @@ interface Props {
   openMindmapMapId?: string | null;
   /** v48.13（P3）：以同一 run 续跑（应用重启后发现未跑完的运行） */
   resumeRunId?: string | null;
+  /** v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡（按书范围会话） */
+  onReviewExtracts?: () => void;
+  onReviewCards?: () => void;
 }
-
-type SelectionAction = "manual" | "ai-cards" | null;
 
 /** v25：读取正文图片/选区图片的 dataURL（blob:/data:/bookasset: 同源可 fetch；超 12MB 拒绝） */
 async function loadImageDataUrl(src: string): Promise<string | null> {
@@ -130,19 +149,44 @@ function cropImageDataUrl(dataUrl: string, bbox: OcclusionRect): Promise<string>
 }
 
 /** v25 手动制卡载荷（M5）：与 AI 制卡同构的字段集 + 图片选区 */
-interface ManualCardPayload {
-  mode: "qa" | "reverse" | "cloze" | "imageOcclusion";
-  front: string;
-  back: string;
-  cloze?: string;
-  reversePair?: { bFront: string; bBack: string };
-  imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
-  priority: number;
-  contextPrefix?: string;
-  domain?: string[];
-  mnemonic?: string;
-  knowledgePointId?: string;
-  dateStamp?: string | null;
+
+/**
+ * 工具栏弹出组（D5-B）：按钮 + 面板。开合状态由宿主持有——两个组互斥、
+ * 点外部/Esc 收起（见 Reader 的 mousedown/keydown effect），故这里不做内部开关。
+ */
+function ReaderToolMenu({
+  id,
+  label,
+  open,
+  onToggle,
+  children
+}: {
+  id: "more" | "settings";
+  label: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="dd" data-reader-tool-menu={id}>
+      <button
+        type="button"
+        className="dd-btn"
+        data-tool-menu-btn={id}
+        aria-expanded={open}
+        aria-controls={`reader-tool-menu-${id}`}
+        onClick={onToggle}
+      >
+        {label}
+        <IconChevronDown size={12} className="dd-caret" />
+      </button>
+      {open && (
+        <div className="dd-menu reader-tool-menu" id={`reader-tool-menu-${id}`} data-tool-menu-panel={id}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function Reader({
@@ -163,20 +207,31 @@ export default function Reader({
   openMindmapInitially,
   onMindmapOpened,
   openMindmapMapId,
-  resumeRunId
+  resumeRunId,
+  onReviewExtracts,
+  onReviewCards
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
-  const [selection, setSelection] = useState<{ x: number; y: number; text: string } | null>(null);
-  const [manualOpen, setManualOpen] = useState(false);
-  // v25：手动制卡的图片选区（从聚焦工具条「手动制卡」进入时携带）
-  const [manualImage, setManualImage] = useState<{
-    dataUrl: string;
-    alt: string;
-    shape: OcclusionShape;
-    rect: OcclusionRect;
+  /**
+   * v48.23（D61 §6.8-11）：选区菜单状态扩为携带 `spans`（多段不相邻选择的原始采集物）。
+   * `text` 恒为各段经主进程拼接后的文本——菜单与 5 个动作只读 text，故多段对所有动作自动生效。
+   */
+  const [selection, setSelection] = useState<{
+    x: number;
+    y: number;
+    text: string;
+    spans: ExtractSpan[];
+    /** 选区包围盒（视口坐标）——菜单定位的锚点（R22 判据 4：不再用 pointerup 点） */
+    rect: ReaderRect;
   } | null>(null);
+  /** 多段选择集合（与主进程 updateSpanSet 同步的权威列表；DOM 顺序＝落库顺序） */
+  const multiSpansRef = useRef<ExtractSpan[]>([]);
+  /** 修饰键（settings.app.multiSelectKey；读侧归一，默认 Ctrl / macOS Meta） */
+  const multiKeyRef = useRef<MultiSelectKey>("Ctrl");
+  /** 选中态更新串行化：指针抬起是高频事件，主进程往返按序应用（避免两次拖选交错） */
+  const spanQueueRef = useRef<Promise<void>>(Promise.resolve());
   // v25：图片聚焦（点选正文图片 → 上浮 + 周围模糊 + 选区工具条）
   const [focusImage, setFocusImage] = useState<{
     src: string;
@@ -202,77 +257,88 @@ export default function Reader({
     setMindmapOpen(true);
     onMindmapOpened?.();
   }, [openMindmapInitially, onMindmapOpened]);
-  const [aiPanel, setAiPanel] = useState<{
-    kind: "explain" | "cards" | "occlusion";
-    text: string;
-    /** v48（M15，D41-⑥）：本批卡片来自哪个导图节点（就此制卡溯源） */
-    mindmapNodeId?: string;
-    answer?: string;
-    drafts?: CardDraft[];
-    accepted?: Set<number>;
-    blockReasons?: string[];
-    batchId?: string;
-    running: boolean;
-    progress?: number;
-    thinking?: number;
-    startedAt?: number;
-    searching?: boolean;
-    searched?: boolean;
-    error?: string;
-    // M1.2：材料类型路由展示与手动覆盖
-    mode?: CardGenMode;
-    routeLabel?: string;
-    routeForm?: string;
-    // M1.1：图片挖空面板
-    image?: { dataUrl: string; assetPath: string };
-    regions?: OcclusionRegion[];
-    // v16 递进补卡（「后续可补」注记 → 询问 AI / 直接制卡）
-    kps?: { id: string; summary: string }[];
-    supplemental?: Set<number>;
-    followUpBusy?: string[];
-    followUpStarted?: Record<string, number | undefined>;
-    followUpErrors?: Record<string, string>;
-    explorations?: {
-      id: number;
-      item: string;
-      kpTitle: string;
-      question: string;
-      answer?: string;
-      running: boolean;
-      startedAt?: number;
-      thinking?: number;
-      error?: string;
-    }[];
-  } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // v25：showToast 上移到各交互回调之前（回调 deps 在渲染期求值，后置声明会触发 TDZ）
   const showToast = useCallback((msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast(null), 1800);
   }, []);
-  // M1.2：制卡模式（材料类型路由的手动覆盖；auto=本地识别）
-  // v16：按书记忆——用户在某本书里手动选过材料类型，则该书后续制卡默认沿用（settings.app.materialTypes）
-  const [aiMode, setAiMode] = useState<CardGenMode>("auto");
-  const itemKey = itemId || contextRef?.documentId || "";
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const map = await settingsStore.get<Record<string, CardGenMode>>("app", "materialTypes", {});
-      if (!cancelled && itemKey && map[itemKey]) setAiMode(map[itemKey]);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [itemKey]);
-  function changeAiMode(m: CardGenMode) {
-    setAiMode(m);
-    if (itemKey) {
-      void settingsStore.get<Record<string, CardGenMode>>("app", "materialTypes", {}).then((map) => {
-        if (map[itemKey] === m) return;
-        void settingsStore.set("app", "materialTypes", { ...map, [itemKey]: m });
-      });
+
+  const sourceTextRef = useRef("");
+  const occlusionSourceRef = useRef<"engine" | "library">("engine");
+  // 需求2：制卡时记录选区锚点（文本 + 当时刻度），随 contextRef 落库，供复习卡「跳转原文」
+  const anchorRef = useRef<{ anchorText: string; anchorRatio: number } | null>(null);
+
+  // ---------- 选区动作编排（批 4 Task 7，R30）：实现全在 src/lib/useSelectionActions.ts，
+  // 这里只注入宿主能力（锚点/选区清理/图片聚焦）并接收状态与回调——Reader 不留动作实现副本。
+  const selActions = useSelectionActions({
+    selectionText: () => selection?.text ?? null,
+    selectionSpans: () => selection?.spans,
+    contextRef: () => enrichedContextRef(),
+    sourceContext: () => ({ documentId: contextRef?.documentId, extractId: contextRef?.extractId }),
+    labels: { title, sourceTitle, section: contextLabel },
+    ownerKey: () => itemId || contextRef?.documentId || "",
+    itemId,
+    sourceTextRef,
+    bodyText: markdown,
+    lookupLocator: () => ({
+      cfi: engineSelRef.current?.cfi ?? jumpAnchor?.cfi ?? null,
+      pageIndex: engineSelRef.current?.pageIndex ?? jumpAnchor?.pageIndex ?? null
+    }),
+    anchorText: () => engineSelRef.current?.anchorText || anchorRef.current?.anchorText || null,
+    rememberAnchor,
+    clearSelection,
+    clearAnchor: () => {
+      anchorRef.current = null;
+    },
+    clearKernelSelection: () => {
+      engineSelRef.current = null;
+    },
+    occlusionSourceRef,
+    showToast,
+    buildSourceAnchor,
+    onManualSettled: () => {
+      markCardRefOverrideRef.current = null;
+    },
+    focus: {
+      get: () => focusImage,
+      close: () => setFocusImage(null),
+      setBusy: setFocusBusy
     }
-  }
+  });
+  const {
+    aiPanel,
+    setAiPanel,
+    manualOpen,
+    manualImage,
+    manualQuote,
+    dictPanel,
+    setDictPanel,
+    dictReading,
+    dictFields,
+    dictManualLang,
+    acceptDraft,
+    acceptOcclusionDraft,
+    rejectAllDrafts,
+    runExplain,
+    runAICards,
+    runOcclusionCards,
+    searchAndRetry,
+    runFollowUpCards,
+    runExploration,
+    acceptVocabCards,
+    runLookup,
+    setDictManualLangBoth,
+    changeAiMode,
+    aiMode,
+    actions: selAct,
+    submitRegionCards,
+    submitRegionManual,
+    handleManualCard,
+    startManualWith,
+    closeManual,
+    createAnnotation
+  } = selActions;
 
   // ---------- 阅读内核分支（v20：文件书走 foliate 内核；粘贴书/摘录 R1b 合流） ----------
   const engineMode = Boolean(book);
@@ -297,6 +363,9 @@ export default function Reader({
   // 引擎选区锚点：语义同 markdown 的 anchorRef——最后一次菜单动作的选区，保留到下一次覆盖
   const engineSelRef = useRef<ReaderSelection | null>(null);
   const engineChapterRef = useRef<number | undefined>(0);
+  /** v48.24 批3（§4 写入侧）：与选区同时采集的源锚几何（PDF 页内百分比矩形；EPUB 为 null，cfi 在选区里）。
+   *  必须在 `actXxx` 清选区**之前**采集——handleExtract 跑起来时选区已被 clearSelection 撤掉了 */
+  const engineAnchorGeomRef = useRef<SourceAnchorGeometry | null>(null);
   // v35 正文图片锚点：点击正文图片时快照（当前 locator+章节+alt/周边文字），供图片卡 contextRef
   const imageAnchorRef = useRef<{
     locator: { cfi?: string; pageIndex?: number } | null;
@@ -305,32 +374,158 @@ export default function Reader({
     contextText?: string;
   } | null>(null);
   // v35 图片制卡来源：engine=正文图片（记图片锚点可跳转）/ library=资源库选图（图不在书中，无定位锚）
-  const occlusionSourceRef = useRef<"engine" | "library">("engine");
   const relocateTimerRef = useRef<number | null>(null);
   // v35 跳转图片卡：图内区域高亮叠加（宿主视口坐标，短暂显示）/ 原图对照浮层（定位失败或 PDF 系）
   const [imgOverlay, setImgOverlay] = useState<{ rect: ReaderRect; occlusion: NonNullable<Props["jumpAnchor"]>["occlusion"] } | null>(null);
   const [sourcePeek, setSourcePeek] = useState<{ occlusion: NonNullable<Props["jumpAnchor"]>["occlusion"] } | null>(null);
-  const [tocOpen, setTocOpen] = useState(false);
+  // v48.24 批3（§4 文中留痕）：本文档的根摘录标记 + 命中后的浮层（只读；编辑永远在卡片上进行）
+  const [markPop, setMarkPop] = useState<{ id: string; rect: ReaderRect } | null>(null);
+  /** 批 4 Task 17：点标记 → 批注编辑浮层（形态唯一，与摘录页共用 AnnotationEditor；
+   *  hover 浮层保留——点击是「要改」的显式意图，hover 只是「看一眼」） */
+  const [markEditor, setMarkEditor] = useState<{
+    id: string;
+    kind: "highlight" | "extract";
+    comment: string | null;
+    color: string | null;
+    quote: string;
+    anchor: ReaderRect;
+  } | null>(null);
+  const marksRef = useRef<ReaderDocMark[]>([]);
+  /** 浮层被点住（钉住）后不再随 pointerleave 收起；点别处/Esc 解除 */
+  const markPinnedRef = useRef(false);
+  const markHideTimerRef = useRef<number | null>(null);
+  /** 从浮层「就此制卡」进入时，本次制卡的 contextRef 覆盖值（挂到该摘录上——已制卡数按 extractId 派生） */
+  const markCardRefOverrideRef = useRef<Record<string, unknown> | null>(null);
+  /** 批注栏（D67 §3）：刚跳中的条目短时强调（不落库、不持久）＋导航有界失败的条目（中性态） */
+  const [annotFocus, setAnnotFocus] = useState<string | null>(null);
+  const [annotUnavailable, setAnnotUnavailable] = useState<Record<string, true>>({});
+  const annotFocusTimerRef = useRef<number | null>(null);
+  /** 内核标记文档序的版本号：安装/重画标记后 +1，侧栏注解栏据此重新取序 */
+  const [marksOrderKey, setMarksOrderKey] = useState(0);
+  /** 本文档的根注解条数（侧栏「摘录」页签与入口可用性的依据；与注解栏同一个 VM 口径） */
+  const [docAnnotCount, setDocAnnotCount] = useState(0);
+  /** 右侧栏开合（D2：入口可用＝目录/注解/图谱任一在场；不合用时自动收起） */
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  /** 工具栏两个弹出组（更多 / 阅读设置）：同刻只开一个，点外部/Esc 收起（D5-B） */
+  const [toolMenu, setToolMenu] = useState<"more" | "settings" | null>(null);
+  /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规）
+   *  与图谱目录（只消费主进程算好的区间） */
+  const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
+  const [mapItems, setMapItems] = useState<MapTreeItem[] | null>(null);
+  const mapUnitAnchorsRef = useRef<string[]>([]);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
+
+  /**
+   * 图谱目录载入（批 4 Task 15）：有内核 + 有已发布导图才取。
+   * 区间由主进程按 buildExtractionModel 算（本层**只消费不切分**）；无导图 ⇒ null ⇒ 不渲染页签。
+   */
+  useEffect(() => {
+    const documentId = contextRef?.documentId;
+    if (!engineMode || !documentId) {
+      setMapItems(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const k = kernelRef.current;
+      const anchors = (k?.getSectionAnchors?.() ?? []).map((a) => a.anchor);
+      const toc = k?.getTOC?.() ?? [];
+      if (!anchors.length || !toc.length) {
+        if (!cancelled) setMapItems(null);
+        return;
+      }
+      const api = (window as unknown as { mindmapAPI?: { mapTree?: (d: string, t: unknown, u: string[]) => Promise<{ items: MapTreeItem[]; unitCount: number } | null> } }).mindmapAPI;
+      const r = await api?.mapTree?.(documentId, toc, anchors);
+      if (cancelled) return;
+      mapUnitAnchorsRef.current = anchors;
+      setMapItems(r?.items?.length ? r.items : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [engineMode, contextRef?.documentId, tocItems]);
+
+  /**
+   * 注解栏条目的「定位到该注解」（D67 §3）：只走内核 `goToMark(id)` 的精确锚
+   * （EPUB＝该条 CFI；PDF＝pageIndex + rects），**不**回退 anchorText 文本搜索。
+   * 成功＝栏内短时强调该条；有界失败＝该条显示中性「不可定位」，不假装跳转成功。
+   */
+  function jumpToMark(id: string) {
+    clearReflowGuard();
+    const k = kernelRef.current;
+    if (!k?.goToMark) {
+      setAnnotUnavailable((m) => ({ ...m, [id]: true }));
+      return;
+    }
+    void k.goToMark(id).then((ok) => {
+      if (!ok) {
+        setAnnotUnavailable((m) => ({ ...m, [id]: true }));
+        return;
+      }
+      setAnnotUnavailable((m) => {
+        if (!m[id]) return m;
+        const next = { ...m };
+        delete next[id];
+        return next;
+      });
+      setAnnotFocus(id);
+      if (annotFocusTimerRef.current) window.clearTimeout(annotFocusTimerRef.current);
+      annotFocusTimerRef.current = window.setTimeout(() => {
+        annotFocusTimerRef.current = null;
+        setAnnotFocus(null);
+      }, 2500);
+    });
+  }
+
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const readerSettingsRef = useRef(readerSettings);
   readerSettingsRef.current = readerSettings;
 
+
   // v29 选区菜单一击消失：菜单打开时，任何落在菜单/AI 面板/弹窗之外的 mousedown 立即关闭菜单。
   // （此前关闭只挂各 surface 的 pointerup——首点落在菜单/控制条等未跟踪元素时，文本选中已消失而菜单残留）
+  // v48.23（D61 §6.8-11）：点菜单内不清空集合；点外面＝清空整组（高亮一并撤掉）。
   useEffect(() => {
     if (!selection) return;
     const onDocMouseDown = (e: MouseEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && typeof t.closest === "function" &&
-        (t.closest(".selection-menu") || t.closest(".ai-panel") || t.closest(".modal-panel") || t.closest(".image-focus-layer"))) return;
+        (t.closest(".selection-menu") || t.closest(".ai-panel") || t.closest(".modal-panel") || t.closest(".image-focus-layer") ||
+          // v48.24 批3（§4 文中留痕）：标记浮层是「就此制卡」的动作面，点它不算点外面
+          t.closest(".reader-mark-pop") ||
+          // v48.23（§6.8-11）：正文内容区（PDF 文本层就落在宿主 DOM 里）不算「外面」——
+          // 在那里按下鼠标常是「加选第二段」的起手，清集合会让多段选择在 PDF 上永远只剩最后一段。
+          // foliate 的章节在 iframe 里，事件根本不冒泡到宿主，本项只影响 PDF 与宿主侧正文。
+          t.closest(".reader-engine-host"))) return;
+      clearMultiSelect();
       setSelection(null);
       engineSelRef.current = null;
     };
     document.addEventListener("mousedown", onDocMouseDown, true);
     return () => document.removeEventListener("mousedown", onDocMouseDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection]);
+
+  // 多段选择的修饰键：settings.app.multiSelectKey（读侧归一；设置页改动即时生效）
+  useEffect(() => {
+    let alive = true;
+    void readMultiSelectKey().then((k) => {
+      if (alive) multiKeyRef.current = k;
+    });
+    const off = eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload && payload.scope === "app" && payload.key === "multiSelectKey") {
+        void readMultiSelectKey().then((k) => {
+          if (alive) multiKeyRef.current = k;
+        });
+      }
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
 
   useEffect(() => {
     if (!engineMode) return;
@@ -382,12 +577,61 @@ export default function Reader({
     el.style.background = a.bgColor ?? "transparent";
   }, [engineMode, readerSettings]);
 
+  /**
+   * D2/§7（Task 7）：侧栏开合＝**布局变更**，不是用户翻页。
+   * 布局引起的 relocate 不写进度（否则开一次侧栏就把进度挪一格）；PDF 数值缩放下还要把页内锚点
+   * 一并还原（fit 模式由 pdf.js 自适应重算 scale，按契约只保当前页）。
+   * 守卫是**瞬时**的（不落设置、不进数据库），三个确定性出口清除它：还原自己的 relocate 落地、
+   * 兜底时限、或用户的下一次导航动作（turnPage / 各类跳转）。
+   */
+  type ReflowGuard = {
+    restore?: () => void;
+    restoring: boolean;
+    clearTimer: number | null;
+    /** 用户手势的即时出口：布局窗口里一旦有真实输入，就不再压制它的 relocate */
+    endOnGesture: () => void;
+  };
+  const reflowGuardRef = useRef<ReflowGuard | null>(null);
+  const clearReflowGuard = useCallback(() => {
+    const g = reflowGuardRef.current;
+    if (!g) return;
+    if (g.clearTimer !== null) window.clearTimeout(g.clearTimer);
+    window.removeEventListener("wheel", g.endOnGesture);
+    window.removeEventListener("pointerdown", g.endOnGesture);
+    window.removeEventListener("keydown", g.endOnGesture);
+    reflowGuardRef.current = null;
+  }, []);
+
   // 引擎进度：relocate 防抖落进度 + 阅读统计（charPos = fraction × 全书字符数近似，热力图口径不变）
   const handleEngineRelocate = useCallback(
     (info: RelocateInfo) => {
+      const prevChapter = engineChapterRef.current;
       engineChapterRef.current = info.chapterIndex;
+      // v48.23（D61 §6.8-11）：换章＝阅读内容变了，旧 Range 全部失效——
+      // 先把多段集合与高亮清掉再收菜单（§6.8-11 的清理义务；滚动同章 relocate 不清）
+      if (prevChapter !== undefined && info.chapterIndex !== undefined && prevChapter !== info.chapterIndex) {
+        clearMultiSelect();
+        setSelection(null);
+      }
       setTocActiveHref(info.chapterHref);
       setImgOverlay(null); // v35：翻页/滚动即清除图内高亮（坐标系随视口失效）
+      const guard = reflowGuardRef.current;
+      if (guard) {
+        // 布局变更期间的 relocate：撤掉可能已排队的进度写入，再决定是否做一次性还原
+        if (relocateTimerRef.current) {
+          window.clearTimeout(relocateTimerRef.current);
+          relocateTimerRef.current = null;
+        }
+        if (!guard.restoring && guard.restore) {
+          const run = guard.restore;
+          guard.restore = undefined;
+          guard.restoring = true;
+          run();
+        }
+        // 抑制一直持续到守卫的**确定性出口**（用户手势 / 有界兜底）：reflow 与还原自己的
+        // settle relocate 都属布局生成，一个都不写进度（早放行会让「开一次侧栏挪一格进度」漏进来）
+        return;
+      }
       if (relocateTimerRef.current) window.clearTimeout(relocateTimerRef.current);
       relocateTimerRef.current = window.setTimeout(() => {
         relocateTimerRef.current = null;
@@ -396,20 +640,90 @@ export default function Reader({
         onProgress?.(info.fraction, "", { cfi: info.location.cfi, fraction: info.fraction, pageIndex: info.location.pageIndex });
       }, 700);
     },
-    [itemId, markdown, onProgress]
+    [itemId, markdown, onProgress, clearReflowGuard]
   );
 
+  /** 侧栏开合（D5-B 入口）：先快照+布防，再改宽度——布局引起的 relocate 不写进度 */
+  const toggleSidebar = useCallback(() => {
+    const k = kernelRef.current;
+    const zoom = readerSettingsRef.current.appearance.zoom;
+    const cfi = k?.getCurrentLocation?.()?.cfi ?? null;
+    // 数值缩放才需要页内锚点还原；fit 模式只保当前页（引擎自适应）
+    const point = typeof zoom === "number" ? k?.captureViewPoint?.() ?? null : null;
+    const restore = () => {
+      if (point) k?.restoreViewPoint?.(point);
+      else if (cfi) void k?.goTo?.({ cfi });
+    };
+    // 用户手势＝布局窗口结束（之后属于用户自己的导航，照常写进度）
+    const endOnGesture = () => clearReflowGuard();
+    const guard: ReflowGuard = { restore, restoring: false, clearTimer: null, endOnGesture };
+    clearReflowGuard();
+    reflowGuardRef.current = guard;
+    window.addEventListener("wheel", endOnGesture, { passive: true });
+    window.addEventListener("pointerdown", endOnGesture);
+    window.addEventListener("keydown", endOnGesture);
+    setSidebarOpen((v) => !v);
+    if (point) {
+      // PDF 数值缩放：宽度变化不产生 relocate（页码没变）⇒ 布局落地后自己还原（两帧足够）
+      window.requestAnimationFrame(() =>
+        window.requestAnimationFrame(() => {
+          if (reflowGuardRef.current !== guard || !guard.restore) return;
+          guard.restore = undefined;
+          guard.restoring = true;
+          restore();
+        })
+      );
+    }
+    // 兜底（有界）：还原的 relocate 迟迟不来（引擎无 relocate / 位置本就未变）时也要收掉守卫，
+    // 不让它长期压制用户后续的进度写入
+    guard.clearTimer = window.setTimeout(() => clearReflowGuard(), 3000);
+  }, [clearReflowGuard]);
+
   // 引擎选区：pointerup 时取选区语义数据并弹出菜单（坐标为宿主视口坐标，菜单用 fixed）
-  const handleEnginePointerUp = useCallback((pos: { x: number; y: number }) => {
+  // v48.23（D61 §6.8-11）：按住修饰键（app.multiSelectKey，默认 Ctrl）再选＝加选：
+  // 集合运算与拼接文本一律交主进程（resolveSpanSet → electron/annotationRange.js），
+  // 本层只负责采集「这一段」并画高亮；不带修饰键＝替换（普通拖选覆盖旧集合）。
+  const handleEnginePointerUp = useCallback((pos: ContentPointerUpInfo) => {
     const k = kernelRef.current;
     const sel = k?.getSelection() ?? null;
-    if (sel && sel.text.trim()) {
-      engineSelRef.current = sel;
-      setSelection({ x: pos.x, y: pos.y, text: sel.text });
-    } else {
+    if (!sel || !sel.text.trim()) {
+      // 空白处点击/折叠选区：沿用旧语义收菜单，并把整组多段集合清掉（高亮一并撤）
+      clearMultiSelect();
+      engineAnchorGeomRef.current = null;
       setSelection(null);
+      return;
     }
-  }, []);
+    engineSelRef.current = sel;
+    // v48.24 批3（§4 写入侧）：源锚几何与选区同时采集（handleExtract 跑时选区已被清掉）
+    engineAnchorGeomRef.current = k?.getSourceAnchor?.() ?? null;
+    const geom = k?.getSelectionGeometry();
+    const incoming: ExtractSpan = {
+      text: sel.text,
+      rects: geom ? [{ x: geom.x, y: geom.y, w: geom.width, h: geom.height }] : []
+    };
+    const withModifier = modifierFlagOf(multiKeyRef.current, pos);
+    // 串行化：两次拖选的往返按序应用，后者永远读到前者落定的集合
+    spanQueueRef.current = spanQueueRef.current
+      .then(async () => {
+        const r = await resolveSpanSet(multiSpansRef.current, incoming, withModifier);
+        if (r.action === "none") return; // 空白新选区：集合不动（内核 updateSpanSet 的语义）
+        multiSpansRef.current = r.spans;
+        kernelRef.current?.multiSelectHighlight?.(r.action);
+        (window as unknown as { __readerMultiSpans?: ExtractSpan[] }).__readerMultiSpans = r.spans;
+        setSelection({
+          x: pos.x,
+          y: pos.y,
+          text: r.text,
+          spans: r.spans,
+          // 选区几何（视口坐标）优先；内核未给几何时退化为 pointerup 点（宽高 0）
+          rect: geom ? { x: geom.x, y: geom.y, width: geom.width, height: geom.height } : { x: pos.x, y: pos.y, width: 0, height: 0 }
+        });
+      })
+      .catch(() => {
+        // 主进程往返失败（理论上不可达）：不静默改集合，避免菜单与库不一致
+        showToast("多段选择暂不可用");
+      });
+  }, [showToast]);
 
   const handleEngineReady = useCallback((k: ReaderKernel) => {
     kernelRef.current = k;
@@ -419,6 +733,47 @@ export default function Reader({
     k.applyAppearance(resolveAppearance(readerSettingsRef.current));
     // 调试/测试钩子（L2 e2e 经此访问章节文档；引擎 iframe 对宿主跨源，contentDocument 不可用）
     (window as unknown as { __readerKernel?: ReaderKernel }).__readerKernel = k;
+    // v48.24 批3（§4 文中留痕）：指针进出/点中标记 → 浮层。标记本身只读，
+    // 这里只做「显示/延时收起/钉住」三件事；数据一律按 id 回查 marksRef（不信任事件带的内容）。
+    k.on("markHover", (info) => {
+      if (info.id && info.rect) {
+        if (markHideTimerRef.current) {
+          window.clearTimeout(markHideTimerRef.current);
+          markHideTimerRef.current = null;
+        }
+        setMarkPop({ id: info.id, rect: info.rect });
+      } else if (!markPinnedRef.current && markHideTimerRef.current === null) {
+        // 留 240ms 让指针从标记走到浮层（浮层在标记下方 8px）
+        markHideTimerRef.current = window.setTimeout(() => {
+          markHideTimerRef.current = null;
+          setMarkPop(null);
+        }, 240);
+      }
+    });
+    k.on("markClick", (info) => {
+      if (!info.id || !info.rect) return;
+      markPinnedRef.current = true;
+      if (markHideTimerRef.current) {
+        window.clearTimeout(markHideTimerRef.current);
+        markHideTimerRef.current = null;
+      }
+      setMarkPop({ id: info.id, rect: info.rect });
+      // 批 4 Task 17（规格 §5.2「点高亮 → 弹出 AnnotationEditor（改/删）」）：
+      // 点击＝明确的「要改」意图，直接开编辑浮层；hover 浮层留在旁边不动。
+      const m = marksRef.current.find((x) => x.id === info.id);
+      if (m) {
+        setMarkEditor({
+          id: m.id,
+          kind: m.kind === "highlight" ? "highlight" : "extract",
+          comment: m.comment ?? null,
+          color: m.color ?? null,
+          quote: m.text,
+          anchor: info.rect
+        });
+      }
+    });
+    // 数据先到（marksRef 已填）而内核后到：这里补推一次；反之由标记 effect 自己推
+    if (marksRef.current.length) k.setDocumentMarks?.(marksRef.current);
     // v35 图片卡跳转：跳转着陆后再找原图叠图内高亮；找不到/PDF 系 → 原图对照浮层
     if (jumpAnchor?.occlusion) window.setTimeout(() => void tryLocateJumpImage(), 800);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -554,6 +909,8 @@ export default function Reader({
   const turnPage = useCallback(async (dir: 1 | -1) => {
     const k = kernelRef.current;
     if (!k) return;
+    // 用户主动翻页＝真实导航：先收掉布局守卫（否则紧接着的 relocate 会被当成布局变更而漏记进度）
+    clearReflowGuard();
     if (dir === 1) await k.next();
     else await k.prev();
   }, []);
@@ -584,9 +941,7 @@ export default function Reader({
   );
 
   // 需求2：制卡时记录选区锚点（文本 + 当时刻度），随 contextRef 落库，供复习卡「跳转原文」
-  const anchorRef = useRef<{ anchorText: string; anchorRatio: number } | null>(null);
   // v34（M12）：本次制卡的完整源文本（短材料锚点键的长度门控输入，§4.16 item 5）
-  const sourceTextRef = useRef("");
   function rememberAnchor(text: string) {
     sourceTextRef.current = text || "";
     const el = scrollRef.current;
@@ -596,7 +951,11 @@ export default function Reader({
       anchorRatio: denom > 0 && el ? Math.min(1, el.scrollTop / denom) : 0
     };
   }
+
   function enrichedContextRef() {
+    // v48.24 批3（§4）：从标记浮层「就此制卡」进入时，contextRef 直接取该摘录（挂 extractId，
+    // 别串到「当前选区」——浮层出现时选区可能已经不在或换了地方）
+    if (markCardRefOverrideRef.current) return markCardRefOverrideRef.current;
     // 引擎分支：可降级定位（foliate 系 cfi → chapterIndex → anchorText；PDF 系 pageIndex → anchorText），带引擎版本便于回归归因
     if (engineMode) {
       const sel = engineSelRef.current;
@@ -626,6 +985,22 @@ export default function Reader({
     }
     return anchorRef.current ? { ...(contextRef || {}), ...anchorRef.current } : contextRef || null;
   }
+
+
+  // v48.23（D61 §6.8-11）：Esc 清空整个多段集合（含菜单与高亮；无集合时按旧行为只收菜单）
+  useEffect(() => {
+    if (!selection) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (manualOpen || aiPanel) return; // 弹层自己处理 Esc
+      clearMultiSelect();
+      clearSelection();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, manualOpen, aiPanel]);
+
 
   // AI 运行中每秒跳一次已等待秒数——让用户确信程序没有卡死（含补充制卡/询问 AI 期间）
   const [nowTick, setNowTick] = useState(Date.now());
@@ -754,13 +1129,27 @@ export default function Reader({
     setSelection({
       x,
       y,
-      text
+      text,
+      // 粘贴书/摘录的 markdown 分支没有内核（不会走到多段选择），恒为单段
+      spans: [{ text }],
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height }
     });
+  }
+
+  /**
+   * v48.23（D61 §6.8-11）：清空多段选择集合——权威列表、内核高亮、测试钩子三处一起清。
+   * 调用点：点菜单外 / Esc / 菜单动作完成 / 换章（阅读内容变化）/ 空选区 pointerup。
+   */
+  function clearMultiSelect() {
+    multiSpansRef.current = [];
+    (window as unknown as { __readerMultiSpans?: ExtractSpan[] }).__readerMultiSpans = [];
+    kernelRef.current?.clearMultiSelectHighlight?.();
   }
 
   function clearSelection() {
     if (engineMode) {
       kernelRef.current?.deselect();
+      clearMultiSelect();
       setSelection(null);
       return;
     }
@@ -768,800 +1157,231 @@ export default function Reader({
     setSelection(null);
   }
 
-  // ---------- 手动制卡（Phase 3：引用+可编辑副本模式；v16 翻转问答 = 制卡手段，产两张独立问答卡；
-  // M5（v25）：与 AI 制卡同构的字段集——类型选择 / UDC 领域标签 / contextPrefix / 助记 / 知识点分组 / 日期标记，
-  // 一律过 CardLintEngine + 相似检索；图片挖空手动卡由正文图片选区进入（front/back 可编辑） ----------
-  async function createSingleCard(p: {
-    front: string;
-    back: string;
-    cardType: string;
-    cloze?: string;
-    priority: number;
-    contextPrefix?: string | null;
-    domain?: string[];
-    mnemonic?: string | null;
-    knowledgePointId?: string | null;
-    dateStamp?: string | null;
-    occlusionJson?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; assetPath: string; shapes?: OcclusionShape[] | null } | null;
-    cardOrd?: number;
-    // v34（M12，§4.16）：同源组键——翻转对/同图卡由调用点显式给出；普通卡由 handleManualCard 预先推导
-    siblingKey?: string | null;
-  }): Promise<void> {
-    const sourceRef = sourceTitle ? { title: sourceTitle } : null;
-    const card = {
-      noteText: p.front || p.cloze || "",
-      cardType: p.cardType,
-      frontMarkdown: p.front,
-      backMarkdown: p.back,
-      clozeOrds: [],
-      cardOrd: p.cardOrd ?? 0,
-      occlusionJson: p.occlusionJson ?? null,
-      contextPrefix: p.contextPrefix || null,
-      contextRef: enrichedContextRef(),
-      mnemonic: p.mnemonic || null,
-      sourceRef,
-      dateStamp: p.dateStamp || null,
-      priority: p.priority,
-      tags: [],
-      domain: p.domain ?? [],
-      knowledgePointId: p.knowledgePointId || null,
-      siblingKey: p.siblingKey ?? null,
-      generatedBy: "manual"
-    };
-    const issues = lintCard({
-      front: card.frontMarkdown,
-      back: card.backMarkdown,
-      cardType: card.cardType,
-      cloze: p.cloze || null,
-      contextPrefix: card.contextPrefix,
-      sourceRef,
-      dateStamp: card.dateStamp,
-      knowledgePointId: card.knowledgePointId,
-      occlusion: card.occlusionJson
-    });
-    const created = await cardsApi.create(card);
-    for (const issue of issues) {
-      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
+  // ---------- v48.24 批3（§4 文中留痕）：数据结构与绘制 ----------
+  const closeMarkPop = useCallback(() => {
+    markPinnedRef.current = false;
+    if (markHideTimerRef.current) {
+      window.clearTimeout(markHideTimerRef.current);
+      markHideTimerRef.current = null;
     }
-    const similar = await similaritySearch.findSimilar(p.front || p.cloze || "", 2);
-    if (similar.length > 0) {
-      await cardsApi.addIssue({
-        cardId: created.id,
-        ruleId: "S1",
-        severity: "warn",
-        message: `与已有卡相似（${Math.round(similar[0].score * 100)}%）：「${similar[0].front.slice(0, 30)}…」`,
-        source: "lint"
-      });
-    }
-  }
+    setMarkPop(null);
+  }, []);
 
-  async function handleManualCard(p: ManualCardPayload) {
-    const meta = {
-      contextPrefix: p.contextPrefix || null,
-      domain: p.domain ?? [],
-      mnemonic: p.mnemonic || null,
-      knowledgePointId: p.knowledgePointId || null,
-      dateStamp: p.dateStamp || null,
-      priority: p.priority
-    };
-    // v34（M12，§4.16）：短材料锚点键——同一句/段的多次制卡（手动或 AI）互为同源，同日只放行一张
-    const srcKey = siblingKeyFor({
-      contextRef: enrichedContextRef(),
-      sourceText: sourceTextRef.current || null,
-      limit: await burySourceTextLimit()
-    });
-    if (p.mode === "imageOcclusion") {
-      if (!p.imageRegion) {
-        showToast("缺少图片选区，无法创建图片挖空卡");
-        return;
-      }
-      const assetPath = await ensureImageAsset(p.imageRegion.dataUrl);
-      if (!assetPath) return;
-      const shape = normalizeShape({ ...p.imageRegion.shape, ord: 0 });
-      await createSingleCard({
-        front: p.front.trim() || "图中遮挡区域对应的是什么？",
-        back: p.back,
-        cardType: "imageOcclusion",
-        cardOrd: 0,
-        // 同图多卡互为同源（结构性，与文本长度无关）：按图片资产分组
-        siblingKey: `img:${assetPath}`,
-        occlusionJson: {
-          assetPath,
-          rects: [{ x: p.imageRegion.rect.x, y: p.imageRegion.rect.y, w: p.imageRegion.rect.w, h: p.imageRegion.rect.h, ord: 0 }],
-          shapes: [shape]
-        },
-        ...meta
-      });
-      eventBus.emit("cards/changed");
-      setManualOpen(false);
-      setManualImage(null);
-      showToast("图片挖空卡已创建（复习正面遮挡所选区域）");
-      return;
-    }
-    if (p.mode === "reverse") {
-      // 翻转问答卡（D18）：互为翻转的两张独立 qa 卡，各自有独立 FSRS 调度状态
-      // v34（M12）：翻转对互为同源（结构性，与文本长度无关）——同日只放行一张
-      const flipKey = `act:flip-${crypto.randomUUID()}`;
-      await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: flipKey, ...meta });
-      await createSingleCard({
-        front: p.reversePair?.bFront || p.back,
-        back: p.reversePair?.bBack || p.front,
-        cardType: "qa",
-        siblingKey: flipKey,
-        ...meta
-      });
-      eventBus.emit("cards/changed");
-      setManualOpen(false);
-      setManualImage(null);
-      showToast("已创建 2 张互为翻转的独立卡片");
-      return;
-    }
-    if (p.mode === "cloze") {
-      const cloze = p.cloze || "";
-      // F12（v25）修复：挖空卡必须把带 {{cN::}} 标记的文本存进 frontMarkdown——
-      // 此前存的是未转换的原文，复习端 parseCloze 找不到挖空 ord，挖空从未遮蔽
-      await createSingleCard({ front: cloze, back: p.back, cardType: "cloze", cloze, siblingKey: srcKey, ...meta });
-      eventBus.emit("cards/changed");
-      setManualOpen(false);
-      setManualImage(null);
-      showToast("卡片已创建，可在复习视图查看");
-      return;
-    }
-    await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: srcKey, ...meta });
-    eventBus.emit("cards/changed");
-    setManualOpen(false);
-    setManualImage(null);
-    showToast("卡片已创建，可在复习视图查看");
-  }
-
-  // ---------- v25 图片选区提交（聚焦工具条 → AI 制卡 / 手动制卡） ----------
-  async function submitRegionCards(payload: ImageFocusSubmit) {
-    const focused = focusImage;
-    if (!focused) return;
-    setFocusBusy(true);
-    try {
-      const assetPath = await ensureImageAsset(focused.dataUrl);
-      if (!assetPath) return;
-      const cropDataUrl = await cropImageDataUrl(focused.dataUrl, payload.bbox);
-      // 图片入口无文本选区：清掉可能残留的锚点，避免把旧锚点挂到新卡上
-      anchorRef.current = null;
-      // v35：正文图片链路——制卡来源=engine（图片锚点已由点击快照）
-      occlusionSourceRef.current = "engine";
-      const label = `[图片选区] ${focused.alt || "正文图片"}`;
-      setFocusImage(null);
-      setAiPanel({
-        kind: "occlusion",
-        text: label,
-        image: { dataUrl: focused.dataUrl, assetPath },
-        running: true,
-        progress: 0,
-        startedAt: Date.now(),
-        thinking: 0
-      });
-      const { batchId, result } = await cardGenerator.generateOcclusionCards(
-        { dataUrl: cropDataUrl, assetPath },
-        {
-          title: sourceTitle,
-          section: contextLabel,
-          // v29 D26：选区 = AI 的完整图片范围，按制卡原则识别内容类型、自选考察方式、
-          // 产出多张混合卡（含一卡多挖空）；regions 为选区图百分比坐标（cards.ts 负责映射回全图）。
-          focus: "用户已在你看到的这张图（选区裁剪）上圈定了制卡范围。请结合下方（如提供）图片周边文字上下文，识别图片内容类型与可测试点，按制卡原则自选考察方式，产出多张混合卡：单挖空遮挡卡、一卡多挖空遮挡卡（同卡多个区域同遮同答，如思维导图同分支的多个关键词）、看图问答卡（cardType=qa，正面图+题面文字）。遮挡必须留有可推断线索，禁止把整个选区作为单一遮挡（除非选区内确只有一个测试点）。所有 regions 坐标为这张选区图的百分比。",
-          presetRegion: { rect: payload.bbox, shape: payload.shape },
-          contextText: focused.contextText
-        },
-        (chars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, progress: chars } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, thinking: thinkChars } : p))
-      );
-      setAiPanel({
-        kind: "occlusion",
-        text: label,
-        image: { dataUrl: focused.dataUrl, assetPath },
-        running: false,
-        progress: undefined,
-        startedAt: undefined,
-        thinking: undefined,
-        drafts: result.cards,
-        accepted: new Set<number>(),
-        blockReasons: result.blockReasons,
-        regions: result.regions,
-        batchId
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAiPanel({
-        kind: "occlusion",
-        text: `[图片选区] ${focused.alt || "正文图片"}`,
-        image: undefined,
-        running: false,
-        startedAt: undefined,
-        thinking: undefined,
-        error: msg.includes("API Key")
-          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
-          : msg
-      });
-    } finally {
-      setFocusBusy(false);
-    }
-  }
-
-  function submitRegionManual(payload: ImageFocusSubmit) {
-    const focused = focusImage;
-    if (!focused) return;
-    setFocusImage(null);
-    setManualImage({
-      dataUrl: focused.dataUrl,
-      alt: focused.alt,
-      shape: normalizeShape({ ...payload.shape, ord: 0 }),
-      rect: payload.bbox
-    });
-    setManualOpen(true);
-  }
-
-  // ---------- AI 制卡（Phase 13 主路径；M1.2 材料类型路由） ----------
-  // v48（M15，D41-⑥）：opts.focus = 导图结构摘要（注入既有【本次制卡重点】槽，≤1200 字）；
-  // opts.mindmapNodeId = 来源导图节点（卡片 context_ref 溯源 + act:mindmap-<nodeId> 同源兄弟键）。
-  // 提示词与规则完全沿用既有管线（材料类型路由/确认面板/CardLint/S1/KP 归一），不另起炉灶。
-  async function runAICards(text: string, webContext?: string, mode: CardGenMode = "auto", opts?: { focus?: string; mindmapNodeId?: string }) {
-    // 本地材料类型识别：auto 时按文本路由到对应提示词分支（概念/公式/序列/枚举），类型可手动覆盖
-    const route = detectMaterialType(text);
-    const resolved: CardGenMode = mode === "auto" ? route.scope : mode;
-    const shownRoute = mode === "auto" ? route : MATERIAL_ROUTES[resolved === "card-formula" ? "formula" : resolved === "card-seq" ? "sequence" : resolved === "card-enum" ? "enumeration" : resolved === "card-literature" ? "literature" : "concept"];
-    setAiPanel({
-      kind: "cards",
-      text,
-      running: true,
-      progress: 0,
-      startedAt: Date.now(),
-      thinking: 0,
-      searched: Boolean(webContext),
-      mode,
-      routeLabel: shownRoute.label,
-      routeForm: shownRoute.defaultForm,
-      mindmapNodeId: opts?.mindmapNodeId
-    });
-    try {
-      const { batchId, result } = await cardGenerator.generateCards(
-        text,
-        { title: sourceTitle, section: contextLabel, webContext, documentId: contextRef?.documentId ?? null, focus: opts?.focus },
-        resolved,
-        (chars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, progress: chars } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, thinking: thinkChars } : p))
-      );
-      setAiPanel({
-        kind: "cards",
-        text,
-        running: false,
-        progress: undefined,
-        startedAt: undefined,
-        thinking: undefined,
-        drafts: result.cards,
-        accepted: new Set<number>(),
-        blockReasons: result.blockReasons,
-        batchId,
-        searched: Boolean(webContext),
-        mode,
-        routeLabel: shownRoute.label,
-        routeForm: shownRoute.defaultForm,
-        kps: result.knowledgePoints,
-        mindmapNodeId: opts?.mindmapNodeId,
-        supplemental: new Set<number>(),
-        followUpBusy: [],
-        followUpStarted: {},
-        followUpErrors: {},
-        explorations: []
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAiPanel({
-        kind: "cards",
-        text,
-        running: false,
-        startedAt: undefined,
-        thinking: undefined,
-        error: msg.includes("API Key")
-          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
-          : msg,
-        mode,
-        routeLabel: shownRoute.label,
-        routeForm: shownRoute.defaultForm
-      });
-    }
-  }
-
-  // ---------- M1.1 图片挖空（D16：GLM 多模态识别遮挡区域，不做手动遮挡编辑器） ----------
-  async function runOcclusionCards() {
-    const ownerKey = itemId || contextRef?.documentId || "";
-    if (!ownerKey) {
-      showToast("无法确定图片归属的书籍");
-      return;
-    }
-    // 图片入口无文本选区：清掉可能残留的选区锚点，避免把旧锚点挂到新卡上
-    anchorRef.current = null;
-    engineSelRef.current = null;
-    // v35：资源库选图——图不在书中正文里，只落 imageSource="library"（复习端隐藏跳转原文）
-    occlusionSourceRef.current = "library";
-    const picked = await window.assetsAPI?.pickOcclusionImage(ownerKey);
-    if (!picked) return;
-    setAiPanel({
-      kind: "occlusion",
-      text: `[图片] ${picked.filename}`,
-      image: { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
-      running: true,
-      progress: 0,
-      startedAt: Date.now(),
-      thinking: 0
-    });
-    try {
-      const { batchId, result } = await cardGenerator.generateOcclusionCards(
-        { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
-        { title: sourceTitle, section: contextLabel },
-        (chars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, progress: chars } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, thinking: thinkChars } : p))
-      );
-      setAiPanel({
-        kind: "occlusion",
-        text: `[图片] ${picked.filename}`,
-        image: { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
-        running: false,
-        progress: undefined,
-        startedAt: undefined,
-        thinking: undefined,
-        drafts: result.cards,
-        accepted: new Set<number>(),
-        blockReasons: result.blockReasons,
-        regions: result.regions,
-        batchId
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAiPanel({
-        kind: "occlusion",
-        text: `[图片] ${picked.filename}`,
-        image: undefined,
-        running: false,
-        startedAt: undefined,
-        thinking: undefined,
-        error: msg.includes("API Key")
-          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
-          : msg
-      });
-    }
-  }
-
-  async function acceptOcclusionDraft(d: CardDraft, draftIndex: number) {
-    if (!d.occlusion || (aiPanel?.accepted?.has(draftIndex) ?? true)) return;
-    const ord = d.ord ?? d.occlusion.ord ?? 0;
-    const card = {
-      noteText: d.front || "图中遮挡区域对应的是什么？",
-      cardType: "imageOcclusion",
-      frontMarkdown: d.front || "图中遮挡区域对应的是什么？",
-      backMarkdown: d.back || d.occlusion.label || "",
-      clozeOrds: [],
-      cardOrd: ord,
-      // v25：形状（矩形/椭圆/多边形）随卡落库；rects 恒为包围盒（兼容旧渲染与 L11）
-      // v30：regionScope 透传——"shared"=旧共享区域链路（单区高亮），缺省=每卡自带（全 accent）
-      occlusionJson: {
-        rects: d.occlusion.rects,
-        assetPath: d.occlusion.assetPath,
-        shapes: d.occlusion.shapes ?? null,
-        regionScope: d.occlusion.regionScope
-      },
-      contextPrefix: d.contextPrefix || null,
-      // v35：library=资源库选图（图不在书中）只落 documentId+imageSource，无定位锚——复习端隐藏跳转；
-      // engine=正文图片走 enrichedContextRef（imageAnchorRef 快照 → 图片所在章节/页可跳转）
-      contextRef: occlusionSourceRef.current === "library"
-        ? { ...(contextRef || {}), imageSource: "library" as const }
-        : enrichedContextRef(),
-      sourceRef: d.sourceRef || (sourceTitle ? { title: sourceTitle } : null),
-      dateStamp: d.dateStamp || null,
-      priority: d.prioritySuggestion ?? 50,
-      tags: [],
-      domain: d.domain ?? [],
-      knowledgePointId: d.knowledgePointId || null,
-      // v34（M12，§4.16）：同图多卡互为同源（D26 同一次选区确认/同一图片资产），结构性、与文本长度无关
-      siblingKey: `img:${d.occlusion.assetPath}`,
-      generatedBy: "ai"
-    };
-    const issues = lintCard({
-      front: card.frontMarkdown,
-      back: card.backMarkdown,
-      cardType: card.cardType,
-      occlusion: {
-        assetPath: card.occlusionJson.assetPath,
-        rects: card.occlusionJson.rects,
-        shapes: card.occlusionJson.shapes
-      },
-      contextPrefix: card.contextPrefix,
-      sourceRef: card.sourceRef,
-      dateStamp: card.dateStamp,
-      knowledgePointId: card.knowledgePointId
-    });
-    const created = await cardsApi.create(card);
-    for (const issue of issues) {
-      await cardsApi.addIssue({ cardId: created.id, ...issue, source: "lint" });
-    }
-    setAiPanel((p) =>
-      p && p.drafts ? { ...p, accepted: new Set([...(p.accepted ?? []), draftIndex]) } : p
-    );
-    eventBus.emit("cards/changed");
-    showToast("遮挡卡已接受，进 FSRS 队列");
-  }
-
-  // ---------- 联网补充事件背景后重试制卡 ----------
-  async function searchAndRetry(text: string) {
-    setAiPanel((p) => (p && p.kind === "cards" ? { ...p, searching: true } : p));
-    try {
-      const results = await (await import("../lib/ai")).aiGateway.websearch(text.slice(0, 120));
-      const webContext = results
-        .map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}`)
-        .join("\n\n");
-      if (!webContext) {
-        setAiPanel((p) => (p && p.kind === "cards" ? { ...p, searching: false, error: "未检索到相关背景，建议手动补充来源后再制卡。" } : p));
-        return;
-      }
-      await runAICards(text, webContext);
-    } catch (err) {
-      setAiPanel((p) =>
-        p && p.kind === "cards"
-          ? { ...p, searching: false, error: err instanceof Error ? err.message : String(err) }
-          : p
-      );
-    }
-  }
-
-  // ---------- v16 递进补卡：知识点「后续可补」注记 → 询问 AI / 直接制卡 ----------
-  const explorationSeqRef = useRef(0);
-
-  function patchExploration(explId: number, patch: Partial<{ answer: string; running: boolean; startedAt?: number; thinking?: number; error?: string }>) {
-    setAiPanel((p) =>
-      p ? { ...p, explorations: (p.explorations ?? []).map((e) => (e.id === explId ? { ...e, ...patch } : e)) } : p
-    );
-  }
-
-  // 询问 AI 相关内容：解释追加在面板最下方，解释末尾带「直接制卡」
-  async function runExploration(item: string, kpTitle: string) {
-    if (!aiPanel) return;
-    const explId = ++explorationSeqRef.current;
-    const question = `就这段文字中的知识点「${kpTitle}」，请解释与「${item}」直接相关的具体内容：若是原因/例子/联系类方向，给出可直接用于制卡的实质内容；若是某个出处、概念或典故，请解释它本身并说明与本段文字的联系。`;
-    setAiPanel((p) =>
-      p
-        ? {
-            ...p,
-            explorations: [
-              ...(p.explorations ?? []),
-              { id: explId, item, kpTitle, question, answer: "", running: true, startedAt: Date.now(), thinking: 0 }
-            ]
-          }
-        : p
-    );
-    try {
-      const answer = await cardGenerator.explain(
-        aiPanel.text,
-        `${sourceTitle ?? ""}${contextLabel ? " · " + contextLabel : ""}`,
-        question,
-        (acc) => patchExploration(explId, { answer: acc }),
-        (thinkChars) => patchExploration(explId, { thinking: thinkChars })
-      );
-      patchExploration(explId, { running: false, answer, startedAt: undefined, thinking: undefined });
-    } catch (err) {
-      patchExploration(explId, {
-        running: false,
-        startedAt: undefined,
-        thinking: undefined,
-        error: err instanceof Error ? err.message : String(err)
-      });
-    }
-  }
-
-  // 直接制卡：以原选文为材料 +「本次制卡重点」指令 + 已有卡清单（防重复），
-  // 生成 1-3 张补充卡追加到卡片清单末尾；contextRef 沿用同一次选区锚点（跳转原文同一位置）
-  async function runFollowUpCards(item: string, kpTitle: string, hint?: string) {
-    const panel = aiPanel;
-    if (!panel || !panel.drafts) return;
-    if ((panel.followUpBusy ?? []).includes(item)) return;
-    setAiPanel((p) =>
-      p
-        ? {
-            ...p,
-            followUpBusy: [...(p.followUpBusy ?? []), item],
-            followUpStarted: { ...(p.followUpStarted ?? {}), [item]: Date.now() },
-            followUpErrors: { ...(p.followUpErrors ?? {}), [item]: "" }
-          }
-        : p
-    );
-    try {
-      const focus = [
-        `这是对同一段材料的补充制卡。知识点「${kpTitle}」的补充方向：「${item}」。`,
-        "请只产 1-3 张该方向的补充卡，禁止与已有卡重复或换皮。",
-        hint ? `可参考以下解释作为卡面素材（提炼为短答案，禁止照抄长句）：\n${hint.slice(0, 400)}` : ""
-      ]
-        .filter(Boolean)
-        .join("\n");
-      const { result } = await cardGenerator.generateCards(
-        panel.text,
-        {
-          title: sourceTitle,
-          section: contextLabel,
-          documentId: contextRef?.documentId ?? null,
-          existingCards: panel.drafts
-            .map((d) => d.front || d.cloze || "")
-            .filter(Boolean)
-            .slice(0, 10),
-          focus
-        },
-        "card-generation"
-      );
-      setAiPanel((p) => {
-        if (!p || !p.drafts) return p;
-        const start = p.drafts.length;
-        const supplemental = new Set(p.supplemental ?? []);
-        for (let k = 0; k < result.cards.length; k++) supplemental.add(start + k);
-        return {
-          ...p,
-          drafts: [...p.drafts, ...result.cards],
-          supplemental,
-          followUpBusy: (p.followUpBusy ?? []).filter((x) => x !== item),
-          followUpStarted: { ...(p.followUpStarted ?? {}), [item]: undefined }
-        } as typeof p;
-      });
-      showToast("补充卡已生成，请确认后接受");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAiPanel((p) =>
-        p
-          ? {
-              ...p,
-              followUpBusy: (p.followUpBusy ?? []).filter((x) => x !== item),
-              followUpStarted: { ...(p.followUpStarted ?? {}), [item]: undefined },
-              followUpErrors: { ...(p.followUpErrors ?? {}), [item]: msg }
-            }
-          : p
-      );
-    }
-  }
-
-  async function acceptDraft(draft: CardDraft, draftIndex: number, edited?: Partial<CardDraft>) {
-    if (aiPanel?.accepted?.has(draftIndex)) return; // 防重复入队
-    const d = { ...draft, ...edited };
-    // v30：建卡逻辑抽至 createAcceptedCard（与复习对比卡确认框共用）；per-blank 多空草稿在其内拆成每空一张
-    // v34（M12）：sourceText 参与短材料锚点键的长度门控——同一句短材料的多角度卡同日只放行一张
-    // v41（K2-A，D38）：genBatchId 落库 → 簇键 batch:<id>:<kp>，接受后后台顺带 AI 抽取归一
-    const expandedCount = expandClozeDraft(d).length;
-    const mmNodeId = aiPanel?.mindmapNodeId;
-    await createAcceptedCard(d, {
-      sourceTitle,
-      contextRef: mmNodeId ? { ...enrichedContextRef(), mindmapNodeId: mmNodeId } : enrichedContextRef(),
-      sourceText: aiPanel?.text ?? null,
-      genBatchId: aiPanel?.batchId ?? null,
-      // v48（M15，D41-⑥）：同一导图节点产出的多卡同日只放行一张（M12 同源延后语义）
-      siblingKey: mmNodeId ? `act:mindmap-${mmNodeId}` : undefined
-    });
-    setAiPanel((p) =>
-      p && p.drafts
-        ? { ...p, accepted: new Set([...(p.accepted ?? []), draftIndex]) }
-        : p
-    );
-    eventBus.emit("cards/changed");
-    showToast(expandedCount > 1 ? `已接受，分答拆为 ${expandedCount} 张卡进 FSRS 队列` : "已接受，进 FSRS 队列");
-  }
-
-  async function rejectAllDrafts() {
-    if (aiPanel?.batchId) await cardsApi.setBatchStatus(aiPanel.batchId, "rejected");
-    setAiPanel(null);
-  }
-
-  // ---------- AI 解释（Phase 12） ----------
-  async function runExplain(text: string, question: string | null) {
-    setAiPanel({ kind: "explain", text, answer: question ? undefined : "", running: true, startedAt: Date.now(), thinking: 0 });
-    try {
-      const answer = await cardGenerator.explain(
-        text,
-        `${title}${contextLabel ? " · " + contextLabel : ""}`,
-        question,
-        (acc) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, answer: acc, running: true } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, thinking: thinkChars } : p))
-      );
-      setAiPanel({ kind: "explain", text, answer, running: false, startedAt: undefined, thinking: undefined });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setAiPanel({
-        kind: "explain",
-        text,
-        running: false,
-        startedAt: undefined,
-        thinking: undefined,
-        error:
-          msg.includes("API Key")
-            ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
-            : msg
-      });
-    }
-  }
-
-  // ---------- 摘录 ----------
-  async function handleExtract(text: string) {
-    const { readingWorkflow } = await import("../lib/readingWorkflow");
-    // 需求2：摘录同样记录选区锚点（跳转原文用）
-    rememberAnchor(text);
-    const ctx = enrichedContextRef();
-    if (contextRef?.extractId) {
-      await readingWorkflow.create({
-        parentType: "extract",
-        parentId: contextRef.extractId,
-        documentId: contextRef.documentId || "",
-        contentMarkdown: text,
-        contextRef: ctx
-      });
-    } else if (contextRef?.documentId) {
-      await readingWorkflow.create({
-        parentType: "document",
-        parentId: contextRef.documentId,
-        documentId: contextRef.documentId,
-        contentMarkdown: text,
-        contextRef: ctx
-      });
-    }
-    eventBus.emit("workflow/changed");
-    showToast("已摘录进学习队列");
-  }
-
-  // ---------- M4 快捷键动作（§9.1 M4：与下方选区菜单按钮完全同源） ----------
-  function actManualCard() {
-    if (!selection) return;
-    rememberAnchor(selection.text);
-    setManualOpen(true);
-    clearSelection();
-  }
-  function actAICards() {
-    if (!selection) return;
-    rememberAnchor(selection.text);
-    const t = selection.text;
-    clearSelection();
-    void runAICards(t, undefined, aiMode);
-  }
-  function actAIExplain() {
-    if (!selection) return;
-    const t = selection.text;
-    clearSelection();
-    void runExplain(t, null);
-  }
-  function actExtractSelection() {
-    if (!selection) return;
-    const t = selection.text;
-    clearSelection();
-    void handleExtract(t);
-  }
-
-  // ---------- M7 查词（v32，D31）：选中单词 → DictPanel（原文即显→Loading→填充/错误），在线绝不阻塞 ----------
-  const [dictPanel, setDictPanel] = useState<DictPanelState | null>(null);
-  const [dictReading, setDictReading] = useState<ReadingContext | null>(null);
-  const [dictFields, setDictFields] = useState<Record<string, boolean>>({});
-  const [dictBusy, setDictBusy] = useState(false);
-  // v38（D35）：① 本次查词的手动语言切换（新选词重置；ref 供异步 lookup 读最新值，state 供面板高亮）
-  const [dictManualLang, setDictManualLang] = useState<string | null>(null);
-  const dictManualLangRef = useRef<string | null>(null);
-  // ② 书籍语言属性（library_items.lang）——查词语言路由的书籍级信号（未标注为空，靠句子启发）
-  const bookLangRef = useRef("");
+  /**
+   * 本文档要画的标记：数据面＝buildDocMarks（纯函数，吃 workflowAPI.listAll() 与按 extractId 派生的
+   * 已制卡数），绘制面＝内核 setDocumentMarks（PDF 矩形层 / EPUB cfi→Range 高亮）。
+   * 只在**真文档**上画：摘录阅读视图（contextRef.extractId）读的是合成 EPUB，画上去会张冠李戴。
+   * 摘录/制卡一变就重算（workflow/changed、cards/changed），于是「刚摘完就出现留痕、刚制完卡计数+1」。
+   */
   useEffect(() => {
-    let cancelled = false;
-    bookLangRef.current = "";
-    void libraryApi.list().then((items) => {
-      if (!cancelled) bookLangRef.current = items.find((it) => it.id === itemId)?.lang ?? "";
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [itemId]);
-  function setDictManualLangBoth(lang: string | null) {
-    dictManualLangRef.current = lang;
-    setDictManualLang(lang);
-  }
-  // 原句上下文：markdown 全文定位选中词前后各 ~120 字（引擎书无 markdown 时用 anchorText 兜底）
-  function sentenceContext(raw: string): string {
-    const body = String(markdown || "");
-    const idx = body ? body.indexOf(raw) : -1;
-    if (idx >= 0) return body.slice(Math.max(0, idx - 120), idx + raw.length + 120);
-    return engineSelRef.current?.anchorText || anchorRef.current?.anchorText || raw;
-  }
-  async function runLookup(forceLocal = false, rawOverride?: string) {
-    const raw = (rawOverride ?? selection?.text ?? "").trim();
-    if (!raw || dictBusy) return;
-    if (!rawOverride && !isVocabSelection(raw)) {
-      showToast("所选过长，已走 AI 制卡更合适");
+    const documentId = contextRef?.documentId;
+    if (!engineMode || !documentId || contextRef?.extractId) {
+      marksRef.current = [];
+      kernelRef.current?.setDocumentMarks?.([]);
+      setDocAnnotCount(0);
       return;
     }
-    setDictBusy(true);
-    const reading = buildReadingContext({
-      selectedText: raw,
-      contextText: sentenceContext(raw),
-      documentId: contextRef?.documentId ?? null,
-      cfi: engineSelRef.current?.cfi ?? jumpAnchor?.cfi ?? null,
-      pageIndex: engineSelRef.current?.pageIndex ?? jumpAnchor?.pageIndex ?? null,
-      anchorText: engineSelRef.current?.anchorText ?? raw.slice(0, 60),
-    });
-    setDictReading(reading);
-    setDictPanel({ selectedText: raw, sentence: reading.sentence, running: true, error: null });
-    // v38（D35）：语言路由信号一次备齐——手动切换 > 书籍语言 > 句中假名 > 字面正则，由 resolveLookupLanguage 组合
-    const langOpts = {
-      languageHint: dictManualLangRef.current ?? undefined,
-      bookLanguage: bookLangRef.current || undefined,
-      sentence: reading.sentence,
-    };
-    try {
-      const settings = await loadDictSettings();
-      setDictFields(settings.popupFields);
-      if (forceLocal) {
-        const { buildManager } = await import("../lib/dictClient");
-        const manager = buildManager("local");
-        const result = await manager.lookup(raw, langOpts);
-        setDictPanel({ selectedText: raw, sentence: reading.sentence, running: false, entry: result.entry, providerId: result.providerId, fromCache: result.fromCache, mode: "local" });
-      } else {
-        const result = await lookupWord(raw, langOpts);
-        setDictPanel({ selectedText: raw, sentence: reading.sentence, running: false, entry: result.entry, providerId: result.providerId, fromCache: result.fromCache, mode: result.mode });
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const [rows, cards] = await Promise.all([
+          window.workflowAPI?.listAll?.() ?? Promise.resolve([]),
+          cardsApi.listAll().catch(() => [])
+        ]);
+        if (cancelled) return;
+        const counts: Record<string, number> = {};
+        for (const c of cards as Array<{ contextRef?: { extractId?: string } | null; isDeleted?: number }>) {
+          const id = c?.contextRef?.extractId;
+          if (id && !c.isDeleted) counts[id] = (counts[id] || 0) + 1;
+        }
+        const marks = buildDocMarks(rows, documentId, engineKind, counts);
+        marksRef.current = marks;
+        kernelRef.current?.setDocumentMarks?.(marks);
+        // 文档序只能问内核（EPUB 的 CFI 只有引擎 resolve 得动）——装完标记通知侧栏重取
+        setMarksOrderKey((v) => v + 1);
+        // 侧栏「摘录」页签与入口可用性用同一个 VM 口径（含无锚老数据——它们也在栏里）
+        setDocAnnotCount(buildAnnotationItems(rows, documentId, engineKind).length);
+      } catch {
+        /* 标记是增强信息：取不到就不画，阅读/制卡链路不受影响 */
       }
-    } catch (err) {
-      setDictPanel({
-        selectedText: raw,
-        sentence: reading.sentence,
-        running: false,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setDictBusy(false);
-    }
+    };
+    void load();
+    const offWorkflow = eventBus.on("workflow/changed", () => void load());
+    const offCards = eventBus.on("cards/changed", () => void load());
+    // 主题/强调色一变，注入 iframe 的高亮字面值要重算——但**必须在主题真正落地之后**：
+    // changeReaderTheme 是先 applyAppearance 再 onSwitchAppTheme，此刻 body 还是旧档，
+    // 在 applyAppearance 里重算会拿到旧色（实测：切回纸白后 iframe 里仍是深色档的蓝）。
+    // 统一挂到 theme/changed（App 在 setTheme 落定后发出）与 accentColor 变更上，重推一次标记。
+    const offTheme = eventBus.on("theme/changed", () => kernelRef.current?.setDocumentMarks?.(marksRef.current));
+    const offAccent = eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload?.key === "accentColor") kernelRef.current?.setDocumentMarks?.(marksRef.current);
+    });
+    return () => {
+      cancelled = true;
+      offWorkflow();
+      offCards();
+      offTheme();
+      offAccent();
+    };
+  }, [engineMode, engineKind, contextRef?.documentId, contextRef?.extractId]);
+
+  // 浮层的两条退出：点别处（含正文）/ Esc——钉住态一并解除
+  useEffect(() => {
+    if (!markPop) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && typeof t.closest === "function" && t.closest(".reader-mark-pop")) return;
+      closeMarkPop();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMarkPop();
+    };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [markPop, closeMarkPop]);
+
+  /**
+   * 源锚装配（§6.8-11 三条腿的容器形态，批3 写入侧）：摘录落 `contextRef.sourceAnchor`，
+   * 文中留痕据此重画。rects 是**页内百分比**（内核在选区还活着时采集），cfi 表达 EPUB 位置；
+   * anchorText + anchorRatio 是位置只记录不重找的兜底（与 Zotero 一致：不做模糊重锚定）。
+   */
+  function buildSourceAnchor(text: string): Record<string, unknown> | null {
+    const documentId = contextRef?.documentId;
+    if (!documentId) return null;
+    const sel = engineSelRef.current;
+    const geom = engineAnchorGeomRef.current;
+    const loc = buildLocator({
+      cfi: sel?.cfi,
+      chapterIndex: sel ? engineChapterRef.current : undefined,
+      pageIndex: geom?.pageIndex ?? sel?.pageIndex,
+      anchorText: sel?.anchorText || text.slice(0, 60)
+    });
+    const el = scrollRef.current;
+    const denom = el ? el.scrollHeight - el.clientHeight : 0;
+    return {
+      documentId,
+      ...loc,
+      ...(geom?.rects?.length ? { rects: geom.rects } : {}),
+      anchorRatio: denom > 0 && el ? Math.min(1, el.scrollTop / denom) : 0,
+      capturedAt: Date.now()
+    };
   }
-  function actLookupWord() {
+
+  /** 浮层「就此制卡」（§4）：复用既有手动制卡链（ManualCardEditor → createSingleCard），
+   *  contextRef 挂到该摘录上（extractId）——「已制卡数」就是按它派生的。 */
+  function startMarkCard(mark: ReaderDocMark) {
+    const documentId = contextRef?.documentId;
+    if (!documentId) return;
+    markCardRefOverrideRef.current = {
+      documentId,
+      extractId: mark.id,
+      ...buildLocator({ cfi: mark.cfi, pageIndex: mark.pageIndex, anchorText: mark.text.slice(0, 60) })
+    };
+    sourceTextRef.current = mark.text;
+    const el = scrollRef.current;
+    const denom = el ? el.scrollHeight - el.clientHeight : 0;
+    anchorRef.current = {
+      anchorText: mark.text.slice(0, 60),
+      anchorRatio: denom > 0 && el ? Math.min(1, el.scrollTop / denom) : 0
+    };
+    startManualWith(mark.text);
+    closeMarkPop();
+  }
+
+  // 批 4 Task 12：标注模式与色板取自设置键（app.annotateMode / annotatePalette / annotateCustomEnabled）
+  // ——模式持久记忆、色板由用户配；改设置有 settings/changed 即时生效（统一走 useAnnotationSettings）
+  const annotSettings = useAnnotationSettings();
+  const annotMode = annotSettings.annotateMode;
+  const setAnnotMode = (m: AnnotMode) => void writeAnnotationSetting("annotateMode", m);
+  const ANNOT_PALETTE: readonly AnnotColor[] = annotSettings.annotatePalette as readonly AnnotColor[];
+
+  /**
+   * 多段选择修饰键按住期（规格 §6.8-11 与 R22 的冲突调和）：菜单**让路**不接管指针。
+   * 实测因果：两行菜单高 79px，按 R22 落在选区下方时会盖住下一行的拖选线
+   * （multiselect.gui：菜单 y 195–274 盖住第二段 y=267）→ 不给让路则该套件 6 条判据全红；
+   * 差分确认（把菜单临时改成 prefer="above" 复跑即 20/20）后定为「按住修饰键期间菜单不接指针」。
+   */
+  const [multiKeyHeld, setMultiKeyHeld] = useState(false);
+  useEffect(() => {
+    // 修饰键状态一律从**指针事件**取（与内核 modifierFlagOf 同一信号源）：
+    // foliate 章节在 iframe 里，其 keyup 不转发到宿主（adapter 已注明），靠宿主 keydown/keyup
+    // 跟踪会在「拖完松手」时卡在按住态——实测该残留态会让菜单永久不接指针、点不动「摘录」。
+    // 指针事件则两处都有：宿主正文直接冒泡，iframe 内的由 adapter 中继。
+    const sync = (e: PointerEvent) => setMultiKeyHeld(modifierFlagOf(multiKeyRef.current, e));
+    const reset = () => setMultiKeyHeld(false);
+    document.addEventListener("pointerdown", sync, true);
+    document.addEventListener("pointermove", sync, true);
+    document.addEventListener("pointerup", sync, true);
+    window.addEventListener("blur", reset);
+    return () => {
+      document.removeEventListener("pointerdown", sync, true);
+      document.removeEventListener("pointermove", sync, true);
+      document.removeEventListener("pointerup", sync, true);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+
+  /**
+   * R38/R40：点色＝完成当前模式的动作（颜色不记）。
+   * 高亮＝建 kind="highlight" 的纯高亮；摘录+高亮＝建 kind="extract" 的摘录；两者都带 annotationColor。
+   * 随后弹 AnnotationEditor 写批注（Task 11 接；本轮只落库不带批注）。
+   */
+  async function handlePickColor(color: AnnotColor) {
     if (!selection) return;
-    rememberAnchor(selection.text);
-    const t = selection.text;
+    const text = selection.text;
+    const spans = selection.spans;
     clearSelection();
-    setDictManualLangBoth(null); // v38（D35）：新选词重置手动语言
-    void runLookup(false, t);
-  }
-  // 一键制卡：勾选的快照卡（D18 独立卡）经 createAcceptedCard 入库（lint+S1 同 AI 链路）。
-  // dictJson 随插入一次写入——cards:update 是全行 UPDATE，建卡后 partial update 曾把内容列清空（空白卡根因）。
-  // 每张卡各自带 kind（听音/挖空等按钮入位由 CardFace 按它分流）；kinds=本次勾选清单（记忆用信息留存）。
-  async function acceptVocabCards(entry: DictionaryEntry, ctx: ReadingContext, kinds: VocabKind[]) {
-    const drafts = buildVocabDrafts(entry, ctx, kinds);
-    let n = 0;
-    for (const v of drafts) {
-      const dictJson = { providerId: entry.source, word: entry.word, normalizedWord: entry.normalizedWord, language: entry.language, audio: entry.audio ?? null, kind: v.kind, kinds, snapshotAt: Date.now() };
-      const d: CardDraft = {
-        cardType: v.cardType,
-        contextPrefix: v.contextPrefix,
-        domain: ["8"],
-        front: v.front,
-        back: v.back,
-        cloze: v.cloze ?? null,
-        example: v.example,
-        sourceRef: sourceTitle ? { title: sourceTitle } : { title: `词典:${entry.source}` },
-        prioritySuggestion: 50,
-        ruleNotes: ["R2", "R14", "R16"],
-        warnings: [],
-      };
-      // v34（M12，§4.16）：单词四卡（D31 快照制）来自同一次查词 → 同锚点键互为同源，同日只放行一张；
-      // sourceText=查词原词（恒 ≤ 阈值 → 必建键），同一词在同一位置重复制卡也会归入同组
-      await createAcceptedCard(d, { sourceTitle: sourceTitle ?? entry.source, contextRef: enrichedContextRef(), dictJson, sourceText: ctx.selectedText || entry.word });
-      n += 1;
-    }
-    eventBus.emit("cards/changed");
-    setDictPanel(null);
-    showToast(`已创建 ${n} 张单词卡（${drafts.map((v) => VOCAB_KIND_LABEL[v.kind]).join("/")}）`);
+    await createAnnotation(text, spans, color, annotMode);
   }
 
   // 阅读场景快捷键（制卡 Ctrl+Z / AI 制卡 Ctrl+X / AI 解释 Ctrl+A / 摘录 Ctrl+S / 查词 Ctrl+D）：
   // 仅当存在活动选区且无手动制卡弹窗、无 AI 面板时可用（弹层开着不触发新动作）
   const readerShortcutReady = !!selection && !manualOpen && !aiPanel && !dictPanel;
   useCommandActions("reader", {
-    "reader.makeCard": { when: () => readerShortcutReady, run: actManualCard },
-    "reader.aiCards": { when: () => readerShortcutReady, run: actAICards },
-    "reader.aiExplain": { when: () => readerShortcutReady, run: actAIExplain },
-    "reader.extract": { when: () => readerShortcutReady, run: actExtractSelection },
-    "reader.lookupWord": { when: () => readerShortcutReady, run: actLookupWord }
+    "reader.makeCard": { when: () => readerShortcutReady, run: () => selAct.manual() },
+    "reader.aiCards": { when: () => readerShortcutReady, run: () => selAct.aiCards() },
+    "reader.aiExplain": { when: () => readerShortcutReady, run: () => selAct.explain() },
+    "reader.extract": { when: () => readerShortcutReady, run: () => selAct.extract() },
+    "reader.lookupWord": { when: () => readerShortcutReady, run: () => selAct.lookup() }
   });
+
+  /**
+   * 侧栏可用性（D2）：目录 / 本文档注解 / 已发布图谱**任一在场**就可用——
+   * PDF 无大纲但有注解也要能开（此前按钮挂在「有目录」上，注解无处可看）。
+   */
+  const tocAvailable = tocItems.length > 0;
+  const mapAvailable = mapItems !== null;
+  const sidebarAvailable = tocAvailable || docAnnotCount > 0 || mapAvailable;
+  useEffect(() => {
+    if (!sidebarAvailable) setSidebarOpen(false);
+  }, [sidebarAvailable]);
+  /** 工具栏弹出组：点外部（含正文/侧栏）或 Esc 收起；组内点击不算外部 */
+  useEffect(() => {
+    if (!toolMenu) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && typeof t.closest === "function" && t.closest("[data-reader-tool-menu]")) return;
+      setToolMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setToolMenu(null);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [toolMenu]);
 
   return (
     <div className="reader-wrap">
-      {/* E-1（审计）：目录是 absolute 浮层，打开时正文必须让位，否则行首被压在面板下 */}
-      <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}${tocOpen ? " reader-body-toc-open" : ""}`}>
+      <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}`}>
         <div
           ref={scrollRef}
           className={`reader-scroll${engineMode ? " reader-scroll-engine" : ""}`}
@@ -1570,17 +1390,19 @@ export default function Reader({
         >
           {engineSource ? (
             <>
+              {/* D5-B：常驻＝侧栏入口 + 翻页；其余收进「更多」「阅读设置」两组弹出（同刻只开一个） */}
               <div className="reader-engine-controls">
                 <div className="reader-engine-controls-group">
-                  {/* v28 PDF 原生阅读：无大纲时目录按钮隐藏（getTOC 为空）；foliate 系恒有目录 */}
-                  {(engineKind !== "pdf" || tocItems.length > 0) && (
-                    <button className="btn btn-outline btn-sm" onClick={() => setTocOpen((v) => !v)}>
-                      目录
-                    </button>
-                  )}
-                  {/* v48 批3（M15，D42）：目录旁「导图」→ 全屏 Overlay 工作区（内核不销毁，正文返回原位） */}
-                  <button className="btn btn-outline btn-sm" data-mindmap-entry disabled={!contextRef?.documentId} onClick={() => setMindmapOpen(true)}>
-                    导图
+                  <button
+                    className="btn btn-outline btn-sm"
+                    data-reader-sidebar-toggle
+                    aria-expanded={sidebarOpen}
+                    aria-controls="reader-sidebar"
+                    disabled={!sidebarAvailable}
+                    title={sidebarAvailable ? "侧栏：目录 / 摘录 / 图谱" : "本书没有目录、注解或图谱"}
+                    onClick={toggleSidebar}
+                  >
+                    侧栏
                   </button>
                   <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
@@ -1591,54 +1413,158 @@ export default function Reader({
                   </button>
                 </div>
                 <div className="reader-engine-controls-group">
-                  <Dropdown
-                    align="left"
-                    title="阅读模式"
-                    value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
-                    options={[
-                      { value: "scrolled", label: "滚动" },
-                      { value: "paged", label: "分页" },
-                      { value: "spread", label: "对开" }
-                    ]}
-                    onChange={(v) =>
-                      changeReaderMode(
-                        v === "scrolled" ? { flow: "scrolled" } : v === "spread" ? { flow: "paged", spread: true } : { flow: "paged" }
-                      )
-                    }
-                  />
-                  <Dropdown
-                    align="left"
-                    title="阅读主题"
-                    value={readerSettings.appearance.theme}
-                    options={[
-                      { value: "paper", label: "纸白" },
-                      { value: "sepia", label: "羊皮" },
-                      { value: "dark", label: "暗夜" },
-                      { value: "custom", label: "自定义" }
-                    ]}
-                    onChange={(t) => changeReaderTheme(t as ReaderAppearance["theme"])}
-                  />
-                  {engineKind === "pdf" && (
-                    <Dropdown
-                      align="left"
-                      title="缩放"
-                      value={String(readerSettings.appearance.zoom ?? "page-width")}
-                      options={[
-                        { value: "page-width", label: "适应宽度" },
-                        { value: "page-fit", label: "适应页面" },
-                        { value: "50", label: "50%" },
-                        { value: "75", label: "75%" },
-                        { value: "100", label: "100%" },
-                        { value: "125", label: "125%" },
-                        { value: "150", label: "150%" },
-                        { value: "200", label: "200%" }
-                      ]}
-                      onChange={(v) => changeReaderZoom(v === "page-width" || v === "page-fit" ? v : Number(v))}
-                    />
-                  )}
+                  <ReaderToolMenu
+                    id="more"
+                    label="更多"
+                    open={toolMenu === "more"}
+                    onToggle={() => setToolMenu((v) => (v === "more" ? null : "more"))}
+                  >
+                    {/* v48 批3（M15，D42）：导图 → 全屏 Overlay 工作区（内核不销毁，正文返回原位） */}
+                    <button
+                      type="button"
+                      className="dd-item"
+                      data-mindmap-entry
+                      disabled={!contextRef?.documentId}
+                      onClick={() => {
+                        setToolMenu(null);
+                        setMindmapOpen(true);
+                      }}
+                    >
+                      导图
+                    </button>
+                    {/* v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡——按书范围会话，遵循共享每日预算 */}
+                    <button
+                      type="button"
+                      className="dd-item"
+                      data-review-extracts
+                      disabled={!itemId || !onReviewExtracts}
+                      title="集中复习本书的摘录（遵循每日上限）"
+                      onClick={() => {
+                        setToolMenu(null);
+                        onReviewExtracts?.();
+                      }}
+                    >
+                      复习摘录
+                    </button>
+                    <button
+                      type="button"
+                      className="dd-item"
+                      data-review-cards
+                      disabled={!itemId || !onReviewCards}
+                      title="集中复习本书的闪卡（遵循每日上限）"
+                      onClick={() => {
+                        setToolMenu(null);
+                        onReviewCards?.();
+                      }}
+                    >
+                      复习闪卡
+                    </button>
+                  </ReaderToolMenu>
+                  <ReaderToolMenu
+                    id="settings"
+                    label="阅读设置"
+                    open={toolMenu === "settings"}
+                    onToggle={() => setToolMenu((v) => (v === "settings" ? null : "settings"))}
+                  >
+                    <div className="reader-tool-menu-row">
+                      <span className="reader-tool-menu-label mono">模式</span>
+                      <Dropdown
+                        title="阅读模式"
+                        value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
+                        options={[
+                          { value: "scrolled", label: "滚动" },
+                          { value: "paged", label: "分页" },
+                          { value: "spread", label: "对开" }
+                        ]}
+                        onChange={(v) =>
+                          changeReaderMode(
+                            v === "scrolled" ? { flow: "scrolled" } : v === "spread" ? { flow: "paged", spread: true } : { flow: "paged" }
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="reader-tool-menu-row">
+                      <span className="reader-tool-menu-label mono">主题</span>
+                      <Dropdown
+                        title="阅读主题"
+                        value={readerSettings.appearance.theme}
+                        options={[
+                          { value: "paper", label: "纸白" },
+                          { value: "sepia", label: "羊皮" },
+                          { value: "dark", label: "暗夜" },
+                          { value: "custom", label: "自定义" }
+                        ]}
+                        onChange={(t) => changeReaderTheme(t as ReaderAppearance["theme"])}
+                      />
+                    </div>
+                    {engineKind === "pdf" && (
+                      <div className="reader-tool-menu-row">
+                        <span className="reader-tool-menu-label mono">缩放</span>
+                        <Dropdown
+                          title="缩放"
+                          value={String(readerSettings.appearance.zoom ?? "page-width")}
+                          options={[
+                            { value: "page-width", label: "适应宽度" },
+                            { value: "page-fit", label: "适应页面" },
+                            { value: "50", label: "50%" },
+                            { value: "75", label: "75%" },
+                            { value: "100", label: "100%" },
+                            { value: "125", label: "125%" },
+                            { value: "150", label: "150%" },
+                            { value: "200", label: "200%" }
+                          ]}
+                          onChange={(v) => changeReaderZoom(v === "page-width" || v === "page-fit" ? v : Number(v))}
+                        />
+                      </div>
+                    )}
+                  </ReaderToolMenu>
                 </div>
               </div>
               <div className="reader-engine-viewport">
+                {/* D2：正文区与侧栏是 flex 兄弟（侧栏在**左**，2026-10-01）——栏开着时正文让宽度，
+                    不是压在正文上；翻页热区只覆盖正文区（.reader-engine-main），不盖到栏上 */}
+                {sidebarOpen && sidebarAvailable && (
+                  <ReaderSidebar
+                    tocItems={tocItems}
+                    activeHref={tocActiveHref}
+                    onNavigate={(item) => {
+                      void kernelRef.current?.goTo({ href: item.href });
+                      setSidebarOpen(false);
+                    }}
+                    onClose={() => setSidebarOpen(false)}
+                    tab={sidebarTab}
+                    onTabChange={setSidebarTab}
+                    extractsPanel={
+                      /* D2：页签各自按自己的数据在场——本文档没有注解就不出现「摘录」页签 */
+                      docAnnotCount > 0 ? (
+                      <ReaderExtractsPanel
+                        documentId={contextRef?.documentId ?? null}
+                        engine={engineKind}
+                        orderKey={marksOrderKey}
+                        getMarkOrder={() => kernelRef.current?.getMarkOrder?.() ?? []}
+                        filter={annotSettings.annotationFilter}
+                        onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
+                        palette={annotSettings.annotatePalette}
+                        currentId={annotFocus}
+                        unavailableIds={Object.keys(annotUnavailable)}
+                        onJump={jumpToMark}
+                        onEdit={(id, comment) => void selActions.saveAnnotationComment(id, comment)}
+                        onColor={(id, color) => void selActions.saveAnnotationColor(id, color)}
+                        onDelete={(id) => void selActions.removeAnnotation(id)}
+                      />
+                      ) : null
+                    }
+                    mapItems={mapItems}
+                    mapAvailable={mapAvailable}
+                    onMapNavigate={(it) => {
+                      // 节点点击 → 跳该节点自有区间起点（复用既有导图跳转：区间起点 → 该单元锚 → goTo）
+                      const anchor = mapUnitAnchorsRef.current[it.start];
+                      if (anchor) void kernelRef.current?.goTo({ href: anchor });
+                      setSidebarOpen(false);
+                    }}
+                  />
+                )}
+                <div className="reader-engine-main">
                 {engineError ? (
                   <div className="reader-engine-error" role="alert">
                     <p className="reader-engine-error-title">
@@ -1687,17 +1613,7 @@ export default function Reader({
                     <div className="reader-tap-zone reader-tap-right" title="下一页" onClick={() => void turnPage(1)} />
                   </>
                 )}
-                {tocOpen && (
-                  <TocSidebar
-                    items={tocItems}
-                    activeHref={tocActiveHref}
-                    onNavigate={(item) => {
-                      void kernelRef.current?.goTo({ href: item.href });
-                      setTocOpen(false);
-                    }}
-                    onClose={() => setTocOpen(false)}
-                  />
-                )}
+                </div>
               </div>
             </>
           ) : (
@@ -1747,118 +1663,27 @@ export default function Reader({
           )}
 
           {selection && (
-            <div
-              className="selection-menu"
-              style={engineMode ? { position: "fixed", left: selection.x, top: Math.max(8, selection.y) } : { left: selection.x, top: Math.max(8, selection.y) }}
-            >
-              <button onClick={actManualCard}>制卡</button>
-              <button onClick={actAICards}>AI 制卡</button>
-              <button onClick={actAIExplain}>AI 解释</button>
-              <button onClick={actExtractSelection}>摘录</button>
-              <button onClick={actLookupWord}>查词</button>
-              <button onClick={() => { clearSelection(); void runOcclusionCards(); }}>图片挖空</button>
-            </div>
+            <SelectionMenu
+              anchor={selection.rect}
+              container={scrollRef.current?.getBoundingClientRect() ?? null}
+              mode={annotMode}
+              onModeChange={setAnnotMode}
+              colors={ANNOT_PALETTE}
+              onPick={handlePickColor}
+              byLocked={multiKeyHeld}
+              actions={[
+                { key: "manual", label: "制卡", onClick: selAct.manual },
+                { key: "ai-cards", label: "AI 制卡", onClick: selAct.aiCards },
+                { key: "explain", label: "AI 解释", onClick: selAct.explain },
+                { key: "extract", label: "摘录", onClick: selAct.extract },
+                { key: "lookup", label: "查词", onClick: selAct.lookup },
+                { key: "occlusion", label: "图片挖空", onClick: selAct.occlusion }
+              ]}
+            />
           )}
         </div>
 
-        {manualOpen && selection?.text && (
-          <ManualCardEditor
-            quote={selection.text}
-            imageRegion={manualImage ?? undefined}
-            onCancel={() => {
-              setManualOpen(false);
-              setManualImage(null);
-            }}
-            onSave={handleManualCard}
-          />
-        )}
-
-        {manualOpen && !selection?.text && (
-          <ManualCardEditor
-            quote=""
-            imageRegion={manualImage ?? undefined}
-            onCancel={() => {
-              setManualOpen(false);
-              setManualImage(null);
-            }}
-            onSave={handleManualCard}
-          />
-        )}
-
-        {dictPanel && (
-          <DictPanel
-            panel={dictPanel}
-            reading={dictReading}
-            popupFields={dictFields}
-            manualLang={dictManualLang}
-            onClose={() => setDictPanel(null)}
-            onRetry={() => void runLookup(false, dictPanel.selectedText)}
-            onUseLocal={() => void runLookup(true, dictPanel.selectedText)}
-            // v38（D35）：面板语言切换——以对应语言重查（"auto"=清除手动选择走自动路由）
-            onSelectLanguage={(lang) => {
-              setDictManualLangBoth(lang === "auto" ? null : lang);
-              void runLookup(false, dictPanel.selectedText);
-            }}
-            onMakeCards={(entry: DictionaryEntry, ctx: ReadingContext, kinds: VocabKind[]) => void acceptVocabCards(entry, ctx, kinds)}
-          />
-        )}
-
-        {aiPanel && (
-          <AIPanel
-            panel={{ ...aiPanel, elapsedSec }}
-            onClose={() => {
-              if (
-                (aiPanel.kind === "cards" || aiPanel.kind === "occlusion") &&
-                aiPanel.batchId &&
-                aiPanel.drafts?.length
-              ) {
-                cardsApi.setBatchStatus(aiPanel.batchId, "rejected");
-              }
-              setAiPanel(null);
-            }}
-            onAccept={(d, idx, edited) => {
-              return acceptDraft(d, idx, edited);
-            }}
-            onAcceptOcclusion={(d, idx) => acceptOcclusionDraft(d, idx)}
-            onEdit={(idx, patch) => {
-              setAiPanel((p) => {
-                if (!p || !p.drafts) return p;
-                const next = [...p.drafts];
-                next[idx] = { ...next[idx], ...patch };
-                return { ...p, drafts: next };
-              });
-            }}
-            onSplitReverse={(idx) => {
-              // v16（D18）：「转翻转卡」= 拆为两张互为翻转的独立 qa 草稿（各自有独立 FSRS 调度）
-              setAiPanel((p) => {
-                if (!p || !p.drafts) return p;
-                const d = p.drafts[idx];
-                const a: CardDraft = { ...d, cardType: "qa", front: d.front, back: d.back };
-                const b: CardDraft = {
-                  ...d,
-                  cardType: "qa",
-                  front: (d.back || "").trim() || d.front,
-                  back: d.front,
-                  cloze: null
-                };
-                const next = [...p.drafts.slice(0, idx), a, b, ...p.drafts.slice(idx + 1)];
-                // 拆分点之后的已接受/补充标记索引整体右移一位，保持对位
-                const accepted = new Set([...(p.accepted ?? [])].map((k) => (k > idx ? k + 1 : k)));
-                const supplemental = new Set([...(p.supplemental ?? [])].map((k) => (k > idx ? k + 1 : k)));
-                return { ...p, drafts: next, accepted, supplemental };
-              });
-            }}
-            onRejectAll={rejectAllDrafts}
-            onExplain={(q) => runExplain(aiPanel.text, q)}
-            onMakeCards={() => runAICards(aiPanel.text, undefined, aiMode)}
-            onModeChange={(m) => changeAiMode(m)}
-            mode={aiMode}
-            onSearchBackground={() => searchAndRetry(aiPanel.text)}
-            onFollowUpCards={(item, kpTitle, hint) => runFollowUpCards(item, kpTitle, hint)}
-            onExploration={(item, kpTitle) => runExploration(item, kpTitle)}
-            elapsedTick={nowTick}
-          />
-        )}
+        <SelectionPanels sel={selActions} selectionText={selection?.text ?? null} nowTick={nowTick} elapsedSec={elapsedSec} />
       </div>
 
       {/* v25 图片聚焦覆盖层：位于阅读器最外层（fixed 全屏），点击模糊区域退出 */}
@@ -1874,6 +1699,63 @@ export default function Reader({
           }}
         />
       )}
+
+      {/* v48.24 批3（§4 文中留痕）：标记浮层——原文 + 批注 + 已制卡数 + 「就此制卡」。
+          hover 出现、点标记钉住、点别处/Esc 收起；「就此制卡」走既有手动制卡链。 */}
+      {markPop && (() => {
+        const mark = marksRef.current.find((m) => m.id === markPop.id);
+        if (!mark) return null;
+        return (
+          <MarkPopover
+            mark={mark}
+            anchor={markPop.rect}
+            onMakeCard={() => startMarkCard(mark)}
+            onClose={closeMarkPop}
+            onKeepOpen={() => {
+              if (markHideTimerRef.current) {
+                window.clearTimeout(markHideTimerRef.current);
+                markHideTimerRef.current = null;
+              }
+            }}
+            onRelease={() => {
+              if (markPinnedRef.current || markHideTimerRef.current !== null) return;
+              markHideTimerRef.current = window.setTimeout(() => {
+                markHideTimerRef.current = null;
+                setMarkPop(null);
+              }, 160);
+            }}
+          />
+        );
+      })()}
+
+      {/* 批 4 Task 17：标记的批注编辑浮层（形态唯一；无保存/取消，失焦即落库） */}
+      {markEditor && (() => {
+        const m = marksRef.current.find((x) => x.id === markEditor.id);
+        if (!m) return null;
+        return (
+          <AnnotationEditor
+            extractId={markEditor.id}
+            kind={markEditor.kind}
+            comment={markEditor.comment}
+            color={markEditor.color}
+            quote={markEditor.quote}
+            anchor={markEditor.anchor}
+            palette={annotSettings.annotatePalette}
+            customEnabled={annotSettings.annotateCustomEnabled}
+            onSaveComment={(c) => selActions.saveAnnotationComment(markEditor.id, c)}
+            onSaveColor={async (c) => {
+              await selActions.saveAnnotationColor(markEditor.id, c);
+              setMarkEditor((prev) => (prev ? { ...prev, color: c } : prev));
+            }}
+            onDelete={async () => {
+              await selActions.removeAnnotation(markEditor.id);
+              setMarkEditor(null);
+              closeMarkPop();
+            }}
+            onClose={() => setMarkEditor(null)}
+          />
+        );
+      })()}
 
       {/* v48 批3（M15，D42）：全屏导图工作区——内核保活，「正文」返回即原位；节点制卡走既有 AI 制卡链路 */}
       {mindmapOpen && engineSource && contextRef?.documentId && kernelRef.current && (
@@ -1893,774 +1775,6 @@ export default function Reader({
       )}
 
       {toast && <div className="reader-toast">{toast}</div>}
-    </div>
-  );
-}
-
-// ---------- 手动制卡编辑器（Phase 3：引用 + 可编辑副本；M1.1 增翻转问答；M5/v25 字段对齐 AI 制卡） ----------
-function ManualCardEditor({
-  quote,
-  imageRegion,
-  onCancel,
-  onSave
-}: {
-  quote: string;
-  /** v25：来自图片聚焦选区（工具条「手动制卡」）——提供时默认进入图片挖空页签 */
-  imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
-  onCancel: () => void;
-  onSave: (payload: ManualCardPayload) => Promise<void>;
-}) {
-  const panelRef = useDialogA11y<HTMLDivElement>(onCancel);
-  const [mode, setMode] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
-  const [front, setFront] = useState(imageRegion ? "" : quote);
-  const [back, setBack] = useState("");
-  const [bFront, setBFront] = useState("");
-  const [bBack, setBBack] = useState("");
-  const [priority, setPriority] = useState(50);
-  const [saving, setSaving] = useState(false);
-  // M5：与 AI 制卡同构的元数据字段（领域标签对齐 R17：≤2 个、首个为主）
-  const [domain, setDomain] = useState<string[]>([]);
-  const [contextPrefix, setContextPrefix] = useState("");
-  const [mnemonic, setMnemonic] = useState("");
-  const [knowledgePointId, setKnowledgePointId] = useState("");
-  const [dateStamped, setDateStamped] = useState(false);
-
-  useEffect(() => {
-    if (mode === "qa" || mode === "imageOcclusion") {
-      setFront((f) => (f ? f : ""));
-    } else {
-      setFront(quote);
-    }
-  }, [mode, quote]);
-
-  async function save() {
-    setSaving(true);
-    const meta = {
-      priority,
-      contextPrefix: contextPrefix.trim(),
-      domain,
-      mnemonic: mnemonic.trim(),
-      knowledgePointId: knowledgePointId.trim(),
-      // 日期标记（R11/规则19）：易变内容勾选后写入当日日期
-      dateStamp: dateStamped ? new Date().toISOString().slice(0, 10) : null
-    };
-    const clozeText = mode === "cloze" ? toCloze(front) : undefined;
-    await onSave({
-      mode,
-      front: mode === "cloze" ? clozeText ?? "" : front,
-      back,
-      cloze: clozeText,
-      reversePair:
-        mode === "reverse"
-          ? { bFront: bFront.trim() || back, bBack: bBack.trim() || front }
-          : undefined,
-      imageRegion: mode === "imageOcclusion" ? imageRegion : undefined,
-      ...meta
-    });
-    setSaving(false);
-  }
-
-  function toCloze(text: string): string {
-    // 简易挖空：用户用 **粗体** 或〔〕标记答案，否则保持原文
-    const bold = /\*\*(.+?)\*\*/.exec(text);
-    if (bold) return text.replace(bold[0], `{{c1::${bold[1]}}}`);
-    const bracket = /〔(.+?)〕/.exec(text);
-    if (bracket) return text.replace(bracket[0], `{{c1::${bracket[1]}}}`);
-    return text;
-  }
-
-  const canSave =
-    mode === "imageOcclusion"
-      ? Boolean(imageRegion) && Boolean(back.trim())
-      : mode === "qa" || mode === "reverse"
-        ? Boolean(front.trim()) && Boolean(back.trim())
-        : Boolean(front.trim());
-
-  return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="手动制卡" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>手动制卡</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onCancel}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-scroll">
-        {quote && <blockquote className="card-quote card-marked">{quote}</blockquote>}
-
-        <div className="seg-tabs">
-          <button className={mode === "qa" ? "active" : ""} onClick={() => setMode("qa")}>
-            问答题
-          </button>
-          <button className={mode === "reverse" ? "active" : ""} onClick={() => setMode("reverse")}>
-            翻转问答
-          </button>
-          <button className={mode === "cloze" ? "active" : ""} onClick={() => setMode("cloze")}>
-            填空题
-          </button>
-          <button className={mode === "imageOcclusion" ? "active" : ""} onClick={() => setMode("imageOcclusion")}>
-            图片挖空
-          </button>
-        </div>
-
-        {mode === "reverse" ? (
-          <>
-            <p className="form-hint">翻转问答：一次性创建两张互为翻转的独立问答卡（B 面留空则自动正反互换），各自有独立的复习调度。</p>
-            <div className="form-field">
-              <label>A 面 · 题面（建议「领域前缀: 问题」）</label>
-              <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="例：统计: 中位数是什么？" />
-            </div>
-            <div className="form-field">
-              <label>A 面 · 答案（目标 ≤15 字）</label>
-              <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：排序后位于中间位置的数" />
-            </div>
-            <div className="form-field">
-              <label>B 面 · 题面（留空则自动用 A 面答案反向提问）</label>
-              <textarea className="ta-short" value={bFront} onChange={(e) => setBFront(e.target.value)} placeholder="例：统计: 排序后位于中间位置的数叫什么？" />
-            </div>
-            <div className="form-field">
-              <label>B 面 · 答案（留空则自动用 A 面题面）</label>
-              <textarea className="ta-short" value={bBack} onChange={(e) => setBBack(e.target.value)} placeholder="例：中位数" />
-            </div>
-          </>
-        ) : mode === "qa" ? (
-          <>
-            <div className="form-field">
-              <label>正面（问题，建议「领域前缀: 问题」）</label>
-              <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="例：统计: 中位数是什么？" />
-            </div>
-            <div className="form-field">
-              <label>背面（答案，目标 ≤15 字）</label>
-              <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：排序后位于中间位置的数" />
-            </div>
-          </>
-        ) : mode === "cloze" ? (
-          <div className="form-field">
-            <label>
-              挖空文本（用 **双星号** 或〔括号〕包住答案，自动转 Anki 挖空；多挖空用 c1/c2 编号语法）
-            </label>
-            <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} />
-            <p className="form-preview mono">{front.replace(/\*\*(.+?)\*\*/g, "〔$1〕")}</p>
-          </div>
-        ) : (
-          <>
-            <p className="form-hint">
-              图片挖空：正面按所选区域遮挡，答案面显示原图与答案文本。区域来自阅读器中的图片选区。
-            </p>
-            {imageRegion ? (
-              <>
-                <div className="occlusion-stage occlusion-preview manual-region-preview">
-                  <img src={imageRegion.dataUrl} alt="" className="occlusion-img" />
-                  <OcclusionShapes occlusion={{ shapes: [imageRegion.shape] }} cardOrd={0} />
-                </div>
-                <div className="form-field">
-                  <label>正面（问题，默认「图中遮挡区域对应的是什么？」）</label>
-                  <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="图中遮挡区域对应的是什么？" />
-                </div>
-                <div className="form-field">
-                  <label>背面（答案，必填）</label>
-                  <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：海马体" />
-                </div>
-              </>
-            ) : (
-              <p className="form-hint">
-                尚未选择图片区域：请关闭本窗口，点击阅读材料中的图片进入聚焦，用工具条框选区域后选择「手动制卡」。
-              </p>
-            )}
-          </>
-        )}
-
-        {/* M5：与 AI 制卡同构的元数据（领域标签 / 上下文前缀 / 助记 / 知识点分组 / 日期标记） */}
-        <div className="form-field">
-          <label>领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）</label>
-          <UdcPicker value={domain} onChange={setDomain} />
-        </div>
-        <div className="form-field">
-          <label>上下文前缀（可选；只能写领域/学科名，禁止泄漏答案——规则16）</label>
-          <input
-            type="text"
-            value={contextPrefix}
-            onChange={(e) => setContextPrefix(e.target.value)}
-            placeholder="例：统计:"
-          />
-        </div>
-        <div className="form-field">
-          <label>助记（可选，规则7 克制使用）</label>
-          <input type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="例：中位数的「中」= 位置在正中间" />
-        </div>
-        <div className="form-field">
-          <label>知识点分组（可选；同组卡片共享同一 knowledgePointId）</label>
-          <input
-            type="text"
-            value={knowledgePointId}
-            onChange={(e) => setKnowledgePointId(e.target.value)}
-            placeholder="例：kp-中位数"
-          />
-        </div>
-        <div className="form-field form-check">
-          <label className="backup-checkline">
-            <input type="checkbox" checked={dateStamped} onChange={(e) => setDateStamped(e.target.checked)} />
-            标注日期（规则19：统计数字/版本/价格等易变内容勾选，写入今日日期）
-          </label>
-        </div>
-
-        <div className="form-field">
-          <label>优先级（0-100，越高越先复习）</label>
-          <input type="range" min={0} max={100} value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
-          <span className="mono">{priority}</span>
-        </div>
-
-        <div className="form-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>取消</button>
-          <button className="btn btn-primary" disabled={saving || !canSave} onClick={save}>
-            {saving ? "保存中…" : "创建卡片"}
-          </button>
-        </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** UDC 领域多选（M5/R17）：选中的标签以 chip 展示（点击移除），菜单只列受控清单 */
-function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
-  const options = [...UDC_LEAVES.map((l) => ({ code: l.code, label: `${l.code} ${l.label}` })), { code: UDC_OTHER, label: "其他" }];
-  return (
-    <div className="udc-picker" ref={ref}>
-      {value.length > 0 && (
-        <div className="udc-chips">
-          {value.map((code, i) => (
-            <button
-              key={code}
-              type="button"
-              className="udc-chip"
-              title={i === 0 ? "主领域（点击移除）" : "点击移除"}
-              onClick={() => onChange(value.filter((c) => c !== code))}
-            >
-              {udcLabel(code)}
-              {i === 0 && <span className="udc-chip-main mono">主</span>}
-              <IconClose size={12} />
-            </button>
-          ))}
-        </div>
-      )}
-      {value.length < UDC_MAX && (
-        <div className="dd">
-          <button type="button" className="dd-btn" onClick={() => setOpen((o) => !o)}>
-            {value.length === 0 ? "选择领域" : "再加一个领域"}
-            <IconChevronDown size={12} className="dd-caret" />
-          </button>
-          {open && (
-            <div className="dd-menu dd-menu-left udc-menu" role="listbox">
-              {options.map((o) => (
-                <button
-                  key={o.code}
-                  type="button"
-                  role="option"
-                  aria-selected={value.includes(o.code)}
-                  className="dd-item"
-                  disabled={value.includes(o.code)}
-                  onClick={() => {
-                    onChange([...value, o.code]);
-                    setOpen(false);
-                  }}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------- AI 面板（解释侧栏 / 制卡预览） ----------
-// 防 AI 返回字段类型漂移导致渲染崩溃（ruleNotes/warnings 可能是字符串）
-function toList(v: unknown): string[] {
-  if (Array.isArray(v)) return v.map((x) => String(x));
-  if (typeof v === "string" && v.trim()) return v.split(/[,;；、]/).map((s) => s.trim()).filter(Boolean);
-  return [];
-}
-
-function AIPanel({
-  panel,
-  onClose,
-  onAccept,
-  onAcceptOcclusion,
-  onEdit,
-  onSplitReverse,
-  onRejectAll,
-  onExplain,
-  onMakeCards,
-  onModeChange,
-  mode = "auto",
-  onSearchBackground,
-  onFollowUpCards,
-  onExploration,
-  elapsedTick = 0
-}: {
-  panel: {
-    kind: "explain" | "cards" | "occlusion";
-    text: string;
-    answer?: string;
-    drafts?: CardDraft[];
-    accepted?: Set<number>;
-    blockReasons?: string[];
-    batchId?: string;
-    running: boolean;
-    progress?: number;
-    thinking?: number;
-    startedAt?: number;
-    elapsedSec?: number;
-    searching?: boolean;
-    searched?: boolean;
-    error?: string;
-    mode?: CardGenMode;
-    routeLabel?: string;
-    routeForm?: string;
-    image?: { dataUrl: string; assetPath: string };
-    regions?: OcclusionRegion[];
-    kps?: { id: string; summary: string }[];
-    supplemental?: Set<number>;
-    followUpBusy?: string[];
-    followUpStarted?: Record<string, number | undefined>;
-    followUpErrors?: Record<string, string>;
-    explorations?: {
-      id: number;
-      item: string;
-      kpTitle: string;
-      question: string;
-      answer?: string;
-      running: boolean;
-      startedAt?: number;
-      thinking?: number;
-      error?: string;
-    }[];
-  };
-  onClose: () => void;
-  onAccept: (draft: CardDraft, draftIndex: number, edited?: Partial<CardDraft>) => Promise<void>;
-  onAcceptOcclusion: (draft: CardDraft, draftIndex: number) => Promise<void>;
-  onEdit: (draftIndex: number, patch: Partial<CardDraft>) => void;
-  onSplitReverse: (draftIndex: number) => void;
-  onRejectAll: () => void;
-  onExplain: (question: string | null) => void;
-  onMakeCards: () => void;
-  onModeChange: (mode: CardGenMode) => void;
-  mode?: CardGenMode;
-  onSearchBackground: () => void;
-  onFollowUpCards: (item: string, kpTitle: string, hint?: string) => void;
-  onExploration: (item: string, kpTitle: string) => void;
-  elapsedTick?: number;
-}) {
-  const [editing, setEditing] = useState<number | null>(null);
-  const [editValues, setEditValues] = useState<Record<number, { front?: string; back?: string }>>({});
-  // v46（M14-UM2，§6.7.3）：memoryRef 校验失败的卡「情境来源存疑」默认不勾选——接受按钮需二次点击确认
-  const [memoryWarnArmed, setMemoryWarnArmed] = useState<Set<number>>(new Set());
-  const isOcclusion = panel.kind === "occlusion";
-  const followUpGroups: FollowUpGroup[] = panel.kps ? parseFollowUps(panel.kps) : [];
-  const nowTick = elapsedTick;
-  const busySec = (item: string) => {
-    const started = panel.followUpStarted?.[item];
-    return started ? Math.max(0, Math.round((nowTick - started) / 1000)) : 0;
-  };
-  const explSec = (e: { startedAt?: number }) =>
-    e.startedAt ? Math.max(0, Math.round((nowTick - e.startedAt) / 1000)) : 0;
-
-  return (
-    <div className="ai-panel">
-      <div className="ai-panel-head">
-        <span className="ai-panel-title">{panel.kind === "explain" ? "AI 解释" : isOcclusion ? "图片挖空" : "AI 制卡"}</span>
-        <button className="icon-btn" title="关闭" onClick={onClose}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
-        </button>
-      </div>
-
-      <div className="ai-panel-body">
-        <blockquote className="ai-quote">{panel.text}</blockquote>
-
-        {(panel.kind === "cards" || isOcclusion) && panel.running && (
-          <div className="ai-streaming mono">
-            {panel.progress
-              ? `生成中… 已输出 ${panel.progress} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒（大模型生成长 JSON 通常需要 1-2 分钟，请保持窗口打开）`
-              : panel.thinking
-                ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
-                : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
-          </div>
-        )}
-        {panel.searching && <div className="ai-streaming mono">正在联网检索事件背景…</div>}
-        {panel.error && <div className="ai-error">{panel.error}</div>}
-
-        {panel.kind === "explain" && panel.running && !panel.answer && (
-          <div className="ai-streaming mono" aria-live="polite">
-            {panel.thinking
-              ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
-              : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
-          </div>
-        )}
-
-        {panel.kind === "explain" && panel.answer && (
-          <>
-            <div className="ai-answer">
-              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {panel.answer}
-              </ReactMarkdown>
-            </div>
-            <div className="ai-actions">
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("通俗解释")}>通俗解释</button>
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("严格定义")}>严格定义</button>
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("举个例子")}>举个例子</button>
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("为什么会这样")}>为什么</button>
-            </div>
-            <div className="ai-actions">
-              <button className="btn btn-secondary btn-sm" disabled={panel.running} onClick={onMakeCards}>
-                就此制卡
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* M1.2：材料类型路由展示 + 手动覆盖 */}
-        {panel.kind === "cards" && (
-          <div className="ai-route-row">
-            <span className="mono">
-              {panel.routeLabel ? `材料类型：${panel.routeLabel} · 默认形式：${panel.routeForm}` : "材料类型：自动识别"}
-            </span>
-            <Dropdown
-              align="left"
-              title="材料类型"
-              value={mode}
-              options={[
-                { value: "auto", label: "自动识别" },
-                { value: "card-generation", label: "概念论述" },
-                { value: "card-formula", label: "公式推导" },
-                { value: "card-seq", label: "流程背诵" },
-                { value: "card-enum", label: "枚举清单" },
-                { value: "card-literature", label: "文学/诗歌背诵" }
-              ]}
-              onChange={(m) => onModeChange(m as CardGenMode)}
-            />
-            {(panel.drafts?.length || panel.error) && !panel.running && (
-              <button className="btn btn-outline btn-sm" onClick={onMakeCards}>
-                按此类型重跑
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* v16 递进补卡：知识点「后续可补」注记 → 逐项两个按钮 */}
-        {panel.kind === "cards" && followUpGroups.length > 0 && (
-          <div className="ai-kps">
-            <p className="ai-kps-title">知识点与后续可补</p>
-            {followUpGroups.map((g, gi) => (
-              <div key={gi} className="ai-kp">
-                <div className="ai-kp-title">{g.kpTitle}</div>
-                {g.items.map((item) => {
-                  const busy = (panel.followUpBusy ?? []).includes(item);
-                  const err = panel.followUpErrors?.[item];
-                  return (
-                    <div key={item} className="ai-kp-item">
-                      <span className="ai-kp-item-text">{item}</span>
-                      <button
-                        className="btn btn-outline btn-sm"
-                        disabled={busy || panel.running}
-                        onClick={() => onExploration(item, g.kpTitle)}
-                      >
-                        询问 AI 相关内容
-                      </button>
-                      <button
-                        className="btn btn-outline btn-sm"
-                        disabled={busy || panel.running}
-                        onClick={() => onFollowUpCards(item, g.kpTitle)}
-                      >
-                        直接制卡
-                      </button>
-                      {busy && <span className="mono ai-kp-busy">补充制卡中… {busySec(item)} 秒（推理模型约需 0.5-1 分钟）</span>}
-                      {err && <span className="lint lint-error">{err}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {isOcclusion && panel.image && !panel.running && (
-          <div className="occlusion-stage occlusion-preview">
-            <img src={panel.image.assetPath} alt="" className="occlusion-img" />
-            {/* v25：形状化预览（矩形/椭圆/多边形）——与复习端同口径渲染 */}
-            <OcclusionShapes
-              occlusion={{
-                rects: (panel.regions ?? []).map((r) => ({ x: r.x, y: r.y, w: r.w, h: r.h, ord: r.ord })),
-                shapes: (panel.regions ?? []).map((r) => r.shape ?? null)
-              }}
-              cardOrd={0}
-              variant="proposal"
-            />
-            {(panel.regions ?? []).map((r) => (
-              <span
-                key={r.ord}
-                className="occlusion-ord mono"
-                style={{ left: `${r.x}%`, top: `${r.y}%` }}
-              >
-                {r.ord + 1}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {(panel.kind === "cards" || isOcclusion) && (
-          <>
-            {panel.blockReasons && panel.blockReasons.length > 0 && (
-              <div className="ai-block-reasons">
-                <p>该{isOcclusion ? "图片" : "文本"}依赖未建立的理解：</p>
-                <ul>{panel.blockReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
-                {!isOcclusion && !panel.searched && (
-                  <div className="ai-actions">
-                    <button
-                      className="btn btn-outline btn-sm"
-                      disabled={panel.searching || panel.running}
-                      onClick={onSearchBackground}
-                    >
-                      {panel.searching ? "检索中…" : "搜索网络补充背景后重试"}
-                    </button>
-                  </div>
-                )}
-                {!isOcclusion && panel.searched && (
-                  <p className="form-hint">已注入联网检索到的事件背景；若仍提示缺背景，建议手动补充来源文本。</p>
-                )}
-              </div>
-            )}
-            {panel.drafts?.map((rawDraft, i) => {
-              if (panel.accepted?.has(i)) {
-                return (
-                  <div key={i} className="ai-draft card-fill ai-draft-accepted">
-                    <div className="ai-draft-accepted-badge">已加入 FSRS 队列</div>
-                    <div className="ai-draft-front">
-                      <div className="ai-draft-text">{String(rawDraft?.front ?? "")}</div>
-                    </div>
-                  </div>
-                );
-              }
-              // 深度防御：字段类型强制归一，杜绝渲染期异常
-              const d: CardDraft = {
-                ...(rawDraft as CardDraft),
-                front: String(rawDraft?.front ?? ""),
-                back: String(rawDraft?.back ?? ""),
-                cloze: rawDraft?.cloze ? String(rawDraft.cloze) : null,
-                contextPrefix: rawDraft?.contextPrefix ? String(rawDraft.contextPrefix) : undefined,
-                domain: sanitizeDomain((rawDraft as CardDraft)?.domain),
-                ruleNotes: toList((rawDraft as CardDraft)?.ruleNotes),
-                warnings: toList((rawDraft as CardDraft)?.warnings)
-              };
-              // v29 D26 逐张分流：面板可混排遮挡卡与看图问答卡——按 draft 自身判断
-              // 遮挡 draft = imageOcclusion 且带非空 rects；看图问答 draft = imageOcclusion 且 rects 空（挂图无遮挡）
-              const dIsOcc = d.cardType === "imageOcclusion" && !!d.occlusion && d.occlusion.rects.length > 0;
-              const issues = lintCard({
-                front: d.front,
-                back: d.back,
-                cardType: d.cardType,
-                occlusion: d.occlusion ? { assetPath: d.occlusion.assetPath, rects: d.occlusion.rects } : null,
-                cloze: d.cloze || null,
-                contextPrefix: d.contextPrefix,
-                sourceRef: d.sourceRef,
-                dateStamp: d.dateStamp
-              });
-              const isEditing = editing === i;
-              const editText = editValues[i] ?? {};
-              const shownFront = editText.front !== undefined ? editText.front : (d.cardType === "cloze" ? d.cloze || d.front : d.front);
-              const shownBack = editText.back !== undefined ? editText.back : d.back;
-              const occlLabel = d.occlusion?.label ? d.occlusion.label : "";
-              return (
-                <div key={i} className="ai-draft">
-                  {isEditing ? (
-                    <>
-                      <textarea
-                        className="ta-short mono"
-                        value={shownFront}
-                        onChange={(e) =>
-                          setEditValues((v) => ({
-                            ...v,
-                            [i]: { ...v[i], front: e.target.value }
-                          }))
-                        }
-                      />
-                      <textarea
-                        className="ta-short mono"
-                        value={shownBack}
-                        onChange={(e) =>
-                          setEditValues((v) => ({
-                            ...v,
-                            [i]: { ...v[i], back: e.target.value }
-                          }))
-                        }
-                      />
-                      <div className="ai-actions">
-                        <button
-                          className="btn btn-primary btn-sm"
-                          onClick={() => {
-                            // 把编辑写回父组件 state（drafts 数组本体）
-                            onEdit(i, {
-                              ...(d.cardType === "cloze" ? { cloze: shownFront } : { front: shownFront }),
-                              back: shownBack,
-                              // 编辑后 front/cloze 变了，同步 noteText 的来源字段
-                              front: d.cardType === "cloze" ? d.front : shownFront
-                            });
-                            setEditValues((v) => {
-                              const { [i]: _removed, ...rest } = v;
-                              return rest;
-                            });
-                            setEditing(null);
-                          }}
-                        >
-                          完成
-                        </button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="ai-draft-front">
-                        <span className="ai-draft-type mono">{d.cardType}</span>
-                        {/* v30（D27）：分答多空卡徽标——接受时自动拆成每空一张 */}
-                        {d.cardType === "cloze" && d.clozeMode === "per-blank" && (
-                          <span className="ai-draft-supplement mono">
-                            分答·拆{Math.max(2, parseCloze(d.cloze || d.front || "").ords.length)}张
-                          </span>
-                        )}
-                        {panel.supplemental?.has(i) && <span className="ai-draft-supplement mono">补充</span>}
-                        {d.contextPrefix && <span className="ai-draft-prefix mono">{d.contextPrefix}</span>}
-                        <div className="ai-draft-text">
-                          {d.cardType === "cloze"
-                            ? (d.cloze || "").replace(/\{\{c\d+::(.*?)(?:::(.*?))?\}\}/g, "〔$1〕")
-                            : d.front}
-                        </div>
-                      </div>
-                      <div className="ai-draft-back">{d.back}</div>
-                      {dIsOcc && occlLabel && (
-                        <div className="ai-draft-notes mono">区域 {(d.ord ?? d.occlusion?.ord ?? 0) + 1} · {occlLabel}</div>
-                      )}
-                      {toList(d.ruleNotes).length > 0 && (
-                        <div className="ai-draft-notes mono">{toList(d.ruleNotes).join(" · ")}</div>
-                      )}
-                      {toList(d.warnings).length > 0 && (
-                        <div className="ai-draft-warnings"><IconAlert size={14} /> {toList(d.warnings).join("；")}</div>
-                      )}
-                      {/* v46（M14-UM2，§6.7.3）：记忆接地轻标记——成功「情境来自记忆」（点开看引用行），
-                          失败「情境来源存疑」（默认不勾选：接受按钮需二次点击确认，不阻断整批） */}
-                      {d.memoryRef && (
-                        <div className="ai-draft-issues">
-                          <span
-                            className={`lint ${d.memoryRefValid ? "lint-info" : "lint-warn"}`}
-                            title={`引用记忆行：${d.memoryRef}${d.memoryRefValid ? "" : "\n（该行未能在本次注入的记忆块中找到——可能记忆已被整理更新）"}`}
-                          >
-                            {d.memoryRefValid ? "情境来自记忆" : "情境来源存疑"}
-                          </span>
-                        </div>
-                      )}
-                      {issues.length > 0 && (
-                        <div className="ai-draft-issues">
-                          {issues.map((it, j) => (
-                            <span key={j} className={`lint lint-${it.severity}`}>
-                              {it.ruleId} {it.message}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      <div className="ai-actions">
-                        {dIsOcc ? (
-                          <button className="btn btn-primary btn-sm" onClick={() => onAcceptOcclusion(d, i)}>接受</button>
-                        ) : d.memoryRef && d.memoryRefValid === false && !memoryWarnArmed.has(i) ? (
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            title="情境来源存疑：该记忆引用未能校验。再点一次确认接受（可自行决定保留），点「编辑」可删掉情境。"
-                            onClick={() => setMemoryWarnArmed((s) => new Set([...s, i]))}
-                          >
-                            情境存疑·仍接受？
-                          </button>
-                        ) : (
-                          <button className="btn btn-primary btn-sm" onClick={() => onAccept(d, i)}>接受</button>
-                        )}
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(i)}>编辑</button>
-                        {d.cardType === "qa" && (
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            title="拆为两张互为翻转的独立问答卡（各自有独立 FSRS 调度状态）"
-                            onClick={() => onSplitReverse(i)}
-                          >
-                            转翻转卡
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-            {(panel.kind === "cards" || isOcclusion) && !panel.running && panel.drafts && panel.drafts.length > 0 && (
-              <div className="ai-actions">
-                <button className="btn btn-outline btn-sm" onClick={onRejectAll}>整批拒绝</button>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* v16：询问 AI 的解释区——追加在面板最下方，解释末尾带「直接制卡」 */}
-        {(panel.explorations ?? []).length > 0 && (
-          <div className="ai-explorations">
-            {(panel.explorations ?? []).map((e) => (
-              <div key={e.id} className="ai-exploration">
-                <div className="ai-exploration-q mono">问（{e.item}）：{e.question}</div>
-                {e.running && (
-                  <div className="ai-streaming mono">
-                    {e.thinking
-                      ? `思考中… 已思考 ${e.thinking} 字 · 已等待 ${explSec(e)} 秒`
-                      : `等待模型响应… 已等待 ${explSec(e)} 秒（推理模型约需 0.5-1 分钟）`}
-                  </div>
-                )}
-                {e.error && <div className="ai-error">{e.error}</div>}
-                {e.answer && (
-                  <div className="ai-answer">
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                      {e.answer}
-                    </ReactMarkdown>
-                  </div>
-                )}
-                {!e.running && e.answer && (
-                  <div className="ai-actions">
-                    <button
-                      className="btn btn-primary btn-sm"
-                      disabled={(panel.followUpBusy ?? []).includes(e.item) || panel.running}
-                      onClick={() => onFollowUpCards(e.item, e.kpTitle, e.answer)}
-                    >
-                      直接制卡
-                    </button>
-                    {(panel.followUpBusy ?? []).includes(e.item) && (
-                      <span className="mono ai-kp-busy">补充制卡中… {busySec(e.item)} 秒</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

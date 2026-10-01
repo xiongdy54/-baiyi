@@ -1,0 +1,475 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>复习页与摘录页对齐样张（第 2 稿）</title>
+<style>
+:root{
+  --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+  --text-primary:#0a0a0a; --text-secondary:#525252; --text-helper:#737373;
+  --border-subtle:#e5e5e3; --border-strong:#a3a3a0;
+  --accent:#002fa7; --accent-soft:color-mix(in srgb, var(--accent) 8%, transparent);
+  --annot-green:#15803d; --annot-blue:#1d4ed8; --annot-amber:#a16207; --annot-red:#b91c1c;
+  --fs-title-l:26px; --fs-title-s:18px; --fs-body:14px; --fs-secondary:13px; --fs-meta:12px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px; --sp-12:48px; --sp-16:64px;
+  --font-sans:"Inter","Helvetica Neue",Arial,"Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  --font-mono:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  --z-sticky:10;
+  --content-max:820px; --content-gutter:48px; --runtime-h:600px; --topbar-h:44px; --bottombar-h:56px;
+  --dock-w:280px; --dock-rail-w:36px;
+}
+body.theme-dark{
+  --paper:#101010; --grey-1:#1c1c1a; --grey-2:#33332f; --grey-3:#8a8a86; --ink:#f5f5f2;
+  --text-primary:#f5f5f2; --text-secondary:#b5b5b0; --text-helper:#8a8a86;
+  --border-subtle:#2a2a27; --border-strong:#4a4a46; --accent:#5b7fe8;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--paper);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--fs-body);line-height:1.6;}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;}
+.doc{max-width:1360px;margin:0 auto;padding:var(--sp-8) var(--sp-6) var(--sp-16);}
+.doc-h1{font-size:var(--fs-title-l);font-weight:300;letter-spacing:-0.02em;margin:0 0 var(--sp-2);}
+.doc-lead{color:var(--text-secondary);max-width:1020px;margin:0 0 var(--sp-4);font-size:var(--fs-secondary);}
+.doc-h2{font-size:var(--fs-title-s);font-weight:500;margin:var(--sp-12) 0 var(--sp-3);padding-top:var(--sp-3);border-top:1px solid var(--border-subtle);}
+.toolbar{position:sticky;top:0;z-index:var(--z-sticky);display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;padding:var(--sp-2) 0;background:var(--paper);border-bottom:1px solid var(--border-subtle);margin-bottom:var(--sp-6);}
+.tbtn{height:32px;padding:0 var(--sp-3);background:var(--paper);border:1px solid var(--border-subtle);color:var(--text-primary);font-size:var(--fs-secondary);cursor:pointer;}
+.tbtn.on{border-color:var(--accent);color:var(--accent);}
+.stage{margin:0 0 var(--sp-8);}
+.stage-head{display:flex;align-items:baseline;gap:var(--sp-2);margin:0 0 var(--sp-2);}
+.stage-tag{font-size:var(--fs-meta);font-weight:500;color:var(--text-helper);border:1px solid var(--border-subtle);padding:0 4px;}
+.stage-note{font-size:var(--fs-meta);color:var(--text-helper);}
+.app{width:1100px;height:var(--runtime-h);border:1px solid var(--border-subtle);background:var(--paper);overflow:hidden;position:relative;display:flex;flex-direction:column;}
+.app-top{height:var(--topbar-h);flex:none;display:flex;align-items:center;gap:var(--sp-6);padding:0 var(--sp-4);border-bottom:1px solid var(--border-subtle);font-size:var(--fs-secondary);}
+.app-top .nav{display:flex;gap:var(--sp-4);color:var(--text-secondary);}
+.app-top .nav .on{color:var(--text-primary);border-bottom:2px solid var(--accent);}
+.app-top .title{margin-left:auto;color:var(--text-helper);font-size:var(--fs-meta);}
+.app-body{flex:1;min-height:0;display:flex;}
+.u-btn{height:40px;display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);
+  background:var(--paper);border:1px solid var(--border-strong);color:var(--text-primary);
+  font-size:var(--fs-secondary);cursor:pointer;padding:0 var(--sp-4);white-space:nowrap;}
+.u-btn:hover{border-color:var(--text-primary);}
+.u-btn.primary{border-color:var(--accent);color:var(--accent);}
+.u-btn.ghost{border-color:var(--border-subtle);color:var(--text-secondary);}
+.kbd{font-size:var(--fs-meta);color:var(--text-helper);}
+.caret{font-size:10px;line-height:1;color:var(--text-helper);}
+.u-seg{display:flex;height:26px;border:1px solid var(--border-subtle);}
+.u-seg button{flex:1;background:var(--paper);border:none;border-right:1px solid var(--border-subtle);font-size:var(--fs-meta);color:var(--text-helper);cursor:pointer;}
+.u-seg button:last-child{border-right:none;}
+.u-seg button.on{color:var(--accent);box-shadow:inset 0 -2px 0 var(--accent);}
+.bottombar{position:absolute;left:0;right:0;bottom:0;height:var(--bottombar-h);
+  display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-4);
+  background:var(--paper);border-top:1px solid var(--border-subtle);z-index:5;}
+.bottombar .grow{flex:1;min-width:0;display:flex;gap:var(--sp-2);}
+.grade-grid{flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-2);min-width:0;}
+.grade{height:40px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  background:var(--paper);border:1px solid var(--border-subtle);border-left-width:3px;cursor:pointer;font-size:var(--fs-secondary);color:var(--text-primary);}
+.grade .due{font-size:var(--fs-meta);color:var(--text-helper);}
+.grade.again{border-left-color:var(--annot-red);}
+.grade.hard{border-left-color:var(--annot-amber);}
+.grade.good{border-left-color:var(--annot-green);}
+.grade.easy{border-left-color:var(--accent);}
+.more-wrap,.postpone{position:relative;}
+.more-pop,.postpone-pop{position:absolute;right:0;bottom:calc(100% + var(--sp-2));min-width:210px;background:var(--paper);
+  border:1px solid var(--border-strong);padding:var(--sp-1) 0;display:none;z-index:6;}
+.postpone-pop{left:0;right:auto;min-width:150px;}
+.more-pop.open,.postpone-pop.open{display:block;}
+.more-pop button,.postpone-pop button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:var(--sp-4);
+  height:32px;padding:0 var(--sp-3);background:none;border:none;font-size:var(--fs-secondary);color:var(--text-primary);cursor:pointer;text-align:left;}
+.more-pop button:hover,.postpone-pop button:hover{background:var(--grey-1);}
+.more-pop .k{font-size:var(--fs-meta);color:var(--text-helper);border:1px solid var(--border-subtle);padding:0 4px;}
+.more-pop .danger{color:var(--annot-red);}
+.review-main{flex:1;min-width:0;position:relative;}
+.review-scroll{position:absolute;inset:0;overflow:auto;padding:var(--sp-6) 0 calc(var(--bottombar-h) + var(--sp-4));}
+.review-inner{width:min(var(--content-max), calc(100% - 2 * var(--content-gutter)));margin:0 auto;}
+.counters{display:flex;gap:var(--sp-4);align-items:baseline;font-size:var(--fs-meta);color:var(--text-helper);}
+.counters b{font-weight:500;color:var(--text-primary);}
+.card-face{margin-top:var(--sp-6);}
+.card-face .q{font-size:var(--fs-title-l);line-height:1.5;font-weight:400;letter-spacing:-0.01em;margin:0;}
+.card-face .hintline{margin-top:var(--sp-6);font-size:var(--fs-title-s);line-height:1.5;}
+.card-face .a{border-top:1px solid var(--grey-2);margin-top:var(--sp-6);padding-top:var(--sp-6);font-size:var(--fs-title-l);line-height:1.5;}
+.card-face .a .phon{color:var(--text-helper);font-size:var(--fs-title-s);}
+.card-meta{margin-top:var(--sp-6);font-size:var(--fs-meta);color:var(--text-helper);display:flex;gap:var(--sp-3);}
+.extract-main{flex:1;min-width:0;display:flex;}
+.extract-left{flex:1;min-width:0;position:relative;display:flex;flex-direction:column;}
+.extract-scroll{flex:1;min-height:0;overflow:auto;padding:var(--sp-4) 0 calc(var(--bottombar-h) + var(--sp-4));}
+.headline{display:flex;align-items:baseline;gap:var(--sp-3);font-size:var(--fs-meta);color:var(--text-helper);}
+.headline .crumb{color:var(--text-secondary);}
+.headline .wait{margin-left:auto;white-space:nowrap;}
+.extract-body{margin-top:var(--sp-4);font-size:var(--fs-title-l);line-height:1.5;letter-spacing:-0.01em;}
+.extract-body mark{background:var(--accent-soft);}
+.dock{width:var(--dock-w);flex:none;border-left:1px solid var(--border-subtle);display:flex;flex-direction:column;background:var(--paper);}
+.dock.collapsed{width:var(--dock-rail-w);}
+.dock.collapsed .dock-tabs,.dock.collapsed .dock-body{display:none;}
+.dock.collapsed .dock-head{padding:var(--sp-2) 0;border-bottom:none;}
+.dock.collapsed .dock-head .row1,.dock.collapsed .dock-segs{display:none;}
+.dock.collapsed .dock-rail{display:flex;}
+.dock-rail{display:none;flex-direction:column;align-items:center;gap:var(--sp-2);padding-top:var(--sp-2);font-size:var(--fs-meta);color:var(--text-helper);cursor:pointer;}
+.dock-tabs{display:flex;border-bottom:1px solid var(--border-subtle);}
+.dock-tabs button{flex:1;height:32px;background:none;border:none;border-bottom:2px solid transparent;font-size:var(--fs-secondary);color:var(--text-secondary);opacity:.7;cursor:pointer;}
+.dock-tabs button.on{color:var(--accent);border-bottom-color:var(--accent);opacity:1;font-weight:500;}
+.dock-head{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border-subtle);}
+.dock-head .row1{display:flex;align-items:center;justify-content:space-between;height:24px;margin-bottom:var(--sp-2);}
+.dock-head .row1 .cnt{font-size:var(--fs-meta);color:var(--text-helper);}
+.dock-head .row1 .cnt b{font-weight:500;color:var(--text-primary);}
+.icon-btn{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;
+  background:none;border:1px solid var(--border-subtle);color:var(--text-helper);cursor:pointer;font-size:10px;line-height:1;}
+.icon-btn:hover{border-color:var(--text-primary);color:var(--text-primary);}
+.dock-segs{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-2);}
+.dock-body{flex:1;min-height:0;overflow:auto;}
+.zitem{padding:var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-2);border-bottom:1px solid var(--border-subtle);border-left:2px solid var(--annot-green);}
+.zitem.blue{border-left-color:var(--annot-blue);}
+.zq{font-size:var(--fs-secondary);color:var(--text-secondary);margin:0 0 var(--sp-1);}
+.zmeta{font-size:var(--fs-meta);color:var(--text-helper);display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap;}
+.tag{border:1px solid var(--border-subtle);padding:0 4px;white-space:nowrap;}
+.prio{display:inline-flex;align-items:center;gap:var(--sp-2);height:40px;padding:0 var(--sp-3);border:1px solid var(--border-subtle);}
+.prio .lbl{font-size:var(--fs-meta);color:var(--text-helper);}
+.prio-track{position:relative;width:140px;height:20px;border:1px solid var(--border-strong);background:var(--grey-2);overflow:hidden;cursor:pointer;}
+.prio-fill{position:absolute;left:0;top:0;bottom:0;background:var(--ink);}
+.prio-track input[type=range]{position:absolute;left:0;top:0;width:100%;height:100%;margin:0;appearance:none;-webkit-appearance:none;background:transparent;}
+.prio-track input[type=range]::-webkit-slider-runnable-track{height:100%;background:transparent;border:none;}
+.prio-track input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:6px;height:18px;background:var(--paper);border:1px solid var(--ink);margin-top:1px;}
+.prio-track input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;}
+.prio input[type=number]{width:52px;height:26px;border:1px solid var(--border-subtle);background:var(--paper);color:var(--text-primary);
+  font-family:var(--font-mono);font-size:var(--fs-secondary);text-align:right;padding:0 4px;}
+table.matrix{width:100%;border-collapse:collapse;font-size:var(--fs-secondary);}
+table.matrix th,table.matrix td{border:1px solid var(--border-subtle);padding:var(--sp-2) var(--sp-3);text-align:left;}
+table.matrix th{font-weight:500;color:var(--text-helper);font-size:var(--fs-meta);}
+.judge{margin-top:var(--sp-4);font-size:var(--fs-secondary);}
+.judge div{padding:4px 0;border-bottom:1px solid var(--border-subtle);}
+.judge .ok{color:var(--annot-green);}
+.judge .bad{color:var(--annot-red);}
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1 class="doc-h1">复习页与摘录页对齐样张 · 第 2 稿</h1>
+  <p class="doc-lead">
+    按 5 条反馈改：① 底栏所有按钮<strong>同高同基线</strong>（含「跳转原文」「更多」）；② 「更多」向上弹 ⇒ 三角朝上；
+    ③ 右栏<strong>可收起/展开</strong>，展开时正文列在剩余宽度里居中且两侧保底 48px（不贴边、不被裁、不盖字）；
+    ④ 右栏头部「注解 N／全部·摘录·高亮／位置·时间」改成同一网格对齐；⑤ 优先级重做为<strong>轨道内嵌滑块 + 实心填充</strong>（不越框）。
+  </p>
+  <div class="toolbar">
+    <button class="tbtn on" data-s="front">复习 · 正面</button>
+    <button class="tbtn" data-s="back">复习 · 背面</button>
+    <button class="tbtn" data-s="extract">摘录页（栏展开）</button>
+    <button class="tbtn" data-s="extract-collapsed">摘录页（栏收起）</button>
+    <span style="flex:1"></span>
+    <button class="tbtn" id="theme">切换深色</button>
+    <button class="tbtn" id="rerun">重新实测</button>
+  </div>
+
+  <div class="stage" id="stage-review">
+    <div class="stage-head"><span class="stage-tag">复习页</span><span class="stage-note">正面只出「显示答案」；背面四档评分；其余收进右下角「更多」（向上弹，三角朝上）</span></div>
+    <div class="app" id="app-review">
+      <div class="app-top">
+        <div class="nav"><span>书架</span><span>摘录</span><span class="on">复习</span><span>卡片</span><span>日记</span><span>数据</span></div>
+        <span class="title">复习</span>
+      </div>
+      <div class="app-body">
+        <div class="review-main">
+          <div class="review-scroll">
+            <div class="review-inner">
+              <div class="counters">
+                <span>未学习 <b class="mono" data-n="new">12</b></span>
+                <span>学习中 <b class="mono" data-n="learn">5</b></span>
+                <span>待复习 <b class="mono" data-n="due">30</b></span>
+              </div>
+              <div class="card-face" id="face">
+                <p class="q">ects within a work of art. The decisions an artist makes in regard to color may appear random, but they are often quite […] and are almost as much a science as an art.</p>
+                <div class="hintline" id="hint">（提示：a. 有目的的；[法] 有意图的，有目的的，故意的）</div>
+                <div class="a" id="answer" style="display:none">
+                  <p class="phon mono">purposeful /ˈpɜːpəsfʊl/</p>
+                  <p style="margin:0">a. 有目的的；[法] 有意图的，有目的的，故意的</p>
+                </div>
+              </div>
+              <div class="card-meta"><span>来源:Art 101</span><span>· 2026-09-30</span></div>
+            </div>
+          </div>
+          <div class="bottombar" id="review-bar">
+            <div class="grow" id="review-front-actions">
+              <button class="u-btn primary" id="reveal" style="flex:1" title="显示答案（快捷键：空格，可在设置里改）">显示答案 <span class="kbd mono">空格</span></button>
+            </div>
+            <div class="grade-grid" id="review-back-actions" style="display:none">
+              <button class="grade again">Again<span class="due mono">1 分钟</span></button>
+              <button class="grade hard">Hard<span class="due mono">6 分钟</span></button>
+              <button class="grade good">Good<span class="due mono">10 分钟</span></button>
+              <button class="grade easy">Easy<span class="due mono">6 天</span></button>
+            </div>
+            <button class="u-btn ghost" title="跳转原文（快捷键：可在设置里改）">跳转原文</button>
+            <div class="more-wrap" data-menu>
+              <button class="u-btn ghost" data-toggle>更多 <span class="caret">▲</span></button>
+              <div class="more-pop" data-pop>
+                <button>撤销评分 <span class="k mono">Z</span></button>
+                <button>查看原图</button>
+                <button>对比卡</button>
+                <button>标记并暂停 <span class="k mono">Q</span></button>
+                <button>跳过 <span class="k mono">W</span></button>
+                <button class="danger">删除 <span class="k mono">D</span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage" id="stage-extract" style="display:none">
+    <div class="stage-head"><span class="stage-tag">摘录页</span><span class="stage-note">顶栏一行并与正文同左缘；右栏可收起（收起后正文列变宽）；底栏同复习页规格</span></div>
+    <div class="app" id="app-extract">
+      <div class="app-top">
+        <div class="nav"><span>书架</span><span class="on">摘录</span><span>复习</span><span>卡片</span><span>日记</span><span>数据</span></div>
+        <span class="title">摘录</span>
+      </div>
+      <div class="app-body">
+        <div class="extract-main">
+          <div class="extract-left">
+            <div class="extract-scroll">
+              <div class="review-inner">
+                <div class="headline" id="extract-headline">
+                  <span class="crumb">原文 › 以“美国小伙一颗子弹干掉一人…”</span>
+                  <span class="wait">5 条待处理 · 现已到期</span>
+                </div>
+                <div class="extract-body" id="extract-body">
+                  以“美国小伙一颗子弹干掉一人 → 中东小伙一包炸药干掉百人 → 中国小伙提高一分干掉万人 → 一张纸巾干掉十亿人”的魔改梗开场<br /><br />
+                  抛出核心观点：<mark>当今社会最强意识形态 不是左派/右派，而是优绩主义</mark>
+                </div>
+              </div>
+            </div>
+            <div class="bottombar" id="extract-bar">
+              <div class="grow">
+                <button class="u-btn primary" style="flex:1" title="下一句（快捷键：空格，可在设置里改）">下一句 <span class="kbd mono">空格</span></button>
+                <div class="postpone" data-menu>
+                  <button class="u-btn ghost" data-toggle>推迟 <span class="caret">▲</span></button>
+                  <div class="postpone-pop" data-pop>
+                    <button>推迟 1 天</button><button>推迟 3 天</button><button>推迟 7 天</button><button>推迟 30 天</button>
+                  </div>
+                </div>
+                <label class="prio" title="优先级：拖动滑块或直接输入数字">
+                  <span class="lbl">优先级</span>
+                  <span class="prio-track" id="prio-track">
+                    <span class="prio-fill" id="prio-fill"></span>
+                    <input type="range" min="0" max="100" step="1" value="50" id="prio-range" aria-label="优先级" />
+                  </span>
+                  <input type="number" min="0" max="100" step="1" value="50" id="prio-num" aria-label="优先级数值" />
+                </label>
+                <button class="u-btn ghost">毕业</button>
+              </div>
+              <div class="more-wrap" data-menu>
+                <button class="u-btn ghost" data-toggle>更多 <span class="caret">▲</span></button>
+                <div class="more-pop" data-pop>
+                  <button>撤销 <span class="k mono">Z</span></button>
+                  <button class="danger">删除摘录</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <aside class="dock" id="dock">
+            <div class="dock-head">
+              <div class="row1">
+                <span class="cnt">注解 <b class="mono">2</b></span>
+                <button class="icon-btn" id="dock-toggle" title="收起批注栏" aria-expanded="true">»</button>
+              </div>
+              <div class="dock-segs">
+                <span class="u-seg" id="seg-filter"><button class="on">全部</button><button>摘录</button><button>高亮</button></span>
+                <span class="u-seg" id="seg-sort"><button class="on">位置</button><button>时间</button></span>
+              </div>
+            </div>
+            <div class="dock-rail" id="dock-rail"><button class="icon-btn" title="展开批注栏">«</button><span>注解</span></div>
+            <div class="dock-tabs">
+              <button>目录</button><button class="on">摘录</button><button>图谱</button>
+            </div>
+            <div class="dock-body">
+              <div class="zitem">
+                <p class="zq">“美国小伙一颗子弹干掉一人 → 中东小伙一包炸药干掉百人 → 中国小伙提高一…</p>
+                <p class="zmeta"><span class="mono">09-27 11:53</span><span class="tag">摘录</span><span>段锚</span></p>
+              </div>
+              <div class="zitem blue">
+                <p class="zq">当今社会最强意识形态 不是左派/右派，而是优绩主义</p>
+                <p class="zmeta"><span class="mono">09-27 11:54</span><span class="tag">摘录</span><span>段锚</span></p>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="doc-h2">版式矩阵（运行期实测，非写死）</h2>
+  <table class="matrix"><thead><tr><th>量</th><th>复习页</th><th>摘录页</th><th>判据</th></tr></thead><tbody></tbody></table>
+
+  <h2 class="doc-h2">自测（读的就是上面各屏的 DOM）</h2>
+  <div class="judge" id="judge"></div>
+
+  <h2 class="doc-h2">要点</h2>
+  <p class="doc-lead">
+    ① 底栏一行同高（40px）：主行动/四档评分占宽，「跳转原文」「更多」等同高靠右；「更多」向上弹、三角朝上。<br />
+    ② 右栏可收起：收起后只剩 36px 窄轨（带展开键），正文列立刻变宽；展开时正文列 = min(820, 100% − 2×48) ⇒ 两侧永远 ≥48px。<br />
+    ③ 右栏头部：第 1 行「注解 N ─ 收起键」两端对齐；第 2 行两条段控放进同一个 1fr/1fr 网格（等宽等高、与面板内边距对齐）。<br />
+    ④ 优先级：外框内嵌轨道（hairline）+ 实心填充段 + 6px 扁滑块，滑块与填充都不越出框；右侧数字可输入，双向同步。<br />
+    ⑤ 快捷键提示只在 hover 的 title 上，文案随设置里的键位变。
+  </p>
+</div>
+
+<script>
+/* 自检样张也要能把「脚本自己挂了」显示出来，否则页面只是空白，看不出是测量失败还是代码报错 */
+window.addEventListener('error', function (e) {
+  var box = document.getElementById('judge');
+  if (!box) return;
+  var d = document.createElement('div');
+  d.className = 'bad';
+  d.textContent = '✗ 脚本异常：' + (e.message || String(e.error)) + ' @' + (e.lineno || '?');
+  box.appendChild(d);
+});
+let mode = (location.hash === '#back' ? 'back' : location.hash === '#extract' ? 'extract' : location.hash === '#collapsed' ? 'extract-collapsed' : 'front');
+const dock = document.getElementById('dock');
+function render(){
+  document.querySelectorAll('.tbtn[data-s]').forEach((b) => b.classList.toggle('on', b.dataset.s === mode));
+  const isExtract = mode.indexOf('extract') === 0;
+  document.getElementById('stage-review').style.display = isExtract ? 'none' : '';
+  document.getElementById('stage-extract').style.display = isExtract ? '' : 'none';
+  const back = mode === 'back';
+  document.getElementById('answer').style.display = back ? '' : 'none';
+  document.getElementById('hint').style.display = back ? 'none' : '';
+  document.getElementById('review-front-actions').style.display = back ? 'none' : '';
+  document.getElementById('review-back-actions').style.display = back ? 'grid' : 'none';
+  dock.classList.toggle('collapsed', mode === 'extract-collapsed');
+  document.getElementById('dock-toggle').setAttribute('aria-expanded', String(mode !== 'extract-collapsed'));
+  measure();
+}
+document.querySelectorAll('.tbtn[data-s]').forEach((b) => b.addEventListener('click', () => { mode = b.dataset.s; render(); }));
+document.getElementById('theme').addEventListener('click', () => document.body.classList.toggle('theme-dark'));
+document.getElementById('reveal').addEventListener('click', () => { mode = 'back'; render(); });
+document.getElementById('face').addEventListener('click', () => { /* 刻意留空：翻面只走按钮 */ });
+document.getElementById('dock-toggle').addEventListener('click', () => { mode = 'extract-collapsed'; render(); });
+document.getElementById('dock-rail').addEventListener('click', () => { mode = 'extract'; render(); });
+document.querySelectorAll('[data-menu]').forEach((w) => {
+  const btn = w.querySelector('[data-toggle]');
+  const pop = w.querySelector('[data-pop]');
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = pop.classList.contains('open');
+    document.querySelectorAll('[data-pop]').forEach((p) => p.classList.remove('open'));
+    if (!open) pop.classList.add('open');
+    measure();
+  });
+});
+document.addEventListener('click', () => { document.querySelectorAll('[data-pop]').forEach((p) => p.classList.remove('open')); });
+const range = document.getElementById('prio-range'), num = document.getElementById('prio-num'), fill = document.getElementById('prio-fill');
+function paint(){ fill.style.width = range.value + '%'; }
+range.addEventListener('input', () => { num.value = range.value; paint(); });
+num.addEventListener('input', () => { const v = Math.max(0, Math.min(100, Number(num.value) || 0)); range.value = String(v); paint(); });
+paint();
+
+const R = (el) => { const b = el.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom), w: Math.round(b.width), h: Math.round(b.height) }; };
+const judgeEl = document.getElementById('judge');
+const tbody = document.querySelector('table.matrix tbody');
+function row(name, rv, ev, crit) {
+  const tr = document.createElement('tr');
+  tr.innerHTML = '<td>' + name + '</td><td class="mono">' + rv + '</td><td class="mono">' + ev + '</td><td>' + crit + '</td>';
+  tbody.appendChild(tr);
+}
+function t(name, cond, detail) {
+  const d = document.createElement('div');
+  d.className = cond ? 'ok' : 'bad';
+  d.textContent = (cond ? '✓ ' : '✗ ') + name + (detail ? ' — ' + detail : '');
+  judgeEl.appendChild(d);
+}
+function withBothStages(fn) {
+  const staged = ['stage-review', 'stage-extract'].map((id) => {
+    const el = document.getElementById(id);
+    const prev = { display: el.style.display, pos: el.style.position, left: el.style.left, top: el.style.top };
+    el.style.display = ''; el.style.position = 'absolute'; el.style.left = '-20000px'; el.style.top = '0';
+    return { el, prev };
+  });
+  const out = fn();
+  for (const s of staged) { s.el.style.display = s.prev.display; s.el.style.position = s.prev.pos; s.el.style.left = s.prev.left; s.el.style.top = s.prev.top; }
+  return out;
+}
+function measure() { judgeEl.innerHTML = ''; tbody.innerHTML = ''; return withBothStages(measureInner); }
+function measureInner() {
+  const appR = document.getElementById('app-review'), appE = document.getElementById('app-extract');
+  const innerR = appR.querySelector('.review-inner'), innerE = appE.querySelector('.review-inner');
+  const leftE = appE.querySelector('.extract-left');
+  const barR = document.getElementById('review-bar'), barE = document.getElementById('extract-bar');
+  const headE = document.getElementById('extract-headline');
+  const frontRow = document.getElementById('review-front-actions'), backRow = document.getElementById('review-back-actions');
+  const reveal = document.getElementById('reveal');
+  const dockEl = document.getElementById('dock');
+  const segF = document.getElementById('seg-filter'), segS = document.getElementById('seg-sort');
+  const track = document.getElementById('prio-track'), fillEl = document.getElementById('prio-fill'), rangeEl = document.getElementById('prio-range');
+  const prioBox = appE.querySelector('.prio');
+  const headEl = appE.querySelector('.dock-head');
+  const toggleBtn = document.getElementById('dock-toggle');
+
+  // A) 正/背面各有一半按钮隐藏：量它们时临时显形，量完还原
+  const fPrev = frontRow.style.display, bPrev = backRow.style.display;
+  frontRow.style.display = ''; backRow.style.display = 'grid';
+  const revealH = R(reveal).h;
+  const gradeBtn = appR.querySelector('.grade'), gradeH = R(gradeBtn).h;
+  const barBtns = [].concat([...barR.querySelectorAll('button')], [...barE.querySelectorAll('button')])
+    .filter((b) => !b.closest('.more-pop') && !b.closest('.postpone-pop'));
+  const barHs = barBtns.map((b) => R(b).h), barTops = barBtns.map((b) => R(b).t), barBots = barBtns.map((b) => R(b).b);
+  frontRow.style.display = fPrev; backRow.style.display = bPrev;
+
+  // B) 右栏「展开态」「收起态」分别量：屏幕停在哪一态由 mode 决定，但判据要两种状态的数字
+  //    （否则同一张矩阵在四个分屏里读数不一致——样张第一版就栽在这）
+  const wasCollapsed = dockEl.classList.contains('collapsed');
+  const ariaBefore = toggleBtn ? toggleBtn.getAttribute('aria-expanded') : null;
+
+  dockEl.classList.remove('collapsed');
+  const headLeft = Math.round(R(headE).l - R(innerE).l);
+  const pad = parseFloat(getComputedStyle(headEl).paddingLeft) || 0;
+  const segFW = R(segF).w, segFH = R(segF).h, segFT = R(segF).t;
+  const segSW = R(segS).w, segSH = R(segS).h, segST = R(segS).t;
+  const segFLeft = R(segF).l, segSRight = R(segS).r;
+  const dockOpenW = R(dockEl).w;
+  const gutters = { left: R(innerE).l - R(leftE).l, right: R(leftE).r - R(innerE).r };
+  const colExpandedW = R(innerE).w;
+  // 展开态里把要用到的 rect 全部抓下来：一旦收起，这些元素是 display:none，再读就是 0
+  const dockL = R(dockEl).l, dockR = R(dockEl).r;
+  const cntL = R(appE.querySelector('.dock-head .cnt')).l;
+  const togR = R(toggleBtn).r;
+
+  dockEl.classList.add('collapsed');
+  const dockRailW = R(dockEl).w;
+  const colCollapsedW = R(innerE).w;
+  const gutterCollapsedLeft = R(innerE).l - R(leftE).l;
+
+  dockEl.classList.toggle('collapsed', wasCollapsed);
+
+  const ir = { top: R(innerR).t - R(appR.querySelector('.review-scroll')).t };
+  const ie = { top: R(innerE).t - R(appE.querySelector('.extract-scroll')).t };
+
+  row('内容上留白', ir.top + 'px', ie.top + 'px', '两页 ≤32px');
+  row('正文列宽（栏展开 / 收起）', R(innerR).w + 'px', colExpandedW + ' / ' + colCollapsedW + 'px', '≤820；展开＝820−2×48');
+  row('正文两侧留白', '—', gutters.left + ' / ' + gutters.right + 'px（收起后 ' + gutterCollapsedLeft + '）', '栏展开时仍 ≥48px');
+  row('底栏按钮高', Math.min.apply(null, barHs) + '–' + Math.max.apply(null, barHs) + 'px', '同', '底栏内一律 40px 同基线');
+  row('右栏宽（展开 / 收起）', '—', dockOpenW + ' / ' + dockRailW + 'px', '280 ↔ 36，收起键在场');
+  row('右栏段控', '—', segFW + '×' + segFH + ' / ' + segSW + '×' + segSH, '等宽等高同一行、边缘对齐');
+  row('优先级轨道', '—', '框 ' + R(prioBox).h + 'px / 轨 ' + R(track).w + '×' + R(track).h + 'px', '滑块与填充不越出轨道框');
+  row('摘录页 head 左缘', '—', headLeft + 'px', '与正文左缘一致（≤1px）');
+
+  t('底栏所有按钮同高（含跳转原文/更多）', Math.max.apply(null, barHs) - Math.min.apply(null, barHs) <= 1, Math.min.apply(null, barHs) + '–' + Math.max.apply(null, barHs) + 'px，共 ' + barBtns.length + ' 个');
+  t('底栏所有按钮同基线', Math.max.apply(null, barTops) - Math.min.apply(null, barTops) <= 1 && Math.max.apply(null, barBots) - Math.min.apply(null, barBots) <= 1, 'top/bottom 差 ≤1px');
+  t('底栏贴页面底', Math.abs(R(barR).b - R(appR).b) <= 1 && Math.abs(R(barE).b - R(appE).b) <= 1, '复习距底 ' + (R(appR).b - R(barR).b) + 'px');
+  t('主行动与评分同高', Math.abs(revealH - gradeH) <= 1, revealH + ' vs ' + gradeH);
+  t('「更多」三角朝上', [...document.querySelectorAll('.more-wrap .caret')].every((c) => c.textContent.trim() === '▲'), '▲');
+  t('栏展开时正文两侧留白 ≥48px（不贴边）', gutters.left >= 48 && gutters.right >= 48, gutters.left + ' / ' + gutters.right + 'px');
+  t('栏展开时正文不被裁（只是重排）', colExpandedW <= R(leftE).w - 2 * 48 + 1, '展开列 ' + colExpandedW + ' ≤ 可用 ' + R(leftE).w);
+  t('收回右栏后正文列变宽', dockRailW === 36 && colCollapsedW > colExpandedW + 50, '收起 ' + dockRailW + 'px ⇒ 列 ' + colCollapsedW + 'px（展开时 ' + colExpandedW + '）');
+  t('收起键在场且 aria-expanded 与当前态一致', ariaBefore === String(!wasCollapsed), 'aria=' + ariaBefore + '，当前收起=' + wasCollapsed);
+  t('栏头部第 1 行两端对齐', Math.abs(cntL - (dockL + pad)) <= 1 && Math.abs(togR - (dockR - pad)) <= 1, 'cnt.l=' + cntL + ' want ' + Math.round(dockL + pad) + '；tog.r=' + togR + ' want ' + Math.round(dockR - pad) + '；pad=' + pad);
+  t('两条段控等宽等高同基线', Math.abs(segFW - segSW) <= 1 && Math.abs(segFH - segSH) <= 1 && Math.abs(segFT - segST) <= 1, segFW + '×' + segFH + ' vs ' + segSW + '×' + segSH);
+  t('段控左右边缘与面板内边距对齐', Math.abs(segFLeft - (dockL + pad)) <= 1 && Math.abs(segSRight - (dockR - pad)) <= 1, 'segF.l=' + segFLeft + ' want ' + Math.round(dockL + pad) + '；segS.r=' + segSRight + ' want ' + Math.round(dockR - pad) + '；dock=' + dockL + '..' + dockR);
+  t('优先级滑块不越出轨道框', R(rangeEl).l >= R(track).l - 1 && R(rangeEl).r <= R(track).r + 1 && R(fillEl).w <= R(track).w + 1, '轨 ' + R(track).w + ' / 填 ' + R(fillEl).w);
+  t('优先级填充＝当前值（50%）', Math.abs(R(fillEl).w - R(track).w * 0.5) <= 2, R(fillEl).w + ' vs ' + (R(track).w / 2));
+  t('摘录页 head 与正文左缘一致', Math.abs(headLeft) <= 1, '偏差 ' + headLeft + 'px');
+  t('顶部计数三项齐', document.querySelectorAll('.counters b[data-n]').length === 3, '未学习/学习中/待复习');
+  t('摘录页无「摘录」「快捷推迟」按钮', !/快捷推迟/.test(appE.textContent), '已删');
+}
+
+render();
+document.getElementById('rerun').addEventListener('click', measure);
+window.addEventListener('resize', measure);
+</script>
+</body>
+</html>

@@ -13,8 +13,11 @@ import { EventBus, PDFLinkService, PDFViewer, ScrollMode, SpreadMode } from "pdf
 import "pdfjs-dist/web/pdf_viewer.css";
 import type {
   BookSource,
+  ContentPointerUpInfo,
   LinkInfo,
+  MarkPointerInfo,
   ReaderAppearance,
+  ReaderDocMark,
   ReaderImageRef,
   ReaderKernel,
   ReaderLocation,
@@ -22,8 +25,14 @@ import type {
   ReaderRect,
   ReaderSelection,
   ReaderTocItem,
-  RelocateInfo
+  RelocateInfo,
+  SourceAnchorGeometry
 } from "../kernel";
+import { createMultiHighlight } from "../multiHighlight";
+import { drawBadges } from "../badges";
+import { annotSoft, annotSolid } from "../annotColor";
+// 百分比换算的唯一实现面（v25 M5）：选区像素框 → 页内百分比走 pxShapeToPct，不另造一套换算
+import { pxShapeToPct } from "../../occlusion";
 import { PDF_ENGINE_VERSION } from "../foliate/version";
 
 // 兼容层（pdf.js v6 要求 ES2025，Electron 31/Chromium 126 缺失，清单见 tests/pdf.compat.js）。
@@ -106,10 +115,187 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
 
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
-  const pointerHandlers = new Set<(pos: { x: number; y: number }) => void>();
+  const pointerHandlers = new Set<(pos: ContentPointerUpInfo) => void>();
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   let appearance: ReaderAppearance | null = null;
   let darkFilterOn = false;
+  // v48.23（D61 §6.8-11）：多段选择高亮——PDF 的选区在宿主文档里，::highlight(multi-select)
+  // 规则直接来自 src/theme.css 的 --hl-multi Token（无需注入），故 styleFor 不传。
+  const multiHighlight = createMultiHighlight({
+    currentDoc() {
+      const sel = window.getSelection();
+      return sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim() ? document : null;
+    }
+  });
+
+  // ---------- v48.24 批3（§4 文中留痕）：PDF 的只读标记层 ----------
+  // 为什么不是塞进 `.page` 里：深色模式的反色滤镜挂在**整个 viewerEl** 上，塞进去的标记会被
+  // invert + hue-rotate 连色相一起转掉（IKB 蓝会被转成另一个色相＝凭空第二个焦点色）。
+  // 为什么挂在 host 而不是 container（滚动容器）：绝对定位在滚动容器里的层会**跟着内容一起滚**
+  // （inset:0 的参考系是滚动内容原点，实测层顶边比容器视口高一个 scrollTop）——挂 host 上
+  // 才能用「页矩形 − 容器视口矩形」直接换算。
+  // 代价：位置要跟着滚动/缩放自己重算（syncMarks）；命中判定一律走自算矩形，标记不吃 pointer-events
+  // （与 foliate 自带 Overlayer 同做法：pointer-events:none + 手工 hitTest），
+  // 于是标记底下的正文照样可以划选/制卡——「只读」不挡路。
+  const markLayer = document.createElement("div");
+  markLayer.className = "pdf-mark-layer";
+  host.appendChild(markLayer);
+  // 批 4 Task 16（规格 §5.2）：角标绘制层（与标记层同规：不吃 pointer-events 的纯绘制层）。
+  // 颜色一律内联 style.fill（见 src/lib/reader/badges.ts 的两条硬约束）。
+  const badgeLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  badgeLayer.setAttribute("class", "pdf-badge-layer");
+  badgeLayer.setAttribute("aria-hidden", "true");
+  host.appendChild(badgeLayer);
+  type MarkEntry = { mark: ReaderDocMark; ord: number; el: HTMLElement };
+  let markEntries: MarkEntry[] = [];
+  let docMarks: ReaderDocMark[] = [];
+  let hoveredMarkId: string | null = null;
+  let syncRaf = 0;
+
+  /**
+   * 页内容框（**百分比坐标的参考系**）：pdf.js 的 `.page` 带一圈透明边框（`--page-border`，
+   * 默认 9px，实测随缩放 8.8px），canvas/文本层都从**内容框**起算。用边框盒当参考系会
+   * 系统性偏移一个边框宽（实测 8.4px），采集与绘制必须同用这一个框。
+   */
+  const pageContentRect = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const bt = parseFloat(cs.borderTopWidth) || 0;
+    const bl = parseFloat(cs.borderLeftWidth) || 0;
+    const br = parseFloat(cs.borderRightWidth) || 0;
+    const bb = parseFloat(cs.borderBottomWidth) || 0;
+    return {
+      left: r.left + bl,
+      top: r.top + bt,
+      width: Math.max(0, r.width - bl - br),
+      height: Math.max(0, r.height - bt - bb)
+    };
+  };
+
+  const layoutMarks = () => {
+    if (markEntries.length === 0) return;
+    const cRect = container.getBoundingClientRect();
+    for (const e of markEntries) {
+      const pageIdx = Number(e.mark.pageIndex);
+      const rect = e.mark.rects?.[e.ord];
+      const pageEl = Number.isFinite(pageIdx)
+        ? (viewerEl.querySelector(`.page[data-page-number="${pageIdx + 1}"]`) as HTMLElement | null)
+        : null;
+      if (!pageEl || !rect) {
+        e.el.style.display = "none";
+        continue;
+      }
+      const p = pageContentRect(pageEl);
+      if (!(p.width > 0)) {
+        e.el.style.display = "none";
+        continue;
+      }
+      // 页内百分比 → 像素：不做取整，浮点 px 让实测矩形与换算值对齐（几何断言才有意义）
+      e.el.style.display = "block";
+      e.el.style.left = `${p.left - cRect.left + (rect.x / 100) * p.width}px`;
+      e.el.style.top = `${p.top - cRect.top + (rect.y / 100) * p.height}px`;
+      e.el.style.width = `${Math.max(1, (rect.w / 100) * p.width)}px`;
+      e.el.style.height = `${Math.max(1, (rect.h / 100) * p.height)}px`;
+    }
+    drawMarkBadges();
+  };
+
+  /**
+   * 角标（批 4 Task 16 / §5.2）：只画**有批注的段锚摘录**（纯高亮与整卡不画，§5.4）；
+   * 位置＝该标记首行矩形（PDF 标记本身就是一条 rect，即首行片段）的右上角；
+   * 颜色＝该条的批注色（--annot-* 实色）——**内联 style.fill**，不写 CSS 规则。
+   */
+  const drawMarkBadges = () => {
+    const hostRect = viewerEl.getBoundingClientRect();
+    badgeLayer.setAttribute("width", String(hostRect.width));
+    badgeLayer.setAttribute("height", String(hostRect.height));
+    const targets: { right: number; top: number; color: string }[] = [];
+    for (const e of markEntries) {
+      if (!e.mark.comment) continue;
+      if (e.mark.kind === "highlight") continue;
+      if (e.el.style.display === "none" || e.ord !== 0) continue;
+      const r = e.el.getBoundingClientRect();
+      if (!(r.width > 0) || !(r.height > 0)) continue;
+      targets.push({ right: r.right, top: r.top, color: annotSolid(e.mark.color, "var(--annot-yellow)") });
+    }
+    drawBadges(badgeLayer, viewerEl, targets, { left: hostRect.left, top: hostRect.top });
+  };
+
+  const syncMarks = () => {
+    if (syncRaf || markEntries.length === 0) return;
+    syncRaf = window.requestAnimationFrame(() => {
+      syncRaf = 0;
+      layoutMarks();
+    });
+  };
+
+  const rebuildMarks = () => {
+    markLayer.textContent = "";
+    markEntries = [];
+    for (const mark of docMarks) {
+      (mark.rects ?? []).forEach((_, i) => {
+        const el = document.createElement("div");
+        el.className = "reader-doc-mark card-marked";
+        el.dataset.markId = mark.id;
+        if (mark.comment) el.dataset.hasComment = "1";
+        // 批 4 修正（规格 §5.4「颜色对应」）：文中高亮＝**该条批注色**的透明档 + 同色左缘条，
+        // 与栏内竖线/色点/角标同色。此前一律 accent，导致「角标跟色、高亮不跟色」自相矛盾。
+        // 无 annotation_color（老数据/没选过色）回落 accent —— 保持批 3 既有观感与断言。
+        el.style.background = annotSoft(mark.color);
+        el.style.borderLeftColor = annotSolid(mark.color);
+        markLayer.appendChild(el);
+        markEntries.push({ mark, ord: i, el });
+      });
+    }
+    markLayer.dataset.count = String(markEntries.length);
+    hoveredMarkId = null;
+    layoutMarks();
+  };
+
+  const hitMark = (clientX: number, clientY: number): { id: string; rect: ReaderRect } | null => {
+    for (let i = markEntries.length - 1; i >= 0; i--) {
+      const el = markEntries[i].el;
+      if (el.style.display === "none") continue;
+      const r = el.getBoundingClientRect();
+      if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+        return { id: markEntries[i].mark.id, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
+      }
+    }
+    return null;
+  };
+
+  const markHoverHandlers = new Set<(info: MarkPointerInfo) => void>();
+  const markClickHandlers = new Set<(info: MarkPointerInfo) => void>();
+  const onMarkMove = (ev: MouseEvent) => {
+    if (markEntries.length === 0) return;
+    const hit = hitMark(ev.clientX, ev.clientY);
+    const id = hit?.id ?? null;
+    if (id === hoveredMarkId) return; // 只报「进入/离开」的翻转，移动本身不刷事件
+    hoveredMarkId = id;
+    markHoverHandlers.forEach((h) => h(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+  };
+  const onMarkLeave = () => {
+    if (hoveredMarkId === null) return;
+    hoveredMarkId = null;
+    markHoverHandlers.forEach((h) => h({ id: null, rect: null }));
+  };
+  const onMarkClick = (ev: MouseEvent) => {
+    if (markEntries.length === 0) return;
+    const hit = hitMark(ev.clientX, ev.clientY);
+    if (!hit) return;
+    // 捕获相位处理 + 阻止传播：点标记＝浮层，不连带触发底下的链接/图片聚焦
+    ev.preventDefault();
+    ev.stopPropagation();
+    markClickHandlers.forEach((h) => h({ id: hit.id, rect: hit.rect }));
+  };
+  container.addEventListener("mousemove", onMarkMove);
+  container.addEventListener("mouseleave", onMarkLeave);
+  container.addEventListener("click", onMarkClick, true);
+  container.addEventListener("scroll", syncMarks, { passive: true });
+  window.addEventListener("resize", syncMarks);
+  eventBus.on("pagerendered", syncMarks);
+  eventBus.on("scalechanging", syncMarks);
+  eventBus.on("scalechanged", syncMarks);
 
   const fractionOf = (page1Based: number) => (totalPages > 0 ? Math.min(1, Math.max(0, page1Based / totalPages)) : 0);
 
@@ -135,9 +321,11 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     if (typeof p === "number") emitRelocate(p);
   });
 
-  // 文本层 pointerup → 壳层取选区（与 foliate adapter 的中继同构）
+  // 文本层 pointerup → 壳层取选区（与 foliate adapter 的中继同构；修饰位一并转发，多段选择判定用）
   viewerEl.addEventListener("pointerup", (ev: PointerEvent) => {
-    pointerHandlers.forEach((h) => h({ x: ev.clientX, y: ev.clientY }));
+    pointerHandlers.forEach((h) =>
+      h({ x: ev.clientX, y: ev.clientY, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+    );
   });
   // 链接：annotation 层 <a> 点击拦截（外链走系统浏览器，内链按 dest 跳页）
   viewerEl.addEventListener("click", (ev: MouseEvent) => {
@@ -424,13 +612,120 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       window.getSelection()?.removeAllRanges();
     },
 
+    // v48.23（D61 §6.8-11）：多段选择高亮（CSS Custom Highlight API，不碰正文 DOM）
+    multiSelectHighlight(action) {
+      multiHighlight.update(action);
+    },
+
+    clearMultiSelectHighlight() {
+      multiHighlight.clear();
+      badgeLayer.textContent = "";
+    },
+
+    // v48.24 批3（§4）：文中留痕——文本层之上的矩形覆盖层（数据面由壳层给）
+    setDocumentMarks(marks) {
+      docMarks = Array.isArray(marks) ? marks : [];
+      rebuildMarks();
+      syncMarks();
+    },
+
+    // D67（§6.8-13）：侧栏注解按 id 导航——只认精确 id 与已存的页锚（pageIndex + rects）；
+    // 不承诺恢复页内垂直位置，也不回退文本搜索。
+    // 成功判据＝**到达所属页且该标记已按该页几何布局完成**（display 由 layoutMarks 置 block，
+    // 而 layoutMarks 只在页内容框有宽度时才置 block）。绘制矩形的最终落点还依赖图层 CSS
+    // （theme.css 的 .pdf-mark-layer/.reader-doc-mark），那是 L2（marks.gui.mjs）的几何断言面——
+    // 本方法只判「条目在该页上」，不把 CSS 缺失/滚动未稳误判成导航失败。
+    async goToMark(id: string) {
+      const mark = docMarks.find((candidate) => candidate.id === id);
+      const pageIndex = Number(mark?.pageIndex);
+      if (!mark || !Number.isFinite(pageIndex) || pageIndex < 0 || !(mark.rects?.length)) return false;
+      const ok = await kernel.goTo({ pageIndex });
+      if (!ok) return false;
+      // 等目标页渲染：pagerendered → syncMarks → layoutMarks 才会给该页的标记条目显形。
+      const deadline = Date.now() + 10000;
+      for (;;) {
+        const pageEl = viewerEl.querySelector(`.page[data-page-number="${pageIndex + 1}"]`) as HTMLElement | null;
+        const entry = markEntries.find((e) => e.mark.id === id);
+        if (pageEl && entry && entry.el.style.display === "block") return true;
+        if (Date.now() > deadline) return false;
+        await new Promise((resolve) => window.setTimeout(resolve, 60));
+      }
+    },
+
+    // v48.24 批3（§4，写入侧）：选区在**本页**里的百分比矩形——摘录 sourceAnchor.rects 的来源。
+    // 参考系＝页**内容框**（见 pageContentRect，绘制侧同一个框）；换算复用 occlusion 的 pxShapeToPct
+    // （唯一的像素↔百分比实现面，含钳制与一位小数归一）。
+    getSourceAnchor(): SourceAnchorGeometry | null {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return null;
+      const range = sel.getRangeAt(0);
+      if (range.collapsed) return null;
+      const startEl = (range.startContainer as Node).parentElement?.closest?.(".page") as HTMLElement | null;
+      const pageNum = Number(startEl?.dataset?.pageNumber);
+      if (!startEl || !Number.isFinite(pageNum)) return null;
+      const p = pageContentRect(startEl);
+      if (!(p.width > 0) || !(p.height > 0)) return null;
+      const rects: NonNullable<SourceAnchorGeometry["rects"]> = [];
+      for (const r of Array.from(range.getClientRects())) {
+        if (!(r.width > 0) || !(r.height > 0)) continue;
+        // 跨页选区只收落在起始页内的矩形：sourceAnchor 的 rects 与 pageIndex 同页才自洽
+        if (r.right < p.left + 1 || r.left > p.left + p.width - 1) continue;
+        const s = pxShapeToPct(
+          { kind: "rect", x: r.left - p.left, y: r.top - p.top, w: r.width, h: r.height },
+          p.width,
+          p.height,
+          rects.length
+        );
+        rects.push({ x: Number(s.x) || 0, y: Number(s.y) || 0, w: Number(s.w) || 0, h: Number(s.h) || 0, ord: rects.length });
+      }
+      if (rects.length === 0) return null;
+      return { pageIndex: pageNum - 1, rects };
+    },
+
     getCurrentLocation(): ReaderLocation | null {
       if (!doc) return null;
       return { pageIndex: viewer.currentPageNumber - 1 };
     },
 
+    // D2/§7（Task 7）：侧栏开合改变容器宽度 ⇒ 数值缩放下页内锚点会漂（pdf.js 只保比例，
+    // 不保你正看着的那一点）。快照/还原都用**页内容框**参考系（与 sourceAnchor.rects 同一框）。
+    captureViewPoint() {
+      const pageEl = viewerEl.querySelector(`.page[data-page-number="${viewer.currentPageNumber}"]`) as HTMLElement | null;
+      if (!pageEl) return null;
+      const p = pageContentRect(pageEl);
+      if (!(p.width > 0 && p.height > 0)) return null;
+      const c = container.getBoundingClientRect();
+      // 视口左上角落在页内容框里的点（可为负/超出页高——那是「页边留白/已滚过页首」的真实状态）
+      return { pageIndex: viewer.currentPageNumber - 1, x: c.left - p.left, y: c.top - p.top };
+    },
+
+    restoreViewPoint(point) {
+      const pageEl = viewerEl.querySelector(`.page[data-page-number="${point.pageIndex + 1}"]`) as HTMLElement | null;
+      if (!pageEl) return false;
+      const p = pageContentRect(pageEl);
+      if (!(p.width > 0 && p.height > 0)) return false;
+      const c = container.getBoundingClientRect();
+      // 把该点推回视口左上角：scroll 与视口位移 1:1（横向同样处理，容器可横向滚动时才有意义）
+      container.scrollTop += p.top + point.y - c.top;
+      container.scrollLeft += p.left + point.x - c.left;
+      return true;
+    },
+
     destroy() {
       destroyed = true;
+      // 高亮注册在宿主文档上，销毁内核时一并撤掉（否则残影跟着下一个内核）
+      multiHighlight.clear();
+      // 标记层与它的监听一并撤掉（滚动/缩放监听挂在 window/container 上，不撤会跟着下一个内核）
+      container.removeEventListener("mousemove", onMarkMove);
+      container.removeEventListener("mouseleave", onMarkLeave);
+      container.removeEventListener("click", onMarkClick, true);
+      container.removeEventListener("scroll", syncMarks);
+      window.removeEventListener("resize", syncMarks);
+      if (syncRaf) window.cancelAnimationFrame(syncRaf);
+      syncRaf = 0;
+      markLayer.remove();
+      markEntries = [];
+      docMarks = [];
       try {
         viewer.setDocument(null as never);
       } catch {
@@ -451,6 +746,8 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
         : event === "link" ? linkHandlers
         : event === "contentPointerUp" ? pointerHandlers
         : event === "imageClick" ? imageHandlers
+        : event === "markHover" ? markHoverHandlers
+        : event === "markClick" ? markClickHandlers
         : null;
       if (!set) throw new Error(`未知事件: ${event}`);
       set.add(handler as never);

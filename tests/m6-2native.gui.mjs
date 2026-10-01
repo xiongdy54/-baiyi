@@ -200,7 +200,7 @@ async function pdfRenderState(cdp) {
 
   console.log("== 3) 目录：大纲章节跳转 ==");
   const tocJump = await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll('.reader-engine-controls button')].find(x => x.textContent.includes('目录'));
+    const b = document.querySelector('[data-reader-sidebar-toggle]');
     if (!b) return "no toc btn";
     b.click(); return "opened";
   })()`);
