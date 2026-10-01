@@ -48,9 +48,14 @@ const ALL_TABLES = [
 ];
 
 runFlow(flow, async () => {
-  const guide = read("AI_DEVELOPMENT_GUIDE.md");
+  const guideRaw = read("AI_DEVELOPMENT_GUIDE.md");
+  // v48.28 / D68：冷历史（历代版本叙述 / §8.3 / §9.1 详情 / §9.3）已迁入 docs/HISTORY.md。
+  // 文档集的闸门（路径 / §引用 / D 编号 / 版本 / 表数）按「guide + HISTORY 并集」判——搬动只改物理位置，
+  // 历史里的 D 编号与版本号仍是正式登记；L5「不得自我复制」仍只看 guide（HISTORY 是逐字档案，重复是它的本分）。
+  const history = exists("docs/HISTORY.md") ? read("docs/HISTORY.md") : "";
+  const guide = guideRaw + "\n" + history;
   const g = guide.split(/\r?\n/);
-  flow.record("指南规模", `${g.length} 行 / ${(guide.length / 1024).toFixed(0)} KB`);
+  flow.record("文档集规模", `guide ${guideRaw.length / 1024 | 0} KB + HISTORY ${history.length / 1024 | 0} KB / ${g.length} 行`);
 
   // ---------- L1 路径可解析 ----------
   flow.section("L1 文档指向的文件必须存在（§7.3 是合同不是愿望清单）");
@@ -96,7 +101,7 @@ runFlow(flow, async () => {
 
   // ---------- L3 版本自洽 ----------
   flow.section("L3 版本号自洽（标题版本必须等于正文最高版本；D50 那类错误的机械化防线）");
-  const titleM = guide.match(/^#\s.*?v(\d+)\.(\d+)/m);
+  const titleM = guideRaw.match(/^#\s.*?v(\d+)\.(\d+)/m);
   const titleVer = titleM ? `${titleM[1]}.${titleM[2]}` : null;
   const allVers = [...guide.matchAll(/\bv(\d+)\.(\d+)\b/g)].map((m) => [Number(m[1]), Number(m[2])]);
   const maxVer = allVers.sort((a, b) => a[0] - b[0] || a[1] - b[1]).pop();
@@ -117,10 +122,11 @@ runFlow(flow, async () => {
   flow.check(`最新决策号 D${maxD} 已在 §8.1 登记`, new RegExp(`D${maxD}\\b`).test(sec81), true, sec81.includes(`D${maxD}`));
 
   // ---------- L5 自我复制 ----------
-  flow.section("L5 文档不得整段自我复制（重复即漂移温床）");
+  flow.section("L5 文档不得整段自我复制（重复即漂移温床；只看 guide，HISTORY 是逐字档案）");
+  const guideLines = guideRaw.split(/\r?\n/);
   const seen = new Map();
   const dup = [];
-  g.forEach((l, i) => {
+  guideLines.forEach((l, i) => {
     const t = l.trim();
     if (t.length < 120) return;
     const key = t.slice(0, 100);
@@ -134,7 +140,7 @@ runFlow(flow, async () => {
     "0 处",
     dup.slice(0, 8)
   );
-  const h2 = g.filter((l) => /^##\s/.test(l));
+  const h2 = guideLines.filter((l) => /^##\s/.test(l));
   const h2dup = [...new Set(h2.filter((v, i) => h2.indexOf(v) !== i))];
   flow.check("小节标题不重复（§7.6 整节出现两次）", h2dup.length === 0, "无重复", h2dup);
 

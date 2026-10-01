@@ -2,6 +2,8 @@
 
 增量阅读桌面应用的**当前态架构模型**。与 `docs/diagrams/`（业务与算法叙事图）并列，不取代它。
 
+> ⚠️ **时效警告（2026-10-01）**：本目录是 `780ea84`（指南 v48.14 时期）的快照，**已落后于当前指南 v48.28**——其中的计数（IPC 通道、库表数量、主进程模块清单）与技术栈描述不保证仍然成立。**现行事实以 `AI_DEVELOPMENT_GUIDE.md` §3 / §4 与代码为准**；本目录的四方差异登记见 `docs-vs-code-vs-model.md`。
+
 - 事实源：`system-model.structurizr.dsl`
 - 状态：current-state only。不含目标态、不含风险评级、不含修复建议
 - 生成：2026-09-21 @ `780ea84`，分支 `docs/architecture-model-v48.14`
