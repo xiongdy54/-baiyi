@@ -37234,6 +37234,218 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
     XfaLayerBuilder
   };
 
+  // src/lib/reader/multiHighlight.ts
+  var MULTI_HIGHLIGHT_NAME = "multi-select";
+  function createMultiHighlight(opts) {
+    const entries = [];
+    const registered = /* @__PURE__ */ new Set();
+    const styles = /* @__PURE__ */ new Map();
+    const winOf = (doc) => doc.defaultView;
+    const sameBoundaries = (a, b) => a.compareBoundaryPoints(Range.START_TO_START, b) === 0 && a.compareBoundaryPoints(Range.END_TO_END, b) === 0;
+    const ensureStyle = (doc) => {
+      const css = opts.styleFor?.(doc);
+      if (!css) return;
+      let el = styles.get(doc);
+      if (!el || !el.isConnected) {
+        el = doc.createElement("style");
+        el.setAttribute("data-reader-multi-highlight", "1");
+        (doc.head ?? doc.documentElement)?.appendChild(el);
+        styles.set(doc, el);
+      }
+      if (el.textContent !== css) el.textContent = css;
+    };
+    const drop = (doc) => {
+      winOf(doc)?.CSS?.highlights?.delete(MULTI_HIGHLIGHT_NAME);
+      registered.delete(doc);
+    };
+    const repaint = () => {
+      for (let i = entries.length - 1; i >= 0; i--) {
+        if (!entries[i].range.startContainer.isConnected) entries.splice(i, 1);
+      }
+      const byDoc = /* @__PURE__ */ new Map();
+      for (const e of entries) {
+        const list = byDoc.get(e.doc) ?? [];
+        list.push(e.range);
+        byDoc.set(e.doc, list);
+      }
+      for (const doc of [...registered]) if (!byDoc.has(doc)) drop(doc);
+      for (const [doc, ranges] of byDoc) {
+        const win = winOf(doc);
+        if (!win?.CSS?.highlights || typeof win.Highlight !== "function") continue;
+        ensureStyle(doc);
+        win.CSS.highlights.set(MULTI_HIGHLIGHT_NAME, new win.Highlight(...ranges));
+        registered.add(doc);
+      }
+    };
+    return {
+      /**
+       * 按集合动作并入/移除「当前选区」：
+       * replace＝只留当前选区；append＝并入；remove＝移除与当前选区边界相同的那段（再点同一段＝移出）。
+       */
+      update(action) {
+        const doc = opts.currentDoc();
+        const range = doc?.defaultView?.getSelection()?.rangeCount ? doc.defaultView.getSelection()?.getRangeAt(0) : null;
+        if (!doc || !range || !range.toString().trim()) return;
+        if (action === "replace") entries.length = 0;
+        const hit = entries.findIndex((e) => e.doc === doc && sameBoundaries(e.range, range));
+        if (action === "remove") {
+          if (hit >= 0) entries.splice(hit, 1);
+        } else {
+          if (hit >= 0) entries.splice(hit, 1);
+          entries.push({ doc, range });
+        }
+        repaint();
+      },
+      /** 清空全部高亮（选区被清空 / 菜单动作完成 / Esc / 章切换由壳层调用） */
+      clear() {
+        entries.length = 0;
+        for (const doc of [...registered]) drop(doc);
+      },
+      /** 当前存活段数（调试/测试用；失效段不计） */
+      count() {
+        return entries.filter((e) => e.range.startContainer.isConnected).length;
+      }
+    };
+  }
+
+  // src/lib/reader/badges.ts
+  var BADGE_SIZE = 8;
+  var BADGE_CUT = 4;
+  function drawBadges(svg, host, targets, offset) {
+    svg.textContent = "";
+    const hostRect = host.getBoundingClientRect();
+    const ox = offset?.left ?? hostRect.left;
+    const oy = offset?.top ?? hostRect.top;
+    for (const t of targets) {
+      const x = t.right - ox - BADGE_SIZE;
+      const y = t.top - oy;
+      const rect = svg.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", String(x));
+      rect.setAttribute("y", String(y));
+      rect.setAttribute("width", String(BADGE_SIZE));
+      rect.setAttribute("height", String(BADGE_SIZE));
+      rect.style.fill = t.color;
+      rect.setAttribute("data-badge", "1");
+      svg.appendChild(rect);
+      const notch = svg.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "polygon");
+      notch.setAttribute(
+        "points",
+        `${x + BADGE_SIZE},${y} ${x + BADGE_SIZE},${y + BADGE_CUT} ${x + BADGE_SIZE - BADGE_CUT},${y}`
+      );
+      notch.style.fill = "var(--paper)";
+      notch.setAttribute("data-badge-notch", "1");
+      svg.appendChild(notch);
+    }
+  }
+
+  // src/lib/reader/annotColor.ts
+  var HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
+  function annotSolid(color, fallback = "var(--accent)") {
+    const c = String(color ?? "").trim();
+    if (!c) return fallback;
+    return HEX_RE.test(c) ? c : `var(--annot-${c})`;
+  }
+  function annotSoft(color, fallback = "var(--accent-soft)") {
+    const c = String(color ?? "").trim();
+    if (!c) return fallback;
+    return HEX_RE.test(c) ? `color-mix(in srgb, ${c} 16%, transparent)` : `var(--annot-${c}-soft)`;
+  }
+
+  // src/lib/occlusion.ts
+  var clampPct = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(100, n));
+  };
+  var round1 = (v) => Math.round(v * 10) / 10;
+  function shapeBBox(shape) {
+    if (shape.kind === "ellipse") {
+      const cx = clampPct(shape.cx);
+      const cy = clampPct(shape.cy);
+      const rx = Math.max(0, Number(shape.rx) || 0);
+      const ry = Math.max(0, Number(shape.ry) || 0);
+      const x2 = Math.max(0, cx - rx);
+      const y2 = Math.max(0, cy - ry);
+      return {
+        x: round1(x2),
+        y: round1(y2),
+        w: round1(Math.min(100 - x2, rx * 2)),
+        h: round1(Math.min(100 - y2, ry * 2))
+      };
+    }
+    if (shape.kind === "polygon") {
+      const pts = shape.points ?? [];
+      if (pts.length === 0) return { x: 0, y: 0, w: 0, h: 0 };
+      const xs = pts.map((p) => clampPct(p.x));
+      const ys = pts.map((p) => clampPct(p.y));
+      const x2 = Math.min(...xs);
+      const y2 = Math.min(...ys);
+      return { x: round1(x2), y: round1(y2), w: round1(Math.max(...xs) - x2), h: round1(Math.max(...ys) - y2) };
+    }
+    const x = clampPct(shape.x);
+    const y = clampPct(shape.y);
+    return {
+      x: round1(x),
+      y: round1(y),
+      w: round1(Math.max(0, Math.min(100 - x, Number(shape.w) || 0))),
+      h: round1(Math.max(0, Math.min(100 - y, Number(shape.h) || 0)))
+    };
+  }
+  function normalizeShape(shape) {
+    if (shape.kind === "polygon") {
+      return {
+        ord: shape.ord,
+        kind: "polygon",
+        points: (shape.points ?? []).map((p) => ({ x: round1(clampPct(p.x)), y: round1(clampPct(p.y)) }))
+      };
+    }
+    if (shape.kind === "ellipse") {
+      const cx = clampPct(shape.cx);
+      const cy = clampPct(shape.cy);
+      return {
+        ord: shape.ord,
+        kind: "ellipse",
+        cx: round1(cx),
+        cy: round1(cy),
+        // 半轴上限 = 中心到最近边界的距离（椭圆整体必须留在画面内）
+        rx: round1(Math.max(0, Math.min(Math.min(cx, 100 - cx), Math.abs(Number(shape.rx) || 0)))),
+        ry: round1(Math.max(0, Math.min(Math.min(cy, 100 - cy), Math.abs(Number(shape.ry) || 0))))
+      };
+    }
+    return { ord: shape.ord, kind: "rect", ...shapeBBox(shape) };
+  }
+  function pxShapeToPct(shape, dispW, dispH, ord = 0) {
+    const sx = dispW > 0 ? 100 / dispW : 0;
+    const sy = dispH > 0 ? 100 / dispH : 0;
+    if (shape.kind === "polygon") {
+      return normalizeShape({
+        ord,
+        kind: "polygon",
+        points: shape.points.map((p) => ({ x: p.x * sx, y: p.y * sy }))
+      });
+    }
+    if (shape.kind === "ellipse") {
+      return normalizeShape({
+        ord,
+        kind: "ellipse",
+        cx: shape.cx * sx,
+        cy: shape.cy * sy,
+        rx: Math.abs(shape.rx) * sx,
+        ry: Math.abs(shape.ry) * sy
+      });
+    }
+    const x = Math.min(shape.x, shape.x + shape.w);
+    const y = Math.min(shape.y, shape.y + shape.h);
+    return normalizeShape({
+      ord,
+      kind: "rect",
+      x: x * sx,
+      y: y * sy,
+      w: Math.abs(shape.w) * sx,
+      h: Math.abs(shape.h) * sy
+    });
+  }
+
   // src/lib/reader/foliate/version.ts
   var PDF_ENGINE_VERSION = "pdfjs-6.3.289";
 
@@ -37299,6 +37511,144 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
     const imageHandlers = /* @__PURE__ */ new Set();
     let appearance = null;
     let darkFilterOn = false;
+    const multiHighlight = createMultiHighlight({
+      currentDoc() {
+        const sel = window.getSelection();
+        return sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim() ? document : null;
+      }
+    });
+    const markLayer = document.createElement("div");
+    markLayer.className = "pdf-mark-layer";
+    host.appendChild(markLayer);
+    const badgeLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    badgeLayer.setAttribute("class", "pdf-badge-layer");
+    badgeLayer.setAttribute("aria-hidden", "true");
+    host.appendChild(badgeLayer);
+    let markEntries = [];
+    let docMarks = [];
+    let hoveredMarkId = null;
+    let syncRaf = 0;
+    const pageContentRect = (el) => {
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      const bt = parseFloat(cs.borderTopWidth) || 0;
+      const bl = parseFloat(cs.borderLeftWidth) || 0;
+      const br = parseFloat(cs.borderRightWidth) || 0;
+      const bb = parseFloat(cs.borderBottomWidth) || 0;
+      return {
+        left: r.left + bl,
+        top: r.top + bt,
+        width: Math.max(0, r.width - bl - br),
+        height: Math.max(0, r.height - bt - bb)
+      };
+    };
+    const layoutMarks = () => {
+      if (markEntries.length === 0) return;
+      const cRect = container.getBoundingClientRect();
+      for (const e of markEntries) {
+        const pageIdx = Number(e.mark.pageIndex);
+        const rect = e.mark.rects?.[e.ord];
+        const pageEl = Number.isFinite(pageIdx) ? viewerEl.querySelector(`.page[data-page-number="${pageIdx + 1}"]`) : null;
+        if (!pageEl || !rect) {
+          e.el.style.display = "none";
+          continue;
+        }
+        const p = pageContentRect(pageEl);
+        if (!(p.width > 0)) {
+          e.el.style.display = "none";
+          continue;
+        }
+        e.el.style.display = "block";
+        e.el.style.left = `${p.left - cRect.left + rect.x / 100 * p.width}px`;
+        e.el.style.top = `${p.top - cRect.top + rect.y / 100 * p.height}px`;
+        e.el.style.width = `${Math.max(1, rect.w / 100 * p.width)}px`;
+        e.el.style.height = `${Math.max(1, rect.h / 100 * p.height)}px`;
+      }
+      drawMarkBadges();
+    };
+    const drawMarkBadges = () => {
+      const hostRect = viewerEl.getBoundingClientRect();
+      badgeLayer.setAttribute("width", String(hostRect.width));
+      badgeLayer.setAttribute("height", String(hostRect.height));
+      const targets = [];
+      for (const e of markEntries) {
+        if (!e.mark.comment) continue;
+        if (e.mark.kind === "highlight") continue;
+        if (e.el.style.display === "none" || e.ord !== 0) continue;
+        const r = e.el.getBoundingClientRect();
+        if (!(r.width > 0) || !(r.height > 0)) continue;
+        targets.push({ right: r.right, top: r.top, color: annotSolid(e.mark.color, "var(--annot-yellow)") });
+      }
+      drawBadges(badgeLayer, viewerEl, targets, { left: hostRect.left, top: hostRect.top });
+    };
+    const syncMarks = () => {
+      if (syncRaf || markEntries.length === 0) return;
+      syncRaf = window.requestAnimationFrame(() => {
+        syncRaf = 0;
+        layoutMarks();
+      });
+    };
+    const rebuildMarks = () => {
+      markLayer.textContent = "";
+      markEntries = [];
+      for (const mark of docMarks) {
+        (mark.rects ?? []).forEach((_, i) => {
+          const el = document.createElement("div");
+          el.className = "reader-doc-mark card-marked";
+          el.dataset.markId = mark.id;
+          if (mark.comment) el.dataset.hasComment = "1";
+          el.style.background = annotSoft(mark.color);
+          el.style.borderLeftColor = annotSolid(mark.color);
+          markLayer.appendChild(el);
+          markEntries.push({ mark, ord: i, el });
+        });
+      }
+      markLayer.dataset.count = String(markEntries.length);
+      hoveredMarkId = null;
+      layoutMarks();
+    };
+    const hitMark = (clientX, clientY) => {
+      for (let i = markEntries.length - 1; i >= 0; i--) {
+        const el = markEntries[i].el;
+        if (el.style.display === "none") continue;
+        const r = el.getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+          return { id: markEntries[i].mark.id, rect: { x: r.left, y: r.top, width: r.width, height: r.height } };
+        }
+      }
+      return null;
+    };
+    const markHoverHandlers = /* @__PURE__ */ new Set();
+    const markClickHandlers = /* @__PURE__ */ new Set();
+    const onMarkMove = (ev) => {
+      if (markEntries.length === 0) return;
+      const hit = hitMark(ev.clientX, ev.clientY);
+      const id = hit?.id ?? null;
+      if (id === hoveredMarkId) return;
+      hoveredMarkId = id;
+      markHoverHandlers.forEach((h) => h(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+    };
+    const onMarkLeave = () => {
+      if (hoveredMarkId === null) return;
+      hoveredMarkId = null;
+      markHoverHandlers.forEach((h) => h({ id: null, rect: null }));
+    };
+    const onMarkClick = (ev) => {
+      if (markEntries.length === 0) return;
+      const hit = hitMark(ev.clientX, ev.clientY);
+      if (!hit) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      markClickHandlers.forEach((h) => h({ id: hit.id, rect: hit.rect }));
+    };
+    container.addEventListener("mousemove", onMarkMove);
+    container.addEventListener("mouseleave", onMarkLeave);
+    container.addEventListener("click", onMarkClick, true);
+    container.addEventListener("scroll", syncMarks, { passive: true });
+    window.addEventListener("resize", syncMarks);
+    eventBus.on("pagerendered", syncMarks);
+    eventBus.on("scalechanging", syncMarks);
+    eventBus.on("scalechanged", syncMarks);
     const fractionOf = (page1Based) => totalPages > 0 ? Math.min(1, Math.max(0, page1Based / totalPages)) : 0;
     const emitRelocate = (page1Based) => {
       if (!doc) return;
@@ -37320,7 +37670,9 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
       if (typeof p === "number") emitRelocate(p);
     });
     viewerEl.addEventListener("pointerup", (ev) => {
-      pointerHandlers.forEach((h) => h({ x: ev.clientX, y: ev.clientY }));
+      pointerHandlers.forEach(
+        (h) => h({ x: ev.clientX, y: ev.clientY, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+      );
     });
     viewerEl.addEventListener("click", (ev) => {
       const target = ev.target;
@@ -37562,12 +37914,106 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
       deselect() {
         window.getSelection()?.removeAllRanges();
       },
+      // v48.23（D61 §6.8-11）：多段选择高亮（CSS Custom Highlight API，不碰正文 DOM）
+      multiSelectHighlight(action) {
+        multiHighlight.update(action);
+      },
+      clearMultiSelectHighlight() {
+        multiHighlight.clear();
+        badgeLayer.textContent = "";
+      },
+      // v48.24 批3（§4）：文中留痕——文本层之上的矩形覆盖层（数据面由壳层给）
+      setDocumentMarks(marks) {
+        docMarks = Array.isArray(marks) ? marks : [];
+        rebuildMarks();
+        syncMarks();
+      },
+      // D67（§6.8-13）：侧栏注解按 id 导航——只认精确 id 与已存的页锚（pageIndex + rects）；
+      // 不承诺恢复页内垂直位置，也不回退文本搜索。
+      // 成功判据＝**到达所属页且该标记已按该页几何布局完成**（display 由 layoutMarks 置 block，
+      // 而 layoutMarks 只在页内容框有宽度时才置 block）。绘制矩形的最终落点还依赖图层 CSS
+      // （theme.css 的 .pdf-mark-layer/.reader-doc-mark），那是 L2（marks.gui.mjs）的几何断言面——
+      // 本方法只判「条目在该页上」，不把 CSS 缺失/滚动未稳误判成导航失败。
+      async goToMark(id) {
+        const mark = docMarks.find((candidate) => candidate.id === id);
+        const pageIndex = Number(mark?.pageIndex);
+        if (!mark || !Number.isFinite(pageIndex) || pageIndex < 0 || !mark.rects?.length) return false;
+        const ok = await kernel.goTo({ pageIndex });
+        if (!ok) return false;
+        const deadline = Date.now() + 1e4;
+        for (; ; ) {
+          const pageEl = viewerEl.querySelector(`.page[data-page-number="${pageIndex + 1}"]`);
+          const entry = markEntries.find((e) => e.mark.id === id);
+          if (pageEl && entry && entry.el.style.display === "block") return true;
+          if (Date.now() > deadline) return false;
+          await new Promise((resolve) => window.setTimeout(resolve, 60));
+        }
+      },
+      // v48.24 批3（§4，写入侧）：选区在**本页**里的百分比矩形——摘录 sourceAnchor.rects 的来源。
+      // 参考系＝页**内容框**（见 pageContentRect，绘制侧同一个框）；换算复用 occlusion 的 pxShapeToPct
+      // （唯一的像素↔百分比实现面，含钳制与一位小数归一）。
+      getSourceAnchor() {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return null;
+        const range = sel.getRangeAt(0);
+        if (range.collapsed) return null;
+        const startEl = range.startContainer.parentElement?.closest?.(".page");
+        const pageNum = Number(startEl?.dataset?.pageNumber);
+        if (!startEl || !Number.isFinite(pageNum)) return null;
+        const p = pageContentRect(startEl);
+        if (!(p.width > 0) || !(p.height > 0)) return null;
+        const rects = [];
+        for (const r of Array.from(range.getClientRects())) {
+          if (!(r.width > 0) || !(r.height > 0)) continue;
+          if (r.right < p.left + 1 || r.left > p.left + p.width - 1) continue;
+          const s = pxShapeToPct(
+            { kind: "rect", x: r.left - p.left, y: r.top - p.top, w: r.width, h: r.height },
+            p.width,
+            p.height,
+            rects.length
+          );
+          rects.push({ x: Number(s.x) || 0, y: Number(s.y) || 0, w: Number(s.w) || 0, h: Number(s.h) || 0, ord: rects.length });
+        }
+        if (rects.length === 0) return null;
+        return { pageIndex: pageNum - 1, rects };
+      },
       getCurrentLocation() {
         if (!doc) return null;
         return { pageIndex: viewer.currentPageNumber - 1 };
       },
+      // D2/§7（Task 7）：侧栏开合改变容器宽度 ⇒ 数值缩放下页内锚点会漂（pdf.js 只保比例，
+      // 不保你正看着的那一点）。快照/还原都用**页内容框**参考系（与 sourceAnchor.rects 同一框）。
+      captureViewPoint() {
+        const pageEl = viewerEl.querySelector(`.page[data-page-number="${viewer.currentPageNumber}"]`);
+        if (!pageEl) return null;
+        const p = pageContentRect(pageEl);
+        if (!(p.width > 0 && p.height > 0)) return null;
+        const c = container.getBoundingClientRect();
+        return { pageIndex: viewer.currentPageNumber - 1, x: c.left - p.left, y: c.top - p.top };
+      },
+      restoreViewPoint(point) {
+        const pageEl = viewerEl.querySelector(`.page[data-page-number="${point.pageIndex + 1}"]`);
+        if (!pageEl) return false;
+        const p = pageContentRect(pageEl);
+        if (!(p.width > 0 && p.height > 0)) return false;
+        const c = container.getBoundingClientRect();
+        container.scrollTop += p.top + point.y - c.top;
+        container.scrollLeft += p.left + point.x - c.left;
+        return true;
+      },
       destroy() {
         destroyed = true;
+        multiHighlight.clear();
+        container.removeEventListener("mousemove", onMarkMove);
+        container.removeEventListener("mouseleave", onMarkLeave);
+        container.removeEventListener("click", onMarkClick, true);
+        container.removeEventListener("scroll", syncMarks);
+        window.removeEventListener("resize", syncMarks);
+        if (syncRaf) window.cancelAnimationFrame(syncRaf);
+        syncRaf = 0;
+        markLayer.remove();
+        markEntries = [];
+        docMarks = [];
         try {
           viewer.setDocument(null);
         } catch {
@@ -37580,7 +38026,7 @@ fn fs_main(in : VertexOutput) -> @location(0) vec4<f32> {
         container.remove();
       },
       on(event, handler) {
-        const set = event === "relocate" ? relocateHandlers : event === "link" ? linkHandlers : event === "contentPointerUp" ? pointerHandlers : event === "imageClick" ? imageHandlers : null;
+        const set = event === "relocate" ? relocateHandlers : event === "link" ? linkHandlers : event === "contentPointerUp" ? pointerHandlers : event === "imageClick" ? imageHandlers : event === "markHover" ? markHoverHandlers : event === "markClick" ? markClickHandlers : null;
         if (!set) throw new Error(`\u672A\u77E5\u4E8B\u4EF6: ${event}`);
         set.add(handler);
         return () => {
@@ -44165,6 +44611,55 @@ button.hasPopupMenu{
       check("P12 \u9996\u9875 next \u524D\u8FDB", okNext === true && kernel.getCurrentLocation()?.pageIndex === 1, String(okNext));
       const cfiGoto = await kernel.goTo({ cfi: "epubcfi(/6/2)" });
       check("P13 goTo(cfi) \u8FD4\u56DE false\uFF08PDF \u7CFB\u65E0 CFI\uFF09", cfiGoto === false, String(cfiGoto));
+      const hasMarkNav = typeof kernel.setDocumentMarks === "function" && typeof kernel.goToMark === "function";
+      check("P13pre PDF \u5185\u6838\u652F\u6301\u6309\u6807\u8BB0 id \u5BFC\u822A", hasMarkNav);
+      if (!hasMarkNav) {
+        check("P13a \u6807\u8BB0 id \u5BFC\u822A\u5230\u5176 PDF \u9875", false, "goToMark/setDocumentMarks \u7F3A\u5931");
+        check("P13b \u76EE\u6807\u6807\u8BB0\u81EA\u7B97\u51E0\u4F55\u843D\u5728\u5BF9\u5E94\u9875\u5185\u5BB9\u6846\u5185", false, "goToMark \u7F3A\u5931");
+        check("P13c \u672A\u77E5\u6807\u8BB0 id \u8FD4\u56DE false \u4E14\u9875\u7801\u4E0D\u53D8", false, "goToMark \u7F3A\u5931");
+        check("P13d \u65E0 pageIndex/rects \u7684\u6807\u8BB0\u8FD4\u56DE false", false, "goToMark \u7F3A\u5931");
+      } else {
+        kernel.setDocumentMarks([
+          { id: "pdf-mark-page-one", text: "anchor-marker", pageIndex: 0, rects: [{ x: 12, y: 20, w: 18, h: 4 }], kind: "extract" },
+          { id: "pdf-mark-page-three", text: "third-page-unique", pageIndex: 2, rects: [{ x: 8, y: 26, w: 24, h: 4 }], kind: "highlight" }
+        ]);
+        const containerEl = document.querySelector(".pdf-viewer-container");
+        const pageContentFrame = (pageEl) => {
+          const cs = getComputedStyle(pageEl);
+          const bl = parseFloat(cs.borderLeftWidth) || 0, bt = parseFloat(cs.borderTopWidth) || 0;
+          const br = parseFloat(cs.borderRightWidth) || 0, bb = parseFloat(cs.borderBottomWidth) || 0;
+          const pr = pageEl.getBoundingClientRect();
+          const cr = containerEl.getBoundingClientRect();
+          return { left: pr.left - cr.left + bl, top: pr.top - cr.top + bt, width: Math.max(0, pr.width - bl - br), height: Math.max(0, pr.height - bt - bb) };
+        };
+        const markInlineFrame = (markId, pageIdx) => {
+          const el = host.querySelector('.pdf-mark-layer [data-mark-id="' + markId + '"]');
+          const pageEl = window.__pdfViewerDebug?.getPageView(pageIdx)?.div;
+          const vals = el ? { left: parseFloat(el.style.left), top: parseFloat(el.style.top), width: parseFloat(el.style.width), height: parseFloat(el.style.height), display: el.style.display } : null;
+          const frame = pageEl ? pageContentFrame(pageEl) : null;
+          const inside = !!(vals && frame && vals.display === "block" && [vals.left, vals.top, vals.width, vals.height].every(Number.isFinite) && vals.width > 0 && vals.height > 0 && vals.left >= frame.left - 1 && vals.left + vals.width <= frame.left + frame.width + 1 && vals.top >= frame.top - 1 && vals.top + vals.height <= frame.top + frame.height + 1);
+          return { inside, vals, frame };
+        };
+        const beforeMarkNav = kernel.getCurrentLocation()?.pageIndex;
+        const markNav = await kernel.goToMark("pdf-mark-page-three");
+        await waitFor(() => markInlineFrame("pdf-mark-page-three", 2).inside ? true : null, 1e4, "target mark laid out on its page").catch(() => null);
+        const afterMarkNav = kernel.getCurrentLocation()?.pageIndex;
+        const target = markInlineFrame("pdf-mark-page-three", 2);
+        const offPage = markInlineFrame("pdf-mark-page-one", 0);
+        check("P13a \u6807\u8BB0 id \u5BFC\u822A\u5230\u5176 PDF \u9875", markNav === true && afterMarkNav === 2 && beforeMarkNav !== 2, `before=${beforeMarkNav} after=${afterMarkNav}`);
+        check("P13b \u76EE\u6807\u6807\u8BB0\u81EA\u7B97\u51E0\u4F55\u843D\u5728\u5BF9\u5E94\u9875\u5185\u5BB9\u6846\u5185", target.inside, JSON.stringify({
+          target,
+          offPage,
+          layerCount: document.querySelectorAll(".pdf-mark-layer").length,
+          markCount: document.querySelectorAll(".pdf-mark-layer .reader-doc-mark").length
+        }));
+        const beforeMissingMark = kernel.getCurrentLocation()?.pageIndex;
+        const missingMark = await kernel.goToMark("missing-mark");
+        check("P13c \u672A\u77E5\u6807\u8BB0 id \u8FD4\u56DE false \u4E14\u9875\u7801\u4E0D\u53D8", missingMark === false && kernel.getCurrentLocation()?.pageIndex === beforeMissingMark, `before=${beforeMissingMark} after=${kernel.getCurrentLocation()?.pageIndex}`);
+        kernel.setDocumentMarks([{ id: "pdf-mark-no-anchor", text: "no anchor", kind: "extract" }]);
+        const unlocatedMark = await kernel.goToMark("pdf-mark-no-anchor");
+        check("P13d \u65E0 pageIndex/rects \u7684\u6807\u8BB0\u8FD4\u56DE false", unlocatedMark === false && kernel.getCurrentLocation()?.pageIndex === beforeMissingMark, `result=${unlocatedMark} page=${kernel.getCurrentLocation()?.pageIndex}`);
+      }
       kernel.applyAppearance({ theme: "paper", zoom: 150 });
       await wait(400);
       const scale150 = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScale : null;
@@ -44173,6 +44668,51 @@ button.hasPopupMenu{
       await wait(400);
       const scalePw = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
       check("P15b zoom=page-width \u2192 currentScaleValue \u5207\u6362", scalePw === "page-width", String(scalePw));
+      const hasViewPoint = typeof kernel.captureViewPoint === "function" && typeof kernel.restoreViewPoint === "function";
+      check("P16pre \u5185\u6838\u652F\u6301\u89C6\u53E3\u9875\u5185\u951A\u70B9\u5FEB\u7167/\u8FD8\u539F", hasViewPoint);
+      const cont = document.querySelector(".pdf-viewer-container");
+      if (!hasViewPoint) {
+        check("P16a \u6570\u503C\u7F29\u653E\uFF1A\u53D8\u7A84\u540E\u9875\u5185\u951A\u70B9\u8FD8\u539F\uFF08\u22642px\uFF09", false, "captureViewPoint/restoreViewPoint \u7F3A\u5931");
+        check("P16b fit \u6A21\u5F0F\uFF1A\u4FDD preset \u4E0E\u5F53\u524D\u9875", false, "captureViewPoint/restoreViewPoint \u7F3A\u5931");
+      } else {
+        kernel.applyAppearance({ theme: "paper", zoom: 150 });
+        await wait(500);
+        await kernel.goTo({ pageIndex: 0 });
+        await wait(600);
+        cont.scrollTop = 300;
+        await wait(400);
+        const pt = kernel.captureViewPoint();
+        const pageBefore = kernel.getCurrentLocation()?.pageIndex;
+        const scrollBefore = cont.scrollTop;
+        host.style.right = "300px";
+        await wait(800);
+        const drifted = kernel.captureViewPoint();
+        const driftY = pt && drifted ? Math.abs(drifted.y - pt.y) + Math.abs(drifted.x - pt.x) : 0;
+        const restored = kernel.restoreViewPoint(pt);
+        await wait(400);
+        const scrollAfter = cont.scrollTop;
+        const pageAfter = kernel.getCurrentLocation()?.pageIndex;
+        check(
+          "P16a \u6570\u503C\u7F29\u653E\uFF1A\u53D8\u7A84\u6F02\u79FB\u53EF\u89C1\uFF0C\u8FD8\u539F\u540E\u9875\u5185\u951A\u70B9\u56DE\u4F4D\uFF08\u22642px\uFF09",
+          drifted !== null && driftY > 2 && restored === true && Math.abs(scrollAfter - scrollBefore) <= 2 && pageAfter === pageBefore,
+          JSON.stringify({ pt, drifted, driftY, scrollBefore, scrollAfter, pageBefore, pageAfter })
+        );
+        kernel.applyAppearance({ theme: "paper", zoom: "page-width" });
+        await wait(500);
+        const contNarrow = cont.getBoundingClientRect().width;
+        const wFitNarrow = document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width;
+        host.style.right = "";
+        await wait(800);
+        const contWide = cont.getBoundingClientRect().width;
+        const wFitWide = document.querySelector(".pdf-viewer-container .page").getBoundingClientRect().width;
+        const scaleValue = window.__pdfViewerDebug ? window.__pdfViewerDebug.currentScaleValue : null;
+        const pageFit = kernel.getCurrentLocation()?.pageIndex;
+        check(
+          "P16b fit \u6A21\u5F0F\uFF1A\u5BB9\u5668\u786E\u5B9E\u53D8\u5BBD\u3001preset \u4FDD\u7559\u3001\u5F53\u524D\u9875\u4E0D\u53D8",
+          scaleValue === "page-width" && pageFit === pageBefore && Math.abs(contWide - contNarrow) > 200,
+          JSON.stringify({ scaleValue, pageFit, pageBefore, contNarrow, contWide, wFitNarrow, wFitWide })
+        );
+      }
       kernel.destroy();
       check("P14 destroy \u540E\u5BB9\u5668\u6E05\u7A7A", host.querySelectorAll("canvas").length === 0, "canvas=" + host.querySelectorAll("canvas").length);
       return check.results;
