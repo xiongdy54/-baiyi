@@ -1141,7 +1141,8 @@ export function CardFace({
 }: {
   card: CardRecord;
   showBack: boolean;
-  onReveal: () => void;
+  /** 翻面回调（可缺省：复习页改成只走底栏「显示答案」按钮，点卡面不翻面——2026-10-01） */
+  onReveal?: () => void;
   onEdit?: (patch: {
     frontMarkdown?: string;
     backMarkdown?: string;
@@ -1247,7 +1248,7 @@ export function CardFace({
       edit({ frontMarkdown: restored, noteText: restored });
     };
     return (
-      <div className="review-face" onClick={!showBack ? onReveal : undefined}>
+      <div className="review-face" onClick={!showBack && onReveal ? onReveal : undefined}>
         <div className="review-front">
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
           {questionEditable ? (
@@ -1275,7 +1276,7 @@ export function CardFace({
   // 不存在复习期形态变化的卡片类型，一切卡设计以 FSRS 为核心。
 
   return (
-    <div className="review-face" onClick={!showBack ? onReveal : undefined}>
+    <div className="review-face" onClick={!showBack && onReveal ? onReveal : undefined}>
       <div className="review-front">
         {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
         {showBack && onEdit ? (

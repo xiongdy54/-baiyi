@@ -6,8 +6,8 @@ import type { DueTopic } from "../lib/readingWorkflow";
 import { paintBodyAnnotations, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
 
 const DAY = 86400000;
-const PRIORITY_OPTIONS = [10, 30, 50, 70, 90];
-const POSTPONE_PRESETS = [1, 3, 7, 30];
+/* 优先级＝滑块 0–100（右侧数字可直接输入）：旧的离散档位下拉与快捷推迟 1/3/7/30 均已退役
+   （用户 2026-10-01：快捷推迟不需要了；优先级要做成滑块 + 可输入数字）。 */
 
 /** 距下次推送的文案（与队列口径一致：到期显示「现已到期」） */
 export function nextAtText(nextAt?: number, now = Date.now()): string {
@@ -152,7 +152,6 @@ export interface ExtractFaceHandlers {
    * 没有选区时＝整条正文（`ranges` ＝整条区间）。父侧偏移由外层写进子摘录 contextRef.parentRange，
    * 子卡「跳转原文」据此回到父卡并高亮所选那句。
    */
-  onExtract?: (payload: ExtractPickPayload) => void;
   /**
    * 批 4 Task 10（规格 §3）：把「正文里的这次选区」报给外层，供选区菜单定位与动作取文本。
    * 采集时机与 `picked` 快照同源（mouseup/keyup），载荷含 rect（视口坐标，菜单锚点 R22）、
@@ -194,20 +193,32 @@ export default function ExtractCardFace({
   handlers: ExtractFaceHandlers;
 }) {
   const [postponeDays, setPostponeDays] = useState(7);
-  /**
-   * 选区的**快照**（工单 ②「多段不相邻选择＝多组偏移，复用既有的多段集合状态」在摘录页的落点）：
-   * 选区一做出就在 mouseup / keyup 采集下来，作为「摘录」的兜底载荷——
-   * 点按钮/别处点击**可能**动到 DOM 选区，而快照保证「选中哪段就摘哪段」不依赖那个时刻的活选区。
-   * 优先级：实时选区 > 快照 > 整条正文（见 pickExtractPayload）。
-   */
-  const [picked, setPicked] = useState<ExtractPickPayload | null>(null);
+  /** 底栏「更多」弹层（同刻只开这一个；点外部/Esc 由下方 effect 收） */
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreWrapRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && moreWrapRef.current?.contains(t)) return;
+      setMoreOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
   const depth = Number(extract.depth) || 1;
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const hlRef = useRef<HTMLElement | null>(null);
 
   // 换卡即清快照（偏移是相对**这一版正文**的，跨卡复用会把范围锚写歪）
   useEffect(() => {
-    setPicked(null);
     handlers.onSelection?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extract.id]);
@@ -222,8 +233,8 @@ export default function ExtractCardFace({
       const ok = selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length);
       const text = ok.map((r) => full.slice(r.start, r.end)).join("\n\n");
       const live = ok.length && text.trim() ? { text, ranges: ok } : null;
-      setPicked(live);
-      // 批 4 Task 10：同一采集点把选区报给外层（含视口坐标 rect＝菜单锚点；R22 不用 pointerup 点）
+      // 批 4 Task 10：同一采集点把选区报给外层（含视口坐标 rect＝菜单锚点；R22 不用 pointerup 点）——
+         // 摘录页的「摘录」从这里取载荷（无选区时菜单动作不出现，不再有整条兜底那条路）
       const sel = typeof window !== "undefined" ? window.getSelection() : null;
       const r = sel && sel.rangeCount ? sel.getRangeAt(0).getBoundingClientRect() : null;
       handlers.onSelection?.(
@@ -238,7 +249,7 @@ export default function ExtractCardFace({
         capture();
         return;
       }
-      // 卡外落下＝旧快照已失效；卡内按钮（如「摘录」）自身的 mouseup 不算，快照要活到 onClick。
+      // 卡外落下＝选区作废（卡片外的动作面除外：菜单/面板自身的 mouseup 不算）。
       // 批 4 Task 10：选区菜单与三个面板渲染在**卡面之外**（页级），点它们同样是「动作面」而非
       // 「点别处」——不豁免的话，mouseup 会先清掉快照/选区，按钮的 onClick 再读就晚了（实测三动作全哑）。
       const el = t as HTMLElement | null;
@@ -247,7 +258,6 @@ export default function ExtractCardFace({
         !!(el.closest(".selection-menu") || el.closest(".modal-panel") || el.closest(".dict-panel") || el.closest(".ai-panel"));
       if (inActionSurface) return;
       if (!(t && face && face.contains(t))) {
-        setPicked(null);
         handlers.onSelection?.(null);
       }
     };
@@ -284,18 +294,6 @@ export default function ExtractCardFace({
    * 「摘录」取的载荷：**实时选区优先、快照兜底**（含父卡坐标的范围），两者皆无＝整条正文。
    * 选区在正文之外（元信息行等）时同样回退整条——不用外部选区当锚，避免把范围锚写歪。
    */
-  const pickExtractPayload = (): ExtractPickPayload => {
-    const body = bodyRef.current;
-    const full = String(extract.contentMarkdown || "");
-    const live = body ? selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length) : [];
-    const fresh: ExtractPickPayload | null = live.length
-      ? { text: live.map((r) => full.slice(r.start, r.end)).join("\n\n"), ranges: live }
-      : null;
-    for (const cand of [fresh, picked]) {
-      if (cand && cand.ranges.length && cand.text.trim()) return cand;
-    }
-    return { text: full.trim(), ranges: [{ start: 0, end: full.length }] };
-  };
 
   return (
     <div className="extract-face" data-extract-id={extract.id} data-view-only={viewOnly ? "1" : undefined}>
@@ -335,87 +333,117 @@ export default function ExtractCardFace({
       </div>
 
       {!viewOnly && (
-        <div className="extract-face-actions">
+        /* 底部动作区（与复习页同规格）：主行动常驻 + 推迟 / 优先级 / 毕业；其余进右下角「更多」（向上弹）。
+           「摘录」（就地另立子摘录）已删：无选区时它兜底摘整条正文 ⇒ 看起来像复制卡片（用户实测）；
+           选中一段再摘录仍可走拖选菜单（同一条 annotateParent 路径）。
+           「快捷推迟」1/3/7/30 已删；推迟天数改由输入框给。 */
+        <div className="extract-face-actions" data-extract-bar>
           {handlers.onAdvance && (
-            <button className="primary" disabled={busy} onClick={() => handlers.onAdvance?.()} title="处理完这条，按 A-Factor 推进调度（空格）">
-              下一条
+            <button className="bar-btn primary grow" disabled={busy} onClick={() => handlers.onAdvance?.()} title="处理完这条，按 A-Factor 推进调度（空格）">
+              下一条<span className="kbd mono">空格</span>
             </button>
           )}
 
           {handlers.onPostpone && (
-            <>
-              <span className="extract-postpone">
+            <span className="extract-postpone bar-group">
+              <input
+                type="number"
+                min={1}
+                max={36500}
+                value={postponeDays}
+                onChange={(e) => setPostponeDays(Math.max(1, Math.min(36500, Number(e.target.value) || 1)))}
+                aria-label="推迟天数"
+              />
+              <span className="mono">天</span>
+              <button className="bar-btn" disabled={busy} onClick={() => handlers.onPostpone?.(postponeDays)}>
+                推迟
+              </button>
+            </span>
+          )}
+
+          {handlers.onPriority && (
+            /* 优先级：轨道内嵌滑块（填充＝主题色 --accent，滑块与底框等高）+ 右侧数字可输入 */
+            <label className="extract-priority bar-group" title="优先级：拖动滑块或直接输入数字（数字越大越靠后）">
+              <span className="lbl">优先级</span>
+              <span className="prio-track">
+                <span className="prio-fill" style={{ width: `${Math.max(0, Math.min(100, Number(extract.priority) || 0))}%` }} />
                 <input
-                  type="number"
-                  min={1}
-                  max={36500}
-                  value={postponeDays}
-                  onChange={(e) => setPostponeDays(Math.max(1, Math.min(36500, Number(e.target.value) || 1)))}
-                  aria-label="推迟天数"
-                />
-                <span className="mono">天后</span>
-                <button disabled={busy} onClick={() => handlers.onPostpone?.(postponeDays)}>
-                  推迟
-                </button>
-              </span>
-
-              <span className="extract-priority">
-                <Dropdown
-                  value={String(extract.priority)}
-                  align="left"
-                  title="快速变更优先级（越大越靠后）"
-                  options={PRIORITY_OPTIONS.map((p) => ({ value: String(p), label: `优先级 ${p}` }))}
-                  onChange={(v) => handlers.onPriority?.(Number(v))}
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.max(0, Math.min(100, Number(extract.priority) || 0))}
+                  aria-label="优先级"
+                  onChange={(e) => handlers.onPriority?.(Number(e.target.value))}
                 />
               </span>
-            </>
+              <input
+                className="prio-num"
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.max(0, Math.min(100, Number(extract.priority) || 0))}
+                aria-label="优先级数值"
+                onChange={(e) => handlers.onPriority?.(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
+              />
+            </label>
           )}
 
-          {handlers.onExtract && (
-            <button
-              disabled={busy}
-              onClick={() => handlers.onExtract?.(pickExtractPayload())}
-              title="就此另立一条子摘录（正文里选中哪段就摘哪段、并记下它在本卡里的位置；未选中＝整条）"
-              data-extract-child
-            >
-              摘录
-            </button>
-          )}
-          {handlers.onJumpToSource && (
-            <button
-              disabled={busy}
-              onClick={() => handlers.onJumpToSource?.()}
-              title={
-                extract.contextRef?.parentExtractId
-                  ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
-                  : "跳回材料中的原位置（不写入阅读进度）"
-              }
-            >
-              跳转原文
-            </button>
-          )}
           {handlers.onGraduate && (
-            <button disabled={busy} onClick={() => handlers.onGraduate?.()} title="处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器">
+            <button className="bar-btn" disabled={busy} onClick={() => handlers.onGraduate?.()} title="处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器">
               毕业
             </button>
           )}
-          {handlers.onUndo && (
-            <button disabled={busy} onClick={() => handlers.onUndo?.()} title="撤销最近一次操作（Z）">
-              撤销
-            </button>
+
+          {(handlers.onJumpToSource || handlers.onUndo) && (
+            <span className="bar-more" data-menu ref={moreWrapRef}>
+              <button
+                className="bar-btn"
+                data-toggle
+                aria-expanded={moreOpen}
+                aria-controls="extract-bar-more"
+                onClick={() => setMoreOpen((v) => !v)}
+              >
+                更多<span className="caret">▲</span>
+              </button>
+              {moreOpen && (
+                <div className="bar-pop" id="extract-bar-more" data-pop>
+                  {handlers.onJumpToSource && (
+                    <button
+                      disabled={busy}
+                      onClick={() => {
+                        setMoreOpen(false);
+                        handlers.onJumpToSource?.();
+                      }}
+                      title={
+                        extract.contextRef?.parentExtractId
+                          ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
+                          : "跳回材料中的原位置（不写入阅读进度）"
+                      }
+                    >
+                      跳转原文
+                    </button>
+                  )}
+                  {handlers.onUndo && (
+                    <button
+                      disabled={busy}
+                      onClick={() => {
+                        setMoreOpen(false);
+                        handlers.onUndo?.();
+                      }}
+                      title="撤销最近一次操作（Z）"
+                    >
+                      撤销<span className="k mono">Z</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </span>
           )}
         </div>
       )}
 
-      {!viewOnly && handlers.onPostpone && POSTPONE_PRESETS.length > 0 && (
-        <div className="extract-face-hints mono">
-          快捷推迟：{POSTPONE_PRESETS.map((d) => (
-            <button key={d} disabled={busy} onClick={() => handlers.onPostpone?.(d)}>
-              {d} 天
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

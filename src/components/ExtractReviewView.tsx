@@ -11,7 +11,8 @@ import { readingWorkflow, parseContextRef, undoApi, type DueTopic, type ExtractD
 import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
 import { useSelectionActions } from "../lib/useSelectionActions";
 import { createMultiHighlight } from "../lib/reader/multiHighlight";
-import { type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
+import { rectFromOffsets, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
+import type { PopoverRect } from "../lib/popoverPlace";
 
 /** 选区快照（卡面 onSelection 回调的载荷；null＝无选区） */
 type FaceSelection = { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null;
@@ -174,6 +175,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   /** 正文痕迹（段锚批注，按色分组；样张 `.q` 同规）——只喂给卡面的绘制层 */
   const [bodyGroups, setBodyGroups] = useState<BodyAnnotationGroup[]>([]);
   const annotsFor = shown?.id ?? null;
+  /** 子条目的**父卡坐标区间**（id → ranges）：浮层锚点要按它算「所引那段」的矩形 */
+  const rangesByIdRef = useRef<Record<string, Array<{ start: number; end: number }>>>({});
   useEffect(() => {
     if (!annotsFor) {
       setAnnots([]);
@@ -217,6 +220,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
             anchorWhole: true
           }]
         : [];
+      const nextRanges: Record<string, Array<{ start: number; end: number }>> = {};
+      for (const r of children) if (r.ranges.length) nextRanges[r.id] = r.ranges;
+      rangesByIdRef.current = nextRanges;
       setAnnots([
         ...wholeItem,
         ...children.map((r) => ({ ...r, anchorWhole: false }))
@@ -236,8 +242,24 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     };
   }, [annotsFor]);
 
-  /** 批 4 Task 14：栏的出现条件＝当前卡 ≥1 条注解（出现即占位 280px） */
+  /**
+   * 批注浮层的锚点（R37 修正）：**所引那段文字**在卡面里的视口矩形（与正文痕迹同一偏移口径）。
+   * 无区间可算时（整卡批注、老数据）退回卡面矩形上沿——绝不把浮层丢到视口原点的 (0,0)。
+   */
+  function anchorForAnnotation(id: string, body: HTMLElement | null): PopoverRect {
+    for (const r of rangesByIdRef.current[id] ?? []) {
+      const rect = rectFromOffsets(body, r.start, r.end);
+      if (rect) return rect;
+    }
+    const box = body?.getBoundingClientRect();
+    if (box && box.width > 0) return { x: box.x + 12, y: box.y + 12, width: Math.min(box.width - 24, 360), height: 0 };
+    return { x: 0, y: 0, width: 0, height: 0 };
+  }
+
+  /** 批 4 Task 14：栏的出现条件＝当前卡 ≥1 条注解 */
   const annotPanelVisible = annots.length > 0 && !viewing;
+  /** 栏开合（会话内偏好，不落设置键）：收起时**不留空栏**，只在原位留一个按钮（2026-10-01 用户裁定） */
+  const [annotOpen, setAnnotOpen] = useState(true);
 
   /**
    * 批 4 Task 10（规格 §3 / §4）：摘录页的选区动作编排与阅读器复用同一个钩子。
@@ -581,6 +603,55 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       </div>
 
       <div className={`extract-page-cols${annotPanelVisible ? " with-annot" : ""}`} data-annot-cols={annotPanelVisible ? "1" : undefined}>
+      {/* 栏开关：锚在页面视口左上角（固定坐标）——展开时它落在栏头那一行里，收起时留在原地，
+          于是**两种状态下按钮位置完全一致**，且收起后不占任何空栏（用户 2026-10-01 两条要求）。 */}
+      {annotPanelVisible && (
+        <button
+          className="annot-toggle"
+          data-annot-toggle
+          aria-expanded={annotOpen}
+          aria-controls="extract-annot-panel"
+          title={annotOpen ? "收起批注栏" : "展开批注栏"}
+          onClick={() => setAnnotOpen((v) => !v)}
+        >
+          {annotOpen ? "«" : "»"}
+        </button>
+      )}
+
+      {/* 批 4 Task 13/14（规格 §5.3）：批注栏——**左侧**、可收起；出现条件＝当前卡 ≥1 条注解。
+          摘录页的栏只有注解列表（没有目录/图谱），故不设页签（用户 2026-10-01）。 */}
+      {annotPanelVisible && annotOpen && (
+        <div className="extract-annot-slot" id="extract-annot-panel">
+          <AnnotationPanel
+            items={annots}
+            currentId={null}
+            filter={annotFilter}
+            onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
+            palette={ANNOT_PALETTE}
+            onJump={(it) => {
+              // 点条目 → 文中滚动到锚点并短暂强调（合成 EPUB 的「文中」＝本条正文里，故滚到卡面正文）
+              const body = document.querySelector(".extract-face-body") as HTMLElement | null;
+              body?.scrollIntoView({ block: "center", behavior: "smooth" });
+              setEditing({
+                id: it.id,
+                kind: it.kind,
+                comment: it.comment,
+                color: it.color,
+                quote: it.quote,
+                anchor: anchorForAnnotation(it.id, body)
+              });
+            }}
+            onEdit={(it, comment) => void selActions.saveAnnotationComment(it.id, comment)}
+            onColor={(it, color) => void selActions.saveAnnotationColor(it.id, color)}
+            onDelete={(it) => {
+              // 整卡批注（锚在整卡）＝本卡自身：删它只清批注，不动用户的卡
+              if (it.anchorWhole) void selActions.saveAnnotationComment(it.id, null);
+              else void selActions.removeAnnotation(it.id);
+            }}
+          />
+        </div>
+      )}
+
       {viewing ? (
         <ExtractCardFace
           key={viewing.id}
@@ -605,9 +676,6 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
             onPriority: (p) => void run(() => readingWorkflow.setPriority(current!.id, p), `优先级改为 ${p}`),
             onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), "已毕业：不再推送，仍保留在卡片浏览器"),
             onEdit: (text) => void run(() => readingWorkflow.updateContent(current!.id, text), "正文已保存"),
-            onExtract: onExtract
-              ? (payload) => onExtract(payload.text, { parentExtractId: current!.id, parentRange: payload.ranges })
-              : undefined,
             // 「跳转原文」按层级分流（规格 §1.2 D62）：有父摘录＝回父卡（查看态 + 高亮所引那段），
             // 根摘录＝跳源文档（逐字保持既有行为，含 returnTo="queue" 现场恢复语义）
             onJumpToSource: current!.contextRef?.parentExtractId
@@ -637,36 +705,6 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
             onUndo: () => void undo(),
             // 批 4 Task 10：把正文里的选区报给外层（菜单锚点 + 五动作的取材）
             onSelection: setFaceSel
-          }}
-        />
-      )}
-
-      {/* 批 4 Task 13/14（规格 §5.3）：批注栏——出现条件＝当前卡 ≥1 条注解；出现即占位 280px */}
-      {annotPanelVisible && (
-        <AnnotationPanel
-          items={annots}
-          currentId={null}
-          filter={annotFilter}
-          onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
-          palette={ANNOT_PALETTE}
-          onJump={(it) => {
-            // 点条目 → 文中滚动到锚点并短暂强调（合成 EPUB 的「文中」＝本条正文里，故滚到卡面正文）
-            document.querySelector(".extract-face-body")?.scrollIntoView({ block: "center", behavior: "smooth" });
-            setEditing({
-              id: it.id,
-              kind: it.kind,
-              comment: it.comment,
-              color: it.color,
-              quote: it.quote,
-              anchor: { x: 0, y: 0, width: 0, height: 0 }
-            });
-          }}
-          onEdit={(it, comment) => void selActions.saveAnnotationComment(it.id, comment)}
-          onColor={(it, color) => void selActions.saveAnnotationColor(it.id, color)}
-          onDelete={(it) => {
-            // 整卡批注（锚在整卡）＝本卡自身：删它只清批注，不动用户的卡
-            if (it.anchorWhole) void selActions.saveAnnotationComment(it.id, null);
-            else void selActions.removeAnnotation(it.id);
           }}
         />
       )}

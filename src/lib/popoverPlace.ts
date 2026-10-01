@@ -29,7 +29,8 @@ export function placePopover({
   anchor,
   container,
   size,
-  prefer = "auto"
+  prefer = "auto",
+  align = "start"
 }: {
   /** 锚点包围盒（视口坐标；用选区/标记的包围盒，不用 pointerup 点） */
   anchor: PopoverRect;
@@ -39,6 +40,8 @@ export function placePopover({
   size: { width: number; height: number };
   /** above=强制上方 / below=强制下方 / auto=按锚点在容器上或下半自动翻转 */
   prefer?: "above" | "below" | "auto";
+  /** start=沿锚点左缘对齐（菜单默认）/ center=在锚点正上方或正下方居中（批注浮层用） */
+  align?: "start" | "center";
 }): PopoverPlaceResult {
   const box = container ?? { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
   const m = POPOVER_MARGIN;
@@ -47,8 +50,10 @@ export function placePopover({
   const minTop = box.y + m;
   const maxBottom = box.y + box.height - m;
 
-  // 左右：先按锚点左缘对齐，再夹进容器
-  const left = Math.max(minLeft, Math.min(maxRight - size.width, anchor.x));
+  // 左右：start＝沿锚点左缘对齐（菜单）；center＝在锚点中心正上/正下方居中（批注浮层）。
+  // 两者都夹进容器（中心对齐时锚点贴边也不会把浮层顶出视口）。
+  const desiredLeft = align === "center" ? anchor.x + anchor.width / 2 - size.width / 2 : anchor.x;
+  const left = Math.max(minLeft, Math.min(maxRight - size.width, desiredLeft));
 
   // 上下：auto 判据＝锚点中心在容器中线之上 → below（菜单在选区下方）
   const anchorCenterY = anchor.y + anchor.height / 2;

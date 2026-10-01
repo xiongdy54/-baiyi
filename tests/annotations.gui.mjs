@@ -14,7 +14,9 @@
 //   ⑥ 角标跟色与不画规则：颜色＝该条批注色（内联 style.fill）/ 纯高亮不画
 //   ⑦ 栏出现条件与占位：无批注不出现 / 有则出现且占 280px
 //   ⑧ 退役检查：全应用内无「打开摘录」
+//   ③b 批注浮层：锚在所引那段（居中、空间不足翻面）＋ 失焦即收起并落库（2026-09-30 用户实测三条）
 //   ⑨ 截图判读：浅/深 × 摘录页/阅读器 四张落盘（人工目视，断言只保证文件非空）
+//   ⑩/⑪（v48.27 批注样张对齐批追加）：阅读器注解栏与 goToMark 导航、右侧停靠栏与工具栏 B 双入口
 import { spawn, execSync } from "node:child_process";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
@@ -437,6 +439,114 @@ try {
   check("落库 kind=highlight（默认模式）", aa.kind === "highlight", aa.kind);
   check("落库带 annotationColor=green", aa.color === "green", aa.color);
   check("挂在当前卡上（parentType=extract）", aa.parentType === "extract", aa.parentType);
+
+  // ============================================================
+  // ③b 批注浮层：锚在所引那段（居中；空间不足翻面）＋ 点亮外处即收起并落库
+  //     用户 2026-09-30 实测三条：①浮层固定出现在左上角；②点别处不消失；
+  //     ③于是点第二条也打不开它自己的浮层
+  // ============================================================
+  console.log("\n== ③b 批注浮层锚点 / 居中 / 失焦收起落库 ==");
+  const cardSpanRect = (needle) => `(() => {
+    const body = document.querySelector(".extract-face-body");
+    if (!body) return "";
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const i = (node.textContent || "").indexOf(${JSON.stringify(needle)});
+      if (i < 0) continue;
+      const r = document.createRange();
+      r.setStart(node, i); r.setEnd(node, i + ${needle.length});
+      const rect = r.getBoundingClientRect();
+      if (!rect.width) continue;
+      return JSON.stringify({ x1: rect.left + 2, x2: rect.right - 2, y: rect.top + rect.height / 2, text: r.toString() });
+    }
+    return "";
+  })()`;
+  const rowCenterExpr = (i) => `(() => {
+    const el = document.querySelectorAll("[data-annot-panel] [data-zitem]")[${i}];
+    if (!el) return "";
+    const r = el.getBoundingClientRect();
+    return JSON.stringify({ id: el.dataset.annotId, x: r.left + r.width * 0.6, y: r.top + 12 });
+  })()`;
+  const editorExpr = `(() => {
+    const el = document.querySelector("[data-editor-for]");
+    if (!el) return JSON.stringify({ up: false });
+    const r = el.getBoundingClientRect();
+    const b = document.querySelector(".extract-face-body")?.getBoundingClientRect() || null;
+    const ta = el.querySelector("textarea");
+    return JSON.stringify({
+      up: true, id: el.dataset.editorFor,
+      rect: { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width) },
+      body: b ? { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom), cx: Math.round((b.left + b.right) / 2) } : null,
+      focused: document.activeElement === ta,
+      inViewport: r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight
+    });
+  })()`;
+
+  // 第二条段锚注解：卡面里另选一段 → 点色（与 ③ 同一条真实路径，栏内随 workflow/changed 刷新）
+  const pick2 = JSON.parse(String(await cdp.eval(cardSpanRect("单独回忆"))) || "{}");
+  if (typeof pick2.x1 === "number") {
+    await drag({ x: pick2.x1, y: pick2.y }, { x: pick2.x2, y: pick2.y });
+    await wait(800);
+    await cdp.eval(`(() => { document.querySelector(".selection-menu .swatch[data-color='blue']")?.click(); return 1; })()`);
+    await wait(1200);
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await wait(700);
+  }
+  const panelIds = JSON.parse(String(await cdp.eval(`JSON.stringify([...document.querySelectorAll("[data-annot-panel] [data-zitem]")].map((el) => el.dataset.annotId))`)) || "[]");
+  check("③b-0 栏内条目 id 唯一（同一条不重复列出）", panelIds.length >= 2 && new Set(panelIds).size === panelIds.length, JSON.stringify(panelIds));
+
+  const r0 = JSON.parse(String(await cdp.eval(rowCenterExpr(0))) || "{}");
+  check("③b-pre 注解栏有可点条目（前置自查，防空转）", typeof r0.x === "number" && typeof r0.id === "string", JSON.stringify(r0));
+  await clickAt(cdp, r0.x, r0.y);
+  await wait(900);
+  const ed1 = JSON.parse(String(await cdp.eval(editorExpr)) || "{}");
+  check("③b-1 点条目打开的是该条的浮层", ed1.up === true && ed1.id === r0.id, JSON.stringify({ want: r0.id, got: ed1.id }));
+  check(
+    "③b-2 浮层锚在所引那段：不在视口原点、纵向贴着卡面正文",
+    ed1.up === true && ed1.rect.l > 100 && ed1.rect.t > 60 && ed1.body != null && ed1.rect.t >= ed1.body.t - 300 && ed1.rect.b <= ed1.body.b + 300,
+    JSON.stringify({ ed: ed1.rect, body: ed1.body })
+  );
+  check(
+    "③b-3 浮层在正文区横向居中（±140px）",
+    ed1.up === true && ed1.body != null && Math.abs(Math.round((ed1.rect.l + ed1.rect.r) / 2) - ed1.body.cx) <= 140,
+    JSON.stringify({ edCenter: ed1.up ? Math.round((ed1.rect.l + ed1.rect.r) / 2) : null, bodyCenter: ed1.body?.cx })
+  );
+  check("③b-4 浮层在视口内且输入框已获焦点（可直接输入）", ed1.inViewport === true && ed1.focused === true, JSON.stringify({ inViewport: ed1.inViewport, focused: ed1.focused }));
+  await screenshot(cdp, "tmp-annot-editor-anchored.png");
+
+  // 输入 → 点亮外处 ⇒ 收起且已落库（没有保存按钮，靠失焦保存）
+  const typedText = "ANNOT 浮层锚点与失焦保存";
+  await cdp.eval(`(() => {
+    const ta = document.querySelector("[data-editor-for] textarea");
+    if (!ta) return 0;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+    setter.call(ta, ${JSON.stringify("ANNOT 浮层锚点与失焦保存")});
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    return 1;
+  })()`);
+  await wait(300);
+  await clickAt(cdp, 420, 60); // 点页面别处（顶部空白区）
+  await wait(1300);
+  const edGone = await cdp.eval(`!document.querySelector("[data-editor-for]")`);
+  const savedRow = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); const hit = (all || []).find((e) => e.id === ${JSON.stringify(r0.id)}); return hit ? String(hit.comment ?? "") : "MISSING"; })()`);
+  check("③b-5 点别处 ⇒ 浮层收起", edGone === true, String(edGone));
+  check("③b-6 失焦收起时文字已落库（无保存按钮）", String(savedRow) === typedText, JSON.stringify({ got: savedRow }));
+
+  const r1 = JSON.parse(String(await cdp.eval(rowCenterExpr(1))) || "{}");
+  if (typeof r1.x === "number") {
+    await clickAt(cdp, r1.x, r1.y);
+    await wait(900);
+    const ed2 = JSON.parse(String(await cdp.eval(editorExpr)) || "{}");
+    check("③b-7 点第二条 ⇒ 打开它自己的浮层（id 相符且在视口内）", ed2.up === true && ed2.id === r1.id && ed2.inViewport === true, JSON.stringify({ want: r1.id, got: ed2.id, rect: ed2.rect }));
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await wait(500);
+  } else {
+    check("③b-7 点第二条 ⇒ 打开它自己的浮层（id 相符且在视口内）", false, "栏内不足两条：" + JSON.stringify(panelIds));
+  }
+
 
   // ============================================================
   // ⑦ 栏出现条件与占位
@@ -879,9 +989,12 @@ try {
     const mr = main ? main.getBoundingClientRect() : null;
     const sr = sb ? sb.getBoundingClientRect() : null;
     return JSON.stringify({
-      mainW: mr ? Math.round(mr.width * 10) / 10 : null, mainR: mr ? mr.right : null,
-      sbW: sr ? Math.round(sr.width * 10) / 10 : null, sbL: sr ? sr.left : null,
-      overlap: mr && sr ? Math.round((mr.right - sr.left) * 10) / 10 : null,
+      mainW: mr ? Math.round(mr.width * 10) / 10 : null,
+      mainL: mr ? Math.round(mr.left * 10) / 10 : null, mainR: mr ? Math.round(mr.right * 10) / 10 : null,
+      sbW: sr ? Math.round(sr.width * 10) / 10 : null,
+      sbL: sr ? Math.round(sr.left * 10) / 10 : null, sbR: sr ? Math.round(sr.right * 10) / 10 : null,
+      /* 侧栏在**左**（2026-10-01）：不相交＝栏右缘 ≤ 正文左缘；gap＝正文左缘 − 栏右缘 */
+      gap: mr && sr ? Math.round((mr.left - sr.right) * 10) / 10 : null,
       tabs: [...document.querySelectorAll("[data-sidebar-tab]")].map((b) => b.dataset.sidebarTab)
     });
   })()`;
@@ -909,8 +1022,9 @@ try {
     return (all || []).filter((e) => { const c = e.contextRef || {}; const a = c.sourceAnchor || {}; return String(a.documentId || c.documentId || "") === ${JSON.stringify(pdfDocId)} && !c.parentExtractId; }).map((e) => e.id).join(",");
   })()`));
   check(
-    "⑪b 打开侧栏：正文让宽 280±1px 且与栏不相交",
-    gClosed.mainW != null && gOpen.mainW != null && Math.abs(gClosed.mainW - gOpen.mainW - 280) <= 1 && Math.abs(gOpen.overlap) <= 1 && Math.abs(gOpen.sbW - 280) <= 1,
+    "⑪b 打开侧栏：正文让宽 280±1px、栏贴左缘且与正文不相交",
+    gClosed.mainW != null && gOpen.mainW != null && Math.abs(gClosed.mainW - gOpen.mainW - 280) <= 1 &&
+      Math.abs(gOpen.sbW - 280) <= 1 && gOpen.sbL === 0 && Math.abs(gOpen.gap) <= 1,
     JSON.stringify({ closed: gClosed, open: gOpen })
   );
   check(

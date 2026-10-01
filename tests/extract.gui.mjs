@@ -80,8 +80,10 @@ try {
   // 批 4 Task 18（R29）：`extractReader` 专用页退役 →「打开摘录」动作不再是动作集成员。
   // 契约变更：动作集去掉了「打开摘录」（其余不变）。
   check(
-    "动作齐全（下一条/推迟/毕业/跳转原文；**不含**已退役的「打开摘录」）",
-    ["下一条", "推迟", "毕业", "跳转原文"].every((t) => face.includes(t)) && !face.includes("打开摘录"),
+    "动作齐全（下一条/推迟/优先级/毕业 + 更多；不含已退役的「打开摘录」「摘录」「快捷推迟」）",
+    ["下一条", "推迟", "优先级", "毕业", "更多"].every((t) => face.includes(t)) &&
+      !face.includes("打开摘录") &&
+      !face.includes("快捷推迟") &&
     face.slice(0, 200)
   );
   check("正文可编辑（EditableText 裸壳在位）", (await cdp.eval(`!!document.querySelector(".extract-face .review-editable")`)) === true, "无 .review-editable");
@@ -95,7 +97,7 @@ try {
   // 5) 下一条 = 读后推进（interval ×1.6），且不再出现
   const before = await cdp.eval(`(async () => { const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"] } }); const e = q.extracts[0]; return JSON.stringify({ id: e?.id, ivl: e?.intervalDays, pc: e?.processCount }); })()`);
   const b = JSON.parse(before || "{}");
-  await cdp.eval(`(() => { const btn = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim() === "下一条"); btn?.click(); return !!btn; })()`);
+  await cdp.eval(`(() => { const btn = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim().startsWith("下一条")); btn?.click(); return !!btn; })()`);
   await wait(1500);
   const after = await cdp.eval(`(async () => { const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"] } }); const e = q.extracts[0]; const d = await window.workflowAPI.get(${JSON.stringify(b.id)}); return JSON.stringify({ remaining: q.extracts.length, ivl: d?.intervalDays, pc: d?.processCount }); })()`);
   const a = JSON.parse(after || "{}");
@@ -130,9 +132,18 @@ try {
     exTypo
   );
 
-  // 7) 推迟 N 天（用「快捷推迟 3 天」）→ 状态 postponed
-  const postponeClicked = await cdp.eval(`(() => { const btn = [...document.querySelectorAll(".extract-face-hints button")].find((x) => x.textContent.includes("3 天")); btn?.click(); return !!btn; })()`);
-  check("快捷推迟按钮在位可点", postponeClicked === true, postponeClicked);
+  // 7) 推迟 N 天：底栏里由输入框给天数 + 「推迟」（快捷推迟 1/3/7/30 已退役）
+  const postponeClicked = await cdp.eval(`(() => {
+    const input = document.querySelector(".extract-face-actions input[type=number]");
+    const btn = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim() === "推迟");
+    if (!input || !btn) return false;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "3");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    btn.click();
+    return true;
+  })()`);
+  check("推迟：输入框给天数 + 推迟按钮在位可点", postponeClicked === true, postponeClicked);
   await wait(1600);
   const postponed = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(b.id)}); return JSON.stringify({ ivl: d?.intervalDays, status: d?.status, pc: d?.postponeCount }); })()`);
   const p = JSON.parse(postponed || "{}");
@@ -318,8 +329,23 @@ try {
   check("真实阅读确实写入了进度（基线非空，防空转）", typeof progressBaseline === "string" && progressBaseline.length > 2, progressBaseline);
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "摘录"); b?.click(); return !!b; })()`);
   await wait(1700);
-  const jumpOk = await cdp.eval(`(() => { const b = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim() === "跳转原文"); b?.click(); return !!b; })()`);
-  check("跳转原文：按钮在位可点", jumpOk === true, jumpOk);
+  // 点「更多」与点弹层里的条目要分两次 eval：React 重渲染是异步的，
+  // 同一个 eval 里「点完立刻查」读到的还是旧 DOM（本项目实测踩过）
+  await cdp.eval(`(() => { const m = [...document.querySelectorAll(".extract-face-actions button")].find((x) => x.textContent.trim().startsWith("更多")); m?.click(); return !!m; })()`);
+  await wait(400);
+  const jumpOk = await cdp.eval(`(() => { const b = [...document.querySelectorAll(".extract-face-actions .bar-pop button")].find((x) => x.textContent.trim() === "跳转原文"); b?.click(); return !!b; })()`);
+  const barDump = await cdp.eval(`(() => {
+    const bar = document.querySelector(".extract-face-actions");
+    const pop = document.querySelector(".extract-face-actions .bar-pop");
+    return JSON.stringify({
+      bar: !!bar, pop: !!pop,
+      btns: bar ? [...bar.querySelectorAll("button")].map((b) => b.textContent.trim()) : [],
+      popBtns: pop ? [...pop.querySelectorAll("button")].map((b) => b.textContent.trim()) : [],
+      cols: !!document.querySelector(".extract-page-cols"),
+      panel: !!document.querySelector(".annot-side"), toggle: !!document.querySelector("[data-annot-toggle]")
+    });
+  })()`);
+  check("跳转原文：按钮在位可点", jumpOk === true, String(jumpOk) + " | " + String(barDump));
   await wait(2800);
   check("跳转原文：阅读器已打开（现场查看语义）", (await cdp.eval(`!!document.querySelector(".reader-wrap")`)) === true, "未打开");
   await cdp.eval(`(() => { const w = document.querySelector(".reader-wrap"); if (w) w.scrollTop = 1200; w?.dispatchEvent(new Event("scroll", { bubbles: true })); return true; })()`);

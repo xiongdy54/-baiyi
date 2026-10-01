@@ -71,6 +71,7 @@ const {
   normalizeAnnotateCustomEnabled,
   normalizeAnnotatePalette,
   computeSessionQueue,
+  computeCardCounts,
   readAiRerank,
   saveAiRerank,
   getActiveExtractEngine,
@@ -561,6 +562,7 @@ ipcMain.handle("limits:usage", (_e, now) => getDailyUsage(now));
 ipcMain.handle("limits:state", (_e, now) => getLimitsState(now));
 ipcMain.handle("limits:validate", (_e, patch) => validateLimits(patch));
 ipcMain.handle("session:queue", (_e, now, opts) => computeSessionQueue(now, opts || {}));
+ipcMain.handle("session:counts", (_e, now, opts) => computeCardCounts(now, opts || {}));
 ipcMain.handle("undo:last", () => undoLast());
 ipcMain.handle("undo:info", () => getUndoInfo());
 ipcMain.handle("library:setPriority", (_e, itemId, priority) => setLibraryItemPriority(String(itemId), priority));

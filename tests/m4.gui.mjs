@@ -278,11 +278,29 @@ if (guard6) {
   await sleep(500);
   await press({ key: "3", bubbles: true, cancelable: true });
   await sleep(1800);
+  // 撤销评分已搬进底栏「更多」（2026-10-01）：先开更多、再读弹层里的条目（点开与查询分两次 eval）
+  await evalJS(`(() => {
+    const m = [...document.querySelectorAll('.review-bar .bar-more button')].find((x) => x.textContent.trim().startsWith('更多'));
+    m?.click();
+    return m ? 1 : 0;
+  })()`);
+  await sleep(400);
   const undoBtn = await evalJS(`(() => {
-    const b = [...document.querySelectorAll('.review-meta button')].find((x) => x.textContent.startsWith('撤销评分'));
+    const b = [...document.querySelectorAll('.review-bar .bar-pop button')].find((x) => x.textContent.startsWith('撤销评分'));
     return b ? b.textContent : 'NO UNDO BTN';
   })()`);
-  check("评分后出现「撤销评分（Good）」按钮", String(undoBtn).includes("撤销评分") && String(undoBtn).includes("Good"), undoBtn);
+  const barDiag = await evalJS(`(() => {
+    const bar = document.querySelector(".review-bar");
+    const pop = document.querySelector(".review-bar .bar-pop");
+    return JSON.stringify({
+      bar: !!bar, pop: !!pop,
+      barBtns: bar ? [...bar.querySelectorAll("button")].map((b) => b.textContent.trim()) : [],
+      popBtns: pop ? [...pop.querySelectorAll("button")].map((b) => b.textContent.trim()) : []
+    });
+  })()`);
+  check("评分后出现「撤销评分（Good）」按钮", String(undoBtn).includes("撤销评分") && String(undoBtn).includes("Good"), String(undoBtn) + " | " + String(barDiag));
+  await press({ key: "Escape", bubbles: true, cancelable: true });
+  await sleep(300);
   // 按 z 撤销：M4-6 回到当前位、背面展开可立即重评、FSRS 状态回 new
   await press({ key: "z", bubbles: true, cancelable: true });
   await sleep(1800);

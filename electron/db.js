@@ -3403,6 +3403,42 @@ function applyAiRerank(items, cache) {
  * **只影响展示、零调度写入**——未放行的条目在库内仍 due（先例＝§4.16 同源延后）。
  * 退化保证：`scope` 为空且余额充足时，`cards` 与 `computeTodayQueue().cards` 逐 id 相等。
  */
+/**
+ * 复习页顶栏的**今日可用**三档计数（与 computeSessionQueue 同一预算口径，唯一真源在 db 侧）：
+ * 未学习＝今天还会发的新卡（受 newCards 额度与结构闸约束）；学习中/待复习＝今天还会发的
+ * learning/relearning 与 review 卡。额度用尽的部分**不计**——这三个数回答的是「今天还能刷多少」，
+ * 不是「库里有多少」（用户 2026-10-01 选定）。
+ */
+function computeCardCounts(nowTs, opts) {
+  const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
+  const o = opts || {};
+  const scope = o.scope || null;
+  const limits = limitsForScope(readLimits(), scope);
+  const remaining = limitsRemaining(limits, getDailyUsage(now));
+  const ignore = limits.ignoreReviewLimitForNew;
+  const q = computeTodayQueue(now);
+  let cardBudget = remaining.cardReviews;
+  let newBudget = remaining.newCards;
+  const out = { new: 0, learning: 0, review: 0 };
+  for (const c of applyScope(q.cards, scope, "card")) {
+    const reps = Number(c.fsrs && c.fsrs.reps) || 0;
+    const state = String((c.fsrs && c.fsrs.state) || "new");
+    if (reps === 0 || state === "new") {
+      if (newBudget <= 0) continue;
+      if (cardBudget <= 0 && !ignore) continue;
+      newBudget -= 1;
+      if (cardBudget > 0) cardBudget -= 1;
+      out.new += 1;
+      continue;
+    }
+    if (cardBudget <= 0) continue;
+    cardBudget -= 1;
+    if (state === "learning" || state === "relearning") out.learning += 1;
+    else out.review += 1;
+  }
+  return out;
+}
+
 function computeSessionQueue(nowTs, opts) {
   const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
   const o = opts || {};
@@ -6092,6 +6128,7 @@ module.exports = {
   saveAiRerank,
   getActiveExtractEngine: () => getActiveEngine(),
   computeSessionQueue,
+  computeCardCounts,
   setLibraryItemPriority,
   getLastUndoableReview,
   undoLastReview,

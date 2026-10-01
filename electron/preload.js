@@ -83,7 +83,8 @@ contextBridge.exposeInMainWorld("limitsAPI", {
 
 // v48.22（D58 §6.8-3）：会话队列（卡片 ∪ 摘录；只影响展示、零调度写入）
 contextBridge.exposeInMainWorld("sessionAPI", {
-  queue: (now, opts) => ipcRenderer.invoke("session:queue", now, opts)
+  queue: (now, opts) => ipcRenderer.invoke("session:queue", now, opts),
+  counts: (now, opts) => ipcRenderer.invoke("session:counts", now, opts)
 });
 
 contextBridge.exposeInMainWorld("undoAPI", {

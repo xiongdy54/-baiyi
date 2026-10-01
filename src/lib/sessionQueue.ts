@@ -31,6 +31,20 @@ export interface LimitsState {
   learningDayStart: number;
 }
 
+/** 复习页顶栏三档计数（今日可用口径；口径唯一在 db 侧 computeCardCounts） */
+export interface CardCounts {
+  new: number;
+  learning: number;
+  review: number;
+}
+
+/** 取三档计数（同队列预算口径；scope 与队列同传，保证「还能刷多少」与队列一致） */
+export async function fetchCardCounts(scope?: unknown): Promise<CardCounts> {
+  const api = (window as unknown as { sessionAPI?: { counts?: (now?: number, opts?: unknown) => Promise<CardCounts> } }).sessionAPI;
+  const r = await api?.counts?.(Date.now(), scope ? { scope } : {});
+  return { new: Number(r?.new) || 0, learning: Number(r?.learning) || 0, review: Number(r?.review) || 0 };
+}
+
 export interface SessionItem {
   kind: "card" | "extract";
   id: string;

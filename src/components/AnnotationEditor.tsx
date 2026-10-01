@@ -4,8 +4,13 @@
 //   · **批注文字清空 ＝ 删除批注**（comment → null）：条目本身保留（纯高亮仍是高亮、摘录仍是摘录）。
 //   · 颜色方块 → 调色浮层（用户色板 + 自定义取色）；选色即时落库。
 //   · 删除按钮**按 kind 换标签**（R36）：highlight →「删除高亮」；extract →「删除摘录」；各带就地二次确认。
-//   · 焦点陷阱 + Esc 关闭（useDialogA11y 既有件）。
-// 定位一律走 src/lib/popoverPlace.ts（与 MarkPopover / SelectionMenu 同一份实现）。
+//   · **失焦即走**（R37 强化）：焦点离开浮层（点别处/点别的条目）→ 先把文字落库、再立刻收起；
+//     Esc 同样「先落库再收起」。故浮层不会赖在屏上挡住下一次点击（实测：此前点别处不消失，
+//     于是点第二条也打不开它自己的浮层）。
+//   · 焦点陷阱 + Esc 关闭（useDialogA11y 既有件）；**非模态**（aria-modal=false）——它靠失焦收起，
+//     不是拦着背景的模态对话框。
+// 定位一律走 src/lib/popoverPlace.ts（与 MarkPopover / SelectionMenu 同一份实现）：
+// 锚点＝所引那段文字的包围盒，**居中**贴其上/下方，空间不够自动翻面。
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { placePopover, type PopoverRect } from "../lib/popoverPlace";
 import { useDialogA11y } from "../lib/dialogA11y";
@@ -62,7 +67,6 @@ export default function AnnotationEditor({
   onDelete,
   onClose
 }: AnnotationEditorProps) {
-  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [text, setText] = useState(comment ?? "");
@@ -73,6 +77,9 @@ export default function AnnotationEditor({
   const hintRef = useRef<number | null>(null);
   /** 已落库文字（判等用：没变就不写库，避免失焦时白发一次更新） */
   const committedRef = useRef<string>(comment ?? "");
+  /** 最新文字（收起时落库读它：监听器不随每次输入重挂） */
+  const textRef = useRef<string>(comment ?? "");
+  textRef.current = text;
 
   const colors = palette && palette.length ? palette : (ANNOT_COLORS as readonly string[]);
 
@@ -98,7 +105,9 @@ export default function AnnotationEditor({
       anchor,
       container,
       size: { width: el.offsetWidth, height: el.offsetHeight },
-      prefer: "below"
+      // 贴所引那段的下方居中；下方放不下自动翻到上方（空间不足再夹进容器）
+      prefer: "below",
+      align: "center"
     });
     setPos({ left, top });
   }, [anchor.x, anchor.y, anchor.width, anchor.height, colorOpen, confirmDelete]);
@@ -125,6 +134,28 @@ export default function AnnotationEditor({
     }
   };
 
+  /**
+   * 收起浮层：**先把文字落库、再立刻消失**。落库是已发出的 IPC 调用，不受卸载影响；
+   * 不这样做的话，防抖计时器会随卸载被清掉 → 刚敲的字丢掉（实测：点别处消失后文字没保存）。
+   */
+  const closeAndSave = () => {
+    void commit(textRef.current);
+    onClose();
+  };
+  const panelRef = useDialogA11y<HTMLDivElement>(closeAndSave);
+
+  // 点浮层之外 ⇒ 落库并收起（点别条目的 mousedown 先走这里，随后的 click 才能打开它自己的浮层）
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && panelRef.current?.contains(t)) return;
+      closeAndSave();
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 400ms 防抖落库
   useEffect(() => {
     if (text.trim() === committedRef.current.trim()) return;
@@ -136,12 +167,12 @@ export default function AnnotationEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text]);
 
-  // 失焦即落库（R37）：浮层内换焦点（点删除、点色块）不算「离开浮层」，
-  // 故只在焦点移到**浮层之外**时才落库，避免点删除时先写一次空批注。
+  // 失焦即落库**并收起**（R37）：浮层内换焦点（点删除、点色块）不算「离开浮层」，
+  // 故只在焦点移到**浮层之外**时才收，避免点删除时先写一次空批注。
   function handleBlur(e: React.FocusEvent<HTMLTextAreaElement>) {
     const next = e.relatedTarget as Node | null;
     if (next && panelRef.current?.contains(next)) return;
-    void commit(text);
+    closeAndSave();
   }
 
   const deleteLabel = kind === "highlight" ? "删除高亮" : "删除摘录";
@@ -151,7 +182,7 @@ export default function AnnotationEditor({
       ref={panelRef}
       className="editor"
       role="dialog"
-      aria-modal="true"
+      aria-modal="false"
       aria-label={kind === "highlight" ? "编辑高亮" : "编辑摘录"}
       data-editor-kind={kind}
       data-editor-for={extractId}

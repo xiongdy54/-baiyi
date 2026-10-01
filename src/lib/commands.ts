@@ -87,6 +87,20 @@ function getBinding(id: string): string {
   return typeof o === "string" && o ? o : def.defaultKey;
 }
 
+/**
+ * 生效键的**显示串**（给按钮 title 用；无绑定＝空串）。
+ * 走 getBinding ⇒ 用户在设置里改了键位，界面提示跟着变（不许把「空格」写死在按钮上）。
+ */
+const KEY_LABEL: Record<string, string> = { Space: "空格", ArrowLeft: "←", ArrowRight: "→", Enter: "回车", Escape: "Esc" };
+export function bindingHint(id: string): string {
+  const combo = getBinding(id);
+  if (!combo) return "";
+  return combo
+    .split("+")
+    .map((part) => KEY_LABEL[part] ?? part)
+    .join("+");
+}
+
 function getAllBindings(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const def of COMMANDS) out[def.id] = getBinding(def.id);

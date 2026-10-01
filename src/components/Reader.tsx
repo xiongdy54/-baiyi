@@ -1521,8 +1521,49 @@ export default function Reader({
                 </div>
               </div>
               <div className="reader-engine-viewport">
-                {/* D2：正文区与右侧栏是 flex 兄弟——栏开着时正文让宽度，不是压在正文上；
-                    翻页热区只覆盖正文区（.reader-engine-main），不盖到栏上 */}
+                {/* D2：正文区与侧栏是 flex 兄弟（侧栏在**左**，2026-10-01）——栏开着时正文让宽度，
+                    不是压在正文上；翻页热区只覆盖正文区（.reader-engine-main），不盖到栏上 */}
+                {sidebarOpen && sidebarAvailable && (
+                  <ReaderSidebar
+                    tocItems={tocItems}
+                    activeHref={tocActiveHref}
+                    onNavigate={(item) => {
+                      void kernelRef.current?.goTo({ href: item.href });
+                      setSidebarOpen(false);
+                    }}
+                    onClose={() => setSidebarOpen(false)}
+                    tab={sidebarTab}
+                    onTabChange={setSidebarTab}
+                    extractsPanel={
+                      /* D2：页签各自按自己的数据在场——本文档没有注解就不出现「摘录」页签 */
+                      docAnnotCount > 0 ? (
+                      <ReaderExtractsPanel
+                        documentId={contextRef?.documentId ?? null}
+                        engine={engineKind}
+                        orderKey={marksOrderKey}
+                        getMarkOrder={() => kernelRef.current?.getMarkOrder?.() ?? []}
+                        filter={annotSettings.annotationFilter}
+                        onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
+                        palette={annotSettings.annotatePalette}
+                        currentId={annotFocus}
+                        unavailableIds={Object.keys(annotUnavailable)}
+                        onJump={jumpToMark}
+                        onEdit={(id, comment) => void selActions.saveAnnotationComment(id, comment)}
+                        onColor={(id, color) => void selActions.saveAnnotationColor(id, color)}
+                        onDelete={(id) => void selActions.removeAnnotation(id)}
+                      />
+                      ) : null
+                    }
+                    mapItems={mapItems}
+                    mapAvailable={mapAvailable}
+                    onMapNavigate={(it) => {
+                      // 节点点击 → 跳该节点自有区间起点（复用既有导图跳转：区间起点 → 该单元锚 → goTo）
+                      const anchor = mapUnitAnchorsRef.current[it.start];
+                      if (anchor) void kernelRef.current?.goTo({ href: anchor });
+                      setSidebarOpen(false);
+                    }}
+                  />
+                )}
                 <div className="reader-engine-main">
                 {engineError ? (
                   <div className="reader-engine-error" role="alert">
@@ -1573,47 +1614,6 @@ export default function Reader({
                   </>
                 )}
                 </div>
-                {sidebarOpen && sidebarAvailable && (
-                  <ReaderSidebar
-                    tocItems={tocItems}
-                    activeHref={tocActiveHref}
-                    onNavigate={(item) => {
-                      void kernelRef.current?.goTo({ href: item.href });
-                      setSidebarOpen(false);
-                    }}
-                    onClose={() => setSidebarOpen(false)}
-                    tab={sidebarTab}
-                    onTabChange={setSidebarTab}
-                    extractsPanel={
-                      /* D2：页签各自按自己的数据在场——本文档没有注解就不出现「摘录」页签 */
-                      docAnnotCount > 0 ? (
-                      <ReaderExtractsPanel
-                        documentId={contextRef?.documentId ?? null}
-                        engine={engineKind}
-                        orderKey={marksOrderKey}
-                        getMarkOrder={() => kernelRef.current?.getMarkOrder?.() ?? []}
-                        filter={annotSettings.annotationFilter}
-                        onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
-                        palette={annotSettings.annotatePalette}
-                        currentId={annotFocus}
-                        unavailableIds={Object.keys(annotUnavailable)}
-                        onJump={jumpToMark}
-                        onEdit={(id, comment) => void selActions.saveAnnotationComment(id, comment)}
-                        onColor={(id, color) => void selActions.saveAnnotationColor(id, color)}
-                        onDelete={(id) => void selActions.removeAnnotation(id)}
-                      />
-                      ) : null
-                    }
-                    mapItems={mapItems}
-                    mapAvailable={mapAvailable}
-                    onMapNavigate={(it) => {
-                      // 节点点击 → 跳该节点自有区间起点（复用既有导图跳转：区间起点 → 该单元锚 → goTo）
-                      const anchor = mapUnitAnchorsRef.current[it.start];
-                      if (anchor) void kernelRef.current?.goTo({ href: anchor });
-                      setSidebarOpen(false);
-                    }}
-                  />
-                )}
               </div>
             </>
           ) : (

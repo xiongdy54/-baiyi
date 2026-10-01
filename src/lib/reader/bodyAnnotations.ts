@@ -81,6 +81,25 @@ function rangeFromOffsets(root: Node, start: number, end: number): Range | null 
   }
 }
 
+/**
+ * 字符区间 → **视口矩形**（批注浮层的锚点用）：与 `rangeFromOffsets` / `ExtractCardFace.domTextOffset`
+ * 同一口径（文本节点长度累加、`<br>` 计 1），故栏内条目与文中那段一定对得上。
+ * 取整段包围盒（跨行时是并集盒）——与选区菜单同规：锚点＝包围盒而不是某个点。
+ * 区间越界/空文本/量不到尺寸时返回 null（调用方退回卡面矩形，别把浮层丢到视口原点）。
+ */
+export function rectFromOffsets(
+  root: HTMLElement | null,
+  start: number,
+  end: number
+): { x: number; y: number; width: number; height: number } | null {
+  if (!root || !(end > start)) return null;
+  const range = rangeFromOffsets(root, start, end);
+  if (!range) return null;
+  const rect = range.getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) return null;
+  return { x: rect.left, y: rect.top, width: rect.width, height: rect.height };
+}
+
 export interface BodyAnnotationGroup {
   /** 该条的批注色（色板 id 或 #hex）；null＝未选色 */
   color?: string | null;
