@@ -6928,6 +6928,93 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     };
   }
 
+  // src/lib/reader/multiHighlight.ts
+  var MULTI_HIGHLIGHT_NAME = "multi-select";
+  function createMultiHighlight(opts) {
+    const entries = [];
+    const registered = /* @__PURE__ */ new Set();
+    const styles = /* @__PURE__ */ new Map();
+    const winOf = (doc) => doc.defaultView;
+    const sameBoundaries = (a3, b3) => a3.compareBoundaryPoints(Range.START_TO_START, b3) === 0 && a3.compareBoundaryPoints(Range.END_TO_END, b3) === 0;
+    const ensureStyle = (doc) => {
+      const css = opts.styleFor?.(doc);
+      if (!css) return;
+      let el = styles.get(doc);
+      if (!el || !el.isConnected) {
+        el = doc.createElement("style");
+        el.setAttribute("data-reader-multi-highlight", "1");
+        (doc.head ?? doc.documentElement)?.appendChild(el);
+        styles.set(doc, el);
+      }
+      if (el.textContent !== css) el.textContent = css;
+    };
+    const drop = (doc) => {
+      winOf(doc)?.CSS?.highlights?.delete(MULTI_HIGHLIGHT_NAME);
+      registered.delete(doc);
+    };
+    const repaint = () => {
+      for (let i3 = entries.length - 1; i3 >= 0; i3--) {
+        if (!entries[i3].range.startContainer.isConnected) entries.splice(i3, 1);
+      }
+      const byDoc = /* @__PURE__ */ new Map();
+      for (const e3 of entries) {
+        const list = byDoc.get(e3.doc) ?? [];
+        list.push(e3.range);
+        byDoc.set(e3.doc, list);
+      }
+      for (const doc of [...registered]) if (!byDoc.has(doc)) drop(doc);
+      for (const [doc, ranges] of byDoc) {
+        const win = winOf(doc);
+        if (!win?.CSS?.highlights || typeof win.Highlight !== "function") continue;
+        ensureStyle(doc);
+        win.CSS.highlights.set(MULTI_HIGHLIGHT_NAME, new win.Highlight(...ranges));
+        registered.add(doc);
+      }
+    };
+    return {
+      /**
+       * 按集合动作并入/移除「当前选区」：
+       * replace＝只留当前选区；append＝并入；remove＝移除与当前选区边界相同的那段（再点同一段＝移出）。
+       */
+      update(action) {
+        const doc = opts.currentDoc();
+        const range = doc?.defaultView?.getSelection()?.rangeCount ? doc.defaultView.getSelection()?.getRangeAt(0) : null;
+        if (!doc || !range || !range.toString().trim()) return;
+        if (action === "replace") entries.length = 0;
+        const hit = entries.findIndex((e3) => e3.doc === doc && sameBoundaries(e3.range, range));
+        if (action === "remove") {
+          if (hit >= 0) entries.splice(hit, 1);
+        } else {
+          if (hit >= 0) entries.splice(hit, 1);
+          entries.push({ doc, range });
+        }
+        repaint();
+      },
+      /** 清空全部高亮（选区被清空 / 菜单动作完成 / Esc / 章切换由壳层调用） */
+      clear() {
+        entries.length = 0;
+        for (const doc of [...registered]) drop(doc);
+      },
+      /** 当前存活段数（调试/测试用；失效段不计） */
+      count() {
+        return entries.filter((e3) => e3.range.startContainer.isConnected).length;
+      }
+    };
+  }
+
+  // src/lib/reader/annotColor.ts
+  var HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
+  function annotSoft(color, fallback = "var(--accent-soft)") {
+    const c2 = String(color ?? "").trim();
+    if (!c2) return fallback;
+    return HEX_RE.test(c2) ? `color-mix(in srgb, ${c2} 16%, transparent)` : `var(--annot-${c2}-soft)`;
+  }
+  function annotKey(color) {
+    const c2 = String(color ?? "").trim();
+    if (!c2) return "default";
+    return HEX_RE.test(c2) ? `hex-${c2.slice(1).toLowerCase()}` : c2;
+  }
+
   // src/lib/reader/foliate/adapter.ts
   function extractImageContext(doc, img) {
     try {
@@ -7015,6 +7102,151 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     let lastRelocate = null;
     let appearance = null;
     let currentFlow = "scrolled";
+    const multiHighlight = createMultiHighlight({
+      currentDoc() {
+        for (const { doc } of view.renderer?.getContents() ?? []) {
+          const sel = doc.defaultView?.getSelection();
+          if (sel && !sel.isCollapsed && sel.rangeCount > 0 && sel.toString().trim()) return doc;
+        }
+        return null;
+      },
+      styleFor() {
+        const value = getComputedStyle(document.body).getPropertyValue("--hl-multi").trim();
+        return `::highlight(${MULTI_HIGHLIGHT_NAME}){background-color:${value || "color-mix(in srgb, #002fa7 22%, transparent)"};}`;
+      }
+    });
+    const MARK_HIGHLIGHT_NAME = "extract-mark";
+    let docMarks = [];
+    const markRanges = /* @__PURE__ */ new Map();
+    const markStyles = /* @__PURE__ */ new Map();
+    const registeredHighlightNames = /* @__PURE__ */ new Map();
+    let hoveredMarkId = null;
+    const markHoverHandlers = /* @__PURE__ */ new Set();
+    const markClickHandlers = /* @__PURE__ */ new Set();
+    const winOf = (doc) => doc.defaultView ?? null;
+    const evalColor = (css, fallback) => {
+      const probe = document.createElement("div");
+      probe.style.cssText = `position:absolute;width:0;height:0;display:none;background:${css};`;
+      document.body.appendChild(probe);
+      const value = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return value && value !== "rgba(0, 0, 0, 0)" ? value : fallback;
+    };
+    const markStyleCss = () => {
+      const keys = /* @__PURE__ */ new Set(["default"]);
+      for (const m3 of docMarks) keys.add(annotKey(m3.color));
+      return [...keys].map((k3) => {
+        const soft = k3 === "default" ? "var(--accent-soft)" : annotSoft(k3.startsWith("hex-") ? `#${k3.slice(4)}` : k3);
+        const value = evalColor(soft, "color-mix(in srgb, #002fa7 8%, transparent)");
+        return `::highlight(${highlightNameFor(k3)}){background-color:${value};}`;
+      }).join("\n");
+    };
+    const highlightNameFor = (key) => key === "default" ? MARK_HIGHLIGHT_NAME : `${MARK_HIGHLIGHT_NAME}-${key.replace(/[^a-z0-9-]/gi, "")}`;
+    const ensureMarkStyle = (doc) => {
+      const css = markStyleCss();
+      let el = markStyles.get(doc);
+      if (!el || !el.isConnected) {
+        el = doc.createElement("style");
+        el.setAttribute("data-reader-extract-mark", "1");
+        (doc.head ?? doc.documentElement)?.appendChild(el);
+        markStyles.set(doc, el);
+      }
+      if (el.textContent !== css) el.textContent = css;
+    };
+    const resolveMarkRange = (cfi, index, doc) => {
+      try {
+        const res = view.resolveCFI?.(cfi);
+        if (!res || Number(res.index) !== index) return null;
+        const anchor = res.anchor;
+        const range = typeof anchor === "function" ? anchor(doc) : anchor;
+        return range && range.startContainer?.isConnected ? range : null;
+      } catch {
+        return null;
+      }
+    };
+    const paintMarksForDoc = (index) => {
+      const doc = docs.get(index);
+      if (!doc) return;
+      const entries = [];
+      for (const mark of docMarks) {
+        if (!mark.cfi) continue;
+        const range = resolveMarkRange(mark.cfi, index, doc);
+        if (range) entries.push({ id: mark.id, range });
+      }
+      markRanges.set(doc, entries);
+      const win = winOf(doc);
+      if (!win?.CSS?.highlights || typeof win.Highlight !== "function") return;
+      for (const name of registeredHighlightNames.get(doc) ?? []) win.CSS.highlights.delete(name);
+      const byKey = /* @__PURE__ */ new Map();
+      for (const mark of docMarks) {
+        if (!mark.cfi) continue;
+        const hit = entries.find((e3) => e3.id === mark.id);
+        if (!hit) continue;
+        const k3 = annotKey(mark.color);
+        byKey.set(k3, [...byKey.get(k3) ?? [], hit.range]);
+      }
+      if (byKey.size === 0) {
+        registeredHighlightNames.set(doc, []);
+        return;
+      }
+      ensureMarkStyle(doc);
+      const names = [];
+      for (const [k3, ranges] of byKey) {
+        const name = highlightNameFor(k3);
+        win.CSS.highlights.set(name, new win.Highlight(...ranges));
+        names.push(name);
+      }
+      registeredHighlightNames.set(doc, names);
+    };
+    const paintAllMarks = () => {
+      for (const index of docs.keys()) paintMarksForDoc(index);
+    };
+    const refreshMarkStyles = () => {
+      markStyles.forEach((_2, doc) => ensureMarkStyle(doc));
+    };
+    const collectMarkOrder = () => {
+      const out = [];
+      const seen = /* @__PURE__ */ new Set();
+      const bySection = [...docs.entries()].sort((a3, b3) => a3[0] - b3[0]);
+      for (const [, doc] of bySection) {
+        const entries = (markRanges.get(doc) ?? []).filter((e3) => e3.range.startContainer.isConnected);
+        entries.sort((a3, b3) => {
+          try {
+            return a3.range.compareBoundaryPoints(Range.START_TO_START, b3.range);
+          } catch {
+            return 0;
+          }
+        });
+        for (const e3 of entries) {
+          if (seen.has(e3.id)) continue;
+          seen.add(e3.id);
+          out.push(e3.id);
+        }
+      }
+      return out;
+    };
+    const hasResolvedMark = (id) => {
+      for (const entries of markRanges.values()) {
+        const hit = entries.find((entry) => entry.id === id);
+        if (hit && hit.range.startContainer.isConnected) return true;
+      }
+      return false;
+    };
+    const hitMarkIn = (doc, clientX, clientY) => {
+      const entries = markRanges.get(doc) ?? [];
+      const frame = doc.defaultView?.frameElement?.getBoundingClientRect() ?? null;
+      for (let i3 = entries.length - 1; i3 >= 0; i3--) {
+        for (const r3 of Array.from(entries[i3].range.getClientRects())) {
+          if (clientX >= r3.left && clientX <= r3.right && clientY >= r3.top && clientY <= r3.bottom) {
+            return {
+              id: entries[i3].id,
+              rect: { x: (frame?.left ?? 0) + r3.left, y: (frame?.top ?? 0) + r3.top, width: r3.width, height: r3.height }
+            };
+          }
+        }
+      }
+      return null;
+    };
     const on = (event, handler) => {
       view.addEventListener(event, handler);
       return () => view.removeEventListener(event, handler);
@@ -7033,8 +7265,36 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       });
       doc.addEventListener("pointerup", (ev) => {
         const pos = pointerToHost(doc, ev.clientX, ev.clientY);
-        pointerHandlers.forEach((h3) => h3(pos));
+        pointerHandlers.forEach(
+          (h3) => h3({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+        );
       });
+      doc.addEventListener("mousemove", (ev) => {
+        if (markRanges.size === 0) return;
+        const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
+        const id = hit?.id ?? null;
+        if (id === hoveredMarkId) return;
+        hoveredMarkId = id;
+        markHoverHandlers.forEach((h3) => h3(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+      });
+      doc.addEventListener("mouseleave", () => {
+        if (hoveredMarkId === null) return;
+        hoveredMarkId = null;
+        markHoverHandlers.forEach((h3) => h3({ id: null, rect: null }));
+      });
+      doc.addEventListener(
+        "click",
+        (ev) => {
+          if (markRanges.size === 0) return;
+          const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
+          if (!hit) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          markClickHandlers.forEach((h3) => h3({ id: hit.id, rect: hit.rect }));
+        },
+        true
+      );
+      paintMarksForDoc(index);
       doc.addEventListener("click", (ev) => {
         const target = ev.target;
         if (!target || typeof target.closest !== "function") return;
@@ -7175,6 +7435,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           injectAppearanceStyle(doc, a3, currentFlow);
           if (currentFlow !== "paged") fixSvgAspect(doc);
         });
+        refreshMarkStyles();
       },
       getTOC() {
         const mapItem = (t3) => ({
@@ -7260,10 +7521,52 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       deselect() {
         view.deselect();
       },
+      // v48.23（D61 §6.8-11）：多段选择高亮（CSS Custom Highlight API，不碰正文 DOM）
+      multiSelectHighlight(action) {
+        multiHighlight.update(action);
+      },
+      clearMultiSelectHighlight() {
+        multiHighlight.clear();
+      },
+      // v48.24 批3（§4）：文中留痕——cfi → Range → CSS Custom Highlight（数据面由壳层给）
+      setDocumentMarks(marks) {
+        docMarks = Array.isArray(marks) ? marks : [];
+        paintAllMarks();
+      },
+      // D67 §3：注解栏「位置」序——当前可解析标记的文档序（见 collectMarkOrder）
+      getMarkOrder() {
+        return collectMarkOrder();
+      },
+      // D67（§6.8-13）：侧栏注解按 id 导航——只认精确 id 与该条的 CFI；
+      // 不承诺章节内像素位置，也不回退文本搜索。
+      async goToMark(id) {
+        const mark = docMarks.find((candidate) => candidate.id === id);
+        const cfi = typeof mark?.cfi === "string" ? mark.cfi : "";
+        if (!cfi) return false;
+        let ok = false;
+        try {
+          ok = await kernel.goTo({ cfi });
+        } catch {
+          return false;
+        }
+        if (!ok) return false;
+        const deadline = Date.now() + 3e3;
+        for (; ; ) {
+          if (hasResolvedMark(id)) return true;
+          if (Date.now() > deadline) return false;
+          await new Promise((resolve) => window.setTimeout(resolve, 50));
+        }
+      },
       getCurrentLocation() {
         return lastRelocate?.location ?? null;
       },
       destroy() {
+        multiHighlight.clear();
+        markRanges.forEach((_2, doc) => winOf(doc)?.CSS?.highlights?.delete(MARK_HIGHLIGHT_NAME));
+        markRanges.clear();
+        markStyles.clear();
+        docMarks = [];
+        hoveredMarkId = null;
         try {
           view.close();
         } catch {
@@ -7274,6 +7577,8 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         linkHandlers.clear();
         pointerHandlers.clear();
         imageHandlers.clear();
+        markHoverHandlers.clear();
+        markClickHandlers.clear();
       },
       on(event, handler) {
         if (event === "relocate") {
@@ -7290,6 +7595,16 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           const h4 = handler;
           imageHandlers.add(h4);
           return () => imageHandlers.delete(h4);
+        }
+        if (event === "markHover") {
+          const h4 = handler;
+          markHoverHandlers.add(h4);
+          return () => markHoverHandlers.delete(h4);
+        }
+        if (event === "markClick") {
+          const h4 = handler;
+          markClickHandlers.add(h4);
+          return () => markClickHandlers.delete(h4);
         }
         const h3 = handler;
         pointerHandlers.add(h3);
@@ -7310,6 +7625,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     let chapter = 0;
     let selection = null;
     let geometry = null;
+    let documentMarks = [];
     let mode = { flow: "scrolled" };
     let appearance = null;
     const toc = spec.chapters.map((c2, i3) => {
@@ -7366,6 +7682,15 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         emitRelocate();
         return true;
       },
+      async goToMark(id) {
+        const mark = documentMarks.find((entry) => entry.id === id);
+        if (!mark?.cfi) return false;
+        return kernel.goTo({ cfi: mark.cfi });
+      },
+      // D67 §3：fake 无几何/章节 DOM，位置序＝有锚标记的**安装序**（只用来验语义：无锚的不在列）
+      getMarkOrder() {
+        return documentMarks.filter((mark) => mark.cfi || mark.pageIndex != null && mark.rects?.length).map((mark) => mark.id);
+      },
       async next() {
         if (chapter >= spec.chapters.length - 1) return false;
         chapter += 1;
@@ -7386,6 +7711,9 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       },
       getTOC() {
         return toc.map((t3) => ({ ...t3 }));
+      },
+      setDocumentMarks(marks) {
+        documentMarks = marks.map((mark) => ({ ...mark, rects: mark.rects?.map((rect) => ({ ...rect })) }));
       },
       // v48 批1（M15 §4.19-4）：每章 = 一个提取单元（anchor 与目录 href 同域），文本 = 章原文
       getSectionAnchors() {
@@ -7420,6 +7748,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       },
       destroy() {
         opened = false;
+        documentMarks = [];
         relocateHandlers.clear();
         linkHandlers.clear();
         pointerHandlers.clear();
@@ -7649,6 +7978,100 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     await wait2(fake2 ? 30 : 500);
     check("S14 \u5206\u9875\u6A21\u5F0F\u5207\u6362\u540E\u5BFC\u822A\u4ECD\u53EF\u7528", okAfterMode === true);
     await kernel.setMode({ flow: "scrolled" });
+    if (!fake2) {
+      const hasMarkNav = typeof kernel.setDocumentMarks === "function" && typeof kernel.goToMark === "function";
+      check("S17pre \u5185\u6838\u652F\u6301\u6309\u6807\u8BB0 id \u5BFC\u822A", hasMarkNav);
+      if (!hasMarkNav) {
+        check("S17a \u7CBE\u786E id \u5BFC\u822A\u5230\u76EE\u6807\u7AE0\uFF08\u6309 CFI\uFF09", false, "goToMark/setDocumentMarks \u7F3A\u5931");
+        check("S17b \u53E6\u4E00\u6761\u6807\u8BB0\u5BFC\u822A\u5230\u5B83\u81EA\u5DF1\u7684\u7AE0", false, "goToMark \u7F3A\u5931");
+        check("S17c \u672A\u77E5 id \u8FD4\u56DE false \u4E14\u4F4D\u7F6E\u4E0D\u53D8", false, "goToMark \u7F3A\u5931");
+        check("S17d \u4E0D\u53EF\u89E3\u6790 CFI \u8FD4\u56DE false", false, "goToMark \u7F3A\u5931");
+        check("S17e \u6807\u8BB0\u5217\u8868\u66FF\u6362\u540E\u65E7 id \u8FD4\u56DE false \u4E14\u4F4D\u7F6E\u4E0D\u53D8", false, "goToMark \u7F3A\u5931");
+      } else {
+        await kernel.goTo({ chapterIndex: 1 });
+        await wait2(500);
+        check("S17pre1 \u7B2C\u4E8C\u7AE0\u9009\u533A\u6CE8\u5165\uFF08\u53D6\u6807\u8BB0 CFI\uFF09", injectSelection(kernel, opts.marker2));
+        await wait2(150);
+        const cfiSecond = kernel.getSelection()?.cfi;
+        await kernel.goTo({ chapterIndex: 2 });
+        await wait2(500);
+        check("S17pre2 \u7B2C\u4E09\u7AE0\u9009\u533A\u6CE8\u5165\uFF08\u53D6\u6807\u8BB0 CFI\uFF09", injectSelection(kernel, opts.marker1));
+        await wait2(150);
+        const cfiThird = kernel.getSelection()?.cfi;
+        check("S17pre3 \u4E24\u6761\u6807\u8BB0 CFI \u5747\u5DF2\u53D6\u5230", typeof cfiSecond === "string" && typeof cfiThird === "string");
+        kernel.setDocumentMarks([
+          { id: "epub-mark-second", text: opts.marker2, cfi: cfiSecond, kind: "extract" },
+          { id: "epub-mark-third", text: opts.marker1, cfi: cfiThird, kind: "highlight" },
+          { id: "epub-mark-bogus", text: "\u574F\u951A", cfi: typeof cfiThird === "string" ? `${cfiThird}/999999` : "epubcfi(/6/2!/4/999999)", kind: "extract" }
+        ]);
+        await kernel.goTo({ chapterIndex: 0 });
+        await wait2(500);
+        const navThird = await kernel.goToMark("epub-mark-third");
+        await waitFor(() => relocate && relocate.chapterIndex === 2, 8e3, "S17a mark nav").catch(() => null);
+        check("S17a \u7CBE\u786E id \u5BFC\u822A\u5230\u76EE\u6807\u7AE0\uFF08\u6309 CFI\uFF09", navThird === true && relocate && relocate.chapterIndex === 2, `nav=${navThird} chapter=${relocate && relocate.chapterIndex}`);
+        const navSecond = await kernel.goToMark("epub-mark-second");
+        await waitFor(() => relocate && relocate.chapterIndex === 1, 8e3, "S17b mark nav").catch(() => null);
+        check("S17b \u53E6\u4E00\u6761\u6807\u8BB0\u5BFC\u822A\u5230\u5B83\u81EA\u5DF1\u7684\u7AE0", navSecond === true && relocate && relocate.chapterIndex === 1, `nav=${navSecond} chapter=${relocate && relocate.chapterIndex}`);
+        const chapterBeforeMissing = relocate && relocate.chapterIndex;
+        const navMissing = await kernel.goToMark("missing-mark");
+        check("S17c \u672A\u77E5 id \u8FD4\u56DE false \u4E14\u4F4D\u7F6E\u4E0D\u53D8", navMissing === false && relocate && relocate.chapterIndex === chapterBeforeMissing, `nav=${navMissing} chapter=${relocate && relocate.chapterIndex}`);
+        const navBogus = await kernel.goToMark("epub-mark-bogus");
+        check("S17d \u4E0D\u53EF\u89E3\u6790 CFI \u8FD4\u56DE false", navBogus === false, String(navBogus));
+        kernel.setDocumentMarks([{ id: "epub-mark-second", text: opts.marker2, cfi: cfiSecond, kind: "extract" }]);
+        const navRemoved = await kernel.goToMark("epub-mark-third");
+        check("S17e \u6807\u8BB0\u5217\u8868\u66FF\u6362\u540E\u65E7 id \u8FD4\u56DE false \u4E14\u4F4D\u7F6E\u4E0D\u53D8", navRemoved === false && relocate && relocate.chapterIndex === chapterBeforeMissing, `nav=${navRemoved} chapter=${relocate && relocate.chapterIndex}`);
+        if (typeof kernel.getMarkOrder !== "function") {
+          check("S18a \u6587\u6863\u5E8F\uFF1D\u7AE0\u8282\u5E8F\uFF08\u4E0E\u5B89\u88C5\u5E8F\u76F8\u53CD\uFF09", false, "getMarkOrder \u7F3A\u5931");
+          check("S18b \u4E0D\u53EF\u89E3\u6790/\u65E0\u951A\u7684\u6807\u8BB0\u4E0D\u5728\u4F4D\u7F6E\u5E8F\u91CC", false, "getMarkOrder \u7F3A\u5931");
+        } else {
+          kernel.setDocumentMarks([
+            { id: "epub-order-third", text: opts.marker1, cfi: cfiThird, kind: "extract" },
+            { id: "epub-order-second", text: opts.marker2, cfi: cfiSecond, kind: "highlight" },
+            { id: "epub-order-bogus", text: "\u574F\u951A", cfi: `${cfiThird}/999999`, kind: "extract" },
+            { id: "epub-order-no-anchor", text: "\u65E0\u951A", kind: "extract" }
+          ]);
+          await kernel.goTo({ chapterIndex: 1 });
+          await wait2(600);
+          await kernel.goTo({ chapterIndex: 2 });
+          await wait2(600);
+          const order = kernel.getMarkOrder();
+          check("S18a \u6587\u6863\u5E8F\uFF1D\u7AE0\u8282\u5E8F\uFF08\u4E0E\u5B89\u88C5\u5E8F\u76F8\u53CD\uFF09", Array.isArray(order) && order.join(",") === "epub-order-second,epub-order-third", JSON.stringify(order));
+          check("S18b \u4E0D\u53EF\u89E3\u6790/\u65E0\u951A\u7684\u6807\u8BB0\u4E0D\u5728\u4F4D\u7F6E\u5E8F\u91CC", Array.isArray(order) && !order.includes("epub-order-bogus") && !order.includes("epub-order-no-anchor"), JSON.stringify(order));
+        }
+        await kernel.goTo({ chapterIndex: 1 });
+        await wait2(700);
+        check("S19pre \u53D8\u66F4\u524D\u5728\u76EE\u6807\u7AE0\u6CE8\u5165\u9009\u533A", injectSelection(kernel, opts.marker2));
+        await wait2(200);
+        const cfiBefore = kernel.getSelection()?.cfi ?? null;
+        const hostEl = document.getElementById("host");
+        const widthBefore = hostEl.getBoundingClientRect().width;
+        hostEl.style.width = "62%";
+        await wait2(300);
+        const widthNarrow = hostEl.getBoundingClientRect().width;
+        await waitFor(() => kernel.getCurrentLocation()?.cfi != null, 6e3, "resize settle").catch(() => null);
+        await wait2(900);
+        const cfiAfter = kernel.getCurrentLocation()?.cfi ?? null;
+        const reselect = kernel.getSelection();
+        hostEl.style.width = "";
+        await wait2(600);
+        const widthAfter = hostEl.getBoundingClientRect().width;
+        check(
+          "S19a \u53D8\u7A84\u540E\u4F4D\u7F6E\u4E0D\u6F02\uFF1A\u5F53\u524D CFI \u4ECD\u5728\u540C\u4E00\u7AE0",
+          typeof cfiBefore === "string" && typeof cfiAfter === "string" && cfiBefore.split("!")[0] === cfiAfter.split("!")[0],
+          JSON.stringify({ cfiBefore, cfiAfter })
+        );
+        check(
+          "S19b \u53D8\u7A84\u540E\u540C\u4E00\u6BB5\u6587\u5B57\u4ECD\u53EF\u89E3\u6790\uFF08\u9009\u533A\u6587\u672C\u4E00\u81F4\uFF09",
+          reselect != null && reselect.text === opts.marker2,
+          JSON.stringify({ text: reselect?.text, want: opts.marker2 })
+        );
+        check(
+          "S19c \u53D8\u7A84\u4E0E\u590D\u539F\u90FD\u771F\u5B9E\u53D1\u751F\uFF08\u81EA\u8BC1\uFF1A\u5E03\u5C40\u53D8\u66F4\u771F\u5B9E\u53D1\u751F\uFF09",
+          widthNarrow < widthBefore - 100 && Math.abs(widthAfter - widthBefore) <= 1,
+          JSON.stringify({ widthBefore, widthNarrow, widthAfter })
+        );
+      }
+    }
     kernel.destroy();
     check("S15 destroy \u4E0D\u629B\u9519", true);
   }
