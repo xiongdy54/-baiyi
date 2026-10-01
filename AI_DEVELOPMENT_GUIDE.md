@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件 — AI 开发指导文档（**v48.28**）
+# 一站式渐进阅读学习软件 — AI 开发指导文档（**v48.29**）
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -12,6 +12,47 @@
 > **第六部分 Roadmap（路线图）**：主线批次 M1–M11（v14 重排；v17 按用户构想增补 M8 日记与 AI 洞察，接下来开发的主线；v33 把 LKM 实施路线 K0–K9 整体并入 M8；v36 把 M8 拆为 M8-A 日记与快速记录 / M8-B AI 洞察；v39 定成长反馈契约并排期 M13，排在 K 系列之后；v40 定 K1 先行排期与 M8-B/K1 架构契约，M8 内部顺序改为 M8-A ✅ → K1 → M8-B → K2–K9；v42 定义 M14 用户记忆，排在 K2-B 之后；**v48.22 定义 M16 摘录复习改版，用户指定先于 M15 剩余批次与 K 系列推进**）、主线状态表、历史阶段存档、可选更新池与技术债。
 > 历史变更记录（v6 起）、历代版本叙述与批次详情已移至 [docs/HISTORY.md](docs/HISTORY.md)（v48.28 / D68）——**编码时不必读**。
 > **AI 入口**：根目录 [AGENTS.md](AGENTS.md) 是本档的极短路由层（做什么 → 读哪里）；本档只保留合同与规则。
+
+## § 索引（章 → 主题；v48.29 新增）
+
+> **用法（指针式交接）**：主代理只给 § 编号，由子代理自取原文，**禁止代读代总结**（AGENTS.md「文档使用」）。带「不变量与验收检查 ↓」的章末尾附有**机械化核对清单**，供弱主控核对强代理产出。
+
+| § | 主题 | 备注 |
+| --- | --- | --- |
+| §1 | 全局原则（10 条最高优先级） | 纯本地 / 三层分离 / 状态可重算 / AI 非事实源 |
+| §2 | 技术栈 | 锁定选型，换栈须先改本文档 |
+| §3 | 进程与模块结构 | 主进程文件清单与表数实测口径 |
+| §4.1 | 数据表 | **不变量与验收检查 ↓** |
+| §4.2 | 必须保留的接口 / 抽象 | 任何 Phase 不得绕过 |
+| §4.3 | AI 制卡执行架构（七步管线） | 不采用内置 Agent |
+| §4.4 | FSRS 调度契约 | **不变量与验收检查 ↓** |
+| §4.5–§4.14 | LKM：本体 / Evidence / Frontier / 画像 / 图谱 / 双轨调优 / FSRS 隔离 / Insight / 结构连接 | 三层分离与可重算 |
+| §4.6 | Knowledge Ontology | **不变量与验收检查 ↓** |
+| §4.16 | 同源卡延后（队列视图，非调度写入） | |
+| §4.17 | 成长反馈（只读呈现层，未实现） | 不落表、不写 FSRS |
+| §4.18 | 用户记忆（文件为唯一真源） | 备份必须含 `memory/` |
+| §4.19 | 材料知识导图（v48 重设计定稿） | 不写知识图谱、不产 mastery |
+| §5.1–§5.5 | Design System：瑞士风基线 / 顶栏导航 / 页面排版 / 组件规范 / 皮肤 | 色值字号间距一律走 Token |
+| §6.1–§6.2 | 核心用户流程 / 已实现功能规格（含阅读器锚点体系） | 锚点＝可降级恢复的定位链 |
+| §6.3 | AI 制卡与助读（原则知识库 / 提示词基线 / CardLint） | **不变量与验收检查 ↓** |
+| §6.4 | Topic 队列优先级、推迟与下一条摘录推荐 | |
+| §6.5 | 日记模块与快速记录 | 唯一持久化节流例外 |
+| §6.6–§6.7 | 成长反馈呈现规格 / 用户记忆的可见性与设置 | |
+| §6.8 | 摘录复习与合并复习 | **不变量与验收检查 ↓** |
+| §7.1 | 硬性约束（含阅读内核防腐层纪律与升级规程） | **不变量与验收检查 ↓** |
+| §7.2 | 数据完整性规则 | **不变量与验收检查 ↓** |
+| §7.3 | 测试义务（按里程碑登记） | |
+| §7.4 | 提示词与配置管理 | 改提示词先改本文档 |
+| §7.5–§7.6 | 安全 / 出错一键上传（未实现） | 遥测白名单永不含正文 |
+| §8.1 | 关键决策日志（D1…D69） | 决策号的唯一登记处 |
+| §8.2 | 已接受偏差 | |
+| §9.1 | 主线批次 M1–M16（只保留里程碑标题行） | `F24` 取号依据 |
+| §9.2 / §9.5 | 主线状态表 / 下一步 | |
+| §9.4 | 可选更新池与技术债（未排期） | **不得自行领取** |
+| 附录A–C | 参考项目 / EPUB 内核备忘 / 用户记忆分层依据 | |
+
+> 历史版本叙述、批次详情与旧变更记录见 [docs/HISTORY.md](docs/HISTORY.md)（v48.28 / D68 迁出）——**编码时不必读**。
+
 ---
 
 # 第一部分 Architecture（架构）
@@ -124,6 +165,18 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 - `memory_runs`（v42 M14，§4.18 / §9.1 M14（UM-1））：**记忆整理运行留痕（append-only）**——`{id, user_id, kind('ingest'|'consolidate'), trigger('auto'|'startup'|'manual'|'backfill'), covered_from_ts, covered_to_ts, entry_ids_json(本次窗口的日记条目 id 清单), entry_count, snapshot_json(整理前 core.md + index.md + 被触及主题文件全文快照，供复现与回滚判断), model, prompt_scope('user-memory'), prompt_version, output_json(AI 原始输出), applied_json(实际操作与跳过原因逐条留痕), status('running'|'done'|'failed'|'skipped'), error_text, created_at, updated_at, sync_version, is_deleted}`。**记忆正文不在本表**——本表只记录「哪一轮整理动了什么、跳过了什么」，文件本身是唯一真源（§4.18-2）；未整理水位线 `lastCoveredAt`（§4.18-16，补处理依据）由本表成功记录推进。
 - **用户记忆文件树（v42，§4.18——本项目首个非 DB 的用户数据真源）**：`<userData>/memory/` 下的 `core.md`（恒定注入，≤800 字）+ `index.md`（目录，恒定注入，≤1,200 字）+ `topics/<生活域>/<主题>.md`（按需注入，单文件 ≤1,200 字）。**AI 自主维护、用户可外部编辑**（§1.7 有界例外，六条护栏见 §4.18-14）；DB 侧只留 `memory_runs` 运行留痕与 `cards.memory_ref_json` 溯源。**备份（M2）必须包含 `memory/` 目录**；遥测 / 出错一键上传白名单（§7.6）永不包含其内容（该通道与 AI 调用的区分见 §4.18-15）。
 
+#### 不变量与验收检查（数据表 / DB 写入面）
+
+- 表清单与 `electron/db.js` 的 `CREATE TABLE` **逐名对齐**；本节声明的表数与其实建数必须一致。
+- 业务表恒带 `userId / updatedAt / syncVersion / isDeleted` 四件套；查询一律带 `is_deleted=0`。
+- 软删是默认；物理删除必须在 §7.2 登记（现有唯一先例：`material_maps` 的版本行）。
+- 历史死列只准保留、不准复用其语义（先例：`extracts.workflow_state_json`）。
+- 已废除字段不得出现在任何运行期读取路径（先例：`settings.app.fsrsWeights`，只在一次性迁移里被读）。
+- schema 变更只有一种方式：启动时 `ALTER TABLE ... ADD COLUMN` + try/catch；破坏性数据修复写一次性迁移脚本。
+- 新列必须可空或带默认值；旧库缺字段只允许在「首次创建」与「基线回填」两条路径兜底。
+- 记忆文件树不在主库：`M2` 备份 / 恢复必须显式包含 `<UserData>/memory/`。
+- 机械核对：`F11`（L6 表名与表数对齐）、`F31`（库不变量）、`F32`（写入存在性矩阵）、`F61`（软删普查）全绿。
+
 ### 4.2 必须保留的接口/抽象（27 项：v48.22 / D58 增第 26 项，v48.23 / D61 增第 27 项；任何 Phase 不得绕过）
 
 1. `EventBus`：唯一事实通道。锁定事件：`stats/updated, library/changed, todo/changed, pomodoro/tick, pomodoro/phaseChange, theme/changed, settings/changed, ai/stream, workflow/changed, cards/changed, ai/batchDone, leech/detected`（**v36 增 `journal/changed`**：主进程日记写入后经 `journal:changed` 推送到各窗口，渲染层桥接为 EventBus 事件，日记页订阅刷新）
@@ -178,6 +231,19 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 10. **参数环境（v23，D22）**：`fsrs_configs`＝不可变调度配置快照（结构见 §4.1）——**所有影响 FSRS 调度结果的 option 必须入 scheduler_options_json**（新增 option 漏快照＝契约违规）；禁止 UPDATE（db.js 不提供更新 API）；同一配置（config_fingerprint 唯一）永远只有一个 config_id；切换＝移动 `settings.app.fsrsConfigId` 指针（指针非配置本体，事实源=fsrs_configs）；reset＝指针回 cfg-default（普通不可变行，业务逻辑禁止特判，seed/migration 除外）；apply 相同配置按指纹去重重指；`cards.fsrs_config_id`＝当前状态最近一次因调度写入所用配置（滚动语义）；**应用新参数只影响未来调度，不回算任何存量卡片的 S/D/due/fsrs_config_id**；audit 按每条日志的 fsrs_config_id 分段构引擎重放（NULL→cfg-default）；`settings.app.fsrsWeights` 字段废除（存量迁移播种为 config 行后删除）；requestRetention 单一命名（对齐 ts-fsrs）；maximumInterval=36500 为产品选择非算法要求。
 11. **模块边界（v23）**：运行时唯一直接 import ts-fsrs 的文件＝`src/lib/fsrs.ts`；优化器 delta_t 唯一出口＝`electron/fsrsTime.js`（独立实现，无库依赖）；业务组件禁止 import ts-fsrs、禁止自算调度或日期差。
 
+#### 不变量与验收检查（FSRS 调度）
+
+- 事实源唯一：调度＝`cards.fsrs_json`、评分＝`review_logs`、参数＝`fsrs_configs`、时间＝`reviewed_at`+`review_seq`、撤销＝快照恢复；统计 / 优化 / 审计一律从这些事实推导。
+- `fsrs_json` 八个字段全量持久化（state / due / lapses / stability / difficulty / reps / lastReview / learningSteps），缺一即重建。
+- `enable_fuzz=false`；preview 四档结果与落库值逐字段相等；过期 preview 一律现场重算，禁止复用。
+- 每条评分日志必须留痕：`fsrs_before_json` / `fsrs_after_json` / `fsrs_config_id` / `fsrs_before_config_id` / `review_seq`。
+- 撤销可判据：`review_seq` 最新 ∧ 有 before+after 快照 ∧ 卡当前 fsrs 与 after 八字段全等；无 after 的旧日志不可撤销。
+- 成功边界＝SQLite COMMIT + persist 成功 + IPC 成功，三者齐才算成功；失败禁止静默降级、禁止自动回滚已 COMMIT 事务。
+- 时间语义三分：调度 elapsed_days（UTC 日历日）/ 优化器 delta_t（`electron/fsrsTime.js` 唯一出口）/ 产品学习日（仅统计口径，禁入调度与训练）。
+- 参数只影响未来，**不回算任何存量卡**；`fsrs_configs` 只增不改。
+- 模块边界：唯一 import `ts-fsrs` 的文件是 `src/lib/fsrs.ts`；业务组件禁止自算调度或日期差。
+- 机械核对：`tests/fsrs/` 六件套 + undo 套件 + persist 边界套件三者全跑全绿（§7.3）。
+
 ### 4.5 Learner Knowledge Model 架构总览（v24，定稿；实现按 K0–K9 分批，见 §9.1 M8）
 
 > 来源：桌面设计稿《学习者知识模型与自适应学习系统设计稿》（LKM §0–§87 + Insight 增补 21 节）经本会话 8 问打磨 + 双轨调优 + 一键上传合并。本节只定架构与契约，**v24 不实现任何业务功能**（K0 纯设计，见 §9.1 M8）。
@@ -212,6 +278,19 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 > 6. **最小输入窗口**——每次只喂「尚未归一的簇」+「相关候选 KP 清单（cap 60）」，已归一事实不进输入（AI 看不到就不可能推翻）；已 accepted 的提案对应簇不再入队。
 > 7. **漂移守门**——temperature 固定 0.1、提示词 scope 独立版本化、prompt-lab「同材料 × N 次」离散度测试（§4.6 item 6 既定）；模型换版不改变本地三条裁决规则。
 
+
+#### 不变量与验收检查（Knowledge Ontology / 知识图谱核心）
+
+- UDC 只保留为统计与粗粒度分类，**不作 Learner Knowledge Graph 的事实基础**。
+- Layer A 领域不是图谱节点主体；Layer B 的 KP 是一等实体，**不属于任何一张卡也不属于任何一本书**。
+- `canonical_label` 非唯一事实，必须配 alias；归一合并＝软删除 + `merged_into` + alias 并入，且**可回滚、可重算**。
+- 关系枚举封闭（9 种）；唯一约束 `(from, to, relation_type)`；`prerequisite` 写时 BFS 无环校验，建环拒绝并返回环路径。
+- `analogous_to` 不参与无环约束、不派生 `due` 与优先级。
+- AI metadata 封闭化：`novelty` 四选一；difficulty / distance / confidence 只许 1–5 档序数 + 判定锚语 + evidence 引用；无 evidence 一律本地降级为 `uncertain`。
+- **AI 永不写** `fsrs_json` / `review_logs` / `knowledge_evidence` / `learner_knowledge_states`；只产 `knowledge_proposals` 与「确定性自动归一」两类写。
+- 禁止 AI 生成任何 ID；`targetKpId` 必须取自输入候选清单，越界即降级。
+- 同输入重复跑零新增由架构保证（`normalizeKpLabel` + 本地裁决器 + 幂等指纹），不依赖模型稳定性。
+- 机械核对：K1 / K2 对应套件 + `F15`（幂等重放）+ `F05`（数据生命周期）全绿。
 
 ### 4.7 Knowledge Evidence 与 BEMM（v24，**外部设计稿** §11–§21 收紧——非本文档章节号）
 
@@ -675,6 +754,18 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 
 severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择接受；info 仅提示。KnowledgeLint 只校验知识结构，不碰 FSRS 调度字段。
 
+#### 不变量与验收检查（AI 制卡与助读）
+
+- 制卡原则只存在于两处：`card-*` 族 PromptTemplate（给 LLM）与 `CardLintEngine` 规则表（本地质检）；代码 / 组件 / 文档**不许散落第二份原则文本**。
+- 提示词一律版本化播种（`ensurePromptTemplates`），只增不覆盖旧版；**改提示词先改本文档**（§7.4）。
+- AI 输出必须先落草稿 / 预览区，用户逐张确认后才写正式表；**AI 卡不得绕过 `CardLintEngine` 直接入 FSRS 队列**。
+- CardLint severity 语义：`error` 阻止入库 / `warn` 可选择接受 / `info` 仅提示；所有结果写 `CardIssue`。
+- 手动制卡与 AI 卡**一视同仁**过 lint 与 S1 相似检索。
+- 翻转问答＝制卡手段而非卡类型：拆成两张互为翻转的独立 qa 卡，各自独立 FSRS 调度；**禁止设计复习期形态会变化的卡片**。
+- 一卡多空两形态须按 `clozeMode` 分派（`together` 同答 / `per-blank` 分答拆卡），单卡挖空 ≤2；R13 禁 hint 拆答案。
+- 归属锚强制：论证 / 理论 / 学说类内容 front 或 contextPrefix 必须带提出者锚，内容卡与归属卡拆分。
+- 机械核对：`F06`（AI 制卡契约）、`F41`（AI 传输故障）、`m1` 制卡套件全绿。
+
 ## 6.4 Topic 队列优先级、推迟与下一条摘录推荐（v24 增补 Next Extract，用户已确认五项）
 
 摘录默认 priority 50（**v48.22 / D58 起：新建摘录继承所属书的 `library_items.priority`**，书级默认亦为 50，故存量语义零变更；用户在书架上可改该书优先级）；推迟＝`interval × a_factor` 封顶 180 天（**v48.22 / D58 起不再是占位**——`a_factor` 是每元素倍率、默认 **1.6**（与旧 ×1.6 逐值等值），读后推进用同一倍率，完整语义见 §6.8-2）；原「负载感知推迟（priority 三档基础间隔 + dueLoad 分散 + postponeCount 抖动 + 上限 180 天）」设计承诺经用户 2026-09-24 授权**解冻**（§9.4 记录），但**本批不实现**——本次改用 SuperMemo 的 A-Factor 语义，原方案留 §9.4 作备选。
@@ -1025,6 +1116,19 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **D67 阅读器 UI 测试义务（v48.27 已全部落地并实测；不得把规格判据说成已实现——故此处只登记已通过的套件与条数）**：在 `tests/annotations.gui.mjs` 或相应 GUI suite 增加：① 无已发布图谱时图谱 tab 缺席，但 TOC / 注解任一仍能开 dock；专门覆盖**无目录的 annotation-only PDF**可开侧栏及其注解列表；② dock 宽 280px、左右边界对齐、正文与侧栏无重叠，打开时 PDF.js / EPUB 内容视口真实缩窄 `280±1px`、关闭恢复；③ Reader 注解行字段、位置/时间排序，点击走 `goToMark(id)`，不可定位条目留在列表并报告失败；侧栏导航与 hover / click 行为独立；④ PDF page navigation、页码与标记可见判据，明确**不验页内 XY restore**；数值缩放保持 preset / 页码，fit 缩放在 resize 后重新适配；⑤ EPUB CFI 精确导航和 reflow 前后同 Range/text 恢复，布局期间被动 relocate 不写 progress、后续真实用户 relocate 正常写；⑥ `ReviewView` / `ExtractCardFace` 字号无回归、粘贴书 Markdown Reader 的布局与交互保持原样。可利用 `tests/annotations.gui.mjs` 现有三章 EPUB/有图与单页 PDF 夹具；Reader 内核定位契约用 `npx electron tests/reader.kernel.cjs`、EPUB L2 用 `node tests/reader.engine.mjs`、PDF L1 用 `npx electron tests/pdf.kernel.cjs`，PDF/EPUB dock 几何与 GUI 行为用新增/扩展 CDP suite 验证。文档漂移再跑 `node tests/flows/f11-doc-code-drift.cjs`；不把尚未添加的断言声称为既有测试通过。**v48.27 实测**：annotations.gui 93/93 · extract.gui 78/78 · reader.engine 24/24 · marks.gui 56/56 · breadcrumb.gui 60/60 · multiselect.gui 20/20 · m6-1 23/23 · m6-3 14/14 · m15r 46/46 · `npx electron tests/pdf.kernel.cjs` 29/29 · `npx electron tests/reader.kernel.cjs` 75/75 · `npx electron tests/reader.fake-marks.test.cjs` 8/8 · `tests/reader.annot-vm.test.cjs` 9/9 · `tsc --noEmit` 0；**既有失败（非本轮引入，已在基线 846a414 上复现同项同读数）**：m6-2 8/15、m6-2native 19/20。
 - **本批未做**：图片粘贴（D65，批 5）、Zotero 借鉴 ②的标签与搜索 / ③模板变量 / ④锚点 Markdown 导出（批 6）；**合并复习页（`ReviewView`）的摘录卡面「跳转原文」仍只跳源文档**（未按 `parentExtractId` 分流）；批注写回源文件；模糊重锚定。
 
+#### 不变量与验收检查（摘录复习 / 会话队列与撤销）
+
+- `computeTodayQueue` 仍是**卡片**到期口径的唯一来源（`F03` 的队列 ≡ 到期口径断言锁定）；摘录与混合会话**不得改动它**，混编由 `SessionQueueComposer` 在其之上组合。
+- `computeSessionQueue` **只影响展示、零调度写入**：未放行的条目在库内仍 due。
+- 每日上限是**全局唯一预算、各范围共享**；四类计数全部派生自 `review_logs` / `extract_ops`，零新状态。
+- 摘录调度语义：`下次间隔 = 当前间隔 × a_factor`（默认 1.6）、新建次日进队、读后 advance 推进、毕业置 `status='resolved'`。
+- 撤销：卡片逆操作**逐字复用** `undoLastReview`；摘录逆操作恢复 `before_json` 前置状态并物理删除该行；批量共用一个 `batch_id`，整批按 seq 降序回退。
+- 跨类撤销排序只靠 `op_journal`；`review_seq` 的分配语义**一字未改**（仍 MAX+1、撤销删除后允许复用）。
+- 引擎切换无损：`A→B→A` 往返后 A 私有子空间逐字段等值，且 B 期间 A 子空间零写入。
+- 跳转原文对阅读进度**零写入**（往返 `progress_json` 逐字节相等）。
+- 筛选牌组＝保存下来的复习范围，**不移动卡片**，故复习记录天然计入 FSRS。
+- 机械核对：`F03` / `F29`（全局序）/ `F52`（队列缺口）/ `F62`（并发写）/ `F89`（摘录幂等）全绿。
+
 ---
 
 # 第四部分 Coding Rules（编码规则）
@@ -1043,6 +1147,20 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 10. **阅读内核升级规程**：vendor 快照更新 → 白名单逐项核对 → L0（fakeKernel 语义）→ L1（`tests/reader.kernel.cjs`，含 CJK ruby/竖排夹具）→ L2（`tests/reader.engine.mjs`）→ L3 真实语料冒烟 → 签发新 ReaderEngineVersion（`src/lib/reader/foliate/version.ts` 单一来源 + 本节版本日志）。失败则 git 还原 `vendor/foliate-js/` 秒级回滚。
 11. **表述红线（防过度自信的实现）**：① vendor = 可复现、可审计、可本地修补，**不等于**供应链零风险（其自带依赖 zip.js/fflate 与升级合并成本仍需管理，MANIFEST.json 记录 upstream commit 与 localPatches）；② L1 契约绿 = adapter 契约未破，**不等于**业务无回归（业务安全由 L2 证明，引擎渲染回归由 L3 真实语料捕获）；③ CFI + anchorText = **可降级恢复**的定位体系，CFI 绑定特定文档结构、并非永久全局 ID（粘贴书合成由 sourceHash 式确定性 + generatorVersion 守卫，结构变更走恢复链）。
 
+#### 不变量与验收检查（硬性约束 / 阅读内核与主进程边界）
+
+- 开工只做用户指定的最小单元，其他代码一行不写；开工前复述 Goals / Non-Goals。
+- 每次完工保证「**启动 → 该单元主流程 → 重启不丢数据**」可演示（§7.1.4）。
+- 遇文档未覆盖的选择先停下问用户；**需求变更先改本文档 bump 版本再编码**（§7.1.5）。
+- 视觉以瑞士风为基线；色值 / 字号 / 间距一律走 Token，禁硬编码魔法值。
+- 核心算法回归测试义务：涉及 FSRS 调度、CardLint、cloze 解析、Markdown 管线的改动必须附可重复运行的自动化测试。
+- **文档声明的字段不许实现时静默裁剪**（§7.1.7 的文档侧判据见 `F11` L6）。
+- sql.js 并发纪律：内存库 + 全量回写，运行期外部脚本改库会被下一次 persist 覆盖——外部数据操作必须先关闭应用。
+- 阅读内核防腐层：业务代码**禁止直接 import foliate-js**；唯一豁免是防腐层内的 foliate 快照目录（§7.1.9），业务组件只依赖 kernel / service 两个入口。
+- 内核升级规程五步不可跳：vendor 快照更新 → API 白名单逐项核对 → L0 → L1 → L2 → L3 真实语料冒烟 → 签发新 ReaderEngineVersion；失败即还原 vendor 快照。
+- 表述红线：适配器契约绿**不等于**业务无回归；CFI 是**可降级恢复**的定位，不是永久全局 ID。
+- 机械核对：`F11`（文档↔代码漂移）、`F27`（克制红线）、`F54`（阅读内容门）、`F66`（失败态）全绿。
+
 ## 7.2 数据完整性规则
 
 - 所有业务表软删除（is_deleted）；查询一律带 `is_deleted=0`。
@@ -1053,6 +1171,19 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - 用户编辑 cloze 卡问题区时，`[…]` 自动还原为挖空语法；提示词禁止 hint 拆答案（渲染层兼容旧数据）。
 - **持久化节流例外（v36）**：日记自动保存（快速记录输入中）走**防抖持久化**（尾随 4s / 上限 20s + 隐藏·发送·退出强制 flush），是本项目对「每次落库即落盘」的**唯一例外**（理由与代价见 D34）；其余任何写入（含日记页的提交/编辑/删除）仍走即时 `persist()`。新增表一律进主库（M2 备份打包整库，自动覆盖）。
 - **用户记忆文件树不在主库（v42，§4.18-2）**：`<userData>/memory/` 是记忆的**唯一真源**，「新增表一律进主库」的规则**对它不适用**——**M2 备份 / 恢复必须显式包含该目录**（§4.1 记忆文件树声明、§9.1 M14 验收 ⑨）；文件写入一律**原子替换**（tmp + rename），禁止留下半截文件；整理执行只追加与标记，**绝不整文件重写**（§4.18-12）。
+
+#### 不变量与验收检查（数据完整性 / 原子持久化与并发）
+
+- 业务表软删除、查询一律带 `is_deleted=0`；**物理删除必须在 §7.2 登记**（现有唯一先例：`material_maps` 版本行）。
+- schema 变更只有 `ALTER TABLE ... ADD COLUMN` + try/catch 一种；破坏性数据修复写一次性迁移脚本。
+- `updateCard` 未传 fsrs / leech 时**保留原值，禁止置 NULL**。
+- 禁止用 partial 对象走全行 UPDATE——改内容必须先取库内最新状态合并（先例：词典快照曾把 17 列清空）。
+- `contentEditable` 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable。
+- **每次落库即落盘**：写路径走 `persist()`（tmp + fsync + rename 原子替换）；唯一例外＝日记草稿节流（D34）。
+- 用户记忆文件树同样原子替换，禁止留半截文件；整理只追加与标记，**绝不整文件重写**。
+- 新增表一律进主库（M2 打包整库自动覆盖）；**唯一例外是不在主库的记忆文件树，备份 / 恢复必须显式包含它**。
+- 并发写走主进程单一 sql.js 实例，渲染层不持库；外部脚本改库前必须先关闭应用。
+- 机械核对：`F33`（持久化保真）/ `F37`（persist 故障注入）/ `F38`（写入模糊）/ `F50`（迁移错误卫生）/ `F62`（并发写）全绿。
 
 ## 7.3 测试义务
 
@@ -1190,6 +1321,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D66 | **v48.25 就地批注与批注栏整链落地（分支 `摘录复习改版`；规格 §3–§5 / R21–R40 的实现批，20 Task）**：① **选区菜单重排为两行面板**（R38）——第一行模式段控（高亮｜摘录+高亮，互斥、**状态持久** `app.annotateMode`）+ 调色排（用户色板，**点色即完成当前模式的动作**；**颜色不记**——用户 2026-09-27 裁定「切换模式 → 选文字 → 点色」三步即一次完整操作）；第二行既有动作。**没有「精细编辑」入口**（写批注走「点色 → 浮层」）。② **定位判据化（R22）**：锚点＝**选区包围盒**（不再用 pointerup 坐标）、与选区不相交、容器内 8px、上半→下方/下半→上方；`src/lib/popoverPlace.ts` 一处实现，MarkPopover / SelectionMenu / AnnotationEditor 三处共用（MarkPopover 传 `prefer:"below"` 保持其旧的「恒优先下方」语义）。③ **批注编辑浮层（R37/R40）**：**无保存/取消**（失焦 + 400ms 防抖落库）；**清空文字＝删批注**（条目保留）；删除按钮**按 kind 换标签**（「删除高亮」/「删除摘录」，R36）+ 就地二次确认；不放解释性小字。④ **展示统一为 Zotero 式（R23/R24/R28/R31–R33/R39）**：批注栏（**整卡批注恒置顶**＋`--accent-soft` 底＋左缘 2px accent；段锚竖线＝批注色实色，**与文中高亮同色板 token**；摘录＝实心点/高亮＝空心点）、**文中角标**（颜色内联 `style.fill`、按首行片段、纯高亮与整卡不画、重画幂等）、阅读器**三页签**（目录/摘录/图谱，**无导图不渲染图谱页签**）。⑤ **退役 `extractReader`（R29）——契约变更：动作集去掉「打开摘录」**。⑥ **设置四键 + 8 枚 Token**：`annotateMode`/`annotatePalette`（有序去重限 8）/`annotateCustomEnabled`/`annotationFilter`，主进程写侧与渲染层读侧**两侧归一**；`--annot-*` 8 枚实色 + 8 枚透明档（浅 12% / 深 26%）在 `:root`/`body`/`body.theme-dark` **三处各声明一次**。取证：`tests/annotations.gui.mjs` **42/42**（九组判据，含截图判读）、marks 56/56、extract 76/76、breadcrumb 60/60、multiselect 20/20、f18 61/61、`tsc --noEmit` 0；实测修正七条（整卡判据按 id 而非区间、删整卡不删用户的卡、菜单让路避拖选线、侧栏配色跟阅读外观、截图走真实主题路径、**文中高亮按批注色**、**摘录页正文痕迹 + 父卡坐标走 contextRef.parentRange**）。 | 用户 2026-09-27 三轮修订（Zotero 借鉴、菜单两行重排、颜色不记）；批 0 样张 54/54×四档作视觉基准；完整规格 `docs/impl-spec/INLINE-ANNOTATION.md`（R21–R40）、计划 `docs/impl-spec/INLINE-ANNOTATION-PLAN.md`（20 Task） | v48.25 |
 | D67 | **v48.26 批注 UI 与阅读器对齐契约（分支 `批注样张对齐`；纯文档先行，完整规格 `docs/impl-spec/ANNOTATION-UI-ALIGNMENT-REDESIGN.md`）**：① Reader 新增 280px 右侧占位式共用 dock；任一 TOC / 当前文档注解 / 已发布且映射可用图谱可开放，三个 tab 按数据独立出现；无图谱隐藏图谱 tab，annotation-only 且无 TOC 的 PDF 仍可打开侧栏。② Reader 注解 tab 复用完整 `AnnotationPanel`，按文档位置或时间排序，条目 click 走只读 kernel `goToMark(id)` 和 PDF / EPUB adapter；导航入口不改变正文 mark hover=`MarkPopover` / click=`AnnotationEditor`。③ 图谱只展示现有 `nodeRange` 覆盖区间、标题及层级文字，无比例 bar，主进程算法与 IPC payload 不变；样张 `ownedRanges` prose 与 payload 不符，以 `nodeRange` 为准修正文案，不派生另一套范围；实现批须把旧 bar 正向断言改成「bar 不存在、区间/层级文字可见」。④ Reader toolbar 采用 B 双入口：常驻侧栏 / 翻页；「更多」收导图及按书复习入口；「阅读设置」收模式、主题、PDF 缩放；原行为处理路径不变。⑤ PDF 标记导航只承诺页级位置，短时强调由标记 id + annotation color 触发；仅矩形实际可见时才能声称其已显露，不承诺 page-XY restore；数字缩放保 preset 与页码、fit preset 随视口宽度自适应。EPUB CFI 导航并在 reflow 后恢复 CFI/Range，只抑制布局恢复期的被动进度写入。PDF 角标保留，EPUB Highlight API 无角标列为接受差异。**实现批登记两条接受约束与两条实测事实**：(1) EPUB 走 CSS Custom Highlight API，无角标可画（绘制层不碰正文 DOM 的代价，接受）；(2) PDF 注解导航只承诺「到达目标页且该条标记在该页布局完成」，不承诺页内 Y（`sourceAnchor` 无跨缩放稳定的页内 Y，接受）。(3) 实测：pdf.js 只在 **window resize** 时重算 `page-width`/`page-fit`，dock 开合不改变容器宽度以外的事件，故 fit 模式页宽**不**自适应（与旧左浮层行为一致，按契约只保 preset 与当前页）；(4) 数值缩放走页内锚点快照/还原（可选内核能力 `captureViewPoint/restoreViewPoint`，参考系＝页内容框）。测试责任见 §7.3。 | 用户批准的 `ANNOTATION-UI-ALIGNMENT-REDESIGN.md`；Task 1 先更新产品合同，UI 实施留后续任务 | v48.27（已实现） |
 | D68 | **v48.28 AI 知识层拆分（根 `AGENTS.md` + 历史档案 `docs/HISTORY.md`）**：指导文档此前 368K 字符、单次无法通读，且约 46% 是只追加历史。① 新增根目录 `AGENTS.md`＝AI 的极短入口与路由层（做什么读哪里）；② 把历代版本叙述、§8.3、§9.1 批次详情、§9.3 存档迁入 `docs/HISTORY.md`，guide 降至 242K（−34.4%）；§9.1 保留 `### M#` 里程碑清单（`F24` 基线取号依据）与 M4 用户锁定键位表（`F20` 对表依据）；③ `F11` 改为读「guide + HISTORY」**并集**，§引用 / D 编号 / 版本自洽 / 表数量四项口径不变；④ §3 按实测更正（189 处 `ipcMain.handle/on`、30 张表、26 个 `electron/*.js`）。**不改任何产品行为、零代码改动**。 | 用户 2026-10-01 指令「评估并拆出极短 AI 项目知识层以省 token，同时清理过期失效信息」；现状实测：360K 字符 / 48 处代码引用 / 7 条流程测试硬解析本档 / 1347 处 §引用 | v48.28 |
+| D69 | **v48.29 契约可核对性（§ 索引 + 核心领域「不变量与验收检查」清单；纯文档，零代码改动）**：① 文档开头新增「**§ 索引**」表（§ → 主题 → 是否附不变量清单），服务**指针式交接**——主代理只给 § 编号、由子代理自取原文，禁止代读代总结；② 在 7 个核心领域小节末尾补「**不变量与验收检查**」块——`§4.1` 数据表/DB 写入面、`§4.4` FSRS 调度、`§4.6` 知识本体与图谱、`§6.3` AI 制卡与助读、`§6.8` 摘录复习与会话队列/撤销、`§7.1` 硬性约束与阅读内核边界、`§7.2` 数据完整性与原子持久化；③ 清单条目**全部从既有契约条款抽取**（不新增任何契约），并逐条挂上可跑的闸门编号（`F03`/`F06`/`F11`/`F27`/`F29`/`F31`/`F32`/`F33`/`F37`/`F38`/`F41`/`F50`/`F52`/`F54`/`F61`/`F62`/`F66`/`F89` 等），使弱主控只做机械验证（跑测试/lint/build、对照清单）而**不做语义判断**（语义把关留给同级评审）；④ 新块一律使用**不带 § 号**的小节标题（`#### 不变量与验收检查（…）`），**不新增、不改动任何 § 编号与 D 编号**——`F11` 的 L2/L3/L4 口径与 `F24` 的章节覆盖棘轮一字不变。 | 用户 2026-10-01 分层多智能体配置指令（弱主控模型只做路由与机械核验，诊断/设计/验收标准由强代理产出）；`AI_DEVELOPMENT_GUIDE.md` 的 § 编号与 D 编号是**被闸门解析的公共接口**，故清单不占新编号、也不移动任何既有编号 | v48.29 |
 
 ## 8.2 已接受偏差（实现与原锁定方案的差异）
 
