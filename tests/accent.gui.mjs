@@ -136,9 +136,9 @@ try {
 
   console.log("\n[6] 恢复默认：两套主题都要回到各自 IKB 档");
   s = await apply(main, { accent: "" });
-  check("深色恢复默认 → #5b7fe8", s.accent === "#5b7fe8" && s.btnBg === rgb("#5b7fe8"), JSON.stringify(s));
+  check("深色恢复默认 → #3fa08a", s.accent === "#3fa08a" && s.btnBg === rgb("#3fa08a"), JSON.stringify(s));
   l = await apply(main, { mode: "light" });
-  check("浅色恢复默认 → #002fa7", l.accent === "#002fa7" && l.btnBg === rgb("#002fa7"), JSON.stringify(l));
+  check("浅色恢复默认 → #166a59", l.accent === "#166a59" && l.btnBg === rgb("#166a59"), JSON.stringify(l));
 
   console.log(`\nAccent GUI: ${pass} 通过 / ${fail} 失败`);
   process.exit(fail > 0 ? 1 : 0);

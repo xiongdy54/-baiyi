@@ -34,6 +34,8 @@ export interface SelectionActionsAdapter {
   selectionText: () => string | null;
   /** 多段选择的原始采集物（单段宿主可返回 undefined） */
   selectionSpans: () => ExtractSpan[] | undefined;
+  /** 多段累计的偏移区间（v48.38 / D78，摘录页）：落库时 ≥2 段才写入 contextRef.parentRange（单段路径逐字节不变）；须在 clearSelection 前取 */
+  selectionRanges?: () => Array<{ start: number; end: number }> | null;
   /** 制卡用的 contextRef（含锚点覆盖与引擎 locator 降级），动作执行时求值 */
   contextRef: () => Record<string, unknown> | null;
   /** 当前阅读位置的事实源（只看 documentId / extractId 两个键） */
@@ -839,15 +841,21 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
    * 装配 content_markdown 与 quote_range_json（一条批注、多段区间、多组矩形）。
    * 只在**真多段（≥2）**时传：单段路径保持既有载荷逐字节不变。
    */
-  async function handleExtract(text: string, spans?: ExtractSpan[]) {
-    await writeExtract(text, spans);
+  async function handleExtract(text: string, spans?: ExtractSpan[], opts?: { parentRange?: Array<{ start: number; end: number }> }) {
+    await writeExtract(text, spans, opts);
   }
 
   /** 摘录/高亮落库的公共装配（kind 分族 + 批注色 + 批注文字；四条落库分支的唯一实现面） */
   async function writeExtract(
     text: string,
     spans?: ExtractSpan[],
-    opts?: { kind?: "highlight" | "extract"; color?: string | null; comment?: string | null }
+    opts?: {
+      kind?: "highlight" | "extract";
+      color?: string | null;
+      comment?: string | null;
+      /** 多段累计的偏移区间（v48.38 / D78）：≥2 段才写入 contextRef.parentRange（单段路径逐字节不变） */
+      parentRange?: Array<{ start: number; end: number }>;
+    }
   ) {
     const { readingWorkflow } = await import("./readingWorkflow");
     // 需求2：摘录同样记录选区锚点（跳转原文用）
@@ -859,6 +867,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const sc = A().sourceContext();
     const sourceAnchor = sc.extractId ? null : A().buildSourceAnchor(text);
     const ctxWithAnchor = sourceAnchor ? { ...(ctx || {}), sourceAnchor } : ctx;
+    // 多段落库锚（v48.38 / D78）：累计的偏移区间 ≥2 段才挂——单段/无累计路径 contextRef 逐字节不变
+    const ctxWithRanges =
+      opts?.parentRange && opts.parentRange.length >= 2 ? { ...ctxWithAnchor, parentRange: opts.parentRange } : ctxWithAnchor;
     const extra = {
       ...(opts?.kind ? { kind: opts.kind } : {}),
       ...(opts?.color ? { annotationColor: opts.color } : {}),
@@ -870,7 +881,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         parentId: sc.extractId,
         documentId: sc.documentId || "",
         contentMarkdown: text,
-        contextRef: ctxWithAnchor,
+        contextRef: ctxWithRanges,
         spans: multi,
         ...extra
       });
@@ -880,7 +891,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         parentId: sc.documentId,
         documentId: sc.documentId,
         contentMarkdown: text,
-        contextRef: ctxWithAnchor,
+        contextRef: ctxWithRanges,
         spans: multi,
         ...extra
       });
@@ -947,8 +958,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   // ---------- M4 快捷键动作（§9.1 M4：与下方选区菜单按钮完全同源） ----------
   /** 摘录页的动作：只摘录，不弹制卡/解释面板 */
   async function extractSelection(text: string, spans?: ExtractSpan[]) {
+    const parentRange = A().selectionRanges?.() ?? null;
     A().clearSelection();
-    await handleExtract(text, spans);
+    await handleExtract(text, spans, parentRange && parentRange.length >= 2 ? { parentRange } : undefined);
   }
   function actManualCard() {
     const text = A().selectionText();
@@ -975,8 +987,10 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const t = A().selectionText();
     if (!t) return;
     const spans = A().selectionSpans();
+    // 多段落库锚先采后清（v48.38 / D78）：clearSelection 会重置累计，≥2 段才随落库写入 parentRange
+    const parentRange = A().selectionRanges?.() ?? null;
     A().clearSelection();
-    void handleExtract(t, spans);
+    void handleExtract(t, spans, parentRange && parentRange.length >= 2 ? { parentRange } : undefined);
   }
 
   // ---------- M7 查词（v32，D31）：选中单词 → DictPanel（原文即显→Loading→填充/错误），在线绝不阻塞 ----------

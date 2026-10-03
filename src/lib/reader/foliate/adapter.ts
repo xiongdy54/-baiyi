@@ -183,7 +183,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     },
     styleFor() {
       const value = getComputedStyle(document.body).getPropertyValue("--hl-multi").trim();
-      return `::highlight(${MULTI_HIGHLIGHT_NAME}){background-color:${value || "color-mix(in srgb, #002fa7 22%, transparent)"};}`;
+      return `::highlight(${MULTI_HIGHLIGHT_NAME}){background-color:${value || "color-mix(in srgb, #166a59 22%, transparent)"};}`;
     }
   });
 
@@ -229,7 +229,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     return [...keys]
       .map((k) => {
         const soft = k === "default" ? "var(--accent-soft)" : annotSoft(k.startsWith("hex-") ? `#${k.slice(4)}` : k);
-        const value = evalColor(soft, "color-mix(in srgb, #002fa7 8%, transparent)");
+        const value = evalColor(soft, "color-mix(in srgb, #166a59 8%, transparent)");
         return `::highlight(${highlightNameFor(k)}){background-color:${value};}`;
       })
       .join("\n");

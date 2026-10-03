@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>底栏重设计 · swiss-international-style（瑞士规范）</title>
+<style>
+  :root {
+    --paper: #fafaf8; --grey-1: #f0f0ee; --grey-2: #d4d4d2; --grey-3: #737373; --ink: #0a0a0a;
+    --border-subtle: #e0e0e0; --border-strong: #a3a3a3;
+    --accent: #166a59; --accent-on: #ffffff;
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-6: 24px;
+    --sans: "Inter", "Helvetica Neue", "Helvetica", "Arial", "Segoe UI", system-ui, "Microsoft YaHei UI", sans-serif;
+    --mono: "JetBrains Mono", "IBM Plex Mono", "Cascadia Code", Consolas, ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--grey-1); font-family: var(--sans); color: var(--ink); padding: 32px; }
+  h1 { font-size: 20px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 4px; }
+  .sub { font-size: 12px; color: var(--grey-3); margin-bottom: 28px; }
+  .variant { margin-bottom: 40px; }
+  .variant > h2 { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+  .variant > p { font-size: 12px; color: var(--grey-3); margin-bottom: 12px; max-width: 900px; line-height: 1.5; }
+  .window { background: var(--paper); border: 1px solid var(--border-subtle); max-width: 1100px; }
+  .fake-content { height: 96px; padding: 16px; font-size: 13px; color: var(--grey-3); }
+  .bar { height: 72px; border-top: 1px solid var(--border-subtle); display: flex; align-items: center; padding: 0 16px; background: var(--paper); }
+  .btn { height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--paper); border: 1px solid var(--border-strong); color: var(--ink); font-size: 13px; padding: 0 16px; white-space: nowrap; cursor: pointer; font-family: var(--sans); }
+  .btn:hover { border-color: var(--ink); }
+  .btn.primary { border-color: var(--accent); color: var(--accent); }
+  .btn.grow { flex: 1; min-width: 0; }
+  .btn .kbd { font-size: 12px; color: var(--grey-3); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ================= S1 card-fill 灰底簇 =================
+     swiss：卡片四类之「灰底（card-fill）」下沉到控件簇——背景形状承载分组（空间第二、线条第三）；
+     直角、无边框、40 高；组内文字钮 hover 升 grey-2；组间 24px（≥2× 组内 8px）。
+     全栏只有 primary 的 accent 与两个灰底块，无第三种面。 */
+  .s1 .bar { gap: 24px; }
+  .s1 .fill-cluster { height: 40px; background: var(--grey-1); display: inline-flex; align-items: center; gap: 8px; padding: 0 4px 0 12px; }
+  .s1 .fill-cluster .unit { font-size: 12px; color: var(--grey-3); white-space: nowrap; }
+  .s1 .fill-cluster .bare-num { border: none; background: none; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 14px; color: var(--ink); width: 28px; text-align: right; padding: 0; }
+  .s1 .fill-cluster .text-btn { border: none; background: none; font-size: 13px; color: var(--ink); height: 32px; padding: 0 8px; cursor: pointer; font-family: var(--sans); white-space: nowrap; }
+  .s1 .fill-cluster .text-btn:hover { background: var(--grey-2); }
+  .s1 .track { width: 140px; height: 20px; border: 1px solid var(--border-strong); background: var(--paper); position: relative; }
+  .s1 .track .fill { position: absolute; inset: 0 auto 0 0; width: 32%; background: var(--accent); }
+  .s1 .track .thumb { position: absolute; left: 32%; top: 0; bottom: 0; width: 6px; margin-left: -3px; background: var(--paper); border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); }
+
+  /* ================= S2 模块分段条 =================
+     swiss：模块网格语言——右半区收进**一条 hairline 描边模块**，内部用 1px 竖 hairline 分段
+     （穆勒-布罗克曼式分段；「数据表格＝全宽单模块」的同源思维）。段＝功能：天/数值段、动作段、调节段；
+     分段条与主按钮/毕业/更多之间 24px。结构最强的一版：一条带 = 调节区。 */
+  .s2 .bar { gap: 24px; }
+  .s2 .strip { height: 40px; border: 1px solid var(--border-strong); display: inline-flex; align-items: stretch; }
+  .s2 .seg { display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; }
+  .s2 .seg + .seg { border-left: 1px solid var(--border-subtle); }
+  .s2 .seg .unit { font-size: 12px; color: var(--grey-3); white-space: nowrap; }
+  .s2 .seg .bare-num { border: none; background: none; font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 14px; color: var(--ink); width: 28px; text-align: right; padding: 0; }
+  .s2 .seg .lbl { font-size: 13px; color: var(--ink); white-space: nowrap; }
+  .s2 .seg .text-btn { border: none; background: none; font-size: 13px; color: var(--ink); padding: 0 4px; height: 32px; cursor: pointer; font-family: var(--sans); white-space: nowrap; }
+  .s2 .seg .text-btn:hover { background: var(--grey-1); }
+  .s2 .track { width: 140px; height: 20px; border: 1px solid var(--border-strong); background: var(--grey-2); position: relative; }
+  .s2 .track .fill { position: absolute; inset: 0 auto 0 0; width: 32%; background: var(--accent); }
+  .s2 .track .thumb { position: absolute; left: 32%; top: 0; bottom: 0; width: 6px; margin-left: -3px; background: var(--paper); border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); }
+</style>
+</head>
+<body>
+  <h1>底栏重设计 · swiss-international-style（瑞士规范）</h1>
+  <div class="sub">设计原则：单一焦点色 #166a59；直角纯色平面；hairline 是手术刀；8px 基线（4px 半步）；组间 ≥2× 组内；卡片四类不混用；数字 mono + tnum。</div>
+
+  <div class="variant s1">
+    <h2>S1 · card-fill 灰底簇</h2>
+    <p>把卡片四类里的「灰底（card-fill）」下沉到控件簇：<strong>每个功能 = 一块 40 高的 grey-1 直角色块</strong>（无边框），
+       组内文字按钮 hover 升 grey-2，组间 24px。全栏只有三种面：paper 底、灰底簇、accent 主钮——
+       「背景形状承载分组」，边界感强而不加线。</p>
+    <div class="window">
+      <div class="fake-content">（卡面内容区）</div>
+      <div class="bar">
+        <button class="btn primary grow">下一条<span class="kbd">空格</span></button>
+        <span class="fill-cluster"><input class="bare-num" value="7"><span class="unit">天</span><button class="text-btn">推迟</button></span>
+        <span class="fill-cluster"><span class="unit">优先级</span><span class="track"><span class="fill"></span><span class="thumb"></span></span><input class="bare-num" style="width:32px" value="50"></span>
+        <button class="btn">毕业</button>
+        <button class="btn">更多 ▲</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="variant s2">
+    <h2>S2 · 模块分段条</h2>
+    <p>模块网格语言：右半区收进<strong>一条 hairline 描边的模块条</strong>，内部用 1px 竖 hairline 分成三段——
+       天数段（7 天）、动作段（推迟）、调节段（优先级 ━━ 50）。段=功能，归属由分段结构自己声明；
+       条外只留主按钮与毕业/更多。分组最强的一版，也最贴「全宽单模块 + 行 hairline」的表格思维。</p>
+    <div class="window">
+      <div class="fake-content">（卡面内容区）</div>
+      <div class="bar">
+        <button class="btn primary grow">下一条<span class="kbd">空格</span></button>
+        <span class="strip">
+          <span class="seg"><input class="bare-num" value="7"><span class="unit">天</span></span>
+          <span class="seg"><button class="text-btn">推迟</button></span>
+          <span class="seg"><span class="lbl">优先级</span><span class="track"><span class="fill"></span><span class="thumb"></span></span><input class="bare-num" style="width:32px" value="50"></span>
+        </span>
+        <button class="btn">毕业</button>
+        <button class="btn">更多 ▲</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

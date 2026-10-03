@@ -19,8 +19,8 @@
   /* 描边 */
   --border-subtle: #e0e0e0;
   --border-strong: #a3a3a3;
-  /* 焦点色：克莱因蓝 IKB（全应用唯一 accent） */
-  --accent: #002fa7;
+  /* 焦点色（全应用唯一 accent）：v48.35/D75 默认改用户裁定的深绿（原克莱因蓝 IKB 退役；可经设置改任何色） */
+  --accent: #166a59;
   --accent-on: #ffffff;
   --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #000000);
@@ -84,6 +84,11 @@
   /* 胶囊档：基线不用（=0），供确实需要圆形/胶囊的控件与皮肤引用，
      避免皮肤直接写 border-radius: 999px 绕过 Token 体系 */
   --radius-pill: 0;
+  /* 舞台带缘 hairline 色（v48.34 / D74，§5.5 皮肤扩展点）：钉底栏上缘（.stage-bar border-top）
+     与吸顶头带下缘（.extract-page-head/.review-head border-bottom）共用一枚。基线＝--border-subtle
+     （D74 撤回 D71 的隐藏——用户 2026-10-02 要求重新显示这两条线；两页共用 ⇒ 复习页同步恢复）；
+     皮肤层仍可整枚替换（显形值须声明在 body 上，§5.5 深色档纪律，同 --field-line）。 */
+  --band-line: var(--border-subtle);
   /* 多段选择高亮（v48.23 / D61 §6.8-11）：::highlight(multi-select) 只能用色值，
      故单列一个 Token 供它取（CSS Custom Highlight API 的高亮底色，比 --accent-soft 略重：
      它是「用户刚划出的选区」，要让多段同时可见）。派生自 --accent ⇒ 必须在
@@ -127,8 +132,8 @@ body.theme-dark {
   --text-placeholder: #7a7a76;
   --border-subtle: #2a2a27;
   --border-strong: #4a4a46;
-  /* IKB 在深底上对比不足，提亮同色相变体至 ≥ 4.5:1 */
-  --accent: #5b7fe8;
+  /* IKB 在深底上对比不足，提亮同色相变体至 ≥ 4.5:1（v48.35/D75：默认 accent 改绿，同法提亮） */
+  --accent: #3fa08a;
   --accent-on: #0a0a0a;
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
@@ -201,6 +206,10 @@ body {
   --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #000000);
   --accent-pressed: color-mix(in srgb, var(--accent) 78%, #000000);
+  /* 舞台带缘 hairline（v48.34 / D74）：派生自 --border-subtle（--band-line 在 :root 有基线声明），
+     必须在 body 这一层重取一次（§5.1 求值层纪律）——否则 body.theme-dark 改 --border-subtle 时
+     两条带缘线会停在 :root 的浅色值上。 */
+  --band-line: var(--border-subtle);
   /* 多段选择高亮：派生自 --accent，必须在所有会被上层改 --accent 的层各声明一次 */
   --hl-multi: color-mix(in srgb, var(--accent) 22%, transparent);
   /* 批注色板：-soft 派生自实色，同样必须在 body 这一层重取一次（§5.1 求值层纪律；
@@ -2387,6 +2396,65 @@ body.theme-dark .modal-panel {
 .lint-warn { background: var(--warning); color: var(--warning-on); }
 .lint-info { background: var(--grey-2); color: var(--text-primary); }
 
+/* ---------- 钉底栏与吸顶头带（摘录页/复习页共用；EXCERPT-REVIEW-LAYOUT-REDESIGN v3） ----------
+   两页同一条配方：页面根＝真滚动容器（overflow-y:auto）；头带＝第 1 个流内子节点（sticky top:0，
+   负水平边距满宽 + --paper 不透明底）；底栏＝最后 1 个流内子节点（sticky bottom:0 零偏移，负水平边距
+   满宽）——不用 fixed、不用负偏移 sticky、不用双滚动；中间内容区 flex-grow 把短内容时的底栏顶到视口底。
+   栏高 72 = 控件 40 + 上下各 16（D70）：按钮下缘距窗底 = 左缘距窗左 = var(--sp-4)，四边留白相等。 */
+.stage-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  height: 72px;
+  margin-inline: calc(var(--sp-16) * -1);
+  padding: 0 var(--sp-4);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4); /* v48.37/D77：按钮间距 = 距窗缘 = 距窗底 = 16px，全栏单一间距值 */
+  background: var(--paper);
+  border-top: 1px solid var(--band-line);
+}
+.bar-side, .review-bar-side { display: inline-flex; align-items: center; gap: var(--sp-2); flex: none; }
+.bar-hint { font-size: var(--fs-meta); color: var(--text-helper); }
+/* 头带：摘录页 .extract-page-head / 复习页 .review-head 共用（带＝全宽吸顶，内列＝≤720 居中）
+   摘录页头带 className 首 token 必须仍是 extract-page-head（面包屑测试命中判据），不得改。 */
+.extract-page-head, .review-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  margin-inline: calc(var(--sp-16) * -1);
+  padding-inline: var(--sp-16);
+  background: var(--paper);
+  border-bottom: 1px solid var(--band-line);
+}
+.extract-page-head-inner, .review-head-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  min-height: var(--sp-12);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-4);
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
+.review-head-inner { justify-content: flex-end; }
+/* 摘录页内列与卡面**同盒**（v5/D72）：同为 ≤720 居中 ⇒ 面包屑左缘＝卡面左缘、最右元素右缘＝卡面右缘，
+   两态（批注轨开/收）皆然——v2 的 data-annot-open 头带 padding-left 补偿随之删除（对收缩内列无效）。 */
+.extract-page-head-inner { width: 100%; }
+/* 窄窗口退让阶梯（只此一级）：会话态快捷键提示整条隐藏 */
+@media (max-width: 1150px) { .extract-page-hint { display: none; } }
+/* 入场动效（克制、语义耦合、可降级）：换卡 120ms、弹层 150ms；减少动效时零动画 */
+@media (prefers-reduced-motion: no-preference) {
+  .review-wrap .review-face,
+  .extract-page .extract-face,
+  .review-wrap .extract-face,
+  .review-wrap .review-back { animation: stage-card-in var(--dur) var(--ease) both; }
+  .bar-pop { animation: stage-pop-in 150ms var(--ease) both; }
+}
+@keyframes stage-card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes stage-pop-in { from { opacity: 0; } to { opacity: 1; } }
+
 /* ---------- 复习视图（Phase 3/14/16；v11.1 排版重设计：swiss 网格 + 左对齐版心） ---------- */
 
 /* 版心 720px + 8px 基线；左对齐非对称布局（弃垂直居中对称），kicker→标题→卡面→评分纵向节奏 */
@@ -2394,22 +2462,11 @@ body.theme-dark .modal-panel {
 /* 顶栏＝Anki 式计数：三项并排、数字用主色，其余 helper（不再有「本轮 N 张」与提示行） */
 .review-count { display: flex; align-items: baseline; gap: var(--sp-4); font-size: var(--fs-meta); color: var(--text-helper); }
 .review-count b { font-weight: 500; color: var(--text-primary); margin-left: 2px; }
-/* 底部动作栏：贴页面底、一行同高 40px（正面＝显示答案；背面＝四档评分） */
-.review-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 6;
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: 56px;
-  padding: 0 var(--sp-4);
-  background: var(--paper);
-  border-top: 1px solid var(--border-subtle);
-}
-.review-bar .grade-row { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); min-width: 0; }
+/* 底部动作栏：几何由共用 .stage-bar 提供（元素挂双类 stage-bar review-bar）。
+   .review-bar 仅作为作用域/测试钩子保留。评分网格显式复位 margin-top，堵住通用 .grade-row 的 48px 泄漏。 */
+.review-bar .grade-row { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); min-width: 0; margin-top: 0; }
+/* 评分钮回 §5.3 合同：本体灰底（由 .grade-* 的 --grey-1 接管）、四边同 1px hairline；
+   评分语义唯一承载层＝既有 .grade-*::before 4px 左缘色条（error/warning/accent/success）。 */
 .review-bar .grade {
   height: 40px;
   display: flex;
@@ -2417,21 +2474,15 @@ body.theme-dark .modal-panel {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  background: var(--paper);
   border: 1px solid var(--border-subtle);
-  border-left-width: 3px;
   font-size: var(--fs-secondary);
   color: var(--text-primary);
   cursor: pointer;
 }
+.review-bar .grade:hover { background: var(--grey-2); }
+.review-bar .grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .review-bar .grade .grade-due { font-size: var(--fs-meta); color: var(--text-helper); }
-.review-bar .grade-again { border-left-color: var(--annot-red); }
-.review-bar .grade-hard { border-left-color: var(--annot-amber); }
-.review-bar .grade-good { border-left-color: var(--annot-green); }
-.review-bar .grade-easy { border-left-color: var(--accent); }
-.review-bar-side { display: inline-flex; align-items: center; gap: var(--sp-2); }
-/* 正文给底栏让位（固定栏不盖最后一行） */
-.review-session { padding-bottom: calc(56px + var(--sp-6)); }
+/* 滚动根：仍是真滚动容器（面包屑测试 L251/L489 硬条件），底栏是它的最后一个流内子节点 */
 .review-wrap {
   flex: 1;
   min-height: 0;
@@ -2440,24 +2491,24 @@ body.theme-dark .modal-panel {
   flex-direction: column;
   align-items: stretch;
   gap: 0;
-  padding: var(--sp-12) var(--sp-16) var(--sp-8);
+  padding: 0 var(--sp-16);
 }
 .review-session {
   width: 100%;
   max-width: 720px; /* 版心：长文阅读单列测量宽 */
   margin: 0 auto;
+  flex: 1 0 auto; /* 短内容撑满滚动口 ⇒ 把底栏顶到视口底 */
+  padding-top: var(--sp-4);
   display: flex;
   flex-direction: column;
   gap: 0;
 }
-/* 页内唯一保留的状态小字：右上角计数（导航高亮已表达当前页，不再重复标题） */
+/* 页内唯一保留的状态小字：计数（进头带内列，右对齐由 .review-head-inner 承担） */
 .review-count {
-  align-self: flex-end;
   font-size: var(--fs-meta);
   font-weight: 500;
   color: var(--text-helper);
   font-variant-numeric: tabular-nums;
-  margin-bottom: var(--sp-6);
 }
 /* v23（§4.4.9）：persist 失败横幅——hairline 直角 + 语义红，重试按钮右置 */
 .save-error {
@@ -4999,75 +5050,115 @@ body.capture-body #root { height: 100vh; }
 /* ---------- 摘录复习（v48.22 / D58 §6.8）：沉浸式连续处理页 + 摘录卡面 ---------- */
 /* 批 4 Task 14：摘录页两列（卡面 + 批注栏）。栏出现时页面本体不再整页滚动，
    改由两列各自滚动——否则栏会跟着正文滚走，「栏内定位」就失去意义。 */
+/* v5/D72 骨架：.extract-page-cols＝「全高批注轨 + 右主列」两列；水平留白在主列，
+   轨贴窗左缘 x=0、上至页面顶（贯通，用户 2026-10-02）；开关钮锚在 cols 左上角。 */
 .extract-page-cols {
   display: flex;
   align-items: stretch;
   gap: 0;
-  flex: 1;
+  flex: 1 0 auto; /* 短内容撑满滚动口 ⇒ 把底栏顶到视口底 */
   min-height: 0;
-  position: relative; /* 栏开关（.annot-toggle）的定位上下文：固定左上角 ⇒ 两态位置一致 */
+  position: relative; /* 栏开关（.annot-toggle）的定位上下文：页面左上角 ⇒ 两态位置一致 */
 }
-.extract-annot-slot { flex: none; display: flex; min-height: 0; }
-/* 栏开关：绝对定位在页面视口左上角 —— 栏展开时它落在栏头那一行、收起时留在原地，
-   于是展开/收起两态按钮坐标完全相同（用户 2026-10-01），且收起后不占空栏。 */
-.annot-toggle {
-  position: absolute;
-  left: var(--sp-3);
-  top: var(--sp-3);
-  z-index: 3;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
+/* 批注轨（v5/D72 重设计）：全高 sticky 左轨——上至页面顶、下缘止于底栏上缘（100vh−顶栏48−底栏72），
+   页面滚动时恒在视口内；面板（.annot-side，280px 内联恒宽）在轨内被裁切 ⇒ 宽度滑动动画内容不自重排。 */
+.extract-annot-rail {
+  flex: none;
+  width: 280px;
+  min-width: 0;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: calc(100vh - 120px); /* 顶栏 48 + 钉底栏 72（D70）：版式量度，非 token */
+  overflow: hidden;
+}
+.extract-annot-rail.is-closed { width: 0; visibility: hidden; } /* 收起＝不留空轨（2026-10-01 裁定，语义等价） */
+@media (prefers-reduced-motion: no-preference) {
+  .extract-annot-rail { transition: width var(--dur) var(--ease), visibility var(--dur) linear; }
+}
+/* 可见性离散步进：过渡下「收起时停在末帧隐身、展开时立即显形」＝滑出/滑入全程可见 */
+.extract-annot-rail .annot-side { height: 100%; }
+/* 栏头行（v7/D74 让位更新）：与 fixed 开关钮**同一行**——头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），
+   行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；「注解 N」已由 showCount={false} 关闭（用户裁定省一行）。
+   两条段控按 3:2 有比例铺满剩余宽（筛选 3 项 : 排序 2 项），按钮 24 高＝8×3 模块。 */
+.extract-annot-rail .annot-side-head {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  background: var(--paper);
-  border: 1px solid var(--border-subtle);
-  color: var(--text-helper);
-  font-size: 11px;
-  line-height: 1;
-  cursor: pointer;
+  gap: var(--sp-1);
+  height: 24px;
+  margin: var(--sp-3) 0 0 var(--sp-16); /* v48.35/D75：顶对齐随钮居中改 48+12 */
+  padding: 0 var(--sp-2) 0 0;
+  border-bottom: none; /* 头行浮在钮旁，基线版的整行 hairline 只会从让位点起笔成断线 */
 }
-.annot-toggle:hover { border-color: var(--text-primary); color: var(--text-primary); }
-/* 栏头给开关让位（只有摘录页的栏里有这个开关；阅读器侧栏的开合在工具条上） */
-.extract-page-cols > .extract-annot-slot .annot-side-head { padding-left: calc(var(--sp-3) + 24px + var(--sp-2)); }
-.extract-page-cols.with-annot > .extract-face,
-.extract-page-cols.with-annot > .extract-page,
-.extract-page-cols.with-annot > *:not(.annot-side) { flex: 1; min-width: 0; overflow-y: auto; }
+.extract-annot-rail .annot-side-head .filter { display: flex; flex: 3; min-width: 0; gap: var(--sp-1); }
+.extract-annot-rail .annot-side-head .sort { display: flex; flex: 2; min-width: 0; gap: var(--sp-1); }
+.extract-annot-rail .annot-side-head .filter button,
+.extract-annot-rail .annot-side-head .sort button { flex: 1; min-width: 0; height: 24px; padding: 0; font-size: var(--fs-meta); }
+/* 条目竖线右移（v7/D74）：轨贴窗左缘后左线贴边看不清（用户裁定）——摘录页作用域把 --zline 竖线
+   从左缘移到右缘；整卡条目的 accent 竖线同步。阅读器 dock 在右侧无此问题，基线 .zitem 左线不动。 */
+.extract-annot-rail .annot-side .zitem { border-left: none; border-right: 2px solid var(--zline, transparent); }
+.extract-annot-rail .annot-side .zitem.whole { border-left: none; border-right-color: var(--accent); }
+/* 主列（v5/D72）：头带 + 卡面都在这里；水平留白 var(--sp-16) —— 头带的负边距满宽公式在此之上原样成立 */
+.extract-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding-inline: var(--sp-16);
+}
+.extract-main > .extract-face { margin-top: var(--sp-4); } /* 头带与卡面的间距（原 cols padding-top 的职责移交） */
+/* 栏开关（v7/D74 造型）：底栏按钮同族（双类 annot-toggle bar-btn），文字钮两态变文案——
+   未展开显示「展开」、展开状态显示「收起」（用户 2026-10-02 中途更正；aria-expanded 同步承载）。
+   v7 尺寸与样式降至段控同规格：24×40（8×3 × 8×5）、1px --border-subtle 框 + helper 字色（与段控同族）；
+   fixed 定位在页面视口左上角（16, 顶栏48+16）——与底栏按钮距窗缘 16px 同一节奏，轨开/收两态坐标恒定；
+   fixed 而非 absolute：受控的轨是 sticky 的，钮随内容滚走就会「栏在眼前、钮在远处」。
+   z-index 高于吸顶头带一层：收起态主列满宽、带（--z-sticky、不透明底）会盖住钮（实测只露 7px、点不到）。
+   选择器用双类提特异性：单类 .annot-toggle 与 .bar-btn 同权重且源序在后，padding/font-size 会被覆盖。 */
+.annot-toggle.bar-btn {
+  position: fixed;
+  left: var(--sp-4);
+  top: calc(48px + var(--sp-3)); /* v48.35/D75：在顶栏下缘（48）与头带下缘（≈96.8）两条细线之间垂直居中 */
+  z-index: calc(var(--z-sticky) + 1);
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  justify-content: center;
+  font-size: var(--fs-meta);
+  border-color: var(--border-subtle);
+  color: var(--text-helper);
+}
+.annot-toggle.bar-btn:hover { border-color: var(--text-primary); color: var(--text-primary); }
 
+/* 页面根＝真滚动容器（面包屑测试 L251/L489 硬条件：scrollHeight−clientHeight 与 scrollTop 必须真实可读）；
+   底栏是它的最后一个流内子节点（钉底）。
+   v5/D72：水平 padding 归零（移交 .extract-main）——批注轨贴窗左缘、底栏自然满窗宽。 */
 .extract-page {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  /* 上内边距交给吸顶的头行承担：否则粘住时留出一条透明缝，滚动正文会从缝里透出来 */
-  padding: 0 var(--sp-16) var(--sp-8);
+  padding: 0;
   display: flex;
   flex-direction: column;
 }
-/* 空态没有头行（计数直接挂在页上）：把那一段上边距补回来 */
-.extract-page > .review-count { padding-top: var(--sp-12); }
+/* 页根已无水平 padding ⇒ 底栏无需负边距满宽；按钮距窗缘 16px 由栏自身的 padding 承担（与复习页一致） */
+.extract-page .stage-bar { margin-inline: 0; }
+/* 空态没有头带（计数直接挂在页上）：把那一段上边距补回来（页根无 padding，水平一并补） */
+.extract-page > .review-count { padding: var(--sp-12) var(--sp-16) 0; }
 .extract-page-head {
-  width: 100%;
-  max-width: 720px;
-  margin: 0 auto var(--sp-4);
-  padding-top: var(--sp-12);
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: var(--sp-4);
-  font-size: var(--fs-meta);
-  color: var(--text-helper);
   /* 面包屑是该页的导航，滚动卡面时**不得**被带走（查看态还需从这里「返回队列」）。
-     吸顶与书架工具条同规（§5.3）：--paper 底 + z-sticky；无新增圆角/阴影。 */
-  position: sticky;
-  top: 0;
-  z-index: var(--z-sticky);
-  background: var(--paper);
+     全宽吸顶带（sticky / top / z-sticky / --paper 不透明底 / 负水平边距满宽）由共用规则
+     「.extract-page-head, .review-head」给出，与书架工具条 .shelf-bar 同规（§5.3）；无新增圆角/阴影。
+     className 首 token 必须仍是 extract-page-head（面包屑测试命中判据）。 */
 }
 /* 面包屑（规格 §1.2 R13）：与计数/状态行**同一区域**（不新增浮层），独占第一行＝左上角。
    样式纪律：只走 Token；层级名 Meta 档；分隔符 --text-helper；无圆角/阴影/accent 填充
    （当前层用 --text-primary + 600 字重表达，与 .shelf-crumb 的 .crumb-here 同规）。 */
 .extract-crumbs {
-  flex: 1 1 100%;
+  flex: 1 1 auto; /* v5/D72：不再独占整行（1 1 100% 会把计数挤到第二行）——计数与面包屑同一行、恒最右 */
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -5077,6 +5168,17 @@ body.capture-body #root { height: 100vh; }
   color: var(--text-helper);
 }
 .crumb-sep { color: var(--text-helper); flex: none; }
+/* 「原文」根节点可点态（v48.35/D75）：按钮裸化到与 span 同形，hover 升正色加下划线（同 .crumb-item 语言） */
+button.crumb-root {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  cursor: pointer;
+}
+button.crumb-root:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
 .crumb-item,
 .crumb-more-btn {
   background: transparent;
@@ -5122,11 +5224,11 @@ body.capture-body #root { height: 100vh; }
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
+  flex: 1 1 auto; /* 行内自适应：批注轨展开时随滚动区变窄并自然重居中 */
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
-  /* 撑满可视高：底栏才能靠 margin-top:auto 落到页面底部（与复习页一致） */
-  min-height: 100%;
 }
 .extract-face-meta {
   display: flex;
@@ -5151,21 +5253,10 @@ body.capture-body #root { height: 100vh; }
 .extract-page .extract-face-body { font-size: var(--fs-title-l); line-height: 1.5; }
 .extract-face-text { white-space: pre-wrap; }
 .extract-face-derived { font-size: var(--fs-meta); color: var(--text-helper); }
-/* 底部动作栏（2026-10-01）：与复习页同规格——贴页面底、一行同高 40px、直角 + hairline。
-   sticky：正文长到要滚动时也钉在底部；margin-top:auto：正文短时也被推到页面底部。 */
-.extract-face-actions {
-  position: sticky;
-  bottom: calc(var(--sp-8) * -1); /* 抵消 .extract-page 的下内边距，让栏底与滚动口底重合 */
-  margin-top: auto;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  align-items: center;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--paper);
-  padding: var(--sp-2) 0;
-  z-index: 4;
-}
+/* 底部动作栏（2026-10-01）：几何由共用 .stage-bar 提供（元素挂双类 stage-bar extract-face-actions）——
+   流内末子节点 + sticky bottom:0 零偏移，长内容钉在滚动口底缘、滚到底自然落在内容末尾，任何窗口高度
+   下自己与内容都不被裁（EXCERPT-REVIEW-LAYOUT-REDESIGN v2）。类名保留为作用域/测试钩子。
+   槽位与复习页一致：主行动区在前、.bar-side 在后；单行不换行。 */
 .bar-btn {
   height: 40px;
   display: inline-flex;
@@ -5181,28 +5272,37 @@ body.capture-body #root { height: 100vh; }
   cursor: pointer;
 }
 .bar-btn:hover { border-color: var(--text-primary); }
-.bar-btn.primary { border-color: var(--accent); color: var(--accent); }
+/* 主按钮（v48.36/D76）：填充式——主层级由填充承载，描边全栏统一为 border-strong 一种灰 */
+.bar-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.bar-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.bar-btn.primary:disabled { background: var(--grey-1); border-color: var(--grey-2); color: var(--grey-3); }
 .bar-btn.grow { flex: 1; min-width: 0; }
 .bar-btn:disabled { border-color: var(--grey-2); color: var(--text-placeholder); cursor: not-allowed; }
 .bar-btn .caret { font-size: 10px; line-height: 1; color: var(--text-helper); }
-.bar-btn .kbd { font-size: var(--fs-meta); color: var(--text-helper); }
-.bar-group { display: inline-flex; align-items: center; gap: var(--sp-2); height: 40px; padding: 0 var(--sp-3); border: 1px solid var(--border-subtle); }
-.bar-group input[type="number"] { width: 52px; height: 26px; border: 1px solid var(--border-subtle); background: var(--paper); color: var(--text-primary); font-family: var(--font-mono); font-size: var(--fs-secondary); text-align: right; padding: 0 4px; }
-.bar-group .lbl { font-size: var(--fs-meta); color: var(--text-helper); }
+/* 功能簇（v48.36/D76，better-layout「L1 · 一盒一功能」定稿）：一个功能 = 一个 1px --border-strong 盒；
+   盒内裸排（mono 数字 / Meta 单位 / 文字钮），**盒内不再套小框**。全栏可见描边只有 --border-strong 一种灰。 */
+.bar-cluster { height: 40px; display: inline-flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3); border: 1px solid var(--border-strong); background: var(--paper); }
+.bar-cluster .bare-num { border: none; background: none; font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: var(--fs-body); color: var(--text-primary); width: 28px; text-align: right; padding: 0; }
+.bar-cluster .bare-num:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.bar-cluster .bare-num::-webkit-outer-spin-button,
+.bar-cluster .bare-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; } /* 裸排无加减箭头；键盘上下仍可调 */
+.bar-cluster .prio-num { width: 32px; }
+.bar-cluster .unit { font-size: var(--fs-meta); color: var(--text-helper); white-space: nowrap; }
+.bar-cluster .text-btn { border: none; background: none; font-family: var(--sans); font-size: var(--fs-secondary); color: var(--text-primary); padding: 4px var(--sp-2); cursor: pointer; white-space: nowrap; }
+.bar-cluster .text-btn:hover { background: var(--grey-1); }
+.bar-cluster .text-btn:disabled { color: var(--grey-2); cursor: not-allowed; }
 .bar-more { position: relative; display: inline-flex; }
 .bar-pop { position: absolute; right: 0; bottom: calc(100% + var(--sp-2)); min-width: 180px; background: var(--paper); border: 1px solid var(--border-strong); padding: var(--sp-1) 0; z-index: 6; }
 .bar-pop button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--sp-4); height: 32px; padding: 0 var(--sp-3); background: none; border: none; font-size: var(--fs-secondary); color: var(--text-primary); text-align: left; cursor: pointer; }
 .bar-pop button:hover { background: var(--grey-1); }
 .bar-pop .k { font-size: var(--fs-meta); color: var(--text-helper); border: 1px solid var(--border-subtle); padding: 0 4px; }
-/* 优先级：轨道内嵌滑块——填充＝主题色（--accent），滑块与底框等高（2026-10-01 两条修正） */
+/* 优先级：轨道内嵌滑块——填充＝主题色（--accent）；v48.35/D75：用户裁定滑轨**单独回退上一版 140×20**（D74 的 144×40 作废），数字框/标签维持 40 高/正色 */
 .prio-track { position: relative; display: inline-block; width: 140px; height: 20px; border: 1px solid var(--border-strong); background: var(--grey-2); overflow: hidden; }
 .prio-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
 .prio-track input[type="range"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
 .prio-track input[type="range"]::-webkit-slider-runnable-track { height: 100%; background: transparent; border: none; }
 .prio-track input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 6px; height: 100%; margin: 0; background: var(--paper); border: none; border-left: 1px solid var(--ink); border-right: 1px solid var(--ink); }
 .prio-track input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.extract-priority .prio-num { width: 52px; height: 26px; border: 1px solid var(--border-subtle); background: var(--paper); color: var(--text-primary); font-family: var(--font-mono); font-size: var(--fs-secondary); text-align: right; padding: 0 4px; }
-.extract-postpone { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-meta); color: var(--text-helper); }
 .extract-face-hints { display: flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-meta); color: var(--text-helper); }
 
 /* ---------- 卡片浏览器 2.0（v48.22 / D58 §6.8-6）：多选列 + 批量动作条 ---------- */

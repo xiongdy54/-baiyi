@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import ExtractCardFace, { parseQuoteRanges } from "./ExtractCardFace";
+import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
@@ -7,7 +7,7 @@ import AnnotationPanel, { type AnnotItem, type AnnotFilter } from "./reader/Anno
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import { cardsApi } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
-import { readingWorkflow, parseContextRef, undoApi, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
+import { readingWorkflow, parseContextRef, undoApi, modifierFlagOf, readMultiSelectKey, type MultiSelectKey, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
 import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
 import { useSelectionActions } from "../lib/useSelectionActions";
 import { createMultiHighlight } from "../lib/reader/multiHighlight";
@@ -93,9 +93,16 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   const [viewRanges, setViewRanges] = useState<Array<{ start: number; end: number }> | null>(null);
   const [crumbOpen, setCrumbOpen] = useState(false);
   const crumbRef = useRef<HTMLDivElement | null>(null);
-  /** 批 4 Task 10：卡面正文里的当前选区（菜单锚点与动作文本都取自它；无选区＝null） */
+  /** 批 4 Task 10：卡面正文里的当前选区（菜单锚点与动作文本都取自它；无选区＝null）。
+   *  v48.38 / D78：ranges 为**累计后的多段区间**（Ctrl 加选），text 为各段 \n\n 拼接。 */
   const [faceSel, setFaceSel] = useState<FaceSelection>(null);
   const pageRef = useRef<HTMLDivElement | null>(null);
+  /** 多段集合（偏移区间，v48.38 / D78）：与阅读器同语义——无修饰＝替换、修饰＝按边界精确切换；不合并 */
+  const multiRangesRef = useRef<Array<{ start: number; end: number }>>([]);
+  /** 上一次**原始**采集的边界（幂等守卫用；与累计集合 multiRangesRef 不同——它是替换前的原始选区） */
+  const lastRawRef = useRef<string | null>(null);
+  /** 修饰键（settings.app.multiSelectKey，默认 Ctrl；与 Reader 同源同订阅） */
+  const multiKeyRef = useRef<MultiSelectKey>("Ctrl");
   // 选区高亮＝CSS Custom Highlight API（宿主文档实例：本页正文就在宿主里，不碰 DOM——§3.3b）
   const multiHighlightRef = useRef<ReturnType<typeof createMultiHighlight> | null>(null);
   if (!multiHighlightRef.current) {
@@ -106,6 +113,26 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       }
     });
   }
+  // 多段选择的修饰键（v48.38 / D78）：settings.app.multiSelectKey——与 Reader 同源同订阅（改动即时生效）
+  useEffect(() => {
+    let alive = true;
+    void readMultiSelectKey().then((k) => {
+      if (alive) multiKeyRef.current = k;
+    });
+    const off = eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload && payload.scope === "app" && payload.key === "multiSelectKey") {
+        void readMultiSelectKey().then((k) => {
+          if (alive) multiKeyRef.current = k;
+        });
+      }
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
 
   /** 批 4 Task 11：正在编辑的批注（新建或点已有条目进入；null＝无浮层） */
@@ -256,10 +283,20 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     return { x: 0, y: 0, width: 0, height: 0 };
   }
 
-  /** 批 4 Task 14：栏的出现条件＝当前卡 ≥1 条注解 */
-  const annotPanelVisible = annots.length > 0 && !viewing;
-  /** 栏开合（会话内偏好，不落设置键）：收起时**不留空栏**，只在原位留一个按钮（2026-10-01 用户裁定） */
-  const [annotOpen, setAnnotOpen] = useState(true);
+  /**
+   * 批注轨常驻（v48.35 / D75，取代 2026-10-01「当前卡 ≥1 条注解才出现」裁定）：推进到无批注卡后
+   * 轨与开关钮整根消失＝用户实测痛点；现在轨与钮恒在场——无批注时列表显示「（筛选后无条目）」空列提示，
+   * 查看态也不再藏轨（查看卡的注解照常按 annotsFor 加载）。空态/加载态页面（无卡）仍无轨。
+   */
+  const annotPanelVisible = true;
+  /**
+   * 栏开合状态记忆（v48.35 / D75）：入 sessionStorage——跨换卡、跨查看态、跨「顶栏摘录」与
+   * 「阅读器·复习摘录」两个入口持久（同挂本组件），应用重启后回到「开」。取代 v48.32 的组件内 useState。
+   */
+  const [annotOpen, setAnnotOpen] = useState(() => sessionStorage.getItem("extract.annotOpen") !== "0");
+  useEffect(() => {
+    sessionStorage.setItem("extract.annotOpen", annotOpen ? "1" : "0");
+  }, [annotOpen]);
 
   /**
    * 批 4 Task 10（规格 §3 / §4）：摘录页的选区动作编排与阅读器复用同一个钩子。
@@ -270,6 +307,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   const selActions = useSelectionActions({
     selectionText: () => faceSel?.text ?? null,
     selectionSpans: () => faceSel?.ranges.map((r) => ({ text: "" })),
+    // 多段累计的偏移区间（v48.38 / D78）：≥2 段随「摘录」落库写入 contextRef.parentRange
+    selectionRanges: () => (faceSel?.ranges.length ? faceSel.ranges : null),
     contextRef: () => (shown?.contextRef ? { ...shown.contextRef } : null),
     sourceContext: () => ({
       documentId: shown?.contextRef?.documentId,
@@ -288,6 +327,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     clearSelection: () => {
       window.getSelection()?.removeAllRanges();
       multiHighlightRef.current?.clear();
+      multiRangesRef.current = [];
       setFaceSel(null);
     },
     clearAnchor: () => {
@@ -325,14 +365,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     }
   });
   const { createAnnotation } = selActions;
-  // 卡面选区变化：画/撤选区高亮（绘制层，不碰正文 DOM——§3.3b）
-  useEffect(() => {
-    const mh = multiHighlightRef.current;
-    if (!mh) return;
-    if (faceSel) mh.update("replace");
-    else mh.clear();
-  }, [faceSel]);
-
+  // 卡面选区高亮（v48.38 / D78）：由 handleFaceSelection 按集合动作（replace/append/remove）直接驱动，
+  // 不再有「faceSel 一变就 replace」的兜底 effect——那会抹掉 Ctrl 加选的累计（多段选择的实现本体在这里）。
   /**
    * R38/R40：点色＝完成当前模式的动作（颜色不记）。
    * 摘录页按规格 §3.4 把批注/高亮挂在当前卡上（annotateParent 已在适配器里给定）；
@@ -345,6 +379,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     // 提前清掉会让落库区间退化成「整条正文」（[{0,len}]）——栏内条目与文中那段就对不上了（实测踩过）。
     const newId = await createAnnotation(sel.text, undefined, color, annotMode);
     multiHighlightRef.current?.clear();
+    multiRangesRef.current = [];
     setFaceSel(null);
     window.getSelection()?.removeAllRanges();
     if (newId) {
@@ -410,6 +445,24 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   );
 
   const advance = useCallback(() => run(() => readingWorkflow.advance(current!.id)), [current, run]);
+  /**
+   * 优先级专用静默提交（v48.33 / D73）：与 run() 的差别＝不挂 busy（busy 态会把整排底栏按钮打成
+   * disabled 又恢复＝用户实测的「整个底部栏闪一下」）、不发 flash note（「优先级改为…」toast 用户明示多余）、
+   * 不广播 workflow/changed（优先级不涉批注与队列组成，省掉订阅方的两次全量重取）；
+   * 仍走 setPriority + refresh() 保证卡面 meta 行与队列投影回流。
+   */
+  const commitPriority = useCallback(
+    async (p: number) => {
+      if (!current || viewing) return;
+      try {
+        await readingWorkflow.setPriority(current.id, p);
+        await refresh();
+      } catch {
+        /* 与 run 同径：投影不回流即视为未生效，不弹错（滑块草稿由 ExtractActionsBar 回流判据兜底回落） */
+      }
+    },
+    [current, refresh, viewing]
+  );
   const undo = useCallback(async () => {
     if (viewing) return;
     const r = await undoApi.last();
@@ -488,7 +541,93 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     return true;
   }, []);
 
-  if (!loaded) return <div className="extract-page" />;
+  // 加载态：台架配方下页面根内居中 meta 文案（现状是空白页；无头带、无底栏）
+  /**
+   * 「原文」根节点跳转（v48.35 / D75）：与底栏「跳转原文」同语义（returnTo="queue" 存现场）。
+   * 锚优先取**当前卡自身 contextRef**（anchorText/anchorRatio——根摘录由阅读器选取时记录）；
+   * 子摘录没有文档级锚（它的位置是父卡坐标 parentRange），回退**链根摘录**的锚；
+   * 两者皆无（较早版本创建、尚无锚体系的卡）→ flash 有界失败，不假装跳转。
+   * 注意 ExtractContextRef 没有 cfi 字段（那是阅读器内核 locator 的载体），摘录只落文本锚+比例。
+   */
+  const jumpCrumbRoot = useCallback(async () => {
+    if (!shown || !onJumpToDoc) return;
+    const ref = shown.contextRef;
+    if (!ref?.documentId) return;
+    const fallbackText = String(shown.contentMarkdown ?? "");
+    const hasOwn = !!(ref.anchorText || ref.anchorRatio != null);
+    let anchor: { anchorText: string; anchorRatio?: number } | null = hasOwn
+      ? { anchorText: ref.anchorText || fallbackText, anchorRatio: ref.anchorRatio }
+      : null;
+    if (!anchor) {
+      const root = await readingWorkflow.getTopic(chain[0]?.id ?? "");
+      const rc = root?.contextRef;
+      if (rc?.documentId === ref.documentId && (rc.anchorText || rc.anchorRatio != null)) {
+        anchor = { anchorText: rc.anchorText || fallbackText, anchorRatio: rc.anchorRatio };
+      }
+    }
+    if (!anchor) {
+      setFlash("该摘录没有跳转位置数据（较早版本创建）");
+      window.setTimeout(() => setFlash(null), 1800);
+      return;
+    }
+    onJumpToDoc(ref.documentId, anchor, "queue");
+  }, [shown, chain, onJumpToDoc]);
+  const canJumpRoot = !!onJumpToDoc && !!shown?.contextRef?.documentId;
+
+  /**
+   * 卡面选区采集（v48.38 / D78）：多段集合运算——与阅读器同语义（无修饰＝替换、修饰＝按边界精确切换、
+   * 同段再选＝移出、不合并）。集合域是 **content_markdown 的字符偏移**（＝落库 parentRange 的第一事实），
+   * 与主进程文本 span 代数分域（文本桥会丢精度且同文段不可消歧，见 D78）；高亮由本函数按动作驱动
+   * multiHighlight，不再有「faceSel 一变就 replace」的兜底。载荷 text＝各段 \n\n 拼接，
+   * 菜单与五动作/批注挂色零改动自动多段化。
+   */
+  const handleFaceSelection = useCallback(
+    (payload: FaceSelection, modifier?: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }) => {
+      if (!payload) {
+        multiRangesRef.current = [];
+        lastRawRef.current = null;
+        multiHighlightRef.current?.clear();
+        setFaceSel(null);
+        return;
+      }
+      const withMod = modifierFlagOf(multiKeyRef.current, modifier ?? {});
+      const rawKey = JSON.stringify(payload.ranges);
+      // 幂等守卫（实测踩过）：不带修饰位且与上次上报同界 ＝ 重复采集（松开 Ctrl 的 keyup 会再采一次），
+      // 不得重放 replace——否则 Ctrl 拖选的累计在松键瞬间被抹掉。带修饰位的上报不跳过（同段再选＝移出）。
+      if (!withMod && lastRawRef.current === rawKey) return;
+      lastRawRef.current = rawKey;
+      const cur = multiRangesRef.current;
+      const incoming = payload.ranges;
+      let removed = false;
+      let next: Array<{ start: number; end: number }>;
+      if (!withMod) {
+        next = incoming;
+      } else {
+        const inc = incoming[0];
+        const hit = inc ? cur.findIndex((r) => r.start === inc.start && r.end === inc.end) : -1;
+        if (inc && hit >= 0) {
+          next = cur.filter((_, i) => i !== hit);
+          removed = true;
+        } else {
+          next = [...cur, ...incoming];
+        }
+      }
+      multiRangesRef.current = next;
+      multiHighlightRef.current?.update(!withMod ? "replace" : removed ? "remove" : "append");
+      const full = String(shown?.contentMarkdown ?? "");
+      const text = next.map((r) => full.slice(Math.min(r.start, full.length), Math.min(r.end, full.length))).join("\n\n");
+      setFaceSel(next.length && text.trim() ? { rect: payload.rect, ranges: next, text } : null);
+    },
+    [shown]
+  );
+
+  if (!loaded) {
+    return (
+      <div className="extract-page">
+        <div className="empty-state"><p className="empty-text">加载中…</p></div>
+      </div>
+    );
+  }
 
   if (!current && !viewing) {
     return (
@@ -534,7 +673,17 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       </button>
     );
   // 每个层级项前都有一条「›」（形态：原文 › 第1层 › 第2层 › 当前）
-  const parts: ReactNode[] = [<span key="doc" className="crumb-root">原文</span>];
+  // 「原文」根节点（v48.35/D75）：有跳转出口（onJumpToDoc + documentId）时渲染为按钮——点击跳源文档；
+  // 无锚数据的旧卡点击后 flash 有界失败（见 jumpCrumbRoot），无出口时维持 span。
+  const parts: ReactNode[] = [
+    canJumpRoot ? (
+      <button key="doc" type="button" className="crumb-root" onClick={() => void jumpCrumbRoot()} title="跳转到原文位置">
+        原文
+      </button>
+    ) : (
+      <span key="doc" className="crumb-root">原文</span>
+    )
+  ];
   const pushLevel = (n: { id: string; text: string; depth: number }, keyPrefix = "") => {
     parts.push(<span key={`sep-${keyPrefix}${n.id}`} className="crumb-sep" aria-hidden="true">›</span>);
     parts.push(levelNode(n));
@@ -578,54 +727,88 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     tail.forEach((n) => pushLevel(n, "tail-"));
   }
 
-  return (
-    <div className="extract-page" ref={pageRef} data-showing-extract-id={shownId ?? ""} data-viewing={viewing ? "1" : undefined}>
-      <div className="extract-page-head">
-        <div className="extract-crumbs" data-extract-crumbs>
-          {parts}
-        </div>
-        <span className="review-count mono">{items.length} 条待处理</span>
-        {header ? <span className="mono extract-page-header">{header}</span> : null}
-        {flash ? <span className="extract-flash mono">{flash}</span> : null}
-        <span className="extract-page-hint mono" data-page-hint>
-          {viewing ? "查看态：只读 · 不推进调度 · Esc 返回队列" : "空格＝下一条 · Z＝撤销 · 正文可直接编辑"}
-        </span>
-        {viewing && (
-          <button className="crumb-exit" data-crumb-exit onClick={closeViewing} title="回到摘录会话（Esc）">
-            返回队列
-          </button>
-        )}
-        {onExit && (
-          <button className="extract-exit" onClick={onExit}>
-            返回阅读
-          </button>
-        )}
-      </div>
+  /**
+   * 会话态动作集（v2 §8.2）：**同一个 handlers 对象**同时喂给卡面与底栏（ExtractActionsBar），调用方零适配。
+   * `onJumpToSource` 的分流判定用可选链——查看态下 current 可能为 null，对象构造期不得抛；
+   * 其余闭包内的 `current!` 只在按钮被点击时求值（会话态必有 current）。
+   */
+  const faceHandlers = {
+    onAdvance: () => void advance(),
+    onPostpone: (days: number) => void run(() => readingWorkflow.postponeDays(current!.id, days), `已推迟 ${days} 天`),
+    onPriority: (p: number) => void commitPriority(p),
+    onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), "已毕业：不再推送，仍保留在卡片浏览器"),
+    onEdit: (text: string) => void run(() => readingWorkflow.updateContent(current!.id, text), "正文已保存"),
+    // 「跳转原文」按层级分流（规格 §1.2 D62）：有父摘录＝回父卡（查看态 + 高亮所引那段），
+    // 根摘录＝跳源文档（逐字保持既有行为，含 returnTo="queue" 现场恢复语义）
+    onJumpToSource: current?.contextRef?.parentExtractId
+      ? () => {
+          void openParentCard(current!).then((ok) => {
+            if (!ok && onJumpToDoc && current!.contextRef?.documentId) {
+              // 父卡已被删/不可取回：退回源文档，不给一个死按钮
+              onJumpToDoc(
+                current!.contextRef!.documentId!,
+                { anchorText: current!.contextRef!.anchorText || current!.contentMarkdown, anchorRatio: current!.contextRef!.anchorRatio },
+                "queue"
+              );
+            }
+          });
+        }
+      : onJumpToDoc && current?.contextRef?.documentId
+        ? () =>
+            onJumpToDoc(
+              current!.contextRef!.documentId!,
+              {
+                anchorText: current!.contextRef!.anchorText || current!.contentMarkdown,
+                anchorRatio: current!.contextRef!.anchorRatio
+              },
+              "queue"
+            )
+        : undefined,
+    onUndo: () => void undo(),
+    // 批 4 Task 10：把正文里的选区报给外层（菜单锚点 + 五动作的取材）
+    onSelection: handleFaceSelection
+  };
 
+  return (
+    <div
+      className="extract-page"
+      ref={pageRef}
+      data-showing-extract-id={shownId ?? ""}
+      data-viewing={viewing ? "1" : undefined}
+      data-annot-open={annotPanelVisible && annotOpen ? "1" : undefined}
+    >
       <div className={`extract-page-cols${annotPanelVisible ? " with-annot" : ""}`} data-annot-cols={annotPanelVisible ? "1" : undefined}>
-      {/* 栏开关：锚在页面视口左上角（固定坐标）——展开时它落在栏头那一行里，收起时留在原地，
-          于是**两种状态下按钮位置完全一致**，且收起后不占任何空栏（用户 2026-10-01 两条要求）。 */}
+      {/* 栏开关（v6/D73 造型）：双类 annot-toggle bar-btn＝底栏按钮同族；文字钮两态变文案——
+          未展开显示「展开」、展开状态显示「收起」（用户 2026-10-02 中途更正；aria-expanded 同步承载）。
+          48×32 token 网格（侧栏钮不与底栏同高）；fixed 定位页面视口左上角 (var(--sp-4), 顶栏48+var(--sp-4))
+          ——两态坐标恒定（2026-10-01），z 高于吸顶头带（收起态带满宽会盖钮）。 */}
       {annotPanelVisible && (
         <button
-          className="annot-toggle"
+          className="annot-toggle bar-btn"
           data-annot-toggle
           aria-expanded={annotOpen}
           aria-controls="extract-annot-panel"
           title={annotOpen ? "收起批注栏" : "展开批注栏"}
           onClick={() => setAnnotOpen((v) => !v)}
         >
-          {annotOpen ? "«" : "»"}
+          {annotOpen ? "收起" : "展开"}
         </button>
       )}
 
-      {/* 批 4 Task 13/14（规格 §5.3）：批注栏——**左侧**、可收起；出现条件＝当前卡 ≥1 条注解。
+      {/* 批注轨（v5/D72）：全高 sticky 左轨——贴窗左缘 x=0、上至页面顶；宽度 280↔0 滑动（.is-closed），
+          两态持续挂载以承载动画；收起时 width:0 + visibility:hidden＝不留空轨、不可交互、不进可访问树。
           摘录页的栏只有注解列表（没有目录/图谱），故不设页签（用户 2026-10-01）。 */}
-      {annotPanelVisible && annotOpen && (
-        <div className="extract-annot-slot" id="extract-annot-panel">
+      {annotPanelVisible && (
+        <div
+          className={`extract-annot-rail${annotOpen ? "" : " is-closed"}`}
+          id="extract-annot-panel"
+          aria-hidden={!annotOpen}
+        >
           <AnnotationPanel
             items={annots}
             currentId={null}
             filter={annotFilter}
+            showCount={false}
             onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
             palette={ANNOT_PALETTE}
             onJump={(it) => {
@@ -652,7 +835,40 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         </div>
       )}
 
-      {viewing ? (
+      {/* 主列（v5/D72）：头带 + 卡面同在 .extract-main——头带内列与卡面同盒（≤720 居中），
+          面包屑左缘＝卡面左缘、最右元素右缘＝卡面右缘，两态（轨开/收）构造性成立。 */}
+      <div className="extract-main">
+        {/* 头带：全宽吸顶（sticky/满宽/--paper 底由共用规则给出）；内列 width:100% + ≤720 居中。
+            className 首 token 必须仍是 extract-page-head（面包屑测试命中判据）。 */}
+        <div className="extract-page-head">
+          <div className="extract-page-head-inner">
+            <div className="extract-crumbs" data-extract-crumbs>
+              {parts}
+            </div>
+            {header ? <span className="mono extract-page-header">{header}</span> : null}
+            {flash ? <span className="extract-flash mono">{flash}</span> : null}
+            {/* 快捷键提示：**仅会话态**（查看态的模式提示已搬到底栏，不重复表达） */}
+            {!viewing && (
+              <span className="extract-page-hint mono" data-page-hint>
+                空格＝下一条 · Z＝撤销 · 正文可直接编辑
+              </span>
+            )}
+            {viewing && (
+              <button className="crumb-exit" data-crumb-exit onClick={closeViewing} title="回到摘录会话（Esc）">
+                返回队列
+              </button>
+            )}
+            {onExit && (
+              <button className="extract-exit" onClick={onExit}>
+                返回阅读
+              </button>
+            )}
+            {/* 计数恒最右（v5/D72）：与面包屑同一行、右缘与卡面右缘对齐（用户裁定 ①） */}
+            <span className="review-count mono">{items.length} 条待处理</span>
+          </div>
+        </div>
+
+        {viewing ? (
         <ExtractCardFace
           key={viewing.id}
           extract={viewing}
@@ -670,45 +886,23 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           engine={engine}
           busy={busy}
           bodyAnnotations={bodyGroups}
-          handlers={{
-            onAdvance: () => void advance(),
-            onPostpone: (days) => void run(() => readingWorkflow.postponeDays(current!.id, days), `已推迟 ${days} 天`),
-            onPriority: (p) => void run(() => readingWorkflow.setPriority(current!.id, p), `优先级改为 ${p}`),
-            onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), "已毕业：不再推送，仍保留在卡片浏览器"),
-            onEdit: (text) => void run(() => readingWorkflow.updateContent(current!.id, text), "正文已保存"),
-            // 「跳转原文」按层级分流（规格 §1.2 D62）：有父摘录＝回父卡（查看态 + 高亮所引那段），
-            // 根摘录＝跳源文档（逐字保持既有行为，含 returnTo="queue" 现场恢复语义）
-            onJumpToSource: current!.contextRef?.parentExtractId
-              ? () => {
-                  void openParentCard(current!).then((ok) => {
-                    if (!ok && onJumpToDoc && current!.contextRef?.documentId) {
-                      // 父卡已被删/不可取回：退回源文档，不给一个死按钮
-                      onJumpToDoc(
-                        current!.contextRef!.documentId!,
-                        { anchorText: current!.contextRef!.anchorText || current!.contentMarkdown, anchorRatio: current!.contextRef!.anchorRatio },
-                        "queue"
-                      );
-                    }
-                  });
-                }
-              : onJumpToDoc && current!.contextRef?.documentId
-                ? () =>
-                    onJumpToDoc(
-                      current!.contextRef!.documentId!,
-                      {
-                        anchorText: current!.contextRef!.anchorText || current!.contentMarkdown,
-                        anchorRatio: current!.contextRef!.anchorRatio
-                      },
-                      "queue"
-                    )
-                : undefined,
-            onUndo: () => void undo(),
-            // 批 4 Task 10：把正文里的选区报给外层（菜单锚点 + 五动作的取材）
-            onSelection: setFaceSel
-          }}
+          handlers={faceHandlers}
         />
       )}
       </div>
+      </div>
+
+      {/* 底栏（v2）：与复习页共用 .stage-bar 几何；它是 .extract-page 的**最后一个流内子节点**
+          ⇒ sticky bottom:0 钉底，任何窗口高度下自己与内容都不被裁；侧边栏开合也不影响它。
+          会话态＝动作栏（ExtractActionsBar）；查看态＝只读模式提示（几何不跳，信息零丢失）。
+          data-page-hint 在查看态落在这条提示上（会话态仍在头带），既有测试钩子保持不变。 */}
+      {viewing ? (
+        <div className="stage-bar extract-face-actions">
+          <span className="bar-hint" data-page-hint>查看态：只读 · 不推进调度 · Esc 返回队列</span>
+        </div>
+      ) : (
+        <ExtractActionsBar extract={current!} engine={engine} busy={busy} handlers={faceHandlers} />
+      )}
 
       {/* 批 4 Task 10（规格 §3.3）：选区菜单——摘录页无图片挖空（卡面正文的图片能力属批 5） */}
       {faceSel && !viewing && (

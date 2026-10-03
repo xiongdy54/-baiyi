@@ -16,7 +16,7 @@ function palette() {
     GREY2: v("--grey-2", "#d4d4d2"),
     GREY3: v("--grey-3", "#737373"),
     GRID: v("--border-subtle", "#e0e0e0"),
-    ACCENT: v("--accent", "#002fa7"),
+    ACCENT: v("--accent", "#166a59"),
     SOFT: v("--accent-soft", "rgba(0,47,167,.08)"),
     /* 固定深/浅色：不随主题反转（:root 里的 --overlay-* 一档）。
        段内文字必须在任何主题下都与其底色反向，用会反转的 --ink/--paper 会算错。 */

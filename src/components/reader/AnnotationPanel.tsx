@@ -46,7 +46,8 @@ export default function AnnotationPanel({
   onColor,
   onDelete,
   palette,
-  width = 280
+  width = 280,
+  showCount = true
 }: {
   /** 全部注解（含纯高亮）；排序与置顶由本组件按 R32 处理 */
   items: AnnotItem[];
@@ -66,6 +67,8 @@ export default function AnnotationPanel({
   palette: readonly string[];
   /** 占位宽度：摘录页＝280（规格 §5.3）；阅读器右侧栏里传 "100%" 随栏宽 */
   width?: number | string;
+  /** 头行「注解 N」计数：摘录页关掉以省一行（v48.33 / D73，用户裁定）；阅读器默认保留 */
+  showCount?: boolean;
 }) {
   const [sort, setSort] = useState<AnnotSort>("pos");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -103,7 +106,7 @@ export default function AnnotationPanel({
   return (
     <aside className="annot-side" ref={boxRef} style={{ width }} data-annot-panel>
       <div className="annot-side-head">
-        <span className="mono" data-annot-count>{`注解 ${listed.length}`}</span>
+        {showCount && <span className="mono" data-annot-count>{`注解 ${listed.length}`}</span>}
         <span className="filter" data-annot-filterseg>
           {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
             <button key={id} className={filter === id ? "on" : ""} data-f={id} onClick={() => onFilter(id)}>

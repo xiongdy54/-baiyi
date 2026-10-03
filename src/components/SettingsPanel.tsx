@@ -2204,7 +2204,7 @@ export default function SettingsPanel({
             <section className="settings-section" id="sec-accent">
               <h3>自定义主题颜色（强调色）</h3>
               <div className="settings-row accent-row">
-                <input type="color" value={accentColor || "#002fa7"} onChange={(e) => onAccentChange(e.target.value)} />
+                <input type="color" value={accentColor || "#166a59"} onChange={(e) => onAccentChange(e.target.value)} />
                 <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
               </div>
             </section>
