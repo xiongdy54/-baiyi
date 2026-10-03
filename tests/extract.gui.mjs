@@ -79,12 +79,15 @@ try {
   check("卡面显示来源书名", face.includes("GUI 摘录测试书"), face.slice(0, 120));
   // 批 4 Task 18（R29）：`extractReader` 专用页退役 →「打开摘录」动作不再是动作集成员。
   // 契约变更：动作集去掉了「打开摘录」（其余不变）。
+  // 判据作用域＝页面根 `.extract-page`（动作栏是它的流内末子节点、不在卡面子树内）：
+  // 断言的是**动作集内容**，不是「动作必须嵌在 .extract-face 里」这一实现细节。
+  const pageText = await cdp.eval(`document.querySelector(".extract-page")?.textContent || ""`);
   check(
     "动作齐全（下一条/推迟/优先级/毕业 + 更多；不含已退役的「打开摘录」「摘录」「快捷推迟」）",
-    ["下一条", "推迟", "优先级", "毕业", "更多"].every((t) => face.includes(t)) &&
-      !face.includes("打开摘录") &&
-      !face.includes("快捷推迟") &&
-    face.slice(0, 200)
+    ["下一条", "推迟", "优先级", "毕业", "更多"].every((t) => pageText.includes(t)) &&
+      !pageText.includes("打开摘录") &&
+      !pageText.includes("快捷推迟") &&
+    pageText.slice(0, 200)
   );
   check("正文可编辑（EditableText 裸壳在位）", (await cdp.eval(`!!document.querySelector(".extract-face .review-editable")`)) === true, "无 .review-editable");
 

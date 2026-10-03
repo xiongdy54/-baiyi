@@ -12,7 +12,7 @@ import { bindingHint } from "../lib/commands";
 import { fetchCardCounts, type CardCounts } from "../lib/sessionQueue";
 import { CardFace } from "./CardBrowser";
 import { fetchSessionQueue, type SessionItem } from "../lib/sessionQueue";
-import ExtractCardFace from "./ExtractCardFace";
+import ExtractCardFace, { ExtractActionsBar } from "./ExtractCardFace";
 import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow";
 import ContrastCardModal from "./ContrastCardModal";
 import ImageLightbox from "./ImageLightbox";
@@ -486,31 +486,36 @@ export default function ReviewView({
       }
       setSessionDone(!nx && extractHeadRef.current === null);
     };
+    // 动作集：同一个对象喂给卡面与底栏（v2 §8.4）
+    const exHandlers = {
+      onAdvance: () => void readingWorkflow.advance(ex.id).then(after),
+      onPostpone: (days: number) => void readingWorkflow.postponeDays(ex.id, days).then(after),
+      onPriority: (p: number) => void readingWorkflow.setPriority(ex.id, p),
+      onGraduate: () => void readingWorkflow.graduate(ex.id).then(after),
+      onEdit: (text: string) => void readingWorkflow.updateContent(ex.id, text),
+      onJumpToSource:
+        onJumpToDoc && ex.contextRef?.documentId
+          ? () =>
+              onJumpToDoc(ex.contextRef!.documentId!, {
+                anchorText: ex.contextRef!.anchorText || ex.contentMarkdown,
+                anchorRatio: ex.contextRef!.anchorRatio
+              })
+          : undefined,
+      onUndo: () => void undoApi.last().then(after)
+    };
     return (
       <div className="review-wrap">
-        <div className="review-session">
-          <div className="review-count mono">摘录 · 合并复习</div>
-          <ExtractCardFace
-            key={ex.id}
-            extract={ex}
-            handlers={{
-              onAdvance: () => void readingWorkflow.advance(ex.id).then(after),
-              onPostpone: (days) => void readingWorkflow.postponeDays(ex.id, days).then(after),
-              onPriority: (p) => void readingWorkflow.setPriority(ex.id, p),
-              onGraduate: () => void readingWorkflow.graduate(ex.id).then(after),
-              onEdit: (text) => void readingWorkflow.updateContent(ex.id, text),
-              onJumpToSource:
-                onJumpToDoc && ex.contextRef?.documentId
-                  ? () =>
-                      onJumpToDoc(ex.contextRef!.documentId!, {
-                        anchorText: ex.contextRef!.anchorText || ex.contentMarkdown,
-                        anchorRatio: ex.contextRef!.anchorRatio
-                      })
-                  : undefined,
-              onUndo: () => void undoApi.last().then(after)
-            }}
-          />
+        {/* 头带：全宽吸顶（与摘录页同一配方），计数在最右 */}
+        <div className="review-head">
+          <div className="review-head-inner">
+            <div className="review-count mono">摘录 · 合并复习</div>
+          </div>
         </div>
+        <div className="review-session">
+          <ExtractCardFace key={ex.id} extract={ex} handlers={exHandlers} />
+        </div>
+        {/* 底栏：滚动根的最后一个流内子节点（sticky bottom:0），与摘录页几何构造性相等 */}
+        <ExtractActionsBar extract={ex} handlers={exHandlers} />
       </div>
     );
   }
@@ -518,8 +523,13 @@ export default function ReviewView({
   if (!current && sessionDone) {
     return (
       <div className="review-wrap">
+        {/* 头带（计数在最右）+ 居中空态；无底栏（v2 §5：Empty 无 bar） */}
+        <div className="review-head">
+          <div className="review-head-inner">
+            <div className="review-count mono">{doneCount} 张已复习</div>
+          </div>
+        </div>
         <div className="review-session">
-          <div className="review-count mono">{doneCount} 张已复习</div>
           <div className="empty-state">
             <div className="empty-deco">
               <span className="empty-sq empty-sq-accent" />
@@ -548,14 +558,21 @@ export default function ReviewView({
 
   return (
     <div className="review-wrap">
-      <div className="review-session">
-        {/* 顶栏＝Anki 式三档计数（今日可用口径，见 sessionAPI.counts）；不再有「本轮 N 张」与
-            「点击卡片或按空格显示答案」那行提示（2026-10-01 用户裁定：翻面改按钮、提示并入按钮 hover） */}
-        <div className="review-count mono" data-review-counts>
-          <span>未学习 <b>{counts.new}</b></span>
-          <span>学习中 <b>{counts.learning}</b></span>
-          <span>待复习 <b>{counts.review}</b></span>
+      {/* 头带：全宽吸顶（与摘录页同一配方；计数恒最右）。它是滚动内容的第 1 个流内子节点，
+          计数不再随卡片滚走。 */}
+      <div className="review-head">
+        <div className="review-head-inner">
+          {/* 顶栏＝Anki 式三档计数（今日可用口径，见 sessionAPI.counts）；不再有「本轮 N 张」与
+              「点击卡片或按空格显示答案」那行提示（2026-10-01 用户裁定：翻面改按钮、提示并入按钮 hover） */}
+          <div className="review-count mono" data-review-counts>
+            <span>未学习 <b>{counts.new}</b></span>
+            <span>学习中 <b>{counts.learning}</b></span>
+            <span>待复习 <b>{counts.review}</b></span>
+          </div>
         </div>
+      </div>
+
+      <div className="review-session">
         {deferredPanel}
 
         {/* v23（§4.4.9）：persist 失败横幅——停留当前卡、封锁动作，重试成功后自动恢复 */}
@@ -582,8 +599,10 @@ export default function ReviewView({
           </div>
         )}
 
-        {/* 翻面只走底栏按钮（2026-10-01）：卡面不再吃点击（onReveal 不传＝点卡面不翻面） */}
-        <CardFace card={current!} showBack={showBack} onEdit={handleEdit} />
+        {/* 翻面只走底栏按钮（2026-10-01）：卡面不再吃点击（onReveal 不传＝点卡面不翻面）。
+            key＝卡 id：换卡即重挂载 ⇒ 入场动效（120ms，见 theme.css）在一次呈现里恰好触发一次；
+            翻面态 showBack 由父持有，不受 remount 影响。 */}
+        <CardFace key={current!.id} card={current!} showBack={showBack} onEdit={handleEdit} />
         {/* 来源/日期是**信息行**（动作都在底栏）：跳转原文/查看原图/撤销评分已搬进底栏（2026-10-01） */}
         <div className="review-meta">
           {current!.sourceRef?.title ? `来源:${current!.sourceRef.title}` : ""}
@@ -595,98 +614,102 @@ export default function ReviewView({
             {current!.mnemonic}
           </div>
         )}
-        <div className="review-bar" data-review-bar>
-          {!showBack ? (
-            <button
-              className="bar-btn primary grow"
-              data-reveal
-              disabled={saveError || !current}
-              title={`显示答案（快捷键：${hint || "未绑定"}，可在设置里改）`}
-              onClick={() => setShowBack(true)}
-            >
-              显示答案{hint ? <span className="kbd mono">{hint}</span> : null}
-            </button>
-          ) : (
-            <div className="grade-row grade-grid">
-              {(previews?.items ?? safePreviewItems(current!.fsrs)).map((p) => (
-                <button key={p.rating} className={`grade grade-${p.rating.toLowerCase()}`} disabled={saveError} onClick={() => grade(p.rating)}>
-                  {p.rating}
-                  <span className="grade-due mono">{p.dueText}</span>
-                </button>
-              ))}
-            </div>
+      </div>
+
+      {/* 底栏（v2）：挂在滚动根（.review-wrap）的**最后一个子节点**上——sticky 时代它必须直接位于滚动根下
+          才能满宽 + 正确钉底（fixed 时代它藏在 .review-session 里无所谓）。
+          内部 DOM（显示答案 / grade-row / .review-bar-side / .bar-more / .bar-pop）一字不改。 */}
+      <div className="stage-bar review-bar" data-review-bar>
+        {!showBack ? (
+          <button
+            className="bar-btn primary grow"
+            data-reveal
+            disabled={saveError || !current}
+            title={`显示答案（快捷键：${hint || "未绑定"}，可在设置里改）`}
+            onClick={() => setShowBack(true)}
+          >
+            显示答案
+          </button>
+        ) : (
+          <div className="grade-row grade-grid">
+            {(previews?.items ?? safePreviewItems(current!.fsrs)).map((p) => (
+              <button key={p.rating} className={`grade grade-${p.rating.toLowerCase()}`} disabled={saveError} onClick={() => grade(p.rating)}>
+                {p.rating}
+                <span className="grade-due mono">{p.dueText}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <span className="review-bar-side">
+          {current!.contextRef?.documentId && onJumpToDoc && current!.contextRef.imageSource !== "library" && (
+            hasSourceAnchor(current!.contextRef) ? (
+              <button className="bar-btn ghost" onClick={handleJumpToSource} title="跳转原文（不写入阅读进度）">
+                跳转原文
+              </button>
+            ) : (
+              <button className="bar-btn ghost" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
+                跳转原文
+              </button>
+            )
           )}
-          <span className="review-bar-side">
-            {current!.contextRef?.documentId && onJumpToDoc && current!.contextRef.imageSource !== "library" && (
-              hasSourceAnchor(current!.contextRef) ? (
-                <button className="bar-btn ghost" onClick={handleJumpToSource} title="跳转原文（不写入阅读进度）">
-                  跳转原文
+          {current!.cardType === "imageOcclusion" && current!.occlusionJson && (
+            <button className="bar-btn ghost" onClick={() => setLightboxOpen(true)}>
+              查看原图
+            </button>
+          )}
+          <span className="bar-more" data-menu ref={barMoreRef}>
+            <button className="bar-btn ghost" data-toggle aria-expanded={barMoreOpen} onClick={() => setBarMoreOpen((v) => !v)}>
+              更多<span className="caret">▲</span>
+            </button>
+            {barMoreOpen && (
+              <div className="bar-pop" data-pop>
+                {undoInfo && (
+                  <button
+                    onClick={() => {
+                      setBarMoreOpen(false);
+                      undoLastGrade();
+                    }}
+                  >
+                    撤销评分{undoInfo.rating ? `（${undoInfo.rating}）` : ""}<span className="k mono">Z</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setBarMoreOpen(false);
+                    setContrastOpen(true);
+                  }}
+                >
+                  对比卡
                 </button>
-              ) : (
-                <button className="bar-btn ghost" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
-                  跳转原文
+                <button
+                  onClick={() => {
+                    setBarMoreOpen(false);
+                    markAndSuspend();
+                  }}
+                >
+                  标记并暂停<span className="k mono">Q</span>
                 </button>
-              )
+                <button
+                  onClick={() => {
+                    setBarMoreOpen(false);
+                    skip();
+                  }}
+                >
+                  跳过<span className="k mono">W</span>
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    setBarMoreOpen(false);
+                    handleDelete();
+                  }}
+                >
+                  删除<span className="k mono">D</span>
+                </button>
+              </div>
             )}
-            {current!.cardType === "imageOcclusion" && current!.occlusionJson && (
-              <button className="bar-btn ghost" onClick={() => setLightboxOpen(true)}>
-                查看原图
-              </button>
-            )}
-            <span className="bar-more" data-menu ref={barMoreRef}>
-              <button className="bar-btn ghost" data-toggle aria-expanded={barMoreOpen} onClick={() => setBarMoreOpen((v) => !v)}>
-                更多<span className="caret">▲</span>
-              </button>
-              {barMoreOpen && (
-                <div className="bar-pop" data-pop>
-                  {undoInfo && (
-                    <button
-                      onClick={() => {
-                        setBarMoreOpen(false);
-                        undoLastGrade();
-                      }}
-                    >
-                      撤销评分{undoInfo.rating ? `（${undoInfo.rating}）` : ""}<span className="k mono">Z</span>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setBarMoreOpen(false);
-                      setContrastOpen(true);
-                    }}
-                  >
-                    对比卡
-                  </button>
-                  <button
-                    onClick={() => {
-                      setBarMoreOpen(false);
-                      markAndSuspend();
-                    }}
-                  >
-                    标记并暂停<span className="k mono">Q</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      setBarMoreOpen(false);
-                      skip();
-                    }}
-                  >
-                    跳过<span className="k mono">W</span>
-                  </button>
-                  <button
-                    className="danger"
-                    onClick={() => {
-                      setBarMoreOpen(false);
-                      handleDelete();
-                    }}
-                  >
-                    删除<span className="k mono">D</span>
-                  </button>
-                </div>
-              )}
-            </span>
           </span>
-        </div>
+        </span>
       </div>
     </div>
   );

@@ -12,7 +12,7 @@
 //      段锚竖线与文中高亮同 token（另配"不同颜色必须可分辨"对照）
 //   ⑤ 三页签与图谱目录：三枚在场 / 同刻一个面板 / 当前页签 accent 下划线 / 图谱嵌套与同级不重叠 / 缩进递增
 //   ⑥ 角标跟色与不画规则：颜色＝该条批注色（内联 style.fill）/ 纯高亮不画
-//   ⑦ 栏出现条件与占位：无批注不出现 / 有则出现且占 280px
+//   ⑦ 栏占位：栏常驻（v48.35/D75：无批注也显示空列提示）/ 有注解时占 280px
 //   ⑧ 退役检查：全应用内无「打开摘录」
 //   ③b 批注浮层：锚在所引那段（居中、空间不足翻面）＋ 失焦即收起并落库（2026-09-30 用户实测三条）
 //   ⑨ 截图判读：浅/深 × 摘录页/阅读器 四张落盘（人工目视，断言只保证文件非空）
@@ -22,7 +22,7 @@ import fs, { openSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PORT = "9237";
+const PORT = "19237"; // 本机动态端口范围异常（1024–15000，netsh int ipv4 show dynamicport tcp），9237 落在段内被无关出站连接随机占用致 devtools bind 失败（0x271D）→ 移出动态段（v48.33 实测）
 const USER_DATA = path.join(ROOT, "tests", "tmp-annot-userdata");
 const FIXDIR = path.join(ROOT, "tests", "tmp-annot-fixtures");
 const PDF_TITLE = "ANNOT PDF 夹具书";
@@ -167,14 +167,23 @@ const spanRectInEpub = (mark) => `(() => {
 })()`;
 
 // 栏内条目（阅读器注解栏：DOM 顺序＝面板展示顺序）
+/** 条目竖线取色（R33）：按实际带线的一缘取——摘录页右线（v48.34/D74）、阅读器 dock 左线 */
+const lineColorOf = (el) => {
+  const cs = getComputedStyle(el);
+  return parseFloat(cs.borderLeftWidth) > 0 ? cs.borderLeftColor : cs.borderRightColor;
+};
+
 const annotRows = `(() => {
   const p = document.querySelector("[data-annot-panel]");
   if (!p) return JSON.stringify({ up: false });
-  const rows = [...p.querySelectorAll("[data-zitem]")].map((el) => ({
+  const rows = [...p.querySelectorAll("[data-zitem]")].map((el) => {
+    const cs = getComputedStyle(el);
+    return ({
     id: el.dataset.annotId, kind: el.dataset.kind, unlocated: !!el.querySelector("[data-annot-unlocated]"),
-    on: el.classList.contains("on"), comment: el.querySelector("[data-zn]")?.textContent ?? null,
-    lineColor: getComputedStyle(el).borderLeftColor
-  }));
+      on: el.classList.contains("on"), comment: el.querySelector("[data-zn]")?.textContent ?? null,
+    lineColor: (parseFloat(cs.borderLeftWidth) > 0 ? cs.borderLeftColor : cs.borderRightColor)
+    });
+  });
   return JSON.stringify({ up: true, rows, count: p.querySelector("[data-annot-count]")?.textContent ?? "", filters: [...p.querySelectorAll("[data-annot-filterseg] button")].map((b) => ({ f: b.dataset.f, on: b.classList.contains("on") })), sorts: [...p.querySelectorAll("[data-annot-sortseg] button")].map((b) => ({ s: b.dataset.sort, on: b.classList.contains("on") })) });
 })()`;
 
@@ -322,7 +331,7 @@ try {
       up: true,
       bg: cs.backgroundColor,
       bgTok: probe("var(--annot-green-soft)"),
-      line: cs.borderLeftColor,
+      line: parseFloat(cs.borderLeftWidth) > 0 ? cs.borderLeftColor : cs.borderRightColor,
       lineTok: probe("var(--annot-green)"),
       accentTok: probe("var(--accent)"),
       badges: badges.length,
@@ -588,12 +597,15 @@ try {
   check("改批注：库中 comment 变化", editRes === "clicked" && sy.db === true, JSON.stringify(sy));
   check("改批注：栏内显示同步", String(sy.shown).includes("ANNOT 栏内改过的批注"), sy.shown);
 
-  // 改色的观测点＝**条目左竖线**（R33：竖线＝批注色实色；样张 `--zline` 同规）。
+  // 改色的观测点＝**条目竖线**（R33：竖线＝批注色实色；样张 `--zline` 同规）。
+  // v48.34/D74：摘录页条目竖线右移（轨贴窗左缘后左线贴边看不清），观测点按实际带线的一缘取色。
   // 不用方点：样张的纯高亮方点按 `.mark-kind.k-extract` 是**灰色空心**（颜色不落在它身上）。
   const readLine = () =>
     cdp.eval(`(() => {
       const el = [...document.querySelectorAll("[data-annot-panel] [data-zitem]")].find((x) => x.dataset.whole !== "1");
-      return el ? getComputedStyle(el).borderLeftColor : null;
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return parseFloat(cs.borderLeftWidth) > 0 ? cs.borderLeftColor : cs.borderRightColor;
     })()`);
   const colorBefore = await readLine();
   await cdp.eval(`(() => { document.querySelector("[data-annot-panel] [data-annot-color]")?.click(); return true; })()`);

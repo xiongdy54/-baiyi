@@ -158,7 +158,11 @@ export interface ExtractFaceHandlers {
    * 各段在本卡正文里的偏移、以及按偏移切出的文本（与落库文本逐字符对齐）。
    * 选区落到正文之外或塌缩 ⇒ 报 null（外层据此收起菜单）。
    */
-  onSelection?: (payload: { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null) => void;
+  onSelection?: (
+    payload: { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null,
+    /** 指针事件的修饰位（v48.38 / D78：摘录页卡面 Ctrl 多段选择；键盘采集不带修饰＝替换） */
+    modifier?: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }
+  ) => void;
 }
 
 /**
@@ -192,27 +196,6 @@ export default function ExtractCardFace({
   bodyAnnotations?: BodyAnnotationGroup[];
   handlers: ExtractFaceHandlers;
 }) {
-  const [postponeDays, setPostponeDays] = useState(7);
-  /** 底栏「更多」弹层（同刻只开这一个；点外部/Esc 由下方 effect 收） */
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreWrapRef = useRef<HTMLSpanElement | null>(null);
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as Node | null;
-      if (t && moreWrapRef.current?.contains(t)) return;
-      setMoreOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMoreOpen(false);
-    };
-    document.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [moreOpen]);
   const depth = Number(extract.depth) || 1;
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const hlRef = useRef<HTMLElement | null>(null);
@@ -228,7 +211,8 @@ export default function ExtractCardFace({
     const body = bodyRef.current;
     if (!body) return;
     const face = body.closest(".extract-face");
-    const capture = () => {
+    // v48.38 / D78：capture 携带指针修饰位——集合运算（替换/加选/移出）由宿主按 app.multiSelectKey 判定
+    const capture = (modifier?: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }) => {
       const full = String(extract.contentMarkdown || "");
       const ok = selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length);
       const text = ok.map((r) => full.slice(r.start, r.end)).join("\n\n");
@@ -240,13 +224,15 @@ export default function ExtractCardFace({
       handlers.onSelection?.(
         live && r && (r.width || r.height)
           ? { rect: { x: r.left, y: r.top, width: r.width, height: r.height }, ranges: live.ranges, text: live.text }
-          : null
+          : null,
+        modifier
       );
     };
     const onUp = (e: Event) => {
       const t = e.target as Node | null;
       if (t && body.contains(t)) {
-        capture();
+        const me = e as MouseEvent;
+        capture({ ctrlKey: me.ctrlKey, altKey: me.altKey, shiftKey: me.shiftKey, metaKey: me.metaKey });
         return;
       }
       // 卡外落下＝选区作废（卡片外的动作面除外：菜单/面板自身的 mouseup 不算）。
@@ -331,119 +317,194 @@ export default function ExtractCardFace({
             : "尚未就此制卡"
           : ""}
       </div>
+    </div>
+  );
+}
 
-      {!viewOnly && (
-        /* 底部动作区（与复习页同规格）：主行动常驻 + 推迟 / 优先级 / 毕业；其余进右下角「更多」（向上弹）。
-           「摘录」（就地另立子摘录）已删：无选区时它兜底摘整条正文 ⇒ 看起来像复制卡片（用户实测）；
-           选中一段再摘录仍可走拖选菜单（同一条 annotateParent 路径）。
-           「快捷推迟」1/3/7/30 已删；推迟天数改由输入框给。 */
-        <div className="extract-face-actions" data-extract-bar>
-          {handlers.onAdvance && (
-            <button className="bar-btn primary grow" disabled={busy} onClick={() => handlers.onAdvance?.()} title="处理完这条，按 A-Factor 推进调度（空格）">
-              下一条<span className="kbd mono">空格</span>
-            </button>
-          )}
+/**
+ * 底部动作栏（EXCERPT-REVIEW-LAYOUT-REDESIGN v2 §8.2）：自 `ExtractCardFace` **原样平移**为命名导出。
+ * 摘录页与复习页「合并复习」分支各自把它渲染成页面滚动根的**末子节点**（几何＝共用 `.stage-bar`：
+ * 流内 + sticky bottom:0 零偏移）⇒ 两页底栏几何构造性相等。
+ * 类名与 data 钩子（`.extract-face-actions` / `data-extract-bar`）全部保留，测试按按钮文本点击不受影响。
+ * 只在会话态渲染；查看态由宿主给一条只读提示（不出现任何调度动作）。
+ */
+export function ExtractActionsBar({
+  extract,
+  busy,
+  handlers
+}: {
+  extract: DueTopic;
+  /** 与卡面同源的引擎标记（props 形状与 ExtractCardFace 一致；本栏当前不消费） */
+  engine?: ExtractEngine;
+  busy?: boolean;
+  handlers: ExtractFaceHandlers;
+}) {
+  const [postponeDays, setPostponeDays] = useState(7);
+  /**
+   * 优先级滑块去闪（v48.32/D72 去抖 + v48.33/D73 草稿保留）：滑块是受控值，而 onPriority 每次都走
+   * 完整 run()（IPC 写 + persist + cardsApi.listAll 全量刷新）——拖动中每个刻度一次往返，值被旧 prop
+   * 反复回拉 ⇒ 整页闪烁。修法＝本地草稿值即时上屏（拇指/填充/数字输入零延迟），停手 350ms 后才提交一次；
+   * **提交后不清草稿**——等写库+刷新回流、`extract.priority` 追上草稿时才回落（v5 先清后提交会让滑块
+   * 在回流前跳回旧位再跳新位＝用户实测残留闪烁）；换卡时草稿复位，卸载时清计时器。
+   */
+  const [prioDraft, setPrioDraft] = useState<number | null>(null);
+  const prioTimerRef = useRef<number | null>(null);
+  const clampPriority = (v: number) => Math.max(0, Math.min(100, Number.isFinite(v) ? Math.round(v) : 0));
+  useEffect(() => {
+    if (prioDraft !== null && clampPriority(Number(extract.priority)) === prioDraft) setPrioDraft(null);
+  }, [extract.priority, prioDraft]);
+  useEffect(() => {
+    setPrioDraft(null);
+  }, [extract.id]);
+  useEffect(
+    () => () => {
+      if (prioTimerRef.current !== null) window.clearTimeout(prioTimerRef.current);
+    },
+    []
+  );
+  const shownPriority = prioDraft ?? clampPriority(Number(extract.priority) || 0);
+  const queuePriority = (v: number) => {
+    const c = clampPriority(v);
+    setPrioDraft(c);
+    if (prioTimerRef.current !== null) window.clearTimeout(prioTimerRef.current);
+    prioTimerRef.current = window.setTimeout(() => {
+      prioTimerRef.current = null;
+      handlers.onPriority?.(c);
+    }, 350);
+  };
+  /** 底栏「更多」弹层（同刻只开这一个；点外部/Esc 由下方 effect 收） */
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreWrapRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node | null;
+      if (t && moreWrapRef.current?.contains(t)) return;
+      setMoreOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
 
-          {handlers.onPostpone && (
-            <span className="extract-postpone bar-group">
-              <input
-                type="number"
-                min={1}
-                max={36500}
-                value={postponeDays}
-                onChange={(e) => setPostponeDays(Math.max(1, Math.min(36500, Number(e.target.value) || 1)))}
-                aria-label="推迟天数"
-              />
-              <span className="mono">天</span>
-              <button className="bar-btn" disabled={busy} onClick={() => handlers.onPostpone?.(postponeDays)}>
-                推迟
-              </button>
-            </span>
-          )}
-
-          {handlers.onPriority && (
-            /* 优先级：轨道内嵌滑块（填充＝主题色 --accent，滑块与底框等高）+ 右侧数字可输入 */
-            <label className="extract-priority bar-group" title="优先级：拖动滑块或直接输入数字（数字越大越靠后）">
-              <span className="lbl">优先级</span>
-              <span className="prio-track">
-                <span className="prio-fill" style={{ width: `${Math.max(0, Math.min(100, Number(extract.priority) || 0))}%` }} />
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={Math.max(0, Math.min(100, Number(extract.priority) || 0))}
-                  aria-label="优先级"
-                  onChange={(e) => handlers.onPriority?.(Number(e.target.value))}
-                />
-              </span>
-              <input
-                className="prio-num"
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={Math.max(0, Math.min(100, Number(extract.priority) || 0))}
-                aria-label="优先级数值"
-                onChange={(e) => handlers.onPriority?.(Math.max(0, Math.min(100, Number(e.target.value) || 0)))}
-              />
-            </label>
-          )}
-
-          {handlers.onGraduate && (
-            <button className="bar-btn" disabled={busy} onClick={() => handlers.onGraduate?.()} title="处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器">
-              毕业
-            </button>
-          )}
-
-          {(handlers.onJumpToSource || handlers.onUndo) && (
-            <span className="bar-more" data-menu ref={moreWrapRef}>
-              <button
-                className="bar-btn"
-                data-toggle
-                aria-expanded={moreOpen}
-                aria-controls="extract-bar-more"
-                onClick={() => setMoreOpen((v) => !v)}
-              >
-                更多<span className="caret">▲</span>
-              </button>
-              {moreOpen && (
-                <div className="bar-pop" id="extract-bar-more" data-pop>
-                  {handlers.onJumpToSource && (
-                    <button
-                      disabled={busy}
-                      onClick={() => {
-                        setMoreOpen(false);
-                        handlers.onJumpToSource?.();
-                      }}
-                      title={
-                        extract.contextRef?.parentExtractId
-                          ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
-                          : "跳回材料中的原位置（不写入阅读进度）"
-                      }
-                    >
-                      跳转原文
-                    </button>
-                  )}
-                  {handlers.onUndo && (
-                    <button
-                      disabled={busy}
-                      onClick={() => {
-                        setMoreOpen(false);
-                        handlers.onUndo?.();
-                      }}
-                      title="撤销最近一次操作（Z）"
-                    >
-                      撤销<span className="k mono">Z</span>
-                    </button>
-                  )}
-                </div>
-              )}
-            </span>
-          )}
-        </div>
+  return (
+    /* 底部动作区（与复习页同规格）：主行动常驻 + 推迟 / 优先级 / 毕业；其余进右下角「更多」（向上弹）。
+       「摘录」（就地另立子摘录）已删：无选区时它兜底摘整条正文 ⇒ 看起来像复制卡片（用户实测）；
+       选中一段再摘录仍可走拖选菜单（同一条 annotateParent 路径）。
+       「快捷推迟」1/3/7/30 已删；推迟天数改由输入框给。 */
+    <div className="stage-bar extract-face-actions" data-extract-bar>
+      {handlers.onAdvance && (
+        <button className="bar-btn primary grow" disabled={busy} onClick={() => handlers.onAdvance?.()} title="处理完这条，按 A-Factor 推进调度（快捷键：空格）">
+          下一条
+        </button>
       )}
 
+      {handlers.onPostpone && (
+        /* 功能簇（v48.36/D76，L1「一盒一功能」）：一盒一功能，盒内裸排（数字/单位/文字钮），不再套小框 */
+        <span className="bar-cluster">
+          <input
+            className="bare-num"
+            type="number"
+            min={1}
+            max={36500}
+            value={postponeDays}
+            onChange={(e) => setPostponeDays(Math.max(1, Math.min(36500, Number(e.target.value) || 1)))}
+            aria-label="推迟天数"
+          />
+          <span className="unit">天</span>
+          <button className="text-btn" disabled={busy} onClick={() => handlers.onPostpone?.(postponeDays)}>
+            推迟
+          </button>
+        </span>
+      )}
+
+      {handlers.onPriority && (
+        /* 优先级簇（v48.36/D76，L1）：一盒一功能——标签/滑轨/数字盒内裸排，滑轨维持 140×20（D75 裁定）。
+            值走本地草稿（shownPriority），停手 350ms 才提交（D72 去闪）。 */
+        <label className="bar-cluster" title="优先级：拖动滑块或直接输入数字（数字越大越靠后）">
+          <span className="unit">优先级</span>
+          <span className="prio-track">
+            <span className="prio-fill" style={{ width: `${shownPriority}%` }} />
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={shownPriority}
+              aria-label="优先级"
+              onChange={(e) => queuePriority(Number(e.target.value))}
+            />
+          </span>
+          <input
+            className="bare-num prio-num"
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            value={shownPriority}
+            aria-label="优先级数值"
+            onChange={(e) => queuePriority(Number(e.target.value))}
+          />
+        </label>
+      )}
+
+      {handlers.onGraduate && (
+        <button className="bar-btn" disabled={busy} onClick={() => handlers.onGraduate?.()} title="处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器">
+          毕业
+        </button>
+      )}
+
+      {(handlers.onJumpToSource || handlers.onUndo) && (
+        <span className="bar-more" data-menu ref={moreWrapRef}>
+          <button
+            className="bar-btn"
+            data-toggle
+            aria-expanded={moreOpen}
+            aria-controls="extract-bar-more"
+            onClick={() => setMoreOpen((v) => !v)}
+          >
+            更多<span className="caret">▲</span>
+          </button>
+          {moreOpen && (
+            <div className="bar-pop" id="extract-bar-more" data-pop>
+              {handlers.onJumpToSource && (
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setMoreOpen(false);
+                    handlers.onJumpToSource?.();
+                  }}
+                  title={
+                    extract.contextRef?.parentExtractId
+                      ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
+                      : "跳回材料中的原位置（不写入阅读进度）"
+                  }
+                >
+                  跳转原文
+                </button>
+              )}
+              {handlers.onUndo && (
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setMoreOpen(false);
+                    handlers.onUndo?.();
+                  }}
+                  title="撤销最近一次操作（Z）"
+                >
+                  撤销<span className="k mono">Z</span>
+                </button>
+              )}
+            </div>
+          )}
+        </span>
+      )}
     </div>
   );
 }

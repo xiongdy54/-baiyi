@@ -72,6 +72,11 @@ try {
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   // 启动真实应用（隔离 userData；夹具书在应用内经 libraryAPI.createFromPaste 建册）
+  // 摘录页回归组（v48.38 / D78）前置：预种一条**今日到期**摘录（复用 extract.gui 种子）
+  execSync("npx electron tests/extract.gui.seed.cjs", {
+    cwd: ROOT, shell: true, stdio: "ignore",
+    env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
+  });
   const out = openSync(path.join(ROOT, "tests", "multiselect.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
     cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
@@ -232,6 +237,87 @@ try {
   })()`);
   const c = JSON.parse(String(cleaned) || "{}");
   check("摘录动作完成后：菜单收起、集合清空、高亮撤掉", c.menu === false && c.spans === 0 && c.alive === 0, cleaned);
+
+  // ============================================================
+  // 6) 摘录页卡面（v48.38 / D78）：同语义 Ctrl 加选（宿主文档、偏移区间域）
+  // ============================================================
+  console.log("\n== 摘录页卡面 Ctrl 多段选择 ==");
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "摘录"); b?.click(); return "nav"; })()`);
+  await wait(2200);
+  check("摘录页卡面在位（预种摘录进入会话）", (await cdp.eval(`!!document.querySelector(".extract-face-body")`)) === true, "无卡面");
+
+  // 卡面正文在宿主文档里（非 iframe）——坐标探针按 .extract-face-body 限定，避开面包屑同文
+  const faceProbe = (mark) => `(() => {
+    const body = document.querySelector(".extract-face-body");
+    if (!body) return "";
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const idx = (node.textContent || "").indexOf(${JSON.stringify(mark)});
+      if (idx < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx + ${JSON.stringify(mark)}.length);
+      const rects = range.getClientRects();
+      const first = rects[0], last = rects[rects.length - 1];
+      if (!first || !last || !first.height) return "EMPTY_RECT";
+      return JSON.stringify({ start: { x: first.left + 2, y: first.top + first.height / 2 }, end: { x: last.right - 2, y: last.top + last.height / 2 } });
+    }
+    return "";
+  })()`;
+  const SEG1 = "GUI 摘录样本";
+  const SEG2 = "单独回忆";
+  const pa = JSON.parse(String(await cdp.eval(faceProbe(SEG1))) || "{}");
+  const pb = JSON.parse(String(await cdp.eval(faceProbe(SEG2))) || "{}");
+  check("两段目标文字在卡面可见（坐标可计算）", typeof pa.start === "object" && typeof pb.start === "object", `A=${JSON.stringify(pa)} B=${JSON.stringify(pb)}`);
+
+  await drag(pa.start, pa.end, 0);
+  await wait(900);
+  const eh1 = await cdp.eval(`(() => { const h = document.defaultView.CSS.highlights.get("multi-select"); return JSON.stringify({ menu: !!document.querySelector(".selection-menu"), size: h ? h.size : -1 }); })()`);
+  const e1 = JSON.parse(String(eh1) || "{}");
+  check("摘录页首段拖选：高亮 1 段 + 菜单出现", e1.size === 1 && e1.menu === true, eh1);
+
+  await keyEvent("rawKeyDown", KEY_MOD.ctrl);
+  await wait(120);
+  await drag(pb.start, pb.end, KEY_MOD.ctrl);
+  await keyEvent("keyUp", 0);
+  await wait(1200);
+  const eh2 = await cdp.eval(`(() => { const h = document.defaultView.CSS.highlights.get("multi-select"); return JSON.stringify({ menu: !!document.querySelector(".selection-menu"), size: h ? h.size : -1, texts: h ? [...h].map((r) => r.toString()) : [] }); })()`);
+  const e2 = JSON.parse(String(eh2) || "{}");
+  check("摘录页 Ctrl 加选后高亮 2 段（不相邻两段同时进集合）", e2.size === 2 && e2.menu === true, eh2);
+  check("摘录页集合内容＝两次选中的文字", Array.isArray(e2.texts) && e2.texts.includes(SEG1) && e2.texts.includes(SEG2), eh2);
+
+  // 菜单点「摘录」→ 子摘录落库：contextRef.parentRange 两段区间（偏移域第一事实）
+  const em = await cdp.eval(`(() => { const b = [...document.querySelectorAll(".selection-menu button")].find((x) => x.textContent.trim() === "摘录"); if (!b) return ""; const r = b.getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()`);
+  check("摘录页菜单含「摘录」按钮", String(em).startsWith("{"), em);
+  const emb = JSON.parse(String(em) || "{}");
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: emb.x, y: emb.y, modifiers: 0 });
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: emb.x, y: emb.y, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+  await wait(80);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: emb.x, y: emb.y, button: "left", buttons: 0, clickCount: 1, modifiers: 0 });
+  await wait(2000);
+
+  const child = await cdp.eval(`(async () => {
+    const all = await window.workflowAPI.listAll();
+    const hit = (all || []).find((e) => String(e.contentMarkdown || "") === ${JSON.stringify(SEG1 + "\n\n" + SEG2)});
+    if (!hit) return JSON.stringify({ found: false, n: (all || []).length });
+    const ref = hit.contextRef || hit.contextRefJson || {};
+    const pr = Array.isArray(ref.parentRange) ? ref.parentRange : null;
+    // parentRange 是**父卡正文**坐标：切片须对父卡 contentMarkdown（子条正文是拼接文本，坐标域不同）；
+    // 父卡＝预种摘录（extract.gui.seed 的固定正文）
+    const parent = (all || []).find((e) => String(e.contentMarkdown || "").includes("值得单独回忆"));
+    const pmd = String((parent && parent.contentMarkdown) || "");
+    return JSON.stringify({
+      found: true,
+      ranges: pr,
+      slices: Array.isArray(pr) ? pr.map((r) => pmd.slice(r.start, r.end)) : null
+    });
+  })()`);
+  const cv = JSON.parse(String(child) || "{}");
+  check("摘录页多段摘录已落库（拼接文本那一条）", cv.found === true, child);
+  check("contextRef.parentRange 有 2 段区间", Array.isArray(cv.ranges) && cv.ranges.length === 2, child);
+  check("各段区间文本＝两次选中的文字", Array.isArray(cv.slices) && cv.slices[0] === SEG1 && cv.slices[1] === SEG2, JSON.stringify(cv.slices));
+  check("区间落在父卡正文坐标（对预种父卡切片吻合）", Array.isArray(cv.slices) && cv.slices[0] === SEG1 && cv.slices[1] === SEG2, JSON.stringify({ slices: cv.slices, ranges: cv.ranges }));
 
   console.log(`\n==== multiselect.gui：${pass} 通过 / ${fail} 失败 ====`);
 } catch (e) {

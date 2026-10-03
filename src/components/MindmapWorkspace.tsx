@@ -57,7 +57,7 @@ function resolveTheme() {
     ink: v("--ink", "#0a0a0a"),
     inkSoft: v("--text-secondary", "#525252"),
     border: v("--border-subtle", "#e0e0e0"),
-    accent: v("--accent", "#002fa7"),
+    accent: v("--accent", "#166a59"),
     accentOn: v("--accent-on", "#ffffff"),
     accentSoft: v("--accent-soft", "#e8eaf5"),
     fontFamily: "var(--font-sans, system-ui, sans-serif)",
