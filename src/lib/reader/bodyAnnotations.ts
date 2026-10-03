@@ -2,7 +2,7 @@
 // 样张的摘录页正文有三类痕迹：`.hl`＝该层自身范围锚、`.q`＝段锚批注（底色＝该批注色的透明档）。
 // 本项目正文是 `EditableText` 裸壳（React 不接管子节点）⇒ **不得往 DOM 插 `<mark>`**（§3.3b），
 // 故一律用 CSS Custom Highlight API 画在绘制层：按**颜色分组**注册（一个注册名只能一种底色）。
-import { annotKey, annotSoft } from "./annotColor";
+import { annotKey, annotSoft, annotSolid } from "./annotColor";
 
 const STYLE_ID = "annot-body-highlight-style";
 const NAME_PREFIX = "annot-body";
@@ -11,8 +11,8 @@ let registered: string[] = [];
 
 const highlightName = (key: string) => `${NAME_PREFIX}-${key.replace(/[^a-z0-9-]/gi, "")}`;
 
-/** 宿主文档里的规则表：每个色键一条（宿主有 Token，直接引 var()） */
-function ensureStyle(doc: Document, keys: { key: string; color?: string | null }[]) {
+/** 宿主文档里的规则表：每个（色键×形式）一条（宿主有 Token，直接引 var()） */
+function ensureStyle(doc: Document, keys: { key: string; color?: string | null; underline?: boolean }[]) {
   let el = doc.getElementById(STYLE_ID) as HTMLStyleElement | null;
   if (!el) {
     el = doc.createElement("style");
@@ -20,7 +20,12 @@ function ensureStyle(doc: Document, keys: { key: string; color?: string | null }
     (doc.head ?? doc.documentElement).appendChild(el);
   }
   const css = keys
-    .map((k) => `::highlight(${highlightName(k.key)}){background-color:${annotSoft(k.color)};}`)
+    .map((k) =>
+      k.underline
+        ? // v48.41（D81）：下划线形式＝透明底 + 批注实色 2px 下划线（::highlight 允许 text-decoration）
+          `::highlight(${highlightName(k.key)}){background-color:transparent;text-decoration:underline;text-decoration-color:${annotSolid(k.color)};text-decoration-thickness:2px;text-underline-offset:3px;}`
+        : `::highlight(${highlightName(k.key)}){background-color:${annotSoft(k.color)};}`
+    )
     .join("\n");
   if (el.textContent !== css) el.textContent = css;
 }
@@ -103,6 +108,8 @@ export function rectFromOffsets(
 export interface BodyAnnotationGroup {
   /** 该条的批注色（色板 id 或 #hex）；null＝未选色 */
   color?: string | null;
+  /** v48.41（D81）：标记形式——true＝下划线（透明底+色线），缺省＝底色高亮 */
+  underline?: boolean;
   ranges: { start: number; end: number }[];
 }
 
@@ -122,11 +129,11 @@ export function paintBodyAnnotations(body: HTMLElement | null, groups: BodyAnnot
   registered = [];
   if (!body || groups.length === 0) return;
 
-  // 按色键归并（一个注册名一种底色）
-  const byKey = new Map<string, { color?: string | null; ranges: Range[] }>();
+  // 按（色键×形式）归并（一个注册名一种画法）
+  const byKey = new Map<string, { color?: string | null; underline: boolean; ranges: Range[] }>();
   for (const g of groups) {
-    const k = annotKey(g.color);
-    const bucket = byKey.get(k) ?? { color: g.color, ranges: [] };
+    const k = `${annotKey(g.color)}${g.underline ? "|u" : ""}`;
+    const bucket = byKey.get(k) ?? { color: g.color, underline: Boolean(g.underline), ranges: [] };
     for (const r of g.ranges) {
       if (!(r.end > r.start)) continue;
       const range = rangeFromOffsets(body, r.start, r.end);
@@ -136,7 +143,7 @@ export function paintBodyAnnotations(body: HTMLElement | null, groups: BodyAnnot
   }
   const keys = [...byKey.entries()]
     .filter(([, v]) => v.ranges.length > 0)
-    .map(([key, v]) => ({ key, color: v.color }));
+    .map(([key, v]) => ({ key, color: v.color, underline: v.underline }));
   if (keys.length === 0) {
     const el = doc.getElementById(STYLE_ID);
     if (el) el.textContent = "";

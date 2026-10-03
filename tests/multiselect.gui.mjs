@@ -1,10 +1,12 @@
 // M16 批 6（D61 §6.8-11）多段不相邻选择 GUI 端到端：真键鼠 Ctrl 加选两段 → 选区菜单 → 摘录 → 落库一条两段区间的批注
+// v48.39（D79）增补：修饰键按**手势全程**判定——拖选途中先松 Ctrl 再松鼠标仍＝加选（只看 pointerup 会误判成替换、抹掉已累计集合）
 // @runtime: node  @tier: 2  @gui: true  @id: MULTISEL  @timeout: 300
 // 运行：npm run build 之后 `node tests/multiselect.gui.mjs`（CDP 驱动 dist 上的真实应用，自启自关、可 taskkill electron）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-multiselect-userdata（先清空，全新库），绝不触碰真实库（§7.3）。
 // 断言链（§3 / §6.8-11）：真键鼠拖选第一段（无修饰键＝替换）→ 按住 Ctrl 拖选不相邻的第二段（＝加选）
 //   → ① 集合长度 2；② 两段都进了 CSS Custom Highlight；③ 选区菜单出现且展示拼接文本；
 //   ④ 点「摘录」落库：quote_range_json 有 2 段区间、各段区间文本＝两次选中的文字、content_markdown 按 \n\n 拼接。
+//   D79 追加：⑤ 阅读器独立场景「途中先松 Ctrl」仍＝2 段；⑥ 摘录页加选步骤改走「途中先松 Ctrl」路径后全链落库不回退。
 import { spawn, execSync } from "node:child_process";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
@@ -132,17 +134,22 @@ try {
   const B = JSON.parse(String(posB) || "{}");
 
   // 3) 真鼠标拖选（CDP Input）：第一段（无修饰键）→ 替换；第二段（按住 Ctrl）→ 加选
-  const drag = async (from, to, modifiers = 0) => {
+  // v48.39（D79）：dropCtrlAfterStep＝在第 N 步移动后松开 Ctrl（松键先于松鼠标的真实手势）；缺省全程按住
+  const drag = async (from, to, modifiers = 0, dropCtrlAfterStep = null) => {
+    const mod = (i) => (dropCtrlAfterStep != null && i > dropCtrlAfterStep ? 0 : modifiers);
     await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y, modifiers });
     await wait(60);
     await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", buttons: 1, clickCount: 1, modifiers });
     for (let i = 1; i <= 6; i++) {
       const x = from.x + ((to.x - from.x) * i) / 6;
       const y = from.y + ((to.y - from.y) * i) / 6;
-      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1, modifiers });
+      if (dropCtrlAfterStep != null && i === dropCtrlAfterStep) {
+        await keyEvent("keyUp", 0);
+      }
+      await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1, modifiers: mod(i) });
       await wait(40);
     }
-    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1, modifiers });
+    await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", buttons: 0, clickCount: 1, modifiers: mod(7) });
   };
   const keyEvent = (type, modifiers) => cdp.send("Input.dispatchKeyEvent", {
     type, key: "Control", code: "ControlLeft", windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17, modifiers
@@ -193,14 +200,14 @@ try {
   check("高亮含 2 个 Range 且文本＝两段选中文字", Array.isArray(h.sizes) && h.sizes.includes(2) && Array.isArray(h.texts) && h.texts.some((t) => t.length === 2 && t[0] === MARK_A && t[1] === MARK_B), hl);
   check("高亮颜色来自 Token（--hl-multi 求值后以字面值注入 iframe）", h.styled === true, hl);
 
-  // 4) 真鼠标点「摘录」→ 落库
+  // 4) 真鼠标点工具栏「摘录」（v48.41/D81：动作自菜单上移工具栏）→ 落库
   const menuBtn = await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll(".selection-menu button")].find((x) => x.textContent.trim() === "摘录");
+    const b = document.querySelector('[data-sel-actions] [data-sel-act="extract"]');
     if (!b) return "";
     const r = b.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
   })()`);
-  check("选区菜单含「摘录」按钮", String(menuBtn).startsWith("{"), menuBtn);
+  check("阅读器工具栏含「摘录」动作", String(menuBtn).startsWith("{"), menuBtn);
   const mb = JSON.parse(String(menuBtn) || "{}");
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: mb.x, y: mb.y, modifiers: 0 });
   await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: mb.x, y: mb.y, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
@@ -237,6 +244,22 @@ try {
   })()`);
   const c = JSON.parse(String(cleaned) || "{}");
   check("摘录动作完成后：菜单收起、集合清空、高亮撤掉", c.menu === false && c.spans === 0 && c.alive === 0, cleaned);
+
+  // ============================================================
+  // 5.5) v48.39（D79）修饰键手势全程判定：途中先松 Ctrl 再松鼠标仍＝加选
+  // （只看 pointerup 一瞬的旧行为会把这次加选误判成替换、集合只剩最后一段＝用户缺陷报告的场景）
+  // ============================================================
+  console.log("\n== 松键时序：途中先松 Ctrl 再松鼠标 ==");
+  await drag(A.start, A.end, 0);
+  await wait(900);
+  await keyEvent("rawKeyDown", KEY_MOD.ctrl);
+  await wait(120);
+  await drag(B.start, B.end, KEY_MOD.ctrl, 3);
+  await keyEvent("keyUp", 0);
+  await wait(1200);
+  const afterEarlyRelease = await cdp.eval(`JSON.stringify((window.__readerMultiSpans || []).map((s) => s.text))`);
+  const er = JSON.parse(String(afterEarlyRelease) || "[]");
+  check("阅读器途中先松 Ctrl 仍＝加选（集合 2 段）", Array.isArray(er) && er.length === 2 && er[0] === MARK_A && er[1] === MARK_B, afterEarlyRelease);
 
   // ============================================================
   // 6) 摘录页卡面（v48.38 / D78）：同语义 Ctrl 加选（宿主文档、偏移区间域）
@@ -277,19 +300,21 @@ try {
   const e1 = JSON.parse(String(eh1) || "{}");
   check("摘录页首段拖选：高亮 1 段 + 菜单出现", e1.size === 1 && e1.menu === true, eh1);
 
+  // v48.39（D79）：加选步骤改走「途中先松 Ctrl 再松鼠标」路径——后续落库 e2e 直接跑在手势全程判定的新代码上
   await keyEvent("rawKeyDown", KEY_MOD.ctrl);
   await wait(120);
-  await drag(pb.start, pb.end, KEY_MOD.ctrl);
+  await drag(pb.start, pb.end, KEY_MOD.ctrl, 3);
   await keyEvent("keyUp", 0);
   await wait(1200);
   const eh2 = await cdp.eval(`(() => { const h = document.defaultView.CSS.highlights.get("multi-select"); return JSON.stringify({ menu: !!document.querySelector(".selection-menu"), size: h ? h.size : -1, texts: h ? [...h].map((r) => r.toString()) : [] }); })()`);
   const e2 = JSON.parse(String(eh2) || "{}");
-  check("摘录页 Ctrl 加选后高亮 2 段（不相邻两段同时进集合）", e2.size === 2 && e2.menu === true, eh2);
+  check("摘录页 Ctrl 加选后高亮 2 段（途中先松 Ctrl 不回退成替换）", e2.size === 2 && e2.menu === true, eh2);
   check("摘录页集合内容＝两次选中的文字", Array.isArray(e2.texts) && e2.texts.includes(SEG1) && e2.texts.includes(SEG2), eh2);
 
   // 菜单点「摘录」→ 子摘录落库：contextRef.parentRange 两段区间（偏移域第一事实）
-  const em = await cdp.eval(`(() => { const b = [...document.querySelectorAll(".selection-menu button")].find((x) => x.textContent.trim() === "摘录"); if (!b) return ""; const r = b.getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()`);
-  check("摘录页菜单含「摘录」按钮", String(em).startsWith("{"), em);
+  // v48.41（D81）：摘录动作在页头工具栏（data-extract-toolbar）
+  const em = await cdp.eval(`(() => { const b = document.querySelector('[data-extract-toolbar] [data-sel-act="extract"]'); if (!b) return ""; const r = b.getBoundingClientRect(); return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 }); })()`);
+  check("摘录页工具栏含「摘录」动作", String(em).startsWith("{"), em);
   const emb = JSON.parse(String(em) || "{}");
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: emb.x, y: emb.y, modifiers: 0 });
   await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x: emb.x, y: emb.y, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });

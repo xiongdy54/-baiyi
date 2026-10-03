@@ -62,6 +62,10 @@ export interface DueTopic {
   prioritySource?: "book" | "user" | string;
   /** v48.22（D58 §6.8-6）：所属书架条目（按书范围会话与浏览器分组用） */
   libraryItemId?: string | null;
+  /** v48.40（D80）：行原生 document_id 列（listDueExtracts 原样透传，未走 contextRef）——老摘录 contextRef 为 NULL 时的落库回退 */
+  document_id?: string | null;
+  /** v48.40（D80）：创建时间毫秒（listDueExtracts/listAllExtracts 均透传）——浏览器「按创建时间」排序用 */
+  createdAt?: number;
   contextRef?: ExtractContextRef | null;
 }
 
@@ -127,6 +131,8 @@ export interface ExtractInput {
   comment?: string | null;
   /** 批 4（R33）：批注色板 id（或 `#hex`），与文中高亮/角标同色 */
   annotationColor?: string | null;
+  /** v48.41（D81）：标记形式——`highlight`＝底色（缺省，兼容旧数据）；`underline`＝下划线 */
+  annotationType?: "highlight" | "underline" | null;
 }
 
 /** 一段选区的原始采集物（rects = 宿主视口坐标的包围盒，可缺省） */

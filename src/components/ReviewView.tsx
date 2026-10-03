@@ -26,16 +26,26 @@ function safePreviewItems(fsrs: unknown): ReturnType<typeof fsrsEngine.preview> 
 export default function ReviewView({
   onJumpToDoc,
   bookItemIds,
-  scopeLimits
+  scopeLimits,
+  onMaterialName
 }: {
   onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }) => void;
   /** v48.22（D58 §6.8-8）：本书范围内的集中复习（阅读器「复习闪卡」入口） */
   bookItemIds?: string[];
   /** 筛选牌组的上限覆写（§6.8-5：只收紧，不另开预算） */
   scopeLimits?: Record<string, number> | null;
+  /** v48.41（D81）：当前卡材料名上报（顶栏中间显示；无材料名时回调空串＝回落「复习」字样） */
+  onMaterialName?: (name: string) => void;
 } = {}) {
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
+  // v48.41（D81）：当前卡材料名上报顶栏（替代「复习」字样；无材料名＝空串，顶栏回落原字样）
+  const materialName = String(current?.sourceRef?.title ?? "");
+  const onMaterialNameRef = useRef(onMaterialName);
+  onMaterialNameRef.current = onMaterialName;
+  useEffect(() => {
+    onMaterialNameRef.current?.(materialName);
+  }, [materialName]);
   /** 顶栏三档计数（今日可用口径；每次换卡/评完刷新） */
   const [counts, setCounts] = useState<CardCounts>({ new: 0, learning: 0, review: 0 });
   /** 底栏「更多」弹层（向上弹；点外部/Esc 收起） */
@@ -603,10 +613,9 @@ export default function ReviewView({
             key＝卡 id：换卡即重挂载 ⇒ 入场动效（120ms，见 theme.css）在一次呈现里恰好触发一次；
             翻面态 showBack 由父持有，不受 remount 影响。 */}
         <CardFace key={current!.id} card={current!} showBack={showBack} onEdit={handleEdit} />
-        {/* 来源/日期是**信息行**（动作都在底栏）：跳转原文/查看原图/撤销评分已搬进底栏（2026-10-01） */}
+        {/* 信息行（2026-10-01 建立；v48.41/D81：**来源上移顶栏中间**（onMaterialName 链路），行内只留日期 */}
         <div className="review-meta">
-          {current!.sourceRef?.title ? `来源:${current!.sourceRef.title}` : ""}
-          {current!.dateStamp ? ` · ${current!.dateStamp}` : ""}
+          {current!.dateStamp ? current!.dateStamp : ""}
         </div>
         {showBack && current!.mnemonic && (
           <div className="review-mnemonic">

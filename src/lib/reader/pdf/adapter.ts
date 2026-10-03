@@ -13,6 +13,7 @@ import { EventBus, PDFLinkService, PDFViewer, ScrollMode, SpreadMode } from "pdf
 import "pdfjs-dist/web/pdf_viewer.css";
 import type {
   BookSource,
+  ContentPointerDownInfo,
   ContentPointerUpInfo,
   LinkInfo,
   MarkPointerInfo,
@@ -116,6 +117,8 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
   const pointerHandlers = new Set<(pos: ContentPointerUpInfo) => void>();
+  // v48.39（D79）：多段选择按手势全程判定修饰键——壳层要在拖选起手采样修饰位，故 pointerdown 一并中继
+  const pointerDownHandlers = new Set<(pos: ContentPointerDownInfo) => void>();
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   let appearance: ReaderAppearance | null = null;
   let darkFilterOn = false;
@@ -235,14 +238,17 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     for (const mark of docMarks) {
       (mark.rects ?? []).forEach((_, i) => {
         const el = document.createElement("div");
-        el.className = "reader-doc-mark card-marked";
+        // v48.41（D81）：下划线形式＝透明底 + 底边 2px 批注实色线（.is-underline）；其余＝底色高亮
+        const underline = mark.annotationType === "underline";
+        el.className = `reader-doc-mark card-marked${underline ? " is-underline" : ""}`;
         el.dataset.markId = mark.id;
         if (mark.comment) el.dataset.hasComment = "1";
         // 批 4 修正（规格 §5.4「颜色对应」）：文中高亮＝**该条批注色**的透明档 + 同色左缘条，
         // 与栏内竖线/色点/角标同色。此前一律 accent，导致「角标跟色、高亮不跟色」自相矛盾。
         // 无 annotation_color（老数据/没选过色）回落 accent —— 保持批 3 既有观感与断言。
-        el.style.background = annotSoft(mark.color);
-        el.style.borderLeftColor = annotSolid(mark.color);
+        el.style.background = underline ? "transparent" : annotSoft(mark.color);
+        el.style.borderLeftColor = underline ? "transparent" : annotSolid(mark.color);
+        el.style.borderBottomColor = annotSolid(mark.color);
         markLayer.appendChild(el);
         markEntries.push({ mark, ord: i, el });
       });
@@ -324,6 +330,13 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
   // 文本层 pointerup → 壳层取选区（与 foliate adapter 的中继同构；修饰位一并转发，多段选择判定用）
   viewerEl.addEventListener("pointerup", (ev: PointerEvent) => {
     pointerHandlers.forEach((h) =>
+      h({ x: ev.clientX, y: ev.clientY, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+    );
+  });
+  // v48.39（D79）：多段选择按手势全程判定修饰键（起手或收尾任一按住＝加选）——
+  // pointerdown 与 pointerup 同构中继，壳层据此在拖选起手采样修饰位
+  viewerEl.addEventListener("pointerdown", (ev: PointerEvent) => {
+    pointerDownHandlers.forEach((h) =>
       h({ x: ev.clientX, y: ev.clientY, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
     );
   });
@@ -745,6 +758,7 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
         event === "relocate" ? relocateHandlers
         : event === "link" ? linkHandlers
         : event === "contentPointerUp" ? pointerHandlers
+        : event === "contentPointerDown" ? pointerDownHandlers
         : event === "imageClick" ? imageHandlers
         : event === "markHover" ? markHoverHandlers
         : event === "markClick" ? markClickHandlers

@@ -1,0 +1,70 @@
+# 选区菜单改版 + 阶段工具栏 + 顶栏材料名 · 设计稿（v3）
+
+> 状态：**已实现**（D81/D82/D83 三批落地，见文末修订记录）。
+> 决策登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D81**（v48.41）/ **D82**（v48.42）/ **D83**（v48.43）。
+> 前置：`docs/design/CARD-BROWSER-REDESIGN.md`（D80 舞台语言）、规格 §3.3（选区菜单）/§5.2（文中留痕）。
+> 设计规范：better-layout（渐进披露/控件成盒）+ swiss-international-style（单焦点、直角、Meta 档）。
+
+---
+
+## 0. 用户原话（2026-10-03，逐字留痕）
+
+1. 「选中文字后的弹出面板改版，仅保留颜色选项，同时增加切换标记形式为高亮或者下划线的按钮，其余按钮移动到顶部工具栏中。」
+2. 「摘录页面中，新增工具栏，按钮和原来的侧边栏展开收起按钮都放在工具栏中。」
+3. 「去掉摘录页面右上方的"待处理 优先级 22 现已到期"文字，将闪卡和摘录卡片的来源信息如"来自《干掉∞人：优绩主义如何击败了所有人？》"移动到顶栏中间，替换掉摘录页面的"摘录"和复习页面的"复习"字样，并去掉"来自"二字，直接显示材料名。」
+
+---
+
+## 1. 契约
+
+### 1.1 选区菜单（阅读器 + 摘录页共用 SelectionMenu）
+
+- **只留两段**：形式段控（`高亮 ｜ 下划线`，取代原 `高亮 ｜ 摘录+高亮`）+ 调色排。动作行（制卡/AI 制卡/AI 解释/摘录/查词/图片挖空）**整体移除**。
+- 形式持久键沿用 `app.annotateMode`：取值域改为 `"highlight" | "underline"`；旧值 `"extract"` 读侧归一为 `"highlight"`。
+- **点色语义收敛（R38 修订）**：点色＝按当前形式建**纯批注**（`kind="highlight"` 恒定、`annotation_type`=形式）——不再经菜单进入摘录队列；「摘录」（进队列）只由工具栏按钮发起。落库链路 `createAnnotation` 扩 `annotationType` 入参（`extracts.annotation_type` 列 v48.23 已登记，此前恒空）。
+- **下划线绘制**：CSS Custom Highlight API 的 `::highlight()` 允许 `text-decoration`——下划线形式＝透明底 + 2px 批注色下划线（卡面正文批注、EPUB 文中留痕同规）；PDF 文中留痕＝矩形层改 `is-underline` 造型（透明底 + 底边 2px 色线）。无形式的旧数据照旧画底色。
+
+### 1.2 阅读器顶部工具栏
+
+- `.reader-engine-controls` 新增一组 `.reader-sel-actions`：制卡 / AI 制卡 / AI 解释 / 摘录 / 查词 / 图片挖空（`data-sel-act` 钩子，与原菜单动作同源 `selAct.*`）。无选区时整组 disabled（title 提示「先选中文字」）。
+- markdown（非引擎）阅读分支同样渲染该组（置顶常驻），同一钩子。
+
+### 1.3 摘录页工具栏 + 卡面瘦身
+
+- 头带下新增 `.extract-toolbar`（`data-extract-toolbar`）：**侧栏开合钮（原 fixed 左上角）** + 制卡 / AI 制卡 / AI 解释 / 摘录 / 查词（`data-sel-act`）。动作钮仅会话态且有选区时可点；查看态整排 disabled（侧栏钮照常可用）。
+- 卡面 meta 行整体移除：右侧 `待处理/优先级/现已到期`（`extract-face-tags`）按指令删除；左侧 `来自《…》`（`extract-face-source`）上移顶栏（1.4），卡面不再重复表达。
+
+### 1.4 顶栏中间＝当前卡材料名
+
+- 顶栏标题（`.topbar-title`）在**摘录会话/复习会话**两视图下显示**当前卡的来源材料名**（摘录＝`docTitle`、闪卡＝`sourceRef.title`），无「来自」前缀、无书名号包装；当前卡没有材料名（或队列为空）时回落原字样「摘录」/「复习」。
+- 机制：两页新增 `onMaterialName(name)` 回调，`current` 变化时上报，App 存 state 参与 `topTitle` 组装；阅读器/卡片浏览等视图不受影响（顶栏本就显示书名/页面名）。
+
+---
+
+## 2. 验收清单（机械判据）
+
+1. `cards.gui` / `multiselect.gui`：菜单点「摘录」改为点工具栏 `[data-sel-act="extract"]`，3 段落库断言不变。
+2. `annotations.gui`：点色断言（swatch）不变；菜单动作点击改工具栏钩子；新增下划线形式用例（切换形式 → 点色 → 落库 annotation_type=underline）。
+3. `extract.gui`：摘录页钩子（data-annot-toggle/data-page-hint/crumbs）不变；卡面 meta 文字断言随删除同步更新。
+4. 菜单内不再有 `.macts` 动作行；工具栏动作按钮无选区时 disabled。
+5. 全量回归：extract / multiselect / cards / annotations / m1 / m4 / m6-1 / m6-2 / m6-2native / reader.engine / marks / f11 / f18。
+
+---
+
+## 修订记录
+
+### v2（2026-10-03，D82——用户七项书面指令）
+
+1. **「收起/展开」还原原位**：批注栏开合钮回到 fixed 页面左上（var(--sp-4), 顶栏48+var(--sp-3)），与批注栏头（全部/摘录/高亮 位置/时间）同一视觉行；D81 曾把它移入工具栏行，作废。
+2. **动作钮行位**：制卡/AI 制卡/AI 解释/摘录/查词保留在头带**首行**（.extract-toolbar），与左侧栏头同一视觉行；面包屑+「N 条待处理」下移为头带第二行（按钮下、正文上）。
+3. **禁用态修型**：动作钮 disabled＝`cursor: default`（去 🚫）、`--text-secondary` 文字 + `--border-strong` 描边（暗色可读）；阅读器 `.reader-sel-actions` 同规。
+4. **规格对齐**：动作钮 26 高 / meta 档（与批注栏头段控一致）。
+5. **补回模式切换**：选区菜单恢复「高亮｜摘录+高亮」模式段控——模式与形式拆双键：`app.annotateMode` 回归模式域（highlight/extract），新增 `app.annotateForm`（highlight/underline，f18 DOC 键+矩阵+两侧归一同步）；点色落库＝kind=模式、annotation_type=形式。设置页两行控件并存。
+6. **优先级滑块**：滑块去双 ink 竖线（暗色下观感差），保留 paper 色块。
+7. **选区菜单紧凑化**：外框紧贴内容（.mrow 去 padding 档与分隔线）、段控去小框（.seg-plain 无边框），保留被选项 accent 下划线。
+
+### v3（2026-10-03，D83——用户四项书面指令）
+
+1. **选区菜单只留色块+批注框**：模式段控（高亮｜摘录+高亮）与形式段控（高亮｜下划线）上移宿主工具栏；菜单＝色块上方的**批注文本框**（每次选区重置）+ 调色排。点色时有文字＝批注一并保存；无文字＝无批注的高亮或摘录。**点色不再自动弹编辑浮层**（编辑入口＝栏内条目/文中标记点击，R37/R40 不变）。
+2. **工具栏段控**：模式/形式段控入 `.reader-sel-actions` 与 `.extract-toolbar`，样式＝批注栏头段控（裸文字、选中 `--grey-1` 底、24 高/meta 档）；动作钮同族（无框、hover grey-1），与 rail 头完全同族。
+3. **阅读器侧栏对齐摘录页**：「侧栏」钮改「收起/展开」两态文字钮（同 `.annot-toggle` 语言）；侧栏内部关闭钮删除；**目录/摘录/图谱三枚恒在**（数据不在场＝disabled＋title 说明，不再消失——用户反馈"有时只有一个或两个按钮"）；页签填满整行、行样式对齐 rail 头（24 高/meta/grey-1 选中底）；翻页钮移到工具栏右缘。

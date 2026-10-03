@@ -1,8 +1,9 @@
-# 批注化摘录 + 多段选择 · 实施规格（v2）
+# 批注化摘录 + 多段选择 · 实施规格（v3）
 
-> 状态：**待用户点头后开工**。本文件是计划，不是既成事实；`src/` 与 `electron/` 一行未改。
-> 前置：`docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`（§6.8 摘录复习）、`AI_DEVELOPMENT_GUIDE.md` v48.22。
-> 决策来源：用户 2026-09-25 两轮裁定。**v2 修订**：R2/R4 已由用户撤回，新增 R9–R14（见 §0）。**待 bump 指南并登记 D61 起**。
+> 状态：批 0–4 已落地（实施批详见 `AI_DEVELOPMENT_GUIDE.md` §6.8-11 与 §8.1 决策日志）。
+> 前置：`docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`（§6.8 摘录复习）、`AI_DEVELOPMENT_GUIDE.md` v48.39。
+> 决策来源：用户 2026-09-25 两轮裁定。**v2 修订**：R2/R4 已由用户撤回，新增 R9–R14（见 §0）。
+> **v3 修订（2026-10-03，D79）**：§3 修饰键判定改为**手势全程**（起手或收尾任一时刻按住＝加选）——用户缺陷报告「现在的实现方式是先按住 Ctrl，然后再依次划选多段文字才行」，实测根因＝只看 pointerup 一瞬的修饰位，先松 Ctrl 再松鼠标即把加选误判成替换（已累计集合被抹成只剩最后一段）。
 
 ---
 
@@ -121,6 +122,7 @@ v1 让用户三选一的"编辑越出批注原文怎么办"（拒绝/收缩/脱�
 
 - **键位**：默认 `Ctrl`（macOS `Cmd`），可配置 → `settings.app.multiSelectKey`（§7.4 登记 + f18 用例）。
 - **行为**：已有选区时，按住修饰键再拖选/双击 → 追加一段；重复切换同一段＝移除；`Esc` 清空全部。
+- **修饰键判定＝手势全程（v3 / D79）**：「本次拖选是否带修饰键」的判据＝**手势起手（pointerdown）或收尾（pointerup）任一时刻按住**，不是只看 pointerup 一瞬——真实用户收尾常先松修饰键再松鼠标（此时 pointerup 修饰位为假），只看 pointerup 会把这次加选误判成「替换」、抹掉已累计的集合。实现：两引擎 adapter 转发 `contentPointerDown`（载荷与 pointerup 同形）供壳层起手采样；壳层把起手与收尾的修饰位**求或**后再交集合运算（主进程 `updateSpanSet` 的 `modifier` 入参语义不变）；摘录页卡面同法（mousedown 采样起手，mouseup 采集时求或；键盘采集路径不变）。首段普通拖选（全程无修饰键）＝替换语义不变——**它落定的集合就是后续 Ctrl 补选的底座**（用户 2026-10-03 指定的主流程：先普通选一段 → 发现要补充 → 按住 Ctrl 补选）。
 - **高亮**：与 §2.4 同一套 Custom Highlight（`CSS.highlights.set('multi-select', …)`）。
 - **载荷**：动作层（制卡/AI 制卡/AI 解释/摘录/查词）统一收 `{spans:[{text,rects,cfi}], joinedText}`；
   制卡 `quote`＝各段按 `\n` 拼接；摘录 `contentMarkdown` 同规则、`rects` 合并多组。

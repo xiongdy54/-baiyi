@@ -67,6 +67,7 @@ const {
   // v48.23（D61 §6.8-11）：多段选择修饰键的写侧归一（取值域封闭，非法值不落盘）
   normalizeMultiSelectKey,
   normalizeAnnotateMode,
+  normalizeAnnotateForm,
   normalizeAnnotationFilter,
   normalizeAnnotateCustomEnabled,
   normalizeAnnotatePalette,
@@ -189,8 +190,10 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   }
   // v48.23（D61 §6.8-11）：多段选择修饰键取值域封闭（Ctrl/Alt/Shift/Meta），非法写入就地归一
   if (scope === "app" && key === "multiSelectKey") value = normalizeMultiSelectKey(value);
-  // 批 4（规格 §9.2）：四个批注设置键同样在写侧归一（枚举回落默认 / 色板净化去重限 8）
+  // 批 4（规格 §9.2）：批注设置键同样在写侧归一（枚举回落默认 / 色板净化去重限 8）
+  // v48.42（D82）：annotateMode 回归模式域（highlight/extract），标记形式拆独立键 annotateForm
   if (scope === "app" && key === "annotateMode") value = normalizeAnnotateMode(value);
+  if (scope === "app" && key === "annotateForm") value = normalizeAnnotateForm(value);
   if (scope === "app" && key === "annotationFilter") value = normalizeAnnotationFilter(value);
   if (scope === "app" && key === "annotateCustomEnabled") value = normalizeAnnotateCustomEnabled(value);
   if (scope === "app" && key === "annotatePalette") value = normalizeAnnotatePalette(value);

@@ -875,7 +875,29 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       ...(opts?.color ? { annotationColor: opts.color } : {}),
       ...(opts?.comment ? { comment: opts.comment } : {})
     };
-    if (sc.extractId) {
+    // v48.40（D80）：宿主给定的落库父级**优先**——摘录页「摘录」动作与点色（createAnnotation）同规，
+    // 恒挂当前卡（§3.4）。此前只认 sourceContext 两字段：contextRef 为 NULL 的老卡两字段皆空
+    // ⇒ 静默不落库但 toast 照弹（用户实测「摘录了却在卡片页找不到」）；有 documentId 的卡则错挂源文档。
+    // parentRange 以动作显式入参为准（actExtractSelection 先清选区后落库，annotateParent 闭包里的 faceSel 已为 null）。
+    let created = false;
+    const parent = A().annotateParent?.();
+    if (parent) {
+      const patched = {
+        ...(ctxWithAnchor || {}),
+        ...(parent.contextRefPatch || {}),
+        ...(opts?.parentRange && opts.parentRange.length >= 2 ? { parentRange: opts.parentRange } : {})
+      };
+      await readingWorkflow.create({
+        parentType: parent.parentType,
+        parentId: parent.parentId,
+        documentId: parent.documentId,
+        contentMarkdown: text,
+        contextRef: patched,
+        spans: multi,
+        ...extra
+      });
+      created = true;
+    } else if (sc.extractId) {
       await readingWorkflow.create({
         parentType: "extract",
         parentId: sc.extractId,
@@ -885,6 +907,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         spans: multi,
         ...extra
       });
+      created = true;
     } else if (sc.documentId) {
       await readingWorkflow.create({
         parentType: "document",
@@ -895,20 +918,25 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         spans: multi,
         ...extra
       });
+      created = true;
     }
     eventBus.emit("workflow/changed");
-    showToast("已摘录进学习队列");
+    showToast(created ? "已摘录进学习队列" : "此处没有可挂靠的来源，未创建摘录");
   }
 
   /**
-   * R38/R40 点色落库：高亮＝只建纯高亮（kind="highlight"，不进队列）；摘录+高亮＝建摘录。
-   * 返回新条目 id 供 AnnotationEditor 挂批注；库侧无 documentId 时返回 null。
+   * R38/R40 点色落库（v48.43/D83）：点色＝按**模式**（highlight＝纯批注不进队列；extract＝摘录+高亮进队列）
+   * 与**形式**（highlight 底色 / underline 下划线，`annotation_type`）落库；批注文字随选区菜单的批注框
+   * 一次带上（空串/缺省＝无批注），**不再自动弹编辑浮层**（编辑走栏内条目/文中标记点击）。
+   * 「摘录」也可由工具栏按钮发起（writeExtract 路径）。返回新条目 id。
    */
   async function createAnnotation(
     text: string,
     spans: ExtractSpan[] | undefined,
     color: string,
-    mode: "highlight" | "extract"
+    mode: "highlight" | "extract",
+    form: "highlight" | "underline",
+    comment?: string | null
   ): Promise<string | null> {
     const { readingWorkflow } = await import("./readingWorkflow");
     A().rememberAnchor(text);
@@ -922,7 +950,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       contextRef: ctxWithAnchor,
       spans: multi,
       kind: mode,
-      annotationColor: color
+      annotationColor: color,
+      annotationType: form,
+      ...(comment ? { comment } : {})
     };
     let created: { id: string } | null = null;
     // 宿主给定的落库父级优先（摘录页恒挂当前卡；规格 §3.4 表）

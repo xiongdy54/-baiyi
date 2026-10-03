@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
-import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
+import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
 import AnnotationPanel, { type AnnotItem, type AnnotFilter } from "./reader/AnnotationPanel";
@@ -38,6 +38,8 @@ interface Props {
     text: string,
     ctx: { parentExtractId: string; parentRange: Array<{ start: number; end: number }> }
   ) => void;
+  /** v48.41（D81）：当前卡材料名上报（顶栏中间显示；无材料名时回调空串＝回落「摘录」字样） */
+  onMaterialName?: (name: string) => void;
 }
 
 /** 面包屑折叠口径（用户 2026-09-25 修订，取代原「超 4 级」）：≤6 级全显示；>6 级才折叠 */
@@ -74,7 +76,7 @@ export function splitChain(chain: Array<{ id: string; text: string; depth: numbe
  * 规格 §1.2 R13（面包屑）：左上角面包屑「原文 › 第1层 › … › 当前」——点任一层＝切到该层卡片
  * （查看态，只读、不推进调度、不改队列，出口＝「返回队列」）；>6 级折叠成「…N 级」，点开逐项可达。
  */
-export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, header, onExit, onExtract }: Props) {
+export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, header, onExit, onExtract, onMaterialName }: Props) {
   const [items, setItems] = useState<DueTopic[]>([]);
   const [engine, setEngine] = useState<ExtractEngine>("sm19-default");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
@@ -134,6 +136,25 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** 修饰键按住期（v48.40 / D80）：菜单**让路**不接管指针——与阅读器同规（Reader.tsx multiKeyHeld）。
+   *  实测（cards.gui）：摘录页此前不让路，菜单按 R22 落在当前选区下方会盖住**下一段**的拖选起笔
+   *  ——3 段连选时第二段被菜单吃掉，集合只剩 [甲,丙]。修饰键状态从指针事件取（与内核同一信号源）。 */
+  const [multiKeyHeld, setMultiKeyHeld] = useState(false);
+  useEffect(() => {
+    const sync = (e: PointerEvent) => setMultiKeyHeld(modifierFlagOf(multiKeyRef.current, e));
+    const reset = () => setMultiKeyHeld(false);
+    document.addEventListener("pointerdown", sync, true);
+    document.addEventListener("pointermove", sync, true);
+    document.addEventListener("pointerup", sync, true);
+    window.addEventListener("blur", reset);
+    return () => {
+      document.removeEventListener("pointerdown", sync, true);
+      document.removeEventListener("pointermove", sync, true);
+      document.removeEventListener("pointerup", sync, true);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+
 
   /** 批 4 Task 11：正在编辑的批注（新建或点已有条目进入；null＝无浮层） */
   const [editing, setEditing] = useState<{
@@ -145,10 +166,12 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     anchor: { x: number; y: number; width: number; height: number };
   } | null>(null);
 
-  /** 批 4 Task 12：模式与色板取自设置键（与阅读器同一份读侧；改设置即时生效） */
+  /** 批 4 Task 12：模式/形式与色板取自设置键（与阅读器同一份读侧；改设置即时生效） */
   const annotSettings = useAnnotationSettings();
   const annotMode = annotSettings.annotateMode;
-  const setAnnotMode = (m: AnnotMode) => void writeAnnotationSetting("annotateMode", m);
+  const setAnnotMode = (m: AnnotMenuMode) => void writeAnnotationSetting("annotateMode", m);
+  const annotForm = annotSettings.annotateForm;
+  const setAnnotForm = (f: AnnotMarkForm) => void writeAnnotationSetting("annotateForm", f);
   const ANNOT_PALETTE: readonly AnnotColor[] = annotSettings.annotatePalette as readonly AnnotColor[];
   const annotFilter: AnnotFilter = annotSettings.annotationFilter;
 
@@ -197,6 +220,14 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   const shown = viewing ?? current;
   const shownId = shown?.id ?? null;
 
+  // v48.41（D81）：当前卡材料名上报顶栏（替代「摘录」字样；无材料名＝空串，顶栏回落原字样）
+  const materialName = String(shown?.docTitle ?? "");
+  const onMaterialNameRef = useRef(onMaterialName);
+  onMaterialNameRef.current = onMaterialName;
+  useEffect(() => {
+    onMaterialNameRef.current?.(materialName);
+  }, [materialName]);
+
   /** 批 4 Task 13/14：当前卡的注解清单（含纯高亮）；栏的出现条件＝≥1 条 */
   const [annots, setAnnots] = useState<AnnotItem[]>([]);
   /** 正文痕迹（段锚批注，按色分组；样张 `.q` 同规）——只喂给卡面的绘制层 */
@@ -220,6 +251,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         quote: String(r.contentMarkdown ?? ""),
         comment: (r.comment as string | null) ?? null,
         color: (r.annotationColor as string | null) ?? null,
+        annotationType: (r.annotationType as string | null) ?? null,
         time: Number(r.createdAt ?? 0),
         parentId: String((r as { parentId?: unknown }).parentId ?? ""),
         hasRange: parseQuoteRanges(r.quoteRangeJson).length > 0,
@@ -255,10 +287,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         ...children.map((r) => ({ ...r, anchorWhole: false }))
       ]);
       // 批 4 修正：正文痕迹＝挂在本卡上的**段锚**批注（按各自的批注色画；整卡批注不画，§5.4）
+      // v48.41（D81）：下划线形式的批注按（色×形式）分组，画透明底+色线而非底色
       setBodyGroups(
         children
           .filter((r) => r.hasRange && r.ranges.length > 0)
-          .map((r) => ({ color: r.color, ranges: r.ranges }))
+          .map((r) => ({ color: r.color, underline: r.annotationType === "underline", ranges: r.ranges }))
       );
     };
     void load();
@@ -341,15 +374,19 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     // 摘录页的选区就是「卡面里选中的那段」：快照面由卡面 onSelection 提供（faceSel），
     // 但菜单/面板的点击会先触发卡面 mouseup——动作面点击已豁免（见 ExtractCardFace.onUp）。
     buildSourceAnchor: () => null,
-    /** 规格 §3.4：摘录页的批注/高亮恒挂在**当前卡**上；所选区间走 contextRef.parentRange
-     *  （父卡坐标，与既有「子摘录」同一套语义）。 */
+    /** 规格 §3.4：摘录页的批注/高亮/**摘录动作**恒挂在**当前卡**上；所选区间走 contextRef.parentRange
+     *  （父卡坐标，与既有「子摘录」同一套语义）。
+     *  v48.40（D80）：守卫放宽——老摘录的 contextRef 可能整体为 NULL（早期版本数据），
+     *  documentId 回退到行原生 `document_id` 列（listDueExtracts 原样透传；能进队列的行必然
+     *  INNER JOIN 过 documents ⇒ 该列必有效，不会造出挂不上 listAllExtracts JOIN 的孤儿行）。 */
     annotateParent: () => {
-      if (!shown?.id || !shown.contextRef?.documentId) return null;
-      const rootId = String(shown.contextRef.rootExtractId || shown.id);
+      if (!shown?.id) return null;
+      const documentId = shown.contextRef?.documentId ?? shown.document_id ?? "";
+      const rootId = String(shown.contextRef?.rootExtractId || shown.id);
       return {
         parentType: "extract" as const,
         parentId: shown.id,
-        documentId: shown.contextRef.documentId,
+        documentId,
         contextRefPatch: {
           extractId: shown.id,
           parentExtractId: shown.id,
@@ -368,30 +405,22 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   // 卡面选区高亮（v48.38 / D78）：由 handleFaceSelection 按集合动作（replace/append/remove）直接驱动，
   // 不再有「faceSel 一变就 replace」的兜底 effect——那会抹掉 Ctrl 加选的累计（多段选择的实现本体在这里）。
   /**
-   * R38/R40：点色＝完成当前模式的动作（颜色不记）。
+   * R38/R40：点色＝完成当前模式与形式的标注（颜色不记）。
    * 摘录页按规格 §3.4 把批注/高亮挂在当前卡上（annotateParent 已在适配器里给定）；
    * 落库后**接着弹批注编辑浮层**（R40：写了批注 → 落带批注那条；没写 → 失焦即落无批注那条）。
    */
-  async function handlePickColor(color: AnnotColor) {
+  async function handlePickColor(color: AnnotColor, comment: string) {
     const sel = faceSel;
     if (!sel) return;
     // **先落库、后清选区**：adapter 的 annotateParent() 读的就是 faceSel 里的偏移，
     // 提前清掉会让落库区间退化成「整条正文」（[{0,len}]）——栏内条目与文中那段就对不上了（实测踩过）。
-    const newId = await createAnnotation(sel.text, undefined, color, annotMode);
+    // v48.43（D83）：批注文字随菜单批注框一次带上（空串＝无批注），**不再自动弹编辑浮层**
+    //（编辑走栏内条目/文中标记点击，R37/R40 入口不变）。
+    await createAnnotation(sel.text, undefined, color, annotMode, annotForm, comment || null);
     multiHighlightRef.current?.clear();
     multiRangesRef.current = [];
     setFaceSel(null);
     window.getSelection()?.removeAllRanges();
-    if (newId) {
-      setEditing({
-        id: newId,
-        kind: annotMode,
-        comment: null,
-        color,
-        quote: sel.text,
-        anchor: sel.rect
-      });
-    }
   }
 
   // 层级链随显示中的卡片刷新（getExtractChain 自根到当前，封顶 20 级）
@@ -778,10 +807,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       data-annot-open={annotPanelVisible && annotOpen ? "1" : undefined}
     >
       <div className={`extract-page-cols${annotPanelVisible ? " with-annot" : ""}`} data-annot-cols={annotPanelVisible ? "1" : undefined}>
-      {/* 栏开关（v6/D73 造型）：双类 annot-toggle bar-btn＝底栏按钮同族；文字钮两态变文案——
-          未展开显示「展开」、展开状态显示「收起」（用户 2026-10-02 中途更正；aria-expanded 同步承载）。
-          48×32 token 网格（侧栏钮不与底栏同高）；fixed 定位页面视口左上角 (var(--sp-4), 顶栏48+var(--sp-4))
-          ——两态坐标恒定（2026-10-01），z 高于吸顶头带（收起态带满宽会盖钮）。 */}
+      {/* 栏开关（v6/D73 造型还原，v48.42/D82 用户指令）：文字钮两态变文案，fixed 页面视口左上角
+          (var(--sp-4), 顶栏48+var(--sp-3))——与批注栏头（全部/摘录/高亮 位置/时间）同一视觉行。 */}
       {annotPanelVisible && (
         <button
           className="annot-toggle bar-btn"
@@ -841,6 +868,24 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         {/* 头带：全宽吸顶（sticky/满宽/--paper 底由共用规则给出）；内列 width:100% + ≤720 居中。
             className 首 token 必须仍是 extract-page-head（面包屑测试命中判据）。 */}
         <div className="extract-page-head">
+          {/* v48.43（D83）工具栏上移为**首行**：模式/形式段控 + 动作钮（批注栏头同款样式）——
+              与左侧批注栏头（收起/展开 全部/摘录/高亮 位置/时间）同一视觉行；
+              面包屑+计数随之下移到动作行下方、正文上方。段控是持久偏好，无选区也可切。 */}
+          <div className="extract-toolbar" data-extract-toolbar>
+            <div className="seg-rail" role="group" aria-label="标注模式">
+              <button type="button" className={annotMode === "highlight" ? "on" : undefined} data-annot-mode="highlight" onClick={() => setAnnotMode("highlight")}>高亮</button>
+              <button type="button" className={annotMode === "extract" ? "on" : undefined} data-annot-mode="extract" onClick={() => setAnnotMode("extract")}>摘录+高亮</button>
+            </div>
+            <div className="seg-rail" role="group" aria-label="标记形式">
+              <button type="button" className={annotForm === "highlight" ? "on" : undefined} data-annot-form="highlight" onClick={() => setAnnotForm("highlight")}>高亮</button>
+              <button type="button" className={annotForm === "underline" ? "on" : undefined} data-annot-form="underline" onClick={() => setAnnotForm("underline")}>下划线</button>
+            </div>
+            <button type="button" className="btn-rail" data-sel-act="manual" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "就地制卡" : "先在正文选中文字"} onClick={() => selActions.actions.manual()}>制卡</button>
+            <button type="button" className="btn-rail" data-sel-act="aiCards" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "AI 制卡" : "先在正文选中文字"} onClick={() => selActions.actions.aiCards()}>AI 制卡</button>
+            <button type="button" className="btn-rail" data-sel-act="explain" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "AI 解释" : "先在正文选中文字"} onClick={() => selActions.actions.explain()}>AI 解释</button>
+            <button type="button" className="btn-rail" data-sel-act="extract" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "摘录进学习队列" : "先在正文选中文字"} onClick={() => selActions.actions.extract()}>摘录</button>
+            <button type="button" className="btn-rail" data-sel-act="lookup" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "查词" : "先在正文选中文字"} onClick={() => selActions.actions.lookup()}>查词</button>
+          </div>
           <div className="extract-page-head-inner">
             <div className="extract-crumbs" data-extract-crumbs>
               {parts}
@@ -904,22 +949,14 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         <ExtractActionsBar extract={current!} engine={engine} busy={busy} handlers={faceHandlers} />
       )}
 
-      {/* 批 4 Task 10（规格 §3.3）：选区菜单——摘录页无图片挖空（卡面正文的图片能力属批 5） */}
+      {/* 批 4 Task 10（规格 §3.3）：选区菜单——v48.42/D82 双段控（模式+形式）+ 色板；动作行移至 .extract-toolbar */}
       {faceSel && !viewing && (
         <SelectionMenu
           anchor={faceSel.rect}
           container={pageRef.current?.getBoundingClientRect() ?? null}
-          mode={annotMode}
-          onModeChange={setAnnotMode}
           colors={ANNOT_PALETTE}
           onPick={handlePickColor}
-          actions={[
-            { key: "manual", label: "制卡", onClick: () => selActions.actions.manual() },
-            { key: "ai-cards", label: "AI 制卡", onClick: () => selActions.actions.aiCards() },
-            { key: "explain", label: "AI 解释", onClick: () => selActions.actions.explain() },
-            { key: "extract", label: "摘录", onClick: () => selActions.actions.extract() },
-            { key: "lookup", label: "查词", onClick: () => selActions.actions.lookup() }
-          ]}
+          byLocked={multiKeyHeld}
         />
       )}
 

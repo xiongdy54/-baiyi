@@ -77,16 +77,16 @@ const selOk = await evalJS(`(() => {
   return 'MARKER NOT FOUND';
 })()`);
 await new Promise((r) => setTimeout(r, 500));
-// 菜单自 Task 9 起是两行面板（R38）：第一行＝模式段控+调色排（色块无文本），第二行＝动作行。
-// 断言动作行文本集（语义＝「动作齐全」，不数色块）。
-const menu = await evalJS(`[...document.querySelectorAll('.selection-menu .macts button')].map((b) => b.textContent.trim()).join('/')`);
-check("选区菜单动作行 6 项（含图片挖空）", String(menu).split("/").length === 6 && String(menu).includes("图片挖空"), String(selOk) + " | " + menu);
+// v48.41（D81）：菜单只留形式段控+调色排；动作行上移阅读器工具栏（data-sel-act）。
+// 断言动作组文本集（语义＝「动作齐全」，不数色块）。
+const menu = await evalJS(`[...document.querySelectorAll('[data-sel-act]')].map((b) => b.textContent.trim()).join('/')`);
+check("阅读器工具栏动作组 6 项（含图片挖空）", String(menu).split("/").length === 6 && String(menu).includes("图片挖空"), String(selOk) + " | " + menu);
 
 // 3) 手动制卡「翻转问答」→ 应创建两张互为翻转的独立 qa 卡（v16 D18）
 // v25/M5：类型页签由 3 个扩为 4 个（新增「图片挖空」）
 console.log("== G3 手动制卡 · 翻转问答 = 两张独立卡 ==");
 const tabs = await evalJS(`(() => {
-  [...document.querySelectorAll('.selection-menu button')].find((b) => b.textContent === "制卡").click();
+  [...document.querySelectorAll('[data-sel-act="manual"]')].find((b) => b.textContent === "制卡").click();
   return new Promise((res) => setTimeout(() => {
     res([...document.querySelectorAll('.modal-panel .seg-tabs button')].map((b) => b.textContent.trim()).join('/'));
   }, 300));

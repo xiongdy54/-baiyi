@@ -123,6 +123,8 @@ export default function CardBrowser({
   const [memFilter, setMemFilter] = useState(false);
   const [sortBy, setSortBy] = useState("due");
   const [detailId, setDetailId] = useState<string | null>(null);
+  // v48.40（D80）：摘录详情——摘录行普通点击打开（与闪卡行同语义；Ctrl/Shift 仍多选）
+  const [extractDetailId, setExtractDetailId] = useState<string | null>(null);
   const [leechTarget, setLeechTarget] = useState<BrowserCard | null>(null);
   const [loaded, setLoaded] = useState(false);
   // v34（M12，§4.16）：今日同源暂缓清单（与复习队列同一视图口径）——id → 延后原因
@@ -306,8 +308,14 @@ export default function CardBrowser({
       });
     }
     if (preset === "due") list = list.filter((e) => Number(e.topicNextAt) <= Date.now());
-    return list;
-  }, [extracts, bookScope, query, preset]);
+    // v48.40（D80）：摘录表此前完全忽略 sortBy（永远主进程的 priority/due 序），新摘录按到期升序沉底
+    // ——补上与闪卡表同名的排序语义；「按创建时间」取降序（新摘录浮顶，可发现性）。
+    const sorted = [...list];
+    if (sortBy === "created") sorted.sort((a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0));
+    else if (sortBy === "priority") sorted.sort((a, b) => Number(b.priority) - Number(a.priority));
+    else sorted.sort((a, b) => Number(a.topicNextAt ?? 0) - Number(b.topicNextAt ?? 0));
+    return sorted;
+  }, [extracts, bookScope, query, preset, sortBy]);
 
   const viewCards = kindFilter === "extract" ? [] : scopeCards;
   const viewExtracts = kindFilter === "card" ? [] : scopeExtracts;
@@ -460,158 +468,106 @@ export default function CardBrowser({
   }, [query]);
 
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
+  const extractDetail = extractDetailId ? extracts.find((e) => e.id === extractDetailId) ?? null : null;
 
   return (
     <div className="queue-wrap">
-      <div className="review-count mono">
-        共 {all.length} 张 · 到期 {counts.due} · 难点 {counts.leech} · 暂停 {counts.suspended}
-      </div>
-
-      <div className="seg-tabs seg-tabs-pad">
-        <button className={preset === "all" ? "active" : ""} onClick={() => setPreset("all")}>
-          全部卡片
-        </button>
-        <button className={preset === "due" ? "active" : ""} onClick={() => setPreset("due")}>
-          到期卡片 ({counts.due})
-        </button>
-        <button className={preset === "leech" ? "active" : ""} onClick={() => setPreset("leech")}>
-          记忆难点 ({counts.leech})
-        </button>
-        {/* v34（M12，§4.16）：今日同源暂缓——被同源卡延后到明日的卡（点开行详情可见原因） */}
-        {counts.deferred > 0 && (
-          <button className={preset === "deferred" ? "active" : ""} onClick={() => setPreset("deferred")}>
-            今日暂缓 ({counts.deferred})
-          </button>
-        )}
-        {/* v40（K1，D37）：知识地基管理面（§9.1 K1-4 最小管理页） */}
-        <button className={preset === "knowledge" ? "active" : ""} onClick={() => setPreset("knowledge")}>
-          知识点
-        </button>
+      {/* v48.40（D80）：吸顶头带——计数 meta + preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline） */}
+      <div className="cb-head">
+        <div className="cb-head-inner">
+          <div className="review-count mono">
+            共 {all.length} 张 · 到期 {counts.due} · 难点 {counts.leech} · 暂停 {counts.suspended}
+          </div>
+          <div className="seg-tabs" role="tablist" aria-label="卡片预设范围">
+            <button className={preset === "all" ? "active" : ""} onClick={() => setPreset("all")}>
+              全部卡片
+            </button>
+            <button className={preset === "due" ? "active" : ""} onClick={() => setPreset("due")}>
+              到期卡片 ({counts.due})
+            </button>
+            <button className={preset === "leech" ? "active" : ""} onClick={() => setPreset("leech")}>
+              记忆难点 ({counts.leech})
+            </button>
+            {/* v34（M12，§4.16）：今日同源暂缓——被同源卡延后到明日的卡（点开行详情可见原因） */}
+            {counts.deferred > 0 && (
+              <button className={preset === "deferred" ? "active" : ""} onClick={() => setPreset("deferred")}>
+                今日暂缓 ({counts.deferred})
+              </button>
+            )}
+            {/* v40（K1，D37）：知识地基管理面（§9.1 K1-4 最小管理页） */}
+            <button className={preset === "knowledge" ? "active" : ""} onClick={() => setPreset("knowledge")}>
+              知识点
+            </button>
+          </div>
+        </div>
       </div>
 
       {preset === "knowledge" && <KnowledgeManager />}
 
       {preset !== "knowledge" && (
       <>
+      {/* v48.40（D80）：工具行——better-layout「一盒一功能」：搜索 grow / 筛选 / 类别 / 来源书 各成一盒（border-strong 描边，16px 组距） */}
       <div className="cb-toolbar">
-        <input
-          className="cb-search"
-          placeholder='搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）'
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <Dropdown title="按卡片类型筛选" value={typeFilter} options={typeOptions} onChange={setTypeFilter} />
-        <Dropdown
-          title="按复习状态筛选"
-          value={stateFilter}
-          options={[
-            { value: "all", label: "全部状态" },
-            { value: "new", label: "新卡" },
-            { value: "learning", label: "学习中" },
-            { value: "review", label: "复习中" },
-            { value: "suspended", label: "已暂停" }
-          ]}
-          onChange={setStateFilter}
-        />
-        <Dropdown
-          title="排序方式"
-          value={sortBy}
-          options={[
-            { value: "due", label: "按到期时间" },
-            { value: "created", label: "按创建时间" },
-            { value: "priority", label: "按优先级" },
-            { value: "lapses", label: "按遗忘次数" }
-          ]}
-          onChange={setSortBy}
-        />
-        {/* v46（M14-UM2，§6.7.3）：记忆接地筛选——情境来自记忆的卡（含「来源存疑」） */}
-        <button
-          className={`btn btn-sm ${memFilter ? "btn-primary" : "btn-outline"}`}
-          title="只显示情境来自用户记忆的卡片"
-          onClick={() => setMemFilter((v) => !v)}
-        >
-          记忆接地
-        </button>
-        {/* v48.22（D58 §6.8-6）：类别切换（闪卡 / 摘录 / 全部） + 按来源书筛选 */}
-        <div className="seg-tabs seg-tabs-sm" role="group" aria-label="条目类别">
-          <button className={kindFilter === "card" ? "active" : ""} data-kind-card onClick={() => setKindFilter("card")}>
-            闪卡
-          </button>
-          <button className={kindFilter === "extract" ? "active" : ""} data-kind-extract onClick={() => setKindFilter("extract")}>
-            摘录
-          </button>
-          <button className={kindFilter === "both" ? "active" : ""} data-kind-both onClick={() => setKindFilter("both")}>
-            全部
+        <div className="cb-cluster cb-cluster-grow">
+          <input
+            className="cb-search"
+            placeholder='搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）'
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="cb-cluster">
+          <Dropdown title="按卡片类型筛选" value={typeFilter} options={typeOptions} onChange={setTypeFilter} />
+          <Dropdown
+            title="按复习状态筛选"
+            value={stateFilter}
+            options={[
+              { value: "all", label: "全部状态" },
+              { value: "new", label: "新卡" },
+              { value: "learning", label: "学习中" },
+              { value: "review", label: "复习中" },
+              { value: "suspended", label: "已暂停" }
+            ]}
+            onChange={setStateFilter}
+          />
+          <Dropdown
+            title="排序方式"
+            value={sortBy}
+            options={[
+              { value: "due", label: "按到期时间" },
+              { value: "created", label: "按创建时间" },
+              { value: "priority", label: "按优先级" },
+              { value: "lapses", label: "按遗忘次数" }
+            ]}
+            onChange={setSortBy}
+          />
+          {/* v46（M14-UM2，§6.7.3）：记忆接地筛选——情境来自记忆的卡（含「来源存疑」） */}
+          <button
+            className={`btn btn-sm ${memFilter ? "btn-primary" : "btn-outline"}`}
+            title="只显示情境来自用户记忆的卡片"
+            onClick={() => setMemFilter((v) => !v)}
+          >
+            记忆接地
           </button>
         </div>
-        <Dropdown title="按来源书筛选" value={bookScope} options={bookOptions} onChange={setBookScope} />
+        {/* v48.22（D58 §6.8-6）：类别切换（闪卡 / 摘录 / 全部） + 按来源书筛选 */}
+        <div className="cb-cluster">
+          <div className="seg-tabs seg-tabs-sm" role="group" aria-label="条目类别">
+            <button className={kindFilter === "card" ? "active" : ""} data-kind-card onClick={() => setKindFilter("card")}>
+              闪卡
+            </button>
+            <button className={kindFilter === "extract" ? "active" : ""} data-kind-extract onClick={() => setKindFilter("extract")}>
+              摘录
+            </button>
+            <button className={kindFilter === "both" ? "active" : ""} data-kind-both onClick={() => setKindFilter("both")}>
+              全部
+            </button>
+          </div>
+          <Dropdown title="按来源书筛选" value={bookScope} options={bookOptions} onChange={setBookScope} />
+        </div>
       </div>
 
-      {/* v48.22（D58 §6.8-6）：多选与批量动作条（选择态常驻，动作在选中 ≥1 条时出现） */}
-      <div className="cb-batch" data-batch-bar>
-        {kindFilter !== "extract" && (
-          <>
-            <button className="btn btn-outline btn-sm" data-sel-all-cards onClick={() => selectAllOf("card")}>
-              全选闪卡
-            </button>
-            <button className="btn btn-outline btn-sm" onClick={() => invertOf("card")}>
-              反选闪卡
-            </button>
-          </>
-        )}
-        {kindFilter !== "card" && (
-          <>
-            <button className="btn btn-outline btn-sm" data-sel-all-extracts onClick={() => selectAllOf("extract")}>
-              全选摘录
-            </button>
-            <button className="btn btn-outline btn-sm" onClick={() => invertOf("extract")}>
-              反选摘录
-            </button>
-          </>
-        )}
-        {selCards.size + selExtracts.size > 0 && (
-          <>
-            <span className="mono" data-sel-count>
-              已选 闪卡 {selCards.size} · 摘录 {selExtracts.size}
-            </span>
-            {selCards.size > 0 && (
-              <>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>删除</button>
-              </>
-            )}
-            {selExtracts.size > 0 && (
-              <>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-extracts onClick={() => void runExtractBatch("postponeDays", { days: 7 })}>推迟 7 天</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 30 })}>优先级 30</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 70 })}>优先级 70</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>毕业</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>召回</button>
-                {/* v48.22（D58 §6.4.2）：状态机另两个出口——归档（留痕）/ 不再关心（可召回） */}
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive onClick={() => void runExtractBatch("set_status", { status: "archived" })}>归档</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "dismissed" })}>不再关心</button>
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>删除</button>
-                <input className="cb-search cb-find" data-find-input placeholder="查找" value={findText} onChange={(e) => setFindText(e.target.value)} />
-                <input className="cb-search cb-find" data-replace-input placeholder="替换为" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} />
-                <button className="btn btn-outline btn-sm" disabled={batchBusy} data-find-replace onClick={() => void runFindReplace()}>正文查找替换</button>
-              </>
-            )}
-            <button
-              className="btn btn-outline btn-sm"
-              onClick={() => {
-                setSelCards(new Set());
-                setSelExtracts(new Set());
-              }}
-            >
-              清除选择
-            </button>
-          </>
-        )}
-        {batchNote && <span className="form-hint" data-batch-note>{batchNote}</span>}
-      </div>
-
+      {/* v48.40（D80）：批量动作条移至吸底 stage-bar（见页尾）——未选中时此处不再常驻空条 */}
       {/* v48.22（D58 §6.8-5）：筛选牌组＝保存下来的复习范围（不移动卡片，故复习记录照常入 FSRS） */}
       <div className="cb-batch" data-deck-bar>
         <span className="mono">筛选牌组</span>
@@ -786,8 +742,8 @@ export default function CardBrowser({
               key={e.id}
               className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
               role="row"
-              onClick={(ev) => toggleSel("extract", e.id, ev)}
-              title="点击选择 · Ctrl/⌘ 多选 · Shift 范围选（摘录行不展开详情，管理动作走批量条）"
+              onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("extract", e.id, ev) : setExtractDetailId(e.id))}
+              title="点击查看详情 · Ctrl/⌘ 多选 · Shift 范围选（左侧复选框直接勾选）"
             >
               <span className="cb-pick">
                 <input
@@ -848,6 +804,81 @@ export default function CardBrowser({
         </div>
       )}
 
+      {/* v48.40（D80）：吸底舞台栏（与摘录/复习页同几何：72px、band-line 上缘、距窗缘 16px）——
+          批量动作收入这里；全选/反选**常驻**（空选择态的入口，extract.gui 批量流程的起手），
+          计数与批量动作按选中态渐进披露；data-batch-bar / 各按钮钩子与文案逐字保留 */}
+      <div className="stage-bar cb-stage" data-batch-bar>
+        <div className="cb-cluster cb-cluster-grow">
+          {selCards.size + selExtracts.size === 0 ? (
+            <span className="bar-hint">普通点击行查看详情 · Ctrl/⌘ 多选 · Shift 范围选</span>
+          ) : (
+            <span className="mono" data-sel-count>
+              已选 闪卡 {selCards.size} · 摘录 {selExtracts.size}
+            </span>
+          )}
+          {kindFilter !== "extract" && (
+            <>
+              <button className="btn btn-outline btn-sm" data-sel-all-cards onClick={() => selectAllOf("card")}>
+                全选闪卡
+              </button>
+              <button className="btn btn-outline btn-sm" onClick={() => invertOf("card")}>
+                反选闪卡
+              </button>
+            </>
+          )}
+          {kindFilter !== "card" && (
+            <>
+              <button className="btn btn-outline btn-sm" data-sel-all-extracts onClick={() => selectAllOf("extract")}>
+                全选摘录
+              </button>
+              <button className="btn btn-outline btn-sm" onClick={() => invertOf("extract")}>
+                反选摘录
+              </button>
+            </>
+          )}
+          {selCards.size > 0 && (
+            <>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>删除</button>
+            </>
+          )}
+          {selExtracts.size > 0 && (
+            <>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-extracts onClick={() => void runExtractBatch("postponeDays", { days: 7 })}>推迟 7 天</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 30 })}>优先级 30</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 70 })}>优先级 70</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>毕业</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>召回</button>
+              {/* v48.22（D58 §6.4.2）：状态机另两个出口——归档（留痕）/ 不再关心（可召回） */}
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive onClick={() => void runExtractBatch("set_status", { status: "archived" })}>归档</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "dismissed" })}>不再关心</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>删除</button>
+            </>
+          )}
+          {selCards.size + selExtracts.size > 0 && (
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => {
+                setSelCards(new Set());
+                setSelExtracts(new Set());
+              }}
+            >
+              清除选择
+            </button>
+          )}
+          {batchNote && <span className="form-hint" data-batch-note>{batchNote}</span>}
+        </div>
+        {selExtracts.size > 0 && (
+          <div className="cb-cluster">
+            <input className="cb-search cb-find" data-find-input placeholder="查找" value={findText} onChange={(e) => setFindText(e.target.value)} />
+            <input className="cb-search cb-find" data-replace-input placeholder="替换为" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} />
+            <button className="btn btn-outline btn-sm" disabled={batchBusy} data-find-replace onClick={() => void runFindReplace()}>正文查找替换</button>
+          </div>
+        )}
+      </div>
+
       {detail && (
         <CardDetail
           card={detail}
@@ -865,6 +896,16 @@ export default function CardBrowser({
         />
       )}
 
+      {/* v48.40（D80）：摘录详情——与 CardDetail 同构（全文 + meta + 维护动作），动作复用批量条同一 IPC */}
+      {extractDetail && (
+        <ExtractDetail
+          extract={extractDetail}
+          onClose={() => setExtractDetailId(null)}
+          onJumpToDoc={onJumpToDoc}
+          onChanged={() => refresh()}
+        />
+      )}
+
       {leechTarget && (
         <LeechWizard
           card={leechTarget}
@@ -875,6 +916,149 @@ export default function CardBrowser({
           }}
         />
       )}
+    </div>
+  );
+}
+
+// ---------- 摘录详情（v48.40 / D80：与 CardDetail 同构；动作复用批量条同一 IPC，单条＝ids 长度 1） ----------
+// documentId：listAllExtracts 映射为驼峰 `documentId`；listDueExtracts 原样透传 `document_id`——两形态都接
+type ExtractRow = DueTopic & {
+  comment?: string | null;
+  quoteRangeJson?: string | null;
+  createdAt?: number;
+  documentId?: string | null;
+  document_id?: string | null;
+};
+
+export function ExtractDetail({
+  extract,
+  onClose,
+  onJumpToDoc,
+  onChanged
+}: {
+  extract: ExtractRow;
+  onClose: () => void;
+  onJumpToDoc?: JumpToDoc;
+  onChanged: () => Promise<void> | void;
+}) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  // quoteRange 是父卡 content_markdown 坐标（§1.1）；坏 JSON 不抛（与 listAllExtracts 同口径）
+  const ranges = (() => {
+    try {
+      const parsed = JSON.parse(String(extract.quoteRangeJson ?? "null"));
+      return Array.isArray(parsed) ? (parsed as Array<{ start: number; end: number }>) : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  async function run(op: string, payload?: unknown, opts?: { confirm?: string; closeAfter?: boolean }) {
+    if (opts?.confirm && !window.confirm(opts.confirm)) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = (await readingWorkflow.batch(op as never, [extract.id], payload as never)) as { ok?: boolean; reason?: string };
+      if (!r?.ok) {
+        setNote(r?.reason || "操作失败，未执行");
+        return;
+      }
+      await onChanged();
+      if (opts?.closeAfter) onClose();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function jump() {
+    const documentId = extract.contextRef?.documentId || extract.documentId || extract.document_id || "";
+    if (!documentId || !onJumpToDoc) return;
+    onJumpToDoc(
+      documentId,
+      {
+        anchorText: extract.contextRef?.anchorText || extract.contentMarkdown,
+        anchorRatio: extract.contextRef?.anchorRatio
+      },
+      "browse"
+    );
+  }
+
+  const meta: [string, string][] = [
+    ["状态", extractStatusLabel(extract.status)],
+    ["优先级", `P${extract.priority}${extract.prioritySource === "user" ? " · 改" : ""}`],
+    ["下次推送", nextAtText(extract.topicNextAt)],
+    ["来源", extract.docTitle || "—"],
+    ["引文", ranges?.length ? `${ranges.length} 段（${extract.parentType === "extract" ? "父卡正文坐标" : "本条正文"}）` : "—"],
+    ["批注", extract.comment || "—"],
+    ["创建时间", extract.createdAt ? new Date(extract.createdAt).toLocaleString() : "—"]
+  ];
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="摘录详情" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>摘录详情</h2>
+          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="modal-scroll">
+          {/* 多段摘录＝各段 \n\n 拼接（D61/D78 落库形态），whitespace 保留原文换行 */}
+          <div className="extract-detail-content">{extract.contentMarkdown}</div>
+
+          <dl className="cb-meta">
+            {meta.map(([k, v]) => (
+              <Fragment key={k}>
+                <dt>{k}</dt>
+                <dd>{v}</dd>
+              </Fragment>
+            ))}
+          </dl>
+
+          {note && <p className="form-hint" data-extract-detail-note>{note}</p>}
+
+          <div className="cb-actions">
+            {(extract.contextRef?.documentId || extract.documentId || extract.document_id) && onJumpToDoc && (
+              <button className="btn btn-outline btn-sm" data-extract-detail-jump onClick={jump}>
+                跳转原文
+              </button>
+            )}
+            <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("postponeDays", { days: 7 })}>
+              推迟 7 天
+            </button>
+            <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_priority", { priority: 30 })}>
+              优先级 30
+            </button>
+            <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_priority", { priority: 70 })}>
+              优先级 70
+            </button>
+            <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "resolved" })}>
+              毕业
+            </button>
+            <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "open" })}>
+              召回
+            </button>
+            <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "archived" })}>
+              归档
+            </button>
+            <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "dismissed" })}>
+              不再关心
+            </button>
+            <button
+              className="btn btn-outline btn-sm"
+              disabled={busy}
+              onClick={() => void run("delete", undefined, { confirm: "删除这条摘录？（软删，可在备份中找回）", closeAfter: true })}
+            >
+              删除
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

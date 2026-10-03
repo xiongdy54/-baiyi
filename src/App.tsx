@@ -69,6 +69,12 @@ export default function App() {
   /* v48.15 / D51：顶栏「书架」被点时自增——已在书架时点它也要能退出文件夹回顶层（Bookshelf 的第二条出路） */
   const [shelfTopTick, setShelfTopTick] = useState(0);
   const [view, setView] = useState<View>({ name: "shelf" });
+  // v48.41（D81）：摘录/复习会话的顶栏标题＝**当前卡材料名**（两页经 onMaterialName 上报；
+  // 空串＝当前卡无材料名或队列为空，回落原「摘录」/「复习」字样）。切视图即失效重报。
+  const [sessionMaterial, setSessionMaterial] = useState("");
+  useEffect(() => {
+    setSessionMaterial("");
+  }, [view.name]);
   const [extractDetail, setExtractDetail] = useState<Awaited<ReturnType<typeof readingWorkflow.getTopic>>>(null);
 
   useEffect(() => {
@@ -402,16 +408,17 @@ export default function App() {
   } else if (view.name === "queue") {
     // v48.22（D58 §6.8）：原「学习队列」列表页退役——列表职能迁入卡片浏览器，
     // 本页改为**沉浸式摘录连续处理页**（一屏一条、连续推进、正文可就地编辑）
-    topTitle = "摘录";
+    topTitle = sessionMaterial || "摘录";
     mainContent = (
       <ExtractReviewView
         onJumpToDoc={handleJumpToDoc}
+        onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
       />
     );
   } else if (view.name === "extractSession") {
     // 本书范围会话（阅读器「复习摘录」入口）：只处理该书摘录，退出回阅读
-    topTitle = "摘录";
+    topTitle = sessionMaterial || "摘录";
     mainContent = (
       <ExtractReviewView
         onJumpToDoc={handleJumpToDoc}
@@ -419,12 +426,14 @@ export default function App() {
         scopeLimits={view.limits ?? null}
         header={`集中复习：《${view.title}》`}
         onExit={() => setView({ name: "shelf" })}
+        onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
       />
     );
   } else if (view.name === "review") {
-    topTitle = view.title ? `复习 · ${view.title}` : "复习";
-    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} bookItemIds={view.bookItemIds} scopeLimits={view.limits ?? null} />;
+    // v48.41（D81）：顶栏显示当前卡材料名（无材料名回落「复习」/「复习 · 牌组名」）
+    topTitle = sessionMaterial || (view.title ? `复习 · ${view.title}` : "复习");
+    mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} bookItemIds={view.bookItemIds} scopeLimits={view.limits ?? null} onMaterialName={setSessionMaterial} />;
   } else if (view.name === "browse") {
     topTitle = "卡片浏览";
     mainContent = (

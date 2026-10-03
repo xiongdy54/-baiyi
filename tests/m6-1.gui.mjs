@@ -290,7 +290,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
     if (!el) return "not found";
     el.click(); return "clicked";
   })()`;
-  await cdp.eval(clickBtn("制卡", ".selection-menu button"));
+  await cdp.eval(clickBtn("制卡", "[data-sel-act]"));
   await wait(700);
   await cdp.eval(`(() => {
     const tas = [...document.querySelectorAll(".modal-panel textarea")];
