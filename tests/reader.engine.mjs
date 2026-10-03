@@ -86,6 +86,9 @@ const clickByText = (txt, sel = "button") => `(() => {
   if (!el) return "not found";
   el.click(); return "clicked";
 })()`;
+// v48.44（D84）：侧栏开关钮是「展开/收起」两态文案（D83 起），按 data 钩子点击而非文字匹配
+// （此前 clickByText("侧栏", …) 在 D83 改两态文案后永远 not found——2a/2b/#7 空转失败）。
+const clickSidebarToggle = () => `(() => { const b = document.querySelector("[data-reader-sidebar-toggle]"); if (!b) return "no btn"; b.click(); return "clicked"; })()`;
 
 // ---------- 主流程 ----------
 let electron = null;
@@ -137,7 +140,7 @@ try {
   await cdp.shot("tmp-l2-1-engine.png");
 
   // 2. 目录侧栏
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(600);
   const tocCount = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
   check("2a 目录侧栏渲染 3 章", tocCount >= 3, "n=" + tocCount);
@@ -145,7 +148,7 @@ try {
   await wait(800);
   const tocClosed = await cdp.eval(`!document.querySelector(".reader-sidebar")`);
   check("2b 目录点击跳转并收起", tocClosed);
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(400);
   await cdp.eval(clickByText("第一章", ".reader-toc-item"));
   await wait(800);
@@ -153,7 +156,7 @@ try {
   // 2c. 翻页按钮（v20.1）：跨章节推进 + 边界
   await cdp.eval(clickByText("第一章", ".reader-toc-item"));
   await wait(800);
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(400);
   const cfiBefore = await cdp.eval(`window.__readerKernel?.getCurrentLocation()?.cfi`);
   await cdp.eval(`(() => { const b = document.querySelector('.reader-engine-controls button[title*="下一页"]'); if (!b) return "no btn"; b.click(); return "clicked"; })()`);
@@ -488,14 +491,14 @@ try {
   await cdp.eval(clickByText("FSRSTEST 粘贴引擎验证书", ".book-card"));
   await wait(3000);
   const pasteEngine = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(500);
   const pasteToc = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
   check("7 粘贴书合成 EPUB 进引擎（目录 3 章）", pasteEngine && pasteToc >= 3, "toc=" + pasteToc);
   await cdp.shot("tmp-l2-7-paste.png");
 
   // 7b. 暗夜主题联动软件夜间模式（v20.1；主题下拉按 title 精确定位，栏内另有阅读模式下拉）
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(400);
   // D5-B：模式/主题/缩放收进「阅读设置」弹出组——先开组，组内的 Dropdown 照旧
   // 点击与断言分两次 —— React 重渲染是异步的，同一个 eval 里「点完立刻查」必然读到旧 DOM

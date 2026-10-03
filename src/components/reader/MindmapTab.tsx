@@ -1,15 +1,19 @@
-// MindmapWorkspace——材料知识导图全屏工作区（v48 批3/4/5，M15，D41/D42 / §4.19）。
-// 交互形态（v47.2 拍板保留）：占满窗口的全屏 Overlay（挂 Reader 外层、内核不销毁、正文返回原位）
-// + 右侧边栏收纳全部操作；画布保持空旷（单 accent / 直角 / 无阴影渐变 / 1px hairline）。
-// 状态机（§4.19-11）：collect → idle/empty → preview → running → done / review_failed / failed；
-// 评审 FAIL 停在确认（用户确认后 repair 一次）；失败永不触碰旧图；无 Key 只读降级（不弹窗）。
+// MindmapTab——材料知识导图并入阅读器侧栏「图谱」页签（v48.44 / D84 / §4.19；设计稿
+// `docs/design/MINDMAP-SIDEBAR-TAB.md`）。原全屏 Overlay 工作区（MindmapWorkspace）退役：
+// 状态机（collect → idle/empty → preview → running → done / review_failed / failed；
+// D45/D46/D47/D48/D49 的发布/深化/续跑语义）**原样保留**，呈现拆两半——
+//   · 页签面板 `.mindmap-tab-panel`（宿主＝侧栏 data-panel="map"）：生成/预览/状态/节点搜索/节点详情/历史版本；
+//   · 画布层：createPortal 进宿主给的 `.reader-map-layer`（.reader-engine-main 内覆盖层）——
+//     图谱页签激活时导图直接盖在正文上方显示，切页签/收侧栏即回正文，内核不卸载。
+// 「跳到正文」＝内核跳转 + onJumpToText()（宿主收侧栏）；就此制卡走既有 card-structure 链路（AI 面板滑出，导图在场）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import DOMPurify from "dompurify";
-import { buildMapSvg } from "../lib/mindmap/render";
-import { layoutMap, type MapNodeLike } from "../lib/mindmap/layout";
-import type { MapStructure, MapNodeRecord, MapPreview, MaterialMapMeta, MapIssue } from "../lib/mindmap";
-import { mindmapApi, buildStructureCardPackage } from "../lib/mindmap";
-import { eventBus } from "../lib/eventbus";
+import { buildMapSvg } from "../../lib/mindmap/render";
+import { layoutMap, type MapNodeLike } from "../../lib/mindmap/layout";
+import type { MapStructure, MapNodeRecord, MapPreview, MaterialMapMeta, MapIssue } from "../../lib/mindmap";
+import { mindmapApi, buildStructureCardPackage } from "../../lib/mindmap";
+import { eventBus } from "../../lib/eventbus";
 
 const GRANULARITY_OPTIONS = [
   { value: "overview", label: "概览" },
@@ -29,11 +33,14 @@ type Phase =
   | "failed"
   | "review_failed";
 
-interface MindmapWorkspaceProps {
-  kernel: import("../lib/reader/kernel").ReaderKernel;
+export interface MindmapTabProps {
+  kernel: import("../../lib/reader/kernel").ReaderKernel;
   documentId: string;
   title: string;
-  onBack: () => void;
+  /** 画布 portal 宿主：Reader 在 .reader-engine-main 里挂的 `.reader-map-layer` 覆盖层元素 */
+  canvasHost: HTMLDivElement | null;
+  /** 「跳到正文」后的宿主动作：收起侧栏回正文（不再有全屏工作区的 onBack） */
+  onJumpToText: () => void;
   /** 就此制卡（批C：结构制卡——section=结构语义包，走 card-structure 分支；未提供时按钮隐藏） */
   onMakeCardsFromNode?: (payload: { nodeId: string; label: string; section: string; focus: string; unitAnchors: string[] }) => void;
   /**
@@ -65,7 +72,7 @@ function resolveTheme() {
   };
 }
 
-export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCardsFromNode, initialMapId, initialResumeRunId }: MindmapWorkspaceProps) {
+export default function MindmapTab({ kernel, documentId, title, canvasHost, onJumpToText, onMakeCardsFromNode, initialMapId, initialResumeRunId }: MindmapTabProps) {
   const [phase, setPhase] = useState<Phase>("loading");
   const [collect, setCollect] = useState<{ tocItems: { anchor: string; label: string; children?: unknown[] }[]; unitAnchors: string[]; textByUnit: Record<string, string> } | null>(null);
   const [collectMsg, setCollectMsg] = useState("");
@@ -87,7 +94,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   const [progress, setProgress] = useState<{ done: number; total: number; label?: string } | null>(null);
   // v48.11：run 级预算与账本口径（计划/缓存命中/需发送/实际尝试），以及首波深挖计划与部分完成提示
   const [budgetInfo, setBudgetInfo] = useState<{ calls: number; budget: number } | null>(null);
-  const [expandPlan, setExpandPlan] = useState<import("../lib/mindmap").MapExpandPlan | null>(null);
+  const [expandPlan, setExpandPlan] = useState<import("../../lib/mindmap").MapExpandPlan | null>(null);
   const [partialNote, setPartialNote] = useState("");
   const [coverageNote, setCoverageNote] = useState("");
   const [forceRebuild, setForceRebuild] = useState(false); // v48.12：强制重算（忽略缓存，供前后对比/benchmark）
@@ -195,6 +202,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     return () => {
       alive = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kernel, documentId, loadMap, refreshVersions, initialMapId]);
 
   // 进度广播（生成中）
@@ -262,7 +270,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
   };
 
   /** 结果落界面（v48.11：section_ready / partial 都是一等状态，禁止把部分完成伪装成失败） */
-  const applyResult = async (result: import("../lib/mindmap").MindmapGenerateResult | null | undefined, opts?: { resume?: boolean }) => {
+  const applyResult = async (result: import("../../lib/mindmap").MindmapGenerateResult | null | undefined, opts?: { resume?: boolean }) => {
     if (!result) return;
     if (result.runId) setLastRunId(result.runId);
     if (result.status === "completed") {
@@ -296,7 +304,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
       // 画布上带＋号的节点点开深化；想一次跑完的人用下方「自动深挖全部」（显式选择，不是默认）。
       setSectionNote(
         result.expandPlan && result.expandPlan.firstWaveNodes
-          ? `首层结构已就绪，现在就可以看。更深的枝条按需展开：点画布上带＋号的节点，用右侧「深化此节点」。`
+          ? `首层结构已就绪，现在就可以看。更深的枝条按需展开：点画布上带＋号的节点，用「深化此节点」。`
           : "首层结构已就绪，现在就可以看。"
       );
     } else if (result.status === "review_failed") {
@@ -331,7 +339,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
    * v48.13 P4（D46）**深化**——「展开」与「深化」严格分开：
    *   · 展开/收起：节点已有 children，纯 UI，**零 AI 请求**（下面的按钮只在无子结构时出现）；
    *   · 深化：节点尚无更深结构、且有原文作用域 → 创建后台任务，只对这一支做「深挖 + 增量评审」。
-   * 深化不阻塞界面：离开工作区/回正文任务照常跑（进度走全局广播与右下角指示器）。
+   * 深化不阻塞界面：离开页签/回正文任务照常跑（进度走全局广播与右下角指示器）。
    */
   const deepenNode = async (node: MapNodeRecord) => {
     const params = buildParams();
@@ -479,10 +487,11 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     setView({ zoom: Math.max(0.15, scale), tx: 0, ty: 0 });
   }, [layout]);
 
+  // v48.44（D84）：画布经 portal 挂进宿主覆盖层——宿主元素就位（或画布宽度随侧栏变化）后重新 fit
   useEffect(() => {
     if (phase === "done" && layout) fitView();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase === "done", layout?.bounds.w]);
+  }, [phase === "done", layout?.bounds.w, canvasHost]);
 
   // 拖拽 vs 点击判定（批3 修复：pointerdown 一律 setPointerCapture 会把 click 的 target 吞到画布层，
   // 导致 data-node-id 永远找不到、节点完全不可点——改为「位移超阈值才算拖拽，拖拽时才捕获」）
@@ -630,7 +639,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     [phase, structure, selectedId, visibleSiblingIds, nodeById, expandedIds]
   );
 
-  // 跳正文：goTo(单元锚) + quote 检索 best-effort（高亮失败≠导航失败，§4.19-9）
+  // 跳正文：goTo(单元锚) + quote 检索 best-effort（高亮失败≠导航失败，§4.19-9）；跳完收侧栏回正文
   const jumpToText = async (node: MapNodeRecord) => {
     const anchor = node.unitAnchors?.[0];
     if (anchor) await kernel.goTo({ href: anchor });
@@ -645,7 +654,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
         }
       }
     }
-    onBack();
+    onJumpToText();
   };
 
   const makeCards = (node: MapNodeRecord) => {
@@ -668,19 +677,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     URL.revokeObjectURL(a.href);
   };
 
-  // ---------- 侧栏区块 ----------
-  const scopeOptions = useMemo(() => {
-    const items = [{ value: "book", label: `整份材料（${title}）` }];
-    const walk = (nodes: { anchor: string; label: string; children?: { anchor: string; label: string; children?: unknown }[] }[], depth: number) => {
-      for (const t of nodes || []) {
-        items.push({ value: t.anchor, label: `${"　".repeat(depth)}${t.label}` });
-        if (t.children) walk(t.children as { anchor: string; label: string; children?: { anchor: string; label: string; children?: unknown }[] }[], depth + 1);
-      }
-    };
-    walk((collect?.tocItems || []) as { anchor: string; label: string; children?: { anchor: string; label: string; children?: unknown }[] }[], 1);
-    return items;
-  }, [collect, title]);
-
+  // ---------- 页签面板区块 ----------
   /** v48.13：有一轮任务在跑（生成/续跑）——深化与自动深挖都要让路（引擎侧也有 busy 守卫兜底） */
   const runInFlight = phase === "running" || phase === "section_ready";
   /**
@@ -711,29 +708,27 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
     return "";
   })();
 
-  return (
-    <div className="mindmap-workspace" role="dialog" aria-label="材料知识导图" tabIndex={0} onKeyDown={handleKeyDown}>
-      <div className="mindmap-top">
-        <button className="btn btn-outline btn-sm" onClick={onBack}>
-          正文
-        </button>
-        <span className="mindmap-top-title">材料知识导图 · {title}</span>
-        <div className="mindmap-top-actions">
-          <button className="btn btn-outline btn-sm" onClick={fitView}>
-            适应窗口
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={() => setView((v) => ({ ...v, zoom: Math.min(2.5, v.zoom + 0.15) }))}>
-            +
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={() => setView((v) => ({ ...v, zoom: Math.max(0.15, v.zoom - 0.15) }))}>
-            −
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={exportSvg}>
-            导出 SVG
-          </button>
+  // ---------- 画布（portal 进宿主覆盖层；宿主未就位的首帧只落页签面板） ----------
+  const canvasView = canvasHost ? (
+    createPortal(
+      <div className="reader-map-stage" role="region" aria-label="材料知识导图" tabIndex={0} onKeyDown={handleKeyDown}>
+        <div className="reader-map-top">
+          <span className="mindmap-top-title">材料知识导图 · {title}</span>
+          <div className="mindmap-top-actions">
+            <button className="btn btn-outline btn-sm" onClick={fitView}>
+              适应窗口
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => setView((v) => ({ ...v, zoom: Math.min(2.5, v.zoom + 0.15) }))}>
+              +
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => setView((v) => ({ ...v, zoom: Math.max(0.15, v.zoom - 0.15) }))}>
+              −
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={exportSvg}>
+              导出 SVG
+            </button>
+          </div>
         </div>
-      </div>
-      <div className="mindmap-body">
         <div
           className="mindmap-canvas"
           ref={canvasRef}
@@ -790,7 +785,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                 dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
               />
               {!selectedId && phase === "done" && (
-                <div className="mindmap-canvas-tip">单击节点选中 · 再击展开/收起（纯界面）· 带＋号的节点可「深化」（按需生成更深结构）· 选中后在右侧制卡或跳正文</div>
+                <div className="mindmap-canvas-tip">单击节点选中 · 再击展开/收起（纯界面）· 带＋号的节点可「深化」（按需生成更深结构）· 选中后在左侧页签制卡或跳正文</div>
               )}
             </>
           ) : (phase === "done" || mapReady) ? (
@@ -819,6 +814,15 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
             </div>
           )}
         </div>
+      </div>,
+      canvasHost
+    )
+  ) : null;
+
+  return (
+    <>
+      {canvasView}
+      <div className="mindmap-tab-panel">
         <aside className="mindmap-sidebar">
           {(phase === "loading" || phase === "collecting") && (
             <div className="mindmap-skeleton-side" aria-hidden="true">
@@ -846,7 +850,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                       className="btn btn-outline btn-sm mindmap-wide"
                       onClick={() => void handleDeepenAll()}
                       // v48.13：**不要**把「本次会话有没有 run」当成禁用条件——
-                      // lastRunId 只在本次会话生成/续跑过才有值，重新打开工作区看已有图时它必然是 null，
+                      // lastRunId 只在本次会话生成/续跑过才有值，重新打开页签看已有图时它必然是 null，
                       // 于是按钮常驻灰色（用户实测：生成完初步导图后按钮变灰、悬停出禁止符号、点不动）。
                       // handleDeepenAll 已经能在没有 run 时回退到完整管线，所以这里只拦「正在跑」与「正在深挖」。
                       disabled={deepenBusy || runInFlight}
@@ -869,13 +873,13 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
                   <ul className="mindmap-preview-list">
                     <li>材料：{title}</li>
                     <li>范围：整份材料</li>
-<li>
+                    <li>
                       首次生成（首层）：{preview.newCalls || 0} 次结构分析调用——终编辑与评审要等后续完整生成／「自动深挖全部」时才跑（{preview.fixedCalls || 2} 次）
                     </li>
                     <li>缓存命中：{preview.cacheHits || 0}</li>
                     <li>需发送：{preview.newCalls || 0}（首层）</li>
                     <li>
-                      深挖：首层完成后按需进行（点节点深化，或侧栏「自动深挖全部」）；单轮总调用上限＝本次预算 {preview.budget || 300}（全局预算，含 section/深挖/补漏/归并/评审）
+                      深挖：首层完成后按需进行（点节点深化，或页签「自动深挖全部」）；单轮总调用上限＝本次预算 {preview.budget || 300}（全局预算，含 section/深挖/补漏/归并/评审）
                     </li>
                     <li>
                       当前策略：批量深挖 {preview.strategy?.expandBatch ?? 1} 个/次 · 递归深度 {preview.strategy?.expandDepth ?? 1} · 原子启发式{" "}
@@ -1045,15 +1049,12 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
           {/* v48.13：历史版本 = **只读**操作，必须任何状态都可见。
               此前它被关在 `hasKey ? … : …` 与 `phase === "done" && structure` 两重条件里，
               于是「无 Key」或「没有已发布版本」时用户看不到任何版本入口——
-              真实现场：一次失败的收尾把已发布版本置为未激活，用户重开工作区只看到「尚未生成」，
+              真实现场：一次失败的收尾把已发布版本置为未激活，用户重开页签只看到「尚未生成」，
               以为 73 节点的成果丢了，而版本其实就在库里、点一下就能激活。 */}
-              {/* v48.13：历史版本必须**任何阶段都可见**。此前它被关在 `phase === "done" && structure` 里，
-              于是「没有已发布版本」的空态下用户看不到任何版本——真实现场：一次失败的收尾把已发布版本
-              置为未激活，用户重开工作区只看到「尚未生成」，以为成果丢了，而版本其实就在库里。 */}
           <section className="mindmap-side-sec">
             <h3>历史版本</h3>
             {/* v48.13：空态但有版本时必须说清楚——否则「尚未生成」会让用户以为成果丢了。
-            现场：一次失败的收尾把已发布版本置为未激活，用户重开工作区看到的就是「尚未生成」。 */}
+            现场：一次失败的收尾把已发布版本置为未激活，用户重开页签看到的就是「尚未生成」。 */}
             {versions.length > 0 && !mapReady && !structure && (
               <p className="mindmap-hint">
             当前没有已发布的版本，但历史里有 {versions.length} 个——点下面任意一版即可激活查看（成果没有丢）。
@@ -1101,7 +1102,7 @@ export function MindmapWorkspace({ kernel, documentId, title, onBack, onMakeCard
 
         </aside>
       </div>
-    </div>
+    </>
   );
 }
 

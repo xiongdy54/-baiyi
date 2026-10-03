@@ -37,9 +37,12 @@ app.whenReady().then(async () => {
       title: "T15 图谱样本",
       structure: {
         nodes: [
-          { id: "n1", parentId: "root", title: "第一章", anchor: "OEBPS/c0.xhtml" },
-          { id: "n2", parentId: "n1", title: "1.1 小节", anchor: "OEBPS/c1.xhtml" },
-          { id: "n3", parentId: "root", title: "第二章", anchor: "OEBPS/c2.xhtml" }
+          // v48.44（D84）：补**根节点**与 childIds——此前只播叶子壳（没有 id=root 的节点），
+          // layoutMap 找不到根 ⇒ 画布恒为空 SVG（旧全屏工作区同样空白，只是此前无人断言画布内容）。
+          { id: "root", parentId: null, title: "T15 材料根", childIds: ["n1", "n3"] },
+          { id: "n1", parentId: "root", title: "第一章", anchor: "OEBPS/c0.xhtml", childIds: ["n2"] },
+          { id: "n2", parentId: "n1", title: "1.1 小节", anchor: "OEBPS/c1.xhtml", childIds: [] },
+          { id: "n3", parentId: "root", title: "第二章", anchor: "OEBPS/c2.xhtml", childIds: [] }
         ],
         edges: []
       },

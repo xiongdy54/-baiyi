@@ -694,22 +694,18 @@ try {
     const tabs = [...sb.querySelectorAll("[data-sidebar-tab]")].map((b) => ({ id: b.dataset.sidebarTab, label: b.textContent.trim(), on: b.classList.contains("on") }));
     const panels = [...sb.querySelectorAll("[data-panel]")].map((p) => p.dataset.panel);
     const onBtn = [...sb.querySelectorAll("[data-sidebar-tab]")].find((b) => b.classList.contains("on"));
-    const nodes = [...sb.querySelectorAll("[data-map-node]")].map((b) => ({
-      id: b.dataset.mapNode, label: b.querySelector(".map-item-label")?.textContent,
-      padLeft: parseFloat(getComputedStyle(b).paddingLeft) || 0,
-      range: b.querySelector("[data-map-range]")?.textContent ?? null,
-      level: b.querySelector("[data-map-level]")?.textContent ?? null,
-      start: Number(b.dataset.mapStart), end: Number(b.dataset.mapEnd), depth: Number(b.dataset.mapDepth),
-      bars: b.querySelectorAll("[data-map-bar], .map-bar").length
-    }));
+    /* v48.44（D84）：图谱页签＝导图工作区面板（原 mapTree 树形目录退役） */
+    const mapPanel = sb.querySelector('[data-panel="map"] .mindmap-tab-panel');
+    const mapSecs = mapPanel ? [...mapPanel.querySelectorAll(".mindmap-side-sec h3")].map((h) => h.textContent.trim()) : [];
     return JSON.stringify({
-      up: true, tabs, panels, nodes,
+      up: true, tabs, panels,
+      mapPanelUp: !!mapPanel, mapSecs,
       underlineColor: onBtn ? getComputedStyle(onBtn).borderBottomColor : null,
       underlineW: onBtn ? getComputedStyle(onBtn).borderBottomWidth : null
     });
   })()`;
   const sb1 = JSON.parse(String(await cdp.eval(sidebar)) || "{}");
-  // v48.43（D83）：页签**恒在**（数据不在场=disabled），不再按数据消失
+  // v48.43（D83）：页签**恒在**（目录/摘录/图谱）；v48.44（D84）：且**恒可点**（不再 disabled）
   check("侧栏页签恒在三枚（目录/摘录/图谱）", sb1.up === true && JSON.stringify((sb1.tabs || []).map((t) => t.id)) === JSON.stringify(["toc", "extracts", "map"]), JSON.stringify(sb1.tabs));
   check("同刻只有一个面板可见", (sb1.panels || []).length === 1, JSON.stringify(sb1.panels));
   // 选中页签＝rail 头同款（grey-1 底），不再是 accent 下划线
@@ -718,19 +714,24 @@ try {
   await wait(1200);
   const sb2 = JSON.parse(String(await cdp.eval(sidebar)) || "{}");
   check("切到图谱页签（同刻仍一个面板）", (sb2.panels || []).length === 1 && sb2.panels[0] === "map", JSON.stringify(sb2.panels));
-  const nd = sb2.nodes || [];
-  console.log("  · 图谱节点 =", JSON.stringify(nd));
-  check("图谱目录有节点行", nd.length > 0, JSON.stringify(nd));
-  const nParent = nd.find((n) => String(n.label).includes("第一章"));
-  const nChild = nd.find((n) => String(n.label).includes("1.1"));
-  check("子节点缩进大于父节点（层级缩进）", nParent && nChild ? nChild.padLeft > nParent.padLeft + 4 : false, JSON.stringify({ p: nParent?.padLeft, c: nChild?.padLeft }));
-  // D4：图谱行只出「标题 + 区间 + 层级」，**没有占比条**（用户明确不要）
-  check("图谱行无占比条（D4）", nd.length > 0 && nd.every((n) => n.bars === 0), JSON.stringify(nd.map((n) => ({ l: n.label, bars: n.bars }))));
-  check(
-    "图谱行出「单元 s–e」区间与层级文字，且与主进程载荷一致",
-    nd.length > 0 && nd.every((n) => n.range === `单元 ${n.start}–${n.end}` && n.level === `L${n.depth}` && Number.isFinite(n.start) && Number.isFinite(n.end)),
-    JSON.stringify(nd.map((n) => ({ l: n.label, r: n.range, lvl: n.level })))
-  );
+  // v48.44（D84）：图谱页签＝导图面板——生成/历史版本区块在场（原树形目录节点行退役）
+  check("图谱页签＝导图工作区面板（D84）", sb2.mapPanelUp === true, JSON.stringify({ mapPanelUp: sb2.mapPanelUp }));
+  check("导图面板历史版本区恒可见（任何状态）", (sb2.mapSecs || []).includes("历史版本"), JSON.stringify(sb2.mapSecs));
+  // v48.44（D84）：画布直接显示在**侧栏右侧的主界面**（.reader-map-layer 覆盖层 portal），不再跳独立界面
+  const mapCanvas = await cdp.eval(`JSON.stringify({
+    layer: !!document.querySelector("[data-reader-map-layer]"),
+    canvas: !!document.querySelector("[data-reader-map-layer] .mindmap-canvas"),
+    svg: !!document.querySelector("[data-reader-map-layer] .mindmap-canvas-inner svg")
+  })`);
+  check("导图画布落在主界面覆盖层（.reader-map-layer，D84）", (() => { const c = JSON.parse(String(mapCanvas) || "{}"); return c.layer === true && c.canvas === true; })(), mapCanvas);
+  // 画布内容：有已发布导图 ⇒ SVG 在场（收集原文是异步的，给两次机会；夹具 v48.44 起带根节点可渲染）
+  const svgUp = async () => (await cdp.eval(`!!document.querySelector("[data-reader-map-layer] .mindmap-canvas-inner svg")`)) === true;
+  let svgOk = await svgUp();
+  if (!svgOk) {
+    await wait(2400);
+    svgOk = await svgUp();
+  }
+  check("导图画布渲染已发布导图（SVG 在场，D84）", svgOk, `${mapCanvas} svg=${svgOk}`);
   // D4：切页签只改视图，**不碰图谱数据**——打开/切换前后各取一次主进程载荷并逐字段比
   const mapPayload = `(async () => {
     const items = await window.libraryAPI.list();
@@ -809,6 +810,10 @@ try {
   })()`);
   check("⑩pre2 老数据（无 sourceAnchor 的根摘录）已落库", typeof oldRowId === "string" && oldRowId.length > 8, String(oldRowId));
   // 合成书由正文标题切章（实测 TOC: 第 1 章/第一章/第二章/第三章）⇒「第二章正文」在第 2 章（索引 2）
+  // v48.44（D84）：§5 结束时图谱页签在激活态——导图画布层盖在正文上（导图直接显示在主界面，
+  // 用户指令④），拖选正文前先切回「摘录」页签让正文恢复可交互。
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="extracts"]')?.click(); return 1; })()`);
+  await wait(700);
   await cdp.eval(`(async () => { await window.__readerKernel.goTo({ chapterIndex: 2 }); return 1; })()`);
   await wait(1600);
   const epPick = JSON.parse(String(await cdp.eval(spanRectInEpub("第二章正文"))) || "{}");
@@ -1018,13 +1023,15 @@ try {
   })()`;
   const toggleState = `(() => {
     const b = document.querySelector("[data-reader-sidebar-toggle]");
-    return JSON.stringify({ up: !!b, disabled: !!b && b.disabled, expanded: b ? b.getAttribute("aria-expanded") : null, label: b ? b.textContent.trim() : null });
+    return JSON.stringify({ up: !!b, disabled: !!b && b.disabled, expanded: b ? b.getAttribute("aria-expanded") : null, label: b ? b.textContent.trim() : null, cls: b ? b.className : null });
   })()`;
 
   // (a)(c) PDF 无大纲但有注解：入口可用；打开后只有「摘录」页签且注解栏在场（Task 4 后移的 PDF 用例）
   const tg0 = JSON.parse(String(await cdp.eval(toggleState)) || "{}");
   const gClosed = JSON.parse(String(await cdp.eval(geom)) || "{}");
   check("⑪a PDF 侧栏入口恒可用＋两态标签（v48.43/D83：收起/展开）", tg0.up === true && tg0.disabled === false && tg0.label === "展开", JSON.stringify(tg0));
+  // v48.44（D84）：开关钮与摘录页同一类对（.annot-toggle.bar-btn 同一枚两态文字钮）
+  check("⑪a2 开关钮＝摘录页同款类对（annot-toggle bar-btn）", typeof tg0.cls === "string" && tg0.cls.includes("annot-toggle") && tg0.cls.includes("bar-btn"), tg0.cls);
   await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
   await wait(1200);
   const gOpen = JSON.parse(String(await cdp.eval(geom)) || "{}");
@@ -1087,7 +1094,8 @@ try {
   })`);
   const mp = JSON.parse(String(morePanel) || "{}");
   const sp = JSON.parse(String(settingsPanel) || "{}");
-  check("⑪f 「更多」＝导图/复习摘录/复习闪卡三枚动作", mp.open === true && ["导图", "复习摘录", "复习闪卡"].every((x) => (mp.acts || []).includes(x)), morePanel);
+  // v48.44（D84）：「导图」并入侧栏图谱页签——「更多」只剩 复习摘录 / 复习闪卡
+  check("⑪f 「更多」＝复习摘录/复习闪卡（导图已并入图谱页签，D84）", mp.open === true && ["复习摘录", "复习闪卡"].every((x) => (mp.acts || []).includes(x)) && !(mp.acts || []).includes("导图"), morePanel);
   check("⑪g 两组弹出互斥（开设置即关更多）且 aria-expanded 同步", sp.settingsOpen === true && sp.moreOpen === false && sp.expandedMore === "false" && (sp.rows || []).includes("模式") && (sp.rows || []).includes("主题"), JSON.stringify(sp));
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
@@ -1112,8 +1120,19 @@ try {
   await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title, .book-card")].find((x) => x.textContent.includes("ANNOT 无目录无注解")); (t?.closest(".book-card") || t)?.click(); return true; })()`);
   await wait(3200);
   const tgBare = JSON.parse(String(await cdp.eval(toggleState)) || "{}");
-  // v48.43（D83）：入口恒可用（两态钮）；「无数据」体现在**页签 disabled**（恒在但不可点）
-  check("⑪j 无目录/无注解/无图谱 ⇒ 入口可用且页签全禁用（v48.43/D83 页签恒在）", tgBare.up === true && tgBare.disabled === false && tgBare.label === "展开", JSON.stringify(tgBare));
+  // v48.44（D84）：页签**恒可点**（不再 disabled）；「无数据」体现在页签内空态文案
+  check("⑪j 无目录/无注解/无图谱 ⇒ 入口可用且页签恒可点（v48.44/D84）", tgBare.up === true && tgBare.disabled === false && tgBare.label === "展开", JSON.stringify(tgBare));
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
+  await wait(1000);
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return 1; })()`);
+  await wait(900);
+  const bareMapPanel = await cdp.eval(`JSON.stringify({
+    panel: !!document.querySelector('[data-panel="map"]'),
+    tabPanel: !!document.querySelector('[data-panel="map"] .mindmap-tab-panel'),
+    versions: [...document.querySelectorAll('[data-panel="map"] .mindmap-side-sec h3')].map((h) => h.textContent.trim())
+  })`);
+  check("⑪j2 无数据书图谱页签可点进＝导图面板在场（历史版本区可见）", (() => { const p = JSON.parse(String(bareMapPanel) || "{}"); return p.panel === true && p.tabPanel === true && (p.versions || []).includes("历史版本"); })(), bareMapPanel);
+  await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
 
   // ============================================================
   // ⑨ 截图判读（浅/深）
@@ -1140,10 +1159,10 @@ try {
   await wait(6000);
   const darkProbe = await cdp.eval(`JSON.stringify({ body: document.body.className, bg: getComputedStyle(document.body).backgroundColor })`);
   await reopenMapBook();
-  const sideDark = await cdp.eval(`JSON.stringify({ body: document.body.className, tabs: document.querySelectorAll("[data-sidebar-tab]").length, nodes: document.querySelectorAll("[data-map-node]").length, fg: getComputedStyle(document.querySelector("[data-map-node]") || document.body).color })`);
+  const sideDark = await cdp.eval(`JSON.stringify({ body: document.body.className, tabs: document.querySelectorAll("[data-sidebar-tab]").length, mapPanel: !!document.querySelector('[data-panel="map"] .mindmap-tab-panel'), fg: getComputedStyle(document.querySelector(".reader-sidebar") || document.body).color })`);
   const d1 = await screenshot(cdp, "tmp-annot-reader-dark.png");
   check("深色档真的落到 body（真实主题路径，非手改 class）", String(darkProbe).includes("theme-dark"), darkProbe);
-  check("深色档下的阅读器侧栏可见（页签+节点在场）", String(sideDark).includes('"tabs":3'), sideDark);
+  check("深色档下的阅读器侧栏可见（页签+导图面板在场）", String(sideDark).includes('"tabs":3') && String(sideDark).includes('"mapPanel":true'), sideDark);
   await cdp.eval(themeSet("light"));
   await wait(6000);
   await reopenMapBook();
