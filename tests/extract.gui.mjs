@@ -76,7 +76,9 @@ try {
 
   const face = await cdp.eval(`document.querySelector(".extract-face")?.textContent || ""`);
   check("沉浸式摘录页渲染出卡面", face.includes("GUI 摘录样本"), face.slice(0, 120));
-  check("卡面显示来源书名", face.includes("GUI 摘录测试书"), face.slice(0, 120));
+  // v48.41（D81）：来源自卡面 meta 行**上移顶栏中间**（.topbar-title 显示材料名，无「来自」包装）
+  const topTitle = await cdp.eval(`document.querySelector(".topbar-title")?.textContent || ""`);
+  check("顶栏中间显示当前卡来源书名", topTitle.includes("GUI 摘录测试书"), topTitle);
   // 批 4 Task 18（R29）：`extractReader` 专用页退役 →「打开摘录」动作不再是动作集成员。
   // 契约变更：动作集去掉了「打开摘录」（其余不变）。
   // 判据作用域＝页面根 `.extract-page`（动作栏是它的流内末子节点、不在卡面子树内）：

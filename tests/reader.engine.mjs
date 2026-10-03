@@ -209,7 +209,7 @@ try {
   const menuUp = await cdp.eval(`Boolean(document.querySelector(".selection-menu"))`);
   check("4a 划选出菜单（引擎选区服务）", selOk === true && menuUp, "sel=" + selOk);
   await cdp.shot("tmp-l2-4-menu.png");
-  await cdp.eval(clickByText("制卡", ".selection-menu button"));
+  await cdp.eval(clickByText("制卡", "[data-sel-act]"));
   await wait(600);
   const frontSet = await cdp.eval(`(() => {
     const tas = [...document.querySelectorAll(".modal-panel textarea")];
@@ -367,7 +367,7 @@ try {
   })()`);
   await wait(700);
   const z2 = await cdp.eval(`(() => {
-    const btns = [...document.querySelectorAll(".selection-menu button")];
+    const btns = [...document.querySelectorAll("[data-sel-act]")];
     const t = btns.find(b => b.textContent.trim() === "制卡");
     if (!t) return "no menu: " + JSON.stringify(btns.map(b => b.textContent.trim()));
     t.click();

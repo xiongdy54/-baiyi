@@ -352,12 +352,12 @@ try {
   await wait(900);
   check("真鼠标拖选后选区菜单出现", (await cdp.eval(`!!document.querySelector(".selection-menu")`)) === true, "无菜单");
   const btn = JSON.parse(String(await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll(".selection-menu .macts button")].find((x) => x.textContent.trim() === "摘录");
+    const b = document.querySelector('[data-sel-act="extract"]');
     if (!b) return "";
     const r = b.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
   })()`)) || "{}");
-  check("选区菜单含「摘录」按钮（动作行内，按文本定位）", typeof btn.x === "number", JSON.stringify(btn));
+  check("工具栏含「摘录」动作（v48.41/D81 动作上移工具栏）", typeof btn.x === "number", JSON.stringify(btn));
   await clickAt(cdp, btn.x, btn.y);
   await wait(1500);
 
@@ -594,7 +594,7 @@ try {
   await makeDrag(cdp)({ x: epSel.x1, y: epSel.y }, { x: epSel.x2, y: epSel.y });
   await wait(900);
   const epBtn = JSON.parse(String(await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll(".selection-menu .macts button")].find((x) => x.textContent.trim() === "摘录");
+    const b = document.querySelector('[data-sel-act="extract"]');
     if (!b) return "";
     const r = b.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });

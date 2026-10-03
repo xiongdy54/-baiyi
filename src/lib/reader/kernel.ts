@@ -119,6 +119,13 @@ export interface ContentPointerUpInfo {
   metaKey?: boolean;
 }
 
+/**
+ * 正文内指针按下载荷（v48.39 / D79）：与 pointerup 同形（宿主坐标 + 修饰位）。
+ * 多段选择按**手势全程**判定修饰键（起手或收尾任一按住＝加选），壳层据此在起手采样；
+ * 坐标字段仅为载荷同形而存在，壳层暂不消费。
+ */
+export type ContentPointerDownInfo = ContentPointerUpInfo;
+
 /** 源文档锚点几何（v48.24 批3 §4「文中留痕」的写入侧）：当前选区在**源文档**里的落点。
  *  PDF＝0 基页码 + 该页内**百分比矩形**（0-100，与 occlusion 同一坐标口径，换算走同一实现面）；
  *  EPUB 不回矩形（cfi 已表达位置，见 ReaderSelection.cfi）。 */
@@ -141,6 +148,8 @@ export interface ReaderDocMark {
   color?: string | null;
   /** 批 4（R39/Task 16）：分族——`highlight`＝纯高亮（**不画角标**，§5.4） */
   kind?: "highlight" | "extract";
+  /** v48.41（D81）：标记形式——`underline`＝透明底+批注色下划线；缺省＝底色高亮 */
+  annotationType?: "highlight" | "underline";
   /** 已制卡数（浮层信息行） */
   cardCount?: number;
   /** EPUB：根锚 cfi（cfi → Range 画 ::highlight） */
@@ -231,6 +240,8 @@ export interface ReaderKernel {
   on(event: "link", handler: (info: LinkInfo) => void): () => void;
   /** 正文内指针抬起（宿主坐标 + 指针事件的修饰位——多段选择按住 Ctrl 再选时判定用） */
   on(event: "contentPointerUp", handler: (pos: ContentPointerUpInfo) => void): () => void;
+  /** 正文内指针按下（v48.39 / D79，载荷与 pointerup 同形）——多段选择按手势全程判定修饰键的起手采样点 */
+  on(event: "contentPointerDown", handler: (pos: ContentPointerDownInfo) => void): () => void;
   /** 正文图片点击（v25）：壳层据此进入图片聚焦（上浮 + 周围模糊 + 选区工具条） */
   on(event: "imageClick", handler: (image: ReaderImageRef) => void): () => void;
   /** 指针进入/离开文中标记（v48.24 批3 §4）：壳层据此出浮层（原文 + 批注 + 已制卡数 + 就此制卡） */

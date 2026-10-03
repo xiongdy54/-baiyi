@@ -4,6 +4,7 @@ import { aiGateway, type AIConfig } from "../lib/ai";
 import { settingsStore } from "../lib/settings";
 import {
   DEFAULT_ANNOTATE_MODE,
+  DEFAULT_ANNOTATE_FORM,
   DEFAULT_ANNOTATE_PALETTE,
   DEFAULT_ANNOTATION_FILTER,
   ANNOT_PALETTE_MAX,
@@ -1085,9 +1086,10 @@ function FSRSSection() {
   );
 }
 
-/** 批 4：四键的初值（与 lib/annotationSettings 的默认值同源） */
+/** 批 4：五键的初值（与 lib/annotationSettings 的默认值同源） */
 const DEFAULT_ANNOT_SETTINGS: AnnotationSettings = {
   annotateMode: DEFAULT_ANNOTATE_MODE,
+  annotateForm: DEFAULT_ANNOTATE_FORM,
   annotatePalette: [...DEFAULT_ANNOTATE_PALETTE],
   annotateCustomEnabled: true,
   annotationFilter: DEFAULT_ANNOTATION_FILTER
@@ -1172,7 +1174,23 @@ function ReaderSection() {
           ))}
         </div>
       </div>
-      <p className="form-hint">选中文字后选区菜单里预选的模式；两种模式都可随时在菜单里临时切换。</p>
+      <p className="form-hint">高亮＝点色只做纯批注（不进摘录队列）；摘录+高亮＝点色同时建一条摘录。两种模式都可在选区菜单里临时切换。</p>
+      <div className="settings-row">
+        <span>默认标注形式</span>
+        <div className="seg-tabs">
+          {([["highlight", "高亮"], ["underline", "下划线"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              className={annot.annotateForm === id ? "active" : ""}
+              data-annot-form={id}
+              onClick={() => saveAnnot("annotateForm", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="form-hint">高亮＝底色；下划线＝批注色 2px 色线。两种形式都可在选区菜单里临时切换（v48.41/D81 引入下划线）。</p>
       <div className="settings-row">
         <span>批注色板</span>
         <div className="annot-palette-pick" data-annot-palette>

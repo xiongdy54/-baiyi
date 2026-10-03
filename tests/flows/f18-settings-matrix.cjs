@@ -41,7 +41,7 @@ const DOC_KEYS = [
   "app.extracts", // §6.8-1 / §7.4（v48.22 / D58 摘录复习改版：mergeIntoReview / interleave / engine 三键）
   "app.limits", // §6.8-1 / §6.8-5（v48.22 / D58 四类每日上限 + ignoreReviewLimitForNew）
   "app.reviewScopes", // §6.8-5（v48.22 / D58 复习范围/筛选牌组；零 schema 变更）
-  "app.annotateMode", "app.annotatePalette", "app.annotateCustomEnabled", "app.annotationFilter", // 批 4 / §9.2（就地批注四键）
+  "app.annotateMode", "app.annotateForm", "app.annotatePalette", "app.annotateCustomEnabled", "app.annotationFilter", // 批 4 / §9.2（就地批注键；v48.42/D82 形式拆 annotateForm）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -225,7 +225,8 @@ app
         ["app", "globalShortcuts", { quickCapture: { enabled: true, bindings: ["Command+Shift+K"] } }],
         ["app", "siblingBury", { enabled: true, newCards: false, reviewCards: true, perDay: 2, sourceTextLimit: 240 }],
         ["app", "multiSelectKey", "Alt"],                 // v48.23 / D61 多段选择的修饰键（非默认值，才验得出往返）
-        ["app", "annotateMode", "extract"],               // 批 4 / §9.2 就地批注四键（非默认值）
+        ["app", "annotateMode", "extract"],               // 批 4 / §9.2 就地批注（非默认值；v48.42/D82 模式域回归）
+        ["app", "annotateForm", "underline"],             // v48.41/D81 标记形式（highlight/underline）
         ["app", "annotatePalette", ["teal", "red", "#aabbcc"]],
         ["app", "annotateCustomEnabled", false],
         ["app", "annotationFilter", "highlight"],
@@ -361,10 +362,11 @@ app
       flow.eq("非法 annotationFilter 回落默认", normBad.annotationFilter, "all");
       flow.eq("非法 annotateCustomEnabled 归一为 false（仅 true 为真）", normBad.annotateCustomEnabled, false);
       flow.eq("色板净化：剔非法、去重、留 #hex", JSON.stringify(normBad.annotatePalette), JSON.stringify(["red", "#aabbcc"]));
-      write({ annotateMode: "extract", annotationFilter: "highlight", annotateCustomEnabled: true, annotatePalette: ["teal", "red"] });
+      write({ annotateMode: "extract", annotateForm: "underline", annotationFilter: "highlight", annotateCustomEnabled: true, annotatePalette: ["teal", "red"] });
       const normOk = db.readAnnotationSettings();
       // 逐字段比对（JSON.stringify 受键序影响，与 readAnnotationSettings 的返回序未必一致）
       flow.eq("合法值原样保留：annotateMode（对照，防空转）", normOk.annotateMode, "extract");
+      flow.eq("合法值原样保留：annotateForm（v48.42/D82）", normOk.annotateForm, "underline");
       flow.eq("合法值原样保留：annotationFilter", normOk.annotationFilter, "highlight");
       flow.eq("合法值原样保留：annotateCustomEnabled", normOk.annotateCustomEnabled, true);
       flow.eq("合法值原样保留：annotatePalette", JSON.stringify(normOk.annotatePalette), JSON.stringify(["teal", "red"]));

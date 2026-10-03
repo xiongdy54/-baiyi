@@ -254,7 +254,7 @@ const BOOK = "FSRSTEST-M6-2 导测";
   await wait(700);
   const menuUp = await cdp.eval(`Boolean(document.querySelector(".selection-menu"))`);
   check("PDF 书划选出制卡菜单", selOk === true && menuUp, "sel=" + selOk);
-  await cdp.eval(clickBtnText("制卡", ".selection-menu button"));
+  await cdp.eval(clickBtnText("制卡", "[data-sel-act]"));
   await wait(700);
   await cdp.eval(`(() => {
     const tas = [...document.querySelectorAll(".modal-panel textarea")];

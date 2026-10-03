@@ -196,9 +196,9 @@ const rowCenter = (id) => `(() => {
   return JSON.stringify({ x: r.left + r.width * 0.6, y: r.top + Math.min(14, r.height / 2) });
 })()`;
 
-/** 菜单动作按钮中心（真实鼠标点击用） */
+/** 动作按钮中心（v48.41/D81：动作在宿主工具栏，真实鼠标点击用） */
 const menuActionCenter = (label) => `(() => {
-  const b = [...document.querySelectorAll(".selection-menu button")].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
+  const b = [...document.querySelectorAll("[data-sel-act]")].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
   if (!b) return "";
   const r = b.getBoundingClientRect();
   return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -211,9 +211,12 @@ const menuState = `(() => {
   const vw = window.innerWidth, vh = window.innerHeight;
   return JSON.stringify({
     up: true, rect: { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height },
-    seg: [...m.querySelectorAll(".seg button")].map((b) => ({ t: b.textContent.trim(), on: b.classList.contains("on") })),
+    // v48.43（D83）：段控上移宿主工具栏（阅读器域 .reader-sel-actions）；菜单＝批注框+色块
+    seg: [...document.querySelectorAll("[data-sel-actions] .seg-rail button")].map((b) => ({ t: b.textContent.trim(), on: b.classList.contains("on") })),
     swatches: m.querySelectorAll(".swatches .swatch").length,
-    acts: [...m.querySelectorAll(".macts button")].map((b) => b.textContent.trim()),
+    comment: !!m.querySelector(".menu-comment"),
+    // v48.41（D81）：动作行移出菜单 → 动作清单改读宿主工具栏（阅读器/摘录页同 data-sel-act 钩子）
+    acts: [...document.querySelectorAll("[data-sel-act]")].map((b) => b.textContent.trim()),
     inViewport: r.left >= 0 && r.top >= 0 && r.right <= vw && r.bottom <= vh
   });
 })()`;
@@ -305,7 +308,9 @@ try {
   );
   check("判据① 菜单与选区不相交（选区矩形高度内无菜单）", typeof m1.rect?.t === "number" && (m1.rect.b <= selMid - 2 || m1.rect.t >= selMid + 2), JSON.stringify({ menu: m1.rect, selMid }));
   check("判据② 菜单整体在视口内（含 8px 边距）", m1.inViewport === true, JSON.stringify(m1.rect));
-  check("菜单含模式段控两枚", Array.isArray(m1.seg) && m1.seg.length === 2, JSON.stringify(m1.seg));
+  // v48.42（D82）：双段控——前两枚＝模式（高亮/摘录+高亮），后两枚＝形式（高亮/下划线）
+  check("工具栏含双段控四枚（模式2 + 形式2，D83 段控上移）", Array.isArray(m1.seg) && m1.seg.length === 4 && m1.seg[1].t === "摘录+高亮" && m1.seg[3].t === "下划线", JSON.stringify(m1.seg));
+  check("菜单＝批注框+色块（无段控）", m1.comment === true && m1.seg.length === 4, JSON.stringify({ comment: m1.comment, seg: m1.seg }));
   check("菜单含动作行（阅读器六项）", Array.isArray(m1.acts) && m1.acts.length === 6 && m1.acts.includes("图片挖空"), JSON.stringify(m1.acts));
   await screenshot(cdp, "tmp-annot-reader-menu.png");
 
@@ -422,18 +427,20 @@ try {
   check("摘录页菜单五项（无图片挖空）", Array.isArray(fm.acts) && fm.acts.length === 5 && !fm.acts.includes("图片挖空"), JSON.stringify(fm.acts));
 
   const actsBefore = await cdp.eval(`(async () => (await window.workflowAPI.listAll()).length)()`);
-  await cdp.eval(`(() => { document.querySelector(".selection-menu .swatch[data-color='green']")?.click(); return true; })()`);
-  await wait(1400);
+  // v48.43（D83）：批注写进**菜单批注框**（点色一并保存），点色后不弹编辑浮层
   const typedEditor = await cdp.eval(`(() => {
-    const el = document.querySelector(".editor textarea");
-    if (!el) return "NO_EDITOR";
+    const el = document.querySelector(".selection-menu .menu-comment");
+    if (!el) return "NO_COMMENT_BOX";
     el.focus();
     const setter = Object.getOwnPropertyDescriptor(el.constructor.prototype, "value").set;
     setter.call(el, "ANNOT 批注落库样本");
     el.dispatchEvent(new Event("input", { bubbles: true }));
     return "typed";
   })()`);
-  await wait(1300);
+  await cdp.eval(`(() => { document.querySelector(".selection-menu .swatch[data-color='green']")?.click(); return true; })()`);
+  await wait(1400);
+  const editorGone = await cdp.eval(`(() => JSON.stringify({ editor: !!document.querySelector(".editor"), menu: !!document.querySelector(".selection-menu") }))()`);
+  check("点色后不弹编辑浮层且菜单收起（D83）", editorGone === '{"editor":false,"menu":false}', editorGone);
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await wait(700);
@@ -443,7 +450,7 @@ try {
     return JSON.stringify({ n: all.length, kind: row?.kind ?? null, color: row?.annotationColor ?? null, parentType: row?.parentType ?? null });
   })()`);
   const aa = JSON.parse(String(afterAnnot) || "{}");
-  check("点色后浮层可写批注（编辑器在场）", typedEditor === "typed", typedEditor);
+  check("批注写进菜单批注框（D83）", typedEditor === "typed", typedEditor);
   check("批注落库（新增一条）", aa.n === Number(actsBefore) + 1, `${actsBefore} → ${aa.n}`);
   check("落库 kind=highlight（默认模式）", aa.kind === "highlight", aa.kind);
   check("落库带 annotationColor=green", aa.color === "green", aa.color);
@@ -702,12 +709,11 @@ try {
     });
   })()`;
   const sb1 = JSON.parse(String(await cdp.eval(sidebar)) || "{}");
-  // D2：页签按**自己的数据**在场——此刻图谱书还没有注解 ⇒ 只有目录+图谱；
-  // 「三枚齐」的形态由 ⑪i 在有了注解之后验（那里才是三枚同时在场）
-  check("侧栏在场且页签按数据在场（此刻无注解 ⇒ 目录+图谱）", sb1.up === true && JSON.stringify((sb1.tabs || []).map((t) => t.id)) === JSON.stringify(["toc", "map"]), JSON.stringify(sb1.tabs));
+  // v48.43（D83）：页签**恒在**（数据不在场=disabled），不再按数据消失
+  check("侧栏页签恒在三枚（目录/摘录/图谱）", sb1.up === true && JSON.stringify((sb1.tabs || []).map((t) => t.id)) === JSON.stringify(["toc", "extracts", "map"]), JSON.stringify(sb1.tabs));
   check("同刻只有一个面板可见", (sb1.panels || []).length === 1, JSON.stringify(sb1.panels));
-  const accentTok = await cdp.eval(tokenValue("--accent"));
-  check("当前页签 accent 下划线（色＝--accent、宽 2px）", sb1.underlineColor === accentTok && sb1.underlineW === "2px", JSON.stringify({ c: sb1.underlineColor, w: sb1.underlineW, acc: accentTok }));
+  // 选中页签＝rail 头同款（grey-1 底），不再是 accent 下划线
+  check("当前页签 rail 头同款选中态（非 accent 下划线）", typeof sb1.underlineW === "string" && sb1.underlineW === "0px", JSON.stringify({ c: sb1.underlineColor, w: sb1.underlineW }));
   await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return true; })()`);
   await wait(1200);
   const sb2 = JSON.parse(String(await cdp.eval(sidebar)) || "{}");
@@ -1018,7 +1024,7 @@ try {
   // (a)(c) PDF 无大纲但有注解：入口可用；打开后只有「摘录」页签且注解栏在场（Task 4 后移的 PDF 用例）
   const tg0 = JSON.parse(String(await cdp.eval(toggleState)) || "{}");
   const gClosed = JSON.parse(String(await cdp.eval(geom)) || "{}");
-  check("⑪a PDF 无大纲但有注解 ⇒ 侧栏入口可用（不再是「有目录才有入口」）", tg0.up === true && tg0.disabled === false && tg0.label === "侧栏", JSON.stringify(tg0));
+  check("⑪a PDF 侧栏入口恒可用＋两态标签（v48.43/D83：收起/展开）", tg0.up === true && tg0.disabled === false && tg0.label === "展开", JSON.stringify(tg0));
   await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
   await wait(1200);
   const gOpen = JSON.parse(String(await cdp.eval(geom)) || "{}");
@@ -1040,8 +1046,8 @@ try {
     JSON.stringify({ closed: gClosed, open: gOpen })
   );
   check(
-    "⑪c PDF 侧栏＝仅「摘录」页签（无目录页签）且列出本文档根摘录",
-    JSON.stringify(gOpen.tabs) === JSON.stringify(["extracts"]) && arPdf.up === true && (arPdf.rows || []).map((r) => r.id).sort().join(",") === String(pdfRootIds).split(",").sort().join(","),
+    "⑪c PDF 侧栏三页签恒在（v48.43/D83），「摘录」可用且列出本文档根摘录",
+    JSON.stringify(gOpen.tabs) === JSON.stringify(["toc", "extracts", "map"]) && arPdf.up === true && (arPdf.rows || []).map((r) => r.id).sort().join(",") === String(pdfRootIds).split(",").sort().join(","),
     JSON.stringify({ tabs: gOpen.tabs, rows: (arPdf.rows || []).length, db: pdfRootIds.split(",").length })
   );
   await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
@@ -1056,10 +1062,11 @@ try {
   await wait(3200);
   const toolBtns = await cdp.eval(`JSON.stringify([...document.querySelectorAll(".reader-engine-controls button")].map((b) => b.textContent.trim()))`);
   check(
-    "⑪e 工具栏＝精简常驻行（侧栏 + 翻页 + 更多 + 阅读设置；导图/复习不再常驻）",
+    "⑪e 工具栏（v48.43/D83）＝收起/展开 + 双段控 + 六动作 + 更多/阅读设置 + 翻页右移",
     (() => {
       const labels = JSON.parse(String(toolBtns) || "[]");
-      return labels.includes("侧栏") && labels.includes("更多") && labels.includes("阅读设置") && !labels.includes("导图") && !labels.includes("复习摘录");
+      return labels.includes("展开") && labels.includes("摘录+高亮") && labels.includes("下划线") &&
+        labels.includes("图片挖空") && labels.includes("更多") && labels.includes("阅读设置");
     })(),
     toolBtns
   );
@@ -1105,7 +1112,8 @@ try {
   await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title, .book-card")].find((x) => x.textContent.includes("ANNOT 无目录无注解")); (t?.closest(".book-card") || t)?.click(); return true; })()`);
   await wait(3200);
   const tgBare = JSON.parse(String(await cdp.eval(toggleState)) || "{}");
-  check("⑪j 无目录/无注解/无图谱 ⇒ 入口禁用（如实不可用，不是点了没反应）", tgBare.up === true && tgBare.disabled === true, JSON.stringify(tgBare));
+  // v48.43（D83）：入口恒可用（两态钮）；「无数据」体现在**页签 disabled**（恒在但不可点）
+  check("⑪j 无目录/无注解/无图谱 ⇒ 入口可用且页签全禁用（v48.43/D83 页签恒在）", tgBare.up === true && tgBare.disabled === false && tgBare.label === "展开", JSON.stringify(tgBare));
 
   // ============================================================
   // ⑨ 截图判读（浅/深）

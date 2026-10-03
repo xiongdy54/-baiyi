@@ -3250,8 +3250,10 @@ function normalizeMultiSelectKey(v) {
 
 // ---------- 批 4（规格 §9.2）：就地批注的四个设置键 ----------
 // 读侧归一（脏值不落盘、也不进渲染层）：枚举回落默认 / 数组净化去重限 8 / 色值 id 或 #hex。
-const ANNOT_MODES = ["highlight", "extract"];
+const ANNOT_MODES = ["highlight", "extract"]; // v48.42（D82）：模式域回归（点色是否进队列）
 const DEFAULT_ANNOT_MODE = "highlight";
+const ANNOT_FORMS = ["highlight", "underline"]; // v48.42（D82）：标记形式域（v48.41/D81 引入下划线）
+const DEFAULT_ANNOT_FORM = "highlight";
 const ANNOTATION_FILTERS = ["all", "extract", "highlight"];
 const DEFAULT_ANNOTATION_FILTER = "all";
 /** 色板 id 值域（与渲染层 --annot-* Token 同名）；也接受 #hex 自定义色 */
@@ -3263,6 +3265,11 @@ const DEFAULT_ANNOT_PALETTE = ["yellow", "red", "green", "blue", "purple", "mage
 /** 归一标注模式：非枚举值回落默认 */
 function normalizeAnnotateMode(v) {
   return ANNOT_MODES.includes(v) ? v : DEFAULT_ANNOT_MODE;
+}
+
+/** 归一标记形式：非枚举值回落 highlight（v48.42/D82） */
+function normalizeAnnotateForm(v) {
+  return ANNOT_FORMS.includes(v) ? v : DEFAULT_ANNOT_FORM;
 }
 
 /** 归一筛选：非枚举值回落 all */
@@ -3300,6 +3307,7 @@ function readAnnotationSettings() {
   const app = readSettings().app || {};
   return {
     annotateMode: normalizeAnnotateMode(app.annotateMode),
+    annotateForm: normalizeAnnotateForm(app.annotateForm),
     annotatePalette: normalizeAnnotatePalette(app.annotatePalette),
     annotateCustomEnabled: app.annotateCustomEnabled === undefined ? true : normalizeAnnotateCustomEnabled(app.annotateCustomEnabled),
     annotationFilter: normalizeAnnotationFilter(app.annotationFilter)
@@ -6098,6 +6106,7 @@ module.exports = {
   normalizeMultiSelectKey,
   // 批 4（规格 §9.2）：四个批注设置键的读/写侧归一
   normalizeAnnotateMode,
+  normalizeAnnotateForm,
   normalizeAnnotationFilter,
   normalizeAnnotateCustomEnabled,
   normalizeAnnotatePalette,

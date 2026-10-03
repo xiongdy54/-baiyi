@@ -17,7 +17,7 @@ import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
 import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
 import MarkPopover from "./reader/MarkPopover";
-import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMode } from "./SelectionMenu";
+import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
@@ -30,6 +30,7 @@ import {
   DEFAULT_READER_SETTINGS,
   buildLocator,
   resolveAppearance,
+  type ContentPointerDownInfo,
   type ContentPointerUpInfo,
   type ImageLocateHit,
   type ReaderAppearance,
@@ -230,6 +231,12 @@ export default function Reader({
   const multiSpansRef = useRef<ExtractSpan[]>([]);
   /** 修饰键（settings.app.multiSelectKey；读侧归一，默认 Ctrl / macOS Meta） */
   const multiKeyRef = useRef<MultiSelectKey>("Ctrl");
+  /**
+   * 本次拖选手势**起手**的修饰位（v48.39 / D79）：`contentPointerDown` 上采样。
+   * 加选/替换的判据＝起手或收尾（pointerup）任一时刻按住修饰键——真实用户收尾常先松修饰键
+   * 再松鼠标，只看 pointerup 会把这次加选误判成「替换」、把已累计的集合抹成只剩最后一段。
+   */
+  const gestureModRef = useRef<ContentPointerDownInfo>({ x: 0, y: 0 });
   /** 选中态更新串行化：指针抬起是高频事件，主进程往返按序应用（避免两次拖选交错） */
   const spanQueueRef = useRef<Promise<void>>(Promise.resolve());
   // v25：图片聚焦（点选正文图片 → 上浮 + 周围模糊 + 选区工具条）
@@ -497,7 +504,9 @@ export default function Reader({
           // v48.23（§6.8-11）：正文内容区（PDF 文本层就落在宿主 DOM 里）不算「外面」——
           // 在那里按下鼠标常是「加选第二段」的起手，清集合会让多段选择在 PDF 上永远只剩最后一段。
           // foliate 的章节在 iframe 里，事件根本不冒泡到宿主，本项只影响 PDF 与宿主侧正文。
-          t.closest(".reader-engine-host"))) return;
+          t.closest(".reader-engine-host") ||
+          // v48.41（D81）：工具栏选区动作组是动作面——点「摘录/制卡」时 mousedown 不得清集合与选区
+          t.closest(".reader-sel-actions"))) return;
       clearMultiSelect();
       setSelection(null);
       engineSelRef.current = null;
@@ -683,6 +692,9 @@ export default function Reader({
   // v48.23（D61 §6.8-11）：按住修饰键（app.multiSelectKey，默认 Ctrl）再选＝加选：
   // 集合运算与拼接文本一律交主进程（resolveSpanSet → electron/annotationRange.js），
   // 本层只负责采集「这一段」并画高亮；不带修饰键＝替换（普通拖选覆盖旧集合）。
+  // v48.39（D79）：修饰键按**手势全程**判定——起手（gestureModRef，contentPointerDown 上采样）
+  // 或收尾（pointerup）任一时刻按住＝加选。真实用户收尾常先松修饰键再松鼠标，只看 pointerup
+  // 会把这次加选误判成替换、把已累计的集合抹成只剩最后一段（用户实测：先普通选一段再 Ctrl 补选失败）。
   const handleEnginePointerUp = useCallback((pos: ContentPointerUpInfo) => {
     const k = kernelRef.current;
     const sel = k?.getSelection() ?? null;
@@ -701,7 +713,9 @@ export default function Reader({
       text: sel.text,
       rects: geom ? [{ x: geom.x, y: geom.y, w: geom.width, h: geom.height }] : []
     };
-    const withModifier = modifierFlagOf(multiKeyRef.current, pos);
+    // v48.39（D79）：起手与收尾任一按住修饰键＝加选（手势全程判定；语义域见函数头注释）
+    const withModifier =
+      modifierFlagOf(multiKeyRef.current, gestureModRef.current) || modifierFlagOf(multiKeyRef.current, pos);
     // 串行化：两次拖选的往返按序应用，后者永远读到前者落定的集合
     spanQueueRef.current = spanQueueRef.current
       .then(async () => {
@@ -774,6 +788,10 @@ export default function Reader({
     });
     // 数据先到（marksRef 已填）而内核后到：这里补推一次；反之由标记 effect 自己推
     if (marksRef.current.length) k.setDocumentMarks?.(marksRef.current);
+    // v48.39（D79）：多段选择按手势全程判定修饰键——拖选起手采样修饰位，pointerup 收尾时与之求或
+    k.on("contentPointerDown", (pos) => {
+      gestureModRef.current = pos;
+    });
     // v35 图片卡跳转：跳转着陆后再找原图叠图内高亮；找不到/PDF 系 → 原图对照浮层
     if (jumpAnchor?.occlusion) window.setTimeout(() => void tryLocateJumpImage(), 800);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1293,11 +1311,13 @@ export default function Reader({
     closeMarkPop();
   }
 
-  // 批 4 Task 12：标注模式与色板取自设置键（app.annotateMode / annotatePalette / annotateCustomEnabled）
-  // ——模式持久记忆、色板由用户配；改设置有 settings/changed 即时生效（统一走 useAnnotationSettings）
+  // 批 4 Task 12：标注模式/形式与色板取自设置键（app.annotateMode / annotateForm / annotatePalette / annotateCustomEnabled）
+  // ——模式（点色是否进队列）与形式（底色/下划线，v48.42/D82 拆独立键）持久记忆；改设置有 settings/changed 即时生效
   const annotSettings = useAnnotationSettings();
   const annotMode = annotSettings.annotateMode;
-  const setAnnotMode = (m: AnnotMode) => void writeAnnotationSetting("annotateMode", m);
+  const setAnnotMode = (m: AnnotMenuMode) => void writeAnnotationSetting("annotateMode", m);
+  const annotForm = annotSettings.annotateForm;
+  const setAnnotForm = (f: AnnotMarkForm) => void writeAnnotationSetting("annotateForm", f);
   const ANNOT_PALETTE: readonly AnnotColor[] = annotSettings.annotatePalette as readonly AnnotColor[];
 
   /**
@@ -1327,16 +1347,17 @@ export default function Reader({
   }, []);
 
   /**
-   * R38/R40：点色＝完成当前模式的动作（颜色不记）。
-   * 高亮＝建 kind="highlight" 的纯高亮；摘录+高亮＝建 kind="extract" 的摘录；两者都带 annotationColor。
+   * R38/R40：点色＝完成当前模式与形式的标注（颜色不记）。
+   * 高亮＝纯批注（不进队列）；摘录+高亮＝建 kind="extract" 的摘录（进队列）；形式＝底色/下划线（annotation_type）。
    * 随后弹 AnnotationEditor 写批注（Task 11 接；本轮只落库不带批注）。
    */
-  async function handlePickColor(color: AnnotColor) {
+  async function handlePickColor(color: AnnotColor, comment: string) {
     if (!selection) return;
     const text = selection.text;
     const spans = selection.spans;
     clearSelection();
-    await createAnnotation(text, spans, color, annotMode);
+    // v48.43（D83）：批注文字随选区菜单批注框一次带上（空串＝无批注）；不弹编辑浮层
+    await createAnnotation(text, spans, color, annotMode, annotForm, comment || null);
   }
 
   // 阅读场景快捷键（制卡 Ctrl+Z / AI 制卡 Ctrl+X / AI 解释 Ctrl+A / 摘录 Ctrl+S / 查词 Ctrl+D）：
@@ -1349,6 +1370,28 @@ export default function Reader({
     "reader.extract": { when: () => readerShortcutReady, run: () => selAct.extract() },
     "reader.lookupWord": { when: () => readerShortcutReady, run: () => selAct.lookup() }
   });
+
+  // v48.43（D83）：选区动作组＝模式/形式段控（批注栏头同款样式）＋动作钮（批注栏头同族无框）。
+  // 段控是持久偏好（无选区也可切）；动作钮无选区 disabled（不可点无 🚫，暗色可读）。
+  // 图片挖空＝正文图片选区流程入口。data-sel-act 钩子与摘录页工具栏同一套。
+  const selActionsGroup = (
+    <div className="reader-engine-controls-group reader-sel-actions" data-sel-actions>
+      <div className="seg-rail" role="group" aria-label="标注模式">
+        <button type="button" className={annotMode === "highlight" ? "on" : undefined} data-annot-mode="highlight" onClick={() => setAnnotMode("highlight")}>高亮</button>
+        <button type="button" className={annotMode === "extract" ? "on" : undefined} data-annot-mode="extract" onClick={() => setAnnotMode("extract")}>摘录+高亮</button>
+      </div>
+      <div className="seg-rail" role="group" aria-label="标记形式">
+        <button type="button" className={annotForm === "highlight" ? "on" : undefined} data-annot-form="highlight" onClick={() => setAnnotForm("highlight")}>高亮</button>
+        <button type="button" className={annotForm === "underline" ? "on" : undefined} data-annot-form="underline" onClick={() => setAnnotForm("underline")}>下划线</button>
+      </div>
+      <button type="button" className="btn-rail" data-sel-act="manual" disabled={!selection} title={selection ? "就地制卡" : "先选中文字"} onClick={selAct.manual}>制卡</button>
+      <button type="button" className="btn-rail" data-sel-act="aiCards" disabled={!selection} title={selection ? "AI 制卡" : "先选中文字"} onClick={selAct.aiCards}>AI 制卡</button>
+      <button type="button" className="btn-rail" data-sel-act="explain" disabled={!selection} title={selection ? "AI 解释" : "先选中文字"} onClick={selAct.explain}>AI 解释</button>
+      <button type="button" className="btn-rail" data-sel-act="extract" disabled={!selection} title={selection ? "摘录进学习队列" : "先选中文字"} onClick={selAct.extract}>摘录</button>
+      <button type="button" className="btn-rail" data-sel-act="lookup" disabled={!selection} title={selection ? "查词" : "先选中文字"} onClick={selAct.lookup}>查词</button>
+      <button type="button" className="btn-rail" data-sel-act="occlusion" disabled={!selection} title={selection ? "图片挖空" : "先选中文字"} onClick={selAct.occlusion}>图片挖空</button>
+    </div>
+  );
 
   /**
    * 侧栏可用性（D2）：目录 / 本文档注解 / 已发布图谱**任一在场**就可用——
@@ -1390,7 +1433,8 @@ export default function Reader({
         >
           {engineSource ? (
             <>
-              {/* D5-B：常驻＝侧栏入口 + 翻页；其余收进「更多」「阅读设置」两组弹出（同刻只开一个） */}
+              {/* D5-B：常驻＝侧栏入口 + 翻页；其余收进「更多」「阅读设置」两组弹出（同刻只开一个）。
+                  v48.43（D83）：左侧＝「收起/展开」两态钮 + 选区动作组；**翻页钮移到右缘**；侧栏页签恒在。 */}
               <div className="reader-engine-controls">
                 <div className="reader-engine-controls-group">
                   <button
@@ -1398,20 +1442,13 @@ export default function Reader({
                     data-reader-sidebar-toggle
                     aria-expanded={sidebarOpen}
                     aria-controls="reader-sidebar"
-                    disabled={!sidebarAvailable}
-                    title={sidebarAvailable ? "侧栏：目录 / 摘录 / 图谱" : "本书没有目录、注解或图谱"}
+                    title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
                     onClick={toggleSidebar}
                   >
-                    侧栏
-                  </button>
-                  <span className="reader-engine-divider" aria-hidden="true" />
-                  <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
-                    <IconChevronLeft />
-                  </button>
-                  <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
-                    <IconChevronRight />
+                    {sidebarOpen ? "收起" : "展开"}
                   </button>
                 </div>
+                {selActionsGroup}
                 <div className="reader-engine-controls-group">
                   <ReaderToolMenu
                     id="more"
@@ -1518,6 +1555,14 @@ export default function Reader({
                       </div>
                     )}
                   </ReaderToolMenu>
+                  {/* v48.43（D83）：翻页钮移到工具栏右缘 */}
+                  <span className="reader-engine-divider" aria-hidden="true" />
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
+                    <IconChevronLeft />
+                  </button>
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
+                    <IconChevronRight />
+                  </button>
                 </div>
               </div>
               <div className="reader-engine-viewport">
@@ -1531,7 +1576,6 @@ export default function Reader({
                       void kernelRef.current?.goTo({ href: item.href });
                       setSidebarOpen(false);
                     }}
-                    onClose={() => setSidebarOpen(false)}
                     tab={sidebarTab}
                     onTabChange={setSidebarTab}
                     extractsPanel={
@@ -1617,6 +1661,9 @@ export default function Reader({
               </div>
             </>
           ) : (
+            <>
+            {/* v48.41（D81）：markdown（粘贴书）分支的选区动作组——与引擎工具栏同一份，置顶常驻 */}
+            <div className="reader-md-actions">{selActionsGroup}</div>
             <article className="reader-markdown">
               <h1 className="reader-title">{title}</h1>
               {contextLabel && <p className="reader-context">{contextLabel}</p>}
@@ -1624,6 +1671,7 @@ export default function Reader({
                 {markdown}
               </ReactMarkdown>
             </article>
+            </>
           )}
 
           {/* v35 图片卡跳转：图内区域高亮（宿主视口坐标，5 秒或翻页自清）+ 未命中时的原图对照浮层 */}
@@ -1666,19 +1714,9 @@ export default function Reader({
             <SelectionMenu
               anchor={selection.rect}
               container={scrollRef.current?.getBoundingClientRect() ?? null}
-              mode={annotMode}
-              onModeChange={setAnnotMode}
               colors={ANNOT_PALETTE}
               onPick={handlePickColor}
               byLocked={multiKeyHeld}
-              actions={[
-                { key: "manual", label: "制卡", onClick: selAct.manual },
-                { key: "ai-cards", label: "AI 制卡", onClick: selAct.aiCards },
-                { key: "explain", label: "AI 解释", onClick: selAct.explain },
-                { key: "extract", label: "摘录", onClick: selAct.extract },
-                { key: "lookup", label: "查词", onClick: selAct.lookup },
-                { key: "occlusion", label: "图片挖空", onClick: selAct.occlusion }
-              ]}
             />
           )}
         </div>

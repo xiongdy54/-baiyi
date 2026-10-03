@@ -10,6 +10,7 @@
 import "../../../../vendor/foliate-js/view.js";
 import type {
   BookSource,
+  ContentPointerDownInfo,
   ContentPointerUpInfo,
   ImageLocateHit,
   ImageLocateQuery,
@@ -29,7 +30,7 @@ import type {
 import { fixSvgAspect, injectAppearanceStyle } from "./appearance";
 import { getSelectionFromContents, getSelectionGeometryFromContents, pointerToHost } from "./selection";
 import { createMultiHighlight, MULTI_HIGHLIGHT_NAME } from "../multiHighlight";
-import { annotKey, annotSoft } from "../annotColor";
+import { annotKey, annotSoft, annotSolid } from "../annotColor";
 
 interface TocNode {
   label?: string;
@@ -165,6 +166,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
   const pointerHandlers = new Set<(pos: ContentPointerUpInfo) => void>();
+  // v48.39（D79）：多段选择按手势全程判定修饰键——壳层要在拖选起手采样修饰位，故 pointerdown 一并中继
+  const pointerDownHandlers = new Set<(pos: ContentPointerDownInfo) => void>();
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   const docs = new Map<number, Document>();
   let lastRelocate: RelocateInfo | null = null;
@@ -218,17 +221,25 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     return value && value !== "rgba(0, 0, 0, 0)" ? value : fallback;
   };
   /**
-   * 按**色键**分组的注入规则（批 4 修正，规格 §5.4「颜色对应」）：
-   * 文中高亮＝该条批注色的透明档，与栏内竖线/色点/角标同色。
-   * `::highlight` 一个注册名只能一种底色 ⇒ 按色开多条规则（`extract-mark` 保给默认色，
-   * 其余 `extract-mark-<色键>`）——这样批 3 的既有断言（无色的标记走 `extract-mark`）不破。
+   * 按（色键×形式）分组的注入规则（批 4 修正，规格 §5.4「颜色对应」；v48.41/D81 增下划线形式）：
+   * 底色形式＝该条批注色的透明档，与栏内竖线/色点/角标同色；
+   * 下划线形式＝透明底 + 批注实色 2px 下划线（::highlight 允许 text-decoration）。
+   * `::highlight` 一个注册名只能一种画法 ⇒ 按（色×形式）开多条规则（`extract-mark` 保给默认色，
+   * 其余 `extract-mark-<色键>` / `-<色键>u`）——批 3 的既有断言（无色的标记走 `extract-mark`）不破。
    */
+  const markKeyFor = (m: ReaderDocMark) => `${annotKey(m.color)}${m.annotationType === "underline" ? "|u" : ""}`;
   const markStyleCss = () => {
     const keys = new Set<string>(["default"]);
-    for (const m of docMarks) keys.add(annotKey(m.color));
+    for (const m of docMarks) keys.add(markKeyFor(m));
     return [...keys]
       .map((k) => {
-        const soft = k === "default" ? "var(--accent-soft)" : annotSoft(k.startsWith("hex-") ? `#${k.slice(4)}` : k);
+        const underline = k.endsWith("|u");
+        const bare = k.replace(/\|u$/, "");
+        if (underline && bare !== "default") {
+          const solid = annotSolid(bare.startsWith("hex-") ? `#${bare.slice(4)}` : bare);
+          return `::highlight(${highlightNameFor(k)}){background-color:transparent;text-decoration:underline;text-decoration-color:${solid};text-decoration-thickness:2px;text-underline-offset:3px;}`;
+        }
+        const soft = k === "default" ? "var(--accent-soft)" : annotSoft(bare.startsWith("hex-") ? `#${bare.slice(4)}` : bare);
         const value = evalColor(soft, "color-mix(in srgb, #166a59 8%, transparent)");
         return `::highlight(${highlightNameFor(k)}){background-color:${value};}`;
       })
@@ -279,7 +290,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       if (!mark.cfi) continue;
       const hit = entries.find((e) => e.id === mark.id);
       if (!hit) continue;
-      const k = annotKey(mark.color);
+      const k = markKeyFor(mark);
       byKey.set(k, [...(byKey.get(k) ?? []), hit.range]);
     }
     if (byKey.size === 0) {
@@ -380,6 +391,14 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     doc.addEventListener("pointerup", (ev: PointerEvent) => {
       const pos = pointerToHost(doc, ev.clientX, ev.clientY);
       pointerHandlers.forEach((h) =>
+        h({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+      );
+    });
+    // v48.39（D79）：多段选择按手势全程判定修饰键（起手或收尾任一按住＝加选）——
+    // pointerdown 与 pointerup 同构中继，壳层据此在拖选起手采样修饰位
+    doc.addEventListener("pointerdown", (ev: PointerEvent) => {
+      const pos = pointerToHost(doc, ev.clientX, ev.clientY);
+      pointerDownHandlers.forEach((h) =>
         h({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
       );
     });
@@ -742,6 +761,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       relocateHandlers.clear();
       linkHandlers.clear();
       pointerHandlers.clear();
+      pointerDownHandlers.clear();
       imageHandlers.clear();
       markHoverHandlers.clear();
       markClickHandlers.clear();
@@ -772,6 +792,11 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         const h = handler as (info: MarkPointerInfo) => void;
         markClickHandlers.add(h);
         return () => markClickHandlers.delete(h);
+      }
+      if (event === "contentPointerDown") {
+        const h = handler as (pos: ContentPointerDownInfo) => void;
+        pointerDownHandlers.add(h);
+        return () => pointerDownHandlers.delete(h);
       }
       const h = handler as (pos: ContentPointerUpInfo) => void;
       pointerHandlers.add(h);

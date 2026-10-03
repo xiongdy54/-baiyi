@@ -199,6 +199,14 @@ export default function ExtractCardFace({
   const depth = Number(extract.depth) || 1;
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const hlRef = useRef<HTMLElement | null>(null);
+  /**
+   * 本次拖选手势**起手**的修饰位（v48.39 / D79）：document mousedown 上采样，mouseup 收尾求或。
+   * 必须是组件级 ref 而非 effect 闭包变量——handlers 依赖每次渲染都是新身份，effect 重挂会
+   * 把闭包变量重置；拖选中途任何重渲染（如 keyup 采集引发的 setFaceSel）都会抹掉起手采样。
+   */
+  const gestureDownModRef = useRef({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false });
+  /** 指针拖选进行中（v48.39 / D79）：拖选期间抑制 keyup 的键盘采集（见 onKey），收尾以 mouseup 为准 */
+  const pointerDownActiveRef = useRef(false);
 
   // 换卡即清快照（偏移是相对**这一版正文**的，跨卡复用会把范围锚写歪）
   useEffect(() => {
@@ -212,6 +220,12 @@ export default function ExtractCardFace({
     if (!body) return;
     const face = body.closest(".extract-face");
     // v48.38 / D78：capture 携带指针修饰位——集合运算（替换/加选/移出）由宿主按 app.multiSelectKey 判定
+    // v48.39（D79）：修饰键按**手势全程**判定——mousedown 起手采样（组件级 ref，见其注释），mouseup 收尾求或：
+    // 真实用户收尾常先松修饰键再松鼠标，只看 mouseup 会把这次加选误判成「替换」、抹掉已累计的集合
+    const onDown = (e: MouseEvent) => {
+      pointerDownActiveRef.current = true;
+      gestureDownModRef.current = { ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey, metaKey: e.metaKey };
+    };
     const capture = (modifier?: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }) => {
       const full = String(extract.contentMarkdown || "");
       const ok = selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length);
@@ -229,33 +243,54 @@ export default function ExtractCardFace({
       );
     };
     const onUp = (e: Event) => {
+      pointerDownActiveRef.current = false;
       const t = e.target as Node | null;
       if (t && body.contains(t)) {
         const me = e as MouseEvent;
-        capture({ ctrlKey: me.ctrlKey, altKey: me.altKey, shiftKey: me.shiftKey, metaKey: me.metaKey });
+        // v48.39（D79）：起手（mousedown）与收尾（mouseup）修饰位求或——手势全程判定
+        const dm = gestureDownModRef.current;
+        capture({
+          ctrlKey: me.ctrlKey || dm.ctrlKey,
+          altKey: me.altKey || dm.altKey,
+          shiftKey: me.shiftKey || dm.shiftKey,
+          metaKey: me.metaKey || dm.metaKey
+        });
         return;
       }
-      // 卡外落下＝选区作废（卡片外的动作面除外：菜单/面板自身的 mouseup 不算）。
+      // 卡外落下＝选区作废（卡片外的动作面除外：菜单/面板/工具栏自身的 mouseup 不算）。
       // 批 4 Task 10：选区菜单与三个面板渲染在**卡面之外**（页级），点它们同样是「动作面」而非
       // 「点别处」——不豁免的话，mouseup 会先清掉快照/选区，按钮的 onClick 再读就晚了（实测三动作全哑）。
+      // v48.41（D81）：页头工具栏（.extract-toolbar，动作行新宿主）同列豁免。
       const el = t as HTMLElement | null;
       const inActionSurface =
         !!el && typeof el.closest === "function" &&
-        !!(el.closest(".selection-menu") || el.closest(".modal-panel") || el.closest(".dict-panel") || el.closest(".ai-panel"));
+        !!(el.closest(".selection-menu") || el.closest(".modal-panel") || el.closest(".dict-panel") || el.closest(".ai-panel") || el.closest(".extract-toolbar"));
       if (inActionSurface) return;
       if (!(t && face && face.contains(t))) {
         handlers.onSelection?.(null);
       }
     };
     const onKey = () => {
+      // v48.39（D79）：指针拖选进行中的 keyup 不采集——松修饰键（如 Ctrl）会走到这里，
+      // 按无修饰＝替换上报会把拖选尚未定型的部分选区当成新选区、当场抹掉已累计的集合；
+      // 收尾由 mouseup 统一采集（起手/收尾修饰位求或）。纯键盘选区（无指针拖选）不受影响。
+      if (pointerDownActiveRef.current) return;
       const a = document.activeElement;
       if (a && (a === body || body.contains(a))) capture();
     };
+    const onWindowBlur = () => {
+      // mouseup 可能丢（在窗口外松开）：失焦即复位拖选态，避免键盘采集被永久抑制
+      pointerDownActiveRef.current = false;
+    };
+    document.addEventListener("mousedown", onDown, true);
     document.addEventListener("mouseup", onUp);
     document.addEventListener("keyup", onKey);
+    window.addEventListener("blur", onWindowBlur);
     return () => {
+      document.removeEventListener("mousedown", onDown, true);
       document.removeEventListener("mouseup", onUp);
       document.removeEventListener("keyup", onKey);
+      window.removeEventListener("blur", onWindowBlur);
     };
   }, [extract.id, extract.contentMarkdown, viewOnly, handlers]);
 
@@ -283,18 +318,8 @@ export default function ExtractCardFace({
 
   return (
     <div className="extract-face" data-extract-id={extract.id} data-view-only={viewOnly ? "1" : undefined}>
-      <div className="extract-face-meta">
-        <span className="extract-face-source">
-          来自《{extract.docTitle || "未知材料"}》
-          {depth > 1 ? ` · 第${depth}层摘录` : ""}
-        </span>
-        <span className="extract-face-tags">
-          <span className="mono">{extractStatusLabel(extract.status)}</span>
-          <span className="mono">优先级 {extract.priority}</span>
-          <span className="mono">{nextAtText(extract.topicNextAt)}</span>
-          {engine === "ai-next-extract" ? <span className="badge-experimental">实验引擎</span> : null}
-        </span>
-      </div>
+      {/* v48.41（D81）：卡面 meta 行整体移除——来源上移顶栏中间（onMaterialName 链路），
+          右上「状态/优先级/下次推送」文字按用户指令删除（信息仍在卡片浏览器与批注栏）。 */}
 
       <div className="extract-face-body" ref={bodyRef}>
         {viewOnly ? (

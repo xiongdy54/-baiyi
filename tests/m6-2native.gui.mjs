@@ -233,7 +233,7 @@ async function pdfRenderState(cdp) {
   await wait(700);
   const menuUp = await cdp.eval(`Boolean(document.querySelector(".selection-menu"))`);
   check("PDF 文本层划选出制卡菜单", selOk === true && menuUp, "sel=" + selOk);
-  await cdp.eval(clickBtnText("制卡", ".selection-menu button"));
+  await cdp.eval(clickBtnText("制卡", "[data-sel-act]"));
   await wait(700);
   await cdp.eval(`(() => {
     const tas = [...document.querySelectorAll(".modal-panel textarea")];
@@ -277,7 +277,7 @@ async function pdfRenderState(cdp) {
     return true;
   })()`);
   await wait(700);
-  await cdp.eval(clickBtnText("摘录", ".selection-menu button"));
+  await cdp.eval(clickBtnText("摘录", "[data-sel-act]"));
   await wait(1200);
   const extractOk = await cdp.eval(`(async () => {
     const topics = await window.workflowAPI.listDue();

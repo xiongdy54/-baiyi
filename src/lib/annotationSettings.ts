@@ -1,6 +1,7 @@
-// 批 4（规格 §9.2）：就地批注的四个设置键——渲染层读侧归一 + 默认值。
-// 键与默认值：
-//   app.annotateMode          "highlight" | "extract"      默认 "highlight"（R38 模式段控持久记忆）
+// 批 4（规格 §9.2）：就地批注的设置键——渲染层读侧归一 + 默认值。
+// 键与默认值（v48.42 / D82：annotateMode 回归**模式**语义；标记形式拆独立键 annotateForm）：
+//   app.annotateMode          "highlight" | "extract"      默认 "highlight"（R38 模式段控持久记忆；点色是否进队列）
+//   app.annotateForm          "highlight" | "underline"    默认 "highlight"（v48.41/D81 引入的标记形式：底色 ｜ 下划线）
 //   app.annotatePalette       string[]（色板 id 或 #hex，有序去重、上限 8）默认 6 支标准色
 //   app.annotateCustomEnabled bool                          默认 true（调色排末位「自定义取色」）
 //   app.annotationFilter      "all" | "extract" | "highlight" 默认 "all"（R39 栏顶筛选记忆）
@@ -12,16 +13,24 @@ import { eventBus } from "./eventbus";
 import { ANNOT_COLORS } from "../components/SelectionMenu";
 
 export type AnnotateMode = "highlight" | "extract";
+export type AnnotateForm = "highlight" | "underline";
 export type AnnotationFilter = "all" | "extract" | "highlight";
 
 export const DEFAULT_ANNOTATE_MODE: AnnotateMode = "highlight";
+export const DEFAULT_ANNOTATE_FORM: AnnotateForm = "highlight";
 export const DEFAULT_ANNOTATION_FILTER: AnnotationFilter = "all";
 export const DEFAULT_ANNOTATE_PALETTE: string[] = ["yellow", "red", "green", "blue", "purple", "magenta"];
 export const ANNOT_PALETTE_MAX = 8;
 const COLOR_IDS: readonly string[] = ANNOT_COLORS;
 
 export function normalizeAnnotateMode(v: unknown): AnnotateMode {
+  // v48.42（D82）：模式域回归 highlight/extract（点色是否进队列）；v48.41 曾短暂承载形式语义
   return v === "extract" || v === "highlight" ? v : DEFAULT_ANNOTATE_MODE;
+}
+
+export function normalizeAnnotateForm(v: unknown): AnnotateForm {
+  // v48.42（D82）：形式域 highlight/underline（v48.41/D81 引入）；非法值回落 highlight
+  return v === "underline" ? "underline" : "highlight";
 }
 
 export function normalizeAnnotationFilter(v: unknown): AnnotationFilter {
@@ -47,21 +56,24 @@ export function normalizeAnnotatePalette(v: unknown): string[] {
 
 export interface AnnotationSettings {
   annotateMode: AnnotateMode;
+  annotateForm: AnnotateForm;
   annotatePalette: string[];
   annotateCustomEnabled: boolean;
   annotationFilter: AnnotationFilter;
 }
 
-/** 一次读齐四键（都是读侧归一后的值） */
+/** 一次读齐五键（都是读侧归一后的值） */
 export async function readAnnotationSettings(): Promise<AnnotationSettings> {
-  const [mode, palette, custom, filter] = await Promise.all([
+  const [mode, form, palette, custom, filter] = await Promise.all([
     settingsStore.get<unknown>("app", "annotateMode", DEFAULT_ANNOTATE_MODE),
+    settingsStore.get<unknown>("app", "annotateForm", DEFAULT_ANNOTATE_FORM),
     settingsStore.get<unknown>("app", "annotatePalette", DEFAULT_ANNOTATE_PALETTE),
     settingsStore.get<unknown>("app", "annotateCustomEnabled", true),
     settingsStore.get<unknown>("app", "annotationFilter", DEFAULT_ANNOTATION_FILTER)
   ]);
   return {
     annotateMode: normalizeAnnotateMode(mode),
+    annotateForm: normalizeAnnotateForm(form),
     annotatePalette: normalizeAnnotatePalette(palette),
     annotateCustomEnabled: custom !== false,
     annotationFilter: normalizeAnnotationFilter(filter)
@@ -83,6 +95,9 @@ export async function writeAnnotationSetting<K extends keyof AnnotationSettings>
     case "annotateMode":
       await settingsStore.set("app", "annotateMode", value);
       return;
+    case "annotateForm":
+      await settingsStore.set("app", "annotateForm", value);
+      return;
     case "annotatePalette":
       await settingsStore.set("app", "annotatePalette", value);
       return;
@@ -96,12 +111,13 @@ export async function writeAnnotationSetting<K extends keyof AnnotationSettings>
 }
 
 /**
- * 四键的渲染层订阅（阅读器/摘录页共用）：
- * 初值＝默认值，挂载后读一次，**设置页改动即时生效**（监听 settings/changed 里这四个键）。
+ * 五键的渲染层订阅（阅读器/摘录页共用）：
+ * 初值＝默认值，挂载后读一次，**设置页改动即时生效**（监听 settings/changed 里这五个键）。
  */
 export function annotateSettingsEqual(a: AnnotationSettings, b: AnnotationSettings): boolean {
   return (
     a.annotateMode === b.annotateMode &&
+    a.annotateForm === b.annotateForm &&
     a.annotateCustomEnabled === b.annotateCustomEnabled &&
     a.annotationFilter === b.annotationFilter &&
     a.annotatePalette.length === b.annotatePalette.length &&
@@ -109,12 +125,13 @@ export function annotateSettingsEqual(a: AnnotationSettings, b: AnnotationSettin
   );
 }
 
-const ANNOT_KEYS = ["annotateMode", "annotatePalette", "annotateCustomEnabled", "annotationFilter"] as const;
+const ANNOT_KEYS = ["annotateMode", "annotateForm", "annotatePalette", "annotateCustomEnabled", "annotationFilter"] as const;
 
-/** 订阅四键（组件内直接用；默认值与读侧归一保证首帧就有合法值） */
+/** 订阅五键（组件内直接用；默认值与读侧归一保证首帧就有合法值） */
 export function useAnnotationSettings(): AnnotationSettings {
   const [state, setState] = useState<AnnotationSettings>({
     annotateMode: DEFAULT_ANNOTATE_MODE,
+    annotateForm: DEFAULT_ANNOTATE_FORM,
     annotatePalette: [...DEFAULT_ANNOTATE_PALETTE],
     annotateCustomEnabled: true,
     annotationFilter: DEFAULT_ANNOTATION_FILTER
