@@ -2,7 +2,7 @@
 // 浏览器式操作（对齐 Anki 浏览器，基于本库数据）：卡面预览与内联编辑（复用复习页 CardFace/EditableText）、
 // 暂停/恢复、推迟、重置为新卡、删除、跳转原文、质检问题（CardIssue）查看、Leech 六步向导入口。
 // 评分调度仍在连续刷题界面（ReviewView），此处不写复习日志。
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -1387,6 +1387,37 @@ export function CardFace({
     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
   );
 
+  // D88 §7.3：双面常挂 + 非当前面 inert（可达性/编辑安全硬性）——useLayoutEffect 在绘制前对调，
+  // 保证「EditableText 只在背面可编辑」的契约在两种动效路径（3D 翻卡 / reduce 瞬时）下都成立；
+  // reduce 降级的视觉切换（非当前面 display:none）由 theme.css reduce 块承担，inert 与动效无关。
+  const frontFaceRef = useRef<HTMLDivElement>(null);
+  const backFaceRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // 非当前面挂 inert：正面态（showBack=false）⇒ 背面 inert；翻到背面 ⇒ 正面 inert
+    if (frontFaceRef.current) frontFaceRef.current.inert = showBack;
+    if (backFaceRef.current) backFaceRef.current.inert = !showBack;
+  }, [showBack]);
+
+  /** 双面包装：两面同格等高（grid 1/1），flipped 类＝翻面姿态（transition 由 CSS 管）。
+      正面点击=翻面（onReveal 在场且未翻面时；复习页不传 onReveal ⇒ 点卡面不翻面，2026-10-01 口径不变）。 */
+  function flipWrap(front: ReactNode, back: ReactNode) {
+    return (
+      <div className={`review-flip${showBack ? " flipped" : ""}`}>
+        <div
+          ref={frontFaceRef}
+          className="review-face"
+          aria-hidden={!showBack || undefined}
+          onClick={!showBack && onReveal ? onReveal : undefined}
+        >
+          {front}
+        </div>
+        <div ref={backFaceRef} className="review-face review-back" aria-hidden={showBack || undefined}>
+          {back}
+        </div>
+      </div>
+    );
+  }
+
   const frontText = card.frontMarkdown || card.noteText;
 
   // v32（M7）单词卡发音按钮：听音卡嵌题面内、其余卡嵌答案区（dict_json.kind 分流；
@@ -1413,11 +1444,22 @@ export function CardFace({
     // v29（D26）：看图问答卡（rects 空数组挂图 + frontMarkdown 题面）——正面图下方渲染题面文字
     // v30（D28，用户拍板）：题面正反面都显示——背面 = 图 + 题面 + 答案（翻面后题面不消失）
     const hasFrontText = !!(card.frontMarkdown && card.frontMarkdown !== "图中遮挡区域对应的是什么？");
-    return (
-      <div className="review-face">
+    // D88 §7.3 双面化：正面 = 遮挡图 + 只读题面（编辑器只在背面在场，GUIDE §5.4 契约）；
+    // 背面 = 原图（无遮挡层）+ 可编辑题面 + 答案。
+    return flipWrap(
+      <>
         <div className="occlusion-stage">
           <img src={card.occlusionJson.assetPath} alt="" className="occlusion-img" />
-          <OcclusionShapes occlusion={card.occlusionJson} cardOrd={card.cardOrd} hidden={showBack} />
+          <OcclusionShapes occlusion={card.occlusionJson} cardOrd={card.cardOrd} hidden={false} />
+        </div>
+        {hasFrontText && <div className="review-front-text">{card.frontMarkdown}</div>}
+        {!showBack && (
+          <button className="btn btn-primary" onClick={onReveal}>显示答案</button>
+        )}
+      </>,
+      <>
+        <div className="occlusion-stage">
+          <img src={card.occlusionJson.assetPath} alt="" className="occlusion-img" />
         </div>
         {hasFrontText && (
           <div className="review-front-text">
@@ -1428,19 +1470,14 @@ export function CardFace({
             )}
           </div>
         )}
-        {showBack && (
-          <div className="review-back">
-            {onEdit ? (
-              <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
-            ) : (
-              card.backMarkdown
-            )}
-          </div>
-        )}
-        {!showBack && (
-          <button className="btn btn-primary" onClick={onReveal}>显示答案</button>
-        )}
-      </div>
+        <div className="review-back-a">
+          {onEdit ? (
+            <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
+          ) : (
+            card.backMarkdown
+          )}
+        </div>
+      </>
     );
   }
 
@@ -1468,7 +1505,6 @@ export function CardFace({
     // 问题区编辑（v12.4）：翻面后可改。用户编辑的是显示文本（当前挖空为[…]），
     // 落库时按文本顺序把第 i 个[…]还原为第 i 个被遮 ord 的原挖空语法（多空同答卡逐个还原）；
     // 其余挖空按显示文本保留（若被改动则该挖空降级为普通文字）
-    const questionEditable = showBack && onEdit;
     const commitQuestion = (t: string) => {
       const edit = onEdit;
       if (!edit) return;
@@ -1481,58 +1517,71 @@ export function CardFace({
       }
       edit({ frontMarkdown: restored, noteText: restored });
     };
-    return (
-      <div className="review-face" onClick={!showBack && onReveal ? onReveal : undefined}>
+    // D88 §7.3 双面化：正面只读；背面 = 题面（同渲染，挖空始终遮蔽，用户需求）+ 答案。
+    // 题面编辑器（EditableText）只挂背面——非当前面 inert ⇒ 翻面前不可聚焦（§5.4 契约）。
+    return flipWrap(
+      <>
         <div className="review-front">
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
-          {questionEditable ? (
+          {md(questionText)}
+        </div>
+      </>,
+      <>
+        <div className="review-back-q">
+          {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
+          {onEdit ? (
             <EditableText value={questionText} onCommit={commitQuestion} />
           ) : (
             md(questionText)
           )}
         </div>
-        {showBack && (
-          <div className="review-back">
-            {onEdit ? (
-              <EditableText value={clozeAnswer} onCommit={(t) => onEdit({ backMarkdown: t })} />
-            ) : (
-              clozeAnswer
-            )}
-            {/* v32（M7）：单词挖空卡（非听音）发音按钮入答案字段 */}
-            {dj && !isListeningVocab && speakBtn}
-          </div>
-        )}
-      </div>
+        <div className="review-back-a">
+          {onEdit ? (
+            <EditableText value={clozeAnswer} onCommit={(t) => onEdit({ backMarkdown: t })} />
+          ) : (
+            clozeAnswer
+          )}
+          {/* v32（M7）：单词挖空卡（非听音）发音按钮入答案字段 */}
+          {dj && !isListeningVocab && speakBtn}
+        </div>
+      </>
     );
   }
 
   // v16（D18）：翻转问答卡 = 制卡手段，创建时即拆为两张独立 qa 卡；
   // 不存在复习期形态变化的卡片类型，一切卡设计以 FSRS 为核心。
 
-  return (
-    <div className="review-face" onClick={!showBack && onReveal ? onReveal : undefined}>
+  // D88 §7.3 双面化：背面 = 题面（翻面前后视觉连续，用户反馈 #1）+ 答案；听音卡发音按钮
+  // 随题面进背面（正面翻走后仍可播——单面时代它常驻在题面字段）。
+  return flipWrap(
+    <>
       <div className="review-front">
         {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
-        {showBack && onEdit ? (
+        {md(frontText)}
+        {/* v32（M7）：听音卡发音按钮嵌入题面字段（存量无 kind 卡按 front 前缀「发音：」判定） */}
+        {dj && isListeningVocab && speakBtn}
+      </div>
+    </>,
+    <>
+      <div className="review-back-q">
+        {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
+        {onEdit ? (
           <EditableText value={frontText} onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })} />
         ) : (
           md(frontText)
         )}
-        {/* v32（M7）：听音卡发音按钮嵌入题面字段（存量无 kind 卡按 front 前缀「发音：」判定） */}
         {dj && isListeningVocab && speakBtn}
       </div>
-      {showBack && (
-        <div className="review-back">
-          {onEdit ? (
-            <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
-          ) : (
-            md(card.backMarkdown)
-          )}
-          {/* v32（M7）：其余单词卡（中→外/外→中/挖空）发音按钮入答案字段 */}
-          {dj && !isListeningVocab && speakBtn}
-        </div>
-      )}
-    </div>
+      <div className="review-back-a">
+        {onEdit ? (
+          <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
+        ) : (
+          md(card.backMarkdown)
+        )}
+        {/* v32（M7）：其余单词卡（中→外/外→中/挖空）发音按钮入答案字段 */}
+        {dj && !isListeningVocab && speakBtn}
+      </div>
+    </>
   );
 }
 

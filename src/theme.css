@@ -52,6 +52,7 @@
   --fs-body: 14px;
   --fs-secondary: 13px;
   --fs-meta: 12px;
+  --fs-stat: 20px; /* 复习页顶栏统计数字（D88 §7.2：20px/300，随 D88 登记的新档） */
   /* 长文行高（阅读正文 + 界面内成段 AI 回答等）：只允许这一个 Token。
      src/lib/reader/foliate/appearance.ts:36 里 EPUB 正文取 a.lineHeight ?? 1.7，
      Markdown 正文走 .reader-markdown；此前一边 1.7、一边 1.9，
@@ -2643,12 +2644,13 @@ body.theme-dark .modal-panel {
 /* 入场动效（克制、语义耦合、可降级）：弹层 150ms；减少动效时零动画。
    D88 §6.4 换卡入场单向采纳：stage-card-in 升级为 translateX(24px→0)（方向＝队列前进方向），
    --dur-stage(240ms) --ease-out-soft（原 120ms translateY 4px）；不做两段式 out→in。
-   复习页翻面揭示（.review-back）不在本轮范围（P4 §7.3 翻卡接管），维持原 120ms 升起。 */
+   D88 P4（§7.3）：复习页翻面揭示改由 3D 翻卡接管——.review-wrap .review-back 的 120ms 升起退场；
+   卡面入场挂在 .review-flip 上（两面整体进场合一面动效，单面动画会与 backface 旋转叠加穿帮），
+   :not(.flipped) 排除「恢复现场/撤销评分」直接以背面挂载的首帧（此时动画会先播正面再瞬时翻面）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .review-wrap .review-face,
+  .review-wrap .review-flip:not(.flipped),
   .extract-page .extract-face,
   .review-wrap .extract-face { animation: stage-card-in var(--dur-stage) var(--ease-out-soft) both; }
-  .review-wrap .review-back { animation: stage-card-in var(--dur) var(--ease) both; }
   .bar-pop { animation: stage-pop-in 150ms var(--ease) both; }
 }
 @keyframes stage-card-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
@@ -2661,26 +2663,106 @@ body.theme-dark .modal-panel {
 /* 顶栏＝Anki 式计数：三项并排、数字用主色，其余 helper（不再有「本轮 N 张」与提示行） */
 .review-count { display: flex; align-items: baseline; gap: var(--sp-4); font-size: var(--fs-meta); color: var(--text-helper); }
 .review-count b { font-weight: 500; color: var(--text-primary); margin-left: 2px; }
+/* ---------- 复习页 D88 §7.2：顶栏三档统计块 + 进度轨 ----------
+   [data-review-counts] 容器类与三档文案「未学习/学习中/待复习」保留（m4/m12 断言钩子），
+   内部升级为预览 .qi 三块：8px 色点 + 20px/300 tabular 数字（预览 20px/700 与「越大越细」冲突，
+   用户已裁定 300；.lab 用 --fs-meta 而非预览 11px——GUIDE §5.3「Meta ≥12px」未被 D88 修订）。
+   色点语义（用户决策）：未学习=--grey-3 · 学习中=--warning · 待复习=--accent。 */
+.review-count[data-review-counts] { display: flex; align-items: stretch; gap: var(--sp-6); }
+.review-count[data-review-counts] .qi { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--sp-1) / 2); }
+.review-count[data-review-counts] .qi .lab {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-meta);
+  letter-spacing: 0.06em;
+  color: var(--text-helper);
+  white-space: nowrap;
+}
+.count-dot { width: 8px; height: 8px; flex: none; display: inline-block; }
+.review-count[data-review-counts] .count-dot-new { background: var(--grey-3); }
+.review-count[data-review-counts] .count-dot-learning { background: var(--warning); }
+.review-count[data-review-counts] .count-dot-review { background: var(--accent); }
+.review-count[data-review-counts] .qi-num {
+  font-size: var(--fs-stat);
+  font-weight: 300;
+  line-height: 1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+/* 计数 bump（§7.2）：由真实 counts 变化驱动（React 比较前后值加类、200ms 后摘）——禁假动画 */
+@media (prefers-reduced-motion: no-preference) {
+  .review-count[data-review-counts] .qi-num { transition: transform 200ms var(--spring); }
+  .review-count[data-review-counts] .qi-num.bump { transform: scale(1.18); }
+}
+/* 进度轨（§7.2）：2px＝hairline 纪律允许档（D50 半档写法），槽 --grey-1、填 --accent；
+   宽度 = doneCount / (doneCount + new + learning + review)，分母 0 整个元素不渲染（禁假动画）。
+   轨挂在 .review-head 内、内列之后 ⇒ 随头带贯通全宽（吸顶行为与头带一致）。 */
+.review-progress { height: calc(var(--sp-1) / 2); background: var(--grey-1); }
+.review-progress > b { display: block; height: 100%; background: var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .review-progress > b { transition: width 500ms var(--ease); }
+}
+/* 空态装饰方块入场（§9 Empty 行）：rise 400ms；reduce 降级（规则在 no-preference 作用域内）。
+   只挂复习页滚动根（§12 P4 白名单页）；摘录/阅读页空态归各自批次。 */
+@media (prefers-reduced-motion: no-preference) {
+  .review-wrap .empty-sq { animation: ctas-rise 400ms var(--ease-out-soft) both; }
+}
+@keyframes ctas-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 /* 底部动作栏：几何由共用 .stage-bar 提供（元素挂双类 stage-bar review-bar）。
    .review-bar 仅作为作用域/测试钩子保留。评分网格显式复位 margin-top，堵住通用 .grade-row 的 48px 泄漏。 */
 .review-bar .grade-row { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); min-width: 0; margin-top: 0; }
-/* 评分钮回 §5.3 合同：本体灰底（由 .grade-* 的 --grey-1 接管）、四边同 1px hairline；
-   评分语义唯一承载层＝既有 .grade-*::before 4px 左缘色条（error/warning/accent/success）。 */
+/* 评分钮 D88 §7.4（GUIDE §5.3 v48.48 修订）：预览 .grade 卡式化——语义色唯一承载＝8px 色点，
+   原「灰底 + 左缘 4px 色条」条款作废（.grade-*::before 随零消费者删除）；两行结构＝
+   .grade-name（色点 + 档名 15px/500）+ .grade-due（mono 间隔预览）。
+   高度 64px（推荐档 72px）在 72px 底栏内恰满格（§11：1120 宽下四钮各 ≈180px 可读）。 */
 .review-bar .grade {
-  height: 40px;
+  min-height: 64px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-4);
   border: 1px solid var(--border-subtle);
-  font-size: var(--fs-secondary);
+  background: var(--grey-1);
   color: var(--text-primary);
   cursor: pointer;
 }
-.review-bar .grade:hover { background: var(--grey-2); }
-.review-bar .grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.review-bar .grade .grade-name { display: flex; align-items: center; gap: var(--sp-2); font-size: 15px; font-weight: 500; }
+.grade-dot { width: 8px; height: 8px; flex: none; display: inline-block; }
+.grade-dot.dot-again { background: var(--error); }
+.grade-dot.dot-hard { background: var(--warning); }
+.grade-dot.dot-good { background: var(--accent); }
+.grade-dot.dot-easy { background: var(--success); }
 .review-bar .grade .grade-due { font-size: var(--fs-meta); color: var(--text-helper); }
+/* 推荐档（Good）：Staging 主视觉——accent 填充 + accent-on 文字 + 加高；色点转白 */
+.review-bar .grade.recommended {
+  position: relative;
+  overflow: hidden; /* 涟漪容器（§4.3：.grade.recommended 是填充钮涟漪白名单成员） */
+  min-height: 72px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+.review-bar .grade.recommended .grade-dot { background: var(--accent-on); }
+.review-bar .grade.recommended .grade-due { color: color-mix(in srgb, var(--accent-on) 85%, transparent); }
+/* disabled（saveError/previewError）：落灰、无位移无涟漪（§9）——填充档禁止以 accent 假性可点 */
+.review-bar .grade:disabled {
+  background: var(--grey-1);
+  color: var(--grey-2);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+.review-bar .grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.review-bar .grade.recommended:focus-visible { outline-color: var(--ink); } /* 填充钮上 outline 取 --ink（§9/§7.4） */
+@media (prefers-reduced-motion: no-preference) {
+  /* hover 抬升 -3px（§7.4 评分钮专属档，压过 §4.1 通用 32-40px 档的 -2px）+ 阴影由通用档提供 */
+  .review-bar .grade:hover:not([disabled]) { transform: translateY(-3px); }
+  /* 色点放大预告（Anticipation）+ Follow Through 滞后 20ms（§7.4） */
+  .review-bar .grade .grade-dot { transition: transform var(--dur-hover) var(--spring) 20ms; }
+  .review-bar .grade:hover:not([disabled]) .grade-dot { transform: scale(1.35); }
+}
 /* 滚动根：仍是真滚动容器（面包屑测试 L251/L489 硬条件），底栏是它的最后一个流内子节点 */
 .review-wrap {
   flex: 1;
@@ -2766,6 +2848,26 @@ body.theme-dark .modal-panel {
 .deferred-front { color: var(--ink); }
 /* 删除按钮：与同排工具一致，仅悬停时以 error 色提示破坏性 */
 .review-delete:hover { color: var(--error); border-color: var(--error); }
+/* ---------- 复习翻卡（D88 §7.3）：CardFace 双面常挂 + grid 等高栈（免测量实现） ----------
+   两面同格（grid-area 1/1）⇒ 容器高 = max(正, 背)，矮的一面拉伸补齐、内容顶对齐；
+   无 JS 测量、无固定高度，图片卡/长卡自适应。非当前面由组件挂 inert + aria-hidden
+   （EditableText 只在背面可编辑的契约不变——非当前面的编辑器不可聚焦）。 */
+.review-flip { display: grid; }
+.review-flip > * { grid-area: 1 / 1; min-width: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .review-flip { transform-style: preserve-3d; transition: transform var(--dur-flip) var(--ease-out-soft); }
+  .review-flip > * { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  .review-flip .review-back { transform: rotateY(180deg); }
+  .review-flip.flipped { transform: rotateY(180deg); }
+  .review-session { perspective: 1600px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 降级＝不做 transform（§13-E-12：transition 为 none、翻面即时对调 inert）。
+     设计稿 §7.3 的「视觉=瞬时切换，同现状」要求非当前面不可见——两面同格叠放时后绘者（背面）
+     恒在上，故 reduce 下把非当前面 display:none（inert 对调仍由组件承担，与动效无关）。 */
+  .review-flip:not(.flipped) > .review-back { display: none; }
+  .review-flip.flipped > :not(.review-back) { display: none; }
+}
 /* 卡面：正面 Title 级 26px/1.5、「越大越细」weight 400；答案揭示后可点击任意位置内联编辑 */
 .review-face {
   position: relative;
@@ -2798,9 +2900,13 @@ body.theme-dark .modal-panel {
   line-height: 1.5;
   letter-spacing: -0.01em;
   color: var(--text-primary);
-  border-top: 1px solid var(--grey-2);
-  padding-top: var(--sp-6);
 }
+/* D88 §7.3 双面化：.review-back 升级为背面**卡面**（.review-flip 的第二面，类名钩子保留——
+   m1/m4 断言在用）。原「问题/答案区内部分隔」的 border-top/padding-top 从面级退下，改由
+   面内答案区（.review-back-a）承载；基线 .review-back 规则继续服务卡片浏览页队列行
+   （.queue-row-text review-back），不受翻卡作用域影响。 */
+.review-flip .review-back { border-top: none; padding-top: 0; }
+.review-back-a { border-top: 1px solid var(--grey-2); padding-top: var(--sp-6); }
 /* v29（D26）看图问答卡：正面图下方的题面文字（图文混排卡面） */
 .review-front-text {
   font-size: var(--fs-title-l);
@@ -2852,46 +2958,18 @@ body.theme-dark .modal-panel {
   gap: var(--sp-2);
   align-items: baseline;
 }
-/* 评分模块：4 等分网格（跨列 4 合规），组间距 48px ≥ 2× 组内 16px */
+/* 评分模块：4 等分网格（跨列 4 合规）。D88 §7.4 修订：评分钮样式收拢进 .review-bar .grade
+   （色点承载语义、推荐档 accent 填充）；本组仅保留网格契约。
+   旧「.grade-row .btn 两行复合钮」与「.grade-*::before 左缘 4px 色条」随零消费者删除（GUIDE §5.3 v48.48 作废条款）。 */
 .grade-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--sp-4);
   margin-top: var(--sp-12);
 }
-.grade-row .btn {
-  flex-direction: column;
-  height: auto;
-  min-height: 56px; /* 两行复合按钮；56 = 8×7 仍吸附基线网格 */
-  padding: var(--sp-2) var(--sp-4);
-  gap: var(--sp-1);
-  align-items: center;
-  justify-content: center;
-}
-/* 「越小越粗」：父级 .btn 是 14px/500，12px 的到期数子标签字重必须 ≥500。
+/* 「越小越粗」：12px 的到期数子标签字重必须 ≥500。
    原 400 + opacity .75 双重违反——字重反向，且 opacity 让深色模式对比度不可控。 */
 .grade-due { font-size: var(--fs-meta); font-weight: 600; color: var(--text-helper); font-variant-numeric: tabular-nums; }
-/* 色彩纪律（swiss + 用户反馈：四按钮样式统一）——本体全部灰底，评分语义只以左缘 4px 色条 +
-   评分词同色表达；无填充差异、无第二焦点色。键盘焦点环 2px accent。 */
-.grade-again, .grade-hard, .grade-good, .grade-easy {
-  background: var(--grey-1);
-  color: var(--text-primary);
-  position: relative;
-}
-.grade-again::before, .grade-hard::before, .grade-good::before, .grade-easy::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-}
-.grade-again::before { background: var(--error); }
-.grade-hard::before { background: var(--warning); }
-.grade-good::before { background: var(--accent); }
-.grade-easy::before { background: var(--success); }
-.grade-row .btn:hover { background: var(--grey-2); }
-.grade-row .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .review-tools { display: flex; gap: var(--sp-3); margin-top: var(--sp-4); }
 
 .ta-short { min-height: 64px !important; }
