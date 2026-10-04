@@ -393,7 +393,6 @@ export default function Reader({
     kind: "highlight" | "extract";
     comment: string | null;
     color: string | null;
-    quote: string;
     anchor: ReaderRect;
   } | null>(null);
   const marksRef = useRef<ReaderDocMark[]>([]);
@@ -728,7 +727,6 @@ export default function Reader({
           kind: m.kind === "highlight" ? "highlight" : "extract",
           comment: m.comment ?? null,
           color: m.color ?? null,
-          quote: m.text,
           anchor: info.rect
         });
       }
@@ -1690,7 +1688,6 @@ export default function Reader({
             kind={markEditor.kind}
             comment={markEditor.comment}
             color={markEditor.color}
-            quote={markEditor.quote}
             anchor={markEditor.anchor}
             palette={annotSettings.annotatePalette}
             customEnabled={annotSettings.annotateCustomEnabled}

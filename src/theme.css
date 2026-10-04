@@ -1970,14 +1970,6 @@ body.theme-dark .modal-panel {
   padding: var(--sp-3);
   z-index: var(--z-sticky);
 }
-.editor .eq {
-  font-size: var(--fs-secondary);
-  color: var(--text-helper);
-  margin: 0 0 var(--sp-2);
-  padding-left: var(--sp-2);
-  border-left: 2px solid var(--accent);
-  background: var(--accent-soft);
-}
 .editor textarea {
   width: 100%;
   min-height: 56px;
@@ -2001,6 +1993,28 @@ body.theme-dark .modal-panel {
   font-size: var(--fs-meta);
   color: var(--text-helper);
 }
+/* v48.46（D86）：「已制卡 N 张」（聚合口径）+「就此制卡」并入底行——计数推右侧组到最右，
+   就此制卡＝与 .del 同规格（无边框 meta 文字钮、hover 下划线）但**黑色文字**（--text-primary，
+   不取 error 红——用户明确「样式对齐删除高亮，颜色保持黑色」）。 */
+.editor .ebar .cardcount {
+  margin-left: auto;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.editor .ebar .make-card {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.editor .ebar .make-card:hover { text-decoration: underline; }
+.editor .ebar .cardcount + .make-card ~ .del,
+.editor .ebar .cardcount + .make-card ~ .del-cancel { margin-left: 0; }
 .editor .ebar .del,
 .editor .ebar .del-cancel {
   margin-left: auto;
@@ -3259,14 +3273,8 @@ body.theme-dark .modal-panel {
   background: var(--accent);
 }
 
-/* v48.45（D85）：悬停浮层（.reader-mark-pop）退役——文中标记的唯一浮层＝点击弹出的
-   批注编辑浮层（.editor），「已制卡 N 张」（聚合口径）+「就此制卡」由编辑浮层的学档行承接。 */
-.editor-learn-bar {
-  justify-content: space-between;
-  border-top: 1px solid var(--border-subtle);
-  padding-top: var(--sp-2);
-}
-.editor-learn-bar .save-state { color: var(--text-helper); }
+/* v48.45（D85）：悬停浮层（.reader-mark-pop）退役——文中标记的唯一浮层＝点击弹出的批注编辑浮层；
+   v48.46（D86）：「已制卡 N 张」+「就此制卡」并入浮层底行（.editor .ebar，见 .cardcount/.make-card）。 */
 
 /* v28 加载态：大书解析+首屏渲染需数秒，期间显示提示（在 container 层，不吃 viewerEl 的反色滤镜） */
 .reader-engine-host .pdf-viewer-container.pdf-loading::after {

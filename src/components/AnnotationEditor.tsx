@@ -26,8 +26,6 @@ export interface AnnotationEditorProps {
   kind: "highlight" | "extract";
   comment: string | null;
   color: string | null;
-  /** 所引原文（浮层顶部一行，截断展示） */
-  quote: string;
   /** 锚点包围盒（视口坐标）——所引文字/高亮的位置 */
   anchor: PopoverRect;
   /** 容器（视口坐标；缺省＝整个视口） */
@@ -64,7 +62,6 @@ export default function AnnotationEditor({
   kind,
   comment,
   color,
-  quote,
   anchor,
   container,
   palette,
@@ -197,7 +194,6 @@ export default function AnnotationEditor({
       data-editor-for={extractId}
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
     >
-      <p className="eq" title={quote}>{quote}</p>
       <textarea
         ref={taRef}
         rows={3}
@@ -222,6 +218,18 @@ export default function AnnotationEditor({
         <span className="save-state" data-savestate>
           {saveState === "saving" ? "正在保存…" : saveState === "saved" ? "已保存" : ""}
         </span>
+        {/* v48.46（D86）：「已制卡 N 张」（聚合口径）+「就此制卡」并入底行（v48.45 的独立学档行作废）——
+            就此制卡＝.make-card（与 .del 同规格、黑色文字）；摘录页宿主不传计数时不渲染，底行照旧 */}
+        {cardCount !== undefined && (
+          <span className="cardcount mono" data-cardcount>
+            已制卡 {cardCount} 张
+          </span>
+        )}
+        {onMakeCard && (
+          <button type="button" className="make-card" data-make-card onClick={onMakeCard}>
+            就此制卡
+          </button>
+        )}
         {confirmDelete ? (
           <>
             <button type="button" className="del" data-del-confirmed onClick={() => void onDelete()}>
@@ -237,19 +245,6 @@ export default function AnnotationEditor({
           </button>
         )}
       </div>
-      {/* v48.45（D85）：悬停浮层退役后由本浮层承接——「已制卡 N 张」（聚合口径）+「就此制卡」 */}
-      {(cardCount !== undefined || onMakeCard) && (
-        <div className="ebar editor-learn-bar" data-learn-bar>
-          <span className="save-state mono" data-cardcount>
-            已制卡 {cardCount ?? 0} 张
-          </span>
-          {onMakeCard && (
-            <button type="button" className="btn btn-outline btn-sm" data-make-card onClick={onMakeCard}>
-              就此制卡
-            </button>
-          )}
-        </div>
-      )}
       {colorOpen && (
         <div className="colorpop" data-colorpop>
           <div className="row" data-colorrow>

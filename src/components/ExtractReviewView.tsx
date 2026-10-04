@@ -970,7 +970,6 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           kind={editing.kind}
           comment={editing.comment}
           color={editing.color}
-          quote={editing.quote}
           anchor={editing.anchor}
           container={pageRef.current?.getBoundingClientRect() ?? null}
           palette={ANNOT_PALETTE}

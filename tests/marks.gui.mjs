@@ -260,13 +260,13 @@ const visibilityProbe = (markId) => `(() => {
 const editorState = `(() => {
   const el = document.querySelector(".editor[data-editor-for]");
   if (!el) return JSON.stringify({ open: false });
-  const q = el.querySelector(".eq");
+  /* v48.46（D86）：引文行（.eq）已删——浮层归属＝data-editor-for（extractId） */
   const ta = el.querySelector("textarea");
   const count = el.querySelector("[data-cardcount]");
   const btns = [...el.querySelectorAll("button")].map((b) => b.textContent.trim());
   const r = el.getBoundingClientRect();
   return JSON.stringify({
-    open: true, quote: q ? q.textContent : null, comment: ta ? ta.value : null,
+    open: true, for: el.dataset.editorFor, comment: ta ? ta.value : null,
     cardcount: count ? count.textContent : null, buttons: btns,
     rect: { l: r.left, t: r.top, w: r.width, h: r.height }, vw: window.innerWidth, vh: window.innerHeight
   });
@@ -404,7 +404,7 @@ try {
   await wait(800);
   let pop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
   check("点击出编辑浮层（唯一浮层，D85）", pop.open === true, JSON.stringify(pop));
-  check("浮层原文 ＝ 摘录正文", pop.quote === PDF_PICK, JSON.stringify(pop).slice(0, 300));
+  check("浮层挂在被点的摘录上（data-editor-for；引文行已删，D86）", pop.for === ex.id, JSON.stringify(pop).slice(0, 300));
   check("浮层含「已制卡 0 张」（聚合口径）", String(pop.cardcount || "").includes("已制卡 0 张"), pop.cardcount);
   check("浮层含「就此制卡」按钮", Array.isArray(pop.buttons) && pop.buttons.includes("就此制卡"), JSON.stringify(pop.buttons));
   check(
@@ -639,7 +639,7 @@ try {
   await clickAt(cdp, (epSel.x1 + epSel.x2) / 2, epSel.y);
   await wait(800);
   let epPop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
-  check("EPUB 点击出浮层且原文 ＝ 所选文字", epPop.open === true && epPop.quote === EPUB_MARK, JSON.stringify(epPop).slice(0, 300));
+  check("EPUB 点击出浮层且挂在被点摘录上（引文行已删，D86）", epPop.open === true && epPop.for === epEx.id, JSON.stringify(epPop).slice(0, 300));
   await screenshot(cdp, "tmp-marks-epub-dark.png");
 
   // 两档：切回纸白 → 注入字面值应变浅档（主题下拉在「阅读设置」弹出组里，先确保组在场）
@@ -669,7 +669,7 @@ try {
   await clickAt(cdp, (epSel.x1 + epSel.x2) / 2, epSel.y);
   await wait(800);
   epPop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
-  check("切主题后高亮仍命中（点击浮层照常出现）", epPop.open === true && epPop.quote === EPUB_MARK, JSON.stringify(epPop).slice(0, 300));
+  check("切主题后高亮仍命中（点击浮层照常出现）", epPop.open === true && epPop.for === epEx.id, JSON.stringify(epPop).slice(0, 300));
   await screenshot(cdp, "tmp-marks-epub-light.png");
 
   // ================= C. 清理 =================
