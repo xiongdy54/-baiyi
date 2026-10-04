@@ -2724,6 +2724,11 @@ body.theme-dark .modal-panel {
 /* 底部动作栏：几何由共用 .stage-bar 提供（元素挂双类 stage-bar review-bar）。
    .review-bar 仅作为作用域/测试钩子保留。评分网格显式复位 margin-top，堵住通用 .grade-row 的 48px 泄漏。 */
 .review-bar .grade-row { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); min-width: 0; margin-top: 0; }
+/* v48.50（D90，用户指令②）：复习页底栏内容列与卡面同盒（静态对齐，无动效——复习页无栏开合）。
+   bar 负边距满宽保留（paper 底/border-top 仍贯通窗宽），padding-inline 与 .review-wrap 同值（64）
+   ⇒ 内容盒 ≡ .review-session 盒，stage-bar-inner 720 居中与卡面同一公式，构造性对齐。 */
+.review-wrap .stage-bar { padding-inline: var(--sp-16); }
+.review-wrap .stage-bar-inner { max-width: 720px; margin-inline: auto; }
 /* 评分钮 D88 §7.4（GUIDE §5.3 v48.48 修订）：预览 .grade 卡式化——语义色唯一承载＝8px 色点，
    原「灰底 + 左缘 4px 色条」条款作废（.grade-*::before 随零消费者删除）；两行结构＝
    .grade-name（色点 + 档名 15px/500）+ .grade-due（mono 间隔预览）。
@@ -3628,13 +3633,20 @@ body.theme-dark .modal-panel {
   align-items: center;
   justify-content: flex-start;
   gap: var(--sp-4);
-  /* v48.45（D85）：左让位 --sp-16 给浮在轨顶的开关钮（16+40+8，与摘录页头带同一让位） */
+  /* v48.45（D85）：左让位 --sp-16 给浮在轨顶的开关钮（16+40+8，与摘录页头带同一让位）
+     v48.50（D90，用户指令③）：让位**条件化**——轨展开时开关钮浮在轨头（16,60）、不再遮挡工具栏，
+     左让位收回 --sp-4（与正文视口同一页面内距 ⇒ 工具栏与正文左对齐）；轨收起时开关钮浮在工具栏区
+     （16,60）⇒ 64px 让位保留。padding-left 挂 --dur/--ease 过渡，与轨宽动画同步。 */
   padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-16);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--reader-bg, var(--paper));
   color: var(--reader-fg, var(--text-primary));
   /* 控件随阅读主题换色（v20.1） */
   --reader-border: color-mix(in srgb, var(--reader-fg, #1a1a1a) 28%, transparent);
+}
+.reader-side-rail:not(.is-closed) + .reader-engine-col .reader-engine-controls { padding-left: var(--sp-4); }
+@media (prefers-reduced-motion: no-preference) {
+  .reader-engine-controls { transition: padding-left var(--dur) var(--ease); }
 }
 .reader-engine-controls-group {
   display: flex;
@@ -3668,9 +3680,11 @@ body.theme-dark .modal-panel {
 /* v48.45（D85，用户指令⑤）：右上三钮（翻页/更多/阅读设置）＝**顶栏导航同款**——
    无边框、32 高、secondary 档 500、次文字色、hover grey-1 底（阅读外观按 --reader-fg 混色取档）。
    D84⑦ 对这三钮的「24 高有框」口径作废；左侧选区动作组的有框语言不变。
-   翻页图标钮＝顶栏 .icon-btn 同规格（32×32 无边框）。 */
-.reader-engine-controls .btn,
-.reader-engine-controls .dd-btn {
+   翻页图标钮＝顶栏 .icon-btn 同规格（32×32 无边框）。
+   v48.50（D90，用户指令③）修订：「更多/阅读设置」两钮**降为 btn-rail 同族**（24 高、有框、meta 字号，
+   框色走 --reader-border 随阅读主题混色）——D85⑤ 的「顶栏同款 32 高」对这两钮作废（用户：「有些大，
+   请调整为与其他按钮一致的大小和样式」）；翻页 icon 钮不在点名范围、维持 32×32 无边框。 */
+.reader-engine-controls .btn {
   height: 32px;
   padding: 0 var(--sp-3);
   font-size: var(--fs-secondary);
@@ -3678,6 +3692,16 @@ body.theme-dark .modal-panel {
   white-space: nowrap;
   background: transparent;
   border: 1px solid transparent;
+  color: color-mix(in srgb, var(--reader-fg, #1a1a1a) 68%, transparent);
+}
+.reader-engine-controls .dd-btn {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--reader-border);
   color: color-mix(in srgb, var(--reader-fg, #1a1a1a) 68%, transparent);
 }
 .reader-engine-controls .reader-nav-btn {
@@ -3688,10 +3712,13 @@ body.theme-dark .modal-panel {
 }
 .reader-engine-controls .btn:hover,
 .reader-engine-controls .dd-btn:hover {
-  border-color: transparent;
   color: var(--reader-fg, var(--text-primary));
   background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent);
 }
+.reader-engine-controls .btn:hover { border-color: transparent; }
+.reader-engine-controls .dd-btn:hover { border-color: var(--reader-fg, var(--border-strong)); }
+/* 选单随 24px 钮族紧凑（D90）：条目内距 sp-1/sp-2（基线 dd-item 是 sp-2/sp-3 的顶栏档密度） */
+.reader-engine-controls .dd-item { padding: var(--sp-1) var(--sp-2); }
 .reader-engine-controls .dd-caret {
   color: var(--reader-fg, var(--text-helper));
   opacity: 0.7;
@@ -5397,7 +5424,9 @@ body.capture-body #root { height: 100vh; }
 @media (prefers-reduced-motion: no-preference) {
   .extract-annot-rail { transition: width var(--dur-panel) var(--ease), visibility var(--dur-panel) linear; }
   .extract-page .extract-page-cols { transition: padding-left var(--dur-panel) var(--ease); }
-  .extract-page .stage-bar { transition: margin-left var(--dur-panel) var(--ease); }
+  /* D90：margin-left 与 margin-right 必须写在**同一条** transition 里——两处简写会对同一选择器
+     级联覆盖（后者顶掉前者），D88 就是这样把 margin-left 过渡弄丢的（底栏瞬跳、与卡面不同步）。 */
+  .extract-page .stage-bar { transition: margin-left var(--dur-panel) var(--ease), margin-right var(--dur-panel) var(--ease); }
 }
 /* 可见性离散步进：过渡下「收起时停在末帧隐身、展开时立即显形」＝滑出/滑入全程可见 */
 .extract-annot-rail .annot-side { height: 100%; }
@@ -5411,7 +5440,7 @@ body.capture-body #root { height: 100vh; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .extract-page .extract-main { transition: padding-right var(--dur-panel) var(--ease); }
-  .extract-page .stage-bar { transition: margin-right var(--dur-panel) var(--ease); }
+  /* D90：stage-bar 的 margin-right 过渡已并入上方 margin-left/margin-right 合并声明（勿在此重复简写）。 */
 }
 /* 栏头行（v7/D74 让位更新；v48.45/D85 起阅读器侧栏轨共用同一套）：与 fixed 开关钮**同一行**——
    头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；
