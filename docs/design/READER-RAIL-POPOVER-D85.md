@@ -79,3 +79,14 @@
 3. 「就此制卡」＝`.make-card`：与 `.del` 同规格（无边框 meta 文字钮、hover 下划线），文字色 `--text-primary`（黑）而非 error 红。
 
 验收：`tsc` 0 + build 成功；marks.gui 浮层断言改「归属 + 计数 + 按钮」口径（引文行不再存在）；annotations ⑩m 不回退；extract.gui（摘录页宿主形态不变）不回退。
+
+### v3（2026-10-04，D87——用户指令：已制卡计数变入口）
+
+0. 用户原话（逐字）：「在阅读或摘录界面点击高亮或下划线或摘录文本时弹出的浮窗上，请把"已制卡多少张"的信息变为一个按钮，点击后可以直接跳转到卡片浏览器筛选显示归属于这个高亮锚下的所有卡片（包括摘录的摘录以及下面的所有子层级产出的卡片）。」
+
+契约：
+1. `AnnotationEditor` 的「已制卡 N 张」由文字变**按钮**（`data-open-cards`，黑字、hover 下划线，title 说明口径）；新增 `onOpenCards` 属性，宿主未传（无跳转出口）时保持纯文字。计数数值仍是 D85 的聚合口径，不变。
+2. 跳转＝App 视图 `browse` 携 `anchorExtractId`；`CardBrowser` 新增锚点筛选——**子孙闭包**（锚摘录自身 + 子摘录/子子摘录…全部层级，从 workflow 行的 `contextRef.parentExtractId` 邻接表派生，防环）：闪卡表按 `contextRef.extractId ∈ 闭包` 过滤；摘录表按 `id ∈ 闭包` 过滤（供切换「摘录」页签看来源树）。工具栏下出**锚点筛选条**（`data-anchor-filter-bar`：计数 + 「清除」），清除经 `onClearAnchorFilter` 回 App 摘掉视图字段。
+3. 两个宿主都接出口：Reader（markEditor）与 ExtractReviewView（editing）各加 `onOpenAnchorCards(extractId)` 回调，App 路由到 browse。
+
+验收：`tsc` 0 + build 成功；marks.gui 新增端到端判据——点计数按钮 → 浏览器在场 + 锚点筛选条在场 + 卡行数＝已制卡数；annotations ⑩m / extract.gui 不回退。

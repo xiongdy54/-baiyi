@@ -1998,11 +1998,17 @@ body.theme-dark .modal-panel {
    不取 error 红——用户明确「样式对齐删除高亮，颜色保持黑色」）。 */
 .editor .ebar .cardcount {
   margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
   font-size: var(--fs-meta);
-  color: var(--text-helper);
+  color: var(--text-primary); /* v48.47（D87）：计数变按钮（黑字、hover 下划线），与 .make-card 同族 */
+  cursor: pointer;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+.editor .ebar .cardcount:hover { text-decoration: underline; }
 .editor .ebar .make-card {
   background: none;
   border: none;
@@ -3585,6 +3591,21 @@ body.theme-dark .modal-panel {
 }
 
 /* ---------- 卡片浏览 v19（Anki 式表格 + 行详情维护）；v48.40/D80 边距对齐舞台语言（距窗缘 16px） ---------- */
+/* v48.47（D87）：锚点筛选条——来自浮窗「已制卡 N 张」点击；清除后隐藏 */
+.cb-anchor-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: 720px;
+  margin: var(--sp-2) auto 0;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--accent-soft);
+  font-size: var(--fs-meta);
+  color: var(--text-primary);
+}
+.cb-anchor-bar .crumb-exit { margin-left: auto; }
+
 .cb-toolbar {
   display: flex;
   align-items: center;

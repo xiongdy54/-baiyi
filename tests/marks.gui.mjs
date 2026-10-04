@@ -458,6 +458,27 @@ try {
   await wait(900);
   pop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
   check("制卡后计数刷新为「已制卡 1 张」", String(pop.cardcount || "").includes("已制卡 1 张"), pop.cardcount);
+
+  // v48.47（D87）：计数是按钮，点击 → 卡片浏览器按锚点筛选（闭包：锚自身 + 全部子层级）
+  const cntBtn = JSON.parse(String(await cdp.eval(`(() => {
+    const b = document.querySelector(".editor [data-open-cards]");
+    if (!b) return "";
+    const r = b.getBoundingClientRect();
+    return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  })()`)) || "{}");
+  check("计数是按钮（data-open-cards，D87）", typeof cntBtn.x === "number", JSON.stringify(cntBtn));
+  await clickAt(cdp, cntBtn.x, cntBtn.y);
+  await wait(1500);
+  const anchorView = await cdp.eval(`JSON.stringify({
+    browse: !!document.querySelector(".cb-toolbar"),
+    bar: !!document.querySelector("[data-anchor-filter-bar]"),
+    barText: document.querySelector("[data-anchor-filter-count]")?.textContent || "",
+    cardRows: document.querySelectorAll(".cb-table:not([data-extract-table]) .cb-row:not(.cb-row-head)").length
+  })`);
+  const av = JSON.parse(String(anchorView) || "{}");
+  check("点计数 → 卡片浏览器 + 锚点筛选条在场（D87）", av.browse === true && av.bar === true, anchorView);
+  check("锚点筛选条计数＝已制卡数（1 张，含全部子层级）", String(av.barText || "").includes("已制卡 1 张"), anchorView);
+  check("浏览器卡行数＝该锚下的卡（1）", av.cardRows === 1, anchorView);
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
   await wait(400);
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });

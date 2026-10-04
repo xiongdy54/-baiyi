@@ -95,6 +95,8 @@ interface Props {
   /** v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡（按书范围会话） */
   onReviewExtracts?: () => void;
   onReviewCards?: () => void;
+  /** v48.47（D87）：点「已制卡 N 张」→ 宿主（App）跳卡片浏览器并按该摘录锚筛选 */
+  onOpenAnchorCards?: (extractId: string) => void;
 }
 
 /** v25：读取正文图片/选区图片的 dataURL（blob:/data:/bookasset: 同源可 fetch；超 12MB 拒绝） */
@@ -209,7 +211,8 @@ export default function Reader({
   openMindmapMapId,
   resumeRunId,
   onReviewExtracts,
-  onReviewCards
+  onReviewCards,
+  onOpenAnchorCards
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
@@ -1693,6 +1696,7 @@ export default function Reader({
             customEnabled={annotSettings.annotateCustomEnabled}
             cardCount={m.cardCount}
             onMakeCard={() => startMarkCard(m)}
+            onOpenCards={onOpenAnchorCards ? () => onOpenAnchorCards(markEditor.id) : undefined}
             onSaveComment={(c) => selActions.saveAnnotationComment(markEditor.id, c)}
             onSaveColor={async (c) => {
               await selActions.saveAnnotationColor(markEditor.id, c);

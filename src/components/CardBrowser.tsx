@@ -108,11 +108,20 @@ function srcLabel(c: CardRecord & { docTitle?: string }): string {
 
 export default function CardBrowser({
   onJumpToDoc,
-  onStartSession
+  onStartSession,
+  anchorExtractId,
+  onClearAnchorFilter
 }: {
   onJumpToDoc?: JumpToDoc;
   /** v48.22（D58 §6.8-5）：从筛选牌组进入「集中复习」（按范围开会话；App 负责路由） */
   onStartSession?: (scope: { bookItemIds: string[]; kinds: string[]; name: string; limits?: Record<string, number> | null }) => void;
+  /**
+   * v48.47（D87）：**锚点筛选**——只显示归属于该高亮锚的条目（锚摘录自身 + 全部子孙摘录，
+   * 闪卡按 `contextRef.extractId ∈ 闭包`、摘录按 `id ∈ 闭包`）；由点击浮窗「已制卡 N 张」进入。
+   */
+  anchorExtractId?: string | null;
+  /** 清除锚点筛选（回 App 摘掉视图字段） */
+  onClearAnchorFilter?: () => void;
 }) {
   const [all, setAll] = useState<BrowserCard[]>([]);
   const [preset, setPreset] = useState<Preset>("all");
@@ -175,6 +184,33 @@ export default function CardBrowser({
     return eventBus.on("cards/changed", refresh);
   }, [refresh]);
 
+  // v48.47（D87）：锚点筛选的**子孙闭包**——锚摘录自身 + 子摘录/子子摘录…全部层级。
+  // 邻接表来自 workflow 行的 contextRef.parentExtractId（摘录树）；visited 防脏数据成环。
+  const anchorClosure = useMemo(() => {
+    if (!anchorExtractId) return null;
+    const parentToChildren = new Map<string, string[]>();
+    for (const e of extracts as Array<{ id?: string; contextRef?: { parentExtractId?: string | null } | null }>) {
+      const pid = e?.contextRef?.parentExtractId;
+      if (pid && e?.id) {
+        const list = parentToChildren.get(String(pid)) ?? [];
+        list.push(String(e.id));
+        parentToChildren.set(String(pid), list);
+      }
+    }
+    const set = new Set<string>([String(anchorExtractId)]);
+    const stack = [String(anchorExtractId)];
+    while (stack.length) {
+      const cur = stack.pop() as string;
+      for (const child of parentToChildren.get(cur) ?? []) {
+        if (!set.has(child)) {
+          set.add(child);
+          stack.push(child);
+        }
+      }
+    }
+    return set;
+  }, [anchorExtractId, extracts]);
+
   const counts = useMemo(
     () => ({
       due: all.filter(isDueCard).length,
@@ -203,6 +239,8 @@ export default function CardBrowser({
     if (preset === "leech") list = list.filter(isLeechOrSuspended);
     if (preset === "deferred") list = list.filter((c) => deferredMap.has(c.id));
     if (typeFilter !== "all") list = list.filter((c) => c.cardType === typeFilter);
+    // v48.47（D87）：锚点筛选——卡挂在闭包内摘录上（contextRef.extractId）
+    if (anchorClosure) list = list.filter((c) => anchorClosure.has(String(c.contextRef?.extractId || "")));
     if (memFilter) list = list.filter((c) => !!c.memoryRefJson);
     if (stateFilter !== "all") {
       list = list.filter((c) => {
@@ -263,7 +301,7 @@ export default function CardBrowser({
     else if (sortBy === "lapses") sorted.sort((a, b) => (b.fsrs?.lapses ?? 0) - (a.fsrs?.lapses ?? 0));
     else sorted.sort((a, b) => (a.fsrs?.due ?? 0) - (b.fsrs?.due ?? 0)); // 默认到期升序，同复习队列
     return sorted;
-  }, [all, preset, typeFilter, stateFilter, memFilter, query, sortBy, deferredMap]);
+  }, [all, preset, typeFilter, stateFilter, memFilter, query, sortBy, deferredMap, anchorClosure]);
 
   // ---- v48.22（D58 §6.8-6）：按书分组 + 多选 + 批量（唯一数据源＝cardsApi.listAll + workflowAPI.listAll）
   const bookOptions = useMemo(() => {
@@ -287,6 +325,8 @@ export default function CardBrowser({
     if (parsed.kind === "card") return [];
     let list = extracts;
     if (bookScope !== "all") list = list.filter((e) => String(e.libraryItemId || "") === bookScope);
+    // v48.47（D87）：锚点筛选——摘录表只留闭包内条目（切「摘录」页签可看锚的来源树）
+    if (anchorClosure) list = list.filter((e) => anchorClosure.has(String(e.id)));
     if (parsed.book) {
       const bk = foldSearch(parsed.book);
       list = list.filter((e) => foldSearch(String(e.docTitle || "")).includes(bk));
@@ -315,7 +355,7 @@ export default function CardBrowser({
     else if (sortBy === "priority") sorted.sort((a, b) => Number(b.priority) - Number(a.priority));
     else sorted.sort((a, b) => Number(a.topicNextAt ?? 0) - Number(b.topicNextAt ?? 0));
     return sorted;
-  }, [extracts, bookScope, query, preset, sortBy]);
+  }, [extracts, bookScope, query, preset, sortBy, anchorClosure]);
 
   const viewCards = kindFilter === "extract" ? [] : scopeCards;
   const viewExtracts = kindFilter === "card" ? [] : scopeExtracts;
@@ -567,6 +607,16 @@ export default function CardBrowser({
         </div>
       </div>
 
+      {/* v48.47（D87）：锚点筛选条——来自阅读/摘录浮窗「已制卡 N 张」点击；计数＝闭包内卡数 */}
+      {anchorExtractId && (
+        <div className="cb-anchor-bar" data-anchor-filter-bar>
+          <span className="mono">锚点筛选</span>
+          <span data-anchor-filter-count>{`已制卡 ${all.filter((c) => anchorClosure?.has(String(c.contextRef?.extractId || ""))).length} 张（含全部子层级）`}</span>
+          <button className="crumb-exit" data-anchor-filter-clear onClick={onClearAnchorFilter} title="清除锚点筛选，回到全部条目">
+            清除
+          </button>
+        </div>
+      )}
       {/* v48.40（D80）：批量动作条移至吸底 stage-bar（见页尾）——未选中时此处不再常驻空条 */}
       {/* v48.22（D58 §6.8-5）：筛选牌组＝保存下来的复习范围（不移动卡片，故复习记录照常入 FSRS） */}
       <div className="cb-batch" data-deck-bar>

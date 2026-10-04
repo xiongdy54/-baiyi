@@ -48,6 +48,11 @@ export interface AnnotationEditorProps {
   cardCount?: number;
   /** 「就此制卡」动作（走宿主的手动制卡链）；缺省不显示按钮 */
   onMakeCard?: () => void;
+  /**
+   * v48.47（D87）：点「已制卡 N 张」→ 宿主跳卡片浏览器并按该锚的子孙闭包筛选；
+   * 缺省（无跳转出口）时计数保持纯文字。
+   */
+  onOpenCards?: () => void;
 }
 
 /** 色块显示色：色板 id → --annot-<id>；#hex 原样 */
@@ -71,7 +76,8 @@ export default function AnnotationEditor({
   onDelete,
   onClose,
   cardCount,
-  onMakeCard
+  onMakeCard,
+  onOpenCards
 }: AnnotationEditorProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -220,11 +226,23 @@ export default function AnnotationEditor({
         </span>
         {/* v48.46（D86）：「已制卡 N 张」（聚合口径）+「就此制卡」并入底行（v48.45 的独立学档行作废）——
             就此制卡＝.make-card（与 .del 同规格、黑色文字）；摘录页宿主不传计数时不渲染，底行照旧 */}
-        {cardCount !== undefined && (
-          <span className="cardcount mono" data-cardcount>
-            已制卡 {cardCount} 张
-          </span>
-        )}
+        {cardCount !== undefined &&
+          (onOpenCards ? (
+            <button
+              type="button"
+              className="cardcount mono"
+              data-cardcount
+              data-open-cards
+              title="查看这个锚点下的全部卡片（含子摘录等所有子层级产出的卡）"
+              onClick={onOpenCards}
+            >
+              已制卡 {cardCount} 张
+            </button>
+          ) : (
+            <span className="cardcount mono" data-cardcount>
+              已制卡 {cardCount} 张
+            </span>
+          ))}
         {onMakeCard && (
           <button type="button" className="make-card" data-make-card onClick={onMakeCard}>
             就此制卡
