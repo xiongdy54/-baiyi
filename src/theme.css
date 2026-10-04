@@ -3680,13 +3680,12 @@ body.theme-dark .modal-panel {
 /* v48.45（D85，用户指令⑤）：右上三钮（翻页/更多/阅读设置）＝**顶栏导航同款**——
    无边框、32 高、secondary 档 500、次文字色、hover grey-1 底（阅读外观按 --reader-fg 混色取档）。
    D84⑦ 对这三钮的「24 高有框」口径作废；左侧选区动作组的有框语言不变。
-   翻页图标钮＝顶栏 .icon-btn 同规格（32×32 无边框）。
-   v48.50（D90，用户指令③）修订：「更多/阅读设置」两钮**降为 btn-rail 同族**（24 高、有框、meta 字号，
-   框色走 --reader-border 随阅读主题混色）——D85⑤ 的「顶栏同款 32 高」对这两钮作废（用户：「有些大，
-   请调整为与其他按钮一致的大小和样式」）；翻页 icon 钮不在点名范围、维持 32×32 无边框。 */
+   v48.50（D90，用户指令③）修订：三钮**全部降为 24 高**（同日增补把翻页也收进来——用户：
+   「翻页按钮请也变小收窄与其他按钮高度对齐」）；「更多/阅读设置」为 btn-rail 同族（有框、meta 字号，
+   框色走 --reader-border 随阅读主题混色），翻页 icon 钮保持无边框。 */
 .reader-engine-controls .btn {
-  height: 32px;
-  padding: 0 var(--sp-3);
+  height: 24px;
+  padding: 0;
   font-size: var(--fs-secondary);
   font-weight: 500;
   white-space: nowrap;
@@ -3705,7 +3704,7 @@ body.theme-dark .modal-panel {
   color: color-mix(in srgb, var(--reader-fg, #1a1a1a) 68%, transparent);
 }
 .reader-engine-controls .reader-nav-btn {
-  width: 32px;
+  width: 24px;
   padding: 0;
   justify-content: center;
   line-height: 1;
@@ -3739,9 +3738,11 @@ body.theme-dark .modal-panel {
 }
 /* 工具栏弹出组（D5-B）：内容＝动作行（更多）或设置行（阅读设置）。
    面板走 .dd-menu 默认（right:0 贴按钮右缘 → 与工具条右端一致，不顶出窗口）；
-   组内的设置下拉沿用同一套 .dd（值是既有 Dropdown，不新增设置键）。 */
+   组内的设置下拉沿用同一套 .dd（值是既有 Dropdown，不新增设置键）。
+   v48.50/D90 增补：去掉 200px 固定 min-width——「更多」只有两个短条目，200px 撑出大片右侧空白；
+   面板宽度交由内容决定（dd-item 本就 nowrap；设置行的行内 flex 自然排布，不依赖面板定宽）。 */
 .reader-tool-menu {
-  min-width: 200px;
+  min-width: 0;
 }
 .reader-tool-menu .dd-item {
   width: 100%;
