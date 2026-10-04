@@ -54,7 +54,8 @@ export function normalizeMarkRects(raw: unknown): { x: number; y: number; w: num
  * @param rows workflowAPI.listAll() 的原样行（contextRef 已解析）
  * @param documentId 当前阅读的文档 id
  * @param engine "pdf" 要有 pageIndex + rects；"foliate" 要有 cfi
- * @param cardCounts extractId → 已制卡数（壳层按 cards 的 contextRef.extractId 派生）
+ * @param cardCounts extractId → 已制卡数（**聚合口径**，v48.45/D85：自身 + 全部子孙摘录的卡；
+ *        壳层按直卡数经 `aggregateCardCounts` 派生）
  */
 /** 阅读器注解面板条目（D67 §3）：数据面只认 listAll 行，导航/绘制由内核另行负责。
  *  `anchorWhole` 恒 false——阅读器视角里每条都锚在文档位置上（整卡批注是摘录页的语义）。 */
@@ -139,6 +140,34 @@ export function buildAnnotationItems(
     return 0;
   });
   return [...located.map((l) => l.item), ...later];
+}
+
+/**
+ * 已制卡数的**聚合口径**（v48.45 / D85，用户点名）：`已制卡 N 张` 不只算这条高亮直接产生的卡，
+ * 还要算它的摘录、子摘录、子子摘录…**全部后代**上的卡。输入＝按 `contextRef.extractId` 直卡的
+ * 直卡数（extractId → 卡数）+ 父→子邻接表（摘录行的 `contextRef.parentExtractId`），输出＝
+ * 每个摘录 id 的聚合卡数（自身直卡 + 全部后代的直卡）。记忆化 DFS、带访问集防环（脏数据不自旋）。
+ */
+export function aggregateCardCounts(
+  counts: Record<string, number>,
+  parentToChildren: ReadonlyMap<string, readonly string[]>
+): Record<string, number> {
+  const memo = new Map<string, number>();
+  const visiting = new Set<string>();
+  const walk = (id: string): number => {
+    const cached = memo.get(id);
+    if (cached !== undefined) return cached;
+    if (visiting.has(id)) return 0; // 环：只算已入栈节点的直卡，不再下钻
+    visiting.add(id);
+    let total = counts[id] ?? 0;
+    for (const child of parentToChildren.get(id) ?? []) total += walk(child);
+    visiting.delete(id);
+    memo.set(id, total);
+    return total;
+  };
+  const out: Record<string, number> = {};
+  for (const id of new Set([...Object.keys(counts), ...parentToChildren.keys()])) out[id] = walk(id);
+  return out;
 }
 
 export function buildDocMarks(

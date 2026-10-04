@@ -1,0 +1,92 @@
+# 阅读侧栏全高轨统一 + 文中标记浮层收敛 + 顶栏化右上钮 · 设计稿（v1）
+
+> 状态：**实施中**（D85；v48.45）。
+> 决策登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D85**；修订对象＝§6.8-13（Reader dock）、§3.3（文中标记浮层）。
+> 前置：`docs/design/SELECTION-MENU-STAGE-TOOLBAR.md` v4（D84 工具栏/侧栏语言）、`docs/design/MINDMAP-SIDEBAR-TAB.md`（D84 导图页签）。
+
+---
+
+## 0. 用户原话（2026-10-04，逐字留痕）
+
+1. 为什么我的书架上多了"FSRSTEST引擎验证书"和"FSRSTEST粘贴引擎验证书"
+2. 当前在工具栏中切换为下划线模式后，选中文字并选择颜色，出来的下划线始终时黑色的，而不是我选的那个颜色，请修正这个问题。
+3. 当我高亮或者下划线一段文字后，如果我的鼠标悬停在文字上方，会弹出一个浮窗。当我点击这段文字时，会再弹出一个浮窗。请去掉鼠标悬停产生的那个浮窗，并将"已制卡多少张"的信息和"就此制卡"按钮移动到鼠标点击产生的浮窗上。注意："已制卡多少张"的数据不仅包含这段高亮文字直接产生的制卡，还包括这段高亮文字的摘录、子摘录、子子摘录以及更下层的摘录，所有子集产生的制卡都算进去。
+4. 我之前说过，阅读界面的侧边栏应与摘录界面的侧边栏布局完全一致，因为它们是同一个功能。这样将来适配其他皮肤时，一处更改即可直接适配两处的侧边栏。具体调整如下：
+   - 书架阅读界面中，侧边栏也应该贯通到顶部的展开按钮。
+   - 在侧边栏的收起按钮旁边，增加与摘录侧边栏相同的"全部摘录"、"高亮"、"位置"、"时间"筛选按钮。
+   - 在书架阅读界面中，如果展开侧边栏，工具栏整体应向右移动。
+   - 书架阅读界面中的侧边栏展开收起，使用与摘录侧边栏相同的动画.
+   - 书架页面和书架阅读页面的展开/收起按钮，应与摘录页面的展开/收起按钮保持完全一致。
+5. 书架阅读界面的工具栏上，翻页按钮、更多按钮、阅读设置按钮，以及它们内部展开后的更多按钮和选项，请使用和顶栏相同的设计。
+
+---
+
+## 1. 契约
+
+### 1.1 测试书泄漏（第 1 项）——诊断 + 防再漏
+
+- **根因**：`tests/reader.engine.mjs` 驱动**真实库**（无 `M7_TEST_USERDATA` 隔离），其清理（FSRSTEST 卡 + 两本书 API 软删）写在主流程**末尾第 8 步**——主流程中途抛异常即整段跳过。D84 当日两次套件中间态崩溃（选择器修复实验）→ 清理未执行 → 两本书泄漏进真实书架。
+- **修**：清理改为 **finally 兜底**（主流程成功/失败都尽力执行：CDP 连接尚在且拿到过 `seeded` id 时执行同一段清理；拿不到则打印未清理 id 供手工回收）。
+- **存量清理**：真实应用**运行中不得**直接写 `library.db`（sql.js 全量落盘，双写互吞）。应用关闭后跑一次性脚本 `npx electron tests/fsrstest.cleanup.cjs`——按书架卡片菜单删除等价：FSRSTEST 卡先删（`cardsAPI.remove` 同口径）→ `library:delete`（`deleteItem` 级联软删 item/documents/assets）。
+
+### 1.2 下划线颜色（第 2 项）——iframe 取值缺陷
+
+- **根因**：EPUB 下划线 CSS 注入 foliate **iframe 文档**，而 `annotSolid(色板 id)` 返回 `var(--annot-<id>)`——iframe 里没有宿主 Token，`text-decoration-color` 按 IACVT 失效回落 `currentColor`（文字色＝黑）。底色路径早已用 `evalColor()` 在宿主侧求字面值，下划线路径漏了同一道。
+- **修**：`foliate/adapter.ts` 下划线分支同样先 `evalColor(annotSolid(…), 兜底)` 求字面实色再注入。PDF 留痕元素在宿主 DOM（var 可解析），不受影响；摘录页卡面（`bodyAnnotations.ts`，宿主文档）不受影响。
+
+### 1.3 文中标记浮层收敛（第 3 项）
+
+- **悬停浮层（MarkPopover）退役**：`markHover` 不再弹浮层；`MarkPopover.tsx` 与其 CSS 删除。
+- **点击浮层（AnnotationEditor）承接动作**：新增 `cardCount` + `onMakeCard` 属性——浮层内出「已制卡 N 张」与「就此制卡」（走既有 `startMarkCard` 手动制卡链）。摘录页等其它宿主不传即不显示，形态不变。
+- **计数口径（聚合）**：`已制卡 N 张` ＝ 该条摘录自身 + 全部子孙摘录（子/子子/…递归）上的卡数之和。`src/lib/reader/marks.ts` 新增 `aggregateCardCounts(counts, parentToChildren)` 纯函数（记忆化 DFS、防环），Reader 在 marks 装载处把"按 extractId 直卡数"换成聚合口径；`buildDocMarks` 的 `cardCounts` 入参语义随之改为聚合值（注释同步）。
+
+### 1.4 阅读侧栏＝全高左轨（第 4 项）
+
+- **结构**：阅读器引擎布局改为「左轨 + 右列」一行两格——`.reader-side-rail`（280↔0）+ 右列（`.reader-engine-controls` 工具栏 + `.reader-engine-viewport`）。侧栏**贯通到顶**（上至应用顶栏下缘），展开时**工具栏整体随右列右移**。
+- **动画**：与摘录批注轨同款——两态恒挂载、`width 280↔0 + visibility` 过渡（`prefers-reduced-motion` 降级），内容容器恒 280px 不自重排。
+- **栏头行**：侧栏顶部＝「收起/展开」钮旁的**同款栏头**——`全部/摘录/高亮` 筛选段控 + `位置/时间` 排序段控（与摘录页 `.annot-side-head` 同类同类几何：行顶 48+12、左让位 `--sp-16`、行高 24、按钮 3:2 铺满）。排序状态从 `AnnotationPanel` 内部态提升为受控属性（`sort`/`onSort`），筛选沿用 `app.annotationFilter`；三页签（目录/摘录/图谱）仍在栏头之下，摘录页签里的 `AnnotationPanel` 以 `showHead=false` 渲染（避免双份段控）。
+- **开关钮**：阅读器开关钮改回与摘录页**同一份 fixed 定位**（视口左上 16, 48+12，浮在轨顶）——撤销 D84 的「工具栏流内」变体；工具栏行左让位 `--sp-16` 给它。书架页/阅读页/摘录页三处开关钮共用同一类对同一坐标语言。
+
+### 1.5 右上钮顶栏化（第 5 项）
+
+- 翻页（图标钮）/ 更多 / 阅读设置（文字钮）与顶栏导航同一设计语言：**无边框**、32 高、`--fs-secondary` 500、`--text-secondary`、hover `--grey-1` 底 + 主文字色（阅读外观下按 `--reader-fg` 混色取档）；展开的 `dd-menu` 面板本就是顶栏菜单同族（paper + hairline + dd-item），不改。D84⑦ 对这三钮的「24 高有框」口径**就此作废**（左侧选区动作组的有框语言不变）。
+
+---
+
+## 2. 验收清单（机械判据）
+
+1. `tsc` 0 错误 + `npm run build` 成功。
+2. `node tests/annotations.gui.mjs` 全绿：⑪ 几何判据改按「轨」口径（关＝轨宽 0），新增「栏头段控在场」判据；⑩m 改为「点击开编辑浮层（含已制卡数 + 就此制卡）」。
+3. `node tests/marks.gui.mjs` 全绿：hover 浮层断言全部改点击浮层（`.editor`）口径，就地制卡链与聚合计数（父条 + 子孙条）断言保留并新增子摘录制卡聚合用例。
+4. `node tests/reader.engine.mjs`：清理进 finally，异常路径不再泄漏 FSRSTEST 书。
+5. `node tests/m15r.gui.mjs` 45/45 不回退（图谱页签链路不受本轮影响）。
+6. 下划线颜色：EPUB 下划线注入色为**字面实色**（iframe 内无 var 依赖）——annotations.gui ⑥既有 computed 断言覆盖。
+
+---
+
+## 修订记录
+
+### v2（2026-10-04，D86——用户三项书面指令：点击浮层瘦身）
+
+0. 用户原话（逐字）：
+   1.「在阅读或摘录界面点击高亮或下划线或摘录文本时，弹出的浮窗最上方以摘录形式展示的被选中文本内容是不需要的。因为用户本身处于阅读界面，能直接看到自己选中的内容，无需在浮窗中重复显示，这既占用空间又影响美观。」
+   2.「将浮窗最下方的"已制卡多少张"信息以及"就此制卡"按钮，向上移动至与"色块"和"删除高亮"按钮同一栏。」
+   3.「"就此制卡"按钮要变小，样式需与"删除高亮"按钮对齐，但颜色保持黑色，不要变成红色。」
+
+契约：
+1. `AnnotationEditor` 删除顶部引文行（`.eq`）——浮层锚在被点文字旁，正文自见；`quote` 属性与两个宿主（Reader/ExtractReviewView）的传参一并拆除。归属判据改由 `data-editor-for`（extractId）承担（测试同步）。
+2. 「已制卡 N 张」（聚合口径）+「就此制卡」并入底行 `.ebar`（色块 · 保存态 · 已制卡 · 就此制卡 · 删除），独立学档行删除；摘录页宿主不传计数时不渲染，底行照旧。
+3. 「就此制卡」＝`.make-card`：与 `.del` 同规格（无边框 meta 文字钮、hover 下划线），文字色 `--text-primary`（黑）而非 error 红。
+
+验收：`tsc` 0 + build 成功；marks.gui 浮层断言改「归属 + 计数 + 按钮」口径（引文行不再存在）；annotations ⑩m 不回退；extract.gui（摘录页宿主形态不变）不回退。
+
+### v3（2026-10-04，D87——用户指令：已制卡计数变入口）
+
+0. 用户原话（逐字）：「在阅读或摘录界面点击高亮或下划线或摘录文本时弹出的浮窗上，请把"已制卡多少张"的信息变为一个按钮，点击后可以直接跳转到卡片浏览器筛选显示归属于这个高亮锚下的所有卡片（包括摘录的摘录以及下面的所有子层级产出的卡片）。」
+
+契约：
+1. `AnnotationEditor` 的「已制卡 N 张」由文字变**按钮**（`data-open-cards`，黑字、hover 下划线，title 说明口径）；新增 `onOpenCards` 属性，宿主未传（无跳转出口）时保持纯文字。计数数值仍是 D85 的聚合口径，不变。
+2. 跳转＝App 视图 `browse` 携 `anchorExtractId`；`CardBrowser` 新增锚点筛选——**子孙闭包**（锚摘录自身 + 子摘录/子子摘录…全部层级，从 workflow 行的 `contextRef.parentExtractId` 邻接表派生，防环）：闪卡表按 `contextRef.extractId ∈ 闭包` 过滤；摘录表按 `id ∈ 闭包` 过滤（供切换「摘录」页签看来源树）。工具栏下出**锚点筛选条**（`data-anchor-filter-bar`：计数 + 「清除」），清除经 `onClearAnchorFilter` 回 App 摘掉视图字段。
+3. 两个宿主都接出口：Reader（markEditor）与 ExtractReviewView（editing）各加 `onOpenAnchorCards(extractId)` 回调，App 路由到 browse。
+
+验收：`tsc` 0 + build 成功；marks.gui 新增端到端判据——点计数按钮 → 浏览器在场 + 锚点筛选条在场 + 卡行数＝已制卡数；annotations ⑩m / extract.gui 不回退。

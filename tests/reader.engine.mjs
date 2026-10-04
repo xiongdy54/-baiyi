@@ -86,9 +86,15 @@ const clickByText = (txt, sel = "button") => `(() => {
   if (!el) return "not found";
   el.click(); return "clicked";
 })()`;
+// v48.44（D84）：侧栏开关钮是「展开/收起」两态文案（D83 起），按 data 钩子点击而非文字匹配
+// （此前 clickByText("侧栏", …) 在 D83 改两态文案后永远 not found——2a/2b/#7 空转失败）。
+const clickSidebarToggle = () => `(() => { const b = document.querySelector("[data-reader-sidebar-toggle]"); if (!b) return "no btn"; b.click(); return "clicked"; })()`;
 
 // ---------- 主流程 ----------
 let electron = null;
+let cdp = null;        // finally 兜底清理要用（v48.45/D85：异常路径不得再泄漏 FSRSTEST 书）
+let seededIds = null; // 第 0 步拿到的两本书 id
+let origReaderSettings = null;
 try {
   // 清场：残留实例会占用 CDP 端口（Windows 下 node 退出不会带走 electron 子进程）
   try {
@@ -104,7 +110,7 @@ try {
     stdio: ["ignore", out, out],
     detached: false
   });
-  const cdp = await cdpConnect();
+  cdp = await cdpConnect();
   await cdp.eval("1");
   await wait(1500);
 
@@ -121,10 +127,12 @@ try {
     const paste = await window.libraryAPI.createFromPaste("FSRSTEST 粘贴引擎验证书", md);
     return { book: book && book.id, paste: paste && paste.id };
   })()`);
+  seededIds = seeded;
   check("0 造数（文件书+粘贴书）", Boolean(seeded?.book && seeded?.paste), JSON.stringify(seeded));
 
   // 0.5 固定阅读设置为已知态（纸白+滚动），并在结束时恢复用户原设置
-  const origSettings = await cdp.eval(`window.settingsAPI.get("app", "readerSettings")`);
+  origReaderSettings = await cdp.eval(`window.settingsAPI.get("app", "readerSettings")`);
+  const origSettings = origReaderSettings;
   await cdp.eval(`window.settingsAPI.set("app", "readerSettings", { mode: { flow: "scrolled" }, appearance: { theme: "paper" } })`);
 
   // 1. 打开文件书 → 引擎视图
@@ -137,7 +145,7 @@ try {
   await cdp.shot("tmp-l2-1-engine.png");
 
   // 2. 目录侧栏
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(600);
   const tocCount = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
   check("2a 目录侧栏渲染 3 章", tocCount >= 3, "n=" + tocCount);
@@ -145,7 +153,7 @@ try {
   await wait(800);
   const tocClosed = await cdp.eval(`!document.querySelector(".reader-sidebar")`);
   check("2b 目录点击跳转并收起", tocClosed);
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(400);
   await cdp.eval(clickByText("第一章", ".reader-toc-item"));
   await wait(800);
@@ -153,7 +161,7 @@ try {
   // 2c. 翻页按钮（v20.1）：跨章节推进 + 边界
   await cdp.eval(clickByText("第一章", ".reader-toc-item"));
   await wait(800);
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(400);
   const cfiBefore = await cdp.eval(`window.__readerKernel?.getCurrentLocation()?.cfi`);
   await cdp.eval(`(() => { const b = document.querySelector('.reader-engine-controls button[title*="下一页"]'); if (!b) return "no btn"; b.click(); return "clicked"; })()`);
@@ -488,14 +496,14 @@ try {
   await cdp.eval(clickByText("FSRSTEST 粘贴引擎验证书", ".book-card"));
   await wait(3000);
   const pasteEngine = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(500);
   const pasteToc = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);
   check("7 粘贴书合成 EPUB 进引擎（目录 3 章）", pasteEngine && pasteToc >= 3, "toc=" + pasteToc);
   await cdp.shot("tmp-l2-7-paste.png");
 
   // 7b. 暗夜主题联动软件夜间模式（v20.1；主题下拉按 title 精确定位，栏内另有阅读模式下拉）
-  await cdp.eval(clickByText("侧栏", "[data-reader-sidebar-toggle]"));
+  await cdp.eval(clickSidebarToggle());
   await wait(400);
   // D5-B：模式/主题/缩放收进「阅读设置」弹出组——先开组，组内的 Dropdown 照旧
   // 点击与断言分两次 —— React 重渲染是异步的，同一个 eval 里「点完立刻查」必然读到旧 DOM
@@ -547,6 +555,30 @@ try {
 } catch (err) {
   check("套件异常", false, err && (err.stack || err.message));
 } finally {
+  // v48.45（D85）：清理兜底——主流程第 8 步在异常路径会被整段跳过，FSRSTEST 书因此泄漏进真实书架
+  //（用户实测）。这里只要 CDP 连接还活着、且拿到过两本书 id，就尽力把第 8 步再走一遍。
+  try {
+    if (cdp && seededIds && seededIds.book && seededIds.paste) {
+      const cleaned = await cdp.eval(`(async () => {
+        const all = await window.cardsAPI.listAll();
+        for (const c of all) {
+          const blob = (c.frontMarkdown || "") + (c.backMarkdown || "") + (c.noteText || "");
+          if (blob.includes("FSRSTEST")) await window.cardsAPI.remove(c.id);
+        }
+        await window.libraryAPI.remove(${JSON.stringify("__BOOK__")});
+        await window.libraryAPI.remove(${JSON.stringify("__PASTE__")});
+        return "cleaned";
+      })()`.replace('"__BOOK__"', JSON.stringify(String(seededIds.book))).replace('"__PASTE__"', JSON.stringify(String(seededIds.paste))));
+      console.log("finally 清理兜底：" + cleaned);
+      if (origReaderSettings) {
+        try { await cdp.eval(`window.settingsAPI.set("app", "readerSettings", ${JSON.stringify(origReaderSettings)})`); } catch { /* 已断开就算了 */ }
+      }
+    } else {
+      console.log("finally 清理兜底：CDP/造数 id 不可得，跳过（请用 tests/fsrstest.cleanup.cjs 回收）");
+    }
+  } catch (e) {
+    console.log("finally 清理兜底失败：" + (e && e.message));
+  }
   await new Promise((r) => setTimeout(r, 800));
   try {
     const { execSync } = await import("node:child_process");

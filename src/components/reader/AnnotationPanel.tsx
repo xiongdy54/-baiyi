@@ -47,7 +47,10 @@ export default function AnnotationPanel({
   onDelete,
   palette,
   width = 280,
-  showCount = true
+  showCount = true,
+  showHead = true,
+  sort: sortProp,
+  onSort: onSortProp
 }: {
   /** 全部注解（含纯高亮）；排序与置顶由本组件按 R32 处理 */
   items: AnnotItem[];
@@ -69,8 +72,18 @@ export default function AnnotationPanel({
   width?: number | string;
   /** 头行「注解 N」计数：摘录页关掉以省一行（v48.33 / D73，用户裁定）；阅读器默认保留 */
   showCount?: boolean;
+  /**
+   * v48.45（D85）：不渲染栏头行——阅读器侧栏的筛选/排序段控上移到**栏头行**（开关钮旁，
+   * 与摘录页批注栏头同一几何），面板本体不再重复表达。缺省 true（摘录页照旧）。
+   */
+  showHead?: boolean;
+  /** v48.45（D85）：排序受控态（宿主＝阅读器栏头段控；缺省＝内部会话态，摘录页照旧） */
+  sort?: AnnotSort;
+  onSort?: (s: AnnotSort) => void;
 }) {
-  const [sort, setSort] = useState<AnnotSort>("pos");
+  const [sortState, setSortState] = useState<AnnotSort>("pos");
+  const sort = sortProp ?? sortState;
+  const setSort = (s: AnnotSort) => (onSortProp ? onSortProp(s) : setSortState(s));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -105,6 +118,7 @@ export default function AnnotationPanel({
 
   return (
     <aside className="annot-side" ref={boxRef} style={{ width }} data-annot-panel>
+      {showHead && (
       <div className="annot-side-head">
         {showCount && <span className="mono" data-annot-count>{`注解 ${listed.length}`}</span>}
         <span className="filter" data-annot-filterseg>
@@ -122,6 +136,7 @@ export default function AnnotationPanel({
           ))}
         </span>
       </div>
+      )}
 
       <div className="annot-side-body" data-annot-list>
         {listed.map((it) => {

@@ -236,7 +236,11 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         const underline = k.endsWith("|u");
         const bare = k.replace(/\|u$/, "");
         if (underline && bare !== "default") {
-          const solid = annotSolid(bare.startsWith("hex-") ? `#${bare.slice(4)}` : bare);
+          // v48.45（D85）：下划线颜色必须**在宿主侧求成字面实色**再注入——annotSolid 对色板 id
+          // 返回 var(--annot-*)，而这段 CSS 落在 foliate iframe 文档里（没有宿主 Token），
+          // var 解不动 → IACVT 回落 currentColor（文字色＝黑），用户实测「下划线始终是黑色」。
+          // 底色分支早就走 evalColor 求字面值，这里补齐同一道。
+          const solid = evalColor(annotSolid(bare.startsWith("hex-") ? `#${bare.slice(4)}` : bare), "#166a59");
           return `::highlight(${highlightNameFor(k)}){background-color:transparent;text-decoration:underline;text-decoration-color:${solid};text-decoration-thickness:2px;text-underline-offset:3px;}`;
         }
         const soft = k === "default" ? "var(--accent-soft)" : annotSoft(bare.startsWith("hex-") ? `#${bare.slice(4)}` : bare);

@@ -38,6 +38,8 @@ interface Props {
     text: string,
     ctx: { parentExtractId: string; parentRange: Array<{ start: number; end: number }> }
   ) => void;
+  /** v48.47（D87）：点「已制卡 N 张」→ 宿主（App）跳卡片浏览器并按该摘录锚筛选 */
+  onOpenAnchorCards?: (extractId: string) => void;
   /** v48.41（D81）：当前卡材料名上报（顶栏中间显示；无材料名时回调空串＝回落「摘录」字样） */
   onMaterialName?: (name: string) => void;
 }
@@ -76,7 +78,7 @@ export function splitChain(chain: Array<{ id: string; text: string; depth: numbe
  * 规格 §1.2 R13（面包屑）：左上角面包屑「原文 › 第1层 › … › 当前」——点任一层＝切到该层卡片
  * （查看态，只读、不推进调度、不改队列，出口＝「返回队列」）；>6 级折叠成「…N 级」，点开逐项可达。
  */
-export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, header, onExit, onExtract, onMaterialName }: Props) {
+export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, header, onExit, onExtract, onMaterialName, onOpenAnchorCards }: Props) {
   const [items, setItems] = useState<DueTopic[]>([]);
   const [engine, setEngine] = useState<ExtractEngine>("sm19-default");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
@@ -970,8 +972,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           kind={editing.kind}
           comment={editing.comment}
           color={editing.color}
-          quote={editing.quote}
           anchor={editing.anchor}
+          onOpenCards={onOpenAnchorCards ? () => onOpenAnchorCards(editing.id) : undefined}
           container={pageRef.current?.getBoundingClientRect() ?? null}
           palette={ANNOT_PALETTE}
           customEnabled={annotSettings.annotateCustomEnabled}

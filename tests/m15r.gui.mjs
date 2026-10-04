@@ -1,9 +1,9 @@
 // v48（M15 重做）材料知识导图 GUI 端到端（CDP 驱动真实应用，自启自关；node tests/m15r.gui.mjs）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-m15r-userdata（先清空），绝不触碰真实库（§7.3）。
 // 覆盖（批 3/4 UI 契约；管线/缓存/校验由 m15r.engine / m15r.core / m15r.db 锁定）：
-//   工具栏「导图」按钮（目录旁）→ 全屏工作区挂载（空态 + 文本提取）→ 无 Key 可读降级
-//   （AI 未配置区块、无发送前预览按钮、不弹错误窗）→「正文」返回（内核保活，阅读器在场）
-//   → 再入工作区（空态保持）。生成全流程与回看细节随批 7 真实 Key 冒烟。
+//   v48.44（D84）：导图并入阅读器侧栏「图谱」页签——开侧栏 → 图谱页签（面板 + 主区画布层）→
+//   空态 + 文本提取 → 无 Key 可读降级（AI 未配置区块、无发送前预览按钮、不弹错误窗）
+//   → 收侧栏回正文（内核保活，阅读器在场）→ 再入页签（空态保持）。生成全流程与回看细节随批 7 真实 Key 冒烟。
 import { spawn, execSync } from "node:child_process";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
@@ -72,11 +72,25 @@ function spawnApp() {
 
 const clickByText = (sel, text) =>
   `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`;
-/** D5-B：导图入口收进工具栏「更多」弹出组——先确保组在场（再点组内的动作行） */
-const openMoreMenu = `(() => {
-  if (!document.querySelector('[data-tool-menu-panel="more"]')) document.querySelector('[data-tool-menu-btn="more"]')?.click();
+/** v48.44（D84）：导图入口＝侧栏「图谱」页签（「更多」里的「导图」按钮已退役）——开侧栏（未开时） */
+const openSidebar = `(() => {
+  const t = document.querySelector("[data-reader-sidebar-toggle]");
+  if (t && t.getAttribute("aria-expanded") !== "true") t.click();
   return 1;
 })()`;
+const gotoMapTab = `(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return 1; })()`;
+/** 「正文」返回的页签等价动作＝收侧栏（画布层随页签卸载，正文原位） */
+const closeSidebar = `(() => {
+  const t = document.querySelector("[data-reader-sidebar-toggle]");
+  if (t && t.getAttribute("aria-expanded") === "true") t.click();
+  return 1;
+})()`;
+const mapProbe = `JSON.stringify({
+  panel: !!document.querySelector('[data-panel="map"] .mindmap-tab-panel'),
+  sidebarOpen: !!document.querySelector("[data-reader-sidebar]"),
+  topTitle: document.body.textContent.includes("材料知识导图"),
+  canvas: !!document.querySelector('[data-reader-map-layer] .reader-map-stage')
+})`;
 
 try {
   try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
@@ -113,20 +127,14 @@ try {
   check("书架点击打开阅读器", opened === true, opened);
   await wait(3500);
 
-  // 1. 工具栏「更多」弹出组（导图入口收进去）→ 打开组并点「导图」→ 全屏工作区挂载
-  const moreBtn = await main.eval(`!!document.querySelector('[data-tool-menu-btn="more"]')`);
-  check("工具栏含「更多」弹出组（导图已收进去）", moreBtn === true, moreBtn);
-  await main.eval(openMoreMenu);
-  await wait(400);
-  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
+  // 1. 侧栏「图谱」页签（导图入口）→ 面板 + 主区画布层挂载
+  await main.eval(openSidebar);
   await wait(600);
-  const collecting = await main.eval(`JSON.stringify({
-    mounted: !!document.querySelector(".mindmap-workspace"),
-    topTitle: document.body.textContent.includes("材料知识导图"),
-    backBtn: [...document.querySelectorAll(".mindmap-top button")].some((x) => x.textContent.trim() === "正文")
-  })`);
+  await main.eval(gotoMapTab);
+  await wait(1200);
+  const collecting = await main.eval(mapProbe);
   const cm = JSON.parse(collecting || "{}");
-  check("全屏工作区挂载（顶栏含正文返回）", cm.mounted === true && cm.topTitle === true && cm.backBtn === true, collecting);
+  check("图谱页签挂载（侧栏面板 + 主区画布层）", cm.panel === true && cm.sidebarOpen === true && cm.topTitle === true && cm.canvas === true, collecting);
   // 文本提取（本地、无截断）：等 collect 完成 → 空态
   await wait(2500);
   const emptyState = await main.eval(`JSON.stringify({
@@ -144,24 +152,24 @@ try {
   const noScopeSelect = await main.eval(`(() => { return !document.querySelector(".mindmap-sidebar select"); })()`);
   check("范围下拉已撤（恒整份材料）", noScopeSelect === true, noScopeSelect);
 
-  // 3. 「正文」返回：工作区关闭、阅读器在场（内核保活——阅读控制条与目录按钮仍在）
-  const back = await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
+  // 3. 收侧栏回正文：页签面板卸载、画布层清空、阅读器在场（内核保活——阅读控制条仍在）
+  const back = await main.eval(closeSidebar);
   await wait(600);
   const backState = await main.eval(`JSON.stringify({
-    closed: !document.querySelector(".mindmap-workspace"),
+    closed: !document.querySelector(".mindmap-tab-panel") && !document.querySelector('[data-reader-map-layer] .reader-map-stage'),
     readerAlive: !!document.querySelector(".reader-engine-controls") && !!document.querySelector('[data-tool-menu-btn="more"]')
   })`);
   const bs = JSON.parse(backState || "{}");
-  check("「正文」返回阅读器（原位保持）", back === true && bs.closed === true && bs.readerAlive === true, backState);
+  check("收侧栏回正文（原位保持）", back === 1 && bs.closed === true && bs.readerAlive === true, backState);
 
-  // 4. 再入工作区（空态保持、无残留）
-  await main.eval(openMoreMenu);
+  // 4. 再入页签（空态保持、无残留）
+  await main.eval(openSidebar);
   await wait(400);
-  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
+  await main.eval(gotoMapTab);
   await wait(1500);
-  const reenter = await main.eval(`!!document.querySelector(".mindmap-workspace") && document.body.textContent.includes("尚未生成")`);
-  check("再入工作区（空态保持）", reenter === true, reenter);
-  await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
+  const reenter = await main.eval(`!!document.querySelector(".mindmap-tab-panel") && document.body.textContent.includes("尚未生成")`);
+  check("再入页签（空态保持）", reenter === true, reenter);
+  await main.eval(closeSidebar);
   await wait(400);
 
   // 4.5 v48.13（P2）：右下角全局活动指示器——**空闲时不得渲染**（常驻空浮窗会干扰阅读）
@@ -376,9 +384,9 @@ try {
   const cfgFile = path.join(USER_DATA, "ai-config.json");
   const cfgRaw = fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8").slice(0, 120) : "MISSING";
   await wait(3500);
-  await main.eval(openMoreMenu);
-  await wait(400);
-  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
+  await main.eval(openSidebar);
+  await wait(500);
+  await main.eval(gotoMapTab);
   await wait(1800);
   const cfgProbe = await main.eval(`(async () => {
     const c = await window.aiAPI.getConfig();
@@ -391,7 +399,7 @@ try {
   const rawResp = await main.send("Runtime.evaluate", {
     expression: `(async () => {
       try {
-        const ws = document.querySelector(".mindmap-workspace");
+        const ws = document.querySelector(".mindmap-tab-panel");
         const inner = document.querySelector(".mindmap-canvas-inner");
         const cfg = await window.aiAPI.getConfig();
         return JSON.stringify({ mounted: !!ws, phase: ws ? "ws" : "noclosed", hasKey: cfg.hasKey, groups: inner ? inner.querySelectorAll("g[data-node-id]").length : 0 });
@@ -406,7 +414,7 @@ try {
   const rawMap = await main.send("Runtime.evaluate", {
     expression: `(async () => {
     try {
-      const ws = document.querySelector(".mindmap-workspace");
+      const ws = document.querySelector(".mindmap-tab-panel");
       const inner = document.querySelector(".mindmap-canvas-inner");
       const cfg = await window.aiAPI.getConfig();
       return JSON.stringify({
@@ -491,7 +499,7 @@ try {
   await wait(600);
   const afterDel = await main.eval(`JSON.stringify({ versions: document.querySelectorAll(".mindmap-versions li").length, badgeGone: true })`);
   check("版本删除按钮流（真实 DELETE + 刷新不崩溃）", delBtn === true, afterDel);
-  await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
+  await main.eval(closeSidebar);
   await wait(400);
 
   // 8. v48.13 空态恢复用例：库里只有未激活版本时，用户必须能看到入口并自救
@@ -500,9 +508,9 @@ try {
   const openedRec = await main.eval(`(() => { const c = [...document.querySelectorAll(".book-card")].find((x) => x.title?.includes("${MARK} 恢复用例")); c?.click(); return !!c; })()`);
   check("恢复用例：阅读器打开", openedRec === true, openedRec);
   await wait(3500);
-  await main.eval(openMoreMenu);
-  await wait(400);
-  await main.eval(clickByText('[data-tool-menu-panel="more"] .dd-item', "导图"));
+  await main.eval(openSidebar);
+  await wait(500);
+  await main.eval(gotoMapTab);
   await wait(2000);
   const recEmpty = await main.eval(`JSON.stringify({
     isEmpty: document.body.textContent.includes("尚未生成"),
@@ -551,7 +559,7 @@ try {
   })`);
   const ra = JSON.parse(recAfter || "{}");
   check("空态：点击版本即激活并渲染出图（成果真的找得回来）", recovered === "clicked" && ra.emptyStill === false && ra.canvasNodes >= 3, recAfter);
-  await main.eval(`(() => { const b = [...document.querySelectorAll(".mindmap-top button")].find((x) => x.textContent.trim() === "正文"); b?.click(); return !!b; })()`);
+  await main.eval(closeSidebar);
   await wait(400);
 
   // v48.17（D53）会话 3：再次启动 → 上一步关过的两条**不该再回来**（这是用户报的「每次开机都出现」的正面回收）

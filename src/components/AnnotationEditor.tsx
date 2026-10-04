@@ -26,8 +26,6 @@ export interface AnnotationEditorProps {
   kind: "highlight" | "extract";
   comment: string | null;
   color: string | null;
-  /** 所引原文（浮层顶部一行，截断展示） */
-  quote: string;
   /** 锚点包围盒（视口坐标）——所引文字/高亮的位置 */
   anchor: PopoverRect;
   /** 容器（视口坐标；缺省＝整个视口） */
@@ -43,6 +41,18 @@ export interface AnnotationEditorProps {
   /** 删除整条（按 kind 换标签；已含二次确认） */
   onDelete: () => Promise<void>;
   onClose: () => void;
+  /**
+   * v48.45（D85）：文中标记的**聚合已制卡数**（本条 + 全部子孙摘录的卡之和）——
+   * 悬停浮层退役后由本浮层承接展示；缺省（摘录页宿主）不显示。
+   */
+  cardCount?: number;
+  /** 「就此制卡」动作（走宿主的手动制卡链）；缺省不显示按钮 */
+  onMakeCard?: () => void;
+  /**
+   * v48.47（D87）：点「已制卡 N 张」→ 宿主跳卡片浏览器并按该锚的子孙闭包筛选；
+   * 缺省（无跳转出口）时计数保持纯文字。
+   */
+  onOpenCards?: () => void;
 }
 
 /** 色块显示色：色板 id → --annot-<id>；#hex 原样 */
@@ -57,7 +67,6 @@ export default function AnnotationEditor({
   kind,
   comment,
   color,
-  quote,
   anchor,
   container,
   palette,
@@ -65,7 +74,10 @@ export default function AnnotationEditor({
   onSaveComment,
   onSaveColor,
   onDelete,
-  onClose
+  onClose,
+  cardCount,
+  onMakeCard,
+  onOpenCards
 }: AnnotationEditorProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -188,7 +200,6 @@ export default function AnnotationEditor({
       data-editor-for={extractId}
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
     >
-      <p className="eq" title={quote}>{quote}</p>
       <textarea
         ref={taRef}
         rows={3}
@@ -213,6 +224,30 @@ export default function AnnotationEditor({
         <span className="save-state" data-savestate>
           {saveState === "saving" ? "正在保存…" : saveState === "saved" ? "已保存" : ""}
         </span>
+        {/* v48.46（D86）：「已制卡 N 张」（聚合口径）+「就此制卡」并入底行（v48.45 的独立学档行作废）——
+            就此制卡＝.make-card（与 .del 同规格、黑色文字）；摘录页宿主不传计数时不渲染，底行照旧 */}
+        {cardCount !== undefined &&
+          (onOpenCards ? (
+            <button
+              type="button"
+              className="cardcount mono"
+              data-cardcount
+              data-open-cards
+              title="查看这个锚点下的全部卡片（含子摘录等所有子层级产出的卡）"
+              onClick={onOpenCards}
+            >
+              已制卡 {cardCount} 张
+            </button>
+          ) : (
+            <span className="cardcount mono" data-cardcount>
+              已制卡 {cardCount} 张
+            </span>
+          ))}
+        {onMakeCard && (
+          <button type="button" className="make-card" data-make-card onClick={onMakeCard}>
+            就此制卡
+          </button>
+        )}
         {confirmDelete ? (
           <>
             <button type="button" className="del" data-del-confirmed onClick={() => void onDelete()}>

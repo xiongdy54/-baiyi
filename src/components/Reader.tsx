@@ -7,7 +7,6 @@ import { cardsApi, parseCloze, type CardDraft } from "../lib/cards";
 import { useSelectionActions } from "../lib/useSelectionActions";
 import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
 import { settingsStore } from "../lib/settings";
-import { MindmapWorkspace } from "./MindmapWorkspace";
 import { sanitizeDomain, udcLabel, UDC_LEAVES, UDC_MAX, UDC_OTHER } from "../lib/udc";
 import { eventBus } from "../lib/eventbus";
 import { readingStats } from "../lib/stats";
@@ -16,14 +15,14 @@ import OcclusionShapes from "./OcclusionShapes";
 import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
 import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
-import MarkPopover from "./reader/MarkPopover";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
-import { type MapTreeItem } from "../lib/reader/mapTree";
+import MindmapTab from "./reader/MindmapTab";
+import type { AnnotSort } from "./reader/AnnotationPanel";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
 import {
@@ -46,7 +45,7 @@ import {
   type SourceAnchorGeometry
 } from "../lib/reader/service";
 // v48.24 批3（§4 文中留痕）：标记的数据面（哪些根摘录要画、浮层显示什么）——纯函数，零 DOM
-import { buildAnnotationItems, buildDocMarks } from "../lib/reader/marks";
+import { aggregateCardCounts, buildAnnotationItems, buildDocMarks } from "../lib/reader/marks";
 // v48.23（D61 §6.8-11）：多段选择的集合运算与修饰键——纯逻辑在 electron/annotationRange.js，
 // 渲染层经主进程算（resolveSpanSet），本层不复制任何 span 归并/装配逻辑。
 import {
@@ -96,6 +95,8 @@ interface Props {
   /** v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡（按书范围会话） */
   onReviewExtracts?: () => void;
   onReviewCards?: () => void;
+  /** v48.47（D87）：点「已制卡 N 张」→ 宿主（App）跳卡片浏览器并按该摘录锚筛选 */
+  onOpenAnchorCards?: (extractId: string) => void;
 }
 
 /** v25：读取正文图片/选区图片的 dataURL（blob:/data:/bookasset: 同源可 fetch；超 12MB 拒绝） */
@@ -210,7 +211,8 @@ export default function Reader({
   openMindmapMapId,
   resumeRunId,
   onReviewExtracts,
-  onReviewCards
+  onReviewCards,
+  onOpenAnchorCards
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
@@ -249,19 +251,19 @@ export default function Reader({
     contextText?: string;
   } | null>(null);
   const [focusBusy, setFocusBusy] = useState(false);
-  // v48 批3（M15，D42）：全屏导图工作区（挂 Reader 外层的 Overlay，内核保活 → 返回正文天然原位）
-  const [mindmapOpen, setMindmapOpen] = useState(false);
   /**
    * v48.13（P3）：续跑意图要在**挂载时快照**。
    * 原因：App 在 onMindmapOpened 里立刻清掉 view.resumeRunId（导航状态要干净），
-   * 而真正用到它的是下面那个 MindmapWorkspace 的挂载流程（要等收集完原文才续跑）——
+   * 而真正用到它的是图谱页签里 MindmapTab 的挂载流程（要等收集完原文才续跑）——
    * 若直接读 prop，会读到已被清空的 null，续跑静默不发生。
+   * v48.44（D84）：「打开导图」落点＝侧栏图谱页签（全屏 Overlay 工作区退役）。
    */
   const [resumeOnce] = useState<string | null>(resumeRunId ?? null);
   // v48.13（P2）：从右下角指示器进入时自动打开（只消费一次；标记即刻回执给 App 清除）
   useEffect(() => {
     if (!openMindmapInitially) return;
-    setMindmapOpen(true);
+    setSidebarOpen(true);
+    setSidebarTab("map");
     onMindmapOpened?.();
   }, [openMindmapInitially, onMindmapOpened]);
   const [toast, setToast] = useState<string | null>(null);
@@ -385,22 +387,18 @@ export default function Reader({
   // v35 跳转图片卡：图内区域高亮叠加（宿主视口坐标，短暂显示）/ 原图对照浮层（定位失败或 PDF 系）
   const [imgOverlay, setImgOverlay] = useState<{ rect: ReaderRect; occlusion: NonNullable<Props["jumpAnchor"]>["occlusion"] } | null>(null);
   const [sourcePeek, setSourcePeek] = useState<{ occlusion: NonNullable<Props["jumpAnchor"]>["occlusion"] } | null>(null);
-  // v48.24 批3（§4 文中留痕）：本文档的根摘录标记 + 命中后的浮层（只读；编辑永远在卡片上进行）
-  const [markPop, setMarkPop] = useState<{ id: string; rect: ReaderRect } | null>(null);
-  /** 批 4 Task 17：点标记 → 批注编辑浮层（形态唯一，与摘录页共用 AnnotationEditor；
-   *  hover 浮层保留——点击是「要改」的显式意图，hover 只是「看一眼」） */
+  // v48.24 批3（§4 文中留痕）：本文档的根摘录标记。
+  // v48.45（D85，用户指令③）：**悬停浮层退役**（markHover 不再弹 MarkPopover）——
+  // 点击标记＝唯一浮层入口（批注编辑浮层 AnnotationEditor，承接「已制卡 N 张」+「就此制卡」）。
+  /** 批 4 Task 17：点标记 → 批注编辑浮层（形态唯一，与摘录页共用 AnnotationEditor） */
   const [markEditor, setMarkEditor] = useState<{
     id: string;
     kind: "highlight" | "extract";
     comment: string | null;
     color: string | null;
-    quote: string;
     anchor: ReaderRect;
   } | null>(null);
   const marksRef = useRef<ReaderDocMark[]>([]);
-  /** 浮层被点住（钉住）后不再随 pointerleave 收起；点别处/Esc 解除 */
-  const markPinnedRef = useRef(false);
-  const markHideTimerRef = useRef<number | null>(null);
   /** 从浮层「就此制卡」进入时，本次制卡的 contextRef 覆盖值（挂到该摘录上——已制卡数按 extractId 派生） */
   const markCardRefOverrideRef = useRef<Record<string, unknown> | null>(null);
   /** 批注栏（D67 §3）：刚跳中的条目短时强调（不落库、不持久）＋导航有界失败的条目（中性态） */
@@ -411,49 +409,23 @@ export default function Reader({
   const [marksOrderKey, setMarksOrderKey] = useState(0);
   /** 本文档的根注解条数（侧栏「摘录」页签与入口可用性的依据；与注解栏同一个 VM 口径） */
   const [docAnnotCount, setDocAnnotCount] = useState(0);
-  /** 右侧栏开合（D2：入口可用＝目录/注解/图谱任一在场；不合用时自动收起） */
+  /** 侧栏开合（v48.44/D84：入口恒可用——页签恒可点，不再按数据在场性自动收起） */
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /** 工具栏两个弹出组（更多 / 阅读设置）：同刻只开一个，点外部/Esc 收起（D5-B） */
   const [toolMenu, setToolMenu] = useState<"more" | "settings" | null>(null);
-  /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规）
-   *  与图谱目录（只消费主进程算好的区间） */
+  /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规） */
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
-  const [mapItems, setMapItems] = useState<MapTreeItem[] | null>(null);
-  const mapUnitAnchorsRef = useRef<string[]>([]);
+  /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
+  const [annotSort, setAnnotSort] = useState<AnnotSort>("pos");
+  /** v48.44（D84）：图谱页签画布的 portal 宿主（.reader-engine-main 内覆盖层；空＝不渲染画布） */
+  const [mapLayerHost, setMapLayerHost] = useState<HTMLDivElement | null>(null);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
 
   /**
-   * 图谱目录载入（批 4 Task 15）：有内核 + 有已发布导图才取。
-   * 区间由主进程按 buildExtractionModel 算（本层**只消费不切分**）；无导图 ⇒ null ⇒ 不渲染页签。
-   */
-  useEffect(() => {
-    const documentId = contextRef?.documentId;
-    if (!engineMode || !documentId) {
-      setMapItems(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      const k = kernelRef.current;
-      const anchors = (k?.getSectionAnchors?.() ?? []).map((a) => a.anchor);
-      const toc = k?.getTOC?.() ?? [];
-      if (!anchors.length || !toc.length) {
-        if (!cancelled) setMapItems(null);
-        return;
-      }
-      const api = (window as unknown as { mindmapAPI?: { mapTree?: (d: string, t: unknown, u: string[]) => Promise<{ items: MapTreeItem[]; unitCount: number } | null> } }).mindmapAPI;
-      const r = await api?.mapTree?.(documentId, toc, anchors);
-      if (cancelled) return;
-      mapUnitAnchorsRef.current = anchors;
-      setMapItems(r?.items?.length ? r.items : null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [engineMode, contextRef?.documentId, tocItems]);
-
-  /**
+   * v48.44（D84）：原「图谱目录载入」（mindmapAPI.mapTree → 侧栏树形目录）随页签改版退役——
+   * 图谱页签＝导图工作区面板（MindmapTab），节点跳转由画布选中/搜索承接；mapTree IPC 保留（仍有调用方）。
+   *
    * 注解栏条目的「定位到该注解」（D67 §3）：只走内核 `goToMark(id)` 的精确锚
    * （EPUB＝该条 CFI；PDF＝pageIndex + rects），**不**回退 anchorText 文本搜索。
    * 成功＝栏内短时强调该条；有界失败＝该条显示中性「不可定位」，不假装跳转成功。
@@ -747,33 +719,10 @@ export default function Reader({
     k.applyAppearance(resolveAppearance(readerSettingsRef.current));
     // 调试/测试钩子（L2 e2e 经此访问章节文档；引擎 iframe 对宿主跨源，contentDocument 不可用）
     (window as unknown as { __readerKernel?: ReaderKernel }).__readerKernel = k;
-    // v48.24 批3（§4 文中留痕）：指针进出/点中标记 → 浮层。标记本身只读，
-    // 这里只做「显示/延时收起/钉住」三件事；数据一律按 id 回查 marksRef（不信任事件带的内容）。
-    k.on("markHover", (info) => {
-      if (info.id && info.rect) {
-        if (markHideTimerRef.current) {
-          window.clearTimeout(markHideTimerRef.current);
-          markHideTimerRef.current = null;
-        }
-        setMarkPop({ id: info.id, rect: info.rect });
-      } else if (!markPinnedRef.current && markHideTimerRef.current === null) {
-        // 留 240ms 让指针从标记走到浮层（浮层在标记下方 8px）
-        markHideTimerRef.current = window.setTimeout(() => {
-          markHideTimerRef.current = null;
-          setMarkPop(null);
-        }, 240);
-      }
-    });
+    // v48.24 批3（§4 文中留痕）：点中标记 → 批注编辑浮层（v48.45/D85：唯一浮层——
+    // 悬停不再弹层；浮层内含聚合「已制卡 N 张」与「就此制卡」）。数据按 id 回查 marksRef。
     k.on("markClick", (info) => {
       if (!info.id || !info.rect) return;
-      markPinnedRef.current = true;
-      if (markHideTimerRef.current) {
-        window.clearTimeout(markHideTimerRef.current);
-        markHideTimerRef.current = null;
-      }
-      setMarkPop({ id: info.id, rect: info.rect });
-      // 批 4 Task 17（规格 §5.2「点高亮 → 弹出 AnnotationEditor（改/删）」）：
-      // 点击＝明确的「要改」意图，直接开编辑浮层；hover 浮层留在旁边不动。
       const m = marksRef.current.find((x) => x.id === info.id);
       if (m) {
         setMarkEditor({
@@ -781,7 +730,6 @@ export default function Reader({
           kind: m.kind === "highlight" ? "highlight" : "extract",
           comment: m.comment ?? null,
           color: m.color ?? null,
-          quote: m.text,
           anchor: info.rect
         });
       }
@@ -1176,14 +1124,6 @@ export default function Reader({
   }
 
   // ---------- v48.24 批3（§4 文中留痕）：数据结构与绘制 ----------
-  const closeMarkPop = useCallback(() => {
-    markPinnedRef.current = false;
-    if (markHideTimerRef.current) {
-      window.clearTimeout(markHideTimerRef.current);
-      markHideTimerRef.current = null;
-    }
-    setMarkPop(null);
-  }, []);
 
   /**
    * 本文档要画的标记：数据面＝buildDocMarks（纯函数，吃 workflowAPI.listAll() 与按 extractId 派生的
@@ -1207,12 +1147,24 @@ export default function Reader({
           cardsApi.listAll().catch(() => [])
         ]);
         if (cancelled) return;
+        // v48.45（D85）：已制卡数＝**聚合口径**——该条摘录及其全部子孙摘录上的卡之和（用户点名：
+        // 子摘录、子子摘录以及更下层的摘录产生的制卡都算进去）。先按直卡统计，再沿父→子邻接表聚合。
         const counts: Record<string, number> = {};
         for (const c of cards as Array<{ contextRef?: { extractId?: string } | null; isDeleted?: number }>) {
           const id = c?.contextRef?.extractId;
           if (id && !c.isDeleted) counts[id] = (counts[id] || 0) + 1;
         }
-        const marks = buildDocMarks(rows, documentId, engineKind, counts);
+        const parentToChildren = new Map<string, string[]>();
+        for (const r of rows as Array<{ id?: string; contextRef?: { parentExtractId?: string | null } | null }>) {
+          const pid = r?.contextRef?.parentExtractId;
+          if (pid && r?.id) {
+            const list = parentToChildren.get(String(pid)) ?? [];
+            list.push(String(r.id));
+            parentToChildren.set(String(pid), list);
+          }
+        }
+        const aggCounts = aggregateCardCounts(counts, parentToChildren);
+        const marks = buildDocMarks(rows, documentId, engineKind, aggCounts);
         marksRef.current = marks;
         kernelRef.current?.setDocumentMarks?.(marks);
         // 文档序只能问内核（EPUB 的 CFI 只有引擎 resolve 得动）——装完标记通知侧栏重取
@@ -1243,25 +1195,6 @@ export default function Reader({
       offAccent();
     };
   }, [engineMode, engineKind, contextRef?.documentId, contextRef?.extractId]);
-
-  // 浮层的两条退出：点别处（含正文）/ Esc——钉住态一并解除
-  useEffect(() => {
-    if (!markPop) return;
-    const onDown = (e: MouseEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && typeof t.closest === "function" && t.closest(".reader-mark-pop")) return;
-      closeMarkPop();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeMarkPop();
-    };
-    document.addEventListener("mousedown", onDown, true);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown, true);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [markPop, closeMarkPop]);
 
   /**
    * 源锚装配（§6.8-11 三条腿的容器形态，批3 写入侧）：摘录落 `contextRef.sourceAnchor`，
@@ -1308,7 +1241,6 @@ export default function Reader({
       anchorRatio: denom > 0 && el ? Math.min(1, el.scrollTop / denom) : 0
     };
     startManualWith(mark.text);
-    closeMarkPop();
   }
 
   // 批 4 Task 12：标注模式/形式与色板取自设置键（app.annotateMode / annotateForm / annotatePalette / annotateCustomEnabled）
@@ -1394,15 +1326,9 @@ export default function Reader({
   );
 
   /**
-   * 侧栏可用性（D2）：目录 / 本文档注解 / 已发布图谱**任一在场**就可用——
-   * PDF 无大纲但有注解也要能开（此前按钮挂在「有目录」上，注解无处可看）。
+   * 侧栏可用性（v48.44/D84）：**恒可用**——三页签恒可点（空数据＝页签内空态），
+   * 入口不再按「目录/注解/图谱任一在场」收缩（D2 口径作废）。
    */
-  const tocAvailable = tocItems.length > 0;
-  const mapAvailable = mapItems !== null;
-  const sidebarAvailable = tocAvailable || docAnnotCount > 0 || mapAvailable;
-  useEffect(() => {
-    if (!sidebarAvailable) setSidebarOpen(false);
-  }, [sidebarAvailable]);
   /** 工具栏弹出组：点外部（含正文/侧栏）或 Esc 收起；组内点击不算外部 */
   useEffect(() => {
     if (!toolMenu) return;
@@ -1433,42 +1359,101 @@ export default function Reader({
         >
           {engineSource ? (
             <>
-              {/* D5-B：常驻＝侧栏入口 + 翻页；其余收进「更多」「阅读设置」两组弹出（同刻只开一个）。
-                  v48.43（D83）：左侧＝「收起/展开」两态钮 + 选区动作组；**翻页钮移到右缘**；侧栏页签恒在。 */}
-              <div className="reader-engine-controls">
-                <div className="reader-engine-controls-group">
-                  <button
-                    className="btn btn-outline btn-sm"
-                    data-reader-sidebar-toggle
-                    aria-expanded={sidebarOpen}
-                    aria-controls="reader-sidebar"
-                    title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
-                    onClick={toggleSidebar}
-                  >
-                    {sidebarOpen ? "收起" : "展开"}
-                  </button>
+              {/* v48.45（D85）：开关钮＝摘录页同一枚（fixed 视口左上 16, 48+12，浮在轨顶）；
+                  「更多」不再含导图（已并入侧栏图谱页签）；翻页组在「更多」左侧。 */}
+              <button
+                className="annot-toggle bar-btn"
+                data-reader-sidebar-toggle
+                aria-expanded={sidebarOpen}
+                aria-controls="reader-sidebar"
+                title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
+                onClick={toggleSidebar}
+              >
+                {sidebarOpen ? "收起" : "展开"}
+              </button>
+              {/* v48.45（D85）：侧栏升级**全高左轨**——一行两格（轨 + 右列），与摘录批注轨同一形态：
+                  贯通到顶、280↔0 滑动动画、展开时工具栏随右列整体右移。 */}
+              <div className="reader-engine-layout">
+                <div
+                  className={`reader-side-rail${sidebarOpen ? "" : " is-closed"}`}
+                  data-reader-side-rail
+                  aria-hidden={!sidebarOpen}
+                >
+                  <ReaderSidebar
+                    tocItems={tocItems}
+                    activeHref={tocActiveHref}
+                    onNavigate={(item) => {
+                      void kernelRef.current?.goTo({ href: item.href });
+                      setSidebarOpen(false);
+                    }}
+                    tab={sidebarTab}
+                    onTabChange={setSidebarTab}
+                    filter={annotSettings.annotationFilter}
+                    onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
+                    sort={annotSort}
+                    onSort={setAnnotSort}
+                    extractsPanel={
+                      /* 本文档没有注解＝页签内空态文案（页签仍可点，D84） */
+                      docAnnotCount > 0 ? (
+                      <ReaderExtractsPanel
+                        documentId={contextRef?.documentId ?? null}
+                        engine={engineKind}
+                        orderKey={marksOrderKey}
+                        getMarkOrder={() => kernelRef.current?.getMarkOrder?.() ?? []}
+                        filter={annotSettings.annotationFilter}
+                        onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
+                        sort={annotSort}
+                        onSort={setAnnotSort}
+                        palette={annotSettings.annotatePalette}
+                        currentId={annotFocus}
+                        unavailableIds={Object.keys(annotUnavailable)}
+                        onJump={jumpToMark}
+                        onEdit={(id, comment) => void selActions.saveAnnotationComment(id, comment)}
+                        onColor={(id, color) => void selActions.saveAnnotationColor(id, color)}
+                        onDelete={(id) => void selActions.removeAnnotation(id)}
+                      />
+                      ) : null
+                    }
+                    mapPanel={
+                      /* v48.44（D84）：图谱页签＝导图工作区面板；画布经 portal 落在
+                         .reader-engine-main 内的 .reader-map-layer 覆盖层（正文引擎不卸载）。
+                         v48.45：轨收起时卸载（收集原文是重活，不在后台白跑）。 */
+                      sidebarOpen && contextRef?.documentId && kernelRef.current ? (
+                        <MindmapTab
+                          kernel={kernelRef.current}
+                          documentId={contextRef.documentId}
+                          title={title || sourceTitle || "未命名材料"}
+                          canvasHost={mapLayerHost}
+                          initialMapId={openMindmapMapId || null}
+                          initialResumeRunId={resumeOnce}
+                          onJumpToText={() => setSidebarOpen(false)}
+                          onMakeCardsFromNode={(payload) => {
+                            // v48.5 批C：结构制卡——mode=card-structure（导图节点专用分支，对作者组织结构出题）
+                            void runAICards(payload.section, undefined, "card-structure", { focus: payload.focus, mindmapNodeId: payload.nodeId });
+                          }}
+                        />
+                      ) : undefined
+                    }
+                  />
                 </div>
+                <div className="reader-engine-col">
+              <div className="reader-engine-controls">
                 {selActionsGroup}
                 <div className="reader-engine-controls-group">
+                  {/* v48.44（D84）：翻页钮移到「更多」左侧 */}
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
+                    <IconChevronLeft />
+                  </button>
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
+                    <IconChevronRight />
+                  </button>
+                  <span className="reader-engine-divider" aria-hidden="true" />
                   <ReaderToolMenu
                     id="more"
                     label="更多"
                     open={toolMenu === "more"}
                     onToggle={() => setToolMenu((v) => (v === "more" ? null : "more"))}
                   >
-                    {/* v48 批3（M15，D42）：导图 → 全屏 Overlay 工作区（内核不销毁，正文返回原位） */}
-                    <button
-                      type="button"
-                      className="dd-item"
-                      data-mindmap-entry
-                      disabled={!contextRef?.documentId}
-                      onClick={() => {
-                        setToolMenu(null);
-                        setMindmapOpen(true);
-                      }}
-                    >
-                      导图
-                    </button>
                     {/* v48.22（D58 §6.8-8）：集中复习本书的摘录 / 闪卡——按书范围会话，遵循共享每日预算 */}
                     <button
                       type="button"
@@ -1555,59 +1540,11 @@ export default function Reader({
                       </div>
                     )}
                   </ReaderToolMenu>
-                  {/* v48.43（D83）：翻页钮移到工具栏右缘 */}
-                  <span className="reader-engine-divider" aria-hidden="true" />
-                  <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
-                    <IconChevronLeft />
-                  </button>
-                  <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
-                    <IconChevronRight />
-                  </button>
                 </div>
               </div>
               <div className="reader-engine-viewport">
-                {/* D2：正文区与侧栏是 flex 兄弟（侧栏在**左**，2026-10-01）——栏开着时正文让宽度，
-                    不是压在正文上；翻页热区只覆盖正文区（.reader-engine-main），不盖到栏上 */}
-                {sidebarOpen && sidebarAvailable && (
-                  <ReaderSidebar
-                    tocItems={tocItems}
-                    activeHref={tocActiveHref}
-                    onNavigate={(item) => {
-                      void kernelRef.current?.goTo({ href: item.href });
-                      setSidebarOpen(false);
-                    }}
-                    tab={sidebarTab}
-                    onTabChange={setSidebarTab}
-                    extractsPanel={
-                      /* D2：页签各自按自己的数据在场——本文档没有注解就不出现「摘录」页签 */
-                      docAnnotCount > 0 ? (
-                      <ReaderExtractsPanel
-                        documentId={contextRef?.documentId ?? null}
-                        engine={engineKind}
-                        orderKey={marksOrderKey}
-                        getMarkOrder={() => kernelRef.current?.getMarkOrder?.() ?? []}
-                        filter={annotSettings.annotationFilter}
-                        onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
-                        palette={annotSettings.annotatePalette}
-                        currentId={annotFocus}
-                        unavailableIds={Object.keys(annotUnavailable)}
-                        onJump={jumpToMark}
-                        onEdit={(id, comment) => void selActions.saveAnnotationComment(id, comment)}
-                        onColor={(id, color) => void selActions.saveAnnotationColor(id, color)}
-                        onDelete={(id) => void selActions.removeAnnotation(id)}
-                      />
-                      ) : null
-                    }
-                    mapItems={mapItems}
-                    mapAvailable={mapAvailable}
-                    onMapNavigate={(it) => {
-                      // 节点点击 → 跳该节点自有区间起点（复用既有导图跳转：区间起点 → 该单元锚 → goTo）
-                      const anchor = mapUnitAnchorsRef.current[it.start];
-                      if (anchor) void kernelRef.current?.goTo({ href: anchor });
-                      setSidebarOpen(false);
-                    }}
-                  />
-                )}
+                {/* v48.45（D85）：侧栏已升为全高左轨（.reader-side-rail，在 layout 层），视口里只剩正文区；
+                    翻页热区只覆盖正文区（.reader-engine-main）。 */}
                 <div className="reader-engine-main">
                 {engineError ? (
                   <div className="reader-engine-error" role="alert">
@@ -1657,7 +1594,12 @@ export default function Reader({
                     <div className="reader-tap-zone reader-tap-right" title="下一页" onClick={() => void turnPage(1)} />
                   </>
                 )}
+                {/* v48.44（D84）：图谱页签画布的 portal 宿主——置于 .reader-engine-main 末位（z 5 高于
+                    翻页热区 z 4 与错误面板），空时 display:none 不遮正文；画布经 MindmapTab portal 落入 */}
+                <div className="reader-map-layer" data-reader-map-layer ref={setMapLayerHost} />
                 </div>
+              </div>
+              </div>
               </div>
             </>
           ) : (
@@ -1738,35 +1680,8 @@ export default function Reader({
         />
       )}
 
-      {/* v48.24 批3（§4 文中留痕）：标记浮层——原文 + 批注 + 已制卡数 + 「就此制卡」。
-          hover 出现、点标记钉住、点别处/Esc 收起；「就此制卡」走既有手动制卡链。 */}
-      {markPop && (() => {
-        const mark = marksRef.current.find((m) => m.id === markPop.id);
-        if (!mark) return null;
-        return (
-          <MarkPopover
-            mark={mark}
-            anchor={markPop.rect}
-            onMakeCard={() => startMarkCard(mark)}
-            onClose={closeMarkPop}
-            onKeepOpen={() => {
-              if (markHideTimerRef.current) {
-                window.clearTimeout(markHideTimerRef.current);
-                markHideTimerRef.current = null;
-              }
-            }}
-            onRelease={() => {
-              if (markPinnedRef.current || markHideTimerRef.current !== null) return;
-              markHideTimerRef.current = window.setTimeout(() => {
-                markHideTimerRef.current = null;
-                setMarkPop(null);
-              }, 160);
-            }}
-          />
-        );
-      })()}
-
-      {/* 批 4 Task 17：标记的批注编辑浮层（形态唯一；无保存/取消，失焦即落库） */}
+      {/* 批 4 Task 17 / v48.45（D85）：标记的批注编辑浮层＝**唯一浮层**（悬停浮层已退役）——
+          批注改/删 + 聚合「已制卡 N 张」+「就此制卡」（走既有手动制卡链）；无保存/取消，失焦即落库。 */}
       {markEditor && (() => {
         const m = marksRef.current.find((x) => x.id === markEditor.id);
         if (!m) return null;
@@ -1776,10 +1691,12 @@ export default function Reader({
             kind={markEditor.kind}
             comment={markEditor.comment}
             color={markEditor.color}
-            quote={markEditor.quote}
             anchor={markEditor.anchor}
             palette={annotSettings.annotatePalette}
             customEnabled={annotSettings.annotateCustomEnabled}
+            cardCount={m.cardCount}
+            onMakeCard={() => startMarkCard(m)}
+            onOpenCards={onOpenAnchorCards ? () => onOpenAnchorCards(markEditor.id) : undefined}
             onSaveComment={(c) => selActions.saveAnnotationComment(markEditor.id, c)}
             onSaveColor={async (c) => {
               await selActions.saveAnnotationColor(markEditor.id, c);
@@ -1788,29 +1705,13 @@ export default function Reader({
             onDelete={async () => {
               await selActions.removeAnnotation(markEditor.id);
               setMarkEditor(null);
-              closeMarkPop();
             }}
             onClose={() => setMarkEditor(null)}
           />
         );
       })()}
 
-      {/* v48 批3（M15，D42）：全屏导图工作区——内核保活，「正文」返回即原位；节点制卡走既有 AI 制卡链路 */}
-      {mindmapOpen && engineSource && contextRef?.documentId && kernelRef.current && (
-        <MindmapWorkspace
-          kernel={kernelRef.current}
-          documentId={contextRef.documentId}
-          title={title || sourceTitle || "未命名材料"}
-          initialMapId={openMindmapMapId || null}
-          initialResumeRunId={resumeOnce}
-          onBack={() => setMindmapOpen(false)}
-          onMakeCardsFromNode={(payload) => {
-            setMindmapOpen(false);
-            // v48.5 批C：结构制卡——mode=card-structure（导图节点专用分支，对作者组织结构出题）
-            void runAICards(payload.section, undefined, "card-structure", { focus: payload.focus, mindmapNodeId: payload.nodeId });
-          }}
-        />
-      )}
+      {/* v48.44（D84）：全屏导图工作区退役——导图并入侧栏图谱页签（MindmapTab，见上方 mapPanel）。 */}
 
       {toast && <div className="reader-toast">{toast}</div>}
     </div>

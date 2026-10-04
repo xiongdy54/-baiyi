@@ -52,7 +52,7 @@ type View =
   // v48.22（D58 §6.8-8）：本书范围的集中复习（阅读器「复习摘录 / 复习闪卡」入口）
   | { name: "extractSession"; bookItemIds: string[]; title: string; limits?: Record<string, number> | null }
   | { name: "review"; bookItemIds?: string[]; title?: string; limits?: Record<string, number> | null }
-  | { name: "browse" }
+  | { name: "browse"; /** v48.47（D87）：锚点筛选（来自浮窗「已制卡 N 张」点击） */ anchorExtractId?: string | null }
   | { name: "journal" }
   | { name: "stats" };
 
@@ -402,6 +402,7 @@ export default function App() {
         resumeRunId={view.resumeRunId ?? null}
         onReviewExtracts={() => setView({ name: "extractSession", bookItemIds: [view.itemId], title: view.doc.title })}
         onReviewCards={() => setView({ name: "review", bookItemIds: [view.itemId], title: view.doc.title })}
+        onOpenAnchorCards={(extractId) => setView({ name: "browse", anchorExtractId: extractId })}
         onMindmapOpened={() => setView((v) => (v.name === "reader" ? { ...v, openMindmap: false, resumeRunId: null } : v))}
       />
     );
@@ -414,6 +415,7 @@ export default function App() {
         onJumpToDoc={handleJumpToDoc}
         onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
+        onOpenAnchorCards={(extractId) => setView({ name: "browse", anchorExtractId: extractId })}
       />
     );
   } else if (view.name === "extractSession") {
@@ -428,6 +430,7 @@ export default function App() {
         onExit={() => setView({ name: "shelf" })}
         onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
+        onOpenAnchorCards={(extractId) => setView({ name: "browse", anchorExtractId: extractId })}
       />
     );
   } else if (view.name === "review") {
@@ -439,6 +442,8 @@ export default function App() {
     mainContent = (
       <CardBrowser
         onJumpToDoc={handleJumpToDoc}
+        anchorExtractId={view.name === "browse" ? view.anchorExtractId ?? null : null}
+        onClearAnchorFilter={() => setView((v) => (v.name === "browse" ? { ...v, anchorExtractId: null } : v))}
         onStartSession={({ bookItemIds, kinds, name, limits }) => {
           // v48.22（D58 §6.8-5）：从筛选牌组进入集中复习——摘录范围走沉浸式摘录页，闪卡范围走复习页；
           // 牌组的上限覆写随视图带过去（只收紧，不另开预算）

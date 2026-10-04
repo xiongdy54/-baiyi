@@ -1901,12 +1901,16 @@ body.theme-dark .modal-panel {
   app-region: no-drag;
 }
 .selection-menu { transform: none; }
-/* v48.42（D82）：菜单紧贴内容——外框缩到段控+色板的本体尺寸（去大框内空白与分隔线） */
+/* v48.44（D84）：菜单定宽 240px——批注框（上）+ 调色排（下）两行后，文本框需要可用宽度 */
+.selection-menu { width: 240px; }
+/* v48.44（D84，用户点名）：批注框在上、色块在下（**上下布局**）；文本框距面板上沿/左沿的
+   边距一致＝.mrow 内边距统一 --sp-2（原上下 --sp-1 / 左右 --sp-2 不一致） */
 .selection-menu .mrow {
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: var(--sp-1) var(--sp-2);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
 }
 /* 模式/形式段控（.seg-plain＝v48.42/D82 去小框）：裸文字 + 被选项主题色下划线 */
 .seg {
@@ -1931,8 +1935,9 @@ body.theme-dark .modal-panel {
   font-weight: 500;
 }
 .seg button:hover { background: var(--grey-1); }
-/* 调色排：色块即动作（点一下＝用这支色完成当前模式的操作） */
-.swatches { display: flex; gap: var(--sp-1); align-items: center; }
+/* 调色排：色块即动作（点一下＝用这支色完成当前模式的操作）。
+   v48.44（D84）：菜单定宽后色排 space-between 铺满行宽（8 支色均匀分布）。 */
+.swatches { display: flex; gap: var(--sp-2); align-items: center; justify-content: space-between; }
 .swatch {
   width: 12px;
   height: 12px;
@@ -1965,14 +1970,6 @@ body.theme-dark .modal-panel {
   padding: var(--sp-3);
   z-index: var(--z-sticky);
 }
-.editor .eq {
-  font-size: var(--fs-secondary);
-  color: var(--text-helper);
-  margin: 0 0 var(--sp-2);
-  padding-left: var(--sp-2);
-  border-left: 2px solid var(--accent);
-  background: var(--accent-soft);
-}
 .editor textarea {
   width: 100%;
   min-height: 56px;
@@ -1996,6 +1993,34 @@ body.theme-dark .modal-panel {
   font-size: var(--fs-meta);
   color: var(--text-helper);
 }
+/* v48.46（D86）：「已制卡 N 张」（聚合口径）+「就此制卡」并入底行——计数推右侧组到最右，
+   就此制卡＝与 .del 同规格（无边框 meta 文字钮、hover 下划线）但**黑色文字**（--text-primary，
+   不取 error 红——用户明确「样式对齐删除高亮，颜色保持黑色」）。 */
+.editor .ebar .cardcount {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  color: var(--text-primary); /* v48.47（D87）：计数变按钮（黑字、hover 下划线），与 .make-card 同族 */
+  cursor: pointer;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.editor .ebar .cardcount:hover { text-decoration: underline; }
+.editor .ebar .make-card {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.editor .ebar .make-card:hover { text-decoration: underline; }
+.editor .ebar .cardcount + .make-card ~ .del,
+.editor .ebar .cardcount + .make-card ~ .del-cancel { margin-left: 0; }
 .editor .ebar .del,
 .editor .ebar .del-cancel {
   margin-left: auto;
@@ -3254,61 +3279,9 @@ body.theme-dark .modal-panel {
   background: var(--accent);
 }
 
-/* 标记浮层：原文 + 批注 + 已制卡数 + 「就此制卡」（fixed 定位由组件实测后给） */
-.reader-mark-pop {
-  position: fixed;
-  z-index: var(--z-sticky);
-  width: 320px;
-  max-width: calc(100vw - var(--sp-4));
-  padding: var(--sp-3);
-  background: var(--paper);
-  border: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-float);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.reader-mark-pop-quote {
-  margin: 0;
-  padding: var(--sp-2);
-  font-size: var(--fs-secondary);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-  /* 只展示前 4 行：浮层是「看一眼」的面板，长摘录回卡片上看 */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  overflow: hidden;
-}
-.reader-mark-pop-comment {
-  margin: 0;
-  font-size: var(--fs-secondary);
-  line-height: 1.5;
-  color: var(--text-secondary);
-  overflow-wrap: anywhere;
-}
-.reader-mark-pop-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-}
-.reader-mark-pop-meta {
-  font-size: var(--fs-meta);
-  color: var(--text-helper);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.reader-mark-pop-actions { display: flex; align-items: center; gap: var(--sp-2); }
-.reader-mark-pop-close {
-  background: none;
-  border: none;
-  padding: 0;
-  font-size: var(--fs-meta);
-  color: var(--text-helper);
-  cursor: pointer;
-}
-.reader-mark-pop-close:hover { color: var(--text-primary); }
+/* v48.45（D85）：悬停浮层（.reader-mark-pop）退役——文中标记的唯一浮层＝点击弹出的批注编辑浮层；
+   v48.46（D86）：「已制卡 N 张」+「就此制卡」并入浮层底行（.editor .ebar，见 .cardcount/.make-card）。 */
+
 /* v28 加载态：大书解析+首屏渲染需数秒，期间显示提示（在 container 层，不吃 viewerEl 的反色滤镜） */
 .reader-engine-host .pdf-viewer-container.pdf-loading::after {
   content: "正在加载 PDF…";
@@ -3340,7 +3313,35 @@ body.theme-dark .modal-panel {
 /* 阅读工具栏：正常文档流顶栏（稳定 chrome，不再浮动遮书）。
    两组分区——左=导航（目录/翻页），右=显示（模式/主题）；
    组内 8px、组间 16px+，以空间分组而非线条（better-layout：空间优先分组）。 */
+/* v48.45（D85）：阅读器＝**全高左轨**（与摘录批注轨同一形态，用户指令④）——
+   一行两格：.reader-side-rail（280↔0，两态恒挂载 + width/visibility 过渡，贯通到顶）
+   + 右列（.reader-engine-col：工具栏 + 正文视口，展开时整体右移）。 */
 .reader-scroll-engine {
+  display: flex;
+  flex-direction: column;
+}
+.reader-engine-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+.reader-side-rail {
+  flex: none;
+  width: 280px;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.reader-side-rail.is-closed { width: 0; visibility: hidden; } /* 收起＝不留空轨（与摘录批注轨同语义） */
+@media (prefers-reduced-motion: no-preference) {
+  .reader-side-rail { transition: width var(--dur) var(--ease), visibility var(--dur) linear; }
+}
+.reader-side-rail .reader-sidebar { height: 100%; }
+.reader-engine-col {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -3351,7 +3352,8 @@ body.theme-dark .modal-panel {
   align-items: center;
   justify-content: flex-start;
   gap: var(--sp-4);
-  padding: var(--sp-2) var(--sp-4);
+  /* v48.45（D85）：左让位 --sp-16 给浮在轨顶的开关钮（16+40+8，与摘录页头带同一让位） */
+  padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-16);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--reader-bg, var(--paper));
   color: var(--reader-fg, var(--text-primary));
@@ -3373,19 +3375,21 @@ body.theme-dark .modal-panel {
   margin-block: var(--sp-1);
   background: var(--reader-border);
 }
-/* 尺寸统一：栏内一切控件同高 32px、同字号 13px（better-typography：语义字号） */
+/* v48.45（D85，用户指令⑤）：右上三钮（翻页/更多/阅读设置）＝**顶栏导航同款**——
+   无边框、32 高、secondary 档 500、次文字色、hover grey-1 底（阅读外观按 --reader-fg 混色取档）。
+   D84⑦ 对这三钮的「24 高有框」口径作废；左侧选区动作组的有框语言不变。
+   翻页图标钮＝顶栏 .icon-btn 同规格（32×32 无边框）。 */
 .reader-engine-controls .btn,
 .reader-engine-controls .dd-btn {
   height: 32px;
+  padding: 0 var(--sp-3);
   font-size: var(--fs-secondary);
+  font-weight: 500;
   white-space: nowrap;
   background: transparent;
-  color: var(--reader-fg, var(--text-primary));
-  border-color: var(--reader-border);
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--reader-fg, #1a1a1a) 68%, transparent);
 }
-/* 翻页箭头键：固定 32px 方形，与文本按钮同高对齐。
-   字形已换成 16px 内嵌 SVG（icons.tsx），所以这里不再需要 font-size: 16px
-   —— 那曾是「用字符当图标」留下的魔法值，脱离字号阶梯。 */
 .reader-engine-controls .reader-nav-btn {
   width: 32px;
   padding: 0;
@@ -3394,7 +3398,7 @@ body.theme-dark .modal-panel {
 }
 .reader-engine-controls .btn:hover,
 .reader-engine-controls .dd-btn:hover {
-  border-color: var(--reader-fg, var(--text-primary));
+  border-color: transparent;
   color: var(--reader-fg, var(--text-primary));
   background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent);
 }
@@ -3488,7 +3492,7 @@ body.theme-dark .modal-panel {
   background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent);
   color: var(--reader-fg, var(--text-primary));
 }
-.reader-sidebar .tabs > button[role="tab"][aria-disabled="true"] { opacity: 0.45; cursor: default; }
+/* v48.44（D84）：页签恒可点——aria-disabled 禁用态随 D83 口径作废删除。 */
 .reader-side-panel { flex: 1; min-height: 0; overflow: auto; }
 /* 图谱目录条目（D4）：标题 + 区间文字 + 层级缩进（由行内 paddingLeft 给）。
    **不画占比条**：条的宽度＝自有区间÷全书单元数，是同一份区间的冗余编码，用户明确不要。 */
@@ -3538,12 +3542,11 @@ body.theme-dark .modal-panel {
   overflow-wrap: anywhere;
 }
 
-/* D2（批注样张对齐）：侧栏从「左侧绝对定位浮层」改为**右侧停靠栏**——flex 兄弟，
-   .reader-engine-main 占其余宽度。左侧浮层的定位/阴影/压正文那套（且正文靠 padding-left 让位）
-   已随 TocSidebar 一起退役：那是浮层时代的补偿手法，停靠布局里不再需要。 */
+/* D2（批注样张对齐）/ v48.45（D85）：侧栏内容装进**全高左轨**（.reader-side-rail 负责开合动画），
+   本体恒 280px 恒全高（轨收起时被裁切 ⇒ 宽度滑动动画内容不自重排，与摘录批注轨同手法）。 */
 .reader-sidebar {
-  flex: 0 0 280px;
-  min-width: 0;
+  width: 280px;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--reader-bg, var(--paper));
@@ -3588,6 +3591,21 @@ body.theme-dark .modal-panel {
 }
 
 /* ---------- 卡片浏览 v19（Anki 式表格 + 行详情维护）；v48.40/D80 边距对齐舞台语言（距窗缘 16px） ---------- */
+/* v48.47（D87）：锚点筛选条——来自浮窗「已制卡 N 张」点击；清除后隐藏 */
+.cb-anchor-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: 720px;
+  margin: var(--sp-2) auto 0;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--accent-soft);
+  font-size: var(--fs-meta);
+  color: var(--text-primary);
+}
+.cb-anchor-bar .crumb-exit { margin-left: auto; }
+
 .cb-toolbar {
   display: flex;
   align-items: center;
@@ -4452,87 +4470,39 @@ body.capture-body #root { height: 100vh; }
 .kmg-prop-card-front { margin: 0; font-size: var(--fs-meta); color: var(--text-secondary); }
 .kmg-prop-actions { display: flex; gap: var(--sp-2); }
 
-/* v47.2：材料知识导图全屏工作区——正文/导图两视图切换；画布占满窗口，操作收右侧边栏 */
-.mindmap-workspace {
-  position: fixed;
+/* ============ v48.44（D84）：材料导图并入阅读器侧栏图谱页签（docs/design/MINDMAP-SIDEBAR-TAB.md）============
+   全屏 Overlay 退役（§4.19-2 v47.2 决策作废）。两个宿主：
+   · 画布层＝.reader-map-layer（Reader 挂在 .reader-engine-main 内的覆盖层，:empty 时不遮正文）
+     → .reader-map-stage（portal 根，App token 取色——画布 SVG 用 resolveTheme() 读的同一套 paper/ink）；
+   · 页签面板＝.mindmap-tab-panel（侧栏 data-panel="map"）→ .mindmap-sidebar 随栏宽铺满，
+     内部配色挂阅读外观变量（--reader-border / --reader-fg），与侧栏其余页签同一套取色。
+   瑞士风：单 accent / 直角 / 无阴影渐变 / 1px hairline / 8px 基线 / 全 token 化 */
+.reader-map-layer {
+  position: absolute;
   inset: 0;
-  z-index: var(--z-sticky);
+  z-index: 5;
+}
+.reader-map-layer:empty { display: none; }
+.reader-map-stage {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   background: var(--paper);
   color: var(--text-primary);
 }
-.mindmap-top {
+.reader-map-top {
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-4);
-  border-bottom: 1px solid var(--grey-2);
-}
-.mindmap-top-title { font-size: var(--fs-body); font-weight: 600; }
-.mindmap-top-meta { margin-left: auto; font-size: var(--fs-meta); color: var(--text-secondary); }
-.mindmap-body { flex: 1; display: flex; min-height: 0; }
-.mindmap-canvas {
-  flex: 1;
-  min-width: 0;
-  overflow: auto;
-  /* 原写 --sp-5（阶梯中不存在）→ 整条 padding 声明失效并回落到 0，
-     导图内容直接贴画布边缘。按 8px 网格取 sp-6。 */
-  padding: var(--sp-6);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--sp-4);
-}
-.mindmap-canvas-hint {
-  margin: auto;
-  max-width: 560px;
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: var(--fs-body);
-  line-height: var(--lh-prose);
-}
-.mindmap-artifact-item {
-  width: 100%;
-  max-width: 1080px;
-  padding: var(--sp-4);
-  border: 1px solid var(--grey-2);
-  background: #ffffff;
-  text-align: center;
-}
-.mindmap-artifact-item svg { max-width: 100%; height: auto; }
-.mindmap-sidebar {
-  width: 400px;
-  flex-shrink: 0;
-  overflow-y: auto;
-  padding: var(--sp-3);
-  border-left: 1px solid var(--grey-2);
-  background: var(--grey-1);
-}
-.mindmap-sidebar h3 { margin: var(--sp-3) 0 var(--sp-2); }
-
-/* ============ v48 批3（M15 重做，D42 / §4.19-9）：材料知识导图全屏工作区 ============ */
-/* 瑞士风：单 accent / 直角 / 无阴影渐变 / 1px hairline / 8px 基线 / 全 token 化 */
-.mindmap-workspace {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal, 200);
-  display: flex;
-  flex-direction: column;
-  background: var(--paper);
-  color: var(--ink);
-}
-.mindmap-top {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  height: 48px;
+  height: 40px;
   padding: 0 var(--sp-4);
   border-bottom: 1px solid var(--border-subtle);
   flex: none;
 }
-.mindmap-top-title {
+.reader-map-top .mindmap-top-title {
   font-size: var(--fs-secondary);
+  font-weight: 600;
   color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4543,14 +4513,10 @@ body.capture-body #root { height: 100vh; }
   display: flex;
   gap: var(--sp-2);
 }
-.mindmap-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
 .mindmap-canvas {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   position: relative;
   cursor: grab;
@@ -4558,12 +4524,17 @@ body.capture-body #root { height: 100vh; }
   /* 画板交互：拖拽平移不得触发文本选择（用户 2026-09-18 实测反馈） */
   user-select: none;
   -webkit-user-select: none;
+  /* 原写 --sp-5（阶梯中不存在）→ 整条 padding 声明失效并回落到 0，
+     导图内容直接贴画布边缘。按 8px 网格取 sp-6。 */
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
 }
-/* 焦点环必须挂在真正可聚焦的元素上：键盘焦点在 .mindmap-workspace
-   （tsx 里 tabIndex={0} + onKeyDown），而 .mindmap-canvas 没有 tabIndex，
-   原规则永不匹配 → 键盘用户在导图里看不到焦点位置。两条都留着以防回归。 */
-.mindmap-canvas:focus-visible,
-.mindmap-workspace:focus-visible {
+/* 焦点环必须挂在真正可聚焦的元素上：键盘焦点在 .reader-map-stage
+   （tsx 里 tabIndex={0} + onKeyDown），而 .mindmap-canvas 没有 tabIndex。 */
+.reader-map-stage:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -4580,12 +4551,16 @@ body.capture-body #root { height: 100vh; }
 .mindmap-canvas-hint {
   position: absolute;
   inset: 0;
+  /* inset:0 + margin:auto + max-width＝水平绝对居中（560px 上限，继承自 v48 全屏工作区） */
+  margin: auto;
+  max-width: 560px;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--sp-8);
   color: var(--text-secondary);
   font-size: var(--fs-body);
+  line-height: var(--lh-prose);
   text-align: center;
 }
 .mindmap-fail {
@@ -4649,6 +4624,60 @@ body.capture-body #root { height: 100vh; }
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+}
+/* v48.44（D84）：页签面板宿主＝阅读器侧栏（280px）——面板随栏宽铺满、去浮动 aside 的框线；
+   内部配色挂阅读外观变量（--reader-border / --reader-fg），纸白/羊皮/暗夜统一适配，
+   与侧栏其余页签（目录/摘录）同一套取色。引用文本底改 accent 透明档（accent-soft 是
+   App 浅色 Token，压深色阅读底会变成浅块浅字）。 */
+.reader-sidebar .mindmap-tab-panel {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
+/* 页签容器变 flex，让面板拿到有界高度（内部自滚，与目录页签 .reader-toc-list 同规） */
+.reader-sidebar .reader-map-panel { display: flex; }
+.reader-sidebar .mindmap-sidebar {
+  width: 100%;
+  flex: 1;
+  min-width: 0;
+  border-left: none;
+  background: transparent;
+  padding: var(--sp-3);
+}
+.reader-sidebar .mindmap-side-sec { border-color: var(--reader-border); }
+.reader-sidebar .mindmap-side-sec h3 { color: var(--reader-fg, var(--text-primary)); }
+.reader-sidebar .mindmap-hint,
+.reader-sidebar .mindmap-status,
+.reader-sidebar .mindmap-meta,
+.reader-sidebar .mindmap-version-time { color: color-mix(in srgb, var(--reader-fg, #1a1a1a) 62%, transparent); }
+.reader-sidebar .mindmap-search {
+  background: transparent;
+  border-color: var(--reader-border);
+  color: var(--reader-fg, var(--text-primary));
+}
+.reader-sidebar .mindmap-preview-list,
+.reader-sidebar .mindmap-node-title,
+.reader-sidebar .mindmap-search-results button,
+.reader-sidebar .mindmap-version-title { color: var(--reader-fg, var(--text-primary)); }
+.reader-sidebar .mindmap-quote {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--reader-fg, var(--text-primary));
+}
+.reader-sidebar .mindmap-versions .mindmap-version-pick {
+  background: transparent;
+  border-color: var(--reader-border);
+  color: var(--reader-fg, var(--text-primary));
+}
+.reader-sidebar .mindmap-versions li.is-active .mindmap-version-pick {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.reader-sidebar .mindmap-version-del {
+  background: transparent;
+  border-color: var(--reader-border);
+  color: color-mix(in srgb, var(--reader-fg, #1a1a1a) 62%, transparent);
 }
 .mindmap-side-sec {
   border: 1px solid var(--border-subtle);
@@ -5071,10 +5100,12 @@ body.capture-body #root { height: 100vh; }
 }
 /* 可见性离散步进：过渡下「收起时停在末帧隐身、展开时立即显形」＝滑出/滑入全程可见 */
 .extract-annot-rail .annot-side { height: 100%; }
-/* 栏头行（v7/D74 让位更新）：与 fixed 开关钮**同一行**——头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），
-   行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；「注解 N」已由 showCount={false} 关闭（用户裁定省一行）。
-   两条段控按 3:2 有比例铺满剩余宽（筛选 3 项 : 排序 2 项），按钮 24 高＝8×3 模块。 */
-.extract-annot-rail .annot-side-head {
+/* 栏头行（v7/D74 让位更新；v48.45/D85 起阅读器侧栏轨共用同一套）：与 fixed 开关钮**同一行**——
+   头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；
+   「注解 N」已由 showCount={false} 关闭（用户裁定省一行）。两条段控按 3:2 有比例铺满剩余宽，
+   按钮 24 高＝8×3 模块。 */
+.extract-annot-rail .annot-side-head,
+.reader-side-rail .annot-side-head {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
@@ -5083,10 +5114,16 @@ body.capture-body #root { height: 100vh; }
   padding: 0 var(--sp-2) 0 0;
   border-bottom: none; /* 头行浮在钮旁，基线版的整行 hairline 只会从让位点起笔成断线 */
 }
-.extract-annot-rail .annot-side-head .filter { display: flex; flex: 3; min-width: 0; gap: var(--sp-1); }
-.extract-annot-rail .annot-side-head .sort { display: flex; flex: 2; min-width: 0; gap: var(--sp-1); }
+.extract-annot-rail .annot-side-head .filter,
+.extract-annot-rail .annot-side-head .sort,
+.reader-side-rail .annot-side-head .filter,
+.reader-side-rail .annot-side-head .sort { display: flex; flex: 3; min-width: 0; gap: var(--sp-1); }
+.extract-annot-rail .annot-side-head .sort,
+.reader-side-rail .annot-side-head .sort { flex: 2; }
 .extract-annot-rail .annot-side-head .filter button,
-.extract-annot-rail .annot-side-head .sort button { flex: 1; min-width: 0; height: 24px; padding: 0; font-size: var(--fs-meta); }
+.extract-annot-rail .annot-side-head .sort button,
+.reader-side-rail .annot-side-head .filter button,
+.reader-side-rail .annot-side-head .sort button { flex: 1; min-width: 0; height: 24px; padding: 0; font-size: var(--fs-meta); }
 /* 条目竖线右移（v7/D74）：轨贴窗左缘后左线贴边看不清（用户裁定）——摘录页作用域把 --zline 竖线
    从左缘移到右缘；整卡条目的 accent 竖线同步。阅读器 dock 在右侧无此问题，基线 .zitem 左线不动。 */
 .extract-annot-rail .annot-side .zitem { border-left: none; border-right: 2px solid var(--zline, transparent); }
@@ -5118,22 +5155,23 @@ body.capture-body #root { height: 100vh; }
 }
 .annot-toggle.bar-btn:hover { border-color: var(--text-primary); color: var(--text-primary); }
 
-/* v48.42（D82）：摘录页工具栏＝首行动作组（制卡/AI 制卡/AI 解释/摘录/查词）——
-   与左侧批注栏头（收起/展开 全部/摘录/高亮 位置/时间）同一视觉行；
-   钮规格对齐栏头段控（26 高、meta 档）；未选区 disabled＝不可点但**无 🚫 光标**、暗色下仍可读。 */
+/* v48.44（D84，用户指令⑥）：工具栏钮与摘录页侧栏顶部按钮同一语言——**都有框**。
+   段控＝组框（1px --border-subtle，钮在框内裸排，同 .filter/.sort）；动作钮＝单钮框。
+   禁用态色阶反转（用户指令⑤）：可用＝--text-secondary（深），禁用＝--text-placeholder（浅）——
+   修正 D83「未选中深、选中反而浅」的倒挂；摘录页 .extract-toolbar 顶边距对齐侧栏开关钮（48+12）。 */
 .extract-toolbar {
   width: 100%;
   max-width: 720px;
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) 0;
+  padding: var(--sp-3) 0 var(--sp-2);
   margin: 0 auto;
 }
 
-/* v48.43（D83）：批注栏头同款段控/动作钮（裸文字、选中 grey-1 底、24 高 meta 档）——
+/* v48.43（D83）：批注栏头同款段控/动作钮（24 高 meta 档；v48.44/D84 加框）——
    阅读器工具栏与摘录页工具栏共用，与批注栏头「全部/摘录/高亮 位置/时间」完全同族。 */
-.seg-rail { display: flex; gap: var(--sp-1); }
+.seg-rail { display: flex; border: 1px solid var(--border-subtle); }
 .seg-rail button {
   height: 24px;
   padding: 0 var(--sp-2);
@@ -5150,15 +5188,15 @@ body.capture-body #root { height: 100vh; }
   height: 24px;
   padding: 0 var(--sp-2);
   background: none;
-  border: none;
+  border: 1px solid var(--border-subtle);
   font-size: var(--fs-meta);
-  color: var(--text-helper);
+  color: var(--text-secondary);
   cursor: pointer;
   white-space: nowrap;
 }
-.btn-rail:hover:not([disabled]) { background: var(--grey-1); color: var(--text-primary); }
-/* disabled＝不可点但**无 🚫 光标**、暗色下可读（用户 2026-10-03） */
-.btn-rail[disabled] { cursor: default; color: var(--text-secondary); }
+.btn-rail:hover:not([disabled]) { background: var(--grey-1); color: var(--text-primary); border-color: var(--text-primary); }
+/* disabled＝不可点但**无 🚫 光标**、比可用态**更浅**（D84 色阶反转；暗色下同样成立） */
+.btn-rail[disabled] { cursor: default; color: var(--text-placeholder); border-color: var(--grey-2); }
 
 /* v48.43（D83）：选区菜单的批注框（色块上方；点色时有文字＝批注一并保存） */
 .menu-comment {
@@ -5429,9 +5467,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   border-bottom: 1px solid var(--border-subtle);
 }
 
-/* v48.41（D81）：markdown 阅读分支的选区动作组容器（引擎分支的组直接挂在 .reader-engine-controls 里） */
+/* v48.41（D81）：markdown 阅读分支的选区动作组容器（引擎分支的组直接挂在 .reader-engine-controls 里）
+   v48.44（D84）：组内钮已有自己的 1px 框（.seg-rail / .btn-rail），原 border-color 桥接规则删除 */
 .reader-md-actions { display: flex; padding: 0 var(--sp-4) var(--sp-2); }
-.reader-md-actions .reader-sel-actions { border-color: var(--border-strong); }
 /* PDF 文中留痕的下划线形式：透明底 + 底边 2px 批注实色线（el 内联 borderBottomColor） */
 .reader-doc-mark.is-underline {
   background: transparent;

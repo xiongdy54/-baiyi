@@ -1,9 +1,10 @@
-// 阅读器侧栏（批 4 Task 15，规格 §5.3）：三页签**目录 / 摘录 / 图谱**，同刻只显示一个面板。
-// 由 TocSidebar 升级而来（页签行 .tabs：当前项 accent 下划线，与 Zotero 侧栏同规）。
-// 「图谱」页签：无已发布导图时**不渲染**（规格 §5.3 明写）；节点行＝标题 + 区间文字 + 层级缩进（D4 起不再画占比条），
-// 区间一律来自主进程（只消费不切分，见 src/lib/reader/mapTree.ts）。
+// 阅读器侧栏（批 4 Task 15，规格 §5.3 / §6.8-13）：**全高左轨**（v48.45/D85，与摘录批注轨同一形态）。
+// 结构＝栏头行（v48.45/D85：与摘录页 `.annot-side-head` 同几何——「全部/摘录/高亮」筛选 +
+// 「位置/时间」排序，挂在「收起/展开」钮旁）+ 三页签**目录 / 摘录 / 图谱** + 当前页签面板。
+// v48.44（D84）：三页签**恒可点**（空数据进页签显示空态文案）；「图谱」页签＝导图工作区面板
+// （MindmapTab 经 mapPanel 注入；原 mapTree 树形目录退役）。
 import type { ReaderTocItem } from "../../lib/reader/service";
-import type { MapTreeItem } from "../../lib/reader/mapTree";
+import type { AnnotFilter, AnnotSort } from "./AnnotationPanel";
 
 export type ReaderTab = "toc" | "extracts" | "map";
 
@@ -27,13 +28,16 @@ export interface ReaderSidebarProps {
   /** 当前页签（会话记忆，由宿主持有） */
   tab: ReaderTab;
   onTabChange: (t: ReaderTab) => void;
-  /** 摘录面板（宿主渲染的节点；缺省＝该页签**禁用**（v48.43/D83 页签恒在，不再消失） */
+  /** 栏头段控：注解筛选（持久键 app.annotationFilter，宿主持有） */
+  filter: AnnotFilter;
+  onFilter: (f: AnnotFilter) => void;
+  /** 栏头段控：注解排序（会话内视图偏好，宿主持有——与摘录页栏头同一控件） */
+  sort: AnnotSort;
+  onSort: (s: AnnotSort) => void;
+  /** 摘录面板（宿主渲染的节点；null＝空态文案「本书暂无批注。」） */
   extractsPanel?: React.ReactNode;
-  /** 图谱目录（null＝无导图 ⇒ 「图谱」页签禁用） */
-  mapItems?: MapTreeItem[] | null;
-  onMapNavigate?: (item: MapTreeItem) => void;
-  /** 图谱页签是否**可用**（无图则页签禁用不消失） */
-  mapAvailable?: boolean;
+  /** 图谱页签面板（宿主＝MindmapTab；缺省＝空态文案） */
+  mapPanel?: React.ReactNode;
 }
 
 export default function ReaderSidebar({
@@ -42,36 +46,60 @@ export default function ReaderSidebar({
   onNavigate,
   tab,
   onTabChange,
+  filter,
+  onFilter,
+  sort,
+  onSort,
   extractsPanel,
-  mapItems,
-  onMapNavigate,
-  mapAvailable = false
+  mapPanel
 }: ReaderSidebarProps) {
   const flat = flatten(tocItems);
-  // D2：页签按数据在场——v48.43（D83）改口径：三枚**恒在**（用户：不知道为什么有时只剩一两枚），
-  // 数据不在场＝disabled + title 说明；不是删除。行样式对齐摘录页批注栏头（24 高/meta/选中 grey-1 底）。
-  const tabs: Array<[ReaderTab, string, boolean]> = [
-    ["toc", "目录", flat.length > 0],
-    ["extracts", "摘录", Boolean(extractsPanel)],
-    ["map", "图谱", Boolean(mapAvailable)]
+  // v48.44（D84）：页签**恒可点**（三枚恒在且都可进，空数据＝页签内空态文案，不 disabled）。
+  // 着陆页签＝会话记忆；唯一下探：会话停在「目录」而目录无数据、其他页签有内容时，
+  // 落到首个**有内容**的页签（无目录 PDF 开栏直达注解栏——D67 起的着陆行为，保留）。
+  const tabs: Array<[ReaderTab, string]> = [
+    ["toc", "目录"],
+    ["extracts", "摘录"],
+    ["map", "图谱"]
   ];
-  // 会话记忆的页签此刻不可用时，落到**第一个可用**页签（不是硬回目录）
-  const shown = tabs.some(([id, , ok]) => ok && id === tab) ? tab : (tabs.find(([, , ok]) => ok)?.[0] ?? "toc");
+  const shown =
+    tab === "toc" && flat.length === 0 && (extractsPanel || mapPanel)
+      ? extractsPanel
+        ? "extracts"
+        : "map"
+      : tab;
 
   return (
     <nav className="reader-sidebar" id="reader-sidebar" aria-label="阅读器侧栏" data-reader-sidebar>
+      {/* v48.45（D85）：栏头行＝摘录页批注栏头同款（类名/几何同一套：.annot-side-head + .filter/.sort）——
+          段控挂在「收起/展开」钮旁，对摘录页签里的注解列表生效（面板本体 showHead 防双份）。 */}
+      <div className="annot-side-head" data-reader-annot-head>
+        <span className="filter" data-annot-filterseg>
+          {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
+            <button key={id} className={filter === id ? "on" : ""} data-f={id} onClick={() => onFilter(id)}>
+              {label}
+            </button>
+          ))}
+        </span>
+        <span className="sort" data-annot-sortseg>
+          {([["pos", "位置"], ["time", "时间"]] as const).map(([id, label]) => (
+            <button key={id} className={sort === id ? "on" : ""} data-sort={id} onClick={() => onSort(id)}>
+              {label}
+            </button>
+          ))}
+        </span>
+      </div>
+
       <div className="tabs" role="tablist" data-sidebar-tabs>
-        {tabs.map(([id, label, ok]) => (
+        {tabs.map(([id, label]) => (
           <button
             key={id}
             type="button"
             role="tab"
             className={shown === id ? "on" : undefined}
             aria-selected={shown === id}
-            aria-disabled={!ok}
             data-sidebar-tab={id}
-            title={ok ? undefined : "本书暂无此页签数据"}
-            onClick={() => ok && onTabChange(id)}
+            onClick={() => onTabChange(id)}
           >
             {label}
           </button>
@@ -98,34 +126,13 @@ export default function ReaderSidebar({
 
       {shown === "extracts" && (
         <div className="reader-side-panel" data-panel="extracts">
-          {extractsPanel}
+          {extractsPanel ?? <p className="reader-toc-empty">本书暂无批注。</p>}
         </div>
       )}
 
       {shown === "map" && (
-        <div className="reader-toc-list" data-panel="map">
-          {(mapItems || []).length === 0 && <p className="reader-toc-empty">图谱暂无可用节点。</p>}
-          {(mapItems || []).map((it) => (
-            <button
-              key={it.id}
-              className="map-item"
-              data-map-node={it.id}
-              data-map-start={it.start}
-              data-map-end={it.end}
-              data-map-depth={it.depth}
-              style={{ paddingLeft: `calc(var(--sp-3) + ${it.depth} * var(--sp-4))` }}
-              onClick={() => onMapNavigate?.(it)}
-              title={`${it.label}（单元 ${it.start}–${it.end}，L${it.depth}）`}
-            >
-              {/* D4：只出「节点 + 区间 + 层级」文字，**不画占比条**（用户明确：占比条不好看）。
-                  区间口径＝主进程给的净区间（父扣掉子），与样张行里的「单元 start–end」同形。 */}
-              <span className="map-item-label">{it.label}</span>
-              <span className="map-item-meta mono">
-                <span className="map-item-range" data-map-range>{`单元 ${it.start}–${it.end}`}</span>
-                <span className="map-item-level" data-map-level>{`L${it.depth}`}</span>
-              </span>
-            </button>
-          ))}
+        <div className="reader-side-panel reader-map-panel" data-panel="map">
+          {mapPanel ?? <p className="reader-toc-empty">图谱页签暂不可用。</p>}
         </div>
       )}
     </nav>
