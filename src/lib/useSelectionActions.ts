@@ -26,6 +26,7 @@ import type { DictPanelState } from "../components/DictPanel";
 import type { ImageFocusSubmit } from "../components/reader/ImageFocus";
 import type { ManualCardPayload } from "../components/ManualCardEditor";
 import { createManualCard } from "./manualCard";
+import { routeExplainMode, type ExplainModePref } from "./explainRouter";
 import type { ExtractSpan } from "./readingWorkflow";
 
 /** 宿主注入面：钩子只从这些函数取值，不反向持有宿主 UI 状态 */
@@ -132,6 +133,8 @@ export interface AiPanelState {
   text: string;
   /** v48（M15，D41-⑥）：本批卡片来自哪个导图节点（就此制卡溯源） */
   mindmapNodeId?: string;
+  /** v48.51（D91 §5.2）：解释面板携带的解读方式三态（auto=路由器解析；切换器显示用） */
+  explainMode?: ExplainModePref;
   answer?: string;
   drafts?: CardDraft[];
   accepted?: Set<number>;
@@ -181,6 +184,13 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
 
   const [aiPanel, setAiPanel] = useState<AiPanelState | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  // v48.52（D92 §4）：右侧学习坞会话态——首次唤起后常驻挂载（收起≠关闭，dockEverOpened 只进不出）
+  const [dockEverOpened, setDockEverOpened] = useState(false);
+  const [dockOpen, setDockOpen] = useState(false);
+  /** v48.52（D92 §3.2）：显式页签选择；新 AI 内容到达时由派生 effect 覆盖（§6.3 内容派生规则） */
+  const [dockTab, setDockTab] = useState<"explain" | "cards">("explain");
+  /** v48.52（D92 §3.4）：手动暂态是否正占坞体（切页签时表单隐藏保活、manualOpen 不动） */
+  const [manualActive, setManualActive] = useState(false);
   // v25：手动制卡的图片选区（从聚焦工具条「手动制卡」进入时携带）
   const [manualImage, setManualImage] = useState<{
     dataUrl: string;
@@ -190,6 +200,10 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   } | null>(null);
   /** 手动制卡引用文本（选区文本，或标记浮层「就此制卡」给出的摘录文本） */
   const [manualQuote, setManualQuote] = useState<string | null>(null);
+  // v48.51（D91 §5.3）：解读方式三态（auto=默认；显式选择会话内记忆，切回 auto 恢复自动）
+  const [explainMode, setExplainMode] = useState<ExplainModePref>("auto");
+  const explainModeRef = useRef<ExplainModePref>("auto");
+  explainModeRef.current = explainMode;
   const [dictPanel, setDictPanel] = useState<DictPanelState | null>(null);
   const [dictReading, setDictReading] = useState<ReadingContext | null>(null);
   const [dictFields, setDictFields] = useState<Record<string, boolean>>({});
@@ -214,6 +228,44 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     dictManualLangRef.current = lang;
     setDictManualLang(lang);
   }
+
+  // ---------- v48.52（D92 §3.3/§4）：学习坞收展与会话态 ----------
+  /** 任何唤坞动作（工具栏 AI 解释/AI 制卡/制卡、追问、就此制卡）自动展开 */
+  function wakeDock() {
+    setDockEverOpened(true);
+    setDockOpen(true);
+  }
+  /** 收起 ≠ 关闭：坞体滑出、状态保留（流式/草稿/计时继续），把手仍可展开 */
+  function collapseDock() {
+    setDockOpen(false);
+  }
+  function expandDock() {
+    wakeDock();
+  }
+  /** 显式页签点击：停留所点页签并让手动暂态退场（表单隐藏保活，manualOpen 不动） */
+  function changeDockTab(tab: "explain" | "cards") {
+    setDockTab(tab);
+    setManualActive(false);
+  }
+  // 内容派生（D92 §3.2/§7.5）：**显式点击 > 内容派生**——新内容到达时覆盖显式选择。
+  // 「新内容到达」＝ aiPanel.kind 变化（含 null→kind）**或** startedAt 变化（同 kind 重跑：
+  // 面板已在解释态时再点「AI 解释」仍是新内容，验收 §7.5 要求自动切回对应页签）；
+  // 无新内容（完成态 startedAt=undefined、同 kind 流式增量）不打扰用户当前所在页签。
+  const prevKindRef = useRef<AiPanelState["kind"] | null>(null);
+  const prevStartRef = useRef<number | null>(null);
+  useEffect(() => {
+    const kind = aiPanel?.kind ?? null;
+    const startedAt = typeof aiPanel?.startedAt === "number" ? aiPanel.startedAt : null;
+    const kindChanged = kind !== prevKindRef.current;
+    const newRun = startedAt !== null && startedAt !== prevStartRef.current;
+    prevKindRef.current = kind;
+    prevStartRef.current = startedAt;
+    if (!kind || (!kindChanged && !newRun)) return;
+    setDockEverOpened(true);
+    setDockOpen(true);
+    setDockTab(kind === "explain" ? "explain" : "cards");
+    setManualActive(false);
+  }, [aiPanel?.kind, aiPanel?.startedAt]);
 
   /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
   async function ensureImageAsset(dataUrl: string): Promise<string | null> {
@@ -386,6 +438,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       occlusionSourceRef.current = "engine";
       const label = `[图片选区] ${focused.alt || "正文图片"}`;
       A().focus.close();
+      wakeDock();
       setAiPanel({
         kind: "occlusion",
         text: label,
@@ -807,23 +860,40 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     setAiPanel(null);
   }
 
-  // ---------- AI 解释（Phase 12） ----------
-  async function runExplain(text: string, question: string | null) {
-    setAiPanel({ kind: "explain", text, answer: question ? undefined : "", running: true, startedAt: Date.now(), thinking: 0 });
+  // ---------- AI 解释（Phase 12；v48.51/D91 解读方式三态 + 本地路由） ----------
+  /**
+   * v48.51（D91 §5.3 点击行为契约）：点击即执行（无条件）；方式解析 = 显式选择 > auto=本地路由器
+   * （`routeExplainMode`，纯前端零请求）。`modeOverride` 供切换器「切换即重跑」（answer 清空重建，
+   * requestId 配对已保证旧流不串扰新结果）；材料语言取书籍语言标记（缺省时由模型自检并在标记中报告）。
+   */
+  async function runExplain(text: string, question: string | null, modeOverride?: ExplainModePref) {
+    const pref: ExplainModePref = modeOverride ?? explainModeRef.current;
+    const ste = pref === "auto" ? routeExplainMode(text) === "ste" : pref === "ste";
+    setAiPanel({
+      kind: "explain",
+      text,
+      explainMode: pref,
+      answer: question ? undefined : "",
+      running: true,
+      startedAt: Date.now(),
+      thinking: 0
+    });
     try {
       const answer = await cardGenerator.explain(
         text,
         `${A().labels.title ?? ""}${A().labels.section ? " · " + A().labels.section : ""}`,
         question,
         (acc) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, answer: acc, running: true } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, thinking: thinkChars } : p))
+        (thinkChars) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, thinking: thinkChars } : p)),
+        ste ? { mode: "ste", matLang: bookLangRef.current || "" } : undefined
       );
-      setAiPanel({ kind: "explain", text, answer, running: false, startedAt: undefined, thinking: undefined });
+      setAiPanel({ kind: "explain", text, explainMode: pref, answer, running: false, startedAt: undefined, thinking: undefined });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel({
         kind: "explain",
         text,
+        explainMode: pref,
         running: false,
         startedAt: undefined,
         thinking: undefined,
@@ -833,6 +903,17 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
             : msg
       });
     }
+  }
+
+  /**
+   * v48.51（D91 §5.3.1/§5.2）：解读方式切换（三态，显式选择会话内记忆）。
+   * 解释面板在场时切换即重跑（清空答案按新方式重发，与现有追问同一交互语法）。
+   */
+  function changeExplainMode(m: ExplainModePref) {
+    setExplainMode(m);
+    explainModeRef.current = m;
+    const p = aiPanel;
+    if (p && p.kind === "explain") void runExplain(p.text, null, m);
   }
 
   // ---------- 摘录 ----------
@@ -992,12 +1073,21 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     A().clearSelection();
     await handleExtract(text, spans, parentRange && parentRange.length >= 2 ? { parentRange } : undefined);
   }
+  /**
+   * v48.52（D92 §3.4 全局制卡）：**去除选区依赖**——无选区＝空表单自由制卡（manualQuote 置空）；
+   * 有选区＝quote 预填（既有语义保留）。两种路径都唤坞（自动展开 + 手动暂态占坞体）。
+   */
   function actManualCard() {
     const text = A().selectionText();
-    if (!text) return;
-    A().rememberAnchor(text);
-    setManualQuote(text);
+    if (text) {
+      A().rememberAnchor(text);
+      setManualQuote(text);
+    } else {
+      setManualQuote(null);
+    }
     setManualOpen(true);
+    setManualActive(true);
+    wakeDock();
     A().clearSelection();
   }
   function actAICards() {
@@ -1005,12 +1095,14 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     if (!t) return;
     A().rememberAnchor(t);
     A().clearSelection();
+    wakeDock();
     void runAICards(t, undefined, aiModeRef.current);
   }
   function actAIExplain() {
     const t = A().selectionText();
     if (!t) return;
     A().clearSelection();
+    wakeDock();
     void runExplain(t, null);
   }
   function actExtractSelection() {
@@ -1149,6 +1241,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     setManualQuote(null);
     setManualOpen(false);
     setManualImage(null);
+    setManualActive(false);
     A().onManualSettled?.();
   }
 
@@ -1165,6 +1258,17 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     dictFields,
     dictBusy,
     dictManualLang,
+    // v48.52（D92）：学习坞会话态（首次唤起后常驻挂载；收起≠关闭）
+    dockEverOpened,
+    dockOpen,
+    dockTab,
+    manualActive,
+    changeDockTab,
+    collapseDock,
+    expandDock,
+    // v48.51（D91）：解读方式三态（会话内记忆）与切换（面板在场时切换即重跑）
+    explainMode,
+    changeExplainMode,
     // 面板回调
     acceptDraft,
     acceptOcclusionDraft,
@@ -1190,6 +1294,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       lookup: actLookupWord,
       occlusion: () => {
         A().clearSelection();
+        wakeDock();
         void runOcclusionCards();
       }
     },
@@ -1221,6 +1326,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     startManualWith: (text: string) => {
       setManualQuote(text);
       setManualOpen(true);
+      setManualActive(true);
+      wakeDock();
     },
     closeManual
   };

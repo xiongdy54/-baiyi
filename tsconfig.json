@@ -5,6 +5,7 @@
     "jsx": "react-jsx",
     "strict": true,
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "types": ["vite/client"]
   },

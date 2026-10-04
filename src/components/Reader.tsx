@@ -326,6 +326,7 @@ export default function Reader({
     dictReading,
     dictFields,
     dictManualLang,
+    dockOpen,
     acceptDraft,
     acceptOcclusionDraft,
     rejectAllDrafts,
@@ -1350,7 +1351,9 @@ export default function Reader({
         <button type="button" className={annotForm === "highlight" ? "on" : undefined} data-annot-form="highlight" onClick={() => setAnnotForm("highlight")}>高亮</button>
         <button type="button" className={annotForm === "underline" ? "on" : undefined} data-annot-form="underline" onClick={() => setAnnotForm("underline")}>下划线</button>
       </div>
-      <button type="button" className="btn-rail" data-sel-act="manual" disabled={!selection} title={selection ? "就地制卡" : "先选中文字"} onClick={selAct.manual}>制卡</button>
+      {/* v48.52（D92 §3.4 全局制卡）：「制卡」去除选区依赖——免选区＝空表单自由制卡；
+          有选区＝quote 预填（actManualCard 现语义保留选区分支）。 */}
+      <button type="button" className="btn-rail" data-sel-act="manual" title={selection ? "就地制卡" : "自由制卡"} onClick={selAct.manual}>制卡</button>
       <button type="button" className="btn-rail" data-sel-act="aiCards" disabled={!selection} title={selection ? "AI 制卡" : "先选中文字"} onClick={selAct.aiCards}>AI 制卡</button>
       <button type="button" className="btn-rail" data-sel-act="explain" disabled={!selection} title={selection ? "AI 解释" : "先选中文字"} onClick={selAct.explain}>AI 解释</button>
       <button type="button" className="btn-rail" data-sel-act="extract" disabled={!selection} title={selection ? "摘录进学习队列" : "先选中文字"} onClick={selAct.extract}>摘录</button>
@@ -1384,9 +1387,10 @@ export default function Reader({
 
   return (
     <div className="reader-wrap">
-      {/* D88 §8：右侧制卡面板 dock（手动态/AI 态）在场时正文让位——机制沿用 ai-panel 时代的
-          .reader-body-shifted（flex-basis calc(100% - 400px)）；图片挖空仍走 modal，不让位。 */}
-      <div className={`reader-body${aiPanel || (manualOpen && !manualImage) ? " reader-body-shifted" : ""}`}>
+      {/* v48.52（D92 §3.3）：右侧学习坞常驻（首次唤起后挂载）——展开时正文让位（既有
+          .reader-body-shifted，flex-basis calc(100% - 400px)），收起时取消（把手 ~40px 不进正文版心）；
+          图片挖空 modal 不占坞、不让位。 */}
+      <div className={`reader-body${dockOpen ? " reader-body-shifted" : ""}`}>
         <div
           ref={scrollRef}
           className={`reader-scroll${engineMode ? " reader-scroll-engine" : ""}`}

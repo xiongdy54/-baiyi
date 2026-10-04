@@ -36,6 +36,8 @@ const {
   MATERIAL_MAP_REVIEW_PROMPT,
   // v48.22（D58 / E1）：摘录重排 scope
   EXTRACT_RERANK_PROMPT,
+  // v48.51（D91）：简明解读 scope
+  READER_EXPLAIN_STE_PROMPT,
   SITUATION_REQUIRED_SCOPES,
   situationRequiredFor
 } = require("./prompts");
@@ -2043,6 +2045,17 @@ function ensurePromptTemplates() {
       db.run(
         "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'journal-insight', '日记洞察 v1', ?, 1, 1, ?, ?)",
         [crypto.randomUUID(), JOURNAL_INSIGHT_PROMPT, situationRequiredFor("journal-insight"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // v48.51（D91）：reader-explain-ste 新 scope 首版 v1——简明解读（双 pack 槽位模板，
+  // pack 由渲染端按材料语言/输出语言注入，见 src/lib/steProfiles.ts）。零新增 IPC、零 schema 变更。
+  try {
+    const steCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'reader-explain-ste'")[0]?.n || 0;
+    if (Number(steCount) === 0) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'reader-explain-ste', '简明解读 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), READER_EXPLAIN_STE_PROMPT, situationRequiredFor("reader-explain-ste"), now]
       );
     }
   } catch { /* 播种失败不阻塞启动 */ }

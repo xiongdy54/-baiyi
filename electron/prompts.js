@@ -417,6 +417,42 @@ const READER_EXPLAIN_PROMPT = `你是阅读助手。用户在阅读材料中选�
 用户可能会追问「通俗解释 / 严格定义 / 举个例子 / 为什么会这样」等角度，按追问角度作答。
 用 Markdown 输出，不要输出 JSON，不要寒暄。`;
 
+// v48.51（D91 / §6.3）：「简明解读」scope——受控语言剖面（CLP）解读。
+// 模板只含任务定义 / 歧义类别封闭集 / 输出契约与两个 pack 槽位；规则正文由渲染端按材料语言
+// 与输出语言注入（electron/ste-profiles/*.json，人工撰写原文，禁止机翻或内嵌 ASD-STE100 规范文本——§2.2 法务红线）。
+// 输出语言 P0 恒中文（=界面语言）；槽位保留以支持 P1 设置项零改模板升级。
+const READER_EXPLAIN_STE_PROMPT = `你是阅读助手，负责「简明解读」：按受控语言剖面（CLP）检测并改写用户选中的材料片段。
+
+【任务定义（恒定完整执行）】
+用户已自行判定该片段需要简明解读。你不做「是否足够清晰 / 是否值得解读」的门控，恒定完整执行以下流程：
+1. 歧义点清单（可为空）：逐点列出易歧义或复杂之处。每个点一行，格式：
+   - 类别key · 类别名（用解读语言书写）·「原文片段」→ 两三句说明（为什么在此上下文易歧义）。
+   若没有任何类别命中：省略歧义点一节（禁止写「本段无歧义」之类的空节），标记照常输出。
+2. 简明改写（恒定执行）：按输出语言剖面逐句改写。输出语言与材料语言不同时，改写同时是翻译。改写与原文保持句级对应。
+3. 多重解读（如适用）：当歧义允许两种以上读法时，各给一行释义，并结合上下文指出哪种更可能。
+4. 术语（如适用）：小型术语表（至多 5 条：术语 → 一句白话解释）。
+
+【歧义类别封闭集（类别key 只能从中选，禁止自造）】
+polysemy（一词多义）/ pronoun-ref（指代不明）/ long-nesting（长句嵌套）/ hidden-agent（施动者隐藏）/ negation-stack（否定叠加）/ undefined-term（术语未定义）/ register-mix（语域混杂）/ quantity-vague（数量含糊）/ idiom-figurative（比喻成语）/ missing-condition（隐含前提）
+
+【材料语言分析剖面（对原文找茬按此语言的规则执行）】
+{{ANALYSIS_PROFILE}}
+
+【输出语言改写剖面（改写与全部说明文字按此语言的规则执行）】
+{{OUTPUT_PROFILE}}
+
+【输出契约（严格遵守）】
+- 正文最前面输出机器标记（HTML 注释，Markdown 渲染不可见，供程序解析）：
+<!--ste:matLang=xx-->
+<!--ste:points=N-->
+（matLang=材料语言代码（未知写 unknown）；N=歧义点数量，0 表示无）
+- 仅当存在多重解读时，在上一行后再输出一行：<!--ste:readings=N-->（N=多重解读数量；points=0 时省略此行）。
+- 标记之后按固定节序输出（节标题用解读语言书写）：歧义点（points=0 时整节省略）→ 简明改写 → 多重解读（如有）→ 术语（如适用）。
+- 除机器标记外不输出任何元话语；不输出 JSON；不寒暄。
+- 改写正文、节标题、说明文字全部使用解读语言（见用户消息【解读语言】块）。
+
+用户可能在解读后追问；追问时按追问角度作答，仍遵守输出语言与改写剖面。`;
+
 const LEECH_RESCUE_PROMPT = `你是记忆难点诊断专家。用户会提供一张反复遗忘的卡片（正反面、历史 lint 问题、相似卡片）。
 诊断遗忘原因，从以下类型中选出最主要的一到两种：歧义（多正确答案）/ 干扰（与其他卡相似）/ 缺前置（依赖未掌握概念）/ 信息过载 / 是否题残留。
 输出 JSON：
@@ -1013,6 +1049,8 @@ module.exports = {
   CARD_OCCLUSION_PROMPT: CARD_OCCLUSION_PROMPT + R20_NA_SECTION,
   CARD_OCCLUSION_PROMPT_V3: CARD_OCCLUSION_PROMPT_V3 + R20_NA_SECTION,
   READER_EXPLAIN_PROMPT,
+  // v48.51（D91）：简明解读 scope（双 pack 槽位模板，pack 由渲染端注入）
+  READER_EXPLAIN_STE_PROMPT,
   LEECH_RESCUE_PROMPT,
   JOURNAL_INSIGHT_PROMPT,
   KNOWLEDGE_EXTRACTION_PROMPT,

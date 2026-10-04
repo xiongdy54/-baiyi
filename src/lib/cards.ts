@@ -3,6 +3,8 @@ import { aiGateway } from "./ai";
 import { autoQueueKpAiProcessing } from "./kpExtract";
 import { clampPct, normalizeShape, occlusionShapes, type OcclusionShape } from "./occlusion";
 import { settingsStore } from "./settings";
+// v48.51（D91）：简明解读的 CLP pack 注入（回退链 + 格式化）
+import { formatProfile, resolveProfile, STE_OUTPUT_LANG } from "./steProfiles";
 
 declare global {
   interface Window {
@@ -383,7 +385,9 @@ export const cardGenerator: {
     context: string,
     question: string | null,
     onDelta?: (acc: string) => void,
-    onThinking?: (thinkChars: number) => void
+    onThinking?: (thinkChars: number) => void,
+    /** v48.51（D91）：mode=ste 走 reader-explain-ste（简明解读）；缺省 general 走既有 reader-explain（逐字不动） */
+    opts?: { mode?: "general" | "ste"; matLang?: string }
   ): Promise<string>;
 } = {
   async generateCards(sourceText, context, mode, onProgress, onThinking) {
@@ -654,7 +658,36 @@ export const cardGenerator: {
     return { batchId: batch?.id || "", result, templateId: tpl.id };
   },
 
-  async explain(sourceText, context, question, onDelta, onThinking) {
+  async explain(sourceText, context, question, onDelta, onThinking, opts) {
+    // v48.51（D91 §6.3）：mode=ste → reader-explain-ste 模板 + 双 pack 注入（分析 pack 按材料语言回退链
+    // 解析，输出 pack 恒 zh-Hans=界面语言）；general（缺省）→ 既有 reader-explain 路径逐字不动。
+    if (opts?.mode === "ste") {
+      const tpl = await window.promptsAPI?.get("reader-explain-ste");
+      if (!tpl) throw new Error("提示词模板缺失（reader-explain-ste）");
+      const matLang = String(opts.matLang ?? "").trim();
+      const analysis = resolveProfile(matLang);
+      const output = resolveProfile(STE_OUTPUT_LANG);
+      const sys = tpl.content
+        .replace("{{ANALYSIS_PROFILE}}", formatProfile(analysis))
+        .replace("{{OUTPUT_PROFILE}}", formatProfile(output));
+      const user = [
+        `【选中文本】\n${sourceText}`,
+        context ? `【上下文】${context}` : "",
+        `【材料语言】${matLang || "未标注——请自检材料语言并在 <!--ste:matLang=…--> 标记中报告"}`,
+        `【解读语言】${STE_OUTPUT_LANG}（简体中文）`
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      return aiGateway.chat(
+        [
+          { role: "system", content: sys },
+          { role: "user", content: user }
+        ],
+        onDelta,
+        0.7,
+        onThinking
+      );
+    }
     const tpl = await window.promptsAPI?.get("reader-explain");
     const sys = tpl?.content || "你是阅读助手。";
     const user = `【选中文本】\n${sourceText}\n\n${context ? `【上下文】${context}` : ""}\n\n${question ? `【用户追问】${question}` : "请解释这段文字。"}`;

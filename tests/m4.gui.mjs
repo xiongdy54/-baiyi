@@ -29,17 +29,44 @@ const parseState = (s) => { try { return JSON.parse(s); } catch { return {}; } }
 // 组合键派发（合成 KeyboardEvent 走 window capture 监听，与真实按键同链路；isTrusted 差异不影响分发逻辑）
 const press = (init) => evalJS(`document.dispatchEvent(new KeyboardEvent('keydown', ${JSON.stringify(init)})) || 'sent'`);
 
-// 选区辅助：选中 FSRSTEST 段落并派发 mouseup，使阅读器出现选区菜单（与 m1 G2 同法）
-const SELECT = `(() => {
-  const p = [...document.querySelectorAll('.reader-markdown p')].find((x) => (x.textContent || '').includes('FSRSTEST'));
-  if (!p) return 'P NOT FOUND';
-  const range = document.createRange();
-  range.selectNodeContents(p);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  document.querySelector('.reader-scroll').dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-  return new Promise((res) => setTimeout(() => res(document.querySelector('.selection-menu') ? 'menu' : 'no-menu'), 250));
+// v48.52：foliate 引擎内拖选（SELECT_GEO 报坐标 → CDP 真鼠标拖选 → 选区菜单确认）
+async function runSelect() {
+  const geo = parseState(await evalJS(SELECT_GEO));
+  if (typeof geo.x1 !== "number") return "NO TEXT";
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: geo.x1, y: geo.y });
+  await sleep(60);
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x: geo.x1, y: geo.y, button: "left", buttons: 1, clickCount: 1 });
+  for (let i = 1; i <= 6; i++) {
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: geo.x1 + ((geo.x2 - geo.x1) * i) / 6, y: geo.y, button: "left", buttons: 1 });
+    await sleep(40);
+  }
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: geo.x2, y: geo.y, button: "left", buttons: 0, clickCount: 1 });
+  await sleep(600);
+  return (await evalJS(`!!document.querySelector('.selection-menu')`)) ? "menu" : "no-menu";
+}
+
+// 选区辅助：v48.52 起粘贴书走 foliate 引擎（iframe）——先报坐标（测试进程真鼠标拖选），见 runSelect()
+const SELECT_GEO = `(() => {
+  const mark = 'FSRSTEST';
+  const k = window.__readerKernel;
+  const entries = (k && k.__getContents ? k.__getContents() : []).filter((e) => e.doc && e.doc.defaultView && e.doc.defaultView.frameElement);
+  for (const { doc } of entries) {
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const idx = (node.textContent || '').indexOf(mark);
+      if (idx < 0) continue;
+      const range = doc.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx + mark.length);
+      const rects = range.getClientRects();
+      const first = rects[0], last = rects[rects.length - 1];
+      if (!first || !last || !first.height) return '';
+      const fr = doc.defaultView.frameElement.getBoundingClientRect();
+      return JSON.stringify({ x1: fr.left + first.left + 2, x2: fr.left + last.right - 2, y: fr.top + first.top + first.height / 2 });
+    }
+  }
+  return '';
 })()`;
 
 // 0) 清残留
@@ -54,17 +81,25 @@ console.log(`  G0: ${JSON.stringify(g0)}`);
 
 // 1) 建测试书并打开阅读器
 console.log("== G1 建书 + 打开阅读器 ==");
-await evalJS(`window.libraryAPI.createFromPaste(${JSON.stringify("FSRSTEST M4 验证书")}, ${JSON.stringify("# 第一章\n\nFSRSTEST 中位数是把一组数据排序后位于中间位置的数，它对极端值不敏感。\n\n# 第二章\n\nFSRSTEST 勾股定理 a²+b²=c² 是几何学的基石。")})`);
+// v48.52：夹具改单章无标题（multiselect/marks 同规——多章 EPUB 在测试环境渲染为空白，main 分支同样）
+await evalJS(`window.libraryAPI.createFromPaste(${JSON.stringify("FSRSTEST M4 验证书")}, ${JSON.stringify("FSRSTEST 中位数是把一组数据排序后位于中间位置的数，它对极端值不敏感。\n\nFSRSTEST 勾股定理 a²+b²=c² 是几何学的基石。")})`);
 await evalJS("window.location.reload()");
 await sleep(2500);
 const opened = await evalJS(`(async () => {
   const target = document.querySelector('.book-card[title*="FSRSTEST"]');
   if (!target) return 'BOOK NOT FOUND';
   target.click();
-  await new Promise((r) => setTimeout(r, 900));
-  return 'reader=' + (document.querySelector('.reader-title') ? 'open' : 'closed');
+  await new Promise((r) => setTimeout(r, 1500));
+  // v48.52：粘贴书走 foliate 引擎分支（markdown 分支才有 .reader-title）——改查 .reader-wrap
+  return 'reader=' + (document.querySelector('.reader-wrap') ? 'open' : 'closed');
 })()`);
 check("测试书打开进入阅读器", String(opened).includes("reader=open"), opened);
+// v48.52：等阅读内核就绪（foliate 章节文档可查）——拖选依赖内核内容
+for (let i = 0; i < 20; i++) {
+  const ok = await evalJS(`(() => { const k = window.__readerKernel; return !!(k && k.__getContents && k.__getContents().some((e) => e.doc && e.doc.defaultView && (e.doc.body?.textContent || '').includes('FSRSTEST'))); })()`);
+  if (ok === true) break;
+  await sleep(500);
+}
 
 // 1.5) AI 桩（必须在建书 reload 之后挂载——reload 会重置页面上下文）
 console.log("== G1.5 AI 桩探测（防真实调用） ==");
@@ -93,53 +128,64 @@ if (aiStubState.aiStub === "ok") {
 
 // 2) 阅读快捷键
 console.log("== G2 阅读快捷键 Ctrl+Z / Ctrl+X / Ctrl+A / Ctrl+S ==");
+let selResult = "";
 
-// Ctrl+Z → 手动制卡面板（D88 P3：制卡语境 modal-panel → data-card-dock；标题在 dock 头行）
-check("选区菜单出现", (await evalJS(SELECT)) === "menu", "menu");
+// Ctrl+Z → 手动制卡面板（D88 P3：制卡语境 modal-panel → data-card-dock；D92 起坞头为页签条，
+// 手动暂态以「＋制卡」active + 手动 tabbody 表单在场断言，不再有单一标题位）
+selResult = await runSelect();
+check("选区菜单出现", selResult === "menu", selResult);
 await press({ key: "z", ctrlKey: true, bubbles: true, cancelable: true });
 await sleep(500);
-const modalH2 = await evalJS(`(() => { const h = document.querySelector('[data-card-dock] .side-dock-title'); return h ? h.textContent : 'NO DOCK'; })()`);
-check("Ctrl+Z 打开手动制卡面板", modalH2 === "手动制卡", modalH2);
+const modalH2 = await evalJS(`(() => {
+  const dock = document.querySelector('[data-card-dock]');
+  const form = dock?.querySelector('[data-dock-tabbody="manual"] textarea');
+  const pressed = dock?.querySelector('[data-testid="dock-manual"]')?.getAttribute('aria-pressed');
+  return JSON.stringify({ dock: !!dock, form: !!form, pressed });
+})()`);
+check("Ctrl+Z 打开手动制卡面板（学习坞手动暂态）", JSON.parse(modalH2).dock && JSON.parse(modalH2).form && JSON.parse(modalH2).pressed === "true", modalH2);
 await evalJS(`(() => { const b = [...document.querySelectorAll('[data-card-dock] button')].find((x) => x.textContent === '取消'); if (b) b.click(); return 'closed'; })()`);
 await sleep(300);
 
-// Ctrl+X → AI 制卡面板（stub 报错，零网络）
+// Ctrl+X → AI 制卡面板（stub 报错，零网络；D92：制卡页签自动激活）
 if (!AI_SKIP) {
-  check("选区菜单出现（重选）", (await evalJS(SELECT)) === "menu", "menu");
+  selResult = await runSelect();
+  check("选区菜单出现（重选）", selResult === "menu", selResult);
   await press({ key: "x", ctrlKey: true, bubbles: true, cancelable: true });
   await sleep(700);
   const aiPanel1 = parseState(await evalJS(`(() => {
-    const t = document.querySelector('.ai-panel-title');
+    const tab = document.querySelector('[data-testid="dock-tab-cards"]');
     const e = document.querySelector('.ai-error');
-    return JSON.stringify({ t: t ? t.textContent : 'NO PANEL', err: e ? e.textContent.slice(0, 30) : '' });
+    return JSON.stringify({ tab: tab ? String(tab.getAttribute('aria-selected')) : 'NO TAB', err: e ? e.textContent.slice(0, 30) : '' });
   })()`));
-  check("Ctrl+X 打开 AI 制卡面板", aiPanel1.t === "AI 制卡", JSON.stringify(aiPanel1));
+  check("Ctrl+X 打开 AI 制卡面板（制卡页签激活）", aiPanel1.tab === "true", JSON.stringify(aiPanel1));
   check("AI 制卡面板为 stub 报错（未真实调用）", String(aiPanel1.err).includes("GUI-TEST-STUB") || String(aiPanel1.err).includes("AI"), aiPanel1.err);
-  await evalJS(`document.querySelector('.ai-panel-head .icon-btn') && document.querySelector('.ai-panel-head .icon-btn').click()`);
+  await evalJS(`document.querySelector('[data-card-dock] [data-dock-close]') && document.querySelector('[data-card-dock] [data-dock-close]').click()`);
   await sleep(300);
 } else {
   console.log("  - 跳过 Ctrl+X（AI 桩不可用且已配置 Key）");
 }
 
-// Ctrl+A → AI 解释面板
+// Ctrl+A → AI 解释面板（D92：解释页签自动激活）
 if (!AI_SKIP) {
-  check("选区菜单出现（重选）", (await evalJS(SELECT)) === "menu", "menu");
+  selResult = await runSelect();
+  check("选区菜单出现（重选）", selResult === "menu", selResult);
   await press({ key: "a", ctrlKey: true, bubbles: true, cancelable: true });
   await sleep(700);
   const aiPanel2 = parseState(await evalJS(`(() => {
-    const t = document.querySelector('.ai-panel-title');
+    const tab = document.querySelector('[data-testid="dock-tab-explain"]');
     const e = document.querySelector('.ai-error');
-    return JSON.stringify({ t: t ? t.textContent : 'NO PANEL', err: e ? e.textContent.slice(0, 30) : '' });
+    return JSON.stringify({ tab: tab ? String(tab.getAttribute('aria-selected')) : 'NO TAB', err: e ? e.textContent.slice(0, 30) : '' });
   })()`));
-  check("Ctrl+A 打开 AI 解释面板", aiPanel2.t === "AI 解释", JSON.stringify(aiPanel2));
-  await evalJS(`document.querySelector('.ai-panel-head .icon-btn') && document.querySelector('.ai-panel-head .icon-btn').click()`);
+  check("Ctrl+A 打开 AI 解释面板（解释页签激活）", aiPanel2.tab === "true", JSON.stringify(aiPanel2));
+  await evalJS(`document.querySelector('[data-card-dock] [data-dock-close]') && document.querySelector('[data-card-dock] [data-dock-close]').click()`);
   await sleep(300);
 } else {
   console.log("  - 跳过 Ctrl+A（AI 桩不可用且已配置 Key）");
 }
 
 // Ctrl+S → 摘录
-check("选区菜单出现（重选）", (await evalJS(SELECT)) === "menu", "menu");
+selResult = await runSelect();
+  check("选区菜单出现（重选）", selResult === "menu", selResult);
 await press({ key: "s", ctrlKey: true, bubbles: true, cancelable: true });
 await sleep(700);
 const toast = await evalJS(`(() => { const t = document.querySelector('.reader-toast'); return t ? t.textContent : 'NO TOAST'; })()`);
