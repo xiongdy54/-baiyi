@@ -1476,14 +1476,16 @@ export default function Reader({
               <div className="reader-engine-controls">
                 {selActionsGroup}
                 <div className="reader-engine-controls-group">
-                  {/* v48.44（D84）：翻页钮移到「更多」左侧 */}
+                  {/* v48.44（D84）：翻页钮移到「更多」左侧。
+                      v48.50（D90 增补）：分隔线移到组首——「图片挖空」与翻页贴得太近（用户指令），
+                      用 hairline 在选区动作组与翻页/菜单组之间给出可见断点。 */}
+                  <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
                     <IconChevronLeft />
                   </button>
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
                     <IconChevronRight />
                   </button>
-                  <span className="reader-engine-divider" aria-hidden="true" />
                   <ReaderToolMenu
                     id="more"
                     label="更多"
