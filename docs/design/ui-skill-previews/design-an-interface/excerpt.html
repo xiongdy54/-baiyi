@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>摘录界面 · Design It Twice 概念对比</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#e3e3df}
+body{font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;color:#0a0a0a;-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input[type=range]{accent-color:var(--acc);cursor:pointer}
+
+.switcher{position:fixed;top:0;left:0;right:0;height:44px;background:#0a0a0a;color:#fafaf8;display:flex;align-items:center;gap:8px;padding:0 16px;z-index:999}
+.switcher .ttl{font-size:11px;letter-spacing:.12em;color:#8a8a88;margin-right:8px}
+.switcher button{display:flex;align-items:center;gap:7px;height:28px;padding:0 12px;font-size:12px;color:#c9c9c6;border:1px solid #3a3a38;transition:all .2s}
+.switcher button:hover{color:#fff;border-color:#777}
+.switcher button.active{background:#fafaf8;color:#0a0a0a;border-color:#fafaf8}
+.switcher .rec{font-size:10px;line-height:1;padding:2px 5px;background:#166a59;color:#fff;font-style:normal}
+.switcher .hint{margin-left:auto;font-size:11px;color:#8a8a88}
+
+.cA{--paper:#fafaf8;--ink:#0a0a0a;--p1:#f0f0ee;--line:#d4d4d2;--mut:#737373;--acc:#166a59;--card:#fff}
+.cB{--paper:#f7f2e9;--ink:#2a2118;--p1:#efe7d7;--line:#d9cfba;--mut:#8a7e69;--acc:#a05a00;--card:#fffdf7;font-family:Georgia,"Noto Serif SC","Songti SC",SimSun,serif}
+.cC{--paper:#121212;--ink:#eaeae8;--p1:#1b1b19;--line:#2c2c2a;--mut:#98988f;--acc:#3ecf9f;--card:#191917}
+
+.concept{display:none}
+.concept.active{display:block;animation:pageIn .45s ease both}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.app{width:1440px;height:900px;margin:44px auto 48px;background:var(--paper);color:var(--ink);position:relative;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.18)}
+.cnote{position:absolute;left:12px;top:64px;z-index:60;font-size:11px;color:var(--mut);background:var(--card);border:1px solid var(--line);padding:5px 10px;max-width:560px;line-height:1.5;pointer-events:none}
+.cnote b{color:var(--acc)}
+
+/* ---- 顶部面包屑条 ---- */
+.crumbs{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 20px;font-size:13px;flex:none}
+.crumbs a{color:var(--mut);text-decoration:none;transition:color .15s}
+.crumbs a:hover{color:var(--acc)}
+.crumbs .sep{color:var(--line)}
+.crumbs .cur{font-weight:600}
+.crumbs .count{margin-left:auto;font-size:12px;color:var(--paper);background:var(--acc);padding:3px 10px;font-variant-numeric:tabular-nums}
+.cC .crumbs{background:#191917}
+.cB .crumbs{border-bottom:2px solid var(--ink)}
+
+/* ---- 段控 / 列表 ---- */
+.seg{display:flex;border:1px solid var(--line)}
+.seg button{flex:1;height:26px;font-size:12px;color:var(--mut);transition:background .15s,color .15s}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--ink);color:var(--paper)}
+.ex{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;gap:10px;cursor:pointer;transition:background .15s}
+.ex:hover{background:var(--p1)}
+.ex .bar{width:3px;flex:none;align-self:stretch}
+.bar.g{background:var(--acc)}.bar.y{background:#c9a227}.bar.b{background:#3b6ea5}
+.ex .q{font-size:12.5px;line-height:1.6;margin-bottom:3px}
+.ex .meta{font-size:11px;color:var(--mut)}
+.ex.on{background:var(--p1);box-shadow:inset 3px 0 0 var(--acc)}
+
+/* ---- 开关 ---- */
+.tgl{position:relative;width:34px;height:19px;background:var(--line);transition:background .2s;flex:none;cursor:pointer}
+.tgl::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;background:var(--card);border:1px solid var(--mut);transition:transform .25s cubic-bezier(.22,.9,.3,1)}
+.tgl.on{background:var(--acc)}
+.tgl.on::after{transform:translateX(15px);border-color:var(--acc)}
+
+/* ============ 概念 A：右栏 + 全宽底栏 ============ */
+.cA .app{display:flex;flex-direction:column}
+.cA .main{flex:1;display:grid;grid-template-columns:1fr 320px;min-height:0}
+.cA .cardzone{overflow-y:auto;padding:36px 56px;display:flex;justify-content:center;align-items:flex-start;animation:rise .5s .05s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.cA .ecard{max-width:620px;width:100%;background:var(--card);border:1px solid var(--line);border-left:5px solid var(--acc);padding:32px 36px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.ecard .src{font-size:11px;letter-spacing:.15em;color:var(--mut);margin-bottom:18px;display:flex;align-items:center;gap:8px}
+.ecard .src .tag{background:var(--acc);color:#fff;padding:2px 8px;letter-spacing:.05em}
+.ecard .quote{font-size:19px;line-height:1.9;font-weight:500;margin-bottom:22px}
+.ecard .quote::before{content:"「";color:var(--acc)} .ecard .quote::after{content:"」";color:var(--acc)}
+.ecard .note-lbl{font-size:11px;letter-spacing:.15em;color:var(--mut);border-top:1px solid var(--line);padding-top:16px;margin-bottom:8px}
+.ecard .note{font-size:14.5px;line-height:1.9;color:#3a3a3a}
+.ecard .note-ref{margin-top:16px;font-size:12px;color:var(--acc);display:inline-block;border:1px solid var(--acc);padding:3px 10px}
+.cA .side{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;animation:rise .5s .1s ease both}
+.cA .side .hd{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;flex:none}
+.cA .side .tools{padding:12px 14px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;flex:none}
+.cA .list{flex:1;overflow-y:auto}
+.cA .bbar{flex:none;height:72px;border-top:1px solid var(--line);background:var(--card);display:flex;align-items:center;gap:24px;padding:0 40px;animation:riseUp .5s .15s ease both}
+@keyframes riseUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.cA .bbar .grp{display:flex;flex-direction:column;gap:5px}
+.cA .bbar .lbl{font-size:10px;letter-spacing:.15em;color:var(--mut)}
+.cA .stepper{display:flex;align-items:center;border:1px solid var(--line)}
+.cA .stepper button{width:30px;height:32px;font-size:15px;color:var(--mut);transition:color .15s,background .15s}
+.cA .stepper button:hover{color:var(--acc);background:var(--p1)}
+.cA .stepper .val{width:64px;text-align:center;font-size:14px;font-weight:600;border-left:1px solid var(--line);border-right:1px solid var(--line);line-height:32px;font-variant-numeric:tabular-nums}
+.cA .bbar input[type=range]{width:200px}
+.cA .bbar .pval{font-size:13px;font-weight:600;color:var(--acc);min-width:56px}
+.cA .next{margin-left:auto;height:44px;padding:0 32px;background:var(--ink);color:var(--paper);font-size:14px;font-weight:600;display:flex;align-items:center;gap:10px;transition:background .2s,transform .15s}
+.cA .next:hover{background:var(--acc);transform:translateX(2px)}
+
+/* ============ 概念 B：索引卡工作台 + 浮动胶囊底栏 ============ */
+.cB .app{display:flex;flex-direction:column}
+.cB .main{flex:1;display:grid;grid-template-columns:300px 1fr;min-height:0}
+.cB .side{border-right:2px solid var(--ink);display:flex;flex-direction:column;min-height:0;background:var(--p1)}
+.cB .side .hd{padding:14px 16px;border-bottom:2px solid var(--ink);font-size:15px;font-weight:700;display:flex;justify-content:space-between;align-items:center;flex:none}
+.cB .side .hd small{font-weight:400;font-size:11px;color:var(--mut)}
+.cB .side .tools{padding:12px 16px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--line);flex:none}
+.cB .list{flex:1;overflow-y:auto}
+.cB .cardzone{overflow-y:auto;padding:44px 48px;display:flex;justify-content:center;align-items:flex-start;animation:rise .5s .05s ease both}
+.cB .ecard{max-width:640px;width:100%;background:var(--card);border:1px solid var(--ink);box-shadow:6px 6px 0 rgba(160,90,0,.15);padding:34px 40px;transform:rotate(-.4deg);position:relative}
+.cB .ecard::before{content:"";position:absolute;top:0;left:0;right:0;height:6px;background:repeating-linear-gradient(90deg,var(--acc) 0 18px,#c9a227 18px 36px)}
+.cB .ecard .src{font-size:12px;color:var(--mut);margin:14px 0 18px;letter-spacing:.04em}
+.cB .ecard .quote{font-size:20px;line-height:1.85;font-style:italic;margin-bottom:22px}
+.cB .ecard .note-lbl{font-size:11px;letter-spacing:.2em;color:var(--acc);border-top:1px dashed var(--line);padding-top:16px;margin-bottom:8px}
+.cB .ecard .note{font-size:15px;line-height:1.9;color:#4a4033}
+.cB .bbar{flex:none;height:64px;display:flex;justify-content:center;pointer-events:none}
+.cB .pill{pointer-events:auto;display:flex;align-items:center;gap:18px;background:var(--card);border:1px solid var(--ink);box-shadow:0 6px 18px rgba(42,33,24,.18);padding:0 10px;transform:translateY(-50%);animation:pop .5s .15s cubic-bezier(.22,1.2,.3,1) both}
+@keyframes pop{from{opacity:0;transform:translateY(-30%)}to{opacity:1;transform:translateY(-50%)}}
+.cB .pill .grp{display:flex;align-items:center;gap:8px;padding:0 10px}
+.cB .pill .lbl{font-size:11px;color:var(--mut);letter-spacing:.05em}
+.cB .pill .stepper{display:flex;align-items:center;border:1px solid var(--line)}
+.cB .pill .stepper button{width:26px;height:28px;color:var(--mut)}
+.cB .pill .stepper .val{width:52px;text-align:center;font-size:13px;font-weight:600;border-left:1px solid var(--line);border-right:1px solid var(--line);line-height:28px}
+.cB .pill input[type=range]{width:130px}
+.cB .pill .next{height:40px;padding:0 22px;background:var(--acc);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px;transition:filter .15s}
+.cB .pill .next:hover{filter:brightness(1.08)}
+.cB .kbd{font-size:11px;color:var(--mut);border:1px solid var(--line);padding:1px 5px}
+
+/* ============ 概念 C：纵向聚焦 + 压边底栏 ============ */
+.cC .app{display:flex;flex-direction:column}
+.cC .main{flex:1;display:flex;min-height:0}
+.cC .rail{width:52px;border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:14px 0;gap:6px;flex:none}
+.cC .rail .ic{width:36px;height:36px;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:15px;transition:all .15s}
+.cC .rail .ic:hover{color:var(--acc);background:var(--p1)}
+.cC .rail .ic.on{color:#0a0a0a;background:var(--acc)}
+.cC .cardzone{flex:1;overflow-y:auto;display:flex;justify-content:center;align-items:center;padding:40px;animation:rise .5s .05s ease both}
+.cC .ecard{max-width:720px;width:100%}
+.cC .ecard .src{font-size:11px;letter-spacing:.25em;color:var(--mut);margin-bottom:20px;display:flex;gap:10px;align-items:center}
+.cC .ecard .src .tag{background:var(--acc);color:#0a0a0a;padding:2px 8px}
+.cC .ecard .quote{font-size:24px;line-height:1.85;font-weight:600;border-left:5px solid var(--acc);padding-left:22px;margin-bottom:26px}
+.cC .ecard .note{font-size:15.5px;line-height:1.95;color:#b9b9b4;padding-left:27px}
+.cC .side{width:320px;border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;animation:rise .5s .1s ease both}
+.cC .side .hd{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);font-size:13px;font-weight:600;flex:none}
+.cC .side .tools{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;flex:none}
+.cC .list{flex:1;overflow-y:auto}
+.cC .bbar{flex:none;height:80px;background:#0a0a0a;border-top:1px solid var(--line);display:flex;align-items:center;gap:28px;padding:0 32px;animation:riseUp .5s .15s ease both}
+.cC .bbar .grp{display:flex;flex-direction:column;gap:6px}
+.cC .bbar .lbl{font-size:10px;letter-spacing:.2em;color:#77776f}
+.cC .bbar .stepper{display:flex;align-items:center;border:1px solid #333}
+.cC .bbar .stepper button{width:30px;height:34px;color:#98988f}
+.cC .bbar .stepper .val{width:60px;text-align:center;font-size:14px;font-weight:600;color:#eaeae8;border-left:1px solid #333;border-right:1px solid #333;line-height:34px}
+.cC .bbar input[type=range]{width:180px}
+.cC .bbar .pval{font-size:13px;font-weight:600;color:var(--acc);min-width:52px}
+.cC .next{margin-left:auto;height:48px;padding:0 36px;background:var(--acc);color:#0a0a0a;font-size:14px;font-weight:700;display:flex;align-items:center;gap:10px;transition:transform .15s,box-shadow .2s}
+.cC .next:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(62,207,159,.25)}
+
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="switcher">
+  <span class="ttl">DESIGN IT TWICE · 摘录界面</span>
+  <button data-c="cA" class="active">A · 右栏 + 全宽底栏 <em class="rec">推荐</em></button>
+  <button data-c="cB">B · 索引卡 + 浮动胶囊</button>
+  <button data-c="cC">C · 纵向聚焦 + 压边底栏</button>
+  <span class="hint">点击切换概念对比</span>
+</div>
+
+<!-- ================= 概念 A ================= -->
+<section class="concept cA active">
+  <div class="app">
+    <header class="crumbs">
+      <a href="#">原文</a><span class="sep">›</span>
+      <a href="#">学习科学</a><span class="sep">›</span>
+      <a href="#">第2章</a><span class="sep">›</span>
+      <span class="cur">适度的遗忘恰恰为提取制造了必要的难度</span>
+      <span class="count">5 条待处理</span>
+    </header>
+    <div class="main">
+      <div class="cardzone">
+        <div class="ecard">
+          <div class="src"><span class="tag">摘录</span>《学习科学：认知心理学视角》 · 第2章 · 第 47 页 · 10月3日 14:22</div>
+          <p class="quote">适度的遗忘恰恰为提取制造了必要的难度，这正是「必要难度」理论的核心主张。</p>
+          <p class="note-lbl">我的笔记</p>
+          <p class="note">这与 FSRS 的遗忘曲线假设一致——复习不是重读，而是强制提取。可以和第 5 章「间隔参数」对照着看：复习调度本质上是在主动制造「适度遗忘」的时机。</p>
+          <span class="note-ref">关联卡片：间隔重复的算法 · 第3章</span>
+        </div>
+      </div>
+      <aside class="side">
+        <div class="hd">批注队列 <button class="tgl on" title="显示/隐藏侧栏"></button></div>
+        <div class="tools">
+          <div class="seg" data-filter="1"><button class="on" data-f="all">全部</button><button data-f="ex">摘录</button><button data-f="hl">高亮</button></div>
+          <div class="seg" data-sort="1"><button class="on" data-s="prio">优先级</button><button data-s="time">时间</button></div>
+        </div>
+        <div class="list" id="listA">
+          <div class="ex on" data-kind="ex" data-prio="5" data-ago="2"><span class="bar g"></span><div><p class="q">「适度的遗忘恰恰为提取制造了必要的难度。」</p><p class="meta">摘录 · P47 · 优先级 5 · 2 小时前</p></div></div>
+          <div class="ex" data-kind="ex" data-prio="4" data-ago="26"><span class="bar g"></span><div><p class="q">「提取练习组的保持率比重复阅读组高出约 50%。」</p><p class="meta">摘录 · P47 · 优先级 4 · 昨天</p></div></div>
+          <div class="ex" data-kind="hl" data-prio="3" data-ago="30"><span class="bar y"></span><div><p class="q">「每一次成功的提取都会重构记忆痕迹。」</p><p class="meta">高亮 · P46 · 优先级 3 · 昨天</p></div></div>
+          <div class="ex" data-kind="ex" data-prio="3" data-ago="76"><span class="bar b"></span><div><p class="q">「间隔重复通过安排复习时机对抗遗忘。」</p><p class="meta">摘录 · P44 · 优先级 3 · 3 天前</p></div></div>
+          <div class="ex" data-kind="hl" data-prio="2" data-ago="130"><span class="bar y"></span><div><p class="q">「图式理论：新信息依附于既有结构被编码。」</p><p class="meta">高亮 · P41 · 优先级 2 · 5 天前</p></div></div>
+        </div>
+      </aside>
+    </div>
+    <footer class="bbar">
+      <div class="grp">
+        <span class="lbl">推迟</span>
+        <div class="stepper"><button id="decA">−</button><span class="val"><span id="dayA">1</span> 天</span><button id="incA">＋</button></div>
+      </div>
+      <div class="grp">
+        <span class="lbl">优先级</span>
+        <input type="range" id="prioA" min="1" max="5" value="5">
+      </div>
+      <span class="pval" id="pvalA">P5 · 紧急</span>
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:var(--mut)">本条处理后队列剩 4 条</span>
+      <button class="next">保存并下一条 →</button>
+    </footer>
+    <div class="cnote"><b>概念 A · 右栏 + 全宽底栏</b>——摘录卡居左、批注队列常驻右栏、操作横条贴底铺满；筛选/排序/开关都在视线动线上，是吞吐批量待处理摘录最稳的形态。</div>
+  </div>
+</section>
+
+<!-- ================= 概念 B ================= -->
+<section class="concept cB">
+  <div class="app">
+    <header class="crumbs">
+      <a href="#">原文</a><span class="sep">›</span>
+      <a href="#">学习科学</a><span class="sep">›</span>
+      <a href="#">第2章</a><span class="sep">›</span>
+      <span class="cur">某摘录</span>
+      <span class="count">5 条待处理</span>
+    </header>
+    <div class="main">
+      <aside class="side">
+        <div class="hd">批注册 <small>队列 5</small></div>
+        <div class="tools">
+          <div class="seg"><button class="on">全部</button><button>摘录</button><button>高亮</button></div>
+          <div class="seg"><button class="on">优先级</button><button>时间</button></div>
+        </div>
+        <div class="list">
+          <div class="ex on"><span class="bar g"></span><div><p class="q">「适度的遗忘恰恰为提取制造了必要的难度。」</p><p class="meta">摘录 · P47 · 优先级 5</p></div></div>
+          <div class="ex"><span class="bar g"></span><div><p class="q">「提取练习组的保持率比重复阅读组高出约 50%。」</p><p class="meta">摘录 · P47 · 优先级 4</p></div></div>
+          <div class="ex"><span class="bar y"></span><div><p class="q">「每一次成功的提取都会重构记忆痕迹。」</p><p class="meta">高亮 · P46 · 优先级 3</p></div></div>
+          <div class="ex"><span class="bar b"></span><div><p class="q">「间隔重复通过安排复习时机对抗遗忘。」</p><p class="meta">摘录 · P44 · 优先级 3</p></div></div>
+          <div class="ex"><span class="bar y"></span><div><p class="q">「图式理论：新信息依附于既有结构被编码。」</p><p class="meta">高亮 · P41 · 优先级 2</p></div></div>
+        </div>
+      </aside>
+      <div class="cardzone">
+        <div class="ecard">
+          <div class="src">《学习科学：认知心理学视角》 · 第2章 · 第 47 页 · 10月3日 14:22 · <b style="color:var(--acc)">优先级 5</b></div>
+          <p class="quote">适度的遗忘恰恰为提取制造了必要的难度，这正是「必要难度」理论的核心主张。</p>
+          <p class="note-lbl">MY NOTES · 我的笔记</p>
+          <p class="note">这与 FSRS 的遗忘曲线假设一致——复习不是重读，而是强制提取。可以和第 5 章「间隔参数」对照着看：复习调度本质上是在主动制造「适度遗忘」的时机。</p>
+        </div>
+      </div>
+    </div>
+    <footer class="bbar">
+      <div class="pill">
+        <div class="grp">
+          <span class="lbl">推迟</span>
+          <div class="stepper"><button>−</button><span class="val">1 天</span><button>＋</button></div>
+        </div>
+        <div class="grp">
+          <span class="lbl">优先级</span>
+          <input type="range" min="1" max="5" value="5" style="accent-color:var(--acc)">
+        </div>
+        <div class="grp"><span class="kbd">P5</span></div>
+        <button class="next">下一条 →</button>
+      </div>
+    </footer>
+    <div class="cnote" style="color:var(--mut)"><b>概念 B · 索引卡 + 浮动胶囊</b>——摘录是一张微倾斜的「索引卡」（彩色纸带压顶 + 硬阴影），批注册换到左栏；操作区收成悬浮胶囊压在底边，可整体拖走不占空间，适合慢速精读式处理。</div>
+  </div>
+</section>
+
+<!-- ================= 概念 C ================= -->
+<section class="concept cC">
+  <div class="app">
+    <header class="crumbs">
+      <a href="#">原文</a><span class="sep">›</span>
+      <a href="#">学习科学</a><span class="sep">›</span>
+      <a href="#">第2章</a><span class="sep">›</span>
+      <span class="cur" style="color:#eaeae8">某摘录</span>
+      <span class="count">5 条待处理</span>
+    </header>
+    <div class="main">
+      <nav class="rail">
+        <button class="ic on" title="批注队列">▤</button>
+        <button class="ic" title="原文上下文">¶</button>
+        <button class="ic" title="关联图谱">⬡</button>
+        <button class="ic" title="AI 助手">✦</button>
+      </nav>
+      <div class="cardzone">
+        <div class="ecard">
+          <div class="src"><span class="tag">摘录</span>学习科学 › 第2章 › 第 47 页 · 10月3日 14:22</div>
+          <p class="quote">适度的遗忘恰恰为提取制造了必要的难度，这正是「必要难度」理论的核心主张。</p>
+          <p class="note">我的笔记 —— 这与 FSRS 的遗忘曲线假设一致：复习不是重读，而是强制提取。可以和第 5 章「间隔参数」对照着看，复习调度本质上是在主动制造「适度遗忘」的时机。</p>
+        </div>
+      </div>
+      <aside class="side">
+        <div class="hd">批注队列 <button class="tgl on" title="显示/隐藏侧栏"></button></div>
+        <div class="tools">
+          <div class="seg"><button class="on">全部</button><button>摘录</button><button>高亮</button></div>
+          <div class="seg"><button class="on">优先级</button><button>时间</button></div>
+        </div>
+        <div class="list">
+          <div class="ex on"><span class="bar g"></span><div><p class="q" style="color:#d9d9d4">「适度的遗忘恰恰为提取制造了必要的难度。」</p><p class="meta">摘录 · P47 · 优先级 5 · 2 小时前</p></div></div>
+          <div class="ex"><span class="bar g"></span><div><p class="q" style="color:#d9d9d4">「提取练习组的保持率比重复阅读组高出约 50%。」</p><p class="meta">摘录 · P47 · 优先级 4 · 昨天</p></div></div>
+          <div class="ex"><span class="bar y"></span><div><p class="q" style="color:#d9d9d4">「每一次成功的提取都会重构记忆痕迹。」</p><p class="meta">高亮 · P46 · 优先级 3 · 昨天</p></div></div>
+          <div class="ex"><span class="bar b"></span><div><p class="q" style="color:#d9d9d4">「间隔重复通过安排复习时机对抗遗忘。」</p><p class="meta">摘录 · P44 · 优先级 3 · 3 天前</p></div></div>
+          <div class="ex"><span class="bar y"></span><div><p class="q" style="color:#d9d9d4">「图式理论：新信息依附于既有结构被编码。」</p><p class="meta">高亮 · P41 · 优先级 2 · 5 天前</p></div></div>
+        </div>
+      </aside>
+    </div>
+    <footer class="bbar">
+      <div class="grp">
+        <span class="lbl">推迟 DEFER</span>
+        <div class="stepper"><button>−</button><span class="val">1 天</span><button>＋</button></div>
+      </div>
+      <div class="grp">
+        <span class="lbl">优先级 PRIORITY</span>
+        <input type="range" min="1" max="5" value="5" style="accent-color:var(--acc)">
+      </div>
+      <span class="pval">P5</span>
+      <span style="flex:1"></span>
+      <span style="font-size:11px;color:#77776f;letter-spacing:.1em">队列 4 / 5</span>
+      <button class="next">下一条 →</button>
+    </footer>
+    <div class="cnote" style="background:#191917"><b>概念 C · 纵向聚焦 + 压边底栏</b>——卡面放大居中、一次只看一条，侧栏收成左缘图标轨；操作条压边为暗色全宽控制台，大按钮大间隔，适合夜间高速清队列。</div>
+  </div>
+</section>
+
+<script>
+/* 概念切换 */
+const btns=document.querySelectorAll('.switcher button');
+btns.forEach(b=>b.addEventListener('click',()=>{
+  btns.forEach(x=>x.classList.toggle('active',x===b));
+  document.querySelectorAll('.concept').forEach(s=>s.classList.remove('active'));
+  document.querySelector('.'+b.dataset.c).classList.add('active');
+}));
+
+/* 筛选 + 排序（概念 A 侧栏） */
+document.querySelectorAll('.seg').forEach(sg=>{
+  sg.addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;
+    sg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    const list=document.getElementById('listA');
+    if(!list)return;
+    if(sg.dataset.filter){
+      const f=b.dataset.f;
+      list.querySelectorAll('.ex[data-kind]').forEach(it=>it.style.display=(f==='all'||it.dataset.kind===f)?'':'none');
+    }
+    if(sg.dataset.sort){
+      const byTime=b.dataset.s==='time';
+      [...list.querySelectorAll('.ex[data-prio]')]
+        .sort((a,c)=>byTime?(+a.dataset.ago)-(+c.dataset.ago):(+c.dataset.prio)-(+a.dataset.prio))
+        .forEach(it=>list.appendChild(it));
+    }
+  });
+});
+
+/* 列表选中态 */
+document.querySelectorAll('.list').forEach(l=>l.addEventListener('click',e=>{
+  const it=e.target.closest('.ex');if(!it)return;
+  l.querySelectorAll('.ex').forEach(x=>x.classList.remove('on'));it.classList.add('on');
+}));
+
+/* 开关 */
+document.querySelectorAll('.tgl').forEach(t=>t.addEventListener('click',()=>t.classList.toggle('on')));
+
+/* 推迟步进 + 优先级联动 */
+const dayA=document.getElementById('dayA'),prioA=document.getElementById('prioA'),pvalA=document.getElementById('pvalA');
+const names=['','P1 · 稍后','P2 · 一般','P3 · 重要','P4 · 很重要','P5 · 紧急'];
+document.getElementById('decA').addEventListener('click',()=>{dayA.textContent=Math.max(1,+dayA.textContent-1)});
+document.getElementById('incA').addEventListener('click',()=>{dayA.textContent=Math.min(30,+dayA.textContent+1)});
+prioA.addEventListener('input',()=>pvalA.textContent=names[+prioA.value]);
+</script>
+</body>
+</html>

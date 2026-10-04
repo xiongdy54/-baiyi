@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>摘录界面 · 设计稿预览（ui-ux-pro-max）</title>
+<style>
+:root{
+  --paper:#fafaf8;
+  --ink:#0a0a0a;
+  --g1:#f0f0ee;
+  --g2:#d4d4d2;
+  --g3:#737373;
+  --accent:#166a59;
+  --accent-strong:#0f5142;
+  --accent-soft:#e4eee9;
+  --hairline:1px solid var(--g2);
+  --dur-fast:150ms;
+  --dur:240ms;
+  --dur-slow:360ms;
+  --ease-out:cubic-bezier(0.22,1,0.36,1);
+  --ease-in:cubic-bezier(0.4,0,1,1);
+  --font:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);font-size:16px;line-height:1.7;overflow:hidden;}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.num{font-variant-numeric:tabular-nums;}
+svg{display:block;flex:none;}
+
+/* ---------- 布局：56px 头带 / 280px 批注轨 / 1fr 主列 / 72px 底栏 ---------- */
+.app{
+  height:100vh;
+  display:grid;
+  grid-template-columns:280px 1fr;
+  grid-template-rows:56px 1fr 72px;
+  grid-template-areas:"head head" "track main" "actionbar actionbar";
+  transition:grid-template-columns var(--dur-slow) var(--ease-out);
+}
+.app.collapsed{grid-template-columns:0px 1fr;}
+
+/* ---------- 头带：收起钮 + 筛选 / 排序段控 同行 ---------- */
+.head{
+  grid-area:head;
+  display:flex;align-items:center;gap:16px;
+  padding:0 16px;
+  border-bottom:var(--hairline);
+}
+.icon-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  min-height:40px;min-width:40px;padding:0 10px;
+  font-size:13px;
+  transition:background-color var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out);
+}
+.icon-btn:hover{background:var(--g1);}
+.icon-btn:active{transform:scale(0.96);}
+.head-rule{width:1px;height:24px;background:var(--g2);}
+.seg{display:flex;border:1px solid var(--g2);}
+.seg button{
+  min-height:32px;padding:0 14px;
+  font-size:12px;color:var(--g3);
+  border-right:1px solid var(--g2);
+  transition:background-color var(--dur-fast) var(--ease-out),color var(--dur-fast) var(--ease-out);
+}
+.seg button:last-child{border-right:none;}
+.seg button:hover{background:var(--g1);}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff;font-weight:600;}
+.head-spacer{flex:1;}
+.head-title{font-size:12px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--g3);}
+
+/* ---------- 左侧 280px 全高批注轨 ---------- */
+.track{
+  grid-area:track;
+  border-right:var(--hairline);
+  display:flex;flex-direction:column;
+  overflow:hidden;min-width:0;
+}
+.track-head{padding:16px;border-bottom:var(--hairline);}
+.track-title{font-size:12px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--g3);}
+.track-count{margin-top:4px;font-size:13px;color:var(--g3);}
+.track-count b{color:var(--ink);}
+.track-body{flex:1;overflow-y:auto;min-height:0;}
+.annot{list-style:none;}
+.annot li{border-bottom:1px solid var(--g1);}
+.annot .item{
+  position:relative;display:block;width:100%;text-align:left;
+  padding:12px 20px 12px 16px;
+  transition:background-color var(--dur-fast) var(--ease-out);
+}
+.annot .item:hover{background:var(--g1);}
+.annot .item::after{content:"";position:absolute;top:8px;bottom:8px;right:0;width:3px;background:var(--accent);}
+.annot .item.current{background:var(--g1);}
+.annot .item.current::after{width:4px;background:var(--accent-strong);}
+.annot .kind{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--g3);display:block;margin-bottom:2px;}
+.annot .txt{
+  font-size:13px;line-height:1.55;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.annot .item.current .txt{font-weight:600;}
+.annot .meta{margin-top:4px;font-size:11px;color:var(--g3);font-variant-numeric:tabular-nums;}
+
+/* ---------- 主列 ---------- */
+.main{grid-area:main;overflow-y:auto;scroll-padding-top:24px;}
+.main-inner{max-width:720px;margin:0 auto;padding:32px 40px 48px;}
+.crumbs{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px;}
+.crumbs a{color:var(--g3);text-decoration:none;padding:2px 0;border-bottom:1px solid transparent;transition:color var(--dur-fast) var(--ease-out),border-color var(--dur-fast) var(--ease-out);}
+.crumbs a:hover{color:var(--accent);border-bottom-color:var(--accent);}
+.crumbs .sep{color:var(--g2);}
+.crumbs [aria-current="page"]{color:var(--ink);font-weight:600;}
+.crumbs-bar{display:flex;align-items:center;gap:16px;justify-content:space-between;padding-bottom:16px;border-bottom:var(--hairline);margin-bottom:32px;}
+.pending{
+  display:inline-flex;align-items:center;gap:8px;flex:none;
+  min-height:32px;padding:0 12px;
+  border:1px solid var(--ink);
+  font-size:12px;font-weight:600;
+}
+.pending .dot{width:8px;height:8px;background:var(--accent);}
+
+/* 摘录卡面 */
+.card{
+  border:1px solid var(--ink);
+  background:var(--paper);
+  display:grid;
+  grid-template-columns:4px 1fr;
+}
+.card-bar{background:var(--accent);}
+.card-body{padding:32px 40px;}
+.card-kind{font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--accent);}
+.quote{
+  margin:16px 0 0;
+  font-size:20px;line-height:1.85;font-weight:500;
+}
+.quote-attr{margin-top:12px;font-size:13px;color:var(--g3);}
+.tags{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;}
+.tag{font-size:11px;padding:2px 8px;border:1px solid var(--g2);color:var(--g3);}
+.note{
+  margin-top:32px;padding-top:24px;
+  border-top:var(--hairline);
+}
+.note-label{font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--g3);}
+.note p{margin-top:8px;font-size:15px;line-height:1.8;color:#1c1c1a;}
+.card-actions{display:flex;align-items:center;gap:8px;margin-top:32px;}
+.btn{
+  display:inline-flex;align-items:center;gap:8px;
+  min-height:40px;padding:0 16px;
+  font-size:13px;border:1px solid var(--g2);
+  transition:background-color var(--dur-fast) var(--ease-out),border-color var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out);
+}
+.btn:hover{background:var(--g1);}
+.btn:active{transform:scale(0.97);}
+.btn-primary{background:var(--ink);color:#fff;border-color:var(--ink);}
+.btn-primary:hover{background:#262626;}
+.btn-accent{background:var(--accent);color:#fff;border-color:var(--accent);}
+.btn-accent:hover{background:var(--accent-strong);}
+
+/* ---------- 底部 sticky 底栏 72px ---------- */
+.actionbar{
+  grid-area:actionbar;
+  border-top:var(--hairline);
+  background:var(--paper);
+  display:flex;align-items:center;gap:32px;
+  padding:0 40px;
+}
+.field{display:flex;align-items:center;gap:12px;}
+.field-label{font-size:13px;font-weight:600;white-space:nowrap;}
+.stepper{display:flex;align-items:stretch;border:1px solid var(--g2);}
+.stepper button{width:36px;min-height:40px;display:flex;align-items:center;justify-content:center;transition:background-color var(--dur-fast) var(--ease-out);}
+.stepper button:hover{background:var(--g1);}
+.stepper input{
+  width:56px;min-height:40px;text-align:center;
+  border:none;border-left:1px solid var(--g2);border-right:1px solid var(--g2);
+  font:inherit;font-size:14px;font-variant-numeric:tabular-nums;
+  background:var(--paper);color:var(--ink);
+}
+.stepper input:focus-visible{outline-offset:-3px;}
+.unit{font-size:13px;color:var(--g3);}
+.slider-field{flex:1;max-width:360px;}
+.slider-head{display:flex;justify-content:space-between;margin-bottom:4px;}
+.slider-val{font-size:12px;color:var(--g3);font-variant-numeric:tabular-nums;}
+input[type="range"]{
+  -webkit-appearance:none;appearance:none;
+  width:100%;height:2px;background:var(--g2);outline-offset:6px;
+}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none;appearance:none;
+  width:16px;height:16px;background:var(--ink);
+  border:none;border-radius:0;cursor:pointer;
+  transition:transform var(--dur-fast) var(--ease-out);
+}
+input[type="range"]::-webkit-slider-thumb:hover{transform:scale(1.15);}
+input[type="range"]::-moz-range-thumb{width:16px;height:16px;background:var(--ink);border:none;border-radius:0;cursor:pointer;}
+.actionbar-spacer{flex:1;}
+.hint{font-size:12px;color:var(--g3);}
+
+/* ---------- 入场编排：40ms 逐项错峰 ---------- */
+.enter{opacity:0;transform:translateY(12px);animation:rise var(--dur-slow) var(--ease-out) forwards;}
+@keyframes rise{to{opacity:1;transform:translateY(0);}}
+.d1{animation-delay:60ms;}.d2{animation-delay:100ms;}.d3{animation-delay:140ms;}
+.d4{animation-delay:180ms;}.d5{animation-delay:220ms;}.d6{animation-delay:260ms;}
+.d7{animation-delay:300ms;}.d8{animation-delay:340ms;}.d9{animation-delay:380ms;}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important;}
+  .enter{opacity:1;transform:none;}
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- 头带 -->
+  <header class="head">
+    <button class="icon-btn" id="trackToggle" type="button" aria-expanded="true" aria-controls="track" aria-label="收起批注轨">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="0"/><path d="M9 4v16"/><path d="m15 10 2 2-2 2"/></svg>
+      收起
+    </button>
+    <span class="head-rule" aria-hidden="true"></span>
+    <div class="seg" role="group" aria-label="按类型筛选">
+      <button type="button" data-filter="all" aria-pressed="true">全部</button>
+      <button type="button" data-filter="excerpt" aria-pressed="false">摘录</button>
+      <button type="button" data-filter="highlight" aria-pressed="false">高亮</button>
+    </div>
+    <div class="seg" role="group" aria-label="按顺序排序">
+      <button type="button" data-sort="pos" aria-pressed="true">位置</button>
+      <button type="button" data-sort="time" aria-pressed="false">时间</button>
+    </div>
+    <div class="head-spacer"></div>
+    <span class="head-title">摘录处理</span>
+  </header>
+
+  <!-- 左侧 280px 全高批注轨 -->
+  <aside class="track" id="track" aria-label="批注轨">
+    <div class="track-head">
+      <p class="track-title">批注轨</p>
+      <p class="track-count num">学习科学 · <b>18</b> 条批注</p>
+    </div>
+    <div class="track-body">
+      <ul class="annot" id="annotList">
+        <li data-type="excerpt"><button class="item current" type="button" aria-current="true">
+          <span class="kind">摘录 · 位置 31%</span>
+          <span class="txt">记忆的消退并非内容的擦除，而是提取线索的衰减——重新接触的时机决定了线索能否被重建。</span>
+          <span class="meta num">今天 14:32 · 待处理</span>
+        </button></li>
+        <li data-type="highlight"><button class="item" type="button">
+          <span class="kind">高亮 · 位置 33%</span>
+          <span class="txt">遗忘的速率在最初 24 小时内最快，随后显著放缓。</span>
+          <span class="meta num">今天 14:36 · 待处理</span>
+        </button></li>
+        <li data-type="excerpt"><button class="item" type="button">
+          <span class="kind">摘录 · 位置 37%</span>
+          <span class="txt">间隔一天后再复习，其长期留存率显著优于当天内的连续重复。</span>
+          <span class="meta num">今天 14:40 · 待处理</span>
+        </button></li>
+        <li data-type="highlight"><button class="item" type="button">
+          <span class="kind">高亮 · 位置 41%</span>
+          <span class="txt">提取困难（Desirable Difficulty）是记忆增益的来源。</span>
+          <span class="meta num">今天 14:47</span>
+        </button></li>
+        <li data-type="excerpt"><button class="item" type="button">
+          <span class="kind">摘录 · 位置 44%</span>
+          <span class="txt">艾宾浩斯以无意义音节为材料测得：20 分钟后遗忘约 42%，一天后遗忘约 66%。</span>
+          <span class="meta num">昨天 21:05 · 待处理</span>
+        </button></li>
+        <li data-type="excerpt"><button class="item" type="button">
+          <span class="kind">摘录 · 位置 52%</span>
+          <span class="txt">测试本身就是一次强的学习事件，而非仅仅是对学习的测量。</span>
+          <span class="meta num">昨天 21:18</span>
+        </button></li>
+        <li data-type="highlight"><button class="item" type="button">
+          <span class="kind">高亮 · 位置 58%</span>
+          <span class="txt">最优间隔并非固定值，它随目标保持期的延长而成比例增长。</span>
+          <span class="meta num">10-02 09:12</span>
+        </button></li>
+        <li data-type="excerpt"><button class="item" type="button">
+          <span class="kind">摘录 · 位置 63%</span>
+          <span class="txt">睡眠在间隔中承担了记忆巩固的角色，剥夺睡眠会抵消间隔效应的大部分收益。</span>
+          <span class="meta num">10-01 22:47</span>
+        </button></li>
+      </ul>
+      <p style="padding:24px 16px;font-size:13px;color:var(--g3);" id="filterEmpty" hidden>该筛选下暂无条目。</p>
+    </div>
+  </aside>
+
+  <!-- 主列 -->
+  <main class="main" id="main">
+    <div class="main-inner">
+      <nav class="crumbs-bar enter d1" aria-label="面包屑">
+        <nav class="crumbs" aria-label="位置">
+          <a href="#">原文</a><span class="sep" aria-hidden="true">›</span>
+          <a href="#">学习科学：原理与应用</a><span class="sep" aria-hidden="true">›</span>
+          <a href="#">第 2 章 · 遗忘曲线与间隔效应</a><span class="sep" aria-hidden="true">›</span>
+          <span aria-current="page">遗忘曲线的摘录</span>
+        </nav>
+        <span class="pending num"><span class="dot" aria-hidden="true"></span>5 条待处理</span>
+      </nav>
+
+      <article class="card enter d2" aria-label="摘录卡面">
+        <div class="card-bar" aria-hidden="true"></div>
+        <div class="card-body">
+          <p class="card-kind">摘录 · 来自原文 · 位置 31%</p>
+          <blockquote class="quote">「记忆的消退并非内容的擦除，而是提取线索的衰减——重新接触的时机，决定了线索能否被重建。」</blockquote>
+          <p class="quote-attr num">学习科学：原理与应用 · 第 2 章 · 摘录于 2026-10-04 14:32</p>
+          <div class="tags">
+            <span class="tag">记忆</span><span class="tag">间隔效应</span><span class="tag">提取</span>
+          </div>
+          <div class="note">
+            <p class="note-label">我的笔记</p>
+            <p>这段话解释了为什么「想不起来」不等于「学过了没用」：线索还在，只是弱了。间隔复习的本质是定期重建提取线索，而不是机械重复。可以联系第 3 章的测试效应——提取本身就是最强的线索重建动作。</p>
+          </div>
+          <div class="card-actions">
+            <button class="btn" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              编辑笔记
+            </button>
+            <button class="btn" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="0"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              复制原文
+            </button>
+            <button class="btn btn-accent" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4Z"/></svg>
+              生成复习卡
+            </button>
+          </div>
+        </div>
+      </article>
+    </div>
+  </main>
+
+  <!-- 底部 sticky 底栏 72px -->
+  <footer class="actionbar enter d3">
+    <div class="field">
+      <label class="field-label" for="deferDays">推迟</label>
+      <div class="stepper">
+        <button type="button" id="deferMinus" aria-label="减少天数">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14"/></svg>
+        </button>
+        <input type="number" id="deferDays" value="3" min="1" max="365" aria-describedby="deferHint">
+        <button type="button" id="deferPlus" aria-label="增加天数">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <span class="unit" id="deferHint">天后再次出现在阅读流</span>
+    </div>
+
+    <div class="field slider-field">
+      <div class="slider-head">
+        <label class="field-label" for="priority">优先级</label>
+        <output class="slider-val" id="priorityOut" for="priority">中 · 60</output>
+      </div>
+      <input type="range" id="priority" min="0" max="100" value="60" step="5">
+    </div>
+
+    <div class="actionbar-spacer"></div>
+    <span class="hint num">处理进度 13 / 18</span>
+    <button class="btn btn-primary" type="button">
+      保存并下一条
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+    </button>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var app=document.getElementById('app');
+  var toggle=document.getElementById('trackToggle');
+  toggle.addEventListener('click',function(){
+    var c=app.classList.toggle('collapsed');
+    toggle.setAttribute('aria-expanded',String(!c));
+    toggle.setAttribute('aria-label',c?'展开批注轨':'收起批注轨');
+    toggle.lastChild.textContent=c?'展开':'收起';
+  });
+
+  // 筛选 / 排序段控
+  var filterBtns=document.querySelectorAll('[data-filter]');
+  var listItems=document.querySelectorAll('#annotList > li');
+  var empty=document.getElementById('filterEmpty');
+  filterBtns.forEach(function(btn){
+    btn.addEventListener('click',function(){
+      filterBtns.forEach(function(b){b.setAttribute('aria-pressed',String(b===btn));});
+      var f=btn.dataset.filter,shown=0;
+      listItems.forEach(function(li){
+        var show=(f==='all'||li.dataset.type===f);
+        li.style.display=show?'':'none';
+        if(show)shown++;
+      });
+      empty.hidden=shown>0;
+    });
+  });
+  var sortBtns=document.querySelectorAll('[data-sort]');
+  var list=document.getElementById('annotList');
+  sortBtns.forEach(function(btn){
+    btn.addEventListener('click',function(){
+      sortBtns.forEach(function(b){b.setAttribute('aria-pressed',String(b===btn));});
+      var items=Array.prototype.slice.call(list.children);
+      if(btn.dataset.sort==='time'){items.reverse();}
+      items.forEach(function(li){list.appendChild(li);});
+    });
+  });
+  // 批注轨条目点击 → 置为当前
+  list.addEventListener('click',function(e){
+    var item=e.target.closest('.item');
+    if(!item)return;
+    list.querySelectorAll('.item').forEach(function(i){
+      i.classList.remove('current');i.removeAttribute('aria-current');
+    });
+    item.classList.add('current');
+    item.setAttribute('aria-current','true');
+  });
+
+  // 推迟天数步进
+  var days=document.getElementById('deferDays');
+  document.getElementById('deferMinus').addEventListener('click',function(){days.stepDown();});
+  document.getElementById('deferPlus').addEventListener('click',function(){days.stepUp();});
+
+  // 优先级滑块实时输出
+  var slider=document.getElementById('priority');
+  var out=document.getElementById('priorityOut');
+  function renderPriority(){
+    var v=Number(slider.value);
+    var label=v<34?'低':(v<67?'中':'高');
+    out.textContent=label+' · '+v;
+  }
+  slider.addEventListener('input',renderPriority);
+  renderPriority();
+})();
+</script>
+</body>
+</html>

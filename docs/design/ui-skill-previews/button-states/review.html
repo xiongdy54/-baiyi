@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440, initial-scale=1">
+<title>复习（FSRS） · 按钮状态设计预览（button-states skill）</title>
+<style>
+/* ================= 基础与 Design Token ================= */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --paper:#fafaf8;
+  --ink:#0a0a0a;
+  --grey-50:#f0f0ee;--grey-100:#e9e9e6;--grey-200:#d4d4d2;--grey-300:#b8b8b5;--grey-400:#98989a;--grey-500:#737373;
+  /* accent #166a59 = hsl(168,65%,25%)，hover/active 按 skill 规则 L-8% / L-14% 推导 */
+  --accent:hsl(168 65% 25%);
+  --accent-hover:hsl(168 65% 17%);
+  --accent-active:hsl(168 65% 11%);
+  --accent-soft:hsl(168 65% 25% / .08);
+  --red:hsl(6 58% 44%);
+  --amber:hsl(40 78% 40%);
+  --blue:hsl(210 55% 40%);
+  --hairline:var(--grey-200);
+  --font:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+html,body{height:100%}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font-family:inherit;color:inherit}
+::selection{background:hsl(168 65% 25% / .18)}
+
+/* ================= 六态按钮体系（button-states skill） ================= */
+.btn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:34px;padding:0 14px;border:none;background:transparent;color:var(--ink);
+  font-size:13px;letter-spacing:.01em;cursor:pointer;user-select:none;-webkit-user-select:none;
+  transition:background 120ms ease-out,color 120ms ease-out,border-color 120ms ease-out,opacity 120ms ease-out,transform 80ms ease-out;
+}
+.btn:hover{background:var(--grey-50)}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.4;cursor:not-allowed;pointer-events:none}
+.btn.btn--loading{opacity:.7;pointer-events:none}
+
+.btn--primary{background:var(--accent);color:#fff}
+.btn--primary:hover{background:var(--accent-hover)}
+.btn--primary:active{background:var(--accent-active)}
+
+.btn--secondary{border:1px solid var(--grey-200)}
+.btn--secondary:hover{background:var(--grey-50);border-color:var(--grey-400)}
+.btn--secondary:active{background:var(--grey-100);border-color:var(--grey-400)}
+
+.btn--ghost{padding:0 10px}
+.btn--ghost:hover{background:var(--grey-50)}
+.btn--ghost:active{background:var(--grey-100)}
+.icon-btn{width:34px;height:34px;padding:0}
+
+.btn .spinner{
+  position:absolute;inset:0;margin:auto;width:14px;height:14px;border-radius:50%;
+  border:2px solid hsl(168 65% 25% / .25);border-top-color:var(--accent);
+  animation:spin .8s linear infinite;display:none;
+}
+.btn--primary .spinner{border-color:rgb(255 255 255 / .35);border-top-color:#fff}
+.btn--loading .spinner{display:block}
+.btn--loading .label{visibility:hidden}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+kbd{
+  font-family:inherit;font-size:10.5px;color:var(--grey-500);
+  border:1px solid var(--grey-200);padding:1px 5px;
+}
+.btn--primary kbd{color:rgb(255 255 255 / .75);border-color:rgb(255 255 255 / .35)}
+
+/* ================= 顶栏与队列计数 ================= */
+.topbar{display:flex;align-items:center;gap:16px;height:56px;padding:0 24px;border-bottom:1px solid var(--hairline)}
+.deck{min-width:0}
+.deck strong{display:block;font-size:13.5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.deck span{display:block;font-size:11px;color:var(--grey-500);line-height:1.3}
+.queue{display:flex;align-items:center;margin-left:auto;border:1px solid var(--grey-200);height:36px}
+.stat{display:flex;align-items:center;gap:8px;height:100%;padding:0 16px;border-left:1px solid var(--grey-200)}
+.stat:first-child{border-left:none}
+.stat b{font-size:15px;font-variant-numeric:tabular-nums;font-weight:700}
+.stat span{font-size:11px;color:var(--grey-500)}
+.stat.due b{color:var(--accent)}
+
+/* ================= 进度 ================= */
+.progress{height:2px;background:var(--grey-100);position:relative;flex:none}
+.progress i{position:absolute;left:0;top:0;bottom:0;width:60%;background:var(--accent);transition:width 400ms cubic-bezier(.2,.7,.2,1)}
+.meta-row{display:flex;align-items:center;justify-content:space-between;max-width:760px;margin:20px auto 0;padding:0 24px;font-size:11.5px;color:var(--grey-500)}
+
+/* ================= 复习卡（可点击翻转） ================= */
+.stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:0;padding:0 24px}
+.flip-wrap{perspective:1400px;width:760px;height:min(420px,58vh)}
+.flip{
+  position:relative;width:100%;height:100%;
+  transform-style:preserve-3d;
+  transition:transform 420ms cubic-bezier(.2,.7,.2,1);
+}
+.flip.flipped{transform:rotateY(180deg)}
+.face{
+  position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;
+  border:1px solid var(--hairline);background:#fff;
+  display:flex;flex-direction:column;padding:36px 44px;
+}
+.face--back{transform:rotateY(180deg)}
+.face-label{font-size:11px;letter-spacing:.2em;color:var(--grey-500);margin-bottom:18px}
+.face-label em{font-style:normal;color:var(--grey-400);margin-left:10px;letter-spacing:.02em}
+.q-text{font-size:21px;line-height:1.75;font-weight:600;max-width:60ch}
+.q-hint{margin-top:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--grey-500)}
+.a-list{list-style:none;display:flex;flex-direction:column;gap:14px}
+.a-list li{position:relative;padding-left:18px;font-size:14.5px;line-height:1.85;color:#1c1c1a}
+.a-list li::before{content:"";position:absolute;left:0;top:11px;width:7px;height:7px;background:var(--accent)}
+.a-tags{display:flex;gap:8px;margin-top:auto;padding-top:14px}
+.tag{font-size:11px;color:var(--grey-500);border:1px solid var(--grey-200);padding:2px 8px}
+.a-src{font-size:11px;color:var(--grey-400);margin-top:10px}
+
+/* 换卡动画 */
+@keyframes cardOut{to{opacity:0;transform:translateY(-14px) scale(.985)}}
+@keyframes cardIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+.flip-wrap.leaving .flip{animation:cardOut 220ms ease-in forwards}
+.flip-wrap.entering .flip{animation:cardIn 260ms cubic-bezier(.2,.7,.2,1) both}
+
+/* ================= 底栏 72px ================= */
+.bottombar{
+  flex:none;height:72px;border-top:1px solid var(--hairline);background:var(--paper);
+  display:flex;align-items:center;justify-content:center;gap:12px;padding:0 24px;
+}
+.grade{
+  position:relative;min-width:150px;height:48px;gap:10px;font-size:13.5px;
+}
+.grade .iv{font-size:12px;font-weight:600;color:var(--grey-500)}
+.btn--primary .iv{color:rgb(255 255 255 / .8)}
+.grade .num{position:absolute;top:4px;right:6px;font-size:10px;color:var(--grey-400)}
+.btn--primary .num{color:rgb(255 255 255 / .6)}
+.dot{width:10px;height:10px;flex:none}
+.dot--red{background:var(--red)}
+.dot--amber{background:var(--amber)}
+.dot--blue{background:var(--blue)}
+.grades{display:flex;gap:12px}
+.grades[hidden]{display:none}
+#showBtn{min-width:260px;height:48px;font-size:14.5px}
+#showBtn[hidden]{display:none}
+.left-tools{position:absolute;left:24px;display:flex;gap:8px}
+.bottombar{position:relative}
+
+/* ================= 动效 ================= */
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes wipeIn{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.topbar{animation:fadeIn 320ms cubic-bezier(.2,.7,.2,1) both}
+.progress i{transform-origin:left;animation:wipeIn 700ms cubic-bezier(.2,.7,.2,1) 150ms both}
+.flip-wrap{animation:fadeUp 380ms cubic-bezier(.2,.7,.2,1) 80ms both}
+.bottombar{animation:fadeUp 320ms cubic-bezier(.2,.7,.2,1) 200ms both}
+.grade{animation:fadeUp 260ms cubic-bezier(.2,.7,.2,1) both}
+.grade:nth-child(1){animation-delay:0ms}.grade:nth-child(2){animation-delay:40ms}
+.grade:nth-child(3){animation-delay:80ms}.grade:nth-child(4){animation-delay:120ms}
+
+/* ================= reduced-motion 降级 ================= */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app" style="display:flex;flex-direction:column;height:100vh">
+
+  <!-- ============ 顶栏：卡组 + 队列计数 ============ -->
+  <header class="topbar">
+    <div class="deck">
+      <strong>学习科学 · 综合卡组</strong>
+      <span>FSRS 调度 · 真源：review_logs + fsrs_configs</span>
+    </div>
+    <div class="queue" role="group" aria-label="队列计数">
+      <div class="stat"><b>12</b><span>未学习</span></div>
+      <div class="stat"><b>3</b><span>学习中</span></div>
+      <div class="stat due"><b>28</b><span>待复习</span></div>
+    </div>
+    <!-- Loading 状态示范：同步日志（首次进入即演示，点击可重放） -->
+    <button class="btn btn--secondary btn--loading" id="syncBtn" aria-busy="true">
+      <span class="spinner" aria-hidden="true"></span><span class="label">同步日志</span>
+    </button>
+    <button class="btn btn--ghost icon-btn" title="FSRS 参数设置" aria-label="FSRS 参数设置">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M2 5h8M12 5h2M2 11h4M8 11h6"/><circle cx="10.5" cy="5" r="1.6"/><circle cx="6.5" cy="11" r="1.6"/>
+      </svg>
+    </button>
+  </header>
+  <div class="progress" aria-hidden="true"><i id="progFill"></i></div>
+
+  <!-- ============ 复习卡 ============ -->
+  <main class="stage">
+    <div class="meta-row">
+      <span>今日目标 71 张 · 已完成 <b id="doneNum">43</b></span>
+      <span>上一张：突触可塑性 · 评分「良好」</span>
+    </div>
+    <div class="flip-wrap" id="flipWrap">
+      <div class="flip" id="flip">
+        <!-- 正面：问题 -->
+        <section class="face face--front" aria-label="问题面">
+          <div class="face-label">问题 <em id="cardNo">卡 #2047 · FSRS 稳定性 6.2 天</em></div>
+          <p class="q-text" id="qText">与被动重读相比，为什么「提取练习」能更有效地巩固长期记忆？请从记忆痕迹的角度说明。</p>
+          <div class="q-hint"><kbd>空格</kbd> 显示答案</div>
+        </section>
+        <!-- 背面：答案 -->
+        <section class="face face--back" aria-label="答案面">
+          <div class="face-label">答案</div>
+          <ul class="a-list" id="aList">
+            <li>提取行为本身是一次「记忆修改事件」：每次成功提取都会重建记忆痕迹，使其更清晰、更抗干扰。</li>
+            <li>重读只提升「流畅感」，加工深度远低于一次费力的主动回忆，对长期保持贡献很小。</li>
+            <li>提取难度具有「合意困难」性质：越费力，记忆增长越大——这正是间隔复习有效的原因。</li>
+          </ul>
+          <div class="a-tags">
+            <span class="tag">#测试效应</span><span class="tag">#提取练习</span><span class="tag">#第2章</span>
+          </div>
+          <div class="a-src">摘自《学习科学》第2.3节 · 位置 118 · 创建于 2026-09-28</div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ 底栏：显示答案 / 四档评分 ============ -->
+  <footer class="bottombar" aria-label="复习操作栏">
+    <div class="left-tools">
+      <button class="btn btn--ghost" disabled title="暂无可撤销的评分">撤销</button>
+      <button class="btn btn--secondary" id="skipBtn">跳过本卡</button>
+    </div>
+    <button class="btn btn--primary" id="showBtn">显示答案<kbd>空格</kbd></button>
+    <div class="grades" id="grades" hidden>
+      <button class="btn btn--secondary grade" data-grade="again">
+        <span class="num">1</span><span class="dot dot--red" aria-hidden="true"></span>重来<span class="iv">10分</span>
+      </button>
+      <button class="btn btn--secondary grade" data-grade="hard" style="animation-delay:40ms">
+        <span class="num">2</span><span class="dot dot--amber" aria-hidden="true"></span>困难<span class="iv">1天</span>
+      </button>
+      <button class="btn btn--primary grade" data-grade="good" style="animation-delay:80ms">
+        <span class="num">3</span>良好<span class="iv">3天</span>
+      </button>
+      <button class="btn btn--secondary grade" data-grade="easy" style="animation-delay:120ms">
+        <span class="num">4</span><span class="dot dot--blue" aria-hidden="true"></span>简单<span class="iv">8天</span>
+      </button>
+    </div>
+  </footer>
+</div>
+
+<script>
+// —— 卡组数据（演示循环 3 张）
+const CARDS = [
+  {
+    no: '卡 #2047 · FSRS 稳定性 6.2 天',
+    q: '与被动重读相比，为什么「提取练习」能更有效地巩固长期记忆？请从记忆痕迹的角度说明。',
+    a: [
+      '提取行为本身是一次「记忆修改事件」：每次成功提取都会重建记忆痕迹，使其更清晰、更抗干扰。',
+      '重读只提升「流畅感」，加工深度远低于一次费力的主动回忆，对长期保持贡献很小。',
+      '提取难度具有「合意困难」性质：越费力，记忆增长越大——这正是间隔复习有效的原因。'
+    ],
+    src: '摘自《学习科学》第2.3节 · 位置 118 · 创建于 2026-09-28'
+  },
+  {
+    no: '卡 #2051 · FSRS 稳定性 2.9 天',
+    q: '什么是「间隔效应」？给出一个可操作的学习安排示例。',
+    a: [
+      '间隔效应：将同一材料的学习分散到多个时段，比集中一次性学习产生更强的长期保持。',
+      '原因：间隔拉长后，每次复习时的提取更费力，合意困难更大，记忆增长更多。',
+      '示例：学后第 1、3、7、16 天各安排一次主动回忆，而不是考前一次读完四遍。'
+    ],
+    src: '摘自《学习科学》第2.4节 · 位置 131 · 创建于 2026-09-30'
+  },
+  {
+    no: '卡 #2063 · FSRS 稳定性 11.4 天',
+    q: '睡眠在记忆巩固中扮演什么角色？',
+    a: [
+      '慢波睡眠期间海马体将新编码的信息「重放」并逐步转移到皮层，完成系统巩固。',
+      '睡眠不足会显著削弱海马体对新信息的编码能力，也会损失当天的巩固窗口。',
+      '实践含义：学习后保证当夜充足睡眠，其收益优于熬夜多学一小时。'
+    ],
+    src: '摘自《学习科学》第5.1节 · 位置 96 · 创建于 2026-10-02'
+  }
+];
+const IV_TEXT = { again:'10分', hard:'1天', good:'3天', easy:'8天' };
+
+let idx = 0, flipped = false, done = 43;
+const flip = document.getElementById('flip');
+const flipWrap = document.getElementById('flipWrap');
+const showBtn = document.getElementById('showBtn');
+const grades = document.getElementById('grades');
+const qText = document.getElementById('qText');
+const aList = document.getElementById('aList');
+const cardNo = document.getElementById('cardNo');
+const aSrc = document.querySelector('.a-src');
+const doneNum = document.getElementById('doneNum');
+const progFill = document.getElementById('progFill');
+
+function setCard(i){
+  const c = CARDS[i];
+  cardNo.textContent = c.no;
+  qText.textContent = c.q;
+  aList.innerHTML = c.a.map(t => '<li>' + t + '</li>').join('');
+  aSrc.textContent = c.src;
+}
+function setFlipped(v){
+  flipped = v;
+  flip.classList.toggle('flipped', v);
+  showBtn.hidden = v;
+  grades.hidden = !v;
+  showBtn.setAttribute('aria-expanded', String(v));
+}
+showBtn.addEventListener('click', () => setFlipped(true));
+document.getElementById('skipBtn').addEventListener('click', nextCard);
+
+// —— 评分 → 换卡动画（出卡 220ms → 载入下一张 → 入卡 260ms）→ 队列计数与进度更新
+function nextCard(){
+  done++; doneNum.textContent = done;
+  progFill.style.width = Math.min(100, Math.round(done / 71 * 100)) + '%';
+  flipWrap.classList.add('leaving');
+  setTimeout(() => {
+    idx = (idx + 1) % CARDS.length;
+    setCard(idx);
+    flipWrap.classList.remove('leaving');
+    flipWrap.classList.add('entering');
+    setFlipped(false);
+    setTimeout(() => flipWrap.classList.remove('entering'), 300);
+  }, 230);
+}
+grades.addEventListener('click', e => {
+  const btn = e.target.closest('.grade');
+  if (!btn || btn.classList.contains('btn--loading')) return;
+  btn.classList.add('btn--loading');               // 提交评分期间禁止重复点击
+  btn.setAttribute('aria-busy','true');
+  setTimeout(() => {
+    btn.classList.remove('btn--loading');
+    btn.removeAttribute('aria-busy');
+    nextCard();
+  }, 500);
+});
+
+// —— 键盘：空格翻面，1–4 评分（翻面后生效）
+addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'Enter') {
+    if (document.activeElement && document.activeElement.tagName === 'BUTTON') return; // 交给按钮自身
+    e.preventDefault();
+    if (!flipped) setFlipped(true);
+  }
+  if (flipped && ['Digit1','Digit2','Digit3','Digit4'].includes(e.code)) {
+    const btn = grades.children[Number(e.code.slice(-1)) - 1];
+    if (btn && !btn.classList.contains('btn--loading')) btn.click();
+  }
+});
+
+// —— 同步日志：loading 状态演示（元素自身呈现进度，宽度稳定，完成后回归 rest）
+const syncBtn = document.getElementById('syncBtn');
+function runSync(ms){
+  if (syncBtn.classList.contains('btn--loading')) return;
+  syncBtn.classList.add('btn--loading');
+  syncBtn.setAttribute('aria-busy','true');
+  setTimeout(() => { syncBtn.classList.remove('btn--loading'); syncBtn.removeAttribute('aria-busy'); }, ms);
+}
+setTimeout(() => runSync(1), 2600);   // 首屏展示 loading 约 2.6 秒后完成
+syncBtn.addEventListener('click', () => runSync(1600));
+
+setCard(0);
+</script>
+</body>
+</html>

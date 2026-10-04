@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440, initial-scale=1">
+<title>阅读 · 按钮状态设计预览（button-states skill）</title>
+<style>
+/* ================= 基础与 Design Token ================= */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --paper:#fafaf8;
+  --ink:#0a0a0a;
+  --grey-50:#f0f0ee;--grey-100:#e9e9e6;--grey-200:#d4d4d2;--grey-300:#b8b8b5;--grey-400:#98989a;--grey-500:#737373;
+  /* accent #166a59 = hsl(168,65%,25%)，hover/active 按 skill 规则 L-8% / L-14% 推导 */
+  --accent:hsl(168 65% 25%);
+  --accent-hover:hsl(168 65% 17%);
+  --accent-active:hsl(168 65% 11%);
+  --accent-soft:hsl(168 65% 25% / .08);
+  --red:hsl(6 58% 44%);
+  --amber:hsl(40 78% 40%);
+  --blue:hsl(210 55% 40%);
+  --purple:hsl(270 38% 50%);
+  --hairline:var(--grey-200);
+  --font:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+html,body{height:100%}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font-family:inherit;color:inherit}
+::selection{background:hsl(168 65% 25% / .18)}
+
+/* ================= 六态按钮体系（button-states skill） ================= */
+/* 状态色不是独立挑选的：primary 由 accent 在 HSL 上做亮度推导；secondary/ghost 走灰阶微填充 */
+.btn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:34px;padding:0 14px;border:none;background:transparent;color:var(--ink);
+  font-size:13px;letter-spacing:.01em;cursor:pointer;user-select:none;-webkit-user-select:none;
+  transition:background 120ms ease-out,color 120ms ease-out,border-color 120ms ease-out,opacity 120ms ease-out,transform 80ms ease-out;
+}
+.btn:hover{background:var(--grey-50)}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.4;cursor:not-allowed;pointer-events:none}
+.btn.btn--loading{opacity:.7;pointer-events:none}
+
+.btn--primary{background:var(--accent);color:#fff}
+.btn--primary:hover{background:var(--accent-hover)}
+.btn--primary:active{background:var(--accent-active)}
+
+.btn--secondary{border:1px solid var(--grey-200)}
+.btn--secondary:hover{background:var(--grey-50);border-color:var(--grey-400)}
+.btn--secondary:active{background:var(--grey-100);border-color:var(--grey-400)}
+
+.btn--ghost{padding:0 10px}
+.btn--ghost:hover{background:var(--grey-50)}
+.btn--ghost:active{background:var(--grey-100)}
+.icon-btn{width:34px;height:34px;padding:0}
+
+/* Loading：spinner 绝对定位替换标签，按钮宽度保持稳定；进度由元素自身呈现 */
+.btn .spinner,.menu-btn .spinner{
+  position:absolute;inset:0;margin:auto;width:14px;height:14px;border-radius:50%;
+  border:2px solid hsl(168 65% 25% / .25);border-top-color:var(--accent);
+  animation:spin .8s linear infinite;display:none;
+}
+.btn--primary .spinner{border-color:rgb(255 255 255 / .35);border-top-color:#fff}
+.btn--loading .spinner,.menu-btn.menu-btn--loading .spinner{display:block}
+.btn--loading .label,.menu-btn--loading .label{visibility:hidden}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ================= 分段控（筛选 / 排序） ================= */
+.seg{display:inline-flex;height:26px;border:1px solid var(--grey-200);background:var(--paper)}
+.seg button{
+  height:100%;padding:0 10px;border:none;border-left:1px solid var(--grey-200);
+  background:transparent;color:var(--grey-500);font-size:11.5px;cursor:pointer;
+  transition:background 120ms ease-out,color 120ms ease-out;
+}
+.seg button:first-child{border-left:none}
+.seg button:hover{background:var(--grey-50);color:var(--ink)}
+.seg button:active{background:var(--grey-100)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg button.on{background:var(--ink);color:#fff}
+
+/* ================= 页签（目录 / 摘录 / 图谱） ================= */
+.tabs{display:flex;border-bottom:1px solid var(--hairline)}
+.tabs button{
+  position:relative;flex:1;height:38px;border:none;background:transparent;cursor:pointer;
+  font-size:13px;color:var(--grey-500);transition:color 120ms ease-out;
+}
+.tabs button::after{
+  content:"";position:absolute;left:16px;right:16px;bottom:-1px;height:2px;
+  background:var(--accent);transform:scaleX(0);transition:transform 150ms ease-out;
+}
+.tabs button:hover{color:var(--ink)}
+.tabs button:active{background:var(--grey-50)}
+.tabs button:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.tabs button.on{color:var(--ink);font-weight:600}
+.tabs button.on::after{transform:scaleX(1)}
+
+/* ================= 布局 ================= */
+.app{display:grid;grid-template-columns:280px 1fr;grid-template-rows:56px 1fr;height:100vh;transition:grid-template-columns 240ms ease}
+.app.side-hidden{grid-template-columns:48px 1fr}
+.app.side-hidden .side-title,.app.side-hidden .side-count,
+.app.side-hidden .side-filters,.app.side-hidden .tabs,.app.side-hidden .side-list,.app.side-hidden .side-foot{display:none}
+.app.side-hidden .side-head{justify-content:center;padding:0}
+
+/* ---- 左侧 280px 全高侧栏 ---- */
+.side{grid-row:1 / 3;border-right:1px solid var(--hairline);display:flex;flex-direction:column;min-height:0;background:var(--paper)}
+.side-head{display:flex;align-items:center;gap:8px;height:56px;padding:0 10px;border-bottom:1px solid var(--hairline);flex:none}
+.side-title{font-size:13px;font-weight:600;flex:1}
+.side-count{font-size:11px;color:var(--grey-500);border:1px solid var(--grey-200);padding:1px 7px}
+.side-filters{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;flex:none}
+.side-list{flex:1;overflow-y:auto;min-height:0}
+.side-foot{flex:none;padding:8px 12px;border-top:1px solid var(--hairline);font-size:11px;color:var(--grey-500)}
+
+.entry{
+  position:relative;display:block;width:100%;text-align:left;border:none;background:transparent;
+  padding:11px 14px 11px 12px;border-bottom:1px solid var(--grey-100);cursor:pointer;
+  transition:background 120ms ease-out;
+}
+.entry:hover{background:var(--grey-50)}
+.entry:active{background:var(--grey-100)}
+.entry:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* 条目右侧高亮色竖线：颜色由每条数据的 --bar 提供 */
+.entry::after{content:"";position:absolute;right:0;top:10px;bottom:10px;width:3px;background:var(--bar,var(--grey-300))}
+.e-text{font-size:12.5px;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.e-note{margin-top:4px;font-size:11.5px;color:var(--grey-500);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.e-note::before{content:"笔 ";font-size:10px;border:1px solid var(--grey-200);padding:0 3px;margin-right:4px;color:var(--grey-500)}
+.e-meta{margin-top:5px;font-size:11px;color:var(--grey-400)}
+
+/* ---- 顶栏 ---- */
+.topbar{grid-column:2;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--hairline);min-width:0}
+.top-title{flex:1;text-align:center;min-width:0;overflow:hidden}
+.top-title strong{display:block;font-size:13.5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-title span{display:block;font-size:11px;color:var(--grey-500);line-height:1.3}
+.page-info{font-size:12px;color:var(--grey-500);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* ---- 主舞台 ---- */
+.stage{grid-column:2;display:flex;min-height:0;position:relative}
+.page{position:relative;flex:1;min-width:0;overflow-y:auto;scroll-behavior:smooth}
+.prose{max-width:720px;margin:0 auto;padding:44px 48px 80px}
+.kicker{font-size:12px;letter-spacing:.18em;color:var(--grey-500)}
+.prose h1{font-size:26px;line-height:1.35;margin:6px 0 26px;font-weight:700}
+.prose p{font-size:15px;line-height:2.0;margin-bottom:20px;color:#1c1c1a}
+/* 已高亮文字 */
+.hl{padding:1px 3px;cursor:text;transition:background 120ms ease-out}
+.hl--yellow{background:hsl(45 85% 55% / .38);box-shadow:inset 0 -2px 0 hsl(45 85% 45% / .8)}
+.hl:hover{background:hsl(45 85% 55% / .5)}
+
+/* ---- 划选菜单浮层（唯一允许单层阴影的元素） ---- */
+.sel-menu{
+  position:absolute;z-index:20;display:flex;align-items:center;gap:2px;padding:4px;
+  background:var(--paper);border:1px solid var(--grey-200);
+  box-shadow:0 10px 28px rgb(10 10 10 / .14);
+}
+.sel-menu::before{
+  content:"";position:absolute;top:-5px;left:50%;margin-left:-5px;width:8px;height:8px;
+  background:var(--paper);border-left:1px solid var(--grey-200);border-top:1px solid var(--grey-200);
+  transform:rotate(45deg);
+}
+.menu-btn{
+  position:relative;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;
+  border:none;background:transparent;font-size:12.5px;cursor:pointer;
+  transition:background 120ms ease-out,color 120ms ease-out,transform 80ms ease-out;
+}
+.menu-btn:hover{background:var(--grey-50)}
+.menu-btn:active{background:var(--grey-100);transform:scale(.97)}
+.menu-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.menu-btn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+.menu-btn--loading{pointer-events:none;opacity:.7}
+.menu-btn--loading .spinner{display:block}
+.menu-btn svg{flex:none}
+.menu-div{width:1px;height:18px;background:var(--grey-200);margin:0 4px}
+.dot{width:10px;height:10px;flex:none}
+.dot--yellow{background:var(--amber)}
+
+/* ---- 右侧竖排工具栏 ---- */
+.rail{
+  width:56px;flex:none;border-left:1px solid var(--hairline);
+  display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 0;
+}
+.rail .rail-gap{flex:1}
+.rail-progress{width:2px;flex:1;background:var(--grey-100);position:relative;margin:6px 0}
+.rail-progress i{position:absolute;top:0;left:0;right:0;height:22%;background:var(--accent)}
+.rail-hint{writing-mode:vertical-rl;font-size:10px;color:var(--grey-400);letter-spacing:.2em}
+
+/* ================= 动效（入场 + 状态过渡；reduced-motion 降级见文末） ================= */
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideRight{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+@keyframes popIn{from{opacity:0;transform:translateY(6px) scale(.96)}to{opacity:1;transform:none}}
+.side{animation:slideRight 320ms cubic-bezier(.2,.7,.2,1) both}
+.topbar{animation:fadeIn 320ms cubic-bezier(.2,.7,.2,1) 60ms both}
+.prose{animation:fadeUp 380ms cubic-bezier(.2,.7,.2,1) 80ms both}
+.rail{animation:fadeIn 320ms ease 160ms both}
+.sel-menu{animation:popIn 260ms cubic-bezier(.2,.7,.2,1) 560ms both}
+.entry{animation:fadeUp 300ms ease both}
+.entry:nth-child(1){animation-delay:120ms}.entry:nth-child(2){animation-delay:160ms}
+.entry:nth-child(3){animation-delay:200ms}.entry:nth-child(4){animation-delay:240ms}
+.entry:nth-child(5){animation-delay:280ms}.entry:nth-child(6){animation-delay:320ms}
+
+/* ================= reduced-motion 降级 ================= */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ 左侧 280px 全高侧栏 ============ -->
+  <aside class="side" aria-label="摘录与目录侧栏">
+    <div class="side-head">
+      <button class="btn btn--ghost icon-btn" id="sideToggle" title="收起 / 展开侧栏" aria-label="收起侧栏" aria-expanded="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1.5" y="2.5" width="13" height="11"/><line x1="6" y1="2.5" x2="6" y2="13.5"/>
+        </svg>
+      </button>
+      <span class="side-title">摘录与目录</span>
+      <span class="side-count">24 条</span>
+    </div>
+
+    <div class="side-filters">
+      <div class="seg" role="group" aria-label="按类型筛选">
+        <button class="on">全部</button><button>摘录</button><button>高亮</button>
+      </div>
+      <div class="seg" role="group" aria-label="排序方式">
+        <button class="on">位置</button><button>时间</button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="侧栏页签">
+      <button role="tab" aria-selected="false">目录</button>
+      <button role="tab" class="on" aria-selected="true">摘录</button>
+      <button role="tab" aria-selected="false">图谱</button>
+    </div>
+
+    <nav class="side-list" aria-label="摘录条目列表">
+      <button class="entry" style="--bar:var(--amber)">
+        <span class="e-text">每一次成功的提取都会重建记忆痕迹，使其更不易受后续干扰。</span>
+        <span class="e-meta">第2章 · 位置 118 · 今天 10:24</span>
+      </button>
+      <button class="entry" style="--bar:var(--accent)">
+        <span class="e-text">测试效应：对同一材料的主动回忆，比重复阅读带来更高的长期保持率。</span>
+        <span class="e-meta">第2章 · 位置 121 · 今天 10:31</span>
+      </button>
+      <button class="entry" style="--bar:var(--blue)">
+        <span class="e-text">提取的难度本身具有「合意困难」的性质——越费力，记忆增长越大。</span>
+        <span class="e-meta">第2章 · 位置 126 · 昨天</span>
+      </button>
+      <button class="entry" style="--bar:var(--amber)">
+        <span class="e-text">间隔效应：将学习分散到多个时段，比集中一次性学习更有效。</span>
+        <span class="e-meta">第2章 · 位置 131 · 昨天</span>
+      </button>
+      <button class="entry" style="--bar:var(--red)">
+        <span class="e-text">睡眠不足会显著削弱海马体对新信息的编码能力。</span>
+        <span class="e-meta">第2章 · 位置 96 · 10-02</span>
+      </button>
+      <button class="entry" style="--bar:var(--accent)">
+        <span class="e-text">这解释了为什么考前突击的学习效果总是差强人意。</span>
+        <span class="e-note">关联第5章「睡眠与记忆巩固」，制卡时合并。</span>
+        <span class="e-meta">第2章 · 位置 133 · 10-01</span>
+      </button>
+    </nav>
+
+    <div class="side-foot">Tab 键移动焦点 · Enter 打开条目</div>
+  </aside>
+
+  <!-- ============ 顶栏 ============ -->
+  <header class="topbar">
+    <button class="btn btn--ghost" title="返回书架">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 2 4 7l5 5"/></svg>
+      书架
+    </button>
+    <div class="top-title">
+      <strong>学习科学：记忆、理解与教学</strong>
+      <span>第2章 · 记忆的机制</span>
+    </div>
+    <span class="page-info">第 47 / 213 页</span>
+    <button class="btn btn--ghost icon-btn" title="阅读设置" aria-label="阅读设置">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M2 5h8M12 5h2M2 11h4M8 11h6"/><circle cx="10.5" cy="5" r="1.6"/><circle cx="6.5" cy="11" r="1.6"/>
+      </svg>
+    </button>
+    <button class="btn btn--ghost icon-btn" title="更多" aria-label="更多操作">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="3" cy="8" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="13" cy="8" r="1.4"/></svg>
+    </button>
+  </header>
+
+  <!-- ============ 书页 + 右侧竖排工具栏 ============ -->
+  <main class="stage">
+    <article class="page">
+      <div class="prose">
+        <p class="kicker">2.3</p>
+        <h1>提取练习与测试效应</h1>
+        <p>绝大多数学生的学习策略是反复阅读：一遍遍地翻看教材、用荧光笔划出重点、在考前把笔记再读一遍。然而，认知心理学在过去半个世纪里积累的证据指向一个反直觉的结论——重读带来的「熟悉感」并不等于记忆。流畅的错觉让人安心，却几乎不产生长期保持。</p>
+        <p>Roediger 与 Karpicke（2006）的经典实验让两组学生学习同一篇科普短文：一组反复阅读四遍，另一组只读一遍后进行自由回忆测试。一周后测量保持量，测试组比重读组高出约 50%。这就是「测试效应」（testing effect），也称提取练习（retrieval practice）：衡量学习的不是输入了多少，而是能提取出多少。</p>
+        <p>提取为什么有效？关键在于，每一次成功的提取都是一次记忆的重建。<mark class="hl hl--yellow" id="hl1">每当你从记忆中主动提取一条信息，这条记忆痕迹就会被重新巩固一遍，变得更清晰、更不易受后续干扰。</mark>而重读只是让材料「看起来更眼熟」，加工深度远远不及一次费力的回忆。</p>
+        <p>值得注意的是，提取的困难程度本身具有「合意困难」（desirable difficulty）的性质：提取越费力，记忆增长越大。这也是间隔复习优于集中复习的原因——间隔拉长之后，提取变得更难，练习因此更有效。</p>
+
+        <!-- 划选菜单浮层：含 loading（AI 制卡）与 disabled（朗读）两种状态示范 -->
+        <div class="sel-menu" id="selMenu" role="menu" aria-label="划选操作菜单">
+          <button class="menu-btn" role="menuitem" title="添加高亮">
+            <span class="dot dot--yellow"></span>高亮
+          </button>
+          <button class="menu-btn" role="menuitem" title="保存为摘录">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="2" width="10" height="9"/><path d="M4 5h5M4 7.5h5M4 10h3"/></svg>
+            摘录
+          </button>
+          <button class="menu-btn" role="menuitem" title="添加批注">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8.5 1.8 11.2 4.5 4.5 11.2H1.8V8.5z"/></svg>
+            批注
+          </button>
+          <span class="menu-div" aria-hidden="true"></span>
+          <button class="menu-btn menu-btn--loading" id="aiBtn" role="menuitem" aria-busy="true" title="用 AI 生成记忆卡">
+            <span class="spinner" aria-hidden="true"></span>
+            <span class="label">AI 制卡</span>
+          </button>
+          <button class="menu-btn" role="menuitem" disabled title="当前格式暂不支持朗读">朗读</button>
+          <button class="menu-btn" role="menuitem" id="copyBtn" title="复制所选文本">复制</button>
+        </div>
+      </div>
+    </article>
+
+    <nav class="rail" aria-label="阅读工具栏">
+      <button class="btn btn--ghost icon-btn" title="上一页" aria-label="上一页">
+        <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 9 7 4l5 5"/></svg>
+      </button>
+      <button class="btn btn--ghost icon-btn" title="下一页" aria-label="下一页">
+        <svg width="15" height="15" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5l5 5 5-5"/></svg>
+      </button>
+      <div class="rail-progress" aria-hidden="true"><i></i></div>
+      <span class="rail-hint">47 / 213</span>
+      <button class="btn btn--ghost icon-btn" title="阅读设置" aria-label="阅读设置">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4">
+          <text x="1" y="12" font-size="11" fill="currentColor" stroke="none" font-family="inherit">Aa</text>
+        </svg>
+      </button>
+      <button class="btn btn--ghost icon-btn" title="更多" aria-label="更多操作">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.4"/><circle cx="8" cy="8" r="1.4"/><circle cx="8" cy="13" r="1.4"/></svg>
+      </button>
+    </nav>
+  </main>
+</div>
+
+<script>
+// —— 侧栏开关钮：grid 列宽过渡（240ms），reduced-motion 下自动降级为瞬时
+const app = document.getElementById('app');
+const toggle = document.getElementById('sideToggle');
+toggle.addEventListener('click', () => {
+  const hidden = app.classList.toggle('side-hidden');
+  toggle.setAttribute('aria-expanded', String(!hidden));
+  toggle.setAttribute('aria-label', hidden ? '展开侧栏' : '收起侧栏');
+});
+
+// —— 划选菜单：锚定在高亮文字下方居中
+const hl = document.getElementById('hl1');
+const page = document.querySelector('.page');
+const menu = document.getElementById('selMenu');
+function placeMenu(){
+  const r = hl.getBoundingClientRect(), pr = page.getBoundingClientRect();
+  const left = r.left - pr.left + page.scrollLeft + r.width / 2 - menu.offsetWidth / 2;
+  const top  = r.bottom - pr.top + page.scrollTop + 10;
+  menu.style.left = Math.max(16, Math.min(left, page.clientWidth - menu.offsetWidth - 80)) + 'px';
+  menu.style.top = top + 'px';
+}
+placeMenu();
+addEventListener('resize', placeMenu);
+
+// —— AI 制卡：loading 状态演示。进度由元素自身呈现（spinner 替换标签、宽度不变），
+//    光标保持不变（pointer-events:none），完成后回到 rest 态。首次进入即演示 loading。
+const aiBtn = document.getElementById('aiBtn');
+function runLoading(btn, ms){
+  if (btn.classList.contains('menu-btn--loading') || btn.classList.contains('btn--loading')) return;
+  btn.classList.add('menu-btn--loading','btn--loading');
+  btn.setAttribute('aria-busy','true');
+  setTimeout(() => {
+    btn.classList.remove('menu-btn--loading','btn--loading');
+    btn.removeAttribute('aria-busy');
+  }, ms);
+}
+runLoading(aiBtn, 2200);
+aiBtn.addEventListener('click', () => runLoading(aiBtn, 1600));
+
+// —— 复制按钮：点击后短暂反馈（微交互）
+const copyBtn = document.getElementById('copyBtn');
+copyBtn.addEventListener('click', () => {
+  const label = copyBtn.textContent;
+  copyBtn.textContent = '已复制 ✓';
+  setTimeout(() => { copyBtn.textContent = label; }, 1200);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>阅读界面 · 设计稿预览（ui-ux-pro-max）</title>
+<style>
+/* ============================================================
+   设计语言：Minimalism & Swiss Style（ui-ux-pro-max styles.csv 校验条目）
+   直角 / 1px 发丝线 / 单一强调色 / 高对比 / 8px 基线网格 / 无装饰阴影
+   ============================================================ */
+:root{
+  --paper:#fafaf8;
+  --ink:#0a0a0a;
+  --g1:#f0f0ee;
+  --g2:#d4d4d2;
+  --g3:#737373;
+  --accent:#166a59;
+  --accent-strong:#0f5142;
+  --accent-soft:#e4eee9;
+  --amber:#8a5a00;
+  --hairline:1px solid var(--g2);
+  /* 运动令牌：到达减速、离开加速；所有动效共享同一节奏（motion-consistency） */
+  --dur-fast:150ms;
+  --dur:240ms;
+  --dur-slow:360ms;
+  --ease-out:cubic-bezier(0.22,1,0.36,1);
+  --ease-in:cubic-bezier(0.4,0,1,1);
+  --font:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{
+  font-family:var(--font);
+  background:var(--paper);
+  color:var(--ink);
+  font-size:16px;
+  line-height:1.7;
+  overflow:hidden;
+}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.skip{position:absolute;left:-9999px;top:0;background:var(--ink);color:#fff;padding:8px 16px;z-index:100;}
+.skip:focus{left:8px;top:8px;}
+.num{font-variant-numeric:tabular-nums;}
+svg{display:block;flex:none;}
+
+/* ---------- 总布局：56px 顶栏 / 280px 侧栏 / 1fr 正文 / 64px 右栏 ---------- */
+.app{
+  height:100vh;
+  display:grid;
+  grid-template-columns:280px 1fr 64px;
+  grid-template-rows:56px 1fr;
+  grid-template-areas:"bar bar bar" "side main rail";
+  transition:grid-template-columns var(--dur-slow) var(--ease-out);
+}
+.app.collapsed{grid-template-columns:0px 1fr 64px;}
+
+/* ---------- 顶部应用栏 ---------- */
+.appbar{
+  grid-area:bar;
+  display:flex;align-items:center;gap:16px;
+  padding:0 16px;
+  border-bottom:var(--hairline);
+  background:var(--paper);
+  z-index:30;
+}
+.icon-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:40px;min-height:40px;
+  gap:6px;padding:0 10px;
+  border:1px solid transparent;
+  font-size:13px;color:var(--ink);
+  transition:background-color var(--dur-fast) var(--ease-out),border-color var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out);
+}
+.icon-btn:hover{background:var(--g1);}
+.icon-btn:active{transform:scale(0.96);}
+.appbar-rule{width:1px;height:24px;background:var(--g2);}
+.book-meta{display:flex;flex-direction:column;min-width:0;}
+.book-meta b{font-size:14px;font-weight:600;letter-spacing:0.01em;}
+.book-meta span{font-size:12px;color:var(--g3);}
+.appbar-spacer{flex:1;}
+.page-info{font-size:13px;color:var(--g3);}
+.page-info b{color:var(--ink);font-weight:600;}
+
+/* ---------- 左侧 280px 全高侧栏 ---------- */
+.sidebar{
+  grid-area:side;
+  border-right:var(--hairline);
+  background:var(--paper);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  min-width:0;
+}
+.sb-head{display:flex;align-items:center;gap:8px;padding:8px 8px 8px 16px;border-bottom:var(--hairline);}
+.sb-title{font-size:12px;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;color:var(--g3);}
+.sb-head .icon-btn{margin-left:auto;}
+.sb-filters{padding:12px 16px;display:flex;flex-direction:column;gap:8px;border-bottom:var(--hairline);}
+.seg{display:flex;border:1px solid var(--g2);}
+.seg button{
+  flex:1;min-height:32px;padding:0 8px;
+  font-size:12px;color:var(--g3);
+  border-right:1px solid var(--g2);
+  transition:background-color var(--dur-fast) var(--ease-out),color var(--dur-fast) var(--ease-out);
+}
+.seg button:last-child{border-right:none;}
+.seg button:hover{background:var(--g1);}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff;font-weight:600;}
+.seg-label{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:var(--g3);}
+
+/* 页签 */
+.tabs{display:flex;border-bottom:var(--hairline);}
+.tabs [role="tab"]{
+  flex:1;min-height:40px;
+  font-size:13px;color:var(--g3);
+  border-bottom:2px solid transparent;
+  transition:color var(--dur-fast) var(--ease-out),border-color var(--dur-fast) var(--ease-out);
+}
+.tabs [role="tab"]:hover{color:var(--ink);}
+.tabs [role="tab"][aria-selected="true"]{color:var(--ink);font-weight:600;border-bottom-color:var(--accent);}
+
+.sb-body{flex:1;overflow-y:auto;min-height:0;}
+[role="tabpanel"]{display:none;}
+[role="tabpanel"].active{display:block;}
+
+/* 目录 */
+.toc{list-style:none;padding:8px 0;}
+.toc li a{
+  display:flex;align-items:baseline;gap:8px;
+  padding:8px 16px;font-size:13px;color:var(--g3);text-decoration:none;
+  border-left:2px solid transparent;
+  transition:background-color var(--dur-fast) var(--ease-out),color var(--dur-fast) var(--ease-out);
+}
+.toc li a:hover{background:var(--g1);color:var(--ink);}
+.toc li a.current{color:var(--ink);font-weight:600;border-left-color:var(--accent);background:var(--g1);}
+.toc .no{font-size:11px;color:var(--g3);font-variant-numeric:tabular-nums;}
+
+/* 摘录 / 高亮条目：右侧高亮色竖线 */
+.items{list-style:none;padding:8px 0;}
+.items li{border-bottom:1px solid var(--g1);}
+.item{
+  position:relative;display:block;width:100%;text-align:left;
+  padding:12px 20px 12px 16px;
+  transition:background-color var(--dur-fast) var(--ease-out);
+}
+.item:hover{background:var(--g1);}
+.item::after{ /* 高亮色竖线 */
+  content:"";position:absolute;top:8px;bottom:8px;right:0;width:3px;background:var(--accent);
+}
+.item.hl-item::after{background:var(--ink);}
+.item .kind{font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--g3);display:block;margin-bottom:2px;}
+.item .txt{
+  font-size:13px;line-height:1.55;color:var(--ink);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.item .meta{margin-top:4px;font-size:11px;color:var(--g3);font-variant-numeric:tabular-nums;}
+.empty{padding:24px 16px;font-size:13px;color:var(--g3);}
+
+/* 图谱（静态示意） */
+.graph-wrap{padding:16px;}
+.graph-wrap p{font-size:12px;color:var(--g3);margin-top:8px;}
+
+/* 收起后的重开钮 */
+.sb-reopen{
+  position:fixed;left:8px;top:72px;z-index:40;
+  display:inline-flex;align-items:center;justify-content:center;
+  width:40px;height:40px;border:1px solid var(--g2);background:var(--paper);
+  opacity:0;visibility:hidden;
+  transition:opacity var(--dur) var(--ease-out),background-color var(--dur-fast) var(--ease-out);
+}
+.sb-reopen.show{opacity:1;visibility:visible;}
+.sb-reopen:hover{background:var(--g1);}
+
+/* ---------- 正文 ---------- */
+.main{
+  grid-area:main;overflow-y:auto;position:relative;
+  scroll-padding-top:24px;
+}
+.article{
+  max-width:680px;margin:0 auto;
+  padding:48px 40px 96px;
+}
+.kicker{font-size:12px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:var(--accent);}
+.article h1{font-size:28px;line-height:1.3;font-weight:700;letter-spacing:0.01em;margin:8px 0 32px;}
+.article p{font-size:16px;line-height:1.9;margin-bottom:24px;color:#1c1c1a;}
+.article .lead{font-size:18px;line-height:1.85;color:var(--ink);}
+.article h2{font-size:20px;font-weight:700;margin:40px 0 16px;}
+.article blockquote{
+  margin:24px 0;padding:8px 0 8px 20px;border-left:2px solid var(--accent);
+  font-size:15px;color:var(--g3);
+}
+mark.hl{
+  background:var(--accent-soft);
+  box-shadow:inset 0 -2px 0 var(--accent);
+  color:inherit;padding:1px 2px;
+}
+
+/* ---------- 划选菜单浮层（唯一允许单层阴影的浮层） ---------- */
+.sel-menu{
+  position:absolute;z-index:20;
+  display:flex;align-items:stretch;
+  background:var(--paper);
+  border:1px solid var(--ink);
+  box-shadow:0 4px 16px rgba(10,10,10,0.14);
+  transform-origin:24px 100%;
+  animation:pop-in var(--dur) var(--ease-out) both;
+  animation-delay:420ms;
+}
+@keyframes pop-in{from{opacity:0;transform:translateY(4px) scale(0.96);}to{opacity:1;transform:translateY(0) scale(1);}}
+.sel-menu button{
+  display:inline-flex;align-items:center;gap:6px;
+  min-height:40px;padding:0 12px;
+  font-size:13px;white-space:nowrap;
+  border-right:1px solid var(--g2);
+  transition:background-color var(--dur-fast) var(--ease-out);
+}
+.sel-menu button:last-child{border-right:none;}
+.sel-menu button:hover{background:var(--g1);}
+.sel-menu .ai{color:var(--accent);font-weight:600;}
+.sel-caret{
+  position:absolute;left:20px;bottom:-5px;width:8px;height:8px;
+  background:var(--paper);
+  border-right:1px solid var(--ink);border-bottom:1px solid var(--ink);
+  transform:rotate(45deg);
+}
+
+/* ---------- 右侧竖排工具栏 ---------- */
+.rail{
+  grid-area:rail;
+  border-left:var(--hairline);
+  display:flex;flex-direction:column;align-items:center;
+  padding:8px 0;gap:4px;
+  background:var(--paper);
+}
+.rail .icon-btn{width:48px;height:44px;padding:0;}
+.rail-rule{width:24px;height:1px;background:var(--g2);margin:8px 0;}
+.rail-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:8px;}
+.rail-progress{
+  writing-mode:vertical-rl;
+  font-size:11px;color:var(--g3);letter-spacing:0.08em;
+  font-variant-numeric:tabular-nums;
+}
+
+/* ---------- 入场编排：列表 40ms 逐项错峰（stagger-sequence） ---------- */
+.enter{opacity:0;transform:translateY(12px);animation:rise var(--dur-slow) var(--ease-out) forwards;}
+@keyframes rise{to{opacity:1;transform:translateY(0);}}
+.d1{animation-delay:60ms;}.d2{animation-delay:100ms;}.d3{animation-delay:140ms;}
+.d4{animation-delay:180ms;}.d5{animation-delay:220ms;}.d6{animation-delay:260ms;}
+.d7{animation-delay:300ms;}.d8{animation-delay:340ms;}
+
+/* ---------- 降级：prefers-reduced-motion ---------- */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important;}
+  .enter{opacity:1;transform:none;}
+  .sel-menu{opacity:1;transform:none;}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+<div class="app" id="app">
+
+  <!-- 顶部应用栏 -->
+  <header class="appbar">
+    <button class="icon-btn" type="button">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+      书架
+    </button>
+    <span class="appbar-rule" aria-hidden="true"></span>
+    <div class="book-meta">
+      <b>学习科学：原理与应用</b>
+      <span>第 2 章 · 遗忘曲线与间隔效应</span>
+    </div>
+    <div class="appbar-spacer"></div>
+    <p class="page-info num">第 <b>128</b> / 342 页 · 已读 37%</p>
+  </header>
+
+  <!-- 左侧 280px 全高侧栏 -->
+  <aside class="sidebar" id="sidebar" aria-label="书内导航">
+    <div class="sb-head">
+      <span class="sb-title">书内导航</span>
+      <button class="icon-btn" id="sbToggle" type="button" aria-expanded="true" aria-controls="sidebar" aria-label="收起侧栏">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="0"/><path d="M9 4v16"/></svg>
+      </button>
+    </div>
+
+    <div class="sb-filters">
+      <span class="seg-label">筛选</span>
+      <div class="seg" role="group" aria-label="按类型筛选">
+        <button type="button" data-filter="all" aria-pressed="true">全部</button>
+        <button type="button" data-filter="excerpt" aria-pressed="false">摘录</button>
+        <button type="button" data-filter="highlight" aria-pressed="false">高亮</button>
+      </div>
+      <span class="seg-label">排序</span>
+      <div class="seg" role="group" aria-label="按顺序排序">
+        <button type="button" data-sort="pos" aria-pressed="true">位置</button>
+        <button type="button" data-sort="time" aria-pressed="false">时间</button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="导航页签">
+      <button role="tab" id="tab-toc" aria-selected="true" aria-controls="panel-toc" type="button">目录</button>
+      <button role="tab" id="tab-items" aria-selected="false" aria-controls="panel-items" type="button">摘录</button>
+      <button role="tab" id="tab-graph" aria-selected="false" aria-controls="panel-graph" type="button">图谱</button>
+    </div>
+
+    <div class="sb-body">
+      <section role="tabpanel" id="panel-toc" aria-labelledby="tab-toc" class="active">
+        <ol class="toc">
+          <li><a href="#" class="num"><span class="no">01</span>学习为什么困难</a></li>
+          <li><a href="#" class="num"><span class="no">02</span>遗忘曲线与间隔效应</a></li>
+          <li><a href="#" class="current num" aria-current="page"><span class="no">03</span>提取练习与测试效应</a></li>
+          <li><a href="#" class="num"><span class="no">04</span>交错练习与变式学习</a></li>
+          <li><a href="#" class="num"><span class="no">05</span>精细加工与双重编码</a></li>
+          <li><a href="#" class="num"><span class="no">06</span>动机、情绪与学习环境</a></li>
+          <li><a href="#" class="num"><span class="no">07</span>把原理变成日常习惯</a></li>
+        </ol>
+      </section>
+
+      <section role="tabpanel" id="panel-items" aria-labelledby="tab-items">
+        <ul class="items" id="itemList">
+          <li data-type="excerpt"><button class="item" type="button">
+            <span class="kind">摘录 · 位置 31%</span>
+            <span class="txt">记忆的消退并非内容的擦除，而是提取线索的衰减——重新接触的时机决定了线索能否被重建。</span>
+            <span class="meta num">今天 14:32 · 高亮 3 处 · 笔记 1 条</span>
+          </button></li>
+          <li data-type="highlight"><button class="item hl-item" type="button">
+            <span class="kind">高亮 · 位置 37%</span>
+            <span class="txt">间隔一天后再复习，其长期留存率显著优于当天内的连续重复。</span>
+            <span class="meta num">今天 14:40</span>
+          </button></li>
+          <li data-type="excerpt"><button class="item" type="button">
+            <span class="kind">摘录 · 位置 44%</span>
+            <span class="txt">艾宾浩斯以无意义音节为材料测得：20 分钟后遗忘约 42%，一天后遗忘约 66%。</span>
+            <span class="meta num">昨天 21:05 · 笔记 2 条</span>
+          </button></li>
+          <li data-type="highlight"><button class="item hl-item" type="button">
+            <span class="kind">高亮 · 位置 52%</span>
+            <span class="txt">测试本身就是一次强的学习事件，而非仅仅是对学习的测量。</span>
+            <span class="meta num">昨天 21:18</span>
+          </button></li>
+          <li data-type="excerpt"><button class="item" type="button">
+            <span class="kind">摘录 · 位置 58%</span>
+            <span class="txt">最优间隔并非固定值，它随目标保持期的延长而成比例增长。</span>
+            <span class="meta num">10-02 09:12</span>
+          </button></li>
+          <li data-type="excerpt"><button class="item" type="button">
+            <span class="kind">摘录 · 位置 63%</span>
+            <span class="txt">睡眠在间隔中承担了记忆巩固的角色，剥夺睡眠会抵消间隔效应的大部分收益。</span>
+            <span class="meta num">10-01 22:47</span>
+          </button></li>
+        </ul>
+        <p class="empty" id="filterEmpty" hidden>该筛选下暂无条目。</p>
+      </section>
+
+      <section role="tabpanel" id="panel-graph" aria-labelledby="tab-graph">
+        <div class="graph-wrap">
+          <svg width="220" height="180" viewBox="0 0 220 180" role="img" aria-label="本章概念图谱示意：间隔效应与提取练习为中心节点">
+            <g stroke="#d4d4d2" stroke-width="1">
+              <line x1="110" y1="80" x2="40" y2="30"/><line x1="110" y1="80" x2="180" y2="26"/>
+              <line x1="110" y1="80" x2="34" y2="130"/><line x1="110" y1="80" x2="186" y2="140"/>
+              <line x1="110" y1="80" x2="110" y2="158"/>
+            </g>
+            <g>
+              <circle cx="110" cy="80" r="22" fill="#166a59"/>
+              <circle cx="40" cy="30" r="6" fill="#0a0a0a"/><circle cx="180" cy="26" r="6" fill="#0a0a0a"/>
+              <circle cx="34" cy="130" r="6" fill="#0a0a0a"/><circle cx="186" cy="140" r="6" fill="#0a0a0a"/>
+              <circle cx="110" cy="158" r="6" fill="#0a0a0a"/>
+            </g>
+            <g font-size="10" fill="#737373" font-family="Inter,'Noto Sans SC',sans-serif">
+              <text x="104" y="84" fill="#ffffff" text-anchor="middle">间隔</text>
+              <text x="24" y="18">遗忘曲线</text><text x="164" y="14">提取练习</text>
+              <text x="12" y="150">测试效应</text><text x="168" y="160">交错练习</text>
+              <text x="96" y="176">睡眠巩固</text>
+            </g>
+          </svg>
+          <p>本章 5 个概念 · 12 条连接 · 双击节点跳转原文</p>
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <button class="sb-reopen" id="sbReopen" type="button" aria-label="展开侧栏" aria-controls="sidebar">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="0"/><path d="M15 4v16"/></svg>
+  </button>
+
+  <!-- 正文 -->
+  <main class="main" id="main">
+    <article class="article">
+      <p class="kicker enter d1">第 2 章 · Chapter 02</p>
+      <h1 class="enter d1">遗忘曲线与间隔效应</h1>
+
+      <p class="lead enter d2">如果学习的时间总量相同，把它摊开在数天里完成，几乎总是比集中在一天里更有效。这一结论被称为<b>间隔效应</b>（Spacing Effect），是学习科学中最稳健的发现之一。</p>
+
+      <p class="enter d3">1885 年，艾宾浩斯以自己为被试，用无意义音节测量记忆随时间的衰减，绘制出第一条<b>遗忘曲线</b>：记忆在最初数十分钟内下降最快，随后趋于平缓。但后续研究者发现，遗忘并不等于删除——<mark class="hl" id="hlAnchor">记忆的消退更多是提取线索的衰减，而每一次恰当时机的重新接触，都在重建这些线索</mark>。这正是间隔复习起作用的认知基础。</p>
+
+      <div class="sel-menu" style="left:96px;top:438px;" role="menu" aria-label="划选操作">
+        <button role="menuitem" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="0"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          复制
+        </button>
+        <button role="menuitem" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 21c3-1 5-3 5-6V6a3 3 0 0 1 3-3h2"/><path d="M21 3c-3 1-5 3-5 6v9a3 3 0 0 1-3 3h-2"/></svg>
+          摘录
+        </button>
+        <button role="menuitem" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 20 8-8a3.5 3.5 0 0 0-5-5l-8 8-2 7 7-2Z"/></svg>
+          高亮
+        </button>
+        <button role="menuitem" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          批注
+        </button>
+        <button role="menuitem" class="ai" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4Z"/></svg>
+          AI 制卡
+        </button>
+        <span class="sel-caret" aria-hidden="true"></span>
+      </div>
+
+      <h2 class="enter d4">2.1 间隔如何被度量</h2>
+      <p class="enter d5">间隔效应中的「间隔」通常以<b>保留间隔比</b>（retention interval ratio）来刻画：复习间隔应约为目标保持期的 10%–20%。打算记住一年，就把复习散布在数周到数月之间；只为应付三天后的考试，间隔则应压缩到数小时。</p>
+
+      <blockquote class="enter d5">「重复触达的时机，比重复触达的次数更能预测长期留存。」——Cepeda et al., 2006</blockquote>
+
+      <h2 class="enter d6">2.2 从曲线到调度</h2>
+      <p class="enter d7">现代间隔重复系统（如 FSRS）把遗忘曲线参数化为个人的记忆稳定性函数：每一次成功提取都会提高稳定性，从而拉长下一次的最优间隔。调度器不追求「永不遗忘」，而是在遗忘临界点附近安排提取，使每一次复习都最大化稳定性的增量。</p>
+      <p class="enter d8">理解这一点，你就明白为什么「今天已经复习过、明天又排进来」是低效的：过早的重复不产生提取困难，也就不产生记忆增益——这引出了下一章的主题，测试效应。</p>
+    </article>
+  </main>
+
+  <!-- 右侧竖排工具栏 -->
+  <nav class="rail" aria-label="阅读工具">
+    <button class="icon-btn" type="button" aria-label="上一页">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg>
+    </button>
+    <button class="icon-btn" type="button" aria-label="下一页">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <span class="rail-rule" aria-hidden="true"></span>
+    <button class="icon-btn" type="button" aria-label="阅读设置">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3"/><circle cx="12" cy="4" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="14" cy="20" r="2"/></svg>
+    </button>
+    <button class="icon-btn" type="button" aria-label="更多操作">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+    </button>
+    <div class="rail-bottom">
+      <button class="icon-btn" type="button" aria-label="添加书签">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21 12 16 5 21V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg>
+      </button>
+      <span class="rail-progress num">37% · 128 页</span>
+    </div>
+  </nav>
+</div>
+
+<script>
+(function(){
+  var app=document.getElementById('app');
+  var toggle=document.getElementById('sbToggle');
+  var reopen=document.getElementById('sbReopen');
+  function setCollapsed(c){
+    app.classList.toggle('collapsed',c);
+    toggle.setAttribute('aria-expanded',String(!c));
+    toggle.setAttribute('aria-label',c?'展开侧栏':'收起侧栏');
+    reopen.classList.toggle('show',c);
+  }
+  toggle.addEventListener('click',function(){setCollapsed(!app.classList.contains('collapsed'));});
+  reopen.addEventListener('click',function(){setCollapsed(false);});
+
+  // 筛选段控（aria-pressed 状态与可见标签一致）
+  var filterBtns=document.querySelectorAll('[data-filter]');
+  var listItems=document.querySelectorAll('#itemList > li');
+  var empty=document.getElementById('filterEmpty');
+  filterBtns.forEach(function(btn){
+    btn.addEventListener('click',function(){
+      filterBtns.forEach(function(b){b.setAttribute('aria-pressed',String(b===btn));});
+      var f=btn.dataset.filter,shown=0;
+      listItems.forEach(function(li){
+        var show=(f==='all'||li.dataset.type===f);
+        li.style.display=show?'':'none';
+        if(show)shown++;
+      });
+      empty.hidden=shown>0;
+    });
+  });
+  // 排序段控（示意：位置=文档序，时间=反向）
+  var sortBtns=document.querySelectorAll('[data-sort]');
+  var list=document.getElementById('itemList');
+  sortBtns.forEach(function(btn){
+    btn.addEventListener('click',function(){
+      sortBtns.forEach(function(b){b.setAttribute('aria-pressed',String(b===btn));});
+      var items=Array.prototype.slice.call(list.children);
+      if(btn.dataset.sort==='time'){items.reverse();}
+      items.forEach(function(li){list.appendChild(li);});
+    });
+  });
+  // 页签
+  var tabs=document.querySelectorAll('[role="tab"]');
+  tabs.forEach(function(tab){
+    tab.addEventListener('click',function(){
+      tabs.forEach(function(t){t.setAttribute('aria-selected',String(t===tab));});
+      document.querySelectorAll('[role="tabpanel"]').forEach(function(p){
+        p.classList.toggle('active',p.id===tab.getAttribute('aria-controls'));
+      });
+    });
+  });
+})();
+</script>
+</body>
+</html>

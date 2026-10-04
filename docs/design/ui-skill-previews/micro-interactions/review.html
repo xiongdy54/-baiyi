@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>复习界面（FSRS） · 微交互预览 — 渐进阅读</title>
+<style>
+/* ============ 设计令牌（瑞士国际主义 × micro-interactions skill） ============ */
+:root{
+  --paper:#fafaf8; --ink:#0a0a0a;
+  --gray-1:#f0f0ee; --gray-2:#d4d4d2; --gray-3:#737373;
+  --accent:#166a59; --accent-dark:#3fa08a;
+  --again:#8a3a12; --hard:#7a6210; --good:#166a59; --easy:#1d4f7a;
+  --hair:1px solid var(--gray-2);
+  /* —— 微交互时长/缓动 —— */
+  --t-hover:100ms ease-out;
+  --t-press:100ms ease-out;
+  --t-toggle:200ms cubic-bezier(.34,1.56,.64,1);
+  --t-tip-in:150ms ease-out; --t-tip-out:100ms ease-in;
+  --t-badge:200ms cubic-bezier(.34,1.56,.64,1);
+  --t-flip:520ms cubic-bezier(.34,1.2,.4,1);   /* 3D 翻转：中段加速、末端缓收 */
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:1440px;height:900px;overflow:hidden;}
+body{font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;background:var(--paper);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+.btn-solid{display:inline-flex;align-items:center;gap:8px;padding:10px 26px;background:var(--ink);color:var(--paper);border-radius:2px;font-size:14px;letter-spacing:.5px;transition:transform var(--t-hover),background-color var(--t-hover),box-shadow var(--t-hover);}
+.btn-solid:hover{background:var(--accent);transform:translateY(-1px);box-shadow:0 2px 10px rgba(10,10,10,.2);} /* Anticipation：预告可按 */
+.btn-solid:active{transform:translateY(0) scale(.97);box-shadow:none;transition-duration:var(--t-press);}      /* Squash & Stretch */
+.icon-btn{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:2px;transition:transform var(--t-hover),background-color var(--t-hover),color var(--t-hover);}
+.icon-btn:hover{background:var(--gray-1);color:var(--accent);transform:translateY(-1px);}
+.icon-btn:active{transform:scale(.92);transition-duration:var(--t-press);}
+.icon-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;}
+.tip{position:relative;}
+.tip::after{content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 8px);transform:translateX(-50%) translateY(-4px);background:var(--ink);color:var(--paper);font-size:11px;line-height:1;padding:6px 8px;white-space:nowrap;opacity:0;pointer-events:none;border-radius:2px;z-index:60;transition:opacity var(--t-tip-out),transform var(--t-tip-out);}
+.tip:hover::after{opacity:1;transform:translateX(-50%) translateY(0);transition:opacity var(--t-tip-in),transform var(--t-tip-in);}
+/* ============ 布局 ============ */
+#app{display:grid;grid-template-rows:56px 1fr 128px;height:900px;}
+/* ---- 头带：队列计数（未学习/学习中/待复习），数字 elastic 更新 ---- */
+#headband{display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:var(--hair);}
+#headband .brand{font-size:13px;font-weight:700;letter-spacing:1px;}
+#headband .divider{width:1px;height:22px;background:var(--gray-2);}
+.q{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-3);}
+.q .dot{width:8px;height:8px;border-radius:50%;transition:transform var(--t-toggle);}
+.q .n{font-size:15px;font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums;display:inline-block;min-width:20px;text-align:center;}
+.q.new .dot{background:var(--gray-3);} .q.learn .dot{background:var(--hard);} .q.due .dot{background:var(--accent);}
+.q{cursor:default;transition:color var(--t-hover);}
+.q:hover{color:var(--ink);}
+.q:hover .dot{transform:scale(1.5);} /* Secondary Action：计数点响应 hover */
+.bounce{animation:badgeBounce var(--t-badge) cubic-bezier(.34,1.56,.64,1);}
+@keyframes badgeBounce{0%{transform:scale(1);}40%{transform:scale(1.35);}70%{transform:scale(.92);}100%{transform:scale(1);}}
+#headband .right{margin-left:auto;display:flex;gap:4px;}
+/* ---- 中央复习卡：3D 翻转 ---- */
+#stage{display:flex;align-items:center;justify-content:center;perspective:1400px;position:relative;overflow:hidden;}
+#flip{width:760px;height:460px;position:relative;transform-style:preserve-3d;transition:transform var(--t-flip);}
+#flip.flipped{transform:rotateY(180deg);} /* Arc→rotateY：绕轴翻转，末端 spring 微收 */
+.face{
+  position:absolute;inset:0;backface-visibility:hidden;background:#fff;border:var(--hair);border-radius:2px;
+  padding:48px 56px;display:flex;flex-direction:column;
+}
+.face.back{transform:rotateY(180deg);}
+.face .lab{font-size:11px;letter-spacing:2px;color:var(--gray-3);display:flex;justify-content:space-between;}
+.face .lab .side{color:var(--accent);font-weight:600;}
+.face .qtext{flex:1;display:flex;align-items:center;font-size:26px;line-height:1.7;font-weight:600;text-align:center;}
+.face .atext{flex:1;display:flex;flex-direction:column;justify-content:center;gap:16px;}
+.face .atext .main{font-size:21px;line-height:1.8;}
+.face .atext .main b{color:var(--accent);}
+.face .src-line{font-size:12px;color:var(--gray-3);border-top:var(--hair);padding-top:14px;display:flex;justify-content:space-between;}
+.face .src-line .lk{color:var(--accent);cursor:pointer;position:relative;}
+.face .src-line .lk::after{content:'';position:absolute;left:0;bottom:-2px;width:100%;height:1px;background:var(--accent);transform:scaleX(0);transform-origin:left;transition:transform var(--t-toggle);}
+.face .src-line .lk:hover::after{transform:scaleX(1);}
+/* 揭示答案瞬间：答案区高亮扫过（Staging：注意力引向答案） */
+.face.back .atext{animation:sweep 600ms ease-out;}
+@keyframes sweep{0%{opacity:0;transform:translateY(10px);}60%{opacity:1;transform:none;}100%{opacity:1;}}
+/* 评分后卡片退场（满足感：向评分方向滑出 + 轻微旋转） */
+@keyframes cardAway{
+  0%{opacity:1;}
+  100%{opacity:0;transform:translateX(var(--ax,320px)) rotate(var(--ar,2deg)) scale(.97);}
+}
+.away{animation:cardAway 260ms ease-in forwards;}
+/* 键位提示 kbd */
+kbd{font-family:Consolas,monospace;font-size:10px;border:var(--hair);border-radius:2px;padding:1px 5px;color:var(--gray-3);background:var(--gray-1);}
+/* ---- 底栏 128px ---- */
+#bottombar{border-top:var(--hair);display:flex;flex-direction:column;justify-content:center;padding:0 64px;gap:10px;}
+#barTop{display:flex;align-items:center;justify-content:center;}
+#grades{display:none;gap:12px;justify-content:center;}
+#grades.show{display:flex;animation:gradeIn 220ms cubic-bezier(.34,1.56,.64,1);}
+@keyframes gradeIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+.grade{
+  min-width:128px;padding:10px 14px;border:var(--hair);border-radius:2px;background:#fff;
+  display:flex;flex-direction:column;align-items:center;gap:3px;position:relative;overflow:hidden;
+  transition:transform var(--t-hover),border-color var(--t-hover),background-color var(--t-hover),box-shadow var(--t-hover);
+}
+.grade:hover{transform:translateY(-2px);box-shadow:0 3px 10px rgba(10,10,10,.12);} /* Anticipation */
+.grade:active{transform:translateY(0) scale(.96);transition-duration:var(--t-press);}
+.grade .name{font-size:13px;font-weight:600;transition:color var(--t-hover);}
+.grade .iv{font-size:11px;color:var(--gray-3);font-variant-numeric:tabular-nums;}
+.grade:hover .iv{color:var(--ink);}
+.grade.kb{position:absolute;right:6px;top:6px;}
+/* 各档 hover 主色化（Secondary Action：文字随容器状态变色） */
+.grade.again:hover{border-color:var(--again);} .grade.again:hover .name{color:var(--again);}
+.grade.hard:hover{border-color:var(--hard);}  .grade.hard:hover .name{color:var(--hard);}
+.grade.good:hover{border-color:var(--good);}  .grade.good:hover .name{color:var(--good);}
+.grade.easy:hover{border-color:var(--easy);}  .grade.easy:hover .name{color:var(--easy);}
+/* 评分点击满足感：色块波从按钮中心扩散（Follow Through） */
+@keyframes gradeWave{from{opacity:.3;transform:scale(0);}to{opacity:0;transform:scale(3);}}
+.grade .wave{position:absolute;inset:0;margin:auto;width:40px;height:40px;border-radius:50%;pointer-events:none;animation:gradeWave 450ms ease-out forwards;}
+/* 评分后按钮成功勾：对勾描边动画（pose to pose：填充后勾延迟画入） */
+.grade .chk{width:16px;height:16px;display:none;}
+.grade.done .chk{display:block;}
+.grade .chk path{stroke:currentColor;fill:none;stroke-width:2.4;stroke-dasharray:20;stroke-dashoffset:20;animation:draw 200ms ease-out 50ms forwards;} /* 勾延迟50ms画入 */
+@keyframes draw{to{stroke-dashoffset:0;}}
+.grade.again.done{color:var(--again);border-color:var(--again);background:#faf3ee;}
+.grade.hard.done{color:var(--hard);border-color:var(--hard);background:#faf7ea;}
+.grade.good.done{color:var(--good);border-color:var(--good);background:#eef5f3;}
+.grade.easy.done{color:var(--easy);border-color:var(--easy);background:#edf3f8;}
+/* ============ 动效说明浮层 ============ */
+#legend{position:fixed;right:24px;top:72px;width:268px;background:#fff;border:var(--hair);box-shadow:0 4px 16px rgba(10,10,10,.12);z-index:80;border-radius:2px;overflow:hidden;}
+#legend header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--ink);color:var(--paper);font-size:11px;letter-spacing:1px;cursor:pointer;transition:background-color var(--t-hover);}
+#legend header:hover{background:var(--accent);}
+#legend .body{padding:10px 12px;font-size:11px;line-height:1.7;max-height:300px;overflow:auto;transition:max-height var(--t-panel,240ms) cubic-bezier(.22,1,.36,1),padding 240ms,opacity 150ms ease-out;}
+#legend.folded .body{max-height:0;padding-top:0;padding-bottom:0;opacity:0;}
+#legend .k{color:var(--accent);font-weight:600;}
+#legend ul{list-style:none;}
+#legend li{display:flex;justify-content:space-between;gap:8px;}
+#legend li span:first-child{color:var(--gray-3);}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{transition-duration:1ms!important;animation-duration:1ms!important;animation-iteration-count:1!important;}
+  #flip{transition:none;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 头带：队列计数 -->
+  <header id="headband">
+    <span class="brand">复习 · FSRS</span>
+    <div class="divider"></div>
+    <span class="q new">未学习 <span class="n" id="nNew">3</span><span class="dot"></span></span>
+    <span class="q learn">学习中 <span class="n" id="nLearn">1</span><span class="dot"></span></span>
+    <span class="q due">待复习 <span class="n" id="nDue">12</span><span class="dot"></span></span>
+    <div class="right">
+      <button class="icon-btn tip" data-tip="撤销上一次评分"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
+      <button class="icon-btn tip" data-tip="更多"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button>
+    </div>
+  </header>
+
+  <!-- 中央复习卡 -->
+  <main id="stage">
+    <div id="flip">
+      <!-- 正面：问题 -->
+      <section class="face front">
+        <div class="lab"><span>问题 QUESTION</span><span class="side">FSRS · 第 4 次复习 · 记忆状态 R 72%</span></div>
+        <div class="qtext">为什么"合意困难"（desirable difficulty）能增强长期记忆，而轻松流畅的重读反而不能？</div>
+        <div class="src-line">
+          <span>来源：<span class="lk">学习科学 › 第2章 › 2.2 提取练习（P.49）</span></span>
+          <span>按 <kbd>空格</kbd> 显示答案</span>
+        </div>
+      </section>
+      <!-- 背面：答案 -->
+      <section class="face back">
+        <div class="lab"><span>答案 ANSWER</span><span class="side">点击下方评分按钮完成本次复习</span></div>
+        <div class="atext">
+          <div class="main">提取的<b>费力程度</b>与巩固收益正相关：费力但成功的回忆迫使记忆痕迹在部分遗忘后<b>重建</b>，形成更抗干扰的编码。</div>
+          <div class="main" style="font-size:15px;color:var(--gray-3);line-height:1.7">流畅的重读只提供"熟悉感"，没有触发重建，因此即时感觉良好、长期保持很差——这正是重读比提取练习效果差的原因。</div>
+        </div>
+        <div class="src-line">
+          <span>关联卡片：<span class="lk">测试效应（P.48）</span> · <span class="lk">间隔效应（P.51）</span></span>
+          <span>按 <kbd>1</kbd>–<kbd>4</kbd> 评分</span>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- 底栏 -->
+  <footer id="bottombar">
+    <div id="barTop">
+      <button class="btn-solid" id="revealBtn">显示答案<span style="opacity:.6">空格</span></button>
+      <div id="grades">
+        <button class="grade again tip" data-tip="评分 1" data-ax="-340px" data-ar="-3deg">
+          <svg class="chk" viewBox="0 0 20 20"><path d="M4 11l4 4 8-9"/></svg>
+          <span class="name">重来</span><span class="iv">10分</span><span class="kb"><kbd>1</kbd></span>
+        </button>
+        <button class="grade hard tip" data-tip="评分 2" data-ax="-120px" data-ar="-1deg">
+          <svg class="chk" viewBox="0 0 20 20"><path d="M4 11l4 4 8-9"/></svg>
+          <span class="name">困难</span><span class="iv">1天</span><span class="kb"><kbd>2</kbd></span>
+        </button>
+        <button class="grade good tip" data-tip="评分 3" data-ax="120px" data-ar="1deg">
+          <svg class="chk" viewBox="0 0 20 20"><path d="M4 11l4 4 8-9"/></svg>
+          <span class="name">良好</span><span class="iv">3天</span><span class="kb"><kbd>3</kbd></span>
+        </button>
+        <button class="grade easy tip" data-tip="评分 4" data-ax="340px" data-ar="3deg">
+          <svg class="chk" viewBox="0 0 20 20"><path d="M4 11l4 4 8-9"/></svg>
+          <span class="name">简单</span><span class="iv">8天</span><span class="kb"><kbd>4</kbd></span>
+        </button>
+      </div>
+    </div>
+    <div style="text-align:center;font-size:11px;color:var(--gray-3)">预计间隔由 FSRS 调度器根据记忆状态实时计算 · 评分即落盘</div>
+  </footer>
+</div>
+
+<!-- 动效说明浮层 -->
+<aside id="legend">
+  <header id="legendHead"><span>动效说明 · REVIEW</span><span id="legendArrow">▾</span></header>
+  <div class="body">
+    <ul>
+      <li><span>卡片 3D 翻转</span><b>520ms <span class="k">cubic(.34,1.2,.4,1)</span></b></li>
+      <li><span>答案揭示</span><b>600ms ease-out 上浮扫入</b></li>
+      <li><span>评分组弹出</span><b>220ms spring 上移入</b></li>
+      <li><span>评分按钮 hover</span><b>100ms ease-out 上移2px</b></li>
+      <li><span>按压 squash</span><b>100ms · scale 0.96</b></li>
+      <li><span>评分满足感</span><b>波纹450ms + 勾200ms延迟50ms</b></li>
+      <li><span>卡片退场</span><b>260ms ease-in 随档位定向</b></li>
+      <li><span>队列计数</span><b>200ms <span class="k">elastic</span> bounce</b></li>
+      <li><span>tooltip</span><b>进150 / 出100ms</b></li>
+    </ul>
+    <p style="margin-top:8px;color:var(--gray-3)">已含 prefers-reduced-motion 降级。</p>
+  </div>
+</aside>
+
+<script>
+/* ---------- 元素 ---------- */
+const flip=document.getElementById('flip'),revealBtn=document.getElementById('revealBtn'),
+      grades=document.getElementById('grades'),stage=document.getElementById('stage');
+const counters={new:document.getElementById('nNew'),learn:document.getElementById('nLearn'),due:document.getElementById('nDue')};
+function bump(el,val){
+  if(val!==undefined)el.textContent=val;
+  el.classList.remove('bounce');void el.offsetWidth;el.classList.add('bounce');
+}
+/* ---------- 显示答案：3D 翻转 ---------- */
+function reveal(){
+  if(flip.classList.contains('flipped'))return;
+  flip.classList.add('flipped');
+  revealBtn.style.display='none';
+  grades.classList.add('show');
+  /* 重新触发背面答案扫入动画（重新插入背面节点） */
+  const back=flip.querySelector('.face.back'),clone=back.cloneNode(true);
+  back.replaceWith(clone);
+}
+revealBtn.addEventListener('click',reveal);
+document.addEventListener('keydown',e=>{
+  if(e.code==='Space'){e.preventDefault();reveal();}
+});
+/* ---------- 评分：波纹 + 对勾 + 定向退场 + 计数 elastic ---------- */
+const ivMap={again:['10分','new'],hard:['1天','learn'],good:['3天','due'],easy:['8天','due']};
+const colorMap={again:'#8a3a12',hard:'#7a6210',good:'#166a59',easy:'#1d4f7a'};
+let busy=false;
+grades.querySelectorAll('.grade').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    if(busy)return;busy=true;
+    const k=[...btn.classList].find(c=>ivMap[c]);
+    /* 波纹（Follow Through：从按钮中心扩散） */
+    const w=document.createElement('span');w.className='wave';w.style.background=colorMap[k];
+    btn.appendChild(w);setTimeout(()=>w.remove(),500);
+    /* 成功态：对勾延迟描边 */
+    btn.classList.add('done');
+    /* 队列计数更新（elastic bounce）：重来→未学习+1，其余→待复习+1 */
+    const[,target]=ivMap[k];
+    if(k==='again'){bump(counters.new,+counters.new.textContent+1);}
+    else{bump(counters.due,+counters.due.textContent+1);}
+    /* 卡片按档位方向退场 → 重置进入下一张演示 */
+    setTimeout(()=>{
+      flip.style.setProperty('--ax',btn.dataset.ax);flip.style.setProperty('--ar',btn.dataset.ar);
+      flip.classList.add('away');
+    },350);
+    setTimeout(()=>{
+      flip.classList.remove('away','flipped');
+      btn.classList.remove('done');
+      grades.classList.remove('show');
+      revealBtn.style.display='';
+      /* 正面问题换一张（演示轮换） */
+      flip.querySelector('.qtext').textContent=DEMO_Q[(qi=(qi+1)%DEMO_Q.length)];
+      busy=false;
+    },1150);
+  });
+});
+const DEMO_Q=[
+  '为什么"合意困难"（desirable difficulty）能增强长期记忆，而轻松流畅的重读反而不能？',
+  '测试效应的经典实验（Roediger & Karpicke, 2006）中，测试组与重读组在学习条件上有什么关键差异？',
+  '间隔效应告诉我们：相同总学习时长应如何分配，才能获得更长的保持期？'
+];
+let qi=0;
+/* ---------- 图例折叠 ---------- */
+const lg=document.getElementById('legend');
+document.getElementById('legendHead').addEventListener('click',()=>{lg.classList.toggle('folded');document.getElementById('legendArrow').textContent=lg.classList.contains('folded')?'▸':'▾';});
+</script>
+</body>
+</html>

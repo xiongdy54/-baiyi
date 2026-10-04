@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>复习界面（FSRS） · Design It Twice 概念对比</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#e3e3df}
+body{font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;color:#0a0a0a;-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+
+.switcher{position:fixed;top:0;left:0;right:0;height:44px;background:#0a0a0a;color:#fafaf8;display:flex;align-items:center;gap:8px;padding:0 16px;z-index:999}
+.switcher .ttl{font-size:11px;letter-spacing:.12em;color:#8a8a88;margin-right:8px}
+.switcher button{display:flex;align-items:center;gap:7px;height:28px;padding:0 12px;font-size:12px;color:#c9c9c6;border:1px solid #3a3a38;transition:all .2s}
+.switcher button:hover{color:#fff;border-color:#777}
+.switcher button.active{background:#fafaf8;color:#0a0a0a;border-color:#fafaf8}
+.switcher .rec{font-size:10px;line-height:1;padding:2px 5px;background:#166a59;color:#fff;font-style:normal}
+.switcher .hint{margin-left:auto;font-size:11px;color:#8a8a88}
+
+.cA{--paper:#fafaf8;--ink:#0a0a0a;--p1:#f0f0ee;--line:#d4d4d2;--mut:#737373;--acc:#166a59;--card:#fff}
+.cB{--paper:#f7f2e9;--ink:#1c1917;--p1:#efe7d7;--line:#d9cfba;--mut:#8a7e69;--acc:#9a3b12;--card:#fffdf7;font-family:Georgia,"Noto Serif SC","Songti SC",SimSun,serif}
+.cC{--paper:#121212;--ink:#eaeae8;--p1:#1b1b19;--line:#2c2c2a;--mut:#98988f;--acc:#3ecf9f;--card:#191917}
+
+.concept{display:none}
+.concept.active{display:block;animation:pageIn .45s ease both}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.app{width:1440px;height:900px;margin:44px auto 48px;background:var(--paper);color:var(--ink);position:relative;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.18)}
+.cnote{position:absolute;left:12px;bottom:12px;z-index:60;font-size:11px;color:var(--mut);background:var(--card);border:1px solid var(--line);padding:5px 10px;max-width:620px;line-height:1.5;pointer-events:none}
+.cnote b{color:var(--acc)}
+
+/* ---- 队列计数 ---- */
+.qbar{display:flex;gap:20px;font-size:12px;color:var(--mut);align-items:center}
+.qbar .qc{display:flex;align-items:center;gap:6px}
+.qbar .dot{width:8px;height:8px;flex:none}
+.dot.n{background:#c9a227}.dot.l{background:#3b6ea5}.dot.r{background:var(--acc)}
+.qbar b{font-variant-numeric:tabular-nums;color:var(--ink);font-size:13px}
+
+/* ============ 概念 A：居中翻转卡 ============ */
+.cA .app{display:flex;flex-direction:column}
+.cA .top{height:52px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 24px;gap:24px;flex:none;animation:rise .4s ease both}
+.cA .top .bk{font-size:12px;color:var(--mut)}
+.cA .top .qbar{margin-left:auto}
+.cA .top .prog{position:absolute;left:0;top:49px;height:3px;width:100%;background:var(--p1)}
+.cA .top .prog i{display:block;height:100%;width:38%;background:var(--acc);transition:width .4s}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.cA .stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:36px;padding:24px}
+.cA .flip{width:760px;height:400px;perspective:1600px;animation:rise .5s .08s ease both}
+.cA .flipinner{position:relative;width:100%;height:100%;transform-style:preserve-3d;transition:transform .6s cubic-bezier(.3,.8,.3,1)}
+.cA .flip.flipped .flipinner{transform:rotateY(180deg)}
+.cA .face{position:absolute;inset:0;backface-visibility:hidden;background:var(--card);border:1px solid var(--line);border-top:4px solid var(--acc);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px;text-align:center}
+.cA .face.back{transform:rotateY(180deg);border-top-color:#3b6ea5}
+.cA .kicker{font-size:11px;letter-spacing:.25em;color:var(--mut);position:absolute;top:20px;left:0;right:0}
+.cA .front .q{font-size:24px;line-height:1.85;font-weight:600;max-width:600px}
+.cA .back .q{font-size:20px;line-height:1.95;max-width:600px}
+.cA .back .src{position:absolute;bottom:20px;left:0;right:0;font-size:11px;color:var(--mut)}
+.cA .showbtn{height:52px;padding:0 56px;background:var(--ink);color:var(--paper);font-size:15px;font-weight:600;letter-spacing:.06em;transition:background .2s,transform .15s;animation:rise .5s .15s ease both}
+.cA .showbtn:hover{background:var(--acc);transform:translateY(-2px)}
+.cA .grades{display:flex;gap:12px;animation:rise .4s .05s ease both}
+.cA .grades.locked{display:none}
+.cA .gr{width:170px;height:76px;border:1px solid var(--line);background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;transition:all .18s}
+.cA .gr:hover{transform:translateY(-3px);border-color:var(--ink)}
+.cA .gr .nm{font-size:15px;font-weight:600}
+.cA .gr .iv{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.cA .gr.again:hover{border-color:#b0431f;color:#b0431f}
+.cA .gr.hard:hover{border-color:#c9a227;color:#8a6d00}
+.cA .gr.good:hover{border-color:var(--acc);color:var(--acc)}
+.cA .gr.easy:hover{border-color:#3b6ea5;color:#3b6ea5}
+
+/* ============ 概念 B：左右分屏对照 ============ */
+.cB .app{display:flex;flex-direction:column}
+.cB .top{height:52px;border-bottom:2px solid var(--ink);display:flex;align-items:center;padding:0 24px;flex:none}
+.cB .top .bk{font-size:13px;font-weight:700}
+.cB .top .qbar{margin-left:auto;font-size:12px;color:var(--mut)}
+.cB .top .qbar b{color:var(--ink)}
+.cB .main{flex:1;display:grid;grid-template-columns:120px 1fr 1fr 200px;min-height:0}
+.cB .queue{border-right:2px solid var(--ink);background:var(--p1);display:flex;flex-direction:column;padding:20px 0;gap:2px}
+.cB .queue .qi{padding:14px 18px;border-left:4px solid transparent;transition:all .15s}
+.cB .queue .qi .n{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums}
+.cB .queue .qi .t{font-size:11px;color:var(--mut);letter-spacing:.1em}
+.cB .queue .qi.cur{border-left-color:var(--acc);background:var(--card)}
+.cB .col{display:flex;flex-direction:column;justify-content:center;padding:56px 52px;min-height:0;animation:rise .5s .05s ease both}
+.cB .col.q{border-right:1px solid var(--line)}
+.cB .col .lbl{font-size:11px;letter-spacing:.25em;color:var(--mut);margin-bottom:18px}
+.cB .col .txt{font-size:21px;line-height:2;font-weight:600}
+.cB .col.a{background:var(--p1)}
+.cB .col .txt2{font-size:17px;line-height:2;color:#3d382f}
+.cB .col .src{margin-top:28px;font-size:12px;color:var(--mut);border-top:1px dashed var(--line);padding-top:14px}
+.cB .col.a .veil{filter:blur(7px);opacity:.55;transition:filter .5s,opacity .5s;user-select:none;pointer-events:none}
+.cB .col.a.revealed .veil{filter:none;opacity:1}
+.cB .act{border-left:2px solid var(--ink);display:flex;flex-direction:column;justify-content:center;gap:10px;padding:24px 18px;animation:rise .5s .1s ease both}
+.cB .reveal{height:48px;background:var(--ink);color:var(--paper);font-size:14px;font-weight:600;transition:background .2s}
+.cB .reveal:hover{background:var(--acc)}
+.cB .act .grades{display:flex;flex-direction:column;gap:10px}
+.cB .act .grades.hidden{display:none}
+.cB .gr{height:64px;border:1px solid var(--line);background:var(--card);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:all .15s}
+.cB .gr:hover{border-color:var(--ink);transform:translateX(-4px)}
+.cB .gr .nm{font-size:14px;font-weight:600}
+.cB .gr .iv{font-size:11px;color:var(--mut)}
+.cB .gr.again:hover{border-color:#b0431f;color:#b0431f}
+.cB .gr.good:hover{border-color:var(--acc);color:var(--acc)}
+.cB .kbd{font-size:10px;color:var(--mut);letter-spacing:.05em;text-align:center}
+
+/* ============ 概念 C：暗色专注舱 · 四分区评分 ============ */
+.cC .app{display:flex;flex-direction:column}
+.cC .top{height:52px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 24px;flex:none}
+.cC .top .bk{font-size:12px;color:var(--mut)}
+.cC .top .qbar{margin-left:auto}
+.cC .top .qbar b{color:var(--ink)}
+.cC .stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:44px;padding:32px 0;animation:rise .5s .05s ease both}
+.cC .deck{max-width:860px;width:100%;min-height:280px;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 48px}
+.cC .deck .q{font-size:27px;line-height:1.9;font-weight:600}
+.cC .deck .a{font-size:20px;line-height:2;color:#c9c9c4;display:none}
+.cC .deck .a .hl{color:var(--acc)}
+.cC .deck .src{font-size:11px;color:var(--mut);margin-top:22px;letter-spacing:.1em}
+.cC.revealed .deck .q{display:none}
+.cC.revealed .deck .a{display:block;animation:aIn .45s ease both}
+@keyframes aIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.cC .show{height:52px;padding:0 64px;border:1px solid var(--acc);color:var(--acc);font-size:15px;font-weight:600;letter-spacing:.2em;transition:all .2s}
+.cC .show:hover{background:var(--acc);color:#0a0a0a;box-shadow:0 0 32px rgba(62,207,159,.3)}
+.cC.revealed .show{display:none}
+.cC .keys{display:grid;grid-template-columns:repeat(4,1fr);width:1440px;height:150px;border-top:1px solid var(--line);flex:none}
+.cC .key{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;transition:background .15s;border-right:1px solid var(--line);animation:riseUp .4s ease both}
+.cC .key:last-child{border-right:none}
+@keyframes riseUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
+.cC .key .nm{font-size:19px;font-weight:700;color:#eaeae8}
+.cC .key .iv{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.cC .key.again{background:rgba(176,67,31,.14)} .cC .key.again .nm{color:#e06a45} .cC .key.again:hover{background:rgba(176,67,31,.32)}
+.cC .key.hard{background:rgba(201,162,39,.10)} .cC .key.hard .nm{color:#d4b04a} .cC .key.hard:hover{background:rgba(201,162,39,.24)}
+.cC .key.good{background:rgba(62,207,159,.10)} .cC .key.good .nm{color:var(--acc)} .cC .key.good:hover{background:rgba(62,207,159,.26)}
+.cC .key.easy{background:rgba(59,110,165,.12)} .cC .key.easy .nm{color:#6a9cd4} .cC .key.easy:hover{background:rgba(59,110,165,.28)}
+.cC .key .kbd{font-size:10px;color:#66665f;border:1px solid #333;padding:1px 6px}
+
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="switcher">
+  <span class="ttl">DESIGN IT TWICE · 复习界面（FSRS）</span>
+  <button data-c="cA" class="active">A · 居中翻转卡 <em class="rec">推荐</em></button>
+  <button data-c="cB">B · 左右分屏对照</button>
+  <button data-c="cC">C · 暗色专注舱 · 四分区评分</button>
+  <span class="hint">点击切换概念对比</span>
+</div>
+
+<!-- ================= 概念 A：居中翻转卡 ================= -->
+<section class="concept cA active">
+  <div class="app">
+    <header class="top">
+      <span class="bk">今日复习 · 2026年10月4日</span>
+      <span style="font-size:12px;color:var(--mut)">剩余 39 张 · 预计 18 分钟</span>
+      <div class="qbar">
+        <span class="qc"><span class="dot n"></span>未学习 <b>12</b></span>
+        <span class="qc"><span class="dot l"></span>学习中 <b>4</b></span>
+        <span class="qc"><span class="dot r"></span>待复习 <b>27</b></span>
+      </div>
+      <div class="prog"><i></i></div>
+    </header>
+    <div class="stage">
+      <div class="flip" id="flipA">
+        <div class="flipinner">
+          <div class="face front">
+            <span class="kicker">问题 · 《学习科学》第2章</span>
+            <p class="q">「提取练习效应」是由哪两位研究者在哪一年的经典实验中系统验证的？其实验设计的关键变量是什么？</p>
+          </div>
+          <div class="face back">
+            <span class="kicker">答案</span>
+            <p class="q">Roediger 与 Karpicke（2006）。被试分两组：重复阅读组 vs 提取练习组（free recall），学习时间对等；一周后测验中提取组保持率高约 50%。关键变量＝<b>学习后的活动类型</b>，而非学习时长。</p>
+            <span class="src">摘自：适度的遗忘恰恰为提取制造了必要的难度 · 第47页</span>
+          </div>
+        </div>
+      </div>
+      <button class="showbtn" id="showA">显示答案</button>
+      <div class="grades locked" id="gradesA">
+        <button class="gr again"><span class="nm">重来</span><span class="iv">&lt; 10 分</span></button>
+        <button class="gr hard"><span class="nm">困难</span><span class="iv">1 天</span></button>
+        <button class="gr good"><span class="nm">良好</span><span class="iv">3 天</span></button>
+        <button class="gr easy"><span class="nm">简单</span><span class="iv">8 天</span></button>
+      </div>
+    </div>
+    <div class="cnote"><b>概念 A · 居中翻转卡</b>——一张 3D 翻转卡 + 顶部队列细条；评分前只给一个「显示答案」按钮，翻转后四档评分展开，操作随认知阶段推进而出现，最不易误触、最贴近 FSRS 主流程。</div>
+  </div>
+</section>
+
+<!-- ================= 概念 B：左右分屏对照 ================= -->
+<section class="concept cB">
+  <div class="app">
+    <header class="top">
+      <span class="bk">今日复习</span>
+      <div class="qbar">
+        未学习 <b>12</b>　·　学习中 <b>4</b>　·　待复习 <b>27</b>
+      </div>
+    </header>
+    <div class="main">
+      <aside class="queue">
+        <div class="qi"><span class="n">12</span><span class="t">未学习</span></div>
+        <div class="qi"><span class="n">4</span><span class="t">学习中</span></div>
+        <div class="qi cur"><span class="n">27</span><span class="t">待复习</span></div>
+        <div style="margin-top:auto;padding:16px 18px;font-size:11px;color:var(--mut);line-height:1.7">FSRS 调度由<br>review_logs 驱动<br>评分仅是请求</div>
+      </aside>
+      <div class="col q">
+        <span class="lbl">问题 QUESTION</span>
+        <p class="txt">「提取练习效应」是由哪两位研究者在哪一年的经典实验中系统验证的？其实验设计的关键变量是什么？</p>
+        <div class="src">《学习科学》第2章 · 第47页 · 关联摘录 2 条</div>
+      </div>
+      <div class="col a" id="ansB">
+        <span class="lbl">答案 ANSWER</span>
+        <div class="veil">
+          <p class="txt2">Roediger 与 Karpicke（2006）。被试分两组：重复阅读组 vs 提取练习组（free recall），学习时间对等；一周后测验中提取组保持率高约 50%。关键变量＝学习后的活动类型，而非学习时长。</p>
+          <div class="src">摘自：适度的遗忘恰恰为提取制造了必要的难度 · 第47页</div>
+        </div>
+      </div>
+      <nav class="act">
+        <button class="reveal" id="revealB">显示答案</button>
+        <div class="grades hidden" id="gradesB">
+          <button class="gr again"><span class="nm">重来</span><span class="iv">10 分</span></button>
+          <button class="gr hard"><span class="nm">困难</span><span class="iv">1 天</span></button>
+          <button class="gr good"><span class="nm">良好</span><span class="iv">3 天</span></button>
+          <button class="gr easy"><span class="nm">简单</span><span class="iv">8 天</span></button>
+          <span class="kbd">键盘 1 · 2 · 3 · 4</span>
+        </div>
+      </nav>
+    </div>
+    <div class="cnote" style="color:var(--mut)"><b>概念 B · 左右分屏对照</b>——问题与答案同屏分栏、答案先以模糊帷幕遮蔽；队列为左缘竖栏、评分竖排右栏，一条视线内完成「问—答—评」，无翻转、上下文永不消失。</div>
+  </div>
+</section>
+
+<!-- ================= 概念 C：暗色专注舱 ================= -->
+<section class="concept cC">
+  <div class="app">
+    <header class="top">
+      <span class="bk">今日复习 · 剩余 39 张</span>
+      <div class="qbar">
+        <span class="qc"><span class="dot n"></span>未学习 <b>12</b></span>
+        <span class="qc"><span class="dot l"></span>学习中 <b>4</b></span>
+        <span class="qc"><span class="dot r"></span>待复习 <b>27</b></span>
+      </div>
+    </header>
+    <div class="stage">
+      <div class="deck">
+        <p class="q">「提取练习效应」是由哪两位研究者在哪一年的经典实验中系统验证的？其实验设计的关键变量是什么？</p>
+        <div class="a">
+          Roediger 与 Karpicke（2006）。重复阅读组 vs 提取练习组（free recall），学习时间对等；<span class="hl">一周后提取组保持率高约 50%</span>。关键变量＝学习后的活动类型，而非学习时长。<br>
+          <span class="src">摘自《学习科学》第2章 · 第47页</span>
+        </div>
+      </div>
+      <button class="show" id="showC">显 示 答 案</button>
+    </div>
+    <div class="keys">
+      <button class="key again" style="animation-delay:.02s"><span class="nm">重来</span><span class="iv">10 分</span><span class="kbd">1</span></button>
+      <button class="key hard" style="animation-delay:.06s"><span class="nm">困难</span><span class="iv">1 天</span><span class="kbd">2</span></button>
+      <button class="key good" style="animation-delay:.1s"><span class="nm">良好</span><span class="iv">3 天</span><span class="kbd">3</span></button>
+      <button class="key easy" style="animation-delay:.14s"><span class="nm">简单</span><span class="iv">8 天</span><span class="kbd">4</span></button>
+    </div>
+    <div class="cnote" style="background:#191917"><b>概念 C · 暗色专注舱 · 四分区评分</b>——问题即界面、无卡片容器，评分是贴底的四个全宽「琴键」分区，常驻可见、大色块可盲击（键盘 1–4），为长时间高速批量复习而生。</div>
+  </div>
+</section>
+
+<script>
+/* 概念切换 */
+const btns=document.querySelectorAll('.switcher button');
+btns.forEach(b=>b.addEventListener('click',()=>{
+  btns.forEach(x=>x.classList.toggle('active',x===b));
+  document.querySelectorAll('.concept').forEach(s=>s.classList.remove('active'));
+  document.querySelector('.'+b.dataset.c).classList.add('active');
+}));
+
+/* 概念 A：3D 翻转 */
+const flipA=document.getElementById('flipA');
+document.getElementById('showA').addEventListener('click',()=>{
+  flipA.classList.add('flipped');
+  document.getElementById('showA').style.display='none';
+  document.getElementById('gradesA').classList.remove('locked');
+});
+/* 概念 A：评分后模拟进入下一张 */
+document.querySelectorAll('#gradesA .gr').forEach(g=>g.addEventListener('click',()=>{
+  flipA.classList.remove('flipped');
+  document.getElementById('showA').style.display='';
+  document.getElementById('gradesA').classList.add('locked');
+  document.querySelector('.cA .face.front .q').textContent='「必要难度」理论对设计复习系统（如 FSRS 调度）有什么核心启示？';
+  document.querySelector('.cA .face.back .q').innerHTML='复习应当安排在<b>快要遗忘但尚未遗忘</b>的时机，让每次复习都是一次有难度的提取尝试；FSRS 按记忆稳定性动态拉长间隔，正是把「适度遗忘」参数化。';
+  document.querySelector('.cA .top .prog i').style.width='41%';
+}));
+
+/* 概念 B：揭示答案 */
+document.getElementById('revealB').addEventListener('click',()=>{
+  document.getElementById('ansB').classList.add('revealed');
+  document.getElementById('revealB').style.display='none';
+  document.getElementById('gradesB').classList.remove('hidden');
+});
+
+/* 概念 C：揭示答案 */
+document.getElementById('showC').addEventListener('click',()=>{
+  document.body.classList.add('revealed');
+});
+document.querySelectorAll('.cC .key').forEach(k=>k.addEventListener('click',()=>{
+  document.body.classList.remove('revealed');
+  document.querySelector('.cC .deck .q').textContent='间隔重复算法中，FSRS 与固定间隔（如 Leitner 盒）的本质区别是什么？';
+  document.querySelector('.cC .deck .a').innerHTML='FSRS 为每张卡片维护<span class="hl">可遗忘概率的三参数模型</span>（难度、稳定性、可提取性），按目标保持率动态求解下一次复习时间；固定间隔不建模遗忘，复习时机与记忆状态脱节。<br><span class="src">摘自《学习科学》第3章 · 第71页</span>';
+}));
+</script>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>复习界面（FSRS） · buttons-ctas 设计预览</title>
+<style>
+/* ============================================================
+   设计系统：瑞士国际主义 × buttons-ctas 动效原则
+   本页是评分按钮（CTA 主战场）的 12 原则演示：
+   1 Squash&Stretch  → :active scale(0.95)
+   2 Anticipation    → :hover 预抬升 + 色点放大预告
+   3 Staging         → 「良好」为推荐档：填充主色、加宽、字号更大
+   4 Pose to Pose    → front(显示答案) / back(四档评分) 两套关键姿态
+   5 Follow Through  → 间隔标签 30ms 滞后于按钮体浮起
+   6 Ease            → cubic-bezier(.4,0,.2,1) 全局
+   8 Secondary       → 底缘强调条 + 快捷键提示随动
+   9 Timing          → hover 160ms / active 60ms / 翻卡 500ms
+   10 Exaggeration   → 评分点击 settle(1.05) → 卡片飞出 → 下一张入场
+   12 Appeal         → 直角按钮 = 调度器的严肃与可信
+   ============================================================ */
+:root{
+  --paper:#fafaf8; --ink:#0a0a0a;
+  --g100:#f0f0ee; --g300:#d4d4d2; --g500:#737373;
+  --accent:#166a59; --accent-dark:#3fa08a;
+  --again:#a8321f; --hard:#a86a10;
+  --ease:cubic-bezier(.4,0,.2,1);
+  --spring:cubic-bezier(.34,1.56,.64,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%}
+body{
+  font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+  background:var(--paper);color:var(--ink);
+  font-size:14px;line-height:1.5;overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideL{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:translateX(0)}}
+
+/* ---------- 按钮 ---------- */
+.btn{
+  position:relative;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:40px;padding:0 16px;border:1px solid var(--ink);border-radius:0;
+  background:var(--paper);color:var(--ink);font-size:14px;cursor:pointer;user-select:none;
+  transition:transform 160ms var(--ease),box-shadow 160ms var(--ease),
+             background-color 160ms var(--ease),border-color 160ms var(--ease),color 160ms var(--ease);
+}
+.btn:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(10,10,10,.14)}
+.btn:active{transform:scale(.95) translateY(0);transition-duration:60ms;box-shadow:none}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;transition-duration:150ms}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
+.btn .ic{transition:transform 160ms var(--ease) 30ms}
+.btn:hover .ic{transform:translateY(2px)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-dark);border-color:var(--accent-dark);box-shadow:0 6px 16px rgba(22,106,89,.30)}
+.btn-ghost{border-color:var(--g300)}
+.btn-ghost:hover{border-color:var(--ink)}
+@keyframes settle{0%{transform:scale(1)}35%{transform:scale(1.05)}100%{transform:scale(1)}}
+.btn.settle{animation:settle 350ms var(--ease)}
+.ripple{position:absolute;border-radius:50%;pointer-events:none;transform:scale(0);
+  background:rgba(10,10,10,.12);animation:ripple 500ms var(--ease) forwards}
+.btn-primary .ripple{background:rgba(255,255,255,.35)}
+@keyframes ripple{to{transform:scale(2.8);opacity:0}}
+.kbd{border:1px solid var(--g300);font-size:10px;padding:0 5px;color:var(--g500);line-height:16px;display:inline-block}
+.btn-primary .kbd{border-color:rgba(255,255,255,.5);color:rgba(255,255,255,.85)}
+
+/* ---------- 顶栏 + 队列计数 ---------- */
+.topbar{
+  height:64px;flex:none;display:flex;align-items:center;gap:20px;padding:0 32px;
+  border-bottom:1px solid var(--g300);animation:fadeIn 400ms var(--ease) both;
+}
+.topbar .logo{width:12px;height:12px;background:var(--accent)}
+.topbar .t{font-size:15px;font-weight:700;letter-spacing:.02em}
+.topbar .date{font-size:12px;color:var(--g500)}
+.queue{margin-left:auto;display:flex;align-items:stretch}
+.qi{display:flex;flex-direction:column;justify-content:center;gap:2px;padding:0 20px;border-left:1px solid var(--g300);
+  animation:slideL 400ms var(--ease) both}
+.qi:nth-child(2){animation-delay:80ms}.qi:nth-child(3){animation-delay:160ms}
+.qi .lab{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--g500);letter-spacing:.06em}
+.qi .lab i{width:8px;height:8px;display:inline-block}
+.qi .num{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1;transition:transform 200ms var(--spring)}
+.qi .num.bump{transform:scale(1.18)}
+.progress{height:3px;background:var(--g100);flex:none}
+.progress b{display:block;height:100%;background:var(--accent);width:0%;
+  transition:width 500ms var(--ease)}
+
+/* ---------- 复习卡 ---------- */
+.app{display:flex;flex-direction:column;height:100%}
+.stagearea{flex:1;display:flex;align-items:center;justify-content:center;padding:32px;min-height:0;perspective:1600px}
+.flip{width:760px;height:400px;position:relative;transform-style:preserve-3d;
+  transition:transform 500ms var(--ease)}
+.flip.flipped{transform:rotateY(180deg)}
+@keyframes cardOut{to{opacity:0;transform:translateX(-64px)}}
+@keyframes cardIn{from{opacity:0;transform:translateX(64px)}to{opacity:1;transform:translateX(0)}}
+.flip.out{animation:cardOut 240ms var(--ease) both}
+.flip.rin{animation:cardIn 320ms var(--ease) both}
+
+.face{
+  position:absolute;inset:0;border:1px solid var(--ink);background:var(--paper);
+  padding:36px 44px;display:flex;flex-direction:column;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;
+}
+.face.back{transform:rotateY(180deg);border-color:var(--accent)}
+.cardhead{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--g500);letter-spacing:.06em}
+.cardhead .src{border:1px solid var(--g300);padding:1px 8px}
+.cardhead .n{margin-left:auto;font-variant-numeric:tabular-nums}
+.face h2{font-size:24px;line-height:1.6;font-weight:600;margin-top:28px;letter-spacing:-.01em}
+.face .ansbody{margin-top:24px;font-size:16px;line-height:1.9}
+.face .ansbody b{color:var(--accent)}
+.face ul{margin:16px 0 0 0;list-style:none}
+.face ul li{position:relative;padding:6px 0 6px 20px;font-size:14px;line-height:1.7}
+.face ul li::before{content:"";position:absolute;left:0;top:15px;width:8px;height:2px;background:var(--accent)}
+.face .hint{margin-top:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--g500)}
+.face .hint .kbd{transform:translateY(-1px)}
+.frontfade{animation:rise 400ms var(--ease) both}
+.backface-in{animation:fadeIn 300ms var(--ease) 200ms both}
+
+/* ---------- 底栏：CTA 主战场 ---------- */
+.bottombar{
+  min-height:120px;flex:none;border-top:1px solid var(--ink);background:var(--paper);
+  display:flex;align-items:center;justify-content:center;padding:20px 32px;gap:16px;position:relative;
+}
+.stateswap{display:flex;align-items:center;justify-content:center;gap:16px;width:100%}
+
+/* front 姿态：唯一主 CTA（Staging：尺寸 + 色彩 + 留白） */
+#showAns{height:56px;min-width:320px;font-size:16px;font-weight:600;letter-spacing:.04em;
+  animation:rise 400ms var(--ease) both}
+#showAns .kbd{margin-left:8px}
+
+/* back 姿态：四档评分按钮 */
+.grades{display:flex;align-items:flex-end;gap:12px}
+.grade{
+  position:relative;overflow:hidden;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  height:64px;min-width:128px;padding:0 20px;
+  border:1px solid var(--ink);background:var(--paper);color:var(--ink);cursor:pointer;user-select:none;
+  transition:transform 160ms var(--ease),box-shadow 160ms var(--ease),background-color 160ms var(--ease),
+             border-color 160ms var(--ease),color 160ms var(--ease);
+}
+/* Staging：推荐档「良好」更大更实 */
+.grade.recommended{min-width:168px;height:76px;background:var(--accent);border-color:var(--accent);color:#fff;
+  box-shadow:0 2px 0 var(--ink);margin-bottom:6px}
+.grade .g1{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:600}
+.grade.recommended .g1{font-size:17px}
+.grade .dot{width:8px;height:8px;background:var(--dc,var(--g500));
+  transition:transform 160ms var(--spring) 20ms}      /* Follow Through：色点滞后 */
+.grade.recommended .dot{background:rgba(255,255,255,.9)}
+.grade .g2{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--g500);font-variant-numeric:tabular-nums;
+  transition:transform 160ms var(--ease) 30ms, color 160ms var(--ease) 30ms}  /* 间隔标签滞后 30ms */
+.grade.recommended .g2{color:rgba(255,255,255,.85)}
+/* Anticipation：hover 预抬升 + 色点放大 */
+.grade:hover{transform:translateY(-3px);box-shadow:0 6px 14px rgba(10,10,10,.16)}
+.grade:hover .dot{transform:scale(1.35)}
+.grade:hover .g2{transform:translateY(1px)}
+.grade.recommended:hover{background:var(--accent-dark);border-color:var(--accent-dark);box-shadow:0 8px 18px rgba(22,106,89,.32)}
+/* Squash & Stretch：按下 60ms 快速压扁 */
+.grade:active{transform:scale(.95) translateY(0);transition-duration:60ms;box-shadow:none}
+.grade:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grade.recommended:focus-visible{outline-color:var(--ink)}
+/* Pose to Pose 入场：翻到背面后四档依次立起 */
+.grades .grade{opacity:0;transform:translateY(16px)}
+.grades.live .grade{animation:rise 320ms var(--ease) both}
+.grades.live .grade:nth-child(1){animation-delay:60ms}
+.grades.live .grade:nth-child(2){animation-delay:130ms}
+.grades.live .grade:nth-child(3){animation-delay:200ms}
+.grades.live .grade:nth-child(4){animation-delay:270ms}
+.grade .g2 .kbd{opacity:.85}
+.footnote{position:absolute;right:32px;bottom:12px;font-size:11px;color:var(--g500)}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}
+  .flip{transition:none}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== 顶栏 + 队列计数 ===== -->
+  <header class="topbar">
+    <span class="logo" aria-hidden="true"></span>
+    <span class="t">FSRS 复习</span>
+    <span class="date">2026-10-04 · 目标 70 张</span>
+    <div class="queue">
+      <div class="qi"><span class="lab"><i style="background:#737373"></i>未学习</span><span class="num" id="qNew">12</span></div>
+      <div class="qi"><span class="lab"><i style="background:#a86a10"></i>学习中</span><span class="num" id="qLearn">3</span></div>
+      <div class="qi"><span class="lab"><i style="background:#166a59"></i>待复习</span><span class="num" id="qDue">28</span></div>
+    </div>
+  </header>
+  <div class="progress"><b id="pbar"></b></div>
+
+  <!-- ===== 复习卡（可点击翻转） ===== -->
+  <main class="stagearea">
+    <div class="flip" id="flip" tabindex="0" role="button" aria-label="点击翻转卡片">
+      <!-- 正面 -->
+      <section class="face front">
+        <div class="cardhead frontfade">
+          <span class="src">摘录 · 学习科学</span><span>第2章 · P47</span>
+          <span class="n">卡片 #1042 · FSRS 调度</span>
+        </div>
+        <h2 class="frontfade" style="animation-delay:80ms">根据「测试效应」，为什么重读教材的复习效率低于主动回忆？</h2>
+        <div class="hint frontfade" style="animation-delay:160ms">
+          回忆要点后按
+          <span class="kbd">空格</span> 或点击卡片显示答案
+        </div>
+      </section>
+      <!-- 背面 -->
+      <section class="face back">
+        <div class="cardhead backface-in">
+          <span class="src" style="border-color:var(--accent);color:var(--accent)">答案</span><span>含 3 个要点 · 建议自行比对</span>
+          <span class="n">卡片 #1042</span>
+        </div>
+        <div class="ansbody backface-in" style="animation-delay:120ms">
+          因为检索是一种<b>编码事件</b>，而非测量工具：
+          <ul>
+            <li>重读只提升<b>流畅感</b>，触发「熟练度错觉」，主观掌握与客观保持脱节；</li>
+            <li>主动回忆<b>重建提取通路</b>，即使失败也带误差反馈，形成记忆锚点；</li>
+            <li>实验中检索组一周后成绩比重读组高约 <b>50%</b>，且重读组的自评反而更高。</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- ===== 底栏：显示答案 / 四档评分 ===== -->
+  <footer class="bottombar">
+    <!-- front 姿态 -->
+    <div class="stateswap" id="frontBar">
+      <button class="btn btn-primary" id="showAns">
+        显示答案
+        <span class="kbd">空格</span>
+      </button>
+    </div>
+
+    <!-- back 姿态：评分 CTA（本 skill 的主战场） -->
+    <div class="stateswap" id="backBar" hidden>
+      <div class="grades" id="grades">
+        <button class="grade" style="--dc:#a8321f" data-iv="10分">
+          <span class="g1"><span class="dot"></span>重来</span>
+          <span class="g2"><span class="kbd">1</span>10分</span>
+        </button>
+        <button class="grade" style="--dc:#a86a10" data-iv="1天">
+          <span class="g1"><span class="dot"></span>困难</span>
+          <span class="g2"><span class="kbd">2</span>1天</span>
+        </button>
+        <button class="grade recommended" style="--dc:#fff" data-iv="3天">
+          <span class="g1"><span class="dot"></span>良好</span>
+          <span class="g2"><span class="kbd">3</span>3天</span>
+        </button>
+        <button class="grade" style="--dc:#3fa08a" data-iv="8天">
+          <span class="g1"><span class="dot"></span>简单</span>
+          <span class="g2"><span class="kbd">4</span>8天</span>
+        </button>
+      </div>
+    </div>
+    <span class="footnote">评分由 FSRS 记入调度 · 快捷键 1–4</span>
+  </footer>
+</div>
+
+<script>
+/* 涟漪（Secondary Action） */
+document.querySelectorAll('.btn,.grade').forEach(function(b){
+  b.addEventListener('pointerdown',function(e){
+    var r=b.getBoundingClientRect(),d=Math.max(r.width,r.height);
+    var s=document.createElement('span');s.className='ripple';
+    s.style.width=s.style.height=d+'px';
+    s.style.left=(e.clientX-r.left-d/2)+'px';s.style.top=(e.clientY-r.top-d/2)+'px';
+    b.appendChild(s);setTimeout(function(){s.remove()},520);
+  });
+});
+document.querySelectorAll('.btn-primary').forEach(function(b){
+  b.addEventListener('click',function(){b.classList.remove('settle');void b.offsetWidth;b.classList.add('settle')});
+});
+
+/* 翻卡 front ↔ back（Pose to Pose） */
+var flip=document.getElementById('flip'),
+    frontBar=document.getElementById('frontBar'),
+    backBar=document.getElementById('backBar'),
+    grades=document.getElementById('grades'),
+    flippable=true;
+
+function showAnswer(){
+  if(!flippable||flip.classList.contains('flipped'))return;
+  flippable=false;
+  flip.classList.add('flipped');
+  setTimeout(function(){
+    frontBar.hidden=true;backBar.hidden=false;
+    grades.classList.add('live');
+    flippable=true;
+  },260);
+}
+function grade(btn){
+  if(!flippable)return;flippable=false;
+  /* Exaggeration：settle 回弹后飞出 */
+  btn.classList.remove('settle');void btn.offsetWidth;btn.classList.add('settle');
+  setTimeout(function(){flip.classList.add('out')},220);
+  setTimeout(function(){
+    /* 队列计数更新：待复习 -1，学习中 +1，进度推进 */
+    var qDue=document.getElementById('qDue'),qLearn=document.getElementById('qLearn');
+    var d=+qDue.textContent,l=+qLearn.textContent;
+    qDue.textContent=Math.max(0,d-1);qLearn.textContent=l+1;
+    [qDue,qLearn].forEach(function(n){n.classList.add('bump');setTimeout(function(){n.classList.remove('bump')},220)});
+    var done=Math.min(70,70-(d-1));
+    document.getElementById('pbar').style.width=(done/70*100)+'%';
+    /* 重置到正面，循环演示 */
+    grades.classList.remove('live');
+    flip.classList.remove('flipped');
+    backBar.hidden=true;frontBar.hidden=false;
+    flip.classList.remove('out');void flip.offsetWidth;flip.classList.add('rin');
+    setTimeout(function(){flip.classList.remove('rin');flippable=true},340);
+  },520);
+}
+
+document.getElementById('showAns').addEventListener('click',showAnswer);
+flip.addEventListener('click',showAnswer);
+document.querySelectorAll('.grade').forEach(function(b){
+  b.addEventListener('click',function(){grade(b)});
+});
+document.addEventListener('keydown',function(e){
+  if(e.code==='Space'||e.key==='Enter'){
+    if(!backBar.hidden){/* 背面时空格 = 良好 */grade(grades.querySelector('.recommended'))}
+    else{e.preventDefault();showAnswer()}
+  }
+  var k={'1':'.grade:nth-child(1)','2':'.grade:nth-child(2)','3':'.grade:nth-child(3)','4':'.grade:nth-child(4)'}[e.key];
+  if(k&&!backBar.hidden)grade(grades.querySelector(k));
+});
+
+/* 入场：顶栏计数 + 进度条 */
+window.addEventListener('load',function(){
+  setTimeout(function(){document.getElementById('pbar').style.width='60%'},300);
+});
+</script>
+</body>
+</html>

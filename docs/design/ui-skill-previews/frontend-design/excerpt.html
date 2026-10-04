@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>摘录界面 · 增量阅读（设计预览）</title>
+<style>
+  :root{
+    --paper:#fafaf8;
+    --ink:#0a0a0a;
+    --fill:#f0f0ee;
+    --line:#d4d4d2;
+    --muted:#737373;
+    --accent:#166a59;
+    --accent-bright:#3fa08a;
+    --amber:#a16207;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+    background:var(--paper);color:var(--ink);font-size:14px;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  ::-webkit-scrollbar{width:8px}
+  ::-webkit-scrollbar-thumb{background:var(--line)}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .track{animation:rise .38s cubic-bezier(.2,.7,.3,1) both}
+  .main{animation:rise .38s cubic-bezier(.2,.7,.3,1) .07s both}
+  .bottombar{animation:rise .38s cubic-bezier(.2,.7,.3,1) .14s both}
+
+  .app{
+    display:grid;
+    grid-template-columns:280px 1fr;
+    grid-template-rows:1fr 72px;
+    grid-template-areas:"track main" "track bottom";
+    height:100vh;min-width:1440px;
+    transition:grid-template-columns .3s cubic-bezier(.2,.7,.3,1);
+  }
+  /* 收起态：轨道收拢为 56px 窄条 */
+  .app.collapsed{grid-template-columns:56px 1fr}
+  .app.collapsed .track-title,
+  .app.collapsed .filters-row,
+  .app.collapsed .track-body{display:none}
+  .app.collapsed .track-head{display:flex;align-items:center;justify-content:center;padding:16px 0}
+  .app.collapsed #collapseBtn svg{transform:rotate(180deg)}
+  #collapseBtn svg{transition:transform .3s}
+
+  /* ---------- 左侧批注轨 ---------- */
+  .track{
+    grid-area:track;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;min-width:0;
+    overflow:hidden;
+  }
+  .track-head{
+    padding:16px;border-bottom:1px solid var(--line);
+    display:flex;flex-direction:column;gap:10px;
+  }
+  .track-head-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .track-title{font-size:15px;font-weight:600}
+  .icon-btn{
+    width:28px;height:28px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+    color:var(--muted);
+  }
+  .icon-btn:hover{background:var(--fill);color:var(--ink)}
+  .seg{display:flex;border:1px solid var(--line)}
+  .seg button{
+    flex:1;padding:5px 0;font-size:12px;color:var(--muted);
+    border-right:1px solid var(--line);white-space:nowrap;
+    transition:background .15s,color .15s;
+  }
+  .seg button:last-child{border-right:none}
+  .seg button:hover{color:var(--ink)}
+  .seg button.on{background:var(--ink);color:var(--paper)}
+  .filters-row{display:flex;gap:8px}
+  .filters-row .seg{flex:1}
+
+  .track-body{flex:1;overflow-y:auto}
+  .ex-item{
+    padding:12px 14px 12px 16px;border-bottom:1px solid var(--fill);
+    border-right:3px solid var(--accent);cursor:pointer;
+    transition:background .15s;
+  }
+  .ex-item:hover{background:var(--fill)}
+  .ex-item.q{border-right-color:var(--amber)}
+  .ex-item.on{background:var(--fill)}
+  .ex-item .t{
+    font-size:13px;line-height:1.55;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  }
+  .ex-item .m{margin-top:6px;display:flex;gap:12px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .ex-item .pending{margin-left:auto;color:var(--accent);font-weight:600}
+
+  /* ---------- 主列 ---------- */
+  .main{grid-area:main;display:flex;flex-direction:column;min-width:0}
+  .crumbbar{
+    display:flex;align-items:center;gap:16px;
+    padding:16px 40px;border-bottom:1px solid var(--line);
+  }
+  .crumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+  .crumb a{color:var(--muted);text-decoration:none;padding:2px 4px}
+  .crumb a:hover{color:var(--ink);background:var(--fill)}
+  .crumb .cur{color:var(--ink);font-weight:600;padding:2px 4px}
+  .crumb .sep{color:var(--line)}
+  .pending-chip{
+    margin-left:auto;display:flex;align-items:baseline;gap:8px;
+    border:1px solid var(--line);padding:6px 14px;
+  }
+  .pending-chip b{font-size:20px;font-weight:600;color:var(--accent);font-variant-numeric:tabular-nums}
+  .pending-chip span{font-size:12px;color:var(--muted)}
+
+  .card-area{flex:1;overflow-y:auto;display:flex;justify-content:center;padding:48px 40px 64px}
+  .card{width:720px}
+
+  .meta-strip{display:flex;border:1px solid var(--line);margin-bottom:32px}
+  .meta-strip div{flex:1;padding:10px 16px;border-right:1px solid var(--line)}
+  .meta-strip div:last-child{border-right:none}
+  .meta-strip .k{font-size:12px;color:var(--muted);margin-bottom:2px}
+  .meta-strip .v{font-size:13px;font-weight:500}
+
+  .block{margin-bottom:32px}
+  .block-label{font-size:12px;color:var(--muted);margin-bottom:10px}
+  .quote{
+    border-left:4px solid var(--accent);
+    padding:4px 0 4px 20px;
+  }
+  .quote.q{border-left-color:var(--amber)}
+  .quote p{font-size:17px;line-height:1.8}
+  .quote .cite{display:block;margin-top:10px;font-size:13px;color:var(--muted)}
+  .note{
+    border:1px solid var(--line);border-left:4px solid var(--ink);
+    padding:16px 20px;
+  }
+  .note p{font-size:15px;line-height:1.75}
+  .links{margin-top:14px;padding-top:12px;border-top:1px solid var(--fill);display:flex;gap:8px;flex-wrap:wrap}
+  .link-chip{
+    font-size:12px;color:var(--accent);border:1px solid var(--line);
+    padding:3px 10px;text-decoration:none;
+  }
+  .link-chip:hover{border-color:var(--accent)}
+
+  /* ---------- 底栏 72px ---------- */
+  .bottombar{
+    grid-area:bottom;border-top:1px solid var(--line);
+    display:flex;align-items:center;gap:32px;padding:0 40px;
+    background:var(--paper);
+  }
+  .field{display:flex;align-items:center;gap:12px}
+  .field-label{font-size:13px;color:var(--muted);white-space:nowrap}
+  .stepper{display:flex;border:1px solid var(--line)}
+  .stepper button{width:32px;height:34px;color:var(--muted);font-size:16px}
+  .stepper button:hover{background:var(--fill);color:var(--ink)}
+  .stepper input{
+    width:44px;border:none;border-left:1px solid var(--line);border-right:1px solid var(--line);
+    text-align:center;font:inherit;font-size:14px;font-variant-numeric:tabular-nums;
+    background:var(--paper);color:var(--ink);
+  }
+  .stepper input:focus{outline:2px solid var(--accent);outline-offset:-2px}
+
+  .slider-field{flex:1;max-width:280px}
+  .slider-head{display:flex;justify-content:space-between;margin-bottom:6px}
+  .slider-head .val{font-size:13px;font-weight:600;color:var(--accent)}
+  input[type=range]{
+    -webkit-appearance:none;appearance:none;width:100%;height:2px;background:var(--line);
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;width:14px;height:14px;background:var(--accent);
+    cursor:ew-resize;border:none;
+  }
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;background:var(--accent);border:none;border-radius:0;cursor:ew-resize}
+
+  .btn{
+    padding:10px 22px;font-size:14px;border:1px solid var(--ink);
+    transition:background .15s,color .15s;white-space:nowrap;
+  }
+  .btn:hover{background:var(--fill)}
+  .btn.pri{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  .btn.pri:hover{background:var(--accent-bright);border-color:var(--accent-bright)}
+  .btn:active{transform:translateY(1px)}
+  .btn .kbd{
+    display:inline-block;margin-left:10px;font-size:11px;color:inherit;opacity:.65;
+    border:1px solid currentColor;padding:0 5px;font-variant-numeric:tabular-nums;
+  }
+
+  .toast{
+    position:fixed;left:50%;bottom:92px;transform:translate(-50%,8px);
+    background:var(--ink);color:var(--paper);font-size:13px;padding:10px 18px;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 左侧批注轨 -->
+  <aside class="track" aria-label="批注轨">
+    <div class="track-head">
+      <div class="track-head-row">
+        <span class="track-title">批注轨</span>
+        <button class="icon-btn" id="collapseBtn" title="收起" aria-label="收起批注轨">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 2 4 7l5 5" stroke="currentColor" stroke-width="1.5"/></svg>
+        </button>
+      </div>
+      <div class="filters-row">
+        <div class="seg" role="group" aria-label="筛选">
+          <button class="on">全部</button><button>摘录</button><button>高亮</button>
+        </div>
+        <div class="seg" role="group" aria-label="排序">
+          <button class="on">位置</button><button>时间</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="track-body">
+      <article class="ex-item on">
+        <div class="t">提取练习的效果远优于重复阅读，尽管学习者普遍低估这一点。</div>
+        <div class="m"><span>p.34</span><span>今天 09:32</span><span class="pending">处理中</span></div>
+      </article>
+      <article class="ex-item">
+        <div class="t">睡眠期间海马体将当日新编码的记忆重放并转移至皮层。</div>
+        <div class="m"><span>p.37</span><span>昨天 22:10</span></div>
+      </article>
+      <article class="ex-item q">
+        <div class="t">测试效应存在边界条件：当提取总是失败时，反复测试反而有害。</div>
+        <div class="m"><span>p.44</span><span>10月1日</span><span class="pending" style="color:var(--amber)">存疑</span></div>
+      </article>
+      <article class="ex-item">
+        <div class="t">图式把零散事实组织成结构，提取时只需检索结构即可重建细节。</div>
+        <div class="m"><span>p.51</span><span>9月28日</span></div>
+      </article>
+      <article class="ex-item">
+        <div class="t">元认知监测的准确度随任务难度上升而下降，越难的题越容易高估自己。</div>
+        <div class="m"><span>p.70</span><span>9月25日</span></div>
+      </article>
+    </div>
+  </aside>
+
+  <!-- 主列 -->
+  <div class="main">
+    <div class="crumbbar">
+      <nav class="crumb" aria-label="位置">
+        <a href="#" onclick="return false">原文</a><span class="sep">›</span>
+        <a href="#" onclick="return false">学习科学</a><span class="sep">›</span>
+        <a href="#" onclick="return false">第 2 章</a><span class="sep">›</span>
+        <span class="cur">间隔效应的实证证据</span>
+      </nav>
+      <div class="pending-chip"><b>5</b><span>条待处理</span></div>
+    </div>
+
+    <div class="card-area">
+      <section class="card">
+        <div class="meta-strip">
+          <div><div class="k">来源</div><div class="v">学习科学</div></div>
+          <div><div class="k">位置</div><div class="v">第 2 章，第 7 段</div></div>
+          <div><div class="k">摘于</div><div class="v">今天 09:32</div></div>
+          <div><div class="k">类型</div><div class="v">摘录</div></div>
+        </div>
+
+        <div class="block">
+          <div class="block-label">原文</div>
+          <blockquote class="quote">
+            <p>同样的总时长，分散在多天的学习组在两周后的保持测验中，成绩比集中学习组高出约一倍。间隔之所以有效，是因为它迫使记忆在「稍微遗忘」之后被重新提取——提取时遇到的困难越大，只要仍然成功，记忆被改写的幅度就越大。</p>
+            <span class="cite">—— 《学习科学：基础与研究》第 41 页</span>
+          </blockquote>
+        </div>
+
+        <div class="block">
+          <div class="block-label">我的批注</div>
+          <div class="note">
+            <p>间隔效应和上一章的生成效应是一体两面：提取本身就是一次「生成」，而间隔保证提取发生在遗忘临界点上，生成难度恰到好处。复习时先凭记忆复述本段，再翻开原文核对，不要直接重读。</p>
+            <div class="links">
+              <a class="link-chip" href="#" onclick="return false">关联：生成效应（p.24）</a>
+              <a class="link-chip" href="#" onclick="return false">关联：合意困难（p.46）</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 底栏 72px -->
+    <footer class="bottombar">
+      <div class="field">
+        <span class="field-label">推迟</span>
+        <div class="stepper">
+          <button id="dec" aria-label="减少天数">−</button>
+          <input id="days" value="3" inputmode="numeric" aria-label="推迟天数">
+          <button id="inc" aria-label="增加天数">+</button>
+        </div>
+        <span class="field-label">天</span>
+      </div>
+
+      <div class="field slider-field">
+        <div class="slider-head">
+          <span class="field-label">优先级</span>
+          <span class="val" id="prioVal">高</span>
+        </div>
+        <input type="range" id="prio" min="0" max="100" value="80" aria-label="优先级">
+      </div>
+
+      <div style="flex:1"></div>
+
+      <button class="btn" id="archiveBtn">存档</button>
+      <button class="btn pri" id="nextBtn">保存并处理下一条<span class="kbd">Enter</span></button>
+    </footer>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+  const toast = document.getElementById('toast');
+  let toastTimer;
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+  }
+
+  // 段控
+  document.querySelectorAll('.seg').forEach(seg => {
+    seg.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      seg.querySelectorAll('button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+    }));
+  });
+
+  // 推迟天数
+  const days = document.getElementById('days');
+  function clampDay(v){ return Math.min(365, Math.max(0, parseInt(v || 0, 10))); }
+  document.getElementById('inc').addEventListener('click', () => days.value = clampDay(+days.value + 1));
+  document.getElementById('dec').addEventListener('click', () => days.value = clampDay(+days.value - 1));
+  days.addEventListener('change', () => days.value = clampDay(days.value));
+
+  // 优先级滑块
+  const prio = document.getElementById('prio');
+  const prioVal = document.getElementById('prioVal');
+  function prioLabel(v){ return v >= 70 ? '高' : v >= 40 ? '中' : '低'; }
+  prio.addEventListener('input', () => prioVal.textContent = prioLabel(+prio.value));
+
+  // 底栏动作
+  document.getElementById('nextBtn').addEventListener('click', () => {
+    showToast('已保存批注，载入下一条摘录');
+  });
+  document.getElementById('archiveBtn').addEventListener('click', () => showToast('已存档，进入摘录库'));
+
+  // 批注轨条目切换
+  document.querySelectorAll('.ex-item').forEach(it => it.addEventListener('click', () => {
+    document.querySelectorAll('.ex-item').forEach(x => x.classList.remove('on'));
+    it.classList.add('on');
+  }));
+
+  // 收起 / 展开批注轨
+  const app = document.querySelector('.app');
+  document.getElementById('collapseBtn').addEventListener('click', () => {
+    app.classList.toggle('collapsed');
+    const collapsed = app.classList.contains('collapsed');
+    document.getElementById('collapseBtn').title = collapsed ? '展开' : '收起';
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440, initial-scale=1">
+<title>摘录 · 按钮状态设计预览（button-states skill）</title>
+<style>
+/* ================= 基础与 Design Token ================= */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --paper:#fafaf8;
+  --ink:#0a0a0a;
+  --grey-50:#f0f0ee;--grey-100:#e9e9e6;--grey-200:#d4d4d2;--grey-300:#b8b8b5;--grey-400:#98989a;--grey-500:#737373;
+  /* accent #166a59 = hsl(168,65%,25%)，hover/active 按 skill 规则 L-8% / L-14% 推导 */
+  --accent:hsl(168 65% 25%);
+  --accent-hover:hsl(168 65% 17%);
+  --accent-active:hsl(168 65% 11%);
+  --accent-soft:hsl(168 65% 25% / .08);
+  --red:hsl(6 58% 44%);
+  --amber:hsl(40 78% 40%);
+  --blue:hsl(210 55% 40%);
+  --purple:hsl(270 38% 50%);
+  --hairline:var(--grey-200);
+  --font:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+html,body{height:100%}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font-family:inherit;color:inherit}
+::selection{background:hsl(168 65% 25% / .18)}
+
+/* ================= 六态按钮体系（button-states skill） ================= */
+.btn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:34px;padding:0 14px;border:none;background:transparent;color:var(--ink);
+  font-size:13px;letter-spacing:.01em;cursor:pointer;user-select:none;-webkit-user-select:none;
+  transition:background 120ms ease-out,color 120ms ease-out,border-color 120ms ease-out,opacity 120ms ease-out,transform 80ms ease-out;
+}
+.btn:hover{background:var(--grey-50)}
+.btn:active{transform:scale(.97)}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.btn:disabled,.btn[aria-disabled="true"]{opacity:.4;cursor:not-allowed;pointer-events:none}
+.btn.btn--loading{opacity:.7;pointer-events:none}
+
+.btn--primary{background:var(--accent);color:#fff}
+.btn--primary:hover{background:var(--accent-hover)}
+.btn--primary:active{background:var(--accent-active)}
+
+.btn--secondary{border:1px solid var(--grey-200)}
+.btn--secondary:hover{background:var(--grey-50);border-color:var(--grey-400)}
+.btn--secondary:active{background:var(--grey-100);border-color:var(--grey-400)}
+
+.btn--danger{color:var(--red)}
+.btn--danger:hover{background:hsl(6 58% 44% / .08);color:var(--red)}
+.btn--danger:active{background:hsl(6 58% 44% / .16)}
+
+.btn--ghost{padding:0 10px}
+.btn--ghost:hover{background:var(--grey-50)}
+.btn--ghost:active{background:var(--grey-100)}
+.icon-btn{width:34px;height:34px;padding:0}
+
+.btn .spinner{
+  position:absolute;inset:0;margin:auto;width:14px;height:14px;border-radius:50%;
+  border:2px solid hsl(168 65% 25% / .25);border-top-color:var(--accent);
+  animation:spin .8s linear infinite;display:none;
+}
+.btn--primary .spinner{border-color:rgb(255 255 255 / .35);border-top-color:#fff}
+.btn--loading .spinner{display:block}
+.btn--loading .label{visibility:hidden}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ================= 分段控 ================= */
+.seg{display:inline-flex;height:26px;border:1px solid var(--grey-200);background:var(--paper)}
+.seg button{
+  height:100%;padding:0 9px;border:none;border-left:1px solid var(--grey-200);
+  background:transparent;color:var(--grey-500);font-size:11.5px;cursor:pointer;
+  transition:background 120ms ease-out,color 120ms ease-out;
+}
+.seg button:first-child{border-left:none}
+.seg button:hover{background:var(--grey-50);color:var(--ink)}
+.seg button:active{background:var(--grey-100)}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.seg button.on{background:var(--ink);color:#fff}
+
+/* ================= 布局 ================= */
+.app{display:grid;grid-template-columns:280px 1fr;height:100vh}
+
+/* ---- 左侧 280px 全高批注轨 ---- */
+.side{border-right:1px solid var(--hairline);display:flex;flex-direction:column;min-height:0;background:var(--paper)}
+.side-head{display:flex;align-items:center;gap:6px;height:56px;padding:0 8px 0 10px;border-bottom:1px solid var(--hairline);flex:none}
+.side-filters{display:flex;gap:6px;padding:10px 12px;flex:none;flex-wrap:wrap}
+.side-label{flex:none;padding:10px 12px 6px;font-size:11px;letter-spacing:.14em;color:var(--grey-500)}
+.side-list{flex:1;overflow-y:auto;min-height:0}
+.side-foot{flex:none;padding:8px 12px;border-top:1px solid var(--hairline);font-size:11px;color:var(--grey-500)}
+
+.entry{
+  position:relative;display:block;width:100%;text-align:left;border:none;background:transparent;
+  padding:11px 14px 11px 12px;border-bottom:1px solid var(--grey-100);cursor:pointer;
+  transition:background 120ms ease-out;
+}
+.entry:hover{background:var(--grey-50)}
+.entry:active{background:var(--grey-100)}
+.entry:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* 条目右侧高亮色竖线 */
+.entry::after{content:"";position:absolute;right:0;top:10px;bottom:10px;width:3px;background:var(--bar,var(--grey-300))}
+.entry.current{background:var(--grey-50)}
+.entry.current::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--accent)}
+.e-text{font-size:12.5px;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.e-note{margin-top:4px;font-size:11.5px;color:var(--grey-500);display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.e-note::before{content:"笔 ";font-size:10px;border:1px solid var(--grey-200);padding:0 3px;margin-right:4px}
+.e-meta{margin-top:5px;font-size:11px;color:var(--grey-400)}
+
+/* ---- 主列 ---- */
+.main{display:flex;flex-direction:column;min-width:0;height:100vh;overflow-y:auto}
+.crumbbar{
+  position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+  height:48px;padding:0 24px;border-bottom:1px solid var(--hairline);background:var(--paper);flex:none;
+}
+.crumbs{display:flex;align-items:center;gap:6px;font-size:12.5px;min-width:0;overflow:hidden;white-space:nowrap}
+.crumbs .sep{color:var(--grey-300)}
+.crumb{
+  border:none;background:transparent;cursor:pointer;font-size:12.5px;color:var(--grey-500);
+  padding:2px 6px;transition:background 120ms ease-out,color 120ms ease-out;
+}
+.crumb:hover{background:var(--grey-50);color:var(--ink)}
+.crumb:active{background:var(--grey-100)}
+.crumb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.crumb.current{color:var(--ink);font-weight:600;cursor:default;padding:2px 0}
+
+.badge{
+  margin-left:auto;display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;
+  font-size:12px;color:var(--accent);background:var(--accent-soft);
+  border:1px solid hsl(168 65% 25% / .28);font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.badge i{width:6px;height:6px;background:var(--accent);flex:none}
+
+/* ---- 摘录卡 ---- */
+.content{flex:1;padding:28px 32px 0}
+.xcard{max-width:780px;margin:0 auto 24px;border:1px solid var(--hairline);background:#fff}
+.xcard-head{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--grey-100)}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;
+  font-size:11px;border:1px solid var(--grey-200);color:var(--grey-500);
+}
+.chip i{width:8px;height:8px;flex:none}
+.xcard-source{margin-left:auto;font-size:11.5px;color:var(--grey-400)}
+.quote{padding:24px 24px 24px 28px;border-left:4px solid var(--bar,var(--accent));margin:20px 0 0 20px}
+.quote p{font-size:16.5px;line-height:2.0;color:#1c1c1a}
+.xcard-actions{display:flex;align-items:center;gap:8px;padding:12px 20px;border-top:1px solid var(--grey-100)}
+
+.note-sec{border-top:1px solid var(--grey-100);padding:16px 20px 20px}
+.note-label{display:flex;align-items:center;gap:8px;font-size:11px;letter-spacing:.14em;color:var(--grey-500);margin-bottom:10px}
+.note-label .saved{margin-left:auto;letter-spacing:0;font-size:11px;color:var(--accent)}
+textarea{
+  width:100%;min-height:96px;resize:vertical;border:1px solid var(--grey-200);background:var(--paper);
+  font:inherit;font-size:13.5px;line-height:1.8;color:var(--ink);padding:12px 14px;
+  transition:border-color 120ms ease-out,background 120ms ease-out;
+}
+textarea:hover{border-color:var(--grey-300)}
+textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px;background:#fff}
+
+/* ---- sticky 底栏 72px ---- */
+.bottombar{
+  position:sticky;bottom:0;z-index:10;flex:none;height:72px;margin-top:auto;
+  display:flex;align-items:center;gap:20px;padding:0 24px;
+  border-top:1px solid var(--hairline);background:var(--paper);
+}
+.field{display:flex;align-items:center;gap:10px}
+.field-label{font-size:12px;color:var(--grey-500);white-space:nowrap}
+.stepper{display:flex;align-items:center;border:1px solid var(--grey-200)}
+.stepper button{
+  width:28px;height:32px;border:none;background:transparent;cursor:pointer;font-size:15px;color:var(--ink);
+  transition:background 120ms ease-out,transform 80ms ease-out;
+}
+.stepper button:hover{background:var(--grey-50)}
+.stepper button:active{background:var(--grey-100);transform:scale(.94)}
+.stepper button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stepper button:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+.stepper input{
+  width:40px;height:32px;border:none;border-left:1px solid var(--grey-200);border-right:1px solid var(--grey-200);
+  background:var(--paper);text-align:center;font:inherit;font-size:13px;font-variant-numeric:tabular-nums;
+}
+.stepper input:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.unit{font-size:12px;color:var(--grey-500)}
+.spacer{flex:1}
+kbd{
+  font-family:inherit;font-size:10.5px;color:var(--grey-500);
+  border:1px solid var(--grey-200);padding:1px 5px;margin-left:8px;
+}
+.btn--primary kbd{color:rgb(255 255 255 / .75);border-color:rgb(255 255 255 / .35)}
+
+/* 滑块（优先级）：方形象征 ink，hover 转 accent，active 轻微缩放 */
+input[type=range]{-webkit-appearance:none;appearance:none;width:170px;height:24px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--grey-200)}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;background:var(--ink);margin-top:-6px;
+  transition:background 120ms ease-out,transform 80ms ease-out;
+}
+input[type=range]:hover::-webkit-slider-thumb{background:var(--accent)}
+input[type=range]:active::-webkit-slider-thumb{transform:scale(.9)}
+input[type=range]::-moz-range-track{height:2px;background:var(--grey-200)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border:none;border-radius:0;background:var(--ink);transition:background 120ms ease-out}
+input[type=range]:hover::-moz-range-thumb{background:var(--accent)}
+input[type=range]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.slider-out{min-width:2ch;font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}
+
+/* ================= 动效 ================= */
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideRight{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+.side{animation:slideRight 320ms cubic-bezier(.2,.7,.2,1) both}
+.crumbbar{animation:fadeIn 320ms cubic-bezier(.2,.7,.2,1) 60ms both}
+.xcard{animation:fadeUp 380ms cubic-bezier(.2,.7,.2,1) 100ms both}
+.bottombar{animation:fadeUp 320ms cubic-bezier(.2,.7,.2,1) 200ms both}
+.entry{animation:fadeUp 300ms ease both}
+.entry:nth-child(1){animation-delay:120ms}.entry:nth-child(2){animation-delay:160ms}
+.entry:nth-child(3){animation-delay:200ms}.entry:nth-child(4){animation-delay:240ms}
+.entry:nth-child(5){animation-delay:280ms}.entry:nth-child(6){animation-delay:320ms}
+
+/* ================= reduced-motion 降级 ================= */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ 左侧 280px 全高批注轨 ============ -->
+  <aside class="side" aria-label="批注轨">
+    <div class="side-head">
+      <!-- 「收起」开关钮：展开态 -->
+      <button class="btn btn--ghost icon-btn" id="sideToggle" title="收起批注轨" aria-label="收起批注轨" aria-expanded="true">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1.5" y="2.5" width="13" height="11"/><line x1="6" y1="2.5" x2="6" y2="13.5"/><path d="M11.5 6 9.5 8l2 2" transform="translate(-1.5 0)"/>
+        </svg>
+      </button>
+      <div class="seg" role="group" aria-label="按类型筛选">
+        <button class="on">全部</button><button>摘录</button><button>高亮</button>
+      </div>
+      <div class="seg" role="group" aria-label="排序方式">
+        <button class="on">位置</button><button>时间</button>
+      </div>
+    </div>
+
+    <div class="side-filters">
+      <span class="side-label" style="padding:0">本章 · 12 条批注</span>
+    </div>
+
+    <nav class="side-list" aria-label="批注条目列表">
+      <button class="entry current" style="--bar:var(--amber)" aria-current="true">
+        <span class="e-text">每一次成功的提取都会重建记忆痕迹，使其更不易受后续干扰。</span>
+        <span class="e-note">这正是 FSRS 间隔递增的原理，可与第5章对照。</span>
+        <span class="e-meta">位置 118 · 今天 10:24</span>
+      </button>
+      <button class="entry" style="--bar:var(--accent)">
+        <span class="e-text">测试效应：对同一材料的主动回忆，比重复阅读带来更高的长期保持率。</span>
+        <span class="e-meta">位置 121 · 今天 10:31</span>
+      </button>
+      <button class="entry" style="--bar:var(--blue)">
+        <span class="e-text">提取的难度本身具有「合意困难」的性质——越费力，记忆增长越大。</span>
+        <span class="e-note">TODO：补 Bjork 1994 的原始出处。</span>
+        <span class="e-meta">位置 126 · 昨天</span>
+      </button>
+      <button class="entry" style="--bar:var(--amber)">
+        <span class="e-text">间隔效应：将学习分散到多个时段，比集中一次性学习更有效。</span>
+        <span class="e-meta">位置 131 · 昨天</span>
+      </button>
+      <button class="entry" style="--bar:var(--red)">
+        <span class="e-text">睡眠不足会显著削弱海马体对新信息的编码能力。</span>
+        <span class="e-meta">位置 96 · 10-02</span>
+      </button>
+      <button class="entry" style="--bar:var(--purple)">
+        <span class="e-text"> interleaving（交错练习）优于分块练习（blocked practice）。</span>
+        <span class="e-meta">位置 140 · 10-01</span>
+      </button>
+    </nav>
+
+    <div class="side-foot">共 24 条 · 本章 12 条</div>
+  </aside>
+
+  <!-- ============ 主列 ============ -->
+  <main class="main">
+    <!-- 面包屑 + 待处理计数 -->
+    <div class="crumbbar">
+      <nav class="crumbs" aria-label="面包屑">
+        <button class="crumb">原文</button><span class="sep">›</span>
+        <button class="crumb">学习科学</button><span class="sep">›</span>
+        <button class="crumb">第2章 · 记忆的机制</button><span class="sep">›</span>
+        <span class="crumb current" aria-current="page">测试效应与提取练习</span>
+      </nav>
+      <span class="badge"><i aria-hidden="true"></i>5 条待处理</span>
+    </div>
+
+    <!-- 摘录卡 -->
+    <div class="content">
+      <article class="xcard" style="--bar:var(--amber)">
+        <div class="xcard-head">
+          <span class="chip"><i style="background:var(--amber)"></i>摘录 · 高亮黄</span>
+          <span class="xcard-source">《学习科学：记忆、理解与教学》第2章 · 位置 118–120</span>
+        </div>
+        <blockquote class="quote">
+          <p>「每当你从记忆中主动提取一条信息，这条记忆痕迹就会被重新巩固一遍，变得更清晰、更不易受后续干扰。」</p>
+        </blockquote>
+        <div class="xcard-actions">
+          <button class="btn btn--secondary btn--loading" id="polishBtn" aria-busy="true">
+            <span class="spinner" aria-hidden="true"></span><span class="label">AI 润色笔记</span>
+          </button>
+          <button class="btn btn--secondary" id="copyQuote">复制原文</button>
+          <button class="btn btn--secondary" disabled title="当前格式暂不支持朗读">朗读</button>
+          <button class="btn btn--ghost btn--danger" id="delBtn" style="margin-left:auto">删除</button>
+        </div>
+        <div class="note-sec">
+          <div class="note-label">我的笔记 <span class="saved" id="savedTag">已自动保存</span></div>
+          <textarea id="noteBox" aria-label="我的笔记">这正是 FSRS 间隔递增的原理：间隔拉长 → 提取更费力 → 记忆增长更大。可以和第5章「合意困难」对照着看，制卡时把两处合并成一张对比卡。</textarea>
+        </div>
+      </article>
+    </div>
+
+    <!-- sticky 底栏 72px -->
+    <div class="bottombar" aria-label="处理操作栏">
+      <div class="field">
+        <span class="field-label">推迟</span>
+        <div class="stepper">
+          <button id="minusBtn" aria-label="减少天数" title="减少">−</button>
+          <input id="deferInput" value="3" inputmode="numeric" aria-label="推迟天数">
+          <button id="plusBtn" aria-label="增加天数" title="增加">＋</button>
+        </div>
+        <span class="unit">天</span>
+      </div>
+      <div class="field">
+        <span class="field-label">优先级</span>
+        <input type="range" id="prio" min="1" max="5" step="1" value="3" aria-label="优先级">
+        <span class="slider-out" id="prioOut">3 · 中</span>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn btn--ghost" id="prevBtn" title="上一条">← 上一条</button>
+      <button class="btn btn--secondary" id="skipBtn">跳过</button>
+      <button class="btn btn--primary" id="nextBtn">
+        保存并下一条<kbd>⏎</kbd>
+      </button>
+    </div>
+  </main>
+</div>
+
+<script>
+// —— 「收起」开关钮：收起批注轨（grid 列宽过渡）
+const app = document.querySelector('.app');
+const toggle = document.getElementById('sideToggle');
+toggle.addEventListener('click', () => {
+  const collapsed = app.style.gridTemplateColumns === '48px 1fr';
+  app.style.gridTemplateColumns = collapsed ? '280px 1fr' : '48px 1fr';
+  toggle.setAttribute('aria-expanded', String(collapsed));
+});
+
+// —— AI 润色：loading 状态演示（spinner 替换标签、宽度稳定、光标不变、禁止重复提交）
+const polishBtn = document.getElementById('polishBtn');
+function runLoading(btn, ms){
+  if (btn.classList.contains('btn--loading')) return;
+  btn.classList.add('btn--loading');
+  btn.setAttribute('aria-busy','true');
+  setTimeout(() => { btn.classList.remove('btn--loading'); btn.removeAttribute('aria-busy'); }, ms);
+}
+runLoading(polishBtn, 2200);
+polishBtn.addEventListener('click', () => runLoading(polishBtn, 1600));
+
+// —— 微交互：复制 / 删除 / 保存反馈
+const copyQuote = document.getElementById('copyQuote');
+copyQuote.addEventListener('click', () => {
+  const t = copyQuote.textContent; copyQuote.textContent = '已复制 ✓';
+  setTimeout(() => copyQuote.textContent = t, 1200);
+});
+const delBtn = document.getElementById('delBtn');
+delBtn.addEventListener('click', () => {
+  const t = delBtn.textContent; delBtn.textContent = '再点一次确认删除';
+  setTimeout(() => delBtn.textContent = t, 1800);
+});
+const noteBox = document.getElementById('noteBox');
+const savedTag = document.getElementById('savedTag');
+let saveTimer;
+noteBox.addEventListener('input', () => {
+  savedTag.textContent = '正在编辑…'; savedTag.style.color = 'var(--grey-500)';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { savedTag.textContent = '已自动保存'; savedTag.style.color = 'var(--accent)'; }, 900);
+});
+
+// —— 推迟天数步进器
+const deferInput = document.getElementById('deferInput');
+const minusBtn = document.getElementById('minusBtn');
+const plusBtn = document.getElementById('plusBtn');
+function clampDefer(v){ return Math.max(1, Math.min(30, v)); }
+function syncDefer(){
+  const v = parseInt(deferInput.value, 10) || 1;
+  minusBtn.disabled = v <= 1;
+  plusBtn.disabled = v >= 30;
+}
+minusBtn.addEventListener('click', () => { deferInput.value = clampDefer((parseInt(deferInput.value,10)||1) - 1); syncDefer(); });
+plusBtn.addEventListener('click', () => { deferInput.value = clampDefer((parseInt(deferInput.value,10)||1) + 1); syncDefer(); });
+deferInput.addEventListener('change', () => { deferInput.value = clampDefer(parseInt(deferInput.value,10)||1); syncDefer(); });
+syncDefer();
+
+// —— 优先级滑块
+const prio = document.getElementById('prio');
+const prioOut = document.getElementById('prioOut');
+const PRIO_NAMES = {1:'1 · 很低',2:'2 · 低',3:'3 · 中',4:'4 · 高',5:'5 · 很高'};
+prio.addEventListener('input', () => { prioOut.textContent = PRIO_NAMES[prio.value]; });
+
+// —— 下一条：按钮短暂 loading 后重置（演示完成态回归 rest）
+const nextBtn = document.getElementById('nextBtn');
+nextBtn.addEventListener('click', () => runLoading(nextBtn, 900));
+</script>
+</body>
+</html>
