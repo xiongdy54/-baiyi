@@ -256,18 +256,18 @@ const visibilityProbe = (markId) => `(() => {
   return JSON.stringify(out);
 })()`;
 
-/** 浮层内容（原文/批注/计数/按钮） */
-const popoverState = `(() => {
-  const el = document.querySelector(".reader-mark-pop");
+/** v48.45（D85）：文中标记的唯一浮层＝点击弹出的批注编辑浮层（.editor）——悬停浮层已退役 */
+const editorState = `(() => {
+  const el = document.querySelector(".editor[data-editor-for]");
   if (!el) return JSON.stringify({ open: false });
-  const q = el.querySelector(".reader-mark-pop-quote");
-  const c = el.querySelector(".reader-mark-pop-comment");
-  const m = el.querySelector(".reader-mark-pop-meta");
+  const q = el.querySelector(".eq");
+  const ta = el.querySelector("textarea");
+  const count = el.querySelector("[data-cardcount]");
   const btns = [...el.querySelectorAll("button")].map((b) => b.textContent.trim());
   const r = el.getBoundingClientRect();
   return JSON.stringify({
-    open: true, quote: q ? q.textContent : null, comment: c ? c.textContent : null,
-    meta: m ? m.textContent : null, buttons: btns,
+    open: true, quote: q ? q.textContent : null, comment: ta ? ta.value : null,
+    cardcount: count ? count.textContent : null, buttons: btns,
     rect: { l: r.left, t: r.top, w: r.width, h: r.height }, vw: window.innerWidth, vh: window.innerHeight
   });
 })()`;
@@ -388,7 +388,7 @@ try {
   );
   check("对照：标记确实偏离页原点 ≥ 50px（画在原点也能过的那种断言被排除）", typeof geo.dOrigin === "number" && geo.dOrigin >= 50, JSON.stringify(geo));
 
-  // hover → 浮层
+  // v48.45（D85）：悬停不出浮层（悬停层退役）；点击标记 → 批注编辑浮层（唯一浮层）
   const mk = await cdp.eval(`(() => {
     const el = document.querySelector('.pdf-mark-layer .reader-doc-mark[data-mark-id="' + ${JSON.stringify(ex.id)} + '"]');
     if (!el) return "";
@@ -397,11 +397,15 @@ try {
   })()`);
   const mkp = JSON.parse(String(mk) || "{}");
   await hoverAt(cdp, mkp.x, mkp.y);
-  await wait(500);
-  let pop = JSON.parse(String(await cdp.eval(popoverState)) || "{}");
-  check("hover 出浮层", pop.open === true, JSON.stringify(pop));
+  await wait(600);
+  const hoverPop = (await cdp.eval(`!!document.querySelector(".reader-mark-pop")`)) === true;
+  check("悬停不再出浮层（悬停层退役，D85）", hoverPop === false, String(hoverPop));
+  await clickAt(cdp, mkp.x, mkp.y);
+  await wait(800);
+  let pop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
+  check("点击出编辑浮层（唯一浮层，D85）", pop.open === true, JSON.stringify(pop));
   check("浮层原文 ＝ 摘录正文", pop.quote === PDF_PICK, JSON.stringify(pop).slice(0, 300));
-  check("浮层含「已制卡 0 张」", String(pop.meta || "").includes("已制卡 0 张"), pop.meta);
+  check("浮层含「已制卡 0 张」（聚合口径）", String(pop.cardcount || "").includes("已制卡 0 张"), pop.cardcount);
   check("浮层含「就此制卡」按钮", Array.isArray(pop.buttons) && pop.buttons.includes("就此制卡"), JSON.stringify(pop.buttons));
   check(
     "浮层在视口内（不越界）",
@@ -412,7 +416,7 @@ try {
 
   // 就此制卡 → 既有制卡链落库
   const mkBtn = JSON.parse(String(await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll(".reader-mark-pop button")].find((x) => x.textContent.trim() === "就此制卡");
+    const b = document.querySelector(".editor [data-make-card]");
     if (!b) return "";
     const r = b.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -449,11 +453,15 @@ try {
   check("就此制卡落库（走既有 createSingleCard 链）", card.found === true && card.back === CARD_BACK, cardRaw);
   check("新卡挂在被点的摘录上（contextRef.extractId ＝ 摘录 id）", card.extractId === ex.id, cardRaw);
 
-  await hoverAt(cdp, mkp.x, mkp.y);
+  // 制卡后重新点开浮层：计数走聚合口径刷新（cards/changed → marks 重算 → 计数 +1）
+  await clickAt(cdp, mkp.x, mkp.y);
   await wait(900);
-  pop = JSON.parse(String(await cdp.eval(popoverState)) || "{}");
-  check("制卡后计数刷新为「已制卡 1 张」", String(pop.meta || "").includes("已制卡 1 张"), pop.meta);
+  pop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
+  check("制卡后计数刷新为「已制卡 1 张」", String(pop.cardcount || "").includes("已制卡 1 张"), pop.cardcount);
   await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5, buttons: 0 });
+  await wait(400);
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await wait(400);
 
   // 带批注的标记（手写 rects 走 IPC：批注编辑 UI 属后续批次，这里只验证「有 comment 就角标 + 浮层显示」）
@@ -499,10 +507,10 @@ try {
     const r = el.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
   })()`)) || "{}");
-  await hoverAt(cdp, mk2.x, mk2.y);
-  await wait(500);
-  pop = JSON.parse(String(await cdp.eval(popoverState)) || "{}");
-  check("hover 带批注标记 → 浮层显示批注文字", pop.comment === "MARKGUI 批注样本", JSON.stringify(pop).slice(0, 300));
+  await clickAt(cdp, mk2.x, mk2.y);
+  await wait(800);
+  pop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
+  check("点击带批注标记 → 浮层批注框显示批注文字", pop.comment === "MARKGUI 批注样本", JSON.stringify(pop).slice(0, 300));
 
   // 标记层的两条承重路径：滚动跟随 / 缩放重算（位置都在 syncMarks 里按当前页矩形重算）
   const scrollBefore = await cdp.eval(`document.querySelector(".pdf-viewer-container").scrollTop`);
@@ -627,11 +635,11 @@ try {
   check("高亮文本 ＝ 所选文字", Array.isArray(hl.texts) && hl.texts.some((t) => t.length === 1 && t[0] === EPUB_MARK), JSON.stringify(hl.texts).slice(0, 300));
   check("注入的 ::highlight 规则带求值后的具体颜色（iframe 拿不到宿主 Token）", /::highlight\(extract-mark\)\{background-color:.+\}/.test(String(hl.styleText)), hl.styleText);
 
-  // hover 命中（真鼠标移到高亮上）
-  await hoverAt(cdp, (epSel.x1 + epSel.x2) / 2, epSel.y);
-  await wait(600);
-  let epPop = JSON.parse(String(await cdp.eval(popoverState)) || "{}");
-  check("EPUB hover 出浮层且原文 ＝ 所选文字", epPop.open === true && epPop.quote === EPUB_MARK, JSON.stringify(epPop).slice(0, 300));
+  // v48.45（D85）：点击命中（真鼠标点高亮 → 批注编辑浮层；悬停层退役）
+  await clickAt(cdp, (epSel.x1 + epSel.x2) / 2, epSel.y);
+  await wait(800);
+  let epPop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
+  check("EPUB 点击出浮层且原文 ＝ 所选文字", epPop.open === true && epPop.quote === EPUB_MARK, JSON.stringify(epPop).slice(0, 300));
   await screenshot(cdp, "tmp-marks-epub-dark.png");
 
   // 两档：切回纸白 → 注入字面值应变浅档（主题下拉在「阅读设置」弹出组里，先确保组在场）
@@ -658,10 +666,10 @@ try {
     backToPaper === "opened" && paperPick === "clicked" && !!hlLight.styleText && hlLight.styleText !== hl.styleText,
     JSON.stringify({ backToPaper, paperPick, dark: hl.styleText, light: hlLight.styleText }).slice(0, 400)
   );
-  await hoverAt(cdp, (epSel.x1 + epSel.x2) / 2, epSel.y);
-  await wait(600);
-  epPop = JSON.parse(String(await cdp.eval(popoverState)) || "{}");
-  check("切主题后高亮仍命中（浮层照常出现）", epPop.open === true && epPop.quote === EPUB_MARK, JSON.stringify(epPop).slice(0, 300));
+  await clickAt(cdp, (epSel.x1 + epSel.x2) / 2, epSel.y);
+  await wait(800);
+  epPop = JSON.parse(String(await cdp.eval(editorState)) || "{}");
+  check("切主题后高亮仍命中（点击浮层照常出现）", epPop.open === true && epPop.quote === EPUB_MARK, JSON.stringify(epPop).slice(0, 300));
   await screenshot(cdp, "tmp-marks-epub-light.png");
 
   // ================= C. 清理 =================

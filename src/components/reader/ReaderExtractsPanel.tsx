@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { eventBus } from "../../lib/eventbus";
 import { readingWorkflow } from "../../lib/readingWorkflow";
 import { buildAnnotationItems, type ReaderAnnotItem } from "../../lib/reader/marks";
-import AnnotationPanel, { type AnnotFilter } from "./AnnotationPanel";
+import AnnotationPanel, { type AnnotFilter, type AnnotSort } from "./AnnotationPanel";
 
 export default function ReaderExtractsPanel({
   documentId,
@@ -16,6 +16,8 @@ export default function ReaderExtractsPanel({
   getMarkOrder,
   filter,
   onFilter,
+  sort,
+  onSort,
   palette,
   currentId,
   unavailableIds,
@@ -33,6 +35,9 @@ export default function ReaderExtractsPanel({
   getMarkOrder: () => string[];
   filter: AnnotFilter;
   onFilter: (f: AnnotFilter) => void;
+  /** v48.45（D85）：排序受控态（栏头段控持有；面板本体 showHead 不再渲染段控） */
+  sort: AnnotSort;
+  onSort: (s: AnnotSort) => void;
   palette: readonly string[];
   /** 栏内高亮（刚跳过的条目，短时强调；不落库） */
   currentId?: string | null;
@@ -79,6 +84,9 @@ export default function ReaderExtractsPanel({
       currentId={currentId ?? null}
       filter={filter}
       onFilter={onFilter}
+      sort={sort}
+      onSort={onSort}
+      showHead={false}
       palette={palette}
       onJump={(it) => onJump(it.id)}
       onEdit={(it, comment) => onEdit(it.id, comment)}

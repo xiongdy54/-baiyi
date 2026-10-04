@@ -1,9 +1,10 @@
-// 阅读器侧栏（批 4 Task 15，规格 §5.3 / §6.8-13）：三页签**目录 / 摘录 / 图谱**，同刻只显示一个面板。
-// 由 TocSidebar 升级而来（页签行 .tabs：当前项 rail 头同款选中态）。
-// v48.44（D84）：① 三页签**恒可点**——D83 的「数据不在场＝disabled」作废（用户：即使没有内容，
-// 也应允许点击进入页签，与摘录页侧栏一致）；空数据进页签显示空态文案。② 「图谱」页签＝**导图工作区
-// 本体**（MindmapTab 面板经 mapPanel 注入，D84；原 mapTree 树形目录退役，节点跳转由画布选中/搜索承接）。
+// 阅读器侧栏（批 4 Task 15，规格 §5.3 / §6.8-13）：**全高左轨**（v48.45/D85，与摘录批注轨同一形态）。
+// 结构＝栏头行（v48.45/D85：与摘录页 `.annot-side-head` 同几何——「全部/摘录/高亮」筛选 +
+// 「位置/时间」排序，挂在「收起/展开」钮旁）+ 三页签**目录 / 摘录 / 图谱** + 当前页签面板。
+// v48.44（D84）：三页签**恒可点**（空数据进页签显示空态文案）；「图谱」页签＝导图工作区面板
+// （MindmapTab 经 mapPanel 注入；原 mapTree 树形目录退役）。
 import type { ReaderTocItem } from "../../lib/reader/service";
+import type { AnnotFilter, AnnotSort } from "./AnnotationPanel";
 
 export type ReaderTab = "toc" | "extracts" | "map";
 
@@ -27,6 +28,12 @@ export interface ReaderSidebarProps {
   /** 当前页签（会话记忆，由宿主持有） */
   tab: ReaderTab;
   onTabChange: (t: ReaderTab) => void;
+  /** 栏头段控：注解筛选（持久键 app.annotationFilter，宿主持有） */
+  filter: AnnotFilter;
+  onFilter: (f: AnnotFilter) => void;
+  /** 栏头段控：注解排序（会话内视图偏好，宿主持有——与摘录页栏头同一控件） */
+  sort: AnnotSort;
+  onSort: (s: AnnotSort) => void;
   /** 摘录面板（宿主渲染的节点；null＝空态文案「本书暂无批注。」） */
   extractsPanel?: React.ReactNode;
   /** 图谱页签面板（宿主＝MindmapTab；缺省＝空态文案） */
@@ -39,6 +46,10 @@ export default function ReaderSidebar({
   onNavigate,
   tab,
   onTabChange,
+  filter,
+  onFilter,
+  sort,
+  onSort,
   extractsPanel,
   mapPanel
 }: ReaderSidebarProps) {
@@ -60,6 +71,25 @@ export default function ReaderSidebar({
 
   return (
     <nav className="reader-sidebar" id="reader-sidebar" aria-label="阅读器侧栏" data-reader-sidebar>
+      {/* v48.45（D85）：栏头行＝摘录页批注栏头同款（类名/几何同一套：.annot-side-head + .filter/.sort）——
+          段控挂在「收起/展开」钮旁，对摘录页签里的注解列表生效（面板本体 showHead 防双份）。 */}
+      <div className="annot-side-head" data-reader-annot-head>
+        <span className="filter" data-annot-filterseg>
+          {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
+            <button key={id} className={filter === id ? "on" : ""} data-f={id} onClick={() => onFilter(id)}>
+              {label}
+            </button>
+          ))}
+        </span>
+        <span className="sort" data-annot-sortseg>
+          {([["pos", "位置"], ["time", "时间"]] as const).map(([id, label]) => (
+            <button key={id} className={sort === id ? "on" : ""} data-sort={id} onClick={() => onSort(id)}>
+              {label}
+            </button>
+          ))}
+        </span>
+      </div>
+
       <div className="tabs" role="tablist" data-sidebar-tabs>
         {tabs.map(([id, label]) => (
           <button

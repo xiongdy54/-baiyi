@@ -92,6 +92,9 @@ const clickSidebarToggle = () => `(() => { const b = document.querySelector("[da
 
 // ---------- 主流程 ----------
 let electron = null;
+let cdp = null;        // finally 兜底清理要用（v48.45/D85：异常路径不得再泄漏 FSRSTEST 书）
+let seededIds = null; // 第 0 步拿到的两本书 id
+let origReaderSettings = null;
 try {
   // 清场：残留实例会占用 CDP 端口（Windows 下 node 退出不会带走 electron 子进程）
   try {
@@ -107,7 +110,7 @@ try {
     stdio: ["ignore", out, out],
     detached: false
   });
-  const cdp = await cdpConnect();
+  cdp = await cdpConnect();
   await cdp.eval("1");
   await wait(1500);
 
@@ -124,10 +127,12 @@ try {
     const paste = await window.libraryAPI.createFromPaste("FSRSTEST 粘贴引擎验证书", md);
     return { book: book && book.id, paste: paste && paste.id };
   })()`);
+  seededIds = seeded;
   check("0 造数（文件书+粘贴书）", Boolean(seeded?.book && seeded?.paste), JSON.stringify(seeded));
 
   // 0.5 固定阅读设置为已知态（纸白+滚动），并在结束时恢复用户原设置
-  const origSettings = await cdp.eval(`window.settingsAPI.get("app", "readerSettings")`);
+  origReaderSettings = await cdp.eval(`window.settingsAPI.get("app", "readerSettings")`);
+  const origSettings = origReaderSettings;
   await cdp.eval(`window.settingsAPI.set("app", "readerSettings", { mode: { flow: "scrolled" }, appearance: { theme: "paper" } })`);
 
   // 1. 打开文件书 → 引擎视图
@@ -550,6 +555,30 @@ try {
 } catch (err) {
   check("套件异常", false, err && (err.stack || err.message));
 } finally {
+  // v48.45（D85）：清理兜底——主流程第 8 步在异常路径会被整段跳过，FSRSTEST 书因此泄漏进真实书架
+  //（用户实测）。这里只要 CDP 连接还活着、且拿到过两本书 id，就尽力把第 8 步再走一遍。
+  try {
+    if (cdp && seededIds && seededIds.book && seededIds.paste) {
+      const cleaned = await cdp.eval(`(async () => {
+        const all = await window.cardsAPI.listAll();
+        for (const c of all) {
+          const blob = (c.frontMarkdown || "") + (c.backMarkdown || "") + (c.noteText || "");
+          if (blob.includes("FSRSTEST")) await window.cardsAPI.remove(c.id);
+        }
+        await window.libraryAPI.remove(${JSON.stringify("__BOOK__")});
+        await window.libraryAPI.remove(${JSON.stringify("__PASTE__")});
+        return "cleaned";
+      })()`.replace('"__BOOK__"', JSON.stringify(String(seededIds.book))).replace('"__PASTE__"', JSON.stringify(String(seededIds.paste))));
+      console.log("finally 清理兜底：" + cleaned);
+      if (origReaderSettings) {
+        try { await cdp.eval(`window.settingsAPI.set("app", "readerSettings", ${JSON.stringify(origReaderSettings)})`); } catch { /* 已断开就算了 */ }
+      }
+    } else {
+      console.log("finally 清理兜底：CDP/造数 id 不可得，跳过（请用 tests/fsrstest.cleanup.cjs 回收）");
+    }
+  } catch (e) {
+    console.log("finally 清理兜底失败：" + (e && e.message));
+  }
   await new Promise((r) => setTimeout(r, 800));
   try {
     const { execSync } = await import("node:child_process");

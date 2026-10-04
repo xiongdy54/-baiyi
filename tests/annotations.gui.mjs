@@ -888,11 +888,12 @@ try {
   );
 
   // 筛选/排序段控（与摘录页同一组件，同规行为）
-  await cdp.eval(`(() => { document.querySelector('[data-annot-panel] [data-annot-filterseg] [data-f="highlight"]')?.click(); return true; })()`);
+  // v48.45（D85）：筛选/排序段控上移到栏头行（data-reader-annot-head）——面板本体不再有段控
+  await cdp.eval(`(() => { document.querySelector('[data-reader-annot-head] [data-annot-filterseg] [data-f="highlight"]')?.click(); return true; })()`);
   await wait(500);
   const arHl = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
   check("⑩g 筛选「高亮」后仅剩高亮条目（本文档无高亮 ⇒ 空且提示在场）", (arHl.rows || []).length === 0, JSON.stringify(arHl.rows));
-  await cdp.eval(`(() => { document.querySelector('[data-annot-panel] [data-annot-filterseg] [data-f="all"]')?.click(); document.querySelector('[data-annot-panel] [data-annot-sortseg] [data-sort="time"]')?.click(); return true; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-reader-annot-head] [data-annot-filterseg] [data-f="all"]')?.click(); document.querySelector('[data-reader-annot-head] [data-annot-sortseg] [data-sort="time"]')?.click(); return true; })()`);
   await wait(600);
   const arTime = JSON.parse(String(await cdp.eval(annotRows)) || "{}");
   check("⑩h 时间序＝创建先后（与位置序相反＝对照非空转）", (arTime.rows || []).map((r) => r.id).join(",") === `${oldRowId},${epAnchor.id}`, JSON.stringify(arTime.rows));
@@ -975,14 +976,14 @@ try {
   check("⑩k 二次确认前不删（计数不变）", confirmUp === true && p10MidCount === p10DelBefore, `${p10DelBefore} → ${p10MidCount} confirm=${confirmUp}`);
   check("⑩l 确认后该条软删（库 -1 且栏内消失）", p10AfterDel === Number(p10DelBefore) - 1 && !(arDel.rows || []).some((r) => r.id === oldRowId), `${p10DelBefore} → ${p10AfterDel}`);
 
-  // ⑩m 回归：正文标记 hover 出浮层 / 真点开批注编辑器（本轮改动了 Reader 的接线；PDF 侧夹具）
-  // 说明：PDF 书当前**没有大纲** ⇒ 工具栏不显示侧栏入口，annotation-only PDF 的入口可用性是
-  // Task 5 的可用性矩阵范围（规格 D2），故本段只做绘制层回归，不在这里验 PDF 注解栏。
+  // ⑩m 回归（v48.45/D85）：正文标记**点击**弹出批注编辑浮层（悬停浮层已退役）——
+  // 浮层内含聚合「已制卡 N 张」（data-cardcount）与「就此制卡」（data-make-card）。PDF 侧夹具
+  // 说明：PDF 书当前**没有大纲** ⇒ 侧栏入口恒可用（D84），本段只做绘制层回归。
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
   await wait(1600);
   await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title, .book-card")].find((x) => x.textContent.includes(${JSON.stringify(PDF_TITLE)})); (t?.closest(".book-card") || t)?.click(); return true; })()`);
   await wait(3200);
-  // 标记画在页首附近——先滚到顶，避免 hover 落在视口外（空转）
+  // 标记画在页首附近——先滚到顶，避免点击落在视口外（空转）
   await cdp.eval(`(() => { const c = document.querySelector(".pdf-viewer-container"); if (c) c.scrollTop = 0; return 1; })()`);
   await wait(900);
   const markRect = JSON.parse(String(await cdp.eval(`(() => {
@@ -992,12 +993,19 @@ try {
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
   })()`)) || "{}");
   if (typeof markRect.x === "number") await hoverAt(cdp, markRect.x, markRect.y);
-  await wait(700);
+  await wait(500);
   const popUp = (await cdp.eval(`!!document.querySelector(".reader-mark-pop")`)) === true;
   if (typeof markRect.x === "number") await clickAt(cdp, markRect.x, markRect.y);
   await wait(800);
-  const editorUp = await cdp.eval(`!!document.querySelector("[data-editor-for]")`);
-  check("⑩m 正文标记 hover 出浮层、真点开批注编辑器（接线回归）", popUp === true && editorUp === true, JSON.stringify({ popUp, editorUp, markRect }));
+  const editorProbe = await cdp.eval(`JSON.stringify({
+    editor: !!document.querySelector("[data-editor-for]"),
+    cardcount: document.querySelector("[data-cardcount]")?.textContent || "",
+    makeCard: !!document.querySelector("[data-make-card]")
+  })`);
+  const ep = JSON.parse(String(editorProbe) || "{}");
+  check("⑩m 正文标记点击开批注编辑浮层（含已制卡数 + 就此制卡；悬停层退役，D85）",
+    popUp === false && ep.editor === true && String(ep.cardcount || "").includes("已制卡") && ep.makeCard === true,
+    JSON.stringify({ popUp, ...ep, markRect }));
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await wait(400);
@@ -1009,6 +1017,7 @@ try {
   const geom = `(() => {
     const main = document.querySelector(".reader-engine-main");
     const sb = document.querySelector("[data-reader-sidebar]");
+    const rail = document.querySelector("[data-reader-side-rail]");
     const mr = main ? main.getBoundingClientRect() : null;
     const sr = sb ? sb.getBoundingClientRect() : null;
     return JSON.stringify({
@@ -1016,6 +1025,8 @@ try {
       mainL: mr ? Math.round(mr.left * 10) / 10 : null, mainR: mr ? Math.round(mr.right * 10) / 10 : null,
       sbW: sr ? Math.round(sr.width * 10) / 10 : null,
       sbL: sr ? Math.round(sr.left * 10) / 10 : null, sbR: sr ? Math.round(sr.right * 10) / 10 : null,
+      /* v48.45（D85）：全高左轨（两态恒挂载）——关＝轨宽 0 */
+      railW: rail ? Math.round(rail.getBoundingClientRect().width * 10) / 10 : null,
       /* 侧栏在**左**（2026-10-01）：不相交＝栏右缘 ≤ 正文左缘；gap＝正文左缘 − 栏右缘 */
       gap: mr && sr ? Math.round((mr.left - sr.right) * 10) / 10 : null,
       tabs: [...document.querySelectorAll("[data-sidebar-tab]")].map((b) => b.dataset.sidebarTab)
@@ -1030,8 +1041,17 @@ try {
   const tg0 = JSON.parse(String(await cdp.eval(toggleState)) || "{}");
   const gClosed = JSON.parse(String(await cdp.eval(geom)) || "{}");
   check("⑪a PDF 侧栏入口恒可用＋两态标签（v48.43/D83：收起/展开）", tg0.up === true && tg0.disabled === false && tg0.label === "展开", JSON.stringify(tg0));
-  // v48.44（D84）：开关钮与摘录页同一类对（.annot-toggle.bar-btn 同一枚两态文字钮）
+  // v48.44（D84）：开关钮与摘录页同一类对（.annot-toggle.bar-btn 同一枚两态文字钮）；
+  // v48.45（D85）：且同一份 fixed 坐标（视口左上 16, 顶栏 48+12，浮在轨顶）
+  const tg0Geom = JSON.parse(String(await cdp.eval(`(() => {
+    const b = document.querySelector("[data-reader-sidebar-toggle]");
+    if (!b) return "{}";
+    const cs = getComputedStyle(b);
+    return JSON.stringify({ pos: cs.position, left: cs.left, top: cs.top, w: Math.round(b.getBoundingClientRect().width), h: Math.round(b.getBoundingClientRect().height) });
+  })()`)) || "{}");
   check("⑪a2 开关钮＝摘录页同款类对（annot-toggle bar-btn）", typeof tg0.cls === "string" && tg0.cls.includes("annot-toggle") && tg0.cls.includes("bar-btn"), tg0.cls);
+  check("⑪a3 开关钮 fixed (16, 60) 40×24（与摘录页同一坐标，D85）",
+    tg0Geom.pos === "fixed" && tg0Geom.left === "16px" && tg0Geom.top === "60px" && tg0Geom.w === 40 && tg0Geom.h === 24, JSON.stringify(tg0Geom));
   await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
   await wait(1200);
   const gOpen = JSON.parse(String(await cdp.eval(geom)) || "{}");
@@ -1060,16 +1080,19 @@ try {
   await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
   await wait(1000);
   const gReClosed = JSON.parse(String(await cdp.eval(geom)) || "{}");
-  check("⑪d 关闭侧栏：正文宽度复原（±1px）", gReClosed.mainW != null && Math.abs(gReClosed.mainW - gClosed.mainW) <= 1 && gReClosed.sbW == null, JSON.stringify({ closed: gClosed.mainW, reopened: gReClosed.mainW }));
+  check("⑪d 关闭侧栏：正文宽度复原（±1px）且轨宽归 0（v48.45/D85 全高左轨）",
+    gReClosed.mainW != null && Math.abs(gReClosed.mainW - gClosed.mainW) <= 1 && gReClosed.railW === 0,
+    JSON.stringify({ closed: gClosed.mainW, reopened: gReClosed.mainW, railW: gReClosed.railW }));
 
   // (b) 有图谱的书＝三页签；工具栏 B 方案：常驻侧栏+翻页，「更多」「阅读设置」成组且互斥
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
   await wait(1600);
   await cdp.eval(`(() => { const t = [...document.querySelectorAll(".book-card-title, .book-card")].find((x) => x.textContent.includes("GUI 图谱测试书")); (t?.closest(".book-card") || t)?.click(); return true; })()`);
   await wait(3200);
-  const toolBtns = await cdp.eval(`JSON.stringify([...document.querySelectorAll(".reader-engine-controls button")].map((b) => b.textContent.trim()))`);
+  // v48.45（D85）：开关钮浮在轨顶（不在 .reader-engine-controls 行内），探针单独取它
+  const toolBtns = await cdp.eval(`JSON.stringify([...document.querySelectorAll(".reader-engine-controls button, [data-reader-sidebar-toggle]")].map((b) => b.textContent.trim()))`);
   check(
-    "⑪e 工具栏（v48.43/D83）＝收起/展开 + 双段控 + 六动作 + 更多/阅读设置 + 翻页右移",
+    "⑪e 工具栏（D83/D84/D85）＝收起/展开（轨顶浮钮）+ 双段控 + 六动作 + 更多/阅读设置 + 翻页左移",
     (() => {
       const labels = JSON.parse(String(toolBtns) || "[]");
       return labels.includes("展开") && labels.includes("摘录+高亮") && labels.includes("下划线") &&
@@ -1106,6 +1129,15 @@ try {
   await wait(1300);
   const gMap = JSON.parse(String(await cdp.eval(geom)) || "{}");
   check("⑪i 有图谱的书＝三页签（目录/摘录/图谱）", JSON.stringify(gMap.tabs) === JSON.stringify(["toc", "extracts", "map"]), JSON.stringify(gMap.tabs));
+  // v48.45（D85）：栏头行＝开关钮旁的「全部/摘录/高亮」+「位置/时间」段控（与摘录页批注栏头同一套）
+  const headRow = await cdp.eval(`JSON.stringify({
+    head: !!document.querySelector('[data-reader-annot-head]'),
+    filters: [...document.querySelectorAll('[data-reader-annot-head] [data-annot-filterseg] button')].map((b) => b.textContent.trim()),
+    sorts: [...document.querySelectorAll('[data-reader-annot-head] [data-annot-sortseg] button')].map((b) => b.textContent.trim())
+  })`);
+  check("⑪i2 栏头段控在场＝全部/摘录/高亮 + 位置/时间（与摘录页栏头同一套，D85）",
+    (() => { const h = JSON.parse(String(headRow) || "{}"); return h.head === true && JSON.stringify(h.filters) === JSON.stringify(["全部", "摘录", "高亮"]) && JSON.stringify(h.sorts) === JSON.stringify(["位置", "时间"]); })(),
+    headRow);
 
   // (d) 既无目录/注解/图谱的书：入口禁用（新导入的无大纲 PDF）
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);

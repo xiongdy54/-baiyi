@@ -43,6 +43,13 @@ export interface AnnotationEditorProps {
   /** 删除整条（按 kind 换标签；已含二次确认） */
   onDelete: () => Promise<void>;
   onClose: () => void;
+  /**
+   * v48.45（D85）：文中标记的**聚合已制卡数**（本条 + 全部子孙摘录的卡之和）——
+   * 悬停浮层退役后由本浮层承接展示；缺省（摘录页宿主）不显示。
+   */
+  cardCount?: number;
+  /** 「就此制卡」动作（走宿主的手动制卡链）；缺省不显示按钮 */
+  onMakeCard?: () => void;
 }
 
 /** 色块显示色：色板 id → --annot-<id>；#hex 原样 */
@@ -65,7 +72,9 @@ export default function AnnotationEditor({
   onSaveComment,
   onSaveColor,
   onDelete,
-  onClose
+  onClose,
+  cardCount,
+  onMakeCard
 }: AnnotationEditorProps) {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -228,6 +237,19 @@ export default function AnnotationEditor({
           </button>
         )}
       </div>
+      {/* v48.45（D85）：悬停浮层退役后由本浮层承接——「已制卡 N 张」（聚合口径）+「就此制卡」 */}
+      {(cardCount !== undefined || onMakeCard) && (
+        <div className="ebar editor-learn-bar" data-learn-bar>
+          <span className="save-state mono" data-cardcount>
+            已制卡 {cardCount ?? 0} 张
+          </span>
+          {onMakeCard && (
+            <button type="button" className="btn btn-outline btn-sm" data-make-card onClick={onMakeCard}>
+              就此制卡
+            </button>
+          )}
+        </div>
+      )}
       {colorOpen && (
         <div className="colorpop" data-colorpop>
           <div className="row" data-colorrow>
