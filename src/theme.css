@@ -2613,6 +2613,18 @@ body.theme-dark .modal-panel {
 }
 .bar-side, .review-bar-side { display: inline-flex; align-items: center; gap: var(--sp-2); flex: none; }
 .bar-hint { font-size: var(--fs-meta); color: var(--text-helper); }
+/* 底栏内容列（v48.49 / D89）：摘录页底栏按钮与卡面/头带内列同盒（≤720 居中）——用户 2026-10-04 指令
+   「底栏按钮与上方的摘录卡片文本框视觉对齐」。包裹层通用还原 .stage-bar 原行布局（复习页合并复习分支
+   不在约束作用域 ⇒ 行为不变）；720 居中只在 .extract-page 生效，bar 盒每态都与 .extract-main 同宽
+   （轨 0↔280、dock 0↔416 让位同步）⇒ 对齐为构造性成立，非测量补偿。bar 盒几何零改动。 */
+.stage-bar-inner {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4); /* D77 全栏单一间距值在此层继续成立 */
+}
 /* 头带：摘录页 .extract-page-head / 复习页 .review-head 共用（带＝全宽吸顶，内列＝≤720 居中）
    摘录页头带 className 首 token 必须仍是 extract-page-head（面包屑测试命中判据），不得改。 */
 .extract-page-head, .review-head {
@@ -5530,6 +5542,12 @@ body.capture-body #root { height: 100vh; }
 }
 /* 页根已无水平 padding ⇒ 底栏无需负边距满宽；按钮距窗缘 16px 由栏自身的 padding 承担（与复习页一致） */
 .extract-page .stage-bar { margin-inline: 0; }
+/* D89：底栏内容列与卡面/头带内列同盒——水平内距 16→64（=var(--sp-16)）与 .extract-main 一致，
+   使 bar 内容盒 ≡ 主列内容盒（bar 宽每态都 ≡ 主列宽），stage-bar-inner 的 720 居中与
+   .extract-face/.extract-page-head-inner 同一公式 ⇒ 构造性对齐（轨 0↔280、dock 0↔416 各态皆然）。
+   实测根因：主列内距是 64 不是 16——轨展开时卡面盒收窄至 692，底栏 720 内容列两侧各偏 14px。 */
+.extract-page .stage-bar { padding-inline: var(--sp-16); }
+.extract-page .stage-bar-inner { max-width: 720px; margin-inline: auto; }
 /* 空态没有头带（计数直接挂在页上）：把那一段上边距补回来（页根无 padding，水平一并补） */
 .extract-page > .review-count { padding: var(--sp-12) var(--sp-16) 0; }
 .extract-page-head {

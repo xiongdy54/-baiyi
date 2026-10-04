@@ -950,7 +950,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           data-page-hint 在查看态落在这条提示上（会话态仍在头带），既有测试钩子保持不变。 */}
       {viewing ? (
         <div className="stage-bar extract-face-actions">
-          <span className="bar-hint" data-page-hint>查看态：只读 · 不推进调度 · Esc 返回队列</span>
+          <div className="stage-bar-inner">
+            <span className="bar-hint" data-page-hint>查看态：只读 · 不推进调度 · Esc 返回队列</span>
+          </div>
         </div>
       ) : (
         <ExtractActionsBar extract={current!} engine={engine} busy={busy} handlers={faceHandlers} />

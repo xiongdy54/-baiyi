@@ -471,6 +471,8 @@ export function ExtractActionsBar({
        选中一段再摘录仍可走拖选菜单（同一条 annotateParent 路径）。
        「快捷推迟」1/3/7/30 已删；推迟天数改由输入框给。 */
     <div className="stage-bar extract-face-actions" data-extract-bar>
+      {/* D89：内容列与卡面/头带内列同盒（≤720 居中，仅摘录页作用域约束，见 theme.css .stage-bar-inner） */}
+      <div className="stage-bar-inner">
       {handlers.onAdvance && (
         <button
           ref={advanceRef}
@@ -587,6 +589,7 @@ export function ExtractActionsBar({
           )}
         </span>
       )}
+      </div>
     </div>
   );
 }
