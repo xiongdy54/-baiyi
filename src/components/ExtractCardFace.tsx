@@ -319,29 +319,36 @@ export default function ExtractCardFace({
   return (
     <div className="extract-face" data-extract-id={extract.id} data-view-only={viewOnly ? "1" : undefined}>
       {/* v48.41（D81）：卡面 meta 行整体移除——来源上移顶栏中间（onMaterialName 链路），
-          右上「状态/优先级/下次推送」文字按用户指令删除（信息仍在卡片浏览器与批注栏）。 */}
+          右上「状态/优先级/下次推送」文字按用户指令删除（信息仍在卡片浏览器与批注栏）。
+          D88 §6.4 卡面 ctas 化（本批白名单＝仅类名/节标签）：正文节挂 .sec.sec-quote + 节标签
+          「原文摘录」（预览 .sec-label 采纳）；预览的「我的批注」节在本项目无对应渲染位
+          （批注驻留左侧批注轨，D72 契约），不发明新节。引文左缘 3px 色条由 .sec-quote CSS 给出。 */}
 
-      <div className="extract-face-body" ref={bodyRef}>
-        {viewOnly ? (
-          <div className="extract-face-text">
-            {textWithRanges(extract.contentMarkdown || "", quoteRanges, (el) => {
-              hlRef.current = el;
-            })}
-          </div>
-        ) : handlers.onEdit ? (
-          <EditableText value={extract.contentMarkdown || ""} onCommit={(t) => handlers.onEdit?.(t)} />
-        ) : (
-          <div className="extract-face-text">{extract.contentMarkdown}</div>
-        )}
+      <div className="sec sec-quote">
+        <div className="sec-label">原文摘录</div>
+        <div className="extract-face-body" ref={bodyRef}>
+          {viewOnly ? (
+            <div className="extract-face-text">
+              {textWithRanges(extract.contentMarkdown || "", quoteRanges, (el) => {
+                hlRef.current = el;
+              })}
+            </div>
+          ) : handlers.onEdit ? (
+            <EditableText value={extract.contentMarkdown || ""} onCommit={(t) => handlers.onEdit?.(t)} />
+          ) : (
+            <div className="extract-face-text">{extract.contentMarkdown}</div>
+          )}
+        </div>
       </div>
 
-      <div className="extract-face-derived mono">
-        {typeof madeCardCount === "number"
-          ? madeCardCount > 0
-            ? `已就此摘录制卡 ${madeCardCount} 张`
-            : "尚未就此制卡"
-          : ""}
-      </div>
+      {/* meta 节（预览 .cardmeta 的最小类名落地）：既有「已制卡 N 张」行升为 hairline 分节的第二节。
+          无计数数据时不渲染空节（bordered 空节会露出一条无内容的 hairline）；
+          添加时间/来源层级/右端「跳转原文」的采纳超出「仅类名/节标签」白名单，待授权批次。 */}
+      {typeof madeCardCount === "number" && (
+        <div className="extract-face-derived mono sec">
+          {madeCardCount > 0 ? `已就此摘录制卡 ${madeCardCount} 张` : "尚未就此制卡"}
+        </div>
+      )}
     </div>
   );
 }
