@@ -715,6 +715,8 @@ export default function ReviewView({
           D88 §7.4/§7.5：「显示答案」＝填充主钮（settle+涟漪）；评分四钮改两行色点卡式钮（推荐档 accent
           填充加高）；.review-bar-side / .bar-more / .bar-pop 内部结构不变。 */}
       <div className="stage-bar review-bar" data-review-bar>
+        {/* D90：内容列与 .review-session 同盒（720 居中，静态对齐） */}
+        <div className="stage-bar-inner">
         {!showBack ? (
           <button
             ref={revealBtnRef}
@@ -829,6 +831,7 @@ export default function ReviewView({
             )}
           </span>
         </span>
+        </div>
       </div>
     </div>
   );
