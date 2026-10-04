@@ -19,7 +19,6 @@ function toList(v: unknown): string[] {
 
 export default function AIPanel({
   panel,
-  onClose,
   onAccept,
   onAcceptOcclusion,
   onEdit,
@@ -72,7 +71,6 @@ export default function AIPanel({
       error?: string;
     }[];
   };
-  onClose: () => void;
   onAccept: (draft: CardDraft, draftIndex: number, edited?: Partial<CardDraft>) => Promise<void>;
   onAcceptOcclusion: (draft: CardDraft, draftIndex: number) => Promise<void>;
   onEdit: (draftIndex: number, patch: Partial<CardDraft>) => void;
@@ -103,15 +101,9 @@ export default function AIPanel({
 
   return (
     <div className="ai-panel">
-      <div className="ai-panel-head">
-        <span className="ai-panel-title">{panel.kind === "explain" ? "AI 解释" : isOcclusion ? "图片挖空" : "AI 制卡"}</span>
-        <button className="icon-btn" title="关闭" onClick={onClose}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
-          </svg>
-        </button>
-      </div>
+      {/* D88 §8.1：`.ai-panel-head` 标题行并入 CardDock 头（标题 .ai-panel-title 类保留、
+          迁移进 dock-head 内；关闭＝dock 的 data-dock-close 钮，走宿主既有关闭链含批次 reject）。
+          本组件只渲染 .ai-panel-body（全部钩子零改动）。 */}
 
       <div className="ai-panel-body">
         <blockquote className="ai-quote">{panel.text}</blockquote>

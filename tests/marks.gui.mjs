@@ -424,10 +424,10 @@ try {
   check("「就此制卡」按钮可点（取到坐标）", typeof mkBtn.x === "number", JSON.stringify(mkBtn));
   await clickAt(cdp, mkBtn.x, mkBtn.y);
   await wait(600);
-  const quoteInEditor = await cdp.eval(`(() => { const ta = document.querySelector(".modal-panel textarea"); return ta ? ta.value : ""; })()`);
+  const quoteInEditor = await cdp.eval(`(() => { const ta = document.querySelector("[data-card-dock] textarea"); return ta ? ta.value : ""; })()`);
   check("手动制卡面板打开且引用 ＝ 摘录正文", quoteInEditor === PDF_PICK, quoteInEditor);
   await cdp.eval(`(() => {
-    const tas = [...document.querySelectorAll(".modal-panel textarea")];
+    const tas = [...document.querySelectorAll("[data-card-dock] textarea")];
     const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
     if (tas[1]) { set.call(tas[1], ${JSON.stringify(CARD_BACK)}); tas[1].dispatchEvent(new Event("input", { bubbles: true })); }
     return tas.length;
@@ -435,7 +435,7 @@ try {
   // 保存按钮用程序化点击：制卡面板是长表单，真鼠标点位会落在滚动视口之外
   // （m6-2native 同款做法）——本轮的「真键鼠」硬要求针对的是标记的 hover/点选
   const saveClicked = await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll(".modal-panel button")].find((x) => x.textContent.trim() === "创建卡片");
+    const b = [...document.querySelectorAll("[data-card-dock] button")].find((x) => x.textContent.trim() === "创建卡片");
     if (!b) return "no btn";
     if (b.disabled) return "disabled";
     b.click();

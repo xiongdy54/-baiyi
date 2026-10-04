@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Dropdown from "./Dropdown";
 import EditableText from "./EditableText";
+import { annotColorCss } from "./AnnotationEditor";
+import { attachRipple, settle } from "../lib/press";
 import { extractStatusLabel, type ExtractEngine } from "../lib/sessionQueue";
 import type { DueTopic } from "../lib/readingWorkflow";
 import { paintBodyAnnotations, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
 
 const DAY = 86400000;
+
+/** 时间显示：与批注栏同档（MM-DD HH:mm，AnnotationPanel 同款） */
+function fmtTime(t: number): string {
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 /* 优先级＝滑块 0–100（右侧数字可直接输入）：旧的离散档位下拉与快捷推迟 1/3/7/30 均已退役
    （用户 2026-10-01：快捷推迟不需要了；优先级要做成滑块 + 可输入数字）。 */
 
@@ -199,6 +209,11 @@ export default function ExtractCardFace({
   const depth = Number(extract.depth) || 1;
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const hlRef = useRef<HTMLElement | null>(null);
+  /** D88 §6.4 P1 补全 a：引文左缘 3px 色条取该摘录批注色（annotColorCss() 既有函数；
+      无色回落 --accent）。annotation_color 由 listDueExtracts 透传（DueTopic 类型未声明，
+      读取处收窄），颜色体系不动——仍走 --annot-* 实色与 accent。 */
+  const annotationColor = (extract as DueTopic & { annotationColor?: string | null }).annotationColor;
+  const quoteBarColor = annotationColor ? annotColorCss(annotationColor) : "var(--accent)";
   /**
    * 本次拖选手势**起手**的修饰位（v48.39 / D79）：document mousedown 上采样，mouseup 收尾求或。
    * 必须是组件级 ref 而非 effect 闭包变量——handlers 依赖每次渲染都是新身份，effect 重挂会
@@ -326,7 +341,7 @@ export default function ExtractCardFace({
 
       <div className="sec sec-quote">
         <div className="sec-label">原文摘录</div>
-        <div className="extract-face-body" ref={bodyRef}>
+        <div className="extract-face-body" ref={bodyRef} style={{ borderLeftColor: quoteBarColor }}>
           {viewOnly ? (
             <div className="extract-face-text">
               {textWithRanges(extract.contentMarkdown || "", quoteRanges, (el) => {
@@ -341,12 +356,30 @@ export default function ExtractCardFace({
         </div>
       </div>
 
-      {/* meta 节（预览 .cardmeta 的最小类名落地）：既有「已制卡 N 张」行升为 hairline 分节的第二节。
-          无计数数据时不渲染空节（bordered 空节会露出一条无内容的 hairline）；
-          添加时间/来源层级/右端「跳转原文」的采纳超出「仅类名/节标签」白名单，待授权批次。 */}
+      {/* D88 §6.4 P1 补全 b：meta 行（预览 .cardmeta 项目化）——添加时间（mono）· 来源层级 ·
+          已制卡 N 张（mono 只读文字）· 右端「跳转原文」（仅锚在场；复用底栏既有跳转动作语义，
+          同 title 文案；不采纳预览的「生成卡片」钮与 kbd 角标）。
+          来源层级沿用 D81 前口径：depth>1 才显「第 N 层摘录」，根摘录不造假层级。
+          无计数数据时不渲染空节（bordered 空节会露出一条无内容的 hairline）。 */}
       {typeof madeCardCount === "number" && (
-        <div className="extract-face-derived mono sec">
-          {madeCardCount > 0 ? `已就此摘录制卡 ${madeCardCount} 张` : "尚未就此制卡"}
+        <div className="extract-face-derived sec cardmeta">
+          {extract.createdAt ? <span className="mono">{fmtTime(extract.createdAt)}</span> : null}
+          {depth > 1 ? <span>第{depth}层摘录</span> : null}
+          <span className="mono">{madeCardCount > 0 ? `已制卡 ${madeCardCount} 张` : "尚未就此制卡"}</span>
+          {handlers.onJumpToSource && (
+            <button
+              type="button"
+              className="cardmeta-jump"
+              onClick={() => handlers.onJumpToSource?.()}
+              title={
+                extract.contextRef?.parentExtractId
+                  ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
+                  : "跳回材料中的原位置（不写入阅读进度）"
+              }
+            >
+              跳转原文
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -407,6 +440,13 @@ export function ExtractActionsBar({
   /** 底栏「更多」弹层（同刻只开这一个；点外部/Esc 由下方 effect 收） */
   const [moreOpen, setMoreOpen] = useState(false);
   const moreWrapRef = useRef<HTMLSpanElement | null>(null);
+  /** D88 §4.2/§4.3：主 CTA「下一条」＝填充钮白名单成员——涟漪挂载 + 点击 settle（真实事件驱动） */
+  const advanceRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const el = advanceRef.current;
+    if (!el) return;
+    return attachRipple(el);
+  }, []);
   useEffect(() => {
     if (!moreOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -432,7 +472,17 @@ export function ExtractActionsBar({
        「快捷推迟」1/3/7/30 已删；推迟天数改由输入框给。 */
     <div className="stage-bar extract-face-actions" data-extract-bar>
       {handlers.onAdvance && (
-        <button className="bar-btn primary grow" disabled={busy} onClick={() => handlers.onAdvance?.()} title="处理完这条，按 A-Factor 推进调度（快捷键：空格）">
+        <button
+          ref={advanceRef}
+          className="bar-btn primary grow"
+          disabled={busy}
+          onClick={(e) => {
+            // D88 §4.2：settle 回弹＝真实点击主 CTA 的按压反馈（Exaggeration；animationend 自摘）
+            settle(e.currentTarget);
+            handlers.onAdvance?.();
+          }}
+          title="处理完这条，按 A-Factor 推进调度（快捷键：空格）"
+        >
           下一条
         </button>
       )}

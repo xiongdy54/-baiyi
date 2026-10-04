@@ -808,6 +808,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       data-showing-extract-id={shownId ?? ""}
       data-viewing={viewing ? "1" : undefined}
       data-annot-open={annotPanelVisible && annotOpen ? "1" : undefined}
+      /* D88 §8.5：制卡面板（手动/AI 任一）在场——宽窗 ≥1520 时主列与底栏右移让位（CSS 条件）；
+         窄窗 dock 为覆盖层，内容不动。 */
+      data-dock-open={selActions.manualOpen || selActions.aiPanel ? "1" : undefined}
     >
       <div className={`extract-page-cols${annotPanelVisible ? " with-annot" : ""}`} data-annot-cols={annotPanelVisible ? "1" : undefined}>
       {/* 栏开关（v6/D73 造型还原，v48.42/D82 用户指令）：文字钮两态变文案，fixed 页面视口左上角
@@ -964,8 +967,14 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         />
       )}
 
-      {/* 批 4 Task 10：三个面板与阅读器共用同一份实现（SelectionPanels） */}
-      <SelectionPanels sel={selActions} selectionText={faceSel?.text ?? null} elapsedSec={0} />
+      {/* 批 4 Task 10：三个面板与阅读器共用同一份实现（SelectionPanels）
+          D88 §8：手动制卡/AI 两态在其中换渲染容器为右侧制卡面板 dock；头行 meta＝材料名 */}
+      <SelectionPanels
+        sel={selActions}
+        selectionText={faceSel?.text ?? null}
+        elapsedSec={0}
+        dockMeta={current?.docTitle || viewing?.docTitle || undefined}
+      />
 
       {/* 批 4 Task 11（R37/R40）：批注编辑浮层——无保存/取消，失焦即落库；清空＝删批注 */}
       {editing && (

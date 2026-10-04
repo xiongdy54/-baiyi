@@ -759,17 +759,24 @@ body.has-skin .topbar { background: transparent; }
 }
 @keyframes ctas-ripple { to { transform: scale(2.8); opacity: 0; } }
 
-/* 浮层入场（D88 §4.5）：选区菜单 / 批注编辑浮层拿到坐标后由宿主挂 .is-placed 才播
-   （先渲染 -9999 一帧的定位测量机制不变，动画只挂在该类上 ⇒ 不闪现）。
-   transform-origin 默认「菜单在选区下方」（50% 100%）；上方翻面态由接线批次挂修饰类另置（50% 0%）。
-   出场保持瞬时（现状惯例）。本批（P0）只落 CSS，.is-placed 挂类属后续批次接线。 */
+/* 浮层入场（D88 §4.5）：选区菜单 / 批注编辑浮层 spring pop-in。
+   等价实现说明：两浮层的定位测量帧（left:-9999）在 useLayoutEffect 内同步重渲染，
+   从不被实际绘制——故动画直接挂在浮层根类上，自挂载帧（=拿到坐标帧）起播，
+   视觉与「拿到坐标后才播」完全一致。设计稿原文的 .is-placed 类门控需改
+   SelectionMenu/AnnotationEditor 两个组件（本轮白名单外）；若后续授权，把本规则
+   换回 .is-placed 门控并在组件里挂类即可（keyframes 与时长不变）。
+   transform-origin 取「菜单在选区下方」（50% 100%）；上方翻面态的 50% 0% 需组件侧
+   placePopover 的翻面结果（同上，本轮不接线）。出场保持瞬时（现状惯例）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .selection-menu.is-placed, .editor.is-placed {
+  .selection-menu, .editor {
     animation: pop-in 220ms var(--spring) both;
     transform-origin: 50% 100%;
   }
 }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.92) translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* 涟漪容器（D88 §4.3）：涟漪 span 绝对定位需相对钮身裁剪——仅填充钮白名单需要 */
+.btn-primary, .bar-btn.primary { position: relative; overflow: hidden; }
 
 /* ---------- 书架 ---------- */
 
@@ -1847,6 +1854,27 @@ body.theme-dark .modal-panel {
 .reader-body.reader-body-shifted .reader-scroll {
   flex: 1 1 calc(100% - 400px);
 }
+/* D88 §8.4：让位与 dock 滑入同参数（--dur-panel/--ease）——fixed 面板用 transform 不触发布局，
+   宿主 flex-basis 让位用过渡补齐同步感。reduce 时规则不在场（瞬时）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .reader-body .reader-scroll { transition: flex-basis var(--dur-panel) var(--ease); }
+}
+/* D88 §5.3 文中标记入场（划笔）：文档打开后**首批** marks 装载时宿主在 .reader-engine-main
+   挂 reader-marks-enter（1200ms 后摘除）；作用域内标记元素左→右揭示（640ms，无 stagger）。
+   实现注记：设计稿原文是「底色层 background-size 0%→100%」——PDF 标记的底色是逐条内联
+   实色（el.style.background = annotSoft(color)，颜色体系 --annot-* 不动是硬约束），无
+   background-image 可供 background-size 扫描；src/lib 在白名单外，故以 clip-path inset
+   左→右揭示等价实现同一「划笔」观感（元素为纯色覆盖层，无文字内容，视觉等价）。
+   EPUB 的标记是 iframe 内 CSS Custom Highlight（无 DOM 元素），宿主容器类够不着，
+   不做入场（标记照旧瞬时出现）。「此后增删的标记 160ms 淡入」需内核给新标记打标，
+   同属 src/lib 白名单外——本轮不实现，仅首次装载有入场。 */
+@media (prefers-reduced-motion: no-preference) {
+  .reader-marks-enter .reader-doc-mark { animation: mark-sweep 640ms var(--ease-out-soft) both; }
+}
+@keyframes mark-sweep {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
 /* E-1 时期的「正文靠 padding-left 给浮层让位」随左侧浮层退役（D2 改为右侧停靠栏，
    让位由 flex 布局天然完成：正文区的宽度里根本没有栏那 280px）。 */
 .reader-scroll {
@@ -2392,6 +2420,76 @@ body.theme-dark .modal-panel {
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
+
+/* ---------- 制卡面板 CardDock（D88 §8）：统一右停靠栏 ----------
+   手动态（ManualCardForm）/ AI 态（AIPanel 嵌入）同刻只开一个（互斥由宿主
+   manualOpen/aiPanel 状态保证）；关闭态不挂载（§8.6）。fixed 右缘 + 顶栏下贴齐，
+   400px（max-width 45vw 沿 .ai-panel 既有几何）；左缘 hairline + 唯一浮层阴影。 */
+.side-dock {
+  position: fixed;
+  right: 0;
+  top: var(--sp-12); /* 顶栏 48 */
+  bottom: 0;
+  width: 400px;
+  max-width: 45vw;
+  background: var(--paper);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  z-index: var(--z-drawer);
+  display: flex;
+  flex-direction: column;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .side-dock { animation: side-dock-in var(--dur-panel) var(--ease); }
+}
+@keyframes side-dock-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.side-dock-head {
+  height: var(--sp-12);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+.side-dock-title {
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex: none;
+}
+.side-dock-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  text-align: right;
+}
+.side-dock-close { flex: none; }
+.side-dock-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* 手动态：表单体原样（seg-tabs/form-field/ta-short/form-actions 自带节奏），容器只给内距 */
+.side-dock-body.side-dock-body-manual { padding: var(--sp-4) var(--sp-6); }
+/* AI 态：AIPanel 原组件嵌入——其根类几何（宽 400/左缘线/入场动画）由 dock 承担，全部回收 */
+.side-dock .ai-panel {
+  width: auto;
+  max-width: none;
+  flex: 1;
+  min-height: 0;
+  border-left: none;
+  z-index: auto;
+  animation: none;
+}
+
 /* ---------- M7 词典（v32）：单词弹窗 + 下载目录行 ---------- */
 /* --fs-title 在 :root 中不存在（阶梯只有 -l/-s），原写法静默失效并继承 14px；
    词条是弹窗主内容 → Title L，越大越细 */
@@ -3454,8 +3552,22 @@ body.theme-dark .modal-panel {
   gap: var(--sp-2);
   min-width: 0;
 }
-/* v48.43（D83）：末组（更多/阅读设置/翻页）推到右缘——左侧＝收起/展开 + 选区动作组紧排 */
-.reader-engine-controls-group:last-child { margin-left: auto; }
+/* v48.43（D83）：末组（更多/阅读设置/翻页）推到右缘——左侧＝收起/展开 + 选区动作组紧排。
+   D88 §5.2 后 pageinfo（span）成为 controls 的末子节点，改用 :last-of-type 让该组
+   （最后一个 div 组）保持贴右，pageinfo 落在其右端。 */
+.reader-engine-controls-group:last-of-type { margin-left: auto; }
+/* D88 §5.2：页码/章节位（meta 档 mono）——数据来自既有 onRelocate locator；
+   页码不可得只显示章节，皆无＝宿主不渲染（禁造假）。窄窗最先退让（§11 第一级）。 */
+.reader-pageinfo {
+  margin-left: var(--sp-4);
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-meta);
+  color: color-mix(in srgb, var(--reader-fg, var(--text-helper)) 62%, transparent);
+  white-space: nowrap;
+}
+@media (max-width: 1150px) { .reader-pageinfo { display: none; } }
 /* 组间分隔（次要手段：主分组靠空间，1px 线仅作视觉断点） */
 .reader-engine-divider {
   width: 1px;
@@ -5199,6 +5311,18 @@ body.capture-body #root { height: 100vh; }
 }
 /* 可见性离散步进：过渡下「收起时停在末帧隐身、展开时立即显形」＝滑出/滑入全程可见 */
 .extract-annot-rail .annot-side { height: 100%; }
+/* D88 §8.5 摘录页 dock 让位：data-dock-open 随 manualOpen/aiPanel 任一在场置位（宿主钩子）。
+   宽窗（≥1520）主列与底栏右移 416（=400 dock + 16 间距；dock fixed 右缘贴窗缘，内容右缘
+   让到 dock 左缘内 16px）；窄窗（<1520）dock 为覆盖层浮于其上，内容不动（保护 1120 最小窗
+   下卡面/底栏可用性）。轨与 dock 同开时左右让位并存，版心取剩余宽。 */
+@media (min-width: 1520px) {
+  .extract-page[data-dock-open="1"] .extract-main { padding-right: 416px; }
+  .extract-page[data-dock-open="1"] .stage-bar { margin-right: 416px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .extract-page .extract-main { transition: padding-right var(--dur-panel) var(--ease); }
+  .extract-page .stage-bar { transition: margin-right var(--dur-panel) var(--ease); }
+}
 /* 栏头行（v7/D74 让位更新；v48.45/D85 起阅读器侧栏轨共用同一套）：与 fixed 开关钮**同一行**——
    头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；
    「注解 N」已由 showCount={false} 关闭（用户裁定省一行）。两条段控按 3:2 有比例铺满剩余宽，
@@ -5438,8 +5562,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   margin-bottom: var(--sp-3);
 }
 /* 引文左缘 3px 批注色条（预览 .quote 采纳）：色默认 --accent；随该摘录 annotationColor
-   取 --annot-* 实色的接线需在节上落数据钩子（本批 ExtractCardFace 白名单仅类名/节标签，
-   待授权批次接线；颜色体系本身不动——仍走 --annot-* 实色与 accent，不引入预览演示色）。
+   取 --annot-* 实色由 ExtractCardFace 在 .extract-face-body 上写内联 borderLeftColor
+   （P1 补全 a；annotColorCss() 既有函数，无色回落 accent）。颜色体系本身不动——
+   仍走 --annot-* 实色与 accent，不引入预览演示色。
    注：CSS 注释里不要让星号与斜杠相邻（如「--annot-」后直接跟「* /」再跟色名）——
    那会让注释提前闭合，其后的说明文字变成非法选择器前奏，打碎紧随的规则（本次实测踩过）。 */
 .extract-face .sec-quote .extract-face-body {
@@ -5460,6 +5585,28 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .extract-page .extract-face-body { font-size: var(--fs-title-l); line-height: 1.5; }
 .extract-face-text { white-space: pre-wrap; }
 .extract-face-derived { font-size: var(--fs-meta); color: var(--text-helper); }
+/* D88 §6.4 P1 补全 b：卡面 meta 行（预览 .cardmeta 项目化）——添加时间（mono）· 来源层级 ·
+   已制卡 N 张（mono 只读文字），右端「跳转原文」（仅锚在场；复用底栏既有跳转动作语义，
+   不采纳预览的「生成卡片」钮与 kbd 角标）。 */
+.extract-face .cardmeta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.extract-face .cardmeta .cardmeta-jump {
+  margin-left: auto;
+  border: none;
+  background: none;
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  padding: 2px var(--sp-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.extract-face .cardmeta .cardmeta-jump:hover { background: var(--grey-1); color: var(--text-primary); }
+.extract-face .cardmeta .cardmeta-jump:disabled { color: var(--grey-2); cursor: not-allowed; }
 /* 底部动作栏（2026-10-01）：几何由共用 .stage-bar 提供（元素挂双类 stage-bar extract-face-actions）——
    流内末子节点 + sticky bottom:0 零偏移，长内容钉在滚动口底缘、滚到底自然落在内容末尾，任何窗口高度
    下自己与内容都不被裁（EXCERPT-REVIEW-LAYOUT-REDESIGN v2）。类名保留为作用域/测试钩子。
