@@ -22,6 +22,10 @@
 >
 > **修订记录（v10，2026-10-03 / D77）**：用户两项收尾指令（逐字）：①「我之前要求你将摘录页中，底栏按钮距离窗口边框和距离窗口底边的间距改为相同的值，现在请将按钮之间的间距也改为这个值，这样看起来整齐一点。复习页的底栏请也做相同的间距调整」——`.stage-bar` gap `--sp-6`（24）→ **`--sp-4`**（16）：按钮间距 = 距窗缘 = 距窗底 = 16px，全栏单一间距值（两页同步）。②「请去掉摘录页的『下一条』按钮上的『空格』和复习页的『显示答案』按钮上的『空格』文字，因为这些快捷键都是可自定义的可变的，快捷键的显示方式统一改成鼠标悬停在按钮上时气泡显示」——删除两钮内嵌的 `.kbd` 快捷键角标；快捷键信息**只走 `title` 悬停气泡**：复习页沿用既有的动态 hint（随键位设置变化，`title=显示答案（快捷键：${hint || "未绑定"}，可在设置里改）`），摘录页「下一条」title 保留（其空格快捷键当前为页面内固定绑定）。`.bar-btn .kbd` / `.bar-btn.primary .kbd` 两条 CSS 规则随零消费者删除。
 >
+> **修订记录（v13，2026-10-04 / D88）**：批注轨几何升级与动效 Token 并轨。D88（设计稿 `docs/design/UI-CTAS-REDESIGN-D88.md`）对本文两处修订：① **v5「底栏不做补偿」（`.stage-bar { margin-inline:0 }`、按钮恒距窗缘 16px）条款由 D88 取代**——用户 2026-10-04 指令「侧边栏贯通到底部，展开侧边栏时底栏相应收缩」，轨改 `fixed`（top:48 → bottom:0 贴窗底，消除 sticky 滚动 clamp 缺陷），轨展开时 `.stage-bar` 与 `.extract-page-cols` 同步 `margin-left/padding-left 0↔280`（`--dur-panel` 同参数同步过渡，底栏控件与内距零改动）；② §6 动效规范的时长/缓动并入 **D88 动效 Token 体系**（`--dur/--ease` 管栏级、`--ease-out-soft/--dur-hover/--dur-press` 管按钮级、`--spring` 管指示/回弹，见 GUIDE §5.1），本稿基线条款继续有效。
+>
+> **修订记录（v12，2026-10-04 / 用户指令）：放开高级动画。** 用户指令（逐字）：「我的项目当中早期好像有『不要动画』的要求，如果现在还有这个要求的话请删掉它，现在可以有高级的动画」。**核查结论**：全仓不存在全局禁动画条款；唯一的成文禁令＝§6 第 4 条「禁止页面/栏开合位移动画、评分色条过渡、按钮 transform」。按指令删除该条，改为允许高级动效。纪律保留：动效须语义耦合、由真实数据/状态驱动（GUIDE §4.10-3 禁假动画、§4.17-7 禁庆祝动画继续生效）、`prefers-reduced-motion` 降级、时长/缓动走 `--dur`/`--ease` Token。本修订为纯文档变更，未动代码。
+>
 > **修订记录（v11，2026-10-03 / D78）**：用户缺陷报告（逐字）：「我之前要求了支持按住Ctrl可以分别进行多次划选来同时选中多段不相连的文字进行摘录或者高亮或者制卡或者其他后续操作，但是我刚才尝试了一下并没有支持这个功能」。**诊断**：D61 §6.8-11 的多段选择采集层只落在 `Reader.tsx`（阅读器路径 `tests/multiselect.gui.mjs` 20/20 实测通过——真键鼠 Ctrl 加选、集合、两段区间落库全链路健在）；**摘录页卡面从未接入**——`ExtractCardFace.capture()` 只采当前 window 选区（单段）、不读修饰键，`ExtractReviewView` 对 multiHighlight 恒 `update("replace")`，故在摘录页 Ctrl+拖选＝普通替换，累计不发生。**修法（同语义接入摘录页）**：①采集面扩到 `ExtractCardFace`——mouseup 载荷携带修饰位（`ctrlKey/altKey/shiftKey/metaKey`，同 Reader 的「修饰位来自指针事件本身」纪律；键盘 shift+方向键采集按无修饰＝替换）；②集合运算在渲染层以**偏移区间**完成（摘录页的锚域是 `content_markdown` 字符偏移，与阅读器的文本 span 域不同域：偏移是落库 `parentRange` 的第一事实，过文本桥会丢精度且同文段无法消歧；`updateSpanSet` 的文本代数不适用于偏移域，非复制）；语义与阅读器逐字一致——无修饰＝替换、修饰＝按边界精确切换（同段再选＝移出）、无合并；③高亮复用既有 multiHighlight（宿主文档、`theme.css` 的 `::highlight(multi-select)`，零新增）；④拼接文本 `\n\n` 与既有 capture 惯例一致，菜单与五动作（制卡/AI 制卡/AI 解释/摘录/查词）+ 批注挂色零改动自动多段化；⑤修饰键同源 `app.multiSelectKey`（读侧 `readMultiSelectKey` + `settings/changed` 订阅，与 Reader 同法）；⑥清理链路全覆盖：`onSelection(null)`（卡外落下/换卡/动作完成 `clearSelection`）/「点色完成」/Esc（经既有路径）均清集合+高亮；⑦**落库锚链**（实测补上）：菜单「摘录/高亮」的落库走 `useSelectionActions.writeExtract`，其 contextRef 原不含 `parentRange` 且 `clearSelection` 先于落库重置累计——新增配置面 `selectionRanges()`（先采后清）+ `writeExtract` 装配 `opts.parentRange`（**≥2 段才写入** `contextRef.parentRange`，单段路径逐字节不变），高亮/批注路径经 `annotateParent().contextRefPatch`（faceSel.ranges＝累计集合）本就携带；⑧**幂等守卫**（实测踩过）：松开 Ctrl 的 keyup 会以无修饰位重采同一选区，若重放 replace 将在松键瞬间抹掉累计——「无修饰位且与上次上报同界＝重复采集，不重放」；带修饰位的上报不跳过（同段再选＝移出语义保留）。
 
 ---
@@ -214,9 +218,9 @@
 | Disabled | 文字/边框 `--grey-2`，不响应 hover（现状 `.bar-btn:disabled`） |
 | 查看态（仅摘录页） | bar 显示模式提示（§3.2）；head 显示「返回队列」；空格/Z 不作用（现状逻辑不动） |
 
-## 6. 动画规范（克制、语义耦合、可降级）
+## 6. 动画规范（v12 起放开高级动效；语义耦合、可降级）
 
-只做两处，全部走既有 `--ease: cubic-bezier(0.2,0,0.38,0.9)` / `--dur: 120ms`（瑞士风 120–240ms 区间下限，连续处理场景宁快勿拖）：
+第 1–2 条为基线动效，全部走既有 `--ease: cubic-bezier(0.2,0,0.38,0.9)` / `--dur: 120ms`（瑞士风 120–240ms 区间下限，连续处理场景宁快勿拖）；**自 v12 起（用户 2026-10-04 指令）在此之上允许高级动效**，不再限于两处：
 
 1. **换卡入场**（两页统一，"连续处理"的唯一表达）：卡面 `opacity 0→1 + translateY(4px→0)`，120ms `--ease`，`both`。
    - 触发：卡 id 变化导致的重挂载。摘录页 `ExtractCardFace` 已有 `key={current!.id}`（[ExtractReviewView.tsx:L667](file:///c:/Users/xiongdy/Documents/OpenCode/Incremental%20reading%20Dev/src/components/ExtractReviewView.tsx#L667)）；**复习页需给 `<CardFace>` 补 `key={current!.id}`**（[ReviewView.tsx:L586](file:///c:/Users/xiongdy/Documents/OpenCode/Incremental%20reading%20Dev/src/components/ReviewView.tsx#L586)，一行改动；翻面状态 `showBack` 由父持有，不受 remount 影响）。
@@ -224,7 +228,7 @@
    - 作用域选择器：`.review-wrap .review-face, .extract-page .extract-face, .review-wrap .extract-face, .review-wrap .review-back`。
 2. **弹层入场**：`.bar-pop` opacity 0→1，150ms（瑞士风"浮层进 150 出 100"；出场保持瞬时，不引 JS 退场动画）。
 3. **降级**：以上全部包在 `@media (prefers-reduced-motion: no-preference)` 内——减少动效时零动画（与全仓既有 reduce 块同思路，[theme.css:L1708](file:///c:/Users/xiongdy/Documents/OpenCode/Incremental%20reading%20Dev/src/theme.css#L1708) 等 6 处先例）。
-4. **禁止**：页面/栏开合位移动画、评分色条过渡、按钮 transform。侧边栏开合瞬时重排。
+4. **高级动效放开（v12 用户裁定，原「禁止页面/栏开合位移动画、评分色条过渡、按钮 transform」条款作废）**：页面/栏开合、评分反馈、按钮变换等均可使用高级动效；纪律仍保留——语义耦合、由真实数据/状态驱动（GUIDE §4.10-3 禁假动画、§4.17-7 禁庆祝动画继续生效）、全部动效包在 `@media (prefers-reduced-motion: no-preference)` 内可降级、时长/缓动走 `--dur`/`--ease` Token 体系。
 
 ## 7. 窗口尺寸变化行为
 
