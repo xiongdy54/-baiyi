@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>复习界面 · 增量阅读（设计预览）</title>
+<style>
+  :root{
+    --paper:#fafaf8;
+    --ink:#0a0a0a;
+    --fill:#f0f0ee;
+    --line:#d4d4d2;
+    --muted:#737373;
+    --accent:#166a59;
+    --accent-bright:#3fa08a;
+    --again:#b3261e;
+    --hard:#a16207;
+    --good:#166a59;
+    --easy:#1e5a8a;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+    background:var(--paper);color:var(--ink);font-size:14px;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  .head{animation:rise .38s cubic-bezier(.2,.7,.3,1) both}
+  .stage{animation:rise .38s cubic-bezier(.2,.7,.3,1) .07s both}
+  .bottombar{animation:rise .38s cubic-bezier(.2,.7,.3,1) .14s both}
+
+  .app{display:flex;flex-direction:column;height:100vh;min-width:1440px}
+
+  /* ---------- 顶部队列带 ---------- */
+  .head{border-bottom:1px solid var(--line);padding:0 48px}
+  .head-row{display:flex;align-items:center;gap:24px;height:64px}
+  .deck{font-size:16px;font-weight:600}
+  .deck-sub{font-size:13px;color:var(--muted)}
+  .head .spacer{flex:1}
+  .queue{display:flex;height:64px}
+  .queue div{
+    display:flex;flex-direction:column;justify-content:center;gap:2px;
+    padding:0 24px;border-left:1px solid var(--line);
+  }
+  .queue b{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+  .queue span{font-size:12px;color:var(--muted)}
+  .queue .todo b{color:var(--accent)}
+  .queue .dot{width:8px;height:8px;background:var(--line);margin-bottom:4px}
+  .queue .todo .dot{background:var(--accent)}
+  .queue .doing .dot{background:var(--muted)}
+
+  .progress{height:2px;background:var(--fill)}
+  .progress i{display:block;height:100%;background:var(--accent);width:18%;transition:width .5s cubic-bezier(.2,.7,.3,1)}
+
+  /* ---------- 复习卡舞台 ---------- */
+  .stage{
+    flex:1;display:flex;align-items:center;justify-content:center;
+    padding:40px 48px;min-height:0;
+  }
+  .flipper{width:720px;height:440px;perspective:1600px}
+  .card{
+    position:relative;width:100%;height:100%;
+    transform-style:preserve-3d;
+    transition:transform .55s cubic-bezier(.3,.7,.25,1);
+  }
+  .flipper.flipped .card{transform:rotateY(180deg)}
+  .face{
+    position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;
+    background:var(--paper);border:1px solid var(--line);
+    padding:44px 56px;display:flex;flex-direction:column;overflow:hidden;
+  }
+  .face.back{transform:rotateY(180deg)}
+  .face-label{
+    display:flex;align-items:baseline;justify-content:space-between;
+    margin-bottom:28px;
+  }
+  .face-label .side{font-size:12px;color:var(--muted)}
+  .face-label .no{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .face h1{font-size:24px;font-weight:600;line-height:1.5;letter-spacing:.005em}
+  .face .qsub{margin-top:auto;font-size:13px;color:var(--muted)}
+  .face .qsub kbd{
+    font:inherit;border:1px solid var(--line);padding:1px 7px;margin:0 2px;font-size:12px;
+  }
+  .answer p{font-size:17px;line-height:1.8;margin-bottom:16px}
+  .answer ul{list-style:none;margin:4px 0 0}
+  .answer li{
+    font-size:15px;line-height:1.7;padding:8px 0 8px 20px;
+    border-left:3px solid var(--accent);margin-bottom:8px;
+  }
+  .answer li b{font-weight:600}
+  .card-meta{
+    margin-top:auto;padding-top:16px;border-top:1px solid var(--fill);
+    display:flex;gap:28px;font-size:12px;color:var(--muted);
+  }
+  .card-meta b{color:var(--ink);font-weight:500}
+
+  /* ---------- 底栏 72px ---------- */
+  .bottombar{
+    height:72px;flex:none;border-top:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;gap:12px;
+    padding:0 48px;background:var(--paper);
+  }
+  .rate-group{display:none;gap:12px}
+  .bottombar.rated .show-btn{display:none}
+  .bottombar.rated .rate-group{display:flex}
+
+  .show-btn{
+    min-width:220px;padding:12px 32px;
+    background:var(--ink);color:var(--paper);font-size:15px;font-weight:600;
+    transition:background .15s;
+  }
+  .show-btn:hover{background:#2d2d2d}
+  .show-btn:active{transform:translateY(1px)}
+
+  .rate{
+    min-width:128px;padding:8px 16px 10px;border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;gap:1px;
+    transition:border-color .15s,background .15s;
+  }
+  .rate:hover{background:var(--fill);border-color:var(--muted)}
+  .rate:active{transform:translateY(1px)}
+  .rate .name{font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .rate .iv{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .rate .kbd{
+    font-size:11px;color:var(--muted);border:1px solid var(--line);
+    padding:0 5px;line-height:1.5;
+  }
+  .rate .tick{width:100%;height:3px;margin-bottom:6px}
+  .rate.again{color:var(--again)}   .rate.again .tick{background:var(--again)}
+  .rate.hard {color:var(--hard)}    .rate.hard  .tick{background:var(--hard)}
+  .rate.good {color:var(--good)}    .rate.good  .tick{background:var(--good)}
+  .rate.easy {color:var(--easy)}    .rate.easy  .tick{background:var(--easy)}
+  .rate .name,.rate .kbd{color:var(--ink)}
+  .rate .tick{margin-top:2px}
+
+  .hint{font-size:12px;color:var(--muted);margin-left:20px}
+
+  .toast{
+    position:fixed;left:50%;bottom:96px;transform:translate(-50%,8px);
+    background:var(--ink);color:var(--paper);font-size:13px;padding:10px 18px;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{animation:none!important;transition:none!important}
+    .flipper.flipped .card{transform:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 顶部队列带 -->
+  <header class="head">
+    <div class="head-row">
+      <div>
+        <div class="deck">学习科学：基础与研究</div>
+        <div class="deck-sub">今日复习队列</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="queue" aria-label="队列计数">
+        <div><span class="dot"></span><b id="cNew">12</b><span>未学习</span></div>
+        <div class="doing"><span class="dot"></span><b id="cLearn">8</b><span>学习中</span></div>
+        <div class="todo"><span class="dot"></span><b id="cDue">24</b><span>待复习</span></div>
+      </div>
+    </div>
+    <div class="progress" aria-hidden="true"><i id="progFill"></i></div>
+  </header>
+
+  <!-- 复习卡 -->
+  <main class="stage">
+    <div class="flipper" id="flipper">
+      <section class="card">
+        <div class="face front">
+          <div class="face-label"><span class="side" id="sideLabel">正面</span><span class="no" id="cardNo">第 8 张，共 44 张</span></div>
+          <h1 id="qText">什么是「合意困难」（desirable difficulties）？它与单纯的「学习吃力」有什么本质区别？</h1>
+          <p class="qsub">凭记忆作答后，再对照背面要点。按 <kbd>空格</kbd> 显示答案</p>
+        </div>
+
+        <div class="face back">
+          <div class="face-label"><span class="side">背面 · 参考答案</span><span class="no" id="cardNoB">第 8 张，共 44 张</span></div>
+          <div class="answer">
+            <p id="aLead">合意困难指<strong>在学习当下降低表现、却能提升长期保持与迁移</strong>的特定困难，如提取练习、间隔安排、变换练习情境。它与「难」的区别在结果指向：</p>
+            <ul>
+              <li>合意困难牺牲<strong>当次成绩</strong>，换来<strong>两周后的保持</strong>；无效困难只是让当下更费力，保持不变。</li>
+              <li>判断标准是提取是否仍然成功——踮起脚够得着；彻底失败则不构成「合意」。</li>
+            </ul>
+          </div>
+          <div class="card-meta">
+            <span>来源 <b>第 2 章，第 7 段</b></span>
+            <span>上次复习 <b>3 天前 · 良好</b></span>
+            <span>稳定性 <b>2.4</b></span>
+            <span>难度 <b>5.1</b></span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- 底栏 -->
+  <footer class="bottombar" id="bottombar">
+    <button class="show-btn" id="showBtn">显示答案</button>
+
+    <div class="rate-group" role="group" aria-label="回忆评分">
+      <button class="rate again" data-rate="重来" data-iv="10 分">
+        <span class="tick"></span>
+        <span class="name">重来<span class="kbd">1</span></span>
+        <span class="iv">10 分</span>
+      </button>
+      <button class="rate hard" data-rate="困难" data-iv="1 天">
+        <span class="tick"></span>
+        <span class="name">困难<span class="kbd">2</span></span>
+        <span class="iv">1 天</span>
+      </button>
+      <button class="rate good" data-rate="良好" data-iv="3 天">
+        <span class="tick"></span>
+        <span class="name">良好<span class="kbd">3</span></span>
+        <span class="iv">3 天</span>
+      </button>
+      <button class="rate easy" data-rate="简单" data-iv="8 天">
+        <span class="tick"></span>
+        <span class="name">简单<span class="kbd">4</span></span>
+        <span class="iv">8 天</span>
+      </button>
+      <span class="hint">间隔由调度器按记忆状态计算，仅供预览</span>
+    </div>
+  </footer>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+  const flipper  = document.getElementById('flipper');
+  const bar      = document.getElementById('bottombar');
+  const toast    = document.getElementById('toast');
+  const showBtn  = document.getElementById('showBtn');
+  const reduced  = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // 预备的下一张卡（演示评分后推进）
+  const nextCard = {
+    no:   '第 9 张，共 44 张',
+    q:    '为什么「临时抱佛脚」的集中学习，在两周后的保持测验中几乎无效？',
+    lead: '集中学习在同一时刻反复提取<strong>同一段高度活跃的记忆</strong>，提取难度趋近于零。有效的改写需要：</p>',
+    li: [
+      '提取发生在<strong>遗忘临界点</strong>上，困难程度恰到好处；',
+      '间隔期间的记忆不稳定状态，正是<strong>重新巩固</strong>的窗口。'
+    ]
+  };
+
+  let toastTimer;
+  function showToast(msg){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+  }
+
+  function flip(){
+    flipper.classList.toggle('flipped');
+    bar.classList.toggle('rated', flipper.classList.contains('flipped'));
+  }
+  showBtn.addEventListener('click', flip);
+
+  function rate(name, iv){
+    showToast('已评「' + name + '」，这张卡 ' + iv + ' 后回到队列');
+    const cDue = document.getElementById('cDue');
+    cDue.textContent = Math.max(0, +cDue.textContent - 1);
+    document.getElementById('progFill').style.width =
+      Math.min(100, parseFloat(document.getElementById('progFill').style.width) + 2.3) + '%';
+    if (reduced) return;
+    // 翻回正面并载入下一张
+    setTimeout(() => {
+      flipper.classList.remove('flipped');
+      bar.classList.remove('rated');
+      setTimeout(() => {
+        document.getElementById('cardNo').textContent  = nextCard.no;
+        document.getElementById('cardNoB').textContent = nextCard.no;
+        document.getElementById('qText').textContent   = nextCard.q;
+      }, reduced ? 0 : 300);
+    }, reduced ? 0 : 450);
+  }
+  document.querySelectorAll('.rate').forEach(b =>
+    b.addEventListener('click', () => rate(b.dataset.rate, b.dataset.iv)));
+
+  // 键盘：空格翻面，1-4 评分
+  document.addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (e.code === 'Space' || e.key === 'Enter') {
+      if (!flipper.classList.contains('flipped')) { e.preventDefault(); flip(); }
+      else if (e.code === 'Space') { e.preventDefault(); }
+      return;
+    }
+    if (flipper.classList.contains('flipped') && ['1','2','3','4'].includes(e.key)) {
+      const b = document.querySelectorAll('.rate')[+e.key - 1];
+      rate(b.dataset.rate, b.dataset.iv);
+    }
+  });
+</script>
+</body>
+</html>

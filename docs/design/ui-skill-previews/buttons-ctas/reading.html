@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>阅读界面 · buttons-ctas 设计预览</title>
+<style>
+/* ============================================================
+   设计系统：瑞士国际主义 × buttons-ctas 动效原则
+   按钮 12 原则落点：
+   1 Squash&Stretch  → :active scale(0.95)
+   2 Anticipation    → :hover translateY(-2px) 预抬升
+   3 Staging         → 主 CTA（制卡/加入复习）尺寸与色彩更突出
+   4 Pose to Pose    → default/hover/active/disabled 四态关键帧
+   5 Follow Through  → 图标 transition-delay 30ms 滞后于按钮
+   6 Ease            → ease-out 进 / ease-in 出，cubic-bezier(.4,0,.2,1)
+   8 Secondary       → 点击涟漪副动效，不压过主体
+   9 Timing          → hover 160ms / active 60ms / focus 150ms
+   10 Exaggeration   → 主按钮点击 settle：scale 1.05 后回落
+   12 Appeal         → 直角 = 专业感（瑞士风）
+   ============================================================ */
+:root{
+  --paper:#fafaf8; --ink:#0a0a0a;
+  --g100:#f0f0ee; --g300:#d4d4d2; --g500:#737373;
+  --accent:#166a59; --accent-dark:#3fa08a;
+  --hl-yellow:rgba(224,182,45,.38);
+  --ease:cubic-bezier(.4,0,.2,1);
+  --spring:cubic-bezier(.34,1.56,.64,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%}
+body{
+  font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+  background:var(--paper);color:var(--ink);
+  font-size:14px;line-height:1.5;overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit}
+
+/* ---------- 按钮：12 原则的核心载体 ---------- */
+.btn{
+  position:relative;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:40px;padding:0 16px;
+  border:1px solid var(--ink);border-radius:0;
+  background:var(--paper);color:var(--ink);
+  font-size:14px;cursor:pointer;user-select:none;
+  transition:transform 160ms var(--ease),
+             box-shadow 160ms var(--ease),
+             background-color 160ms var(--ease),
+             border-color 160ms var(--ease),
+             color 160ms var(--ease);
+}
+.btn:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(10,10,10,.14)}
+.btn:active{transform:scale(.95) translateY(0);transition-duration:60ms;box-shadow:none}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;transition-duration:150ms}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
+.btn .ic{transition:transform 160ms var(--ease) 30ms}   /* Follow Through：图标滞后 */
+.btn:hover .ic{transform:translateX(2px)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-dark);border-color:var(--accent-dark);box-shadow:0 6px 16px rgba(22,106,89,.28)}
+.btn-sm{height:32px;padding:0 12px;font-size:13px}
+@keyframes settle{0%{transform:scale(1)}35%{transform:scale(1.05)}100%{transform:scale(1)}}
+.btn.settle{animation:settle 350ms var(--ease)}
+.ripple{position:absolute;border-radius:50%;pointer-events:none;transform:scale(0);
+  background:rgba(10,10,10,.12);animation:ripple 500ms var(--ease) forwards}
+.btn-primary .ripple{background:rgba(255,255,255,.35)}
+@keyframes ripple{to{transform:scale(2.8);opacity:0}}
+
+/* 图标按钮 */
+.ibtn{
+  width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid transparent;border-radius:0;background:transparent;color:var(--ink);cursor:pointer;
+  transition:transform 160ms var(--ease),background-color 160ms var(--ease),border-color 160ms var(--ease),box-shadow 160ms var(--ease);
+}
+.ibtn:hover{transform:translateY(-2px);background:var(--paper);border-color:var(--ink);box-shadow:0 3px 8px rgba(10,10,10,.10)}
+.ibtn:active{transform:scale(.92);transition-duration:60ms}
+.ibtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 段控 */
+.seg{display:inline-flex;height:30px;border:1px solid var(--ink);background:var(--paper)}
+.seg button{border:0;background:transparent;color:var(--ink);padding:0 12px;font-size:12px;cursor:pointer;
+  transition:background-color 150ms var(--ease),color 150ms var(--ease)}
+.seg button + button{border-left:1px solid var(--g300)}
+.seg button:hover{background:var(--g100)}
+.seg button.on{background:var(--ink);color:#fff}
+.seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ---------- 应用栏 ---------- */
+.appbar{
+  height:56px;display:flex;align-items:center;gap:16px;padding:0 16px;
+  border-bottom:1px solid var(--g300);
+  animation:fadeIn 400ms var(--ease) both;
+}
+.appbar .vdiv{width:1px;height:24px;background:var(--g300)}
+.booktitle{font-size:15px;font-weight:600;letter-spacing:.01em}
+.booktitle .sub{font-weight:400;color:var(--g500);font-size:12px;margin-left:8px}
+.pageinfo{margin-left:auto;font-size:12px;color:var(--g500);font-variant-numeric:tabular-nums}
+.pageinfo b{color:var(--ink);font-weight:600}
+
+/* ---------- 三栏骨架 ---------- */
+.stage{display:flex;height:calc(100% - 56px);position:relative}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes slideL{from{opacity:0;transform:translateX(-20px)}to{opacity:1;transform:translateX(0)}}
+@keyframes slideR{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+
+/* ---------- 左侧 280px 侧边栏 ---------- */
+#side{
+  width:280px;height:100%;flex:none;border-right:1px solid var(--g300);
+  display:flex;flex-direction:column;overflow:hidden;
+  animation:slideL 450ms var(--ease) both;
+  transition:width 280ms var(--ease),opacity 280ms var(--ease);
+}
+#side.closed{width:0;opacity:0;border-right-color:transparent}
+.side-inner{width:280px;min-width:280px;display:flex;flex-direction:column;height:100%}
+.side-head{display:flex;align-items:center;gap:8px;height:48px;padding:0 8px;border-bottom:1px solid var(--g300)}
+.side-head .t{font-size:12px;font-weight:600;letter-spacing:.12em;color:var(--g500)}
+.side-controls{display:flex;align-items:center;gap:8px;padding:12px 12px 10px;flex-wrap:wrap}
+.tabs{position:relative;display:flex;border-bottom:1px solid var(--g300);padding:0 12px}
+.tab{position:relative;border:0;background:transparent;cursor:pointer;padding:8px 12px 10px;
+  font-size:13px;color:var(--g500);transition:color 150ms var(--ease)}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--ink);font-weight:600}
+.tab-ind{position:absolute;bottom:-1px;height:2px;background:var(--accent);
+  transition:transform 220ms var(--spring),width 220ms var(--spring)}
+.tabpane{flex:1;overflow-y:auto;display:none;animation:rise 260ms var(--ease) both}
+.tabpane.show{display:block}
+
+/* 目录 */
+.toc-item{display:flex;align-items:baseline;gap:8px;padding:10px 16px;border-bottom:1px solid var(--g100);
+  cursor:pointer;transition:background-color 150ms var(--ease),padding-left 150ms var(--ease);font-size:13px}
+.toc-item:hover{background:var(--g100);padding-left:20px}
+.toc-item .pg{margin-left:auto;font-size:11px;color:var(--g500);font-variant-numeric:tabular-nums}
+.toc-item.cur{color:var(--accent);font-weight:600;border-left:2px solid var(--accent);padding-left:14px}
+.toc-item.l2{padding-left:32px;font-size:12px;color:var(--g500)}
+
+/* 摘录条目 */
+.xitem{position:relative;padding:12px 16px 12px 14px;border-bottom:1px solid var(--g100);cursor:pointer;
+  transition:background-color 150ms var(--ease),transform 150ms var(--ease)}
+.xitem:hover{background:var(--g100);transform:translateX(2px)}
+.xitem .xt{font-size:13px;line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.xitem .xm{display:flex;gap:8px;margin-top:6px;font-size:11px;color:var(--g500)}
+.xitem .tag{border:1px solid var(--g300);padding:0 4px;font-size:10px}
+.xitem::after{content:"";position:absolute;top:0;right:0;bottom:0;width:3px;background:var(--c,var(--accent))}
+.xitem.on{background:var(--g100)}
+.xitem.on::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--ink)}
+
+/* 图谱 */
+.graph{padding:16px}
+.graph svg{display:block;width:100%;height:auto}
+.graph .gl{stroke-dasharray:200;stroke-dashoffset:200;animation:draw 900ms var(--ease) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.graph .gn{opacity:0;animation:fadeIn 400ms var(--ease) forwards}
+
+/* ---------- 阅读主列 ---------- */
+.reader{flex:1;overflow-y:auto;display:flex;justify-content:center}
+#page{max-width:680px;width:100%;padding:48px 40px 96px;animation:rise 450ms var(--ease) 120ms both}
+#page.turn-out-l{animation:tOutL 180ms var(--ease) both}
+#page.turn-in-l{animation:tInL 240ms var(--ease) both}
+#page.turn-out-r{animation:tOutR 180ms var(--ease) both}
+#page.turn-in-r{animation:tInR 240ms var(--ease) both}
+@keyframes tOutL{to{opacity:0;transform:translateX(-24px)}}
+@keyframes tInL{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}
+@keyframes tOutR{to{opacity:0;transform:translateX(24px)}}
+@keyframes tInR{from{opacity:0;transform:translateX(-24px)}to{opacity:1;transform:translateX(0)}}
+.kicker{font-size:11px;letter-spacing:.16em;color:var(--accent);font-weight:600;margin-bottom:12px}
+#page h1{font-size:28px;line-height:1.3;font-weight:700;letter-spacing:-.01em;margin-bottom:24px;
+  padding-bottom:16px;border-bottom:1px solid var(--ink)}
+#page p{font-size:15px;line-height:1.9;margin-bottom:18px;text-align:justify}
+#page p.meta{font-size:11px;color:var(--g500);letter-spacing:.08em;margin-top:40px;padding-top:12px;border-top:1px solid var(--g300)}
+
+/* 高亮文字：入场「划笔」动画 */
+.hl{padding:1px 2px;cursor:default;text-decoration:none;
+  background-image:linear-gradient(var(--hc,var(--hl-yellow)),var(--hc,var(--hl-yellow)));
+  background-repeat:no-repeat;background-size:0% 100%;
+  animation:drawhl .7s var(--ease) 900ms forwards}
+@keyframes drawhl{to{background-size:100% 100%}}
+.hl:hover{background-size:100% 100%;filter:brightness(.96)}
+.hl-g{--hc:rgba(63,160,138,.32)}
+.hl-y{--hc:var(--hl-yellow)}
+
+/* ---------- 划选菜单浮层（允许单层阴影） ---------- */
+.hl-wrap{position:relative}
+.selmenu{
+  position:absolute;bottom:calc(100% + 10px);left:0;z-index:20;
+  display:flex;align-items:center;gap:2px;height:44px;padding:0 8px;
+  background:var(--paper);border:1px solid var(--ink);
+  box-shadow:0 8px 24px rgba(10,10,10,.14);           /* 单层阴影 */
+  transform-origin:50% 100%;
+  animation:pop 260ms var(--spring) 1s both;
+}
+@keyframes pop{from{opacity:0;transform:scale(.86) translateY(6px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.selmenu .m{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:0;background:transparent;
+  font-size:12px;cursor:pointer;color:var(--ink);transition:background-color 150ms var(--ease),transform 100ms var(--ease)}
+.selmenu .m:hover{background:var(--g100)}
+.selmenu .m:active{transform:scale(.93)}
+.selmenu .m:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.selmenu .m .lab{font-size:12px}
+.selmenu .sw{width:18px;height:18px;border:1px solid var(--g300);cursor:pointer;padding:0;
+  transition:transform 120ms var(--spring),box-shadow 120ms var(--ease)}
+.selmenu .sw:hover{transform:scale(1.18)}
+.selmenu .sw:active{transform:scale(.9)}
+.selmenu .sw.on{outline:2px solid var(--ink);outline-offset:1px}
+.selmenu .div{width:1px;height:20px;background:var(--g300);margin:0 6px}
+
+/* ---------- 右侧竖排工具栏 ---------- */
+.tools{
+  width:56px;flex:none;border-left:1px solid var(--g300);
+  display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;
+  animation:slideR 450ms var(--ease) both;
+}
+.tools .d{width:24px;height:1px;background:var(--g300);margin:8px 0}
+.tools .num{font-size:12px;color:var(--g500);font-variant-numeric:tabular-nums;padding:4px 0}
+.tools .spacer{flex:1}
+
+/* 侧栏收起后的展开钮 */
+.side-expand{position:absolute;left:8px;top:8px;z-index:30;background:var(--paper);border:1px solid var(--g300)}
+.side-expand[hidden]{display:none}
+
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-delay:0ms!important;transition-duration:.01ms!important}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部应用栏 ===== -->
+<header class="appbar">
+  <button class="btn btn-sm" id="backShelf">
+    <svg class="ic" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 3 5 8l5 5"/></svg>
+    书架
+  </button>
+  <span class="vdiv"></span>
+  <div class="booktitle">学习科学：基于证据的学习方法<span class="sub">第 2 版 · Bruyckere 等</span></div>
+  <div class="pageinfo">第 <b>47</b> / 312 页 · 第 2 章 · 信息的编码与提取</div>
+</header>
+
+<div class="stage">
+
+  <!-- ===== 左侧 280px 全高侧边栏 ===== -->
+  <aside id="side" aria-label="材料面板">
+    <div class="side-inner">
+      <div class="side-head">
+        <button class="ibtn" id="sideToggle" title="收起面板" aria-label="收起面板">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="11"/><path d="M6 2.5v11"/><path d="M10.5 6 8.5 8l2 2"/></svg>
+        </button>
+        <span class="t">材料面板</span>
+      </div>
+
+      <div class="side-controls">
+        <div class="seg" role="group" aria-label="筛选">
+          <button class="on">全部</button><button>摘录</button><button>高亮</button>
+        </div>
+        <div class="seg" role="group" aria-label="排序">
+          <button class="on">位置</button><button>时间</button>
+        </div>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-pane="pane-toc">目录</button>
+        <button class="tab on" role="tab" data-pane="pane-x">摘录</button>
+        <button class="tab" role="tab" data-pane="pane-g">图谱</button>
+        <span class="tab-ind"></span>
+      </div>
+
+      <!-- 目录 -->
+      <div class="tabpane" id="pane-toc">
+        <div class="toc-item"><span>1 · 学习科学与证据</span><span class="pg">12</span></div>
+        <div class="toc-item l2"><span>1.1 为什么直觉不可靠</span><span class="pg">15</span></div>
+        <div class="toc-item cur"><span>2 · 信息的编码与提取</span><span class="pg">44</span></div>
+        <div class="toc-item l2"><span>2.1 测试效应</span><span class="pg">47</span></div>
+        <div class="toc-item l2"><span>2.2 间隔效应</span><span class="pg">51</span></div>
+        <div class="toc-item l2"><span>2.3 交错练习</span><span class="pg">58</span></div>
+        <div class="toc-item"><span>3 · 遗忘曲线与间隔重复</span><span class="pg">96</span></div>
+        <div class="toc-item"><span>4 · 记忆的巩固与睡眠</span><span class="pg">140</span></div>
+        <div class="toc-item"><span>5 · 迁移与知识图谱</span><span class="pg">188</span></div>
+      </div>
+
+      <!-- 摘录 -->
+      <div class="tabpane show" id="pane-x">
+        <div class="xitem on" style="--c:#166a59">
+          <div class="xt">检索组的成绩比重读组高出约 50%，而重读组的学生对自己的成绩预测反而更高。</div>
+          <div class="xm"><span class="tag">摘录</span><span>P47</span><span>10-02 21:47</span></div>
+        </div>
+        <div class="xitem" style="--c:#e0b62d">
+          <div class="xt">间隔效应的关键不是复习次数，而是每次复习时记忆痕迹已部分遗忘、需要费力重建。</div>
+          <div class="xm"><span class="tag">摘录</span><span>P51</span><span>10-03 09:12</span></div>
+        </div>
+        <div class="xitem" style="--c:#2d6fe0">
+          <div class="xt">提取困难恰恰是学习正在发生的信号，而非学习失败的信号。</div>
+          <div class="xm"><span class="tag">高亮</span><span>P48</span><span>10-03 09:20</span></div>
+        </div>
+        <div class="xitem" style="--c:#166a59">
+          <div class="xt">交错练习在训练时表现更差、在延迟测验中表现更好，学习者因此系统性低估它。</div>
+          <div class="xm"><span class="tag">摘录</span><span>P58</span><span>10-03 15:03</span></div>
+        </div>
+        <div class="xitem" style="--c:#c2452d">
+          <div class="xt">熟练度错觉：流畅感上升被大脑误判为掌握程度上升。</div>
+          <div class="xm"><span class="tag">摘录</span><span>P46</span><span>10-03 20:41</span></div>
+        </div>
+      </div>
+
+      <!-- 图谱 -->
+      <div class="tabpane" id="pane-g">
+        <div class="graph">
+          <svg viewBox="0 0 240 260">
+            <line class="gl" x1="120" y1="40" x2="60"  y2="120" stroke="#d4d4d2"/>
+            <line class="gl" x1="120" y1="40" x2="180" y2="120" stroke="#d4d4d2" style="animation-delay:120ms"/>
+            <line class="gl" x1="60"  y1="120" x2="120" y2="200" stroke="#d4d4d2" style="animation-delay:240ms"/>
+            <line class="gl" x1="180" y1="120" x2="120" y2="200" stroke="#d4d4d2" style="animation-delay:360ms"/>
+            <g class="gn" style="animation-delay:200ms"><rect x="86" y="24" width="68" height="30" fill="#166a59"/><text x="120" y="43" text-anchor="middle" fill="#fff" font-size="11">测试效应</text></g>
+            <g class="gn" style="animation-delay:350ms"><rect x="26" y="105" width="68" height="30" fill="#fafaf8" stroke="#0a0a0a"/><text x="60" y="124" text-anchor="middle" fill="#0a0a0a" font-size="11">间隔重复</text></g>
+            <g class="gn" style="animation-delay:500ms"><rect x="146" y="105" width="68" height="30" fill="#fafaf8" stroke="#0a0a0a"/><text x="180" y="124" text-anchor="middle" fill="#0a0a0a" font-size="11">工作记忆</text></g>
+            <g class="gn" style="animation-delay:650ms"><rect x="82" y="185" width="76" height="30" fill="#fafaf8" stroke="#0a0a0a"/><text x="120" y="204" text-anchor="middle" fill="#0a0a0a" font-size="11">长期保持</text></g>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <button class="ibtn side-expand" id="sideExpand" hidden title="展开面板" aria-label="展开面板">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="11"/><path d="M6 2.5v11"/><path d="M8.5 6l2 2-2 2"/></svg>
+  </button>
+
+  <!-- ===== 阅读主列 ===== -->
+  <main class="reader">
+    <article id="page">
+      <p class="kicker">第 2 章 · 信息的编码与提取</p>
+      <h1>测试效应：检索本身就是学习</h1>
+
+      <p>学习科学中最反直觉的发现之一，是「重复阅读」几乎总是被学习者高估。当一页教材被读到第三遍时，主观流畅感会持续上升，而大脑把这种流畅误判为掌握——这就是<span style="background:rgba(224,182,45,.28);padding:1px 2px">熟练度错觉</span>。它与真实的记忆保持几乎没有相关，甚至在某些实验中呈负相关。</p>
+
+      <p>与之相对，测试效应（testing effect）表明：在没有外部提示的情况下努力回忆一段内容，哪怕回忆失败，也比重读同一页更能巩固记忆。检索不是测量学习的工具，检索本身就是一次强烈的编码事件——每一次成功的提取，都会重塑通往该记忆的通路。</p>
+
+      <p>2006 年 Roediger 与 Karpicke 的经典实验让两组学生学习同一篇短文：一组反复阅读四遍，另一组只读一遍后进行三轮自由回忆练习。一周后的测验中，
+        <span class="hl-wrap"><mark class="hl hl-g">检索组的成绩比重读组高出约 50%，而重读组的学生对自己的成绩预测反而更高——主观自信与客观收益在这里彻底分道扬镳。</mark>
+          <!-- 划选菜单浮层 -->
+          <div class="selmenu" role="toolbar" aria-label="划选操作">
+            <button class="m" title="高亮">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9.5 2.5l4 4L6 14H2v-4z"/></svg>
+              <span class="lab">高亮</span>
+            </button>
+            <span class="div"></span>
+            <button class="sw on" style="background:rgba(63,160,138,.55)" title="绿"></button>
+            <button class="sw" style="background:rgba(224,182,45,.55)" title="黄"></button>
+            <button class="sw" style="background:rgba(45,111,224,.45)" title="蓝"></button>
+            <button class="sw" style="background:rgba(194,69,45,.45)" title="红"></button>
+            <span class="div"></span>
+            <button class="m">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 2h8v9H3z"/><path d="M5 13h8V5"/></svg>
+              <span class="lab">批注</span>
+            </button>
+            <button class="m">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="5.5" height="5.5"/><rect x="8.5" y="2" width="5.5" height="5.5"/><rect x="2" y="8.5" width="5.5" height="5.5"/><rect x="8.5" y="8.5" width="5.5" height="5.5"/></svg>
+              <span class="lab">制卡</span>
+            </button>
+            <button class="m">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="9" height="9"/><path d="M11 5V2H2v9h3"/></svg>
+              <span class="lab">复制</span>
+            </button>
+          </div>
+        </span>
+      </p>
+
+      <p>这解释了为什么「先答后看」的笔记法有效：先凭记忆写下你以为的章节要点，再对照原文校准误差——误差本身会成为记忆的锚点。下一次当你觉得复习「很顺」时，请把它当作警告而非安慰。</p>
+
+      <p class="meta">本章共 3 条摘录 · 1 条待处理 · 上次阅读 10-03 21:47</p>
+    </article>
+  </main>
+
+  <!-- ===== 右侧竖排工具栏 ===== -->
+  <nav class="tools" aria-label="阅读工具">
+    <button class="ibtn" id="prevPage" title="上一页">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 10l5-5 5 5"/></svg>
+    </button>
+    <span class="num" id="pageNum">47</span>
+    <button class="ibtn" id="nextPage" title="下一页">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6l5 5 5-5"/></svg>
+    </button>
+    <span class="d"></span>
+    <button class="ibtn" title="书签">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 2h8v12l-4-3-4 3z"/></svg>
+    </button>
+    <span class="spacer"></span>
+    <button class="ibtn" title="阅读设置">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 5h8M12 5h2M2 11h2M6 11h8"/><circle cx="10.5" cy="5" r="1.6"/><circle cx="4.5" cy="11" r="1.6"/></svg>
+    </button>
+    <button class="ibtn" title="更多">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="3" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="13" cy="8" r=".9" fill="currentColor"/></svg>
+    </button>
+  </nav>
+</div>
+
+<script>
+/* 涟漪（Secondary Action）：副动效不压主体 */
+document.querySelectorAll('.btn,.ibtn,.selmenu .m').forEach(function(b){
+  b.addEventListener('pointerdown',function(e){
+    var r=b.getBoundingClientRect(),d=Math.max(r.width,r.height);
+    var s=document.createElement('span');s.className='ripple';
+    s.style.width=s.style.height=d+'px';
+    s.style.left=(e.clientX-r.left-d/2)+'px';
+    s.style.top=(e.clientY-r.top-d/2)+'px';
+    b.appendChild(s);setTimeout(function(){s.remove()},520);
+  });
+});
+/* 主按钮点击 settle（Exaggeration） */
+document.querySelectorAll('.btn-primary,#backShelf').forEach(function(b){
+  b.addEventListener('click',function(){b.classList.remove('settle');void b.offsetWidth;b.classList.add('settle')});
+});
+
+/* 段控 */
+document.querySelectorAll('.seg').forEach(function(seg){
+  seg.addEventListener('click',function(e){
+    var t=e.target.closest('button');if(!t)return;
+    seg.querySelectorAll('button').forEach(function(x){x.classList.remove('on')});t.classList.add('on');
+  });
+});
+
+/* 页签 + 滑动指示条 */
+var tabs=document.querySelectorAll('.tab'),ind=document.querySelector('.tab-ind');
+function moveInd(t){ind.style.width=t.offsetWidth+'px';ind.style.transform='translateX('+t.offsetLeft+'px)'}
+tabs.forEach(function(t){t.addEventListener('click',function(){
+  tabs.forEach(function(x){x.classList.remove('on')});t.classList.add('on');moveInd(t);
+  document.querySelectorAll('.tabpane').forEach(function(p){p.classList.remove('show')});
+  document.getElementById(t.dataset.pane).classList.add('show');
+})});
+window.addEventListener('load',function(){moveInd(document.querySelector('.tab.on'))});
+window.addEventListener('resize',function(){moveInd(document.querySelector('.tab.on'))});
+
+/* 侧栏开合 */
+var side=document.getElementById('side'),exp=document.getElementById('sideExpand');
+document.getElementById('sideToggle').addEventListener('click',function(){side.classList.add('closed');exp.hidden=false});
+exp.addEventListener('click',function(){side.classList.remove('closed');exp.hidden=true});
+
+/* 摘录条目选中 */
+document.querySelectorAll('.xitem').forEach(function(it){
+  it.addEventListener('click',function(){
+    document.querySelectorAll('.xitem').forEach(function(x){x.classList.remove('on')});it.classList.add('on');
+  });
+});
+
+/* 翻页动画 */
+var pg=47,page=document.getElementById('page'),num=document.getElementById('pageNum');
+function turn(dir){
+  page.className=dir>0?'turn-out-l':'turn-out-r';
+  setTimeout(function(){
+    pg+=dir;num.textContent=pg;
+    document.querySelector('.pageinfo').innerHTML='第 <b>'+pg+'</b> / 312 页 · 第 2 章 · 信息的编码与提取';
+    page.className=dir>0?'turn-in-l':'turn-in-r';
+    setTimeout(function(){page.className=''},260);
+  },190);
+}
+document.getElementById('nextPage').addEventListener('click',function(){turn(1)});
+document.getElementById('prevPage').addEventListener('click',function(){turn(-1)});
+</script>
+</body>
+</html>

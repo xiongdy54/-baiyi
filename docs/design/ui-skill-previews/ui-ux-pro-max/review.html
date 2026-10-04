@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FSRS 复习界面 · 设计稿预览（ui-ux-pro-max）</title>
+<style>
+:root{
+  --paper:#fafaf8;
+  --ink:#0a0a0a;
+  --g1:#f0f0ee;
+  --g2:#d4d4d2;
+  --g3:#737373;
+  --accent:#166a59;
+  --accent-strong:#0f5142;
+  --accent-soft:#e4eee9;
+  --amber:#8a5a00;
+  --amber-soft:#f4ecdc;
+  --danger:#a03123;
+  --danger-soft:#f6e7e4;
+  --hairline:1px solid var(--g2);
+  --dur-fast:150ms;
+  --dur:240ms;
+  --dur-slow:360ms;
+  --dur-flip:520ms;
+  --ease-out:cubic-bezier(0.22,1,0.36,1);
+  --ease-spring:cubic-bezier(0.34,1.3,0.5,1);
+  --font:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);font-size:16px;line-height:1.7;overflow:hidden;}
+button{font-family:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.num{font-variant-numeric:tabular-nums;}
+svg{display:block;flex:none;}
+
+/* ---------- 布局：56px 头带 / 1fr 卡片区 / 96px 评分底栏 ---------- */
+.app{height:100vh;display:grid;grid-template-rows:56px 1fr 96px;grid-template-areas:"head" "stage" "bar";}
+
+/* ---------- 头带：队列计数（颜色 + 文本，不只靠颜色） ---------- */
+.head{
+  grid-area:head;
+  display:flex;align-items:center;gap:24px;
+  padding:0 24px;
+  border-bottom:var(--hairline);
+}
+.head-title{font-size:13px;font-weight:700;letter-spacing:0.02em;}
+.head-rule{width:1px;height:24px;background:var(--g2);}
+.queue{display:flex;align-items:center;gap:16px;}
+.q-item{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--g3);}
+.q-item .dot{width:8px;height:8px;flex:none;}
+.q-new .dot{background:var(--g2);}
+.q-learning .dot{background:var(--amber);}
+.q-review .dot{background:var(--accent);}
+.q-item b{color:var(--ink);font-variant-numeric:tabular-nums;font-size:13px;}
+.head-spacer{flex:1;}
+.today{font-size:12px;color:var(--g3);}
+.today b{color:var(--ink);}
+
+/* ---------- 卡片舞台 ---------- */
+.stage{
+  grid-area:stage;
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;position:relative;
+}
+.flip{perspective:1600px;width:640px;}
+.card{
+  position:relative;width:100%;min-height:360px;
+  transform-style:preserve-3d;
+  transition:transform var(--dur-flip) var(--ease-spring);
+  cursor:pointer;
+}
+.card.flipped{transform:rotateY(180deg);}
+.face{
+  position:absolute;inset:0;
+  display:flex;flex-direction:column;
+  padding:40px 48px;
+  background:var(--paper);
+  border:1px solid var(--ink);
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+}
+.face.back{transform:rotateY(180deg);}
+.face-label{font-size:11px;font-weight:600;letter-spacing:0.16em;text-transform:uppercase;color:var(--accent);}
+.question{font-size:26px;line-height:1.6;font-weight:600;margin-top:24px;}
+.answer{margin-top:20px;}
+.answer p{font-size:17px;line-height:1.9;color:#1c1c1a;}
+.answer p + p{margin-top:12px;}
+.answer em{font-style:normal;background:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent);padding:0 2px;}
+.face-foot{
+  margin-top:auto;padding-top:24px;
+  border-top:var(--hairline);
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+}
+.src{font-size:12px;color:var(--g3);}
+.flip-hint{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--g3);}
+kbd{
+  font-family:inherit;font-size:11px;
+  border:1px solid var(--g2);padding:1px 6px;
+  color:var(--g3);
+}
+.face.back .face-foot{border-top-color:var(--g2);}
+
+/* 卡片角落的编号（瑞士式索引） */
+.card-no{
+  position:absolute;top:16px;right:20px;
+  font-size:12px;color:var(--g3);font-variant-numeric:tabular-nums;
+}
+/* 舞台背景的基线网格（瑞士网格肌理，纯装饰） */
+.stage::before{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(var(--g1) 1px,transparent 1px);
+  background-size:100% 64px;
+  opacity:0.6;
+}
+.flip{position:relative;z-index:1;}
+
+/* ---------- 底栏：显示答案 / 四档评分 ---------- */
+.bar{
+  grid-area:bar;
+  border-top:var(--hairline);
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  padding:0 24px;
+  background:var(--paper);
+}
+.grade-btn{
+  display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  min-width:132px;min-height:56px;
+  border:1px solid var(--g2);
+  padding:0 16px;
+  transition:background-color var(--dur-fast) var(--ease-out),border-color var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out),opacity var(--dur) var(--ease-out);
+}
+.grade-btn .g-name{font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;}
+.grade-btn .g-iv{font-size:11px;color:var(--g3);font-variant-numeric:tabular-nums;}
+.grade-btn:hover{background:var(--g1);}
+.grade-btn:active{transform:scale(0.97);}
+.grade-btn .g-dot{width:8px;height:8px;flex:none;}
+.g-again .g-dot{background:var(--danger);}
+.g-hard .g-dot{background:var(--amber);}
+.g-good .g-dot{background:var(--accent);}
+.g-easy .g-dot{background:var(--ink);}
+.grade-btn.hidden-state{display:none;}
+
+/* 显示答案（主操作，每屏唯一 primary CTA） */
+.show-btn{
+  display:inline-flex;align-items:center;gap:10px;
+  min-width:280px;min-height:56px;justify-content:center;
+  background:var(--ink);color:#fff;
+  font-size:15px;font-weight:600;
+  border:1px solid var(--ink);
+  transition:background-color var(--dur-fast) var(--ease-out),transform var(--dur-fast) var(--ease-out),opacity var(--dur) var(--ease-out);
+}
+.show-btn:hover{background:#262626;}
+.show-btn:active{transform:scale(0.98);}
+.show-btn.hidden-state{display:none;}
+.bar-hint{position:absolute;left:24px;font-size:12px;color:var(--g3);}
+.bar{
+  position:relative;
+}
+
+/* ---------- 入场编排 ---------- */
+.enter{opacity:0;transform:translateY(12px);animation:rise var(--dur-slow) var(--ease-out) forwards;}
+@keyframes rise{to{opacity:1;transform:translateY(0);}}
+.d1{animation-delay:40ms;}.d2{animation-delay:90ms;}.d3{animation-delay:140ms;}.d4{animation-delay:190ms;}
+.flip.enter{transform:translateY(16px) scale(0.98);animation-name:card-rise;}
+@keyframes card-rise{to{opacity:1;transform:translateY(0) scale(1);}}
+.card.flipped{animation:none;}
+
+/* 评分完成后反馈（示意：成功反馈色闪） */
+@keyframes ack{0%{background:var(--accent-soft);}100%{background:var(--paper);}}
+.acked{animation:ack 480ms var(--ease-out) 1;}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important;}
+  .enter{opacity:1;transform:none;}
+  .flip.enter{transform:none;}
+  /* 翻转改为直接切换可见面 */
+  .card{transform-style:flat;transition:none;}
+  .card.flipped{transform:none;}
+  .face.back{display:none;}
+  .card.flipped .face.back{display:flex;}
+  .card.flipped .face.front{display:none;}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 头带：队列计数 -->
+  <header class="head enter d1">
+    <span class="head-title">FSRS 复习</span>
+    <span class="head-rule" aria-hidden="true"></span>
+    <div class="queue" aria-label="复习队列">
+      <span class="q-item q-new"><span class="dot" aria-hidden="true"></span>未学习 <b>12</b></span>
+      <span class="q-item q-learning"><span class="dot" aria-hidden="true"></span>学习中 <b>8</b></span>
+      <span class="q-item q-review"><span class="dot" aria-hidden="true"></span>待复习 <b>24</b></span>
+    </div>
+    <div class="head-spacer"></div>
+    <span class="today num">今日已完成 <b>26</b> / 50 · 预计还需 9 分钟</span>
+  </header>
+
+  <!-- 卡片舞台 -->
+  <main class="stage" id="stage">
+    <div class="flip enter d2">
+      <div class="card" id="card" role="button" tabindex="0" aria-pressed="false" aria-label="复习卡，点击或按空格键显示答案">
+        <span class="card-no num" aria-hidden="true">#128 / 44</span>
+
+        <!-- 正面 -->
+        <div class="face front">
+          <p class="face-label">问题 · 摘录复习</p>
+          <h1 class="question">间隔效应（Spacing Effect）指的是什么？为什么「间隔复习」比「集中重复」更有效？</h1>
+          <div class="face-foot">
+            <span class="src num">来自《学习科学：原理与应用》第 2 章 · 位置 31%</span>
+            <span class="flip-hint">点击卡片或按 <kbd>空格</kbd> 显示答案</span>
+          </div>
+        </div>
+
+        <!-- 背面 -->
+        <div class="face back">
+          <p class="face-label">答案</p>
+          <div class="answer">
+            <p><em>在总学习时间相同的前提下，把复习分散在多个时间点（间隔复习）比集中在一次完成（集中重复）能产生更好的长期留存，这一现象即间隔效应。</em></p>
+            <p>原因有二：其一，间隔引入了<b>轻度遗忘</b>，使下次提取带有适当的提取困难，成功提取后的记忆增益更大；其二，分散的重复在不同语境中重建提取线索，形成更多样的记忆通路。艾宾浩斯的遗忘曲线表明最初遗忘最快，因此间隔应随稳定性增长而逐步拉长——这正是 FSRS 调度的核心思想。</p>
+          </div>
+          <div class="face-foot">
+            <span class="src num">上一次复习：2026-10-01 · 评分「良好」</span>
+            <span class="flip-hint">按 <kbd>1</kbd>–<kbd>4</kbd> 评分</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <span class="bar-hint" id="liveHint" role="status" aria-live="polite"></span>
+  </main>
+
+  <!-- 底栏 -->
+  <footer class="bar enter d3">
+    <button class="show-btn" id="showBtn" type="button">
+      显示答案
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+
+    <button class="grade-btn g-again hidden-state" data-grade="again" type="button">
+      <span class="g-name"><span class="g-dot" aria-hidden="true"></span>重来</span>
+      <span class="g-iv num">10 分</span>
+    </button>
+    <button class="grade-btn g-hard hidden-state" data-grade="hard" type="button">
+      <span class="g-name"><span class="g-dot" aria-hidden="true"></span>困难</span>
+      <span class="g-iv num">1 天</span>
+    </button>
+    <button class="grade-btn g-good hidden-state" data-grade="good" type="button">
+      <span class="g-name"><span class="g-dot" aria-hidden="true"></span>良好</span>
+      <span class="g-iv num">3 天</span>
+    </button>
+    <button class="grade-btn g-easy hidden-state" data-grade="easy" type="button">
+      <span class="g-name"><span class="g-dot" aria-hidden="true"></span>简单</span>
+      <span class="g-iv num">8 天</span>
+    </button>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var card=document.getElementById('card');
+  var showBtn=document.getElementById('showBtn');
+  var gradeBtns=document.querySelectorAll('.grade-btn');
+  var showEls=[showBtn];
+  var hint=document.getElementById('liveHint');
+  var flipped=false;
+
+  function setFlip(v){
+    flipped=v;
+    card.classList.toggle('flipped',v);
+    card.setAttribute('aria-pressed',String(v));
+    card.setAttribute('aria-label',v?'复习卡答案面，按 1–4 评分，或点击翻回问题':'复习卡，点击或按空格键显示答案');
+    showBtn.classList.toggle('hidden-state',v);
+    gradeBtns.forEach(function(b){b.classList.toggle('hidden-state',!v);});
+    if(v){
+      hint.textContent='已显示答案，请为本次提取回忆质量评分';
+    }else{
+      hint.textContent='';
+    }
+  }
+  function flip(){setFlip(!flipped);}
+
+  card.addEventListener('click',flip);
+  card.addEventListener('keydown',function(e){
+    if(e.key===' '||e.key==='Enter'){e.preventDefault();flip();}
+  });
+  showBtn.addEventListener('click',function(){setFlip(true);});
+
+  gradeBtns.forEach(function(btn,idx){
+    btn.addEventListener('keydown',function(e){
+      if(e.key>='1'&&e.key<='4'){e.preventDefault();grade(gradeBtns[Number(e.key)-1]);}
+    });
+    btn.addEventListener('click',function(){grade(btn);});
+  });
+  function grade(btn){
+    if(!flipped)return;
+    var names={again:'重来',hard:'困难',good:'良好',easy:'简单'};
+    var ivs={again:'下一间隔 10 分钟',hard:'下一间隔 1 天',good:'下一间隔 3 天',easy:'下一间隔 8 天'};
+    hint.textContent='已评分「'+names[btn.dataset.grade]+'」，'+ivs[btn.dataset.grade]+'，加载下一张卡';
+    btn.classList.remove('acked');
+    void btn.offsetWidth; /* 重新触发动画 */
+    btn.classList.add('acked');
+    // 示意：评分后回到问题面（真实实现会换卡）
+    setTimeout(function(){setFlip(false);},360);
+  }
+
+  // 全局键盘：空格翻面 / 1-4 评分
+  document.addEventListener('keydown',function(e){
+    if(e.target!==document.body)return;
+    if(e.key===' '){e.preventDefault();flip();}
+    if(flipped&&e.key>='1'&&e.key<='4'){
+      e.preventDefault();grade(gradeBtns[Number(e.key)-1]);
+    }
+  });
+})();
+</script>
+</body>
+</html>

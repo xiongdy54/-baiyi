@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>摘录界面 · 微交互预览 — 渐进阅读</title>
+<style>
+/* ============ 设计令牌（瑞士国际主义 × micro-interactions skill） ============ */
+:root{
+  --paper:#fafaf8; --ink:#0a0a0a;
+  --gray-1:#f0f0ee; --gray-2:#d4d4d2; --gray-3:#737373;
+  --accent:#166a59; --accent-dark:#3fa08a;
+  --warn:#a04416; --hair:1px solid var(--gray-2);
+  /* —— 微交互时长/缓动 —— */
+  --t-hover:100ms ease-out;
+  --t-press:100ms ease-out;
+  --t-toggle:200ms cubic-bezier(.34,1.56,.64,1);  /* 弹性过冲 */
+  --t-tip-in:150ms ease-out; --t-tip-out:100ms ease-in;
+  --t-panel:240ms cubic-bezier(.22,1,.36,1);
+  --t-badge:200ms cubic-bezier(.34,1.56,.64,1);   /* Badge elastic */
+  --t-card:320ms cubic-bezier(.22,1,.36,1);       /* 换卡入场 */
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:1440px;height:900px;overflow:hidden;}
+body{font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;background:var(--paper);color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+.icon-btn{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:2px;transition:transform var(--t-hover),background-color var(--t-hover),color var(--t-hover);}
+.icon-btn:hover{background:var(--gray-1);color:var(--accent);transform:translateY(-1px);}
+.icon-btn:active{transform:translateY(0) scale(.92);transition-duration:var(--t-press);}
+.icon-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;}
+.btn-solid{display:inline-flex;align-items:center;gap:8px;padding:9px 20px;background:var(--ink);color:var(--paper);border-radius:2px;font-size:13px;transition:transform var(--t-hover),background-color var(--t-hover),box-shadow var(--t-hover);}
+.btn-solid:hover{background:var(--accent);transform:translateY(-1px);box-shadow:0 2px 8px rgba(10,10,10,.18);}
+.btn-solid:active{transform:translateY(0) scale(.98);box-shadow:none;transition-duration:var(--t-press);}
+.tip{position:relative;}
+.tip::after{content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%) translateY(-4px);background:var(--ink);color:var(--paper);font-size:11px;line-height:1;padding:6px 8px;white-space:nowrap;opacity:0;pointer-events:none;border-radius:2px;z-index:60;transition:opacity var(--t-tip-out),transform var(--t-tip-out);}
+.tip:hover::after{opacity:1;transform:translateX(-50%) translateY(0);transition:opacity var(--t-tip-in),transform var(--t-tip-in);}
+/* ============ 布局 ============ */
+#app{display:grid;grid-template-rows:56px 1fr 72px;height:900px;}
+/* ---- 顶栏：收起开关钮 + 同行筛选/排序 ---- */
+#topbar{display:flex;align-items:center;gap:16px;padding:0 20px;border-bottom:var(--hair);z-index:30;}
+.seg{display:flex;background:var(--gray-1);border-radius:2px;padding:2px;position:relative;}
+.seg button{position:relative;z-index:1;flex:1;padding:5px 14px;font-size:12px;color:var(--gray-3);border-radius:1px;transition:color var(--t-hover);white-space:nowrap;}
+.seg button:hover{color:var(--ink);}
+.seg button.on{color:var(--paper);}
+.seg .thumb{position:absolute;top:2px;bottom:2px;left:2px;background:var(--ink);border-radius:1px;transition:transform var(--t-toggle),width var(--t-toggle);}
+.top-lab{font-size:11px;color:var(--gray-3);letter-spacing:1px;}
+/* 摘录列表收起钮（开关：弹性拨杆） */
+#trackToggle{width:44px;height:24px;border-radius:12px;background:var(--gray-2);position:relative;flex:none;transition:background-color var(--t-hover);}
+#trackToggle .knob{
+  position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;background:var(--paper);
+  box-shadow:0 1px 3px rgba(0,0,0,.25);
+  transition:transform var(--t-toggle),width var(--t-toggle),height var(--t-toggle); /* Arc→直线 + squash */
+}
+#trackToggle.on{background:var(--accent);}
+#trackToggle.on .knob{transform:translateX(20px);}
+#trackToggle:active .knob{width:24px;height:16px;} /* Squash & Stretch：拨杆压缩 */
+#topbar .divider{width:1px;height:24px;background:var(--gray-2);}
+/* 待处理计数徽标（Badge update 200ms elastic） */
+#pending{
+  margin-left:auto;display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--gray-3);
+}
+#pending .num{
+  display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;
+  background:var(--accent);color:var(--paper);font-weight:600;border-radius:2px;font-variant-numeric:tabular-nums;
+  transition:transform var(--t-badge),background-color var(--t-hover);
+}
+#pending .num:hover{background:var(--accent-dark);}
+.bounce{animation:badgeBounce var(--t-badge) cubic-bezier(.34,1.56,.64,1);}
+@keyframes badgeBounce{0%{transform:scale(1);}40%{transform:scale(1.18);}70%{transform:scale(.96);}100%{transform:scale(1);}}
+/* ============ 主体：左批注轨 + 主列 ============ */
+#bodyRow{display:grid;grid-template-columns:auto 1fr;min-height:0;}
+/* 280px 全高批注轨 */
+#track{
+  width:280px;border-right:var(--hair);display:flex;flex-direction:column;overflow:hidden;
+  transition:width var(--t-panel),opacity var(--t-panel);z-index:20;
+}
+#track.collapsed{width:0;opacity:0;}
+#trackInner{width:280px;display:flex;flex-direction:column;height:100%;}
+#track h3{font-size:12px;letter-spacing:1px;padding:12px 16px 8px;color:var(--gray-3);font-weight:600;}
+.note-list{flex:1;overflow-y:auto;}
+.note{
+  padding:12px 16px 12px 14px;position:relative;border-bottom:1px solid var(--gray-1);cursor:pointer;
+  transition:background-color var(--t-hover),transform var(--t-hover),padding-left var(--t-hover);
+  animation:noteIn 300ms cubic-bezier(.22,1,.36,1) backwards;
+}
+@keyframes noteIn{from{opacity:0;transform:translateX(-12px);}to{opacity:1;transform:none;}}
+.note:hover{background:var(--gray-1);transform:translateX(2px);padding-left:18px;}
+.note:active{transform:translateX(2px) scale(.99);transition-duration:var(--t-press);}
+.note.cur{background:var(--gray-1);}
+.note .bar{position:absolute;right:0;top:10px;bottom:10px;width:3px;background:var(--accent);transform:scaleY(.4);transform-origin:center;transition:transform var(--t-toggle);}
+.note:hover .bar,.note.cur .bar{transform:scaleY(1);}
+.note.y .bar{background:var(--warn);} .note.g .bar{background:var(--gray-3);}
+.note .src{font-size:11px;color:var(--gray-3);margin-bottom:2px;}
+.note .txt{font-size:13px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.note .st{font-size:10px;margin-top:5px;color:var(--accent);letter-spacing:.5px;}
+.note.y .st{color:var(--warn);}
+/* ---- 主列 ---- */
+#content{display:flex;flex-direction:column;min-width:0;padding:24px 48px 16px;overflow-y:auto;}
+/* 面包屑：可点击层级，hover 下划线滑入 */
+.crumbs{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--gray-3);margin-bottom:20px;flex-wrap:wrap;}
+.crumbs a{position:relative;color:var(--gray-3);text-decoration:none;padding:2px 0;cursor:pointer;transition:color var(--t-hover);}
+.crumbs a::after{content:'';position:absolute;left:0;bottom:0;height:1px;width:100%;background:var(--accent);transform:scaleX(0);transform-origin:left;transition:transform var(--t-toggle);}
+.crumbs a:hover{color:var(--accent);}
+.crumbs a:hover::after{transform:scaleX(1);}
+.crumbs .cur{color:var(--ink);font-weight:600;}
+.crumbs .sep{color:var(--gray-2);}
+/* 摘录卡：批注色条 + 原文 + 笔记 */
+#cardStage{flex:1;display:flex;align-items:flex-start;justify-content:center;padding-top:8px;}
+.card{
+  width:640px;background:#fff;border:var(--hair);border-radius:2px;position:relative;
+  padding:0 32px 28px;box-shadow:none;
+}
+.card .edge{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent);}
+.card.y .edge{background:var(--warn);}
+.card .tag{position:absolute;right:16px;top:16px;font-size:10px;letter-spacing:1px;color:var(--gray-3);border:var(--hair);padding:3px 8px;border-radius:2px;}
+.card .quote-lab,.card .note-lab{font-size:11px;letter-spacing:2px;color:var(--gray-3);margin:24px 0 8px;}
+.card blockquote{font-size:17px;line-height:1.9;border-left:1px solid var(--gray-2);padding-left:16px;color:var(--ink);}
+.card mark{background:linear-gradient(transparent 55%,rgba(22,106,89,.22) 55%);border-bottom:2px solid var(--accent);padding:0 1px;}
+.card .note-box{
+  margin-top:12px;background:var(--gray-1);padding:14px 16px;border-radius:2px;font-size:14px;line-height:1.8;
+  border-left:2px solid var(--accent);
+}
+/* 换卡入场动画（Pose to Pose→入场：位移+淡入+轻微过冲） */
+@keyframes cardIn{
+  0%{opacity:0;transform:translateX(32px) scale(.985);}
+  70%{opacity:1;transform:translateX(-3px) scale(1.002);}
+  100%{opacity:1;transform:none;}
+}
+.card.in{animation:cardIn var(--t-card) both;}
+.card.out{animation:cardOut 160ms ease-in both;}
+@keyframes cardOut{to{opacity:0;transform:translateX(-24px);}}
+/* ============ 底部 sticky 底栏 72px ============ */
+#bottombar{
+  height:72px;border-top:var(--hair);background:var(--paper);display:flex;align-items:center;
+  gap:28px;padding:0 32px;z-index:40;position:relative;
+}
+.field{display:flex;flex-direction:column;gap:4px;}
+.field label{font-size:10px;letter-spacing:1px;color:var(--gray-3);}
+/* 数字框：stepper 点击数值滚动 */
+.stepper{display:flex;align-items:center;border:var(--hair);border-radius:2px;height:32px;}
+.stepper button{width:28px;height:100%;font-size:14px;color:var(--gray-3);transition:background-color var(--t-hover),color var(--t-hover),transform var(--t-press);}
+.stepper button:hover{background:var(--gray-1);color:var(--accent);}
+.stepper button:active{transform:scale(.85);}
+.stepper .val{width:44px;text-align:center;font-variant-numeric:tabular-nums;font-weight:600;overflow:hidden;}
+.stepper .val span{display:inline-block;}
+@keyframes numRoll{0%{transform:translateY(8px);opacity:0;}100%{transform:none;opacity:1;}}
+.numroll{animation:numRoll 150ms ease-out;}
+/* 优先级滑块：轨道填充 + 手柄 hover 放大、拖动积热 */
+.slider{position:relative;width:180px;height:32px;display:flex;align-items:center;cursor:pointer;}
+.slider .rail{width:100%;height:2px;background:var(--gray-2);position:relative;}
+.slider .fill{position:absolute;left:0;top:0;height:100%;background:var(--accent);transition:width 150ms ease-out;}
+.slider .knob2{
+  position:absolute;top:50%;width:14px;height:14px;border-radius:50%;background:var(--paper);
+  border:2px solid var(--accent);transform:translate(-50%,-50%);
+  transition:transform var(--t-hover),background-color var(--t-hover);
+}
+.slider:hover .knob2{transform:translate(-50%,-50%) scale(1.25);} /* Anticipation：预告可拖 */
+.slider.drag .knob2{transform:translate(-50%,-50%) scale(1.4);background:var(--accent);}
+.slider .tick{font-size:10px;color:var(--gray-3);margin-left:8px;min-width:28px;font-variant-numeric:tabular-nums;}
+#nextBtn{margin-left:auto;}
+/* 评分完成满足感：按钮成功态脉冲（Exaggeration 收敛到 1.06） */
+@keyframes donePulse{0%{transform:scale(1);}35%{transform:scale(1.06);background:var(--accent);color:var(--paper);}100%{transform:scale(1);}}
+.done{animation:donePulse 320ms cubic-bezier(.34,1.56,.64,1);}
+/* ============ 动效说明浮层 ============ */
+#legend{position:fixed;right:24px;bottom:96px;width:268px;background:#fff;border:var(--hair);box-shadow:0 4px 16px rgba(10,10,10,.12);z-index:80;border-radius:2px;overflow:hidden;}
+#legend header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--ink);color:var(--paper);font-size:11px;letter-spacing:1px;cursor:pointer;transition:background-color var(--t-hover);}
+#legend header:hover{background:var(--accent);}
+#legend .body{padding:10px 12px;font-size:11px;line-height:1.7;max-height:280px;overflow:auto;transition:max-height var(--t-panel),padding var(--t-panel),opacity 150ms ease-out;}
+#legend.folded .body{max-height:0;padding-top:0;padding-bottom:0;opacity:0;}
+#legend b{font-weight:600;} #legend .k{color:var(--accent);font-weight:600;}
+#legend ul{list-style:none;} #legend li{display:flex;justify-content:space-between;gap:8px;}
+#legend li span:first-child{color:var(--gray-3);}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{transition-duration:1ms!important;animation-duration:1ms!important;animation-iteration-count:1!important;}
+  .note{animation:none;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 顶栏：收起开关钮 + 同行筛选/排序 -->
+  <header id="topbar">
+    <button id="trackToggle" class="on tip" data-tip="收起 / 展开批注轨" aria-label="收起批注轨"><span class="knob"></span></button>
+    <div class="divider"></div>
+    <span class="top-lab">筛选</span>
+    <div class="seg" id="segFilter" style="width:220px"><div class="thumb"></div>
+      <button class="on">全部 28</button><button>待处理 5</button><button>已排期 23</button>
+    </div>
+    <span class="top-lab">排序</span>
+    <div class="seg" id="segSort" style="width:150px"><div class="thumb"></div>
+      <button class="on">优先级</button><button>创建时间</button>
+    </div>
+    <div id="pending"><span>本节待处理</span><span class="num" id="pendingNum">5</span></div>
+  </header>
+
+  <div id="bodyRow">
+    <!-- 左 280px 批注轨 -->
+    <aside id="track">
+      <div id="trackInner">
+        <h3>批注轨 · 学习科学 / 第2章</h3>
+        <div class="note-list" id="noteList">
+          <div class="note cur" style="animation-delay:0ms"><div class="bar"></div>
+            <div class="src">P.47 · §2.2 提取练习 · 09:12</div>
+            <div class="txt">提取即学习：每一次成功的回忆都会重塑记忆痕迹，使其更不易被干扰。</div>
+            <div class="st">待处理 · 新摘录</div>
+          </div>
+          <div class="note y" style="animation-delay:40ms"><div class="bar"></div>
+            <div class="src">P.48 · §2.2 测试效应 · 09:15</div>
+            <div class="txt">测试效应的元分析显示，提取练习比重复学习在延迟测验中高出约 50%。</div>
+            <div class="st">待处理 · 已加批注</div>
+          </div>
+          <div class="note" style="animation-delay:80ms"><div class="bar"></div>
+            <div class="src">P.51 · §2.3 间隔效应 · 昨天</div>
+            <div class="txt">将相同的学习总时长分散到多个时间点，比集中学习产生更长的保持期。</div>
+            <div class="st">已排期 · 3 天后</div>
+          </div>
+          <div class="note g" style="animation-delay:120ms"><div class="bar"></div>
+            <div class="src">P.42 · §2.1 编码 · 昨天</div>
+            <div class="txt">加工深度假说认为，语义层面的精细复述比机械重复更能促成持久记忆。</div>
+            <div class="st">已排期 · 明天</div>
+          </div>
+          <div class="note" style="animation-delay:160ms"><div class="bar"></div>
+            <div class="src">P.55 · §2.4 交错练习 · 周二</div>
+            <div class="txt">交错不同类型的题目虽然降低即时正确率，却显著提升迁移能力。</div>
+            <div class="st">已排期 · 7 天后</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 主列 -->
+    <main id="content">
+      <nav class="crumbs">
+        <a>原文</a><span class="sep">›</span>
+        <a>学习科学：从认知心理学到教学实践</a><span class="sep">›</span>
+        <a>第2章 记忆的编码与提取</a><span class="sep">›</span>
+        <span class="cur">「提取即学习」摘录</span>
+      </nav>
+
+      <div id="cardStage">
+        <article class="card in" id="card">
+          <div class="edge"></div>
+          <div class="tag">EXCERPT · 01/05</div>
+          <div class="quote-lab">原文摘录 QUOTE</div>
+          <blockquote>"<mark>提取即学习</mark>：每一次成功的回忆都会重塑记忆痕迹，使其更不易被干扰和遗忘。当回忆过程费力但最终成功时，记忆痕迹得到最大程度的巩固——这就是所谓的'合意困难'。"</blockquote>
+          <div class="note-lab">我的笔记 NOTE</div>
+          <div class="note-box">这解释了为什么复习卡片必须"先回忆、后揭示"：被动重读卡面等于绕过了合意困难。对应到 FSRS 流程——评分"困难"反而可能是好事，说明提取发生在遗忘边缘，巩固收益最大。可关联：间隔效应（§2.3）、测试效应元分析（P.48）。</div>
+        </article>
+      </div>
+    </main>
+  </div>
+
+  <!-- 底部 sticky 底栏 72px -->
+  <footer id="bottombar">
+    <div class="field">
+      <label>推迟 DEFER</label>
+      <div class="stepper">
+        <button id="decBtn" aria-label="减少">−</button>
+        <div class="val"><span id="deferVal">1</span></div>
+        <button id="incBtn" aria-label="增加">＋</button>
+      </div>
+      <span style="font-size:10px;color:var(--gray-3)">天后重新出现在队列</span>
+    </div>
+    <div class="field">
+      <label>优先级 PRIORITY</label>
+      <div class="slider" id="slider">
+        <div class="rail"><div class="fill" id="fill"></div></div>
+        <div class="knob2" id="knob"></div>
+        <span class="tick" id="priVal">60</span>
+      </div>
+    </div>
+    <button class="btn-solid" id="skipBtn" style="margin-left:auto;background:none;color:var(--ink);border:var(--hair)">跳过此条</button>
+    <button class="btn-solid" id="nextBtn">完成并下一条 →</button>
+  </footer>
+</div>
+
+<!-- 动效说明浮层 -->
+<aside id="legend">
+  <header id="legendHead"><span>动效说明 · EXCERPT</span><span id="legendArrow">▾</span></header>
+  <div class="body">
+    <ul>
+      <li><span>开关钮拨杆</span><b>200ms <span class="k">spring</span> + 按压squash</b></li>
+      <li><span>批注轨开合</span><b>240ms cubic(.22,1,.36,1)</b></li>
+      <li><span>段控滑块</span><b>200ms spring 过冲</b></li>
+      <li><span>面包屑下划线</span><b>200ms spring scaleX</b></li>
+      <li><span>条目 hover 竖线</span><b>200ms spring 伸展</b></li>
+      <li><span>换卡入场</span><b>320ms ease-out + 70%过冲</b></li>
+      <li><span>徽标计数</span><b>200ms <span class="k">elastic</span> bounce</b></li>
+      <li><span>数字步进</span><b>150ms ease-out 滚入</b></li>
+      <li><span>滑块手柄</span><b>hover 放大1.25 / 拖动1.4</b></li>
+      <li><span>完成脉冲</span><b>320ms spring · 1.06</b></li>
+    </ul>
+    <p style="margin-top:8px;color:var(--gray-3)">已含 prefers-reduced-motion 降级。</p>
+  </div>
+</aside>
+
+<script>
+/* ---------- 段控 ---------- */
+function bindSeg(id){
+  const seg=document.getElementById(id),thumb=seg.querySelector('.thumb'),btns=[...seg.querySelectorAll('button')];
+  function place(anim=true){
+    const b=seg.querySelector('button.on');
+    if(!anim)thumb.style.transition='none';
+    thumb.style.width=b.offsetWidth+'px';
+    thumb.style.transform=`translateX(${b.offsetLeft-2}px)`;
+    if(!anim)requestAnimationFrame(()=>thumb.style.transition='');
+  }
+  btns.forEach(b=>b.addEventListener('click',()=>{btns.forEach(x=>x.classList.remove('on'));b.classList.add('on');place();}));
+  place(false);
+}
+bindSeg('segFilter');bindSeg('segSort');
+/* ---------- 批注轨开关（弹性拨杆 + 面板滑动） ---------- */
+const tg=document.getElementById('trackToggle'),track=document.getElementById('track');
+tg.addEventListener('click',()=>{tg.classList.toggle('on');track.classList.toggle('collapsed',!tg.classList.contains('on'));
+  tg.setAttribute('aria-label',tg.classList.contains('on')?'收起批注轨':'展开批注轨');});
+/* ---------- 批注轨条目点击 → 当前项 + 换卡 ---------- */
+const card=document.getElementById('card'),notes=[...document.querySelectorAll('.note')];
+notes.forEach(n=>n.addEventListener('click',()=>{
+  notes.forEach(x=>x.classList.remove('cur'));n.classList.add('cur');
+  swapCard();
+}));
+/* ---------- 换卡动画（演示钮 = 完成并下一条 / 点击条目） ---------- */
+function swapCard(){
+  card.classList.remove('in');card.classList.add('out');
+  setTimeout(()=>{card.classList.remove('out');void card.offsetWidth;card.classList.add('in');},170);
+}
+/* ---------- 待处理徽标 elastic bounce ---------- */
+const pn=document.getElementById('pendingNum');
+function bounce(){pn.classList.remove('bounce');void pn.offsetWidth;pn.classList.add('bounce');}
+/* ---------- 数字步进：数值滚入 ---------- */
+const dv=document.getElementById('deferVal');
+function step(d){const v=Math.min(30,Math.max(1,+dv.textContent+d));dv.textContent=v;dv.classList.remove('numroll');void dv.offsetWidth;dv.classList.add('numroll');}
+document.getElementById('incBtn').addEventListener('click',()=>step(1));
+document.getElementById('decBtn').addEventListener('click',()=>step(-1));
+/* ---------- 优先级滑块 ---------- */
+const sl=document.getElementById('slider'),fill=document.getElementById('fill'),knob=document.getElementById('knob'),pv=document.getElementById('priVal');
+let pri=60;
+function renderPri(){const pct=pri/100*100;fill.style.width=pct+'%';knob.style.left=pct+'%';pv.textContent=pri;}
+function setFromEvent(e){const r=sl.querySelector('.rail').getBoundingClientRect();pri=Math.round(Math.min(100,Math.max(0,(e.clientX-r.left)/r.width*100)));renderPri();}
+sl.addEventListener('pointerdown',e=>{sl.classList.add('drag');sl.setPointerCapture(e.pointerId);setFromEvent(e);});
+sl.addEventListener('pointermove',e=>{if(sl.classList.contains('drag'))setFromEvent(e);});
+sl.addEventListener('pointerup',()=>sl.classList.remove('drag'));
+renderPri();
+/* ---------- 完成并下一条：脉冲 + 徽标 -1 + 换卡 ---------- */
+const next=document.getElementById('nextBtn');
+next.addEventListener('click',()=>{
+  next.classList.remove('done');void next.offsetWidth;next.classList.add('done');
+  const n=Math.max(0,+pn.textContent-1);pn.textContent=n;bounce();
+  swapCard();
+});
+/* ---------- 图例折叠 ---------- */
+const lg=document.getElementById('legend');
+document.getElementById('legendHead').addEventListener('click',()=>{lg.classList.toggle('folded');document.getElementById('legendArrow').textContent=lg.classList.contains('folded')?'▸':'▾';});
+</script>
+</body>
+</html>

@@ -293,7 +293,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   await cdp.eval(clickBtn("制卡", "[data-sel-act]"));
   await wait(700);
   await cdp.eval(`(() => {
-    const tas = [...document.querySelectorAll(".modal-panel textarea")];
+    const tas = [...document.querySelectorAll("[data-card-dock] textarea")];
     const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
     set.call(tas[0], "FSRSTEST M6 Word 制卡题面");
     tas[0].dispatchEvent(new Event("input", { bubbles: true }));
@@ -301,7 +301,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
     tas[1].dispatchEvent(new Event("input", { bubbles: true }));
     return tas.length;
   })()`);
-  await cdp.eval(clickBtn("创建卡片", ".modal-panel .btn-primary"));
+  await cdp.eval(clickBtn("创建卡片", "[data-card-dock] .btn-primary"));
   await wait(1200);
   const cardOk = await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();
@@ -311,7 +311,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   })()`);
   const cardOkObj = cardOk && cardOk !== "null" ? JSON.parse(cardOk) : null;
   check("Word 选区制卡成功（CFI + 引擎版本锚点）", Boolean(cardOkObj && cardOkObj.cfi && cardOkObj.v), String(cardOk));
-  await cdp.eval(`document.querySelector(".modal-panel .modal-close")?.click(); 1`);
+  await cdp.eval(`document.querySelector("[data-card-dock] [data-dock-close]")?.click(); 1`);
 
   console.log("== 6) 重启应用 → 数据不丢、图仍渲染 ==");
   try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }

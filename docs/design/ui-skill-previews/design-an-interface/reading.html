@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>阅读界面 · Design It Twice 概念对比</title>
+<style>
+/* ============ 基础 ============ */
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:#e3e3df}
+body{font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;color:#0a0a0a;-webkit-font-smoothing:antialiased}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+mark{background:rgba(22,106,89,.16);color:inherit;padding:1px 2px;border-bottom:2px solid rgba(22,106,89,.55)}
+
+/* ============ 概念切换条（固定顶部） ============ */
+.switcher{position:fixed;top:0;left:0;right:0;height:44px;background:#0a0a0a;color:#fafaf8;display:flex;align-items:center;gap:8px;padding:0 16px;z-index:999}
+.switcher .ttl{font-size:11px;letter-spacing:.12em;color:#8a8a88;margin-right:8px}
+.switcher button{display:flex;align-items:center;gap:7px;height:28px;padding:0 12px;font-size:12px;color:#c9c9c6;border:1px solid #3a3a38;transition:color .2s,border-color .2s,background .2s}
+.switcher button:hover{color:#fff;border-color:#777}
+.switcher button.active{background:#fafaf8;color:#0a0a0a;border-color:#fafaf8}
+.switcher .rec{font-size:10px;line-height:1;padding:2px 5px;background:#166a59;color:#fff;font-style:normal;letter-spacing:.05em}
+.switcher .hint{margin-left:auto;font-size:11px;color:#8a8a88}
+
+/* ============ 概念调色板 ============ */
+.cA{--paper:#fafaf8;--ink:#0a0a0a;--p1:#f0f0ee;--line:#d4d4d2;--mut:#737373;--acc:#166a59;--card:#ffffff;--hlbg:rgba(22,106,89,.14)}
+.cB{--paper:#f7f2e9;--ink:#1c1917;--p1:#efe7d7;--line:#d9cfba;--mut:#8a7e69;--acc:#9a3b12;--card:#fffdf7;--hlbg:rgba(154,59,18,.14);font-family:Georgia,"Noto Serif SC","Songti SC",SimSun,serif}
+.cC{--paper:#121212;--ink:#eaeae8;--p1:#1b1b19;--line:#2c2c2a;--mut:#98988f;--acc:#3ecf9f;--card:#191917;--hlbg:rgba(62,207,159,.18)}
+
+.concept{display:none}
+.concept.active{display:block;animation:pageIn .45s ease both}
+@keyframes pageIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.app{width:1440px;height:900px;margin:44px auto 48px;background:var(--paper);color:var(--ink);position:relative;overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.18)}
+.cnote{position:absolute;left:12px;bottom:12px;z-index:60;font-size:11px;color:var(--mut);background:var(--card);border:1px solid var(--line);padding:5px 10px;max-width:640px;line-height:1.5;pointer-events:none}
+.cnote b{color:var(--acc);letter-spacing:.04em}
+
+/* ============ 通用：应用栏 ============ */
+.appbar{height:56px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 16px;flex:none}
+.appbar .back{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--mut);padding:6px 8px;transition:color .2s}
+.appbar .back:hover{color:var(--acc)}
+.appbar .bk{font-size:15px;font-weight:600;letter-spacing:.02em}
+.appbar .pg{font-size:12px;color:var(--mut);border-left:1px solid var(--line);padding-left:16px;font-variant-numeric:tabular-nums}
+.appbar .prog{flex:1;max-width:280px;height:3px;background:var(--p1);margin-left:8px}
+.appbar .prog i{display:block;height:100%;width:15%;background:var(--acc)}
+
+/* ============ 通用：侧栏组件 ============ */
+.tabs{display:flex;border-bottom:1px solid var(--line);flex:none}
+.tabs button{flex:1;height:40px;font-size:13px;color:var(--mut);border-bottom:2px solid transparent;letter-spacing:.05em;transition:color .2s}
+.tabs button:hover{color:var(--ink)}
+.tabs button.on{color:var(--acc);border-bottom-color:var(--acc);font-weight:600}
+.side-tools{padding:12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px;flex:none}
+.seg{display:flex;border:1px solid var(--line)}
+.seg button{flex:1;height:28px;font-size:12px;color:var(--mut);transition:background .15s,color .15s}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button.on{background:var(--ink);color:var(--paper)}
+.seg-row{display:flex;gap:8px}
+.seg-row .seg{flex:1}
+.seg .lbl{font-size:10px;color:var(--mut);padding:0 4px 2px;display:block;letter-spacing:.1em}
+.exlist{overflow-y:auto;flex:1}
+.ex{display:flex;gap:10px;padding:12px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .15s}
+.ex:hover{background:var(--p1)}
+.ex .bar{width:3px;flex:none;align-self:stretch}
+.bar.g{background:var(--acc)} .bar.y{background:#c9a227} .bar.b{background:#3b6ea5}
+.ex .q{font-size:13px;line-height:1.6;margin-bottom:4px}
+.ex .meta{font-size:11px;color:var(--mut)}
+.ex .note{font-size:12px;color:var(--mut);margin-top:4px;padding-left:8px;border-left:2px solid var(--line)}
+.pane{display:flex;flex-direction:column;flex:1;min-height:0}
+
+/* ============ 概念 A：常驻右栏（瑞士风） ============ */
+.cA .app{display:flex;flex-direction:column}
+.cA .main{flex:1;display:grid;grid-template-columns:1fr 352px 56px;min-height:0}
+.cA .content{overflow-y:auto;padding:40px 48px;animation:rise .5s .05s ease both}
+.cA .article{max-width:640px}
+.cA .chap{font-size:11px;letter-spacing:.25em;color:var(--acc);margin-bottom:12px}
+.cA h1{font-size:26px;font-weight:700;letter-spacing:.02em;margin-bottom:24px}
+.cA .article p{font-size:15px;line-height:1.95;margin-bottom:16px;color:#262626}
+.cA .rail{border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;animation:rise .5s .1s ease both}
+.cA .side{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;animation:slideL .5s .1s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes slideL{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}
+.rbtn{width:40px;height:40px;display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:16px;transition:color .2s,background .2s;border-radius:0}
+.rbtn:hover{color:var(--acc);background:var(--p1)}
+.rbtn.on{color:var(--acc)}
+.rail .gap{height:8px}
+
+/* ============ 划选菜单浮层 ============ */
+.selmenu{position:absolute;z-index:40;background:var(--card);border:1px solid var(--ink);box-shadow:4px 4px 0 rgba(10,10,10,.12);display:flex;align-items:center;gap:2px;padding:4px}
+.selmenu button{height:28px;padding:0 10px;font-size:12px;white-space:nowrap;transition:background .15s}
+.selmenu button:hover{background:var(--p1)}
+.selmenu button.pri{background:var(--acc);color:#fff}
+.selmenu button.pri:hover{filter:brightness(1.1);background:var(--acc)}
+.selmenu .dots{display:flex;gap:5px;padding:0 8px;border-left:1px solid var(--line)}
+.selmenu .dots i{width:12px;height:12px;border:1px solid rgba(0,0,0,.2);cursor:pointer}
+.selmenu::after{content:"";position:absolute;top:-5px;left:88px;width:8px;height:8px;background:var(--card);border-left:1px solid var(--ink);border-top:1px solid var(--ink);transform:rotate(45deg)}
+
+/* ============ 概念 B：左侧浮层抽屉（暖纸编辑风） ============ */
+.cB .app{display:flex;flex-direction:column}
+.cB .main{flex:1;position:relative;min-height:0}
+.cB .content{height:100%;overflow-y:auto;padding:48px 0 48px 96px;transition:padding .35s ease}
+.cB .article{max-width:660px}
+.cB .chap{font-size:12px;letter-spacing:.3em;color:var(--acc);margin-bottom:14px;font-style:italic}
+.cB h1{font-size:30px;font-weight:700;margin-bottom:8px}
+.cB .byline{font-size:12px;color:var(--mut);margin-bottom:28px;letter-spacing:.05em}
+.cB .article p{font-size:16px;line-height:2.05;margin-bottom:18px;color:#2c2620}
+.cB .dropcap::first-letter{float:left;font-size:52px;line-height:.9;padding:4px 10px 0 0;color:var(--acc);font-weight:700}
+.cB .scrim{position:absolute;inset:0;background:rgba(28,25,23,.28);opacity:0;pointer-events:none;transition:opacity .3s;z-index:10}
+.cB .drawer{position:absolute;top:0;bottom:0;left:0;width:440px;background:var(--card);border-right:2px solid var(--ink);z-index:20;display:flex;flex-direction:column;transform:translateX(-100%);transition:transform .35s cubic-bezier(.22,.9,.3,1)}
+.cB .drawer.open{transform:none}
+.cB .scrim.show{opacity:1}
+.cB .drawer.open~.rail, .cB .main.hasdrawer .content{padding-left:520px}
+.cB .dhead{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:2px solid var(--ink);flex:none}
+.cB .dhead .t{font-size:16px;font-weight:700;letter-spacing:.05em}
+.cB .x{width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--mut);border:1px solid var(--line);transition:all .2s}
+.cB .x:hover{color:var(--acc);border-color:var(--acc)}
+.cB .rail{position:absolute;top:0;right:0;bottom:0;width:56px;border-left:2px solid var(--ink);background:var(--p1);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px;z-index:5}
+.cB .appbar{border-bottom:2px solid var(--ink)}
+.cB mark{border-bottom:2px solid rgba(154,59,18,.6)}
+.cB .drawer.open~.rail{right:0}
+
+/* ============ 概念 C：底部横排面板（暗色专注） ============ */
+.cC .app{display:flex;flex-direction:column}
+.cC .main{flex:1;display:flex;min-height:0}
+.cC .content{flex:1;overflow-y:auto;padding:48px 40px;transition:height .35s}
+.cC .article{max-width:680px;margin:0 auto}
+.cC .chap{font-size:11px;letter-spacing:.3em;color:var(--acc);margin-bottom:14px}
+.cC h1{font-size:28px;font-weight:700;margin-bottom:24px;letter-spacing:.02em}
+.cC .article p{font-size:15.5px;line-height:2;margin-bottom:18px;color:#c9c9c4}
+.cC .rail{width:56px;border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:4px}
+.cC .bpanel{flex:none;border-top:1px solid var(--line);background:var(--card);height:236px;display:flex;flex-direction:column;transition:height .35s cubic-bezier(.22,.9,.3,1)}
+.cC .bpanel.collapsed{height:36px}
+.cC .handle{height:36px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;cursor:pointer;color:var(--mut);font-size:12px;letter-spacing:.08em}
+.cC .handle .arw{transition:transform .3s}
+.cC .bpanel.collapsed .handle .arw{transform:rotate(180deg)}
+.cC .handle .cnt{color:var(--acc);font-variant-numeric:tabular-nums}
+.cC .film{flex:1;display:flex;gap:12px;padding:8px 16px 16px;overflow-x:auto}
+.cC .fcard{flex:0 0 300px;background:var(--p1);border:1px solid var(--line);border-top:3px solid var(--acc);padding:14px;display:flex;flex-direction:column;gap:8px;transition:transform .2s,border-color .2s;animation:rise .5s ease both}
+.cC .fcard:hover{transform:translateY(-4px);border-top-color:#fff}
+.cC .fcard .q{font-size:13px;line-height:1.65}
+.cC .fcard .meta{font-size:11px;color:var(--mut);margin-top:auto}
+.cC mark{border-bottom:2px solid rgba(62,207,159,.6)}
+.cC .rbtn:hover{color:var(--acc);background:var(--p1)}
+
+/* ============ 动效降级 ============ */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+</style>
+</head>
+<body data-page="reading">
+
+<div class="switcher">
+  <span class="ttl">DESIGN IT TWICE · 阅读界面</span>
+  <button data-c="cA" class="active">A · 常驻右栏 <em class="rec">推荐</em></button>
+  <button data-c="cB">B · 左侧浮层抽屉</button>
+  <button data-c="cC">C · 底部横排面板</button>
+  <span class="hint">点击切换概念对比</span>
+</div>
+
+<!-- ================= 概念 A：常驻右栏 ================= -->
+<section class="concept cA active">
+  <div class="app">
+    <header class="appbar">
+      <button class="back">← 返回书架</button>
+      <span class="bk">学习科学：认知心理学视角</span>
+      <span class="pg">第 47 页 / 共 312 页</span>
+      <span class="prog"><i></i></span>
+    </header>
+    <div class="main">
+      <div class="content">
+        <article class="article">
+          <div class="chap">第 2 章 · 记忆与提取</div>
+          <h1>2.3　提取练习效应</h1>
+          <p>学习者在记忆活动中的主动提取，远比重复阅读更能巩固长期记忆。Roediger 与 Karpicke（2006）的经典实验将被试随机分为两组：一组反复阅读同一篇科普短文，另一组在阅读后进行 free recall 提取练习。一周后的测验显示，在同等学习时间下，提取练习组的保持率比重复阅读组高出约 50%。这一现象被称为「提取练习效应」（testing effect），也常译作「测试效应」。</p>
+          <p>提取之所以有效，是因为每一次成功的提取都会重构记忆痕迹，并使相关神经通路得到再一次的强化。换言之，遗忘并不可怕——<mark id="hlTarget">适度的遗忘恰恰为提取制造了必要的难度</mark>，这正是 Bjork 所提出的「必要难度」（desirable difficulty）理论的核心主张：让学习过程显得更吃力的条件，往往带来更持久的保持。</p>
+          <p>值得强调的是，提取练习的效果并不依赖于测验的评分方式。即便是没有反馈的低 stakes 自测，也显著优于被动重读。对渐进阅读的启示在于：复习卡片应当被设计为一次「提取尝试」，而非一次「重读确认」——先回忆，再核对答案，让间隔安排出来的遗忘成为练习的一部分。</p>
+        </article>
+
+        <!-- 划选菜单浮层 -->
+        <div class="selmenu" style="top:328px;left:404px">
+          <button class="pri">摘录</button>
+          <button>高亮</button>
+          <button>批注</button>
+          <button>AI 制卡</button>
+          <span class="dots"><i style="background:#166a59"></i><i style="background:#c9a227"></i><i style="background:#3b6ea5"></i><i style="background:#fff"></i></span>
+        </div>
+      </div>
+
+      <aside class="side">
+        <div class="tabs" role="tablist">
+          <button data-t="toc">目录</button>
+          <button class="on" data-t="ex">摘录</button>
+          <button data-t="kg">图谱</button>
+        </div>
+        <div class="pane" data-pane="toc" hidden>
+          <div class="exlist">
+            <div class="ex"><div class="ex-body"><p class="q">第 1 章　记忆的模型</p><p class="meta">第 1 页</p></div></div>
+            <div class="ex" style="background:var(--p1)"><div class="ex-body"><p class="q" style="color:var(--acc);font-weight:600">第 2 章　记忆与提取</p><p class="meta">第 43 页 · 当前</p></div></div>
+            <div class="ex"><div class="ex-body"><p class="q">2.1 工作记忆的瓶颈</p><p class="meta">第 43 页</p></div></div>
+            <div class="ex"><div class="ex-body"><p class="q">2.2 遗忘曲线的再发现</p><p class="meta">第 45 页</p></div></div>
+            <div class="ex"><div class="ex-body"><p class="q">2.3 提取练习效应</p><p class="meta">第 47 页</p></div></div>
+            <div class="ex"><div class="ex-body"><p class="q">第 3 章　间隔重复的算法</p><p class="meta">第 71 页</p></div></div>
+          </div>
+        </div>
+        <div class="pane" data-pane="ex">
+          <div class="side-tools">
+            <div class="seg-row">
+              <div class="seg" data-filter="1">
+                <button class="on" data-f="all">全部</button>
+                <button data-f="ex">摘录</button>
+                <button data-f="hl">高亮</button>
+              </div>
+              <div class="seg" data-sort="1">
+                <button class="on" data-s="pos">位置</button>
+                <button data-s="time">时间</button>
+              </div>
+            </div>
+          </div>
+          <div class="exlist" id="exListA">
+            <div class="ex" data-kind="hl" data-pos="47" data-ago="2"><span class="bar g"></span><div class="ex-body"><p class="q">「适度的遗忘恰恰为提取制造了必要的难度。」</p><p class="meta">高亮 · 第 47 页 · 2 小时前</p></div></div>
+            <div class="ex" data-kind="ex" data-pos="47" data-ago="26"><span class="bar g"></span><div class="ex-body"><p class="q">「提取练习组的保持率比重复阅读组高出约 50%。」</p><p class="note">做卡：效应量 + 出处一起记</p><p class="meta">摘录 · 第 47 页 · 昨天</p></div></div>
+            <div class="ex" data-kind="ex" data-pos="46" data-ago="30"><span class="bar y"></span><div class="ex-body"><p class="q">「每一次成功的提取都会重构记忆痕迹。」</p><p class="meta">摘录 · 第 46 页 · 昨天</p></div></div>
+            <div class="ex" data-kind="hl" data-pos="44" data-ago="76"><span class="bar b"></span><div class="ex-body"><p class="q">「间隔重复通过安排复习时机对抗遗忘。」</p><p class="meta">高亮 · 第 44 页 · 3 天前</p></div></div>
+            <div class="ex" data-kind="ex" data-pos="41" data-ago="130"><span class="bar y"></span><div class="ex-body"><p class="q">「图式理论：新信息依附于既有结构被编码。」</p><p class="meta">摘录 · 第 41 页 · 5 天前</p></div></div>
+          </div>
+        </div>
+        <div class="pane" data-pane="kg" hidden>
+          <div class="exlist" style="padding:16px">
+            <svg width="100%" height="300" viewBox="0 0 300 300">
+              <line x1="150" y1="150" x2="70" y2="70" stroke="#d4d4d2"/><line x1="150" y1="150" x2="235" y2="80" stroke="#d4d4d2"/><line x1="150" y1="150" x2="75" y2="230" stroke="#d4d4d2"/><line x1="150" y1="150" x2="235" y2="225" stroke="#d4d4d2"/>
+              <circle cx="150" cy="150" r="34" fill="#166a59"/><text x="150" y="154" text-anchor="middle" fill="#fff" font-size="11">提取练习</text>
+              <circle cx="70" cy="70" r="28" fill="#fff" stroke="#0a0a0a"/><text x="70" y="74" text-anchor="middle" font-size="10" fill="#0a0a0a">必要难度</text>
+              <circle cx="235" cy="80" r="28" fill="#fff" stroke="#0a0a0a"/><text x="235" y="84" text-anchor="middle" font-size="10" fill="#0a0a0a">间隔重复</text>
+              <circle cx="75" cy="230" r="28" fill="#fff" stroke="#0a0a0a"/><text x="75" y="234" text-anchor="middle" font-size="10" fill="#0a0a0a">工作记忆</text>
+              <circle cx="235" cy="225" r="28" fill="#fff" stroke="#0a0a0a"/><text x="235" y="229" text-anchor="middle" font-size="10" fill="#0a0a0a">遗忘曲线</text>
+            </svg>
+            <p style="font-size:11px;color:var(--mut);margin-top:8px">本章 4 个概念节点 · 6 条摘录关联</p>
+          </div>
+        </div>
+      </aside>
+
+      <nav class="rail">
+        <button class="rbtn" title="上一页">↑</button>
+        <button class="rbtn" title="下一页">↓</button>
+        <span class="gap"></span>
+        <button class="rbtn on" title="侧栏">▤</button>
+        <button class="rbtn" title="阅读设置">Aa</button>
+        <button class="rbtn" title="更多">⋯</button>
+      </nav>
+    </div>
+    <div class="cnote"><b>概念 A · 常驻右栏</b>——侧栏 352px 固定停靠在正文与工具栏之间，目录/摘录/图谱同屏可查，边读边摘零遮挡，最贴合「阅读中持续产出摘录」的主工作流。</div>
+  </div>
+</section>
+
+<!-- ================= 概念 B：左侧浮层抽屉 ================= -->
+<section class="concept cB">
+  <div class="app">
+    <header class="appbar">
+      <button class="back">← 返回书架</button>
+      <span class="bk">学习科学：认知心理学视角</span>
+      <span class="pg">第 47 页 / 共 312 页</span>
+      <span class="prog"><i></i></span>
+      <button class="rbtn" id="drawerBtn" style="margin-left:auto;width:36px;height:32px;border:1px solid var(--line);font-size:14px" title="目录与摘录">▤</button>
+    </header>
+    <div class="main hasdrawer">
+      <div class="scrim show" id="scrimB"></div>
+      <aside class="drawer open" id="drawerB">
+        <div class="dhead">
+          <span class="t">目录与摘录</span>
+          <button class="x" id="closeB">✕</button>
+        </div>
+        <div class="tabs">
+          <button data-t="toc">目录</button>
+          <button class="on" data-t="ex">摘录</button>
+          <button data-t="kg">图谱</button>
+        </div>
+        <div class="pane" data-pane="toc" hidden>
+          <div class="exlist">
+            <div class="ex"><div class="ex-body"><p class="q">第 2 章　记忆与提取</p><p class="meta">第 43 页 · 当前</p></div></div>
+            <div class="ex"><div class="ex-body"><p class="q">第 3 章　间隔重复的算法</p><p class="meta">第 71 页</p></div></div>
+            <div class="ex"><div class="ex-body"><p class="q">第 4 章　元认知与自我调节</p><p class="meta">第 103 页</p></div></div>
+          </div>
+        </div>
+        <div class="pane" data-pane="ex">
+          <div class="side-tools">
+            <div class="seg-row">
+              <div class="seg"><button class="on">全部</button><button>摘录</button><button>高亮</button></div>
+              <div class="seg"><button class="on">位置</button><button>时间</button></div>
+            </div>
+          </div>
+          <div class="exlist">
+            <div class="ex"><span class="bar g"></span><div class="ex-body"><p class="q">「适度的遗忘恰恰为提取制造了必要的难度。」</p><p class="meta">高亮 · 第 47 页 · 2 小时前</p></div></div>
+            <div class="ex"><span class="bar g"></span><div class="ex-body"><p class="q">「提取练习组的保持率比重复阅读组高出约 50%。」</p><p class="note">做卡：效应量 + 出处一起记</p><p class="meta">摘录 · 第 47 页 · 昨天</p></div></div>
+            <div class="ex"><span class="bar y"></span><div class="ex-body"><p class="q">「每一次成功的提取都会重构记忆痕迹。」</p><p class="meta">摘录 · 第 46 页 · 昨天</p></div></div>
+            <div class="ex"><span class="bar b"></span><div class="ex-body"><p class="q">「间隔重复通过安排复习时机对抗遗忘。」</p><p class="meta">高亮 · 第 44 页 · 3 天前</p></div></div>
+          </div>
+        </div>
+        <div class="pane" data-pane="kg" hidden>
+          <div class="exlist" style="padding:16px;font-size:12px;color:var(--mut)">概念图视图：以「提取练习」为中心，连接「必要难度」「间隔重复」「遗忘曲线」。</div>
+        </div>
+      </aside>
+      <div class="content">
+        <article class="article">
+          <div class="chap">CHAPTER TWO · MEMORY &amp; RETRIEVAL</div>
+          <h1>2.3　提取练习效应</h1>
+          <div class="byline">《学习科学：认知心理学视角》 · 第 47 页</div>
+          <p class="dropcap">学习者在记忆活动中的主动提取，远比重复阅读更能巩固长期记忆。Roediger 与 Karpicke（2006）的经典实验将被试随机分为两组：一组反复阅读同一篇科普短文，另一组在阅读后进行提取练习。一周后的测验显示，提取练习组的保持率比重复阅读组高出约 50%。这一现象被称为「提取练习效应」。</p>
+          <p>提取之所以有效，是因为每一次成功的提取都会重构记忆痕迹，并使相关神经通路得到再一次的强化。换言之，遗忘并不可怕——<mark>适度的遗忘恰恰为提取制造了必要的难度</mark>，这正是「必要难度」理论的核心主张：让学习过程显得更吃力的条件，往往带来更持久的保持。</p>
+          <p>值得强调的是，提取练习的效果并不依赖于测验的评分方式。即便是没有反馈的低 stakes 自测，也显著优于被动重读。对渐进阅读的启示在于：复习卡片应当被设计为一次「提取尝试」，而非一次「重读确认」。</p>
+        </article>
+
+        <div class="selmenu" style="top:472px;left:520px;background:var(--card)">
+          <button class="pri">摘录</button>
+          <button>高亮</button>
+          <button>批注</button>
+          <button>AI 制卡</button>
+          <span class="dots"><i style="background:#9a3b12"></i><i style="background:#c9a227"></i><i style="background:#3b6ea5"></i></span>
+        </div>
+      </div>
+      <nav class="rail">
+        <button class="rbtn" title="上一页">↑</button>
+        <button class="rbtn" title="下一页">↓</button>
+        <span class="gap"></span>
+        <button class="rbtn" title="阅读设置">Aa</button>
+        <button class="rbtn" title="更多">⋯</button>
+      </nav>
+    </div>
+    <div class="cnote" style="background:var(--card);color:var(--mut)"><b>概念 B · 左侧浮层抽屉</b>——440px 抽屉从左侧滑入覆盖正文、带遮罩，默认收起换取整页沉浸阅读；暖纸 + 衬线 + 落首字，营造「纸质书 + 批注册」的编辑气质。</div>
+  </div>
+</section>
+
+<!-- ================= 概念 C：底部横排面板 ================= -->
+<section class="concept cC">
+  <div class="app">
+    <header class="appbar" style="background:#191917">
+      <button class="back">← 返回书架</button>
+      <span class="bk">学习科学：认知心理学视角</span>
+      <span class="pg">第 47 页 / 共 312 页</span>
+      <span class="prog" style="background:#2c2c2a"><i></i></span>
+    </header>
+    <div class="main">
+      <div class="content">
+        <article class="article">
+          <div class="chap">第 2 章 · 记忆与提取</div>
+          <h1>2.3　提取练习效应</h1>
+          <p>学习者在记忆活动中的主动提取，远比重复阅读更能巩固长期记忆。Roediger 与 Karpicke（2006）的经典实验将被试随机分为两组：一组反复阅读同一篇科普短文，另一组在阅读后进行提取练习。一周后的测验显示，提取练习组的保持率比重复阅读组高出约 50%。</p>
+          <p>提取之所以有效，是因为每一次成功的提取都会重构记忆痕迹，并使相关神经通路得到再一次的强化。换言之，遗忘并不可怕——<mark>适度的遗忘恰恰为提取制造了必要的难度</mark>，这正是「必要难度」理论的核心主张。</p>
+          <p>值得强调的是，提取练习的效果并不依赖于测验的评分方式。即便是没有反馈的低 stakes 自测，也显著优于被动重读。对渐进阅读的启示在于：复习卡片应当被设计为一次「提取尝试」，而非一次「重读确认」。</p>
+        </article>
+
+        <div class="selmenu" style="top:330px;left:300px;background:#191917;border-color:#3ecf9f;box-shadow:0 4px 20px rgba(0,0,0,.5)">
+          <button class="pri" style="background:#3ecf9f;color:#0a0a0a">摘录</button>
+          <button>高亮</button>
+          <button>批注</button>
+          <button>AI 制卡</button>
+          <span class="dots" style="border-color:#2c2c2a"><i style="background:#3ecf9f"></i><i style="background:#c9a227"></i><i style="background:#3b6ea5"></i></span>
+        </div>
+      </div>
+      <nav class="rail">
+        <button class="rbtn" title="上一页">↑</button>
+        <button class="rbtn" title="下一页">↓</button>
+        <span class="gap"></span>
+        <button class="rbtn on" title="摘录面板">▤</button>
+        <button class="rbtn" title="阅读设置">Aa</button>
+        <button class="rbtn" title="更多">⋯</button>
+      </nav>
+    </div>
+
+    <div class="bpanel" id="bpanelC">
+      <div class="handle" id="handleC">
+        <span class="arw">▾</span>
+        <span>本章摘录</span>
+        <span class="cnt">5 条 · 3 摘录 / 2 高亮</span>
+        <span style="margin-left:auto">全部 / 摘录 / 高亮　·　位置 / 时间</span>
+      </div>
+      <div class="film">
+        <div class="fcard" style="animation-delay:.05s"><p class="q">「适度的遗忘恰恰为提取制造了必要的难度。」</p><p class="meta">高亮 · 第 47 页 · 2 小时前</p></div>
+        <div class="fcard" style="animation-delay:.1s;border-top-color:#c9a227"><p class="q">「提取练习组的保持率比重复阅读组高出约 50%。」</p><p class="meta">摘录 · 第 47 页 · 昨天</p></div>
+        <div class="fcard" style="animation-delay:.15s;border-top-color:#c9a227"><p class="q">「每一次成功的提取都会重构记忆痕迹。」</p><p class="meta">摘录 · 第 46 页 · 昨天</p></div>
+        <div class="fcard" style="animation-delay:.2s;border-top-color:#3b6ea5"><p class="q">「间隔重复通过安排复习时机对抗遗忘。」</p><p class="meta">高亮 · 第 44 页 · 3 天前</p></div>
+        <div class="fcard" style="animation-delay:.25s"><p class="q">「图式理论：新信息依附于既有结构被编码。」</p><p class="meta">摘录 · 第 41 页 · 5 天前</p></div>
+      </div>
+    </div>
+    <div class="cnote" style="background:#191917"><b>概念 C · 底部横排面板</b>——摘录以胶片式横排卡片铺在底部、可折叠到 36px 手柄，正文获得最大沉浸高度；暗色专注舱配色，摘录更像「工作台上的待检胶片」而非文档列表。</div>
+  </div>
+</section>
+
+<script>
+/* 概念切换 */
+const btns=document.querySelectorAll('.switcher button');
+btns.forEach(b=>b.addEventListener('click',()=>{
+  btns.forEach(x=>x.classList.toggle('active',x===b));
+  document.querySelectorAll('.concept').forEach(s=>s.classList.remove('active'));
+  document.querySelector('.'+b.dataset.c).classList.add('active');
+}));
+
+/* 页签（每个侧栏独立作用域） */
+document.querySelectorAll('.tabs').forEach(tg=>{
+  tg.addEventListener('click',e=>{
+    const b=e.target.closest('button[data-t]');if(!b)return;
+    tg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    const scope=tg.parentElement;
+    scope.querySelectorAll('[data-pane]').forEach(p=>p.hidden=p.dataset.pane!==b.dataset.t);
+  });
+});
+
+/* 段控（筛选会真正过滤列表，排序会真正重排） */
+document.querySelectorAll('.seg').forEach(sg=>{
+  sg.addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;
+    sg.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+    const pane=sg.closest('.pane');
+    if(sg.dataset.filter){
+      const f=b.dataset.f;
+      pane.querySelectorAll('.ex[data-kind]').forEach(it=>{
+        it.style.display=(f==='all'||it.dataset.kind===f)?'':'none';
+      });
+    }
+    if(sg.dataset.sort){
+      const byTime=b.dataset.s==='time';
+      const list=pane.querySelector('.exlist');
+      [...list.querySelectorAll('.ex[data-pos]')]
+        .sort((a,c)=>byTime?(+a.dataset.ago)-(+c.dataset.ago):(+c.dataset.pos)-(+a.dataset.pos))
+        .forEach(it=>list.appendChild(it));
+    }
+  });
+});
+
+/* 概念 B 抽屉开合 */
+const dB=document.getElementById('drawerB'),sB=document.getElementById('scrimB');
+function toggleDrawer(){
+  dB.classList.toggle('open');sB.classList.toggle('show');
+  dB.closest('.main').classList.toggle('hasdrawer',dB.classList.contains('open'));
+}
+document.getElementById('closeB').addEventListener('click',toggleDrawer);
+sB.addEventListener('click',toggleDrawer);
+document.getElementById('drawerBtn').addEventListener('click',toggleDrawer);
+
+/* 概念 C 底部面板折叠 */
+document.getElementById('handleC').addEventListener('click',()=>{
+  document.getElementById('bpanelC').classList.toggle('collapsed');
+});
+</script>
+</body>
+</html>

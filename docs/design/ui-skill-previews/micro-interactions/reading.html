@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>阅读界面 · 微交互预览 — 渐进阅读</title>
+<style>
+/* ============ 设计令牌（瑞士国际主义 × micro-interactions skill） ============ */
+:root{
+  --paper:#fafaf8; --ink:#0a0a0a;
+  --gray-1:#f0f0ee; --gray-2:#d4d4d2; --gray-3:#737373;
+  --accent:#166a59; --accent-dark:#3fa08a;
+  --hair:1px solid var(--gray-2);
+  /* —— 微交互时长/缓动（skill Timing Reference）—— */
+  --t-hover:100ms ease-out;          /* Hover 100ms ease-out */
+  --t-press:100ms ease-out;          /* Click 100ms ease-out */
+  --t-toggle:200ms cubic-bezier(.34,1.56,.64,1); /* Toggle 200ms spring（弹性过冲） */
+  --t-tip-in:150ms ease-out;         /* Tooltip show 150ms ease-out */
+  --t-tip-out:100ms ease-in;         /* Tooltip hide 100ms ease-in */
+  --t-panel:240ms cubic-bezier(.22,1,.36,1);     /* 侧栏滑入：Slow Out 长距运动 */
+  --t-badge:200ms cubic-bezier(.34,1.56,.64,1);  /* Badge update 200ms elastic */
+  --stagger:40ms;                    /* 列表项 Follow Through 逐项错峰 */
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{width:1440px;height:900px;overflow:hidden;}
+body{
+  font-family:Inter,"Noto Sans SC","Microsoft YaHei",sans-serif;
+  background:var(--paper);color:var(--ink);
+  font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;}
+/* 通用图标按钮：Anticipation（hover 抬升）→ Squash & Stretch（按压压缩） */
+.icon-btn{
+  width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:2px;position:relative;
+  transition:transform var(--t-hover),background-color var(--t-hover),color var(--t-hover);
+}
+.icon-btn:hover{background:var(--gray-1);color:var(--accent);transform:translateY(-1px);}
+.icon-btn:active{transform:translateY(0) scale(.92);transition-duration:var(--t-press);}
+.icon-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;transition:transform var(--t-hover);}
+.icon-btn:hover svg{transform:scale(1.08);} /* Secondary Action：图标随父级状态响应 */
+/* 主按钮（实心） */
+.btn-solid{
+  display:inline-flex;align-items:center;gap:8px;padding:8px 16px;
+  background:var(--ink);color:var(--paper);border-radius:2px;font-size:13px;
+  transition:transform var(--t-hover),background-color var(--t-hover),box-shadow var(--t-hover);
+}
+.btn-solid:hover{background:var(--accent);transform:translateY(-1px);box-shadow:0 2px 8px rgba(10,10,10,.18);}
+.btn-solid:active{transform:translateY(0) scale(.98);box-shadow:none;transition-duration:var(--t-press);}
+/* 文字 tooltip：进 150ms ease-out / 出 100ms ease-in，transform-origin 随触发点 */
+.tip{position:relative;}
+.tip::after{
+  content:attr(data-tip);position:absolute;left:50%;top:calc(100% + 6px);transform:translateX(-50%) translateY(-4px);
+  background:var(--ink);color:var(--paper);font-size:11px;line-height:1;padding:6px 8px;white-space:nowrap;
+  opacity:0;pointer-events:none;border-radius:2px;z-index:60;
+  transition:opacity var(--t-tip-out),transform var(--t-tip-out);
+}
+.tip:hover::after{opacity:1;transform:translateX(-50%) translateY(0);transition:opacity var(--t-tip-in),transform var(--t-tip-in);}
+/* ============ 布局骨架 ============ */
+#app{display:grid;grid-template-rows:56px 1fr;width:1440px;height:900px;}
+/* ---- 顶部应用栏 ---- */
+#topbar{
+  display:flex;align-items:center;gap:16px;padding:0 20px;
+  border-bottom:var(--hair);background:var(--paper);z-index:30;
+}
+#topbar .divider{width:1px;height:24px;background:var(--gray-2);}
+#book-title{font-size:15px;font-weight:600;letter-spacing:.2px;}
+#page-info{margin-left:auto;color:var(--gray-3);font-size:12px;font-variant-numeric:tabular-nums;transition:color var(--t-hover);}
+/* ---- 中部三栏 ---- */
+#main{display:grid;grid-template-columns:auto 1fr auto;min-height:0;}
+/* ============ 左侧 280px 全高侧边栏 ============ */
+#sidebar{
+  width:280px;height:100%;border-right:var(--hair);background:var(--paper);
+  display:flex;flex-direction:column;overflow:hidden;position:relative;z-index:20;
+  transition:width var(--t-panel),opacity var(--t-panel);
+}
+#sidebar.collapsed{width:0;opacity:0;} /* 收起：滑出 + 淡出，面板内容固定 280px 宽避免回流跳动 */
+#sidebar-inner{width:280px;height:100%;display:flex;flex-direction:column;}
+.side-head{padding:12px 16px;border-bottom:var(--hair);display:flex;align-items:center;gap:8px;}
+.side-head h2{font-size:13px;font-weight:600;letter-spacing:.5px;}
+/* 段控（Segmented Control）：滑块沿轨道滑动 + 微过冲（Arc→直线轨道版） */
+.seg{display:flex;background:var(--gray-1);border-radius:2px;padding:2px;position:relative;}
+.seg button{
+  position:relative;z-index:1;flex:1;padding:4px 10px;font-size:12px;color:var(--gray-3);
+  border-radius:1px;transition:color var(--t-hover);
+}
+.seg button:hover{color:var(--ink);}
+.seg button.on{color:var(--paper);}
+.seg .thumb{
+  position:absolute;top:2px;bottom:2px;z-index:0;background:var(--ink);border-radius:1px;
+  transition:transform var(--t-toggle),width var(--t-toggle); /* 弹性曲线：到位后轻微过冲回稳 */
+}
+.seg-label{font-size:11px;color:var(--gray-3);margin:12px 0 6px;letter-spacing:1px;}
+.filters{padding:0 16px;}
+.filters .row{display:flex;gap:8px;align-items:center;}
+/* 页签：底部墨线 200ms 滑动（Follow Through） */
+.tabs{display:flex;border-bottom:var(--hair);padding:0 16px;gap:4px;position:relative;}
+.tabs button{
+  padding:10px 12px;font-size:13px;color:var(--gray-3);position:relative;
+  transition:color var(--t-hover),transform var(--t-hover);
+}
+.tabs button:hover{color:var(--ink);transform:translateY(-1px);}
+.tabs button.on{color:var(--ink);font-weight:600;}
+.tabs .inkline{
+  position:absolute;bottom:-1px;height:2px;background:var(--accent);width:40px;left:16px;
+  transition:transform var(--t-toggle),width var(--t-toggle);
+}
+/* 摘录条目列表：hover 抬升 + 右侧高亮色竖线伸展 */
+.entry-list{flex:1;overflow-y:auto;padding:8px 0;}
+.entry{
+  padding:10px 16px 10px 14px;position:relative;cursor:pointer;
+  border-bottom:1px solid var(--gray-1);
+  transition:background-color var(--t-hover),transform var(--t-hover),padding-left var(--t-hover);
+}
+.entry:hover{background:var(--gray-1);transform:translateX(2px);padding-left:18px;}
+.entry:active{transform:translateX(2px) scale(.99);transition-duration:var(--t-press);}
+.entry .bar{ /* 高亮色竖线：静止 2px，hover 伸展变宽（Secondary Action） */
+  position:absolute;right:0;top:8px;bottom:8px;width:3px;background:var(--accent);
+  transform:scaleY(.4);transform-origin:center;
+  transition:transform var(--t-toggle),background-color var(--t-hover);
+}
+.entry:hover .bar{transform:scaleY(1);}
+.entry.t2 .bar{background:var(--accent-dark);}
+.entry.t3 .bar{background:var(--gray-3);}
+.entry .src{font-size:11px;color:var(--gray-3);margin-bottom:2px;}
+.entry .txt{font-size:13px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.entry .meta{font-size:11px;color:var(--gray-3);margin-top:4px;display:flex;gap:8px;align-items:center;}
+.entry .meta .loc{font-variant-numeric:tabular-nums;}
+/* 列表逐项入场（Follow Through / Overlapping：错峰 stagger） */
+.entry{animation:entryIn 300ms cubic-bezier(.22,1,.36,1) backwards;}
+@keyframes entryIn{from{opacity:0;transform:translateX(-12px);}to{opacity:1;transform:none;}}
+/* ============ 中部书页 ============ */
+#reader{overflow-y:auto;padding:48px 72px;min-width:0;}
+.page{max-width:640px;margin:0 auto;}
+.page h1{font-size:24px;font-weight:700;letter-spacing:.3px;margin-bottom:8px;}
+.page .chapter{font-size:11px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;margin-bottom:24px;}
+.page p{font-size:16px;line-height:2;margin-bottom:20px;text-align:justify;color:var(--ink);}
+.page p.dim{color:var(--gray-3);}
+mark.hl{
+  background:linear-gradient(transparent 55%,rgba(22,106,89,.22) 55%);
+  color:inherit;padding:0 2px;cursor:pointer;position:relative;
+  border-bottom:2px solid var(--accent);
+  transition:background-color var(--t-hover),border-color var(--t-hover);
+}
+mark.hl:hover{background-color:rgba(22,106,89,.12);}
+mark.hl.selected{background:rgba(22,106,89,.28);border-bottom-color:var(--accent-dark);}
+/* 划选菜单浮层：单层阴影允许；scale(.92)→1 弹出（Solid Drawing：origin 底部中心） */
+#selmenu{
+  position:absolute;display:flex;align-items:center;background:var(--ink);color:var(--paper);
+  border-radius:2px;box-shadow:0 4px 16px rgba(10,10,10,.25);padding:2px;z-index:40;
+  transform-origin:bottom center;
+  opacity:0;pointer-events:none;transform:translate(-50%,-8px) scale(.92);
+  transition:opacity var(--t-tip-out),transform var(--t-tip-out);
+}
+#selmenu.show{opacity:1;pointer-events:auto;transform:translate(-50%,0) scale(1);
+  transition:opacity var(--t-tip-in),transform 180ms cubic-bezier(.34,1.56,.64,1);} /* 弹性弹出：轻微过冲 */
+#selmenu button{
+  padding:8px 12px;font-size:12px;color:var(--paper);border-radius:1px;
+  transition:background-color var(--t-hover),transform var(--t-press);
+}
+#selmenu button:hover{background:rgba(250,250,248,.14);}
+#selmenu button:active{transform:scale(.9);}
+#selmenu .sep{width:1px;height:18px;background:rgba(250,250,248,.25);margin:0 2px;}
+#selmenu button.c-accent:hover{background:var(--accent);}
+/* 划选反馈：点击高亮句产生 ripple 波纹（Follow Through：波纹溢出点按位置） */
+@keyframes ripple{from{opacity:.35;transform:scale(0);}to{opacity:0;transform:scale(2.6);}}
+.rip{position:absolute;border-radius:50%;background:var(--accent);width:56px;height:56px;pointer-events:none;animation:ripple 450ms ease-out forwards;}
+/* ============ 右侧竖排工具栏 ============ */
+#rail{
+  width:56px;border-left:var(--hair);display:flex;flex-direction:column;align-items:center;
+  padding:16px 0;gap:8px;background:var(--paper);z-index:20;
+}
+#rail .gap{flex:1;}
+/* ============ 动效说明浮层 ============ */
+#legend{
+  position:fixed;right:72px;bottom:24px;width:262px;background:#fff;border:var(--hair);
+  box-shadow:0 4px 16px rgba(10,10,10,.12);z-index:80;border-radius:2px;overflow:hidden;
+}
+#legend header{
+  display:flex;align-items:center;justify-content:space-between;padding:8px 12px;
+  background:var(--ink);color:var(--paper);font-size:11px;letter-spacing:1px;cursor:pointer;
+  transition:background-color var(--t-hover);
+}
+#legend header:hover{background:var(--accent);}
+#legend .body{padding:10px 12px;font-size:11px;line-height:1.7;color:var(--ink);max-height:260px;overflow:auto;transition:max-height var(--t-panel),padding var(--t-panel),opacity 150ms ease-out;}
+#legend.folded .body{max-height:0;padding-top:0;padding-bottom:0;opacity:0;}
+#legend b{font-weight:600;}
+#legend .k{color:var(--accent);font-weight:600;}
+#legend code{font-family:Consolas,monospace;font-size:10px;background:var(--gray-1);padding:1px 4px;border-radius:1px;}
+#legend ul{list-style:none;}
+#legend li{display:flex;justify-content:space-between;gap:8px;}
+#legend li span:first-child{color:var(--gray-3);}
+/* 页面跳动提示（Staging：翻页时焦点指示） */
+@keyframes flash{0%{color:var(--accent);}100%{color:var(--gray-3);}}
+.flash{animation:flash 600ms ease-out;}
+/* ============ 降级 ============ */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{transition-duration:1ms!important;animation-duration:1ms!important;animation-iteration-count:1!important;}
+  .entry{animation:none;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 顶部应用栏 -->
+  <header id="topbar">
+    <button class="icon-btn tip" data-tip="返回书架" aria-label="返回书架">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+    </button>
+    <div class="divider"></div>
+    <div id="book-title">学习科学：从认知心理学到教学实践</div>
+    <div id="page-info">第 2 章 · 记忆的编码与提取 — <span id="pageNo">47</span> / 312</div>
+  </header>
+
+  <div id="main">
+    <!-- 左侧 280px 全高侧边栏 -->
+    <aside id="sidebar">
+      <div id="sidebar-inner">
+        <div class="side-head">
+          <h2>本文导航</h2>
+          <span style="margin-left:auto;font-size:11px;color:var(--gray-3)">28 条</span>
+        </div>
+        <div class="filters">
+          <div class="seg-label">筛选 FILTER</div>
+          <div class="row">
+            <div class="seg" id="segFilter" style="flex:1">
+              <div class="thumb"></div>
+              <button class="on">全部</button><button>摘录</button><button>高亮</button>
+            </div>
+          </div>
+          <div class="seg-label">排序 SORT</div>
+          <div class="row">
+            <div class="seg" id="segSort" style="flex:1">
+              <div class="thumb"></div>
+              <button class="on">位置</button><button>时间</button>
+            </div>
+          </div>
+        </div>
+        <nav class="tabs" id="tabs" style="margin-top:12px">
+          <button class="on">目录</button><button>摘录</button><button>图谱</button>
+          <div class="inkline"></div>
+        </nav>
+        <div class="entry-list" id="entryList">
+          <div class="entry" style="animation-delay:0ms"><div class="bar"></div>
+            <div class="src">§2.1 编码：信息如何进入长时记忆</div>
+            <div class="txt">加工深度假说认为，语义层面的精细复述比机械重复更能促成持久记忆。</div>
+            <div class="meta"><span class="loc">P.42 · 段3</span><span>高亮</span></div>
+          </div>
+          <div class="entry t2" style="animation-delay:40ms"><div class="bar"></div>
+            <div class="src">§2.2 提取练习</div>
+            <div class="txt">提取即学习：每一次成功的回忆都会重塑记忆痕迹，使其更不易被干扰。</div>
+            <div class="meta"><span class="loc">P.47 · 段1</span><span>摘录</span></div>
+          </div>
+          <div class="entry t3" style="animation-delay:80ms"><div class="bar"></div>
+            <div class="src">§2.2 提取练习</div>
+            <div class="txt">测试效应的元分析显示，提取练习比重复学习在延迟测验中高出约 50%。</div>
+            <div class="meta"><span class="loc">P.48 · 段2</span><span>摘录</span></div>
+          </div>
+          <div class="entry" style="animation-delay:120ms"><div class="bar"></div>
+            <div class="src">§2.3 间隔效应</div>
+            <div class="txt">将相同的学习总时长分散到多个时间点，比集中学习产生更长的保持期。</div>
+            <div class="meta"><span class="loc">P.51 · 段4</span><span>高亮</span></div>
+          </div>
+          <div class="entry t2" style="animation-delay:160ms"><div class="bar"></div>
+            <div class="src">§2.4 交错练习</div>
+            <div class="txt">交错不同类型的题目虽然降低即时正确率，却显著提升迁移能力。</div>
+            <div class="meta"><span class="loc">P.55 · 段2</span><span>摘录</span></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 中部书页 -->
+    <section id="reader">
+      <article class="page">
+        <div class="chapter">Chapter 02 · 记忆的编码与提取</div>
+        <h1>2.2 提取练习：测试即学习</h1>
+        <p class="dim" style="margin-top:8px">当学习者尝试从记忆中提取信息时，发生的不只是"检验"——提取行为本身就在改变记忆。这一节我们讨论提取练习为什么有效，以及如何在阅读实践中使用它。</p>
+        <p>传统的观点把测验看作学习的"温度计"：它只测量学到了多少，而不改变学习的总量。但过去二十年的实验证据一致表明，<mark class="hl selected" id="hlTarget">提取即学习：每一次成功的回忆都会重塑记忆痕迹，使其更不易被干扰和遗忘</mark>。Roediger 与 Karpicke 在 2006 年的经典实验中，让两组学生学习同一篇短文：一组反复阅读，另一组阅读后进行自由回忆测试。一周后的测验里，测试组的保持量显著高于重读组，尽管前者在学习阶段接触文本的次数更少。</p>
+        <p>这一现象被称为"测试效应"（testing effect）。值得注意的是，测试效应的强度与提取的难度呈正相关：当回忆过程费力但最终成功时，记忆痕迹得到最大程度的巩固——这就是所谓的"合意困难"（desirable difficulty）。过于容易的提取，例如刚读完就回忆，几乎不产生巩固效果；而间隔安排的提取练习，因为强迫记忆在部分遗忘后重建，反而带来了最强的长期保持。</p>
+        <p>对渐进阅读的启示是直接的：复习卡片不应该被当作被动的"查看"，而应当始终先尝试主动回忆，再揭示答案。<span style="border-bottom:1px dashed var(--gray-3)">接下来的 2.3 节将说明，如何用间隔调度算法把合意困难安排在最恰当的时机。</span></p>
+        <p class="dim" style="margin-top:40px;font-size:13px">—— 本页共 3 段已进入复习队列 · 上次阅读于 2026-10-03 21:40</p>
+      </article>
+      <!-- 划选菜单浮层（演示：锚定在高亮句上方） -->
+      <div id="selmenu" style="left:calc(50% + 120px);top:438px;">
+        <button data-act="excerpt">摘录</button>
+        <div class="sep"></div>
+        <button data-act="highlight" class="c-accent">高亮</button>
+        <div class="sep"></div>
+        <button data-act="note">批注</button>
+        <div class="sep"></div>
+        <button data-act="card">制卡</button>
+      </div>
+    </section>
+
+    <!-- 右侧竖排工具栏 -->
+    <nav id="rail">
+      <button class="icon-btn tip" data-tip="上一页" id="prevPage"><svg viewBox="0 0 24 24"><path d="M18 15l-6-6-6 6"/></svg></button>
+      <button class="icon-btn tip" data-tip="下一页" id="nextPage"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+      <div class="gap"></div>
+      <button class="icon-btn tip" data-tip="阅读设置"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></button>
+      <button class="icon-btn tip" data-tip="更多"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/></svg></button>
+    </nav>
+  </div>
+</div>
+
+<!-- 侧栏开合演示钮（固定，不随侧栏收起消失） -->
+<button id="sideToggle" class="btn-solid tip" data-tip="演示：侧栏滑动动画"
+  style="position:fixed;left:20px;bottom:24px;z-index:70;">
+  <svg viewBox="0 0 24 24" width="14" height="14" style="stroke:currentColor;fill:none;stroke-width:2"><path d="M4 6h16M4 12h10M4 18h16"/></svg>
+  <span id="sideToggleTxt">收起侧栏</span>
+</button>
+
+<!-- 动效说明浮层 -->
+<aside id="legend">
+  <header id="legendHead"><span>动效说明 · READING</span><span id="legendArrow">▾</span></header>
+  <div class="body">
+    <ul>
+      <li><span>图标按钮 hover</span><b>100ms <span class="k">ease-out</span> · 上移1px</b></li>
+      <li><span>按压 squash</span><b>100ms · scale 0.92/0.98</b></li>
+      <li><span>段控滑块</span><b>200ms <span class="k">spring</span> 过冲</b></li>
+      <li><span>页签墨线</span><b>200ms spring 滑动</b></li>
+      <li><span>侧栏开合</span><b>240ms <span class="k">cubic(.22,1,.36,1)</span></b></li>
+      <li><span>条目 hover 竖线</span><b>200ms spring 伸展</b></li>
+      <li><span>列表入场 stagger</span><b>300ms · 逐项 40ms</b></li>
+      <li><span>划选菜单弹出</span><b>150ms in / 100ms out · scale.92→1</b></li>
+      <li><span>点按波纹</span><b>450ms ease-out 溢出</b></li>
+      <li><span>tooltip</span><b>进150 / 出100ms</b></li>
+    </ul>
+    <p style="margin-top:8px;color:var(--gray-3)">已含 prefers-reduced-motion 降级。</p>
+  </div>
+</aside>
+
+<script>
+/* ---------- 段控：滑块跟随选中项（弹性过冲） ---------- */
+function bindSeg(id){
+  const seg=document.getElementById(id),thumb=seg.querySelector('.thumb'),btns=[...seg.querySelectorAll('button')];
+  function place(anim=true){
+    const b=seg.querySelector('button.on');
+    if(!anim)thumb.style.transition='none';
+    thumb.style.width=b.offsetWidth+'px';
+    thumb.style.transform=`translateX(${b.offsetLeft-2}px)`;
+    if(!anim)requestAnimationFrame(()=>thumb.style.transition='');
+  }
+  btns.forEach((b,i)=>{
+    b.addEventListener('click',()=>{
+      btns.forEach(x=>x.classList.remove('on'));b.classList.add('on');place();
+      if(id==='segFilter')filterList(b.textContent);
+    });
+    b.addEventListener('mouseenter',()=>{if(!b.classList.contains('on'))thumb.style.transform=`translateX(${b.offsetLeft-2}px)`;});
+    b.addEventListener('mouseleave',()=>place(false));
+  });
+  place(false);window.addEventListener('resize',()=>place(false));
+}
+/* ---------- 筛选演示：列表项错峰退场/入场 ---------- */
+function filterList(kind){
+  const items=[...document.querySelectorAll('.entry')];
+  items.forEach((el,i)=>{
+    const show = kind==='全部' || (kind==='摘录'? el.querySelector('.meta span:last-child').textContent==='摘录' : el.querySelector('.meta span:last-child').textContent==='高亮');
+    el.style.animation='none';void el.offsetWidth;
+    if(show){el.style.display='';el.style.animation=`entryIn 300ms cubic-bezier(.22,1,.36,1) ${i*40}ms backwards`;}
+    else el.style.display='none';
+  });
+}
+bindSeg('segFilter');bindSeg('segSort');
+/* ---------- 页签墨线 ---------- */
+const tabs=document.getElementById('tabs'),ink=tabs.querySelector('.inkline'),tbs=[...tabs.querySelectorAll('button')];
+function placeInk(){const b=tabs.querySelector('button.on');ink.style.width=b.offsetWidth-16+'px';ink.style.transform=`translateX(${b.offsetLeft-16}px)`;}
+tbs.forEach(b=>b.addEventListener('click',()=>{tbs.forEach(x=>x.classList.remove('on'));b.classList.add('on');placeInk();}));
+placeInk();
+/* ---------- 侧栏开合（240ms 滑动） ---------- */
+const sidebar=document.getElementById('sidebar'),st=document.getElementById('sideToggle'),stTxt=document.getElementById('sideToggleTxt');
+let open=true;
+st.addEventListener('click',()=>{
+  open=!open;sidebar.classList.toggle('collapsed',!open);
+  stTxt.textContent=open?'收起侧栏':'展开侧栏';
+  setTimeout(placeInk,260);
+});
+/* ---------- 划选菜单：点高亮句弹出（弹性） + 波纹 ---------- */
+const hl=document.getElementById('hlTarget'),menu=document.getElementById('selmenu');
+hl.addEventListener('click',e=>{
+  const r=document.createElement('span');r.className='rip';
+  r.style.left=(e.offsetX-28)+'px';r.style.top=(e.offsetY-28)+'px';
+  hl.appendChild(r);setTimeout(()=>r.remove(),500);
+  menu.classList.add('show');
+});
+document.addEventListener('click',e=>{if(!menu.contains(e.target)&&e.target!==hl)menu.classList.remove('show');});
+menu.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>menu.classList.remove('show')));
+/* ---------- 翻页：页码 flash + 计数（Secondary Action） ---------- */
+const pageNo=document.getElementById('pageNo');
+function flip(d){pageNo.textContent=Math.min(312,Math.max(1,+pageNo.textContent+d));pageNo.classList.remove('flash');void pageNo.offsetWidth;pageNo.classList.add('flash');}
+document.getElementById('prevPage').addEventListener('click',()=>flip(-1));
+document.getElementById('nextPage').addEventListener('click',()=>flip(1));
+/* ---------- 图例折叠 ---------- */
+const lg=document.getElementById('legend');
+document.getElementById('legendHead').addEventListener('click',()=>{lg.classList.toggle('folded');document.getElementById('legendArrow').textContent=lg.classList.contains('folded')?'▸':'▾';});
+</script>
+</body>
+</html>

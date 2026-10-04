@@ -663,7 +663,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   if (!current && !viewing) {
     return (
       <div className="extract-page">
-        <div className="review-count mono">0 条待处理</div>
+        {/* D88 §6.5：计数升级为预览 .pending 形态——8px accent 方点（纯装饰 .count-dot，不加 data 钩子）+ 数字 mono 600 */}
+        <div className="review-count mono"><i className="count-dot" aria-hidden="true" /><b>0</b> 条待处理</div>
         <div className="empty-state">
           <div className="empty-deco">
             <span className="empty-sq empty-sq-accent" />
@@ -807,6 +808,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       data-showing-extract-id={shownId ?? ""}
       data-viewing={viewing ? "1" : undefined}
       data-annot-open={annotPanelVisible && annotOpen ? "1" : undefined}
+      /* D88 §8.5：制卡面板（手动/AI 任一）在场——宽窗 ≥1520 时主列与底栏右移让位（CSS 条件）；
+         窄窗 dock 为覆盖层，内容不动。 */
+      data-dock-open={selActions.manualOpen || selActions.aiPanel ? "1" : undefined}
     >
       <div className={`extract-page-cols${annotPanelVisible ? " with-annot" : ""}`} data-annot-cols={annotPanelVisible ? "1" : undefined}>
       {/* 栏开关（v6/D73 造型还原，v48.42/D82 用户指令）：文字钮两态变文案，fixed 页面视口左上角
@@ -910,8 +914,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
                 返回阅读
               </button>
             )}
-            {/* 计数恒最右（v5/D72）：与面包屑同一行、右缘与卡面右缘对齐（用户裁定 ①） */}
-            <span className="review-count mono">{items.length} 条待处理</span>
+            {/* 计数恒最右（v5/D72）：与面包屑同一行、右缘与卡面右缘对齐（用户裁定 ①）
+                D88 §6.5：升级为预览 .pending 形态——8px accent 方点 + 数字 mono 600（外层 .review-count 类保留） */}
+            <span className="review-count mono"><i className="count-dot" aria-hidden="true" /><b>{items.length}</b> 条待处理</span>
           </div>
         </div>
 
@@ -945,7 +950,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           data-page-hint 在查看态落在这条提示上（会话态仍在头带），既有测试钩子保持不变。 */}
       {viewing ? (
         <div className="stage-bar extract-face-actions">
-          <span className="bar-hint" data-page-hint>查看态：只读 · 不推进调度 · Esc 返回队列</span>
+          <div className="stage-bar-inner">
+            <span className="bar-hint" data-page-hint>查看态：只读 · 不推进调度 · Esc 返回队列</span>
+          </div>
         </div>
       ) : (
         <ExtractActionsBar extract={current!} engine={engine} busy={busy} handlers={faceHandlers} />
@@ -962,8 +969,14 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         />
       )}
 
-      {/* 批 4 Task 10：三个面板与阅读器共用同一份实现（SelectionPanels） */}
-      <SelectionPanels sel={selActions} selectionText={faceSel?.text ?? null} elapsedSec={0} />
+      {/* 批 4 Task 10：三个面板与阅读器共用同一份实现（SelectionPanels）
+          D88 §8：手动制卡/AI 两态在其中换渲染容器为右侧制卡面板 dock；头行 meta＝材料名 */}
+      <SelectionPanels
+        sel={selActions}
+        selectionText={faceSel?.text ?? null}
+        elapsedSec={0}
+        dockMeta={current?.docTitle || viewing?.docTitle || undefined}
+      />
 
       {/* 批 4 Task 11（R37/R40）：批注编辑浮层——无保存/取消，失焦即落库；清空＝删批注 */}
       {editing && (

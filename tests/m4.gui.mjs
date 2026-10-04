@@ -94,13 +94,13 @@ if (aiStubState.aiStub === "ok") {
 // 2) 阅读快捷键
 console.log("== G2 阅读快捷键 Ctrl+Z / Ctrl+X / Ctrl+A / Ctrl+S ==");
 
-// Ctrl+Z → 手动制卡弹窗
+// Ctrl+Z → 手动制卡面板（D88 P3：制卡语境 modal-panel → data-card-dock；标题在 dock 头行）
 check("选区菜单出现", (await evalJS(SELECT)) === "menu", "menu");
 await press({ key: "z", ctrlKey: true, bubbles: true, cancelable: true });
 await sleep(500);
-const modalH2 = await evalJS(`(() => { const h = document.querySelector('.modal-panel h2'); return h ? h.textContent : 'NO MODAL'; })()`);
-check("Ctrl+Z 打开手动制卡弹窗", modalH2 === "手动制卡", modalH2);
-await evalJS(`(() => { const b = [...document.querySelectorAll('.modal-panel button')].find((x) => x.textContent === '取消'); if (b) b.click(); return 'closed'; })()`);
+const modalH2 = await evalJS(`(() => { const h = document.querySelector('[data-card-dock] .side-dock-title'); return h ? h.textContent : 'NO DOCK'; })()`);
+check("Ctrl+Z 打开手动制卡面板", modalH2 === "手动制卡", modalH2);
+await evalJS(`(() => { const b = [...document.querySelectorAll('[data-card-dock] button')].find((x) => x.textContent === '取消'); if (b) b.click(); return 'closed'; })()`);
 await sleep(300);
 
 // Ctrl+X → AI 制卡面板（stub 报错，零网络）

@@ -407,6 +407,14 @@ export default function Reader({
   const annotFocusTimerRef = useRef<number | null>(null);
   /** 内核标记文档序的版本号：安装/重画标记后 +1，侧栏注解栏据此重新取序 */
   const [marksOrderKey, setMarksOrderKey] = useState(0);
+  /** D88 §5.3 文中标记入场：文档打开后**首批** marks 装载时置位（挂 reader-marks-enter），
+      1200ms 后摘除——一次性，此后增删的标记不做入场（armed 按文档复位）。 */
+  const [marksEnter, setMarksEnter] = useState(false);
+  const marksEnterArmedRef = useRef(false);
+  const marksEnterTimerRef = useRef<number | null>(null);
+  /** D88 §5.2 pageinfo：既有 onRelocate locator 里的页码（0 基，显示时 +1）；
+      foliate 引擎无页码＝null，只显示章节；两者皆无＝不渲染（禁造假）。 */
+  const [relocPage, setRelocPage] = useState<number | null>(null);
   /** 本文档的根注解条数（侧栏「摘录」页签与入口可用性的依据；与注解栏同一个 VM 口径） */
   const [docAnnotCount, setDocAnnotCount] = useState(0);
   /** 侧栏开合（v48.44/D84：入口恒可用——页签恒可点，不再按数据在场性自动收起） */
@@ -595,6 +603,8 @@ export default function Reader({
         setSelection(null);
       }
       setTocActiveHref(info.chapterHref);
+      // D88 §5.2 pageinfo：页码随 relocate 更新（PDF 有 pageIndex；foliate 无＝null，只显章节）
+      setRelocPage(typeof info.location.pageIndex === "number" ? info.location.pageIndex : null);
       setImgOverlay(null); // v35：翻页/滚动即清除图内高亮（坐标系随视口失效）
       const guard = reflowGuardRef.current;
       if (guard) {
@@ -1133,6 +1143,9 @@ export default function Reader({
    */
   useEffect(() => {
     const documentId = contextRef?.documentId;
+    // D88 §5.3：armed/容器类按文档复位（换书/换引擎格式后新文档的首次装载重新算「首批」）
+    marksEnterArmedRef.current = false;
+    setMarksEnter(false);
     if (!engineMode || !documentId || contextRef?.extractId) {
       marksRef.current = [];
       kernelRef.current?.setDocumentMarks?.([]);
@@ -1167,6 +1180,17 @@ export default function Reader({
         const marks = buildDocMarks(rows, documentId, engineKind, aggCounts);
         marksRef.current = marks;
         kernelRef.current?.setDocumentMarks?.(marks);
+        // D88 §5.3：首批 marks 的「划笔」入场——容器类一次性置位、1200ms 后摘除；
+        // 只认真实装载事件（marks 非空），此后增删（workflow/changed 重算）不再入场
+        if (!marksEnterArmedRef.current && marks.length > 0) {
+          marksEnterArmedRef.current = true;
+          setMarksEnter(true);
+          if (marksEnterTimerRef.current !== null) window.clearTimeout(marksEnterTimerRef.current);
+          marksEnterTimerRef.current = window.setTimeout(() => {
+            marksEnterTimerRef.current = null;
+            setMarksEnter(false);
+          }, 1200);
+        }
         // 文档序只能问内核（EPUB 的 CFI 只有引擎 resolve 得动）——装完标记通知侧栏重取
         setMarksOrderKey((v) => v + 1);
         // 侧栏「摘录」页签与入口可用性用同一个 VM 口径（含无锚老数据——它们也在栏里）
@@ -1189,6 +1213,7 @@ export default function Reader({
     });
     return () => {
       cancelled = true;
+      if (marksEnterTimerRef.current !== null) window.clearTimeout(marksEnterTimerRef.current);
       offWorkflow();
       offCards();
       offTheme();
@@ -1303,6 +1328,15 @@ export default function Reader({
     "reader.lookupWord": { when: () => readerShortcutReady, run: () => selAct.lookup() }
   });
 
+  // D88 §5.2 pageinfo 文案：页码（PDF 的 pageIndex+1）与当前章节名（TOC 按 chapterHref 匹配），
+  // 有页码显页码、有章节显章节，两者皆无＝整个元素不渲染（数据来自既有 relocate，禁造假）。
+  const chapterLabel = tocItems.find((t) => t.href === tocActiveHref)?.label;
+  const readerPageInfoText = [
+    relocPage != null ? `第 ${relocPage + 1} 页` : null,
+    chapterLabel ?? null
+  ]
+    .filter(Boolean)
+    .join(" · ");
   // v48.43（D83）：选区动作组＝模式/形式段控（批注栏头同款样式）＋动作钮（批注栏头同族无框）。
   // 段控是持久偏好（无选区也可切）；动作钮无选区 disabled（不可点无 🚫，暗色可读）。
   // 图片挖空＝正文图片选区流程入口。data-sel-act 钩子与摘录页工具栏同一套。
@@ -1350,7 +1384,9 @@ export default function Reader({
 
   return (
     <div className="reader-wrap">
-      <div className={`reader-body${aiPanel ? " reader-body-shifted" : ""}`}>
+      {/* D88 §8：右侧制卡面板 dock（手动态/AI 态）在场时正文让位——机制沿用 ai-panel 时代的
+          .reader-body-shifted（flex-basis calc(100% - 400px)）；图片挖空仍走 modal，不让位。 */}
+      <div className={`reader-body${aiPanel || (manualOpen && !manualImage) ? " reader-body-shifted" : ""}`}>
         <div
           ref={scrollRef}
           className={`reader-scroll${engineMode ? " reader-scroll-engine" : ""}`}
@@ -1541,11 +1577,16 @@ export default function Reader({
                     )}
                   </ReaderToolMenu>
                 </div>
+                {/* D88 §5.2：页码/章节位（meta 档 mono）——工具栏右端新增；无数据不渲染 */}
+                {readerPageInfoText ? <span className="reader-pageinfo mono">{readerPageInfoText}</span> : null}
               </div>
               <div className="reader-engine-viewport">
                 {/* v48.45（D85）：侧栏已升为全高左轨（.reader-side-rail，在 layout 层），视口里只剩正文区；
                     翻页热区只覆盖正文区（.reader-engine-main）。 */}
-                <div className="reader-engine-main">
+                {/* v48.45（D85）：侧栏已升为全高左轨（.reader-side-rail，在 layout 层），视口里只剩正文区；
+                    翻页热区只覆盖正文区（.reader-engine-main）。
+                    D88 §5.3：marksEnter＝首批标记装载的「划笔」入场容器类（1200ms 后摘除）。 */}
+                <div className={`reader-engine-main${marksEnter ? " reader-marks-enter" : ""}`}>
                 {engineError ? (
                   <div className="reader-engine-error" role="alert">
                     <p className="reader-engine-error-title">
@@ -1663,7 +1704,14 @@ export default function Reader({
           )}
         </div>
 
-        <SelectionPanels sel={selActions} selectionText={selection?.text ?? null} nowTick={nowTick} elapsedSec={elapsedSec} />
+        {/* D88 §8：右侧制卡面板（手动态/AI 态经 SelectionPanels 换容器）；dock 头 meta＝材料名（§8.2） */}
+        <SelectionPanels
+          sel={selActions}
+          selectionText={selection?.text ?? null}
+          nowTick={nowTick}
+          elapsedSec={elapsedSec}
+          dockMeta={title || sourceTitle || undefined}
+        />
       </div>
 
       {/* v25 图片聚焦覆盖层：位于阅读器最外层（fixed 全屏），点击模糊区域退出 */}

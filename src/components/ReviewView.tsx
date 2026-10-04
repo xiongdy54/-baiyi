@@ -10,6 +10,7 @@ import { eventBus } from "../lib/eventbus";
 import { useCommandActions } from "../lib/useCommands";
 import { bindingHint } from "../lib/commands";
 import { fetchCardCounts, type CardCounts } from "../lib/sessionQueue";
+import { attachRipple, settle } from "../lib/press"; // D88 §4.2/§4.3：主 CTA settle + 填充钮涟漪
 import { CardFace } from "./CardBrowser";
 import { fetchSessionQueue, type SessionItem } from "../lib/sessionQueue";
 import ExtractCardFace, { ExtractActionsBar } from "./ExtractCardFace";
@@ -22,6 +23,10 @@ import ImageLightbox from "./ImageLightbox";
 function safePreviewItems(fsrs: unknown): ReturnType<typeof fsrsEngine.preview> {
   try { return fsrsEngine.preview(fsrs as never); } catch { return []; }
 }
+
+// D88 §7.4：评分钮档名（预览 review.html 口径：重来/困难/良好/简单；色点承载语义色）。
+// 快捷键 title 气泡沿用 D77 口径（kbd 角标不采纳）：`重来（快捷键：1）· 间隔 10分` 式组装。
+const RATING_LABEL: Record<Rating, string> = { Again: "重来", Hard: "困难", Good: "良好", Easy: "简单" };
 
 export default function ReviewView({
   onJumpToDoc,
@@ -48,15 +53,48 @@ export default function ReviewView({
   }, [materialName]);
   /** 顶栏三档计数（今日可用口径；每次换卡/评完刷新） */
   const [counts, setCounts] = useState<CardCounts>({ new: 0, learning: 0, review: 0 });
+  // D88 §7.2：计数 bump——由真实 counts 变化驱动（React 比较前后值加类、200ms 后摘），禁假动画
+  const prevCountsRef = useRef<CardCounts>(counts);
+  const [bumpKeys, setBumpKeys] = useState<{ new: boolean; learning: boolean; review: boolean }>({
+    new: false,
+    learning: false,
+    review: false
+  });
+  useEffect(() => {
+    const prev = prevCountsRef.current;
+    prevCountsRef.current = counts;
+    const changed = (["new", "learning", "review"] as const).filter((k) => counts[k] !== prev[k]);
+    if (changed.length === 0) return;
+    setBumpKeys({
+      new: changed.includes("new"),
+      learning: changed.includes("learning"),
+      review: changed.includes("review")
+    });
+    const t = window.setTimeout(() => setBumpKeys({ new: false, learning: false, review: false }), 200);
+    return () => window.clearTimeout(t);
+  }, [counts]);
   /** 底栏「更多」弹层（向上弹；点外部/Esc 收起） */
   const [barMoreOpen, setBarMoreOpen] = useState(false);
   const barMoreRef = useRef<HTMLSpanElement | null>(null);
+  // D88 §4.3：涟漪挂载面＝填充钮白名单（.bar-btn.primary「显示答案」/ .grade.recommended「良好」）。
+  // 两钮随 showBack 互斥换挂 ⇒ 以 showBack 为依赖重新绑定（挂载帧之后执行，refs 已就位）。
+  const revealBtnRef = useRef<HTMLButtonElement | null>(null);
+  const goodBtnRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const el = showBack ? goodBtnRef.current : revealBtnRef.current;
+    if (!el) return;
+    return attachRipple(el);
+  }, [showBack]);
   /** 显示答案的**生效**快捷键（随设置变化；不许把「空格」写死） */
   const hint = bindingHint("review.showAnswer");
   const [startedAt, setStartedAt] = useState(Date.now());
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
   const [sessionDone, setSessionDone] = useState(false);
+  // D88 §7.2：进度轨真实分母（分母 0 ⇒ 整个进度轨不渲染，禁假动画）
+  const progressDenominator = doneCount + counts.new + counts.learning + counts.review;
+  const progressPct =
+    progressDenominator > 0 ? Math.round((doneCount / progressDenominator) * 10000) / 100 : 0;
   // v23（§4.4.9）：persist 失败态——停留当前卡、封锁评分/跳过/删除，提供「重试保存」
   const [saveError, setSaveError] = useState(false);
   // v23（§4.4.3）：预览携带源卡状态引用，评分提交时判废（防复用过期预览）
@@ -533,11 +571,24 @@ export default function ReviewView({
   if (!current && sessionDone) {
     return (
       <div className="review-wrap">
-        {/* 头带（计数在最右）+ 居中空态；无底栏（v2 §5：Empty 无 bar） */}
+        {/* 头带（计数在最右）+ 居中空态；无底栏（v2 §5：Empty 无 bar）。
+            D88 §7.2：进度轨随头带（收尾页分母>0 时呈满格——doneCount/分母=100%）。 */}
         <div className="review-head">
           <div className="review-head-inner">
             <div className="review-count mono">{doneCount} 张已复习</div>
           </div>
+          {progressDenominator > 0 && (
+            <div
+              className="review-progress"
+              role="progressbar"
+              aria-label="今日复习进度"
+              aria-valuemin={0}
+              aria-valuemax={progressDenominator}
+              aria-valuenow={doneCount}
+            >
+              <b style={{ width: `${progressPct}%` }} />
+            </div>
+          )}
         </div>
         <div className="review-session">
           <div className="empty-state">
@@ -573,13 +624,46 @@ export default function ReviewView({
       <div className="review-head">
         <div className="review-head-inner">
           {/* 顶栏＝Anki 式三档计数（今日可用口径，见 sessionAPI.counts）；不再有「本轮 N 张」与
-              「点击卡片或按空格显示答案」那行提示（2026-10-01 用户裁定：翻面改按钮、提示并入按钮 hover） */}
-          <div className="review-count mono" data-review-counts>
-            <span>未学习 <b>{counts.new}</b></span>
-            <span>学习中 <b>{counts.learning}</b></span>
-            <span>待复习 <b>{counts.review}</b></span>
+              「点击卡片或按空格显示答案」那行提示（2026-10-01 用户裁定：翻面改按钮、提示并入按钮 hover）。
+              D88 §7.2：内部升级为预览 .qi 三块（8px 色点 + 20px/300 tabular 数字）；容器类与
+              三档文案保留（m4/m12 断言钩子），色点＝未学习 --grey-3 · 学习中 --warning · 待复习 --accent。 */}
+          <div className="review-count" data-review-counts>
+            <span className="qi">
+              <span className="lab">
+                <i className="count-dot count-dot-new" aria-hidden="true" />
+                未学习
+              </span>
+              <span className={`qi-num${bumpKeys.new ? " bump" : ""}`}>{counts.new}</span>
+            </span>
+            <span className="qi">
+              <span className="lab">
+                <i className="count-dot count-dot-learning" aria-hidden="true" />
+                学习中
+              </span>
+              <span className={`qi-num${bumpKeys.learning ? " bump" : ""}`}>{counts.learning}</span>
+            </span>
+            <span className="qi">
+              <span className="lab">
+                <i className="count-dot count-dot-review" aria-hidden="true" />
+                待复习
+              </span>
+              <span className={`qi-num${bumpKeys.review ? " bump" : ""}`}>{counts.review}</span>
+            </span>
           </div>
         </div>
+        {/* D88 §7.2 进度轨：真实分母，分母 0 不渲染（禁假动画）；填色＝--accent（设计基准黑→主题色） */}
+        {progressDenominator > 0 && (
+          <div
+            className="review-progress"
+            role="progressbar"
+            aria-label="今日复习进度"
+            aria-valuemin={0}
+            aria-valuemax={progressDenominator}
+            aria-valuenow={doneCount}
+          >
+            <b style={{ width: `${progressPct}%` }} />
+          </div>
+        )}
       </div>
 
       <div className="review-session">
@@ -610,8 +694,9 @@ export default function ReviewView({
         )}
 
         {/* 翻面只走底栏按钮（2026-10-01）：卡面不再吃点击（onReveal 不传＝点卡面不翻面）。
-            key＝卡 id：换卡即重挂载 ⇒ 入场动效（120ms，见 theme.css）在一次呈现里恰好触发一次；
-            翻面态 showBack 由父持有，不受 remount 影响。 */}
+            key＝卡 id：换卡即重挂载 ⇒ 入场动效（--dur-stage 240ms，见 theme.css）在一次呈现里恰好触发一次；
+            翻面态 showBack 由父持有，不受 remount 影响。
+            D88 §7.3：CardFace 双面常挂（.review-flip 3D 翻卡），翻面在此只翻 flipped 类与 inert 对调。 */}
         <CardFace key={current!.id} card={current!} showBack={showBack} onEdit={handleEdit} />
         {/* 信息行（2026-10-01 建立；v48.41/D81：**来源上移顶栏中间**（onMaterialName 链路），行内只留日期 */}
         <div className="review-meta">
@@ -627,26 +712,51 @@ export default function ReviewView({
 
       {/* 底栏（v2）：挂在滚动根（.review-wrap）的**最后一个子节点**上——sticky 时代它必须直接位于滚动根下
           才能满宽 + 正确钉底（fixed 时代它藏在 .review-session 里无所谓）。
-          内部 DOM（显示答案 / grade-row / .review-bar-side / .bar-more / .bar-pop）一字不改。 */}
+          D88 §7.4/§7.5：「显示答案」＝填充主钮（settle+涟漪）；评分四钮改两行色点卡式钮（推荐档 accent
+          填充加高）；.review-bar-side / .bar-more / .bar-pop 内部结构不变。 */}
       <div className="stage-bar review-bar" data-review-bar>
         {!showBack ? (
           <button
+            ref={revealBtnRef}
             className="bar-btn primary grow"
             data-reveal
             disabled={saveError || !current}
             title={`显示答案（快捷键：${hint || "未绑定"}，可在设置里改）`}
-            onClick={() => setShowBack(true)}
+            onClick={(e) => {
+              // D88 §4.2：settle 回弹＝真实点击主 CTA 的按压反馈（animationend 自摘）
+              settle(e.currentTarget);
+              setShowBack(true);
+            }}
           >
             显示答案
           </button>
         ) : (
           <div className="grade-row grade-grid">
-            {(previews?.items ?? safePreviewItems(current!.fsrs)).map((p) => (
-              <button key={p.rating} className={`grade grade-${p.rating.toLowerCase()}`} disabled={saveError} onClick={() => grade(p.rating)}>
-                {p.rating}
-                <span className="grade-due mono">{p.dueText}</span>
-              </button>
-            ))}
+            {/* D88 §7.4 评分 CTA：两行结构（色点+档名 / 间隔预览）；语义色唯一承载＝色点；
+                推荐档 Good＝accent 填充加高（Staging）；点击 settle；涟漪仅推荐档（§4.3 白名单）。 */}
+            {(previews?.items ?? safePreviewItems(current!.fsrs)).map((p) => {
+              const recommended = p.rating === "Good";
+              const gradeHint = bindingHint(`review.${p.rating.toLowerCase()}`);
+              return (
+                <button
+                  key={p.rating}
+                  ref={recommended ? goodBtnRef : undefined}
+                  className={`grade grade-${p.rating.toLowerCase()}${recommended ? " recommended" : ""}`}
+                  disabled={saveError}
+                  title={`${RATING_LABEL[p.rating]}（快捷键：${gradeHint || "未绑定"}）· 间隔 ${p.dueText}`}
+                  onClick={(e) => {
+                    settle(e.currentTarget);
+                    void grade(p.rating);
+                  }}
+                >
+                  <span className="grade-name">
+                    <i className={`grade-dot dot-${p.rating.toLowerCase()}`} aria-hidden="true" />
+                    {RATING_LABEL[p.rating]}
+                  </span>
+                  <span className="grade-due mono">{p.dueText}</span>
+                </button>
+              );
+            })}
           </div>
         )}
         <span className="review-bar-side">

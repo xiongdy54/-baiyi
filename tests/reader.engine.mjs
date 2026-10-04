@@ -220,7 +220,7 @@ try {
   await cdp.eval(clickByText("制卡", "[data-sel-act]"));
   await wait(600);
   const frontSet = await cdp.eval(`(() => {
-    const tas = [...document.querySelectorAll(".modal-panel textarea")];
+    const tas = [...document.querySelectorAll("[data-card-dock] textarea")];
     const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
     set.call(tas[0], "FSRSTEST 引擎制卡题面");
     tas[0].dispatchEvent(new Event("input", { bubbles: true }));
@@ -228,7 +228,7 @@ try {
     tas[1].dispatchEvent(new Event("input", { bubbles: true }));
     return tas.length;
   })()`);
-  await cdp.eval(clickByText("创建卡片", ".modal-panel .btn-primary"));
+  await cdp.eval(clickByText("创建卡片", "[data-card-dock] .btn-primary"));
   await wait(1000);
   const cardOk = await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();
@@ -237,7 +237,7 @@ try {
     return { cfi: c.contextRef && c.contextRef.cfi, chapterIndex: c.contextRef && c.contextRef.chapterIndex, anchorText: c.contextRef && c.contextRef.anchorText, v: c.contextRef && c.contextRef.readerEngineVersion };
   })()`);
   check("4b 制卡 contextRef 四层（cfi/章索引/锚文本/引擎版本）", Boolean(cardOk && cardOk.cfi && cardOk.v), JSON.stringify(cardOk));
-  await cdp.eval(`(() => { document.querySelector(".modal-panel .modal-close")?.click(); return 1; })()`);
+  await cdp.eval(`(() => { document.querySelector("[data-card-dock] [data-dock-close]")?.click(); return 1; })()`);
   await wait(300);
 
   // 4c. v25 正文图片点选聚焦：点击章节内图片 → 聚焦覆盖层（上浮 + 模糊）+ 三类选区工具条
@@ -390,8 +390,8 @@ try {
   })()`);
   await wait(300);
   const z4 = await cdp.eval(`(() => {
-    const ta = document.querySelector(".modal-panel textarea");
-    if (!ta) return "no textarea (modal=" + Boolean(document.querySelector(".modal-panel")) + ")";
+    const ta = document.querySelector("[data-card-dock] textarea");
+    if (!ta) return "no textarea (dock=" + Boolean(document.querySelector("[data-card-dock]")) + ")";
     const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
     set.call(ta, "FSRSTEST 锚甲出现在**第一章**");
     ta.dispatchEvent(new Event("input", { bubbles: true }));
@@ -399,7 +399,7 @@ try {
   })()`);
   await wait(200);
   const z5 = await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll(".modal-panel .btn-primary")].find(x => x.textContent.includes("创建卡片"));
+    const b = [...document.querySelectorAll("[data-card-dock] .btn-primary")].find(x => x.textContent.includes("创建卡片"));
     if (!b) return "no create btn";
     if (b.disabled) return "create disabled";
     b.click();

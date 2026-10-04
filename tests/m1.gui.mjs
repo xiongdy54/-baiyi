@@ -88,14 +88,14 @@ console.log("== G3 手动制卡 · 翻转问答 = 两张独立卡 ==");
 const tabs = await evalJS(`(() => {
   [...document.querySelectorAll('[data-sel-act="manual"]')].find((b) => b.textContent === "制卡").click();
   return new Promise((res) => setTimeout(() => {
-    res([...document.querySelectorAll('.modal-panel .seg-tabs button')].map((b) => b.textContent.trim()).join('/'));
+    res([...document.querySelectorAll('[data-card-dock] .seg-tabs button')].map((b) => b.textContent.trim()).join('/'));
   }, 300));
 })()`);
 check("手动制卡 tabs = 问答题/翻转问答/填空题/图片挖空", tabs === "问答题/翻转问答/填空题/图片挖空", tabs);
 const saved = await evalJS(`(() => {
-  [...document.querySelectorAll('.modal-panel .seg-tabs button')].find((b) => b.textContent === "翻转问答").click();
+  [...document.querySelectorAll('[data-card-dock] .seg-tabs button')].find((b) => b.textContent === "翻转问答").click();
   return new Promise((res) => setTimeout(() => {
-    const tas = [...document.querySelectorAll('.modal-panel textarea')];
+    const tas = [...document.querySelectorAll('[data-card-dock] textarea')];
     if (tas.length < 4) { res('FIELDS=' + tas.length); return; }
     // React 受控组件必须用原型原生 setter 赋值（直接 ta.value= 会被值追踪器去重，onChange 不触发）
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
@@ -105,7 +105,7 @@ const saved = await evalJS(`(() => {
     set(tas[2], '统计: FSRSTEST 排序后位于中间位置的数叫什么？');
     set(tas[3], '中位数');
     setTimeout(() => {
-      const saveBtn = [...document.querySelectorAll('.modal-panel .form-actions button')].find((b) => b.textContent.includes('创建卡片'));
+      const saveBtn = [...document.querySelectorAll('[data-card-dock] .form-actions button')].find((b) => b.textContent.includes('创建卡片'));
       if (saveBtn.disabled) { res('BTN DISABLED'); return; }
       saveBtn.click();
       // 两张卡 = 两次落库（各含 lint + 相似检索 await），留足时间再查库

@@ -236,7 +236,7 @@ async function pdfRenderState(cdp) {
   await cdp.eval(clickBtnText("制卡", "[data-sel-act]"));
   await wait(700);
   await cdp.eval(`(() => {
-    const tas = [...document.querySelectorAll(".modal-panel textarea")];
+    const tas = [...document.querySelectorAll("[data-card-dock] textarea")];
     const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
     set.call(tas[0], ${JSON.stringify(CARD_FRONT)});
     tas[0].dispatchEvent(new Event("input", { bubbles: true }));
@@ -244,7 +244,7 @@ async function pdfRenderState(cdp) {
     tas[1].dispatchEvent(new Event("input", { bubbles: true }));
     return tas.length;
   })()`);
-  await cdp.eval(clickBtnText("创建卡片", ".modal-panel .btn-primary"));
+  await cdp.eval(clickBtnText("创建卡片", "[data-card-dock] .btn-primary"));
   await wait(1200);
   const cardOk = await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();
@@ -253,7 +253,7 @@ async function pdfRenderState(cdp) {
     return "page:" + c.contextRef.pageIndex + " v:" + c.contextRef.readerEngineVersion + " anchor:" + String(c.contextRef.anchorText || "").slice(0, 12);
   })()`);
   check("制卡成功（pageIndex + pdfjs 版本锚点）", /^page:\d+ v:pdfjs-/.test(String(cardOk)), String(cardOk));
-  await cdp.eval(`document.querySelector(".modal-panel .modal-close")?.click(); 1`);
+  await cdp.eval(`document.querySelector("[data-card-dock] [data-dock-close]")?.click(); 1`);
   await cdp.eval(backToShelf);
   await wait(1200);
 

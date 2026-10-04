@@ -1,9 +1,14 @@
 // 手动制卡编辑器（Phase 3：引用 + 可编辑副本；M1.1 增翻转问答；M5/v25 字段对齐 AI 制卡）
 // 批 4（Task 4）：从 Reader.tsx 原样搬出（纯移动，零行为改动）——摘录页与阅读器共用同一份实现。
 // UdcPicker 只被本文件使用，一并搬入。
+// D88 P3（§8.2）：表单体抽为命名导出 `ManualCardForm`（props 与原组件一致，去掉 modal 包装；
+// 纯移动，逻辑零改动）——CardDock 手动态直接渲染它。默认导出 `ManualCardEditor` 保留为
+// 「modal 包装 + ManualCardForm」：**图片挖空**（imageOcclusion，来自图片聚焦工具条）继续走
+// modal（大图预览需要幅面），其余三模式走 dock——m6 系列图片挖空断言零迁移。
 import { useEffect, useRef, useState } from "react";
 import { UDC_LEAVES, UDC_MAX, UDC_OTHER, udcLabel } from "../lib/udc";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { attachRipple, settle } from "../lib/press";
 import { IconChevronDown, IconClose } from "./icons";
 import OcclusionShapes from "./OcclusionShapes";
 import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
@@ -24,7 +29,9 @@ export interface ManualCardPayload {
   dateStamp?: string | null;
 }
 
-export default function ManualCardEditor({
+/** 手动制卡表单体（D88 §8.2 抽取，纯移动）：modal 包装之外的全部内容——
+    字段、落库链（onSave → 宿主 handleManualCard）、canSave 校验一字不改。 */
+export function ManualCardForm({
   quote,
   imageRegion,
   onCancel,
@@ -36,7 +43,6 @@ export default function ManualCardEditor({
   onCancel: () => void;
   onSave: (payload: ManualCardPayload) => Promise<void>;
 }) {
-  const panelRef = useDialogA11y<HTMLDivElement>(onCancel);
   const [mode, setMode] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
   const [front, setFront] = useState(imageRegion ? "" : quote);
   const [back, setBack] = useState("");
@@ -58,6 +64,14 @@ export default function ManualCardEditor({
       setFront(quote);
     }
   }, [mode, quote]);
+
+  // D88 §4.3：主 CTA「创建卡片」涟漪（填充钮白名单成员；真实 pointerdown 驱动，reduce 不挂）
+  const createBtnRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    const el = createBtnRef.current;
+    if (!el) return;
+    return attachRipple(el);
+  }, []);
 
   async function save() {
     setSaving(true);
@@ -103,19 +117,8 @@ export default function ManualCardEditor({
         : Boolean(front.trim());
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="手动制卡" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>手动制卡</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onCancel}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-scroll">
-        {quote && <blockquote className="card-quote card-marked">{quote}</blockquote>}
+    <>
+    {quote && <blockquote className="card-quote card-marked">{quote}</blockquote>}
 
         <div className="seg-tabs">
           <button className={mode === "qa" ? "active" : ""} onClick={() => setMode("qa")}>
@@ -241,10 +244,51 @@ export default function ManualCardEditor({
 
         <div className="form-actions">
           <button className="btn btn-secondary" onClick={onCancel}>取消</button>
-          <button className="btn btn-primary" disabled={saving || !canSave} onClick={save}>
+          <button
+            ref={createBtnRef}
+            className="btn btn-primary"
+            disabled={saving || !canSave}
+            onClick={(e) => {
+              // D88 §4.2：settle 回弹＝真实点击主 CTA 的按压反馈（Exaggeration；animationend 自摘）
+              settle(e.currentTarget);
+              void save();
+            }}
+          >
             {saving ? "保存中…" : "创建卡片"}
           </button>
         </div>
+    </>
+  );
+}
+
+/** modal 包装（D88 §8.2 保留形态）：图片挖空继续走 modal——大图预览需要幅面（§8.2）。
+    Esc/焦点锁/焦点归还仍由 useDialogA11y 承担（与抽表前一致）。 */
+export default function ManualCardEditor({
+  quote,
+  imageRegion,
+  onCancel,
+  onSave
+}: {
+  quote: string;
+  imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
+  onCancel: () => void;
+  onSave: (payload: ManualCardPayload) => Promise<void>;
+}) {
+  const panelRef = useDialogA11y<HTMLDivElement>(onCancel);
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="手动制卡" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>手动制卡</h2>
+          <button className="icon-btn modal-close" title="关闭" onClick={onCancel}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="modal-scroll">
+          <ManualCardForm quote={quote} imageRegion={imageRegion} onCancel={onCancel} onSave={onSave} />
         </div>
       </div>
     </div>

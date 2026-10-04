@@ -52,6 +52,7 @@
   --fs-body: 14px;
   --fs-secondary: 13px;
   --fs-meta: 12px;
+  --fs-stat: 20px; /* 复习页顶栏统计数字（D88 §7.2：20px/300，随 D88 登记的新档） */
   /* 长文行高（阅读正文 + 界面内成段 AI 回答等）：只允许这一个 Token。
      src/lib/reader/foliate/appearance.ts:36 里 EPUB 正文取 a.lineHeight ?? 1.7，
      Markdown 正文走 .reader-markdown；此前一边 1.7、一边 1.9，
@@ -117,6 +118,18 @@
   /* 动效 */
   --ease: cubic-bezier(0.2, 0, 0.38, 0.9);
   --dur: 120ms;
+  /* buttons-ctas 交互族（D88 §3）：按钮级交互态专用；栏/面板级过渡仍走既有 --dur/--ease。
+     全部静态值、无 var() 派生 ⇒ 只在 :root 声明一次（§5.1 求值层纪律），深浅主题共用。 */
+  --ease-out-soft: cubic-bezier(0.4, 0, 0.2, 1); /* hover 进出（skill 原则 6） */
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);   /* 指示条/弹层回弹（原则 6 变体） */
+  --dur-hover: 160ms;  /* hover 过渡（skill 原则 9：150-200ms） */
+  --dur-press: 60ms;   /* active 按压（skill 原则 9：50-100ms） */
+  --dur-panel: 240ms;  /* 栏/停靠面板开合（摘录轨 + 底栏让位同步） */
+  --dur-stage: 240ms;  /* 卡片入场（原 120ms 升档，取瑞士风 120-240 区间上限） */
+  --dur-flip: 500ms;   /* 复习翻卡 */
+  /* §2.3-1 豁免件：瑞士「直角无阴影」的唯一例外——仅允许出现在 ≥32px 可点控件 hover 态
+     与评分钮 hover 态；24px 工具栏钮、列表条目、表格行禁止使用。字面黑（阴影不随主题反转）。 */
+  --shadow-hover: 0 3px 8px rgba(10, 10, 10, 0.12);
 }
 
 /* 深色模式：只覆盖色值组，布局/字号/组件规则不变 */
@@ -685,6 +698,86 @@ body.has-skin .topbar { background: transparent; }
   cursor: not-allowed;
 }
 .btn-outline:disabled { background: transparent; border-color: var(--grey-2); }
+
+/* ---------- buttons-ctas 通用交互语言（D88 §4；一次定义三界面复用，全部挂在既有类名上，零 DOM） ----------
+   缓动分层：按钮级走 --ease-out-soft/--dur-hover(160)/--dur-press(60)；栏/面板级仍走 --ease/--dur。
+   hover 抬升＝Anticipation（-1px 24px 档 / -2px 32-40px 档）；按压缩放＝Squash & Stretch；
+   --shadow-hover 只给 ≥32px 档与评分钮（§2.3-1 豁免范围），24px 工具栏档禁用。
+   降级纪律：本块整体在 no-preference 作用域内，reduce 时全部规则不在场（§13-E）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .btn, .bar-btn, .btn-rail, .seg-rail button, .icon-btn, .reader-nav-btn,
+  .reader-engine-controls .btn, .reader-engine-controls .dd-btn, .grade {
+    transition: transform var(--dur-hover) var(--ease-out-soft),
+                box-shadow var(--dur-hover) var(--ease-out-soft),
+                background-color var(--dur-hover) var(--ease-out-soft),
+                border-color var(--dur-hover) var(--ease-out-soft),
+                color var(--dur-hover) var(--ease-out-soft);
+  }
+  /* hover 抬升（Anticipation）：32-40px 档 -2px + 阴影；disabled 无位移无阴影（§9） */
+  .btn:hover:not([disabled]), .bar-btn:hover:not([disabled]), .grade:hover:not([disabled]) {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-hover);
+  }
+  /* 24px 工具栏档 / 图标钮：-1px，无阴影（§2.3-1） */
+  .btn-rail:hover:not([disabled]), .seg-rail button:hover { transform: translateY(-1px); }
+  .icon-btn:hover, .reader-nav-btn:hover { transform: translateY(-1px); }
+  /* 24px 档挂 .bar-btn 双类者（.annot-toggle.bar-btn）按 §4.1 表回落：-1px 且无阴影 */
+  .annot-toggle.bar-btn:hover:not([disabled]) { transform: translateY(-1px); box-shadow: none; }
+  /* 按压缩放（Squash & Stretch，--dur-press=60ms）：置于 hover 组之后并带同款 :not([disabled])
+     守卫——特异性对齐后由源序保证按住时 active 压制 hover 抬升（disabled 无 :active）。
+     （设计稿 §4.1 CSS 草案的 :active 在 :hover 之前且缺守卫，特异性行不通；此处按其
+     §4.1 表格语义落——active=scale(.95) 必须可发生。） */
+  .bar-btn:active:not([disabled]), .grade:active:not([disabled]) { transform: scale(0.95); transition-duration: var(--dur-press); }
+  .btn:active { transform: scale(0.95); transition-duration: var(--dur-press); }
+  .btn-rail:active:not([disabled]), .seg-rail button:active { transform: scale(0.95); transition-duration: var(--dur-press); }
+  .icon-btn:active, .reader-nav-btn:active { transform: scale(0.92); transition-duration: var(--dur-press); }
+  .annot-toggle.bar-btn:active:not([disabled]) { transform: scale(0.95); transition-duration: var(--dur-press); }
+  /* Follow Through（图标滞后 §4.1）：30ms 延迟使图标随钮身滞后；方向语义位移（前进右移/返回左移）
+     需逐钮方向钩子，待后续批次接线（现有 DOM 无方向类）。 */
+  .btn .ic, .icon-btn svg { transition: transform var(--dur-hover) var(--ease-out-soft) 30ms; }
+}
+
+/* settle 回弹（D88 §4.2，Exaggeration）：主 CTA 专用按压反馈——移除类 → reflow → 加 .settle，
+   animationend 自摘（src/lib/press.ts settle()）。只挂四类主 CTA（显示答案/下一条/评分四钮/创建卡片），
+   禁止扩散到普通工具栏钮。reduce 时 .settle 规则不在场 ⇒ animation-name 为 none（§13-E-12）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .settle { animation: ctas-settle 350ms var(--ease-out-soft); }
+}
+@keyframes ctas-settle { 0% { transform: scale(1); } 35% { transform: scale(1.05); } 100% { transform: scale(1); } }
+
+/* 涟漪（D88 §4.3，Secondary Action）：仅填充钮白名单（.bar-btn.primary / .btn-primary /
+   .grade.recommended / dock 创建卡片）；色随主题反转（§2.2：accent-on 22%）。
+   挂载由 src/lib/press.ts attachRipple() 在 pointerdown 时生成 span.ripple，动画完移除。 */
+@media (prefers-reduced-motion: no-preference) {
+  .ripple {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    transform: scale(0);
+    background: color-mix(in srgb, var(--accent-on) 22%, transparent);
+    animation: ctas-ripple 520ms var(--ease-out-soft) forwards;
+  }
+}
+@keyframes ctas-ripple { to { transform: scale(2.8); opacity: 0; } }
+
+/* 浮层入场（D88 §4.5）：选区菜单 / 批注编辑浮层 spring pop-in。
+   等价实现说明：两浮层的定位测量帧（left:-9999）在 useLayoutEffect 内同步重渲染，
+   从不被实际绘制——故动画直接挂在浮层根类上，自挂载帧（=拿到坐标帧）起播，
+   视觉与「拿到坐标后才播」完全一致。设计稿原文的 .is-placed 类门控需改
+   SelectionMenu/AnnotationEditor 两个组件（本轮白名单外）；若后续授权，把本规则
+   换回 .is-placed 门控并在组件里挂类即可（keyframes 与时长不变）。
+   transform-origin 取「菜单在选区下方」（50% 100%）；上方翻面态的 50% 0% 需组件侧
+   placePopover 的翻面结果（同上，本轮不接线）。出场保持瞬时（现状惯例）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .selection-menu, .editor {
+    animation: pop-in 220ms var(--spring) both;
+    transform-origin: 50% 100%;
+  }
+}
+@keyframes pop-in { from { opacity: 0; transform: scale(0.92) translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* 涟漪容器（D88 §4.3）：涟漪 span 绝对定位需相对钮身裁剪——仅填充钮白名单需要 */
+.btn-primary, .bar-btn.primary { position: relative; overflow: hidden; }
 
 /* ---------- 书架 ---------- */
 
@@ -1762,6 +1855,27 @@ body.theme-dark .modal-panel {
 .reader-body.reader-body-shifted .reader-scroll {
   flex: 1 1 calc(100% - 400px);
 }
+/* D88 §8.4：让位与 dock 滑入同参数（--dur-panel/--ease）——fixed 面板用 transform 不触发布局，
+   宿主 flex-basis 让位用过渡补齐同步感。reduce 时规则不在场（瞬时）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .reader-body .reader-scroll { transition: flex-basis var(--dur-panel) var(--ease); }
+}
+/* D88 §5.3 文中标记入场（划笔）：文档打开后**首批** marks 装载时宿主在 .reader-engine-main
+   挂 reader-marks-enter（1200ms 后摘除）；作用域内标记元素左→右揭示（640ms，无 stagger）。
+   实现注记：设计稿原文是「底色层 background-size 0%→100%」——PDF 标记的底色是逐条内联
+   实色（el.style.background = annotSoft(color)，颜色体系 --annot-* 不动是硬约束），无
+   background-image 可供 background-size 扫描；src/lib 在白名单外，故以 clip-path inset
+   左→右揭示等价实现同一「划笔」观感（元素为纯色覆盖层，无文字内容，视觉等价）。
+   EPUB 的标记是 iframe 内 CSS Custom Highlight（无 DOM 元素），宿主容器类够不着，
+   不做入场（标记照旧瞬时出现）。「此后增删的标记 160ms 淡入」需内核给新标记打标，
+   同属 src/lib 白名单外——本轮不实现，仅首次装载有入场。 */
+@media (prefers-reduced-motion: no-preference) {
+  .reader-marks-enter .reader-doc-mark { animation: mark-sweep 640ms var(--ease-out-soft) both; }
+}
+@keyframes mark-sweep {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
 /* E-1 时期的「正文靠 padding-left 给浮层让位」随左侧浮层退役（D2 改为右侧停靠栏，
    让位由 flex 布局天然完成：正文区的宽度里根本没有栏那 280px）。 */
 .reader-scroll {
@@ -2307,6 +2421,76 @@ body.theme-dark .modal-panel {
   flex-wrap: wrap;
   gap: var(--sp-2);
 }
+
+/* ---------- 制卡面板 CardDock（D88 §8）：统一右停靠栏 ----------
+   手动态（ManualCardForm）/ AI 态（AIPanel 嵌入）同刻只开一个（互斥由宿主
+   manualOpen/aiPanel 状态保证）；关闭态不挂载（§8.6）。fixed 右缘 + 顶栏下贴齐，
+   400px（max-width 45vw 沿 .ai-panel 既有几何）；左缘 hairline + 唯一浮层阴影。 */
+.side-dock {
+  position: fixed;
+  right: 0;
+  top: var(--sp-12); /* 顶栏 48 */
+  bottom: 0;
+  width: 400px;
+  max-width: 45vw;
+  background: var(--paper);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  z-index: var(--z-drawer);
+  display: flex;
+  flex-direction: column;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .side-dock { animation: side-dock-in var(--dur-panel) var(--ease); }
+}
+@keyframes side-dock-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.side-dock-head {
+  height: var(--sp-12);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+.side-dock-title {
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  flex: none;
+}
+.side-dock-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  text-align: right;
+}
+.side-dock-close { flex: none; }
+.side-dock-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* 手动态：表单体原样（seg-tabs/form-field/ta-short/form-actions 自带节奏），容器只给内距 */
+.side-dock-body.side-dock-body-manual { padding: var(--sp-4) var(--sp-6); }
+/* AI 态：AIPanel 原组件嵌入——其根类几何（宽 400/左缘线/入场动画）由 dock 承担，全部回收 */
+.side-dock .ai-panel {
+  width: auto;
+  max-width: none;
+  flex: 1;
+  min-height: 0;
+  border-left: none;
+  z-index: auto;
+  animation: none;
+}
+
 /* ---------- M7 词典（v32）：单词弹窗 + 下载目录行 ---------- */
 /* --fs-title 在 :root 中不存在（阶梯只有 -l/-s），原写法静默失效并继承 14px；
    词条是弹窗主内容 → Title L，越大越细 */
@@ -2429,6 +2613,18 @@ body.theme-dark .modal-panel {
 }
 .bar-side, .review-bar-side { display: inline-flex; align-items: center; gap: var(--sp-2); flex: none; }
 .bar-hint { font-size: var(--fs-meta); color: var(--text-helper); }
+/* 底栏内容列（v48.49 / D89）：摘录页底栏按钮与卡面/头带内列同盒（≤720 居中）——用户 2026-10-04 指令
+   「底栏按钮与上方的摘录卡片文本框视觉对齐」。包裹层通用还原 .stage-bar 原行布局（复习页合并复习分支
+   不在约束作用域 ⇒ 行为不变）；720 居中只在 .extract-page 生效，bar 盒每态都与 .extract-main 同宽
+   （轨 0↔280、dock 0↔416 让位同步）⇒ 对齐为构造性成立，非测量补偿。bar 盒几何零改动。 */
+.stage-bar-inner {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4); /* D77 全栏单一间距值在此层继续成立 */
+}
 /* 头带：摘录页 .extract-page-head / 复习页 .review-head 共用（带＝全宽吸顶，内列＝≤720 居中）
    摘录页头带 className 首 token 必须仍是 extract-page-head（面包屑测试命中判据），不得改。 */
 .extract-page-head, .review-head {
@@ -2457,15 +2653,19 @@ body.theme-dark .modal-panel {
 .extract-page-head-inner { width: 100%; }
 /* 窄窗口退让阶梯（只此一级）：会话态快捷键提示整条隐藏 */
 @media (max-width: 1150px) { .extract-page-hint { display: none; } }
-/* 入场动效（克制、语义耦合、可降级）：换卡 120ms、弹层 150ms；减少动效时零动画 */
+/* 入场动效（克制、语义耦合、可降级）：弹层 150ms；减少动效时零动画。
+   D88 §6.4 换卡入场单向采纳：stage-card-in 升级为 translateX(24px→0)（方向＝队列前进方向），
+   --dur-stage(240ms) --ease-out-soft（原 120ms translateY 4px）；不做两段式 out→in。
+   D88 P4（§7.3）：复习页翻面揭示改由 3D 翻卡接管——.review-wrap .review-back 的 120ms 升起退场；
+   卡面入场挂在 .review-flip 上（两面整体进场合一面动效，单面动画会与 backface 旋转叠加穿帮），
+   :not(.flipped) 排除「恢复现场/撤销评分」直接以背面挂载的首帧（此时动画会先播正面再瞬时翻面）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .review-wrap .review-face,
+  .review-wrap .review-flip:not(.flipped),
   .extract-page .extract-face,
-  .review-wrap .extract-face,
-  .review-wrap .review-back { animation: stage-card-in var(--dur) var(--ease) both; }
+  .review-wrap .extract-face { animation: stage-card-in var(--dur-stage) var(--ease-out-soft) both; }
   .bar-pop { animation: stage-pop-in 150ms var(--ease) both; }
 }
-@keyframes stage-card-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes stage-card-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 @keyframes stage-pop-in { from { opacity: 0; } to { opacity: 1; } }
 
 /* ---------- 复习视图（Phase 3/14/16；v11.1 排版重设计：swiss 网格 + 左对齐版心） ---------- */
@@ -2475,26 +2675,106 @@ body.theme-dark .modal-panel {
 /* 顶栏＝Anki 式计数：三项并排、数字用主色，其余 helper（不再有「本轮 N 张」与提示行） */
 .review-count { display: flex; align-items: baseline; gap: var(--sp-4); font-size: var(--fs-meta); color: var(--text-helper); }
 .review-count b { font-weight: 500; color: var(--text-primary); margin-left: 2px; }
+/* ---------- 复习页 D88 §7.2：顶栏三档统计块 + 进度轨 ----------
+   [data-review-counts] 容器类与三档文案「未学习/学习中/待复习」保留（m4/m12 断言钩子），
+   内部升级为预览 .qi 三块：8px 色点 + 20px/300 tabular 数字（预览 20px/700 与「越大越细」冲突，
+   用户已裁定 300；.lab 用 --fs-meta 而非预览 11px——GUIDE §5.3「Meta ≥12px」未被 D88 修订）。
+   色点语义（用户决策）：未学习=--grey-3 · 学习中=--warning · 待复习=--accent。 */
+.review-count[data-review-counts] { display: flex; align-items: stretch; gap: var(--sp-6); }
+.review-count[data-review-counts] .qi { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--sp-1) / 2); }
+.review-count[data-review-counts] .qi .lab {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-meta);
+  letter-spacing: 0.06em;
+  color: var(--text-helper);
+  white-space: nowrap;
+}
+.count-dot { width: 8px; height: 8px; flex: none; display: inline-block; }
+.review-count[data-review-counts] .count-dot-new { background: var(--grey-3); }
+.review-count[data-review-counts] .count-dot-learning { background: var(--warning); }
+.review-count[data-review-counts] .count-dot-review { background: var(--accent); }
+.review-count[data-review-counts] .qi-num {
+  font-size: var(--fs-stat);
+  font-weight: 300;
+  line-height: 1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+/* 计数 bump（§7.2）：由真实 counts 变化驱动（React 比较前后值加类、200ms 后摘）——禁假动画 */
+@media (prefers-reduced-motion: no-preference) {
+  .review-count[data-review-counts] .qi-num { transition: transform 200ms var(--spring); }
+  .review-count[data-review-counts] .qi-num.bump { transform: scale(1.18); }
+}
+/* 进度轨（§7.2）：2px＝hairline 纪律允许档（D50 半档写法），槽 --grey-1、填 --accent；
+   宽度 = doneCount / (doneCount + new + learning + review)，分母 0 整个元素不渲染（禁假动画）。
+   轨挂在 .review-head 内、内列之后 ⇒ 随头带贯通全宽（吸顶行为与头带一致）。 */
+.review-progress { height: calc(var(--sp-1) / 2); background: var(--grey-1); }
+.review-progress > b { display: block; height: 100%; background: var(--accent); }
+@media (prefers-reduced-motion: no-preference) {
+  .review-progress > b { transition: width 500ms var(--ease); }
+}
+/* 空态装饰方块入场（§9 Empty 行）：rise 400ms；reduce 降级（规则在 no-preference 作用域内）。
+   只挂复习页滚动根（§12 P4 白名单页）；摘录/阅读页空态归各自批次。 */
+@media (prefers-reduced-motion: no-preference) {
+  .review-wrap .empty-sq { animation: ctas-rise 400ms var(--ease-out-soft) both; }
+}
+@keyframes ctas-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 /* 底部动作栏：几何由共用 .stage-bar 提供（元素挂双类 stage-bar review-bar）。
    .review-bar 仅作为作用域/测试钩子保留。评分网格显式复位 margin-top，堵住通用 .grade-row 的 48px 泄漏。 */
 .review-bar .grade-row { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); min-width: 0; margin-top: 0; }
-/* 评分钮回 §5.3 合同：本体灰底（由 .grade-* 的 --grey-1 接管）、四边同 1px hairline；
-   评分语义唯一承载层＝既有 .grade-*::before 4px 左缘色条（error/warning/accent/success）。 */
+/* 评分钮 D88 §7.4（GUIDE §5.3 v48.48 修订）：预览 .grade 卡式化——语义色唯一承载＝8px 色点，
+   原「灰底 + 左缘 4px 色条」条款作废（.grade-*::before 随零消费者删除）；两行结构＝
+   .grade-name（色点 + 档名 15px/500）+ .grade-due（mono 间隔预览）。
+   高度 64px（推荐档 72px）在 72px 底栏内恰满格（§11：1120 宽下四钮各 ≈180px 可读）。 */
 .review-bar .grade {
-  height: 40px;
+  min-height: 64px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-4);
   border: 1px solid var(--border-subtle);
-  font-size: var(--fs-secondary);
+  background: var(--grey-1);
   color: var(--text-primary);
   cursor: pointer;
 }
-.review-bar .grade:hover { background: var(--grey-2); }
-.review-bar .grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.review-bar .grade .grade-name { display: flex; align-items: center; gap: var(--sp-2); font-size: 15px; font-weight: 500; }
+.grade-dot { width: 8px; height: 8px; flex: none; display: inline-block; }
+.grade-dot.dot-again { background: var(--error); }
+.grade-dot.dot-hard { background: var(--warning); }
+.grade-dot.dot-good { background: var(--accent); }
+.grade-dot.dot-easy { background: var(--success); }
 .review-bar .grade .grade-due { font-size: var(--fs-meta); color: var(--text-helper); }
+/* 推荐档（Good）：Staging 主视觉——accent 填充 + accent-on 文字 + 加高；色点转白 */
+.review-bar .grade.recommended {
+  position: relative;
+  overflow: hidden; /* 涟漪容器（§4.3：.grade.recommended 是填充钮涟漪白名单成员） */
+  min-height: 72px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+.review-bar .grade.recommended .grade-dot { background: var(--accent-on); }
+.review-bar .grade.recommended .grade-due { color: color-mix(in srgb, var(--accent-on) 85%, transparent); }
+/* disabled（saveError/previewError）：落灰、无位移无涟漪（§9）——填充档禁止以 accent 假性可点 */
+.review-bar .grade:disabled {
+  background: var(--grey-1);
+  color: var(--grey-2);
+  border-color: transparent;
+  cursor: not-allowed;
+}
+.review-bar .grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.review-bar .grade.recommended:focus-visible { outline-color: var(--ink); } /* 填充钮上 outline 取 --ink（§9/§7.4） */
+@media (prefers-reduced-motion: no-preference) {
+  /* hover 抬升 -3px（§7.4 评分钮专属档，压过 §4.1 通用 32-40px 档的 -2px）+ 阴影由通用档提供 */
+  .review-bar .grade:hover:not([disabled]) { transform: translateY(-3px); }
+  /* 色点放大预告（Anticipation）+ Follow Through 滞后 20ms（§7.4） */
+  .review-bar .grade .grade-dot { transition: transform var(--dur-hover) var(--spring) 20ms; }
+  .review-bar .grade:hover:not([disabled]) .grade-dot { transform: scale(1.35); }
+}
 /* 滚动根：仍是真滚动容器（面包屑测试 L251/L489 硬条件），底栏是它的最后一个流内子节点 */
 .review-wrap {
   flex: 1;
@@ -2580,6 +2860,26 @@ body.theme-dark .modal-panel {
 .deferred-front { color: var(--ink); }
 /* 删除按钮：与同排工具一致，仅悬停时以 error 色提示破坏性 */
 .review-delete:hover { color: var(--error); border-color: var(--error); }
+/* ---------- 复习翻卡（D88 §7.3）：CardFace 双面常挂 + grid 等高栈（免测量实现） ----------
+   两面同格（grid-area 1/1）⇒ 容器高 = max(正, 背)，矮的一面拉伸补齐、内容顶对齐；
+   无 JS 测量、无固定高度，图片卡/长卡自适应。非当前面由组件挂 inert + aria-hidden
+   （EditableText 只在背面可编辑的契约不变——非当前面的编辑器不可聚焦）。 */
+.review-flip { display: grid; }
+.review-flip > * { grid-area: 1 / 1; min-width: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .review-flip { transform-style: preserve-3d; transition: transform var(--dur-flip) var(--ease-out-soft); }
+  .review-flip > * { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+  .review-flip .review-back { transform: rotateY(180deg); }
+  .review-flip.flipped { transform: rotateY(180deg); }
+  .review-session { perspective: 1600px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* 降级＝不做 transform（§13-E-12：transition 为 none、翻面即时对调 inert）。
+     设计稿 §7.3 的「视觉=瞬时切换，同现状」要求非当前面不可见——两面同格叠放时后绘者（背面）
+     恒在上，故 reduce 下把非当前面 display:none（inert 对调仍由组件承担，与动效无关）。 */
+  .review-flip:not(.flipped) > .review-back { display: none; }
+  .review-flip.flipped > :not(.review-back) { display: none; }
+}
 /* 卡面：正面 Title 级 26px/1.5、「越大越细」weight 400；答案揭示后可点击任意位置内联编辑 */
 .review-face {
   position: relative;
@@ -2612,9 +2912,13 @@ body.theme-dark .modal-panel {
   line-height: 1.5;
   letter-spacing: -0.01em;
   color: var(--text-primary);
-  border-top: 1px solid var(--grey-2);
-  padding-top: var(--sp-6);
 }
+/* D88 §7.3 双面化：.review-back 升级为背面**卡面**（.review-flip 的第二面，类名钩子保留——
+   m1/m4 断言在用）。原「问题/答案区内部分隔」的 border-top/padding-top 从面级退下，改由
+   面内答案区（.review-back-a）承载；基线 .review-back 规则继续服务卡片浏览页队列行
+   （.queue-row-text review-back），不受翻卡作用域影响。 */
+.review-flip .review-back { border-top: none; padding-top: 0; }
+.review-back-a { border-top: 1px solid var(--grey-2); padding-top: var(--sp-6); }
 /* v29（D26）看图问答卡：正面图下方的题面文字（图文混排卡面） */
 .review-front-text {
   font-size: var(--fs-title-l);
@@ -2666,46 +2970,18 @@ body.theme-dark .modal-panel {
   gap: var(--sp-2);
   align-items: baseline;
 }
-/* 评分模块：4 等分网格（跨列 4 合规），组间距 48px ≥ 2× 组内 16px */
+/* 评分模块：4 等分网格（跨列 4 合规）。D88 §7.4 修订：评分钮样式收拢进 .review-bar .grade
+   （色点承载语义、推荐档 accent 填充）；本组仅保留网格契约。
+   旧「.grade-row .btn 两行复合钮」与「.grade-*::before 左缘 4px 色条」随零消费者删除（GUIDE §5.3 v48.48 作废条款）。 */
 .grade-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: var(--sp-4);
   margin-top: var(--sp-12);
 }
-.grade-row .btn {
-  flex-direction: column;
-  height: auto;
-  min-height: 56px; /* 两行复合按钮；56 = 8×7 仍吸附基线网格 */
-  padding: var(--sp-2) var(--sp-4);
-  gap: var(--sp-1);
-  align-items: center;
-  justify-content: center;
-}
-/* 「越小越粗」：父级 .btn 是 14px/500，12px 的到期数子标签字重必须 ≥500。
+/* 「越小越粗」：12px 的到期数子标签字重必须 ≥500。
    原 400 + opacity .75 双重违反——字重反向，且 opacity 让深色模式对比度不可控。 */
 .grade-due { font-size: var(--fs-meta); font-weight: 600; color: var(--text-helper); font-variant-numeric: tabular-nums; }
-/* 色彩纪律（swiss + 用户反馈：四按钮样式统一）——本体全部灰底，评分语义只以左缘 4px 色条 +
-   评分词同色表达；无填充差异、无第二焦点色。键盘焦点环 2px accent。 */
-.grade-again, .grade-hard, .grade-good, .grade-easy {
-  background: var(--grey-1);
-  color: var(--text-primary);
-  position: relative;
-}
-.grade-again::before, .grade-hard::before, .grade-good::before, .grade-easy::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-}
-.grade-again::before { background: var(--error); }
-.grade-hard::before { background: var(--warning); }
-.grade-good::before { background: var(--accent); }
-.grade-easy::before { background: var(--success); }
-.grade-row .btn:hover { background: var(--grey-2); }
-.grade-row .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .review-tools { display: flex; gap: var(--sp-3); margin-top: var(--sp-4); }
 
 .ta-short { min-height: 64px !important; }
@@ -3366,8 +3642,22 @@ body.theme-dark .modal-panel {
   gap: var(--sp-2);
   min-width: 0;
 }
-/* v48.43（D83）：末组（更多/阅读设置/翻页）推到右缘——左侧＝收起/展开 + 选区动作组紧排 */
-.reader-engine-controls-group:last-child { margin-left: auto; }
+/* v48.43（D83）：末组（更多/阅读设置/翻页）推到右缘——左侧＝收起/展开 + 选区动作组紧排。
+   D88 §5.2 后 pageinfo（span）成为 controls 的末子节点，改用 :last-of-type 让该组
+   （最后一个 div 组）保持贴右，pageinfo 落在其右端。 */
+.reader-engine-controls-group:last-of-type { margin-left: auto; }
+/* D88 §5.2：页码/章节位（meta 档 mono）——数据来自既有 onRelocate locator；
+   页码不可得只显示章节，皆无＝宿主不渲染（禁造假）。窄窗最先退让（§11 第一级）。 */
+.reader-pageinfo {
+  margin-left: var(--sp-4);
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-meta);
+  color: color-mix(in srgb, var(--reader-fg, var(--text-helper)) 62%, transparent);
+  white-space: nowrap;
+}
+@media (max-width: 1150px) { .reader-pageinfo { display: none; } }
 /* 组间分隔（次要手段：主分组靠空间，1px 线仅作视觉断点） */
 .reader-engine-divider {
   width: 1px;
@@ -5072,8 +5362,8 @@ body.capture-body #root { height: 100vh; }
 /* ---------- 摘录复习（v48.22 / D58 §6.8）：沉浸式连续处理页 + 摘录卡面 ---------- */
 /* 批 4 Task 14：摘录页两列（卡面 + 批注栏）。栏出现时页面本体不再整页滚动，
    改由两列各自滚动——否则栏会跟着正文滚走，「栏内定位」就失去意义。 */
-/* v5/D72 骨架：.extract-page-cols＝「全高批注轨 + 右主列」两列；水平留白在主列，
-   轨贴窗左缘 x=0、上至页面顶（贯通，用户 2026-10-02）；开关钮锚在 cols 左上角。 */
+/* v1/D88 骨架：.extract-page-cols＝「批注轨 + 右主列」两列；轨改 fixed 脱离流内（见下），
+   主列经 padding-left 0↔280 让位（data-annot-open）；开关钮 fixed 页面视口左上角，两态位置一致。 */
 .extract-page-cols {
   display: flex;
   align-items: stretch;
@@ -5082,24 +5372,47 @@ body.capture-body #root { height: 100vh; }
   min-height: 0;
   position: relative; /* 栏开关（.annot-toggle）的定位上下文：页面左上角 ⇒ 两态位置一致 */
 }
-/* 批注轨（v5/D72 重设计）：全高 sticky 左轨——上至页面顶、下缘止于底栏上缘（100vh−顶栏48−底栏72），
-   页面滚动时恒在视口内；面板（.annot-side，280px 内联恒宽）在轨内被裁切 ⇒ 宽度滑动动画内容不自重排。 */
+/* 批注轨（v1/D88 取代 v5 的 height:calc(100vh - 120px) sticky 方案）：改 **fixed**——相对视口锚定，
+   贯通到窗底（top=顶栏 48 → bottom=0），任何滚动位置、任何内容长度下轨底缘都贴窗底
+   （fixed 无 sticky 滚到内容末端被 clamp 回缩的缺陷；与 .annot-toggle 同一锚定方式）。
+   D72「底栏不做补偿」条款由用户 2026-10-04 指令取代：轨展开时主列 padding-left 与底栏
+   margin-left 同步让位 0↔280（底栏控件与内距零改动，仅左缘让到轨右缘＝「相应收缩」）。
+   轨 z 3 < 底栏 z 4：过渡瞬间亚像素重叠由底栏 paper 底盖住（几何上不相交，此条只是保险）。
+   面板（.annot-side，280px 内联恒宽）在轨内被裁切 ⇒ 宽度滑动动画内容不自重排。 */
 .extract-annot-rail {
-  flex: none;
+  position: fixed;
+  left: 0;
+  top: var(--sp-12); /* 顶栏 48 */
+  bottom: 0;         /* 窗底：贯通 */
   width: 280px;
-  min-width: 0;
-  position: sticky;
-  top: 0;
-  align-self: flex-start;
-  height: calc(100vh - 120px); /* 顶栏 48 + 钉底栏 72（D70）：版式量度，非 token */
   overflow: hidden;
+  z-index: 3;
 }
 .extract-annot-rail.is-closed { width: 0; visibility: hidden; } /* 收起＝不留空轨（2026-10-01 裁定，语义等价） */
+/* 底栏让位（v13 修订 EXCERPT-REVIEW §3.5「底栏不做补偿」）：data-annot-open 为既有状态钩子，
+   直接复用为 CSS 条件，不新增状态。三量（轨宽 / 主列 padding / 底栏 margin）同 --dur-panel
+   同 --ease 同步过渡 ⇒ 动画期间底栏左缘始终贴着轨右缘，不被遮挡、不露缝。 */
+.extract-page[data-annot-open="1"] .extract-page-cols { padding-left: 280px; }
+.extract-page[data-annot-open="1"] .stage-bar { margin-left: 280px; }
 @media (prefers-reduced-motion: no-preference) {
-  .extract-annot-rail { transition: width var(--dur) var(--ease), visibility var(--dur) linear; }
+  .extract-annot-rail { transition: width var(--dur-panel) var(--ease), visibility var(--dur-panel) linear; }
+  .extract-page .extract-page-cols { transition: padding-left var(--dur-panel) var(--ease); }
+  .extract-page .stage-bar { transition: margin-left var(--dur-panel) var(--ease); }
 }
 /* 可见性离散步进：过渡下「收起时停在末帧隐身、展开时立即显形」＝滑出/滑入全程可见 */
 .extract-annot-rail .annot-side { height: 100%; }
+/* D88 §8.5 摘录页 dock 让位：data-dock-open 随 manualOpen/aiPanel 任一在场置位（宿主钩子）。
+   宽窗（≥1520）主列与底栏右移 416（=400 dock + 16 间距；dock fixed 右缘贴窗缘，内容右缘
+   让到 dock 左缘内 16px）；窄窗（<1520）dock 为覆盖层浮于其上，内容不动（保护 1120 最小窗
+   下卡面/底栏可用性）。轨与 dock 同开时左右让位并存，版心取剩余宽。 */
+@media (min-width: 1520px) {
+  .extract-page[data-dock-open="1"] .extract-main { padding-right: 416px; }
+  .extract-page[data-dock-open="1"] .stage-bar { margin-right: 416px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .extract-page .extract-main { transition: padding-right var(--dur-panel) var(--ease); }
+  .extract-page .stage-bar { transition: margin-right var(--dur-panel) var(--ease); }
+}
 /* 栏头行（v7/D74 让位更新；v48.45/D85 起阅读器侧栏轨共用同一套）：与 fixed 开关钮**同一行**——
    头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；
    「注解 N」已由 showCount={false} 关闭（用户裁定省一行）。两条段控按 3:2 有比例铺满剩余宽，
@@ -5183,7 +5496,10 @@ body.capture-body #root { height: 100vh; }
   white-space: nowrap;
 }
 .seg-rail button:hover { color: var(--text-primary); }
-.seg-rail button.on { background: var(--grey-1); color: var(--text-primary); }
+/* v48.44/D84 现状 --grey-1 底 → D88 §4.4：选中态＝强调，归 accent（§2.2 映射「选中填充」行）——
+   accent-soft 底（浅 8% / 深 16%，既有 token 派生保证可读）+ accent 字 + 500 字重；
+   同时覆盖摘录页 .extract-toolbar 与阅读器 .reader-sel-actions 内的段控（同一类族）。 */
+.seg-rail button.on { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
 .btn-rail {
   height: 24px;
   padding: 0 var(--sp-2);
@@ -5226,6 +5542,12 @@ body.capture-body #root { height: 100vh; }
 }
 /* 页根已无水平 padding ⇒ 底栏无需负边距满宽；按钮距窗缘 16px 由栏自身的 padding 承担（与复习页一致） */
 .extract-page .stage-bar { margin-inline: 0; }
+/* D89：底栏内容列与卡面/头带内列同盒——水平内距 16→64（=var(--sp-16)）与 .extract-main 一致，
+   使 bar 内容盒 ≡ 主列内容盒（bar 宽每态都 ≡ 主列宽），stage-bar-inner 的 720 居中与
+   .extract-face/.extract-page-head-inner 同一公式 ⇒ 构造性对齐（轨 0↔280、dock 0↔416 各态皆然）。
+   实测根因：主列内距是 64 不是 16——轨展开时卡面盒收窄至 692，底栏 720 内容列两侧各偏 14px。 */
+.extract-page .stage-bar { padding-inline: var(--sp-16); }
+.extract-page .stage-bar-inner { max-width: 720px; margin-inline: auto; }
 /* 空态没有头带（计数直接挂在页上）：把那一段上边距补回来（页根无 padding，水平一并补） */
 .extract-page > .review-count { padding: var(--sp-12) var(--sp-16) 0; }
 .extract-page-head {
@@ -5300,10 +5622,19 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 /* 查看态落点：该层的高亮范围（与多段选择的 --hl-multi 同一支高亮色） */
 .extract-quote-hl { background-color: var(--hl-multi); color: inherit; }
 .extract-page-head .review-count { align-self: auto; }
+/* D88 §6.5：「N 条待处理」计数升级为预览 .pending 形态——8px accent 方点 + 数字 mono 600。
+   外层 .review-count 类保留（测试钩子）；内部 <i class="count-dot"> 纯装饰不加 data 钩子。
+   作用域锁定摘录页（复习页顶栏统计块属 P4 §7.2，不动）。 */
+.extract-page .review-count { align-items: center; gap: var(--sp-2); }
+.extract-page .review-count .count-dot { width: 8px; height: 8px; background: var(--accent); flex: none; }
+.extract-page .review-count b { font-weight: 600; margin-left: 0; }
 .extract-page-header { color: var(--text-primary); }
 .extract-page-hint { margin-left: auto; }
 .extract-flash { color: var(--accent); }
 .extract-exit { margin-left: var(--sp-4); }
+/* D88 §6.4 卡面 ctas 化（预览 .card 采纳 + §2.2 项目化修正）：1px 描边用中性 strong 灰
+   （描边是「结界」不是「强调」，不是预览的黑）+ paper 底；分节 .sec + .sec 用 hairline
+   --border-subtle（节间节奏由 .sec 内距承担，预览 .card 无 gap ⇒ gap 归零）。 */
 .extract-face {
   width: 100%;
   max-width: 720px;
@@ -5312,7 +5643,29 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
+  gap: 0; /* D88 §6.4：分节节奏移交 .sec 内距（原 --sp-4） */
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+}
+.extract-face .sec { padding: var(--sp-4) var(--sp-6); }
+.extract-face .sec + .sec { border-top: 1px solid var(--border-subtle); }
+/* 节标签（预览 .sec-label 采纳；项目化：字号 --fs-meta、色 --text-helper，字距 .14em 照抄） */
+.sec-label {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--text-helper);
+  margin-bottom: var(--sp-3);
+}
+/* 引文左缘 3px 批注色条（预览 .quote 采纳）：色默认 --accent；随该摘录 annotationColor
+   取 --annot-* 实色由 ExtractCardFace 在 .extract-face-body 上写内联 borderLeftColor
+   （P1 补全 a；annotColorCss() 既有函数，无色回落 accent）。颜色体系本身不动——
+   仍走 --annot-* 实色与 accent，不引入预览演示色。
+   注：CSS 注释里不要让星号与斜杠相邻（如「--annot-」后直接跟「* /」再跟色名）——
+   那会让注释提前闭合，其后的说明文字变成非法选择器前奏，打碎紧随的规则（本次实测踩过）。 */
+.extract-face .sec-quote .extract-face-body {
+  border-left: 3px solid var(--accent);
+  padding-left: var(--sp-4);
 }
 /* v48.41（D81）：卡面 meta 行移除（来源上顶栏、状态文字删除），规则随零消费者删除 */
 .badge-experimental {
@@ -5328,6 +5681,28 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .extract-page .extract-face-body { font-size: var(--fs-title-l); line-height: 1.5; }
 .extract-face-text { white-space: pre-wrap; }
 .extract-face-derived { font-size: var(--fs-meta); color: var(--text-helper); }
+/* D88 §6.4 P1 补全 b：卡面 meta 行（预览 .cardmeta 项目化）——添加时间（mono）· 来源层级 ·
+   已制卡 N 张（mono 只读文字），右端「跳转原文」（仅锚在场；复用底栏既有跳转动作语义，
+   不采纳预览的「生成卡片」钮与 kbd 角标）。 */
+.extract-face .cardmeta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.extract-face .cardmeta .cardmeta-jump {
+  margin-left: auto;
+  border: none;
+  background: none;
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  padding: 2px var(--sp-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.extract-face .cardmeta .cardmeta-jump:hover { background: var(--grey-1); color: var(--text-primary); }
+.extract-face .cardmeta .cardmeta-jump:disabled { color: var(--grey-2); cursor: not-allowed; }
 /* 底部动作栏（2026-10-01）：几何由共用 .stage-bar 提供（元素挂双类 stage-bar extract-face-actions）——
    流内末子节点 + sticky bottom:0 零偏移，长内容钉在滚动口底缘、滚到底自然落在内容末尾，任何窗口高度
    下自己与内容都不被裁（EXCERPT-REVIEW-LAYOUT-REDESIGN v2）。类名保留为作用域/测试钩子。
