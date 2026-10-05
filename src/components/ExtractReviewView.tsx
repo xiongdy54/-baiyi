@@ -11,7 +11,8 @@ import { readingWorkflow, parseContextRef, undoApi, modifierFlagOf, readMultiSel
 import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
 import { useSelectionActions } from "../lib/useSelectionActions";
 import { createMultiHighlight } from "../lib/reader/multiHighlight";
-import { rectFromOffsets, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
+import { rectFromMappedOffsets, rectFromOffsets, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
+import type { OffsetMap } from "../lib/editor/markdownOffsetMap";
 import type { PopoverRect } from "../lib/popoverPlace";
 
 /** 选区快照（卡面 onSelection 回调的载荷；null＝无选区） */
@@ -168,6 +169,50 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     anchor: { x: number; y: number; width: number; height: number };
   } | null>(null);
 
+  /** 读态映射的重建信号（onOffsetMap 回调进 ref 不触发渲染，浮层锚点延迟计算需要一个可订阅的版本号） */
+  const [mapReady, setMapReady] = useState(0);
+  /**
+   * EDIT 态点批注轨条目的挂起跳转（审查 P1-2）：blur 同步提交后编辑态退场与映射重建是异步渲染，
+   * click 同步求值 anchorForAnnotation 只会拿到 null 映射 → 回落旧口径对 ReactMarkdown DOM 错位。
+   * 挂起到 mapReady 版本号推进（映射真实重建）再开浮层；映射迟迟不来（极端内容）由兜底计时器
+   * 退化为卡面矩形锚点照常开浮层，保证入口永不卡死。
+   */
+  const [pendingJump, setPendingJump] = useState<{
+    id: string;
+    kind: "highlight" | "extract";
+    comment: string | null;
+    color: string | null;
+    quote: string;
+  } | null>(null);
+  const pendingJumpTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!pendingJump) return;
+    const body = document.querySelector(".extract-face-body") as HTMLElement | null;
+    if (offsetMapRef.current && body?.dataset.editing !== "1") {
+      if (pendingJumpTimerRef.current !== null) {
+        window.clearTimeout(pendingJumpTimerRef.current);
+        pendingJumpTimerRef.current = null;
+      }
+      setEditing({ ...pendingJump, anchor: anchorForAnnotation(pendingJump.id, body) });
+      setPendingJump(null);
+      return;
+    }
+    if (pendingJumpTimerRef.current === null) {
+      pendingJumpTimerRef.current = window.setTimeout(() => {
+        pendingJumpTimerRef.current = null;
+        const b = document.querySelector(".extract-face-body") as HTMLElement | null;
+        setEditing({ ...pendingJump, anchor: anchorForAnnotation(pendingJump.id, b) });
+        setPendingJump(null);
+      }, 600);
+    }
+  }, [pendingJump, mapReady]);
+  useEffect(
+    () => () => {
+      if (pendingJumpTimerRef.current !== null) window.clearTimeout(pendingJumpTimerRef.current);
+    },
+    []
+  );
+
   /** 批 4 Task 12：模式/形式与色板取自设置键（与阅读器同一份读侧；改设置即时生效） */
   const annotSettings = useAnnotationSettings();
   const annotMode = annotSettings.annotateMode;
@@ -234,6 +279,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   const [annots, setAnnots] = useState<AnnotItem[]>([]);
   /** 正文痕迹（段锚批注，按色分组；样张 `.q` 同规）——只喂给卡面的绘制层 */
   const [bodyGroups, setBodyGroups] = useState<BodyAnnotationGroup[]>([]);
+  /** D93 §C.4/§D.3：当前卡读态的源偏移↔渲染 DOM 映射（卡面建好后上报；浮层锚点换算用，无映射回落旧口径） */
+  const offsetMapRef = useRef<OffsetMap | null>(null);
   const annotsFor = shown?.id ?? null;
   /** 子条目的**父卡坐标区间**（id → ranges）：浮层锚点要按它算「所引那段」的矩形 */
   const rangesByIdRef = useRef<Record<string, Array<{ start: number; end: number }>>>({});
@@ -290,10 +337,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       ]);
       // 批 4 修正：正文痕迹＝挂在本卡上的**段锚**批注（按各自的批注色画；整卡批注不画，§5.4）
       // v48.41（D81）：下划线形式的批注按（色×形式）分组，画透明底+色线而非底色
+      // D93 §C.8：组带 id——点高亮（§D.3）据此路由到同一浮层（rangesByIdRef 已有同 id 数据路径）
       setBodyGroups(
         children
           .filter((r) => r.hasRange && r.ranges.length > 0)
-          .map((r) => ({ color: r.color, underline: r.annotationType === "underline", ranges: r.ranges }))
+          .map((r) => ({ id: r.id, color: r.color, underline: r.annotationType === "underline", ranges: r.ranges }))
       );
     };
     void load();
@@ -309,8 +357,10 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
    * 无区间可算时（整卡批注、老数据）退回卡面矩形上沿——绝不把浮层丢到视口原点的 (0,0)。
    */
   function anchorForAnnotation(id: string, body: HTMLElement | null): PopoverRect {
+    const map = offsetMapRef.current;
     for (const r of rangesByIdRef.current[id] ?? []) {
-      const rect = rectFromOffsets(body, r.start, r.end);
+      // D93 §D.3：读态渲染 DOM 下按映射换算；无映射（未迁移宿主/映射未就绪）回落旧同构口径
+      const rect = map ? rectFromMappedOffsets(body, map, r.start, r.end) : rectFromOffsets(body, r.start, r.end);
       if (rect) return rect;
     }
     const box = body?.getBoundingClientRect();
@@ -476,6 +526,27 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   );
 
   const advance = useCallback(() => run(() => readingWorkflow.advance(current!.id)), [current, run]);
+  /**
+   * 编辑器内容提交（D93 §B.3；审查 P0）：与 run() 的差别＝**不读也不挂 busy**——失焦提交与底栏动作
+   * （下一条/推迟/毕业，全经 run 的 busy 守卫）会在同一瞬间先后发生（blur 先于 click），任何一方被
+   * busy 丢弃＝丢用户正文或丢动作；内容保存与调度动作写同一行的不同字段，IPC 按序落库，可安全并行。
+   * 仍保查看态守卫（查看态一律不写）、workflow/changed 广播（正文变更牵动批注区间与队列投影）与保存提示。
+   */
+  const commitEditContent = useCallback(
+    async (text: string) => {
+      if (!current || viewing) return;
+      try {
+        await readingWorkflow.updateContent(current.id, text);
+        eventBus.emit("workflow/changed");
+        await refresh();
+        setFlash("正文已保存");
+        window.setTimeout(() => setFlash(null), 1800);
+      } catch {
+        /* 与 run 同径：投影不回流即视为未生效，不弹错（提交方已有幂等短路兜底） */
+      }
+    },
+    [current, refresh, viewing]
+  );
   /**
    * 优先级专用静默提交（v48.33 / D73）：与 run() 的差别＝不挂 busy（busy 态会把整排底栏按钮打成
    * disabled 又恢复＝用户实测的「整个底部栏闪一下」）、不发 flash note（「优先级改为…」toast 用户明示多余）、
@@ -769,7 +840,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     onPostpone: (days: number) => void run(() => readingWorkflow.postponeDays(current!.id, days), `已推迟 ${days} 天`),
     onPriority: (p: number) => void commitPriority(p),
     onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), "已毕业：不再推送，仍保留在卡片浏览器"),
-    onEdit: (text: string) => void run(() => readingWorkflow.updateContent(current!.id, text), "正文已保存"),
+    onEdit: (text: string) => void commitEditContent(text),
     // 「跳转原文」按层级分流（规格 §1.2 D62）：有父摘录＝回父卡（查看态 + 高亮所引那段），
     // 根摘录＝跳源文档（逐字保持既有行为，含 returnTo="queue" 现场恢复语义）
     onJumpToSource: current?.contextRef?.parentExtractId
@@ -797,6 +868,20 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
             )
         : undefined,
     onUndo: () => void undo(),
+    // D93 §D.3：READ 态点高亮命中段锚批注 → setEditing（与批注轨 onJump 完全同一浮层、同一落库链）
+    onHighlightClick: (annotationId: string) => {
+      const it = annots.find((a) => a.id === annotationId && !a.anchorWhole);
+      if (!it) return;
+      const body = document.querySelector(".extract-face-body") as HTMLElement | null;
+      setEditing({
+        id: it.id,
+        kind: it.kind,
+        comment: it.comment,
+        color: it.color,
+        quote: it.quote,
+        anchor: anchorForAnnotation(it.id, body)
+      });
+    },
     // 批 4 Task 10：把正文里的选区报给外层（菜单锚点 + 五动作的取材）
     onSelection: handleFaceSelection
   };
@@ -848,6 +933,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
               // 点条目 → 文中滚动到锚点并短暂强调（合成 EPUB 的「文中」＝本条正文里，故滚到卡面正文）
               const body = document.querySelector(".extract-face-body") as HTMLElement | null;
               body?.scrollIntoView({ block: "center", behavior: "smooth" });
+              if (body?.dataset.editing === "1") {
+                // EDIT 态点轨条目（§D.5「先提交再开浮层」）：提交已随 blur 同步发生，浮层等映射重建后再开
+                setPendingJump({ id: it.id, kind: it.kind, comment: it.comment, color: it.color, quote: it.quote });
+                return;
+              }
               setEditing({
                 id: it.id,
                 kind: it.kind,
@@ -901,7 +991,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
             {/* 快捷键提示：**仅会话态**（查看态的模式提示已搬到底栏，不重复表达） */}
             {!viewing && (
               <span className="extract-page-hint mono" data-page-hint>
-                空格＝下一条 · Z＝撤销 · 正文可直接编辑
+                空格＝下一条 · Z＝撤销 · 点正文编辑 · 点高亮批注
               </span>
             )}
             {viewing && (
@@ -928,6 +1018,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           viewOnly
           // 调用方带了「要看的范围」（子摘录的 parentRange）就高亮它；否则高亮该层自身区间
           quoteRanges={viewRanges ?? parseQuoteRanges(viewing.quoteRangeJson)}
+          onOffsetMap={(m) => { offsetMapRef.current = m; if (m) setMapReady((v) => v + 1); }}
           handlers={{}}
         />
       ) : (
@@ -938,6 +1029,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           engine={engine}
           busy={busy}
           bodyAnnotations={bodyGroups}
+          onOffsetMap={(m) => { offsetMapRef.current = m; if (m) setMapReady((v) => v + 1); }}
           handlers={faceHandlers}
         />
       )}

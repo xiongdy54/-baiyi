@@ -404,7 +404,7 @@ try {
   check("摘录页就绪", (await cdp.eval(`!!document.querySelector(".extract-face")`)) === true, "无卡面");
   const FACE_MARK = "这一段的含义";
   const faceProbe = (len) => `(() => {
-    const body = document.querySelector(".extract-face .review-editable");
+    const body = document.querySelector(".extract-face .extract-face-body");
     if (!body) return "";
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
     let node;

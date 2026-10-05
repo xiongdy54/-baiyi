@@ -132,7 +132,11 @@ try {
     const page = document.querySelector(".extract-page");
     const crumbs = document.querySelector(".extract-crumbs");
     const face = document.querySelector(".extract-face");
-    const marks = [...document.querySelectorAll(".extract-face-body .extract-quote-hl")].map((m) => m.textContent);
+    // D93 §C.5（验收 12）：落点高亮改绘制层——旧 mark.extract-quote-hl DOM 退役，
+    // 断言改 Highlight API 注册（CSS.highlights.get）的 Range 文本
+    // （注意：本函数体在 cdp.eval 模板串内，注释里不能出现反引号）
+    const reg = window.CSS && CSS.highlights ? CSS.highlights.get("extract-quote-hl") : null;
+    const marks = reg ? [...reg].map((r) => r.toString()) : [];
     return JSON.stringify({
       showing: page ? (page.getAttribute("data-showing-extract-id") || "") : null,
       viewing: page ? page.getAttribute("data-viewing") === "1" : null,
@@ -226,7 +230,9 @@ try {
   const geo = await cdp.eval(`(() => {
     const page = document.querySelector(".extract-page");
     const head = document.querySelector(".extract-page-head");
-    const hl = document.querySelector(".extract-face-body .extract-quote-hl");
+    // D93（验收 12）：几何断言取绘制层 Range 的包围盒（与旧 mark 元素同一语义）
+    const reg = window.CSS && CSS.highlights ? CSS.highlights.get("extract-quote-hl") : null;
+    const hl = reg && reg.size ? [...reg][0] : null;
     if (!page || !hl || !head) return "";
     const pr = page.getBoundingClientRect();
     const hr = hl.getBoundingClientRect();
@@ -473,7 +479,9 @@ try {
   );
   const geo2 = await cdp.eval(`(() => {
     const page = document.querySelector(".extract-page");
-    const hl = document.querySelector(".extract-face-body .extract-quote-hl");
+    // D93（验收 12）：同上，绘制层 Range 包围盒
+    const reg = window.CSS && CSS.highlights ? CSS.highlights.get("extract-quote-hl") : null;
+    const hl = reg && reg.size ? [...reg][0] : null;
     if (!page || !hl) return "";
     const pr = page.getBoundingClientRect();
     const hr = hl.getBoundingClientRect();

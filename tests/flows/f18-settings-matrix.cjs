@@ -17,9 +17,30 @@
 "use strict";
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const { app } = require("electron");
 const { Flow, runFlow, tmpUserDataDir, freshDir, ROOT } = require("./lib/harness.cjs");
 const { audit, quit, reopenFlowDb } = require("./lib/dbenv.cjs");
+
+// D93（v48.51）：摘录卡四键的读侧归一矩阵装载**渲染层真模块**（src/lib/extractCardSettings.ts）——
+// 与 tests/markdown-offset-map.test.cjs 同法，esbuild JS API 现场打包到临时目录（不留仓库文件）。
+// 归一双侧：主进程写侧在 electron/main.js settings:set（逐键字面量），渲染层读侧在本模块；此处钉读侧真码，
+// 写侧的落库效果由 GUI 套件（tests/extract-editor.gui.mjs 验收 10/11）经设置页真实路径覆盖。
+const esbuild = require("esbuild");
+const EXTNORM_OUT = path.join(os.tmpdir(), `extnorm-f18-${process.pid}.cjs`);
+esbuild.buildSync({
+  stdin: {
+    contents: 'export { normalizeExtractEditorToolbar, normalizeExtractFaceFontFollow, normalizeExtractFaceFontSize, normalizeExtractFaceFontFamily } from "./src/lib/extractCardSettings";',
+    resolveDir: ROOT,
+    loader: "ts"
+  },
+  bundle: true,
+  platform: "node",
+  format: "cjs",
+  outfile: EXTNORM_OUT,
+  logLevel: "silent"
+});
+const extNorm = require(EXTNORM_OUT);
 
 const flow = new Flow({
   id: "F18",
@@ -42,6 +63,7 @@ const DOC_KEYS = [
   "app.limits", // §6.8-1 / §6.8-5（v48.22 / D58 四类每日上限 + ignoreReviewLimitForNew）
   "app.reviewScopes", // §6.8-5（v48.22 / D58 复习范围/筛选牌组；零 schema 变更）
   "app.annotateMode", "app.annotateForm", "app.annotatePalette", "app.annotateCustomEnabled", "app.annotationFilter", // 批 4 / §9.2（就地批注键；v48.42/D82 形式拆 annotateForm）
+  "app.extractEditorToolbar", "app.extractFaceFontFollow", "app.extractFaceFontSize", "app.extractFaceFontFamily", // §7.4 v48.51 / D93（摘录卡编辑器工具栏 + 字号/字体桥）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -230,6 +252,10 @@ app
         ["app", "annotatePalette", ["teal", "red", "#aabbcc"]],
         ["app", "annotateCustomEnabled", false],
         ["app", "annotationFilter", "highlight"],
+        ["app", "extractEditorToolbar", false],           // v48.51 / D93 摘录卡编辑工具栏（非默认值，才验得出往返）
+        ["app", "extractFaceFontFollow", false],          // v48.51 / D93 摘录卡字号跟随（默认 true）
+        ["app", "extractFaceFontSize", 22],               // v48.51 / D93 独立字号（默认 17；文件层往返原值）
+        ["app", "extractFaceFontFamily", " Georgia, serif "], // v48.51 / D93 独立字体（文件层往返字节一致；trim 归一在读写两侧）
         ["app", "memory", { enabled: false, injectBudget: 3000, minIntervalMinutes: 30, consolidateEvery: 20, lastCoveredAt: 1758500000000 }],
         ["app", "readerSettings", { fontSize: 19, lineHeight: 1.75, width: 720 }],
         ["app", "skinId", "none"],
@@ -373,6 +399,30 @@ app
       // 色板空 ⇒ 回落默认 6 支（不是空数组——调色排不该空着）
       write({ annotatePalette: [] });
       flow.eq("色板空回落默认 6 支", db.readAnnotationSettings().annotatePalette.length, 6);
+
+      // ---------- Y4b D93 摘录卡四键：非法值经渲染层读侧真模块必须回落（§7.4 v48.51 / 设计稿 §F.2） ----------
+      flow.section("Y4b 摘录卡编辑器/字号四键归一（渲染层读侧真模块 src/lib/extractCardSettings.ts）");
+      const normToolbar = extNorm.normalizeExtractEditorToolbar;
+      const normFollow = extNorm.normalizeExtractFaceFontFollow;
+      const normSize = extNorm.normalizeExtractFaceFontSize;
+      const normFamily = extNorm.normalizeExtractFaceFontFamily;
+      // 归一语义（§F.2）：仅严格 true；字号 round 后落 10–40 否则回落 17；字体 trim 字符串
+      flow.eq("extractEditorToolbar：仅严格 true 为真（true/'true'/1/false/null/undefined）",
+        JSON.stringify([true, "true", 1, false, null, undefined].map(normToolbar)),
+        JSON.stringify([true, false, false, false, false, false]));
+      flow.eq("extractFaceFontFollow：仅严格 true 为真（true/'yes'/1/null）",
+        JSON.stringify([true, "yes", 1, null].map(normFollow)),
+        JSON.stringify([true, false, false, false]));
+      flow.eq("extractFaceFontSize：round 钳位（22.4→22、21.5→22）", JSON.stringify([normSize(22.4), normSize(21.5)]), JSON.stringify([22, 22]));
+      flow.eq("extractFaceFontSize：合法边界原样保留（10/40）", JSON.stringify([normSize(10), normSize(40)]), JSON.stringify([10, 40]));
+      flow.eq("extractFaceFontSize：越界/非法一律回落 17（9/41/99.6/'abc'/null/undefined/-3）",
+        JSON.stringify([9, 41, 99.6, "abc", null, undefined, -3].map(normSize)),
+        JSON.stringify([17, 17, 17, 17, 17, 17, 17]));
+      flow.eq("extractFaceFontFamily：trim（两端空白去除）", normFamily("  Georgia, serif  "), "Georgia, serif");
+      flow.eq("extractFaceFontFamily：非字符串回落空串（42/null）", JSON.stringify([normFamily(42), normFamily(null)]), JSON.stringify(["", ""]));
+      flow.eq("合法值原样保留（toolbar/follow/size/family，非空转对照）",
+        JSON.stringify([normToolbar(true), normFollow(true), normSize(25), normFamily("Noto Serif SC")]),
+        JSON.stringify([true, true, 25, "Noto Serif SC"]));
 
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       flow.eq("清空后记忆总开关回到默认关", mem.readMemoryConfig({ readSettings: () => st.readSettings() }).enabled, false);

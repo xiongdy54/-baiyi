@@ -423,6 +423,12 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 
 ## 修订记录
 
+### v1.2（2026-10-05，代码审查修复轮）
+
+- **审查 P0（丢字竞态，已修）**：失焦提交原实现推迟到 `setTimeout(0)`，与底栏动作（下一条/推迟/毕业，全经 `run()` 的 busy 守卫）存在竞态——click 先落 busy、随后提交被静默丢弃＝丢用户正文。修复＝①blur 改**同步提交**（旧 EditableText 语义，"先提交后动作"顺序成立）；②提交接收端从 `run(updateContent)` 改为专用 `commitEditContent`（**不读不挂 busy**，仿 D73 commitPriority 先例；仍保查看态守卫、workflow/changed 广播与保存提示）——内容保存与调度动作可安全并行，双向都不再被 busy 吞。GUI 回归断言新增 `tests/extract-editor.gui.mjs` 验收 12（编辑后不按 Esc 直接点「下一条」→ 正文必须落库）。
+- **审查 P1（浮层锚点时序，已修）**：EDIT 态点批注轨条目时 blur 提交后的编辑退场与映射重建是异步渲染，click 同步求值锚点只会拿到 null 映射（回落旧口径对渲染 DOM 错位）。修复＝挂起跳转机制（`pendingJump` + `mapReady` 版本号）：锚点延迟到映射真实重建后计算，600ms 兜底计时器退化为卡面矩形锚点，入口永不卡死。
+- **审查 P2（已修）**：①围栏代码块 info 串与内容首行前缀撞车时 `indexOf` 命中围栏区——改为围栏行后起搜（金样新增 M8b 三项）；②`theme.css` 零消费者残留 `.extract-face-text` 规则删除；③`extract.gui` 失败消息引用不存在字段修正。**未修（登记）**：卸载兜底提交的跨卡身份依赖（P1-3，今日由既有调度时序不变量兜底，合并复习分支天然安全）；`bodyAnnotations` 模块级注册守卫的双卡同挂互删（单卡现状无害，与既有 `registered` 同规）。
+
 ### v1.1（2026-10-04，总控拍板）
 
 - 五项开放问题全部按本稿推荐项/默认项拍板（见「开放问题」节首部拍板记录）：①原始 HTML P0 引入；②焦点落点 P0 块级；③parentRange 维持既有边界（P0 零 db.js 改动）；④IME 采风险姿态 + 用户侧冒烟验证登记；⑤工具栏 16 钮一次到位。§G 施工清单与验收清单不变。

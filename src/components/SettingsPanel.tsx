@@ -13,6 +13,14 @@ import {
   type AnnotationSettings
 } from "../lib/annotationSettings";
 import { ANNOT_COLORS } from "./SelectionMenu";
+import {
+  readExtractCardSettings,
+  DEFAULT_EXTRACT_EDITOR_TOOLBAR,
+  DEFAULT_EXTRACT_FACE_FONT_FOLLOW,
+  DEFAULT_EXTRACT_FACE_FONT_SIZE,
+  DEFAULT_EXTRACT_FACE_FONT_FAMILY,
+  type ExtractCardSettings
+} from "../lib/extractCardSettings";
 import { shortcutsApi, type ShortcutStatus } from "../lib/journal";
 import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
@@ -1109,6 +1117,13 @@ function ReaderSection() {
   const [multiKey, setMultiKey] = useState<MultiSelectKey | null>(null);
   // 批 4（规格 §9.2）：就地批注四键——读侧统一走 lib/annotationSettings（与两宿主同一份归一）
   const [annot, setAnnot] = useState<AnnotationSettings>(DEFAULT_ANNOT_SETTINGS);
+  // D93 §E/§F：摘录卡编辑器工具栏 + 字号/字体四键（读侧同一份归一；写侧 main.js settings:set 再归一一次）
+  const [ext, setExt] = useState<ExtractCardSettings>({
+    extractEditorToolbar: DEFAULT_EXTRACT_EDITOR_TOOLBAR,
+    extractFaceFontFollow: DEFAULT_EXTRACT_FACE_FONT_FOLLOW,
+    extractFaceFontSize: DEFAULT_EXTRACT_FACE_FONT_SIZE,
+    extractFaceFontFamily: DEFAULT_EXTRACT_FACE_FONT_FAMILY
+  });
   useEffect(() => {
     settingsStore
       .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
@@ -1121,6 +1136,7 @@ function ReaderSection() {
       .catch(() => setCfg(DEFAULT_READER_SETTINGS));
     void readMultiSelectKey().then(setMultiKey);
     void readAnnotationSettings().then(setAnnot);
+    void readExtractCardSettings().then(setExt);
   }, []);
   const save = (next: ReaderSettings) => {
     setCfg(next);
@@ -1129,6 +1145,14 @@ function ReaderSection() {
   const saveMultiKey = (key: MultiSelectKey) => {
     setMultiKey(key);
     void settingsStore.set("app", "multiSelectKey", key);
+  };
+  /** D93：写摘录卡四键（键名用显式字面量——f18 消费者扫描器按常量名反查，见 annotationSettings 同款注释） */
+  const saveExtract = (next: ExtractCardSettings) => {
+    setExt(next);
+    void settingsStore.set("app", "extractEditorToolbar", next.extractEditorToolbar);
+    void settingsStore.set("app", "extractFaceFontFollow", next.extractFaceFontFollow);
+    void settingsStore.set("app", "extractFaceFontSize", next.extractFaceFontSize);
+    void settingsStore.set("app", "extractFaceFontFamily", next.extractFaceFontFamily);
   };
   /** 写单键：本地态先动（UI 即时），主进程写侧还会再归一一次 */
   const saveAnnot = <K extends keyof AnnotationSettings>(key: K, value: AnnotationSettings[K]) => {
@@ -1280,6 +1304,58 @@ function ReaderSection() {
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontFamily: e.target.value } })}
         />
       </div>
+      {/* D93 §E：摘录卡编辑器下方的富文本工具栏开关（关＝整行不渲染，markdown 语法输入不受影响） */}
+      <div className="settings-row">
+        <span>摘录卡编辑工具栏</span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-extract-editor-toolbar"
+            checked={ext.extractEditorToolbar}
+            onChange={(e) => saveExtract({ ...ext, extractEditorToolbar: e.target.checked })}
+          />
+          <span>编辑时显示</span>
+        </label>
+      </div>
+      <p className="form-hint">编辑器下方的加粗/标题/列表/公式等按钮；关闭后仍可用 markdown 语法输入与快捷键。</p>
+      {/* D93 §F.2：摘录卡字号——默认跟随阅读界面，可独立自定义字号/字体（行高恒跟随） */}
+      <div className="settings-row">
+        <span>摘录卡字号</span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-extract-font-follow"
+            checked={ext.extractFaceFontFollow}
+            onChange={(e) => saveExtract({ ...ext, extractFaceFontFollow: e.target.checked })}
+          />
+          <span>跟随阅读界面字号/字体</span>
+        </label>
+      </div>
+      {!ext.extractFaceFontFollow && (
+        <>
+          <div className="settings-row">
+            <span>摘录卡字号（{ext.extractFaceFontSize}px）</span>
+            <input
+              type="range"
+              min={10}
+              max={40}
+              data-testid="setting-extract-font-size"
+              value={ext.extractFaceFontSize}
+              onChange={(e) => saveExtract({ ...ext, extractFaceFontSize: Number(e.target.value) })}
+            />
+          </div>
+          <div className="settings-row">
+            <span>摘录卡字体</span>
+            <input
+              className="row-fill"
+              data-testid="setting-extract-font-family"
+              value={ext.extractFaceFontFamily}
+              placeholder="留空使用应用默认字体"
+              onChange={(e) => saveExtract({ ...ext, extractFaceFontFamily: e.target.value })}
+            />
+          </div>
+        </>
+      )}
     </section>
   );
 }

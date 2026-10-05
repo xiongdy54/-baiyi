@@ -5649,8 +5649,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   cursor: pointer;
 }
 .crumb-exit:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
-/* 查看态落点：该层的高亮范围（与多段选择的 --hl-multi 同一支高亮色） */
-.extract-quote-hl { background-color: var(--hl-multi); color: inherit; }
+/* 查看态落点：该层的高亮范围（与多段选择的 --hl-multi 同一支高亮色）
+   D93 §C.5：`<mark class="extract-quote-hl">` DOM 实现退役（不再往 React 子树插 mark），
+   改 CSS Custom Highlight API 绘制层——注册名沿用 extract-quote-hl，色值不变 */
+::highlight(extract-quote-hl) { background-color: var(--hl-multi); }
 .extract-page-head .review-count { align-self: auto; }
 /* D88 §6.5：「N 条待处理」计数升级为预览 .pending 形态——8px accent 方点 + 数字 mono 600。
    外层 .review-count 类保留（测试钩子）；内部 <i class="count-dot"> 纯装饰不加 data 钩子。
@@ -5704,12 +5706,22 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   padding: 0 var(--sp-2);
   font-size: var(--fs-meta);
 }
-.extract-face-body { font-size: var(--fs-body); line-height: 1.8; color: var(--text-primary); min-height: 120px; }
-/* D1（批注样张对齐）：**摘录页**的正文按样张放大到 26px/1.5——作用域只到 .extract-page 之下。
-   复习页（ReviewView）与其它宿主仍用上面的基线（--fs-body/1.8），故用后代选择器而不是改基线。
-   可编辑态（.review-editable）与只读文本都没有自带字号，随父级继承，无需另写规则。 */
-.extract-page .extract-face-body { font-size: var(--fs-title-l); line-height: 1.5; }
-.extract-face-text { white-space: pre-wrap; }
+/* D93 §F.1：摘录卡字号/字体/行高桥的 :root 静态默认档（17px/inherit/1.7）——变量未注入时卡面有
+   合法基线（IACVT 纪律：下方 var() 全带回退值，双保险）。运行时由 useExtractFaceTypography
+   写 document.body 上的同名变量（跟随阅读器外观或独立自定义）。26px 的 .extract-page 覆盖已删
+   （用户原话「摘录卡片不用这么大」的直接修复——字号从此与阅读界面文字同源）。 */
+:root {
+  --extract-face-fs: 17px;
+  --extract-face-font: inherit;
+  --extract-face-lh: var(--lh-prose, 1.7);
+}
+.extract-face-body {
+  font-size: var(--extract-face-fs, var(--fs-body));
+  line-height: var(--extract-face-lh, 1.7);
+  font-family: var(--extract-face-font, inherit);
+  color: var(--text-primary);
+  min-height: 120px;
+}
 .extract-face-derived { font-size: var(--fs-meta); color: var(--text-helper); }
 /* D88 §6.4 P1 补全 b：卡面 meta 行（预览 .cardmeta 项目化）——添加时间（mono）· 来源层级 ·
    已制卡 N 张（mono 只读文字），右端「跳转原文」（仅锚在场；复用底栏既有跳转动作语义，
@@ -5882,3 +5894,116 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   border-bottom-width: 2px;
   border-bottom-style: solid;
 }
+
+/* ==========================================================================
+   D93 §B.1/§E：摘录卡 WYSIWYG 编辑器（Milkdown）与读态 markdown 元素作用域
+   —— 读态与编辑态共用 .extract-face-body 的排版（视觉同构：退出编辑 = 同一块内容、
+   同一字号、同一排版，不闪版）。全部复用既有 Token（--fs-* / hairline / --sp-*），
+   不新造视觉语言；直角、无阴影、单 accent 焦点色。无过渡/动画，prefers-reduced-motion 天然满足。
+   ========================================================================== */
+/* 工具栏（编辑器下方一行；.btn-rail 同族：24px 档、hairline 描边、meta 字号） */
+.extract-face-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+}
+.extract-face-toolbar-btn {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: 1px solid transparent;
+  font-family: var(--font-sans);
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.extract-face-toolbar-btn:hover { background: var(--grey-1); color: var(--text-primary); border-color: var(--border-subtle); }
+.extract-face-toolbar-btn:active { color: var(--accent); }
+/* 瑞士风焦点：单 accent 描边，无光晕 */
+.extract-face-toolbar-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
+
+/* Milkdown 根：字体/字号/行高全随 .extract-face-body（字号桥同步生效），排版细节由 ProseMirror 提供 */
+.extract-face-body .extract-editor { min-width: 0; }
+.extract-face-body .ProseMirror {
+  font: inherit;
+  color: inherit;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  min-height: 2.6em;
+  outline: none;
+  caret-color: var(--accent);
+}
+/* 瑞士风焦点：编辑态用 hairline 内描边表达「在编辑」，不做光晕 */
+.extract-face-body .ProseMirror:focus-visible { outline: none; }
+.extract-face-body[data-editing="1"] { cursor: text; }
+
+/* markdown 元素（读态与编辑态同规）：字号阶梯用 em（随字号桥整体缩放），色/距/线用既有 Token */
+.extract-face-body h1, .extract-face-body h2, .extract-face-body h3,
+.extract-face-body h4, .extract-face-body h5, .extract-face-body h6 {
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  margin: 1.2em 0 0.5em;
+}
+.extract-face-body h1:first-child, .extract-face-body h2:first-child,
+.extract-face-body h3:first-child, .extract-face-body h4:first-child,
+.extract-face-body p:first-child, .extract-face-body ul:first-child,
+.extract-face-body ol:first-child, .extract-face-body blockquote:first-child,
+.extract-face-body pre:first-child, .extract-face-body table:first-child { margin-top: 0; }
+.extract-face-body h1 { font-size: 1.5em; }
+.extract-face-body h2 { font-size: 1.3em; }
+.extract-face-body h3 { font-size: 1.15em; }
+.extract-face-body h4, .extract-face-body h5, .extract-face-body h6 { font-size: 1em; }
+.extract-face-body p { margin: 0 0 0.7em; }
+.extract-face-body p:last-child { margin-bottom: 0; }
+.extract-face-body ul, .extract-face-body ol { margin: 0 0 0.7em; padding-left: 1.5em; }
+.extract-face-body li { margin: 0.2em 0; }
+/* gfm 任务列表：checkbox 随正文色，去列表符（.task-list-item 由 remark-gfm 输出） */
+.extract-face-body li.task-list-item { list-style: none; margin-left: -1.2em; }
+.extract-face-body li.task-list-item input[type="checkbox"] { margin-right: 0.4em; vertical-align: middle; }
+.extract-face-body blockquote {
+  margin: 0 0 0.7em;
+  padding: 0 0 0 var(--sp-3);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.extract-face-body blockquote > *:last-child { margin-bottom: 0; }
+/* 行内代码与代码块：mono、grey-1 底、hairline 描边、直角 */
+.extract-face-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--grey-1);
+  border: 1px solid var(--border-subtle);
+  padding: 0 0.25em;
+}
+.extract-face-body pre {
+  margin: 0 0 0.7em;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--grey-1);
+  border: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+.extract-face-body pre code { background: none; border: none; padding: 0; font-size: var(--fs-secondary); }
+/* 表格：hairline 网格、直角、表头 mono meta 档 */
+.extract-face-body table { border-collapse: collapse; margin: 0 0 0.7em; font-size: 0.95em; }
+.extract-face-body th, .extract-face-body td {
+  border: 1px solid var(--border-subtle);
+  padding: var(--sp-1) var(--sp-2);
+  text-align: left;
+}
+.extract-face-body th { font-weight: 600; background: var(--grey-1); }
+/* 分隔线：hairline */
+.extract-face-body hr { border: none; border-top: 1px solid var(--border-subtle); margin: 1.2em 0; }
+.extract-face-body a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.extract-face-body del, .extract-face-body s, .extract-face-body strike { color: var(--text-secondary); }
+.extract-face-body img { max-width: 100%; }
+/* 公式（编辑态的 math 节点源码呈现；读态为 rehype-katex 输出） */
+.extract-face-body .extract-math-block-src { font-family: var(--font-mono); font-size: var(--fs-secondary); }
+.extract-face-body .extract-math-inline, .extract-face-body .extract-math-block { color: var(--text-primary); }
+.extract-face-body .katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; }
+.extract-face-body .katex { font-size: 1.05em; }

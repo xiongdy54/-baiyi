@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件 — AI 开发指导文档（**v48.50**）
+# 一站式渐进阅读学习软件 — AI 开发指导文档（**v48.51**）
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -1111,7 +1111,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **颜色对应（R33/§5.4 的实现面，v48.25 修正）**：`src/lib/reader/annotColor.ts` 一处取色（`annotSolid` 实色 / `annotSoft` 透明档 / `annotKey` 分组键；色板 id 取 `--annot-*` Token，`#hex` 用 color-mix 现场算）。三处渲染都向它取——
   - **阅读器 PDF**：标记矩形＝该条批注色的透明档底 + 同色实色左缘（`el.style.background/borderLeftColor`；无 `annotation_color` 回落 accent）。
   - **阅读器 EPUB**：`::highlight()` 一个注册名只能一种底色 ⇒ **按色分组**注册（默认色仍叫 `extract-mark`，其余 `extract-mark-<色键>`），颜色在宿主侧求值后以字面值注入 iframe。
-  - **摘录页正文**：`src/lib/reader/bodyAnnotations.ts` 按色分组用 CSS Custom Highlight API 画（**不往 DOM 插 `<mark>`**，守 §3.3b 与 `EditableText` 契约）。
+  - **摘录页正文**：`src/lib/reader/bodyAnnotations.ts` 按色分组用 CSS Custom Highlight API 画（**不往 DOM 插 `<mark>`**；v48.51/D93 起卡面正文是 ReactMarkdown 渲染的 React 子树，插 mark 会复活 removeChild 崩溃——绘制层原则不变；「EditableText 裸壳」契约随 D93 收窄至**闪卡面**，见 §6.8-14）。
   - **摘录页的父卡坐标**：所选区间必须走 `contextRef.parentRange`（与既有「子摘录」同一套语义）——**不能**当成本行自己的 `quoteRange`：后者按本条正文长度归一，父坐标会被判越界丢成 `[]`（实测踩过）；且落库要**先于**清选区，否则 adapter 读不到偏移。
   - **一处不照抄（技术不可行，已登记）**：样张 `.q` 正文里还有 `border-left:2px`，而 Highlight API 画不出边框 ⇒ 正文只有底色；左缘实色条只落在阅读器矩形层与栏内条目上。
 - **侧栏配色必须跟阅读外观**：侧栏底色是 `--reader-bg`（纸白/羊皮/暗夜由**阅读外观**决定），文字一律用 `--reader-fg`；用 `--text-primary`（**应用主题**色）会在「应用切深色而阅读外观仍纸白」时得到浅字浅底（实测深色档下节点标题几乎不可见）。
@@ -1136,6 +1136,17 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - 跳转原文对阅读进度**零写入**（往返 `progress_json` 逐字节相等）。
 - 筛选牌组＝保存下来的复习范围，**不移动卡片**，故复习记录天然计入 FSRS。
 - 机械核对：`F03` / `F29`（全局序）/ `F52`（队列缺口）/ `F62`（并发写）/ `F89`（摘录幂等）全绿。
+
+### 6.8-14 摘录卡编辑器与默认读态（v48.51，D93；完整设计 `docs/design/EDITOR-EXTRACT-CARD-D93.md`）
+
+- **一句话**：摘录卡默认**读态**（ReactMarkdown 渲染），点非高亮区进 **WYSIWYG 编辑**（Milkdown 7），划选不进编辑、点高亮弹批注浮层（对齐阅读器 markClick，唯一浮层原则）；字号/字体与阅读器外观同步，编辑器下方富文本工具栏可在设置中关闭。
+- **编辑器选型（D93 §A）**：`@milkdown/kit` + `@milkdown/react` ^7.22.2（MIT）——文档模型即 remark AST，「源文 markdown 进 / 源文 markdown 出」是原生路径；与读态渲染（react-markdown 10 / remark-parse ^11）同族解析；KaTeX 依赖同版（`remark-math ^6`）。备选判据＝往返保真金样例失败或 CJK IME 缺陷高频无修复时间表时换 Vditor 4 IR（§A.4）。实测装配（kit 无 math 预设，按 crepe 同款 `$remark`/`$nodeSchema` 装配）：`math_inline` 为自装 atom schema（katex 渲染呈现）、`math_block` 以源码形式呈现（块内文本即 TeX）。
+- **三分支重组（§B.1）**：`viewOnly`（面包屑查看态）与会话**读态**（新默认）都走 ReactMarkdown（remark-gfm + remark-math + rehype-raw/rehype-sanitize + rehype-katex）；会话读态点击路由——点非高亮区（真点击、选区塌缩且未命中批注）→ 进编辑（`src/components/editor/ExtractEditor.tsx`），点高亮 → `onHighlightClick` → AnnotationEditor 浮层（与批注轨 onJump 完全同一浮层、同一落库链），划选 → 保持读态（选区菜单/五动作/多段集合机制原样，载荷形状不变）。编辑中零写库；提交＝事件驱动（Esc / 失焦 / 点批注轨条目先提交；编辑器 host 之后渲染工具栏，`mousedown preventDefault` 不失焦）；序列化与源文相同 → 幂等短路不发写请求；落库沿用既有 `extracts:update`（含区间重映射与 `persist()`），零新写通道。
+- **偏移不变式（§C，最高技术约束）**：`quote_range_json` / `contextRef.parentRange` / 面包屑 `viewRanges` 仍是 `content_markdown` **源字符偏移**，零数据迁移、零 schema 变更；写侧重映射（`electron/annotationRange.js`）零改动。新增读态渲染 DOM ↔ 源偏移双向映射纯函数 `src/lib/editor/markdownOffsetMap.ts`（remark-parse `position` + 段内 raw↔decoded 对齐 + 缝隙端点吸附 + unmappable 段降级；`buildOffsetMap`/`srcToRange`/`domToSrc`/`blockIndexForSrc`），选区采集/点击命中/批注绘制/浮层锚点全部经映射换算（无 map 回落旧同构口径——兼容未迁移宿主）。`viewOnly` 的 `<mark class="extract-quote-hl">` DOM 实现退役 → `paintQuoteRanges` 绘制层（注册名同名、色值仍 `--hl-multi`）；落点滚动改「映射 Range → `getBoundingClientRect` → 滚动容器居中」（尽力而为语义不变；映射暂 null 时浮层锚回落卡面矩形兜底）。
+- **工具栏（§E）**：编辑器下方一行 16 钮（行内六 + 块级八 + 历史二），全部走 `commandsCtx` 官方命令通道（不自改 DOM）；`app.extractEditorToolbar` 关闭后整行不渲染（markdown 语法输入不受影响）。钩子：容器 `data-testid="extract-editor-toolbar"`、按钮 `data-tb`、设置行 `data-testid="setting-extract-editor-toolbar"`。
+- **字号/字体（§F）**：删除 `.extract-page .extract-face-body` 的 26px 覆盖（「摘录卡片不用这么大」的直接修复）；卡面字号/字体/行高经根级 CSS 变量桥（`src/lib/extractCardSettings.ts` 的 `useExtractFaceTypography` 写 `--extract-face-fs/-font/-lh` 到 body，卸载移除还原基线；`:root` 有静态默认档）与阅读器外观同步，默认跟随；可独立自定义（`extractFaceFontFollow=false` 时用独立键，行高恒跟随）。两宿主（摘录页与合并复习卡面）共用同一桥。
+- **EditableText 契约收窄（§B.2）**：EditableText 摘录卡退场（组件保留给**闪卡面**，D10 不推翻）；摘录卡读态坚持绘制层原则的新理由＝往 React 子树插 mark 会复活 removeChild 崩溃；编辑态 Milkdown/ProseMirror **自管其子树**（React 不描述其内部节点），不在裸壳契约管辖内。点高亮路由按 `BodyAnnotationGroup.id`（§C.8 增可选字段）。
+- **测试义务**：`tests/extract-editor.gui.mjs`（默认读态 / 点非高亮进编辑 / 划选不进编辑 / 点高亮浮层三判据 / WYSIWYG / 往返不毁源 / 工具栏开关与重启 / 字号同步）；`tests/extract.gui.mjs`、`tests/annotations.gui.mjs`、`tests/breadcrumb.gui.mjs`（Highlight API 注册 + Range 几何断言）、`tests/multiselect.gui.mjs` 迁移回归；映射金样例 `tests/markdown-offset-map.test.cjs`；`F18` DOC_KEYS + round-trip + 非法值矩阵。既有 P1 排队项（块内字符级落点、viewOnly 点高亮浮层、合并复习分支批注编排对齐、rehype-raw 段内映射精化）见设计稿 §G.3。
 
 ---
 
@@ -1175,7 +1186,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
   - **已登记的例外（v48.16 / D52 补记，v48.5 起）**：`deleteMaterialMap` 对 `material_maps` 是**物理 DELETE**（`electron/db.js:4237`）。理由：导图版本行是可再生成的产物，分片缓存与运行留痕分别在 `material_map_shards` / `material_map_runs`，若只软删会让「哪一版是活跃版」的判定出现幽灵行；删除后同文档同锚点下会重选活跃版。除这一处外本节规则不变，其余业务表一律软删。
 - schema 变更用启动时 `ALTER TABLE ... ADD COLUMN` + try/catch（列已存在即跳过）；破坏性数据修复写一次性迁移脚本。
 - `updateCard` 未传 fsrs/leech 时保留原值，禁止置 NULL（v12 修复 F6）。
-- contentEditable 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable（removeChild 崩溃教训）。
+- contentEditable 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable（removeChild 崩溃教训）；**例外（v48.51 / D93）＝自管子树的编辑器内核**（摘录卡 Milkdown/ProseMirror，§6.8-14）：内核独占其子树、React 不描述其内部节点，不受裸壳模式约束。
 - 用户编辑 cloze 卡问题区时，`[…]` 自动还原为挖空语法；提示词禁止 hint 拆答案（渲染层兼容旧数据）。
 - **持久化节流例外（v36）**：日记自动保存（快速记录输入中）走**防抖持久化**（尾随 4s / 上限 20s + 隐藏·发送·退出强制 flush），是本项目对「每次落库即落盘」的**唯一例外**（理由与代价见 D34）；其余任何写入（含日记页的提交/编辑/删除）仍走即时 `persist()`。新增表一律进主库（M2 备份打包整库，自动覆盖）。
 - **用户记忆文件树不在主库（v42，§4.18-2）**：`<userData>/memory/` 是记忆的**唯一真源**，「新增表一律进主库」的规则**对它不适用**——**M2 备份 / 恢复必须显式包含该目录**（§4.1 记忆文件树声明、§9.1 M14 验收 ⑨）；文件写入一律**原子替换**（tmp + rename），禁止留下半截文件；整理执行只追加与标记，**绝不整文件重写**（§4.18-12）。
@@ -1186,7 +1197,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - schema 变更只有 `ALTER TABLE ... ADD COLUMN` + try/catch 一种；破坏性数据修复写一次性迁移脚本。
 - `updateCard` 未传 fsrs / leech 时**保留原值，禁止置 NULL**。
 - 禁止用 partial 对象走全行 UPDATE——改内容必须先取库内最新状态合并（先例：词典快照曾把 17 列清空）。
-- `contentEditable` 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable。
+- `contentEditable` 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable；**例外（v48.51 / D93）＝自管子树的编辑器内核**（摘录卡 Milkdown/ProseMirror，§6.8-14）。
 - **每次落库即落盘**：写路径走 `persist()`（tmp + fsync + rename 原子替换）；唯一例外＝日记草稿节流（D34）。
 - 用户记忆文件树同样原子替换，禁止留半截文件；整理只追加与标记，**绝不整文件重写**。
 - 新增表一律进主库（M2 打包整库自动覆盖）；**唯一例外是不在主库的记忆文件树，备份 / 恢复必须显式包含它**。
@@ -1226,6 +1237,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **指示器已关清单（v48.17 / D53 落码，v48.18 / D54 补登记）**：`activity.dismissedRuns`（`string[]`，runId 列表，上限 200，超限从最旧一端让位）——用户点过「关闭 / 打开导图」的后台运行，重启播种时不再提示。单独一层而不是塞进 `app`，是为了把「指示器的处置记录」与产品设置分开审；读写都在 `src/lib/activityDismiss.ts`（`activity.ts` 守「零 IO」约定，写盘不塞进它）。
 - **就地批注五键（v48.25 / 规格 §9.2；R37–R40；v48.42/D82 增 `annotateForm`；配套套件见 §7.3「就地批注与批注栏」）**：`app.annotateMode`（`highlight`｜`extract`，默认 `highlight`）＝选区菜单里**预选**的标注模式（点色是否进摘录队列；菜单里可临时切换；改这里＝持久记忆）、`app.annotateForm`（`highlight`｜`underline`，默认 `highlight`）＝标记形式（底色 ｜ 下划线；v48.41/D81 引入下划线绘制）、`app.annotatePalette`（`string[]`，色板 id 或 `#hex`，**有序去重、上限 8**，默认 6 支标准色 `yellow/red/green/blue/purple/magenta`）＝调色排里出现的颜色、`app.annotateCustomEnabled`（bool，默认 `true`）＝调色排末位是否显示「自定义…」、`app.annotationFilter`（`all`｜`extract`｜`highlight`，默认 `all`）＝批注栏顶筛选的状态记忆（**不新增排序键**：排序是会话内视图偏好，存组件态）。五键走 `app` 层、**零 schema 变更**；**两侧都归一**——主进程 `settings:set` 写侧（`db.normalizeAnnotateMode` / `normalizeAnnotateForm` / `normalizeAnnotationFilter` / `normalizeAnnotateCustomEnabled` / `normalizeAnnotatePalette`，非法值不落盘）与渲染层读侧（`src/lib/annotationSettings.ts`，与 `--annot-*` Token 同名校验）。色板**空 ⇒ 回落默认 6 支**（调色排不该空着）；`annotateCustomEnabled` 仅 `true` 为真（`"yes"` 之类一律 false）。设置页「阅读」区有四组控件；`F18` 的 `DOC_KEYS` + round-trip + 非法值矩阵 + 读侧归一对照须同步补齐。**实现注意（实测）**：写侧**不要**写 `settingsStore.set("app", 变量, v)` 这种间接形式——F18 的消费者扫描器会把传入标识符按「常量名→字面量」反查，而 `key` 这个名字在别处被绑到 JSX 的 `key="doc"`，会凭空多出一个 `app.doc` 假键并把 Y1/Y2 判红；逐键写字面量即可。
 - **摘录复习改版的新键（v48.22 / D58；完整语义见 §6.8-1）**：`app.extracts.mergeIntoReview`（bool，默认 `false`）、`app.extracts.interleave`（`quota-1-4`｜`by-due`，默认 `quota-1-4`）、`app.extracts.engine`（`sm19-default`｜`ai-next-extract`，默认 `sm19-default`）、`app.limits.newCardsPerDay`（默认 20）、`app.limits.cardReviewsPerDay`（默认 200）、`app.limits.newExtractsPerDay`（默认 10）、`app.limits.extractReviewsPerDay`（默认 50）、`app.limits.ignoreReviewLimitForNew`（bool，默认 `false`）、`app.reviewScopes`（数组：筛选牌组 `{id, name, bookItemIds, kinds, limits?}`——**结构化过滤**，自由文本查询语法在 §6.8-6 的浏览器查询框里）。九键全部走 `app` 层、**零 schema 变更**（先例＝`app.shelfOrder` / `app.shelfFolders`，D51）；`F18` 的 `DOC_KEYS` 与 round-trip 用例须同步补齐。
+- **摘录卡编辑器与字号四键（v48.51 / D93；设计稿 §E/§F.2，完整语义见 §6.8-14）**：`app.extractEditorToolbar`（bool，默认 `true`）＝摘录卡编辑器下方富文本工具栏开关（关闭后整行不渲染，markdown 语法输入不受影响）、`app.extractFaceFontFollow`（bool，默认 `true`）＝卡面字号/字体/行高跟随 `app.readerSettings.appearance`（行高恒跟随，不单列键）、`app.extractFaceFontSize`（int 10–40，默认 `17`）＝follow=false 时的卡面字号、`app.extractFaceFontFamily`（string，默认 `""`）＝follow=false 时的卡面字体（`""`＝应用默认 UI 字体栈）。四键走 `app` 层、**零 schema 变更**；**两侧都归一**——主进程 `settings:set` 写侧（`electron/main.js`，逐键字面量：仅严格 `true` 为真；字号 `Math.round` 后落 10–40 区间否则回落 17；字体 trim 字符串，非字符串回落 `""`）与渲染层读侧（`src/lib/extractCardSettings.ts`，同一套规则，脏值一律回落默认）。`F18` 的 `DOC_KEYS` + round-trip + 非法值矩阵须同步补齐（Y2 往返四键 + Y4b 读侧真模块矩阵）；写侧的落库效果由 `tests/extract-editor.gui.mjs` 经设置页真实路径覆盖。
 - **`app.extracts.aiRerank`（v48.22 / D58；E1 的派生缓存，**非调度真源**）**：`{fingerprint, at, order:[{id, reason}]}`——AI 重排结果的缓存，指纹不符即失效；`computeSessionQueue` 同步读它，**读路径绝不调用模型**。属已登记 `app.extracts` 对象的子字段，`F18` 无需新增键项。
 - **提示词新 scope `extract-rerank` v1（v48.22 / D58；E1）**：与制卡族 `TARGET_VERSION` **无关**（不动它，避免整族重播），按新 scope 首版插入；出层契约＝`kpScopes.validateExtractRerankOutput`（越界 id 丢弃 / 理由编造数字清空 / 全空回退本地序），主进程 / prompt-lab / 测试三方共用同一裁决器。
 - **设置层（§4.2-3 补充）**：除已登记的 `app` / `theme` / `plugin.<id>` 三层外，仪表盘部件布局与可见性使用独立的 **`dashboard` 层**（`dashboard.configs`，含 `layout` / `hiddenWidgets`）；v48.16 起把它登记为第四层，闸门 `F18` 的允许集合同步。
@@ -1352,6 +1364,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D88 | **v48.48 三界面 buttons-ctas 动效语言改造 + 右侧制卡面板（设计文档 `docs/design/UI-CTAS-REDESIGN-D88.md` v1）**：①新增动效 Token（`--ease-out-soft/--spring/--dur-hover/--dur-press/--dur-panel/--dur-stage/--dur-flip/--shadow-hover`）与按钮五态通用语言（hover 抬升/active 缩放/图标滞后/主 CTA settle/填充钮涟漪），三界面统一；②预览黑强调全部改判主题色（选中态 accent 填充、强描边中性灰）；③阅读页：工具栏保留+pageinfo、标记划笔入场、选区菜单/批注浮层 spring 入场、不引入右侧竖条；④摘录页：批注轨改 fixed 贯通到窗底、底栏 margin-left 0↔280 让位收缩（取代 D72「底栏不做补偿」）、卡面描边分节+换卡 240ms 方向性入场；⑤复习页：顶栏三档统计块（色点+20px/300）+2px 进度轨（真实分母，禁假动画）、CardFace 双面 grid 等高 3D 翻卡（inert 保可达性）、评分钮改色点+推荐档 accent 填充放大（§5.3 色条条款随之修订）；⑥右侧制卡面板 CardDock（400px fixed 右停靠，手动态=ManualCardForm 抽取、AI 态=AIPanel 嵌入，SelectionPanels 换容器，数据流零改动；图片挖空维持模态；窄窗 <1520 覆盖层、宽窗让位）；⑦纪律：全部新动效包 no-preference 降级、`--shadow-hover` 与按钮 transform 为瑞士基线的显式豁免件（范围锁定） | 用户 2026-10-04 逐字指令（存设计稿 §0）；v12 已放开高级动效 | v48.48 |
 | D89 | **v48.49 摘录页底栏内容列与卡面同盒（设计文档 `docs/design/EXCERPT-REVIEW-LAYOUT-REDESIGN.md` 升 v14）**：用户指令——底栏按钮与上方摘录卡片文本框视觉对齐。核查＝未对齐（卡面/头带内列在「主列宽−2×64」盒内 ≤720 居中，底栏内容盒是「栏宽−2×16」；1120 宽轨收起时偏差 174px、**轨展开时卡面盒收窄至 692 而底栏内容列仍 720，两侧各偏 14px**，CDP 实测）。修法＝①底栏加 `.stage-bar-inner` 包裹层；②摘录页作用域底栏 `padding-inline: var(--sp-16)`（16→64 与主列同值）＋ inner `max-width:720 + margin-inline:auto`——bar 盒每态都与 `.extract-main` 同宽、内容盒同盒 ⇒ 构造性对齐；几何变更登记：sticky/满宽/72 高不变，**水平内距 16→64 为唯一内距变更**（D70「距窗缘 16」由「与卡面左缘对齐」取代，垂直节奏不变）；复习页合并复习分支不加约束 | 用户 2026-10-04 书面指令（逐字存设计稿 v14 修订记录）；实测根因＝主列内距 64 非观察 assumed 的 16 | v48.49 |
 | D90 | **v48.50 底栏动效同步 / 复习页底栏同盒对齐 / 阅读器右上钮降轨族与工具栏让位条件化（设计文档 `docs/design/EXCERPT-REVIEW-LAYOUT-REDESIGN.md` 升 v15、`docs/design/READER-RAIL-POPOVER-D85.md` 升 v4）**：用户三项指令——①摘录页底栏让位与卡面动效同步：修因＝D88 两处 `transition` 简写对同一选择器级联覆盖（dock 块的 `margin-right` 声明顶掉 `margin-left` 过渡 ⇒ 底栏瞬跳），修＝合并为单条 `transition: margin-left, margin-right`；②复习页底栏内容列与卡面同盒对齐（静态、无动效——复习页无栏开合）：`.review-wrap .stage-bar` padding-inline 64（bar 负边距满宽保留）+ `.stage-bar-inner` 720 居中，与 `.review-session` 同一公式；③阅读器右上「更多/阅读设置」降为 **btn-rail 同族**（24 高、1px `--reader-border` 框、meta 字号——D85⑤「顶栏同款 32 高」对这两钮作废，翻页 icon 钮不动），选单条目紧凑化（padding sp-1/sp-2）；工具栏左让位**条件化**：轨展开（开关钮浮在轨头）让位收回 `--sp-4` 与正文视口同一内距、轨收起保留 64px 给浮在工具栏区的开关钮，padding-left 随 `--dur/--ease` 过渡与轨宽动画同步（**同日增补，用户看实景后追加**：翻页钮亦降 24×24 并入同族、分隔线移到选区动作组与翻页组之间——「图片挖空」与翻页贴得太近；`.reader-tool-menu` 去掉 200px 固定 min-width——「更多」选单两条短目被撑出大片右侧空白，面板宽度交由内容决定） | 用户 2026-10-04 三项书面指令 | v48.50 |
+| D93 | **摘录卡 WYSIWYG 编辑器与默认读态（设计文档 `docs/design/EDITOR-EXTRACT-CARD-D93.md`）**：①编辑器选型 Milkdown 7（`@milkdown/kit`/`@milkdown/react` ^7.22.2，MIT，remark 同族解析，往返保真金样例锁定；备选判据＝Vditor 4 IR）；②摘录卡默认**读态**（ReactMarkdown + remark-gfm + rehype-raw/sanitize 渲染），点非高亮进编辑（WYSIWYG）、划选不进编辑、点高亮弹 AnnotationEditor 浮层（对齐阅读器 markClick，唯一浮层原则）；③**偏移不变式**——`quote_range_json`/`parentRange`/`viewRanges` 仍为 `content_markdown` 源字符偏移，零迁移，写侧重映射零改动，新增源↔渲染 DOM 双向映射纯函数（remark-parse position + 段内 raw↔decoded 对齐 + 缝隙吸附）；④编辑器下方富文本工具栏（`app.extractEditorToolbar` 默认开可关）；⑤摘录卡字号/字体/行高与阅读器外观同步（根级 CSS 变量桥，删 26px 覆盖），可独立自定义（`app.extractFaceFontFollow/FontSize/FontFamily`）；⑥EditableText 摘录卡退场（组件保留给闪卡面，D10 不推翻） | 用户 2026-10-04 两轮书面指令（逐字见设计稿 §0）；与 D91/D92 并行分支合并时按合并顺序机械重排 §8.1 条目序（设计稿 §I.1，用户已接受） | v48.51 |
 
 ## 8.2 已接受偏差（实现与原锁定方案的差异）
 

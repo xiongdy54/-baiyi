@@ -197,6 +197,14 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "annotationFilter") value = normalizeAnnotationFilter(value);
   if (scope === "app" && key === "annotateCustomEnabled") value = normalizeAnnotateCustomEnabled(value);
   if (scope === "app" && key === "annotatePalette") value = normalizeAnnotatePalette(value);
+  // D93（设计稿 §E/§F.2）：摘录卡编辑器与字号四键写侧归一——语义与渲染层读侧（src/lib/extractCardSettings.ts）一致
+  if (scope === "app" && key === "extractEditorToolbar") value = value === true;
+  if (scope === "app" && key === "extractFaceFontFollow") value = value === true;
+  if (scope === "app" && key === "extractFaceFontSize") {
+    const n = Math.round(Number(value));
+    value = Number.isFinite(n) && n >= 10 && n <= 40 ? n : 17;
+  }
+  if (scope === "app" && key === "extractFaceFontFamily") value = typeof value === "string" ? value.trim() : "";
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
