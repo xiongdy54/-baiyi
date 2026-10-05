@@ -506,6 +506,37 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     host.style.background = a.bgColor ?? "transparent";
   };
 
+  // v48.53（D93）：空壳节着陆自愈——粘贴书正文以一级标题开头时，splitMarkdownChapters 会
+  // 先压入一个空壳章（spine[0] 正文为空，§9.4「粘贴书空首章」），init 无保存位置时恒落
+  // spine 首节 → 首屏空白（滚动/resize 均无法唤出，任意显式 goTo 即恢复，实验实锤）。
+  // 打开落点定案后探测当前节：body innerHTML 为空白则顺序前进到首个非空节。
+  // 封面节含 <img> → innerHTML 非空不会误跳；CBZ/FB2 等异构节 createDocument 异常时
+  // 静默放弃（回退旧行为，只损失自愈不损失正确性）。不改合成结构、零 CFI 影响。
+  const isSectionEmpty = async (index: number): Promise<boolean | null> => {
+    try {
+      const section = view.book?.sections?.[index];
+      if (!section?.createDocument) return null;
+      const doc = await section.createDocument();
+      return String(doc?.body?.innerHTML ?? "").trim() === "";
+    } catch {
+      return null; // 异构格式探测失败 = 不判定为空
+    }
+  };
+  const healEmptySectionLanding = async () => {
+    try {
+      const contents = (view.renderer?.getContents?.() ?? [])
+        .slice()
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+      const landed = contents[0];
+      if (!landed || typeof landed.index !== "number") return;
+      if ((await isSectionEmpty(landed.index)) !== true) return;
+      const sections = view.book?.sections ?? [];
+      let next = landed.index + 1;
+      while (next < sections.length && (await isSectionEmpty(next)) === true) next += 1;
+      if (next < sections.length) await view.goTo(next);
+    } catch { /* 自愈失败不阻塞打开 */ }
+  };
+
   const kernel: ReaderKernel = {
     async open(source: BookSource, init?: { location?: ReaderLocation }) {
       // M6-3（v30）：MIME 按扩展名映射——foliate makeBook 用魔数分发 ZIP/MOBI，
@@ -531,6 +562,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         await view.init({});
         if (init?.location?.fraction != null) await view.goToFraction(init.location.fraction);
       }
+      // D93：落点为空壳章（含存量用户进度被旧 bug 卡在空章的情形）→ 前进到首个非空节
+      await healEmptySectionLanding();
     },
 
     async goTo(target) {
