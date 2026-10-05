@@ -67,6 +67,7 @@ async function makeRenderer() {
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkMath)
+    .use(M.remarkSoftBreaks)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
     .use(rehypeSanitize, M.extractSanitizeSchema)
@@ -89,7 +90,7 @@ async function makeRenderer() {
     // comment / raw：React 客户端不渲染（rehype-raw 已展开 raw）
   };
   return (md) => {
-    const hast = pipeline.runSync(pipeline.parse(md));
+    const hast = pipeline.runSync(pipeline.parse(md), { value: md }); // file 必须带上：remarkSoftBreaks 的源切片基准是 file.value
     const dom = new JSDOM("<!doctype html><html><body></body></html>");
     const root = dom.window.document.body;
     for (const child of hast.children) renderHast(child, root);
@@ -199,13 +200,15 @@ async function main() {
     check("M3.5 端点回写（精确区间逐字节；缝隙区间落在吸附边界 5/7）", rAll && rBold && rCode && M.domToSrc(map, rAll.startContainer, rAll.startOffset) === sBold && M.domToSrc(map, rAll.endContainer, rAll.endOffset) === sBold + 2 && M.domToSrc(map, rBold.startContainer, rBold.startOffset) === sBold && M.domToSrc(map, rCode.startContainer, rCode.startOffset) === sCode, true, [M.domToSrc(map, rAll.startContainer, rAll.startOffset), M.domToSrc(map, rAll.endContainer, rAll.endOffset)]);
   }
 
-  console.log("== M4 软换行/硬换行 ==");
+  console.log("== M4 软换行/硬换行（v1.4：软换行＝可见换行，remark-breaks 语义） ==");
   {
     const mdSoft = "上行文字\n下行文字";
     const a = B(mdSoft);
-    check("M4.1 软换行保留在文本叶里（单段）", domText(a.map.root) === mdSoft, mdSoft, domText(a.map.root));
+    check("M4.1 软换行渲染为 br（breaks 语义；渲染文本无换行符）", domText(a.map.root) === "上行文字下行文字" && a.root.querySelectorAll("br").length === 1, "上行文字下行文字 + br×1", domText(a.map.root) + " br=" + a.root.querySelectorAll("br").length);
     const rSoft = M.srcToRange(a.map, 0, mdSoft.length);
-    check("M4.2 软换行全文区间", rSoft && rSoft.toString() === mdSoft, mdSoft, rSoft && rSoft.toString());
+    // 与 M4.6 同口径：mdast-util-to-hast 在 br 后注入 "\n"（rehype-raw 并入相邻叶），
+    // 跨 br 区间的 toString 含该注入换行——decShift 保证端点回写仍逐字对齐
+    check("M4.2 软换行全文区间（含 br 后注入换行，同 M4.6 口径）", rSoft && rSoft.toString() === "上行文字\n下行文字", "上行文字\\n下行文字", rSoft && JSON.stringify(rSoft.toString()));
 
     const mdHard = "甲行  \n乙行\\\n丙行";
     const b = B(mdHard);

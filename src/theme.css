@@ -5479,7 +5479,8 @@ body.capture-body #root { height: 100vh; }
   flex-direction: column;
   padding-inline: var(--sp-16);
 }
-.extract-main > .extract-face { margin-top: var(--sp-4); } /* 头带与卡面的间距（原 cols padding-top 的职责移交） */
+/* v1.4（用户反馈「下方间隔与上方一致」）：卡面与底栏 band-line 的间距＝与头带侧相同的 --sp-4 */
+.extract-main > .extract-face { margin: var(--sp-4) 0; } /* 头带/底栏与卡面的对称间距 */
 /* 栏开关（v7/D74 造型，v48.42/D82 用户指令**还原原位**）：文字钮两态变文案——
    未展开显示「展开」、展开状态显示「收起」；fixed 页面视口左上角 (16, 顶栏48+12)，
    与批注栏头（全部/摘录/高亮 位置/时间）同一视觉行；z 高于吸顶头带（收起态带满宽会盖钮）。 */
@@ -5893,15 +5894,31 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
    同一字号、同一排版，不闪版）。全部复用既有 Token（--fs-* / hairline / --sp-*），
    不新造视觉语言；直角、无阴影、单 accent 焦点色。无过渡/动画，prefers-reduced-motion 天然满足。
    ========================================================================== */
-/* 工具栏（编辑器下方一行；.btn-rail 同族：24px 档、hairline 描边、meta 字号） */
+/* 工具栏（编辑器下方一行；.btn-rail 同族：24px 档、hairline 描边、meta 字号）
+   v1.4（用户反馈）：dock（默认）＝margin-top:auto 钉在文本框底端（分节随卡片拉伸后
+   正文短也贴底缘）；is-float（app.extractEditorToolbarFloat）＝悬浮面板：sticky 吸住
+   滚动视口下缘、纸底+浮层阴影+中性描边，与文本框脱开。 */
 .extract-face-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-1);
-  margin-top: var(--sp-3);
+  margin-top: auto;
   padding-top: var(--sp-2);
   border-top: 1px solid var(--border-subtle);
+}
+.extract-face-toolbar.is-float {
+  position: sticky;
+  bottom: var(--sp-2);
+  margin-top: var(--sp-2);
+  align-self: center;
+  width: max-content;
+  max-width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);
+  padding: var(--sp-1) var(--sp-2);
+  z-index: var(--z-sticky);
 }
 .extract-face-toolbar-btn {
   height: 24px;
@@ -5921,6 +5938,15 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 
 /* Milkdown 根：字体/字号/行高全随 .extract-face-body（字号桥同步生效），排版细节由 ProseMirror 提供 */
 .extract-face-body .extract-editor { min-width: 0; }
+/* v1.4（用户反馈「工具条固定在文本框底端」）：分节随卡片拉伸（sec-quote flex:1），
+   编辑态正文盒弹性列——编辑器链逐级 flex:1 吃掉余量（点文本下方空白即入编辑），
+   工具条 margin-top:auto 钉在盒底缘；正文长于盒时自然顺排。 */
+.extract-face .sec-quote { flex: 1 1 auto; display: flex; flex-direction: column; }
+.extract-face .sec-quote .extract-face-body[data-editing="1"] { display: flex; flex-direction: column; flex: 1 1 auto; }
+.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor { flex: 1 1 auto; display: flex; flex-direction: column; }
+.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor > div,
+.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor .milkdown,
+.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor .ProseMirror { flex: 1 1 auto; }
 .extract-face-body .ProseMirror {
   font: inherit;
   color: inherit;
@@ -6011,6 +6037,15 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .extract-face-body .extract-math-inline, .extract-face-body .extract-math-block { color: var(--text-primary); }
 .extract-face-body .katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; }
 .extract-face-body .katex { font-size: 1.05em; }
+/* D93 v1.4（用户反馈「编辑后换行消失」）：Milkdown 把段内软换行（源文单个 \n）渲染成
+   span[data-type=hardbreak]，内容是一个空格——视觉上「挤成一整段」。CSS 让它真正断行：
+   display:block 切断行内流，height:0 + visibility:hidden 不占高、空格不可见。
+   序列化不受影响（inline hardbreak 序列化回源文 \n，实测逐字保留）。 */
+.extract-face-body .ProseMirror span[data-type="hardbreak"] {
+  display: block;
+  height: 0;
+  visibility: hidden;
+}
 /* D93 v1.3（用户反馈）：摘录自身的**原始批注**（在原文中摘录本段时所做，与批注轨里的子批注不同层级）
    ——正文下方的安静文本块：hairline 分组（与编辑工具栏同语法）、secondary 色、字号字体随字号桥。 */
 .extract-face-annot {

@@ -404,6 +404,42 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 
 ---
 
+## J. 全应用统一 Markdown 编辑方案（v1.4 新增：设计定稿，迁移分期另批实施）
+
+用户指令：软件中**所有涉及文本编辑的输入框**统一采用摘录卡这套 Markdown 输入方案。本节是两阶段流程的第一阶段产物（面清单 + 组件抽取 + 分期 + 风险），第二阶段按此派工，验收以届时清单为准。
+
+### J.1 现状面清单（2026-10-05 实测）
+
+| # | 面 | 现状实现 | 内容字段 | 落库链 | 统一后形态（建议） |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 摘录卡正文（ExtractCardFace） | Milkdown WYSIWYG + 工具条（本批） | `content_markdown` | `extracts:update` | **基准实现** |
+| 2 | 快速摘录浮窗（CaptureEditor） | textarea（`.editor` 320px 浮窗） | 摘录正文（`content_markdown`） | 摘录创建 IPC | **P0**：完整编辑器（含工具条）；顺带根治它占用 `.editor` 类名的历史负担 |
+| 3 | 日记（JournalView 3× textarea） | textarea | 日记条目 | journal IPC | **P0**：主正文用完整编辑器；标题/元字段保持单行输入 |
+| 4 | 手动制卡表单（ManualCardEditor 9× textarea） | textarea | front/back 等卡字段 | handleManualCard | **P0**：紧凑变体（无工具条、矮 min-height）——9 个 ProseMirror 实例的性能与聚焦 UX 由紧凑档控制 |
+| 5 | 闪卡面内联编辑（CardBrowser `EditableText`×N + 复习界面复用） | 裸壳 contentEditable | `frontMarkdown`/`backMarkdown`/`questionText` | card update | **P1**：紧凑变体；**前置风险＝cloze 语法**（`{{c1::…}}` 必须逐字节往返，需专项金样例；WYSIWYG 输入规则不得吞大括号） |
+| 6 | 批注浮层（AnnotationEditor + SelectionMenu + AnnotationPanel 行内编辑） | textarea | 批注 comment | `saveAnnotationComment`/`createAnnotation` | **P1（需契约决策）**：批注文字若 markdown 化，批注轨/浮层列表的**展示侧**必须同步 markdown 渲染（新渲染义务）；不做则此面保持纯文本并在文档登记例外 |
+| 7 | AI 面板追问输入（AIPanel 2× textarea） | textarea | 聊天消息（非文档存储） | `ai:chat` | **建议例外**：聊天输入非 markdown 文档面；若用户坚持统一再纳入 P2 |
+
+### J.2 组件抽取（第二阶段第一个最小单元）
+
+- 新组件 `src/components/editor/MarkdownEditor.tsx`：把 ExtractEditor 的 Milkdown 装配 + 提交语义（dirty 守卫/幂等短路/失焦 Esc 提交/工具栏）抽为通用受控封装——props：`value`、`onCommit`、`placeholder`、`variant: "full" | "compact"`、`toolbar?: boolean`、`float?: boolean`、`minRows`。ExtractEditor 退化为薄壳（保留摘录特有的块级焦点落点 API）。
+- 工具条与形态设置（`app.extractEditorToolbar(Float)`）随组件走，各宿主可传 `toolbar={false}` 关闭；不做每面独立的形态键（设置面爆炸）。
+- 读态/展示侧渲染统一用卡面同款管线（react-markdown + remark-gfm + remark-math + remarkSoftBreaks + rehype-raw/sanitize + rehype-katex）——抽 `renderMarkdown` 共享函数，杜绝「同一段 markdown 两处渲染不同」。
+- 设计原则（skills 对齐）：better-layout「控件与内容分离、对齐共同边缘」（compact 档矮盒、工具条共享几何）；better-typography「同一字阶」（编辑器排版全走 `--fs-*`/字号桥）；micro-interactions「状态切换零跳版」（提交/只读切换不改盒几何）；buttons-ctas 反馈在既有 hover/active 档内，不新造动效。
+
+### J.3 分期与验收口径
+
+- **P0**：§J.2 组件抽取（含金样例：往返保真语料集复用映射测试的 M1-M14 语料）→ #2 快速摘录 → #3 日记 → #4 手动制卡紧凑档。每面验收：进出编辑往返逐字节不变（幂等短路）、落库链零新写通道、设置键零新增（复用五键）。
+- **P1**：#5 闪卡面（cloze 金样例先行）→ #6 批注（先拍板 comment 是否 markdown 化）。
+- **P2**：#7 AI 追问（如拍板纳入）。
+- **通用红线**：偏移不变式（§C.1）只在摘录卡适用；其他面无偏移锚定负担，但**往返保真与幂等短路是全部面的通用验收项**。
+
+### J.4 本批边界
+
+本批实施 = 修复 ①②③ + 本节设计；§J 各面迁移与组件抽取**不在本批**（一次只实现一个最小单元；P0 组件抽取是下一个最小单元）。
+
+---
+
 ## 开放问题（需拍板后进 P0/P1）
 
 > **拍板记录（2026-10-04，总控裁定；五项均按本稿已写明的推荐项/默认项执行，用户事后可推翻并触发对应 P1 项）**：
@@ -422,6 +458,26 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 ---
 
 ## 修订记录
+
+### v1.4（2026-10-05，用户实机反馈第二轮：三项修复 + 全应用统一 Markdown 方案设计）
+
+用户书面反馈（逐字）：
+
+> "1. 进入编辑后，文本框中的文字未继承原文摘录格式。例如原文有换行，但进入编辑框后文字挤在一起，变成连续一整段，换行消失。我刚才在编辑时不得不手动进行换行。 2. 富文本工具条应固定在文本框底端，并支持在设置中切换为悬浮工具条。 3. 当前摘录页面文本框距离上方细线有一定间隔，但距离下方细线无间隔，紧贴底栏边缘。请将下方间隔调整为与上方一致。 注意：软件中所有涉及文本编辑的输入框（包括侧边栏、复习界面、日记界面及其他所有文本输入场景）都要统一采用这套相同的 Markdown 输入方案。同时注意所有修改设计都要先在 dylantarre/animation-principles 这个 GitHub 仓库中搜寻相关 skill 作为指导来进行（本轮加载 buttons-ctas，连同已载的 better-layout/better-typography/micro-interactions）。"
+
+**修复 ①（换行消失）**——两层实测根因 + 修复：
+- 源文层：Milkdown 往返**无损**（`甲行\n乙行` 序列化逐字保留，node 冒烟实证）——数据没丢，是**渲染语义**问题。
+- 编辑态渲染：Milkdown 把段内软换行拆成 inline hardbreak 节点，DOM 渲染为**含一个空格的 span**（`<span data-type="hardbreak"> </span>`）→ 视觉"挤成一整段"。修复＝CSS `display:block;height:0;visibility:hidden` 让它真正断行（序列化零影响）。
+- 读态渲染：react-markdown 按 CommonMark 把单 `\n` 折叠成空格（旧纯文本视图 pre-wrap 是按换行显示的，D93 引入回归）。修复＝自写 remark 插件 `remarkSoftBreaks`（在 `markdownOffsetMap.ts` 内，与 sanitize schema 同址）把段内 text 叶按 `\n` 拆成 text+break+text，**位置逐段重算保真**。**不用现成 remark-breaks**：其经 mdast-util-find-and-replace 替换不保 position，会打断源偏移映射（实测 srcToRange 返回 null）。另两处坑记档：transform 只在 run 阶段执行（单 parse 不触发）；分离调用 `runSync(parse())` 时 VFile 不自动携带，必须显式传 `{value}`。
+- 新增映射金样例 M4.1/M4.2（breaks 语义 + br 后注入换行与 M4.6 同口径）；br↔break 配对位置无关，既有机制零改动。
+
+**修复 ②（工具条钉底 + 悬浮档）**：`.sec-quote` 随卡片拉伸（flex:1，此前只有内容高 183px、卡片 504px，工具条悬在卡中部）＋编辑态正文盒弹性列（编辑器链逐级 flex:1）＋工具栏 `margin-top:auto` 钉在盒底缘（正文短也贴底，正文长则顺排）。新设置键 `app.extractEditorToolbarFloat`（bool，默认 false）：true＝悬浮面板（sticky 吸滚动区下缘、纸底+`--shadow-float`+中性描边、`width:max-content` 居中；buttons-ctas 的状态反馈原则在既有 hover/active 档内）。设置页新增「悬浮工具条」checkbox；写侧/读侧双侧归一；f18 DOC_KEYS+往返+非法值矩阵同步（现五键）。
+
+**修复 ③（上下间距对称）**：实测 `.extract-face` margin 16px 0 0——卡面底缘与底栏 band-line 间距为 0、上缘 16px。改 `margin: var(--sp-4) 0`（better-layout「对齐到共同边缘」：上/下同一间距 token）。
+
+**统一方案（§J，新节）**：全应用文本编辑面统一到同一套 Markdown 编辑方案——组件抽取、逐面清单、分期与风险见 §J；**本批只交付设计 + 上述三项修复，各面迁移按 §J 分期另批实施**。
+
+
 
 ### v1.3（2026-10-05，用户实机反馈轮：六项修改）
 

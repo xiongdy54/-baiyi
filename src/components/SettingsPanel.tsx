@@ -16,6 +16,7 @@ import { ANNOT_COLORS } from "./SelectionMenu";
 import {
   readExtractCardSettings,
   DEFAULT_EXTRACT_EDITOR_TOOLBAR,
+  DEFAULT_EXTRACT_EDITOR_TOOLBAR_FLOAT,
   DEFAULT_EXTRACT_FACE_FONT_FOLLOW,
   DEFAULT_EXTRACT_FACE_FONT_SIZE,
   DEFAULT_EXTRACT_FACE_FONT_FAMILY,
@@ -1120,6 +1121,7 @@ function ReaderSection() {
   // D93 §E/§F：摘录卡编辑器工具栏 + 字号/字体四键（读侧同一份归一；写侧 main.js settings:set 再归一一次）
   const [ext, setExt] = useState<ExtractCardSettings>({
     extractEditorToolbar: DEFAULT_EXTRACT_EDITOR_TOOLBAR,
+    extractEditorToolbarFloat: DEFAULT_EXTRACT_EDITOR_TOOLBAR_FLOAT,
     extractFaceFontFollow: DEFAULT_EXTRACT_FACE_FONT_FOLLOW,
     extractFaceFontSize: DEFAULT_EXTRACT_FACE_FONT_SIZE,
     extractFaceFontFamily: DEFAULT_EXTRACT_FACE_FONT_FAMILY
@@ -1150,6 +1152,7 @@ function ReaderSection() {
   const saveExtract = (next: ExtractCardSettings) => {
     setExt(next);
     void settingsStore.set("app", "extractEditorToolbar", next.extractEditorToolbar);
+    void settingsStore.set("app", "extractEditorToolbarFloat", next.extractEditorToolbarFloat);
     void settingsStore.set("app", "extractFaceFontFollow", next.extractFaceFontFollow);
     void settingsStore.set("app", "extractFaceFontSize", next.extractFaceFontSize);
     void settingsStore.set("app", "extractFaceFontFamily", next.extractFaceFontFamily);
@@ -1317,7 +1320,20 @@ function ReaderSection() {
           <span>编辑时显示</span>
         </label>
       </div>
-      <p className="form-hint">编辑器下方的加粗/标题/列表/公式等按钮；关闭后仍可用 markdown 语法输入与快捷键。</p>
+      {/* D93 v1.4：工具栏形态——钉底（默认）/悬浮面板 */}
+      <div className="settings-row">
+        <span>工具栏形态</span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-extract-editor-toolbar-float"
+            checked={ext.extractEditorToolbarFloat}
+            onChange={(e) => saveExtract({ ...ext, extractEditorToolbarFloat: e.target.checked })}
+          />
+          <span>悬浮工具条</span>
+        </label>
+      </div>
+      <p className="form-hint">编辑器下方的加粗/标题/列表/公式等按钮；关闭后仍可用 markdown 语法输入与快捷键。悬浮＝工具栏脱开文本框、吸在滚动区下缘。</p>
       {/* D93 §F.2：摘录卡字号——默认跟随阅读界面，可独立自定义字号/字体（行高恒跟随） */}
       <div className="settings-row">
         <span>摘录卡字号</span>

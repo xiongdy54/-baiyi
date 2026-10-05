@@ -8,19 +8,72 @@
 // 文本（反斜杠转义、字符引用已解）——段内长度可能不等，按 CommonMark 两类构造逐 run 对齐。
 // 解码直接复用 micromark 同款工具（decode-named-character-reference /
 // micromark-util-decode-numeric-character-reference，remark 生态的传递依赖），保证与解析器逐字节一致。
-import { unified } from "unified";
+import { unified, type Plugin } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import type { Root, Content } from "mdast";
+import type { Root, Content, Parent } from "mdast";
 import { defaultSchema } from "hast-util-sanitize";
 import { decodeNamedCharacterReference } from "decode-named-character-reference";
 import { decodeNumericCharacterReference } from "micromark-util-decode-numeric-character-reference";
 
-/** 读态渲染的 mdast 解析（与 react-markdown 读态同族同选项；导出供映射单测复用同一解析） */
+/** 读态渲染的 mdast 解析（与 react-markdown 读态同族同选项；导出供映射单测复用同一解析）。
+ *  注意两点：remarkSoftBreaks 是 tree transform，只在 run 阶段执行，单 parse 不触发；
+ *  runSync 必须把带 value 的 file 传回去——分离调用 runSync(parse()) 时 VFile 不会自动携带，
+ *  而插件的源切片基准正是 file.value。 */
 export function parseForMap(markdown: string): Root {
-  return unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(markdown) as Root;
+  const processor = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(remarkSoftBreaks);
+  return processor.runSync(processor.parse(markdown), { value: markdown }) as Root;
 }
+
+/**
+ * v1.4 软换行＝可见换行（用户反馈「编辑后换行消失」）：把段内 text 叶按 \n 拆成
+ * text + break + text。**自写而不用 remark-breaks**——它经 mdast-util-find-and-replace 替换，
+ * 拆出的节点不带 position，而源偏移映射（本模块）依赖叶级 position。这里以原始源切片为基准
+ * 逐段重算 offset：raw 与 decoded 在 \n 处必然对齐（反斜杠转义与字符引用都不跨换行），
+ * value 沿用解码值分段，break 的源区间＝那 1 个 \n 字符（与既有 br↔break 配对口径一致）。
+ * code/inlineCode 的 value 与一切非 text 节点不动；空行本就成段，不经此处。
+ * line/column 仅给占位（映射契约只用 offset；hast 渲染不消费 position）。
+ */
+export const remarkSoftBreaks: Plugin<[]> = function () {
+  return (tree, file) => {
+    const raw = typeof file.value === "string" ? file.value : String(file.value ?? "");
+    const walk = (parent: Parent) => {
+      if (!Array.isArray(parent.children)) return;
+      const next: Content[] = [];
+      for (const child of parent.children) {
+        const pos = child.position;
+        if (
+          child.type === "text" && child.value.includes("\n") && pos &&
+          typeof pos.start.offset === "number" && typeof pos.end.offset === "number"
+        ) {
+          const s = pos.start.offset;
+          const rawParts = raw.slice(s, pos.end.offset).split("\n");
+          const valParts = child.value.split("\n");
+          if (rawParts.length === valParts.length) {
+            let off = s;
+            rawParts.forEach((rp, i) => {
+              if (i > 0) {
+                next.push({ type: "break", position: { start: { line: 1, column: 1, offset: off }, end: { line: 1, column: 1, offset: off + 1 } } });
+                off += 1;
+              }
+              if (rp.length > 0) {
+                next.push({ type: "text", value: valParts[i], position: { start: { line: 1, column: 1, offset: off }, end: { line: 1, column: 1, offset: off + rp.length } } });
+                off += rp.length;
+              }
+            });
+            continue;
+          }
+          // raw/decoded 段数不一致（理论不可达）：整叶放弃拆分，回落 CommonMark 空格语义
+        }
+        next.push(child);
+        if (Array.isArray((child as Parent).children)) walk(child as Parent);
+      }
+      parent.children = next;
+    };
+    walk(tree as Parent);
+  };
+};
 
 /**
  * 读态 sanitize schema（D93 §C 已知坑的最小放行）：rehype 管线固定为

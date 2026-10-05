@@ -3,7 +3,7 @@
 // 提交语义（§B.3）：编辑中零写库；失焦/Esc 提交；listener 未观察到 doc 变更 → 不提交直接退读态；
 // 序列化结果与 defaultValue 相同 → 幂等短路不回调（保证「无修改退出逐字节不变」）。
 // 工具栏 16 钮全部走 commandsCtx 官方命令通道（不自改 DOM）；mousedown preventDefault 不失焦。
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode } from "react";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import {
   Editor,
@@ -193,6 +193,11 @@ interface ExtractEditorProps {
   pendingFocusIndex?: number | null;
   /** §E：工具栏开关（app.extractEditorToolbar）；关闭后整行不渲染 */
   toolbar?: boolean;
+  /** v1.4：工具栏形态（app.extractEditorToolbarFloat）——false＝钉在文本框底端（dock，默认），true＝悬浮面板 */
+  float?: boolean;
+  /** v1.4：编辑器内容与工具栏之间的附加块（摘录卡＝原始批注块）——dock 钉底时保持
+      「正文 → 批注 → 工具条@盒底缘」的顺序（批注块在宿主侧渲染会落到工具条之后） */
+  footer?: ReactNode;
 }
 
 export const ExtractEditor = forwardRef<ExtractEditorApi, ExtractEditorProps>(function ExtractEditor(
@@ -207,7 +212,7 @@ export const ExtractEditor = forwardRef<ExtractEditorApi, ExtractEditorProps>(fu
 });
 
 const ExtractEditorInner = forwardRef<ExtractEditorApi, ExtractEditorProps>(function ExtractEditorInner(
-  { defaultValue, onCommit, pendingFocusIndex, toolbar = true },
+  { defaultValue, onCommit, pendingFocusIndex, toolbar = true, float = false, footer },
   ref
 ) {
   /** listener 是否观察到过 doc 变更（§B.3 提交语义的判据） */
@@ -377,10 +382,12 @@ const ExtractEditorInner = forwardRef<ExtractEditorApi, ExtractEditorProps>(func
   return (
     <div className="extract-editor" onBlur={onRootBlur}>
       <Milkdown />
+      {footer}
       {toolbar && (
         <div
-          className="extract-face-toolbar"
+          className={`extract-face-toolbar${float ? " is-float" : ""}`}
           data-testid="extract-editor-toolbar"
+          data-toolbar-mode={float ? "float" : "dock"}
           role="toolbar"
           aria-label="摘录编辑工具栏"
           /* mousedown preventDefault：点工具栏不转移焦点（ProseMirror 不失焦，§D.5） */

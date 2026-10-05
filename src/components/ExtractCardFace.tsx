@@ -21,10 +21,11 @@ import {
   resolveCaret,
   srcToRange,
   extractSanitizeSchema,
+  remarkSoftBreaks,
   type OffsetMap
 } from "../lib/editor/markdownOffsetMap";
 import { ExtractEditor, type ExtractEditorApi } from "./editor/ExtractEditor";
-import { useExtractEditorToolbar, useExtractFaceTypography } from "../lib/extractCardSettings";
+import { useExtractEditorToolbar, useExtractEditorToolbarFloat, useExtractFaceTypography } from "../lib/extractCardSettings";
 
 const DAY = 86400000;
 
@@ -71,8 +72,12 @@ export function parseQuoteRanges(raw: unknown): Array<{ start: number; end: numb
 
 // 读态渲染管线（D93 §1/§B.1）：与闪卡面同族（react-markdown 10 / remark-parse ^11），
 // remark-gfm 补表格/删除线/任务列表，rehype-raw+sanitize 渲染原始 HTML，rehype-katex 出公式。
-// sanitize schema 见 markdownOffsetMap.ts（sanitize 先于 katex，公式/任务列表/对齐须存活）。
-const READ_REMARK_PLUGINS = [remarkGfm, remarkMath];
+// sanitize schema 与 remarkSoftBreaks 见 markdownOffsetMap.ts（sanitize 先于 katex，公式/任务列表/对齐须存活）。
+// remarkSoftBreaks（v1.4 用户反馈）：单换行＝可见换行——摘录取自阅读原文（阅读器的行文自带换行），
+// 旧纯文本视图（pre-wrap）按换行显示；换 markdown 渲染后若按 CommonMark 折叠成空格，用户在编辑态
+// 看到的就是「挤成一整段」。读态与编辑态统一为 breaks 语义（编辑态由 Milkdown 的 inline hardbreak
+// 承载，CSS 让它真正断行，见 theme.css；序列化仍保源文 \n 不变）。
+const READ_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkSoftBreaks];
 const READ_REHYPE_PLUGINS: PluggableList = [rehypeRaw, [rehypeSanitize, extractSanitizeSchema], rehypeKatex];
 
 function ReadMarkdown({ text }: { text: string }) {
@@ -189,8 +194,16 @@ export default function ExtractCardFace({
       listDueExtracts 的 SELECT 已透传 e.comment（DueTopic 类型未声明，读取处收窄，
       同 annotationColor 的 cast 口径）；空批注不渲染块。 */
   const ownComment = String((extract as DueTopic & { comment?: string | null }).comment ?? "").trim();
-  /** §F：工具栏开关与字号/字体桥（两宿主共用本组件，桥随组件挂/卸） */
+  /** v1.4：批注块节点——读态直排正文下、编辑态经 footer 进编辑器（正文与工具条之间） */
+  const annotBlock = ownComment ? (
+    <div className="extract-face-annot" data-testid="extract-face-comment" data-noedit="1">
+      <div className="sec-label">批注</div>
+      <div className="extract-face-annot-text">{ownComment}</div>
+    </div>
+  ) : null;
+  /** §F：工具栏开关/形态与字号/字体桥（两宿主共用本组件，桥随组件挂/卸） */
   const toolbarOn = useExtractEditorToolbar();
+  const toolbarFloat = useExtractEditorToolbarFloat();
   useExtractFaceTypography();
   /**
    * 本次拖选手势**起手**的修饰位（v48.39 / D79）：document mousedown 上采样，mouseup 收尾求或。
@@ -232,6 +245,7 @@ export default function ExtractCardFace({
     if (viewOnly || editing || !handlers.onEdit) return;
     const target = e.target as Node | null;
     if (target && (target as HTMLElement).closest?.(".extract-face-toolbar")) return; // 工具栏自身不算正文点击
+    if (target && (target as HTMLElement).closest?.("[data-noedit]")) return; // 批注块等非正文区（v1.4）
     const sel = typeof window !== "undefined" ? window.getSelection() : null;
     if (!sel || !sel.isCollapsed) return; // 划选不进编辑（§D.4）
     const map = mapRef.current;
@@ -434,16 +448,15 @@ export default function ExtractCardFace({
               defaultValue={bodyText}
               pendingFocusIndex={pendingFocusRef.current}
               toolbar={toolbarOn}
+              float={toolbarFloat}
+              footer={annotBlock}
               onCommit={handleEditorCommit}
             />
           )}
+          {/* v1.4：批注块（摘录自身原始批注，空则不渲染）。读态直排正文之下；编辑态经 footer
+              传入编辑器（内容与工具条之间），data-noedit＝点击豁免（批注不是正文，点了不进编辑）。 */}
+          {(!editing || viewOnly || !handlers.onEdit) && annotBlock}
         </div>
-        {ownComment ? (
-          <div className="extract-face-annot" data-testid="extract-face-comment">
-            <div className="sec-label">批注</div>
-            <div className="extract-face-annot-text">{ownComment}</div>
-          </div>
-        ) : null}
       </div>
       {/* §E：编辑态时工具栏由 ExtractEditor 渲染在编辑器 host 之后（.extract-face-toolbar，
           data-testid="extract-editor-toolbar"）；app.extractEditorToolbar=false 整行不渲染 */}

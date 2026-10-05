@@ -569,6 +569,72 @@ try {
   await pressEsc(cdp);
 
   // ============================================================
+  // 验收 13（v1.4）：软换行可见（读态 br / 编辑态 hardbreak 真断行）+ 工具条钉底/悬浮切换。
+  // 经真实 extracts:update 写入换行样本再切页签刷新（该 IPC 不广播）；结束后恢复 RICH_TEXT
+  // 与设置，保证后续验收 12 的探针文本不变。
+  // ============================================================
+  console.log("\n== 验收 13 v1.4：软换行可见 + 工具条钉底/悬浮 ==");
+  // ⑩ 结束时工具栏开关是关（false 且重启持久）——本节先开、结束还原
+  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbar", true); return true; })()`);
+  await wait(600);
+  await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(seedId)}, { contentMarkdown: ${JSON.stringify("甲行文本\n乙行文本")} }); return true; })()`);
+  await navTo(cdp, "书架");
+  await wait(1000);
+  await navTo(cdp, "摘录");
+  await wait(1800);
+  const brRead13 = await cdp.eval(`(() => { const b = document.querySelector(".extract-face-body"); return JSON.stringify({ brs: b ? b.querySelectorAll("br").length : -1 }); })()`);
+  const br13 = JSON.parse(String(brRead13) || "{}");
+  check("⑬ 读态软换行＝可见 br（breaks 语义，v1.4）", br13.brs === 1, brRead13);
+  const p13 = await probeRange(cdp, "甲行文本");
+  check("⑬ 前置：读态正文可命中", !!p13, "probeRange 未命中");
+  await clickAt(cdp, p13.start.x, p13.start.y);
+  check("⑬ 前置：进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
+  await wait(900);
+  const edit13 = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-face-body");
+    const hb = body?.querySelector('.ProseMirror span[data-type="hardbreak"]');
+    const tb = body?.querySelector('[data-testid="extract-editor-toolbar"]');
+    const rb = body?.getBoundingClientRect();
+    const rt = tb?.getBoundingClientRect();
+    return JSON.stringify({
+      hbDisplay: hb ? getComputedStyle(hb).display : null,
+      mode: tb?.dataset.toolbarMode || null,
+      bodyBottom: rb ? Math.round(rb.bottom) : null,
+      tbBottom: rt ? Math.round(rt.bottom) : null
+    });
+  })()`);
+  const e13 = JSON.parse(String(edit13) || "{}");
+  check("⑬ 编辑态 hardbreak span 真断行（display block，v1.4）", e13.hbDisplay === "block", edit13);
+  check("⑬ dock 工具条钉在文本盒底缘（toolbar bottom ≈ body bottom）", e13.mode === "dock" && typeof e13.bodyBottom === "number" && Math.abs(e13.tbBottom - e13.bodyBottom) <= 2, edit13);
+  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarFloat", true); return true; })()`);
+  // settingsAPI.set 是裸 IPC，不触发渲染层 eventBus 广播——重挂卡面让读侧 hook 重新读取
+  //（真实设置页走 settingsStore.set 自带广播，编辑中即时生效；此处测「设置后生效」即可）
+  await navTo(cdp, "书架");
+  await wait(1000);
+  await navTo(cdp, "摘录");
+  await wait(1800);
+  await clickAt(cdp, p13.start.x, p13.start.y);
+  check("⑬ 前置：悬浮档下进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
+  await wait(900);
+  const float13 = await cdp.eval(`(() => {
+    const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, pos: tb ? getComputedStyle(tb).position : null, shadow: tb ? getComputedStyle(tb).boxShadow : null });
+  })()`);
+  const f13 = JSON.parse(String(float13) || "{}");
+  check("⑬ 悬浮档即时生效（float + sticky + 浮层阴影）", f13.mode === "float" && f13.pos === "sticky" && f13.shadow && f13.shadow !== "none", float13);
+  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarFloat", false); return true; })()`);
+  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbar", false); return true; })()`);
+  await wait(400);
+  await pressEsc(cdp);
+  await waitEditor(cdp, false);
+  await wait(600);
+  await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(seedId)}, { contentMarkdown: ${JSON.stringify(RICH_TEXT)} }); return true; })()`);
+  await navTo(cdp, "书架");
+  await wait(1000);
+  await navTo(cdp, "摘录");
+  await wait(1800);
+
+  // ============================================================
   // 验收 12（审查 P0 回归）：失焦提交不与底栏动作竞态——编辑后不按 Esc、直接真鼠标点「下一条」，
   // blur 同步提交必须先于 click 的 busy 守卫生效（旧缺陷：提交推迟到宏任务会被动作方 busy 吞掉＝丢字）。
   // 本节放套件末尾：advance 会把唯一种子卡推出队列，不得影响前序验收的卡面状态。
