@@ -1,11 +1,31 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import Dropdown from "./Dropdown";
-import EditableText from "./EditableText";
-import { annotColorCss } from "./AnnotationEditor";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
+import ReactMarkdown from "react-markdown";
+import type { PluggableList } from "unified";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
+import rehypeKatex from "rehype-katex";
 import { attachRipple, settle } from "../lib/press";
 import { extractStatusLabel, type ExtractEngine } from "../lib/sessionQueue";
 import type { DueTopic } from "../lib/readingWorkflow";
-import { paintBodyAnnotations, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
+import {
+  paintBodyAnnotations,
+  paintQuoteRanges,
+  type BodyAnnotationGroup
+} from "../lib/reader/bodyAnnotations";
+import {
+  buildOffsetMap,
+  blockIndexForSrc,
+  domToSrc,
+  resolveCaret,
+  srcToRange,
+  extractSanitizeSchema,
+  remarkSoftBreaks,
+  type OffsetMap
+} from "../lib/editor/markdownOffsetMap";
+import { ExtractEditor, type ExtractEditorApi } from "./editor/ExtractEditor";
+import { useExtractEditorToolbar, useExtractEditorToolbarFloat, useExtractFaceTypography } from "../lib/extractCardSettings";
 
 const DAY = 86400000;
 
@@ -50,102 +70,46 @@ export function parseQuoteRanges(raw: unknown): Array<{ start: number; end: numb
     .sort((a, b) => a.start - b.start);
 }
 
-/**
- * DOM 文本坐标（规格 §1.2 / 工单 ②）：自 root 起按文档序累加文本节点长度，`<br>` 计 1 个换行。
- * `EditableText` 的落库口径是 `innerText`，而 Chromium 的 innerText setter 把 `\n` 落成 `<br>`
- * （实测：`"a\n\nb"` → `a<br><br>b`，见 tests/breadcrumb.gui.mjs 的多段正文用例）——
- * 因此「文本节点长度 + br 计 1」与 `content_markdown` 逐字符同构，选区偏移可直接当范围锚用。
- */
-function domTextOffset(root: Node, container: Node, offset: number): number | null {
-  let acc = 0;
-  let hit: number | null = null;
-  const visit = (node: Node): void => {
-    if (hit !== null) return;
-    if (node === container) {
-      if (node.nodeType === 3 /* TEXT_NODE */) {
-        hit = acc + offset;
-        return;
-      }
-      // 元素容器：点＝「第 offset 个子节点之前」，先把之前的兄弟累加完再落点
-      const kids = node.childNodes;
-      for (let i = 0; i < offset && i < kids.length; i++) visit(kids[i]);
-      if (hit === null) hit = acc;
-      return;
-    }
-    if (node.nodeType === 3) {
-      acc += (node.textContent || "").length;
-      return;
-    }
-    if (node.nodeType === 1 && (node as Element).tagName === "BR") {
-      acc += 1;
-      return;
-    }
-    if (node.nodeType === 1) {
-      const kids = node.childNodes;
-      for (let i = 0; i < kids.length; i++) visit(kids[i]);
-    }
-  };
-  visit(root);
-  return hit;
+// 读态渲染管线（D95 §1/§B.1）：与闪卡面同族（react-markdown 10 / remark-parse ^11），
+// remark-gfm 补表格/删除线/任务列表，rehype-raw+sanitize 渲染原始 HTML，rehype-katex 出公式。
+// sanitize schema 与 remarkSoftBreaks 见 markdownOffsetMap.ts（sanitize 先于 katex，公式/任务列表/对齐须存活）。
+// remarkSoftBreaks（v1.4 用户反馈）：单换行＝可见换行——摘录取自阅读原文（阅读器的行文自带换行），
+// 旧纯文本视图（pre-wrap）按换行显示；换 markdown 渲染后若按 CommonMark 折叠成空格，用户在编辑态
+// 看到的就是「挤成一整段」。读态与编辑态统一为 breaks 语义（编辑态由 Milkdown 的 inline hardbreak
+// 承载，CSS 让它真正断行，见 theme.css；序列化仍保源文 \n 不变）。
+const READ_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkSoftBreaks];
+const READ_REHYPE_PLUGINS: PluggableList = [rehypeRaw, [rehypeSanitize, extractSanitizeSchema], rehypeKatex];
+
+function ReadMarkdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={READ_REMARK_PLUGINS} rehypePlugins={READ_REHYPE_PLUGINS}>
+      {text}
+    </ReactMarkdown>
+  );
 }
 
 /**
- * 当前选区在**该卡正文**里的字符偏移（纯函数式，不写 DOM、不落库；工单 ②「采集父侧偏移」）。
- * 多段不相邻选择＝多组偏移（`selection.rangeCount > 1` 时逐段取；与阅读器侧 spans 集合同构），
- * 选区落在正文之外（如卡面元信息行）或塌缩时返回空数组——调用方据此回退「整条正文」。
+ * 当前选区在**该卡正文**里的字符偏移（D95 §C.6）：经源偏移↔渲染 DOM 双向映射换算，
+ * 多段不相邻选择＝多组偏移、越界/塌缩过滤、排序——与旧 `selectionOffsetsInBody` 同形，
+ * 消费方（ExtractReviewView 集合运算）零改动。选区起点取 before、终点取 after：
+ * 端点落在公式等 unmappable 缝隙时高亮罩住整段。
  */
-export function selectionOffsetsInBody(root: HTMLElement): Array<{ start: number; end: number }> {
+export function selectionOffsetsViaMap(root: HTMLElement, map: OffsetMap | null): Array<{ start: number; end: number }> {
   const sel = typeof window !== "undefined" ? window.getSelection() : null;
-  if (!sel || !sel.rangeCount) return [];
+  if (!sel || !sel.rangeCount || !map) return [];
   const out: Array<{ start: number; end: number }> = [];
   for (let i = 0; i < sel.rangeCount; i++) {
     const r = sel.getRangeAt(i);
     if (!root.contains(r.commonAncestorContainer)) continue;
-    const s = domTextOffset(root, r.startContainer, r.startOffset);
-    const e = domTextOffset(root, r.endContainer, r.endOffset);
+    const sc = resolveCaret(r.startContainer, r.startOffset);
+    const ec = resolveCaret(r.endContainer, r.endOffset);
+    if (!sc || !ec) continue;
+    const s = domToSrc(map, sc.node, sc.off, "before");
+    const e = domToSrc(map, ec.node, ec.off, "after");
     if (s === null || e === null || e <= s) continue;
     out.push({ start: s, end: e });
   }
   return out.sort((a, b) => a.start - b.start);
-}
-
-/**
- * 「摘录」动作的载荷（工单 ②）：文本＝卡面里选中的那段（无选区＝整条正文），
- * ranges＝选区在**本卡 content_markdown** 里的字符偏移（父卡坐标，逐段对应；多段选择即多组）。
- * 文本取 `slice` 而非 `selection.toString()`：落库文本与范围锚逐字符对齐（父卡跳回来高亮的就是它）。
- */
-export interface ExtractPickPayload {
-  text: string;
-  ranges: Array<{ start: number; end: number }>;
-}
-
-/**
- * 把正文按高亮区间切成交错节点（只读渲染用，规格 §1.2 R13 落点）。
- * 区间超出正文长度一律裁剪；重叠区间按游标裁剪，保证不重复输出同一段文字。
- */
-function textWithRanges(text: string, ranges: Array<{ start: number; end: number }> | null | undefined, hlRef: (el: HTMLElement | null) => void) {
-  const body = String(text || "");
-  const list = (ranges || []).filter((r) => r.start < body.length && r.end > r.start);
-  if (!list.length) return body;
-  const out: ReactNode[] = [];
-  let cursor = 0;
-  let first = true;
-  list.forEach((r, i) => {
-    const s = Math.max(cursor, r.start);
-    const e = Math.min(body.length, r.end);
-    if (s > cursor) out.push(body.slice(cursor, s));
-    if (e > s) {
-      out.push(
-        <mark key={`hl-${i}`} className="extract-quote-hl" ref={first ? hlRef : undefined}>
-          {body.slice(s, e)}
-        </mark>
-      );
-      first = false;
-    }
-    cursor = Math.max(cursor, e);
-  });
-  if (cursor < body.length) out.push(body.slice(cursor));
-  return out;
 }
 
 export interface ExtractFaceHandlers {
@@ -173,13 +137,18 @@ export interface ExtractFaceHandlers {
     /** 指针事件的修饰位（v48.38 / D78：摘录页卡面 Ctrl 多段选择；键盘采集不带修饰＝替换） */
     modifier?: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }
   ) => void;
+  /**
+   * D95 §D.3：READ 态点高亮命中段锚批注 → 宿主据此开批注浮层（与批注轨 onJump 同一浮层同一落库链）。
+   * handler 缺失时点高亮＝不进编辑也不弹层（合并复习分支宿主未接批注编排的现状语义）。
+   */
+  onHighlightClick?: (annotationId: string) => void;
 }
 
 /**
  * 摘录卡面（v48.22 / D58 §6.8）：沉浸式连续处理页与复习页**共用同一组件**。
- * 正文与闪卡一样可就地编辑（EditableText）；动作集＝下一条 / 推迟 / 优先级 / 毕业 / 跳转原文 / 摘录。
- * **批 4 Task 18（R29）**：`extractReader` 专用页已退役——「打开摘录」动作随之删除。
- * `viewOnly` ＝面包屑查看态（只读渲染 + 高亮该层范围，不出现任何调度动作）。
+ * D95 §B.1 三分支：`viewOnly`（查看态）与会话**读态**（新默认）都走 ReactMarkdown 渲染 + 绘制层高亮；
+ * 会话读态点非高亮区进编辑（ExtractEditor，WYSIWYG），点高亮弹批注浮层，划选不进编辑（§D）。
+ * `viewOnly` ＝面包屑查看态（只读渲染 + 高亮该层范围，不出现任何调度动作，无编辑出口 §D.4）。
  */
 export default function ExtractCardFace({
   extract,
@@ -189,6 +158,7 @@ export default function ExtractCardFace({
   viewOnly,
   quoteRanges,
   bodyAnnotations,
+  onOffsetMap,
   handlers
 }: {
   extract: DueTopic;
@@ -204,16 +174,37 @@ export default function ExtractCardFace({
    * （CSS Custom Highlight API，不碰 DOM）。栏内条目与文中那段据此对上。
    */
   bodyAnnotations?: BodyAnnotationGroup[];
+  /** D95 §D.3：映射表建好/销毁时上报宿主（浮层锚点 anchorForAnnotation 换算用） */
+  onOffsetMap?: (map: OffsetMap | null) => void;
   handlers: ExtractFaceHandlers;
 }) {
   const depth = Number(extract.depth) || 1;
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const hlRef = useRef<HTMLElement | null>(null);
-  /** D88 §6.4 P1 补全 a：引文左缘 3px 色条取该摘录批注色（annotColorCss() 既有函数；
-      无色回落 --accent）。annotation_color 由 listDueExtracts 透传（DueTopic 类型未声明，
-      读取处收窄），颜色体系不动——仍走 --annot-* 实色与 accent。 */
-  const annotationColor = (extract as DueTopic & { annotationColor?: string | null }).annotationColor;
-  const quoteBarColor = annotationColor ? annotColorCss(annotationColor) : "var(--accent)";
+  /** viewOnly 落点滚动用：第一个可映射区间（尽力而为，§C.5） */
+  const hlRangeRef = useRef<Range | null>(null);
+  /** D95 §D.1 读/写状态机（每卡一份，随 extract.id 重置；viewOnly 恒 READ） */
+  const [editing, setEditing] = useState(false);
+  /** 编辑器 API（提交/焦点落点） */
+  const editorApiRef = useRef<ExtractEditorApi | null>(null);
+  /** 进入编辑时的焦点块索引（§D.2 P0 块级；null＝文档开头） */
+  const pendingFocusRef = useRef<number | null>(null);
+  /** 源偏移↔渲染 DOM 映射（读态建表；选区采集/点击路由/高亮绘制共用） */
+  const mapRef = useRef<OffsetMap | null>(null);
+  /** D95 v1.3：摘录自身的**原始批注**（在原文中摘录本段时所做；与批注轨里的子批注不同层级）。
+      listDueExtracts 的 SELECT 已透传 e.comment（DueTopic 类型未声明，读取处收窄，
+      同 annotationColor 的 cast 口径）；空批注不渲染块。 */
+  const ownComment = String((extract as DueTopic & { comment?: string | null }).comment ?? "").trim();
+  /** v1.4：批注块节点——读态直排正文下、编辑态经 footer 进编辑器（正文与工具条之间） */
+  const annotBlock = ownComment ? (
+    <div className="extract-face-annot" data-testid="extract-face-comment" data-noedit="1">
+      <div className="sec-label">批注</div>
+      <div className="extract-face-annot-text">{ownComment}</div>
+    </div>
+  ) : null;
+  /** §F：工具栏开关/形态与字号/字体桥（两宿主共用本组件，桥随组件挂/卸） */
+  const toolbarOn = useExtractEditorToolbar();
+  const toolbarFloat = useExtractEditorToolbarFloat();
+  useExtractFaceTypography();
   /**
    * 本次拖选手势**起手**的修饰位（v48.39 / D79）：document mousedown 上采样，mouseup 收尾求或。
    * 必须是组件级 ref 而非 effect 闭包变量——handlers 依赖每次渲染都是新身份，effect 重挂会
@@ -222,15 +213,140 @@ export default function ExtractCardFace({
   const gestureDownModRef = useRef({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false });
   /** 指针拖选进行中（v48.39 / D79）：拖选期间抑制 keyup 的键盘采集（见 onKey），收尾以 mouseup 为准 */
   const pointerDownActiveRef = useRef(false);
+  /** onOffsetMap 的最新引用（映射重建 effect 不随 handlers/prop 身份变化重跑） */
+  const onOffsetMapRef = useRef(onOffsetMap);
+  onOffsetMapRef.current = onOffsetMap;
 
-  // 换卡即清快照（偏移是相对**这一版正文**的，跨卡复用会把范围锚写歪）
+  // 换卡即清快照并退出编辑态（偏移是相对**这一版正文**的，跨卡复用会把范围锚写歪；§D.1 状态机随卡重置）
   useEffect(() => {
+    setEditing(false);
     handlers.onSelection?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extract.id]);
 
+  /** 进入编辑（§D.2）：src＝点击源偏移（可空＝映射不可用，光标落文档开头） */
+  const enterEdit = (src: number | null) => {
+    if (src !== null && mapRef.current) {
+      pendingFocusRef.current = blockIndexForSrc(mapRef.current, src);
+    } else {
+      pendingFocusRef.current = null;
+    }
+    // 清掉可能残留的多段选区快照（编辑态内划选＝编辑器内原生选择，不进宿主集合）
+    handlers.onSelection?.(null);
+    window.getSelection()?.removeAllRanges();
+    setEditing(true);
+  };
+
+  /**
+   * 点击路由（§C.7/§D.2，仅会话读态）：①选区塌缩（真点击，划选收尾不触发）；②映射换算源偏移；
+   * 命中段锚批注 → onHighlightClick（缺失＝不动）；未命中 → 进编辑。映射无内容（空卡）→ 直接进编辑。
+   */
+  const onBodyClick = (e: ReactMouseEvent) => {
+    if (viewOnly || editing || !handlers.onEdit) return;
+    const target = e.target as Node | null;
+    if (target && (target as HTMLElement).closest?.(".extract-face-toolbar")) return; // 工具栏自身不算正文点击
+    if (target && (target as HTMLElement).closest?.("[data-noedit]")) return; // 批注块等非正文区（v1.4）
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (!sel || !sel.isCollapsed) return; // 划选不进编辑（§D.4）
+    const map = mapRef.current;
+    if (!map) return; // 渲染未就绪（本帧刚切换态等）：忽略本次点击
+    const caret = resolveCaret(sel.anchorNode, sel.anchorOffset);
+    const src = caret ? domToSrc(map, caret.node, caret.off, "before") : null;
+    if (src === null) {
+      if (map.segments.length === 0) enterEdit(null); // 空卡：点正文任意处开始编辑
+      return;
+    }
+    const hit = (bodyAnnotations ?? []).find(
+      (g) => g.id && g.ranges.some((r) => src >= r.start && src <= r.end)
+    );
+    if (hit?.id) {
+      handlers.onHighlightClick?.(hit.id); // 命中高亮 → 浮层（handler 缺失＝不进编辑）
+      return;
+    }
+    enterEdit(src);
+  };
+
+  /** 编辑态 Esc＝提交并退回 READ（§D.5；与 EditableText 现行语义一致） */
+  const onBodyKeyDown = (e: ReactKeyboardEvent) => {
+    if (!editing) return;
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      editorApiRef.current?.commit();
+    }
+  };
+
+  /** 编辑器提交：无变更/幂等（null）直接退读态；有变更走既有 onEdit → updateContent 落库链（§B.3） */
+  const handleEditorCommit = (text: string | null) => {
+    setEditing(false);
+    if (text !== null) handlers.onEdit?.(text);
+  };
+
+  /**
+   * 读态映射建表（§C.3）：ReactMarkdown 提交后按当前正文重建（换卡/内容变化即重建），
+   * 并据此重画批注痕迹、上报宿主。编辑态不建（§D.1：编辑中内容在变、区间映射失效，重映射在提交时由 db 完成）。
+   */
   useEffect(() => {
-    if (viewOnly) return;
+    if (viewOnly || editing) return;
+    const body = bodyRef.current;
+    if (!body) return;
+    const md = String(extract.contentMarkdown || "");
+    const map = buildOffsetMap(md, body);
+    mapRef.current = map;
+    onOffsetMapRef.current?.(map);
+    paintBodyAnnotations(body, bodyAnnotations ?? [], map);
+    return () => {
+      paintBodyAnnotations(null, []);
+      onOffsetMapRef.current?.(null);
+      mapRef.current = null;
+    };
+  }, [viewOnly, editing, extract.id, extract.contentMarkdown, bodyAnnotations]);
+
+  /**
+   * viewOnly：quoteRanges 经映射画到绘制层（§C.5，`<mark class="extract-quote-hl">` 已退役），
+   * 并记录第一个可映射区间供落点滚动（尽力而为）。
+   */
+  useEffect(() => {
+    if (!viewOnly) return;
+    const body = bodyRef.current;
+    if (!body) return;
+    const map = buildOffsetMap(String(extract.contentMarkdown || ""), body);
+    const ranges = quoteRanges ?? [];
+    paintQuoteRanges(body, ranges, map);
+    hlRangeRef.current = null;
+    for (const r of ranges) {
+      const range = srcToRange(map, r.start, r.end);
+      if (range) {
+        hlRangeRef.current = range;
+        break;
+      }
+    }
+    return () => {
+      paintQuoteRanges(null, [], null);
+      hlRangeRef.current = null;
+    };
+  }, [viewOnly, extract.id, extract.contentMarkdown, quoteRanges]);
+
+  // 落点（尽力而为）：映射 Range → 视口矩形 → 滚动容器居中（容器不可滚时是一次 no-op，§C.5）
+  useEffect(() => {
+    if (!viewOnly) return;
+    const body = bodyRef.current;
+    const range = hlRangeRef.current;
+    if (!body || !range) return;
+    let scroller: HTMLElement | null = body.parentElement;
+    while (scroller && scroller.scrollHeight <= scroller.clientHeight + 1) {
+      scroller = scroller.parentElement;
+    }
+    if (!scroller) return;
+    const rect = range.getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) return;
+    const box = scroller.getBoundingClientRect();
+    const target = rect.top - box.top + scroller.scrollTop + rect.height / 2 - scroller.clientHeight / 2;
+    scroller.scrollTop = Math.max(0, target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewOnly, extract.id]);
+
+  useEffect(() => {
+    if (viewOnly || editing) return;
     const body = bodyRef.current;
     if (!body) return;
     const face = body.closest(".extract-face");
@@ -243,7 +359,7 @@ export default function ExtractCardFace({
     };
     const capture = (modifier?: { ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean }) => {
       const full = String(extract.contentMarkdown || "");
-      const ok = selectionOffsetsInBody(body).filter((r) => r.start < full.length && r.end <= full.length);
+      const ok = selectionOffsetsViaMap(body, mapRef.current).filter((r) => r.start < full.length && r.end <= full.length);
       const text = ok.map((r) => full.slice(r.start, r.end)).join("\n\n");
       const live = ok.length && text.trim() ? { text, ranges: ok } : null;
       // 批 4 Task 10：同一采集点把选区报给外层（含视口坐标 rect＝菜单锚点；R22 不用 pointerup 点）——
@@ -307,54 +423,43 @@ export default function ExtractCardFace({
       document.removeEventListener("keyup", onKey);
       window.removeEventListener("blur", onWindowBlur);
     };
-  }, [extract.id, extract.contentMarkdown, viewOnly, handlers]);
+  }, [extract.id, extract.contentMarkdown, viewOnly, editing, handlers]);
 
-  /**
-   * 卡面正文里的批注痕迹（批 4 修正，样张 `.q` 同规）：按**该条批注色**画在绘制层
-   * （CSS Custom Highlight API）——栏内条目与文中那段据此对上（R33）。
-   * 只画**段锚**批注；整卡批注是元批注，文中不画（§5.4）。重画幂等（内部先撤后建）。
-   */
-  useEffect(() => {
-    if (viewOnly) return;
-    paintBodyAnnotations(bodyRef.current, bodyAnnotations ?? []);
-    return () => paintBodyAnnotations(null, []);
-  }, [viewOnly, extract.id, extract.contentMarkdown, bodyAnnotations]);
-
-  // 落点（尽力而为）：高亮段落在卡面上可见即滚到可视区中部（容器不可滚时是一次 no-op）
-  useEffect(() => {
-    if (!viewOnly) return;
-    hlRef.current?.scrollIntoView({ block: "center" });
-  }, [viewOnly, extract.id]);
-
-  /**
-   * 「摘录」取的载荷：**实时选区优先、快照兜底**（含父卡坐标的范围），两者皆无＝整条正文。
-   * 选区在正文之外（元信息行等）时同样回退整条——不用外部选区当锚，避免把范围锚写歪。
-   */
+  const bodyText = String(extract.contentMarkdown || "");
 
   return (
     <div className="extract-face" data-extract-id={extract.id} data-view-only={viewOnly ? "1" : undefined}>
       {/* v48.41（D81）：卡面 meta 行整体移除——来源上移顶栏中间（onMaterialName 链路），
           右上「状态/优先级/下次推送」文字按用户指令删除（信息仍在卡片浏览器与批注栏）。
           D88 §6.4 卡面 ctas 化（本批白名单＝仅类名/节标签）：正文节挂 .sec.sec-quote + 节标签
-          「原文摘录」（预览 .sec-label 采纳）；预览的「我的批注」节在本项目无对应渲染位
-          （批注驻留左侧批注轨，D72 契约），不发明新节。引文左缘 3px 色条由 .sec-quote CSS 给出。 */}
+          「摘录原文」（v48.51/D95 v1.3 前为「原文摘录」，用户反馈改名；预览的「我的批注」节
+          在本项目无对应渲染位——批注驻留左侧批注轨，D72 契约，不发明新节）。
+          D95 §B.1：三分支重组——viewOnly 与会话读态都走 ReactMarkdown（绘制层高亮），
+          会话态点击路由进 ExtractEditor（WYSIWYG）；EditableText 退役（组件保留给闪卡面）。
+          D95 v1.3：正文下方增「批注」块（摘录自身原始批注，空则不渲染）；引文左缘色条退役。 */}
 
       <div className="sec sec-quote">
-        <div className="sec-label">原文摘录</div>
-        <div className="extract-face-body" ref={bodyRef} style={{ borderLeftColor: quoteBarColor }}>
-          {viewOnly ? (
-            <div className="extract-face-text">
-              {textWithRanges(extract.contentMarkdown || "", quoteRanges, (el) => {
-                hlRef.current = el;
-              })}
-            </div>
-          ) : handlers.onEdit ? (
-            <EditableText value={extract.contentMarkdown || ""} onCommit={(t) => handlers.onEdit?.(t)} />
-          ) : (
-            <div className="extract-face-text">{extract.contentMarkdown}</div>
+        <div className="sec-label">摘录原文</div>
+        <div className="extract-face-body" ref={bodyRef} onClick={onBodyClick} onKeyDown={onBodyKeyDown} data-editing={editing ? "1" : undefined}>
+          {viewOnly || !handlers.onEdit || !editing ? <ReadMarkdown text={bodyText} /> : null}
+          {!viewOnly && handlers.onEdit && editing && (
+            <ExtractEditor
+              ref={editorApiRef}
+              defaultValue={bodyText}
+              pendingFocusIndex={pendingFocusRef.current}
+              toolbar={toolbarOn}
+              float={toolbarFloat}
+              footer={annotBlock}
+              onCommit={handleEditorCommit}
+            />
           )}
+          {/* v1.4：批注块（摘录自身原始批注，空则不渲染）。读态直排正文之下；编辑态经 footer
+              传入编辑器（内容与工具条之间），data-noedit＝点击豁免（批注不是正文，点了不进编辑）。 */}
+          {(!editing || viewOnly || !handlers.onEdit) && annotBlock}
         </div>
       </div>
+      {/* §E：编辑态时工具栏由 ExtractEditor 渲染在编辑器 host 之后（.extract-face-toolbar，
+          data-testid="extract-editor-toolbar"）；app.extractEditorToolbar=false 整行不渲染 */}
 
       {/* D88 §6.4 P1 补全 b：meta 行（预览 .cardmeta 项目化）——添加时间（mono）· 来源层级 ·
           已制卡 N 张（mono 只读文字）· 右端「跳转原文」（仅锚在场；复用底栏既有跳转动作语义，

@@ -514,7 +514,9 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   // 静默放弃（回退旧行为，只损失自愈不损失正确性）。不改合成结构、零 CFI 影响。
   const isSectionEmpty = async (index: number): Promise<boolean | null> => {
     try {
-      const section = view.book?.sections?.[index];
+      // book.sections 的本地最小类型只声明了 id/href（L44）——cast 取 createDocument，
+      // 与本文件 L661 既有 cast 先例同法（合并时补的类型缺口，运行时行为零改动）
+      const section = (view.book?.sections as { createDocument?: () => Promise<Document> }[] | undefined)?.[index];
       if (!section?.createDocument) return null;
       const doc = await section.createDocument();
       return String(doc?.body?.innerHTML ?? "").trim() === "";

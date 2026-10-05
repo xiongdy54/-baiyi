@@ -18,6 +18,58 @@ function check(name, cond, actual) {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let electron = null;
 
+// 真鼠标单击（CDP Input；hover 先到位，与 annotations.gui 同规）——读态进编辑必须真点击
+// （合成 .click() 不落光标，onBodyClick 读的是真实选区塌缩点）
+async function clickAt(cdp, x, y) {
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, modifiers: 0 });
+  await wait(60);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1, modifiers: 0 });
+  await wait(60);
+  await cdp.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", buttons: 0, clickCount: 1, modifiers: 0 });
+}
+/** 读态渲染正文里某子串的视口中心（找不到返回 null） */
+async function probeText(cdp, needle, take = 4) {
+  const raw = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-face-body");
+    if (!body) return "";
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let n;
+    while ((n = walker.nextNode())) {
+      const i = (n.textContent || "").indexOf(${JSON.stringify(needle)});
+      if (i < 0) continue;
+      const r = document.createRange();
+      r.setStart(n, i); r.setEnd(n, i + Math.min(${take}, ${JSON.stringify(needle)}.length));
+      const rc = r.getClientRects();
+      const first = rc[0];
+      if (!first || !first.height) continue;
+      return JSON.stringify({ x: first.left + first.width / 2, y: first.top + first.height / 2 });
+    }
+    return "";
+  })()`);
+  return String(raw).startsWith("{") ? JSON.parse(String(raw)) : null;
+}
+/** D95 编辑链（验收 5/8/13 的共用路径）：真点正文 → 等编辑器就绪 → Ctrl+A 全选 → 键入替换 → Esc 提交 */
+async function editViaTyping(cdp, clickPoint, replacement) {
+  await clickAt(cdp, clickPoint.x, clickPoint.y);
+  let editor = false;
+  for (let i = 0; i < 30; i++) {
+    await wait(200);
+    if (await cdp.eval(`!!document.querySelector(".extract-face-body .ProseMirror[contenteditable=true]")`)) { editor = true; break; }
+  }
+  await wait(400);
+  if (editor) {
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+    await wait(120);
+    await cdp.send("Input.insertText", { text: replacement });
+    await wait(250);
+  }
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await wait(1600);
+  return { editor };
+}
+
 async function connect() {
   for (let i = 0; i < 90; i++) {
     try {
@@ -91,13 +143,31 @@ try {
       !pageText.includes("快捷推迟") &&
     pageText.slice(0, 200)
   );
-  check("正文可编辑（EditableText 裸壳在位）", (await cdp.eval(`!!document.querySelector(".extract-face .review-editable")`)) === true, "无 .review-editable");
+  // D95（§G.2 验收 4）：默认读态——EditableText 裸壳退役，正文＝ReactMarkdown 渲染、卡面正文无 contentEditable
+  const readState = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-face-body");
+    return JSON.stringify({
+      editable: !!document.querySelector(".extract-face .review-editable"),
+      body: !!body,
+      rendered: body ? !!body.querySelector("p, h1, h2, h3, ul, ol, blockquote, pre, code") : false,
+      ce: body ? body.querySelector("[contenteditable=true]") !== null : null,
+      text: body ? (body.textContent || "").slice(0, 80) : ""
+    });
+  })()`);
+  const rs4 = JSON.parse(String(readState) || "{}");
+  check(
+    "默认读态：正文渲染在位、无 EditableText 裸壳、卡面正文无 contentEditable（D95 验收 4）",
+    rs4.body === true && rs4.rendered === true && rs4.editable === false && rs4.ce === false,
+    readState
+  );
 
-  // 4) 正文就地编辑 → 落库
-  await cdp.eval(`(() => { const el = document.querySelector(".extract-face .review-editable"); el.focus(); el.innerText = "GUI 摘录样本（已编辑）"; el.blur(); return true; })()`);
-  await wait(1200);
+  // 4) 正文就地编辑 → 落库（D95：点非高亮进编辑 → 键入改文 → Esc 提交；原「直改 innerText」路径随裸壳退役）
+  const clickPoint = await probeText(cdp, "GUI 摘录样本");
+  check("点非高亮前置：读态正文可命中点击坐标", !!clickPoint, JSON.stringify(clickPoint));
+  await editViaTyping(cdp, clickPoint, "GUI 摘录样本（已编辑）：这一段的含义值得单独回忆。");
   const edited = await cdp.eval(`(async () => { const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"] } }); return q.extracts[0]?.contentMarkdown || ""; })()`);
   check("正文编辑落库（摘录内容已更新）", String(edited).includes("已编辑"), edited);
+  check("编辑提交后退回读态（编辑器卸载、渲染正文在场）", (await cdp.eval(`JSON.stringify({ pm: !!document.querySelector(".extract-face-body .ProseMirror"), p: !!document.querySelector(".extract-face-body p") })`)) === '{"pm":false,"p":true}', "读态未恢复");
 
   // 5) 下一条 = 读后推进（interval ×1.6），且不再出现
   const before = await cdp.eval(`(async () => { const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"] } }); const e = q.extracts[0]; return JSON.stringify({ id: e?.id, ivl: e?.intervalDays, pc: e?.processCount }); })()`);
@@ -121,19 +191,29 @@ try {
   check("撤销回退：process_count 复原", Number(u.pc) === 0, u.pc);
   check("撤销后卡面重新出现（队列已刷新）", (await cdp.eval(`!!document.querySelector(".extract-face")`)) === true, "未出现");
 
-  // D1：摘录页正文 26px/1.5（作用域只到 .extract-page；复习页基线不动——见 15) 的差分对照）
+  // D1 → D95（验收 11）：摘录页卡面字号/行高＝字号桥值（默认跟随阅读器 17px/1.7），
+  // 26px 的 .extract-page 覆盖已删（§F.1）；「子级继承」意图由渲染元素随桥缩放保留
   const exTypo = await cdp.eval(`(() => {
     const body = document.querySelector(".extract-page .extract-face-body");
     if (!body) return JSON.stringify({ up: false });
     const cs = getComputedStyle(body);
-    const text = body.querySelector(".extract-face-text") || body.querySelector(".review-editable");
-    const probe = (v) => { const d = document.createElement("span"); d.style.fontSize = v; document.body.appendChild(d); const s = getComputedStyle(d).fontSize; d.remove(); return s; };
-    return JSON.stringify({ up: true, fontSize: cs.fontSize, lineHeight: cs.lineHeight, tok: probe("var(--fs-title-l)"), child: text ? getComputedStyle(text).fontSize : null, childLine: text ? getComputedStyle(text).lineHeight : null });
+    const probe = (prop, v) => { const d = document.createElement("span"); d.style[prop] = v; if (prop === "lineHeight") d.style.fontSize = "17px"; document.body.appendChild(d); const s = getComputedStyle(d)[prop]; d.remove(); return s; };
+    const p = body.querySelector("p");
+    return JSON.stringify({
+      up: true,
+      fontSize: cs.fontSize,
+      fsBridge: probe("fontSize", "var(--extract-face-fs)"),
+      title: probe("fontSize", "var(--fs-title-l)"),
+      lineHeight: cs.lineHeight,
+      lhBridge: probe("lineHeight", "var(--extract-face-lh)"),
+      child: p ? getComputedStyle(p).fontSize : null
+    });
   })()`);
   const et = JSON.parse(String(exTypo) || "{}");
   check(
-    "摘录页正文 26px/1.5 且子级继承（D1）",
-    et.up === true && et.fontSize === "26px" && et.fontSize === et.tok && et.lineHeight === "39px" && et.child === "26px",
+    "摘录页卡面字号/行高＝字号桥值且子级继承（默认 17px；26px 覆盖已死，D95 §F.1）",
+    et.up === true && et.fontSize === "17px" && et.fontSize === et.fsBridge && et.fontSize !== et.title &&
+      et.lineHeight === et.lhBridge && et.child === et.fontSize,
     exTypo
   );
 
@@ -368,17 +448,52 @@ try {
   check("合并复习：复习页渲染出摘录卡面（不再跳过摘录条目）", mf.wrap === true && mf.face === true, mergedFace);
   check("合并复习：卡面内容为那条摘录", String(mf.text).includes("GUI 摘录样本"), mergedFace);
 
-  // D1 对照：合并复习页的摘录卡面**不**吃摘录页的 26px——仍是基线 --fs-body（差分非空转）
+  // D95（验收 11/13）：合并复习卡面与摘录页同吃字号桥（26px 已删，两宿主同规——原「不吃 26px」差分随覆盖删除改写）
   const revTypo = await cdp.eval(`(() => {
     const body = document.querySelector(".review-wrap .extract-face-body");
+    if (!body) return JSON.stringify({ up: false });
+    const cs = getComputedStyle(body);
     const probe = (v) => { const d = document.createElement("span"); d.style.fontSize = v; document.body.appendChild(d); const s = getComputedStyle(d).fontSize; d.remove(); return s; };
-    return JSON.stringify({ body: body ? getComputedStyle(body).fontSize : null, base: probe("var(--fs-body)"), title: probe("var(--fs-title-l)"), line: body ? getComputedStyle(body).lineHeight : null, baseLine: (() => { const d = document.createElement("span"); d.style.lineHeight = "1.8"; d.style.fontSize = "var(--fs-body)"; document.body.appendChild(d); const s = getComputedStyle(d).lineHeight; d.remove(); return s; })() });
+    return JSON.stringify({ up: true, body: cs.fontSize, bridge: probe("var(--extract-face-fs)"), title: probe("var(--fs-title-l)") });
   })()`);
   const rt = JSON.parse(String(revTypo) || "{}");
   check(
-    "复习页摘录卡面保持基线字号/行高（D1 对照）",
-    rt.body === rt.base && rt.body !== rt.title && rt.line === rt.baseLine,
+    "合并复习：卡面字号＝字号桥值（与摘录页同规；26px 覆盖已死，D95 §F.1）",
+    rt.up === true && rt.body === rt.bridge && rt.body === "17px" && rt.body !== rt.title,
     revTypo
+  );
+
+  // 验收 13：合并复习分支默认读态、点非高亮进编辑并落库（D95 §B.4：onEdit 已在场，组件级能力随卡面自动获得）
+  const mergedRead = await cdp.eval(`(() => {
+    const body = document.querySelector(".review-wrap .extract-face-body");
+    return JSON.stringify({
+      editable: !!document.querySelector(".review-wrap .review-editable"),
+      rendered: body ? !!body.querySelector("p, h1, h2, h3, ul, ol, blockquote, pre, code") : false,
+      pm: body ? !!body.querySelector(".ProseMirror") : null
+    });
+  })()`);
+  const mr = JSON.parse(String(mergedRead) || "{}");
+  check(
+    "合并复习：默认读态（无裸壳、渲染正文在场、未在编辑态，D95 验收 13）",
+    mr.editable === false && mr.rendered === true && mr.pm === false,
+    mergedRead
+  );
+  // 旧流程自 §9 起设置弹层一直开着（§10–§13 断言全走 eval 点击不受影响）；本节的编辑链用
+  // 真鼠标坐标点击，先按 Esc 关掉弹层（useDialogA11y 出口），避免它挡住卡面上的真实点击
+  for (let i = 0; i < 3; i++) {
+    if (!(await cdp.eval(`!!document.querySelector("#sec-reader")`))) break;
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+    await wait(500);
+  }
+  const mClick = await probeText(cdp, "GUI 摘录样本");
+  check("合并复习：读态正文可命中点击坐标", !!mClick, JSON.stringify(mClick));
+  const mEdit = await editViaTyping(cdp, mClick, "GUI 摘录样本（合并分支已编辑）：这一段的含义值得单独回忆。");
+  const mergedEdited = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(b.id)}); return d ? d.contentMarkdown : "MISSING"; })()`);
+  check(
+    "合并复习：进编辑改文 Esc 后已落库",
+    String(mergedEdited).includes("合并分支已编辑"),
+    `DB=${String(mergedEdited).slice(0, 60)} | editor=${mEdit.editor}`
   );
 
   // 15) 阅读器两个集中复习按钮（§6.8-8，需求 ⑦）

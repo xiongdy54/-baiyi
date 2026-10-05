@@ -404,7 +404,7 @@ try {
   check("摘录页就绪", (await cdp.eval(`!!document.querySelector(".extract-face")`)) === true, "无卡面");
   const FACE_MARK = "这一段的含义";
   const faceProbe = (len) => `(() => {
-    const body = document.querySelector(".extract-face .review-editable");
+    const body = document.querySelector(".extract-face .extract-face-body");
     if (!body) return "";
     const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
     let node;
@@ -525,8 +525,10 @@ try {
     JSON.stringify({ ed: ed1.rect, body: ed1.body })
   );
   check(
-    "③b-3 浮层在正文区横向居中（±140px）",
-    ed1.up === true && ed1.body != null && Math.abs(Math.round((ed1.rect.l + ed1.rect.r) / 2) - ed1.body.cx) <= 140,
+    // D95 v1.3：卡面左缘 3px 色条 + 16px 内缩退役，锚定的引文矩形整体左移 19px（旧几何恰压 ±140 边界），
+    // 容差按新几何重校 ±170——语义不变：浮层锚在所引文字上、大致居于正文区，而非钉死居中
+    "③b-3 浮层在正文区横向居中（±170px；v1.3 几何重校）",
+    ed1.up === true && ed1.body != null && Math.abs(Math.round((ed1.rect.l + ed1.rect.r) / 2) - ed1.body.cx) <= 170,
     JSON.stringify({ edCenter: ed1.up ? Math.round((ed1.rect.l + ed1.rect.r) / 2) : null, bodyCenter: ed1.body?.cx })
   );
   check("③b-4 浮层在视口内且输入框已获焦点（可直接输入）", ed1.inViewport === true && ed1.focused === true, JSON.stringify({ inViewport: ed1.inViewport, focused: ed1.focused }));
