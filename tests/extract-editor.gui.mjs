@@ -182,6 +182,28 @@ try {
   check("④ 默认读态：卡面正文内无 contentEditable 元素", rs.ce === 0, readState);
   const hint = await cdp.eval(`document.querySelector("[data-page-hint]")?.textContent || ""`);
   check("§D.7 头带提示随新文案（点正文编辑 · 点高亮批注）", String(hint).includes("点正文编辑") && String(hint).includes("点高亮批注") && !String(hint).includes("正文可直接编辑"), hint);
+  // v1.3（用户反馈）：节标签改名 + 摘录自身原始批注块（空则不渲染）
+  const label13 = await cdp.eval(`(() => {
+    const face = document.querySelector(".extract-face");
+    return JSON.stringify({
+      label: face?.querySelector(".sec-quote .sec-label")?.textContent || "",
+      annot: !!face?.querySelector('[data-testid="extract-face-comment"]')
+    });
+  })()`);
+  const l13 = JSON.parse(String(label13) || "{}");
+  check("v1.3 节标签＝「摘录原文」", l13.label === "摘录原文", label13);
+  check("v1.3 无批注时不渲染批注块", l13.annot === false, label13);
+  await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(seedId)}, { comment: "D93 原始批注样本：摘录时在原文处所做。" }); return true; })()`);
+  await navTo(cdp, "书架");
+  await wait(1200);
+  await navTo(cdp, "摘录");
+  await wait(1800);
+  const annot13 = await cdp.eval(`(() => {
+    const blk = document.querySelector('[data-testid="extract-face-comment"]');
+    return JSON.stringify({ up: !!blk, label: blk?.querySelector(".sec-label")?.textContent || "", text: blk?.querySelector(".extract-face-annot-text")?.textContent || "" });
+  })()`);
+  const a13 = JSON.parse(String(annot13) || "{}");
+  check("v1.3 批注块：有批注时渲染（标签「批注」+ 原文摘录时的原始批注文本）", a13.up === true && a13.label === "批注" && a13.text.includes("原始批注样本"), annot13);
 
   // ============================================================
   // 验收 5：点非高亮进编辑（真键鼠）
@@ -204,6 +226,28 @@ try {
     const tb = body?.querySelector('[data-testid="extract-editor-toolbar"]');
     return !!pm && !!tb && !!(pm.compareDocumentPosition(tb) & Node.DOCUMENT_POSITION_FOLLOWING);
   })()`)) === true, "工具栏不在编辑器之后");
+  // v1.3（审查后用户反馈）：编辑态窗口与读态完全同形——Milkdown 根的 `editor` 类会被快速摘录
+  // 浮窗的 .editor 规则劫持（fixed/320px/纸底/浮层阴影），卡面作用域内必须逐项抵消
+  const shape13 = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-face-body");
+    const pm = body?.querySelector(".ProseMirror");
+    if (!body || !pm) return "";
+    const cs = getComputedStyle(pm);
+    const rb = body.getBoundingClientRect();
+    const csPadL = getComputedStyle(body).paddingLeft;
+    const rp = pm.getBoundingClientRect();
+    return JSON.stringify({
+      position: cs.position, shadow: cs.boxShadow, bg: cs.backgroundColor, display: cs.display,
+      parentCls: String(pm.parentElement.className).slice(0, 40), parentDisplay: getComputedStyle(pm.parentElement).display,
+      pmTransform: cs.transform, pmAnim: cs.animationName,
+      faceTransform: getComputedStyle(body.closest(".extract-face")).transform,
+      faceAnim: getComputedStyle(body.closest(".extract-face")).animationName,
+      bodyW: Math.round(rb.width), pmW: Math.round(rp.width), padL: parseFloat(csPadL)
+    });
+  })()`);
+  const s13 = JSON.parse(String(shape13) || "{}");
+  check("v1.3 编辑态同形：无 fixed 定位、无阴影、无纸底", s13.position === "static" && (s13.shadow === "none" || s13.shadow === "") && (s13.bg === "rgba(0, 0, 0, 0)" || s13.bg === "transparent"), shape13);
+  check("v1.3 编辑态同形：编辑器宽度＝正文盒内容宽（随流满宽）", Math.abs((s13.pmW ?? 0) - ((s13.bodyW ?? 0) - (s13.padL ?? 0))) <= 2, shape13);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   const afterEsc = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(seedId)}); return d ? d.contentMarkdown : "MISSING"; })()`);

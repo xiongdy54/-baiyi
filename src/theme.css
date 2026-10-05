@@ -5689,16 +5689,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--text-helper);
   margin-bottom: var(--sp-3);
 }
-/* 引文左缘 3px 批注色条（预览 .quote 采纳）：色默认 --accent；随该摘录 annotationColor
-   取 --annot-* 实色由 ExtractCardFace 在 .extract-face-body 上写内联 borderLeftColor
-   （P1 补全 a；annotColorCss() 既有函数，无色回落 accent）。颜色体系本身不动——
-   仍走 --annot-* 实色与 accent，不引入预览演示色。
-   注：CSS 注释里不要让星号与斜杠相邻（如「--annot-」后直接跟「* /」再跟色名）——
-   那会让注释提前闭合，其后的说明文字变成非法选择器前奏，打碎紧随的规则（本次实测踩过）。 */
-.extract-face .sec-quote .extract-face-body {
-  border-left: 3px solid var(--accent);
-  padding-left: var(--sp-4);
-}
+/* D93 v1.3（用户反馈）：引文左缘 3px 批注色条退役——正文左缘与卡内其他小节（标签/meta）共享同一对齐边
+   （better-layout：对齐到共同边缘）；批注色信息由批注轨与文中高亮承载，不再重复一条竖线。 */
 /* v48.41（D81）：卡面 meta 行移除（来源上顶栏、状态文字删除），规则随零消费者删除 */
 .badge-experimental {
   border: 1px solid var(--accent);
@@ -5712,7 +5704,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
    （用户原话「摘录卡片不用这么大」的直接修复——字号从此与阅读界面文字同源）。 */
 :root {
   --extract-face-fs: 17px;
-  --extract-face-font: inherit;
+  --extract-face-font: var(--font-sans);
   --extract-face-lh: var(--lh-prose, 1.7);
 }
 .extract-face-body {
@@ -5937,6 +5929,18 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   min-height: 2.6em;
   outline: none;
   caret-color: var(--accent);
+  /* Milkdown 根节点自带 `editor` 类，会命中快速摘录浮窗的 .editor 规则（theme.css .editor：
+     fixed / 320px / 纸底 / 浮层阴影；另有浮层家族的 pop-in 入场动画同样命中）——D93 v1.3
+     实测被劫持成窄列白盒 + scale 弹入。在卡面作用域内逐项抵消，编辑态窗口与读态完全同形
+     （同宽、无底色、无阴影、无入场动画、随流布局、无跳版）。 */
+  position: static;
+  width: auto;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  z-index: auto;
+  animation: none;
 }
 /* 瑞士风焦点：编辑态用 hairline 内描边表达「在编辑」，不做光晕 */
 .extract-face-body .ProseMirror:focus-visible { outline: none; }
@@ -6007,3 +6011,16 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .extract-face-body .extract-math-inline, .extract-face-body .extract-math-block { color: var(--text-primary); }
 .extract-face-body .katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; }
 .extract-face-body .katex { font-size: 1.05em; }
+/* D93 v1.3（用户反馈）：摘录自身的**原始批注**（在原文中摘录本段时所做，与批注轨里的子批注不同层级）
+   ——正文下方的安静文本块：hairline 分组（与编辑工具栏同语法）、secondary 色、字号字体随字号桥。 */
+.extract-face-annot {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+}
+.extract-face-annot .sec-label { margin-bottom: var(--sp-1); }
+.extract-face-annot-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+}

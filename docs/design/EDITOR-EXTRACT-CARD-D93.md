@@ -423,6 +423,21 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 
 ## 修订记录
 
+### v1.3（2026-10-05，用户实机反馈轮：六项修改）
+
+用户在 worktree 版本实机试用后书面反馈（逐字）：
+
+> "可以看到编辑模式下文本窗口的形状变了，请保持编辑模式窗口始终与阅读状态窗口一致。默认字体改为无衬线字体。去掉摘录内容左侧那条绿色的竖线。文本框左上角的'原文摘录'改为'摘录原文'。下方应该再加一个文本块来放'批注'，也就是这段摘录在原文中被摘录的时候所做的原始批注，这个批注和左侧边栏中显示的当前摘录卡片当中做的批注不是同一个层级的。在做上面的这些修改时要先从 dylantarre/animation-principles 这个 GitHub 仓库中寻找涉及到的 skill 来作为修改指导。"
+
+处理（按该仓库 better-layout / better-typography / micro-interactions 三份 skill 为指导）：
+
+1. **编辑态窗口同形**：根因实测（CDP 探针）＝Milkdown 编辑器根节点自带 `editor` 类，命中快速摘录浮窗的 `.editor` 规则（`theme.css` fixed / 320px / `--paper` 底 / `--shadow-float`）被劫持成窄列白盒、工具栏被盖在盒下；**且浮层家族的 `pop-in` 入场动画（`.selection-menu, .editor` 共用规则）同样命中**（scale 0.92 弹入）。修复＝`.extract-face-body .ProseMirror` 作用域内逐项抵消（position static / width auto / 无底色 / 无描边 / 无阴影 / 无 padding / z-index auto / animation none）——编辑态与读态共享同一盒子边缘（better-layout「对齐到共同边缘」），零跳版零弹入（micro-interactions：几何一致即无过渡需求）。GUI 断言：position/shadow/bg + 编辑器宽度＝正文盒内容宽。
+2. **默认无衬线**（better-typography）：字体只跟随**显式设置值**——follow 模式读阅读器 appearance 的原始 `fontFamily`（留空＝未显式设置）、独立模式读独立键；两者留空一律回落 `var(--font-sans)`；`:root` 静态默认档同步改。不再继承阅读器的衬线默认栈。
+3. **左缘色条退役**：`.extract-face .sec-quote .extract-face-body` 的 `border-left: 3px` + 内联 `borderLeftColor` + `quoteBarColor`/`annotColorCss` 消费链整体移除——正文左缘与卡内其他小节共享对齐边；批注色信息由批注轨与文中高亮承载。
+4. **节标签改名**：「原文摘录」→「摘录原文」。
+5. **原始批注块**（新增）：正文下方 `.extract-face-annot`（hairline 分组与工具栏同语法、secondary 色、随字号桥；better-layout「用留白与既有分组语法，不新造视觉语言」），内容＝摘录自身 `e.comment`（`listDueExtracts` SELECT 已透传，`DueTopic` cast 读取，零 schema/零 IPC 增量）——**与批注轨的子批注不同层级**（批注轨＝挂在卡内的子注解；此块＝在原文中摘录本段时所做的那条元批注）。空则不渲染（无内容不露 hairline，沿用 meta 行纪律）。`data-testid="extract-face-comment"`。
+6. 测试：`tests/extract-editor.gui.mjs` 增 v1.3 断言组（标签名、空不渲染、有则渲染、同形四项）；GUIDE §6.8-14/§7.4 字体留空语义同步修订。
+
 ### v1.2（2026-10-05，代码审查修复轮）
 
 - **审查 P0（丢字竞态，已修）**：失焦提交原实现推迟到 `setTimeout(0)`，与底栏动作（下一条/推迟/毕业，全经 `run()` 的 busy 守卫）存在竞态——click 先落 busy、随后提交被静默丢弃＝丢用户正文。修复＝①blur 改**同步提交**（旧 EditableText 语义，"先提交后动作"顺序成立）；②提交接收端从 `run(updateContent)` 改为专用 `commitEditContent`（**不读不挂 busy**，仿 D73 commitPriority 先例；仍保查看态守卫、workflow/changed 广播与保存提示）——内容保存与调度动作可安全并行，双向都不再被 busy 吞。GUI 回归断言新增 `tests/extract-editor.gui.mjs` 验收 12（编辑后不按 Esc 直接点「下一条」→ 正文必须落库）。

@@ -103,7 +103,13 @@ export function useExtractFaceTypography(): void {
           appearance: { ...DEFAULT_READER_SETTINGS.appearance, ...reader.appearance }
         });
         const fs = card.extractFaceFontFollow ? resolved.fontSize : card.extractFaceFontSize;
-        const font = (card.extractFaceFontFollow ? resolved.fontFamily : card.extractFaceFontFamily) || "inherit";
+        // D93 v1.3（用户反馈「默认字体改为无衬线字体」）：family 只跟随**显式设置值**——
+        // follow 时读阅读器 appearance 的原始 fontFamily（留空＝未显式设置），独立模式读独立键；
+        // 两者留空一律回落应用无衬线栈（不再继承阅读器的衬线默认栈）。
+        const customFamily = card.extractFaceFontFollow
+          ? String((reader.appearance as { fontFamily?: unknown } | undefined)?.fontFamily ?? "").trim()
+          : card.extractFaceFontFamily;
+        const font = customFamily || "var(--font-sans)";
         const lh = resolved.lineHeight; // 行高恒跟随（§F.2）
         const style = document.body.style;
         style.setProperty("--extract-face-fs", `${fs}px`);

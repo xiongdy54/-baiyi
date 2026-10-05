@@ -6,7 +6,6 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
-import { annotColorCss } from "./AnnotationEditor";
 import { attachRipple, settle } from "../lib/press";
 import { extractStatusLabel, type ExtractEngine } from "../lib/sessionQueue";
 import type { DueTopic } from "../lib/readingWorkflow";
@@ -186,11 +185,10 @@ export default function ExtractCardFace({
   const pendingFocusRef = useRef<number | null>(null);
   /** 源偏移↔渲染 DOM 映射（读态建表；选区采集/点击路由/高亮绘制共用） */
   const mapRef = useRef<OffsetMap | null>(null);
-  /** D88 §6.4 P1 补全 a：引文左缘 3px 色条取该摘录批注色（annotColorCss() 既有函数；
-      无色回落 --accent）。annotation_color 由 listDueExtracts 透传（DueTopic 类型未声明，
-      读取处收窄），颜色体系不动——仍走 --annot-* 实色与 accent。 */
-  const annotationColor = (extract as DueTopic & { annotationColor?: string | null }).annotationColor;
-  const quoteBarColor = annotationColor ? annotColorCss(annotationColor) : "var(--accent)";
+  /** D93 v1.3：摘录自身的**原始批注**（在原文中摘录本段时所做；与批注轨里的子批注不同层级）。
+      listDueExtracts 的 SELECT 已透传 e.comment（DueTopic 类型未声明，读取处收窄，
+      同 annotationColor 的 cast 口径）；空批注不渲染块。 */
+  const ownComment = String((extract as DueTopic & { comment?: string | null }).comment ?? "").trim();
   /** §F：工具栏开关与字号/字体桥（两宿主共用本组件，桥随组件挂/卸） */
   const toolbarOn = useExtractEditorToolbar();
   useExtractFaceTypography();
@@ -420,14 +418,15 @@ export default function ExtractCardFace({
       {/* v48.41（D81）：卡面 meta 行整体移除——来源上移顶栏中间（onMaterialName 链路），
           右上「状态/优先级/下次推送」文字按用户指令删除（信息仍在卡片浏览器与批注栏）。
           D88 §6.4 卡面 ctas 化（本批白名单＝仅类名/节标签）：正文节挂 .sec.sec-quote + 节标签
-          「原文摘录」（预览 .sec-label 采纳）；预览的「我的批注」节在本项目无对应渲染位
-          （批注驻留左侧批注轨，D72 契约），不发明新节。引文左缘 3px 色条由 .sec-quote CSS 给出。
+          「摘录原文」（v48.51/D93 v1.3 前为「原文摘录」，用户反馈改名；预览的「我的批注」节
+          在本项目无对应渲染位——批注驻留左侧批注轨，D72 契约，不发明新节）。
           D93 §B.1：三分支重组——viewOnly 与会话读态都走 ReactMarkdown（绘制层高亮），
-          会话态点击路由进 ExtractEditor（WYSIWYG）；EditableText 退役（组件保留给闪卡面）。 */}
+          会话态点击路由进 ExtractEditor（WYSIWYG）；EditableText 退役（组件保留给闪卡面）。
+          D93 v1.3：正文下方增「批注」块（摘录自身原始批注，空则不渲染）；引文左缘色条退役。 */}
 
       <div className="sec sec-quote">
-        <div className="sec-label">原文摘录</div>
-        <div className="extract-face-body" ref={bodyRef} style={{ borderLeftColor: quoteBarColor }} onClick={onBodyClick} onKeyDown={onBodyKeyDown} data-editing={editing ? "1" : undefined}>
+        <div className="sec-label">摘录原文</div>
+        <div className="extract-face-body" ref={bodyRef} onClick={onBodyClick} onKeyDown={onBodyKeyDown} data-editing={editing ? "1" : undefined}>
           {viewOnly || !handlers.onEdit || !editing ? <ReadMarkdown text={bodyText} /> : null}
           {!viewOnly && handlers.onEdit && editing && (
             <ExtractEditor
@@ -439,6 +438,12 @@ export default function ExtractCardFace({
             />
           )}
         </div>
+        {ownComment ? (
+          <div className="extract-face-annot" data-testid="extract-face-comment">
+            <div className="sec-label">批注</div>
+            <div className="extract-face-annot-text">{ownComment}</div>
+          </div>
+        ) : null}
       </div>
       {/* §E：编辑态时工具栏由 ExtractEditor 渲染在编辑器 host 之后（.extract-face-toolbar，
           data-testid="extract-editor-toolbar"）；app.extractEditorToolbar=false 整行不渲染 */}
