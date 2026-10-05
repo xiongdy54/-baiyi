@@ -810,7 +810,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       data-annot-open={annotPanelVisible && annotOpen ? "1" : undefined}
       /* D88 §8.5：制卡面板（手动/AI 任一）在场——宽窗 ≥1520 时主列与底栏右移让位（CSS 条件）；
          窄窗 dock 为覆盖层，内容不动。 */
-      data-dock-open={selActions.manualOpen || selActions.aiPanel ? "1" : undefined}
+      data-dock-open={selActions.dockOpen ? "1" : undefined}
     >
       <div className={`extract-page-cols${annotPanelVisible ? " with-annot" : ""}`} data-annot-cols={annotPanelVisible ? "1" : undefined}>
       {/* 栏开关（v6/D73 造型还原，v48.42/D82 用户指令）：文字钮两态变文案，fixed 页面视口左上角
@@ -886,7 +886,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
               <button type="button" className={annotForm === "highlight" ? "on" : undefined} data-annot-form="highlight" onClick={() => setAnnotForm("highlight")}>高亮</button>
               <button type="button" className={annotForm === "underline" ? "on" : undefined} data-annot-form="underline" onClick={() => setAnnotForm("underline")}>下划线</button>
             </div>
-            <button type="button" className="btn-rail" data-sel-act="manual" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "就地制卡" : "先在正文选中文字"} onClick={() => selActions.actions.manual()}>制卡</button>
+            {/* v48.52（D92 §3.4）：「制卡」去除选区依赖（免选区＝空表单自由制卡；有选区＝quote 预填） */}
+            <button type="button" className="btn-rail" data-sel-act="manual" disabled={!!viewing} title={faceSel && !viewing ? "就地制卡" : "自由制卡"} onClick={() => selActions.actions.manual()}>制卡</button>
             <button type="button" className="btn-rail" data-sel-act="aiCards" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "AI 制卡" : "先在正文选中文字"} onClick={() => selActions.actions.aiCards()}>AI 制卡</button>
             <button type="button" className="btn-rail" data-sel-act="explain" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "AI 解释" : "先在正文选中文字"} onClick={() => selActions.actions.explain()}>AI 解释</button>
             <button type="button" className="btn-rail" data-sel-act="extract" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "摘录进学习队列" : "先在正文选中文字"} onClick={() => selActions.actions.extract()}>摘录</button>

@@ -496,6 +496,15 @@ try {
   await cdp.eval(clickByText("FSRSTEST 粘贴引擎验证书", ".book-card"));
   await wait(3000);
   const pasteEngine = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
+  // v48.53（D93）：空壳章自愈回归——该粘贴书正文以一级标题开头（spine[0] 为空壳章），
+  // 打开首屏必须已自愈到首个非空节（任何交互之前断言正文可见）
+  const pasteFirstPaint = await cdp.eval(`(() => {
+    const k = window.__readerKernel;
+    const texts = (k && k.__getContents ? k.__getContents() : []).map((e) => (e.doc?.body?.textContent || "").trim()).filter(Boolean);
+    return JSON.stringify({ visible: texts.length > 0, head: (texts[0] || "").slice(0, 20) });
+  })()`);
+  const firstPaint = JSON.parse(String(pasteFirstPaint) || "{}");
+  check("7pre 粘贴书首屏正文可见（空壳章自愈，D93）", firstPaint.visible === true, pasteFirstPaint);
   await cdp.eval(clickSidebarToggle());
   await wait(500);
   const pasteToc = await cdp.eval(`document.querySelectorAll(".reader-toc-item").length`);

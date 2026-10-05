@@ -2456,12 +2456,6 @@ body.theme-dark .modal-panel {
   border-bottom: 1px solid var(--border-subtle);
   flex: none;
 }
-.side-dock-title {
-  font-size: var(--fs-secondary);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  flex: none;
-}
 .side-dock-meta {
   flex: 1;
   min-width: 0;
@@ -2489,6 +2483,128 @@ body.theme-dark .modal-panel {
   border-left: none;
   z-index: auto;
   animation: none;
+}
+
+/* ---------- 学习坞（v48.52 / D92）：页签化 + 收起展开 ----------
+   收起 ≠ 关闭：坞体 translateX 滑出视口（状态保留），右缘留 ~40px 常驻把手；
+   展开时正文让位（reader-body-shifted / extract [data-dock-open]），收起时取消。 */
+.side-dock {
+  transition: transform var(--dur-panel) var(--ease);
+}
+.side-dock.is-collapsed {
+  transform: translateX(calc(100% + 8px));
+  visibility: hidden;
+  transition: transform var(--dur-panel) var(--ease), visibility 0s var(--dur-panel);
+}
+@media (prefers-reduced-motion: reduce) {
+  .side-dock,
+  .side-dock.is-collapsed { transition: none; }
+}
+/* 坞头页签条：复用左栏页签语法（role=tablist/tab、active=.on），右栏变体（paper 底、无 reader-fg） */
+.dock-tabs {
+  display: flex;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: none;
+}
+.dock-tabs > button[role="tab"] {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: none;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dock-tabs > button[role="tab"]:hover { background: var(--grey-1); }
+.dock-tabs > button[role="tab"].on {
+  background: var(--grey-1);
+  color: var(--text-primary);
+}
+/* 「＋制卡」主按钮：坞头视觉最重的一枚（全局手动制卡）；草稿在场（手动暂态占坞）呈 active 态 */
+.dock-manual-btn { flex: none; }
+.dock-manual-btn.on { box-shadow: inset 0 0 0 2px var(--ink); }
+/* 页签体容器：隐藏保活（display:none 切换，组件不卸载、流式/草稿/计时继续） */
+.dock-tabbody { display: flex; flex-direction: column; min-height: 100%; }
+.side-dock-body > .dock-tabbody { flex: 1; }
+/* 空态指引（页签恒可点，D84 惯例：坞可以先开、方式可以先调、内容后到） */
+.dock-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4) var(--sp-4) var(--sp-2);
+}
+.dock-empty-hint {
+  margin: 0;
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+}
+/* occlusion 徽章（AI 图片挖空归「AI 制卡」页签，体内顶部保留现标题文案） */
+.dock-badge {
+  padding: var(--sp-1) var(--sp-4);
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex: none;
+}
+/* 收起后的常驻细把手：右缘竖条、hairline 左缘、chevron + 状态点（AI 流式＝呼吸点、草稿＝墨点） */
+.dock-handle {
+  position: fixed;
+  right: 0;
+  top: var(--sp-12);
+  bottom: 0;
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  background: var(--paper);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: var(--z-drawer);
+}
+.dock-handle:hover { color: var(--ink); }
+.dock-handle-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+}
+.dock-handle-dot.is-live { background: var(--accent); }
+.dock-handle-dot.is-draft { background: var(--ink); }
+@media (prefers-reduced-motion: no-preference) {
+  .dock-handle-dot.is-live { animation: dock-breathe 1.6s var(--ease) infinite; }
+}
+@keyframes dock-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* ---------- v48.51（D91）：解读方式切换器与事后建议 ---------- */
+.ai-explain-mode {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.ai-explain-mode-label {
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+}
+/* 事后建议轻提示行（ste 完成后 points=0 且改写≈原文 → 「切换到通用解读？」） */
+.ai-suggest {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  background: var(--grey-1);
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-2);
 }
 
 /* ---------- M7 词典（v32）：单词弹窗 + 下载目录行 ---------- */

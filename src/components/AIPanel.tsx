@@ -1,11 +1,15 @@
 // AI 面板（解释侧栏 / 制卡预览）
 // 批 4（Task 5）：从 Reader.tsx 原样搬出（纯移动，零行为改动）——摘录页与阅读器共用同一份实现。
+// v48.51（D91 §5.2/§5.5）：explain 分支首行加三态「解读方式」切换器（等待回答时也可切换，切换即重跑；
+// 重跑逻辑在宿主 changeExplainMode）+ 答案尾部的事后建议轻提示行（仅 auto 路由进 ste 且 points=0 且
+// 改写≈原文时出现——用户多半更想要概念解释）。
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { lintCard, parseCloze, parseFollowUps, type CardDraft, type CardGenMode, type FollowUpGroup, type OcclusionRegion } from "../lib/cards";
 import { sanitizeDomain } from "../lib/udc";
+import { isLikelySameText, parseSteMarkers, stripSteMarkers, type ExplainModePref } from "../lib/explainRouter";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
 import { IconAlert } from "./icons";
@@ -15,6 +19,36 @@ function toList(v: unknown): string[] {
   if (Array.isArray(v)) return v.map((x) => String(x));
   if (typeof v === "string" && v.trim()) return v.split(/[,;；、]/).map((s) => s.trim()).filter(Boolean);
   return [];
+}
+
+/**
+ * v48.51（D91 §5.2/§4.4）：解读方式三态切换器（自动（默认）｜通用｜简明）。
+ * 独立导出：AI 解释页签体的空态指引同位复用（D92——「先开坞、先调方式、内容后到」）。
+ * 主文案不出现 ASD-STE100（全球用户不认识该编号，法务上弱化商标使用）。
+ */
+export function ExplainModeSwitcher({
+  value,
+  onChange
+}: {
+  value: ExplainModePref;
+  onChange: (m: ExplainModePref) => void;
+}) {
+  return (
+    <div className="ai-explain-mode" data-testid="explain-mode" data-value={value}>
+      <span className="ai-explain-mode-label mono">解读方式</span>
+      <Dropdown
+        align="left"
+        title="解读方式"
+        value={value}
+        options={[
+          { value: "auto", label: "自动" },
+          { value: "general", label: "通用解读" },
+          { value: "ste", label: "简明解读" }
+        ]}
+        onChange={(m) => onChange(m as ExplainModePref)}
+      />
+    </div>
+  );
 }
 
 export default function AIPanel({
@@ -31,6 +65,8 @@ export default function AIPanel({
   onSearchBackground,
   onFollowUpCards,
   onExploration,
+  explainMode = "auto",
+  onExplainModeChange,
   elapsedTick = 0
 }: {
   panel: {
@@ -83,12 +119,30 @@ export default function AIPanel({
   onSearchBackground: () => void;
   onFollowUpCards: (item: string, kpTitle: string, hint?: string) => void;
   onExploration: (item: string, kpTitle: string) => void;
+  /** v48.51（D91 §5.2）：解读方式三态（会话内记忆，auto=默认） */
+  explainMode?: ExplainModePref;
+  /** v48.51（D91 §5.3）：切换即重跑（重发请求在宿主 changeExplainMode） */
+  onExplainModeChange?: (m: ExplainModePref) => void;
   elapsedTick?: number;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, { front?: string; back?: string }>>({});
   // v46（M14-UM2，§6.7.3）：memoryRef 校验失败的卡「情境来源存疑」默认不勾选——接受按钮需二次点击确认
   const [memoryWarnArmed, setMemoryWarnArmed] = useState<Set<number>>(new Set());
+  // v48.51（D91 §5.5 事后建议）：仅 auto 路由进 ste 的结果、流式完成后，机器标记 points=0
+  // 且改写与原文几乎一致（文本其实清晰，用户多半更想要概念解释）→ 答案尾部一行轻提示。
+  // 显式选择「简明解读」= 用户自判需要简化流程，不打扰（§4.1 门控取消的本意）。
+  const steMarkers = panel.kind === "explain" && panel.answer ? parseSteMarkers(panel.answer) : null;
+  const suggestGeneral =
+    panel.kind === "explain" &&
+    !!panel.answer &&
+    !panel.running &&
+    !panel.error &&
+    explainMode === "auto" &&
+    !!onExplainModeChange &&
+    steMarkers !== null &&
+    steMarkers.points === 0 &&
+    isLikelySameText(panel.text, stripSteMarkers(panel.answer));
   const isOcclusion = panel.kind === "occlusion";
   const followUpGroups: FollowUpGroup[] = panel.kps ? parseFollowUps(panel.kps) : [];
   const nowTick = elapsedTick;
@@ -101,11 +155,15 @@ export default function AIPanel({
 
   return (
     <div className="ai-panel">
-      {/* D88 §8.1：`.ai-panel-head` 标题行并入 CardDock 头（标题 .ai-panel-title 类保留、
-          迁移进 dock-head 内；关闭＝dock 的 data-dock-close 钮，走宿主既有关闭链含批次 reject）。
-          本组件只渲染 .ai-panel-body（全部钩子零改动）。 */}
+      {/* v48.52（D92 §6.1）：CardDock 头行改为页签条（AI 解释｜AI 制卡）+「＋制卡」+ 收起/关闭，
+          不再承载标题（`.ai-panel-title` 仅存于 DictPanel 自有头行）；关闭＝dock 的 data-dock-close 钮，
+          走宿主既有关闭链含批次 reject。本组件只渲染 .ai-panel-body（全部钩子零改动）。 */}
 
       <div className="ai-panel-body">
+        {/* v48.51（D91 §5.2）：解读方式切换器＝explain 分支首行（等待回答时也可切换，切换即重发） */}
+        {panel.kind === "explain" && (
+          <ExplainModeSwitcher value={explainMode} onChange={(m) => onExplainModeChange?.(m)} />
+        )}
         <blockquote className="ai-quote">{panel.text}</blockquote>
 
         {(panel.kind === "cards" || isOcclusion) && panel.running && (
@@ -135,6 +193,15 @@ export default function AIPanel({
                 {panel.answer}
               </ReactMarkdown>
             </div>
+            {/* v48.51（D91 §5.5）：事后建议——路由错配的语义级纠偏，点击即按通用解读重跑（reader-explain scope） */}
+            {suggestGeneral && (
+              <div className="ai-suggest" data-testid="explain-suggest">
+                <span>这段更像概念解释，切换到通用解读？</span>
+                <button className="btn btn-outline btn-sm" onClick={() => onExplainModeChange?.("general")}>
+                  切换到通用解读
+                </button>
+              </div>
+            )}
             <div className="ai-actions">
               <button className="btn btn-outline btn-sm" onClick={() => onExplain("通俗解释")}>通俗解释</button>
               <button className="btn btn-outline btn-sm" onClick={() => onExplain("严格定义")}>严格定义</button>

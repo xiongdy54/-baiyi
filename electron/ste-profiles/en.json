@@ -1,0 +1,35 @@
+{
+  "lang": "en",
+  "name": "Plain English Profile v1 (controlled-language distillation)",
+  "derivedFrom": ["ISO 24495-1:2023", "ASD-STE100 Issue 9 (structure reference only; all rule wording originally written)"],
+  "licenseNote": "original-wording: every rule sentence in this file is originally written; no copyrighted specification text or its word lists is reproduced",
+  "sentence": {
+    "maxWords": 20,
+    "maxSentencesPerParagraph": 6,
+    "note": "One instruction per sentence; one topic per paragraph (with a conclusion first); split sentences longer than about 20 words; keep relative clauses to at most one per sentence"
+  },
+  "voice": {
+    "preferActive": true,
+    "agentUnknownNote": "Prefer the active voice and name the doer; when the doer is unknown, say so explicitly (for example 'the source does not state who approved this'); use the passive only when the doer is unknown or unimportant"
+  },
+  "lexicon": [
+    "One term, one meaning: use the same word for the same concept throughout the text",
+    "Prefer everyday words; explain a technical term in plain words where it first appears",
+    "Keep noun phrases short (about three words at most); do not stack nouns",
+    "Use verbs in simple finite forms; do not reuse one word with several grammatical functions",
+    "Make quantities and conditions explicit: give units with numbers and write ranges precisely"
+  ],
+  "avoid": [
+    { "bad": "Long noun chains such as 'system configuration item version verification procedure'", "why": "Stacked nouns hide who does what to what" },
+    { "bad": "Sentences where several things happen with only 'and' or 'which' to hold them together", "why": "Readers lose track of the main statement" },
+    { "bad": "Vague quantifiers such as 'several', 'some', 'appropriate'", "why": "The reader cannot act on an unspecified amount or condition" },
+    { "bad": "Idioms and figurative verbs (for example 'the market tanked')", "why": "Figurative language does not survive translation and puzzles non-native readers" }
+  ],
+  "rewriteExample": [
+    {
+      "before": "The implementation of the utilization of this procedure is performed by the operator.",
+      "after": "The operator uses this procedure."
+    }
+  ],
+  "source": "docs/design/STE-PLAIN-DECODE-D91.md"
+}
