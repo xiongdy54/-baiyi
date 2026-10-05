@@ -502,6 +502,12 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 
 ## 修订记录
 
+### v1.7（2026-10-05，实施记录：§K 四项 + §J P0 于 main 落地 v48.55/D96）
+
+- §K 四项按本节实施（GUIDE 登记 **D96 / v48.55**，新会话 ZCode 直接在 main，未开分支）：①dock 拉伸钉底退役 → sticky（`dock-bottom`，短文零大空白 + 长文吸底让开 72px stage-bar）；②`app.extractEditorToolbarTop`（`dock-top`＝flex `order:-1` + sticky top，摘录页实测让位 95px / 复习页 49px）；③悬浮改判选区锚定弹层（`float-selection`＝placePopover prefer above / align center，塌选/滚动/换卡收起，`data-toolbar-mode` 三值 `dock-bottom|dock-top|float-selection`）；④`app.readerActionsFloat`（`ReaderSelActionsFloat`，与 SelectionMenu 同 selection 生命周期，保留 `.reader-sel-actions` 豁免类，固定态零改动）。
+- §J P0：`MarkdownEditor.tsx`（full/compact、placeholder 走 ProseMirror `data-placeholder` + CSS `:has(> br:only-child)::before` 零依赖、onChange 镜像、外部置值重建、commitOnUnmount、onEscape/onKeyDown/onReady/focusEnd）+ `ReadMarkdown.tsx` 共享展示管线；ExtractEditor 薄壳化；三面迁移（快速摘录浮窗/日记三面/手动制卡紧凑档）。
+- 实施补注（设计期未定、实施期决策）：**批注浮层类名 `editor` → `annot-editor`**（§J.1 #2「根治 .editor 类名负担」的落地形态——Milkdown 根自带 `editor` 类的全局冲突自此消除，v1.3 抵消块退役）；快速记录浮窗新增滚动包裹层（`.cap-editor-scroll`，工具条 dock 态在其内吸底）；日记草稿编辑提交＝写回同一条草稿（`journal:update` 不区分草稿身份，零新通道），发送仍走显式 draftSend。
+
 ### v1.6（2026-10-05，交接节）
 
 - 新增 §K 工具条系统第二轮需求交接节（用户 2026-10-05 书面指令逐字留痕 §K.0）：①dock 态「高/上下空白」缺陷修复（总控诊断＝v1.4 弹性拉伸所致，建议改 sticky 语义）；②设置支持钉顶/钉底；③悬浮态改选区锚定弹层（与弹窗家族统一定位）；④阅读器顶部动作组支持固定/悬浮设置。执行方式＝§J P0 迁移与本节全部需求由**新 ZCode 会话**直接在 **main** 实施（用户指令，不新开分支）；开工先加载 dylantarre/animation-principles 相关 skill。

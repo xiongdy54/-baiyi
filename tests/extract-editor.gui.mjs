@@ -569,15 +569,19 @@ try {
   await pressEsc(cdp);
 
   // ============================================================
-  // 验收 13（v1.4）：软换行可见（读态 br / 编辑态 hardbreak 真断行）+ 工具条钉底/悬浮切换。
-  // 经真实 extracts:update 写入换行样本再切页签刷新（该 IPC 不广播）；结束后恢复 RICH_TEXT
-  // 与设置，保证后续验收 12 的探针文本不变。
+  // 验收 13（v1.4 + §K 第二轮）：软换行可见（读态 br / 编辑态 hardbreak 真断行）
+  //   + 工具条三形态：dock-bottom 短文零大空白/长文滚动吸底（§K.1）、dock-top 吸顶让开头带（§K.2）、
+  //     float-selection 选区锚定弹层（§K.3）。经真实 extracts:update 写入样本再切页签刷新
+  //   （settingsAPI.set 是裸 IPC 不广播，读侧 hook 重读靠卡面重挂——与真实路径一致的「设置后生效」）。
+  //   结束后恢复 RICH_TEXT 与设置，保证后续验收 12 的探针文本不变。
   // ============================================================
-  console.log("\n== 验收 13 v1.4：软换行可见 + 工具条钉底/悬浮 ==");
+  const SHORT_MD = "甲行文本\n乙行文本";
+  const LONG_MD = Array.from({ length: 60 }, (_, i) => `长文滚动样本第 ${i + 1} 段，用于把编辑面撑出滚动区。`).join("\n\n") + "\n\n结尾段。";
+  console.log("\n== 验收 13 v1.4+§K：软换行 + 工具条三形态 ==");
   // ⑩ 结束时工具栏开关是关（false 且重启持久）——本节先开、结束还原
   await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbar", true); return true; })()`);
   await wait(600);
-  await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(seedId)}, { contentMarkdown: ${JSON.stringify("甲行文本\n乙行文本")} }); return true; })()`);
+  await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(seedId)}, { contentMarkdown: ${JSON.stringify(SHORT_MD)} }); return true; })()`);
   await navTo(cdp, "书架");
   await wait(1000);
   await navTo(cdp, "摘录");
@@ -593,41 +597,159 @@ try {
   const edit13 = await cdp.eval(`(() => {
     const body = document.querySelector(".extract-face-body");
     const hb = body?.querySelector('.ProseMirror span[data-type="hardbreak"]');
-    const tb = body?.querySelector('[data-testid="extract-editor-toolbar"]');
-    const rb = body?.getBoundingClientRect();
+    const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+    const pm = body?.querySelector(".ProseMirror");
     const rt = tb?.getBoundingClientRect();
+    // 工具条的前一个兄弟（原始批注块或 Milkdown 根）＝「正文侧」末元素；间隙即「正文与工具条之间空白」
+    const prev = tb?.previousElementSibling;
+    const rp = prev?.getBoundingClientRect();
     return JSON.stringify({
       hbDisplay: hb ? getComputedStyle(hb).display : null,
       mode: tb?.dataset.toolbarMode || null,
-      bodyBottom: rb ? Math.round(rb.bottom) : null,
-      tbBottom: rt ? Math.round(rt.bottom) : null
+      pos: tb ? getComputedStyle(tb).position : null,
+      prevCls: prev ? String(prev.className).slice(0, 30) : null,
+      tbBottom: rt ? Math.round(rt.bottom) : null,
+      tbTop: rt ? Math.round(rt.top) : null,
+      prevBottom: rp ? Math.round(rp.bottom) : null
     });
   })()`);
   const e13 = JSON.parse(String(edit13) || "{}");
   check("⑬ 编辑态 hardbreak span 真断行（display block，v1.4）", e13.hbDisplay === "block", edit13);
-  check("⑬ dock 工具条钉在文本盒底缘（toolbar bottom ≈ body bottom）", e13.mode === "dock" && typeof e13.bodyBottom === "number" && Math.abs(e13.tbBottom - e13.bodyBottom) <= 2, edit13);
-  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarFloat", true); return true; })()`);
-  // settingsAPI.set 是裸 IPC，不触发渲染层 eventBus 广播——重挂卡面让读侧 hook 重新读取
-  //（真实设置页走 settingsStore.set 自带广播，编辑中即时生效；此处测「设置后生效」即可）
+  // §K.1：dock-bottom＝工具条紧跟正文侧末元素（短文零大空白，间隙 ≤ 一个 --sp-4 档 + margin）
+  // 旧缺陷（v1.4 拉伸钉底）此间隙＝整片空编辑面（>100px），本判据即缺陷鉴别器
+  check("⑬ §K.1 dock 工具条紧跟正文（正文侧末元素与工具条间隙 ≤ 16px，零大空白）",
+    e13.mode === "dock-bottom" && e13.pos === "sticky" && typeof e13.prevBottom === "number" && e13.tbTop - e13.prevBottom <= 16, edit13);
+  await pressEsc(cdp);
+  await waitEditor(cdp, false);
+  await wait(400);
+
+  // —— §K.1 长文滚动：工具条吸可视区底缘（让开 72px 吸底动作栏） ——
+  await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(seedId)}, { contentMarkdown: ${JSON.stringify(LONG_MD)} }); return true; })()`);
   await navTo(cdp, "书架");
   await wait(1000);
   await navTo(cdp, "摘录");
   await wait(1800);
-  await clickAt(cdp, p13.start.x, p13.start.y);
-  check("⑬ 前置：悬浮档下进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
+  const pLong = await probeRange(cdp, "长文滚动样本第 1 段");
+  check("⑬ 前置：长文读态可命中进入编辑", !!pLong, "probeRange 未命中");
+  await clickAt(cdp, pLong.start.x, pLong.start.y);
+  check("⑬ 前置：长文进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
   await wait(900);
+  await cdp.eval(`(() => { const pg = document.querySelector(".extract-page"); if (pg) pg.scrollTop = 900; return pg ? pg.scrollTop : -1; })()`);
+  await wait(500);
+  const stick13 = await cdp.eval(`(() => {
+    const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+    const pg = document.querySelector(".extract-page");
+    const rt = tb?.getBoundingClientRect();
+    return JSON.stringify({
+      mode: tb?.dataset.toolbarMode || null,
+      tbBottom: rt ? Math.round(rt.bottom) : null,
+      vh: window.innerHeight,
+      scrolled: pg ? pg.scrollTop : -1
+    });
+  })()`);
+  const st13 = JSON.parse(String(stick13) || "{}");
+  check("⑬ §K.1 长文滚动中工具条吸可视区底缘（bottom ≈ 视口高-72 吸底动作栏让位）",
+    st13.mode === "dock-bottom" && typeof st13.tbBottom === "number" && Math.abs(st13.tbBottom - (st13.vh - 72)) <= 3 && st13.scrolled > 0, stick13);
+  await pressEsc(cdp);
+  await waitEditor(cdp, false);
+  await wait(400);
+
+  // —— §K.2 dock-top：设置开 → 工具条排到编辑面顶部、滚动吸顶让开吸顶头带（实测：头带下缘 158，
+  //      scrollport 原点在 48px 顶栏之下 ⇒ CSS 让位 110px） ——
+  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarTop", true); return true; })()`);
+  await navTo(cdp, "书架");
+  await wait(1000);
+  await navTo(cdp, "摘录");
+  await wait(1800);
+  const pTop = await probeRange(cdp, "长文滚动样本第 1 段");
+  await clickAt(cdp, pTop.start.x, pTop.start.y);
+  check("⑬ §K.2 前置：钉顶档进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
+  await wait(900);
+  // 视觉序在未滚动态测量（滚动后正文顶部已滚出视口，几何比较无意义）
+  const order13 = await cdp.eval(`(() => {
+    const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+    const pm = document.querySelector(".extract-face-body .ProseMirror");
+    const rt = tb?.getBoundingClientRect();
+    const rp = pm?.getBoundingClientRect();
+    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, tbBottom: rt ? Math.round(rt.bottom) : null, pmTop: rp ? Math.round(rp.top) : null });
+  })()`);
+  const or13 = JSON.parse(String(order13) || "{}");
+  check("⑬ §K.2 钉顶：工具条排到编辑面之前（视觉序＝工具条在上、正文在下）",
+    or13.mode === "dock-top" && typeof or13.tbBottom === "number" && typeof or13.pmTop === "number" && or13.tbBottom <= or13.pmTop + 2, order13);
+  await cdp.eval(`(() => { const pg = document.querySelector(".extract-page"); if (pg) pg.scrollTop = 900; return true; })()`);
+  await wait(500);
+  const top13 = await cdp.eval(`(() => {
+    const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+    const head = document.querySelector(".extract-page-head");
+    const rt = tb?.getBoundingClientRect();
+    const rh = head?.getBoundingClientRect();
+    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, tbTop: rt ? Math.round(rt.top) : null, headBottom: rh ? Math.round(rh.bottom) : null });
+  })()`);
+  const tp13 = JSON.parse(String(top13) || "{}");
+  check("⑬ §K.2 钉顶：滚动吸顶并让开吸顶头带（toolbar top ≈ 头带下缘）",
+    typeof tp13.tbTop === "number" && typeof tp13.headBottom === "number" && Math.abs(tp13.tbTop - tp13.headBottom) <= 3, top13);
+  await pressEsc(cdp);
+  await waitEditor(cdp, false);
+  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarTop", false); return true; })()`);
+  await wait(400);
+
+  // —— §K.3 悬浮＝选区锚定弹层：选中文本 → 上方居中；点按钮命令生效且弹层不收；塌选收起 ——
+  await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarFloat", true); return true; })()`);
+  await navTo(cdp, "书架");
+  await wait(1000);
+  await navTo(cdp, "摘录");
+  await wait(1800);
+  const pFloat = await probeRange(cdp, "长文滚动样本第 1 段");
+  await clickAt(cdp, pFloat.start.x, pFloat.start.y);
+  check("⑬ §K.3 前置：悬浮档进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
+  await wait(900);
+  check("⑬ §K.3 无选区时悬浮工具条不出现（塌选/markdown 输入不依赖工具条）",
+    (await cdp.eval(`!!document.querySelector('[data-testid="extract-editor-toolbar"]')`)) === false, "工具条在无选区时在场");
+  const pf13 = await probeRange(cdp, "长文滚动样本第 3 段");
+  check("⑬ §K.3 前置：编辑器内拖选目标可命中", !!pf13, "probeRange 未命中");
+  await drag(cdp)(pf13.start, pf13.end);
+  await wait(700);
   const float13 = await cdp.eval(`(() => {
     const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
-    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, pos: tb ? getComputedStyle(tb).position : null, shadow: tb ? getComputedStyle(tb).boxShadow : null });
+    const r = tb?.getBoundingClientRect();
+    return JSON.stringify({
+      mode: tb?.dataset.toolbarMode || null,
+      pos: tb ? getComputedStyle(tb).position : null,
+      shadow: tb ? getComputedStyle(tb).boxShadow : null,
+      anim: tb ? getComputedStyle(tb).animationName : null,
+      left: r ? Math.round(r.left) : null, top: r ? Math.round(r.top) : null,
+      cx: r ? Math.round(r.left + r.width / 2) : null,
+      bottom: r ? Math.round(r.bottom) : null
+    });
   })()`);
   const f13 = JSON.parse(String(float13) || "{}");
-  check("⑬ 悬浮档即时生效（float + sticky + 浮层阴影）", f13.mode === "float" && f13.pos === "sticky" && f13.shadow && f13.shadow !== "none", float13);
+  check("⑬ §K.3 悬浮＝选区锚定弹层（float-selection + fixed + 浮层阴影 + pop-in 入场）",
+    f13.mode === "float-selection" && f13.pos === "fixed" && f13.shadow && f13.shadow !== "none" && f13.anim === "pop-in", float13);
+  check("⑬ §K.3 弹层水平居中于选区（|中心差| ≤ 8，容器钳制容差）",
+    typeof f13.cx === "number" && Math.abs(f13.cx - Math.round((pf13.start.x + pf13.end.x) / 2)) <= 8, float13);
+  check("⑬ §K.3 弹层在选区上方（bottom ≤ 选区顶缘，与选区不相交）",
+    typeof f13.bottom === "number" && f13.bottom <= Math.round(pf13.start.y) + 2, float13);
+  // 点工具条按钮：mousedown preventDefault 保选区 → 命令作用该选区、弹层不收
+  await cdp.eval(`(() => { document.querySelector('[data-testid="extract-editor-toolbar"] [data-tb="bold"]')?.click(); return true; })()`);
+  await wait(500);
+  const bold13 = await cdp.eval(`(() => {
+    const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+    const st = document.querySelector('.extract-face-body .ProseMirror strong');
+    return JSON.stringify({ still: !!tb, strong: st ? st.textContent : null });
+  })()`);
+  const b13 = JSON.parse(String(bold13) || "{}");
+  check("⑬ §K.3 点按钮：选区保住（弹层不收）且命令作用该选区（加粗呈现）",
+    b13.still === true && b13.strong === "长文滚动样本第 3 段", bold13);
+  // 点正文落 caret（选区塌缩）→ 弹层收起
+  await clickAt(cdp, pFloat.start.x, pFloat.start.y);
+  await wait(500);
+  check("⑬ §K.3 选区塌缩即收起（点正文落 caret）",
+    (await cdp.eval(`!!document.querySelector('[data-testid="extract-editor-toolbar"]')`)) === false, "弹层未收起");
+  await pressEsc(cdp);
+  await waitEditor(cdp, false);
   await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarFloat", false); return true; })()`);
   await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbar", false); return true; })()`);
   await wait(400);
-  await pressEsc(cdp);
-  await waitEditor(cdp, false);
-  await wait(600);
   await cdp.eval(`(async () => { await window.workflowAPI.update(${JSON.stringify(seedId)}, { contentMarkdown: ${JSON.stringify(RICH_TEXT)} }); return true; })()`);
   await navTo(cdp, "书架");
   await wait(1000);

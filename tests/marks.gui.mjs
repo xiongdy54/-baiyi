@@ -257,8 +257,19 @@ const visibilityProbe = (markId) => `(() => {
 })()`;
 
 /** v48.45（D85）：文中标记的唯一浮层＝点击弹出的批注编辑浮层（.editor）——悬停浮层已退役 */
+// §J P0：制卡表单字段已统一为紧凑档 Markdown 编辑器（ProseMirror contenteditable）——
+// 填写/读取改走 PM（聚焦 + selectAll + insertText；textContent 读回）
+const setPM = (sel, value) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)});
+  if (!el) return "no-el";
+  el.focus();
+  document.execCommand("selectAll", false, null);
+  document.execCommand("insertText", false, ${JSON.stringify(value)});
+  return "inserted";
+})()`;
+
 const editorState = `(() => {
-  const el = document.querySelector(".editor[data-editor-for]");
+  const el = document.querySelector(".annot-editor[data-editor-for]");
   if (!el) return JSON.stringify({ open: false });
   /* v48.46（D86）：引文行（.eq）已删——浮层归属＝data-editor-for（extractId） */
   const ta = el.querySelector("textarea");
@@ -416,7 +427,7 @@ try {
 
   // 就此制卡 → 既有制卡链落库
   const mkBtn = JSON.parse(String(await cdp.eval(`(() => {
-    const b = document.querySelector(".editor [data-make-card]");
+    const b = document.querySelector(".annot-editor [data-make-card]");
     if (!b) return "";
     const r = b.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -424,14 +435,12 @@ try {
   check("「就此制卡」按钮可点（取到坐标）", typeof mkBtn.x === "number", JSON.stringify(mkBtn));
   await clickAt(cdp, mkBtn.x, mkBtn.y);
   await wait(600);
-  const quoteInEditor = await cdp.eval(`(() => { const ta = document.querySelector("[data-card-dock] textarea"); return ta ? ta.value : ""; })()`);
+  const quoteInEditor = await cdp.eval(`(() => { const pm = document.querySelector("[data-card-dock] .markdown-editor .ProseMirror"); return pm ? pm.textContent : ""; })()`);
   check("手动制卡面板打开且引用 ＝ 摘录正文", quoteInEditor === PDF_PICK, quoteInEditor);
-  await cdp.eval(`(() => {
-    const tas = [...document.querySelectorAll("[data-card-dock] textarea")];
-    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    if (tas[1]) { set.call(tas[1], ${JSON.stringify(CARD_BACK)}); tas[1].dispatchEvent(new Event("input", { bubbles: true })); }
-    return tas.length;
-  })()`);
+  await cdp.eval(setPM("[data-card-dock] .markdown-editor .ProseMirror", PDF_PICK));
+  const pms = "[...document.querySelectorAll('[data-card-dock] .markdown-editor .ProseMirror')]";
+  await cdp.eval(`(() => { const els = ${pms}; if (!els[1]) return "no-back"; els[1].focus(); document.execCommand("selectAll", false, null); document.execCommand("insertText", false, ${JSON.stringify(CARD_BACK)}); return "back-filled"; })()`);
+  await wait(400); // 等 React 状态回流（PM onChange → canSave 门控）
   // 保存按钮用程序化点击：制卡面板是长表单，真鼠标点位会落在滚动视口之外
   // （m6-2native 同款做法）——本轮的「真键鼠」硬要求针对的是标记的 hover/点选
   const saveClicked = await cdp.eval(`(() => {
@@ -450,7 +459,7 @@ try {
     return JSON.stringify({ found: true, id: c.id, back: c.backMarkdown, extractId: c.contextRef ? c.contextRef.extractId : null, documentId: c.contextRef ? c.contextRef.documentId : null });
   })()`);
   const card = JSON.parse(String(cardRaw) || "{}");
-  check("就此制卡落库（走既有 createSingleCard 链）", card.found === true && card.back === CARD_BACK, cardRaw);
+  check("就此制卡落库（走既有 createSingleCard 链；markdown 序列化段尾带换行）", card.found === true && card.back === CARD_BACK + "\n", cardRaw);
   check("新卡挂在被点的摘录上（contextRef.extractId ＝ 摘录 id）", card.extractId === ex.id, cardRaw);
 
   // 制卡后重新点开浮层：计数走聚合口径刷新（cards/changed → marks 重算 → 计数 +1）
@@ -461,7 +470,7 @@ try {
 
   // v48.47（D87）：计数是按钮，点击 → 卡片浏览器按锚点筛选（闭包：锚自身 + 全部子层级）
   const cntBtn = JSON.parse(String(await cdp.eval(`(() => {
-    const b = document.querySelector(".editor [data-open-cards]");
+    const b = document.querySelector(".annot-editor [data-open-cards]");
     if (!b) return "";
     const r = b.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });

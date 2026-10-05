@@ -769,10 +769,17 @@ body.has-skin .topbar { background: transparent; }
    transform-origin 取「菜单在选区下方」（50% 100%）；上方翻面态的 50% 0% 需组件侧
    placePopover 的翻面结果（同上，本轮不接线）。出场保持瞬时（现状惯例）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .selection-menu, .editor {
+  .selection-menu, .annot-editor, .reader-sel-actions-pop {
     animation: pop-in 220ms var(--spring) both;
     transform-origin: 50% 100%;
   }
+  /* 悬浮工具条（选区锚定弹层）：翻面侧由组件 data-place 给出，origin 随之翻——
+     above＝自选区上方长出（origin 底缘），below＝下方（origin 顶缘） */
+  .extract-face-toolbar.is-float-pop {
+    animation: pop-in 220ms var(--spring) both;
+    transform-origin: 50% 100%;
+  }
+  .extract-face-toolbar.is-float-pop[data-place="below"] { transform-origin: 50% 0%; }
 }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.92) translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -2075,7 +2082,7 @@ body.theme-dark .modal-panel {
    即时生效：无保存/取消按钮（失焦 + 400ms 防抖落库）；清空文字＝删除批注。
    定位走 src/lib/popoverPlace.ts（与 MarkPopover / SelectionMenu 同一份实现）。
    焦点样式沿用全局 :focus-visible（不用 outline 另起一套）。 */
-.editor {
+.annot-editor {
   position: fixed;
   width: 320px;
   background: var(--paper);
@@ -2084,7 +2091,7 @@ body.theme-dark .modal-panel {
   padding: var(--sp-3);
   z-index: var(--z-sticky);
 }
-.editor textarea {
+.annot-editor textarea {
   width: 100%;
   min-height: 56px;
   height: auto;
@@ -2097,20 +2104,20 @@ body.theme-dark .modal-panel {
   resize: vertical;
 }
 /* 底行：左＝颜色方块（点开取色，含自定义）· 中＝保存态 · 右＝删除（标签按 kind 变） */
-.editor .ebar {
+.annot-editor .ebar {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
 }
-.editor .ebar .save-state {
+.annot-editor .ebar .save-state {
   font-size: var(--fs-meta);
   color: var(--text-helper);
 }
 /* v48.46（D86）：「已制卡 N 张」（聚合口径）+「就此制卡」并入底行——计数推右侧组到最右，
    就此制卡＝与 .del 同规格（无边框 meta 文字钮、hover 下划线）但**黑色文字**（--text-primary，
    不取 error 红——用户明确「样式对齐删除高亮，颜色保持黑色」）。 */
-.editor .ebar .cardcount {
+.annot-editor .ebar .cardcount {
   margin-left: auto;
   background: none;
   border: none;
@@ -2122,8 +2129,8 @@ body.theme-dark .modal-panel {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.editor .ebar .cardcount:hover { text-decoration: underline; }
-.editor .ebar .make-card {
+.annot-editor .ebar .cardcount:hover { text-decoration: underline; }
+.annot-editor .ebar .make-card {
   background: none;
   border: none;
   padding: 0;
@@ -2132,11 +2139,11 @@ body.theme-dark .modal-panel {
   cursor: pointer;
   white-space: nowrap;
 }
-.editor .ebar .make-card:hover { text-decoration: underline; }
-.editor .ebar .cardcount + .make-card ~ .del,
-.editor .ebar .cardcount + .make-card ~ .del-cancel { margin-left: 0; }
-.editor .ebar .del,
-.editor .ebar .del-cancel {
+.annot-editor .ebar .make-card:hover { text-decoration: underline; }
+.annot-editor .ebar .cardcount + .make-card ~ .del,
+.annot-editor .ebar .cardcount + .make-card ~ .del-cancel { margin-left: 0; }
+.annot-editor .ebar .del,
+.annot-editor .ebar .del-cancel {
   margin-left: auto;
   background: none;
   border: none;
@@ -2146,9 +2153,9 @@ body.theme-dark .modal-panel {
   cursor: pointer;
   white-space: nowrap;
 }
-.editor .ebar .del-cancel { margin-left: 0; color: var(--text-helper); }
-.editor .ebar .del:hover,
-.editor .ebar .del-cancel:hover { text-decoration: underline; }
+.annot-editor .ebar .del-cancel { margin-left: 0; color: var(--text-helper); }
+.annot-editor .ebar .del:hover,
+.annot-editor .ebar .del-cancel:hover { text-decoration: underline; }
 .colorbtn {
   width: 12px;
   height: 12px;
@@ -3677,7 +3684,7 @@ body.theme-dark .modal-panel {
 }
 
 /* v48.45（D85）：悬停浮层（.reader-mark-pop）退役——文中标记的唯一浮层＝点击弹出的批注编辑浮层；
-   v48.46（D86）：「已制卡 N 张」+「就此制卡」并入浮层底行（.editor .ebar，见 .cardcount/.make-card）。 */
+   v48.46（D86）：「已制卡 N 张」+「就此制卡」并入浮层底行（.annot-editor .ebar，见 .cardcount/.make-card）。 */
 
 /* v28 加载态：大书解析+首屏渲染需数秒，期间显示提示（在 container 层，不吃 viewerEl 的反色滤镜） */
 .reader-engine-host .pdf-viewer-container.pdf-loading::after {
@@ -4552,18 +4559,14 @@ body.theme-dark .modal-panel {
 .journal-entry:hover .journal-entry-actions,
 .journal-entry-actions:focus-within { opacity: 1; }
 
-.journal-edit-area {
-  width: 100%;
+/* §J P0（#3 日记统一 Markdown 编辑器）：编辑框沿用旧 .journal-edit-area 的框线观感 */
+.journal-edit-md {
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--border-strong);
   background: var(--paper);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: var(--fs-body);
-  line-height: 1.7;
-  resize: vertical;
 }
-.journal-edit-area:focus { outline: none; border-color: var(--accent); }
+.journal-edit-md:focus-within { border-color: var(--accent); }
+.journal-edit-md .ProseMirror { font-family: var(--font-sans); font-size: var(--fs-body); line-height: 1.7; }
 .journal-edit-hint {
   display: block;
   margin-top: var(--sp-1);
@@ -4586,18 +4589,14 @@ body.theme-dark .modal-panel {
 }
 
 .journal-composer { padding: var(--sp-3) 0 var(--sp-6); }
-.journal-composer-area {
-  width: 100%;
+/* §J P0（#3 日记统一 Markdown 编辑器）：当日输入行沿用旧 .journal-composer-area 的框线观感 */
+.journal-composer-md {
   padding: var(--sp-3);
   border: 1px solid var(--border-subtle);
   background: var(--paper);
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: var(--fs-body);
-  line-height: 1.7;
-  resize: none;
 }
-.journal-composer-area:focus { outline: none; border-color: var(--accent); }
+.journal-composer-md:focus-within { border-color: var(--accent); }
+.journal-composer-md .ProseMirror { font-family: var(--font-sans); font-size: var(--fs-body); line-height: 1.7; }
 .journal-composer-foot {
   display: flex;
   align-items: center;
@@ -4677,22 +4676,20 @@ body.capture-body #root { height: 100vh; }
 }
 .cap-link:hover { text-decoration: underline; }
 .cap-link-danger { color: var(--error); }
-.cap-editor {
+/* §J P0（#2 快速记录统一 Markdown 编辑器）：滚动区（工具条 dock 态在此吸底）+ 编辑器排版
+   （字号/行高与旧 .cap-editor 一致；no-drag 语义移到滚动区，保证窗口可拖动区不缩水） */
+.cap-editor-scroll {
   flex: 1;
   min-height: 0;
-  width: 100%;
-  padding: var(--sp-4);
-  border: none;
-  outline: none;
-  resize: none;
-  background: var(--paper);
-  color: var(--text-primary);
+  overflow-y: auto;
+  -webkit-app-region: no-drag;
+}
+.cap-editor-md { min-height: 100%; padding: var(--sp-4); }
+.cap-editor-md .ProseMirror {
   font-family: var(--font-sans);
   font-size: var(--fs-title-s);
   line-height: 1.7;
-  -webkit-app-region: no-drag;
 }
-.cap-editor::placeholder { color: var(--text-placeholder); }
 .cap-footer {
   flex: none;
   height: 44px;
@@ -6005,35 +6002,98 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 
 /* ==========================================================================
-   D95 §B.1/§E：摘录卡 WYSIWYG 编辑器（Milkdown）与读态 markdown 元素作用域
+   D95 §B.1/§E + §J.2：统一 Markdown 编辑器（Milkdown）与读态 markdown 元素作用域
    —— 读态与编辑态共用 .extract-face-body 的排版（视觉同构：退出编辑 = 同一块内容、
    同一字号、同一排版，不闪版）。全部复用既有 Token（--fs-* / hairline / --sp-*），
-   不新造视觉语言；直角、无阴影、单 accent 焦点色。无过渡/动画，prefers-reduced-motion 天然满足。
+   不新造视觉语言；直角、无阴影、单 accent 焦点色。
    ========================================================================== */
-/* 工具栏（编辑器下方一行；.btn-rail 同族：24px 档、hairline 描边、meta 字号）
-   v1.4（用户反馈）：dock（默认）＝margin-top:auto 钉在文本框底端（分节随卡片拉伸后
-   正文短也贴底缘）；is-float（app.extractEditorToolbarFloat）＝悬浮面板：sticky 吸住
-   滚动视口下缘、纸底+浮层阴影+中性描边，与文本框脱开。 */
+
+/* ---------- 统一 Markdown 编辑器壳（§J.2 MarkdownEditor：摘录卡/日记/快速记录/制卡表单共用） ----------
+   full＝随宿主排版（无自身框）；compact＝表单字段档（hairline 框 + 矮盒，取代被迁移的 textarea
+   控件观感——better-layout「控件与内容分离」）。状态切换零跳版（micro-interactions：几何不变）。 */
+.markdown-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.markdown-editor .ProseMirror {
+  font: inherit;
+  color: inherit;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  min-height: calc(var(--md-editor-min-rows, 0) * 1.7em);
+  outline: none;
+  caret-color: var(--accent);
+}
+/* 空文档占位：ProseMirror 空段渲染为 <p><br></p>，仅当整文档只有一个空段时以 ::before 显示 */
+.markdown-editor .ProseMirror[data-placeholder] p:first-child:last-child:has(> br:only-child)::before {
+  content: attr(data-placeholder);
+  color: var(--text-placeholder);
+  pointer-events: none;
+}
+.markdown-editor-compact {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--paper);
+  padding: var(--sp-2) var(--sp-3);
+  /* 与被替代的 textarea 同一份 120ms 边框反馈（micro-interactions 档内，不新造动效） */
+  transition: border-color var(--dur) var(--ease);
+}
+.markdown-editor-compact:hover { border-color: var(--border-strong); }
+.markdown-editor-compact:focus-within { border-color: var(--accent); }
+.markdown-editor-compact .ProseMirror { min-height: calc(var(--md-editor-min-rows, 2) * 1.7em); }
+
+/* ---------- 工具条（编辑器下方一行；.btn-rail 同族：24px 档、hairline 描边、meta 字号） ----------
+   §K 第二轮三形态（v1.4 的「分节拉伸 + margin-top:auto 钉底」退役——空白缺陷＝被拉伸的空编辑面）：
+   · dock-bottom（默认）＝随文档流紧跟正文（正文短＝零大空白），长文滚动时 sticky 吸滚动区下缘
+     （宿主有吸底栏的按作用域让位：摘录页/复习页 stage-bar 72px）；
+   · dock-top（app.extractEditorToolbarTop）＝flex order:-1 顶到编辑面视觉首位 + sticky 吸顶
+     （让开吸顶头带，偏移按宿主头带实测：摘录页 95px / 复习页 49px）；
+   · float-selection（app.extractEditorToolbarFloat）＝选区锚定弹层：position:fixed +
+     placePopover（上方居中、空间不足翻到下方居中），纸底+浮层阴影+中性描边，与弹窗家族
+     同一套 pop-in 入场（见文件头浮层家族规则；reduced-motion 自动降级为零动画）。 */
 .extract-face-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-1);
-  margin-top: auto;
+  margin-top: var(--sp-2);
   padding-top: var(--sp-2);
   border-top: 1px solid var(--border-subtle);
 }
-.extract-face-toolbar.is-float {
+.extract-face-toolbar.is-dock-bottom {
   position: sticky;
-  bottom: var(--sp-2);
-  margin-top: var(--sp-2);
-  align-self: center;
-  width: max-content;
-  max-width: 100%;
+  bottom: 0;
+  z-index: 2;
   background: var(--paper);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-float);
+}
+/* 摘录页/复习页的吸底动作栏（.stage-bar，72px 高）让出偏移 */
+.extract-page .extract-face-toolbar.is-dock-bottom,
+.review-wrap .extract-face-toolbar.is-dock-bottom { bottom: 72px; }
+.extract-face-toolbar.is-dock-top {
+  order: -1; /* DOM 序仍在编辑器之后（React 不重挂），视觉顶到首位；sticky 随排序后位置生效 */
+  position: sticky;
+  top: 0;
+  margin: 0 0 var(--sp-2);
+  padding-top: 0;
+  border-top: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--paper);
+  z-index: 2;
+}
+/* 摘录页头带（.extract-page-head 吸顶，scrollport 原点在 48px 应用顶栏之下：头带实测高 110）
+   与复习页头带（.review-head 49）让位 */
+.extract-page .extract-face-toolbar.is-dock-top { top: 110px; }
+.review-wrap .extract-face-toolbar.is-dock-top { top: 49px; }
+.extract-face-toolbar.is-float-pop {
+  position: fixed;
+  margin: 0;
   padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  box-shadow: var(--shadow-float);
+  width: max-content;
+  max-width: min(720px, calc(100vw - 16px));
   z-index: var(--z-sticky);
 }
 .extract-face-toolbar-btn {
@@ -6052,18 +6112,30 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 /* 瑞士风焦点：单 accent 描边，无光晕 */
 .extract-face-toolbar-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
 
-/* Milkdown 根：字体/字号/行高全随 .extract-face-body（字号桥同步生效），排版细节由 ProseMirror 提供 */
-.extract-face-body .extract-editor { min-width: 0; }
-/* v1.4（用户反馈「工具条固定在文本框底端」）：分节随卡片拉伸（sec-quote flex:1），
-   编辑态正文盒弹性列——编辑器链逐级 flex:1 吃掉余量（点文本下方空白即入编辑），
-   工具条 margin-top:auto 钉在盒底缘；正文长于盒时自然顺排。 */
-.extract-face .sec-quote { flex: 1 1 auto; display: flex; flex-direction: column; }
-.extract-face .sec-quote .extract-face-body[data-editing="1"] { display: flex; flex-direction: column; flex: 1 1 auto; }
-.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor { flex: 1 1 auto; display: flex; flex-direction: column; }
-.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor > div,
-.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor .milkdown,
-.extract-face .sec-quote .extract-face-body[data-editing="1"] .extract-editor .ProseMirror { flex: 1 1 auto; }
-.extract-face-body .ProseMirror {
+/* ---------- 阅读器选区动作组悬浮弹层（§K.4；app.readerActionsFloat） ----------
+   固定态（默认）＝顶栏内 .reader-sel-actions 零改动；悬浮态＝同一组按钮以选区锚定弹层呈现
+   （保留 .reader-sel-actions 类＝宿主 mouseup 豁免面判据不变，点按钮不清选区）。 */
+.reader-sel-actions-pop {
+  position: fixed;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  background: var(--reader-bg, var(--paper));
+  color: var(--reader-fg, var(--text-primary));
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  padding: var(--sp-2);
+  width: max-content;
+  max-width: min(720px, calc(100vw - 16px));
+}
+
+/* ---------- 摘录卡正文盒（Milkdown 根作用域） ----------
+   D95 v1.3 的「.editor 类劫持逐项抵消」随 §J.2 根治退役：批注浮层类名已改名 .annot-editor，
+   Milkdown 根自带的 `editor` 类不再命中任何浮窗规则——编辑态天然与读态同形（同宽、无底色、
+   无阴影、随流布局）。仅保留排版与焦点语义。 */
+.extract-face-body .markdown-editor .ProseMirror {
   font: inherit;
   color: inherit;
   white-space: pre-wrap;
@@ -6071,93 +6143,15 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   min-height: 2.6em;
   outline: none;
   caret-color: var(--accent);
-  /* Milkdown 根节点自带 `editor` 类，会命中快速摘录浮窗的 .editor 规则（theme.css .editor：
-     fixed / 320px / 纸底 / 浮层阴影；另有浮层家族的 pop-in 入场动画同样命中）——D95 v1.3
-     实测被劫持成窄列白盒 + scale 弹入。在卡面作用域内逐项抵消，编辑态窗口与读态完全同形
-     （同宽、无底色、无阴影、无入场动画、随流布局、无跳版）。 */
-  position: static;
-  width: auto;
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-  z-index: auto;
-  animation: none;
 }
-/* 瑞士风焦点：编辑态用 hairline 内描边表达「在编辑」，不做光晕 */
-.extract-face-body .ProseMirror:focus-visible { outline: none; }
+.extract-face-body .markdown-editor .ProseMirror:focus-visible { outline: none; }
 .extract-face-body[data-editing="1"] { cursor: text; }
 
-/* markdown 元素（读态与编辑态同规）：字号阶梯用 em（随字号桥整体缩放），色/距/线用既有 Token */
-.extract-face-body h1, .extract-face-body h2, .extract-face-body h3,
-.extract-face-body h4, .extract-face-body h5, .extract-face-body h6 {
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--text-primary);
-  margin: 1.2em 0 0.5em;
-}
-.extract-face-body h1:first-child, .extract-face-body h2:first-child,
-.extract-face-body h3:first-child, .extract-face-body h4:first-child,
-.extract-face-body p:first-child, .extract-face-body ul:first-child,
-.extract-face-body ol:first-child, .extract-face-body blockquote:first-child,
-.extract-face-body pre:first-child, .extract-face-body table:first-child { margin-top: 0; }
-.extract-face-body h1 { font-size: 1.5em; }
-.extract-face-body h2 { font-size: 1.3em; }
-.extract-face-body h3 { font-size: 1.15em; }
-.extract-face-body h4, .extract-face-body h5, .extract-face-body h6 { font-size: 1em; }
-.extract-face-body p { margin: 0 0 0.7em; }
-.extract-face-body p:last-child { margin-bottom: 0; }
-.extract-face-body ul, .extract-face-body ol { margin: 0 0 0.7em; padding-left: 1.5em; }
-.extract-face-body li { margin: 0.2em 0; }
-/* gfm 任务列表：checkbox 随正文色，去列表符（.task-list-item 由 remark-gfm 输出） */
-.extract-face-body li.task-list-item { list-style: none; margin-left: -1.2em; }
-.extract-face-body li.task-list-item input[type="checkbox"] { margin-right: 0.4em; vertical-align: middle; }
-.extract-face-body blockquote {
-  margin: 0 0 0.7em;
-  padding: 0 0 0 var(--sp-3);
-  border-left: 2px solid var(--border-strong);
-  color: var(--text-secondary);
-}
-.extract-face-body blockquote > *:last-child { margin-bottom: 0; }
-/* 行内代码与代码块：mono、grey-1 底、hairline 描边、直角 */
-.extract-face-body code {
-  font-family: var(--font-mono);
-  font-size: 0.88em;
-  background: var(--grey-1);
-  border: 1px solid var(--border-subtle);
-  padding: 0 0.25em;
-}
-.extract-face-body pre {
-  margin: 0 0 0.7em;
-  padding: var(--sp-2) var(--sp-3);
-  background: var(--grey-1);
-  border: 1px solid var(--border-subtle);
-  overflow-x: auto;
-}
-.extract-face-body pre code { background: none; border: none; padding: 0; font-size: var(--fs-secondary); }
-/* 表格：hairline 网格、直角、表头 mono meta 档 */
-.extract-face-body table { border-collapse: collapse; margin: 0 0 0.7em; font-size: 0.95em; }
-.extract-face-body th, .extract-face-body td {
-  border: 1px solid var(--border-subtle);
-  padding: var(--sp-1) var(--sp-2);
-  text-align: left;
-}
-.extract-face-body th { font-weight: 600; background: var(--grey-1); }
-/* 分隔线：hairline */
-.extract-face-body hr { border: none; border-top: 1px solid var(--border-subtle); margin: 1.2em 0; }
-.extract-face-body a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
-.extract-face-body del, .extract-face-body s, .extract-face-body strike { color: var(--text-secondary); }
-.extract-face-body img { max-width: 100%; }
-/* 公式（编辑态的 math 节点源码呈现；读态为 rehype-katex 输出） */
-.extract-face-body .extract-math-block-src { font-family: var(--font-mono); font-size: var(--fs-secondary); }
-.extract-face-body .extract-math-inline, .extract-face-body .extract-math-block { color: var(--text-primary); }
-.extract-face-body .katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; }
-.extract-face-body .katex { font-size: 1.05em; }
 /* D95 v1.4（用户反馈「编辑后换行消失」）：Milkdown 把段内软换行（源文单个 \n）渲染成
    span[data-type=hardbreak]，内容是一个空格——视觉上「挤成一整段」。CSS 让它真正断行：
    display:block 切断行内流，height:0 + visibility:hidden 不占高、空格不可见。
    序列化不受影响（inline hardbreak 序列化回源文 \n，实测逐字保留）。 */
-.extract-face-body .ProseMirror span[data-type="hardbreak"] {
+.extract-face-body .markdown-editor .ProseMirror span[data-type="hardbreak"] {
   display: block;
   height: 0;
   visibility: hidden;

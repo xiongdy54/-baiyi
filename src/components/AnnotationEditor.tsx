@@ -192,7 +192,7 @@ export default function AnnotationEditor({
   return (
     <div
       ref={panelRef}
-      className="editor"
+      className="annot-editor"
       role="dialog"
       aria-modal="false"
       aria-label={kind === "highlight" ? "编辑高亮" : "编辑摘录"}

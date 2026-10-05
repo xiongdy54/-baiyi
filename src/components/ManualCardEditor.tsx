@@ -11,7 +11,36 @@ import { useDialogA11y } from "../lib/dialogA11y";
 import { attachRipple, settle } from "../lib/press";
 import { IconChevronDown, IconClose } from "./icons";
 import OcclusionShapes from "./OcclusionShapes";
+import MarkdownEditor from "./editor/MarkdownEditor";
 import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
+
+/** §J P0（#4）：制卡表单字段统一 Markdown 紧凑档（无工具条、矮盒 minRows=2）。
+    onChange 实时镜像（canSave 门控与挖空预览保持逐键响应）；提交语义不需要（表单保存走「创建卡片」），
+    onCommit 置空——失焦提交只做镜像核对，不写库（落库链零新通道）。 */
+function MdField({
+  value,
+  onChange,
+  placeholder,
+  label
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  label?: string;
+}) {
+  return (
+    <MarkdownEditor
+      value={value}
+      variant="compact"
+      toolbar={false}
+      minRows={2}
+      placeholder={placeholder}
+      ariaLabel={label}
+      onChange={onChange}
+      onCommit={() => {}}
+    />
+  );
+}
 
 /** 手动制卡的提交载荷（原在 Reader.tsx，Task 4 随组件一并搬出） */
 export interface ManualCardPayload {
@@ -140,30 +169,30 @@ export function ManualCardForm({
             <p className="form-hint">翻转问答：一次性创建两张互为翻转的独立问答卡（B 面留空则自动正反互换），各自有独立的复习调度。</p>
             <div className="form-field">
               <label>A 面 · 题面（建议「领域前缀: 问题」）</label>
-              <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="例：统计: 中位数是什么？" />
+              <MdField value={front} onChange={setFront} placeholder="例：统计: 中位数是什么？" label="题面" />
             </div>
             <div className="form-field">
               <label>A 面 · 答案（目标 ≤15 字）</label>
-              <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：排序后位于中间位置的数" />
+              <MdField value={back} onChange={setBack} placeholder="例：排序后位于中间位置的数" label="答案" />
             </div>
             <div className="form-field">
               <label>B 面 · 题面（留空则自动用 A 面答案反向提问）</label>
-              <textarea className="ta-short" value={bFront} onChange={(e) => setBFront(e.target.value)} placeholder="例：统计: 排序后位于中间位置的数叫什么？" />
+              <MdField value={bFront} onChange={setBFront} placeholder="例：统计: 排序后位于中间位置的数叫什么？" label="B 面 · 题面" />
             </div>
             <div className="form-field">
               <label>B 面 · 答案（留空则自动用 A 面题面）</label>
-              <textarea className="ta-short" value={bBack} onChange={(e) => setBBack(e.target.value)} placeholder="例：中位数" />
+              <MdField value={bBack} onChange={setBBack} placeholder="例：中位数" label="B 面 · 答案" />
             </div>
           </>
         ) : mode === "qa" ? (
           <>
             <div className="form-field">
               <label>正面（问题，建议「领域前缀: 问题」）</label>
-              <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="例：统计: 中位数是什么？" />
+              <MdField value={front} onChange={setFront} placeholder="例：统计: 中位数是什么？" label="题面" />
             </div>
             <div className="form-field">
               <label>背面（答案，目标 ≤15 字）</label>
-              <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：排序后位于中间位置的数" />
+              <MdField value={back} onChange={setBack} placeholder="例：排序后位于中间位置的数" label="答案" />
             </div>
           </>
         ) : mode === "cloze" ? (
@@ -171,7 +200,7 @@ export function ManualCardForm({
             <label>
               挖空文本（用 **双星号** 或〔括号〕包住答案，自动转 Anki 挖空；多挖空用 c1/c2 编号语法）
             </label>
-            <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} />
+            <MdField value={front} onChange={setFront} label="挖空文本" />
             <p className="form-preview mono">{front.replace(/\*\*(.+?)\*\*/g, "〔$1〕")}</p>
           </div>
         ) : (
@@ -187,11 +216,11 @@ export function ManualCardForm({
                 </div>
                 <div className="form-field">
                   <label>正面（问题，默认「图中遮挡区域对应的是什么？」）</label>
-                  <textarea className="ta-short" value={front} onChange={(e) => setFront(e.target.value)} placeholder="图中遮挡区域对应的是什么？" />
+                  <MdField value={front} onChange={setFront} placeholder="图中遮挡区域对应的是什么？" label="正面（图片挖空）" />
                 </div>
                 <div className="form-field">
                   <label>背面（答案，必填）</label>
-                  <textarea className="ta-short" value={back} onChange={(e) => setBack(e.target.value)} placeholder="例：海马体" />
+                  <MdField value={back} onChange={setBack} placeholder="例：海马体" label="背面（图片挖空）" />
                 </div>
               </>
             ) : (

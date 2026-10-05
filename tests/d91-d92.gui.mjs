@@ -116,6 +116,17 @@ async function connect() {
   throw new Error("CDP 连接失败");
 }
 
+// §J P0：制卡表单字段已统一为紧凑档 Markdown 编辑器（ProseMirror contenteditable）——
+// 填写/读取改走 PM（聚焦 + selectAll + insertText；textContent 读回）
+const setPM = (sel, value) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)});
+  if (!el) return "no-el";
+  el.focus();
+  document.execCommand("selectAll", false, null);
+  document.execCommand("insertText", false, ${JSON.stringify(value)});
+  return "inserted";
+})()`;
+
 const parseState = (s) => { try { return JSON.parse(s); } catch { return {}; } };
 
 // ---------- 真鼠标拖选 / 点击（marks.gui 同法） ----------
@@ -240,7 +251,7 @@ try {
   await wait(500);
   const g1a = parseState(await cdp.eval(`JSON.stringify({
     dock: !!document.querySelector('[data-card-dock]'),
-    manualForm: !!document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] textarea'),
+    manualForm: !!document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror'),
     pressed: document.querySelector('[data-testid="dock-manual"]')?.getAttribute('aria-pressed'),
     tabs: !!document.querySelector('[data-testid="dock-tabs"]'),
     shifted: document.querySelector('.reader-body')?.className.includes('reader-body-shifted')
@@ -248,25 +259,20 @@ try {
   check("坞挂载 + 手动暂态占坞（空表单可自由制卡）", g1a.dock && g1a.manualForm && g1a.pressed === "true", JSON.stringify(g1a));
   check("坞头双页签在位（role=tablist）", g1a.tabs, g1a.tabs);
   check("展开时正文让位（reader-body-shifted）", g1a.shifted === true, g1a.shifted);
-  await cdp.eval(`(() => {
-    const ta = document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] textarea');
-    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-    set.call(ta, 'FSRSTEST 草稿句子');
-    ta.dispatchEvent(new Event('input', { bubbles: true }));
-    return 'typed';
-  })()`);
+  await cdp.eval(setPM('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror', 'FSRSTEST 草稿句子'));
+  await wait(400); // 等 React 状态回流（PM onChange → 表单状态）
   // 草稿保活：切页签隐藏不卸载，点「＋制卡」回表单输入仍在（§7.7）
   await cdp.eval(`document.querySelector('[data-testid="dock-tab-explain"]').click()`);
   await wait(300);
   const g1b = parseState(await cdp.eval(`JSON.stringify({
     manualHidden: document.querySelector('[data-card-dock] [data-dock-tabbody="manual"]')?.style.display === 'none',
-    manualMounted: !!document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] textarea'),
+    manualMounted: !!document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror'),
     emptyExplain: !!document.querySelector('[data-dock-empty="explain"]')
   })`));
   check("切页签：表单隐藏保活（display:none 不卸载）+ 解释页签空态在场", g1b.manualHidden && g1b.manualMounted && g1b.emptyExplain, JSON.stringify(g1b));
   await cdp.eval(`document.querySelector('[data-testid="dock-manual"]').click()`);
   await wait(300);
-  const draftBack = await cdp.eval(`document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] textarea')?.value || ''`);
+  const draftBack = await cdp.eval(`document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror')?.textContent || ''`);
   check("点「＋制卡」回表单，草稿仍在", draftBack === "FSRSTEST 草稿句子", draftBack);
   await cdp.eval(`(() => { const b = [...document.querySelectorAll('[data-card-dock] button')].find((x) => x.textContent === '取消'); if (b) b.click(); return 'closed'; })()`);
   await wait(400);

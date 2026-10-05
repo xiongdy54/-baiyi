@@ -87,6 +87,16 @@ function spawnApp() {
   });
 }
 
+// §J P0：markdown 编辑器（ProseMirror contenteditable）内容写入——聚焦后 selectAll+insertText
+// （execCommand 走 beforeinput 管道，ProseMirror 原生处理；等价旧 textarea 的 setValue+input）
+const setPM = (sel, value) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)});
+  if (!el) return false;
+  el.focus();
+  document.execCommand("selectAll", false, null);
+  document.execCommand("insertText", false, ${JSON.stringify(value)});
+  return true;
+})()`;
 // 设置受控 textarea/input 的值并触发 React onChange（原生 setter + input 事件，React 才能感知）
 const setValue = (sel, value) => `(() => {
   const el = document.querySelector(${JSON.stringify(sel)});
@@ -120,7 +130,7 @@ try {
 
   // 1. 导航「日记」存在并可切换
   const navLabels = await main.eval(`[...document.querySelectorAll(".nav-item")].map((b) => b.textContent.trim()).join("/")`);
-  check("顶栏导航含「日记」（书架/队列/复习/卡片/日记/数据）", navLabels === "书架/队列/复习/卡片/日记/数据", navLabels);
+  check("顶栏导航含「日记」（书架/摘录/复习/卡片/日记/数据；D58 起二项为摘录）", navLabels === "书架/摘录/复习/卡片/日记/数据", navLabels);
   await main.eval(clickByText(".nav-item", "日记"));
   await wait(900);
   const journalMounted = await main.eval(`!!document.querySelector(".journal")`);
@@ -129,14 +139,15 @@ try {
   check("空状态提示含全局快捷键（真实键位）", emptyText.includes("Ctrl+Alt+Space"), emptyText);
 
   // 2. 主窗口当日输入行：Enter 提交为一条
-  const typed = await main.eval(setValue(".journal-composer-area", `${MARK} 主窗口写下的一条`));
+  const typed = await main.eval(setPM(".journal-composer .ProseMirror", `${MARK} 主窗口写下的一条`));
   check("输入行可写入", typed === true, typed);
+  await wait(400); // 等 React 状态回流（PM onChange → setState），否则「记下」按钮仍持旧 disabled 态
   await main.eval(clickByText(".journal-composer .btn-primary", "记下"));
   await wait(1200);
   const afterCompose = await main.eval(`JSON.stringify({
     entries: document.querySelectorAll(".journal-entry:not(.journal-draft)").length,
     text: document.querySelector(".journal-entry-md")?.textContent || "",
-    composerCleared: (document.querySelector(".journal-composer-area")?.value || "") === ""
+    composerCleared: (document.querySelector(".journal-composer .ProseMirror")?.textContent || "") === ""
   })`);
   const ac = JSON.parse(afterCompose || "{}");
   check("提交后日记出现 1 条且内容正确", ac.entries === 1 && String(ac.text).includes("主窗口写下的一条"), afterCompose);
@@ -169,8 +180,8 @@ try {
   check("空内容时「发送」置灰", cs.sendDisabled === true, capShell);
 
   // 5. 输入即自动保存（零点击）
-  await cap.eval(`document.querySelector(".cap-editor")?.focus()`);
-  await cap.eval(setValue(".cap-editor", `${MARK} 快速记录随想`));
+  await cap.eval(`document.querySelector(".cap-editor-md .ProseMirror")?.focus()`);
+  await cap.eval(setPM(".cap-editor-md .ProseMirror", `${MARK} 快速记录随想`));
   await wait(2200); // 防抖 1.2s + IPC
   const savedState = await cap.eval(`JSON.stringify({
     status: document.querySelector(".cap-status")?.textContent || "",
@@ -202,16 +213,16 @@ try {
   await wait(700);
   await main.eval(`(async () => await window.shortcutsAPI.toggleCapture())()`);
   await wait(1400);
-  const resumed = await cap.eval(`document.querySelector(".cap-editor")?.value || ""`);
+  const resumed = await cap.eval(`document.querySelector(".cap-editor-md .ProseMirror")?.textContent || ""`);
   check("隐藏后重新呼出：草稿内容原样保留（可继续向下写）", resumed.includes("快速记录随想"), resumed);
-  await cap.eval(setValue(".cap-editor", `${MARK} 快速记录随想（续写并发送）`));
+  await cap.eval(setPM(".cap-editor-md .ProseMirror", `${MARK} 快速记录随想（续写并发送）`));
   await wait(1800);
 
   // 8. 发送 → 编辑器清空 + 提示 + 主窗口出现正式条目
   await cap.eval(`document.querySelector(".cap-footer .btn-primary")?.click()`);
   await wait(1400);
   const sentState = await cap.eval(`JSON.stringify({
-    value: document.querySelector(".cap-editor")?.value || "",
+    value: document.querySelector(".cap-editor-md .ProseMirror")?.textContent || "",
     toast: document.querySelector(".cap-toast")?.textContent || "",
     meta: document.querySelector(".cap-meta")?.textContent || ""
   })`);

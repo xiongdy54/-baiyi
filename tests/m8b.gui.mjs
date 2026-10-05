@@ -85,6 +85,16 @@ function spawnApp() {
   });
 }
 
+// §J P0：markdown 编辑器（ProseMirror contenteditable）内容写入——聚焦后 selectAll+insertText
+// （execCommand 走 beforeinput 管道，ProseMirror 原生处理；等价旧 textarea 的 setValue+input）
+const setPM = (sel, value) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)});
+  if (!el) return false;
+  el.focus();
+  document.execCommand("selectAll", false, null);
+  document.execCommand("insertText", false, ${JSON.stringify(value)});
+  return true;
+})()`;
 const setValue = (sel, value) => `(() => {
   const el = document.querySelector(${JSON.stringify(sel)});
   if (!el) return false;
@@ -115,7 +125,8 @@ try {
   check("应用启动", (await main.eval(`!!document.querySelector("#root")`)) === true, "root");
   await main.eval(clickByText(".nav-item", "日记"));
   await wait(900);
-  await main.eval(setValue(".journal-composer-area", MARK));
+  await main.eval(setPM(".journal-composer .ProseMirror", MARK));
+  await wait(400); // 等 React 状态回流（PM onChange → setState），否则「记下」按钮仍持旧 disabled 态
   await main.eval(clickByText(".journal-composer .btn-primary", "记下"));
   await wait(1200);
   check("日记条目已写入", (await main.eval(`(document.querySelector(".journal-entry-md")?.textContent || "").includes("刻意练习")`)) === true, "entry");

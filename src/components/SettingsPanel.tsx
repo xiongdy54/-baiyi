@@ -17,11 +17,13 @@ import {
   readExtractCardSettings,
   DEFAULT_EXTRACT_EDITOR_TOOLBAR,
   DEFAULT_EXTRACT_EDITOR_TOOLBAR_FLOAT,
+  DEFAULT_EXTRACT_EDITOR_TOOLBAR_TOP,
   DEFAULT_EXTRACT_FACE_FONT_FOLLOW,
   DEFAULT_EXTRACT_FACE_FONT_SIZE,
   DEFAULT_EXTRACT_FACE_FONT_FAMILY,
   type ExtractCardSettings
 } from "../lib/extractCardSettings";
+import { DEFAULT_READER_ACTIONS_FLOAT, normalizeReaderActionsFloat } from "../lib/readerActionsSettings";
 import { shortcutsApi, type ShortcutStatus } from "../lib/journal";
 import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
@@ -1118,14 +1120,17 @@ function ReaderSection() {
   const [multiKey, setMultiKey] = useState<MultiSelectKey | null>(null);
   // 批 4（规格 §9.2）：就地批注四键——读侧统一走 lib/annotationSettings（与两宿主同一份归一）
   const [annot, setAnnot] = useState<AnnotationSettings>(DEFAULT_ANNOT_SETTINGS);
-  // D95 §E/§F：摘录卡编辑器工具栏 + 字号/字体四键（读侧同一份归一；写侧 main.js settings:set 再归一一次）
+  // D95 §E/§F：摘录卡编辑器工具栏 + 字号/字体键（读侧同一份归一；写侧 main.js settings:set 再归一一次）
   const [ext, setExt] = useState<ExtractCardSettings>({
     extractEditorToolbar: DEFAULT_EXTRACT_EDITOR_TOOLBAR,
     extractEditorToolbarFloat: DEFAULT_EXTRACT_EDITOR_TOOLBAR_FLOAT,
+    extractEditorToolbarTop: DEFAULT_EXTRACT_EDITOR_TOOLBAR_TOP,
     extractFaceFontFollow: DEFAULT_EXTRACT_FACE_FONT_FOLLOW,
     extractFaceFontSize: DEFAULT_EXTRACT_FACE_FONT_SIZE,
     extractFaceFontFamily: DEFAULT_EXTRACT_FACE_FONT_FAMILY
   });
+  // §K.4：阅读器选区动作组呈现（false＝固定顶栏，true＝选区锚定弹层）
+  const [readerActionsFloat, setReaderActionsFloat] = useState(DEFAULT_READER_ACTIONS_FLOAT);
   useEffect(() => {
     settingsStore
       .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
@@ -1139,6 +1144,9 @@ function ReaderSection() {
     void readMultiSelectKey().then(setMultiKey);
     void readAnnotationSettings().then(setAnnot);
     void readExtractCardSettings().then(setExt);
+    void settingsStore
+      .get<unknown>("app", "readerActionsFloat", DEFAULT_READER_ACTIONS_FLOAT)
+      .then((v) => setReaderActionsFloat(normalizeReaderActionsFloat(v)));
   }, []);
   const save = (next: ReaderSettings) => {
     setCfg(next);
@@ -1148,11 +1156,12 @@ function ReaderSection() {
     setMultiKey(key);
     void settingsStore.set("app", "multiSelectKey", key);
   };
-  /** D95：写摘录卡四键（键名用显式字面量——f18 消费者扫描器按常量名反查，见 annotationSettings 同款注释） */
+  /** D95：写摘录卡键（键名用显式字面量——f18 消费者扫描器按常量名反查，见 annotationSettings 同款注释） */
   const saveExtract = (next: ExtractCardSettings) => {
     setExt(next);
     void settingsStore.set("app", "extractEditorToolbar", next.extractEditorToolbar);
     void settingsStore.set("app", "extractEditorToolbarFloat", next.extractEditorToolbarFloat);
+    void settingsStore.set("app", "extractEditorToolbarTop", next.extractEditorToolbarTop);
     void settingsStore.set("app", "extractFaceFontFollow", next.extractFaceFontFollow);
     void settingsStore.set("app", "extractFaceFontSize", next.extractFaceFontSize);
     void settingsStore.set("app", "extractFaceFontFamily", next.extractFaceFontFamily);
@@ -1320,7 +1329,7 @@ function ReaderSection() {
           <span>编辑时显示</span>
         </label>
       </div>
-      {/* D95 v1.4：工具栏形态——钉底（默认）/悬浮面板 */}
+      {/* D95 v1.4→§K.3：工具栏形态——dock（钉底/钉顶）/悬浮＝选区锚定弹层 */}
       <div className="settings-row">
         <span>工具栏形态</span>
         <label className="widget-toggle-main">
@@ -1330,10 +1339,43 @@ function ReaderSection() {
             checked={ext.extractEditorToolbarFloat}
             onChange={(e) => saveExtract({ ...ext, extractEditorToolbarFloat: e.target.checked })}
           />
-          <span>悬浮工具条</span>
+          <span>悬浮于选中文字</span>
         </label>
       </div>
-      <p className="form-hint">编辑器下方的加粗/标题/列表/公式等按钮；关闭后仍可用 markdown 语法输入与快捷键。悬浮＝工具栏脱开文本框、吸在滚动区下缘。</p>
+      {/* §K.2：dock 态钉底/钉顶（悬浮态优先于本键；钉顶时工具条吸顶并让开吸顶头带） */}
+      <div className="settings-row">
+        <span>工具栏固定位置（非悬浮时）</span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-extract-editor-toolbar-top"
+            checked={ext.extractEditorToolbarTop}
+            onChange={(e) => saveExtract({ ...ext, extractEditorToolbarTop: e.target.checked })}
+          />
+          <span>固定在顶部</span>
+        </label>
+      </div>
+      <p className="form-hint">
+        编辑时选中文字即可用工具条加粗/标题/列表/公式等；关闭工具条仍可用 markdown 语法输入与快捷键。
+        悬浮＝工具条弹层锚定当前选中的文字（上方居中，空间不足翻到下方）；非悬浮时工具条随文档流固定在顶部（吸顶）或底部（吸底）。
+      </p>
+      {/* §K.4：阅读器选区动作组（高亮/摘录/制卡/查词等）呈现位置 */}
+      <div className="settings-row">
+        <span>阅读器选区动作组</span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-reader-actions-float"
+            checked={readerActionsFloat}
+            onChange={(e) => {
+              setReaderActionsFloat(e.target.checked);
+              void settingsStore.set("app", "readerActionsFloat", e.target.checked);
+            }}
+          />
+          <span>悬浮于选中文字</span>
+        </label>
+      </div>
+      <p className="form-hint">默认固定在阅读器顶栏；开启后选中文字时动作组以弹层浮现在选中的文字旁（同一组按钮，功能不变）。</p>
       {/* D95 §F.2：摘录卡字号——默认跟随阅读界面，可独立自定义字号/字体（行高恒跟随） */}
       <div className="settings-row">
         <span>摘录卡字号</span>

@@ -1,6 +1,7 @@
-// 摘录卡编辑器/字号设置（D95 §E/§F + v1.4）——五新键的读侧归一 + typography 桥。
+// 摘录卡编辑器/字号设置（D95 §E/§F + v1.4 + §K 第二轮）——六新键的读侧归一 + typography 桥。
 //   app.extractEditorToolbar        bool        默认 true（编辑器下方富文本工具栏开关）
-//   app.extractEditorToolbarFloat   bool        默认 false（v1.4：false＝钉在文本框底端，true＝悬浮面板）
+//   app.extractEditorToolbarFloat   bool        默认 false（§K.3：false＝随文档流钉底/钉顶，true＝悬浮于选中文字的弹层）
+//   app.extractEditorToolbarTop     bool        默认 false（§K.2：dock 态钉底/钉顶——false＝sticky 吸滚动区下缘，true＝吸顶并让开吸顶头带）
 //   app.extractFaceFontFollow       bool        默认 true（字号/字体跟随阅读器外观；行高恒跟随）
 //   app.extractFaceFontSize         int 10–40   默认 17（follow=false 时的卡面字号）
 //   app.extractFaceFontFamily       string      默认 ""（独立字体键；留空一律回落应用无衬线栈，v1.3）
@@ -13,6 +14,7 @@ import { DEFAULT_READER_SETTINGS, resolveAppearance, type ReaderSettings } from 
 
 export const DEFAULT_EXTRACT_EDITOR_TOOLBAR = true;
 export const DEFAULT_EXTRACT_EDITOR_TOOLBAR_FLOAT = false;
+export const DEFAULT_EXTRACT_EDITOR_TOOLBAR_TOP = false;
 export const DEFAULT_EXTRACT_FACE_FONT_FOLLOW = true;
 export const DEFAULT_EXTRACT_FACE_FONT_SIZE = 17;
 export const DEFAULT_EXTRACT_FACE_FONT_FAMILY = "";
@@ -23,6 +25,10 @@ export function normalizeExtractEditorToolbar(v: unknown): boolean {
 }
 
 export function normalizeExtractEditorToolbarFloat(v: unknown): boolean {
+  return v === true;
+}
+
+export function normalizeExtractEditorToolbarTop(v: unknown): boolean {
   return v === true;
 }
 
@@ -43,16 +49,18 @@ export function normalizeExtractFaceFontFamily(v: unknown): string {
 export interface ExtractCardSettings {
   extractEditorToolbar: boolean;
   extractEditorToolbarFloat: boolean;
+  extractEditorToolbarTop: boolean;
   extractFaceFontFollow: boolean;
   extractFaceFontSize: number;
   extractFaceFontFamily: string;
 }
 
-/** 一次读齐五键（都是读侧归一后的值） */
+/** 一次读齐六键（都是读侧归一后的值） */
 export async function readExtractCardSettings(): Promise<ExtractCardSettings> {
-  const [toolbar, toolbarFloat, follow, fontSize, fontFamily] = await Promise.all([
+  const [toolbar, toolbarFloat, toolbarTop, follow, fontSize, fontFamily] = await Promise.all([
     settingsStore.get<unknown>("app", "extractEditorToolbar", DEFAULT_EXTRACT_EDITOR_TOOLBAR),
     settingsStore.get<unknown>("app", "extractEditorToolbarFloat", DEFAULT_EXTRACT_EDITOR_TOOLBAR_FLOAT),
+    settingsStore.get<unknown>("app", "extractEditorToolbarTop", DEFAULT_EXTRACT_EDITOR_TOOLBAR_TOP),
     settingsStore.get<unknown>("app", "extractFaceFontFollow", DEFAULT_EXTRACT_FACE_FONT_FOLLOW),
     settingsStore.get<unknown>("app", "extractFaceFontSize", DEFAULT_EXTRACT_FACE_FONT_SIZE),
     settingsStore.get<unknown>("app", "extractFaceFontFamily", DEFAULT_EXTRACT_FACE_FONT_FAMILY)
@@ -60,13 +68,14 @@ export async function readExtractCardSettings(): Promise<ExtractCardSettings> {
   return {
     extractEditorToolbar: normalizeExtractEditorToolbar(toolbar),
     extractEditorToolbarFloat: normalizeExtractEditorToolbarFloat(toolbarFloat),
+    extractEditorToolbarTop: normalizeExtractEditorToolbarTop(toolbarTop),
     extractFaceFontFollow: normalizeExtractFaceFontFollow(follow),
     extractFaceFontSize: normalizeExtractFaceFontSize(fontSize),
     extractFaceFontFamily: normalizeExtractFaceFontFamily(fontFamily)
   };
 }
 
-const EXTRACT_KEYS = ["extractEditorToolbar", "extractEditorToolbarFloat", "extractFaceFontFollow", "extractFaceFontSize", "extractFaceFontFamily"] as const;
+const EXTRACT_KEYS = ["extractEditorToolbar", "extractEditorToolbarFloat", "extractEditorToolbarTop", "extractFaceFontFollow", "extractFaceFontSize", "extractFaceFontFamily"] as const;
 
 /** 工具栏开关的渲染层订阅（设置页改动即时生效） */
 export function useExtractEditorToolbar(): boolean {
@@ -91,7 +100,7 @@ export function useExtractEditorToolbar(): boolean {
   return on;
 }
 
-/** 工具栏形态订阅（v1.4：false＝钉底 dock，true＝悬浮面板） */
+/** 工具栏形态订阅（§K.3：false＝随文档流 dock（钉底/钉顶由 Top 键定），true＝悬浮于选中文字的弹层） */
 export function useExtractEditorToolbarFloat(): boolean {
   const [float, setFloat] = useState(DEFAULT_EXTRACT_EDITOR_TOOLBAR_FLOAT);
   useEffect(() => {
@@ -112,6 +121,29 @@ export function useExtractEditorToolbarFloat(): boolean {
     };
   }, []);
   return float;
+}
+
+/** dock 态钉底/钉顶订阅（§K.2：false＝sticky 吸滚动区下缘（默认），true＝吸顶并让开吸顶头带） */
+export function useExtractEditorToolbarTop(): boolean {
+  const [top, setTop] = useState(DEFAULT_EXTRACT_EDITOR_TOOLBAR_TOP);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      void readExtractCardSettings().then((s) => {
+        if (alive) setTop(s.extractEditorToolbarTop);
+      });
+    };
+    load();
+    const off = eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload?.scope === "app" && payload.key === "extractEditorToolbarTop") load();
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+  return top;
 }
 
 /**

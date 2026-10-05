@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatClock, journalDateLabel, todayJournalDate, type JournalEntry } from "../lib/journal";
 import { applyAccent } from "../lib/accentVar";
+import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 const TOAST_MS = 2600;
@@ -41,7 +42,7 @@ export default function CaptureEditor() {
   const [toast, setToast] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
-  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const mdRef = useRef<MarkdownEditorApi | null>(null);
   const debounceRef = useRef<number | null>(null);
   const toastRef = useRef<number | null>(null);
   const textRef = useRef("");
@@ -49,15 +50,8 @@ export default function CaptureEditor() {
   const sendingRef = useRef(false); // 发送并发闸（ref 同步，双击不会发出两条）
 
   const focusEditor = useCallback(() => {
-    const el = taRef.current;
-    if (!el) return;
-    el.focus();
-    try {
-      const len = el.value.length;
-      el.setSelectionRange(len, len);
-    } catch {
-      /* 忽略：非致命 */
-    }
+    // §J P0：编辑器内容区聚焦，光标落到文档末尾（「继续向下写」语义，与旧 textarea 一致）
+    mdRef.current?.focusEnd();
   }, []);
 
   const showToast = useCallback((message: string) => {
@@ -174,17 +168,19 @@ export default function CaptureEditor() {
     }, AUTOSAVE_DEBOUNCE_MS);
   }
 
-  // Esc 隐藏（先把待保存输入补一次，绝不因隐藏而丢字）；Ctrl+Enter 发送
-  async function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Escape") {
-      e.preventDefault();
+  // §J P0：Esc 语义由 MarkdownEditor 内部承接（先提交再通知），这里补「隐藏窗口」（绝不因隐藏丢字）
+  function handleEscape() {
+    void (async () => {
       await flush();
       await window.captureAPI?.hide();
-      return;
-    }
+    })();
+  }
+
+  // §J P0：Ctrl+Enter 发送（编辑器其余键全部交给 markdown 输入，Enter＝换行段落）
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      await send();
+      void send();
     }
   }
 
@@ -296,16 +292,29 @@ export default function CaptureEditor() {
         </div>
       )}
 
-      <textarea
-        ref={taRef}
-        className="cap-editor"
-        value={text}
-        onChange={(e) => handleChange(e.target.value)}
-        onKeyDown={(e) => void handleKeyDown(e)}
-        placeholder="随手写点什么…（支持 Markdown，输入即自动保存）"
-        spellCheck={false}
-        autoFocus
-      />
+      {/* §J P0：主正文统一 Markdown 编辑器（含工具条，形态设置随组件走）。
+          滚动区包裹层替换旧 textarea 的 flex:1 撑满；编辑中 onChange 镜像走原防抖自动保存链。 */}
+      <div className="cap-editor-scroll">
+        <MarkdownEditor
+          ref={mdRef}
+          value={text}
+          onChange={(md) => handleChange(md)}
+          onCommit={(md) => {
+            if (md !== null) {
+              // 失焦/Esc 提交：越过防抖立即定格（md 即最新序列化）
+              textRef.current = md;
+              dirtyRef.current = true;
+              void save();
+            }
+          }}
+          onEscape={handleEscape}
+          onKeyDown={handleKeyDown}
+          onReady={focusEditor}
+          placeholder="随手写点什么…（支持 Markdown，输入即自动保存）"
+          className="cap-editor-md"
+          toolbarLabel="快速记录工具栏"
+        />
+      </div>
 
       <footer className="cap-footer">
         <span className={`cap-status${saveState === "error" ? " cap-status-error" : ""}`}>

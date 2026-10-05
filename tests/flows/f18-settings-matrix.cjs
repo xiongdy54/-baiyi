@@ -30,7 +30,10 @@ const esbuild = require("esbuild");
 const EXTNORM_OUT = path.join(os.tmpdir(), `extnorm-f18-${process.pid}.cjs`);
 esbuild.buildSync({
   stdin: {
-    contents: 'export { normalizeExtractEditorToolbar, normalizeExtractEditorToolbarFloat, normalizeExtractFaceFontFollow, normalizeExtractFaceFontSize, normalizeExtractFaceFontFamily } from "./src/lib/extractCardSettings";',
+    contents: [
+      'export { normalizeExtractEditorToolbar, normalizeExtractEditorToolbarFloat, normalizeExtractEditorToolbarTop, normalizeExtractFaceFontFollow, normalizeExtractFaceFontSize, normalizeExtractFaceFontFamily } from "./src/lib/extractCardSettings";',
+      'export { normalizeReaderActionsFloat } from "./src/lib/readerActionsSettings";'
+    ].join("\n"),
     resolveDir: ROOT,
     loader: "ts"
   },
@@ -63,7 +66,8 @@ const DOC_KEYS = [
   "app.limits", // §6.8-1 / §6.8-5（v48.22 / D58 四类每日上限 + ignoreReviewLimitForNew）
   "app.reviewScopes", // §6.8-5（v48.22 / D58 复习范围/筛选牌组；零 schema 变更）
   "app.annotateMode", "app.annotateForm", "app.annotatePalette", "app.annotateCustomEnabled", "app.annotationFilter", // 批 4 / §9.2（就地批注键；v48.42/D82 形式拆 annotateForm）
-  "app.extractEditorToolbar", "app.extractEditorToolbarFloat", "app.extractFaceFontFollow", "app.extractFaceFontSize", "app.extractFaceFontFamily", // §7.4 v48.54 / D95（摘录卡编辑器工具栏与形态 + 字号/字体桥）
+  "app.extractEditorToolbar", "app.extractEditorToolbarFloat", "app.extractEditorToolbarTop", "app.extractFaceFontFollow", "app.extractFaceFontSize", "app.extractFaceFontFamily", // §7.4 v48.54 / D95（摘录卡编辑器工具栏与形态 + 字号/字体桥；v48.55/§K 增钉顶键）
+  "app.readerActionsFloat", // §7.4 v48.55 / D95 §K.4（阅读器选区动作组固定/悬浮）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -253,7 +257,9 @@ app
         ["app", "annotateCustomEnabled", false],
         ["app", "annotationFilter", "highlight"],
         ["app", "extractEditorToolbar", false],           // v48.54 / D95 摘录卡编辑工具栏（非默认值，才验得出往返）
-        ["app", "extractEditorToolbarFloat", true],       // v48.54 / D95 v1.4 工具栏形态（默认 false＝钉底；true＝悬浮）
+        ["app", "extractEditorToolbarFloat", true],       // v48.54 / D95 v1.4 工具栏形态（默认 false＝随文档流；true＝悬浮于选中文字）
+        ["app", "extractEditorToolbarTop", true],         // v48.55 / D95 §K.2 dock 态钉顶（默认 false＝吸底；非默认值才验得出往返）
+        ["app", "readerActionsFloat", true],              // v48.55 / D95 §K.4 阅读器选区动作组悬浮（默认 false＝固定顶栏）
         ["app", "extractFaceFontFollow", false],          // v48.54 / D95 摘录卡字号跟随（默认 true）
         ["app", "extractFaceFontSize", 22],               // v48.54 / D95 独立字号（默认 17；文件层往返原值）
         ["app", "extractFaceFontFamily", " Georgia, serif "], // v48.54 / D95 独立字体（文件层往返字节一致；trim 归一在读写两侧）
@@ -405,6 +411,8 @@ app
       flow.section("Y4b 摘录卡编辑器/字号五键归一（渲染层读侧真模块 src/lib/extractCardSettings.ts）");
       const normToolbar = extNorm.normalizeExtractEditorToolbar;
       const normToolbarFloat = extNorm.normalizeExtractEditorToolbarFloat;
+      const normToolbarTop = extNorm.normalizeExtractEditorToolbarTop;
+      const normReaderFloat = extNorm.normalizeReaderActionsFloat;
       const normFollow = extNorm.normalizeExtractFaceFontFollow;
       const normSize = extNorm.normalizeExtractFaceFontSize;
       const normFamily = extNorm.normalizeExtractFaceFontFamily;
@@ -415,6 +423,12 @@ app
       flow.eq("extractEditorToolbarFloat：仅严格 true 为真（true/1/'x'/false/undefined）",
         JSON.stringify([true, 1, "x", false, undefined].map(normToolbarFloat)),
         JSON.stringify([true, false, false, false, false]));
+      flow.eq("extractEditorToolbarTop：仅严格 true 为真（true/1/'x'/false/undefined）",
+        JSON.stringify([true, 1, "x", false, undefined].map(normToolbarTop)),
+        JSON.stringify([true, false, false, false, false]));
+      flow.eq("readerActionsFloat：仅严格 true 为真（true/1/'x'/false/null/undefined）",
+        JSON.stringify([true, 1, "x", false, null, undefined].map(normReaderFloat)),
+        JSON.stringify([true, false, false, false, false, false]));
       flow.eq("extractFaceFontFollow：仅严格 true 为真（true/'yes'/1/null）",
         JSON.stringify([true, "yes", 1, null].map(normFollow)),
         JSON.stringify([true, false, false, false]));

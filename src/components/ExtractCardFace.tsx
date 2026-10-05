@@ -1,11 +1,4 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import type { PluggableList } from "unified";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
-import rehypeKatex from "rehype-katex";
 import { attachRipple, settle } from "../lib/press";
 import { extractStatusLabel, type ExtractEngine } from "../lib/sessionQueue";
 import type { DueTopic } from "../lib/readingWorkflow";
@@ -20,12 +13,10 @@ import {
   domToSrc,
   resolveCaret,
   srcToRange,
-  extractSanitizeSchema,
-  remarkSoftBreaks,
   type OffsetMap
 } from "../lib/editor/markdownOffsetMap";
 import { ExtractEditor, type ExtractEditorApi } from "./editor/ExtractEditor";
-import { useExtractEditorToolbar, useExtractEditorToolbarFloat, useExtractFaceTypography } from "../lib/extractCardSettings";
+import { useExtractFaceTypography } from "../lib/extractCardSettings";
 
 const DAY = 86400000;
 
@@ -70,23 +61,9 @@ export function parseQuoteRanges(raw: unknown): Array<{ start: number; end: numb
     .sort((a, b) => a.start - b.start);
 }
 
-// 读态渲染管线（D95 §1/§B.1）：与闪卡面同族（react-markdown 10 / remark-parse ^11），
-// remark-gfm 补表格/删除线/任务列表，rehype-raw+sanitize 渲染原始 HTML，rehype-katex 出公式。
-// sanitize schema 与 remarkSoftBreaks 见 markdownOffsetMap.ts（sanitize 先于 katex，公式/任务列表/对齐须存活）。
-// remarkSoftBreaks（v1.4 用户反馈）：单换行＝可见换行——摘录取自阅读原文（阅读器的行文自带换行），
-// 旧纯文本视图（pre-wrap）按换行显示；换 markdown 渲染后若按 CommonMark 折叠成空格，用户在编辑态
-// 看到的就是「挤成一整段」。读态与编辑态统一为 breaks 语义（编辑态由 Milkdown 的 inline hardbreak
-// 承载，CSS 让它真正断行，见 theme.css；序列化仍保源文 \n 不变）。
-const READ_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkSoftBreaks];
-const READ_REHYPE_PLUGINS: PluggableList = [rehypeRaw, [rehypeSanitize, extractSanitizeSchema], rehypeKatex];
-
-function ReadMarkdown({ text }: { text: string }) {
-  return (
-    <ReactMarkdown remarkPlugins={READ_REMARK_PLUGINS} rehypePlugins={READ_REHYPE_PLUGINS}>
-      {text}
-    </ReactMarkdown>
-  );
-}
+// 读态渲染管线（D95 §1/§B.1 → §J.2 收口）：抽到共享组件 `editor/ReadMarkdown`（与日记等一切
+// markdown 展示面同一份管线），此处只消费——保证「同一段 markdown 全应用渲染一致」。
+import ReadMarkdown from "./editor/ReadMarkdown";
 
 /**
  * 当前选区在**该卡正文**里的字符偏移（D95 §C.6）：经源偏移↔渲染 DOM 双向映射换算，
@@ -201,9 +178,8 @@ export default function ExtractCardFace({
       <div className="extract-face-annot-text">{ownComment}</div>
     </div>
   ) : null;
-  /** §F：工具栏开关/形态与字号/字体桥（两宿主共用本组件，桥随组件挂/卸） */
-  const toolbarOn = useExtractEditorToolbar();
-  const toolbarFloat = useExtractEditorToolbarFloat();
+  /** §F：字号/字体桥（两宿主共用本组件，桥随组件挂/卸）。工具条开关与形态（§J.2「随组件走」）
+      由 MarkdownEditor 内部读设置键，宿主不再逐层透传。 */
   useExtractFaceTypography();
   /**
    * 本次拖选手势**起手**的修饰位（v48.39 / D79）：document mousedown 上采样，mouseup 收尾求或。
@@ -447,8 +423,6 @@ export default function ExtractCardFace({
               ref={editorApiRef}
               defaultValue={bodyText}
               pendingFocusIndex={pendingFocusRef.current}
-              toolbar={toolbarOn}
-              float={toolbarFloat}
               footer={annotBlock}
               onCommit={handleEditorCommit}
             />

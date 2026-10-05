@@ -439,7 +439,7 @@ try {
   })()`);
   await cdp.eval(`(() => { document.querySelector(".selection-menu .swatch[data-color='green']")?.click(); return true; })()`);
   await wait(1400);
-  const editorGone = await cdp.eval(`(() => JSON.stringify({ editor: !!document.querySelector(".editor"), menu: !!document.querySelector(".selection-menu") }))()`);
+  const editorGone = await cdp.eval(`(() => JSON.stringify({ editor: !!document.querySelector(".annot-editor"), menu: !!document.querySelector(".selection-menu") }))()`);
   check("点色后不弹编辑浮层且菜单收起（D83）", editorGone === '{"editor":false,"menu":false}', editorGone);
   await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
   await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });

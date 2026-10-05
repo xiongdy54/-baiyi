@@ -4,11 +4,10 @@
 // ——新写的内容天然出现在「当日结尾」（用户要求「追加到当日日记结尾另起一行」的字面实现）。
 // 纪律：不做强制标签/分类/双链（D19 Non-Goals）；条目只作第二输入通道，不进 FSRS 队列。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
 import { eventBus } from "../lib/eventbus";
 import InsightPanel from "./InsightPanel";
+import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
+import ReadMarkdown from "./editor/ReadMarkdown";
 import {
   formatClock,
   journalApi,
@@ -38,12 +37,12 @@ export default function JournalView({ onJumpToDoc }: {
   // v40（M8-B）：洞察面板（按需触发，禁后台自动分析）
   const [insightOpen, setInsightOpen] = useState(false);
   const today = todayJournalDate();
-
-  const editRef = useRef<HTMLTextAreaElement | null>(null);
-  const draftRef = useRef<HTMLTextAreaElement | null>(null);
   // 提交/发送的并发闸：失焦自动提交与按钮点击可能在同一帧内先后触发（React 状态尚未回落），
   // 只用 state 判忙会漏；ref 是同步的，保证同一条内容只会落一条（重复提交=凭空多一条日记）
   const submittingRef = useRef(false);
+  // §J P0：三个 markdown 编辑面（条目编辑/草稿续写/当日输入行）的编辑器 API（就绪即接管焦点）
+  const editMdRef = useRef<MarkdownEditorApi | null>(null);
+  const draftMdRef = useRef<MarkdownEditorApi | null>(null);
 
   const load = useCallback(
     async (opts: { resetLimit?: boolean } = {}) => {
@@ -97,13 +96,14 @@ export default function JournalView({ onJumpToDoc }: {
   const todayGroup = groups.find((g) => g.date === today);
   const todayComposerVisible = !todayGroup || !todayGroup.draft;
 
-  async function submitComposer() {
-    const text = composerText.trim();
+  async function submitComposer(content?: string) {
+    const source = content ?? composerText;
+    const text = source.trim();
     if (!text || submittingRef.current) return;
     submittingRef.current = true;
     setBusy(true);
     try {
-      await journalApi.create(composerText, { source: "app" });
+      await journalApi.create(source, { source: "app" });
       setComposerText("");
       await load();
     } finally {
@@ -112,17 +112,34 @@ export default function JournalView({ onJumpToDoc }: {
     }
   }
 
-  async function saveEdit(id: string) {
-    const text = editText;
+  /** §J P0：条目编辑提交（MarkdownEditor 幂等短路：无变更传 null＝仅收编辑器）。编辑成空＝显式
+      清空意图：软删该条（与快速记录「空内容不建条」同口径，原 textarea 语义保留）。 */
+  async function commitEdit(id: string, text: string | null) {
     setEditingId(null);
+    if (text === null) return;
     const original = entries.find((e) => e.id === id);
     if (!original || original.contentMarkdown === text) return;
     if (!text.trim()) {
-      // 编辑成空 = 显式清空意图：软删该条（与快速记录「空内容不建条」同口径）
       await journalApi.remove(id);
     } else {
       await journalApi.update(id, text);
     }
+    await load();
+  }
+
+  /** §J P0：草稿续写提交——内容写回**同一条草稿**（journal:update 不区分草稿/已发，落库链零新增），
+      保持草稿身份；「发送」仍由发送按钮显式触发（draftSend 定格为一条），失焦/Esc 不误发。 */
+  async function commitDraft(draft: JournalEntry, text: string | null) {
+    setDraftEditing(false);
+    if (text === null) return;
+    if (!text.trim()) {
+      // 编辑成空＝显式清空意图：软删草稿（与条目编辑同口径）
+      await journalApi.remove(draft.id);
+      await load();
+      return;
+    }
+    if (text === draft.contentMarkdown) return;
+    await journalApi.update(draft.id, text);
     await load();
   }
 
@@ -157,13 +174,6 @@ export default function JournalView({ onJumpToDoc }: {
       /* 剪贴板不可用：静默（不阻塞编辑） */
     }
   }
-
-  useEffect(() => {
-    if (editingId) editRef.current?.focus();
-  }, [editingId]);
-  useEffect(() => {
-    if (draftEditing) draftRef.current?.focus();
-  }, [draftEditing]);
 
   if (loading && entries.length === 0 && !query) {
     return (
@@ -242,31 +252,22 @@ export default function JournalView({ onJumpToDoc }: {
               <div className="journal-entry-body">
                 {editingId === entry.id ? (
                   <div className="journal-edit">
-                    <textarea
-                      ref={editRef}
-                      className="journal-edit-area"
+                    {/* §J P0：主正文统一 Markdown 编辑器（幂等短路：无变更 onCommit(null)＝仅收编辑器） */}
+                    <MarkdownEditor
+                      ref={editMdRef}
                       value={editText}
-                      rows={Math.min(14, Math.max(3, editText.split("\n").length))}
-                      onChange={(e) => setEditText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          setEditingId(null);
-                        }
-                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                          e.preventDefault();
-                          void saveEdit(entry.id);
-                        }
-                      }}
-                      onBlur={() => void saveEdit(entry.id)}
+                      variant="full"
+                      minRows={3}
+                      onChange={setEditText}
+                      onCommit={(t) => void commitEdit(entry.id, t)}
+                      className="journal-edit-md"
+                      onReady={() => editMdRef.current?.focusBlock(0)}
                     />
-                    <span className="journal-edit-hint mono">Ctrl+Enter 保存 · Esc 取消</span>
+                    <span className="journal-edit-hint mono">Esc 保存 · 失焦保存 · Enter 换行</span>
                   </div>
                 ) : (
                   <div className="journal-entry-md">
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                      {entry.contentMarkdown}
-                    </ReactMarkdown>
+                    <ReadMarkdown text={entry.contentMarkdown} />
                   </div>
                 )}
               </div>
@@ -301,30 +302,22 @@ export default function JournalView({ onJumpToDoc }: {
                 <span className="journal-draft-label mono">草稿 · 未发送</span>
                 {draftEditing ? (
                   <div className="journal-edit">
-                    <textarea
-                      ref={draftRef}
-                      className="journal-edit-area"
+                    {/* §J P0：草稿续写用完整编辑器；提交＝写回同一条草稿（不误发），发送仍走显式按钮 */}
+                    <MarkdownEditor
+                      ref={draftMdRef}
                       value={editText}
-                      rows={Math.min(14, Math.max(3, editText.split("\n").length))}
-                      onChange={(e) => setEditText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          setDraftEditing(false);
-                        }
-                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                          e.preventDefault();
-                          void sendDraft(group.draft!, editText);
-                        }
-                      }}
+                      variant="full"
+                      minRows={3}
+                      onChange={setEditText}
+                      onCommit={(t) => void commitDraft(group.draft!, t)}
+                      className="journal-edit-md"
+                      onReady={() => draftMdRef.current?.focusBlock(0)}
                     />
-                    <span className="journal-edit-hint mono">Ctrl+Enter 发送 · Esc 取消</span>
+                    <span className="journal-edit-hint mono">Esc 存草稿 · 失焦存草稿 · 发送按钮定格</span>
                   </div>
                 ) : (
                   <div className="journal-entry-md">
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                      {group.draft.contentMarkdown}
-                    </ReactMarkdown>
+                    <ReadMarkdown text={group.draft.contentMarkdown} />
                   </div>
                 )}
               </div>
@@ -354,24 +347,20 @@ export default function JournalView({ onJumpToDoc }: {
 
           {group.date === today && todayComposerVisible && (
             <div className="journal-composer">
-              <textarea
-                className="journal-composer-area"
+              {/* §J P0：当日输入行统一 Markdown 编辑器（统一方案语义：Enter=换行段落，Esc/失焦/按钮提交） */}
+              <MarkdownEditor
                 value={composerText}
-                rows={Math.min(10, Math.max(1, composerText.split("\n").length))}
-                placeholder="记下此刻的想法…（Enter 提交 · Shift+Enter 换行）"
-                onChange={(e) => setComposerText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void submitComposer();
-                  }
+                variant="full"
+                minRows={2}
+                placeholder="记下此刻的想法…（Enter 换行 · Esc 或失焦提交）"
+                onChange={setComposerText}
+                onCommit={(t) => {
+                  if (t !== null && t.trim()) void submitComposer(t);
                 }}
-                onBlur={() => {
-                  if (composerText.trim()) void submitComposer();
-                }}
+                className="journal-composer-md"
               />
               <div className="journal-composer-foot">
-                <span className="journal-composer-hint mono">Enter 提交 · Shift+Enter 换行</span>
+                <span className="journal-composer-hint mono">Esc 提交 · 失焦提交</span>
                 <button className="btn btn-primary btn-sm" disabled={!composerText.trim() || busy} onClick={() => void submitComposer()}>
                   记下
                 </button>
