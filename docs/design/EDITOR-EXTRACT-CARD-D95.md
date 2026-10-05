@@ -404,7 +404,50 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 
 ---
 
+## K. 工具条系统第二轮需求（v1.6 新增：交接节，新会话实施）
+
+> **执行方式（用户指令，2026-10-05）**：§J P0 迁移与本节全部需求**直接在 main 实施、不新开分支**，且**在 ZCode 中新开任务会话执行**（节省上下文）。开工前先按惯例加载 dylantarre/animation-principles 相关 skill（better-layout / better-typography / micro-interactions / buttons-ctas）作为修改指导。
+
+### K.0 用户原话（2026-10-05，逐字）
+
+> "后续统一 Markdown 方案的 P0 迁移（§J 设计已定稿）以及后续完整任务请直接在main中进行，不用新开分支，但是要在zcode中新开一个任务会话来进行，节省上下文。同时现在的富文本工具条为什么这么高？上下有大片的空白，这点请修复。并且请在设置中支持切换固定在顶部还是底部。还有在设置中将富文本工具条切换为悬浮显示应该后，应该将工具条悬浮在选中文本的上方居中或下方居中，和批注弹窗以及其他弹窗统一逻辑。还有顶部工具栏"高亮摘录+高亮高亮下划线制卡AI 制卡AI 解释摘录查词图片挖空"这些按钮请同样支持在设置中切换固定还是悬浮。"
+
+### K.1 需求 ①：编辑态工具条「高/上下空白」修复（缺陷，优先）
+
+- **现象**：dock 态下正文短时，正文与工具条之间出现大片空白（用户感知为「工具条很高、上下有空白」）。
+- **总控诊断（交接给新会话验证）**：v1.4 的 dock 实现＝`.extract-face .sec-quote { flex:1 }` 分节拉伸 + `.extract-face-body[data-editing="1"]` 弹性列 + `.extract-editor`/`.ProseMirror { flex:1 }` 让编辑面吃掉全部余量 + 工具栏 `margin-top:auto` 钉底（`src/theme.css` 「v1.4（用户反馈「工具条固定在文本框底端」）」注释段）。**空白就是被拉伸的空编辑面**——钉底语义与「紧凑」冲突。
+- **设计方向（建议）**：dock 改 **sticky** 语义——取消编辑面拉伸（撤 `.ProseMirror`/`.milkdown`/wrapper 的 `flex:1` 与工具栏 `margin-top:auto`），工具栏 `position: sticky` 贴滚动容器（`.extract-page`）下缘：正文短＝工具栏紧跟正文（零空白）；正文长＝滚动时吸在可视区底缘。「固定在文本框底端」的用户意图由 sticky 在长文时的表现承载。回归断言相应改写（tests/extract-editor.gui.mjs ⑬「toolbar bottom ≈ body bottom」→ 改 sticky 行为断言：短文零间隙 + 长文滚动吸底）。
+- 注意保持 v1.3 已修复的「编辑态与读态同形」（`.extract-face-body .ProseMirror` 作用域抵消 `.editor` 劫持段）不受影响；批注块 footer 顺序（正文→批注→工具条）在 sticky 布局下重新审视（建议：批注块保持正文之下、工具栏 sticky 独立于文档流钉边）。
+
+### K.2 需求 ②：设置支持「固定在顶部还是底部」
+
+- 新设置键（建议）`app.extractEditorToolbarTop`（bool，默认 `false`＝钉底；`true`＝钉顶），走既有五键同款双侧归一（`electron/main.js` settings:set + `src/lib/extractCardSettings.ts` 读侧）+ `f18` DOC_KEYS/往返/非法值矩阵 + SettingsPanel sec-reader 行（「工具栏固定在顶部」checkbox）。
+- **钉顶实现要点**：sticky `top` 需求 DOM 序在前——用 flex `order:-1` 把工具栏排到编辑面之前（sticky 作用于排序后的位置）；`top` 值要让开吸顶头带（实测头带高度后定，`--sp` 系 token）；dock 底部态 `bottom` 同理让开底栏。两种形态都要过 `prefers-reduced-motion` 与长文滚动实测（GUI 断言：滚动中工具栏贴边不跳）。
+
+### K.3 需求 ③：悬浮态＝选区锚定弹层（与既有弹窗统一逻辑）
+
+- 现悬浮档（sticky 面板）**废弃**，改为：**悬浮工具条锚定当前选中文本，上方居中（空间不足翻转到下方居中）**，与 SelectionMenu / AnnotationEditor 同一套定位逻辑（上/下半落位、与选区不相交、8px 边距、容器钳制、D88 spring `pop-in` 入场、reduced-motion 降级）。
+- 行为设计要点：仅编辑态出现；选区塌缩（点击正文落 caret）时隐藏（markdown 语法输入不依赖工具栏）；工具栏按钮 `mousedown preventDefault` 保选区（既有行为）→ 点按钮不消失、命令后选区变化即重算锚点；`data-toolbar-mode` 由 `float` 语义改为 `float-selection`（或保留 float 值改断言）；设置页「悬浮工具条」文案更新为「悬浮于选中文字」。
+- 复用点：选区矩形经 `window.getSelection().getRangeAt(0).getBoundingClientRect()`（编辑器内即页面坐标，无 iframe 换算）；摆放算法参考 SelectionMenu 的 placePopover（ExtractReviewView 宿主侧）与 AnnotationEditor 的锚点/翻面判据；锚点失效（滚动/换卡/失焦）即收起。
+
+### K.4 需求 ④：阅读器顶部动作条同样支持「固定 / 悬浮」设置
+
+- 对象：阅读器顶栏的选择动作组（高亮｜摘录+高亮｜高亮｜下划线｜制卡｜AI 制卡｜AI 解释｜摘录｜查词｜图片挖空，`data-sel-act` 按钮，`src/components/Reader.tsx` 工具栏区）。
+- 新设置键（建议）`app.readerActionsFloat`（bool，默认 `false`＝现固定顶栏），true＝选中文字时动作组以**选区锚定弹层**呈现（同 §K.3 定位逻辑；在阅读器中选区矩形位于章节 iframe 内，**坐标换算**需经内核已有的 rect 管道——参考 markClick/摘录锚点已有的 iframe→页面坐标换算路径，勿自行 getBoundingClientRect）。固定态现状零改动；两态共用同一组按钮（抽组件或 CSS 变体，不复制按钮集）。
+- 与 D92 学习坞的边界：本需求只动「选择动作组」的呈现位置，不碰学习坞页签/收展/手动制卡。
+
+### K.5 验收骨架（新会话细化为机械判据）
+
+1. dock 底部：短文正文与工具栏零大空白（间距 ≤ 一个 --sp 档）；长文滚动工具栏吸可视区底缘。
+2. dock 顶部：设置开 → 工具栏在编辑面顶部、长文滚动吸顶（让开吸顶头带）。
+3. 悬浮：选中文字 → 工具条弹层在选区上方居中（下半空间不足时下方居中）、pop-in 动画与弹窗家族一致；塌缩/失焦/换卡收起；按钮命令作用于该选区。
+4. 阅读器：默认固定态全回归零改动；悬浮态选中出弹层、按钮功能与固定态等价（摘录/高亮/制卡全链）。
+5. 新设置键双侧归一 + f18 矩阵；既有 16 钮/编辑态同形/字号桥断言零回归；`tests/d91-d92.gui.mjs` 全绿（对方接口不破坏）。
+
+---
+
 ## J. 全应用统一 Markdown 编辑方案（v1.4 新增：设计定稿，迁移分期另批实施）
+
 
 用户指令：软件中**所有涉及文本编辑的输入框**统一采用摘录卡这套 Markdown 输入方案。本节是两阶段流程的第一阶段产物（面清单 + 组件抽取 + 分期 + 风险），第二阶段按此派工，验收以届时清单为准。
 
@@ -459,9 +502,13 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 
 ## 修订记录
 
+### v1.6（2026-10-05，交接节）
+
+- 新增 §K 工具条系统第二轮需求交接节（用户 2026-10-05 书面指令逐字留痕 §K.0）：①dock 态「高/上下空白」缺陷修复（总控诊断＝v1.4 弹性拉伸所致，建议改 sticky 语义）；②设置支持钉顶/钉底；③悬浮态改选区锚定弹层（与弹窗家族统一定位）；④阅读器顶部动作组支持固定/悬浮设置。执行方式＝§J P0 迁移与本节全部需求由**新 ZCode 会话**直接在 **main** 实施（用户指令，不新开分支）；开工先加载 dylantarre/animation-principles 相关 skill。
+
 ### v1.5（2026-10-05，合并重编号）
 
-- 并行会话的 D91+D92（v48.52）与其 D93（v48.53 粘贴书修复）已先行合入 main；本批合并时按预约（已确认决策⑥）将本批决策号 **D93 → D95**（D94 已被并行会话的 D94 设计稿预留），版本落 **v48.54**；本文档文件名同步  → ，全文引用与 GUIDE §6.8-14/§7.4/§8.1 条目同步。技术内容零改动。
+- 并行会话的 D91+D92（v48.52）与其 D93（v48.53 粘贴书修复）已先行合入 main；本批合并时按预约（已确认决策⑥）将本批决策号 **D93 → D95**（D94 已被并行会话的 D94 设计稿预留），版本落 **v48.54**；本文档文件名同步 `EDITOR-EXTRACT-CARD-D93.md` → `EDITOR-EXTRACT-CARD-D95.md`，全文引用与 GUIDE §6.8-14/§7.4/§8.1 条目同步。技术内容零改动。
 
 ### v1.4（2026-10-05，用户实机反馈第二轮：三项修复 + 全应用统一 Markdown 方案设计）
 
