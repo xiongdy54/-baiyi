@@ -24,6 +24,7 @@
     "katex": "^0.18.5",
     "mammoth": "^1.12.3",
     "markdown-it": "^14.3.1",
+    "micromark-extension-mark": "^1.0.2",
     "pdfjs-dist": "^6.3.289",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

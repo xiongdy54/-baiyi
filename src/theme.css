@@ -5509,7 +5509,7 @@ body.capture-body #root { height: 100vh; }
   display: flex;
   align-items: stretch;
   gap: 0;
-  flex: 1 0 auto; /* 短内容撑满滚动口 ⇒ 把底栏顶到视口底 */
+  flex: 1 1 auto; /* D97：min-height:0 链路——主列恰好处在头带与底栏之间，不再把底栏顶出视口 */
   min-height: 0;
   position: relative; /* 栏开关（.annot-toggle）的定位上下文：页面左上角 ⇒ 两态位置一致 */
 }
@@ -5588,10 +5588,53 @@ body.capture-body #root { height: 100vh; }
 .extract-main {
   flex: 1;
   min-width: 0;
+  min-height: 0; /* D97：卡面定高链路 */
   display: flex;
   flex-direction: column;
   padding-inline: var(--sp-16);
 }
+/* D97（用户指令）：文本框定高——sec-quote 在卡内占满余量，正文在 extract-face-body 内滚动；
+   编辑态滚动区在 .milkdown（工具条钉在卡缘不随内容滚走）。 */
+.extract-page .extract-face {
+  flex: 1 1 0; /* basis 0＝卡面高度与内容彻底解耦（内容再长也不参与分寸） */
+  min-height: 0;
+}
+.extract-page .extract-face .sec.sec-quote {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.extract-page .extract-face .sec.sec-quote > .extract-face-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.extract-page .extract-face .sec.sec-quote > .extract-face-body[data-editing="1"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.extract-page .extract-face-body[data-editing="1"] .markdown-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Milkdown 双层包裹（data-milkdown-root > .milkdown）都必须进 flex 链——否则内容高度把
+   工具条推出卡外（实测：长文时 tb bottom = 内容尾而非卡底） */
+.extract-page .extract-face-body[data-editing="1"] .markdown-editor > div {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.extract-page .extract-face-body[data-editing="1"] .markdown-editor .milkdown {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* v1.4（用户反馈「下方间隔与上方一致」）：卡面与底栏 band-line 的间距＝与头带侧相同的 --sp-4 */
 .extract-main > .extract-face { margin: var(--sp-4) 0; } /* 头带/底栏与卡面的对称间距 */
 /* 栏开关（v7/D74 造型，v48.42/D82 用户指令**还原原位**）：文字钮两态变文案——
@@ -5679,7 +5722,9 @@ body.capture-body #root { height: 100vh; }
 .extract-page {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  /* D97（用户实测：长文把卡面与底栏挤出界面）：定高布局——页面本体不再滚动，
+     卡面在头带与底栏之间恒定占满，正文在卡内滚动，底栏固定在界面底部 */
+  overflow: hidden;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -5787,6 +5832,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   margin: 0 auto;
   flex: 1 1 auto; /* 行内自适应：批注轨展开时随滚动区变窄并自然重居中 */
   min-width: 0;
+  min-height: 0; /* D97：定高链路——卡面不超过头带与底栏之间的可用空间 */
   display: flex;
   flex-direction: column;
   gap: 0; /* D88 §6.4：分节节奏移交 .sec 内距（原 --sp-4） */
@@ -6061,30 +6107,27 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   padding-top: var(--sp-2);
   border-top: 1px solid var(--border-subtle);
 }
-.extract-face-toolbar.is-dock-bottom {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
+/* D97（用户指令）：钉底＝满幅条带贴卡面底边——负外距抵消 .sec 内距，条带下缘与卡框零空隙。
+   摘录页正文在卡内滚动（.milkdown 为滚动区），工具条不随内容滚走＝恒定钉在底缘。 */
+.extract-page .extract-face-toolbar.is-dock-bottom {
+  position: static;
+  margin: var(--sp-2) calc(var(--sp-6) * -1) calc(var(--sp-4) * -1);
+  padding: var(--sp-2) var(--sp-6);
   background: var(--paper);
 }
-/* 摘录页/复习页的吸底动作栏（.stage-bar，72px 高）让出偏移 */
-.extract-page .extract-face-toolbar.is-dock-bottom,
-.review-wrap .extract-face-toolbar.is-dock-bottom { bottom: 72px; }
-.extract-face-toolbar.is-dock-top {
-  order: -1; /* DOM 序仍在编辑器之后（React 不重挂），视觉顶到首位；sticky 随排序后位置生效 */
-  position: sticky;
-  top: 0;
-  margin: 0 0 var(--sp-2);
-  padding-top: 0;
+/* D97：钉顶＝满幅条带贴卡面顶边、排在「摘录原文」标签**之前**（header 插槽进标签 + order:-1） */
+.extract-page .extract-face-toolbar.is-dock-top {
+  order: -1; /* DOM 序仍在编辑器之后（React 不重挂），视觉顶到标签之前 */
+  position: static;
+  margin: calc(var(--sp-4) * -1) calc(var(--sp-6) * -1) var(--sp-3);
+  padding: var(--sp-2) var(--sp-6);
   border-top: none;
   border-bottom: 1px solid var(--border-subtle);
   background: var(--paper);
-  z-index: 2;
 }
-/* 摘录页头带（.extract-page-head 吸顶，scrollport 原点在 48px 应用顶栏之下：头带实测高 110）
-   与复习页头带（.review-head 49）让位 */
-.extract-page .extract-face-toolbar.is-dock-top { top: 110px; }
-.review-wrap .extract-face-toolbar.is-dock-top { top: 49px; }
+/* 合并复习分支保持页面滚动模型：工具条 sticky 让位（review-head 49px / stage-bar 72px） */
+.review-wrap .extract-face-toolbar.is-dock-bottom { position: sticky; bottom: 72px; z-index: 2; background: var(--paper); }
+.review-wrap .extract-face-toolbar.is-dock-top { position: sticky; top: 49px; z-index: 2; background: var(--paper); }
 .extract-face-toolbar.is-float-pop {
   position: fixed;
   margin: 0;
@@ -6097,8 +6140,13 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   z-index: var(--z-sticky);
 }
 .extract-face-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 26px;
   height: 24px;
-  padding: 0 var(--sp-2);
+  padding: 0;
   background: none;
   border: 1px solid transparent;
   font-family: var(--font-sans);
@@ -6111,6 +6159,44 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .extract-face-toolbar-btn:active { color: var(--accent); }
 /* 瑞士风焦点：单 accent 描边，无光晕 */
 .extract-face-toolbar-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
+/* 字形钮（B/I/S）：语义由排版样式承载——斜体真斜、删除线真带线（D97 用户实测纠偏） */
+.md-glyph { line-height: 1; font-size: 13px; }
+.md-glyph-bold { font-weight: 700; }
+.md-glyph-italic { font-style: italic; font-family: Georgia, "Times New Roman", serif; }
+.md-glyph-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; }
+/* 标题层级下拉（tb=h） */
+.md-tb-menu-wrap { position: relative; display: inline-flex; }
+.md-tb-menu {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-direction: column;
+  min-width: 88px;
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  padding: var(--sp-1);
+}
+.md-tb-menu-item {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: var(--sp-1) var(--sp-2);
+  font-family: var(--font-sans);
+  font-size: var(--fs-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.md-tb-menu-item:hover { background: var(--grey-1); }
+.md-tb-menu-item[data-h="1"] { font-size: 15px; font-weight: 600; }
+.md-tb-menu-item[data-h="2"] { font-size: 14px; font-weight: 600; }
+.md-tb-menu-item[data-h="3"] { font-size: 13px; font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .md-tb-menu { animation: stage-pop-in 150ms var(--ease) both; }
+}
 
 /* ---------- 阅读器选区动作组悬浮弹层（§K.4；app.readerActionsFloat） ----------
    固定态（默认）＝顶栏内 .reader-sel-actions 零改动；悬浮态＝同一组按钮以选区锚定弹层呈现
@@ -6146,6 +6232,95 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 .extract-face-body .markdown-editor .ProseMirror:focus-visible { outline: none; }
 .extract-face-body[data-editing="1"] { cursor: text; }
+
+/* markdown 元素（读态与编辑态同规）：字号阶梯用 em（随字号桥整体缩放），色/距/线用既有 Token */
+.extract-face-body h1, .extract-face-body h2, .extract-face-body h3,
+.extract-face-body h4, .extract-face-body h5, .extract-face-body h6 {
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  margin: 1.2em 0 0.5em;
+}
+.extract-face-body h1:first-child, .extract-face-body h2:first-child,
+.extract-face-body h3:first-child, .extract-face-body h4:first-child,
+.extract-face-body p:first-child, .extract-face-body ul:first-child,
+.extract-face-body ol:first-child, .extract-face-body blockquote:first-child,
+.extract-face-body pre:first-child, .extract-face-body table:first-child { margin-top: 0; }
+.extract-face-body h1 { font-size: 1.5em; }
+.extract-face-body h2 { font-size: 1.3em; }
+.extract-face-body h3 { font-size: 1.15em; }
+.extract-face-body h4, .extract-face-body h5, .extract-face-body h6 { font-size: 1em; }
+.extract-face-body p { margin: 0 0 0.7em; }
+.extract-face-body p:last-child { margin-bottom: 0; }
+.extract-face-body ul, .extract-face-body ol { margin: 0 0 0.7em; padding-left: 1.5em; }
+.extract-face-body li { margin: 0.2em 0; }
+/* gfm 任务列表：checkbox 随正文色，去列表符（.task-list-item 由 remark-gfm 输出） */
+.extract-face-body li.task-list-item { list-style: none; margin-left: -1.2em; }
+.extract-face-body li.task-list-item input[type="checkbox"] { margin-right: 0.4em; vertical-align: middle; }
+.extract-face-body blockquote {
+  margin: 0 0 0.7em;
+  padding: 0 0 0 var(--sp-3);
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+.extract-face-body blockquote > *:last-child { margin-bottom: 0; }
+/* 行内代码与代码块：mono、grey-1 底、hairline 描边、直角 */
+.extract-face-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--grey-1);
+  border: 1px solid var(--border-subtle);
+  padding: 0 0.25em;
+}
+.extract-face-body pre {
+  margin: 0 0 0.7em;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--grey-1);
+  border: 1px solid var(--border-subtle);
+  overflow-x: auto;
+}
+.extract-face-body pre code { background: none; border: none; padding: 0; font-size: var(--fs-secondary); }
+/* 表格：hairline 网格、直角、表头 mono meta 档 */
+.extract-face-body table { border-collapse: collapse; margin: 0 0 0.7em; font-size: 0.95em; }
+.extract-face-body th, .extract-face-body td {
+  border: 1px solid var(--border-subtle);
+  padding: var(--sp-1) var(--sp-2);
+  text-align: left;
+}
+.extract-face-body th { font-weight: 600; background: var(--grey-1); }
+/* 分隔线：hairline */
+.extract-face-body hr { border: none; border-top: 1px solid var(--border-subtle); margin: 1.2em 0; }
+.extract-face-body a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.extract-face-body del, .extract-face-body s, .extract-face-body strike { color: var(--text-secondary); }
+/* 标注（==高亮==，D97）：读态与编辑态同一支荧光——批注黄、字色随正文 */
+.extract-face-body mark, .extract-face-body .ProseMirror mark {
+  background: var(--annot-yellow);
+  color: var(--text-primary);
+  padding: 0 1px;
+}
+/* 折叠列表（<details>，读态可点开合；D97） */
+.extract-face-body details { margin: 0 0 0.7em; border: 1px solid var(--border-subtle); padding: var(--sp-2) var(--sp-3); }
+.extract-face-body summary { cursor: pointer; font-weight: 600; color: var(--text-primary); }
+.extract-face-body details[open] > summary { margin-bottom: var(--sp-2); }
+/* 编辑态的 html 块（折叠模板等）：以源码块呈现——诚实可见、可再编辑（commonmark html atom） */
+.extract-face-body .ProseMirror span[data-type="html"] {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  background: var(--grey-1);
+  border: 1px solid var(--border-subtle);
+  padding: var(--sp-2) var(--sp-3);
+  white-space: pre-wrap;
+  margin: 0.4em 0;
+  user-select: text;
+}
+.extract-face-body img { max-width: 100%; }
+/* 公式（编辑态的 math 节点源码呈现；读态为 rehype-katex 输出） */
+.extract-face-body .extract-math-block-src { font-family: var(--font-mono); font-size: var(--fs-secondary); }
+.extract-face-body .extract-math-inline, .extract-face-body .extract-math-block { color: var(--text-primary); }
+.extract-face-body .katex-display { margin: 0.4em 0; overflow-x: auto; overflow-y: hidden; }
+.extract-face-body .katex { font-size: 1.05em; }
 
 /* D95 v1.4（用户反馈「编辑后换行消失」）：Milkdown 把段内软换行（源文单个 \n）渲染成
    span[data-type=hardbreak]，内容是一个空格——视觉上「挤成一整段」。CSS 让它真正断行：

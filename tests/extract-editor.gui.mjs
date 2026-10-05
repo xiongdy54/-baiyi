@@ -216,10 +216,10 @@ try {
   const tb5 = await cdp.eval(`(() => {
     const t = document.querySelector('.extract-face-body [data-testid="extract-editor-toolbar"]');
     const btns = t ? [...t.querySelectorAll("[data-tb]")].map((b) => b.dataset.tb) : [];
-    return JSON.stringify({ up: !!t, n: btns.length, has: ["bold", "italic", "strike", "code", "link", "inlineMath", "h", "quote", "ul", "ol", "task", "codeBlock", "hr", "mathBlock", "undo", "redo"].filter((k) => btns.includes(k)).length });
+    return JSON.stringify({ up: !!t, n: btns.length, has: ["bold", "italic", "strike", "code", "link", "inlineMath", "mark", "h", "quote", "ul", "ol", "task", "details", "table", "codeBlock", "hr", "mathBlock", "undo", "redo"].filter((k) => btns.includes(k)).length });
   })()`);
   const t5 = JSON.parse(String(tb5) || "{}");
-  check("⑤ 工具栏在场（data-testid=extract-editor-toolbar）且 16 钮齐全", t5.up === true && t5.n === 16 && t5.has === 16, tb5);
+  check("⑤ 工具栏在场（data-testid=extract-editor-toolbar）且 19 钮齐全（D97 增标注/折叠/表格）", t5.up === true && t5.n === 19 && t5.has === 19, tb5);
   check("⑤ 工具栏在编辑器 host 之后（.extract-face-body 内、ProseMirror 之后）", (await cdp.eval(`(() => {
     const body = document.querySelector(".extract-face-body");
     const pm = body?.querySelector(".ProseMirror");
@@ -247,7 +247,8 @@ try {
   })()`);
   const s13 = JSON.parse(String(shape13) || "{}");
   check("v1.3 编辑态同形：无 fixed 定位、无阴影、无纸底", s13.position === "static" && (s13.shadow === "none" || s13.shadow === "") && (s13.bg === "rgba(0, 0, 0, 0)" || s13.bg === "transparent"), shape13);
-  check("v1.3 编辑态同形：编辑器宽度＝正文盒内容宽（随流满宽）", Math.abs((s13.pmW ?? 0) - ((s13.bodyW ?? 0) - (s13.padL ?? 0))) <= 2, shape13);
+  // D97：正文区成为滚动容器（卡内滚动）——Windows 经典滚动条占 10px 槽，允许 ≤14px 差
+  check("v1.3 编辑态同形：编辑器宽度＝正文盒内容宽（随流满宽；容滚动条槽）", Math.abs((s13.pmW ?? 0) - ((s13.bodyW ?? 0) - (s13.padL ?? 0))) <= 14, shape13);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   const afterEsc = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(seedId)}); return d ? d.contentMarkdown : "MISSING"; })()`);
@@ -422,6 +423,60 @@ try {
   check("⑧ 退出编辑读态渲染一致（h1 + strong）", rr8.h1 === "标题" && rr8.strong === "粗" && rr8.pm === false, read8);
   const db8 = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(${JSON.stringify(seedId)}); return d ? d.contentMarkdown : "MISSING"; })()`);
   check("⑧ 落库的是 markdown 源文（含 # 与 **）", String(db8).includes("# 标题") && String(db8).includes("**粗**"), db8);
+
+  // —— 验收 8b（D97）：新增按钮功能——标注/表格/折叠/标题下拉（编辑态即渲染 + 落库为源语法） ——
+  console.log("\n== 验收 8b D97 新按钮 ==");
+  const p8b = await probeRange(cdp, "标题"); // ⑧ 已把全文替换为「# 标题/**粗**」，探针随之
+  await clickAt(cdp, p8b.start.x, p8b.start.y);
+  check("⑧b 前置：进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
+  await wait(800);
+  // 全选后依次施加：标注 → H2 → 表格 → 折叠（各钮真点击）
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+  await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
+  await wait(250);
+  await cdp.eval(`(() => { document.querySelector('[data-tb="mark"]')?.click(); return true; })()`);
+  await wait(400);
+  const mark8b = await cdp.eval(`(() => { const m = document.querySelector(".extract-face-body .ProseMirror mark"); return JSON.stringify({ up: !!m, text: m ? m.textContent.slice(0, 12) : null }); })()`);
+  const mk8b = JSON.parse(String(mark8b) || "{}");
+  check("⑧b 标注钮：编辑态选区呈现 <mark>", mk8b.up === true && (mk8b.text || "").length > 0, mark8b);
+  // 标题下拉：点开 → 选 H2
+  await cdp.eval(`(() => { document.querySelector('[data-tb="h"]')?.click(); return true; })()`);
+  await wait(300);
+  const menu8b = await cdp.eval(`!!document.querySelector(".md-tb-menu [data-h='2']")`);
+  check("⑧b 标题下拉菜单弹出（H1/H2/H3/正文）", menu8b === true, menu8b);
+  await cdp.eval(`(() => { document.querySelector(".md-tb-menu [data-h='2']")?.click(); return true; })()`);
+  await wait(400);
+  const h8b = await cdp.eval(`(() => { const h = document.querySelector(".extract-face-body .ProseMirror h2"); const m = document.querySelector(".md-tb-menu"); return JSON.stringify({ h2: h ? h.textContent.slice(0, 12) : null, menuClosed: !m }); })()`);
+  const hh8b = JSON.parse(String(h8b) || "{}");
+  check("⑧b 标题下拉选 H2：段落变标题且菜单收起", hh8b.h2 !== null && hh8b.menuClosed === true, h8b);
+  // 塌缩光标到文末（后续块级插入不吞前文——表格 replaceSelectionWith 会替换选区）
+  await cdp.eval(`(() => { const pm = document.querySelector(".extract-face-body .ProseMirror"); pm.focus(); const sel = getSelection(); sel.selectAllChildren(pm); sel.collapseToEnd(); return true; })()`);
+  await wait(400);
+  // 折叠钮：插入 details 源码块
+  await cdp.eval(`(() => { document.querySelector('[data-tb="details"]')?.click(); return true; })()`);
+  await wait(500);
+  const det8b = await cdp.eval(`(() => { const d = document.querySelector('.extract-face-body .ProseMirror span[data-type="html"]'); return JSON.stringify({ up: !!d, hasDetails: d ? d.textContent.includes("<details>") : false }); })()`);
+  const dd8b = JSON.parse(String(det8b) || "{}");
+  check("⑧b 折叠钮：插入 details 源码块（编辑态源码呈现）", dd8b.up === true && dd8b.hasDetails === true, det8b);
+  // 表格钮：文末插入 3×3 表
+  await cdp.eval(`(() => { document.querySelector('[data-tb="table"]')?.click(); return true; })()`);
+  await wait(500);
+  const tbl8b = await cdp.eval(`(() => { const t = document.querySelector(".extract-face-body .ProseMirror table"); return JSON.stringify({ up: !!t, rows: t ? t.querySelectorAll("tr").length : 0 }); })()`);
+  const tb8b = JSON.parse(String(tbl8b) || "{}");
+  check("⑧b 表格钮：编辑态插入 3×3 表格", tb8b.up === true && tb8b.rows === 3, tbl8b);
+  await pressEsc(cdp);
+  await waitEditor(cdp, false);
+  await wait(600);
+  const read8b = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-face-body");
+    return JSON.stringify({ mark: !!body?.querySelector("mark"), h2: !!body?.querySelector("h2"), table: !!body?.querySelector("table"), details: !!body?.querySelector("details") });
+  })()`);
+  const rr8b = JSON.parse(String(read8b) || "{}");
+  check("⑧b 退出编辑读态同构（mark/h2/table/details 全在场）",
+    rr8b.mark === true && rr8b.h2 === true && rr8b.table === true && rr8b.details === true, read8b);
+  const db8b = await cdp.eval(`(async () => { const d = await window.workflowAPI.get(SEED); return d ? d.contentMarkdown : "MISSING"; })()`.replace("SEED", JSON.stringify(seedId)));
+  check("⑧b 落库为源语法（==标注== / ## / 表格源文 / <details>）",
+    String(db8b).includes("==") && String(db8b).includes("## ") && String(db8b).includes("|") && String(db8b).includes("<details>"), String(db8b).slice(0, 200));
 
   // ============================================================
   // 验收 9：往返不毁源（表格+公式+代码块进出编辑逐字节不变）
@@ -598,27 +653,21 @@ try {
     const body = document.querySelector(".extract-face-body");
     const hb = body?.querySelector('.ProseMirror span[data-type="hardbreak"]');
     const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
-    const pm = body?.querySelector(".ProseMirror");
+    const face = document.querySelector(".extract-face");
     const rt = tb?.getBoundingClientRect();
-    // 工具条的前一个兄弟（原始批注块或 Milkdown 根）＝「正文侧」末元素；间隙即「正文与工具条之间空白」
-    const prev = tb?.previousElementSibling;
-    const rp = prev?.getBoundingClientRect();
+    const rf = face?.getBoundingClientRect();
     return JSON.stringify({
       hbDisplay: hb ? getComputedStyle(hb).display : null,
       mode: tb?.dataset.toolbarMode || null,
-      pos: tb ? getComputedStyle(tb).position : null,
-      prevCls: prev ? String(prev.className).slice(0, 30) : null,
       tbBottom: rt ? Math.round(rt.bottom) : null,
-      tbTop: rt ? Math.round(rt.top) : null,
-      prevBottom: rp ? Math.round(rp.bottom) : null
+      faceBottom: rf ? Math.round(rf.bottom) : null
     });
   })()`);
   const e13 = JSON.parse(String(edit13) || "{}");
   check("⑬ 编辑态 hardbreak span 真断行（display block，v1.4）", e13.hbDisplay === "block", edit13);
-  // §K.1：dock-bottom＝工具条紧跟正文侧末元素（短文零大空白，间隙 ≤ 一个 --sp-4 档 + margin）
-  // 旧缺陷（v1.4 拉伸钉底）此间隙＝整片空编辑面（>100px），本判据即缺陷鉴别器
-  check("⑬ §K.1 dock 工具条紧跟正文（正文侧末元素与工具条间隙 ≤ 16px，零大空白）",
-    e13.mode === "dock-bottom" && e13.pos === "sticky" && typeof e13.prevBottom === "number" && e13.tbTop - e13.prevBottom <= 16, edit13);
+  // D97：dock-bottom＝满幅条带贴卡面底边（工具条下缘 ≈ 卡框下缘，零空隙——用户第二轮指令）
+  check("⑬ dock 工具条贴卡面底边（tb bottom ≈ 卡面底缘 ±2，下方零空白）",
+    e13.mode === "dock-bottom" && typeof e13.tbBottom === "number" && typeof e13.faceBottom === "number" && Math.abs(e13.tbBottom - e13.faceBottom) <= 2, edit13);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   await wait(400);
@@ -634,22 +683,32 @@ try {
   await clickAt(cdp, pLong.start.x, pLong.start.y);
   check("⑬ 前置：长文进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
   await wait(900);
-  await cdp.eval(`(() => { const pg = document.querySelector(".extract-page"); if (pg) pg.scrollTop = 900; return pg ? pg.scrollTop : -1; })()`);
+  // D97：卡面定高——滚动发生在卡内（.milkdown 滚动区），页面/卡面底缘不动，工具条恒贴卡底
+  await cdp.eval(`(() => { const m = document.querySelector(".extract-face-body .markdown-editor .milkdown"); if (m) m.scrollTop = 900; return m ? m.scrollTop : -1; })()`);
   await wait(500);
   const stick13 = await cdp.eval(`(() => {
     const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+    const face = document.querySelector(".extract-face");
     const pg = document.querySelector(".extract-page");
+    const bar = document.querySelector(".extract-face-actions") || document.querySelector(".stage-bar");
     const rt = tb?.getBoundingClientRect();
+    const rf = face?.getBoundingClientRect();
+    const rb = bar?.getBoundingClientRect();
     return JSON.stringify({
       mode: tb?.dataset.toolbarMode || null,
       tbBottom: rt ? Math.round(rt.bottom) : null,
+      faceBottom: rf ? Math.round(rf.bottom) : null,
+      barTop: rb ? Math.round(rb.top) : null,
       vh: window.innerHeight,
-      scrolled: pg ? pg.scrollTop : -1
+      pageScroll: pg ? pg.scrollTop : -1
     });
   })()`);
   const st13 = JSON.parse(String(stick13) || "{}");
-  check("⑬ §K.1 长文滚动中工具条吸可视区底缘（bottom ≈ 视口高-72 吸底动作栏让位）",
-    st13.mode === "dock-bottom" && typeof st13.tbBottom === "number" && Math.abs(st13.tbBottom - (st13.vh - 72)) <= 3 && st13.scrolled > 0, stick13);
+  check("⑬ D97 长文卡内滚动：工具条恒贴卡面底缘（滚后 tb bottom ≈ 卡底 ±2）且页零滚动",
+    st13.mode === "dock-bottom" && typeof st13.tbBottom === "number" && typeof st13.faceBottom === "number"
+      && Math.abs(st13.tbBottom - st13.faceBottom) <= 2 && st13.pageScroll === 0, stick13);
+  check("⑬ D97 底栏恒在界面底部（bar top ≈ 视口高-72，未被挤出）",
+    typeof st13.barTop === "number" && Math.abs(st13.barTop - (st13.vh - 72)) <= 3, stick13);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   await wait(400);
@@ -665,29 +724,30 @@ try {
   await clickAt(cdp, pTop.start.x, pTop.start.y);
   check("⑬ §K.2 前置：钉顶档进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
   await wait(900);
-  // 视觉序在未滚动态测量（滚动后正文顶部已滚出视口，几何比较无意义）
   const order13 = await cdp.eval(`(() => {
     const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
-    const pm = document.querySelector(".extract-face-body .ProseMirror");
+    const label = document.querySelector(".sec-quote .sec-label");
+    const face = document.querySelector(".extract-face");
     const rt = tb?.getBoundingClientRect();
-    const rp = pm?.getBoundingClientRect();
-    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, tbBottom: rt ? Math.round(rt.bottom) : null, pmTop: rp ? Math.round(rp.top) : null });
+    const rl = label?.getBoundingClientRect();
+    const rf = face?.getBoundingClientRect();
+    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, tbTop: rt ? Math.round(rt.top) : null, tbBottom: rt ? Math.round(rt.bottom) : null, labelTop: rl ? Math.round(rl.top) : null, faceTop: rf ? Math.round(rf.top) : null });
   })()`);
   const or13 = JSON.parse(String(order13) || "{}");
-  check("⑬ §K.2 钉顶：工具条排到编辑面之前（视觉序＝工具条在上、正文在下）",
-    or13.mode === "dock-top" && typeof or13.tbBottom === "number" && typeof or13.pmTop === "number" && or13.tbBottom <= or13.pmTop + 2, order13);
-  await cdp.eval(`(() => { const pg = document.querySelector(".extract-page"); if (pg) pg.scrollTop = 900; return true; })()`);
+  check("⑬ D97 钉顶：工具条贴卡面顶边（tb top ≈ 卡面顶缘 ±2）",
+    or13.mode === "dock-top" && typeof or13.tbTop === "number" && typeof or13.faceTop === "number" && Math.abs(or13.tbTop - or13.faceTop) <= 2, order13);
+  check("⑬ D97 钉顶：工具条在「摘录原文」标签**之上**（label.top > tb.bottom——用户指令）",
+    typeof or13.tbBottom === "number" && typeof or13.labelTop === "number" && or13.labelTop > or13.tbBottom, order13);
+  await cdp.eval(`(() => { const m = document.querySelector(".extract-face-body .markdown-editor .milkdown"); if (m) m.scrollTop = 900; return true; })()`);
   await wait(500);
   const top13 = await cdp.eval(`(() => {
     const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
-    const head = document.querySelector(".extract-page-head");
     const rt = tb?.getBoundingClientRect();
-    const rh = head?.getBoundingClientRect();
-    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, tbTop: rt ? Math.round(rt.top) : null, headBottom: rh ? Math.round(rh.bottom) : null });
+    return JSON.stringify({ mode: tb?.dataset.toolbarMode || null, tbTop: rt ? Math.round(rt.top) : null });
   })()`);
   const tp13 = JSON.parse(String(top13) || "{}");
-  check("⑬ §K.2 钉顶：滚动吸顶并让开吸顶头带（toolbar top ≈ 头带下缘）",
-    typeof tp13.tbTop === "number" && typeof tp13.headBottom === "number" && Math.abs(tp13.tbTop - tp13.headBottom) <= 3, top13);
+  check("⑬ D97 钉顶：卡内滚动时工具条纹丝不动（tb top 恒定）",
+    typeof tp13.tbTop === "number" && typeof or13.tbTop === "number" && Math.abs(tp13.tbTop - or13.tbTop) <= 2, top13);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarTop", false); return true; })()`);

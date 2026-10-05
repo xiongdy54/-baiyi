@@ -20,7 +20,7 @@ import {
   commonmark,
   createCodeBlockCommand,
   insertHrCommand,
-  headingSchema,
+  htmlSchema,
   toggleEmphasisCommand,
   toggleInlineCodeCommand,
   toggleLinkCommand,
@@ -30,14 +30,20 @@ import {
   wrapInHeadingCommand,
   wrapInOrderedListCommand
 } from "@milkdown/kit/preset/commonmark";
-import { gfm, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm";
+import { gfm, insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm";
 import { history, redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
-import { $command, $nodeSchema, $remark, getMarkdown } from "@milkdown/kit/utils";
+import { $command, $markSchema, $nodeSchema, $remark, getMarkdown } from "@milkdown/kit/utils";
 import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import katex from "katex";
 import remarkMath from "remark-math";
 import { placePopover, type PopoverRect } from "../../lib/popoverPlace";
+import { remarkMark } from "../../lib/editor/markdownOffsetMap";
+import {
+  GlyphBold, GlyphItalic, GlyphStrike,
+  IconCodeInline, IconLink, IconInlineMath, IconQuote, IconUl, IconOl, IconTask, IconTable,
+  IconCodeBlock, IconHr, IconMathBlock, IconMark, IconDetails, IconUndo, IconRedo, IconHeading
+} from "./toolbarIcons";
 import { useExtractEditorToolbar, useExtractEditorToolbarFloat, useExtractEditorToolbarTop } from "../../lib/extractCardSettings";
 
 // ---------- math 扩展（官方 kit 无 math 预设；按 crepe latex feature 同款 $remark/$nodeSchema 装配） ----------
@@ -45,6 +51,42 @@ import { useExtractEditorToolbar, useExtractEditorToolbarFloat, useExtractEditor
 /** remark-math 同时携带 mdast↔micromark 的 parse 与 stringify 扩展：milkdown 的序列化走同一个
  *  remark 处理器（core 把 remarkPluginsCtx 逐个 .use() 进去），math/inlineMath 节点因此可往返 */
 const remarkMathPlugin = $remark("extractRemarkMath", () => remarkMath);
+
+/** 标注（==高亮==）：与读态管线共用同一份 remark 胶水（remarkMark，markdownOffsetMap.ts）——
+    解析与序列化同一份扩展，`==…==` 在编辑态与读态往返逐字节一致（金样例 M15 锁定） */
+const remarkMarkPlugin = $remark("extractRemarkMark", () => remarkMark as never);
+
+/** 标注 mark：mdast `mark` 节点 ⇄ PM mark（emphasis 同款 openMark/next/closeMark 三段式） */
+const markSchema = $markSchema("extract_mark", () => ({
+  parseDOM: [{ tag: "mark" }, { tag: "span[data-type=extract-mark]" }],
+  toDOM: () => ["mark", { "data-type": "extract-mark" }],
+  parseMarkdown: {
+    match: (node) => node.type === "mark",
+    runner: (state, node, markType) => {
+      state.openMark(markType);
+      state.next(node.children);
+      state.closeMark(markType);
+    }
+  },
+  toMarkdown: {
+    match: (mark) => mark.type.name === "extract_mark",
+    runner: (state, mark) => {
+      state.withMark(mark, "mark");
+    }
+  }
+}));
+
+/** 标注开关：选区已在标注内 → 去除；否则施加（a=b 等单等号文本不受影响） */
+const toggleMarkCommand = $command("ToggleExtractMark", (ctx) => () => (state, dispatch) => {
+  const t = markSchema.type(ctx);
+  const { from, to } = state.selection;
+  const active = state.doc.rangeHasMark(from, to, t);
+  if (dispatch) {
+    if (active) dispatch(state.tr.removeMark(from, to, t));
+    else dispatch(state.tr.addMark(from, to, t.create()));
+  }
+  return true;
+});
 
 const inlineMathSchema = $nodeSchema("extract_math_inline", () => ({
   group: "inline",
@@ -179,8 +221,11 @@ export function createExtractEditor(
     .use(commonmark)
     .use(gfm)
     .use(remarkMathPlugin)
+    .use(remarkMarkPlugin)
     .use(inlineMathSchema)
     .use(mathBlockSchema)
+    .use(markSchema)
+    .use(toggleMarkCommand)
     .use(toggleInlineMathCommand)
     .use(insertMathBlockCommand)
     .use(setTaskCheckedCommand)
@@ -226,6 +271,9 @@ export interface MarkdownEditorProps {
   ariaLabel?: string;
   /** 编辑器内容与工具条之间的附加块（摘录卡＝原始批注块；dock 钉底时保持「正文→批注→工具条」序） */
   footer?: ReactNode;
+  /** 编辑器**上方**的附加块（摘录卡＝「摘录原文」节标签：钉顶时工具条 order:-1 排到标签之前＝
+      用户要求「固定在摘录原文的上面」）。仅编辑态渲染（读态标签由宿主自渲染，无双份） */
+  header?: ReactNode;
   className?: string;
 }
 
@@ -244,6 +292,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
     toolbarLabel = "Markdown 工具栏",
     ariaLabel,
     footer,
+    header,
     onReady,
     className
   },
@@ -430,23 +479,26 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
     });
   };
 
-  /** 标题 H1→H2→H3→正文 循环（§E） */
-  const headingCycle = () => {
+  /** 标题层级（D97 用户指令「标题层级选择」）：1/2/3＝H1-H3，0＝正文 */
+  const applyHeading = (level: number) => {
+    run((editor) => {
+      editor.action((ctx) => {
+        ctx.get(commandsCtx).call(wrapInHeadingCommand.key, level);
+      });
+    });
+  };
+
+  /** 折叠列表（D97）：插入 `<details>` 模板——以 inline html 节点入文（commonmark html schema 的
+      value 承载原文），序列化原样吐回＝往返逐字节；编辑态显示源码块，读态（rehype-raw+sanitize
+      放行 details/summary）呈现为可折叠块。Milkdown 无 details 结构支持，这是诚实的最小实现。 */
+  const insertDetails = () => {
     run((editor) => {
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
-        const headingType = headingSchema.type(ctx);
-        let level = 0;
-        const { $from } = view.state.selection;
-        for (let d = $from.depth; d > 0; d--) {
-          const n = $from.node(d);
-          if (n.type === headingType) {
-            level = Number(n.attrs.level) || 0;
-            break;
-          }
-        }
-        const next = level === 0 ? 1 : level >= 3 ? 0 : level + 1;
-        ctx.get(commandsCtx).call(wrapInHeadingCommand.key, next);
+        const node = htmlSchema.type(ctx).create({
+          value: '<details>\n<summary>折叠标题</summary>\n\n待展开的内容\n\n</details>'
+        });
+        view.dispatch(view.state.tr.replaceSelectionWith(node));
       });
     });
   };
@@ -462,24 +514,28 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
     });
   };
 
-  /** §E 16 钮：行内六 + 块级八 + 历史二 */
-  const BUTTONS: Array<{ tb: string; label: string; title: string; run: () => void }> = [
-    { tb: "bold", label: "B", title: "加粗", run: () => call(toggleStrongCommand.key) },
-    { tb: "italic", label: "I", title: "斜体", run: () => call(toggleEmphasisCommand.key) },
-    { tb: "strike", label: "S", title: "删除线", run: () => call(toggleStrikethroughCommand.key) },
-    { tb: "code", label: "‹›", title: "行内代码", run: () => call(toggleInlineCodeCommand.key) },
-    { tb: "link", label: "链接", title: "链接（选中文字后点此；再点一次取消）", run: () => call(toggleLinkCommand.key, {}) },
-    { tb: "inlineMath", label: "$x$", title: "行内公式", run: () => call(toggleInlineMathCommand.key) },
-    { tb: "h", label: "H", title: "标题（H1→H2→H3→正文 循环）", run: headingCycle },
-    { tb: "quote", label: "❝", title: "引用", run: () => call(wrapInBlockquoteCommand.key) },
-    { tb: "ul", label: "• 列表", title: "无序列表", run: () => call(wrapInBulletListCommand.key) },
-    { tb: "ol", label: "1. 列表", title: "有序列表", run: () => call(wrapInOrderedListCommand.key) },
-    { tb: "task", label: "☐ 任务", title: "任务列表", run: taskList },
-    { tb: "codeBlock", label: "代码块", title: "代码块", run: () => call(createCodeBlockCommand.key) },
-    { tb: "hr", label: "—", title: "分隔线", run: () => call(insertHrCommand.key) },
-    { tb: "mathBlock", label: "$$", title: "公式块", run: () => call(insertMathBlockCommand.key) },
-    { tb: "undo", label: "↩", title: "撤销（编辑器内历史）", run: () => call(undoCommand.key) },
-    { tb: "redo", label: "↪", title: "重做", run: () => call(redoCommand.key) }
+  /** 工具条按钮（D97 用户指令：统一图标 + 悬停 title 显示功能名称）：
+      行内七（含标注）+ 块级九（含标题下拉/折叠/表格）+ 历史二。tb 钩子保留给测试与样式。 */
+  const BUTTONS: Array<{ tb: string; title: string; icon: ReactNode; run: () => void; menu?: boolean }> = [
+    { tb: "bold", title: "加粗", icon: <GlyphBold />, run: () => call(toggleStrongCommand.key) },
+    { tb: "italic", title: "斜体", icon: <GlyphItalic />, run: () => call(toggleEmphasisCommand.key) },
+    { tb: "strike", title: "删除线", icon: <GlyphStrike />, run: () => call(toggleStrikethroughCommand.key) },
+    { tb: "code", title: "行内代码", icon: <IconCodeInline />, run: () => call(toggleInlineCodeCommand.key) },
+    { tb: "link", title: "链接（选中文字后点此；再点一次取消）", icon: <IconLink />, run: () => call(toggleLinkCommand.key, {}) },
+    { tb: "inlineMath", title: "行内公式", icon: <IconInlineMath />, run: () => call(toggleInlineMathCommand.key) },
+    { tb: "mark", title: "标注（==高亮==）", icon: <IconMark />, run: () => call(toggleMarkCommand.key) },
+    { tb: "h", title: "标题层级", icon: <IconHeading />, menu: true, run: () => setHMenuOpen((v) => !v) },
+    { tb: "quote", title: "引用", icon: <IconQuote />, run: () => call(wrapInBlockquoteCommand.key) },
+    { tb: "ul", title: "无序列表", icon: <IconUl />, run: () => call(wrapInBulletListCommand.key) },
+    { tb: "ol", title: "有序列表", icon: <IconOl />, run: () => call(wrapInOrderedListCommand.key) },
+    { tb: "task", title: "待办事项（任务列表）", icon: <IconTask />, run: taskList },
+    { tb: "details", title: "折叠列表（<details>，读态可折叠）", icon: <IconDetails />, run: insertDetails },
+    { tb: "table", title: "表格（3×3）", icon: <IconTable />, run: () => call(insertTableCommand.key, { row: 3, col: 3 }) },
+    { tb: "codeBlock", title: "代码块", icon: <IconCodeBlock />, run: () => call(createCodeBlockCommand.key) },
+    { tb: "hr", title: "分隔线", icon: <IconHr />, run: () => call(insertHrCommand.key) },
+    { tb: "mathBlock", title: "公式块", icon: <IconMathBlock />, run: () => call(insertMathBlockCommand.key) },
+    { tb: "undo", title: "撤销（编辑器内历史）", icon: <IconUndo />, run: () => call(undoCommand.key) },
+    { tb: "redo", title: "重做", icon: <IconRedo />, run: () => call(redoCommand.key) }
   ];
 
   // ---------- 悬浮态＝选区锚定弹层（§K.3，与 SelectionMenu/AnnotationEditor 同一族定位逻辑） ----------
@@ -491,6 +547,18 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   const [floatAnchor, setFloatAnchor] = useState<PopoverRect | null>(null);
   const [floatPos, setFloatPos] = useState<{ left: number; top: number; placement: "above" | "below" } | null>(null);
   const dragActiveRef = useRef(false);
+  /** 标题层级下拉（tb="h"）：开合 + 点外即收（工具条 preventDefault mousedown 不影响 document 监听） */
+  const [hMenuOpen, setHMenuOpen] = useState(false);
+  const hMenuRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    if (!hMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (hMenuRef.current?.contains(e.target as Node)) return;
+      setHMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown, true);
+    return () => document.removeEventListener("mousedown", onDown, true);
+  }, [hMenuOpen]);
   /** 锚点读取的去重 rAF 句柄：**挂载/卸载弹层永远出帧执行**——在 selectionchange 事件派发内
       同步挂载 portal（实测）会打断 ProseMirror 的选区收尾（PM 把 DOM 选区重置回过期 state） */
   const anchorRafRef = useRef<number | null>(null);
@@ -604,11 +672,38 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
       /* mousedown preventDefault：点工具条不转移焦点（ProseMirror 不失焦、选区保住＝弹层不收） */
       onMouseDown={(e) => e.preventDefault()}
     >
-      {BUTTONS.map((b) => (
-        <button key={b.tb} type="button" className="extract-face-toolbar-btn" data-tb={b.tb} title={b.title} onClick={b.run}>
-          {b.label}
-        </button>
-      ))}
+      {BUTTONS.map((b) =>
+        b.menu ? (
+          <span key={b.tb} className="md-tb-menu-wrap" ref={hMenuRef}>
+            <button type="button" className="extract-face-toolbar-btn" data-tb={b.tb} title={b.title} aria-haspopup="menu" aria-expanded={hMenuOpen} onClick={b.run}>
+              {b.icon}
+            </button>
+            {hMenuOpen && (
+              <span className="md-tb-menu" role="menu" aria-label="标题层级">
+                {([["1", "标题 1"], ["2", "标题 2"], ["3", "标题 3"], ["0", "正文"]] as const).map(([lv, label]) => (
+                  <button
+                    key={lv}
+                    type="button"
+                    role="menuitem"
+                    className="md-tb-menu-item"
+                    data-h={lv}
+                    onClick={() => {
+                      setHMenuOpen(false);
+                      applyHeading(Number(lv));
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </span>
+            )}
+          </span>
+        ) : (
+          <button key={b.tb} type="button" className="extract-face-toolbar-btn" data-tb={b.tb} title={b.title} onClick={b.run}>
+            {b.icon}
+          </button>
+        )
+      )}
     </div>
   ) : null;
 
@@ -621,6 +716,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
       onKeyDown={onRootKeyDown}
       style={minRows ? ({ ["--md-editor-min-rows" as string]: String(minRows) } as CSSProperties) : undefined}
     >
+      {header}
       <Milkdown />
       {footer}
       {/* 悬浮弹层 portal 到 body：卡片宿主普遍带入场动画（fill both 的 transform 动画使其成为

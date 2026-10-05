@@ -13,9 +13,9 @@ import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import rehypeKatex from "rehype-katex";
-import { extractSanitizeSchema, remarkSoftBreaks } from "../../lib/editor/markdownOffsetMap";
+import { extractSanitizeSchema, remarkMark, remarkSoftBreaks } from "../../lib/editor/markdownOffsetMap";
 
-const READ_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkSoftBreaks];
+const READ_REMARK_PLUGINS = [remarkGfm, remarkMath, remarkMark, remarkSoftBreaks];
 const READ_REHYPE_PLUGINS: PluggableList = [rehypeRaw, [rehypeSanitize, extractSanitizeSchema], rehypeKatex];
 
 /** 统一展示侧渲染（摘录卡读态/查看态、日记条目正文等一切 markdown 面共用这一份管线） */

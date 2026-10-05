@@ -17,10 +17,12 @@ interface ExtractEditorProps {
   pendingFocusIndex?: number | null;
   /** v1.3：编辑器内容与工具条之间的附加块（摘录卡＝原始批注块） */
   footer?: ReactNode;
+  /** D97：编辑器上方的附加块（摘录卡＝「摘录原文」节标签——钉顶时工具条排到标签之前） */
+  header?: ReactNode;
 }
 
 export const ExtractEditor = forwardRef<ExtractEditorApi, ExtractEditorProps>(function ExtractEditor(
-  { defaultValue, onCommit, pendingFocusIndex, footer },
+  { defaultValue, onCommit, pendingFocusIndex, footer, header },
   ref
 ) {
   const editorRef = useRef<MarkdownEditorApi | null>(null);
@@ -40,6 +42,7 @@ export const ExtractEditor = forwardRef<ExtractEditorApi, ExtractEditorProps>(fu
       variant="full"
       commitOnUnmount
       footer={footer}
+      header={header}
       className="extract-editor"
       onReady={() => {
         // 编辑器就绪即接管焦点：落点＝宿主给的块索引（§D.2 P0 块级；不可用时落文档开头）

@@ -67,6 +67,7 @@ async function makeRenderer() {
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkMath)
+    .use(M.remarkMark)
     .use(M.remarkSoftBreaks)
     .use(remarkRehype, { allowDangerousHtml: true })
     .use(rehypeRaw)
@@ -438,6 +439,28 @@ async function main() {
     check("M14.3 容器开头落点 → 首文本头", c3 && c3.node.data === "甲段落 " && c3.off === 0, 0, c3 && c3.off);
     const src = c1 && M.domToSrc(map, c1.node, c1.off);
     check("M14.4 落点→源偏移落在加粗内文", src === md.indexOf("加粗段"), md.indexOf("加粗段"), src);
+  }
+
+  console.log("== M15 标注（==高亮==，D97） ==");
+  {
+    const md = "前文 ==标注内容== 后文。";
+    const { map, root } = B(md);
+    const mark = root.querySelector("mark");
+    check("M15.1 读态渲染 <mark>（sanitize 放行）", !!mark, true, !!mark);
+    check("M15.2 渲染文本与源一致（去 == 语法）", domText(map.root) === "前文 标注内容 后文。", "前文 标注内容 后文。", domText(map.root));
+    const s0 = md.indexOf("标注内容");
+    const r = M.srcToRange(map, s0, s0 + 4);
+    check("M15.3 srcToRange 标注内文", r && r.toString() === "标注内容", "标注内容", r && r.toString());
+    check("M15.4 端点回写",
+      r && M.domToSrc(map, r.startContainer, r.startOffset) === s0 && M.domToSrc(map, r.endContainer, r.endOffset) === s0 + 4,
+      [s0, s0 + 4],
+      r && [M.domToSrc(map, r.startContainer, r.startOffset), M.domToSrc(map, r.endContainer, r.endOffset)]);
+    const md2 = "链接 https://x.com/?a=1&b=2 与比值 a=b 不受影响。";
+    const { map: m2, root: root2 } = B(md2);
+    check("M15.5 单等号/URL 不触发标注（零 mark 节点）", !root2.querySelector("mark"), true, !!root2.querySelector("mark"));
+    check("M15.6 单等号语料映射完好（无 unmappable）", m2.boundaries.size === 0, 0, m2.boundaries.size);
+    const r2 = M.srcToRange(m2, md2.indexOf("链接"), md2.indexOf("链接") + 2);
+    check("M15.7 标注外语料区间正常", r2 && r2.toString() === "链接", "链接", r2 && r2.toString());
   }
 
   console.log(`\n通过 ${pass} 项，失败 ${fail} 项`);

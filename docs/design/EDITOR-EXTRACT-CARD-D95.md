@@ -502,6 +502,11 @@ theme.css 消费：.extract-face-body { font-size: var(--extract-face-fs, var(--
 
 ## 修订记录
 
+### v1.8（2026-10-05，D97 实施记录：定高布局 + 图标化 + 新按钮，v48.56）
+
+用户第四轮反馈（两张截图 + 五项指令）全部落地（GUIDE **D97 / v48.56**，main 直接实施）：
+①**摘录页定高布局**——`.extract-page` overflow hidden、卡面 `flex-basis 0` 恒定占满头带与底栏之间、正文卡内滚动（编辑态滚动区＝`.milkdown`；Milkdown 双层包裹 div 全部进 min-height:0 链——漏掉中间层会让内容把工具条推出卡外，实测踩坑）、底栏与内容长度彻底解耦；②钉顶＝满幅条带贴卡面顶边、排在「摘录原文」标签**之前**（标签经 MarkdownEditor `header` 插槽进编辑器、工具条 `order:-1`），钉底＝满幅条带贴卡面底边零空隙（负外距抵消 sec 内距）；③19 钮全图标化（B/I/S 字形真斜体/真删除线 + SVG 线性图标 + 悬停 title），新增**标注**（`==高亮==`：micromark-extension-mark ^1.0.2 + 自写 remark mdast 胶水 `remarkMark`（编辑态/读态共用一份，读态经 mdast `data.hName:"mark"` 成元素 + sanitize 放行 mark/details/summary；转义只涉相邻等号——URL 单等号逐字节保真，金样例 M15）、**标题层级下拉**（H1/H2/H3/正文）、**表格**（gfm insertTableCommand 3×3）、**折叠列表**（`<details>` 模板以 inline html 节点承载原文逐字节往返；编辑态显示源码块、读态可折叠——Milkdown 无 details 结构支持，诚实最小实现）、**待办事项**图标化；④恢复 D96 期间意外缺失的 markdown 元素样式块（h1-h6/引用/代码/表格等约 49 条规则——「引用只缩进无样式」的根因，浏览器默认样式掩盖了缺失）。
+
 ### v1.7（2026-10-05，实施记录：§K 四项 + §J P0 于 main 落地 v48.55/D96）
 
 - §K 四项按本节实施（GUIDE 登记 **D96 / v48.55**，新会话 ZCode 直接在 main，未开分支）：①dock 拉伸钉底退役 → sticky（`dock-bottom`，短文零大空白 + 长文吸底让开 72px stage-bar）；②`app.extractEditorToolbarTop`（`dock-top`＝flex `order:-1` + sticky top，摘录页实测让位 95px / 复习页 49px）；③悬浮改判选区锚定弹层（`float-selection`＝placePopover prefer above / align center，塌选/滚动/换卡收起，`data-toolbar-mode` 三值 `dock-bottom|dock-top|float-selection`）；④`app.readerActionsFloat`（`ReaderSelActionsFloat`，与 SelectionMenu 同 selection 生命周期，保留 `.reader-sel-actions` 豁免类，固定态零改动）。

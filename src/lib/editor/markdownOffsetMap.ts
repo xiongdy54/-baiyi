@@ -13,18 +13,65 @@ import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { Root, Content, Parent } from "mdast";
+import type { CompileContext, Token } from "mdast-util-from-markdown";
 import { defaultSchema } from "hast-util-sanitize";
 import { decodeNamedCharacterReference } from "decode-named-character-reference";
 import { decodeNumericCharacterReference } from "micromark-util-decode-numeric-character-reference";
+import { pandocMark } from "micromark-extension-mark";
 
 /** 读态渲染的 mdast 解析（与 react-markdown 读态同族同选项；导出供映射单测复用同一解析）。
  *  注意两点：remarkSoftBreaks 是 tree transform，只在 run 阶段执行，单 parse 不触发；
  *  runSync 必须把带 value 的 file 传回去——分离调用 runSync(parse()) 时 VFile 不会自动携带，
  *  而插件的源切片基准正是 file.value。 */
 export function parseForMap(markdown: string): Root {
-  const processor = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(remarkSoftBreaks);
+  const processor = unified().use(remarkParse).use(remarkGfm).use(remarkMath).use(remarkMark).use(remarkSoftBreaks);
   return processor.runSync(processor.parse(markdown), { value: markdown }) as Root;
 }
+
+/**
+ * 标注（==高亮==，D97 用户指令「标注」按钮）：micromark-extension-mark 只提供 micromark 语法
+ * 扩展（pandocMark），remark 的 mdast from/to 胶水需自写——与 mdast-util-gfm-strikethrough
+ * 同构：enter/exit 把 mark token 收成 mdast `mark` 节点，toMarkdown handler 以 `==…==` 包回。
+ * 转义纪律：只转义**相邻等号**（`a=b`、URL 中的单个 `=` 永不触发、逐字节保真；金样例 M15 锁定）。
+ * Milkdown 编辑态（MarkdownEditor）与本读态管线共用本插件——解析与序列化同一份，往返稳定。
+ */
+export const remarkMark: Plugin<[]> = function () {
+  const data = this.data();
+  data.micromarkExtensions ??= [];
+  data.fromMarkdownExtensions ??= [];
+  data.toMarkdownExtensions ??= [];
+  data.micromarkExtensions.push(pandocMark());
+  const fromExtension = {
+    canContainEols: ["mark"],
+    enter: {
+      // token 名＝pandocMark 语法流中的标记容器（与 markSequence 分隔符 token 相对）
+      mark(this: CompileContext, token: Token) {
+        // mdast 节点类型联合不认识 mark（自定义节点）——按结构传入、push 处整体断言。
+        // data.hName＝remark-rehype 未知节点钩子：读态渲染为 <mark>（sanitize 放行后成立）
+        this.enter({ type: "mark", children: [], data: { hName: "mark" } } as unknown as Content, token);
+      }
+    },
+    exit: {
+      mark(this: CompileContext, token: Token) {
+        this.exit(token);
+      }
+    }
+  };
+  data.fromMarkdownExtensions.push(fromExtension as unknown as (typeof data.fromMarkdownExtensions)[number]);
+  const toExtension = {
+    unsafe: [{ character: "=", after: "=" }],
+    handlers: {
+      // 与 mdast-util-to-markdown 的 emphasis handler 同形：进 mark 域 → 收子短语 → ==包回
+      mark(node: unknown, _parent: unknown, state: { enter: (s: string) => () => void; containerPhrasing: (n: unknown, i: unknown) => string }, info: unknown) {
+        const exit = state.enter("mark");
+        const value = state.containerPhrasing(node, info);
+        exit();
+        return "==" + value + "==";
+      }
+    }
+  };
+  data.toMarkdownExtensions.push(toExtension as unknown as (typeof data.toMarkdownExtensions)[number]);
+};
 
 /**
  * v1.4 软换行＝可见换行（用户反馈「编辑后换行消失」）：把段内 text 叶按 \n 拆成
@@ -83,6 +130,7 @@ export const remarkSoftBreaks: Plugin<[]> = function () {
  */
 export const extractSanitizeSchema: typeof defaultSchema = {
   ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), "mark", "details", "summary"],
   attributes: {
     ...defaultSchema.attributes,
     li: [...(defaultSchema.attributes?.li ?? []), ["className", "task-list-item"]],

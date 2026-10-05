@@ -308,7 +308,8 @@ export default function ExtractCardFace({
     const body = bodyRef.current;
     const range = hlRangeRef.current;
     if (!body || !range) return;
-    let scroller: HTMLElement | null = body.parentElement;
+    // D97：正文区自身即滚动容器（卡面定高、内部滚动）——从 body 起步向上找
+    let scroller: HTMLElement | null = body;
     while (scroller && scroller.scrollHeight <= scroller.clientHeight + 1) {
       scroller = scroller.parentElement;
     }
@@ -415,7 +416,9 @@ export default function ExtractCardFace({
           D95 v1.3：正文下方增「批注」块（摘录自身原始批注，空则不渲染）；引文左缘色条退役。 */}
 
       <div className="sec sec-quote">
-        <div className="sec-label">摘录原文</div>
+        {/* D97：编辑态节标签经 header 插槽进编辑器（工具条钉顶时排到标签之前＝「固定在摘录原文的
+            上面」）；读态/查看态仍由宿主直排（无双份）。 */}
+        {(!editing || viewOnly || !handlers.onEdit) && <div className="sec-label">摘录原文</div>}
         <div className="extract-face-body" ref={bodyRef} onClick={onBodyClick} onKeyDown={onBodyKeyDown} data-editing={editing ? "1" : undefined}>
           {viewOnly || !handlers.onEdit || !editing ? <ReadMarkdown text={bodyText} /> : null}
           {!viewOnly && handlers.onEdit && editing && (
@@ -424,6 +427,7 @@ export default function ExtractCardFace({
               defaultValue={bodyText}
               pendingFocusIndex={pendingFocusRef.current}
               footer={annotBlock}
+              header={<div className="sec-label">摘录原文</div>}
               onCommit={handleEditorCommit}
             />
           )}
