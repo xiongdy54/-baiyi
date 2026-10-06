@@ -23,6 +23,8 @@ import CardFaceExtrasBlock from "./CardFaceExtras";
 // v48.60（D101/D102）：答案揭示后快捷打标 + 「不再关心」归档
 import TagInput from "./TagInput";
 import { applyTagDelta, type TagVocabEntry } from "../lib/tags";
+// v48.63（D107）：标签功能总开关——复习页标签区与快捷打标入口受其控制
+import { useTagsEnabled } from "../lib/tagSettings";
 
 // A-1（审计）：渲染期调用不得抛。原写法 `previews?.items ?? fsrsEngine.preview(current!.fsrs)`
 // 在 previews 为 null 时会同步抛，被根错误边界接管 → 整应用停止渲染。这里降级为空列表。
@@ -53,6 +55,7 @@ export default function ReviewView({
   /** v48.41（D81）：当前卡材料名上报（顶栏中间显示；无材料名时回调空串＝回落「复习」字样） */
   onMaterialName?: (name: string) => void;
 } = {}) {
+  const tagsEnabled = useTagsEnabled();
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
   // v48.41（D81）：当前卡材料名上报顶栏（替代「复习」字样；无材料名＝空串，顶栏回落原字样）
@@ -791,8 +794,9 @@ export default function ReviewView({
         <div className="review-meta">
           {current!.dateStamp ? current!.dateStamp : ""}
         </div>
-        {/* v48.60（D101）：答案揭示后的标签区——chips 只读 + 快捷添加（**正面永不显示**，防泄题 R6 同源） */}
-        {showBack && (
+        {/* v48.60（D101）：答案揭示后的标签区——chips 只读 + 快捷添加（**正面永不显示**，防泄题 R6 同源）；
+            v48.63（D107）：标签功能总开关关闭时整块不渲染 */}
+        {showBack && tagsEnabled && (
           <div className="review-tags" data-testid="review-tags">
             {(current!.tags ?? []).map((t) => (
               <span key={t} className="tag-chip tag-chip-static">

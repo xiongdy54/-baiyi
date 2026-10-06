@@ -13,6 +13,8 @@ import { IconChevronDown, IconClose } from "./icons";
 import OcclusionShapes from "./OcclusionShapes";
 import MarkdownEditor from "./editor/MarkdownEditor";
 import TagInput from "./TagInput";
+// v48.63（D107）：标签功能总开关——手动表单标签行受其控制
+import { useTagsEnabled } from "../lib/tagSettings";
 import type { TagVocabEntry } from "../lib/tags";
 import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
 
@@ -95,7 +97,8 @@ export function ManualCardForm({
   const [mnemonic, setMnemonic] = useState("");
   const [knowledgePointId, setKnowledgePointId] = useState("");
   const [dateStamped, setDateStamped] = useState(false);
-  // v48.60（D101）：标签（初值 = 批注标签继承预填，可删）
+  // v48.60（D101）：标签（初值 = 批注标签继承预填，可删）；v48.63（D107）：总开关关闭时恒空提交
+  const tagsEnabled = useTagsEnabled();
   const [tags, setTags] = useState<string[]>(initialTags ?? []);
 
   useEffect(() => {
@@ -124,7 +127,7 @@ export function ManualCardForm({
       knowledgePointId: knowledgePointId.trim(),
       // 日期标记（R11/规则19）：易变内容勾选后写入当日日期
       dateStamp: dateStamped ? new Date().toISOString().slice(0, 10) : null,
-      tags
+      tags: tagsEnabled ? tags : []
     };
     const clozeText = mode === "cloze" ? toCloze(front) : undefined;
     await onSave({
@@ -249,11 +252,14 @@ export function ManualCardForm({
           <label>领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）</label>
           <UdcPicker value={domain} onChange={setDomain} />
         </div>
-        {/* v48.60（D101）：用户标签——回车/逗号/顿号确认 chip；词表建议；继承初值可删 */}
-        <div className="form-field">
-          <label>标签（可选；自由组织词汇，用 :: 分层级，如「考研::英语」）</label>
-          <TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" />
-        </div>
+        {/* v48.60（D101）：用户标签——回车/逗号/顿号确认 chip；词表建议；继承初值可删；
+            v48.63（D107）：总开关关闭时整行不渲染，tags 恒空提交（继承初值一并失效） */}
+        {tagsEnabled && (
+          <div className="form-field">
+            <label>标签（可选；自由组织词汇，用 :: 分层级，如「考研::英语」）</label>
+            <TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" />
+          </div>
+        )}
         <div className="form-field">
           <label>上下文前缀（可选；只能写领域/学科名，禁止泄漏答案——规则16）</label>
           <input

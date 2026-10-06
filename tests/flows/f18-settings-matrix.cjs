@@ -33,7 +33,8 @@ esbuild.buildSync({
     contents: [
       'export { normalizeExtractEditorToolbar, normalizeExtractEditorToolbarFloat, normalizeExtractEditorToolbarTop, normalizeExtractFaceFontFollow, normalizeExtractFaceFontSize, normalizeExtractFaceFontFamily } from "./src/lib/extractCardSettings";',
       'export { normalizeReaderActionsFloat } from "./src/lib/readerActionsSettings";',
-      'export { normalizeCardFaceExtras, DEFAULT_CARD_FACE_EXTRAS } from "./src/lib/cardFaceExtras";'
+      'export { normalizeCardFaceExtras, DEFAULT_CARD_FACE_EXTRAS } from "./src/lib/cardFaceExtras";',
+      'export { normalizeTagsEnabled } from "./src/lib/tagSettings";'
     ].join("\n"),
     resolveDir: ROOT,
     loader: "ts"
@@ -70,6 +71,7 @@ const DOC_KEYS = [
   "app.extractEditorToolbar", "app.extractEditorToolbarFloat", "app.extractEditorToolbarTop", "app.extractFaceFontFollow", "app.extractFaceFontSize", "app.extractFaceFontFamily", // §7.4 v48.54 / D95（摘录卡编辑器工具栏与形态 + 字号/字体桥；v48.55/§K 增钉顶键）
   "app.readerActionsFloat", // §7.4 v48.55 / D95 §K.4（阅读器选区动作组固定/悬浮）
   "app.cardFaceExtras", // §7.4 v48.61 / D104（卡面信息密度三开关：背面辅助字段助记/例子/来源）
+  "app.tagsEnabled", // §7.4 v48.63 / D107（标签功能总开关：默认开，仅严格 false 为关；隐藏入口不动数据）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -272,6 +274,7 @@ app
         ["app", "limits", { newCardsPerDay: 20, cardReviewsPerDay: 200, newExtractsPerDay: 10, extractReviewsPerDay: 50, ignoreReviewLimitForNew: false }], // v48.22 / D58
         ["app", "reviewScopes", [{ id: "scope-1", name: "测试范围", bookItemIds: ["item-1"], tags: ["考研::英语", "错题"], kpIds: ["kp-1"], kinds: ["card", "extract"], limits: { extractReviewsPerDay: 5 } }]], // v48.22 / D58；v48.61 / D105 扩展 tags/kpIds
         ["app", "cardFaceExtras", { mnemonic: true, example: false, sourceRef: true }], // v48.61 / D104 卡面信息密度（非默认值才验得出往返）
+        ["app", "tagsEnabled", false], // v48.63 / D107 标签功能总开关（非默认值才验得出往返）
         ["app", "accentColor", "#0057ff"],
         ["app", "mindmapMaxCalls", 40],
         ["app", "mindmapPricing", { input: 1.5, output: 6 }],
@@ -458,6 +461,10 @@ app
         JSON.stringify([null, [], "x", 42, undefined].map(normExtras)),
         JSON.stringify(Array(5).fill({ mnemonic: true, example: true, sourceRef: true })));
       flow.eq("cardFaceExtras：默认常量全开", JSON.stringify(extNorm.DEFAULT_CARD_FACE_EXTRAS), JSON.stringify({ mnemonic: true, example: true, sourceRef: true }));
+      flow.eq("tagsEnabled：仅严格 false 为关（true/'false'/0/null/undefined）",
+        JSON.stringify([true, "false", 0, null, undefined].map(extNorm.normalizeTagsEnabled)),
+        JSON.stringify([true, true, true, true, true]));
+      flow.eq("tagsEnabled：false 为关", extNorm.normalizeTagsEnabled(false), false);
 
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       flow.eq("清空后记忆总开关回到默认关", mem.readMemoryConfig({ readSettings: () => st.readSettings() }).enabled, false);

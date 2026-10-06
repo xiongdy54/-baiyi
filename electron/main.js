@@ -214,6 +214,8 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "extractFaceFontFamily") value = typeof value === "string" ? value.trim() : "";
   // v48.61（D104，§7.4）：卡面信息密度三开关写侧归一——仅严格 true 为真、其余回落 true（默认全开），
   // 与渲染层读侧（src/lib/cardFaceExtras.ts normalizeCardFaceExtras）同规
+  // v48.63（D107，§7.4）：标签功能总开关写侧归一——仅严格 false 为关，其余（含缺失/非法）回落开
+  if (scope === "app" && key === "tagsEnabled") value = value !== false;
   if (scope === "app" && key === "cardFaceExtras") {
     const src = value && typeof value === "object" && !Array.isArray(value) ? value : {};
     value = {

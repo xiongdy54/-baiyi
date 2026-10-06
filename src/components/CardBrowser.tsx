@@ -21,6 +21,8 @@ import KnowledgeManager from "./KnowledgeManager";
 import { buildLineageTree, type LineageExtractRow, type LineageNode } from "../lib/cardLineage";
 // v48.61（D104）：背面辅助字段区（app.cardFaceExtras 三开关，与复习页同一组件）
 import CardFaceExtrasBlock from "./CardFaceExtras";
+// v48.63（D107）：标签功能总开关——批量打标/详情标签区/构建器标签条件受其控制
+import { useTagsEnabled } from "../lib/tagSettings";
 // v48.22（D58 §6.8-6）：浏览器 2.0——摘录行数据源 + 状态/推送文案
 import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
 import { extractStatusLabel } from "../lib/sessionQueue";
@@ -136,6 +138,7 @@ export default function CardBrowser({
   /** 清除锚点筛选（回 App 摘掉视图字段） */
   onClearAnchorFilter?: () => void;
 }) {
+  const tagsEnabled = useTagsEnabled();
   const [all, setAll] = useState<BrowserCard[]>([]);
   const [preset, setPreset] = useState<Preset>("all");
   const [query, setQuery] = useState("");
@@ -882,9 +885,11 @@ export default function CardBrowser({
               {bookOptions.filter((o) => o.value !== "all").length === 0 && <span className="form-hint">暂无可选书</span>}
             </span>
           )}
-          <span className="cb-deck-tags" data-deck-tags>
-            <TagInput value={deckTags} onChange={setDeckTags} suggestions={tagVocab} ariaLabel="牌组标签条件" placeholder="标签条件（层级前缀，回车确认）" />
-          </span>
+          {tagsEnabled && (
+            <span className="cb-deck-tags" data-deck-tags>
+              <TagInput value={deckTags} onChange={setDeckTags} suggestions={tagVocab} ariaLabel="牌组标签条件" placeholder="标签条件（层级前缀，回车确认）" />
+            </span>
+          )}
           <span className="cb-deck-chips">
             {deckKps.map((k) => (
               <span key={k.id} className="tag-chip tag-chip-static" data-deck-kp-chip>
@@ -1148,7 +1153,8 @@ export default function CardBrowser({
               <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
-              {/* v48.60（D101）：批量打标/去标（v1 仅闪卡行；浮层内 TagInput + 词表建议） */}
+              {/* v48.60（D101）：批量打标/去标（v1 仅闪卡行；浮层内 TagInput + 词表建议）；v48.63（D107）受标签总开关控制 */}
+              {tagsEnabled && (
               <button
                 className={`btn btn-outline btn-sm${tagPop === "add" ? " btn-primary" : ""}`}
                 disabled={batchBusy}
@@ -1160,6 +1166,8 @@ export default function CardBrowser({
               >
                 打标签
               </button>
+              )}
+              {tagsEnabled && (
               <button
                 className={`btn btn-outline btn-sm${tagPop === "remove" ? " btn-primary" : ""}`}
                 disabled={batchBusy}
@@ -1171,6 +1179,7 @@ export default function CardBrowser({
               >
                 去标签
               </button>
+              )}
               {/* v48.60（D102）：批量归档/恢复（生命周期；不评分、不动 FSRS） */}
               <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive-cards onClick={() => void runCardBatch("archive")}>归档</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-restore-cards onClick={() => void runCardBatch("restore")}>恢复</button>
@@ -1474,6 +1483,8 @@ function CardDetail({
   const [tagDraft, setTagDraft] = useState<string[]>([]);
   const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
   const isArchived = card.status === "archived";
+  // v48.63（D107）：标签功能总开关——详情标签区受其控制（数据不动）
+  const tagsEnabled = useTagsEnabled();
 
   // v48.61（D103）：血缘树——复用 D87 邻接表口径（workflow 行 parentExtractId）+ D85 聚合计数
   const lineage = useMemo(
@@ -1764,7 +1775,9 @@ function CardDetail({
             </div>
           )}
 
-          {/* v48.60（D101）：标签区——chips + 单卡编辑（正面永不显示标签，详情属编辑域不受此限） */}
+          {/* v48.60（D101）：标签区——chips + 单卡编辑（正面永不显示标签，详情属编辑域不受此限）；
+              v48.63（D107）：标签功能总开关关闭时整块不渲染 */}
+          {tagsEnabled && (
           <div className="cb-tags" data-testid="card-detail-tags">
             <span className="cb-tags-label">标签</span>
             {tagEditing ? (
@@ -1803,6 +1816,7 @@ function CardDetail({
               </span>
             )}
           </div>
+          )}
 
           {issues.length > 0 && (
             <div className="cb-issues">

@@ -628,6 +628,45 @@ function CardFaceExtrasSection() {
   );
 }
 
+// ---------- 标签功能总开关（v48.63，D107）：一键开启/关闭全部标签入口与展示 ----------
+// 覆盖：手动制卡标签行、AI 制卡的批注标签继承（批 F 的 AI 建议标签届时同受此开关）、
+// 复习页标签区与快捷打标、浏览器批量打标/去标、卡详情标签区、筛选牌组构建器标签条件。
+// 只隐藏入口与展示——已存标签数据零改动，重新打开即恢复；查询 tag: 与已存 scope 照常生效。
+function TagsEnabledSection() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    settingsStore.get<unknown>("app", "tagsEnabled", null).then((v) => setEnabled(v !== false));
+  }, []);
+  async function update(next: boolean) {
+    setEnabled(next);
+    await settingsStore.set("app", "tagsEnabled", next);
+    // 广播设置变更（App 主题/皮肤同款事件）——设置模态常开在当前视图之上，宿主不重挂载也能即时生效
+    eventBus.emit("settings/changed", { scope: "app", key: "tagsEnabled" });
+    setSavedTick((t) => t + 1);
+    window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
+  }
+  return (
+    <section className="settings-section" id="sec-tags">
+      <h3>标签功能</h3>
+      <p className="form-hint">
+        标签是给卡片自造的组织词（如「考研」「错题」）。关闭后，制卡表单、复习页、卡片浏览器里的全部标签入口与展示
+        一并隐藏（AI 制卡的标签建议也一并停用）；已打的标签数据原样保留，重新打开即恢复显示。
+      </p>
+      {enabled !== null && (
+        <div className="settings-row">
+          <span>启用标签功能</span>
+          <div className="seg-tabs seg-tabs-sm" role="group" aria-label="标签功能开关" data-testid="tags-enabled-toggle">
+            <button className={enabled ? "active" : ""} data-tags-on onClick={() => update(true)}>开</button>
+            <button className={!enabled ? "active" : ""} data-tags-off onClick={() => update(false)}>关</button>
+          </div>
+        </div>
+      )}
+      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，各界面即时生效。</p>}
+    </section>
+  );
+}
+
 // ---------- 摘录复习（v48.22，D58/§6.8）：并入复习队列 / 混编模式 / 推送引擎 ----------
 // 实验项必须带「实验功能 · 早期开发阶段」标识与说明（用户口径）；切换推送引擎为**无损**操作
 // （每引擎私有子空间互不覆盖，A→B→A 往返逐字段等值，指南 §6.8-4）。
@@ -2422,6 +2461,8 @@ export default function SettingsPanel({
             <SiblingBurySection />
             {/* v48.61（D104）：卡面信息密度（背面辅助字段三开关） */}
             <CardFaceExtrasSection />
+            {/* v48.63（D107）：标签功能总开关 */}
+            <TagsEnabledSection />
             {/* v48.22（D58 §6.8）：摘录复习与每日上限 */}
             <ExtractReviewSection />
             <LimitsSection />

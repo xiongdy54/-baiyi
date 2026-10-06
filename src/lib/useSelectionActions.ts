@@ -29,6 +29,8 @@ import type { OcclusionEditorSubmit } from "../components/editor/OcclusionEditor
 import type { ManualCardPayload } from "../components/ManualCardEditor";
 import { createManualCard } from "./manualCard";
 import { normalizeTags } from "./tags";
+// v48.63（D107）：标签功能总开关
+import { useTagsEnabled } from "./tagSettings";
 import { routeExplainMode, type ExplainModePref } from "./explainRouter";
 import type { ExtractSpan } from "./readingWorkflow";
 
@@ -180,6 +182,8 @@ export type SelectionActions = ReturnType<typeof useSelectionActions>;
 
 export function useSelectionActions(adapter: SelectionActionsAdapter) {
   const { showToast, sourceTextRef, occlusionSourceRef } = adapter;
+  // v48.63（D107）：标签功能总开关——AI 卡的批注标签继承与手动表单预填受其控制（关＝不继承不预填）
+  const tagsEnabled = useTagsEnabled();
   // 动作是渲染期创建的普通函数（与抽出前一致）；回调里一律读最新的 adapter，避免快照过期
   const adapterRef = useRef(adapter);
   adapterRef.current = adapter;
@@ -953,8 +957,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   async function acceptDraft(draft: CardDraft, draftIndex: number, edited?: Partial<CardDraft>) {
     if (aiPanel?.accepted?.has(draftIndex)) return; // 防重复入队
     const d = { ...draft, ...edited };
-    // v48.60（D101 §1.4④）：批注标签继承——草稿无标签时并入来源摘录的批注标签（用户事后可改）
-    if (!d.tags || d.tags.length === 0) {
+    // v48.60（D101 §1.4④）：批注标签继承——草稿无标签时并入来源摘录的批注标签（用户事后可改）；
+    // v48.63（D107）：标签总开关关闭时不继承（AI 卡不带标签落库）
+    if (tagsEnabled && (!d.tags || d.tags.length === 0)) {
       const inherited = await inheritedExtractTags();
       if (inherited.length) d.tags = inherited;
     }
@@ -1214,11 +1219,14 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     setManualActive(true);
     wakeDock();
     A().clearSelection();
-    // v48.60（D101）：继承初值异步补入（表单打开后 chips 到位即可，不阻塞开坞）
+    // v48.60（D101）：继承初值异步补入（表单打开后 chips 到位即可，不阻塞开坞）；
+    // v48.63（D107）：标签总开关关闭时不预填
     setManualTagsInitial([]);
-    void inheritedExtractTags().then((tags) => {
-      if (tags.length) setManualTagsInitial(tags);
-    });
+    if (tagsEnabled) {
+      void inheritedExtractTags().then((tags) => {
+        if (tags.length) setManualTagsInitial(tags);
+      });
+    }
   }
   function actAICards() {
     const t = A().selectionText();
