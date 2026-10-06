@@ -3462,36 +3462,53 @@ body.theme-dark .modal-panel {
   font-size: var(--fs-meta);
 }
 .tag-input-box input:focus { outline: none; border-color: var(--accent); }
-.tag-suggest {
+.tag-input-box.expanded input { border-color: var(--accent); }
+/* v48.62（D106，设计稿 TAG-SUGGESTION-PREVIEW.md V4）：展开式建议面板——
+   视觉一体化：与输入框同底色、accent 连续描边（top 无框、top:-1px 与输入框共享边线）；
+   展开动效＝grid-template-rows 0fr→1fr 200ms ease-in-out（state-changes accordion 模式），
+   收回 140ms（.closing，去回对称）；候选行 stagger 20ms 上限 5（entrance-animations）；
+   聚焦态 border accent（:focus 规则）＝Anticipation 预告步。 */
+.tag-suggest-v4 {
   position: absolute;
-  top: calc(100% + 2px);
+  top: calc(100% - 1px);
   left: 0;
+  right: 0;
   z-index: calc(var(--z-toast) - 2);
-  min-width: 180px;
-  max-height: 200px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-elevated, var(--bg));
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-hover);
+  background: var(--paper);
+  border: 1px solid var(--accent);
+  border-top: none;
 }
-.tag-suggest button {
+.tag-suggest-clip { display: grid; grid-template-rows: 1fr; animation: tag-panel-grow 200ms ease-in-out; overflow: hidden; }
+.tag-suggest-v4.closing .tag-suggest-clip { animation: tag-panel-shrink 140ms ease-in-out forwards; }
+@keyframes tag-panel-grow { from { grid-template-rows: 0fr; } to { grid-template-rows: 1fr; } }
+@keyframes tag-panel-shrink { from { grid-template-rows: 1fr; } to { grid-template-rows: 0fr; } }
+.tag-suggest-body { min-height: 0; overflow-y: auto; max-height: 220px; display: flex; flex-direction: column; }
+.tag-suggest-empty { padding: var(--sp-2); color: var(--text-helper); font-size: var(--fs-meta); }
+.tag-suggest-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--sp-2);
   background: transparent;
   border: 0;
+  border-left: 2px solid transparent;
   color: var(--text-primary);
   font-family: inherit;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-secondary);
   text-align: left;
   cursor: pointer;
+  animation: tag-row-in 120ms ease-out both;
 }
-.tag-suggest button:hover { background: var(--grey-1); }
-.tag-suggest .mono { color: var(--text-secondary); }
+@keyframes tag-row-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+.tag-suggest-row:hover { background: var(--grey-1); }
+.tag-suggest-row.active { background: var(--accent-soft); border-left-color: var(--accent); }
+.tag-suggest-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-suggest-hit { color: var(--accent); }
+.tag-suggest-meta { flex: none; color: var(--text-secondary); font-size: var(--fs-meta); }
+@media (prefers-reduced-motion: reduce) {
+  .tag-suggest-clip, .tag-suggest-v4.closing .tag-suggest-clip, .tag-suggest-row { animation: none !important; }
+}
 .tag-invalid { color: var(--error); }
 .tag-chip-static { cursor: default; }
 .tag-chip-static:hover { background: var(--accent-soft); }
@@ -3502,7 +3519,16 @@ body.theme-dark .modal-panel {
 .cb-tag-pop { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 260px; }
 /* 复习页：答案揭示后的标签区（D101；正面永不渲染） */
 .review-tags { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); max-width: 720px; }
-.review-tag-add { color: var(--text-secondary); }
+/* v48.61 实测修订（用户截图）：「＋标签」沿用底栏 .bar-btn 尺寸（40px 高），比右侧
+   .tag-input-box input（26px）明显高大——收敛为与输入框同高同视觉（同高/同字号/透明底/同描边语言） */
+.review-tag-add {
+  color: var(--text-secondary);
+  height: 26px;
+  padding: 0 var(--sp-3);
+  gap: var(--sp-1);
+  font-size: var(--fs-meta);
+  background: transparent;
+}
 .review-tag-editor { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .review-tag-editor .tag-input-box input { width: 200px; }
 /* 卡片浏览器：详情三区块（D103）——生成信息区 / 来源谱系（血缘树）/ 同源组；全部只读派生 */
