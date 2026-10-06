@@ -577,6 +577,57 @@ function SiblingBurySection() {
   );
 }
 
+// ---------- 卡面信息密度（v48.61，D104/D94 设计稿 §3.5）：背面辅助字段三开关 ----------
+// 纯显示开关：关闭即不渲染对应块；不改卡内数据、不影响 CardLint。作用于复习页背面与卡详情预览（同一组件）。
+function CardFaceExtrasSection() {
+  const [cfg, setCfg] = useState<{ mnemonic: boolean; example: boolean; sourceRef: boolean } | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  useEffect(() => {
+    settingsStore.get<unknown>("app", "cardFaceExtras", null).then((v) => {
+      const src = (v && typeof v === "object" && !Array.isArray(v) ? v : {}) as Record<string, unknown>;
+      setCfg({
+        mnemonic: src.mnemonic !== false,
+        example: src.example !== false,
+        sourceRef: src.sourceRef !== false
+      });
+    });
+  }, []);
+  async function update(patch: Partial<NonNullable<typeof cfg>>) {
+    if (!cfg) return;
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    await settingsStore.set("app", "cardFaceExtras", next);
+    setSavedTick((t) => t + 1);
+    window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
+  }
+  return (
+    <section className="settings-section" id="sec-cardface">
+      <h3>卡面信息密度</h3>
+      <p className="form-hint">
+        复习页卡面背面与卡片详情里的辅助字段（助记 / 例子 / 来源）按需显示——关闭对应项即可让卡面更精简。
+        纯显示开关：不改卡片内容，也不影响制卡时的质检。
+      </p>
+      {cfg && (
+        <>
+          <div className="settings-row">
+            <span>显示助记</span>
+            <input type="checkbox" data-cf-mnemonic checked={cfg.mnemonic} onChange={(e) => update({ mnemonic: e.target.checked })} />
+          </div>
+          <div className="settings-row">
+            <span>显示例子</span>
+            <input type="checkbox" data-cf-example checked={cfg.example} onChange={(e) => update({ example: e.target.checked })} />
+          </div>
+          <div className="settings-row">
+            <span>显示来源</span>
+            <input type="checkbox" data-cf-source checked={cfg.sourceRef} onChange={(e) => update({ sourceRef: e.target.checked })} />
+          </div>
+        </>
+      )}
+      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，卡面即时生效。</p>}
+    </section>
+  );
+}
+
 // ---------- 摘录复习（v48.22，D58/§6.8）：并入复习队列 / 混编模式 / 推送引擎 ----------
 // 实验项必须带「实验功能 · 早期开发阶段」标识与说明（用户口径）；切换推送引擎为**无损**操作
 // （每引擎私有子空间互不覆盖，A→B→A 往返逐字段等值，指南 §6.8-4）。
@@ -2369,6 +2420,8 @@ export default function SettingsPanel({
             <LearningDaySection />
 
             <SiblingBurySection />
+            {/* v48.61（D104）：卡面信息密度（背面辅助字段三开关） */}
+            <CardFaceExtrasSection />
             {/* v48.22（D58 §6.8）：摘录复习与每日上限 */}
             <ExtractReviewSection />
             <LimitsSection />

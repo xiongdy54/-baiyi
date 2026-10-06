@@ -15,6 +15,8 @@ declare global {
       create: (card: unknown) => Promise<{ id: string }>;
       update: (card: unknown) => Promise<boolean>;
       get: (id: string) => Promise<unknown>;
+      /** v48.61（D103）：生成信息区只读 join（card + 批次 + 提示词 + card_issues） */
+      genInfo?: (id: string) => Promise<unknown>;
       listDue: () => Promise<unknown[]>;
       todayQueue?: (now?: number) => Promise<unknown>;
       listAll: () => Promise<unknown[]>;
@@ -444,6 +446,9 @@ export const cardGenerator: {
     const resolved = mode === "auto" ? detectMode(sourceText) : mode;
     const tpl = await window.promptsAPI?.get(resolved);
     if (!tpl) throw new Error("提示词模板缺失");
+    // v48.61（D103，D94 设计稿 §3.2）：生成时模型名快照进批次 context_json.model——
+    // 卡详情生成信息区按批次如实展示；存量批次（无快照）显示「—」，不猜
+    const aiCfg = await aiGateway.getConfig().catch(() => null);
     const sys = tpl.content;
     // v46（M14-UM2，R20 v44 原则制）：模板 situationRequired=1 时装配【用户记忆】块
     // （memory:retrieve 内部做开关/无 Key 检查；未命中/未开启 → block=null → 零注入零提示）
@@ -500,6 +505,8 @@ export const cardGenerator: {
       sourceText,
       context: {
         ...context,
+        // v48.61（D103）：生成时模型名快照（生成信息区展示用；诊断留痕同批装配）
+        model: aiCfg?.model ?? null,
         // 诊断留痕：确认联网背景是否真的进入了上下文
         webContextChars: context.webContext ? context.webContext.length : 0,
         webContextPreview: context.webContext ? context.webContext.slice(0, 200) : "",
@@ -862,6 +869,8 @@ export const cardsApi = {
   create: async (card: unknown) => (await window.cardsAPI?.create(card)) ?? { id: "" },
   update: async (card: unknown) => (await window.cardsAPI?.update(card)) ?? false,
   get: async (id: string) => ((await window.cardsAPI?.get(id)) ?? null) as CardRecord | null,
+  /** v48.61（D103）：生成信息区只读 join（AI 卡批次/提示词/当时 CardLint） */
+  genInfo: async (id: string) => ((await window.cardsAPI?.genInfo?.(id)) ?? null) as CardGenInfo | null,
   listDue: async () => ((await window.cardsAPI?.listDue()) ?? []) as (CardRecord & { docTitle?: string })[],
   // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单；ReviewView/CardBrowser 消费）
   todayQueue: async (now?: number) =>
@@ -976,6 +985,25 @@ export interface CardIssueRecord {
   message: string;
   source: string;
   status: string;
+}
+
+/** v48.61（D103，D94 设计稿 §3.2）：生成信息区只读 join（cards:genInfo 输出） */
+export interface CardGenInfo {
+  card: CardRecord;
+  /** 生成批次；手动卡 / gen_batch_id 缺失 / 批次行不存在时为 null */
+  batch: {
+    id: string;
+    scope: string;
+    status: string;
+    createdAt: number;
+    /** 生成时模型名快照（v48.61 起写入批次 context_json.model）；存量批次为 null（如实显示「—」） */
+    model: string | null;
+    promptTemplateId: string | null;
+  } | null;
+  /** 当时使用的提示词模板（scope/名称/版本）；批次或模板行缺失时为 null */
+  template: { id: string; scope: string; name: string; version: number; isDefault: boolean; createdAt: number } | null;
+  /** card_issues 按 card_id 全量（含已解决；「当时 CardLint 结果」） */
+  issues: CardIssueRecord[];
 }
 
 // ---------- 易混对比卡（v30 D29 候选增强）：以当前卡为基准，AI 从已有卡语义检索易混卡后走对比模板产三件套 ----------

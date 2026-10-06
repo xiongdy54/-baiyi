@@ -3505,6 +3505,54 @@ body.theme-dark .modal-panel {
 .review-tag-add { color: var(--text-secondary); }
 .review-tag-editor { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .review-tag-editor .tag-input-box input { width: 200px; }
+/* 卡片浏览器：详情三区块（D103）——生成信息区 / 来源谱系（血缘树）/ 同源组；全部只读派生 */
+.cb-section-title {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  letter-spacing: 0.04em;
+  margin: 0 0 var(--sp-1);
+}
+.cb-geninfo, .cb-lineage, .cb-sibling { padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); }
+.cb-geninfo .btn { margin-top: var(--sp-2); }
+.cb-gen-meta { margin-top: var(--sp-1); border-top: none; padding-top: 0; }
+/* 血缘树：缩进＝depth × --sp-3（连续标尺，祖先链与子孙闭包共用）；本卡行 accent 左缘高亮 */
+.cb-lineage-list, .cb-sibling-list { list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
+.cb-lineage-item {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2); border-left: 2px solid transparent;
+  min-height: 32px;
+}
+.cb-lineage-item.current { border-left-color: var(--accent); background: var(--accent-soft); }
+.cb-lineage-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-secondary); color: var(--text-primary); }
+.cb-lineage-count { flex: none; min-width: 24px; text-align: right; color: var(--text-secondary); }
+/* 同源组：一行一条（形式/题面/状态/due/暂缓徽标）；本卡行同血缘树高亮语言 */
+.cb-sibling-item {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2); border-left: 2px solid transparent;
+  min-height: 32px; cursor: pointer;
+}
+.cb-sibling-item:hover { background: var(--grey-1); }
+.cb-sibling-item.current { border-left-color: var(--accent); background: var(--accent-soft); cursor: default; }
+.cb-sibling-front { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-secondary); color: var(--text-primary); }
+.cb-sibling-item .mono, .cb-lineage-item .mono { color: var(--text-secondary); font-size: var(--fs-meta); }
+.cb-sibling-item .lint { flex: none; }
+/* 卡面背面辅助字段区（D104）：助记/例子/来源三块，app.cardFaceExtras 开关控制整块不渲染 */
+.card-extras { display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); }
+.card-extras .review-mnemonic { margin-top: 0; }
+/* 筛选牌组条件构建器（D105）：书多选 / 标签多选 / 知识点多选；复用 tag-chip 语言 */
+.cb-deck-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.cb-deck-chip-x { background: none; border: none; padding: 0 0 0 2px; cursor: pointer; color: var(--text-secondary); font-size: var(--fs-meta); line-height: 1; }
+.cb-deck-chip-x:hover { color: var(--error); }
+.cb-deck-tags { display: inline-flex; align-items: center; }
+.cb-deck-pop {
+  position: relative; display: inline-flex; flex-wrap: wrap; gap: var(--sp-1);
+  max-width: 560px; padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong); background: var(--bg-elevated, var(--bg-1));
+}
+.cb-deck-pop-col { flex-direction: column; min-width: 280px; }
+.cb-deck-pop-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-secondary); padding: 2px 0; cursor: pointer; }
+.cb-deck-pop-list { display: flex; flex-direction: column; max-height: 220px; overflow: auto; min-width: 240px; }
+.cb-deck-pop .cb-search { min-width: 200px; }
 .manual-region-preview { margin: 0 0 var(--sp-3); }
 .form-check { margin-bottom: var(--sp-4); }
 

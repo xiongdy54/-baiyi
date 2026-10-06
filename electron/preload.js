@@ -96,6 +96,8 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   create: (card) => ipcRenderer.invoke("cards:create", card),
   update: (card) => ipcRenderer.invoke("cards:update", card),
   get: (id) => ipcRenderer.invoke("cards:get", id),
+  // v48.61（D103）：生成信息区只读 join（card + 批次 + 提示词 + card_issues）
+  genInfo: (id) => ipcRenderer.invoke("cards:genInfo", id),
   listDue: () => ipcRenderer.invoke("cards:listDue"),
   // v34（M12，§4.2-20）：今日队列视图 {cards, deferred[]}（同源暂缓清单含延后原因）
   todayQueue: (now) => ipcRenderer.invoke("cards:todayQueue", now),

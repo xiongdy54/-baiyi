@@ -18,6 +18,8 @@ import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow"
 import ContrastCardModal from "./ContrastCardModal";
 import ImageLightbox from "./ImageLightbox";
 import AnswerJudgeModal from "./AnswerJudgeModal";
+// v48.61（D104）：背面辅助字段区（助记/例子/来源，app.cardFaceExtras 三开关）——与卡详情预览同一组件
+import CardFaceExtrasBlock from "./CardFaceExtras";
 // v48.60（D101/D102）：答案揭示后快捷打标 + 「不再关心」归档
 import TagInput from "./TagInput";
 import { applyTagDelta, type TagVocabEntry } from "../lib/tags";
@@ -36,6 +38,8 @@ export default function ReviewView({
   onJumpToDoc,
   bookItemIds,
   scopeLimits,
+  scopeTags,
+  scopeKpIds,
   onMaterialName
 }: {
   onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }) => void;
@@ -43,6 +47,9 @@ export default function ReviewView({
   bookItemIds?: string[];
   /** 筛选牌组的上限覆写（§6.8-5：只收紧，不另开预算） */
   scopeLimits?: Record<string, number> | null;
+  /** v48.61（D105）：筛选牌组的标签/知识点条件（进 applyScope 过滤） */
+  scopeTags?: string[];
+  scopeKpIds?: string[];
   /** v48.41（D81）：当前卡材料名上报（顶栏中间显示；无材料名时回调空串＝回落「复习」字样） */
   onMaterialName?: (name: string) => void;
 } = {}) {
@@ -178,8 +185,8 @@ export default function ReviewView({
   const extractHeadRef = useRef<DueTopic | null>(null);
 
   const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
-    const scope = bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length)
-      ? { bookItemIds: bookItemIds ?? undefined, limits: scopeLimits ?? undefined }
+    const scope = bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length) || scopeTags?.length || scopeKpIds?.length
+      ? { bookItemIds: bookItemIds ?? undefined, tags: scopeTags, kpIds: scopeKpIds, limits: scopeLimits ?? undefined }
       : undefined;
     const session = await fetchSessionQueue({ scope });
     if (session) {
@@ -813,12 +820,9 @@ export default function ReviewView({
             )}
           </div>
         )}
-        {showBack && current!.mnemonic && (
-          <div className="review-mnemonic">
-            <span className="book-card-label">助记</span>
-            {current!.mnemonic}
-          </div>
-        )}
+        {/* v48.61（D104）：背面辅助字段区——助记/例子/来源三块统一受 app.cardFaceExtras 开关控制
+            （此前只渲染 mnemonic，example/sourceRef 全库无消费点位，本批补齐为三块统一） */}
+        {showBack && <CardFaceExtrasBlock card={current!} />}
       </div>
 
       {/* 底栏（v2）：挂在滚动根（.review-wrap）的**最后一个子节点**上——sticky 时代它必须直接位于滚动根下

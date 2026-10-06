@@ -72,6 +72,10 @@ export interface SessionQueue {
 /** 复习范围（筛选牌组）：结构化过滤 + 可选上限覆写（§6.8-5） */
 export interface ScopeFilter {
   bookItemIds?: string[];
+  /** v48.61（D105）：标签条件（多值 OR、层级前缀语义同 §6.8-6 tag:；卡片行 tags_json / 摘录行 tag_json） */
+  tags?: string[];
+  /** v48.61（D105）：知识点条件（仅闪卡行命中；KnowledgeBase 归并族展开在主进程 applyScope） */
+  kpIds?: string[];
   kinds?: Array<"card" | "extract">;
   limits?: Partial<Limits>;
 }

@@ -32,7 +32,8 @@ esbuild.buildSync({
   stdin: {
     contents: [
       'export { normalizeExtractEditorToolbar, normalizeExtractEditorToolbarFloat, normalizeExtractEditorToolbarTop, normalizeExtractFaceFontFollow, normalizeExtractFaceFontSize, normalizeExtractFaceFontFamily } from "./src/lib/extractCardSettings";',
-      'export { normalizeReaderActionsFloat } from "./src/lib/readerActionsSettings";'
+      'export { normalizeReaderActionsFloat } from "./src/lib/readerActionsSettings";',
+      'export { normalizeCardFaceExtras, DEFAULT_CARD_FACE_EXTRAS } from "./src/lib/cardFaceExtras";'
     ].join("\n"),
     resolveDir: ROOT,
     loader: "ts"
@@ -68,6 +69,7 @@ const DOC_KEYS = [
   "app.annotateMode", "app.annotateForm", "app.annotatePalette", "app.annotateCustomEnabled", "app.annotationFilter", // 批 4 / §9.2（就地批注键；v48.42/D82 形式拆 annotateForm）
   "app.extractEditorToolbar", "app.extractEditorToolbarFloat", "app.extractEditorToolbarTop", "app.extractFaceFontFollow", "app.extractFaceFontSize", "app.extractFaceFontFamily", // §7.4 v48.54 / D95（摘录卡编辑器工具栏与形态 + 字号/字体桥；v48.55/§K 增钉顶键）
   "app.readerActionsFloat", // §7.4 v48.55 / D95 §K.4（阅读器选区动作组固定/悬浮）
+  "app.cardFaceExtras", // §7.4 v48.61 / D104（卡面信息密度三开关：背面辅助字段助记/例子/来源）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -268,7 +270,8 @@ app
         ["app", "skinId", "none"],
         ["app", "extracts", { mergeIntoReview: false, interleave: "quota-1-4", engine: "sm19-default" }], // v48.22 / D58
         ["app", "limits", { newCardsPerDay: 20, cardReviewsPerDay: 200, newExtractsPerDay: 10, extractReviewsPerDay: 50, ignoreReviewLimitForNew: false }], // v48.22 / D58
-        ["app", "reviewScopes", [{ id: "scope-1", name: "测试范围", bookItemIds: ["item-1"], kinds: ["card", "extract"], limits: { extractReviewsPerDay: 5 } }]], // v48.22 / D58
+        ["app", "reviewScopes", [{ id: "scope-1", name: "测试范围", bookItemIds: ["item-1"], tags: ["考研::英语", "错题"], kpIds: ["kp-1"], kinds: ["card", "extract"], limits: { extractReviewsPerDay: 5 } }]], // v48.22 / D58；v48.61 / D105 扩展 tags/kpIds
+        ["app", "cardFaceExtras", { mnemonic: true, example: false, sourceRef: true }], // v48.61 / D104 卡面信息密度（非默认值才验得出往返）
         ["app", "accentColor", "#0057ff"],
         ["app", "mindmapMaxCalls", 40],
         ["app", "mindmapPricing", { input: 1.5, output: 6 }],
@@ -442,6 +445,19 @@ app
       flow.eq("合法值原样保留（toolbar/follow/size/family，非空转对照）",
         JSON.stringify([normToolbar(true), normFollow(true), normSize(25), normFamily("Noto Serif SC")]),
         JSON.stringify([true, true, 25, "Noto Serif SC"]));
+
+      // ---------- Y4c D104 卡面信息密度键：读侧真模块归一（src/lib/cardFaceExtras.ts） ----------
+      flow.section("Y4c 卡面信息密度三开关归一（渲染层读侧真模块 src/lib/cardFaceExtras.ts）");
+      const normExtras = extNorm.normalizeCardFaceExtras;
+      flow.eq("cardFaceExtras：逐键仅严格 false 为关（mnemonic:false 生效）",
+        JSON.stringify(normExtras({ mnemonic: false, example: "no", sourceRef: 0 })),
+        JSON.stringify({ mnemonic: false, example: true, sourceRef: true }));
+      flow.eq("cardFaceExtras：对象缺键回落 true（默认全开）",
+        JSON.stringify(normExtras({ example: false })), JSON.stringify({ mnemonic: true, example: false, sourceRef: true }));
+      flow.eq("cardFaceExtras：非对象整体回落默认（null/数组/'x'/42/undefined）",
+        JSON.stringify([null, [], "x", 42, undefined].map(normExtras)),
+        JSON.stringify(Array(5).fill({ mnemonic: true, example: true, sourceRef: true })));
+      flow.eq("cardFaceExtras：默认常量全开", JSON.stringify(extNorm.DEFAULT_CARD_FACE_EXTRAS), JSON.stringify({ mnemonic: true, example: true, sourceRef: true }));
 
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       flow.eq("清空后记忆总开关回到默认关", mem.readMemoryConfig({ readSettings: () => st.readSettings() }).enabled, false);

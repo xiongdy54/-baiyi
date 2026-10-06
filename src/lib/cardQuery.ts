@@ -157,3 +157,11 @@ export function tagFilterMatches(q: ParsedCardQuery, tags: string[] | null | und
   if (q.tagNeg?.length && q.tagNeg.some((t) => anyTagMatches(tags ?? [], t))) return false;
   return true;
 }
+
+/** v48.61（D105，D94 设计稿 §3.4）：「用当前查询创建」——从查询文本提取 `book:` / `tag:` 条件转结构化。
+ *  供筛选牌组保存时合并进 scope（bookItemIds 由调用方按书名子串解析为 libraryItemId）；
+ *  负号排除（-tag:）不提取——排除语义 scope v1 不承载，如实丢弃而非静默反转。 */
+export function extractScopeConditions(query: string): { tags: string[]; bookNames: string[] } {
+  const parsed = parseCardQuery(query);
+  return { tags: [...(parsed.tag ?? [])], bookNames: parsed.book ? [parsed.book] : [] };
+}
