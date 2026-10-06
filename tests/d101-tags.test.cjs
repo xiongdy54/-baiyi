@@ -66,7 +66,8 @@ check("type: 小写归一", q.type === "cloze", "cloze", q.type);
 q = cardQuery.parseCardQuery('type:CLOZE kind:card');
 check("type: 与 kind: 并存", q.type === "cloze" && q.kind === "card", { type: "cloze", kind: "card" }, { type: q.type, kind: q.kind });
 q = cardQuery.parseCardQuery('-type:qa');
-check("-type: 未实现（落 exclude 不改义）", q.type === undefined && q.exclude.includes("type:qa"), true, q);
+// v48.64（D108）v3：负号统一为 NOT 算子——-type: 由 v1/v2 的「落 exclude 不改义」升级为有效取反
+check("-type: NOT 语义（leaf 包 not，扁平 type 不设）", q.type === undefined && q.ast?.t === "not" && q.ast?.kid?.leaf?.f === "type" && q.ast?.kid?.leaf?.value === "qa", true, q);
 
 console.log("== D101-T5 tagFilterMatches（OR / 否定） ==");
 q = cardQuery.parseCardQuery("tag:考研 tag:口语");

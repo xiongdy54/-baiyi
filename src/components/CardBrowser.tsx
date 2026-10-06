@@ -28,7 +28,7 @@ import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
 import { extractStatusLabel } from "../lib/sessionQueue";
 import { nextAtText } from "./ExtractCardFace";
 import { settingsStore } from "../lib/settings";
-import { parseCardQuery, extractMatches, textMatches, tagFilterMatches, extractTagsOf, extractScopeConditions } from "../lib/cardQuery";
+import { parseCardQuery, cardRowMatches, extractRowMatches, extractScopeConditions } from "../lib/cardQuery";
 // v48.60（D101）：标签——批量打标/去标的终值计算 + 词表建议（规则单一源 = src/lib/tags.ts）
 import { applyTagDelta, tagKey, type TagVocabEntry } from "../lib/tags";
 import TagInput from "./TagInput";
@@ -272,7 +272,6 @@ export default function CardBrowser({
   }, [all]);
 
   const filtered = useMemo(() => {
-    const q = foldSearch(query);
     const parsed = parseCardQuery(query);
     let list = all;
     // v48.60（D102）：已归档默认排除（视图口径）；显式入口＝「已归档」preset / status:archived 查询 / 状态下拉
@@ -295,59 +294,25 @@ export default function CardBrowser({
         return stateFilter === "learning" ? s === "learning" || s === "relearning" : s === stateFilter;
       });
     }
-    if (q) {
-      list = list.filter((c) => {
-        const hay = [
-          c.frontMarkdown,
-          c.backMarkdown,
-          c.noteText,
-          c.contextPrefix || "",
-          c.docTitle || "",
-          ...(c.domain ?? []),
-          ...(c.tags ?? [])
-        ]
-          .join("\n")
-          .normalize("NFKC")
-          .toLowerCase();
-        // v48.22（D58 §6.8-6）：查询语法——主串 + 负号排除（字段前缀由下面的独立过滤处理）
-        if (!hay.includes(q)) return false;
-        return textMatches({ ...parsed, text: "" }, hay);
-      });
-    }
-    // 查询语法里的字段前缀（kind/book/status/priority/tag/type）——与下拉筛选叠加生效
-    if (parsed.kind === "extract") list = [];
-    if (parsed.book) {
-      const bk = foldSearch(parsed.book);
-      list = list.filter((c) => foldSearch(String(c.docTitle || "")).includes(bk));
-    }
-    if (parsed.status) {
-      if (parsed.status === "archived" || parsed.status === "已归档") {
-        // v48.60（D102）：status:已归档——生命周期维度（FSRS 状态 ∪ {已归档}）
-        list = list.filter((c) => c.status === "archived");
-      } else {
-        list = list.filter((c) => {
-          const suspended = Boolean(c.leech?.suspended);
-          const s = suspended ? "suspended" : c.fsrs?.state ?? "new";
-          return String(s).toLowerCase() === parsed.status;
-        });
-      }
-    }
-    // v48.60（D101 §1.5）：tag:（层级边界前缀，多值 OR，-tag: 排除）与 type:（卡形式）
-    if (parsed.tag?.length || parsed.tagNeg?.length) list = list.filter((c) => tagFilterMatches(parsed, c.tags));
-    if (parsed.type) list = list.filter((c) => String(c.cardType || "").toLowerCase() === parsed.type);
-    if (parsed.priority || parsed.priorityNot !== undefined) {
-      list = list.filter((c) => {
-        const p = Number(c.priority) || 0;
-        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
-        if (!parsed.priority) return true;
-        const { op, value } = parsed.priority;
-        if (op === "<=") return p <= value;
-        if (op === ">=") return p >= value;
-        if (op === "<") return p < value;
-        if (op === ">") return p > value;
-        return p === value;
-      });
-    }
+    // v48.64（D108 §6.8-6 v3）：查询语法统一 AST 行判定——文本项逐词（修复含字段前缀/多 token
+    // 查询整串 includes 恒 false 全灭的缺陷）、负号字段条件（-book:/-status:/-type:/-kind:）、
+    // or / 括号 / 通配符全部在 cardQuery.ts 求值；kind 页签联动只在无 or/括号查询里另行生效
+    list = list.filter((c) =>
+      cardRowMatches(parsed, {
+        frontMarkdown: c.frontMarkdown,
+        backMarkdown: c.backMarkdown,
+        noteText: c.noteText,
+        contextPrefix: c.contextPrefix,
+        docTitle: c.docTitle,
+        domain: c.domain,
+        tags: c.tags,
+        cardType: c.cardType,
+        status: c.status,
+        leechSuspended: Boolean(c.leech?.suspended),
+        fsrsState: c.fsrs?.state ?? "new",
+        priority: c.priority
+      })
+    );
     const sorted = [...list];
     if (sortBy === "created") sorted.sort((a, b) => b.createdAt - a.createdAt);
     else if (sortBy === "priority") sorted.sort((a, b) => b.priority - a.priority);
@@ -373,35 +338,23 @@ export default function CardBrowser({
   );
 
   const scopeExtracts = useMemo(() => {
-    const q = foldSearch(query);
     const parsed = parseCardQuery(query);
-    if (parsed.kind === "card") return [];
     let list = extracts;
     if (bookScope !== "all") list = list.filter((e) => String(e.libraryItemId || "") === bookScope);
     // v48.47（D87）：锚点筛选——摘录表只留闭包内条目（切「摘录」页签可看锚的来源树）
     if (anchorClosure) list = list.filter((e) => anchorClosure.has(String(e.id)));
-    if (parsed.book) {
-      const bk = foldSearch(parsed.book);
-      list = list.filter((e) => foldSearch(String(e.docTitle || "")).includes(bk));
-    }
-    // v48.60（D101 §1.5）：tag: 对摘录行同样生效（匹配 extracts.tag_json；type:/status: 仅闪卡行）
-    if (parsed.tag?.length || parsed.tagNeg?.length) list = list.filter((e) => tagFilterMatches(parsed, extractTagsOf(e as { tagJson?: string | null })));
-    if (q || parsed.exclude.length || parsed.status || parsed.priority || parsed.priorityNot !== undefined) {
-      list = list.filter((e) => {
-        if (!extractMatches(parsed, e)) return false;
-        const p = Number(e.priority) || 0;
-        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
-        if (parsed.priority) {
-          const { op, value } = parsed.priority;
-          if (op === "<=" && !(p <= value)) return false;
-          if (op === ">=" && !(p >= value)) return false;
-          if (op === "<" && !(p < value)) return false;
-          if (op === ">" && !(p > value)) return false;
-          if (op === "=" && p !== value) return false;
-        }
-        return true;
-      });
-    }
+    // v48.64（D108 §6.8-6 v3）：统一 AST 行判定——kind:card 使摘录行全不命中（原 L378 return []
+    // 等价）、type: 恒不命中（摘录行无卡形式，诚实语义）、文本项逐词 AND（原整串子串）、
+    // -book:/-status: 取反与 or/括号/通配符生效
+    list = list.filter((e) =>
+      extractRowMatches(parsed, {
+        contentMarkdown: e.contentMarkdown,
+        docTitle: e.docTitle,
+        status: e.status,
+        tagJson: (e as { tagJson?: string | null }).tagJson,
+        priority: e.priority
+      })
+    );
     if (preset === "due") list = list.filter((e) => Number(e.topicNextAt) <= Date.now());
     // v48.40（D80）：摘录表此前完全忽略 sortBy（永远主进程的 priority/due 序），新摘录按到期升序沉底
     // ——补上与闪卡表同名的排序语义；「按创建时间」取降序（新摘录浮顶，可发现性）。
@@ -650,10 +603,11 @@ export default function CardBrowser({
     setRowLimit(200);
   }, [query, typeFilter, stateFilter, preset, kindFilter, bookScope, memFilter, sortBy]);
 
-  // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）
+  // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）；
+  // v48.64（D108）：含 or/括号的查询不做页签联动（kind 只是行谓词，布尔语义照常求值）
   useEffect(() => {
     const parsed = parseCardQuery(query);
-    if (parsed.kind) setKindFilter(parsed.kind);
+    if (!parsed.hasGroups && parsed.kind) setKindFilter(parsed.kind);
   }, [query]);
 
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
