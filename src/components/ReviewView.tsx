@@ -649,21 +649,18 @@ export default function ReviewView({
           <div className="review-count" data-review-counts>
             <span className="qi">
               <span className="lab">
-                <i className="count-dot count-dot-new" aria-hidden="true" />
                 未学习
               </span>
               <span className={`qi-num${bumpKeys.new ? " bump" : ""}`}>{counts.new}</span>
             </span>
             <span className="qi">
               <span className="lab">
-                <i className="count-dot count-dot-learning" aria-hidden="true" />
                 学习中
               </span>
               <span className={`qi-num${bumpKeys.learning ? " bump" : ""}`}>{counts.learning}</span>
             </span>
             <span className="qi">
               <span className="lab">
-                <i className="count-dot count-dot-review" aria-hidden="true" />
                 待复习
               </span>
               <span className={`qi-num${bumpKeys.review ? " bump" : ""}`}>{counts.review}</span>
@@ -771,7 +768,6 @@ export default function ReviewView({
                   }}
                 >
                   <span className="grade-name">
-                    <i className={`grade-dot dot-${p.rating.toLowerCase()}`} aria-hidden="true" />
                     {RATING_LABEL[p.rating]}
                   </span>
                   <span className="grade-due mono">{p.dueText}</span>

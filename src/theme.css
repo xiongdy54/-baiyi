@@ -32,6 +32,8 @@
   /* error 的派生档：与 accent 同一套算法，供破坏性按钮使用 */
   --error-on: #ffffff;
   --warning-on: #ffffff;
+  /* v48.59（D100）：success-on 配对补齐（同 error-on/warning-on 族）——评分钮 hover 语义色填充的浅档文字 */
+  --success-on: #ffffff;
   --error-soft: color-mix(in srgb, var(--error) 10%, transparent);
   --error-hover: color-mix(in srgb, var(--error) 88%, #000000);
   --error-pressed: color-mix(in srgb, var(--error) 78%, #000000);
@@ -157,6 +159,8 @@ body.theme-dark {
   /* 深色下 error 提亮后属浅色 → 反白文字改纯黑（瑞士风焦点色硬规则） */
   --error-on: #0a0a0a;
   --warning-on: #0a0a0a;
+  /* v48.59（D100）：success-on 深档（success #3fb950 提亮后属浅色 → 反白文字改纯黑，同 error/warning） */
+  --success-on: #0a0a0a;
   --error-soft: color-mix(in srgb, var(--error) 18%, transparent);
   --error-hover: color-mix(in srgb, var(--error) 88%, #ffffff);
   --error-pressed: color-mix(in srgb, var(--error) 78%, #ffffff);
@@ -2674,7 +2678,7 @@ body.theme-dark .modal-panel {
   line-height: 1;
 }
 .vocab-speak-btn:hover { border-color: var(--accent); color: var(--accent); }
-/* AI 判答模态（v48.58 / D99）：题面预览 + 学生答案输入 + 四档裁决徽标（语义色唯一承载，同 .grade-dot 口径） */
+/* AI 判答模态（v48.58 / D99）：题面预览 + 学生答案输入 + 四档裁决徽标（语义色唯一承载，同评分钮档名承色口径） */
 .judge-front { border: 1px solid var(--border-subtle); background: var(--grey-1); padding: var(--sp-3); max-height: 180px; overflow-y: auto; }
 .judge-front p { margin: 0 0 var(--sp-2); }
 .judge-input { margin-top: var(--sp-3); width: 100%; resize: vertical; }
@@ -2789,6 +2793,17 @@ body.theme-dark .modal-panel {
   color: var(--text-helper);
 }
 .review-head-inner { justify-content: flex-end; }
+/* v48.59（D100 用户指令一）：复习页头带下缘细线收进 720 内列——全宽 border-bottom 退役，
+   改 ::after 内列线（与 .review-head-inner / .review-progress / 卡面 / 底栏内容列同一公式，
+   构造性对齐）。摘录页头带（.extract-page-head）的全宽契约不动。 */
+.review-head { border-bottom: none; }
+.review-head::after {
+  content: "";
+  display: block;
+  max-width: 720px;
+  margin-inline: auto;
+  border-bottom: 1px solid var(--band-line);
+}
 /* 摘录页内列与卡面**同盒**（v5/D72）：同为 ≤720 居中 ⇒ 面包屑左缘＝卡面左缘、最右元素右缘＝卡面右缘，
    两态（批注轨开/收）皆然——v2 的 data-annot-open 头带 padding-left 补偿随之删除（对收缩内列无效）。 */
 .extract-page-head-inner { width: 100%; }
@@ -2818,11 +2833,12 @@ body.theme-dark .modal-panel {
 .review-count b { font-weight: 500; color: var(--text-primary); margin-left: 2px; }
 /* ---------- 复习页 D88 §7.2：顶栏三档统计块 + 进度轨 ----------
    [data-review-counts] 容器类与三档文案「未学习/学习中/待复习」保留（m4/m12 断言钩子），
-   内部升级为预览 .qi 三块：8px 色点 + 20px/300 tabular 数字（预览 20px/700 与「越大越细」冲突，
-   用户已裁定 300；.lab 用 --fs-meta 而非预览 11px——GUIDE §5.3「Meta ≥12px」未被 D88 修订）。
-   色点语义（用户决策）：未学习=--grey-3 · 学习中=--warning · 待复习=--accent。 */
+   内部＝.qi 三块（标签 meta 上 / 20px/300 tabular 数字下，「越大越细」用户裁定 300）。
+   v48.59（D100）：8px 方形色点退役（用户裁定「颜色块不要正方形」）；计数无彩色
+   （「不要以文字承色」更正），结构性由档间 hairline 竖分隔承担。 */
 .review-count[data-review-counts] { display: flex; align-items: stretch; gap: var(--sp-6); }
 .review-count[data-review-counts] .qi { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--sp-1) / 2); }
+.review-count[data-review-counts] .qi + .qi { border-left: 1px solid var(--border-subtle); padding-left: var(--sp-4); }
 .review-count[data-review-counts] .qi .lab {
   display: flex;
   align-items: center;
@@ -2832,10 +2848,11 @@ body.theme-dark .modal-panel {
   color: var(--text-helper);
   white-space: nowrap;
 }
-.count-dot { width: 8px; height: 8px; flex: none; display: inline-block; }
-.review-count[data-review-counts] .count-dot-new { background: var(--grey-3); }
-.review-count[data-review-counts] .count-dot-learning { background: var(--warning); }
-.review-count[data-review-counts] .count-dot-review { background: var(--accent); }
+/* v48.59（D100 用户指令三 + 「不要以文字承色」更正）：复习页三档计数**无彩色**（标签 helper /
+   数字主文字色），结构性由档间 hairline 竖分隔承担（8px 方形色点退役）。
+   基类 .count-dot 仅剩结构职责——摘录页「N 条待处理」仍在消费（ExtractReviewView，不在本批范围）。 */
+.count-dot { display: inline-block; }
+.review-count[data-review-counts] .qi + .qi { border-left: 1px solid var(--border-subtle); padding-left: var(--sp-4); }
 .review-count[data-review-counts] .qi-num {
   font-size: var(--fs-stat);
   font-weight: 300;
@@ -2871,9 +2888,12 @@ body.theme-dark .modal-panel {
    ⇒ 内容盒 ≡ .review-session 盒，stage-bar-inner 720 居中与卡面同一公式，构造性对齐。 */
 .review-wrap .stage-bar { padding-inline: var(--sp-16); }
 .review-wrap .stage-bar-inner { max-width: 720px; margin-inline: auto; }
-/* 评分钮 D88 §7.4 建立；v48.58（D99 用户指令④，GUIDE §5.3 再修订）：高度对齐「显示答案」主钮——
-   40px 单行（.bar-btn 同一 40 档），.grade-name（色点+档名）与 .grade-due（mono 间隔预览）横排同行；
-   语义色唯一承载仍＝8px 色点；D88 的 64px 两行卡式与推荐档 72px 加高条款作废。 */
+/* 评分钮 D88 §7.4 建立；v48.58（D99）40px 单行等高；v48.59（D100 用户裁定·定稿）：
+   常态**完全无彩色**（描边 + --grey-1 底 + 主文字色，四钮同灰），**hover 时整钮以对应语义色填充揭示**——
+   重来=--error/--error-on、困难=--warning/--warning-on、简单=--success/--success-on（配对 Token 本批补齐）、
+   良好=--accent/--accent-on（推荐档填充移至 hover；类保留＝涟漪白名单/焦点 outline 钩子）。
+   动效：Anticipation（hover 预告色）+ 通用 §4.1 过渡档已含 background/border/color（--dur-hover）；
+   D88 的 8px 色点、64px 两行卡式、72px 加高条款全部作废。 */
 .review-bar .grade {
   height: 40px;
   display: flex;
@@ -2888,24 +2908,21 @@ body.theme-dark .modal-panel {
   cursor: pointer;
 }
 .review-bar .grade .grade-name { display: flex; align-items: center; gap: var(--sp-2); font-size: 15px; font-weight: 500; }
-.grade-dot { width: 8px; height: 8px; flex: none; display: inline-block; }
-.grade-dot.dot-again { background: var(--error); }
-.grade-dot.dot-hard { background: var(--warning); }
-.grade-dot.dot-good { background: var(--accent); }
-.grade-dot.dot-easy { background: var(--success); }
 .review-bar .grade .grade-due { font-size: var(--fs-meta); color: var(--text-helper); }
-/* 推荐档（Good）：accent 填充 + accent-on 文字；色点转白（v48.58/D99：等高，加高退役） */
+/* hover 揭示语义色（整钮填充 + -on 文字；间隔预览随 currentColor 收淡） */
+.review-bar .grade-again:hover:not([disabled]) { background: var(--error); border-color: var(--error); color: var(--error-on); }
+.review-bar .grade-hard:hover:not([disabled]) { background: var(--warning); border-color: var(--warning); color: var(--warning-on); }
+.review-bar .grade-easy:hover:not([disabled]) { background: var(--success); border-color: var(--success); color: var(--success-on); }
+.review-bar .grade.recommended:hover:not([disabled]) { background: var(--accent); border-color: var(--accent); color: var(--accent-on); }
+.review-bar .grade:hover:not([disabled]) .grade-due { color: inherit; opacity: 0.85; }
+/* 推荐档（Good）：**常态与他钮同灰**（v48.59/D100：accent 填充移至 hover 揭示）；
+   类保留＝涟漪白名单成员（§4.3：填充钮…hover 瞬间即填充态）与焦点 outline --ink 钩子 */
 .review-bar .grade.recommended {
   position: relative;
-  overflow: hidden; /* 涟漪容器（§4.3：.grade.recommended 是填充钮涟漪白名单成员） */
+  overflow: hidden;
   height: 40px;
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-on);
 }
-.review-bar .grade.recommended .grade-dot { background: var(--accent-on); }
-.review-bar .grade.recommended .grade-due { color: color-mix(in srgb, var(--accent-on) 85%, transparent); }
-/* disabled（saveError/previewError）：落灰、无位移无涟漪（§9）——填充档禁止以 accent 假性可点 */
+/* disabled（saveError/previewError）：落灰、无位移无涟漪（§9）——常态无彩色，disabled 维持灰 */
 .review-bar .grade:disabled {
   background: var(--grey-1);
   color: var(--grey-2);
@@ -2917,9 +2934,6 @@ body.theme-dark .modal-panel {
 @media (prefers-reduced-motion: no-preference) {
   /* hover 抬升 -3px（§7.4 评分钮专属档，压过 §4.1 通用 32-40px 档的 -2px）+ 阴影由通用档提供 */
   .review-bar .grade:hover:not([disabled]) { transform: translateY(-3px); }
-  /* 色点放大预告（Anticipation）+ Follow Through 滞后 20ms（§7.4） */
-  .review-bar .grade .grade-dot { transition: transform var(--dur-hover) var(--spring) 20ms; }
-  .review-bar .grade:hover:not([disabled]) .grade-dot { transform: scale(1.35); }
 }
 /* 滚动根：仍是真滚动容器（面包屑测试 L251/L489 硬条件），底栏是它的最后一个流内子节点 */
 .review-wrap {
