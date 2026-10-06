@@ -21,6 +21,8 @@ const {
   CARD_STRUCTURE_PROMPT,
   READER_EXPLAIN_PROMPT,
   LEECH_RESCUE_PROMPT,
+  // v48.58（D99）：复习页「AI 判答」等价判定 scope
+  REVIEW_ANSWER_JUDGE_PROMPT,
   JOURNAL_INSIGHT_PROMPT,
   KNOWLEDGE_EXTRACTION_PROMPT,
   KNOWLEDGE_RELATION_PROMPT,
@@ -2045,6 +2047,17 @@ function ensurePromptTemplates() {
       db.run(
         "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'journal-insight', '日记洞察 v1', ?, 1, 1, ?, ?)",
         [crypto.randomUUID(), JOURNAL_INSIGHT_PROMPT, situationRequiredFor("journal-insight"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // v48.58（D99 / §6.8-16）：review-answer-judge 新 scope 首版 v1——复习页「AI 判答」等价判定模板。
+  // 与制卡族 TARGET_VERSION 无关（extract-rerank 同法：per-scope count==0 播种，存量库启动即补种）。
+  try {
+    const judgeCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'review-answer-judge'")[0]?.n || 0;
+    if (Number(judgeCount) === 0) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'review-answer-judge', 'AI 判答 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), REVIEW_ANSWER_JUDGE_PROMPT, situationRequiredFor("review-answer-judge"), now]
       );
     }
   } catch { /* 播种失败不阻塞启动 */ }

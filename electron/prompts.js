@@ -462,6 +462,17 @@ const LEECH_RESCUE_PROMPT = `你是记忆难点诊断专家。用户会提供一
   "suggestions": ["对应处理建议（最多3条）"]
 }`;
 
+// v48.58（D99 / §6.8-16）：复习页「AI 判答」（review-answer-judge）——学生自答与标准答案的等价比对。
+// 判定等价而非逐字；只依据题面与标准答案，不引入外部事实；输出严格 JSON 四档裁决。
+const REVIEW_ANSWER_JUDGE_PROMPT = `你是间隔重复学习软件里的「答案判定助手」。学生先尝试回忆卡片答案，再把自己的答案交给你，与标准答案比对。你的任务：判断学生的答案与标准答案是否表达同一（或等价）的知识点，并解释理由。
+
+规则：
+1. 判定等价而非逐字：同义改写、不同语言表述、单位换算后等值、比标准答案更宽泛但包含其核心的表述，都算等价（verdict "correct"）。
+2. 学生答案在标准答案之外补充了内容：补充内容正确判 "partial"，补充内容错误判 "incorrect"，都要在理由里指出。
+3. 只依据题面与标准答案判定，不引入外部事实；题面与标准答案不足以得出结论时 verdict 用 "unknown" 并说明缺什么。
+4. 不讨论评分与调度；你的判断仅供参考。
+5. 输出严格 JSON（无代码块围栏）：{"verdict": "correct" | "partial" | "incorrect" | "unknown", "explanation": "简短理由，中文，1-3 句"}`;
+
 // v40（M8-B，D37 / §4.13）：日记洞察（journal-insight）——四分支 Knowledge/Self/Frontier/Structure。
 // 输入＝主进程装配的 Evidence Package（禁全库直发，§4.13-5；grounding 优先级：用户材料 > 确认洞察 > 图谱 > 权威 > 先验）。
 // 三层证据纪律：FACT（日记原文，AI 不得改写）/ LEARNED（引用输入中给定的真实 ID）/ INFERENCE（必须标推测）。
@@ -1052,6 +1063,8 @@ module.exports = {
   // v48.51（D91）：简明解读 scope（双 pack 槽位模板，pack 由渲染端注入）
   READER_EXPLAIN_STE_PROMPT,
   LEECH_RESCUE_PROMPT,
+  // v48.58（D99）：复习页「AI 判答」等价判定 scope
+  REVIEW_ANSWER_JUDGE_PROMPT,
   JOURNAL_INSIGHT_PROMPT,
   KNOWLEDGE_EXTRACTION_PROMPT,
   KNOWLEDGE_RELATION_PROMPT,

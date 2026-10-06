@@ -17,6 +17,7 @@ import ExtractCardFace, { ExtractActionsBar } from "./ExtractCardFace";
 import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow";
 import ContrastCardModal from "./ContrastCardModal";
 import ImageLightbox from "./ImageLightbox";
+import AnswerJudgeModal from "./AnswerJudgeModal";
 
 // A-1（审计）：渲染期调用不得抛。原写法 `previews?.items ?? fsrsEngine.preview(current!.fsrs)`
 // 在 previews 为 null 时会同步抛，被根错误边界接管 → 整应用停止渲染。这里降级为空列表。
@@ -110,6 +111,12 @@ export default function ReviewView({
   const [undoInfo, setUndoInfo] = useState<{ logId: string; cardId: string; rating: string; reviewedAt: number } | null>(null);
   // v30（D29）：易混对比卡确认框（以当前卡为基准生成对比三件套）
   const [contrastOpen, setContrastOpen] = useState(false);
+  // v48.58（D99）：AI 判答模态（自答交给 AI 与标准答案等价比对；零写库，见 AnswerJudgeModal）
+  const [judgeOpen, setJudgeOpen] = useState(false);
+  // 换卡即关（防键盘快捷键换卡后模态显示旧卡）
+  useEffect(() => {
+    setJudgeOpen(false);
+  }, [current?.id]);
   // v34（M12，§4.16）：今日同源暂缓清单——延后不写 FSRS，此处给出可读原因（与队列同一视图口径）
   const [deferred, setDeferred] = useState<TodayQueue["deferred"]>([]);
   const [deferredOpen, setDeferredOpen] = useState(false);
@@ -123,14 +130,24 @@ export default function ReviewView({
     void refreshUndo();
   }, [refreshUndo]);
 
-  // v32（M7）自动发音：出到单词卡（有 dict_json）且设置开启时自动朗读；每卡现读设置（改开关即时生效）
+  // v32（M7）自动发音；v48.58（D99）改判：跟随**发音按钮的出现面**——听音卡（按钮嵌题面）出卡即读，
+  // 其余单词卡（按钮嵌答案区）翻面即读；同卡同面只触发一次（翻回再翻到可再触发一次）。
+  // dictAutoSpeak 默认值随 D99 改为开（§7.4 v32 追记六「默认关」作废；显式存过 false 的库不受影响）
+  const autoSpokenRef = useRef<string>("");
   useEffect(() => {
-    if (!current?.dictJson || showBack) return;
-    void settingsStore.get<boolean>("app", "dictAutoSpeak", false).then((on) => {
+    const dj = current?.dictJson;
+    if (!dj) return;
+    const isListening = dj.kind ? dj.kind === "listening" : String(current?.frontMarkdown ?? "").startsWith("发音：");
+    const face = isListening ? "front" : showBack ? "back" : null;
+    if (!face) return;
+    const key = `${current!.id}:${face}`;
+    if (autoSpokenRef.current === key) return;
+    autoSpokenRef.current = key;
+    void settingsStore.get<boolean>("app", "dictAutoSpeak", true).then((on) => {
       if (on && current?.dictJson) void playVocabAudio(current.dictJson);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current?.id]);
+  }, [current?.id, showBack]);
 
   // 拉取今日队列队首（同一视图：到期 + 同源延后 + 规范序），并同步「同源暂缓」清单。
   // v48.22（D58 §6.8-3）：改为消费**会话队列**（§4.2-26 唯一装配面）——它同样受每日上限与
@@ -477,6 +494,8 @@ export default function ReviewView({
   // q/w/d 与翻面状态无关，只要当前有卡即可触发（删除仍走 confirm 确认）。
   const hasCard = !!current;
   const canGrade = hasCard && showBack;
+  // D99：AI 判答需要标准答案文本可比（挖空缺省态等无 backMarkdown 的卡禁用）
+  const canJudge = !!current && !!(current.backMarkdown && current.backMarkdown.trim());
   useCommandActions("review", {
     "review.showAnswer": { when: () => hasCard && !showBack && !actionBusyRef.current, run: () => setShowBack(true) },
     "review.again": { when: () => canGrade && !actionBusyRef.current && !saveError, run: () => void grade("Again") },
@@ -762,6 +781,16 @@ export default function ReviewView({
           </div>
         )}
         <span className="review-bar-side">
+          {/* v48.58（D99）：AI 判答入口——正反两面恒在，无标准答案文本的卡禁用 */}
+          <button
+            className="bar-btn ghost"
+            data-testid="review-judge-btn"
+            disabled={!canJudge || saveError}
+            title={canJudge ? "AI 判答：把你的答案交给 AI，与标准答案比对是否等价" : "该卡没有标准答案文本，无法 AI 判答"}
+            onClick={() => setJudgeOpen(true)}
+          >
+            AI 判答
+          </button>
           {current!.contextRef?.documentId && onJumpToDoc && current!.contextRef.imageSource !== "library" && (
             hasSourceAnchor(current!.contextRef) ? (
               <button className="bar-btn ghost" onClick={handleJumpToSource} title="跳转原文（不写入阅读进度）">
@@ -833,6 +862,9 @@ export default function ReviewView({
         </span>
         </div>
       </div>
+      {judgeOpen && current && (
+        <AnswerJudgeModal card={current} onClose={() => setJudgeOpen(false)} />
+      )}
     </div>
   );
 }

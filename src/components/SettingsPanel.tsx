@@ -1690,7 +1690,8 @@ function DictSection() {
     settingsStore.get<"tts" | "online">("app", "dictAudioSource", "tts").then((v) => {
       if (v === "tts" || v === "online") setAudioSource(v);
     });
-    settingsStore.get<boolean>("app", "dictAutoSpeak", false).then((v) => setAutoSpeak(!!v));
+    // v48.58（D99）：自动发音默认开（v32 追记六「默认关」作废；显式存过 false 的库不受影响）
+    settingsStore.get<boolean>("app", "dictAutoSpeak", true).then((v) => setAutoSpeak(!!v));
     refreshSources();
     const off = window.dictAPI?.onDownloadProgress((msg) => {
       setProgress((p) => ({ ...p, [msg.id]: { progress: msg.progress, state: msg.state } }));
