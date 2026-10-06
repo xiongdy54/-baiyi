@@ -3519,9 +3519,12 @@ body.theme-dark .modal-panel {
 .cb-tag-pop { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 260px; }
 /* 复习页：答案揭示后的标签区（D101；正面永不渲染） */
 .review-tags { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); max-width: 720px; }
-/* v48.61 实测修订（用户截图）：「＋标签」沿用底栏 .bar-btn 尺寸（40px 高），比右侧
-   .tag-input-box input（26px）明显高大——收敛为与输入框同高同视觉（同高/同字号/透明底/同描边语言） */
-.review-tag-add {
+/* v48.62 实测修订（用户两张截图）：「＋标签」沿用底栏 .bar-btn 尺寸（40px 高），比右侧
+   .tag-input-box input（26px）明显高大——收敛为与输入框同高同视觉。
+   D106 期首修无效的教训：.review-tag-add 与 .bar-btn 同特异性（0,1,0）且 .bar-btn 在样式表
+   更后（L6426），height/padding/font-size/background 全被盖回——升到 .review-tags 前缀（0,2,0）必胜，
+   并由 d106.gui 计算样式断言锁死（防同类「写了但没生效」再犯）。 */
+.review-tags .review-tag-add {
   color: var(--text-secondary);
   height: 26px;
   padding: 0 var(--sp-3);

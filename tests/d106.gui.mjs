@@ -81,6 +81,10 @@ try {
   await wait(2200);
   await cdp.eval(`(() => { document.querySelector('[data-review-bar] [data-reveal]')?.click(); return "revealed"; })()`);
   await wait(700);
+  // 0) 计算样式断言（D106 期首修无效的教训——写了规则不等于生效）：按钮与输入框同高（±2px）
+  const sizes = await cdp.eval(`(() => { const b = document.querySelector('[data-testid="review-tag-add"]'); const i = document.querySelector('[data-testid="review-tags"] .tag-input-box input'); if (!b || !i) return "{}"; return JSON.stringify({ btn: Math.round(b.getBoundingClientRect().height), input: Math.round(i.getBoundingClientRect().height) }); })()`);
+  check("「＋标签」按钮与输入框同高（计算样式，±2px）", Math.abs(Number(/"btn":(\d+)/.exec(String(sizes))?.[1] ?? 0) - Number(/"input":(\d+)/.exec(String(sizes))?.[1] ?? 0)) <= 2, sizes);
+
   await cdp.eval(`(() => { document.querySelector('[data-testid="review-tag-add"]')?.click(); return "opened"; })()`);
   await wait(400);
 
