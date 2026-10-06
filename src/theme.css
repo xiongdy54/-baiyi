@@ -2793,6 +2793,9 @@ body.theme-dark .modal-panel {
   color: var(--text-helper);
 }
 .review-head-inner { justify-content: flex-end; }
+/* v48.59（D100 R2 用户实测：计数单行后头带随之收紧）：内列不再撑 48px 最小高，改内容高 +
+   上下 sp-2 —— 计数是次要信息，纵向空间还给卡面。 */
+.review-head-inner { min-height: 0; padding-block: var(--sp-2); }
 /* v48.59（D100 用户指令一）：复习页头带下缘细线收进 720 内列——全宽 border-bottom 退役，
    改 ::after 内列线（与 .review-head-inner / .review-progress / 卡面 / 底栏内容列同一公式，
    构造性对齐）。摘录页头带（.extract-page-head）的全宽契约不动。 */
@@ -2837,7 +2840,8 @@ body.theme-dark .modal-panel {
    v48.59（D100）：8px 方形色点退役（用户裁定「颜色块不要正方形」）；计数无彩色
    （「不要以文字承色」更正），结构性由档间 hairline 竖分隔承担。 */
 .review-count[data-review-counts] { display: flex; align-items: stretch; gap: var(--sp-6); }
-.review-count[data-review-counts] .qi { display: flex; flex-direction: column; justify-content: center; gap: calc(var(--sp-1) / 2); }
+/* v48.59（D100 R2 用户实测：计数改单行、头带收紧）：标签 + 数字同行（baseline 对齐） */
+.review-count[data-review-counts] .qi { display: flex; flex-direction: row; align-items: baseline; gap: var(--sp-2); }
 .review-count[data-review-counts] .qi + .qi { border-left: 1px solid var(--border-subtle); padding-left: var(--sp-4); }
 .review-count[data-review-counts] .qi .lab {
   display: flex;
@@ -2882,7 +2886,14 @@ body.theme-dark .modal-panel {
 @keyframes ctas-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 /* 底部动作栏：几何由共用 .stage-bar 提供（元素挂双类 stage-bar review-bar）。
    .review-bar 仅作为作用域/测试钩子保留。评分网格显式复位 margin-top，堵住通用 .grade-row 的 48px 泄漏。 */
-.review-bar .grade-row { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); min-width: 0; margin-top: 0; }
+/* v48.59（D100 R2 用户实测：窄列下「重来/困难」逐字竖排）：按钮 nowrap 硬保证 + 行级容器查询
+   逐级退让——评分行被侧簇（跳转原文/AI 判答/更多）挤到 <480px（每列 <~110px）时先藏间隔预览
+   （secondary-action 次级信息让位；间隔仍完整保留在按钮 title 气泡里），档名单行恒可读。
+   窗口宽度不改变行宽（底栏内容列恒 ≤720 封顶），触发只随侧簇按钮数量变化。 */
+.review-bar .grade-row { flex: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-2); min-width: 0; margin-top: 0; container-type: inline-size; }
+@container (max-width: 479px) {
+  .review-bar .grade .grade-due { display: none; }
+}
 /* v48.50（D90，用户指令②）：复习页底栏内容列与卡面同盒（静态对齐，无动效——复习页无栏开合）。
    bar 负边距满宽保留（paper 底/border-top 仍贯通窗宽），padding-inline 与 .review-wrap 同值（64）
    ⇒ 内容盒 ≡ .review-session 盒，stage-bar-inner 720 居中与卡面同一公式，构造性对齐。 */
@@ -2906,6 +2917,7 @@ body.theme-dark .modal-panel {
   background: var(--grey-1);
   color: var(--text-primary);
   cursor: pointer;
+  white-space: nowrap; /* D100 R2：任何宽度下按钮文字永不逐字竖排（配合行级容器查询先藏间隔预览） */
 }
 .review-bar .grade .grade-name { display: flex; align-items: center; gap: var(--sp-2); font-size: 15px; font-weight: 500; }
 .review-bar .grade .grade-due { font-size: var(--fs-meta); color: var(--text-helper); }

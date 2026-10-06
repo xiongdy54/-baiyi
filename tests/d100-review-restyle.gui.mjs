@@ -29,6 +29,7 @@ let electron = null;
 let cdp = null;
 let cdpRaw = null;
 let seededId = null;
+let seededId2 = null;
 
 async function listTargets() {
   const list = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
@@ -106,10 +107,14 @@ try {
   const seeded = await cdp.eval(`(async () => {
     const OLD = Date.parse('2000-01-01');
     const qa = await window.cardsAPI.create({ noteText: 'FSRSTEST D100-qa', cardType: 'qa', frontMarkdown: 'FSRSTEST 重设计判据卡？', backMarkdown: 'FSRSTEST 答案', priority: 50, tags: [], fsrsJson: JSON.stringify({ state: 'new', due: OLD, lapses: 0, reps: 0 }) });
-    return String(qa.id || "");
+    // 第二张：带 contextRef（底栏多出「跳转原文」第三侧钮 → 评分行被挤进容器查询紧凑档）
+    const qa2 = await window.cardsAPI.create({ noteText: 'FSRSTEST D100-qa2', cardType: 'qa', frontMarkdown: 'FSRSTEST 挤压场景判据卡？', backMarkdown: 'FSRSTEST 答案2', priority: 50, tags: [], contextRef: { documentId: 'FSRSTEST-doc', anchorText: 'FSRSTEST 锚文本' }, fsrsJson: JSON.stringify({ state: 'new', due: OLD + 1000, lapses: 0, reps: 0 }) });
+    return JSON.stringify({ a: qa.id || "", b: qa2.id || "" });
   })()`);
-  if (seeded) seededId = seeded;
-  check("播种测试卡", Boolean(seededId), seeded);
+  const seedObj = JSON.parse(seeded || "{}");
+  if (seedObj.a) seededId = seedObj.a;
+  if (seedObj.b) seededId2 = seedObj.b;
+  check("播种两张测试卡（第二张带 contextRef）", Boolean(seedObj.a) && Boolean(seedObj.b), seeded);
 
   await cdp.eval("window.location.reload()");
   await wait(3000);
@@ -142,7 +147,9 @@ try {
       labels: [...wrap.querySelectorAll('.lab')].map((x) => x.textContent.trim()).join('|'),
       numColors: nums,
       labColor: lab ? getComputedStyle(lab).color : null,
-      sep: second ? getComputedStyle(second).borderLeftWidth : null
+      sep: second ? getComputedStyle(second).borderLeftWidth : null,
+      qiDir: getComputedStyle(wrap.querySelectorAll('.qi')[0]).flexDirection,
+      qiMaxH: Math.max(...[...wrap.querySelectorAll('.qi')].map((x) => x.getBoundingClientRect().height))
     };
   })())`);
   const c1 = JSON.parse(counts || "{}");
@@ -150,6 +157,7 @@ try {
   check("三档文案在场（m4/m12 钩子）", c1.labels === "未学习|学习中|待复习", counts);
   check("三档数字无彩色（互同色）", Array.isArray(c1.numColors) && c1.numColors.length === 3 && new Set(c1.numColors).size === 1, counts);
   check("档间 hairline 竖分隔（DPR 容差）", c1.sep !== null && parseFloat(c1.sep) > 0 && parseFloat(c1.sep) <= 1.3, counts);
+  check("计数单行（标签+数字同行，R2）", c1.qiDir === "row" && c1.qiMaxH <= 34, counts);
 
   // ---------- ② 评分钮：色点退役 + 常态无彩色 + hover 揭示 ----------
   await cdp.eval(`(() => { const b = document.querySelector('[data-reveal]'); b && b.click(); return 'revealed'; })()`);
@@ -166,6 +174,9 @@ try {
       dotGone: !dot,
       names, bgs,
       h: btns.map((b) => b.getBoundingClientRect().height),
+      nowrap: btns.map((b) => getComputedStyle(b).whiteSpace),
+      dueVisible: [...bar.querySelectorAll('.grade-due')].map((d) => getComputedStyle(d).display !== "none"),
+      rowW: bar.querySelector('.grade-row').getBoundingClientRect().width,
       recIsGood: rec ? rec.querySelector('.grade-name').textContent.trim() === "良好" : false
     };
   })())`);
@@ -175,6 +186,8 @@ try {
   check("常态四钮底色无彩色（互同、非 accent）", Array.isArray(r1.bgs) && r1.bgs.length === 4 && new Set(r1.bgs).size === 1, rest);
   check("四钮仍 40px 单行（D99 等高维持）", Array.isArray(r1.h) && r1.h.length === 4 && r1.h.every((x) => Math.abs(x - 40) <= 1), rest);
   check("recommended 类仍挂良好档（涟漪/焦点钩子）", r1.recIsGood === true, rest);
+  check("按钮文字 nowrap（R2 竖排根治）", Array.isArray(r1.nowrap) && r1.nowrap.every((w) => w === "nowrap"), rest);
+  check("宽敞档（两侧钮）间隔预览在场", Array.isArray(r1.dueVisible) && r1.dueVisible.every((v) => v === true) && r1.rowW >= 480, rest);
 
   // hover 揭示：真鼠标移到「重来」→ 整钮 error 填充；移到「良好」→ accent 填充
   const restBg = r1.bgs[0];
@@ -190,14 +203,43 @@ try {
   const back = await cdp.eval(`getComputedStyle(document.querySelector('.grade-again')).backgroundColor`);
   check("移开后回落常态灰", back === restBg, back);
 
+  // ---------- R2 紧凑档：评分 Good → 带 contextRef 的卡 2（侧簇三钮）→ 间隔预览让位 ----------
+  await cdp.eval(`(() => { const b = document.querySelector('.grade.recommended'); b && b.click(); return 'graded'; })()`);
+  await wait(1800);
+  check("进入带 contextRef 的卡 2", (await cdp.eval(`(() => { const f = document.querySelector('.review-front'); return f && f.innerText.includes('挤压场景') ? 'ok' : (f ? f.innerText.slice(0, 20) : 'NO FACE'); })()`)) === "ok", "face");
+  await cdp.eval(`(() => { const b = document.querySelector('[data-reveal]'); b && b.click(); return 'revealed'; })()`);
+  await wait(700);
+  const squeezed = await cdp.eval(`JSON.stringify((() => {
+    const bar = document.querySelector('.review-bar');
+    const jump = [...bar.querySelectorAll('.bar-btn')].some((b) => b.textContent.includes('跳转原文'));
+    const dues = [...bar.querySelectorAll('.grade-due')].map((d) => getComputedStyle(d).display);
+    const btns = [...bar.querySelectorAll('.grade')];
+    return {
+      jump,
+      dueHidden: dues.every((d) => d === "none"),
+      rowW: bar.querySelector('.grade-row').getBoundingClientRect().width,
+      h: btns.map((b) => b.getBoundingClientRect().height),
+      noVertText: btns.every((b) => b.scrollHeight <= Math.ceil(b.clientHeight + 1))
+    };
+  })())`);
+  const s1 = JSON.parse(squeezed || "{}");
+  check("卡 2 侧簇出现「跳转原文」（三侧钮挤压场景）", s1.jump === true, squeezed);
+  check("行宽 <480 → 间隔预览让位（容器查询紧凑档）", s1.dueHidden === true && s1.rowW < 480, squeezed);
+  check("紧凑档下按钮仍 40px 且无竖排文字", Array.isArray(s1.h) && s1.h.every((x) => Math.abs(x - 40) <= 1) && s1.noVertText === true, squeezed);
+
   await cdp.shot("tests/tmp-d100-back.png");
 } catch (err) {
   fail++;
   console.log(`  ✗ 套件异常 | ${err && err.message ? err.message : String(err)}`);
 } finally {
   try {
-    if (cdp && seededId) {
-      await cdp.eval(`(async () => { try { await window.cardsAPI.remove(${JSON.stringify(seededId)}); } catch (e) {} return 'cleaned'; })()`);
+    if (cdp && (seededId || seededId2)) {
+      await cdp.eval(`(async () => {
+        for (const id of ${JSON.stringify([seededId, seededId2].filter(Boolean))}) {
+          try { await window.cardsAPI.remove(id); } catch (e) {}
+        }
+        return 'cleaned';
+      })()`);
     }
   } catch { /* 清理尽力而为 */ }
   try { if (cdpRaw) cdpRaw.close(); } catch { /* ignore */ }
