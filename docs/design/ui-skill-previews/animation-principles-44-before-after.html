@@ -1,0 +1,1513 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>animation-principles · 44 Skills 应用前后对比预览</title>
+<style>
+/* ============================================================
+   动画十二原则 · 44 Skills 前后对比预览
+   设计 token 对齐 src/theme.css（v48.35）：焦点色 #166a59 / 直角 / Hairline
+   左栏 = 现状（应用 skill 前的典型写法）
+   右栏 = 应用后（按该 skill 设计的真实场景效果）
+   ============================================================ */
+:root{
+  --paper:#fafaf8; --ink:#0a0a0a;
+  --g100:#f0f0ee; --g200:#d4d4d2; --g300:#a3a3a3; --g500:#737373;
+  --border-subtle:#e0e0e0; --border-strong:#a3a3a3;
+  --accent:#166a59; --accent-soft:rgba(22,106,89,.08);
+  --success:#1a7f37; --error:#b42318; --warning:#9a6700;
+  --ease:cubic-bezier(.4,0,.2,1);
+  --ease-out:cubic-bezier(0,0,.2,1);
+  --spring:cubic-bezier(.34,1.56,.64,1);
+  --font:"Inter","Helvetica Neue","Helvetica","Arial","Segoe UI",
+         "PingFang SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+  --mono:"JetBrains Mono","IBM Plex Mono","SF Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit}
+code{font-family:var(--mono)}
+
+/* ---------- 页头 ---------- */
+.masthead{max-width:1160px;margin:0 auto;padding:52px 32px 0}
+.masthead h1{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1.2}
+.masthead .sub{color:var(--g500);font-size:13px;margin:10px 0 0;max-width:880px}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:20px 0 0}
+.legend span{font-size:11px;color:#525252;border:1px solid var(--g200);
+  padding:4px 10px;background:#fff;display:inline-flex;align-items:center;gap:6px}
+.legend b{font-weight:700}
+.toc{max-width:1160px;margin:24px auto 0;padding:0 32px;position:sticky;top:0;z-index:50;
+  background:var(--paper);border-bottom:1px solid var(--border-subtle)}
+.toc-in{display:flex;gap:2px;overflow-x:auto;padding:8px 0;scrollbar-width:none}
+.toc-in::-webkit-scrollbar{display:none}
+.toc a{font-size:11px;color:#525252;text-decoration:none;padding:5px 10px;
+  border:1px solid transparent;white-space:nowrap}
+.toc a:hover{border-color:var(--ink);color:var(--ink)}
+.toc a b{color:var(--ink);font-weight:700;margin-right:4px}
+
+/* ---------- 分类与 skill 卡 ---------- */
+main{max-width:1160px;margin:0 auto;padding:0 32px 80px}
+.cat{margin-top:56px;scroll-margin-top:64px}
+.cat-head{display:flex;align-items:baseline;gap:12px;border-bottom:2px solid var(--ink);padding-bottom:8px}
+.cat-head .no{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--accent)}
+.cat-head h2{font-size:18px;font-weight:800;letter-spacing:-.01em}
+.cat-head .en{font-size:12px;color:var(--g500)}
+.cat-head .cnt{margin-left:auto;font-size:11px;color:var(--g500);font-family:var(--mono)}
+.skill{border:1px solid var(--g200);background:#fff;margin-top:20px}
+.skill-head{display:flex;align-items:center;gap:10px;padding:12px 16px;flex-wrap:wrap}
+.skill-head .idx{font-family:var(--mono);font-size:10px;color:var(--g500);letter-spacing:.05em}
+.skill-head h3{font-size:15px;font-weight:700;display:flex;align-items:baseline;gap:8px}
+.skill-head h3 code{font-size:13px;font-weight:600}
+.skill-head h3 .cn{font-size:12px;color:#525252;font-weight:500}
+.skill-head .path{font-family:var(--mono);font-size:10px;color:var(--g300)}
+.skill-head .mode{font-size:10px;border:1px solid var(--g200);color:#525252;padding:2px 8px}
+.skill-head .why{flex-basis:100%;font-size:12px;color:#525252}
+.skill-head .replay{margin-left:auto;font-size:11px;border:1px solid var(--ink);
+  background:#fff;padding:4px 12px;cursor:pointer;color:var(--ink)}
+.skill-head .replay:hover{background:var(--ink);color:#fff}
+.skill-head .replay:active{transform:scale(.96)}
+
+.panels{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--border-subtle)}
+.panel{display:flex;flex-direction:column;min-width:0}
+.panel + .panel{border-left:1px solid var(--border-subtle)}
+.p-label{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:11px;font-weight:700;
+  letter-spacing:.06em;border-bottom:1px solid var(--border-subtle)}
+.p-label .dot{width:8px;height:8px}
+.panel.before .p-label{color:#525252}
+.panel.before .dot{background:var(--g300)}
+.panel.after .p-label{color:var(--accent)}
+.panel.after .dot{background:var(--accent)}
+.p-label .en{color:var(--g300);font-weight:500}
+.stage{position:relative;min-height:216px;background:var(--paper);overflow:hidden;flex:1}
+.stage.pad{padding:16px}
+.p-note{font-size:11px;color:#525252;padding:9px 14px;border-top:1px solid var(--border-subtle);
+  background:#fff;min-height:38px}
+.p-note b{color:var(--ink)}
+.p-note.after b{color:var(--accent)}
+
+/* 角落时长徽标 */
+.ms{position:absolute;right:8px;bottom:6px;font-family:var(--mono);font-size:10px;
+  color:var(--g500);background:rgba(255,255,255,.85);border:1px solid var(--border-subtle);padding:1px 6px}
+
+/* ---------- 通用小部件 ---------- */
+.w-btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  height:32px;padding:0 14px;border:1px solid var(--ink);background:#fff;color:var(--ink);
+  font-size:12px;cursor:pointer;user-select:none}
+.w-btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.w-chip{display:inline-flex;align-items:center;height:22px;padding:0 8px;
+  border:1px solid var(--border-strong);font-size:11px;background:#fff}
+.w-input{height:30px;border:1px solid var(--border-strong);padding:0 8px;font-size:12px;
+  background:#fff;width:200px;color:var(--ink)}
+.w-panel{background:#fff;border:1px solid var(--border-strong)}
+.w-title{font-size:12px;font-weight:700}
+.w-meta{font-size:11px;color:var(--g500)}
+.w-row{display:flex;align-items:center;gap:8px}
+.skel{height:8px;background:var(--g100);position:relative;overflow:hidden;border-radius:0}
+.skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.95),transparent);
+  animation:shimmer 1.1s infinite}
+@keyframes shimmer{to{transform:translateX(100%)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes popIn{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
+@keyframes shakeX{0%,100%{transform:none}20%{transform:translateX(-5px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes flashBg{0%{background:var(--accent-soft)}100%{background:transparent}}
+.code{font-family:var(--mono);font-size:10.5px;color:#525252;background:var(--g100);
+  padding:6px 10px;line-height:1.6;white-space:pre-wrap;word-break:break-all}
+.code .k{color:var(--accent);font-weight:600}
+.code .bad{color:var(--error);font-weight:600}
+.code .good{color:var(--success);font-weight:600}
+
+footer{max-width:1160px;margin:0 auto;padding:32px 32px 64px;color:var(--g500);font-size:12px;
+  border-top:1px solid var(--border-subtle)}
+footer a{color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <h1>动画十二原则 · 44 Skills 应用前后对比</h1>
+  <p class="sub">来源 <b>dylantarre/animation-principles</b>（144 个 skill 中按本项目筛出 44 个）× 项目真实场景
+  （书架 / 阅读 / 摘录 / AI 制卡 / FSRS 复习 / 导图图谱）。每条左侧为<b>应用前的典型现状</b>，右侧为<b>应用该 skill 后的设计</b>。
+  设计 token 对齐 src/theme.css：焦点色 #166a59、直角、Hairline。生成于 2026-10-05。</p>
+  <div class="legend">
+    <span><b>▶ 重放</b>＝同时重播左右两栏</span>
+    <span><b>悬停 / 点击</b>＝交互式，直接在框内操作</span>
+    <span><b>右下角 ms</b>＝该演示实际使用的时长</span>
+    <span><b>斜坡/曲线图标</b>＝缓动曲线示意（45° 直线＝linear）</span>
+  </div>
+</header>
+
+<nav class="toc"><div class="toc-in" id="toc"></div></nav>
+
+<main id="app"></main>
+
+<footer>
+  预览仅为设计参照，不进入构建产物。skill 原文：<a href="https://github.com/dylantarre/animation-principles">github.com/dylantarre/animation-principles</a>
+  · 建议在 Electron/Chrome 环境查看（依赖 grid-template-rows 过渡、clip-path、backface-visibility 等特性）。
+</footer>
+
+<script>
+'use strict';
+/* ================= 演示框架 ================= */
+const DEMOS = {};
+function def(id, css, build){ DEMOS[id] = {css, build}; }
+
+const H = {
+  el(tag, cls, html){ const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; },
+  on(el, ev, fn){ el.addEventListener(ev, fn); },
+  wait(ms){ return new Promise(r=>setTimeout(r,ms)); },
+  reg(stage, fn){ stage._play = fn; },          // 注册重放/自动播放
+  ms(stage, txt){ const b=H.el('span','ms',txt); stage.appendChild(b); return b; },
+  curve(x1,y1,x2,y2,w=46,h=30){                 // 缓动曲线示意 svg
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="vertical-align:middle">
+      <line x1="0" y1="${h-1}" x2="${w}" y2="${h-1}" stroke="#d4d4d2" stroke-width="1"/>
+      <line x1="1" y1="0" x2="1" y2="${h}" stroke="#d4d4d2" stroke-width="1"/>
+      <path d="M1 ${h-1} C${x1*w} ${h-y1*h} ${x2*w} ${h-y2*h} ${w-1} 1" fill="none" stroke="#166a59" stroke-width="1.6"/></svg>`;
+  },
+  star(filled){ return `<svg width="16" height="16" viewBox="0 0 24 24" fill="${filled?'#166a59':'none'}" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>`; },
+  chev(){ return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>`; },
+  check(){ return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 6L9 17l-5-5"/></svg>`; }
+};
+
+/* ================= Skill 清单（文案 + 分类） ================= */
+const CATS = [
+ {id:'01', slug:'by-domain', en:'领域 · 按业务域划分', items:[
+  {id:'micro-interactions', cn:'微交互', hint:'交互 · 点击', why:'按钮态、工具菜单、批注操作这类"小反馈时刻"——是整个阅读软件手感的基础。',
+   nB:'点击后图标/计数瞬间变化，动作没有过程，确认感弱。', nA:'点击时图标弹性 pop + 计数上跳，一次动作得到一次明确确认。'},
+  {id:'page-transitions', cn:'页面过渡', hint:'交互 · 点击', why:'书架→阅读→复习的视图切换、翻页——最高频的"大动作"。',
+   nB:'视图瞬间替换，空间关系断裂，用户会"迷失半拍"。', nA:'旧视图淡出退向左侧、新视图从右侧进入，保持方向连续性。'},
+  {id:'data-visualization', cn:'数据可视化', hint:'自动播放', why:'材料导图、知识图谱与统计数字的入场与更新动效。',
+   nB:'柱形直接以最终高度出现，数据的"量感"没有被表达。', nA:'柱形按序从零生长（每根错开 60ms），数值随后淡入，量的增长可感知。'},
+  {id:'web-motion-design', cn:'Web 动效设计', hint:'自动播放', why:'渲染层就是 Web：整套动效的方法论与一致性约束。',
+   nB:'三处元素各用各的时长与缓动（0ms / 1200ms linear / 300ms 过冲），观感涣散。', nA:'统一动效 token：同一 240ms ease-out，级联 60ms，界面像一个系统。'},
+  {id:'accessible-motion', cn:'可访问动效', hint:'勾选开关 + 重放', why:'尊重 prefers-reduced-motion：长时间阅读场景必须有降级路径。',
+   nB:'动画无条件播放，对前庭敏感用户是持续干扰。', nA:'勾选"模拟减弱动态"后，弹跳退化为一次简单淡入——真实实现用 @media (prefers-reduced-motion)。'}]},
+ {id:'02', slug:'by-thinking-style', en:'思维方式 · 动效背后的思考模型', items:[
+  {id:'timing-mastery', cn:'时值掌控', hint:'自动播放', why:'每个动作的时长与节奏——D90 调的底部栏/菜单手感正是这一条。',
+   nB:'900ms 的滑入：等得心焦，界面显得迟钝。', nA:'240ms ease-out：快到不阻塞、慢到能看清，信息层级不丢。'},
+  {id:'naturalistic-motion', cn:'自然运动', hint:'自动播放', why:'带重量感的缓动，而非线性匀速的"机器人运动"。',
+   nB:'linear 匀速下落：没有重力，像 PPT 里的默认动画。', nA:'带轻微过冲的减速曲线：卡片像有质量一样落定。'},
+  {id:'attention-direction', cn:'注意力引导', hint:'自动播放', why:'引导视线到当前卡片/主操作——复习界面的核心诉求。',
+   nB:'三张选项视觉权重完全相同，用户需要自己"找重点"。', nA:'400ms 后焦点卡柔和浮起一次，其余淡化——视线被直接带到重点。'},
+  {id:'problem-diagnosis', cn:'问题诊断', hint:'自动播放', why:'动效"不对劲"时的定位思路：先看是布局问题还是绘制问题。',
+   nB:'动画期间改 width，文字每帧重新折行——这是布局型动画的典型病灶。', nA:'布局只算一次（固定宽），用 clip-path 揭示，动画全程文字稳定。'}]},
+ {id:'03', slug:'by-role-persona', en:'角色 · 按使用者视角', items:[
+  {id:'frontend-developer', cn:'前端开发者', hint:'交互 · 悬停', why:'面向代码实现的落地建议：怎么写才既对又好维护。',
+   nB:'transition:all 一把梭：任何属性变化都拖 400ms，手感发糊且难以排查。', nA:'逐属性声明 + token 化时长：只有该动的属性动，且节奏可全局调整。'}]},
+ {id:'05', slug:'by-animation-type', en:'动画类型 · 按动作种类', items:[
+  {id:'entrance-animations', cn:'入场动画', hint:'自动播放', why:'AI 面板、学习坞、卡片进入视口的瞬间。',
+   nB:'display:none→block 硬切，元素"凭空出现"。', nA:'上移 10px + 淡入 240ms ease-out，来源方向暗示"从底部升起"。'},
+  {id:'exit-animations', cn:'退场动画', hint:'自动播放', why:'面板、菜单退出的瞬间——最常被忽略的一半。',
+   nB:'瞬间消失，刚才还在的东西凭空蒸发，位置记忆被打断。', nA:'180ms 下沉淡出后再移除 DOM，退出方向与入场呼应。'},
+  {id:'state-changes', cn:'状态切换', hint:'交互 · 点击标题', why:'学习坞收起/展开、rail 态、开关——状态的连续变化。',
+   nB:'内容区瞬间出现/消失，高度跳变带动整栏抖动。', nA:'高度连续展开 280ms + 箭头同步旋转，状态变化有过程。'},
+  {id:'hover-interactions', cn:'悬停反馈', hint:'交互 · 悬停', why:'工具栏、翻页按钮的 hover——使用频率最高的微反馈。',
+   nB:'hover 生效为 0ms 硬切，像信号灯闪烁而非界面。', nA:'120ms 过渡：灰底与图标位移同时发生，反馈"够快但不生硬"。'},
+  {id:'loading-states', cn:'加载状态', hint:'自动播放', why:'AI 制卡、STE 简明解读进行中的等待体验。',
+   nB:'空白→内容突然砸出来，等待期间零信息，结果出现得毫无铺垫。', nA:'骨架屏先占位并微光流动 800ms，再交叉淡入内容——等待被"看见"。'},
+  {id:'feedback-indicators', cn:'反馈指示', hint:'交互 · 点击保存', why:'摘录成功、评分确认——操作必须被确认，且不打断流。',
+   nB:'按钮文字直接替换成"已保存"，无任何过程感。', nA:'对勾 pop 入场 + 行背景一次轻闪，250ms 内完成确认。'},
+  {id:'transition-sequences', cn:'过渡序列', hint:'自动播放', why:'多元素级联衔接——D90 的 cascade 合并动画就是这一类。',
+   nB:'工具栏、正文、学习坞同帧一起出现，没有层次。', nA:'工具栏→正文→学习坞依次错开 80ms，视线按使用顺序移动。'}]},
+ {id:'06', slug:'by-emotional-outcome', en:'情绪目标 · 动效传达的情绪', items:[
+  {id:'calm-relaxation', cn:'平静安宁', hint:'自动播放', why:'阅读场景要安静——动效必须克制，不与内容争夺注意力。',
+   nB:'徽章无限弹跳 + 下划线脉冲，持续抢夺视线，无法安心阅读。', nA:'徽章只出现一次（300ms 淡入上移）随即安静，把注意力还给正文。'},
+  {id:'professionalism-credibility', cn:'专业可信', hint:'自动播放', why:'学习工具要传递精确、可靠——动效是品牌气质的一部分。',
+   nB:'橡皮筋式大过冲 + 摆动：像玩具，削弱数据可信感。', nA:'200ms 精确淡入 + 2px 上移：克制、一次到位，专业感来自准确。'},
+  {id:'elegance-sophistication', cn:'优雅精致', hint:'自动播放', why:'细节质感：一条线、一个字距的出场方式。',
+   nB:'粗灰块 250ms 默认缓动闪入——存在，但不讲究。', nA:'1px 焦点色发丝线 550ms 舒展生长，说明文字随后轻落——精致在节奏差里。'}]},
+ {id:'07', slug:'by-ui-element', en:'界面元素 · 按组件', items:[
+  {id:'buttons-ctas', cn:'按钮 / CTA', hint:'交互 · 悬停+按下', why:'主操作按钮的四态动效（默认/悬停/按下/焦点）。',
+   nB:'hover 硬切颜色，按下无任何响应，焦点不可见。', nA:'hover 抬升 2px+投影 160ms，按下压扁 60ms，焦点环清晰——四态完整。'},
+  {id:'modals-dialogs', cn:'弹窗 / 对话框', hint:'交互 · 点击删除', why:'确认框、摘录审查视图等模态场景。',
+   nB:'弹窗与遮罩瞬间出现，前后层级关系没有交代。', nA:'遮罩 200ms 淡入 + 弹窗从 96% 缩放升起 220ms，空间层级被讲清楚。'},
+  {id:'navigation-menus', cn:'导航菜单', hint:'交互 · 点击 ⋯', why:'阅读器 More / Settings 下拉菜单的出现方式。',
+   nB:'菜单瞬间出现，与触发按钮没有视觉从属关系。', nA:'以按钮为变换原点缩放淡入 150ms——菜单"长"自按钮。'},
+  {id:'accordions-dropdowns', cn:'折叠 / 下拉', hint:'交互 · 点击行', why:'学习坞收起展开、设置分组折叠。',
+   nB:'内容区 display 硬切，突兀且无法预示还有多少内容。', nA:'高度连续展开 260ms + 箭头旋转 200ms，可预期、可打断。'},
+  {id:'cards-containers', cn:'卡片容器', hint:'交互 · 悬停 + 重放', why:'卡片坞、复习卡、书卡——项目里最多的容器类型。',
+   nB:'悬停无任何反馈；新卡插入瞬间出现，来源不明。', nA:'悬停抬升+投影 150ms；新卡淡入上浮 220ms 进入队列。'},
+  {id:'lists-grids', cn:'列表 / 网格', hint:'自动播放', why:'书架网格、卡组的批量入场。',
+   nB:'白屏后 8 张封面同帧砸出，批量数据"一次性倒出"。', nA:'每张错开 35ms 淡入上浮，总量感逐格建立。'},
+  {id:'notifications-toasts', cn:'通知 / Toast', hint:'自动播放', why:'"已加入复习队列"这类操作结果提示。',
+   nB:'出现与消失都是硬切，且停留时间与阅读节奏无关。', nA:'滑入 240ms → 停留 → 滑出 200ms，进出方向一致，节奏完整。'},
+  {id:'loaders-spinners', cn:'加载指示', hint:'自动播放', why:'PDF 打开、长任务进行的进度表达。',
+   nB:'转圈→内容瞬间替换，进度与结果之间没有连接。', nA:'细进度条走到 100% 再交叉淡入内容，因果链完整。'},
+  {id:'forms-inputs', cn:'表单 / 输入', hint:'交互 · 聚焦+提交', why:'设置表单、搜索框的焦点与校验反馈。',
+   nB:'聚焦无反馈、错误信息硬切出现，用户不知道该看哪里。', nA:'焦点环 120ms 淡入；错误消息下滑 160ms + 输入框轻晃，视线被正确引导。'}]},
+ {id:'08', slug:'by-industry', en:'行业 · 按产品类型', items:[
+  {id:'education-learning', cn:'教育 / 学习', hint:'交互 · 点击卡片', why:'翻卡、评分、强化反馈——与产品复习流程直接同构。',
+   nB:'正面瞬间换成答案，评分按钮一直杵在那里，答题节奏被打乱。', nA:'卡片 3D 翻转 500ms，翻转完成后评分按钮依次浮现——先思考，再作答。'},
+  {id:'saas-productivity', cn:'生产力工具', hint:'交互 · 点击 ⌘K', why:'命令面板等效率工具的动效惯例——高频操作要"快而不糙"。',
+   nB:'面板瞬间整块出现，列表与面板无层次差。', nA:'面板缩放淡入 200ms，条目以 20ms 步进追上，页脚提示最后落位。'}]},
+ {id:'09', slug:'by-tool-framework', en:'工具链 · 按技术栈', items:[
+  {id:'css-native', cn:'原生 CSS', hint:'交互 · 悬停', why:'项目未用任何动画库，全部动效由 transition/keyframes 实现——这份是直接可抄的写法对照。',
+   nB:'transition:all .45s：hover 时背景、内边距、字距、投影全部拖 450ms，糊成一片。', nA:'只声明要动的属性，时长 150ms + 统一缓动 token——脆、快、可维护。'}]},
+ {id:'10', slug:'by-time-scale', en:'时长区间 · 按持续时间', items:[
+  {id:'instant-0-100ms', cn:'即时 0–100ms', hint:'自动播放', why:'按压等需要"立刻承认"的反馈。',
+   nB:'500ms 才给出按压态——手已经离开了，反馈才到。', nA:'60ms：仍在"即时"感知窗口内，手感和实体按键一致。'},
+  {id:'micro-100-200ms', cn:'微 100–200ms', hint:'自动播放', why:'勾选、hover 着色这类微反馈的正确时长带。',
+   nB:'700ms 画一个勾：慢得像卡顿。', nA:'150ms 一笔完成：既看到过程，又不拖延操作流。'},
+  {id:'small-200-300ms', cn:'小 200–300ms', hint:'自动播放', why:'下拉、小菜单、小型面板的时长带。',
+   nB:'900ms 打开一个下拉——用户早已把视线移开。', nA:'240ms：菜单出现的瞬间仍能看清运动方向。'},
+  {id:'medium-300-500ms', cn:'中 300–500ms', hint:'自动播放', why:'面板/学习坞滑入的时长带。',
+   nB:'80ms 太快，运动没被读出来，只剩"闪一下"的毛刺感。', nA:'380ms ease-out：位移可读，又不阻塞下一步操作。'},
+  {id:'large-500-800ms', cn:'大 500–800ms', hint:'自动播放', why:'整屏级过渡（书架⇄阅读）的时长带上限。',
+   nB:'0ms 硬切：大区域切换没有连续性，空间感断裂。', nA:'620ms ease-in-out：整屏移动可读、可预期，接近翻页的物理感。'}]},
+ {id:'11', slug:'by-principle-focus', en:'单一原则 · 十二原则逐条聚焦', items:[
+  {id:'slow-in-out-mastery', cn:'缓入缓出', hint:'自动播放', why:'加速-减速曲线——翻页动效的核心原则。',
+   nB:'linear 匀速翻页：起止生硬，像传送带而非纸页。', nA:'ease-in-out：页起加速、页落减速，还原纸张的物理惯性。'},
+  {id:'staging-mastery', cn:'舞台调度', hint:'自动播放', why:'同屏只讲一件事——多元素动效必须分主次。',
+   nB:'徽章、进度条、文字、按钮同时动画，没有任何焦点。', nA:'只让主 CTA 轻脉冲一次，其余保持静止——焦点唯一。'},
+  {id:'follow-through-overlapping-action', cn:'跟随与重叠', hint:'自动播放', why:'级联 settle：各部分不同时启停（D90 cascade 同源原理）。',
+   nB:'面板与内部三行同时启动、同时停止，像一整块铁板。', nA:'面板先行带轻微过冲，三行内容依次晚 40ms 落定——有层次、有余韵。'}]},
+ {id:'12', slug:'by-problem-type', en:'问题类型 · 按要解决的麻烦', items:[
+  {id:'performance-optimization', cn:'性能优化', hint:'自动播放 · 留意卡顿', why:'长文档/PDF 场景渲染层性能：只动 transform 与 opacity。',
+   nB:'每帧改 left 并读取 offsetWidth（强制重排）×重投影元素——肉眼可见的卡顿。', nA:'只写 transform，合成器接管，全程满帧。'},
+  {id:'timing-calibration', cn:'时值校准', hint:'交互 · 拖滑块到绿区', why:'把时长调进舒适区的方法：先框定区间，再微调。',
+   nB:'1100ms——远超 240–420ms 舒适带，拖沓。', nA:'拖动滑块把时长调进绿色区间（240–420ms），现场感受"对了"的瞬间。'},
+  {id:'implementation-debugging', cn:'实现调试', hint:'自动播放', why:'transition 不生效的经典坑：同一帧改 display。',
+   nB:'display 与 class 同帧修改：起始帧从未被绘制，transition 被整个吞掉。', nA:'先渲染起始帧，再用双 rAF 加目标 class——动画如期播放。'},
+  {id:'ux-friction', cn:'操作摩擦', hint:'交互 · 点击 × 与撤销', why:'用动效降低摩擦：给破坏性操作反馈与退路。',
+   nB:'过小的点击区 + 瞬间消失，误触无解、后果不明。', nA:'32px 命中区 + 按压反馈；行折叠退场后出现可撤销 Toast——错了能回来。'}]}
+];
+
+/* ================= 渲染（boot：待全部 def() 执行完后调用） ================= */
+function boot(){
+  const app = document.getElementById('app');
+  const toc = document.getElementById('toc');
+  CATS.forEach(cat=>{
+    const sec = H.el('section','cat'); sec.id = 'cat-'+cat.id;
+    sec.appendChild(H.el('div','cat-head',
+      `<span class="no">${cat.id}</span><h2>${cat.slug}</h2><span class="en">${cat.en}</span><span class="cnt">${cat.items.length} skills</span>`));
+    cat.items.forEach((it,ii)=>{
+      const d = DEMOS[it.id]; if(!d) return;
+      const skill = H.el('section','skill'); skill.id = 's-'+it.id; skill.dataset.demo = it.id;
+      const canReplay = !it.hint.startsWith('交互 · 悬停');
+      skill.innerHTML = `
+        <header class="skill-head">
+          <span class="idx">${cat.id}·${String(ii+1).padStart(2,'0')}</span>
+          <h3><code>${it.id}</code><span class="cn">${it.cn}</span></h3>
+          <span class="path">${cat.slug}/${it.id}</span>
+          <span class="mode">${it.hint}</span>
+          ${canReplay?'<button class="replay" type="button">▶ 重放</button>':''}
+          <p class="why">${it.why}</p>
+        </header>
+        <div class="panels">
+          <div class="panel before">
+            <div class="p-label"><span class="dot"></span>现状<span class="en">BEFORE</span></div>
+            <div class="stage pad"></div><p class="p-note"><b>问题：</b>${it.nB}</p>
+          </div>
+          <div class="panel after">
+            <div class="p-label"><span class="dot"></span>应用后<span class="en">AFTER</span></div>
+            <div class="stage pad"></div><p class="p-note after"><b>改进：</b>${it.nA}</p>
+          </div>
+        </div>`;
+      sec.appendChild(skill);
+      const bStage=skill.querySelector('.panel.before .stage'), aStage=skill.querySelector('.panel.after .stage');
+      bStage.classList.add('st-b'); aStage.classList.add('st-a');
+      try{ d.build(bStage, aStage, H); }
+      catch(err){ console.error('demo build failed:', it.id, err); }
+    });
+    app.appendChild(sec);
+    const a = H.el('a', null, `<b>${cat.id}</b>${cat.slug}`);
+    a.href = '#cat-'+cat.id; toc.appendChild(a);
+  });
+  // 汇总演示 CSS
+  const st = document.createElement('style');
+  st.textContent = Object.values(DEMOS).filter(Boolean).map(d=>d.css||'').join('\n');
+  document.head.appendChild(st);
+  // 重放按钮 + 进入视口自动播放
+  document.getElementById('app').addEventListener('click', e=>{
+    const btn = e.target.closest('.replay'); if(!btn) return;
+    btn.closest('.skill').querySelectorAll('.stage').forEach(st=>{ st._play && st._play(); });
+  });
+  const io = new IntersectionObserver(entries=>{
+    entries.forEach(en=>{
+      if(en.isIntersecting && !en.target._played){
+        en.target._played = true;
+        en.target.querySelectorAll('.stage').forEach(st=>{ st._play && st._play(); });
+      }
+    });
+  },{threshold:.3});
+  document.querySelectorAll('.skill').forEach(s=>io.observe(s));
+}
+
+/* ============ 01 by-domain ============ */
+/* --- micro-interactions --- */
+def('micro-interactions', `
+.mi-tool{display:flex;align-items:center;gap:10px}
+.mi-star{width:34px;height:34px;border:1px solid var(--border-strong);background:#fff;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;color:#525252}
+.mi-star.on{color:var(--accent);border-color:var(--accent)}
+.mi-star.pop svg{animation:miPop .24s var(--spring)}
+@keyframes miPop{0%{transform:scale(.6)}60%{transform:scale(1.35)}100%{transform:scale(1)}}
+.mi-count{font-family:var(--mono);font-size:12px;border:1px solid var(--border-strong);
+  padding:3px 8px;background:#fff}
+.mi-count.bump{animation:miBump .24s var(--ease-out)}
+@keyframes miBump{0%{transform:none}45%{transform:translateY(-4px)}100%{transform:none}}
+/* before：无过程 */
+.st-b .mi-star svg{transition:none}
+`, (B,A,h)=>{
+  function mk(stage){
+    const tool=h.el('div','mi-tool');
+    const btn=h.el('button','mi-star',h.star(false));
+    const cnt=h.el('span','mi-count','12');
+    tool.append(btn,cnt); stage.appendChild(tool);
+    let on=false;
+    return ()=>{ on=!on;
+      btn.classList.toggle('on',on); btn.innerHTML=h.star(on);
+      if(stage.classList.contains('st-a')){
+        btn.classList.remove('pop'); void btn.offsetWidth; btn.classList.add('pop');
+        cnt.textContent = on?'13':'12';
+        cnt.classList.remove('bump'); void cnt.offsetWidth; cnt.classList.add('bump');
+      } else { cnt.textContent = on?'13':'12'; }
+    };
+  }
+  B.classList.add('st-b'); A.classList.add('st-a');
+  h.reg(B, mk(B)); h.reg(A, mk(A));
+});
+
+/* --- page-transitions --- */
+def('page-transitions', `
+.pt-btn{position:absolute;top:12px;left:16px;z-index:5}
+.pt-wrap{position:absolute;inset:52px 16px 16px}
+.pt-view{position:absolute;inset:0;background:#fff;border:1px solid var(--border-strong);padding:14px}
+.pt-view h4{font-size:12px;margin-bottom:10px}
+.pt-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.pt-cover{height:52px;background:var(--g100);border:1px solid var(--border-subtle);position:relative}
+.pt-cover::before{content:'';position:absolute;left:4px;top:0;bottom:0;width:2px;background:var(--border-strong)}
+.pt-lines i{display:block;height:7px;background:var(--g100);margin-bottom:8px}
+/* after：方向连续的过渡 */
+.st-a .pt-view{transition:opacity .22s var(--ease-out),transform .22s var(--ease-out)}
+.st-a .off-l{opacity:0;transform:translateX(-14px);pointer-events:none}
+.st-a .off-r{opacity:0;transform:translateX(14px);pointer-events:none}
+`, (B,A,h)=>{
+  function mk(stage, dir){   // dir=1: 书架→阅读
+    const btn=h.el('button','w-btn pt-btn','打开《遗忘曲线》');
+    const wrap=h.el('div','pt-wrap');
+    const shelf=h.el('div','pt-view','<h4>书架</h4><div class="pt-grid">'+'<div class="pt-cover"></div>'.repeat(4)+'</div>');
+    const reader=h.el('div','pt-view','<h4>《遗忘曲线》· 第 3 章</h4><div class="pt-lines">'+'<i style="width:96%"></i><i style="width:88%"></i><i style="width:92%"></i><i style="width:64%"></i></div>');
+    reader.style.display='none';
+    wrap.append(shelf,reader); stage.append(btn,wrap);
+    let reading=false, busy=false;
+    function go(){
+      if(busy) return; busy=true; reading=!reading;
+      const a=stage.classList.contains('st-a');
+      btn.textContent = reading?'返回书架':'打开《遗忘曲线》';
+      const show=reading?reader:shelf, hide=reading?shelf:reader;
+      if(!a){ show.style.display='block'; hide.style.display='none'; busy=false; return; }
+      hide.classList.add(reading?'off-l':'off-r');
+      h.wait(200).then(()=>{ hide.style.display='none';
+        show.classList.add(reading?'off-r':'off-l'); show.style.display='block';
+        void show.offsetWidth;
+        show.classList.remove('off-r','off-l');
+        return h.wait(230);
+      }).then(()=>{ hide.classList.remove('off-l','off-r'); busy=false; });
+    }
+    h.on(btn,'click',go);
+    h.reg(stage, ()=>{ if(!busy) go(); });
+  }
+  mk(B,1); mk(A,1);
+});
+
+/* --- data-visualization --- */
+def('data-visualization', `
+.dv-chart{display:flex;align-items:flex-end;gap:10px;height:150px;padding:8px 4px 0}
+.dv-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%}
+.dv-bar{width:100%;height:6px;background:var(--accent)}
+.dv-val{font-family:var(--mono);font-size:10px;color:var(--g500);opacity:0}
+.dv-lab{font-size:10px;color:var(--g500)}
+/* after：生长 + 级联 */
+.st-a .dv-bar{transition:height .5s var(--ease-out)}
+.st-a .dv-val{transition:opacity .3s var(--ease-out)}
+`, (B,A,h)=>{
+  const data=[[10,40],[16,65],[13,50],[21,80],[15,58],[24,92]];
+  function mk(stage, animated){
+    const chart=h.el('div','dv-chart');
+    const cols=data.map(([lab,vh])=>{
+      const col=h.el('div','dv-col');
+      const val=h.el('span','dv-val',lab);
+      const bar=h.el('div','dv-bar');
+      col.append(val,bar);
+      col.insertAdjacentHTML('beforeend',`<span class="dv-lab">周${'一二三四五六'[data.findIndex(d=>d[0]===lab)]}</span>`);
+      return {col,val,bar,vh};
+    });
+    cols.forEach(c=>chart.appendChild(c.col));
+    stage.appendChild(chart);
+    h.reg(stage, ()=>{
+      cols.forEach((c,i)=>{
+        c.bar.style.height='6px'; c.val.style.opacity='0';
+        c.bar.style.transition = animated?'':'none'; c.val.style.transition = animated?'':'none';
+      });
+      void chart.offsetWidth;
+      cols.forEach((c,i)=>{
+        const delay=animated? i*60 : 0;
+        setTimeout(()=>{ c.bar.style.height=c.vh+'%'; }, animated?delay:0);
+        setTimeout(()=>{ c.val.style.opacity='1'; }, animated?450+i*60:0);
+      });
+    });
+  }
+  mk(B,false); mk(A,true);
+});
+
+/* --- web-motion-design --- */
+def('web-motion-design', `
+.wm-panel{background:#fff;border:1px solid var(--border-strong);padding:14px;max-width:330px}
+.wm-panel h4{font-size:13px;margin-bottom:8px}
+.wm-line{height:7px;background:var(--g100);margin-bottom:8px;transform:translateX(-14px);opacity:0}
+.wm-foot{display:flex;justify-content:flex-end;transform:translateY(10px);opacity:0}
+.wm-title{transform:translateY(-8px);opacity:0}
+.wm-panel.go .wm-title,.wm-panel.go .wm-line,.wm-panel.go .wm-foot{transform:none;opacity:1}
+/* before：各用各的时长缓动（混乱） */
+.st-b .wm-title{transition:all 0s}
+.st-b .wm-line{transition:all 1.2s linear}
+.st-b .wm-foot{transition:all .3s var(--spring)}
+/* after：统一 token + 级联 */
+.st-a .wm-title,.st-a .wm-line,.st-a .wm-foot{transition:all .24s var(--ease-out)}
+.st-a .wm-line{transition-delay:60ms}
+.st-a .wm-foot{transition-delay:120ms}
+`, (B,A,h)=>{
+  function mk(stage){
+    const p=h.el('div','wm-panel',
+      '<h4 class="wm-title">AI 摘要 · 第 3 章</h4><div class="wm-line" style="width:92%"></div><div class="wm-line" style="width:74%"></div><div class="wm-foot"><span class="w-btn pri" style="height:26px;padding:0 10px;font-size:11px">生成卡片</span></div>');
+    stage.appendChild(p);
+    h.reg(stage, ()=>{ p.classList.remove('go'); void p.offsetWidth; p.classList.add('go'); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- accessible-motion --- */
+def('accessible-motion', `
+.am-toggle{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:12px}
+.am-toggle input{accent-color:var(--accent)}
+.am-card{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:300px;position:relative}
+.am-badge{position:absolute;top:-9px;right:10px;background:var(--accent);color:#fff;
+  font-size:10px;padding:2px 8px}
+.am-line{height:7px;background:var(--g100);margin-top:8px}
+/* before：无条件弹跳 */
+.st-b .am-card{animation:amBounce .7s var(--spring) infinite}
+@keyframes amBounce{0%,100%{transform:none}40%{transform:translateY(-8px)}}
+/* after：默认同款动画；勾选后降级为一次简单淡入 */
+.st-a .am-card{animation:amIn .5s var(--spring)}
+@keyframes amIn{from{transform:translateY(-14px);opacity:0}to{transform:none;opacity:1}}
+.stage.prm .am-card{animation:amFade .15s ease both}
+@keyframes amFade{from{opacity:0}to{opacity:1}}
+`, (B,A,h)=>{
+  function mk(stage){
+    stage.innerHTML='';
+    const card=h.el('div','am-card','<h4 class="w-title">今日待复习 12 张</h4><div class="am-line" style="width:88%"></div><div class="am-line" style="width:64%"></div>');
+    card.insertAdjacentHTML('beforeend','<span class="am-badge">新卡片已生成</span>');
+    stage.appendChild(card);
+    h.reg(stage, ()=>{ card.style.animation='none'; void card.offsetWidth; card.style.animation=''; });
+  }
+  mk(B); mk(A);
+  const t=h.el('label','am-toggle','<input type="checkbox"> 模拟 prefers-reduced-motion（作用于右栏）');
+  A.parentNode.querySelector('.p-label').appendChild(t);
+  h.on(t.querySelector('input'),'change',e=>{ A.classList.toggle('prm', e.target.checked); });
+});
+/* ============ 02 by-thinking-style + 03 by-role ============ */
+/* --- timing-mastery --- */
+def('timing-mastery', `
+.tm-clip{position:absolute;inset:0;overflow:hidden}
+.tm-dock{position:absolute;left:14px;right:14px;bottom:0;background:#fff;
+  border:1px solid var(--border-strong);border-bottom:none;padding:12px 14px;
+  transform:translateY(105%)}
+.tm-dock.go{transform:none}
+.st-b .tm-dock{transition:transform .9s ease}
+.st-a .tm-dock{transition:transform .24s var(--ease-out)}
+.tm-dock h5{font-size:12px;margin-bottom:6px}
+`, (B,A,h)=>{
+  function mk(stage){
+    const clip=h.el('div','tm-clip');
+    const dock=h.el('div','tm-dock','<h5 class="w-title">学习坞 · 待制卡摘录 3 条</h5><div class="skel" style="width:80%"></div>');
+    clip.appendChild(dock); stage.appendChild(clip);
+    const badge=h.ms(stage,'');
+    h.reg(stage, ()=>{ dock.classList.remove('go'); void dock.offsetWidth; dock.classList.add('go'); });
+    return badge;
+  }
+  h.ms(B,'900ms · ease'); h.ms(A,'240ms · ease-out');
+  mk(B); mk(A);
+});
+
+/* --- naturalistic-motion --- */
+def('naturalistic-motion', `
+.nm-area{position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding-top:12px}
+.nm-card{width:250px;background:#fff;border:1px solid var(--border-strong);padding:12px;
+  transform:translateY(-90px) rotate(-4deg);opacity:0}
+.nm-card.go{transform:none;opacity:1}
+.st-b .nm-card.go{transition:all .5s linear}
+.st-a .nm-card.go{transition:all .55s cubic-bezier(.3,1.36,.5,1)}
+`, (B,A,h)=>{
+  function mk(stage){
+    const area=h.el('div','nm-area');
+    const card=h.el('div','nm-card','<h5 class="w-title">FSRS-5 已就绪</h5><p class="w-meta" style="margin-top:4px">调度真源：review_logs</p>');
+    area.appendChild(card); stage.appendChild(area);
+    h.reg(stage, ()=>{ card.classList.remove('go'); void card.offsetWidth; card.classList.add('go'); });
+  }
+  B.insertAdjacentHTML('beforeend',`<div style="position:absolute;left:12px;bottom:8px">${h.curve(0,0,0,0)}<span class="w-meta" style="margin-left:6px">linear</span></div>`);
+  A.insertAdjacentHTML('beforeend',`<div style="position:absolute;left:12px;bottom:8px">${h.curve(.3,1.36,.5,1)}<span class="w-meta" style="margin-left:6px">过冲减速</span></div>`);
+  mk(B); mk(A);
+});
+
+/* --- attention-direction --- */
+def('attention-direction', `
+.at-q{font-size:13px;font-weight:700;margin-bottom:10px}
+.at-opts{display:flex;flex-direction:column;gap:8px;max-width:340px}
+.at-opt{background:#fff;border:1px solid var(--border-strong);padding:9px 12px;font-size:12px;
+  transition:opacity .3s var(--ease-out),box-shadow .3s var(--ease-out),transform .3s var(--ease-out)}
+.at-opt .tag{font-family:var(--mono);color:var(--g500);margin-right:8px;font-size:11px}
+.at-opt.focus{box-shadow:0 8px 24px rgba(10,10,10,.14);border-color:var(--accent);
+  transform:translateY(-2px)}
+.at-opt.dim{opacity:.45}
+`, (B,A,h)=>{
+  const opts=['间隔重复算法','一个现代调度算法','记忆曲线'];
+  function mk(stage, guided){
+    stage.insertAdjacentHTML('beforeend','<div class="at-q">FSRS 指的是？</div>');
+    const box=h.el('div','at-opts');
+    const els=opts.map((t,i)=>h.el('div','at-opt',`<span class="tag">${'ABC'[i]}</span>${t}`));
+    els.forEach(e=>box.appendChild(e)); stage.appendChild(box);
+    h.reg(stage, ()=>{
+      els.forEach(e=>e.classList.remove('focus','dim'));
+      if(!guided) return;
+      h.wait(400).then(()=>{ els[1].classList.add('focus'); els[0].classList.add('dim'); els[2].classList.add('dim'); });
+    });
+  }
+  mk(B,false); mk(A,true);
+});
+
+/* --- problem-diagnosis --- */
+def('problem-diagnosis', `
+.pd-wrap{position:absolute;left:16px;top:40px}
+.pd-pill{height:44px;background:#fff;border:1px solid var(--border-strong);
+  overflow:hidden;width:150px}
+.pd-pill.go{width:310px}
+.pd-inner{padding:8px 12px;font-size:12px;line-height:1.7;width:310px}
+.st-b .pd-pill{transition:width .45s ease}
+.st-b .pd-inner{width:auto}          /* 每帧随容器重新折行 */
+.st-a .pd-pill{transition:clip-path .45s var(--ease-out);width:310px;
+  clip-path:inset(0 160px 0 0)}
+.st-a .pd-pill.go{clip-path:inset(0 0 0 0)}
+`, (B,A,h)=>{
+  const text='<b>标签</b>：记忆巩固 · FSRS · 间隔重复算法的工程实现';
+  function mk(stage){
+    const wrap=h.el('div','pd-wrap');
+    const pill=h.el('div','pd-pill',`<div class="pd-inner">${text}</div>`);
+    wrap.appendChild(pill); stage.appendChild(wrap);
+    h.reg(stage, ()=>{ pill.classList.remove('go'); void pill.offsetWidth; pill.classList.add('go'); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- frontend-developer --- */
+def('frontend-developer', `
+.fd-chip{height:34px;padding:0 14px;border:1px solid var(--border-strong);background:#fff;
+  font-size:12px;display:inline-flex;align-items:center;cursor:pointer;margin-top:10px}
+/* before：transition:all，全属性 400ms */
+.st-b .fd-chip{transition:all .4s}
+.st-b .fd-chip:hover{background:var(--g100);padding:0 26px;letter-spacing:1px;
+  box-shadow:0 2px 6px rgba(10,10,10,.18)}
+/* after：逐属性 + token */
+.st-a .fd-chip{transition:background-color .15s var(--ease-out),transform .15s var(--ease-out)}
+.st-a .fd-chip:hover{background:var(--g100);transform:translateY(-1px)}
+`, (B,A,h)=>{
+  function mk(stage, css, bad){
+    stage.insertAdjacentHTML('beforeend',`<div class="code">${css}</div>`);
+    stage.insertAdjacentHTML('beforeend','<button class="fd-chip">摘录选中段落</button>');
+    stage.insertAdjacentHTML('beforeend',
+      bad?'<p class="w-meta" style="margin-top:8px">悬停试试：连内边距和字距都在拖 400ms</p>'
+         :'<p class="w-meta" style="margin-top:8px">悬停试试：只有底色与 1px 位移参与过渡</p>');
+  }
+  mk(B,`<span class="bad">transition: all .4s;</span>   /* 一把梭 */`, true);
+  mk(A,`<span class="good">transition: background-color .15s var(--ease-out),\n              transform .15s var(--ease-out);</span>`, false);
+});
+/* ============ 05 by-animation-type ============ */
+/* --- entrance-animations --- */
+def('entrance-animations', `
+.en-panel{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:300px;display:none}
+.en-panel.show{display:block}
+.st-a .en-panel.show{animation:fadeUp .24s var(--ease-out)}
+`, (B,A,h)=>{
+  function mk(stage){
+    const p=h.el('div','en-panel','<h5 class="w-title">STE 简明解读</h5><p class="w-meta" style="margin:6px 0">用受控语言改写：把长句拆成短句，保留术语。</p><div class="skel" style="width:82%"></div>');
+    stage.appendChild(p);
+    h.reg(stage, ()=>{ p.classList.remove('show'); void p.offsetWidth; p.classList.add('show'); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- exit-animations --- */
+def('exit-animations', `
+.ex-panel{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:300px}
+.ex-panel.out{opacity:0;transform:translateY(6px)}
+.st-a .ex-panel{transition:opacity .18s ease-in,transform .18s ease-in}
+`, (B,A,h)=>{
+  function mk(stage){
+    const p=h.el('div','ex-panel','<h5 class="w-title">筛选：本周到期</h5><p class="w-meta" style="margin-top:4px">共 12 张 · 预计 9 分钟</p>');
+    stage.appendChild(p);
+    h.reg(stage, async ()=>{
+      p.classList.remove('out'); p.style.display='block';
+      if(!stage.classList.contains('st-a')){
+        p.style.transition='none'; void p.offsetWidth;
+        await h.wait(300); p.style.display='none';
+      }else{
+        p.style.transition=''; void p.offsetWidth;
+        await h.wait(300); p.classList.add('out');
+        await h.wait(220); p.style.display='none';
+      }
+    });
+  }
+  mk(B); mk(A);
+});
+
+/* --- state-changes --- */
+def('state-changes', `
+.sc-dock{background:#fff;border:1px solid var(--border-strong);max-width:320px}
+.sc-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;user-select:none}
+.sc-head .chev{display:inline-flex;transition:transform .2s var(--ease)}
+.sc-body{padding:0 12px}
+.sc-body-in{overflow:hidden}
+.sc-row{height:7px;background:var(--g100);margin:8px 0}
+/* after：grid-rows 高度过渡 + 箭头旋转 */
+.st-a .sc-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s var(--ease)}
+.st-a .sc-dock.open .sc-body{grid-template-rows:1fr}
+.st-a .sc-dock.open .chev{transform:rotate(180deg)}
+`, (B,A,h)=>{
+  function mk(stage){
+    const dock=h.el('div','sc-dock',
+      `<div class="sc-head"><span class="w-title">学习坞</span><span class="chev">${h.chev()}</span></div>
+       <div class="sc-body"><div class="sc-body-in"><div class="sc-row" style="width:86%"></div><div class="sc-row" style="width:64%"></div><div class="sc-row" style="width:74%"></div></div></div>`);
+    stage.appendChild(dock);
+    let open=false;
+    const toggle=()=>{
+      open=!open;
+      if(!stage.classList.contains('st-a')){
+        dock.querySelector('.sc-body').style.display=open?'block':'none';
+      }else dock.classList.toggle('open',open);
+    };
+    h.on(dock.querySelector('.sc-head'),'click',toggle);
+    h.reg(stage, ()=>{ if(open){open=false; toggle();} else toggle(); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- hover-interactions --- */
+def('hover-interactions', `
+.hv-bar{display:flex;gap:6px}
+.hv-btn{width:34px;height:34px;border:1px solid var(--border-strong);background:#fff;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;color:#525252}
+.hv-btn:hover{background:var(--g100);color:var(--ink)}
+.st-a .hv-btn{transition:background-color .12s var(--ease-out),color .12s var(--ease-out)}
+.hv-btn svg{pointer-events:none}
+`, (B,A,h)=>{
+  const icons='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>'+
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18"/><path d="M8 12h8M12 8v8"/></svg>'+
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'+
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2m-9 0v14h10V6"/></svg>';
+  function mk(stage){
+    const bar=h.el('div','hv-bar');
+    icons.match(/<svg[\s\S]*?<\/svg>/g).forEach(ic=>{ bar.appendChild(h.el('button','hv-btn',ic)); });
+    stage.innerHTML=''; stage.appendChild(bar);
+    stage.insertAdjacentHTML('beforeend','<p class="w-meta" style="margin-top:10px">悬停四个工具按钮对比反馈</p>');
+  }
+  mk(B); mk(A);
+});
+
+/* --- loading-states --- */
+def('loading-states', `
+.ld-box{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:310px;min-height:76px}
+.ld-skel{display:none;flex-direction:column;gap:9px}
+.ld-skel.show{display:flex}
+.ld-text{display:none}
+.ld-text.show{display:block}
+.st-a .ld-text{opacity:0;transition:opacity .25s var(--ease-out)}
+.st-a .ld-text.show{opacity:1}
+.ld-text p{font-size:12px;line-height:1.6;color:#333;margin:0}
+`, (B,A,h)=>{
+  const body='<p>遗忘曲线描述记忆随时间衰减的规律；FSRS 在此基础上以逐日复习记录拟合个体参数，动态安排下次复习时点。</p>';
+  function mk(stage, animated){
+    const box=h.el('div','ld-box');
+    const skel=h.el('div','ld-skel','<div class="skel" style="width:88%"></div><div class="skel" style="width:70%"></div><div class="skel" style="width:52%"></div>');
+    const txt=h.el('div','ld-text',body);
+    box.append(skel,txt); stage.appendChild(box);
+    h.reg(stage, async ()=>{
+      skel.classList.remove('show'); txt.classList.remove('show');
+      void box.offsetWidth;
+      if(!animated){ await h.wait(800); txt.classList.add('show'); }
+      else{ skel.classList.add('show'); await h.wait(800);
+        skel.classList.remove('show'); txt.classList.add('show'); }
+    });
+  }
+  mk(B,false); mk(A,true);
+});
+
+/* --- feedback-indicators --- */
+def('feedback-indicators', `
+.fb-row{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:330px}
+.fb-text{font-size:12px;margin-bottom:10px}
+.fb-check{display:none;color:var(--accent);vertical-align:middle}
+.fb-btn.saved{background:var(--g100);color:var(--g500);cursor:default}
+.fb-row.flash{animation:flashBg .5s var(--ease-out)}
+.st-b .fb-check.pop{display:inline-flex}
+.st-a .fb-check.pop{display:inline-flex;animation:popIn .25s var(--spring)}
+`, (B,A,h)=>{
+  function mk(stage){
+    const row=h.el('div','fb-row',
+      `<p class="fb-text">「间隔重复通过扩大复习间隔来对抗遗忘。」</p>
+       <div class="w-row"><button class="w-btn fb-btn">保存摘录</button><span class="fb-check">${h.check()}</span></div>`);
+    stage.appendChild(row);
+    const btn=row.querySelector('.fb-btn'), chk=row.querySelector('.fb-check');
+    const act=()=>{
+      if(btn.classList.contains('saved')){ btn.classList.remove('saved'); chk.classList.remove('pop'); return; }
+      btn.classList.add('saved'); btn.textContent='已保存';
+      chk.classList.add('pop');
+      if(stage.classList.contains('st-a')){ row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash'); }
+    };
+    h.on(btn,'click',act);
+    h.reg(stage, ()=>{ btn.textContent='保存摘录'; btn.classList.remove('saved'); chk.classList.remove('pop'); act(); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- transition-sequences --- */
+def('transition-sequences', `
+.ts-stage{position:absolute;inset:0;padding:12px;display:flex;flex-direction:column;gap:8px}
+.ts-el{opacity:0;transform:translateY(10px)}
+.ts-el.show{opacity:1;transform:none}
+/* after：级联 80ms */
+.st-a .ts-el{transition:opacity .24s var(--ease-out),transform .24s var(--ease-out)}
+.st-a .ts-el.show{transition-delay:calc(var(--i)*80ms)}
+`, (B,A,h)=>{
+  function mk(stage){
+    const box=h.el('div','ts-stage',
+      `<div class="ts-el" style="--i:0"><div class="w-chip">阅读 · 第 3 章</div></div>
+       <div class="ts-el" style="--i:1"><div class="skel" style="width:88%"></div><div class="skel" style="width:70%"></div></div>
+       <div class="ts-el" style="--i:2"><div class="w-panel" style="padding:8px 10px"><span class="w-meta">学习坞 · 3 条待制卡</span></div></div>`);
+    stage.appendChild(box);
+    h.reg(stage, async ()=>{
+      box.querySelectorAll('.ts-el').forEach(e=>e.classList.remove('show'));
+      void box.offsetWidth;
+      if(!stage.classList.contains('st-a')){
+        await h.wait(120); box.querySelectorAll('.ts-el').forEach(e=>e.classList.add('show'));
+      }else box.querySelectorAll('.ts-el').forEach(e=>e.classList.add('show'));
+    });
+  }
+  mk(B); mk(A);
+});
+/* ============ 06 by-emotional-outcome + 08 by-industry ============ */
+/* --- calm-relaxation --- */
+def('calm-relaxation', `
+.cl-head{background:#fff;border:1px solid var(--border-strong);padding:14px;max-width:330px;position:relative}
+.cl-head p{font-size:12px;line-height:1.7;color:#333;margin:0}
+.cl-badge{position:absolute;top:-9px;right:10px;background:var(--accent);color:#fff;font-size:10px;padding:2px 8px;opacity:0}
+.cl-badge.show{opacity:1}
+/* before：无限循环弹跳 + 持续脉冲 */
+.st-b .cl-badge.show{animation:clBounce 1s ease-in-out infinite}
+@keyframes clBounce{0%,100%{transform:none}50%{transform:translateY(-5px)}}
+.st-b .cl-underline{height:2px;background:var(--accent);animation:clPulse 1s ease-in-out infinite}
+@keyframes clPulse{0%,100%{opacity:.15}50%{opacity:.9}}
+/* after：出现一次即安静 */
+.st-a .cl-badge.show{animation:fadeUp .3s var(--ease-out) both}
+.st-a .cl-underline{height:2px;background:var(--accent);opacity:.35}
+`, (B,A,h)=>{
+  function mk(stage){
+    const head=h.el('div','cl-head','<p class="cl-text">第 3 章正文。间隔重复的历史可以追溯到艾宾浩斯的记忆实验……</p><div class="cl-underline" style="margin-top:10px"></div>');
+    const badge=h.el('span','cl-badge','新卡片已生成');
+    head.appendChild(badge); stage.appendChild(head);
+    h.reg(stage, ()=>{ badge.classList.remove('show'); void badge.offsetWidth; badge.classList.add('show'); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- professionalism-credibility --- */
+def('professionalism-credibility', `
+.pc-pill{display:inline-flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--border-strong);
+  padding:8px 14px;font-size:12px;margin-top:24px}
+.pc-dot{width:7px;height:7px;background:var(--success)}
+.st-b .pc-pill.go{animation:pcWobble .6s ease both}
+@keyframes pcWobble{0%{transform:scale(.4);opacity:0}45%{transform:scale(1.35) rotate(2deg)}
+  70%{transform:scale(.92) rotate(-1.5deg)}85%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+.st-a .pc-pill.go{animation:fadeUp .2s var(--ease-out) both}
+`, (B,A,h)=>{
+  function mk(stage){
+    const pill=h.el('div','pc-pill','<span class="pc-dot"></span>已完成同步 · 12 条复习记录');
+    stage.appendChild(pill);
+    h.reg(stage, ()=>{ pill.classList.remove('go'); void pill.offsetWidth; pill.classList.add('go'); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- elegance-sophistication --- */
+def('elegance-sophistication', `
+.eg-sec{max-width:330px;padding-top:10px}
+.eg-sec h4{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.eg-rule{height:4px;background:var(--g300);margin:10px 0 8px;transform:scaleX(0);transform-origin:left}
+.eg-rule.go{transform:scaleX(1)}
+.eg-meta{font-size:10px;letter-spacing:.18em;color:var(--g500);text-transform:uppercase;opacity:0}
+.eg-meta.go{opacity:1}
+/* before：粗块 + 默认缓动，快而硬 */
+.st-b .eg-rule.go{transition:transform .25s ease}
+.st-b .eg-meta.go{transition:opacity 0s}
+/* after：发丝线舒展 + 说明文字轻落 */
+.st-a .eg-rule{height:1px;background:var(--accent)}
+.st-a .eg-rule.go{transition:transform .55s cubic-bezier(.22,1,.36,1)}
+.st-a .eg-meta.go{transition:opacity .3s var(--ease-out) .25s}
+`, (B,A,h)=>{
+  function mk(stage){
+    const sec=h.el('div','eg-sec','<h4>遗忘曲线</h4><div class="eg-rule"></div><div class="eg-meta">Chapter 04 · Memory</div>');
+    stage.appendChild(sec);
+    h.reg(stage, ()=>{ sec.querySelectorAll('.go').forEach(e=>e.classList.remove('go')); void sec.offsetWidth; sec.querySelectorAll('.eg-rule,.eg-meta').forEach(e=>e.classList.add('go')); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- education-learning --- */
+def('education-learning', `
+.ed-scene{perspective:600px;max-width:300px;margin-top:6px}
+.ed-card{position:relative;height:120px;transform-style:preserve-3d;cursor:pointer}
+.ed-face{position:absolute;inset:0;background:#fff;border:1px solid var(--border-strong);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  backface-visibility:hidden;-webkit-backface-visibility:hidden;padding:12px;text-align:center}
+.ed-face.back{transform:rotateY(180deg)}
+.ed-card.flip{transform:rotateY(180deg)}
+.st-a .ed-card{transition:transform .5s var(--ease)}
+.st-a .ed-grades{display:flex;gap:8px;margin-top:10px;justify-content:center}
+.st-a .ed-grades button{opacity:0;transform:translateY(6px)}
+.st-a .ed-card.flip ~ .ed-grades button{animation:fadeUp .3s var(--ease-out) both}
+.st-a .ed-card.flip ~ .ed-grades button:nth-child(1){animation-delay:.1s}
+.st-a .ed-card.flip ~ .ed-grades button:nth-child(2){animation-delay:.18s}
+.st-a .ed-card.flip ~ .ed-grades button:nth-child(3){animation-delay:.26s}
+.st-a .ed-card.flip ~ .ed-grades button:nth-child(4){animation-delay:.34s}
+.ed-grades{display:flex;gap:8px;margin-top:10px;justify-content:center}
+.ed-grades button{height:26px;padding:0 10px;font-size:11px;border:1px solid var(--border-strong);background:#fff;cursor:pointer}
+`, (B,A,h)=>{
+  function mk(stage){
+    stage.insertAdjacentHTML('beforeend','<div class="w-meta" style="margin-bottom:4px">点击卡片翻面</div>');
+    const scene=h.el('div','ed-scene');
+    const card=h.el('div','ed-card',
+      `<div class="ed-face"><span class="w-meta">正面 · 问</span><span class="w-title">FSRS 的调度依据是什么？</span></div>
+       <div class="ed-face back"><span class="w-meta">背面 · 答</span><span class="w-title">review_logs 中的逐次复习记录</span></div>`);
+    const grades=h.el('div','ed-grades',['忘记','困难','良好','简单'].map(t=>`<button>${t}</button>`).join(''));
+    scene.append(card,grades); stage.appendChild(scene);
+    h.on(card,'click',()=>card.classList.toggle('flip'));
+    h.reg(stage, ()=>card.classList.remove('flip'));
+  }
+  mk(B); mk(A);
+});
+
+/* --- saas-productivity --- */
+def('saas-productivity', `
+.sp-open{position:absolute;top:14px;right:14px;z-index:6}
+.sp-scrim{position:absolute;inset:0;background:rgba(10,10,10,.25);display:none;z-index:4}
+.sp-pal{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:300px;
+  background:#fff;border:1px solid var(--border-strong);box-shadow:0 8px 24px rgba(10,10,10,.12);
+  z-index:5;display:none;padding:8px}
+.sp-item{display:flex;align-items:center;gap:8px;padding:8px 10px;font-size:12px}
+.sp-item .k{font-family:var(--mono);font-size:10px;color:var(--g500);margin-left:auto}
+.sp-foot{padding:6px 10px 4px;font-size:10px;color:var(--g500);border-top:1px solid var(--border-subtle);margin-top:6px}
+.st-a .sp-scrim.show{display:block;animation:opFade .15s ease both}
+.st-a .sp-pal.show{display:block;animation:opIn .2s var(--ease-out) both}
+.st-a .sp-pal.show .sp-item{animation:fadeUp .22s var(--ease-out) both;animation-delay:calc(60ms + var(--i)*20ms)}
+.st-a .sp-pal.show .sp-foot{animation:fadeUp .22s var(--ease-out) both;animation-delay:.2s}
+@keyframes opFade{from{opacity:0}to{opacity:1}}
+@keyframes opIn{from{opacity:0;transform:translate(-50%,-50%) scale(.97)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+`, (B,A,h)=>{
+  const items=[['打开最近书籍','⌘1'],['生成卡片','⌘K'],['开始复习','R'],['导出笔记','E'],['打开设置',',']];
+  function mk(stage){
+    const btn=h.el('button','w-btn sp-open','⌘K 命令面板');
+    const scrim=h.el('div','sp-scrim');
+    const pal=h.el('div','sp-pal',
+      items.map(([t,k],i)=>`<div class="sp-item" style="--i:${i}">${t}<span class="k">${k}</span></div>`).join('')
+      +'<div class="sp-foot">↑↓ 选择 · ↻ 打开</div>');
+    stage.append(btn,scrim,pal);
+    let open=false;
+    const set=v=>{
+      open=v;
+      if(!stage.classList.contains('st-a')){
+        scrim.style.display=pal.style.display=v?'block':'none';
+      }else{
+        scrim.classList.toggle('show',v); pal.classList.toggle('show',v);
+        if(v){ pal.querySelectorAll('.sp-item,.sp-foot').forEach(e=>{e.style.animation='none'; void e.offsetWidth; e.style.animation='';}); }
+      }
+    };
+    h.on(btn,'click',()=>set(!open));
+    h.on(scrim,'click',()=>set(false));
+    h.reg(stage, ()=>set(!open));
+  }
+  mk(B); mk(A);
+});
+/* ============ 07 by-ui-element ============ */
+/* --- buttons-ctas --- */
+def('buttons-ctas', `
+.bt-row{display:flex;gap:10px;margin-top:14px}
+/* before：hover 硬切，无按下态 */
+.st-b .w-btn{transition:none}
+.st-b .w-btn:hover{background:var(--g100)}
+.st-b .w-btn.pri:hover{background:var(--accent)}
+/* after：四态完整 */
+.st-a .w-btn{transition:transform .16s var(--ease),box-shadow .16s var(--ease),background-color .16s var(--ease)}
+.st-a .w-btn:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(10,10,10,.14)}
+.st-a .w-btn:active{transform:scale(.95);transition-duration:60ms;box-shadow:none}
+.st-a .w-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+`, (B,A,h)=>{
+  function mk(stage){
+    stage.insertAdjacentHTML('beforeend','<div class="bt-row"><button class="w-btn pri">开始复习</button><button class="w-btn">浏览全部</button></div><p class="w-meta" style="margin-top:10px">悬停、按下、Tab 聚焦分别试试</p>');
+  }
+  mk(B); mk(A);
+});
+
+/* --- modals-dialogs --- */
+def('modals-dialogs', `
+.md-open{position:absolute;top:14px;right:14px;z-index:6}
+.md-scrim{position:absolute;inset:0;background:rgba(10,10,10,.32);display:none;z-index:4}
+.md-box{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);width:280px;
+  background:#fff;border:1px solid var(--border-strong);box-shadow:0 8px 24px rgba(10,10,10,.12);
+  z-index:5;display:none;padding:16px}
+.md-box h5{font-size:13px;margin-bottom:6px}
+.md-box p{font-size:12px;color:#525252;margin-bottom:14px}
+.md-acts{display:flex;justify-content:flex-end;gap:8px}
+/* after：遮罩淡入 + 弹窗升起 */
+.st-a .md-scrim.show{display:block;animation:opFade .2s ease both}
+.st-a .md-box.show{display:block;animation:mdIn .22s var(--ease-out) both}
+@keyframes mdIn{from{opacity:0;transform:translate(-50%,-50%) scale(.96) translateY(6px)}to{opacity:1;transform:translate(-50%,-50%)}}
+`, (B,A,h)=>{
+  function mk(stage){
+    const btn=h.el('button','w-btn md-open','删除卡片');
+    const scrim=h.el('div','md-scrim');
+    const box=h.el('div','md-box','<h5>删除这张卡片？</h5><p>卡片将从复习队列移除，摘录原文保留。</p><div class="md-acts"><button class="w-btn md-no">取消</button><button class="w-btn pri md-yes">删除</button></div>');
+    stage.append(btn,scrim,box);
+    let open=false;
+    const set=v=>{
+      open=v;
+      if(!stage.classList.contains('st-a')){ scrim.style.display=box.style.display=v?'block':'none'; }
+      else{ scrim.classList.toggle('show',v); box.classList.toggle('show',v); }
+    };
+    h.on(btn,'click',()=>set(true));
+    h.on(box.querySelector('.md-no'),'click',()=>set(false));
+    h.on(box.querySelector('.md-yes'),'click',()=>set(false));
+    h.on(scrim,'click',()=>set(false));
+    h.reg(stage, ()=>set(!open));
+  }
+  mk(B); mk(A);
+});
+
+/* --- navigation-menus --- */
+def('navigation-menus', `
+.nm-wrap{position:absolute;top:14px;right:14px}
+.nm-menu{position:absolute;top:38px;right:0;width:180px;background:#fff;
+  border:1px solid var(--border-strong);box-shadow:0 8px 24px rgba(10,10,10,.12);
+  padding:4px;display:none;z-index:5}
+.nm-menu div{padding:7px 10px;font-size:12px;cursor:pointer}
+.nm-menu div:hover{background:var(--g100)}
+/* after：从按钮原点长出 */
+.st-a .nm-menu{transform-origin:top right;opacity:0;transform:scale(.95);
+  visibility:hidden;pointer-events:none;
+  transition:opacity .15s var(--ease-out),transform .15s var(--ease-out),visibility 0s .15s}
+.st-a .nm-menu.show{opacity:1;transform:none;visibility:visible;pointer-events:auto;transition-delay:0s}
+`, (B,A,h)=>{
+  function mk(stage){
+    const wrap=h.el('div','nm-wrap','<button class="w-btn nm-btn">⋯ 更多</button><div class="nm-menu"><div>导出材料导图</div><div>知识图谱</div><div>页面设置</div><div>统计信息</div></div>');
+    stage.appendChild(wrap);
+    const menu=wrap.querySelector('.nm-menu');
+    let open=false;
+    const set=v=>{
+      open=v;
+      if(!stage.classList.contains('st-a')) menu.style.display=v?'block':'none';
+      else menu.classList.toggle('show',v);
+    };
+    h.on(wrap.querySelector('.nm-btn'),'click',()=>set(!open));
+    h.on(menu,'click',e=>{ if(e.target.tagName==='DIV') set(false); });
+    h.reg(stage, ()=>set(!open));
+  }
+  mk(B); mk(A);
+});
+
+/* --- accordions-dropdowns --- */
+def('accordions-dropdowns', `
+.ac-list{max-width:330px;border:1px solid var(--border-strong);background:#fff}
+.ac-item + .ac-item{border-top:1px solid var(--border-subtle)}
+.ac-head{display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;font-size:12px;font-weight:600}
+.ac-head .chev{margin-left:auto;display:inline-flex;transition:transform .2s var(--ease)}
+.ac-body{padding:0 12px}
+.ac-body-in{overflow:hidden}
+.ac-body p{font-size:11px;color:#525252;margin:2px 0 10px}
+/* after */
+.st-a .ac-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .26s var(--ease)}
+.st-a .ac-item.open .ac-body{grid-template-rows:1fr}
+.st-a .ac-item.open .chev{transform:rotate(180deg)}
+`, (B,A,h)=>{
+  function mk(stage){
+    const list=h.el('div','ac-list');
+    [['调度参数在哪里调','设置 → 复习 → FSRS 参数，支持按牌组覆盖。'],
+     ['摘录会进复习队列吗','勾选"制卡"后才会；纯批注只留在原文。'],
+     ['导图和图谱的区别','导图按材料章节组织；图谱按卡片引用关系组织。']]
+    .forEach(([t,d],i)=>{
+      const item=h.el('div','ac-item',
+        `<div class="ac-head">${t}<span class="chev">${h.chev()}</span></div>
+         <div class="ac-body"><div class="ac-body-in"><p>${d}</p></div></div>`);
+      list.appendChild(item);
+      h.on(item.querySelector('.ac-head'),'click',()=>{
+        if(!stage.classList.contains('st-a')){
+          const b=item.querySelector('.ac-body');
+          b.style.display=b.style.display==='block'?'none':'block';
+        }else item.classList.toggle('open');
+      });
+      if(i===0&&stage.classList.contains('st-a')){} // 初始全部收起
+    });
+    stage.appendChild(list);
+    h.reg(stage, ()=>{ list.querySelectorAll('.ac-item')[1].querySelector('.ac-head').click(); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- cards-containers --- */
+def('cards-containers', `
+.cc-grid{display:flex;gap:10px;flex-wrap:wrap;align-content:flex-start}
+.cc-card{width:88px;height:112px;background:#fff;border:1px solid var(--border-strong);padding:8px;position:relative}
+.cc-card::before{content:'';position:absolute;left:4px;top:0;bottom:0;width:2px;background:var(--border-strong)}
+.cc-card b{font-size:11px;display:block;margin-top:10px}
+.cc-card span{font-size:10px;color:var(--g500)}
+.cc-new{display:none}
+.cc-new.show{display:block}
+.st-a .cc-card{transition:transform .15s var(--ease-out),box-shadow .15s var(--ease-out)}
+.st-a .cc-card:hover{transform:translateY(-3px);box-shadow:0 6px 16px rgba(10,10,10,.14)}
+.st-a .cc-new.show{display:block;animation:fadeUp .22s var(--ease-out)}
+`, (B,A,h)=>{
+  function mk(stage){
+    stage.insertAdjacentHTML('beforeend','<div class="w-meta" style="margin-bottom:8px">悬停书卡 · 点「重放」看新书入库</div>');
+    const grid=h.el('div','cc-grid');
+    [['如何学习','第 2 章'],['记忆的科学','第 3 章'],['间隔重复','第 4 章']]
+      .forEach(([t,c])=>grid.appendChild(h.el('div','cc-card',`<b>${t}</b><span>${c}</span>`)));
+    const neo=h.el('div','cc-card cc-new','<b>刻意练习</b><span>第 5 章</span>');
+    grid.appendChild(neo); stage.appendChild(grid);
+    h.reg(stage, ()=>{ neo.classList.remove('show'); void neo.offsetWidth; neo.classList.add('show'); });
+  }
+  mk(B); mk(A);
+});
+
+/* --- lists-grids --- */
+def('lists-grids', `
+.lg-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.lg-item{height:86px;background:#fff;border:1px solid var(--border-strong);position:relative;padding:8px;opacity:0}
+.lg-item::before{content:'';position:absolute;left:4px;top:0;bottom:0;width:2px;background:var(--border-strong)}
+.lg-item b{font-size:11px;display:block;margin-top:8px}
+.lg-item.show{opacity:1}
+.st-a .lg-item.show{animation:lgIn .28s var(--ease-out) both;animation-delay:calc(var(--i)*35ms)}
+@keyframes lgIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+`, (B,A,h)=>{
+  const names=['ADDRULE','超级记忆','认知天性','刻意练习','记忆碎片','学习之道','如何学习','练习的心态'];
+  function mk(stage){
+    const grid=h.el('div','lg-grid',
+      names.map((t,i)=>`<div class="lg-item" style="--i:${i}"><b>${t}</b></div>`).join(''));
+    stage.appendChild(grid);
+    h.reg(stage, async ()=>{
+      grid.querySelectorAll('.lg-item').forEach(e=>e.classList.remove('show'));
+      void grid.offsetWidth;
+      await h.wait(250);
+      grid.querySelectorAll('.lg-item').forEach(e=>e.classList.add('show'));
+    });
+  }
+  mk(B); mk(A);
+});
+
+/* --- notifications-toasts --- */
+def('notifications-toasts', `
+.nt-area{position:absolute;inset:0}
+.nt-toast{position:absolute;top:14px;right:14px;background:var(--ink);color:#f5f5f2;
+  font-size:12px;padding:9px 14px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 24px rgba(10,10,10,.2)}
+.nt-toast .undo{color:#8fd4c6;cursor:pointer;text-decoration:underline}
+.nt-toast.hide-b{display:none}
+/* after：滑入 → 停留 → 滑出 */
+.st-a .nt-toast{transform:translateX(calc(100% + 20px))}
+.st-a .nt-toast.in{transform:none;transition:transform .24s var(--ease-out)}
+.st-a .nt-toast.out{transform:translateX(calc(100% + 20px));transition:transform .2s ease-in}
+`, (B,A,h)=>{
+  function mk(stage){
+    const area=h.el('div','nt-area');
+    const t=h.el('div','nt-toast','已加入复习队列<span class="undo">撤销</span>');
+    area.appendChild(t); stage.appendChild(area);
+    let timers=[];
+    h.reg(stage, ()=>{
+      timers.forEach(clearTimeout); timers=[];
+      if(!stage.classList.contains('st-a')){
+        t.classList.remove('hide-b');
+        timers.push(setTimeout(()=>t.classList.add('hide-b'),1400));
+      }else{
+        t.classList.remove('in','out'); void t.offsetWidth;
+        t.classList.add('in');
+        timers.push(setTimeout(()=>t.classList.add('out'),1600));
+        timers.push(setTimeout(()=>t.classList.remove('in','out'),1850));
+      }
+    });
+  }
+  mk(B); mk(A);
+});
+
+/* --- loaders-spinners --- */
+def('loaders-spinners', `
+.ld2-wrap{max-width:300px}
+.ld2-spin{width:22px;height:22px;border:3px solid var(--g100);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite;margin:6px 0 10px}
+.ld2-page{height:74px;background:#fff;border:1px solid var(--border-strong);padding:10px;display:none}
+.ld2-page.show{display:block}
+.ld2-bar{height:3px;background:var(--g100);position:relative;margin:6px 0 10px;display:none}
+.ld2-bar.show{display:block}
+.ld2-bar i{position:absolute;inset:0;background:var(--accent);transform-origin:left;transform:scaleX(0)}
+/* after */
+.st-a .ld2-page{opacity:0;transition:opacity .25s var(--ease-out)}
+.st-a .ld2-page.show{opacity:1}
+.st-a .ld2-bar i{transition:transform .9s ease-in-out}
+`, (B,A,h)=>{
+  function mk(stage){
+    const w=h.el('div','ld2-wrap');
+    const spin=h.el('div','ld2-spin');
+    const bar=h.el('div','ld2-bar','<i></i>');
+    const page=h.el('div','ld2-page','<span class="w-title">第 3 章 · 遗忘曲线</span><div class="skel" style="width:84%;margin-top:8px"></div><div class="skel" style="width:62%;margin-top:8px"></div>');
+    w.append(spin,bar,page); stage.appendChild(w);
+    h.reg(stage, async ()=>{
+      page.classList.remove('show'); page.style.transition='none';
+      if(!stage.classList.contains('st-a')){
+        spin.style.display='block'; bar.classList.remove('show');
+        void w.offsetWidth;
+        await h.wait(900); spin.style.display='none'; page.classList.add('show');
+      }else{
+        spin.style.display='none'; page.style.transition='';
+        bar.classList.add('show');
+        const i=bar.querySelector('i'); i.style.transform='scaleX(0)'; void i.offsetWidth;
+        i.style.transform='scaleX(1)';
+        await h.wait(950); bar.classList.remove('show'); page.classList.add('show');
+      }
+    });
+  }
+  mk(B); mk(A);
+});
+
+/* --- forms-inputs --- */
+def('forms-inputs', `
+.fm-form{max-width:320px}
+.fm-field{margin-bottom:12px}
+.fm-field label{display:block;font-size:11px;color:#525252;margin-bottom:4px}
+.fm-err{overflow:hidden;max-height:0;transition:max-height .16s var(--ease-out)}
+.fm-err p{font-size:11px;color:var(--error);padding-top:4px}
+.fm-err.show{max-height:28px}
+.st-b .w-input:focus{outline:none}      /* 现状：无任何反馈 */
+.st-a .w-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.st-a .w-input{transition:border-color .12s var(--ease-out),box-shadow .12s var(--ease-out)}
+.st-a .shake{animation:shakeX .3s ease both}
+.st-a .fm-err{margin-top:-6px}
+`, (B,A,h)=>{
+  function mk(stage){
+    const f=h.el('div','fm-form',
+      `<div class="fm-field"><label>数据库备份路径</label><input class="w-input" value="D:/backup"><div class="fm-err"><p>路径包含非法字符 "。</p></div></div>
+       <button class="w-btn fm-save">保存</button>
+       <p class="w-meta" style="margin-top:8px">聚焦输入框 · 点击「保存」触发校验</p>`);
+    stage.appendChild(f);
+    const inp=f.querySelector('.w-input'), err=f.querySelector('.fm-err');
+    h.on(f.querySelector('.fm-save'),'click',()=>{
+      const bad=inp.value.includes('"')||!inp.value.trim();
+      if(!stage.classList.contains('st-a')){
+        err.style.display=bad?'block':'none';
+      }else{
+        err.classList.remove('show'); void err.offsetWidth;
+        if(bad){ err.classList.add('show'); inp.classList.remove('shake'); void inp.offsetWidth; inp.classList.add('shake'); }
+      }
+    });
+    h.reg(stage, ()=>{
+      inp.value='D:/backup"；'; inp.blur();
+      f.querySelector('.fm-save').click();
+    });
+  }
+  mk(B); mk(A);
+});
+/* ============ 09 by-tool-framework + 10 by-time-scale ============ */
+/* --- css-native --- */
+def('css-native', `
+.cn-chip{height:36px;padding:0 16px;border:1px solid var(--border-strong);background:#fff;
+  font-size:12px;cursor:pointer;display:inline-flex;align-items:center;margin-top:10px}
+/* before：transition:all */
+.st-b .cn-chip{transition:all .45s}
+.st-b .cn-chip:hover{background:var(--g100);padding:0 28px;letter-spacing:2px;
+  box-shadow:0 4px 10px rgba(10,10,10,.2);color:var(--accent)}
+/* after：精确声明 */
+.st-a .cn-chip{transition:background-color .15s var(--ease-out)}
+.st-a .cn-chip:hover{background:var(--g100)}
+`, (B,A,h)=>{
+  function mk(stage, css, bad){
+    stage.insertAdjacentHTML('beforeend',`<div class="code">${css}</div><button class="cn-chip">制卡</button>`);
+    stage.insertAdjacentHTML('beforeend',`<p class="w-meta" style="margin-top:8px">${bad?'悬停试试：四项属性同时拖 450ms':'悬停试试：只过渡底色，150ms 干脆利落'}</p>`);
+  }
+  mk(B,`<span class="bad">transition: all .45s;</span>`, true);
+  mk(A,`<span class="good">transition: background-color .15s var(--ease-out);</span>`, false);
+});
+
+/* --- 10 by-time-scale：五种区间同一工厂 --- */
+const tsWidget = {
+  press(){ return `<div style="padding-top:8px"><button class="w-btn pri ts-press-btn">按下我（自动演示）</button></div>`; },
+  check(){ return `<div style="padding-top:8px"><label style="display:inline-flex;align-items:center;gap:8px;font-size:12px;cursor:pointer"><span class="ts-box" style="width:20px;height:20px;border:1px solid var(--border-strong);background:#fff;display:inline-flex;align-items:center;justify-content:center;color:#fff"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="stroke-dasharray:24;stroke-dashoffset:24"><path d="M20 6L9 17l-5-5"/></svg></span>勾选已完成</label></div>`; },
+  menu(){ return `<div style="padding-top:8px;position:relative"><button class="w-btn ts-menu-btn">选项 ▾</button><div class="w-panel ts-menu" style="position:absolute;top:42px;left:0;width:150px;padding:4px;display:none"><div class="sp-item">按到期排序</div><div class="sp-item">按标签排序</div></div></div>`; },
+  dock(){ return `<div class="ts-clip" style="position:absolute;inset:0;overflow:hidden"><div class="w-panel ts-dockw" style="position:absolute;left:14px;right:14px;bottom:0;transform:translateY(105%);padding:12px"><span class="w-title">学习坞</span></div></div>`; },
+  view(){ return `<div class="ts-views" style="position:absolute;inset:0"><div class="w-panel ts-v1" style="position:absolute;inset:14px;padding:12px"><span class="w-title">书架</span></div><div class="w-panel ts-v2" style="position:absolute;inset:14px;padding:12px;background:var(--accent);color:#fff;display:none"><span class="w-title" style="color:#fff">阅读中</span></div></div>`; }
+};
+function tsDef(id, bMs, aMs, widget, bDesc, aDesc){
+  def(id, `
+    .ts-go .ts-press-btn.pressed{background:var(--accent-pressed);border-color:var(--accent-pressed)}
+    .ts-go .ts-box{background:var(--accent);border-color:var(--accent)}
+    .ts-go .ts-box svg{stroke-dashoffset:0}
+    .ts-go .ts-menu{display:block!important}
+    .ts-go .ts-dockw{transform:none}
+    .ts-go .ts-v1{opacity:0}
+    .ts-go .ts-v2{display:block}
+    .ts-note{margin-top:12px}
+  `, (B,A,h)=>{
+    [ [B,bMs,bDesc], [A,aMs,aDesc] ].forEach(([stage,ms,desc])=>{
+      stage.insertAdjacentHTML('beforeend', tsWidget[widget]());
+      stage.insertAdjacentHTML('beforeend',`<p class="w-meta ts-note">${desc}</p>`);
+      const badge=h.ms(stage, ms+'ms');
+      // 各部件的时长
+      const pressBtn=stage.querySelector('.ts-press-btn'),
+            box=stage.querySelector('.ts-box'), svg=stage.querySelector('.ts-box svg'),
+            menu=stage.querySelector('.ts-menu'), dockw=stage.querySelector('.ts-dockw'),
+            v1=stage.querySelector('.ts-v1'), v2=stage.querySelector('.ts-v2');
+      if(pressBtn) pressBtn.style.transition=`background-color ${ms}ms,border-color ${ms}ms`;
+      if(box) box.style.transition=`background-color ${ms}ms,border-color ${ms}ms`;
+      if(svg) svg.style.transition=`stroke-dashoffset ${ms}ms linear`;
+      if(menu) menu.style.transition=`opacity ${ms}ms var(--ease-out),transform ${ms}ms var(--ease-out)`;
+      if(dockw) dockw.style.transition=`transform ${ms}ms var(--ease-out)`;
+      if(v1||v2){ [v1,v2].forEach(v=>{ if(v){v.style.transition=`opacity ${ms}ms var(--ease-out)`;} }); }
+      const anims=[pressBtn,box,svg,menu,dockw,v1,v2].filter(Boolean);
+      anims.forEach(e=>{ if(!e._tsTr) e._tsTr = e.style.transition; });
+      h.reg(stage, ()=>{
+        const root=stage;
+        anims.forEach(e=>e.style.transition='none');      // 重置期间禁用过渡
+        root.classList.remove('ts-go');
+        if(menu){ menu.style.opacity='0'; menu.style.transform='scale(.95)'; }
+        if(v2){ v2.style.opacity='0'; }
+        if(pressBtn) pressBtn.classList.remove('pressed');
+        void root.offsetWidth;                            // 先渲染起始帧
+        anims.forEach(e=>e.style.transition=e._tsTr);
+        void root.offsetWidth;
+        root.classList.add('ts-go');                      // 播放
+        if(menu){ void menu.offsetWidth; menu.style.opacity='1'; menu.style.transform='none'; }
+        if(v2){ void v2.offsetWidth; v2.style.opacity='1'; }
+        if(pressBtn){ pressBtn.classList.add('pressed'); setTimeout(()=>pressBtn.classList.remove('pressed'), Math.max(ms+180,420)); }
+      });
+    });
+  });
+}
+tsDef('instant-0-100ms', 500, 60, 'press', '500ms 才给出按压态：手已离开，反馈才到。', '60ms：仍在"即时"窗口内，实体按键手感。');
+tsDef('micro-100-200ms', 700, 150, 'check', '700ms 画一个勾：像卡顿。', '150ms 一笔完成：有过程不拖延。');
+tsDef('small-200-300ms', 900, 240, 'menu', '900ms 打开下拉：视线早已移开。', '240ms：能看清运动方向，又不阻塞。');
+tsDef('medium-300-500ms', 80, 380, 'dock', '80ms：只剩"闪一下"的毛刺感。', '380ms ease-out：位移可读、不挡操作。');
+tsDef('large-500-800ms', 0, 620, 'view', '0ms 硬切：大区域切换没有连续性。', '620ms ease-in-out：整屏移动可读、可预期。');
+/* ============ 11 by-principle-focus + 12 by-problem-type ============ */
+/* --- slow-in-out-mastery --- */
+def('slow-in-out-mastery', `
+.si-book{position:absolute;inset:14px;background:#fff;border:1px solid var(--border-strong);overflow:hidden}
+.si-page{position:absolute;inset:0;background:var(--g100);border-left:1px solid var(--border-strong);
+  display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--g500);
+  transform:translateX(-101%)}
+.si-page.run{transform:none}
+.st-b .si-page.run{transition:transform .6s linear}
+.st-a .si-page.run{transition:transform .6s cubic-bezier(.65,0,.35,1)}
+.si-lab{position:absolute;left:12px;bottom:8px;display:flex;align-items:center;gap:6px}
+`, (B,A,h)=>{
+  function mk(stage){
+    const book=h.el('div','si-book','<div class="si-page">翻页中 …</div>');
+    stage.appendChild(book);
+    h.reg(stage, ()=>{ const p=book.querySelector('.si-page'); p.classList.remove('run'); void p.offsetWidth; p.classList.add('run'); });
+  }
+  B.insertAdjacentHTML('beforeend',`<div class="si-lab">${h.curve(0,0,0,0).replace('#166a59','#a3a3a3')}<span class="w-meta">linear</span></div>`);
+  A.insertAdjacentHTML('beforeend',`<div class="si-lab">${h.curve(.65,0,.35,1)}<span class="w-meta">ease-in-out</span></div>`);
+  mk(B); mk(A);
+});
+
+/* --- staging-mastery --- */
+def('staging-mastery', `
+.sg-bar{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:340px;
+  display:flex;align-items:center;gap:12px}
+.sg-badge{font-size:10px;border:1px solid var(--error);color:var(--error);padding:2px 6px}
+.sg-fill{flex:1;height:5px;background:var(--g100);position:relative}
+.sg-fill i{position:absolute;inset:0;background:var(--warning);transform-origin:left;transform:scaleX(.2)}
+.sg-cta{height:30px;padding:0 12px;background:var(--accent);border:none;color:#fff;font-size:12px}
+/* before：四处同时动 */
+.st-b .sg-bar.go .sg-badge{animation:sgBlink .5s ease 3}
+.st-b .sg-bar.go .sg-fill i{transform:scaleX(.9);transition:transform .6s var(--ease)}
+.st-b .sg-bar.go .sg-cta{animation:sgGlow .5s ease 3}
+.st-b .sg-bar.go .sg-badge{animation:sgBlink .45s ease 3}
+@keyframes sgBlink{50%{opacity:.1}}
+@keyframes sgGlow{50%{transform:scale(1.06)}}
+/* after：只有主 CTA 轻脉冲一次 */
+.st-a .sg-bar.go .sg-cta{animation:sgPulse .6s var(--ease-out) 1}
+@keyframes sgPulse{0%{box-shadow:0 0 0 0 rgba(22,106,89,.35)}100%{box-shadow:0 0 0 10px rgba(22,106,89,0)}}
+`, (B,A,h)=>{
+  function mk(stage, noisy){
+    const bar=h.el('div','sg-bar',
+      `<span class="sg-badge">逾期 3</span><span class="sg-fill"><i></i></span><button class="sg-cta">开始复习</button>`);
+    stage.appendChild(bar);
+    h.reg(stage, ()=>{ bar.classList.remove('go'); void bar.offsetWidth; bar.classList.add('go'); });
+  }
+  mk(B,true); mk(A,false);
+});
+
+/* --- follow-through-overlapping-action --- */
+def('follow-through-overlapping-action', `
+.ft-panel{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:300px;
+  opacity:0;transform:translateY(16px)}
+.ft-panel.in{opacity:1;transform:none}
+.ft-row{height:8px;background:var(--g100);margin-top:8px;opacity:0;transform:translateY(6px)}
+.ft-row.in{opacity:1;transform:none}
+/* before：整体同启同停 */
+.st-b .ft-panel.in,.st-b .ft-row.in{transition:all .3s ease;transition-delay:0s}
+/* after：面板先行过冲，行依次晚 40ms 落定 */
+.st-a .ft-panel.in{transition:all .38s cubic-bezier(.34,1.3,.64,1)}
+.st-a .ft-row.in{transition:all .3s var(--ease-out)}
+.st-a .ft-row:nth-of-type(1).in{transition-delay:.12s}
+.st-a .ft-row:nth-of-type(2).in{transition-delay:.16s}
+.st-a .ft-row:nth-of-type(3).in{transition-delay:.2s}
+`, (B,A,h)=>{
+  function mk(stage){
+    const p=h.el('div','ft-panel','<span class="w-title">摘录批次 · 3 条</span><div class="ft-row" style="width:88%"></div><div class="ft-row" style="width:70%"></div><div class="ft-row" style="width:78%"></div>');
+    stage.appendChild(p);
+    h.reg(stage, ()=>{
+      p.classList.remove('in'); p.querySelectorAll('.in').forEach(e=>e.classList.remove('in'));
+      void p.offsetWidth; p.classList.add('in');
+      p.querySelectorAll('.ft-row').forEach(r=>r.classList.add('in'));
+    });
+  }
+  mk(B); mk(A);
+});
+
+/* --- performance-optimization --- */
+def('performance-optimization', `
+.pf-field{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;padding-top:26px}
+.pf-chip{height:20px;background:#fff;border:1px solid var(--border-strong);
+  box-shadow:0 3px 8px rgba(10,10,10,.22)}
+.pf-sq{position:absolute;top:34px;left:8px;width:52px;height:20px;background:var(--accent-soft);
+  border:1px solid var(--accent);will-change:transform}
+.pf-lab{position:absolute;top:6px;left:8px;font-size:11px;color:var(--g500)}
+`, (B,A,h)=>{
+  function mk(stage, thrash){
+    stage.insertAdjacentHTML('beforeend','<span class="pf-lab">高亮方块扫过 40 个元素 —— 留意左右画面的流畅度差异</span>');
+    const field=h.el('div','pf-field','<div class="pf-chip"></div>'.repeat(40));
+    const sq=h.el('div','pf-sq');
+    stage.append(field,sq);
+    let raf=0;
+    h.reg(stage, ()=>{
+      cancelAnimationFrame(raf);
+      const maxW=stage.clientWidth-68, dur=1200, t0=performance.now();
+      const step=now=>{
+        const p=Math.min((now-t0)/dur,1);
+        if(thrash){ sq.style.left=(8+p*maxW)+'px'; void stage.offsetHeight; } // 强制重排
+        else{ sq.style.transform=`translateX(${p*maxW}px)`; }
+        if(p<1) raf=requestAnimationFrame(step);
+      };
+      raf=requestAnimationFrame(step);
+    });
+  }
+  mk(B,true); mk(A,false);
+});
+
+/* --- timing-calibration --- */
+def('timing-calibration', `
+.cal-dock{position:absolute;left:14px;right:14px;bottom:0;background:#fff;
+  border:1px solid var(--border-strong);border-bottom:none;padding:12px;transform:translateY(105%)}
+.cal-dock.go{transform:none}
+.cal-ctl{position:absolute;left:14px;right:14px;top:12px}
+.cal-ctl input{width:100%;accent-color:var(--accent)}
+.cal-track{height:4px;background:var(--g100);position:relative;margin-top:2px}
+.cal-band{position:absolute;top:0;bottom:0;left:20%;width:15%;background:var(--accent)}
+.cal-lab{display:flex;justify-content:space-between;font-size:10px;color:var(--g500);margin-top:4px}
+.cal-val{font-family:var(--mono)}
+`, (B,A,h)=>{
+  function mk(stage, fixedMs){
+    if(fixedMs){
+      const d=h.el('div','cal-dock','<span class="w-title">学习坞 · 3 条待制卡</span>');
+      stage.appendChild(d); h.ms(stage,'1100ms（固定）');
+      h.reg(stage, ()=>{ d.classList.remove('go'); void d.offsetWidth; d.classList.add('go'); d.style.transition=`transform 1100ms ease`; });
+      return;
+    }
+    const ctl=h.el('div','cal-ctl',
+      `<input type="range" min="0" max="1200" step="20" value="1100">
+       <div class="cal-track"><span class="cal-band"></span></div>
+       <div class="cal-lab"><span>0</span><span class="cal-val">1100ms</span><span>1200</span></div>`);
+    const d=h.el('div','cal-dock','<span class="w-title">学习坞 · 3 条待制卡</span>');
+    stage.append(ctl,d); h.ms(stage,'拖到绿区（240–420ms）');
+    const inp=ctl.querySelector('input'), val=ctl.querySelector('.cal-val');
+    const play=ms=>{
+      d.classList.remove('go'); d.style.transition='none'; void d.offsetWidth;
+      d.style.transition=`transform ${ms}ms var(--ease-out)`; void d.offsetWidth;
+      d.classList.add('go');
+    };
+    h.on(inp,'input',()=>{ val.textContent=inp.value+'ms'; });
+    h.on(inp,'change',()=>play(+inp.value));
+    h.reg(stage, ()=>play(+inp.value));
+  }
+  mk(B,1100); mk(A,null);
+});
+
+/* --- implementation-debugging --- */
+def('implementation-debugging', `
+.db-panel{background:#fff;border:1px solid var(--border-strong);padding:12px;max-width:300px;display:none}
+.db-panel.on{display:block;opacity:0;transform:translateY(10px);transition:opacity .3s var(--ease-out),transform .3s var(--ease-out)}
+.db-panel.on.in{opacity:1;transform:none}
+.db-flag{position:absolute;top:10px;right:12px;font-size:10px;padding:2px 6px}
+.db-bad{background:var(--error-soft);color:var(--error);border:1px solid var(--error)}
+.db-ok{background:rgba(26,127,55,.08);color:var(--success);border:1px solid var(--success)}
+`, (B,A,h)=>{
+  function mk(stage, bug){
+    const p=h.el('div','db-panel','<h5 class="w-title">复习队列已更新</h5>');
+    stage.append(p, h.el('span',`db-flag ${bug?'db-bad':'db-ok'}`, bug?'⚠ transition 未生效':'✓ 动画如期播放'));
+    h.reg(stage, async ()=>{
+      p.classList.remove('on','in'); void p.offsetWidth;
+      p.classList.add('on');
+      if(bug){ p.classList.add('in'); }               // 同一帧：transition 被吞
+      else{ await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))); p.classList.add('in'); }
+    });
+  }
+  mk(B,true); mk(A,false);
+});
+
+/* --- ux-friction --- */
+def('ux-friction', `
+.uf-row{background:#fff;border:1px solid var(--border-strong);padding:10px 12px;max-width:330px;
+  display:flex;align-items:center;gap:10px;font-size:12px}
+.uf-x{border:none;background:none;color:var(--g500);cursor:pointer;line-height:1}
+.uf-row.gone{display:none}
+.uf-collapse{overflow:hidden;transition:height .2s var(--ease-out)}
+.uf-toast{position:absolute;bottom:12px;left:14px;right:14px;background:var(--ink);color:#f5f5f2;
+  font-size:11px;padding:8px 12px;display:none;justify-content:space-between;align-items:center}
+.uf-toast .undo{color:#8fd4c6;cursor:pointer;text-decoration:underline}
+.uf-toast.show{display:flex;animation:fadeUp .22s var(--ease-out)}
+/* after：32px 命中区 + 按压反馈 + 折叠退场 + 可撤销 */
+.st-a .uf-x{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center}
+.st-a .uf-x:active{transform:scale(.88)}
+`, (B,A,h)=>{
+  function mk(stage){
+    const row=h.el('div','uf-row','<span>「间隔重复通过扩大复习间隔来对抗遗忘。」</span>');
+    const x=h.el('button','uf-x','×'); row.appendChild(x);
+    const toast=h.el('div','uf-toast','<span>已删除 1 条摘录</span><span class="undo">撤销</span>');
+    stage.append(row,toast);
+    x.style.fontSize='16px'; x.style.padding='0 4px';
+    const del=()=>{
+      if(!stage.classList.contains('st-a')){ row.classList.add('gone'); }
+      else{
+        row.style.height=row.offsetHeight+'px'; void row.offsetWidth;
+        row.style.transition='height .2s var(--ease-out),opacity .2s ease'; row.style.opacity='0'; row.style.height='0px';
+        setTimeout(()=>{ row.classList.add('gone'); row.style.cssText=''; },220);
+      }
+      toast.classList.remove('show'); void toast.offsetWidth; toast.classList.add('show');
+    };
+    const undo=()=>{ row.classList.remove('gone'); row.style.cssText=''; toast.classList.remove('show'); };
+    h.on(x,'click',del); h.on(toast.querySelector('.undo'),'click',undo);
+    h.reg(stage, ()=>{ row.classList.remove('gone'); row.style.cssText=''; toast.classList.remove('show'); });
+  }
+  mk(B); mk(A);
+});
+boot();
+</script>
+</body>
+</html>
