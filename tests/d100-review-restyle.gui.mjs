@@ -149,7 +149,10 @@ try {
       labColor: lab ? getComputedStyle(lab).color : null,
       sep: second ? getComputedStyle(second).borderLeftWidth : null,
       qiDir: getComputedStyle(wrap.querySelectorAll('.qi')[0]).flexDirection,
-      qiMaxH: Math.max(...[...wrap.querySelectorAll('.qi')].map((x) => x.getBoundingClientRect().height))
+      qiMaxH: Math.max(...[...wrap.querySelectorAll('.qi')].map((x) => x.getBoundingClientRect().height)),
+      numFs: getComputedStyle(wrap.querySelector('.qi-num')).fontSize,
+      labFs: getComputedStyle(wrap.querySelector('.lab')).fontSize,
+      numW: getComputedStyle(wrap.querySelector('.qi-num')).fontWeight
     };
   })())`);
   const c1 = JSON.parse(counts || "{}");
@@ -158,6 +161,7 @@ try {
   check("三档数字无彩色（互同色）", Array.isArray(c1.numColors) && c1.numColors.length === 3 && new Set(c1.numColors).size === 1, counts);
   check("档间 hairline 竖分隔（DPR 容差）", c1.sep !== null && parseFloat(c1.sep) > 0 && parseFloat(c1.sep) <= 1.3, counts);
   check("计数单行（标签+数字同行，R2）", c1.qiDir === "row" && c1.qiMaxH <= 34, counts);
+  check("数字与标签同字号不强调（R3）", c1.numFs === c1.labFs && c1.numW === "500", counts);
 
   // ---------- ② 评分钮：色点退役 + 常态无彩色 + hover 揭示 ----------
   await cdp.eval(`(() => { const b = document.querySelector('[data-reveal]'); b && b.click(); return 'revealed'; })()`);

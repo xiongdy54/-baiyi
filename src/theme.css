@@ -54,7 +54,7 @@
   --fs-body: 14px;
   --fs-secondary: 13px;
   --fs-meta: 12px;
-  --fs-stat: 20px; /* 复习页顶栏统计数字（D88 §7.2：20px/300，随 D88 登记的新档） */
+  --fs-stat: 20px; /* 复习页顶栏统计数字（D88 §7.2 新档；v48.59/D100 R3 起零消费者——计数数字改与标签同字号） */
   /* 长文行高（阅读正文 + 界面内成段 AI 回答等）：只允许这一个 Token。
      src/lib/reader/foliate/appearance.ts:36 里 EPUB 正文取 a.lineHeight ?? 1.7，
      Markdown 正文走 .reader-markdown；此前一边 1.7、一边 1.9，
@@ -2857,9 +2857,11 @@ body.theme-dark .modal-panel {
    基类 .count-dot 仅剩结构职责——摘录页「N 条待处理」仍在消费（ExtractReviewView，不在本批范围）。 */
 .count-dot { display: inline-block; }
 .review-count[data-review-counts] .qi + .qi { border-left: 1px solid var(--border-subtle); padding-left: var(--sp-4); }
+/* v48.59（D100 R3 用户裁定）：数字与标签同字号同字重（--fs-meta/500）——计数是次要信息，不强调数字；
+   主文字色与 tabular-nums 保留（多位数字滚动不跳宽）。--fs-stat 随此零消费（Token 保留）。 */
 .review-count[data-review-counts] .qi-num {
-  font-size: var(--fs-stat);
-  font-weight: 300;
+  font-size: var(--fs-meta);
+  font-weight: 500;
   line-height: 1;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
