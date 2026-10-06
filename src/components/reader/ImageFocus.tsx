@@ -28,6 +28,8 @@ const CLOSE_HIT_PX = 12;
 export interface ImageFocusSubmit {
   shape: OcclusionShape;
   bbox: OcclusionRect;
+  /** D98：「挖空编辑」提交时附图片聚焦层的显示框，供编辑器 FLIP 承接（视口坐标） */
+  origin?: { x: number; y: number; width: number; height: number };
 }
 
 interface Props {
@@ -36,7 +38,7 @@ interface Props {
   origin: { x: number; y: number; width: number; height: number };
   busy?: boolean;
   onClose: () => void;
-  onSubmit: (kind: "ai" | "manual", payload: ImageFocusSubmit) => void;
+  onSubmit: (kind: "ai" | "editor", payload: ImageFocusSubmit) => void;
 }
 
 export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: Props) {
@@ -248,9 +250,18 @@ export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: P
             type="button"
             className="btn btn-primary btn-sm"
             disabled={!usable || busy}
-            onClick={() => shape && onSubmit("manual", { shape, bbox: shapeBBox(shape) })}
+            onClick={() => {
+              if (!shape) return;
+              // D98：进入手动挖空编辑器（预载本选区为首块遮罩）；origin 供编辑器 FLIP 承接
+              const r = imgBoxRef.current?.getBoundingClientRect();
+              onSubmit("editor", {
+                shape,
+                bbox: shapeBBox(shape),
+                origin: r ? { x: r.left, y: r.top, width: r.width, height: r.height } : undefined
+              });
+            }}
           >
-            手动制卡
+            挖空编辑
           </button>
         </div>
       </div>

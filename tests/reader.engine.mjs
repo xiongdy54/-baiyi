@@ -219,15 +219,19 @@ try {
   await cdp.shot("tmp-l2-4-menu.png");
   await cdp.eval(clickByText("制卡", "[data-sel-act]"));
   await wait(600);
+  // v48.54-56（§J P0）：手动制卡字段已从 <textarea> 迁移为 Milkdown 编辑器（.ProseMirror contenteditable），
+  // 旧「native setter + input 事件」取填法落空（tas[0] undefined → Illegal invocation，套件中断）。
+  // 此处对齐新 DOM：聚焦 ProseMirror 根后 execCommand insertText（PM 经 beforeinput 事务接住）。
   const frontSet = await cdp.eval(`(() => {
-    const tas = [...document.querySelectorAll("[data-card-dock] textarea")];
-    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    set.call(tas[0], "FSRSTEST 引擎制卡题面");
-    tas[0].dispatchEvent(new Event("input", { bubbles: true }));
-    set.call(tas[1], "引擎制卡答案");
-    tas[1].dispatchEvent(new Event("input", { bubbles: true }));
-    return tas.length;
+    const eds = [...document.querySelectorAll("[data-card-dock] .ProseMirror")];
+    if (eds.length < 2) return "editors=" + eds.length;
+    eds[0].focus();
+    document.execCommand("insertText", false, "FSRSTEST 引擎制卡题面");
+    eds[1].focus();
+    document.execCommand("insertText", false, "引擎制卡答案");
+    return "filled=" + eds.length;
   })()`);
+  await wait(300); // React 把 onChange 镜像反映到 canSave/按钮 disabled 态（无等待时点击落在禁用钮上）
   await cdp.eval(clickByText("创建卡片", "[data-card-dock] .btn-primary"));
   await wait(1000);
   const cardOk = await cdp.eval(`(async () => {
@@ -236,11 +240,11 @@ try {
     if (!c) return null;
     return { cfi: c.contextRef && c.contextRef.cfi, chapterIndex: c.contextRef && c.contextRef.chapterIndex, anchorText: c.contextRef && c.contextRef.anchorText, v: c.contextRef && c.contextRef.readerEngineVersion };
   })()`);
-  check("4b 制卡 contextRef 四层（cfi/章索引/锚文本/引擎版本）", Boolean(cardOk && cardOk.cfi && cardOk.v), JSON.stringify(cardOk));
+  check("4b 制卡 contextRef 四层（cfi/章索引/锚文本/引擎版本）", Boolean(cardOk && cardOk.cfi && cardOk.v), JSON.stringify(cardOk) + " | fill=" + frontSet);
   await cdp.eval(`(() => { document.querySelector("[data-card-dock] [data-dock-close]")?.click(); return 1; })()`);
   await wait(300);
 
-  // 4c. v25 正文图片点选聚焦：点击章节内图片 → 聚焦覆盖层（上浮 + 模糊）+ 三类选区工具条
+  // 4c. D98/R1：正文图片点击直进挖空编辑器（图片聚焦层退役；空画布、保存钮禁用）
   const imgClick = await cdp.eval(`(() => {
     const k = window.__readerKernel;
     const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
@@ -251,100 +255,80 @@ try {
     return "clicked";
   })()`);
   await wait(900);
-  const focusDiag = await cdp.eval(`JSON.stringify({
-    layer: Boolean(document.querySelector(".image-focus-layer")),
-    stage: Boolean(document.querySelector(".image-focus-stage img")),
-    tools: [...document.querySelectorAll(".image-focus-tool")].map(e => e.textContent.trim()),
-    submit: [...document.querySelectorAll(".image-focus-actions button")].map(e => e.textContent.trim())
+  const edState = await cdp.eval(`JSON.stringify({
+    editor: Boolean(document.querySelector(".occlusion-editor-layer")),
+    noFocus: !document.querySelector(".image-focus-layer"),
+    tools: [...document.querySelectorAll(".occl-seg .occl-tool")].map(e => e.textContent.trim()),
+    masks: document.querySelectorAll(".occlusion-editor-badge").length,
+    save: (document.querySelector('[data-testid="occl-save"]') || {}).textContent || "",
+    saveDisabled: (document.querySelector('[data-testid="occl-save"]') || {}).disabled
   })`);
-  const focus = JSON.parse(focusDiag);
+  const ed = JSON.parse(edState);
   check(
-    "4c 图片点击进入聚焦（覆盖层 + 三类选区工具 + 提交动作）",
-    imgClick === "clicked" && focus.layer && focus.stage && focus.tools.length === 3 && focus.submit.includes("AI 制卡") && focus.submit.includes("手动制卡"),
-    imgClick + " | " + focusDiag
+    "4c 图片点击直进挖空编辑器（无聚焦中间层 + 三工具 + 空画布保存禁用）",
+    imgClick === "clicked" && ed.editor && ed.noFocus && ed.tools.length === 3 && ed.masks === 0 && ed.saveDisabled && ed.save.includes("创建卡片"),
+    imgClick + " | " + edState
   );
-  await cdp.shot("tmp-l2-4c-image-focus.png");
-  // 点击模糊区域退出（mousedown 落在覆盖层自身）
-  await cdp.eval(`(() => {
-    const layer = document.querySelector(".image-focus-layer");
-    if (!layer) return "no layer";
-    layer.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    return "closed";
-  })()`);
-  await wait(500);
-  const focusGone = await cdp.eval(`!document.querySelector(".image-focus-layer")`);
-  check("4d 点击模糊区域退出聚焦返回阅读界面", focusGone === true, String(focusGone));
-
-  // 4e. 选区 → 手动制卡（v25/M5）：画矩形选区 → 手动制卡页签 → 落库 occlusionJson.shapes
-  const drawRes = await cdp.eval(`(() => {
-    const k = window.__readerKernel;
-    const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
-    if (!entry) return "no doc";
-    const img = entry.doc.querySelector('img[alt="引擎夹具图"]');
-    if (!img) return "no img";
-    img.dispatchEvent(new entry.doc.defaultView.MouseEvent("click", { bubbles: true, cancelable: true }));
-    return "clicked";
-  })()`);
-  await wait(900);
-  const rectEnabled = await cdp.eval(`(() => {
-    const canvas = document.querySelector(".image-focus-canvas");
+  await cdp.shot("tmp-l2-4c-occl-editor.png");
+  // 编辑器画布按百分比拖矩形（4d 复用）
+  const drawEd = (x0, y0, x1, y1) => `(() => {
+    const canvas = document.querySelector('[data-testid="occl-canvas"]');
     if (!canvas) return "no canvas";
     const r = canvas.getBoundingClientRect();
-    if (r.width < 4 || r.height < 4) return "empty canvas " + JSON.stringify({ w: r.width, h: r.height });
     const at = (fx, fy) => ({ clientX: r.left + r.width * fx, clientY: r.top + r.height * fy });
     const opts = { bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse", isPrimary: true };
-    canvas.dispatchEvent(new PointerEvent("pointerdown", { ...opts, ...at(0.2, 0.3) }));
-    canvas.dispatchEvent(new PointerEvent("pointermove", { ...opts, ...at(0.65, 0.75) }));
-    canvas.dispatchEvent(new PointerEvent("pointerup", { ...opts, ...at(0.65, 0.75) }));
-    return "drawn @ " + Math.round(r.width) + "x" + Math.round(r.height);
-  })()`);
-  await wait(300);
-  const submitState = await cdp.eval(`JSON.stringify([...document.querySelectorAll(".image-focus-actions button")].map(b => ({ t: b.textContent.trim(), disabled: b.disabled })))`);
-  const submitBtns = JSON.parse(submitState);
-  check(
-    "4e 画出矩形选区后提交按钮可用",
-    String(rectEnabled).startsWith("drawn") && submitBtns.every((b) => b.disabled === false),
-    rectEnabled + " | " + submitState
-  );
-  await cdp.shot("tmp-l2-4e-region.png");
-  await cdp.eval(clickByText("手动制卡", ".image-focus-actions button"));
-  await wait(700);
-  const modalState = await cdp.eval(`JSON.stringify({
-    open: Boolean(document.querySelector(".modal-panel")),
-    tab: (document.querySelector(".seg-tabs button.active") || {}).textContent || "",
-    preview: Boolean(document.querySelector(".manual-region-preview img, .occlusion-preview img")),
-    textareas: document.querySelectorAll(".modal-panel textarea").length
-  })`);
-  const ms = JSON.parse(modalState);
-  check("4f 手动制卡弹窗（图片挖空页签 + 区域预览）", ms.open && ms.tab.includes("图片挖空") && ms.preview && ms.textareas >= 2, modalState);
+    canvas.dispatchEvent(new PointerEvent("pointerdown", { ...opts, ...at(${x0}, ${y0}) }));
+    canvas.dispatchEvent(new PointerEvent("pointermove", { ...opts, ...at(${(x0 + x1) / 2}, ${(y0 + y1) / 2}) }));
+    canvas.dispatchEvent(new PointerEvent("pointerup", { ...opts, ...at(${x1}, ${y1}) }));
+    return "drawn";
+  })()`;
+
+  // 4d. 编辑器内连续框选两块遮罩（右栏列表同步 2 行）
+  const d1 = await cdp.eval(drawEd(0.55, 0.05, 0.9, 0.25));
+  await wait(250);
+  const d2 = await cdp.eval(drawEd(0.05, 0.55, 0.45, 0.9));
+  await wait(250);
+  const rows2 = await cdp.eval(`document.querySelectorAll('[data-testid="occl-mask-row"]').length`);
+  check("4d 编辑器内连续框选两块遮罩（列表 2 行）", d1 === "drawn" && d2 === "drawn" && rows2 === 2, d1 + " | " + d2 + " rows=" + rows2);
+
+  // 4e. 填答案 → 批量落库断言：逐块拆卡两卡——各带单遮罩（rects/shapes 1、shapeOrd=cardOrd）、同图同源、无 regionScope
   await cdp.eval(`(() => {
-    const tas = [...document.querySelectorAll(".modal-panel textarea")];
-    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    set.call(tas[0], "图中遮挡区域对应的是什么？");
-    tas[0].dispatchEvent(new Event("input", { bubbles: true }));
-    set.call(tas[1], "FSRSTEST 选区答案");
-    tas[1].dispatchEvent(new Event("input", { bubbles: true }));
-    return tas.length;
+    const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const rows = [...document.querySelectorAll('[data-testid="occl-mask-row"] input')];
+    rows.forEach((input, i) => {
+      set.call(input, "FSRSTEST 区域" + (i === 0 ? "一" : "二"));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    return rows.length;
   })()`);
-  await cdp.eval(clickByText("创建卡片", ".modal-panel .btn-primary"));
-  await wait(1200);
-  const occlCard = await cdp.eval(`(async () => {
+  await wait(200);
+  await cdp.eval(`document.querySelector('[data-testid="occl-save"]').click()`);
+  await wait(1500);
+  const editorClosed = await cdp.eval(`!document.querySelector(".occlusion-editor-layer")`);
+  const occCards = await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();
-    const c = all.find(x => (x.backMarkdown || "").includes("FSRSTEST 选区答案"));
-    if (!c) return null;
-    const o = c.occlusionJson || {};
-    return {
-      type: c.cardType,
-      asset: String(o.assetPath || ""),
-      shapeKind: o.shapes && o.shapes[0] ? o.shapes[0].kind : null,
-      shapeW: o.shapes && o.shapes[0] ? o.shapes[0].w : null,
-      rectW: o.rects && o.rects[0] ? o.rects[0].w : null
-    };
+    return all
+      .filter((x) => x.cardType === "imageOcclusion" && (x.backMarkdown || "").startsWith("FSRSTEST 区域"))
+      .sort((a, b) => a.cardOrd - b.cardOrd)
+      .map((c) => ({
+        ord: c.cardOrd,
+        back: c.backMarkdown,
+        rects: (c.occlusionJson.rects || []).length,
+        shapes: (c.occlusionJson.shapes || []).length,
+        shapeOrd: c.occlusionJson.shapes && c.occlusionJson.shapes[0] ? c.occlusionJson.shapes[0].ord : null,
+        asset: String((c.occlusionJson || {}).assetPath || ""),
+        sib: c.siblingKey || "",
+        scope: c.occlusionJson.regionScope || ""
+      }));
   })()`);
   check(
-    "4g 图片选区手动制卡落库（imageOcclusion + asset + shapes.rect）",
-    Boolean(occlCard && occlCard.type === "imageOcclusion" && /^bookasset:/.test(occlCard.asset) && occlCard.shapeKind === "rect" && occlCard.shapeW > 0 && occlCard.rectW > 0),
-    JSON.stringify(occlCard)
+    "4e 挖空编辑批量落库（逐块拆卡两卡：各带单遮罩 + 同图同源）",
+    editorClosed && occCards.length === 2 &&
+      occCards.every((c, i) =>
+        c.ord === i && c.rects === 1 && c.shapes === 1 && c.shapeOrd === i &&
+        /^bookasset:/.test(c.asset) && c.sib.startsWith("img:") && !c.scope
+      ) && occCards[0].back === "FSRSTEST 区域一" && occCards[1].back === "FSRSTEST 区域二",
+    "closed=" + editorClosed + " | " + JSON.stringify(occCards)
   );
 
   // 4h. 填空题手动制卡（v25/F12 修复回归）：挖空标记必须写进 frontMarkdown——
@@ -390,14 +374,13 @@ try {
   })()`);
   await wait(300);
   const z4 = await cdp.eval(`(() => {
-    const ta = document.querySelector("[data-card-dock] textarea");
-    if (!ta) return "no textarea (dock=" + Boolean(document.querySelector("[data-card-dock]")) + ")";
-    const set = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    set.call(ta, "FSRSTEST 锚甲出现在**第一章**");
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
+    const ed = document.querySelector("[data-card-dock] .ProseMirror");
+    if (!ed) return "no editor (dock=" + Boolean(document.querySelector("[data-card-dock]")) + ")";
+    ed.focus();
+    document.execCommand("insertText", false, "FSRSTEST 锚甲出现在**第一章**");
     return "filled";
   })()`);
-  await wait(200);
+  await wait(400);
   const z5 = await cdp.eval(`(() => {
     const b = [...document.querySelectorAll("[data-card-dock] .btn-primary")].find(x => x.textContent.includes("创建卡片"));
     if (!b) return "no create btn";

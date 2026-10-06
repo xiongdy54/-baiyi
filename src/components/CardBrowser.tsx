@@ -1453,7 +1453,9 @@ export function CardFace({
           <OcclusionShapes occlusion={card.occlusionJson} cardOrd={card.cardOrd} hidden={false} />
         </div>
         {hasFrontText && <div className="review-front-text">{card.frontMarkdown}</div>}
-        {!showBack && (
+        {/* R8（D98/v48.57）：复习页翻面只走底栏「显示答案」（onReveal 不传＝卡面无按钮——
+        此前渲染出无 onClick 的死按钮）；onReveal 在场的调用方（若有）仍显示 */}
+        {!showBack && onReveal && (
           <button className="btn btn-primary" onClick={onReveal}>显示答案</button>
         )}
       </>,

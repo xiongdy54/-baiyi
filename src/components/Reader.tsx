@@ -12,7 +12,7 @@ import { eventBus } from "../lib/eventbus";
 import { readingStats } from "../lib/stats";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
-import ImageFocus, { type ImageFocusSubmit } from "./reader/ImageFocus";
+import OcclusionEditor from "./editor/OcclusionEditor";
 import { useCommandActions } from "../lib/useCommands";
 import ReaderEngine from "./reader/ReaderEngine";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
@@ -278,16 +278,7 @@ export default function Reader({
   const gestureModRef = useRef<ContentPointerDownInfo>({ x: 0, y: 0 });
   /** 选中态更新串行化：指针抬起是高频事件，主进程往返按序应用（避免两次拖选交错） */
   const spanQueueRef = useRef<Promise<void>>(Promise.resolve());
-  // v25：图片聚焦（点选正文图片 → 上浮 + 周围模糊 + 选区工具条）
-  const [focusImage, setFocusImage] = useState<{
-    src: string;
-    dataUrl: string;
-    alt: string;
-    rect: OcclusionRect;
-    /** v29 图片周边文字上下文（D26）：AI 制卡结合上下文出题 */
-    contextText?: string;
-  } | null>(null);
-  const [focusBusy, setFocusBusy] = useState(false);
+  // D98/R1：图片聚焦层退役——正文图片点击直进挖空编辑器（会话态在 useSelectionActions.occlEditor）
   /**
    * v48.13（P3）：续跑意图要在**挂载时快照**。
    * 原因：App 在 onMindmapOpened 里立刻清掉 view.resumeRunId（导航状态要干净），
@@ -347,9 +338,11 @@ export default function Reader({
       markCardRefOverrideRef.current = null;
     },
     focus: {
-      get: () => focusImage,
-      close: () => setFocusImage(null),
-      setBusy: setFocusBusy
+      // D98/R1：图片聚焦层退役——本 adapter 槽位仅供退役链路（submitRegionCards/submitRegionManual）占位，
+      // 恒 null；编辑器走 occlEditor 会话态
+      get: () => null,
+      close: () => {},
+      setBusy: () => {}
     }
   });
   const {
@@ -384,7 +377,13 @@ export default function Reader({
     handleManualCard,
     startManualWith,
     closeManual,
-    createAnnotation
+    createAnnotation,
+    // D98 手动图片挖空编辑器
+    occlEditor,
+    openOcclusionEditor,
+    closeOcclusionEditor,
+    submitOcclusionEditor,
+    runOcclusionSuggest
   } = selActions;
 
   // ---------- 阅读内核分支（v20：文件书走 foliate 内核；粘贴书/摘录 R1b 合流） ----------
@@ -860,11 +859,11 @@ export default function Reader({
     setImgOverlay({ rect: { x: r.left, y: r.top, width: r.width, height: r.height }, occlusion: occ });
   }, [jumpAnchor]);
 
-  // v25 图片点选聚焦：正文图片点击 → 取字节为 dataURL → 进入聚焦覆盖层（选区工具条）
-  // v29：携带图片周边文字上下文（D26），供 AI 制卡结合上下文出题
+  // v25 图片点选聚焦 → D98/R1 改直进挖空编辑器：正文图片点击 → 取字节为 dataURL → 编辑器（默认框遮罩，
+  // 裁剪/AI 在编辑器内）；v29：携带图片周边文字上下文（D26），供编辑器 AI 建议层结合上下文出题
   const handleEngineImageClick = useCallback(
     async (img: ReaderImageRef) => {
-      if (manualOpen || aiPanel || focusImage) return; // 弹层/聚焦在场时不重复进入
+      if (manualOpen || aiPanel || occlEditor) return; // 弹层/编辑器在场时不重复进入
       const dataUrl = await loadImageDataUrl(img.src);
       if (!dataUrl) {
         showToast("无法读取这张图片的内容（可能来自外部链接）");
@@ -879,15 +878,12 @@ export default function Reader({
         alt: img.alt || undefined,
         contextText: img.contextText || undefined
       };
-      setFocusImage({
-        src: img.src,
-        dataUrl,
-        alt: img.alt,
-        rect: { x: img.rect.x, y: img.rect.y, w: img.rect.width, h: img.rect.height },
-        contextText: img.contextText
-      });
+      openOcclusionEditor(
+        { dataUrl, alt: img.alt || "", contextText: img.contextText || undefined },
+        { x: img.rect.x, y: img.rect.y, width: img.rect.width, height: img.rect.height }
+      );
     },
-    [manualOpen, aiPanel, focusImage, showToast]
+    [manualOpen, aiPanel, occlEditor, openOcclusionEditor, showToast]
   );
 
   /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
@@ -932,7 +928,7 @@ export default function Reader({
   useEffect(() => {
     if (!engineMode) return;
     const onKey = (e: KeyboardEvent) => {
-      if (manualOpen || aiPanel || focusImage) return;
+      if (manualOpen || aiPanel || occlEditor) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (e.key === "ArrowRight" || e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
@@ -945,7 +941,7 @@ export default function Reader({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [engineMode, manualOpen, aiPanel, focusImage, turnPage]);
+  }, [engineMode, manualOpen, aiPanel, occlEditor, turnPage]);
 
   useEffect(
     () => () => {
@@ -1771,17 +1767,14 @@ export default function Reader({
         />
       </div>
 
-      {/* v25 图片聚焦覆盖层：位于阅读器最外层（fixed 全屏），点击模糊区域退出 */}
-      {focusImage && (
-        <ImageFocus
-          image={{ src: focusImage.src, dataUrl: focusImage.dataUrl, alt: focusImage.alt }}
-          origin={{ x: focusImage.rect.x, y: focusImage.rect.y, width: focusImage.rect.w, height: focusImage.rect.h }}
-          busy={focusBusy}
-          onClose={() => setFocusImage(null)}
-          onSubmit={(kind, payload) => {
-            if (kind === "ai") void submitRegionCards(payload);
-            else submitRegionManual(payload);
-          }}
+      {/* D98/R1 手动图片挖空编辑器：点击正文图片直进（图片聚焦层退役），多遮罩批量落库后由编排面关闭 */}
+      {occlEditor && (
+        <OcclusionEditor
+          image={occlEditor.image}
+          origin={occlEditor.origin}
+          onAISuggest={runOcclusionSuggest}
+          onClose={closeOcclusionEditor}
+          onSubmit={submitOcclusionEditor}
         />
       )}
 

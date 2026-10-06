@@ -13,6 +13,8 @@ export interface CardUpsert {
     rects: { x: number; y: number; w: number; h: number; ord: number }[];
     assetPath: string;
     shapes?: OcclusionShape[] | null;
+    /** v30：区域归属——"shared"=全图区域共享（cardOrd 单区 accent）；缺省=每卡自带。D98 编辑器共遮呈现写入 */
+    regionScope?: string;
   } | null;
   contextPrefix: string | null;
   contextRef: Record<string, unknown> | null;

@@ -12,6 +12,7 @@ import {
   expandClozeDraft,
   burySourceTextLimit,
   siblingKeyFor,
+  requestOcclusionResult,
   MATERIAL_ROUTES,
   type CardDraft,
   type CardGenMode,
@@ -20,10 +21,11 @@ import {
 import { VOCAB_KIND_LABEL, buildVocabDrafts, isVocabSelection, type DictionaryEntry, type ReadingContext, type VocabKind } from "./dict";
 import { buildReadingContext, loadDictSettings, lookupWord } from "./dictClient";
 import { libraryApi } from "./library";
-import { normalizeShape, type OcclusionRect, type OcclusionShape } from "./occlusion";
+import { normalizeShape, shapeBBox, type OcclusionRect, type OcclusionShape } from "./occlusion";
 import { eventBus } from "./eventbus";
 import type { DictPanelState } from "../components/DictPanel";
 import type { ImageFocusSubmit } from "../components/reader/ImageFocus";
+import type { OcclusionEditorSubmit } from "../components/editor/OcclusionEditor";
 import type { ManualCardPayload } from "../components/ManualCardEditor";
 import { createManualCard } from "./manualCard";
 import { routeExplainMode, type ExplainModePref } from "./explainRouter";
@@ -191,12 +193,17 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   const [dockTab, setDockTab] = useState<"explain" | "cards">("explain");
   /** v48.52（D92 §3.4）：手动暂态是否正占坞体（切页签时表单隐藏保活、manualOpen 不动） */
   const [manualActive, setManualActive] = useState(false);
-  // v25：手动制卡的图片选区（从聚焦工具条「手动制卡」进入时携带）
+  // v25：手动制卡的图片选区（从聚焦工具条「手动制卡」进入时携带；D98 起该链路不可达，P1 评估退役）
   const [manualImage, setManualImage] = useState<{
     dataUrl: string;
     alt: string;
     shape: OcclusionShape;
     rect: OcclusionRect;
+  } | null>(null);
+  // D98（v48.57 R1）：手动图片挖空编辑器会话态——点击正文图片直进（图片聚焦中间层退役）
+  const [occlEditor, setOcclEditor] = useState<{
+    image: { dataUrl: string; alt: string; contextText?: string };
+    origin: { x: number; y: number; width: number; height: number } | null;
   } | null>(null);
   /** 手动制卡引用文本（选区文本，或标记浮层「就此制卡」给出的摘录文本） */
   const [manualQuote, setManualQuote] = useState<string | null>(null);
@@ -302,7 +309,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     mnemonic?: string | null;
     knowledgePointId?: string | null;
     dateStamp?: string | null;
-    occlusionJson?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; assetPath: string; shapes?: OcclusionShape[] | null } | null;
+    occlusionJson?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; assetPath: string; shapes?: OcclusionShape[] | null; regionScope?: string } | null;
     cardOrd?: number;
     // v34（M12，§4.16）：同源组键——翻转对/同图卡由调用点显式给出；普通卡由 handleManualCard 预先推导
     siblingKey?: string | null;
@@ -505,6 +512,93 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       rect: payload.bbox
     });
     setManualOpen(true);
+  }
+
+  // ---------- D98 手动图片挖空编辑器（v48.57 R1）：点击正文图片直进 → 多遮罩批量落库 ----------
+  /** 直进编辑器：图片数据/锚点快照已由点击处理器备好（contextText 供 AI 建议层结合上下文出题） */
+  function openOcclusionEditor(
+    image: { dataUrl: string; alt: string; contextText?: string },
+    origin?: { x: number; y: number; width: number; height: number }
+  ) {
+    A().clearKernelSelection?.();
+    // 正文图片链路：制卡来源=engine（图片锚点已由点击快照，复习端可跳转原文）
+    occlusionSourceRef.current = "engine";
+    setOcclEditor({ image, origin: origin ?? null });
+  }
+
+  function closeOcclusionEditor() {
+    setOcclEditor(null);
+  }
+
+  /** R1 AI 挖空建议层：直读 card-occlusion 提示词（requestOcclusionResult，零批次创建），
+      返回归一化 regions 供编辑器导入为可编辑遮罩。AI 仅建议——不落库。 */
+  async function runOcclusionSuggest(dataUrl: string): Promise<OcclusionRegion[]> {
+    if (!occlEditor) return [];
+    try {
+      const { result } = await requestOcclusionResult(
+        { dataUrl },
+        {
+          title: A().labels.sourceTitle,
+          section: A().labels.section,
+          contextText: occlEditor.image.contextText
+        }
+      );
+      return result.regions ?? [];
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg.includes("API Key")
+        ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
+        : `AI 挖空失败：${msg}`);
+      return [];
+    }
+  }
+
+  /** 批量落库：逐块拆卡（每卡自带单遮罩 / shared=全图区域+cardOrd 单区 accent）或整图一卡（同遮同答）。
+      数据契约零变更——复用 occlusion_json 既有字段；同图多卡 siblingKey=图片资产（v34 同源同日埋葬）。
+      R1：imageDataUrl=编辑器当前图（可能已经裁剪），资产以它落盘。 */
+  async function submitOcclusionEditor(p: OcclusionEditorSubmit) {
+    if (!occlEditor) return;
+    const assetPath = await ensureImageAsset(p.imageDataUrl);
+    if (!assetPath) {
+      showToast("图片资产落盘失败，未创建卡片");
+      return;
+    }
+    const shapes = p.masks.map((m, i) => normalizeShape({ ...m, ord: i }));
+    if (shapes.length === 0) return;
+    // rects 恒为形状包围盒（兼容旧渲染与 L11 校验），shapes 为精确轮廓
+    const rects = shapes.map((s) => ({ ...shapeBBox(s), ord: s.ord }));
+    const front = p.frontText.trim() || "图中遮挡区域对应的是什么？";
+    const siblingKey = `img:${assetPath}`;
+    if (p.mode === "single") {
+      await createSingleCard({
+        front,
+        back: p.masks.map((m) => m.label).filter(Boolean).join("；"),
+        cardType: "imageOcclusion",
+        cardOrd: 0,
+        siblingKey,
+        occlusionJson: { assetPath, rects, shapes },
+        priority: 50
+      });
+    } else {
+      for (let i = 0; i < shapes.length; i++) {
+        await createSingleCard({
+          front,
+          back: p.masks[i].label || `区域 ${i + 1}`,
+          cardType: "imageOcclusion",
+          cardOrd: i,
+          siblingKey,
+          occlusionJson: p.shared
+            ? { assetPath, rects, shapes, regionScope: "shared" }
+            : { assetPath, rects: [rects[i]], shapes: [shapes[i]] },
+          priority: 50
+        });
+      }
+    }
+    eventBus.emit("cards/changed");
+    setOcclEditor(null);
+    showToast(p.mode === "single"
+      ? "图片挖空卡已创建（复习正面遮挡全部区域）"
+      : `已创建 ${shapes.length} 张图片挖空卡（复习正面遮挡各区域）`);
   }
 
   // ---------- AI 制卡（Phase 13 主路径；M1.2 材料类型路由） ----------
@@ -1323,6 +1417,12 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     submitRegionCards,
     submitRegionManual,
     handleManualCard,
+    // D98 手动图片挖空编辑器
+    occlEditor,
+    openOcclusionEditor,
+    closeOcclusionEditor,
+    submitOcclusionEditor,
+    runOcclusionSuggest,
     startManualWith: (text: string) => {
       setManualQuote(text);
       setManualOpen(true);

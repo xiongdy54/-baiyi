@@ -564,6 +564,7 @@ body.has-skin .topbar { background: transparent; }
   display: flex;
   align-items: center;
   gap: var(--sp-1);
+  flex: none; /* R2：窗控/右侧钮不参与收缩 */
   -webkit-app-region: no-drag;
 }
 
@@ -592,11 +593,14 @@ body.has-skin .topbar { background: transparent; }
   display: flex;
   align-items: center;
   gap: var(--sp-1);
+  flex: none; /* R2：书名过长时收缩量全部落在标题（省略号），导航恒横排 */
   -webkit-app-region: no-drag; /* 按钮必须可点：顶栏整体 drag，导航区豁免 */
 }
 .topbar-nav .nav-item {
   height: var(--sp-8);
   padding: 0 var(--sp-3);
+  flex: none;
+  white-space: nowrap;
   background: transparent;
   border: none;
   cursor: pointer;
@@ -3387,9 +3391,362 @@ body.theme-dark .modal-panel {
 .manual-region-preview { margin: 0 0 var(--sp-3); }
 .form-check { margin-bottom: var(--sp-4); }
 
+/* ============ 手动图片挖空编辑器（D98 v48.57，R1 修订）============ */
+/* 全屏层（与 image-focus 同 z 层级与淡入语义）；主区右避让右栏 300+16+16=332px（修右栏盖图） */
+.occlusion-editor-layer {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-toast) - 1);
+  background: color-mix(in srgb, var(--overlay-ink) 55%, transparent);
+  user-select: none;
+  animation: image-focus-fade 160ms var(--ease);
+}
+/* R1：主区（工具条+画布）与右栏并排——工具条随主区在流内定位，与右栏无覆盖可能 */
+.occlusion-editor-main {
+  position: absolute;
+  inset: var(--sp-4) 332px var(--sp-4) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+}
+/* R1 工具条重设计：单行紧凑、fit-content、无提示文案、按钮不换行不收缩 */
+.occlusion-editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: nowrap;
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);
+  cursor: default;
+  z-index: 2;
+}
+/* 用户实测修正（D98）：动作按钮窄幅下文字换行成竖排——一律禁换行、不收缩 */
+.image-focus-actions .btn,
+.occlusion-editor-toolbar .btn { white-space: nowrap; flex: none; }
+/* 段控（state-changes）：滑移指示条 200ms ease-in-out */
+.occl-seg { position: relative; display: flex; transition: opacity var(--dur-hover) var(--ease-out-soft); }
+.occl-seg.cropping { opacity: 0.4; pointer-events: none; }
+.occl-seg-ind {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: var(--accent-soft);
+  border-bottom: 2px solid var(--accent);
+  transition: left 200ms cubic-bezier(0.4, 0, 0.2, 1), width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+.occl-tool {
+  position: relative;
+  z-index: 1;
+  height: 28px;
+  padding: 0 var(--sp-3);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-hover) var(--ease-out-soft), background var(--dur-hover) var(--ease-out-soft);
+}
+.occl-tool:hover { background: var(--grey-1); color: var(--text-primary); }
+.occl-tool.active { color: var(--accent); }
+.occl-toolbar-div { width: 1px; height: 20px; background: var(--border-subtle); flex: none; }
+.occl-crop-active { border-color: var(--accent); color: var(--accent); }
+.occlusion-editor-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 100%;
+  max-height: 100%;
+  cursor: default;
+  transition: transform 240ms var(--ease), opacity 240ms var(--ease);
+  will-change: transform;
+}
+.occlusion-editor-imgbox {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  background: var(--paper);
+  box-shadow: var(--shadow-panel);
+}
+.occlusion-editor-imgbox > img {
+  display: block;
+  max-width: calc(100vw - 400px);
+  max-height: calc(100vh - 170px);
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.occlusion-editor-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+.occlusion-editor-canvas.tool-rect,
+.occlusion-editor-canvas.tool-ellipse,
+.occlusion-editor-canvas.tool-crop { cursor: crosshair; }
+.occlusion-editor-canvas.tool-polygon { cursor: cell; }
+/* 已落定遮罩：accent 半透明填充 + accent 描边（区别于复习面的实色遮挡）。
+   pop-in（entrance + follow-through）：240ms spring scale .88→1.03→1——React keyed 挂载触发，
+   拖拽/撤销（key 稳定）不重放 */
+@keyframes occl-pop {
+  0% { opacity: 0; transform: scale(0.88); }
+  62% { opacity: 1; transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.occlusion-editor-mask {
+  fill: color-mix(in srgb, var(--accent) 15%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+  cursor: move;
+  animation: occl-pop 240ms var(--spring) both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.occlusion-editor-mask.selected {
+  fill: color-mix(in srgb, var(--accent) 22%, transparent);
+  stroke-width: 3;
+}
+.occlusion-editor-mask.drafting {
+  fill: color-mix(in srgb, var(--accent) 20%, transparent);
+  cursor: cell;
+}
+/* R3：手柄/顶点＝HTML 小圆点（用户指定圆点；评分色点同族，覆盖瑞士直角基线）。
+   定尺寸不随图变形；pointer-events none——命中与拖拽仍走画布的像素级 nearHandle 逻辑；
+   级联 delay 内联注入。`.first`＝多边形起点（闭合目标），放大 + 实心 accent 高亮 */
+@keyframes occl-dot-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+.occl-dot {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--paper);
+  border: 1.5px solid var(--accent);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 2;
+  animation: occl-dot-in 150ms cubic-bezier(0, 0, 0.2, 1) both;
+}
+.occl-dot.first {
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border: 2px solid var(--paper);
+  outline: 1px solid var(--accent);
+}
+/* 删除退场残影：universal-patterns「exit 比 enter 快」——140ms fade+scale */
+@keyframes occl-ghost-out {
+  to { opacity: 0; transform: scale(0.86); }
+}
+.occl-ghost {
+  fill: color-mix(in srgb, var(--accent) 15%, transparent);
+  stroke: var(--accent);
+  stroke-width: 2;
+  pointer-events: none;
+  animation: occl-ghost-out 140ms cubic-bezier(0.4, 0, 1, 1) both;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+/* 序号徽标：贴遮罩包围盒左上角，点击＝选中（位移与缩放同帧动画） */
+@keyframes occl-badge-pop {
+  0% { opacity: 0; transform: translateY(-110%) scale(0.88); }
+  62% { opacity: 1; transform: translateY(-110%) scale(1.03); }
+  100% { opacity: 1; transform: translateY(-110%) scale(1); }
+}
+.occlusion-editor-badge {
+  position: absolute;
+  transform: translateY(-110%);
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  background: var(--ink);
+  color: var(--paper);
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 1;
+  animation: occl-badge-pop 240ms var(--spring) both;
+}
+.occlusion-editor-badge.sel { background: var(--accent); }
+/* R1 裁剪预览：外部压暗 + accent 描边——永不实色填充，框内内容始终可见 */
+.occl-crop-dim { fill: color-mix(in srgb, var(--overlay-ink) 55%, transparent); }
+.occl-crop-rect {
+  fill: transparent;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+/* 右栏：制卡模式 / 题面 / 区域列表 */
+.occlusion-editor-rail {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  bottom: var(--sp-4);
+  width: 300px;
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);
+  overflow-y: auto;
+  padding: var(--sp-4);
+  cursor: default;
+  user-select: text;
+}
+.occlusion-editor-rail-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text-helper);
+  letter-spacing: 0.06em;
+  margin: var(--sp-4) 0 var(--sp-2);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.occlusion-editor-rail-label:first-child { margin-top: 0; }
+.occlusion-editor-rail-count { font-weight: 400; }
+.occlusion-editor-modes { display: flex; border: 1px solid var(--border-strong); }
+.occlusion-editor-mode { flex: 1; }
+.occlusion-editor-mode.active { background: var(--accent-soft); }
+.occlusion-editor-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.occlusion-editor-check input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.occlusion-editor-input {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+  color: var(--text-primary);
+  resize: vertical;
+}
+.occlusion-editor-input:focus { outline: none; border-color: var(--accent); }
+.occlusion-editor-list { display: flex; flex-direction: column; gap: var(--sp-1); }
+.occlusion-editor-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-out-soft), border-color var(--dur-hover) var(--ease-out-soft);
+}
+.occlusion-editor-row:hover { background: var(--grey-1); }
+.occlusion-editor-row.sel { border-color: var(--accent); background: var(--accent-soft); }
+.occlusion-editor-row-num {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink);
+  color: var(--paper);
+  font-size: 11px;
+}
+.occlusion-editor-row.sel .occlusion-editor-row-num { background: var(--accent); }
+.occlusion-editor-row input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  padding: 2px 0;
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+  color: var(--text-primary);
+}
+.occlusion-editor-row input:focus { outline: none; border-bottom-color: var(--accent); }
+.occlusion-editor-row-del {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-helper);
+  cursor: pointer;
+  transition: color var(--dur-hover) ease, background var(--dur-hover) ease;
+}
+.occlusion-editor-row-del:hover { color: var(--error); background: var(--grey-1); }
+.occlusion-editor-empty { font-size: var(--fs-secondary); color: var(--text-helper); margin: var(--sp-2) 0; }
+.occlusion-editor-count { font-size: var(--fs-meta); color: var(--text-helper); margin: var(--sp-3) 0 0; }
+/* AI 识别中（feedback-indicators loading）：直角旋转描边（瑞士风不用圆点） */
+@keyframes occl-rotate { to { transform: rotate(360deg); } }
+.occl-spin {
+  width: 11px;
+  height: 11px;
+  display: inline-block;
+  border: 2px solid var(--accent-soft);
+  border-top-color: var(--accent);
+  animation: occl-rotate 700ms linear infinite;
+}
+/* 未保存确认条（Esc/关闭钮触发） */
+.occlusion-editor-confirm {
+  position: absolute;
+  bottom: var(--sp-6);
+  left: calc((100% - 332px) / 2);
+  transform: translate(-50%, 8px);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-hover) var(--ease-out-soft), transform var(--dur-hover) var(--ease-out-soft);
+  z-index: 3;
+}
+.occlusion-editor-confirm.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.occlusion-editor-confirm p { font-size: var(--fs-secondary); color: var(--text-secondary); margin: 0; }
+
 @media (prefers-reduced-motion: reduce) {
   .image-focus-layer { animation: none; }
   .image-focus-stage { transition: none; }
+  .occlusion-editor-layer { animation: none; }
+  .occlusion-editor-stage { transition: none; }
+  .occlusion-editor-confirm { transition: none; }
+  .occlusion-editor-row { transition: none; }
+  .occl-seg-ind { transition: none; }
+  .occlusion-editor-mask,
+  .occl-dot,
+  .occl-ghost,
+  .occlusion-editor-badge { animation: none; }
+  .occl-spin { animation-duration: 0.01ms; animation-iteration-count: infinite; }
 }
 
 /* ---------- AI 设置 ---------- */

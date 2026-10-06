@@ -357,6 +357,48 @@ export function extractJson(raw: string): GenResult {
   );
 }
 
+/** D98（v48.57）：card-occlusion 请求公共段（模板装配 + 多模态调用 + JSON 解析）——
+ *  generateOcclusionCards 与编辑器「AI 挖空建议层」（OcclusionEditor 直读，零批次创建）
+ *  共用同一装配，语义不分流（同一份事实不允许两套解释）。 */
+export async function requestOcclusionResult(
+  image: { dataUrl: string },
+  context: { title?: string; section?: string; focus?: string; contextText?: string },
+  onProgress?: (chars: number) => void,
+  onThinking?: (thinkChars: number) => void
+): Promise<{ result: GenResult; templateId: string }> {
+  const tpl = await window.promptsAPI?.get("card-occlusion");
+  if (!tpl) throw new Error("提示词模板缺失（card-occlusion）");
+  const textParts = [
+    "【任务】识别图片中适合记忆测试的内容并给出遮挡区域（坐标为相对图片尺寸的百分比）。",
+    // v25：用户已手绘区域的场景——图片是用户选区的裁剪，模型只负责读出该区域内容；
+    // 指令经请求装配注入（与 generateCards 的 context.focus 同机制），提示词模板不变
+    context.focus ? `【用户已选定的遮挡区域】${context.focus}` : "",
+    // v29（D26）：图片周边文字上下文——相关则结合出题，无关则由模型忽略
+    context.contextText ? `【图片周边文字上下文（图片上方 1 段 + 下方 2 段）】\n${context.contextText}\n（若与图片内容相关，可结合上下文出题；无关则忽略）` : "",
+    context.title ? `【来源】《${context.title}》${context.section ? " · " + context.section : ""}` : ""
+  ].filter(Boolean);
+  const userContent: ({ type: "image_url"; image_url: { url: string } } | { type: "text"; text: string })[] = [
+    { type: "image_url", image_url: { url: image.dataUrl } },
+    { type: "text", text: textParts.join("\n") }
+  ];
+  let acc = "";
+  const raw = await aiGateway.chat(
+    [
+      { role: "system", content: tpl.content },
+      { role: "user", content: userContent }
+    ],
+    onProgress
+      ? (a) => {
+          acc = a;
+          onProgress(a.length);
+        }
+      : undefined,
+    0.2,
+    onThinking
+  );
+  return { result: extractJson(raw || acc), templateId: tpl.id };
+}
+
 export const cardGenerator: {
   generateCards(
     sourceText: string,
@@ -466,37 +508,7 @@ export const cardGenerator: {
   // M1.1（v15，D16）：图片挖空生成链路——图片已入库，把 dataURL 交 GLM 多模态识别遮挡区域，
   // 返回 regions（归一化百分比坐标）+ 每区域一张 imageOcclusion 草稿（rects 共享同一 occlusionJson）
   async generateOcclusionCards(image, context, onProgress, onThinking) {
-    const tpl = await window.promptsAPI?.get("card-occlusion");
-    if (!tpl) throw new Error("提示词模板缺失（card-occlusion）");
-    const textParts = [
-      "【任务】识别图片中适合记忆测试的内容并给出遮挡区域（坐标为相对图片尺寸的百分比）。",
-      // v25：用户已手绘区域的场景——图片是用户选区的裁剪，模型只负责读出该区域内容；
-      // 指令经请求装配注入（与 generateCards 的 context.focus 同机制），提示词模板不变
-      context.focus ? `【用户已选定的遮挡区域】${context.focus}` : "",
-      // v29（D26）：图片周边文字上下文——相关则结合出题，无关则由模型忽略
-      context.contextText ? `【图片周边文字上下文（图片上方 1 段 + 下方 2 段）】\n${context.contextText}\n（若与图片内容相关，可结合上下文出题；无关则忽略）` : "",
-      context.title ? `【来源】《${context.title}》${context.section ? " · " + context.section : ""}` : ""
-    ].filter(Boolean);
-    const userContent: ({ type: "image_url"; image_url: { url: string } } | { type: "text"; text: string })[] = [
-      { type: "image_url", image_url: { url: image.dataUrl } },
-      { type: "text", text: textParts.join("\n") }
-    ];
-    let acc = "";
-    const raw = await aiGateway.chat(
-      [
-        { role: "system", content: tpl.content },
-        { role: "user", content: userContent }
-      ],
-      onProgress
-        ? (a) => {
-            acc = a;
-            onProgress(a.length);
-          }
-        : undefined,
-      0.2,
-      onThinking
-    );
-    const result = extractJson(raw || acc);
+    const { result, templateId: tplId } = await requestOcclusionResult(image, context, onProgress, onThinking);
     const preset = context.presetRegion;
     if (preset) {
       // v29 D26 选区即画布：模型 cards[] 逐张处理——
@@ -578,10 +590,10 @@ export const cardGenerator: {
           scope: "card-occlusion",
           sourceText: `[图片选区] ${image.assetPath}`,
           context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Mapped: true },
-          promptTemplateId: tpl.id,
+          promptTemplateId: tplId,
           result
         });
-        return { batchId: batch0?.id || "", result, templateId: tpl.id };
+        return { batchId: batch0?.id || "", result, templateId: tplId };
       }
       // 回退 D25 旧语义：模型未产出有效卡 → 整选区单卡（流程不死路）
       const rect = {
@@ -617,10 +629,10 @@ export const cardGenerator: {
         scope: "card-occlusion",
         sourceText: `[图片选区] ${image.assetPath}`,
         context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Fallback: true },
-        promptTemplateId: tpl.id,
+        promptTemplateId: tplId,
         result
       });
-      return { batchId: batch0?.id || "", result, templateId: tpl.id };
+      return { batchId: batch0?.id || "", result, templateId: tplId };
     }
     // 区域规范化：坐标钳制 0-100、w/h 下限 1，防模型越界导致遮挡框不可见
     const regions = (result.regions ?? []).map((r, i) => {
@@ -652,10 +664,10 @@ export const cardGenerator: {
       scope: "card-occlusion",
       sourceText: `[图片] ${image.assetPath}`,
       context: { ...context, imageAsset: image.assetPath, regionCount: regions.length },
-      promptTemplateId: tpl.id,
+      promptTemplateId: tplId,
       result
     });
-    return { batchId: batch?.id || "", result, templateId: tpl.id };
+    return { batchId: batch?.id || "", result, templateId: tplId };
   },
 
   async explain(sourceText, context, question, onDelta, onThinking, opts) {
