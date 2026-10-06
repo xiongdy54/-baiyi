@@ -110,8 +110,11 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   persistNow: () => ipcRenderer.invoke("cards:persistNow"),
   skip: (cardId) => ipcRenderer.invoke("cards:skip", cardId),
   setSuspended: (id, suspended, reason) => ipcRenderer.invoke("cards:setSuspended", id, suspended, reason),
-  // v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete）
+  // v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete；v48.60/D102 增 archive|restore）
   batch: (op, ids, payload) => ipcRenderer.invoke("cards:batch", op, ids, payload),
+  // v48.60（D101，§4.1）：标签写入（items=[{id,tags[]}]，渲染层算好终值）与词表（只读派生）
+  setTags: (items) => ipcRenderer.invoke("cards:setTags", items),
+  listTags: () => ipcRenderer.invoke("cards:listTags"),
   updateLeech: (id, patch) => ipcRenderer.invoke("cards:updateLeech", id, patch),
   resolveLeech: (id, resolution, updates) => ipcRenderer.invoke("cards:resolveLeech", id, resolution, updates),
   listLeech: () => ipcRenderer.invoke("cards:listLeech")

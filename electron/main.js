@@ -59,6 +59,9 @@ const {
   deleteExtract,
   batchExtractOps,
   batchCardOps,
+  // v48.60（D101）：标签写入与词表（§4.1）
+  setCardTags,
+  listCardTags,
   switchExtractEngine,
   setLibraryItemPriority,
   getDailyUsage,
@@ -586,6 +589,9 @@ ipcMain.handle("library:setPriority", (_e, itemId, priority) => setLibraryItemPr
 ipcMain.handle("cards:create", (_e, card) => createCard(card || {}));
 ipcMain.handle("cards:update", (_e, card) => updateCard(card || {}));
 ipcMain.handle("cards:batch", (_e, op, ids, payload) => batchCardOps(String(op), ids, payload));
+// v48.60（D101，§4.1）：标签写入（渲染层算好每卡终值，主进程只存储）与词表（只读派生）
+ipcMain.handle("cards:setTags", (_e, items) => setCardTags(items));
+ipcMain.handle("cards:listTags", () => listCardTags());
 ipcMain.handle("cards:get", (_e, id) => getCard(String(id)));
 ipcMain.handle("cards:listDue", () => listDueCards());
 // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试

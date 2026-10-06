@@ -28,6 +28,7 @@ import type { ImageFocusSubmit } from "../components/reader/ImageFocus";
 import type { OcclusionEditorSubmit } from "../components/editor/OcclusionEditor";
 import type { ManualCardPayload } from "../components/ManualCardEditor";
 import { createManualCard } from "./manualCard";
+import { normalizeTags } from "./tags";
 import { routeExplainMode, type ExplainModePref } from "./explainRouter";
 import type { ExtractSpan } from "./readingWorkflow";
 
@@ -186,6 +187,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
 
   const [aiPanel, setAiPanel] = useState<AiPanelState | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  // v48.60（D101 §1.4④）：批注标签继承初值——打开手动表单时从来源摘录读取（表单内可删）
+  const [manualTagsInitial, setManualTagsInitial] = useState<string[]>([]);
   // v48.52（D92 §4）：右侧学习坞会话态——首次唤起后常驻挂载（收起≠关闭，dockEverOpened 只进不出）
   const [dockEverOpened, setDockEverOpened] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
@@ -298,6 +301,24 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   // ---------- 手动制卡（Phase 3：引用+可编辑副本模式；v16 翻转问答 = 制卡手段，产两张独立问答卡；
   // M5（v25）：与 AI 制卡同构的字段集——类型选择 / UDC 领域标签 / contextPrefix / 助记 / 知识点分组 / 日期标记，
   // 一律过 CardLintEngine + 相似检索；图片挖空手动卡由正文图片选区进入（front/back 可编辑） ----------
+
+  /** v48.60（D101 §1.4④）：批注标签继承——读来源摘录（D61）的 tag_json 作为制卡标签初值。
+   *  继承的是用户自己打的批注标签（非 AI 产出）；无来源摘录/坏 JSON 一律空（不猜）。 */
+  function inheritedExtractTags(): Promise<string[]> {
+    const extractId = A().sourceContext().extractId;
+    if (!extractId) return Promise.resolve([]);
+    return (window.workflowAPI?.get(extractId) as Promise<{ tagJson?: string | null } | undefined> | undefined)
+      ?.then((ext) => {
+        if (!ext?.tagJson) return [];
+        try {
+          const arr = JSON.parse(ext.tagJson);
+          return normalizeTags(Array.isArray(arr) ? arr : []);
+        } catch {
+          return [];
+        }
+      })
+      .catch(() => []) ?? Promise.resolve([]);
+  }
   async function createSingleCard(p: {
     front: string;
     back: string;
@@ -309,6 +330,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     mnemonic?: string | null;
     knowledgePointId?: string | null;
     dateStamp?: string | null;
+    /** v48.60（D101）：用户标签（调用方已 normalize） */
+    tags?: string[];
     occlusionJson?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; assetPath: string; shapes?: OcclusionShape[] | null; regionScope?: string } | null;
     cardOrd?: number;
     // v34（M12，§4.16）：同源组键——翻转对/同图卡由调用点显式给出；普通卡由 handleManualCard 预先推导
@@ -329,7 +352,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       sourceRef,
       dateStamp: p.dateStamp || null,
       priority: p.priority,
-      tags: [],
+      tags: p.tags ?? [],
       domain: p.domain ?? [],
       knowledgePointId: p.knowledgePointId || null,
       siblingKey: p.siblingKey ?? null
@@ -345,7 +368,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         sourceRef,
         dateStamp: card.dateStamp,
         knowledgePointId: card.knowledgePointId,
-        occlusion: card.occlusionJson
+        occlusion: card.occlusionJson,
+        tags: card.tags
       },
       similarity: { text: p.front || p.cloze || "" }
     });
@@ -358,7 +382,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       mnemonic: p.mnemonic || null,
       knowledgePointId: p.knowledgePointId || null,
       dateStamp: p.dateStamp || null,
-      priority: p.priority
+      priority: p.priority,
+      // v48.60（D101）：表单终值（继承初值已以 chips 形式进表单，用户删了就是删了——提交层不再回填）
+      tags: normalizeTags(p.tags ?? [])
     };
     // v34（M12，§4.16）：短材料锚点键——同一句/段的多次制卡（手动或 AI）互为同源，同日只放行一张
     const srcKey = siblingKeyFor({
@@ -927,6 +953,11 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   async function acceptDraft(draft: CardDraft, draftIndex: number, edited?: Partial<CardDraft>) {
     if (aiPanel?.accepted?.has(draftIndex)) return; // 防重复入队
     const d = { ...draft, ...edited };
+    // v48.60（D101 §1.4④）：批注标签继承——草稿无标签时并入来源摘录的批注标签（用户事后可改）
+    if (!d.tags || d.tags.length === 0) {
+      const inherited = await inheritedExtractTags();
+      if (inherited.length) d.tags = inherited;
+    }
     // v30：建卡逻辑抽至 createAcceptedCard（与复习对比卡确认框共用）；per-blank 多空草稿在其内拆成每空一张
     // v34（M12）：sourceText 参与短材料锚点键的长度门控——同一句短材料的多角度卡同日只放行一张
     // v41（K2-A，D38）：genBatchId 落库 → 簇键 batch:<id>:<kp>，接受后后台顺带 AI 抽取归一
@@ -1183,6 +1214,11 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     setManualActive(true);
     wakeDock();
     A().clearSelection();
+    // v48.60（D101）：继承初值异步补入（表单打开后 chips 到位即可，不阻塞开坞）
+    setManualTagsInitial([]);
+    void inheritedExtractTags().then((tags) => {
+      if (tags.length) setManualTagsInitial(tags);
+    });
   }
   function actAICards() {
     const t = A().selectionText();
@@ -1346,6 +1382,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     manualOpen,
     manualImage,
     manualQuote,
+    // v48.60（D101）：手动表单的标签初值（批注标签继承，可删）——宿主透传 ManualCardForm.initialTags
+    manualTagsInitial,
     dictPanel,
     setDictPanel,
     dictReading,
@@ -1428,6 +1466,11 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       setManualOpen(true);
       setManualActive(true);
       wakeDock();
+      // v48.60（D101）：继承初值异步补入（同 actManualCard）
+      setManualTagsInitial([]);
+      void inheritedExtractTags().then((tags) => {
+        if (tags.length) setManualTagsInitial(tags);
+      });
     },
     closeManual
   };

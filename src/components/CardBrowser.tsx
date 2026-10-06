@@ -21,7 +21,10 @@ import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
 import { extractStatusLabel } from "../lib/sessionQueue";
 import { nextAtText } from "./ExtractCardFace";
 import { settingsStore } from "../lib/settings";
-import { parseCardQuery, extractMatches, textMatches } from "../lib/cardQuery";
+import { parseCardQuery, extractMatches, textMatches, tagFilterMatches, extractTagsOf } from "../lib/cardQuery";
+// v48.60（D101）：标签——批量打标/去标的终值计算 + 词表建议（规则单一源 = src/lib/tags.ts）
+import { applyTagDelta, tagKey, type TagVocabEntry } from "../lib/tags";
+import TagInput from "./TagInput";
 
 /** v48.22（D58 §6.8-5）：筛选牌组（复习范围）——保存的过滤条件，零 schema 变更 */
 interface SavedScope {
@@ -32,7 +35,7 @@ interface SavedScope {
   limits?: unknown;
 }
 
-type Preset = "all" | "due" | "leech" | "deferred" | "knowledge";
+type Preset = "all" | "due" | "leech" | "deferred" | "knowledge" | "archived";
 type BrowserCard = CardRecord & { docTitle?: string };
 type JumpToDoc = (
   docId: string,
@@ -54,6 +57,8 @@ const typeLabel = (t: string) => TYPE_LABELS[t] || t;
 const STATE_LABELS: Record<string, string> = { new: "新卡", learning: "学习中", relearning: "学习中", review: "复习中" };
 
 function statusOf(c: CardRecord): string {
+  // v48.60（D102）：生命周期归档最先可见（与挂起正交——归档 + 挂起显示「已归档」，挂起态在详情/meta 可见）
+  if ((c as { status?: string | null }).status === "archived") return "已归档";
   if (c.leech?.suspended) return "已暂停";
   return STATE_LABELS[c.fsrs?.state ?? "new"] ?? "复习中";
 }
@@ -147,6 +152,10 @@ export default function CardBrowser({
   const [bookScope, setBookScope] = useState<string>("all");
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchNote, setBatchNote] = useState<string | null>(null);
+  // v48.60（D101）：批量打标/去标浮层（v1 仅闪卡行；摘录标签走批注编辑既有入口）+ 词表建议
+  const [tagPop, setTagPop] = useState<null | "add" | "remove">(null);
+  const [tagDraft, setTagDraft] = useState<string[]>([]);
+  const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
   // v48.22（D58 §6.8-5）：筛选牌组（复习范围）——存 settings.app.reviewScopes，零 schema 变更（D51 先例）
   const [scopes, setScopes] = useState<SavedScope[]>([]);
   const [deckName, setDeckName] = useState("");
@@ -235,6 +244,10 @@ export default function CardBrowser({
     const q = foldSearch(query);
     const parsed = parseCardQuery(query);
     let list = all;
+    // v48.60（D102）：已归档默认排除（视图口径）；显式入口＝「已归档」preset / status:archived 查询 / 状态下拉
+    const archivedOnly =
+      preset === "archived" || parsed.status === "archived" || parsed.status === "已归档" || stateFilter === "archived";
+    list = archivedOnly ? list.filter((c) => c.status === "archived") : list.filter((c) => c.status !== "archived");
     if (preset === "due") list = list.filter(isDueCard);
     if (preset === "leech") list = list.filter(isLeechOrSuspended);
     if (preset === "deferred") list = list.filter((c) => deferredMap.has(c.id));
@@ -244,6 +257,7 @@ export default function CardBrowser({
     if (memFilter) list = list.filter((c) => !!c.memoryRefJson);
     if (stateFilter !== "all") {
       list = list.filter((c) => {
+        if (stateFilter === "archived") return c.status === "archived";
         if (stateFilter === "suspended") return Boolean(c.leech?.suspended);
         if (c.leech?.suspended) return false;
         const s = c.fsrs?.state ?? "new";
@@ -269,19 +283,27 @@ export default function CardBrowser({
         return textMatches({ ...parsed, text: "" }, hay);
       });
     }
-    // 查询语法里的字段前缀（kind/book/status/priority）——与下拉筛选叠加生效
+    // 查询语法里的字段前缀（kind/book/status/priority/tag/type）——与下拉筛选叠加生效
     if (parsed.kind === "extract") list = [];
     if (parsed.book) {
       const bk = foldSearch(parsed.book);
       list = list.filter((c) => foldSearch(String(c.docTitle || "")).includes(bk));
     }
     if (parsed.status) {
-      list = list.filter((c) => {
-        const suspended = Boolean(c.leech?.suspended);
-        const s = suspended ? "suspended" : c.fsrs?.state ?? "new";
-        return String(s).toLowerCase() === parsed.status;
-      });
+      if (parsed.status === "archived" || parsed.status === "已归档") {
+        // v48.60（D102）：status:已归档——生命周期维度（FSRS 状态 ∪ {已归档}）
+        list = list.filter((c) => c.status === "archived");
+      } else {
+        list = list.filter((c) => {
+          const suspended = Boolean(c.leech?.suspended);
+          const s = suspended ? "suspended" : c.fsrs?.state ?? "new";
+          return String(s).toLowerCase() === parsed.status;
+        });
+      }
     }
+    // v48.60（D101 §1.5）：tag:（层级边界前缀，多值 OR，-tag: 排除）与 type:（卡形式）
+    if (parsed.tag?.length || parsed.tagNeg?.length) list = list.filter((c) => tagFilterMatches(parsed, c.tags));
+    if (parsed.type) list = list.filter((c) => String(c.cardType || "").toLowerCase() === parsed.type);
     if (parsed.priority || parsed.priorityNot !== undefined) {
       list = list.filter((c) => {
         const p = Number(c.priority) || 0;
@@ -331,6 +353,8 @@ export default function CardBrowser({
       const bk = foldSearch(parsed.book);
       list = list.filter((e) => foldSearch(String(e.docTitle || "")).includes(bk));
     }
+    // v48.60（D101 §1.5）：tag: 对摘录行同样生效（匹配 extracts.tag_json；type:/status: 仅闪卡行）
+    if (parsed.tag?.length || parsed.tagNeg?.length) list = list.filter((e) => tagFilterMatches(parsed, extractTagsOf(e as { tagJson?: string | null })));
     if (q || parsed.exclude.length || parsed.status || parsed.priority || parsed.priorityNot !== undefined) {
       list = list.filter((e) => {
         if (!extractMatches(parsed, e)) return false;
@@ -398,6 +422,44 @@ export default function CardBrowser({
   function flashNote(text: string) {
     setBatchNote(text);
     window.setTimeout(() => setBatchNote(null), 2400);
+  }
+  // v48.60（D101）：词表建议（浮层打开时拉取；派生只读，主进程现算）
+  useEffect(() => {
+    if (!tagPop) return;
+    let cancelled = false;
+    window.cardsAPI?.listTags?.().then((l) => {
+      if (!cancelled) setTagVocab(l ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagPop]);
+  /** v48.60（D101）：批量打标/去标——渲染层用 tags.ts 算每卡终值（规则单一源），主进程只存储 */
+  async function runSetTags(mode: "add" | "remove", tags: string[]) {
+    const ids = [...selCards];
+    if (ids.length === 0 || tags.length === 0) return;
+    const items = ids.map((id) => {
+      const card = all.find((c) => c.id === id);
+      return {
+        id,
+        tags: applyTagDelta(card?.tags ?? [], mode === "add" ? tags : [], mode === "remove" ? tags : []).tags
+      };
+    });
+    setBatchBusy(true);
+    try {
+      const r = await cardsApi.setTags(items);
+      if (r?.ok) {
+        setSelCards(new Set());
+        setTagDraft([]);
+        flashNote(`已更新 ${r.count ?? ids.length} 张卡的标签`);
+        eventBus.emit("cards/changed");
+        await refresh();
+      } else {
+        flashNote(r?.reason || "标签写入失败，整批未执行");
+      }
+    } finally {
+      setBatchBusy(false);
+    }
   }
   async function runCardBatch(op: string, payload?: unknown) {
     const ids = [...selCards];
@@ -538,6 +600,10 @@ export default function CardBrowser({
             <button className={preset === "knowledge" ? "active" : ""} onClick={() => setPreset("knowledge")}>
               知识点
             </button>
+            {/* v48.60（D102）：已归档（不再关心）——默认列表不含归档，这里显式进入 */}
+            <button className={preset === "archived" ? "active" : ""} onClick={() => setPreset("archived")}>
+              已归档
+            </button>
           </div>
         </div>
       </div>
@@ -566,7 +632,8 @@ export default function CardBrowser({
               { value: "new", label: "新卡" },
               { value: "learning", label: "学习中" },
               { value: "review", label: "复习中" },
-              { value: "suspended", label: "已暂停" }
+              { value: "suspended", label: "已暂停" },
+              { value: "archived", label: "已归档" }
             ]}
             onChange={setStateFilter}
           />
@@ -891,7 +958,56 @@ export default function CardBrowser({
               <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
+              {/* v48.60（D101）：批量打标/去标（v1 仅闪卡行；浮层内 TagInput + 词表建议） */}
+              <button
+                className={`btn btn-outline btn-sm${tagPop === "add" ? " btn-primary" : ""}`}
+                disabled={batchBusy}
+                data-batch-tag-add
+                onClick={() => {
+                  setTagPop(tagPop === "add" ? null : "add");
+                  setTagDraft([]);
+                }}
+              >
+                打标签
+              </button>
+              <button
+                className={`btn btn-outline btn-sm${tagPop === "remove" ? " btn-primary" : ""}`}
+                disabled={batchBusy}
+                data-batch-tag-remove
+                onClick={() => {
+                  setTagPop(tagPop === "remove" ? null : "remove");
+                  setTagDraft([]);
+                }}
+              >
+                去标签
+              </button>
+              {/* v48.60（D102）：批量归档/恢复（生命周期；不评分、不动 FSRS） */}
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive-cards onClick={() => void runCardBatch("archive")}>归档</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-restore-cards onClick={() => void runCardBatch("restore")}>恢复</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>删除</button>
+              {tagPop && (
+                <span className="cb-tag-pop" data-batch-tag-pop>
+                  <TagInput
+                    value={tagDraft}
+                    onChange={setTagDraft}
+                    suggestions={tagVocab}
+                    ariaLabel={tagPop === "add" ? "要添加的标签" : "要移除的标签"}
+                    placeholder={tagPop === "add" ? "输入要添加的标签，回车确认" : "输入要移除的标签（含::子级）"}
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={tagDraft.length === 0 || batchBusy}
+                    data-batch-tag-apply
+                    onClick={() => {
+                      const mode = tagPop;
+                      setTagPop(null);
+                      void runSetTags(mode, tagDraft);
+                    }}
+                  >
+                    应用到 {selCards.size} 张
+                  </button>
+                </span>
+              )}
             </>
           )}
           {selExtracts.size > 0 && (
@@ -1133,6 +1249,40 @@ function CardDetail({
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [issues, setIssues] = useState<CardIssueRecord[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // v48.60（D101）：卡详情标签区——chips 展示 + 单卡编辑（ids 长度 1 = 单卡，D80 先例）
+  const [tagList, setTagList] = useState<string[]>(card.tags ?? []);
+  const [tagEditing, setTagEditing] = useState(false);
+  const [tagDraft, setTagDraft] = useState<string[]>([]);
+  const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
+  const isArchived = card.status === "archived";
+
+  useEffect(() => {
+    setTagList(card.tags ?? []);
+    setTagEditing(false);
+  }, [card.id, card.updatedAt]);
+
+  useEffect(() => {
+    if (!tagEditing) return;
+    let cancelled = false;
+    window.cardsAPI?.listTags?.().then((l) => {
+      if (!cancelled) setTagVocab(l ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagEditing]);
+
+  async function saveTags() {
+    await cardsApi.setTags([{ id: card.id, tags: tagDraft }]);
+    setTagList(tagDraft);
+    setTagEditing(false);
+    eventBus.emit("cards/changed");
+  }
+
+  async function toggleArchive() {
+    await cardsApi.batch(isArchived ? "restore" : "archive", [card.id]);
+    eventBus.emit("cards/changed");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1245,6 +1395,46 @@ function CardDetail({
             ))}
           </dl>
 
+          {/* v48.60（D101）：标签区——chips + 单卡编辑（正面永不显示标签，详情属编辑域不受此限） */}
+          <div className="cb-tags" data-testid="card-detail-tags">
+            <span className="cb-tags-label">标签</span>
+            {tagEditing ? (
+              <span className="cb-tags-editor">
+                <TagInput value={tagDraft} onChange={setTagDraft} suggestions={tagVocab} ariaLabel="标签" />
+                <button className="btn btn-primary btn-sm" data-tags-save onClick={() => void saveTags()}>
+                  保存
+                </button>
+                <button className="btn btn-outline btn-sm" onClick={() => setTagEditing(false)}>
+                  取消
+                </button>
+              </span>
+            ) : (
+              <span className="cb-tags-view">
+                {tagList.length > 0 ? (
+                  <span className="tag-chips">
+                    {tagList.map((t) => (
+                      <span key={t} className="tag-chip tag-chip-static">
+                        {t}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="form-hint">无标签</span>
+                )}
+                <button
+                  className="btn btn-outline btn-sm"
+                  data-tags-edit
+                  onClick={() => {
+                    setTagDraft(tagList);
+                    setTagEditing(true);
+                  }}
+                >
+                  编辑
+                </button>
+              </span>
+            )}
+          </div>
+
           {issues.length > 0 && (
             <div className="cb-issues">
               <p className="cb-issues-title">质检问题（CardLint / 相似检索）</p>
@@ -1278,6 +1468,10 @@ function CardDetail({
             )}
             <button className="btn btn-outline btn-sm" onClick={toggleSuspend}>
               {card.leech?.suspended ? "恢复调度" : "暂停调度"}
+            </button>
+            {/* v48.60（D102）：生命周期归档/恢复（与暂停调度正交；不评分、不动 FSRS） */}
+            <button className="btn btn-outline btn-sm" data-detail-archive onClick={toggleArchive}>
+              {isArchived ? "恢复（解除归档）" : "不再关心"}
             </button>
             <button className="btn btn-outline btn-sm" onClick={() => postpone(1)}>
               推迟 1 天
