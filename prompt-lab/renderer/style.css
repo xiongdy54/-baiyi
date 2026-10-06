@@ -189,3 +189,6 @@ body {
 .btn-primary:disabled { opacity: 0.5; cursor: default; }
 .btn-outline { border-color: var(--grey-4); background: var(--bg); color: var(--text-1); }
 .btn-outline:hover { background: var(--grey-1); }
+
+/* v8 候选（批 F）：AI 建议标签展示行 */
+.rc-suggested { color: #0e7a5f; font-size: 12px; margin-top: 4px; }

@@ -541,6 +541,10 @@ function cardEl(c, isSupplement) {
     card.appendChild(el("div", "rc-back", escapeHtml(c.back)));
   }
   if (c.mnemonic) card.appendChild(el("div", "rc-notes", `助记：${escapeHtml(c.mnemonic)}`));
+  // v8 候选（批 F）：AI 建议标签展示——默认不勾选语义在测试台即如实呈现为「仅展示、不落库」
+  if (Array.isArray(c.suggestedTags) && c.suggestedTags.length) {
+    card.appendChild(el("div", "rc-suggested mono", `建议标签：${c.suggestedTags.map((t) => "#" + t).join("  ")}`));
+  }
   if (c.ruleNotes) card.appendChild(el("div", "rc-notes mono", escapeHtml([].concat(c.ruleNotes).join(" · "))));
   if (c.warnings) card.appendChild(el("div", "rc-notes", `⚠ ${escapeHtml([].concat(c.warnings).join("；"))}`));
   card.appendChild(
