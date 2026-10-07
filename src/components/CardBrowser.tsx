@@ -115,6 +115,10 @@ function frontPreview(c: CardRecord): string {
 // query.trim().toLowerCase()，少了 NFKC 这一步，于是同一个词在卡片浏览与日记/知识点给出不同结果。
 const foldSearch = (s: unknown) => String(s ?? "").normalize("NFKC").trim().toLowerCase();
 
+// D110：Chromium 单滚动容器 scrollHeight 硬上限 ≈ 13.42M px（实测钳制值 13,421,773）——
+// 虚拟滚动 spacer 总高超限时按比例压缩（见 recomputeWindows 内注释）
+const SCROLL_CAP = 13_000_000;
+
 function srcLabel(c: CardRecord & { docTitle?: string }): string {
   const t = c.docTitle || c.sourceRef?.title || "";
   if (!t) return "—";
@@ -142,6 +146,12 @@ export default function CardBrowser({
   const [all, setAll] = useState<BrowserCard[]>([]);
   const [preset, setPreset] = useState<Preset>("all");
   const [query, setQuery] = useState("");
+  // D110：输入防抖——30 万行下全量过滤每键 1s+ 会卡输入；输入框即时回显，过滤用 300ms 防抖值
+  const [queryInput, setQueryInput] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(queryInput), 300);
+    return () => clearTimeout(t);
+  }, [queryInput]);
   const [typeFilter, setTypeFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
   // v46（M14-UM2，§6.7.3）：「记忆接地」筛选（情境来自记忆的卡，含存疑）
@@ -296,23 +306,26 @@ export default function CardBrowser({
     }
     // v48.64（D108 §6.8-6 v3）：查询语法统一 AST 行判定——文本项逐词（修复含字段前缀/多 token
     // 查询整串 includes 恒 false 全灭的缺陷）、负号字段条件（-book:/-status:/-type:/-kind:）、
-    // or / 括号 / 通配符全部在 cardQuery.ts 求值；kind 页签联动只在无 or/括号查询里另行生效
-    list = list.filter((c) =>
-      cardRowMatches(parsed, {
-        frontMarkdown: c.frontMarkdown,
-        backMarkdown: c.backMarkdown,
-        noteText: c.noteText,
-        contextPrefix: c.contextPrefix,
-        docTitle: c.docTitle,
-        domain: c.domain,
-        tags: c.tags,
-        cardType: c.cardType,
-        status: c.status,
-        leechSuspended: Boolean(c.leech?.suspended),
-        fsrsState: c.fsrs?.state ?? "new",
-        priority: c.priority
-      })
-    );
+    // or / 括号 / 通配符全部在 cardQuery.ts 求值；kind 页签联动只在无 or/括号查询里另行生效。
+    // D110：无查询条件（ast 缺省＝无条件恒真）跳过逐行求值——30 万行省 30 万次谓词表构造
+    if (parsed.ast) {
+      list = list.filter((c) =>
+        cardRowMatches(parsed, {
+          frontMarkdown: c.frontMarkdown,
+          backMarkdown: c.backMarkdown,
+          noteText: c.noteText,
+          contextPrefix: c.contextPrefix,
+          docTitle: c.docTitle,
+          domain: c.domain,
+          tags: c.tags,
+          cardType: c.cardType,
+          status: c.status,
+          leechSuspended: Boolean(c.leech?.suspended),
+          fsrsState: c.fsrs?.state ?? "new",
+          priority: c.priority
+        })
+      );
+    }
     const sorted = [...list];
     if (sortBy === "created") sorted.sort((a, b) => b.createdAt - a.createdAt);
     else if (sortBy === "priority") sorted.sort((a, b) => b.priority - a.priority);
@@ -345,16 +358,18 @@ export default function CardBrowser({
     if (anchorClosure) list = list.filter((e) => anchorClosure.has(String(e.id)));
     // v48.64（D108 §6.8-6 v3）：统一 AST 行判定——kind:card 使摘录行全不命中（原 L378 return []
     // 等价）、type: 恒不命中（摘录行无卡形式，诚实语义）、文本项逐词 AND（原整串子串）、
-    // -book:/-status: 取反与 or/括号/通配符生效
-    list = list.filter((e) =>
-      extractRowMatches(parsed, {
-        contentMarkdown: e.contentMarkdown,
-        docTitle: e.docTitle,
-        status: e.status,
-        tagJson: (e as { tagJson?: string | null }).tagJson,
-        priority: e.priority
-      })
-    );
+    // -book:/-status: 取反与 or/括号/通配符生效。D110：无条件时跳过逐行求值。
+    if (parsed.ast) {
+      list = list.filter((e) =>
+        extractRowMatches(parsed, {
+          contentMarkdown: e.contentMarkdown,
+          docTitle: e.docTitle,
+          status: e.status,
+          tagJson: (e as { tagJson?: string | null }).tagJson,
+          priority: e.priority
+        })
+      );
+    }
     if (preset === "due") list = list.filter((e) => Number(e.topicNextAt) <= Date.now());
     // v48.40（D80）：摘录表此前完全忽略 sortBy（永远主进程的 priority/due 序），新摘录按到期升序沉底
     // ——补上与闪卡表同名的排序语义；「按创建时间」取降序（新摘录浮顶，可发现性）。
@@ -596,12 +611,73 @@ export default function CardBrowser({
     }
   }
 
-  // v48.22（D58 §6.8-6）：行数窗口——真实库可达上万行，全量渲染会让筛选/滚动卡顿；
-  // 先渲染 200 行 + 「显示更多」增量放行（真正的虚拟滚动留待后续批次，此处是可用性下限保障）
-  const [rowLimit, setRowLimit] = useState(200);
+  // v48.22（D58 §6.8-6）：行数窗口（先渲染 200 行 + 「显示更多」）已在 v48.66/D110 退役。
+  // D110：真虚拟滚动——固定行高窗口化渲染（30 万卡量测驱动，基线/复测数字见 tests/browser.perf.log）。
+  // 滚动容器＝组件根 .queue-wrap；两表各自按「表顶相对滚动视口」计算可见行区间（±OVERSCAN 冗余），
+  // 前后 spacer 撑起总高使滚动条稳定。行高恒定的依据：.cb-row 为 grid 单行 + 题面/来源列 nowrap
+  // + 行详情＝模态（非行内展开）。「显示更多」增量放行随之退役（滚动到底即全部可达）。
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const cardTableRef = useRef<HTMLDivElement | null>(null);
+  const extractTableRef = useRef<HTMLDivElement | null>(null);
+  const [rowH, setRowH] = useState(40);
+  const [headH, setHeadH] = useState(37);
+  const [win, setWin] = useState({ card: { start: 0, end: 0 }, extract: { start: 0, end: 0 } });
+
+  const recomputeWindows = useCallback(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const viewportH = wrap.clientHeight;
+    if (viewportH <= 0) return;
+    const wrapTop = wrap.getBoundingClientRect().top;
+    const OVERSCAN = 12;
+    // D110：Chromium 单滚动容器 scrollHeight 硬上限 ≈ 13.42M px（实测 30 万行 × 66px = 19.8M 被
+    // 钳在 13,421,773，滚到底物理不可达最后 ~9.7 万行；5 万行 3.3M 未触限）。总高超限时按比例
+    // 压缩 spacer 虚拟高度（C<1），滚动位置除以 C 还原行 index——滚动条一格覆盖多行、全程可达；
+    // C=1（total×rowH ≤ 上限）时映射完全精确。
+    const calc = (table: HTMLElement | null, total: number) => {
+      if (!table || total === 0 || rowH <= 0) return { start: 0, end: 0 };
+      const c = Math.min(1, SCROLL_CAP / (total * rowH));
+      const rel = table.getBoundingClientRect().top - wrapTop + headH; // 行区顶相对滚动视口（真实 px）
+      const unit = rowH * c;
+      const start = Math.max(0, Math.floor(-rel / unit) - OVERSCAN);
+      const end = Math.min(total, Math.max(start, Math.ceil((viewportH - rel) / unit) + OVERSCAN));
+      return { start, end };
+    };
+    setWin({ card: calc(cardTableRef.current, viewCards.length), extract: calc(extractTableRef.current, viewExtracts.length) });
+  }, [rowH, headH, viewCards, viewExtracts]);
+
+  // 行高实测——必须等窗口渲染出真实行后再量（首帧 win 全 0 量不到，估计值 40 与真实行高的偏差
+  // 在 30 万行深度会被 spacer 放大成「滚到底换页失准」；实测踩坑）。表样式为全局常量 → 量准一次即定。
+  useLayoutEffect(() => {
+    const table = cardTableRef.current ?? extractTableRef.current;
+    if (!table) return;
+    const row = table.querySelector(".cb-row:not(.cb-row-head)") as HTMLElement | null;
+    const head = table.querySelector(".cb-row-head") as HTMLElement | null;
+    if (row) {
+      const h = Math.max(1, Math.round(row.getBoundingClientRect().height));
+      if (h !== rowH) setRowH(h);
+    }
+    if (head) {
+      const h = Math.max(1, Math.round(head.getBoundingClientRect().height));
+      if (h !== headH) setHeadH(h);
+    }
+  }, [win, loaded, preset, kindFilter, rowH, headH]);
+
   useEffect(() => {
-    setRowLimit(200);
-  }, [query, typeFilter, stateFilter, preset, kindFilter, bookScope, memFilter, sortBy]);
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const onScroll = () => recomputeWindows();
+    wrap.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      wrap.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [recomputeWindows]);
+
+  useEffect(() => {
+    recomputeWindows();
+  }, [recomputeWindows]);
 
   // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）；
   // v48.64（D108）：含 or/括号的查询不做页签联动（kind 只是行谓词，布尔语义照常求值）
@@ -614,7 +690,7 @@ export default function CardBrowser({
   const extractDetail = extractDetailId ? extracts.find((e) => e.id === extractDetailId) ?? null : null;
 
   return (
-    <div className="queue-wrap">
+    <div className="queue-wrap" ref={wrapRef}>
       {/* v48.40（D80）：吸顶头带——计数 meta + preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline） */}
       <div className="cb-head">
         <div className="cb-head-inner">
@@ -659,8 +735,8 @@ export default function CardBrowser({
           <input
             className="cb-search"
             placeholder='搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）'
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={queryInput}
+            onChange={(e) => setQueryInput(e.target.value)}
           />
         </div>
         <div className="cb-cluster">
@@ -934,7 +1010,7 @@ export default function CardBrowser({
           ))}
         </div>
       ) : (
-        <div className="cb-table" role="table">
+        <div className="cb-table" role="table" ref={cardTableRef}>
           <div className="cb-row cb-row-head" role="row">
             <span className="cb-pick">选</span>
             <span>题面</span>
@@ -946,7 +1022,8 @@ export default function CardBrowser({
             <span className="cb-num">优先</span>
             <span>来源</span>
           </div>
-          {viewCards.slice(0, rowLimit).map((c) => (
+          {viewCards.length > 0 && <div style={{ height: win.card.start * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewCards.length * rowH)) : 1) }} aria-hidden="true" />}
+          {viewCards.slice(win.card.start, win.card.end).map((c) => (
             <div
               key={c.id}
               className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
@@ -977,15 +1054,7 @@ export default function CardBrowser({
               <span className="cb-src" title={srcLabel(c)}>{srcLabel(c)}</span>
             </div>
           ))}
-          {viewCards.length > rowLimit && (
-            <div className="cb-row" role="row">
-              <span className="cb-front">
-                <button className="btn btn-outline btn-sm" data-more-rows onClick={() => setRowLimit((n) => n + 200)}>
-                  显示更多（还有 {viewCards.length - rowLimit} 行）
-                </button>
-              </span>
-            </div>
-          )}
+          {viewCards.length > 0 && <div style={{ height: (viewCards.length - win.card.end) * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewCards.length * rowH)) : 1) }} aria-hidden="true" />}
         </div>
       )}
       </>
@@ -993,7 +1062,7 @@ export default function CardBrowser({
 
       {/* v48.22（D58 §6.8-6）：摘录表——与闪卡同页管理（状态/优先级/下次推送/来源书） */}
       {kindFilter !== "card" && (
-        <div className="cb-table" role="table" data-extract-table>
+        <div className="cb-table" role="table" data-extract-table ref={extractTableRef}>
           <div className="cb-row cb-row-head" role="row">
             <span className="cb-pick">选</span>
             <span>摘录内容</span>
@@ -1003,7 +1072,8 @@ export default function CardBrowser({
             <span>来源</span>
             <span>操作</span>
           </div>
-          {viewExtracts.slice(0, rowLimit).map((e) => (
+          {viewExtracts.length > 0 && <div style={{ height: win.extract.start * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewExtracts.length * rowH)) : 1) }} aria-hidden="true" />}
+          {viewExtracts.slice(win.extract.start, win.extract.end).map((e) => (
             <div
               key={e.id}
               className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
@@ -1053,15 +1123,7 @@ export default function CardBrowser({
               </span>
             </div>
           ))}
-          {viewExtracts.length > rowLimit && (
-            <div className="cb-row" role="row">
-              <span className="cb-front">
-                <button className="btn btn-outline btn-sm" data-more-rows-extract onClick={() => setRowLimit((n) => n + 200)}>
-                  显示更多（还有 {viewExtracts.length - rowLimit} 行）
-                </button>
-              </span>
-            </div>
-          )}
+          {viewExtracts.length > 0 && <div style={{ height: (viewExtracts.length - win.extract.end) * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewExtracts.length * rowH)) : 1) }} aria-hidden="true" />}
           {viewExtracts.length === 0 && (
             <div className="cb-row" role="row">
               <span className="cb-front">没有符合筛选条件的摘录。</span>

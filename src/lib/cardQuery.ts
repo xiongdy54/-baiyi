@@ -422,20 +422,23 @@ export interface CardQueryCardRow {
 }
 
 export function makeCardPredicates(row: CardQueryCardRow): QueryPredicates {
-  const hay = [
-    row.frontMarkdown,
-    row.backMarkdown,
-    row.noteText,
-    row.contextPrefix || "",
-    row.docTitle || "",
-    ...(row.domain ?? []),
-    ...(row.tags ?? [])
-  ]
-    .join("\n")
-    .normalize("NFKC")
-    .toLowerCase();
+  // D110：hay 惰性构造——无文本条件（无 text leaf / 空查询）时 30 万行不花 join+NFKC+lowercase 的钱
+  let hay: string | null = null;
+  const getHay = () =>
+    (hay ??= [
+      row.frontMarkdown,
+      row.backMarkdown,
+      row.noteText,
+      row.contextPrefix || "",
+      row.docTitle || "",
+      ...(row.domain ?? []),
+      ...(row.tags ?? [])
+    ]
+      .join("\n")
+      .normalize("NFKC")
+      .toLowerCase());
   return {
-    text: (v) => valueMatches(hay, foldQueryText(v)),
+    text: (v) => valueMatches(getHay(), foldQueryText(v)),
     kind: (v) => v === "card",
     book: (v) => valueMatches(foldQueryText(String(row.docTitle || "")), foldQueryText(v)),
     status: (v) => {
@@ -468,9 +471,11 @@ export interface CardQueryExtractRow {
 }
 
 export function makeExtractPredicates(row: CardQueryExtractRow): QueryPredicates {
-  const hay = `${row.contentMarkdown ?? ""}\n${row.docTitle ?? ""}`.toLowerCase();
+  // D110：同闪卡行——hay 惰性构造
+  let hay: string | null = null;
+  const getHay = () => (hay ??= `${row.contentMarkdown ?? ""}\n${row.docTitle ?? ""}`.toLowerCase());
   return {
-    text: (v) => valueMatches(hay, foldQueryText(v)),
+    text: (v) => valueMatches(getHay(), foldQueryText(v)),
     kind: (v) => v === "extract",
     book: (v) => valueMatches(foldQueryText(String(row.docTitle || "")), foldQueryText(v)),
     status: (v) => String(row.status ?? "open").toLowerCase() === v,

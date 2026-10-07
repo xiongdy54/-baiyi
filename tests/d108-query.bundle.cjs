@@ -337,7 +337,8 @@ function priorityPredicate(rowPriority) {
   };
 }
 function makeCardPredicates(row) {
-  const hay = [
+  let hay = null;
+  const getHay = () => hay ??= [
     row.frontMarkdown,
     row.backMarkdown,
     row.noteText,
@@ -347,7 +348,7 @@ function makeCardPredicates(row) {
     ...row.tags ?? []
   ].join("\n").normalize("NFKC").toLowerCase();
   return {
-    text: (v) => valueMatches(hay, foldQueryText(v)),
+    text: (v) => valueMatches(getHay(), foldQueryText(v)),
     kind: (v) => v === "card",
     book: (v) => valueMatches(foldQueryText(String(row.docTitle || "")), foldQueryText(v)),
     status: (v) => {
@@ -367,10 +368,11 @@ function cardRowMatches(q, row) {
   return evalQueryNode(q.ast, makeCardPredicates(row));
 }
 function makeExtractPredicates(row) {
-  const hay = `${row.contentMarkdown ?? ""}
+  let hay = null;
+  const getHay = () => hay ??= `${row.contentMarkdown ?? ""}
 ${row.docTitle ?? ""}`.toLowerCase();
   return {
-    text: (v) => valueMatches(hay, foldQueryText(v)),
+    text: (v) => valueMatches(getHay(), foldQueryText(v)),
     kind: (v) => v === "extract",
     book: (v) => valueMatches(foldQueryText(String(row.docTitle || "")), foldQueryText(v)),
     status: (v) => String(row.status ?? "open").toLowerCase() === v,
