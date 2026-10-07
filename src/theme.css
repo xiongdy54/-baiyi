@@ -4093,7 +4093,6 @@ body.theme-dark .modal-panel {
   margin: 0 0 var(--sp-1);
 }
 .ai-preset-name { display: block; font-weight: 500; }
-.ai-preset-hint { display: block; font-size: var(--fs-meta); color: var(--text-helper); }
 .ai-fields {
   margin-top: var(--sp-4);
   display: flex;

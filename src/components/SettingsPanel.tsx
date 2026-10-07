@@ -392,7 +392,7 @@ function AISection() {
                   onClick={() => save({ preset: p.id })}
                 >
                   <span className="ai-preset-name">{p.name}</span>
-                  <span className="ai-preset-hint">{p.hint}</span>
+                  {/* D115：名称后缀灰字（p.hint）不再渲染；hint 数据仍在注册表，Key 区引导语仍消费 */}
                 </button>
               ))}
             </div>
