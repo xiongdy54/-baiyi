@@ -6173,8 +6173,11 @@ body.capture-body #root { height: 100vh; }
   min-height: 0;
 }
 /* Milkdown 双层包裹（data-milkdown-root > .milkdown）都必须进 flex 链——否则内容高度把
-   工具条推出卡外（实测：长文时 tb bottom = 内容尾而非卡底） */
-.extract-page .extract-face-body[data-editing="1"] .markdown-editor > div {
+   工具条推出卡外（实测：长文时 tb bottom = 内容尾而非卡底）。
+   D109：选择器从 `> div` 收窄为 `> [data-milkdown-root]`——`> div` 会同时命中同为直接
+   子元素的工具条 div，把它的 flex-direction 覆盖成 column + 拉伸，wrap 后列优先折成
+   多列（用户实测：19 钮竖排两列）。 */
+.extract-page .extract-face-body[data-editing="1"] .markdown-editor > [data-milkdown-root] {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -6651,7 +6654,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
      同一套 pop-in 入场（见文件头浮层家族规则；reduced-motion 自动降级为零动画）。 */
 .extract-face-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  /* D109（用户指令）硬不变量：任何形态任何宽度恒单行横排——永不换行竖排；
+     空间不足时按钮行内横向滚动（scrollbar 由全局细样式承载）。 */
+  flex-wrap: nowrap;
+  overflow-x: auto;
   align-items: center;
   gap: var(--sp-1);
   margin-top: var(--sp-2);
@@ -6697,6 +6703,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   gap: 2px;
   width: 26px;
   height: 24px;
+  flex-shrink: 0; /* D109：单行硬不变量——不压缩，溢出走工具条行内横滚 */
   padding: 0;
   background: none;
   border: 1px solid transparent;
@@ -6716,7 +6723,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .md-glyph-italic { font-style: italic; font-family: Georgia, "Times New Roman", serif; }
 .md-glyph-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 /* 标题层级下拉（tb=h） */
-.md-tb-menu-wrap { position: relative; display: inline-flex; }
+.md-tb-menu-wrap { position: relative; display: inline-flex; flex-shrink: 0; } /* D109：单行硬不变量同上 */
 .md-tb-menu {
   position: absolute;
   top: 26px;
