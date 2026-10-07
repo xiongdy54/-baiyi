@@ -129,8 +129,8 @@ try {
   await wait(1000);
   const modalOpen = await cdp.eval(`!!document.querySelector(".settings-nav")`);
   check("设置面板已打开", modalOpen === true, modalOpen);
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".settings-nav button")].find((x) => x.textContent.includes("同源")); b?.click(); return !!b; })()`);
-  await wait(600);
+  // v48.70（D114）：设置页重设计后导航项为「调度规则」，不再含「同源」——
+  // 改为直达定位：子块根元素保留 id sec-siblingbury（设计稿 §12-T4 迁移）
   const secVisible = await cdp.eval(`!!document.querySelector("#sec-siblingbury")`);
   check("设置含「同源卡延后」区块", secVisible === true, secVisible);
   const secText = await cdp.eval(`document.querySelector("#sec-siblingbury")?.textContent || ""`);

@@ -1659,6 +1659,20 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("[backup] 自动备份失败：", err);
   }
+  // D117（v48.73）：启动空闲补齐旧档 sidecar（备份列表零解压加速缓存，诊断报告 §4.1）。
+  // 延迟 5s 让启动流程先落定；后台串行 worker 解析、不阻塞主进程（worker_threads，§4.2）。
+  // 失败只影响下次列表速度（回退 zip 解析），不影响正确性——sidecar 是缓存，zip 本体是事实源。
+  setTimeout(() => {
+    try {
+      Promise.resolve(backup.backfillSidecars())
+        .then((r) => {
+          if (r && (r.written || r.swept)) console.log(`[backup] sidecar 补齐：补写 ${r.written}、回收孤儿 ${r.swept}（${r.dir}）`);
+        })
+        .catch((err) => console.error("[backup] sidecar 补齐失败：", err));
+    } catch (err) {
+      console.error("[backup] sidecar 补齐失败：", err);
+    }
+  }, 5000);
   // v45（M14-UM1，§4.18-11①）：启动补跑——开启 + 有未整理条目 + 距上次成功 ≥12h；失败不阻塞启动
   try {
     memoryTidy.startupBackfillIfDue(memoryCtx());

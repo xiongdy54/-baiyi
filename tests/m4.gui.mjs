@@ -375,8 +375,11 @@ await evalJS(`(() => { const gear = document.querySelector('[title=\"设置\"]')
 await sleep(600);
 await evalJS(`(() => { const nav = [...document.querySelectorAll('.settings-nav button')].find((b) => b.textContent === '快捷键'); nav && nav.click(); return 'nav'; })()`);
 await sleep(400);
-const kbRows = await evalJS(`document.querySelectorAll('.kb-row').length`);
-check("快捷键区块 13 行（v22 增补撤销评分）", kbRows === 13, kbRows);
+// v48.70（D114）：「全局快捷键」并入 sec-shortcuts（子块根保留 id sec-global），
+// .kb-row 计数改作用域断言并修正既有失真（document 级 ===13 是 v36 引入全局快捷键前的旧值）：
+// 14 条应用内键位（阅读 5 + 复习 9，含 v22 撤销评分）+ 3 条全局快捷键 = 17（设计稿 §12-T7 迁移）
+const kbRows = await evalJS(`document.querySelectorAll('#sec-shortcuts .kb-row').length`);
+check("快捷键区块 17 行（14 应用内 + 3 全局）", kbRows === 17, kbRows);
 
 // 捕获：把「评分 Good」改为 8
 const captureGood = parseState(await evalJS(`(async () => {
