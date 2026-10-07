@@ -3,9 +3,12 @@
 // 恢复 = 校验 → 先对当前数据做安全备份 → 解包到 restore-staging/ + restore-pending.json 标记
 //        → 重启应用时 applyPendingRestore() 换入生效（sql.js 内存库约束 §7.1.8，运行期禁止直接换库文件）
 // 核心函数均接受显式路径（opts.dataDir 等），缺省时从 electron app 取——便于无 Electron 环境跑单元测试。
+// D117（v48.73）：备份列表 meta 走 sidecar 加速缓存（<backupDir>/meta/<zip 名>.json），列表零解压；
+//                回退解析在 worker_threads 内执行——主进程不再被整包读 zip 阻塞（打开设置卡顿根治）。
 const fs = require("fs");
 const path = require("path");
 const JSZip = require("jszip");
+const { Worker } = require("worker_threads");
 
 const APP_TAG = "incremental-reading-dev";
 const FORMAT = 1;
@@ -15,6 +18,15 @@ const AUTO_RE = /^backup-auto-\d{4}-\d{2}-\d{2}\.zip$/;
 // 给 safety 单独一个上限（保留最近 5 份，足够回退几次误恢复）。
 const SAFETY_RE = /^backup-safety-\d{8}-\d{6}(-\d+)?\.zip$/;
 const SAFETY_KEEP = 5;
+// D117（v48.73，docs/design/SETTINGS-OPEN-JANK-D116.md §4.1/§4.2）：备份列表元数据 sidecar。
+// 备份 zip 本体仍是唯一事实源（§1.9「同一份事实不允许两套解释」）；sidecar 只是**列表加速缓存**：
+// 命中（key = zip 的 mtime+size，与下方 listCache 同键先例）→ 列表零解压毫秒级返回；
+// 缺失/损坏/失配（zip 被篡改、替换）→ 回退 zip 解析（worker_threads 内执行，§4.2）→ 成功即补写自愈。
+// 文件 = <backupDir>/meta/<zip 名>.json（报告 §4.1 的「zip 名 + .json」）。只挪进子目录的原因：
+// 既有闸门与单测按「目录顶层文件名」过滤计数（f05 B6 的 ^backup-auto- 计数、backup.test.cjs 同型断言），
+// 顶层散放 .json 会被一并计入而误报；子目录同时让备份目录对用户保持「只有 zip」的干净视图。
+const SIDECAR_DIR = "meta";
+const BACKUP_ZIP_RE = /^backup-(manual|auto|safety)-.+\d\.zip$/i;
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -237,6 +249,11 @@ async function createBackup(opts = {}) {
     const tmp = destFile + ".part";
     fs.writeFileSync(tmp, buf);
     fs.renameSync(tmp, destFile);
+    // D117：落列表加速 sidecar（缓存，非事实源）。写失败不影响备份本体成功
+    //（writeSidecar 内部吞错）；这里连 stat 都取不到时同样放弃，留给下次列表/启动补齐自愈。
+    try {
+      writeSidecar(destFile, statKeyOf(fs.statSync(destFile)), meta);
+    } catch { /* 忽略：sidecar 缺失只影响下次列表速度 */ }
     // A-13（审计）：safety 备份纳入滚动清理，否则每执行一次「恢复」就多一份且永不删除
     if (label === "safety") rotateSafetyBackups(destDir, opts.safetyKeep || SAFETY_KEEP);
     return { ok: true, file: destFile, meta };
@@ -248,7 +265,75 @@ async function createBackup(opts = {}) {
 
 const listCache = new Map(); // file → { key, entry }（按 mtime+size 失效，避免列表反复解压全部 zip）
 
-async function readBackupMeta(file) {
+// ---------- D117：meta sidecar（列表加速缓存，zip 本体仍是唯一事实源） ----------
+
+function sidecarPathFor(zipFile) {
+  return path.join(path.dirname(zipFile), SIDECAR_DIR, path.basename(zipFile) + ".json");
+}
+function statKeyOf(st) {
+  return `${st.mtimeMs}-${st.size}`;
+}
+
+// 读并校验 sidecar：内容 { key, meta }。key 与 zip 当前 mtime+size 不一致（zip 被篡改/替换）→ 视为失效。
+// 缺失/损坏/失配一律返回 null，由调用方走 zip 回退解析。
+function readSidecar(zipFile, key) {
+  try {
+    const sc = JSON.parse(fs.readFileSync(sidecarPathFor(zipFile), "utf-8"));
+    if (sc && sc.key === key && sc.meta && typeof sc.meta === "object" && !Array.isArray(sc.meta)) return sc.meta;
+  } catch { /* 缺失/损坏 → 回退 zip 解析 */ }
+  return null;
+}
+
+// 原子写 sidecar（temp + rename），best-effort：sidecar 是缓存不是事实源，任何失败都不影响备份本体成功。
+// writeFileSync + renameSync 背靠背同步执行、中间无 await ⇒ 进程被杀也造不出半成品 sidecar；
+// 临时名后缀用 .new（避开 f39 leftovers 哨兵的 .tmp/.part 模式），失败即清。
+function writeSidecar(zipFile, key, meta) {
+  const sc = sidecarPathFor(zipFile);
+  const tmp = sc + ".new";
+  try {
+    fs.mkdirSync(path.dirname(sc), { recursive: true });
+    fs.writeFileSync(tmp, JSON.stringify({ key, meta }));
+    fs.renameSync(tmp, sc);
+    return true;
+  } catch {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* 尽力 */ }
+    return false;
+  }
+}
+
+function removeSidecar(dir, zipName) {
+  try { fs.rmSync(sidecarPathFor(path.join(dir, zipName)), { force: true }); } catch { /* 尽力：漏删只是无害孤儿 */ }
+}
+
+// D117 §4.2（防御纵深）：zip 回退解析挪进 worker_threads —— 主进程（=Chromium browser 进程 UI 线程）
+// 永不再被单份大 zip 的「整包读入 + 解压」阻塞（895MB×N 份曾把主进程按住 10–17s）。
+// worker 崩溃/超时/不可用 → status:"error"，调用方用同步路径兜底（报告 §4.2「worker 崩溃回退」）。
+function parseMetaInWorker(file, timeoutMs = 60000) {
+  return new Promise((resolve) => {
+    let w;
+    try {
+      w = new Worker(path.join(__dirname, "backup-meta-worker.js"), { workerData: { file } });
+    } catch {
+      resolve({ status: "error" });
+      return;
+    }
+    let settled = false;
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { w.terminate(); } catch { /* 尽力 */ }
+      resolve(v);
+    };
+    const timer = setTimeout(() => finish({ status: "error" }), timeoutMs);
+    w.on("message", (m) => finish(m && m.ok ? { status: "ok", meta: m.meta ?? null } : { status: "error" }));
+    w.on("error", () => finish({ status: "error" }));
+    w.on("exit", () => finish({ status: "error" })); // 没发 message 就退出 = 失败
+  });
+}
+
+// 同步兜底（worker 不可用时仍可用）：会阻塞主进程，仅作防御回退，正常路径不再走到这里。
+async function readBackupMetaSync(file) {
   let buf;
   try {
     buf = fs.readFileSync(file);
@@ -265,12 +350,54 @@ async function readBackupMeta(file) {
   }
 }
 
-async function listBackups(opts = {}) {
+// 回退解析（sidecar 未命中时唯一入口）：先 worker（不阻塞主进程），失败再同步兜底。
+// 按文件去重并发：listBackups 与启动补齐可能同时盯上同一份旧档，避免重复解析 895MB。
+const inflightZipParses = new Map(); // file → Promise<meta|null>
+function parseZipMetaFallback(file) {
+  let p = inflightZipParses.get(file);
+  if (!p) {
+    p = (async () => {
+      const r = await parseMetaInWorker(file);
+      if (r.status === "ok") return r.meta;
+      return readBackupMetaSync(file);
+    })().finally(() => inflightZipParses.delete(file));
+    inflightZipParses.set(file, p);
+  }
+  return p;
+}
+
+// D117：读备份 meta。sidecar 命中 → 零解压直接返回；未命中 → zip 回退解析（worker 内）并补写自愈。
+// 返回 null 表示不是本软件的有效备份（与既有语义一致）。
+async function readBackupMeta(file) {
+  let st;
+  try {
+    st = fs.statSync(file);
+  } catch {
+    return null;
+  }
+  const key = statKeyOf(st);
+  const hit = readSidecar(file, key);
+  if (hit) return hit;
+  const meta = await parseZipMetaFallback(file);
+  if (meta) writeSidecar(file, key, meta); // 自愈补写（best-effort，失败不影响正确性）
+  return meta;
+}
+
+// D117：启动空闲补齐（由 main.js 在拿到单实例锁后调度）——为缺 sidecar 的旧档后台补写，
+// 让老用户第二次打开设置即全量走 sidecar；顺带回收「zip 已被外部删除」的孤儿 sidecar/半成品。
+// 逐份串行 worker 解析（同时最多一份 895MB 在途，内存可控）；全函数不阻塞主进程事件循环。
+async function backfillSidecars(opts = {}) {
   const dir = getBackupDir(opts);
-  if (!fs.existsSync(dir)) return { backupDir: dir, backups: [] };
-  const out = [];
-  for (const name of fs.readdirSync(dir)) {
-    if (!/^backup-(manual|auto|safety)-.+\d\.zip$/i.test(name)) continue;
+  if (!fs.existsSync(dir)) return { ok: true, dir, scanned: 0, written: 0, swept: 0 };
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch (err) {
+    return { ok: false, dir, error: err instanceof Error ? err.message : String(err) };
+  }
+  const zips = names.filter((n) => BACKUP_ZIP_RE.test(n));
+  let written = 0;
+  for (const name of zips) {
     const full = path.join(dir, name);
     let st;
     try {
@@ -279,7 +406,45 @@ async function listBackups(opts = {}) {
       continue;
     }
     if (!st.isFile()) continue;
-    const key = `${st.mtimeMs}-${st.size}`;
+    const key = statKeyOf(st);
+    if (readSidecar(full, key)) continue;
+    const meta = await parseZipMetaFallback(full);
+    if (meta && writeSidecar(full, key, meta)) written++;
+  }
+  let swept = 0;
+  const metaDir = path.join(dir, SIDECAR_DIR);
+  let metaNames = [];
+  try {
+    metaNames = fs.readdirSync(metaDir);
+  } catch { /* meta/ 不存在就没有孤儿 */ }
+  for (const name of metaNames) {
+    const zipName = name.endsWith(".json.new")
+      ? name.slice(0, -".json.new".length)
+      : name.endsWith(".json")
+        ? name.slice(0, -".json".length)
+        : null;
+    if (!zipName || !BACKUP_ZIP_RE.test(zipName)) continue;
+    if (fs.existsSync(path.join(dir, zipName))) continue;
+    try { fs.rmSync(path.join(metaDir, name), { force: true }); swept++; } catch { /* 尽力 */ }
+  }
+  return { ok: true, dir, scanned: zips.length, written, swept };
+}
+
+async function listBackups(opts = {}) {
+  const dir = getBackupDir(opts);
+  if (!fs.existsSync(dir)) return { backupDir: dir, backups: [] };
+  const out = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!BACKUP_ZIP_RE.test(name)) continue;
+    const full = path.join(dir, name);
+    let st;
+    try {
+      st = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) continue;
+    const key = statKeyOf(st);
     let meta = null;
     const hit = listCache.get(full);
     if (hit && hit.key === key) meta = hit.meta;
@@ -329,6 +494,7 @@ function rotateSafetyBackups(dir, keep = SAFETY_KEEP) {
   const safeties = listByMtimeAsc(dir, SAFETY_RE);
   for (const f of safeties.slice(0, Math.max(0, safeties.length - keep))) {
     try { fs.rmSync(path.join(dir, f), { force: true }); } catch { /* 单个删除失败不影响其余 */ }
+    removeSidecar(dir, f); // D117：zip 被轮转掉，它的列表 sidecar 一并清（漏删也只是无害孤儿）
   }
 }
 
@@ -358,6 +524,7 @@ function rotateAutoBackups(dir, keep) {
     try {
       fs.rmSync(path.join(dir, f), { force: true });
     } catch { /* 单个删除失败不影响其余 */ }
+    removeSidecar(dir, f); // D117：zip 被轮转掉，它的列表 sidecar 一并清（漏删也只是无害孤儿）
   }
 }
 
@@ -537,6 +704,7 @@ module.exports = {
   autoBackupIfNeeded,
   rotateAutoBackups,
   rotateSafetyBackups,
+  backfillSidecars,
   getBackupDir,
   getDataInfo,
   readBackupMeta
