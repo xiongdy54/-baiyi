@@ -3,7 +3,7 @@
 // 输出四分支（Knowledge/Self/Frontier/Structure）；反馈四档只写 insight_runs（永不写 mastery）；
 // 去向：就此制卡（createAcceptedCard 复用制卡管线 + CardLint）/ 沉淀 Personal Meaning 候选 / 跳转关联。
 import { useCallback, useEffect, useRef, useState } from "react";
-import { aiGateway } from "../lib/ai";
+import { aiConfigUsable, aiGateway } from "../lib/ai";
 import { createAcceptedCard } from "../lib/cards";
 import { eventBus } from "../lib/eventbus";
 import { useDialogA11y } from "../lib/dialogA11y";
@@ -69,7 +69,8 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
     void (async () => {
       try {
         const cfg = await aiGateway.getConfig();
-        setNoKey(!cfg?.hasKey);
+        // aiConfigUsable：本地预设免 Key（v48.68 / D112——此前只看 hasKey 误判本地配置）
+        setNoKey(!aiConfigUsable(cfg));
       } catch {
         setNoKey(true);
       }

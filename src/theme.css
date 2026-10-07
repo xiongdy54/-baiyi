@@ -3944,6 +3944,16 @@ body.theme-dark .modal-panel {
 }
 
 /* ---------- AI 设置 ---------- */
+/* 供应商注册表分组（v48.68 / D112）：官方云服务 / 聚合平台 / 本地运行时 / 通用 */
+.ai-preset-group { margin-top: var(--sp-3); }
+.ai-preset-group:first-child { margin-top: 0; }
+.ai-preset-group-label {
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  margin: 0 0 var(--sp-1);
+}
 .ai-preset-name { display: block; font-weight: 500; }
 .ai-preset-hint { display: block; font-size: var(--fs-meta); color: var(--text-helper); }
 .ai-fields {

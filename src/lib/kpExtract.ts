@@ -1,7 +1,7 @@
 // AI 抽取归一编排（v41，K2-A，D38）——渲染层唯一入口，位置与制卡/洞察管线一致：
 // 主进程只做输入装配（kpExtractPrepare）与确定性裁决（kpExtractApply）；本模块只负责调 AI
 // （两个 scope 各一次、temperature 0.1、无 Key 静默跳过）。AI 跑几次结果不变由主进程裁决器保证。
-import { aiGateway } from "./ai";
+import { aiConfigUsable, aiGateway } from "./ai";
 import { knowledgeApi, type KpExtractionSummary } from "./knowledge";
 
 export type KpAiSkipReason = "unsupported" | "no-clusters" | "no-key" | "no-prompt" | null;
@@ -19,7 +19,8 @@ export async function runKpAiProcessing(opts: { sources?: { knowledgePointId: st
   const prep = await knowledgeApi.kpExtractPrepare(opts);
   if (!prep || prep.clusterCount === 0) return { skipped: "no-clusters", clusterCount: 0, summary: null };
   const cfg = await aiGateway.getConfig();
-  if (!cfg?.hasKey) return { skipped: "no-key", clusterCount: prep.clusterCount, summary: null };
+  // aiConfigUsable：本地预设免 Key（v48.68 / D112——此前只看 hasKey，本地无 Key 配置被误判静默跳过）
+  if (!aiConfigUsable(cfg)) return { skipped: "no-key", clusterCount: prep.clusterCount, summary: null };
   const tplE = await window.promptsAPI?.get("knowledge-extraction");
   if (!tplE?.content) return { skipped: "no-prompt", clusterCount: prep.clusterCount, summary: null };
   try {
