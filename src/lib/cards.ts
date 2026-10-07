@@ -20,6 +20,12 @@ declare global {
       listDue: () => Promise<unknown[]>;
       todayQueue?: (now?: number) => Promise<unknown>;
       listAll: () => Promise<unknown[]>;
+      /** v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数（meta/ids 轻量行集 + 行窗口按需取） */
+      listMeta?: () => Promise<unknown>;
+      queryIds?: (query: string) => Promise<unknown>;
+      getWindow?: (ids: string[]) => Promise<unknown[]>;
+      siblingGroup?: (key: string) => Promise<unknown[]>;
+      deferredToday?: (now?: number) => Promise<unknown>;
       remove: (id: string) => Promise<boolean>;
       review: (cardId: string, fsrsState: unknown, rating: string, durationMs?: number, fsrsBefore?: unknown) => Promise<boolean>;
       lastUndoableReview: () => Promise<unknown>;
@@ -854,6 +860,28 @@ export const similaritySearch = {
 };
 
 // ---------- 卡片持久化封装 ----------
+/** v48.67（D111 §6.8-6 数据通道）：主进程轻量行集——无题面/答案/备注大列，排序/预设/页签/锚点闭包/按书 scope 全在渲染层消费 */
+export interface BrowserMetaRow {
+  id: string;
+  bookId: string | null;
+  docTitle: string | null;
+  extractId: string | null;
+  priority: number;
+  status: string | null;
+  cardType: string;
+  fsrsState: string;
+  suspended: boolean;
+  isLeech: boolean;
+  due: number | null;
+  lapses: number;
+  reps: number;
+  mem: 0 | 1;
+  createdAt: number;
+}
+export interface BrowserBooksEntry { id: string; title: string }
+export interface BrowserMetaResult { fp: string; total: number; meta: BrowserMetaRow[]; books: BrowserBooksEntry[] }
+export interface BrowserQueryResult { fp: string; meta: BrowserMetaRow[] }
+
 /** v34（M12，§4.2-20）：今日队列视图——「今日该复习什么」的唯一口径（队列与统计同源） */
 export interface TodayQueue {
   cards: (CardRecord & { docTitle?: string })[];
@@ -864,6 +892,9 @@ export interface TodayQueue {
   })[];
   now: number;
 }
+
+/** 延后原因：kind=reviewed（同源卡今日已评分）/ revealed（同组今日放行名额已被占） */
+export type DeferredReason = NonNullable<TodayQueue["deferred"][number]["deferReason"]>;
 
 export const cardsApi = {
   create: async (card: unknown) => (await window.cardsAPI?.create(card)) ?? { id: "" },
@@ -876,6 +907,15 @@ export const cardsApi = {
   todayQueue: async (now?: number) =>
     ((await window.cardsAPI?.todayQueue?.(now)) ?? { cards: [], deferred: [], now: Date.now() }) as TodayQueue,
   listAll: async () => ((await window.cardsAPI?.listAll()) ?? []) as (CardRecord & { docTitle?: string })[],
+  // v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数
+  listMeta: async () =>
+    ((await window.cardsAPI?.listMeta?.()) ?? { fp: "", total: 0, meta: [], books: [] }) as BrowserMetaResult,
+  queryIds: async (query: string) =>
+    ((await window.cardsAPI?.queryIds?.(query)) ?? { fp: "", meta: [] }) as BrowserQueryResult,
+  getWindow: async (ids: string[]) => ((await window.cardsAPI?.getWindow?.(ids)) ?? []) as (CardRecord & { docTitle?: string })[],
+  siblingGroup: async (key: string) => ((await window.cardsAPI?.siblingGroup?.(key)) ?? []) as (CardRecord & { docTitle?: string })[],
+  deferredToday: async (now?: number) =>
+    ((await window.cardsAPI?.deferredToday?.(now)) ?? []) as Array<{ id: string; deferReason: DeferredReason }>,
   remove: async (id: string) => (await window.cardsAPI?.remove(id)) ?? false,
   // v22 撤销评分：review 传 fsrsBefore（评分前 FSRS 快照）方可撤销
   review: async (cardId: string, fsrsState: unknown, rating: string, durationMs?: number, fsrsBefore?: unknown) => {

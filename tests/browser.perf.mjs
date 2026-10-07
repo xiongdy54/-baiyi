@@ -1,6 +1,7 @@
 // 浏览器性能量测（CDP 真机；node tests/browser.perf.mjs）
 // 目的：为「行数窗口 vs 虚拟滚动」提供实测数字（规格 §H 要求「须先量测再替换」）
-// 量什么：① 全量取数 IPC 往返；② 进入卡片页到首屏行出现；③ 输入筛选后的重绘；④ DOM 行数是否受窗口限制
+// 量什么：① 取数通道（v48.67/D111 起为 meta/ids 主进程过滤 + 行窗口；listAll 保留作对照）；
+//         ② 进入卡片页到首屏行出现；③ DOM 行数是否受窗口限制 + 深滚动正确性；④ 输入筛选后的主进程查询耗时
 // 规模（D110，用户 2026-10-07 指令）＝30 万卡 + 5 万摘录（终身使用量级）；环境变量可调小做快速冒烟
 import { spawn, execSync } from "node:child_process";
 import fs, { openSync } from "node:fs";
@@ -68,18 +69,29 @@ try {
   await wait(2500);
   check("应用启动", (await cdp.eval(`!!document.querySelector("#root")`)) === true, "未挂载");
 
-  // ① 全量取数 IPC 往返（客户端每次刷新都全量取，这是行数增长时最可能先爆的一环）
-  const ipcMs = await cdp.eval(`(async () => { const t = performance.now(); const all = await window.cardsAPI.listAll(); return JSON.stringify({ ms: Math.round(performance.now() - t), n: all.length }); })()`);
+  // ① 取数通道（v48.67 / D111：主进程过滤 + 分页取数——meta 轻量行集为主，listAll 仅作对照不再被浏览器消费）
+  const ipcMs = await cdp.eval(`(async () => { const t = performance.now(); const m = await window.cardsAPI.listMeta(); return JSON.stringify({ ms: Math.round(performance.now() - t), n: m.total }); })()`);
   const ipc = JSON.parse(ipcMs || "{}");
-  console.log(`    · 全量 listAll：${ipc.n} 行 / ${ipc.ms}ms`);
-  check("全量取数与种子一致", Number(ipc.n) >= CARDS, CARDS, ipc.n);
+  console.log(`    · cards:listMeta：${ipc.n} 行 / ${ipc.ms}ms`);
+  check("meta 取数与种子一致", Number(ipc.n) >= CARDS, CARDS, ipc.n);
+  const cmp = JSON.parse(String(await cdp.eval(`(async () => {
+    const t0 = performance.now();
+    await window.cardsAPI.listAll();
+    const t1 = performance.now();
+    const q1 = await window.cardsAPI.queryIds("PERFCARD 题面 ${CARDS - 1}");
+    const t2 = performance.now();
+    const q2 = await window.cardsAPI.queryIds("PERFCARD 题面 ${CARDS - 1}");
+    const t3 = performance.now();
+    return JSON.stringify({ listAllMs: Math.round(t1 - t0), queryColdMs: Math.round(t2 - t1), queryWarmMs: Math.round(t3 - t2), qn1: q1.meta.length, qn2: q2.meta.length });
+  })()`)) || "{}");
+  console.log(`    · 对照：listAll ${cmp.listAllMs}ms / queryIds 冷 ${cmp.queryColdMs}ms / 温 ${cmp.queryWarmMs}ms（D110 基线 listAll 29–40s）`);
 
-  // ② 进入卡片页到首屏行出现
+  // ② 进入卡片页到首屏行出现（meta 通道 + 行窗口按需取）
   const t0 = Date.now();
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
   let rows = 0;
-  for (let i = 0; i < 40; i++) {
-    await wait(150);
+  for (let i = 0; i < 60; i++) {
+    await wait(250);
     rows = Number(await cdp.eval(`document.querySelectorAll(".cb-table .cb-row:not(.cb-row-head)").length`)) || 0;
     if (rows > 0) break;
   }
@@ -90,9 +102,9 @@ try {
   // ③ DOM 行数受虚拟窗口限制（D110：可见行 + 2×12 冗余；视口 ~600px/40px ≈ 15 行 → 上限 80 从宽）
   check("DOM 行数受虚拟窗口限制（≤80 行，D110）", rows <= 80, `${rows} 行（库内 ${CARDS} 卡）`);
 
-  // ③b D110 深滚动：滚到底后 DOM 行数仍有界，且最后一行内容真实出现在 DOM（spacer 高度与窗口换页正确）
+  // ③b D110 深滚动：滚到底后 DOM 行数仍有界，且最后一行内容真实出现在 DOM（行窗口换页经新通道仍正确）
   await cdp.eval(`(() => { const w = document.querySelector(".queue-wrap"); if (w) w.scrollTop = w.scrollHeight; return true; })()`);
-  await wait(700);
+  await wait(900);
   const deep = JSON.parse(String(await cdp.eval(`(() => {
     const rows2 = [...document.querySelectorAll(".cb-table .cb-row:not(.cb-row-head)")];
     const last = rows2[rows2.length - 1];
@@ -103,22 +115,26 @@ try {
   await cdp.eval(`(() => { const w = document.querySelector(".queue-wrap"); if (w) w.scrollTop = 0; return true; })()`);
   await wait(500);
 
-  // ④ 输入筛选后的重绘耗时（防抖 300ms 后一次完整过滤 + 渲染；筛选词取唯一串——30 万行下
-  //    「第 12」这类短前缀子串命中数千行会让「缩小结果集」断言失效）
-  const filterMs = await cdp.eval(`(async () => {
+  // ④ 输入筛选 → 主进程查询（防抖 300ms 后 cards:queryIds 求值 + 行窗口取数；筛选词取唯一串）
+  await cdp.eval(`(() => {
     const inp = document.querySelector(".cb-toolbar .cb-search");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-    const t = performance.now();
-    setter.call(inp, "第 ${CARDS - 1} 张");
+    setter.call(inp, "PERFCARD 题面 ${CARDS - 1}");
     inp.dispatchEvent(new Event("input", { bubbles: true }));
-    await new Promise((r) => setTimeout(r, 800));
-    return Math.round(performance.now() - t);
+    return true;
   })()`);
-  const filteredRows = Number(await cdp.eval(`document.querySelectorAll(".cb-table .cb-row:not(.cb-row-head)").length`)) || 0;
-  console.log(`    · 输入筛选 → 重绘：${filterMs}ms（剩 ${filteredRows} 行）`);
-  check("筛选后确实缩小结果集（非空转）", filteredRows > 0 && filteredRows < 80, `1..79`, filteredRows);
+  const tFilter = Date.now();
+  let filteredRows = 0;
+  for (let i = 0; i < 80; i++) {
+    await wait(250);
+    filteredRows = Number(await cdp.eval(`document.querySelectorAll(".cb-table .cb-row:not(.cb-row-head)").length`)) || 0;
+    if (filteredRows === 1) break;
+  }
+  const filterMs = Date.now() - tFilter;
+  console.log(`    · 输入筛选（主进程查询）→ 重绘：${filterMs}ms（剩 ${filteredRows} 行）`);
+  check("筛选后确实缩小结果集（唯一词命中 1 行）", filteredRows === 1, 1, filteredRows);
 
-  // ⑤ 摘录表（500 条）切换与渲染——先清空查询（否则被上一步的筛选串污染，只剩空态行）
+  // ⑤ 摘录表（5 万条）切换与渲染——先清空查询（否则被上一步的筛选串污染，只剩空态行）
   const exMs = await cdp.eval(`(async () => {
     const inp = document.querySelector(".cb-toolbar .cb-search");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;

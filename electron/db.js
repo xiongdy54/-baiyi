@@ -1574,13 +1574,277 @@ function listDueCards(now) {
 
 function listAllCards() {
   // v19：补 docTitle JOIN（同 listDueCards）——卡片浏览页需要展示来源书并按书筛选
+  // v48.67（D111）：补 li.id AS library_item_id 别名（此前缺别名 ⇒ 卡片行 libraryItemId 恒 null，
+  // 浏览器「按所属书筛选」对闪卡恒空）+ 修复 JOIN docTitle 被 mapCardRow 丢弃（逐字段构造不透传
+  // SQL 别名列，最终 docTitle 恒为 sourceRef 回落 ⇒ 旧路径 book: 查询只匹配 sourceRef 书名）——
+  // 两处都是潜伏缺陷，主进程/meta 通道自始使用 JOIN 值，修复后新旧通道命中集一致（d111 对拍闸门）。
   const rows = queryAll(
-    `SELECT c.*, li.title AS docTitle FROM cards c
+    `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
      LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0 ORDER BY c.created_at DESC`
   );
-  return rows.map(mapCardRow).map((r) => ({ ...r, docTitle: r.docTitle || (r.sourceRef && r.sourceRef.title) || null }));
+  return rows.map(mapCardRowWithDocTitle);
+}
+
+// ===== v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数 =====
+// 求值引擎＝cardQuery.bundle.cjs（src/lib/cardQuery.ts 的 esbuild 单源产物）——渲染层/主进程/测试
+// 三方消费同一份编译产物，命中集逐行一致由构造保证；禁止手改产物（新鲜度 tests/d111-artifact.test.cjs 把守）。
+// 缓存失效＝库指纹（COUNT(*) + MAX(updated_at)；cards 全部写路径触碰 updated_at 的既有纪律在此成为契约前提）。
+const cardQueryCore = require("./cardQuery.bundle.cjs");
+
+const BROWSER_QUERY_CACHE_MAX = 4;
+let browserFp = null;
+let browserBaseMeta = null; // 全库轻量行集（行对象与查询缓存子集共享引用）
+const browserQueryCache = new Map(); // fp + "\u0000" + query → 轻量行子集（LRU）
+
+function cardsFingerprint() {
+  const r = queryAll("SELECT COUNT(*) AS n, COALESCE(MAX(updated_at), 0) AS m FROM cards")[0];
+  return `${r.n}:${r.m}`;
+}
+
+function safeParseObj(text) {
+  if (!text) return null;
+  try {
+    const v = JSON.parse(text);
+    return v && typeof v === "object" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeParseArr(text) {
+  if (!text) return [];
+  try {
+    const v = JSON.parse(text);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+/** 轻量行（无题面/答案/备注大列）。fsrs/leech 损坏回落 new/false（与 normalizeFsrs / mapCardRow 同口径）。 */
+function cardMetaRow(r) {
+  const fsrs = safeParseObj(r.fsrs_json);
+  const leech = safeParseObj(r.leech_json);
+  const cr = safeParseObj(r.context_ref_json);
+  let docTitle = r.docTitle || null;
+  if (!docTitle) {
+    const sr = safeParseObj(r.source_ref_json);
+    docTitle = sr && sr.title ? String(sr.title) : null; // 与 listAllCards 的 mapCardRow 修补同口径
+  }
+  return {
+    id: r.id,
+    bookId: r.library_item_id ?? null,
+    docTitle,
+    extractId: cr && cr.extractId ? String(cr.extractId) : null,
+    priority: r.priority,
+    status: r.status || null,
+    cardType: r.card_type,
+    fsrsState: fsrs && typeof fsrs.state === "string" ? fsrs.state : "new",
+    suspended: Boolean(leech && leech.suspended),
+    isLeech: Boolean(leech && leech.isLeech),
+    due: fsrs && Number.isFinite(Number(fsrs.due)) ? Number(fsrs.due) : null,
+    lapses: fsrs && Number.isFinite(Number(fsrs.lapses)) ? Number(fsrs.lapses) : 0,
+    reps: fsrs && Number.isFinite(Number(fsrs.reps)) ? Number(fsrs.reps) : 0,
+    mem: r.memory_ref_json ? 1 : 0,
+    createdAt: r.created_at
+  };
+}
+
+/** 求值行视图（喂 makeCardPredicates；tags/domain 惰性构造——无文本/tag 条件不花解析的钱） */
+function evalViewOf(r, m) {
+  const cached = {};
+  return {
+    frontMarkdown: r.front_markdown,
+    backMarkdown: r.back_markdown,
+    noteText: r.note_text,
+    contextPrefix: r.context_prefix || "",
+    cardType: m.cardType,
+    status: m.status,
+    priority: m.priority,
+    fsrsState: m.fsrsState,
+    leechSuspended: m.suspended,
+    docTitle: r.docTitle || m.docTitle || "",
+    get tags() {
+      return (cached.tags ??= safeParseArr(r.tags_json));
+    },
+    get domain() {
+      return (cached.domain ??= safeParseArr(r.domain));
+    }
+  };
+}
+
+/** 纯字段条件（无 text/tag leaf）在轻量行集上求值——行视图不携带内容列，makeCardPredicates 的
+ *  惰性 hay/tags 在此分支永远不会被触达（调用方先用 hasTextOrTagLeaf 分流）。 */
+function metaEvalView(m) {
+  return {
+    frontMarkdown: null,
+    backMarkdown: null,
+    noteText: null,
+    contextPrefix: "",
+    cardType: m.cardType,
+    status: m.status,
+    priority: m.priority,
+    fsrsState: m.fsrsState,
+    leechSuspended: m.suspended,
+    docTitle: m.docTitle,
+    tags: null,
+    domain: null
+  };
+}
+
+function hasTextOrTagLeaf(node) {
+  if (!node) return false;
+  if (node.t === "leaf") return node.leaf.f === "text" || node.leaf.f === "tag";
+  if (node.t === "not") return hasTextOrTagLeaf(node.kid);
+  return node.kids.some(hasTextOrTagLeaf);
+}
+
+const BROWSER_JOIN = `FROM cards c
+  LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
+  LEFT JOIN library_items li ON li.id = d.library_item_id
+  WHERE c.is_deleted = 0`;
+
+// sql.js 同步游标分块消费——30 万行全量物化会把主进程顶上 GB 级，峰值内存必须钳在一个 chunk
+function nextTick() {
+  return new Promise((res) => setImmediate(res));
+}
+
+async function scanCards(sql, params, handleRow) {
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  let n = 0;
+  try {
+    while (stmt.step()) {
+      handleRow(stmt.getAsObject());
+      if (++n % 2000 === 0) await nextTick();
+    }
+  } finally {
+    stmt.free();
+  }
+  return n;
+}
+
+function packBooks(meta) {
+  const books = [];
+  const seen = new Set();
+  for (const m of meta) {
+    if (m.bookId && !seen.has(m.bookId)) {
+      seen.add(m.bookId);
+      books.push({ id: m.bookId, title: m.docTitle || "未知材料" });
+    }
+  }
+  books.sort((a, b) => a.title.localeCompare(b.title));
+  return books;
+}
+
+/** 全库轻量行集（cards:listMeta）。缓存命中毫秒级；失效按库指纹重建。 */
+async function getCardBrowserMeta() {
+  const fp = cardsFingerprint();
+  if (browserBaseMeta && browserFp === fp) {
+    return { fp, total: browserBaseMeta.length, meta: browserBaseMeta, books: packBooks(browserBaseMeta) };
+  }
+  const meta = [];
+  await scanCards(
+    `SELECT c.id, c.priority, c.status, c.card_type, c.fsrs_json, c.leech_json,
+            c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.created_at,
+            li.id AS library_item_id, li.title AS docTitle
+     ${BROWSER_JOIN}
+     ORDER BY c.created_at DESC`,
+    [],
+    (r) => meta.push(cardMetaRow(r))
+  );
+  browserFp = fp;
+  browserBaseMeta = meta;
+  browserQueryCache.clear();
+  return { fp, total: meta.length, meta, books: packBooks(meta) };
+}
+
+/** 查询求值（cards:queryIds）。按（库指纹, 查询串）LRU 缓存；纯字段条件走轻量行集，
+ *  含文本/tag 条件才分块扫描内容列（求值引擎与渲染层同一份产物，命中集逐行一致）。 */
+async function queryCardBrowserIds(query) {
+  const q = String(query ?? "");
+  const fp = cardsFingerprint();
+  const key = fp + "\u0000" + q;
+  if (browserQueryCache.has(key)) {
+    const meta = browserQueryCache.get(key);
+    browserQueryCache.delete(key);
+    browserQueryCache.set(key, meta); // LRU 触达刷新
+    return { fp, meta };
+  }
+  const parsed = cardQueryCore.parseCardQuery(q);
+  let out;
+  if (!parsed.ast) {
+    out = (await getCardBrowserMeta()).meta;
+  } else if (!hasTextOrTagLeaf(parsed.ast)) {
+    const base = (await getCardBrowserMeta()).meta;
+    out = base.filter((m) => cardQueryCore.cardRowMatches(parsed, metaEvalView(m)));
+  } else {
+    const meta = [];
+    await scanCards(
+      `SELECT c.id, c.priority, c.status, c.card_type, c.fsrs_json, c.leech_json,
+              c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.created_at,
+              c.front_markdown, c.back_markdown, c.note_text, c.context_prefix, c.tags_json, c.domain,
+              li.id AS library_item_id, li.title AS docTitle
+       ${BROWSER_JOIN}
+       ORDER BY c.created_at DESC`,
+      [],
+      (r) => {
+        const m = cardMetaRow(r);
+        if (cardQueryCore.cardRowMatches(parsed, evalViewOf(r, m))) meta.push(m);
+      }
+    );
+    out = meta;
+  }
+  browserQueryCache.set(key, out);
+  while (browserQueryCache.size > BROWSER_QUERY_CACHE_MAX) {
+    browserQueryCache.delete(browserQueryCache.keys().next().value);
+  }
+  return { fp, meta: out };
+}
+
+const CARD_FULL_SELECT = `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
+  LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
+  LEFT JOIN library_items li ON li.id = d.library_item_id`;
+
+function withDocTitleFallback(r) {
+  // mapCardRow 逐字段构造不透传 SQL 别名列（docTitle/library_item_id 需从原始行回补；
+  // library_item_id 已在 mapCardRow 内消费，docTitle 在此回补——JOIN 书名优先、sourceRef 书名回落）
+  const mapped = mapCardRow(r);
+  return { ...mapped, docTitle: r.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null };
+}
+const mapCardRowWithDocTitle = withDocTitleFallback;
+
+/** 行窗口（cards:getWindow）：按 id 取全行，≤500/次，返回按入参 id 序排列。 */
+function getCardsWindow(ids) {
+  const list = (Array.isArray(ids) ? ids : []).map(String).filter(Boolean).slice(0, 500);
+  if (list.length === 0) return [];
+  const byId = new Map();
+  for (let i = 0; i < list.length; i += 200) {
+    const part = list.slice(i, i + 200);
+    const rows = queryAll(`${CARD_FULL_SELECT} WHERE c.is_deleted = 0 AND c.id IN (${part.map(() => "?").join(",")})`, part);
+    for (const r of rows) byId.set(r.id, r);
+  }
+  return list
+    .map((id) => byId.get(id))
+    .filter(Boolean)
+    .map(withDocTitleFallback);
+}
+
+/** 卡详情同源组行（cards:siblingGroup）。 */
+function listCardsBySibling(key) {
+  const rows = queryAll(`${CARD_FULL_SELECT} WHERE c.is_deleted = 0 AND c.sibling_key = ? ORDER BY c.created_at DESC`, [
+    String(key || "")
+  ]);
+  return rows.map(withDocTitleFallback);
+}
+
+/** 浏览器侧今日暂缓（cards:deferredToday）：调度语义唯一源仍是 computeTodayQueue（§4.16），
+ *  这里只消除全量卡行的 IPC 传输——返回暂缓 id + 延后原因。 */
+function listDeferredToday(now) {
+  const n = Number(now);
+  return computeTodayQueue(Number.isFinite(n) ? n : Date.now()).deferred.map((c) => ({ id: c.id, deferReason: c.deferReason }));
 }
 
 function deleteCard(id) {
@@ -6393,6 +6657,11 @@ module.exports = {
   listDueCards,
   computeTodayQueue,
   listAllCards,
+  getCardBrowserMeta,
+  queryCardBrowserIds,
+  getCardsWindow,
+  listCardsBySibling,
+  listDeferredToday,
   readBookFile,
   readPdfFile,
   readEbookFile,

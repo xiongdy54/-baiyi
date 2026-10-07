@@ -102,6 +102,12 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   // v34（M12，§4.2-20）：今日队列视图 {cards, deferred[]}（同源暂缓清单含延后原因）
   todayQueue: (now) => ipcRenderer.invoke("cards:todayQueue", now),
   listAll: () => ipcRenderer.invoke("cards:listAll"),
+  // v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数（meta/ids 轻量行集 + 行窗口按需取）
+  listMeta: () => ipcRenderer.invoke("cards:listMeta"),
+  queryIds: (query) => ipcRenderer.invoke("cards:queryIds", query),
+  getWindow: (ids) => ipcRenderer.invoke("cards:getWindow", ids),
+  siblingGroup: (key) => ipcRenderer.invoke("cards:siblingGroup", key),
+  deferredToday: (now) => ipcRenderer.invoke("cards:deferredToday", now),
   remove: (id) => ipcRenderer.invoke("cards:delete", id),
   review: (cardId, fsrsState, rating, durationMs, fsrsBefore) =>
     ipcRenderer.invoke("cards:review", cardId, fsrsState, rating, durationMs, fsrsBefore),

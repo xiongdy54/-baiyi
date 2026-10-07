@@ -611,6 +611,13 @@ ipcMain.handle("cards:listDue", () => listDueCards());
 // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试
 ipcMain.handle("cards:todayQueue", (_e, now) => computeTodayQueue(Number.isFinite(now) ? Number(now) : undefined));
 ipcMain.handle("cards:listAll", () => listAllCards());
+// v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数——meta/ids 轻量行集 + 行窗口按需取 +
+// 同源组行 + 今日暂缓 id（浏览器侧退役全量 listAll 消费；契约见 GUIDE §6.8-6）
+ipcMain.handle("cards:listMeta", () => dbModule.getCardBrowserMeta());
+ipcMain.handle("cards:queryIds", (_e, query) => dbModule.queryCardBrowserIds(query));
+ipcMain.handle("cards:getWindow", (_e, ids) => dbModule.getCardsWindow(ids));
+ipcMain.handle("cards:siblingGroup", (_e, key) => dbModule.listCardsBySibling(key));
+ipcMain.handle("cards:deferredToday", (_e, now) => dbModule.listDeferredToday(now));
 ipcMain.handle("cards:delete", (_e, id) => deleteCard(String(id)));
 ipcMain.handle("cards:review", (_e, cardId, fsrsState, rating, durationMs, fsrsBefore) =>
   saveReview(String(cardId), fsrsState, String(rating), durationMs, fsrsBefore)
