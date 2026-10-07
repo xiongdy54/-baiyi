@@ -5,6 +5,8 @@ import { clampPct, normalizeShape, occlusionShapes, type OcclusionShape } from "
 import { settingsStore } from "./settings";
 // v48.51（D91）：简明解读的 CLP pack 注入（回退链 + 格式化）
 import { formatProfile, resolveProfile, STE_OUTPUT_LANG } from "./steProfiles";
+// v48.60（D101）：标签规范常量（L17 与 tags.ts 同源，禁第二份阈值）
+import { TAG_MAX_DEPTH, TAG_MAX_LEN, TAG_MAX_PER_CARD, type TagVocabEntry } from "./tags";
 
 declare global {
   interface Window {
@@ -13,6 +15,8 @@ declare global {
       create: (card: unknown) => Promise<{ id: string }>;
       update: (card: unknown) => Promise<boolean>;
       get: (id: string) => Promise<unknown>;
+      /** v48.61（D103）：生成信息区只读 join（card + 批次 + 提示词 + card_issues） */
+      genInfo?: (id: string) => Promise<unknown>;
       listDue: () => Promise<unknown[]>;
       todayQueue?: (now?: number) => Promise<unknown>;
       listAll: () => Promise<unknown[]>;
@@ -23,8 +27,12 @@ declare global {
       persistNow: () => Promise<boolean>;
       skip: (cardId: string) => Promise<boolean>;
       setSuspended: (id: string, suspended: boolean, reason?: string) => Promise<boolean>;
-      /** v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete） */
+      /** v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete；v48.60/D102 增 archive|restore） */
       batch: (op: string, ids: string[], payload?: unknown) => Promise<unknown>;
+      /** v48.60（D101）：标签写入（items=[{id,tags[]}]，渲染层算好每卡终值） */
+      setTags?: (items: Array<{ id: string; tags: string[] }>) => Promise<unknown>;
+      /** v48.60（D101）：标签词表（cards.tags_json ∪ extracts.tag_json 派生） */
+      listTags?: () => Promise<Array<{ display: string; cardCount: number; extractCount: number; lastUsedAt: number }>>;
       updateLeech: (id: string, patch: Record<string, unknown>) => Promise<boolean>;
       resolveLeech: (id: string, resolution: string, updates?: unknown) => Promise<boolean>;
       listLeech: () => Promise<unknown[]>;
@@ -166,6 +174,8 @@ export interface CardDraft {
   // v46（M14-UM2，R20）：AI 引用的记忆行（逐字抄录）+ 本地子串校验结果（undefined=本卡未走记忆链路）
   memoryRef?: string | null;
   memoryRefValid?: boolean;
+  // v48.60（D101）：用户标签（四入口写入；AI 草稿 v1 恒空——建议标签属批 F，须走 prompt-lab 闭环）
+  tags?: string[];
 }
 
 export interface GenResult {
@@ -436,6 +446,9 @@ export const cardGenerator: {
     const resolved = mode === "auto" ? detectMode(sourceText) : mode;
     const tpl = await window.promptsAPI?.get(resolved);
     if (!tpl) throw new Error("提示词模板缺失");
+    // v48.61（D103，D94 设计稿 §3.2）：生成时模型名快照进批次 context_json.model——
+    // 卡详情生成信息区按批次如实展示；存量批次（无快照）显示「—」，不猜
+    const aiCfg = await aiGateway.getConfig().catch(() => null);
     const sys = tpl.content;
     // v46（M14-UM2，R20 v44 原则制）：模板 situationRequired=1 时装配【用户记忆】块
     // （memory:retrieve 内部做开关/无 Key 检查；未命中/未开启 → block=null → 零注入零提示）
@@ -492,6 +505,8 @@ export const cardGenerator: {
       sourceText,
       context: {
         ...context,
+        // v48.61（D103）：生成时模型名快照（生成信息区展示用；诊断留痕同批装配）
+        model: aiCfg?.model ?? null,
         // 诊断留痕：确认联网背景是否真的进入了上下文
         webContextChars: context.webContext ? context.webContext.length : 0,
         webContextPreview: context.webContext ? context.webContext.slice(0, 200) : "",
@@ -735,6 +750,7 @@ export function lintCard(draft: {
   knowledgePointId?: string | null;
   clusterSize?: number;
   occlusion?: { assetPath?: string; rects?: unknown[]; shapes?: (OcclusionShape | null | undefined)[] | null } | null;
+  tags?: string[] | null;
 }): LintIssue[] {
   const issues: LintIssue[] = [];
   const front = draft.front || "";
@@ -814,6 +830,19 @@ export function lintCard(draft: {
       message: "疑似人名缩略（R16）：请确认使用完整全名（如「迈克尔·杨」而非「杨」）"
     });
   }
+  // L17 标签超限（v48.60 / D101）：数量/长度/深度超限提示；阈值与 src/lib/tags.ts 同源（禁第二份）
+  const tags = draft.tags ?? [];
+  if (tags.length > TAG_MAX_PER_CARD) {
+    issues.push({ ruleId: "L17", severity: "info", message: `标签超过 ${TAG_MAX_PER_CARD} 个，建议收敛到高频使用的少数标签` });
+  }
+  const overLen = tags.filter((t) => [...String(t)].length > TAG_MAX_LEN);
+  if (overLen.length > 0) {
+    issues.push({ ruleId: "L17", severity: "info", message: `标签超过 ${TAG_MAX_LEN} 字：「${overLen[0]}…」` });
+  }
+  const overDepth = tags.filter((t) => String(t).split("::").length > TAG_MAX_DEPTH);
+  if (overDepth.length > 0) {
+    issues.push({ ruleId: "L17", severity: "info", message: `标签层级超过 ${TAG_MAX_DEPTH} 层：「${overDepth[0]}」` });
+  }
   return issues;
 }
 
@@ -840,6 +869,8 @@ export const cardsApi = {
   create: async (card: unknown) => (await window.cardsAPI?.create(card)) ?? { id: "" },
   update: async (card: unknown) => (await window.cardsAPI?.update(card)) ?? false,
   get: async (id: string) => ((await window.cardsAPI?.get(id)) ?? null) as CardRecord | null,
+  /** v48.61（D103）：生成信息区只读 join（AI 卡批次/提示词/当时 CardLint） */
+  genInfo: async (id: string) => ((await window.cardsAPI?.genInfo?.(id)) ?? null) as CardGenInfo | null,
   listDue: async () => ((await window.cardsAPI?.listDue()) ?? []) as (CardRecord & { docTitle?: string })[],
   // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单；ReviewView/CardBrowser 消费）
   todayQueue: async (now?: number) =>
@@ -866,6 +897,11 @@ export const cardsApi = {
   /** v48.22（D58 §6.8-6）：卡片批量（单事务 + 单次落盘） */
   batch: async (op: string, ids: string[], payload?: unknown): Promise<{ ok: boolean; count?: number; reason?: string }> =>
     ((await window.cardsAPI?.batch(op, ids, payload)) ?? { ok: false, reason: "API 不可用" }) as { ok: boolean; count?: number; reason?: string },
+  /** v48.60（D101）：标签写入——items=[{id,tags[]}]（渲染层用 tags.ts 算好每卡终值，主进程只存储） */
+  setTags: async (items: Array<{ id: string; tags: string[] }>): Promise<{ ok: boolean; count?: number; reason?: string }> =>
+    ((await window.cardsAPI?.setTags?.(items)) ?? { ok: false, reason: "API 不可用" }) as { ok: boolean; count?: number; reason?: string },
+  /** v48.60（D101）：标签词表（cards.tags_json ∪ extracts.tag_json 派生，主进程只读现算） */
+  listTags: async (): Promise<TagVocabEntry[]> => ((await window.cardsAPI?.listTags?.()) ?? []) as TagVocabEntry[],
   updateLeech: async (id: string, patch: Record<string, unknown>) =>
     (await window.cardsAPI?.updateLeech(id, patch)) ?? false,
   resolveLeech: async (id: string, resolution: string, updates?: unknown) =>
@@ -914,6 +950,8 @@ export interface CardRecord {
   dateStamp: string | null;
   priority: number;
   tags: string[];
+  /** v48.60（D102，§4.1）：卡片生命周期（active/archived；NULL 视同 active） */
+  status?: string | null;
   domain: string[];
   knowledgePointId: string | null;
   /** v25：rects 恒为包围盒（兼容旧渲染）；shapes 为精确轮廓（矩形/椭圆/多边形）；
@@ -947,6 +985,25 @@ export interface CardIssueRecord {
   message: string;
   source: string;
   status: string;
+}
+
+/** v48.61（D103，D94 设计稿 §3.2）：生成信息区只读 join（cards:genInfo 输出） */
+export interface CardGenInfo {
+  card: CardRecord;
+  /** 生成批次；手动卡 / gen_batch_id 缺失 / 批次行不存在时为 null */
+  batch: {
+    id: string;
+    scope: string;
+    status: string;
+    createdAt: number;
+    /** 生成时模型名快照（v48.61 起写入批次 context_json.model）；存量批次为 null（如实显示「—」） */
+    model: string | null;
+    promptTemplateId: string | null;
+  } | null;
+  /** 当时使用的提示词模板（scope/名称/版本）；批次或模板行缺失时为 null */
+  template: { id: string; scope: string; name: string; version: number; isDefault: boolean; createdAt: number } | null;
+  /** card_issues 按 card_id 全量（含已解决；「当时 CardLint 结果」） */
+  issues: CardIssueRecord[];
 }
 
 // ---------- 易混对比卡（v30 D29 候选增强）：以当前卡为基准，AI 从已有卡语义检索易混卡后走对比模板产三件套 ----------
@@ -1137,7 +1194,8 @@ export async function createAcceptedCard(
       sourceRef: dd.sourceRef || (ctx.sourceTitle ? { title: ctx.sourceTitle } : null),
       dateStamp: dd.dateStamp || null,
       priority: dd.prioritySuggestion ?? 50,
-      tags: [],
+      // v48.60（D101）：调用方传入的标签（如批注标签继承初值）原样落库；AI 草稿缺省 = []
+      tags: dd.tags ?? [],
       domain: dd.domain ?? [],
       knowledgePointId: dd.knowledgePointId || null,
       // v41（K2-A，D38）：批次归组——AI 抽取归一的簇键（batch:<id>:<kp>）依据，消除跨材料 kp1 碰撞
@@ -1158,7 +1216,8 @@ export async function createAcceptedCard(
       contextPrefix: card.contextPrefix,
       sourceRef: card.sourceRef,
       dateStamp: card.dateStamp,
-      knowledgePointId: card.knowledgePointId
+      knowledgePointId: card.knowledgePointId,
+      tags: card.tags
     });
     const created = await cardsApi.create(card);
     ids.push(created.id);

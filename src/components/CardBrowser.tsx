@@ -6,33 +6,46 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, use
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { parseCloze, extractClozeAnswers, cardsApi, hasSourceAnchor, type CardRecord, type CardIssueRecord, type TodayQueue } from "../lib/cards";
+import { parseCloze, extractClozeAnswers, cardsApi, hasSourceAnchor, type CardRecord, type CardIssueRecord, type CardGenInfo, type TodayQueue } from "../lib/cards";
 import { playVocabAudio } from "../lib/dictClient";
 import { eventBus } from "../lib/eventbus";
 import ContrastCardModal from "./ContrastCardModal";
+import RegenCardsModal from "./RegenCardsModal";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
 import ImageLightbox from "./ImageLightbox";
 import { IconVolume } from "./icons";
 import { useDialogA11y } from "../lib/dialogA11y";
 import KnowledgeManager from "./KnowledgeManager";
+// v48.61（D103）：血缘树纯函数（D87 邻接表口径 + D85 聚合计数，复用零新写路径）
+import { buildLineageTree, type LineageExtractRow, type LineageNode } from "../lib/cardLineage";
+// v48.61（D104）：背面辅助字段区（app.cardFaceExtras 三开关，与复习页同一组件）
+import CardFaceExtrasBlock from "./CardFaceExtras";
+// v48.63（D107）：标签功能总开关——批量打标/详情标签区/构建器标签条件受其控制
+import { useTagsEnabled } from "../lib/tagSettings";
 // v48.22（D58 §6.8-6）：浏览器 2.0——摘录行数据源 + 状态/推送文案
 import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
 import { extractStatusLabel } from "../lib/sessionQueue";
 import { nextAtText } from "./ExtractCardFace";
 import { settingsStore } from "../lib/settings";
-import { parseCardQuery, extractMatches, textMatches } from "../lib/cardQuery";
+import { parseCardQuery, cardRowMatches, extractRowMatches, extractScopeConditions } from "../lib/cardQuery";
+// v48.60（D101）：标签——批量打标/去标的终值计算 + 词表建议（规则单一源 = src/lib/tags.ts）
+import { applyTagDelta, tagKey, type TagVocabEntry } from "../lib/tags";
+import TagInput from "./TagInput";
 
-/** v48.22（D58 §6.8-5）：筛选牌组（复习范围）——保存的过滤条件，零 schema 变更 */
+/** v48.22（D58 §6.8-5）：筛选牌组（复习范围）——保存的过滤条件，零 schema 变更。
+ *  v48.61（D105）：结构扩展 tags[] / kpIds[]（向后兼容，缺省 = 不限）；过滤语义见 §6.8-5 */
 interface SavedScope {
   id: string;
   name: string;
   bookItemIds: string[];
+  tags?: string[];
+  kpIds?: string[];
   kinds: string[];
   limits?: unknown;
 }
 
-type Preset = "all" | "due" | "leech" | "deferred" | "knowledge";
+type Preset = "all" | "due" | "leech" | "deferred" | "knowledge" | "archived";
 type BrowserCard = CardRecord & { docTitle?: string };
 type JumpToDoc = (
   docId: string,
@@ -54,6 +67,8 @@ const typeLabel = (t: string) => TYPE_LABELS[t] || t;
 const STATE_LABELS: Record<string, string> = { new: "新卡", learning: "学习中", relearning: "学习中", review: "复习中" };
 
 function statusOf(c: CardRecord): string {
+  // v48.60（D102）：生命周期归档最先可见（与挂起正交——归档 + 挂起显示「已归档」，挂起态在详情/meta 可见）
+  if ((c as { status?: string | null }).status === "archived") return "已归档";
   if (c.leech?.suspended) return "已暂停";
   return STATE_LABELS[c.fsrs?.state ?? "new"] ?? "复习中";
 }
@@ -100,6 +115,10 @@ function frontPreview(c: CardRecord): string {
 // query.trim().toLowerCase()，少了 NFKC 这一步，于是同一个词在卡片浏览与日记/知识点给出不同结果。
 const foldSearch = (s: unknown) => String(s ?? "").normalize("NFKC").trim().toLowerCase();
 
+// D110：Chromium 单滚动容器 scrollHeight 硬上限 ≈ 13.42M px（实测钳制值 13,421,773）——
+// 虚拟滚动 spacer 总高超限时按比例压缩（见 recomputeWindows 内注释）
+const SCROLL_CAP = 13_000_000;
+
 function srcLabel(c: CardRecord & { docTitle?: string }): string {
   const t = c.docTitle || c.sourceRef?.title || "";
   if (!t) return "—";
@@ -114,7 +133,7 @@ export default function CardBrowser({
 }: {
   onJumpToDoc?: JumpToDoc;
   /** v48.22（D58 §6.8-5）：从筛选牌组进入「集中复习」（按范围开会话；App 负责路由） */
-  onStartSession?: (scope: { bookItemIds: string[]; kinds: string[]; name: string; limits?: Record<string, number> | null }) => void;
+  onStartSession?: (scope: { bookItemIds: string[]; tags?: string[]; kpIds?: string[]; kinds: string[]; name: string; limits?: Record<string, number> | null }) => void;
   /**
    * v48.47（D87）：**锚点筛选**——只显示归属于该高亮锚的条目（锚摘录自身 + 全部子孙摘录，
    * 闪卡按 `contextRef.extractId ∈ 闭包`、摘录按 `id ∈ 闭包`）；由点击浮窗「已制卡 N 张」进入。
@@ -123,9 +142,16 @@ export default function CardBrowser({
   /** 清除锚点筛选（回 App 摘掉视图字段） */
   onClearAnchorFilter?: () => void;
 }) {
+  const tagsEnabled = useTagsEnabled();
   const [all, setAll] = useState<BrowserCard[]>([]);
   const [preset, setPreset] = useState<Preset>("all");
   const [query, setQuery] = useState("");
+  // D110：输入防抖——30 万行下全量过滤每键 1s+ 会卡输入；输入框即时回显，过滤用 300ms 防抖值
+  const [queryInput, setQueryInput] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(queryInput), 300);
+    return () => clearTimeout(t);
+  }, [queryInput]);
   const [typeFilter, setTypeFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
   // v46（M14-UM2，§6.7.3）：「记忆接地」筛选（情境来自记忆的卡，含存疑）
@@ -147,12 +173,25 @@ export default function CardBrowser({
   const [bookScope, setBookScope] = useState<string>("all");
   const [batchBusy, setBatchBusy] = useState(false);
   const [batchNote, setBatchNote] = useState<string | null>(null);
+  // v48.60（D101）：批量打标/去标浮层（v1 仅闪卡行；摘录标签走批注编辑既有入口）+ 词表建议
+  const [tagPop, setTagPop] = useState<null | "add" | "remove">(null);
+  const [tagDraft, setTagDraft] = useState<string[]>([]);
+  const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
   // v48.22（D58 §6.8-5）：筛选牌组（复习范围）——存 settings.app.reviewScopes，零 schema 变更（D51 先例）
   const [scopes, setScopes] = useState<SavedScope[]>([]);
   const [deckName, setDeckName] = useState("");
   // 上限覆写（§6.8-5：范围只能收紧、不能另开预算；0 = 继承全局）
   const [deckCapExtracts, setDeckCapExtracts] = useState(0);
   const [deckCapNewCards, setDeckCapNewCards] = useState(0);
+  // v48.61（D105）：条件构建器——书多选 + 标签多选（词表建议）+ 知识点多选（KnowledgeBase 检索口径）
+  const [deckBuilderOpen, setDeckBuilderOpen] = useState(false);
+  const [deckExtraBooks, setDeckExtraBooks] = useState<string[]>([]);
+  const [deckTags, setDeckTags] = useState<string[]>([]);
+  const [deckKps, setDeckKps] = useState<Array<{ id: string; label: string }>>([]);
+  const [deckBookPop, setDeckBookPop] = useState(false);
+  const [deckKpPop, setDeckKpPop] = useState(false);
+  const [kpQuery, setKpQuery] = useState("");
+  const [kpOptions, setKpOptions] = useState<Array<{ id: string; label: string; status: string; mergedInto: string | null }>>([]);
   // v48.22（D58 §6.8-6 / O-8 裁定）：摘录正文查找替换（仅选中项、仅正文、纯文本，不做正则）
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
@@ -186,8 +225,19 @@ export default function CardBrowser({
 
   // v48.47（D87）：锚点筛选的**子孙闭包**——锚摘录自身 + 子摘录/子子摘录…全部层级。
   // 邻接表来自 workflow 行的 contextRef.parentExtractId（摘录树）；visited 防脏数据成环。
+  // v48.61（D103）：筛选锚改**内部状态**（App prop 变化时同步）——卡详情血缘树「查看卡片」
+  // 可在浏览器内就地发起，不必绕道 App 视图字段；清除时仍回调 onClearAnchorFilter 保持 App 侧一致。
+  const [anchorFilter, setAnchorFilter] = useState<string | null>(anchorExtractId ?? null);
+  useEffect(() => {
+    setAnchorFilter(anchorExtractId ?? null);
+  }, [anchorExtractId]);
+  const clearAnchorFilter = useCallback(() => {
+    setAnchorFilter(null);
+    onClearAnchorFilter?.();
+  }, [onClearAnchorFilter]);
+
   const anchorClosure = useMemo(() => {
-    if (!anchorExtractId) return null;
+    if (!anchorFilter) return null;
     const parentToChildren = new Map<string, string[]>();
     for (const e of extracts as Array<{ id?: string; contextRef?: { parentExtractId?: string | null } | null }>) {
       const pid = e?.contextRef?.parentExtractId;
@@ -197,8 +247,8 @@ export default function CardBrowser({
         parentToChildren.set(String(pid), list);
       }
     }
-    const set = new Set<string>([String(anchorExtractId)]);
-    const stack = [String(anchorExtractId)];
+    const set = new Set<string>([String(anchorFilter)]);
+    const stack = [String(anchorFilter)];
     while (stack.length) {
       const cur = stack.pop() as string;
       for (const child of parentToChildren.get(cur) ?? []) {
@@ -209,7 +259,7 @@ export default function CardBrowser({
       }
     }
     return set;
-  }, [anchorExtractId, extracts]);
+  }, [anchorFilter, extracts]);
 
   const counts = useMemo(
     () => ({
@@ -232,9 +282,12 @@ export default function CardBrowser({
   }, [all]);
 
   const filtered = useMemo(() => {
-    const q = foldSearch(query);
     const parsed = parseCardQuery(query);
     let list = all;
+    // v48.60（D102）：已归档默认排除（视图口径）；显式入口＝「已归档」preset / status:archived 查询 / 状态下拉
+    const archivedOnly =
+      preset === "archived" || parsed.status === "archived" || parsed.status === "已归档" || stateFilter === "archived";
+    list = archivedOnly ? list.filter((c) => c.status === "archived") : list.filter((c) => c.status !== "archived");
     if (preset === "due") list = list.filter(isDueCard);
     if (preset === "leech") list = list.filter(isLeechOrSuspended);
     if (preset === "deferred") list = list.filter((c) => deferredMap.has(c.id));
@@ -244,56 +297,34 @@ export default function CardBrowser({
     if (memFilter) list = list.filter((c) => !!c.memoryRefJson);
     if (stateFilter !== "all") {
       list = list.filter((c) => {
+        if (stateFilter === "archived") return c.status === "archived";
         if (stateFilter === "suspended") return Boolean(c.leech?.suspended);
         if (c.leech?.suspended) return false;
         const s = c.fsrs?.state ?? "new";
         return stateFilter === "learning" ? s === "learning" || s === "relearning" : s === stateFilter;
       });
     }
-    if (q) {
-      list = list.filter((c) => {
-        const hay = [
-          c.frontMarkdown,
-          c.backMarkdown,
-          c.noteText,
-          c.contextPrefix || "",
-          c.docTitle || "",
-          ...(c.domain ?? []),
-          ...(c.tags ?? [])
-        ]
-          .join("\n")
-          .normalize("NFKC")
-          .toLowerCase();
-        // v48.22（D58 §6.8-6）：查询语法——主串 + 负号排除（字段前缀由下面的独立过滤处理）
-        if (!hay.includes(q)) return false;
-        return textMatches({ ...parsed, text: "" }, hay);
-      });
-    }
-    // 查询语法里的字段前缀（kind/book/status/priority）——与下拉筛选叠加生效
-    if (parsed.kind === "extract") list = [];
-    if (parsed.book) {
-      const bk = foldSearch(parsed.book);
-      list = list.filter((c) => foldSearch(String(c.docTitle || "")).includes(bk));
-    }
-    if (parsed.status) {
-      list = list.filter((c) => {
-        const suspended = Boolean(c.leech?.suspended);
-        const s = suspended ? "suspended" : c.fsrs?.state ?? "new";
-        return String(s).toLowerCase() === parsed.status;
-      });
-    }
-    if (parsed.priority || parsed.priorityNot !== undefined) {
-      list = list.filter((c) => {
-        const p = Number(c.priority) || 0;
-        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
-        if (!parsed.priority) return true;
-        const { op, value } = parsed.priority;
-        if (op === "<=") return p <= value;
-        if (op === ">=") return p >= value;
-        if (op === "<") return p < value;
-        if (op === ">") return p > value;
-        return p === value;
-      });
+    // v48.64（D108 §6.8-6 v3）：查询语法统一 AST 行判定——文本项逐词（修复含字段前缀/多 token
+    // 查询整串 includes 恒 false 全灭的缺陷）、负号字段条件（-book:/-status:/-type:/-kind:）、
+    // or / 括号 / 通配符全部在 cardQuery.ts 求值；kind 页签联动只在无 or/括号查询里另行生效。
+    // D110：无查询条件（ast 缺省＝无条件恒真）跳过逐行求值——30 万行省 30 万次谓词表构造
+    if (parsed.ast) {
+      list = list.filter((c) =>
+        cardRowMatches(parsed, {
+          frontMarkdown: c.frontMarkdown,
+          backMarkdown: c.backMarkdown,
+          noteText: c.noteText,
+          contextPrefix: c.contextPrefix,
+          docTitle: c.docTitle,
+          domain: c.domain,
+          tags: c.tags,
+          cardType: c.cardType,
+          status: c.status,
+          leechSuspended: Boolean(c.leech?.suspended),
+          fsrsState: c.fsrs?.state ?? "new",
+          priority: c.priority
+        })
+      );
     }
     const sorted = [...list];
     if (sortBy === "created") sorted.sort((a, b) => b.createdAt - a.createdAt);
@@ -320,32 +351,24 @@ export default function CardBrowser({
   );
 
   const scopeExtracts = useMemo(() => {
-    const q = foldSearch(query);
     const parsed = parseCardQuery(query);
-    if (parsed.kind === "card") return [];
     let list = extracts;
     if (bookScope !== "all") list = list.filter((e) => String(e.libraryItemId || "") === bookScope);
     // v48.47（D87）：锚点筛选——摘录表只留闭包内条目（切「摘录」页签可看锚的来源树）
     if (anchorClosure) list = list.filter((e) => anchorClosure.has(String(e.id)));
-    if (parsed.book) {
-      const bk = foldSearch(parsed.book);
-      list = list.filter((e) => foldSearch(String(e.docTitle || "")).includes(bk));
-    }
-    if (q || parsed.exclude.length || parsed.status || parsed.priority || parsed.priorityNot !== undefined) {
-      list = list.filter((e) => {
-        if (!extractMatches(parsed, e)) return false;
-        const p = Number(e.priority) || 0;
-        if (parsed.priorityNot !== undefined && p === parsed.priorityNot) return false;
-        if (parsed.priority) {
-          const { op, value } = parsed.priority;
-          if (op === "<=" && !(p <= value)) return false;
-          if (op === ">=" && !(p >= value)) return false;
-          if (op === "<" && !(p < value)) return false;
-          if (op === ">" && !(p > value)) return false;
-          if (op === "=" && p !== value) return false;
-        }
-        return true;
-      });
+    // v48.64（D108 §6.8-6 v3）：统一 AST 行判定——kind:card 使摘录行全不命中（原 L378 return []
+    // 等价）、type: 恒不命中（摘录行无卡形式，诚实语义）、文本项逐词 AND（原整串子串）、
+    // -book:/-status: 取反与 or/括号/通配符生效。D110：无条件时跳过逐行求值。
+    if (parsed.ast) {
+      list = list.filter((e) =>
+        extractRowMatches(parsed, {
+          contentMarkdown: e.contentMarkdown,
+          docTitle: e.docTitle,
+          status: e.status,
+          tagJson: (e as { tagJson?: string | null }).tagJson,
+          priority: e.priority
+        })
+      );
     }
     if (preset === "due") list = list.filter((e) => Number(e.topicNextAt) <= Date.now());
     // v48.40（D80）：摘录表此前完全忽略 sortBy（永远主进程的 priority/due 序），新摘录按到期升序沉底
@@ -399,6 +422,65 @@ export default function CardBrowser({
     setBatchNote(text);
     window.setTimeout(() => setBatchNote(null), 2400);
   }
+  // v48.60（D101）：词表建议（浮层打开时拉取；派生只读，主进程现算）——v48.61（D105）扩条件构建器共用
+  useEffect(() => {
+    if (!tagPop && !deckBuilderOpen) return;
+    let cancelled = false;
+    window.cardsAPI?.listTags?.().then((l) => {
+      if (!cancelled) setTagVocab(l ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagPop, deckBuilderOpen]);
+
+  // v48.61（D105）：知识点多选候选——经 KnowledgeBase 检索口径（knowledge:listPoints），归并行如实标注
+  useEffect(() => {
+    if (!deckKpPop) return;
+    let cancelled = false;
+    window.knowledgeAPI
+      ?.listPoints({ query: kpQuery || undefined, limit: 50 })
+      .then((res) => {
+        if (!cancelled) {
+          setKpOptions(
+            (res?.points ?? []).map((p) => ({ id: p.id, label: p.canonicalLabel, status: p.status, mergedInto: p.mergedInto }))
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setKpOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deckKpPop, kpQuery]);
+  /** v48.60（D101）：批量打标/去标——渲染层用 tags.ts 算每卡终值（规则单一源），主进程只存储 */
+  async function runSetTags(mode: "add" | "remove", tags: string[]) {
+    const ids = [...selCards];
+    if (ids.length === 0 || tags.length === 0) return;
+    const items = ids.map((id) => {
+      const card = all.find((c) => c.id === id);
+      return {
+        id,
+        tags: applyTagDelta(card?.tags ?? [], mode === "add" ? tags : [], mode === "remove" ? tags : []).tags
+      };
+    });
+    setBatchBusy(true);
+    try {
+      const r = await cardsApi.setTags(items);
+      if (r?.ok) {
+        setSelCards(new Set());
+        setTagDraft([]);
+        flashNote(`已更新 ${r.count ?? ids.length} 张卡的标签`);
+        eventBus.emit("cards/changed");
+        await refresh();
+      } else {
+        flashNote(r?.reason || "标签写入失败，整批未执行");
+      }
+    } finally {
+      setBatchBusy(false);
+    }
+  }
   async function runCardBatch(op: string, payload?: unknown) {
     const ids = [...selCards];
     if (ids.length === 0) return;
@@ -439,13 +521,28 @@ export default function CardBrowser({
   }
 
   // v48.22（D58 §6.8-5）：筛选牌组——保存当前筛选为复习范围 / 应用 / 集中复习 / 删除
+  // v48.61（D105）：条件构建器（书多选/标签多选/知识点多选）+「用当前查询创建」提取 book:/tag: 转结构化
   async function saveDeck() {
     const fallback = kindFilter === "card" ? "闪卡" : kindFilter === "extract" ? "摘录" : "全部";
     const name = deckName.trim() || `筛选牌组 · ${fallback}`;
+    const cond = extractScopeConditions(query);
+    const bookItemIds = [
+      ...new Set([
+        ...(bookScope !== "all" ? [bookScope] : []),
+        ...deckExtraBooks,
+        // 查询里的 book: 书名子串 → 按书名（NFKC 折叠）解析为 libraryItemId；无命中如实丢弃
+        ...cond.bookNames.flatMap((needle) =>
+          bookOptions.filter((o) => o.value !== "all" && foldSearch(o.label).includes(foldSearch(needle))).map((o) => o.value)
+        )
+      ])
+    ];
+    const tags = [...new Set([...deckTags, ...cond.tags])];
     const scope: SavedScope = {
       id: crypto.randomUUID(),
       name,
-      bookItemIds: bookScope === "all" ? [] : [bookScope],
+      bookItemIds,
+      tags,
+      kpIds: deckKps.map((k) => k.id),
       kinds: kindFilter === "both" ? ["card", "extract"] : [kindFilter],
       limits: deckCapExtracts > 0 || deckCapNewCards > 0
         ? { ...(deckCapExtracts > 0 ? { extractReviewsPerDay: deckCapExtracts } : {}), ...(deckCapNewCards > 0 ? { newCardsPerDay: deckCapNewCards } : {}) }
@@ -455,12 +552,32 @@ export default function CardBrowser({
     await settingsStore.set("app", "reviewScopes", next);
     setScopes(next);
     setDeckName("");
-    flashNote(`已保存筛选牌组「${name}」`);
+    const extra = [
+      tags.length ? `标签 ${tags.length}` : "",
+      scope.kpIds?.length ? `知识点 ${scope.kpIds.length}` : "",
+      bookItemIds.length ? `书 ${bookItemIds.length}` : ""
+    ].filter(Boolean).join(" + ");
+    flashNote(`已保存筛选牌组「${name}」${extra ? `（${extra}）` : ""}`);
   }
-  function applyDeck(scope: SavedScope) {
-    setKindFilter(scope.kinds.length === 2 ? "both" : scope.kinds[0] === "extract" ? "extract" : "card");
-    setBookScope(scope.bookItemIds[0] || "all");
-    flashNote(`已应用「${scope.name}」`);
+  function applyDeck(s: SavedScope) {
+    setKindFilter(s.kinds.length === 2 ? "both" : s.kinds[0] === "extract" ? "extract" : "card");
+    setBookScope(s.bookItemIds[0] || "all");
+    setDeckExtraBooks(s.bookItemIds.slice(1));
+    setDeckTags(s.tags ?? []);
+    // 知识点 chip 需要 label——经 KnowledgeBase 列表回填（找不到的 id 原样显示，不猜）
+    const ids = [...new Set(s.kpIds ?? [])];
+    setDeckKps([]);
+    if (ids.length) {
+      window.knowledgeAPI
+        ?.listPoints({ limit: 1000 })
+        .then((res) => {
+          const byId = new Map((res?.points ?? []).map((p) => [p.id, p.canonicalLabel]));
+          setDeckKps(ids.map((id) => ({ id, label: byId.get(id) ?? id })));
+        })
+        .catch(() => setDeckKps(ids.map((id) => ({ id, label: id }))));
+    }
+    setDeckBuilderOpen(Boolean(s.tags?.length || s.kpIds?.length || s.bookItemIds.length > 1));
+    flashNote(`已应用「${s.name}」`);
   }
   async function deleteDeck(id: string) {
     const next = scopes.filter((s) => s.id !== id);
@@ -494,24 +611,86 @@ export default function CardBrowser({
     }
   }
 
-  // v48.22（D58 §6.8-6）：行数窗口——真实库可达上万行，全量渲染会让筛选/滚动卡顿；
-  // 先渲染 200 行 + 「显示更多」增量放行（真正的虚拟滚动留待后续批次，此处是可用性下限保障）
-  const [rowLimit, setRowLimit] = useState(200);
-  useEffect(() => {
-    setRowLimit(200);
-  }, [query, typeFilter, stateFilter, preset, kindFilter, bookScope, memFilter, sortBy]);
+  // v48.22（D58 §6.8-6）：行数窗口（先渲染 200 行 + 「显示更多」）已在 v48.66/D110 退役。
+  // D110：真虚拟滚动——固定行高窗口化渲染（30 万卡量测驱动，基线/复测数字见 tests/browser.perf.log）。
+  // 滚动容器＝组件根 .queue-wrap；两表各自按「表顶相对滚动视口」计算可见行区间（±OVERSCAN 冗余），
+  // 前后 spacer 撑起总高使滚动条稳定。行高恒定的依据：.cb-row 为 grid 单行 + 题面/来源列 nowrap
+  // + 行详情＝模态（非行内展开）。「显示更多」增量放行随之退役（滚动到底即全部可达）。
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const cardTableRef = useRef<HTMLDivElement | null>(null);
+  const extractTableRef = useRef<HTMLDivElement | null>(null);
+  const [rowH, setRowH] = useState(40);
+  const [headH, setHeadH] = useState(37);
+  const [win, setWin] = useState({ card: { start: 0, end: 0 }, extract: { start: 0, end: 0 } });
 
-  // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）
+  const recomputeWindows = useCallback(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const viewportH = wrap.clientHeight;
+    if (viewportH <= 0) return;
+    const wrapTop = wrap.getBoundingClientRect().top;
+    const OVERSCAN = 12;
+    // D110：Chromium 单滚动容器 scrollHeight 硬上限 ≈ 13.42M px（实测 30 万行 × 66px = 19.8M 被
+    // 钳在 13,421,773，滚到底物理不可达最后 ~9.7 万行；5 万行 3.3M 未触限）。总高超限时按比例
+    // 压缩 spacer 虚拟高度（C<1），滚动位置除以 C 还原行 index——滚动条一格覆盖多行、全程可达；
+    // C=1（total×rowH ≤ 上限）时映射完全精确。
+    const calc = (table: HTMLElement | null, total: number) => {
+      if (!table || total === 0 || rowH <= 0) return { start: 0, end: 0 };
+      const c = Math.min(1, SCROLL_CAP / (total * rowH));
+      const rel = table.getBoundingClientRect().top - wrapTop + headH; // 行区顶相对滚动视口（真实 px）
+      const unit = rowH * c;
+      const start = Math.max(0, Math.floor(-rel / unit) - OVERSCAN);
+      const end = Math.min(total, Math.max(start, Math.ceil((viewportH - rel) / unit) + OVERSCAN));
+      return { start, end };
+    };
+    setWin({ card: calc(cardTableRef.current, viewCards.length), extract: calc(extractTableRef.current, viewExtracts.length) });
+  }, [rowH, headH, viewCards, viewExtracts]);
+
+  // 行高实测——必须等窗口渲染出真实行后再量（首帧 win 全 0 量不到，估计值 40 与真实行高的偏差
+  // 在 30 万行深度会被 spacer 放大成「滚到底换页失准」；实测踩坑）。表样式为全局常量 → 量准一次即定。
+  useLayoutEffect(() => {
+    const table = cardTableRef.current ?? extractTableRef.current;
+    if (!table) return;
+    const row = table.querySelector(".cb-row:not(.cb-row-head)") as HTMLElement | null;
+    const head = table.querySelector(".cb-row-head") as HTMLElement | null;
+    if (row) {
+      const h = Math.max(1, Math.round(row.getBoundingClientRect().height));
+      if (h !== rowH) setRowH(h);
+    }
+    if (head) {
+      const h = Math.max(1, Math.round(head.getBoundingClientRect().height));
+      if (h !== headH) setHeadH(h);
+    }
+  }, [win, loaded, preset, kindFilter, rowH, headH]);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const onScroll = () => recomputeWindows();
+    wrap.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      wrap.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [recomputeWindows]);
+
+  useEffect(() => {
+    recomputeWindows();
+  }, [recomputeWindows]);
+
+  // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）；
+  // v48.64（D108）：含 or/括号的查询不做页签联动（kind 只是行谓词，布尔语义照常求值）
   useEffect(() => {
     const parsed = parseCardQuery(query);
-    if (parsed.kind) setKindFilter(parsed.kind);
+    if (!parsed.hasGroups && parsed.kind) setKindFilter(parsed.kind);
   }, [query]);
 
   const detail = detailId ? all.find((c) => c.id === detailId) ?? null : null;
   const extractDetail = extractDetailId ? extracts.find((e) => e.id === extractDetailId) ?? null : null;
 
   return (
-    <div className="queue-wrap">
+    <div className="queue-wrap" ref={wrapRef}>
       {/* v48.40（D80）：吸顶头带——计数 meta + preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline） */}
       <div className="cb-head">
         <div className="cb-head-inner">
@@ -538,6 +717,10 @@ export default function CardBrowser({
             <button className={preset === "knowledge" ? "active" : ""} onClick={() => setPreset("knowledge")}>
               知识点
             </button>
+            {/* v48.60（D102）：已归档（不再关心）——默认列表不含归档，这里显式进入 */}
+            <button className={preset === "archived" ? "active" : ""} onClick={() => setPreset("archived")}>
+              已归档
+            </button>
           </div>
         </div>
       </div>
@@ -552,8 +735,8 @@ export default function CardBrowser({
           <input
             className="cb-search"
             placeholder='搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）'
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            value={queryInput}
+            onChange={(e) => setQueryInput(e.target.value)}
           />
         </div>
         <div className="cb-cluster">
@@ -566,7 +749,8 @@ export default function CardBrowser({
               { value: "new", label: "新卡" },
               { value: "learning", label: "学习中" },
               { value: "review", label: "复习中" },
-              { value: "suspended", label: "已暂停" }
+              { value: "suspended", label: "已暂停" },
+              { value: "archived", label: "已归档" }
             ]}
             onChange={setStateFilter}
           />
@@ -607,12 +791,12 @@ export default function CardBrowser({
         </div>
       </div>
 
-      {/* v48.47（D87）：锚点筛选条——来自阅读/摘录浮窗「已制卡 N 张」点击；计数＝闭包内卡数 */}
-      {anchorExtractId && (
+      {/* v48.47（D87）：锚点筛选条——来自阅读/摘录浮窗「已制卡 N 张」或卡详情血缘树「查看卡片」；计数＝闭包内卡数 */}
+      {anchorFilter && (
         <div className="cb-anchor-bar" data-anchor-filter-bar>
           <span className="mono">锚点筛选</span>
           <span data-anchor-filter-count>{`已制卡 ${all.filter((c) => anchorClosure?.has(String(c.contextRef?.extractId || ""))).length} 张（含全部子层级）`}</span>
-          <button className="crumb-exit" data-anchor-filter-clear onClick={onClearAnchorFilter} title="清除锚点筛选，回到全部条目">
+          <button className="crumb-exit" data-anchor-filter-clear onClick={clearAnchorFilter} title="清除锚点筛选，回到全部条目">
             清除
           </button>
         </div>
@@ -630,6 +814,15 @@ export default function CardBrowser({
         />
         <button className="btn btn-outline btn-sm" data-deck-save onClick={() => void saveDeck()}>
           保存当前筛选
+        </button>
+        {/* v48.61（D105）：条件构建器开关——书多选 / 标签多选 / 知识点多选 */}
+        <button
+          className={`btn btn-sm ${deckBuilderOpen ? "btn-primary" : "btn-outline"}`}
+          data-deck-builder-toggle
+          title="展开条件构建器：按书 / 标签 / 知识点组合保存范围（条件间 AND）"
+          onClick={() => setDeckBuilderOpen((v) => !v)}
+        >
+          条件构建器
         </button>
         <span className="mono">上限覆写</span>
         <input
@@ -658,14 +851,20 @@ export default function CardBrowser({
           <span className="cb-deck" data-deck-item key={s.id}>
             <button className="btn btn-outline btn-sm" data-deck-apply title="把浏览器的筛选切到该范围" onClick={() => applyDeck(s)}>
               {s.name}
-              <span className="n"> {s.kinds.join("/")}{s.bookItemIds.length ? " · 单书" : ""}</span>
+              <span className="n">
+                {" "}
+                {s.kinds.join("/")}
+                {s.bookItemIds.length ? ` · 书 ${s.bookItemIds.length}` : ""}
+                {s.tags?.length ? ` · 标签 ${s.tags.length}` : ""}
+                {s.kpIds?.length ? ` · 知识点 ${s.kpIds.length}` : ""}
+              </span>
             </button>
             {onStartSession && (
               <button
                 className="btn btn-outline btn-sm"
                 data-deck-start
                 title="按该范围开始集中复习（记录照常计入 FSRS）"
-                onClick={() => onStartSession({ bookItemIds: s.bookItemIds, kinds: s.kinds, name: s.name, limits: (s.limits as Record<string, number> | null) ?? null })}
+                onClick={() => onStartSession({ bookItemIds: s.bookItemIds, tags: s.tags, kpIds: s.kpIds, kinds: s.kinds, name: s.name, limits: (s.limits as Record<string, number> | null) ?? null })}
               >
                 集中复习
               </button>
@@ -677,6 +876,99 @@ export default function CardBrowser({
         ))}
         {scopes.length === 0 && <span className="form-hint">把当前「类别 + 来源书」筛选存下来，即可反复进入同一复习范围。</span>}
       </div>
+
+      {/* v48.61（D105）：条件构建器行——书多选 + 标签多选（词表建议）+ 知识点多选（KnowledgeBase 检索口径） */}
+      {deckBuilderOpen && (
+        <div className="cb-batch" data-deck-builder>
+          <span className="mono">条件</span>
+          <span className="cb-deck-chips">
+            {deckExtraBooks.map((id) => (
+              <span key={id} className="tag-chip tag-chip-static" data-deck-book-chip>
+                {bookOptions.find((o) => o.value === id)?.label ?? id}
+                <button
+                  className="cb-deck-chip-x"
+                  aria-label="移除该书条件"
+                  onClick={() => setDeckExtraBooks((b) => b.filter((x) => x !== id))}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <button className="btn btn-outline btn-sm" data-deck-add-book onClick={() => setDeckBookPop((v) => !v)}>
+              ＋书
+            </button>
+          </span>
+          {deckBookPop && (
+            <span className="cb-deck-pop" data-deck-book-pop>
+              {bookOptions.filter((o) => o.value !== "all").map((o) => (
+                <label key={o.value} className="cb-deck-pop-row">
+                  <input
+                    type="checkbox"
+                    checked={deckExtraBooks.includes(o.value)}
+                    onChange={(e) =>
+                      setDeckExtraBooks((b) => (e.target.checked ? [...b, o.value] : b.filter((x) => x !== o.value)))
+                    }
+                  />
+                  {o.label}
+                </label>
+              ))}
+              {bookOptions.filter((o) => o.value !== "all").length === 0 && <span className="form-hint">暂无可选书</span>}
+            </span>
+          )}
+          {tagsEnabled && (
+            <span className="cb-deck-tags" data-deck-tags>
+              <TagInput value={deckTags} onChange={setDeckTags} suggestions={tagVocab} ariaLabel="牌组标签条件" placeholder="标签条件（层级前缀，回车确认）" />
+            </span>
+          )}
+          <span className="cb-deck-chips">
+            {deckKps.map((k) => (
+              <span key={k.id} className="tag-chip tag-chip-static" data-deck-kp-chip>
+                {k.label}
+                <button
+                  className="cb-deck-chip-x"
+                  aria-label="移除该知识点条件"
+                  onClick={() => setDeckKps((ks) => ks.filter((x) => x.id !== k.id))}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <button className="btn btn-outline btn-sm" data-deck-add-kp onClick={() => setDeckKpPop((v) => !v)}>
+              ＋知识点
+            </button>
+          </span>
+          {deckKpPop && (
+            <span className="cb-deck-pop cb-deck-pop-col" data-deck-kp-pop>
+              <input
+                className="cb-search"
+                data-deck-kp-search
+                placeholder="搜索知识点（名称/别名）…"
+                value={kpQuery}
+                onChange={(e) => setKpQuery(e.target.value)}
+              />
+              <span className="cb-deck-pop-list">
+                {kpOptions.map((p) => (
+                  <label key={p.id} className="cb-deck-pop-row">
+                    <input
+                      type="checkbox"
+                      checked={deckKps.some((k) => k.id === p.id)}
+                      onChange={(e) =>
+                        setDeckKps((ks) =>
+                          e.target.checked ? [...ks, { id: p.id, label: p.label }] : ks.filter((x) => x.id !== p.id)
+                        )
+                      }
+                    />
+                    {p.label}
+                    {p.status === "merged" && <span className="form-hint">（已归并，匹配时自动展开）</span>}
+                  </label>
+                ))}
+                {kpOptions.length === 0 && <span className="form-hint">无匹配知识点</span>}
+              </span>
+            </span>
+          )}
+          {deckKps.length > 0 && <span className="form-hint" data-deck-kp-hint>知识点条件仅对闪卡生效（摘录行不命中）</span>}
+        </div>
+      )}
 
       {loaded && viewCards.length === 0 && viewExtracts.length === 0 && (
         <div className="empty-state">
@@ -718,7 +1010,7 @@ export default function CardBrowser({
           ))}
         </div>
       ) : (
-        <div className="cb-table" role="table">
+        <div className="cb-table" role="table" ref={cardTableRef}>
           <div className="cb-row cb-row-head" role="row">
             <span className="cb-pick">选</span>
             <span>题面</span>
@@ -730,7 +1022,8 @@ export default function CardBrowser({
             <span className="cb-num">优先</span>
             <span>来源</span>
           </div>
-          {viewCards.slice(0, rowLimit).map((c) => (
+          {viewCards.length > 0 && <div style={{ height: win.card.start * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewCards.length * rowH)) : 1) }} aria-hidden="true" />}
+          {viewCards.slice(win.card.start, win.card.end).map((c) => (
             <div
               key={c.id}
               className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
@@ -761,15 +1054,7 @@ export default function CardBrowser({
               <span className="cb-src" title={srcLabel(c)}>{srcLabel(c)}</span>
             </div>
           ))}
-          {viewCards.length > rowLimit && (
-            <div className="cb-row" role="row">
-              <span className="cb-front">
-                <button className="btn btn-outline btn-sm" data-more-rows onClick={() => setRowLimit((n) => n + 200)}>
-                  显示更多（还有 {viewCards.length - rowLimit} 行）
-                </button>
-              </span>
-            </div>
-          )}
+          {viewCards.length > 0 && <div style={{ height: (viewCards.length - win.card.end) * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewCards.length * rowH)) : 1) }} aria-hidden="true" />}
         </div>
       )}
       </>
@@ -777,7 +1062,7 @@ export default function CardBrowser({
 
       {/* v48.22（D58 §6.8-6）：摘录表——与闪卡同页管理（状态/优先级/下次推送/来源书） */}
       {kindFilter !== "card" && (
-        <div className="cb-table" role="table" data-extract-table>
+        <div className="cb-table" role="table" data-extract-table ref={extractTableRef}>
           <div className="cb-row cb-row-head" role="row">
             <span className="cb-pick">选</span>
             <span>摘录内容</span>
@@ -787,7 +1072,8 @@ export default function CardBrowser({
             <span>来源</span>
             <span>操作</span>
           </div>
-          {viewExtracts.slice(0, rowLimit).map((e) => (
+          {viewExtracts.length > 0 && <div style={{ height: win.extract.start * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewExtracts.length * rowH)) : 1) }} aria-hidden="true" />}
+          {viewExtracts.slice(win.extract.start, win.extract.end).map((e) => (
             <div
               key={e.id}
               className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
@@ -837,15 +1123,7 @@ export default function CardBrowser({
               </span>
             </div>
           ))}
-          {viewExtracts.length > rowLimit && (
-            <div className="cb-row" role="row">
-              <span className="cb-front">
-                <button className="btn btn-outline btn-sm" data-more-rows-extract onClick={() => setRowLimit((n) => n + 200)}>
-                  显示更多（还有 {viewExtracts.length - rowLimit} 行）
-                </button>
-              </span>
-            </div>
-          )}
+          {viewExtracts.length > 0 && <div style={{ height: (viewExtracts.length - win.extract.end) * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewExtracts.length * rowH)) : 1) }} aria-hidden="true" />}
           {viewExtracts.length === 0 && (
             <div className="cb-row" role="row">
               <span className="cb-front">没有符合筛选条件的摘录。</span>
@@ -891,7 +1169,60 @@ export default function CardBrowser({
               <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
+              {/* v48.60（D101）：批量打标/去标（v1 仅闪卡行；浮层内 TagInput + 词表建议）；v48.63（D107）受标签总开关控制 */}
+              {tagsEnabled && (
+              <button
+                className={`btn btn-outline btn-sm${tagPop === "add" ? " btn-primary" : ""}`}
+                disabled={batchBusy}
+                data-batch-tag-add
+                onClick={() => {
+                  setTagPop(tagPop === "add" ? null : "add");
+                  setTagDraft([]);
+                }}
+              >
+                打标签
+              </button>
+              )}
+              {tagsEnabled && (
+              <button
+                className={`btn btn-outline btn-sm${tagPop === "remove" ? " btn-primary" : ""}`}
+                disabled={batchBusy}
+                data-batch-tag-remove
+                onClick={() => {
+                  setTagPop(tagPop === "remove" ? null : "remove");
+                  setTagDraft([]);
+                }}
+              >
+                去标签
+              </button>
+              )}
+              {/* v48.60（D102）：批量归档/恢复（生命周期；不评分、不动 FSRS） */}
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive-cards onClick={() => void runCardBatch("archive")}>归档</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-restore-cards onClick={() => void runCardBatch("restore")}>恢复</button>
               <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>删除</button>
+              {tagPop && (
+                <span className="cb-tag-pop" data-batch-tag-pop>
+                  <TagInput
+                    value={tagDraft}
+                    onChange={setTagDraft}
+                    suggestions={tagVocab}
+                    ariaLabel={tagPop === "add" ? "要添加的标签" : "要移除的标签"}
+                    placeholder={tagPop === "add" ? "输入要添加的标签，回车确认" : "输入要移除的标签（含::子级）"}
+                  />
+                  <button
+                    className="btn btn-primary btn-sm"
+                    disabled={tagDraft.length === 0 || batchBusy}
+                    data-batch-tag-apply
+                    onClick={() => {
+                      const mode = tagPop;
+                      setTagPop(null);
+                      void runSetTags(mode, tagDraft);
+                    }}
+                  >
+                    应用到 {selCards.size} 张
+                  </button>
+                </span>
+              )}
             </>
           )}
           {selExtracts.size > 0 && (
@@ -932,6 +1263,9 @@ export default function CardBrowser({
       {detail && (
         <CardDetail
           card={detail}
+          cards={all}
+          extracts={extracts}
+          deferredMap={deferredMap}
           deferredNote={
             (() => {
               const r = deferredMap.get(detail.id);
@@ -943,6 +1277,12 @@ export default function CardBrowser({
           onClose={() => setDetailId(null)}
           onJumpToDoc={onJumpToDoc}
           onOpenLeech={(c) => setLeechTarget(c)}
+          onOpenAnchorFilter={(extractId) => {
+            // v48.61（D103）：血缘树节点「查看卡片」——就地切锚点筛选并关详情（D87 既有入口）
+            setDetailId(null);
+            setAnchorFilter(String(extractId));
+          }}
+          onOpenCard={(id) => setDetailId(id)}
         />
       )}
 
@@ -1116,23 +1456,98 @@ export function ExtractDetail({
 // ---------- 行详情（v19：Anki 浏览器的卡片信息 + 维护动作） ----------
 // 卡面预览复用复习页 CardFace（showBack + onEdit → EditableText 内联编辑，cloze 自动回填挖空语法）；
 // 编辑只改文案不动 FSRS（updateCard 未传 fsrs 时保留原值，§7.2）。
+// v48.61（D103，D94 设计稿 §3.1–3.3）：新增三个**只读派生**区块——来源谱系（血缘树）、
+// 生成信息区（AI 卡）+「用当前提示词重新生成」、同源组区；零写路径（f32 矩阵不回退）。
 function CardDetail({
   card,
+  cards,
+  extracts,
+  deferredMap,
   onClose,
   onJumpToDoc,
   onOpenLeech,
+  onOpenAnchorFilter,
+  onOpenCard,
   deferredNote
 }: {
   card: BrowserCard;
+  /** 全量卡（同源组列表 + 血缘树制卡计数的数据面；listAllCards 口径） */
+  cards: BrowserCard[];
+  /** 摘录行（血缘树邻接表 + 引文标签的数据面；workflowAPI.listAll 口径） */
+  extracts: DueTopic[];
+  /** 今日同源暂缓清单（同源组「今日暂缓」徽标；与复习队列同一视图口径） */
+  deferredMap: Map<string, NonNullable<TodayQueue["deferred"][number]["deferReason"]>>;
   onClose: () => void;
   onJumpToDoc?: JumpToDoc;
   onOpenLeech: (card: BrowserCard) => void;
+  /** 血缘树节点「查看卡片」→ 浏览器锚点筛选（D87 既有入口；父组件就地设内部筛选锚） */
+  onOpenAnchorFilter: (extractId: string) => void;
+  /** 同源组行点击 → 切换详情到该卡 */
+  onOpenCard: (id: string) => void;
   /** v34（M12）：今日同源暂缓原因（不在暂缓组时为 undefined） */
   deferredNote?: string;
 }) {
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [issues, setIssues] = useState<CardIssueRecord[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  // v48.61（D103）：生成信息区（AI 卡）——cards:genInfo 只读 join；重新生成确认面板开关
+  const [genInfo, setGenInfo] = useState<CardGenInfo | null>(null);
+  const [regenOpen, setRegenOpen] = useState(false);
+  // v48.60（D101）：卡详情标签区——chips 展示 + 单卡编辑（ids 长度 1 = 单卡，D80 先例）
+  const [tagList, setTagList] = useState<string[]>(card.tags ?? []);
+  const [tagEditing, setTagEditing] = useState(false);
+  const [tagDraft, setTagDraft] = useState<string[]>([]);
+  const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
+  const isArchived = card.status === "archived";
+  // v48.63（D107）：标签功能总开关——详情标签区受其控制（数据不动）
+  const tagsEnabled = useTagsEnabled();
+
+  // v48.61（D103）：血缘树——复用 D87 邻接表口径（workflow 行 parentExtractId）+ D85 聚合计数
+  const lineage = useMemo(
+    () =>
+      buildLineageTree({
+        extractId: card.contextRef?.extractId ?? null,
+        extracts: extracts as LineageExtractRow[],
+        cards
+      }),
+    [card.contextRef?.extractId, extracts, cards]
+  );
+
+  // v48.61（D103）：同源组——sibling_key 非空时列组内全部卡（含归档行如实展示）；due 升序同队列序
+  const siblingMembers = useMemo(() => {
+    if (!card.siblingKey) return [];
+    return cards
+      .filter((c) => c.siblingKey && c.siblingKey === card.siblingKey)
+      .sort((a, b) => (a.fsrs?.due ?? 0) - (b.fsrs?.due ?? 0));
+  }, [card.siblingKey, cards]);
+
+  useEffect(() => {
+    setTagList(card.tags ?? []);
+    setTagEditing(false);
+  }, [card.id, card.updatedAt]);
+
+  useEffect(() => {
+    if (!tagEditing) return;
+    let cancelled = false;
+    window.cardsAPI?.listTags?.().then((l) => {
+      if (!cancelled) setTagVocab(l ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagEditing]);
+
+  async function saveTags() {
+    await cardsApi.setTags([{ id: card.id, tags: tagDraft }]);
+    setTagList(tagDraft);
+    setTagEditing(false);
+    eventBus.emit("cards/changed");
+  }
+
+  async function toggleArchive() {
+    await cardsApi.batch(isArchived ? "restore" : "archive", [card.id]);
+    eventBus.emit("cards/changed");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -1143,6 +1558,19 @@ function CardDetail({
       cancelled = true;
     };
   }, [card.id, card.updatedAt]);
+
+  // v48.61（D103）：生成信息区数据（AI 卡才读；只读 join，零写路径）
+  useEffect(() => {
+    setGenInfo(null);
+    if (card.generatedBy !== "ai") return;
+    let cancelled = false;
+    cardsApi.genInfo(card.id).then((info) => {
+      if (!cancelled) setGenInfo(info);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [card.id, card.generatedBy, card.updatedAt]);
 
   async function handleEdit(patch: { frontMarkdown?: string; backMarkdown?: string; noteText?: string }) {
     await cardsApi.update({ ...card, ...patch });
@@ -1190,6 +1618,16 @@ function CardDetail({
     );
   }
 
+  // v48.61（D103）：血缘树节点跳原文（与卡跳原文同链路；锚点信息取自该摘录行，§6.8-8 进度不变量由既有链路保证）
+  function jumpNode(n: LineageNode) {
+    if (!n.documentId || !onJumpToDoc) return;
+    onJumpToDoc(
+      n.documentId,
+      { anchorText: n.anchorText || n.label, anchorRatio: n.anchorRatio ?? undefined },
+      "browse"
+    );
+  }
+
   const f = card.fsrs ?? {};
   const meta: [string, string][] = [
     ["类型", typeLabel(card.cardType)],
@@ -1223,6 +1661,8 @@ function CardDetail({
         </div>
         <div className="modal-scroll">
           <CardFace card={card} showBack onReveal={() => {}} onEdit={handleEdit} />
+          {/* v48.61（D104）：背面辅助字段区（助记/例子/来源，app.cardFaceExtras 三开关）——与复习页同一组件自动继承 */}
+          <CardFaceExtrasBlock card={card} />
 
           {/* v46（M14-UM2，§6.7.3）：记忆溯源——显示所引记忆行与校验状态；已入库卡不随记忆文件改动自动改写 */}
           {card.memoryRefJson && (
@@ -1244,6 +1684,155 @@ function CardDetail({
               </Fragment>
             ))}
           </dl>
+
+          {/* v48.61（D103）：生成信息区（AI 卡）——批次/提示词/当时质检如实展示 + 重新生成入口；手动卡无批次区（meta 生成方式=手动） */}
+          {card.generatedBy === "ai" && (
+            <div className="cb-geninfo" data-testid="card-detail-geninfo">
+              <p className="cb-section-title">生成信息</p>
+              {genInfo ? (
+                <>
+                  <dl className="cb-meta cb-gen-meta">
+                    <dt>生成批次</dt>
+                    <dd data-testid="geninfo-batch">
+                      {genInfo.batch ? new Date(genInfo.batch.createdAt).toLocaleString() : "—（批次缺失）"}
+                      {genInfo.batch?.model ? ` · ${genInfo.batch.model}` : ""}
+                    </dd>
+                    <dt>提示词</dt>
+                    <dd data-testid="geninfo-template">
+                      {genInfo.template
+                        ? `${genInfo.template.scope} · ${genInfo.template.name} · v${genInfo.template.version}`
+                        : "—"}
+                    </dd>
+                    <dt>当时质检</dt>
+                    <dd data-testid="geninfo-lint">
+                      {(() => {
+                        const lint = genInfo.issues.filter((i) => i.source === "lint");
+                        if (lint.length === 0) return "无提示";
+                        const open = lint.filter((i) => i.status === "open").length;
+                        return `${lint.length} 条${open ? `（${open} 条未处理）` : "（均已处理）"}`;
+                      })()}
+                    </dd>
+                  </dl>
+                  {card.contextRef?.extractId ? (
+                    <button className="btn btn-outline btn-sm" data-testid="regen-cards" onClick={() => setRegenOpen(true)}>
+                      用当前提示词重新生成
+                    </button>
+                  ) : (
+                    <span className="form-hint">无来源摘录，无法重新生成</span>
+                  )}
+                </>
+              ) : (
+                <p className="form-hint">生成信息加载中…</p>
+              )}
+            </div>
+          )}
+
+          {/* v48.61（D103）：来源谱系（血缘树）——本卡所属摘录向上到根、向下到叶；D85 聚合计数；空态如实显示「无来源锚」 */}
+          {lineage.hasSource ? (
+            <div className="cb-lineage" data-testid="card-detail-lineage">
+              <p className="cb-section-title">来源谱系</p>
+              <ul className="cb-lineage-list">
+                {[...lineage.ancestors, ...lineage.descendants].map((n) => (
+                  <li
+                    key={n.id}
+                    className={"cb-lineage-item" + (n.isCurrent ? " current" : "")}
+                    style={{ paddingLeft: `calc(var(--sp-3) * ${Math.min(n.depth, 6)})` }}
+                  >
+                    <span className="cb-lineage-label">{n.label || "（空引文）"}</span>
+                    <span className="cb-lineage-count mono" title="该节点及全部子孙摘录上的卡数（D85 聚合口径）">
+                      {n.count}
+                    </span>
+                    {n.documentId && onJumpToDoc && (
+                      <button className="btn btn-outline btn-sm" onClick={() => jumpNode(n)} title="跳转到该摘录的原文位置">
+                        跳原文
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-outline btn-sm"
+                      data-testid="lineage-view-cards"
+                      onClick={() => onOpenAnchorFilter(n.id)}
+                      title="按该锚点筛选浏览器（含全部子层级）"
+                    >
+                      查看卡片
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="cb-lineage" data-testid="card-detail-lineage-empty">
+              <p className="form-hint">无来源锚</p>
+            </div>
+          )}
+
+          {/* v48.61（D103）：同源组（§4.16）——组内全部卡列表，本卡高亮；复习页「同源暂缓」提示保持原样（不加点跳） */}
+          {siblingMembers.length > 0 && (
+            <div className="cb-sibling" data-testid="card-detail-sibling">
+              <p className="cb-section-title">同源组（{siblingMembers.length} 张）</p>
+              <ul className="cb-sibling-list">
+                {siblingMembers.map((m) => (
+                  <li
+                    key={m.id}
+                    className={"cb-sibling-item" + (m.id === card.id ? " current" : "")}
+                    data-testid="sibling-row"
+                    onClick={() => {
+                      if (m.id !== card.id) onOpenCard(m.id);
+                    }}
+                    title={m.id === card.id ? undefined : "查看这张同源卡的详情"}
+                  >
+                    <span className="mono">{typeLabel(m.cardType)}</span>
+                    <span className="cb-sibling-front">{frontPreview(m).replace(/\s+/g, " ").slice(0, 40) || "（空题面）"}</span>
+                    <span>{statusOf(m)}</span>
+                    <span className="mono">{dueText(m)}</span>
+                    {deferredMap.has(m.id) && <span className="lint lint-warn">今日暂缓</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* v48.60（D101）：标签区——chips + 单卡编辑（正面永不显示标签，详情属编辑域不受此限）；
+              v48.63（D107）：标签功能总开关关闭时整块不渲染 */}
+          {tagsEnabled && (
+          <div className="cb-tags" data-testid="card-detail-tags">
+            <span className="cb-tags-label">标签</span>
+            {tagEditing ? (
+              <span className="cb-tags-editor">
+                <TagInput value={tagDraft} onChange={setTagDraft} suggestions={tagVocab} ariaLabel="标签" />
+                <button className="btn btn-primary btn-sm" data-tags-save onClick={() => void saveTags()}>
+                  保存
+                </button>
+                <button className="btn btn-outline btn-sm" onClick={() => setTagEditing(false)}>
+                  取消
+                </button>
+              </span>
+            ) : (
+              <span className="cb-tags-view">
+                {tagList.length > 0 ? (
+                  <span className="tag-chips">
+                    {tagList.map((t) => (
+                      <span key={t} className="tag-chip tag-chip-static">
+                        {t}
+                      </span>
+                    ))}
+                  </span>
+                ) : (
+                  <span className="form-hint">无标签</span>
+                )}
+                <button
+                  className="btn btn-outline btn-sm"
+                  data-tags-edit
+                  onClick={() => {
+                    setTagDraft(tagList);
+                    setTagEditing(true);
+                  }}
+                >
+                  编辑
+                </button>
+              </span>
+            )}
+          </div>
+          )}
 
           {issues.length > 0 && (
             <div className="cb-issues">
@@ -1279,6 +1868,10 @@ function CardDetail({
             <button className="btn btn-outline btn-sm" onClick={toggleSuspend}>
               {card.leech?.suspended ? "恢复调度" : "暂停调度"}
             </button>
+            {/* v48.60（D102）：生命周期归档/恢复（与暂停调度正交；不评分、不动 FSRS） */}
+            <button className="btn btn-outline btn-sm" data-detail-archive onClick={toggleArchive}>
+              {isArchived ? "恢复（解除归档）" : "不再关心"}
+            </button>
             <button className="btn btn-outline btn-sm" onClick={() => postpone(1)}>
               推迟 1 天
             </button>
@@ -1306,6 +1899,14 @@ function CardDetail({
               regionScope={card.occlusionJson.regionScope}
               cardOrd={card.cardOrd}
               onClose={() => setLightboxOpen(false)}
+            />
+          )}
+          {/* v48.61（D103）：「用当前提示词重新生成」确认面板——产物走完整接受流（CardLint + S1），新建卡不覆盖原卡 */}
+          {regenOpen && (
+            <RegenCardsModal
+              card={card}
+              batchScope={genInfo?.batch?.scope ?? null}
+              onClose={() => setRegenOpen(false)}
             />
           )}
         </div>

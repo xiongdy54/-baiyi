@@ -90,6 +90,7 @@ __export(cards_exports, {
   lintCard: () => lintCard,
   parseCloze: () => parseCloze,
   parseFollowUps: () => parseFollowUps,
+  requestOcclusionResult: () => requestOcclusionResult,
   siblingKeyFor: () => siblingKeyFor,
   similaritySearch: () => similaritySearch
 });
@@ -394,9 +395,161 @@ var settingsStore = {
   }
 };
 
+// electron/ste-profiles/zh-Hans.json
+var zh_Hans_default = {
+  lang: "zh-Hans",
+  name: "\u7B80\u660E\u4E2D\u6587\u5256\u9762 v1",
+  derivedFrom: ["ISO 24495-1:2023", "ASD-STE100 Issue 9\uFF08\u4EC5\u7ED3\u6784\u53C2\u7167\uFF0C\u89C4\u5219\u6587\u5B57\u5168\u90E8\u81EA\u5199\u84B8\u998F\uFF09"],
+  licenseNote: "original-wording: \u672C\u6587\u4EF6\u5168\u90E8\u89C4\u5219\u6587\u5B57\u4E3A\u81EA\u5199\uFF0C\u4E0D\u542B\u4EFB\u4F55\u53D7\u7248\u6743\u4FDD\u62A4\u7684\u89C4\u8303\u539F\u6587\u4E0E\u8BCD\u5178\u8BCD\u8868",
+  sentence: {
+    maxChars: 40,
+    maxClauses: 2,
+    note: "\u4E00\u53E5\u4E00\u4E49\uFF1B\u8D85\u8FC7\u7EA6 40 \u5B57\u6216\u542B\u4E24\u4E2A\u4EE5\u4E0A\u5206\u53E5\u7684\u957F\u53E5\u5FC5\u987B\u62C6\u5206\uFF1B\u4ECE\u53E5\u5D4C\u5957\u81F3\u591A\u4E00\u5C42\uFF1B\u4E00\u6BB5\u53EA\u8BF4\u4E00\u4E2A\u4E3B\u9898\uFF0C\u5148\u7ED3\u8BBA\u540E\u5C55\u5F00"
+  },
+  voice: {
+    preferActive: true,
+    agentUnknownNote: "\u4E3B\u52A8\u8BED\u6001\u4F18\u5148\uFF1B\u65BD\u52A8\u8005\u4E0D\u660E\u65F6\u663E\u5F0F\u5199\u300C\u6765\u6E90\u672A\u8BF4\u660E\u300D\uFF0C\u4E0D\u5F97\u7528\u88AB\u52A8\u53E5\u63A9\u853D\u65BD\u52A8\u8005"
+  },
+  lexicon: [
+    "\u4E00\u8BCD\u4E00\u4E49\uFF1A\u540C\u4E00\u6982\u5FF5\u4ECE\u5934\u5230\u5C3E\u53EA\u7528\u540C\u4E00\u4E2A\u8BCD\uFF0C\u4E0D\u6362\u8FD1\u4E49\u8BCD",
+    "\u907F\u514D\u6587\u767D\u5939\u6742\uFF08\u5982\u300C\u4E4B\u300D\u300C\u5176\u300D\u300C\u8005\u300D\u6DF7\u5728\u767D\u8BDD\u91CC\uFF09\u4E0E\u591A\u4E49\u6210\u8BED",
+    "\u672F\u8BED\u9996\u6B21\u51FA\u73B0\u5C31\u7528\u4E00\u53E5\u767D\u8BDD\u5C31\u5730\u5B9A\u4E49\uFF0C\u4E4B\u540E\u518D\u76F4\u63A5\u4F7F\u7528\u8BE5\u672F\u8BED",
+    "\u907F\u514D\u884C\u8BDD\u3001\u7F51\u7EDC\u8BED\u4E0E\u5916\u6587\u7F29\u5199\uFF1B\u786E\u9700\u7F29\u5199\u65F6\u9996\u6B21\u51FA\u73B0\u7ED9\u51FA\u5168\u79F0",
+    "\u6570\u91CF\u4E0E\u6761\u4EF6\u5199\u660E\u786E\uFF1A\u6570\u5B57\u5E26\u5355\u4F4D\uFF0C\u91CF\u7EA7\u4E0D\u5199\u300C\u82E5\u5E72\u300D\u300C\u4E00\u4E9B\u300D\u8FD9\u7C7B\u542B\u7CCA\u8BCD"
+  ],
+  avoid: [
+    { bad: "\u88AB\u2026\u2026\u6240\u2026\u2026\uFF08\u65BD\u52A8\u8005\u7F3A\u5931\u7684\u88AB\u52A8\u957F\u53E5\uFF09", why: "\u65BD\u52A8\u8005\u88AB\u9690\u85CF\uFF0C\u8BFB\u8005\u65E0\u6CD5\u5224\u65AD\u662F\u8C01\u505A\u7684" },
+    { bad: "\u591A\u5C42\u300C\u7684\u300D\u5B57\u957F\u5B9A\u8BED\uFF08\u5982\u300C\u7531\u90E8\u95E8\u5236\u5B9A\u7684\u5173\u4E8E\u89C4\u8303\u6240\u5C5E\u673A\u6784\u884C\u4E3A\u7684\u529E\u6CD5\u300D\uFF09", why: "\u5B9A\u8BED\u5C42\u5C42\u53E0\u52A0\uFF0C\u4E2D\u5FC3\u8BED\u88AB\u63A8\u8FDC\uFF0C\u8BFB\u4E09\u904D\u624D\u6562\u65AD\u53E5" },
+    { bad: "\u5BF9\u300C\u5176\u300D\u300C\u8BE5\u300D\u300C\u6B64\u300D\u7684\u8FDC\u8DDD\u79BB\u6307\u4EE3", why: "\u6307\u4EE3\u5BF9\u8C61\u9694\u53E5\u4E4B\u540E\uFF0C\u8BFB\u8005\u9700\u8981\u56DE\u6EAF\u731C\u6D4B" },
+    { bad: "\u6587\u767D\u6DF7\u6742\u7684\u4E66\u9762\u8154\uFF08\u300C\u4E1A\u5DF2\u300D\u300C\u5982\u4E0A\u6240\u8FF0\u300D\u300C\u5179\u300D\uFF09", why: "\u8BED\u57DF\u6DF7\u6742\uFF0C\u666E\u901A\u8BFB\u8005\u4E0D\u719F\u6089\u65E7\u5F0F\u4E66\u9762\u8BCD" }
+  ],
+  rewriteExample: [
+    {
+      before: "\u672C\u65B9\u6CD5\u4E4B\u6240\u4EE5\u80FD\u591F\u88AB\u5E7F\u6CDB\u91C7\u7528\uFF0C\u4E43\u56E0\u5176\u7531\u4E1A\u754C\u6240\u516C\u8BA4\u4E4B\u6280\u672F\u8DEF\u7EBF\u6240\u652F\u6301\u3002",
+      after: "\u4E1A\u754C\u516C\u8BA4\u8FD9\u6761\u6280\u672F\u8DEF\u7EBF\uFF0C\u6240\u4EE5\u672C\u65B9\u6CD5\u88AB\u5E7F\u6CDB\u91C7\u7528\u3002\uFF08\u6765\u6E90\u672A\u8BF4\u660E\u662F\u8C01\u516C\u8BA4\uFF09"
+    }
+  ],
+  source: "docs/design/STE-PLAIN-DECODE-D91.md"
+};
+
+// electron/ste-profiles/en.json
+var en_default = {
+  lang: "en",
+  name: "Plain English Profile v1 (controlled-language distillation)",
+  derivedFrom: ["ISO 24495-1:2023", "ASD-STE100 Issue 9 (structure reference only; all rule wording originally written)"],
+  licenseNote: "original-wording: every rule sentence in this file is originally written; no copyrighted specification text or its word lists is reproduced",
+  sentence: {
+    maxWords: 20,
+    maxSentencesPerParagraph: 6,
+    note: "One instruction per sentence; one topic per paragraph (with a conclusion first); split sentences longer than about 20 words; keep relative clauses to at most one per sentence"
+  },
+  voice: {
+    preferActive: true,
+    agentUnknownNote: "Prefer the active voice and name the doer; when the doer is unknown, say so explicitly (for example 'the source does not state who approved this'); use the passive only when the doer is unknown or unimportant"
+  },
+  lexicon: [
+    "One term, one meaning: use the same word for the same concept throughout the text",
+    "Prefer everyday words; explain a technical term in plain words where it first appears",
+    "Keep noun phrases short (about three words at most); do not stack nouns",
+    "Use verbs in simple finite forms; do not reuse one word with several grammatical functions",
+    "Make quantities and conditions explicit: give units with numbers and write ranges precisely"
+  ],
+  avoid: [
+    { bad: "Long noun chains such as 'system configuration item version verification procedure'", why: "Stacked nouns hide who does what to what" },
+    { bad: "Sentences where several things happen with only 'and' or 'which' to hold them together", why: "Readers lose track of the main statement" },
+    { bad: "Vague quantifiers such as 'several', 'some', 'appropriate'", why: "The reader cannot act on an unspecified amount or condition" },
+    { bad: "Idioms and figurative verbs (for example 'the market tanked')", why: "Figurative language does not survive translation and puzzles non-native readers" }
+  ],
+  rewriteExample: [
+    {
+      before: "The implementation of the utilization of this procedure is performed by the operator.",
+      after: "The operator uses this procedure."
+    }
+  ],
+  source: "docs/design/STE-PLAIN-DECODE-D91.md"
+};
+
+// electron/ste-profiles/universal.json
+var universal_default = {
+  lang: "universal",
+  name: "Universal plain-language profile v1 (four principles)",
+  derivedFrom: ["ISO 24495-1:2023"],
+  licenseNote: "original-wording: \u672C\u6587\u4EF6\u5168\u90E8\u89C4\u5219\u6587\u5B57\u4E3A\u81EA\u5199\uFF0C\u4E0D\u542B\u4EFB\u4F55\u53D7\u7248\u6743\u4FDD\u62A4\u7684\u89C4\u8303\u539F\u6587\u4E0E\u8BCD\u8868",
+  sentence: {
+    note: "\u6309\u8BE5\u8BED\u8A00\u81EA\u5DF1\u7684\u4E60\u60EF\u5199\u77ED\u53E5\u3001\u76F4\u9648\u53E5\uFF1A\u4E00\u53E5\u53EA\u8BF4\u4E00\u4EF6\u4E8B\uFF0C\u5148\u7ED3\u8BBA\u540E\u5C55\u5F00\uFF0C\u4E00\u6BB5\u4E00\u4E2A\u4E3B\u9898\uFF08ISO \u56DB\u539F\u5219\u4E0D\u8BBE\u91CF\u5316\u53E5\u957F\uFF0C\u7531\u5404\u8BED\u8A00 pack \u7ED9\u51FA\u8FD1\u4F3C\u4E0A\u9650\uFF09"
+  },
+  voice: {
+    preferActive: true,
+    agentUnknownNote: "\u4E3B\u52A8\u8BED\u6001\u4F18\u5148\uFF0C\u5199\u660E\u300C\u8C01\u505A\u4E86\u4EC0\u4E48\u300D\uFF1B\u65BD\u52A8\u8005\u4E0D\u660E\u65F6\u660E\u8BF4\u300C\u6765\u6E90\u672A\u8BF4\u660E\u300D\uFF0C\u4E0D\u9760\u8BED\u6001\u63A9\u853D"
+  },
+  lexicon: [
+    "\u8BFB\u8005\u80FD\u627E\u5230\uFF1A\u91CD\u8981\u5185\u5BB9\u653E\u524D\u9762\uFF0C\u6807\u9898\u4E0E\u8282\u5E8F\u7A33\u5B9A\uFF0C\u4E0D\u57CB\u5173\u952E\u4FE1\u606F",
+    "\u8BFB\u8005\u80FD\u7406\u89E3\uFF1A\u7528\u8BE5\u8BED\u8A00\u7684\u5E38\u7528\u8BCD\uFF1B\u672F\u8BED\u9996\u73B0\u5C31\u5730\u7ED9\u4E00\u53E5\u5E73\u5B9E\u5B9A\u4E49\uFF1B\u4E00\u8BCD\u4E00\u4E49",
+    "\u8BFB\u8005\u80FD\u4F7F\u7528\uFF1A\u6570\u91CF\u3001\u5355\u4F4D\u3001\u6761\u4EF6\u3001\u524D\u63D0\u5199\u660E\u786E\uFF0C\u4E0D\u5199\u542B\u7CCA\u91CF\u8BCD\uFF1B\u9690\u542B\u524D\u63D0\u663E\u5F0F\u5316",
+    "\u76F8\u5173\uFF1A\u53EA\u5199\u4E0E\u8BFB\u8005\u4EFB\u52A1\u6709\u5173\u7684\u5185\u5BB9\uFF0C\u5220\u6389\u88C5\u9970\u6027\u94FA\u57AB"
+  ],
+  avoid: [
+    { bad: "\u6307\u4EE3\u8DDD\u79BB\u8FC7\u8FDC\u7684\u4EE3\u8BCD\u4E0E\u7701\u7565\u4E3B\u8BED\u7684\u8FDE\u7EED\u5206\u53E5", why: "\u8BFB\u8005\u9700\u8981\u56DE\u6EAF\u4E0E\u731C\u6D4B\uFF0C\u8FDD\u53CD\u300C\u80FD\u7406\u89E3\u300D\u539F\u5219" },
+    { bad: "\u6CA1\u6709\u5355\u4F4D\u6216\u754C\u9650\u7684\u6570\u91CF\u8BCD\uFF08\u82E5\u5E72\u3001\u4E00\u4E9B\u3001\u9002\u5F53\uFF09", why: "\u8BFB\u8005\u65E0\u6CD5\u636E\u6B64\u884C\u52A8\uFF0C\u8FDD\u53CD\u300C\u80FD\u4F7F\u7528\u300D\u539F\u5219" }
+  ],
+  rewriteExample: [
+    {
+      before: "\u7CFB\u7EDF\u5728\u7279\u5B9A\u6761\u4EF6\u4E0B\u53EF\u80FD\u4F1A\u51FA\u73B0\u4E00\u5B9A\u7A0B\u5EA6\u7684\u6027\u80FD\u6CE2\u52A8\u3002",
+      after: "\u5F53\u5E76\u53D1\u7528\u6237\u8D85\u8FC7 200 \u65F6\uFF0C\u7CFB\u7EDF\u54CD\u5E94\u4F1A\u53D8\u6162\u7EA6 2 \u79D2\u3002\uFF08\u6765\u6E90\u672A\u8BF4\u660E\u8BE5\u9608\u503C\u7684\u6D4B\u5B9A\u6761\u4EF6\uFF09"
+    }
+  ],
+  source: "docs/design/STE-PLAIN-DECODE-D91.md"
+};
+
+// src/lib/steProfiles.ts
+var STE_PROFILES = {
+  "zh-Hans": zh_Hans_default,
+  en: en_default,
+  universal: universal_default
+};
+var STE_OUTPUT_LANG = "zh-Hans";
+function resolveProfile(lang) {
+  const raw = String(lang ?? "").trim();
+  if (raw) {
+    const lower = raw.toLowerCase();
+    const base = lower.split(/[-_]/)[0];
+    for (const key of Object.keys(STE_PROFILES)) {
+      if (key.toLowerCase() === lower) return STE_PROFILES[key];
+    }
+    if (base === "zh") return STE_PROFILES["zh-Hans"];
+    if (STE_PROFILES[base]) return STE_PROFILES[base];
+    return STE_PROFILES.en;
+  }
+  return STE_PROFILES.universal;
+}
+function formatProfile(p) {
+  const lines = [`\u3010${p.name}\uFF08${p.lang}\uFF09\u3011`];
+  const s = p.sentence ?? {};
+  const sentenceBits = [
+    s.maxChars ? `\u4E00\u53E5 \u2264 ${s.maxChars} \u5B57` : "",
+    s.maxWords ? `\u4E00\u53E5 \u2264 ${s.maxWords} words` : "",
+    s.maxClauses ? `\u5206\u53E5 \u2264 ${s.maxClauses}` : "",
+    s.maxSentencesPerParagraph ? `\u4E00\u6BB5 \u2264 ${s.maxSentencesPerParagraph} \u53E5` : "",
+    s.note ?? ""
+  ].filter(Boolean);
+  if (sentenceBits.length) lines.push(`- \u53E5\u5B50\uFF1A${sentenceBits.join("\uFF1B")}`);
+  if (p.voice?.preferActive !== void 0) {
+    lines.push(`- \u8BED\u6001\uFF1A${p.voice.preferActive ? "\u4E3B\u52A8\u8BED\u6001\u4F18\u5148" : "\u4E0D\u5F3A\u5236\u4E3B\u52A8\u8BED\u6001"}${p.voice.agentUnknownNote ? `\uFF1B${p.voice.agentUnknownNote}` : ""}`);
+  }
+  for (const rule of p.lexicon ?? []) lines.push(`- \u8BCD\u6C47\uFF1A${rule}`);
+  for (const a of p.avoid ?? []) lines.push(`- \u907F\u514D\uFF1A${a.bad}\u2014\u2014${a.why}`);
+  for (const ex of p.rewriteExample ?? []) lines.push(`- \u6539\u5199\u793A\u4F8B\uFF1A\u539F\u300C${ex.before}\u300D\u2192 \u6539\u300C${ex.after}\u300D`);
+  return lines.join("\n");
+}
+
+// src/lib/tags.ts
+var TAG_MAX_PER_CARD = 8;
+var TAG_MAX_LEN = 24;
+var TAG_MAX_DEPTH = 3;
+
 // src/lib/cards.ts
 function parseCloze(text) {
-  const re = /\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g;
+  const re = /\{\{c(\d+)::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g;
   const ords = /* @__PURE__ */ new Set();
   let m;
   while (m = re.exec(text)) ords.add(Number(m[1]));
@@ -407,7 +560,7 @@ function parseCloze(text) {
   const renderWith = (hiddenOrd) => {
     const mask = normalize(hiddenOrd);
     const maskedOrds = [];
-    const out = text.replace(/\{\{c(\d+)::(.*?)(?:::(.*?))?\}\}/g, (_s, ordStr, content, hint) => {
+    const out = text.replace(/\{\{c(\d+)::([\s\S]*?)(?:::([\s\S]*?))?\}\}/g, (_s, ordStr, content, hint) => {
       const ord = Number(ordStr);
       if (mask === null || !mask.has(ord)) return content;
       if (!maskedOrds.includes(ord)) maskedOrds.push(ord);
@@ -426,9 +579,11 @@ function parseCloze(text) {
   };
 }
 function extractClozeAnswer(text, ord) {
-  const re = new RegExp(`\\{\\{c${ord}::(.*?)(?:::(.*?))?\\}\\}`);
-  const m = re.exec(text);
-  return m ? (m[1] ?? "") + (m[2] ? `\uFF08${m[2]}\uFF09` : "") : "";
+  const re = new RegExp(`\\{\\{c${ord}::([\\s\\S]*?)(?:::([\\s\\S]*?))?\\}\\}`, "g");
+  const parts = [];
+  let m;
+  while (m = re.exec(text)) parts.push((m[1] ?? "") + (m[2] ? `\uFF08${m[2]}\uFF09` : ""));
+  return parts.join(" / ");
 }
 function extractClozeAnswers(text, ords) {
   return ords.map((o) => extractClozeAnswer(text, o));
@@ -561,6 +716,39 @@ function extractJson(raw) {
     `AI \u672A\u8FD4\u56DE\u6709\u6548 JSON\uFF1A${lastErr instanceof Error ? lastErr.message : "\u672A\u627E\u5230 JSON \u5BF9\u8C61"}`
   );
 }
+async function requestOcclusionResult(image, context, onProgress, onThinking) {
+  const tpl = await window.promptsAPI?.get("card-occlusion");
+  if (!tpl) throw new Error("\u63D0\u793A\u8BCD\u6A21\u677F\u7F3A\u5931\uFF08card-occlusion\uFF09");
+  const textParts = [
+    "\u3010\u4EFB\u52A1\u3011\u8BC6\u522B\u56FE\u7247\u4E2D\u9002\u5408\u8BB0\u5FC6\u6D4B\u8BD5\u7684\u5185\u5BB9\u5E76\u7ED9\u51FA\u906E\u6321\u533A\u57DF\uFF08\u5750\u6807\u4E3A\u76F8\u5BF9\u56FE\u7247\u5C3A\u5BF8\u7684\u767E\u5206\u6BD4\uFF09\u3002",
+    // v25：用户已手绘区域的场景——图片是用户选区的裁剪，模型只负责读出该区域内容；
+    // 指令经请求装配注入（与 generateCards 的 context.focus 同机制），提示词模板不变
+    context.focus ? `\u3010\u7528\u6237\u5DF2\u9009\u5B9A\u7684\u906E\u6321\u533A\u57DF\u3011${context.focus}` : "",
+    // v29（D26）：图片周边文字上下文——相关则结合出题，无关则由模型忽略
+    context.contextText ? `\u3010\u56FE\u7247\u5468\u8FB9\u6587\u5B57\u4E0A\u4E0B\u6587\uFF08\u56FE\u7247\u4E0A\u65B9 1 \u6BB5 + \u4E0B\u65B9 2 \u6BB5\uFF09\u3011
+${context.contextText}
+\uFF08\u82E5\u4E0E\u56FE\u7247\u5185\u5BB9\u76F8\u5173\uFF0C\u53EF\u7ED3\u5408\u4E0A\u4E0B\u6587\u51FA\u9898\uFF1B\u65E0\u5173\u5219\u5FFD\u7565\uFF09` : "",
+    context.title ? `\u3010\u6765\u6E90\u3011\u300A${context.title}\u300B${context.section ? " \xB7 " + context.section : ""}` : ""
+  ].filter(Boolean);
+  const userContent = [
+    { type: "image_url", image_url: { url: image.dataUrl } },
+    { type: "text", text: textParts.join("\n") }
+  ];
+  let acc = "";
+  const raw = await aiGateway.chat(
+    [
+      { role: "system", content: tpl.content },
+      { role: "user", content: userContent }
+    ],
+    onProgress ? (a) => {
+      acc = a;
+      onProgress(a.length);
+    } : void 0,
+    0.2,
+    onThinking
+  );
+  return { result: extractJson(raw || acc), templateId: tpl.id };
+}
 var cardGenerator = {
   async generateCards(sourceText, context, mode, onProgress, onThinking) {
     const resolved = mode === "auto" ? detectMode(sourceText) : mode;
@@ -633,37 +821,7 @@ ${context.userProfile}` : "",
   // M1.1（v15，D16）：图片挖空生成链路——图片已入库，把 dataURL 交 GLM 多模态识别遮挡区域，
   // 返回 regions（归一化百分比坐标）+ 每区域一张 imageOcclusion 草稿（rects 共享同一 occlusionJson）
   async generateOcclusionCards(image, context, onProgress, onThinking) {
-    const tpl = await window.promptsAPI?.get("card-occlusion");
-    if (!tpl) throw new Error("\u63D0\u793A\u8BCD\u6A21\u677F\u7F3A\u5931\uFF08card-occlusion\uFF09");
-    const textParts = [
-      "\u3010\u4EFB\u52A1\u3011\u8BC6\u522B\u56FE\u7247\u4E2D\u9002\u5408\u8BB0\u5FC6\u6D4B\u8BD5\u7684\u5185\u5BB9\u5E76\u7ED9\u51FA\u906E\u6321\u533A\u57DF\uFF08\u5750\u6807\u4E3A\u76F8\u5BF9\u56FE\u7247\u5C3A\u5BF8\u7684\u767E\u5206\u6BD4\uFF09\u3002",
-      // v25：用户已手绘区域的场景——图片是用户选区的裁剪，模型只负责读出该区域内容；
-      // 指令经请求装配注入（与 generateCards 的 context.focus 同机制），提示词模板不变
-      context.focus ? `\u3010\u7528\u6237\u5DF2\u9009\u5B9A\u7684\u906E\u6321\u533A\u57DF\u3011${context.focus}` : "",
-      // v29（D26）：图片周边文字上下文——相关则结合出题，无关则由模型忽略
-      context.contextText ? `\u3010\u56FE\u7247\u5468\u8FB9\u6587\u5B57\u4E0A\u4E0B\u6587\uFF08\u56FE\u7247\u4E0A\u65B9 1 \u6BB5 + \u4E0B\u65B9 2 \u6BB5\uFF09\u3011
-${context.contextText}
-\uFF08\u82E5\u4E0E\u56FE\u7247\u5185\u5BB9\u76F8\u5173\uFF0C\u53EF\u7ED3\u5408\u4E0A\u4E0B\u6587\u51FA\u9898\uFF1B\u65E0\u5173\u5219\u5FFD\u7565\uFF09` : "",
-      context.title ? `\u3010\u6765\u6E90\u3011\u300A${context.title}\u300B${context.section ? " \xB7 " + context.section : ""}` : ""
-    ].filter(Boolean);
-    const userContent = [
-      { type: "image_url", image_url: { url: image.dataUrl } },
-      { type: "text", text: textParts.join("\n") }
-    ];
-    let acc = "";
-    const raw = await aiGateway.chat(
-      [
-        { role: "system", content: tpl.content },
-        { role: "user", content: userContent }
-      ],
-      onProgress ? (a) => {
-        acc = a;
-        onProgress(a.length);
-      } : void 0,
-      0.2,
-      onThinking
-    );
-    const result = extractJson(raw || acc);
+    const { result, templateId: tplId } = await requestOcclusionResult(image, context, onProgress, onThinking);
     const preset = context.presetRegion;
     if (preset) {
       const px = clampPct(preset.rect.x);
@@ -734,10 +892,10 @@ ${context.contextText}
           scope: "card-occlusion",
           sourceText: `[\u56FE\u7247\u9009\u533A] ${image.assetPath}`,
           context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Mapped: true },
-          promptTemplateId: tpl.id,
+          promptTemplateId: tplId,
           result
         });
-        return { batchId: batch02?.id || "", result, templateId: tpl.id };
+        return { batchId: batch02?.id || "", result, templateId: tplId };
       }
       const rect = {
         x: clampPct(preset.rect.x),
@@ -771,10 +929,10 @@ ${context.contextText}
         scope: "card-occlusion",
         sourceText: `[\u56FE\u7247\u9009\u533A] ${image.assetPath}`,
         context: { ...context, imageAsset: image.assetPath, userRegion: true, d26Fallback: true },
-        promptTemplateId: tpl.id,
+        promptTemplateId: tplId,
         result
       });
-      return { batchId: batch0?.id || "", result, templateId: tpl.id };
+      return { batchId: batch0?.id || "", result, templateId: tplId };
     }
     const regions = (result.regions ?? []).map((r, i) => {
       const x = clampPct(r.x);
@@ -804,12 +962,36 @@ ${context.contextText}
       scope: "card-occlusion",
       sourceText: `[\u56FE\u7247] ${image.assetPath}`,
       context: { ...context, imageAsset: image.assetPath, regionCount: regions.length },
-      promptTemplateId: tpl.id,
+      promptTemplateId: tplId,
       result
     });
-    return { batchId: batch?.id || "", result, templateId: tpl.id };
+    return { batchId: batch?.id || "", result, templateId: tplId };
   },
-  async explain(sourceText, context, question, onDelta, onThinking) {
+  async explain(sourceText, context, question, onDelta, onThinking, opts) {
+    if (opts?.mode === "ste") {
+      const tpl2 = await window.promptsAPI?.get("reader-explain-ste");
+      if (!tpl2) throw new Error("\u63D0\u793A\u8BCD\u6A21\u677F\u7F3A\u5931\uFF08reader-explain-ste\uFF09");
+      const matLang = String(opts.matLang ?? "").trim();
+      const analysis = resolveProfile(matLang);
+      const output = resolveProfile(STE_OUTPUT_LANG);
+      const sys2 = tpl2.content.replace("{{ANALYSIS_PROFILE}}", formatProfile(analysis)).replace("{{OUTPUT_PROFILE}}", formatProfile(output));
+      const user2 = [
+        `\u3010\u9009\u4E2D\u6587\u672C\u3011
+${sourceText}`,
+        context ? `\u3010\u4E0A\u4E0B\u6587\u3011${context}` : "",
+        `\u3010\u6750\u6599\u8BED\u8A00\u3011${matLang || "\u672A\u6807\u6CE8\u2014\u2014\u8BF7\u81EA\u68C0\u6750\u6599\u8BED\u8A00\u5E76\u5728 <!--ste:matLang=\u2026--> \u6807\u8BB0\u4E2D\u62A5\u544A"}`,
+        `\u3010\u89E3\u8BFB\u8BED\u8A00\u3011${STE_OUTPUT_LANG}\uFF08\u7B80\u4F53\u4E2D\u6587\uFF09`
+      ].filter(Boolean).join("\n\n");
+      return aiGateway.chat(
+        [
+          { role: "system", content: sys2 },
+          { role: "user", content: user2 }
+        ],
+        onDelta,
+        0.7,
+        onThinking
+      );
+    }
     const tpl = await window.promptsAPI?.get("reader-explain");
     const sys = tpl?.content || "\u4F60\u662F\u9605\u8BFB\u52A9\u624B\u3002";
     const user = `\u3010\u9009\u4E2D\u6587\u672C\u3011
@@ -897,6 +1079,18 @@ function lintCard(draft) {
       message: "\u7591\u4F3C\u4EBA\u540D\u7F29\u7565\uFF08R16\uFF09\uFF1A\u8BF7\u786E\u8BA4\u4F7F\u7528\u5B8C\u6574\u5168\u540D\uFF08\u5982\u300C\u8FC8\u514B\u5C14\xB7\u6768\u300D\u800C\u975E\u300C\u6768\u300D\uFF09"
     });
   }
+  const tags = draft.tags ?? [];
+  if (tags.length > TAG_MAX_PER_CARD) {
+    issues.push({ ruleId: "L17", severity: "info", message: `\u6807\u7B7E\u8D85\u8FC7 ${TAG_MAX_PER_CARD} \u4E2A\uFF0C\u5EFA\u8BAE\u6536\u655B\u5230\u9AD8\u9891\u4F7F\u7528\u7684\u5C11\u6570\u6807\u7B7E` });
+  }
+  const overLen = tags.filter((t) => [...String(t)].length > TAG_MAX_LEN);
+  if (overLen.length > 0) {
+    issues.push({ ruleId: "L17", severity: "info", message: `\u6807\u7B7E\u8D85\u8FC7 ${TAG_MAX_LEN} \u5B57\uFF1A\u300C${overLen[0]}\u2026\u300D` });
+  }
+  const overDepth = tags.filter((t) => String(t).split("::").length > TAG_MAX_DEPTH);
+  if (overDepth.length > 0) {
+    issues.push({ ruleId: "L17", severity: "info", message: `\u6807\u7B7E\u5C42\u7EA7\u8D85\u8FC7 ${TAG_MAX_DEPTH} \u5C42\uFF1A\u300C${overDepth[0]}\u300D` });
+  }
   return issues;
 }
 var similaritySearch = {
@@ -925,6 +1119,12 @@ var cardsApi = {
     await window.cardsAPI?.skip(cardId);
   },
   setSuspended: async (id, suspended, reason) => await window.cardsAPI?.setSuspended(id, suspended, reason) ?? false,
+  /** v48.22（D58 §6.8-6）：卡片批量（单事务 + 单次落盘） */
+  batch: async (op, ids, payload) => await window.cardsAPI?.batch(op, ids, payload) ?? { ok: false, reason: "API \u4E0D\u53EF\u7528" },
+  /** v48.60（D101）：标签写入——items=[{id,tags[]}]（渲染层用 tags.ts 算好每卡终值，主进程只存储） */
+  setTags: async (items) => await window.cardsAPI?.setTags?.(items) ?? { ok: false, reason: "API \u4E0D\u53EF\u7528" },
+  /** v48.60（D101）：标签词表（cards.tags_json ∪ extracts.tag_json 派生，主进程只读现算） */
+  listTags: async () => await window.cardsAPI?.listTags?.() ?? [],
   updateLeech: async (id, patch) => await window.cardsAPI?.updateLeech(id, patch) ?? false,
   resolveLeech: async (id, resolution, updates) => await window.cardsAPI?.resolveLeech(id, resolution, updates) ?? false,
   listLeech: async () => await window.cardsAPI?.listLeech() ?? [],
@@ -1048,7 +1248,8 @@ async function createAcceptedCard(d, ctx = {}) {
       sourceRef: dd.sourceRef || (ctx.sourceTitle ? { title: ctx.sourceTitle } : null),
       dateStamp: dd.dateStamp || null,
       priority: dd.prioritySuggestion ?? 50,
-      tags: [],
+      // v48.60（D101）：调用方传入的标签（如批注标签继承初值）原样落库；AI 草稿缺省 = []
+      tags: dd.tags ?? [],
       domain: dd.domain ?? [],
       knowledgePointId: dd.knowledgePointId || null,
       // v41（K2-A，D38）：批次归组——AI 抽取归一的簇键（batch:<id>:<kp>）依据，消除跨材料 kp1 碰撞
@@ -1069,7 +1270,8 @@ async function createAcceptedCard(d, ctx = {}) {
       contextPrefix: card.contextPrefix,
       sourceRef: card.sourceRef,
       dateStamp: card.dateStamp,
-      knowledgePointId: card.knowledgePointId
+      knowledgePointId: card.knowledgePointId,
+      tags: card.tags
     });
     const created = await cardsApi.create(card);
     ids.push(created.id);
@@ -1126,6 +1328,7 @@ function hasSourceAnchor(ref) {
   lintCard,
   parseCloze,
   parseFollowUps,
+  requestOcclusionResult,
   siblingKeyFor,
   similaritySearch
 });

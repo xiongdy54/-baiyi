@@ -96,6 +96,8 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   create: (card) => ipcRenderer.invoke("cards:create", card),
   update: (card) => ipcRenderer.invoke("cards:update", card),
   get: (id) => ipcRenderer.invoke("cards:get", id),
+  // v48.61（D103）：生成信息区只读 join（card + 批次 + 提示词 + card_issues）
+  genInfo: (id) => ipcRenderer.invoke("cards:genInfo", id),
   listDue: () => ipcRenderer.invoke("cards:listDue"),
   // v34（M12，§4.2-20）：今日队列视图 {cards, deferred[]}（同源暂缓清单含延后原因）
   todayQueue: (now) => ipcRenderer.invoke("cards:todayQueue", now),
@@ -110,8 +112,11 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   persistNow: () => ipcRenderer.invoke("cards:persistNow"),
   skip: (cardId) => ipcRenderer.invoke("cards:skip", cardId),
   setSuspended: (id, suspended, reason) => ipcRenderer.invoke("cards:setSuspended", id, suspended, reason),
-  // v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete）
+  // v48.22（D58 §6.8-6）：卡片批量（单事务；op = suspend|resume|postpone|delete；v48.60/D102 增 archive|restore）
   batch: (op, ids, payload) => ipcRenderer.invoke("cards:batch", op, ids, payload),
+  // v48.60（D101，§4.1）：标签写入（items=[{id,tags[]}]，渲染层算好终值）与词表（只读派生）
+  setTags: (items) => ipcRenderer.invoke("cards:setTags", items),
+  listTags: () => ipcRenderer.invoke("cards:listTags"),
   updateLeech: (id, patch) => ipcRenderer.invoke("cards:updateLeech", id, patch),
   resolveLeech: (id, resolution, updates) => ipcRenderer.invoke("cards:resolveLeech", id, resolution, updates),
   listLeech: () => ipcRenderer.invoke("cards:listLeech")

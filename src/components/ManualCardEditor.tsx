@@ -12,6 +12,10 @@ import { attachRipple, settle } from "../lib/press";
 import { IconChevronDown, IconClose } from "./icons";
 import OcclusionShapes from "./OcclusionShapes";
 import MarkdownEditor from "./editor/MarkdownEditor";
+import TagInput from "./TagInput";
+// v48.63（D107）：标签功能总开关——手动表单标签行受其控制
+import { useTagsEnabled } from "../lib/tagSettings";
+import type { TagVocabEntry } from "../lib/tags";
 import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
 
 /** §J P0（#4）：制卡表单字段统一 Markdown 紧凑档（无工具条、矮盒 minRows=2）。
@@ -56,6 +60,8 @@ export interface ManualCardPayload {
   mnemonic?: string;
   knowledgePointId?: string;
   dateStamp?: string | null;
+  /** v48.60（D101）：用户标签（表单内已 normalize；继承初值由宿主经 initialTags 预填） */
+  tags?: string[];
 }
 
 /** 手动制卡表单体（D88 §8.2 抽取，纯移动）：modal 包装之外的全部内容——
@@ -63,12 +69,18 @@ export interface ManualCardPayload {
 export function ManualCardForm({
   quote,
   imageRegion,
+  tagSuggestions,
+  initialTags,
   onCancel,
   onSave
 }: {
   quote: string;
   /** v25：来自图片聚焦选区（工具条「手动制卡」）——提供时默认进入图片挖空页签 */
   imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
+  /** v48.60（D101）：标签词表建议（cards:listTags；不传则无建议下拉） */
+  tagSuggestions?: TagVocabEntry[] | null;
+  /** v48.60（D101）：标签初值（批注标签继承预填，可删） */
+  initialTags?: string[];
   onCancel: () => void;
   onSave: (payload: ManualCardPayload) => Promise<void>;
 }) {
@@ -85,6 +97,9 @@ export function ManualCardForm({
   const [mnemonic, setMnemonic] = useState("");
   const [knowledgePointId, setKnowledgePointId] = useState("");
   const [dateStamped, setDateStamped] = useState(false);
+  // v48.60（D101）：标签（初值 = 批注标签继承预填，可删）；v48.63（D107）：总开关关闭时恒空提交
+  const tagsEnabled = useTagsEnabled();
+  const [tags, setTags] = useState<string[]>(initialTags ?? []);
 
   useEffect(() => {
     if (mode === "qa" || mode === "imageOcclusion") {
@@ -111,7 +126,8 @@ export function ManualCardForm({
       mnemonic: mnemonic.trim(),
       knowledgePointId: knowledgePointId.trim(),
       // 日期标记（R11/规则19）：易变内容勾选后写入当日日期
-      dateStamp: dateStamped ? new Date().toISOString().slice(0, 10) : null
+      dateStamp: dateStamped ? new Date().toISOString().slice(0, 10) : null,
+      tags: tagsEnabled ? tags : []
     };
     const clozeText = mode === "cloze" ? toCloze(front) : undefined;
     await onSave({
@@ -236,6 +252,14 @@ export function ManualCardForm({
           <label>领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）</label>
           <UdcPicker value={domain} onChange={setDomain} />
         </div>
+        {/* v48.60（D101）：用户标签——回车/逗号/顿号确认 chip；词表建议；继承初值可删；
+            v48.63（D107）：总开关关闭时整行不渲染，tags 恒空提交（继承初值一并失效） */}
+        {tagsEnabled && (
+          <div className="form-field">
+            <label>标签（可选；自由组织词汇，用 :: 分层级，如「考研::英语」）</label>
+            <TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" />
+          </div>
+        )}
         <div className="form-field">
           <label>上下文前缀（可选；只能写领域/学科名，禁止泄漏答案——规则16）</label>
           <input
@@ -295,11 +319,15 @@ export function ManualCardForm({
 export default function ManualCardEditor({
   quote,
   imageRegion,
+  tagSuggestions,
+  initialTags,
   onCancel,
   onSave
 }: {
   quote: string;
   imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
+  tagSuggestions?: TagVocabEntry[] | null;
+  initialTags?: string[];
   onCancel: () => void;
   onSave: (payload: ManualCardPayload) => Promise<void>;
 }) {
@@ -317,7 +345,7 @@ export default function ManualCardEditor({
           </button>
         </div>
         <div className="modal-scroll">
-          <ManualCardForm quote={quote} imageRegion={imageRegion} onCancel={onCancel} onSave={onSave} />
+          <ManualCardForm quote={quote} imageRegion={imageRegion} tagSuggestions={tagSuggestions} initialTags={initialTags} onCancel={onCancel} onSave={onSave} />
         </div>
       </div>
     </div>

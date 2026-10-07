@@ -28,6 +28,9 @@ interface Props {
   bookItemIds?: string[];
   /** 筛选牌组的上限覆写（§6.8-5：只收紧，不另开预算） */
   scopeLimits?: Record<string, number> | null;
+  /** v48.61（D105）：筛选牌组的标签/知识点条件（进 applyScope 过滤） */
+  scopeTags?: string[];
+  scopeKpIds?: string[];
   /** 顶部一行上下文（如「集中复习：《书名》」） */
   header?: string;
   onExit?: () => void;
@@ -79,7 +82,7 @@ export function splitChain(chain: Array<{ id: string; text: string; depth: numbe
  * 规格 §1.2 R13（面包屑）：左上角面包屑「原文 › 第1层 › … › 当前」——点任一层＝切到该层卡片
  * （查看态，只读、不推进调度、不改队列，出口＝「返回队列」）；>6 级折叠成「…N 级」，点开逐项可达。
  */
-export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, header, onExit, onExtract, onMaterialName, onOpenAnchorCards }: Props) {
+export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, scopeTags, scopeKpIds, header, onExit, onExtract, onMaterialName, onOpenAnchorCards }: Props) {
   const [items, setItems] = useState<DueTopic[]>([]);
   const [engine, setEngine] = useState<ExtractEngine>("sm19-default");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
@@ -226,9 +229,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     () => ({
       kinds: ["extract"],
       bookItemIds: bookItemIds && bookItemIds.length ? bookItemIds : undefined,
+      tags: scopeTags,
+      kpIds: scopeKpIds,
       limits: scopeLimits && Object.keys(scopeLimits).length ? (scopeLimits as Partial<Limits>) : undefined
     }),
-    [bookItemIds, scopeLimits]
+    [bookItemIds, scopeTags, scopeKpIds, scopeLimits]
   );
 
   const refresh = useCallback(async () => {

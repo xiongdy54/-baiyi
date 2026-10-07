@@ -11,7 +11,9 @@ import ManualCardEditor, { ManualCardForm } from "./ManualCardEditor";
 import CardDock, { type DockTab } from "./CardDock";
 import AIPanel, { ExplainModeSwitcher } from "./AIPanel";
 import { DictPanel } from "./DictPanel";
+import { useEffect, useState } from "react";
 import { cardsApi, type CardDraft } from "../lib/cards";
+import type { TagVocabEntry } from "../lib/tags";
 import type { DictionaryEntry, ReadingContext, VocabKind } from "../lib/dict";
 import type { SelectionActions } from "../lib/useSelectionActions";
 
@@ -33,6 +35,20 @@ export default function SelectionPanels({
   dockMeta?: string;
 }) {
   const { aiPanel, manualOpen, manualImage, manualQuote, dictPanel, dockOpen, dockTab, manualActive } = sel;
+  // v48.60（D101）：标签词表建议（cards.tags_json ∪ extracts.tag_json 派生；建卡/卡片改动后刷新）
+  const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      window.cardsAPI?.listTags?.().then((list) => {
+        if (!cancelled) setTagVocab(list ?? []);
+      });
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [sel.manualOpen, sel.dockOpen]);
   /** 手动制卡保存链（modal / dock 同一份：落库 → closeManual，现状语义零改动） */
   const saveManual = async (p: Parameters<typeof sel.handleManualCard>[0]) => {
     try {
@@ -186,6 +202,8 @@ export default function SelectionPanels({
             <div className="dock-tabbody" data-dock-tabbody="manual" style={manualActive ? undefined : { display: "none" }}>
               <ManualCardForm
                 quote={manualQuote ?? selectionText ?? ""}
+                tagSuggestions={tagVocab}
+                initialTags={sel.manualTagsInitial}
                 onCancel={sel.closeManual}
                 onSave={saveManual}
               />

@@ -59,6 +59,9 @@ const {
   deleteExtract,
   batchExtractOps,
   batchCardOps,
+  // v48.60（D101）：标签写入与词表（§4.1）
+  setCardTags,
+  listCardTags,
   switchExtractEngine,
   setLibraryItemPriority,
   getDailyUsage,
@@ -209,6 +212,18 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
     value = Number.isFinite(n) && n >= 10 && n <= 40 ? n : 17;
   }
   if (scope === "app" && key === "extractFaceFontFamily") value = typeof value === "string" ? value.trim() : "";
+  // v48.61（D104，§7.4）：卡面信息密度三开关写侧归一——仅严格 true 为真、其余回落 true（默认全开），
+  // 与渲染层读侧（src/lib/cardFaceExtras.ts normalizeCardFaceExtras）同规
+  // v48.63（D107，§7.4）：标签功能总开关写侧归一——仅严格 false 为关，其余（含缺失/非法）回落开
+  if (scope === "app" && key === "tagsEnabled") value = value !== false;
+  if (scope === "app" && key === "cardFaceExtras") {
+    const src = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    value = {
+      mnemonic: src.mnemonic === false ? false : true,
+      example: src.example === false ? false : true,
+      sourceRef: src.sourceRef === false ? false : true
+    };
+  }
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
@@ -586,7 +601,12 @@ ipcMain.handle("library:setPriority", (_e, itemId, priority) => setLibraryItemPr
 ipcMain.handle("cards:create", (_e, card) => createCard(card || {}));
 ipcMain.handle("cards:update", (_e, card) => updateCard(card || {}));
 ipcMain.handle("cards:batch", (_e, op, ids, payload) => batchCardOps(String(op), ids, payload));
+// v48.60（D101，§4.1）：标签写入（渲染层算好每卡终值，主进程只存储）与词表（只读派生）
+ipcMain.handle("cards:setTags", (_e, items) => setCardTags(items));
+ipcMain.handle("cards:listTags", () => listCardTags());
 ipcMain.handle("cards:get", (_e, id) => getCard(String(id)));
+// v48.61（D103，D94 设计稿 §3.2）：生成信息区只读 join（card + 批次 + 提示词 + card_issues；零写路径）
+ipcMain.handle("cards:genInfo", (_e, id) => dbModule.getCardGenInfo(String(id)));
 ipcMain.handle("cards:listDue", () => listDueCards());
 // v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试
 ipcMain.handle("cards:todayQueue", (_e, now) => computeTodayQueue(Number.isFinite(now) ? Number(now) : undefined));

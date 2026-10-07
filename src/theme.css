@@ -3430,6 +3430,158 @@ body.theme-dark .modal-panel {
 .udc-chip-main { opacity: 0.65; }
 .udc-menu { max-height: 240px; overflow-y: auto; }
 .udc-menu .dd-item:disabled { color: var(--text-placeholder); cursor: default; }
+
+/* ============ 标签输入（D101 v48.60，§1.4）============ */
+/* 与 udc-chip 同族视觉（accent 软底 + 描边），输入框裸排、建议浮层与 dd-menu 同语言 */
+.tag-input { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.tag-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 26px;
+  padding: 0 var(--sp-2);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.tag-chip:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.tag-chip:disabled { cursor: default; opacity: 0.75; }
+.tag-input-box { position: relative; display: inline-flex; flex: 1 1 140px; min-width: 140px; }
+.tag-input-box input {
+  width: 100%;
+  height: 26px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-meta);
+}
+.tag-input-box input:focus { outline: none; border-color: var(--accent); }
+.tag-input-box.expanded input { border-color: var(--accent); }
+/* v48.62（D106，设计稿 TAG-SUGGESTION-PREVIEW.md V4）：展开式建议面板——
+   视觉一体化：与输入框同底色、accent 连续描边（top 无框、top:-1px 与输入框共享边线）；
+   展开动效＝grid-template-rows 0fr→1fr 200ms ease-in-out（state-changes accordion 模式），
+   收回 140ms（.closing，去回对称）；候选行 stagger 20ms 上限 5（entrance-animations）；
+   聚焦态 border accent（:focus 规则）＝Anticipation 预告步。 */
+.tag-suggest-v4 {
+  position: absolute;
+  top: calc(100% - 1px);
+  left: 0;
+  right: 0;
+  z-index: calc(var(--z-toast) - 2);
+  background: var(--paper);
+  border: 1px solid var(--accent);
+  border-top: none;
+}
+.tag-suggest-clip { display: grid; grid-template-rows: 1fr; animation: tag-panel-grow 200ms ease-in-out; overflow: hidden; }
+.tag-suggest-v4.closing .tag-suggest-clip { animation: tag-panel-shrink 140ms ease-in-out forwards; }
+@keyframes tag-panel-grow { from { grid-template-rows: 0fr; } to { grid-template-rows: 1fr; } }
+@keyframes tag-panel-shrink { from { grid-template-rows: 1fr; } to { grid-template-rows: 0fr; } }
+.tag-suggest-body { min-height: 0; overflow-y: auto; max-height: 220px; display: flex; flex-direction: column; }
+.tag-suggest-empty { padding: var(--sp-2); color: var(--text-helper); font-size: var(--fs-meta); }
+.tag-suggest-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+  text-align: left;
+  cursor: pointer;
+  animation: tag-row-in 120ms ease-out both;
+}
+@keyframes tag-row-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
+.tag-suggest-row:hover { background: var(--grey-1); }
+.tag-suggest-row.active { background: var(--accent-soft); border-left-color: var(--accent); }
+.tag-suggest-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-suggest-hit { color: var(--accent); }
+.tag-suggest-meta { flex: none; color: var(--text-secondary); font-size: var(--fs-meta); }
+@media (prefers-reduced-motion: reduce) {
+  .tag-suggest-clip, .tag-suggest-v4.closing .tag-suggest-clip, .tag-suggest-row { animation: none !important; }
+}
+.tag-invalid { color: var(--error); }
+.tag-chip-static { cursor: default; }
+.tag-chip-static:hover { background: var(--accent-soft); }
+/* 卡片浏览器：详情标签区 + 批量打标浮层（D101） */
+.cb-tags { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); }
+.cb-tags-label { font-size: var(--fs-meta); color: var(--text-secondary); padding-top: var(--sp-1); }
+.cb-tags-view, .cb-tags-editor { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.cb-tag-pop { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 260px; }
+/* 复习页：答案揭示后的标签区（D101；正面永不渲染） */
+.review-tags { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-2); max-width: 720px; }
+/* v48.62 实测修订（用户两张截图）：「＋标签」沿用底栏 .bar-btn 尺寸（40px 高），比右侧
+   .tag-input-box input（26px）明显高大——收敛为与输入框同高同视觉。
+   D106 期首修无效的教训：.review-tag-add 与 .bar-btn 同特异性（0,1,0）且 .bar-btn 在样式表
+   更后（L6426），height/padding/font-size/background 全被盖回——升到 .review-tags 前缀（0,2,0）必胜，
+   并由 d106.gui 计算样式断言锁死（防同类「写了但没生效」再犯）。 */
+.review-tags .review-tag-add {
+  color: var(--text-secondary);
+  height: 26px;
+  padding: 0 var(--sp-3);
+  gap: var(--sp-1);
+  font-size: var(--fs-meta);
+  background: transparent;
+}
+.review-tag-editor { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.review-tag-editor .tag-input-box input { width: 200px; }
+/* 卡片浏览器：详情三区块（D103）——生成信息区 / 来源谱系（血缘树）/ 同源组；全部只读派生 */
+.cb-section-title {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  letter-spacing: 0.04em;
+  margin: 0 0 var(--sp-1);
+}
+.cb-geninfo, .cb-lineage, .cb-sibling { padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); }
+.cb-geninfo .btn { margin-top: var(--sp-2); }
+.cb-gen-meta { margin-top: var(--sp-1); border-top: none; padding-top: 0; }
+/* 血缘树：缩进＝depth × --sp-3（连续标尺，祖先链与子孙闭包共用）；本卡行 accent 左缘高亮 */
+.cb-lineage-list, .cb-sibling-list { list-style: none; margin: var(--sp-1) 0 0; padding: 0; }
+.cb-lineage-item {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2); border-left: 2px solid transparent;
+  min-height: 32px;
+}
+.cb-lineage-item.current { border-left-color: var(--accent); background: var(--accent-soft); }
+.cb-lineage-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-secondary); color: var(--text-primary); }
+.cb-lineage-count { flex: none; min-width: 24px; text-align: right; color: var(--text-secondary); }
+/* 同源组：一行一条（形式/题面/状态/due/暂缓徽标）；本卡行同血缘树高亮语言 */
+.cb-sibling-item {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2); border-left: 2px solid transparent;
+  min-height: 32px; cursor: pointer;
+}
+.cb-sibling-item:hover { background: var(--grey-1); }
+.cb-sibling-item.current { border-left-color: var(--accent); background: var(--accent-soft); cursor: default; }
+.cb-sibling-front { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-secondary); color: var(--text-primary); }
+.cb-sibling-item .mono, .cb-lineage-item .mono { color: var(--text-secondary); font-size: var(--fs-meta); }
+.cb-sibling-item .lint { flex: none; }
+/* 卡面背面辅助字段区（D104）：助记/例子/来源三块，app.cardFaceExtras 开关控制整块不渲染 */
+.card-extras { display: flex; flex-direction: column; gap: var(--sp-1); margin-top: var(--sp-2); }
+.card-extras .review-mnemonic { margin-top: 0; }
+/* 筛选牌组条件构建器（D105）：书多选 / 标签多选 / 知识点多选；复用 tag-chip 语言 */
+.cb-deck-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.cb-deck-chip-x { background: none; border: none; padding: 0 0 0 2px; cursor: pointer; color: var(--text-secondary); font-size: var(--fs-meta); line-height: 1; }
+.cb-deck-chip-x:hover { color: var(--error); }
+.cb-deck-tags { display: inline-flex; align-items: center; }
+.cb-deck-pop {
+  position: relative; display: inline-flex; flex-wrap: wrap; gap: var(--sp-1);
+  max-width: 560px; padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--border-strong); background: var(--bg-elevated, var(--bg-1));
+}
+.cb-deck-pop-col { flex-direction: column; min-width: 280px; }
+.cb-deck-pop-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-secondary); padding: 2px 0; cursor: pointer; }
+.cb-deck-pop-list { display: flex; flex-direction: column; max-height: 220px; overflow: auto; min-width: 240px; }
+.cb-deck-pop .cb-search { min-width: 200px; }
 .manual-region-preview { margin: 0 0 var(--sp-3); }
 .form-check { margin-bottom: var(--sp-4); }
 
@@ -6021,8 +6173,11 @@ body.capture-body #root { height: 100vh; }
   min-height: 0;
 }
 /* Milkdown 双层包裹（data-milkdown-root > .milkdown）都必须进 flex 链——否则内容高度把
-   工具条推出卡外（实测：长文时 tb bottom = 内容尾而非卡底） */
-.extract-page .extract-face-body[data-editing="1"] .markdown-editor > div {
+   工具条推出卡外（实测：长文时 tb bottom = 内容尾而非卡底）。
+   D109：选择器从 `> div` 收窄为 `> [data-milkdown-root]`——`> div` 会同时命中同为直接
+   子元素的工具条 div，把它的 flex-direction 覆盖成 column + 拉伸，wrap 后列优先折成
+   多列（用户实测：19 钮竖排两列）。 */
+.extract-page .extract-face-body[data-editing="1"] .markdown-editor > [data-milkdown-root] {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -6499,7 +6654,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
      同一套 pop-in 入场（见文件头浮层家族规则；reduced-motion 自动降级为零动画）。 */
 .extract-face-toolbar {
   display: flex;
-  flex-wrap: wrap;
+  /* D109（用户指令）硬不变量：任何形态任何宽度恒单行横排——永不换行竖排；
+     空间不足时按钮行内横向滚动（scrollbar 由全局细样式承载）。 */
+  flex-wrap: nowrap;
+  overflow-x: auto;
   align-items: center;
   gap: var(--sp-1);
   margin-top: var(--sp-2);
@@ -6545,6 +6703,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   gap: 2px;
   width: 26px;
   height: 24px;
+  flex-shrink: 0; /* D109：单行硬不变量——不压缩，溢出走工具条行内横滚 */
   padding: 0;
   background: none;
   border: 1px solid transparent;
@@ -6564,7 +6723,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .md-glyph-italic { font-style: italic; font-family: Georgia, "Times New Roman", serif; }
 .md-glyph-strike { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 /* 标题层级下拉（tb=h） */
-.md-tb-menu-wrap { position: relative; display: inline-flex; }
+.md-tb-menu-wrap { position: relative; display: inline-flex; flex-shrink: 0; } /* D109：单行硬不变量同上 */
 .md-tb-menu {
   position: absolute;
   top: 26px;

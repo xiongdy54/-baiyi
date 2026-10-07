@@ -18,6 +18,13 @@ import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow"
 import ContrastCardModal from "./ContrastCardModal";
 import ImageLightbox from "./ImageLightbox";
 import AnswerJudgeModal from "./AnswerJudgeModal";
+// v48.61（D104）：背面辅助字段区（助记/例子/来源，app.cardFaceExtras 三开关）——与卡详情预览同一组件
+import CardFaceExtrasBlock from "./CardFaceExtras";
+// v48.60（D101/D102）：答案揭示后快捷打标 + 「不再关心」归档
+import TagInput from "./TagInput";
+import { applyTagDelta, type TagVocabEntry } from "../lib/tags";
+// v48.63（D107）：标签功能总开关——复习页标签区与快捷打标入口受其控制
+import { useTagsEnabled } from "../lib/tagSettings";
 
 // A-1（审计）：渲染期调用不得抛。原写法 `previews?.items ?? fsrsEngine.preview(current!.fsrs)`
 // 在 previews 为 null 时会同步抛，被根错误边界接管 → 整应用停止渲染。这里降级为空列表。
@@ -33,6 +40,8 @@ export default function ReviewView({
   onJumpToDoc,
   bookItemIds,
   scopeLimits,
+  scopeTags,
+  scopeKpIds,
   onMaterialName
 }: {
   onJumpToDoc?: (docId: string, anchor: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } }) => void;
@@ -40,9 +49,13 @@ export default function ReviewView({
   bookItemIds?: string[];
   /** 筛选牌组的上限覆写（§6.8-5：只收紧，不另开预算） */
   scopeLimits?: Record<string, number> | null;
+  /** v48.61（D105）：筛选牌组的标签/知识点条件（进 applyScope 过滤） */
+  scopeTags?: string[];
+  scopeKpIds?: string[];
   /** v48.41（D81）：当前卡材料名上报（顶栏中间显示；无材料名时回调空串＝回落「复习」字样） */
   onMaterialName?: (name: string) => void;
 } = {}) {
+  const tagsEnabled = useTagsEnabled();
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
   // v48.41（D81）：当前卡材料名上报顶栏（替代「复习」字样；无材料名＝空串，顶栏回落原字样）
@@ -113,10 +126,27 @@ export default function ReviewView({
   const [contrastOpen, setContrastOpen] = useState(false);
   // v48.58（D99）：AI 判答模态（自答交给 AI 与标准答案等价比对；零写库，见 AnswerJudgeModal）
   const [judgeOpen, setJudgeOpen] = useState(false);
+  // v48.60（D101）：答案揭示后的快捷打标（meta 行「＋标签」；仅背面出现，正面永不显示标签——防泄题）
+  const [tagOpen, setTagOpen] = useState(false);
+  const [tagDraft, setTagDraft] = useState<string[]>([]);
+  const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
   // 换卡即关（防键盘快捷键换卡后模态显示旧卡）
   useEffect(() => {
     setJudgeOpen(false);
+    setTagOpen(false);
+    setTagDraft([]);
   }, [current?.id]);
+  // v48.60（D101）：快捷打标词表（编辑器打开时拉取；派生只读）
+  useEffect(() => {
+    if (!tagOpen) return;
+    let cancelled = false;
+    window.cardsAPI?.listTags?.().then((l) => {
+      if (!cancelled) setTagVocab(l ?? []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagOpen]);
   // v34（M12，§4.16）：今日同源暂缓清单——延后不写 FSRS，此处给出可读原因（与队列同一视图口径）
   const [deferred, setDeferred] = useState<TodayQueue["deferred"]>([]);
   const [deferredOpen, setDeferredOpen] = useState(false);
@@ -158,8 +188,8 @@ export default function ReviewView({
   const extractHeadRef = useRef<DueTopic | null>(null);
 
   const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
-    const scope = bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length)
-      ? { bookItemIds: bookItemIds ?? undefined, limits: scopeLimits ?? undefined }
+    const scope = bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length) || scopeTags?.length || scopeKpIds?.length
+      ? { bookItemIds: bookItemIds ?? undefined, tags: scopeTags, kpIds: scopeKpIds, limits: scopeLimits ?? undefined }
       : undefined;
     const session = await fetchSessionQueue({ scope });
     if (session) {
@@ -339,6 +369,52 @@ export default function ReviewView({
       void refreshUndo();
     } finally {
       actionBusyRef.current = false;
+    }
+  }
+
+  // v48.60（D102）：「不再关心」＝归档当前卡并进下一张——不评分、不写 review_logs、不计四类上限；
+  // FSRS 零写入（fsrs_json 原样，恢复后按原 due 继续；浏览器「已归档」可恢复）
+  async function archiveAndNext() {
+    if (!current || actionBusyRef.current || saveError) return;
+    actionBusyRef.current = true;
+    try {
+      try {
+        const r = await cardsApi.batch("archive", [current.id]);
+        if (!r?.ok) {
+          setSaveError(true);
+          return;
+        }
+      } catch {
+        setSaveError(true);
+        return;
+      }
+      eventBus.emit("cards/changed");
+      setDoneCount((n) => n + 1);
+      const next = await nextCard();
+      if (next) {
+        setCurrent(next);
+        setShowBack(false);
+        setStartedAt(Date.now());
+      } else {
+        setCurrent(null);
+        setSessionDone(true);
+      }
+      void refreshUndo();
+    } finally {
+      actionBusyRef.current = false;
+    }
+  }
+
+  // v48.60（D101）：答案揭示后的快捷打标——单卡写入（ids 长度 1），不碰评分时序
+  async function applyQuickTags() {
+    if (!current || tagDraft.length === 0) return;
+    const next = applyTagDelta(current.tags ?? [], tagDraft, []).tags;
+    const r = await cardsApi.setTags([{ id: current.id, tags: next }]);
+    if (r?.ok) {
+      setCurrent({ ...current, tags: next });
+      setTagDraft([]);
+      setTagOpen(false);
+      eventBus.emit("cards/changed");
     }
   }
 
@@ -718,12 +794,39 @@ export default function ReviewView({
         <div className="review-meta">
           {current!.dateStamp ? current!.dateStamp : ""}
         </div>
-        {showBack && current!.mnemonic && (
-          <div className="review-mnemonic">
-            <span className="book-card-label">助记</span>
-            {current!.mnemonic}
+        {/* v48.60（D101）：答案揭示后的标签区——chips 只读 + 快捷添加（**正面永不显示**，防泄题 R6 同源）；
+            v48.63（D107）：标签功能总开关关闭时整块不渲染 */}
+        {showBack && tagsEnabled && (
+          <div className="review-tags" data-testid="review-tags">
+            {(current!.tags ?? []).map((t) => (
+              <span key={t} className="tag-chip tag-chip-static">
+                {t}
+              </span>
+            ))}
+            <button
+              className="bar-btn ghost review-tag-add"
+              data-testid="review-tag-add"
+              title="给这张卡加标签（如「错题」），可在卡片浏览器按 tag: 筛选"
+              onClick={() => {
+                setTagOpen((v) => !v);
+                setTagDraft([]);
+              }}
+            >
+              ＋ 标签
+            </button>
+            {tagOpen && (
+              <span className="review-tag-editor">
+                <TagInput value={tagDraft} onChange={setTagDraft} suggestions={tagVocab} ariaLabel="标签" placeholder="输入标签，回车确认" />
+                <button className="btn btn-primary btn-sm" data-testid="review-tag-apply" disabled={tagDraft.length === 0} onClick={() => void applyQuickTags()}>
+                  保存
+                </button>
+              </span>
+            )}
           </div>
         )}
+        {/* v48.61（D104）：背面辅助字段区——助记/例子/来源三块统一受 app.cardFaceExtras 开关控制
+            （此前只渲染 mnemonic，example/sourceRef 全库无消费点位，本批补齐为三块统一） */}
+        {showBack && <CardFaceExtrasBlock card={current!} />}
       </div>
 
       {/* 底栏（v2）：挂在滚动根（.review-wrap）的**最后一个子节点**上——sticky 时代它必须直接位于滚动根下
@@ -834,6 +937,16 @@ export default function ReviewView({
                   }}
                 >
                   标记并暂停<span className="k mono">Q</span>
+                </button>
+                {/* v48.60（D102）：不再关心＝归档（cards.status），与「标记并暂停」（Leech 挂起）正交 */}
+                <button
+                  data-testid="review-archive"
+                  onClick={() => {
+                    setBarMoreOpen(false);
+                    void archiveAndNext();
+                  }}
+                >
+                  不再关心（归档）
                 </button>
                 <button
                   onClick={() => {

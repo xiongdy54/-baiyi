@@ -44,6 +44,21 @@ function check(name, cond, actual) {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let electron = null;
 
+// D109：工具条单行横排硬不变量——所有按钮同一 y（±1px）且条带高度有界（单行 ≈41px，折列会 >300px）
+const ONE_ROW_READ = `(() => {
+  const tb = document.querySelector('[data-testid="extract-editor-toolbar"]');
+  if (!tb) return "{}";
+  const btns = [...tb.querySelectorAll("button[data-tb]")];
+  const tops = btns.map((b) => Math.round(b.getBoundingClientRect().top));
+  const r = tb.getBoundingClientRect();
+  return JSON.stringify({
+    n: btns.length,
+    span: tops.length ? Math.max(...tops) - Math.min(...tops) : null,
+    tbH: Math.round(r.height),
+    mode: tb.dataset.toolbarMode || null
+  });
+})()`;
+
 async function connect() {
   for (let i = 0; i < 90; i++) {
     try {
@@ -668,6 +683,10 @@ try {
   // D97：dock-bottom＝满幅条带贴卡面底边（工具条下缘 ≈ 卡框下缘，零空隙——用户第二轮指令）
   check("⑬ dock 工具条贴卡面底边（tb bottom ≈ 卡面底缘 ±2，下方零空白）",
     e13.mode === "dock-bottom" && typeof e13.tbBottom === "number" && typeof e13.faceBottom === "number" && Math.abs(e13.tbBottom - e13.faceBottom) <= 2, edit13);
+  // D109：单行横排硬不变量（19 钮同一 y、条带高有界＝不折列）
+  const rowBottom = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
+  check("⑬ D109 dock-bottom：工具条 19 钮单行横排（y 差 ≤1、条带高 ≤60）",
+    rowBottom.n === 19 && typeof rowBottom.span === "number" && rowBottom.span <= 1 && rowBottom.tbH <= 60, rowBottom);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   await wait(400);
@@ -738,6 +757,9 @@ try {
     or13.mode === "dock-top" && typeof or13.tbTop === "number" && typeof or13.faceTop === "number" && Math.abs(or13.tbTop - or13.faceTop) <= 2, order13);
   check("⑬ D97 钉顶：工具条在「摘录原文」标签**之上**（label.top > tb.bottom——用户指令）",
     typeof or13.tbBottom === "number" && typeof or13.labelTop === "number" && or13.labelTop > or13.tbBottom, order13);
+  const rowTop = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
+  check("⑬ D109 dock-top：工具条 19 钮单行横排（y 差 ≤1、条带高 ≤60）",
+    rowTop.n === 19 && typeof rowTop.span === "number" && rowTop.span <= 1 && rowTop.tbH <= 60, rowTop);
   await cdp.eval(`(() => { const m = document.querySelector(".extract-face-body .markdown-editor .milkdown"); if (m) m.scrollTop = 900; return true; })()`);
   await wait(500);
   const top13 = await cdp.eval(`(() => {
@@ -752,6 +774,29 @@ try {
   await waitEditor(cdp, false);
   await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarTop", false); return true; })()`);
   await wait(400);
+
+  // —— D109 矮窗口（用户实测截图场景）：编辑区高度不足时旧 `.markdown-editor > div` 规则把
+  //      工具条 flex-direction 覆盖成 column + wrap，19 钮列优先折两列；修复后恒单行。 ——
+  {
+    const vp = JSON.parse(String(await cdp.eval(`JSON.stringify({ w: window.innerWidth, h: window.innerHeight })`)) || "{}");
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: Number(vp.w) || 1280, height: 520, deviceScaleFactor: 1, mobile: false });
+    await navTo(cdp, "书架");
+    await wait(900);
+    await navTo(cdp, "摘录");
+    await wait(1500);
+    const pShort = await probeRange(cdp, "长文滚动样本第 1 段");
+    check("⑬ D109 前置：矮窗口读态可命中", !!pShort, "probeRange 未命中");
+    await clickAt(cdp, pShort.start.x, pShort.start.y);
+    check("⑬ D109 前置：矮窗口进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
+    await wait(900);
+    const rowShort = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
+    check("⑬ D109 矮窗口（视口高 520）：工具条 19 钮恒单行（y 差 ≤1、条带高 ≤60、不折列）",
+      rowShort.n === 19 && typeof rowShort.span === "number" && rowShort.span <= 1 && rowShort.tbH <= 60, rowShort);
+    await pressEsc(cdp);
+    await waitEditor(cdp, false);
+    await cdp.send("Emulation.clearDeviceMetricsOverride", {});
+    await wait(400);
+  }
 
   // —— §K.3 悬浮＝选区锚定弹层：选中文本 → 上方居中；点按钮命令生效且弹层不收；塌选收起 ——
   await cdp.eval(`(async () => { await window.settingsAPI.set("app", "extractEditorToolbarFloat", true); return true; })()`);
@@ -789,6 +834,9 @@ try {
     typeof f13.cx === "number" && Math.abs(f13.cx - Math.round((pf13.start.x + pf13.end.x) / 2)) <= 8, float13);
   check("⑬ §K.3 弹层在选区上方（bottom ≤ 选区顶缘，与选区不相交）",
     typeof f13.bottom === "number" && f13.bottom <= Math.round(pf13.start.y) + 2, float13);
+  const rowFloat = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
+  check("⑬ D109 float：弹层 19 钮单行横排（y 差 ≤1、弹层高 ≤60）",
+    rowFloat.n === 19 && typeof rowFloat.span === "number" && rowFloat.span <= 1 && rowFloat.tbH <= 60, rowFloat);
   // 点工具条按钮：mousedown preventDefault 保选区 → 命令作用该选区、弹层不收
   await cdp.eval(`(() => { document.querySelector('[data-testid="extract-editor-toolbar"] [data-tb="bold"]')?.click(); return true; })()`);
   await wait(500);

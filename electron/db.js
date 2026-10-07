@@ -444,6 +444,13 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  // v48.60（D102，§4.1）：cards.status——卡片生命周期（active/archived）。
+  // NULL 视同 active（零回填）；只影响 TODAY_QUEUE_SQL 视图过滤，不改任何 FSRS 字段。
+  try {
+    db.run("ALTER TABLE cards ADD COLUMN status TEXT");
+  } catch {
+    /* 列已存在 */
+  }
   // v36（M8-A，§4.1/§6.5.2，D34）：journal_entries——流式日记条目（第二输入通道）。
   // 口径：entry_date 为**自然日**（不随学习日切点漂移）；is_draft=1 为「未发送的快速记录草稿」。
   // 草稿全局至多一条由**部分唯一索引**在库层兜底（业务层仍先查后写，索引是防止竞态/脚本误写的护栏）。
@@ -1282,6 +1289,8 @@ function mapCardRow(r) {
     // v46（M14-UM2，§4.18-10）：记忆溯源（{line, verified}；NULL=未用记忆）
     memoryRefJson: j(r.memory_ref_json, null, "memory_ref_json"),
     siblingKey: r.sibling_key || null,
+    // v48.60（D102，§4.1）：卡片生命周期（active/archived；NULL 视同 active）
+    status: r.status || null,
     // v48.22（D58 §6.8-5）：卡片所属书（按书范围会话与浏览分组用；无来源卡为 null）
     libraryItemId: r.library_item_id ?? null,
     createdAt: r.created_at,
@@ -1527,6 +1536,7 @@ const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle, li.id AS library_item
      LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
      LEFT JOIN library_items li ON li.id = d.library_item_id
      WHERE c.is_deleted = 0
+       AND COALESCE(c.status, 'active') != 'archived'
      ORDER BY c.created_at ASC`;
 
 /**
@@ -1949,6 +1959,56 @@ function setAIGenBatchStatus(id, status) {
   db.run("UPDATE ai_gen_batches SET status = ? WHERE id = ?", [status, id]);
   persist();
   return true;
+}
+
+// v48.61（D103，D94 设计稿 §3.2）：卡详情「生成信息区」只读 join——card + 生成批次 + 提示词 + 当时 CardLint 结果。
+// 零写路径零 persist（A-10 只读出口纪律）；card 不存在返回 null。批次模型名为 generateCards 装配时
+// 写入 context_json.model 的快照（v48.61 起才有），存量批次如实返回 null（前端显示「—」，不猜）。
+function getCardGenInfo(cardId) {
+  const card = getCard(String(cardId || ""));
+  if (!card) return null;
+  let batch = null;
+  if (card.genBatchId) {
+    const row = queryAll(
+      "SELECT id, scope, context_json, prompt_template_id, status, created_at FROM ai_gen_batches WHERE id = ?",
+      [String(card.genBatchId)]
+    )[0];
+    if (row) {
+      let ctx = null;
+      try {
+        ctx = row.context_json ? JSON.parse(row.context_json) : null;
+      } catch {
+        ctx = null; // 坏 JSON 不抛：模型名缺失照常展示
+      }
+      batch = {
+        id: row.id,
+        scope: row.scope,
+        status: row.status,
+        createdAt: row.created_at,
+        model: ctx && typeof ctx === "object" && ctx.model ? String(ctx.model) : null,
+        promptTemplateId: row.prompt_template_id || null
+      };
+    }
+  }
+  let template = null;
+  if (batch && batch.promptTemplateId) {
+    const t = queryAll(
+      "SELECT id, scope, name, version, is_default, created_at FROM prompt_templates WHERE id = ?",
+      [String(batch.promptTemplateId)]
+    )[0];
+    if (t) {
+      template = {
+        id: t.id,
+        scope: t.scope,
+        name: t.name,
+        version: t.version,
+        isDefault: !!t.is_default,
+        createdAt: t.created_at
+      };
+    }
+  }
+  const issues = listCardIssues(card.id);
+  return { card, batch, template, issues };
 }
 
 function ensurePromptTemplates() {
@@ -3051,9 +3111,10 @@ function batchExtractOps(op, ids, payload) {
 }
 
 /** 卡片批量操作（v48.22 §6.8-6）：**单事务 + 单次 persist**，逐条列级写（不整行回写，避免 v32 式静默清列）。
- *  支持：suspend / resume / postpone(days) / delete。**重置为新卡不在批内**——它要重写 fsrs 全字段，
- *  §4.4.1 下须单独评审（保持单卡路径不变）。 */
-const CARD_BATCH_OPS = ["suspend", "resume", "postpone", "delete"];
+ *  支持：suspend / resume / postpone(days) / delete / archive / restore（v48.60 D102）。
+ *  **重置为新卡不在批内**——它要重写 fsrs 全字段，§4.4.1 下须单独评审（保持单卡路径不变）。
+ *  卡片批量无 op_journal 撤销日志（§6.8-7 覆盖清单只含摘录批量与评分；v48.60 如实登记）。 */
+const CARD_BATCH_OPS = ["suspend", "resume", "postpone", "delete", "archive", "restore"];
 function batchCardOps(op, ids, payload) {
   if (!CARD_BATCH_OPS.includes(op)) return { ok: false, reason: `不支持的批量操作：${op}` };
   const list = (Array.isArray(ids) ? ids : []).filter((x) => typeof x === "string" && x);
@@ -3083,11 +3144,88 @@ function batchCardOps(op, ids, payload) {
       } else if (op === "delete") {
         db.run("UPDATE cards SET is_deleted = 1, updated_at = ? WHERE id = ?", [now, card.id]);
         db.run("UPDATE card_issues SET status = 'dismissed', resolved_at = ? WHERE card_id = ? AND status = 'open'", [now, card.id]);
+      } else if (op === "archive" || op === "restore") {
+        // v48.60（D102）：生命周期归档/恢复——只动 status 列；与 leech.suspended 正交不互碰；
+        // **零 FSRS 写入**（fsrs_json 原样，恢复后按原 due 继续）；恢复显式落 'active'
+        const value = op === "archive" ? "archived" : "active";
+        db.run("UPDATE cards SET status = ?, updated_at = ? WHERE id = ?", [value, now, card.id]);
       }
       applied += 1;
     }
     return { ok: true, count: applied, days: op === "postpone" ? days : undefined };
   });
+}
+
+/** v48.60（D101，§4.1/设计稿 §1.4）：标签写入——渲染层用 src/lib/tags.ts（规则单一源）算好每卡终值，
+ *  主进程只做存储：验证 id 存在 → 事务内逐卡拉平写 tags_json（字符串数组，形状校验）。
+ *  无 op_journal 撤销日志（与卡片批量同域）；ids 长度 1 = 单卡（D80 先例）；缺卡 → 整批拒绝。 */
+function setCardTags(items) {
+  const list = (Array.isArray(items) ? items : []).filter(
+    (it) => it && typeof it.id === "string" && it.id && Array.isArray(it.tags)
+  );
+  if (list.length === 0) return { ok: false, reason: "未选中任何卡片或载荷形状非法" };
+  const rows = [];
+  for (const it of list) {
+    const card = getCard(it.id);
+    if (!card) return { ok: false, reason: "存在已删除或不存在的卡片，整批未执行" };
+    rows.push({ id: it.id, tags: it.tags.filter((t) => typeof t === "string") });
+  }
+  return withTransaction(() => {
+    const now = Date.now();
+    let applied = 0;
+    for (const row of rows) {
+      const cur = getCard(row.id);
+      const before = JSON.stringify(Array.isArray(cur.tags) ? cur.tags : []);
+      const after = JSON.stringify(row.tags);
+      if (before === after) continue; // 无变化不触碰行
+      db.run("UPDATE cards SET tags_json = ?, updated_at = ? WHERE id = ?", [after, now, row.id]);
+      applied += 1;
+    }
+    // persist 由 withTransaction 在 COMMIT 后统一执行（与 batchCardOps 同模式；fn 内禁 persist）
+    return { ok: true, count: applied };
+  });
+}
+
+/** v48.60（D101，§1.3）：标签词表——cards.tags_json ∪ extracts.tag_json 派生（只读现算，零新表零缓存落盘）。
+ *  大小写不敏感合并（NFKC 折叠键）；display 保留最近使用一方的写法；
+ *  按总计数降序、同频按 display 排序（输入建议与计数展示用）。 */
+function listCardTags() {
+  const acc = new Map();
+  const bump = (field) => (raw, lastUsedAt) => {
+    if (!Array.isArray(raw)) return;
+    for (const t of raw) {
+      if (typeof t !== "string" || !t.trim()) continue;
+      const key = t.normalize("NFKC").toLowerCase();
+      if (!acc.has(key)) acc.set(key, { display: t, cardCount: 0, extractCount: 0, lastUsedAt: 0 });
+      const e = acc.get(key);
+      e[field] += 1;
+      if (lastUsedAt > e.lastUsedAt) {
+        e.lastUsedAt = lastUsedAt;
+        e.display = t;
+      }
+    }
+  };
+  for (const r of queryAll("SELECT tags_json, updated_at FROM cards WHERE is_deleted = 0")) {
+    let tags = null;
+    try {
+      tags = r.tags_json ? JSON.parse(r.tags_json) : null;
+    } catch {
+      tags = null;
+    }
+    bump("cardCount")(tags, Number(r.updated_at) || 0);
+  }
+  for (const r of queryAll("SELECT tag_json, updated_at FROM extracts WHERE is_deleted = 0")) {
+    let tags = null;
+    try {
+      tags = r.tag_json ? JSON.parse(r.tag_json) : null;
+    } catch {
+      tags = null;
+    }
+    bump("extractCount")(tags, Number(r.updated_at) || 0);
+  }
+  return [...acc.values()].sort(
+    (a, b) => b.cardCount + b.extractCount - (a.cardCount + a.extractCount) || a.display.localeCompare(b.display)
+  );
 }
 
 /** 按 journal.ref 取回该次操作的 op 行（批量优先按 batch_id；单条按 id） */
@@ -3348,7 +3486,9 @@ function readSessionPrefs() {
   };
 }
 
-/** 复习范围（筛选牌组）：结构化过滤（书 / 类别）+ 可选上限覆写。零 schema 变更（D51 先例） */
+/** 复习范围（筛选牌组）：结构化过滤（书 / 标签 / 知识点 / 类别）+ 可选上限覆写。零 schema 变更（D51 先例）
+ *  v48.61（D105，D94 设计稿 §3.4）：扩 tags[]（多值 OR、层级前缀语义同 §6.8-6 tag:）与 kpIds[]（仅闪卡行命中）；
+ *  向后兼容——两字段缺省 = 不限。 */
 function readReviewScopes() {
   const raw = (readSettings().app || {}).reviewScopes;
   if (!Array.isArray(raw)) return [];
@@ -3358,6 +3498,8 @@ function readReviewScopes() {
       id: String(s.id),
       name: String(s.name || "未命名范围"),
       bookItemIds: Array.isArray(s.bookItemIds) ? s.bookItemIds.map(String).filter(Boolean) : [],
+      tags: Array.isArray(s.tags) ? s.tags.map(String).filter(Boolean) : [],
+      kpIds: Array.isArray(s.kpIds) ? s.kpIds.map(String).filter(Boolean) : [],
       kinds: Array.isArray(s.kinds) ? s.kinds.filter((k) => k === "card" || k === "extract") : [],
       limits: s.limits && typeof s.limits === "object" ? s.limits : null
     }));
@@ -3377,13 +3519,86 @@ function limitsForScope(base, scope) {
   return out;
 }
 
-/** 范围过滤（书 / 类别；无 scope 时原样返回） */
+// 主进程侧的标签**层级边界前缀**匹配（NFKC 折叠 + 小写 + `::` 边界）：`考研` 命中 `考研` 与 `考研::英语`、
+// 不命中 `考研英语`。渲染层与主进程无法共享模块（foldSearch 同款约束），语义源 = src/lib/tags.ts 的
+// tagPathMatches，一致性由 tests/d105-scope.test.cjs 对照矩阵锁定。
+function scopeTagMatches(tags, prefix) {
+  const p = String(prefix ?? "").normalize("NFKC").trim().toLowerCase();
+  if (!p) return false;
+  return (Array.isArray(tags) ? tags : []).some((t) => {
+    const k = String(t ?? "").normalize("NFKC").trim().toLowerCase();
+    return k === p || k.startsWith(p + "::");
+  });
+}
+
+// 摘录行的 tag_json（原始 JSON 串）→ 字符串数组（坏 JSON / 非串元素丢弃，与渲染层 extractTagsOf 同规）
+function extractRowTags(x) {
+  if (typeof x.tagJson !== "string") return Array.isArray(x.tags) ? x.tags : [];
+  try {
+    const v = JSON.parse(x.tagJson);
+    return Array.isArray(v) ? v.filter((t) => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * KnowledgeBase 归并族展开（只读，D105）：所选 KP id → 匹配集 = 该 KP 所在归并族的全部成员
+ * （沿 merged_into 上溯到 active 根 + 并入该根的全部来源；resolveKpFamily 同语义）。
+ * 合并不改写卡片 knowledge_point_id（D38 契约），读取侧补语义；不在此表的 id（legacy 键）按精确匹配透传。
+ */
+function scopeKpFamilySet(kpIds) {
+  const wanted = (Array.isArray(kpIds) ? kpIds : []).map(String).filter(Boolean);
+  const out = new Set();
+  if (wanted.length === 0) return out;
+  const rows = queryAll("SELECT id, merged_into FROM knowledge_points WHERE is_deleted = 0");
+  const parent = new Map();
+  for (const r of rows) parent.set(String(r.id), r.merged_into ? String(r.merged_into) : null);
+  const rootOf = (id) => {
+    let cur = id;
+    const seen = new Set();
+    while (parent.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      const p = parent.get(cur);
+      if (!p) break;
+      cur = p;
+    }
+    return cur;
+  };
+  const byRoot = new Map();
+  for (const id of parent.keys()) {
+    const r = rootOf(id);
+    if (!byRoot.has(r)) byRoot.set(r, []);
+    byRoot.get(r).push(id);
+  }
+  for (const id of wanted) {
+    const members = byRoot.get(rootOf(id));
+    if (members) for (const m of members) out.add(m);
+    else out.add(id); // 不在 KP 表（legacy 键/已物理清理）→ 精确匹配
+  }
+  return out;
+}
+
+/** 范围过滤（书 / 标签 / 知识点 / 类别；无 scope 时原样返回）。条件间 AND；tags 内多值 OR */
 function applyScope(items, scope, kind) {
   if (!scope) return items;
   let out = items;
   if (Array.isArray(scope.bookItemIds) && scope.bookItemIds.length > 0) {
     const allowed = new Set(scope.bookItemIds.map(String));
     out = out.filter((x) => allowed.has(String(x.libraryItemId ?? "")));
+  }
+  // v48.61（D105）：tags 多值 OR——卡片行匹配 cards.tags_json（mapCardRow 已解析数组）、
+  // 摘录行匹配 extracts.tag_json（原始 JSON 串，extractRowTags 解析）
+  if (Array.isArray(scope.tags) && scope.tags.length > 0) {
+    out = out.filter((x) => {
+      const tags = kind === "extract" ? extractRowTags(x) : Array.isArray(x.tags) ? x.tags : [];
+      return scope.tags.some((t) => scopeTagMatches(tags, t));
+    });
+  }
+  // v48.61（D105）：kpIds 仅闪卡行命中（摘录行无 KP 字段，不命中）；命中集经 KnowledgeBase 归并族展开
+  if (Array.isArray(scope.kpIds) && scope.kpIds.length > 0) {
+    const family = scopeKpFamilySet(scope.kpIds);
+    out = out.filter((x) => kind === "card" && x.knowledgePointId != null && family.has(String(x.knowledgePointId)));
   }
   if (Array.isArray(scope.kinds) && scope.kinds.length > 0 && !scope.kinds.includes(kind)) out = [];
   return out;
@@ -6149,6 +6364,9 @@ module.exports = {
   deleteExtract,
   batchExtractOps,
   batchCardOps,
+  // v48.60（D101）：标签写入与词表（§4.1）
+  setCardTags,
+  listCardTags,
   switchExtractEngine,
   undoLast,
   getUndoInfo,
@@ -6170,6 +6388,8 @@ module.exports = {
   createCard,
   updateCard,
   getCard,
+  // v48.61（D103）：生成信息区只读 join（card + 批次 + 提示词 + card_issues；零写路径）
+  getCardGenInfo,
   listDueCards,
   computeTodayQueue,
   listAllCards,
