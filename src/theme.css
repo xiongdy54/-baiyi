@@ -1522,21 +1522,33 @@ body.has-skin .topbar { background: transparent; }
   min-height: 0;
   padding: var(--sp-6);
 }
-/* 设置页加宽：固定头部 + 左锚点导航(sticky) + 720px 内容列内部滚动 */
+/* header 是面板直接子元素的弹窗（卡片详情/摘录详情等 8 处）：面板本身 padding:0，
+   header 不补内边距就会贴死左上角（D116）。侧边距 = .modal-scroll 的 --sp-6，标题与正文同缘对齐 */
+.modal-panel > .modal-header {
+  flex: none;
+  padding: var(--sp-6) var(--sp-6) 0;
+}
+/* 设置页加宽：固定头部 + 左锚点导航(sticky) + 720px 内容列内部滚动。
+   D116：高度提到 92vh（用户指令「确保信息不会被挤出画面之外」——80vh 下导航 13 项
+   + 5 组标题在常见窗口高度上放不下，底部项被挤出视口且不可达） */
 .modal-panel-wide {
   width: 980px;
+  max-height: 92vh;
 }
 /* v48.70（D114 §6.2）：窄窗口断点用容器查询（对齐 D51 书架工具条先例，860px 一档）。
    容器放在设置面板根上而不是 .settings-layout —— @container 规则不能命中容器自身，
    而窄档恰恰要改 .settings-layout 的排布方向；同时 layout containment 使面板成为
-   absolute/fixed 后代的包含块，设置页内的 fixed 浮层（tooltip）已 portal 到 body 不受影响。 */
+   absolute/fixed 后代的包含块，设置页内的 fixed 浮层（tooltip）已 portal 到 body 不受影响。
+   v48.71 / D116：`.modal-panel-wide > .modal-scroll { padding: 0 }` 退役——modal-panel-wide
+   仅设置页使用，该规则（0-2-0）在宽档压过 .settings-layout 的 --sp-8 内边距，导航整列贴死
+   面板左缘；删掉后宽档走 .settings-layout 自身 padding，窄档仍由下方容器查询取胜。 */
 .settings-panel {
   container-type: inline-size;
   container-name: settings;
 }
-.modal-panel-wide > .modal-scroll { padding: 0; }
 .modal-panel-wide .modal-header {
-  padding: var(--sp-6) var(--sp-8);
+  /* D116：竖向收窄（用户指令「把『设置』二字和关闭按钮所占的空间缩小」），横向保持 --sp-8 */
+  padding: var(--sp-4) var(--sp-8);
   border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 0;
   flex: none;
@@ -1554,10 +1566,18 @@ body.has-skin .topbar { background: transparent; }
   top: 0;
   display: flex;
   flex-direction: column;
+  /* D116 兜底：极矮窗口下导航高于滚动视口时，sticky 吸顶会让底部项永久不可达
+     （better-layout：关键操作不得停放在会被滚动裁剪的位置）。上限取滚动视口高度
+     （.settings-layout 高度确定，百分比可解析）——导航自身可滚，常规窗口不出现第二根滚动条 */
+  max-height: 100%;
+  overflow-y: auto;
 }
-/* 分组标题（D114 §6.1）：Meta 档 12/600 helper 色，非交互、不进 Tab 序 */
+/* 分组标题（D114 §6.1）：Meta 档 12/600 helper 色，非交互、不进 Tab 序。
+   D116：与导航项文字同左缘（按钮 12px 内边距 + 2px 左描边），层级靠排印不靠缩进；
+   组距收紧到 --sp-4（导航局部紧凑档，瑞士风密度规则），配合 92vh 保 13 项全部可达 */
 .settings-nav-group {
-  margin: var(--sp-6) 0 var(--sp-2);
+  margin: var(--sp-4) 0 var(--sp-2);
+  padding-inline-start: calc(var(--sp-3) + 2px);
   font-size: var(--fs-meta);
   font-weight: 600;
   color: var(--text-helper);
@@ -1707,8 +1727,7 @@ body.theme-dark .modal-panel {
    内容列 < 720 可用时断为纵向：导航变顶部横向滚动条（sticky 吸 modal-header 下缘），
    组标题收纳为分隔点；内容列全宽，不出现水平滚动条。 */
 @container settings (max-width: 860px) {
-  /* .modal-panel-wide > .modal-scroll 的 padding:0（0-2-0）会压过单类选择器，
-     此处提到同等特异性并更靠后，窄档内边距才生效 */
+  /* 0-2-0 特异性 + 靠后：压过基础 .settings-layout（0-1-0）的 --sp-8，窄档内边距 --sp-4 生效 */
   .settings-layout.modal-scroll {
     flex-direction: column;
     align-items: stretch;
