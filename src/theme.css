@@ -76,6 +76,8 @@
   --z-sticky: 200;
   --z-drawer: 300;
   --z-modal: 400;
+  /* v48.70（D114 §11.2）：设置页行内说明 tooltip 浮层——modal(400) < tooltip(450) < toast(500) */
+  --z-tooltip: 450;
   --z-toast: 500;
   /* 浮层阴影（全应用唯一允许的阴影） */
   --shadow-float: 0 8px 24px rgba(10, 10, 10, 0.12);
@@ -129,6 +131,9 @@
   --dur-panel: 240ms;  /* 栏/停靠面板开合（摘录轨 + 底栏让位同步） */
   --dur-stage: 240ms;  /* 卡片入场（原 120ms 升档，取瑞士风 120-240 区间上限） */
   --dur-flip: 500ms;   /* 复习翻卡 */
+  /* v48.70（D114 §11.2）：设置页 tooltip 进出场（浮层进 150ms / 出 100ms，swiss 浮层档） */
+  --dur-tip-in: 150ms;
+  --dur-tip-out: 100ms;
   /* §2.3-1 豁免件：瑞士「直角无阴影」的唯一例外——仅允许出现在 ≥32px 可点控件 hover 态
      与评分钮 hover 态；24px 工具栏钮、列表条目、表格行禁止使用。字面黑（阴影不随主题反转）。 */
   --shadow-hover: 0 3px 8px rgba(10, 10, 10, 0.12);
@@ -1521,6 +1526,14 @@ body.has-skin .topbar { background: transparent; }
 .modal-panel-wide {
   width: 980px;
 }
+/* v48.70（D114 §6.2）：窄窗口断点用容器查询（对齐 D51 书架工具条先例，860px 一档）。
+   容器放在设置面板根上而不是 .settings-layout —— @container 规则不能命中容器自身，
+   而窄档恰恰要改 .settings-layout 的排布方向；同时 layout containment 使面板成为
+   absolute/fixed 后代的包含块，设置页内的 fixed 浮层（tooltip）已 portal 到 body 不受影响。 */
+.settings-panel {
+  container-type: inline-size;
+  container-name: settings;
+}
 .modal-panel-wide > .modal-scroll { padding: 0; }
 .modal-panel-wide .modal-header {
   padding: var(--sp-6) var(--sp-8);
@@ -1535,13 +1548,21 @@ body.has-skin .topbar { background: transparent; }
   padding: var(--sp-8);
 }
 .settings-nav {
-  width: 160px;
+  width: 180px;
   flex: none;
   position: sticky;
   top: 0;
   display: flex;
   flex-direction: column;
 }
+/* 分组标题（D114 §6.1）：Meta 档 12/600 helper 色，非交互、不进 Tab 序 */
+.settings-nav-group {
+  margin: var(--sp-6) 0 var(--sp-2);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text-helper);
+}
+.settings-nav-group:first-child { margin-top: 0; }
 .settings-nav button {
   padding: var(--sp-2) var(--sp-3);
   background: none;
@@ -1552,7 +1573,8 @@ body.has-skin .topbar { background: transparent; }
   font-weight: 500;
   color: var(--text-secondary);
   cursor: pointer;
-  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+  /* D114 §11.3 hover-interactions：hover 只做底色/文字色过渡，走按钮交互族 Token */
+  transition: color var(--dur-hover) var(--ease-out-soft), background-color var(--dur-hover) var(--ease-out-soft);
 }
 .settings-nav button:hover { color: var(--text-primary); background: var(--grey-1); }
 .settings-nav button.active {
@@ -1564,6 +1586,10 @@ body.has-skin .topbar { background: transparent; }
   flex: 1;
   min-width: 0;
   max-width: 720px;
+  /* v48.70（D114 §6.1）：区块列表纵向排布，块间距 = --sp-6（替代旧 hairline 分隔节） */
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
 }
 /* 深色下阴影减弱，层次改以 hairline 描边区分 */
 body.theme-dark .modal-panel {
@@ -1585,17 +1611,15 @@ body.theme-dark .modal-panel {
 }
 .modal-close { flex: none; }
 
-/* ---------- 设置面板 ---------- */
+/* ---------- 设置面板（v48.70 / D114 重设计） ---------- */
 
-/* ---------- 设置分组留白 ---------- */
-
+/* 分组容器 = card-fill（--grey-1 直角底，swiss 卡片四类之「默认中性」；无描边、无阴影）。
+   块间距由 .settings-content 的 flex gap（--sp-6）负责，不再用 hairline 分隔节。 */
 .settings-section {
-  margin-top: var(--sp-8);
-  padding-bottom: var(--sp-8);
-  border-bottom: 1px solid var(--border-subtle);
+  background: var(--grey-1);
+  color: var(--text-primary);
+  padding: var(--sp-6);
 }
-.settings-section:first-child { margin-top: 0; }
-.settings-section:last-child { border-bottom: none; }
 .settings-section h3 {
   margin: 0 0 var(--sp-2);
   font-size: var(--fs-title-s);
@@ -1607,6 +1631,50 @@ body.theme-dark .modal-panel {
 .settings-section > h3 { font-size: var(--fs-title-s); }
 .settings-section .form-hint { margin: 0 0 var(--sp-4); }
 
+/* 行间距：静态说明收编为 tooltip 后，行与行用 8px 沟（§6.1「行与行 gap: --sp-2」）；
+   行后的状态行（form-hint/ai-test-*）同样让出呼吸 */
+.settings-section .settings-row + .settings-row { margin-top: var(--sp-2); }
+.settings-section .settings-row + p { margin-top: var(--sp-2); }
+
+/* 行 label + ⓘ（§6.1：label 部分包一层以容纳图标） */
+.settings-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* ---------- 设置页行内说明 ⓘ + tooltip（D114 §8） ---------- */
+.settings-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-helper);
+  cursor: help;
+  flex: none;
+  vertical-align: -2px;
+  transition: color var(--dur-hover) var(--ease-out-soft);
+}
+.settings-info:hover { color: var(--accent); }
+/* 浮层：全应用唯一允许阴影的浮层件之一（paper 底 + hairline + --shadow-float，直角）；
+   portal 到 body 渲染（.settings-panel 容器含 layout containment，见上方容器注释） */
+.settings-info-tip {
+  position: fixed;
+  z-index: var(--z-tooltip);
+  max-width: 320px;
+  padding: var(--sp-3);
+  background: var(--paper);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  font-size: var(--fs-secondary);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
 /* 四级小节标题：此前 theme.css 没有任何 h4 规则，浏览器默认给 16px/700 +
    1.33em 上下边距 —— 字号不在阶梯、字重违反「越大越细」、间距脱离 8px 网格。
    设置面板有 4 处 h4（词典字段/发音/一键下载/已安装）全部受影响。 */
@@ -1615,6 +1683,76 @@ body.theme-dark .modal-panel {
   font-size: var(--fs-secondary);
   font-weight: 600;
   color: var(--text-primary);
+}
+
+/* ---------- 设置页动效（D114 §11）：全部新动效只写在 no-preference 作用域内 ----------
+   tooltip 入场 ease-out（--dur-tip-in 150ms）/ 出场 ease-in（--dur-tip-out 100ms），
+   slow-in-out-mastery 的「入场快起缓停、出场收速」；reduce 下瞬时显隐（无动画即瞬时）。 */
+@keyframes settings-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes settings-tip-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .settings-info-tip[data-show="in"] { animation: settings-tip-in var(--dur-tip-in) var(--ease-out-soft); }
+  .settings-info-tip[data-show="out"] { animation: settings-tip-out var(--dur-tip-out) var(--ease) forwards; }
+  /* 「已保存，…即时生效」状态行统一淡入（D114 §11.3 micro-interactions：相关反馈成组、有进场） */
+  .settings-saved { animation: settings-tip-in var(--dur-tip-in) var(--ease-out-soft); }
+}
+
+/* ---------- 设置页窄窗口断点（D114 §6.2，容器查询 860px 一档） ----------
+   内容列 < 720 可用时断为纵向：导航变顶部横向滚动条（sticky 吸 modal-header 下缘），
+   组标题收纳为分隔点；内容列全宽，不出现水平滚动条。 */
+@container settings (max-width: 860px) {
+  /* .modal-panel-wide > .modal-scroll 的 padding:0（0-2-0）会压过单类选择器，
+     此处提到同等特异性并更靠后，窄档内边距才生效 */
+  .settings-layout.modal-scroll {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-4);
+    padding: var(--sp-4);
+  }
+  .settings-nav {
+    top: 0;
+    z-index: var(--z-sticky);
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-1);
+    padding-bottom: var(--sp-1);
+    overflow-x: auto;
+    background: var(--paper);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .settings-nav button {
+    flex: none;
+    white-space: nowrap;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+  }
+  .settings-nav button.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--accent);
+  }
+  /* 组标题收纳为分隔点（3px 方点，直角纪律；文字隐藏不占版面） */
+  .settings-nav-group {
+    flex: none;
+    align-self: center;
+    width: 3px;
+    height: 3px;
+    margin: 0 var(--sp-2);
+    font-size: 0;
+    background: var(--grey-2);
+    overflow: hidden;
+  }
+  .settings-content { max-width: none; }
+}
+/* 矮窗口：modal-header 收窄（D114 §6.2，窗口高 < 640px） */
+@media (max-height: 639px) {
+  .modal-panel-wide .modal-header { padding: var(--sp-4) var(--sp-6); }
 }
 
 /* 标题层级：设置面板是近全屏的页面级界面（980×80vh），其 h2 属「页面主标题」

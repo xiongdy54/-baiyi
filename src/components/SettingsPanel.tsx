@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { SKINS } from "../skins";
 import { aiGateway, aiConfigUsable, type AIConfig, type AiPresetMeta, type LocalDetectResult } from "../lib/ai";
 import { settingsStore } from "../lib/settings";
@@ -36,6 +36,7 @@ import { FIELD_LABELS } from "./DictPanel";
 import { eventBus } from "../lib/eventbus";
 import { memoryApi, type MemoryPendingStats, type MemoryStatus } from "../lib/memory";
 import { useDialogA11y } from "../lib/dialogA11y";
+import SettingsInfo from "./SettingsInfo";
 // v48.22（D58 §6.8）：摘录复习开关 / 每日上限（写路径经主进程硬边界校验）
 import {
   extractSettings,
@@ -73,6 +74,54 @@ const GROUP_LABELS: Record<string, string> = { official: "官方云服务", agg:
 
 function SkeletonBlock({ h = 40 }: { h?: number }) {
   return <div className="skeleton" style={{ height: h }} />;
+}
+
+// ---------- 新信息架构（v48.70 / D114，设计稿 §5）----------
+// 14 项平铺导航收编为 5 组 13 项；组标题为非交互 div，不进 .settings-nav button 查询集；
+// 13 个导航项与 13 个 card-fill 区块一一对应（区块常挂载、无条件卸载，滚动定位一一可达）。
+const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: string }> }> = [
+  { label: "界面", items: [{ id: "appearance", label: "主题与颜色" }] },
+  { label: "阅读", items: [{ id: "reader", label: "阅读" }] },
+  {
+    label: "复习与调度",
+    items: [
+      { id: "extracts", label: "摘录复习" },
+      { id: "limits", label: "每日上限" },
+      { id: "schedule", label: "调度规则" },
+      { id: "cardtags", label: "卡面与标签" },
+      { id: "fsrs", label: "FSRS 优化" }
+    ]
+  },
+  {
+    label: "智能",
+    items: [
+      { id: "ai", label: "AI 服务" },
+      { id: "dict", label: "词典与查词" },
+      { id: "memory", label: "用户记忆" }
+    ]
+  },
+  {
+    label: "数据与效率",
+    items: [
+      { id: "backup", label: "备份与恢复" },
+      { id: "shortcuts", label: "快捷键" },
+      { id: "widgets", label: "统计仪表盘" }
+    ]
+  }
+];
+
+// card-fill 区块容器（设计稿 §6.1/§7 薄壳）：h3 是 scrollIntoView 后的聚焦目标
+// （tabindex=-1，屏幕阅读器可达），info 为挂在标题上的可选 ⓘ 说明。
+function SettingsSection({ id, title, info, children }: { id: string; title: string; info?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="settings-section card-fill" id={id}>
+      <h3 tabIndex={-1}>
+        {title}
+        {info}
+      </h3>
+      {children}
+    </section>
+  );
 }
 
 // 给可能长时间挂起的 Promise 加超时上限（v45 用户反馈：测试连接失败后按钮永久置灰）。
@@ -125,50 +174,53 @@ function DashboardSection() {
     setSizes({});
   }
 
-  if (!loaded) return <SkeletonBlock h={120} />;
-
   return (
-    <>
-      <section className="settings-section" id="sec-widgets">
-        <h3>显示哪些组件</h3>
-        <div className="widget-list">
-          {WIDGETS.map((w) => (
-            <div key={w.id} className="widget-toggle">
-              <label className="widget-toggle-main">
-                <input
-                  type="checkbox"
-                  checked={!hidden.includes(w.id)}
-                  onChange={() => toggleWidget(w.id)}
-                />
-                <span>{w.title}</span>
-              </label>
-              <div className="seg-tabs seg-tabs-sm" role="group" aria-label={`${w.title}宽度`}>
-                <button
-                  className={(sizes[w.id] ?? "wide") === "wide" ? "active" : ""}
-                  onClick={() => setWidgetSize(w.id, "wide")}
-                >
-                  宽幅
-                </button>
-                <button
-                  className={sizes[w.id] === "half" ? "active" : ""}
-                  onClick={() => setWidgetSize(w.id, "half")}
-                >
-                  窄幅
-                </button>
+    <SettingsSection id="sec-widgets" title="统计仪表盘">
+      {!loaded ? (
+        <SkeletonBlock h={120} />
+      ) : (
+        <>
+          <h4>
+            统计组件
+            <SettingsInfo label="统计组件">
+              宽幅＝通栏一行；窄幅＝半幅，相邻窄幅自动两两成行。拖动组件标题栏可交换位置。
+            </SettingsInfo>
+          </h4>
+          <div className="widget-list">
+            {WIDGETS.map((w) => (
+              <div key={w.id} className="widget-toggle">
+                <label className="widget-toggle-main">
+                  <input
+                    type="checkbox"
+                    checked={!hidden.includes(w.id)}
+                    onChange={() => toggleWidget(w.id)}
+                  />
+                  <span>{w.title}</span>
+                </label>
+                <div className="seg-tabs seg-tabs-sm" role="group" aria-label={`${w.title}宽度`}>
+                  <button
+                    className={(sizes[w.id] ?? "wide") === "wide" ? "active" : ""}
+                    onClick={() => setWidgetSize(w.id, "wide")}
+                  >
+                    宽幅
+                  </button>
+                  <button
+                    className={sizes[w.id] === "half" ? "active" : ""}
+                    onClick={() => setWidgetSize(w.id, "half")}
+                  >
+                    窄幅
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-        <p className="form-hint">宽幅 = 统计页通栏一行；窄幅 = 半幅，相邻窄幅自动两两成行。所有图表显示在顶栏「统计数据」页，拖动组件标题栏可交换位置。</p>
-      </section>
-
-      <section className="settings-section" id="sec-dashreset">
-        <h3>重置布局</h3>
-        <div className="settings-row">
-          <button className="btn btn-secondary btn-sm" onClick={resetLayout}>恢复默认排列与宽度</button>
-        </div>
-      </section>
-    </>
+            ))}
+          </div>
+          {/* sec-dashreset 撤销（D114）：「恢复默认排列与宽度」收编为本节一行 */}
+          <div className="settings-row">
+            <button className="btn btn-secondary btn-sm" onClick={resetLayout}>恢复默认排列与宽度</button>
+          </div>
+        </>
+      )}
+    </SettingsSection>
   );
 }
 
@@ -325,9 +377,7 @@ function AISection() {
     : models;
 
   return (
-    <section className="settings-section" id="sec-ai">
-      <h3>AI 服务</h3>
-
+    <SettingsSection id="sec-ai" title="AI 服务">
       {GROUP_ORDER.map((g) => {
         const items = presets.filter((p) => (p.group || "official") === g);
         if (items.length === 0) return null;
@@ -361,23 +411,18 @@ function AISection() {
       )}
 
       {cfg.preset === "local" && (
-        <>
-          <p className="form-hint">
-            需本机运行 Ollama（默认端口 11434）或 LM Studio（端口 1234），无需 Key。
-          </p>
-          <div className="settings-row settings-row-wrap">
-            <button className="btn btn-outline btn-sm" disabled={busy !== ""} onClick={handleDetectLocal}>
-              {busy === "detect" ? "检测中…" : "检测本地服务"}
-            </button>
-            {localDetect && (
-              <span className={localDetect.detected ? "ai-test-ok" : "ai-test-fail"}>
-                {localDetect.detected
-                  ? `已检测到 ${localDetect.runtimeName || "本地服务"}`
-                  : (localDetect.message || "未检测到本地模型服务")}
-              </span>
-            )}
-          </div>
-        </>
+        <div className="settings-row settings-row-wrap">
+          <button className="btn btn-outline btn-sm" disabled={busy !== ""} onClick={handleDetectLocal}>
+            {busy === "detect" ? "检测中…" : "检测本地服务"}
+          </button>
+          {localDetect && (
+            <span className={localDetect.detected ? "ai-test-ok" : "ai-test-fail"}>
+              {localDetect.detected
+                ? `已检测到 ${localDetect.runtimeName || "本地服务"}`
+                : (localDetect.message || "未检测到本地模型服务")}
+            </span>
+          )}
+        </div>
       )}
 
       <div className="ai-fields">
@@ -393,7 +438,10 @@ function AISection() {
         )}
         {cfg.preset === "local" && (
           <div className="form-field">
-            <label>服务地址（Ollama 默认 11434，LM Studio 默认 1234）</label>
+            <label>
+              服务地址（Ollama 默认 11434，LM Studio 默认 1234）
+              <SettingsInfo label="服务地址">本机服务无需 API Key；端口 Ollama 11434 / LM Studio 1234。</SettingsInfo>
+            </label>
             <input
               className="mono"
               value={cfg.baseUrl}
@@ -507,13 +555,28 @@ function AISection() {
 
       {(busy === "test" || busy === "models" || busy === "save") && <SkeletonBlock h={32} />}
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
-    </section>
+    </SettingsSection>
+  );
+}
+
+// ---------- 调度规则（v48.70 / D114）：学习日 + 同源卡延后物理合并 ----------
+// 两个 h4 子块的根元素保留 id sec-learningday / sec-siblingbury（m12 直达定位，设计稿 §5.3/§12-T4）。
+function ScheduleSection() {
+  return (
+    <SettingsSection id="sec-schedule" title="调度规则">
+      <div id="sec-learningday">
+        <LearningDayBlock />
+      </div>
+      <div id="sec-siblingbury">
+        <SiblingBuryBlock />
+      </div>
+    </SettingsSection>
   );
 }
 
 // 学习日（v23，D21/§4.4.8）：统计口径的「新一天」起点 = 本地钟面 0-23 时，默认 0（午夜）。
 // 仅影响统计（今日完成度/热力/日聚合）；FSRS 调度间隔与优化训练不受其影响。
-function LearningDaySection() {
+function LearningDayBlock() {
   const [cutoff, setCutoff] = useState<number | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -531,25 +594,25 @@ function LearningDaySection() {
     window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
   }
   return (
-    <section className="settings-section" id="sec-learningday">
-      <h3>学习日（新一天开始时刻）</h3>
-      <p className="form-hint">
-        统计口径：每日该时刻起算「新的一天」——学习到深夜时，凌晨的学习仍计入前一天。仅影响统计与热力图，不影响 FSRS 复习间隔。
-      </p>
+    <>
+      <h4>学习日</h4>
       <div className="settings-row">
-        <span>新一天从</span>
+        <span className="settings-row-label">
+          新一天从
+          <SettingsInfo label="新一天从">凌晨的学习计入前一天。仅影响统计与热力图，不影响 FSRS 复习间隔。</SettingsInfo>
+        </span>
         {cutoff !== null && (
           <Dropdown value={String(cutoff)} options={options} align="left" onChange={update} title="学习日切点" />
         )}
       </div>
-      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，统计口径即时生效。</p>}
-    </section>
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，统计口径即时生效。</p>}
+    </>
   );
 }
 
 // 同源卡延后（v34，M12/D33/§4.16）：同一制卡来源单元的多张卡同一学习日只放行一张、其余延至次日。
 // 延后是队列视图而非调度写入——不改 FSRS 的 due/S/D，不产生复习日志，次日自动解封。
-function SiblingBurySection() {
+function SiblingBuryBlock() {
   const [cfg, setCfg] = useState<{ enabled: boolean; newCards: boolean; reviewCards: boolean; perDay: number; sourceTextLimit: number } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -574,13 +637,11 @@ function SiblingBurySection() {
     window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
   }
   return (
-    <section className="settings-section" id="sec-siblingbury">
-      <h3>同源卡延后（Anki 式 Sibling Burying）</h3>
-      <p className="form-hint">
-        同一句话/同一次动作产出的多张卡（翻转对、分答拆卡、单词四卡、同图多卡、短材料多角度卡）内容高度重叠，
-        同日互相泄题会让 FSRS 把「刚看过答案的容易」误判为记忆稳定。开启后同源组每日只放行一张，其余次日自动解封。
-        延后不改动 FSRS 调度与复习记录，被延后的卡仍可在卡片浏览页主动复习。
-      </p>
+    <>
+      <h4>
+        同源卡延后
+        <SettingsInfo label="同源卡延后">同源组同日只放行一张，防互相泄题；不改调度，次日自动解封，仍可在卡片浏览页主动复习。</SettingsInfo>
+      </h4>
       {cfg && (
         <>
           <div className="settings-row">
@@ -611,7 +672,10 @@ function SiblingBurySection() {
             <span>张</span>
           </div>
           <div className="settings-row settings-row-wrap">
-            <span>短材料阈值</span>
+            <span className="settings-row-label">
+              短材料阈值
+              <SettingsInfo label="短材料阈值">该字符数以内才按「同一次选区」建组（长选区各卡锚定不同知识点，不延后）。</SettingsInfo>
+            </span>
             <input
               className="mono input-num input-num-md"
               type="number"
@@ -621,18 +685,28 @@ function SiblingBurySection() {
               value={cfg.sourceTextLimit}
               onChange={(e) => update({ sourceTextLimit: Math.max(50, Number(e.target.value) || 300) })}
             />
-            <span className="form-hint">字符以内才按「同一次选区」建组（长选区各卡锚定不同知识点，不延后）</span>
           </div>
         </>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，队列即时生效。</p>}
-    </section>
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，队列即时生效。</p>}
+    </>
   );
 }
 
-// ---------- 卡面信息密度（v48.61，D104/D94 设计稿 §3.5）：背面辅助字段三开关 ----------
+// ---------- 卡面与标签（v48.70 / D114）：卡面信息密度 + 标签功能总开关物理合并 ----------
+// data-cf-* / tags-enabled-toggle / data-tags-on/off 钩原样保留（d104/d107 为 document 级查询，位置无关）。
+function CardTagsSection() {
+  return (
+    <SettingsSection id="sec-cardtags" title="卡面与标签">
+      <CardFaceBlock />
+      <TagsBlock />
+    </SettingsSection>
+  );
+}
+
+// 卡面信息密度（v48.61，D104/D94 设计稿 §3.5）：背面辅助字段三开关
 // 纯显示开关：关闭即不渲染对应块；不改卡内数据、不影响 CardLint。作用于复习页背面与卡详情预览（同一组件）。
-function CardFaceExtrasSection() {
+function CardFaceBlock() {
   const [cfg, setCfg] = useState<{ mnemonic: boolean; example: boolean; sourceRef: boolean } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -654,12 +728,11 @@ function CardFaceExtrasSection() {
     window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
   }
   return (
-    <section className="settings-section" id="sec-cardface">
-      <h3>卡面信息密度</h3>
-      <p className="form-hint">
-        复习页卡面背面与卡片详情里的辅助字段（助记 / 例子 / 来源）按需显示——关闭对应项即可让卡面更精简。
-        纯显示开关：不改卡片内容，也不影响制卡时的质检。
-      </p>
+    <>
+      <h4>
+        卡面信息密度
+        <SettingsInfo label="卡面信息密度">关闭即不渲染对应块；不改卡内数据，也不影响制卡时的质检。</SettingsInfo>
+      </h4>
       {cfg && (
         <>
           <div className="settings-row">
@@ -676,8 +749,8 @@ function CardFaceExtrasSection() {
           </div>
         </>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，卡面即时生效。</p>}
-    </section>
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，卡面即时生效。</p>}
+    </>
   );
 }
 
@@ -685,7 +758,7 @@ function CardFaceExtrasSection() {
 // 覆盖：手动制卡标签行、AI 制卡的批注标签继承（批 F 的 AI 建议标签届时同受此开关）、
 // 复习页标签区与快捷打标、浏览器批量打标/去标、卡详情标签区、筛选牌组构建器标签条件。
 // 只隐藏入口与展示——已存标签数据零改动，重新打开即恢复；查询 tag: 与已存 scope 照常生效。
-function TagsEnabledSection() {
+function TagsBlock() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -700,23 +773,22 @@ function TagsEnabledSection() {
     window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
   }
   return (
-    <section className="settings-section" id="sec-tags">
-      <h3>标签功能</h3>
-      <p className="form-hint">
-        标签是给卡片自造的组织词（如「考研」「错题」）。关闭后，制卡表单、复习页、卡片浏览器里的全部标签入口与展示
-        一并隐藏（AI 制卡的标签建议也一并停用）；已打的标签数据原样保留，重新打开即恢复显示。
-      </p>
+    <>
+      <h4>标签功能</h4>
       {enabled !== null && (
         <div className="settings-row">
-          <span>启用标签功能</span>
+          <span className="settings-row-label">
+            启用标签功能
+            <SettingsInfo label="启用标签功能">关闭隐藏全部标签入口与展示（AI 标签建议同停）；已存标签数据原样保留，重开即恢复。</SettingsInfo>
+          </span>
           <div className="seg-tabs seg-tabs-sm" role="group" aria-label="标签功能开关" data-testid="tags-enabled-toggle">
             <button className={enabled ? "active" : ""} data-tags-on onClick={() => update(true)}>开</button>
             <button className={!enabled ? "active" : ""} data-tags-off onClick={() => update(false)}>关</button>
           </div>
         </div>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，各界面即时生效。</p>}
-    </section>
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，各界面即时生效。</p>}
+    </>
   );
 }
 
@@ -754,23 +826,24 @@ function ExtractReviewSection() {
     window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
   }
   return (
-    <section className="settings-section" id="sec-extracts">
-      <h3>摘录复习</h3>
-      <p className="form-hint">
-        摘录与闪卡是同一份学习材料的两面。开启「并入复习队列」后，复习时会按混编规则推送摘录卡片，
-        可就地处理、阅读或制卡；关闭时两类分开复习，摘录在顶栏「摘录」页连续处理。
-      </p>
+    <SettingsSection id="sec-extracts" title="摘录复习">
       {cfg && (
         <>
           <div className="settings-row">
-            <span>并入复习队列（传统 SuperMemo 方式）</span>
+            <span className="settings-row-label">
+              并入复习队列（传统 SuperMemo 方式）
+              <SettingsInfo label="并入复习队列">开启后复习时按混编规则推送摘录卡，可就地处理；关闭时摘录在顶栏「摘录」页连续处理。</SettingsInfo>
+            </span>
             <div className="seg-tabs seg-tabs-sm" role="group" aria-label="摘录并入复习队列">
               <button className={cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: true })}>开</button>
               <button className={!cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: false })}>关</button>
             </div>
           </div>
           <div className="settings-row">
-            <span>混编规则</span>
+            <span className="settings-row-label">
+              混编规则
+              <SettingsInfo label="混编规则">切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。</SettingsInfo>
+            </span>
             <Dropdown
               value={cfg.interleave}
               align="left"
@@ -781,9 +854,14 @@ function ExtractReviewSection() {
               onChange={(v) => void update({ interleave: v as InterleaveMode })}
             />
           </div>
-          <p className="form-hint">两种混编规则可随时切换，**不写任何调度状态**：未放行的摘录仍在库内到期，切换后立即可见。</p>
           <div className="settings-row">
-            <span>摘录推送引擎</span>
+            <span className="settings-row-label">
+              摘录推送引擎
+              <SettingsInfo label="摘录推送引擎">
+                实验引擎按本地因子（优先级/逾期/搁置/同书连击）排序并给逐条可验证理由；AI 重排只影响处理顺序、
+                经本地裁决过滤；Frontier 因子未接入。切回 SuperMemo 无损。
+              </SettingsInfo>
+            </span>
             <Dropdown
               value={cfg.engine}
               align="left"
@@ -796,6 +874,8 @@ function ExtractReviewSection() {
           </div>
           {cfg.engine === "ai-next-extract" && (
             <>
+              {/* 实验标识句按契约保留行内（D114 §9）；完整语义入「摘录推送引擎」tooltip */}
+              <p className="form-hint">实验功能 · 早期开发阶段。</p>
               <div className="settings-row">
                 <span>AI 重排</span>
                 <button className="btn btn-outline btn-sm" data-rerank-now disabled={busyRerank} onClick={() => void runRerank()}>
@@ -803,18 +883,12 @@ function ExtractReviewSection() {
                 </button>
               </div>
               {rerankNote && <p className="form-hint">{rerankNote}</p>}
-              <p className="form-hint">
-                实验功能 · 早期开发阶段：实验引擎按**本地因子**排序（优先级 / 逾期时长 / 搁置次数 / 同书连击降权）并给逐条可验证理由；
-                配置 AI Key 后还可跑一次 **AI 重排**——它只影响**处理顺序**，输出经本地裁决器过滤（越界 id 丢弃、理由里编造的数字清空、任何失败回退本地序），
-                因此不会污染调度字段。**知识前置（Frontier）因子仍未接入**（需 K4–K5 的知识模型数据）。
-                切回 SuperMemo 是无损操作：两套引擎各自记账，调度状态逐字段复原。
-              </p>
             </>
           )}
         </>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，队列即时生效。</p>}
-    </section>
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，队列即时生效。</p>}
+    </SettingsSection>
   );
 }
 
@@ -850,9 +924,16 @@ function LimitsSection() {
       setErrors([e instanceof Error ? e.message : String(e)]);
     }
   }
-  const num = (label: string, key: keyof Limits, hint: string) => (
+  const num = (label: string, key: keyof Limits, hint: string, tip?: ReactNode) => (
     <div className="settings-row settings-row-wrap" key={key}>
-      <span>{label}</span>
+      {tip ? (
+        <span className="settings-row-label">
+          {label}
+          {tip}
+        </span>
+      ) : (
+        <span>{label}</span>
+      )}
       <input
         className="mono input-num input-num-md"
         type="number"
@@ -865,30 +946,39 @@ function LimitsSection() {
     </div>
   );
   return (
-    <section className="settings-section" id="sec-limits">
-      <h3>每日上限</h3>
-      <p className="form-hint">
-        四类上限按**学习日**（设置里的「新一天开始时刻」）计算，全部范围共享同一份额度；
-        填 0 表示不限制。硬边界：复习上限不得低于新上限的 5 倍（防旧内容积压还在学新卡）；
-        低于 10 倍时给出提示（Anki 官方经验：20 张新卡约带来 200 次复习/日）。
-      </p>
+    <SettingsSection
+      id="sec-limits"
+      title="每日上限"
+      info={
+        <SettingsInfo label="每日上限">
+          四类上限按学习日（「新一天从」时刻）计算，全部范围共享同一份额度；填 0 表示不限制。
+        </SettingsInfo>
+      }
+    >
       {limits && (
         <>
           {num("每日新卡片上限", "newCardsPerDay", "首次作答的卡片张数")}
-          {num("每日卡片复习上限", "cardReviewsPerDay", "卡片作答总次数（新卡与复习卡共用）")}
+          {num(
+            "每日卡片复习上限",
+            "cardReviewsPerDay",
+            "卡片作答总次数（新卡与复习卡共用）",
+            <SettingsInfo label="每日卡片复习上限">
+              硬边界：不得低于新卡上限的 5 倍；低于 10 倍时给出提示（Anki 经验：20 张新卡约 200 次复习/日）。
+            </SettingsInfo>
+          )}
           {num("每日新摘录上限", "newExtractsPerDay", "新引入的摘录条数")}
           {num("每日摘录处理上限", "extractReviewsPerDay", "到期摘录的处理条数")}
           <div className="settings-row">
-            <span>复习上限用尽后仍发新卡与新摘录</span>
+            <span className="settings-row-label">
+              复习上限用尽后仍发新卡与新摘录
+              <SettingsInfo label="复习上限用尽后仍发新卡与新摘录">关闭（默认）＝防积压的结构闸：复习额度用尽即停发新卡与新摘录。</SettingsInfo>
+            </span>
             <input
               type="checkbox"
               checked={limits.ignoreReviewLimitForNew}
               onChange={(e) => void save({ ignoreReviewLimitForNew: e.target.checked })}
             />
           </div>
-          <p className="form-hint">
-            关闭（默认）时，复习上限用尽即停发新卡与新摘录——这是防积压的结构闸（对齐 Anki 同名选项）。
-          </p>
           {state && (
             <p className="form-hint">
               今日已用：新卡 {state.usage.newCards}/{state.limits.newCardsPerDay || "∞"} · 复习 {state.usage.cardReviews}/
@@ -901,8 +991,8 @@ function LimitsSection() {
       )}
       {errors.length > 0 && <p className="ai-test-err">{errors.join("；")}</p>}
       {errors.length === 0 && advisory.length > 0 && <p className="form-hint">提示：{advisory.join("；")}</p>}
-      {savedTick % 2 === 1 && <p className="ai-test-ok">已保存，队列即时生效。</p>}
-    </section>
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，队列即时生效。</p>}
+    </SettingsSection>
   );
 }
 
@@ -1013,8 +1103,7 @@ function MemorySection() {
 
   const bf = status?.backfill;
   return (
-    <section className="settings-section" id="sec-memory">
-      <h3>用户记忆（AI 自动维护）</h3>
+    <SettingsSection id="sec-memory" title="用户记忆（AI 自动维护）">
       <p className="form-hint">
         软件把你的日记自动整理成一份本地记忆文件，将来制卡时为「应用类卡片」提供你真实经历过的情境。
         会发送什么：日记新增/改动片段；何时发送：日记变更防抖后与启动补跑；发到哪里：你自己配置的 AI 模型；
@@ -1050,7 +1139,10 @@ function MemorySection() {
             </span>
           </div>
           <div className="settings-row">
-            <span>注入预算</span>
+            <span className="settings-row-label">
+              注入预算
+              <SettingsInfo label="注入预算">制卡时单次注入记忆的字数上限；core/目录/主题按比例分配。</SettingsInfo>
+            </span>
             <input
               className="mono input-num input-num-md"
               type="number"
@@ -1060,7 +1152,6 @@ function MemorySection() {
               value={injectBudget ?? 4400}
               onChange={(e) => void changeInjectBudget(Number(e.target.value))}
             />
-            <span className="form-hint">字（制卡时单次注入记忆的上限；core/目录/主题按比例分配）</span>
           </div>
           {bf?.running && (
             <div className="settings-row">
@@ -1075,9 +1166,9 @@ function MemorySection() {
             ) : (
               <>
                 {/* 不可逆删除：瑞士风要求破坏性操作用 error 填充，而不是把全屏唯一
-                    的高饱和焦点色（accent）用在最危险的动作上 */}
+                    的高饱和焦点色（accent）用在最危险的动作上；确认面板出现时焦点落「取消」（D50 先例，D114 §10） */}
                 <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void doReset()}>确认清空</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setResetArmed(false)}>取消</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setResetArmed(false)} autoFocus>取消</button>
               </>
             )}
           </div>
@@ -1093,7 +1184,7 @@ function MemorySection() {
               </p>
               <div className="settings-row">
                 <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void startBackfill()}>开始补处理</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setPreview(null)}>暂不</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setPreview(null)} autoFocus>暂不</button>
               </div>
             </div>
           )}
@@ -1113,11 +1204,11 @@ function MemorySection() {
           </p>
           <div className="settings-row">
             <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void confirmIntro()}>已知悉，开启</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setIntroOpen(false)}>取消</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setIntroOpen(false)} autoFocus>取消</button>
           </div>
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -1203,8 +1294,7 @@ function FSRSSection() {
   }
 
   return (
-    <section className="settings-section" id="sec-fsrs">
-      <h3>FSRS 参数优化</h3>
+    <SettingsSection id="sec-fsrs" title="FSRS 参数优化">
       {stats && (
         <p className="form-hint">
           复习记录 <span className="mono">{stats.reviewCount}</span> 条
@@ -1236,7 +1326,7 @@ function FSRSSection() {
         </p>
       )}
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -1317,114 +1407,13 @@ function ReaderSection() {
   if (!cfg) return null;
   const a = cfg.appearance;
   return (
-    <section className="settings-section" id="sec-reader">
-      <h3>阅读（书与摘录的阅读视图）</h3>
-      <p className="form-hint">
-        阅读器顶栏的「主题」快捷菜单与本区块读写同一份设置；自定义色直接作用于正文背景与文字。
-      </p>
+    <SettingsSection id="sec-reader" title="阅读">
+      <h4>阅读外观</h4>
       <div className="settings-row">
-        <span>多段选择修饰键</span>
-        <Dropdown
-          value={multiKey ?? DEFAULT_MULTI_SELECT_KEY}
-          align="left"
-          options={MULTI_SELECT_KEYS.map((k) => ({
-            value: k,
-            label: k === "Meta" ? "Meta（macOS 的 Command）" : k
-          }))}
-          onChange={(v) => saveMultiKey(v as MultiSelectKey)}
-        />
-      </div>
-      <p className="form-hint">
-        选中一段文字后按住它再选不相邻的另一段＝加选（两段同时高亮，再执行制卡/摘录等同一动作）；
-        重复选同一段＝移出，Esc 清空。Ctrl+Z/X/S/A/D 这类纯键盘组合不受影响。
-      </p>
-      <div className="settings-row">
-        <span>默认标注模式</span>
-        <div className="seg-tabs">
-          {([["highlight", "高亮"], ["extract", "摘录+高亮"]] as const).map(([id, label]) => (
-            <button
-              key={id}
-              className={annot.annotateMode === id ? "active" : ""}
-              data-annot-mode={id}
-              onClick={() => saveAnnot("annotateMode", id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="form-hint">高亮＝点色只做纯批注（不进摘录队列）；摘录+高亮＝点色同时建一条摘录。两种模式都可在选区菜单里临时切换。</p>
-      <div className="settings-row">
-        <span>默认标注形式</span>
-        <div className="seg-tabs">
-          {([["highlight", "高亮"], ["underline", "下划线"]] as const).map(([id, label]) => (
-            <button
-              key={id}
-              className={annot.annotateForm === id ? "active" : ""}
-              data-annot-form={id}
-              onClick={() => saveAnnot("annotateForm", id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="form-hint">高亮＝底色；下划线＝批注色 2px 色线。两种形式都可在选区菜单里临时切换（v48.41/D81 引入下划线）。</p>
-      <div className="settings-row">
-        <span>批注色板</span>
-        <div className="annot-palette-pick" data-annot-palette>
-          {ANNOT_COLORS.map((c) => {
-            const on = annot.annotatePalette.includes(c);
-            return (
-              <button
-                key={c}
-                type="button"
-                className={`swatch${on ? " on" : ""}`}
-                data-palette-color={c}
-                aria-pressed={on}
-                title={on ? `${c}（点击移出色板）` : `${c}（点击加入色板，最多 8 支）`}
-                style={{ background: `var(--annot-${c})` }}
-                onClick={() => saveAnnot("annotatePalette", togglePaletteColor(annot.annotatePalette, c))}
-              />
-            );
-          })}
-        </div>
-      </div>
-      <p className="form-hint">调色排里出现的颜色（按此处顺序）；点色即完成当前模式的动作。</p>
-      <div className="settings-row">
-        <span>自定义取色</span>
-        <div className="seg-tabs">
-          {([[true, "显示"], [false, "隐藏"]] as const).map(([id, label]) => (
-            <button
-              key={String(id)}
-              className={annot.annotateCustomEnabled === id ? "active" : ""}
-              data-annot-custom={String(id)}
-              onClick={() => saveAnnot("annotateCustomEnabled", id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="form-hint">调色排末位是否显示「自定义…」（可任取一色）。</p>
-      <div className="settings-row">
-        <span>批注栏默认筛选</span>
-        <div className="seg-tabs">
-          {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
-            <button
-              key={id}
-              className={annot.annotationFilter === id ? "active" : ""}
-              data-annot-filter={id}
-              onClick={() => saveAnnot("annotationFilter", id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-      <p className="form-hint">批注栏打开时的筛选状态（栏顶段控与本键同一份设置）。</p>
-      <div className="settings-row">
-        <span>主题预设</span>
+        <span className="settings-row-label">
+          主题预设
+          <SettingsInfo label="主题预设">与阅读器顶栏「主题」菜单读写同一份设置。</SettingsInfo>
+        </span>
         <div className="seg-tabs">
           {(["paper", "sepia", "dark", "custom"] as const).map((t) => (
             <button key={t} className={a.theme === t ? "active" : ""} onClick={() => save({ ...cfg, appearance: { ...a, theme: t } })}>
@@ -1450,61 +1439,132 @@ function ReaderSection() {
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontSize: Number(e.target.value) } })}
         />
       </div>
-      <div className="settings-row">
-        <span>正文字体</span>
+      <div className="form-field">
+        <label>正文字体</label>
         <input
-          className="row-fill"
           value={a.fontFamily ?? ""}
           placeholder="留空使用默认多语言衬线栈"
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontFamily: e.target.value } })}
         />
       </div>
-      {/* D95 §E：摘录卡编辑器下方的富文本工具栏开关（关＝整行不渲染，markdown 语法输入不受影响） */}
+
+      <h4>选区与批注</h4>
       <div className="settings-row">
-        <span>摘录卡编辑工具栏</span>
-        <label className="widget-toggle-main">
-          <input
-            type="checkbox"
-            data-testid="setting-extract-editor-toolbar"
-            checked={ext.extractEditorToolbar}
-            onChange={(e) => saveExtract({ ...ext, extractEditorToolbar: e.target.checked })}
-          />
-          <span>编辑时显示</span>
-        </label>
+        <span className="settings-row-label">
+          多段选择修饰键
+          <SettingsInfo label="多段选择修饰键">按住它再选不相邻段＝加选；重复选＝移出；Esc 清空。Ctrl+Z/X/S/A/D 等纯键盘组合不受影响。</SettingsInfo>
+        </span>
+        <Dropdown
+          value={multiKey ?? DEFAULT_MULTI_SELECT_KEY}
+          align="left"
+          options={MULTI_SELECT_KEYS.map((k) => ({
+            value: k,
+            label: k === "Meta" ? "Meta（macOS 的 Command）" : k
+          }))}
+          onChange={(v) => saveMultiKey(v as MultiSelectKey)}
+        />
       </div>
-      {/* D95 v1.4→§K.3：工具栏形态——dock（钉底/钉顶）/悬浮＝选区锚定弹层 */}
       <div className="settings-row">
-        <span>工具栏形态</span>
-        <label className="widget-toggle-main">
-          <input
-            type="checkbox"
-            data-testid="setting-extract-editor-toolbar-float"
-            checked={ext.extractEditorToolbarFloat}
-            onChange={(e) => saveExtract({ ...ext, extractEditorToolbarFloat: e.target.checked })}
-          />
-          <span>悬浮于选中文字</span>
-        </label>
+        <span className="settings-row-label">
+          默认标注模式
+          <SettingsInfo label="默认标注模式">高亮＝点色只做纯批注；摘录+高亮＝点色同时建一条摘录。都可在选区菜单里临时切换。</SettingsInfo>
+        </span>
+        <div className="seg-tabs">
+          {([["highlight", "高亮"], ["extract", "摘录+高亮"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              className={annot.annotateMode === id ? "active" : ""}
+              data-annot-mode={id}
+              onClick={() => saveAnnot("annotateMode", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      {/* §K.2：dock 态钉底/钉顶（悬浮态优先于本键；钉顶时工具条吸顶并让开吸顶头带） */}
       <div className="settings-row">
-        <span>工具栏固定位置（非悬浮时）</span>
-        <label className="widget-toggle-main">
-          <input
-            type="checkbox"
-            data-testid="setting-extract-editor-toolbar-top"
-            checked={ext.extractEditorToolbarTop}
-            onChange={(e) => saveExtract({ ...ext, extractEditorToolbarTop: e.target.checked })}
-          />
-          <span>固定在顶部</span>
-        </label>
+        <span className="settings-row-label">
+          默认标注形式
+          <SettingsInfo label="默认标注形式">高亮＝底色；下划线＝批注色 2px 色线。都可在选区菜单里临时切换。</SettingsInfo>
+        </span>
+        <div className="seg-tabs">
+          {([["highlight", "高亮"], ["underline", "下划线"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              className={annot.annotateForm === id ? "active" : ""}
+              data-annot-form={id}
+              onClick={() => saveAnnot("annotateForm", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="form-hint">
-        编辑时选中文字即可用工具条加粗/标题/列表/公式等；关闭工具条仍可用 markdown 语法输入与快捷键。
-        悬浮＝工具条弹层锚定当前选中的文字（上方居中，空间不足翻到下方）；非悬浮时工具条随文档流固定在顶部（吸顶）或底部（吸底）。
-      </p>
+      <div className="settings-row">
+        <span className="settings-row-label">
+          批注色板
+          <SettingsInfo label="批注色板">勾选的颜色与顺序＝调色排里出现的颜色与顺序；点色即执行当前模式的动作。</SettingsInfo>
+        </span>
+        <div className="annot-palette-pick" data-annot-palette>
+          {ANNOT_COLORS.map((c) => {
+            const on = annot.annotatePalette.includes(c);
+            return (
+              <button
+                key={c}
+                type="button"
+                className={`swatch${on ? " on" : ""}`}
+                data-palette-color={c}
+                aria-pressed={on}
+                title={on ? `${c}（点击移出色板）` : `${c}（点击加入色板，最多 8 支）`}
+                style={{ background: `var(--annot-${c})` }}
+                onClick={() => saveAnnot("annotatePalette", togglePaletteColor(annot.annotatePalette, c))}
+              />
+            );
+          })}
+        </div>
+      </div>
+      <div className="settings-row">
+        <span className="settings-row-label">
+          自定义取色
+          <SettingsInfo label="自定义取色">调色排末位是否显示「自定义…」入口。</SettingsInfo>
+        </span>
+        <div className="seg-tabs">
+          {([[true, "显示"], [false, "隐藏"]] as const).map(([id, label]) => (
+            <button
+              key={String(id)}
+              className={annot.annotateCustomEnabled === id ? "active" : ""}
+              data-annot-custom={String(id)}
+              onClick={() => saveAnnot("annotateCustomEnabled", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="settings-row">
+        <span className="settings-row-label">
+          批注栏默认筛选
+          <SettingsInfo label="批注栏默认筛选">批注栏打开时的初始筛选；栏顶段控与本键同一份设置。</SettingsInfo>
+        </span>
+        <div className="seg-tabs">
+          {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              className={annot.annotationFilter === id ? "active" : ""}
+              data-annot-filter={id}
+              onClick={() => saveAnnot("annotationFilter", id)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
       {/* §K.4：阅读器选区动作组（高亮/摘录/制卡/查词等）呈现位置 */}
       <div className="settings-row">
-        <span>阅读器选区动作组</span>
+        <span className="settings-row-label">
+          阅读器选区动作组
+          <SettingsInfo label="阅读器选区动作组">同一组按钮：默认固定在阅读器顶栏；开启后选中文字时以弹层浮现在选中的文字旁。</SettingsInfo>
+        </span>
         <label className="widget-toggle-main">
           <input
             type="checkbox"
@@ -1518,7 +1578,56 @@ function ReaderSection() {
           <span>悬浮于选中文字</span>
         </label>
       </div>
-      <p className="form-hint">默认固定在阅读器顶栏；开启后选中文字时动作组以弹层浮现在选中的文字旁（同一组按钮，功能不变）。</p>
+
+      <h4>摘录卡编辑器</h4>
+      {/* D95 §E：摘录卡编辑器下方的富文本工具栏开关（关＝整行不渲染，markdown 语法输入不受影响） */}
+      <div className="settings-row">
+        <span className="settings-row-label">
+          摘录卡编辑工具栏
+          <SettingsInfo label="摘录卡编辑工具栏">编辑时选中文字即可用工具条加粗/标题/列表/公式等；关闭后仍可用 markdown 语法输入与快捷键。</SettingsInfo>
+        </span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-extract-editor-toolbar"
+            checked={ext.extractEditorToolbar}
+            onChange={(e) => saveExtract({ ...ext, extractEditorToolbar: e.target.checked })}
+          />
+          <span>编辑时显示</span>
+        </label>
+      </div>
+      {/* D95 v1.4→§K.3：工具栏形态——dock（钉底/钉顶）/悬浮＝选区锚定弹层 */}
+      <div className="settings-row">
+        <span className="settings-row-label">
+          工具栏形态
+          <SettingsInfo label="工具栏形态">悬浮＝工具条弹层锚定当前选中的文字；关闭＝随文档流固定在顶部或底部。</SettingsInfo>
+        </span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-extract-editor-toolbar-float"
+            checked={ext.extractEditorToolbarFloat}
+            onChange={(e) => saveExtract({ ...ext, extractEditorToolbarFloat: e.target.checked })}
+          />
+          <span>悬浮于选中文字</span>
+        </label>
+      </div>
+      {/* §K.2：dock 态钉底/钉顶（悬浮态优先于本键；钉顶时工具条吸顶并让开吸顶头带） */}
+      <div className="settings-row">
+        <span className="settings-row-label">
+          工具栏固定位置（非悬浮时）
+          <SettingsInfo label="工具栏固定位置">开启＝钉顶（吸顶并让开吸顶头带）；关闭＝钉底。悬浮形态优先于本键。</SettingsInfo>
+        </span>
+        <label className="widget-toggle-main">
+          <input
+            type="checkbox"
+            data-testid="setting-extract-editor-toolbar-top"
+            checked={ext.extractEditorToolbarTop}
+            onChange={(e) => saveExtract({ ...ext, extractEditorToolbarTop: e.target.checked })}
+          />
+          <span>固定在顶部</span>
+        </label>
+      </div>
       {/* D95 §F.2：摘录卡字号——默认跟随阅读界面，可独立自定义字号/字体（行高恒跟随） */}
       <div className="settings-row">
         <span>摘录卡字号</span>
@@ -1545,10 +1654,9 @@ function ReaderSection() {
               onChange={(e) => saveExtract({ ...ext, extractFaceFontSize: Number(e.target.value) })}
             />
           </div>
-          <div className="settings-row">
-            <span>摘录卡字体</span>
+          <div className="form-field">
+            <label>摘录卡字体</label>
             <input
-              className="row-fill"
               data-testid="setting-extract-font-family"
               value={ext.extractFaceFontFamily}
               placeholder="留空使用应用默认字体"
@@ -1557,7 +1665,7 @@ function ReaderSection() {
           </div>
         </>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -1704,8 +1812,7 @@ function BackupSection() {
   }
 
   return (
-    <section className="settings-section" id="sec-backup">
-      <h3>数据备份与恢复</h3>
+    <SettingsSection id="sec-backup" title="数据备份与恢复">
       {info && (
         <p className="form-hint">
           当前数据：<span className="mono">{info.counts.items}</span> 本书 ·{" "}
@@ -1762,7 +1869,7 @@ function BackupSection() {
             <button className="btn btn-danger btn-sm" disabled={busy !== ""} onClick={doRestore}>
               {busy === "restore" ? "恢复中…" : "确认恢复"}
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmFile(null)}>取消</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmFile(null)} autoFocus>取消</button>
           </div>
         </div>
       )}
@@ -1808,11 +1915,11 @@ function BackupSection() {
           从备份文件恢复…
         </button>
       </div>
-    </section>
+    </SettingsSection>
   );
 }
 
-// ---------- M7 词典/下载（v32，D31）：来源模式 + 弹窗字段 + 一键下载 + 本地导入 ----------
+// ---------- 词典与查词（v32，D31；v48.70/D114 由「词典/下载」改名）----------
 function DictSection() {
   const [mode, setMode] = useState<"local" | "online" | "auto">("auto");
   const [fields, setFields] = useState<Record<string, boolean>>(DEFAULT_POPUP_FIELDS);
@@ -1913,21 +2020,25 @@ function DictSection() {
   }
 
   return (
-    <section className="settings-section" id="sec-dict">
-      <h3>词典/下载</h3>
-      <p className="form-hint">选中单词 → 查词弹窗 → 一键制卡（4 张：中→外/外→中/听音/原句挖空）。查词结果必显来源；换词典不影响已存卡。</p>
-      <div className="seg-tabs" role="radiogroup" aria-label="词典来源">
-        {(["local", "online", "auto"] as const).map((m) => (
-          <button key={m} className={mode === m ? "active" : ""} onClick={() => changeMode(m)}>
-            {m === "local" ? "本地词典" : m === "online" ? "在线词典" : "自动"}
-          </button>
-        ))}
+    <SettingsSection id="sec-dict" title="词典与查词">
+      <div className="settings-row">
+        <span className="settings-row-label">
+          词典来源
+          <SettingsInfo label="词典来源">本地＝不联网；在线＝Free Dictionary / Jisho；自动＝在线优先，失败/超时回落本地。</SettingsInfo>
+        </span>
+        <div className="seg-tabs" role="radiogroup" aria-label="词典来源">
+          {(["local", "online", "auto"] as const).map((m) => (
+            <button key={m} className={mode === m ? "active" : ""} onClick={() => changeMode(m)}>
+              {m === "local" ? "本地词典" : m === "online" ? "在线词典" : "自动"}
+            </button>
+          ))}
+        </div>
       </div>
-      <p className="form-hint">
-        {mode === "local" ? "只查已安装/导入的本地词典，不联网。" : mode === "online" ? "使用在线词典（Free Dictionary API / Jisho）。" : "优先在线，失败/超时/无结果时自动回落本地。"}
-      </p>
 
-      <h4>弹窗显示字段</h4>
+      <h4>
+        弹窗显示字段
+        <SettingsInfo label="弹窗显示字段">默认开拼写/音标/发音/释义；例句关闭不影响原句保存与挖空卡。</SettingsInfo>
+      </h4>
       <div className="settings-row check-row">
         {FIELD_LABELS.map((f) => (
           <label key={f.key} className="check-inline">
@@ -1936,18 +2047,18 @@ function DictSection() {
           </label>
         ))}
       </div>
-      <p className="form-hint">默认开拼写/音标/发音/释义；例句关闭不影响原句保存与挖空卡。</p>
 
       <h4>单词卡发音</h4>
-      <div className="seg-tabs" role="radiogroup" aria-label="发音来源">
-        <button className={audioSource === "tts" ? "active" : ""} onClick={() => changeAudioSource("tts")}>系统 TTS</button>
-        <button className={audioSource === "online" ? "active" : ""} onClick={() => changeAudioSource("online")}>在线音频</button>
+      <div className="settings-row">
+        <span className="settings-row-label">
+          发音来源
+          <SettingsInfo label="发音来源">TTS＝离线可用（Windows 需语言语音包）；在线＝真人音频，缺失时回落 TTS。</SettingsInfo>
+        </span>
+        <div className="seg-tabs" role="radiogroup" aria-label="发音来源">
+          <button className={audioSource === "tts" ? "active" : ""} onClick={() => changeAudioSource("tts")}>系统 TTS</button>
+          <button className={audioSource === "online" ? "active" : ""} onClick={() => changeAudioSource("online")}>在线音频</button>
+        </div>
       </div>
-      <p className="form-hint">
-        {audioSource === "tts"
-          ? "使用系统语音朗读单词（离线可用；Windows 需安装对应语言语音包）。"
-          : "优先播放词典在线真人音频（仅在线词典提供；缺失时回落系统 TTS）。"}
-      </p>
       <div className="settings-row">
         <label className="check-inline">
           <input type="checkbox" checked={autoSpeak} onChange={(e) => changeAutoSpeak(e.target.checked)} />
@@ -1955,7 +2066,10 @@ function DictSection() {
         </label>
       </div>
 
-      <h4>一键下载</h4>
+      <h4>
+        一键下载
+        <SettingsInfo label="一键下载">版权不明的第三方包（StarDict 朗道/牛津等）仅本地导入；Wiktionary 全量仅在线 API。</SettingsInfo>
+      </h4>
       {DICT_CATALOG.filter((c) => c.suitable === "download").map((c) => {
         const pg = progress[c.id];
         return (
@@ -1975,7 +2089,6 @@ function DictSection() {
           </div>
         );
       })}
-      <p className="form-hint">StarDict 朗道/牛津等第三方包版权不明，不提供下载，仅走本地导入；Wiktionary 全量数 GB，仅在线 API。</p>
       <div className="settings-row">
         <button className="btn btn-outline btn-sm" onClick={importLocal}>本地导入词典文件…</button>
       </div>
@@ -2008,7 +2121,7 @@ function DictSection() {
         </>
       )}
       {notice && <p className="form-hint">{notice}</p>}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -2077,14 +2190,19 @@ function ShortcutsSection() {
   ];
 
   return (
-    <section className="settings-section" id="sec-shortcuts">
-      <h3>快捷键</h3>      <p className="form-hint">
-        点击键位框后按下新的组合键（Esc 取消）；与其他动作冲突的键位不会被保存。
-        输入框内的 Ctrl+Z / Ctrl+A 等编辑键不受影响。
-      </p>
+    <SettingsSection
+      id="sec-shortcuts"
+      title="快捷键"
+      info={
+        <SettingsInfo label="快捷键">
+          点键位框后按新组合键（Esc 取消）；与其他动作冲突的键位不会被保存；输入框内的编辑键不受影响。
+        </SettingsInfo>
+      }
+    >
       <div className="settings-row settings-block-b">
         <button className="btn btn-outline btn-sm" onClick={resetAllBindings}>全部恢复默认</button>
       </div>
+      <h4>应用内快捷键</h4>
       {groups.map(([label, defs]) => (
         <div key={label} className="kb-group">
           <div className="kb-group-label mono">{label}</div>
@@ -2116,7 +2234,9 @@ function ShortcutsSection() {
           })}
         </div>
       ))}
-    </section>
+      {/* v48.70（D114）：「全局快捷键」并入本节；子块根元素保留 id sec-global（m8 直达定位） */}
+      <GlobalShortcutsBlock />
+    </SettingsSection>
   );
 }
 
@@ -2150,7 +2270,7 @@ function shortcutStateLabel(s?: { enabled: boolean; registered: boolean; error: 
   return { text: s.error ? "被占用" : "未注册", cls: " err" };
 }
 
-function GlobalShortcutsSection() {
+function GlobalShortcutsBlock() {
   const [cfg, setCfg] = useState<GlobalShortcutsConfig>(DEFAULT_GLOBAL_SHORTCUTS);
   const [status, setStatus] = useState<ShortcutStatus | null>(null);
   const [capturing, setCapturing] = useState<GlobalTarget | null>(null);
@@ -2274,16 +2394,15 @@ function GlobalShortcutsSection() {
   }
 
   return (
-    <section className="settings-section" id="sec-global">
-      <h3>全局快捷键</h3>
-      <p className="form-hint">
-        全局快捷键在软件没有焦点时也生效（软件需处于运行状态；可勾选「随系统启动」）。点击键位框后按下新组合键（Esc
-        取消）；与系统或其它软件冲突时下方会提示「被占用」，换一个组合即可。
-      </p>
+    <div id="sec-global">
+      <h4>
+        全局快捷键
+        <SettingsInfo label="全局快捷键">
+          软件无焦点时也生效（需运行中，可配合「随系统启动」）；状态「被占用」＝系统层冲突，换一个组合即可。
+        </SettingsInfo>
+      </h4>
 
       <div className="kb-group">
-        <div className="kb-group-label mono">全局</div>
-
         <div className="kb-row">
           <label className="kb-row-title gs-check">
             <input
@@ -2308,7 +2427,8 @@ function GlobalShortcutsSection() {
               void persist({ ...cfg, quickCapture: { ...cfg.quickCapture, hideOnBlur: e.target.checked } })
             }
           />
-          失焦时自动隐藏窗口（内容已即时保存；不勾选则需按 Esc 关闭）
+          失焦时自动隐藏窗口
+          <SettingsInfo label="失焦时自动隐藏">内容已即时保存；不勾选则需按 Esc 关闭。</SettingsInfo>
         </label>
 
         <div className="kb-row">
@@ -2345,7 +2465,7 @@ function GlobalShortcutsSection() {
           试一下快速记录
         </button>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -2359,37 +2479,17 @@ export default function SettingsPanel({
   onClose
 }: Props) {
   const [activeNav, setActiveNav] = useState("appearance");
-  // 必须与 .settings-content 里的 section id 一一对应：此前「皮肤」「强调色」
-  // 两节在 DOM 里存在却没有导航入口，滚轮能碰到、导航点不到。
-  const sections = [
-    { id: "appearance", label: "外观" },
-    { id: "skin", label: "皮肤" },
-    { id: "accent", label: "强调色" },
-    { id: "reader", label: "阅读" },
-    // 统计仪表盘锚点＝sec-widgets（仪表盘区块由 sec-widgets + sec-dashreset 两节组成；
-    // v45 修复：原 id "dashboard" 无对应元素，scrollIntoView 静默失效——点击不跳转）
-    { id: "widgets", label: "统计仪表盘" },
-    { id: "learningday", label: "学习日" },
-    { id: "siblingbury", label: "同源卡延后" },
-    { id: "ai", label: "AI 服务" },
-    { id: "dict", label: "词典/下载" },
-    { id: "memory", label: "用户记忆" },
-    { id: "fsrs", label: "FSRS 优化" },
-    { id: "backup", label: "备份与恢复" },
-    { id: "global", label: "全局快捷键" },
-    { id: "shortcuts", label: "快捷键" }
-  ];
   const layoutRef = useRef<HTMLDivElement>(null);
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
 
-  // 滚动时同步左导航高亮。此前 activeNav 只在点击时改变：14 项导航 + 单列长滚的
-  // 面板里，用户滚到「备份与恢复」，左侧仍亮着「外观」—— 导航会说谎。
-  // 只跟踪有导航项的 section（sec-dashreset 是「统计仪表盘」的第二节，无独立入口，
-  // 跳过它可让高亮停留在 widgets）。
+  // 滚动时同步左导航高亮（v45 引入的收敛修正全部继承：scroll + scrollend + 220ms 尾随测一次）。
+  // v48.70（D114）：13 个导航项与 13 个区块一一对应（SECTION_GROUPS 生成 navIds），
+  // 不再需要「跳过无导航节」的特判；子块 id（sec-learningday/sec-siblingbury/sec-global）
+  // 挂在 div 上、不带 .settings-section 类，天然不进测量集。
   useEffect(() => {
     const root = layoutRef.current;
     if (!root) return;
-    const navIds = new Set(sections.map((s) => `sec-${s.id}`));
+    const navIds = new Set(SECTION_GROUPS.flatMap((g) => g.items.map((s) => `sec-${s.id}`)));
     // 每次现取：仪表盘等区块在数据加载后才从骨架换成真内容，挂载时快照会漏节
     const listItems = () =>
       Array.from(root.querySelectorAll<HTMLElement>(".settings-section[id]")).filter((el) => navIds.has(el.id));
@@ -2428,14 +2528,24 @@ export default function SettingsPanel({
       root.removeEventListener("scroll", onScroll);
       root.removeEventListener("scrollend", onScroll);
     };
-    // sections 是本组件内的常量数组，逐次渲染新建，故以长度作依赖
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections.length]);
+    // SECTION_GROUPS 是模块级常量，挂载一次即可
+  }, []);
+
+  // 点击导航 → 平滑滚动 + 目标 h3 聚焦（tabindex=-1，屏幕阅读器可达，设计稿 §6.3）；
+  // prefers-reduced-motion 下改 auto（§11 降级纪律）。
+  const jumpTo = (id: string) => {
+    setActiveNav(id);
+    const el = document.getElementById(`sec-${id}`);
+    if (!el) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth" });
+    el.querySelector("h3")?.focus({ preventScroll: true });
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="modal-panel modal-panel-wide"
+        className="modal-panel modal-panel-wide settings-panel"
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -2454,24 +2564,27 @@ export default function SettingsPanel({
 
         <div className="settings-layout modal-scroll" ref={layoutRef}>
           <nav className="settings-nav" aria-label="设置分区">
-            {sections.map((s) => (
-              <button
-                key={s.id}
-                className={activeNav === s.id ? "active" : ""}
-                aria-current={activeNav === s.id ? "true" : undefined}
-                onClick={() => {
-                  setActiveNav(s.id);
-                  document.getElementById(`sec-${s.id}`)?.scrollIntoView({ behavior: "smooth" });
-                }}
-              >
-                {s.label}
-              </button>
+            {SECTION_GROUPS.map((g) => (
+              <Fragment key={g.label}>
+                {/* 组标题：非交互 div，不进 Tab 序、不进 .settings-nav button 查询集（§5.4） */}
+                <div className="settings-nav-group">{g.label}</div>
+                {g.items.map((s) => (
+                  <button
+                    key={s.id}
+                    className={activeNav === s.id ? "active" : ""}
+                    aria-current={activeNav === s.id ? "true" : undefined}
+                    onClick={() => jumpTo(s.id)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </Fragment>
             ))}
           </nav>
 
           <div className="settings-content">
-            <section className="settings-section" id="sec-appearance">
-              <h3>主题模式</h3>
+            <SettingsSection id="sec-appearance" title="主题与颜色">
+              <h4>主题模式</h4>
               <div className="seg-tabs">
                 <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
                   浅色
@@ -2480,10 +2593,7 @@ export default function SettingsPanel({
                   深色
                 </button>
               </div>
-            </section>
-
-            <section className="settings-section" id="sec-skin">
-              <h3>皮肤（背景特效）</h3>
+              <h4>皮肤</h4>
               <div className="skin-list">
                 {SKINS.map((s) => (
                   <button
@@ -2495,44 +2605,31 @@ export default function SettingsPanel({
                   </button>
                 ))}
               </div>
-            </section>
-
-            <section className="settings-section" id="sec-accent">
-              <h3>自定义主题颜色（强调色）</h3>
+              <h4>强调色</h4>
               <div className="settings-row accent-row">
                 <input type="color" value={accentColor || "#166a59"} onChange={(e) => onAccentChange(e.target.value)} />
                 <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
               </div>
-            </section>
+            </SettingsSection>
 
             <ReaderSection />
 
-            <DashboardSection />
-
-            <LearningDaySection />
-
-            <SiblingBurySection />
-            {/* v48.61（D104）：卡面信息密度（背面辅助字段三开关） */}
-            <CardFaceExtrasSection />
-            {/* v48.63（D107）：标签功能总开关 */}
-            <TagsEnabledSection />
-            {/* v48.22（D58 §6.8）：摘录复习与每日上限 */}
+            {/* 复习与调度（D114 §5.2）：摘录复习 → 每日上限 → 调度规则 → 卡面与标签 → FSRS */}
             <ExtractReviewSection />
             <LimitsSection />
-
-            <AISection />
-
-            <DictSection />
-
-            <MemorySection />
-
+            <ScheduleSection />
+            <CardTagsSection />
             <FSRSSection />
 
+            {/* 智能 */}
+            <AISection />
+            <DictSection />
+            <MemorySection />
+
+            {/* 数据与效率 */}
             <BackupSection />
-
-            <GlobalShortcutsSection />
-
             <ShortcutsSection />
+            <DashboardSection />
           </div>
         </div>
       </div>
