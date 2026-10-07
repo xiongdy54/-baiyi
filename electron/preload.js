@@ -226,6 +226,7 @@ contextBridge.exposeInMainWorld("aiAPI", {
   setConfig: (partial) => ipcRenderer.invoke("ai:setConfig", partial),
   test: () => ipcRenderer.invoke("ai:test"),
   listModels: () => ipcRenderer.invoke("ai:listModels"),
+  detectLocal: () => ipcRenderer.invoke("ai:detectLocal"),
   websearch: (query) => ipcRenderer.invoke("ai:websearch", query),
   chat: (requestId, messages, temperature) => ipcRenderer.send("ai:chat", requestId, messages, temperature),
   onStream: (callback) => {

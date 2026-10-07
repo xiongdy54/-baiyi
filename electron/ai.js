@@ -7,10 +7,24 @@ const https = require("https");
 const http = require("http");
 const { safeStorage } = require("electron");
 
+// 供应商注册表（v48.68 / D112，设计 docs/design/AI-PROVIDER-REGISTRY-D112.md）：
+// 单一来源驱动设置页 UI（经 ai:getConfig 下发元数据，无 Key）。
+// 全部走 OpenAI 兼容 /chat/completions——Claude / Gemini 用其官方兼容层；端点于 2026-10-07 联网核实。
 const PRESETS = {
+  // 硅基流动置顶（v48.69 / D113 用户指令）：keyUrl 为用户个人邀请链接（「推荐官」计划）
+  siliconflow: {
+    id: "siliconflow",
+    name: "硅基流动 SiliconFlow",
+    group: "official",
+    baseUrl: "https://api.siliconflow.cn/v1",
+    model: "Qwen/Qwen2.5-7B-Instruct",
+    keyUrl: "https://cloud.siliconflow.cn/i/AL4iBJ0e",
+    hint: "OpenAI 兼容聚合 · DeepSeek / Qwen / GLM 全系 · 经邀请链接注册后在控制台创建 API Key"
+  },
   goat: {
     id: "goat",
     name: "Command Code GOAT Plan",
+    group: "official",
     baseUrl: "https://api.commandcode.ai/provider/v1",
     model: "z-ai/glm-5.3-flash",
     keyUrl: "https://commandcode.ai/xiongdy54/settings/keys",
@@ -19,14 +33,106 @@ const PRESETS = {
   zai: {
     id: "zai",
     name: "智谱官方 API（bigmodel.cn）",
+    group: "official",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     model: "glm-4.7-flash",
     keyUrl: "https://bigmodel.cn/usercenter/proj-mgmt/apikeys",
     hint: "OpenAI 兼容 · 默认免费模型 glm-4.7-flash · 可拉取列表自选 glm-5.3 等"
   },
+  deepseek: {
+    id: "deepseek",
+    name: "DeepSeek 官方",
+    group: "official",
+    baseUrl: "https://api.deepseek.com/v1",
+    model: "deepseek-chat",
+    keyUrl: "https://platform.deepseek.com/api_keys",
+    hint: "OpenAI 兼容 · deepseek-chat（对话）/ deepseek-reasoner（推理）"
+  },
+  mimo: {
+    id: "mimo",
+    name: "小米 MiMo 开放平台",
+    group: "official",
+    baseUrl: "https://api.xiaomimimo.com/v1",
+    model: "MiMo-V2-Flash",
+    keyUrl: "https://mimo.mi.com",
+    hint: "OpenAI 兼容 · MiMo-V2 系列，建议拉取模型列表后自选"
+  },
+  openai: {
+    id: "openai",
+    name: "OpenAI 官方（GPT）",
+    group: "official",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    keyUrl: "https://platform.openai.com/api-keys",
+    hint: "原生 OpenAI 协议 · 默认 gpt-4o-mini，可拉取列表自选"
+  },
+  ark: {
+    id: "ark",
+    name: "火山方舟（豆包）",
+    group: "official",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+    model: "",
+    keyUrl: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey",
+    hint: "OpenAI 兼容 · 模型名填推理接入点 ID（ep-…）或开通的模型名"
+  },
+  grok: {
+    id: "grok",
+    name: "xAI Grok",
+    group: "official",
+    baseUrl: "https://api.x.ai/v1",
+    model: "grok-3",
+    keyUrl: "https://console.x.ai",
+    hint: "OpenAI 兼容 · 可拉取模型列表自选 grok 系列"
+  },
+  claude: {
+    id: "claude",
+    name: "Anthropic Claude",
+    group: "official",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-sonnet-4-6",
+    keyUrl: "https://console.anthropic.com/settings/keys",
+    hint: "走官方 OpenAI 兼容层 · 温度上限 1 · 不提供模型列表，请手输模型名（如 claude-sonnet-4-6）"
+  },
+  gemini: {
+    id: "gemini",
+    name: "Google Gemini",
+    group: "official",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    model: "gemini-2.5-flash",
+    keyUrl: "https://aistudio.google.com/apikey",
+    hint: "走官方 OpenAI 兼容层 · 可拉取列表或手输 gemini 系列"
+  },
+  kimi: {
+    id: "kimi",
+    name: "Kimi（月之暗面）",
+    group: "official",
+    baseUrl: "https://api.moonshot.cn/v1",
+    model: "kimi-k2-0905-preview",
+    keyUrl: "https://platform.kimi.com",
+    hint: "OpenAI 兼容 · kimi-k2 系列，可拉取列表自选"
+  },
+  qwen: {
+    id: "qwen",
+    name: "阿里云百炼（Qwen）",
+    group: "official",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-plus",
+    keyUrl: "https://bailian.console.aliyun.com/?apiKey=1",
+    hint: "OpenAI 兼容（compatible-mode）· qwen 系列，可拉取列表自选"
+  },
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter（多模型聚合）",
+    group: "agg",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "",
+    keyUrl: "https://openrouter.ai/keys",
+    hint: "一个 Key 用全部主流模型 · 请拉取模型列表后自选"
+  },
   custom: {
     id: "custom",
     name: "通用 API Key（OpenAI 兼容）",
+    group: "custom",
     baseUrl: "",
     model: "",
     keyUrl: "",
@@ -35,12 +141,23 @@ const PRESETS = {
   local: {
     id: "local",
     name: "本地模型（Ollama / LM Studio）",
+    group: "local",
     baseUrl: "http://localhost:11434/v1",
     model: "qwen3:8b",
     keyUrl: "",
-    hint: "零排队 · 零成本 · 8GB 显存推荐 qwen3:8b；LM Studio 端口 1234"
+    hint: "零排队 · 零成本 · 8GB 显存推荐 qwen3:8b；LM Studio 端口 1234；无需 Key"
   }
 };
+
+// 渲染层下拉的分组顺序（group 值 → 展示名；映射放渲染层，这里只带 group 标签）
+
+// 本地运行时探测顺序（v48.68 / D112）：Ollama 优先（其 /v1/models 失败再试原生 /api/tags，旧版兼容），
+// LM Studio 其次。每探针独立短超时，任何失败都落到下一候选；全不命中返回 detected:false（不抛错）。
+const LOCAL_PROBES = [
+  { runtime: "ollama", runtimeName: "Ollama", baseUrl: "http://localhost:11434/v1" },
+  { runtime: "lmstudio", runtimeName: "LM Studio", baseUrl: "http://localhost:1234/v1" }
+];
+const DETECT_TIMEOUT_MS = 4000;
 
 const LEGACY_MODELS = new Set(["glm-5.3-flash", "glm-4.6"]);
 
@@ -76,6 +193,24 @@ function writeConfig(cfg) {
   fs.writeFileSync(aiConfigPath(), JSON.stringify(cfg, null, 2), "utf-8");
 }
 
+// 注册表元数据（v48.68 / D112）：随 ai:getConfig 下发渲染层驱动 UI——只含公开字段，永不含 Key
+const PRESET_META = Object.values(PRESETS).map(({ id, name, baseUrl, model, keyUrl, hint, group }) => ({
+  id,
+  name,
+  baseUrl,
+  model,
+  keyUrl,
+  hint,
+  group
+}));
+
+/** OpenAI `{data:[{id}]}` / Ollama `{models:[{name}]}` / 裸字符串数组 → 模型 id 列表 */
+function modelIdsFromJson(json) {
+  if (!json) return [];
+  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json.models) ? json.models : [];
+  return raw.map((m) => (typeof m === "string" ? m : m.id || m.name || m.model)).filter(Boolean);
+}
+
 function getAIConfig() {
   const cfg = readConfig();
   let apiKey = "";
@@ -96,7 +231,8 @@ function getAIConfig() {
     keyUrl: preset.keyUrl || "",
     hint: preset.hint || "",
     presetName: preset.name,
-    reasoningEffort: cfg.reasoningEffort || "low"
+    reasoningEffort: cfg.reasoningEffort || "low",
+    presets: PRESET_META
   };
 }
 
@@ -388,7 +524,7 @@ function chatStreamOnce({ messages, temperature, abortSignal }, send) {
   });
 }
 
-function requestJSON(url, headers) {
+function requestJSON(url, headers, timeoutMs) {
   const u = new URL(url);
   const isHttps = u.protocol === "https:";
   return new Promise((resolve, reject) => {
@@ -413,12 +549,26 @@ function requestJSON(url, headers) {
       }
     );
     req.on("error", reject);
-    // 拉取模型列表/在线词典等 JSON 请求：30 秒无数据即断（防黑洞连接挂死调用方）
-    req.setTimeout(30000, () => {
+    // 拉取模型列表/在线词典等 JSON 请求：30 秒无数据即断（防黑洞连接挂死调用方）；
+    // 本地运行时探测用更短的 4 秒探针超时（v48.68 / D112）
+    req.setTimeout(timeoutMs || 30000, () => {
       req.destroy(new Error("请求超时：30 秒无响应，已自动中断"));
     });
     req.end();
   });
+}
+
+/** 本地预设的模型列表降级源：Ollama 原生 /api/tags（同源，/v1/models 不可用或为空时兜底） */
+async function ollamaTagsFallback(baseUrl) {
+  try {
+    const origin = new URL(baseUrl).origin;
+    const { status, json } = await requestJSON(origin + "/api/tags", {}, DETECT_TIMEOUT_MS);
+    if (status !== 200 || !json) return null;
+    const ids = modelIdsFromJson(json);
+    return ids.length > 0 ? ids.sort((a, b) => a.localeCompare(b)) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function listModels() {
@@ -432,19 +582,58 @@ async function listModels() {
   const url = cfg.baseUrl.replace(/\/$/, "") + "/models";
   const headers = {};
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
-  const { status, json } = await requestJSON(url, headers);
+  let status = 0;
+  let json = null;
+  let netFailed = false;
+  try {
+    ({ status, json } = await requestJSON(url, headers));
+  } catch {
+    netFailed = true;
+  }
+  // 本地预设：/v1/models 连不上、非 200 或返回空时，降级 Ollama 原生 /api/tags（v48.68 / D112）
+  if (cfg.preset === "local" && (netFailed || status !== 200 || !json)) {
+    const tags = await ollamaTagsFallback(cfg.baseUrl);
+    if (tags) return tags;
+    throw new Error("无法连接本地模型服务。请确认 Ollama / LM Studio 已启动。");
+  }
+  if (netFailed) throw new Error("网络错误：无法访问模型列表接口");
   if (status !== 200 || !json) {
-    if (cfg.preset === "local") {
-      throw new Error("无法连接本地模型服务。请确认 Ollama / LM Studio 已启动。");
-    }
     throw new Error(`拉取模型列表失败（HTTP ${status}）`);
   }
-  // OpenAI 格式 { data: [{id}] }；兼容 { models: [{name/id}] }
-  const raw = Array.isArray(json.data) ? json.data : Array.isArray(json.models) ? json.models : [];
-  const ids = raw
-    .map((m) => (typeof m === "string" ? m : m.id || m.name || m.model))
-    .filter(Boolean);
+  const ids = modelIdsFromJson(json);
+  if (cfg.preset === "local" && ids.length === 0) {
+    const tags = await ollamaTagsFallback(cfg.baseUrl);
+    if (tags) return tags;
+  }
   return ids.sort((a, b) => a.localeCompare(b));
+}
+
+/** 本地运行时探测（v48.68 / D112）：Ollama 11434 → LM Studio 1234，探针 4s 超时；全不命中不抛错。
+ *  probes 参数仅供测试注入自定义端点，生产调用不传（用 LOCAL_PROBES）。 */
+async function detectLocalRuntime(probes) {
+  const list = Array.isArray(probes) && probes.length > 0 ? probes : LOCAL_PROBES;
+  for (const probe of list) {
+    try {
+      const { status, json } = await requestJSON(probe.baseUrl + "/models", {}, DETECT_TIMEOUT_MS);
+      if (status === 200 && json) {
+        const ids = modelIdsFromJson(json);
+        return { detected: true, runtime: probe.runtime, runtimeName: probe.runtimeName, baseUrl: probe.baseUrl, models: ids.sort((a, b) => a.localeCompare(b)) };
+      }
+      if (probe.runtime === "ollama") {
+        const tags = await ollamaTagsFallback(probe.baseUrl);
+        if (tags) return { detected: true, runtime: probe.runtime, runtimeName: probe.runtimeName, baseUrl: probe.baseUrl, models: tags };
+      }
+    } catch {
+      if (probe.runtime === "ollama") {
+        const tags = await ollamaTagsFallback(probe.baseUrl);
+        if (tags) return { detected: true, runtime: probe.runtime, runtimeName: probe.runtimeName, baseUrl: probe.baseUrl, models: tags };
+      }
+    }
+  }
+  return {
+    detected: false,
+    message: "未检测到本地模型服务。请确认：① Ollama 已安装并启动（默认端口 11434），或 LM Studio 已加载模型并开启本地服务（默认端口 1234）；② 服务地址可访问"
+  };
 }
 
 async function testConnection() {
@@ -461,4 +650,4 @@ async function testConnection() {
   return { ok: acc.length > 0, message: acc.trim().slice(0, 50) || "无响应" };
 }
 
-module.exports = { getAIConfig, setAIConfig, chatStream, testConnection, listModels, PRESETS };
+module.exports = { getAIConfig, setAIConfig, chatStream, testConnection, listModels, detectLocalRuntime, PRESETS };

@@ -107,7 +107,7 @@ const {
   listPromptTemplates,
   findSimilarCards
 } = require("./db");
-const { getAIConfig, setAIConfig, chatStream, testConnection, listModels } = require("./ai");
+const { getAIConfig, setAIConfig, chatStream, testConnection, listModels, detectLocalRuntime } = require("./ai");
 // v48.22（D58 / E1）：AI 重排的本地裁决与指纹（与 db 侧同一份实现）
 const { rankWithAI, rerankFingerprint } = require("./aiNextExtract");
 const dbModule = require("./db");
@@ -783,6 +783,8 @@ ipcMain.handle("ai:getConfig", () => {
 ipcMain.handle("ai:setConfig", (_e, partial) => setAIConfig(partial || {}));
 ipcMain.handle("ai:test", () => testConnection());
 ipcMain.handle("ai:listModels", () => listModels());
+// 本地运行时探测（v48.68 / D112）：Ollama/LM Studio 端口探针，永不抛错（未命中返回 detected:false）
+ipcMain.handle("ai:detectLocal", () => detectLocalRuntime());
 
 // 联网补充事件背景（多引擎回退：Bing → DuckDuckGo → 百度；走 Chromium 网络栈自动继承系统代理）
 const SEARCH_ENGINES = [

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SKINS } from "../skins";
-import { aiGateway, type AIConfig } from "../lib/ai";
+import { aiGateway, aiConfigUsable, type AIConfig, type AiPresetMeta, type LocalDetectResult } from "../lib/ai";
 import { settingsStore } from "../lib/settings";
 import {
   DEFAULT_ANNOTATE_MODE,
@@ -60,12 +60,16 @@ interface Props {
   onClose: () => void;
 }
 
-const PRESET_OPTIONS = [
-  { id: "goat", label: "Command Code GOAT Plan", hint: "api.commandcode.ai/provider/v1 · 默认模型 z-ai/glm-5.3-flash" },
-  { id: "zai", label: "智谱官方 API（bigmodel.cn）", hint: "open.bigmodel.cn · 默认免费模型 glm-4.7-flash" },
-  { id: "local", label: "本地模型（Ollama / LM Studio）", hint: "零排队零成本 · 8GB 显存推荐 qwen3:8b" },
-  { id: "custom", label: "通用 API Key（OpenAI 兼容）", hint: "自填 Base URL 与模型名" }
+// 供应商注册表经 ai:getConfig 下发（v48.68 / D112，主进程 PRESETS 单一来源）；
+// 此静态表仅为「主进程未下发 presets 字段」时的兜底（异常降级 / 桩测试），常规路径不使用
+const FALLBACK_PRESETS: AiPresetMeta[] = [
+  { id: "goat", name: "Command Code GOAT Plan", group: "official", baseUrl: "", model: "", keyUrl: "", hint: "api.commandcode.ai/provider/v1 · 默认模型 z-ai/glm-5.3-flash" },
+  { id: "zai", name: "智谱官方 API（bigmodel.cn）", group: "official", baseUrl: "", model: "", keyUrl: "", hint: "open.bigmodel.cn · 默认免费模型 glm-4.7-flash" },
+  { id: "local", name: "本地模型（Ollama / LM Studio）", group: "local", baseUrl: "", model: "", keyUrl: "", hint: "零排队零成本 · 8GB 显存推荐 qwen3:8b" },
+  { id: "custom", name: "通用 API Key（OpenAI 兼容）", group: "custom", baseUrl: "", model: "", keyUrl: "", hint: "自填 Base URL 与模型名" }
 ];
+const GROUP_ORDER = ["official", "agg", "local", "custom"];
+const GROUP_LABELS: Record<string, string> = { official: "官方云服务", agg: "聚合平台", local: "本地运行时", custom: "通用" };
 
 function SkeletonBlock({ h = 40 }: { h?: number }) {
   return <div className="skeleton" style={{ height: h }} />;
@@ -175,8 +179,9 @@ function AISection() {
   const [modelFilter, setModelFilter] = useState("");
   const [modelInput, setModelInput] = useState("");
   const [modelsOpen, setModelsOpen] = useState(false);
-  const [busy, setBusy] = useState<"" | "save" | "test" | "models">("");
+  const [busy, setBusy] = useState<"" | "save" | "test" | "models" | "detect">("");
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  const [localDetect, setLocalDetect] = useState<LocalDetectResult | null>(null);
   const modelsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -204,6 +209,7 @@ function AISection() {
     }
     // 切换预设：端点/模型重置；Key 按服务商独立留存，切回时自动恢复
     if (prevPreset && typeof partial.preset === "string" && partial.preset !== prevPreset) {
+      setLocalDetect(null);
       setNotice(
         next?.hasKey
           ? { ok: true, text: "已切换服务，并自动恢复了该服务之前保存的 API Key。" }
@@ -245,7 +251,8 @@ function AISection() {
     setBusy("test");
     try {
       const saved = await withTimeout(doSave(), 15000, "保存配置");
-      if (!saved || (saved.preset !== "local" && !saved.hasKey)) {
+      // aiConfigUsable：本地预设免 Key（v48.68 / D112，与主进程 needKey 纪律对齐）
+      if (!saved || !aiConfigUsable(saved)) {
         setNotice({ ok: false, text: "请先粘贴 API Key，点击「保存配置」后再测试" });
         return;
       }
@@ -278,8 +285,41 @@ function AISection() {
     }
   }
 
+  // 本地运行时探测（v48.68 / D112）：主进程扫 Ollama/LM Studio 默认端口，
+  // 命中即采用其地址并把模型列表填入下拉；未命中给可读指引，绝不挂死
+  async function handleDetectLocal() {
+    setNotice(null);
+    setModelsOpen(false);
+    setBusy("detect");
+    try {
+      const r = await withTimeout(aiGateway.detectLocal(), 20000, "检测本地服务");
+      if (!r) {
+        setNotice({ ok: false, text: "当前应用不支持本地探测，请重启应用后再试" });
+        return;
+      }
+      setLocalDetect(r);
+      if (r.detected) {
+        if (r.baseUrl && cfg && r.baseUrl !== cfg.baseUrl) await save({ baseUrl: r.baseUrl });
+        setModels(r.models || []);
+        setModelFilter("");
+        setNotice({
+          ok: true,
+          text: `检测到 ${r.runtimeName || "本地服务"}（${r.baseUrl}）· ${(r.models || []).length} 个模型已填入「模型名」下拉`
+        });
+      } else {
+        setNotice({ ok: false, text: r.message || "未检测到本地模型服务" });
+      }
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy("");
+    }
+  }
+
   if (!cfg) return null;
 
+  const presets: AiPresetMeta[] = cfg.presets && cfg.presets.length > 0 ? cfg.presets : FALLBACK_PRESETS;
+  const presetMeta = presets.find((p) => p.id === cfg.preset);
   const filtered = modelFilter
     ? models.filter((m) => m.toLowerCase().includes(modelFilter.toLowerCase()))
     : models;
@@ -288,43 +328,56 @@ function AISection() {
     <section className="settings-section" id="sec-ai">
       <h3>AI 服务</h3>
 
-      <div className="skin-list">
-        {PRESET_OPTIONS.map((p) => (
-          <button
-            key={p.id}
-            className={cfg.preset === p.id ? "active" : ""}
-            onClick={() => save({ preset: p.id })}
-          >
-            <span className="ai-preset-name">{p.label}</span>
-            <span className="ai-preset-hint">{p.hint}</span>
-          </button>
-        ))}
-      </div>
+      {GROUP_ORDER.map((g) => {
+        const items = presets.filter((p) => (p.group || "official") === g);
+        if (items.length === 0) return null;
+        return (
+          <div key={g} className="ai-preset-group">
+            <p className="ai-preset-group-label">{GROUP_LABELS[g] || g}</p>
+            <div className="skin-list">
+              {items.map((p) => (
+                <button
+                  key={p.id}
+                  className={cfg.preset === p.id ? "active" : ""}
+                  onClick={() => save({ preset: p.id })}
+                >
+                  <span className="ai-preset-name">{p.name}</span>
+                  <span className="ai-preset-hint">{p.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })}
 
-      {cfg.preset === "goat" && (
+      {presetMeta?.keyUrl && (
         <p className="form-hint">
           在{" "}
-          <a href="https://commandcode.ai/xiongdy54/settings/keys" target="_blank" rel="noreferrer">
-            commandcode.ai → Studio → API Keys
+          <a href={presetMeta.keyUrl} target="_blank" rel="noreferrer">
+            {presetMeta.name}
           </a>{" "}
-          创建 Key。
-        </p>
-      )}
-
-      {cfg.preset === "zai" && (
-        <p className="form-hint">
-          在{" "}
-          <a href="https://bigmodel.cn/apikey/platform" target="_blank" rel="noreferrer">
-            智谱开放平台
-          </a>{" "}
-          创建 Key。<span className="mono">glm-4.7-flash</span> 免费。
+          创建 Key。{presetMeta.hint}
         </p>
       )}
 
       {cfg.preset === "local" && (
-        <p className="form-hint">
-          需本机运行 Ollama（默认端口 11434）或 LM Studio（端口 1234）。
-        </p>
+        <>
+          <p className="form-hint">
+            需本机运行 Ollama（默认端口 11434）或 LM Studio（端口 1234），无需 Key。
+          </p>
+          <div className="settings-row settings-row-wrap">
+            <button className="btn btn-outline btn-sm" disabled={busy !== ""} onClick={handleDetectLocal}>
+              {busy === "detect" ? "检测中…" : "检测本地服务"}
+            </button>
+            {localDetect && (
+              <span className={localDetect.detected ? "ai-test-ok" : "ai-test-fail"}>
+                {localDetect.detected
+                  ? `已检测到 ${localDetect.runtimeName || "本地服务"}`
+                  : (localDetect.message || "未检测到本地模型服务")}
+              </span>
+            )}
+          </div>
+        </>
       )}
 
       <div className="ai-fields">
@@ -361,7 +414,7 @@ function AISection() {
             <input
               className="mono"
               value={modelInput}
-              placeholder={cfg.preset === "goat" ? "z-ai/glm-5.3-flash" : "模型名（可手输）"}
+              placeholder={presetMeta?.model || "模型名（可手输）"}
               onChange={(e) => {
                 const v = e.target.value;
                 setModelInput(v);
