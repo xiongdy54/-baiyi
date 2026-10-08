@@ -380,7 +380,9 @@ export async function requestOcclusionResult(
   image: { dataUrl: string },
   context: { title?: string; section?: string; focus?: string; contextText?: string },
   onProgress?: (chars: number) => void,
-  onThinking?: (thinkChars: number) => void
+  onThinking?: (thinkChars: number) => void,
+  /** v48.74（D118 §3④）：注册一次性取消闭包（ai:abort） */
+  onCancelRegister?: (cancel: () => void) => void
 ): Promise<{ result: GenResult; templateId: string }> {
   const tpl = await window.promptsAPI?.get("card-occlusion");
   if (!tpl) throw new Error("提示词模板缺失（card-occlusion）");
@@ -410,7 +412,8 @@ export async function requestOcclusionResult(
         }
       : undefined,
     0.2,
-    onThinking
+    onThinking,
+    onCancelRegister
   );
   return { result: extractJson(raw || acc), templateId: tpl.id };
 }
@@ -421,7 +424,9 @@ export const cardGenerator: {
     context: { title?: string; section?: string; sourceRef?: { title?: string } | null; existingCards?: string[]; existingCardsLimit?: number; userProfile?: string; webContext?: string; focus?: string; /** v46（UM-2）：本书已有卡 UDC 域分布的检索键 */ documentId?: string | null },
     mode: CardGenMode,
     onProgress?: (chars: number) => void,
-    onThinking?: (thinkChars: number) => void
+    onThinking?: (thinkChars: number) => void,
+    /** v48.74（D118 §3④）：注册一次性取消闭包（ai:abort） */
+    onCancelRegister?: (cancel: () => void) => void
   ): Promise<{ batchId: string; result: GenResult; templateId: string | null }>;
   generateOcclusionCards(
     image: { dataUrl: string; assetPath: string },
@@ -436,7 +441,9 @@ export const cardGenerator: {
       contextText?: string;
     },
     onProgress?: (chars: number) => void,
-    onThinking?: (thinkChars: number) => void
+    onThinking?: (thinkChars: number) => void,
+    /** v48.74（D118 §3④）：注册一次性取消闭包（ai:abort） */
+    onCancelRegister?: (cancel: () => void) => void
   ): Promise<{ batchId: string; result: GenResult; templateId: string | null }>;
   explain(
     sourceText: string,
@@ -445,10 +452,12 @@ export const cardGenerator: {
     onDelta?: (acc: string) => void,
     onThinking?: (thinkChars: number) => void,
     /** v48.51（D91）：mode=ste 走 reader-explain-ste（简明解读）；缺省 general 走既有 reader-explain（逐字不动） */
-    opts?: { mode?: "general" | "ste"; matLang?: string }
+    opts?: { mode?: "general" | "ste"; matLang?: string },
+    /** v48.74（D118 §3④）：注册一次性取消闭包（ai:abort） */
+    onCancelRegister?: (cancel: () => void) => void
   ): Promise<string>;
 } = {
-  async generateCards(sourceText, context, mode, onProgress, onThinking) {
+  async generateCards(sourceText, context, mode, onProgress, onThinking, onCancelRegister) {
     const resolved = mode === "auto" ? detectMode(sourceText) : mode;
     const tpl = await window.promptsAPI?.get(resolved);
     if (!tpl) throw new Error("提示词模板缺失");
@@ -493,7 +502,8 @@ export const cardGenerator: {
           }
         : undefined,
       0.4,
-      onThinking
+      onThinking,
+      onCancelRegister
     );
     const result = extractJson(raw || acc);
     // v30（D27）：per-blank 多空卡在入确认面板前拆成每空一张（独立 FSRS 调度）
@@ -528,8 +538,8 @@ export const cardGenerator: {
 
   // M1.1（v15，D16）：图片挖空生成链路——图片已入库，把 dataURL 交 GLM 多模态识别遮挡区域，
   // 返回 regions（归一化百分比坐标）+ 每区域一张 imageOcclusion 草稿（rects 共享同一 occlusionJson）
-  async generateOcclusionCards(image, context, onProgress, onThinking) {
-    const { result, templateId: tplId } = await requestOcclusionResult(image, context, onProgress, onThinking);
+  async generateOcclusionCards(image, context, onProgress, onThinking, onCancelRegister) {
+    const { result, templateId: tplId } = await requestOcclusionResult(image, context, onProgress, onThinking, onCancelRegister);
     const preset = context.presetRegion;
     if (preset) {
       // v29 D26 选区即画布：模型 cards[] 逐张处理——
@@ -691,7 +701,7 @@ export const cardGenerator: {
     return { batchId: batch?.id || "", result, templateId: tplId };
   },
 
-  async explain(sourceText, context, question, onDelta, onThinking, opts) {
+  async explain(sourceText, context, question, onDelta, onThinking, opts, onCancelRegister) {
     // v48.51（D91 §6.3）：mode=ste → reader-explain-ste 模板 + 双 pack 注入（分析 pack 按材料语言回退链
     // 解析，输出 pack 恒 zh-Hans=界面语言）；general（缺省）→ 既有 reader-explain 路径逐字不动。
     if (opts?.mode === "ste") {
@@ -707,7 +717,10 @@ export const cardGenerator: {
         `【选中文本】\n${sourceText}`,
         context ? `【上下文】${context}` : "",
         `【材料语言】${matLang || "未标注——请自检材料语言并在 <!--ste:matLang=…--> 标记中报告"}`,
-        `【解读语言】${STE_OUTPUT_LANG}（简体中文）`
+        `【解读语言】${STE_OUTPUT_LANG}（简体中文）`,
+        // v48.74（D118 追加）：追问必须送达——此前 ste 分支丢掉 question，四个追问按钮与
+        // 初次解读发出的请求逐字相同 ⇒ 回复几乎一样（模板侧另有「追问直答」条款配合）
+        question ? `【用户追问】${question}` : ""
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -718,7 +731,8 @@ export const cardGenerator: {
         ],
         onDelta,
         0.7,
-        onThinking
+        onThinking,
+        onCancelRegister
       );
     }
     const tpl = await window.promptsAPI?.get("reader-explain");
@@ -731,7 +745,8 @@ export const cardGenerator: {
       ],
       onDelta,
       0.7,
-      onThinking
+      onThinking,
+      onCancelRegister
     );
   }
 };

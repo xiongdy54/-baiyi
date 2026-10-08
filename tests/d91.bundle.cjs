@@ -143,7 +143,7 @@ function routeExplainMode(text) {
 }
 function parseSteMarkers(answer) {
   const out = {};
-  const re = /<!--ste:([a-zA-Z]+)=([^>-]*)-->/g;
+  const re = /<!--ste:([a-zA-Z]+)=([^>]*)-->/g;
   let m;
   while (m = re.exec(String(answer ?? ""))) {
     const key = m[1];
@@ -155,7 +155,7 @@ function parseSteMarkers(answer) {
   return out;
 }
 function stripSteMarkers(answer) {
-  return String(answer ?? "").replace(/<!--ste:[a-zA-Z]+=[^>-]*-->/g, "");
+  return String(answer ?? "").replace(/<!--ste:[a-zA-Z]+=[^>]*-->/g, "");
 }
 var EXPLAIN_SAME_TEXT_RATIO = 0.6;
 var EXPLAIN_SAME_TEXT_MIN_CHARS = 12;

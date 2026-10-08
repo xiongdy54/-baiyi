@@ -218,6 +218,27 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   const [explainMode, setExplainMode] = useState<ExplainModePref>("auto");
   const explainModeRef = useRef<ExplainModePref>("auto");
   explainModeRef.current = explainMode;
+  // v48.74（D118 §3③/④）：AI 运行归属守卫 + 取消——
+  // aiRunSeq：轮次序号，只有最新一轮的流回调/终态可写面板（主进程 thinkAcc 单调，「已思考」起伏
+  // 只能来自僵尸流与新流串台覆盖同一 panel；ai:chat 此前无 abort 通道，旧流在用户放弃后仍存活）。
+  // aiCancelRef：当前轮的一次性取消闭包（ai:abort）；新轮开始先取消旧流；stopAIRun 供「停止」按钮。
+  const aiRunSeq = useRef(0);
+  const aiCancelRef = useRef<(() => void) | null>(null);
+  function beginAIRun(): number {
+    aiRunSeq.current += 1;
+    aiCancelRef.current?.();
+    aiCancelRef.current = null;
+    return aiRunSeq.current;
+  }
+  function registerAICancel(seq: number) {
+    return (cancel: () => void) => {
+      if (seq === aiRunSeq.current) aiCancelRef.current = cancel;
+    };
+  }
+  function stopAIRun() {
+    aiCancelRef.current?.();
+    aiCancelRef.current = null;
+  }
   const [dictPanel, setDictPanel] = useState<DictPanelState | null>(null);
   const [dictReading, setDictReading] = useState<ReadingContext | null>(null);
   const [dictFields, setDictFields] = useState<Record<string, boolean>>({});
@@ -640,6 +661,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const route = detectMaterialType(text);
     const resolved: CardGenMode = mode === "auto" ? route.scope : mode;
     const shownRoute = mode === "auto" ? route : MATERIAL_ROUTES[resolved === "card-formula" ? "formula" : resolved === "card-seq" ? "sequence" : resolved === "card-enum" ? "enumeration" : resolved === "card-literature" ? "literature" : "concept"];
+    // v48.74（D118 §3③）：新一轮开始——取消旧流；此后仅本轮 seq 的回调可写面板
+    const seq = beginAIRun();
     setAiPanel({
       kind: "cards",
       text,
@@ -658,9 +681,17 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         text,
         { title: A().labels.sourceTitle, section: A().labels.section, webContext, documentId: A().sourceContext().documentId ?? null, focus: opts?.focus },
         resolved,
-        (chars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, progress: chars } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "cards" ? { ...p, thinking: thinkChars } : p))
+        (chars) => {
+          if (seq !== aiRunSeq.current) return;
+          setAiPanel((p) => (p && p.kind === "cards" ? { ...p, progress: chars } : p));
+        },
+        (thinkChars) => {
+          if (seq !== aiRunSeq.current) return;
+          setAiPanel((p) => (p && p.kind === "cards" ? { ...p, thinking: thinkChars } : p));
+        },
+        registerAICancel(seq)
       );
+      if (seq !== aiRunSeq.current) return;
       setAiPanel({
         kind: "cards",
         text,
@@ -685,6 +716,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         explorations: []
       });
     } catch (err) {
+      if (seq !== aiRunSeq.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel({
         kind: "cards",
@@ -716,6 +748,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     occlusionSourceRef.current = "library";
     const picked = await window.assetsAPI?.pickOcclusionImage(ownerKey);
     if (!picked) return;
+    // v48.74（D118 §3③）：新一轮开始——取消旧流；此后仅本轮 seq 的回调可写面板
+    const seq = beginAIRun();
     setAiPanel({
       kind: "occlusion",
       text: `[图片] ${picked.filename}`,
@@ -729,9 +763,17 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       const { batchId, result } = await cardGenerator.generateOcclusionCards(
         { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
         { title: A().labels.sourceTitle, section: A().labels.section },
-        (chars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, progress: chars } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, thinking: thinkChars } : p))
+        (chars) => {
+          if (seq !== aiRunSeq.current) return;
+          setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, progress: chars } : p));
+        },
+        (thinkChars) => {
+          if (seq !== aiRunSeq.current) return;
+          setAiPanel((p) => (p && p.kind === "occlusion" ? { ...p, thinking: thinkChars } : p));
+        },
+        registerAICancel(seq)
       );
+      if (seq !== aiRunSeq.current) return;
       setAiPanel({
         kind: "occlusion",
         text: `[图片] ${picked.filename}`,
@@ -747,6 +789,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         batchId
       });
     } catch (err) {
+      if (seq !== aiRunSeq.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel({
         kind: "occlusion",
@@ -994,11 +1037,14 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   /**
    * v48.51（D91 §5.3 点击行为契约）：点击即执行（无条件）；方式解析 = 显式选择 > auto=本地路由器
    * （`routeExplainMode`，纯前端零请求）。`modeOverride` 供切换器「切换即重跑」（answer 清空重建，
-   * requestId 配对已保证旧流不串扰新结果）；材料语言取书籍语言标记（缺省时由模型自检并在标记中报告）。
+   * 流数据按 requestId 配对不串扰；v48.74（D118 §3③）起面板写路径另有轮次序号守卫——requestId 只保证
+   * 流数据不混线，不防旧流终态覆盖新面板）；材料语言取书籍语言标记（缺省时由模型自检并在标记中报告）。
    */
   async function runExplain(text: string, question: string | null, modeOverride?: ExplainModePref) {
     const pref: ExplainModePref = modeOverride ?? explainModeRef.current;
     const ste = pref === "auto" ? routeExplainMode(text) === "ste" : pref === "ste";
+    // v48.74（D118 §3③）：新一轮开始——取消旧流；此后仅本轮 seq 的回调/终态可写面板
+    const seq = beginAIRun();
     setAiPanel({
       kind: "explain",
       text,
@@ -1013,12 +1059,21 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         text,
         `${A().labels.title ?? ""}${A().labels.section ? " · " + A().labels.section : ""}`,
         question,
-        (acc) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, answer: acc, running: true } : p)),
-        (thinkChars) => setAiPanel((p) => (p && p.kind === "explain" ? { ...p, thinking: thinkChars } : p)),
-        ste ? { mode: "ste", matLang: bookLangRef.current || "" } : undefined
+        (acc) => {
+          if (seq !== aiRunSeq.current) return;
+          setAiPanel((p) => (p && p.kind === "explain" ? { ...p, answer: acc, running: true } : p));
+        },
+        (thinkChars) => {
+          if (seq !== aiRunSeq.current) return;
+          setAiPanel((p) => (p && p.kind === "explain" ? { ...p, thinking: thinkChars } : p));
+        },
+        ste ? { mode: "ste", matLang: bookLangRef.current || "" } : undefined,
+        registerAICancel(seq)
       );
+      if (seq !== aiRunSeq.current) return;
       setAiPanel({ kind: "explain", text, explainMode: pref, answer, running: false, startedAt: undefined, thinking: undefined });
     } catch (err) {
+      if (seq !== aiRunSeq.current) return;
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel({
         kind: "explain",
@@ -1409,6 +1464,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     // v48.51（D91）：解读方式三态（会话内记忆）与切换（面板在场时切换即重跑）
     explainMode,
     changeExplainMode,
+    // v48.74（D118 §3④）：生成中「停止」——取消当前在途 AI 请求（ai:abort）
+    stopAIRun,
     // 面板回调
     acceptDraft,
     acceptOcclusionDraft,

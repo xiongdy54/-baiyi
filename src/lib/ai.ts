@@ -31,6 +31,8 @@ declare global {
       detectLocal?: () => Promise<LocalDetectResult>;
       websearch: (query: string) => Promise<{ title: string; snippet: string }[]>;
       chat: (requestId: string, messages: unknown[], temperature?: number) => void;
+      /** v48.74（D118 §3④）：按 requestId 取消在途请求（AIGateway cancel 契约） */
+      abortChat: (requestId: string) => void;
       onStream: (cb: (requestId: string, msg: { delta?: string; thinking?: number; done?: boolean; error?: string }) => void) => () => void;
     };
   }
@@ -91,11 +93,14 @@ export const aiGateway = {
     return window.aiAPI.websearch(query);
   },
   // 流式对话：onDelta 累积增量；onThinking 上报思考模型（reasoning_content）的已思考字数；resolve 返回全文
+  // v48.74（D118 §3④）：onCancelRegister（可选）在请求发出前收到一次性取消闭包——宿主据此实现
+  // 「停止」按钮与新运行取消旧流（ai:abort → 主进程 AbortController → chatStream reject）。
   chat(
     messages: ChatMessage[],
     onDelta?: (acc: string, delta: string) => void,
     temperature?: number,
-    onThinking?: (thinkChars: number) => void
+    onThinking?: (thinkChars: number) => void,
+    onCancelRegister?: (cancel: () => void) => void
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       if (!window.aiAPI) {
@@ -105,6 +110,7 @@ export const aiGateway = {
       const requestId = Math.random().toString(36).slice(2);
       let acc = "";
       let finished = false;
+      onCancelRegister?.(() => window.aiAPI?.abortChat(requestId));
       const off = window.aiAPI.onStream((rid, msg) => {
         if (rid !== requestId) return;
         if (msg.error) {

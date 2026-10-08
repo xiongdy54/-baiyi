@@ -67,6 +67,8 @@ export default function AIPanel({
   onExploration,
   explainMode = "auto",
   onExplainModeChange,
+  /** v48.74（D118 §3④）：生成中「停止」——经宿主 stopAIRun() 走 ai:abort 取消当前请求 */
+  onStop,
   elapsedTick = 0
 }: {
   panel: {
@@ -123,6 +125,8 @@ export default function AIPanel({
   explainMode?: ExplainModePref;
   /** v48.51（D91 §5.3）：切换即重跑（重发请求在宿主 changeExplainMode） */
   onExplainModeChange?: (m: ExplainModePref) => void;
+  /** v48.74（D118 §3④）：生成中「停止」（缺省不渲染按钮——宿主未接取消通道时） */
+  onStop?: () => void;
   elapsedTick?: number;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
@@ -173,6 +177,8 @@ export default function AIPanel({
               : panel.thinking
                 ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
                 : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
+            {/* v48.74（D118 §3④）：生成中可手动停止（AIGateway cancel 契约落地） */}
+            {onStop && <button className="btn btn-outline btn-sm" onClick={onStop}>停止</button>}
           </div>
         )}
         {panel.searching && <div className="ai-streaming mono">正在联网检索事件背景…</div>}
@@ -183,14 +189,19 @@ export default function AIPanel({
             {panel.thinking
               ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
               : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
+            {/* v48.74（D118 §3④）：生成中可手动停止（AIGateway cancel 契约落地） */}
+            {onStop && <button className="btn btn-outline btn-sm" onClick={onStop}>停止</button>}
           </div>
         )}
 
         {panel.kind === "explain" && panel.answer && (
           <>
             <div className="ai-answer">
+              {/* v48.74（D118 §3①）：渲染前剥离 <!--ste:…--> 机器标记——react-markdown@10 会把
+                  未挂 rehype-raw 的 HTML 注释以转义文本渲染出来（D91 的「不可见」假设不成立）；
+                  panel.answer 数据层原样保留（parseSteMarkers / 相似性判定不受影响） */}
               <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {panel.answer}
+                {stripSteMarkers(panel.answer)}
               </ReactMarkdown>
             </div>
             {/* v48.51（D91 §5.5）：事后建议——路由错配的语义级纠偏，点击即按通用解读重跑（reader-explain scope） */}
@@ -517,7 +528,7 @@ export default function AIPanel({
                 {e.answer && (
                   <div className="ai-answer">
                     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                      {e.answer}
+                      {stripSteMarkers(e.answer)}
                     </ReactMarkdown>
                   </div>
                 )}
