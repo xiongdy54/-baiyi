@@ -35,6 +35,50 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+// v48.75（D119，设计 docs/design/APP-LOGGING-D119.md）：应用日志——单实例锁之后、其余 require
+// 之前尽早初始化（后续模块加载期的异常也落日志；目录在 userData 下，必须在 M7_TEST_USERDATA
+// setPath 之后取路径）。第二实例不初始化（立即退出，避免重复启动在日志留噪音行）。
+const appLog = require("./appLog");
+appLog.init({
+  dir: path.join(app.getPath("userData"), "logs"),
+  version: app.getVersion(),
+  platform: `${process.platform}/${process.arch}`,
+  electronVersion: process.versions.electron,
+  nodeVersion: process.versions.node,
+  packaged: app.isPackaged
+});
+// 进程级异常捕获（v48.75 审查修订，D119 §6 两阶段崩溃语义）：
+// - 启动期（!app.isReady()）：同步异常会中止本模块顶层（后续业务 require / whenReady 注册
+//   全部跳过）→ 半初始化进程无 IPC、无用户现场可保——落日志后 app.exit(1)，不留僵尸。
+// - 就绪后：**继续运行保现场**（有意抑制 Node 默认退出——桌面应用工作现场优先，
+//   electron-log 同惯例；业务级错误由各 IPC handler 既有 try/catch 防线兜底）。
+// - unhandledRejection 一律只记录不退出（异步拒绝不中止初始化流程，误杀风险大于收益）。
+process.on("uncaughtException", (err) => {
+  appLog.logError("main", err, { event: "uncaughtException" });
+  if (!app.isReady()) app.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  appLog.logError("main", reason instanceof Error ? reason : String(reason), { event: "unhandledRejection" });
+});
+// 测试钩子（仅测试设置 env 时生效，M7_TEST_USERDATA 同例）：模拟模块加载期同步崩溃，
+// 供 tests/applog.test.cjs 验证「启动期异常 → 落日志 + app.exit(1) 不僵尸」。必须位于
+// 上方 uncaughtException 注册之后（否则无人捕获）。
+if (process.env.M7_APPLOG_STARTUP_CRASH) {
+  throw new Error(`M7_APPLOG_STARTUP_CRASH: ${process.env.M7_APPLOG_STARTUP_CRASH}`);
+}
+// 渲染层错误转发（fire-and-forget on 通道：报告失败不触发新错误）；openFolder 目录不存在先建。
+ipcMain.on("logs:rendererError", (_e, payload) => {
+  try {
+    appLog.logRendererError(payload);
+  } catch {
+    /* 静默：日志通道永不外溢 */
+  }
+});
+ipcMain.handle("logs:openFolder", () => {
+  appLog.ensureDir();
+  return shell.openPath(appLog.getLogDir()).then((msg) => msg === "");
+});
+
 const {
   initDb,
   listItems,
@@ -1593,6 +1637,9 @@ function createWindow() {  // 防重入：已存在窗口时不再创建（macOS
 }
 
 app.whenReady().then(async () => {
+  // v48.75（D119）：生命周期锚点——区分「进程启动」（init 横幅）与「窗口就绪」（本行），
+  // 两者之间崩溃/卡死时日志可判读。
+  appLog.log("INFO", "app", "app ready");
   Menu.setApplicationMenu(null);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
   createWindow();
@@ -1728,4 +1775,6 @@ app.on("before-quit", () => {
 // M7：词典词条库（独立 dictionary.db）退出兜底落盘（正常路径导入后已即时 save）
 app.on("will-quit", () => {
   void dictDb.saveOnQuit();
+  // v48.75（D119）：退出横幅（生命周期事件；写失败由 appLog 内部静默）
+  appLog.log("INFO", "app", "app quit");
 });
