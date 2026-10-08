@@ -13,6 +13,13 @@ contextBridge.exposeInMainWorld("windowAPI", {
   openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url)
 });
 
+// v48.75（D119）：应用日志——openFolder 打开 logs 目录；report 为渲染层错误转发
+// （fire-and-forget send：不回执，报告失败不触发新错误）
+contextBridge.exposeInMainWorld("logsAPI", {
+  openFolder: () => ipcRenderer.invoke("logs:openFolder"),
+  report: (payload) => ipcRenderer.send("logs:rendererError", payload)
+});
+
 contextBridge.exposeInMainWorld("libraryAPI", {
   list: () => ipcRenderer.invoke("library:list"),
   createFromPaste: (title, markdown) => ipcRenderer.invoke("library:createFromPaste", title, markdown),

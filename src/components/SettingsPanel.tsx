@@ -104,6 +104,7 @@ const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: s
     label: "数据与效率",
     items: [
       { id: "backup", label: "备份与恢复" },
+      { id: "logs", label: "日志" },
       { id: "shortcuts", label: "快捷键" },
       { id: "widgets", label: "统计仪表盘" }
     ]
@@ -1719,6 +1720,44 @@ function fmtTime(ts: number): string {
 
 const BACKUP_LABEL: Record<string, string> = { manual: "手动", auto: "自动", safety: "安全" };
 
+// ---------- 日志（v48.75 / D119，设计 docs/design/APP-LOGGING-D119.md）：诊断文件唯一入口 ----------
+// logsAPI 访问（preload 暴露；局部断言，先例＝backupAPI）
+function logsAPI() {
+  return (window as unknown as {
+    logsAPI?: { openFolder: () => Promise<boolean> };
+  }).logsAPI!;
+}
+
+function LogsSection() {
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
+  async function openFolder() {
+    try {
+      const ok = await logsAPI().openFolder();
+      setNotice(
+        ok
+          ? { ok: true, text: "已在系统文件管理器中打开日志文件夹。" }
+          : { ok: false, text: "打开日志文件夹失败，请重试。" }
+      );
+    } catch (err) {
+      setNotice({ ok: false, text: `打开日志文件夹失败：${err instanceof Error ? err.message : String(err)}` });
+    }
+  }
+  return (
+    <SettingsSection id="sec-logs" title="日志">
+      <p className="form-hint">
+        软件运行与错误信息记录在本地日志文件中（只含时间、错误消息与运行状态，不含书籍内容）。
+        遇到问题时，可将日志文件发送给开发者协助排查。
+      </p>
+      <div className="settings-row">
+        <button className="btn btn-outline btn-sm" onClick={openFolder}>
+          打开日志文件夹
+        </button>
+      </div>
+      {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
+    </SettingsSection>
+  );
+}
+
 function BackupSection() {
   const [info, setInfo] = useState<BackupInfo | null>(null);
   const [list, setList] = useState<{ backupDir: string; backups: BackupEntry[] } | null>(null);
@@ -2628,6 +2667,7 @@ export default function SettingsPanel({
 
             {/* 数据与效率 */}
             <BackupSection />
+            <LogsSection />
             <ShortcutsSection />
             <DashboardSection />
           </div>
