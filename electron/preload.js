@@ -229,6 +229,8 @@ contextBridge.exposeInMainWorld("aiAPI", {
   detectLocal: () => ipcRenderer.invoke("ai:detectLocal"),
   websearch: (query) => ipcRenderer.invoke("ai:websearch", query),
   chat: (requestId, messages, temperature) => ipcRenderer.send("ai:chat", requestId, messages, temperature),
+  // v48.74（D118 §3④）：按 requestId 取消在途 AI 请求（停止按钮 / 新一轮运行取消旧流）
+  abortChat: (requestId) => ipcRenderer.send("ai:abort", requestId),
   onStream: (callback) => {
     const handler = (_e, requestId, msg) => callback(requestId, msg);
     ipcRenderer.on("ai:stream", handler);

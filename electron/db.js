@@ -38,8 +38,11 @@ const {
   MATERIAL_MAP_REVIEW_PROMPT,
   // v48.22（D58 / E1）：摘录重排 scope
   EXTRACT_RERANK_PROMPT,
-  // v48.51（D91）：简明解读 scope
+  // v48.51（D91）：简明解读 scope；v48.74（D118）v1 原文冻结常量（全新库 v1 行留痕用）
   READER_EXPLAIN_STE_PROMPT,
+  READER_EXPLAIN_STE_PROMPT_V1,
+  // v48.74（D118）：通用解释模板 v2（追问四式）的 v1 原文冻结常量（READER_EXPLAIN_PROMPT 已在上方导入＝v2 现行文本）
+  READER_EXPLAIN_PROMPT_V1,
   SITUATION_REQUIRED_SCOPES,
   situationRequiredFor
 } = require("./prompts");
@@ -2352,17 +2355,29 @@ function ensurePromptTemplates() {
   }
   // v1 一次性播种（首次安装）：reader-explain / leech-rescue 只在此处加入
   // （v15 修正：原来按全表 count===0 判断，全新库上主制卡模板先播种导致此块永不执行、解释/诊断模板缺失）
+  // v48.74（D118）：reader-explain v1 行改用冻结常量（原文留痕），v2 升版播种见下
   const explainCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'reader-explain'")[0]?.n || 0;
   if (Number(explainCount) === 0) {
     db.run(
       "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, 1, 1, ?, ?)",
-      [crypto.randomUUID(), "reader-explain", "阅读解释 v1", READER_EXPLAIN_PROMPT, situationRequiredFor("reader-explain"), now]
+      [crypto.randomUUID(), "reader-explain", "阅读解释 v1", READER_EXPLAIN_PROMPT_V1, situationRequiredFor("reader-explain"), now]
     );
     db.run(
       "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, 1, 1, ?, ?)",
       [crypto.randomUUID(), "leech-rescue", "难点诊断 v1", LEECH_RESCUE_PROMPT, situationRequiredFor("leech-rescue"), now]
     );
   }
+  // v48.74（D118）：reader-explain v2——追问四式条款（四个追问按钮此前只有一句弱指引，模型自由发挥）。
+  // 存量库按 MAX(version)<2 升版播种（reader-explain-ste v2 同款模式），v1 留痕。
+  try {
+    const explainMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'reader-explain'")[0]?.v || 0;
+    if (Number(explainMaxV) < 2) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'reader-explain', '阅读解释 v2', ?, 2, 1, ?, ?)",
+        [crypto.randomUUID(), READER_EXPLAIN_PROMPT, situationRequiredFor("reader-explain"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
   // v40（M8-B，D37）：journal-insight 新 scope 首版 v1——洞察提示词（§4.13 三层证据 + 竞争解释 + 可选结构分支）。
   // 结构分支独立模板 structure-analogy 随 K2 提案管线播种；调优一律走测试台闭环（§7.4）。
   try {
@@ -2387,11 +2402,24 @@ function ensurePromptTemplates() {
   } catch { /* 播种失败不阻塞启动 */ }
   // v48.51（D91）：reader-explain-ste 新 scope 首版 v1——简明解读（双 pack 槽位模板，
   // pack 由渲染端按材料语言/输出语言注入，见 src/lib/steProfiles.ts）。零新增 IPC、零 schema 变更。
+  // v48.74（D118）：v1 行用冻结的 READER_EXPLAIN_STE_PROMPT_V1（D91 原文留痕），全新库即 v1+v2 两行。
   try {
     const steCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'reader-explain-ste'")[0]?.n || 0;
     if (Number(steCount) === 0) {
       db.run(
         "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'reader-explain-ste', '简明解读 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), READER_EXPLAIN_STE_PROMPT_V1, situationRequiredFor("reader-explain-ste"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // v48.74（D118）：reader-explain-ste v2——节标题语法硬约束（独占一行 + ## 前缀，禁止【】/粗体代替）。
+  // 存量库按 MAX(version)<2 升版播种（card-occlusion v3 同款模式），v1 留痕；getPromptTemplate 按
+  // is_default DESC, version DESC 取行 ⇒ v2 自然生效。
+  try {
+    const steMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'reader-explain-ste'")[0]?.v || 0;
+    if (Number(steMaxV) < 2) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'reader-explain-ste', '简明解读 v2', ?, 2, 1, ?, ?)",
         [crypto.randomUUID(), READER_EXPLAIN_STE_PROMPT, situationRequiredFor("reader-explain-ste"), now]
       );
     }
@@ -2481,6 +2509,15 @@ function getPromptTemplate(scope) {
   const rows = queryAll(
     "SELECT * FROM prompt_templates WHERE scope = ? ORDER BY is_default DESC, version DESC LIMIT 1",
     [scope]
+  );
+  return rows[0] || null;
+}
+
+// v48.74（D118）：按版本取模板行（只读）——升版播种测试核对留痕行（如 reader-explain-ste v1 原文冻结）
+function getPromptTemplateVersion(scope, version) {
+  const rows = queryAll(
+    "SELECT * FROM prompt_templates WHERE scope = ? AND version = ? LIMIT 1",
+    [scope, version]
   );
   return rows[0] || null;
 }
@@ -6704,6 +6741,7 @@ module.exports = {
   setAIGenBatchStatus,
   ensurePromptTemplates,
   getPromptTemplate,
+  getPromptTemplateVersion,
   listPromptTemplates,
   findSimilarCards,
   listDictSources,

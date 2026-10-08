@@ -873,18 +873,36 @@ ipcMain.handle("ai:websearch", async (_e, query) => {
     `联网搜索失败（${errors.join("；")}）。建议：确认 Clash 系统代理开启；或直接粘贴相关背景文字后再制卡。`
   );
 });
+// v48.74（D118 §3④）：AIGateway cancel 契约（§3 容器清单 stream/cancel）在 IPC 层落地——
+// 每请求 AbortController 入注册表传入 chatStream（abortSignal 形参既有，传输层零改动）；
+// ai:abort 按 requestId 取消（停止按钮/新一轮运行取消旧流）；结算（resolve/reject）即移除。
+const aiChatAborts = new Map();
 ipcMain.on("ai:chat", (e, requestId, messages, temperature) => {
   const send = (m) => {
     if (!e.sender.isDestroyed()) e.sender.send("ai:stream", requestId, m);
   };
+  const controller = new AbortController();
+  aiChatAborts.set(requestId, controller);
   try {
-    chatStream({ messages, temperature }, send).catch((err) => {
-      send({ error: err instanceof Error ? err.message : String(err) });
-    });
+    chatStream({ messages, temperature, abortSignal: controller.signal }, send)
+      .catch((err) => {
+        send({ error: err instanceof Error ? err.message : String(err) });
+      })
+      .finally(() => aiChatAborts.delete(requestId));
   } catch (err) {
+    aiChatAborts.delete(requestId);
     // 同步抛出（如未配 Key）也走流式错误，绝不炸主进程
     send({ error: err instanceof Error ? err.message : String(err), code: err?.code });
   }
+});
+ipcMain.on("ai:abort", (_e, requestId) => {
+  const controller = aiChatAborts.get(requestId);
+  if (!controller) return;
+  aiChatAborts.delete(requestId);
+  // abortErrorOf 契约：reason 带机读 code 才被透传（cancelled=用户取消，无 retriable ⇒ 不触发 §3.7 重试）
+  const reason = new Error("已手动停止本轮 AI 生成");
+  reason.code = "cancelled";
+  controller.abort(reason);
 });
 
 // ---------- M7 词典（v32，D31）：在线代理 + 本地查词 + 下载/导入 + 缓存 ----------

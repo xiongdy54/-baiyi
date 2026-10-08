@@ -121,6 +121,8 @@ export default function SelectionPanels({
       onExploration={(item, kpTitle) => sel.runExploration(item, kpTitle)}
       explainMode={sel.explainMode}
       onExplainModeChange={(m) => sel.changeExplainMode(m)}
+      // v48.74（D118 §3④）：生成中「停止」→ ai:abort 取消当前请求
+      onStop={() => sel.stopAIRun()}
       elapsedTick={nowTick}
     />
   ) : null;

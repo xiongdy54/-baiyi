@@ -156,7 +156,9 @@ export interface SteMarkers {
 /** 从答案原文解析 ste 机器标记（HTML 注释，Markdown 渲染不可见） */
 export function parseSteMarkers(answer: string): SteMarkers {
   const out: SteMarkers = {};
-  const re = /<!--ste:([a-zA-Z]+)=([^>-]*)-->/g;
+  // v48.74（D118 追加）：值字符集放宽为 [^>]*——原 [^>-]* 把连字符排除在外，
+  // BCP-47 语言代码（zh-Hans / en-US）含连字符 ⇒ matLang 标记既解析不出也剥不掉（界面露出代码）
+  const re = /<!--ste:([a-zA-Z]+)=([^>]*)-->/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(String(answer ?? "")))) {
     const key = m[1];
@@ -170,7 +172,7 @@ export function parseSteMarkers(answer: string): SteMarkers {
 
 /** 剥掉机器标记后的正文（渲染层不需要——HTML 注释本身不渲染；供相似性比较用） */
 export function stripSteMarkers(answer: string): string {
-  return String(answer ?? "").replace(/<!--ste:[a-zA-Z]+=[^>-]*-->/g, "");
+  return String(answer ?? "").replace(/<!--ste:[a-zA-Z]+=[^>]*-->/g, "");
 }
 
 // ---------- 事后建议的「改写≈原文」判定（D91 §5.5） ----------

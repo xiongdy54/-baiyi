@@ -76,6 +76,12 @@ const m2 = d91.parseSteMarkers("<!--ste:matLang=unknown-->\n<!--ste:points=0-->\
 check("points=0 无 readings（省略合法）", m2.points === 0 && m2.readings === undefined, { points: 0, readings: undefined }, m2);
 check("无标记 → 空对象（通用解读结果不含标记）", Object.keys(d91.parseSteMarkers("普通回答")).length === 0, "{}", d91.parseSteMarkers("普通回答"));
 check("stripSteMarkers 剥离注释", d91.stripSteMarkers("<!--ste:points=1-->正文").trim() === "正文", "正文", d91.stripSteMarkers("<!--ste:points=1-->正文"));
+// v48.74（D118 追加）：BCP-47 语言代码含连字符（zh-Hans/en-US）——原 [^>-]* 值字符集把 '-' 排除，
+// matLang 标记既解析不出也剥不掉（用户实测界面露出 <!--ste:matLang=zh-Hans-->）
+const hyphenSample = "<!--ste:matLang=zh-Hans-->\n<!--ste:points=3-->\n\n## 歧义点\n...";
+const mH = d91.parseSteMarkers(hyphenSample);
+check("连字符语言代码可解析（zh-Hans）", mH.matLang === "zh-Hans" && mH.points === 3, { matLang: "zh-Hans", points: 3 }, mH);
+check("连字符语言代码可剥离（不残留代码）", d91.stripSteMarkers(hyphenSample).trim().startsWith("## 歧义点"), "## 歧义点…", d91.stripSteMarkers(hyphenSample).trim().slice(0, 30));
 const cats = d91.STE_CATEGORIES.map((c) => c.key);
 check("歧义类别封闭集 = 10 类且 key 唯一", cats.length === 10 && new Set(cats).size === 10, 10, cats.length);
 
