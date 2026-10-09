@@ -19,7 +19,7 @@ export interface CardUpsert {
   contextPrefix: string | null;
   contextRef: Record<string, unknown> | null;
   mnemonic: string | null;
-  sourceRef: { title?: string } | null;
+  sourceRef: { title?: string; author?: string } | null;
   dateStamp: string | null;
   priority: number;
   tags: string[];

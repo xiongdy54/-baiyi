@@ -613,6 +613,29 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
       return { text, pageIndex, anchorText: text.slice(0, 60) };
     },
 
+    // D121 §2.3：PDF 选区前后文——取选区所在页 text layer 文本，以选区文本定位后取其前 600 / 后 400 字
+    // （页内近似「前 2 段 / 后 1 段」；无法定位则无前后文，不猜）
+    getSelectionContext(): { before: string; after: string } | null {
+      try {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return null;
+        const selText = sel.toString().replace(/\s+/g, " ").trim();
+        if (!selText) return null;
+        const range = sel.getRangeAt(0);
+        const pageEl = (range.startContainer as Node).parentElement?.closest?.(".page") as HTMLElement | null;
+        const layer = pageEl?.querySelector(".textLayer") as HTMLElement | null;
+        if (!layer) return null;
+        const pageText = (layer.textContent || "").replace(/\s+/g, " ").trim();
+        const at = pageText.indexOf(selText);
+        if (at < 0) return null;
+        const before = pageText.slice(Math.max(0, at - 600), at).trim();
+        const after = pageText.slice(at + selText.length, at + selText.length + 400).trim();
+        return before || after ? { before, after } : null;
+      } catch {
+        return null;
+      }
+    },
+
     getSelectionGeometry(): ReaderRect | null {
       const sel = window.getSelection();
       if (!sel || sel.rangeCount === 0) return null;

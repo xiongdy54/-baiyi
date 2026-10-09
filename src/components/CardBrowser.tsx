@@ -12,7 +12,7 @@ import rehypeKatex from "rehype-katex";
 import { parseCloze, extractClozeAnswers, cardsApi, hasSourceAnchor, type CardRecord, type CardIssueRecord, type CardGenInfo, type TodayQueue, type BrowserMetaRow } from "../lib/cards";
 import { playVocabAudio } from "../lib/dictClient";
 import { eventBus } from "../lib/eventbus";
-import ContrastCardModal from "./ContrastCardModal";
+import DisambiguateModal from "./DisambiguateModal";
 import RegenCardsModal from "./RegenCardsModal";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
@@ -2362,13 +2362,16 @@ export function CardFace({
 }
 
 // ---------- Leech 六步处理向导（§8.7） ----------
-export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClose: () => void; onDone: () => void }) {
+export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRecord; onClose: () => void; onDone: () => void }) {
+  // D121：辨析弹窗可能改写卡面文字——向导后续的全行 update 必须基于最新行，否则会用旧文案覆盖
+  const [freshCard, setFreshCard] = useState<CardRecord | null>(null);
+  const card = freshCard ?? cardProp;
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [step, setStep] = useState(0);
   const [diagnosis, setDiagnosis] = useState<{ diagnosis?: string; analysis?: string; suggestions?: string[] } | null>(null);
   const [running, setRunning] = useState(false);
-  // v30（D29）：易混对比卡一键生成（与复习页共用 ContrastCardModal）
-  const [contrastOpen, setContrastOpen] = useState(false);
+  // v48.77（D121 §3.1）：辨析弹窗（与复习页共用 DisambiguateModal；替换 v30 易混对比卡一键生成）
+  const [disambOpen, setDisambOpen] = useState(false);
 
   async function runDiagnose() {
     setRunning(true);
@@ -2429,9 +2432,9 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
             <div className="queue-row-text review-back">{card.backMarkdown}</div>
           </div>
 
-          {/* v30（D29）：以本卡为基准生成易混对比卡三件套 */}
+          {/* D121 §3.1：辨析（选另一张卡并排对照，可 AI 诊断、就地修正、归档或生成对比卡） */}
           <div className="ai-actions mb-4">
-            <button className="btn btn-outline btn-sm" onClick={() => setContrastOpen(true)}>生成对比卡</button>
+            <button className="btn btn-outline btn-sm" data-testid="leech-disamb-btn" onClick={() => setDisambOpen(true)}>辨析</button>
           </div>
 
           {step === 0 && (
@@ -2455,7 +2458,7 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
           )}
           {step === 1 && (
             <div>
-              <p className="form-hint">Step 2 · 补充卡片。对卡内不熟的术语补前置知识卡；若存在相似卡，生成对比卡区分（需在阅读器选中对应文字后用 AI 制卡）。</p>
+              <p className="form-hint">Step 2 · 补充卡片。对卡内不熟的术语补前置知识卡；若存在相似卡，点「辨析」比较并修正。</p>
             </div>
           )}
           {step === 2 && (
@@ -2534,7 +2537,20 @@ export function LeechWizard({ card, onClose, onDone }: { card: CardRecord; onClo
           </div>
         </div>
       </div>
-      {contrastOpen && <ContrastCardModal card={card} onClose={() => setContrastOpen(false)} />}
+      {disambOpen && (
+        <DisambiguateModal
+          card={card}
+          origin="browser"
+          onClose={(r) => {
+            setDisambOpen(false);
+            if (r.archivedIds.includes(card.id)) {
+              onDone();
+              return;
+            }
+            if (r.changed) void cardsApi.get(card.id).then((fresh) => { if (fresh) setFreshCard(fresh); });
+          }}
+        />
+      )}
     </div>
   );
 }

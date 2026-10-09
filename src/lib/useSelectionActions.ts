@@ -8,9 +8,11 @@ import {
   lintCard,
   cardsApi,
   createAcceptedCard,
+  buildSourceRef,
   detectMaterialType,
   expandClozeDraft,
   burySourceTextLimit,
+  buildRelatedCardsContext,
   siblingKeyFor,
   requestOcclusionResult,
   MATERIAL_ROUTES,
@@ -47,11 +49,15 @@ export interface SelectionActionsAdapter {
   /** 当前阅读位置的事实源（只看 documentId / extractId 两个键） */
   sourceContext: () => { documentId?: string; extractId?: string };
   /** 提示词与面板上的来源标签：title＝解释侧栏用，sourceTitle/section＝制卡用 */
-  labels: { title?: string; sourceTitle?: string; section?: string };
+  labels: { title?: string; sourceTitle?: string; /** D121 §1.3：书籍作者（有值才写入 sourceRef.author） */ sourceAuthor?: string; section?: string };
   /** assets 表归属键（本书/本文档） */
   ownerKey: () => string;
   /** 本书 id（查词语言路由的书籍级信号按它取） */
   itemId?: string | null;
+  /** D121 §2.2：章节路径（顶层→当前），动作时求值；取不到返回 []（则回落 labels.section） */
+  sectionPath?: () => string[];
+  /** D121 §2.3：选区前 2 段/后 1 段；**必须在 clearSelection 之前调用** */
+  selectionSurrounding?: () => { before: string; after: string } | null;
   /** 本次制卡的完整源文本（短材料锚点键的长度门控输入） */
   sourceTextRef: MutableRefObject<string>;
   /** 正文全文（查词原句上下文的定位底本） */
@@ -223,6 +229,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   // 只能来自僵尸流与新流串台覆盖同一 panel；ai:chat 此前无 abort 通道，旧流在用户放弃后仍存活）。
   // aiCancelRef：当前轮的一次性取消闭包（ai:abort）；新轮开始先取消旧流；stopAIRun 供「停止」按钮。
   const aiRunSeq = useRef(0);
+  /** D121 §2.2/§2.3：选区语境包（章节路径 + 前后文）——在 clearSelection 之前由 actAICards 采集，
+   *  runAICards / 联网重试 / 补充制卡按 text 命中复用（选区清掉后无法再从宿主重新取） */
+  const aiCtxRef = useRef<{ text: string; sectionPath: string[]; surrounding: { before: string; after: string } | null } | null>(null);
   const aiCancelRef = useRef<(() => void) | null>(null);
   function beginAIRun(): number {
     aiRunSeq.current += 1;
@@ -361,8 +370,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     cardOrd?: number;
     // v34（M12，§4.16）：同源组键——翻转对/同图卡由调用点显式给出；普通卡由 handleManualCard 预先推导
     siblingKey?: string | null;
-  }): Promise<void> {
-    const sourceRef = A().labels.sourceTitle ? { title: A().labels.sourceTitle } : null;
+  }): Promise<string> {
+    // D121 §4.2：手动制卡自动写 {title, author}（作者有值才写）
+    const sourceRef = buildSourceRef(null, A().labels.sourceTitle, A().labels.sourceAuthor);
     const card = {
       noteText: p.front || p.cloze || "",
       cardType: p.cardType,
@@ -382,7 +392,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       knowledgePointId: p.knowledgePointId || null,
       siblingKey: p.siblingKey ?? null
     };
-    await createManualCard({
+    const created = await createManualCard({
       card,
       lint: {
         front: card.frontMarkdown,
@@ -398,9 +408,11 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       },
       similarity: { text: p.front || p.cloze || "" }
     });
+    return created.id;
   }
 
-  async function handleManualCard(p: ManualCardPayload) {
+  /** 返回新建卡 id（翻转对返回第一张；图片挖空/缺选区时 null）——D121 §4.1「保存并辨析」需要 */
+  async function handleManualCard(p: ManualCardPayload): Promise<string | null> {
     const meta = {
       contextPrefix: p.contextPrefix || null,
       domain: p.domain ?? [],
@@ -420,12 +432,12 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     if (p.mode === "imageOcclusion") {
       if (!p.imageRegion) {
         showToast("缺少图片选区，无法创建图片挖空卡");
-        return;
+        return null;
       }
       const assetPath = await ensureImageAsset(p.imageRegion.dataUrl);
-      if (!assetPath) return;
+      if (!assetPath) return null;
       const shape = normalizeShape({ ...p.imageRegion.shape, ord: 0 });
-      await createSingleCard({
+      const imgId = await createSingleCard({
         front: p.front.trim() || "图中遮挡区域对应的是什么？",
         back: p.back,
         cardType: "imageOcclusion",
@@ -443,13 +455,13 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       setManualOpen(false);
       setManualImage(null);
       showToast("图片挖空卡已创建（复习正面遮挡所选区域）");
-      return;
+      return imgId;
     }
     if (p.mode === "reverse") {
       // 翻转问答卡（D18）：互为翻转的两张独立 qa 卡，各自有独立 FSRS 调度状态
       // v34（M12）：翻转对互为同源（结构性，与文本长度无关）——同日只放行一张
       const flipKey = `act:flip-${crypto.randomUUID()}`;
-      await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: flipKey, ...meta });
+      const flipId = await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: flipKey, ...meta });
       await createSingleCard({
         front: p.reversePair?.bFront || p.back,
         back: p.reversePair?.bBack || p.front,
@@ -461,24 +473,25 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       setManualOpen(false);
       setManualImage(null);
       showToast("已创建 2 张互为翻转的独立卡片");
-      return;
+      return flipId;
     }
     if (p.mode === "cloze") {
       const cloze = p.cloze || "";
       // F12（v25）修复：挖空卡必须把带 {{cN::}} 标记的文本存进 frontMarkdown——
       // 此前存的是未转换的原文，复习端 parseCloze 找不到挖空 ord，挖空从未遮蔽
-      await createSingleCard({ front: cloze, back: p.back, cardType: "cloze", cloze, siblingKey: srcKey, ...meta });
+      const clozeId = await createSingleCard({ front: cloze, back: p.back, cardType: "cloze", cloze, siblingKey: srcKey, ...meta });
       eventBus.emit("cards/changed");
       setManualOpen(false);
       setManualImage(null);
       showToast("卡片已创建，可在复习视图查看");
-      return;
+      return clozeId;
     }
-    await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: srcKey, ...meta });
+    const qaId = await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: srcKey, ...meta });
     eventBus.emit("cards/changed");
     setManualOpen(false);
     setManualImage(null);
     showToast("卡片已创建，可在复习视图查看");
+    return qaId;
   }
 
   // ---------- v25 图片选区提交（聚焦工具条 → AI 制卡 / 手动制卡） ----------
@@ -677,9 +690,24 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       mindmapNodeId: opts?.mindmapNodeId
     });
     try {
+      // D121 §2：语境包——作者/章节路径/前后文/相关已有卡（相关卡纯本地检索，失败静默）
+      const cap = aiCtxRef.current && aiCtxRef.current.text === text ? aiCtxRef.current : null;
+      const sectionPath = cap?.sectionPath ?? A().sectionPath?.() ?? [];
+      const surrounding = cap ? cap.surrounding : A().selectionSurrounding?.() ?? null;
+      const relatedCards = await buildRelatedCardsContext(text);
       const { batchId, result } = await cardGenerator.generateCards(
         text,
-        { title: A().labels.sourceTitle, section: A().labels.section, webContext, documentId: A().sourceContext().documentId ?? null, focus: opts?.focus },
+        {
+          title: A().labels.sourceTitle,
+          author: A().labels.sourceAuthor,
+          section: A().labels.section,
+          sectionPath,
+          surrounding,
+          relatedCards,
+          webContext,
+          documentId: A().sourceContext().documentId ?? null,
+          focus: opts?.focus
+        },
         resolved,
         (chars) => {
           if (seq !== aiRunSeq.current) return;
@@ -829,7 +857,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       contextRef: occlusionSourceRef.current === "library"
         ? { ...(A().contextRef() || {}), imageSource: "library" as const }
         : A().contextRef(),
-      sourceRef: d.sourceRef || (A().labels.sourceTitle ? { title: A().labels.sourceTitle } : null),
+      sourceRef: buildSourceRef(d.sourceRef, A().labels.sourceTitle, A().labels.sourceAuthor),
       dateStamp: d.dateStamp || null,
       priority: d.prioritySuggestion ?? 50,
       tags: [],
@@ -954,11 +982,17 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       ]
         .filter(Boolean)
         .join("\n");
+      const cap = aiCtxRef.current && aiCtxRef.current.text === panel.text ? aiCtxRef.current : null;
+      const relatedCards = await buildRelatedCardsContext(panel.text);
       const { result } = await cardGenerator.generateCards(
         panel.text,
         {
           title: A().labels.sourceTitle,
+          author: A().labels.sourceAuthor,
           section: A().labels.section,
+          sectionPath: cap?.sectionPath,
+          surrounding: cap?.surrounding ?? null,
+          relatedCards,
           documentId: A().sourceContext().documentId ?? null,
           existingCards: panel.drafts
             .map((d) => d.front || d.cloze || "")
@@ -1013,6 +1047,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const mmNodeId = aiPanel?.mindmapNodeId;
     await createAcceptedCard(d, {
       sourceTitle: A().labels.sourceTitle,
+      sourceAuthor: A().labels.sourceAuthor,
       contextRef: mmNodeId ? { ...(A().contextRef() || {}), mindmapNodeId: mmNodeId } : A().contextRef(),
       sourceText: aiPanel?.text ?? null,
       genBatchId: aiPanel?.batchId ?? null,
@@ -1287,6 +1322,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const t = A().selectionText();
     if (!t) return;
     A().rememberAnchor(t);
+    // D121 §2.3：前后文与章节路径必须在 clearSelection 之前采集
+    aiCtxRef.current = { text: t, sectionPath: A().sectionPath?.() ?? [], surrounding: A().selectionSurrounding?.() ?? null };
     A().clearSelection();
     wakeDock();
     void runAICards(t, undefined, aiModeRef.current);
@@ -1395,7 +1432,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       };
       // v34（M12，§4.16）：单词四卡（D31 快照制）来自同一次查词 → 同锚点键互为同源，同日只放行一张；
       // sourceText=查词原词（恒 ≤ 阈值 → 必建键），同一词在同一位置重复制卡也会归入同组
-      await createAcceptedCard(d, { sourceTitle: A().labels.sourceTitle ?? entry.source, contextRef: A().contextRef(), dictJson, sourceText: ctx.selectedText || entry.word });
+      await createAcceptedCard(d, { sourceTitle: A().labels.sourceTitle ?? entry.source, sourceAuthor: A().labels.sourceAuthor, contextRef: A().contextRef(), dictJson, sourceText: ctx.selectedText || entry.word });
       n += 1;
     }
     eventBus.emit("cards/changed");

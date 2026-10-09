@@ -12,7 +12,8 @@ import CardDock, { type DockTab } from "./CardDock";
 import AIPanel, { ExplainModeSwitcher } from "./AIPanel";
 import { DictPanel } from "./DictPanel";
 import { useEffect, useState } from "react";
-import { cardsApi, type CardDraft } from "../lib/cards";
+import { cardsApi, type CardDraft, type CardRecord } from "../lib/cards";
+import DisambiguateModal from "./DisambiguateModal";
 import type { TagVocabEntry } from "../lib/tags";
 import type { DictionaryEntry, ReadingContext, VocabKind } from "../lib/dict";
 import type { SelectionActions } from "../lib/useSelectionActions";
@@ -52,10 +53,16 @@ export default function SelectionPanels({
   /** 手动制卡保存链（modal / dock 同一份：落库 → closeManual，现状语义零改动） */
   const saveManual = async (p: Parameters<typeof sel.handleManualCard>[0]) => {
     try {
-      await sel.handleManualCard(p);
+      return await sel.handleManualCard(p);
     } finally {
       sel.closeManual();
     }
+  };
+  /** D121 §4.1「保存并辨析」：弹窗挂在本组件（表单随 closeManual 卸载后仍存活）；新卡为 A、相似卡为 B */
+  const [disamb, setDisamb] = useState<{ card: CardRecord; other: string } | null>(null);
+  const openDisamb = async (newId: string, otherId: string) => {
+    const card = await cardsApi.get(newId).catch(() => null);
+    if (card) setDisamb({ card, other: otherId });
   };
   /** 关闭链（D92 §4 原样迁移）：手动暂态 ×＝closeManual（丢草稿）；AI 态 ×＝批次 reject + 清面板；
       空坞 ×＝收起（常驻坞没有「关闭」，收起把手仍在）。 */
@@ -208,10 +215,14 @@ export default function SelectionPanels({
                 initialTags={sel.manualTagsInitial}
                 onCancel={sel.closeManual}
                 onSave={saveManual}
+                onDisambiguate={(n, o) => void openDisamb(n, o)}
               />
             </div>
           )}
         </CardDock>
+      )}
+      {disamb && (
+        <DisambiguateModal card={disamb.card} presetOther={disamb.other} origin="manual" onClose={() => setDisamb(null)} />
       )}
     </>
   );

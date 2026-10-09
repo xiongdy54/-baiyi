@@ -44,7 +44,9 @@ const {
   // v48.74（D118）：通用解释模板 v2（追问四式）的 v1 原文冻结常量（READER_EXPLAIN_PROMPT 已在上方导入＝v2 现行文本）
   READER_EXPLAIN_PROMPT_V1,
   SITUATION_REQUIRED_SCOPES,
-  situationRequiredFor
+  situationRequiredFor,
+  // D121 §3.3/§3.4：卡片辨析 scope card-disambiguate v1
+  CARD_DISAMBIGUATE_PROMPT
 } = require("./prompts");
 const { sanitizeDomain, domainFromPrefix } = require("./udc");
 const { calculateFsrsDeltaT, learningDayStartMs } = require("./fsrsTime");
@@ -239,6 +241,20 @@ CREATE TABLE IF NOT EXISTS fsrs_configs (
   source TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+-- D121 §1.2：卡片辨析链接（展示/溯源用结构数据，不参与 FSRS 与队列；card_b 为 NULL = 单卡辨析）
+CREATE TABLE IF NOT EXISTS card_links (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  card_a TEXT NOT NULL,
+  card_b TEXT,
+  kind TEXT NOT NULL DEFAULT 'disambiguated',
+  verdict TEXT,
+  note TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
 `;
 
 async function initDb() {
@@ -250,6 +266,11 @@ async function initDb() {
   try { fs.rmSync(dbFile + ".tmp", { force: true }); } catch { /* 忽略 */ }
   db = fs.existsSync(dbFile) ? new SQL.Database(fs.readFileSync(dbFile)) : new SQL.Database();
   db.run(SCHEMA);
+  // D121 §1.2：card_links 索引（与其余索引同法放 initDb，IF NOT EXISTS 幂等）
+  try {
+    db.run("CREATE INDEX IF NOT EXISTS idx_card_links_a ON card_links(card_a)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_card_links_b ON card_links(card_b)");
+  } catch { /* 忽略 */ }
   try {
     db.run("ALTER TABLE library_items ADD COLUMN progress_json TEXT");
   } catch {
@@ -775,6 +796,12 @@ async function initDb() {
       }
     }
   } catch { /* 表已存在 */ }
+  // D121 §1.1：书籍作者（可空；导入时取得到才填，绝不猜）
+  try {
+    db.run("ALTER TABLE library_items ADD COLUMN author TEXT");
+  } catch {
+    /* 列已存在 */
+  }
   ensurePromptTemplates();
   persist();
 }
@@ -883,7 +910,7 @@ function getBackupCounts() {
 function listItems() {
   const stmt = db.prepare(`
     SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_json AS progressJson,
-           li.lang, li.priority, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
+           li.lang, li.priority, li.author, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
     FROM library_items li
     LEFT JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.is_deleted = 0
@@ -924,6 +951,16 @@ function setLibraryItemTitle(id, title) {
   // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
   if (!rowExists("library_items", id)) return false;
   db.run("UPDATE library_items SET title=?, updated_at=? WHERE id=? AND is_deleted=0", [t, Date.now(), String(id)]);
+  persist();
+  return true;
+}
+
+// D121 §1.1：书籍作者编辑——trim；空串→NULL；>200 字拒绝
+function setLibraryItemAuthor(id, author) {
+  const a = String(author ?? "").trim();
+  if (a.length > 200) throw new Error("作者过长（至多 200 字符）");
+  if (!rowExists("library_items", id)) return false;
+  db.run("UPDATE library_items SET author=?, updated_at=? WHERE id=? AND is_deleted=0", [a || null, Date.now(), String(id)]);
   persist();
   return true;
 }
@@ -1023,7 +1060,13 @@ function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-function createFromEpub(title, markdown, toc, coverDataUrl, epubData, sourceName) {
+// D121 §1.1：导入时的作者归一（trim；空→NULL；超 200 截断而非拒绝，导入不应因元数据失败）
+function cleanImportAuthor(author) {
+  const a = String(author ?? "").trim().slice(0, 200);
+  return a || null;
+}
+
+function createFromEpub(title, markdown, toc, coverDataUrl, epubData, sourceName, author) {
   const cleanTitle = String(title || "").trim() || "未命名书籍";
   const itemId = crypto.randomUUID();
   const docId = crypto.randomUUID();
@@ -1051,9 +1094,9 @@ function createFromEpub(title, markdown, toc, coverDataUrl, epubData, sourceName
   }
 
   db.run(
-    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, 'epub', ?, ?, ?, ?, 0, 0)`,
-    [itemId, cleanTitle, sourceName || null, coverRel, now, now]
+    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, author, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, 'epub', ?, ?, ?, ?, ?, 0, 0)`,
+    [itemId, cleanTitle, sourceName || null, coverRel, cleanImportAuthor(author), now, now]
   );
   db.run(
     `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
@@ -1084,7 +1127,7 @@ function safeAssetFileName(name, fallback) {
   return base && !/^\.+$/.test(base) ? base : fallback;
 }
 
-function createImportedDoc({ title, markdown, sourceType, sourceName, originalName, originalBuf, images }) {
+function createImportedDoc({ title, markdown, sourceType, sourceName, originalName, originalBuf, images, author }) {
   const cleanTitle = String(title || "").trim() || firstLine(markdown) || "未命名书籍";
   const itemId = crypto.randomUUID();
   const docId = crypto.randomUUID();
@@ -1111,9 +1154,9 @@ function createImportedDoc({ title, markdown, sourceType, sourceName, originalNa
   }
 
   db.run(
-    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, NULL, ?, ?, 0, 0)`,
-    [itemId, cleanTitle, String(sourceType), sourceName || null, now, now]
+    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, author, created_at, updated_at, sync_version, is_deleted)
+     VALUES (?, 'local-user', ?, ?, ?, NULL, ?, ?, ?, 0, 0)`,
+    [itemId, cleanTitle, String(sourceType), sourceName || null, cleanImportAuthor(author), now, now]
   );
   db.run(
     `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
@@ -2168,6 +2211,74 @@ function resolveCardIssue(id) {
   return true;
 }
 
+// D121 §1.2：card_links —— 卡片辨析链接（只读展示用，不参与 FSRS / 队列）
+const CARD_LINK_VERDICTS = ["missing-qualifier", "one-wrong", "duplicate", "confusable", "no-conflict", "insufficient", "manual"];
+
+function normalizeCardLinkVerdictNote(verdict, note) {
+  if (typeof verdict !== "string" || !CARD_LINK_VERDICTS.includes(verdict)) throw new Error("cardLinks: verdict 非法");
+  const n = note == null ? "" : String(note).slice(0, 500);
+  return { verdict, note: n };
+}
+
+function addCardLink(input) {
+  const p = input && typeof input === "object" ? input : {};
+  const cardA = p.cardA;
+  if (typeof cardA !== "string" || !cardA.trim()) throw new Error("cardLinks: cardA 必须是非空字符串");
+  const cardB = p.cardB == null ? null : p.cardB;
+  if (cardB !== null && (typeof cardB !== "string" || !cardB.trim())) throw new Error("cardLinks: cardB 必须是非空字符串或 null");
+  if (cardB === cardA) throw new Error("cardLinks: cardB 不能等于 cardA");
+  const { verdict, note } = normalizeCardLinkVerdictNote(p.verdict, p.note);
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    "INSERT INTO card_links (id, user_id, card_a, card_b, kind, verdict, note, created_at, updated_at, sync_version, is_deleted) VALUES (?, 'local-user', ?, ?, 'disambiguated', ?, ?, ?, ?, 0, 0)",
+    [id, cardA, cardB, verdict, note, now, now]
+  );
+  persist();
+  return id;
+}
+
+function updateCardLink(id, patch) {
+  const p = patch && typeof patch === "object" ? patch : {};
+  const { verdict, note } = normalizeCardLinkVerdictNote(p.verdict, p.note);
+  if (!rowExists("card_links", id)) return false;
+  db.run("UPDATE card_links SET verdict = ?, note = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ? AND is_deleted = 0", [verdict, note, Date.now(), String(id)]);
+  persist();
+  return true;
+}
+
+function listCardLinksForCard(cardId) {
+  const cid = String(cardId ?? "");
+  if (!cid) return [];
+  const links = queryAll(
+    "SELECT * FROM card_links WHERE is_deleted = 0 AND (card_a = ? OR card_b = ?) ORDER BY updated_at DESC, created_at DESC",
+    [cid, cid]
+  );
+  const out = [];
+  for (const l of links) {
+    let other = null;
+    if (l.card_b != null) {
+      const otherId = l.card_a === cid ? l.card_b : l.card_a;
+      const r = queryAll(`${CARD_FULL_SELECT} WHERE c.id = ? AND c.is_deleted = 0`, [otherId])[0];
+      if (!r) continue; // 对端不存在/已软删：不返回
+      const m = withDocTitleFallback(r);
+      const front = String(m.frontMarkdown || m.noteText || "").replace(/\s+/g, " ").trim().slice(0, 60);
+      other = { id: otherId, front, docTitle: m.docTitle || null };
+    }
+    out.push({
+      id: l.id,
+      cardA: l.card_a,
+      cardB: l.card_b ?? null,
+      verdict: l.verdict ?? null,
+      note: l.note ?? "",
+      createdAt: l.created_at,
+      updatedAt: l.updated_at,
+      other
+    });
+  }
+  return out;
+}
+
 function createAIGenBatch(batch) {
   const id = crypto.randomUUID();
   db.run(
@@ -2294,7 +2405,9 @@ function ensurePromptTemplates() {
   //   ③ card-literature 由序列模板占位改为**专用文学模板**（此前 CARD_LITERATURE_PROMPT 写了却无人引用，属死代码）。
   // 目标版本统一升到 6——v5 已被 v30 两批占用，存量库必须有更高版本号才会补播新内容。
   // v46（M14-UM2，§4.18-13）统一升到 7：组装 R20 记忆情境接地段（v6 基础文本不变，旧版本行留痕）。
-  const TARGET_VERSION = 7;
+  // v8（D121，v48.77）统一升到 8：R21 限定完整性（归属/应然实然/时空范围/框架口径四层）+ 输出字段 qualifier
+  //   + 自检「限定排查」；请求装配新增【前后文】【相关已有卡】块（模板外注入）。旧版本行留痕。
+  const TARGET_VERSION = 8;
   const seedScope = (scope, name, content) => {
     const rows = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope]);
     if (Number(rows[0]?.v || 0) >= TARGET_VERSION) return;
@@ -2303,16 +2416,16 @@ function ensurePromptTemplates() {
       [crypto.randomUUID(), scope, name, content, TARGET_VERSION, situationRequiredFor(scope), now]
     );
   };
-  seedScope("card-generation", "主制卡 v6", CARD_GEN_PROMPT);
-  seedScope("card-formula", "公式分解 v6", CARD_FORMULA_PROMPT);
-  seedScope("card-seq", "序列/背诵 v6", CARD_SEQ_PROMPT);
-  seedScope("card-enum", "枚举拆解 v6", CARD_ENUM_PROMPT);
+  seedScope("card-generation", "主制卡 v8", CARD_GEN_PROMPT);
+  seedScope("card-formula", "公式分解 v8", CARD_FORMULA_PROMPT);
+  seedScope("card-seq", "序列/背诵 v8", CARD_SEQ_PROMPT);
+  seedScope("card-enum", "枚举拆解 v8", CARD_ENUM_PROMPT);
   // card-literature：专用文学模板（v31 修复死代码；v30 的序列占位行保留留痕）
-  seedScope("card-literature", "文学/诗歌背诵 v6（专用模板）", CARD_LITERATURE_PROMPT);
-  seedScope("card-mnemonic", "助记双卡 v6", CARD_MNEMONIC_PROMPT);
-  seedScope("card-contrast", "对比卡 v6", CARD_CONTRAST_PROMPT);
-  seedScope("card-wording", "措辞优化 v6", CARD_WORDING_PROMPT);
-  seedScope("card-basic", "前置知识卡 v6", CARD_BASIC_PROMPT);
+  seedScope("card-literature", "文学/诗歌背诵 v8（专用模板）", CARD_LITERATURE_PROMPT);
+  seedScope("card-mnemonic", "助记双卡 v8", CARD_MNEMONIC_PROMPT);
+  seedScope("card-contrast", "对比卡 v8", CARD_CONTRAST_PROMPT);
+  seedScope("card-wording", "措辞优化 v8", CARD_WORDING_PROMPT);
+  seedScope("card-basic", "前置知识卡 v8", CARD_BASIC_PROMPT);
   // v32（M7，D31）：card-vocab 新 scope 首版 v1——既有 v6 目标版本不动，只增新 scope 行
   try {
     const vocabCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'card-vocab'")[0]?.n || 0;
@@ -2397,6 +2510,17 @@ function ensurePromptTemplates() {
       db.run(
         "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'review-answer-judge', 'AI 判答 v1', ?, 1, 1, ?, ?)",
         [crypto.randomUUID(), REVIEW_ANSWER_JUDGE_PROMPT, situationRequiredFor("review-answer-judge"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // D121（v48.77 / §3.3）：card-disambiguate 新 scope 首版 v1——卡片辨析 AI 诊断（点击才调用）。
+  // 与制卡族 TARGET_VERSION 无关（同 review-answer-judge 法：per-scope count==0 播种）；situationRequiredFor 返回 0。
+  try {
+    const disCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'card-disambiguate'")[0]?.n || 0;
+    if (Number(disCount) === 0) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'card-disambiguate', '卡片辨析 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), CARD_DISAMBIGUATE_PROMPT, situationRequiredFor("card-disambiguate"), now]
       );
     }
   } catch { /* 播种失败不阻塞启动 */ }
@@ -2660,7 +2784,7 @@ function setDictCache(providerId, language, word, entry, version) {
 
 function getDocument(itemId) {
   const stmt = db.prepare(`
-    SELECT li.title, li.progress_json AS progressJson, d.id AS documentId, d.markdown, li.source_type AS sourceType
+    SELECT li.title, li.progress_json AS progressJson, d.id AS documentId, d.markdown, li.source_type AS sourceType, li.author
     FROM library_items li
     JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.id = ? AND li.is_deleted = 0
@@ -4126,10 +4250,11 @@ function getStatsOverview() {
   const dueToday = dueTodayCandidates.length - kpiDeferred.size;
   const siblingDeferred = kpiDeferred.size;
   const reviewedToday = queryAll("SELECT DISTINCT card_id FROM review_logs WHERE reviewed_at >= ?", [today0]).length;
+  // 一次取出今日评过的卡集合，代替原来「每张活卡一条 SELECT」的 N+1（口径不变）
+  const reviewedTodaySet = new Set(queryAll("SELECT DISTINCT card_id FROM review_logs WHERE reviewed_at >= ?", [today0]).map((r) => r.card_id));
   const completedToday = active.filter((c) => {
     if ((c.fsrs?.due ?? now) > today24) return false; // 不再被推送
-    // 今日评过至少一次
-    return queryAll("SELECT 1 FROM review_logs WHERE card_id = ? AND reviewed_at >= ? LIMIT 1", [c.id, today0]).length > 0;
+    return reviewedTodaySet.has(c.id); // 今日评过至少一次
   }).length;
 
   // ---- 今日时长 / 连续天数 ----
@@ -4194,10 +4319,12 @@ function getStatsOverview() {
   const ratings = ratingRows.map((r) => ({ rating: r.rating, count: r.n }));
 
   // ---- 答题时长（近 90 天，按主领域分箱 + 全体五数概括）----
+  // 单卡作答耗时是「秒」量级：上限 10 分钟以内才计入——更长的几乎一定是「卡开着人走了」，
+  // 留着会把箱线图量程撑到小时级、把真实的几秒几十秒挤成一条线。
   const durRows = queryAll(
     `SELECT rl.duration_ms AS d, c.domain FROM review_logs rl
      JOIN cards c ON c.id = rl.card_id AND c.is_deleted = 0
-     WHERE rl.reviewed_at >= ? AND rl.duration_ms IS NOT NULL AND rl.duration_ms > 0`,
+     WHERE rl.reviewed_at >= ? AND rl.duration_ms IS NOT NULL AND rl.duration_ms > 0 AND rl.duration_ms <= 600000`,
     [now - 90 * 86400_000]
   );
   const quantile = (arr, q) => {
@@ -4225,26 +4352,33 @@ function getStatsOverview() {
     outliers: arr.filter((v) => v > quantile(arr, 0.75) + 1.5 * (quantile(arr, 0.75) - quantile(arr, 0.25))).slice(0, 4)
   })).filter((f) => f.count >= 5).sort((a, b) => a.median - b.median);
   const allDur = durRows.map((r) => r.d);
-  // 直方图：5 分钟一箱 × 12 箱（0–60 分钟），前端按小时轴展示
+  // 直方图：5 秒一箱 × 12 箱（0–60 秒；最后一箱含 ≥55 秒），前端按秒轴展示
   const durationHist = {};
   for (const v of allDur) {
-    const bin = Math.min(11, Math.floor(v / 300_000));
+    const bin = Math.min(11, Math.floor(v / 5_000));
     durationHist[bin] = (durationHist[bin] || 0) + 1;
   }
   const durationBins = Array.from({ length: 12 }, (_, i) => durationHist[i] || 0);
+  const durationMedianMs = Math.round(quantile(allDur, 0.5));
+  const durationP90Ms = Math.round(quantile(allDur, 0.9));
 
-  // ---- 卡片生命周期漏斗（近 90 天入队样本；v34 起复用 KPI 卡集，fsrs 已解析）----
+  // ---- 卡片生命周期漏斗（近 90 天新建的卡；v34 起复用 KPI 卡集，fsrs 已解析）----
+  // 阶段单调递减：新建 ⊇ 已开始学（脱离 new）⊇ 进入长期复习（review/relearning）⊇ 已巩固（稳定度 > 21 天）。
+  // 原口径把「AI 草稿」与「采纳入队」取同一个数（流转率恒 100%），且把仍在学习步里的卡
+  // 漏出「已开始学」——这里改为真实可对账的四段；drafts/entered 字段保留以兼容旧读数。
   const funnelFrom = now - 90 * 86400_000;
   const cohort = kpiCards.filter((c) => c.createdAt >= funnelFrom);
-  const funnel = { drafts: cohort.length, entered: cohort.length, firstLearned: 0, reviewing: 0, consolidated: 0 };
+  const funnel = { drafts: cohort.length, entered: cohort.length, created: cohort.length, firstLearned: 0, reviewing: 0, consolidated: 0 };
   for (const c of cohort) {
     const f = c.fsrs || {};
-    if (f.state === "review" || f.state === "relearning") funnel.firstLearned++;
-    if (f.state === "review" && (f.stability ?? 0) > 21) { funnel.reviewing++; funnel.consolidated++; }
-    else if (f.state === "review") funnel.reviewing++;
+    const st = f.state;
+    const started = st === "learning" || st === "review" || st === "relearning" || (f.reps ?? 0) > 0;
+    if (started) funnel.firstLearned++;
+    if (st === "review" || st === "relearning") funnel.reviewing++;
+    if (st === "review" && (f.stability ?? 0) > 21) funnel.consolidated++;
   }
 
-  // ---- 新建卡来源（近 26 周，卡 → 书 × 主领域）----
+  // ---- 新建卡来源（近 26 周，卡 → 书 × 主领域；库内聚合，不把逐卡行送到渲染层）----
   const srcFrom = now - 182 * 86400_000;
   const srcRows = queryAll(
     `SELECT c.id, c.domain, c.source_ref_json, c.context_ref_json, li.title AS bookTitle
@@ -4254,22 +4388,38 @@ function getStatsOverview() {
      WHERE c.is_deleted = 0 AND c.created_at >= ?`,
     [srcFrom]
   );
-  const sourceCards = srcRows.map((r) => {
+  const srcAgg = new Map();
+  const srcLeafMain = {};
+  for (const l of UDC_LEAVES) srcLeafMain[l.code] = l.main;
+  for (const r of srcRows) {
     let dom = [];
     try { dom = r.domain ? JSON.parse(r.domain) : []; } catch { /* ignore */ }
     let book = r.bookTitle;
     if (!book) {
       try { book = JSON.parse(r.source_ref_json || "null")?.title || null; } catch { book = null; }
     }
-    return { book: book || "未知来源", domain: dom[0] || null };
-  });
+    // 领域归到 UDC 主类（叶 → 主类走 UDC_LEAVES 单一来源；原来渲染层另抄了一张写死的映射表）
+    const main = dom[0] ? (srcLeafMain[dom[0]] ?? "") : "";
+    const key = `${main}\u0000${book || "未知来源"}`;
+    const cur = srcAgg.get(key);
+    if (cur) cur.count++;
+    else srcAgg.set(key, { book: book || "未知来源", main: main || null, count: 1 });
+  }
+  const sourceBooks = [...srcAgg.values()].sort((a, b) => b.count - a.count);
 
-  // ---- 领域排名（近 6 个月，按月）----
+  // ---- 领域排名（近 6 个自然月，按月；月份轴连续，没复习的月份 rank=0）----
+  // 原实现只取「有数据的月份」，而渲染层按「今天往前数 6 个月」打月份标签——中间有空月时
+  // 标签与数据整体错位。现在后端直接给出连续月轴 domainRankMonths。
+  const rankMonths = [];
+  for (let k = 5; k >= 0; k--) {
+    const dt = new Date(new Date(now).getFullYear(), new Date(now).getMonth() - k, 1);
+    rankMonths.push({ key: `${dt.getFullYear()}-${dt.getMonth() + 1}`, from: dt.getTime(), month: dt.getMonth() + 1 });
+  }
   const rankRows = queryAll(
     `SELECT rl.reviewed_at, c.domain FROM review_logs rl
      JOIN cards c ON c.id = rl.card_id AND c.is_deleted = 0
      WHERE rl.reviewed_at >= ?`,
-    [now - 183 * 86400_000]
+    [rankMonths[0].from]
   );
   const monthMap = {};
   for (const r of rankRows) {
@@ -4281,18 +4431,23 @@ function getStatsOverview() {
     (monthMap[mk] = monthMap[mk] || {});
     monthMap[mk][key] = (monthMap[mk][key] || 0) + 1;
   }
-  const monthKeys = Object.keys(monthMap).sort().slice(-6);
+  const monthKeys = rankMonths.map((m) => m.key);
   const allCodes = new Set();
-  for (const mk of monthKeys) for (const code of Object.keys(monthMap[mk])) allCodes.add(code);
+  for (const mk of monthKeys) for (const code of Object.keys(monthMap[mk] || {})) allCodes.add(code);
   const domainRank = [...allCodes].map((code) => ({
     code,
     label: code === "none" ? "未分类" : ((UDC_LEAVES.find((l) => l.code === code) || {}).label || code),
+    counts: monthKeys.map((mk) => (monthMap[mk] || {})[code] || 0),
     ranks: monthKeys.map((mk) => {
-      const entries = Object.entries(monthMap[mk]).sort((a, b) => b[1] - a[1]);
+      const entries = Object.entries(monthMap[mk] || {}).sort((a, b) => b[1] - a[1]);
       const idx = entries.findIndex(([c]) => c === code);
-      return idx < 0 ? entries.length + 1 : idx + 1;
+      return idx < 0 ? 0 : idx + 1; // 0 = 当月没有复习
     })
-  })).sort((a, b) => a.ranks[a.ranks.length - 1] - b.ranks[b.ranks.length - 1]);
+  })).sort((a, b) => {
+    const la = a.ranks[a.ranks.length - 1] || 99, lb = b.ranks[b.ranks.length - 1] || 99;
+    return la - lb || b.counts.reduce((x, y) => x + y, 0) - a.counts.reduce((x, y) => x + y, 0);
+  });
+  const domainRankMonths = rankMonths.map((m) => ({ key: m.key, month: m.month }));
 
   // ---- 月度队列水位（当月）----
   const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
@@ -4302,14 +4457,25 @@ function getStatsOverview() {
   // 照下方阅读字数那两条的既有写法 JOIN 父表过滤（review_logs/review_skips 自身没有软删位）。
   const monthReviews = queryAll("SELECT COUNT(DISTINCT r.card_id) AS n FROM review_logs r JOIN cards c ON c.id = r.card_id WHERE r.reviewed_at >= ? AND c.is_deleted = 0", [monthStart])[0]?.n || 0;
   const monthSkips = queryAll("SELECT COUNT(DISTINCT s.card_id) AS n FROM review_skips s JOIN cards c ON c.id = s.card_id WHERE s.skipped_at >= ? AND c.is_deleted = 0", [monthStart])[0]?.n || 0;
-  const queueFlow = { carriedOver: Math.max(0, dueToday - monthNew), overdue: 0, newCards: monthNew, completed: monthReviews, skipped: monthSkips, remaining: Math.max(0, dueToday - completedToday) };
+  // 到期预测：未来 14 个学习日每天到期的**已学过**的卡数（新卡无 due，不计）；早于今天起点的归「逾期」。
+  // overdue 此前恒为 0（占位未实现），现按真实到期时刻统计。
+  const dueForecast = Array(14).fill(0);
+  let overdueCards = 0;
+  for (const c of active) {
+    const due = c.fsrs?.due;
+    if (typeof due !== "number") continue;
+    const idx = Math.floor((due - today0) / 86400_000);
+    if (idx < 0) overdueCards++;
+    else if (idx < 14) dueForecast[idx]++;
+  }
+  const queueFlow = { carriedOver: Math.max(0, dueToday - monthNew), overdue: overdueCards, newCards: monthNew, completed: monthReviews, skipped: monthSkips, remaining: Math.max(0, dueToday - completedToday) };
 
-  // ---- 阅读字数（近 45 天**含今日** = 46 个日桶，相邻正增量之和）----
+  // ---- 阅读字数（近 90 天**含今日** = 90 个日桶，相邻正增量之和）----
   // 批次 B（D-TEST-12）：桶轴必须与 readByDay 的键（dayStartMs）同一坐标系——
   // 原来用 now - 45·day（带当天毫秒）去取日切点键的表，恒取不到，图此恒为 0。
   // 批次 B（D-TEST-23）：JOIN 父表过滤已删书（§7.2 L869「查询一律带 is_deleted = 0」）；
   // reading_events 表本身没有软删位，绝不能写 re.is_deleted。
-  const readFrom = today0 - 45 * 86400_000;
+  const readFrom = today0 - 89 * 86400_000;
   const readRows = queryAll(
     `SELECT re.item_id, re.char_pos, re.created_at FROM reading_events re
      JOIN library_items li ON li.id = re.item_id AND li.is_deleted = 0
@@ -4333,19 +4499,18 @@ function getStatsOverview() {
     "SELECT reviewed_at, rating FROM review_logs WHERE reviewed_at >= ?",
     [now - 90 * 86400_000]
   );
-  const rhythmGrid = Array.from({ length: 7 }, () => Array(13).fill(0));
-  const rhythmEvents = [];
-  const RHYTHM_SAMPLE_MAX = 60;
-  const rhythmStride = Math.max(1, Math.ceil(rhythmRows.length / RHYTHM_SAMPLE_MAX));
-  rhythmRows.forEach((r, idx) => {
+  // 星期 × 24 个整点（钟面时刻，不受学习日切点影响——节律看的是「几点」）。
+  // 原来只开 8–20 点 13 列，早晚复习被夹到两端的列里，曲线端点凭空翘起。
+  const rhythmGrid = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const rhythmHours = Array.from({ length: 24 }, () => ({ count: 0, again: 0 }));
+  for (const r of rhythmRows) {
     const dt = new Date(r.reviewed_at);
     const weekday = (dt.getDay() + 6) % 7;
     const hour = dt.getHours();
-    rhythmGrid[weekday][Math.min(12, Math.max(0, hour - 8))]++;
-    if (idx % rhythmStride === 0 && rhythmEvents.length < RHYTHM_SAMPLE_MAX) {
-      rhythmEvents.push({ hour, again: r.rating === "Again" });
-    }
-  });
+    rhythmGrid[weekday][hour]++;
+    rhythmHours[hour].count++;
+    if (r.rating === "Again") rhythmHours[hour].again++;
+  }
 
   return {
     kpi: { dueToday, completedToday, pendingToday: Math.max(0, dueToday - completedToday), reviewedToday, streak, minutesToday: Math.round(todayDur / 60000), siblingDeferred },
@@ -4356,14 +4521,91 @@ function getStatsOverview() {
     ratings,
     durationByField,
     durationBins,
+    durationMedianMs,
+    durationP90Ms,
     funnel,
-    sourceCards,
+    sourceBooks,
     domainRank,
+    domainRankMonths,
     queueFlow,
+    dueForecast,
     readingDays,
     rhythmGrid,
-    rhythmEvents
+    rhythmHours
   };
+}
+
+// ---------- 数据页「一日时间轴」（stats:timeline，只读） ----------
+// 把阅读 / 摘录 / 复习 / 制卡 / 日记五类行为聚成「时段块」（口径见 statsTimeline.js 顶部注释）。
+// opts: { endDay?: 任一落在目标学习日内的时间戳（缺省=现在）, days?: 1–31（缺省 1；含 endDay 往前共 days 个学习日） }
+const statsTimeline = require("./statsTimeline");
+
+function getStatsTimeline(opts) {
+  const now = Date.now();
+  const days = Math.min(31, Math.max(1, Math.floor(Number(opts?.days) || 1)));
+  const endTs = Number.isFinite(Number(opts?.endDay)) && Number(opts?.endDay) > 0 ? Number(opts.endDay) : now;
+  const endDay0 = dayStartMs(endTs);
+  const start0 = endDay0 - (days - 1) * 86400_000;
+  const to = endDay0 + 86400_000;
+  const events = [];
+
+  // 复习（卡片）
+  for (const r of queryAll(
+    `SELECT rl.reviewed_at, rl.duration_ms, rl.rating FROM review_logs rl
+     JOIN cards c ON c.id = rl.card_id AND c.is_deleted = 0
+     WHERE rl.reviewed_at >= ? AND rl.reviewed_at < ?`,
+    [start0, to]
+  )) events.push(statsTimeline.reviewEvent(r.reviewed_at, r.duration_ms, r.rating, "card"));
+
+  // 复习（摘录：读后推进 / 推迟 / 毕业；只数摘录，纯高亮不进队列）
+  for (const r of queryAll(
+    `SELECT o.created_at FROM extract_ops o JOIN extracts e ON e.id = o.extract_id AND e.is_deleted = 0
+     WHERE o.created_at >= ? AND o.created_at < ? AND o.op_type IN ('advance','postpone','graduate')
+       AND COALESCE(e.kind,'extract') = 'extract'`,
+    [start0, to]
+  )) events.push(statsTimeline.reviewEvent(r.created_at, 0, null, "extract"));
+
+  // 阅读：与概览同口径（相邻位置的正增量），区间起点前的最后位置作基准
+  const readRows = queryAll(
+    `SELECT re.item_id, re.char_pos, re.created_at, li.title FROM reading_events re
+     JOIN library_items li ON li.id = re.item_id AND li.is_deleted = 0
+     WHERE re.created_at >= ? AND re.created_at < ? ORDER BY re.created_at ASC`,
+    [start0, to]
+  );
+  const lastPos = {};
+  for (const r of readRows) {
+    if (lastPos[r.item_id] === undefined) {
+      const prior = queryAll(
+        "SELECT char_pos FROM reading_events WHERE item_id = ? AND created_at < ? ORDER BY created_at DESC LIMIT 1",
+        [r.item_id, start0]
+      )[0];
+      lastPos[r.item_id] = prior ? prior.char_pos : r.char_pos;
+    }
+    const delta = r.char_pos - lastPos[r.item_id];
+    lastPos[r.item_id] = r.char_pos;
+    events.push(statsTimeline.readEvent(r.created_at, delta > 0 ? delta : 0, r.title));
+  }
+
+  // 摘录（含纯高亮，块详情里分开计数）
+  for (const r of queryAll(
+    "SELECT created_at, kind FROM extracts WHERE is_deleted = 0 AND created_at >= ? AND created_at < ?",
+    [start0, to]
+  )) events.push(statsTimeline.pointEvent("extract", r.created_at, r.kind === "highlight" ? { hl: true } : undefined));
+
+  // 制卡
+  for (const r of queryAll(
+    "SELECT created_at FROM cards WHERE is_deleted = 0 AND created_at >= ? AND created_at < ?",
+    [start0, to]
+  )) events.push(statsTimeline.pointEvent("card", r.created_at));
+
+  // 日记（草稿不算，发送/保存后才是正式条目）
+  for (const r of queryAll(
+    "SELECT created_at FROM journal_entries WHERE is_deleted = 0 AND is_draft = 0 AND created_at >= ? AND created_at < ?",
+    [start0, to]
+  )) events.push(statsTimeline.pointEvent("journal", r.created_at));
+
+  const built = statsTimeline.buildTimeline(events, { dayStart0: start0, days });
+  return { now, cutoffHour: getCutoffHour(), ...built };
 }
 
 // ---------- v36（M8-A，§6.5 / D34）：日记条目（第二输入通道） ----------
@@ -6728,12 +6970,16 @@ module.exports = {
   saveSkip,
   addReadingEvent,
   getStatsOverview,
+  getStatsTimeline,
   setCardSuspended,
   updateCardLeech,
   resolveLeech,
   listLeechCards,
   addCardIssue,
   listCardIssues,
+  addCardLink,
+  updateCardLink,
+  listCardLinksForCard,
   resolveCardIssue,
   createAIGenBatch,
   getAIGenBatch,
@@ -6751,6 +6997,7 @@ module.exports = {
   dictLangForFormat,
   setLibraryItemLang,
   setLibraryItemTitle,
+  setLibraryItemAuthor,
   listCardDomainsForDocument,
   getDictCache,
   setDictCache,

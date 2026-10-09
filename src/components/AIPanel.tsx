@@ -7,7 +7,7 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { lintCard, parseCloze, parseFollowUps, type CardDraft, type CardGenMode, type FollowUpGroup, type OcclusionRegion } from "../lib/cards";
+import { lintCard, needsAttribution, parseCloze, parseFollowUps, type CardDraft, type CardQualifier, type CardGenMode, type FollowUpGroup, type OcclusionRegion } from "../lib/cards";
 import { sanitizeDomain } from "../lib/udc";
 import { isLikelySameText, parseSteMarkers, stripSteMarkers, type ExplainModePref } from "../lib/explainRouter";
 import Dropdown from "./Dropdown";
@@ -19,6 +19,17 @@ function toList(v: unknown): string[] {
   if (Array.isArray(v)) return v.map((x) => String(x));
   if (typeof v === "string" && v.trim()) return v.split(/[,;；、]/).map((s) => s.trim()).filter(Boolean);
   return [];
+}
+
+/** D121 §2.6：归属标签文案 */
+function qualifierLabel(q: CardQualifier): string {
+  switch (q.stance) {
+    case "author": return "作者观点";
+    case "reported": return q.holder ? `转述·${q.holder}` : "转述";
+    case "criticized": return q.holder ? `批判对象·${q.holder}` : "批判对象";
+    case "consensus": return "公认";
+    default: return "归属未定";
+  }
 }
 
 /**
@@ -129,6 +140,7 @@ export default function AIPanel({
   onStop?: () => void;
   elapsedTick?: number;
 }) {
+  const [qualInput, setQualInput] = useState<Record<number, string>>({});
   const [editing, setEditing] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, { front?: string; back?: string }>>({});
   // v46（M14-UM2，§6.7.3）：memoryRef 校验失败的卡「情境来源存疑」默认不勾选——接受按钮需二次点击确认
@@ -436,6 +448,17 @@ export default function AIPanel({
                         )}
                         {panel.supplemental?.has(i) && <span className="ai-draft-supplement mono">补充</span>}
                         {d.contextPrefix && <span className="ai-draft-prefix mono">{d.contextPrefix}</span>}
+                        {/* D121 §2.6：R21 归属标签——unknown 用既有 warn 色（lint-warn），其余沿用前缀行同款样式 */}
+                        {d.qualifier && (
+                          <span
+                            className={d.qualifier.stance === "unknown" ? "lint lint-warn mono" : "ai-draft-prefix mono"}
+                            title={d.qualifier.note ?? undefined}
+                            data-testid="draft-qualifier"
+                            data-stance={d.qualifier.stance}
+                          >
+                            {qualifierLabel(d.qualifier)}
+                          </span>
+                        )}
                         <div className="ai-draft-text">
                           {d.cardType === "cloze"
                             ? (d.cloze || "").replace(/\{\{c\d+::(.*?)(?:::(.*?))?\}\}/g, "〔$1〕")
@@ -471,6 +494,34 @@ export default function AIPanel({
                               {it.ruleId} {it.message}
                             </span>
                           ))}
+                        </div>
+                      )}
+                      {/* D121 §2.6：归属未定 / 缺 qualifier 且含观点性措辞 → 单行「补限定」，拼到 front（cloze 卡拼到 cloze 文本）开头 */}
+                      {!dIsOcc && (d.qualifier?.stance === "unknown" || (!d.qualifier && needsAttribution(d.cardType === "cloze" ? d.cloze || d.front : d.front, d.contextPrefix))) && (
+                        <div className="ai-actions" data-testid="draft-add-qualifier">
+                          <input
+                            className="mono"
+                            style={{ flex: 1, minWidth: 0 }}
+                            placeholder="补限定（如：桑德尔认为，）"
+                            value={qualInput[i] ?? ""}
+                            onChange={(e) => setQualInput((v) => ({ ...v, [i]: e.target.value }))}
+                          />
+                          <button
+                            className="btn btn-outline btn-sm"
+                            disabled={!(qualInput[i] ?? "").trim()}
+                            onClick={() => {
+                              const text = (qualInput[i] ?? "").trim();
+                              if (!text) return;
+                              const q: CardQualifier = { stance: "reported", holder: [...text].slice(0, 60).join(""), note: d.qualifier?.note ?? null };
+                              onEdit(i, d.cardType === "cloze" ? { cloze: text + (d.cloze || ""), qualifier: q } : { front: text + d.front, qualifier: q });
+                              setQualInput((v) => {
+                                const { [i]: _r, ...rest } = v;
+                                return rest;
+                              });
+                            }}
+                          >
+                            补上
+                          </button>
                         </div>
                       )}
                       <div className="ai-actions">

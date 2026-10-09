@@ -98,6 +98,51 @@ function extractImageContext(doc: Document, img: HTMLElement): string | undefine
   }
 }
 
+/**
+ * D121 §2.3 选区前后文：与 extractImageContext 同思路（块级容器 + 兄弟块），但以选区 Range 起点为准。
+ * 选区所在块内位于选区之前/之后的文字各计 1 段（与 paragraphContext 对同段的处理一致），
+ * 再向外补前 2 段 / 后 1 段有文本的兄弟块；before ≤600（远端截断）、after ≤400，段内空白归一。
+ */
+function extractSelectionContext(range: Range): { before: string; after: string } | null {
+  try {
+    const BEFORE_CAP = 600;
+    const AFTER_CAP = 400;
+    const norm = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim();
+    const startEl = range.startContainer.nodeType === 1 ? (range.startContainer as Element) : range.startContainer.parentElement;
+    if (!startEl) return null;
+    const block = startEl.closest("p, li, blockquote, h1, h2, h3, h4, h5, h6, pre, td, div") || startEl;
+    const pre = block.ownerDocument.createRange();
+    pre.selectNodeContents(block);
+    pre.setEnd(range.startContainer, range.startOffset);
+    const post = block.ownerDocument.createRange();
+    post.selectNodeContents(block);
+    post.setStart(range.endContainer, range.endOffset);
+    const before: string[] = [];
+    const ownBefore = norm(pre.toString());
+    if (ownBefore) before.unshift(ownBefore);
+    let prev = block.previousElementSibling;
+    while (prev && before.length < 2) {
+      const t = norm(prev.textContent);
+      if (t) before.unshift(t);
+      prev = prev.previousElementSibling;
+    }
+    let after = norm(post.toString());
+    if (!after) {
+      let next = block.nextElementSibling;
+      while (next && !after) {
+        after = norm(next.textContent);
+        next = next.nextElementSibling;
+      }
+    }
+    let b = before.join("\n");
+    if (b.length > BEFORE_CAP) b = b.slice(b.length - BEFORE_CAP);
+    if (after.length > AFTER_CAP) after = after.slice(0, AFTER_CAP);
+    return b || after ? { before: b, after } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   const view = document.createElement("foliate-view") as unknown as FoliateView;
   view.style.display = "block";
@@ -173,6 +218,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   let lastRelocate: RelocateInfo | null = null;
   let appearance: ReaderAppearance | null = null;
   let currentFlow: "scrolled" | "paged" = "scrolled";
+  let pendingMode: ReaderModeConfig | null = null;
   // v48.23（D61 §6.8-11）：多段选择高亮——两个引擎共用的实现（见 ../multiHighlight.ts）。
   // iframe 文档拿不到宿主的 Token，故把 --hl-multi 的求值结果以字面值注入该文档的 <style>
   // （与外观注入同一做法；宿主侧则直接吃 src/theme.css 的 ::highlight(multi-select) 规则）。
@@ -558,6 +604,10 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         type: MIME_BY_EXT[ext] || "application/epub+zip"
       });
       await view.open(file);
+      // 首屏闪烁修复：renderer 在 open 后才存在、首次排版在 init 里——必须在 init 之前把
+      // 已知的模式/外观写进 renderer，否则 paginator 默认（分页+双栏=对开）先画一帧，
+      // 随后 onReady 里的 setMode 才切回滚动。
+      if (pendingMode || appearance) applyRendererSettings(appearance, pendingMode);
       if (init?.location?.cfi) {
         await view.init({ lastLocation: init.location.cfi });
       } else {
@@ -622,6 +672,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
 
     async setMode(mode) {
       currentFlow = mode.flow;
+      pendingMode = mode;
       docs.forEach((doc) => {
         if (appearance) injectAppearanceStyle(doc, appearance, currentFlow);
         if (currentFlow !== "paged") fixSvgAspect(doc);
@@ -689,6 +740,18 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       const r = view.renderer;
       if (!r) return null;
       return getSelectionFromContents(view, r.getContents());
+    },
+
+    // D121 §2.3：选区前后文（供 AI 制卡判断归属/前提）；iframe 对宿主跨源，只能在本 adapter 内取 DOM
+    getSelectionContext(): { before: string; after: string } | null {
+      const r = view.renderer;
+      if (!r) return null;
+      for (const { doc } of r.getContents()) {
+        const sel = doc.defaultView?.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) continue;
+        return extractSelectionContext(sel.getRangeAt(0));
+      }
+      return null;
     },
 
     // v35 正文图片定位：按 alt/周边文字在各章节 DOM 找回原图并滚到可见，返回宿主坐标框。

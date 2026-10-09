@@ -1,22 +1,17 @@
 // 统计组件注册表 — 数据选择（一数据多图型）与图型切换在这里集中定义
-// 图型渲染全部来自 charts/swiss.tsx（原创实现，瑞士国际主义风格）。
-// 兼容：老配置里存的旧 chart id 通过 ALIAS 映射到新图型，无需迁移设置。
+// 图表渲染全部来自 charts/charts.tsx（响应式像素布局）与 charts/Timeline.tsx（一日时间轴）。
+// 兼容：老配置里存的旧 chart id 通过 ALIAS 映射到新图型，无需迁移设置；旧 id 若仍有对应图型则沿用同名 id。
 import type { ReactNode } from "react";
 import type { StatsOverview } from "../../lib/stats";
 import {
-  ChartSvg, chartQueueBar, chartStreakRuler, chartMinutesStrip,
-  chartDailyColumns, chartCumulativeStep, chartWeekdayProfile, chartMonthMultiples,
-  chartUnitColumn, chartDivergingPair,
-  chartDomainDots, chartDomainTreemap,
-  chartRatingColumn,
-  chartFieldRanges, chartFreqPoly,
-  chartUnitFunnel,
-  chartSourceTree,
-  chartRhythmCurves, chartHourClusters,
-  chartRankSlope,
-  chartQueueLedger,
-  chartReadingStrips, chartReadingHist
-} from "../charts/swiss";
+  QueueProgress, StreakPanel, MinutesColumns,
+  HeatCalendar, DailyColumns, WeekdayBars, CumulativeArea,
+  TodayUnits, TodayRing,
+  DomainBars, DomainTreemap, RatingBar,
+  DurationHist, DurationRanges, FunnelBars, SourceBars,
+  RhythmHours, RhythmGrid, RankBump, QueueLedger, DueForecast, ReadingHist
+} from "../charts/charts";
+import TimelineWidget from "../charts/Timeline";
 
 export type ChartMode = string; // 图型 id，如 "months" / "columns"
 
@@ -35,7 +30,7 @@ export interface WidgetDef {
   render: (o: StatsOverview, dataKey: string, chart: ChartMode, rnd: (i: number, k: number) => number) => ReactNode;
 }
 
-// 确定性伪随机（保留导出以兼容 Dashboard 的 render 签名；新渲染器内部自带确定性 jitter）
+// 确定性伪随机（保留导出以兼容 Dashboard 的 render 签名）
 export const rnd: Rng = (i, k) => Math.abs(((i * 73856093) ^ (k * 19349663)) % 1000) / 1000;
 type Rng = (i: number, k: number) => number;
 
@@ -80,14 +75,16 @@ const HEAT_RANGES: Record<string, number> = {
   "reviews-30d": 30, "reviews-60d": 60, "reviews-90d": 90,
   "reviews-120d": 120, "reviews-150d": 150, "reviews-26w": 182
 };
-const heatSlice = (days: { date: number; count: number }[], dk: string) => days.slice(-(HEAT_RANGES[dk] ?? 90));
+const heatSlice = (o: StatsOverview, dk: string) =>
+  o.heatDays.slice(-(HEAT_RANGES[dk] ?? 90)).map((d) => ({ date: d.date, value: d.count }));
 const HEAT_KEYS = Object.keys(HEAT_RANGES);
 const HEAT_CHARTS = [
-  { id: "months", label: "月面板" },
+  { id: "months", label: "日历热力" },
   { id: "columns", label: "日柱" },
   { id: "weekday", label: "星期剖面" },
-  { id: "cumulative", label: "累计阶梯" }
+  { id: "cumulative", label: "累计曲线" }
 ];
+const HEAT_EMPTY = "所选范围暂无复习记录";
 
 export const WIDGETS: WidgetDef[] = [
   {
@@ -96,19 +93,33 @@ export const WIDGETS: WidgetDef[] = [
     dataKeys: ["kpi"],
     charts: {
       kpi: [
-        { id: "queuebar", label: "队列构成" },
-        { id: "streak", label: "连续学习里程碑" },
+        { id: "queuebar", label: "今日进度" },
+        { id: "streak", label: "连续学习" },
         { id: "minutes", label: "今日时长对照" }
       ]
     },
     defaultData: "kpi",
     defaultChart: "queuebar",
     render: (o, _dk, chart) => {
-      const c = (ALIAS.kpi as Record<string, string>)[chart] || chart;
-      if (c === "streak") return <ChartSvg {...chartStreakRuler(o.kpi.streak)} maxHeight={180} />;
-      if (c === "minutes") return <ChartSvg {...chartMinutesStrip(o.kpi, o.heatDays)} maxHeight={180} />;
-      return <ChartSvg {...chartQueueBar(o.kpi)} maxHeight={180} />;
+      const c = normalizeChartId("kpi", chart);
+      if (c === "streak") return <StreakPanel streak={o.kpi.streak} heatDays={o.heatDays} />;
+      if (c === "minutes") return <MinutesColumns kpi={o.kpi} heatDays={o.heatDays} />;
+      return <QueueProgress kpi={o.kpi} />;
     }
+  },
+  {
+    id: "timeline",
+    title: "一日时间轴",
+    wide: true,
+    dataKeys: ["timeline-day", "timeline-week"],
+    dataLabels: { "timeline-day": "单日明细", "timeline-week": "近 7 天" },
+    charts: {
+      "timeline-day": [{ id: "gantt", label: "甘特时间轴" }],
+      "timeline-week": [{ id: "gantt", label: "甘特时间轴" }]
+    },
+    defaultData: "timeline-day",
+    defaultChart: "gantt",
+    render: (_o, dk) => <TimelineWidget mode={dk === "timeline-week" ? "week" : "day"} />
   },
   {
     id: "heatmap",
@@ -123,12 +134,12 @@ export const WIDGETS: WidgetDef[] = [
     defaultData: "reviews-90d",
     defaultChart: "months",
     render: (o, dk, chart) => {
-      const c = (ALIAS.heatmap as Record<string, string>)[chart] || chart;
-      const days = heatSlice(o.heatDays, dk);
-      if (c === "columns") return <ChartSvg {...chartDailyColumns(days)} maxHeight={300} />;
-      if (c === "weekday") return <ChartSvg {...chartWeekdayProfile(days)} maxHeight={300} />;
-      if (c === "cumulative") return <ChartSvg {...chartCumulativeStep(days)} maxHeight={300} />;
-      return <ChartSvg {...chartMonthMultiples(days)} maxHeight={300} />;
+      const c = normalizeChartId("heatmap", chart);
+      const days = heatSlice(o, dk);
+      if (c === "columns") return <DailyColumns days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
+      if (c === "weekday") return <WeekdayBars days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
+      if (c === "cumulative") return <CumulativeArea days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
+      return <HeatCalendar days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
     }
   },
   {
@@ -137,87 +148,73 @@ export const WIDGETS: WidgetDef[] = [
     dataKeys: ["today-progress"],
     charts: {
       "today-progress": [
-        { id: "units", label: "方块垒（1块=1张）" },
-        { id: "divergence", label: "双向发散" }
+        { id: "units", label: "方块格（1 格 = 1 张）" },
+        { id: "divergence", label: "进度环" }
       ]
     },
     defaultData: "today-progress",
     defaultChart: "units",
-    render: (o, _dk, chart) => {
-      const c = (ALIAS.today as Record<string, string>)[chart] || chart;
-      return c === "divergence"
-        ? <ChartSvg {...chartDivergingPair(o.kpi)} />
-        : <ChartSvg {...chartUnitColumn(o.kpi)} />;
-    }
+    render: (o, _dk, chart) => (normalizeChartId("today", chart) === "divergence" ? <TodayRing kpi={o.kpi} /> : <TodayUnits kpi={o.kpi} />)
   },
   {
     id: "domains",
     title: "领域分布",
     dataKeys: ["domains-main", "domains-detail"],
     charts: {
-      "domains-main": [
-        { id: "dots", label: "点行对齐" },
-        { id: "treemap", label: "矩形树图" }
-      ],
-      "domains-detail": [
-        { id: "dots", label: "点行对齐" },
-        { id: "treemap", label: "矩形树图" }
-      ]
+      "domains-main": [{ id: "dots", label: "排行条形" }, { id: "treemap", label: "矩形树图" }],
+      "domains-detail": [{ id: "dots", label: "排行条形" }, { id: "treemap", label: "矩形树图" }]
     },
     defaultData: "domains-main",
     defaultChart: "dots",
     render: (o, dk, chart) => {
-      const c = (ALIAS.domains as Record<string, string>)[chart] || chart;
       const items = domainItems(o, dk);
-      return c === "treemap"
-        ? <ChartSvg {...chartDomainTreemap(items, "卡")} />
-        : <ChartSvg {...chartDomainDots(items, "卡")} />;
+      return normalizeChartId("domains", chart) === "treemap"
+        ? <DomainTreemap items={items} unit="卡" />
+        : <DomainBars items={items} unit="卡" />;
     }
   },
   {
     id: "ratings",
     title: "评分构成",
     dataKeys: ["ratings-30d"],
-    charts: { "ratings-30d": [{ id: "ratingcol", label: "百分比单柱" }] },
+    charts: { "ratings-30d": [{ id: "ratingcol", label: "占比条" }] },
     defaultData: "ratings-30d",
     defaultChart: "ratingcol",
-    render: (o) => <ChartSvg {...chartRatingColumn(o.ratings)} />
+    render: (o) => <RatingBar ratings={o.ratings} />
   },
   {
     id: "duration",
     title: "答题时长",
     dataKeys: ["duration-by-field", "duration-hist"],
     charts: {
-      "duration-by-field": [{ id: "ranges", label: "区间浮条" }],
-      "duration-hist": [{ id: "freqpoly", label: "频率多边形" }]
+      "duration-by-field": [{ id: "ranges", label: "领域对比" }],
+      "duration-hist": [{ id: "freqpoly", label: "分布直方" }]
     },
     defaultData: "duration-hist",
     defaultChart: "freqpoly",
     render: (o, dk, chart) => {
-      const c = (ALIAS.duration as Record<string, string>)[chart] || chart;
-      if (dk === "duration-by-field" || c === "ranges")
-        return <ChartSvg {...chartFieldRanges(o.durationByField)} />;
-      return <ChartSvg {...chartFreqPoly(o.durationBins)} />;
+      if (dk === "duration-by-field" || normalizeChartId("duration", chart) === "ranges") return <DurationRanges fields={o.durationByField} />;
+      return <DurationHist bins={o.durationBins} medianMs={o.durationMedianMs} p90Ms={o.durationP90Ms} />;
     }
   },
   {
     id: "funnel",
     title: "卡片生命周期",
     dataKeys: ["funnel-90d"],
-    charts: { "funnel-90d": [{ id: "unitfunnel", label: "方块漏斗" }] },
+    charts: { "funnel-90d": [{ id: "unitfunnel", label: "逐级漏斗" }] },
     defaultData: "funnel-90d",
     defaultChart: "unitfunnel",
-    render: (o) => <ChartSvg {...chartUnitFunnel(o.funnel)} />
+    render: (o) => <FunnelBars funnel={o.funnel} />
   },
   {
     id: "sources",
     title: "来源归属",
     wide: true,
     dataKeys: ["sources-26w"],
-    charts: { "sources-26w": [{ id: "sourcetree", label: "归属树" }] },
+    charts: { "sources-26w": [{ id: "sourcetree", label: "领域 → 来源" }] },
     defaultData: "sources-26w",
     defaultChart: "sourcetree",
-    render: (o) => <ChartSvg {...chartSourceTree(o.sourceCards)} maxHeight={340} />
+    render: (o) => <SourceBars books={o.sourceBooks} />
   },
   {
     id: "rhythm",
@@ -225,55 +222,56 @@ export const WIDGETS: WidgetDef[] = [
     dataKeys: ["rhythm-90d"],
     charts: {
       "rhythm-90d": [
-        { id: "curves", label: "星期曲线谱" },
-        { id: "clusters", label: "时刻点簇" }
+        { id: "curves", label: "24 小时分布" },
+        { id: "clusters", label: "星期 × 时段" }
       ]
     },
     defaultData: "rhythm-90d",
     defaultChart: "curves",
-    render: (o, _dk, chart) => {
-      const c = (ALIAS.rhythm as Record<string, string>)[chart] || chart;
-      if (c === "clusters") {
-        return <ChartSvg {...chartHourClusters(o.rhythmEvents || [])} />;
-      }
-      return <ChartSvg {...chartRhythmCurves(o.rhythmGrid || [])} />;
-    }
+    render: (o, _dk, chart) => (normalizeChartId("rhythm", chart) === "clusters"
+      ? <RhythmGrid grid={o.rhythmGrid || []} />
+      : <RhythmHours hours={o.rhythmHours || []} />)
   },
   {
     id: "domainrank",
     title: "领域排名",
     dataKeys: ["domain-rank-6m"],
-    charts: { "domain-rank-6m": [{ id: "slope", label: "斜率排名" }] },
+    charts: { "domain-rank-6m": [{ id: "slope", label: "月度名次" }] },
     defaultData: "domain-rank-6m",
     defaultChart: "slope",
-    render: (o) => <ChartSvg {...chartRankSlope(o.domainRank.map((d) => ({ label: d.label, ranks: d.ranks })))} />
+    render: (o) => <RankBump rows={o.domainRank} months={o.domainRankMonths} />
   },
   {
     id: "queueflow",
     title: "队列水位",
     dataKeys: ["queue-month"],
-    charts: { "queue-month": [{ id: "ledger", label: "进出账本" }] },
+    charts: { "queue-month": [{ id: "ledger", label: "本月进出" }, { id: "forecast", label: "到期预测" }] },
     defaultData: "queue-month",
     defaultChart: "ledger",
-    render: (o) => <ChartSvg {...chartQueueLedger(o.queueFlow)} />
+    render: (o, _dk, chart) => (normalizeChartId("queueflow", chart) === "forecast"
+      ? <DueForecast overdue={o.queueFlow.overdue} forecast={o.dueForecast || []} />
+      : <QueueLedger q={o.queueFlow} />)
   },
   {
     id: "reading",
     title: "阅读输入",
     dataKeys: ["reading-45d"],
+    dataLabels: { "reading-45d": "近 12 周" },
     charts: {
       "reading-45d": [
-        { id: "strips", label: "周条密度带（42天）" },
+        { id: "strips", label: "日历热力" },
+        { id: "bars", label: "日柱" },
         { id: "rhist", label: "字数分布" }
       ]
     },
     defaultData: "reading-45d",
     defaultChart: "strips",
     render: (o, _dk, chart) => {
-      const c = (ALIAS.reading as Record<string, string>)[chart] || chart;
-      return c === "rhist"
-        ? <ChartSvg {...chartReadingHist(o.readingDays)} />
-        : <ChartSvg {...chartReadingStrips(o.readingDays)} maxHeight={300} />;
+      const c = normalizeChartId("reading", chart);
+      const all = o.readingDays.map((d) => ({ date: d.date, value: d.chars }));
+      if (c === "rhist") return <ReadingHist days={all} />;
+      if (c === "bars") return <DailyColumns days={all.slice(-60)} unit="字" emptyMsg="近 60 天暂无阅读记录" />;
+      return <HeatCalendar days={all.slice(-84)} unit="字" emptyMsg="近 12 周暂无阅读记录" />;
     }
   }
 ];

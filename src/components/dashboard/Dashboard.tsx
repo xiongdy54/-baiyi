@@ -17,12 +17,30 @@ interface WidgetConfig {
   chart: string;
 }
 
+/* 模块级缓存（stale-while-revalidate）：切页会卸载/重挂统计页，若每次从骨架屏起步，
+   就会出现「骨架 → 内容」的一次跳变（闪烁）。缓存上次的数据与布局，重挂载首帧直接渲染内容，
+   后台再静默拉最新数据覆盖。 */
+const dashCache: {
+  overview: StatsOverview | null;
+  layout: DashLayoutV2 | null;
+  hidden: string[];
+  configs: Record<string, WidgetConfig>;
+} = { overview: null, layout: null, hidden: [], configs: {} };
+
 export default function Dashboard() {
-  const [overview, setOverview] = useState<StatsOverview | null>(null);
+  const [overview, setOverviewState] = useState<StatsOverview | null>(dashCache.overview);
+  const setOverview = useCallback((o: StatsOverview) => { dashCache.overview = o; setOverviewState(o); }, []);
   const [error, setError] = useState<string | null>(null);
-  const [layout, setLayout] = useState<DashLayoutV2 | null>(null);
-  const [hidden, setHidden] = useState<string[]>([]);
-  const [configs, setConfigs] = useState<Record<string, WidgetConfig>>({});
+  const [layout, setLayoutState] = useState<DashLayoutV2 | null>(dashCache.layout);
+  const setLayout = useCallback((u: DashLayoutV2 | null | ((p: DashLayoutV2 | null) => DashLayoutV2 | null)) => {
+    setLayoutState((prev) => {
+      const next = typeof u === "function" ? u(prev) : u;
+      dashCache.layout = next;
+      return next;
+    });
+  }, []);
+  const [hidden, setHidden] = useState<string[]>(dashCache.hidden);
+  const [configs, setConfigs] = useState<Record<string, WidgetConfig>>(dashCache.configs);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [paletteTick, setPaletteTick] = useState(0);
@@ -38,6 +56,8 @@ export default function Dashboard() {
           settingsStore.get<DashLayoutV2 | null>("dashboard", "layout", null)
         ]);
         if (!alive) return;
+        dashCache.hidden = hiddenS;
+        dashCache.configs = configsS;
         setHidden(hiddenS);
         setConfigs(configsS);
         setLayout(syncHidden(isSaneLayoutV2(layoutS) ? layoutS! : defaultLayoutV2(hiddenS), hiddenS));
@@ -124,6 +144,7 @@ export default function Dashboard() {
   const setConfig = useCallback((widgetId: string, patch: Partial<WidgetConfig>) => {
     setConfigs((prev) => {
       const next = { ...prev, [widgetId]: { ...(prev[widgetId] || { dataKey: widgetById(widgetId)!.defaultData, chart: widgetById(widgetId)!.defaultChart }), ...patch } };
+      dashCache.configs = next;
       settingsStore.set("dashboard", "configs", next);
       return next;
     });
@@ -138,6 +159,7 @@ export default function Dashboard() {
         settingsStore.get<string[]>("dashboard", "hiddenWidgets", []),
         settingsStore.get<DashLayoutV2 | null>("dashboard", "layout", null)
       ]);
+      dashCache.hidden = hiddenS;
       setHidden(hiddenS);
       setLayout((prev) => {
         const merged = syncHidden(prev || defaultLayoutV2(hiddenS), hiddenS);

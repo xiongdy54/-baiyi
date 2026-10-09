@@ -32,7 +32,9 @@ export const COMMANDS: CommandDef[] = [
   { id: "review.undo",        title: "撤销评分",   scene: "复习", defaultKey: "Z" },
   { id: "review.markSuspend", title: "标记并暂停", scene: "复习", defaultKey: "Q" },
   { id: "review.skip",        title: "跳过",       scene: "复习", defaultKey: "W" },
-  { id: "review.delete",      title: "删除",       scene: "复习", defaultKey: "D" }
+  { id: "review.delete",      title: "删除",       scene: "复习", defaultKey: "D" },
+  // v48.77（D121 §3.1）：辨析 / 有疑问——打开卡片辨析弹窗（答案翻开前后均可用）
+  { id: "review.disambiguate", title: "辨析",      scene: "复习", defaultKey: "E" }
 ];
 
 const DEFS_BY_ID = new Map(COMMANDS.map((c) => [c.id, c]));

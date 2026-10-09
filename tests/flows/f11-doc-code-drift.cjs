@@ -44,7 +44,7 @@ const ALL_TABLES = [
   "prompt_templates", "review_logs", "review_skips", "fsrs_configs", "reading_events", "dict_sources",
   "dictionary_cache", "journal_entries", "knowledge_points", "knowledge_relations", "knowledge_external_refs",
   "knowledge_proposals", "insight_runs", "personal_meaning_candidates", "memory_runs", "material_maps",
-  "material_map_shards", "material_map_runs", "material_map_calls",
+  "material_map_shards", "material_map_runs", "material_map_calls", "card_links",
 ];
 
 runFlow(flow, async () => {

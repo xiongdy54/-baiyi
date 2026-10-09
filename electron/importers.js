@@ -183,7 +183,34 @@ function titleFromFilename(name) {
   return String(name || "").replace(/\.[^.]+$/, "").trim();
 }
 
+/**
+ * D121 §1.1：DOCX 作者——读 docProps/core.xml 的 <dc:creator>。取不到（无 jszip / 无该文件 / 空值）一律返回 null，绝不猜。
+ */
+async function docxAuthor(buf) {
+  try {
+    const JSZip = require("jszip");
+    const zip = await JSZip.loadAsync(buf);
+    const f = zip.file("docProps/core.xml");
+    if (!f) return null;
+    const xml = await f.async("string");
+    const m = /<dc:creator\b[^>]*>([\s\S]*?)<\/dc:creator>/i.exec(xml);
+    if (!m) return null;
+    const v = m[1]
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, "&")
+      .trim();
+    return v || null;
+  } catch {
+    return null;
+  }
+}
+
 module.exports = {
+  docxAuthor,
   wordToMarkdown,
   decodeTextBytes,
   txtToMarkdown,

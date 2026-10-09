@@ -13,6 +13,7 @@ export interface DashLayoutV2 {
 export function defaultLayoutV2(hidden: string[]): DashLayoutV2 {
   const all = [
     { id: "kpi", size: "wide" },
+    { id: "timeline", size: "wide" },
     { id: "heatmap", size: "wide" },
     { id: "today", size: "half" },
     { id: "domains", size: "half" },
@@ -80,9 +81,13 @@ export function setWidgetSize(layout: DashLayoutV2, widgetId: string, size: Widg
 export function syncHidden(layout: DashLayoutV2, hidden: string[]): DashLayoutV2 {
   const def = defaultLayoutV2(hidden);
   const order = layout.order.filter((id) => !hidden.includes(id));
-  for (const id of def.order) {
-    if (!order.includes(id)) order.push(id);
-  }
+  // 新出现的组件（含版本升级新增的，如「一日时间轴」）按默认顺序插到它前一个组件之后，
+  // 而不是一律追加到末尾——否则老用户升级后新图表埋在页面最底部看不见。
+  def.order.forEach((id, i) => {
+    if (order.includes(id)) return;
+    const prev = i > 0 ? order.indexOf(def.order[i - 1]) : -1;
+    order.splice(prev + 1, 0, id);
+  });
   const sizes = { ...def.sizes, ...layout.sizes };
   return { order, sizes };
 }

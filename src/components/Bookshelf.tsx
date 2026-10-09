@@ -108,14 +108,25 @@ const ROSTER_MAX = 6;
 const SPINE_MAX = 5;
 const DENSITY_CLASS: Record<ShelfDensity, string> = { sm: "dens-sm", md: "", lg: "dens-lg" };
 
+/* 模块级缓存（stale-while-revalidate）：书架在切页时会被卸载重挂，若每次都从空态起步，
+   首帧会闪出「书架还是空的」。缓存上次的数据让重挂载首帧即带内容，后台再静默刷新。 */
+const shelfCache: {
+  items: LibraryItem[] | null;
+  shelf: ShelfState | null;
+  prefs: { mode: ShelfViewMode; density: ShelfDensity; sort: ShelfSort } | null;
+} = { items: null, shelf: null, prefs: null };
+
 export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }: Props) {
-  const [items, setItems] = useState<LibraryItem[]>([]);
-  const [shelf, setShelf] = useState<ShelfState>(EMPTY_SHELF);
-  const [sort, setSort] = useState<ShelfSort>("manual");
-  const [mode, setMode] = useState<ShelfViewMode>("wall");
-  const [density, setDensity] = useState<ShelfDensity>("md");
+  const [items, setItems] = useState<LibraryItem[]>(shelfCache.items ?? []);
+  const [shelf, setShelf] = useState<ShelfState>(shelfCache.shelf ?? EMPTY_SHELF);
+  // 数据是否已就绪：有缓存＝立刻就绪；冷启动＝等首次加载完成，期间不渲染空态
+  const [dataReady, setDataReady] = useState(shelfCache.items !== null && shelfCache.shelf !== null);
+  const [sort, setSort] = useState<ShelfSort>(shelfCache.prefs?.sort ?? "manual");
+  const [mode, setMode] = useState<ShelfViewMode>(shelfCache.prefs?.mode ?? "wall");
+  const [density, setDensity] = useState<ShelfDensity>(shelfCache.prefs?.density ?? "md");
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; value: string } | null>(null);
+  // field="author"：同一输入框复用于编辑作者（D121 §1.1；空=未知）
+  const [renaming, setRenaming] = useState<{ id: string; value: string; field?: "author" } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ id: string; kind: MenuKind } | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -131,7 +142,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
   }, [hoverFrozen]);
   const [error, setError] = useState<string | null>(null);
   // v48.18 / D54：视图/密度/排序是组件内状态，进出阅读器会重挂载 → 必须落 SettingsStore
-  const [prefsReady, setPrefsReady] = useState(false);
+  const [prefsReady, setPrefsReady] = useState(shelfCache.prefs !== null);
   const [freshId, setFreshId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -148,11 +159,14 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
       setMode(p.mode);
       setDensity(p.density);
       setSort(p.sort);
+      shelfCache.prefs = { mode: p.mode, density: p.density, sort: p.sort };
       setPrefsReady(true);
     });
   }, []);
   useEffect(() => {
-    if (prefsReady) saveViewPrefs({ mode, density, sort });
+    if (!prefsReady) return;
+    shelfCache.prefs = { mode, density, sort };
+    saveViewPrefs({ mode, density, sort });
   }, [prefsReady, mode, density, sort]);
 
   /* 新入库的材料插到队首并高亮 1.2s（避免"导入完找不到"，§5.4）。
@@ -163,6 +177,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     const ids = new Set(list.map((i) => i.id));
     const added = prevIds.current ? list.filter((i) => !prevIds.current!.has(i.id)) : [];
     prevIds.current = ids;
+    shelfCache.items = list;
     setItems(list);
     if (added.length) {
       const id = added[0].id; // listItems() 按 created_at DESC，added[0] 就是最新那本
@@ -172,14 +187,18 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     setShelf((prev) => {
       const next = ensureOrder(prev, list.map((i) => i.id));
       if (next !== prev) saveShelf(next);
+      shelfCache.shelf = next;
       return next;
     });
   }, []);
 
   useEffect(() => {
     void (async () => {
-      setShelf(await loadShelf());
+      const loadedShelf = await loadShelf();
+      shelfCache.shelf = loadedShelf;
+      setShelf(loadedShelf);
       await refresh();
+      setDataReady(true);
     })();
     return eventBus.on("library/changed", refresh);
   }, [refresh]);
@@ -298,6 +317,18 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     setRenaming(null);
     if (!cur) return;
     const next = cur.value.trim();
+    if (cur.field === "author") {
+      const it = items.find((x) => x.id === cur.id);
+      if (!it || next === (it.author ?? "")) return;
+      setError(null);
+      try {
+        await libraryApi.setItemAuthor(cur.id, next);
+        eventBus.emit("library/changed");
+      } catch (err) {
+        setError(`修改作者失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
     if (!next) return;
     if (findFolder(shelf, cur.id)) {
       if (next !== findFolder(shelf, cur.id)!.name) commit(renameFolder(shelf, cur.id, next));
@@ -475,10 +506,10 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           className="cap-input"
           autoFocus
           value={renaming.value}
-          title="回车保存，Esc 取消"
-          aria-label={entry.kind === "folder" ? "修改文件夹名" : "修改书名"}
+          title={renaming.field === "author" ? "作者（留空=未知），回车保存，Esc 取消" : "回车保存，Esc 取消"}
+          aria-label={renaming.field === "author" ? "修改作者" : entry.kind === "folder" ? "修改文件夹名" : "修改书名"}
           onClick={(e) => e.stopPropagation()}
-          onChange={(e) => setRenaming({ id: entry.id, value: e.target.value })}
+          onChange={(e) => setRenaming({ id: entry.id, value: e.target.value, field: renaming.field })}
           onBlur={() => void commitRename()}
           onKeyDown={(e) => {
             if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
@@ -615,6 +646,10 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
         <button className="act" title="重命名" aria-label="重命名"
           onClick={() => setRenaming({ id: item.id, value: item.title })}>
           <IconPencil />
+        </button>
+        <button className="act act-text" title={item.author ? `作者：${item.author}（点击修改）` : "设置作者（留空=未知）"} aria-label="作者"
+          onClick={() => setRenaming({ id: item.id, value: item.author ?? "", field: "author" })}>
+          作者
         </button>
         <span className="dd">
           <button className="act" title="书籍语言（查词按它路由）" aria-label="书籍语言" aria-haspopup="true"
@@ -955,7 +990,10 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           </span>
         </p>
       )}
-      {entries.length === 0 ? (
+      {!(dataReady && prefsReady) ? (
+        /* 冷启动数据未到：留空占位（工具条已在），不闪空态；通常只持续几十毫秒 */
+        <div className="shelf-pending" aria-busy="true" />
+      ) : entries.length === 0 ? (
         /* 空态：几何装饰 + 一句话。不再放主行动按钮——工具条的「添加材料」已在同一视口常驻
            （v48.15 / D51，swiss 文档「状态设计 · empty」同步补了这条例外） */
         <div className="empty-state">

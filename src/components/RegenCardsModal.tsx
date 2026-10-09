@@ -5,7 +5,7 @@
 // **接受＝新建卡，不覆盖原卡**——原卡及其调度事实原样保留（卡片＝调度单元，覆盖改写
 // 会污染「这张卡复习了什么」的历史语义）；siblingKey 走默认推导（与原卡同源同组，管线语义一致）。
 import { useEffect, useRef, useState } from "react";
-import { cardGenerator, createAcceptedCard, type CardDraft, type CardGenMode, type CardRecord } from "../lib/cards";
+import { buildRelatedCardsContext, cardGenerator, createAcceptedCard, type CardDraft, type CardGenMode, type CardRecord } from "../lib/cards";
 
 /** 浏览器行卡（listAllCards 附带 docTitle） */
 type BrowserCardRecord = CardRecord & { docTitle?: string };
@@ -76,9 +76,11 @@ export default function RegenCardsModal({
         sourceTextRef.current = sourceText;
         const mode: CardGenMode = batchScope && KNOWN_SCOPES.has(batchScope) ? (batchScope as CardGenMode) : "auto";
         const title = card.docTitle || card.sourceRef?.title || undefined;
+        // v48.77（D121 §2.4）：相关已有卡（排除本卡自身——重生成时原卡仍在库，答案必然相同）
+        const related = (await buildRelatedCardsContext(sourceText)).filter((l) => !card.frontMarkdown || !l.startsWith(`Q：${card.frontMarkdown.slice(0, 20)}`));
         const { batchId: newBatchId, result } = await cardGenerator.generateCards(
           sourceText,
-          { title, documentId: card.contextRef?.documentId ?? null },
+          { title, author: card.sourceRef?.author || undefined, documentId: card.contextRef?.documentId ?? null, relatedCards: related },
           mode,
           (n) => { if (!cancelled) setProgress(n); },
           () => { if (!cancelled) setThinking(true); }
@@ -103,6 +105,7 @@ export default function RegenCardsModal({
     try {
       await createAcceptedCard(d, {
         sourceTitle: card.docTitle || card.sourceRef?.title || null,
+        sourceAuthor: card.sourceRef?.author ?? null,
         contextRef: card.contextRef,
         sourceText: sourceTextRef.current,
         genBatchId: batchId || null

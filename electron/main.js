@@ -138,6 +138,7 @@ const {
   saveSkip,
   addReadingEvent,
   getStatsOverview,
+  getStatsTimeline,
   setCardSuspended,
   updateCardLeech,
   resolveLeech,
@@ -168,6 +169,7 @@ const quickCapture = require("./quickCapture");
 const { journalDateOf } = require("./journalTime");
 const {
   wordToMarkdown,
+  docxAuthor,
   decodeTextBytes,
   txtToMarkdown,
   markdownFromText,
@@ -311,6 +313,8 @@ ipcMain.handle("library:delete", (_e, id) => deleteItem(String(id)));
 // v38（D35）：书籍语言属性——查词语言路由的书籍级信号
 ipcMain.handle("library:setItemLang", (_e, id, lang) => dbModule.setLibraryItemLang(String(id), String(lang || "")));
 ipcMain.handle("library:setItemTitle", (_e, id, title) => dbModule.setLibraryItemTitle(String(id), String(title ?? "")));
+// D121 §1.1：书籍作者（空=未知）
+ipcMain.handle("library:setItemAuthor", (_e, id, author) => dbModule.setLibraryItemAuthor(String(id), String(author ?? "")));
 
 ipcMain.handle("library:pickEpub", async () => {
   const result = await dialog.showOpenDialog({
@@ -324,9 +328,9 @@ ipcMain.handle("library:pickEpub", async () => {
 });
 
 ipcMain.handle("library:createFromEpub", (_e, payload) => {
-  const { title, markdown, toc, coverDataUrl, epubData, sourceName } = payload || {};
+  const { title, markdown, toc, coverDataUrl, epubData, sourceName, author } = payload || {};
   if (!markdown || !String(markdown).trim()) return null;
-  return createFromEpub(title, String(markdown), toc || [], coverDataUrl, epubData, sourceName);
+  return createFromEpub(title, String(markdown), toc || [], coverDataUrl, epubData, sourceName, typeof author === "string" ? author : null);
 });
 
 // ---------- M6-1（v26）导入格式扩展：Word（含内嵌图）/ TXT / Markdown（转换在主进程，见 importers.js） ----------
@@ -363,7 +367,8 @@ ipcMain.handle("library:createFromWord", async (_e, payload) => {
     sourceName: name || null,
     originalName: "original.docx",
     originalBuf: buf,
-    images
+    images,
+    author: await docxAuthor(buf)
   });
 });
 
@@ -495,6 +500,7 @@ ipcMain.handle("library:createFromPdf", async (_e, payload) => {
   const buf = fs.readFileSync(String(filePath));
   let pages = 0;
   let emptyPages = 0;
+  let pdfAuthor = null; // D121 §1.1：info.Author（trim，空→NULL）
   try {
     const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     // pdf.js v6 无 PDFDocumentProxy.destroy（已移除），资源释放调 loadingTask.destroy()
@@ -511,6 +517,13 @@ ipcMain.handle("library:createFromPdf", async (_e, payload) => {
     });
     const doc = await task.promise;
     pages = doc.numPages;
+    try {
+      const meta = await doc.getMetadata();
+      const a = meta && meta.info && meta.info.Author;
+      if (typeof a === "string" && a.trim()) pdfAuthor = a.trim();
+    } catch {
+      /* 元数据取不到即 NULL */
+    }
     for (let i = 1; i <= pages; i++) {
       const tc = await (await doc.getPage(i)).getTextContent();
       if (!tc.items.some((it) => it.str && it.str.trim())) emptyPages++;
@@ -530,7 +543,8 @@ ipcMain.handle("library:createFromPdf", async (_e, payload) => {
     sourceName: name || null,
     originalName: "original.pdf",
     originalBuf: buf,
-    images: []
+    images: [],
+    author: pdfAuthor
   });
   return { ...created, pages, emptyPages };
 });
@@ -677,6 +691,7 @@ ipcMain.handle("cards:undoReview", () => undoLastReview());
 ipcMain.handle("cards:skip", (_e, cardId) => saveSkip(String(cardId)));
 ipcMain.handle("reading:event", (_e, itemId, charPos) => addReadingEvent(String(itemId), Number(charPos)));
 ipcMain.handle("stats:overview", () => getStatsOverview());
+ipcMain.handle("stats:timeline", (_e, opts) => getStatsTimeline(opts && typeof opts === "object" ? opts : {}));
 ipcMain.handle("cards:setSuspended", (_e, id, suspended, reason) =>
   setCardSuspended(String(id), Boolean(suspended), reason)
 );
@@ -721,6 +736,10 @@ ipcMain.handle("cards:listLeech", () => listLeechCards());
 ipcMain.handle("issues:add", (_e, issue) => addCardIssue(issue || {}));
 ipcMain.handle("issues:list", (_e, cardId) => listCardIssues(String(cardId)));
 ipcMain.handle("issues:resolve", (_e, id) => resolveCardIssue(String(id)));
+// D121 §1.2：卡片辨析链接
+ipcMain.handle("card-links:add", (_e, input) => dbModule.addCardLink(input || {}));
+ipcMain.handle("card-links:update", (_e, id, patch) => dbModule.updateCardLink(String(id), patch || {}));
+ipcMain.handle("card-links:listForCard", (_e, cardId) => dbModule.listCardLinksForCard(String(cardId)));
 ipcMain.handle("batches:create", (_e, batch) => createAIGenBatch(batch || {}));
 ipcMain.handle("batches:setStatus", (_e, id, status) => setAIGenBatchStatus(String(id), String(status)));
 // A-10（审计）：补两个只读出口，让关窗后已付费的草稿能被取回

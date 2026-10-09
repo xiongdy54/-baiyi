@@ -33,6 +33,8 @@ interface Props {
   onMarkClick?: (info: MarkPointerInfo) => void;
   /** 内核就绪（open 完成）：父层在此保存引用并应用初始模式/外观 */
   onReady: (kernel: ReaderKernel) => void;
+  /** open 之前调用：父层在此对内核应用已保存的模式/外观，使首屏即为正确布局 */
+  beforeOpen?: (kernel: ReaderKernel) => void | Promise<void>;
   /**
    * 打开失败（文件损坏 / 格式不支持 / 资源缺失）。
    * 此前整段异步体没有 try/catch：createKernel 或 k.open 一 reject 就是
@@ -54,12 +56,13 @@ export default function ReaderEngine({
   onMarkHover,
   onMarkClick,
   onReady,
+  beforeOpen,
   onError
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   // 回调经 ref 转发，避免父层每轮渲染的新函数触发内核重建
-  const handlers = useRef({ onRelocate, onLink, onContentPointerUp, onImageClick, onMarkHover, onMarkClick, onReady, onError, jump, initLocation });
-  handlers.current = { onRelocate, onLink, onContentPointerUp, onImageClick, onMarkHover, onMarkClick, onReady, onError, jump, initLocation };
+  const handlers = useRef({ onRelocate, onLink, onContentPointerUp, onImageClick, onMarkHover, onMarkClick, onReady, beforeOpen, onError, jump, initLocation });
+  handlers.current = { onRelocate, onLink, onContentPointerUp, onImageClick, onMarkHover, onMarkClick, onReady, beforeOpen, onError, jump, initLocation };
 
   useEffect(() => {
     const host = hostRef.current;
@@ -81,6 +84,10 @@ export default function ReaderEngine({
         k.on("markHover", (i) => handlers.current.onMarkHover?.(i));
         k.on("markClick", (i) => handlers.current.onMarkClick?.(i));
         const j = handlers.current.jump;
+        // 首屏前先落模式/外观（避免先按引擎默认对开排一帧再闪回滚动）
+        // 仅 foliate：PDF 内核的 viewer 在 open 之前尚无文档，沿用原有 onReady 后应用的路径
+        try { if (engine === "foliate") await handlers.current.beforeOpen?.(k); } catch { /* 取设置失败则沿用默认 */ }
+        if (disposed) return;
         await k.open(source, { location: j ? undefined : (handlers.current.initLocation ?? undefined) });
         if (disposed) return;
         if (j) {

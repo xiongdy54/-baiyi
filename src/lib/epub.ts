@@ -12,6 +12,28 @@ export interface EpubImportResult {
   coverDataUrl: string;
   epubData: Uint8Array;
   sourceName: string;
+  /** D121 §1.1：OPF dc:creator（多值以「、」连接）；取不到为 undefined */
+  author?: string;
+}
+
+/** D121 §1.1：作者元数据归一——string / {name: string | 语言表} / 以上的数组 → 「、」连接的字符串；空→undefined */
+export function normalizeAuthor(v: unknown): string | undefined {
+  const one = (x: unknown): string[] => {
+    if (x == null) return [];
+    if (typeof x === "string") return [x.trim()].filter(Boolean);
+    if (Array.isArray(x)) return x.flatMap(one);
+    if (typeof x === "object") {
+      const name = (x as { name?: unknown }).name;
+      if (typeof name === "string") return [name.trim()].filter(Boolean);
+      if (name && typeof name === "object") {
+        const vals = Object.values(name as Record<string, unknown>).filter((s): s is string => typeof s === "string" && !!s.trim());
+        return vals.length ? [vals[0].trim()] : [];
+      }
+    }
+    return [];
+  };
+  const out = [...new Set(one(v))].join("、").trim();
+  return out || undefined;
 }
 
 const turndown = new TurndownService({
@@ -124,7 +146,8 @@ export async function parseEpubBytes(name: string, rawBytes: Uint8Array): Promis
     toc,
     coverDataUrl,
     epubData: raw,
-    sourceName: picked.name
+    sourceName: picked.name,
+    author: normalizeAuthor((meta as { creator?: unknown; author?: unknown } | undefined)?.creator ?? (meta as { author?: unknown } | undefined)?.author)
   };
 }
 

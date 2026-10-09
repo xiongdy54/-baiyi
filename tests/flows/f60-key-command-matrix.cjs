@@ -50,6 +50,7 @@ const GUIDE_TABLE = {
   "review.markSuspend": "Q",
   "review.skip": "W",
   "review.delete": "D",
+  "review.disambiguate": "E",
 };
 
 // ---------- 组合键 → CDP 键事件参数 ----------
@@ -133,8 +134,8 @@ runFlow(flow, async () => {
   const table = readCommandTable();
   flow.record("绑定来源", "现读 src/lib/commands.ts 的 COMMANDS 数组（代码表），共 " + table.length + " 条；另硬核对指南 §9.1 M4 锁定表");
   const mism = table.filter((r) => GUIDE_TABLE[r.id] && GUIDE_TABLE[r.id].toUpperCase() !== r.key.toUpperCase());
-  flow.record("指南表 vs 代码表不一致", mism.length ? JSON.stringify(mism) : "无（14/14 逐条相同）");
-  flow.check("代码表与指南 §9.1 M4 锁定表逐条一致", table.length === 14 && mism.length === 0, "14 条全等", `${table.length} 条 / ${mism.length} 处不一致`);
+  flow.record("指南表 vs 代码表不一致", mism.length ? JSON.stringify(mism) : "无（15/15 逐条相同）");
+  flow.check("代码表与指南 §9.1 M4 锁定表逐条一致", table.length === 15 && mism.length === 0, "15 条全等", `${table.length} 条 / ${mism.length} 处不一致`);
 
   const h = await launch({ label: "f60", port: 9900, fresh: true });
   if (h.skip || h.skippedByExit || h.timeout) {
@@ -525,8 +526,8 @@ runFlow(flow, async () => {
     await press("Space", 600);
     const bg0 = await fp();
     // 删除确认是**原生**对话框（会冻结渲染进程），拿它测「模态背后」不成立；
-    // 这里用真正在 DOM 里的模态：复习页的「对比卡」向导（A-12 当年就是在它开着时按「1」把背后的卡评了分）
-    const opened = await clickEl(".review-tools button", "对比卡");
+    // 这里用真正在 DOM 里的模态：复习页的「辨析 / 有疑问」弹窗（A-12 当年就是在它开着时按「1」把背后的卡评了分）
+    const opened = await clickEl(".review-tools button", "辨析 / 有疑问");
     await wait(1400);
     const bgOpen = await fp();
     flow.record("对比卡模态是否打开", opened && Number(bgOpen.dialogs) > Number(bg0.dialogs) ? `是（DOM 内 role=dialog 数 ${bg0.dialogs}→${bgOpen.dialogs}）` : `点击结果=${opened}，dialogs ${bg0.dialogs}→${bgOpen.dialogs}`);
@@ -558,7 +559,7 @@ runFlow(flow, async () => {
       const a2 = await fp();
       if (Number(a2.dialogs) !== Number(a1.dialogs)) {
         flow.record(`键 ${c} 把模态关掉了`, `dialogs ${a1.dialogs}→${a2.dialogs}（原生按钮被空格/回车激活，非命令表命中）；重新打开模态继续`);
-        if (c === "Space") await clickEl(".review-tools button", "对比卡");
+        if (c === "Space") await clickEl(".review-tools button", "辨析 / 有疑问");
         await wait(1200);
         continue;
       }

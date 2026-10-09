@@ -467,6 +467,7 @@ export default function App() {
         contextRef={{ documentId: view.doc.documentId }}
         jumpAnchor={view.jumpAnchor}
         sourceTitle={view.doc.title}
+        sourceAuthor={view.doc.author ?? undefined}
         onBack={view.jumpAnchor ? () => changeView({ name: view.returnTo ?? "review" } as View) : backToShelf}
         onSwitchAppTheme={handleThemeChange}
         // 跳转进入（jumpAnchor 存在）时不传 onProgress：Reader 的滚动/卸载保存全部失效，

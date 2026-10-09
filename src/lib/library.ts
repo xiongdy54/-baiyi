@@ -33,6 +33,8 @@ declare global {
       setItemLang?: (id: string, lang: string) => Promise<boolean>;
       // v45.1：书架悬停改名
       setItemTitle?: (id: string, title: string) => Promise<boolean>;
+      /** D121 §1.1：书籍作者（空串=未知） */
+      setItemAuthor?: (id: string, author: string) => Promise<boolean>;
       /** v48.22（D58 §6.8-2）：书级默认优先级（继承型摘录实时跟随） */
       setPriority?: (id: string, priority: number) => Promise<unknown>;
     };
@@ -52,6 +54,8 @@ export interface LibraryItem {
   lang?: string;
   /** 书级默认优先级（v48.22 D58 §6.8-2）：新建摘录继承；0-100，缺省 50 */
   priority?: number;
+  /** 作者（D121 §1.1）：导入时取得到才有，空/缺=未知 */
+  author?: string | null;
 }
 
 /** 书籍语言选项（与 dict.ts languageLabel 的语言名映射对齐；value 空=未知） */
@@ -89,6 +93,8 @@ export interface DocPayload {
   progressJson: string | null;
   /** 书籍来源类型：epub（有原书文件，走阅读内核）/ paste（粘贴快捕）等 */
   sourceType?: string;
+  /** 作者（D121 §1.1）；未知为 null */
+  author?: string | null;
 }
 
 export interface ReadingProgress {
@@ -187,6 +193,10 @@ export const libraryApi = {
   // v45.1：书架悬停改名（只改标题，不动封面/进度/文档）
   async setItemTitle(id: string, title: string): Promise<boolean> {
     return (await window.libraryAPI?.setItemTitle?.(id, title)) ?? false;
+  },
+  // D121 §1.1：设置书籍作者；空串=未知
+  async setItemAuthor(id: string, author: string): Promise<boolean> {
+    return (await window.libraryAPI?.setItemAuthor?.(id, author)) ?? false;
   },
   /** v48.22（D58 §6.8-2）：书级默认优先级——同时把该书下「继承型」摘录同步过去（用户单条改过的 'user' 不动） */
   async setPriority(id: string, priority: number): Promise<{ ok: boolean; priority?: number; followedExtracts?: number }> {

@@ -63,7 +63,7 @@ app
 
       // ---------- W1 COMMANDS ↔ 文档锁定表 ----------
       flow.section("W1 命令表与文档「默认键位（用户锁定）」逐条对表（§9.1 M4）");
-      flow.eq("命令条数（阅读 5 + 复习 9）", COMMANDS.length, 14);
+      flow.eq("命令条数（阅读 5 + 复习 10）", COMMANDS.length, 15);
       const scenes = COMMANDS.reduce((a, c) => ((a[c.scene] = (a[c.scene] || 0) + 1), a), {});
       flow.record("场景分组", Object.entries(scenes).map(([k, v]) => `${k} ${v}`).join(" / "));
       const ids = COMMANDS.map((c) => c.id);
@@ -97,7 +97,7 @@ app
       flow.record("文档表里的键位串", docKeys.join(" ") || "（没抓到表）");
       flow.check("代码里每个默认键都必须在文档锁定表里出现（改了键位要同步文档）", codeNotInDoc.length === 0, "全部在册", codeNotInDoc);
       const docSays12 = /12\s*条/.test(table) || /12\s*条/.test(guide);
-      flow.check("文档不得声明一个与代码不符的命令条数", !docSays12, "条数已同步", docSays12 ? "文档仍写「命令表 12 条」，代码 COMMANDS 实为 14 条" : "（已同步）");
+      flow.check("文档不得声明一个与代码不符的命令条数", !docSays12, "条数已同步", docSays12 ? "文档仍写「命令表 12 条」，代码 COMMANDS 实为 15 条" : "（已同步）");
         // 批次 F（D-DOC-09 收口时对齐判据）：原式 `!/keybinding/.test(guide)` 扫全文，会命中真实存在的设置键
   // `settings.app.keybindings`（D-DOC-08 还要求它必须在文档里登记），两条闸门互斥、任何诚实文档都拿不到绿。
   // 本条登记的现象是「§4.2-2 把 CommandDef 的字段写成 {id,title,when,键位}」，判据收窄到那一行：

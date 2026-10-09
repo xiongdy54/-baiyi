@@ -15,7 +15,10 @@ import { CardFace } from "./CardBrowser";
 import { fetchSessionQueue, type SessionItem } from "../lib/sessionQueue";
 import ExtractCardFace, { ExtractActionsBar } from "./ExtractCardFace";
 import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow";
-import ContrastCardModal from "./ContrastCardModal";
+import DisambiguateModal, { type DisambiguateCloseResult } from "./DisambiguateModal";
+import { cardLinksApi, type CardLink } from "../lib/cardLinks";
+import { VERDICT_LABELS } from "../lib/disambiguateCore.mjs";
+import { disambHintText, latestLink } from "../lib/disambiguateUi";
 import ImageLightbox from "./ImageLightbox";
 import AnswerJudgeModal from "./AnswerJudgeModal";
 // v48.61（D104）：背面辅助字段区（助记/例子/来源，app.cardFaceExtras 三开关）——与卡详情预览同一组件
@@ -122,8 +125,11 @@ export default function ReviewView({
   const actionBusyRef = useRef(false);
   // v22 撤销评分：最近一条可撤销评分（有评分前快照且卡未删），null=当前不可撤销
   const [undoInfo, setUndoInfo] = useState<{ logId: string; cardId: string; rating: string; reviewedAt: number } | null>(null);
-  // v30（D29）：易混对比卡确认框（以当前卡为基准生成对比三件套）
-  const [contrastOpen, setContrastOpen] = useState(false);
+  // v48.77（D121 §3.1）：辨析弹窗（替换 v30 易混对比卡确认框）；presetOther=「已辨析」提示点击时直达第二屏的对端卡
+  const [disamb, setDisamb] = useState<{ presetOther?: string } | null>(null);
+  // D121 §3.5：当前卡的辨析链接（换卡 / 弹窗关闭后刷新；失败静默）
+  const [cardLinks, setCardLinks] = useState<CardLink[]>([]);
+  const [linksTick, setLinksTick] = useState(0);
   // v48.58（D99）：AI 判答模态（自答交给 AI 与标准答案等价比对；零写库，见 AnswerJudgeModal）
   const [judgeOpen, setJudgeOpen] = useState(false);
   // v48.60（D101）：答案揭示后的快捷打标（meta 行「＋标签」；仅背面出现，正面永不显示标签——防泄题）
@@ -135,7 +141,22 @@ export default function ReviewView({
     setJudgeOpen(false);
     setTagOpen(false);
     setTagDraft([]);
+    setDisamb(null);
   }, [current?.id]);
+  // D121 §3.5：拉取当前卡的辨析链接（只读；失败静默）
+  useEffect(() => {
+    const id = current?.id;
+    setCardLinks([]);
+    if (!id) return;
+    let cancelled = false;
+    cardLinksApi
+      .listForCard(id)
+      .then((l) => { if (!cancelled) setCardLinks(l); })
+      .catch(() => { /* 提示是增强信息：取不到就不显示 */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [current?.id, linksTick]);
   // v48.60（D101）：快捷打标词表（编辑器打开时拉取；派生只读）
   useEffect(() => {
     if (!tagOpen) return;
@@ -374,19 +395,22 @@ export default function ReviewView({
 
   // v48.60（D102）：「不再关心」＝归档当前卡并进下一张——不评分、不写 review_logs、不计四类上限；
   // FSRS 零写入（fsrs_json 原样，恢复后按原 due 继续；浏览器「已归档」可恢复）
-  async function archiveAndNext() {
+  // D121 §3.2：alreadyArchived=辨析弹窗内已归档当前卡，只推进不再重复归档
+  async function archiveAndNext(alreadyArchived = false) {
     if (!current || actionBusyRef.current || saveError) return;
     actionBusyRef.current = true;
     try {
-      try {
-        const r = await cardsApi.batch("archive", [current.id]);
-        if (!r?.ok) {
+      if (!alreadyArchived) {
+        try {
+          const r = await cardsApi.batch("archive", [current.id]);
+          if (!r?.ok) {
+            setSaveError(true);
+            return;
+          }
+        } catch {
           setSaveError(true);
           return;
         }
-      } catch {
-        setSaveError(true);
-        return;
       }
       eventBus.emit("cards/changed");
       setDoneCount((n) => n + 1);
@@ -418,12 +442,13 @@ export default function ReviewView({
     }
   }
 
-  async function skip() {
+  // cardOverride：辨析弹窗改过卡面文字后传入最新整行，避免全行更新用旧文案覆盖编辑
+  async function skip(cardOverride?: CardRecord & { docTitle?: string }) {
     if (!current || actionBusyRef.current || saveError) return;
     actionBusyRef.current = true;
     try {
       // 跳过：不评分、不写 review_log（保持 FSRS 历史纯净），仅把 due 后移 10 分钟使其沉底
-      const c = current;
+      const c = cardOverride ?? current;
       // 统计埋点：记录跳过事件（队列水位瀑布的「跳过」档数据源）
       void cardsApi.skip(c.id);
       const fsrs = { ...(c.fsrs ?? {}), due: Date.now() + 10 * 60_000 };
@@ -531,6 +556,28 @@ export default function ReviewView({
     });
   }
 
+  // D121 §3.2：辨析弹窗关闭——当前卡被归档 → 走 archiveAndNext 推进（不再 skip）；
+  // 否则卡面被改过 → 重取最新行；勾选「关闭后跳过本卡」→ 既有 skip()（只记跳过事件、due+10min、不写 review_logs、不动 FSRS）
+  async function handleDisambClose(res: DisambiguateCloseResult) {
+    const c = current;
+    setDisamb(null);
+    setLinksTick((n) => n + 1);
+    if (!c) return;
+    if (res.archivedIds.includes(c.id)) {
+      await archiveAndNext(true);
+      return;
+    }
+    let target = c;
+    if (res.changed) {
+      const fresh = await cardsApi.get(c.id);
+      if (fresh) {
+        target = { ...fresh, docTitle: c.docTitle };
+        setCurrent(target);
+      }
+    }
+    if (res.skipRequested) await skip(target);
+  }
+
   // 顶栏计数：换卡/评完/跳过/删除/撤销后各刷一次（只读、同队列口径）
   useEffect(() => {
     let alive = true;
@@ -581,7 +628,9 @@ export default function ReviewView({
     "review.undo": { when: () => !!undoInfo && !actionBusyRef.current && !saveError, run: () => void undoLastGrade() },
     "review.markSuspend": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void markAndSuspend() },
     "review.skip": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void skip() },
-    "review.delete": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void handleDelete() }
+    "review.delete": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void handleDelete() },
+    // D121 §3.1：辨析（答案翻开前后均可用；弹窗内按键由全局分发器的 dialog 守卫放行）
+    "review.disambiguate": { when: () => hasCard && !actionBusyRef.current && !saveError && !disamb, run: () => setDisamb({}) }
   });
 
   // v34（M12，§4.16）：延后原因可读化——reviewed=同源卡今日已评分；revealed=同组今日放行名额已被占
@@ -827,6 +876,23 @@ export default function ReviewView({
         {/* v48.61（D104）：背面辅助字段区——助记/例子/来源三块统一受 app.cardFaceExtras 开关控制
             （此前只渲染 mnemonic，example/sourceRef 全库无消费点位，本批补齐为三块统一） */}
         {showBack && <CardFaceExtrasBlock card={current!} />}
+        {/* D121 §3.5：已辨析提示——仅答案翻开后显示（翻开前显示对端题面会泄题）；点击直达第二屏 */}
+        {showBack && (() => {
+          const link = latestLink(cardLinks);
+          if (!link) return null;
+          const label = link.verdict ? VERDICT_LABELS[link.verdict] : null;
+          return (
+            <button
+              type="button"
+              className="review-disamb-hint"
+              data-testid="review-disamb-hint"
+              title="查看或修改这次辨析"
+              onClick={() => setDisamb(link.other ? { presetOther: link.other.id } : {})}
+            >
+              {disambHintText(link.other, label)}
+            </button>
+          );
+        })()}
       </div>
 
       {/* 底栏（v2）：挂在滚动根（.review-wrap）的**最后一个子节点**上——sticky 时代它必须直接位于滚动根下
@@ -925,10 +991,10 @@ export default function ReviewView({
                 <button
                   onClick={() => {
                     setBarMoreOpen(false);
-                    setContrastOpen(true);
+                    setDisamb({});
                   }}
                 >
-                  对比卡
+                  辨析 / 有疑问<span className="k mono">{bindingHint("review.disambiguate")}</span>
                 </button>
                 <button
                   onClick={() => {
@@ -973,6 +1039,14 @@ export default function ReviewView({
       </div>
       {judgeOpen && current && (
         <AnswerJudgeModal card={current} onClose={() => setJudgeOpen(false)} />
+      )}
+      {disamb && current && (
+        <DisambiguateModal
+          card={current}
+          presetOther={disamb.presetOther}
+          origin="review"
+          onClose={(r) => void handleDisambClose(r)}
+        />
       )}
     </div>
   );

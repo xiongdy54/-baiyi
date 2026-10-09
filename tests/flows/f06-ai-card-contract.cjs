@@ -137,9 +137,9 @@ app
       flow.record("代码中出现的规则编号", [...ids].sort().join(" "));
       const forbidden = FORBIDDEN_RULE_IDS.filter((f) => ids.has(f));
       flow.check("已废弃的 L15 绝不复活（§6.3.5 L585 同日删除）", forbidden.length === 0, "无 L15", forbidden);
-      const outOfRange = [...ids].filter((x) => /^L/.test(x) && (Number(x.slice(1)) < 1 || Number(x.slice(1)) > 16));
-      flow.check("规则编号不越出 L1–L16 区间", outOfRange.length === 0, "全部在区间内", outOfRange);
-      flow.record("L1–L16 中代码未直接标号的（可能由 K 系列/其他文件承担）", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16].map((n) => `L${n}`).filter((x) => !ids.has(x)).join(" ") || "（无）");
+      const outOfRange = [...ids].filter((x) => /^L/.test(x) && (Number(x.slice(1)) < 1 || Number(x.slice(1)) > 18));
+      flow.check("规则编号不越出 L1–L18 区间", outOfRange.length === 0, "全部在区间内", outOfRange);
+      flow.record("L1–L18 中代码未直接标号的（可能由 K 系列/其他文件承担）", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18].map((n) => `L${n}`).filter((x) => !ids.has(x)).join(" ") || "（无）");
 
       // ---------- A5 键规则确定性 ----------
       flow.section("A5 sibling_key 确定性（§4.16 L326–329）");

@@ -10,6 +10,8 @@ import { eventBus } from "../lib/eventbus";
 import { readingWorkflow, parseContextRef, undoApi, modifierFlagOf, readMultiSelectKey, type MultiSelectKey, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
 import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
 import { useSelectionActions } from "../lib/useSelectionActions";
+import { headingPathAt } from "../lib/reader/tocPath";
+import { paragraphContext } from "../lib/selectionContext";
 import { createMultiHighlight } from "../lib/reader/multiHighlight";
 import { rectFromMappedOffsets, rectFromOffsets, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
 import type { OffsetMap } from "../lib/editor/markdownOffsetMap";
@@ -433,6 +435,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
    * 「阅读器·复习摘录」两个入口持久（同挂本组件），应用重启后回到「开」。取代 v48.32 的组件内 useState。
    */
   const [annotOpen, setAnnotOpen] = useState(() => sessionStorage.getItem("extract.annotOpen") !== "0");
+  // 只有用户亲手点「展开/收起」之后才允许轨宽/主列让位做滑动过渡；
+  // 页面进入时的初始布局（含 loading 壳→正式布局）一律瞬时落位，避免核心区域从左往右滑入。
+  const [railAnimate, setRailAnimate] = useState(false);
   useEffect(() => {
     sessionStorage.setItem("extract.annotOpen", annotOpen ? "1" : "0");
   }, [annotOpen]);
@@ -454,6 +459,19 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       extractId: shown?.contextRef?.extractId ?? undefined
     }),
     labels: { title: shown?.docTitle, sourceTitle: shown?.docTitle, section: undefined },
+    // D121 §2.2/§2.3：摘录正文是 markdown——章节路径取选区之前的标题层级栈，前后文对正文做段落定位
+    sectionPath: () => {
+      const body = String(shown?.contentMarkdown ?? "");
+      const t = faceSel?.text;
+      if (!body || !t) return [];
+      const at = faceSel?.ranges?.[0]?.start ?? body.indexOf(t);
+      return at >= 0 ? headingPathAt(body, at) : [];
+    },
+    selectionSurrounding: () => {
+      const body = String(shown?.contentMarkdown ?? "");
+      const t = faceSel?.text;
+      return body && t ? paragraphContext(body, t) : null;
+    },
     ownerKey: () => shown?.contextRef?.documentId ?? "",
     itemId: null,
     sourceTextRef,
@@ -951,6 +969,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       data-showing-extract-id={shownId ?? ""}
       data-viewing={viewing ? "1" : undefined}
       data-annot-open={annotPanelVisible && annotOpen ? "1" : undefined}
+      data-rail-anim={railAnimate ? "1" : undefined}
       /* R2-A（§18.2）：首卡抑制标记挂页面根——卡面由共用组件渲染，祖先标记等价；
          换卡当帧随新卡一同摘除（见上方 live/id 机制）。 */
       data-first-card={isFirstCardEl ? "1" : undefined}
@@ -968,7 +987,10 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           aria-expanded={annotOpen}
           aria-controls="extract-annot-panel"
           title={annotOpen ? "收起批注栏" : "展开批注栏"}
-          onClick={() => setAnnotOpen((v) => !v)}
+          onClick={() => {
+            setRailAnimate(true);
+            setAnnotOpen((v) => !v);
+          }}
         >
           {annotOpen ? "收起" : "展开"}
         </button>

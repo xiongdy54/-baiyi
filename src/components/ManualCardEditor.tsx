@@ -6,6 +6,9 @@
 // 「modal 包装 + ManualCardForm」：**图片挖空**（imageOcclusion，来自图片聚焦工具条）继续走
 // modal（大图预览需要幅面），其余三模式走 dock——m6 系列图片挖空断言零迁移。
 import { useEffect, useRef, useState } from "react";
+import { cardsApi, similaritySearch } from "../lib/cards";
+import { bigramJaccard } from "../lib/disambiguateCore.mjs";
+import { PRECHECK_K, answerDiffers, clipText, manualPrecheckText, shouldRunPrecheck } from "../lib/disambiguateUi";
 import { UDC_LEAVES, UDC_MAX, UDC_OTHER, udcLabel } from "../lib/udc";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { attachRipple, settle } from "../lib/press";
@@ -64,6 +67,16 @@ export interface ManualCardPayload {
   tags?: string[];
 }
 
+/** D121 §4.1：保存前预检命中的相似已有卡（已补全答案与来源） */
+interface PrecheckHit {
+  id: string;
+  front: string;
+  back: string;
+  source: string;
+  score: number;
+  differs: boolean;
+}
+
 /** 手动制卡表单体（D88 §8.2 抽取，纯移动）：modal 包装之外的全部内容——
     字段、落库链（onSave → 宿主 handleManualCard）、canSave 校验一字不改。 */
 export function ManualCardForm({
@@ -72,7 +85,8 @@ export function ManualCardForm({
   tagSuggestions,
   initialTags,
   onCancel,
-  onSave
+  onSave,
+  onDisambiguate
 }: {
   quote: string;
   /** v25：来自图片聚焦选区（工具条「手动制卡」）——提供时默认进入图片挖空页签 */
@@ -82,7 +96,10 @@ export function ManualCardForm({
   /** v48.60（D101）：标签初值（批注标签继承预填，可删） */
   initialTags?: string[];
   onCancel: () => void;
-  onSave: (payload: ManualCardPayload) => Promise<void>;
+  /** 返回新建卡 id（宿主 handleManualCard 链；翻转对为第一张），供「保存并辨析」使用 */
+  onSave: (payload: ManualCardPayload) => Promise<string | null | void>;
+  /** D121 §4.1：「保存并辨析」——保存成功后以新卡为 A、相似卡为 B 打开辨析弹窗（宿主渲染，表单卸载后仍存活）；不传则不显示该按钮 */
+  onDisambiguate?: (newCardId: string, otherCardId: string) => void;
 }) {
   const [mode, setMode] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
   const [front, setFront] = useState(imageRegion ? "" : quote);
@@ -117,7 +134,53 @@ export function ManualCardForm({
     return attachRipple(el);
   }, []);
 
-  async function save() {
+  // D121 §4.1：保存前相似卡预检——面板只出现一次（front 文本变化后再保存才重新检索）
+  const [hits, setHits] = useState<PrecheckHit[] | null>(null);
+  const [checking, setChecking] = useState(false);
+  const lastChecked = useRef<string | null>(null);
+  const precheckText = manualPrecheckText(mode, front, mode === "cloze" ? toCloze(front) : null);
+  useEffect(() => {
+    // 面板展开后用户改了 front：面板作废（下次保存重新检索）
+    if (hits && precheckText !== lastChecked.current) setHits(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [precheckText]);
+
+  async function onCreateClick() {
+    if (shouldRunPrecheck(precheckText, lastChecked.current)) {
+      setChecking(true);
+      try {
+        const found = await similaritySearch.findSimilar(precheckText as string, PRECHECK_K);
+        lastChecked.current = precheckText;
+        const list: PrecheckHit[] = [];
+        for (const f of found) {
+          const c = (await cardsApi.get(f.cardId).catch(() => null)) as (Awaited<ReturnType<typeof cardsApi.get>> & { docTitle?: string; isDeleted?: boolean }) | null;
+          if (!c || c.isDeleted) continue;
+          const title = c.sourceRef?.title || c.docTitle || "";
+          const author = c.sourceRef?.author ? ` · ${c.sourceRef.author}` : "";
+          const otherBack = c.backMarkdown ?? "";
+          list.push({
+            id: c.id,
+            front: c.frontMarkdown || c.noteText || f.front || "",
+            back: otherBack,
+            source: title ? `《${title}》${author}` : "来源未知",
+            score: f.score,
+            differs: answerDiffers(back, otherBack, bigramJaccard(back, otherBack))
+          });
+        }
+        if (list.length > 0) {
+          setHits(list);
+          return;
+        }
+      } catch {
+        // 检索失败不阻塞制卡：走原保存路径
+      } finally {
+        setChecking(false);
+      }
+    }
+    await save();
+  }
+
+  async function save(disambiguateWith?: string) {
     setSaving(true);
     const meta = {
       priority,
@@ -130,7 +193,8 @@ export function ManualCardForm({
       tags: tagsEnabled ? tags : []
     };
     const clozeText = mode === "cloze" ? toCloze(front) : undefined;
-    await onSave({
+    setHits(null);
+    const newId = await onSave({
       mode,
       front: mode === "cloze" ? clozeText ?? "" : front,
       back,
@@ -143,6 +207,7 @@ export function ManualCardForm({
       ...meta
     });
     setSaving(false);
+    if (disambiguateWith && newId) onDisambiguate?.(newId, disambiguateWith);
   }
 
   function toCloze(text: string): string {
@@ -295,19 +360,53 @@ export function ManualCardForm({
           <span className="mono">{priority}</span>
         </div>
 
+        {/* D121 §4.1：相似已有卡预检面板（内联、不弹窗；每个 front 文本只出现一次） */}
+        {hits && hits.length > 0 && (
+          <div className="manual-similar" data-testid="manual-similar-panel" role="region" aria-label="相似已有卡">
+            <p className="manual-similar-title">发现 {hits.length} 张相似已有卡——确认不是重复或矛盾后再保存</p>
+            <ul className="manual-similar-list">
+              {hits.map((h) => (
+                <li key={h.id} className="manual-similar-item" data-testid="manual-similar-item">
+                  <div className="disamb-candidate-q">{clipText(h.front, 80)}</div>
+                  <div className="disamb-candidate-a">答：{clipText(h.back, 60) || "（无）"}</div>
+                  <div className="disamb-candidate-meta">
+                    <span>{h.source}</span>
+                    <span className="mono">相似 {Math.round(h.score * 100)}%</span>
+                    {h.differs && <span className="disamb-tag">答案不同</span>}
+                    {onDisambiguate && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm manual-similar-disamb"
+                        disabled={saving}
+                        onClick={() => void save(h.id)}
+                      >
+                        保存并辨析
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="manual-similar-actions">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setHits(null)}>返回修改</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => void save()}>仍然保存</button>
+            </div>
+          </div>
+        )}
+
         <div className="form-actions">
           <button className="btn btn-secondary" onClick={onCancel}>取消</button>
           <button
             ref={createBtnRef}
             className="btn btn-primary"
-            disabled={saving || !canSave}
+            disabled={saving || checking || !canSave}
             onClick={(e) => {
               // D88 §4.2：settle 回弹＝真实点击主 CTA 的按压反馈（Exaggeration；animationend 自摘）
               settle(e.currentTarget);
-              void save();
+              void onCreateClick();
             }}
           >
-            {saving ? "保存中…" : "创建卡片"}
+            {saving ? "保存中…" : checking ? "检查相似卡…" : "创建卡片"}
           </button>
         </div>
     </>
@@ -329,7 +428,7 @@ export default function ManualCardEditor({
   tagSuggestions?: TagVocabEntry[] | null;
   initialTags?: string[];
   onCancel: () => void;
-  onSave: (payload: ManualCardPayload) => Promise<void>;
+  onSave: (payload: ManualCardPayload) => Promise<string | null | void>;
 }) {
   const panelRef = useDialogA11y<HTMLDivElement>(onCancel);
   return (

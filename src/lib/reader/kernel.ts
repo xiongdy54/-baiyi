@@ -188,6 +188,9 @@ export interface ReaderKernel {
   getSectionText?(startAnchor: string, endAnchor?: string): Promise<string>;
   /** 当前选区语义数据（制卡管线唯一入口）；无选区返回 null */
   getSelection(): ReaderSelection | null;
+  /** D121 §2.3（可选能力）：选区前 2 段 / 后 1 段文字（before ≤600、after ≤400，段内空白归一）；
+   *  仅用于 AI 制卡判断归属与前提，禁止对其出卡。无选区或取不到返回 null。 */
+  getSelectionContext?(): { before: string; after: string } | null;
   /** 正文图片定位（v35）：按 alt/周边文字找回原图并滚动到可见；命中返回宿主坐标框，未命中返回 null */
   locateImage?(query: ImageLocateQuery): Promise<ImageLocateHit | null>;
   /** 选区几何（宿主视口坐标）；仅供浮动菜单定位，非语义数据 */

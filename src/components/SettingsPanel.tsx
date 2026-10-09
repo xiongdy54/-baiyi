@@ -2536,15 +2536,20 @@ export default function SettingsPanel({
     // 每次现取：仪表盘等区块在数据加载后才从骨架换成真内容，挂载时快照会漏节
     const listItems = () =>
       Array.from(root.querySelectorAll<HTMLElement>(".settings-section[id]")).filter((el) => navIds.has(el.id));
+    // 宽档由 .settings-content 滚动（左导航固定不动），窄档由 .settings-layout 整体滚动
+    const contentEl = root.querySelector<HTMLElement>(".settings-content");
+    const scroller = () =>
+      contentEl && getComputedStyle(contentEl).overflowY === "auto" ? contentEl : root;
     const measure = () => {
       const items = listItems();
       if (!items.length) return;
+      const sc = scroller();
       // 已滚到底：最后一节再怎么滚也到不了顶部，最近判据会停在倒数第二节 → 兜底
-      if (root.scrollTop + root.clientHeight >= root.scrollHeight - 8) {
+      if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 8) {
         setActiveNav(items[items.length - 1].id.replace(/^sec-/, ""));
         return;
       }
-      const rt = root.getBoundingClientRect().top;
+      const rt = sc.getBoundingClientRect().top;
       // 判据取「距容器顶最近的一节」而不是「最后一条越过判定线的节」：
       // 平滑滚动落点前约 40px 就不再触发 scroll，越线判据会稳定地慢一节。
       let best = items[0];
@@ -2563,13 +2568,18 @@ export default function SettingsPanel({
       window.clearTimeout(tail);
       tail = window.setTimeout(measure, 220);
     };
-    root.addEventListener("scroll", onScroll, { passive: true });
-    root.addEventListener("scrollend", onScroll);
+    const targets = [root, contentEl].filter((x): x is HTMLElement => !!x);
+    for (const t of targets) {
+      t.addEventListener("scroll", onScroll, { passive: true });
+      t.addEventListener("scrollend", onScroll);
+    }
     measure();
     return () => {
       window.clearTimeout(tail);
-      root.removeEventListener("scroll", onScroll);
-      root.removeEventListener("scrollend", onScroll);
+      for (const t of targets) {
+        t.removeEventListener("scroll", onScroll);
+        t.removeEventListener("scrollend", onScroll);
+      }
     };
     // SECTION_GROUPS 是模块级常量，挂载一次即可
   }, []);

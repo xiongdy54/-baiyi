@@ -22,7 +22,7 @@ const FOCUSABLE =
   'textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
 /**
- * 已挂载面板的栈。存在嵌套模态（LeechWizard 里可再开 ContrastCardModal），
+ * 已挂载面板的栈。存在嵌套模态（LeechWizard 里可再开 DisambiguateModal），
  * 若每个实例都独立处理 Esc / Tab，最外层会先把内层还开着的外层关掉、
  * 两个焦点锁也会互相抢焦点。故只有栈顶实例响应键盘。
  */

@@ -5,6 +5,8 @@ import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { cardsApi, parseCloze, type CardDraft } from "../lib/cards";
 import { useSelectionActions } from "../lib/useSelectionActions";
+import { headingPathAt, tocPathByHref } from "../lib/reader/tocPath";
+import { paragraphContext } from "../lib/selectionContext";
 import type { OcclusionRect, OcclusionShape } from "../lib/occlusion";
 import { settingsStore } from "../lib/settings";
 import { sanitizeDomain, udcLabel, UDC_LEAVES, UDC_MAX, UDC_OTHER } from "../lib/udc";
@@ -117,6 +119,8 @@ interface Props {
   /** 原书文件字节（存在即走阅读内核；粘贴书/摘录 R1b 合流） */
   book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" } | null;
   sourceTitle?: string;
+  /** D121 §1.3：书籍作者（制卡时写入 sourceRef.author） */
+  sourceAuthor?: string;
   onBack: () => void;
   onProgress?: (ratio: number, lastText: string, extra?: { cfi?: string; fraction?: number; pageIndex?: number }) => void;
   /** 阅读主题联动整个软件（v20.1）：暗夜→软件夜间模式，纸白/羊皮→浅色 */
@@ -240,6 +244,7 @@ export default function Reader({
   jumpAnchor,
   book,
   sourceTitle,
+  sourceAuthor,
   onBack,
   onProgress,
   onSwitchAppTheme,
@@ -313,7 +318,25 @@ export default function Reader({
     selectionSpans: () => selection?.spans,
     contextRef: () => enrichedContextRef(),
     sourceContext: () => ({ documentId: contextRef?.documentId, extractId: contextRef?.extractId }),
-    labels: { title, sourceTitle, section: contextLabel },
+    labels: { title, sourceTitle, sourceAuthor, section: contextLabel },
+    // D121 §2.2：章节路径——引擎书走目录 DFS（tocItems/tocActiveHref 在后面才声明，故用函数在动作时求值），
+    // 自渲染 markdown 书走选区之前的 ATX 标题层级栈；都取不到 = []（labels.section 作兜底）
+    sectionPath: () => {
+      if (engineMode) return tocPathByHref(tocItems, tocActiveHref);
+      const t = selection?.text;
+      if (!t || !markdown) return [];
+      const at = markdown.indexOf(t);
+      return at >= 0 ? headingPathAt(markdown, at) : [];
+    },
+    // D121 §2.3：前后文——引擎书优先取内核（块级兄弟），否则对 markdown 正文做段落定位
+    selectionSurrounding: () => {
+      if (engineMode) {
+        const c = kernelRef.current?.getSelectionContext?.();
+        if (c && (c.before || c.after)) return c;
+      }
+      const t = selection?.text;
+      return t && markdown ? paragraphContext(markdown, t) : null;
+    },
     ownerKey: () => itemId || contextRef?.documentId || "",
     itemId,
     sourceTextRef,
@@ -757,6 +780,20 @@ export default function Reader({
         showToast("多段选择暂不可用");
       });
   }, [showToast]);
+
+  // 首屏前应用已保存设置：settings 加载是异步的，这里直接等 store 读完再给内核，
+  // 避免 readerSettingsRef 仍是默认值，也避免 paginator 默认对开先画一帧。
+  const handleEngineBeforeOpen = useCallback(async (k: ReaderKernel) => {
+    const s = await settingsStore.get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS);
+    const merged: ReaderSettings = {
+      mode: { ...DEFAULT_READER_SETTINGS.mode, ...s?.mode },
+      appearance: { ...DEFAULT_READER_SETTINGS.appearance, ...s?.appearance }
+    };
+    readerSettingsRef.current = merged;
+    setReaderSettings(merged);
+    await k.setMode(merged.mode);
+    k.applyAppearance(resolveAppearance(merged));
+  }, []);
 
   const handleEngineReady = useCallback((k: ReaderKernel) => {
     kernelRef.current = k;
@@ -1364,7 +1401,8 @@ export default function Reader({
 
   // D88 §5.2 pageinfo 文案：页码（PDF 的 pageIndex+1）与当前章节名（TOC 按 chapterHref 匹配），
   // 有页码显页码、有章节显章节，两者皆无＝整个元素不渲染（数据来自既有 relocate，禁造假）。
-  const chapterLabel = tocItems.find((t) => t.href === tocActiveHref)?.label;
+  // D121 §2.2：目录可嵌套，旧实现只查顶层 → 子章节恒无章节名；改取路径末项
+  const chapterLabel = tocPathByHref(tocItems, tocActiveHref).slice(-1)[0];
   const readerPageInfoText = [
     relocPage != null ? `第 ${relocPage + 1} 页` : null,
     chapterLabel ?? null
@@ -1674,6 +1712,7 @@ export default function Reader({
                   onContentPointerUp={handleEnginePointerUp}
                   onImageClick={(img) => void handleEngineImageClick(img)}
                   onReady={handleEngineReady}
+                  beforeOpen={handleEngineBeforeOpen}
                   onError={(msg) => setEngineError(msg)}
                 />
                 )}

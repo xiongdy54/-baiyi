@@ -55,7 +55,9 @@ contextBridge.exposeInMainWorld("libraryAPI", {
   // v38（D35）：书籍语言属性（查词语言路由的书籍级信号）
   setItemLang: (id, lang) => ipcRenderer.invoke("library:setItemLang", id, lang),
   // v45.1：书架悬停改名
-  setItemTitle: (id, title) => ipcRenderer.invoke("library:setItemTitle", id, title)
+  setItemTitle: (id, title) => ipcRenderer.invoke("library:setItemTitle", id, title),
+  // D121 §1.1：书籍作者（空=未知）
+  setItemAuthor: (id, author) => ipcRenderer.invoke("library:setItemAuthor", id, author)
 });
 
 contextBridge.exposeInMainWorld("workflowAPI", {
@@ -140,13 +142,21 @@ contextBridge.exposeInMainWorld("readingAPI", {
 });
 
 contextBridge.exposeInMainWorld("statsAPI", {
-  overview: () => ipcRenderer.invoke("stats:overview")
+  overview: () => ipcRenderer.invoke("stats:overview"),
+  timeline: (opts) => ipcRenderer.invoke("stats:timeline", opts)
 });
 
 contextBridge.exposeInMainWorld("issuesAPI", {
   add: (issue) => ipcRenderer.invoke("issues:add", issue),
   list: (cardId) => ipcRenderer.invoke("issues:list", cardId),
   resolve: (id) => ipcRenderer.invoke("issues:resolve", id)
+});
+
+// D121 §1.2：卡片辨析链接
+contextBridge.exposeInMainWorld("cardLinksAPI", {
+  add: (input) => ipcRenderer.invoke("card-links:add", input),
+  update: (id, patch) => ipcRenderer.invoke("card-links:update", id, patch),
+  listForCard: (cardId) => ipcRenderer.invoke("card-links:listForCard", cardId)
 });
 
 contextBridge.exposeInMainWorld("batchesAPI", {
