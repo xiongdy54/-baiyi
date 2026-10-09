@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
@@ -271,6 +271,55 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   /** 面包屑描述的是**正在显示**的那张卡：会话态＝队列头；查看态＝被点开的那层 */
   const shown = viewing ?? current;
   const shownId = shown?.id ?? null;
+
+  /* ---------- R2-5（MOTION-DESIGN-SPEC §18.2）：摘录页两态统一入场 ----------
+     R2-A 首卡抑制：页面进入后的**首张卡**不播 stage-card-in（入场完全由 §5.1 方向性页面过渡
+       承担，修 §18.1-E3 双动效）；同视图内换卡（推进/撤销/查看）照常播。
+       卡面元素（.extract-face）由共用组件 ExtractCardFace 渲染（宿主不得越界改它），标记按
+       等价语义落在页面根（data-first-card）——抑制规则只在「本周期首卡元素存续期」在场。
+     R2-B 内容就绪 fade：loaded 首转真的首个渲染周期给页面根挂 content-enter，CSS 作用于
+       .extract-page-cols 与 .stage-bar（同一份规则，开/收轨两态时长缓动逐字相同）。 */
+  /** 首卡标记（live/id 机制）：id=null＝本周期尚未记录首卡；live=true＝被标记的首卡元素仍在场。
+      渲染期**只读不写**（StrictMode 双渲染两次读到同值，提交才带标记）；消费在下方 layout effect。
+      换卡（推进/撤销/查看，key 变化）当帧标记随新卡一同摘除 ⇒ 新卡首帧即播 stage-card-in；
+      被标记卡存续期恒带标记——中途摘除会让 stage-card-in 迟到重放（动画名由 none 复现即起播）。 */
+  const firstCardMarkRef = useRef<{ id: string | null; live: boolean }>({ id: null, live: true });
+  /** content-enter 武装：首个含卡渲染周期挂 class；fade 仅 --dur-view(200ms)，700ms 后经定时器
+      摘除（同 shelf-enter 的清除纪律：防后续重挂载/闸门重开误播；提前摘会打断 fade 中途跳变）。 */
+  const contentEnterArmedRef = useRef(true);
+  const contentEnterTimerRef = useRef<number | null>(null);
+  const [, bumpEnterClear] = useState(0);
+  const fullLayout = loaded && (current !== null || viewing !== null);
+  useLayoutEffect(() => {
+    const mark = firstCardMarkRef.current;
+    if (!fullLayout || !mark.live) return;
+    if (mark.id === null) firstCardMarkRef.current = { id: shownId, live: true };
+    else if (mark.id !== shownId) firstCardMarkRef.current = { id: shownId, live: false };
+  }, [fullLayout, shownId]);
+  useLayoutEffect(() => {
+    if (!fullLayout || !contentEnterArmedRef.current || contentEnterTimerRef.current !== null) return;
+    contentEnterTimerRef.current = window.setTimeout(() => {
+      contentEnterTimerRef.current = null;
+      contentEnterArmedRef.current = false;
+      bumpEnterClear((v) => v + 1); // 触发重渲染摘下 content-enter（此刻 fade 早已结束，无打断）
+    }, 700);
+  }, [fullLayout]);
+  // loaded 回落假（重新加载）＝视为新入场周期（方案未定义，按交接包拍板）：重武装两标记，转真后重播一次
+  useLayoutEffect(() => {
+    if (loaded) return;
+    firstCardMarkRef.current = { id: null, live: true };
+    contentEnterArmedRef.current = true;
+    if (contentEnterTimerRef.current !== null) {
+      window.clearTimeout(contentEnterTimerRef.current);
+      contentEnterTimerRef.current = null;
+    }
+  }, [loaded]);
+  useEffect(
+    () => () => {
+      if (contentEnterTimerRef.current !== null) window.clearTimeout(contentEnterTimerRef.current);
+    },
+    []
+  );
 
   // v48.41（D81）：当前卡材料名上报顶栏（替代「摘录」字样；无材料名＝空串，顶栏回落原字样）
   const materialName = String(shown?.docTitle ?? "");
@@ -891,13 +940,20 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     onSelection: handleFaceSelection
   };
 
+  // R2-5（§18.2）渲染标记：content-enter＝loaded 首转真的首个渲染周期（armed，700ms 后摘除）；
+  // data-first-card＝本周期首卡元素存续期恒挂（渲染期只读 ref，消费见上方 layout effect）。
+  const firstCardMark = firstCardMarkRef.current;
+  const isFirstCardEl = firstCardMark.live && (firstCardMark.id === null || firstCardMark.id === shownId);
   return (
     <div
-      className="extract-page"
+      className={contentEnterArmedRef.current ? "extract-page content-enter" : "extract-page"}
       ref={pageRef}
       data-showing-extract-id={shownId ?? ""}
       data-viewing={viewing ? "1" : undefined}
       data-annot-open={annotPanelVisible && annotOpen ? "1" : undefined}
+      /* R2-A（§18.2）：首卡抑制标记挂页面根——卡面由共用组件渲染，祖先标记等价；
+         换卡当帧随新卡一同摘除（见上方 live/id 机制）。 */
+      data-first-card={isFirstCardEl ? "1" : undefined}
       /* D88 §8.5：制卡面板（手动/AI 任一）在场——宽窗 ≥1520 时主列与底栏右移让位（CSS 条件）；
          窄窗 dock 为覆盖层，内容不动。 */
       data-dock-open={selActions.dockOpen ? "1" : undefined}

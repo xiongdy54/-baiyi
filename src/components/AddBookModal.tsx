@@ -2,6 +2,7 @@ import { useState } from "react";
 import { libraryApi, BOOK_LANGUAGES } from "../lib/library";
 import { importMany } from "../lib/importRouter";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { useDismiss } from "../lib/useDismiss";
 import { eventBus } from "../lib/eventbus";
 import { IconAlert, IconClose, IconImport } from "./icons";
 
@@ -17,7 +18,9 @@ interface ImportReport {
 }
 
 export default function AddBookModal({ onSave, onClose }: Props) {
-  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  // D120 §8.1：出场两步走——Esc / 遮罩 / 关闭·取消按钮 / 导入成功自动关，全部收口到 requestClose
+  const { show, requestClose } = useDismiss(onClose);
+  const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
   // v38（D35）：粘贴书的语言（留空=未知，查词时靠句子语境启发）；批量导入的书到书架卡片上设
@@ -40,6 +43,8 @@ export default function AddBookModal({ onSave, onClose }: Props) {
     setSaveError(null);
     try {
       await onSave(title, markdown, lang);
+      // D120 §8.1：保存成功 → 走 requestClose 两步走出场；失败 catch 留窗报错，不关
+      requestClose();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -62,10 +67,10 @@ export default function AddBookModal({ onSave, onClose }: Props) {
       const okList = outcomes.filter((o) => o.ok);
       const failList = outcomes.filter((o) => !o.ok);
       if (okList.length > 0) eventBus.emit("library/changed");
-      // 全成功 → 直接关窗（与原先一致）。只要有失败，窗口就留着展示报告，
+      // 全成功 → 直接关窗（与原先一致，走 requestClose 播出场）。只要有失败，窗口就留着展示，
       // 让用户看清是哪几个文件、为什么没进来，而不是被一次 onClose 带走。
       if (failList.length === 0) {
-        onClose();
+        requestClose();
         return;
       }
       setImportReport({
@@ -81,11 +86,11 @@ export default function AddBookModal({ onSave, onClose }: Props) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="添加书籍" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
+      <div className="modal-panel" data-show={show ? "in" : "out"} ref={panelRef} role="dialog" aria-modal="true" aria-label="添加书籍" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>添加书籍</h2>
-          <button className="icon-btn modal-close" title="关闭" aria-label="关闭" onClick={onClose}>
+          <button className="icon-btn modal-close" title="关闭" aria-label="关闭" onClick={requestClose}>
             <IconClose size={18} />
           </button>
         </div>
@@ -155,7 +160,7 @@ export default function AddBookModal({ onSave, onClose }: Props) {
               : "导入文件"}
           </button>
           <span className="form-actions-spacer" />
-          <button className="btn btn-secondary" onClick={onClose}>取消</button>
+          <button className="btn btn-secondary" onClick={requestClose}>取消</button>
           <button className="btn btn-primary" disabled={!canSave} onClick={handleSave}>
             {saving ? "保存中…" : "保存到书架"}
           </button>

@@ -134,9 +134,29 @@
   /* v48.70（D114 §11.2）：设置页 tooltip 进出场（浮层进 150ms / 出 100ms，swiss 浮层档） */
   --dur-tip-in: 150ms;
   --dur-tip-out: 100ms;
-  /* §2.3-1 豁免件：瑞士「直角无阴影」的唯一例外——仅允许出现在 ≥32px 可点控件 hover 态
-     与评分钮 hover 态；24px 工具栏钮、列表条目、表格行禁止使用。字面黑（阴影不随主题反转）。 */
-  --shadow-hover: 0 3px 8px rgba(10, 10, 10, 0.12);
+  /* v48.76（D120）：全局 Motion Token（MOTION-DESIGN-SPEC §1 整块，只增不改）——零视觉变化。
+     全部静态值、无 var() 派生 ⇒ 只在 :root 声明一次（§5.1 求值层纪律），深浅主题共用。 */
+  /* —— 时长档位（全部 ms，禁止组件内裸写 ms） —— */
+  --dur-exit: 100ms;    /* 浮层/元素出场（瑞士风硬规则：浮层出 100ms） */
+  --dur-enter: 150ms;   /* 浮层/菜单/模态入场（瑞士风硬规则：浮层进 150ms） */
+  --dur-view: 200ms;    /* 页面级切换（瑞士风硬规则：视图切换 ≤200ms） */
+  --dur-chart: 300ms;   /* 图表数据更新过渡 */
+  --dur-chart-in: 400ms;/* 图表首次入场（含 stagger 总预算 ≤640ms，§6.3） */
+
+  /* —— 缓动（全应用一族，elegance-sophistication：无回弹） —— */
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);   /* 入场专用：快起步缓着陆（ease-out 族） */
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);    /* 出场专用：缓起步快离场（ease-in 族） */
+  /* 双向变换（展开/收起、hover 进出、面板开合）仍用既有 --ease-out-soft */
+  /* 标准短过渡仍用既有 --ease；--spring 冻结（仅存量两处，禁止新引用） */
+
+  /* —— 位移/缩放档位（token 化，禁止裸写 px 位移） —— */
+  --shift-xs: 2px;   /* 图标随动、focus 微移 */
+  --shift-sm: 4px;   /* 入场起始偏移（浮层、页面、面板） */
+  --shift-md: 8px;   /* 面板/卡片入场偏移上限 */
+  --scale-press: 0.95;  /* 按压缩放（沿用现状） */
+  --scale-in: 0.98;     /* 入场起始缩放（克制，不用 0.9 以下的弹入） */
+  /* --shadow-hover 已删除（GUIDE §5.1 v48.76/D120：hover 抬升与该阴影自 D120 起废除，
+     hover 只变底色/图标随动——§2.3-1 豁免件随之退役，瑞士「直角无阴影」再无例外）。 */
 }
 
 /* 深色模式：只覆盖色值组，布局/字号/组件规则不变 */
@@ -712,32 +732,31 @@ body.has-skin .topbar { background: transparent; }
 }
 .btn-outline:disabled { background: transparent; border-color: var(--grey-2); }
 
-/* ---------- buttons-ctas 通用交互语言（D88 §4；一次定义三界面复用，全部挂在既有类名上，零 DOM） ----------
+/* ---------- buttons-ctas 通用交互语言（D88 §4；D120/方案 §4 修订：hover 禁抬升。一次定义三界面复用，全部挂在既有类名上，零 DOM） ----------
    缓动分层：按钮级走 --ease-out-soft/--dur-hover(160)/--dur-press(60)；栏/面板级仍走 --ease/--dur。
-   hover 抬升＝Anticipation（-1px 24px 档 / -2px 32-40px 档）；按压缩放＝Squash & Stretch；
-   --shadow-hover 只给 ≥32px 档与评分钮（§2.3-1 豁免范围），24px 工具栏档禁用。
+   hover 只变底色（块外既有 --grey 族规则）与图标随动；hover 抬升（translateY 上浮）与
+   --shadow-hover 自 D120 起废除（§4 禁止：translateY 负值上浮 / scale>1 / hover 新增阴影）。
+   触屏无 hover 态：transition 声明与图标滞后属 hover 交互规则，包 @media (hover:hover)；
+   :active 按压是触觉反馈（触屏主要反馈渠道），留在外层不包裹（§4 active 行保留语义）。
    降级纪律：本块整体在 no-preference 作用域内，reduce 时全部规则不在场（§13-E）。 */
 @media (prefers-reduced-motion: no-preference) {
+  /* 触屏按压回退（D120 §4 触屏注记，第 1 轮审查采纳）：transform 过渡声明放 hover 媒体查询外层——
+     hover:none 设备上 :active 按压/抬起都走 60ms（--dur-press）平滑回退；hover 设备上
+     被下方同选择器 hover 块（靠后声明、同权重）整组覆盖，桌面行为不变。 */
   .btn, .bar-btn, .btn-rail, .seg-rail button, .icon-btn, .reader-nav-btn,
   .reader-engine-controls .btn, .reader-engine-controls .dd-btn, .grade {
-    transition: transform var(--dur-hover) var(--ease-out-soft),
-                box-shadow var(--dur-hover) var(--ease-out-soft),
-                background-color var(--dur-hover) var(--ease-out-soft),
-                border-color var(--dur-hover) var(--ease-out-soft),
-                color var(--dur-hover) var(--ease-out-soft);
+    transition: transform var(--dur-press) var(--ease-out-soft);
   }
-  /* hover 抬升（Anticipation）：32-40px 档 -2px + 阴影；disabled 无位移无阴影（§9） */
-  .btn:hover:not([disabled]), .bar-btn:hover:not([disabled]), .grade:hover:not([disabled]) {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-hover);
+  @media (hover: hover) {
+    .btn, .bar-btn, .btn-rail, .seg-rail button, .icon-btn, .reader-nav-btn,
+    .reader-engine-controls .btn, .reader-engine-controls .dd-btn, .grade {
+      transition: transform var(--dur-hover) var(--ease-out-soft),
+                  background-color var(--dur-hover) var(--ease-out-soft),
+                  border-color var(--dur-hover) var(--ease-out-soft),
+                  color var(--dur-hover) var(--ease-out-soft);
+    }
   }
-  /* 24px 工具栏档 / 图标钮：-1px，无阴影（§2.3-1） */
-  .btn-rail:hover:not([disabled]), .seg-rail button:hover { transform: translateY(-1px); }
-  .icon-btn:hover, .reader-nav-btn:hover { transform: translateY(-1px); }
-  /* 24px 档挂 .bar-btn 双类者（.annot-toggle.bar-btn）按 §4.1 表回落：-1px 且无阴影 */
-  .annot-toggle.bar-btn:hover:not([disabled]) { transform: translateY(-1px); box-shadow: none; }
-  /* 按压缩放（Squash & Stretch，--dur-press=60ms）：置于 hover 组之后并带同款 :not([disabled])
-     守卫——特异性对齐后由源序保证按住时 active 压制 hover 抬升（disabled 无 :active）。
+  /* 按压缩放（Squash & Stretch，--dur-press=60ms）：带 :not([disabled]) 守卫（disabled 无 :active）。
      （设计稿 §4.1 CSS 草案的 :active 在 :hover 之前且缺守卫，特异性行不通；此处按其
      §4.1 表格语义落——active=scale(.95) 必须可发生。） */
   .bar-btn:active:not([disabled]), .grade:active:not([disabled]) { transform: scale(0.95); transition-duration: var(--dur-press); }
@@ -747,7 +766,9 @@ body.has-skin .topbar { background: transparent; }
   .annot-toggle.bar-btn:active:not([disabled]) { transform: scale(0.95); transition-duration: var(--dur-press); }
   /* Follow Through（图标滞后 §4.1）：30ms 延迟使图标随钮身滞后；方向语义位移（前进右移/返回左移）
      需逐钮方向钩子，待后续批次接线（现有 DOM 无方向类）。 */
-  .btn .ic, .icon-btn svg { transition: transform var(--dur-hover) var(--ease-out-soft) 30ms; }
+  @media (hover: hover) {
+    .btn .ic, .icon-btn svg { transition: transform var(--dur-hover) var(--ease-out-soft) 30ms; }
+  }
 }
 
 /* settle 回弹（D88 §4.2，Exaggeration）：主 CTA 专用按压反馈——移除类 → reflow → 加 .settle，
@@ -793,6 +814,12 @@ body.has-skin .topbar { background: transparent; }
     transform-origin: 50% 100%;
   }
   .extract-face-toolbar.is-float-pop[data-place="below"] { transform-origin: 50% 0%; }
+  /* 浮层菜单（D120 §8.4）：Dropdown / 书架 CardMenu / 阅读器工具菜单——均条件挂载，
+     挂既有 pop-in（spring 冻结豁免，§12-12）；origin 随翻边：向下开自顶缘长出（默认与
+     dd-menu-down 同），向上开（dd-menu-up）自底缘长出。零 JS 改动。 */
+  .dd-menu { animation: pop-in 220ms var(--spring) both; transform-origin: 50% 0%; }
+  .dd-menu.dd-menu-up { transform-origin: 50% 100%; }
+  .dd-menu.dd-menu-down { transform-origin: 50% 0%; }
 }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.92) translateY(4px); } to { opacity: 1; transform: none; } }
 
@@ -948,6 +975,15 @@ body.has-skin .topbar { background: transparent; }
   height: 100%;
   object-fit: cover;
   display: block;
+}
+/* D120-R2（MOTION-DESIGN-SPEC §10-R2）：封面解码淡入——bookasset:// 逐张解码是书架
+   「生硬」的第二波硬显来源；解码完成（TSX 侧 onLoad 置 is-loaded）前不显示，150ms 淡入落地。
+   no-preference 外无 opacity:0 —— reduce / 无动画环境图片直接显（§3.2 双轨制）。
+   失败回落骨架（.book-card-spine + .book-card-title）与无封面占位态不是 .cover-img，表现不变；
+   重试链 ?r=N 不动，每次重试的加载重新走同一规则（§10-R2）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .cover-img { opacity: 0; transition: opacity var(--dur-enter) var(--ease-enter); }
+  .cover-img.is-loaded { opacity: 1; }
 }
 /* 无封面：灰底 + accent 方块 + 左下对齐标题（沿用既有骨架，不另发明一套） */
 .book-card-spine {
@@ -1418,6 +1454,47 @@ body.has-skin .topbar { background: transparent; }
   outline: calc(var(--sp-1) / 2) solid var(--accent);
   outline-offset: 2px;
 }
+
+/* ==========================================================================
+   D120-R2（MOTION-DESIGN-SPEC §10-R2）：书架入场——Bookshelf 挂载后 items 由空→非空
+   的首个渲染周期，TSX 给网格/表容器挂 shelf-enter（enterArmed ref 单次武装 +
+   700ms 清除：200 + 8×30 + 余量，防无关重渲染里新建节点误播）、每卡/行注入 --i。
+   封面墙卡片与目录表行：opacity 0→1 + translateY(--shift-sm)→0，
+   --dur-view(200ms) --ease-enter，stagger 30ms/张 ×≤8（--i 已 clamp 到 0-7 共 8 档）。
+   选择器挂 :root:not([data-vt])（§5.2 入场闸门，本文件首个消费者）：过渡遮罩在场时
+   规则不在场、揭幕后从头完整播放；闸门外的重排 / refresh 回灌无 shelf-enter 容器，不播。
+   reduce（本块外）规则不在场，元素直接落终态（§3.2 双轨制）。
+   ========================================================================== */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-vt]) .bookshelf-grid.shelf-enter > .shelf-item,
+  :root:not([data-vt]) .shelf-body.shelf-enter tbody tr {
+    animation: shelf-item-in var(--dur-view) var(--ease-enter) both;
+    animation-delay: calc(var(--i, 0) * 30ms); /* 30ms/张 ×≤8：§3.6 stagger 预算下限（§10-R2 明定） */
+  }
+  @keyframes shelf-item-in {
+    from { opacity: 0; transform: translateY(var(--shift-sm)); }
+    to { opacity: 1; transform: none; }
+  }
+  /* is-fresh 同帧延迟（§10-R2 / §9-1 单主角）：同容器带 shelf-enter 时高亮框推迟到
+     入场序列结束（200 + 8×30 = 440ms）后起播，避免与 stagger 并发抢戏。
+     方案明定 keyframes + animation-delay 形态；动画属性 outline-color 为 paint-only
+     非布局属性（不触发 reflow），出处 §10-R2。backwards：延迟期透明＝不可见。
+     非同帧（无 shelf-enter / 闸门期 / reduce）无此动画，高亮瞬现如既有表现。 */
+  :root:not([data-vt]) .bookshelf-grid.shelf-enter .shelf-item.is-fresh .shelf-face {
+    animation: fresh-outline var(--dur-enter) var(--ease-enter) calc(var(--dur-view) + 8 * 30ms) backwards;
+  }
+  @keyframes fresh-outline {
+    from { outline-color: transparent; }
+    to { outline-color: var(--accent); }
+  }
+  /* 第 1 轮审查 LOW-3：表格态同款同帧延迟——目录表（.shelf-body）行若带 is-fresh，
+     同样推迟到入场序列结束（200 + 8×30 = 440ms）后起播，与墙面容器同一把尺、同一 keyframes。
+     注意：当前 Bookshelf 的表格行渲染尚未注入 is-fresh（仅墙面卡有），本规则为表格态对齐的
+     在场预备；tr 无 outline 声明时动画不可见，不改变现有行为。 */
+  :root:not([data-vt]) .shelf-body.shelf-enter tbody tr.is-fresh {
+    animation: fresh-outline var(--dur-enter) var(--ease-enter) calc(var(--dur-view) + 8 * 30ms) backwards;
+  }
+}
 .shelf-table .col-act .dd { display: inline-block; }
 .shelf-table .col-act .act { color: var(--text-secondary); }
 .shelf-table .col-act .act:hover { background: var(--grey-2); color: var(--text-primary); }
@@ -1499,11 +1576,32 @@ body.has-skin .topbar { background: transparent; }
   display: flex;
   align-items: center;
   justify-content: center;
-  animation: modal-in 150ms var(--ease);
 }
 @keyframes modal-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+/* ---------- 模态入场/出场统一（MOTION-DESIGN-SPEC §8.1，D120） ----------
+   替换原「.modal-backdrop { animation: modal-in 150ms var(--ease) }」裸值规则：
+   入场 150ms（--dur-enter）缓动换 --ease-enter，面板新增 panel-in（位移 --shift-sm、
+   缩放 --scale-in，无 overshoot）；出场走 data-show="out" 两步（useDismiss 100ms 后卸载），
+   panel-out 位移 --shift-xs。只动 transform/opacity；全部收在 no-preference 作用域，
+   reduce 时规则不在场（开关瞬时）。 */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(var(--shift-sm)) scale(var(--scale-in)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes panel-out {
+  to { opacity: 0; transform: translateY(var(--shift-xs)) scale(var(--scale-in)); }
+}
+@keyframes modal-out {
+  to { opacity: 0; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .modal-backdrop { animation: modal-in var(--dur-enter) var(--ease-enter); }
+  .modal-panel { animation: panel-in var(--dur-enter) var(--ease-enter) both; }
+  .modal-backdrop[data-show="out"] { animation: modal-out var(--dur-exit) var(--ease-exit) forwards; }
+  .modal-panel[data-show="out"] { animation: panel-out var(--dur-exit) var(--ease-exit) forwards; }
 }
 .modal-panel {
   width: 480px;
@@ -2541,15 +2639,16 @@ body.theme-dark .modal-panel {
   z-index: var(--z-drawer);
   display: flex;
   flex-direction: column;
-  animation: ai-panel-in 150ms var(--ease);
 }
-/* 动效降级：此前 .ai-panel 的入场动画不在任何 reduce 块内（全表其余四处都有） */
-@media (prefers-reduced-motion: reduce) {
-  .ai-panel { animation: none; }
+/* 入场（D120 §12-4 整改）：width 0→400 动画布局属性违反复合属性纪律——改 translateX(100%)→0
+   （与 side-dock-in 同手法；嵌入 dock 时由 .side-dock .ai-panel 回收为 animation: none）。
+   时长就地 token 化 150ms→--dur-enter（等值）；no-preference 作用域＝reduce 时规则不在场（§3.2）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .ai-panel { animation: ai-panel-in var(--dur-enter) var(--ease); }
 }
 @keyframes ai-panel-in {
-  from { width: 0; opacity: 0.4; }
-  to { width: 400px; opacity: 1; }
+  from { transform: translateX(100%); opacity: 0.4; }
+  to { transform: translateX(0); opacity: 1; }
 }
 .ai-panel-head {
   height: var(--sp-12);
@@ -2976,9 +3075,13 @@ body.theme-dark .modal-panel {
    卡面入场挂在 .review-flip 上（两面整体进场合一面动效，单面动画会与 backface 旋转叠加穿帮），
    :not(.flipped) 排除「恢复现场/撤销评分」直接以背面挂载的首帧（此时动画会先播正面再瞬时翻面）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .review-wrap .review-flip:not(.flipped),
-  .extract-page .extract-face,
-  .review-wrap .extract-face { animation: stage-card-in var(--dur-stage) var(--ease-out-soft) both; }
+  .review-wrap .review-flip:not(.flipped) { animation: stage-card-in var(--dur-stage) var(--ease-out-soft) both; }
+  /* 第 1 轮审查 LOW-2（§5.2 闸门）：摘录页 stage-card-in 消费者并入 :root:not([data-vt])——
+     页面过渡遮罩期（≈300ms）规则不在场、揭幕后从头完整播放，与 R2-5 首卡抑制（本文件 §18.2 块）
+     互补，消除「遮罩期内播完、揭幕只剩静态」的双动效空隙；页内换卡无 data-vt ⇒ 照常立即播
+     （闸门只挡页面过渡期间）。review-flip 翻卡不在此列（:not(.flipped) 语义独立，维持现状）。 */
+  :root:not([data-vt]) .extract-page .extract-face,
+  :root:not([data-vt]) .review-wrap .extract-face { animation: stage-card-in var(--dur-stage) var(--ease-out-soft) both; }
   .bar-pop { animation: stage-pop-in 150ms var(--ease) both; }
 }
 @keyframes stage-card-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
@@ -3023,7 +3126,8 @@ body.theme-dark .modal-panel {
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
-/* 计数 bump（§7.2）：由真实 counts 变化驱动（React 比较前后值加类、200ms 后摘）——禁假动画 */
+/* 计数 bump（§7.2）：由真实 counts 变化驱动（React 比较前后值加类、200ms 后摘）——禁假动画。
+   spring 存量豁免（D120 §12-7）：200ms var(--spring) 保留不改——冻结三处之一，禁止扩散。 */
 @media (prefers-reduced-motion: no-preference) {
   .review-count[data-review-counts] .qi-num { transition: transform 200ms var(--spring); }
   .review-count[data-review-counts] .qi-num.bump { transform: scale(1.18); }
@@ -3034,8 +3138,9 @@ body.theme-dark .modal-panel {
    .stage-bar-inner 同一公式，构造性对齐）——D88 的「随头带贯通全宽」条款作废。 */
 .review-progress { height: calc(var(--sp-1) / 2); background: var(--grey-1); max-width: 720px; margin-inline: auto; }
 .review-progress > b { display: block; height: 100%; background: var(--accent); }
+/* 宽度过渡 token 化（D120 §12-7/§6）：500ms 裸值→--dur-chart（图表/进度档） */
 @media (prefers-reduced-motion: no-preference) {
-  .review-progress > b { transition: width 500ms var(--ease); }
+  .review-progress > b { transition: width var(--dur-chart) var(--ease); }
 }
 /* 空态装饰方块入场（§9 Empty 行）：rise 400ms；reduce 降级（规则在 no-preference 作用域内）。
    只挂复习页滚动根（§12 P4 白名单页）；摘录/阅读页空态归各自批次。 */
@@ -3102,10 +3207,7 @@ body.theme-dark .modal-panel {
 }
 .review-bar .grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .review-bar .grade.recommended:focus-visible { outline-color: var(--ink); } /* 填充钮上 outline 取 --ink（§9/§7.4） */
-@media (prefers-reduced-motion: no-preference) {
-  /* hover 抬升 -3px（§7.4 评分钮专属档，压过 §4.1 通用 32-40px 档的 -2px）+ 阴影由通用档提供 */
-  .review-bar .grade:hover:not([disabled]) { transform: translateY(-3px); }
-}
+/* hover 抬升 -3px 专属档已删除（D120/方案 §4 禁抬升，.grade hover 位移全部移除）；按压反馈走 D88 块 .grade:active */
 /* 滚动根：仍是真滚动容器（面包屑测试 L251/L489 硬条件），底栏是它的最后一个流内子节点 */
 .review-wrap {
   flex: 1;
@@ -3424,7 +3526,7 @@ body.theme-dark .modal-panel {
   background: color-mix(in srgb, var(--overlay-ink) 55%, transparent);
   cursor: zoom-out;
   user-select: none;
-  animation: image-focus-fade 160ms var(--ease);
+  animation: image-focus-fade var(--dur-enter) var(--ease);
 }
 @keyframes image-focus-fade {
   from { opacity: 0; }
@@ -3438,7 +3540,8 @@ body.theme-dark .modal-panel {
   max-width: 92vw;
   max-height: 100%;
   cursor: default;
-  transition: transform 240ms var(--ease), opacity 240ms var(--ease);
+  /* 240ms 裸值 token 化（D120 §12-6）：--dur-panel + --ease-out-soft */
+  transition: transform var(--dur-panel) var(--ease-out-soft), opacity var(--dur-panel) var(--ease-out-soft);
   will-change: transform;
 }
 .image-focus-imgbox {
@@ -3588,6 +3691,17 @@ body.theme-dark .modal-panel {
 .udc-menu { max-height: 240px; overflow-y: auto; }
 .udc-menu .dd-item:disabled { color: var(--text-placeholder); cursor: default; }
 
+/* ============ 通用折叠模式（D120 §7 / state-changes：唯一折叠技法）============
+   grid-template-rows 0fr↔1fr 过渡：内容高度未知时唯一可平滑折叠的零依赖手法
+   （§3 复合属性纪律唯一例外）。展开 --dur-panel + --ease-out-soft；
+   reduce 时显式 transition: none（§3.2 功能轨双轨制）。 */
+.collapse-clip { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--dur-panel) var(--ease-out-soft); }
+.collapse-clip.is-open { grid-template-rows: 1fr; }
+.collapse-inner { overflow: hidden; min-height: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .collapse-clip { transition: none; }
+}
+
 /* ============ 标签输入（D101 v48.60，§1.4）============ */
 /* 与 udc-chip 同族视觉（accent 软底 + 描边），输入框裸排、建议浮层与 dd-menu 同语言 */
 .tag-input { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
@@ -3622,9 +3736,9 @@ body.theme-dark .modal-panel {
 .tag-input-box.expanded input { border-color: var(--accent); }
 /* v48.62（D106，设计稿 TAG-SUGGESTION-PREVIEW.md V4）：展开式建议面板——
    视觉一体化：与输入框同底色、accent 连续描边（top 无框、top:-1px 与输入框共享边线）；
-   展开动效＝grid-template-rows 0fr→1fr 200ms ease-in-out（state-changes accordion 模式），
-   收回 140ms（.closing，去回对称）；候选行 stagger 20ms 上限 5（entrance-animations）；
-   聚焦态 border accent（:focus 规则）＝Anticipation 预告步。 */
+   展开动效＝§7 通用折叠模式（.collapse-clip）：展开 --dur-panel(240ms)、收回 --dur-view(200ms)
+   --ease-out-soft（D120 §7 存量整改：原两个 keyframes 已删、并入通用模式）；候选行 stagger
+   20ms 上限 5（entrance-animations）；聚焦态 border accent（:focus 规则）＝Anticipation 预告步。 */
 .tag-suggest-v4 {
   position: absolute;
   top: calc(100% - 1px);
@@ -3635,10 +3749,13 @@ body.theme-dark .modal-panel {
   border: 1px solid var(--accent);
   border-top: none;
 }
-.tag-suggest-clip { display: grid; grid-template-rows: 1fr; animation: tag-panel-grow 200ms ease-in-out; overflow: hidden; }
-.tag-suggest-v4.closing .tag-suggest-clip { animation: tag-panel-shrink 140ms ease-in-out forwards; }
-@keyframes tag-panel-grow { from { grid-template-rows: 0fr; } to { grid-template-rows: 1fr; } }
-@keyframes tag-panel-shrink { from { grid-template-rows: 1fr; } to { grid-template-rows: 0fr; } }
+/* 面板按需挂载（挂载即开、无前置 0fr 帧）：@starting-style 提供起始帧，让 is-open 的 1fr
+   仍以 transition 从 0fr 展开（§7 折叠模式；Chromium 117+/Electron 31 支持） */
+@starting-style {
+  .tag-suggest-v4 .collapse-clip.is-open { grid-template-rows: 0fr; }
+}
+/* 收回（§7 折叠行：exit 略快于展开）＝--dur-view(200ms)；closing 态容器留在 DOM 等过渡走完再卸载 */
+.tag-suggest-v4.closing .collapse-clip { transition-duration: var(--dur-view); }
 .tag-suggest-body { min-height: 0; overflow-y: auto; max-height: 220px; display: flex; flex-direction: column; }
 .tag-suggest-empty { padding: var(--sp-2); color: var(--text-helper); font-size: var(--fs-meta); }
 .tag-suggest-row {
@@ -3664,7 +3781,7 @@ body.theme-dark .modal-panel {
 .tag-suggest-hit { color: var(--accent); }
 .tag-suggest-meta { flex: none; color: var(--text-secondary); font-size: var(--fs-meta); }
 @media (prefers-reduced-motion: reduce) {
-  .tag-suggest-clip, .tag-suggest-v4.closing .tag-suggest-clip, .tag-suggest-row { animation: none !important; }
+  .tag-suggest-row { animation: none !important; }
 }
 .tag-invalid { color: var(--error); }
 .tag-chip-static { cursor: default; }
@@ -3750,7 +3867,7 @@ body.theme-dark .modal-panel {
   z-index: calc(var(--z-toast) - 1);
   background: color-mix(in srgb, var(--overlay-ink) 55%, transparent);
   user-select: none;
-  animation: image-focus-fade 160ms var(--ease);
+  animation: image-focus-fade var(--dur-enter) var(--ease);
 }
 /* R1：主区（工具条+画布）与右栏并排——工具条随主区在流内定位，与右栏无覆盖可能 */
 .occlusion-editor-main {
@@ -3780,7 +3897,7 @@ body.theme-dark .modal-panel {
 /* 用户实测修正（D98）：动作按钮窄幅下文字换行成竖排——一律禁换行、不收缩 */
 .image-focus-actions .btn,
 .occlusion-editor-toolbar .btn { white-space: nowrap; flex: none; }
-/* 段控（state-changes）：滑移指示条 200ms ease-in-out */
+/* 段控（state-changes）：滑移指示条（D120 §12-6 token 化：--dur-hover + --ease-out-soft） */
 .occl-seg { position: relative; display: flex; transition: opacity var(--dur-hover) var(--ease-out-soft); }
 .occl-seg.cropping { opacity: 0.4; pointer-events: none; }
 .occl-seg-ind {
@@ -3791,7 +3908,7 @@ body.theme-dark .modal-panel {
   width: 0;
   background: var(--accent-soft);
   border-bottom: 2px solid var(--accent);
-  transition: left 200ms cubic-bezier(0.4, 0, 0.2, 1), width 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: left var(--dur-hover) var(--ease-out-soft), width var(--dur-hover) var(--ease-out-soft);
   pointer-events: none;
 }
 .occl-tool {
@@ -3821,7 +3938,8 @@ body.theme-dark .modal-panel {
   max-width: 100%;
   max-height: 100%;
   cursor: default;
-  transition: transform 240ms var(--ease), opacity 240ms var(--ease);
+  /* 240ms 裸值 token 化（D120 §12-6）：--dur-panel + --ease-out-soft */
+  transition: transform var(--dur-panel) var(--ease-out-soft), opacity var(--dur-panel) var(--ease-out-soft);
   will-change: transform;
 }
 .occlusion-editor-imgbox {
@@ -4131,7 +4249,7 @@ body.theme-dark .modal-panel {
 .skeleton {
   background: var(--grey-1);
   border-radius: var(--radius);
-  animation: skeleton-pulse 1.2s var(--ease) infinite;
+  animation: skeleton-pulse 1.2s var(--ease-out-soft) infinite;
   margin-top: var(--sp-2);
 }
 @keyframes skeleton-pulse {
@@ -4879,12 +4997,101 @@ body.theme-dark .modal-panel {
    完整 mono 化需要给数值/类目两类 <text> 分别挂 class，属后续项。 */
 .dash-widget svg text { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
 
+/* ---------- 图表动效层 v2（MOTION-DESIGN-SPEC §6.3，R2-7）----------
+   五族动画（§6.3）：条形 chart-bar（scaleY 生长，30ms/根 ×≤8 档；密植 >30 项由渲染器按
+   8 档等比分组编 --i，如日柱/密度带/点簇）；分段 chart-seg 系（scaleX，origin ltr/rtl/mid
+   三类保留，40ms/段）；折线 chart-line/chart-dot（描线 --dur-chart-in 400ms，多序列
+   stagger 60ms/条 ×≤4 档）；单位方块 chart-unit（R2-7 新增族：opacity 0→1 +
+   translateY(--shift-xs)→0，20ms/块）；KPI 瞬时无挂点。
+   swiss.tsx 渲染器在数据主体上挂**字面** class + --i（stg() 注入器，族名按 §6.4
+   「以渲染器实际元素为准」登记在各渲染器注释），本文件只放动画/过渡规则。
+   入场闸门（§5.2，修 §6.1-E1）：一切「挂载即播」规则挂 :root:not([data-vt])——视图过渡
+   遮罩期（≈300ms）规则不在场、揭幕后从头完整播放（stagger 自揭幕起算）；页内改图型/换数据
+   无 data-vt，立即播。首播一次性：ChartSvg 的 ref 已播标记保留（主题切换/数据刷新不重播
+   入场）；paletteTick 重绘颜色瞬时换（不设 color transition）。
+   chart-fade-in 语义收窄（修 §6.1-E4）：入场容器淡入（原 .chart-enter.chart-svg）已删除
+   ——与页面 200ms 淡入叠合不可分辨；仅折线族「数据更新：d 不插值 → 直接重绘」场景，
+   由 ChartSvg 检测折线 d 签名变化后给容器挂 .chart-redraw 消费（animationend 摘除）。
+   .dash-widget 容器无任何入场/过渡（E4）。数据更新 = SVG 几何属性（x/y/width/height）的
+   CSS transition（--dur-chart 300ms；Chromium 将 SVG 几何属性作为可过渡 CSS 属性插值，
+   不触发文档重排；路径 d 不可插值，折线不设 d 过渡）；hover-dim 扩展到条/段/块全族
+   （其余 opacity→0.35、当前不变，100ms）。
+   全部动效收在 no-preference 作用域，reduce 时规则不在场、元素直接落终态（瞬时）。 */
+.chart-bar, .chart-seg, .chart-seg-rev, .chart-seg-mid, .chart-unit { transform-box: fill-box; }
+.chart-bar { transform-origin: bottom; }
+.chart-seg { transform-origin: left; }
+.chart-seg-rev { transform-origin: right; }
+.chart-seg-mid { transform-origin: center; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 首次入场（§5.2 闸门前缀；backwards 使 stagger 延迟档保持初始不可见态；keyframes 无 to，
+     动画终点 = 元素自然态） */
+  :root:not([data-vt]) .chart-enter .chart-bar {
+    animation: chart-bar-in var(--dur-chart-in) var(--ease-enter) backwards;
+    animation-delay: calc(var(--i, 0) * 30ms);
+  }
+  :root:not([data-vt]) .chart-enter .chart-seg,
+  :root:not([data-vt]) .chart-enter .chart-seg-rev,
+  :root:not([data-vt]) .chart-enter .chart-seg-mid {
+    animation: chart-seg-in var(--dur-chart-in) var(--ease-enter) backwards;
+    animation-delay: calc(var(--i, 0) * 40ms);
+  }
+  :root:not([data-vt]) .chart-enter .chart-unit {
+    animation: chart-unit-in var(--dur-chart-in) var(--ease-enter) backwards;
+    animation-delay: calc(var(--i, 0) * 20ms);
+  }
+  /* 描线：pathLength=1（渲染器挂）把周长归一化，dash 1 = 全长；多序列 60ms/条
+     （--i 由渲染器按 ≤4 档编，§6.3 折线族 ×≤4） */
+  :root:not([data-vt]) .chart-enter .chart-line {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: chart-line-in var(--dur-chart-in) var(--ease-enter) forwards;
+    animation-delay: calc(var(--i, 0) * 60ms);
+  }
+  @keyframes chart-bar-in { from { transform: scaleY(0); } }
+  @keyframes chart-seg-in { from { transform: scaleX(0); } }
+  @keyframes chart-unit-in { from { opacity: 0; transform: translateY(var(--shift-xs)); } }
+  @keyframes chart-line-in { to { stroke-dashoffset: 0; } }
+  @keyframes chart-fade-in { from { opacity: 0; } }
+
+  /* 折线更新重绘（§6.3 折线族「数据更新」列）＝chart-fade-in 唯一消费场景（E4 收窄）：
+     .chart-redraw 由 ChartSvg 在折线 d 签名变化时挂、animationend 摘除；入场不挂。
+     R2 收尾审计补闸门（§5.2，上游审查建议）：eventBus 刷新若落在过渡遮罩期，动画
+     照常计时会被吞前段——挂 :root:not([data-vt]) 后遮罩期规则不在场（animationend
+     不触发、class 残留无消费），揭幕后从头完整播放再摘除。 */
+  :root:not([data-vt]) .chart-svg.chart-redraw { animation: chart-fade-in var(--dur-view) var(--ease-enter); }
+
+  /* 数据更新过渡：条形/分段/单位方块的 x/y/width/height 随数据刷新平滑重排
+     （300ms --ease-out-soft）；opacity 100ms 服务 hover-dim 进出 */
+  .chart-bar, .chart-seg, .chart-seg-rev, .chart-seg-mid, .chart-unit {
+    transition:
+      opacity 100ms var(--ease-enter),
+      x var(--dur-chart) var(--ease-out-soft),
+      y var(--dur-chart) var(--ease-out-soft),
+      width var(--dur-chart) var(--ease-out-soft),
+      height var(--dur-chart) var(--ease-out-soft);
+  }
+
+  /* hover（§6.3「hover」列）：其余条/段/块降至 0.35、当前不变；折线数据点 hover 浮现
+     （150ms），hero 末端点不带 chart-dot、常显不参互。
+     no-preference 之外无 opacity:0 —— reduce / 无 hover 能力时数据点常显。 */
+  @media (hover: hover) {
+    .chart-dot { opacity: 0; transition: opacity 150ms var(--ease-enter); }
+    .chart-svg:hover .chart-dot { opacity: 1; }
+    .chart-svg:hover .chart-bar:not(:hover),
+    .chart-svg:hover .chart-seg:not(:hover),
+    .chart-svg:hover .chart-seg-rev:not(:hover),
+    .chart-svg:hover .chart-seg-mid:not(:hover),
+    .chart-svg:hover .chart-unit:not(:hover) { opacity: 0.35; }
+  }
+}
+
+/* v48.76（D120 拆解 #9）：原 reduce 块「.dash-widget { transition: none }」已删除——
+   .dash-widget 容器本身没有任何 transition 声明，图表动效（上方图表动效层）全部收在
+   no-preference 作用域内，reduce 时规则本就不在场，该防御规则已无可禁用的过渡。 */
+
 /* 加载骨架 */
 .dash-skeleton { display: flex; flex-direction: column; gap: var(--sp-4); }
-
-@media (prefers-reduced-motion: reduce) {
-  .dash-widget { transition: none; }
-}
 
 /* 设置页：组件开关列表（行尾宽/窄切换） */
 .widget-list { display: flex; flex-direction: column; }
@@ -5344,6 +5551,20 @@ body.capture-body #root { height: 100vh; }
   flex-direction: column;
   background: var(--paper);
   border: 1px solid var(--border-strong);
+}
+/* ---------- 快捷日记窗口内容入场（MOTION-DESIGN-SPEC §8.5 弹出面板，D120） ----------
+   BrowserWindow 显隐由主进程瞬时控制，动效只做在内容根节点 .cap-shell 上：opacity 0→1 +
+   translateY(calc(-1 * var(--shift-sm)))→0，--dur-enter / --ease-enter（150ms 快起步缓着陆；
+   saas-productivity：高效专业不挡路，无弹性、无远滑）。keyframes 与消费规则同收
+   no-preference 作用域，reduce 时规则不在场、瞬时落终态（§3.2 第一轨）；只动 transform/opacity。
+   出场不做：窗口关闭走主进程 hide（Esc→captureAPI.hide / 失焦主进程隐藏），渲染层无
+   「先播 100ms 出场再隐藏」的时机，§8.5 未覆盖窗口级关闭时序，留待后续。 */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes cap-enter {
+    from { opacity: 0; transform: translateY(calc(-1 * var(--shift-sm))); }
+    to { opacity: 1; transform: none; }
+  }
+  .cap-shell { animation: cap-enter var(--dur-enter) var(--ease-enter) both; }
 }
 .cap-header {
   flex: none;
@@ -6259,6 +6480,25 @@ body.capture-body #root { height: 100vh; }
      级联覆盖（后者顶掉前者），D88 就是这样把 margin-left 过渡弄丢的（底栏瞬跳、与卡面不同步）。 */
   .extract-page .stage-bar { transition: margin-left var(--dur-panel) var(--ease), margin-right var(--dur-panel) var(--ease); }
 }
+/* R2-5（MOTION-DESIGN-SPEC §18.2）：摘录页两态统一入场。两个标记由 ExtractReviewView 挂页面根
+   （卡面 .extract-face 属共用组件 ExtractCardFace、会话态底栏 .stage-bar 属 ExtractActionsBar，
+   宿主只控祖先——语义等价：标记只在「本周期首卡元素存续期 / loaded 首转真渲染周期」在场）。
+   R2-A 首卡抑制：页面进入后的首张卡不播 stage-card-in（入场完全由 §5.1 方向性页面过渡承担，
+   修 §18.1-E3 双动效）；同视图内换卡（推进/撤销/查看）标记当帧摘除 ⇒ stage-card-in 照常。
+   抑制选择器 (0,5,0) 压过 stage-card-in 的 (0,4,0)（第 1 轮审查 LOW-2 闸门化后）且序在其后（双保险）；挂 :root:not([data-vt])
+   闸门（§5.2：过渡遮罩在场时规则不在场）；reduce：本块外无此规则，stage-card-in 本就不在场。
+   R2-B 内容就绪 fade：加载壳→正式布局的结构波软化为一次性整体淡入（仅 opacity；keyframes
+   复用/改名自 chart-fade-in）。class 挂页面根且只在 full-layout JSX（空态/加载壳自然不在场
+   ＝R2-D 空态不播），作用域限定首层两盒——开/收轨两态**同一份规则**，时长缓动逐字相同
+   （「两态统一」落点）。数据早到：闸门期规则不在场，揭幕后从头播放；数据晚到：闸门常开立即播。 */
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-vt]) .extract-page[data-first-card] .extract-face { animation: none; }
+  :root:not([data-vt]) .extract-page.content-enter > .extract-page-cols,
+  :root:not([data-vt]) .extract-page.content-enter > .stage-bar {
+    animation: content-fade-in var(--dur-view) var(--ease-enter);
+  }
+  @keyframes content-fade-in { from { opacity: 0; } }
+}
 /* 可见性离散步进：过渡下「收起时停在末帧隐身、展开时立即显形」＝滑出/滑入全程可见 */
 .extract-annot-rail .annot-side { height: 100%; }
 /* D88 §8.5 摘录页 dock 让位：data-dock-open 随 manualOpen/aiPanel 任一在场置位（宿主钩子）。
@@ -6356,7 +6596,7 @@ body.capture-body #root { height: 100vh; }
 }
 
 /* v1.4（用户反馈「下方间隔与上方一致」）：卡面与底栏 band-line 的间距＝与头带侧相同的 --sp-4 */
-.extract-main > .extract-face { margin: var(--sp-4) 0; } /* 头带/底栏与卡面的对称间距 */
+.extract-main > .extract-face { margin: var(--sp-4) auto; } /* 头带/底栏与卡面的对称间距；R2（§18.3）：水平 auto 恢复居中——≤720 居中列对齐锚，与头带内列/底栏内容列同缘 */
 /* 栏开关（v7/D74 造型，v48.42/D82 用户指令**还原原位**）：文字钮两态变文案——
    未展开显示「展开」、展开状态显示「收起」；fixed 页面视口左上角 (16, 顶栏48+12)，
    与批注栏头（全部/摘录/高亮 位置/时间）同一视觉行；z 高于吸顶头带（收起态带满宽会盖钮）。 */
@@ -7067,4 +7307,78 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   v48.76（D120 / MOTION-DESIGN-SPEC §5）：页面切换统一（page-transitions）
+   App.tsx 的 changeView 经 document.startViewTransition 触发切换：
+   揭幕式同步（R2 闪白修复，机制详见 MOTION-DESIGN-SPEC §5.1）——新视图快照恒
+   不透明垫底（方向位移 200ms --dur-view / --ease-enter），旧视图快照置顶层
+   100ms 淡出（--dur-exit / --ease-exit）；合成覆盖率恒 ≡1，交叉期零透底。
+   API 缺失时 JS 侧降级为瞬时切换（MOTION-DESIGN-SPEC §5：不垫 fallback 动画）。
+   D120-R2（§5.1）：页序向右＝fwd（新页自右往左入 8px）、页序向左＝bwd（自左往右入）；
+   同席互切 / reader↔reader 不写 data-vt-dir＝新页原位垫底（无位移）。
+   D120-R2（§5.2 入场闸门）：过渡期间 documentElement 带 data-vt，finished 结算后删除——
+   一切「视图进入时播一次」的入场规则选择器必须挂 :root:not([data-vt])（闸门纪律，§5.2）。
+   ========================================================================== */
+
+/* Staging（page-transitions）：顶栏与右下角活动指示器不参与过渡——
+   各设独立 view-transition-name 从 root 快照中提出，其 old/new 均禁动画：
+   导航高亮即时切换、指示器稳定不动，只有内容区 crossfade（公共元素保持不动）。 */
+.topbar { view-transition-name: topbar; }
+.bg-activity { view-transition-name: bg-activity; }
+::view-transition-old(topbar),
+::view-transition-new(topbar),
+::view-transition-old(bg-activity),
+::view-transition-new(bg-activity) { animation: none; }
+
+/* §3.3 不阻塞输入：过渡快照层不拦截指针（<400ms 的过渡期间元素保持可点） */
+::view-transition { pointer-events: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  /* R2 闪白修复（2026-10-09，帧级+数值取证）：原非对称 crossfade（旧 100ms 先尽 / 新 200ms 未满）
+     交叉期合成覆盖率实测最低 82.7%，透底（画布纸色）使深色内容整体 washed——即「闪一下」。
+     快照层之下无任何绘制（红兜底注入实证），补背景色无法根除 ⇒ 改**揭幕式同步**：
+     新快照恒不透明垫底（只位移不淡入），旧快照置顶层 100ms 淡出——合成覆盖率恒 ≡1，任何路径零透底。
+     与 §5.1「crossfade」表述差异需知：机制为揭幕式（new opacity 恒 1），方向位移/时长/顶栏排除语义不变。 */
+  ::view-transition-old(root) { z-index: 2; animation: view-out var(--dur-exit) var(--ease-exit) both; }
+  ::view-transition-new(root) { animation: none; }
+  /* D120-R2 §5.1 方向性切换：data-vt-dir 写在 documentElement，root 过渡伪元素树的 originating
+     element 就是 html —— 选择器必须**直挂**（伪元素紧贴复合选择符，无后代空格）；
+     R2 初版「:root[data-vt-dir] ␣::view-transition-new(root)」的后代形式永不命中
+     （探针实证 animationName 恒 view-in、transform 恒 none，方向位移从未渲染）。
+     新快照恒不透明：方向 keyframes 只含 transform，不含 opacity。 */
+  :root[data-vt-dir="fwd"]::view-transition-new(root) { animation: view-in-fwd var(--dur-view) var(--ease-enter) both; }
+  :root[data-vt-dir="bwd"]::view-transition-new(root) { animation: view-in-bwd var(--dur-view) var(--ease-enter) both; }
+  @keyframes view-out { from { opacity: 1; } to { opacity: 0; } }
+  @keyframes view-in-fwd {
+    from { transform: translateX(var(--shift-md)); }
+    to { transform: none; }
+  }
+  @keyframes view-in-bwd {
+    from { transform: translateX(calc(-1 * var(--shift-md))); }
+    to { transform: none; }
+  }
+}
+/* reduce 降级＝瞬时切换：显式关掉 root 对的动画（含 UA 默认 crossfade），新快照直接落位 */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) { animation: none; }
+}
+
+/* ==========================================================================
+   D120-R2（MOTION-DESIGN-SPEC §5.3）：首屏入场——应用启动后 .app-shell 首次挂载
+   （App.tsx 的 loaded 翻真、app-loading 直换点）。它不是页面切换：不走 View
+   Transitions、不参与页序表、不写 data-vt/data-vt-dir。垂直微沉 var(--shift-sm)
+   ＝中性「落位」，不带方向语义（首屏无「从哪来」的空间前提）。
+   应用生命周期只挂载一次 ⇒ 天然只播一次，无需 JS 标记；app-loading 直换保留
+   （shell 入场即覆盖该跳变，不给 loading 页加出场）。顶栏随 shell 一体入场
+   （首屏无 Staging 问题——没有「上一屏」可对比）。
+   ========================================================================== */
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell { animation: app-shell-in var(--dur-view) var(--ease-enter) both; }
+  @keyframes app-shell-in {
+    from { opacity: 0; transform: translateY(var(--shift-sm)); }
+    to { opacity: 1; transform: none; }
+  }
 }

@@ -2,7 +2,7 @@
 // 视觉契约：一切直角、0.7px 发丝线、灰阶明度即数据、单一焦点色 --accent、
 // "越大越细越小越粗"、SVG 文字 ≥11px、数字语义用等宽、颜色全部走 theme.css token（深浅色自适应）。
 // 每个渲染器：纯函数，输入 overview 数据 → { viewBox, els }，由 ChartSvg 统一挂载。
-import { createElement, type ReactNode } from "react";
+import { createElement, useEffect, useRef, type ReactNode } from "react";
 import { udcLabel, UDC_MAIN } from "../../lib/udc";
 
 // 主题色：从 CSS 变量实时取值（随深浅色切换自动更新）
@@ -16,6 +16,7 @@ function palette() {
     GREY2: v("--grey-2", "#d4d4d2"),
     GREY3: v("--grey-3", "#737373"),
     GRID: v("--border-subtle", "#e0e0e0"),
+    AXIS: v("--border-strong", "#a3a3a3"), // MOTION-DESIGN-SPEC §6.2 主轴色 --border-strong（网格仍用 --border-subtle）
     ACCENT: v("--accent", "#166a59"),
     SOFT: v("--accent-soft", "rgba(0,47,167,.08)"),
     /* 固定深/浅色：不随主题反转（:root 里的 --overlay-* 一档）。
@@ -48,25 +49,63 @@ function textOn(bg: string, P: ReturnType<typeof palette>): string {
   return contrast(l, relLum(P.ON_DARK)) >= contrast(l, relLum(P.ON_LIGHT)) ? P.ON_DARK : P.ON_LIGHT;
 }
 
-export type El = { tag: string; attrs: Record<string, string | number>; text?: string; title?: string };
+// attrs 值允许 style 对象（动效层挂 --i 自定义属性用，MOTION-DESIGN-SPEC §6）；
+// 既有 string | number 用法不受影响。
+export type El = {
+  tag: string;
+  attrs: Record<string, string | number | Record<string, string | number>>;
+  text?: string;
+  title?: string;
+};
 type Box = { viewBox: string; els: El[] };
 
 // 通用小工具 ────────────────────────────────────────────────
-const T = (x: number, y: number, s: string, o: Record<string, string | number> = {}): El =>
+type Attrs = El["attrs"];
+const T = (x: number, y: number, s: string, o: Attrs = {}): El =>
   ({ tag: "text", attrs: { x, y, fontSize: 11, fill: "currentColor", ...o }, text: s });
-const L = (x1: number, y1: number, x2: number, y2: number, stroke: string, w = 0.7, extra: Record<string, string | number> = {}): El =>
+const L = (x1: number, y1: number, x2: number, y2: number, stroke: string, w = 0.7, extra: Attrs = {}): El =>
   ({ tag: "line", attrs: { x1, y1, x2, y2, stroke, strokeWidth: w, ...extra } });
-const R = (x: number, y: number, w: number, h: number, fill: string, extra: Record<string, string | number> = {}): El =>
+const R = (x: number, y: number, w: number, h: number, fill: string, extra: Attrs = {}): El =>
   ({ tag: "rect", attrs: { x, y, width: w, height: h, fill, ...extra } });
 const fmt = (n: number) => n.toLocaleString("en-US");
+
+// 动效挂点（MOTION-DESIGN-SPEC §6.3 v2，R2-7）：渲染器在数据主体上挂**字面**动效 class
+//（chart-bar / chart-seg 系 / chart-line / chart-dot / chart-unit 五族；族名按 §6.4
+// 「归属以渲染器实际元素为准」登记在各渲染器注释），动画/过渡规则全部在 theme.css
+// 「图表动效层」，入场规则挂 :root:not([data-vt]) 闸门（§5.2）。
+// stg() 是 --i stagger 档位注入器：默认 clamp ≤8 档（§3.6 预算）；折线多序列传 slots=4
+//（§6.3 折线族 60ms/条 ×≤4）；密植图（>30 项，如日柱/密度带/点簇）传 total 按 8 档等比分组生长。
+const STAG_MAX = 8;
+const stg = (i: number, total = 0, slots = STAG_MAX): Attrs => ({
+  style: {
+    "--i": String(
+      total > 30
+        ? Math.min(slots - 1, Math.floor((i / total) * slots))
+        : Math.min(i, slots - 1)
+    )
+  }
+});
+
+// MOTION-DESIGN-SPEC §6.2 视觉基线常量（R2-6，全渲染器共享；颜色仍全部经 palette() 取 token）：
+//   主轴 1px --border-strong（P.AXIS）；网格线 0.7px --border-subtle（≤3 条，0/50/100 三档）；轴不外延；
+//   条形族 band:gap＝2:1（条宽占槽位 2/3）；>0 值最小可见高 2px；
+//   折线族 hero 1.8px --accent / 对照 1px --grey-2；数据点 6px 方块；单位方块间隙 1px；分段条高 28px。
+const AXIS_W = 1;
+const GRID_W = 0.7;
+const BAND = 2 / 3; // §6.2 条宽 / 槽位
+const BAR_MIN_H = 2; // §6.2 >0 值最小可见高
+
+// §6.2 空态：居中 12px --text-helper＋引导文案；不画假轴/假网格/假数据（签名与文案归属不变）。
 const empty = (msg: string, w = 460, h = 300): Box => ({
   viewBox: `0 0 ${w} ${h}`,
-  els: [T(w / 2, h / 2, msg, { textAnchor: "middle", fontWeight: 600, fill: "var(--text-helper)" })]
+  els: [T(w / 2, h / 2, msg, { textAnchor: "middle", fontSize: 12, fontWeight: 600, fill: "var(--text-helper)" })]
 });
-// 明度阶梯：按排名取灰（0 = 最重）。hero 位用焦点色。
+// 明度阶梯（MOTION-DESIGN-SPEC §6.2）：单图焦点 ≤1 处 --accent（hero＝最大/当前序列）；
+// 其余按 rank 取 INK → GREY2，对照/历史序列统一 GREY2，禁止逐序列多彩。
+// GREY1 属表面色、不作实心数据填充（浅色纸面上近不可见）；更浅档由消费方用 fillOpacity 表达。
 function ladderShade(P: ReturnType<typeof palette>, rank: number, hero = true): string {
   if (hero && rank === 0) return P.ACCENT;
-  return [P.INK, P.GREY3, P.GREY2, P.GREY2, P.GREY2][Math.min(rank, 4)] || P.GREY2;
+  return rank === 1 ? P.INK : P.GREY2;
 }
 // 把 "5千2" 类大数缩写为短标签
 function shortNum(n: number): string {
@@ -86,29 +125,28 @@ export function chartQueueBar(kpi: { completedToday: number; dueToday: number })
   if (!due) return empty("今日队列已清空 — 无到期卡片", 460, 170);
   const done = Math.min(kpi.completedToday, due);
   const left = due - done;
-  const X0 = 20, W = 420, Y = 74, H = 26;
+  const X0 = 20, W = 420, Y = 74, H = 28; // §6.2 分段/占比条：条高 28px
   const wDone = (done / due) * W;
   const els: El[] = [];
-  // 标尺（0/50%/100% 刻度在条上方）
-  els.push(L(X0, Y - 14, X0 + W, Y - 14, P.GRID));
-  [0, 0.25, 0.5, 0.75, 1].forEach((f) => {
+  // 标尺（§6.2 网格 ≤3 条、0/50/100 三档；标尺＝主轴 1px，刻度刺针 0.7px）
+  els.push(L(X0, Y - 14, X0 + W, Y - 14, P.AXIS, AXIS_W));
+  [0, 0.5, 1].forEach((f) => {
     const x = X0 + f * W;
-    els.push(L(x, Y - 14, x, Y - 9, P.GRID));
+    els.push(L(x, Y - 14, x, Y - 9, P.GRID, GRID_W));
     els.push(T(x, Y - 20, `${Math.round(f * 100)}`, { textAnchor: f === 0 ? "start" : f === 1 ? "end" : "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   });
   els.push(T(X0 + W, Y - 32, "%", { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
-  // 组成条
-  if (done > 0) els.push({ ...R(X0, Y, wDone, H, P.ACCENT), title: `已完成 ${done} 张` });
-  if (left > 0) els.push({ ...R(X0 + wDone, Y, W - wDone, H, P.GREY2), title: `未完成 ${left} 张` });
-  // 段上数值
+  // 组成条（堆叠段：先完成后未完成，各段 stagger 40ms；§6.2 段间 1px --paper 分隔缝）
+  // 动效族：分段（chart-seg，§6.4 kpi/queuebar）
+  if (done > 0) els.push({ ...R(X0, Y, wDone, H, P.ACCENT, { className: "chart-seg", ...stg(0) }), title: `已完成 ${done} 张` });
+  if (left > 0) els.push({ ...R(X0 + wDone + (done > 0 ? 1 : 0), Y, W - wDone - (done > 0 ? 1 : 0), H, P.GREY2, { className: "chart-seg", ...stg(1) }), title: `未完成 ${left} 张` });
+  // 段内数值（直接标注优先；§6.2 反白/反黑按 textOn）
   if (wDone > 34) els.push(T(X0 + wDone / 2, Y + H / 2 + 4, `${done}`, { textAnchor: "middle", fontWeight: 700, fill: textOn(P.ACCENT, P), fontSize: 12 }));
-  if (W - wDone > 34) els.push(T(X0 + wDone + (W - wDone) / 2, Y + H / 2 + 4, `${left}`, { textAnchor: "middle", fontWeight: 700, fill: P.INK, fontSize: 12 }));
-  // 图例
-  els.push(R(X0, Y + H + 16, 10, 10, P.ACCENT));
-  els.push(T(X0 + 16, Y + H + 25, `已完成 ${done} 张`, { fontWeight: 600 }));
-  els.push(R(X0 + 110, Y + H + 16, 10, 10, P.GREY2));
-  els.push(T(X0 + 126, Y + H + 25, `未完成 ${left} 张`, { fontWeight: 600, fill: P.GREY3 }));
-  els.push(T(X0 + W, Y + H + 25, `今日到期 ${due} 张`, { textAnchor: "end", fontWeight: 700 }));
+  if (W - wDone > 34) els.push(T(X0 + wDone + (W - wDone) / 2, Y + H / 2 + 4, `${left}`, { textAnchor: "middle", fontWeight: 700, fill: textOn(P.GREY2, P), fontSize: 12 }));
+  // 直接标注（§6.2 图例/注记：序列 ≤3 不设独立图例行，段名直接标在条下）
+  els.push(T(X0, Y + H + 20, "已完成", { fontWeight: 700, fill: P.ACCENT }));
+  els.push(T(X0 + W, Y + H + 20, "未完成", { textAnchor: "end", fontWeight: 600, fill: P.GREY3 }));
+  els.push(T(X0 + W, Y + H + 40, `今日到期 ${due} 张`, { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   return { viewBox: "0 0 460 170", els };
 }
 
@@ -120,9 +158,10 @@ export function chartStreakRuler(streak: number): Box {
   const X0 = 20, W = 420, Y = 96;
   const xOf = (d: number) => X0 + (d / top) * W;
   const els: El[] = [];
-  // 大数字
-  els.push(T(X0, 40, `${streak}`, { fontSize: 44, fontWeight: 200, letterSpacing: "-0.02em" }));
-  els.push(T(X0 + (streak >= 100 ? 108 : streak >= 10 ? 62 : 34), 40, "天", { fontSize: 14, fontWeight: 400, fill: P.GREY3 }));
+  // 动效族：KPI（§6.4 kpi/streak）——数字/轨道瞬时，无动效挂点（§6.3 KPI 行「无入场」）。
+  // 大数字（§6.2 KPI 族：数值 40px/700 mono --ink；标签 12px --grey-3）
+  els.push(T(X0, 40, `${streak}`, { fontSize: 40, fontWeight: 700, letterSpacing: "-0.02em" }));
+  els.push(T(X0 + (streak >= 100 ? 100 : streak >= 10 ? 58 : 32), 40, "天", { fontSize: 12, fontWeight: 400, fill: P.GREY3 }));
   els.push(T(X0 + W, 38, "连续学习", { textAnchor: "end", fontWeight: 600, fill: P.GREY3 }));
   els.push(T(X0 + W, 54, `下一里程碑 ${top} 天 · 还差 ${top - streak} 天`, { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   // 轨道
@@ -142,11 +181,12 @@ export function chartStreakRuler(streak: number): Box {
   // 里程碑旗标
   MILES.filter((m) => m <= top).forEach((m) => {
     const x = xOf(m), reached = streak >= m;
-    els.push(L(x, Y - 16, x, Y + 16, reached ? P.ACCENT : P.GREY2, 0.9));
-    els.push({ ...R(x - 3, Y - 26, 6, 6, reached ? P.ACCENT : P.GREY2), title: `${m} 天里程碑` });
+    // §6.2 明度阶梯：焦点色只留给轨道进度（hero＝当前 streak），旗标按达成与否取 INK/GREY2
+    els.push(L(x, Y - 16, x, Y + 16, reached ? P.INK : P.GREY2, 0.9));
+    els.push({ ...R(x - 3, Y - 26, 6, 6, reached ? P.INK : P.GREY2), title: `${m} 天里程碑` });
     els.push(T(x, Y + 30, `${m}`, { textAnchor: "middle", fontWeight: 700, fill: reached ? P.INK : P.GREY3 }));
   });
-  els.push(T(X0 + W / 2, 152, `${perDay ? "一格 = 一天" : `一格 ≈ ${(top / 14).toFixed(1)} 天`} · 蓝旗 = 已达成里程碑`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
+  els.push(T(X0 + W / 2, 152, `${perDay ? "一格 = 一天" : `一格 ≈ ${(top / 14).toFixed(1)} 天`} · 墨旗 = 已达成里程碑`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   return { viewBox: "0 0 460 170", els };
 }
 
@@ -159,23 +199,23 @@ export function chartMinutesStrip(kpi: { minutesToday: number }, heatDays: { dat
   const vmax = Math.max(5, ...tail.map((d) => d.minutes), kpi.minutesToday);
   const xOf = (v: number) => X0 + (Math.min(v, vmax) / vmax) * W;
   const els: El[] = [];
-  // 轴
-  els.push(L(X0, Y, X0 + W, Y, P.GRID));
+  // 轴（§6.2 主轴 1px --border-strong；刻度刺针 0.7px）
+  els.push(L(X0, Y, X0 + W, Y, P.AXIS, AXIS_W));
   const step = vmax > 120 ? 60 : vmax > 50 ? 30 : 15;
   for (let v = 0; v <= vmax; v += step) {
-    els.push(L(xOf(v), Y, xOf(v), Y - 5, P.GRID));
+    els.push(L(xOf(v), Y, xOf(v), Y - 5, P.GRID, GRID_W));
     els.push(T(xOf(v), Y + 16, `${v}分`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
-  // 历史日：空心圆点，抖动两行避免完全重叠
+  // 历史日：空心方点，抖动两行避免完全重叠（§6.2 数据点＝6px 方块，直角纪律不用圆点）
+  // 动效族：单位方块（chart-unit，§6.4 kpi/minutes——按现状元素＝方点带归属单位方块族）
   tail.forEach((d, i) => {
     const dy = i % 2 === 0 ? -7 : 7;
     const isToday = i === tail.length - 1;
     if (isToday) {
-      els.push({ ...R(xOf(d.minutes) - 5, Y - 5, 10, 10, P.ACCENT), title: `今天 — ${d.minutes} 分钟` });
+      els.push({ ...R(xOf(d.minutes) - 4, Y - 4, 8, 8, P.ACCENT, { className: "chart-unit", ...stg(i) }), title: `今天 — ${d.minutes} 分钟` }); // §6.2 hero 点常显 8px
     } else if (d.minutes > 0) {
       els.push({
-        tag: "circle",
-        attrs: { cx: xOf(d.minutes), cy: Y + dy, r: 3.4, fill: P.PAPER, stroke: P.GREY3, strokeWidth: 1.2 },
+        ...R(xOf(d.minutes) - 3, Y + dy - 3, 6, 6, P.PAPER, { className: "chart-unit", ...stg(i), stroke: P.GREY3, strokeWidth: 1 }),
         title: `${dayLabel(d.date)} — ${d.minutes} 分钟`
       });
     }
@@ -187,12 +227,12 @@ export function chartMinutesStrip(kpi: { minutesToday: number }, heatDays: { dat
     els.push(L(xOf(med), Y - 22, xOf(med), Y + 8, P.INK, 1, { strokeDasharray: "3 3" }));
     els.push(T(xOf(med) + 5, Y - 26, `中位 ${med}分`, { fontSize: 11, fontWeight: 700, fill: P.INK }));
   }
-  // 今日读数
-  els.push(T(X0, 34, `${kpi.minutesToday}`, { fontSize: 44, fontWeight: 200, letterSpacing: "-0.02em" }));
-  els.push(T(X0 + (kpi.minutesToday >= 100 ? 108 : kpi.minutesToday >= 10 ? 62 : 34), 34, "分钟", { fontSize: 14, fontWeight: 400, fill: P.GREY3 }));
+  // 今日读数（§6.2 KPI 族：数值 40px/700 mono --ink；标签 12px）
+  els.push(T(X0, 34, `${kpi.minutesToday}`, { fontSize: 40, fontWeight: 700, letterSpacing: "-0.02em" }));
+  els.push(T(X0 + (kpi.minutesToday >= 100 ? 100 : kpi.minutesToday >= 10 ? 58 : 32), 34, "分钟", { fontSize: 12, fontWeight: 400, fill: P.GREY3 }));
   els.push(T(X0 + W, 32, "今日学习时长", { textAnchor: "end", fontWeight: 600, fill: P.GREY3 }));
   els.push(T(X0 + W, 48, "对照近 30 天分布", { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
-  els.push(T(X0 + W / 2, 152, "一空心点 = 过去一天 · 蓝方块 = 今天 · 虚线 = 中位", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
+  els.push(T(X0 + W / 2, 152, "一空心方块 = 过去一天 · 蓝方块 = 今天 · 虚线 = 中位", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   return { viewBox: "0 0 460 170", els };
 }
 
@@ -208,29 +248,28 @@ export function chartDailyColumns(days: { date: number; count: number }[]): Box 
   const W = 960, X0 = 52, X1 = 940, BASE = 226, TOP = 52;
   const vmax = Math.max(...tail.map((d) => d.count));
   const pitch = (X1 - X0) / tail.length;
-  const bw = Math.max(2, Math.min(24, pitch - Math.max(2.4, pitch * 0.28)));
+  const bw = Math.max(2, Math.min(24, pitch * BAND)); // §6.2 条形族 band:gap＝2:1（条宽占槽位 2/3）
   const els: El[] = [];
   for (let k = 0; k <= 2; k++) {
     const y = BASE - (k / 2) * (BASE - TOP);
-    els.push(L(X0, y, X1, y, P.GRID, k === 0 ? 0.9 : 0.6));
+    // §6.2 基线＝主轴 1px --border-strong，其余网格 0.7px 发丝线（≤3 条）
+    els.push(L(X0, y, X1, y, k === 0 ? P.AXIS : P.GRID, k === 0 ? AXIS_W : GRID_W));
     els.push(T(X0 - 8, y + 4, String(Math.round((vmax * k) / 2)), { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
   const vs = tail.map((d) => d.count);
-  const topIdx: number[] = [];
-  for (const i of [...vs.keys()].sort((a, b) => vs[b] - vs[a])) {
-    if (vs[i] <= 0) break; // 降序排列，遇到零即全为零
-    if (topIdx.every((t) => Math.abs(t - i) >= 6)) topIdx.push(i);
-    if (topIdx.length === 3) break;
-  }
+  const maxIdx = vs.indexOf(Math.max(...vs)); // §6.2 明度阶梯：单图焦点 ≤1 处 --accent（hero＝最大值柱；原三根高峰柱收敛为一根）
   tail.forEach((d, i) => {
     const x = X0 + i * pitch + (pitch - bw) / 2;
-    const h = (d.count / vmax) * (BASE - TOP);
-    const peak = topIdx.includes(i);
+    const h = Math.max(BAR_MIN_H, (d.count / vmax) * (BASE - TOP)); // §6.2 >0 值最小可见高 2px
+    const peak = i === maxIdx;
     const weekend = [0, 6].includes(md(d.date).getDay());
     if (d.count > 0) {
       const hollow = weekend && !peak;
+      // 动效族：条形密植（chart-bar，§6.4 review/columns；>30 根按 8 档分组生长，§6.3）
       els.push({
-        ...(hollow ? R(x, BASE - h, bw, h, P.PAPER, { stroke: P.GREY3, strokeWidth: 1 }) : R(x, BASE - h, bw, h, peak ? P.ACCENT : P.INK)),
+        ...(hollow
+          ? R(x, BASE - h, bw, h, P.PAPER, { className: "chart-bar", ...stg(i, tail.length), stroke: P.GREY3, strokeWidth: 1 })
+          : R(x, BASE - h, bw, h, peak ? P.ACCENT : P.INK, { className: "chart-bar", ...stg(i, tail.length) })),
         title: `${dayLabel(d.date)} — ${d.count} 张`
       });
     } else {
@@ -275,7 +314,7 @@ export function chartCumulativeStep(days: { date: number; count: number }[]): Bo
   const els: El[] = [];
   for (let k = 0; k <= 2; k++) {
     const v = Math.round((vmax * k) / 2);
-    els.push(L(X0, yOf(v), X1, yOf(v), P.GRID, k === 0 ? 0.9 : 0.6));
+    els.push(L(X0, yOf(v), X1, yOf(v), k === 0 ? P.AXIS : P.GRID, k === 0 ? AXIS_W : GRID_W)); // §6.2 基线＝主轴 1px，网格 0.7px（≤3 条）
     els.push(T(X0 - 8, yOf(v) + 4, shortNum(v), { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
   // 阶梯 path（step-after）+ 轻面积
@@ -293,10 +332,10 @@ export function chartCumulativeStep(days: { date: number; count: number }[]): Bo
     dLine += (i === 0 ? `M${x} ${y}` : ` L${x} ${y}`);
     if (i < cum.length - 1) dLine += ` L${x} ${y}`;
   });
-  els.push({ tag: "path", attrs: { d: dLine, fill: "none", stroke: P.ACCENT, strokeWidth: 1.6 } });
+  els.push({ tag: "path", attrs: { d: dLine, fill: "none", stroke: P.ACCENT, strokeWidth: 1.8, pathLength: 1, className: "chart-line" } }); // §6.2 折线族 hero 线 1.8px；动效族：折线（chart-line，§6.4 review/cumulative，末端点常显不参互）
   const lastX = xOf(cum.length - 1), lastY = yOf(vmax);
-  els.push({ ...R(lastX - 4, lastY - 4, 8, 8, P.ACCENT), title: `累计 ${fmt(vmax)} 张` });
-  els.push(T(lastX - 6, lastY - 10, `累计 ${shortNum(vmax)} 张`, { textAnchor: "end", fontSize: 12, fontWeight: 700, fill: P.ACCENT }));
+  els.push({ ...R(lastX - 4, lastY - 4, 8, 8, P.ACCENT), title: `累计 ${fmt(vmax)} 张` }); // §6.2 hero 末端点常显 8px
+  els.push(T(lastX - 6, lastY - 10, `累计 ${shortNum(vmax)} 张`, { textAnchor: "end", fontSize: 11, fontWeight: 700, fill: P.ACCENT })); // §6.2 末端直接标注 11px/700 accent
   [0, Math.floor(tail.length / 2), tail.length - 1].forEach((i, k) => {
     els.push(T(xOf(i), 246, dayLabel(tail[i].date), { textAnchor: k === 0 ? "start" : k === 2 ? "end" : "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   });
@@ -319,7 +358,7 @@ export function chartWeekdayProfile(days: { date: number; count: number }[]): Bo
   const els: El[] = [];
   for (let k = 0; k <= 2; k++) {
     const x = X0 + (k / 2) * (X1 - X0);
-    els.push(L(x, Y0 - 8, x, 228, P.GRID, k === 0 ? 0.9 : 0.6));
+    els.push(L(x, Y0 - 8, x, 228, k === 0 ? P.AXIS : P.GRID, k === 0 ? AXIS_W : GRID_W)); // §6.2 左轴＝主轴 1px（横向条形），其余网格 0.7px
     els.push(T(x, Y0 - 14, (Math.round((vmax * k) / 2 * 10) / 10).toString(), { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
   DAY.forEach((lab, i) => {
@@ -327,7 +366,9 @@ export function chartWeekdayProfile(days: { date: number; count: number }[]): Bo
     const w = (avg[i] / vmax) * (X1 - X0);
     els.push(T(X0 - 12, y + rowH / 2 + 4, lab, { textAnchor: "end", fontWeight: i === best ? 700 : 600, fill: i === best ? P.INK : P.GREY3 }));
     if (avg[i] > 0.05) {
-      els.push({ ...R(X0, y + 5, Math.max(w, 2), 14, i === best ? P.ACCENT : P.INK), title: `${lab} 平均 ${avg[i].toFixed(1)} 张/日` });
+      // §6.2 横向条形 band:gap 2:1（rowH 24 → 条高 16）；>0 最小可见 2px
+      // 动效族：分段/横条（chart-seg ltr，§6.4 review/weekday——按现状元素＝横条，scaleX origin:left）
+      els.push({ ...R(X0, y + 4, Math.max(w, 2), 16, i === best ? P.ACCENT : P.INK, { className: "chart-seg", ...stg(i) }), title: `${lab} 平均 ${avg[i].toFixed(1)} 张/日` });
       els.push(T(X0 + Math.max(w, 2) + 8, y + rowH / 2 + 4, avg[i].toFixed(1), { fontWeight: 700, fill: i === best ? P.ACCENT : P.INK }));
     } else {
       els.push(T(X0 + 8, y + rowH / 2 + 4, "无记录", { fontWeight: 600, fill: P.GREY2 }));
@@ -362,14 +403,15 @@ export function chartMonthMultiples(days: { date: number; count: number }[]): Bo
     const ox = startX + i * (PW + GAP);
     const [, m] = k.split("-").map(Number);
     els.push(T(ox, 42, `${m + 1}月`, { fontSize: 12, fontWeight: i === hero ? 700 : 600, fill: i === hero ? P.ACCENT : P.GREY3 }));
-    els.push(L(ox, BASE, ox + PW, BASE, P.GRID, 0.8));
+    els.push(L(ox, BASE, ox + PW, BASE, P.AXIS, AXIS_W)); // §6.2 面板基线＝主轴 1px
     const pitch = PW / Math.max(arr.length, 28);
-    const barW = Math.max(1.4, Math.min(18, pitch - 1.6));
+    const barW = Math.max(2, Math.min(18, pitch * BAND)); // §6.2 条形族 band:gap＝2:1
     arr.forEach((d, j) => {
       const x = ox + j * pitch + (pitch - barW) / 2;
       if (d.count > 0) {
-        const h = Math.max(1.5, (d.count / vmax) * hMax);
-        els.push({ ...R(x, BASE - h, barW, h, i === hero ? P.ACCENT : P.INK), title: `${dayLabel(d.date)} — ${d.count} 张` });
+        const h = Math.max(BAR_MIN_H, (d.count / vmax) * hMax); // §6.2 >0 值最小可见高 2px
+        // 动效族：条形（chart-bar，§6.4 review/months——按现状元素＝细柱；面板内按天分组）
+        els.push({ ...R(x, BASE - h, barW, h, i === hero ? P.ACCENT : P.INK, { className: "chart-bar", ...stg(j, arr.length) }), title: `${dayLabel(d.date)} — ${d.count} 张` });
       } else {
         els.push(L(x + barW / 2, BASE, x + barW / 2, BASE - 2.5, P.GREY2, 1));
       }
@@ -391,7 +433,7 @@ export function chartUnitColumn(kpi: { completedToday: number; dueToday: number 
   const UNIT = due > 40 ? Math.ceil(due / 40) : 1;
   const blocks = Math.ceil(due / UNIT);
   const doneBlocks = Math.round(done / UNIT);
-  const S = 14, GAP = 5, pitch = S + GAP;
+  const S = 14, GAP = 1, pitch = S + GAP; // §6.2 单位方块族：方块间隙 1px
   const perCol = Math.min(blocks, Math.floor(190 / pitch));
   const cols = Math.ceil(blocks / perCol);
   const X0 = 60, baseY = 256;
@@ -402,15 +444,16 @@ export function chartUnitColumn(kpi: { completedToday: number; dueToday: number 
     const x = X0 + col * pitch;
     const y = baseY - (row + 1) * pitch + GAP;
     const isDone = b < doneBlocks;
+    // 动效族：单位方块（chart-unit，§6.4 today/units；垒块自下而上即阅读序，>30 块分组生长）
     els.push({
-      ...(R(x, y, S, S, isDone ? P.ACCENT : P.GREY2)),
+      ...(R(x, y, S, S, isDone ? P.ACCENT : P.GREY2, { className: "chart-unit", ...stg(b, blocks) })),
       title: isDone ? `已完成（${UNIT} 张/块）` : `未完成（${UNIT} 张/块）`
     });
   }
-  // 基线与标注
-  els.push(L(X0 - 6, baseY + 2, X0 + cols * pitch, baseY + 2, P.GRID, 0.9));
-  els.push(T(X0, 36, `${done}`, { fontSize: 44, fontWeight: 200, fill: P.ACCENT, letterSpacing: "-0.02em" }));
-  els.push(T(X0 + (done >= 100 ? 108 : done >= 10 ? 62 : 34), 36, `/ ${due} 张`, { fontSize: 14, fontWeight: 400, fill: P.GREY3 }));
+  // 基线与标注（§6.2 主轴 1px、不外延；KPI 数值 40px/700 mono --ink——焦点色留给已完成方块）
+  els.push(L(X0, baseY + 2, X0 + cols * pitch, baseY + 2, P.AXIS, AXIS_W));
+  els.push(T(X0, 36, `${done}`, { fontSize: 40, fontWeight: 700, letterSpacing: "-0.02em" }));
+  els.push(T(X0 + (done >= 100 ? 100 : done >= 10 ? 58 : 32), 36, `/ ${due} 张`, { fontSize: 12, fontWeight: 400, fill: P.GREY3 }));
   els.push(T(460 - 20, 34, "已完成 / 今日到期", { textAnchor: "end", fontWeight: 600, fill: P.GREY3 }));
   els.push(T(460 - 20, 54, `还剩 ${due - done} 张`, { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   els.push(T(230, 292, UNIT === 1 ? "一方块 = 一张卡 · 蓝 = 已完成" : `一方块 = ${UNIT} 张卡 · 蓝 = 已完成`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
@@ -423,14 +466,15 @@ export function chartDivergingPair(kpi: { completedToday: number; dueToday: numb
   const due = kpi.dueToday, done = Math.min(kpi.completedToday, due);
   if (!due) return empty("今日队列已清空 — 无到期卡片", 460, 300);
   const left = due - done;
-  const CX = 230, Y = 128, H = 30, Wmax = 170;
+  const CX = 230, Y = 128, H = 28, Wmax = 170; // §6.2 分段/占比条：条高 28px
   const wDone = (done / due) * Wmax, wLeft = (left / due) * Wmax;
   const els: El[] = [];
-  els.push(L(CX, Y - 42, CX, Y + H + 18, P.GRID, 0.9, { strokeDasharray: "3 3" }));
-  els.push({ ...R(CX - wDone, Y, wDone, H, P.ACCENT), title: `已完成 ${done} 张` });
-  els.push({ ...R(CX, Y, wLeft, H, P.GREY2), title: `未完成 ${left} 张` });
+  els.push(L(CX, Y - 42, CX, Y + H + 18, P.AXIS, AXIS_W, { strokeDasharray: "3 3" })); // §6.2 中轴＝主轴 1px
+  // 动效族：分段（§6.4 today/divergence——rtl 既有 origin:right 保留）
+  els.push({ ...R(CX - wDone, Y, wDone, H, P.ACCENT, { className: "chart-seg chart-seg-rev", ...stg(0) }), title: `已完成 ${done} 张` });
+  els.push({ ...R(CX, Y, wLeft, H, P.GREY2, { className: "chart-seg", ...stg(1) }), title: `未完成 ${left} 张` });
   els.push(T(CX - wDone / 2, Y + H / 2 + 4, `${done}`, { textAnchor: "middle", fontWeight: 700, fill: textOn(P.ACCENT, P), fontSize: 13 }));
-  els.push(T(CX + wLeft / 2, Y + H / 2 + 4, `${left}`, { textAnchor: "middle", fontWeight: 700, fontSize: 13 }));
+  els.push(T(CX + wLeft / 2, Y + H / 2 + 4, `${left}`, { textAnchor: "middle", fontWeight: 700, fill: textOn(P.GREY2, P), fontSize: 13 })); // §6.2 段内标签反白/反黑按 textOn
   els.push(T(CX - wDone / 2, Y - 12, "已完成", { textAnchor: "middle", fontWeight: 600, fill: P.ACCENT }));
   els.push(T(CX + wLeft / 2, Y - 12, "未完成", { textAnchor: "middle", fontWeight: 600, fill: P.GREY3 }));
   els.push(T(CX, Y + H + 36, `配速 ${due ? Math.round((done / due) * 100) : 0}%`, { textAnchor: "middle", fontWeight: 700, fontSize: 13 }));
@@ -459,8 +503,9 @@ export function chartDomainDots(items: { label: string; count: number }[], unit:
   D.forEach((d, i) => {
     const y = Y0 + i * rowH + rowH / 2;
     els.push(T(X0 - 10, y + 4, d.label.length <= 6 ? d.label : d.label.slice(0, 5) + "…", { textAnchor: "end", fontWeight: i === 0 ? 700 : 600, fill: i === 0 ? P.INK : P.GREY3 }));
-    els.push(L(X0, y, X1, y, P.GRID, 0.6));
-    els.push({ ...R(xOf(d.count) - 5, y - 5, 10, 10, ladderShade(P, i)), title: `${d.label} — ${d.count} ${unit}` });
+    els.push(L(X0, y, X1, y, P.GRID, GRID_W)); // §6.2 行轨发丝线 0.7px
+    // 动效族：单位方块（chart-unit，§6.4 domains/dots——点行按排名阅读序）
+    els.push({ ...R(xOf(d.count) - 5, y - 5, 10, 10, ladderShade(P, i), { className: "chart-unit", ...stg(i) }), title: `${d.label} — ${d.count} ${unit}` });
     els.push(T(X1 + 12, y + 4, String(d.count), { fontWeight: 700, fill: i === 0 ? P.ACCENT : P.INK }));
   });
   els.push(T(230, 292, `一方块 = 按 ${unit} 数对齐 · 越靠右越多`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
@@ -494,19 +539,20 @@ export function chartDomainTreemap(items: { label: string; count: number }[], un
   };
   split([...D].sort((x, y) => y.count - x.count), { x: X0, y: Y0, w: GW, h: GH }, 0, true);
   const els: El[] = [];
+  // 动效族：单位方块（chart-unit，§6.4 domains/treemap；--i 按 rank＝先大后小阅读序编，§6.3）
   rects.forEach((rc) => {
-    const pad = 1;
+    const pad = 0.5; // §6.2 单位方块族：相邻块间隙 1px（两侧各缩 0.5）
     const fill = ladderShade(P, rc.rank);
     els.push({
-      ...R(rc.x + pad, rc.y + pad, Math.max(rc.w - 2 * pad, 1), Math.max(rc.h - 2 * pad, 1), fill, rc.rank === 0 ? {} : { fillOpacity: rc.rank <= 1 ? 0.85 : rc.rank <= 3 ? 0.6 : 0.35 }),
+      ...R(rc.x + pad, rc.y + pad, Math.max(rc.w - 2 * pad, 1), Math.max(rc.h - 2 * pad, 1), fill, { className: "chart-unit", ...stg(rc.rank), ...(rc.rank === 0 ? {} : { fillOpacity: rc.rank <= 1 ? 0.85 : rc.rank <= 3 ? 0.6 : 0.35 }) }),
       title: `${rc.item.label} — ${rc.item.count} ${unit}（${Math.round((rc.item.count / total) * 100)}%）`
     });
     const wide = rc.w > 64 && rc.h > 40;
     if (wide) {
-      const onAccent = rc.rank === 0;
+      // §6.2 块内标签反白/反黑一律按 textOn（新阶梯 rank1=INK，深底上必须反白）
       const on = textOn(fill, P);
-      els.push(T(rc.x + 10, rc.y + 22, rc.item.label.length <= 5 ? rc.item.label : rc.item.label.slice(0, 4) + "…", { fontSize: 12, fontWeight: 700, fill: onAccent ? on : P.INK }));
-      els.push(T(rc.x + 10, rc.y + 38, `${Math.round((rc.item.count / total) * 100)}%`, { fontSize: 11, fontWeight: 600, fill: onAccent ? on : P.GREY3 }));
+      els.push(T(rc.x + 10, rc.y + 22, rc.item.label.length <= 5 ? rc.item.label : rc.item.label.slice(0, 4) + "…", { fontSize: 12, fontWeight: 700, fill: on }));
+      els.push(T(rc.x + 10, rc.y + 38, `${Math.round((rc.item.count / total) * 100)}%`, { fontSize: 11, fontWeight: 600, fill: on }));
     }
   });
   els.push(T(230, 292, `面积 = ${unit}数 · 面积越大占比越高`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
@@ -526,20 +572,24 @@ export function chartRatingColumn(ratings: { rating: string; count: number }[]):
   // Again = 墨黑（最需警惕），Good = 焦点色（主旋律）
   const SHADE = [P.INK, P.GREY3, P.ACCENT, P.GREY2];
   // 水平居中：柱 + 间距 + 图例整组落在卡片中轴上
+  // §6.2 注：竖直单柱宽保持 40——「条高 28px」档按横向占比条执行，竖排转置会使段内 ≥11px 标签溢出，标签可读性优先
   const CX = 135, W = 40, Y0 = 48, H = 190;
   const LEG_X = 235, LEG_Y0 = 76;
   const els: El[] = [];
   let y = Y0 + H;
+  const bounds: number[] = []; // 已画段上缘（§6.2 相邻段之间补 1px 纸色缝）
   D.forEach((d, i) => {
     const h = (d.pct / 100) * H;
     y -= h;
-    if (h > 0.5) els.push({ ...R(CX, y, W, h, SHADE[i]), title: `${ZH[d.name]} ${d.pct.toFixed(1)}%` });
+    // 动效族：分段竖柱（§6.4 ratings/ratingcol「既有保留」——chart-bar 纵向生长既有族不变）
+    if (h > 0.5) { els.push({ ...R(CX, y, W, h, SHADE[i], { className: "chart-bar", ...stg(i) }), title: `${ZH[d.name]} ${d.pct.toFixed(1)}%` }); bounds.push(y); }
     // D-TEST-81：柱内标签原来用 Math.round(d.pct)，而同一段的悬浮值（上一行）与右侧图例（下方）
     // 用 d.pct.toFixed(1) —— 同一张图里同一个量出现两种精度（67% 与 67.4% 并存），用户会以为
     // 是两个不同的量。统一到 toFixed(1)。
     if (h > 22) els.push(T(CX + W / 2, y + h / 2 + 4, `${d.pct.toFixed(1)}%`, { textAnchor: "middle", fontWeight: 700, fontSize: 12, fill: textOn(SHADE[i], P) }));
   });
-  els.push(L(CX - 8, Y0 + H + 2, CX + W + 8, Y0 + H + 2, P.GRID, 0.9));
+  bounds.slice(0, -1).forEach((by) => els.push(L(CX, by, CX + W, by, P.PAPER, 1))); // §6.2 段间 1px --paper 分隔缝
+  els.push(L(CX, Y0 + H + 2, CX + W, Y0 + H + 2, P.AXIS, AXIS_W)); // §6.2 主轴 1px、不外延
   els.push(T(CX + W / 2, Y0 + H + 20, "近 30 天", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   // 图例自上而下与柱段同序（轻松→通过→吃力→遗忘），垂直居中对齐柱身
   for (let i = D.length - 1; i >= 0; i--) {
@@ -563,6 +613,7 @@ export function chartFieldRanges(fields: { label: string; q1: number; median: nu
   const MS_H = 3600_000;
   const maxV = Math.max(...G.map((g) => Math.max(g.max, ...g.outliers))) / MS_H * 1.06;
   const X0 = 108, X1 = 420, rowH = Math.min(56, 220 / G.length), Y0 = 50;
+  const BH = Math.round(rowH * BAND); // §6.2 横向条形 band:gap＝2:1（转置：条厚 = 行槽 2/3）
   const xOf = (msv: number) => X0 + (msv / MS_H / maxV) * (X1 - X0);
   const hOf = (msv: number) => `${(Math.round((msv / MS_H) * 10) / 10).toString()}`;
   const els: El[] = [];
@@ -574,16 +625,17 @@ export function chartFieldRanges(fields: { label: string; q1: number; median: nu
   G.forEach((g, i) => {
     const y = Y0 + i * rowH + rowH / 2;
     els.push(T(X0 - 10, y + 4, g.label.length <= 5 ? g.label : g.label.slice(0, 4) + "…", { textAnchor: "end", fontWeight: i === 0 ? 700 : 600, fill: i === 0 ? P.INK : P.GREY3 }));
-    // 须
+    // 须（§6.2 须端帽与条厚同高）
     els.push(L(xOf(g.min), y, xOf(g.max), y, P.GREY3, 1));
-    [g.min, g.max].forEach((v) => els.push(L(xOf(v), y - 5, xOf(v), y + 5, P.GREY3, 1)));
+    [g.min, g.max].forEach((v) => els.push(L(xOf(v), y - BH / 2, xOf(v), y + BH / 2, P.GREY3, 1)));
     g.outliers.forEach((o) => els.push({
-      ...R(xOf(o) - 2.5, y - 2.5, 5, 5, P.PAPER, { stroke: P.GREY3, strokeWidth: 1 }),
+      ...R(xOf(o) - 3, y - 3, 6, 6, P.PAPER, { stroke: P.GREY3, strokeWidth: 1 }), // §6.2 离群点 6px 方点
       title: `${g.label} 离群 — ${hOf(o)} 小时`
     }));
     // 浮条 Q1–Q3 + 中位缺口
-    els.push({ ...R(xOf(g.q1), y - 9, Math.max(xOf(g.q3) - xOf(g.q1), 3), 18, ladderShade(P, i)), title: `${g.label} — 一半答题在 ${hOf(g.q1)}–${hOf(g.q3)} 小时` });
-    els.push(L(xOf(g.median), y - 9, xOf(g.median), y + 9, P.PAPER, 2.4));
+    // 动效族：分段/横条（chart-seg ltr＝§6.4 duration/ranges「横向＝scaleX origin:left」的现行等价挂点）
+    els.push({ ...R(xOf(g.q1), y - BH / 2, Math.max(xOf(g.q3) - xOf(g.q1), 3), BH, ladderShade(P, i), { className: "chart-seg", ...stg(i) }), title: `${g.label} — 一半答题在 ${hOf(g.q1)}–${hOf(g.q3)} 小时` });
+    els.push(L(xOf(g.median), y - BH / 2, xOf(g.median), y + BH / 2, P.PAPER, 2.4));
     els.push(T(X1 + 8, y + 4, `${hOf(g.median)}时`, { fontWeight: 700, fill: i === 0 ? P.ACCENT : P.INK }));
   });
   els.push(T(230, 292, "蓝条 = 中间一半答题 · 缺口 = 中位 · 须 = 全距", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
@@ -602,15 +654,16 @@ export function chartFreqPoly(bins: number[]): Box {
   const els: El[] = [];
   for (let k = 0; k <= 2; k++) {
     const y = base - (k / 2) * (base - top);
-    els.push(L(X0 - 6, y, X1, y, P.GRID, k === 0 ? 0.9 : 0.6));
+    els.push(L(X0, y, X1, y, k === 0 ? P.AXIS : P.GRID, k === 0 ? AXIS_W : GRID_W)); // §6.2 基线＝主轴 1px 不外延，网格 0.7px（≤3 条）
     els.push(T(X0 - 12, y + 4, String(Math.round((vmax * k) / 2)), { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
-  // 折线 + 顶点方块
+  // 折线 + 顶点方块（§6.2 折线族：单序列线取 hero 线宽 1.8px；焦点色预算留给峰档标注，≤1 处 accent）
+  // 动效族：折线（chart-line＋chart-dot，§6.4 duration/freqpoly）
   const pts = bins.map((v, i) => `${xOf(i)} ${yOf(v)}`).join(" L ");
-  els.push({ tag: "path", attrs: { d: `M${pts}`, fill: "none", stroke: P.INK, strokeWidth: 1.4 } });
+  els.push({ tag: "path", attrs: { d: `M${pts}`, fill: "none", stroke: P.INK, strokeWidth: 1.8, pathLength: 1, className: "chart-line" } });
   bins.forEach((v, i) => {
     if (v <= 0) return;
-    els.push({ ...R(xOf(i) - 3.5, yOf(v) - 3.5, 7, 7, P.INK), title: `${i * 5}–${i * 5 + 5} 分钟 — ${v} 次` });
+    els.push({ ...R(xOf(i) - 3, yOf(v) - 3, 6, 6, P.INK, { className: "chart-dot" }), title: `${i * 5}–${i * 5 + 5} 分钟 — ${v} 次` }); // §6.2 数据点 6px 方块
   });
   const pk = bins.indexOf(Math.max(...bins));
   if (bins[pk] > 0) {
@@ -623,10 +676,9 @@ export function chartFreqPoly(bins: number[]): Box {
   for (let i = 0; i < 12; i++) { acc += bins[i]; if (acc >= total / 2) { mbin = i; break; } }
   els.push(L(xOf(mbin), base, xOf(mbin), top - 8, P.GREY3, 0.9, { strokeDasharray: "3 3" }));
   if (mbin !== pk) els.push(T(Math.min(xOf(mbin) + 5, X1 - 90), top + 14, "一半在此之内", { fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
-  // 轴
-  els.push(L(X0 - 6, base, X1, base, P.GRID, 0.9));
+  // 轴（基线已由上方 k=0 网格行画出，这里只补刻度刺针；§6.2 刻度 0.7px）
   for (let e = 0; e <= 12; e += 2) {
-    els.push(L(X0 + e * PW, base, X0 + e * PW, base + 5, P.GREY2, 0.8));
+    els.push(L(X0 + e * PW, base, X0 + e * PW, base + 5, P.GREY2, GRID_W));
     els.push(T(X0 + e * PW, base + 19, `${e * 5}`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
   els.push(T(X1, base + 34, "分钟", { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
@@ -644,6 +696,10 @@ export function chartUnitFunnel(f: { drafts: number; entered: number; firstLearn
   const UNIT = Math.max(1, Math.ceil(top / 20));
   const rowH = 42, Y0 = 40, X0 = 20;
   const els: El[] = [];
+  // 动效族：单位方块（chart-unit，§6.4 funnel/unitfunnel；--i 按阅读序（先行后列）顺序编，
+  // 总块数 >30 按 8 档分组生长，§6.3）
+  const totalBlocks = STAGE.reduce((a, [, c]) => a + Math.round(c / UNIT), 0);
+  let fi = 0;
   STAGE.forEach(([name, c], k) => {
     const y = Y0 + k * rowH;
     const n = Math.round(c / UNIT);
@@ -651,7 +707,7 @@ export function chartUnitFunnel(f: { drafts: number; entered: number; firstLearn
     els.push(T(X0 + 74, y + 12, `${fmt(c)} 张`, { fontWeight: 600, fill: P.GREY3 }));
     for (let b = 0; b < n; b++) {
       els.push({
-        ...R(X0 + 150 + b * 13, y + 3, 9, 9, ladderShade(P, STAGE.length - 1 - k, true)),
+        ...R(X0 + 150 + b * 10, y + 3, 9, 9, ladderShade(P, STAGE.length - 1 - k, true), { className: "chart-unit", ...stg(fi++, totalBlocks) }), // §6.2 单位方块族：方块间隙 1px（9px 块 + 1px 距）
         title: `${name} — ${c} 张`
       });
     }
@@ -659,7 +715,7 @@ export function chartUnitFunnel(f: { drafts: number; entered: number; firstLearn
       const next = STAGE[k + 1][1];
       const pct = c > 0 ? Math.round((next / c) * 100) : 0;
       els.push(T(440, y + 26, `${pct}% 流转`, { textAnchor: "end", fontSize: 11, fontWeight: 700, fill: pct >= 80 ? P.INK : P.GREY3 }));
-      els.push(L(X0 + 150, y + rowH - 6, 446, y + rowH - 6, P.GRID, 0.6));
+      els.push(L(X0 + 150, y + rowH - 6, 446, y + rowH - 6, P.GRID, GRID_W)); // §6.2 行缝发丝线 0.7px
     }
   });
   els.push(T(230, Y0 + 5 * rowH + 16, `一块 ≈ ${UNIT} 张卡 · 每行右端 = 该阶段存量`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
@@ -685,10 +741,10 @@ export function chartSourceTree(cards: { book: string; domain: string | null }[]
     .map(([d, books]) => ({ d, total: [...books.values()].reduce((a, b) => a + b, 0), books: [...books.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3) }))
     .sort((a, b) => b.total - a.total)
     .slice(0, 5);
-  const rows: { indent: number; label: string; count: number; isDomain: boolean }[] = [];
-  domains.forEach((dm) => {
-    rows.push({ indent: 0, label: dm.d, count: dm.total, isDomain: true });
-    dm.books.forEach(([b, n]) => rows.push({ indent: 1, label: b, count: n, isDomain: false }));
+  const rows: { indent: number; label: string; count: number; isDomain: boolean; di: number }[] = [];
+  domains.forEach((dm, di) => {
+    rows.push({ indent: 0, label: dm.d, count: dm.total, isDomain: true, di });
+    dm.books.forEach(([b, n]) => rows.push({ indent: 1, label: b, count: n, isDomain: false, di }));
   });
   const rowH = Math.min(24, 268 / rows.length), Y0 = 44, X0 = 40;
   const els: El[] = [];
@@ -696,11 +752,13 @@ export function chartSourceTree(cards: { book: string; domain: string | null }[]
     const y = Y0 + i * rowH;
     const x = X0 + r.indent * 26;
     if (r.isDomain) {
-      els.push({ ...R(X0 - 14, y - 9, 4, rowH - 4, P.ACCENT), title: `${r.label} 共 ${r.count} 张` });
+      // §6.2 明度阶梯：焦点色只给最大领域（hero＝卡量第一枝），其余领域枝取 INK
+      // 动效族：单位方块（chart-unit，§6.4 sources/sourcetree——领域枝标记块按枝序）
+      els.push({ ...R(X0 - 14, y - 9, 4, rowH - 4, r.di === 0 ? P.ACCENT : P.INK, { className: "chart-unit", ...stg(r.di) }), title: `${r.label} 共 ${r.count} 张` });
       els.push(T(x, y + 2, r.label, { fontWeight: 700, fontSize: 12, fill: P.INK }));
     } else {
-      els.push(L(X0 - 10, y - 4, x - 8, y - 4, P.GRID, 0.6));
-      els.push(L(x - 8, y - 4, x - 8, y + 8, P.GRID, 0.6));
+      els.push(L(X0 - 10, y - 4, x - 8, y - 4, P.GRID, GRID_W)); // §6.2 托架发丝线 0.7px
+      els.push(L(x - 8, y - 4, x - 8, y + 8, P.GRID, GRID_W));
       els.push(T(x, y + 4, r.label.length <= 16 ? r.label : r.label.slice(0, 15) + "…", { fontWeight: 600, fontSize: 11, fill: P.GREY3 }));
     }
     els.push(T(940, y + 2, `${r.count}`, { textAnchor: "end", fontWeight: r.isDomain ? 700 : 600, fontSize: r.isDomain ? 12 : 11, fill: r.isDomain ? P.INK : P.GREY3 }));
@@ -734,20 +792,20 @@ export function chartRhythmCurves(grid: number[][]): Box {
   const els: El[] = [];
   for (let k = 0; k <= 2; k++) {
     const y = base - (k / 2) * (base - top);
-    els.push(L(X0 - 4, y, X1, y, P.GRID, k === 0 ? 0.9 : 0.6));
+    els.push(L(X0, y, X1, y, k === 0 ? P.AXIS : P.GRID, k === 0 ? AXIS_W : GRID_W)); // §6.2 基线＝主轴 1px 不外延，网格 0.7px（≤3 条）
     els.push(T(X0 - 10, y + 4, String(Math.round((vmax * k) / 2)), { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
   grid.forEach((row, i) => {
     const hero = i === heroDay;
     const dPath = row.map((v, j) => `${j === 0 ? "M" : " L"}${xOf(j)} ${yOf(v)}`).join("");
-    els.push({ tag: "path", attrs: { d: dPath, fill: "none", stroke: hero ? P.ACCENT : P.GREY2, strokeWidth: hero ? 1.8 : 1 } });
+    // 动效族：折线多序列（chart-line，§6.4 rhythm/curves；七线 stagger 60ms/条 ×≤4 档）
+    els.push({ tag: "path", attrs: { d: dPath, fill: "none", stroke: hero ? P.ACCENT : P.GREY2, strokeWidth: hero ? 1.8 : 1, pathLength: 1, className: "chart-line", ...stg(i, 0, 4) } });
     if (hero) {
       const pj = row.indexOf(Math.max(...row));
       els.push({ ...R(xOf(pj) - 4, yOf(row[pj]) - 4, 8, 8, P.ACCENT), title: `周${DAY[i]} ${8 + pj}:00 — ${row[pj]} 张` });
       els.push(T(Math.min(xOf(pj) + 8, X1 - 40), yOf(row[pj]) - 8, `周${DAY[i]} ${8 + pj}:00`, { fontWeight: 700, fill: P.ACCENT, fontSize: 11 }));
     }
   });
-  els.push(L(X0 - 4, base, X1, base, P.GRID, 0.9));
   for (let j = 0; j < nCols; j += 2) {
     els.push(T(xOf(j), base + 18, `${8 + j}时`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
@@ -762,27 +820,29 @@ export function chartHourClusters(events: { hour: number; again: boolean }[]): B
   const X0 = 40, X1 = 430, base = 240;
   const xOf = (h: number) => X0 + (h / 23) * (X1 - X0);
   const stacks = new Map<number, number>();
-  const S = 9;
+  const S = 6; // §6.2 点簇 6px 方点；方块间隙 1px（堆叠距 = S+1）
   const els: El[] = [];
   events.forEach((e, i) => {
     const h = Math.max(0, Math.min(23, Math.floor(e.hour)));
     const lvl = stacks.get(h) || 0;
     stacks.set(h, lvl + 1);
-    const x = xOf(h), y = base - 10 - lvl * (S + 3);
+    const x = xOf(h), y = base - 4 - lvl * (S + 1);
+    // 动效族：单位方块（chart-unit，§6.4 rhythm/clusters；事件数 >30 按 8 档分组生长）
     els.push({
-      ...R(x - S / 2, y - S / 2, S, S, e.again ? P.PAPER : P.INK, e.again ? { stroke: P.ACCENT, strokeWidth: 1.2 } : {}),
+      // §6.2 明度阶梯：点簇多事件不逐点染焦点色，Again 以灰描边空心区分
+      ...R(x - S / 2, y - S / 2, S, S, e.again ? P.PAPER : P.INK, { className: "chart-unit", ...stg(i, events.length), ...(e.again ? { stroke: P.GREY3, strokeWidth: 1 } : {}) }),
       title: `#${i + 1} — ${String(h).padStart(2, "0")}:00${e.again ? " · 评了 Again" : ""}`
     });
   });
-  els.push(L(X0 - 6, base, X1, base, P.GRID, 0.9));
+  els.push(L(X0, base, X1, base, P.AXIS, AXIS_W)); // §6.2 主轴 1px
   [0, 6, 12, 18, 23].forEach((h) => {
-    els.push(L(xOf(h), base, xOf(h), base + 5, P.GREY2, 0.8));
+    els.push(L(xOf(h), base, xOf(h), base + 5, P.GREY2, GRID_W));
     els.push(T(xOf(h), base + 19, `${String(h).padStart(2, "0")}:00`, { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   });
-  els.push(R(120, 274, 9, 9, P.INK));
-  els.push(T(136, 282, "通过", { fontWeight: 600 }));
-  els.push(R(196, 274, 9, 9, P.PAPER, { stroke: P.ACCENT, strokeWidth: 1.2 }));
-  els.push(T(212, 282, "评了 Again", { fontWeight: 600, fill: P.GREY3 }));
+  els.push(R(120, 276, 6, 6, P.INK));
+  els.push(T(132, 282, "通过", { fontWeight: 600 }));
+  els.push(R(196, 276, 6, 6, P.PAPER, { stroke: P.GREY3, strokeWidth: 1 }));
+  els.push(T(208, 282, "评了 Again", { fontWeight: 600, fill: P.GREY3 }));
   els.push(T(X1, 282, `样本 ${events.length} 次`, { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   return { viewBox: "0 0 460 300", els };
 }
@@ -808,15 +868,16 @@ export function chartRankSlope(rows: { label: string; ranks: number[] }[]): Box 
   const els: El[] = [];
   months.forEach((m, k) => els.push(T(xOf(k), Y0 - 22, m, { textAnchor: "middle", fontWeight: 600, fill: P.GREY3 })));
   for (let r = 1; r <= nR; r++) {
-    els.push(L(X0 - 6, yOf(r), X1, yOf(r), P.GRID, r === 1 ? 0.8 : 0.5));
+    els.push(L(X0, yOf(r), X1, yOf(r), P.GRID, GRID_W)); // §6.2 名次轨为结构线，统一 0.7px 发丝线
     els.push(T(X0 - 12, yOf(r) + 4, String(r), { textAnchor: "end", fontWeight: 700, fontSize: 11, fill: r === 1 ? P.ACCENT : P.GREY3 }));
   }
   sorted.forEach((row, i) => {
     const last = i === 0;
     const dPath = row.ranks.map((r, m) => `${m === 0 ? "M" : " L"}${xOf(m)} ${yOf(r)}`).join("");
-    els.push({ tag: "path", attrs: { d: dPath, fill: "none", stroke: last ? P.ACCENT : P.GREY2, strokeWidth: last ? 2 : 1.1 } });
+    // 动效族：折线多序列（chart-line＋chart-dot，§6.4 domainrank/slope；×≤4 档 stagger）
+    els.push({ tag: "path", attrs: { d: dPath, fill: "none", stroke: last ? P.ACCENT : P.GREY2, strokeWidth: last ? 1.8 : 1, pathLength: 1, className: "chart-line", ...stg(i, 0, 4) } }); // §6.2 折线族 hero 1.8px / 对照 1px
     row.ranks.forEach((r, m) => {
-      els.push({ ...R(xOf(m) - 3, yOf(r) - 3, 6, 6, last ? P.ACCENT : P.GREY3), title: `${row.label} — ${months[m]} 第 ${r} 名` });
+      els.push({ ...R(xOf(m) - 3, yOf(r) - 3, 6, 6, last ? P.ACCENT : P.GREY3, { className: "chart-dot" }), title: `${row.label} — ${months[m]} 第 ${r} 名` });
     });
     const endR = row.ranks[row.ranks.length - 1];
     els.push(T(X1 + 6, yOf(endR) + 4, row.label.length <= 4 ? row.label : row.label.slice(0, 4), { fontWeight: last ? 700 : 600, fontSize: 11, fill: last ? P.ACCENT : P.GREY3 }));
@@ -839,29 +900,32 @@ export function chartQueueLedger(q: { carriedOver: number; newCards: number; com
   ];
   const maxAbs = Math.max(...rows.map(([, v]) => Math.abs(v)), 1);
   const W = 460, X0 = 24, X1 = 356, rowH = 40, Y0 = 48;
+  const BH = Math.round(rowH * BAND), by0 = Math.round((rowH - BH) / 2); // §6.2 横向条形 band:gap＝2:1（转置：条厚 = 行槽 2/3）
   const CX = X0 + (X1 - X0) / 2;
   const halfW = (X1 - X0) / 2 - 6;
   const els: El[] = [];
   rows.forEach(([name, v, kind], i) => {
     const y = Y0 + i * rowH;
-    // 行分割发丝线
-    if (i > 0) els.push(L(X0, y - 8, X1 + 70, y - 8, P.GRID, 0.6));
+    // 行分割发丝线（落位于上下两条的空档内；§6.2 发丝线 0.7px）
+    if (i > 0) els.push(L(X0, y - 2, X1 + 70, y - 2, P.GRID, GRID_W));
     const isStock = kind === "stock";
     const w = (Math.abs(v) / maxAbs) * halfW;
+    const cy = y + by0 + BH / 2 + 4; // 行内文字基线随条高居中
+    // 动效族：分段双向（chart-seg / -rev / -mid，§6.4 queueflow/ledger「条形（双向）」按现状元素）
     if (kind === "in") {
-      els.push({ ...R(CX, y + 2, w, 16, P.ACCENT), title: `${name} +${v} 张` });
-      els.push(T(CX + w + 6, y + 14, `+${v}`, { fontWeight: 700, fill: P.ACCENT }));
+      els.push({ ...R(CX, y + by0, w, BH, P.ACCENT, { className: "chart-seg", ...stg(i) }), title: `${name} +${v} 张` });
+      els.push(T(CX + w + 6, cy, `+${v}`, { fontWeight: 700, fill: P.ACCENT }));
     } else if (kind === "out") {
-      els.push({ ...R(CX - w, y + 2, w, 16, P.GREY2), title: `${name} ${v} 张` });
-      els.push(T(CX - w - 6, y + 14, `${v}`, { textAnchor: "end", fontWeight: 700, fill: P.GREY3 }));
+      els.push({ ...R(CX - w, y + by0, w, BH, P.GREY2, { className: "chart-seg chart-seg-rev", ...stg(i) }), title: `${name} ${v} 张` });
+      els.push(T(CX - w - 6, cy, `${v}`, { textAnchor: "end", fontWeight: 700, fill: P.GREY3 }));
     } else {
-      els.push({ ...R(CX - w / 2, y + 2, Math.max(w, 2), 16, P.INK), title: `${name} ${v} 张` });
-      els.push(T(CX + w / 2 + 6, y + 14, `${v}`, { fontWeight: 700 }));
+      els.push({ ...R(CX - w / 2, y + by0, Math.max(w, 2), BH, P.INK, { className: "chart-seg chart-seg-mid", ...stg(i) }), title: `${name} ${v} 张` });
+      els.push(T(CX + w / 2 + 6, cy, `${v}`, { fontWeight: 700 }));
     }
-    els.push(T(X0, y + 14, name, { fontWeight: isStock ? 700 : 600, fill: isStock ? P.INK : P.GREY3 }));
+    els.push(T(X0, cy, name, { fontWeight: isStock ? 700 : 600, fill: isStock ? P.INK : P.GREY3 }));
   });
-  // 中轴
-  els.push(L(CX, Y0 - 12, CX, Y0 + rows.length * rowH - 14, P.GRID, 0.8, { strokeDasharray: "2 3" }));
+  // 中轴（§6.2 主轴 1px）
+  els.push(L(CX, Y0 - 12, CX, Y0 + rows.length * rowH - 14, P.AXIS, AXIS_W, { strokeDasharray: "2 3" }));
   els.push(T(X1 + 70, Y0 - 18, "张", { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   els.push(T(230, 292, "中轴右蓝 = 进入 · 左灰 = 消化 · 黑 = 存量", { textAnchor: "middle", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   return { viewBox: "0 0 460 300", els };
@@ -884,16 +948,17 @@ export function chartReadingStrips(days: { date: number; chars: number }[]): Box
     const y = Y0 + wi * rowH;
     const start = wk[0].date, end = wk[wk.length - 1].date;
     els.push(T(X0 - 10, y + 15, `${dayLabel(start)}`, { textAnchor: "end", fontWeight: 600, fontSize: 11, fill: P.GREY3 }));
+    // 动效族：单位方块密植（chart-unit，§6.4 reading/strips；≤42 段按 8 档分组生长）
     wk.forEach((d, di) => {
       const x = X0 + di * segW;
       const ink = d.chars / vmax;
       if (d.chars > 0) {
         els.push({
-          ...R(x + 1, y + 4, segW - 2, 18, P.INK, { fillOpacity: 0.15 + ink * 0.85 }),
+          ...R(x + 0.5, y + 4, segW - 1, 18, P.INK, { className: "chart-unit", ...stg(wi * 7 + di, tail.length), fillOpacity: 0.15 + ink * 0.85 }), // §6.2 单位方块族：段间 1px 缝
           title: `${dayLabel(d.date)} — ${fmt(d.chars)} 字`
         });
       } else {
-        els.push(L(x + segW / 2, y + 4, x + segW / 2, y + 22, P.GRID, 1));
+        els.push(L(x + segW / 2, y + 4, x + segW / 2, y + 22, P.GRID, GRID_W));
       }
     });
     const total = wk.reduce((a, d) => a + d.chars, 0);
@@ -917,22 +982,23 @@ export function chartReadingHist(days: { date: number; chars: number }[]): Box {
   }
   const total = tail.length;
   const vmax = Math.max(...bins, 1);
-  const PW = 130, BW = 90;
+  const PW = 130, BW = Math.round(PW * BAND); // §6.2 条形族 band:gap＝2:1
   const totalW = bins.length * PW;
   const X0 = 52 + ((940 - 52) - totalW) / 2;
   const BASE = 226, TOP = 56;
   const els: El[] = [];
   for (let k = 0; k <= 2; k++) {
     const y = BASE - (k / 2) * (BASE - TOP);
-    els.push(L(X0 - 6, y, X0 + totalW, y, P.GRID, k === 0 ? 0.9 : 0.6));
+    els.push(L(X0, y, X0 + totalW, y, k === 0 ? P.AXIS : P.GRID, k === 0 ? AXIS_W : GRID_W)); // §6.2 基线＝主轴 1px 不外延，网格 0.7px（≤3 条）
     els.push(T(X0 - 12, y + 4, String(Math.round((vmax * k) / 2)), { textAnchor: "end", fontSize: 11, fontWeight: 600, fill: P.GREY3 }));
   }
   bins.forEach((v, i) => {
     const x = X0 + i * PW + (PW - BW) / 2;
-    const h = (v / vmax) * (BASE - TOP);
+    const h = Math.max(BAR_MIN_H, (v / vmax) * (BASE - TOP)); // §6.2 >0 值最小可见高 2px
     if (v > 0) {
       const peak = v === vmax;
-      els.push({ ...R(x, BASE - h, BW, h, P.INK), title: `${LABELS[i]}字 — ${v} 天` });
+      // 动效族：条形（chart-bar，§6.4 reading/rhist）
+      els.push({ ...R(x, BASE - h, BW, h, P.INK, { className: "chart-bar", ...stg(i) }), title: `${LABELS[i]}字 — ${v} 天` });
       els.push(T(x + BW / 2, BASE - h - 8, `${Math.round((v / total) * 100)}%`, { textAnchor: "middle", fontWeight: 700, fill: peak ? P.ACCENT : P.INK }));
       if (peak) els.push(R(x, BASE - h, BW, 3, P.ACCENT));
     } else {
@@ -948,11 +1014,38 @@ export function chartReadingHist(days: { date: number; chars: number }[]): Box {
 
 // ────────────────────────── 通用 SVG 挂载容器 ──────────────────────────
 export function ChartSvg({ viewBox, els, maxHeight, label }: { viewBox: string; els: El[]; maxHeight?: number; label?: string }) {
+  // 入场动画只播一次（MOTION-DESIGN-SPEC §6.3 / D120）：.chart-enter 只出现在首次挂载的渲染
+  // 输出里，commit 后 ref 置位——同挂载周期内的数据刷新与主题重绘（Dashboard paletteTick
+  // 触发的重渲染）不再携带该 class，不重播 stagger 入场，走 CSS 更新过渡或直接终态。
+  // 视图离开再回来是新的挂载周期，入场按设计重播。
+  const playedRef = useRef(false);
+  useEffect(() => { playedRef.current = true; }, []);
+  // 折线族数据更新重绘（§6.3 折线行「数据更新」列，R2-7 / E4 收窄）：d 不可插值 ⇒ 直接重绘，
+  // 容器 200ms 淡入（chart-fade-in 唯一消费场景）。检测＝chart-line path 的 d 签名变化：
+  // 主题 paletteTick 重绘只换颜色、d 不变 ⇒ 不重播（§6.3「paletteTick 颜色瞬时换」）；
+  // 数据刷新/图型切换几何变了 ⇒ 挂 .chart-redraw（theme.css 消费），animationend 摘除。
+  // 首挂载周期不计（prev === null），入场由族动画承担，容器淡入不与页面过渡叠合（E4）。
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const lineSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    const sig = els
+      .filter((e) => e.tag === "path" && typeof e.attrs.className === "string" && e.attrs.className.includes("chart-line"))
+      .map((e) => String(e.attrs.d ?? ""))
+      .join("|");
+    const prev = lineSigRef.current;
+    lineSigRef.current = sig;
+    if (!playedRef.current || prev === null || sig === prev || sig === "") return;
+    const svg = svgRef.current;
+    if (!svg) return;
+    svg.classList.add("chart-redraw");
+    svg.addEventListener("animationend", () => svg.classList.remove("chart-redraw"), { once: true });
+  }, [els]);
+  const cls = playedRef.current ? "chart-svg" : "chart-svg chart-enter";
   // role="img" 会把整个子树对读屏隐藏。此前无条件挂 role="img" 又没有可访问名，
   // 读屏用户从 15 个图表里得到的信息是 0。改为：给了 label 才用 img（并配 aria-label）；
   // 没给就不设 role，让 SVG 里已有的 <text> 数值节点正常暴露出来。
   return (
-    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid meet" style={{ maxHeight: maxHeight || 320, width: "100%", display: "block" }} {...(label ? { role: "img", "aria-label": label } : {})}>
+    <svg ref={svgRef} viewBox={viewBox} className={cls} preserveAspectRatio="xMidYMid meet" style={{ maxHeight: maxHeight || 320, width: "100%", display: "block" }} {...(label ? { role: "img", "aria-label": label } : {})}>
       {els.map((e, i) =>
         e.text !== undefined && e.text !== "" ? (
           <text key={i} {...(e.attrs as object)} fontFamily="inherit">{e.text}</text>
