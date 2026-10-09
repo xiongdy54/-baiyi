@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { flushSync } from "react-dom";
 import "./theme.css";
 import Bookshelf from "./components/Bookshelf";
 import Reader from "./components/Reader";
@@ -57,6 +58,31 @@ type View =
   | { name: "journal" }
   | { name: "stats" };
 
+// D120-R2（MOTION-DESIGN-SPEC §5.1）：页序表——顶栏六签从左至右的视觉序，与下方 nav 数组同序（不得另造）；
+// queue 与 extractSession 同席（顶栏同钮高亮）⇒ 互切 dir=0；reader 为深度视图（+∞，不列席，见 viewDirOf 特则）。
+const VIEW_ORDER: Record<View["name"], number> = {
+  shelf: 0,
+  queue: 1,
+  extractSession: 1,
+  review: 2,
+  browse: 3,
+  journal: 4,
+  stats: 5,
+  reader: Number.POSITIVE_INFINITY
+};
+
+// 方向判定（§5.1 唯一判定点）：fwd＝目标在右＝新页自右往左入（前进/深入）；bwd＝目标在左＝新页自左往右入（返回）；
+// ""（dir=0）＝同席互切或 reader↔reader 跳转＝纯 crossfade 不位移。
+// reader 特则：进入 reader 恒为 fwd（深入）、离开恒为 bwd（返回），不按数值比较（§3.4 方向语义一致）。
+function viewDirOf(cur: View, next: View): "fwd" | "bwd" | "" {
+  if (cur.name === "reader" || next.name === "reader") {
+    if (cur.name === next.name) return "";
+    return next.name === "reader" ? "fwd" : "bwd";
+  }
+  const d = VIEW_ORDER[next.name] - VIEW_ORDER[cur.name];
+  return d === 0 ? "" : d > 0 ? "fwd" : "bwd";
+}
+
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [skinId, setSkinId] = useState("none");
@@ -70,6 +96,15 @@ export default function App() {
   /* v48.15 / D51：顶栏「书架」被点时自增——已在书架时点它也要能退出文件夹回顶层（Bookshelf 的第二条出路） */
   const [shelfTopTick, setShelfTopTick] = useState(0);
   const [view, setView] = useState<View>({ name: "shelf" });
+  // D120-R2（§5.1）：changeView 的方向判定需同步读到「当前视图」——viewRef 镜像 view：
+  // changeView 在改 view 的同一时刻**同步推进**镜像（第 1 轮审查 LOW-1：仅靠 passive effect
+  // 回写时，同帧第二次 changeView 会读到旧值、方向错一档），下方 effect 兜底其余路径。
+  const viewRef = useRef(view);
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+  // 世代号：快速连点时新过渡会跳过旧过渡（旧 finished 仍会结算）——旧清理不得误删新过渡刚写入的标记
+  const vtGenRef = useRef(0);
   // v48.41（D81）：摘录/复习会话的顶栏标题＝**当前卡材料名**（两页经 onMaterialName 上报；
   // 空串＝当前卡无材料名或队列为空，回落原「摘录」/「复习」字样）。切视图即失效重报。
   const [sessionMaterial, setSessionMaterial] = useState("");
@@ -231,21 +266,60 @@ export default function App() {
     return { bytes: syn.bytes, name: "synthetic.epub" };
   }, []);
 
+  // v48.76（D120 / MOTION-DESIGN-SPEC §5）：页面切换统一入口——全部**跨视图**切换只走这一个口子，
+  // 经原生 View Transitions API crossfade（旧视图 100ms 出 / 新视图 200ms 入，缓动与 exclude 规则见 theme.css「页面切换」节）；
+  // flushSync 保证回调返回前 DOM 已提交：浏览器在回调结束后立即捕获新视图快照，
+  // React 18 异步渲染下不加 flushSync 会拍到同帧（crossfade 拍出两个相同画面）。
+  // D120-R2（§5.1/§5.2）：调 startViewTransition **之前**同步写 documentElement 的
+  // data-vt（入场闸门：过渡遮罩在场）与 data-vt-dir（fwd=新页自右入 / bwd=自左入；dir=0 同席不写）；
+  // transition.finished 结算（finally 兜底，含跳过/失败路径）后删除两属性——
+  // 闸门关闭期间挂载的入场动画被推迟到揭幕后从头播放（§5.2），方向位移由 CSS 按 data-vt-dir 选取。
+  const changeView = useCallback((next: SetStateAction<View>) => {
+    // TS 5.5 lib.dom 尚无 startViewTransition 类型：局部特性检测声明，不污染全局类型
+    const host = document as unknown as { startViewTransition?: (update: () => void) => { finished: Promise<void> } };
+    const cur = viewRef.current; // 当前视图镜像（§5.1 方向判定的同步读取点）
+    const nextView = typeof next === "function" ? next(cur) : next;
+    const dir = viewDirOf(cur, nextView);
+    if (typeof host.startViewTransition !== "function") {
+      // 降级（§5.1）：不写 dataset，瞬时切换，方向动效自然不在场
+      setView(nextView);
+      viewRef.current = nextView; // LOW-1：镜像同步推进（同帧双 changeView 不读旧值）
+      return;
+    }
+    const root = document.documentElement;
+    root.dataset.vt = "1"; // §5.2 入场闸门：过渡遮罩在场
+    if (dir) root.dataset.vtDir = dir;
+    else delete root.dataset.vtDir; // dir=0（同席互切 / reader↔reader）：纯 crossfade 不位移
+    const gen = ++vtGenRef.current;
+    const clearVtMarkers = () => {
+      if (vtGenRef.current !== gen) return; // 已被更新的过渡接管，其清理负责删除
+      delete root.dataset.vt;
+      delete root.dataset.vtDir;
+    };
+    host.startViewTransition(() => {
+      flushSync(() => setView(nextView));
+      viewRef.current = nextView; // LOW-1：flushSync 提交后同步推进镜像，同帧双 changeView 方向判定不再读旧值
+    }).finished
+      .catch(() => { /* 跳过/失败路径同样结算，统一走 finally 清理 */ })
+      .finally(clearVtMarkers);
+  }, []);
+
   const openBook = useCallback((itemId: string) => {
     libraryApi.getDocument(itemId).then(async (doc) => {
       if (!doc) return;
       const book = await loadReaderBook(itemId, doc);
-      setView({ name: "reader", itemId, doc, book });
+      changeView({ name: "reader", itemId, doc, book });
     });
-  }, [loadReaderBook]);
+  }, [changeView, loadReaderBook]);
 
-  const backToShelf = useCallback(() => setView({ name: "shelf" }), []);
+  const backToShelf = useCallback(() => changeView({ name: "shelf" }), [changeView]);
 
   // v48.13（P2）：右下角指示器「打开导图」——已在读该材料则就地打开工作区，
   // 否则先按 documentId 找回书架条目、载入内核，再带 openMindmap 标记进入（Reader 挂载后自动打开）。
   const openMaterialMap = useCallback(
     async (documentId: string, mapId?: string | null, resumeRunId?: string | null) => {
       if (view.name === "reader" && view.doc.documentId === documentId) {
+        // 就地更新：已在同一 reader 视图（不跨视图，不走 changeView 过渡）
         setView({ ...view, openMindmap: true, openMindmapMapId: mapId ?? null, resumeRunId: resumeRunId ?? null });
         return;
       }
@@ -254,9 +328,9 @@ export default function App() {
       const doc = await libraryApi.getDocument(itemId);
       if (!doc) return;
       const book = await loadReaderBook(itemId, doc);
-      setView({ name: "reader", itemId, doc, book, openMindmap: true, openMindmapMapId: mapId ?? null, resumeRunId: resumeRunId ?? null });
+      changeView({ name: "reader", itemId, doc, book, openMindmap: true, openMindmapMapId: mapId ?? null, resumeRunId: resumeRunId ?? null });
     },
-    [view, loadReaderBook]
+    [view, changeView, loadReaderBook]
   );
 
   // v48.23（D61 §6.8-11）：多段不相邻选择时，spans 与 contentMarkdown 一起过桥——
@@ -333,9 +407,9 @@ export default function App() {
     const doc = await libraryApi.getDocument(itemId);
     if (doc) {
       const book = await loadReaderBook(itemId, doc);
-      setView({ name: "reader", itemId, doc, book, jumpAnchor: anchor, returnTo });
+      changeView({ name: "reader", itemId, doc, book, jumpAnchor: anchor, returnTo });
     }
-  }, [loadReaderBook]);
+  }, [changeView, loadReaderBook]);
 
   if (!loaded) {
     return (
@@ -393,7 +467,7 @@ export default function App() {
         contextRef={{ documentId: view.doc.documentId }}
         jumpAnchor={view.jumpAnchor}
         sourceTitle={view.doc.title}
-        onBack={view.jumpAnchor ? () => setView({ name: view.returnTo ?? "review" } as View) : backToShelf}
+        onBack={view.jumpAnchor ? () => changeView({ name: view.returnTo ?? "review" } as View) : backToShelf}
         onSwitchAppTheme={handleThemeChange}
         // 跳转进入（jumpAnchor 存在）时不传 onProgress：Reader 的滚动/卸载保存全部失效，
         // 阅读进度与阅读字数保持上次真实阅读的值（v19 现场查看语义）
@@ -401,9 +475,10 @@ export default function App() {
         openMindmapInitially={Boolean(view.openMindmap)}
         openMindmapMapId={view.openMindmapMapId ?? null}
         resumeRunId={view.resumeRunId ?? null}
-        onReviewExtracts={() => setView({ name: "extractSession", bookItemIds: [view.itemId], title: view.doc.title })}
-        onReviewCards={() => setView({ name: "review", bookItemIds: [view.itemId], title: view.doc.title })}
-        onOpenAnchorCards={(extractId) => setView({ name: "browse", anchorExtractId: extractId })}
+        onReviewExtracts={() => changeView({ name: "extractSession", bookItemIds: [view.itemId], title: view.doc.title })}
+        onReviewCards={() => changeView({ name: "review", bookItemIds: [view.itemId], title: view.doc.title })}
+        onOpenAnchorCards={(extractId) => changeView({ name: "browse", anchorExtractId: extractId })}
+        // 就地清除标记（同一 reader 视图），非页面切换，不走 changeView
         onMindmapOpened={() => setView((v) => (v.name === "reader" ? { ...v, openMindmap: false, resumeRunId: null } : v))}
       />
     );
@@ -416,7 +491,7 @@ export default function App() {
         onJumpToDoc={handleJumpToDoc}
         onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
-        onOpenAnchorCards={(extractId) => setView({ name: "browse", anchorExtractId: extractId })}
+        onOpenAnchorCards={(extractId) => changeView({ name: "browse", anchorExtractId: extractId })}
       />
     );
   } else if (view.name === "extractSession") {
@@ -430,10 +505,10 @@ export default function App() {
         scopeTags={view.scopeTags}
         scopeKpIds={view.scopeKpIds}
         header={`集中复习：《${view.title}》`}
-        onExit={() => setView({ name: "shelf" })}
+        onExit={() => changeView({ name: "shelf" })}
         onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
-        onOpenAnchorCards={(extractId) => setView({ name: "browse", anchorExtractId: extractId })}
+        onOpenAnchorCards={(extractId) => changeView({ name: "browse", anchorExtractId: extractId })}
       />
     );
   } else if (view.name === "review") {
@@ -446,12 +521,13 @@ export default function App() {
       <CardBrowser
         onJumpToDoc={handleJumpToDoc}
         anchorExtractId={view.name === "browse" ? view.anchorExtractId ?? null : null}
+        // 就地清除锚点筛选（同一 browse 视图），非页面切换，不走 changeView
         onClearAnchorFilter={() => setView((v) => (v.name === "browse" ? { ...v, anchorExtractId: null } : v))}
         onStartSession={({ bookItemIds, tags, kpIds, kinds, name, limits }) => {
           // v48.22（D58 §6.8-5）：从筛选牌组进入集中复习——摘录范围走沉浸式摘录页，闪卡范围走复习页；
           // 牌组的上限覆写随视图带过去（只收紧，不另开预算）
-          if (!kinds.includes("card")) setView({ name: "extractSession", bookItemIds, title: name, limits: limits ?? null, scopeTags: tags, scopeKpIds: kpIds });
-          else setView({ name: "review", bookItemIds, title: name, limits: limits ?? null, scopeTags: tags, scopeKpIds: kpIds });
+          if (!kinds.includes("card")) changeView({ name: "extractSession", bookItemIds, title: name, limits: limits ?? null, scopeTags: tags, scopeKpIds: kpIds });
+          else changeView({ name: "review", bookItemIds, title: name, limits: limits ?? null, scopeTags: tags, scopeKpIds: kpIds });
         }}
       />
     );
@@ -499,7 +575,7 @@ export default function App() {
               key={item.key}
               className={`nav-item${item.match(view.name) ? " active" : ""}`}
               onClick={() => {
-                setView({ name: item.key } as View);
+                changeView({ name: item.key } as View);
                 if (item.key === "shelf") setShelfTopTick((t) => t + 1);
               }}
             >
@@ -545,7 +621,7 @@ export default function App() {
             // v38（D35）：粘贴书随建册带上语言属性（空=未知）
             if (created && lang) await libraryApi.setItemLang(created.id, lang);
             eventBus.emit("library/changed");
-            setAddMaterialOpen(false);
+            // D120：成功关窗收口到 AddBookModal 的 requestClose()（两步走出场），父级不再直接卸载
           }}
           onClose={() => setAddMaterialOpen(false)}
         />

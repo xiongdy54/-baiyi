@@ -48,11 +48,25 @@ export default function CaptureEditor() {
   const textRef = useRef("");
   const dirtyRef = useRef(false); // 有尚未送出的输入（决定失焦/隐藏前是否要补一次保存）
   const sendingRef = useRef(false); // 发送并发闸（ref 同步，双击不会发出两条）
+  const shellRef = useRef<HTMLDivElement | null>(null); // .cap-shell 根节点（入场重触发用）
 
   const focusEditor = useCallback(() => {
     // §J P0：编辑器内容区聚焦，光标落到文档末尾（「继续向下写」语义，与旧 textarea 一致）
     mdRef.current?.focusEnd();
   }, []);
+
+  // MOTION-DESIGN-SPEC §8.5 弹出族语义（D120 R3）：capture 是长生命周期单例窗口，
+  // hide→show 不卸载组件，CSS animation 只在首帧播一次——每次呼出需重触发 cap-enter。
+  // 手法：内联 animation 置 none → 强制 reflow 作废旧动画状态 → 清空内联，交还 CSS
+  // （no-preference 作用域）接管重播；reduce 下规则不在场，此操作为 no-op。
+  // 只动 style.animation，无新增监听/无残留 class（满足「保持 CSS 驱动原则」）。
+  function restartEnter() {
+    const el = shellRef.current;
+    if (!el) return;
+    el.style.animation = "none";
+    void el.offsetHeight; // 强制 reflow：浏览器同步丢弃旧动画状态
+    el.style.animation = "";
+  }
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -196,12 +210,13 @@ export default function CaptureEditor() {
     };
   }, [reload]);
 
-  // 每次呼出：重读外观（主题/强调色可能已变）→ 刷新当日条数与草稿（隐藏期间可能已在主窗口编辑过）
-  // → 聚焦、光标置末尾
+  // 每次呼出：重触发入场（§8.5 弹出族语义）→ 重读外观（主题/强调色可能已变）
+  // → 刷新当日条数与草稿（隐藏期间可能已在主窗口编辑过）→ 聚焦、光标置末尾
   useEffect(() => {
     const api = window.captureAPI;
     if (!api) return;
     return api.onShown(() => {
+      restartEnter();
       void applyCaptureAppearance()
         .then(() => reload(true))
         .then(() => focusEditor());
@@ -258,7 +273,7 @@ export default function CaptureEditor() {
           : "输入即自动保存";
 
   return (
-    <div className="cap-shell">
+    <div className="cap-shell" ref={shellRef}>
       <header className="cap-header">
         <span className="cap-title">快速记录</span>
         <span className="cap-meta mono">

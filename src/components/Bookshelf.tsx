@@ -26,6 +26,9 @@ import {
 const COVER_RETRY_MAX = 3;
 function CoverImg({ itemId, filename, title }: { itemId: string; filename: string; title: string }) {
   const [attempt, setAttempt] = useState(0);
+  // D120-R2（MOTION-DESIGN-SPEC §10-R2）：封面解码淡入——解码完成（onLoad）前 is-loaded 不在场，
+  // img 在 no-preference 环境下 opacity:0；成功后 150ms 淡入。失败回落骨架（spine+title）不走此规则。
+  const [loaded, setLoaded] = useState(false);
   if (attempt > COVER_RETRY_MAX) {
     return (
       <>
@@ -36,9 +39,10 @@ function CoverImg({ itemId, filename, title }: { itemId: string; filename: strin
   }
   return (
     <img
-      className="cover-img"
+      className={`cover-img${loaded ? " is-loaded" : ""}`}
       src={`bookasset://${itemId}/${filename}${attempt > 0 ? `?r=${attempt}` : ""}`}
       alt={title}
+      onLoad={() => setLoaded(true)}
       onError={() => window.setTimeout(() => setAttempt((a) => a + 1), 400)}
     />
   );
@@ -179,6 +183,29 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     })();
     return eventBus.on("library/changed", refresh);
   }, [refresh]);
+
+  /* D120-R2（MOTION-DESIGN-SPEC §10-R2）：书架入场标记。
+     触发＝挂载后 items 由空→非空的**首个渲染周期**——首屏数据到达与他页切回（新挂载周期）两条路径都覆盖。
+     enterArmed 保证组件生命周期内只武装一次：此后的 refresh 回灌 / 排序 / 密度 / 视图切换
+     都在无 shelf-enter 容器下渲染，自然不播；700ms（200 + 8×30 + 余量）后清除标记，
+     防无关重渲染里的新建节点误播（§10-R2）。定时器随 effect 清理，卸载 / StrictMode 双挂载安全。
+     文件夹进出（openFolderId 无持久化回填）变化时主动终止未完序列——§10-R2 排除项；
+     视图/排序不监听：loadViewPrefs 的异步回填可能晚于 items 到达，会误杀首屏入场（700ms 余量兜底）。 */
+  const [shelfEnter, setShelfEnter] = useState(false);
+  const enterArmed = useRef(false);
+  useEffect(() => {
+    if (enterArmed.current || items.length === 0) return;
+    enterArmed.current = true;
+    setShelfEnter(true);
+  }, [items]);
+  useEffect(() => {
+    if (!shelfEnter) return;
+    const t = window.setTimeout(() => setShelfEnter(false), 700);
+    return () => window.clearTimeout(t);
+  }, [shelfEnter]);
+  useEffect(() => {
+    setShelfEnter(false);
+  }, [openFolderId]);
 
   /* 顶栏「书架」点击 → 退出文件夹（首次挂载不触发，否则会打断刚进来的状态恢复） */
   const firstSignal = useRef(topLevelSignal);
@@ -636,7 +663,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
       </>
     );
 
-  const wallCard = (entry: ShelfEntry) => {
+  // index：视觉阅读序（先行后列＝entries 渲染序），供入场 stagger 的 --i（clamp 到 0-7 共 8 档，§3.6 预算）
+  const wallCard = (entry: ShelfEntry, index: number) => {
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
@@ -647,6 +675,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
         key={entry.id}
         data-entry={entry.id}
         className={`shelf-item${zoneClass(entry.id)}${drag?.id === entry.id ? " is-dragging" : ""}${freshId === entry.id ? " is-fresh" : ""}`}
+        style={{ "--i": String(Math.min(index, 7)) } as React.CSSProperties}
         {...itemProps(entry)}
       >
         {/* .shelf-face = 封面 + 进度轨那一整块，拖拽/新入库的高亮框画在它身上（§5.4） */}
@@ -669,7 +698,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
                     {members.slice(0, SPINE_MAX).map((m) => (
                       <i key={m.id}>
                         {m.cover ? (
-                          <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true" />
+                          <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
+                            onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />
                         ) : (
                           <span className="book-card-spine" />
                         )}
@@ -736,7 +766,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     );
   };
 
-  const tableRow = (entry: ShelfEntry) => {
+  const tableRow = (entry: ShelfEntry, index: number) => {
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
@@ -750,6 +780,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
         key={entry.id}
         data-entry={entry.id}
         className={`${zoneClass(entry.id)}${drag?.id === entry.id ? " is-dragging" : ""}${isFolder ? " is-folder" : ""}`}
+        style={{ "--i": String(Math.min(index, 7)) } as React.CSSProperties}
         {...itemProps(entry)}
       >
         {/* v48.18：撤掉「打开」列与拖拽把手列。打开的入口改到**封面与书名本身**（与卡片视图同一套语言：
@@ -761,13 +792,15 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
             <span className="thumb">
               <span className="f-spines">
                 {members.slice(0, 3).map((m) => (
-                  <i key={m.id}>{m.cover && <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true" />}</i>
+                  <i key={m.id}>{m.cover && <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
+                    onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}</i>
                 ))}
                 {members.length > 3 && <i className="rest">+{members.length - 3}</i>}
               </span>
             </span>
           ) : (
-            <span className="thumb">{entry.item.cover ? <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true" /> : <span className="book-card-spine" />}</span>
+            <span className="thumb">{entry.item.cover ? <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true"
+              onLoad={(e) => e.currentTarget.classList.add("is-loaded")} /> : <span className="book-card-spine" />}</span>
           )}
         </td>
         <td className="col-main" onClick={open}>
@@ -938,9 +971,9 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           </p>
         </div>
       ) : mode === "wall" ? (
-        <div className="bookshelf-grid" ref={listRef} onDragOver={onGridDragOver} onDrop={onGridDrop}>{entries.map(wallCard)}</div>
+        <div className={`bookshelf-grid${shelfEnter ? " shelf-enter" : ""}`} ref={listRef} onDragOver={onGridDragOver} onDrop={onGridDrop}>{entries.map((e, i) => wallCard(e, i))}</div>
       ) : (
-        <div className="shelf-body" ref={listRef} onDragOver={onGridDragOver} onDrop={onGridDrop}>
+        <div className={`shelf-body${shelfEnter ? " shelf-enter" : ""}`} ref={listRef} onDragOver={onGridDragOver} onDrop={onGridDrop}>
           <table className="shelf-table">
             <thead>
               <tr>
@@ -953,7 +986,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
                 <th className="col-act" />
               </tr>
             </thead>
-            <tbody>{entries.map(tableRow)}</tbody>
+            <tbody>{entries.map((e, i) => tableRow(e, i))}</tbody>
           </table>
         </div>
       )}

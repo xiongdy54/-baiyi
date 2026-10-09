@@ -36,6 +36,7 @@ import { FIELD_LABELS } from "./DictPanel";
 import { eventBus } from "../lib/eventbus";
 import { memoryApi, type MemoryPendingStats, type MemoryStatus } from "../lib/memory";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { useDismiss } from "../lib/useDismiss";
 import SettingsInfo from "./SettingsInfo";
 // v48.22（D58 §6.8）：摘录复习开关 / 每日上限（写路径经主进程硬边界校验）
 import {
@@ -2519,7 +2520,10 @@ export default function SettingsPanel({
 }: Props) {
   const [activeNav, setActiveNav] = useState("appearance");
   const layoutRef = useRef<HTMLDivElement>(null);
-  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  // D120 §8.1：出场两步走——Esc / 遮罩点击 / 关闭按钮收口到同一 requestClose；
+  // data-show 只挂在 modal 容器级（backdrop/panel），13 个 sec-* 区块仍常挂载，内部结构不动
+  const { show, requestClose } = useDismiss(onClose);
+  const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
 
   // 滚动时同步左导航高亮（v45 引入的收敛修正全部继承：scroll + scrollend + 220ms 尾随测一次）。
   // v48.70（D114）：13 个导航项与 13 个区块一一对应（SECTION_GROUPS 生成 navIds），
@@ -2582,9 +2586,10 @@ export default function SettingsPanel({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
       <div
         className="modal-panel modal-panel-wide settings-panel"
+        data-show={show ? "in" : "out"}
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -2593,7 +2598,7 @@ export default function SettingsPanel({
       >
         <div className="modal-header">
           <h2>设置</h2>
-          <button className="icon-btn modal-close" title="关闭" aria-label="关闭设置" onClick={onClose}>
+          <button className="icon-btn modal-close" title="关闭" aria-label="关闭设置" onClick={requestClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />

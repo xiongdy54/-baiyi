@@ -6,14 +6,26 @@
 // 输入 ≥1 字即向下生长为一体化面板（同底色 + accent 连续描边；候选 ≤8 或「回车新建」提示行）；
 // **首项不预选**：Enter 恒为确认输入原文（回车新建语义不变），↑↓ 显式激活候选后才接管 Enter；
 // 候选两行结构（层级路径 + 两源计数 meta），输入前缀 accent 高亮（staging：让「为什么推荐它」可见）；
-// 动效映射既有 D88 Token：展开 200ms ease-in-out（state-changes accordion）、收回 140ms（closing 态去回对称）、
-// 行 stagger 20ms 上限 5（entrance-animations）；聚焦态 border accent（既有 :focus 规则）＝Anticipation 预告步。
+// 动效映射 D120 §7 通用折叠模式（.collapse-clip）：展开 --dur-panel(240ms)、收回 --dur-view(200ms)、
+// --ease-out-soft（closing 态去回对称）；行 stagger 20ms 上限 5（entrance-animations）；
+// 聚焦态 border accent（既有 :focus 规则）＝Anticipation 预告步。
 import { useMemo, useRef, useState } from "react";
 import { IconClose } from "./icons";
 import { normalizeTag, tagKey, type TagVocabEntry } from "../lib/tags";
 
-/** 收回动效时长（theme.css tag-panel-shrink 同步；ms） */
-const CLOSE_MS = 140;
+/** 收回动效时长（theme.css .tag-suggest-v4.closing .collapse-clip 的 --dur-view 同步；ms） */
+const CLOSE_MS = 200;
+
+/** reduce 用户：收回动画不在场，JS 等待短路为 0（与 useDismiss.resolveExitMs 同手法，
+ *  D120 R3 统一 reduce 语义）；无 matchMedia 的旧环境走正常延迟 */
+function resolveCloseMs(): number {
+  try {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return 0;
+  } catch {
+    /* 特性检测失败 → 走正常延迟 */
+  }
+  return CLOSE_MS;
+}
 
 /** 前缀高亮切分：按 tagKey 折叠串定位；NFKC 展开导致长度不一致的罕见词不高亮（如实降级） */
 function splitPrefix(display: string, query: string): [string, string] | null {
@@ -49,7 +61,7 @@ export function TagInput({
   const [text, setText] = useState("");
   const [invalid, setInvalid] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
-  /** D106：收回动效态（closing 期间面板仍在 DOM，播 140ms 收回后卸载） */
+  /** D106：收回动效态（closing 期间面板仍在 DOM，播 200ms 收回后卸载） */
   const [closing, setClosing] = useState(false);
   /** D106：↑↓ 显式激活的候选下标（-1 = 未激活——Enter 走「确认输入原文」） */
   const [active, setActive] = useState(-1);
@@ -79,7 +91,7 @@ export function TagInput({
       closeTimer.current = null;
     }
   }
-  /** D106 收回：播 140ms 收回动效后卸载（去回对称；Esc/失焦共用） */
+  /** D106 收回：播收回动效后卸载（去回对称；Esc/失焦共用） */
   function startClose() {
     if (!panelVisible && !closing) {
       setOpen(false);
@@ -92,7 +104,7 @@ export function TagInput({
       setOpen(false);
       setActive(-1);
       closeTimer.current = null;
-    }, CLOSE_MS);
+    }, resolveCloseMs());
   }
 
   function commit(raw: string) {
@@ -182,8 +194,8 @@ export function TagInput({
             role="listbox"
             aria-label="标签建议"
           >
-            <span className="tag-suggest-clip">
-              <span className="tag-suggest-body">
+            <span className={`collapse-clip${closing ? "" : " is-open"}`}>
+              <span className="tag-suggest-body collapse-inner">
                 {filtered.length === 0 ? (
                   <span className="tag-suggest-empty" data-testid="tag-suggest-empty">
                     回车新建「{text.trim()}」

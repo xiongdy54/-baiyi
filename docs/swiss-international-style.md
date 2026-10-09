@@ -219,6 +219,7 @@ description: 瑞士国际主义设计风格的软件 UI 视觉规范。用户要
 - 缓动:`cubic-bezier(.2,0,.38,.9)` 120-240ms(常规交互);`cubic-bezier(0,0,.3,1)` 400-700ms(欢迎页/引导)
 - 软件附加:浮层进 150ms 出 100ms;视图切换 ≤ 200ms;列表增删用高度过渡,不闪跳
 - `prefers-reduced-motion` 时关闭非必要动效
+- 软件实现的完整动效规范（motion token、页面切换、图表、模态/浮层/弹出面板、列表、加载指示、reduced-motion 双轨）见 `docs/design/MOTION-DESIGN-SPEC.md`（D120）;两文件冲突时以本节硬规则为准
 
 ## 布局模式库(软件界面)
 
