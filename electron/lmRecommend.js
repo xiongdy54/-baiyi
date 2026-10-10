@@ -566,10 +566,19 @@ function genStart(track, ctx) {
     .slice(0, 3);
 }
 
-// K3 extract-batch（每轨道至多 1 个；到期口径与 listDueExtracts 完全相同，由 refresh 组装进 snapshot.extracts）
+// K3 extract-batch（每轨道至多 1 个）。到期口径与 listDueExtracts 完全相同（设计稿 §8.2 K3）：
+// is_deleted=0、所属 document 与 library_item 未删、kind='extract'、
+// status NOT IN (resolved,dismissed,archived)、topic_next_at <= now —— 前四个条件由 learnerRefresh
+// 组装 snapshot.extracts 时套用（learnerFacts 返回全量未删摘录，K4 需要 reading 态非到期行），
+// 这里套用剩余两个条件，语义与 listDueExtracts 逐条对齐。
 function genExtractBatch(track, ctx) {
   const now = ctx.snapshot.now;
-  const due = (ctx.snapshot.extracts || []).filter((e) => ctx.extractTrackOf(String(e.id)) === track.id);
+  const due = (ctx.snapshot.extracts || []).filter(
+    (e) =>
+      ctx.extractTrackOf(String(e.id)) === track.id &&
+      !["resolved", "dismissed", "archived"].includes(String(e.status || "open")) &&
+      (Number(e.topicNextAt) || 0) <= now
+  );
   const n = due.length;
   if (n < 1) return [];
   const itemIds = [...new Set(due.map((e) => String(e.libraryItemId)))].sort();
