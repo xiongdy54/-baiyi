@@ -74,41 +74,89 @@ export function publishWorkbenchState(s: WorkbenchState): void {
 // ---------- 推让与窗口外延 ----------
 // 多个宿主（阅读器 / 摘录页 / 自由宿主）不会同时存在，但视图切换的交叠帧里新旧宿主的 effect
 // 清理与挂载次序不可靠——所以由本模块串行仲裁：登记表里「最后登记且展开」的宿主说了算。
+//
+// 开合动画（修订 6，用户：侧栏与正文必须同步，不许先收起留白再还原）：
+//  · 内推（最大化/余量不足）：data-wb-open 的增删与制卡台滑动在**同一帧**触发（onCommit 内 flushSync），
+//    `.app-main` 的 margin-right 与制卡台 transform 用同一时长/缓动 → 正文随侧栏同步收窄/还原。
+//  · 外延（窗口向右变宽）：正文宽度本就不该变——开合前把 .app-main 钉死为当前像素宽（data-wb-pin），
+//    窗口变宽/还原期间正文纹丝不动，只有制卡台滑入/滑出；动画结束后再解钉。
 const owners = new Map<symbol, { placement: WorkbenchPlacement }>();
 let extended = false;
 let chain: Promise<void> = Promise.resolve();
 let bridgeInstalled = false;
+const ANIM_MS = 260; // ≥ --dur-panel(240ms)
 
 function root(): HTMLElement {
   return document.documentElement;
 }
 
-async function applyDesired(): Promise<void> {
+const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+
+function pinMain(on: boolean): void {
+  const el = root();
+  if (!on) {
+    delete el.dataset.wbPin;
+    el.style.removeProperty("--wb-main-w");
+    return;
+  }
+  const main = document.querySelector<HTMLElement>(".app-main");
+  const w = main ? main.getBoundingClientRect().width : 0;
+  if (w > 0) {
+    el.style.setProperty("--wb-main-w", `${w}px`);
+    el.dataset.wbPin = "1";
+  }
+}
+
+async function applyDesired(onCommit?: () => void): Promise<void> {
   const active = [...owners.values()].pop();
   const el = root();
   if (!active) {
-    delete el.dataset.wbOpen;
-    delete el.dataset.wbPlace;
-    delete el.dataset.wbMode;
+    // 收起
     if (extended) {
+      // 外延：正文钉死 → 制卡台滑出 → 动画结束后窗口还原 → 同帧去掉让位与钉死
+      pinMain(true);
+      onCommit?.();
+      await sleep(ANIM_MS);
       extended = false;
       await window.windowAPI?.dockRestore?.();
+      delete el.dataset.wbOpen;
+      delete el.dataset.wbPlace;
+      delete el.dataset.wbMode;
+      pinMain(false);
+      return;
     }
+    // 内推：margin 回落与制卡台滑出同帧同步
+    el.dataset.wbAnim = "1";
+    delete el.dataset.wbOpen;
+    onCommit?.();
+    await sleep(ANIM_MS);
+    delete el.dataset.wbPlace;
+    delete el.dataset.wbMode;
+    delete el.dataset.wbAnim;
     return;
   }
-  // 修订 5：先把窗口外延/还原做完，再一次性写 data-wb-*（正文让位与窗口变宽落在同一帧，避免「先收窄、后变宽」两次重排）
+  // 展开
   if (active.placement === "right") {
     if (!extended) {
+      pinMain(true); // 窗口变宽的瞬间正文不得被拉宽
       const r = await window.windowAPI?.dockExtend?.(WB_WIDTH);
       extended = r?.mode === "extended";
+      if (!extended) pinMain(false);
     }
   } else if (extended) {
     extended = false;
     await window.windowAPI?.dockRestore?.();
+    pinMain(false);
   }
-  el.dataset.wbOpen = "1";
+  const ext = active.placement === "right" && extended;
   el.dataset.wbPlace = active.placement;
-  el.dataset.wbMode = active.placement === "right" && extended ? "extended" : "inner";
+  el.dataset.wbMode = ext ? "extended" : "inner";
+  if (!ext) el.dataset.wbAnim = "1";
+  el.dataset.wbOpen = "1";
+  onCommit?.();
+  await sleep(ANIM_MS);
+  delete el.dataset.wbAnim;
+  if (ext) pinMain(false); // margin-right 已让位，解钉后宽度与钉死值一致
 }
 
 function installBridge(): void {
@@ -124,7 +172,7 @@ function installBridge(): void {
 }
 
 /** 宿主登记/注销自己的制卡台展开态（open=false 即注销） */
-export function setDockLayout(owner: symbol, open: boolean, placement: WorkbenchPlacement): Promise<void> {
+export function setDockLayout(owner: symbol, open: boolean, placement: WorkbenchPlacement, onCommit?: () => void): Promise<void> {
   installBridge();
   if (open) {
     owners.delete(owner); // 重新登记＝成为「最后登记者」
@@ -132,6 +180,6 @@ export function setDockLayout(owner: symbol, open: boolean, placement: Workbench
   } else {
     owners.delete(owner);
   }
-  chain = chain.then(applyDesired).catch(() => {});
+  chain = chain.then(() => applyDesired(onCommit)).catch(() => {});
   return chain;
 }

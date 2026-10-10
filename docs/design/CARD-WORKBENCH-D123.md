@@ -91,3 +91,9 @@
 - 滚动条全局隐藏（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），滚轮/键盘滚动不受影响；手动区展开过程不再因滚动条出没挤压文本框宽度。阅读内核 iframe（foliate）内部文档的滚动条不在应用样式作用域内。
 - 展开/收起卡顿：根因＝① `.app-main` 的 margin 过渡让正文（阅读内核）每帧重排；② 让位（margin）先于窗口外延（IPC）→ 先收窄后变宽两次重排；③ 滑入动画与首次挂载（Milkdown 初始化）同帧。修复：去掉 margin 过渡；`applyDesired` 先完成外延/还原再一次性写 `data-wb-*`；`CardDock` 以 `shown` 门控——展开＝「让位/外延 → 双 rAF → 仅 transform 滑入」，收起＝「滑出 → 260ms 后注销让位/还原窗口」；`will-change: transform`。
 - 屏幕截图提速：遮罩窗口与抓屏并行；遮罩背景走 JPEG（PNG 编码大屏 >1s），仅最终裁剪小图编 PNG；透明等待 240→100ms；Windows 启动 8s 后预热一次 1×1 `getSources`（摊掉首次初始化成本）。
+
+### 7.5 修订 6（2026-10-10 深夜）——开合动画与正文同步（取代 7.4 中「先让位再滑入 / 先滑出再还原」的顺序）
+- 反例（用户截图）：收起时侧栏先滑走、正文留着大片空白，滑完才还原；展开同理——生硬、不同步。
+- **内推**（最大化/余量不足）：`data-wb-open` 的增删与制卡台滑动经 `setDockLayout(..., onCommit)` 在**同一帧**提交（onCommit 内 `flushSync(setShown)`），`html[data-wb-anim] .app-main` 的 margin 过渡与 `.side-dock` 的 transform 过渡同为 `--dur-panel` + `--ease` → 正文随侧栏同步收窄/还原。
+- **外延**（窗口向右变宽）：正文宽度本就不该变——开合前把 `.app-main` 钉成当前像素宽（`data-wb-pin` + `--wb-main-w`），窗口变宽/还原期间正文纹丝不动，只有制卡台滑入/滑出；收起时先滑出、动画结束（260ms）再还原窗口，随后同帧去让位与解钉。
+- 阅读内核（foliate 的 shadow DOM）里的滚动条：应用 CSS 够不到，已在 `vendor/foliate-js/paginator.js` 的 `#container` 就地隐藏。

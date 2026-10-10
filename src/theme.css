@@ -2769,8 +2769,12 @@ body.theme-dark .modal-panel {
   display: flex;
   flex-direction: column;
 }
-/* 修订 5：不再给 .app-main 的 margin 做过渡——正文（阅读内核/iframe）每帧重排是展开卡顿的主因；
-   开合只让制卡台自身 transform 滑动（合成层，零重排），正文在开合起止各一次性让位。 */
+/* 修订 6：正文让位与制卡台滑动同步——仅「内推」开合期间（html[data-wb-anim]）给 margin 过渡，
+   时长/缓动与 .side-dock 的 transform 完全一致；「外延」时正文被钉死像素宽（data-wb-pin），不参与动画。 */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-wb-anim] .app-main { transition: margin var(--dur-panel) var(--ease); }
+}
+html[data-wb-pin] .app-main { flex: none; width: var(--wb-main-w); }
 html[data-wb-open="1"][data-wb-place="right"] .app-main { margin-right: var(--wb-w); }
 html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--wb-h); }
 

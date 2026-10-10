@@ -530,6 +530,9 @@ export class Paginator extends HTMLElement {
             grid-row: 1 / -1;
             overflow: auto;
         }
+        /* 应用级「隐藏滚动条」（用户 2026-10-10）：shadow DOM 不吃应用样式，在此就地隐藏；滚轮/键盘滚动不受影响 */
+        #container { scrollbar-width: none; }
+        #container::-webkit-scrollbar { display: none; width: 0; height: 0; }
         #header {
             grid-column: 3 / 4;
             grid-row: 1;

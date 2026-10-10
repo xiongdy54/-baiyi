@@ -5,6 +5,7 @@
 // 放置：right（默认，右侧固定）/ bottom（底部固定，手动左 AI 右）/ window（独立窗口：占满、不推让不外延）。
 // 推让与窗口外延由 workbenchLayout 仲裁（本组件只登记展开态）。
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { IconChevronDown, IconChevronRight } from "./icons";
 import { setDockLayout, type WorkbenchDockPlacement } from "../lib/workbenchLayout";
 
@@ -41,9 +42,8 @@ export default function CardDock({
 }) {
   const dockRef = useRef<HTMLElement | null>(null);
 
-  // 登记布局：展开且非独立窗口才推让/外延（串行仲裁见 workbenchLayout）。
-  // 修订 5（展开/收起卡顿）：开合顺序＝「先让位/外延（一次性重排）→ 再滑入」；「先滑出 → 再还原」。
-  // 滑动本身只动 transform（合成层），整个动画期间正文零重排；shown 驱动 is-collapsed 的增减。
+  // 登记布局：展开且非独立窗口才推让/外延（串行仲裁与同步动画见 workbenchLayout）。
+  // 制卡台滑动（class）与正文让位（html 数据属性）在 onCommit 内同帧提交（flushSync），时长/缓动一致。
   const [shown, setShown] = useState(false);
   useEffect(() => {
     if (placement === "window") {
@@ -55,17 +55,9 @@ export default function CardDock({
       return;
     }
     const owner = Symbol("card-dock");
-    let alive = true;
-    void setDockLayout(owner, true, placement).then(() => {
-      if (!alive) return;
-      // 等布局提交一帧，再触发滑入（否则 transform 过渡会与让位重排抢同一帧）
-      requestAnimationFrame(() => requestAnimationFrame(() => alive && setShown(true)));
-    });
+    void setDockLayout(owner, true, placement, () => flushSync(() => setShown(true)));
     return () => {
-      alive = false;
-      setShown(false);
-      // 滑出动画（--dur-panel 240ms）结束后再注销让位 / 还原窗口宽度
-      window.setTimeout(() => void setDockLayout(owner, false, placement), 260);
+      void setDockLayout(owner, false, placement, () => flushSync(() => setShown(false)));
     };
   }, [dockOpen, placement]);
 
