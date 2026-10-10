@@ -78,3 +78,10 @@
 - 输入框一行起步（段落零外距）；伸缩动效不变。
 - 「图片挖空」页签不再切表单，而是启动**整屏截图**：`electron/screenCapture.js`（desktopCapturer 抓光标所在显示器 + 全屏遮罩窗口 `captureOverlay.html` 拖框；Esc/右键取消；应用窗口截前临时透明不入镜）→ dataURL → `useSelectionActions.startWorkbenchCapture` → 图片挖空编辑器（由 SelectionPanels 渲染，`occlEditor.workbench` 标记；阅读器不重复渲染）。无归属书籍时资产落 `assets/workbench-assets/`（`createAssetForItem` 识别）。IPC：`screen-capture:start`（preload `assetsAPI.captureScreen`）；遮罩内部通道 `screen-capture:shot/ready/done`。
 - 阅读器「截图」无反应的根因：`handleCaptureReader` 与点击正文图片的入口都用 `manualOpen || aiPanel` 当「弹层在场」守卫，制卡台常驻后二者几乎恒真 → 静默 return。改为只在挖空编辑器 / 挖空弹窗在场时拦截，并给出提示。
+
+### 7.3 修订 4（2026-10-10 夜）
+- 两区同为 paper 底，仅以一条细线分界；标题列等宽（5.2em）：「手动制卡」「AI 助手」，页签同起点；手动区收起/展开均走 `collapse-clip`（`.wb-manual-clip`），`.wb-manual-body` 不再用 `hidden`（测试改查 `.wb-manual.is-collapsed`）。
+- 图片挖空编辑器关闭钮：原用浅色（`--overlay-text`）描边/图标，叠在右栏 paper 底上不可见 → 墨色 + paper 底 + 细边框。
+- 翻转问答（dock）只留 2 框；反向卡由 `handleManualCard` 既有逻辑自动生成（B 面空 ⇒ 用 A 面答案/题面互换），载荷不变。
+- 填空（dock）：纯文本 textarea + 工具行「挖空 / 同题挖空 / 取消挖空」+ 「N 张卡 · M 个空」；快捷键 Ctrl+Shift+C / Ctrl+Alt+Shift+C。Anki 语义：不同编号＝不同卡（每张 `clozeOrds=[自己的ord]`、`cardOrd=i`、共享 siblingKey），同编号多空＝同卡一起遮；仅一个编号＝单卡（旧行为不变）。至少一个挖空才可制卡。
+- 自动填写（dock，用户动过的项不覆盖）：标注日期＝正反面命中 L12 同一正则（`needsDateStamp`）；前缀＝首个领域名称；领域＝沿用上一张手动卡（会话内）。助记、知识点分组不自动填（助记需创造性、规则 7 要求克制；知识点错误归组会污染簇）。

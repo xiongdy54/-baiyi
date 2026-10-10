@@ -815,6 +815,10 @@ export interface LintIssue {
 }
 
 const CHANGEABLE = /(统计|版本|价格|政策|截至|目前|当前|最新)/;
+/** D123 修订 4：手动制卡「标注日期」自动勾选的判据（与 L12 lint 同一份正则，口径一致） */
+export function needsDateStamp(text: string): boolean {
+  return CHANGEABLE.test(text);
+}
 
 export function lintCard(draft: {
   front?: string;

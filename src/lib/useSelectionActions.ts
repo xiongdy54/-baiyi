@@ -7,6 +7,7 @@ import {
   cardGenerator,
   lintCard,
   cardsApi,
+  parseCloze,
   createAcceptedCard,
   buildSourceRef,
   detectMaterialType,
@@ -388,6 +389,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     tags?: string[];
     occlusionJson?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; assetPath: string; shapes?: OcclusionShape[] | null; regionScope?: string } | null;
     cardOrd?: number;
+    /** 手动多题挖空：每张卡只遮自己的 ord（空＝遮全部，与 AI 同答卡口径一致） */
+    clozeOrds?: number[];
     // v34（M12，§4.16）：同源组键——翻转对/同图卡由调用点显式给出；普通卡由 handleManualCard 预先推导
     siblingKey?: string | null;
   }): Promise<string> {
@@ -398,7 +401,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       cardType: p.cardType,
       frontMarkdown: p.front,
       backMarkdown: p.back,
-      clozeOrds: [],
+      clozeOrds: p.clozeOrds ?? [],
       cardOrd: p.cardOrd ?? 0,
       occlusionJson: p.occlusionJson ?? null,
       contextPrefix: p.contextPrefix || null,
@@ -499,12 +502,28 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       const cloze = p.cloze || "";
       // F12（v25）修复：挖空卡必须把带 {{cN::}} 标记的文本存进 frontMarkdown——
       // 此前存的是未转换的原文，复习端 parseCloze 找不到挖空 ord，挖空从未遮蔽
-      const clozeId = await createSingleCard({ front: cloze, back: p.back, cardType: "cloze", cloze, siblingKey: srcKey, ...meta });
+      // D123 修订 4（Anki 语义）：不同编号（c1/c2…）＝不同的卡，同编号的多个空＝同一张卡一起遮；
+      // 只有一个编号＝单卡（clozeOrds 留空＝遮全部，与旧行为逐字节一致）。
+      const ords = parseCloze(cloze).ords;
+      if (ords.length <= 1) {
+        const clozeId = await createSingleCard({ front: cloze, back: p.back, cardType: "cloze", cloze, siblingKey: srcKey, ...meta });
+        eventBus.emit("cards/changed");
+        setManualOpen(false);
+        setManualImage(null);
+        showToast("卡片已创建，可在复习视图查看");
+        return clozeId;
+      }
+      const groupKey = srcKey ?? `act:cloze-${crypto.randomUUID()}`;
+      let firstId: string | null = null;
+      for (let i = 0; i < ords.length; i++) {
+        const id = await createSingleCard({ front: cloze, back: p.back, cardType: "cloze", cloze, cardOrd: i, clozeOrds: [ords[i]], siblingKey: groupKey, ...meta });
+        if (!firstId) firstId = id;
+      }
       eventBus.emit("cards/changed");
       setManualOpen(false);
       setManualImage(null);
-      showToast("卡片已创建，可在复习视图查看");
-      return clozeId;
+      showToast(`已创建 ${ords.length} 张挖空卡（每个编号一张）`);
+      return firstId;
     }
     const qaId = await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: srcKey, ...meta });
     eventBus.emit("cards/changed");

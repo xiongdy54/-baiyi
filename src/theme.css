@@ -7829,15 +7829,12 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-chev-btn:hover { color: var(--text-primary); background: var(--grey-1); }
 .wb-manual-toggle { padding: 0; }
 .wb-manual-toggle .wb-title { cursor: pointer; }
-/* 两区区分：手动区＝paper 底；AI 区＝略深的 grey-1 底 + 顶部 ink 实线分界，一眼看出是两个模块 */
-.wb-manual { background: var(--paper); }
-.wb-ai { background: color-mix(in srgb, var(--grey-1) 55%, var(--paper)); border-top: 1px solid var(--text-primary); }
-.wb-ai .wb-head { border-bottom-color: var(--border-subtle); }
-.side-dock[data-placement="bottom"] .wb-ai { border-top: 0; border-left: 1px solid var(--text-primary); }
+/* 两区以一条细线分界（不以底色区分）：手动区与 AI 区同为 paper 底 */
+.wb-ai { border-top: 1px solid var(--border-strong); }
+.side-dock[data-placement="bottom"] .wb-ai { border-top: 0; border-left: 1px solid var(--border-strong); }
 .wb-manual-body { border-bottom: 0; }
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-tabs,
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-chev-btn { display: none; }
-.wb-ai .wb-field, .wb-ai .wb-free textarea, .wb-composer textarea { background: var(--paper); }
 
 /* 字段：一行起步，clip 高度由 useGrowBox 设定并过渡；框线在外壳，聚焦只变 accent */
 .wb-fields { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
@@ -8007,3 +8004,90 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-field .markdown-editor { min-height: 0; }
 .wb-field .markdown-editor-compact .ProseMirror { min-height: 1.6em; }
 .wb-manual-body { gap: var(--sp-2); padding-top: var(--sp-2); }
+
+/* ==========================================================================
+   D123 修订 4（用户 2026-10-10）
+   · 两区同底色；标题行统一：等宽标题列（手动制卡 / AI 助手 对齐）+ 页签同起点 + 右端图标钮
+   · 手动区收起/展开同一套 collapse-clip（双向过渡）
+   · 图片挖空编辑器关闭钮：右栏是 paper 底，原浅色描边/图标看不见 → 改墨色
+   · 填空工具行 / 填空输入框
+   ========================================================================== */
+.wb-head { gap: 0; }
+.wb-title {
+  flex: none;
+  width: 5.2em;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-helper);
+  white-space: nowrap;
+}
+.wb-manual-toggle { width: 5.2em; flex: none; justify-content: flex-start; }
+.wb-manual-toggle .wb-title { width: auto; }
+.wb-tabs, .dock-tabs { margin-left: 0; gap: 2px; }
+.wb-tabs button, .dock-tabs > button[role="tab"] { padding: 0 var(--sp-3); font-size: var(--fs-secondary); }
+.wb-tabs button.on, .dock-tabs > button[role="tab"].on { color: var(--text-primary); font-weight: 600; }
+.wb-tabs button.on::after, .dock-tabs > button[role="tab"].on::after { left: var(--sp-3); right: var(--sp-3); }
+.wb-chev-btn { width: 22px; height: 22px; margin-right: -4px; }
+
+/* 手动区折叠：clip 吃 flex 空间，body 内部滚动 */
+.wb-manual-clip { flex: 1; min-height: 0; }
+.wb-manual-clip > .collapse-inner { display: flex; flex-direction: column; }
+.wb-manual-clip .wb-manual-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.wb-manual-clip:not(.is-open) > .collapse-inner { visibility: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  .wb-manual-clip > .collapse-inner { transition: visibility 0s; }
+  .wb-manual-clip:not(.is-open) > .collapse-inner { transition: visibility 0s var(--dur-panel); }
+}
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-manual-clip { display: none; }
+
+/* 图片挖空编辑器：右栏 paper 底上的关闭钮 */
+.occlusion-editor-layer .image-focus-close {
+  color: var(--text-primary);
+  background: var(--paper);
+  border-color: var(--border-strong);
+  z-index: 2;
+}
+.occlusion-editor-layer .image-focus-close:hover { background: var(--grey-1); border-color: var(--text-primary); }
+
+/* 填空 */
+.wb-cloze-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  height: 1.6em;
+  min-height: 1.6em;
+  max-height: 168px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-secondary);
+  line-height: 1.6;
+  resize: none;
+  overflow-y: hidden;
+  outline: none;
+}
+.wb-cloze-input::placeholder { color: var(--text-placeholder); }
+@media (prefers-reduced-motion: no-preference) {
+  .wb-cloze-input { transition: height var(--dur-panel) var(--ease); }
+}
+.wb-cloze-bar { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.wb-cloze-btn {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wb-cloze-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
+.wb-cloze-btn:disabled { color: var(--text-placeholder); border-color: var(--border-subtle); cursor: default; }
+.wb-cloze-stat { margin-left: auto; font-size: var(--fs-meta); color: var(--text-helper); white-space: nowrap; }
+@media (prefers-reduced-motion: no-preference) {
+  .wb-cloze-btn { transition: background-color var(--dur) var(--ease-out-soft), border-color var(--dur) var(--ease-out-soft), color var(--dur) var(--ease-out-soft); }
+}

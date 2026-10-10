@@ -96,13 +96,18 @@ export default function CardDock({
             )}
           </button>
         </header>
-        <div className="wb-manual-body" hidden={manualCollapsed}>
-          {manual}
+        {/* 收起/展开同一套 collapse-clip（grid 0fr↔1fr）：两个方向都有过渡；表单保持挂载，收起态 visibility 延后隐藏 */}
+        <div className={`collapse-clip wb-manual-clip${manualCollapsed ? "" : " is-open"}`} aria-hidden={manualCollapsed}>
+          <div className="collapse-inner">
+            <div className="wb-manual-body" data-testid="wb-manual-body">
+              {manual}
+            </div>
+          </div>
         </div>
       </section>
       <section className="wb-ai" aria-label="AI">
         <header className="wb-head wb-ai-head">
-          <span className="wb-title">AI</span>
+          <span className="wb-title">AI 助手</span>
           <div className="dock-tabs" role="tablist" aria-label="AI 页签" data-testid="dock-tabs">
             <button
               type="button"

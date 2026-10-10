@@ -5,14 +5,14 @@
 // 纯移动，逻辑零改动）——CardDock 手动态直接渲染它。默认导出 `ManualCardEditor` 保留为
 // 「modal 包装 + ManualCardForm」：**图片挖空**（imageOcclusion，来自图片聚焦工具条）继续走
 // modal（大图预览需要幅面），其余三模式走 dock——m6 系列图片挖空断言零迁移。
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { cardsApi, similaritySearch } from "../lib/cards";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { cardsApi, needsDateStamp, parseCloze, similaritySearch } from "../lib/cards";
 import { bigramJaccard } from "../lib/disambiguateCore.mjs";
 import { PRECHECK_K, answerDiffers, clipText, manualPrecheckText, shouldRunPrecheck } from "../lib/disambiguateUi";
 import { UDC_LEAVES, UDC_MAX, UDC_OTHER, udcLabel } from "../lib/udc";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { attachRipple, settle } from "../lib/press";
-import { useGrowBox } from "../lib/autoGrow";
+import { growTextarea, useGrowBox } from "../lib/autoGrow";
 import { IconChevronDown, IconClose } from "./icons";
 import OcclusionShapes from "./OcclusionShapes";
 import MarkdownEditor from "./editor/MarkdownEditor";
@@ -95,6 +95,120 @@ function GrowField({
   );
 }
 
+/** D123 修订 4：本次运行内记住「上一张手动卡」的领域——同一份材料连续制卡时领域几乎不变（新表单自动沿用，可改） */
+let lastManualDomain: string[] = [];
+
+/** Anki 语义的挖空标记：编号取现有最大值 +1（新题）或沿用最大值（同题多空） */
+function nextClozeOrd(text: string, sameCard: boolean): number {
+  const ords = parseCloze(text).ords;
+  const max = ords.length ? ords[ords.length - 1] : 0;
+  return sameCard ? Math.max(1, max) : max + 1;
+}
+
+/** 以选区（textarea 的 selectionStart/End）包上 {{cN::…}}；返回新文本与新选区 */
+function wrapCloze(text: string, start: number, end: number, ord: number): { text: string; caret: [number, number] } | null {
+  if (start === end) return null;
+  const inner = text.slice(start, end);
+  const open = `{{c${ord}::`;
+  const next = text.slice(0, start) + open + inner + "}}" + text.slice(end);
+  return { text: next, caret: [start + open.length, start + open.length + inner.length] };
+}
+
+/** 取消挖空：选区/光标落在某个 {{cN::x}} 内 → 还原成 x（只拆一个，最内层命中者） */
+function unwrapCloze(text: string, pos: number): { text: string; caret: number } | null {
+  const re = /\{\{c\d+::([\s\S]*?)(?:::[\s\S]*?)?\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (pos >= m.index && pos <= m.index + m[0].length) {
+      return { text: text.slice(0, m.index) + m[1] + text.slice(m.index + m[0].length), caret: m.index + m[1].length };
+    }
+  }
+  return null;
+}
+
+/** 填空字段：纯文本 textarea（能可靠读写选区），一行起步随内容伸缩；工具行＝挖空 / 同题挖空 / 取消挖空 + 实时「N 张卡 · M 个空」 */
+function ClozeField({ value, onChange, onPick }: { value: string; onChange: (v: string) => void; onPick?: { label: string; get: () => string | null | undefined } }) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  const pendingCaret = useRef<[number, number] | null>(null);
+  const [hasSel, setHasSel] = useState(false);
+  const [inBlank, setInBlank] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    growTextarea(el, 168);
+    if (pendingCaret.current) {
+      el.focus();
+      el.setSelectionRange(pendingCaret.current[0], pendingCaret.current[1]);
+      pendingCaret.current = null;
+    }
+  }, [value]);
+  const sync = () => {
+    const el = ref.current;
+    if (!el) return;
+    setHasSel(el.selectionStart !== el.selectionEnd);
+    setInBlank(!!unwrapCloze(el.value, el.selectionStart));
+  };
+  const apply = (sameCard: boolean) => {
+    const el = ref.current;
+    if (!el) return;
+    const r = wrapCloze(value, el.selectionStart, el.selectionEnd, nextClozeOrd(value, sameCard));
+    if (!r) return;
+    pendingCaret.current = r.caret;
+    onChange(r.text);
+  };
+  const remove = () => {
+    const el = ref.current;
+    if (!el) return;
+    const r = unwrapCloze(value, el.selectionStart);
+    if (!r) return;
+    pendingCaret.current = [r.caret, r.caret];
+    onChange(r.text);
+  };
+  const ords = parseCloze(value).ords;
+  const blanks = (value.match(/\{\{c\d+::/g) ?? []).length;
+  // 工具钮 mousedown 阻止默认：点击不夺走 textarea 焦点，选区得以保留
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+  return (
+    <>
+      <GrowField pick={onPick ? { label: onPick.label, empty: "没有选区", get: onPick.get, apply: (t) => onChange(t) } : undefined}>
+        <textarea
+          ref={ref}
+          className="wb-cloze-input"
+          rows={1}
+          value={value}
+          aria-label="挖空文本"
+          placeholder="输入一段话，选中文字后点「挖空」"
+          onChange={(e) => onChange(e.target.value)}
+          onSelect={sync}
+          onKeyUp={sync}
+          onMouseUp={sync}
+          onKeyDown={(e) => {
+            // Anki 快捷键：Ctrl+Shift+C 挖空（新题）；Ctrl+Alt+Shift+C 同题挖空
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "c") {
+              e.preventDefault();
+              apply(e.altKey);
+            }
+          }}
+        />
+      </GrowField>
+      <div className="wb-cloze-bar">
+        <button type="button" className="wb-cloze-btn" disabled={!hasSel} onMouseDown={keep} onClick={() => apply(false)} title="选中文字后点击：新建一题（c1、c2…，Ctrl+Shift+C）">
+          挖空
+        </button>
+        <button type="button" className="wb-cloze-btn" disabled={!hasSel || ords.length === 0} onMouseDown={keep} onClick={() => apply(true)} title="与上一个挖空同属一题，复习时一起遮（Ctrl+Alt+Shift+C）">
+          同题挖空
+        </button>
+        <button type="button" className="wb-cloze-btn" disabled={!inBlank} onMouseDown={keep} onClick={remove} title="光标放在某个挖空里，点击还原为普通文字">
+          取消挖空
+        </button>
+        <span className="wb-cloze-stat mono" aria-live="polite">
+          {blanks === 0 ? "尚无挖空" : `${ords.length} 张卡 · ${blanks} 个空`}
+        </span>
+      </div>
+    </>
+  );
+}
+
 /** 手动制卡的提交载荷（原在 Reader.tsx，Task 4 随组件一并搬出） */
 export interface ManualCardPayload {
   mode: "qa" | "reverse" | "cloze" | "imageOcclusion";
@@ -174,11 +288,17 @@ export function ManualCardForm({
   const [priority, setPriority] = useState(50);
   const [saving, setSaving] = useState(false);
   // M5：与 AI 制卡同构的元数据字段（领域标签对齐 R17：≤2 个、首个为主）
-  const [domain, setDomain] = useState<string[]>([]);
+  const [domain, setDomainRaw] = useState<string[]>(() => (variant === "dock" ? lastManualDomain : []));
+  const setDomain = (v: string[]) => {
+    touched.current.domain = true;
+    setDomainRaw(v);
+  };
   const [contextPrefix, setContextPrefix] = useState("");
   const [mnemonic, setMnemonic] = useState("");
   const [knowledgePointId, setKnowledgePointId] = useState("");
   const [dateStamped, setDateStamped] = useState(false);
+  // D123 修订 4：自动填写——用户一旦手动动过某项就不再覆盖（touched 记在 ref，不触发渲染）
+  const touched = useRef({ domain: false, prefix: false, date: false });
   // v48.60（D101）：标签（初值 = 批注标签继承预填，可删）；v48.63（D107）：总开关关闭时恒空提交
   const tagsEnabled = useTagsEnabled();
   const [tags, setTags] = useState<string[]>(initialTags ?? []);
@@ -201,6 +321,21 @@ export function ManualCardForm({
     prevQuoteRef.current = quote;
     setFront((f) => (!f || f === prev ? quote : f));
   }, [quote]);
+
+  // D123 修订 4：自动填写（仅 dock 形态；用户动过的项不再覆盖）
+  //  · 标注日期：正反面命中「统计/版本/价格/政策/截至/目前/当前/最新」（与 L12 lint 同一正则）→ 自动勾选，不命中 → 取消
+  //  · 前缀：已选领域且前缀为空 → 取首个领域的名称（规则16：只能写领域/学科名）
+  //  · 领域：沿用上一张手动卡的领域（初值，见 lastManualDomain）
+  useEffect(() => {
+    if (variant !== "dock" || touched.current.date) return;
+    setDateStamped(needsDateStamp(`${front}\n${back}`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [front, back]);
+  useEffect(() => {
+    if (variant !== "dock" || touched.current.prefix) return;
+    setContextPrefix(domain.length ? `${udcLabel(domain[0])}:` : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [domain]);
 
   // D88 §4.3：主 CTA「创建卡片」涟漪（填充钮白名单成员；真实 pointerdown 驱动，reduce 不挂）
   const createBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -269,6 +404,7 @@ export function ManualCardForm({
       tags: tagsEnabled ? tags : []
     };
     const clozeText = mode === "cloze" ? toCloze(front) : undefined;
+    if (variant === "dock") lastManualDomain = domain;
     setHits(null);
     const newId = await onSave({
       mode,
@@ -300,7 +436,7 @@ export function ManualCardForm({
       ? Boolean(imageRegion) && Boolean(back.trim())
       : mode === "qa" || mode === "reverse"
         ? Boolean(front.trim()) && Boolean(back.trim())
-        : Boolean(front.trim());
+        : parseCloze(toCloze(front)).ords.length > 0;
 
   // D121 §4.1：相似已有卡预检面板（内联、不弹窗；每个 front 文本只出现一次）；modal / dock 两种形态共用
   const hitsPanel =
@@ -356,10 +492,8 @@ export function ManualCardForm({
         >
           {mode === "reverse" ? (
             <>
-              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="A 面 · 题面" label="A 面 · 题面" /></GrowField>
-              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="A 面 · 答案" label="A 面 · 答案" /></GrowField>
-              <GrowField><MdField minRows={1} value={bFront} onChange={setBFront} placeholder="B 面 · 题面（留空＝用 A 面答案反问）" label="B 面 · 题面" /></GrowField>
-              <GrowField><MdField minRows={1} value={bBack} onChange={setBBack} placeholder="B 面 · 答案（留空＝用 A 面题面）" label="B 面 · 答案" /></GrowField>
+              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="问题（制卡后另生成一张：以它为答案）" label="问题" /></GrowField>
+              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="答案（制卡后另生成一张：以它为问题）" label="答案" /></GrowField>
             </>
           ) : mode === "qa" ? (
             <>
@@ -367,10 +501,7 @@ export function ManualCardForm({
               <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案）" label="答案" /></GrowField>
             </>
           ) : mode === "cloze" ? (
-            <>
-              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="挖空文本：用 **粗体** 或〔括号〕包住答案" label="挖空文本" /></GrowField>
-              {front.trim() && <p className="wb-cloze-preview mono">{front.replace(/\*\*(.+?)\*\*/g, "〔$1〕")}</p>}
-            </>
+            <ClozeField value={front} onChange={setFront} onPick={onPickSelection ? { label: "带入选区", get: onPickSelection } : undefined} />
           ) : imageRegion ? (
             <>
               <div className="occlusion-stage occlusion-preview manual-region-preview">
@@ -403,7 +534,7 @@ export function ManualCardForm({
               )}
               <label className="wb-row" title="只能写领域/学科名，禁止泄漏答案（规则 16）">
                 <span className="wb-k">前缀</span>
-                <input className="wb-line" type="text" value={contextPrefix} onChange={(e) => setContextPrefix(e.target.value)} placeholder="例：统计:" />
+                <input className="wb-line" type="text" value={contextPrefix} onChange={(e) => { touched.current.prefix = true; setContextPrefix(e.target.value); }} placeholder="自动：取领域名称" />
               </label>
               <label className="wb-row" title="规则 7：克制使用">
                 <span className="wb-k">助记</span>
@@ -414,7 +545,7 @@ export function ManualCardForm({
                 <input className="wb-line" type="text" value={knowledgePointId} onChange={(e) => setKnowledgePointId(e.target.value)} placeholder="例：kp-中位数" />
               </label>
               <label className="wb-row wb-check" title="规则 19：统计数字 / 版本 / 价格等易变内容勾选，写入今日日期">
-                <input type="checkbox" checked={dateStamped} onChange={(e) => setDateStamped(e.target.checked)} />
+                <input type="checkbox" checked={dateStamped} onChange={(e) => { touched.current.date = true; setDateStamped(e.target.checked); }} />
                 <span>标注日期</span>
               </label>
             </div>

@@ -265,7 +265,7 @@ try {
   await cdp.eval(`document.querySelector('[data-testid="dock-tab-explain"]').click()`);
   await wait(300);
   const g1b = parseState(await cdp.eval(`JSON.stringify({
-    manualVisible: !document.querySelector('[data-card-dock] [data-testid="wb-manual-body"], [data-card-dock] .wb-manual-body')?.hidden,
+    manualVisible: !document.querySelector('[data-card-dock] [data-testid="wb-manual"]')?.classList.contains('is-collapsed'),
     manualMounted: !!document.querySelector('[data-card-dock] [data-testid="wb-manual"] .ProseMirror'),
     emptyExplain: !!document.querySelector('[data-dock-empty="explain"]')
   })`));

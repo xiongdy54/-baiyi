@@ -96,14 +96,12 @@ const saved = await evalJS(`(() => {
   [...document.querySelectorAll('[data-card-dock] .wb-tabs button')].find((b) => b.textContent === "翻转问答").click();
   return new Promise((res) => setTimeout(() => {
     const tas = [...document.querySelectorAll('[data-card-dock] textarea')];
-    if (tas.length < 4) { res('FIELDS=' + tas.length); return; }
+    if (tas.length < 2) { res('FIELDS=' + tas.length); return; }
     // React 受控组件必须用原型原生 setter 赋值（直接 ta.value= 会被值追踪器去重，onChange 不触发）
     const nativeSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
     const set = (ta, v) => { nativeSetter.call(ta, v); ta.dispatchEvent(new Event('input', { bubbles: true })); };
     set(tas[0], '统计: FSRSTEST 中位数是什么？');
-    set(tas[1], '排序后中间的数');
-    set(tas[2], '统计: FSRSTEST 排序后位于中间位置的数叫什么？');
-    set(tas[3], '中位数');
+    set(tas[1], '排序后中间的数');  // D123 修订 4：翻转问答只有两个框，反向卡由系统自动生成（问↔答互换）
     setTimeout(() => {
       const saveBtn = [...document.querySelectorAll('[data-card-dock] .form-actions button')].find((b) => b.textContent.trim() === '制卡');
       if (saveBtn.disabled) { res('BTN DISABLED'); return; }
@@ -120,7 +118,7 @@ const saved = await evalJS(`(() => {
 const savedParsed = parseState(saved);
 check("翻转问答创建了两张独立卡", savedParsed.count === 2, saved);
 check("两卡均为 qa 类型", savedParsed.types === "qa/qa", saved);
-check("两卡题面互为翻转", String(savedParsed.fronts).includes("中位数是什么") && String(savedParsed.fronts).includes("叫什么"), saved);
+check("两卡题面互为翻转", String(savedParsed.fronts).includes("中位数是什么") && String(savedParsed.fronts).includes("排序后中间的数"), saved);
 
 // 4) 播种两张测试卡（due 2000 年，保证排在用户真实卡之前）：
 //    ①普通 qa ②imageOcclusion；并断言复习端无「换面」类形态变化控件（v16 D18）
