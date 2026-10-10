@@ -1,5 +1,6 @@
-// v48.22 M16 批次 5：AI 推送引擎本地因子层（§6.4.1 两段式 E1）单元测试（纯 node，无 electron）
 // @runtime: node  @tier: 1  @gui: false  @id: AINEXT  @timeout: 120
+// 运行：node tests/ainextextract.test.cjs
+// v48.22 M16 批次 5：AI 推送引擎本地因子层（§6.4.1 两段式 E1）单元测试（纯 node，无 electron）
 // 契约：确定性（同输入同输出）、因子单调性、多样性降权、理由可验证、不修改入参
 const { scoreExtracts, explainExtract, rankExtracts, rankWithAI, rerankFingerprint } = require("../electron/aiNextExtract.js");
 
@@ -115,6 +116,32 @@ const fakeOrder = (order) => async () => JSON.stringify({ order });
   const fp1 = rerankFingerprint(aiItems);
   const fp2 = rerankFingerprint(aiItems.map((e, i) => (i === 0 ? { ...e, priority: 10 } : e)));
   check("指纹随候选变化（用于缓存失效）", fp1 !== fp2 && fp1 === rerankFingerprint(aiItems), "变/不变", `${fp1 === fp2}/${fp1 === rerankFingerprint(aiItems)}`);
+
+  // ---- v48.80（D124 / 设计稿 §9.5 E2）：kpFactorOf 接入 ----
+  {
+    const base = [
+      mk(`e-1`, { libraryItemId: `bA`, priority: 10 }),
+      mk(`e-2`, { libraryItemId: `bB`, priority: 20 }),
+      mk(`e-3`, { libraryItemId: `bC`, priority: 30 })
+    ];
+    const plain = rankExtracts(base, NOW);
+    const withOne = rankExtracts(base, NOW, { kpFactorOf: () => 1 });
+    check(
+      `kpFactorOf 恒返回 1 时排序与不传 opts 完全相同`,
+      JSON.stringify(plain.map((x) => x.id)) === JSON.stringify(withOne.map((x) => x.id)) &&
+        JSON.stringify(plain.map((x) => x.engineScore)) === JSON.stringify(withOne.map((x) => x.engineScore)),
+      true,
+      { plain: plain.map((x) => [x.id, x.engineScore]), withOne: withOne.map((x) => [x.id, x.engineScore]) }
+    );
+    const boosted = rankExtracts(base, NOW, { kpFactorOf: (id) => (id === `e-3` ? 1.3 : id === `e-1` ? 0.85 : 1) });
+    check(
+      `kpFactor 1.3 的摘录排在 0.85 之前（其余因子相同）`,
+      boosted.findIndex((x) => x.id === `e-3`) < boosted.findIndex((x) => x.id === `e-1`),
+      true,
+      boosted.map((x) => [x.id, x.engineScore])
+    );
+    check(`不传 opts 时排序保持本地因子原语义（E1 行为不变）`, plain[0].id === `e-1`, `e-1`, plain.map((x) => x.id));
+  }
 
   console.log(`\n==== ainextextract.test：${pass} 通过 / ${fail} 失败 ====`);
   process.exit(fail === 0 ? 0 : 1);

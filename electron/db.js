@@ -4182,6 +4182,13 @@ function computeCardCounts(nowTs, opts) {
   return out;
 }
 
+// v48.80（D124 / 设计稿 §9.5 E2）：KP 就绪度因子缓存（派生数据，learnerRefresh 刷新成功后写入；
+// 读侧 computeSessionQueue 只在 app.learner.enabled !== false 时使用，否则一律因子 1）
+let kpFactorMap = null;
+function setKpFactorMap(map) {
+  kpFactorMap = map instanceof Map ? map : null;
+}
+
 function computeSessionQueue(nowTs, opts) {
   const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
   const o = opts || {};
@@ -4225,7 +4232,12 @@ function computeSessionQueue(nowTs, opts) {
     // v48.22（D58/D59）：实验引擎生效时按**本地因子**重排（§6.4.1 两段式 E1，确定性、零 IO）；
     // 默认引擎保持 SQL 原序（priority ASC, topic_next_at ASC），存量行为零变更
     if (sessionEngine === ENGINE_AI) {
-      due = rankExtracts(due, now);
+      // v48.80（D124 / 设计稿 §9.5 E2）：KP 就绪度因子——总开关关闭（lmOn=false）时一律因子 1（E1 原行为）。
+      // 开关口径与 learnerRefresh.learnerEnabled() 同源（db.js 不能 require learnerRefresh，两边改动须同步）。
+      const lmOn = readSettings().app?.learner?.enabled !== false;
+      due = rankExtracts(due, now, {
+        kpFactorOf: (id) => (lmOn && kpFactorMap && kpFactorMap.has(String(id)) ? kpFactorMap.get(String(id)) : 1)
+      });
       // E1 的 AI 层：消费主进程写下的重排缓存（指纹不符＝候选已变 ⇒ 忽略，回退本地序）
       due = applyAiRerank(due, readAiRerank());
     }
@@ -7603,5 +7615,7 @@ module.exports = {
   saveRecRun,
   listRecentRunKeys,
   resolveCardKpMap,
-  learnerFacts
+  learnerFacts,
+  // v48.80（D124 / §9.5 E2）：KP 就绪度因子缓存写入（learnerRefresh 调用）
+  setKpFactorMap
 };

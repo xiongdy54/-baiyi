@@ -17,6 +17,9 @@ import {
 } from "../lib/knowledge";
 import { UDC_LEAVES, udcLabel } from "../lib/udc";
 import { IconClose } from "./icons";
+// v48.80（D124 / 设计稿 §11.7）：KP 掌握等级标签（数据来自 learner:kpLevels；总开关关闭时整体不显示）
+import { learnerApi, type KpLevelRow } from "../lib/learner";
+import { learnerStrings } from "../lib/learnerStrings";
 
 type Selected = KnowledgePoint | null;
 
@@ -146,6 +149,43 @@ export default function KnowledgeManager() {
     },
     []
   );
+
+  // v48.80（D124 §11.7）：KP 五级（L0–L4）。learner:kpLevels 返回 disabled（总开关关闭）时不显示。
+  const [levels, setLevels] = useState<Record<string, KpLevelRow> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    learnerApi
+      .kpLevels()
+      .then((r) => {
+        if (cancelled) return;
+        if (r && !r.disabled && Array.isArray(r.rows)) {
+          const map: Record<string, KpLevelRow> = {};
+          for (const row of r.rows) map[row.kpId] = row;
+          setLevels(map);
+        } else {
+          setLevels(null);
+        }
+      })
+      .catch(() => !cancelled && setLevels(null));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const KM = learnerStrings();
+  const levelChipOf = (kpId: string): string | null => {
+    if (!levels) return null;
+    const row = levels[kpId];
+    if (!row) return null;
+    const lv = Math.min(4, Math.max(0, Math.round(row.level)));
+    return KM.km.levelNames[lv] + (row.fading ? ` ${KM.km.fadingSuffix}` : "");
+  };
+  const metricsLineOf = (kpId: string): string | null => {
+    if (!levels) return null;
+    const row = levels[kpId];
+    const m = (row?.metrics || {}) as { n?: number; meanR?: number; stableRatio?: number; hasDeep?: boolean };
+    if (!row || !m.n) return null;
+    return KM.km.metricsLine(m.n, Math.round((m.meanR || 0) * 100), Math.round((m.stableRatio || 0) * 100), Boolean(m.hasDeep));
+  };
 
   const loadProposals = useCallback(async () => {
     setProposals(await knowledgeApi.listProposals({ status: "pending" }));
@@ -425,6 +465,7 @@ export default function KnowledgeManager() {
                 <span className="mono kmg-row-meta">
                   {p.domainId ? udcLabel(p.domainId) || p.domainId : ""}
                   {statusChip(p.status) ? ` · ${statusChip(p.status)}` : ""}
+                  {levelChipOf(p.id) ? ` · ${levelChipOf(p.id)}` : ""}
                 </span>
               </div>
               {(p.aliases || []).length > 0 && <div className="kmg-row-alias">别名：{(p.aliases || []).join(" / ")}</div>}
@@ -445,6 +486,7 @@ export default function KnowledgeManager() {
                   {selected.mergedInto ? " · 已并入" : ""}
                 </span>
               </div>
+              {metricsLineOf(selected.id) && <p className="kmg-desc learner-km-line">{metricsLineOf(selected.id)}</p>}
               {selected.description && <p className="kmg-desc">{selected.description}</p>}
 
               <div className="kmg-actions">

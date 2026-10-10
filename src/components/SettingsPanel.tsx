@@ -935,6 +935,17 @@ function ExtractReviewSection() {
   const [cfg, setCfg] = useState<{ mergeIntoReview: boolean; interleave: InterleaveMode; engine: ExtractEngine } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const [rerankNote, setRerankNote] = useState<string | null>(null);
+  // v48.80（D124 / 设计稿 §9.5）：E2 知识点就绪度说明随学习者模型总开关显示
+  const [learnerOn, setLearnerOn] = useState(true);
+  const frontierNote = learnerOn ? learnerStringsSafe().settings.frontierReady : learnerStringsSafe().settings.frontierOff;
+  useEffect(() => {
+    void learnerSettings.read().then((s) => setLearnerOn(s.enabled));
+    const off = eventBus.on("settings/changed", (p) => {
+      if ((p as { scope?: string; key?: string } | undefined)?.key !== "learner") return;
+      void learnerSettings.read().then((s) => setLearnerOn(s.enabled));
+    });
+    return off;
+  }, []);
   const [busyRerank, setBusyRerank] = useState(false);
   async function runRerank() {
     setBusyRerank(true);
@@ -995,7 +1006,7 @@ function ExtractReviewSection() {
               摘录推送引擎
               <SettingsInfo label="摘录推送引擎">
                 实验引擎按本地因子（优先级/逾期/搁置/同书连击）排序并给逐条可验证理由；AI 重排只影响处理顺序、
-                经本地裁决过滤；Frontier 因子未接入。切回 SuperMemo 无损。
+                经本地裁决过滤；{frontierNote}。切回 SuperMemo 无损。
               </SettingsInfo>
             </span>
             <Dropdown

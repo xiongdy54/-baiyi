@@ -115,6 +115,7 @@ async function refresh({ force = false } = {}) {
         status.phase = "stopped";
       } else {
         status.phase = "save";
+        await updateKpFactorMap(); // §9.5 E2：每次 refresh 成功后重算摘录的 KP 就绪度因子
         await stepSave();
         anyStepRan = true;
       }
@@ -1333,6 +1334,49 @@ function lookupKeysForEvent(payload, lang) {
 async function stepSave() {
   await learnerDb.save();
   status.lastRefreshAt = Date.now();
+}
+
+// ---------- E2（设计稿 §9.5）：摘录的 KP 就绪度因子 ----------
+// kpFactor = 摘录没有 KP（extract.kpIds 为空）→ 不放进 map（等于 1）
+//          = 否则 0.85 + 0.45 × readiness(摘录 KP 集合)   // 范围 0.85..1.30
+// readiness 同 §7.2：把摘录的 KP 当作单元 KP 计算（P = 各 KP 的 prerequisite 前置并集；P 为空 = 0.7）。
+async function updateKpFactorMap() {
+  if (!learnerEnabled()) {
+    dbModule.setKpFactorMap(null);
+    return;
+  }
+  try {
+    const facts = await loadFacts();
+    const extractKpIds = computeExtractKpIds(facts);
+    const scores = new Map(
+      (await learnerDb.all("SELECT kp_id AS kpId, score FROM kp_states")).map((r) => [String(r.kpId), Number(r.score) || 0])
+    );
+    const prereqsByKp = new Map();
+    for (const r of facts.relations || []) {
+      if (String(r.type) !== "prerequisite") continue;
+      const to = String(r.toId);
+      if (!prereqsByKp.has(to)) prereqsByKp.set(to, []);
+      prereqsByKp.get(to).push(String(r.fromId));
+    }
+    const map = new Map();
+    for (const [exId, kpIds] of extractKpIds) {
+      if (!kpIds || kpIds.length === 0) continue;
+      const prereqSet = new Set();
+      for (const k of kpIds) for (const p of prereqsByKp.get(k) || []) prereqSet.add(p);
+      let readiness;
+      if (prereqSet.size === 0) {
+        readiness = P.READINESS_EMPTY;
+      } else {
+        let sum = 0;
+        for (const p of [...prereqSet].sort()) sum += Math.min(1, (scores.get(p) || 0) / P.READY_SCORE);
+        readiness = sum / prereqSet.size;
+      }
+      map.set(exId, 0.85 + 0.45 * readiness);
+    }
+    dbModule.setKpFactorMap(map);
+  } catch {
+    dbModule.setKpFactorMap(null); // 因子算不出＝一律 1（E1 原行为）
+  }
 }
 
 // ---------- buildSnapshot（设计稿 §9.2） ----------

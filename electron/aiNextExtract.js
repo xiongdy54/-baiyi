@@ -25,8 +25,9 @@ function clamp(v, lo, hi) {
  *  staleness    = 1 + min(postponeCount, 10)/20（搁置越久温和加分，防永久沉底）
  *  depthBonus   = 子摘录（更具体的最小单元）略优先
  *  diversity    = 同一本书的第 n 条按 1/(1 + 0.35n) 降权（防隧道）
+ *  kpFactor     = E2（D124 / 设计稿 §9.5）可选的 KP 就绪度因子，0.85..1.30；opts.kpFactorOf 未传时恒 1（E1 行为逐字节不变）
  */
-function scoreExtracts(items, nowTs) {
+function scoreExtracts(items, nowTs, opts = {}) {
   const now = Number(nowTs) || Date.now();
   const list = Array.isArray(items) ? items : [];
   const scored = list.map((e) => {
@@ -39,10 +40,12 @@ function scoreExtracts(items, nowTs) {
     const dueBoost = 1 + Math.min(overdueDays, STALE_WINDOW_DAYS) / STALE_WINDOW_DAYS;
     const staleness = 1 + Math.min(postponeCount, POSTPONE_SATURATION) / 20;
     const depthBonus = depth > 1 ? 1.05 : 1;
+    // E2：KP 就绪度因子（learnerRefresh 刷新后经 db.setKpFactorMap 注入；不传 opts 时与原实现逐字节一致）
+    const kf = typeof opts.kpFactorOf === "function" ? Number(opts.kpFactorOf(e.id)) || 1 : 1;
     return {
       id: String(e.id),
-      base: userPriority * dueBoost * staleness * depthBonus,
-      factors: { userPriority, dueBoost, staleness, depthBonus, overdueDays, postponeCount, priority, depth },
+      base: userPriority * dueBoost * staleness * depthBonus * kf,
+      factors: { userPriority, dueBoost, staleness, depthBonus, kpFactor: kf, overdueDays, postponeCount, priority, depth },
       dueAt,
       libraryItemId: e.libraryItemId ?? null,
       item: e
@@ -75,9 +78,9 @@ function explainExtract(entry) {
   return `${bits.join(" · ")}｜得分 ${entry.score.toFixed(3)}`;
 }
 
-/** 对外出口：排序并附带理由（不改变调用方数据，返回浅包装） */
-function rankExtracts(items, nowTs) {
-  return scoreExtracts(items, nowTs).map((entry) => ({
+/** 对外出口：排序并附带理由（不改变调用方数据，返回浅包装）；opts 原样传给 scoreExtracts（E2 kpFactorOf） */
+function rankExtracts(items, nowTs, opts = {}) {
+  return scoreExtracts(items, nowTs, opts).map((entry) => ({
     ...entry.item,
     engineScore: Number(entry.score.toFixed(6)),
     engineReason: explainExtract(entry)
