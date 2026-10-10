@@ -13,7 +13,6 @@ export type DockTab = "explain" | "cards";
 export default function CardDock({
   tab,
   onTabChange,
-  meta,
   placement,
   dockOpen,
   manualCollapsed,
@@ -25,8 +24,6 @@ export default function CardDock({
   /** 活动页签（显式点击 > 内容派生，派生在宿主 hook） */
   tab: DockTab;
   onTabChange: (tab: DockTab) => void;
-  /** 手动区标题行右侧 meta（mono）：《材料名》——有则显，flex 收缩省略号 */
-  meta?: string;
   placement: WorkbenchDockPlacement;
   dockOpen: boolean;
   /** 手动区是否收起为仅标题行（表单仍挂载） */
@@ -88,7 +85,6 @@ export default function CardDock({
               )}
             </span>
           </button>
-          {meta ? <span className="side-dock-meta mono">《{meta}》</span> : null}
         </header>
         <div className="wb-manual-body" hidden={manualCollapsed}>
           {manual}

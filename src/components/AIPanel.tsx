@@ -3,7 +3,8 @@
 // v48.51（D91 §5.2/§5.5）：explain 分支首行加三态「解读方式」切换器（等待回答时也可切换，切换即重跑；
 // 重跑逻辑在宿主 changeExplainMode）+ 答案尾部的事后建议轻提示行（仅 auto 路由进 ste 且 points=0 且
 // 改写≈原文时出现——用户多半更想要概念解释）。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { growTextarea } from "../lib/autoGrow";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -148,12 +149,8 @@ export function ExplainThread({ items, onMake }: { items: AskThreadItem[]; onMak
 export function ChatComposer({ busy, onSend }: { busy: boolean; onSend: (q: string) => void }) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement | null>(null);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto";
-    const chrome = el.offsetHeight - el.clientHeight; // 上下边框
-    el.style.height = `${Math.min(el.scrollHeight + chrome, 120)}px`;
+  useLayoutEffect(() => {
+    if (ref.current) growTextarea(ref.current, 120);
   }, [text]);
   const send = () => {
     const q = text.trim();

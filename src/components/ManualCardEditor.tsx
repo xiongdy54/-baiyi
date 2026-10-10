@@ -5,13 +5,14 @@
 // 纯移动，逻辑零改动）——CardDock 手动态直接渲染它。默认导出 `ManualCardEditor` 保留为
 // 「modal 包装 + ManualCardForm」：**图片挖空**（imageOcclusion，来自图片聚焦工具条）继续走
 // modal（大图预览需要幅面），其余三模式走 dock——m6 系列图片挖空断言零迁移。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cardsApi, similaritySearch } from "../lib/cards";
 import { bigramJaccard } from "../lib/disambiguateCore.mjs";
 import { PRECHECK_K, answerDiffers, clipText, manualPrecheckText, shouldRunPrecheck } from "../lib/disambiguateUi";
 import { UDC_LEAVES, UDC_MAX, UDC_OTHER, udcLabel } from "../lib/udc";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { attachRipple, settle } from "../lib/press";
+import { useGrowBox } from "../lib/autoGrow";
 import { IconChevronDown, IconClose } from "./icons";
 import OcclusionShapes from "./OcclusionShapes";
 import MarkdownEditor from "./editor/MarkdownEditor";
@@ -28,24 +29,69 @@ function MdField({
   value,
   onChange,
   placeholder,
-  label
+  label,
+  minRows = 2
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   label?: string;
+  minRows?: number;
 }) {
   return (
     <MarkdownEditor
       value={value}
       variant="compact"
       toolbar={false}
-      minRows={2}
+      minRows={minRows}
       placeholder={placeholder}
       ariaLabel={label}
       onChange={onChange}
       onCommit={() => {}}
     />
+  );
+}
+
+
+/** 制卡台输入字段外壳（D123 修订）：默认一行、随内容伸缩（高度过渡由 CSS 的 --dur-panel/--ease 承担）；
+    右下角可选「带入…」悬停钮（设计稿绿色小字）：点击把外部文本写入该字段。 */
+function GrowField({
+  children,
+  pick
+}: {
+  children: ReactNode;
+  pick?: { label: string; empty: string; get: () => string | null | undefined; apply: (t: string) => void };
+}) {
+  const [clipRef, innerRef] = useGrowBox<HTMLDivElement, HTMLDivElement>(168);
+  const [miss, setMiss] = useState(false);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
+  return (
+    <div className="wb-field">
+      <div className="wb-field-clip" ref={clipRef}>
+        <div className="wb-field-inner" ref={innerRef}>{children}</div>
+      </div>
+      {pick && (
+        <button
+          type="button"
+          className={`wb-pick${miss ? " is-miss" : ""}`}
+          // 不抢焦点/选区：mousedown 阻止默认，读选区时阅读区选区仍在
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            const t = (pick.get() ?? "").trim();
+            if (t) {
+              pick.apply(t);
+              return;
+            }
+            setMiss(true);
+            if (timer.current) window.clearTimeout(timer.current);
+            timer.current = window.setTimeout(() => setMiss(false), 1400);
+          }}
+        >
+          {miss ? pick.empty : pick.label}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -87,8 +133,14 @@ export function ManualCardForm({
   onCancel,
   onSave,
   onDisambiguate,
+  onPickSelection,
+  onPickAnswer,
   variant = "modal"
 }: {
+  /** D123 修订：「带入选区」——返回阅读区当前选区文字（无＝空） */
+  onPickSelection?: () => string | null | undefined;
+  /** D123 修订：「带入 AI 回答」——返回最近一条 AI 回答（无＝空） */
+  onPickAnswer?: () => string | null | undefined;
   /** D123：dock＝制卡台常驻表单（隐藏「取消」、高级字段收进「更多」）；modal＝原弹窗形态 */
   variant?: "modal" | "dock";
   quote: string;
@@ -285,9 +337,10 @@ export function ManualCardForm({
       ["cloze", "填空题"],
       ["imageOcclusion", "图片挖空"]
     ];
+    const pickSel = onPickSelection ? { label: "带入选区", empty: "没有选区", get: onPickSelection, apply: setFront } : undefined;
+    const pickAns = onPickAnswer ? { label: "带入 AI 回答", empty: "暂无 AI 回答", get: onPickAnswer, apply: setBack } : undefined;
     return (
       <>
-        {quote && <div className="wb-quote" title={quote}>{quote}</div>}
         <div className="wb-seg" role="tablist" aria-label="卡片类型" data-testid="manual-types">
           {MODES.map(([m, label]) => (
             <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "on" : undefined} onClick={() => setMode(m)}>
@@ -306,19 +359,19 @@ export function ManualCardForm({
         >
           {mode === "reverse" ? (
             <>
-              <MdField value={front} onChange={setFront} placeholder="A 面 · 题面（建议「领域: 问题」）" label="A 面 · 题面" />
-              <MdField value={back} onChange={setBack} placeholder="A 面 · 答案（≤15 字）" label="A 面 · 答案" />
-              <MdField value={bFront} onChange={setBFront} placeholder="B 面 · 题面（留空＝用 A 面答案反问）" label="B 面 · 题面" />
-              <MdField value={bBack} onChange={setBBack} placeholder="B 面 · 答案（留空＝用 A 面题面）" label="B 面 · 答案" />
+              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="A 面 · 题面" label="A 面 · 题面" /></GrowField>
+              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="A 面 · 答案" label="A 面 · 答案" /></GrowField>
+              <GrowField><MdField minRows={1} value={bFront} onChange={setBFront} placeholder="B 面 · 题面（留空＝用 A 面答案反问）" label="B 面 · 题面" /></GrowField>
+              <GrowField><MdField minRows={1} value={bBack} onChange={setBBack} placeholder="B 面 · 答案（留空＝用 A 面题面）" label="B 面 · 答案" /></GrowField>
             </>
           ) : mode === "qa" ? (
             <>
-              <MdField value={front} onChange={setFront} placeholder="正面（建议「领域: 问题」）" label="题面" />
-              <MdField value={back} onChange={setBack} placeholder="背面（答案，≤15 字）" label="答案" />
+              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（问题）" label="题面" /></GrowField>
+              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案）" label="答案" /></GrowField>
             </>
           ) : mode === "cloze" ? (
             <>
-              <MdField value={front} onChange={setFront} placeholder="挖空文本：用 **粗体** 或〔括号〕包住答案" label="挖空文本" />
+              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="挖空文本：用 **粗体** 或〔括号〕包住答案" label="挖空文本" /></GrowField>
               {front.trim() && <p className="wb-cloze-preview mono">{front.replace(/\*\*(.+?)\*\*/g, "〔$1〕")}</p>}
             </>
           ) : imageRegion ? (
@@ -327,8 +380,8 @@ export function ManualCardForm({
                 <img src={imageRegion.dataUrl} alt="" className="occlusion-img" />
                 <OcclusionShapes occlusion={{ shapes: [imageRegion.shape] }} cardOrd={0} />
               </div>
-              <MdField value={front} onChange={setFront} placeholder="正面（默认「图中遮挡区域对应的是什么？」）" label="正面（图片挖空）" />
-              <MdField value={back} onChange={setBack} placeholder="背面（答案，必填）" label="背面（图片挖空）" />
+              <GrowField><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（默认「图中遮挡区域对应的是什么？」）" label="正面（图片挖空）" /></GrowField>
+              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案，必填）" label="背面（图片挖空）" /></GrowField>
             </>
           ) : (
             <p className="wb-empty" title="关闭本窗口，点击阅读材料中的图片进入聚焦，框选区域后选择「手动制卡」">先在阅读材料里框选图片区域</p>
@@ -337,38 +390,38 @@ export function ManualCardForm({
 
         {hitsPanel}
 
-        <div className="wb-more" data-testid="manual-more" hidden={!moreOpen}>
-          <div className="wb-row" title="对齐 R17：UDC 受控清单，≤2 个，首个为主领域">
-            <span className="wb-k">领域</span>
-            <div className="wb-v"><UdcPicker value={domain} onChange={setDomain} /></div>
-          </div>
-          {tagsEnabled && (
-            <div className="wb-row" title="自由组织词汇，用 :: 分层级，如「考研::英语」">
-              <span className="wb-k">标签</span>
-              <div className="wb-v"><TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" /></div>
+        {/* 「更多」：collapse-clip 通用折叠（grid-template-rows 0fr↔1fr，--dur-panel + --ease-out-soft；收起态 visibility 延后隐藏，防 Tab 进入） */}
+        <div className={`collapse-clip wb-more-clip${moreOpen ? " is-open" : ""}`} data-testid="manual-more" aria-hidden={!moreOpen}>
+          <div className="collapse-inner">
+            <div className="wb-more">
+              <div className="wb-row" title="对齐 R17：UDC 受控清单，≤2 个，首个为主领域">
+                <span className="wb-k">领域</span>
+                <div className="wb-v"><UdcPicker value={domain} onChange={setDomain} /></div>
+              </div>
+              {tagsEnabled && (
+                <div className="wb-row" title="自由组织词汇，用 :: 分层级，如「考研::英语」">
+                  <span className="wb-k">标签</span>
+                  <div className="wb-v"><TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" /></div>
+                </div>
+              )}
+              <label className="wb-row" title="只能写领域/学科名，禁止泄漏答案（规则 16）">
+                <span className="wb-k">前缀</span>
+                <input className="wb-line" type="text" value={contextPrefix} onChange={(e) => setContextPrefix(e.target.value)} placeholder="例：统计:" />
+              </label>
+              <label className="wb-row" title="规则 7：克制使用">
+                <span className="wb-k">助记</span>
+                <input className="wb-line" type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="例：中位数的「中」＝正中间" />
+              </label>
+              <label className="wb-row" title="同组卡片共享同一 knowledgePointId">
+                <span className="wb-k">知识点</span>
+                <input className="wb-line" type="text" value={knowledgePointId} onChange={(e) => setKnowledgePointId(e.target.value)} placeholder="例：kp-中位数" />
+              </label>
+              <label className="wb-row wb-check" title="规则 19：统计数字 / 版本 / 价格等易变内容勾选，写入今日日期">
+                <input type="checkbox" checked={dateStamped} onChange={(e) => setDateStamped(e.target.checked)} />
+                <span>标注日期</span>
+              </label>
             </div>
-          )}
-          <label className="wb-row" title="只能写领域/学科名，禁止泄漏答案（规则 16）">
-            <span className="wb-k">前缀</span>
-            <input className="wb-line" type="text" value={contextPrefix} onChange={(e) => setContextPrefix(e.target.value)} placeholder="例：统计:" />
-          </label>
-          <label className="wb-row" title="规则 7：克制使用">
-            <span className="wb-k">助记</span>
-            <input className="wb-line" type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="例：中位数的「中」＝正中间" />
-          </label>
-          <label className="wb-row" title="同组卡片共享同一 knowledgePointId">
-            <span className="wb-k">知识点</span>
-            <input className="wb-line" type="text" value={knowledgePointId} onChange={(e) => setKnowledgePointId(e.target.value)} placeholder="例：kp-中位数" />
-          </label>
-          <div className="wb-row">
-            <span className="wb-k">优先级</span>
-            <input className="wb-range" type="range" min={0} max={100} value={priority} onChange={(e) => setPriority(Number(e.target.value))} aria-label="优先级" />
-            <span className="wb-num mono">{priority}</span>
           </div>
-          <label className="wb-row wb-check" title="规则 19：统计数字 / 版本 / 价格等易变内容勾选，写入今日日期">
-            <input type="checkbox" checked={dateStamped} onChange={(e) => setDateStamped(e.target.checked)} />
-            <span>标注日期</span>
-          </label>
         </div>
 
         <div className="form-actions wb-foot">

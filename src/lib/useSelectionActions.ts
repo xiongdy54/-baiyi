@@ -1548,6 +1548,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     manualQuote,
     // D123：手动表单重置序号 / AI 解释页自由追问线程
     manualSeq,
+    // D123 修订：制卡台「带入选区」——读取阅读区当前选区文字（无选区＝null）
+    readSelectionText: () => A().selectionText(),
     thread,
     runAsk,
     clearThread,

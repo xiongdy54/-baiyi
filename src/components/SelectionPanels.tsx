@@ -8,7 +8,8 @@ import ManualCardEditor, { ManualCardForm } from "./ManualCardEditor";
 import CardDock, { type DockTab } from "./CardDock";
 import AIPanel, { ChatComposer, ExplainModeSwitcher, ExplainThread } from "./AIPanel";
 import { DictPanel } from "./DictPanel";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { growTextarea } from "../lib/autoGrow";
 import { cardsApi, type CardDraft, type CardRecord } from "../lib/cards";
 import DisambiguateModal from "./DisambiguateModal";
 import type { TagVocabEntry } from "../lib/tags";
@@ -27,22 +28,32 @@ import {
 function FreeSource({ onExplain, onCards, prefer }: { onExplain: (t: string) => void; onCards: (t: string) => void; prefer: "explain" | "cards" }) {
   const [text, setText] = useState("");
   const t = text.trim();
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    if (ref.current) growTextarea(ref.current, 168);
+  }, [text]);
   return (
     <div className="wb-free" data-testid="wb-free-source">
       <textarea
+        ref={ref}
         value={text}
-        placeholder="粘贴或输入要处理的文字（也可在阅读时选中文字，用浮条的 AI 解释 / AI 制卡）"
+        placeholder="粘贴或输入要处理的文字"
         aria-label="待处理文字"
-        rows={4}
+        rows={1}
         onChange={(e) => setText(e.target.value)}
       />
-      <div className="wb-free-acts">
-        <button type="button" className={`btn btn-sm ${prefer === "explain" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onExplain(t)}>
-          AI 解释
-        </button>
-        <button type="button" className={`btn btn-sm ${prefer === "cards" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onCards(t)}>
-          AI 制卡
-        </button>
+      {/* 有内容才出现，高度随之展开（collapse-clip）；空态一行即止 */}
+      <div className={`collapse-clip wb-free-clip${t ? " is-open" : ""}`}>
+        <div className="collapse-inner">
+          <div className="wb-free-acts">
+            <button type="button" className={`btn btn-sm ${prefer === "explain" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onExplain(t)}>
+              AI 解释
+            </button>
+            <button type="button" className={`btn btn-sm ${prefer === "cards" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onCards(t)}>
+              AI 制卡
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -206,6 +217,12 @@ export default function SelectionPanels({
       onStop={() => sel.stopAIRun()}
     />
   ) : null;
+  // 「带入 AI 回答」：最近一条已完成的追问回答 > 当前解释面板的回答
+  const latestAnswer = () => {
+    const th = [...sel.thread].reverse().find((x) => x.answer && !x.running);
+    if (th?.answer) return th.answer;
+    return aiPanel?.kind === "explain" ? aiPanel.answer ?? "" : "";
+  };
   const tabVisible = (t: DockTab) => dockTab === t;
   const cardsOf = (text: string) => void sel.runAICards(text, undefined, sel.aiMode);
   const explainOf = (text: string) => void sel.runExplain(text, null);
@@ -245,7 +262,6 @@ export default function SelectionPanels({
           <CardDock
             tab={dockTab}
             onTabChange={(t) => sel.changeDockTab(t)}
-            meta={dockMeta}
             placement={placement}
             dockOpen={dockOpen}
             manualCollapsed={manualCollapsed}
@@ -261,6 +277,8 @@ export default function SelectionPanels({
                 onCancel={sel.closeManual}
                 onSave={saveManual}
                 onDisambiguate={(n, o) => void openDisamb(n, o)}
+                onPickSelection={() => sel.readSelectionText()}
+                onPickAnswer={latestAnswer}
               />
             }
           >

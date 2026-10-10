@@ -319,7 +319,12 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   // value 与「最近一次上报值」不同 ⇒ 宿主从外部改了内容（如表单模式切换预填）⇒ 重建编辑器。
   const syncRef = useRef({ value, key: 0 });
   if (value !== syncRef.current.value) {
-    syncRef.current = { value, key: syncRef.current.key + 1 };
+    // 受控镜像（onChange→宿主 setState→value 回灌）：回灌值＝编辑器自己刚上报的序列化结果时**不重建**——
+    // 否则每敲一键就销毁重建编辑器，输入法组合态被打断（中文输入最多打出 1–3 个字母就被截断）。
+    syncRef.current =
+      value === latestMdRef.current
+        ? { value, key: syncRef.current.key }
+        : { value, key: syncRef.current.key + 1 };
   }
   const recreateKey = syncRef.current.key;
 
