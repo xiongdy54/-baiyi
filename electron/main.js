@@ -1767,6 +1767,7 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
 }
 
 app.whenReady().then(async () => {
+  screenCapture.warmup();
   // v48.75（D119）：生命周期锚点——区分「进程启动」（init 横幅）与「窗口就绪」（本行），
   // 两者之间崩溃/卡死时日志可判读。
   appLog.log("INFO", "app", "app ready");

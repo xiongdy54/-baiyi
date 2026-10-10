@@ -473,11 +473,9 @@ select option { background: var(--paper); color: var(--text-primary); }
   outline-offset: 2px;
 }
 
-/* 细平滚动条 */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--grey-2); }
-::-webkit-scrollbar-thumb:hover { background: var(--grey-3); }
+/* 滚动条一律隐藏（用户 2026-10-10）：仍可滚轮/触控板/键盘滚动；也避免面板开合过程中滚动条出没挤压内容宽度 */
+* { scrollbar-width: none; }
+::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
 .mono {
   font-family: var(--font-mono);
@@ -2771,9 +2769,8 @@ body.theme-dark .modal-panel {
   display: flex;
   flex-direction: column;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .app-main { transition: margin var(--dur-panel) var(--ease); }
-}
+/* 修订 5：不再给 .app-main 的 margin 做过渡——正文（阅读内核/iframe）每帧重排是展开卡顿的主因；
+   开合只让制卡台自身 transform 滑动（合成层，零重排），正文在开合起止各一次性让位。 */
 html[data-wb-open="1"][data-wb-place="right"] .app-main { margin-right: var(--wb-w); }
 html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--wb-h); }
 
@@ -2808,9 +2805,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   flex-direction: column;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .side-dock { transition: transform var(--dur-panel) var(--ease), visibility 0s; }
-  .side-dock[data-placement="right"] { animation: side-dock-in var(--dur-panel) var(--ease); }
-  .side-dock[data-placement="bottom"] { animation: side-dock-in-b var(--dur-panel) var(--ease); }
+  .side-dock { transition: transform var(--dur-panel) var(--ease), visibility 0s; will-change: transform; }
 }
 @keyframes side-dock-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @keyframes side-dock-in-b { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -8091,3 +8086,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 @media (prefers-reduced-motion: no-preference) {
   .wb-cloze-btn { transition: background-color var(--dur) var(--ease-out-soft), border-color var(--dur) var(--ease-out-soft), color var(--dur) var(--ease-out-soft); }
 }
+
+/* 修订 5：不再依赖挂载动画（transition 由 is-collapsed 的增减驱动，见 CardDock 的 shown 门控） */
+.side-dock[data-placement="right"], .side-dock[data-placement="bottom"] { animation: none; }
+/* 手动区开合：只过渡 clip 高度；body 宽度恒定（滚动条已隐藏，不再挤压文本框） */
+.wb-manual-clip { contain: layout style; }

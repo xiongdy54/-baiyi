@@ -85,3 +85,9 @@
 - 翻转问答（dock）只留 2 框；反向卡由 `handleManualCard` 既有逻辑自动生成（B 面空 ⇒ 用 A 面答案/题面互换），载荷不变。
 - 填空（dock）：纯文本 textarea + 工具行「挖空 / 同题挖空 / 取消挖空」+ 「N 张卡 · M 个空」；快捷键 Ctrl+Shift+C / Ctrl+Alt+Shift+C。Anki 语义：不同编号＝不同卡（每张 `clozeOrds=[自己的ord]`、`cardOrd=i`、共享 siblingKey），同编号多空＝同卡一起遮；仅一个编号＝单卡（旧行为不变）。至少一个挖空才可制卡。
 - 自动填写（dock，用户动过的项不覆盖）：标注日期＝正反面命中 L12 同一正则（`needsDateStamp`）；前缀＝首个领域名称；领域＝沿用上一张手动卡（会话内）。助记、知识点分组不自动填（助记需创造性、规则 7 要求克制；知识点错误归组会污染簇）。
+
+### 7.4 修订 5（2026-10-10 深夜）
+- 「带入选区 / 带入 AI 回答」：对应字段已有文字则不渲染该钮（避免盖字）。
+- 滚动条全局隐藏（`scrollbar-width:none` + `::-webkit-scrollbar{display:none}`），滚轮/键盘滚动不受影响；手动区展开过程不再因滚动条出没挤压文本框宽度。阅读内核 iframe（foliate）内部文档的滚动条不在应用样式作用域内。
+- 展开/收起卡顿：根因＝① `.app-main` 的 margin 过渡让正文（阅读内核）每帧重排；② 让位（margin）先于窗口外延（IPC）→ 先收窄后变宽两次重排；③ 滑入动画与首次挂载（Milkdown 初始化）同帧。修复：去掉 margin 过渡；`applyDesired` 先完成外延/还原再一次性写 `data-wb-*`；`CardDock` 以 `shown` 门控——展开＝「让位/外延 → 双 rAF → 仅 transform 滑入」，收起＝「滑出 → 260ms 后注销让位/还原窗口」；`will-change: transform`。
+- 屏幕截图提速：遮罩窗口与抓屏并行；遮罩背景走 JPEG（PNG 编码大屏 >1s），仅最终裁剪小图编 PNG；透明等待 240→100ms；Windows 启动 8s 后预热一次 1×1 `getSources`（摊掉首次初始化成本）。

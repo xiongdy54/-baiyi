@@ -96,21 +96,19 @@ async function applyDesired(): Promise<void> {
     }
     return;
   }
-  el.dataset.wbOpen = "1";
-  el.dataset.wbPlace = active.placement;
+  // 修订 5：先把窗口外延/还原做完，再一次性写 data-wb-*（正文让位与窗口变宽落在同一帧，避免「先收窄、后变宽」两次重排）
   if (active.placement === "right") {
     if (!extended) {
       const r = await window.windowAPI?.dockExtend?.(WB_WIDTH);
       extended = r?.mode === "extended";
     }
-    el.dataset.wbMode = extended ? "extended" : "inner";
-  } else {
-    if (extended) {
-      extended = false;
-      await window.windowAPI?.dockRestore?.();
-    }
-    el.dataset.wbMode = "inner";
+  } else if (extended) {
+    extended = false;
+    await window.windowAPI?.dockRestore?.();
   }
+  el.dataset.wbOpen = "1";
+  el.dataset.wbPlace = active.placement;
+  el.dataset.wbMode = active.placement === "right" && extended ? "extended" : "inner";
 }
 
 function installBridge(): void {
@@ -126,7 +124,7 @@ function installBridge(): void {
 }
 
 /** 宿主登记/注销自己的制卡台展开态（open=false 即注销） */
-export function setDockLayout(owner: symbol, open: boolean, placement: WorkbenchPlacement): void {
+export function setDockLayout(owner: symbol, open: boolean, placement: WorkbenchPlacement): Promise<void> {
   installBridge();
   if (open) {
     owners.delete(owner); // 重新登记＝成为「最后登记者」
@@ -135,4 +133,5 @@ export function setDockLayout(owner: symbol, open: boolean, placement: Workbench
     owners.delete(owner);
   }
   chain = chain.then(applyDesired).catch(() => {});
+  return chain;
 }

@@ -4,7 +4,7 @@
 //       本组件不再有「＋制卡」大钮、关闭钮、右缘把手，也没有任何闪烁/呼吸动画。
 // 放置：right（默认，右侧固定）/ bottom（底部固定，手动左 AI 右）/ window（独立窗口：占满、不推让不外延）。
 // 推让与窗口外延由 workbenchLayout 仲裁（本组件只登记展开态）。
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconChevronDown, IconChevronRight } from "./icons";
 import { setDockLayout, type WorkbenchDockPlacement } from "../lib/workbenchLayout";
 
@@ -41,12 +41,32 @@ export default function CardDock({
 }) {
   const dockRef = useRef<HTMLElement | null>(null);
 
-  // 登记布局：展开且非独立窗口才推让/外延；卸载或收起即注销（串行仲裁见 workbenchLayout）
+  // 登记布局：展开且非独立窗口才推让/外延（串行仲裁见 workbenchLayout）。
+  // 修订 5（展开/收起卡顿）：开合顺序＝「先让位/外延（一次性重排）→ 再滑入」；「先滑出 → 再还原」。
+  // 滑动本身只动 transform（合成层），整个动画期间正文零重排；shown 驱动 is-collapsed 的增减。
+  const [shown, setShown] = useState(false);
   useEffect(() => {
-    if (placement === "window") return;
+    if (placement === "window") {
+      setShown(dockOpen);
+      return;
+    }
+    if (!dockOpen) {
+      setShown(false);
+      return;
+    }
     const owner = Symbol("card-dock");
-    setDockLayout(owner, dockOpen, placement);
-    return () => setDockLayout(owner, false, placement);
+    let alive = true;
+    void setDockLayout(owner, true, placement).then(() => {
+      if (!alive) return;
+      // 等布局提交一帧，再触发滑入（否则 transform 过渡会与让位重排抢同一帧）
+      requestAnimationFrame(() => requestAnimationFrame(() => alive && setShown(true)));
+    });
+    return () => {
+      alive = false;
+      setShown(false);
+      // 滑出动画（--dur-panel 240ms）结束后再注销让位 / 还原窗口宽度
+      window.setTimeout(() => void setDockLayout(owner, false, placement), 260);
+    };
   }, [dockOpen, placement]);
 
   // Esc：焦点在制卡台内时收起（下拉菜单自己处理 Esc 时事件已被消费则不重复）
@@ -59,7 +79,7 @@ export default function CardDock({
   return (
     <aside
       ref={dockRef}
-      className={`side-dock card-dock${dockOpen ? "" : " is-collapsed"}`}
+      className={`side-dock card-dock${shown ? "" : " is-collapsed"}`}
       data-card-dock
       data-testid="workbench-dock"
       data-placement={placement}

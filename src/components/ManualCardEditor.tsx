@@ -492,16 +492,16 @@ export function ManualCardForm({
         >
           {mode === "reverse" ? (
             <>
-              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="问题（制卡后另生成一张：以它为答案）" label="问题" /></GrowField>
-              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="答案（制卡后另生成一张：以它为问题）" label="答案" /></GrowField>
+              <GrowField pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="问题（制卡后另生成一张：以它为答案）" label="问题" /></GrowField>
+              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="答案（制卡后另生成一张：以它为问题）" label="答案" /></GrowField>
             </>
           ) : mode === "qa" ? (
             <>
-              <GrowField pick={pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（问题）" label="题面" /></GrowField>
-              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案）" label="答案" /></GrowField>
+              <GrowField pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（问题）" label="题面" /></GrowField>
+              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案）" label="答案" /></GrowField>
             </>
           ) : mode === "cloze" ? (
-            <ClozeField value={front} onChange={setFront} onPick={onPickSelection ? { label: "带入选区", get: onPickSelection } : undefined} />
+            <ClozeField value={front} onChange={setFront} onPick={onPickSelection && !front.trim() ? { label: "带入选区", get: onPickSelection } : undefined} />
           ) : imageRegion ? (
             <>
               <div className="occlusion-stage occlusion-preview manual-region-preview">
@@ -509,7 +509,7 @@ export function ManualCardForm({
                 <OcclusionShapes occlusion={{ shapes: [imageRegion.shape] }} cardOrd={0} />
               </div>
               <GrowField><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（默认「图中遮挡区域对应的是什么？」）" label="正面（图片挖空）" /></GrowField>
-              <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案，必填）" label="背面（图片挖空）" /></GrowField>
+              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案，必填）" label="背面（图片挖空）" /></GrowField>
             </>
           ) : (
             <p className="wb-empty">点上方「图片挖空」开始截图</p>
