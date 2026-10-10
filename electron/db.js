@@ -48,7 +48,7 @@ const {
   // D121 §3.3/§3.4：卡片辨析 scope card-disambiguate v1
   CARD_DISAMBIGUATE_PROMPT
 } = require("./prompts");
-const { sanitizeDomain, domainFromPrefix } = require("./udc");
+const { sanitizeDomain, domainFromPrefix, UDC_MAIN, UDC_LEAVES, UDC_OTHER } = require("./udc");
 const { calculateFsrsDeltaT, learningDayStartMs } = require("./fsrsTime");
 const { journalDateOf, isJournalDate } = require("./journalTime");
 // v41（K2-A，D38）：知识归一纯函数（规范化 / 批次簇键 / 提案幂等指纹）
@@ -255,6 +255,71 @@ CREATE TABLE IF NOT EXISTS card_links (
   sync_version INTEGER NOT NULL DEFAULT 0,
   is_deleted INTEGER NOT NULL DEFAULT 0
 );
+-- v48.80（D124，§4.20）：学习轨道——用户在学的领域与处理方式
+CREATE TABLE IF NOT EXISTS learner_tracks (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  label TEXT NOT NULL,
+  mode TEXT NOT NULL,                 -- language|concept|procedural|factual|narrative
+  lang TEXT NOT NULL DEFAULT '',      -- 仅 language：ISO 639-1，如 en / ja / zh / ko / fr
+  udc_codes_json TEXT NOT NULL DEFAULT '[]', -- 非 language：UDC 叶子编码数组
+  status TEXT NOT NULL DEFAULT 'active',     -- active|paused|archived
+  pinned INTEGER NOT NULL DEFAULT 0,
+  priority INTEGER NOT NULL DEFAULT 3,       -- 1..5，3=普通
+  source TEXT NOT NULL DEFAULT 'user',       -- user|proposal（由提议一键采纳）
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+-- 轨道↔材料的「人工覆盖」：只存用户手动加入(member=1)或排除(member=0)；自动归属不落表（设计稿 §6.9）
+CREATE TABLE IF NOT EXISTS track_materials (
+  id TEXT PRIMARY KEY,
+  track_id TEXT NOT NULL,
+  library_item_id TEXT NOT NULL,
+  member INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_track_materials_pair ON track_materials(track_id, library_item_id);
+-- 学习事件（append-only 事实；kind 封闭枚举见设计稿 §5.3）
+CREATE TABLE IF NOT EXISTS learning_events (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  lang TEXT NOT NULL DEFAULT '',
+  library_item_id TEXT,
+  unit_id TEXT,
+  kp_id TEXT,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  sync_version INTEGER NOT NULL DEFAULT 0,
+  is_deleted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_learning_events_kind_ts ON learning_events(kind, ts);
+-- 推荐运行（只在推荐集合变化时写一行；保留最近 300 行，例外已在指导文档 §7.2 登记）
+CREATE TABLE IF NOT EXISTS rec_runs (
+  id TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  lm_version TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,          -- 推荐项 key 列表 sha1
+  candidate_count INTEGER NOT NULL,
+  items_json TEXT NOT NULL            -- 展示给用户的推荐项快照（RecItem[]）
+);
+CREATE INDEX IF NOT EXISTS idx_rec_runs_created ON rec_runs(created_at);
+-- 推荐反馈（append-only 事实；action 封闭枚举见设计稿 §8.6）
+CREATE TABLE IF NOT EXISTS rec_feedback (
+  id TEXT PRIMARY KEY,
+  rec_run_id TEXT,
+  item_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  library_item_id TEXT,
+  action TEXT NOT NULL,
+  auto INTEGER NOT NULL DEFAULT 0,    -- 1=系统自动判定完成
+  ts INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rec_feedback_key ON rec_feedback(item_key, ts);
 `;
 
 async function initDb() {
@@ -4217,8 +4282,7 @@ function computeSessionQueue(nowTs, opts) {
 }
 
 // ---------- 统计聚合（stats:overview，只读，不改任何调度状态） ----------
-
-const { UDC_MAIN, UDC_LEAVES, UDC_OTHER } = require("./udc");
+// （UDC 常量已随文件顶部 require("./udc") 导入）
 
 // v23（D21/§4.4.8）：统计的「学习日」起点 = 本地钟面日切点（settings.app.dayCutoffHour，默认 0）。
 // 仅统计口径使用；FSRS 调度/训练一律不受切点影响。
@@ -6873,6 +6937,438 @@ function listResumableMaterialMapRuns(limit = 20) {
   return rows.map((r) => ({ ...mapMaterialMapRunRow(r), materialTitle: r.material_title || null }));
 }
 
+// ---------- v48.80（D124 / 指导文档 §4.20）：学习者模型事实表读写面 ----------
+// 边界（设计稿 §0.1-4/§14-1）：对 cards / review_logs / extracts / knowledge_* 一律只读；
+// 本节只写 learner_tracks / track_materials / learning_events / rec_runs / rec_feedback 五张新表。
+
+const TRACK_MODES = ["language", "concept", "procedural", "factual", "narrative"];
+const REC_FEEDBACK_ACTIONS = ["opened", "done", "snooze", "dismissed", "not_interested", "too_hard", "too_easy"];
+const learnerClamp01 = (x) => Math.min(1, Math.max(0, Number(x) || 0));
+
+function mapTrackRow(r) {
+  let udc = [];
+  try {
+    udc = JSON.parse(r.udc_codes_json || "[]");
+  } catch {
+    udc = [];
+  }
+  return {
+    id: r.id,
+    label: r.label,
+    mode: r.mode,
+    lang: r.lang || "",
+    udcCodes: Array.isArray(udc) ? udc.map(String) : [],
+    status: r.status || "active",
+    pinned: Number(r.pinned) === 1,
+    priority: Number(r.priority) || 3,
+    source: r.source || "user",
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+
+/** 轨道清单（闸门 f19 会以 () 与 ({}) 调用：必须无参可调、空库返回 []、不播种任何行） */
+function listLearnerTracks() {
+  if (!db) return [];
+  return queryAll("SELECT * FROM learner_tracks WHERE is_deleted = 0 ORDER BY created_at ASC, id ASC").map(mapTrackRow);
+}
+
+function getLearnerTrackRow(id) {
+  return queryAll("SELECT * FROM learner_tracks WHERE id = ? AND is_deleted = 0", [String(id)])[0] || null;
+}
+
+/** 新建 / 更新轨道（校验在设计稿 §11.1：mode 枚举 / language 必有 lang 且无 udc / 其他 mode 的 udc ∈ UDC 叶子∪other / priority 1..5 / label ≤40） */
+function saveLearnerTrack(track) {
+  const t = track && typeof track === "object" ? track : {};
+  const mode = String(t.mode || "");
+  if (!TRACK_MODES.includes(mode)) return { ok: false, error: "mode 非法" };
+  const label = String(t.label ?? "").trim();
+  if (!label || label.length > 40) return { ok: false, error: "名称须为 1–40 字" };
+  let lang = String(t.lang ?? "").trim().toLowerCase();
+  const udcCodes = Array.isArray(t.udcCodes) ? t.udcCodes.map((c) => String(c).trim()).filter(Boolean) : [];
+  if (mode === "language") {
+    if (!lang) return { ok: false, error: "language 轨道必须指定语言" };
+    if (udcCodes.length > 0) return { ok: false, error: "language 轨道不带领域编码" };
+  } else {
+    lang = "";
+    const valid = new Set(UDC_LEAVES.map((l) => l.code));
+    valid.add(UDC_OTHER);
+    for (const c of udcCodes) {
+      if (!valid.has(c)) return { ok: false, error: `领域编码 ${c} 不在受控清单` };
+    }
+    if (udcCodes.length === 0) return { ok: false, error: "该处理方式至少要选一个领域编码" };
+  }
+  const status = ["active", "paused", "archived"].includes(t.status) ? t.status : "active";
+  const pinned = t.pinned === true ? 1 : 0;
+  const priority = Math.min(5, Math.max(1, Math.round(Number(t.priority) || 3)));
+  const now = Date.now();
+  const existing = t.id ? getLearnerTrackRow(String(t.id)) : null;
+  if (existing) {
+    db.run(
+      "UPDATE learner_tracks SET label=?, mode=?, lang=?, udc_codes_json=?, status=?, pinned=?, priority=?, updated_at=?, sync_version=sync_version+1 WHERE id=? AND is_deleted=0",
+      [label, mode, lang, JSON.stringify(udcCodes), status, pinned, priority, now, existing.id]
+    );
+    persist();
+    return { ok: true, track: mapTrackRow(getLearnerTrackRow(existing.id)) };
+  }
+  const id = crypto.randomUUID();
+  db.run(
+    "INSERT INTO learner_tracks (id, user_id, label, mode, lang, udc_codes_json, status, pinned, priority, source, created_at, updated_at) VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, label, mode, lang, JSON.stringify(udcCodes), status, pinned, priority, t.source === "proposal" ? "proposal" : "user", now, now]
+  );
+  persist();
+  return { ok: true, track: mapTrackRow(getLearnerTrackRow(id)) };
+}
+
+function deleteLearnerTrack(id) {
+  if (!rowExists("learner_tracks", id)) return { ok: false, error: "轨道不存在" };
+  db.run("UPDATE learner_tracks SET is_deleted=1, updated_at=?, sync_version=sync_version+1 WHERE id=?", [Date.now(), String(id)]);
+  persist();
+  return { ok: true };
+}
+
+/** 轨道↔材料人工覆盖：member=1 加入 / 0 排除 / null 删除覆盖（唯一索引 ⇒ 先查后改，含已软删行） */
+function setTrackMaterial(trackId, libraryItemId, member) {
+  const tid = String(trackId ?? "");
+  const itemId = String(libraryItemId ?? "");
+  if (!tid || !itemId) return { ok: false, error: "参数缺失" };
+  const now = Date.now();
+  const existing = queryAll(
+    "SELECT id FROM track_materials WHERE track_id = ? AND library_item_id = ?",
+    [tid, itemId]
+  )[0];
+  if (member === null || member === undefined) {
+    if (!existing) return { ok: true }; // 本来就没有覆盖 ⇒ 幂等成功
+    db.run("UPDATE track_materials SET is_deleted=1, updated_at=?, sync_version=sync_version+1 WHERE id=?", [now, existing.id]);
+    persist();
+    return { ok: true };
+  }
+  const m = Number(member) === 1 ? 1 : 0;
+  if (existing) {
+    db.run("UPDATE track_materials SET member=?, is_deleted=0, updated_at=?, sync_version=sync_version+1 WHERE id=?", [m, now, existing.id]);
+  } else {
+    db.run(
+      "INSERT INTO track_materials (id, track_id, library_item_id, member, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      [crypto.randomUUID(), tid, itemId, m, now, now]
+    );
+  }
+  persist();
+  return { ok: true };
+}
+
+// 设计稿 §5.3：learning_events.kind 封闭枚举与 payload 形状（非法 kind/payload 拒绝；超长截断）
+const LEARNING_EVENT_SPECS = {
+  dict_lookup: {
+    required: ["lang", "library_item_id"],
+    payload(p) {
+      if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+      return {
+        text: String(p.text ?? "").slice(0, 64),
+        sentence: String(p.sentence ?? "").slice(0, 400),
+        offset: Math.max(0, Math.floor(Number(p.offset) || 0))
+      };
+    }
+  },
+  lexeme_mark: {
+    required: ["lang"],
+    payload(p) {
+      if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+      if (p.mark !== "known" && p.mark !== "unknown") return null;
+      if (p.via !== "mine") return null;
+      const keys = (Array.isArray(p.keys) ? p.keys : []).map((k) => String(k)).filter(Boolean).slice(0, 200);
+      if (keys.length === 0) return null;
+      return { keys, mark: p.mark, via: "mine" };
+    }
+  },
+  placement: {
+    required: ["lang"],
+    payload(p) {
+      if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+      const knownKeys = (Array.isArray(p.knownKeys) ? p.knownKeys : []).map(String).filter(Boolean).slice(0, 600);
+      const extrapolatedKeys = (Array.isArray(p.extrapolatedKeys) ? p.extrapolatedKeys : []).map(String).filter(Boolean).slice(0, 8000);
+      const bands = (Array.isArray(p.bands) ? p.bands : [])
+        .filter((b) => b && typeof b === "object")
+        .slice(0, 20)
+        .map((b) => ({ from: Math.max(1, Math.floor(Number(b.from) || 1)), to: Math.max(1, Math.floor(Number(b.to) || 1)), ratio: learnerClamp01(Number(b.ratio) || 0) }));
+      return { knownKeys, extrapolatedKeys, bands };
+    }
+  },
+  unit_reread: {
+    required: ["unit_id", "library_item_id", "lang"],
+    payload() {
+      return {};
+    }
+  },
+  reel_done: {
+    required: ["lang"],
+    payload(p) {
+      if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+      if (p.result !== "clear" && p.result !== "unclear") return null;
+      const keys = (Array.isArray(p.keys) ? p.keys : []).map((k) => String(k)).filter(Boolean).slice(0, 200);
+      if (keys.length === 0) return null;
+      return { keys, result: p.result };
+    }
+  },
+  self_explain: {
+    required: ["kp_id"],
+    payload(p) {
+      if (!p || typeof p !== "object" || Array.isArray(p)) return null;
+      if (!["clear", "partial", "stuck"].includes(p.selfRating)) return null;
+      return {
+        text: String(p.text ?? "").slice(0, 4000),
+        relatedKpId: p.relatedKpId ? String(p.relatedKpId) : null,
+        selfRating: p.selfRating
+      };
+    }
+  }
+};
+
+function addLearningEvent(evt) {
+  const e = evt && typeof evt === "object" ? evt : {};
+  const kind = String(e.kind || "");
+  const spec = LEARNING_EVENT_SPECS[kind];
+  if (!spec) return { ok: false, error: `未知学习事件类型 ${kind}` };
+  for (const f of spec.required) {
+    const v = e[f];
+    if (v === undefined || v === null || v === "") return { ok: false, error: `缺少必填字段 ${f}` };
+  }
+  const payload = spec.payload(e.payload);
+  if (payload === null) return { ok: false, error: "payload 形状非法" };
+  const id = crypto.randomUUID();
+  const ts = Number(e.ts) || Date.now();
+  db.run(
+    "INSERT INTO learning_events (id, kind, ts, lang, library_item_id, unit_id, kp_id, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      id,
+      kind,
+      ts,
+      String(e.lang ?? ""),
+      e.library_item_id ? String(e.library_item_id) : null,
+      e.unit_id ? String(e.unit_id) : null,
+      e.kp_id ? String(e.kp_id) : null,
+      JSON.stringify(payload)
+    ]
+  );
+  persist();
+  return { ok: true, id };
+}
+
+function addRecFeedback(fb) {
+  const f = fb && typeof fb === "object" ? fb : {};
+  const action = String(f.action || "");
+  if (!REC_FEEDBACK_ACTIONS.includes(action)) return { ok: false, error: `非法反馈动作 ${action}` };
+  const itemKey = String(f.itemKey || f.item_key || "");
+  if (!itemKey) return { ok: false, error: "缺少 itemKey" };
+  const id = crypto.randomUUID();
+  db.run(
+    "INSERT INTO rec_feedback (id, rec_run_id, item_key, kind, library_item_id, action, auto, ts) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [
+      id,
+      f.recRunId ? String(f.recRunId) : null,
+      itemKey,
+      String(f.kind || ""),
+      f.libraryItemId ? String(f.libraryItemId) : null,
+      action,
+      f.auto === true || Number(f.auto) === 1 ? 1 : 0,
+      Number(f.ts) || Date.now()
+    ]
+  );
+  persist();
+  return { ok: true, id };
+}
+
+function mapRecRunRow(r, withItems) {
+  let items = [];
+  if (withItems) {
+    try {
+      items = JSON.parse(r.items_json || "[]");
+    } catch {
+      items = [];
+    }
+  }
+  return {
+    id: r.id,
+    createdAt: r.created_at,
+    lmVersion: r.lm_version,
+    fingerprint: r.fingerprint,
+    candidateCount: r.candidate_count,
+    ...(withItems ? { items } : {})
+  };
+}
+
+function latestRecRun() {
+  if (!db) return null;
+  const r = queryAll("SELECT * FROM rec_runs ORDER BY created_at DESC, id DESC LIMIT 1")[0];
+  return r ? mapRecRunRow(r, true) : null;
+}
+
+/** 写推荐运行：指纹与最近一条相同则跳过（只在推荐集合变化时写一行）；超出 300 行物理裁剪（§7.2 已登记例外） */
+function saveRecRun(items, candidateCount, lmVersion) {
+  const list = Array.isArray(items) ? items : [];
+  const fingerprint = crypto
+    .createHash("sha1")
+    .update(list.map((it) => String(it && it.key)).join("\u0000"))
+    .digest("hex");
+  const latest = latestRecRun();
+  if (latest && latest.fingerprint === fingerprint) {
+    return { ok: true, id: latest.id, createdAt: latest.createdAt, changed: false };
+  }
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  db.run(
+    "INSERT INTO rec_runs (id, created_at, lm_version, fingerprint, candidate_count, items_json) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, now, String(lmVersion || "LM-1"), fingerprint, Number(candidateCount) || 0, JSON.stringify(list)]
+  );
+  db.run(
+    "DELETE FROM rec_runs WHERE id NOT IN (SELECT id FROM rec_runs ORDER BY created_at DESC, id DESC LIMIT 300)"
+  );
+  persist();
+  return { ok: true, id, createdAt: now, changed: true };
+}
+
+/** 近 N 天 rec_runs 出现过的 item key（K8b 的 30 天冷却用，设计稿 §8.2） */
+function listRecentRunKeys(days = 30) {
+  if (!db) return [];
+  const since = Date.now() - (Number(days) || 30) * 86400000;
+  const rows = queryAll("SELECT items_json FROM rec_runs WHERE created_at >= ?", [since]);
+  const out = new Set();
+  for (const r of rows) {
+    try {
+      for (const it of JSON.parse(r.items_json || "[]") || []) out.add(String(it.key));
+    } catch {
+      /* 坏 JSON 跳过 */
+    }
+  }
+  return [...out];
+}
+
+/**
+ * 卡片 → 知识点（设计稿 §6.5 resolveCardKpMap，只读）。
+ * 键索引＝active KP 的 {id, canonical_label, ...alias, ...家族 id}；卡候选键＝[原始值, 批次簇键]；
+ * 命中多个时优先簇键的 → updated_at 最大 → id 字典序最小；结果沿 merged_into 走到根。
+ */
+function resolveCardKpMap() {
+  if (!db) return new Map();
+  const activeKps = queryAll(
+    "SELECT id, canonical_label, alias_json, updated_at FROM knowledge_points WHERE is_deleted = 0 AND status = 'active'"
+  );
+  // parent/rootOf：照抄 scopeKpFamilySet 内部的写法（含 seen 防环），不改动 scopeKpFamilySet 本体
+  const parent = new Map();
+  for (const r of queryAll("SELECT id, merged_into FROM knowledge_points WHERE is_deleted = 0")) {
+    parent.set(String(r.id), r.merged_into ? String(r.merged_into) : null);
+  }
+  const rootOf = (id) => {
+    let cur = id;
+    const seen = new Set();
+    while (parent.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      const p = parent.get(cur);
+      if (!p) break;
+      cur = p;
+    }
+    return cur;
+  };
+  const keyMap = new Map();
+  const addKey = (key, kpId, updatedAt) => {
+    const k = String(key ?? "");
+    if (!k) return;
+    if (!keyMap.has(k)) keyMap.set(k, []);
+    keyMap.get(k).push({ id: String(kpId), updatedAt: Number(updatedAt) || 0 });
+  };
+  for (const kp of activeKps) {
+    let aliases = [];
+    try {
+      aliases = JSON.parse(kp.alias_json || "[]");
+    } catch {
+      aliases = [];
+    }
+    const family = resolveKpFamily(kp.id);
+    const keys = new Set([String(kp.id), String(kp.canonical_label), ...aliases.map((a) => String(a)), ...family.map((f) => String(f))]);
+    for (const key of keys) addKey(key, kp.id, kp.updated_at);
+  }
+  const cards = queryAll(
+    "SELECT id, knowledge_point_id, gen_batch_id, context_ref_json, updated_at FROM cards WHERE is_deleted = 0 AND (status IS NULL OR status = 'active') AND knowledge_point_id IS NOT NULL AND knowledge_point_id != ''"
+  );
+  const out = new Map();
+  for (const c of cards) {
+    let documentId = null;
+    try {
+      const ref = c.context_ref_json ? JSON.parse(c.context_ref_json) : null;
+      documentId = ref && ref.documentId ? String(ref.documentId) : null;
+    } catch {
+      documentId = null;
+    }
+    const clusterKey = kpClusterKeyFor({ genBatchId: c.gen_batch_id, documentId, knowledgePointId: c.knowledge_point_id });
+    const clusterHits = clusterKey ? keyMap.get(clusterKey) || [] : [];
+    const rawHits = keyMap.get(String(c.knowledge_point_id)) || [];
+    const hits = clusterHits.length > 0 ? clusterHits : rawHits;
+    if (hits.length === 0) continue;
+    const pick = hits
+      .slice()
+      .sort((a, b) => b.updatedAt - a.updatedAt || String(a.id).localeCompare(String(b.id)))[0];
+    out.set(String(c.id), rootOf(pick.id));
+  }
+  return out;
+}
+
+/**
+ * 学习者模型的一次性事实读取（设计稿 §9.2，只读不写）。
+ * opts.readingEventsAfter：只取该水位之后的阅读事件（增量通读计算用；缺省取全量）。
+ * 注意：extracts 返回**全部**未删摘录（K4 需要 reading 态的非到期行）；K3 的到期口径
+ * （与 listDueExtracts 相同的 WHERE）由 learnerRefresh 在组装快照时套用。
+ */
+function learnerFacts(opts) {
+  const o = opts || {};
+  const after = Number(o.readingEventsAfter) || 0;
+  if (!db) {
+    return {
+      tracks: [], overrides: [], materials: [], documents: [], cards: [], reviewLogs: [], extracts: [],
+      kps: [], relations: [], learningEvents: [], recFeedback: [], latestRecRun: null, recentRunKeys: [], readingEvents: []
+    };
+  }
+  return {
+    tracks: queryAll("SELECT * FROM learner_tracks WHERE is_deleted = 0 ORDER BY created_at ASC, id ASC"),
+    overrides: queryAll("SELECT track_id AS trackId, library_item_id AS libraryItemId, member FROM track_materials WHERE is_deleted = 0"),
+    materials: queryAll("SELECT id, title, lang, priority, source_type AS sourceType FROM library_items WHERE is_deleted = 0 ORDER BY created_at ASC, id ASC"),
+    documents: queryAll(
+      "SELECT id, library_item_id AS libraryItemId, updated_at AS updatedAt, (markdown IS NOT NULL AND markdown != '') AS hasMarkdown, LENGTH(COALESCE(markdown,'')) AS markdownLen FROM documents WHERE is_deleted = 0 ORDER BY id ASC"
+    ),
+    cards: queryAll(
+      "SELECT id, card_type AS cardType, knowledge_point_id AS knowledgePointId, gen_batch_id AS genBatchId, context_ref_json AS contextRefJson, dict_json AS dictJson, domain, generated_by AS generatedBy, created_at AS createdAt, updated_at AS updatedAt, fsrs_json AS fsrsJson FROM cards WHERE is_deleted = 0"
+    ),
+    reviewLogs: queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt FROM review_logs ORDER BY reviewed_at ASC"),
+    extracts: queryAll(
+      `SELECT e.id, d.library_item_id AS libraryItemId, e.document_id AS documentId, COALESCE(e.status,'open') AS status,
+              e.priority, e.topic_next_at AS topicNextAt, e.process_count AS processCount,
+              e.content_markdown AS contentMarkdown, e.context_ref_json AS contextRefJson,
+              COALESCE(e.kind,'extract') AS kind
+       FROM extracts e
+       JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
+       JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
+       WHERE e.is_deleted = 0 AND COALESCE(e.kind,'extract') = 'extract'
+       ORDER BY e.priority ASC, e.topic_next_at ASC`
+    ),
+    kps: queryAll(
+      "SELECT id, canonical_label AS label, domain_id AS domainId, alias_json AS aliasJson, merged_into AS mergedInto, updated_at AS updatedAt FROM knowledge_points WHERE is_deleted = 0 AND status = 'active' ORDER BY id ASC"
+    ),
+    relations: queryAll(
+      "SELECT from_knowledge_point_id AS fromId, to_knowledge_point_id AS toId, relation_type AS type FROM knowledge_relations WHERE is_deleted = 0"
+    ),
+    learningEvents: queryAll(
+      "SELECT id, kind, ts, lang, library_item_id AS libraryItemId, unit_id AS unitId, kp_id AS kpId, payload_json AS payloadJson FROM learning_events WHERE is_deleted = 0 ORDER BY ts ASC"
+    ),
+    recFeedback: queryAll(
+      "SELECT rec_run_id AS recRunId, item_key AS itemKey, kind, library_item_id AS libraryItemId, action, auto, ts FROM rec_feedback ORDER BY ts ASC"
+    ),
+    latestRecRun: latestRecRun(),
+    recentRunKeys: listRecentRunKeys(30),
+    readingEvents: queryAll(
+      "SELECT item_id AS itemId, char_pos AS charPos, created_at AS createdAt FROM reading_events WHERE created_at > ? ORDER BY created_at ASC",
+      [after]
+    )
+  };
+}
+
 module.exports = {
   foldSearch,
   initDb,
@@ -7076,5 +7572,17 @@ module.exports = {
   reconcileStaleMaterialMapRuns,
   listResumableMaterialMapRuns,
   findRunningMaterialMapRun,
-  listMindmapLearningStatus
+  listMindmapLearningStatus,
+  // v48.80（D124 / §4.20）：学习者模型事实表读写面（对 cards/review_logs/extracts/knowledge_* 只读）
+  listLearnerTracks,
+  saveLearnerTrack,
+  deleteLearnerTrack,
+  setTrackMaterial,
+  addLearningEvent,
+  addRecFeedback,
+  latestRecRun,
+  saveRecRun,
+  listRecentRunKeys,
+  resolveCardKpMap,
+  learnerFacts
 };

@@ -92,7 +92,7 @@
 ```
 electron/            主进程（CommonJS）
   main.js            入口：窗口、IPC 注册（**189 处 `ipcMain.handle/on`**，v48.28 实测）、bookasset/pdfres 协议、联网搜索、单实例锁
-  db.js              sql.js 仓储层：**31 张表**（v48.28 实测 `CREATE TABLE IF NOT EXISTS`；含 v36 `journal_entries`、v40 K 系列 6 表、摘录复习族 `extract_ops`/`op_journal`/`op_counter`）、迁移、黄金查询、日记持久化节流钩子
+  db.js              sql.js 仓储层：**36 张表**（v48.80 实测 `CREATE TABLE IF NOT EXISTS`；含 v36 `journal_entries`、v40 K 系列 6 表、摘录复习族 `extract_ops`/`op_journal`/`op_counter`、v48.80 D124 学习者事实表 5 张）、迁移、黄金查询、日记持久化节流钩子
   ai.js              AI 网关：配置/加密/流式/模型列表/reasoning_effort/供应商注册表/本地运行时探测（v48.68）
   optimizer.js       FSRS 参数优化器（fsrs-rs-nodejs 封装）
   prompts.js         10 个提示词模板（版本化播种，当前 v3）
@@ -130,14 +130,14 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 
 ## 4. 数据模型与接口抽象
 
-### 4.1 数据表（**当前实建 31 张**：v48.22 / D58 契约新增的 `extract_ops` / `op_counter` / `op_journal` 三张已于批 1 落地，v48.77 / D121 再增 `card_links` 1 张；另加 v42 用户记忆文件树——**非 DB 真源**，见 §4.18）
+### 4.1 数据表（**当前实建 36 张**：v48.22 / D58 契约新增的 `extract_ops` / `op_counter` / `op_journal` 三张已于批 1 落地，v48.77 / D121 再增 `card_links` 1 张，v48.80 / D124 再增学习者事实表 5 张；另加 v42 用户记忆文件树——**非 DB 真源**，见 §4.18）
 
 核心业务表带 `userId/updatedAt/syncVersion/isDeleted` 四件套，删除一律软删除：
 
 - **users / library_items / documents / assets / extracts / cards / card_issues / ai_gen_batches / review_logs / fsrs_configs**（另有 review_skips）
-- **表逐一点名（v48.16 / D52 收口＝与 `electron/db.js` 的 `CREATE TABLE` 同步；**v48.22 / D58 契约新增 `extract_ops` / `op_counter` / `op_journal` 三张——标「契约」者批 1 落地前**尚未实建**）**：`ai_gen_batches`、`assets`、`card_issues`、`card_links`（v48.77 / D121）、`cards`、`dict_sources`、`dictionary_cache`、`documents`、`extracts`、`fsrs_configs`、`insight_runs`、`journal_entries`、`knowledge_external_refs`、`knowledge_points`、`knowledge_proposals`、`knowledge_relations`、`library_items`、`material_map_calls`、`material_map_runs`、`material_map_shards`、`material_maps`、`memory_runs`、`personal_meaning_candidates`、`prompt_templates`、`reading_events`、`review_logs`、`review_skips`、`users`（以上 28 张，含 `card_links`）+ 批 1 已落地的 `extract_ops`、`op_counter`、`op_journal` 三张 = **31 张已实建**。其中 `reading_events`（阅读位置事件流，字数统计的唯一真源）此前从未在本文档点名，属 D-DOC-03 的漏项。
-- **D124 规划新增 5 张主库表**（`learner_tracks / track_materials / learning_events / rec_runs / rec_feedback`，设计稿 §5.1；L2-1 落地后再计入实建数与上面点名清单）。
-- **D124 规划新增独立派生库 `learner.db`**（写法仿 `dictionary.db`：sql.js 独立实例 + 原子落盘，存内容单元索引 / 通读次数 / KP 等级 / 词项索引等**派生缓存**，删除可重建、不进备份；详见设计稿 §5.2 与 §4.20）。
+- **表逐一点名（v48.16 / D52 收口＝与 `electron/db.js` 的 `CREATE TABLE` 同步；**v48.22 / D58 契约新增 `extract_ops` / `op_counter` / `op_journal` 三张——标「契约」者批 1 落地前**尚未实建**）**：`ai_gen_batches`、`assets`、`card_issues`、`card_links`（v48.77 / D121）、`cards`、`dict_sources`、`dictionary_cache`、`documents`、`extracts`、`fsrs_configs`、`insight_runs`、`journal_entries`、`knowledge_external_refs`、`knowledge_points`、`knowledge_proposals`、`knowledge_relations`、`learning_events`（v48.80 / D124）、`library_items`、`material_map_calls`、`material_map_runs`、`material_map_shards`、`material_maps`、`memory_runs`、`personal_meaning_candidates`、`prompt_templates`、`reading_events`、`rec_feedback`（v48.80 / D124）、`rec_runs`（v48.80 / D124）、`review_logs`、`review_skips`、`learner_tracks`（v48.80 / D124）、`track_materials`（v48.80 / D124）、`users`（以上 33 张，含 `card_links`）+ 批 1 已落地的 `extract_ops`、`op_counter`、`op_journal` 三张 = **36 张已实建**。其中 `reading_events`（阅读位置事件流，字数统计的唯一真源）此前从未在本文档点名，属 D-DOC-03 的漏项。
+- **v48.80 新增 5 张主库表**（`learner_tracks / track_materials / learning_events / rec_runs / rec_feedback`，设计稿 §5.1；已计入实建数与上面点名清单）。
+- **v48.80 新增独立派生库 `learner.db`**（写法仿 `dictionary.db`：sql.js 独立实例 + 原子落盘，存内容单元索引 / 通读次数 / KP 等级 / 词项索引等**派生缓存**，删除可重建、不进备份；详见设计稿 §5.2 与 §4.20）。
 - `cards.fsrs_json`：**全字段持久化** `{state,due,lapses,stability,difficulty,reps,lastReview,learningSteps}`（§4.4.1 契约）
 - `cards.fsrs_config_id`（v23）：当前 FSRS 状态**最近一次因调度写入**所用参数配置（滚动语义，非出生标签；写入规则见 §4.4.9）
 - `cards.occlusion_json`：图片挖空 `{rects:[{x,y,w,h,ord}], assetPath, shapes?:[{ord,kind:rect|ellipse|polygon, …}]}`（区域与形状均为相对图片百分比坐标；**rects 恒为形状包围盒**——旧渲染与 L11 校验的兼容层，shapes 为精确轮廓：rect 用 x/y/w/h、ellipse 用 cx/cy/rx/ry、polygon 用 points[{x,y}]；图片资产入 assets 表 kind=image-occlusion，v15 补齐生成链路，v25 补手绘选区形状）
