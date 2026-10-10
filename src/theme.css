@@ -7761,3 +7761,170 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wbw-btn.on { color: var(--accent); }
 .wbw-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .wbw-body .side-dock[data-placement="window"] { flex: 1; min-height: 0; border: none; }
+
+/* ==========================================================================
+   D123 修订（用户 2026-10-10）：制卡台还原 制卡台-融合优化版-v3.html 的视觉语言
+   —— 直角、hairline、单 accent；无「说明性长文案」常驻；高级字段为紧凑「标签—值」行；
+   不出现横向滚动（所有子项 min-width:0 + overflow-x:hidden）。放文件末尾以按序覆盖前文同名规则。
+   ========================================================================== */
+.wb-manual-body {
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-2);
+  border-bottom: 1px solid var(--border-strong);
+}
+.wb-manual-body > * { min-width: 0; }
+.side-dock[data-placement="bottom"] .wb-manual-body { border-bottom: none; }
+.wb-manual-body .wb-quote {
+  border-left: 2px solid var(--border-strong);
+  padding: 1px 0 1px var(--sp-3);
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 分段控件（题型 / AI 页签共用）：hairline 框，选中＝accent 实底白字 */
+.wb-seg, .dock-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+}
+.wb-seg button, .dock-tabs > button[role="tab"] {
+  height: 26px;
+  padding: 0 var(--sp-3);
+  background: none;
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  font-size: var(--fs-secondary);
+  color: var(--text-primary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wb-seg button:last-child, .dock-tabs > button[role="tab"]:last-child { border-right: 0; }
+.wb-seg button:hover:not(.on), .dock-tabs > button[role="tab"]:hover:not(.on) { background: var(--grey-1); }
+.wb-seg button.on, .dock-tabs > button[role="tab"].on { background: var(--accent); color: var(--accent-on); }
+.dock-tabs { gap: 0; }
+.dock-tabs > button[role="tab"] { padding: 0 var(--sp-4); }
+
+/* 正面 / 背面框：占位符即标签，无独立 label；聚焦只变 accent 边 */
+.wb-fields { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.wb-fields .markdown-editor-compact {
+  border-color: var(--border-strong);
+  padding: 6px var(--sp-2);
+  line-height: 1.6;
+  font-size: var(--fs-secondary);
+}
+.wb-fields .markdown-editor-compact:focus-within { border-color: var(--accent); }
+.wb-fields .markdown-editor-compact .ProseMirror { min-height: calc(var(--md-editor-min-rows, 2) * 1.6em); }
+.wb-fields .manual-region-preview { margin: 0; max-width: 100%; }
+.wb-cloze-preview { margin: 0; font-size: var(--fs-meta); color: var(--text-helper); overflow-wrap: anywhere; }
+.wb-empty { margin: 0; font-size: var(--fs-meta); color: var(--text-helper); }
+
+/* 「更多」：紧凑 标签—值 行，无 label 长句 */
+.wb-more { display: flex; flex-direction: column; border-top: 1px solid var(--border-subtle); padding-top: var(--sp-1); }
+.wb-more[hidden] { display: none; }
+.wb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 34px;
+  min-width: 0;
+  margin: 0;
+}
+.wb-k { flex: none; width: 48px; font-size: var(--fs-meta); color: var(--text-helper); white-space: nowrap; }
+.wb-v { flex: 1; min-width: 0; }
+.wb-line {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dashed var(--border-strong);
+  border-radius: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-secondary);
+  outline: none;
+}
+.wb-line:focus { border-bottom-color: var(--accent); }
+.wb-line::placeholder { color: var(--text-placeholder); }
+.wb-range { flex: 1; min-width: 0; accent-color: var(--accent); }
+.wb-num { flex: none; width: 24px; text-align: right; font-size: var(--fs-meta); color: var(--text-primary); }
+.wb-check { cursor: pointer; gap: var(--sp-2); font-size: var(--fs-secondary); color: var(--text-secondary); }
+.wb-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 0;
+  background: var(--paper);
+  position: relative;
+  cursor: pointer;
+}
+.wb-check input:checked { background: var(--accent); border-color: var(--accent); }
+.wb-check input:checked::after {
+  content: "";
+  position: absolute;
+  left: 3.5px;
+  top: 0.5px;
+  width: 3px;
+  height: 7px;
+  border: solid var(--accent-on);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+.wb-more .udc-picker, .wb-more .tag-input { gap: var(--sp-1); }
+.wb-more .dd-btn { height: 26px; padding: 0 var(--sp-2); border-color: var(--border-strong); }
+.wb-more .dd-menu { right: auto; left: 0; max-width: calc(var(--wb-w) - 96px); }
+.wb-more .tag-input-box { flex: 1 1 100px; min-width: 100px; }
+
+/* 页脚：左「更多 ▾」安静灰字，右「制卡」accent 实底 */
+.wb-foot { margin-top: 0; padding: var(--sp-1) 0 var(--sp-1); justify-content: space-between; }
+.wb-foot .btn {
+  height: 28px;
+  padding: 0 var(--sp-4);
+  min-width: 64px;
+  font-size: var(--fs-secondary);
+  font-weight: 700;
+}
+.wb-more-toggle { height: 28px; padding: 0; }
+
+/* 相似卡预检面板在 dock 内收紧 */
+.wb-manual-body .manual-similar { margin: 0; padding: var(--sp-2); }
+
+/* AI 区：自由材料框与底部输入条 */
+.wb-free textarea {
+  border-color: var(--border-strong);
+  resize: none;
+  min-height: 96px;
+  font-size: var(--fs-secondary);
+}
+.wb-free textarea:focus { border-color: var(--accent); }
+.dock-empty { padding: var(--sp-3) var(--sp-4); gap: var(--sp-3); }
+.wb-composer { border-top-color: var(--border-strong); background: var(--paper); }
+.wb-composer textarea { border-color: var(--border-strong); }
+.wb-composer textarea:focus { border-color: var(--accent); }
+.wb-composer-send { min-width: 56px; font-weight: 700; }
+.ai-explain-mode-label { font-family: inherit; color: var(--text-helper); }
+
+/* 制卡页：知识点区贴近设计稿（节标题 ink 下划线、知识点标题 hairline 分隔） */
+.ai-kps { border-top: 0; padding-top: 0; margin-top: var(--sp-2); }
+.ai-kps-head { border-bottom: 1px solid var(--text-primary); padding-bottom: var(--sp-1); margin-bottom: 0; }
+.ai-kps-title { font-size: var(--fs-secondary); font-weight: 700; color: var(--text-primary); letter-spacing: 0; }
+.ai-kp { margin-top: 0; padding: var(--sp-2) 0 var(--sp-1); border-bottom: 1px solid var(--border-subtle); }
+.ai-kp-text { font-size: var(--fs-secondary); }
+
+/* 阅读器：「展开侧栏」钮收起态与同行工具钮（24px 高、行内 8px 上内距）垂直对齐
+   （展开态浮在轨头 (16, 60)，保持不变） */
+.annot-toggle.bar-btn[data-reader-sidebar-toggle][aria-expanded="false"] { top: calc(48px + var(--sp-2)); }

@@ -265,7 +265,7 @@ const BOOK = "FSRSTEST-M6-2 导测";
     tas[1].dispatchEvent(new Event("input", { bubbles: true }));
     return tas.length;
   })()`);
-  await cdp.eval(clickBtnText("创建卡片", "[data-card-dock] .btn-primary"));
+  await cdp.eval(clickBtnText("制卡", "[data-card-dock] .wb-foot .btn-primary"));
   await wait(1200);
   const cardOk = await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();

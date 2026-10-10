@@ -301,7 +301,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
     tas[1].dispatchEvent(new Event("input", { bubbles: true }));
     return tas.length;
   })()`);
-  await cdp.eval(clickBtn("创建卡片", "[data-card-dock] .btn-primary"));
+  await cdp.eval(clickBtn("制卡", "[data-card-dock] .wb-foot .btn-primary"));
   await wait(1200);
   const cardOk = await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();

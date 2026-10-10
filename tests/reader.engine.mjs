@@ -232,7 +232,7 @@ try {
     return "filled=" + eds.length;
   })()`);
   await wait(300); // React 把 onChange 镜像反映到 canSave/按钮 disabled 态（无等待时点击落在禁用钮上）
-  await cdp.eval(clickByText("创建卡片", "[data-card-dock] .btn-primary"));
+  await cdp.eval(clickByText("制卡", "[data-card-dock] .wb-foot .btn-primary"));
   await wait(1000);
   const cardOk = await cdp.eval(`(async () => {
     const all = await window.cardsAPI.listAll();
@@ -367,7 +367,7 @@ try {
   })()`);
   await wait(700);
   const z3 = await cdp.eval(`(() => {
-    const tab = [...document.querySelectorAll(".seg-tabs button")].find(b => b.textContent.includes("填空题"));
+    const tab = [...document.querySelectorAll("[data-card-dock] .wb-seg button")].find(b => b.textContent.includes("填空题"));
     if (!tab) return "no tab";
     tab.click();
     return "tab-clicked";
@@ -382,7 +382,7 @@ try {
   })()`);
   await wait(400);
   const z5 = await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll("[data-card-dock] .btn-primary")].find(x => x.textContent.includes("创建卡片"));
+    const b = [...document.querySelectorAll("[data-card-dock] .btn-primary")].find(x => x.textContent.includes("制卡"));
     if (!b) return "no create btn";
     if (b.disabled) return "create disabled";
     b.click();

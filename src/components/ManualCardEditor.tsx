@@ -240,6 +240,159 @@ export function ManualCardForm({
         ? Boolean(front.trim()) && Boolean(back.trim())
         : Boolean(front.trim());
 
+  // D121 §4.1：相似已有卡预检面板（内联、不弹窗；每个 front 文本只出现一次）；modal / dock 两种形态共用
+  const hitsPanel =
+    hits && hits.length > 0 ? (
+          <div className="manual-similar" data-testid="manual-similar-panel" role="region" aria-label="相似已有卡">
+            <p className="manual-similar-title">发现 {hits.length} 张相似已有卡——确认不是重复或矛盾后再保存</p>
+            <ul className="manual-similar-list">
+              {hits.map((h) => (
+                <li key={h.id} className="manual-similar-item" data-testid="manual-similar-item">
+                  <div className="disamb-candidate-q">{clipText(h.front, 80)}</div>
+                  <div className="disamb-candidate-a">答：{clipText(h.back, 60) || "（无）"}</div>
+                  <div className="disamb-candidate-meta">
+                    <span>{h.source}</span>
+                    <span className="mono">相似 {Math.round(h.score * 100)}%</span>
+                    {h.differs && <span className="disamb-tag">答案不同</span>}
+                    {onDisambiguate && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm manual-similar-disamb"
+                        disabled={saving}
+                        onClick={() => void save(h.id)}
+                      >
+                        保存并辨析
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="manual-similar-actions">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setHits(null)}>返回修改</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => void save()}>仍然保存</button>
+            </div>
+          </div>
+        
+    ) : null;
+
+  // D123 修订（用户 2026-10-10，还原 制卡台-融合优化版-v3.html）：dock 形态只留「引用 · 题型 · 正面/背面框 ·
+  // 页脚（更多 / 制卡）」，说明性长文案收进 title / placeholder；高级字段收进「更多」（hidden 不卸载，载荷不变）。
+  if (variant === "dock") {
+    const MODES: Array<["qa" | "reverse" | "cloze" | "imageOcclusion", string]> = [
+      ["qa", "问答题"],
+      ["reverse", "翻转问答"],
+      ["cloze", "填空题"],
+      ["imageOcclusion", "图片挖空"]
+    ];
+    return (
+      <>
+        {quote && <div className="wb-quote" title={quote}>{quote}</div>}
+        <div className="wb-seg" role="tablist" aria-label="卡片类型" data-testid="manual-types">
+          {MODES.map(([m, label]) => (
+            <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "on" : undefined} onClick={() => setMode(m)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div
+          className="wb-fields"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && canSave && !saving && !checking) {
+              e.preventDefault();
+              void onCreateClick();
+            }
+          }}
+        >
+          {mode === "reverse" ? (
+            <>
+              <MdField value={front} onChange={setFront} placeholder="A 面 · 题面（建议「领域: 问题」）" label="A 面 · 题面" />
+              <MdField value={back} onChange={setBack} placeholder="A 面 · 答案（≤15 字）" label="A 面 · 答案" />
+              <MdField value={bFront} onChange={setBFront} placeholder="B 面 · 题面（留空＝用 A 面答案反问）" label="B 面 · 题面" />
+              <MdField value={bBack} onChange={setBBack} placeholder="B 面 · 答案（留空＝用 A 面题面）" label="B 面 · 答案" />
+            </>
+          ) : mode === "qa" ? (
+            <>
+              <MdField value={front} onChange={setFront} placeholder="正面（建议「领域: 问题」）" label="题面" />
+              <MdField value={back} onChange={setBack} placeholder="背面（答案，≤15 字）" label="答案" />
+            </>
+          ) : mode === "cloze" ? (
+            <>
+              <MdField value={front} onChange={setFront} placeholder="挖空文本：用 **粗体** 或〔括号〕包住答案" label="挖空文本" />
+              {front.trim() && <p className="wb-cloze-preview mono">{front.replace(/\*\*(.+?)\*\*/g, "〔$1〕")}</p>}
+            </>
+          ) : imageRegion ? (
+            <>
+              <div className="occlusion-stage occlusion-preview manual-region-preview">
+                <img src={imageRegion.dataUrl} alt="" className="occlusion-img" />
+                <OcclusionShapes occlusion={{ shapes: [imageRegion.shape] }} cardOrd={0} />
+              </div>
+              <MdField value={front} onChange={setFront} placeholder="正面（默认「图中遮挡区域对应的是什么？」）" label="正面（图片挖空）" />
+              <MdField value={back} onChange={setBack} placeholder="背面（答案，必填）" label="背面（图片挖空）" />
+            </>
+          ) : (
+            <p className="wb-empty" title="关闭本窗口，点击阅读材料中的图片进入聚焦，框选区域后选择「手动制卡」">先在阅读材料里框选图片区域</p>
+          )}
+        </div>
+
+        {hitsPanel}
+
+        <div className="wb-more" data-testid="manual-more" hidden={!moreOpen}>
+          <div className="wb-row" title="对齐 R17：UDC 受控清单，≤2 个，首个为主领域">
+            <span className="wb-k">领域</span>
+            <div className="wb-v"><UdcPicker value={domain} onChange={setDomain} /></div>
+          </div>
+          {tagsEnabled && (
+            <div className="wb-row" title="自由组织词汇，用 :: 分层级，如「考研::英语」">
+              <span className="wb-k">标签</span>
+              <div className="wb-v"><TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" /></div>
+            </div>
+          )}
+          <label className="wb-row" title="只能写领域/学科名，禁止泄漏答案（规则 16）">
+            <span className="wb-k">前缀</span>
+            <input className="wb-line" type="text" value={contextPrefix} onChange={(e) => setContextPrefix(e.target.value)} placeholder="例：统计:" />
+          </label>
+          <label className="wb-row" title="规则 7：克制使用">
+            <span className="wb-k">助记</span>
+            <input className="wb-line" type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="例：中位数的「中」＝正中间" />
+          </label>
+          <label className="wb-row" title="同组卡片共享同一 knowledgePointId">
+            <span className="wb-k">知识点</span>
+            <input className="wb-line" type="text" value={knowledgePointId} onChange={(e) => setKnowledgePointId(e.target.value)} placeholder="例：kp-中位数" />
+          </label>
+          <div className="wb-row">
+            <span className="wb-k">优先级</span>
+            <input className="wb-range" type="range" min={0} max={100} value={priority} onChange={(e) => setPriority(Number(e.target.value))} aria-label="优先级" />
+            <span className="wb-num mono">{priority}</span>
+          </div>
+          <label className="wb-row wb-check" title="规则 19：统计数字 / 版本 / 价格等易变内容勾选，写入今日日期">
+            <input type="checkbox" checked={dateStamped} onChange={(e) => setDateStamped(e.target.checked)} />
+            <span>标注日期</span>
+          </label>
+        </div>
+
+        <div className="form-actions wb-foot">
+          <button type="button" className="wb-more-toggle" data-testid="manual-more-toggle" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)}>
+            更多
+            <IconChevronDown size={12} className={moreOpen ? "is-flip" : undefined} />
+          </button>
+          <button
+            ref={createBtnRef}
+            className="btn btn-primary"
+            disabled={saving || checking || !canSave}
+            title="Ctrl+Enter"
+            onClick={(e) => {
+              settle(e.currentTarget);
+              void onCreateClick();
+            }}
+          >
+            {saving ? "保存中…" : checking ? "检查中…" : "制卡"}
+          </button>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
     {quote && <blockquote className="card-quote card-marked">{quote}</blockquote>}
@@ -328,7 +481,7 @@ export function ManualCardForm({
 
         {/* M5：与 AI 制卡同构的元数据（领域标签 / 上下文前缀 / 助记 / 知识点分组 / 日期标记）
             D123：dock 变体收进「更多选项」（hidden 不卸载） */}
-        <div className="form-more" data-testid="manual-more" hidden={variant === "dock" && !moreOpen}>
+        <div className="form-more" data-testid="manual-more" hidden={false}>
         <div className="form-field">
           <label>领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）</label>
           <UdcPicker value={domain} onChange={setDomain} />
@@ -377,55 +530,10 @@ export function ManualCardForm({
         </div>
         </div>
 
-        {/* D121 §4.1：相似已有卡预检面板（内联、不弹窗；每个 front 文本只出现一次） */}
-        {hits && hits.length > 0 && (
-          <div className="manual-similar" data-testid="manual-similar-panel" role="region" aria-label="相似已有卡">
-            <p className="manual-similar-title">发现 {hits.length} 张相似已有卡——确认不是重复或矛盾后再保存</p>
-            <ul className="manual-similar-list">
-              {hits.map((h) => (
-                <li key={h.id} className="manual-similar-item" data-testid="manual-similar-item">
-                  <div className="disamb-candidate-q">{clipText(h.front, 80)}</div>
-                  <div className="disamb-candidate-a">答：{clipText(h.back, 60) || "（无）"}</div>
-                  <div className="disamb-candidate-meta">
-                    <span>{h.source}</span>
-                    <span className="mono">相似 {Math.round(h.score * 100)}%</span>
-                    {h.differs && <span className="disamb-tag">答案不同</span>}
-                    {onDisambiguate && (
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm manual-similar-disamb"
-                        disabled={saving}
-                        onClick={() => void save(h.id)}
-                      >
-                        保存并辨析
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <div className="manual-similar-actions">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setHits(null)}>返回修改</button>
-              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => void save()}>仍然保存</button>
-            </div>
-          </div>
-        )}
+        {hitsPanel}
 
         <div className="form-actions">
-          {variant === "dock" ? (
-            <button
-              type="button"
-              className="wb-more-toggle"
-              data-testid="manual-more-toggle"
-              aria-expanded={moreOpen}
-              onClick={() => setMoreOpen((v) => !v)}
-            >
-              更多选项
-              <IconChevronDown size={12} className={moreOpen ? "is-flip" : undefined} />
-            </button>
-          ) : (
-            <button className="btn btn-secondary" onClick={onCancel}>取消</button>
-          )}
+          <button className="btn btn-secondary" onClick={onCancel}>取消</button>
           <button
             ref={createBtnRef}
             className="btn btn-primary"

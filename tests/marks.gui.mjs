@@ -444,7 +444,7 @@ try {
   // 保存按钮用程序化点击：制卡面板是长表单，真鼠标点位会落在滚动视口之外
   // （m6-2native 同款做法）——本轮的「真键鼠」硬要求针对的是标记的 hover/点选
   const saveClicked = await cdp.eval(`(() => {
-    const b = [...document.querySelectorAll("[data-card-dock] button")].find((x) => x.textContent.trim() === "创建卡片");
+    const b = [...document.querySelectorAll("[data-card-dock] button")].find((x) => x.textContent.trim() === "制卡");
     if (!b) return "no btn";
     if (b.disabled) return "disabled";
     b.click();
