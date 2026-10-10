@@ -1,3 +1,5 @@
+> **修订 r2（2026-10-10，用户确认 Q1–Q5）**：全球化（任意母语 / 任意材料语言 / 字符串表，§6.2、§11.6、§11.9）；整体总开关（§11.8）；推荐条数面板内可调；面板位置确认在数据页顶部；查词制卡默认卡型不改（§15）。
+
 # D124 学习者模型与下一步推荐重设计（Learner Model v2，代号 LM-1）
 
 > 状态：**设计定稿待用户确认**（2026-10-10，Opus 5.5 出稿）。本文件是唯一实现依据，取代 `AI_DEVELOPMENT_GUIDE.md` §4.7（BEMM）、§4.8（Frontier 六因子）、§4.9（材料画像）、§4.11（LKM 双轨调优）、§4.7 v44 探针契约、§6.4.1（Next Extract E2）以及 §9.1 M8 路线中的 K3–K9（替代关系见 §2.3）。
@@ -18,9 +20,11 @@
 7. **不新增 npm 依赖。** 分词用 `Intl.Segmenter`（Node 与 Electron 31 内置），词干用本文给的 Porter 算法自己实现。
 8. 主库写入后必须调用 `persist()`（`electron/db.js:812`）；`learner.db` 写入后调用 `learnerDb.save()`（§5.2）。
 9. IPC 通道名一律 `learner:<动词>`（小写域名 + 冒号 + 驼峰动词，闸门 f45 S1）。
-10. 纯函数模块 `electron/lm*.js` **只允许** `require("node:crypto")` 和同目录的 `./lmParams`、`./lmText`、`./lmLex`、`./lmLevels`（依赖方向：lmParams ← lmText ← lmLex ← lmLevels ← lmRecommend，禁止反向）；另外允许 `require("./kpNorm")`（取 `normalizeKpLabel`；`electron/kpNorm.js` 只依赖 Node 内置 `crypto`，可在沙箱直接加载）。**禁止** require `electron`、`fs`、`path`、`./db`、`./learnerDb`、`./learnerRefresh` 等其他任何模块。这样能在沙箱用 `node` 直接测。
-11. **数字以 §10 参数文件为准**：正文里出现的阈值若与 §10 不一致，以 §10 为准并报告。
-12. **测试文件头**：第一行 `// @runtime: node`（或 `electron`），第二行 `// 运行：node tests/<文件名>`（electron 的写 `// 运行：npx electron tests/<文件名>`）——闸门 f11 L9 要求文件头含运行命令。
+10. 纯函数模块 `electron/lm*.js` **只允许** `require("node:crypto")` 和同目录的 `./lmParams`、`./lmText`、`./lmLex`、`./lmLevels`、`./lmStrings`（依赖方向：lmParams ← lmText ← lmLex ← lmLevels ← lmRecommend，lmStrings 只被 lmRecommend 使用，禁止反向）；另外允许 `require("./kpNorm")`（取 `normalizeKpLabel`；`electron/kpNorm.js` 只依赖 Node 内置 `crypto`，可在沙箱直接加载）。**禁止** require `electron`、`fs`、`path`、`./db`、`./learnerDb`、`./learnerRefresh` 等其他任何模块。这样能在沙箱用 `node` 直接测。
+11. **不得写死任何一种语言**（用户母语、材料语言、界面语言都可能是任意语言，§6.2 全球化约束、§11.9）；**用户可见文字只能来自字符串表**（§11.9）。
+12. **总开关**：每个新增的学习者模型入口都要按 §11.8 检查开关。
+13. **数字以 §10 参数文件为准**：正文里出现的阈值若与 §10 不一致，以 §10 为准并报告。
+14. **测试文件头**：第一行 `// @runtime: node`（或 `electron`），第二行 `// 运行：node tests/<文件名>`（electron 的写 `// 运行：npx electron tests/<文件名>`）——闸门 f11 L9 要求文件头含运行命令。
 
 ### 0.2 术语表（全文统一，代码里的英文名照抄）
 
@@ -182,9 +186,11 @@
 | `electron/lmLex.js` | 纯函数 | 分词、词项归一（含 Porter）、停用词、覆盖率、i+1 句子判定 |
 | `electron/lmLevels.js` | 纯函数 | 可提取率、KP 等级、词项状态、通读次数计算 |
 | `electron/lmRecommend.js` | 纯函数 | 轨道权重、候选生成、打分、选取、理由文案 |
+| `electron/lmStrings.js` | 纯常量 | 主进程侧用户可见文字表 `{ zh, en }`（§11.9） |
 | `electron/learnerDb.js` | 有状态 | 独立 sql.js 库 `learner.db` 的打开 / 建表 / 原子保存（仿 `electron/dictDb.js`） |
 | `electron/learnerRefresh.js` | 有状态 | 刷新管线编排、单飞锁、进度、快照组装 |
-| `src/lib/learner.ts` | 渲染层 | 类型定义与 `learnerAPI` 封装 |
+| `src/lib/learner.ts` | 渲染层 | 类型定义、`learnerAPI` 封装、`learnerSettings`、`NATIVE_LANG_CHOICES` |
+| `src/lib/learnerStrings.ts` | 渲染层 | 界面文字表 `{ zh, en }`（§11.9） |
 | `src/components/learner/*.tsx` | 渲染层 | 面板与对话框（§11） |
 | `tests/lm-*.test.cjs` | 测试 | 见 §13 |
 
@@ -410,28 +416,49 @@ CREATE TABLE IF NOT EXISTS lexeme_states (
 
 ### 6.2 分词与词项归一（`lmLex.js`）
 
+> **全球化约束（用户 2026-10-10）**：软件面向全球学习者，用户母语各不相同，任何语言都可能是「外语」。因此本节所有函数**必须对任意语言可用**：没有专门规则的语言走「通用规则」降级，而不是被误判成英语或被丢弃。语言代码一律用 ISO 639-1 主子标签（`zh-TW`、`zh-CN` → `zh`；`pt-BR` → `pt`），取法 `String(tag).toLowerCase().split(/[-_]/)[0]`，记为 `baseLang(tag)`。
+
+#### 语言能力表 `LANG_PROFILE`（`lmLex.js` 常量）
+| 字段 | 含义 | 取值 |
+|---|---|---|
+| `spaced` | 词之间是否用空格分隔 | 不分隔：`zh ja th lo km my bo`；其余全部分隔 |
+| `cased` | 是否有大小写 | 有：拉丁、西里尔、希腊、亚美尼亚字母的语言（按文字判断：token 含 `\p{Lu}` 或 `\p{Ll}` 即视为有大小写，不必列语言） |
+| `properByCaps` | 能否用「句中首字母大写」识别专名 | 仅 `en fr es it pt nl sv da no nb nn ro ca pl cs id ms`；**`de` 必须为 false**（德语所有名词首字母大写）；其余语言 false |
+| `stemmer` | 词干算法 | 仅 `en` = Porter；其余无（只做大小写折叠） |
+| `stopwords` | 停用词表 | `en ja zh` 有表（下方）；其余空集 |
+
 #### `detectLang(text: string): string`
-取前 3000 字统计：假名 `[぀-ヿ]`、汉字 `[一-鿿]`、谚文 `[가-힯]`、拉丁字母 `[A-Za-z]`。
-- 假名 > 20 且 假名 ≥ 0.05×(假名+汉字) → `ja`
-- 否则 汉字 > 50 且 汉字 > 拉丁 → `zh`
-- 否则 谚文 > 50 → `ko`
-- 否则 拉丁 > 200 → `en`
-- 否则 `''`
-材料语言 = `library_items.lang` 非空则用它，否则用 `detectLang`（非 PDF 取 markdown 前 3000 字，PDF 取前 3 页）。
+取前 3000 字，按 Unicode 文字统计字符数：假名 `\p{Script=Hiragana}|\p{Script=Katakana}`、汉字 `\p{Script=Han}`、谚文 `\p{Script=Hangul}`、泰文 `\p{Script=Thai}`、阿拉伯 `\p{Script=Arabic}`、希伯来 `\p{Script=Hebrew}`、西里尔 `\p{Script=Cyrillic}`、希腊 `\p{Script=Greek}`、天城文 `\p{Script=Devanagari}`、拉丁 `\p{Script=Latin}`。按顺序判定，第一个命中即返回：
+1. 假名 > 20 且 假名 ≥ 0.05×(假名+汉字) → `ja`
+2. 汉字 > 50 且 汉字 > 拉丁 → `zh`
+3. 谚文 > 50 → `ko`；泰文 > 50 → `th`；希伯来 > 50 → `he`；希腊 > 50 → `el`；天城文 > 50 → `hi`
+4. 阿拉伯 > 50 → `ar`（波斯语等同文字语言无法区分，用户须在书籍属性里手动指定）
+5. 西里尔 > 50 → `ru`（乌克兰语等同理，含 `ї є і ґ` 任一 > 5 次则 `uk`）
+6. 拉丁 > 200 → 用**停用词投票**区分：对下表每种语言，数文本里（小写化后、按空格/标点切开）属于该语言特征词集的词个数，得票最多且 ≥ 5 票的语言胜出；都不足 5 票 → `''`（未知）。
+   - `en`: the and of to is that it with for was
+   - `fr`: le la les des est une dans pour qui pas
+   - `de`: der die und das ist nicht ein eine mit sich
+   - `es`: el los las que una por con para del está
+   - `it`: il che di della per non sono una gli è
+   - `pt`: o os que não uma para com do da são
+   - `nl`: de het een en van dat niet ik zijn met
+7. 否则 `''`。
+
+`detectLang` 只是兜底：**用户在书籍属性里设的 `library_items.lang` 永远优先**。材料语言 = `baseLang(library_items.lang)` 非空则用它，否则用 `detectLang`（非 PDF 取 markdown 前 3000 字，PDF 取前 3 页）。材料语言为 `''` 的材料不进入任何 language 轨道（轨道管理里在「未归类」下提示「语言未知，请在书籍属性中设置」）。
 
 #### `tokenize(text, lang): Token[]`
 `Token = { surface, start, end, proper }`
-- 用 `new Intl.Segmenter(lang || "en", { granularity: "word" })`，只保留 `isWordLike === true` 的段。
+- 用 `new Intl.Segmenter(lang || "und", { granularity: "word" })`，只保留 `isWordLike === true` 的段（Segmenter 内置泰文、日文、中文等无空格文字的词典切分）。
 - 丢弃纯数字 `/^\p{N}+$/u`。
-- `ja` / `zh`：丢弃不含汉字或假名的段（夹杂的英文词不计）。
-- `en` 等拉丁语言：`proper = 词长 ≥ 2 && 首字母大写 && 不是句首词`（单字母词如 `I` 一律 `proper=false`；全大写缩写如 `NASA` 也按此规则判为 proper）。判定句首：该词之前最近的非空白字符是 `.!?` 或文本开头或换行。
-- `ja/zh/ko` 等：`proper` 一律 `false`。
+- 丢弃与材料语言主文字不同的段：`ja` 只留含汉字或假名的段；`zh` 只留含汉字的段；`ko` 只留含谚文的段；其余语言只留含字母 `\p{L}` 的段（夹杂的外文词不计）。
+- `proper`：仅 `properByCaps` 为 true 的语言才判断——`proper = 词长 ≥ 2 && 首字母为大写 \p{Lu} && 不是句首词`（单字母词一律 false；全大写缩写如 `NASA` 判为 proper）。句首：该词之前最近的非空白字符是 `.!?…。！？` 或文本开头或换行。其他语言 `proper` 一律 `false`。
 - `Intl.Segmenter` 不存在时（极旧环境）退化为 `text.match(/[\p{L}\p{M}]+/gu)`。
 
 #### `lexemeKey(surface, lang): string`
-- 公共：`s = surface.normalize("NFKC")`。
-- `en`：`s = s.toLowerCase().replace(/[’']s$/, "")`；若 `IRREGULAR[s]` 存在则 `s = IRREGULAR[s]`；返回 `porterStem(s)`。
-- 其他语言：返回 `s`（`ja/zh/ko` 保留原形；不做假名折叠）。已知局限：日语活用形与辞书形是不同键（如「食べ」与「食べる」），v1 接受，查词埋点用「句内重叠」规则补救（§6.7）。
+- 公共：`s = surface.normalize("NFKC")`；若含大小写字母，`s = s.toLocaleLowerCase(lang || undefined)`（土耳其语 `İ/I` 依赖 locale，必须传 lang）。
+- `en`：再 `s = s.replace(/[’']s$/, "")`；若 `IRREGULAR[s]` 存在则 `s = IRREGULAR[s]`；返回 `porterStem(s)`。
+- `fr / it` 等带省音的语言：去掉词首省音前缀 `/^(l|d|j|m|n|s|t|c|qu)[’']/`（`l'homme` → `homme`）。
+- 其他语言：返回 `s`（不做词干）。已知局限：屈折丰富的语言（德、俄、日活用等）同一词的不同形态是不同键；v1 接受，查词埋点用「句内重叠」规则补救（§6.7），L7 再按语言加词干/形态分析。
 
 `porterStem`：以 tartarus.org/martin/PorterStemmer 的官方参考实现为准（即 1980 原算法 + 官方两处修订：step 2 的 `bli→ble`、`logi→log`），长度 ≤ 2 的词原样返回。§13.2 的用例必须全部通过。
 
@@ -453,7 +480,7 @@ children→child; men→man; women→woman; mice→mouse; feet→foot; teeth→t
 - `en`：a an the and or but if then else of to in on at by for with from as is are was were be been being am do does did have has had i you he she it we they me him her us them my your his its our their this that these those there here what which who whom whose when where why how not no yes so than too very can could will would shall should may might must just also only about into over under again more most some any all each both few other such own same up down out off
 - `ja`：の に は を た が で て と し れ さ ある いる も する から な こと として い や れる など なっ ない この ため その あっ よう また もの という あり まで られ なる へ か だ これ によって により おり より による ず なり られる において ば なかっ なく しかし について せ だっ できる それ う ので なお のみ でき き つ における および いう さらに でも ら たり ます ん です
 - `zh`：的 了 和 是 在 有 这 那 也 就 都 而 与 及 或 但 被 把 将 对 从 向 以 于 为 着 过 之 其 所 得 地 么 吗 呢 吧 啊 不 没 很 我 你 他 她 它 我们 你们 他们 这个 那个 一个 什么 因为 所以 如果 但是 可以 没有 自己 已经 还 又 再 才 就是 这样 那样
-- 其他语言：空集。
+- 其他语言：空集。**没有停用词表的语言用「频率替代」**：该语言 `lexemes` 中 `total_count` 排名前 `FREQ_STOP_TOP`(50) 的词项在 i+1 判定、语境串、快测、词项推荐中视同停用词（`is_stop` 列仍为 0，判定时现算）；这样不必为每种语言维护词表也能排除功能词。
 
 停用词**计入覆盖率分子**（视为已知），**不参与** i+1 判定、语境串、快测、词项推荐。
 
@@ -624,7 +651,7 @@ bandOf(coverage /* number */, shift = 0 /* §8.6 的偏移，正数=更严 */) �
   // coverage ≥ EASY+shift → easy；≥ OPTIMAL+shift → optimal；≥ INTENSIVE+shift → intensive；否则 hard
 isIPlusOneSentence(tokens /* tokenize 的结果 */, isKnownKey /* (key) => boolean，停用词也返回 true */, lang) → string | null
   // 排除 proper 的 token；对剩余 token 求 lexemeKey；未知的「不同 key」恰好 1 个才返回该 key（同一个未知词出现两次算 1 个）
-  // 长度：lang 为 ja/zh/ko 时句子纯文本长度 8–60 字；其他语言 token 数 6–40；不满足返回 null
+  // 长度：LANG_PROFILE[lang].spaced 为 false（zh ja th lo km my bo）时句子纯文本长度 8–60 字；其他语言 token 数 6–40；不满足返回 null
 ```
 - 覆盖带含义：`easy` 泛读、`optimal` 最佳输入、`intensive` 精读、`hard` 太难。阈值见 §10 `BANDS`。
 - `learningCount(unit)` = 单元内状态为 `learning` 的不同词项数（不含停用词）。
@@ -644,8 +671,9 @@ isIPlusOneSentence(tokens /* tokenize 的结果 */, isKnownKey /* (key) => boole
 KP 的 `domain_id ∈ t.udc_codes` → 属于 t；否则看它链接卡片的材料，取材料所属轨道中卡数最多的那个。
 
 #### 系统提议轨道（`proposeTracks`，纯函数）
-- 每种非母语语言（材料语言非空且不在 `app.learner.nativeLangs` 中）且有 ≥ 1 份材料 → 提议 `{mode:"language", lang, label: 语言中文名}`（中文名用 `src/lib/dict.ts` 的 `languageLabel` 同款映射，主进程里复制一份小表：en 英语、ja 日语、zh 中文、ko 韩语、fr 法语、de 德语、es 西班牙语、ru 俄语，其余用代码本身）。
-- 每个 UDC 叶子，若卡片数 ≥ 5 或自动归属材料 ≥ 2 → 提议 `{mode: §3.1 默认, udc_codes:[叶子], label: UDC 中文名}`。
+- 每种非母语语言（材料语言非空且不在母语生效值中，§11.6）且有 ≥ 1 份材料 → 提议 `{mode:"language", lang, label: 语言名}`。**语言名按界面语言生成**：`new Intl.DisplayNames([uiLocale], { type: "language" }).of(lang)`（`uiLocale` 见 §11.9；失败时用代码本身，如 `"sw"`）。不要手写语言名表。
+- 每个 UDC 叶子，若卡片数 ≥ 5 或自动归属材料 ≥ 2 → 提议 `{mode: §3.1 默认, udc_codes:[叶子], label: UDC 名称}`（UDC 名称当前只有中文表 `electron/udc.js`；`uiLocale` 非 `zh` 时先显示中文名，待全局 i18n 落地后由字符串表接管，见 §11.9）。
+- 提议轨道的 `label` 只在展示时生成，不落库；用户「采纳」时才把当时显示的 label 写进 `learner_tracks.label`（之后用户可改名）。
 - 已有同 lang 的 language 轨道、或已有包含该叶子的非 language 轨道 → 不再提议。
 - **用户一条轨道都没有时，推荐引擎把全部提议当作隐式轨道使用**（不落库），面板顶部提示「这些轨道是根据书架自动推断的，点此确认或调整」。
 
@@ -755,7 +783,7 @@ type Candidate = {
 - concept / procedural：若 `readiness(u) < 0.4`，**不出 K1**，改为对 u 的未就绪先修 KP（score 最低的那个）出一条 K5 reinforce（若该 KP 有卡）或 K9 find-material（若该 KP 没有任何单元链接）。
 - 特征：fit = 按 mode 算（§7.2）；value：概念类 `0.6 + 0.4 × novelty(u)`，语言类 `0.5 + 0.5 × recycling(u)`，narrative/factual `0.6`；urgency：距最近通读 d 天，`d < 1 → 0`，`1 ≤ d ≤ 7 → d/7`，`7 < d ≤ 30 → 1`，`d > 30 → 0.5`；momentum：`d ≤ 3 → 1`，否则 `0.5`；priority：材料优先级。
 - key `continue:<libraryItemId>`。action `open-book`（§8.7）。
-- facts：`material`（书名）、`unitTitle`、`daysAgo`、`minutes`（= u.plainLen / 阅读速度，`ja/zh/ko` 400 字/分，其他 1000 字符/分，向上取整）；概念类加 `kpNames`（u 链接的 L1–L3 KP 前 2 个标签，用「、」连接）；语言类加 `coveragePct`（四舍五入整数）、`bandLabel`、`learningCount`。
+- facts：`material`（书名）、`unitTitle`、`daysAgo`、`minutes`（= u.plainLen / 阅读速度，`zh ja ko` 及 `spaced=false` 的语言 400 字/分，其他 1000 字符/分，向上取整）；概念类加 `kpNames`（u 链接的 L1–L3 KP 前 2 个标签，用「、」连接）；语言类加 `coveragePct`（四舍五入整数）、`bandLabel`、`learningCount`。
 
 **K2 start**（每轨道至多 3 个候选）
 - 条件：材料属于该轨道；所有单元都没有通读；材料没有被 `not_interested`。
@@ -952,7 +980,8 @@ async function refresh({ force = false } = {}) {
 
 触发：
 - `learner:recommend` 时距上次 > 10 分钟自动触发。
-- 应用启动后 20 秒（`setTimeout`，`app.learner.enabled` 为 true 时）后台触发一次。
+- 应用启动后 20 秒（`setTimeout`，回调里 `learnerEnabled()` 为 true 才执行，§11.8）后台触发一次。
+- `refresh` 每一步开始前检查 `learnerEnabled()`，为 false 则停止（§11.8）。
 - 「刷新」按钮 `learner:refresh({force:true})`。
 - **不**在复习、摘录、制卡的 IPC 里触发（硬规则 0.1-5）。
 
@@ -961,7 +990,7 @@ async function refresh({ force = false } = {}) {
 ```ts
 type Snapshot = {
   now: number;
-  settings: { nativeLangs: string[]; recCount: number };
+  settings: { nativeLangs: string[] /* 生效值，§11.6 */; recCount: number; locale: "zh" | "en" /* learnerLocale()，§11.9 */ };
   tracks: Track[];                 // 落库轨道（未删）
   proposals: TrackProposal[];      // proposeTracks 结果
   overrides: { trackId, libraryItemId, member }[];
@@ -997,13 +1026,13 @@ type Snapshot = {
 `electron/aiNextExtract.js` 的 `scoreExtracts`（:29）当前 KP_frontier 项为空。机制（照做，不要另想）：
 
 1. `aiNextExtract.js`：`scoreExtracts(items, nowTs, opts = {})` 与 `rankExtracts(items, nowTs, opts = {})` 各加第三个可选参数；`rankExtracts` 把 `opts` 原样传给 `scoreExtracts`。`scoreExtracts` 内 `const kf = typeof opts.kpFactorOf === "function" ? Number(opts.kpFactorOf(it.id)) || 1 : 1;`，把 `kf` 乘到该条现有的乘积上（E1 本身是连乘结构，保持一致，不重构 E1）。不传 opts 时行为与现在逐字节相同。
-2. `db.js`：新增模块级变量 `let kpFactorMap = null;` 与导出函数 `setKpFactorMap(map)`（接受 `Map<extractId, number>` 或 null）。`computeSessionQueue` 的 `ENGINE_AI` 分支（`db.js:4157-4166`）调用 `rankExtracts(items, nowTs, { kpFactorOf: (id) => (kpFactorMap && kpFactorMap.has(id) ? kpFactorMap.get(id) : 1) })`。
+2. `db.js`：新增模块级变量 `let kpFactorMap = null;` 与导出函数 `setKpFactorMap(map)`（接受 `Map<extractId, number>` 或 null）。`computeSessionQueue` 的 `ENGINE_AI` 分支（`db.js:4157-4166`）调用 `rankExtracts(items, nowTs, { kpFactorOf: (id) => (lmOn && kpFactorMap && kpFactorMap.has(id) ? kpFactorMap.get(id) : 1) })`，其中 `const lmOn = readSettings().app?.learner?.enabled !== false;`（总开关，§11.8）。
 3. `learnerRefresh.js`：每次 refresh 成功后，计算每条未删摘录的因子并调用 `db.setKpFactorMap(map)`：
 ```
 kpFactor = 摘录没有 KP（§6.5 摘录 kpIds 为空）→ 不放进 map（等于 1）
          = 否则 0.85 + 0.45 × readiness(摘录 KP 集合)    // 范围 0.85..1.30；readiness 同 §7.2，把摘录的 KP 当作单元 KP 计算
 ```
-4. 设置页 `SettingsPanel.tsx:898` 的「Frontier 因子未接入」文案改为「知识点就绪度已接入（学习推荐刷新后生效）」。
+4. 设置页 `SettingsPanel.tsx:898` 的「Frontier 因子未接入」文案改为按开关显示：开启 →「知识点就绪度已接入（学习推荐刷新后生效）」；关闭 →「知识点就绪度未启用（学习者知识模型已关闭）」。
 
 ---
 
@@ -1026,6 +1055,8 @@ module.exports = Object.freeze({
   JUMP_CHARS: 20000,
   END_RATIO: 0.97,
   PDF_JUMP_PAGES: 30,
+  FREQ_STOP_TOP: 50,          // 无停用词表的语言：频次前 50 的词项视同停用词（§6.2）
+  LANG_VOTE_MIN: 5,           // detectLang 拉丁语言停用词投票的最低票数（§6.2）
   FSRS_DEFAULT_DECAY: 0.1542,
   KP: { STABLE_S: 21, LONG_S: 60, R_CONSOL: 0.85, R_SOLID: 0.90, R_FADING: 0.75,
         STABLE_RATIO: 0.5, LONG_RATIO: 0.6, LAPSE_WINDOW_DAYS: 30, SELF_EXPLAIN_WINDOW_DAYS: 90,
@@ -1034,7 +1065,7 @@ module.exports = Object.freeze({
          CARD_KNOWN_S: 21, CARD_KNOWN_R: 0.85, COLD_START_KNOWN: 200, PLACEMENT_MIN_LEXEMES: 300 },
   BANDS: { EASY: 0.98, OPTIMAL: 0.95, INTENSIVE: 0.90 },
   BAND_FIT: { easy: 0.7, optimal: 1.0, intensive: 0.6, hard: 0 },
-  READ_SPEED: { cjk: 400, other: 1000 },
+  READ_SPEED: { cjk: 400, other: 1000 }, // cjk = zh ja ko 及 LANG_PROFILE.spaced=false 的语言
   REREAD_INTERVALS_DAYS: [3, 7, 16, 35, 75],
   REREAD_MIN_LEARNING: 5,
   REREAD_MAX_PASSES: 6,
@@ -1121,10 +1152,14 @@ type TrackSummary = Track & { isProposal: boolean; weight: number; materialCount
 
 **NextStepsPanel（下一步）** —— 放在数据页最上方（不是 WidgetDef，不进布局编辑）。插入位置：`src/App.tsx:582` 现为 `mainContent = <Dashboard />;`，改为 `mainContent = <><NextStepsPanel /><Dashboard /></>;`——这样数据统计加载失败或骨架屏时面板也照常显示，且不改 `Dashboard.tsx`。面板外层用与 Dashboard 相同的页面左右留白（读 `Dashboard.tsx:273` 的 `<section className="dashboard dash-page">` 所用 class 的 padding，给面板外层加同样的 class 或等值样式）。`app.learner.enabled === false` 时不渲染。
 - 标题行：左「下一步」，右侧小字「{生成时间 HH:mm} · 从 {candidateCount} 个候选中选出」+「刷新」文字按钮 +「学习轨道…」文字按钮。
+- 标题行右侧另有一个小号下拉「{N} 条」（选项 3–10，当前值 = `recCount`），改动即 `learnerSettings.write({ recCount })` 并重新请求推荐。与设置页的「推荐条数」是同一个值。
+- **母语确认（首行，优先于下一条提示）**：`nativeConfirmed === false` 时，标题下一行显示「你的母语是 {语言名列表} 吗？」+「是」（写 `nativeLangs = 当前生效值, nativeConfirmed = true`）+「更改…」（打开 TracksDialog 并滚动到「我的母语」）。生效值为空时文案改为「请先设置你的母语，以便区分哪些是外语材料。」+「设置…」。
 - `usingProposals` 为 true 时标题下一行提示：「这些推荐基于从书架推断的学习轨道。」+「确认轨道」按钮（打开 TracksDialog）。
 - 列表：每项一行，左侧小号大写标签（kind 中文名 + 轨道名，如「继续读 · 日语」），主体两行：第一行标题（粗）、第二行理由（次要色）；右侧主按钮（文案：继续读→「继续」、开始读→「开始」、处理摘录→「去处理」、摘录制卡→「打开原文」、巩固→「复习」或「重读原文」、换个讲法→「去看看」、自我解释→「写一写」、练习→「去练习」、缺少材料→「复制搜索词」、重读→「重读」、语境串→「读一读」、挖句子→「挑句子」、词汇快测→「开始」）+「⋯」菜单（稍后、不用了、不感兴趣、太难 / 太简单（仅 K1/K2/K10））。
 - 点主按钮：先 `learner:feedback(action:'opened')`，再执行动作。菜单项点击后该行立即从列表移除（本地），并写反馈。
 - 加载中：首次索引时显示「正在建立学习索引…（{phase} {done}/{total}）」，每 1 秒轮询 `learner:status`。
+- 面板订阅 `settings/changed`（key 为 `learner` 时）：重新 `learnerSettings.read()`；`enabled` 变 false 时立即卸载自身（返回 null），变 true 时重新请求推荐。
+- 所有显示用户文本（书名、单元标题、句子、摘录片段）的元素加 `dir="auto"`；所有界面文字取自 `src/lib/learnerStrings.ts`（§11.9）。
 - 空列表：「暂时没有推荐。去书架添加材料，或在阅读中摘录、制卡。」
 - 错误：显示 `error` 文字 +「重试」。不弹窗。
 
@@ -1133,7 +1168,7 @@ type TrackSummary = Track & { isProposal: boolean; weight: number; materialCount
 - 中：「建议的轨道」（proposals）每条一个「采纳」按钮（采纳 = saveTrack，source='proposal'）。
 - 下：「未归类的材料」每本书一个「归入…」下拉（选轨道即 `setTrackMaterial member=1`）。
 - 每个轨道可展开看归属材料，每本后有「移出」（member=0）。
-- 底部：「我的母语」多选（写设置 `app.learner.nativeLangs`），「重建学习索引」按钮（调用 `learner:rebuild`）。
+- 底部：「我的母语」多选（控件见 §11.6；保存时同时写 `nativeConfirmed = true`），「重建学习索引」按钮（调用 `learner:rebuild`）。
 
 **SelfExplainDialog**：提示语（§8.2 K7 模板）+ 多行输入（自动增高，参考 `src/lib/autoGrow.ts`）+ 三个自评按钮「讲清楚了 / 部分清楚 / 卡住了」→ 写 `self_explain` 事件 → 关闭并把该推荐标 done。旁边「对照原文」链接 → `jump` 到该 KP 第一张有来源的卡的原文。
 
@@ -1151,6 +1186,7 @@ type TrackSummary = Track & { isProposal: boolean; weight: number; materialCount
 ### 11.5 查词埋点（L3 批）
 
 在 `src/lib/useSelectionActions.ts` 查词成功、`setDictPanel` 显示结果之后（:1491 附近两处分支各一次），若当前在阅读器中（有材料 id）且 `result.entry` 非空，调用：
+先判断总开关：`if (!(await learnerSettings.read()).enabled) return;`（§11.8；放在埋点代码块内部、不要阻塞查词结果显示——整个埋点包在一个不 await 的 async IIFE 里）。然后：
 ```ts
 void learnerApi.logEvent({ kind: "dict_lookup", lang: 实际查词语言, libraryItemId: 当前材料 id,
   payload: { text: raw.slice(0, 64), sentence: (reading.sentence || "").slice(0, 400),
@@ -1164,17 +1200,57 @@ void learnerApi.logEvent({ kind: "dict_lookup", lang: 实际查词语言, librar
 
 | 字段 | 默认 | 合法值 | 说明 |
 |---|---|---|---|
-| `enabled` | `true` | boolean | 关闭后不渲染面板、不自动刷新（数据保留） |
-| `nativeLangs` | `["zh"]` | ISO 639-1 字符串数组，去重，最多 8 个 | 母语，决定哪些语言算「外语」 |
-| `recCount` | `6` | 整数 3–10 | 推荐条数 |
+| `enabled` | `true` | boolean | **学习者知识模型总开关**，语义见 §11.8 |
+| `nativeLangs` | **字段缺省**（= 用户尚未确认） | ISO 639-1 主子标签数组，去重，1–8 个 | 母语 / 已精通的语言，决定哪些语言算「外语」。缺省时的生效值见下 |
+| `nativeConfirmed` | `false` | boolean | 用户是否已确认过母语（§11.4 面板首行提示用） |
+| `recCount` | `6` | 整数 3–10 | 推荐条数，用户可在设置页与面板标题行两处调整（同一个值） |
 
-- **渲染层**：在 `src/lib/learner.ts` 里写 `learnerSettings = { read(), write(patch) }`，结构照抄 `extractSettings.read/write`（`settingsStore.get("app","learner",{})` / `settingsStore.set("app","learner",{...旧, ...patch})`），`read()` 里做合法化（非法值回默认，`recCount` 取整后夹到 3..10）。
-- **主进程**：`learnerRefresh.js` 用 `require("./settingsStore").readSettings().app?.learner`（写法同 `db.js:3073` 读 `app.extracts`），做同样的合法化。**不改** `main.js` 的 `settings:set`。
-- **设置页位置**：不新增导航项（D114 规定「13 个导航项与 13 个区块一一对应」，加导航项会影响相关测试）。在 `src/components/SettingsPanel.tsx` 的「统计仪表盘」区块 `<SettingsSection id="sec-widgets">`（:181）的子元素末尾，追加 `<div id="sec-learner">…</div>` 子块（写法照 `sec-schedule` 里的 `<div id="sec-learningday">` 子块，:570），子块内一个 `<h4>学习推荐（数据页「下一步」）</h4>` + 三项设置（开关用 `seg-tabs` 开/关，写法照 :872-876；母语用逗号分隔的文本框，失焦时保存；条数用数字输入框）+「管理学习轨道…」按钮（打开 TracksDialog）。
+- **母语的生效值（全球用户，不得写死任何语言）**：`nativeLangs` 合法且非空 → 用它；否则 → `[baseLang(系统区域)]`，系统区域在主进程取 `app.getLocale()`，在渲染层取 `navigator.language`（两者在 Electron 中一致）；取不到或得到空串 → `[]`（此时没有任何语言被视为外语之外的「母语」，所有有语言的材料都会被提议为 language 轨道，面板首行会要求用户设置母语）。
+- **渲染层**：在 `src/lib/learner.ts` 里写 `learnerSettings = { read(), write(patch) }`，结构照抄 `extractSettings.read/write`（`settingsStore.get("app","learner",{})` / `settingsStore.set("app","learner",{...旧, ...patch})`），`read()` 里做合法化（非法值回默认，`recCount` 取整后夹到 3..10，`nativeLangs` 每项过 `baseLang` 后去重、只保留 `/^[a-z]{2,3}$/`）并返回母语生效值 `effectiveNativeLangs`。写入后 `eventBus.emit("settings/changed", { scope: "app", key: "learner" })`（写法同 `src/App.tsx:264-276`）。
+- **主进程**：`learnerRefresh.js` 用 `require("./settingsStore").readSettings().app?.learner`（写法同 `db.js:3073` 读 `app.extracts`），做同样的合法化与生效值计算。**每次 IPC 调用都重新读一次**（文件很小，`getActiveEngine` 已是同样做法），这样开关切换立即生效，不需要通知机制。**不改** `main.js` 的 `settings:set`。
+- **母语选择控件**：多选标签列表。候选语言 = 常量 `NATIVE_LANG_CHOICES`（放 `src/lib/learner.ts`）：`en zh es hi ar pt bn ru ja de fr ko it tr vi pl uk nl th id ms fa he el cs sv ro hu da fi no sk bg hr sr lt lv et sl ca sw tl ta te ur mr`，显示名用 `new Intl.DisplayNames([uiLocale], { type: "language" }).of(code)`，按显示名排序；列表末尾一个「其他语言代码」输入框（输入 2–3 个字母的 ISO 代码，回车添加）。
+- **设置页位置**：不新增导航项（D114 规定「13 个导航项与 13 个区块一一对应」，加导航项会影响相关测试）。在 `src/components/SettingsPanel.tsx` 的「统计仪表盘」区块 `<SettingsSection id="sec-widgets">`（:181）的子元素末尾，追加 `<div id="sec-learner">…</div>` 子块（写法照 `sec-schedule` 里的 `<div id="sec-learningday">` 子块，:570）。子块内容：
+  1. `<h4>学习者知识模型</h4>`
+  2. 总开关一行：标签「启用学习者知识模型」+ 说明气泡（`SettingsInfo`）「根据你的阅读、摘录、制卡与复习记录估计掌握水平，并在数据页给出「下一步」建议。全部在本机计算，不联网、不调用 AI。关闭后停止计算与记录，已有数据保留，重新开启即恢复。」+ `seg-tabs` 开/关（写法照 :872-876）。
+  3. **仅当开启时**显示其余项：「我的母语」（上面的多选控件）、「推荐条数」（3–10 的数字输入框）、「管理学习轨道…」按钮（打开 TracksDialog）、「重建学习索引」按钮（`learner:rebuild`）。
 
 ### 11.7 知识点页显示等级（L6 批）
 
-`src/components/KnowledgeManager.tsx` 的 KP 列表每行加一个等级小标签（§6.6 中文标签），数据来自 `learner:kpLevels`。点开 KP 详情时显示 `metrics` 的人话版：「{n} 张卡已复习，平均回忆率 {meanR}%，{stableRatio}% 已稳定；{有/无}应用题或自我解释」。
+`src/components/KnowledgeManager.tsx` 的 KP 列表每行加一个等级小标签（§6.6 中文标签），数据来自 `learner:kpLevels`。点开 KP 详情时显示 `metrics` 的人话版：「{n} 张卡已复习，平均回忆率 {meanR}%，{stableRatio}% 已稳定；{有/无}应用题或自我解释」。总开关关闭时（`learner:kpLevels` 返回 `disabled`）不显示等级标签与这段说明，知识点页其余功能不变。
+
+### 11.8 总开关：学习者知识模型可整体开启 / 关闭（用户 2026-10-10 要求）
+
+**默认开启**（全部本地计算、零网络、零 AI，没有隐私与费用顾虑）。开关是 `settings.app.learner.enabled`，「关闭」的含义是**整个功能停止工作，但不删除任何数据**：
+
+| 触点 | 开启 | 关闭 |
+|---|---|---|
+| 主进程 IPC `learner:*` | 正常工作 | **除 `learner:status` 外**，所有 handler 第一行检查开关，关闭时立即返回 `{ ok: false, disabled: true }`，不读写任何库、不启动刷新 |
+| `learner:status` | 返回 §9.1 status，另加 `enabled: true` | 返回 `{ enabled: false }` |
+| 启动后 20 秒自动刷新（§9.1） | 执行 | 不执行（定时器回调里再查一次开关） |
+| 正在进行的刷新 | — | 刷新每一步开始前检查开关，关闭则在当前步骤结束后停止（已完成部分照常 `learnerDb.save()`），status.phase 置 `"stopped"` |
+| 查词埋点（§11.5） | 记录 `dict_lookup` | **不记录**（渲染层调用前用 `learnerSettings.read()` 判断；主进程 `learner:logEvent` 同时拒绝，双保险） |
+| 数据页「下一步」面板 | 显示 | **不渲染**（不留空白、不占位） |
+| 知识点页等级标签（§11.7） | 显示 | 不显示 |
+| 摘录 AI 引擎的知识点就绪度因子（§9.5） | 生效 | **不生效**：`computeSessionQueue` 只在 `readSettings().app?.learner?.enabled !== false` 时使用 `kpFactorMap`，否则一律因子 1（即 E1 原行为）；设置页 `SettingsPanel.tsx:898` 的说明文字随开关显示「已接入」或「未启用（学习者知识模型已关闭）」 |
+| 设置页子块 | 显示全部选项 | 只显示总开关与说明 |
+| 已有数据（`learner_tracks / track_materials / learning_events / rec_runs / rec_feedback`、`learner.db`） | — | **全部保留不动**；备份照常包含主库这 5 张表 |
+
+**重新开启**：不需要任何迁移。下一次打开数据页时 `learner:recommend` 发现距上次刷新已超过 10 分钟（或从未刷新），按 §7.1 的「首次索引」路径在后台增量刷新，面板显示「正在更新学习索引…」，完成后出推荐。所有派生状态都从事实表重算（§2.2-5），关闭期间的阅读、制卡、复习记录本来就由主功能写入，不会丢；**唯一的缺口是关闭期间的查词不被记录**——设置页说明气泡里已写明「关闭后停止记录」。
+
+**实现约束**：开关判断写成一个函数，主进程 `learnerEnabled()`（放 `learnerRefresh.js`，导出给 `main.js` 与 `db.js` 调用——`db.js` 不能 require `learnerRefresh.js`，所以 `db.js` 里直接写 `readSettings().app?.learner?.enabled !== false`，与 `learnerEnabled()` 同口径，并加注释互相指向）；渲染层 `learnerSettings.read().enabled`。不要在别处各自发明判断。
+
+### 11.9 多语言准备（软件将面向全球用户发布）
+
+当前软件界面只有中文，全局 i18n（软件语言设置）按 D91 规划在后续批次落地。本功能现在就做到「换语言只换字符串表」：
+
+1. **所有用户可见文字集中在两张字符串表里**，代码中不得出现硬编码的用户可见文字：
+   - 主进程（新增文件 `electron/lmStrings.js`，纯常量模块）：推荐种类名、标题模板（§8.2「标题格式」）、理由模板（§8.5）、覆盖带名称、KP 等级名、mode 名。结构 `{ zh: {...}, en: {...} }`，两种语言的键必须完全相同（测试断言）。
+   - 渲染层（新增文件 `src/lib/learnerStrings.ts`）：面板、对话框、设置子块里的按钮与提示文字，同样 `{ zh, en }`。
+2. **界面语言 `uiLocale`**：写成函数 `learnerLocale()`（主进程与渲染层各一个，同口径）：若设置里将来出现软件语言键则用它；**v1 恒返回 `"zh"`**，与软件其余界面保持一致。全局 i18n 落地时只改这一个函数。
+3. 模板函数签名改为 `explain(candidate, strings)`、`titleOf(candidate, strings)`：`strings` 由 `lmStrings[learnerLocale()]` 传入（经 Snapshot 的 `settings.locale` 选择），`lmRecommend.js` 不自己选语言。
+4. 语言名一律用 `Intl.DisplayNames([uiLocale], { type: "language" })` 生成，不维护语言名表。
+5. 用户文本（书名、句子、摘录）可能是从右到左的文字（阿拉伯语、希伯来语）：显示这些内容的元素加 `dir="auto"`。
+6. 推荐理由中的数字直接插入（不做本地化数字格式），保证 §13.4-10 的「理由数字可在 facts 中找到」断言在任何语言下都成立。
 
 ---
 
@@ -1199,7 +1275,7 @@ void learnerApi.logEvent({ kind: "dict_lookup", lang: 实际查词语言, librar
 | L0-2 | 新增 §4.20「学习者模型 LM-1（D124）」：只写 10 行以内的摘要 + 指向设计稿；在 §4.7、§4.8、§4.9、§4.11、§4.14、§6.4.1 每节标题下加一行引用块「> **已被 D124 取代**（见 §4.20 与设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`），本节保留作历史」。**不删除旧正文，不改任何 § 编号** | 同上 | `grep -c "已被 D124 取代" AI_DEVELOPMENT_GUIDE.md` = 6 | L0-1 |
 | L0-3 | §4.1：在表清单后加一段「D124 规划新增 5 张主库表（`learner_tracks / track_materials / learning_events / rec_runs / rec_feedback`，L2-1 落地后再计入实建数）」，另加一段说明规划新增的派生库 `learner.db`（写法仿 dictionary.db） | 同上 | 闸门见下 | L0-2 |
 | L0-4 | §7.2 例外登记：① `learner.db` 写入走 `learnerDb.save()` 不走 `persist()`；② `rec_runs` 保留最近 300 行，超出物理删除（理由：展示快照的审计价值随时间递减 + 主库全量回写约束） | 同上 | 同上 | L0-3 |
-| L0-5 | §7.4 登记设置键 `app.learner`（对象，字段 enabled / nativeLangs / recCount，见设计稿 §11.6） | 同上 | 同上 | L0-3 |
+| L0-5 | §7.4 登记设置键 `app.learner`（对象，字段 enabled / nativeLangs / nativeConfirmed / recCount，见设计稿 §11.6；enabled 是学习者知识模型总开关，见设计稿 §11.8） | 同上 | 同上 | L0-3 |
 | L0-6 | §9.1 新增小节，**标题必须写成** `### 学习者模型与下一步推荐（M17，D124）`（不要以 `M17` 开头——f24 R4 用 `/###?\s*M(\d{1,2})\b/` 抓里程碑，M17 若被抓到会成为「无人点名的新里程碑」而变红），正文列 L0–L6；§9.2 主线状态表加一行「学习者模型 M17 · 📐 设计定稿」（同样不要让单元格以 `M17` 开头）；K0–K9 行状态后追加「K3–K9 已被 D124/M17 取代」 | 同上 | 同上 | L0-5 |
 | L0-7 | 删除重复的旧版 §6.3.11 与 §6.3.12：**删除范围＝指导文档中第二次出现的那两节**（标题以「（v24 规范，K2 起按需播种）」结尾、不含 v33 字样，约在 759–777 行，到 `#### 不变量与验收检查（AI 制卡与助读）` 之前为止）；保留第一次出现的两节 | 同上 | `grep -c '^### 6.3.11' AI_DEVELOPMENT_GUIDE.md` = 1 且 `grep -c '^### 6.3.12' AI_DEVELOPMENT_GUIDE.md` = 1 | L0-6 |
 | — | **本批闸门**：先 `git worktree add /tmp/base HEAD` 做基线。沙箱：在当前目录和 `/tmp/base` 各跑 `node tests/flows/f11-doc-code-drift.cjs`、`f21-ipc-bridge.cjs`、`f24-coverage-audit.cjs`、`f27-restraint-redlines.cjs`、`f45-feature-blindspots.cjs`（注意：若闸门脚本里写死了项目根路径 `ROOT`，跑基线时要让它指向 `/tmp/base`，做不到就只在当前目录跑并与 main 上已知失败项比对）。主机（用户）：`npx electron tests/flows/f18-settings-matrix.cjs`、`f20-command-contract.cjs`。**本批不得新增失败项** | — | 失败项集合 ⊆ 基线失败项集合 | — |
@@ -1210,9 +1286,9 @@ void learnerApi.logEvent({ kind: "dict_lookup", lang: 实际查词语言, librar
 |---|---|---|---|---|
 | L1-1 | 照抄 §10 建参数文件 | `electron/lmParams.js` | `node -e "require('./electron/lmParams.js')"` 无错 | L0 |
 | L1-2 | `markdownToPlain` / `segmentMarkdown` / `segmentPages` / `splitSentences`（`Intl.Segmenter` granularity sentence，退化用 `/[^。！？.!?\n]+[。！？.!?]?/g`）/ `detectLang` | `electron/lmText.js`、`tests/lm-text.test.cjs` | `node tests/lm-text.test.cjs` 全绿（用例见 §13.1） | L1-1 |
-| L1-3 | `tokenize` / `porterStem` / `IRREGULAR` / `lexemeKey` / `STOPWORDS` / `unitCoverage` / `bandOf` / `isIPlusOneSentence` | `electron/lmLex.js`、`tests/lm-lex.test.cjs` | 同上（§13.2） | L1-1 |
+| L1-3 | `baseLang` / `LANG_PROFILE` / `tokenize` / `porterStem` / `IRREGULAR` / `lexemeKey` / `STOPWORDS` / `unitCoverage` / `bandOf` / `isIPlusOneSentence` | `electron/lmLex.js`、`tests/lm-lex.test.cjs` | 同上（§13.2） | L1-1 |
 | L1-4 | `retrievability` / `computeKpLevel` / `computeLexState` / `computePasses` | `electron/lmLevels.js`、`tests/lm-levels.test.cjs` | 同上（§13.3） | L1-1 |
-| L1-5 | `proposeTracks` / `resolveMembership` / `trackWeights` / 13 个生成器 / `score` / `select` / `explain` / `recommend` | `electron/lmRecommend.js`、`tests/lm-recommend.test.cjs` | 同上（§13.4） | L1-2..4 |
+| L1-5 | `electron/lmStrings.js`（§11.9，zh 与 en 两套，键相同）+ `proposeTracks` / `resolveMembership` / `trackWeights` / 13 个生成器 / `score` / `select` / `titleOf` / `explain` / `recommend` | `electron/lmStrings.js`、`electron/lmRecommend.js`、`tests/lm-recommend.test.cjs` | 同上（§13.4） | L1-2..4 |
 
 ### L2 存储与刷新管线
 
@@ -1222,23 +1298,23 @@ void learnerApi.logEvent({ kind: "dict_lookup", lang: 实际查词语言, librar
 | L2-2 ★ | `db.js` 新增并导出：`learnerFacts()`、`resolveCardKpMap()`、`listLearnerTracks / saveLearnerTrack / deleteLearnerTrack / setTrackMaterial`、`addLearningEvent`（含 §5.3 校验）、`addRecFeedback`、`saveRecRun`（含 300 行裁剪）、`latestRecRun` | `electron/db.js` | 同上 + `npx tsc --noEmit -p .` | L2-1 |
 | L2-3 | 独立库（§5.2） | `electron/learnerDb.js` | lm-db 测试：打开 / 建表 / 保存 / reset / schema 版本不符时重建 | L1 |
 | L2-4 | 刷新管线六步 + 单飞 + status + buildSnapshot（§9） | `electron/learnerRefresh.js` | lm-db 测试：造 2 本书（1 本英文、1 本中文）+ 阅读事件 + 卡片 + 复习日志 → refresh 后 `content_units / unit_progress / kp_states / lexeme_states` 行数与 §13.5 期望一致 | L2-2, L2-3 |
-| L2-5 ★ | **同一任务内完成三件事**（分开做会让 f21「死通道」闸门中途变红）：① `main.js` 注册 §11.1 全部 16 个 IPC（每个 `ipcMain.handle("learner:…"` 单独一行）+ 启动后 20 秒自动刷新 + `extractPdfPages` 注入；② `preload.js` 暴露 `learnerAPI`（每个 `ipcRenderer.invoke("learner:…"` 单独一行）；③ 在 `tests/lm-db.test.cjs` 里加「通道清单」断言（见 §13.5 最后一条，f45 S2 要求每个通道名在 tests/ 中以完整字符串出现） | `electron/main.js`、`electron/preload.js`、`tests/lm-db.test.cjs` | `grep -c 'ipcMain.handle("learner:' electron/main.js` = 16；`grep -c 'invoke("learner:' electron/preload.js` = 16；`node tests/flows/f21-ipc-bridge.cjs` 与 `node tests/flows/f45-feature-blindspots.cjs` 不新增失败 | L2-4 |
+| L2-5 ★ | **同一任务内完成三件事**（分开做会让 f21「死通道」闸门中途变红）：① `main.js` 注册 §11.1 全部 16 个 IPC（每个 `ipcMain.handle("learner:…"` 单独一行；除 `learner:status` 外每个 handler 第一行 `if (!learnerEnabled()) return { ok: false, disabled: true };`，§11.8）+ 启动后 20 秒自动刷新 + `extractPdfPages` 注入；② `preload.js` 暴露 `learnerAPI`（每个 `ipcRenderer.invoke("learner:…"` 单独一行）；③ 在 `tests/lm-db.test.cjs` 里加「通道清单」断言（见 §13.5 最后一条，f45 S2 要求每个通道名在 tests/ 中以完整字符串出现） | `electron/main.js`、`electron/preload.js`、`tests/lm-db.test.cjs` | `grep -c 'ipcMain.handle("learner:' electron/main.js` = 16；`grep -c 'invoke("learner:' electron/preload.js` = 16；`node tests/flows/f21-ipc-bridge.cjs` 与 `node tests/flows/f45-feature-blindspots.cjs` 不新增失败 | L2-4 |
 
 ### L3 事件埋点与推荐接口
 
 | ID | 任务 | 涉及文件 | 验收 | 依赖 |
 |---|---|---|---|---|
-| L3-1 | 渲染层类型与 API 封装 + `learnerSettings`（§11.6） | `src/lib/learner.ts` | `npx tsc --noEmit -p .` | L2-5 |
-| L3-2 | 查词埋点（§11.5） | `src/lib/useSelectionActions.ts` | tsc；主机手测：阅读英文书查 3 个词 → `learning_events` 有 3 行 `dict_lookup` | L3-1 |
+| L3-1 | 渲染层类型与 API 封装 + `learnerSettings`（含母语生效值，§11.6）+ `NATIVE_LANG_CHOICES` + 界面字符串表（§11.9） | `src/lib/learner.ts`、`src/lib/learnerStrings.ts` | `npx tsc --noEmit -p .` | L2-5 |
+| L3-2 | 查词埋点（§11.5，含总开关判断） | `src/lib/useSelectionActions.ts` | tsc；主机手测：阅读英文书查 3 个词 → `learning_events` 有 3 行 `dict_lookup`；关闭总开关后再查 → 不新增行 | L3-1 |
 | L3-3 | eventbus 两个事件名 + App 导航（§11.3） | `src/lib/eventbus.ts`、`src/App.tsx` | tsc；主机手测 4 种 action 都能跳转、返回键回到数据页 | L3-1 |
 
 ### L4 下一步面板与轨道管理
 
 | ID | 任务 | 涉及文件 | 验收 | 依赖 |
 |---|---|---|---|---|
-| L4-1 | NextStepsPanel（§11.4） | `src/components/learner/NextStepsPanel.tsx`、`src/App.tsx`（只改 :582 一行与 import） | tsc；`npm run build`（主机）；手测：有推荐、空态、加载态（首次索引）、错误态 | L3 |
+| L4-1 | NextStepsPanel（§11.4） | `src/components/learner/NextStepsPanel.tsx`、`src/App.tsx`（只改 :582 一行与 import） | tsc；`npm run build`（主机）；手测：有推荐、空态、加载态（首次索引）、错误态、标题行条数下拉改为 3 后只显示 3 条、母语确认行点「是」后消失、设置页关闭总开关后面板立即消失 | L3 |
 | L4-2 | TracksDialog（§11.4） | `src/components/learner/TracksDialog.tsx` | 同上；手测：采纳提议、改 mode、归类材料、移出材料后推荐变化 | L4-1 |
-| L4-3 | 设置子块（§11.6） | `src/components/SettingsPanel.tsx` | tsc；f18 闸门（主机）不新增失败 | L4-1 |
+| L4-3 | 设置子块（§11.6：总开关 + 母语多选 + 推荐条数 + 两个按钮；关闭时只显示开关） | `src/components/SettingsPanel.tsx` | tsc；f18 闸门（主机）不新增失败；手测 §11.8 表格每一行 | L4-1 |
 
 ### L5 语言专用对话框
 
@@ -1255,7 +1331,7 @@ void learnerApi.logEvent({ kind: "dict_lookup", lang: 实际查词语言, librar
 | ID | 任务 | 涉及文件 | 验收 | 依赖 |
 |---|---|---|---|---|
 | L6-1 ★ | E2：`kpFactorOf` 接入（§9.5 四步） | `electron/aiNextExtract.js`、`electron/db.js`、`electron/learnerRefresh.js`、`src/components/SettingsPanel.tsx`、`tests/ainextextract.test.cjs` | `node tests/ainextextract.test.cjs` 原有用例全绿（不传 opts ⇒ 行为不变）；在同一文件追加 2 条用例：① `kpFactorOf` 恒返回 1 时排序与不传 opts 完全相同；② 两条其他因子相同的摘录，`kpFactorOf` 分别返回 1.3 与 0.85，前者排在前面 | L2 |
-| L6-2 | 知识点页等级标签（§11.7） | `src/components/KnowledgeManager.tsx` | tsc；手测 | L2 |
+| L6-2 | 知识点页等级标签（§11.7，关闭时不显示） | `src/components/KnowledgeManager.tsx` | tsc；手测开 / 关两种状态 | L2 |
 | L6-3 | 指导文档 §9.2 M17 状态更新为 ✅（列出完成批次与测试数） | `AI_DEVELOPMENT_GUIDE.md` | L0 批的闸门组 | 全部 |
 
 ### L7（远期，不在本次范围，列出供将来参考）
@@ -1275,7 +1351,7 @@ AI 解释理由（复用 `frontier-explain` scope，只重述 facts）；AI 对�
 5. 空章节被删：`"# A\n\n# B\n" + "b".repeat(2000)` → 1 个单元，标题 `B`。
 6. `isExercise`：标题「第三章 习题」的单元为 1。
 7. `segmentPages(["a".repeat(2000), "b".repeat(2000), "c".repeat(500)])` → 1 个单元 `{pageFrom:0, pageTo:2}`（第 1、2 页累计 4000 ≥ 3000 成块，第 3 页 500 < 1500 并入）。
-8. `detectLang`：日文假名文本 → `ja`；纯中文 → `zh`；英文段落 → `en`；`"123"` → `''`。
+8. `detectLang`：日文假名文本 → `ja`；纯中文 → `zh`；英文段落 → `en`；法文段落（含 le/la/les/des/est 等）→ `fr`；德文段落 → `de`；西班牙文段落 → `es`；俄文段落 → `ru`；泰文段落 → `th`；阿拉伯文段落 → `ar`；只有 3 个拉丁词的短句 → `''`；`"123"` → `''`。每个段落在测试文件里写一段真实的 200 词以上文本（可用公有领域文学作品开头）。
 9. 代码围栏内的 `# 不是标题` 不切分。
 
 ### 13.2 `tests/lm-lex.test.cjs`
@@ -1284,6 +1360,11 @@ AI 解释理由（复用 `frontier-explain` scope，只重述 facts）；AI 对�
 3. `lexemeKey("ｶﾀｶﾅ","ja") === "カタカナ"`（NFKC）。
 4. `tokenize("I met John in Paris. He smiled.","en")`：`John`、`Paris` 的 `proper=true`；`He`（句首）`proper=false`；`I` 不判专名（单字母大写词一律 `proper=false`）。
 5. 纯数字被丢弃：`tokenize("in 2024 we","en")` 不含 `2024`。
+5a. 德语专名规则关闭：`tokenize("Ich sehe den Hund im Garten.","de")` 中 `Hund`、`Garten` 的 `proper=false`。
+5b. 大小写折叠按语言：`lexemeKey("İstanbul","tr") === "istanbul"`；`lexemeKey("Haus","de") === "haus"`；`lexemeKey("Москва","ru") === "москва"`。
+5c. 法语省音：`lexemeKey("l'homme","fr") === "homme"`。
+5d. `baseLang("zh-TW") === "zh"`、`baseLang("pt_BR") === "pt"`、`baseLang("EN") === "en"`。
+5e. 泰文分词：`tokenize("ฉันชอบอ่านหนังสือ","th")` 返回 ≥ 3 个 token（证明无空格文字可切分）。
 6. `unitCoverage([[1,8],[2,1],[3,1]], 10, id => id === 1 || id === 2)` → 0.9；`bandOf(0.9)` = `intensive`，`bandOf(0.95)` = `optimal`，`bandOf(0.98)` = `easy`，`bandOf(0.89)` = `hard`；`bandOf(0.95, 0.01)` = `intensive`（偏移后要求 0.96）；`unitCoverage([], 0, () => false)` = 1。
 7. `isIPlusOneSentence`：`tokens = tokenize("the cat sat on the mat today","en")`，`isKnownKey = k => k !== lexemeKey("mat","en")` → 返回 `lexemeKey("mat","en")`；`isKnownKey = k => ![lexemeKey("mat","en"), lexemeKey("cat","en")].includes(k)` → null；`tokenize("the cat sat down","en")`（4 个 token）配任意 isKnownKey → null；「the mat sat on the mat today」中 mat 出现两次、只有 mat 未知 → 返回 mat 的 key（同一未知词算 1 个）。
 
@@ -1323,6 +1404,8 @@ AI 解释理由（复用 `frontier-explain` scope，只重述 facts）；AI 对�
 9. not_interested 材料：60 天内该材料不出 K1/K2。
 10. 理由无编造数字：对每个结果项，用 `/\d+(\.\d+)?/g` 取出理由里的每个数字串，它必须作为子串出现在 `Object.values(facts).map(String).join(" ")` 里。
 11. 确定性：同一快照跑两次结果 `JSON.stringify` 完全相同。
+11a. 字符串表：`lmStrings.zh` 与 `lmStrings.en` 的键集合（递归）完全相同；`settings.locale = "en"` 跑同一快照，理由里不含任何汉字（`/\p{Script=Han}/u` 不匹配），且用例 10 仍成立。
+11b. 母语：快照 `nativeLangs = ["ja"]`、有一本 `lang='zh'` 和一本 `lang='ja'` 的书 → 提议 zh 的 language 轨道、不提议 ja；`nativeLangs = []` → 两本都提议。
 12. 自动完成：lastRun 中 continue 项的目标单元在展示后有通读 → `recommend` 返回的 `autoDone` 列表包含其 key（由调用方写 rec_feedback）。
 
 ### 13.5 `tests/lm-db.test.cjs`（@runtime electron，用户主机跑）
@@ -1330,11 +1413,12 @@ AI 解释理由（复用 `frontier-explain` scope，只重述 facts）；AI 对�
 - E 有 3 个单元、Z 有 2 个单元。
 - E 单元 0、单元 1 各通读 1 次，单元 2 通读 0 次（每章约 2013 字符，4500 跨过前两个单元的 md_to、未达 docLen×0.97）。测试里先读出 `content_units` 的 md_to 确认 `md_to[1] <= 4500 < docLen × 0.97`，前提不成立就让测试失败并打印实际值。
 - `kp_states` 有该 KP 一行，level ≥ 2。
-- 用户母语 zh → 自动提议 1 个 en language 轨道；`lexemes` 只含 en（中文书不建词项）。
+- 设置 `app.learner.nativeLangs = ["zh"]` → 自动提议 1 个 en language 轨道；`lexemes` 只含 en（中文书不建词项）。再改为 `["en"]` 并 refresh → 改为提议 zh 轨道、不再提议 en（验证母语不是写死的）。
 - `learner:logEvent` 非法 kind 返回 `{ok:false}` 且不写库。
 - `rec_runs` 写 301 次后表内 300 行。
 - 刷新过程中未调用 `persist()` 写 cards / review_logs（断言这两张表行数与 `updated_at` 不变）。
 - 删除 `learner.db` 后 refresh，单元数与 KP 状态和删除前完全一致（可重建）。
+- **总开关**：把 `app.learner.enabled` 设为 false（写测试临时 userData 的 settings.json）后：`learner:recommend`、`learner:logEvent`、`learner:refresh` 都返回 `{ok:false, disabled:true}`，`learning_events` 与 `rec_runs` 行数不变，`learner.db` 的修改时间不变；`learner:status` 返回 `{enabled:false}`；先 `setKpFactorMap(new Map([[某摘录id, 1.3]]))` 再算 `computeSessionQueue`，结果顺序与 `setKpFactorMap(null)` 时相同。改回 true 后 `learner:recommend` 正常返回。
 - `setTrackMaterial` 先设 member=1、再设 null、再设 1，不报 UNIQUE 错，最终该对有效（is_deleted=0, member=1）。
 - **通道清单**：测试里写一个字符串数组，16 个元素逐字列出全部通道名（`"learner:status"`、`"learner:refresh"`、`"learner:recommend"`、`"learner:feedback"`、`"learner:listTracks"`、`"learner:saveTrack"`、`"learner:deleteTrack"`、`"learner:setTrackMaterial"`、`"learner:kpLevels"`、`"learner:logEvent"`、`"learner:unitText"`、`"learner:contextReel"`、`"learner:sentenceMine"`、`"learner:placementSample"`、`"learner:lexStats"`、`"learner:rebuild"`）；读 `electron/main.js` 断言每个都有 `ipcMain.handle("<名>"`，读 `electron/preload.js` 断言每个都有 `invoke("<名>"`。（这一条也满足闸门 f45 S2「每个通道名在 tests/ 里以完整字符串出现」。）
 
@@ -1352,17 +1436,20 @@ AI 解释理由（复用 `frontier-explain` scope，只重述 facts）；AI 对�
 8. 新设置键已登记 §7.4，f18 无新增失败。
 9. 没有新增 npm 依赖（`git diff package.json` 为空）。
 10. v1 无 AI 调用（新文件里没有 `chat` / `chatStream` / `callAI` / `mindmapChat`）。
+11. 总开关：`grep -n 'ipcMain.handle("learner:' electron/main.js` 的每个 handler（`learner:status` 除外）首行都是开关检查；§11.8 表格每一行有对应实现。
+12. 不写死语言：新代码里没有 `"zh"` 作为母语 / 界面语言的默认值（`learnerLocale()` 的 v1 返回值除外）；用户可见文字全部来自 `lmStrings` / `learnerStrings`（抽查组件里没有中文字面量）。
 
 ---
 
-## 15. 需要用户确认的决策（有默认值，不阻塞 L0–L2）
+## 15. 已确认的决策（用户 2026-10-10）
 
-| # | 问题 | 默认 |
+| # | 问题 | 决定 |
 |---|---|---|
-| Q1 | 母语默认 `zh` 是否正确？是否还有其他母语 / 熟练语言？ | `["zh"]` |
-| Q2 | language 轨道下，查词制卡的「单词四卡」是否改为只默认勾选「带原句语境」的卡型（更符合母语式习得理念），孤立「词→义」卡默认不勾？ | v1 **不改**现有制卡行为，只在推荐层不鼓励；如需改，另开一批 |
-| Q3 | 「下一步」面板放在数据页顶部是否合适？还是要放到书架页顶部（打开应用第一眼看到）？ | 数据页顶部 |
-| Q4 | 推荐条数默认 6 条是否合适？ | 6 |
+| Q1 | 母语 | 软件面向全球发布，用户母语各不相同：**不写死任何语言**。母语默认取系统区域的语言，面板首次提示用户确认，用户可多选修改（§11.6、§11.4）；分词、语言识别、专名与大小写规则全部按语言能力表处理任意语言（§6.2）；界面文字集中到字符串表，为全局 i18n 做准备（§11.9） |
+| Q2 | 查词制卡的默认卡型是否改 | **不改**。这与本功能的实现没有依赖关系：学习者模型只读取已有的词汇卡（`cards.dict_json`）来判断词的状态，卡型如何都能工作。当初提出只是因为「孤立的 词→释义 卡」偏向背单词，与母语式习得理念有张力；但是否制卡、制什么卡由用户决定，推荐层本身也不会推「背单词」类动作 |
+| Q3 | 「下一步」面板位置 | 数据页（统计页）顶部（§11.4） |
+| Q4 | 推荐条数 | 默认 6，用户可在设置页与面板标题行调节，范围 3–10（§11.6、§11.4） |
+| Q5 | 整体开关 | 学习者知识模型整体可开启 / 关闭，默认开启；关闭即全部入口停止工作、数据保留，重新开启自动恢复（§11.8） |
 
 ---
 
