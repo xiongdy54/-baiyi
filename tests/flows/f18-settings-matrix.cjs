@@ -32,7 +32,7 @@ esbuild.buildSync({
   stdin: {
     contents: [
       'export { normalizeExtractEditorToolbar, normalizeExtractEditorToolbarFloat, normalizeExtractEditorToolbarTop, normalizeExtractFaceFontFollow, normalizeExtractFaceFontSize, normalizeExtractFaceFontFamily } from "./src/lib/extractCardSettings";',
-      'export { normalizeReaderActionsFloat } from "./src/lib/readerActionsSettings";',
+      'export { normalizeSelectionBarStyle } from "./src/lib/selectionBarSettings";',
       'export { normalizeCardFaceExtras, DEFAULT_CARD_FACE_EXTRAS } from "./src/lib/cardFaceExtras";',
       'export { normalizeTagsEnabled } from "./src/lib/tagSettings";'
     ].join("\n"),
@@ -69,7 +69,7 @@ const DOC_KEYS = [
   "app.reviewScopes", // §6.8-5（v48.22 / D58 复习范围/筛选牌组；零 schema 变更）
   "app.annotateMode", "app.annotateForm", "app.annotatePalette", "app.annotateCustomEnabled", "app.annotationFilter", // 批 4 / §9.2（就地批注键；v48.42/D82 形式拆 annotateForm）
   "app.extractEditorToolbar", "app.extractEditorToolbarFloat", "app.extractEditorToolbarTop", "app.extractFaceFontFollow", "app.extractFaceFontSize", "app.extractFaceFontFamily", // §7.4 v48.54 / D95（摘录卡编辑器工具栏与形态 + 字号/字体桥；v48.55/§K 增钉顶键）
-  "app.readerActionsFloat", // §7.4 v48.55 / D95 §K.4（阅读器选区动作组固定/悬浮）
+  "app.selectionBarStyle", // D122（选区浮条动作呈现 icon/text；取代 D95 §K.4 readerActionsFloat）
   "app.cardFaceExtras", // §7.4 v48.61 / D104（卡面信息密度三开关：背面辅助字段助记/例子/来源）
   "app.tagsEnabled", // §7.4 v48.63 / D107（标签功能总开关：默认开，仅严格 false 为关；隐藏入口不动数据）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
@@ -263,7 +263,7 @@ app
         ["app", "extractEditorToolbar", false],           // v48.54 / D95 摘录卡编辑工具栏（非默认值，才验得出往返）
         ["app", "extractEditorToolbarFloat", true],       // v48.54 / D95 v1.4 工具栏形态（默认 false＝随文档流；true＝悬浮于选中文字）
         ["app", "extractEditorToolbarTop", true],         // v48.55 / D95 §K.2 dock 态钉顶（默认 false＝吸底；非默认值才验得出往返）
-        ["app", "readerActionsFloat", true],              // v48.55 / D95 §K.4 阅读器选区动作组悬浮（默认 false＝固定顶栏）
+        ["app", "selectionBarStyle", "text"],             // D122 选区浮条动作呈现（默认 "icon"）
         ["app", "extractFaceFontFollow", false],          // v48.54 / D95 摘录卡字号跟随（默认 true）
         ["app", "extractFaceFontSize", 22],               // v48.54 / D95 独立字号（默认 17；文件层往返原值）
         ["app", "extractFaceFontFamily", " Georgia, serif "], // v48.54 / D95 独立字体（文件层往返字节一致；trim 归一在读写两侧）
@@ -411,14 +411,14 @@ app
       flow.eq("合法值原样保留：annotatePalette", JSON.stringify(normOk.annotatePalette), JSON.stringify(["teal", "red"]));
       // 色板空 ⇒ 回落默认 6 支（不是空数组——调色排不该空着）
       write({ annotatePalette: [] });
-      flow.eq("色板空回落默认 6 支", db.readAnnotationSettings().annotatePalette.length, 6);
+      flow.eq("色板空回落默认 5 支", db.readAnnotationSettings().annotatePalette.length, 5);
 
       // ---------- Y4b D95 摘录卡五键：非法值经渲染层读侧真模块必须回落（§7.4 v48.51 / 设计稿 §F.2 + v1.4） ----------
       flow.section("Y4b 摘录卡编辑器/字号五键归一（渲染层读侧真模块 src/lib/extractCardSettings.ts）");
       const normToolbar = extNorm.normalizeExtractEditorToolbar;
       const normToolbarFloat = extNorm.normalizeExtractEditorToolbarFloat;
       const normToolbarTop = extNorm.normalizeExtractEditorToolbarTop;
-      const normReaderFloat = extNorm.normalizeReaderActionsFloat;
+      const normBarStyle = extNorm.normalizeSelectionBarStyle;
       const normFollow = extNorm.normalizeExtractFaceFontFollow;
       const normSize = extNorm.normalizeExtractFaceFontSize;
       const normFamily = extNorm.normalizeExtractFaceFontFamily;
@@ -432,9 +432,9 @@ app
       flow.eq("extractEditorToolbarTop：仅严格 true 为真（true/1/'x'/false/undefined）",
         JSON.stringify([true, 1, "x", false, undefined].map(normToolbarTop)),
         JSON.stringify([true, false, false, false, false]));
-      flow.eq("readerActionsFloat：仅严格 true 为真（true/1/'x'/false/null/undefined）",
-        JSON.stringify([true, 1, "x", false, null, undefined].map(normReaderFloat)),
-        JSON.stringify([true, false, false, false, false, false]));
+      flow.eq("selectionBarStyle：仅严格 'text' 为 text，其余回落 icon（D122）",
+        JSON.stringify(["text", "icon", "TEXT", 1, null, undefined].map(normBarStyle)),
+        JSON.stringify(["text", "icon", "icon", "icon", "icon", "icon"]));
       flow.eq("extractFaceFontFollow：仅严格 true 为真（true/'yes'/1/null）",
         JSON.stringify([true, "yes", 1, null].map(normFollow)),
         JSON.stringify([true, false, false, false]));

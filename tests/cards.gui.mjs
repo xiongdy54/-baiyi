@@ -170,7 +170,7 @@ try {
   await drag(P[1].start, P[1].end, 0);
   await wait(900);
   const formOk = await cdp.eval(`(() => {
-    const b = document.querySelector('[data-extract-toolbar] [data-annot-form="underline"]');
+    const b = document.querySelector('.selection-menu [data-annot-form="underline"]');
     b?.click();
     return !!b;
   })()`);

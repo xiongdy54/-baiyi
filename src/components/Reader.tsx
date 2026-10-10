@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -20,8 +20,7 @@ import ReaderEngine from "./reader/ReaderEngine";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
-import { useReaderActionsFloat } from "../lib/readerActionsSettings";
-import { placePopover } from "../lib/popoverPlace";
+import { useSelectionBarStyle } from "../lib/selectionBarSettings";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
@@ -60,41 +59,7 @@ import {
   type MultiSelectKey
 } from "../lib/readingWorkflow";
 
-/**
- * §K.4（D95 第二轮）：阅读器选区动作组的**悬浮形态**——同一组按钮（selActionsInner）以选区
- * 锚定弹层呈现（上方居中、空间不足翻到下方居中），与 SelectionMenu/AnnotationEditor/悬浮
- * 工具条同一族 placePopover 定位与 pop-in 入场。保留 `.reader-sel-actions` 类＝宿主
- * mouseup 豁免面判据不变（点按钮不清选区）。选区消失（滚动/点击空白/Esc）即随 selection
- * 卸载——生命周期与 SelectionMenu 完全同源（同一 selection state 驱动）。
- */
-function ReaderSelActionsFloat({ inner, anchor }: { inner: ReactNode; anchor: ReaderRect }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    // 先渲染在视口外一帧等测量（left:-9999），再按实测尺寸算位置——浮层家族同规，不闪错位帧
-    const { left, top } = placePopover({
-      anchor,
-      size: { width: el.offsetWidth, height: el.offsetHeight },
-      prefer: "above",
-      align: "center"
-    });
-    setPos({ left, top });
-  }, [anchor.x, anchor.y, anchor.width, anchor.height]);
-  return (
-    <div
-      ref={ref}
-      className="reader-sel-actions-pop reader-sel-actions"
-      data-sel-actions
-      role="toolbar"
-      aria-label="选区动作"
-      style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
-    >
-      {inner}
-    </div>
-  );
-}
+// D122：§K.4 的 ReaderSelActionsFloat（选区动作组悬浮形态）已退役——被 SelectionMenu（选区浮条）取代。
 
 interface Props {
   title: string;
@@ -923,6 +888,36 @@ export default function Reader({
     [manualOpen, aiPanel, occlEditor, openOcclusionEditor, showToast]
   );
 
+  /**
+   * D122 截图：截取阅读区当前可见内容（主进程 webContents.capturePage，覆盖 foliate iframe / PDF canvas
+   * 等渲染层读不到像素的内核）→ 与「点击正文图片」同一条路径进入图片挖空编辑器（默认框遮罩、
+   * 裁剪/AI 建议在编辑器内）。截前先清选区并等两帧重绘，浮条/选区高亮不入镜。
+   */
+  const handleCaptureReader = useCallback(async () => {
+    if (manualOpen || aiPanel || occlEditor) return;
+    const box = scrollRef.current?.getBoundingClientRect();
+    const capture = window.assetsAPI?.captureRegion;
+    if (!box || box.width < 8 || box.height < 8 || !capture) {
+      showToast("当前环境无法截图");
+      return;
+    }
+    setSelection(null);
+    engineSelRef.current = null;
+    await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+    const dataUrl = await capture({ x: box.left, y: box.top, width: box.width, height: box.height });
+    if (!dataUrl) {
+      showToast("截图失败");
+      return;
+    }
+    imageAnchorRef.current = {
+      locator: kernelRef.current?.getCurrentLocation() ?? null,
+      chapterIndex: engineChapterRef.current,
+      alt: "页面截图",
+      contextText: undefined
+    };
+    openOcclusionEditor({ dataUrl, alt: "页面截图" }, undefined);
+  }, [manualOpen, aiPanel, occlEditor, openOcclusionEditor, showToast]);
+
   /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
   const ensureImageAsset = useCallback(
     async (dataUrl: string): Promise<string | null> => {
@@ -1409,35 +1404,16 @@ export default function Reader({
   ]
     .filter(Boolean)
     .join(" · ");
-  // v48.43（D83）：选区动作组＝模式/形式段控（批注栏头同款样式）＋动作钮（批注栏头同族无框）。
-  // 段控是持久偏好（无选区也可切）；动作钮无选区 disabled（不可点无 🚫，暗色可读）。
-  // 图片挖空＝正文图片选区流程入口。data-sel-act 钩子与摘录页工具栏同一套。
-  // §K.4（D95 第二轮）：app.readerActionsFloat=true 时同一组按钮改以**选区锚定弹层**呈现
-  // （与 SelectionMenu/AnnotationEditor 同一族 placePopover 定位）；固定态顶栏零改动。
-  const actionsFloat = useReaderActionsFloat();
-  const selActionsInner = (
-    <>
-      <div className="seg-rail" role="group" aria-label="标注模式">
-        <button type="button" className={annotMode === "highlight" ? "on" : undefined} data-annot-mode="highlight" onClick={() => setAnnotMode("highlight")}>高亮</button>
-        <button type="button" className={annotMode === "extract" ? "on" : undefined} data-annot-mode="extract" onClick={() => setAnnotMode("extract")}>摘录+高亮</button>
-      </div>
-      <div className="seg-rail" role="group" aria-label="标记形式">
-        <button type="button" className={annotForm === "highlight" ? "on" : undefined} data-annot-form="highlight" onClick={() => setAnnotForm("highlight")}>高亮</button>
-        <button type="button" className={annotForm === "underline" ? "on" : undefined} data-annot-form="underline" onClick={() => setAnnotForm("underline")}>下划线</button>
-      </div>
-      {/* v48.52（D92 §3.4 全局制卡）：「制卡」去除选区依赖——免选区＝空表单自由制卡；
-          有选区＝quote 预填（actManualCard 现语义保留选区分支）。 */}
-      <button type="button" className="btn-rail" data-sel-act="manual" title={selection ? "就地制卡" : "自由制卡"} onClick={selAct.manual}>制卡</button>
-      <button type="button" className="btn-rail" data-sel-act="aiCards" disabled={!selection} title={selection ? "AI 制卡" : "先选中文字"} onClick={selAct.aiCards}>AI 制卡</button>
-      <button type="button" className="btn-rail" data-sel-act="explain" disabled={!selection} title={selection ? "AI 解释" : "先选中文字"} onClick={selAct.explain}>AI 解释</button>
-      <button type="button" className="btn-rail" data-sel-act="extract" disabled={!selection} title={selection ? "摘录进学习队列" : "先选中文字"} onClick={selAct.extract}>摘录</button>
-      <button type="button" className="btn-rail" data-sel-act="lookup" disabled={!selection} title={selection ? "查词" : "先选中文字"} onClick={selAct.lookup}>查词</button>
-      <button type="button" className="btn-rail" data-sel-act="occlusion" disabled={!selection} title={selection ? "图片挖空" : "先选中文字"} onClick={selAct.occlusion}>图片挖空</button>
-    </>
-  );
+  // D122：与选区相关的动作（批注/制卡/AI 制卡/AI 解释/查词）与「摘录/形式」标注选项全部迁入
+  // 选区浮条（SelectionMenu，随选区出现在鼠标旁）；工具栏只留**不依赖文字选区**的两项：
+  //   · 制卡＝免选区自由制卡（D92 §3.4；有选区时同样 quote 预填）
+  //   · 截图＝截取阅读区可见内容 → 进入与「点击正文图片」同一条图片挖空制卡流程
+  //     （取代原「图片挖空」资源库选图按钮——正文图片本身点击即可挖空，该按钮冗余）
+  const selBarStyle = useSelectionBarStyle();
   const selActionsGroup = (
     <div className="reader-engine-controls-group reader-sel-actions" data-sel-actions>
-      {selActionsInner}
+      <button type="button" className="btn-rail" data-sel-act="manual" title={selection ? "就地制卡" : "自由制卡"} onClick={selAct.manual}>制卡</button>
+      <button type="button" className="btn-rail" data-sel-act="capture" title="截取当前阅读区域并进入图片挖空制卡" onClick={() => void handleCaptureReader()}>截图</button>
     </div>
   );
 
@@ -1557,13 +1533,12 @@ export default function Reader({
                 </div>
                 <div className="reader-engine-col">
               <div className="reader-engine-controls">
-                {!actionsFloat && selActionsGroup}
+                {selActionsGroup}
                 <div className="reader-engine-controls-group">
                   {/* v48.44（D84）：翻页钮移到「更多」左侧。
                       v48.50（D90 增补）：分隔线移到组首——「图片挖空」与翻页贴得太近（用户指令），
-                      用 hairline 在选区动作组与翻页/菜单组之间给出可见断点。
-                      §K.4：动作组悬浮态下该断点随组一起退出顶栏（左侧无组可断）。 */}
-                  {!actionsFloat && <span className="reader-engine-divider" aria-hidden="true" />}
+                      用 hairline 在选区动作组与翻页/菜单组之间给出可见断点。 */}
+                  <span className="reader-engine-divider" aria-hidden="true" />
                   <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
                     <IconChevronLeft />
                   </button>
@@ -1732,9 +1707,8 @@ export default function Reader({
             </>
           ) : (
             <>
-            {/* v48.41（D81）：markdown（粘贴书）分支的选区动作组——与引擎工具栏同一份，置顶常驻。
-                §K.4：动作组悬浮态下退出顶栏（改以选区锚定弹层呈现，见 ReaderSelActionsFloat）。 */}
-            {!actionsFloat && <div className="reader-md-actions">{selActionsGroup}</div>}
+            {/* v48.41（D81）：markdown（粘贴书）分支的选区动作组——与引擎工具栏同一份，置顶常驻。 */}
+            <div className="reader-md-actions">{selActionsGroup}</div>
             <article className="reader-markdown">
               <h1 className="reader-title">{title}</h1>
               {contextLabel && <p className="reader-context">{contextLabel}</p>}
@@ -1788,12 +1762,14 @@ export default function Reader({
               colors={ANNOT_PALETTE}
               onPick={handlePickColor}
               byLocked={multiKeyHeld}
+              mode={annotMode}
+              onModeChange={setAnnotMode}
+              form={annotForm}
+              onFormChange={setAnnotForm}
+              barStyle={selBarStyle}
+              actions={{ manual: selAct.manual, aiCards: selAct.aiCards, explain: selAct.explain, lookup: selAct.lookup }}
             />
           )}
-
-          {/* §K.4：动作组悬浮态——选中文字时同一组按钮以选区锚定弹层呈现（selection 驱动，
-              滚动/点击空白即随选区清空而收起，与 SelectionMenu 同生命周期） */}
-          {actionsFloat && selection && <ReaderSelActionsFloat inner={selActionsInner} anchor={selection.rect} />}
         </div>
 
         {/* D88 §8：右侧制卡面板（手动态/AI 态经 SelectionPanels 换容器）；dock 头 meta＝材料名（§8.2） */}

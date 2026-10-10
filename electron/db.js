@@ -3848,8 +3848,8 @@ const DEFAULT_ANNOTATION_FILTER = "all";
 /** 色板 id 值域（与渲染层 --annot-* Token 同名）；也接受 #hex 自定义色 */
 const ANNOT_COLOR_IDS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "magenta"];
 const ANNOT_PALETTE_MAX = 8;
-/** 6 支标准色（§9.2 默认值；与 Zotero 数量对齐但值域自定） */
-const DEFAULT_ANNOT_PALETTE = ["yellow", "red", "green", "blue", "purple", "magenta"];
+/** 5 支默认色（D122：区分度最高的黄/红/绿/蓝/紫；§9.2 值域不变，仍可自定义） */
+const DEFAULT_ANNOT_PALETTE = ["yellow", "red", "green", "blue", "purple"];
 
 /** 归一标注模式：非枚举值回落默认 */
 function normalizeAnnotateMode(v) {

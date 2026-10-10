@@ -110,14 +110,14 @@
      颜色**不承载调度语义**；渲染取 --annot-<name>（实色：竖线/色点/角标）与
      --annot-<name>-soft（透明档：文中高亮，浅档 12% / 深档 26%）。
      -soft 派生自实色 ⇒ 必须与实色一起在 :root / body / body.theme-dark 三处各声明一次。 */
-  --annot-red: #c0392b;
-  --annot-orange: #c2410c;
-  --annot-yellow: #a16207;
-  --annot-green: #1a7f37;
-  --annot-teal: #0f766e;
-  --annot-blue: #002fa7;
-  --annot-purple: #6d28d9;
-  --annot-magenta: #a21caf;
+  --annot-red: #e5484d;
+  --annot-orange: #f28c28;
+  --annot-yellow: #f2b705;
+  --annot-green: #2fa866;
+  --annot-teal: #14b8a6;
+  --annot-blue: #3e7bfa;
+  --annot-purple: #8b5cf6;
+  --annot-magenta: #db4fa8;
   --annot-red-soft: color-mix(in srgb, var(--annot-red) 12%, transparent);
   --annot-orange-soft: color-mix(in srgb, var(--annot-orange) 12%, transparent);
   --annot-yellow-soft: color-mix(in srgb, var(--annot-yellow) 12%, transparent);
@@ -207,14 +207,15 @@ body.theme-dark {
   --shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.5);
   /* 批注色板深色档：实色提亮（对比不足的同因处理，同 --accent），透明档加深到 26%
      以便与深底拉开——浅档 12% 在 #101010 上几乎看不见（样张实测口径）。 */
-  --annot-red: #f87171;
-  --annot-orange: #fb923c;
-  --annot-yellow: #eab308;
-  --annot-green: #3fb950;
+  /* D122：新默认 5 色（黄/红/绿/蓝/紫）的深色提亮档；橙/青/品红为自定义色板可选的同族补充 */
+  --annot-red: #ff6b70;
+  --annot-orange: #fda04d;
+  --annot-yellow: #facc15;
+  --annot-green: #4ade80;
   --annot-teal: #2dd4bf;
-  --annot-blue: #5b7fe8;
+  --annot-blue: #6c9bff;
   --annot-purple: #a78bfa;
-  --annot-magenta: #e879f9;
+  --annot-magenta: #f472b6;
   --annot-red-soft: color-mix(in srgb, var(--annot-red) 26%, transparent);
   --annot-orange-soft: color-mix(in srgb, var(--annot-orange) 26%, transparent);
   --annot-yellow-soft: color-mix(in srgb, var(--annot-yellow) 26%, transparent);
@@ -268,14 +269,14 @@ body {
   --hl-multi: color-mix(in srgb, var(--accent) 22%, transparent);
   /* 批注色板：-soft 派生自实色，同样必须在 body 这一层重取一次（§5.1 求值层纪律；
      否则皮肤在 body 上改 --annot-* 时，-soft 会停在 :root 的实色上） */
-  --annot-red: #c0392b;
-  --annot-orange: #c2410c;
-  --annot-yellow: #a16207;
-  --annot-green: #1a7f37;
-  --annot-teal: #0f766e;
-  --annot-blue: #002fa7;
-  --annot-purple: #6d28d9;
-  --annot-magenta: #a21caf;
+  --annot-red: #e5484d;
+  --annot-orange: #f28c28;
+  --annot-yellow: #f2b705;
+  --annot-green: #2fa866;
+  --annot-teal: #14b8a6;
+  --annot-blue: #3e7bfa;
+  --annot-purple: #8b5cf6;
+  --annot-magenta: #db4fa8;
   --annot-red-soft: color-mix(in srgb, var(--annot-red) 12%, transparent);
   --annot-orange-soft: color-mix(in srgb, var(--annot-orange) 12%, transparent);
   --annot-yellow-soft: color-mix(in srgb, var(--annot-yellow) 12%, transparent);
@@ -815,9 +816,14 @@ body.has-skin .topbar { background: transparent; }
    transform-origin 取「菜单在选区下方」（50% 100%）；上方翻面态的 50% 0% 需组件侧
    placePopover 的翻面结果（同上，本轮不接线）。出场保持瞬时（现状惯例）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .selection-menu, .annot-editor, .reader-sel-actions-pop {
+  .annot-editor {
     animation: pop-in 220ms var(--spring) both;
     transform-origin: 50% 100%;
+  }
+  /* D122 选区浮条：不用 spring（MOTION-DESIGN-SPEC §0 冻结）——150ms --ease-enter 的落位淡入（§8.1 panel-in 同参） */
+  .selection-menu {
+    animation: sel-bar-in var(--dur-enter) var(--ease-enter) both;
+    transform-origin: 0% 100%;
   }
   /* 悬浮工具条（选区锚定弹层）：翻面侧由组件 data-place 给出，origin 随之翻——
      above＝自选区上方长出（origin 底缘），below＝下方（origin 顶缘） */
@@ -834,6 +840,7 @@ body.has-skin .topbar { background: transparent; }
   .dd-menu.dd-menu-down { transform-origin: 50% 0%; }
 }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.92) translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes sel-bar-in { from { opacity: 0; transform: translateY(var(--shift-sm)) scale(var(--scale-in)); } to { opacity: 1; transform: none; } }
 
 /* 涟漪容器（D88 §4.3）：涟漪 span 绝对定位需相对钮身裁剪——仅填充钮白名单需要 */
 .btn-primary, .bar-btn.primary { position: relative; overflow: hidden; }
@@ -2300,17 +2307,59 @@ body.theme-dark .modal-panel {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
-.selection-menu { transform: none; }
-/* v48.44（D84）：菜单定宽 240px——批注框（上）+ 调色排（下）两行后，文本框需要可用宽度 */
-.selection-menu { width: 240px; }
-/* v48.44（D84，用户点名）：批注框在上、色块在下（**上下布局**）；文本框距面板上沿/左沿的
-   边距一致＝.mrow 内边距统一 --sp-2（原上下 --sp-1 / 左右 --sp-2 不一致） */
-.selection-menu .mrow {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--sp-2);
-  padding: var(--sp-2);
+/* ---- D122 选区浮条（单行横条；设计稿 docs/design/SELECTION-POPOVER-D122.md）----
+   一行：色点｜批注·制卡·AI 制卡·AI 解释·查词｜标注选项 ▸（点开向右展开 摘录 + 底色|下划线）。
+   内边距 4px（--sp-1）；按钮同编辑条规格 24 高（图标钮 26×24）；hover 只改底色，不位移不阴影。 */
+.selection-menu { transform: none; width: max-content; max-width: calc(100vw - var(--sp-4)); }
+.sel-row { display: flex; align-items: center; gap: var(--sp-1); padding: var(--sp-1); }
+.sel-sep { flex: none; width: 1px; height: 16px; margin: 0 var(--sp-1); background: var(--border-subtle); }
+/* 色点：方块 16×16，间距 6px（半档写 calc） */
+.selection-menu .swatches { gap: calc(var(--sp-1) * 1.5); justify-content: flex-start; padding: 0 var(--sp-1); }
+.selection-menu .swatch { width: 16px; height: 16px; border: 0; border-radius: 0; flex: none; }
+.selection-menu .swatch:hover { outline: 1px solid var(--text-secondary); outline-offset: 2px; }
+.selection-menu .swatch:active { transform: scale(0.9); }
+/* 统一按钮（无框）：动作 / 摘录 / 底色·下划线 / 标注选项 同一套 */
+.sel-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 24px;
+  min-width: 26px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur-hover) var(--ease-out-soft), color var(--dur-hover) var(--ease-out-soft), border-color var(--dur-hover) var(--ease-out-soft);
+}
+.sel-btn.ic { width: 26px; padding: 0; }
+.sel-btn svg { display: block; }
+.sel-btn:hover { background: var(--grey-1); color: var(--text-primary); border-color: var(--border-subtle); }
+.sel-btn:active { transform: scale(var(--scale-press)); }
+.sel-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
+.sel-btn.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+/* 标注选项钮：开了摘录时折叠态也能一眼看出（图标版靠 accent 着色，文字版靠「摘录·」前缀） */
+.sel-gear.is-extract { color: var(--accent); }
+.sel-chev { display: inline-flex; margin-left: 2px; }
+.sel-chev svg { transition: transform var(--dur-panel) var(--ease-out-soft); }
+.sel-gear.on .sel-chev svg { transform: rotate(180deg); }
+.sel-seg { display: inline-flex; gap: calc(var(--sp-1) / 2); }
+/* 向右展开的选项区（state-changes §7：grid 0fr↔1fr；展开 240ms / 收起 200ms） */
+.sel-ext { display: grid; grid-template-columns: 0fr; margin-left: calc(var(--sp-1) * -1); transition: grid-template-columns 200ms var(--ease-out-soft); }
+.sel-ext.open { grid-template-columns: 1fr; transition-duration: var(--dur-panel); }
+.sel-ext > div { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; overflow: hidden; white-space: nowrap; }
+/* 批注（渐进披露）：向下展开；批注框与浮条边距同为 --sp-1 */
+.sel-clip { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 200ms var(--ease-out-soft); }
+.sel-clip.open { grid-template-rows: 1fr; transition-duration: var(--dur-panel); }
+.sel-clip > div { min-height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .sel-ext, .sel-clip, .sel-chev svg { transition: none; }
 }
 /* 模式/形式段控（.seg-plain＝v48.42/D82 去小框）：裸文字 + 被选项主题色下划线 */
 .seg {
@@ -6751,7 +6800,10 @@ body.capture-body #root { height: 100vh; }
 
 /* v48.43（D83）：选区菜单的批注框（色块上方；点色时有文字＝批注一并保存） */
 .menu-comment {
-  width: 100%;
+  display: block;
+  width: calc(100% - var(--sp-2));
+  margin: var(--sp-1) var(--sp-1) 0;
+  min-width: 220px;
   resize: none;
   font: inherit;
   font-size: var(--fs-meta);
@@ -7250,24 +7302,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   .md-tb-menu { animation: stage-pop-in 150ms var(--ease) both; }
 }
 
-/* ---------- 阅读器选区动作组悬浮弹层（§K.4；app.readerActionsFloat） ----------
-   固定态（默认）＝顶栏内 .reader-sel-actions 零改动；悬浮态＝同一组按钮以选区锚定弹层呈现
-   （保留 .reader-sel-actions 类＝宿主 mouseup 豁免面判据不变，点按钮不清选区）。 */
-.reader-sel-actions-pop {
-  position: fixed;
-  z-index: var(--z-sticky);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-  background: var(--reader-bg, var(--paper));
-  color: var(--reader-fg, var(--text-primary));
-  border: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-float);
-  padding: var(--sp-2);
-  width: max-content;
-  max-width: min(720px, calc(100vw - 16px));
-}
+/* （D122：§K.4 阅读器选区动作组悬浮弹层 .reader-sel-actions-pop 已退役——被选区浮条 .sel-bar 取代） */
 
 /* ---------- 摘录卡正文盒（Milkdown 根作用域） ----------
    D95 v1.3 的「.editor 类劫持逐项抵消」随 §J.2 根治退役：批注浮层类名已改名 .annot-editor，

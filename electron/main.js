@@ -247,11 +247,12 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "annotateCustomEnabled") value = normalizeAnnotateCustomEnabled(value);
   if (scope === "app" && key === "annotatePalette") value = normalizeAnnotatePalette(value);
   // D95（设计稿 §E/§F.2 + §K 第二轮）：摘录卡编辑器/字号键 + 阅读器动作组键写侧归一——
-  // 语义与渲染层读侧（src/lib/extractCardSettings.ts、src/lib/readerActionsSettings.ts）一致
+  // 语义与渲染层读侧（src/lib/extractCardSettings.ts、src/lib/selectionBarSettings.ts）一致
   if (scope === "app" && key === "extractEditorToolbar") value = value === true;
   if (scope === "app" && key === "extractEditorToolbarFloat") value = value === true;
   if (scope === "app" && key === "extractEditorToolbarTop") value = value === true;
-  if (scope === "app" && key === "readerActionsFloat") value = value === true;
+  // D122：选区浮条动作呈现（icon/text）取代 readerActionsFloat；与 src/lib/selectionBarSettings.ts 同规
+  if (scope === "app" && key === "selectionBarStyle") value = value === "text" ? "text" : "icon";
   if (scope === "app" && key === "extractFaceFontFollow") value = value === true;
   if (scope === "app" && key === "extractFaceFontSize") {
     const n = Math.round(Number(value));
@@ -774,6 +775,27 @@ ipcMain.handle("assets:saveImage", (_e, ownerKey, ext, base64, kind) => {
     return dbModule.createAssetForItem(String(ownerKey), String(kind || "image-occlusion"), String(ext || "png"), buf);
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
+  }
+});
+
+// D122 阅读器「截图」：截取**发起请求的窗口**内的视口矩形（CSS px，webContents.capturePage 按 DIP 取）。
+// 能截到 foliate iframe / PDF canvas 这类渲染层 DOM 读不到像素的内核；矩形夹进窗口内容区，越界/空 ⇒ null。
+ipcMain.handle("reader-capture:region", async (e, rect) => {
+  try {
+    const wc = e.sender;
+    const win = BrowserWindow.fromWebContents(wc);
+    if (!win) return null;
+    const [cw, ch] = win.getContentSize();
+    const x = Math.max(0, Math.floor(Number(rect && rect.x) || 0));
+    const y = Math.max(0, Math.floor(Number(rect && rect.y) || 0));
+    const w = Math.min(cw - x, Math.floor(Number(rect && rect.width) || 0));
+    const h = Math.min(ch - y, Math.floor(Number(rect && rect.height) || 0));
+    if (w < 8 || h < 8) return null;
+    const img = await wc.capturePage({ x, y, width: w, height: h });
+    if (!img || img.isEmpty()) return null;
+    return img.toDataURL();
+  } catch {
+    return null;
   }
 });
 

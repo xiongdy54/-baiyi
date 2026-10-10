@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
+import { useSelectionBarStyle } from "../lib/selectionBarSettings";
 import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
 import AnnotationPanel, { type AnnotItem, type AnnotFilter } from "./reader/AnnotationPanel";
@@ -220,6 +221,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
 
   /** 批 4 Task 12：模式/形式与色板取自设置键（与阅读器同一份读侧；改设置即时生效） */
   const annotSettings = useAnnotationSettings();
+  const selBarStyle = useSelectionBarStyle();
   const annotMode = annotSettings.annotateMode;
   const setAnnotMode = (m: AnnotMenuMode) => void writeAnnotationSetting("annotateMode", m);
   const annotForm = annotSettings.annotateForm;
@@ -1051,20 +1053,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
               与左侧批注栏头（收起/展开 全部/摘录/高亮 位置/时间）同一视觉行；
               面包屑+计数随之下移到动作行下方、正文上方。段控是持久偏好，无选区也可切。 */}
           <div className="extract-toolbar" data-extract-toolbar>
-            <div className="seg-rail" role="group" aria-label="标注模式">
-              <button type="button" className={annotMode === "highlight" ? "on" : undefined} data-annot-mode="highlight" onClick={() => setAnnotMode("highlight")}>高亮</button>
-              <button type="button" className={annotMode === "extract" ? "on" : undefined} data-annot-mode="extract" onClick={() => setAnnotMode("extract")}>摘录+高亮</button>
-            </div>
-            <div className="seg-rail" role="group" aria-label="标记形式">
-              <button type="button" className={annotForm === "highlight" ? "on" : undefined} data-annot-form="highlight" onClick={() => setAnnotForm("highlight")}>高亮</button>
-              <button type="button" className={annotForm === "underline" ? "on" : undefined} data-annot-form="underline" onClick={() => setAnnotForm("underline")}>下划线</button>
-            </div>
-            {/* v48.52（D92 §3.4）：「制卡」去除选区依赖（免选区＝空表单自由制卡；有选区＝quote 预填） */}
+            {/* D122：批注/AI 制卡/AI 解释/查词与「摘录·形式」标注选项迁入选区浮条（随选区出现在鼠标旁）；
+                工具栏只留不依赖选区的「制卡」（v48.52 / D92 §3.4：免选区＝空表单自由制卡；有选区＝quote 预填）。 */}
             <button type="button" className="btn-rail" data-sel-act="manual" disabled={!!viewing} title={faceSel && !viewing ? "就地制卡" : "自由制卡"} onClick={() => selActions.actions.manual()}>制卡</button>
-            <button type="button" className="btn-rail" data-sel-act="aiCards" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "AI 制卡" : "先在正文选中文字"} onClick={() => selActions.actions.aiCards()}>AI 制卡</button>
-            <button type="button" className="btn-rail" data-sel-act="explain" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "AI 解释" : "先在正文选中文字"} onClick={() => selActions.actions.explain()}>AI 解释</button>
-            <button type="button" className="btn-rail" data-sel-act="extract" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "摘录进学习队列" : "先在正文选中文字"} onClick={() => selActions.actions.extract()}>摘录</button>
-            <button type="button" className="btn-rail" data-sel-act="lookup" disabled={!!viewing || !faceSel} title={faceSel && !viewing ? "查词" : "先在正文选中文字"} onClick={() => selActions.actions.lookup()}>查词</button>
           </div>
           <div className="extract-page-head-inner">
             <div className="extract-crumbs" data-extract-crumbs>
@@ -1142,6 +1133,17 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           colors={ANNOT_PALETTE}
           onPick={handlePickColor}
           byLocked={multiKeyHeld}
+          mode={annotMode}
+          onModeChange={setAnnotMode}
+          form={annotForm}
+          onFormChange={setAnnotForm}
+          barStyle={selBarStyle}
+          actions={{
+            manual: () => selActions.actions.manual(),
+            aiCards: () => selActions.actions.aiCards(),
+            explain: () => selActions.actions.explain(),
+            lookup: () => selActions.actions.lookup()
+          }}
         />
       )}
 

@@ -180,7 +180,9 @@ contextBridge.exposeInMainWorld("similarityAPI", {
 // v25：saveImage 供正文图片点选聚焦（字节来自渲染层，不经文件对话框）
 contextBridge.exposeInMainWorld("assetsAPI", {
   pickOcclusionImage: (ownerKey) => ipcRenderer.invoke("assets:pickOcclusionImage", ownerKey),
-  saveImage: (ownerKey, ext, base64, kind) => ipcRenderer.invoke("assets:saveImage", ownerKey, ext, base64, kind)
+  saveImage: (ownerKey, ext, base64, kind) => ipcRenderer.invoke("assets:saveImage", ownerKey, ext, base64, kind),
+  // D122 阅读器「截图」：截取本窗口内的视口矩形 → PNG dataURL（进入图片挖空编辑器）
+  captureRegion: (rect) => ipcRenderer.invoke("reader-capture:region", rect)
 });
 
 // v23：FSRS 参数环境——活跃配置完整快照 + 主进程事实层推送的热生效通知（F9）

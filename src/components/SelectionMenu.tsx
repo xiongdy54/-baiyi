@@ -1,11 +1,26 @@
-// 选区菜单（批 4 Task 9，规格 §3.3；v48.41/D81 动作上移工具栏；v48.43/D83 菜单只留**批注框+色块**）：
-// 模式段控（高亮 ｜ 摘录+高亮）与形式段控（高亮 ｜ 下划线）上移宿主工具栏（.reader-sel-actions /
-// .extract-toolbar，批注栏头段控同款样式）。菜单＝色块上方的**批注文本框**（每次选区重置）+ 调色排——
-// 点色时有文字＝批注一并保存；无文字＝无批注的高亮或摘录。点色**不再自动弹编辑浮层**（编辑走
-// 栏内条目/文中标记点击，R37/R40 入口不变）。
-// 定位一律走 src/lib/popoverPlace.ts（R22：锚点＝**选区包围盒**，不再用 pointerup 坐标）。
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+// 选区浮条（D122，取代 D83/D84 的「批注框+色块」菜单；设计稿 docs/design/SELECTION-POPOVER-D122.md）：
+// 选中文字后出现在选区**上方**（放不下翻到下方）的一行横条——
+//   色点（方块，点色＝按当前「摘录/形式」完成标注）｜批注/制卡/AI 制卡/AI 解释/查词｜标注选项 ▸
+// · 「摘录」不再是动作按钮而是**标注选项**：开＝点色同时进摘录队列（原 annotateMode=extract），
+//   形式（底色/下划线）同理（原 annotateForm）。两者收在最右「标注选项」钮里，点开**向右**展开，
+//   折叠态钮面显示当前值，不占行。
+// · 批注默认折叠（渐进披露）：点「批注」向下展开文本框；写好后点色＝批注随标注保存，
+//   或 Ctrl+Enter＝用上一次点过的颜色保存；Esc 收起。
+// · 动作呈现按 app.selectionBarStyle：icon（默认，编辑条同款 16px 图标）| text（文字标签）。
+// 定位一律走 src/lib/popoverPlace.ts（R22：锚点＝选区包围盒）；高度/宽度变化（展开批注/选项）
+// 由 ResizeObserver 重新定位，保证贴近选区的那条边不动。
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { placePopover, type PopoverRect } from "../lib/popoverPlace";
+import type { SelectionBarStyle } from "../lib/selectionBarSettings";
+import {
+  IconSelAiCards,
+  IconSelCard,
+  IconSelChevron,
+  IconSelExplain,
+  IconSelLookup,
+  IconSelMark,
+  IconSelNote
+} from "./selectionIcons";
 
 /** 批注色板 id（规格 §2）：渲染取 --annot-<name>；颜色不承载调度语义 */
 export const ANNOT_COLORS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "magenta"] as const;
@@ -14,7 +29,6 @@ export type AnnotColor = (typeof ANNOT_COLORS)[number];
 /**
  * 标注模式（R38）：`highlight`＝纯批注（不进队列）；`extract`＝摘录+高亮（进队列）。
  * 标记形式（v48.41/D81）：`highlight`＝底色高亮；`underline`＝批注色下划线（透明底）。
- * 两者已上移宿主工具栏（D83），菜单不再渲染段控。
  */
 export type AnnotMenuMode = "highlight" | "extract";
 export type AnnotMarkForm = "highlight" | "underline";
@@ -26,65 +40,165 @@ export interface SelectionMenuAction {
   onClick: () => void;
 }
 
+/** 浮条里对选区做事的四个动作（与快捷键 Ctrl+Z/X/A/D 同源 selAct.*） */
+export interface SelectionBarActions {
+  manual: () => void;
+  aiCards: () => void;
+  explain: () => void;
+  lookup: () => void;
+}
+
+const COLOR_NAMES: Record<string, string> = {
+  red: "红", orange: "橙", yellow: "黄", green: "绿", teal: "青", blue: "蓝", purple: "紫", magenta: "品红"
+};
+const FORM_LABEL: Record<AnnotMarkForm, string> = { highlight: "底色", underline: "下划线" };
+
 export default function SelectionMenu({
   anchor,
   container,
   colors,
   onPick,
-  byLocked = false
+  byLocked = false,
+  mode = "highlight",
+  onModeChange,
+  form = "highlight",
+  onFormChange,
+  barStyle = "icon",
+  actions
 }: {
   /** 选区包围盒（视口坐标）——R22 判据 4 */
   anchor: PopoverRect;
-  /** 阅读容器（视口坐标；菜单夹在它内部，含 8px 边距） */
+  /** 阅读容器（视口坐标；浮条夹在它内部，含 8px 边距） */
   container?: PopoverRect | null;
-  /** 用户配好的色板（设置键 annotatePalette）；空则不渲染调色排 */
-  colors: readonly AnnotColor[];
-  /** 点色＝按工具栏当前模式与形式完成标注；第二参＝菜单批注框的文字（空串＝无批注） */
+  /** 用户配好的色板（设置键 annotatePalette）；空则不渲染色点 */
+  colors: readonly string[];
+  /** 点色＝按当前模式与形式完成标注；第二参＝批注文字（空串＝无批注） */
   onPick: (color: AnnotColor, comment: string) => void;
   /**
-   * 多段选择修饰键按住期间置位：菜单**让路**——整块 pointer-events:none，
-   * 好让「按住 Ctrl 拖选下一段」的起笔落在正文而不是菜单上。
+   * 多段选择修饰键按住期间置位：浮条**让路**——整块 pointer-events:none，
+   * 好让「按住 Ctrl 拖选下一段」的起笔落在正文而不是浮条上。
    */
   byLocked?: boolean;
+  /** 当前标注模式 / 形式与改写回调（持久键 app.annotateMode / app.annotateForm） */
+  mode?: AnnotMenuMode;
+  onModeChange?: (m: AnnotMenuMode) => void;
+  form?: AnnotMarkForm;
+  onFormChange?: (f: AnnotMarkForm) => void;
+  /** 动作呈现：icon（默认）| text */
+  barStyle?: SelectionBarStyle;
+  /** 四个选区动作；缺省＝不渲染动作区 */
+  actions?: SelectionBarActions;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLTextAreaElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  // 批注草稿：随选区（锚点）更换即重置——菜单是「这一次标注」的一次性面板
+  // 批注草稿 + 展开态：随选区（锚点）更换即重置——浮条是「这一次标注」的一次性面板
   const [comment, setComment] = useState("");
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [optsOpen, setOptsOpen] = useState(false);
+  // 「上一次点过的颜色」：Ctrl+Enter 默认用它；首次＝色板第一支
+  const lastColor = useRef<string | null>(null);
   useEffect(() => {
     setComment("");
+    setCommentOpen(false);
   }, [anchor.x, anchor.y, anchor.width, anchor.height]);
 
-  useLayoutEffect(() => {
+  const place = () => {
     const el = ref.current;
     if (!el) return;
-    // 先渲染在视口外一帧等测量（left:-9999），再按实测尺寸算位置——避免首帧闪到错误位置
+    // 先渲染在视口外一帧等测量（left:-9999），再按实测尺寸算位置——避免首帧闪到错误位置。
+    // 默认在选区上方（prefer above）：不盖住下一行文字；放不下 placePopover 自动翻到下方。
     const { left, top } = placePopover({
       anchor,
       container,
       size: { width: el.offsetWidth, height: el.offsetHeight },
-      prefer: "auto"
+      prefer: "above"
     });
-    setPos({ left, top });
-  }, [anchor.x, anchor.y, anchor.width, anchor.height, container?.x, container?.y, container?.width, container?.height, colors.length]);
+    setPos((p) => (p && p.left === left && p.top === top ? p : { left, top }));
+  };
+
+  useLayoutEffect(place, [anchor.x, anchor.y, anchor.width, anchor.height, container?.x, container?.y, container?.width, container?.height, colors.length, barStyle]);
+
+  // 批注/选项展开动画期间尺寸逐帧变化：随之重新定位（上方时固定下沿向上长）
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => place());
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor.x, anchor.y, anchor.width, anchor.height, container?.x, container?.y, container?.width, container?.height]);
+
+  const pick = (c: string) => {
+    lastColor.current = c;
+    onPick(c as AnnotColor, comment.trim());
+  };
+
+  const toggleComment = () => {
+    setCommentOpen((o) => {
+      if (!o) setTimeout(() => textRef.current?.focus(), 120);
+      return !o;
+    });
+  };
+
+  // 点按钮不夺走正文选区（textarea 例外：它要拿焦点）
+  const keepSel = (e: ReactMouseEvent) => e.preventDefault();
+
+  const isIcon = barStyle === "icon";
+  const extract = mode === "extract";
+  const gearTitle = `标注选项：${extract ? "摘录+" : ""}${FORM_LABEL[form]}`;
+  const gearText = `${extract ? "摘录·" : ""}${FORM_LABEL[form]}`;
+
+  const actBtn = (key: string, label: string, title: string, icon: ReactNode, onClick: () => void, extra?: string) => (
+    <button
+      key={key}
+      type="button"
+      className={`sel-btn${isIcon ? " ic" : ""}${extra ? ` ${extra}` : ""}`}
+      data-sel-act={key}
+      title={title}
+      aria-label={label}
+      onMouseDown={keepSel}
+      onClick={onClick}
+    >
+      {isIcon ? icon : label}
+    </button>
+  );
 
   return (
     <div
       ref={ref}
-      className={`menu selection-menu${byLocked ? " menu-locked" : ""}`}
+      className={`menu selection-menu sel-bar${byLocked ? " menu-locked" : ""}`}
       role="dialog"
       aria-label="选中文字"
+      data-sel-actions
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
     >
-      <div className="mrow">
-        <textarea
-          className="menu-comment"
-          rows={2}
-          placeholder="批注（可留空）"
-          aria-label="批注内容"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-        />
+      <div className={`sel-clip${commentOpen ? " open" : ""}`}>
+        <div>
+          <textarea
+            ref={textRef}
+            className="menu-comment"
+            rows={2}
+            placeholder="写批注…（Ctrl+Enter 用上次的颜色保存）"
+            aria-label="批注内容"
+            tabIndex={commentOpen ? 0 : -1}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                const c = lastColor.current ?? colors[0];
+                if (c) pick(c);
+              } else if (e.key === "Escape") {
+                e.stopPropagation();
+                setCommentOpen(false);
+              }
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="sel-row">
         {colors.length > 0 && (
           <div className="swatches">
             {colors.map((c) => (
@@ -93,13 +207,76 @@ export default function SelectionMenu({
                 type="button"
                 className="swatch"
                 data-color={c}
-                title="用这支色完成本次标注（附上方批注，如有）"
+                title={`${COLOR_NAMES[c] ?? c}色${extract ? " · 摘录+" : " · "}${FORM_LABEL[form]}${comment.trim() ? "（附批注）" : ""}`}
                 aria-label={`标注色 ${c}`}
-                style={{ background: `var(--annot-${c})` }}
-                onClick={() => onPick(c, comment.trim())}
+                style={{ background: c.startsWith("#") ? c : `var(--annot-${c})` }}
+                onMouseDown={keepSel}
+                onClick={() => pick(c)}
               />
             ))}
           </div>
+        )}
+
+        {actions && (
+          <>
+            <i className="sel-sep" aria-hidden="true" />
+            {actBtn("note", "批注", "批注（先写再点颜色）", <IconSelNote />, toggleComment, commentOpen ? "on" : undefined)}
+            {actBtn("manual", "制卡", "就地制卡 · Ctrl+Z", <IconSelCard />, actions.manual)}
+            {actBtn("aiCards", "AI 制卡", "AI 制卡 · Ctrl+X", <IconSelAiCards />, actions.aiCards)}
+            {actBtn("explain", "AI 解释", "AI 解释 · Ctrl+A", <IconSelExplain />, actions.explain)}
+            {actBtn("lookup", "查词", "查词 · Ctrl+D", <IconSelLookup />, actions.lookup)}
+          </>
+        )}
+
+        {(onModeChange || onFormChange) && (
+          <>
+            <i className="sel-sep" aria-hidden="true" />
+            <button
+              type="button"
+              className={`sel-btn sel-gear${optsOpen ? " on" : ""}${extract ? " is-extract" : ""}`}
+              data-sel-gear
+              title={gearTitle}
+              aria-label={gearTitle}
+              aria-expanded={optsOpen}
+              onMouseDown={keepSel}
+              onClick={() => setOptsOpen((o) => !o)}
+            >
+              {isIcon ? <IconSelMark /> : gearText}
+              <span className="sel-chev"><IconSelChevron /></span>
+            </button>
+            <div className={`sel-ext${optsOpen ? " open" : ""}`} aria-hidden={!optsOpen}>
+              <div>
+                <i className="sel-sep" aria-hidden="true" />
+                <button
+                  type="button"
+                  className={`sel-btn${extract ? " on" : ""}`}
+                  data-annot-extract
+                  aria-pressed={extract}
+                  tabIndex={optsOpen ? 0 : -1}
+                  title="点颜色时同时进入学习队列"
+                  onMouseDown={keepSel}
+                  onClick={() => onModeChange?.(extract ? "highlight" : "extract")}
+                >
+                  摘录
+                </button>
+                <span className="sel-seg" role="group" aria-label="标记形式">
+                  {(["highlight", "underline"] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`sel-btn${form === f ? " on" : ""}`}
+                      data-annot-form={f}
+                      tabIndex={optsOpen ? 0 : -1}
+                      onMouseDown={keepSel}
+                      onClick={() => onFormChange?.(f)}
+                    >
+                      {FORM_LABEL[f]}
+                    </button>
+                  ))}
+                </span>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>

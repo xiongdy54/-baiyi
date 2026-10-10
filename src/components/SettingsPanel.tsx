@@ -23,7 +23,7 @@ import {
   DEFAULT_EXTRACT_FACE_FONT_FAMILY,
   type ExtractCardSettings
 } from "../lib/extractCardSettings";
-import { DEFAULT_READER_ACTIONS_FLOAT, normalizeReaderActionsFloat } from "../lib/readerActionsSettings";
+import { DEFAULT_SELECTION_BAR_STYLE, normalizeSelectionBarStyle, type SelectionBarStyle } from "../lib/selectionBarSettings";
 import { shortcutsApi, type ShortcutStatus } from "../lib/journal";
 import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
@@ -1364,8 +1364,8 @@ function ReaderSection() {
     extractFaceFontSize: DEFAULT_EXTRACT_FACE_FONT_SIZE,
     extractFaceFontFamily: DEFAULT_EXTRACT_FACE_FONT_FAMILY
   });
-  // §K.4：阅读器选区动作组呈现（false＝固定顶栏，true＝选区锚定弹层）
-  const [readerActionsFloat, setReaderActionsFloat] = useState(DEFAULT_READER_ACTIONS_FLOAT);
+  // D122：选区浮条动作呈现（icon 图标 / text 文字）
+  const [selBarStyle, setSelBarStyle] = useState<SelectionBarStyle>(DEFAULT_SELECTION_BAR_STYLE);
   useEffect(() => {
     settingsStore
       .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
@@ -1380,8 +1380,8 @@ function ReaderSection() {
     void readAnnotationSettings().then(setAnnot);
     void readExtractCardSettings().then(setExt);
     void settingsStore
-      .get<unknown>("app", "readerActionsFloat", DEFAULT_READER_ACTIONS_FLOAT)
-      .then((v) => setReaderActionsFloat(normalizeReaderActionsFloat(v)));
+      .get<unknown>("app", "selectionBarStyle", DEFAULT_SELECTION_BAR_STYLE)
+      .then((v) => setSelBarStyle(normalizeSelectionBarStyle(v)));
   }, []);
   const save = (next: ReaderSettings) => {
     setCfg(next);
@@ -1561,24 +1561,28 @@ function ReaderSection() {
           ))}
         </div>
       </div>
-      {/* §K.4：阅读器选区动作组（高亮/摘录/制卡/查词等）呈现位置 */}
+      {/* D122：选区浮条里「批注/制卡/AI 制卡/AI 解释/查词」的呈现——图标（默认）或文字 */}
       <div className="settings-row">
         <span className="settings-row-label">
-          阅读器选区动作组
-          <SettingsInfo label="阅读器选区动作组">同一组按钮：默认固定在阅读器顶栏；开启后选中文字时以弹层浮现在选中的文字旁。</SettingsInfo>
+          选区浮条按钮样式
+          <SettingsInfo label="选区浮条按钮样式">选中文字时出现在文字旁的浮条里，动作按钮用图标（悬停显示名称）或文字标签。</SettingsInfo>
         </span>
-        <label className="widget-toggle-main">
-          <input
-            type="checkbox"
-            data-testid="setting-reader-actions-float"
-            checked={readerActionsFloat}
-            onChange={(e) => {
-              setReaderActionsFloat(e.target.checked);
-              void settingsStore.set("app", "readerActionsFloat", e.target.checked);
-            }}
-          />
-          <span>悬浮于选中文字</span>
-        </label>
+        <div className="seg-tabs">
+          {([["icon", "图标"], ["text", "文字"]] as const).map(([id, label]) => (
+            <button
+              key={id}
+              className={selBarStyle === id ? "active" : ""}
+              data-sel-bar-style={id}
+              data-testid={`setting-sel-bar-style-${id}`}
+              onClick={() => {
+                setSelBarStyle(id);
+                void settingsStore.set("app", "selectionBarStyle", id);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <h4>摘录卡编辑器</h4>

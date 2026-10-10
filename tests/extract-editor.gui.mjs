@@ -298,7 +298,7 @@ try {
   // 验收 7：点高亮出浮层（拖选 + 摘录+高亮 造段锚批注 → 三判据）
   // ============================================================
   console.log("\n== 验收 7 点高亮出浮层 ==");
-  await cdp.eval(`(() => { document.querySelector('[data-annot-mode="extract"]')?.click(); return true; })()`);
+  await cdp.eval(`(() => { document.querySelector('.selection-menu [data-annot-extract]')?.click(); return true; })()`);
   await wait(400);
   await drag(cdp)(p6.start, p6.end);
   await wait(900);

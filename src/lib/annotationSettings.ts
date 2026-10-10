@@ -19,7 +19,7 @@ export type AnnotationFilter = "all" | "extract" | "highlight";
 export const DEFAULT_ANNOTATE_MODE: AnnotateMode = "highlight";
 export const DEFAULT_ANNOTATE_FORM: AnnotateForm = "highlight";
 export const DEFAULT_ANNOTATION_FILTER: AnnotationFilter = "all";
-export const DEFAULT_ANNOTATE_PALETTE: string[] = ["yellow", "red", "green", "blue", "purple", "magenta"];
+export const DEFAULT_ANNOTATE_PALETTE: string[] = ["yellow", "red", "green", "blue", "purple"]; // D122：精简为区分度最高的 5 色（仍可在设置里自定义）
 export const ANNOT_PALETTE_MAX = 8;
 const COLOR_IDS: readonly string[] = ANNOT_COLORS;
 
