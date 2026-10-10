@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件（**v48.79**） — AI 开发指导文档
+# 一站式渐进阅读学习软件（**v48.80**） — AI 开发指导文档
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -136,6 +136,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 
 - **users / library_items / documents / assets / extracts / cards / card_issues / ai_gen_batches / review_logs / fsrs_configs**（另有 review_skips）
 - **表逐一点名（v48.16 / D52 收口＝与 `electron/db.js` 的 `CREATE TABLE` 同步；**v48.22 / D58 契约新增 `extract_ops` / `op_counter` / `op_journal` 三张——标「契约」者批 1 落地前**尚未实建**）**：`ai_gen_batches`、`assets`、`card_issues`、`card_links`（v48.77 / D121）、`cards`、`dict_sources`、`dictionary_cache`、`documents`、`extracts`、`fsrs_configs`、`insight_runs`、`journal_entries`、`knowledge_external_refs`、`knowledge_points`、`knowledge_proposals`、`knowledge_relations`、`library_items`、`material_map_calls`、`material_map_runs`、`material_map_shards`、`material_maps`、`memory_runs`、`personal_meaning_candidates`、`prompt_templates`、`reading_events`、`review_logs`、`review_skips`、`users`（以上 28 张，含 `card_links`）+ 批 1 已落地的 `extract_ops`、`op_counter`、`op_journal` 三张 = **31 张已实建**。其中 `reading_events`（阅读位置事件流，字数统计的唯一真源）此前从未在本文档点名，属 D-DOC-03 的漏项。
+- **D124 规划新增 5 张主库表**（`learner_tracks / track_materials / learning_events / rec_runs / rec_feedback`，设计稿 §5.1；L2-1 落地后再计入实建数与上面点名清单）。
+- **D124 规划新增独立派生库 `learner.db`**（写法仿 `dictionary.db`：sql.js 独立实例 + 原子落盘，存内容单元索引 / 通读次数 / KP 等级 / 词项索引等**派生缓存**，删除可重建、不进备份；详见设计稿 §5.2 与 §4.20）。
 - `cards.fsrs_json`：**全字段持久化** `{state,due,lapses,stability,difficulty,reps,lastReview,learningSteps}`（§4.4.1 契约）
 - `cards.fsrs_config_id`（v23）：当前 FSRS 状态**最近一次因调度写入**所用参数配置（滚动语义，非出生标签；写入规则见 §4.4.9）
 - `cards.occlusion_json`：图片挖空 `{rects:[{x,y,w,h,ord}], assetPath, shapes?:[{ord,kind:rect|ellipse|polygon, …}]}`（区域与形状均为相对图片百分比坐标；**rects 恒为形状包围盒**——旧渲染与 L11 校验的兼容层，shapes 为精确轮廓：rect 用 x/y/w/h、ellipse 用 cx/cy/rx/ry、polygon 用 points[{x,y}]；图片资产入 assets 表 kind=image-occlusion，v15 补齐生成链路，v25 补手绘选区形状）
@@ -302,6 +304,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 
 ### 4.7 Knowledge Evidence 与 BEMM（v24，**外部设计稿** §11–§21 收紧——非本文档章节号）
 
+> **已被 D124 取代**（见 §4.20 与设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`），本节保留作历史。
+
 1. **FSRS 管记忆、LKM 管能力（设计稿 §13/§53）：** `FSRS = Card-level memory state`（这张卡记得怎么样），`LKM = Concept-level competency state`（这个知识点整体掌握到什么程度）。单卡 stability 高只证明该卡信息保持好，**不得直接断言 KnowledgePoint mastered**。四问分离：这张卡何时复习 / 用户懂什么概念 / 下一步学什么 / 用什么材料——各由 FSRS / LKM / Frontier / Material 模型回答。
 2. **五维状态（外部设计稿 §11–§12，非本文档章节号）：** 每 KP 每维度一个 Beta 后验 `Mastery ~ Beta(α,β)`，`estimate=α/(α+β)`，同时存 `confidence + evidenceCount + lastEvidenceAt`。五维：`recognition（识别判断）/ recall（无提示主动回忆，主源 QA/Cloze/FSRS）/ conceptualUnderstanding（关系机制，主源 why/how·解释·对比·因果卡）/ application（解决实际问题，禁由纯背诵卡推断）/ transfer（迁移新情境，最高层证据）`。存 `(alpha,beta)` 全量，**禁只存百分比**；UI 显示 `developing / functional / strong / uncertain` 四态，算法用连续值。
 3. **知识状态持续演化、无永久标签（§20–§21）：** 长期无证据 → confidence 下降 → 回 `uncertain`；**禁简单复制 FSRS 遗忘曲线**（FSRS 管记忆项目，mastery 是高层能力估计，半衰期独立参数化）。
@@ -328,6 +332,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 
 ### 4.8 Learning Frontier（v24，设计稿 §22–§25）
 
+> **已被 D124 取代**（见 §4.20 与设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`），本节保留作历史。
+
 1. **定义：** 与已掌握知识充分关联、前置基本满足、尚未充分掌握、挑战处于可吸收范围的知识候选集。是 `Ready enough + Novel enough + Connected enough + Challenging enough + Useful enough` 的交集，不是"最难的"也不是"最新的"。
 2. **候选分：** `readiness（前置掌握）× novelty（未知度）× connectivity（与既有图谱连接，孤立新领域降权）× challengeFit × utility（目标/阅读史/日记/主题/用户选择/近期关注）× evidenceNeed（confidence 低则值得验证）`。
 3. **Challenge Fit：** challenge＝内容难度 + 前置缺口 + novelty + 密度 + 抽象度 + 任务要求；能力＝前置 mastery + 近期表现 + 阅读理解证据；映射到 `comfortable / growth / stretch / too_hard` 四档（初始阈值可配，后续按表现自动校准）。**不用固定 i+1**。desirable difficulties 有边界条件，过高认知负荷损害学习。
@@ -335,6 +341,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 5. **RL 延后（§64）：** 先解决"状态如何正确估计"，再谈策略优化。
 
 ### 4.9 Material Knowledge Profile 与推荐（v24，设计稿 §26–§32）
+
+> **已被 D124 取代**（见 §4.20 与设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`），本节保留作历史。
 
 1. **材料画像：** 每份材料存 `knowledge coverage（KP→覆盖度）+ prerequisiteGap + conceptDensity + estimatedDifficulty + estimatedChallenge + completionStatus`；难度分解 `conceptualDifficulty / languageDifficulty / prerequisiteDifficulty / density / applicationDemand / transferDemand` 六维（语言学习场景下语言难与概念难可反向）。
 2. **候选池：** 未读 + 阅读中 + 读完 + 摘录 + 用户导入（PDF/EPUB/TXT/Markdown/Word）+ 联网新材料。导入时走 profiling 管线（parse → 语义分析 → KP/关系抽取 → 难度估计 → 落库），推荐时直接查。**（v33）** 结构驱动候选（§4.14）还要「用户未接触过的领域」，该来源在 K6 联网发现落地前**只能从已导入未读材料或用户手动提供的材料中生成**，禁凭空列举领域与书目。
@@ -349,6 +357,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 3. **生长动画＝真实回放（K8 验收）：** 推荐/洞察管线 emit 阶段事件（扫描 N 节点 → 发现 M 缺口 → 筛出 K 可学 → 检查 X 份材料 → 推荐 Y），UI 按事件逐批淡入/连边生长；**禁无数据的假扫描动画**。同理 Insight Evidence Trail（概念信号 → 检索 → 图遍历 → 证据 → 竞争解释 → 组装）须由 `insight_runs` 真实计数字段驱动。
 
 ### 4.11 LKM 双轨调优（v24，打磨 Q5/Q7/Q8 + 开发者轨）
+
+> **已被 D124 取代**（见 §4.20 与设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`），本节保留作历史。
 
 1. **共用底座（仿 D22）：** `lkm_configs{id, modelVersion(LKM-vN), parameterVersion, params_json(§4.7 的全部待校准参数：先验/权重矩阵/guess-slip/reliability/Bottleneck/Frontier 权重/挑战阈值/衰减半衰期), config_fingerprint UNIQUE, source(default|user_trained|dev_candidate), createdAt}` + `settings.app.lkmConfigId` 活跃指针。只增不改，切换只移指针，apply 指纹去重，reset 回默认，失败 `{ok:false}` 不阻塞复习。
 2. **Track A 用户本地优化器（仿 optimizer.js 四步）：** `buildLkmTrainSet → train → evaluate(可评估子集) → apply/reset`；目标是**预测下一次同 KP 任务成功概率**（Brier/Calibration/AUC，§49–§50），禁拟合 mastery 本身；小数据用 Beta-Binomial MLE/网格搜索，纯 JS 本地算子，**禁复用 `fsrs-rs-nodejs`**（FSRS 专用）。主观感受不进目标函数。
@@ -376,6 +386,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 7. **Structure Insight（结构连接，v33 增补）：** 由「已持有知识结构 ↔ 候选领域知识结构」的对应关系驱动的洞察，是 AI 洞察的重要一支（完整契约见 §4.14）。输出契约：`{structureConnection: {ownedStructure: {knowledgePointIds[], relationEdges[], structureLabel}, connectionMode, candidateDomain, counterpartStructure, slotMapping[{fromKnowledgePointId?, toLabel, relationType, confidence}], whyThisDomain, disanalogy[]（≥1 条主要差异）, expectedEntryPoint（初步认知模型的最小骨架）, falsifiableQuestions[], uncertainties[]}}`；必须能回答「为什么推荐这个领域」与「结构相似在哪里」；每条映射须可点击追溯到 KP/卡/摘录，无依据一律降 `uncertain`；`ownedStructure` 侧证据不足时不出建议。
 
 ### 4.14 结构连接 Structure Connection（v33，Insight 第四分支 + Frontier 第二入口）
+
+> **已被 D124 取代**（推迟不在 LM-1 路线内；见 §4.20 与设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`），本节保留作历史。
 
 1. **命题。** i+1 的「i」不止是已掌握的具体知识点与前置，也包含**已有知识中的相关结构**。因此进入一个新领域有两条路——**前置驱动**（该领域的前置已具备）与**结构驱动**（该领域的知识结构与你已持有的结构高度对应，即使前置缺口存在）。**关键命题：AI 洞察的关键不只是控制新知识的难度，更在于找到新知识与已有认知结构之间的可连接点。** 结构驱动的进入不以该领域的前置知识为切入点，而以结构相似性为切入点；用户接受后先建立**粗略的初步认知模型**，再在该模型上吸收略高于当前理解水平的新信息并持续修正它，从而不断扩展知识面。
 2. **连接手法（封闭枚举）+ 强制输出。** `connectionMode ∈ {analogy（类比：A 域结构 ↔ B 域结构整体对应）/ abstraction（抽象：把已有结构提升为更高层的模式，再找实例化它的领域，依赖 generalization_of 边）/ combination（组合：两个及以上已有结构交叉，指向交叉/新兴领域）}`——即「类比 / 抽象 / 组合」三类手法；**三种手法都必须产出槽位映射 `mapping`**（逐槽列出 A 侧 KP/关系 ↔ B 侧概念/关系的对应 + 各自 confidence）。即「类比、映射、组合、抽象」四要素＝**三类手法 + 一项强制输出**。
@@ -537,6 +549,18 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 10. **制卡联结与学习状态（节点身份 remap，D41-⑥）。** 节点「就此制卡」→ **既有 createAcceptedCard 管线**（不复制新制卡系统）：注入**有界** materialMapContext（当前节点 → 父 → 祖先路径 → 必要兄弟 → 节点 evidence → 材料级结构摘要，≤1200 字，禁止整图无限塞入）；`cards.context_ref_json.mindmapNodeId` 溯源 + `siblingKey = act:mindmap-<nodeId>`（创建时点值）。**重生成不保 nodeId 稳定**：新版被用户接受时执行本地确定性 remap（提取单元覆盖重叠 → evidence quoteHash 重叠 → 标题精确相等，按序打分），oldId→newId 存 `nodeRemapJson`；**卡片永不改写**，学习状态查询沿 remap 链解析；未匹配旧卡留在旧版本语境；title 不作身份。节点可显示「已有 N 张卡 / 知识点已存在」（只读查询 `knowledge_points` 真实数据），但学习状态**只映射显示**——不得改变地图结构/节点位置/组织关系（用户背熟不自动变绿、不移动、不消失）。
 11. **失败状态机、修复与取消（D41-③）。** 状态：pending / estimating / waiting_user / running / validating / completed / failed_network / failed_timeout / failed_rate_limit / failed_json / failed_validation / cancelled。首字符静默约 40 秒是已知模型行为——显示「正在等待模型响应…」，**禁止虚假进度百分比**。模型输出 JSON 语法错误最多允许一次 **STRUCTURE_FORMAT_REPAIR** 调用（不加节点/不加证据/不改语义，只转合法 JSON；仍失败即 failed_json，不偷偷继续；额外调用计入实际费用）。**取消**＝停止尚未开始的请求 + 终止可取消的请求 + **已成功完成的分片照常入缓存** + 不产出半成品 active map + 旧图保留；再次生成从缓存续。**任何失败（超时/JSON/证据/网络）都不覆盖或删除旧地图。**
 12. **合规。** 全书/章节文本发送 AI ＝ 用户主动触发 + **发送前预览**（上条）+ 用户自有 Key；无 Key 时可读降级——可阅读已有导图/展开折叠/节点查看/跳正文/看学习状态，生成与重生成按钮 disabled + 说明「配置 AI Key 后可生成新的材料知识导图」（**不弹错误弹窗**）；导图永不自动生成、永不做逐条确认流（生成的是分析视图，节点制卡仍逐张经确认面板）；导图永不作为推荐/掌握度/调度输入（与 §4.18-14 ⑥ 同口径）。
+
+### 4.20 学习者模型 LM-1（D124，v48.80；**唯一实现依据＝设计稿** `docs/design/LEARNER-MODEL-REDESIGN-D124.md`）
+
+> 本节只是路由摘要（10 行内）；全部数值、表名、函数名、文件路径以设计稿为准。执行批次 L0–L6 见 §9.1「学习者模型与下一步推荐（M17，D124）」。
+
+- **目标：** 根据用户当前掌握水平，在数据页「下一步」面板给出 3–10 件可立即执行的具体行动（续读 / 开读 / 处理摘录 / 摘录制卡 / 巩固 / 换个讲法 / 自我解释 / 练习 / 找材料 / 重读 / 语境串 / 挖句子 / 词汇快测），每件附一句理由，全部本地确定性计算、零网络、零 AI。
+- **取代关系（详见设计稿 §2.3）：** 本节取代 §4.7（BEMM 五维 Beta / `knowledge_evidence` / `learner_knowledge_states`）、§4.7 v44 探针契约（`probe_runs`）、§4.8（Frontier 六因子）、§4.9（AI 材料画像）、§4.11（双轨调优 `lkm_configs`）、§6.4.1 的 E2（KP_frontier 因子改由设计稿 §9.5 `kpFactor` 实现）；§4.14 结构连接推迟不在本路线内；§9.1 M8 路线 K3–K9 由 M17 的 L0–L6 取代。
+- **架构：** 主库新增 5 张事实表 `learner_tracks / track_materials / learning_events / rec_runs / rec_feedback`（v48.80 新增，L2-1 落地）；派生数据放独立 `learner.db`（`content_units / unit_progress / unit_kp_links / kp_states / lexemes / unit_lex / lexeme_states` 等，可删可重建，不进备份）。
+- **核心机制：** 5 种处理方式（mode：language/concept/procedural/factual/narrative）× 学习轨道（track）× 内容单元（约 1500–6000 字）× KP 五级（L0–L4，由多卡 FSRS 保持率确定性判定）× 词项五态（unknown/seen/learning/familiar/known，由查词/通读/标记/快测判定）；13 种推荐（K1–K12、K14）由 13 个候选生成器 → 加权和打分 → 轨道配额 + 多样性选取产生。
+- **参数集中：** 全部阈值与权重在 `electron/lmParams.js`（规划新增），带 `LM_VERSION` / `PARAM_VERSION`；改数值必须 bump 并在本文档记录。
+- **总开关：** `app.learner.enabled`（默认开；见 §7.4 登记与设计稿 §11.8），关闭即整个功能停止计算与记录、数据保留。
+- **硬边界：** 学习者模型对 `cards / review_logs / extracts / knowledge_*` 只读；复习评分、摘录推进、制卡的 IPC 处理函数内不得调用学习者模型代码（复习成功绝不等学习者模型）。
 
 ---
 
@@ -756,25 +780,6 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 
 > **KnowledgeLint 落地形态注记（v43）**：K2（prerequisite 环）/ K3（自循环）已随 K1 落地为**写时校验**（`wouldCreatePrerequisiteCycle` 建环拒绝 / `createKnowledgeRelation` 自循环拒绝）；K5（低置信进候选池）/ K6（疑似重复提议合并）已随 K2-A 落地为**提案裁决形态**（指纹幂等 / n-gram+AI 归一建议）；**K4/K7/K8 于 v43 随 K2-B 落地为报告型检查**——`db.runKnowledgeLint()`（K4：KP domain 不在 UDC 受控清单、关联卡主类与 KP 主域不一致 → warn；K7：关联卡跨 ≥3 个 UDC 主类 → info 建议拆分；K8：零关系边且关联卡 ≤1 张 → info 建议合并或挂靠），IPC `knowledge:lint`，KnowledgeManager「质量检查」按钮手动触发、只读非阻断、确定性启发式零维护；K9/K10 仍随 K9 批次。
 
-### 6.3.11 LKM 专用 PromptTemplate 分支（v24 规范，K2 起按需播种）
-
-- **禁把知识模型职责塞进 `card-generation`（设计稿 §55–§56）：** 制卡提示词只管制卡。LKM 新增 5 个独立 scope，各自版本化播种、各自走测试台验证：`knowledge-extraction`（KP 抽取：label/description/domain/封闭档位 + evidence span）/ `knowledge-relation`（关系抽取：8 种 relationType 封闭枚举 + 置信档 + 依据）/ `material-difficulty`（材料六维难度档位估计 + 覆盖 KP 候选）/ `knowledge-probe`（dimension 探针卡：新情境出题，沿用四档评分心智，输出带 `dimension` 标签）/ `frontier-explain`（推荐解释：只组织已验证数据依据，禁编造扫描数字）。
-- 每个 LKM 模板必须含判定锚语（什么条件下写哪一档）+ evidence 引用要求（无 evidence 降级 `uncertain`）+ 封闭选项清单（写法照抄 R17 UDC 清单注入方式）。
-
-### 6.3.12 KnowledgeLint（v24 规范，独立于 CardLint，设计稿 §57）
-
-| ruleId | 检查内容 | severity |
-|---|---|---|
-| K2 | prerequisite 自循环 / 环（A 是 B 的前置且 B 是 A 的前置） | error |
-| K3 | relation 自循环（from == to） | error |
-| K4 | domain 不在受控清单 / KP 与卡 domain 不一致 | warn |
-| K5 | AI relation confidence 低于阈值（进候选池，不进正式表） | info |
-| K6 | knowledgePoint 疑似重复（归一器提议合并） | warn |
-| K7 | concept 过宽（覆盖面过大，建议拆分） | info |
-| K8 | concept 过窄（单例孤立，建议合并或挂靠） | info |
-
-severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择接受；info 仅提示。KnowledgeLint 只校验知识结构，不碰 FSRS 调度字段。
-
 #### 不变量与验收检查（AI 制卡与助读）
 
 - 制卡原则只存在于两处：`card-*` 族 PromptTemplate（给 LLM）与 `CardLintEngine` 规则表（本地质检）；代码 / 组件 / 文档**不许散落第二份原则文本**。
@@ -792,6 +797,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 摘录默认 priority 50（**v48.22 / D58 起：新建摘录继承所属书的 `library_items.priority`**，书级默认亦为 50，故存量语义零变更；用户在书架上可改该书优先级）；推迟＝`interval × a_factor` 封顶 180 天（**v48.22 / D58 起不再是占位**——`a_factor` 是每元素倍率、默认 **1.6**（与旧 ×1.6 逐值等值），读后推进用同一倍率，完整语义见 §6.8-2）；原「负载感知推迟（priority 三档基础间隔 + dueLoad 分散 + postponeCount 抖动 + 上限 180 天）」设计承诺经用户 2026-09-24 授权**解冻**（§9.4 记录），但**本批不实现**——本次改用 SuperMemo 的 A-Factor 语义，原方案留 §9.4 作备选。
 
 ### 6.4.1 下一条摘录推荐（Next Extract，v24 规范，K4–K5 落地，一步到位）
+
+> **已被 D124 取代**（E2 的 KP_frontier 因子改由设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md` §9.5 `kpFactor` 实现；见 §4.20），本节保留作历史。
 
 - **定位：** Frontier 的首选落点是摘录而非整本书。摘录是用户亲手搁置的最小未理解单元（暂时不理解、等前置补上再学），与 SuperMemo Extract / Priority Queue 同构：先分散摘出、排队、前置补上后回头消化。从 KP 到摘录是一跳直达，无需先经整书再定位章节。
 - **不碰现有语义：** 到期队列仍按 `priority ASC + topic_next_at ASC` 确定性排序（用户已习惯）。推荐以"推荐面板 + 可选排序开关"叠加：队列页顶部"下一条推荐"Top 1–3 + 可验证一句话解释；原列表默认顺序不变，另给"按推荐排序"开关，切过去才重排，切回恢复。**禁静默重排。**
@@ -1231,6 +1238,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **持久化节流例外（v36）**：日记自动保存（快速记录输入中）走**防抖持久化**（尾随 4s / 上限 20s + 隐藏·发送·退出强制 flush），是本项目对「每次落库即落盘」的**首个已登记例外**（理由与代价见 D34；第二个例外＝应用日志追加写，见下条 D119）；其余任何写入（含日记页的提交/编辑/删除）仍走即时 `persist()`。新增表一律进主库（M2 备份打包整库，自动覆盖）。
 - **用户记忆文件树不在主库（v42，§4.18-2）**：`<userData>/memory/` 是记忆的**唯一真源**，「新增表一律进主库」的规则**对它不适用**——**M2 备份 / 恢复必须显式包含该目录**（§4.1 记忆文件树声明、§9.1 M14 验收 ⑨）；文件写入一律**原子替换**（tmp + rename），禁止留下半截文件；整理执行只追加与标记，**绝不整文件重写**（§4.18-12）。
 - **应用日志追加写（v48.75 / D119）**：`<userData>/logs/` 的诊断日志用 `appendFileSync` 直写、不落库、不走 `persist()` 原子替换——日志非用户数据、非调度事实源，append-only 追加语义与 tmp+rename 原子替换冲突，单行丢失不影响诊断完整性，写失败必须静默降级不得阻塞任何业务路径；隐私白名单与体积轮转见 D119。
+- **`learner.db` 独立派生库落盘例外（v48.80 / D124，设计稿 §5.2）**：D124 规划新增的独立派生库 `learner.db`（`electron/learnerDb.js`，写法仿 `dictionary.db`）写入走 `learnerDb.save()`（tmp + fsync + rename 原子写）**不走主库 `persist()`**——与 `dictionary.db` 同一理由：sql.js 每次 `persist()` 全量导出主库，词项索引可达数十万行，入主库会拖慢每次复习评分落盘；且全部是派生数据，删除可重建、不进备份。
+- **`rec_runs` 保留最近 300 行例外（v48.80 / D124，设计稿 §7.2 例外登记）**：`rec_runs` 是推荐展示快照（append-only 事实），超出 300 行**物理删除**最旧行——理由：展示快照的审计价值随时间递减，且主库受 sql.js 全量回写约束不宜无限增长。物理删除按本条登记。
 
 #### 不变量与验收检查（数据完整性 / 原子持久化与并发）
 
@@ -1239,7 +1248,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - `updateCard` 未传 fsrs / leech 时**保留原值，禁止置 NULL**。
 - 禁止用 partial 对象走全行 UPDATE——改内容必须先取库内最新状态合并（先例：词典快照曾把 17 列清空）。
 - `contentEditable` 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable；**例外（v48.54 / D95）＝自管子树的编辑器内核**（摘录卡 Milkdown/ProseMirror，§6.8-14）。
-- **每次落库即落盘**：写路径走 `persist()`（tmp + fsync + rename 原子替换）；例外仅限本节登记的两个＝日记草稿节流（D34）＋应用日志追加写（D119）。
+- **每次落库即落盘**：写路径走 `persist()`（tmp + fsync + rename 原子替换）；例外仅限本节登记＝日记草稿节流（D34）＋应用日志追加写（D119）＋`learner.db` 走 `learnerDb.save()`（D124）＋`rec_runs` 300 行物理裁剪（D124）。
 - 用户记忆文件树同样原子替换，禁止留半截文件；整理只追加与标记，**绝不整文件重写**。
 - 新增表一律进主库（M2 打包整库自动覆盖）；**唯一例外是不在主库的记忆文件树，备份 / 恢复必须显式包含它**。
 - 并发写走主进程单一 sql.js 实例，渲染层不持库；外部脚本改库前必须先关闭应用。
@@ -1283,6 +1292,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **卡面信息密度键（v48.61 / D104；完整语义见 §6.8-6 行详情）**：`app.cardFaceExtras`（对象 `{mnemonic, example, sourceRef}`，三键 bool 各默认 `true`）＝复习页背面辅助字段区与卡详情卡面预览的**纯显示开关**（助记 / 例子 / 来源三块，关闭即不渲染对应块；不影响卡内数据与 CardLint）。**双侧归一**——主进程 `settings:set` 写侧（`electron/main.js`，逐键字面量：三键仅严格 `true` 为真，缺失/非法回落 `true`）与渲染层读侧（`src/lib/cardFaceExtras.ts` `normalizeCardFaceExtras`，同一套规则）；`F18` 的 `DOC_KEYS` + round-trip + 读侧真模块矩阵须同步补齐。
 - **标签功能总开关（v48.63 / D107）**：`app.tagsEnabled`（bool，默认 `true`）＝标签功能一键开/关——关闭时六处入口（手动制卡标签行 / AI 制卡批注标签继承与建议 / 复习页标签区与快捷打标 / 浏览器批量打标 / 卡详情标签区 / 筛选牌组构建器标签条件）全部隐藏，**只隐藏入口与展示、数据零改动**（`tags_json` 原样保留，重开即恢复；查询 `tag:` 与已存 scope 照常生效）。**双侧归一**——主进程 `settings:set` 写侧（`electron/main.js`，仅严格 `false` 为关）与渲染层读侧（`src/lib/tagSettings.ts` `normalizeTagsEnabled` 同规）；`F18` 的 `DOC_KEYS` + round-trip + 读侧归一矩阵须同步补齐。
 - **制卡台设置（v48.79 / D123）**：`app.workbenchPlacement`（`"right"`｜`"bottom"`，默认 `"right"`，写侧归一非法回落 right）＝制卡台放置位置，只在设置页「卡面与标签」切换；`app.closeToTray`（bool，默认 `true`，仅严格 `false` 为关）＝关闭主窗口时收进系统托盘继续运行；`app.globalShortcuts.workbench`（`{enabled, accelerator}`，默认 `Ctrl+Alt+K`）＝呼出独立制卡台窗口，与另两个全局键同表同机制（注册失败可见、三键互斥）。
+- **学习者知识模型键（v48.80 / D124，设计稿 §11.6；对象键，存储形态照 `app.extracts` 先例）**：`app.learner = { enabled, nativeLangs, nativeConfirmed, recCount }`——`enabled`（bool，默认 `true`）＝**学习者知识模型总开关**（设计稿 §11.8：关闭即整个功能停止计算与记录、数据保留，重新开启自动恢复）；`nativeLangs`（ISO 639-1 主子标签数组，去重 1–8 个；**字段缺省＝用户尚未确认**，生效值回落 `[baseLang(系统区域)]`）＝母语/已精通语言，决定哪些语言算外语；`nativeConfirmed`（bool，默认 `false`）＝用户是否已确认过母语；`recCount`（整数 3–10，默认 `6`）＝推荐条数。主进程读侧合法化在 `electron/learnerRefresh.js`（每次 IPC 重读），渲染层读侧在 `src/lib/learner.ts` `learnerSettings`（规划新增）；`F18` 的 `DOC_KEYS` + round-trip 用例须同步补齐。
 - **摘录卡编辑器与字号键 + 阅读器动作组键（v48.54 / D95 + v48.55 / D96 §K，完整语义见 §6.8-14/§6.8-15）**：`app.extractEditorToolbar`（bool，默认 `true`）＝摘录卡编辑器下方富文本工具栏开关（关闭后整行不渲染，markdown 语法输入不受影响）、`app.extractEditorToolbarFloat`（bool，默认 `false`；**v1.4 引入、v48.55 悬浮语义改判 §K.3**）＝工具栏形态——`false`＝随文档流 dock（钉底/钉顶由下一键定）、`true`＝**选区锚定弹层**（悬浮于选中文字，placePopover 上方居中/翻面、弹窗家族同源入场）、`app.extractEditorToolbarTop`（bool，默认 `false`；**v48.55 §K.2**）＝非悬浮时 dock 态钉底/钉顶——`false`＝sticky 吸滚动区下缘（默认）、`true`＝吸顶并让开吸顶头带）、`app.extractFaceFontFollow`（bool，默认 `true`）＝卡面字号/字体/行高跟随 `app.readerSettings.appearance`（行高恒跟随，不单列键）、`app.extractFaceFontSize`（int 10–40，默认 `17`）＝follow=false 时的卡面字号、`app.extractFaceFontFamily`（string，默认 `""`）＝独立字体键；**留空语义（v1.3）＝无论 follow 与否，未显式设置字体一律回落应用无衬线栈 `var(--font-sans)`**（follow 时只跟随阅读器的显式设置值）。五键走 `app` 层、**零 schema 变更**；**两侧都归一**——主进程 `settings:set` 写侧（`electron/main.js`，逐键字面量：仅严格 `true` 为真；字号 `Math.round` 后落 10–40 区间否则回落 17；字体 trim 字符串，非字符串回落 `""`）与渲染层读侧（`src/lib/extractCardSettings.ts`，同一套规则，脏值一律回落默认）。`F18` 的 `DOC_KEYS` + round-trip + 非法值矩阵须同步补齐（Y2 往返 + Y4b 读侧真模块矩阵）；写侧的落库效果由 `tests/extract-editor.gui.mjs` 经设置页真实路径覆盖。
 - **阅读器选区动作组呈现键（v48.55 / D96 §K.4；完整语义见 §6.8-15/§6.8-14）**：`app.readerActionsFloat`（bool，默认 `false`）＝阅读器顶栏选区动作组（模式/形式段控 + 高亮/摘录/制卡/AI/查词/图片挖空八钮，`data-sel-actions`）的呈现——`false`＝固定顶栏（现状零改动）、`true`＝选中文字时**同一组按钮**以选区锚定弹层呈现（`ReaderSelActionsFloat`：placePopover prefer above / align center、保留 `.reader-sel-actions` 类＝宿主 mouseup 豁免面判据不变；与 SelectionMenu 同一 `selection` state 驱动，滚动/点击空白即随选区清空收起）。仅改呈现位置，不碰 D92 学习坞页签/收展/手动制卡。写侧归一（`electron/main.js`，仅严格 `true`）+ 读侧（`src/lib/readerActionsSettings.ts`，同规）双侧归一；`F18` DOC_KEYS/round-trip/非法值矩阵同步。
 - **`app.extracts.aiRerank`（v48.22 / D58；E1 的派生缓存，**非调度真源**）**：`{fingerprint, at, order:[{id, reason}]}`——AI 重排结果的缓存，指纹不符即失效；`computeSessionQueue` 同步读它，**读路径绝不调用模型**。属已登记 `app.extracts` 对象的子字段，`F18` 无需新增键项。
@@ -1446,6 +1456,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D112 | **v48.68 AI 供应商注册表扩容 + 本地模型可用性（设计 `docs/design/AI-PROVIDER-REGISTRY-D112.md`，用户指令「完善大模型供应商设置和本地大模型接入设置…增加对主流大模型供应商官方APIkey接入的支持…完善本地大模型接入功能，确保它确实可用」）**：①**注册表化**——`electron/ai.js` `PRESETS` 4 项扩 15 项（+`group` 分组字段），全部走既有 OpenAI 兼容传输层零改动（Claude/Gemini 经其官方 OpenAI 兼容层，端点经 2026-10-07 联网核实，核实表存设计稿 §1.2）；`ai:getConfig` 附 `presets` 元数据（无 Key）下发，渲染层 `PRESET_OPTIONS` 硬编码退役（缺席回落兜底）；`setAIConfig` 既有按服务商 Key 留存逻辑对新 id 天然生效；②**本地探测**——新 IPC `ai:detectLocal`（`detectLocalRuntime()`：Ollama 11434 `/v1/models`（降级 `/api/tags`）→ LM Studio 1234，4s 探针超时，未命中可读指引不抛错）+ `listModels()` 本地 `/api/tags` 降级 + 设置页本地预设「检测本地服务」一键采用检测地址与模型列表；③**潜伏缺陷修复**——kpExtract.ts / InsightPanel.tsx 渲染层无 Key 预检只看 `hasKey`，本地无 Key 配置被误判静默跳过（K2-A 知识抽取不跑、洞察页置灰，与主进程 `needKey` 豁免相矛盾）；修复＝`src/lib/ai.ts` `aiConfigUsable(cfg)` 单一判据，kpExtract / InsightPanel / SettingsPanel 三处统一。传输层零改动 ⇒ F41 全绿为回归门槛。测试：`tests/d112-providers.test.cjs`（注册表完整性/切换预设不串 Key/detectLocal 两态/tags 降级）+ `tests/d112.gui.mjs`（15 项分组渲染/本地检测按钮） | 用户 2026-10-07 书面指令（逐字存设计稿 §0）；Hermes Agent 与各供应商官方文档检索为依据 | v48.68 |
 | D108 | **v48.64 查询语法 v3＝布尔结构与通配（M16 批次 4 残余收口之一，§6.8-6「仍未实现」清单兑现）**：① `or`（独立 token、大小写不敏感）取并，优先级低于隐式 AND；② 分组括号 `(` / `)` **必须为独立 token**（词内括号按普通字符，不破坏书名括号）；③ 通配符 `*`（文本项与 `book:`/`status:`/`tag:`/`type:` 字段值，`*`＝任意串、其余字面、不锚定）；④ 负号统一为 NOT 算子（`-book:`/`-status:`/`-type:` 取反可用；`-kind:`/`-priority<op>` 由静默无效升级为有效语义——v1/v2 实况：负号字段条件落 `exclude` 被 `textMatches` 跳过＝无效，`cardQuery.ts` kind 取反三元是死代码，文档声称与实现不符）；⑤ 实现＝`src/lib/cardQuery.ts` AST 化（递归下降：括号 > NOT > AND > or；`parseCardQuery` 增 `ast`/`hasGroups` 字段 + `cardRowMatches`/`extractRowMatches` 统一行判定；**无 `or`/括号查询 AST 做等值变换（tag 正值归组 OR、单值字段取最后一次出现）≡ 扁平逐条 AND**；扁平字段保留为编译产物，`extractScopeConditions` 不变）；⑥ 含 `or`/括号查询不做 kind 页签联动（裸 `kind:` 才切页签），tag 多值在此按布尔 AND（无 or/括号查询保持 v1/v2 多值 OR）；⑦ **顺带修复批次 4 结构性缺陷（实证）**：闪卡侧文本过滤对**整条原始查询串**做 `hay.includes`（`CardBrowser.tsx` L313）——任何含字段前缀或多 token 的查询恒 false 全灭，字段过滤从未有机会执行（`tag:`/`kind:`/`priority<=30` 在闪卡页签全部失效，d101 GUI 无查询框用例故未暴露）；v3 统一 AST 求值后文本项逐词判定（多词＝AND、引号短语整串），摘录侧多词文本同步由整串子串改逐词 AND；`type:` 查询摘录页签由「忽略显示全部」改为恒空（摘录行无卡形式，诚实语义）。**不涉及**：schema、设置键、主进程（纯渲染层查询面）。测试：`tests/d108-query.test.cjs`（AST 解析/求值矩阵 + or/括号/NOT/通配 + 无新语法查询与扁平路径等值差分 + 闪卡全灭缺陷修复对照 + 摘录行判定）+ 既有 d101/d105 套件回归（`-type:` 断言按 v3 NOT 语义同步改写） | §6.8-6 v1/v2 时登记「仍未实现：`or` 与括号、通配符、`-book:`/`-status:` 取反——留给后续批次」；D58 ⑧ 浏览器 2.0 功能清单含查询语法（Anki 手册功能描述为参照，AGPL 零搬运边界沿用 D58 ⑩） | v48.64 |
 
+| D124 | **v48.80 学习者模型与下一步推荐重设计 LM-1（设计 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`，Opus 5.5 出稿、用户 2026-10-10 确认 Q1–Q5；唯一实现依据，取代 §4.7 / §4.8 / §4.9 / §4.11 / §4.14 推迟 / §6.4.1 E2 与 §9.1 M8 路线 K3–K9，新主线编号 M17）**：目标＝数据页「下一步」面板按当前掌握水平给 3–10 件可执行行动（K1 续读 / K2 开读 / K3 处理摘录 / K4 摘录制卡 / K5 巩固 / K6 换个讲法 / K7 自我解释 / K8 练习 / K9 找材料 / K10 重读 / K11 语境串 / K12 挖句子 / K14 词汇快测），全部本地确定性计算、零网络、零 AI；主库新增 5 张事实表（轨道 / 归属覆盖 / 学习事件 / 推荐运行 / 推荐反馈）+ 独立派生库 `learner.db`（可删可重建、不进备份）；5 种处理方式（mode）× 学习轨道 × 内容单元 × KP 五级（多卡 FSRS 保持率确定性判定）× 词项五态（查词/通读/标记/快测判定）；13 个候选生成器 → 加权和打分 → 轨道配额 + 多样性选取；全球化（任意母语/材料语言/字符串表，Q1）+ 整体总开关 `app.learner.enabled`（默认开，Q5）+ 推荐条数 3–10 可调（Q4）+ 面板在数据页顶部（Q3）+ 查词制卡默认卡型不改（Q2）；执行批次 L0–L6 与全部数值/表名/函数名以设计稿为准 | 用户 2026-10-10 确认设计定稿并指令实现（Q1–Q5 五项拍板见设计稿 §15） | v48.80 |
 | D123 | **v48.79 制卡台（设计 `docs/design/CARD-WORKBENCH-D123.md`；用户 2026-10-10 指令）**：手动制卡/AI 制卡/AI 解释合并为全局模块「制卡台」，唯一入口＝顶栏文字按钮 + `Ctrl+K`；手动制卡为常驻主角（可收成一行、保留四种卡片类型切换），AI 制卡保留材料类型/默认形式/重跑，知识点行改为「勾选·可编辑条目·解释」并去除行内重复的「制卡」按钮，AI 解释页底部常驻自适应输入框并支持把 AI 回复制卡；放置位置（右侧/底部）在设置里切换；最大化内推、非最大化窗口向右外延（`win:dockExtend`）；退役 `dock-handle`/呼吸点/坞头「＋制卡」与关闭钮，摘录页取消上方「制卡」工具行以对齐细线；摘录页 `elapsedSec={0}` 硬编码（「已等待 0 秒」根因）改由 AIPanel 自算；托盘常驻（`app.closeToTray`）、独立制卡台窗口与全局快捷键 `globalShortcuts.workbench`。无 schema/调度/提示词改动 | 用户 2026-10-10 逐条指令（预览稿选定版本 1+3 融合；「直接开始实现」）；GUI/托盘/外延实机行为待主机验证 | v48.79 |
 | D122 | **v48.78 数据页图表重设计与一日时间轴（设计 `docs/design/DASHBOARD-REDESIGN-D121.md`，文件沿用原路径）**：固定 viewBox 图表改响应式像素布局、文字实测截断和 HTML 图注；秒级答题分布、连续月份排名、24 小时节律、单调卡片漏斗、库内来源聚合与 14 学习日到期预测口径在 §4.2 登记；新增 `stats:timeline` 只读 IPC，五类行为按学习日聚成估算时段块（阅读/日记阈值 5 分钟，摘录/制卡 4 分钟，复习 3 分钟；作答夹 3–180 秒，块时长最少 30 秒，活跃时长取估算区间并集）。时间轴不改变日记自然日归属、不作知识掌握证据；无 schema/设置键/调度写入。新 timeline widget 对老布局插入默认前驱之后，图表配色 Token `--chart-2..6` 深浅各档。验证与未完成 GUI 边界见设计稿 | 用户 2026-10-09 授权提交合并现有 Claude Code 工作区；2026-10-09 提交前审查补记既有实现的合同遗漏，不能据此声称原实现遵守了文档先行流程 | v48.78 |
 
@@ -1488,6 +1499,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 ### M14 — 用户记忆 User Memory（v42 定契约，✅ v45 UM-1 + v46 UM-2 已全部实现；**位置：排在 K2-B 之后、K3 之前**）
 ### M15 — 材料知识导图 Material Mind Map 重做（v44 定契约 D40；v47 曾实现并于 2026-09-18 整体回滚；**v48 重设计定稿 D41/D42——§4.19 v48 全节重写为唯一实现依据**；位置：M14 之后，可与 K3 并行）
 ### M16 — 摘录复习改版（v48.22 定契约 D58–D60；完整规格 `docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md`；位置：用户 2026-09-24 指定，先于 M15 剩余批次与 K 系列推进）
+### 学习者模型与下一步推荐（M17，D124）——实现批次：L0 文档批（指导文档 v48.80 登记，本批）→ L1 纯函数核心（`electron/lmParams.js` / `lmText.js` / `lmLex.js` / `lmLevels.js` / `lmStrings.js` / `lmRecommend.js` 规划新增 + 4 个 node 测试）→ L2 存储与刷新管线（主库 5 张事实表 + `learnerDb.js` + `learnerRefresh.js` + 16 个 `learner:*` IPC，规划新增）→ L3 事件埋点与推荐接口（`src/lib/learner.ts` 等渲染层基础 + 查词埋点 + App 导航）→ L4 下一步面板与轨道管理（`NextStepsPanel` / `TracksDialog` / 设置子块）→ L5 语言专用对话框（单元阅读 / 语境串 / 挖句子 / 词汇快测 / 自我解释）→ L6 衔接（E2 `kpFactor` + 知识点页等级标签 + 文档收口）。唯一实现依据＝设计稿 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`（§12 任务拆解表逐行验收）；K0–K9 路线中 K3–K9 由本批次取代（§2.3 替代关系）
 ### M9 — 在线功能（商业化前置）
 ### M10 — 官网
 ### M11 — 界面自定义与主题社区
@@ -1535,7 +1547,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | M9 | 在线功能（数据收集/反馈/更新/多提供商/API 分发） | ❌ |
 | M10 | 官网 | ❌ |
 | M11 | 界面自定义 + 主题社区 | ❌ |
-| K0–K9 | Learner Knowledge Model（v24 架构定稿，纯文档；实现按 §9.1 M8 实施路线 K0–K9 分批） | 📐 v24 定稿（§4.5–§4.13 + §6.3.11–12 + §7.6 + D24）+ **v33 增补（§4.14 结构连接 + §6.3.11 `structure-analogy` + §6.3.12 K9–K10 + D32）**；实现未启动（K0–K9 见 §9.1 M8） |
+| K0–K9 | Learner Knowledge Model（v24 架构定稿，纯文档；实现按 §9.1 M8 实施路线 K0–K9 分批） | 📐 v24 定稿（§4.5–§4.13 + §6.3.11–12 + §7.6 + D24）+ **v33 增补（§4.14 结构连接 + §6.3.11 `structure-analogy` + §6.3.12 K9–K10 + D32）**；实现未启动（K0–K9 见 §9.1 M8）；K1（四表）/K2-A/K2-B 已随 v40–v43 落地；**K3–K9 已被 D124/M17 取代**（L0–L6，§4.20） |
+| 学习者模型 M17 · 📐 设计定稿 | 学习者模型与下一步推荐 LM-1（设计 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`；数据页「下一步」面板 + 学习轨道 + KP 五级 + 词项五态 + 13 种推荐；主库 5 张事实表 + 独立派生库 learner.db + 总开关 `app.learner.enabled`） | 📐 设计定稿（2026-10-10，Opus 5.5 出稿、用户确认 Q1–Q5；实现批次 L0–L6 见 §9.1 学习者模型小节） |
 | M13 | 成长反馈 Growth Feedback（呈现层只读；正反馈分级总表；微反馈 + 会话成果汇总 + 仪表盘四层 + Territory；内部 GF-1 记忆层 → GF-2 知识层） | ❌ v39 定契约（§4.17 + §6.6 + D36），实现未启动（**排在 M8-B 与 K0–K9 之后**，用户 2026-09-15 拍板） |
 | M14 | 用户记忆 User Memory（AI 自主维护的**分层记忆文件**：`core.md` + `index.md` + `topics/<生活域>/<主题>.md`；日记增量整理；**总量不限、永不淘汰、不做衰减**；制卡按需检索接地——R20 + `memoryRef`；**§1.7 有界例外 + 六护栏**；开关默认关闭、重开后**补处理**关闭期间日记；内部 UM-1 记忆文件与整理管线 → UM-2 接地与检索） | ✅ **v45 UM-1 + v46 UM-2 全部实现**（UM-1：文件树 + memoryTidy 整理管线 + memory_runs + user-memory v1 播种 + sec-memory + M2 备份覆盖 memory/；UM-2：R20 situationRequired 声明位 + memoryRetrieve 宽召回 + 制卡族 v7 + memoryRef 校验与溯源 + 确认面板徽标/二次确认 + 浏览页筛选；完成情况见 §9.1 M14 两 blockquote） |
 | M15 | 材料知识导图 Material Mind Map（导图=作者视角独立产物、知识图谱=大脑画像，两图独立并行+联结；全屏 Overlay 工作区 + 自底向上递归归并管线 + 区间集合差取文 + 双证据本地校验 + AI 语义审查确认制 + 分片缓存含模型三元组 + 节点制卡联结与 remap；**质量优先于成本**；**位置 M14 之后、可与 K3 并行**） | 📐 **v48 重设计定稿**（D40 补录 + D41/D42，§4.19 v48 全节重写，批次 0–7 见 §9.1 M15）；v47 曾实现已于 2026-09-18 整体回滚（生成质量不达用户预期，快照存 docs/m15-archive/） |
