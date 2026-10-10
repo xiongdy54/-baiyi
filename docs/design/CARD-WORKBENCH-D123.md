@@ -72,3 +72,9 @@
 - 题型 / AI 页签＝整宽等分段控件；输入框默认一行，`useGrowBox`/`growTextarea`（`src/lib/autoGrow.ts`）随内容伸缩，过渡用 `--dur-panel` + `--ease`；「更多」走 `.collapse-clip` 通用折叠。
 - 「带入选区」「带入 AI 回答」悬停小字（accent）：选区经 `sel.readSelectionText()`；回答取最近完成的追问回答，否则解释面板回答。无内容时按钮短暂提示「没有选区 / 暂无 AI 回答」。
 - 手动制卡 dock 移除「优先级」：优先级只服务摘录推送，闪卡由 FSRS 调度；载荷仍带默认 50（数据模型零改动）。modal 形态（图片挖空）保持原样。
+
+### 7.2 修订 3（2026-10-10 深夜）
+- 两区分层：手动区 paper 底；AI 区 grey-1 淡底 + 顶部 1px ink 分界线。两区标题行同高（34px）、同款：左标题（手动制卡 / AI）+ 紧随的文字页签（选中＝accent 字 + 2px 下划线，无填充块）；手动区题型页签并入标题行，右端为收起箭头。
+- 输入框一行起步（段落零外距）；伸缩动效不变。
+- 「图片挖空」页签不再切表单，而是启动**整屏截图**：`electron/screenCapture.js`（desktopCapturer 抓光标所在显示器 + 全屏遮罩窗口 `captureOverlay.html` 拖框；Esc/右键取消；应用窗口截前临时透明不入镜）→ dataURL → `useSelectionActions.startWorkbenchCapture` → 图片挖空编辑器（由 SelectionPanels 渲染，`occlEditor.workbench` 标记；阅读器不重复渲染）。无归属书籍时资产落 `assets/workbench-assets/`（`createAssetForItem` 识别）。IPC：`screen-capture:start`（preload `assetsAPI.captureScreen`）；遮罩内部通道 `screen-capture:shot/ready/done`。
+- 阅读器「截图」无反应的根因：`handleCaptureReader` 与点击正文图片的入口都用 `manualOpen || aiPanel` 当「弹层在场」守卫，制卡台常驻后二者几乎恒真 → 静默 return。改为只在挖空编辑器 / 挖空弹窗在场时拦截，并给出提示。

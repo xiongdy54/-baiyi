@@ -174,6 +174,7 @@ const dictStore = require("./dictStore");
 const quickCapture = require("./quickCapture");
 // D123：独立制卡台窗口与系统托盘（见 docs/design/CARD-WORKBENCH-D123.md）
 const workbenchWindow = require("./workbenchWindow");
+const screenCapture = require("./screenCapture");
 const tray = require("./tray");
 const { journalDateOf } = require("./journalTime");
 const {
@@ -852,6 +853,9 @@ ipcMain.handle("reader-capture:region", async (e, rect) => {
     return null;
   }
 });
+
+// D123 修订 3：制卡台「图片挖空 → 截图」——整块屏幕任意内容框选（遮罩窗口），返回 PNG dataURL / null
+ipcMain.handle("screen-capture:start", (e) => screenCapture.start(e.sender));
 
 // ---------- M2 数据备份与恢复（§9.1 M2） ----------
 const backupOpts = () => ({

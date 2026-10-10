@@ -19,6 +19,7 @@ export default function CardDock({
   onToggleManual,
   onCollapse,
   manual,
+  manualTabs,
   children
 }: {
   /** 活动页签（显式点击 > 内容派生，派生在宿主 hook） */
@@ -33,6 +34,8 @@ export default function CardDock({
   onCollapse: () => void;
   /** 手动制卡表单（常驻） */
   manual: ReactNode;
+  /** 手动区标题行内的题型页签（与「手动制卡」同一行） */
+  manualTabs?: ReactNode;
   /** AI 页签体 */
   children: ReactNode;
 }) {
@@ -77,13 +80,20 @@ export default function CardDock({
             onClick={onToggleManual}
           >
             <span className="wb-title">手动制卡</span>
-            <span className="wb-chev" aria-hidden="true">
-              {placement === "bottom" ? (
-                <IconChevronRight size={14} className={manualCollapsed ? undefined : "is-flip"} />
-              ) : (
-                <IconChevronDown size={14} className={manualCollapsed ? undefined : "is-flip"} />
-              )}
-            </span>
+          </button>
+          {manualTabs}
+          <button
+            type="button"
+            className="wb-chev-btn"
+            aria-label={manualCollapsed ? "展开手动制卡" : "收起手动制卡"}
+            aria-expanded={!manualCollapsed}
+            onClick={onToggleManual}
+          >
+            {placement === "bottom" ? (
+              <IconChevronRight size={14} className={manualCollapsed ? undefined : "is-flip"} />
+            ) : (
+              <IconChevronDown size={14} className={manualCollapsed ? undefined : "is-flip"} />
+            )}
           </button>
         </header>
         <div className="wb-manual-body" hidden={manualCollapsed}>
@@ -92,6 +102,7 @@ export default function CardDock({
       </section>
       <section className="wb-ai" aria-label="AI">
         <header className="wb-head wb-ai-head">
+          <span className="wb-title">AI</span>
           <div className="dock-tabs" role="tablist" aria-label="AI 页签" data-testid="dock-tabs">
             <button
               type="button"

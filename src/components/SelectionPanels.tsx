@@ -8,6 +8,7 @@ import ManualCardEditor, { ManualCardForm } from "./ManualCardEditor";
 import CardDock, { type DockTab } from "./CardDock";
 import AIPanel, { ChatComposer, ExplainModeSwitcher, ExplainThread } from "./AIPanel";
 import { DictPanel } from "./DictPanel";
+import OcclusionEditor from "./editor/OcclusionEditor";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { growTextarea } from "../lib/autoGrow";
 import { cardsApi, type CardDraft, type CardRecord } from "../lib/cards";
@@ -223,6 +224,23 @@ export default function SelectionPanels({
     if (th?.answer) return th.answer;
     return aiPanel?.kind === "explain" ? aiPanel.answer ?? "" : "";
   };
+  // 手动制卡题型（题型页签在标题行里，表单受控）。「图片挖空」＝启动整屏截图（截完直接弹挖空编辑器），不切表单
+  type ManualMode = "qa" | "reverse" | "cloze" | "imageOcclusion";
+  const [manualMode, setManualMode] = useState<ManualMode>("qa");
+  useEffect(() => setManualMode("qa"), [sel.manualSeq]);
+  const pickMode = (m: ManualMode) => {
+    if (m === "imageOcclusion") {
+      void sel.startWorkbenchCapture();
+      return;
+    }
+    setManualMode(m);
+  };
+  const MANUAL_TABS: Array<[ManualMode, string]> = [
+    ["qa", "问答题"],
+    ["reverse", "翻转问答"],
+    ["cloze", "填空题"],
+    ["imageOcclusion", "图片挖空"]
+  ];
   const tabVisible = (t: DockTab) => dockTab === t;
   const cardsOf = (text: string) => void sel.runAICards(text, undefined, sel.aiMode);
   const explainOf = (text: string) => void sel.runExplain(text, null);
@@ -256,6 +274,17 @@ export default function SelectionPanels({
         />
       )}
 
+      {/* D123 修订 3：制卡台「图片挖空 → 截图」产生的编辑器（阅读器自己的点击图片入口仍由 Reader 渲染） */}
+      {sel.occlEditor?.workbench && (
+        <OcclusionEditor
+          image={sel.occlEditor.image}
+          origin={sel.occlEditor.origin}
+          onAISuggest={sel.runOcclusionSuggest}
+          onClose={sel.closeOcclusionEditor}
+          onSubmit={sel.submitOcclusionEditor}
+        />
+      )}
+
       {/* 制卡台：首次唤起后挂载；收起≠关闭（面板滑出、状态保留）；展开/收起只经顶栏按钮 / Ctrl+K / Esc */}
       {sel.dockEverOpened && (
         <div ref={dockRootRef} className="wb-root">
@@ -267,10 +296,21 @@ export default function SelectionPanels({
             manualCollapsed={manualCollapsed}
             onToggleManual={() => setManualCollapsed((v) => !v)}
             onCollapse={sel.collapseDock}
+            manualTabs={
+              <div className="wb-tabs" role="tablist" aria-label="卡片类型" data-testid="manual-types">
+                {MANUAL_TABS.map(([m, label]) => (
+                  <button key={m} type="button" role="tab" aria-selected={manualMode === m} className={manualMode === m ? "on" : undefined} onClick={() => pickMode(m)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            }
             manual={
               <ManualCardForm
                 key={sel.manualSeq}
                 variant="dock"
+                mode={manualMode}
+                onModeChange={setManualMode}
                 quote={manualQuote ?? ""}
                 tagSuggestions={tagVocab}
                 initialTags={sel.manualTagsInitial}

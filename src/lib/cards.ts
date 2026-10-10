@@ -64,6 +64,8 @@ declare global {
       pickOcclusionImage: (ownerKey: string) => Promise<{ itemId: string; filename: string; assetPath: string; dataUrl: string } | null>;
       /** D122 截图：截取当前窗口内视口矩形（CSS px）→ PNG dataURL；失败/越界返回 null */
       captureRegion?: (rect: { x: number; y: number; width: number; height: number }) => Promise<string | null>;
+      /** D123 修订 3：整屏框选截图（制卡台「图片挖空」）；取消/失败 ⇒ null */
+      captureScreen?: () => Promise<string | null>;
       /** v25：把渲染层已拿到的图片字节（如正文图片/选区裁剪）落盘入 assets 表 */
       saveImage: (
         ownerKey: string,

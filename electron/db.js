@@ -1034,10 +1034,14 @@ function addAssetRow(itemId, kind, relPath, hash, now) {
 
 // M1.1（v15）：图片挖空卡 —— 把渲染层传来的图片字节落盘 + 入 assets 表（kind=image-occlusion）。
 // ownerKey 允许传 library item id 或 documentId（摘录阅读器场景只有 documentId），统一归一到 itemId。
+const WORKBENCH_ASSET_OWNER = "workbench-assets";
 function createAssetForItem(ownerKey, kind, ext, dataBuf) {
   let itemId = null;
-  const rows = queryAll("SELECT id FROM library_items WHERE id = ? AND is_deleted = 0", [String(ownerKey)]);
-  if (rows.length > 0) {
+  const rows = String(ownerKey) === WORKBENCH_ASSET_OWNER ? [] : queryAll("SELECT id FROM library_items WHERE id = ? AND is_deleted = 0", [String(ownerKey)]);
+  if (String(ownerKey) === WORKBENCH_ASSET_OWNER) {
+    // 制卡台自由截图（无归属书籍）：落到固定的 workbench-assets 资产目录
+    itemId = WORKBENCH_ASSET_OWNER;
+  } else if (rows.length > 0) {
     itemId = rows[0].id;
   } else {
     itemId = getItemIdByDocumentId(String(ownerKey));

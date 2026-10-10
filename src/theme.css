@@ -7770,9 +7770,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
    · 「更多」走 .collapse-clip 通用折叠；「带入…」悬停小字（accent）
    · 全程无横向滚动。放文件末尾以按序覆盖前文同名规则。
    ========================================================================== */
-:root { --wb-head-h: 40px; --wb-pad: var(--sp-4); }
-.wb-head { height: var(--wb-head-h); padding: 0 var(--wb-pad); gap: var(--sp-2); }
-.wb-manual-toggle { height: 100%; }
+:root { --wb-head-h: 34px; --wb-pad: var(--sp-4); }
 
 .wb-manual-body {
   overflow-x: hidden;
@@ -7785,35 +7783,61 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-manual-body > * { min-width: 0; }
 .side-dock[data-placement="bottom"] .wb-manual-body { border-bottom: none; }
 
-/* 分段控件：整宽等分，选中＝accent 实底白字；AI 页签在标题行内垂直居中 */
-.wb-seg, .dock-tabs {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 1fr;
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
-  gap: 0;
-}
-.wb-seg button, .dock-tabs > button[role="tab"] {
-  height: 26px;
+/* 标题行（手动 / AI 两区统一）：左标题 + 紧随的文字页签（选中＝accent 色 + 2px 下划线，无填充块）；34px 高 */
+.wb-head { height: var(--wb-head-h); padding: 0 var(--wb-pad); gap: var(--sp-3); position: relative; }
+.wb-title { flex: none; font-size: var(--fs-secondary); font-weight: 700; letter-spacing: 0.02em; color: var(--text-primary); }
+.wb-tabs, .dock-tabs { display: flex; align-self: stretch; gap: var(--sp-1); min-width: 0; margin-left: var(--sp-1); }
+.wb-tabs button, .dock-tabs > button[role="tab"] {
+  position: relative;
+  height: 100%;
   padding: 0 var(--sp-2);
   background: none;
   border: 0;
-  border-right: 1px solid var(--border-subtle);
   font-size: var(--fs-secondary);
-  line-height: 26px;
-  color: var(--text-primary);
+  line-height: 1;
+  color: var(--text-helper);
   white-space: nowrap;
   cursor: pointer;
 }
-.wb-seg button:last-child, .dock-tabs > button[role="tab"]:last-child { border-right: 0; }
-.wb-seg button:hover:not(.on), .dock-tabs > button[role="tab"]:hover:not(.on) { background: var(--grey-1); }
-.wb-seg button.on, .dock-tabs > button[role="tab"].on { background: var(--accent); color: var(--accent-on); }
-@media (prefers-reduced-motion: no-preference) {
-  .wb-seg button, .dock-tabs > button[role="tab"] { transition: background-color var(--dur) var(--ease-out-soft), color var(--dur) var(--ease-out-soft); }
+.wb-tabs button:hover, .dock-tabs > button[role="tab"]:hover { background: none; color: var(--text-primary); }
+.wb-tabs button.on, .dock-tabs > button[role="tab"].on { background: none; color: var(--accent); font-weight: 600; }
+.wb-tabs button.on::after, .dock-tabs > button[role="tab"].on::after {
+  content: "";
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
 }
+@media (prefers-reduced-motion: no-preference) {
+  .wb-tabs button, .dock-tabs > button[role="tab"] { transition: color var(--dur) var(--ease-out-soft); }
+}
+.wb-chev-btn {
+  margin-left: auto;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 0;
+  color: var(--text-helper);
+  cursor: pointer;
+}
+.wb-chev-btn:hover { color: var(--text-primary); background: var(--grey-1); }
+.wb-manual-toggle { padding: 0; }
+.wb-manual-toggle .wb-title { cursor: pointer; }
+/* 两区区分：手动区＝paper 底；AI 区＝略深的 grey-1 底 + 顶部 ink 实线分界，一眼看出是两个模块 */
+.wb-manual { background: var(--paper); }
+.wb-ai { background: color-mix(in srgb, var(--grey-1) 55%, var(--paper)); border-top: 1px solid var(--text-primary); }
+.wb-ai .wb-head { border-bottom-color: var(--border-subtle); }
+.side-dock[data-placement="bottom"] .wb-ai { border-top: 0; border-left: 1px solid var(--text-primary); }
+.wb-manual-body { border-bottom: 0; }
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-tabs,
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-chev-btn { display: none; }
+.wb-ai .wb-field, .wb-ai .wb-free textarea, .wb-composer textarea { background: var(--paper); }
 
 /* 字段：一行起步，clip 高度由 useGrowBox 设定并过渡；框线在外壳，聚焦只变 accent */
 .wb-fields { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
@@ -7977,3 +8001,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 
 /* 阅读器：收起态「展开」钮与工具行同高对齐（展开态浮在轨头，保持不变） */
 .annot-toggle.bar-btn[data-reader-sidebar-toggle][aria-expanded="false"] { top: calc(48px + var(--sp-2)); }
+
+/* 字段紧凑化（单行起步）：段落零外距，防止 ProseMirror 的 <p> 外距撑出第二行 */
+.wb-field .markdown-editor .ProseMirror p { margin: 0; }
+.wb-field .markdown-editor { min-height: 0; }
+.wb-field .markdown-editor-compact .ProseMirror { min-height: 1.6em; }
+.wb-manual-body { gap: var(--sp-2); padding-top: var(--sp-2); }

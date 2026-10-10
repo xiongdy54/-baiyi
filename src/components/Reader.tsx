@@ -865,7 +865,7 @@ export default function Reader({
   // 裁剪/AI 在编辑器内）；v29：携带图片周边文字上下文（D26），供编辑器 AI 建议层结合上下文出题
   const handleEngineImageClick = useCallback(
     async (img: ReaderImageRef) => {
-      if (manualOpen || aiPanel || occlEditor) return; // 弹层/编辑器在场时不重复进入
+      if (occlEditor || (manualOpen && manualImage)) return; // 挖空编辑器/弹窗在场时不重复进入（制卡台常驻不算）
       const dataUrl = await loadImageDataUrl(img.src);
       if (!dataUrl) {
         showToast("无法读取这张图片的内容（可能来自外部链接）");
@@ -885,7 +885,7 @@ export default function Reader({
         { x: img.rect.x, y: img.rect.y, width: img.rect.width, height: img.rect.height }
       );
     },
-    [manualOpen, aiPanel, occlEditor, openOcclusionEditor, showToast]
+    [manualOpen, manualImage, occlEditor, openOcclusionEditor, showToast]
   );
 
   /**
@@ -894,7 +894,12 @@ export default function Reader({
    * 裁剪/AI 建议在编辑器内）。截前先清选区并等两帧重绘，浮条/选区高亮不入镜。
    */
   const handleCaptureReader = useCallback(async () => {
-    if (manualOpen || aiPanel || occlEditor) return;
+    // 制卡台常驻后 manualOpen / aiPanel 常为真（表单常驻、AI 面板留存）——不能再当作「弹层在场」拦截，
+    // 否则截图钮永远静默无反应（用户 2026-10-10 反馈）。只有图片挖空编辑器 / 图片挖空弹窗在场才拦。
+    if (occlEditor || (manualOpen && manualImage)) {
+      showToast("请先完成或关闭当前的图片挖空");
+      return;
+    }
     const box = scrollRef.current?.getBoundingClientRect();
     const capture = window.assetsAPI?.captureRegion;
     if (!box || box.width < 8 || box.height < 8 || !capture) {
@@ -916,7 +921,7 @@ export default function Reader({
       contextText: undefined
     };
     openOcclusionEditor({ dataUrl, alt: "页面截图" }, undefined);
-  }, [manualOpen, aiPanel, occlEditor, openOcclusionEditor, showToast]);
+  }, [manualOpen, manualImage, occlEditor, openOcclusionEditor, showToast]);
 
   /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
   const ensureImageAsset = useCallback(
@@ -1783,7 +1788,7 @@ export default function Reader({
       </div>
 
       {/* D98/R1 手动图片挖空编辑器：点击正文图片直进（图片聚焦层退役），多遮罩批量落库后由编排面关闭 */}
-      {occlEditor && (
+      {occlEditor && !occlEditor.workbench && (
         <OcclusionEditor
           image={occlEditor.image}
           origin={occlEditor.origin}

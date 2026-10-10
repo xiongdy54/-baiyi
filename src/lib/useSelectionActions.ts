@@ -234,6 +234,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   const [occlEditor, setOcclEditor] = useState<{
     image: { dataUrl: string; alt: string; contextText?: string };
     origin: { x: number; y: number; width: number; height: number } | null;
+    /** D123 修订 3：来自制卡台「图片挖空 → 截图」——编辑器由 SelectionPanels 渲染（阅读器不重复渲染） */
+    workbench?: boolean;
   } | null>(null);
   /** 手动制卡引用文本（选区文本，或标记浮层「就此制卡」给出的摘录文本） */
   const [manualQuote, setManualQuote] = useState<string | null>(null);
@@ -330,7 +332,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
 
   /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
   async function ensureImageAsset(dataUrl: string): Promise<string | null> {
-    const ownerKey = A().ownerKey();
+    // 制卡台自由截图（页面无归属书籍）：落到固定的 workbench-assets 资产目录（主进程 createAssetForItem 识别）
+    const ownerKey = A().ownerKey() || (occlEditor?.workbench ? "workbench-assets" : "");
     if (!ownerKey) {
       showToast("无法确定图片归属的书籍");
       return null;
@@ -605,6 +608,22 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     // 正文图片链路：制卡来源=engine（图片锚点已由点击快照，复习端可跳转原文）
     occlusionSourceRef.current = "engine";
     setOcclEditor({ image, origin: origin ?? null });
+  }
+
+  /** D123 修订 3：制卡台「图片挖空」→ 整屏框选截图（主进程遮罩窗口，可截软件之外的任意内容）→
+      直接弹出图片挖空编辑器；取消框选不做任何事。 */
+  async function startWorkbenchCapture() {
+    if (occlEditor) return;
+    const capture = window.assetsAPI?.captureScreen;
+    if (!capture) {
+      showToast("当前环境无法截图");
+      return;
+    }
+    const dataUrl = await capture();
+    if (!dataUrl) return;
+    A().clearKernelSelection?.();
+    occlusionSourceRef.current = "engine";
+    setOcclEditor({ image: { dataUrl, alt: "屏幕截图" }, origin: null, workbench: true });
   }
 
   function closeOcclusionEditor() {
@@ -1631,6 +1650,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     // D98 手动图片挖空编辑器
     occlEditor,
     openOcclusionEditor,
+    startWorkbenchCapture,
     closeOcclusionEditor,
     submitOcclusionEditor,
     runOcclusionSuggest,

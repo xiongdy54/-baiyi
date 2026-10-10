@@ -367,7 +367,7 @@ try {
   })()`);
   await wait(700);
   const z3 = await cdp.eval(`(() => {
-    const tab = [...document.querySelectorAll("[data-card-dock] .wb-seg button")].find(b => b.textContent.includes("填空题"));
+    const tab = [...document.querySelectorAll("[data-card-dock] .wb-tabs button")].find(b => b.textContent.includes("填空题"));
     if (!tab) return "no tab";
     tab.click();
     return "tab-clicked";

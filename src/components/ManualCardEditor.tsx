@@ -135,8 +135,13 @@ export function ManualCardForm({
   onDisambiguate,
   onPickSelection,
   onPickAnswer,
+  mode: modeProp,
+  onModeChange,
   variant = "modal"
 }: {
+  /** D123 修订 3：题型由宿主控制（题型页签在制卡台标题行里）；不传＝内部自管 */
+  mode?: "qa" | "reverse" | "cloze" | "imageOcclusion";
+  onModeChange?: (m: "qa" | "reverse" | "cloze" | "imageOcclusion") => void;
   /** D123 修订：「带入选区」——返回阅读区当前选区文字（无＝空） */
   onPickSelection?: () => string | null | undefined;
   /** D123 修订：「带入 AI 回答」——返回最近一条 AI 回答（无＝空） */
@@ -156,7 +161,12 @@ export function ManualCardForm({
   /** D121 §4.1：「保存并辨析」——保存成功后以新卡为 A、相似卡为 B 打开辨析弹窗（宿主渲染，表单卸载后仍存活）；不传则不显示该按钮 */
   onDisambiguate?: (newCardId: string, otherCardId: string) => void;
 }) {
-  const [mode, setMode] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
+  const [modeInner, setModeInner] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
+  const mode = modeProp ?? modeInner;
+  const setMode = (m: "qa" | "reverse" | "cloze" | "imageOcclusion") => {
+    setModeInner(m);
+    onModeChange?.(m);
+  };
   const [front, setFront] = useState(imageRegion ? "" : quote);
   const [back, setBack] = useState("");
   const [bFront, setBFront] = useState("");
@@ -331,23 +341,10 @@ export function ManualCardForm({
   // D123 修订（用户 2026-10-10，还原 制卡台-融合优化版-v3.html）：dock 形态只留「引用 · 题型 · 正面/背面框 ·
   // 页脚（更多 / 制卡）」，说明性长文案收进 title / placeholder；高级字段收进「更多」（hidden 不卸载，载荷不变）。
   if (variant === "dock") {
-    const MODES: Array<["qa" | "reverse" | "cloze" | "imageOcclusion", string]> = [
-      ["qa", "问答题"],
-      ["reverse", "翻转问答"],
-      ["cloze", "填空题"],
-      ["imageOcclusion", "图片挖空"]
-    ];
     const pickSel = onPickSelection ? { label: "带入选区", empty: "没有选区", get: onPickSelection, apply: setFront } : undefined;
     const pickAns = onPickAnswer ? { label: "带入 AI 回答", empty: "暂无 AI 回答", get: onPickAnswer, apply: setBack } : undefined;
     return (
       <>
-        <div className="wb-seg" role="tablist" aria-label="卡片类型" data-testid="manual-types">
-          {MODES.map(([m, label]) => (
-            <button key={m} type="button" role="tab" aria-selected={mode === m} className={mode === m ? "on" : undefined} onClick={() => setMode(m)}>
-              {label}
-            </button>
-          ))}
-        </div>
         <div
           className="wb-fields"
           onKeyDown={(e) => {
@@ -384,7 +381,7 @@ export function ManualCardForm({
               <GrowField pick={pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案，必填）" label="背面（图片挖空）" /></GrowField>
             </>
           ) : (
-            <p className="wb-empty" title="关闭本窗口，点击阅读材料中的图片进入聚焦，框选区域后选择「手动制卡」">先在阅读材料里框选图片区域</p>
+            <p className="wb-empty">点上方「图片挖空」开始截图</p>
           )}
         </div>
 

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; cursor: crosshair; user-select: none; -webkit-user-select: none; font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+  #bg { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #dim { position: fixed; inset: 0; background: rgba(0, 0, 0, .38); }
+  #sel { position: fixed; display: none; box-sizing: border-box; border: 1px solid #3fa08a; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .38); }
+  #tag { position: fixed; display: none; background: #111; color: #fff; font-size: 12px; line-height: 20px; padding: 0 8px; white-space: nowrap; }
+  #hint { position: fixed; left: 50%; top: 24px; transform: translateX(-50%); background: #111; color: #fff; font-size: 13px; line-height: 28px; padding: 0 14px; white-space: nowrap; }
+</style>
+</head>
+<body>
+<img id="bg" alt="">
+<div id="dim"></div>
+<div id="sel"></div>
+<div id="tag"></div>
+<div id="hint">拖动框选要截取的区域　·　Esc 或右键取消</div>
+<script>
+  const bg = document.getElementById("bg"), dim = document.getElementById("dim"), sel = document.getElementById("sel"), tag = document.getElementById("tag"), hint = document.getElementById("hint");
+  let start = null, rect = null;
+  window.captureOverlay.getShot().then((url) => {
+    if (!url) return window.captureOverlay.done(null);
+    bg.onload = () => window.captureOverlay.ready();
+    bg.src = url;
+  });
+  const norm = (a, b) => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) });
+  function paint() {
+    if (!rect) return;
+    sel.style.cssText = "display:block;left:" + rect.x + "px;top:" + rect.y + "px;width:" + rect.width + "px;height:" + rect.height + "px";
+    tag.textContent = Math.round(rect.width) + " × " + Math.round(rect.height);
+    tag.style.display = "block";
+    tag.style.left = rect.x + "px";
+    tag.style.top = Math.max(0, rect.y - 24) + "px";
+  }
+  addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return window.captureOverlay.done(null);
+    start = { x: e.clientX, y: e.clientY };
+    rect = null;
+    dim.style.display = "none";
+    hint.style.display = "none";
+  });
+  addEventListener("mousemove", (e) => {
+    if (!start) return;
+    rect = norm(start, { x: e.clientX, y: e.clientY });
+    paint();
+  });
+  addEventListener("mouseup", () => {
+    if (!start) return;
+    const r = rect;
+    start = null;
+    if (r && r.width >= 8 && r.height >= 8) return window.captureOverlay.done(r);
+    rect = null;
+    sel.style.display = "none";
+    tag.style.display = "none";
+    dim.style.display = "block";
+    hint.style.display = "block";
+  });
+  addEventListener("contextmenu", (e) => { e.preventDefault(); window.captureOverlay.done(null); });
+  addEventListener("keydown", (e) => { if (e.key === "Escape") window.captureOverlay.done(null); });
+</script>
+</body>
+</html>

@@ -88,12 +88,12 @@ console.log("== G3 手动制卡 · 翻转问答 = 两张独立卡 ==");
 const tabs = await evalJS(`(() => {
   [...document.querySelectorAll('[data-sel-act="manual"]')].find((b) => b.textContent === "制卡").click();
   return new Promise((res) => setTimeout(() => {
-    res([...document.querySelectorAll('[data-card-dock] .wb-seg button')].map((b) => b.textContent.trim()).join('/'));
+    res([...document.querySelectorAll('[data-card-dock] .wb-tabs button')].map((b) => b.textContent.trim()).join('/'));
   }, 300));
 })()`);
 check("手动制卡 tabs = 问答题/翻转问答/填空题/图片挖空", tabs === "问答题/翻转问答/填空题/图片挖空", tabs);
 const saved = await evalJS(`(() => {
-  [...document.querySelectorAll('[data-card-dock] .wb-seg button')].find((b) => b.textContent === "翻转问答").click();
+  [...document.querySelectorAll('[data-card-dock] .wb-tabs button')].find((b) => b.textContent === "翻转问答").click();
   return new Promise((res) => setTimeout(() => {
     const tas = [...document.querySelectorAll('[data-card-dock] textarea')];
     if (tas.length < 4) { res('FIELDS=' + tas.length); return; }
