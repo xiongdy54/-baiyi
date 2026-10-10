@@ -7314,27 +7314,37 @@ function resolveCardKpMap() {
 /**
  * 学习者模型的一次性事实读取（设计稿 §9.2，只读不写）。
  * opts.readingEventsAfter：只取该水位之后的阅读事件（增量通读计算用；缺省取全量）。
+ * opts.readingEventsTailBefore：每份材料在该时刻之前最后一条阅读事件（作为会话续算的第一对 a）。
  * 注意：extracts 返回**全部**未删摘录（K4 需要 reading 态的非到期行）；K3 的到期口径
  * （与 listDueExtracts 相同的 WHERE）由 learnerRefresh 在组装快照时套用。
  */
 function learnerFacts(opts) {
   const o = opts || {};
   const after = Number(o.readingEventsAfter) || 0;
+  const tailBefore = Number(o.readingEventsTailBefore) || 0;
   if (!db) {
     return {
       tracks: [], overrides: [], materials: [], documents: [], cards: [], reviewLogs: [], extracts: [],
-      kps: [], relations: [], learningEvents: [], recFeedback: [], latestRecRun: null, recentRunKeys: [], readingEvents: []
+      kps: [], relations: [], learningEvents: [], recFeedback: [], latestRecRun: null, recentRunKeys: [],
+      readingEvents: [], readingEventTail: [], readingEventsMax: 0, extractOpTimes: {}, fsrsConfigs: []
     };
+  }
+  const extractOpTimes = {};
+  for (const r of queryAll(
+    "SELECT extract_id AS extractId, MAX(created_at) AS lastAt FROM extract_ops WHERE created_at > ? GROUP BY extract_id",
+    [Date.now() - 90 * 86400000]
+  )) {
+    extractOpTimes[String(r.extractId)] = Number(r.lastAt) || 0;
   }
   return {
     tracks: queryAll("SELECT * FROM learner_tracks WHERE is_deleted = 0 ORDER BY created_at ASC, id ASC"),
     overrides: queryAll("SELECT track_id AS trackId, library_item_id AS libraryItemId, member FROM track_materials WHERE is_deleted = 0"),
-    materials: queryAll("SELECT id, title, lang, priority, source_type AS sourceType FROM library_items WHERE is_deleted = 0 ORDER BY created_at ASC, id ASC"),
+    materials: queryAll("SELECT id, title, lang, priority, source_type AS sourceType, progress_json AS progressJson FROM library_items WHERE is_deleted = 0 ORDER BY created_at ASC, id ASC"),
     documents: queryAll(
       "SELECT id, library_item_id AS libraryItemId, updated_at AS updatedAt, (markdown IS NOT NULL AND markdown != '') AS hasMarkdown, LENGTH(COALESCE(markdown,'')) AS markdownLen FROM documents WHERE is_deleted = 0 ORDER BY id ASC"
     ),
     cards: queryAll(
-      "SELECT id, card_type AS cardType, knowledge_point_id AS knowledgePointId, gen_batch_id AS genBatchId, context_ref_json AS contextRefJson, dict_json AS dictJson, domain, generated_by AS generatedBy, created_at AS createdAt, updated_at AS updatedAt, fsrs_json AS fsrsJson FROM cards WHERE is_deleted = 0"
+      "SELECT id, card_type AS cardType, knowledge_point_id AS knowledgePointId, gen_batch_id AS genBatchId, context_ref_json AS contextRefJson, dict_json AS dictJson, domain, generated_by AS generatedBy, created_at AS createdAt, updated_at AS updatedAt, fsrs_json AS fsrsJson, fsrs_config_id AS fsrsConfigId FROM cards WHERE is_deleted = 0"
     ),
     reviewLogs: queryAll("SELECT card_id AS cardId, rating, reviewed_at AS reviewedAt FROM review_logs ORDER BY reviewed_at ASC"),
     extracts: queryAll(
@@ -7365,7 +7375,16 @@ function learnerFacts(opts) {
     readingEvents: queryAll(
       "SELECT item_id AS itemId, char_pos AS charPos, created_at AS createdAt FROM reading_events WHERE created_at > ? ORDER BY created_at ASC",
       [after]
-    )
+    ),
+    readingEventTail: tailBefore
+      ? queryAll(
+          "SELECT item_id AS itemId, char_pos AS charPos, MAX(created_at) AS createdAt FROM reading_events WHERE created_at <= ? GROUP BY item_id",
+          [tailBefore]
+        )
+      : [],
+    readingEventsMax: Number(queryAll("SELECT MAX(created_at) AS m FROM reading_events")[0]?.m) || 0,
+    extractOpTimes,
+    fsrsConfigs: queryAll("SELECT id, weights_json AS weightsJson FROM fsrs_configs")
   };
 }
 
