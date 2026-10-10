@@ -34,6 +34,8 @@ import { createManualCard } from "./manualCard";
 import { normalizeTags } from "./tags";
 // v48.63（D107）：标签功能总开关
 import { useTagsEnabled } from "./tagSettings";
+// v48.80（D124 / 设计稿 §11.5）：查词埋点（dict_lookup → 学习者模型词项状态）
+import { learnerApi, learnerSettings } from "./learner";
 import { routeExplainMode, type ExplainModePref } from "./explainRouter";
 import type { ExtractSpan } from "./readingWorkflow";
 
@@ -1482,14 +1484,37 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     try {
       const settings = await loadDictSettings();
       setDictFields(settings.popupFields);
+      // v48.80（D124 §11.5）：查词成功埋点——总开关在 IIFE 内判断，绝不阻塞结果显示，失败静默
+      const trackLookup = (entry: DictionaryEntry | null | undefined) => {
+        if (!entry || !adapter.itemId) return; // 仅阅读器中（有材料 id）且查到词条
+        void (async () => {
+          try {
+            if (!(await learnerSettings.read()).enabled) return;
+            await learnerApi.logEvent({
+              kind: "dict_lookup",
+              lang: String(entry.language || langOpts.bookLanguage || ""),
+              libraryItemId: String(adapter.itemId),
+              payload: {
+                text: raw.slice(0, 64),
+                sentence: (reading.sentence || "").slice(0, 400),
+                offset: Math.max(0, (reading.sentence || "").indexOf(raw)),
+              },
+            });
+          } catch {
+            /* 埋点失败静默，不影响查词 */
+          }
+        })();
+      };
       if (forceLocal) {
         const { buildManager } = await import("./dictClient");
         const manager = buildManager("local");
         const result = await manager.lookup(raw, langOpts);
         setDictPanel({ selectedText: raw, sentence: reading.sentence, running: false, entry: result.entry, providerId: result.providerId, fromCache: result.fromCache, mode: "local" });
+        trackLookup(result.entry);
       } else {
         const result = await lookupWord(raw, langOpts);
         setDictPanel({ selectedText: raw, sentence: reading.sentence, running: false, entry: result.entry, providerId: result.providerId, fromCache: result.fromCache, mode: result.mode });
+        trackLookup(result.entry);
       }
     } catch (err) {
       setDictPanel({

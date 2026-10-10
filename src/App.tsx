@@ -59,7 +59,8 @@ type View =
       /** 原书文件字节（存在即走阅读内核；engine=pdf 时走 pdf.js 内核直读） */
       book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" };
       jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } };
-      returnTo?: "review" | "queue" | "browse";
+      /** v48.80（D124）：学习者模型「下一步」面板的 jump 动作返回数据页 */
+      returnTo?: "review" | "queue" | "browse" | "stats";
       /** v48.13（P2）：从右下角指示器「打开导图」进入时置位——Reader 挂载后自动打开导图工作区 */
       openMindmap?: boolean;
       /** v48.13（P2）：要展示的导图版本（候选版本——按发布模型不激活，但用户点了就该看到它） */
@@ -436,7 +437,7 @@ export default function App() {
   const handleJumpToDoc = useCallback(async (
     docId: string,
     anchor: NonNullable<Extract<View, { name: "reader" }>["jumpAnchor"]>,
-    returnTo: "review" | "queue" | "browse" = "review"
+    returnTo: "review" | "queue" | "browse" | "stats" = "review"
   ) => {
     if (returnTo === "review") {
       // 仅复习来源需要现场恢复标记（返回时恢复该卡与翻面状态）
@@ -452,6 +453,24 @@ export default function App() {
       changeView({ name: "reader", itemId, doc, book, jumpAnchor: anchor, returnTo });
     }
   }, [changeView, loadReaderBook]);
+
+  // v48.80（D124 §11.3）：学习者模型「下一步」面板的动作分派（copy-query 与 dialog 在面板内部处理，不走 App）
+  useEffect(() => {
+    return eventBus.on("learner/navigate", (payload) => {
+      const p = payload as
+        | { type: "open-book"; libraryItemId: string }
+        | { type: "jump"; documentId: string; anchor: NonNullable<Extract<View, { name: "reader" }>["jumpAnchor"]> }
+        | { type: "review"; scopeKpIds: string[]; title?: string }
+        | { type: "extract-session"; bookItemIds: string[]; title?: string }
+        | null;
+      if (!p) return;
+      if (p.type === "open-book") openBook(p.libraryItemId);
+      else if (p.type === "jump") void handleJumpToDoc(p.documentId, p.anchor, "stats");
+      else if (p.type === "review") changeView({ name: "review", scopeKpIds: p.scopeKpIds, title: p.title });
+      else if (p.type === "extract-session") changeView({ name: "extractSession", bookItemIds: p.bookItemIds, title: p.title ?? "" });
+    });
+    // openBook / handleJumpToDoc 均为 useCallback（changeView 稳定）；面板只在 stats 页挂载，闭包时效可接受
+  }, [openBook, handleJumpToDoc, changeView]);
 
   if (!loaded) {
     return (

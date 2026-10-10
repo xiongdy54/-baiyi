@@ -5,6 +5,9 @@
 // v36（M8-A）：+ journal/changed（主进程日记写入推送 → 日记页刷新）
 // v40（M8-B）：+ insight/changed（主进程洞察运行/反馈变化推送 → 洞察面板刷新）
 // v45（M14-UM1）：+ memory/changed（主进程记忆整理/补处理进度推送 → 设置页记忆区刷新）
+// v48（M15 重做，D41/D42）：+ mindmap/changed（导图生成进度与完成广播）
+// v48.80（D124 §11.3）：+ learner/navigate（「下一步」面板 emit、App 订阅分派动作）
+//                      + learner/changed（任一 learner 对话框完成写入后 emit、面板重取推荐）
 export const ALLOWED_EVENTS = [
   "stats/updated",
   "library/changed",
@@ -21,7 +24,9 @@ export const ALLOWED_EVENTS = [
   "journal/changed",
   "insight/changed",
   "memory/changed",
-  "mindmap/changed" // v48（M15 重做，D41/D42）：导图生成进度与完成广播
+  "mindmap/changed", // v48（M15 重做，D41/D42）：导图生成进度与完成广播
+  "learner/navigate", // v48.80（D124）：面板动作 → App 导航（open-book / jump / review / extract-session）
+  "learner/changed" // v48.80（D124）：对话框完成写入 → NextStepsPanel 重新请求推荐
 ] as const;
 
 export type AppEvent = (typeof ALLOWED_EVENTS)[number];
