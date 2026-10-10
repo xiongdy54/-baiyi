@@ -99,11 +99,20 @@ export default function SelectionPanels({
 
   /** 把焦点交给手动表单的第一个可输入字段（点开即可打字，D88 §15 注记延续） */
   const focusManual = () => {
+    // 修订 9：① 等滑入动画结束（制卡台此刻仍在屏幕外 translateX，聚焦屏外元素会让浏览器去滚动
+    // overflow:hidden 的祖先把它「滚进视野」——顶栏随之整体平移，随后弹回）；② preventScroll 双保险；
+    // ③ 聚焦后把可能被带偏的祖先滚动位置归零。
     window.setTimeout(() => {
       const root = document.querySelector('[data-testid="wb-manual"]');
       const first = root?.querySelector('textarea, input:not([type=checkbox]):not([type=range]), [contenteditable="true"]');
-      (first as HTMLElement | null)?.focus();
-    }, 80);
+      (first as HTMLElement | null)?.focus({ preventScroll: true });
+      for (const el of [document.documentElement, document.body, document.querySelector<HTMLElement>(".app-shell")]) {
+        if (el && (el.scrollLeft || el.scrollTop)) {
+          el.scrollLeft = 0;
+          el.scrollTop = 0;
+        }
+      }
+    }, 300);
   };
 
   // 顶栏按钮 / Ctrl+K → 开合制卡台（每个页面恰有一个宿主挂着本组件）

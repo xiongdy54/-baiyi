@@ -104,3 +104,7 @@
 
 ### 7.7 修订 8（2026-10-10 夜）——开合时整页向上跳 / 复习底栏闪到中间
 - 根因：修订 6 的「钉死正文宽度」写成 `flex:none; width:…`。`.app-shell` 是**纵向** flex，`flex:none` 作用在主轴（高度）上 → `.app-main` 高度塌成内容高，顶栏/底栏整体上跳、复习底栏漂到中间。改为只钉 `min-width/max-width`，不碰高度。
+
+### 7.8 修订 9（2026-10-10 夜）——首次打开时顶栏从界面外滑回
+- 根因：`focusManual` 在展开后 80ms 就聚焦手动表单，此时制卡台仍在屏幕外（translateX 滑入中，且 `.app-shell` 是 overflow:hidden）；聚焦屏外元素使浏览器滚动祖先容器以「露出」它，顶栏随之整体平移，焦点后又弹回。首次打开 Milkdown 刚挂载、时序更紧，所以「有时」出现。
+- 修复：聚焦延后到滑入结束（300ms），`focus({preventScroll:true})`，并把 html/body/.app-shell 的残余滚动位置归零。

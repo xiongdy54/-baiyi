@@ -137,7 +137,7 @@ function ClozeField({ value, onChange, onPick }: { value: string; onChange: (v: 
     if (!el) return;
     growTextarea(el, 168);
     if (pendingCaret.current) {
-      el.focus();
+      el.focus({ preventScroll: true });
       el.setSelectionRange(pendingCaret.current[0], pendingCaret.current[1]);
       pendingCaret.current = null;
     }
