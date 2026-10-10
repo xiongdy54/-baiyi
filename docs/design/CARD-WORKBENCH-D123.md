@@ -97,3 +97,7 @@
 - **内推**（最大化/余量不足）：`data-wb-open` 的增删与制卡台滑动经 `setDockLayout(..., onCommit)` 在**同一帧**提交（onCommit 内 `flushSync(setShown)`），`html[data-wb-anim] .app-main` 的 margin 过渡与 `.side-dock` 的 transform 过渡同为 `--dur-panel` + `--ease` → 正文随侧栏同步收窄/还原。
 - **外延**（窗口向右变宽）：正文宽度本就不该变——开合前把 `.app-main` 钉成当前像素宽（`data-wb-pin` + `--wb-main-w`），窗口变宽/还原期间正文纹丝不动，只有制卡台滑入/滑出；收起时先滑出、动画结束（260ms）再还原窗口，随后同帧去让位与解钉。
 - 阅读内核（foliate 的 shadow DOM）里的滚动条：应用 CSS 够不到，已在 `vendor/foliate-js/paginator.js` 的 `#container` 就地隐藏。
+
+### 7.6 修订 7（2026-10-10 深夜）——首次打开 / 切页时「展开→收起→展开」+ 两次跳动
+- 根因：布局登记是「卸载时注销 + 挂载时登记」两步，且每步都完整执行动画（收起 260ms → 展开）；宿主随页面切换重挂载（或首次挂载时 effect 清理/重登记）就会被拆成一次完整收起再一次完整展开，正文随之跳两次。
+- 修复：① `workbenchLayout` 引入「已落地布局」`applied`，期望与已落地相同则不动画（只补 onCommit）；② 收起经 `setTimeout` 落地，卸载（页面切换）给 700ms 宽限等新宿主登记，期间有登记则取消收起；③ `CardDock` 重挂载时若布局已展开，`shown` 初值即 true，不重播滑入；④ `useWorkbenchPlacement` 初值取缓存的上次设置，避免重挂载时「先 right 后 bottom」导致登记反复。

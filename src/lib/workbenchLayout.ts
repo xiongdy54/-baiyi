@@ -18,13 +18,17 @@ export function normalizePlacement(v: unknown): WorkbenchPlacement {
 }
 
 /** 订阅 app.workbenchPlacement（设置页改动后即时生效） */
+let cachedPlacement: WorkbenchPlacement = "right";
 export function useWorkbenchPlacement(): WorkbenchPlacement {
-  const [placement, setPlacement] = useState<WorkbenchPlacement>("right");
+  // 修订 7：初值取上次读到的设置（宿主随页面切换重挂载时不再「先 right 后 bottom」抖一次，避免布局登记反复）
+  const [placement, setPlacement] = useState<WorkbenchPlacement>(cachedPlacement);
   useEffect(() => {
     let cancelled = false;
     const load = () => {
       void settingsStore.get<string>("app", "workbenchPlacement", "right").then((v) => {
-        if (!cancelled) setPlacement(normalizePlacement(v));
+        const p = normalizePlacement(v);
+        cachedPlacement = p;
+        if (!cancelled) setPlacement(p);
       });
     };
     load();
@@ -107,9 +111,24 @@ function pinMain(on: boolean): void {
   }
 }
 
-async function applyDesired(onCommit?: () => void): Promise<void> {
+/** 已落地的布局（null＝未展开）。宿主随页面切换卸载/重挂时，新旧登记在同一轮内先后发生——
+    以「已落地 vs 期望」做差，相同则只补一次 onCommit，绝不「先收起再展开」。 */
+let applied: WorkbenchPlacement | null = null;
+export function isDockLayoutApplied(): boolean {
+  return applied !== null;
+}
+let closeTimer: number | null = null;
+let pendingCommit: (() => void) | undefined;
+
+async function applyDesired(): Promise<void> {
+  const onCommit = pendingCommit;
+  pendingCommit = undefined;
   const active = [...owners.values()].pop();
   const el = root();
+  if ((active ? active.placement : null) === applied) {
+    onCommit?.(); // 无变化：只同步宿主的 shown 状态（重挂载的新 CardDock 初值已是 shown，此处为空操作）
+    return;
+  }
   if (!active) {
     // 收起
     if (extended) {
@@ -123,6 +142,7 @@ async function applyDesired(onCommit?: () => void): Promise<void> {
       delete el.dataset.wbPlace;
       delete el.dataset.wbMode;
       pinMain(false);
+      applied = null;
       return;
     }
     // 内推：margin 回落与制卡台滑出同帧同步
@@ -133,6 +153,7 @@ async function applyDesired(onCommit?: () => void): Promise<void> {
     delete el.dataset.wbPlace;
     delete el.dataset.wbMode;
     delete el.dataset.wbAnim;
+    applied = null;
     return;
   }
   // 展开
@@ -153,6 +174,7 @@ async function applyDesired(onCommit?: () => void): Promise<void> {
   el.dataset.wbMode = ext ? "extended" : "inner";
   if (!ext) el.dataset.wbAnim = "1";
   el.dataset.wbOpen = "1";
+  applied = active.placement;
   onCommit?.();
   await sleep(ANIM_MS);
   delete el.dataset.wbAnim;
@@ -171,15 +193,30 @@ function installBridge(): void {
   });
 }
 
-/** 宿主登记/注销自己的制卡台展开态（open=false 即注销） */
-export function setDockLayout(owner: symbol, open: boolean, placement: WorkbenchPlacement, onCommit?: () => void): Promise<void> {
+/** 宿主登记/注销自己的制卡台展开态（open=false 即注销）。
+    展开立即落地；收起经 setTimeout 落地（普通开合 0ms；宿主卸载＝页面切换时给 closeDelayMs 宽限，等新宿主登记，期间若又有登记则取消收起）。 */
+export function setDockLayout(owner: symbol, open: boolean, placement: WorkbenchPlacement, onCommit?: () => void, closeDelayMs = 0): Promise<void> {
   installBridge();
   if (open) {
     owners.delete(owner); // 重新登记＝成为「最后登记者」
     owners.set(owner, { placement });
-  } else {
-    owners.delete(owner);
+    if (closeTimer !== null) {
+      window.clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+    pendingCommit = onCommit;
+    chain = chain.then(applyDesired).catch(() => {});
+    return chain;
   }
-  chain = chain.then(() => applyDesired(onCommit)).catch(() => {});
+  owners.delete(owner);
+  if (owners.size === 0) {
+    if (closeTimer !== null) window.clearTimeout(closeTimer);
+    closeTimer = window.setTimeout(() => {
+      closeTimer = null;
+      if (owners.size !== 0) return;
+      pendingCommit = onCommit;
+      chain = chain.then(applyDesired).catch(() => {});
+    }, closeDelayMs);
+  }
   return chain;
 }

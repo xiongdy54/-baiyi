@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { IconChevronDown, IconChevronRight } from "./icons";
-import { setDockLayout, type WorkbenchDockPlacement } from "../lib/workbenchLayout";
+import { isDockLayoutApplied, setDockLayout, type WorkbenchDockPlacement } from "../lib/workbenchLayout";
 
 export type DockTab = "explain" | "cards";
 
@@ -44,7 +44,16 @@ export default function CardDock({
 
   // 登记布局：展开且非独立窗口才推让/外延（串行仲裁与同步动画见 workbenchLayout）。
   // 制卡台滑动（class）与正文让位（html 数据属性）在 onCommit 内同帧提交（flushSync），时长/缓动一致。
-  const [shown, setShown] = useState(false);
+  // 修订 7：重挂载（页面切换）时若布局本就已展开，初值即 shown——不再「先收起、再滑入」
+  // 声明在布局 effect 之前：卸载时其清理先于布局 effect 的清理执行，从而让后者知道「是卸载而非开合」
+  const unmountingRef = useRef(false);
+  useEffect(() => {
+    unmountingRef.current = false;
+    return () => {
+      unmountingRef.current = true;
+    };
+  }, []);
+  const [shown, setShown] = useState(() => placement !== "window" && dockOpen && isDockLayoutApplied());
   useEffect(() => {
     if (placement === "window") {
       setShown(dockOpen);
@@ -57,7 +66,8 @@ export default function CardDock({
     const owner = Symbol("card-dock");
     void setDockLayout(owner, true, placement, () => flushSync(() => setShown(true)));
     return () => {
-      void setDockLayout(owner, false, placement, () => flushSync(() => setShown(false)));
+      // 卸载（页面切换换宿主）给 700ms 宽限等新宿主登记；普通收起/换位置立即（0ms）
+      void setDockLayout(owner, false, placement, () => flushSync(() => setShown(false)), unmountingRef.current ? 700 : 0);
     };
   }, [dockOpen, placement]);
 
