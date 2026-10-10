@@ -140,8 +140,8 @@ function computePasses(events, units, docLen) {
     .filter((e) => e.char_pos <= Number(docLen)) // char_pos > docLen 直接丢弃（旧自渲染坐标系事件）
     .sort((a, b) => a.created_at - b.created_at);
   const us = (Array.isArray(units) ? units : [])
-    .filter((u) => u && Number.isFinite(Number(u.mdTo)))
-    .map((u) => ({ id: String(u.id), mdTo: Number(u.mdTo) }))
+    .map((u) => ({ id: String(u.id), mdTo: u.mdTo != null ? Number(u.mdTo) : Number(u.md_to) })) // 兼容 camelCase 与 DB 行的 snake_case
+    .filter((u) => u && Number.isFinite(u.mdTo))
     .sort((a, b) => a.mdTo - b.mdTo);
   const result = new Map();
   if (us.length === 0 || evs.length < 2) return result;

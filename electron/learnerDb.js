@@ -15,7 +15,7 @@ let openPromise = null;
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS lm_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS content_units (
-  id TEXT PRIMARY KEY,               -- ${documentId}#${ord}
+  id TEXT PRIMARY KEY,               -- unit id 规则：documentId + '#' + ord
   library_item_id TEXT NOT NULL,
   document_id TEXT NOT NULL,
   ord INTEGER NOT NULL,

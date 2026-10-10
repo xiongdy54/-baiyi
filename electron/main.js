@@ -1339,6 +1339,142 @@ ipcMain.handle("knowledge:acceptAllPending", () => dbModule.acceptAllPendingKnow
 // v43（K2-B）：KnowledgeLint K4/K7/K8 报告型检查（只读，非阻断）
 ipcMain.handle("knowledge:lint", () => dbModule.runKnowledgeLint());
 
+// ---------- v48.80（D124 / 设计稿 §11.1）：学习者模型 learner:*（16 个通道；除 status 外每个
+// handler 第一行检查总开关，关闭时立即返回 {ok:false, disabled:true}，不读写任何库） ----------
+const learnerRefresh = require("./learnerRefresh");
+const learnerDb = require("./learnerDb");
+
+const learnerDisabled = () => ({ ok: false, disabled: true });
+
+// PDF 页文本抽取（设计稿 §6.1）：复制 library:createFromPdf 的 pdfjs 加载方式，按页取文本层
+async function extractPdfPagesForLearner(itemId) {
+  const buf = dbModule.readPdfFile(String(itemId));
+  if (!buf) return null;
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const pdfjsDir = path.join(__dirname, "..", "node_modules", "pdfjs-dist").replace(/\\/g, "/");
+  const task = pdfjs.getDocument({
+    data: new Uint8Array(buf),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    cMapUrl: `${pdfjsDir}/cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `${pdfjsDir}/standard_fonts/`
+  });
+  try {
+    const doc = await task.promise;
+    const out = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const tc = await (await doc.getPage(i)).getTextContent();
+      out.push(tc.items.map((it) => it.str).join(" "));
+    }
+    return out;
+  } finally {
+    await task.destroy();
+  }
+}
+learnerRefresh.init({ extractPdfPages: extractPdfPagesForLearner });
+
+ipcMain.handle("learner:status", () => {
+  if (!learnerRefresh.learnerEnabled()) return { enabled: false };
+  return learnerRefresh.statusForIpc();
+});
+ipcMain.handle("learner:refresh", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.refresh(opts && typeof opts === "object" ? opts : {});
+});
+ipcMain.handle("learner:recommend", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.recommendFlow(opts && typeof opts === "object" ? opts : {});
+});
+ipcMain.handle("learner:feedback", (_e, payload) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  const p = payload && typeof payload === "object" ? payload : {};
+  return dbModule.addRecFeedback({
+    recRunId: p.runId,
+    itemKey: p.itemKey,
+    kind: p.kind,
+    libraryItemId: p.libraryItemId,
+    action: p.action,
+    auto: false
+  });
+});
+ipcMain.handle("learner:listTracks", async () => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  const snapshot = await learnerRefresh.buildSnapshot();
+  const tracks = learnerRefresh.buildTrackSummaries(snapshot, {}, false, snapshot.proposals || []);
+  const unassigned = [];
+  const assigned = new Set();
+  const overrides = new Map((snapshot.overrides || []).map((o) => [`${o.trackId}:${o.libraryItemId}`, o.member]));
+  for (const m of snapshot.materials || []) {
+    for (const t of tracks) {
+      if (t.isProposal) continue;
+      if (require("./lmRecommend").resolveMembership(t, m, overrides)) {
+        assigned.add(String(m.id));
+        break;
+      }
+    }
+  }
+  for (const m of snapshot.materials || []) {
+    if (!assigned.has(String(m.id))) unassigned.push({ libraryItemId: String(m.id), title: String(m.title || "") });
+  }
+  return { tracks, proposals: snapshot.proposals || [], unassigned };
+});
+ipcMain.handle("learner:saveTrack", (_e, track) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return dbModule.saveLearnerTrack(track || {});
+});
+ipcMain.handle("learner:deleteTrack", (_e, id) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return dbModule.deleteLearnerTrack(String(id));
+});
+ipcMain.handle("learner:setTrackMaterial", (_e, payload) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  const p = payload && typeof payload === "object" ? payload : {};
+  return dbModule.setTrackMaterial(String(p.trackId || ""), String(p.libraryItemId || ""), p.member === null || p.member === undefined ? null : Number(p.member));
+});
+ipcMain.handle("learner:kpLevels", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.kpLevelsFor(opts || {});
+});
+ipcMain.handle("learner:logEvent", (_e, evt) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  const e = evt && typeof evt === "object" ? evt : {};
+  return dbModule.addLearningEvent({
+    kind: e.kind,
+    ts: e.ts,
+    lang: e.lang,
+    library_item_id: e.libraryItemId,
+    unit_id: e.unitId,
+    kp_id: e.kpId,
+    payload: e.payload
+  });
+});
+ipcMain.handle("learner:unitText", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.unitTextFor(opts || {});
+});
+ipcMain.handle("learner:contextReel", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.contextReelFor(opts || {});
+});
+ipcMain.handle("learner:sentenceMine", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.sentenceMineFor(opts || {});
+});
+ipcMain.handle("learner:placementSample", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.placementSampleFor(opts || {});
+});
+ipcMain.handle("learner:lexStats", (_e, opts) => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  return learnerRefresh.lexStatsFor(opts || {});
+});
+ipcMain.handle("learner:rebuild", async () => {
+  if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
+  await learnerDb.reset();
+  return learnerRefresh.refresh({ force: true });
+});
+
 // ---------- v40（M8-B，§4.2-24）：洞察 insights:* + Personal Meaning meaning:* ----------
 // InsightEngine 编排在渲染层（同制卡管线：主进程不拼提示词），主进程只做：Evidence Package 装配、
 // runs 事实记录、反馈落表；LLM 流式走既有 ai:chat/ai:stream 通道（Key 不进渲染层）。
@@ -1771,6 +1907,10 @@ app.whenReady().then(async () => {
   // v48.75（D119）：生命周期锚点——区分「进程启动」（init 横幅）与「窗口就绪」（本行），
   // 两者之间崩溃/卡死时日志可判读。
   appLog.log("INFO", "app", "app ready");
+  // v48.80（D124 / 设计稿 §9.1）：应用启动后 20 秒后台触发一次学习索引刷新（回调里再查总开关）
+  setTimeout(() => {
+    if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh();
+  }, 20000);
   Menu.setApplicationMenu(null);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
   createWindow();
@@ -1923,8 +2063,10 @@ app.on("before-quit", () => {
 });
 
 // M7：词典词条库（独立 dictionary.db）退出兜底落盘（正常路径导入后已即时 save）
+// v48.80（D124）：learner.db 同样退出兜底落盘（正常路径刷新结束时已 save）
 app.on("will-quit", () => {
   void dictDb.saveOnQuit();
+  void learnerDb.saveOnQuit();
   // v48.75（D119）：退出横幅（生命周期事件；写失败由 appLog 内部静默）
   appLog.log("INFO", "app", "app quit");
 });

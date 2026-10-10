@@ -91,6 +91,7 @@ async function refresh({ force = false } = {}) {
   running = (async () => {
     const startedAt = Date.now();
     status = { ...status, indexing: true, phase: "", done: 0, total: 0, lastError: "" };
+    let anyStepRan = false;
     try {
       // 每步开始前检查开关（§11.8：关闭则在当前步骤结束后停止）
       const steps = [
@@ -108,21 +109,28 @@ async function refresh({ force = false } = {}) {
         status.phase = phase;
         // eslint-disable-next-line no-await-in-loop
         await fn();
+        anyStepRan = true;
       }
       if (!learnerEnabled()) {
         status.phase = "stopped";
       } else {
         status.phase = "save";
         await stepSave();
+        anyStepRan = true;
       }
     } catch (err) {
       status.lastError = String((err && err.message) || err);
     } finally {
+      running = null; // 单飞解锁（设计稿 §9.1：finally 里置空，否则后续刷新拿到旧 promise）
       status.indexing = false;
-      try {
-        await learnerDb.save(); // 已完成的步骤照常落盘（设计稿 §9.1 失败处理）
-      } catch {
-        /* 保底：失败不抛出刷新之外 */
+      // 总开关关闭导致的全程未启动＝真 no-op（不落盘，§13.5 的 mtime 断言）；
+      // 中途停止则已完成的步骤照常落盘（设计稿 §9.1 失败处理）
+      if (anyStepRan) {
+        try {
+          await learnerDb.save();
+        } catch {
+          /* 保底：失败不抛出刷新之外 */
+        }
       }
     }
     return { ok: !status.lastError, ms: Date.now() - startedAt, error: status.lastError || undefined };
@@ -1819,6 +1827,407 @@ async function statusForIpc() {
   return getStatus();
 }
 
+// ---------- learner:recommend 全流程（设计稿 §7.1） ----------
+
+async function recommendFlow({ force = false } = {}) {
+  const st = getStatus();
+  // 首次索引 / 已在刷新：不等待，立即返回并在后台启动 refresh（面板每 1 秒轮询 status）
+  if (st.indexing || st.lastRefreshAt === 0) {
+    if (!st.indexing) void refresh({ force: true });
+    return { ok: true, indexing: true, items: [], runId: null, generatedAt: null, candidateCount: 0, tracks: [], usingProposals: false };
+  }
+  if (force || Date.now() - st.lastRefreshAt > P.REC.STALE_MS) {
+    const r = await refresh({ force });
+    if (r && r.ok === false && status.lastRefreshAt === 0) {
+      return { ok: false, indexing: false, items: [], runId: null, generatedAt: null, candidateCount: 0, tracks: [], usingProposals: false, error: r.error };
+    }
+  }
+  const snapshot = await buildSnapshot();
+  const result = lmRecommend.recommend(snapshot);
+  // 自动判定完成 → 写 rec_feedback（action=done, auto=1，由调用方=本函数落库）
+  const lastRunId = snapshot.lastRun ? snapshot.lastRun.id : null;
+  for (const d of result.autoDone || []) {
+    try {
+      dbModule.addRecFeedback({ recRunId: lastRunId, itemKey: d.itemKey, kind: d.kind, libraryItemId: d.libraryItemId, action: "done", auto: true });
+    } catch {
+      /* 反馈写失败不阻塞推荐 */
+    }
+  }
+  // 指纹未变则 saveRecRun 内部跳过写入，runId 取最近一条
+  const saved = dbModule.saveRecRun(result.items, result.candidateCount, P.LM_VERSION);
+  const tracks = buildTrackSummaries(snapshot, result.weights || {}, result.usingProposals, result.proposals || []);
+  return {
+    ok: true,
+    indexing: false,
+    runId: saved.id,
+    generatedAt: Date.now(),
+    items: result.items,
+    candidateCount: result.candidateCount,
+    tracks,
+    usingProposals: result.usingProposals,
+    byKind: result.byKind,
+    error: status.lastError || undefined
+  };
+}
+
+/** TrackSummary（设计稿 §11.1 辅助类型）：提议轨道转正时 id = "proposal:" + key */
+function buildTrackSummaries(snapshot, weights, usingProposals, proposals) {
+  const effTracks = usingProposals
+    ? proposals.map((p) => ({
+        id: `proposal:${p.key}`,
+        label: p.label,
+        mode: p.mode,
+        lang: p.lang,
+        udcCodes: p.udcCodes,
+        status: "active",
+        pinned: false,
+        priority: 3,
+        source: "proposal",
+        isProposal: true
+      }))
+    : snapshot.tracks.map((t) => ({ ...t, isProposal: false }));
+  const materialCount = new Map();
+  const trackMaterials = new Map();
+  for (const t of effTracks) trackMaterials.set(t.id, new Set());
+  const overrides = new Map((snapshot.overrides || []).map((o) => [`${o.trackId}:${o.libraryItemId}`, o.member]));
+  for (const m of snapshot.materials || []) {
+    for (const t of effTracks.slice().sort((a, b) => a.id.localeCompare(b.id))) {
+      if (lmRecommend.resolveMembership(t, m, overrides)) {
+        materialCount.set(t.id, (materialCount.get(t.id) || 0) + 1);
+        trackMaterials.get(t.id).add(String(m.id));
+        break;
+      }
+    }
+  }
+  const levelCountsByTrack = new Map();
+  for (const t of effTracks) levelCountsByTrack.set(t.id, [0, 0, 0, 0, 0]);
+  for (const kp of snapshot.kps || []) {
+    for (const t of effTracks) {
+      if (t.mode === "language") continue;
+      const belongs =
+        (kp.domainId && (t.udcCodes || []).includes(kp.domainId)) ||
+        (kp.cardMaterialIds || []).some((mid) => trackMaterials.get(t.id).has(String(mid)));
+      if (belongs) {
+        const arr = levelCountsByTrack.get(t.id);
+        arr[clamp01Level(kp.level)] += 1;
+        break;
+      }
+    }
+  }
+  return effTracks.map((t) => ({
+    ...t,
+    weight: Number(weights[t.id]) || 0,
+    materialCount: materialCount.get(t.id) || 0,
+    kpCount: levelCountsByTrack.get(t.id).reduce((s, n) => s + n, 0),
+    levelCounts: levelCountsByTrack.get(t.id)
+  }));
+}
+
+function clamp01Level(level) {
+  return Math.min(4, Math.max(0, Math.round(Number(level) || 0)));
+}
+
+// ---------- learner:kpLevels（设计稿 §11.7） ----------
+
+async function kpLevelsFor({ kpIds } = {}) {
+  const rows = await learnerDb.all("SELECT * FROM kp_states");
+  const filter = Array.isArray(kpIds) && kpIds.length > 0 ? new Set(kpIds.map(String)) : null;
+  const labels = new Map((dbModule.learnerFacts().kps || []).map((k) => [String(k.id), String(k.label || "")]));
+  return rows
+    .filter((r) => !filter || filter.has(String(r.kp_id)))
+    .map((r) => ({
+      kpId: String(r.kp_id),
+      level: Number(r.level) || 0,
+      label: labels.get(String(r.kp_id)) || String(r.kp_id),
+      confidence: String(r.confidence || "low"),
+      fading: Number(r.fading) === 1,
+      metrics: parseJsonSafe(r.metrics_json, {})
+    }));
+}
+
+// ---------- learner:unitText（单元文本 + learning 词位置） ----------
+
+async function unitContext(unitId) {
+  const unit = (await learnerDb.all("SELECT * FROM content_units WHERE id = ?", [String(unitId)]))[0];
+  if (!unit) return null;
+  const mdCache = new Map();
+  const plain = await unitPlainOf(unit, mdCache);
+  const mat = dbModule.learnerFacts().materials.find((m) => String(m.id) === String(unit.library_item_id));
+  const anchor =
+    unit.page_from != null
+      ? { anchorText: String(unit.head_text || ""), pageIndex: Number(unit.page_from) }
+      : {
+          anchorText: String(unit.head_text || ""),
+          anchorRatio: unit.md_from != null && unit.md_to != null && unit.md_to > 0 ? Number(unit.md_to) / Math.max(1, Number(unit.md_to)) : undefined
+        };
+  return { unit, plain, lang: String(unit.lang || ""), materialTitle: mat ? String(mat.title) : "", documentId: String(unit.document_id), anchor };
+}
+
+async function unitTextFor({ unitId } = {}) {
+  const ctx = await unitContext(unitId);
+  if (!ctx) return null;
+  // learning 词位置：unit_lex × lexeme_states → learning lexeme 的 key 集，扫 token 命中
+  const row = (await learnerDb.all("SELECT lex_json AS lexJson FROM unit_lex WHERE unit_id = ?", [String(unitId)]))[0];
+  const learningSpans = [];
+  if (row) {
+    const learningIds = new Set(
+      parseJsonSafe(row.lexJson, []).map(([id]) => Number(id))
+    );
+    const lexIds = parseJsonSafe(row.lexJson, []).map(([id]) => Number(id));
+    const states = await learnerDb.all(
+      `SELECT lexeme_id AS id FROM lexeme_states WHERE state = 'learning' AND lexeme_id IN (${lexIds.map(() => "?").join(",") || "NULL"})`,
+      lexIds
+    );
+    learningIds.clear();
+    for (const s of states) learningIds.add(Number(s.id));
+    if (learningIds.size > 0) {
+      // lexemeId → key
+      const idRows = await learnerDb.all(
+        `SELECT id, key FROM lexemes WHERE id IN (${lexIds.map(() => "?").join(",") || "NULL"})`,
+        lexIds
+      );
+      const keyById = new Map(idRows.map((r) => [Number(r.id), String(r.key)]));
+      const learningKeys = new Set([...learningIds].map((id) => keyById.get(id)).filter(Boolean));
+      const tokens = lmLex.tokenize(ctx.plain, ctx.lang);
+      for (const t of tokens) {
+        if (t.proper) continue;
+        const key = lmLex.lexemeKey(t.surface, ctx.lang);
+        if (key && learningKeys.has(key)) learningSpans.push([t.start, t.end]);
+      }
+    }
+  }
+  return {
+    unitId: String(unitId),
+    title: String(ctx.unit.title || ""),
+    material: ctx.materialTitle,
+    text: ctx.plain,
+    lang: ctx.lang,
+    learningSpans: learningSpans.sort((a, b) => a[0] - b[0]),
+    documentId: ctx.documentId,
+    anchor: ctx.anchor
+  };
+}
+
+// ---------- learner:contextReel（设计稿 §8.2 K11 / §11.1） ----------
+
+async function contextReelFor({ lang: langRaw, key } = {}) {
+  const lang = lmLex.baseLang(String(langRaw || ""));
+  const target = String(key || "");
+  if (!lang || !target) return null;
+  const lexeme = (await learnerDb.all("SELECT * FROM lexemes WHERE lang = ? AND key = ?", [lang, target]))[0];
+  if (!lexeme) return { word: target, sentences: [] };
+  // 含该词项的单元：已通读优先（按最近通读降序），再未读
+  const unitRows = await learnerDb.all(
+    `SELECT u.*, p.passes_json AS passesJson, p.last_pass_at AS lastPassAt
+     FROM unit_lex l
+     JOIN content_units u ON u.id = l.unit_id
+     LEFT JOIN unit_progress p ON p.unit_id = u.id
+     WHERE l.lex_json LIKE ?`,
+    [`[${Number(lexeme.id)},%`]
+  );
+  const sortReadFirst = (a, b) => {
+    const ra = (parseJsonSafe(a.passesJson, []) || []).length > 0 ? 1 : 0;
+    const rb = (parseJsonSafe(b.passesJson, []) || []).length > 0 ? 1 : 0;
+    if (ra !== rb) return rb - ra;
+    return (Number(b.lastPassAt) || 0) - (Number(a.lastPassAt) || 0) || Number(a.ord) - Number(b.ord);
+  };
+  unitRows.sort(sortReadFirst);
+  const facts = dbModule.learnerFacts();
+  const titleByItem = new Map((facts.materials || []).map((m) => [String(m.id), String(m.title || "")]));
+  const mdCache = new Map();
+  const sentences = [];
+  for (const u of unitRows) {
+    if (sentences.length >= 5) break;
+    const plain = await unitPlainOf(u, mdCache);
+    let perUnit = 0;
+    for (const sentence of lmText.splitSentences(plain)) {
+      if (perUnit >= 2 || sentences.length >= 5) break;
+      const tokens = lmLex.tokenize(sentence.text, lang);
+      let hit = null;
+      for (const t of tokens) {
+        if (t.proper) continue;
+        if (lmLex.lexemeKey(t.surface, lang) === target) {
+          hit = t;
+          break;
+        }
+      }
+      if (!hit) continue;
+      const item = String(u.library_item_id);
+      const unit = u;
+      sentences.push({
+        text: sentence.text,
+        start: hit.start,
+        end: hit.end,
+        unitId: String(u.id),
+        material: titleByItem.get(item) || "",
+        documentId: String(u.document_id),
+        anchor:
+          u.page_from != null
+            ? { anchorText: String(u.head_text || ""), pageIndex: Number(u.page_from) }
+            : { anchorText: String(u.head_text || ""), anchorRatio: unit.md_from != null && mdLenOf(facts, item) ? Number(u.md_from) / Math.max(1, mdLenOf(facts, item)) : undefined }
+      });
+      perUnit += 1;
+    }
+  }
+  return { word: String(lexeme.sample || lexeme.key), sentences };
+}
+
+function mdLenOf(facts, itemId) {
+  const doc = (facts.documents || []).find((d) => String(d.libraryItemId) === String(itemId));
+  return Number(doc ? doc.markdownLen : 0) || 0;
+}
+
+// ---------- learner:sentenceMine（设计稿 §8.2 K12 / §11.1） ----------
+
+async function sentenceMineFor({ trackId, limit = 10 } = {}) {
+  const tracks = dbModule.listLearnerTracks();
+  const track = tracks.find((t) => String(t.id) === String(trackId));
+  const lang = track && track.mode === "language" ? String(track.lang) : "";
+  if (!lang) return { items: [] };
+  const cap = Math.min(50, Math.max(1, Number(limit) || 10));
+  // 该语言全部 learning/seen 且 unit_count ≥ 2 的目标词
+  const lexemes = await learnerDb.all("SELECT * FROM lexemes WHERE lang = ?", [lang]);
+  const states = new Map((await learnerDb.all("SELECT * FROM lexeme_states")).map((r) => [Number(r.lexeme_id), r]));
+  const candidates = new Map(); // key → {sample}
+  for (const lex of lexemes) {
+    const st = states.get(Number(lex.id));
+    const state = st ? st.state : "unknown";
+    if (state !== "learning" && state !== "seen") continue;
+    if (Number(lex.unit_count) < 2) continue;
+    if (isStopKeyFor(lang, String(lex.key))) continue;
+    candidates.set(String(lex.key), String(lex.sample || lex.key));
+  }
+  // 近 14 天通读过的该语言单元 → 切句 → i+1 判定
+  const now = Date.now();
+  const items = [];
+  const unitRows = await learnerDb.all(
+    `SELECT u.*, p.passes_json AS passesJson FROM content_units u
+     LEFT JOIN unit_progress p ON p.unit_id = u.id
+     WHERE u.lang = ? ORDER BY u.library_item_id ASC, u.ord ASC`,
+    [lang]
+  );
+  const knownStateByKey = new Map();
+  for (const lex of lexemes) {
+    const st = states.get(Number(lex.id));
+    knownStateByKey.set(String(lex.key), st ? st.state : "unknown");
+  }
+  const isKnownKey = (key) => {
+    const st = knownStateByKey.get(String(key));
+    return st === "known" || st === "familiar" || isStopKeyFor(lang, String(key));
+  };
+  const facts = dbModule.learnerFacts();
+  const titleByItem = new Map((facts.materials || []).map((m) => [String(m.id), String(m.title || "")]));
+  const mdCache = new Map();
+  for (const u of unitRows) {
+    if (items.length >= cap) break;
+    const passes = parseJsonSafe(u.passesJson, []);
+    const lastPass = passes.length ? Math.max(...passes) : 0;
+    if (!lastPass || now - lastPass > 14 * DAY) continue;
+    const plain = await unitPlainOf(u, mdCache);
+    for (const sentence of lmText.splitSentences(plain)) {
+      if (items.length >= cap) break;
+      const tokens = lmLex.tokenize(sentence.text, lang);
+      const targetKey = lmLex.isIPlusOneSentence(tokens, isKnownKey, lang);
+      if (!targetKey) continue;
+      let hit = null;
+      for (const t of tokens) {
+        if (t.proper) continue;
+        if (lmLex.lexemeKey(t.surface, lang) === targetKey) {
+          hit = t;
+          break;
+        }
+      }
+      if (!hit) continue;
+      const item = String(u.library_item_id);
+      items.push({
+        sentence: sentence.text,
+        target: { key: targetKey, sample: candidates.get(targetKey) || targetKey, start: hit.start, end: hit.end },
+        unitId: String(u.id),
+        material: titleByItem.get(item) || "",
+        documentId: String(u.document_id),
+        anchor: {
+          anchorText: sentence.text.replace(/\s+/g, " ").trim().slice(0, 40),
+          ...(u.page_from != null ? { pageIndex: Number(u.page_from) } : u.md_from != null && mdLenOf(facts, item) ? { anchorRatio: Number(u.md_from) / Math.max(1, mdLenOf(facts, item)) } : {})
+        }
+      });
+    }
+  }
+  return { items };
+}
+
+function isStopKeyFor(lang, key) {
+  const table = lmLex.STOPWORDS[lmLex.baseLang(lang)];
+  return Boolean(table && table.has(String(key)));
+}
+
+// ---------- learner:placementSample（设计稿 §11.4） ----------
+
+const PLACEMENT_BANDS = [
+  [1, 250],
+  [251, 500],
+  [501, 1000],
+  [1001, 2000],
+  [2001, 4000],
+  [4001, 8000]
+];
+
+async function placementSampleFor({ lang: langRaw } = {}) {
+  const lang = lmLex.baseLang(String(langRaw || ""));
+  if (!lang) return { bands: [] };
+  const lexemes = await learnerDb.all("SELECT * FROM lexemes WHERE lang = ? ORDER BY total_count DESC, id ASC", [lang]);
+  // 非停用词项排名（1 起；表外语言按频率替代排除前 50）
+  const nonStop = lexemes.filter((l) => !isStopKeyFor(lang, String(l.key)));
+  const bands = [];
+  for (const [from, to] of PLACEMENT_BANDS) {
+    if (from > nonStop.length) break; // 超出词项总数的频段丢弃
+    const candidates = nonStop.slice(from - 1, Math.min(to, nonStop.length));
+    if (candidates.length === 0) continue;
+    const seed = require("node:crypto").createHash("sha1").update(lang + String(from)).digest("hex");
+    const picked = candidates
+      .map((l) => ({ l, h: require("node:crypto").createHash("sha1").update(seed + String(l.key)).digest("hex") }))
+      .sort((a, b) => a.h.localeCompare(b.h) || String(a.l.key).localeCompare(String(b.l.key)))
+      .slice(0, 10)
+      .map(({ l }) => ({ key: String(l.key), sample: String(l.sample || l.key) }));
+    bands.push({ from, to, words: picked });
+  }
+  return { bands };
+}
+
+// ---------- learner:lexStats（设计稿 §11.1） ----------
+
+async function lexStatsFor({ lang: langRaw } = {}) {
+  const lang = lmLex.baseLang(String(langRaw || ""));
+  if (!lang) return { knownCount: 0, familiarCount: 0, learningCount: 0, totalLexemes: 0, recentCoverage: null };
+  const lexemes = await learnerDb.all("SELECT * FROM lexemes WHERE lang = ?", [lang]);
+  const states = new Map((await learnerDb.all("SELECT * FROM lexeme_states")).map((r) => [Number(r.lexeme_id), r]));
+  let knownCount = 0;
+  let familiarCount = 0;
+  let learningCount = 0;
+  for (const lex of lexemes) {
+    if (isStopKeyFor(lang, String(lex.key))) continue;
+    const st = states.get(Number(lex.id));
+    const state = st ? st.state : "unknown";
+    if (state === "known") knownCount += 1;
+    if (state === "familiar") familiarCount += 1;
+    if (state === "learning") learningCount += 1;
+  }
+  // recentCoverage = 近 5 个通读单元覆盖率平均
+  const unitRows = await learnerDb.all(
+    `SELECT u.id AS id, p.last_pass_at AS lastPassAt FROM content_units u
+     JOIN unit_lex l ON l.unit_id = u.id
+     JOIN unit_progress p ON p.unit_id = u.id
+     WHERE u.lang = ? ORDER BY p.last_pass_at DESC LIMIT 5`,
+    [lang]
+  );
+  const coverages = [];
+  for (const r of unitRows) {
+    const cached = lexUnitCache.get(String(r.id));
+    if (cached && typeof cached.coverage === "number") coverages.push(cached.coverage);
+  }
+  const recentCoverage = coverages.length ? coverages.reduce((s, c) => s + c, 0) / coverages.length : null;
+  return { knownCount, familiarCount, learningCount, totalLexemes: lexemes.length, recentCoverage };
+}
+
 module.exports = {
   refresh,
   buildSnapshot,
@@ -1828,5 +2237,13 @@ module.exports = {
   learnerEnabled,
   learnerSettings,
   learnerLocale,
-  computeExtractKpIds
+  computeExtractKpIds,
+  recommendFlow,
+  buildTrackSummaries,
+  kpLevelsFor,
+  unitTextFor,
+  contextReelFor,
+  sentenceMineFor,
+  placementSampleFor,
+  lexStatsFor
 };

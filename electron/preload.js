@@ -339,6 +339,26 @@ contextBridge.exposeInMainWorld("knowledgeAPI", {
   lint: () => ipcRenderer.invoke("knowledge:lint")
 });
 
+// v48.80（D124 / 设计稿 §11.1）：学习者模型——轨道 / 推荐 / 学习事件 / 语言专用查询（一个通道一个方法）
+contextBridge.exposeInMainWorld("learnerAPI", {
+  status: () => ipcRenderer.invoke("learner:status"),
+  refresh: (opts) => ipcRenderer.invoke("learner:refresh", opts || {}),
+  recommend: (opts) => ipcRenderer.invoke("learner:recommend", opts || {}),
+  feedback: (payload) => ipcRenderer.invoke("learner:feedback", payload || {}),
+  listTracks: () => ipcRenderer.invoke("learner:listTracks"),
+  saveTrack: (track) => ipcRenderer.invoke("learner:saveTrack", track || {}),
+  deleteTrack: (id) => ipcRenderer.invoke("learner:deleteTrack", id),
+  setTrackMaterial: (payload) => ipcRenderer.invoke("learner:setTrackMaterial", payload || {}),
+  kpLevels: (opts) => ipcRenderer.invoke("learner:kpLevels", opts || {}),
+  logEvent: (evt) => ipcRenderer.invoke("learner:logEvent", evt || {}),
+  unitText: (opts) => ipcRenderer.invoke("learner:unitText", opts || {}),
+  contextReel: (opts) => ipcRenderer.invoke("learner:contextReel", opts || {}),
+  sentenceMine: (opts) => ipcRenderer.invoke("learner:sentenceMine", opts || {}),
+  placementSample: (opts) => ipcRenderer.invoke("learner:placementSample", opts || {}),
+  lexStats: (opts) => ipcRenderer.invoke("learner:lexStats", opts || {}),
+  rebuild: () => ipcRenderer.invoke("learner:rebuild")
+});
+
 // v40（M8-B，§4.2-24）：AI 洞察 + Personal Meaning 候选（InsightEngine 渲染层编排面）
 contextBridge.exposeInMainWorld("insightsAPI", {
   buildPackage: (opts) => ipcRenderer.invoke("insights:buildPackage", opts || {}),
