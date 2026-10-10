@@ -1260,7 +1260,7 @@ function recommend(snapshot) {
     trackNet: (track) => fb.trackNet.get(track.id) || 0,
     bandOf: (track, coverage) => {
       const shift = clamp((fb.trackNet.get(track.id) || 0) * P.REC.BAND_SHIFT_STEP, -P.REC.BAND_SHIFT_MAX, P.REC.BAND_SHIFT_MAX);
-      return require("./lmLex").bandOf(coverage, shift);
+      return lmLex.bandOf(coverage, shift);
     }
   };
 
