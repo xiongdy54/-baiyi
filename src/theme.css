@@ -2774,7 +2774,8 @@ body.theme-dark .modal-panel {
 @media (prefers-reduced-motion: no-preference) {
   html[data-wb-anim] .app-main { transition: margin var(--dur-panel) var(--ease); }
 }
-html[data-wb-pin] .app-main { flex: none; width: var(--wb-main-w); }
+/* 只钉宽度（min/max-width）：.app-shell 是纵向 flex，若写 flex:none 会把 .app-main 的**高度**也变成内容高 → 顶栏/底栏整体跳动 */
+html[data-wb-pin] .app-main { min-width: var(--wb-main-w); max-width: var(--wb-main-w); }
 html[data-wb-open="1"][data-wb-place="right"] .app-main { margin-right: var(--wb-w); }
 html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--wb-h); }
 
