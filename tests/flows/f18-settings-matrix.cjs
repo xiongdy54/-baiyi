@@ -71,6 +71,7 @@ const DOC_KEYS = [
   "app.extractEditorToolbar", "app.extractEditorToolbarFloat", "app.extractEditorToolbarTop", "app.extractFaceFontFollow", "app.extractFaceFontSize", "app.extractFaceFontFamily", // §7.4 v48.54 / D95（摘录卡编辑器工具栏与形态 + 字号/字体桥；v48.55/§K 增钉顶键）
   "app.selectionBarStyle", // D122（选区浮条动作呈现 icon/text；取代 D95 §K.4 readerActionsFloat）
   "app.cardFaceExtras", // §7.4 v48.61 / D104（卡面信息密度三开关：背面辅助字段助记/例子/来源）
+  "app.workbenchPlacement", "app.closeToTray", // §7.4 v48.79 / D123（制卡台放置位置 / 关闭收进托盘）
   "app.tagsEnabled", // §7.4 v48.63 / D107（标签功能总开关：默认开，仅严格 false 为关；隐藏入口不动数据）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
@@ -264,6 +265,8 @@ app
         ["app", "extractEditorToolbarFloat", true],       // v48.54 / D95 v1.4 工具栏形态（默认 false＝随文档流；true＝悬浮于选中文字）
         ["app", "extractEditorToolbarTop", true],         // v48.55 / D95 §K.2 dock 态钉顶（默认 false＝吸底；非默认值才验得出往返）
         ["app", "selectionBarStyle", "text"],             // D122 选区浮条动作呈现（默认 "icon"）
+        ["app", "workbenchPlacement", "bottom"],          // D123 制卡台放置位置（默认 "right"）
+        ["app", "closeToTray", false],                    // D123 关闭收进托盘（默认 true）
         ["app", "extractFaceFontFollow", false],          // v48.54 / D95 摘录卡字号跟随（默认 true）
         ["app", "extractFaceFontSize", 22],               // v48.54 / D95 独立字号（默认 17；文件层往返原值）
         ["app", "extractFaceFontFamily", " Georgia, serif "], // v48.54 / D95 独立字体（文件层往返字节一致；trim 归一在读写两侧）

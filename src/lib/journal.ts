@@ -40,6 +40,8 @@ export interface JournalDay {
 export interface ShortcutStatus {
   quickCapture: { enabled: boolean; accelerator: string; registered: boolean; error: string | null };
   addMaterial: { enabled: boolean; accelerator: string; registered: boolean; error: string | null };
+  /** D123：独立制卡台窗口全局快捷键 */
+  workbench: { enabled: boolean; accelerator: string; registered: boolean; error: string | null };
   hideOnBlur: boolean;
   autoLaunch: boolean;
 }

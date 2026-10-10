@@ -3,7 +3,7 @@
 // v48.51（D91 §5.2/§5.5）：explain 分支首行加三态「解读方式」切换器（等待回答时也可切换，切换即重跑；
 // 重跑逻辑在宿主 changeExplainMode）+ 答案尾部的事后建议轻提示行（仅 auto 路由进 ste 且 points=0 且
 // 改写≈原文时出现——用户多半更想要概念解释）。
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -12,7 +12,8 @@ import { sanitizeDomain } from "../lib/udc";
 import { isLikelySameText, parseSteMarkers, stripSteMarkers, type ExplainModePref } from "../lib/explainRouter";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
-import { IconAlert } from "./icons";
+import { IconAlert, IconCheck, IconChevronDown, IconClose, IconPencil } from "./icons";
+import type { AskThreadItem } from "../lib/useSelectionActions";
 
 // 防 AI 返回字段类型漂移导致渲染崩溃（ruleNotes/warnings 可能是字符串）
 function toList(v: unknown): string[] {
@@ -62,6 +63,326 @@ export function ExplainModeSwitcher({
   );
 }
 
+// ---------- D123：计时与状态行（静态方块点、无动画；计时自算——摘录页曾硬编码 elapsedSec=0） ----------
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+export function fmtElapsed(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** 单行进度：「● 思考中 0:12 · 2052 字  [停止]」（计时＝从点击起累计，每秒刷新） */
+export function AIStatus({
+  startedAt,
+  thinking,
+  progress,
+  onStop,
+  label
+}: {
+  startedAt?: number;
+  thinking?: number;
+  progress?: number;
+  onStop?: () => void;
+  label?: string;
+}) {
+  const now = useNow(true);
+  const chars = progress || thinking || 0;
+  const text = label ?? (progress ? "生成中" : thinking ? "思考中" : "等待响应");
+  return (
+    <div className="ai-status" role="status" aria-live="polite" data-testid="ai-status">
+      <span className="ai-status-dot" aria-hidden="true" />
+      <span>{text}</span>
+      <span className="mono ai-status-time">{fmtElapsed(startedAt ? now - startedAt : 0)}</span>
+      {chars > 0 && <span className="mono ai-status-chars">{chars} 字</span>}
+      {onStop && (
+        <button type="button" className="btn btn-outline btn-sm ai-status-stop" onClick={onStop}>
+          停止
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** AI 解释页：自由追问线程（每条回复悬停出现「制卡」＝以该回复为材料走 AI 制卡） */
+export function ExplainThread({ items, onMake }: { items: AskThreadItem[]; onMake: (answer: string) => void }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="wb-thread" data-testid="wb-thread">
+      {items.map((it) => (
+        <div key={it.id} className="wb-turn">
+          <div className="wb-q">{it.q}</div>
+          {it.running && !it.answer && <AIStatus startedAt={it.startedAt} thinking={it.thinking} />}
+          {it.error && <div className="ai-error">{it.error}</div>}
+          {it.answer && (
+            <div className="wb-a">
+              <div className="ai-answer">
+                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                  {stripSteMarkers(it.answer)}
+                </ReactMarkdown>
+              </div>
+              {!it.running && (
+                <div className="wb-a-acts">
+                  <button type="button" className="ai-link" onClick={() => onMake(it.answer as string)}>
+                    制卡
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** AI 解释页底部输入条：默认单行（与「发送」同高 32px 对齐），随输入增高（≤120px）；Enter 发送、Shift+Enter 换行 */
+export function ChatComposer({ busy, onSend }: { busy: boolean; onSend: (q: string) => void }) {
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const chrome = el.offsetHeight - el.clientHeight; // 上下边框
+    el.style.height = `${Math.min(el.scrollHeight + chrome, 120)}px`;
+  }, [text]);
+  const send = () => {
+    const q = text.trim();
+    if (!q || busy) return;
+    onSend(q);
+    setText("");
+  };
+  return (
+    <div className="wb-composer" data-testid="wb-composer">
+      <textarea
+        ref={ref}
+        rows={1}
+        value={text}
+        aria-label="追问 AI"
+        placeholder="追问，或自由提问…"
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            send();
+          }
+        }}
+      />
+      <button type="button" className="btn btn-primary btn-sm wb-composer-send" disabled={!text.trim() || busy} onClick={send}>
+        发送
+      </button>
+    </div>
+  );
+}
+
+type KpGroup = { kpTitle: string; items: string[] };
+
+/** AI 制卡页「知识点与后续可补」：勾选 · 条目（✎ 可编辑）· 解释（完成后可展开/收起）；
+    制卡只有两条路径——勾选后底部批量条，或展开解释里的「制卡」（行内不再有重复的制卡钮）。 */
+function FollowUpList({
+  panel,
+  groups,
+  onExploration,
+  onFollowUpCards
+}: {
+  panel: {
+    running: boolean;
+    followUpBusy?: string[];
+    followUpErrors?: Record<string, string>;
+    explorations?: { id: number; item: string; srcKey?: string; answer?: string; running: boolean; startedAt?: number; thinking?: number; error?: string }[];
+  };
+  groups: KpGroup[];
+  onExploration: (item: string, kpTitle: string, srcKey?: string) => void;
+  onFollowUpCards: (item: string, kpTitle: string, hint?: string) => void | Promise<void>;
+}) {
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [edited, setEdited] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [making, setMaking] = useState(false);
+  const textOf = (item: string) => edited[item] ?? item;
+  const expOf = (item: string) =>
+    (panel.explorations ?? []).filter((e) => (e.srcKey ?? e.item) === item && e.item === textOf(item)).pop();
+  const all = groups.flatMap((g) => g.items.map((item) => ({ item, kpTitle: g.kpTitle })));
+  const picked = all.filter((x) => checked.has(x.item));
+  const toggle = (item: string) =>
+    setChecked((s) => {
+      const n = new Set(s);
+      if (n.has(item)) n.delete(item);
+      else n.add(item);
+      return n;
+    });
+  const startEdit = (item: string) => {
+    setEditing(item);
+    setDraft(textOf(item));
+  };
+  const commitEdit = (item: string) => {
+    const v = draft.trim();
+    setEditing(null);
+    if (v && v !== textOf(item)) setEdited((m) => ({ ...m, [item]: v }));
+  };
+  const makeAll = async () => {
+    setMaking(true);
+    try {
+      for (const x of picked) {
+        const exp = expOf(x.item);
+        await onFollowUpCards(textOf(x.item), x.kpTitle, exp?.answer);
+      }
+      setChecked(new Set());
+    } finally {
+      setMaking(false);
+    }
+  };
+  return (
+    <div className="ai-kps" data-testid="ai-kps">
+      <div className="ai-kps-head">
+        <span className="ai-kps-title">知识点与后续可补</span>
+        <button
+          type="button"
+          className="ai-link"
+          onClick={() => setChecked(picked.length === all.length ? new Set() : new Set(all.map((x) => x.item)))}
+        >
+          {picked.length === all.length ? "取消全选" : "全选"}
+        </button>
+      </div>
+      {groups.map((g, gi) => (
+        <div key={gi} className="ai-kp">
+          <div className="ai-kp-title">{g.kpTitle}</div>
+          {g.items.map((item) => {
+            const text = textOf(item);
+            const exp = expOf(item);
+            const busy = (panel.followUpBusy ?? []).includes(text);
+            const err = panel.followUpErrors?.[text];
+            const isOpen = open.has(item);
+            const explainBtn = exp?.running ? (
+              <button type="button" className="ai-kp-explain is-busy" disabled>
+                解释中
+              </button>
+            ) : exp?.answer ? (
+              <button
+                type="button"
+                className="ai-kp-explain is-done"
+                aria-expanded={isOpen}
+                onClick={() =>
+                  setOpen((s) => {
+                    const n = new Set(s);
+                    if (n.has(item)) n.delete(item);
+                    else n.add(item);
+                    return n;
+                  })
+                }
+              >
+                {isOpen ? "收起" : "展开"}
+                <IconChevronDown size={11} className={isOpen ? "is-flip" : undefined} />
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="ai-kp-explain"
+                disabled={panel.running}
+                onClick={() => {
+                  onExploration(text, g.kpTitle, item);
+                  setOpen((s) => new Set(s).add(item));
+                }}
+              >
+                {exp?.error ? "重试" : "解释"}
+              </button>
+            );
+            return (
+              <div key={item} className="ai-kp-item" data-testid="ai-kp-item">
+                <div className="ai-kp-row">
+                  <input
+                    type="checkbox"
+                    className="ai-kp-check"
+                    checked={checked.has(item)}
+                    aria-label={`选择：${text}`}
+                    onChange={() => toggle(item)}
+                  />
+                  {editing === item ? (
+                    <>
+                      <input
+                        className="ai-kp-edit"
+                        value={draft}
+                        autoFocus
+                        aria-label="编辑条目"
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.nativeEvent.isComposing) commitEdit(item);
+                          else if (e.key === "Escape") {
+                            e.stopPropagation();
+                            setEditing(null);
+                          }
+                        }}
+                      />
+                      <button type="button" className="ai-icon" title="确定" onClick={() => commitEdit(item)}>
+                        <IconCheck size={13} />
+                      </button>
+                      <button type="button" className="ai-icon" title="取消" onClick={() => setEditing(null)}>
+                        <IconClose size={13} />
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="ai-kp-text">{text}</span>
+                      <button type="button" className="ai-icon ai-kp-pencil" title="编辑条目（改成你想了解的内容再点解释）" onClick={() => startEdit(item)}>
+                        <IconPencil size={13} />
+                      </button>
+                      {explainBtn}
+                    </>
+                  )}
+                </div>
+                {exp?.running && <div className="ai-kp-note mono">AI 正在回答…</div>}
+                {exp?.error && <div className="ai-error">{exp.error}</div>}
+                {err && <div className="lint lint-error">{err}</div>}
+                {busy && <div className="ai-kp-note mono">补充制卡中…</div>}
+                {isOpen && exp?.answer && (
+                  <div className="ai-kp-exp">
+                    <div className="ai-answer">
+                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
+                        {stripSteMarkers(exp.answer)}
+                      </ReactMarkdown>
+                    </div>
+                    {!exp.running && (
+                      <div className="ai-kp-exp-foot">
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          disabled={busy || panel.running}
+                          onClick={() => void onFollowUpCards(text, g.kpTitle, exp.answer)}
+                        >
+                          制卡
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {picked.length > 0 && (
+        <div className="ai-kps-bar" data-testid="ai-kps-bar">
+          <span>已选 {picked.length} 项</span>
+          <button type="button" className="btn btn-primary btn-sm" disabled={making || panel.running} onClick={() => void makeAll()}>
+            {making ? "制卡中…" : `制卡 (${picked.length})`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AIPanel({
   panel,
   onAccept,
@@ -76,6 +397,7 @@ export default function AIPanel({
   onSearchBackground,
   onFollowUpCards,
   onExploration,
+  onAsk,
   explainMode = "auto",
   onExplainModeChange,
   /** v48.74（D118 §3④）：生成中「停止」——经宿主 stopAIRun() 走 ai:abort 取消当前请求 */
@@ -130,8 +452,10 @@ export default function AIPanel({
   onModeChange: (mode: CardGenMode) => void;
   mode?: CardGenMode;
   onSearchBackground: () => void;
-  onFollowUpCards: (item: string, kpTitle: string, hint?: string) => void;
-  onExploration: (item: string, kpTitle: string) => void;
+  onFollowUpCards: (item: string, kpTitle: string, hint?: string) => void | Promise<void>;
+  onExploration: (item: string, kpTitle: string, srcKey?: string) => void;
+  /** D123：解释页快捷追问（通俗解释/严格定义…）走自由追问线程；缺省回落 onExplain（替换式） */
+  onAsk?: (question: string) => void;
   /** v48.51（D91 §5.2）：解读方式三态（会话内记忆，auto=默认） */
   explainMode?: ExplainModePref;
   /** v48.51（D91 §5.3）：切换即重跑（重发请求在宿主 changeExplainMode） */
@@ -182,28 +506,16 @@ export default function AIPanel({
         )}
         <blockquote className="ai-quote">{panel.text}</blockquote>
 
+        {/* D123：单行进度（计时自算，不再依赖宿主传入的 elapsedSec——摘录页曾硬编码 0）；
+            v48.74（D118 §3④）：生成中可手动停止 */}
         {(panel.kind === "cards" || isOcclusion) && panel.running && (
-          <div className="ai-streaming mono">
-            {panel.progress
-              ? `生成中… 已输出 ${panel.progress} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒（大模型生成长 JSON 通常需要 1-2 分钟，请保持窗口打开）`
-              : panel.thinking
-                ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
-                : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
-            {/* v48.74（D118 §3④）：生成中可手动停止（AIGateway cancel 契约落地） */}
-            {onStop && <button className="btn btn-outline btn-sm" onClick={onStop}>停止</button>}
-          </div>
+          <AIStatus startedAt={panel.startedAt} thinking={panel.thinking} progress={panel.progress} onStop={onStop} />
         )}
         {panel.searching && <div className="ai-streaming mono">正在联网检索事件背景…</div>}
         {panel.error && <div className="ai-error">{panel.error}</div>}
 
         {panel.kind === "explain" && panel.running && !panel.answer && (
-          <div className="ai-streaming mono" aria-live="polite">
-            {panel.thinking
-              ? `模型思考中… 已思考 ${panel.thinking} 字 · 已等待 ${panel.elapsedSec ?? 0} 秒`
-              : `正在等待模型响应… 已等待 ${panel.elapsedSec ?? 0} 秒（推理模型输出正文前会先思考约 0.5-1 分钟）`}
-            {/* v48.74（D118 §3④）：生成中可手动停止（AIGateway cancel 契约落地） */}
-            {onStop && <button className="btn btn-outline btn-sm" onClick={onStop}>停止</button>}
-          </div>
+          <AIStatus startedAt={panel.startedAt} thinking={panel.thinking} onStop={onStop} />
         )}
 
         {panel.kind === "explain" && panel.answer && (
@@ -226,10 +538,11 @@ export default function AIPanel({
               </div>
             )}
             <div className="ai-actions">
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("通俗解释")}>通俗解释</button>
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("严格定义")}>严格定义</button>
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("举个例子")}>举个例子</button>
-              <button className="btn btn-outline btn-sm" onClick={() => onExplain("为什么会这样")}>为什么</button>
+              {([["通俗解释", "通俗解释"], ["严格定义", "严格定义"], ["举个例子", "举个例子"], ["为什么", "为什么会这样"]] as const).map(([label, q]) => (
+                <button key={label} className="btn btn-outline btn-sm" onClick={() => (onAsk ? onAsk(q) : onExplain(q))}>
+                  {label}
+                </button>
+              ))}
             </div>
             <div className="ai-actions">
               <button className="btn btn-secondary btn-sm" disabled={panel.running} onClick={onMakeCards}>
@@ -241,10 +554,8 @@ export default function AIPanel({
 
         {/* M1.2：材料类型路由展示 + 手动覆盖 */}
         {panel.kind === "cards" && (
-          <div className="ai-route-row">
-            <span className="mono">
-              {panel.routeLabel ? `材料类型：${panel.routeLabel} · 默认形式：${panel.routeForm}` : "材料类型：自动识别"}
-            </span>
+          <div className="ai-route-row" data-testid="ai-route-row">
+            <span className="ai-route-label">材料类型</span>
             <Dropdown
               align="left"
               title="材料类型"
@@ -259,49 +570,25 @@ export default function AIPanel({
               ]}
               onChange={(m) => onModeChange(m as CardGenMode)}
             />
+            <span className="ai-route-meta mono">
+              {panel.routeLabel ? `${mode === "auto" ? `识别为${panel.routeLabel} · ` : ""}默认形式：${panel.routeForm}` : ""}
+            </span>
             {(panel.drafts?.length || panel.error) && !panel.running && (
-              <button className="btn btn-outline btn-sm" onClick={onMakeCards}>
-                按此类型重跑
+              <button type="button" className="ai-link ai-route-rerun" title="按当前材料类型重新生成" onClick={onMakeCards}>
+                重跑
               </button>
             )}
           </div>
         )}
 
-        {/* v16 递进补卡：知识点「后续可补」注记 → 逐项两个按钮 */}
+        {/* D123：知识点与后续可补（勾选 · 可编辑条目 · 解释；解释内容行内展开，已并入原「询问 AI 相关内容」区） */}
         {panel.kind === "cards" && followUpGroups.length > 0 && (
-          <div className="ai-kps">
-            <p className="ai-kps-title">知识点与后续可补</p>
-            {followUpGroups.map((g, gi) => (
-              <div key={gi} className="ai-kp">
-                <div className="ai-kp-title">{g.kpTitle}</div>
-                {g.items.map((item) => {
-                  const busy = (panel.followUpBusy ?? []).includes(item);
-                  const err = panel.followUpErrors?.[item];
-                  return (
-                    <div key={item} className="ai-kp-item">
-                      <span className="ai-kp-item-text">{item}</span>
-                      <button
-                        className="btn btn-outline btn-sm"
-                        disabled={busy || panel.running}
-                        onClick={() => onExploration(item, g.kpTitle)}
-                      >
-                        询问 AI 相关内容
-                      </button>
-                      <button
-                        className="btn btn-outline btn-sm"
-                        disabled={busy || panel.running}
-                        onClick={() => onFollowUpCards(item, g.kpTitle)}
-                      >
-                        直接制卡
-                      </button>
-                      {busy && <span className="mono ai-kp-busy">补充制卡中… {busySec(item)} 秒（推理模型约需 0.5-1 分钟）</span>}
-                      {err && <span className="lint lint-error">{err}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+          <FollowUpList
+            panel={panel}
+            groups={followUpGroups}
+            onExploration={onExploration}
+            onFollowUpCards={onFollowUpCards}
+          />
         )}
 
         {isOcclusion && panel.image && !panel.running && (
@@ -562,45 +849,6 @@ export default function AIPanel({
           </>
         )}
 
-        {/* v16：询问 AI 的解释区——追加在面板最下方，解释末尾带「直接制卡」 */}
-        {(panel.explorations ?? []).length > 0 && (
-          <div className="ai-explorations">
-            {(panel.explorations ?? []).map((e) => (
-              <div key={e.id} className="ai-exploration">
-                <div className="ai-exploration-q mono">问（{e.item}）：{e.question}</div>
-                {e.running && (
-                  <div className="ai-streaming mono">
-                    {e.thinking
-                      ? `思考中… 已思考 ${e.thinking} 字 · 已等待 ${explSec(e)} 秒`
-                      : `等待模型响应… 已等待 ${explSec(e)} 秒（推理模型约需 0.5-1 分钟）`}
-                  </div>
-                )}
-                {e.error && <div className="ai-error">{e.error}</div>}
-                {e.answer && (
-                  <div className="ai-answer">
-                    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                      {stripSteMarkers(e.answer)}
-                    </ReactMarkdown>
-                  </div>
-                )}
-                {!e.running && e.answer && (
-                  <div className="ai-actions">
-                    <button
-                      className="btn btn-primary btn-sm"
-                      disabled={(panel.followUpBusy ?? []).includes(e.item) || panel.running}
-                      onClick={() => onFollowUpCards(e.item, e.kpTitle, e.answer)}
-                    >
-                      直接制卡
-                    </button>
-                    {(panel.followUpBusy ?? []).includes(e.item) && (
-                      <span className="mono ai-kp-busy">补充制卡中… {busySec(e.item)} 秒</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );

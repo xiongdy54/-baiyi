@@ -251,41 +251,44 @@ try {
   await wait(500);
   const g1a = parseState(await cdp.eval(`JSON.stringify({
     dock: !!document.querySelector('[data-card-dock]'),
-    manualForm: !!document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror'),
-    pressed: document.querySelector('[data-testid="dock-manual"]')?.getAttribute('aria-pressed'),
+    manualForm: !!document.querySelector('[data-card-dock] [data-testid="wb-manual"] .ProseMirror'),
     tabs: !!document.querySelector('[data-testid="dock-tabs"]'),
-    shifted: document.querySelector('.reader-body')?.className.includes('reader-body-shifted')
+    // D123：推让改由 html[data-wb-open] 驱动（reader-body-shifted 退役）
+    shifted: document.documentElement.dataset.wbOpen === '1'
   })`));
-  check("坞挂载 + 手动暂态占坞（空表单可自由制卡）", g1a.dock && g1a.manualForm && g1a.pressed === "true", JSON.stringify(g1a));
-  check("坞头双页签在位（role=tablist）", g1a.tabs, g1a.tabs);
-  check("展开时正文让位（reader-body-shifted）", g1a.shifted === true, g1a.shifted);
-  await cdp.eval(setPM('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror', 'FSRSTEST 草稿句子'));
+  check("制卡台挂载 + 手动区常驻（空表单可自由制卡）", g1a.dock && g1a.manualForm, JSON.stringify(g1a));
+  check("AI 页签条在位（role=tablist）", g1a.tabs, g1a.tabs);
+  check("展开时正文让位（html[data-wb-open]）", g1a.shifted === true, g1a.shifted);
+  await cdp.eval(setPM('[data-card-dock] [data-testid="wb-manual"] .ProseMirror', 'FSRSTEST 草稿句子'));
   await wait(400); // 等 React 状态回流（PM onChange → 表单状态）
-  // 草稿保活：切页签隐藏不卸载，点「＋制卡」回表单输入仍在（§7.7）
+  // 草稿保活：手动区常驻（D123），切 AI 页签不影响表单，草稿仍在（§7.7）
   await cdp.eval(`document.querySelector('[data-testid="dock-tab-explain"]').click()`);
   await wait(300);
   const g1b = parseState(await cdp.eval(`JSON.stringify({
-    manualHidden: document.querySelector('[data-card-dock] [data-dock-tabbody="manual"]')?.style.display === 'none',
-    manualMounted: !!document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror'),
+    manualVisible: !document.querySelector('[data-card-dock] [data-testid="wb-manual-body"], [data-card-dock] .wb-manual-body')?.hidden,
+    manualMounted: !!document.querySelector('[data-card-dock] [data-testid="wb-manual"] .ProseMirror'),
     emptyExplain: !!document.querySelector('[data-dock-empty="explain"]')
   })`));
-  check("切页签：表单隐藏保活（display:none 不卸载）+ 解释页签空态在场", g1b.manualHidden && g1b.manualMounted && g1b.emptyExplain, JSON.stringify(g1b));
-  await cdp.eval(`document.querySelector('[data-testid="dock-manual"]').click()`);
-  await wait(300);
-  const draftBack = await cdp.eval(`document.querySelector('[data-card-dock] [data-dock-tabbody="manual"] .ProseMirror')?.textContent || ''`);
-  check("点「＋制卡」回表单，草稿仍在", draftBack === "FSRSTEST 草稿句子", draftBack);
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll('[data-card-dock] button')].find((x) => x.textContent === '取消'); if (b) b.click(); return 'closed'; })()`);
+  check("切页签：手动区常驻不受影响 + 解释页签空态在场", g1b.manualVisible && g1b.manualMounted && g1b.emptyExplain, JSON.stringify(g1b));
+  const draftBack = await cdp.eval(`document.querySelector('[data-card-dock] [data-testid="wb-manual"] .ProseMirror')?.textContent || ''`);
+  check("切页签后手动表单草稿仍在", draftBack === "FSRSTEST 草稿句子", draftBack);
+  // D123：Esc（焦点在制卡台内）= 收起整个制卡台，状态保留；再点顶栏「制卡台」展开
+  await cdp.eval(`(() => { const d = document.querySelector('[data-card-dock]'); d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 'esc'; })()`);
+  await wait(400);
+  const g1c0 = parseState(await cdp.eval(`JSON.stringify({ collapsed: document.querySelector('[data-card-dock]')?.getAttribute('data-dock-collapsed') === '1' })`));
+  check("Esc 收起制卡台（不卸载）", g1c0.collapsed === true, JSON.stringify(g1c0));
+  await cdp.eval(`document.querySelector('[data-testid="workbench-entry"]').click()`);
   await wait(400);
   const g1c = parseState(await cdp.eval(`JSON.stringify({
     dock: !!document.querySelector('[data-card-dock]'),
     emptyExplain: !!document.querySelector('[data-dock-empty="explain"]'),
     emptyCards: !!document.querySelector('[data-dock-empty="cards"]'),
     switcherInEmpty: !!document.querySelector('[data-dock-empty="explain"] [data-testid="explain-mode"]'),
-    pressed: document.querySelector('[data-testid="dock-manual"]')?.getAttribute('aria-pressed')
+    pressed: document.querySelector('[data-testid="workbench-entry"]')?.getAttribute('aria-pressed')
   })`));
-  check("取消后：坞常驻 + 两页签空态在场（页签恒可点）", g1c.dock && g1c.emptyExplain && g1c.emptyCards, JSON.stringify(g1c));
+  check("顶栏按钮再展开：制卡台常驻 + 两页签空态在场（页签恒可点）", g1c.dock && g1c.emptyExplain && g1c.emptyCards, JSON.stringify(g1c));
   check("空态解释页签内含解读方式切换器（方式可先调）", g1c.switcherInEmpty === true, g1c.switcherInEmpty);
-  check("关闭手动暂态后「＋制卡」active 态解除", g1c.pressed === "false", g1c.pressed);
+  check("顶栏「制卡台」按钮 aria-pressed=true", g1c.pressed === "true", g1c.pressed);
   // 空态页签切换（§7.2 两页签可点）
   await cdp.eval(`document.querySelector('[data-testid="dock-tab-cards"]').click()`);
   await wait(250);
@@ -358,24 +361,22 @@ try {
   await wait(1800); // 流式中（分片 300ms × ~30 段 ≈ 9s，此处 1.8s 时必然在途）
   const before = parseState(await cdp.eval(`JSON.stringify({ len: (document.querySelector('.ai-answer')?.textContent || '').length })`));
   check("流式进行中（收起前提）", mock.open === true && before.len > 0, `open=${mock.open} len=${before.len}`);
-  await cdp.eval(`document.querySelector('[data-testid="dock-collapse"]').click()`);
+  await cdp.eval(`document.querySelector('[data-testid="workbench-entry"]').click()`);
   await wait(600);
   const g4a = parseState(await cdp.eval(`JSON.stringify({
-    handle: !!document.querySelector('[data-testid="dock-handle"]'),
     collapsed: document.querySelector('[data-card-dock]')?.getAttribute('data-dock-collapsed') === '1',
-    shifted: document.querySelector('.reader-body')?.className.includes('reader-body-shifted'),
+    shifted: document.documentElement.dataset.wbOpen === '1',
     len: (document.querySelector('.ai-answer')?.textContent || '').length
   })`));
-  check("收起：把手在场 + 坞体出视口 + 正文让位取消", g4a.handle && g4a.collapsed && g4a.shifted === false, JSON.stringify(g4a));
+  check("收起：坞体出视口 + 正文让位取消（无把手）", g4a.collapsed && g4a.shifted === false, JSON.stringify(g4a));
   await wait(2000); // 收起期间流式继续（§7.3 核心承诺）
-  await cdp.eval(`document.querySelector('[data-testid="dock-handle"]').click()`);
+  await cdp.eval(`document.querySelector('[data-testid="workbench-entry"]').click()`);
   await wait(600);
   const g4b = parseState(await cdp.eval(`JSON.stringify({
-    handle: !!document.querySelector('[data-testid="dock-handle"]'),
-    shifted: document.querySelector('.reader-body')?.className.includes('reader-body-shifted'),
+    shifted: document.documentElement.dataset.wbOpen === '1',
     len: (document.querySelector('.ai-answer')?.textContent || '').length
   })`));
-  check("展开：把手退场 + 让位恢复", g4b.handle === false && g4b.shifted === true, JSON.stringify(g4b));
+  check("展开：让位恢复", g4b.shifted === true, JSON.stringify(g4b));
   check("收起不丢状态：答案增量在继续（无重启）", g4b.len > before.len, `before=${before.len} after=${g4b.len}`);
   await waitAnswerDone();
 

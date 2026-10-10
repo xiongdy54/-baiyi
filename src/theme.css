@@ -2145,9 +2145,6 @@ body.theme-dark .modal-panel {
   min-width: 0;
   transition: width var(--dur) var(--ease);
 }
-.reader-body.reader-body-shifted .reader-scroll {
-  flex: 1 1 calc(100% - 400px);
-}
 /* D88 §8.4：让位与 dock 滑入同参数（--dur-panel/--ease）——fixed 面板用 transform 不触发布局，
    宿主 flex-basis 让位用过渡补齐同步感。reduce 时规则不在场（瞬时）。 */
 @media (prefers-reduced-motion: no-preference) {
@@ -2758,32 +2755,76 @@ body.theme-dark .modal-panel {
   gap: var(--sp-2);
 }
 
-/* ---------- 制卡面板 CardDock（D88 §8）：统一右停靠栏 ----------
-   手动态（ManualCardForm）/ AI 态（AIPanel 嵌入）同刻只开一个（互斥由宿主
-   manualOpen/aiPanel 状态保证）；关闭态不挂载（§8.6）。fixed 右缘 + 顶栏下贴齐，
-   400px（max-width 45vw 沿 .ai-panel 既有几何）；左缘 hairline + 唯一浮层阴影。 */
-.side-dock {
-  position: fixed;
-  right: 0;
-  top: var(--sp-12); /* 顶栏 48 */
-  bottom: 0;
-  width: 400px;
-  max-width: 45vw;
-  background: var(--paper);
-  border-left: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-float);
-  z-index: var(--z-drawer);
+/* ---------- 制卡台 CardDock（D123）：手动制卡常驻 + AI 页签 ----------
+   取代 D88 §8 / D92 的「学习坞」。放置 right（默认）/ bottom / window（独立窗口，占满、不推让）。
+   展开时 .app-main 经 html[data-wb-open][data-wb-place] 让出宽/高（推让）；非最大化时窗口另由主进程
+   向右外延（data-wb-mode="extended"），正文宽度不变。无呼吸/脉冲动画（用户 2026-10-10：禁止闪烁）。
+   标题行高 = 顶栏 48px = 摘录页头带内列高（--sp-12，content-box + 1px 下缘线），两条 hairline 同一 y。 */
+:root {
+  --wb-w: 400px;
+  --wb-h: clamp(300px, 42vh, 420px);
+}
+.app-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
 @media (prefers-reduced-motion: no-preference) {
-  .side-dock { animation: side-dock-in var(--dur-panel) var(--ease); }
+  .app-main { transition: margin var(--dur-panel) var(--ease); }
 }
-@keyframes side-dock-in {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+html[data-wb-open="1"][data-wb-place="right"] .app-main { margin-right: var(--wb-w); }
+html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--wb-h); }
+
+.side-dock {
+  position: fixed;
+  background: var(--paper);
+  z-index: var(--z-drawer);
+  display: flex;
+  min-width: 0;
+  min-height: 0;
 }
-.side-dock-head {
+.side-dock[data-placement="right"] {
+  right: 0;
+  top: var(--sp-12); /* 顶栏 48 */
+  bottom: 0;
+  width: var(--wb-w);
+  flex-direction: column;
+  border-left: 1px solid var(--border-subtle);
+}
+.side-dock[data-placement="bottom"] {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--wb-h);
+  flex-direction: row;
+  border-top: 1px solid var(--border-subtle);
+}
+.side-dock[data-placement="window"] {
+  position: static;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .side-dock { transition: transform var(--dur-panel) var(--ease), visibility 0s; }
+  .side-dock[data-placement="right"] { animation: side-dock-in var(--dur-panel) var(--ease); }
+  .side-dock[data-placement="bottom"] { animation: side-dock-in-b var(--dur-panel) var(--ease); }
+}
+@keyframes side-dock-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes side-dock-in-b { from { transform: translateY(100%); } to { transform: translateY(0); } }
+.side-dock.is-collapsed { visibility: hidden; transition: transform var(--dur-panel) var(--ease), visibility 0s var(--dur-panel); }
+.side-dock[data-placement="right"].is-collapsed { transform: translateX(calc(100% + 8px)); }
+.side-dock[data-placement="bottom"].is-collapsed { transform: translateY(calc(100% + 8px)); }
+@media (prefers-reduced-motion: reduce) {
+  .side-dock,
+  .side-dock.is-collapsed { transition: none; }
+}
+
+/* 标题行：手动区 / AI 区共用（content-box 48 + 下缘 1px，与摘录页头带同高同线） */
+.wb-head {
+  box-sizing: content-box;
   height: var(--sp-12);
   display: flex;
   align-items: center;
@@ -2802,122 +2843,212 @@ body.theme-dark .modal-panel {
   color: var(--text-helper);
   text-align: right;
 }
-.side-dock-close { flex: none; }
-.side-dock-body {
+.wb-manual {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  min-width: 0;
+}
+.side-dock[data-placement="right"] .wb-manual,
+.side-dock[data-placement="window"] .wb-manual { max-height: 62%; }
+.wb-manual-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-2) 0 0;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.wb-manual-toggle:hover .wb-chev { color: var(--text-primary); }
+.wb-chev { display: inline-flex; color: var(--text-helper); }
+.is-flip { transform: rotate(180deg); }
+.wb-manual-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
 }
-/* 手动态：表单体原样（seg-tabs/form-field/ta-short/form-actions 自带节奏），容器只给内距 */
-.side-dock-body.side-dock-body-manual { padding: var(--sp-4) var(--sp-6); }
-/* AI 态：AIPanel 原组件嵌入——其根类几何（宽 400/左缘线/入场动画）由 dock 承担，全部回收 */
-.side-dock .ai-panel {
-  width: auto;
-  max-width: none;
-  flex: 1;
-  min-height: 0;
-  border-left: none;
-  z-index: auto;
-  animation: none;
+.wb-manual-body[hidden] { display: none; }
+/* 底部放置：手动在左、AI 在右；手动收起时变 44px 竖条（保留标题与箭头） */
+.side-dock[data-placement="bottom"] .wb-manual {
+  width: 46%;
+  height: 100%;
+  border-right: 1px solid var(--border-subtle);
 }
-
-/* ---------- 学习坞（v48.52 / D92）：页签化 + 收起展开 ----------
-   收起 ≠ 关闭：坞体 translateX 滑出视口（状态保留），右缘留 ~40px 常驻把手；
-   展开时正文让位（reader-body-shifted / extract [data-dock-open]），收起时取消。 */
-.side-dock {
-  transition: transform var(--dur-panel) var(--ease);
+.side-dock[data-placement="bottom"] .wb-manual-body { border-bottom: none; }
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed { width: 44px; }
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-head {
+  flex-direction: column;
+  height: auto;
+  padding: var(--sp-3) 0;
+  border-bottom: none;
+  justify-content: flex-start;
 }
-.side-dock.is-collapsed {
-  transform: translateX(calc(100% + 8px));
-  visibility: hidden;
-  transition: transform var(--dur-panel) var(--ease), visibility 0s var(--dur-panel);
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-title { writing-mode: vertical-rl; }
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .side-dock-meta,
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-manual-body { display: none; }
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-manual-toggle { flex-direction: column; height: auto; padding: 0; }
+/* dock 变体的手动表单：引用块压成两行、表单节奏收紧、「更多选项」收起高级字段 */
+.wb-manual-body .card-quote {
+  margin: 0 0 var(--sp-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: var(--fs-meta);
 }
-@media (prefers-reduced-motion: reduce) {
-  .side-dock,
-  .side-dock.is-collapsed { transition: none; }
-}
-/* 坞头页签条：复用左栏页签语法（role=tablist/tab、active=.on），右栏变体（paper 底、无 reader-fg） */
-.dock-tabs {
-  display: flex;
+.wb-manual-body .form-actions { justify-content: space-between; align-items: center; }
+.wb-more-toggle {
+  display: inline-flex;
+  align-items: center;
   gap: var(--sp-1);
-  min-width: 0;
-  flex: none;
-}
-.dock-tabs > button[role="tab"] {
-  height: 24px;
-  padding: 0 var(--sp-2);
   background: none;
   border: none;
+  color: var(--text-helper);
   font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.wb-more-toggle:hover { color: var(--text-primary); }
+.form-more[hidden] { display: none; }
+
+.wb-ai {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.wb-ai-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dock-tabbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.wb-scroll > .ai-panel { padding-bottom: var(--sp-4); }
+.side-dock .ai-panel { width: auto; max-width: none; flex: none; border-left: none; z-index: auto; animation: none; }
+/* AI 页签条：复用左栏页签语法（role=tablist/tab、active=.on） */
+.dock-tabs { display: flex; gap: var(--sp-1); min-width: 0; flex: none; }
+.dock-tabs > button[role="tab"] {
+  height: 28px;
+  padding: 0 var(--sp-3);
+  background: none;
+  border: none;
+  font-size: var(--fs-secondary);
   color: var(--text-helper);
   cursor: pointer;
   white-space: nowrap;
 }
 .dock-tabs > button[role="tab"]:hover { background: var(--grey-1); }
-.dock-tabs > button[role="tab"].on {
-  background: var(--grey-1);
+.dock-tabs > button[role="tab"].on { background: var(--grey-1); color: var(--text-primary); }
+/* 空态：自由材料输入 */
+.dock-empty { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); }
+.dock-empty-hint { margin: 0; font-size: var(--fs-secondary); color: var(--text-secondary); }
+.dock-badge { padding: var(--sp-1) var(--sp-4); font-size: var(--fs-meta); color: var(--text-secondary); border-bottom: 1px solid var(--border-subtle); flex: none; }
+.wb-free { display: flex; flex-direction: column; gap: var(--sp-2); }
+.wb-free textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 84px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
   color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-secondary);
+  line-height: 1.6;
 }
-/* 「＋制卡」主按钮：坞头视觉最重的一枚（全局手动制卡）；草稿在场（手动暂态占坞）呈 active 态 */
-.dock-manual-btn { flex: none; }
-.dock-manual-btn.on { box-shadow: inset 0 0 0 2px var(--ink); }
-/* 页签体容器：隐藏保活（display:none 切换，组件不卸载、流式/草稿/计时继续） */
-.dock-tabbody { display: flex; flex-direction: column; min-height: 100%; }
-.side-dock-body > .dock-tabbody { flex: 1; }
-/* 空态指引（页签恒可点，D84 惯例：坞可以先开、方式可以先调、内容后到） */
-.dock-empty {
+.wb-free textarea:focus { outline: none; border-color: var(--border-strong); }
+.wb-free-acts { display: flex; gap: var(--sp-2); justify-content: flex-end; }
+.ai-panel-body { padding: var(--sp-3) var(--sp-4) 0; }
+
+/* 单行进度：静态方块点 + 累计计时（无动画） */
+.ai-status {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-4) var(--sp-4) var(--sp-2);
-}
-.dock-empty-hint {
-  margin: 0;
+  margin: var(--sp-2) 0;
   font-size: var(--fs-secondary);
   color: var(--text-secondary);
 }
-/* occlusion 徽章（AI 图片挖空归「AI 制卡」页签，体内顶部保留现标题文案） */
-.dock-badge {
-  padding: var(--sp-1) var(--sp-4);
+.ai-status-dot { width: 8px; height: 8px; background: var(--accent); flex: none; }
+.ai-status-time, .ai-status-chars { font-size: var(--fs-meta); color: var(--text-helper); }
+.ai-status-stop { margin-left: auto; }
+.ai-link {
+  background: none;
+  border: none;
+  padding: 0 var(--sp-1);
+  color: var(--accent);
   font-size: var(--fs-meta);
-  color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-subtle);
-  flex: none;
-}
-/* 收起后的常驻细把手：右缘竖条、hairline 左缘、chevron + 状态点（AI 流式＝呼吸点、草稿＝墨点） */
-.dock-handle {
-  position: fixed;
-  right: 0;
-  top: var(--sp-12);
-  bottom: 0;
-  width: 40px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--sp-2);
-  padding-top: var(--sp-3);
-  background: var(--paper);
-  border-left: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-float);
-  color: var(--text-secondary);
   cursor: pointer;
-  z-index: var(--z-drawer);
 }
-.dock-handle:hover { color: var(--ink); }
-.dock-handle-dot {
-  width: 8px;
-  height: 8px;
+.ai-link:hover { text-decoration: underline; }
+.ai-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: none;
+  color: var(--text-helper);
+  cursor: pointer;
   flex: none;
 }
-.dock-handle-dot.is-live { background: var(--accent); }
-.dock-handle-dot.is-draft { background: var(--ink); }
-@media (prefers-reduced-motion: no-preference) {
-  .dock-handle-dot.is-live { animation: dock-breathe 1.6s var(--ease) infinite; }
+.ai-icon:hover { color: var(--text-primary); background: var(--grey-1); }
+
+/* AI 解释：追问线程 + 底部输入条（单行，与「发送」同高 32px，随输入增高） */
+.wb-thread { padding: 0 var(--sp-4) var(--sp-4); }
+.wb-turn { margin-top: var(--sp-4); }
+.wb-q {
+  margin-left: var(--sp-8);
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--grey-1);
+  font-size: var(--fs-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
-@keyframes dock-breathe {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 1; }
+.wb-a { position: relative; margin-top: var(--sp-2); }
+.wb-a-acts { display: flex; opacity: 0; transition: opacity var(--dur) var(--ease); }
+.wb-a:hover .wb-a-acts, .wb-a:focus-within .wb-a-acts { opacity: 1; }
+.wb-composer {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--paper);
 }
+.wb-composer textarea {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+  max-height: 120px;
+  padding: 5px var(--sp-2);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-secondary);
+  line-height: 20px;
+  resize: none;
+  overflow-y: auto;
+}
+.wb-composer textarea:focus { outline: none; border-color: var(--border-strong); }
+.wb-composer-send { flex: none; height: 32px; }
 
 /* ---------- v48.51（D91）：解读方式切换器与事后建议 ---------- */
 .ai-explain-mode {
@@ -3580,12 +3711,16 @@ body.theme-dark .modal-panel {
 .ai-route-row {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
+  gap: var(--sp-2);
   margin: var(--sp-2) 0;
   font-size: var(--fs-meta);
   color: var(--text-helper);
   flex-wrap: wrap;
 }
+/* D123：材料类型（下拉）+ 识别结果/默认形式 + 重跑，一行收齐 */
+.ai-route-label { color: var(--text-helper); }
+.ai-route-meta { flex: 1; min-width: 0; color: var(--text-helper); }
+.ai-route-rerun { margin-left: auto; }
 /* 材料类型下拉使用共享 .dd 直角下拉（v19），不再有原生 select 样式 */
 /* 图片挖空确认：图上区域叠加预览 */
 .occlusion-preview { margin: var(--sp-3) 0; }
@@ -3594,29 +3729,85 @@ body.theme-dark .modal-panel {
 /* 引用 / 标记块统一用「accent-soft 底 + 左缘 2px accent 条」（规范 selected 语言），
    不再用 grey-1 底叠 accent 条 */
 .ai-kps {
-  margin: var(--sp-2) 0;
-  padding: var(--sp-3);
-  background: var(--accent-soft);
-  border-left: 2px solid var(--accent);
+  margin: var(--sp-3) 0;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--sp-3);
 }
+.ai-kps-head { display: flex; align-items: baseline; margin-bottom: var(--sp-1); }
+.ai-kps-head .ai-link { margin-left: auto; }
 .ai-kps-title {
   font-size: var(--fs-meta);
   color: var(--text-helper);
   letter-spacing: 0.04em;
-  margin-bottom: var(--sp-2);
 }
-.ai-kp { margin-bottom: var(--sp-2); }
-.ai-kp:last-child { margin-bottom: 0; }
-.ai-kp-title { font-weight: 600; line-height: 1.6; }
-.ai-kp-item {
+.ai-kp { margin-top: var(--sp-3); }
+.ai-kp-title { font-weight: 600; line-height: 1.6; font-size: var(--fs-secondary); }
+.ai-kp-item { margin-top: var(--sp-1); }
+.ai-kp-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: var(--sp-2);
-  margin: var(--sp-2) 0 0 var(--sp-3);
+  min-height: 32px;
 }
-.ai-kp-item-text { font-size: var(--fs-body); }
-.ai-kp-busy { font-size: var(--fs-meta); color: var(--text-helper); }
+.ai-kp-check { flex: none; margin: 0; }
+.ai-kp-text { flex: 1; min-width: 0; font-size: var(--fs-body); line-height: 1.5; }
+.ai-kp-edit {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  box-sizing: border-box;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--fs-body);
+}
+.ai-kp-edit:focus { outline: none; }
+/* ✎ 悬停/聚焦才显示（渐进披露） */
+.ai-kp-pencil { opacity: 0; }
+.ai-kp-row:hover .ai-kp-pencil, .ai-kp-row:focus-within .ai-kp-pencil { opacity: 1; }
+.ai-kp-explain {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 24px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ai-kp-explain:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ai-kp-explain.is-done { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.ai-kp-explain:disabled { color: var(--text-placeholder); cursor: default; }
+.ai-kp-note { font-size: var(--fs-meta); color: var(--text-helper); margin: 0 0 var(--sp-1) var(--sp-6); }
+.ai-kp-exp {
+  margin: var(--sp-1) 0 var(--sp-2) var(--sp-6);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+  font-size: var(--fs-secondary);
+}
+.ai-kp-exp .ai-answer { font-size: var(--fs-secondary); }
+.ai-kp-exp-foot { display: flex; justify-content: flex-end; margin-top: var(--sp-2); }
+/* 批量制卡条：仅在有勾选时出现，吸底 */
+.ai-kps-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) 0;
+  background: var(--paper);
+  border-top: 1px solid var(--border-subtle);
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+}
 .ai-draft-supplement {
   display: inline-block;
   padding: 0 var(--sp-2);
@@ -6638,18 +6829,8 @@ body.capture-body #root { height: 100vh; }
 }
 /* 可见性离散步进：过渡下「收起时停在末帧隐身、展开时立即显形」＝滑出/滑入全程可见 */
 .extract-annot-rail .annot-side { height: 100%; }
-/* D88 §8.5 摘录页 dock 让位：data-dock-open 随 manualOpen/aiPanel 任一在场置位（宿主钩子）。
-   宽窗（≥1520）主列与底栏右移 416（=400 dock + 16 间距；dock fixed 右缘贴窗缘，内容右缘
-   让到 dock 左缘内 16px）；窄窗（<1520）dock 为覆盖层浮于其上，内容不动（保护 1120 最小窗
-   下卡面/底栏可用性）。轨与 dock 同开时左右让位并存，版心取剩余宽。 */
-@media (min-width: 1520px) {
-  .extract-page[data-dock-open="1"] .extract-main { padding-right: 416px; }
-  .extract-page[data-dock-open="1"] .stage-bar { margin-right: 416px; }
-}
-@media (prefers-reduced-motion: no-preference) {
-  .extract-page .extract-main { transition: padding-right var(--dur-panel) var(--ease); }
-  /* D90：stage-bar 的 margin-right 过渡已并入上方 margin-left/margin-right 合并声明（勿在此重复简写）。 */
-}
+/* D123：制卡台推让改由全局 html[data-wb-open] → .app-main 的 margin 承担（见「制卡台 CardDock」节），
+   摘录页/阅读器不再各写让位规则。 */
 /* 栏头行（v7/D74 让位更新；v48.45/D85 起阅读器侧栏轨共用同一套）：与 fixed 开关钮**同一行**——
    头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；
    「注解 N」已由 showCount={false} 关闭（用户裁定省一行）。两条段控按 3:2 有比例铺满剩余宽，
@@ -7510,3 +7691,73 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
     to { opacity: 1; transform: none; }
   }
 }
+
+/* ---------- 顶栏「制卡台」按钮（D123）：安静的文字按钮，展开时浅绿底；状态点为静态方块（无呼吸/闪烁） ---------- */
+.topbar-wb {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-3);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: var(--fs-secondary);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.topbar-wb:hover { background: var(--grey-1); color: var(--text-primary); }
+.topbar-wb.is-on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.topbar-wb svg { display: block; flex: none; }
+.topbar-wb-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+}
+.wb-toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-8);
+  transform: translateX(-50%);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--ink);
+  color: var(--paper);
+  font-size: var(--fs-secondary);
+  z-index: var(--z-toast);
+}
+
+/* ---------- 独立制卡台窗口（D123）：无框窗口自带 40px 标题条（可拖拽），其下制卡台占满 ---------- */
+.workbench-body { margin: 0; overflow: hidden; }
+.wbw { display: flex; flex-direction: column; height: 100vh; background: var(--paper); color: var(--text-primary); }
+.wbw-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 40px;
+  flex: none;
+  padding: 0 var(--sp-3) 0 var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.wbw-title { flex: 1; font-size: var(--fs-secondary); font-weight: 600; }
+.wbw-btn {
+  height: 26px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: none;
+  color: var(--text-helper);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.wbw-btn:hover { color: var(--text-primary); background: var(--grey-1); }
+.wbw-btn.on { color: var(--accent); }
+.wbw-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.wbw-body .side-dock[data-placement="window"] { flex: 1; min-height: 0; border: none; }

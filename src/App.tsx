@@ -25,10 +25,28 @@ import { readingWorkflow, parseContextRef, type ExtractSpan } from "./lib/readin
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
 import { applyAccent } from "./lib/accentVar";
+import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
+import { WB_STATE_EVENT, requestWorkbenchToggle, type WorkbenchState } from "./lib/workbenchLayout";
 
 declare global {
   interface Window {
-    windowAPI?: { minimize(): void; maximize(): void; close(): void; openExternal(url: string): Promise<boolean> };
+    windowAPI?: {
+      minimize(): void;
+      maximize(): void;
+      close(): void;
+      openExternal(url: string): Promise<boolean>;
+      /** D123：制卡台右侧放置时请主进程把窗口向右外延 deltaPx（最大化/余量不足返回 inner） */
+      dockExtend?(deltaPx: number): Promise<{ mode: "extended" | "inner" }>;
+      dockRestore?(): Promise<boolean>;
+      /** D123：主进程在窗口被最大化等情形下告知「回落内推」 */
+      onDockMode?(cb: (mode: "extended" | "inner") => void): () => void;
+      /** D123：独立制卡台窗口（toggle/show/hide/pin） */
+      workbench?(action: "toggle" | "show" | "hide" | "pin"): Promise<{ visible: boolean; pinned: boolean }>;
+      /** D123：独立窗口建卡后通知主窗口刷新；主窗口订阅 */
+      notifyCardsChanged?(): void;
+      onCardsChanged?(cb: () => void): () => void;
+      onWorkbenchShown?(cb: () => void): () => void;
+    };
   }
 }
 
@@ -90,6 +108,30 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // D123：制卡台状态（宿主面板经 wb:state 事件同步；顶栏按钮只读它，静态方块点、无动画）
+  const [wb, setWb] = useState<WorkbenchState>({ open: false, busy: false, draft: false });
+  const settingsOpenRef = useRef(false);
+  useEffect(() => {
+    settingsOpenRef.current = settingsOpen;
+  }, [settingsOpen]);
+  useEffect(() => {
+    const on = (e: Event) => setWb((e as CustomEvent<WorkbenchState>).detail);
+    window.addEventListener(WB_STATE_EVENT, on);
+    return () => window.removeEventListener(WB_STATE_EVENT, on);
+  }, []);
+  // D123：Ctrl/⌘+K 开合制卡台（任何页面；设置弹窗期间不响应；已被编辑器等 preventDefault 的不抢）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || settingsOpenRef.current) return;
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "k") return;
+      e.preventDefault();
+      requestWorkbenchToggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // D123：独立制卡台窗口建卡后，主窗口各页刷新
+  useEffect(() => window.windowAPI?.onCardsChanged?.(() => eventBus.emit("cards/changed")), []);
   // v36（M8-A）：添加材料模态提升到 App 级——全局快捷键 Ctrl+Alt+N 与书架入口共用同一模态，
   // 且快捷键呼出时**不切换视图**（阅读位置与复习会话原地保留，D34-⑤）
   const [addMaterialOpen, setAddMaterialOpen] = useState(false);
@@ -586,6 +628,22 @@ export default function App() {
         </nav>
         {view.name !== "shelf" && <span className="topbar-title">{topTitle}</span>}
         <div className="topbar-right">
+          {/* D123：制卡台唯一入口（手动制卡 / AI 制卡 / AI 解释同一模块）；快捷键只在悬停提示里 */}
+          <button
+            type="button"
+            className={`topbar-wb${wb.open ? " is-on" : ""}`}
+            data-testid="workbench-entry"
+            aria-pressed={wb.open}
+            title="制卡台（Ctrl+K）"
+            onClick={requestWorkbenchToggle}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="1" />
+              <path d="M7 10h10M7 14h6" />
+            </svg>
+            <span>制卡台</span>
+            {wb.busy && <i className="topbar-wb-dot" aria-hidden="true" />}
+          </button>
           <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <circle cx="12" cy="12" r="3" />
@@ -612,7 +670,11 @@ export default function App() {
           </div>
         </div>
       </header>
-      {mainContent}
+      <div className="app-main">
+        {mainContent}
+        {/* D123：无阅读上下文的页面（书架/复习/卡片/日记/数据）挂自由制卡台宿主；阅读器与摘录页自带宿主 */}
+        {view.name !== "reader" && view.name !== "queue" && view.name !== "extractSession" && <FreeWorkbenchHost />}
+      </div>
       {/* v48.13（P2）：全局后台活动指示器——生成任务在主进程持有，与当前界面无关 */}
       <BackgroundActivity onOpenMap={(documentId, mapId, resumeRunId) => void openMaterialMap(documentId, mapId, resumeRunId)} />
       {addMaterialOpen && (

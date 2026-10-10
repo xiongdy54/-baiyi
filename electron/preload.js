@@ -10,7 +10,28 @@ contextBridge.exposeInMainWorld("windowAPI", {
   maximize: () => ipcRenderer.send("win:maximize"),
   close: () => ipcRenderer.send("win:close"),
   // 外链（v20）：仅 http/https，交系统浏览器
-  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url)
+  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
+  // D123：制卡台右侧放置时窗口向右外延 / 还原；最大化时主进程推送回落内推
+  dockExtend: (deltaPx) => ipcRenderer.invoke("win:dockExtend", deltaPx),
+  dockRestore: () => ipcRenderer.invoke("win:dockRestore"),
+  onDockMode: (cb) => {
+    const handler = (_e, mode) => cb(mode);
+    ipcRenderer.on("win:dockMode", handler);
+    return () => ipcRenderer.removeListener("win:dockMode", handler);
+  },
+  // D123：独立制卡台窗口（toggle/show/hide/pin）与跨窗口建卡刷新
+  workbench: (action) => ipcRenderer.invoke("win:workbench", action),
+  notifyCardsChanged: () => ipcRenderer.send("win:cardsChanged"),
+  onCardsChanged: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on("win:cardsRefresh", handler);
+    return () => ipcRenderer.removeListener("win:cardsRefresh", handler);
+  },
+  onWorkbenchShown: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on("win:workbenchShown", handler);
+    return () => ipcRenderer.removeListener("win:workbenchShown", handler);
+  }
 });
 
 // v48.75（D119）：应用日志——openFolder 打开 logs 目录；report 为渲染层错误转发

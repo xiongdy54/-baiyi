@@ -15,6 +15,8 @@ const fs = require("fs");
 
 const DEFAULT_ACCEL_CAPTURE = "Ctrl+Alt+Space";
 const DEFAULT_ACCEL_ADD_MATERIAL = "Ctrl+Alt+N";
+// D123：独立制卡台窗口（手动制卡 / AI 制卡 / AI 解释）
+const DEFAULT_ACCEL_WORKBENCH = "Ctrl+Alt+K";
 const PERSIST_TRAILING_MS = 4000;
 const PERSIST_MAX_MS = 20000;
 
@@ -96,6 +98,7 @@ let persistMaxTimer = null;
 let status = {
   quickCapture: { enabled: true, accelerator: DEFAULT_ACCEL_CAPTURE, registered: false, error: null },
   addMaterial: { enabled: true, accelerator: DEFAULT_ACCEL_ADD_MATERIAL, registered: false, error: null },
+  workbench: { enabled: true, accelerator: DEFAULT_ACCEL_WORKBENCH, registered: false, error: null },
   hideOnBlur: true,
   autoLaunch: false
 };
@@ -106,8 +109,13 @@ function readShortcutConfig() {
   const raw = (ctx?.readSettings?.()?.app || {}).globalShortcuts || {};
   const qc = raw.quickCapture || {};
   const am = raw.addMaterial || {};
+  const wb = raw.workbench || {};
   const accelCapture = normalizeAccelerator(qc.accelerator) || DEFAULT_ACCEL_CAPTURE;
   const accelAdd = normalizeAccelerator(am.accelerator) || DEFAULT_ACCEL_ADD_MATERIAL;
+  const accelWbRaw = normalizeAccelerator(wb.accelerator) || DEFAULT_ACCEL_WORKBENCH;
+  // 与前两键相同则回落默认（同「两键相同」的处理口径）
+  const wbConflict = accelWbRaw === accelCapture || accelWbRaw === accelAdd;
+  const accelWb = wbConflict ? DEFAULT_ACCEL_WORKBENCH : accelWbRaw;
   // 两键相同：后注册的必然抢不到，直接判为非法并回落默认（避免用户看到「被占用」却找不到原因）
   const sameAccel = accelCapture === accelAdd;
   return {
@@ -120,6 +128,11 @@ function readShortcutConfig() {
       enabled: am.enabled !== false,
       accelerator: sameAccel ? DEFAULT_ACCEL_ADD_MATERIAL : accelAdd,
       conflictWithCapture: sameAccel
+    },
+    workbench: {
+      enabled: wb.enabled !== false,
+      accelerator: accelWb,
+      conflict: wbConflict
     },
     autoLaunch: raw.autoLaunch === true
   };
@@ -174,6 +187,10 @@ function applyGlobalShortcuts() {
     ? tryRegister(cfg.addMaterial.accelerator, () => ctx?.sendToMain?.("library:openAddMaterial"), "添加学习材料")
     : { registered: false, error: null };
 
+  const workbench = cfg.workbench.enabled
+    ? tryRegister(cfg.workbench.accelerator, () => ctx?.toggleWorkbench?.(), "制卡台")
+    : { registered: false, error: null };
+
   if (cfg.autoLaunch !== isAutoLaunchOn()) applyAutoLaunch(cfg.autoLaunch);
 
   status = {
@@ -183,6 +200,12 @@ function applyGlobalShortcuts() {
       accelerator: cfg.addMaterial.accelerator,
       ...addMaterial,
       error: addMaterial.error || (cfg.addMaterial.conflictWithCapture ? "两个快捷键不能相同" : null)
+    },
+    workbench: {
+      enabled: cfg.workbench.enabled,
+      accelerator: cfg.workbench.accelerator,
+      ...workbench,
+      error: workbench.error || (cfg.workbench.conflict ? "与另一个全局快捷键相同，已回落默认" : null)
     },
     hideOnBlur: cfg.quickCapture.hideOnBlur,
     autoLaunch: cfg.autoLaunch

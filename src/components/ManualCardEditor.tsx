@@ -86,8 +86,11 @@ export function ManualCardForm({
   initialTags,
   onCancel,
   onSave,
-  onDisambiguate
+  onDisambiguate,
+  variant = "modal"
 }: {
+  /** D123：dock＝制卡台常驻表单（隐藏「取消」、高级字段收进「更多」）；modal＝原弹窗形态 */
+  variant?: "modal" | "dock";
   quote: string;
   /** v25：来自图片聚焦选区（工具条「手动制卡」）——提供时默认进入图片挖空页签 */
   imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
@@ -117,14 +120,25 @@ export function ManualCardForm({
   // v48.60（D101）：标签（初值 = 批注标签继承预填，可删）；v48.63（D107）：总开关关闭时恒空提交
   const tagsEnabled = useTagsEnabled();
   const [tags, setTags] = useState<string[]>(initialTags ?? []);
+  // D123：dock 变体的高级字段默认收起（DOM 保持挂载，仅 hidden——载荷与落库链不变）
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     if (mode === "qa" || mode === "imageOcclusion") {
       setFront((f) => (f ? f : ""));
     } else {
-      setFront(quote);
+      // D123：无引用文本时保留用户已写的正面（常驻表单里切题型不应清空输入）
+      setFront((f) => (quote ? quote : f));
     }
   }, [mode, quote]);
+  // D123：制卡台表单常驻——引用文本后到（选区「制卡」）时只在正面为空/仍是上一份引用时预填，不覆盖用户已写内容
+  const prevQuoteRef = useRef(quote);
+  useEffect(() => {
+    if (quote === prevQuoteRef.current) return;
+    const prev = prevQuoteRef.current;
+    prevQuoteRef.current = quote;
+    setFront((f) => (!f || f === prev ? quote : f));
+  }, [quote]);
 
   // D88 §4.3：主 CTA「创建卡片」涟漪（填充钮白名单成员；真实 pointerdown 驱动，reduce 不挂）
   const createBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -312,7 +326,9 @@ export function ManualCardForm({
           </>
         )}
 
-        {/* M5：与 AI 制卡同构的元数据（领域标签 / 上下文前缀 / 助记 / 知识点分组 / 日期标记） */}
+        {/* M5：与 AI 制卡同构的元数据（领域标签 / 上下文前缀 / 助记 / 知识点分组 / 日期标记）
+            D123：dock 变体收进「更多选项」（hidden 不卸载） */}
+        <div className="form-more" data-testid="manual-more" hidden={variant === "dock" && !moreOpen}>
         <div className="form-field">
           <label>领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）</label>
           <UdcPicker value={domain} onChange={setDomain} />
@@ -359,6 +375,7 @@ export function ManualCardForm({
           <input type="range" min={0} max={100} value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
           <span className="mono">{priority}</span>
         </div>
+        </div>
 
         {/* D121 §4.1：相似已有卡预检面板（内联、不弹窗；每个 front 文本只出现一次） */}
         {hits && hits.length > 0 && (
@@ -395,7 +412,20 @@ export function ManualCardForm({
         )}
 
         <div className="form-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>取消</button>
+          {variant === "dock" ? (
+            <button
+              type="button"
+              className="wb-more-toggle"
+              data-testid="manual-more-toggle"
+              aria-expanded={moreOpen}
+              onClick={() => setMoreOpen((v) => !v)}
+            >
+              更多选项
+              <IconChevronDown size={12} className={moreOpen ? "is-flip" : undefined} />
+            </button>
+          ) : (
+            <button className="btn btn-secondary" onClick={onCancel}>取消</button>
+          )}
           <button
             ref={createBtnRef}
             className="btn btn-primary"

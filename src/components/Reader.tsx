@@ -1445,7 +1445,7 @@ export default function Reader({
       {/* v48.52（D92 §3.3）：右侧学习坞常驻（首次唤起后挂载）——展开时正文让位（既有
           .reader-body-shifted，flex-basis calc(100% - 400px)），收起时取消（把手 ~40px 不进正文版心）；
           图片挖空 modal 不占坞、不让位。 */}
-      <div className={`reader-body${dockOpen ? " reader-body-shifted" : ""}`}>
+      <div className="reader-body">
         <div
           ref={scrollRef}
           className={`reader-scroll${engineMode ? " reader-scroll-engine" : ""}`}

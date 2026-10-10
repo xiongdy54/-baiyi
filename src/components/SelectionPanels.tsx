@@ -1,41 +1,72 @@
-// 选区动作的三个面板（手动制卡 / 查词 / AI）——批 4 Task 10 从 Reader.tsx 原样搬出，
-// 摘录页与阅读器共用同一份渲染（§4 纪律：抽完后宿主不得保留实现副本，防两份漂移）。
-// 本组件只做「把 useSelectionActions 的状态与回调接到既有面板上」，不含任何业务逻辑。
-// D88 P3（§8.1/§8.3）：手动制卡与 AI 两态统一换渲染容器为右侧制卡面板 CardDock。
-// v48.52（D92 §4）：从「按状态分别渲染 CardDock」重构为**单坞常驻编排**——首次唤起后挂载不卸：
-// 坞头双页签（AI 解释｜AI 制卡）+ 三类体内容（AI 页签体 / 手动暂态 / 空态）。
-// 页签体**隐藏保活**（display:none 不卸载：流式继续、表单草稿不丢）；关闭链语义零改动
-// （AI 态 ×＝批次 reject + setAiPanel(null)；手动 ×＝closeManual；Esc 仅手动暂态）；词典面板/图片挖空
-// modal 维持独立弹窗不入坞。
+// 选区动作的面板编排（手动制卡 / 查词 / AI）——批 4 Task 10 从 Reader.tsx 原样搬出，
+// 摘录页、阅读器与自由宿主（其余页面 / 独立窗口）共用同一份渲染（§4 纪律：宿主不得保留实现副本）。
+// 本组件只做「把 useSelectionActions 的状态与回调接到既有面板上」，不含业务逻辑。
+// v48.79（D123）：学习坞升级为「制卡台」——手动制卡表单**常驻**（可收成仅标题行，草稿保留），
+// AI 区为页签（解释｜制卡）；入口只有顶栏按钮 / Ctrl+K（经 wb:toggle 事件开合），不再有坞内关闭钮与把手。
+// 页签体隐藏保活（display:none 不卸载：流式继续、表单草稿不丢）；词典面板/图片挖空 modal 维持独立弹窗不入坞。
 import ManualCardEditor, { ManualCardForm } from "./ManualCardEditor";
 import CardDock, { type DockTab } from "./CardDock";
-import AIPanel, { ExplainModeSwitcher } from "./AIPanel";
+import AIPanel, { ChatComposer, ExplainModeSwitcher, ExplainThread } from "./AIPanel";
 import { DictPanel } from "./DictPanel";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cardsApi, type CardDraft, type CardRecord } from "../lib/cards";
 import DisambiguateModal from "./DisambiguateModal";
 import type { TagVocabEntry } from "../lib/tags";
 import type { DictionaryEntry, ReadingContext, VocabKind } from "../lib/dict";
 import type { SelectionActions } from "../lib/useSelectionActions";
+import {
+  WB_TOGGLE_EVENT,
+  getLastWorkbenchOpen,
+  publishWorkbenchState,
+  setLastWorkbenchOpen,
+  useWorkbenchPlacement,
+  type WorkbenchDockPlacement
+} from "../lib/workbenchLayout";
+
+/** 无选区/无面板时的自由材料输入：粘贴或输入一段文字 → AI 解释 / AI 制卡（自由模式与独立窗口的主入口） */
+function FreeSource({ onExplain, onCards, prefer }: { onExplain: (t: string) => void; onCards: (t: string) => void; prefer: "explain" | "cards" }) {
+  const [text, setText] = useState("");
+  const t = text.trim();
+  return (
+    <div className="wb-free" data-testid="wb-free-source">
+      <textarea
+        value={text}
+        placeholder="粘贴或输入要处理的文字（也可在阅读时选中文字，用浮条的 AI 解释 / AI 制卡）"
+        aria-label="待处理文字"
+        rows={4}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <div className="wb-free-acts">
+        <button type="button" className={`btn btn-sm ${prefer === "explain" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onExplain(t)}>
+          AI 解释
+        </button>
+        <button type="button" className={`btn btn-sm ${prefer === "cards" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onCards(t)}>
+          AI 制卡
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function SelectionPanels({
   sel,
-  selectionText,
-  nowTick = 0,
-  elapsedSec,
-  dockMeta
+  dockMeta,
+  placementOverride
 }: {
   /** useSelectionActions 的返回值（原样传入；类型即钩子返回值，不另立影子类型） */
   sel: SelectionActions;
-  /** 引用文本兜底（手动制卡浮层：manualQuote 为空时用当前选区文本） */
-  selectionText?: string | null;
-  /** AI 面板计时（宿主每秒一跳） */
-  nowTick?: number;
-  elapsedSec: number;
-  /** dock 头行 meta（材料名，§8.2「有则显，无则省」） */
+  /** 手动区标题行 meta（材料名，有则显，无则省） */
   dockMeta?: string;
+  /** 独立窗口传 "window"：制卡台占满窗口，不推让不外延，且常开 */
+  placementOverride?: "window";
+  /** @deprecated D123：保留以兼容旧宿主调用，已不使用（AIPanel 自算计时） */
+  selectionText?: string | null;
+  nowTick?: number;
+  elapsedSec?: number;
 }) {
-  const { aiPanel, manualOpen, manualImage, manualQuote, dictPanel, dockOpen, dockTab, manualActive } = sel;
+  const { aiPanel, manualOpen, manualImage, manualQuote, dictPanel, dockOpen, dockTab } = sel;
+  const settingPlacement = useWorkbenchPlacement();
+  const placement: WorkbenchDockPlacement = placementOverride ?? settingPlacement;
   // v48.60（D101）：标签词表建议（cards.tags_json ∪ extracts.tag_json 派生；建卡/卡片改动后刷新）
   const [tagVocab, setTagVocab] = useState<TagVocabEntry[]>([]);
   useEffect(() => {
@@ -49,8 +80,69 @@ export default function SelectionPanels({
     return () => {
       cancelled = true;
     };
-  }, [sel.manualOpen, sel.dockOpen]);
-  /** 手动制卡保存链（modal / dock 同一份：落库 → closeManual，现状语义零改动） */
+  }, [sel.manualSeq, sel.dockOpen]);
+
+  const [manualCollapsed, setManualCollapsed] = useState(false);
+  const dockRootRef = useRef<HTMLDivElement | null>(null);
+
+  /** 把焦点交给手动表单的第一个可输入字段（点开即可打字，D88 §15 注记延续） */
+  const focusManual = () => {
+    window.setTimeout(() => {
+      const root = document.querySelector('[data-testid="wb-manual"]');
+      const first = root?.querySelector('textarea, input:not([type=checkbox]):not([type=range]), [contenteditable="true"]');
+      (first as HTMLElement | null)?.focus();
+    }, 80);
+  };
+
+  // 顶栏按钮 / Ctrl+K → 开合制卡台（每个页面恰有一个宿主挂着本组件）
+  const toggleRef = useRef<() => void>(() => {});
+  toggleRef.current = () => {
+    if (placementOverride === "window") return;
+    if (!sel.dockEverOpened || !sel.dockOpen) {
+      setManualCollapsed(false);
+      sel.expandDock();
+      focusManual();
+    } else {
+      sel.collapseDock();
+    }
+  };
+  useEffect(() => {
+    const on = () => toggleRef.current();
+    window.addEventListener(WB_TOGGLE_EVENT, on);
+    return () => window.removeEventListener(WB_TOGGLE_EVENT, on);
+  }, []);
+
+  // 工具栏/浮条「制卡」（actions.manual）唤坞时：手动区展开并聚焦
+  useEffect(() => {
+    if (sel.manualOpen && !sel.manualImage) {
+      setManualCollapsed(false);
+      focusManual();
+    }
+  }, [sel.manualOpen, sel.manualImage]);
+
+  // 独立窗口：常开；主窗口：切换页面后沿用「开着」的状态（宿主随视图换，见 workbenchLayout.lastOpen）
+  const initialOpenRef = useRef(getLastWorkbenchOpen());
+  useEffect(() => {
+    if (placementOverride === "window" || initialOpenRef.current) sel.expandDock();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [placementOverride]);
+
+  // 向顶栏按钮同步状态（静态方块点：AI 在跑 / 无动画）
+  const threadBusy = sel.thread.some((x) => x.running);
+  const busy = !!aiPanel?.running || threadBusy;
+  const isOpen = sel.dockEverOpened && dockOpen;
+  useEffect(() => {
+    if (placementOverride === "window") return;
+    publishWorkbenchState({ open: isOpen, busy, draft: false });
+    // 只在「本宿主已挂载过且稳定」后记录，避免新宿主首帧（尚未按 lastOpen 展开）把标记冲掉
+    if (isOpen || sel.dockEverOpened) setLastWorkbenchOpen(isOpen);
+  }, [isOpen, busy, placementOverride]);
+  useEffect(() => {
+    if (placementOverride === "window") return;
+    return () => publishWorkbenchState({ open: false, busy: false, draft: false });
+  }, [placementOverride]);
+
+  /** 手动制卡保存链（modal / dock 同一份：落库 → closeManual 换 key 清空表单） */
   const saveManual = async (p: Parameters<typeof sel.handleManualCard>[0]) => {
     try {
       return await sel.handleManualCard(p);
@@ -58,36 +150,17 @@ export default function SelectionPanels({
       sel.closeManual();
     }
   };
-  /** D121 §4.1「保存并辨析」：弹窗挂在本组件（表单随 closeManual 卸载后仍存活）；新卡为 A、相似卡为 B */
+  /** D121 §4.1「保存并辨析」：弹窗挂在本组件（表单随换 key 卸载后仍存活）；新卡为 A、相似卡为 B */
   const [disamb, setDisamb] = useState<{ card: CardRecord; other: string } | null>(null);
   const openDisamb = async (newId: string, otherId: string) => {
     const card = await cardsApi.get(newId).catch(() => null);
     if (card) setDisamb({ card, other: otherId });
   };
-  /** 关闭链（D92 §4 原样迁移）：手动暂态 ×＝closeManual（丢草稿）；AI 态 ×＝批次 reject + 清面板；
-      空坞 ×＝收起（常驻坞没有「关闭」，收起把手仍在）。 */
-  const closeDock = () => {
-    if (manualActive) {
-      sel.closeManual();
-      return;
-    }
-    if (aiPanel) {
-      if (
-        (aiPanel.kind === "cards" || aiPanel.kind === "occlusion") &&
-        aiPanel.batchId &&
-        aiPanel.drafts?.length
-      ) {
-        cardsApi.setBatchStatus(aiPanel.batchId, "rejected");
-      }
-      sel.setAiPanel(null);
-      return;
-    }
-    sel.collapseDock();
-  };
+
   /** AI 面板元素（explain / cards+occlusion 两页签体共用同一 props；occlusion 归制卡页签） */
   const aiPanelNode = aiPanel ? (
     <AIPanel
-      panel={{ ...aiPanel, elapsedSec }}
+      panel={aiPanel}
       onAccept={(d, idx, edited) => sel.acceptDraft(d, idx, edited)}
       onAcceptOcclusion={(d, idx) => sel.acceptOcclusionDraft(d, idx)}
       onEdit={(idx, patch) => {
@@ -120,21 +193,22 @@ export default function SelectionPanels({
       }}
       onRejectAll={sel.rejectAllDrafts}
       onExplain={(q) => sel.runExplain(aiPanel.text, q)}
+      onAsk={(q) => void sel.runAsk(q)}
       onMakeCards={() => sel.runAICards(aiPanel.text, undefined, sel.aiMode)}
       onModeChange={(m) => sel.changeAiMode(m)}
       mode={sel.aiMode}
       onSearchBackground={() => sel.searchAndRetry(aiPanel.text)}
       onFollowUpCards={(item, kpTitle, hint) => sel.runFollowUpCards(item, kpTitle, hint)}
-      onExploration={(item, kpTitle) => sel.runExploration(item, kpTitle)}
+      onExploration={(item, kpTitle, srcKey) => sel.runExploration(item, kpTitle, srcKey)}
       explainMode={sel.explainMode}
       onExplainModeChange={(m) => sel.changeExplainMode(m)}
       // v48.74（D118 §3④）：生成中「停止」→ ai:abort 取消当前请求
       onStop={() => sel.stopAIRun()}
-      elapsedTick={nowTick}
     />
   ) : null;
-  /** 页签体可见性：手动暂态占坞时两页签体皆隐藏（保活）；否则显示活动页签 */
-  const tabVisible = (t: DockTab) => !manualActive && dockTab === t;
+  const tabVisible = (t: DockTab) => dockTab === t;
+  const cardsOf = (text: string) => void sel.runAICards(text, undefined, sel.aiMode);
+  const explainOf = (text: string) => void sel.runExplain(text, null);
 
   return (
     <>
@@ -158,68 +232,70 @@ export default function SelectionPanels({
       {/* 图片挖空（manualImage 在场＝来自图片聚焦工具条）维持 modal，不入坞（D88/D92 语义不变） */}
       {manualOpen && manualImage && (
         <ManualCardEditor
-          quote={manualQuote ?? selectionText ?? ""}
+          quote={manualQuote ?? ""}
           imageRegion={manualImage}
           onCancel={sel.closeManual}
           onSave={saveManual}
         />
       )}
 
-      {/* v48.52（D92）：单坞常驻——首次唤起后挂载；收起≠关闭（坞体滑出、把手常驻、状态保留） */}
+      {/* 制卡台：首次唤起后挂载；收起≠关闭（面板滑出、状态保留）；展开/收起只经顶栏按钮 / Ctrl+K / Esc */}
       {sel.dockEverOpened && (
-        <CardDock
-          mode={manualActive ? "manual" : "ai"}
-          tab={dockTab}
-          onTabChange={(t) => sel.changeDockTab(t)}
-          meta={dockMeta}
-          manualActive={manualActive}
-          onManual={() => sel.actions.manual()}
-          streaming={!!aiPanel?.running}
-          manualDraft={manualOpen && !manualImage}
-          dockOpen={dockOpen}
-          onCollapse={sel.collapseDock}
-          onExpand={sel.expandDock}
-          onClose={closeDock}
-        >
-          {/* AI 解释页签体（保活；空态＝页签恒可点的 D84 惯例，方式可先调） */}
-          <div className="dock-tabbody" data-dock-tabbody="explain" style={tabVisible("explain") ? undefined : { display: "none" }}>
-            {aiPanel?.kind === "explain" ? (
-              aiPanelNode
-            ) : (
-              <div className="dock-empty" data-dock-empty="explain">
-                <p className="dock-empty-hint">选中文字后点工具栏「AI 解释」开始。</p>
-                <p className="dock-empty-hint">也可先在此选好解读方式：</p>
-                <ExplainModeSwitcher value={sel.explainMode} onChange={(m) => sel.changeExplainMode(m)} />
-              </div>
-            )}
-          </div>
-          {/* AI 制卡页签体（保活；occlusion＝AI 图片挖空归此页签，体内保留徽章） */}
-          <div className="dock-tabbody" data-dock-tabbody="cards" style={tabVisible("cards") ? undefined : { display: "none" }}>
-            {aiPanel && (aiPanel.kind === "cards" || aiPanel.kind === "occlusion") ? (
-              <>
-                {aiPanel.kind === "occlusion" && <div className="dock-badge mono">图片挖空</div>}
-                {aiPanelNode}
-              </>
-            ) : (
-              <div className="dock-empty" data-dock-empty="cards">
-                <p className="dock-empty-hint">选中文字后点「AI 制卡」开始。</p>
-              </div>
-            )}
-          </div>
-          {/* 手动暂态（保活）：占坞体时两页签非激活、「＋制卡」active；切页签隐藏不卸载、草稿不丢 */}
-          {manualOpen && !manualImage && (
-            <div className="dock-tabbody" data-dock-tabbody="manual" style={manualActive ? undefined : { display: "none" }}>
+        <div ref={dockRootRef} className="wb-root">
+          <CardDock
+            tab={dockTab}
+            onTabChange={(t) => sel.changeDockTab(t)}
+            meta={dockMeta}
+            placement={placement}
+            dockOpen={dockOpen}
+            manualCollapsed={manualCollapsed}
+            onToggleManual={() => setManualCollapsed((v) => !v)}
+            onCollapse={sel.collapseDock}
+            manual={
               <ManualCardForm
-                quote={manualQuote ?? selectionText ?? ""}
+                key={sel.manualSeq}
+                variant="dock"
+                quote={manualQuote ?? ""}
                 tagSuggestions={tagVocab}
                 initialTags={sel.manualTagsInitial}
                 onCancel={sel.closeManual}
                 onSave={saveManual}
                 onDisambiguate={(n, o) => void openDisamb(n, o)}
               />
+            }
+          >
+            {/* AI 解释页签体（保活）：解读/回答 + 自由追问线程 + 底部输入条 */}
+            <div className="dock-tabbody" data-dock-tabbody="explain" style={tabVisible("explain") ? undefined : { display: "none" }}>
+              <div className="wb-scroll">
+                {aiPanel?.kind === "explain" ? (
+                  aiPanelNode
+                ) : sel.thread.length === 0 ? (
+                  <div className="dock-empty" data-dock-empty="explain">
+                    <ExplainModeSwitcher value={sel.explainMode} onChange={(m) => sel.changeExplainMode(m)} />
+                    <FreeSource prefer="explain" onExplain={explainOf} onCards={cardsOf} />
+                  </div>
+                ) : null}
+                <ExplainThread items={sel.thread} onMake={(answer) => cardsOf(answer)} />
+              </div>
+              <ChatComposer busy={threadBusy} onSend={(q) => void sel.runAsk(q)} />
             </div>
-          )}
-        </CardDock>
+            {/* AI 制卡页签体（保活；occlusion＝AI 图片挖空归此页签，体内保留徽章） */}
+            <div className="dock-tabbody" data-dock-tabbody="cards" style={tabVisible("cards") ? undefined : { display: "none" }}>
+              <div className="wb-scroll">
+                {aiPanel && (aiPanel.kind === "cards" || aiPanel.kind === "occlusion") ? (
+                  <>
+                    {aiPanel.kind === "occlusion" && <div className="dock-badge mono">图片挖空</div>}
+                    {aiPanelNode}
+                  </>
+                ) : (
+                  <div className="dock-empty" data-dock-empty="cards">
+                    <FreeSource prefer="cards" onExplain={explainOf} onCards={cardsOf} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </CardDock>
+        </div>
       )}
       {disamb && (
         <DisambiguateModal card={disamb.card} presetOther={disamb.other} origin="manual" onClose={() => setDisamb(null)} />

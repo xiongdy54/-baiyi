@@ -13,7 +13,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        capture: resolve(__dirname, "capture.html")
+        capture: resolve(__dirname, "capture.html"),
+        // D123：独立制卡台窗口（主进程按 dist/workbench.html 载入）
+        workbench: resolve(__dirname, "workbench.html")
       }
     }
   }

@@ -176,12 +176,25 @@ export interface AiPanelState {
     item: string;
     kpTitle: string;
     question: string;
+    /** D123：条目被用户编辑后，解释所属的原始条目文本（行内按它归位） */
+    srcKey?: string;
     answer?: string;
     running: boolean;
     startedAt?: number;
     thinking?: number;
     error?: string;
   }[];
+}
+
+/** D123：AI 解释页的自由追问线程（独立于 aiPanel：制卡面板在场时追问也不会冲掉草稿） */
+export interface AskThreadItem {
+  id: number;
+  q: string;
+  answer?: string;
+  running: boolean;
+  startedAt?: number;
+  thinking?: number;
+  error?: string;
 }
 
 export type SelectionActions = ReturnType<typeof useSelectionActions>;
@@ -197,6 +210,10 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
 
   const [aiPanel, setAiPanel] = useState<AiPanelState | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  /** D123：手动表单重置序号（保存/关闭后自增，作为 ManualCardForm 的 key 清空表单；制卡台里表单常驻不再随 manualOpen 卸载） */
+  const [manualSeq, setManualSeq] = useState(0);
+  /** D123：AI 解释页自由追问线程 */
+  const [thread, setThread] = useState<AskThreadItem[]>([]);
   // v48.60（D101 §1.4④）：批注标签继承初值——打开手动表单时从来源摘录读取（表单内可删）
   const [manualTagsInitial, setManualTagsInitial] = useState<string[]>([]);
   // v48.52（D92 §4）：右侧学习坞会话态——首次唤起后常驻挂载（收起≠关闭，dockEverOpened 只进不出）
@@ -924,7 +941,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   }
 
   // 询问 AI 相关内容：解释追加在面板最下方，解释末尾带「直接制卡」
-  async function runExploration(item: string, kpTitle: string) {
+  async function runExploration(item: string, kpTitle: string, srcKey?: string) {
     if (!aiPanel) return;
     const explId = ++explorationSeqRef.current;
     const question = `就这段文字中的知识点「${kpTitle}」，请解释与「${item}」直接相关的具体内容：若是原因/例子/联系类方向，给出可直接用于制卡的实质内容；若是某个出处、概念或典故，请解释它本身并说明与本段文字的联系。`;
@@ -934,7 +951,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
             ...p,
             explorations: [
               ...(p.explorations ?? []),
-              { id: explId, item, kpTitle, question, answer: "", running: true, startedAt: Date.now(), thinking: 0 }
+              { id: explId, item, kpTitle, question, srcKey, answer: "", running: true, startedAt: Date.now(), thinking: 0 }
             ]
           }
         : p
@@ -956,6 +973,51 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         error: err instanceof Error ? err.message : String(err)
       });
     }
+  }
+
+  // ---------- D123：AI 解释页自由追问（线程独立于 aiPanel） ----------
+  const askSeqRef = useRef(0);
+  const threadRef = useRef<AskThreadItem[]>([]);
+  threadRef.current = thread;
+  function patchThread(id: number, patch: Partial<AskThreadItem>) {
+    setThread((t) => t.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }
+  async function runAsk(question: string) {
+    const q = question.trim();
+    if (!q) return;
+    const id = ++askSeqRef.current;
+    // 材料语境：当前面板的选文（图片挖空占位不算）；无面板＝纯自由对话
+    const ctxText = aiPanel && !aiPanel.text.startsWith("[图片]") ? aiPanel.text : "";
+    // 承接上文：最近两轮已完成问答（各截 500 字），避免追问脱离前文
+    const hist = threadRef.current
+      .filter((x) => x.answer && !x.running)
+      .slice(-2)
+      .map((x) => `问：${x.q}\n答：${(x.answer || "").slice(0, 500)}`)
+      .join("\n\n");
+    const fullQ = hist ? `（此前对话，供承接上文）\n${hist}\n\n现在的问题：${q}` : q;
+    wakeDock();
+    setThread((t) => [...t, { id, q, answer: "", running: true, startedAt: Date.now(), thinking: 0 }]);
+    try {
+      const answer = await cardGenerator.explain(
+        ctxText,
+        `${A().labels.title ?? ""}${A().labels.section ? " · " + A().labels.section : ""}`,
+        fullQ,
+        (acc) => patchThread(id, { answer: acc }),
+        (thinkChars) => patchThread(id, { thinking: thinkChars })
+      );
+      patchThread(id, { running: false, answer, startedAt: undefined, thinking: undefined });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      patchThread(id, {
+        running: false,
+        startedAt: undefined,
+        thinking: undefined,
+        error: msg.includes("API Key") ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。" : msg
+      });
+    }
+  }
+  function clearThread() {
+    setThread([]);
   }
 
   // 直接制卡：以原选文为材料 +「本次制卡重点」指令 + 已有卡清单（防重复），
@@ -1080,6 +1142,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const ste = pref === "auto" ? routeExplainMode(text) === "ste" : pref === "ste";
     // v48.74（D118 §3③）：新一轮开始——取消旧流；此后仅本轮 seq 的回调/终态可写面板
     const seq = beginAIRun();
+    setThread([]); // D123：新一轮解释＝新语境，旧追问线程退场
     setAiPanel({
       kind: "explain",
       text,
@@ -1472,6 +1535,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     setManualOpen(false);
     setManualImage(null);
     setManualActive(false);
+    setManualSeq((n) => n + 1); // D123：制卡台里的表单常驻，靠换 key 清空
     A().onManualSettled?.();
   }
 
@@ -1482,6 +1546,11 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     manualOpen,
     manualImage,
     manualQuote,
+    // D123：手动表单重置序号 / AI 解释页自由追问线程
+    manualSeq,
+    thread,
+    runAsk,
+    clearThread,
     // v48.60（D101）：手动表单的标签初值（批注标签继承，可删）——宿主透传 ManualCardForm.initialTags
     manualTagsInitial,
     dictPanel,

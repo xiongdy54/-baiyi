@@ -1049,14 +1049,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         {/* 头带：全宽吸顶（sticky/满宽/--paper 底由共用规则给出）；内列 width:100% + ≤720 居中。
             className 首 token 必须仍是 extract-page-head（面包屑测试命中判据）。 */}
         <div className="extract-page-head">
-          {/* v48.43（D83）工具栏上移为**首行**：模式/形式段控 + 动作钮（批注栏头同款样式）——
-              与左侧批注栏头（收起/展开 全部/摘录/高亮 位置/时间）同一视觉行；
-              面包屑+计数随之下移到动作行下方、正文上方。段控是持久偏好，无选区也可切。 */}
-          <div className="extract-toolbar" data-extract-toolbar>
-            {/* D122：批注/AI 制卡/AI 解释/查词与「摘录·形式」标注选项迁入选区浮条（随选区出现在鼠标旁）；
-                工具栏只留不依赖选区的「制卡」（v48.52 / D92 §3.4：免选区＝空表单自由制卡；有选区＝quote 预填）。 */}
-            <button type="button" className="btn-rail" data-sel-act="manual" disabled={!!viewing} title={faceSel && !viewing ? "就地制卡" : "自由制卡"} onClick={() => selActions.actions.manual()}>制卡</button>
-          </div>
+          {/* D123：原「工具栏首行」（仅剩一枚「制卡」）退役——入口已全局化（顶栏「制卡台」/Ctrl+K）；
+              头带只剩面包屑行，下缘线与制卡台标题行下缘线同一 y。 */}
           <div className="extract-page-head-inner">
             <div className="extract-crumbs" data-extract-crumbs>
               {parts}
@@ -1151,8 +1145,6 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           D88 §8：手动制卡/AI 两态在其中换渲染容器为右侧制卡面板 dock；头行 meta＝材料名 */}
       <SelectionPanels
         sel={selActions}
-        selectionText={faceSel?.text ?? null}
-        elapsedSec={0}
         dockMeta={current?.docTitle || viewing?.docTitle || undefined}
       />
 

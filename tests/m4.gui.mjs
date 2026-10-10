@@ -138,12 +138,13 @@ await press({ key: "z", ctrlKey: true, bubbles: true, cancelable: true });
 await sleep(500);
 const modalH2 = await evalJS(`(() => {
   const dock = document.querySelector('[data-card-dock]');
-  const form = dock?.querySelector('[data-dock-tabbody="manual"] textarea');
-  const pressed = dock?.querySelector('[data-testid="dock-manual"]')?.getAttribute('aria-pressed');
-  return JSON.stringify({ dock: !!dock, form: !!form, pressed });
+  const form = dock?.querySelector('[data-testid="wb-manual"] textarea');
+  const open = document.documentElement.dataset.wbOpen === '1';
+  return JSON.stringify({ dock: !!dock, form: !!form, open });
 })()`);
-check("Ctrl+Z 打开手动制卡面板（学习坞手动暂态）", JSON.parse(modalH2).dock && JSON.parse(modalH2).form && JSON.parse(modalH2).pressed === "true", modalH2);
-await evalJS(`(() => { const b = [...document.querySelectorAll('[data-card-dock] button')].find((x) => x.textContent === '取消'); if (b) b.click(); return 'closed'; })()`);
+check("Ctrl+Z 打开手动制卡面板（制卡台手动区）", JSON.parse(modalH2).dock && JSON.parse(modalH2).form && JSON.parse(modalH2).open === true, modalH2);
+// D123：制卡台无「取消/关闭」钮——Esc（焦点在台内）收起
+await evalJS(`(() => { const d = document.querySelector('[data-card-dock]'); d?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 'closed'; })()`);
 await sleep(300);
 
 // Ctrl+X → AI 制卡面板（stub 报错，零网络；D92：制卡页签自动激活）

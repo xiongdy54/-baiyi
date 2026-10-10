@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -18,6 +18,9 @@ const annotationRange = require("./annotationRange");
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
 let mainWindow = null;
+// D123：真正退出标记（before-quit 置位）——关闭主窗口默认收进托盘，只有它为 true 才放行销毁
+let appQuitting = false;
+let trayHinted = false;
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -27,11 +30,14 @@ if (!app.requestSingleInstanceLock()) {
   return;
 } else {
   app.on("second-instance", () => {
-    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : BrowserWindow.getAllWindows()[0];
-    if (!win || win.isDestroyed()) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+    // D123：只认主窗口（隐藏的快速记录/制卡台窗口也在 getAllWindows 里，不能拿来聚焦）；已销毁则重建
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      if (app.isReady()) createWindow();
+      return;
+    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
   });
 }
 
@@ -166,6 +172,9 @@ const memoryRetrieve = require("./memoryRetrieve");
 const mindmapEngine = require("./mindmapEngine");
 const dictStore = require("./dictStore");
 const quickCapture = require("./quickCapture");
+// D123：独立制卡台窗口与系统托盘（见 docs/design/CARD-WORKBENCH-D123.md）
+const workbenchWindow = require("./workbenchWindow");
+const tray = require("./tray");
 const { journalDateOf } = require("./journalTime");
 const {
   wordToMarkdown,
@@ -253,6 +262,9 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "extractEditorToolbarTop") value = value === true;
   // D122：选区浮条动作呈现（icon/text）取代 readerActionsFloat；与 src/lib/selectionBarSettings.ts 同规
   if (scope === "app" && key === "selectionBarStyle") value = value === "text" ? "text" : "icon";
+  // D123：制卡台放置位置（right/bottom，非法回落 right）与「关闭窗口收进托盘」（仅严格 false 为关）
+  if (scope === "app" && key === "workbenchPlacement") value = value === "bottom" ? "bottom" : "right";
+  if (scope === "app" && key === "closeToTray") value = value !== false;
   if (scope === "app" && key === "extractFaceFontFollow") value = value === true;
   if (scope === "app" && key === "extractFaceFontSize") {
     const n = Math.round(Number(value));
@@ -299,6 +311,48 @@ ipcMain.on("win:maximize", (e) => {
 
 ipcMain.on("win:close", (e) => {
   BrowserWindow.fromWebContents(e.sender)?.close();
+});
+
+// ---------- D123：制卡台窗口外延 / 独立窗口 ----------
+// 非最大化且屏幕右缘有余量：窗口整体向右变宽 delta（面板占新增的那一条，正文宽度不变）；
+// 最大化/全屏/余量不足：返回 inner，渲染层按「向内推」处理。外延记录只为还原用。
+let dockExt = null; // { win, delta }
+function dockExtend(win, delta) {
+  if (!win || win.isDestroyed() || !(delta > 0)) return { mode: "inner" };
+  if (win.isMaximized() || win.isFullScreen() || win.isMinimized()) return { mode: "inner" };
+  if (dockExt && dockExt.win === win) return { mode: "extended" };
+  try {
+    const b = win.getBounds();
+    const wa = screen.getDisplayMatching(b).workArea;
+    if (b.x + b.width + delta > wa.x + wa.width) return { mode: "inner" };
+    win.setBounds({ x: b.x, y: b.y, width: b.width + delta, height: b.height });
+    dockExt = { win, delta };
+    return { mode: "extended" };
+  } catch {
+    return { mode: "inner" };
+  }
+}
+function dockRestore(win) {
+  if (!dockExt || dockExt.win !== win || !win || win.isDestroyed()) {
+    if (!dockExt || !dockExt.win || dockExt.win.isDestroyed()) dockExt = null;
+    return false;
+  }
+  const { delta } = dockExt;
+  dockExt = null;
+  if (win.isMaximized() || win.isFullScreen()) return true;
+  const b = win.getBounds();
+  const [minW] = win.getMinimumSize();
+  win.setBounds({ x: b.x, y: b.y, width: Math.max(minW || 0, b.width - delta), height: b.height });
+  return true;
+}
+ipcMain.handle("win:dockExtend", (e, deltaPx) => dockExtend(BrowserWindow.fromWebContents(e.sender), Number(deltaPx)));
+ipcMain.handle("win:dockRestore", (e) => dockRestore(BrowserWindow.fromWebContents(e.sender)));
+ipcMain.handle("win:workbench", (_e, action) => workbenchWindow.control(String(action || "toggle")));
+// 独立窗口建卡后：转告主窗口各页刷新（两个渲染进程的 eventBus 互不相通）
+ipcMain.on("win:cardsChanged", (e) => {
+  if (mainWindow && !mainWindow.isDestroyed() && e.sender !== mainWindow.webContents) {
+    mainWindow.webContents.send("win:cardsRefresh");
+  }
 });
 
 ipcMain.handle("library:list", () => listItems());
@@ -1629,8 +1683,9 @@ ipcMain.handle("shortcuts:apply", () => quickCapture.applyGlobalShortcuts());
 // 「添加学习材料」：主窗口前置 + 就地弹出添加模态（不切换视图，阅读位置与复习会话原地保留）
 ipcMain.handle("library:requestAdd", () => sendToMainWindow("library:openAddMaterial"));
 
-function createWindow() {  // 防重入：已存在窗口时不再创建（macOS activate 与启动路径共用此函数）
-  if (BrowserWindow.getAllWindows().length > 0) return;
+function createWindow() {  // 防重入：已存在**主窗口**时不再创建（macOS activate 与启动路径共用此函数）
+  // D123：不能再按 getAllWindows().length 判断——隐藏常驻的快速记录/制卡台窗口也计入，会让主窗口关掉后再也建不出来
+  if (mainWindow && !mainWindow.isDestroyed()) return;
   const win = new BrowserWindow({
     width: 1100,
     height: 750,
@@ -1662,8 +1717,38 @@ function createWindow() {  // 防重入：已存在窗口时不再创建（macOS
     return { action: "deny" };
   });
   mainWindow = win;
+  // D123：关闭＝收进系统托盘继续运行（app.closeToTray，默认开）；托盘「退出」/ app.quit 才真销毁
+  win.on("close", (e) => {
+    if (appQuitting) return;
+    let toTray = true;
+    try {
+      toTray = readSettings().app?.closeToTray !== false;
+    } catch {
+      /* 读不到设置按默认（收进托盘） */
+    }
+    if (!toTray) return;
+    e.preventDefault();
+    win.hide();
+    // 每次启动只提示一次（内存标记，不新增设置键）
+    if (!trayHinted) {
+      trayHinted = true;
+      tray.hintHidden();
+    }
+  });
+  // 窗口被最大化/全屏：清外延记录，并告知渲染层回落「向内推」
+  const dropExt = () => {
+    if (dockExt && dockExt.win === win) {
+      dockExt = null;
+      if (!win.isDestroyed()) win.webContents.send("win:dockMode", "inner");
+    }
+  };
+  win.on("maximize", dropExt);
+  win.on("enter-full-screen", dropExt);
   win.on("closed", () => {
+    if (dockExt && dockExt.win === win) dockExt = null;
     if (mainWindow === win) mainWindow = null;
+    // 关闭未被收进托盘（closeToTray 关闭）＝用户要退出：隐藏常驻的小窗口不会触发 window-all-closed，需显式退出
+    if (!appQuitting && process.platform !== "darwin") app.quit();
   });
   // 加载顺序（v11.2）：dist 存在则直接用（生产产物优先，避免 devURL 连接超时挂起导致白屏）；
   // dist 不存在（纯开发场景）才走 vite dev server，失败再报错
@@ -1753,10 +1838,25 @@ app.whenReady().then(async () => {
       db: dbModule,
       readSettings,
       writeSettings,
-      sendToMain: (channel) => sendToMainWindow(channel)
+      sendToMain: (channel) => sendToMainWindow(channel),
+      toggleWorkbench: () => workbenchWindow.control("toggle")
     });
   } catch (err) {
     console.error("[quickCapture] 初始化失败：", err);
+  }
+  // D123：独立制卡台窗口 + 系统托盘（失败不阻塞启动）
+  try {
+    workbenchWindow.init({ readSettings });
+    tray.init({
+      showMain: () => {
+        if (!focusMainWindow()) createWindow();
+      },
+      toggleWorkbench: () => workbenchWindow.control("toggle"),
+      toggleCapture: () => quickCapture.toggleCapture(),
+      quit: () => app.quit()
+    });
+  } catch (err) {
+    console.error("[workbench] 托盘/独立窗口初始化失败：", err);
   }
   // M2：每日首次启动自动滚动备份（设置可关；失败不阻塞启动）
   try {
@@ -1799,7 +1899,8 @@ app.whenReady().then(async () => {
 
   // 首个窗口已在上方先行创建（v10.2 启动优化），此处只做协议注册与生命周期挂接
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+    else focusMainWindow();
   });
 });
 
@@ -1810,7 +1911,10 @@ app.on("window-all-closed", () => {
 // v36（M8-A）：退出前把日记节流的待落盘内容强制刷盘 + 注销全局快捷键 + 放行捕获窗口关闭
 // （before-quit 早于窗口关闭；prepareQuit 置 quitting 标记，否则捕获窗口的 close 会被拦成隐藏）
 app.on("before-quit", () => {
+  appQuitting = true;
   quickCapture.prepareQuit();
+  workbenchWindow.prepareQuit();
+  tray.destroy();
 });
 
 // M7：词典词条库（独立 dictionary.db）退出兜底落盘（正常路径导入后已即时 save）

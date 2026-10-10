@@ -25,6 +25,7 @@ import {
 } from "../lib/extractCardSettings";
 import { DEFAULT_SELECTION_BAR_STYLE, normalizeSelectionBarStyle, type SelectionBarStyle } from "../lib/selectionBarSettings";
 import { shortcutsApi, type ShortcutStatus } from "../lib/journal";
+import { normalizePlacement, type WorkbenchPlacement } from "../lib/workbenchLayout";
 import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
 import Dropdown from "./Dropdown";
@@ -700,9 +701,42 @@ function SiblingBuryBlock() {
 function CardTagsSection() {
   return (
     <SettingsSection id="sec-cardtags" title="卡面与标签">
+      <WorkbenchBlock />
       <CardFaceBlock />
       <TagsBlock />
     </SettingsSection>
+  );
+}
+
+// 制卡台放置位置（v48.79，D123）：右侧（默认）/ 底部。与使用习惯相关、很少调整，所以放设置而不放在面板上。
+function WorkbenchBlock() {
+  const [placement, setPlacement] = useState<WorkbenchPlacement | null>(null);
+  useEffect(() => {
+    void settingsStore.get<unknown>("app", "workbenchPlacement", "right").then((v) => setPlacement(normalizePlacement(v)));
+  }, []);
+  async function change(next: WorkbenchPlacement) {
+    setPlacement(next);
+    await settingsStore.set("app", "workbenchPlacement", next);
+  }
+  return (
+    <>
+      <h4>
+        制卡台
+        <SettingsInfo label="制卡台">
+          手动制卡、AI 制卡、AI 解释都在制卡台里；顶栏「制卡台」按钮或 Ctrl+K 开合。最大化时向内推，非最大化时窗口会向右变宽（屏幕放不下则向内推）。
+        </SettingsInfo>
+      </h4>
+      <div className="settings-row">
+        <span className="settings-row-label">放置位置</span>
+        <div className="seg-tabs" role="radiogroup" aria-label="制卡台放置位置">
+          {(["right", "bottom"] as const).map((m) => (
+            <button key={m} role="radio" aria-checked={placement === m} data-wb-placement={m} className={placement === m ? "active" : ""} onClick={() => void change(m)}>
+              {m === "right" ? "右侧" : "底部"}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -2293,16 +2327,19 @@ function ShortcutsSection() {
 interface GlobalShortcutsConfig {
   quickCapture: { enabled: boolean; accelerator: string; hideOnBlur: boolean };
   addMaterial: { enabled: boolean; accelerator: string };
+  /** D123：独立制卡台窗口 */
+  workbench: { enabled: boolean; accelerator: string };
   autoLaunch: boolean;
 }
 
 const DEFAULT_GLOBAL_SHORTCUTS: GlobalShortcutsConfig = {
   quickCapture: { enabled: true, accelerator: "Ctrl+Alt+Space", hideOnBlur: true },
   addMaterial: { enabled: true, accelerator: "Ctrl+Alt+N" },
+  workbench: { enabled: true, accelerator: "Ctrl+Alt+K" },
   autoLaunch: false
 };
 
-type GlobalTarget = "quickCapture" | "addMaterial";
+type GlobalTarget = "quickCapture" | "addMaterial" | "workbench";
 
 function shortcutStateLabel(s?: { enabled: boolean; registered: boolean; error: string | null }): {
   text: string;
@@ -2312,6 +2349,31 @@ function shortcutStateLabel(s?: { enabled: boolean; registered: boolean; error: 
   if (!s.enabled) return { text: "已关闭", cls: "" };
   if (s.registered) return { text: "已注册", cls: " on" };
   return { text: s.error ? "被占用" : "未注册", cls: " err" };
+}
+
+// D123：关闭主窗口＝收进系统托盘（默认开）；关闭则点关闭按钮直接退出应用
+function TrayRow() {
+  const [on, setOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    void settingsStore.get<unknown>("app", "closeToTray", true).then((v) => setOn(v !== false));
+  }, []);
+  if (on === null) return null;
+  return (
+    <div className="kb-row">
+      <label className="kb-row-title gs-check">
+        <input
+          type="checkbox"
+          data-close-to-tray
+          checked={on}
+          onChange={(e) => {
+            setOn(e.target.checked);
+            void settingsStore.set("app", "closeToTray", e.target.checked);
+          }}
+        />
+        关闭窗口时收进系统托盘继续运行（托盘菜单「退出」才真正退出）
+      </label>
+    </div>
+  );
 }
 
 function GlobalShortcutsBlock() {
@@ -2331,6 +2393,7 @@ function GlobalShortcutsBlock() {
       const next: GlobalShortcutsConfig = {
         quickCapture: { ...DEFAULT_GLOBAL_SHORTCUTS.quickCapture, ...(saved.quickCapture || {}) },
         addMaterial: { ...DEFAULT_GLOBAL_SHORTCUTS.addMaterial, ...(saved.addMaterial || {}) },
+        workbench: { ...DEFAULT_GLOBAL_SHORTCUTS.workbench, ...(saved.workbench || {}) },
         autoLaunch: saved.autoLaunch === true
       };
       setCfg(next);
@@ -2351,7 +2414,7 @@ function GlobalShortcutsBlock() {
     const st = await shortcutsApi.status();
     setStatus(st);
     if (target && st) {
-      const err = target === "quickCapture" ? st.quickCapture.error : st.addMaterial.error;
+      const err = st[target].error;
       if (err) setConflict({ target, message: err });
     }
   }
@@ -2377,8 +2440,10 @@ function GlobalShortcutsBlock() {
       }
       setCapturing(null);
       const current = cfgRef.current;
-      const other = target === "quickCapture" ? current.addMaterial.accelerator : current.quickCapture.accelerator;
-      if (combo === other) {
+      const others = (["quickCapture", "addMaterial", "workbench"] as const)
+        .filter((k) => k !== target)
+        .map((k) => current[k].accelerator);
+      if (others.includes(combo)) {
         setConflict({ target, message: "与另一个全局快捷键相同" });
         return;
       }
@@ -2388,10 +2453,7 @@ function GlobalShortcutsBlock() {
         return;
       }
       setConflict(null);
-      const next: GlobalShortcutsConfig =
-        target === "quickCapture"
-          ? { ...current, quickCapture: { ...current.quickCapture, accelerator: combo } }
-          : { ...current, addMaterial: { ...current.addMaterial, accelerator: combo } };
+      const next: GlobalShortcutsConfig = { ...current, [target]: { ...current[target], accelerator: combo } };
       void persist(next, target);
     }
     window.addEventListener("keydown", onKey, true);
@@ -2400,20 +2462,17 @@ function GlobalShortcutsBlock() {
 
   const capture = shortcutStateLabel(status?.quickCapture);
   const add = shortcutStateLabel(status?.addMaterial);
+  const wbs = shortcutStateLabel(status?.workbench);
 
   function renderKeyButton(target: GlobalTarget, enabled: boolean) {
-    const binding = target === "quickCapture" ? cfg.quickCapture.accelerator : cfg.addMaterial.accelerator;
-    const isDefault =
-      binding ===
-      (target === "quickCapture"
-        ? DEFAULT_GLOBAL_SHORTCUTS.quickCapture.accelerator
-        : DEFAULT_GLOBAL_SHORTCUTS.addMaterial.accelerator);
+    const binding = cfg[target].accelerator;
+    const isDefault = binding === DEFAULT_GLOBAL_SHORTCUTS[target].accelerator;
     const reset = () => {
       const current = cfgRef.current;
-      const next: GlobalShortcutsConfig =
-        target === "quickCapture"
-          ? { ...current, quickCapture: { ...current.quickCapture, accelerator: DEFAULT_GLOBAL_SHORTCUTS.quickCapture.accelerator } }
-          : { ...current, addMaterial: { ...current.addMaterial, accelerator: DEFAULT_GLOBAL_SHORTCUTS.addMaterial.accelerator } };
+      const next: GlobalShortcutsConfig = {
+        ...current,
+        [target]: { ...current[target], accelerator: DEFAULT_GLOBAL_SHORTCUTS[target].accelerator }
+      };
       setConflict(null);
       void persist(next, target);
     };
@@ -2493,6 +2552,20 @@ function GlobalShortcutsBlock() {
           <label className="kb-row-title gs-check">
             <input
               type="checkbox"
+              checked={cfg.workbench.enabled}
+              onChange={(e) => void persist({ ...cfg, workbench: { ...cfg.workbench, enabled: e.target.checked } })}
+            />
+            制卡台（弹出独立窗口：手动制卡 / AI 制卡 / AI 解释）
+          </label>
+          {conflict?.target === "workbench" && <span className="kb-conflict">{conflict.message}</span>}
+          {renderKeyButton("workbench", cfg.workbench.enabled)}
+          <span className={`gs-state mono${wbs.cls}`}>{wbs.text}</span>
+        </div>
+
+        <div className="kb-row">
+          <label className="kb-row-title gs-check">
+            <input
+              type="checkbox"
               checked={cfg.autoLaunch}
               onChange={(e) => void persist({ ...cfg, autoLaunch: e.target.checked })}
             />
@@ -2504,9 +2577,14 @@ function GlobalShortcutsBlock() {
         </div>
       </div>
 
+      <TrayRow />
+
       <div className="settings-row settings-block">
         <button className="btn btn-outline btn-sm" onClick={() => void shortcutsApi.toggleCapture()}>
           试一下快速记录
+        </button>
+        <button className="btn btn-outline btn-sm" onClick={() => void window.windowAPI?.workbench?.("toggle")}>
+          试一下制卡台窗口
         </button>
       </div>
     </div>
