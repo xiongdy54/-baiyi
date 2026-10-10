@@ -1932,7 +1932,29 @@ function clamp01Level(level) {
 async function kpLevelsFor({ kpIds } = {}) {
   const rows = await learnerDb.all("SELECT * FROM kp_states");
   const filter = Array.isArray(kpIds) && kpIds.length > 0 ? new Set(kpIds.map(String)) : null;
-  const labels = new Map((dbModule.learnerFacts().kps || []).map((k) => [String(k.id), String(k.label || "")]));
+  const facts = dbModule.learnerFacts();
+  const labels = new Map((facts.kps || []).map((k) => [String(k.id), String(k.label || "")]));
+  // firstSourceCard（SelfExplainDialog「对照原文」跳转用；与 buildSnapshot 的 KP 视图同一口径）
+  const cardKp = dbModule.resolveCardKpMap();
+  const docByDocId = new Map((facts.documents || []).map((d) => [String(d.id), d]));
+  const sourceByKp = new Map();
+  for (const card of (facts.cards || []).slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0))) {
+    const kpId = cardKp.get(String(card.id));
+    if (!kpId || sourceByKp.has(kpId)) continue;
+    const ref = parseContextRef(card.contextRefJson);
+    if (!ref || !(ref.anchorText || ref.anchorRatio != null || ref.pageIndex != null || ref.cfi)) continue;
+    const doc = ref.documentId ? docByDocId.get(String(ref.documentId)) : null;
+    if (!doc) continue;
+    sourceByKp.set(kpId, {
+      documentId: String(ref.documentId),
+      anchor: {
+        ...(ref.anchorText ? { anchorText: String(ref.anchorText) } : {}),
+        ...(ref.anchorRatio != null ? { anchorRatio: Number(ref.anchorRatio) } : {}),
+        ...(ref.pageIndex != null ? { pageIndex: Number(ref.pageIndex) } : {}),
+        ...(ref.cfi ? { cfi: String(ref.cfi) } : {})
+      }
+    });
+  }
   return rows
     .filter((r) => !filter || filter.has(String(r.kp_id)))
     .map((r) => ({
@@ -1941,7 +1963,8 @@ async function kpLevelsFor({ kpIds } = {}) {
       label: labels.get(String(r.kp_id)) || String(r.kp_id),
       confidence: String(r.confidence || "low"),
       fading: Number(r.fading) === 1,
-      metrics: parseJsonSafe(r.metrics_json, {})
+      metrics: parseJsonSafe(r.metrics_json, {}),
+      firstSourceCard: sourceByKp.get(String(r.kp_id)) || null
     }));
 }
 
@@ -2188,7 +2211,8 @@ async function placementSampleFor({ lang: langRaw } = {}) {
       .sort((a, b) => a.h.localeCompare(b.h) || String(a.l.key).localeCompare(String(b.l.key)))
       .slice(0, 10)
       .map(({ l }) => ({ key: String(l.key), sample: String(l.sample || l.key) }));
-    bands.push({ from, to, words: picked });
+    // allKeys = 该频段全部词项 key（排名序）——提交时 ratio ≥ 0.9 的频段整段外推（未展示的也算，设计稿 §11.4）
+    bands.push({ from, to, words: picked, allKeys: candidates.map((l) => String(l.key)) });
   }
   return { bands };
 }

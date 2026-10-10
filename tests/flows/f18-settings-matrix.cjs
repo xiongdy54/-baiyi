@@ -278,6 +278,7 @@ app
         ["app", "reviewScopes", [{ id: "scope-1", name: "测试范围", bookItemIds: ["item-1"], tags: ["考研::英语", "错题"], kpIds: ["kp-1"], kinds: ["card", "extract"], limits: { extractReviewsPerDay: 5 } }]], // v48.22 / D58；v48.61 / D105 扩展 tags/kpIds
         ["app", "cardFaceExtras", { mnemonic: true, example: false, sourceRef: true }], // v48.61 / D104 卡面信息密度（非默认值才验得出往返）
         ["app", "tagsEnabled", false], // v48.63 / D107 标签功能总开关（非默认值才验得出往返）
+        ["app", "learner", { enabled: true, nativeLangs: ["zh", "en"], nativeConfirmed: true, recCount: 8 }], // v48.80 / D124 学习者知识模型（对象键，设计稿 §11.6）
         ["app", "accentColor", "#0057ff"],
         ["app", "mindmapMaxCalls", 40],
         ["app", "mindmapPricing", { input: 1.5, output: 6 }],

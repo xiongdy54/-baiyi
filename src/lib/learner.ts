@@ -121,9 +121,21 @@ export const learnerApi = {
     if (!window.learnerAPI) return { ok: false };
     return (await window.learnerAPI.feedback(payload as Record<string, unknown>)) as { ok: boolean; disabled?: boolean };
   },
-  async listTracks(): Promise<{ ok?: boolean; disabled?: boolean; tracks: TrackSummary[]; proposals: TrackProposal[]; unassigned: { libraryItemId: string; title: string }[] }> {
+  async listTracks(): Promise<{
+    ok?: boolean;
+    disabled?: boolean;
+    tracks: TrackSummary[];
+    proposals: TrackProposal[];
+    unassigned: { libraryItemId: string; title: string; lang?: string }[];
+    trackMaterials?: { trackId: string; libraryItemId: string; title: string; lang: string }[];
+  }> {
     if (!window.learnerAPI) return { tracks: [], proposals: [], unassigned: [] };
-    return (await window.learnerAPI.listTracks()) as { tracks: TrackSummary[]; proposals: TrackProposal[]; unassigned: { libraryItemId: string; title: string }[] };
+    return (await window.learnerAPI.listTracks()) as {
+      tracks: TrackSummary[];
+      proposals: TrackProposal[];
+      unassigned: { libraryItemId: string; title: string; lang?: string }[];
+      trackMaterials?: { trackId: string; libraryItemId: string; title: string; lang: string }[];
+    };
   },
   async saveTrack(track: Partial<Track>): Promise<{ ok: boolean; disabled?: boolean; error?: string; track?: Track }> {
     if (!window.learnerAPI) return { ok: false };

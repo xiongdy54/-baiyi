@@ -39,6 +39,11 @@ import { memoryApi, type MemoryPendingStats, type MemoryStatus } from "../lib/me
 import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
 import SettingsInfo from "./SettingsInfo";
+// v48.80（D124 / 设计稿 §11.6）：学习者知识模型设置子块（sec-learner）
+import { learnerApi, learnerSettings } from "../lib/learner";
+import { learnerStrings as learnerStringsSafe } from "../lib/learnerStrings";
+import NativeLangsPicker from "./learner/NativeLangsPicker";
+import TracksDialog from "./learner/TracksDialog";
 // v48.22（D58 §6.8）：摘录复习开关 / 每日上限（写路径经主进程硬边界校验）
 import {
   extractSettings,
@@ -221,9 +226,104 @@ function DashboardSection() {
           <div className="settings-row">
             <button className="btn btn-secondary btn-sm" onClick={resetLayout}>恢复默认排列与宽度</button>
           </div>
+          {/* v48.80（D124 / 设计稿 §11.6）：学习者知识模型子块——开关关闭时只显示总开关与说明 */}
+          <div id="sec-learner">
+            <LearnerBlock />
+          </div>
         </>
       )}
     </SettingsSection>
+  );
+}
+
+// 学习者知识模型（v48.80 / D124）：总开关 + 母语多选 + 推荐条数 + 两个按钮（§11.6）。
+// 设置值统一走 learnerSettings（写后广播 settings/changed，NextStepsPanel 订阅即时卸载/恢复）。
+// 界面文字一律来自 learnerStrings（§11.9，代码中不得硬编码用户可见文字）。
+function LearnerBlock() {
+  const S = learnerStringsSafe();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [nativeLangs, setNativeLangs] = useState<string[]>([]);
+  const [recCount, setRecCount] = useState(6);
+  const [tracksOpen, setTracksOpen] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      const s = await learnerSettings.read();
+      setEnabled(s.enabled);
+      setNativeLangs(s.effectiveNativeLangs);
+      setRecCount(s.recCount);
+    })();
+  }, []);
+
+  return (
+    <>
+      <h4>{S.settings.title}</h4>
+      <div className="settings-row">
+        <span className="settings-row-label">
+          {S.settings.enabledLabel}
+          <SettingsInfo label={S.settings.enabledLabel}>{S.settings.enabledInfo}</SettingsInfo>
+        </span>
+        <div className="seg-tabs seg-tabs-sm" role="group" aria-label={S.settings.enabledLabel}>
+          <button
+            className={enabled === true ? "active" : ""}
+            onClick={() => {
+              setEnabled(true);
+              void learnerSettings.write({ enabled: true });
+            }}
+          >
+            {S.settings.on}
+          </button>
+          <button
+            className={enabled === false ? "active" : ""}
+            onClick={() => {
+              setEnabled(false);
+              void learnerSettings.write({ enabled: false });
+            }}
+          >
+            {S.settings.off}
+          </button>
+        </div>
+      </div>
+      {enabled !== false && (
+        <>
+          <div className="settings-row">
+            <span className="settings-row-label">{S.settings.nativeLangs}</span>
+            <NativeLangsPicker value={nativeLangs} onChange={(next) => { setNativeLangs(next); void learnerSettings.write({ nativeLangs: next }); }} />
+          </div>
+          <div className="settings-row">
+            <span className="settings-row-label">{S.settings.recCount}</span>
+            <input
+              type="number"
+              min={3}
+              max={10}
+              value={recCount}
+              onChange={(e) => {
+                const n = Math.min(10, Math.max(3, Math.round(Number(e.target.value) || 6)));
+                setRecCount(n);
+                void learnerSettings.write({ recCount: n });
+              }}
+            />
+          </div>
+          <div className="settings-row">
+            <button className="btn btn-secondary btn-sm" onClick={() => setTracksOpen(true)}>
+              {S.settings.manageTracks}
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={rebuilding}
+              onClick={() => {
+                setRebuilding(true);
+                void learnerApi.rebuild().finally(() => setRebuilding(false));
+              }}
+            >
+              {rebuilding ? S.tracks.rebuilding : S.settings.rebuild}
+            </button>
+          </div>
+        </>
+      )}
+      {tracksOpen && <TracksDialog onClose={() => setTracksOpen(false)} />}
+    </>
   );
 }
 

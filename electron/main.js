@@ -1402,22 +1402,24 @@ ipcMain.handle("learner:listTracks", async () => {
   if (!learnerRefresh.learnerEnabled()) return learnerDisabled();
   const snapshot = await learnerRefresh.buildSnapshot();
   const tracks = learnerRefresh.buildTrackSummaries(snapshot, {}, false, snapshot.proposals || []);
-  const unassigned = [];
-  const assigned = new Set();
+  const effective = tracks.filter((t) => !t.isProposal);
   const overrides = new Map((snapshot.overrides || []).map((o) => [`${o.trackId}:${o.libraryItemId}`, o.member]));
+  const assigned = new Set();
+  const trackMaterials = []; // 轨道 → 归属材料明细（TracksDialog 展开区 + 「移出」用）
   for (const m of snapshot.materials || []) {
-    for (const t of tracks) {
-      if (t.isProposal) continue;
+    for (const t of effective.slice().sort((a, b) => a.id.localeCompare(b.id))) {
       if (require("./lmRecommend").resolveMembership(t, m, overrides)) {
         assigned.add(String(m.id));
+        trackMaterials.push({ trackId: t.id, libraryItemId: String(m.id), title: String(m.title || ""), lang: String(m.lang || "") });
         break;
       }
     }
   }
+  const unassigned = [];
   for (const m of snapshot.materials || []) {
-    if (!assigned.has(String(m.id))) unassigned.push({ libraryItemId: String(m.id), title: String(m.title || "") });
+    if (!assigned.has(String(m.id))) unassigned.push({ libraryItemId: String(m.id), title: String(m.title || ""), lang: String(m.lang || "") });
   }
-  return { tracks, proposals: snapshot.proposals || [], unassigned };
+  return { tracks, proposals: snapshot.proposals || [], unassigned, trackMaterials };
 });
 ipcMain.handle("learner:saveTrack", (_e, track) => {
   if (!learnerRefresh.learnerEnabled()) return learnerDisabled();

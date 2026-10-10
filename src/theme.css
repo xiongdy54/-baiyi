@@ -8096,3 +8096,61 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .side-dock[data-placement="right"], .side-dock[data-placement="bottom"] { animation: none; }
 /* 手动区开合：只过渡 clip 高度；body 宽度恒定（滚动条已隐藏，不再挤压文本框） */
 .wb-manual-clip { contain: layout style; }
+
+/* ---------- v48.80（D124）：学习者模型「下一步」面板与轨道/对话框 ---------- */
+.learner-panel-card { padding: var(--sp-6); display: flex; flex-direction: column; gap: var(--sp-4); }
+.learner-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); flex-wrap: wrap; }
+.learner-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+.learner-head-right { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.learner-meta { font-size: 12px; color: var(--text-tertiary, var(--text-secondary)); }
+.learner-count-select { font-size: 12px; }
+.learner-notice { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; font-size: 13px; padding: var(--sp-2) 0; }
+.learner-empty { font-size: 13px; color: var(--text-secondary); margin: var(--sp-2) 0; }
+.learner-error { color: var(--danger, #b3261e); font-size: 13px; margin: var(--sp-2) 0; }
+.learner-copied { font-size: 12px; color: var(--text-secondary); margin: 0; }
+.learner-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.learner-item { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-3) 0; border-top: 1px solid var(--hairline); }
+.learner-item-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.learner-item-kind { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-tertiary, var(--text-secondary)); }
+.learner-item-title { font-size: 14px; font-weight: 600; }
+.learner-item-reason { font-size: 12px; color: var(--text-secondary); }
+.learner-item-side { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.learner-menu { position: relative; }
+.learner-menu summary { list-style: none; cursor: pointer; padding: 0 6px; border: 1px solid var(--hairline); font-size: 14px; user-select: none; }
+.learner-menu summary::-webkit-details-marker { display: none; }
+.learner-menu-pop { position: absolute; right: 0; top: 100%; z-index: 30; min-width: 128px; display: flex; flex-direction: column; background: var(--paper); border: 1px solid var(--hairline); box-shadow: var(--shadow-float, 0 8px 24px rgba(0,0,0,.12)); }
+.learner-menu-pop button { text-align: left; padding: 8px 12px; font-size: 13px; background: none; border: 0; cursor: pointer; }
+.learner-menu-pop button:hover { background: var(--hover, rgba(0,0,0,.04)); }
+
+/* 对话框内部（轨道 / 语言对话框共用） */
+.learner-dialog-body { display: flex; flex-direction: column; gap: var(--sp-4); }
+.learner-dialog-footer { display: flex; justify-content: flex-end; gap: var(--sp-2); padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--hairline); }
+.learner-dialog-prompt { font-size: 13px; margin: 0; }
+.learner-row-actions { display: flex; gap: var(--sp-3); }
+.learner-meta-inline { font-size: 12px; font-weight: 400; color: var(--text-secondary); }
+.learner-explain-input { width: 100%; min-height: 64px; resize: none; }
+.learner-unit-text { font-size: 15px; line-height: 1.9; max-width: 40em; white-space: pre-wrap; }
+.learner-lw { text-underline-offset: 3px; }
+.learner-reel-sentence { border-top: 1px solid var(--hairline); padding-top: var(--sp-3); }
+.learner-reel-text { margin: 0 0 var(--sp-1); font-size: 15px; line-height: 1.8; }
+.learner-reel-meta { display: flex; gap: var(--sp-3); font-size: 12px; color: var(--text-secondary); }
+.learner-mine-row { border-top: 1px solid var(--hairline); padding-top: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
+.learner-mine-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+.learner-placement-band { border-top: 1px solid var(--hairline); padding-top: var(--sp-3); }
+.learner-placement-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: var(--sp-2); }
+.learner-placement-bandops { display: flex; gap: var(--sp-3); }
+
+/* 标签多选（母语 / 快测共用） */
+.learner-native-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.learner-tag { font-size: 12px; padding: 3px 10px; border: 1px solid var(--hairline); background: none; cursor: pointer; }
+.learner-tag.is-on { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
+.learner-native-custom { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
+.learner-native-custom input { width: 160px; }
+
+/* 轨道管理 */
+.learner-track { border-top: 1px solid var(--hairline); padding: var(--sp-3) 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.learner-track-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
+.learner-track-name { width: 160px; }
+.learner-track-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.learner-track-sub { font-size: 12px; color: var(--text-secondary); }
+.learner-danger { color: var(--danger, #b3261e); }

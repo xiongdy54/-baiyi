@@ -10,6 +10,8 @@ import JournalView from "./components/JournalView";
 import AddBookModal from "./components/AddBookModal";
 import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
 import Dashboard from "./components/dashboard/Dashboard";
+// v48.80（D124）：数据页顶部「下一步」面板（不是 WidgetDef，不进布局编辑）
+import NextStepsPanel from "./components/learner/NextStepsPanel";
 import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
 import { commandRegistry } from "./lib/commands";
@@ -598,7 +600,13 @@ export default function App() {
     mainContent = <JournalView onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "stats") {
     topTitle = "统计数据";
-    mainContent = <Dashboard />;
+    // v48.80（D124 §11.4）：面板在数据页最上方——数据统计加载失败或骨架屏时面板照常显示，不改 Dashboard
+    mainContent = (
+      <>
+        <NextStepsPanel />
+        <Dashboard />
+      </>
+    );
   } else {
     mainContent = (
       <Bookshelf
