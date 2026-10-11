@@ -4973,6 +4973,9 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
             grid-row: 1 / -1;
             overflow: auto;
         }
+        /* \u5E94\u7528\u7EA7\u300C\u9690\u85CF\u6EDA\u52A8\u6761\u300D\uFF08\u7528\u6237 2026-10-10\uFF09\uFF1Ashadow DOM \u4E0D\u5403\u5E94\u7528\u6837\u5F0F\uFF0C\u5728\u6B64\u5C31\u5730\u9690\u85CF\uFF1B\u6EDA\u8F6E/\u952E\u76D8\u6EDA\u52A8\u4E0D\u53D7\u5F71\u54CD */
+        #container { scrollbar-width: none; }
+        #container::-webkit-scrollbar { display: none; width: 0; height: 0; }
         #header {
             grid-column: 3 / 4;
             grid-row: 1;
@@ -7004,6 +7007,11 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
 
   // src/lib/reader/annotColor.ts
   var HEX_RE = /^#[0-9a-fA-F]{3,8}$/;
+  function annotSolid(color, fallback = "var(--accent)") {
+    const c2 = String(color ?? "").trim();
+    if (!c2) return fallback;
+    return HEX_RE.test(c2) ? c2 : `var(--annot-${c2})`;
+  }
   function annotSoft(color, fallback = "var(--accent-soft)") {
     const c2 = String(color ?? "").trim();
     if (!c2) return fallback;
@@ -7044,6 +7052,45 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       return joined ? joined.slice(0, 1500) : void 0;
     } catch {
       return void 0;
+    }
+  }
+  function extractSelectionContext(range) {
+    try {
+      const BEFORE_CAP = 600;
+      const AFTER_CAP = 400;
+      const norm = (s3) => (s3 || "").replace(/\s+/g, " ").trim();
+      const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+      if (!startEl) return null;
+      const block = startEl.closest("p, li, blockquote, h1, h2, h3, h4, h5, h6, pre, td, div") || startEl;
+      const pre = block.ownerDocument.createRange();
+      pre.selectNodeContents(block);
+      pre.setEnd(range.startContainer, range.startOffset);
+      const post = block.ownerDocument.createRange();
+      post.selectNodeContents(block);
+      post.setStart(range.endContainer, range.endOffset);
+      const before = [];
+      const ownBefore = norm(pre.toString());
+      if (ownBefore) before.unshift(ownBefore);
+      let prev = block.previousElementSibling;
+      while (prev && before.length < 2) {
+        const t3 = norm(prev.textContent);
+        if (t3) before.unshift(t3);
+        prev = prev.previousElementSibling;
+      }
+      let after = norm(post.toString());
+      if (!after) {
+        let next = block.nextElementSibling;
+        while (next && !after) {
+          after = norm(next.textContent);
+          next = next.nextElementSibling;
+        }
+      }
+      let b3 = before.join("\n");
+      if (b3.length > BEFORE_CAP) b3 = b3.slice(b3.length - BEFORE_CAP);
+      if (after.length > AFTER_CAP) after = after.slice(0, AFTER_CAP);
+      return b3 || after ? { before: b3, after } : null;
+    } catch {
+      return null;
     }
   }
   function createFoliateKernel(host) {
@@ -7097,11 +7144,13 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     const relocateHandlers = /* @__PURE__ */ new Set();
     const linkHandlers = /* @__PURE__ */ new Set();
     const pointerHandlers = /* @__PURE__ */ new Set();
+    const pointerDownHandlers = /* @__PURE__ */ new Set();
     const imageHandlers = /* @__PURE__ */ new Set();
     const docs = /* @__PURE__ */ new Map();
     let lastRelocate = null;
     let appearance = null;
     let currentFlow = "scrolled";
+    let pendingMode = null;
     const multiHighlight = createMultiHighlight({
       currentDoc() {
         for (const { doc } of view.renderer?.getContents() ?? []) {
@@ -7112,7 +7161,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       },
       styleFor() {
         const value = getComputedStyle(document.body).getPropertyValue("--hl-multi").trim();
-        return `::highlight(${MULTI_HIGHLIGHT_NAME}){background-color:${value || "color-mix(in srgb, #002fa7 22%, transparent)"};}`;
+        return `::highlight(${MULTI_HIGHLIGHT_NAME}){background-color:${value || "color-mix(in srgb, #166a59 22%, transparent)"};}`;
       }
     });
     const MARK_HIGHLIGHT_NAME = "extract-mark";
@@ -7132,12 +7181,19 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       probe.remove();
       return value && value !== "rgba(0, 0, 0, 0)" ? value : fallback;
     };
+    const markKeyFor = (m3) => `${annotKey(m3.color)}${m3.annotationType === "underline" ? "|u" : ""}`;
     const markStyleCss = () => {
       const keys = /* @__PURE__ */ new Set(["default"]);
-      for (const m3 of docMarks) keys.add(annotKey(m3.color));
+      for (const m3 of docMarks) keys.add(markKeyFor(m3));
       return [...keys].map((k3) => {
-        const soft = k3 === "default" ? "var(--accent-soft)" : annotSoft(k3.startsWith("hex-") ? `#${k3.slice(4)}` : k3);
-        const value = evalColor(soft, "color-mix(in srgb, #002fa7 8%, transparent)");
+        const underline = k3.endsWith("|u");
+        const bare = k3.replace(/\|u$/, "");
+        if (underline && bare !== "default") {
+          const solid = evalColor(annotSolid(bare.startsWith("hex-") ? `#${bare.slice(4)}` : bare), "#166a59");
+          return `::highlight(${highlightNameFor(k3)}){background-color:transparent;text-decoration:underline;text-decoration-color:${solid};text-decoration-thickness:2px;text-underline-offset:3px;}`;
+        }
+        const soft = k3 === "default" ? "var(--accent-soft)" : annotSoft(bare.startsWith("hex-") ? `#${bare.slice(4)}` : bare);
+        const value = evalColor(soft, "color-mix(in srgb, #166a59 8%, transparent)");
         return `::highlight(${highlightNameFor(k3)}){background-color:${value};}`;
       }).join("\n");
     };
@@ -7182,7 +7238,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         if (!mark.cfi) continue;
         const hit = entries.find((e3) => e3.id === mark.id);
         if (!hit) continue;
-        const k3 = annotKey(mark.color);
+        const k3 = markKeyFor(mark);
         byKey.set(k3, [...byKey.get(k3) ?? [], hit.range]);
       }
       if (byKey.size === 0) {
@@ -7269,6 +7325,12 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           (h3) => h3({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
         );
       });
+      doc.addEventListener("pointerdown", (ev) => {
+        const pos = pointerToHost(doc, ev.clientX, ev.clientY);
+        pointerDownHandlers.forEach(
+          (h3) => h3({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
+        );
+      });
       doc.addEventListener("mousemove", (ev) => {
         if (markRanges.size === 0) return;
         const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
@@ -7344,11 +7406,40 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         r3.setAttribute("max-column-count", mode.flow === "paged" && mode.spread ? "2" : "1");
       }
       if (a3?.margin != null) r3.setAttribute("margin", `${a3.margin}px`);
+      const ex = a3;
+      if (ex?.maxInlineSize != null) r3.setAttribute("max-inline-size", `${ex.maxInlineSize}px`);
+      if (ex) {
+        if (ex.turnAnimated === true) r3.setAttribute("animated", "");
+        else r3.removeAttribute("animated");
+      }
     };
     const applyToHost = (a3) => {
       host.style.setProperty("--reader-bg", a3.bgColor ?? "transparent");
       host.style.setProperty("--reader-fg", a3.fgColor ?? "inherit");
       host.style.background = a3.bgColor ?? "transparent";
+    };
+    const isSectionEmpty = async (index) => {
+      try {
+        const section = view.book?.sections?.[index];
+        if (!section?.createDocument) return null;
+        const doc = await section.createDocument();
+        return String(doc?.body?.innerHTML ?? "").trim() === "";
+      } catch {
+        return null;
+      }
+    };
+    const healEmptySectionLanding = async () => {
+      try {
+        const contents = (view.renderer?.getContents?.() ?? []).slice().sort((a3, b3) => (a3.index ?? 0) - (b3.index ?? 0));
+        const landed = contents[0];
+        if (!landed || typeof landed.index !== "number") return;
+        if (await isSectionEmpty(landed.index) !== true) return;
+        const sections = view.book?.sections ?? [];
+        let next = landed.index + 1;
+        while (next < sections.length && await isSectionEmpty(next) === true) next += 1;
+        if (next < sections.length) await view.goTo(next);
+      } catch {
+      }
     };
     const kernel = {
       async open(source, init) {
@@ -7367,12 +7458,14 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           type: MIME_BY_EXT[ext] || "application/epub+zip"
         });
         await view.open(file);
+        if (pendingMode || appearance) applyRendererSettings(appearance, pendingMode);
         if (init?.location?.cfi) {
           await view.init({ lastLocation: init.location.cfi });
         } else {
           await view.init({});
           if (init?.location?.fraction != null) await view.goToFraction(init.location.fraction);
         }
+        await healEmptySectionLanding();
       },
       async goTo(target) {
         if ("chapterIndex" in target) {
@@ -7421,6 +7514,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       },
       async setMode(mode) {
         currentFlow = mode.flow;
+        pendingMode = mode;
         docs.forEach((doc) => {
           if (appearance) injectAppearanceStyle(doc, appearance, currentFlow);
           if (currentFlow !== "paged") fixSvgAspect(doc);
@@ -7479,6 +7573,17 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         const r3 = view.renderer;
         if (!r3) return null;
         return getSelectionFromContents(view, r3.getContents());
+      },
+      // D121 §2.3：选区前后文（供 AI 制卡判断归属/前提）；iframe 对宿主跨源，只能在本 adapter 内取 DOM
+      getSelectionContext() {
+        const r3 = view.renderer;
+        if (!r3) return null;
+        for (const { doc } of r3.getContents()) {
+          const sel = doc.defaultView?.getSelection();
+          if (!sel || sel.isCollapsed || sel.rangeCount === 0) continue;
+          return extractSelectionContext(sel.getRangeAt(0));
+        }
+        return null;
       },
       // v35 正文图片定位：按 alt/周边文字在各章节 DOM 找回原图并滚到可见，返回宿主坐标框。
       // 引擎 iframe 对宿主跨源，DOM 操作只能在本 adapter 内做（kernel.locateImage 契约）。
@@ -7576,6 +7681,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         relocateHandlers.clear();
         linkHandlers.clear();
         pointerHandlers.clear();
+        pointerDownHandlers.clear();
         imageHandlers.clear();
         markHoverHandlers.clear();
         markClickHandlers.clear();
@@ -7605,6 +7711,11 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           const h4 = handler;
           markClickHandlers.add(h4);
           return () => markClickHandlers.delete(h4);
+        }
+        if (event === "contentPointerDown") {
+          const h4 = handler;
+          pointerDownHandlers.add(h4);
+          return () => pointerDownHandlers.delete(h4);
         }
         const h3 = handler;
         pointerHandlers.add(h3);

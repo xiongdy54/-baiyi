@@ -8,6 +8,17 @@ contextBridge.exposeInMainWorld("settingsAPI", {
   get: (scope, key) => ipcRenderer.invoke("settings:get", scope, key)
 });
 
+// v48.89（D132 §4.4）：捕获窗口跟随主题插件的**最小子集桥**——只读激活载荷 + 推送订阅，
+// 不暴露 list/setActive/openFolder（捕获窗无插件管理面；最小权限，§7.5）。
+contextBridge.exposeInMainWorld("pluginsAPI", {
+  getActive: () => ipcRenderer.invoke("plugins:getActive"),
+  onChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("plugins:changed", handler);
+    return () => ipcRenderer.removeListener("plugins:changed", handler);
+  }
+});
+
 contextBridge.exposeInMainWorld("captureAPI", {
   // 渲染层首帧就绪后通知主进程（主进程收到才 show，杜绝白闪）
   ready: () => ipcRenderer.send("capture:ready"),

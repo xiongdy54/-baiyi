@@ -174,6 +174,9 @@ const dictStore = require("./dictStore");
 const quickCapture = require("./quickCapture");
 // D123：独立制卡台窗口与系统托盘（见 docs/design/CARD-WORKBENCH-D123.md）
 const workbenchWindow = require("./workbenchWindow");
+// v48.89（D132，设计 docs/design/PLUGIN-SYSTEM-D132.md）：插件/主题宿主——惰性扫描（启动主流程
+// 不触碰插件目录，§4.7），对 <userData>/plugins/ 零写入（§4.6）；IPC 四通道 + plugins:changed 广播在其内注册
+const pluginHost = require("./pluginHost");
 const screenCapture = require("./screenCapture");
 const tray = require("./tray");
 const { journalDateOf } = require("./journalTime");
@@ -2042,6 +2045,13 @@ app.whenReady().then(async () => {
     });
   } catch (err) {
     console.error("[workbench] 托盘/独立窗口初始化失败：", err);
+  }
+  // v48.89（D132）：插件/主题宿主——只注入 settings.json 读写入口并注册 plugins:* IPC；
+  // 扫描惰性（渲染层首次 plugins:list / rescan 才读插件目录），坏插件在场不阻塞启动（§4.7）
+  try {
+    pluginHost.init({ readSettings, writeSettings });
+  } catch (err) {
+    console.error("[pluginHost] 初始化失败：", err);
   }
   // M2：每日首次启动自动滚动备份（设置可关；失败不阻塞启动）
   try {

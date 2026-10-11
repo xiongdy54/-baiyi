@@ -1,0 +1,9 @@
+{
+  "id": "remote-css",
+  "name": "外链样式",
+  "version": "1.0.0",
+  "author": "本仓库",
+  "description": "反例夹具：styles.css 含 @import 外链，零网络守卫拒载（D132 §6.2 规则 3）。",
+  "type": "theme",
+  "styles": "styles.css"
+}

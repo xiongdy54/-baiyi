@@ -1,0 +1,5 @@
+/* 外链反例夹具（D132 §10.5）：@import 任意大小写、含 https 外链——零网络红线静态入口，宿主拒载。 */
+@import url("https://example.com/x.css");
+body {
+  --paper: #fafaf8;
+}

@@ -1,0 +1,9 @@
+/* 坏对比反例夹具（D132 §10.5 / §6.6）：
+   body 块声明 --accent: #8a4b2a; --accent-on: #b0b0b0; —— accent-on 对 accent 的实际比值
+   按 §6.6 的 WCAG 公式为 3.10:1 < 4.5:1，宿主审计必须拒载，且错误信息带实际比值。
+   （设计稿 §10.5 预写「2.31:1」为笔误：#b0b0b0 对 #8a4b2a 按公式实算 3.10:1，
+    拒载判据不变；见 tests/pluginhost.test.cjs 第 6 节注释。） */
+body {
+  --accent: #8a4b2a;
+  --accent-on: #b0b0b0;
+}

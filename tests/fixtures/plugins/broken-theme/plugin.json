@@ -1,0 +1,9 @@
+{
+  "id": "broken-theme",
+  "name": "坏对比示例",
+  "version": "1.0.0",
+  "author": "本仓库",
+  "description": "反例夹具：accent-on 对 accent 低于 4.5:1，宿主对比度审计拒载（D132 §6.6）。",
+  "type": "theme",
+  "styles": "styles.css"
+}

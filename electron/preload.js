@@ -434,3 +434,19 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
   }
 });
 
+// v48.91（D132，设计 docs/design/PLUGIN-SYSTEM-D132.md §4.4）：插件/主题宿主桥——四 invoke 通道 +
+// plugins:changed 推送订阅（渲染层由 themePlugins.ts 经 onChanged 直连 ipcRenderer，不经 EventBus）。
+// 与 windowAPI 既有模式逐字同构：全部闭包封装 ipcRenderer.invoke/on，onChanged 返回退订函数。
+contextBridge.exposeInMainWorld("pluginsAPI", {
+  list: () => ipcRenderer.invoke("plugins:list"),
+  getActive: () => ipcRenderer.invoke("plugins:getActive"),
+  setActive: (id) => ipcRenderer.invoke("plugins:setActive", id),
+  openFolder: () => ipcRenderer.invoke("plugins:openFolder"),
+  rescan: () => ipcRenderer.invoke("plugins:rescan"),
+  onChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("plugins:changed", handler);
+    return () => ipcRenderer.removeListener("plugins:changed", handler);
+  }
+});
+

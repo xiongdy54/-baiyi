@@ -1,0 +1,11 @@
+{
+  "id": "sepia-demo",
+  "name": "羊皮纸（示例）",
+  "version": "1.0.0",
+  "minAppVersion": "0.0.1",
+  "author": "本仓库",
+  "description": "最小可用的 type:theme 示例：双档 Token 覆盖 + @settings 可调项。作验收夹具与创作模板。",
+  "type": "theme",
+  "styles": "styles.css",
+  "main": "main.js"
+}

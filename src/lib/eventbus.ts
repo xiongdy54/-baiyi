@@ -8,6 +8,8 @@
 // v48（M15 重做，D41/D42）：+ mindmap/changed（导图生成进度与完成广播）
 // v48.80（D124 §11.3）：+ learner/navigate（「下一步」面板 emit、App 订阅分派动作）
 //                      + learner/changed（任一 learner 对话框完成写入后 emit、面板重取推荐）
+// （D132 插件变更推送不走本表：实现为 window.pluginsAPI.onChanged 直连 ipcRenderer
+//   "plugins:changed"，不经 EventBus——曾登记的 plugins/changed 为死条目，已删除。）
 export const ALLOWED_EVENTS = [
   "stats/updated",
   "library/changed",

@@ -5,6 +5,8 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
 import { applyCaptureAppearance } from "./components/CaptureEditor";
+// v48.89（D132 §6.4）：制卡台窗口跟随主题插件（主 preload 全量桥，随 preload.js 注入）
+import { installThemePluginBridge } from "./lib/themePlugins";
 import { eventBus } from "./lib/eventbus";
 import "./theme.css";
 
@@ -49,6 +51,7 @@ function WorkbenchWindow() {
   );
 }
 
+installThemePluginBridge(); // v48.89（D132）：主题插件跟随（与 applyCaptureAppearance 同期首拉）
 void applyCaptureAppearance().then(() => {
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>

@@ -76,6 +76,7 @@ const DOC_KEYS = [
   "app.tagsEnabled", // §7.4 v48.63 / D107（标签功能总开关：默认开，仅严格 false 为关；隐藏入口不动数据）
   "app.growthFeedback", // §7.4 v48.85 / D129（成长反馈总开关：对象 {enabled} 默认开，仅严格 false 为关；关闭=零渲染零计算）
   "app.legacyBackfillV1", // §9.4 一次性版本化回填完成标记（时间戳；挂载点 persist() 成功后由 legacyBackfill.js mark() 写入，对象键 = MARKER_KEY 逐字面量）
+  "app.activeThemePlugin", // §7.4 v48.89 / D132（激活的主题插件 id，空串=未激活；与 app.skinId 双槽互斥，pluginCore.nextAppearanceState 锁定矩阵；`plugin.<id>` 动态 scope 免逐键登记——见 GUIDE §7.4 D132 豁免段）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -283,6 +284,7 @@ app
         ["app", "tagsEnabled", false], // v48.63 / D107 标签功能总开关（非默认值才验得出往返）
         ["app", "growthFeedback", { enabled: false }], // v48.85 / D129 成长反馈总开关（对象键，非默认值才验得出往返）
         ["app", "legacyBackfillV1", 1699999999999], // §9.4 一次性回填完成标记（时间戳数值往返；真值由挂载点 persist() 成功后写入）
+        ["app", "activeThemePlugin", "sepia-demo"], // v48.89 / D132 主题插件激活指针（非默认值才验得出往返；空串=未激活；与 app.skinId 双槽互斥）
         ["app", "learner", { enabled: true, nativeLangs: ["zh", "en"], nativeConfirmed: true, recCount: 8 }], // v48.80 / D124 学习者知识模型（对象键，设计稿 §11.6）
         ["app", "accentColor", "#0057ff"],
         ["app", "mindmapMaxCalls", 40],
