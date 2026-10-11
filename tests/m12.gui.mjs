@@ -95,10 +95,11 @@ try {
   check("延后原因可读（指向已放行卡）", reasonText.includes("同源") && reasonText.includes("甲"), reasonText.slice(0, 120));
 
   // 3. 评分 Good → 其余同源卡当日不再出现（会话收尾） + 延后卡 due/fsrs 零变化（不写 FSRS）
-  //    qa 卡面翻面 = 整卡点击（CardFace qa 分支 onClick=onReveal，无「显示答案」按钮——那是 cloze/遮挡分支）
+  //    翻面只走底栏「显示答案」按钮（2026-10-01 用户裁定、提交 82c5267：onReveal 不传＝卡面
+  //    不再吃点击，提示并入按钮 hover；探针陈旧化更新，M13 GF-1-B 遗留项）
   const dueBefore = await cdp.eval(`(async () => { const all = await window.cardsAPI.listAll(); return JSON.stringify(all.filter((c) => c.siblingKey === "gui:src:m12" && c.frontMarkdown.includes("乙")).map((c) => c.fsrs)); })()`);
-  const revealed = await cdp.eval(`(() => { const f = document.querySelector(".review-face"); f?.click(); return !!f; })()`);
-  check("翻面成功（整卡点击）", revealed === true, revealed);
+  const revealed = await cdp.eval(`(() => { const b = document.querySelector("[data-review-bar] [data-reveal]"); b?.click(); return !!b; })()`);
+  check("翻面成功（底栏「显示答案」按钮）", revealed === true, revealed);
   await wait(600);
   const graded = await cdp.eval(`(() => { const b = document.querySelector(".grade-good"); b?.click(); return !!b; })()`);
   check("评分按钮在场（背面四档）", graded === true, graded);

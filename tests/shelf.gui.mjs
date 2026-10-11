@@ -190,7 +190,9 @@ try {
   check("进度轨高 2px（§5.3 半档写法）", r.railH === "2px", r.railH);
   check("封面保持 2:3 且直角", r.cardAspect === "2 / 3" && r.radius === "0px", JSON.stringify(r));
   check("卡面上不再有原生 <select>（旧版语言下拉）", r.nativeSelect === 0, r.nativeSelect);
-  check("动作条 4 枚（重命名/语言/归入/删除）", r.acts === 4, r.acts);
+  // v48.22（D58 §6.8-2）：书卡动作条新增「优先」（书级默认优先级 Dropdown）；v48.77（D121 ⑥，
+  // 提交 1d0c070）：再补「作者」（library_items.author + library:setItemAuthor 通道）→ 4 枚 → 6 枚
+  check("动作条 6 枚（重命名/作者/语言/优先/归入/删除）", r.acts === 6, r.acts);
 
   console.log("\n[3] 网格几何：四个视口宽度下右侧富余必须为 0");
   const widths = [620, 900, 1100, 1600];
