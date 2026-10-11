@@ -1,0 +1,46 @@
+# electron-builder 打包配置（§9.4 技术债「electron-builder 打包」P0 落地）
+# 约束：本地优先 —— publish 置 null（杜绝任何自动更新/遥测/发布通道），CLI 一律 --publish never。
+appId: com.incrementalreading.desktop
+# productName 保持与 package.json name 一致：Electron 的 userData 目录默认取 app 名，
+# 改成别的显示名会把数据目录从 %APPDATA%/incremental-reading-dev 迁走（违背 §2 记载的数据路径，重启丢数据观感）。
+# 对外显示名由 nsis.shortcutName（桌面/开始菜单快捷方式）承担。
+productName: incremental-reading-dev
+directories:
+  # vite 的 renderer 产物占用 dist/（D6：dist 存在则优先加载），打包产物必须另立目录，禁止混用。
+  output: release
+  buildResources: build # electron-builder 惯例目录，仓库已有 build/icon.ico（多尺寸 256px）
+files:
+  # 精确清单：renderer 产物（含 public 拷贝的 pdfjs/favicon）+ 主进程 + vendor 阅读内核快照。
+  # package.json 由 electron-builder 自动打入（剥离 devDependencies）。
+  # 生产 node_modules 由 electron-builder 按 dependencies 自动收集，不在此列。
+  - dist/**/*
+  - electron/**/*
+  - vendor/**/*
+asar: true
+asarUnpack:
+  # fsrs-rs-nodejs（NAPI 预编译）等原生绑定不能从 asar 内 dlopen
+  - "**/*.node"
+  # main.js 以原生路径读取窗口图标（electron/main.js），asar 内原生读文件不可靠
+  - electron/icon.ico
+# NAPI 预编译（fsrs-rs-nodejs-win32-x64-msvc）与 WASM（sql.js）均无需按 Electron ABI 重编；
+# 关闭 rebuild 免去 node-gyp/VS 构建链依赖。
+npmRebuild: false
+compression: normal
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+nsis:
+  # 向导式安装：允许自选安装目录、允许用户决定是否创建快捷方式（已确认决策）
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # 快捷方式显示名用中文；exe/安装目录名仍走 ASCII 的 productName，规避 NSIS 文件名兼容风险
+  shortcutName: 增量阅读
+  deleteAppDataOnUninstall: false # 卸载不删 userData（本地优先：数据归用户）
+  artifactName: ${name}-${version}-setup.${ext}

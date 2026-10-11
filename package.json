@@ -9,7 +9,9 @@
     "dev": "concurrently -k \"npm run dev:renderer\" \"wait-on http://localhost:5173 && electron .\"",
     "build:renderer": "vite build",
     "build": "npm run build:renderer && node scripts/postbuild-pdf-compat.cjs",
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --win --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never"
   },
   "dependencies": {
     "@likecoin/epub-ts": "^0.7.2",
@@ -48,6 +50,7 @@
     "@vitejs/plugin-react": "^4.3.1",
     "concurrently": "^9.0.1",
     "electron": "^31.0.0",
+    "electron-builder": "^26.15.3",
     "jsdom": "^30.0.1",
     "typescript": "^5.5.3",
     "vite": "^6.0.0",
