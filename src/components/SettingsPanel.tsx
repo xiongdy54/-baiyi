@@ -86,6 +86,9 @@ function SkeletonBlock({ h = 40 }: { h?: number }) {
 // ---------- 新信息架构（v48.70 / D114，设计稿 §5）----------
 // 14 项平铺导航收编为 5 组 13 项；组标题为非交互 div，不进 .settings-nav button 查询集；
 // 13 个导航项与 13 个 card-fill 区块一一对应（区块常挂载、无条件卸载，滚动定位一一可达）。
+// v48.81（D125，用户指令）：新增「实验功能」（sec-lab，归「数据与效率」组末位），学习者知识模型
+// 设置自 sec-widgets 迁入——左栏按钮 14 → 15（D114 立约文本记 13 项，DOM 实际计数 14，历史出入以实际为准）；
+// 可达性沿用 92vh + 导航自滚兜底（D116）。
 const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: string }> }> = [
   { label: "界面", items: [{ id: "appearance", label: "主题与颜色" }] },
   { label: "阅读", items: [{ id: "reader", label: "阅读" }] },
@@ -113,7 +116,8 @@ const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: s
       { id: "backup", label: "备份与恢复" },
       { id: "logs", label: "日志" },
       { id: "shortcuts", label: "快捷键" },
-      { id: "widgets", label: "统计仪表盘" }
+      { id: "widgets", label: "统计仪表盘" },
+      { id: "lab", label: "实验功能" }
     ]
   }
 ];
@@ -225,10 +229,6 @@ function DashboardSection() {
           {/* sec-dashreset 撤销（D114）：「恢复默认排列与宽度」收编为本节一行 */}
           <div className="settings-row">
             <button className="btn btn-secondary btn-sm" onClick={resetLayout}>恢复默认排列与宽度</button>
-          </div>
-          {/* v48.80（D124 / 设计稿 §11.6）：学习者知识模型子块——开关关闭时只显示总开关与说明 */}
-          <div id="sec-learner">
-            <LearnerBlock />
           </div>
         </>
       )}
@@ -2878,6 +2878,14 @@ export default function SettingsPanel({
             <LogsSection />
             <ShortcutsSection />
             <DashboardSection />
+            {/* v48.81（D125，用户指令）：实验功能——学习者知识模型设置迁入（sec-learner 子块 id 保留），
+                与既有实验项同带「早期开发阶段」标识；左栏按钮 14 → 15 */}
+            <SettingsSection id="sec-lab" title="实验功能">
+              <p className="form-hint">实验功能 · 早期开发阶段。</p>
+              <div id="sec-learner">
+                <LearnerBlock />
+              </div>
+            </SettingsSection>
           </div>
         </div>
       </div>

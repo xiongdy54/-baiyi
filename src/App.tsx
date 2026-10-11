@@ -10,8 +10,10 @@ import JournalView from "./components/JournalView";
 import AddBookModal from "./components/AddBookModal";
 import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
 import Dashboard from "./components/dashboard/Dashboard";
-// v48.80（D124）：数据页顶部「下一步」面板（不是 WidgetDef，不进布局编辑）
+// v48.80（D124）：数据页顶部「下一步」面板（不是 WidgetDef，不进布局编辑）；v48.81（D125）迁为顶栏独立页签页
 import NextStepsPanel from "./components/learner/NextStepsPanel";
+import { learnerSettings } from "./lib/learner";
+import { learnerStrings } from "./lib/learnerStrings";
 import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
 import { commandRegistry } from "./lib/commands";
@@ -61,8 +63,8 @@ type View =
       /** 原书文件字节（存在即走阅读内核；engine=pdf 时走 pdf.js 内核直读） */
       book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" };
       jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } };
-      /** v48.80（D124）：学习者模型「下一步」面板的 jump 动作返回数据页 */
-      returnTo?: "review" | "queue" | "browse" | "stats";
+      /** v48.80（D124）：学习者模型「下一步」面板的 jump 动作返回来源页；v48.81（D125）面板页签化后返回「下一步」页 */
+      returnTo?: "review" | "queue" | "browse" | "stats" | "next";
       /** v48.13（P2）：从右下角指示器「打开导图」进入时置位——Reader 挂载后自动打开导图工作区 */
       openMindmap?: boolean;
       /** v48.13（P2）：要展示的导图版本（候选版本——按发布模型不激活，但用户点了就该看到它） */
@@ -77,18 +79,22 @@ type View =
   | { name: "review"; bookItemIds?: string[]; title?: string; limits?: Record<string, number> | null; scopeTags?: string[]; scopeKpIds?: string[] }
   | { name: "browse"; /** v48.47（D87）：锚点筛选（来自浮窗「已制卡 N 张」点击） */ anchorExtractId?: string | null }
   | { name: "journal" }
+  // v48.81（D125）：学习者模型「下一步」独立页签——顶栏第 4 位；关闭学习者模型时页签收拢消失
+  | { name: "next" }
   | { name: "stats" };
 
-// D120-R2（MOTION-DESIGN-SPEC §5.1）：页序表——顶栏六签从左至右的视觉序，与下方 nav 数组同序（不得另造）；
+// D120-R2（MOTION-DESIGN-SPEC §5.1）：页序表——顶栏签从左至右的视觉序，与下方 nav 数组同序（不得另造）；
+// v48.81（D125）起第 4 位为「下一步」（仅在学习者模型开启时在场，关闭后其余六签页序不变）；
 // queue 与 extractSession 同席（顶栏同钮高亮）⇒ 互切 dir=0；reader 为深度视图（+∞，不列席，见 viewDirOf 特则）。
 const VIEW_ORDER: Record<View["name"], number> = {
   shelf: 0,
   queue: 1,
   extractSession: 1,
   review: 2,
-  browse: 3,
-  journal: 4,
-  stats: 5,
+  next: 3,
+  browse: 4,
+  journal: 5,
+  stats: 6,
   reader: Number.POSITIVE_INFINITY
 };
 
@@ -103,6 +109,16 @@ function viewDirOf(cur: View, next: View): "fwd" | "bwd" | "" {
   const d = VIEW_ORDER[next.name] - VIEW_ORDER[cur.name];
   return d === 0 ? "" : d > 0 ? "fwd" : "bwd";
 }
+
+// 顶栏静态六签（v12.1 文字主导航）。v48.81（D125）：「下一步」页签按总开关插在复习与卡片之间（见渲染处），不入本表。
+const TOP_NAV = [
+  { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
+  { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractSession" },
+  { key: "review", label: "复习", match: (n: string) => n === "review" },
+  { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
+  { key: "journal", label: "日记", match: (n: string) => n === "journal" },
+  { key: "stats", label: "数据", match: (n: string) => n === "stats" }
+] as const;
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
@@ -439,7 +455,7 @@ export default function App() {
   const handleJumpToDoc = useCallback(async (
     docId: string,
     anchor: NonNullable<Extract<View, { name: "reader" }>["jumpAnchor"]>,
-    returnTo: "review" | "queue" | "browse" | "stats" = "review"
+    returnTo: "review" | "queue" | "browse" | "stats" | "next" = "review"
   ) => {
     if (returnTo === "review") {
       // 仅复习来源需要现场恢复标记（返回时恢复该卡与翻面状态）
@@ -467,12 +483,43 @@ export default function App() {
         | null;
       if (!p) return;
       if (p.type === "open-book") openBook(p.libraryItemId);
-      else if (p.type === "jump") void handleJumpToDoc(p.documentId, p.anchor, "stats");
+      else if (p.type === "jump") void handleJumpToDoc(p.documentId, p.anchor, "next");
       else if (p.type === "review") changeView({ name: "review", scopeKpIds: p.scopeKpIds, title: p.title });
       else if (p.type === "extract-session") changeView({ name: "extractSession", bookItemIds: p.bookItemIds, title: p.title ?? "" });
     });
-    // openBook / handleJumpToDoc 均为 useCallback（changeView 稳定）；面板只在 stats 页挂载，闭包时效可接受
+    // openBook / handleJumpToDoc 均为 useCallback（changeView 稳定）；面板只在「下一步」页挂载，闭包时效可接受
   }, [openBook, handleJumpToDoc, changeView]);
+
+  // v48.81（D125）：顶栏「下一步」页签随总开关在场——读 app.learner.enabled 并订阅 settings/changed。
+  // 关闭：页签先横向收拢（.nav-collapse，§7 折叠的水平变体）后卸载；若正处「下一步」页则退回数据页。
+  const [learnerEnabled, setLearnerEnabled] = useState<boolean | null>(null);
+  const [nextTabClosing, setNextTabClosing] = useState(false);
+  const nextCloseTimer = useRef<number | null>(null);
+  useEffect(() => {
+    void (async () => setLearnerEnabled((await learnerSettings.read()).enabled))();
+    return eventBus.on("settings/changed", (p) => {
+      if ((p as { key?: string } | undefined)?.key !== "learner") return;
+      void (async () => {
+        const on = (await learnerSettings.read()).enabled;
+        setLearnerEnabled(on);
+        if (on) {
+          if (nextCloseTimer.current != null) {
+            window.clearTimeout(nextCloseTimer.current);
+            nextCloseTimer.current = null;
+          }
+          setNextTabClosing(false);
+        } else {
+          setNextTabClosing(true); // 320ms > 收拢时长 --dur-view(200ms)，动画播完再卸载
+          if (nextCloseTimer.current != null) window.clearTimeout(nextCloseTimer.current);
+          nextCloseTimer.current = window.setTimeout(() => {
+            setNextTabClosing(false);
+            nextCloseTimer.current = null;
+          }, 320);
+          if (viewRef.current.name === "next") changeView({ name: "stats" });
+        }
+      })();
+    });
+  }, [changeView]);
 
   if (!loaded) {
     return (
@@ -490,6 +537,20 @@ export default function App() {
 
   let mainContent: ReactNode = null;
   let topTitle = "";
+  // v48.81（D125）：界面文字（「下一步」页签/标题）取自学习者字符串表（§11.9）；静态六签渲染器
+  const LS = learnerStrings();
+  const navItem = (item: (typeof TOP_NAV)[number]) => (
+    <button
+      key={item.key}
+      className={`nav-item${item.match(view.name) ? " active" : ""}`}
+      onClick={() => {
+        changeView({ name: item.key } as View);
+        if (item.key === "shelf") setShelfTopTick((t) => t + 1);
+      }}
+    >
+      {item.label}
+    </button>
+  );
 
   if (view.name === "reader") {
     const p = (() => {
@@ -598,15 +659,13 @@ export default function App() {
   } else if (view.name === "journal") {
     topTitle = "日记";
     mainContent = <JournalView onJumpToDoc={handleJumpToDoc} />;
+  } else if (view.name === "next") {
+    // v48.81（D125）：「下一步」独立页签页。关闭学习者模型时页签收拢消失，本视图由 App 退回数据页
+    topTitle = LS.panel.tab;
+    mainContent = <NextStepsPanel />;
   } else if (view.name === "stats") {
     topTitle = "统计数据";
-    // v48.80（D124 §11.4）：面板在数据页最上方——数据统计加载失败或骨架屏时面板照常显示，不改 Dashboard
-    mainContent = (
-      <>
-        <NextStepsPanel />
-        <Dashboard />
-      </>
-    );
+    mainContent = <Dashboard />;
   } else {
     mainContent = (
       <Bookshelf
@@ -631,27 +690,23 @@ export default function App() {
         </div>
       )}
       <header className="topbar">
-        {/* 文字主导航（v12.1）：常驻左侧，当前项 accent 高亮；书架视图不再渲染品牌字块 */}
+        {/* 文字主导航（v12.1）：常驻左侧，当前项 accent 高亮；书架视图不再渲染品牌字块。
+            v48.81（D125）：「下一步」页签按总开关插在复习与卡片之间（顶栏第 4 位）；
+            关闭学习者模型时经 .nav-collapse 横向收拢后卸载，右侧签前滑补位 */}
         <nav className="topbar-nav">
-          {([
-            { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
-            { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractSession" },
-            { key: "review", label: "复习", match: (n: string) => n === "review" },
-            { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
-            { key: "journal", label: "日记", match: (n: string) => n === "journal" },
-            { key: "stats", label: "数据", match: (n: string) => n === "stats" }
-          ] as const).map((item) => (
-            <button
-              key={item.key}
-              className={`nav-item${item.match(view.name) ? " active" : ""}`}
-              onClick={() => {
-                changeView({ name: item.key } as View);
-                if (item.key === "shelf") setShelfTopTick((t) => t + 1);
-              }}
-            >
-              {item.label}
-            </button>
-          ))}
+          {TOP_NAV.slice(0, 3).map(navItem)}
+          {(learnerEnabled === true || nextTabClosing) && (
+            <span className={`nav-collapse${nextTabClosing ? "" : " is-open"}`}>
+              <button
+                type="button"
+                className={`nav-item${view.name === "next" ? " active" : ""}`}
+                onClick={() => changeView({ name: "next" })}
+              >
+                {LS.panel.tab}
+              </button>
+            </span>
+          )}
+          {TOP_NAV.slice(3).map(navItem)}
         </nav>
         {view.name !== "shelf" && <span className="topbar-title">{topTitle}</span>}
         <div className="topbar-right">

@@ -656,6 +656,18 @@ body.has-skin .topbar { background: transparent; }
   font-weight: 600;
   box-shadow: inset 0 -2px 0 var(--accent);
 }
+/* 顶栏「下一步」页签（v48.81 / D125）：关闭学习者模型时页签收拢、右侧签前滑补位——
+   §7 折叠（.collapse-clip）的水平变体：grid 轨道 0fr↔1fr；收 200ms（--dur-view）、开 240ms（--dur-panel），
+   文字随轨道同步淡出/淡入；reduce 降级直切（卸载由 App 侧 320ms 定时兜底） */
+.nav-collapse { display: grid; grid-template-columns: 0fr; }
+.nav-collapse.is-open { grid-template-columns: 1fr; }
+.nav-collapse .nav-item { overflow: hidden; min-width: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .nav-collapse { transition: grid-template-columns var(--dur-view) var(--ease-out-soft); }
+  .nav-collapse.is-open { transition-duration: var(--dur-panel); }
+  .nav-collapse .nav-item { transition: opacity var(--dur-view) var(--ease-out-soft); }
+  .nav-collapse:not(.is-open) .nav-item { opacity: 0; }
+}
 .topbar-title {
   margin-left: var(--sp-4);
   padding-left: var(--sp-4);
@@ -1678,7 +1690,7 @@ body.has-skin .topbar { background: transparent; }
   flex: none;
   display: flex;
   flex-direction: column;
-  /* 极矮窗口兜底：导航自身可滚，13 项始终可达 */
+  /* 极矮窗口兜底：导航自身可滚，全部导航项始终可达（v48.81 / D125 起 15 项） */
   overflow-y: auto;
   padding: 0;
 }
@@ -1687,7 +1699,7 @@ body.has-skin .topbar { background: transparent; }
 .settings-nav::after { content: ""; flex: 1 1 0; }
 /* 分组标题（D114 §6.1）：Meta 档 12/600 helper 色，非交互、不进 Tab 序。
    D116：与导航项文字同左缘（按钮 12px 内边距 + 2px 左描边），层级靠排印不靠缩进；
-   组距收紧到 --sp-4（导航局部紧凑档，瑞士风密度规则），配合 92vh 保 13 项全部可达 */
+   组距收紧到 --sp-4（导航局部紧凑档，瑞士风密度规则），配合 92vh 保全部导航项可达（D125 起 15 项） */
 .settings-nav-group {
   margin: var(--sp-3) 0 var(--sp-1);
   padding-inline-start: calc(var(--sp-3) + 2px);

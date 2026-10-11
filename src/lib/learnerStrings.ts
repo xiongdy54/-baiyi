@@ -11,6 +11,7 @@ export function learnerLocale(): "zh" | "en" {
 const zh = {
   panel: {
     title: "下一步",
+    tab: "下一步",
     headerMeta: (generatedAt: string, count: number) => `${generatedAt} · 从 ${count} 个候选中选出`,
     refresh: "刷新",
     tracks: "学习轨道…",
@@ -185,6 +186,7 @@ const zh = {
 const en: typeof zh = {
   panel: {
     title: "Next steps",
+    tab: "Next steps",
     headerMeta: (generatedAt: string, count: number) => `${generatedAt} · picked from ${count} candidates`,
     refresh: "Refresh",
     tracks: "Learning tracks…",
