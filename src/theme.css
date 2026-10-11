@@ -1010,21 +1010,14 @@ body.has-skin .topbar { background: transparent; }
 /* D120-R2（MOTION-DESIGN-SPEC §10-R2）：封面解码淡入——bookasset:// 逐张解码是书架
    「生硬」的第二波硬显来源；解码完成（TSX 侧 onLoad 置 is-loaded）前不显示，150ms 淡入落地。
    no-preference 外无 opacity:0 —— reduce / 无动画环境图片直接显（§3.2 双轨制）。
-   失败回落骨架（.book-card-spine + .book-card-title）与无封面占位态不是 .cover-img，表现不变；
+   失败回落骨架（灰底 + .book-card-title）与无封面占位态不是 .cover-img，表现不变；
    重试链 ?r=N 不动，每次重试的加载重新走同一规则（§10-R2）。 */
 @media (prefers-reduced-motion: no-preference) {
   .cover-img { opacity: 0; transition: opacity var(--dur-enter) var(--ease-enter); }
   .cover-img.is-loaded { opacity: 1; }
 }
-/* 无封面：灰底 + accent 方块 + 左下对齐标题（沿用既有骨架，不另发明一套） */
-.book-card-spine {
-  position: absolute;
-  top: var(--sp-4);
-  left: var(--sp-4);
-  width: 8px;
-  height: 8px;
-  background: var(--accent);
-}
+/* 无封面：灰底 + 左下对齐标题（沿用既有骨架，不另发明一套；v48.82/D126：accent 书脊小方块退役，
+   标题位置不动——方块仅 8×8，移除不留洞） */
 .book-card-title {
   align-self: flex-end;
   margin: 0;
@@ -1524,7 +1517,7 @@ body.has-skin .topbar { background: transparent; }
 .shelf-table .col-act .act { color: var(--text-secondary); }
 .shelf-table .col-act .act:hover { background: var(--grey-2); color: var(--text-primary); }
 
-/* 空状态：几何装饰 + 一句话 + 一个主行动 */
+/* 空状态：一句话 + 一个主行动（v48.82/D126：几何装饰三方块退役，文案垂直居中自然补位） */
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -1533,9 +1526,6 @@ body.has-skin .topbar { background: transparent; }
   padding: var(--sp-16) var(--sp-8);
   text-align: center;
 }
-.empty-deco { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-2); }
-.empty-sq { width: 8px; height: 8px; background: var(--grey-2); }
-.empty-sq-accent { background: var(--accent); }
 .empty-text {
   margin: 0;
   max-width: 420px;
@@ -2530,7 +2520,8 @@ body.theme-dark .modal-panel {
 .annot-palette-pick .swatch.on { box-shadow: 0 0 0 2px var(--accent); }
 
 /* ---------- 批注栏（批 4 Task 13 / 规格 §5.3–5.4） ---------- */
-/* 类名与尺寸照 design-samples/annotation-two-modes.html（.zitem/.dot/.zq/.zn/.zmeta/.palette/.filter） */
+/* 类名与尺寸源出 design-samples/annotation-two-modes.html（.zitem/.zq/.zn/.zmeta/.palette/.filter）；
+   v48.82/D126 起条目方点退役、右缘色条 .zbar 承色兼改色入口（样张该点不再对版，见设计稿 D126） */
 .annot-side {
   flex: none;
   display: flex;
@@ -2580,8 +2571,59 @@ body.theme-dark .modal-panel {
 .annot-acts { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; opacity: 0; }
 .annot-side .zitem:hover .annot-acts,
 .annot-side .zitem:focus-within .annot-acts { opacity: 1; }
-/* 色点＝条目的那枚类型方点（样张里条目上只有它一个色块），点它改色 */
-.annot-side .mark-kind[data-annot-color] { cursor: pointer; }
+/* D126 R4.1（Zotero 式引用样式）：色线不再是条目右缘的通高条，改**引用样式**——
+   贴在引文行（.zbody-quote）左侧、与其等高（原文两行/整卡一行），距条目左缘一个内距；
+   纯指示不可点，填色＝条目批注色（inline background）。 */
+.zbody-quote {
+  display: flex;
+  gap: var(--sp-2);
+}
+.zbar {
+  width: 2px;
+  flex: none;
+  align-self: stretch;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+/* ⋯ 钮：meta 行右端常显（R4.1 用户裁定：悬浮在引文上不可见、且易与正文省略号混淆） */
+.zdots {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-helper);
+  cursor: pointer;
+  flex: none;
+}
+.zdots:hover,
+.zdots:focus-visible { background: var(--grey-1); color: var(--text-primary); }
+.zdots:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 选单：dd-menu 族样式全继承（paper + hairline + --shadow-float + --z-dropdown；行 = .dd-item
+   fs-meta / hover grey-1；pop-in 220ms --spring 存量豁免 + origin 随 dd-menu-up/down 翻边，§8.4）。
+   此处补：条目内锚定、宽度收敛（基线 min-width:100% 会拉满整栏留大片空白——双类选择器压过它）、
+   行内容对齐（每行 14px ✓ 槽位：色行＝✓+色块+名，动作行＝空槽+文字，色块与动作文字同缘对齐）。 */
+.zmenu.dd-menu {
+  /* R4.2：fixed 视口定位（top/right 由 ⋯ 钮/条目实测坐标内联注入）——
+     阅读器侧栏的轨 overflow:hidden 与列表滚动容器 overflow:auto 都会裁掉 absolute 选单 */
+  position: fixed;
+  /* 宽度随内容（R4.1 用户裁定：180px 下右侧成片空白）；nowrap 行已由 .dd-item 保证 */
+  width: max-content;
+  min-width: 128px;
+  max-width: min(280px, calc(100vw - 16px));
+}
+.zmenu-color { display: flex; align-items: center; gap: var(--sp-2); }
+.zmenu-check { width: 14px; flex: none; text-align: center; }
+.zmenu-swatch { width: 12px; height: 12px; flex: none; border: 1px solid var(--border-subtle); }
+.zmenu-name { flex: 1; }
+.zmenu-sep { height: 1px; background: var(--border-subtle); margin: var(--sp-1) 0; }
+/* 删除确认态：meta 行「确认删除 / 取消」常显（§8.2 破坏性操作退路；入口在 ⋯ 选单内） */
+.zitem.confirming .annot-acts { opacity: 1; }
 .annot-act {
   background: none;
   border: none;
@@ -2601,29 +2643,20 @@ body.theme-dark .modal-panel {
   white-space: nowrap;
 }
 .annot-del:hover { text-decoration: underline; }
-/* 色点下拉：与调色排同尺度（12px 方块） */
-.annot-side .palette { display: flex; gap: var(--sp-1); margin-top: var(--sp-2); }
-.annot-side .palette button {
-  width: 12px;
-  height: 12px;
-  border: 1px solid var(--border-subtle);
-  padding: 0;
-  cursor: pointer;
-}
+/* D126 R2：条目下方的 12px 方块色板行退役——取色色带随右缘色条滑出（见 .zbar-stack 段）。 */
 
 /* Zotero 式注解条目（栏内与后续阅读器侧栏共用）：
-   左竖线（段锚＝批注色实色 / 整卡＝主题色）+ 方点 + 引文 + 批注 + 时间 */
+   左竖线（段锚＝批注色实色 / 整卡＝主题色）+ 引文 + 批注 + 时间 + 右缘色条（改色入口，D126） */
 .zitem {
+  position: relative; /* ⋯ 选单的定位锚（D126 R4） */
   display: flex;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-2);
+  /* 左右 12px（R4.1 用户裁定：左右留白稍大、与上下分布均匀） */
+  padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border-subtle);
-  border-left: 2px solid var(--zline, transparent);
 }
-/* 整卡批注（R32）：恒置顶 + 整块 --accent-soft 底 + 左缘 2px --accent */
-.zitem.whole { background: var(--accent-soft); border-left-color: var(--accent); }
-.zitem.whole .dot { background: var(--accent); }
-.dot { width: 8px; height: 8px; flex: none; margin-top: 5px; cursor: pointer; }
+/* 整卡批注（R32）：恒置顶 + 整块 --accent-soft 底（批注色由引文行左侧引用式色线承担，R4.1） */
+.zitem.whole { background: var(--accent-soft); }
 .zitem .zq {
   font-size: var(--fs-secondary);
   color: var(--text-secondary);
@@ -2648,7 +2681,10 @@ body.theme-dark .modal-panel {
 .zitem .zmeta {
   font-size: var(--fs-meta);
   color: var(--text-helper);
-  margin-top: var(--sp-1);
+  /* 组间节奏（better-layout 2×）：引文组内 4px、引文组→meta 组 8px；
+     margin-bottom 归零（<p> 的 UA 默认 1em 曾在 meta 行下留 12px 成片空白——实测） */
+  margin-top: var(--sp-2);
+  margin-bottom: 0;
   display: flex;
   gap: var(--sp-2);
   align-items: center;
@@ -2657,10 +2693,8 @@ body.theme-dark .modal-panel {
   flex-wrap: wrap;
 }
 .tag-whole { font-size: var(--fs-meta); color: var(--accent); }
-/* 两类可辨（R39）：摘录＝实心方点 / 纯高亮＝空心方点；「高亮」标签用默认色（不抢批注色） */
-.mark-kind { width: 8px; height: 8px; flex: none; margin-top: 5px; }
-.mark-kind.k-extract { border: 1px solid var(--text-secondary); }
-.mark-kind.k-extract.filled { background: currentColor; border-color: transparent; }
+/* 两类可辨（R39；v48.82/D126 方点退役）：摘录/高亮由 meta 行 kind-tag 独自承担；
+   「高亮」标签用默认色（不抢批注色） */
 .kind-tag {
   font-size: var(--fs-meta);
   color: var(--text-helper);
@@ -3383,8 +3417,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 }
 /* v48.59（D100 用户指令三 + 「不要以文字承色」更正）：复习页三档计数**无彩色**（标签 helper /
    数字主文字色），结构性由档间 hairline 竖分隔承担（8px 方形色点退役）。
-   基类 .count-dot 仅剩结构职责——摘录页「N 条待处理」仍在消费（ExtractReviewView，不在本批范围）。 */
-.count-dot { display: inline-block; }
+   v48.82/D126：摘录页「N 条待处理」的预览方点亦退役，.count-dot 类全部移除。 */
 .review-count[data-review-counts] .qi + .qi { border-left: 1px solid var(--border-subtle); padding-left: var(--sp-4); }
 /* v48.59（D100 R3 用户裁定）：数字与标签同字号同字重（--fs-meta/500）——计数是次要信息，不强调数字；
    主文字色与 tabular-nums 保留（多位数字滚动不跳宽）。--fs-stat 随此零消费（Token 保留）。 */
@@ -3411,12 +3444,6 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 @media (prefers-reduced-motion: no-preference) {
   .review-progress > b { transition: width var(--dur-chart) var(--ease); }
 }
-/* 空态装饰方块入场（§9 Empty 行）：rise 400ms；reduce 降级（规则在 no-preference 作用域内）。
-   只挂复习页滚动根（§12 P4 白名单页）；摘录/阅读页空态归各自批次。 */
-@media (prefers-reduced-motion: no-preference) {
-  .review-wrap .empty-sq { animation: ctas-rise 400ms var(--ease-out-soft) both; }
-}
-@keyframes ctas-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 /* 底部动作栏：几何由共用 .stage-bar 提供（元素挂双类 stage-bar review-bar）。
    .review-bar 仅作为作用域/测试钩子保留。评分网格显式复位 margin-top，堵住通用 .grade-row 的 48px 泄漏。 */
 /* v48.59（D100 R2 用户实测：窄列下「重来/困难」逐字竖排）：按钮 nowrap 硬保证 + 行级容器查询
@@ -5071,33 +5098,66 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 /* ---------- 阅读器侧栏三页签（批 4 Task 15 / 规格 §5.3） ---------- */
 /* 页签行：与 Zotero 侧栏同规——三枚页签、当前项 accent 下划线、直角。
    同刻只显示一个面板（其余不渲染）。 */
+/* D127：页签行＝侧栏主役导航，与右列工具行同带（56 = 8 内距 + 40 钮 + 8 内距）；
+   左让位 var(--sp-16)（16+40+8，浮动开关钮 gutter，D85 同一让位 Token）。
+   激活态＝全应用页签语言（顶栏同款：文字主色 + 2px accent 下划线，瞬切不做位移动画）。 */
 .reader-sidebar .tabs {
   flex: none;
   display: flex;
+  gap: var(--sp-2);
+  height: 56px;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-16);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.reader-sidebar .tabs > button[role="tab"] {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: none;
+  font-size: var(--fs-secondary);
+  color: var(--reader-fg, var(--text-helper));
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: inset 0 -2px 0 transparent;
+}
+.reader-sidebar .tabs > button[role="tab"]:hover {
+  color: var(--reader-fg, var(--text-primary));
+  background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent);
+}
+.reader-sidebar .tabs > button[role="tab"].on {
+  color: var(--reader-fg, var(--text-primary));
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+/* v48.44（D84）：页签恒可点——aria-disabled 禁用态随 D83 口径作废删除。 */
+/* D127：摘录页签的上下文工具行（筛选 3 段 + 排序 2 段，3:2 铺满、24 高）——
+   贴面板顶、hairline 与列表分隔，不随列表滚动（面板 flex 列，列表在 .annot-side-body 自滚）。
+   几何沿用原栏头行（D85 同一套 .filter/.sort 段控语言）。 */
+.reader-side-panel[data-panel="extracts"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.reader-annot-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-2) var(--sp-3);
   border-bottom: 1px solid var(--border-subtle);
 }
-/* v48.43（D83）：页签行对齐摘录页批注栏头（24 高/meta/选中 grey-1 底）；
-   reader-fg 混色保阅读主题（纸白/羊皮/暗夜）下的可读性，形态与 rail 头一致 */
-.reader-sidebar .tabs > button[role="tab"] {
+.reader-annot-toolbar .filter,
+.reader-annot-toolbar .sort { display: flex; flex: 3; min-width: 0; gap: var(--sp-1); }
+.reader-annot-toolbar .sort { flex: 2; }
+.reader-annot-toolbar .filter button,
+.reader-annot-toolbar .sort button { flex: 1; min-width: 0; height: 24px; padding: 0; font-size: var(--fs-meta); }
+.reader-side-panel[data-panel="extracts"] .annot-side {
   flex: 1;
-  min-width: 0;
-  height: 24px;
-  padding: 0 var(--sp-2);
-  background: none;
-  border: none;
-  font-size: var(--fs-meta);
-  color: var(--reader-fg, var(--text-helper));
-  cursor: pointer;
-  white-space: nowrap;
+  min-height: 0;
+  width: 100%;
+  border-right: none;
 }
-.reader-sidebar .tabs > button[role="tab"]:hover { background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent); }
-.reader-sidebar .tabs > button[role="tab"].on {
-  background: color-mix(in srgb, var(--reader-fg, #1a1a1a) 8%, transparent);
-  color: var(--reader-fg, var(--text-primary));
-}
-/* v48.44（D84）：页签恒可点——aria-disabled 禁用态随 D83 口径作废删除。 */
 .reader-side-panel { flex: 1; min-height: 0; overflow: auto; }
 /* 图谱目录条目（D4）：标题 + 区间文字 + 层级缩进（由行内 paddingLeft 给）。
    **不画占比条**：条的宽度＝自有区间÷全书单元数，是同一份区间的冗余编码，用户明确不要。 */
@@ -6848,12 +6908,13 @@ body.capture-body #root { height: 100vh; }
 .extract-annot-rail .annot-side { height: 100%; }
 /* D123：制卡台推让改由全局 html[data-wb-open] → .app-main 的 margin 承担（见「制卡台 CardDock」节），
    摘录页/阅读器不再各写让位规则。 */
-/* 栏头行（v7/D74 让位更新；v48.45/D85 起阅读器侧栏轨共用同一套）：与 fixed 开关钮**同一行**——
+/* 栏头行（v7/D74 让位更新；v48.45/D85 起共用）：与 fixed 开关钮**同一行**——
    头行左让位 var(--sp-16)（16+40+8，钮宽 40 定宽），行顶 y＝顶栏下 16px 与钮顶对齐、行高随钮降 24；
    「注解 N」已由 showCount={false} 关闭（用户裁定省一行）。两条段控按 3:2 有比例铺满剩余宽，
-   按钮 24 高＝8×3 模块。 */
-.extract-annot-rail .annot-side-head,
-.reader-side-rail .annot-side-head {
+   按钮 24 高＝8×3 模块。
+   D127：阅读器侧栏的筛选/排序段控已降级为摘录页签内上下文工具行（.reader-annot-toolbar），
+   本组规则仅摘录页轨继续使用。 */
+.extract-annot-rail .annot-side-head {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
@@ -6863,19 +6924,12 @@ body.capture-body #root { height: 100vh; }
   border-bottom: none; /* 头行浮在钮旁，基线版的整行 hairline 只会从让位点起笔成断线 */
 }
 .extract-annot-rail .annot-side-head .filter,
-.extract-annot-rail .annot-side-head .sort,
-.reader-side-rail .annot-side-head .filter,
-.reader-side-rail .annot-side-head .sort { display: flex; flex: 3; min-width: 0; gap: var(--sp-1); }
-.extract-annot-rail .annot-side-head .sort,
-.reader-side-rail .annot-side-head .sort { flex: 2; }
+.extract-annot-rail .annot-side-head .sort { display: flex; flex: 3; min-width: 0; gap: var(--sp-1); }
+.extract-annot-rail .annot-side-head .sort { flex: 2; }
 .extract-annot-rail .annot-side-head .filter button,
-.extract-annot-rail .annot-side-head .sort button,
-.reader-side-rail .annot-side-head .filter button,
-.reader-side-rail .annot-side-head .sort button { flex: 1; min-width: 0; height: 24px; padding: 0; font-size: var(--fs-meta); }
-/* 条目竖线右移（v7/D74）：轨贴窗左缘后左线贴边看不清（用户裁定）——摘录页作用域把 --zline 竖线
-   从左缘移到右缘；整卡条目的 accent 竖线同步。阅读器 dock 在右侧无此问题，基线 .zitem 左线不动。 */
-.extract-annot-rail .annot-side .zitem { border-left: none; border-right: 2px solid var(--zline, transparent); }
-.extract-annot-rail .annot-side .zitem.whole { border-left: none; border-right-color: var(--accent); }
+.extract-annot-rail .annot-side-head .sort button { flex: 1; min-width: 0; height: 24px; padding: 0; font-size: var(--fs-meta); }
+/* 条目左线已整体退役（D126 R4.1）：批注色改由条目内引用式色线（.zbody-quote .zbar）承担，
+   基线与轨内都不再画边线色条。 */
 /* 主列（v5/D72）：头带 + 卡面都在这里；水平留白 var(--sp-16) —— 头带的负边距满宽公式在此之上原样成立 */
 .extract-main {
   flex: 1;
@@ -6947,6 +7001,12 @@ body.capture-body #root { height: 100vh; }
   font-size: var(--fs-meta);
   border-color: var(--border-subtle);
   color: var(--text-helper);
+}
+/* D127：阅读器侧栏开关钮——两态同位同高（与右列工具行对齐：top 48+8、高 40 = .btn 同高；
+   作废「收起态 56 / 展开态 60」双轨）。摘录页共用基线（40×24 / top 48+12）不动。 */
+.annot-toggle.bar-btn[data-reader-sidebar-toggle] {
+  top: calc(48px + var(--sp-2));
+  height: 40px;
 }
 .annot-toggle.bar-btn:hover { border-color: var(--text-primary); color: var(--text-primary); }
 
@@ -7111,11 +7171,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
    改 CSS Custom Highlight API 绘制层——注册名沿用 extract-quote-hl，色值不变 */
 ::highlight(extract-quote-hl) { background-color: var(--hl-multi); }
 .extract-page-head .review-count { align-self: auto; }
-/* D88 §6.5：「N 条待处理」计数升级为预览 .pending 形态——8px accent 方点 + 数字 mono 600。
-   外层 .review-count 类保留（测试钩子）；内部 <i class="count-dot"> 纯装饰不加 data 钩子。
+/* D88 §6.5 的预览方点已于 v48.82/D126 退役——计数只留「数字 + 条待处理」（数字 mono 600 保留）。
+   外层 .review-count 类保留（测试钩子）；gap 维持 D88 时的 8px 节距。
    作用域锁定摘录页（复习页顶栏统计块属 P4 §7.2，不动）。 */
 .extract-page .review-count { align-items: center; gap: var(--sp-2); }
-.extract-page .review-count .count-dot { width: 8px; height: 8px; background: var(--accent); flex: none; }
 .extract-page .review-count b { font-weight: 600; margin-left: 0; }
 .extract-page-header { color: var(--text-primary); }
 .extract-page-hint { margin-left: auto; }
@@ -8013,8 +8072,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .ai-kp { margin-top: 0; padding: var(--sp-2) 0 var(--sp-1); border-bottom: 1px solid var(--border-subtle); }
 .ai-kp-text { font-size: var(--fs-secondary); }
 
-/* 阅读器：收起态「展开」钮与工具行同高对齐（展开态浮在轨头，保持不变） */
-.annot-toggle.bar-btn[data-reader-sidebar-toggle][aria-expanded="false"] { top: calc(48px + var(--sp-2)); }
+/* 阅读器开关钮两态同位同高（D127）：规则并入上方 [data-reader-sidebar-toggle] 覆盖，收起态特例退役。 */
 
 /* 字段紧凑化（单行起步）：段落零外距，防止 ProseMirror 的 <p> 外距撑出第二行 */
 .wb-field .markdown-editor .ProseMirror p { margin: 0; }

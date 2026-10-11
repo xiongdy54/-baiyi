@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>D126 R3 · 批注改色入口 5 版样式预览（真实 Token · 实现契约版）</title>
+<style>
+/* ===== 项目真实 Token（抄自 src/theme.css :root，浅色档；实现时直接引用，不另造值） ===== */
+:root {
+  --paper: #fafaf8;
+  --grey-1: #f0f0ee;
+  --grey-2: #d4d4d2;
+  --grey-3: #737373;
+  --ink: #0a0a0a;
+  --text-primary: var(--ink);
+  --text-secondary: #525252;
+  --text-helper: var(--grey-3);
+  --border-subtle: #e0e0e0;
+  --border-strong: #a3a3a3;
+  --accent: #166a59;
+  --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
+  --error: #b42318;
+  --shadow-float: 0 8px 24px rgba(10, 10, 10, 0.12);
+  --font-sans: "Inter", "Helvetica Neue", "Helvetica", "Arial", "Segoe UI Variable",
+    "Segoe UI", system-ui, "PingFang SC", "Hiragino Sans GB", "Source Han Sans SC",
+    "Noto Sans SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", "SF Mono", "Cascadia Code",
+    Consolas, ui-monospace, monospace;
+  --fs-body: 14px;
+  --fs-secondary: 13px;
+  --fs-meta: 12px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --dur-hover: 160ms;
+  --dur-panel: 240ms;
+  --dur-view: 200ms;
+  --dur-enter: 150ms;
+  --dur-exit: 100ms;
+  --ease-enter: cubic-bezier(0, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --scale-in: 0.98;
+  /* 批注色板（D122 默认 5 色；渲染取 --annot-<name>） */
+  --annot-yellow: #f2b705;
+  --annot-red: #e5484d;
+  --annot-green: #2fa866;
+  --annot-blue: #3e7bfa;
+  --annot-purple: #8b5cf6;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 32px 40px 80px; background: var(--paper); color: var(--text-primary);
+  font-family: var(--font-sans); font-size: var(--fs-body); line-height: 1.6;
+}
+h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+.lede { color: var(--text-secondary); max-width: 760px; margin: 0 0 8px; }
+.contract-note { color: var(--text-helper); font-size: var(--fs-meta); font-family: var(--font-mono); max-width: 760px; margin: 0 0 24px; }
+section { margin: 56px 0; }
+.var-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.var-no { font-family: var(--font-mono); font-size: 12px; color: var(--accent); font-weight: 700; }
+.var-name { font-size: 16px; font-weight: 600; }
+.var-mech { color: var(--text-secondary); font-size: 13px; margin: 0 0 14px; max-width: 760px; }
+.contract {
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; color: var(--text-helper);
+  border-top: 1px solid var(--border-subtle); padding-top: 8px; margin-top: 14px; max-width: 760px;
+  white-space: pre-wrap;
+}
+.hint { font-size: 12px; color: var(--text-helper); margin: 0 0 10px; }
+.hint b { color: var(--text-secondary); font-weight: 600; }
+
+/* ===== 侧栏与条目骨架（与 AnnotationPanel/extract 轨同构：无左线，右缘 2px 色线＝rest 唯一色彩元素） ===== */
+.sidebar { width: 280px; border: 1px solid var(--border-subtle); background: var(--paper); }
+.zitem { position: relative; display: flex; gap: var(--sp-2); padding: var(--sp-2) 0 var(--sp-2) var(--sp-2); border-bottom: 1px solid var(--border-subtle); cursor: pointer; }
+.zitem:hover { background: var(--grey-1); }
+.zbody { flex: 1; min-width: 0; padding-right: var(--sp-2); }
+.zq { margin: 0 0 var(--sp-1); font-size: var(--fs-secondary); color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.zmeta { margin: var(--sp-1) 0 0; font-family: var(--font-mono); font-feature-settings: "tnum"; font-size: var(--fs-meta); color: var(--text-helper); display: flex; gap: var(--sp-2); align-items: center; }
+.kindtag { border: 1px solid var(--border-subtle); padding: 0 4px; white-space: nowrap; }
+.kindtag.t-extract { color: var(--text-primary); border-color: var(--border-strong); }
+.zdel { margin-left: auto; opacity: 0; background: none; border: none; padding: 0; font-size: var(--fs-meta); color: var(--error, #b42318); cursor: pointer; font-family: var(--font-mono); }
+.zitem:hover .zdel { opacity: 1; }
+/* rest：右缘 2px 色线（五版共用；true button，键盘可达，隐形命中加宽） */
+.zedge {
+  position: relative; width: 2px; flex: none; border: none; padding: 0; cursor: pointer;
+  background: var(--zline, var(--grey-2)); transform-origin: right center;
+}
+.zedge::after { content: ""; position: absolute; top: 0; bottom: 0; left: -8px; right: -2px; }
+@media (hover: hover) { .zedge:hover { opacity: 0.72; } }
+.zedge:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.demo-tag { font-family: var(--font-mono); font-size: 10px; color: var(--accent); letter-spacing: 0.08em; }
+
+/* ===================== V-A 整行下展色带（用户方向：占满条目宽） ===================== */
+/* 结构改 grid：行 1＝正文+右缘线；行 2＝色带（跨双列，真·全宽）。点击细线钉住展开（悬浮只作可供性——
+   收展引起列表重排，hover 触发会让列表跳动，故钉住制）。色带显形＝§7 唯一折叠 grid-template-rows 0fr↔1fr。 */
+.vA.zitem { display: grid; grid-template-columns: 1fr 2px; grid-template-rows: auto auto; }
+.vA .zbody { grid-column: 1; grid-row: 1; }
+.vA .zedge { grid-column: 2; grid-row: 1; }
+.vA-clip { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-rows: 0fr; visibility: hidden; }
+.vA.is-open .vA-clip { grid-template-rows: 1fr; visibility: visible; }
+.vA-band { overflow: hidden; min-height: 0; display: flex; gap: 1px; padding: 6px 0 2px; }
+.vA-seg { flex: 1; height: 16px; border: none; padding: 0; cursor: pointer; position: relative; }
+.vA-seg:hover { opacity: 0.8; }
+/* 当前色段＝底部 2px 纸色缺口（不新增颜色/描边语言） */
+.vA-seg.cur::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--paper); }
+@media (prefers-reduced-motion: no-preference) {
+  .vA-clip { transition: grid-template-rows var(--dur-view) var(--ease-out-soft), visibility 0s var(--dur-view); }
+  .vA.is-open .vA-clip { transition: grid-template-rows var(--dur-panel) var(--ease-out-soft), visibility 0s; }
+  .vA-band { opacity: 0; transition: opacity var(--dur-view) var(--ease-out-soft); }
+  .vA.is-open .vA-band { opacity: 1; transition-delay: 50ms; }
+}
+
+/* ===================== V-B 浮层色板卡（dd-menu 同族 popover） ===================== */
+/* 点击细线弹出小卡：paper 底 + hairline 描边 + --shadow-float（全应用唯一允许阴影）；16px 方块排。
+   显形＝§8.4 pop-in（220ms --spring 存量豁免），transform-origin 随落位（本样张右下锚＝100% 0）。 */
+.vB.zitem { }
+.vB-card {
+  position: absolute; right: 0; top: calc(100% - 1px); z-index: 100;
+  display: flex; gap: 6px; padding: 8px; background: var(--paper);
+  border: 1px solid var(--border-subtle); box-shadow: var(--shadow-float);
+  visibility: hidden; opacity: 0; transform: scale(var(--scale-in)); transform-origin: 100% 0;
+  pointer-events: none;
+}
+.vB.is-open .vB-card { visibility: visible; opacity: 1; transform: none; pointer-events: auto; }
+.vB-chip { width: 16px; height: 16px; border: none; padding: 0; cursor: pointer; position: relative; }
+.vB-chip:hover { opacity: 0.8; }
+.vB-chip.cur::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--paper); }
+@media (prefers-reduced-motion: no-preference) {
+  .vB-card { transition: opacity var(--dur-exit) var(--ease-exit), transform var(--dur-exit) var(--ease-exit), visibility 0s var(--dur-exit); }
+  .vB.is-open .vB-card { transition: opacity 220ms var(--spring), transform 220ms var(--spring), visibility 0s; }
+}
+
+/* ===================== V-C 底缘光谱下划线（一个元素两种职责） ===================== */
+/* 悬浮条目（任意处，触发面大）＝条目底缘 hairline 原位变 4px 光谱：5 段等宽色块自右缘铺开（scaleX
+   origin right），最右段恒＝当前色（与右缘 2px 细线连成一体）；点任一段＝换色。overlay 不重排。 */
+.vC.zitem { padding-bottom: var(--sp-3); }
+.vC-underline {
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 4px;
+  display: flex; gap: 1px; transform: scaleX(0); transform-origin: right center;
+  visibility: hidden; pointer-events: none;
+}
+.vC:hover .vC-underline, .vC:focus-within .vC-underline, .vC.is-open .vC-underline { transform: none; visibility: visible; pointer-events: auto; }
+.vC-seg { flex: 1; border: none; padding: 0; cursor: pointer; position: relative; }
+.vC-seg:hover { opacity: 0.8; }
+.vC-seg.cur::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--paper); }
+@media (prefers-reduced-motion: no-preference) {
+  .vC-underline { transition: transform var(--dur-view) var(--ease-out-soft), visibility 0s var(--dur-view); }
+  .vC:hover .vC-underline, .vC:focus-within .vC-underline, .vC.is-open .vC-underline { transition: transform var(--dur-view) var(--ease-out-soft), visibility 0s; }
+  .vC-seg { opacity: 0; transition: opacity var(--dur-view) var(--ease-out-soft); }
+  .vC:hover .vC-seg, .vC:focus-within .vC-seg, .vC.is-open .vC-seg { opacity: 1; }
+  .vC:hover .vC-seg:nth-child(1), .vC:focus-within .vC-seg:nth-child(1), .vC.is-open .vC-seg:nth-child(1) { transition-delay: 120ms; }
+  .vC:hover .vC-seg:nth-child(2), .vC:focus-within .vC-seg:nth-child(2), .vC.is-open .vC-seg:nth-child(2) { transition-delay: 90ms; }
+  .vC:hover .vC-seg:nth-child(3), .vC:focus-within .vC-seg:nth-child(3), .vC.is-open .vC-seg:nth-child(3) { transition-delay: 60ms; }
+  .vC:hover .vC-seg:nth-child(4), .vC:focus-within .vC-seg:nth-child(4), .vC.is-open .vC-seg:nth-child(4) { transition-delay: 30ms; }
+  .vC:hover .vC-seg:nth-child(5), .vC:focus-within .vC-seg:nth-child(5), .vC.is-open .vC-seg:nth-child(5) { transition-delay: 0ms; }
+}
+
+/* ===================== V-D 色票折页（右缘滑出的大色票竖排） ===================== */
+/* 悬浮细线＝右缘滑出一叠 44×16 色票（hairline 描边、2px 纸缝，30ms 阶梯 stagger，§3-6 预算内），
+   叠在正文上（overlay 不重排）；当前色票描边转 --ink。点击色票换色。 */
+.vD-tickets {
+  position: absolute; right: 2px; top: var(--sp-1); z-index: 100;
+  display: flex; flex-direction: column; gap: 2px;
+  visibility: hidden; pointer-events: none;
+}
+.vD:hover .vD-tickets, .vD:focus-within .vD-tickets, .vD.is-open .vD-tickets { visibility: visible; pointer-events: auto; }
+.vD-tk { width: 44px; height: 16px; border: 1px solid var(--border-subtle); padding: 0; cursor: pointer; background-clip: padding-box; }
+.vD-tk:hover { opacity: 0.8; }
+.vD-tk.cur { border-color: var(--ink); }
+@media (prefers-reduced-motion: no-preference) {
+  .vD-tk { opacity: 0; transform: translateX(6px); transition: opacity var(--dur-view) var(--ease-out-soft), transform var(--dur-view) var(--ease-out-soft); }
+  .vD:hover .vD-tk, .vD:focus-within .vD-tk, .vD.is-open .vD-tk { opacity: 1; transform: none; }
+  .vD:hover .vD-tk:nth-child(1), .vD:focus-within .vD-tk:nth-child(1), .vD.is-open .vD-tk:nth-child(1) { transition-delay: 0ms; }
+  .vD:hover .vD-tk:nth-child(2), .vD:focus-within .vD-tk:nth-child(2), .vD.is-open .vD-tk:nth-child(2) { transition-delay: 30ms; }
+  .vD:hover .vD-tk:nth-child(3), .vD:focus-within .vD-tk:nth-child(3), .vD.is-open .vD-tk:nth-child(3) { transition-delay: 60ms; }
+  .vD:hover .vD-tk:nth-child(4), .vD:focus-within .vD-tk:nth-child(4), .vD.is-open .vD-tk:nth-child(4) { transition-delay: 90ms; }
+  .vD:hover .vD-tk:nth-child(5), .vD:focus-within .vD-tk:nth-child(5), .vD.is-open .vD-tk:nth-child(5) { transition-delay: 120ms; }
+}
+
+/* ===================== V-E 整条覆盖色板（占满整个条目的色块版面） ===================== */
+/* 点击细线＝paper 底色板整版滑入盖住条目（translateX(100%)→0，overlay 零重排）：5 个等宽全高色字段，
+   Mondrian 式大色面；当前色若在色板内＝底部 2px 纸色缺口，hover 字段轻压暗；右缘细线浮在版面上
+   （z-index）保持「当前色」恒可见。点任一字段＝换色并滑出。 */
+.vE.zitem { }
+.vE-sheet {
+  position: absolute; inset: 0; z-index: 50; display: flex;
+  background: var(--paper); border-bottom: 1px solid var(--border-subtle);
+  transform: translateX(100%); visibility: hidden; pointer-events: none;
+}
+.vE.is-open .vE-sheet { transform: none; visibility: visible; pointer-events: auto; }
+.vE-field { flex: 1; border: none; padding: 0; cursor: pointer; position: relative; }
+.vE-field:hover { opacity: 0.85; }
+.vE-field.cur::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--paper); }
+.vE .zedge { z-index: 60; }
+@media (prefers-reduced-motion: no-preference) {
+  .vE-sheet { transition: transform var(--dur-view) var(--ease-out-soft), visibility 0s var(--dur-view); }
+  .vE.is-open .vE-sheet { transition: transform var(--dur-panel) var(--ease-out-soft), visibility 0s; }
+}
+</style>
+</head>
+<body>
+<h1>批注改色入口 · 5 版样式预览（D126 R3）</h1>
+<p class="lede">五版共用同一 rest 形态：右缘 2px 细色线（条目上唯一的常驻色彩元素）。差别只在「展开成什么、怎么展开」。每版下方是<b>实现契约</b>——DOM 结构、状态机与动效参数都钉死，选中哪版，实现就是把契约里的 CSS/DOM 原样移植进 theme.css / AnnotationPanel，再用几何探针与样张对版。</p>
+<p class="contract-note">颜色＝D122 默认色板 yellow/red/green/blue/purple（点击色块真的会改当前条目颜色，可试）。全部动效仅 transform/opacity，hover 规则包 (hover:hover)，reduce 直切。</p>
+
+<!-- ============ V-A ============ -->
+<section>
+  <div class="var-head"><span class="var-no">V-A</span><span class="var-name">整行下展色带</span></div>
+  <p class="var-mech">你的原方向：色带占满整个条目宽度。点击右缘细线，条目底部整行展开一条 16px 高的等宽色带（推下后续条目）；再点收起。悬浮细线只做轻淡可供性，不展开——收展引起列表重排，hover 触发会让列表跳动，所以钉住制。</p>
+  <div style="display:flex; gap:24px; align-items:flex-start;">
+    <div class="sidebar" data-variant="A">
+      <div class="zitem vA" data-color="annot-green" style="--zline: var(--annot-green);">
+        <div class="zbody">
+          <p class="zq">南京鸭腿阿姨（烤鸭腿）事件：借名校生探店爆火，网友只认“清华北大人大”定位，忽略“鸭腿还是鹅腿”…</p>
+          <p class="zmeta"><span>10-11 17:40</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vA-clip"><div class="vA-band">
+          <button class="vA-seg cur" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vA-seg" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vA-seg" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vA-seg" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vA-seg" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div></div>
+      </div>
+      <div class="zitem vA" data-color="annot-blue" style="--zline: var(--annot-blue);">
+        <div class="zbody">
+          <p class="zq">优绩主义的正当性辩护通常诉诸“才能 + 努力”，但这一辩护忽略了起点的不平等与运气的分量…</p>
+          <p class="zmeta"><span>10-11 17:12</span><span class="kindtag t-extract">摘录</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vA-clip"><div class="vA-band">
+          <button class="vA-seg" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vA-seg" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vA-seg" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vA-seg cur" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vA-seg" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div></div>
+      </div>
+      <div class="zitem vA" data-color="annot-red" style="--zline: var(--annot-red);">
+        <div class="zbody">
+          <p class="zq">学历符号的“充值”机制：当回报分配绑定文凭，竞争就从生产领域转移到信号制造领域…</p>
+          <p class="zmeta"><span>10-11 16:55</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vA-clip"><div class="vA-band">
+          <button class="vA-seg" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vA-seg cur" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vA-seg" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vA-seg" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vA-seg" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div></div>
+      </div>
+    </div>
+    <p class="hint" style="max-width:300px;"><b>试：</b>点击任意条目右缘的细色线展开/收起；点色带上的色段换色（当前色段底部有纸色缺口）。</p>
+  </div>
+  <div class="contract">契约 A
+· 结构：.zitem 改 grid（列 1fr/2px，行 auto/auto）——行1＝.zbody+.zedge，行2＝.vA-clip 跨双列（真全宽）
+· 开合态：.zitem.is-open（点击 .zedge 钉住；外点/Esc 收；aria-expanded 随动；hover 只给 .zedge opacity .72 供可供性）
+· 色带：.vA-clip grid-template-rows 0fr↔1fr（§7 唯一折叠例外）；.vA-band flex 等宽 5 段×16px，gap 1px
+· 动效：开 240ms --dur-panel / 收 200ms --dur-view，--ease-out-soft；色带 opacity 开延迟 50ms、收先走；reduce 直切
+· 取舍：✓ 目标最大（段宽≈55px）、最贴合“占满条目宽”；✗ 收展推挤列表（展开时下方条目下移 24px）</div>
+</section>
+
+<!-- ============ V-B ============ -->
+<section>
+  <div class="var-head"><span class="var-no">V-B</span><span class="var-name">浮层色板卡</span></div>
+  <p class="var-mech">最保守的一版：完全复用应用既有「下拉浮层」语言（Dropdown/书架 CardMenu 同族）。点击细线，在细线下方弹出一张 paper 小卡（hairline 描边 + 全应用唯一允许的 --shadow-float），卡内 16px 方块色板。对老用户零学习成本。</p>
+  <div style="display:flex; gap:24px; align-items:flex-start;">
+    <div class="sidebar" data-variant="B">
+      <div class="zitem vB" data-color="annot-green" style="--zline: var(--annot-green);">
+        <div class="zbody">
+          <p class="zq">南京鸭腿阿姨（烤鸭腿）事件：借名校生探店爆火，网友只认“清华北大人大”定位，忽略“鸭腿还是鹅腿”…</p>
+          <p class="zmeta"><span>10-11 17:40</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vB-card">
+          <button class="vB-chip" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vB-chip" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vB-chip cur" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vB-chip" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vB-chip" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vB" data-color="annot-blue" style="--zline: var(--annot-blue);">
+        <div class="zbody">
+          <p class="zq">优绩主义的正当性辩护通常诉诸“才能 + 努力”，但这一辩护忽略了起点的不平等与运气的分量…</p>
+          <p class="zmeta"><span>10-11 17:12</span><span class="kindtag t-extract">摘录</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vB-card">
+          <button class="vB-chip" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vB-chip" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vB-chip" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vB-chip cur" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vB-chip" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vB" data-color="annot-red" style="--zline: var(--annot-red);">
+        <div class="zbody">
+          <p class="zq">学历符号的“充值”机制：当回报分配绑定文凭，竞争就从生产领域转移到信号制造领域…</p>
+          <p class="zmeta"><span>10-11 16:55</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vB-card">
+          <button class="vB-chip" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vB-chip cur" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vB-chip" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vB-chip" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vB-chip" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+    </div>
+    <p class="hint" style="max-width:300px;"><b>试：</b>点击细线弹出/收起色板卡；点方块换色（当前色块底部纸色缺口）。Esc 或点空白处收起。</p>
+  </div>
+  <div class="contract">契约 B
+· 结构：.vB-card absolute 挂 .zitem（right:0，top:100%-1px），DOM＝zitem 第二子（edge 之后）
+· 开合态：.zitem.is-open（点击 .zedge 钉住；外点/Esc 收；aria-haspopup="menu" + aria-expanded）
+· 卡面：paper 底 + 1px --border-subtle + --shadow-float（全应用唯一阴影 Token）；chips 16×16 gap 6px
+· 动效：§8.4 pop-in——开 220ms --spring（存量豁免）+ transform: scale(--scale-in)→1；收 100ms --dur-exit
+  --ease-exit；transform-origin 100% 0（贴右缘下展，空间不足翻边 100% 100%）；reduce 直切
+· 取舍：✓ 与应用内所有下拉同一语言、实现风险最低；✗ 色板是“卡”不是“条”，与细线的形态连续性弱</div>
+</section>
+
+<!-- ============ V-C ============ -->
+<section>
+  <div class="var-head"><span class="var-no">V-C</span><span class="var-name">底缘光谱下划线</span></div>
+  <p class="var-mech">一个元素两种职责：条目本来的底缘 hairline，悬浮条目（任意位置，触发面最大）时原位变厚成 4px 光谱——5 段等宽色块自右缘铺开（scaleX），当前段以纸色缺口标记，光谱右端与右缘细线相接；点任一段换色。overlay 不重排，离开即收。</p>
+  <div style="display:flex; gap:24px; align-items:flex-start;">
+    <div class="sidebar" data-variant="C">
+      <div class="zitem vC" data-color="annot-green" style="--zline: var(--annot-green);">
+        <div class="zbody">
+          <p class="zq">南京鸭腿阿姨（烤鸭腿）事件：借名校生探店爆火，网友只认“清华北大人大”定位，忽略“鸭腿还是鹅腿”…</p>
+          <p class="zmeta"><span>10-11 17:40</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vC-underline">
+          <button class="vC-seg" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vC-seg" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vC-seg cur" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vC-seg" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vC-seg" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vC" data-color="annot-blue" style="--zline: var(--annot-blue);">
+        <div class="zbody">
+          <p class="zq">优绩主义的正当性辩护通常诉诸“才能 + 努力”，但这一辩护忽略了起点的不平等与运气的分量…</p>
+          <p class="zmeta"><span>10-11 17:12</span><span class="kindtag t-extract">摘录</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vC-underline">
+          <button class="vC-seg" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vC-seg" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vC-seg" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vC-seg cur" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vC-seg" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vC" data-color="annot-red" style="--zline: var(--annot-red);">
+        <div class="zbody">
+          <p class="zq">学历符号的“充值”机制：当回报分配绑定文凭，竞争就从生产领域转移到信号制造领域…</p>
+          <p class="zmeta"><span>10-11 16:55</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vC-underline">
+          <button class="vC-seg" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vC-seg cur" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vC-seg" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vC-seg" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vC-seg" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+    </div>
+    <p class="hint" style="max-width:300px;"><b>试：</b>把鼠标悬到任意条目上——底缘hairline 变 4px 光谱自右铺开；点色段换色。移开即收。</p>
+  </div>
+  <div class="contract">契约 C
+· 结构：.vC-underline absolute（left:0 right:0 bottom:-1px，盖在条目 border-bottom 上），DOM＝zitem 末子
+· 开合态：hover/focus-within/.is-open 三入口（hover 规则包 (hover:hover)）；纯 overlay，零重排
+· 光谱：5 段 flex 等宽（段宽≈55px）×4px 高，gap 1px；当前段＝底部 2px 纸色缺口标记；
+  光谱右端与右缘 2px 细线相接（同源 --zline）
+· 动效：容器 scaleX 0→1（origin right）200ms --dur-view --ease-out-soft；段 opacity 自右向左 30ms 阶梯
+  （5×30=150ms ≤ §3-6 预算）；reduce 直切
+· 取舍：✓ 零新增视觉词汇（底缘线本来就在）、一个元素双职责、触发面最大；✗ 4px 高的目标偏扁（但段宽大），
+  悬浮整行即展开可能“太主动”，可收窄为仅悬浮细线触发</div>
+</section>
+
+<!-- ============ V-D ============ -->
+<section>
+  <div class="var-head"><span class="var-no">V-D</span><span class="var-name">色票折页</span></div>
+  <p class="var-mech">右缘滑出一叠「色票」：44×16 的大票面（hairline 描边、2px 纸缝），30ms 阶梯自右滑入，像翻开的色卡折页。目标比上一版（6px 细条簇）大得多，且票面有描边、有呼吸，不再挤成一团。悬浮细线即出，移开即收。</p>
+  <div style="display:flex; gap:24px; align-items:flex-start;">
+    <div class="sidebar" data-variant="D">
+      <div class="zitem vD" data-color="annot-green" style="--zline: var(--annot-green);">
+        <div class="zbody">
+          <p class="zq">南京鸭腿阿姨（烤鸭腿）事件：借名校生探店爆火，网友只认“清华北大人大”定位，忽略“鸭腿还是鹅腿”…</p>
+          <p class="zmeta"><span>10-11 17:40</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vD-tickets">
+          <button class="vD-tk" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vD-tk" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vD-tk cur" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vD-tk" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vD-tk" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vD" data-color="annot-blue" style="--zline: var(--annot-blue);">
+        <div class="zbody">
+          <p class="zq">优绩主义的正当性辩护通常诉诸“才能 + 努力”，但这一辩护忽略了起点的不平等与运气的分量…</p>
+          <p class="zmeta"><span>10-11 17:12</span><span class="kindtag t-extract">摘录</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vD-tickets">
+          <button class="vD-tk" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vD-tk" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vD-tk" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vD-tk cur" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vD-tk" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vD" data-color="annot-red" style="--zline: var(--annot-red);">
+        <div class="zbody">
+          <p class="zq">学历符号的“充值”机制：当回报分配绑定文凭，竞争就从生产领域转移到信号制造领域…</p>
+          <p class="zmeta"><span>10-11 16:55</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vD-tickets">
+          <button class="vD-tk" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vD-tk cur" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vD-tk" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vD-tk" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vD-tk" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+    </div>
+    <p class="hint" style="max-width:300px;"><b>试：</b>悬浮条目右缘细线——色票折页阶梯滑出；点色票换色（当前票描边转墨色）。移开即收。</p>
+  </div>
+  <div class="contract">契约 D
+· 结构：.vD-tickets absolute（right:2px，top:4px，紧贴细线左缘），DOM＝zitem 末子；overlay 不重排
+· 开合态：hover .zedge（:has 联动）+ focus-within + .is-open 三入口；色票 hover 持续在场（票在 .zitem 内）
+· 票面：44×16、1px --border-subtle 描边、background-clip: padding-box；当前票 border-color 转 --ink
+· 动效：票 opacity 0→1 + translateX(6px)→0，200ms --dur-view --ease-out-soft，自上而下 30ms 阶梯
+  （5×30=150ms ≤ §3-6 预算）；reduce 直切
+· 取舍：✓ 目标大、形态与「折页/书签」隐喻连续、动效有节奏；✗ 叠在引文文字上（短暂遮挡），
+  5 张票竖排占高 ≈90px，高于条目时会溢出到相邻条目（需 overflow 容忍或改横排）</div>
+</section>
+
+<!-- ============ V-E ============ -->
+<section>
+  <div class="var-head"><span class="var-no">V-E</span><span class="var-name">整条覆盖色板（占满整个条目）</span></div>
+  <p class="var-mech">最彻底的「占满」：点击细线，一张 paper 底色板整版从右滑入、盖住整个条目——5 个等宽全高的大色字段并排（Mondrian 式色面），点任一字段换色并滑出。当前色若在色板内，其字段底部有纸色缺口；右缘细线浮在版面之上，当前色恒可见。overlay 零重排。</p>
+  <div style="display:flex; gap:24px; align-items:flex-start;">
+    <div class="sidebar" data-variant="E">
+      <div class="zitem vE" data-color="annot-green" style="--zline: var(--annot-green);">
+        <div class="zbody">
+          <p class="zq">南京鸭腿阿姨（烤鸭腿）事件：借名校生探店爆火，网友只认“清华北大人大”定位，忽略“鸭腿还是鹅腿”…</p>
+          <p class="zmeta"><span>10-11 17:40</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vE-sheet">
+          <button class="vE-field" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vE-field" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vE-field cur" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vE-field" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vE-field" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vE" data-color="annot-blue" style="--zline: var(--annot-blue);">
+        <div class="zbody">
+          <p class="zq">优绩主义的正当性辩护通常诉诸“才能 + 努力”，但这一辩护忽略了起点的不平等与运气的分量…</p>
+          <p class="zmeta"><span>10-11 17:12</span><span class="kindtag t-extract">摘录</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vE-sheet">
+          <button class="vE-field" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vE-field" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vE-field" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vE-field cur" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vE-field" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+      <div class="zitem vE" data-color="annot-red" style="--zline: var(--annot-red);">
+        <div class="zbody">
+          <p class="zq">学历符号的“充值”机制：当回报分配绑定文凭，竞争就从生产领域转移到信号制造领域…</p>
+          <p class="zmeta"><span>10-11 16:55</span><span class="kindtag">高亮</span><span>段锚</span><button class="zdel">删除</button></p>
+        </div>
+        <button class="zedge" aria-label="改高亮颜色" aria-expanded="false"></button>
+        <div class="vE-sheet">
+          <button class="vE-field" style="background: var(--annot-yellow)" data-c="annot-yellow" aria-label="改为 yellow"></button>
+          <button class="vE-field cur" style="background: var(--annot-red)" data-c="annot-red" aria-label="改为 red"></button>
+          <button class="vE-field" style="background: var(--annot-green)" data-c="annot-green" aria-label="改为 green"></button>
+          <button class="vE-field" style="background: var(--annot-blue)" data-c="annot-blue" aria-label="改为 blue"></button>
+          <button class="vE-field" style="background: var(--annot-purple)" data-c="annot-purple" aria-label="改为 purple"></button>
+        </div>
+      </div>
+    </div>
+    <p class="hint" style="max-width:300px;"><b>试：</b>点击条目右缘细线——paper 色板整版自右滑入盖住条目；点任一大色面换色并滑出。Esc/点空白收起。</p>
+  </div>
+  <div class="contract">契约 E
+· 结构：.vE-sheet absolute inset:0（盖满条目含 padding），DOM＝zitem 末子；.vE .zedge z-index 浮于版面
+· 开合态：.zitem.is-open（点击 .zedge 钉住；外点/Esc 收；选色后自动收）；纯 overlay 零重排
+· 色面：5 字段 flex 等宽全高（字段宽≈55px × 条目高≈70px，目标极大）；当前色字段底部 2px 纸色缺口；
+  字段 hover opacity .85
+· 动效：translateX(100%)→none——开 240ms --dur-panel / 收 200ms --dur-view，--ease-out-soft（§3-1 纯
+  transform/opacity）；reduce 直切
+· 取舍：✓ “占满整个条目”的最彻底解、目标极大、形态最克制（纯色面无小控件）；✗ 打断条目阅读（盖住引文），
+  悬浮不可用（必须点击），与“轻量微调色”的心智略重</div>
+</section>
+
+<script>
+// 预览交互：与实现同构的状态机（is-open 钉住 + 外点/Esc 收 + 选色即改 --zline/当前标记）
+document.querySelectorAll('.sidebar').forEach((sb) => {
+  sb.querySelectorAll('.zedge').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = btn.closest('.zitem');
+      const was = item.classList.contains('is-open');
+      closeAll(sb);
+      if (!was) { item.classList.add('is-open'); btn.setAttribute('aria-expanded', 'true'); }
+    });
+  });
+  sb.querySelectorAll('[data-c]').forEach((seg) => {
+    seg.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = seg.closest('.zitem');
+      const c = seg.dataset.c;
+      item.dataset.color = c;
+      item.style.setProperty('--zline', `var(--${c})`);
+      item.querySelectorAll('.cur').forEach((x) => x.classList.remove('cur'));
+      seg.classList.add('cur');
+      item.classList.remove('is-open');
+      const edge = item.querySelector('.zedge');
+      if (edge) edge.setAttribute('aria-expanded', 'false');
+    });
+  });
+});
+function closeAll(scope) {
+  (scope || document).querySelectorAll('.zitem.is-open').forEach((item) => {
+    item.classList.remove('is-open');
+    const edge = item.querySelector('.zedge');
+    if (edge) edge.setAttribute('aria-expanded', 'false');
+  });
+}
+document.addEventListener('click', () => closeAll());
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAll(); });
+</script>
+</body>
+</html>

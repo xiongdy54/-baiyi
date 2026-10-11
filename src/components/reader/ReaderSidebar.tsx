@@ -1,6 +1,7 @@
 // 阅读器侧栏（批 4 Task 15，规格 §5.3 / §6.8-13）：**全高左轨**（v48.45/D85，与摘录批注轨同一形态）。
-// 结构＝栏头行（v48.45/D85：与摘录页 `.annot-side-head` 同几何——「全部/摘录/高亮」筛选 +
-// 「位置/时间」排序，挂在「收起/展开」钮旁）+ 三页签**目录 / 摘录 / 图谱** + 当前页签面板。
+// 结构（D127 信息架构重排）：三页签**目录 / 摘录 / 图谱**升为第一行主役导航（与右列工具行同带，
+// 激活态＝全应用页签语言）+ 当前页签面板；「全部/摘录/高亮」筛选与「位置/时间」排序＝**摘录页签内**
+// 的上下文工具行（只对注解列表生效，随页签在场；面板本体 showHead=false 防双份）。
 // v48.44（D84）：三页签**恒可点**（空数据进页签显示空态文案）；「图谱」页签＝导图工作区面板
 // （MindmapTab 经 mapPanel 注入；原 mapTree 树形目录退役）。
 import type { ReaderTocItem } from "../../lib/reader/service";
@@ -71,25 +72,9 @@ export default function ReaderSidebar({
 
   return (
     <nav className="reader-sidebar" id="reader-sidebar" aria-label="阅读器侧栏" data-reader-sidebar>
-      {/* v48.45（D85）：栏头行＝摘录页批注栏头同款（类名/几何同一套：.annot-side-head + .filter/.sort）——
-          段控挂在「收起/展开」钮旁，对摘录页签里的注解列表生效（面板本体 showHead 防双份）。 */}
-      <div className="annot-side-head" data-reader-annot-head>
-        <span className="filter" data-annot-filterseg>
-          {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
-            <button key={id} className={filter === id ? "on" : ""} data-f={id} onClick={() => onFilter(id)}>
-              {label}
-            </button>
-          ))}
-        </span>
-        <span className="sort" data-annot-sortseg>
-          {([["pos", "位置"], ["time", "时间"]] as const).map(([id, label]) => (
-            <button key={id} className={sort === id ? "on" : ""} data-sort={id} onClick={() => onSort(id)}>
-              {label}
-            </button>
-          ))}
-        </span>
-      </div>
-
+      {/* D127：页签（目录/摘录/图谱）＝主役导航，升为侧栏第一行（与右列工具行同带高 56，
+          左让位 --sp-16 给浮动开关钮）；激活态＝全应用页签语言（文字 + 2px accent 下划线）。
+          旧「栏头行」（筛选/排序段控）降级为摘录页签内的上下文工具行（见 extracts 分支）。 */}
       <div className="tabs" role="tablist" data-sidebar-tabs>
         {tabs.map(([id, label]) => (
           <button
@@ -126,6 +111,24 @@ export default function ReaderSidebar({
 
       {shown === "extracts" && (
         <div className="reader-side-panel" data-panel="extracts">
+          {/* D127：筛选/排序段控＝摘录页签的上下文工具行（只对本页签生效，随页签在场；
+              贴面板顶、不随列表滚动——列表在 .annot-side-body 内自滚） */}
+          <div className="reader-annot-toolbar" data-reader-annot-head>
+            <span className="filter" data-annot-filterseg>
+              {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
+                <button key={id} className={filter === id ? "on" : ""} data-f={id} onClick={() => onFilter(id)}>
+                  {label}
+                </button>
+              ))}
+            </span>
+            <span className="sort" data-annot-sortseg>
+              {([["pos", "位置"], ["time", "时间"]] as const).map(([id, label]) => (
+                <button key={id} className={sort === id ? "on" : ""} data-sort={id} onClick={() => onSort(id)}>
+                  {label}
+                </button>
+              ))}
+            </span>
+          </div>
           {extractsPanel ?? <p className="reader-toc-empty">本书暂无批注。</p>}
         </div>
       )}

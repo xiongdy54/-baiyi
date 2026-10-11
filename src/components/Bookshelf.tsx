@@ -22,17 +22,16 @@ import {
 } from "../lib/shelf";
 
 // v45.1（用户反馈「封面偶尔加载失败」）：bookasset 协议注册现已提前（main.js），此处再兜底——
-// 启动早期偶发请求失败时自动重试（至多 3 次，400ms 间隔）；仍失败则回落无封面骨架（书脊+标题）。
+// 启动早期偶发请求失败时自动重试（至多 3 次，400ms 间隔）；仍失败则回落无封面骨架（灰底+标题）。
 const COVER_RETRY_MAX = 3;
 function CoverImg({ itemId, filename, title }: { itemId: string; filename: string; title: string }) {
   const [attempt, setAttempt] = useState(0);
   // D120-R2（MOTION-DESIGN-SPEC §10-R2）：封面解码淡入——解码完成（onLoad）前 is-loaded 不在场，
-  // img 在 no-preference 环境下 opacity:0；成功后 150ms 淡入。失败回落骨架（spine+title）不走此规则。
+  // img 在 no-preference 环境下 opacity:0；成功后 150ms 淡入。失败回落骨架（灰底+title）不走此规则。
   const [loaded, setLoaded] = useState(false);
   if (attempt > COVER_RETRY_MAX) {
     return (
       <>
-        <span className="book-card-spine" />
         <p className="book-card-title">{title}</p>
       </>
     );
@@ -692,10 +691,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     item.cover ? (
       <CoverImg itemId={item.id} filename={item.cover} title={item.title} />
     ) : (
-      <>
-        <span className="book-card-spine" />
-        <p className="book-card-title">{item.title}</p>
-      </>
+      <p className="book-card-title">{item.title}</p>
     );
 
   // index：视觉阅读序（先行后列＝entries 渲染序），供入场 stagger 的 --i（clamp 到 0-7 共 8 档，§3.6 预算）
@@ -732,12 +728,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
                   <div className="f-spines">
                     {members.slice(0, SPINE_MAX).map((m) => (
                       <i key={m.id}>
-                        {m.cover ? (
-                          <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
-                            onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />
-                        ) : (
-                          <span className="book-card-spine" />
-                        )}
+                        {m.cover && <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
+                          onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}
                       </i>
                     ))}
                     {members.length > SPINE_MAX && <i className="rest">+{members.length - SPINE_MAX}</i>}
@@ -834,8 +826,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
               </span>
             </span>
           ) : (
-            <span className="thumb">{entry.item.cover ? <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true"
-              onLoad={(e) => e.currentTarget.classList.add("is-loaded")} /> : <span className="book-card-spine" />}</span>
+            <span className="thumb">{entry.item.cover && <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true"
+              onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}</span>
           )}
         </td>
         <td className="col-main" onClick={open}>
@@ -994,14 +986,9 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
         /* 冷启动数据未到：留空占位（工具条已在），不闪空态；通常只持续几十毫秒 */
         <div className="shelf-pending" aria-busy="true" />
       ) : entries.length === 0 ? (
-        /* 空态：几何装饰 + 一句话。不再放主行动按钮——工具条的「添加材料」已在同一视口常驻
-           （v48.15 / D51，swiss 文档「状态设计 · empty」同步补了这条例外） */
+        /* 空态：一句话。不再放主行动按钮——工具条的「添加材料」已在同一视口常驻
+           （v48.15 / D51，swiss 文档「状态设计 · empty」同步补了这条例外；v48.82/D126 几何装饰退役） */
         <div className="empty-state">
-          <div className="empty-deco">
-            <span className="empty-sq empty-sq-accent" />
-            <span className="empty-sq" />
-            <span className="empty-sq" />
-          </div>
           <p className="empty-text">
             {openFolder
               ? "这个文件夹还是空的。把书拖到另一本书上，或用卡片动作条的「归入文件夹」往里放。"

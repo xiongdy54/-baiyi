@@ -7,7 +7,7 @@
 // 九组判据（规格 §10.1 原文编号）：
 //   ① 菜单定位：上/下半落位、与选区不相交、在容器内（8px 边距）
 //   ② 摘录页五动作：拖选 → 菜单五项 → 摘录/制卡/批注落库
-//   ③ 批注增删改：改文字（库变 + 显示同步）/ 删除（软删 + 二次确认）/ 改色（color 落库 + 色点 computed 变）
+//   ③ 批注增删改：改文字（库变 + 显示同步）/ 删除（软删 + 二次确认）/ 改色（color 落库 + 色条 computed 变；D126 观测点由竖线改色条）
 //   ④ 层级与颜色：整卡恒置顶（含"挪到末尾判据必须变红"的对照）、整卡底＝accent-soft、左缘 2px accent、
 //      段锚竖线与文中高亮同 token（另配"不同颜色必须可分辨"对照）
 //   ⑤ 三页签与图谱目录：三枚在场 / 同刻一个面板 / 当前页签 accent 下划线 / 图谱嵌套与同级不重叠 / 缩进递增
@@ -606,25 +606,32 @@ try {
   check("改批注：库中 comment 变化", editRes === "clicked" && sy.db === true, JSON.stringify(sy));
   check("改批注：栏内显示同步", String(sy.shown).includes("ANNOT 栏内改过的批注"), sy.shown);
 
-  // 改色的观测点＝**条目竖线**（R33：竖线＝批注色实色；样张 `--zline` 同规）。
-  // v48.34/D74：摘录页条目竖线右移（轨贴窗左缘后左线贴边看不清），观测点按实际带线的一缘取色。
-  // 不用方点：样张的纯高亮方点按 `.mark-kind.k-extract` 是**灰色空心**（颜色不落在它身上）。
+  // 改色的观测点＝**右缘色线 .zbar**（v48.82/D126 R4：色线纯指示、不可点；阅读器 dock 左线虽在、
+  // 观测点统一取色线 background）。改色入口＝条目右上角 ⋯ 选单。
   const readLine = () =>
     cdp.eval(`(() => {
       const el = [...document.querySelectorAll("[data-annot-panel] [data-zitem]")].find((x) => x.dataset.whole !== "1");
-      if (!el) return null;
-      const cs = getComputedStyle(el);
-      return parseFloat(cs.borderLeftWidth) > 0 ? cs.borderLeftColor : cs.borderRightColor;
+      const bar = el?.querySelector("[data-annot-color]");
+      return bar ? getComputedStyle(bar).backgroundColor : null;
     })()`);
   const colorBefore = await readLine();
-  await cdp.eval(`(() => { document.querySelector("[data-annot-panel] [data-annot-color]")?.click(); return true; })()`);
+  await cdp.eval(`(() => {
+    const row = [...document.querySelectorAll("[data-annot-panel] [data-zitem]")].find((x) => x.dataset.whole !== "1");
+    row?.querySelector("[data-zdots]")?.click();
+    return true;
+  })()`);
   await wait(600);
-  const palUp = await cdp.eval(`document.querySelectorAll("[data-annot-panel] [data-annot-palette] [data-annot-pick]").length`);
-  check("色点可点开色板", palUp > 0, palUp);
-  await cdp.eval(`(() => { document.querySelector("[data-annot-panel] [data-annot-pick='blue']")?.click(); return true; })()`);
+  const menuUp = await cdp.eval(`(() => {
+    const m = document.querySelector("[data-annot-panel] [data-zmenu]");
+    if (!m) return 0;
+    const pick = m.querySelector("[data-annot-pick]");
+    return pick && getComputedStyle(m).visibility !== "hidden" ? m.querySelectorAll("[data-annot-pick]").length : 0;
+  })()`);
+  check("⋯ 选单展开色板（色板行在场且可见）", menuUp > 0, menuUp);
+  await cdp.eval(`(() => { document.querySelector("[data-annot-panel] [data-zmenu] [data-annot-pick='blue']")?.click(); return true; })()`);
   await wait(1400);
   // 栏靠 workflow/changed 重载；此处走的是真实 UI 路径（selActions.saveAnnotationColor 会广播），
-  // 故等事件+重渲染即可——但色点读的是**条目上的当前色**，需确认已落库再读。
+  // 故等事件+重渲染即可——但色线读的是**条目上的当前色**，需确认已落库再读。
   const colorPersisted = await cdp.eval(`(async () => {
     const all = await window.workflowAPI.listAll();
     const row = all.find((x) => String(x.comment || "").includes("ANNOT 栏内改过的批注"));
@@ -633,7 +640,7 @@ try {
   check("改色：annotation_color 已落库（blue，取自默认色板）", colorPersisted === "blue", colorPersisted);
   const colorAfter = await readLine();
   const blueTok = await cdp.eval(tokenValue("--annot-blue"));
-  check("改色：段锚条目左竖线 ＝ --annot-blue（R33；另配「与改前不同」对照）", colorAfter === blueTok && colorAfter !== colorBefore, JSON.stringify({ colorBefore, colorAfter, blueTok }));
+  check("改色：段锚条目右缘色条 ＝ --annot-blue（R33 同源；另配「与改前不同」对照）", colorAfter === blueTok && colorAfter !== colorBefore, JSON.stringify({ colorBefore, colorAfter, blueTok }));
 
   // 正文痕迹（样张 `.q` 同规）：段锚批注按**自己的批注色**画在绘制层里
   // （CSS Custom Highlight API；不碰 DOM——EditableText 是裸壳）。
@@ -661,10 +668,17 @@ try {
 
   const delCount = `(async () => { const cur = document.querySelector(".extract-face")?.dataset.extractId; const all = await window.workflowAPI.listAll(); return all.filter((x) => x.parentId === cur).length; })()`;
   const delBefore = await cdp.eval(delCount);
+  // 删除入口在 ⋯ 选单里（R4）：先开单，再点「删除」，行内出现二次确认
   await cdp.eval(`(() => {
     const item = [...document.querySelectorAll("[data-annot-panel] [data-zitem]")].find((el) => el.dataset.whole !== "1");
-    item?.querySelector("[data-annot-del]")?.click();
+    item?.querySelector("[data-zdots]")?.click();
     return !!item;
+  })()`);
+  await wait(600);
+  await cdp.eval(`(() => {
+    const item = [...document.querySelectorAll("[data-annot-panel] [data-zitem]")].find((el) => el.dataset.whole !== "1");
+    item?.querySelector("[data-zmenu] [data-annot-del]")?.click();
+    return true;
   })()`);
   await wait(600);
   check("删除带就地二次确认", (await cdp.eval(`!!document.querySelector("[data-annot-panel] [data-annot-del-confirm]")`)) === true, "无确认");
@@ -934,9 +948,9 @@ try {
     `${panelEditRes} / ${editDb} / ${typeRes}`
   );
 
-  // 改色入口是条目上的方点（点它出色板）
+  // 改色入口是条目右上角 ⋯ 选单（R4）：开单 → 点色行
   const dotPt = JSON.parse(String(await cdp.eval(`(() => {
-    const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-annot-color]');
+    const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-zdots]');
     if (!el) return "";
     const r = el.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -944,7 +958,7 @@ try {
   if (typeof dotPt.x === "number") await clickAt(cdp, dotPt.x, dotPt.y);
   await wait(600);
   const pickPt = JSON.parse(String(await cdp.eval(`(() => {
-    const b = document.querySelector('[data-annot-panel] [data-annot-palette] [data-annot-pick="green"]');
+    const b = document.querySelector('[data-annot-panel] [data-zmenu] [data-annot-pick="green"]');
     if (!b) return "";
     const r = b.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -955,8 +969,14 @@ try {
   check("⑩j 栏内改色：annotation_color 落库（green）", colorDb === "green", String(colorDb));
 
   const p10DelBefore = await cdp.eval(`(async () => { const all = await window.workflowAPI.listAll(); return (all || []).length; })()`);
+  // 删除入口在 ⋯ 选单（R4）：开单 → 点「删除」→ 行内二次确认
+  await cdp.eval(`(() => {
+    document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-zdots]')?.click();
+    return true;
+  })()`);
+  await wait(600);
   const delPt = JSON.parse(String(await cdp.eval(`(() => {
-    const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-annot-del]');
+    const el = document.querySelector('[data-annot-panel] [data-annot-id="' + ${JSON.stringify(oldRowId)} + '"] [data-zmenu] [data-annot-del]');
     if (!el) return "";
     const r = el.getBoundingClientRect();
     return JSON.stringify({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
@@ -1052,8 +1072,8 @@ try {
     return JSON.stringify({ pos: cs.position, left: cs.left, top: cs.top, w: Math.round(b.getBoundingClientRect().width), h: Math.round(b.getBoundingClientRect().height) });
   })()`)) || "{}");
   check("⑪a2 开关钮＝摘录页同款类对（annot-toggle bar-btn）", typeof tg0.cls === "string" && tg0.cls.includes("annot-toggle") && tg0.cls.includes("bar-btn"), tg0.cls);
-  check("⑪a3 开关钮 fixed (16, 60) 40×24（与摘录页同一坐标，D85）",
-    tg0Geom.pos === "fixed" && tg0Geom.left === "16px" && tg0Geom.top === "60px" && tg0Geom.w === 40 && tg0Geom.h === 24, JSON.stringify(tg0Geom));
+  check("⑪a3 开关钮 fixed (16, 56) 40×40（与右列工具行同带、两态同位同高，D127）",
+    tg0Geom.pos === "fixed" && tg0Geom.left === "16px" && tg0Geom.top === "56px" && tg0Geom.w === 40 && tg0Geom.h === 40, JSON.stringify(tg0Geom));
   await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
   await wait(1200);
   const gOpen = JSON.parse(String(await cdp.eval(geom)) || "{}");
@@ -1131,13 +1151,15 @@ try {
   await wait(1300);
   const gMap = JSON.parse(String(await cdp.eval(geom)) || "{}");
   check("⑪i 有图谱的书＝三页签（目录/摘录/图谱）", JSON.stringify(gMap.tabs) === JSON.stringify(["toc", "extracts", "map"]), JSON.stringify(gMap.tabs));
-  // v48.45（D85）：栏头行＝开关钮旁的「全部/摘录/高亮」+「位置/时间」段控（与摘录页批注栏头同一套）
+  // D127：筛选/排序段控＝摘录页签内的上下文工具行（随页签在场）——先切到摘录页签再断言
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="extracts"]')?.click(); return 1; })()`);
+  await wait(700);
   const headRow = await cdp.eval(`JSON.stringify({
     head: !!document.querySelector('[data-reader-annot-head]'),
     filters: [...document.querySelectorAll('[data-reader-annot-head] [data-annot-filterseg] button')].map((b) => b.textContent.trim()),
     sorts: [...document.querySelectorAll('[data-reader-annot-head] [data-annot-sortseg] button')].map((b) => b.textContent.trim())
   })`);
-  check("⑪i2 栏头段控在场＝全部/摘录/高亮 + 位置/时间（与摘录页栏头同一套，D85）",
+  check("⑪i2 摘录页签工具行段控在场＝全部/摘录/高亮 + 位置/时间（D127：随页签在场）",
     (() => { const h = JSON.parse(String(headRow) || "{}"); return h.head === true && JSON.stringify(h.filters) === JSON.stringify(["全部", "摘录", "高亮"]) && JSON.stringify(h.sorts) === JSON.stringify(["位置", "时间"]); })(),
     headRow);
 

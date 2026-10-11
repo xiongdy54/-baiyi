@@ -252,7 +252,6 @@ export default function Dashboard() {
     return (
       <section className="dashboard dash-page">
         <div className="empty-state">
-          <div className="empty-deco"><span className="empty-sq empty-sq-accent" /><span className="empty-sq" /><span className="empty-sq" /></div>
           <p className="empty-text">{error}</p>
         </div>
       </section>

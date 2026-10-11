@@ -169,9 +169,10 @@ function app_main() {
     };
     const emptyBlock = jsxBlock(shelfTxt, '<div className="empty-state"');
     flow.record("空态块长度", `${emptyBlock.length} 字符`);
-    flow.check("空态存在且带几何装饰 + 一句话说明", /empty-deco/.test(emptyBlock) && /empty-text/.test(emptyBlock), "装饰 + 文案", emptyBlock.slice(0, 60) || "（没找到 empty-state）");
+    flow.check("空态存在且带一句话说明（v48.82/D126：几何装饰退役，empty-deco 不再在场）", !/empty-deco/.test(emptyBlock) && /empty-text/.test(emptyBlock), "文案 + 无装饰", emptyBlock.slice(0, 60) || "（没找到 empty-state）");
     flow.check("该屏主行动已常驻吸顶工具条，空态不再重复放主按钮（同屏两个主行动会让人不知点哪个）", !/<button|onClick=/.test(emptyBlock), "空态内无按钮", (emptyBlock.match(/<button[^>]*>/g) || []).join(" "));
     flow.check("空态文案直接指出主行动的位置（而不是再放一个按钮）", /右上角|Ctrl\+Alt\+N/.test(emptyBlock), "指过去", (emptyBlock.match(/书架还是空的[^"']{0,40}/) || ["（没抓到文案）"])[0]);
+    flow.check("无封面回落骨架不再有 accent 书脊小方块（v48.82/D126）", !/book-card-spine/.test(shelfTxt), "无 spine", (shelfTxt.match(/book-card-spine/g) || []).length);
     const barCss = (themeTxt.match(/\.shelf-bar\s*\{[^}]*\}/) || [""])[0];
     flow.check("吸顶工具条五件套齐（计数 · 视图 · 密度 · 排序 · 主行动在右）", /position\s*:\s*sticky/.test(barCss) && /shelf-bar/.test(shelfTxt) && ["视图", "密度", "排序"].every((w) => shelfTxt.includes(w)), ".shelf-bar 吸顶 + 三个选择器", { css: barCss.slice(0, 70) || "（没抓到 .shelf-bar）", sticky: /position\s*:\s*sticky/.test(barCss), 视图: shelfTxt.includes("视图"), 密度: shelfTxt.includes("密度"), 排序: shelfTxt.includes("排序") });
     flow.check("卡片动作不在卡面永久挂控件（靠 hover/focus 显形）", /:hover[^{]*\{[^}]*opacity\s*:\s*1|hover[^{]*\{[^}]*opacity\s*:\s*1/.test(themeTxt), "hover 显形", (themeTxt.match(/\.shelf-act[^\n]*\{[^}]*\}/) || ["（没抓到动作条样式）"])[0]?.slice(0, 90));

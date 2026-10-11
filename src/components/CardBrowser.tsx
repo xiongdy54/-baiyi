@@ -1129,11 +1129,6 @@ export default function CardBrowser({
 
       {loaded && cardsMeta.length === 0 && viewExtracts.length === 0 && (
         <div className="empty-state">
-          <div className="empty-deco">
-            <span className="empty-sq empty-sq-accent" />
-            <span className="empty-sq" />
-            <span className="empty-sq" />
-          </div>
           <p className="empty-text">
             {metaAll.length === 0 ? "还没有卡片。在阅读器中选中文字即可制卡。" : "没有符合筛选条件的卡片。"}
           </p>

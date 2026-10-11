@@ -736,11 +736,6 @@ export default function ReviewView({
         </div>
         <div className="review-session">
           <div className="empty-state">
-            <div className="empty-deco">
-              <span className="empty-sq empty-sq-accent" />
-              <span className="empty-sq" />
-              <span className="empty-sq" />
-            </div>
             <p className="empty-text">
               {doneCount > 0 ? "到期卡片已清空，休息一下。" : "今日到期卡片已清空。"}
             </p>

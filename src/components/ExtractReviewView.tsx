@@ -808,14 +808,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   if (!current && !viewing) {
     return (
       <div className="extract-page">
-        {/* D88 §6.5：计数升级为预览 .pending 形态——8px accent 方点（纯装饰 .count-dot，不加 data 钩子）+ 数字 mono 600 */}
-        <div className="review-count mono"><i className="count-dot" aria-hidden="true" /><b>0</b> 条待处理</div>
+        {/* D126：D88 §6.5 的 8px accent 预览方点退役——计数只留「数字 + 条待处理」（数字 mono 600，间距走既有 gap） */}
+        <div className="review-count mono"><b>0</b> 条待处理</div>
         <div className="empty-state">
-          <div className="empty-deco">
-            <span className="empty-sq empty-sq-accent" />
-            <span className="empty-sq" />
-            <span className="empty-sq" />
-          </div>
           <p className="empty-text">
             {bookItemIds && bookItemIds.length
               ? "这本书没有待处理的摘录。在阅读时选中一段文字点「摘录」，新摘录会在下一个学习日进队。"
@@ -1074,8 +1069,8 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
               </button>
             )}
             {/* 计数恒最右（v5/D72）：与面包屑同一行、右缘与卡面右缘对齐（用户裁定 ①）
-                D88 §6.5：升级为预览 .pending 形态——8px accent 方点 + 数字 mono 600（外层 .review-count 类保留） */}
-            <span className="review-count mono"><i className="count-dot" aria-hidden="true" /><b>{items.length}</b> 条待处理</span>
+                D126：D88 §6.5 的预览方点退役——只留「数字 + 条待处理」（外层 .review-count 类保留） */}
+            <span className="review-count mono"><b>{items.length}</b> 条待处理</span>
           </div>
         </div>
 

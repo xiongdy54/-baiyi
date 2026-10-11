@@ -1,14 +1,18 @@
 // 批注栏（批 4 Task 13，规格 §5.3 / §5.4 R24/R28/R32/R33/R39）。
-// 形态（样张 design-samples/annotation-two-modes.html 对版）：
-//   · 条目：左竖线（段锚＝批注色实色 / 整卡＝--accent）+ 方点 + 所引原文（2 行截断）+ 批注文字 + 时间（mono）。
-//   · **整卡批注恒置顶**（R32：任何排序下都成立）——整块 --accent-soft 底 + 左缘 2px --accent，色点 --accent。
+// 形态（源出样张 design-samples/annotation-two-modes.html；v48.82/D126 起条目方点退役，该点不再对版）：
+//   · 条目：左竖线（段锚＝批注色实色 / 整卡＝--accent）+ 所引原文（2 行截断）+ 批注文字 + 时间（mono）+ 右缘色条。
+//   · **整卡批注恒置顶**（R32）：任何排序下都成立——整块 --accent-soft 底 + 左缘 2px --accent。
 //   · **段锚左竖线＝文中高亮同色**（R33）：竖线 2px 实色（--annot-*），文中高亮＝该 token 的透明档。
-//   · **两类可辨**（R39）：摘录＝实心方点 + 「摘录」标签；纯高亮＝空心方点 + 「高亮」标签。
+//   · **两类可辨**（R39，D126 起方点退役）：摘录/高亮由 meta 行 kind-tag（「摘录」/「高亮」标签）独自承担。
+//   · **引用式色线 + meta 行 ⋯ 选单（D126 R4.1，Zotero 式）**：色线贴引文行左侧、与其等高（纯指示，
+//     不可点）；改色与更多操作（添加/编辑批注、删除）收进 meta 行右端 ⋯ 弹出选单——dd-menu 族样式
+//     + §8.4 pop-in 动效，开向随滚动容器底缘翻边；条目不再画任何边线色条（基线与轨内一致）。
 //   · **没写批注就不显示批注行**（不放占位字）；纯高亮不画角标（那是绘制层的事）。
 //   · 筛选段控「全部/摘录/高亮」；排序段控「位置/时间」（会话内视图偏好，**不落设置键**）。
-//   · 条目内联编辑批注（失焦保存）、删除带就地二次确认、色点可点改色。
-import { useEffect, useRef, useState } from "react";
+//   · 条目内联编辑批注（失焦保存）、删除带就地二次确认（入口在 ⋯ 选单，确认态行内常显）。
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { annotColorCss } from "../AnnotationEditor";
+import { IconEllipsis } from "../icons";
 
 export interface AnnotItem {
   id: string;
@@ -36,6 +40,13 @@ function fmtTime(t: number): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** 色板中文名（R4 选单行显示；未知 id 原样、#hex 显示「自定义」） */
+const COLOR_NAMES: Record<string, string> = {
+  yellow: "黄色", red: "红色", green: "绿色", blue: "蓝色", purple: "紫色",
+  teal: "青色", orange: "橙色", magenta: "洋红色", grey: "灰色", gray: "灰色"
+};
+const colorName = (c: string) => (c.startsWith("#") ? "自定义" : COLOR_NAMES[c] ?? c);
+
 export default function AnnotationPanel({
   items,
   currentId,
@@ -62,7 +73,7 @@ export default function AnnotationPanel({
   onJump: (item: AnnotItem) => void;
   /** 内联编辑批注（失焦/回车保存；空串 ⇒ null ＝删批注） */
   onEdit: (item: AnnotItem, comment: string | null) => void;
-  /** 改色（色点下拉选色） */
+  /** 改色（右缘色条 → 色板选色） */
   onColor: (item: AnnotItem, color: string) => void;
   /** 删除整条（调用方已含确认？——本组件就地二次确认后再调它） */
   onDelete: (item: AnnotItem) => void;
@@ -87,20 +98,64 @@ export default function AnnotationPanel({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
-  const [colorFor, setColorFor] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number; up: boolean } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const boxRef = useRef<HTMLElement | null>(null);
 
-  // 点别处收起色点下拉
+  // 开单（R4.2）：选单改 **fixed 视口定位**——阅读器侧栏的轨（overflow:hidden 开合动画）与列表
+  // 滚动容器（overflow:auto）都会把 absolute 选单裁掉/盖住（条目靠可视区底部时实测）。
+  // 锚点＝⋯ 钮下缘 +4px、右缘贴条目右缘 -8px；上/下开向在挂载后按选单实高与视口翻边。
+  const openMenu = (it: AnnotItem, btn: HTMLButtonElement) => {
+    const item = btn.closest(".zitem") as HTMLElement | null;
+    const br = btn.getBoundingClientRect();
+    const ir = item?.getBoundingClientRect();
+    setMenuPos({
+      top: br.bottom + 4,
+      right: Math.max(8, window.innerWidth - (ir ? ir.right : br.right) + 8),
+      up: false
+    });
+    setMenuFor(menuFor === it.id ? null : it.id);
+  };
+
+  // 点别处 / 滚动 / 缩放 / Esc 收起选单（fixed 选单不随列表滚，滚动即收——§8.4 popover 惯例）
   useEffect(() => {
-    if (!colorFor) return;
+    if (!menuFor) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node | null;
       if (t && boxRef.current?.contains(t)) return;
-      setColorFor(null);
+      setMenuFor(null);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuFor(null);
+    };
+    const onScrollOrResize = () => setMenuFor(null);
     document.addEventListener("mousedown", onDown, true);
-    return () => document.removeEventListener("mousedown", onDown, true);
-  }, [colorFor]);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [menuFor]);
+
+  // 挂载后量选单实高翻边（pre-paint，无闪跳）：下方放不下且上方放得下 → 向上开
+  useLayoutEffect(() => {
+    if (!menuFor || !menuRef.current || !menuPos) return;
+    const menu = menuRef.current;
+    const item = menu.closest(".zitem") as HTMLElement | null;
+    if (!item) return;
+    const ir = item.getBoundingClientRect();
+    const mh = menu.offsetHeight;
+    const fitsDown = menuPos.top + mh <= window.innerHeight - 8;
+    const fitsUp = ir.top - mh >= 8;
+    if (!fitsDown && fitsUp) {
+      setMenuPos((pos) => (pos ? { ...pos, top: Math.max(8, ir.top - mh - 4), up: true } : pos));
+    }
+  }, [menuFor]);
 
   const visible = items.filter((it) => (filter === "all" ? true : it.kind === filter));
   // R32：整卡批注恒置顶（任何排序下都成立）——先按置顶分组，组内再按所选排序
@@ -141,24 +196,26 @@ export default function AnnotationPanel({
       <div className="annot-side-body" data-annot-list>
         {listed.map((it) => {
           const isWhole = it.anchorWhole;
-          // R32/R33 的颜色口径：整卡＝accent；段锚＝该条自己的批注色
-          const lineCss = isWhole ? "var(--accent)" : annotColorCss(it.color);
-          const dotCss = isWhole ? "var(--accent)" : annotColorCss(it.color);
+          // R32/R33 的颜色口径：整卡＝accent；段锚＝该条自己的批注色——引用式色线与文中高亮同源
+          const annotCss = isWhole ? "var(--accent)" : annotColorCss(it.color);
           return (
             <div
               key={it.id}
-              className={`zitem${isWhole ? " whole" : ""}${currentId === it.id ? " on" : ""}`}
+              className={`zitem${isWhole ? " whole" : ""}${currentId === it.id ? " on" : ""}${menuFor === it.id ? " menu-open" : ""}${confirmId === it.id ? " confirming" : ""}`}
               data-zitem=""
               data-annot-id={it.id}
               data-kind={it.kind}
               data-whole={isWhole ? "1" : undefined}
-              style={{ "--zline": lineCss } as React.CSSProperties}
               role="button"
               tabIndex={0}
               title="点击条目：文中跳到锚点并短暂强调"
               onClick={() => {
                 // 点条目＝跳转（样张 §5.3「点击条目 → 文中滚动到锚点并短暂强调」）；
-                // 点色点/删除/输入区不触发（各自 stopPropagation）
+                // ⋯ 选单 / 删除确认 / 输入区不触发（各自 stopPropagation）；选单开着时点条目＝先收单
+                if (menuFor === it.id) {
+                  setMenuFor(null);
+                  return;
+                }
                 if (confirmId !== it.id && editingId !== it.id) onJump(it);
               }}
               onKeyDown={(e) => {
@@ -168,26 +225,14 @@ export default function AnnotationPanel({
                 }
               }}
             >
-              {/* R39：摘录＝实心方点；纯高亮＝空心方点（不靠颜色区分——颜色已被批注色占用）。
-                  这枚方点同时是**色点**：样张的条目上只有它一个色块，点它＝改色。 */}
-              <i
-                className={`mark-kind${it.kind === "extract" ? " k-extract filled" : " k-extract"}`}
-                data-kindmark=""
-                data-annot-color
-                role="button"
-                tabIndex={0}
-                aria-label="改高亮颜色"
-                title="改高亮颜色"
-                style={{ color: dotCss }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setColorFor(colorFor === it.id ? null : it.id);
-                }}
-              />
               <div className="annot-body">
-                <p className={`zq${isWhole ? " tag-whole" : ""}`} data-zq>
-                  {isWhole ? "本条批注 · 锚在整卡" : it.quote}
-                </p>
+                {/* R4.1：色线改引用样式——贴着引文行、与其等高（原文两行），距条目左缘一个内距 */}
+                <div className="zbody-quote">
+                  <i className="zbar" data-annot-color="" aria-hidden="true" style={{ background: annotCss }} />
+                  <p className={`zq${isWhole ? " tag-whole" : ""}`} data-zq>
+                    {isWhole ? "本条批注 · 锚在整卡" : it.quote}
+                  </p>
+                </div>
                 {/* 「没写批注就不显示批注行」（R33）：纯高亮与无批注条目只留引文 */}
                 {editingId === it.id ? (
                   <textarea
@@ -236,69 +281,125 @@ export default function AnnotationPanel({
                   ) : (
                     <span>{isWhole ? "整卡" : "段锚"}</span>
                   )}
-                  <span className="annot-acts">
-                    {confirmId === it.id ? (
-                      <>
-                        <button
-                          type="button"
-                          className="annot-del"
-                          data-annot-del-confirm
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onDelete(it);
-                            setConfirmId(null);
-                          }}
-                        >
-                          确认删除
-                        </button>
-                        <button
-                          type="button"
-                          className="annot-act"
-                          data-annot-del-cancel
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setConfirmId(null);
-                          }}
-                        >
-                          取消
-                        </button>
-                      </>
-                    ) : (
+                  {/* 删除确认态（R4：删除入口在 ⋯ 选单里；确认/取消回到行内常显——§8.2 破坏性操作退路） */}
+                  {confirmId === it.id && (
+                    <span className="annot-acts">
                       <button
                         type="button"
                         className="annot-del"
-                        data-annot-del
+                        data-annot-del-confirm
                         onClick={(e) => {
                           e.stopPropagation();
-                          setConfirmId(it.id);
+                          onDelete(it);
+                          setConfirmId(null);
                         }}
                       >
-                        {/* 整卡批注＝本卡自身的元批注：删它＝**清掉这条批注**，绝不删用户的卡
-                            （R36 的「删除摘录/删除高亮」说的是段锚注解那条独立行） */}
-                        {isWhole ? "删除批注" : it.kind === "highlight" ? "删除高亮" : "删除摘录"}
+                        确认删除
                       </button>
-                    )}
-                  </span>
-                </p>
-                {colorFor === it.id && (
-                  <div className="palette" data-annot-palette onClick={(e) => e.stopPropagation()}>
-                    {palette.map((c) => (
                       <button
-                        key={c}
                         type="button"
-                        data-annot-pick={c}
-                        title={c}
-                        aria-label={`改为 ${c}`}
-                        style={{ background: annotColorCss(c) }}
-                        onClick={() => {
-                          onColor(it, c);
-                          setColorFor(null);
+                        className="annot-act"
+                        data-annot-del-cancel
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmId(null);
                         }}
-                      />
-                    ))}
-                  </div>
-                )}
+                      >
+                        取消
+                      </button>
+                    </span>
+                  )}
+                  {/* R4.1：更多操作钮移入 meta 行右端（不再悬浮在引文上；常显，点它开合 ⋯ 选单） */}
+                  <button
+                    type="button"
+                    className="zdots"
+                    data-zdots=""
+                    aria-label="更多操作"
+                    aria-haspopup="menu"
+                    aria-expanded={menuFor === it.id}
+                    title="更多操作"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openMenu(it, e.currentTarget);
+                }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <IconEllipsis size={14} />
+                  </button>
+                </p>
               </div>
+              {/* D126 R4（Zotero 式）：⋯ 选单（换色组 + 编辑批注 + 删除）条件挂载；
+                  右缘不再挂任何元素——色线已改引用样式进引文行。keydown 止泡，
+                  避免 zitem 的 Enter/Space 跳转 preventDefault 吞掉原生激活。 */}
+              {menuFor === it.id && menuPos && (
+                <div
+                  className={`zmenu dd-menu${menuPos.up ? " dd-menu-up" : " dd-menu-down"}`}
+                  data-zmenu=""
+                  role="menu"
+                  ref={menuRef}
+                  style={{ top: menuPos.top, right: menuPos.right }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* 换色组：仅段锚条目显示——整卡批注色恒为 --accent（R32），无换色语义 */}
+                  {!isWhole && (
+                    <>
+                      {palette.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={it.color === c}
+                          className="dd-item zmenu-color"
+                          data-annot-pick={c}
+                          title={c}
+                          onClick={() => {
+                            onColor(it, c);
+                            setMenuFor(null);
+                          }}
+                          onKeyDown={(e) => e.stopPropagation()}
+                        >
+                          <span className="zmenu-check" aria-hidden="true">{it.color === c ? "✓" : ""}</span>
+                          <span className="zmenu-swatch" style={{ background: annotColorCss(c) }} aria-hidden="true" />
+                          <span className="zmenu-name">{colorName(c)}</span>
+                        </button>
+                      ))}
+                      <div className="zmenu-sep" aria-hidden="true" />
+                    </>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="dd-item"
+                    data-annot-editmenu=""
+                    onClick={() => {
+                      setMenuFor(null);
+                      setEditingId(it.id);
+                      setDraft(it.comment ?? "");
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="zmenu-check" aria-hidden="true" />
+                    <span className="zmenu-name">{it.comment ? "编辑批注" : "添加批注"}</span>
+                  </button>
+                  <div className="zmenu-sep" aria-hidden="true" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="dd-item"
+                    data-annot-del=""
+                    onClick={() => {
+                      // 整卡批注＝本卡自身的元批注：删它＝**清掉这条批注**，绝不删用户的卡
+                      // （R36 的「删除摘录/删除高亮」说的是段锚注解那条独立行）
+                      setMenuFor(null);
+                      setConfirmId(it.id);
+                    }}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <span className="zmenu-check" aria-hidden="true" />
+                    <span className="zmenu-name">{isWhole ? "删除批注" : it.kind === "highlight" ? "删除高亮" : "删除摘录"}</span>
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
