@@ -63,7 +63,7 @@ type View =
       /** 原书文件字节（存在即走阅读内核；engine=pdf 时走 pdf.js 内核直读） */
       book?: { bytes: Uint8Array; name: string; engine?: "foliate" | "pdf" };
       jumpAnchor?: { anchorText: string; anchorRatio?: number; cfi?: string; chapterIndex?: number; pageIndex?: number; imageAnchor?: { alt?: string; contextText?: string }; occlusion?: { rects: { x: number; y: number; w: number; h: number; ord: number }[]; shapes?: unknown; regionScope?: string; cardOrd?: number; assetPath?: string } };
-      /** v48.80（D124）：学习者模型「下一步」面板的 jump 动作返回来源页；v48.81（D125）面板页签化后返回「下一步」页 */
+      /** v48.80（D124）：学习者模型「下一步」面板的 jump 动作返回来源页；v48.81（D125）面板页签化后返回「推荐」页 */
       returnTo?: "review" | "queue" | "browse" | "stats" | "next";
       /** v48.13（P2）：从右下角指示器「打开导图」进入时置位——Reader 挂载后自动打开导图工作区 */
       openMindmap?: boolean;
@@ -79,12 +79,12 @@ type View =
   | { name: "review"; bookItemIds?: string[]; title?: string; limits?: Record<string, number> | null; scopeTags?: string[]; scopeKpIds?: string[] }
   | { name: "browse"; /** v48.47（D87）：锚点筛选（来自浮窗「已制卡 N 张」点击） */ anchorExtractId?: string | null }
   | { name: "journal" }
-  // v48.81（D125）：学习者模型「下一步」独立页签——顶栏第 4 位；关闭学习者模型时页签收拢消失
+  // v48.81（D125）：学习者模型「推荐」页签（面板模块名仍为「下一步」）——顶栏第 4 位；关闭学习者模型时页签收拢消失
   | { name: "next" }
   | { name: "stats" };
 
 // D120-R2（MOTION-DESIGN-SPEC §5.1）：页序表——顶栏签从左至右的视觉序，与下方 nav 数组同序（不得另造）；
-// v48.81（D125）起第 4 位为「下一步」（仅在学习者模型开启时在场，关闭后其余六签页序不变）；
+// v48.81（D125）起第 4 位为「推荐」页签（仅在学习者模型开启时在场，关闭后其余六签页序不变）；
 // queue 与 extractSession 同席（顶栏同钮高亮）⇒ 互切 dir=0；reader 为深度视图（+∞，不列席，见 viewDirOf 特则）。
 const VIEW_ORDER: Record<View["name"], number> = {
   shelf: 0,
@@ -110,7 +110,7 @@ function viewDirOf(cur: View, next: View): "fwd" | "bwd" | "" {
   return d === 0 ? "" : d > 0 ? "fwd" : "bwd";
 }
 
-// 顶栏静态六签（v12.1 文字主导航）。v48.81（D125）：「下一步」页签按总开关插在复习与卡片之间（见渲染处），不入本表。
+// 顶栏静态六签（v12.1 文字主导航）。v48.81（D125）：「推荐」页签按总开关插在复习与卡片之间（见渲染处），不入本表。
 const TOP_NAV = [
   { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
   { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractSession" },
@@ -490,8 +490,8 @@ export default function App() {
     // openBook / handleJumpToDoc 均为 useCallback（changeView 稳定）；面板只在「下一步」页挂载，闭包时效可接受
   }, [openBook, handleJumpToDoc, changeView]);
 
-  // v48.81（D125）：顶栏「下一步」页签随总开关在场——读 app.learner.enabled 并订阅 settings/changed。
-  // 关闭：页签先横向收拢（.nav-collapse，§7 折叠的水平变体）后卸载；若正处「下一步」页则退回数据页。
+  // v48.81（D125）：顶栏「推荐」页签随总开关在场——读 app.learner.enabled 并订阅 settings/changed。
+  // 关闭：页签先横向收拢（.nav-collapse，§7 折叠的水平变体）后卸载；若正处「推荐」页则退回数据页。
   const [learnerEnabled, setLearnerEnabled] = useState<boolean | null>(null);
   const [nextTabClosing, setNextTabClosing] = useState(false);
   const nextCloseTimer = useRef<number | null>(null);
@@ -537,7 +537,7 @@ export default function App() {
 
   let mainContent: ReactNode = null;
   let topTitle = "";
-  // v48.81（D125）：界面文字（「下一步」页签/标题）取自学习者字符串表（§11.9）；静态六签渲染器
+  // v48.81（D125）：界面文字（「推荐」页签 /「下一步」标题）取自学习者字符串表（§11.9）；静态六签渲染器
   const LS = learnerStrings();
   const navItem = (item: (typeof TOP_NAV)[number]) => (
     <button
@@ -660,8 +660,8 @@ export default function App() {
     topTitle = "日记";
     mainContent = <JournalView onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "next") {
-    // v48.81（D125）：「下一步」独立页签页。关闭学习者模型时页签收拢消失，本视图由 App 退回数据页
-    topTitle = LS.panel.tab;
+    // v48.81（D125）：「推荐」页签页（顶栏标题沿模块全名「下一步」，同 卡片→卡片浏览 模式）。关闭学习者模型时页签收拢消失，本视图由 App 退回数据页
+    topTitle = LS.panel.title;
     mainContent = <NextStepsPanel />;
   } else if (view.name === "stats") {
     topTitle = "统计数据";

@@ -161,7 +161,7 @@ skill 原文的 lift/scale 手法（`translateY(-4px) scale(1.02)` + 阴影扩�
 | shelf（书架） | 0 | |
 | queue / extractSession（摘录） | 1 | 两视图同席（nav match 现状即同钮高亮），互切 dir=0 |
 | review（复习） | 2 | |
-| next（下一步） | 3 | v48.81 / D125：仅在学习者模型开启时在场；关闭后其余六签页序不变 |
+| next（推荐） | 3 | v48.81 / D125：仅在学习者模型开启时在场；关闭后其余六签页序不变 |
 | browse（卡片） | 4 | |
 | journal（日记） | 5 | |
 | stats（数据） | 6 | |
