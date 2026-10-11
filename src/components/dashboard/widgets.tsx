@@ -12,6 +12,10 @@ import {
   RhythmHours, RhythmGrid, RankBump, QueueLedger, DueForecast, ReadingHist
 } from "../charts/charts";
 import TimelineWidget from "../charts/Timeline";
+// v48.85（D129 B4，§5.3）：成长反馈两 widget——Growth 层「成长记录」+ Territory 层「巩固疆域」。
+// 自取数（useGrowthOverview 防抖 hook，Timeline 先例），不进 StatsOverview、不改 stats:overview 刷新链。
+import GrowthEventsWidget from "./GrowthEventsWidget";
+import TerritoryWidget from "./TerritoryWidget";
 
 export type ChartMode = string; // 图型 id，如 "months" / "columns"
 
@@ -19,6 +23,9 @@ export interface WidgetDef {
   id: string;
   title: string;
   wide?: boolean;              // 建议通栏
+  // v48.85（D129 §6.6.4/§5.3）：仪表盘四层归属（today=Activity 既有层；growth/capability/territory
+  // 为成长反馈层）。缺省即 "today"——既有 12 组件定义未显式标注（本批禁改其定义，行为零变化）。
+  layer?: "today" | "growth" | "capability" | "territory";
   // 从 overview 取本组件用到的数据键（设置页展示"可显示数据"用）
   dataKeys: string[];
   // dataKey → 显示名（缺省用 Dashboard 内置映射）
@@ -273,6 +280,30 @@ export const WIDGETS: WidgetDef[] = [
       if (c === "bars") return <DailyColumns days={all.slice(-60)} unit="字" emptyMsg="近 60 天暂无阅读记录" />;
       return <HeatCalendar days={all.slice(-84)} unit="字" emptyMsg="近 12 周暂无阅读记录" />;
     }
+  },
+  // —— v48.85（D129 B4，§5.3）：成长反馈两 widget（Growth / Territory 层）——
+  // 自取数组件：render 忽略 overview 入参，数据经 useGrowthOverview() 独立缓存独立防抖刷新；
+  // charts 单图型（无 dataKey 档位，设置页「可显示数据」面板不出现下拉）。
+  {
+    id: "growth-events",
+    title: "成长记录",
+    wide: true,
+    layer: "growth",
+    dataKeys: ["growth-recent"],
+    charts: { "growth-recent": [{ id: "records", label: "时间线" }] },
+    defaultData: "growth-recent",
+    defaultChart: "records",
+    render: () => <GrowthEventsWidget />
+  },
+  {
+    id: "territory",
+    title: "巩固疆域",
+    layer: "territory",
+    dataKeys: ["territory-map"],
+    charts: { "territory-map": [{ id: "segments", label: "巩固地图" }] },
+    defaultData: "territory-map",
+    defaultChart: "segments",
+    render: () => <TerritoryWidget />
   }
 ];
 

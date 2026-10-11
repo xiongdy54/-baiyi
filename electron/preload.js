@@ -167,6 +167,14 @@ contextBridge.exposeInMainWorld("statsAPI", {
   timeline: (opts) => ipcRenderer.invoke("stats:timeline", opts)
 });
 
+// v48.85（D129，§3.4）：成长反馈只读三通道（M13 GF-1 数据面；照 statsAPI 先例，全部 invoke、零事件推送——
+// 提示由渲染层在评分成功后主动拉取，§4.17-3）
+contextBridge.exposeInMainWorld("growthAPI", {
+  afterReview: (cardId, now) => ipcRenderer.invoke("growth:afterReview", String(cardId), now),
+  sessionSummary: (fromTs, now) => ipcRenderer.invoke("growth:sessionSummary", Number(fromTs) || 0, now),
+  overview: (opts, now) => ipcRenderer.invoke("growth:overview", opts || {}, now)
+});
+
 contextBridge.exposeInMainWorld("issuesAPI", {
   add: (issue) => ipcRenderer.invoke("issues:add", issue),
   list: (cardId) => ipcRenderer.invoke("issues:list", cardId),

@@ -34,7 +34,8 @@ esbuild.buildSync({
       'export { normalizeExtractEditorToolbar, normalizeExtractEditorToolbarFloat, normalizeExtractEditorToolbarTop, normalizeExtractFaceFontFollow, normalizeExtractFaceFontSize, normalizeExtractFaceFontFamily } from "./src/lib/extractCardSettings";',
       'export { normalizeSelectionBarStyle } from "./src/lib/selectionBarSettings";',
       'export { normalizeCardFaceExtras, DEFAULT_CARD_FACE_EXTRAS } from "./src/lib/cardFaceExtras";',
-      'export { normalizeTagsEnabled } from "./src/lib/tagSettings";'
+      'export { normalizeTagsEnabled } from "./src/lib/tagSettings";',
+      'export { normalizeGrowthFeedback, DEFAULT_GROWTH_FEEDBACK } from "./src/lib/growthSettings";'
     ].join("\n"),
     resolveDir: ROOT,
     loader: "ts"
@@ -73,10 +74,12 @@ const DOC_KEYS = [
   "app.cardFaceExtras", // §7.4 v48.61 / D104（卡面信息密度三开关：背面辅助字段助记/例子/来源）
   "app.workbenchPlacement", "app.closeToTray", // §7.4 v48.79 / D123（制卡台放置位置 / 关闭收进托盘）
   "app.tagsEnabled", // §7.4 v48.63 / D107（标签功能总开关：默认开，仅严格 false 为关；隐藏入口不动数据）
+  "app.growthFeedback", // §7.4 v48.85 / D129（成长反馈总开关：对象 {enabled} 默认开，仅严格 false 为关；关闭=零渲染零计算）
+  "app.legacyBackfillV1", // §9.4 一次性版本化回填完成标记（时间戳；挂载点 persist() 成功后由 legacyBackfill.js mark() 写入，对象键 = MARKER_KEY 逐字面量）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
-const DOC_UNIMPLEMENTED = ["frontierExploration", "growthFeedback", "lkmConfigId", "errorReportConsent"];
+const DOC_UNIMPLEMENTED = ["frontierExploration", "lkmConfigId", "errorReportConsent"];
 /** 文档明写已废除的键（§4.4.10 L173 / D22）：只允许出现在迁移代码里，渲染层必须零引用 */
 const DOC_RETIRED = ["fsrsWeights"];
 
@@ -278,6 +281,8 @@ app
         ["app", "reviewScopes", [{ id: "scope-1", name: "测试范围", bookItemIds: ["item-1"], tags: ["考研::英语", "错题"], kpIds: ["kp-1"], kinds: ["card", "extract"], limits: { extractReviewsPerDay: 5 } }]], // v48.22 / D58；v48.61 / D105 扩展 tags/kpIds
         ["app", "cardFaceExtras", { mnemonic: true, example: false, sourceRef: true }], // v48.61 / D104 卡面信息密度（非默认值才验得出往返）
         ["app", "tagsEnabled", false], // v48.63 / D107 标签功能总开关（非默认值才验得出往返）
+        ["app", "growthFeedback", { enabled: false }], // v48.85 / D129 成长反馈总开关（对象键，非默认值才验得出往返）
+        ["app", "legacyBackfillV1", 1699999999999], // §9.4 一次性回填完成标记（时间戳数值往返；真值由挂载点 persist() 成功后写入）
         ["app", "learner", { enabled: true, nativeLangs: ["zh", "en"], nativeConfirmed: true, recCount: 8 }], // v48.80 / D124 学习者知识模型（对象键，设计稿 §11.6）
         ["app", "accentColor", "#0057ff"],
         ["app", "mindmapMaxCalls", 40],
@@ -469,6 +474,21 @@ app
         JSON.stringify([true, "false", 0, null, undefined].map(extNorm.normalizeTagsEnabled)),
         JSON.stringify([true, true, true, true, true]));
       flow.eq("tagsEnabled：false 为关", extNorm.normalizeTagsEnabled(false), false);
+
+      // ---------- Y4d D129 成长反馈总开关：读侧真模块归一（src/lib/growthSettings.ts） ----------
+      flow.section("Y4d 成长反馈总开关归一（渲染层读侧真模块 src/lib/growthSettings.ts，§7.4 v48.85 / D129）");
+      const normGrowth = extNorm.normalizeGrowthFeedback;
+      flow.eq("growthFeedback：仅严格 false 为关（true/'false'/0/'x'）",
+        JSON.stringify([true, "false", 0, "x"].map(normGrowth)),
+        JSON.stringify([{ enabled: true }, { enabled: true }, { enabled: true }, { enabled: true }]));
+      flow.eq("growthFeedback：false 为关", JSON.stringify(normGrowth(false)), JSON.stringify({ enabled: false }));
+      flow.eq("growthFeedback：缺失/undefined/null 回落开",
+        JSON.stringify([undefined, null].map(normGrowth)),
+        JSON.stringify([{ enabled: true }, { enabled: true }]));
+      flow.eq("growthFeedback：非对象（数组/数字/字符串）回落开",
+        JSON.stringify([[], [1], 42, "y"].map(normGrowth)),
+        JSON.stringify([{ enabled: true }, { enabled: true }, { enabled: true }, { enabled: true }]));
+      flow.eq("growthFeedback：默认常量开", JSON.stringify(extNorm.DEFAULT_GROWTH_FEEDBACK), JSON.stringify({ enabled: true }));
 
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       flow.eq("清空后记忆总开关回到默认关", mem.readMemoryConfig({ readSettings: () => st.readSettings() }).enabled, false);

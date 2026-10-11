@@ -69,7 +69,9 @@ runFlow(flow, async () => {
   const leaks = [];
   for (const f of prodFiles) {
     const t = read(f);
-    if (/growth_events|growthEvents|GrowthEventTable|territory_state/i.test(t)) leaks.push(`${f}：出现成长事件表/疆域状态`);
+    // \bgrowthEvents\b 收紧（终审 P1-2）：不再命中组件名 GrowthEventsWidget 等复合标识符；
+    // 「禁落库」原判据不变——growth_events 表名 / insertGrowthEvent 族写入函数照旧全禁（GF-2 前仍有效）
+    if (/growth_events|\bgrowthEvents\b|GrowthEventTable|territory_state/i.test(t)) leaks.push(`${f}：出现成长事件表/疆域状态`);
     if (/insertGrowthEvent|createGrowthEvent|saveMilestone/i.test(t)) leaks.push(`${f}：出现「把成长事件写进库」的函数`);
   }
   flow.check("生产代码里不得出现成长层落库实现", leaks.length === 0, "零偷跑", leaks);

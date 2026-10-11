@@ -28,11 +28,95 @@ import TagInput from "./TagInput";
 import { applyTagDelta, type TagVocabEntry } from "../lib/tags";
 // v48.63（D107）：标签功能总开关——复习页标签区与快捷打标入口受其控制
 import { useTagsEnabled } from "../lib/tagSettings";
+// v48.85（D129，B2/B3）：成长反馈——评分成功边界后拉取微反馈 + 收尾页会话成果汇总（只读，零写路径）
+import { growthApi, readGrowthFeedbackEnabled, type GrowthEventHit, type GrowthFoldEntry, type GrowthSessionSummaryResult } from "../lib/growth";
+import { growthEventText, growthEvidenceLines, growthFoldText, growthTierLabel } from "../lib/growthStrings";
+import GrowthToast from "./GrowthToast";
 
 // A-1（审计）：渲染期调用不得抛。原写法 `previews?.items ?? fsrsEngine.preview(current!.fsrs)`
 // 在 previews 为 null 时会同步抛，被根错误边界接管 → 整应用停止渲染。这里降级为空列表。
 function safePreviewItems(fsrs: unknown): ReturnType<typeof fsrsEngine.preview> {
   try { return fsrsEngine.preview(fsrs as never); } catch { return []; }
+}
+
+// ---------- v48.85（D129，B3 / 设计稿 §5.2）：会话成果汇总（本轮成果） ----------
+// 收尾页挂载时经 growthAPI.sessionSummary(sessionStartTs) 拉取一次；空命中零渲染（禁「今日无成长」
+// 类负面对照，§6.6.3）；行序 = §6.6.1 表序（主进程 foldSameDay/compareHits 已排好，禁第二套排序）；
+// hits 画可见行、folded 画折叠行（勿重复）；行内「证据」展开与折叠行展开均走 §7 折叠模式（.collapse-clip）。
+
+function GrowthRow({ hit }: { hit: GrowthEventHit }) {
+  const [open, setOpen] = useState(false);
+  const lines = growthEvidenceLines(hit);
+  return (
+    <li className="growth-row" data-growth-row data-growth-event={hit.type} data-growth-tier={hit.tier}>
+      <span className="growth-row-tier mono">{growthTierLabel(hit.tier)}</span>
+      <span className="growth-row-text">{growthEventText(hit)}</span>
+      {lines.length > 0 && (
+        <button type="button" className="growth-toast-more" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          证据
+        </button>
+      )}
+      <div className={`collapse-clip${open ? " is-open" : ""}`}>
+        <div className="collapse-inner">
+          <div className="growth-toast-detail">
+            {lines.map((l, i) => (
+              <p key={i} className="mono">{l}</p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function GrowthFoldRow({ fold }: { fold: GrowthFoldEntry }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li className="growth-row" data-growth-fold>
+      <button type="button" className="growth-fold-btn" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {growthFoldText(fold.count)}
+      </button>
+      <div className={`collapse-clip${open ? " is-open" : ""}`} data-growth-fold-list>
+        <div className="collapse-inner">
+          {/* 折叠明细：每条同 growth-row 结构（设计稿 §5.2） */}
+          <ul className="growth-fold-list">
+            {fold.hits.map((h) => (
+              <GrowthRow key={h.key} hit={h} />
+            ))}
+          </ul>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function GrowthSessionSummary({ fromTs }: { fromTs: number }) {
+  const [result, setResult] = useState<GrowthSessionSummaryResult | null>(null);
+  useEffect(() => {
+    let alive = true;
+    growthApi
+      .sessionSummary(fromTs)
+      .then((r) => { if (alive) setResult(r); })
+      .catch(() => { /* 汇总是增强信息：取不到就不显示（§4.17-3 派生失败静默） */ });
+    return () => { alive = false; };
+  }, [fromTs]);
+  if (!result || !result.enabled) return null; // 设置关闭 / 主进程降级 → 静默零渲染
+  const hits = result.hits ?? [];
+  const folded = result.folded ?? [];
+  if (hits.length === 0 && folded.length === 0) return null; // 空态：不渲染本块（G-8）
+  return (
+    <div className="growth-session" data-growth-session>
+      <p className="growth-session-title">本轮成果</p>
+      <ul className="growth-session-list">
+        {hits.map((h) => (
+          <GrowthRow key={h.key} hit={h} />
+        ))}
+        {folded.map((f, i) => (
+          <GrowthFoldRow key={`${f.type}:${f.dayStart}:${i}`} fold={f} />
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 // D88 §7.4：评分钮档名（预览 review.html 口径：重来/困难/良好/简单；色点承载语义色）。
@@ -172,6 +256,34 @@ export default function ReviewView({
   const [deferred, setDeferred] = useState<TodayQueue["deferred"]>([]);
   const [deferredOpen, setDeferredOpen] = useState(false);
 
+  // ---------- v48.85（D129，B2/B3）：成长反馈 ----------
+  // 设置读侧（§5.1 零渲染零计算短路）：enabled=false 时评分路径**完全不调用** growth:afterReview
+  // （读取路径短路，非「调了但藏 UI」）。挂载时现读 + settings/changed（growthFeedback）时重读。
+  const growthEnabledRef = useRef(true);
+  useEffect(() => {
+    let alive = true;
+    const read = () => {
+      void readGrowthFeedbackEnabled().then((on) => {
+        if (alive) growthEnabledRef.current = on;
+      });
+    };
+    read();
+    const off = eventBus.on("settings/changed", (payload?: unknown) => {
+      const key = (payload as { scope?: string; key?: string } | undefined)?.key;
+      if (!key || key === "growthFeedback") read();
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+  // 微反馈条状态：单槽（至多一条，新命中直接覆盖 §6.6.2）；n = 同键事件重挂序号（撤销后重评同键
+  // 再触发时强制 GrowthToast 重挂、重起 5s 计时）。设置关闭或 afterReview 失败 → 恒 null（零渲染）。
+  const [growthToast, setGrowthToast] = useState<{ hit: GrowthEventHit; n: number } | null>(null);
+  const growthToastSeqRef = useRef(0);
+  // 会话起点（§5.2：sessionStartTs = 会话首卡渲染时刻，组件 state 记录；会话成果汇总窗口起点）
+  const [sessionStartTs, setSessionStartTs] = useState(() => Date.now());
+
   // 查询最近可撤销评分（评分/撤销后刷新；挂起/跳过/删除不产生日志无需刷新，删除他人卡由撤销时服务端兜底）
   const refreshUndo = useCallback(async () => {
     setUndoInfo((await cardsApi.lastUndoableReview()) ?? null);
@@ -257,6 +369,7 @@ export default function ReviewView({
         setCurrent(resumeCard);
         setShowBack(resumeShowBack);
         setStartedAt(Date.now());
+        setSessionStartTs(Date.now()); // v48.85（D129 B3）：会话首卡渲染时刻
         setLoading(false);
         return;
       }
@@ -266,6 +379,7 @@ export default function ReviewView({
         setCurrent(c);
         setShowBack(false);
         setStartedAt(Date.now());
+        setSessionStartTs(Date.now()); // v48.85（D129 B3）：会话首卡渲染时刻
       } else {
         setSessionDone(true);
       }
@@ -323,6 +437,19 @@ export default function ReviewView({
       } catch {
         setSaveError(true);
         return;
+      }
+      // v48.85（D129 B2，§4.17-6⑥/§6.6.2 非阻塞硬性）：评分成功边界（COMMIT + persist + IPC 成功）后的
+      // 成长反馈拉取——fire-and-forget：不 await、不进 actionBusy、失败静默（growthApi 内部已兜底降级），
+      // 绝不阻塞评分→下一张卡路径；设置关闭（growthEnabledRef=false）时完全不调用（读取路径短路）。
+      // toast 候选至多 1 条由主进程 pickTopEvent 选出（口径唯一居所 electron/growth.js）；单槽直接覆盖。
+      if (growthEnabledRef.current) {
+        const gradedCardId = current.id;
+        void growthApi.afterReview(gradedCardId).then((r) => {
+          if (r.enabled && r.toast) {
+            growthToastSeqRef.current += 1;
+            setGrowthToast({ hit: r.toast, n: growthToastSeqRef.current });
+          }
+        });
       }
       // Leech 检测（§8.7 + §11.4 字段级更新）
       if (fsrsEngine.isLeech(lapses, 8) && !(current.leech?.isLeech)) {
@@ -740,6 +867,9 @@ export default function ReviewView({
               {doneCount > 0 ? "到期卡片已清空，休息一下。" : "今日到期卡片已清空。"}
             </p>
             {deferredPanel}
+            {/* v48.85（D129 B3，§5.2）：会话成果汇总——deferredPanel 之后；仅 doneCount>0 时驱动
+                growthAPI.sessionSummary(sessionStartTs)；空命中组件自身零渲染（禁负面对照） */}
+            {doneCount > 0 && <GrowthSessionSummary fromTs={sessionStartTs} />}
             <div className="settings-row">
               {undoInfo && (
                 <button className="btn btn-secondary btn-sm" onClick={undoLastGrade}>
@@ -834,6 +964,15 @@ export default function ReviewView({
             翻面态 showBack 由父持有，不受 remount 影响。
             D88 §7.3：CardFace 双面常挂（.review-flip 3D 翻卡），翻面在此只翻 flipped 类与 inert 对调。 */}
         <CardFace key={current!.id} card={current!} showBack={showBack} onEdit={handleEdit} />
+        {/* v48.85（D129 B2，§5.1）：微反馈条——CardFace 之后的条件渲染，绝对定位浮层不占布局流；
+            key 含 n：同键事件再次触发时强制重挂（旧条直卸重起新条，§5.1「替换」行） */}
+        {growthToast && (
+          <GrowthToast
+            key={`${growthToast.hit.key}:${growthToast.n}`}
+            hit={growthToast.hit}
+            onDone={() => setGrowthToast(null)}
+          />
+        )}
         {/* 信息行（2026-10-01 建立；v48.41/D81：**来源上移顶栏中间**（onMaterialName 链路），行内只留日期 */}
         <div className="review-meta">
           {current!.dateStamp ? current!.dateStamp : ""}

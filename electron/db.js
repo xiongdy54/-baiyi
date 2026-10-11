@@ -867,8 +867,33 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  // §9.4 历史数据兼容（一次性版本化回填）：① v11 前新卡态卡片 fsrs_json 补 S/D 基线（createEmptyCard
+  // 口径 0/0，§4.4.1「历史缺字段基线回填」）；② 存量 cloze 卡 hint 拆答案物化进 back_markdown（与渲染层
+  // extractClozeAnswer(s) 拼接逐字符等价，tests/legacyBackfill.test.cjs 对拍）。判定/编排见 legacyBackfill.js：
+  // 单事务 + 未匹配行零变更 + settings.app.legacyBackfillV1 标记幂等；数据落盘走本函数末尾 persist()。
+  let legacyBackfillResult = null; // P1 时序：回填结果暂存，完成标记延到 persist() 成功之后才落盘
+  try {
+    const { runLegacyBackfill } = require("./legacyBackfill");
+    const bf = runLegacyBackfill({ db, queryAll, readSettings, writeSettings, now: Date.now });
+    if (bf.ran && (bf.fsrsFixed > 0 || bf.clozeFixed > 0)) {
+      console.log(`[legacyBackfill] fsrs_json 补 S/D ${bf.fsrsFixed} 行；cloze hint 答案物化 ${bf.clozeFixed} 行`);
+    }
+    if (bf.ran) legacyBackfillResult = bf;
+  } catch (e) {
+    console.error("[legacyBackfill] 回填失败（不阻塞启动，下次启动重试）：", e);
+  }
   ensurePromptTemplates();
   persist();
+  // P1 时序：完成标记必须在 persist() 成功之后写（标记是重跑跳过的唯一安全网，先于数据落盘会在
+  // 「标记已写、数据未持久化即崩溃」时把存量旧数据锁死在未回填态）——persist 抛错则此处不执行，
+  // 标记不落盘，下次启动重跑可续（事务零残留；数据已持久化时重跑判定已合规 → 零写入 → 补标记）。
+  if (legacyBackfillResult) {
+    try {
+      legacyBackfillResult.mark();
+    } catch (e) {
+      console.error("[legacyBackfill] 完成标记写入失败（下次启动重跑补记）：", e);
+    }
+  }
 }
 
 // v23/F11（§4.4.9）：原子持久化——同目录 tmp + fsync + rename 原子替换（Windows MOVEFILE_REPLACE_EXISTING）。
@@ -1359,6 +1384,9 @@ function mapCardRow(r) {
         // （src/lib/fsrs.ts 明写「新卡的 S/D 合法为 0（首评前），不能无条件钳进 [1,10]」），
         // 而原判据不区分 state，会把这种合法新卡判成 damaged 并从队列**静默缺席**
         // （m12 夹具 17 条断言因此全红）。非新卡仍按原值域严格判定，F34 的保护不变。
+        // isNewState 同源口径（P3 联动）：electron/legacyBackfill.js needsFsrsBaseline 的 S/D 回填判定
+        // 用**同一表达式**，两处互为镜像——改一处必改另一处（漂移＝回填认新卡而本闸门认非新卡，
+        // S/D=0 基线行会被判 damaged 从队列静默缺席）。
         const isNewState = f.state === "new" || f.state === undefined || f.state === null;
         const bad =
           (f.stability !== undefined && !(Number.isFinite(S) && (isNewState ? S >= 0 : S > 0))) ||
@@ -4688,6 +4716,229 @@ function getStatsTimeline(opts) {
   return { now, cutoffHour: getCutoffHour(), ...built };
 }
 
+// ---------- v48.85（D129，§4.2-22 / §4.17）：成长反馈只读聚合出口（GrowthReadModel 数据面） ----------
+// 分层仿 getStatsTimeline ↔ statsTimeline 先例：本文件只做取数与组装（全部 SELECT、零写路径、零新表，
+// §4.17-3 只读不变量），事件判定口径一律在 electron/growth.js 纯函数模块——**禁止在此实现第二套口径**。
+// 设计稿 docs/design/GROWTH-FEEDBACK-D129.md §3.3；测试 tests/m13.test.cjs（N-1…N-12）。
+const growth = require("./growth");
+
+// 设置读侧：`app.growthFeedback` 对象 {enabled}——**仅严格 false 为关**（含手改文件把整个值写成
+// 布尔 false 的形态），缺失/非法/非对象一律回落开（§7.4 v48.85/D129；与 electron/main.js settings:set
+// 写侧、src/lib/growthSettings.ts 读侧同规）。
+// 关闭＝三出口短路返回 {enabled:false} 且不做任何查询（零渲染零计算，§6.6.2 硬性）。
+function growthFeedbackEnabled() {
+  const v = readSettings().app?.growthFeedback;
+  if (v === false) return false;
+  return !(v && typeof v === "object" && !Array.isArray(v) && v.enabled === false);
+}
+
+// 成长侧取数的卡行 join（R9：复用 TODAY_QUEUE_SQL 的同一 join 写法——contextRef.documentId → documents →
+// library_items；无归属卡不参与书维聚合、仍参与领域维）。只取活跃未删卡；口径与今日队列视图一致。
+const GROWTH_CARD_SQL = `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
+     LEFT JOIN library_items li ON li.id = d.library_item_id
+     WHERE c.is_deleted = 0 AND COALESCE(c.status, 'active') != 'archived'`;
+
+// review_logs 行 → growth.js 证据行：快照防御性解析，损坏/缺失一律 null（缺快照的 v22 前旧日志
+// 不参与判定，§3.2；坏行容错与 mapCardRow/computeTodayQueue 同口径，N-7）。
+function mapGrowthLogRow(r) {
+  const j = (t) => {
+    if (t === null || t === undefined || t === "") return null;
+    try {
+      const v = JSON.parse(t);
+      return v && typeof v === "object" ? v : null;
+    } catch { return null; }
+  };
+  return {
+    id: r.id,
+    cardId: r.card_id,
+    reviewSeq: r.review_seq,
+    reviewedAt: r.reviewed_at,
+    before: j(r.fsrs_before_json),
+    after: j(r.fsrs_after_json),
+    leechBefore: j(r.leech_before_json)
+  };
+}
+
+// 装载一批卡的证据行（卡行 + 各卡全部日志按 review_seq 升序）；fsrs/leech 损坏行按 damaged 跳过（N-7）。
+function loadGrowthCardsWithLogs(extraWhere, params) {
+  const rows = queryAll(
+    `${GROWTH_CARD_SQL}${extraWhere ? ` AND (${extraWhere})` : ""}`,
+    params || []
+  );
+  const byId = new Map();
+  for (const r of rows) {
+    const mapped = mapCardRow(r);
+    if (!mapped || mapped.damaged) continue;
+    // docTitle 回补（复审 P1 必修，同 withDocTitleFallback 先例 db.js:1930）：mapCardRow 逐字段构造
+    // 不透传 SQL 别名列——GROWTH_CARD_SQL 的 JOIN 书名在此回补（sourceRef 书名回落），否则
+    // material 书维 entityLabel/evidence.docTitle 与 Territory 书行 label（§3.1 entityLabel=书名）恒落 UUID。
+    byId.set(mapped.id, {
+      ...mapped,
+      docTitle: r.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null,
+      logs: []
+    });
+  }
+  const ids = [...byId.keys()];
+  for (let i = 0; i < ids.length; i += 400) { // 分批 IN，避免超大集合单语句过长
+    const chunk = ids.slice(i, i + 400);
+    const ph = chunk.map(() => "?").join(",");
+    for (const lr of queryAll(`SELECT * FROM review_logs WHERE card_id IN (${ph}) ORDER BY review_seq ASC`, chunk)) {
+      const c = byId.get(lr.card_id);
+      if (c) c.logs.push(mapGrowthLogRow(lr));
+    }
+  }
+  return [...byId.values()];
+}
+
+// 把一份取数结果并入去重集合（同卡多次命中不同范围时只留一份）。
+function mergeGrowthCards(target, extra) {
+  for (const c of extra) if (!target.has(c.id)) target.set(c.id, c);
+  return target;
+}
+
+// 窄范围派生（R2，§3.3）：afterReview 只取「刚评分的卡 + 同组卡 + 所属书/领域活跃卡集」，不触全库。
+function loadGrowthAfterReviewScope(card) {
+  const scope = new Map();
+  const groupKey = card.siblingKey || card.knowledgePointId;
+  if (groupKey) {
+    mergeGrowthCards(scope, loadGrowthCardsWithLogs("c.sibling_key = ? OR c.knowledge_point_id = ?", [groupKey, groupKey]));
+  }
+  const dom = Array.isArray(card.domain) && card.domain.length ? String(card.domain[0]) : null;
+  const clauses = [];
+  const params = [];
+  if (card.libraryItemId) { clauses.push("li.id = ?"); params.push(card.libraryItemId); }
+  if (dom) { clauses.push("CASE WHEN json_valid(c.domain) THEN json_extract(c.domain, '$[0]') END = ?"); params.push(dom); }
+  if (clauses.length) {
+    mergeGrowthCards(scope, loadGrowthCardsWithLogs(clauses.join(" OR "), params));
+  }
+  return scope;
+}
+
+// 会话/档案路径的聚合范围：种子卡 ∪ 同组卡 ∪ 书/领域成员（与 afterReview 共用同一批 derive 函数，N-9 一致性）。
+function loadGrowthAggregateScope(seedCards) {
+  const scope = new Map();
+  mergeGrowthCards(scope, seedCards);
+  const groupKeys = new Set();
+  const bookIds = new Set();
+  const doms = new Set();
+  for (const c of seedCards) {
+    if (c.siblingKey) groupKeys.add(c.siblingKey);
+    if (c.knowledgePointId) groupKeys.add(c.knowledgePointId);
+    if (c.libraryItemId) bookIds.add(c.libraryItemId);
+    if (Array.isArray(c.domain) && c.domain.length) doms.add(String(c.domain[0]));
+  }
+  if (groupKeys.size) {
+    const keys = [...groupKeys];
+    const ph = keys.map(() => "?").join(",");
+    mergeGrowthCards(scope, loadGrowthCardsWithLogs(`c.sibling_key IN (${ph}) OR c.knowledge_point_id IN (${ph})`, [...keys, ...keys]));
+  }
+  const clauses = [];
+  const params = [];
+  if (bookIds.size) {
+    const ids = [...bookIds];
+    clauses.push(`li.id IN (${ids.map(() => "?").join(",")})`);
+    params.push(...ids);
+  }
+  if (doms.size) {
+    const ds = [...doms];
+    clauses.push(`CASE WHEN json_valid(c.domain) THEN json_extract(c.domain, '$[0]') END IN (${ds.map(() => "?").join(",")})`);
+    params.push(...ds);
+  }
+  if (clauses.length) mergeGrowthCards(scope, loadGrowthCardsWithLogs(clauses.join(" OR "), params));
+  return scope;
+}
+
+// 对刚评分的卡派生全部记忆层命中并做防回灌过滤（§4.17-6③ / §3.2）：
+// 取该卡最新一条日志的 review_seq 为 triggerSeq，只保留 triggerSeq === 该 seq 的命中——
+// 存量历史跨越的 triggerSeq 更小，天然不命中（toast 只消费本出口，R4）。
+function getGrowthAfterReview(cardId, now) {
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  if (!growthFeedbackEnabled()) return { enabled: false }; // 零计算短路：不做任何查询
+  const id = String(cardId || "");
+  if (!id) return { enabled: true, toast: null, others: [] };
+  const rows = queryAll(`${GROWTH_CARD_SQL} AND c.id = ?`, [id]);
+  const mapped = rows.length ? mapCardRow(rows[0]) : null;
+  if (!mapped || mapped.damaged) return { enabled: true, toast: null, others: [] };
+  // docTitle 回补（复审 P1 必修，同 loadGrowthCardsWithLogs）：rows[0] 为原始行（JOIN docTitle 在场），
+  // mapCardRow 输出不带该别名列——toast/汇总证据链 evidence.docTitle（§3.1 entityLabel=书名）依赖它。
+  const card = {
+    ...mapped,
+    docTitle: rows[0].docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null,
+    logs: queryAll("SELECT * FROM review_logs WHERE card_id = ? ORDER BY review_seq ASC", [id]).map(mapGrowthLogRow)
+  };
+  const latestSeq = card.logs.length ? card.logs[card.logs.length - 1].reviewSeq : 0;
+  const keep = (hits) => hits.filter((h) => Number.isFinite(latestSeq) && h.triggerSeq === latestSeq);
+  const hits = keep(growth.deriveCardEvents(card, card.logs, nowMs));
+  const scope = loadGrowthAfterReviewScope(card);
+  const members = [...scope.values()];
+  if (members.length) {
+    hits.push(...keep(growth.deriveGroupEvents(members, nowMs)));
+    hits.push(...keep(growth.deriveMaterialEvents(members, nowMs)));
+  }
+  const picked = growth.pickTopEvent(hits);
+  return { enabled: true, toast: picked.toast, others: picked.others };
+}
+
+// 会话成果汇总（§3.3）：窗口起点 fromTs（ms）→ {enabled, fromTs, hits, folded}。
+// 窗口过滤按「触发日志 reviewed_at 落在窗口内」进行；派生一律喂**全量**日志（首达语义需要完整序列，
+// 否则会把窗口内本已达成的状态误判成新首达——同防回灌一个道理）。
+// hits = 表序可见命中（含 L3——汇总面照常列出）；folded = L2 单日折叠计数（含被折叠完整命中，供展开）。
+function getGrowthSessionSummary(fromTs, now) {
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  if (!growthFeedbackEnabled()) return { enabled: false };
+  const from = Number(fromTs) || 0;
+  const windowCardIds = queryAll(
+    `SELECT DISTINCT r.card_id AS id FROM review_logs r
+     JOIN cards c ON c.id = r.card_id
+     WHERE r.reviewed_at >= ? AND c.is_deleted = 0 AND COALESCE(c.status, 'active') != 'archived'`,
+    [from]
+  ).map((r) => r.id);
+  if (!windowCardIds.length) return { enabled: true, fromTs: from, hits: [], folded: [] };
+  // 分批 IN（复审 P2b 采纳，同 loadGrowthCardsWithLogs 的 400 批先例）：超大窗口避免单语句过长
+  const seed = new Map();
+  for (let i = 0; i < windowCardIds.length; i += 400) {
+    const chunk = windowCardIds.slice(i, i + 400);
+    mergeGrowthCards(seed, loadGrowthCardsWithLogs(`c.id IN (${chunk.map(() => "?").join(",")})`, chunk));
+  }
+  if (!seed.size) return { enabled: true, fromTs: from, hits: [], folded: [] };
+  const cards = [...loadGrowthAggregateScope([...seed.values()]).values()];
+  const hits = [];
+  for (const c of cards) hits.push(...growth.deriveCardEvents(c, c.logs, nowMs));
+  hits.push(...growth.deriveGroupEvents(cards, nowMs));
+  hits.push(...growth.deriveMaterialEvents(cards, nowMs));
+  const inWindow = hits.filter((h) => h.triggerAt >= from);
+  const folded = growth.foldSameDay(inWindow, (ts) => dayStartMs(ts)); // 学习日口径 = D23 切点（N-10）
+  return { enabled: true, fromTs: from, hits: folded.visible, folded: folded.folded };
+}
+
+// 成长总览 / 档案（§3.3）：全库 derive → 近期 L0–L2 档案 + totals + Territory。
+// 全库聚合**只**在仪表盘挂载时触发 + 事件驱动防抖刷新（§4.17-6⑥），不进评分路径、不做每评分全量重算。
+function getGrowthOverview(opts, now) {
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const limit = Math.min(200, Math.max(1, Math.floor(Number(opts && opts.limit) || 30)));
+  if (!growthFeedbackEnabled()) return { enabled: false };
+  const cards = loadGrowthCardsWithLogs("", []);
+  const hits = [];
+  for (const c of cards) hits.push(...growth.deriveCardEvents(c, c.logs, nowMs));
+  hits.push(...growth.deriveGroupEvents(cards, nowMs));
+  hits.push(...growth.deriveMaterialEvents(cards, nowMs));
+  // 档案只收录 L0–L2（§4.17-7①：Growth Records 不收 L3 与取消项）；按 triggerSeq 倒序（近期在前），limit 截断
+  const archive = hits.filter((h) => h.tier <= 2);
+  const recentEvents = [...archive].sort((a, b) => b.triggerSeq - a.triggerSeq).slice(0, limit);
+  const totals = { l0: 0, l1: 0, l2: 0 };
+  for (const h of archive) totals[`l${h.tier}`] += 1;
+  return {
+    enabled: true,
+    now: nowMs,
+    cutoffHour: getCutoffHour(),
+    recentEvents,
+    totals,
+    territory: growth.buildTerritory(cards, nowMs),
+    knowledge: null // GF-2 预留（§3.5）：阻塞于缺口 G1，契约修订前恒为 null
+  };
+}
+
 // ---------- v36（M8-A，§6.5 / D34）：日记条目（第二输入通道） ----------
 // 三条口径：① `entry_date` = **自然日**（journalTime.journalDateOf；不随学习日切点漂移）；
 // ② `is_draft=1` = 「未发送的快速记录草稿」（全局至多一条，库层部分唯一索引兜底）；
@@ -7502,6 +7753,10 @@ module.exports = {
   addReadingEvent,
   getStatsOverview,
   getStatsTimeline,
+  // v48.85（D129，§4.2-22）：成长反馈只读聚合出口（GrowthReadModel 数据面；零写路径，§4.17-3）
+  getGrowthAfterReview,
+  getGrowthSessionSummary,
+  getGrowthOverview,
   setCardSuspended,
   updateCardLeech,
   resolveLeech,

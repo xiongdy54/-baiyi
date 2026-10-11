@@ -8236,3 +8236,177 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .learner-udc-edit { display: flex; align-items: flex-start; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
 .learner-udc-edit > span { line-height: 24px; }
 .learner-danger { color: var(--danger, #b3261e); }
+
+/* ============================== M13 成长反馈（v48.85 / D129 批次 B2–B4） ==============================
+   设计稿 docs/design/GROWTH-FEEDBACK-D129.md §5（以下类名即实现契约）；动效全部引用
+   MOTION-DESIGN-SPEC §1 既有 token（不裸写 ms、不新增 token）；双轨 reduce（装饰性入场规则全部
+   收进 no-preference 作用域，reduce 块显式禁用——§3 通用硬规则 2）。颜色纪律：无装饰彩色，
+   单一焦点色只允许出现在「证据」文字按钮与 Territory「已巩固」段（§5.1/§5.3）。 */
+
+/* ---------- B2 复习页微反馈条（§5.1）：绝对定位浮层，不占布局流 → 结构性保证不推挤卡面 ---------- */
+/* 浮层锚点：.review-session 原无定位上下文，设 relative 供 .growth-toast 锚定（其内既有绝对定位
+   后代——.review-face / .tag-input-box——均有更近的 positioned 祖先，锚定不变，已核对）。 */
+.review-session { position: relative; }
+.growth-toast {
+  position: absolute;
+  inset-inline: 0;
+  margin-inline: auto;              /* 720 居中列同一公式（§18.3 对齐锚） */
+  max-width: 720px;
+  bottom: var(--sp-4);
+  z-index: var(--z-sticky);
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);  /* 浮层唯一阴影，不混用 --shadow-hover（已废除） */
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: 0;                 /* 默认皮肤方角语言 */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+.growth-toast-text { margin: 0; font-size: var(--fs-body, 14px); color: var(--ink); }
+/* 「证据」＝Meta 档 accent 文字按钮，hover 下划线（§5.4 跳转链接先例），无箭头字符；
+   单一焦点色仅此处（tier 不用颜色表达，§6.6.2） */
+.growth-toast-more {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--accent);
+  padding: 0;
+}
+.growth-toast-more:hover { text-decoration: underline; text-underline-offset: 3px; }
+.growth-toast-detail {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+}
+/* 证据折叠容器（§7 .collapse-clip）作为浮层 flex 子项需通栏 */
+.growth-toast > .collapse-clip { align-self: stretch; width: 100%; }
+.growth-toast-detail .mono { font-family: var(--mono); color: var(--grey-3); font-size: 12px; margin: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  /* 进场：opacity 0→1 + translateY(--shift-sm)→0，--dur-enter(150ms) --ease-enter（§5.1 动效表）。
+     替换＝旧条直卸（单槽替换，无交叉出场——§9 单主角），由父组件 key 重挂实现。 */
+  .growth-toast { animation: growth-toast-in var(--dur-enter) var(--ease-enter) both; }
+  /* 消失（5s 计时到点 / 展开面板关闭后再计 5s）：--dur-exit(100ms) --ease-exit，动画完卸载（组件承担） */
+  .growth-toast.is-closing { animation: growth-toast-out var(--dur-exit) var(--ease-exit) forwards; }
+}
+@keyframes growth-toast-in {
+  from { opacity: 0; transform: translateY(var(--shift-sm)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes growth-toast-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* ---------- B3 会话成果汇总（§5.2）：无卡片化容器堆叠——Meta 档标题 + hairline 行；
+   层级（能力/结构/建制）用文字不用颜色 ---------- */
+.growth-session { width: 100%; margin-top: var(--sp-4); }
+.growth-session-title { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); color: var(--grey-3); }
+.growth-session-list { list-style: none; margin: 0; padding: 0; }
+.growth-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+.growth-session-list > .growth-row:first-child { border-top: 0; }
+.growth-row-tier { font-family: var(--mono); font-size: 12px; color: var(--grey-3); flex: none; }
+.growth-row-text { flex: 1 1 auto; min-width: 0; font-size: var(--fs-body); color: var(--ink); }
+/* 汇总行内的证据折叠容器通栏换行 */
+.growth-row > .collapse-clip { flex-basis: 100%; min-width: 0; }
+.growth-fold-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  color: var(--grey-3);
+  padding: 0;
+  text-align: left;
+}
+.growth-fold-btn:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.growth-fold-list { list-style: none; margin: 0; padding: var(--sp-1) 0 0 var(--sp-6); display: flex; flex-direction: column; }
+
+/* ---------- B4 仪表盘 growth-events（§5.3）：成长记录时间线 + totals 头部计数 ---------- */
+.growth-records { display: flex; flex-direction: column; gap: var(--sp-2); }
+.growth-records-totals { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--grey-3); }
+.growth-record-list { list-style: none; margin: 0; padding: 0; }
+.growth-record {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.growth-record:first-child { border-top: 0; }
+.growth-record-date { font-family: var(--mono); font-size: 12px; color: var(--grey-3); flex: none; font-variant-numeric: tabular-nums; }
+.growth-record-text { flex: 1 1 auto; min-width: 0; font-size: var(--fs-body); color: var(--ink); }
+.growth-record-src {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--grey-3);
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.growth-empty { margin: 0; font-size: var(--fs-meta); color: var(--grey-3); }
+
+/* ---------- B4 仪表盘 territory（§5.3，GF-1 材料/领域巩固地图）：分段条 12px 直角、
+   段间 1px --paper 缝；--grey-1（未学）→ --grey-2（学习中）→ --ink（长期复习）→ --accent
+  （已巩固，单图唯一焦点色）；无圆角无渐变 ---------- */
+.territory-map { display: flex; flex-direction: column; gap: var(--sp-2); }
+.territory-row { display: flex; align-items: center; gap: var(--sp-3); }
+.territory-name {
+  flex: 0 0 30%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+.territory-seg { display: flex; flex: 1 1 auto; height: 12px; gap: 1px; min-width: 0; }
+.territory-seg > i { display: block; height: 100%; min-width: 0; border-radius: 0; }
+.territory-seg-new { background: var(--grey-1); }
+.territory-seg-learning { background: var(--grey-2); }
+.territory-seg-reviewing { background: var(--ink); }
+.territory-seg-consolidated { background: var(--accent); }
+.territory-pct { flex: none; min-width: 3.5em; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--grey-3); font-variant-numeric: tabular-nums; }
+.territory-foot { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--grey-3); }
+/* hover-dim 族（§6.3）：hover 某行时其余行 opacity→0.35；包 hover:hover（§4 新纪律） */
+@media (hover: hover) {
+  .territory-map .territory-row { transition: opacity var(--dur-hover) var(--ease-enter); }
+  .territory-map:has(.territory-row:hover) .territory-row:not(:hover) { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* 分段条入场＝chart-seg 族（scaleX 0→1，stagger 40ms/段 ×≤8，--dur-chart-in --ease-enter，
+     §5.3 动效行；40ms 为 §3-6 stagger 预算定值，同书架 30ms/张 先例写法），挂 :root:not([data-vt])
+     入场闸门（MOTION-DESIGN-SPEC §6.3/§5.2）。数据更新的几何呈现随重渲瞬时落位（列表非图表，
+     flex-grow 属布局属性不入过渡——§3 硬规则 1 只动画可复合属性）。 */
+  :root:not([data-vt]) .territory-seg > i {
+    transform-origin: left;
+    animation: territory-seg-in var(--dur-chart-in) var(--ease-enter) both;
+    animation-delay: calc(var(--seg-i, 0) * 40ms);
+  }
+}
+@keyframes territory-seg-in {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+/* reduce 双轨（§3 硬规则 2：每个 keyframes 消费点同文件存在对应 reduce 块）：
+   微反馈条显示/消失瞬时（功能性出现，无装饰位移——§5.1 reduce 行）；分段条无入场位移；
+   territory 行 hover-dim 瞬时（§6.3 opacity 过渡免动；选择器与 hover-dim 规则同特异度，压得住后者） */
+@media (prefers-reduced-motion: reduce) {
+  .growth-toast,
+  .growth-toast.is-closing { animation: none; transition: none; }
+  .territory-seg > i { animation: none; transition: none; }
+  .territory-map .territory-row { transition: none; }
+}

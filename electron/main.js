@@ -284,6 +284,15 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
       sourceRef: src.sourceRef === false ? false : true
     };
   }
+  // v48.85（D129，§7.4）：成长反馈总开关写侧归一——对象 {enabled}，仅严格 false 为关
+  //（含手改文件把整个值写成布尔 false 的形态），其余（含缺失/非法/非对象）回落开；
+  // 与渲染层读侧（src/lib/growthSettings.ts normalizeGrowthFeedback）同规。
+  // 对象键逐字面量（D82 教训 / 设计稿 R7：勿用变量间接，防 F18 扫描器误报；子键不单列 DOC_KEYS）
+  if (scope === "app" && key === "growthFeedback") {
+    const off = value === false ||
+      (value !== null && typeof value === "object" && !Array.isArray(value) && value.enabled === false);
+    value = { enabled: !off };
+  }
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
@@ -748,6 +757,35 @@ ipcMain.handle("cards:skip", (_e, cardId) => saveSkip(String(cardId)));
 ipcMain.handle("reading:event", (_e, itemId, charPos) => addReadingEvent(String(itemId), Number(charPos)));
 ipcMain.handle("stats:overview", () => getStatsOverview());
 ipcMain.handle("stats:timeline", (_e, opts) => getStatsTimeline(opts && typeof opts === "object" ? opts : {}));
+// ---------- v48.85（D129，§4.2-22）：成长反馈只读派生（M13 GF-1 数据面；§4.17-3 只读不变量——零写路径、
+// 零事件推送；渲染层在评分成功边界之后异步调用，失败 catch 静默，绝不影响评分/跳过/删除/Undo） ----------
+// 三条通道兜底 catch（复审 P2a 采纳）：db 出口抛错时降级返回设计稿 §3.3 的 {enabled:false}
+// （渲染层按「成长反馈不可用」静默隐藏——与设置关闭短路同形，渲染层已按该形状处理，不新增契约），
+// 防未处理 rejection；设置关闭的正常短路返回体经 try 正常透传，兜底不改变其语义。
+ipcMain.handle("growth:afterReview", (_e, cardId, now) => {
+  try {
+    return dbModule.getGrowthAfterReview(String(cardId ?? ""), Number.isFinite(now) ? Number(now) : undefined);
+  } catch (err) {
+    console.error("[growth:afterReview] 派生失败，降级返回 {enabled:false}（评分流程不受影响）:", err);
+    return { enabled: false };
+  }
+});
+ipcMain.handle("growth:sessionSummary", (_e, fromTs, now) => {
+  try {
+    return dbModule.getGrowthSessionSummary(Number(fromTs) || 0, Number.isFinite(now) ? Number(now) : undefined);
+  } catch (err) {
+    console.error("[growth:sessionSummary] 派生失败，降级返回 {enabled:false}:", err);
+    return { enabled: false };
+  }
+});
+ipcMain.handle("growth:overview", (_e, opts, now) => {
+  try {
+    return dbModule.getGrowthOverview(opts && typeof opts === "object" ? opts : {}, Number.isFinite(now) ? Number(now) : undefined);
+  } catch (err) {
+    console.error("[growth:overview] 派生失败，降级返回 {enabled:false}:", err);
+    return { enabled: false };
+  }
+});
 ipcMain.handle("cards:setSuspended", (_e, id, suspended, reason) =>
   setCardSuspended(String(id), Boolean(suspended), reason)
 );

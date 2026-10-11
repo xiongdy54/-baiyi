@@ -190,7 +190,7 @@ runFlow(flow, async () => {
   walk(path.join(ROOT, "src"));
   walk(path.join(ROOT, "electron"));
   const unbuilt = [
-    ["growth: IPC（§6.6/§4.17 规范未实现）", /ipcMain\.handle\(\s*"growth:/],
+    // growth: IPC 已随 v48.85 / D129 GF-1 实现并在 §4.2-22 登记为已实现——从 unbuilt 移除（终审 P1-1）
     ["K3 探针卡运行表 probe_runs（未实现）", /\bprobe_runs\s*\(/],
     ["frontierExploration 前沿探索开关（未实现）", /frontierExploration/],
     ["出错一键上传队列 error-report-queue（§7.6 未实现）", /error-report-queue/],
