@@ -197,9 +197,9 @@ ${images.map((im, i) => `<Relationship Id="rIdImg${i}" Type="http://schemas.open
   ok(scriptMd === "正文前正文后", "清洗：script 块（大写）剔除且不误伤正文");
   ok(importers.markdownFromText("普通段落 a\n\n普通段落 b").includes("data:") === false, "清洗：普通内容不受影响");
 
-  // ---------- M6-1-3 合成 EPUB 图片能力（syn-2） ----------
-  section("M6-1-3 合成 EPUB 图片能力（syn-2）");
-  ok(epub.SYNTH_GENERATOR_VERSION === "syn-2", "syn 版本：syn-2（结构变更纪律 §7.1.11）");
+  // ---------- M6-1-3 合成 EPUB 图片能力（syn-3） ----------
+  section("M6-1-3 合成 EPUB 图片能力（syn-3）");
+  ok(epub.SYNTH_GENERATOR_VERSION === "syn-3", "syn 版本：syn-3（空首章清理，结构变更纪律 §7.1.11）");
 
   const mdPlain = "# 第一章\n\n正文段落，没有图片。";
   const s1 = await epub.buildSyntheticEpub("无图书", mdPlain);
@@ -216,7 +216,7 @@ ${images.map((im, i) => `<Relationship Id="rIdImg${i}" Type="http://schemas.open
     for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
     return h.toString(36);
   }
-  ok(opf1.includes(`urn:uuid:synthetic-${djb2("无图书\u0000" + mdPlain)}`), "合成：无图 identifier 与 syn-1 算法恒等（存量粘贴书 CFI 不受影响）");
+  ok(opf1.includes(`urn:uuid:synthetic-${djb2("无图书\u0000" + mdPlain)}`), "合成：无图 identifier 算法与 syn-1 恒等（syn-3 不改 identifier 输入）");
 
   const mdImgs = "# 第一章\n\n看图：![说明](img-0.png)\n\n# 第二章\n\n再看：![](img-1.png)";
   const imgA = new Uint8Array(PNG_A);
@@ -233,13 +233,12 @@ ${images.map((im, i) => `<Relationship Id="rIdImg${i}" Type="http://schemas.open
   ok(Buffer.compare(Buffer.from(zipImg), PNG_A) === 0, "合成：图片字节原样落包 OEBPS/images/");
   const ch0 = await z2.file("OEBPS/c0.xhtml").async("string");
   const ch1 = await z2.file("OEBPS/c1.xhtml").async("string");
-  const ch2 = await z2.file("OEBPS/c2.xhtml").async("string");
-  // 注：markdown 以「# 」开头时首章为空是既有技术债（§9.4「粘贴书合成 EPUB 的空首章」，本批 Non-Goal），
-  // 章节下标因此后移一位：c1=第一章（img-0），c2=第二章（img-1）
-  ok(ch0.trim().endsWith("<body>\n\n</body></html>") || !ch0.includes("<img"), "合成：空首章为既有技术债行为（本批不修）");
-  ok(ch1.includes('src="images/img-0.png"'), "合成：第一章 img src 重写为 EPUB 内部路径");
-  ok(ch2.includes('src="images/img-1.png"'), "合成：第二章 img src 重写（跨章生效）");
-  ok(!ch1.includes('src="img-0.png"'), "合成：旧相对引用不残留");
+  // syn-3：一级标题开头不再压空首章（§9.4「粘贴书合成 EPUB 的空首章」清理）——
+  // c0=第一章（img-0），c1=第二章（img-1），无 c2；目录不再多一项
+  ok(!z2.file("OEBPS/c2.xhtml"), "合成：一级标题开头无空首章（spine 只剩 2 章，目录去多项）");
+  ok(ch0.includes('src="images/img-0.png"'), "合成：第一章 img src 重写为 EPUB 内部路径");
+  ok(ch1.includes('src="images/img-1.png"'), "合成：第二章 img src 重写（跨章生效）");
+  ok(!ch0.includes('src="img-0.png"'), "合成：旧相对引用不残留");
   const s2b = await epub.buildSyntheticEpub("带图书", mdImgs, { images: [
     { filename: "img-0.png", bytes: imgA, mediaType: "image/png" },
     { filename: "img-1.png", bytes: imgB, mediaType: "image/png" }
@@ -256,6 +255,60 @@ ${images.map((im, i) => `<Relationship Id="rIdImg${i}" Type="http://schemas.open
   const s4 = await epub.buildSyntheticEpub("带图书", mdImgs, { images: [{ filename: "img-0.png", bytes: imgA, mediaType: "image/png" }] });
   const opf4 = await (await JSZip.loadAsync(s4.bytes)).file("OEBPS/content.opf").async("string");
   ok(!opf4.includes(`urn:uuid:synthetic-${djb2("带图书\u0000" + mdImgs)}`), "合成：有图 identifier ≠ 无图 identifier（碰撞防护）");
+
+  // ---------- M6-1-5 syn-3 空首章清理与存量结构映射（§9.4 / §7.1.11） ----------
+  section("M6-1-5 syn-3 空首章清理与存量结构映射（§9.4 / §7.1.11）");
+  // 旧算法复刻（syn-2 行为，含空壳首章）——仅用于机械锁定「新章索引 = 旧章索引 − 1」的结构映射，
+  // 供存量粘贴书锚点降级链（§6.2）的后续运行时映射实现对照。
+  const oldSplit = (markdown, fallbackTitle) => {
+    const chapters = [];
+    let cur = { title: "", bodyHtml: "" };
+    let buf = [];
+    const flush = () => { cur.bodyHtml = epub.renderMarkdownToBodyHtml(buf.join("\n")); chapters.push(cur); };
+    for (const line of String(markdown || "").split("\n")) {
+      const m = /^#\s+(.+)$/.exec(line.trim());
+      if (m) { flush(); cur = { title: m[1].trim(), bodyHtml: "" }; buf = []; }
+      else buf.push(line);
+    }
+    flush();
+    if (chapters.length === 1 && !chapters[0].title) chapters[0].title = (fallbackTitle || "").trim() || "正文";
+    return chapters;
+  };
+  // (a) 多章节、一级标题开头：空壳被删，新旧索引恒等映射 new[i] === old[i+1]
+  const oldChapters = oldSplit(mdImgs);
+  const newChapters = epub.splitMarkdownChapters(mdImgs);
+  ok(oldChapters.length === 3 && oldChapters[0].title === "" && oldChapters[0].bodyHtml === "", "旧算法复刻：一级标题开头压出空壳首章（syn-2 行为基线）");
+  ok(newChapters.length === oldChapters.length - 1, "syn-3：空壳首章被删（章数 − 1）");
+  ok(newChapters.every((c, i) => c.title === oldChapters[i + 1].title && c.bodyHtml === oldChapters[i + 1].bodyHtml), "存量映射：新章 i = 旧章 i+1（chapterIndex 整体偏移 −1，旧 1 即新 0）");
+  // (b) 无一级标题开头（散文/Word 正文先行）：新旧结构恒等，零 CFI 影响
+  const mdProse = "这是没有一级标题的散文开头。\n\n第二段。";
+  const oldProse = oldSplit(mdProse, "散文书");
+  const newProse = epub.splitMarkdownChapters(mdProse, "散文书");
+  ok(oldProse.length === 1 && newProse.length === 1 && newProse[0].title === oldProse[0].title && newProse[0].bodyHtml === oldProse[0].bodyHtml, "存量映射：无一级标题开头的书新旧结构恒等（零偏移、零 CFI 影响）");
+  // (c) 只有一级标题（无更多章节）：目录恰 1 项、首章即正文
+  const mdSingle = "# 只有一级标题\n\n正文一段，没有更多章节。";
+  const s5 = await epub.buildSyntheticEpub("单章书", mdSingle);
+  const z5 = await JSZip.loadAsync(s5.bytes);
+  const nav5 = await z5.file("OEBPS/nav.xhtml").async("string");
+  const c05 = await z5.file("OEBPS/c0.xhtml").async("string");
+  ok((nav5.match(/<li>/g) || []).length === 1, "只有一级标题：目录恰 1 项（syn-2 为 2 项：空壳+正章）");
+  ok(c05.includes("正文一段"), "只有一级标题：首章即正文（首屏不空白）");
+  ok((await z5.file("OEBPS/content.opf").async("string")).includes('<itemref idref="c0"/>'), "只有一级标题：spine 首项即正章");
+  // (d) 合法空章不误删：有标题的「# 前言」后紧跟下一标题
+  const prefaceChapters = epub.splitMarkdownChapters("# 前言\n\n# 第一章\n\n第一章正文。");
+  ok(prefaceChapters.length === 2 && prefaceChapters[0].title === "前言" && prefaceChapters[1].title === "第一章", "合法空章：有标题的「前言」章保留（判定条件含 title===\"\" 从严不误删）");
+  // (e) 标题前有实际正文 → 隐式前言章保留（③ 有非空行不丢）
+  const introChapters = epub.splitMarkdownChapters("开头散文段。\n\n# 第一章\n\n正文。");
+  ok(introChapters.length === 2 && introChapters[0].title === "" && introChapters[0].bodyHtml.includes("开头散文段"), "标题前正文：保留为隐式前言章（有非空行不丢）");
+  // (f) 纯空白行 + 一级标题：不产生空壳（空白不算内容）
+  const wsChapters = epub.splitMarkdownChapters("\n\n# 第一章\n\n正文。");
+  ok(wsChapters.length === 1 && wsChapters[0].title === "第一章", "纯空白行+标题：不产生空壳（空白不算内容）");
+  // (g) 空 markdown：行为不变（单章回退材料名）
+  const emptyChapters = epub.splitMarkdownChapters("", "空书");
+  ok(emptyChapters.length === 1 && emptyChapters[0].title === "空书", "空 markdown：行为不变（单章回退材料名）");
+  // (h) 多章合成 toc：首项即首个一级标题（去多项，c0 起步）
+  const s6 = await epub.buildSyntheticEpub("多章书", "# 甲\n\n甲正文。\n\n# 乙\n\n乙正文。");
+  ok(s6.toc.length === 2 && s6.toc[0].label === "甲" && s6.toc[0].href === "c0.xhtml" && s6.toc[1].label === "乙" && s6.toc[1].href === "c1.xhtml", "多章：toc 首项即首个一级标题（目录去多项）");
 
   // ---------- M6-1-4 src 重写与 mediaType 工具 ----------
   section("M6-1-4 rewriteImgSrcs / mediaTypeForFilename");

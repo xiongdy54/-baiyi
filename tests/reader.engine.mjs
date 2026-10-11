@@ -479,8 +479,8 @@ try {
   await cdp.eval(clickByText("FSRSTEST 粘贴引擎验证书", ".book-card"));
   await wait(3000);
   const pasteEngine = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
-  // v48.53（D93）：空壳章自愈回归——该粘贴书正文以一级标题开头（spine[0] 为空壳章），
-  // 打开首屏必须已自愈到首个非空节（任何交互之前断言正文可见）
+  // v48.53（D93）着陆自愈回归 + syn-3（§9.4 空首章清理）：该粘贴书正文以一级标题开头——
+  // syn-3 起合成不再产生空壳章、首屏直落正文；D93 自愈保留为异构格式/真实 EPUB 空节兜底
   const pasteFirstPaint = await cdp.eval(`(() => {
     const k = window.__readerKernel;
     const texts = (k && k.__getContents ? k.__getContents() : []).map((e) => (e.doc?.body?.textContent || "").trim()).filter(Boolean);
