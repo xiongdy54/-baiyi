@@ -1408,10 +1408,10 @@ ipcMain.handle("learner:listTracks", async () => {
   const trackMaterials = []; // 轨道 → 归属材料明细（TracksDialog 展开区 + 「移出」用）
   for (const m of snapshot.materials || []) {
     for (const t of effective.slice().sort((a, b) => a.id.localeCompare(b.id))) {
+      // 同一份材料可同属多个轨道（设计稿 §3），每条命中轨道都要记录——展开区与「已归属」标注才完整
       if (require("./lmRecommend").resolveMembership(t, m, overrides)) {
         assigned.add(String(m.id));
         trackMaterials.push({ trackId: t.id, libraryItemId: String(m.id), title: String(m.title || ""), lang: String(m.lang || "") });
-        break;
       }
     }
   }

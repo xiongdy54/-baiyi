@@ -836,6 +836,8 @@ body.has-skin .topbar { background: transparent; }
   .dd-menu { animation: pop-in 220ms var(--spring) both; transform-origin: 50% 0%; }
   .dd-menu.dd-menu-up { transform-origin: 50% 100%; }
   .dd-menu.dd-menu-down { transform-origin: 50% 0%; }
+  /* 面板「⋯」菜单（D124）：同为浮层菜单族（D120 §8.4），同挂既有 pop-in；恒在按钮下方开 → 顶缘长出 */
+  .learner-menu-pop { animation: pop-in 220ms var(--spring) both; transform-origin: 50% 0%; }
 }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.92) translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes sel-bar-in { from { opacity: 0; transform: translateY(var(--shift-sm)) scale(var(--scale-in)); } to { opacity: 1; transform: none; } }
@@ -5296,6 +5298,9 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 }
 .dd-item:hover { background: var(--grey-1); }
 .dd-item-on { border-left-color: var(--accent); color: var(--accent); }
+/* 禁用项（v48.80 D124）：无语言信息的轨道禁选「语言习得」——灰字、无 hover 底色（不位移不加影） */
+.dd-item:disabled,
+.dd-item:disabled:hover { color: var(--text-helper); cursor: default; background: none; }
 
 /* 图表区：水平垂直居中，SVG 自适应不出框 */
 .dash-widget-body {
@@ -8157,4 +8162,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .learner-track-name { width: 160px; }
 .learner-track-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .learner-track-sub { font-size: 12px; color: var(--text-secondary); }
+/* 领域多选行（v48.80 D124 §11.4）：标签在左、learner-tag 芯片多选在右，可换行 */
+.learner-udc-edit { display: flex; align-items: flex-start; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
+.learner-udc-edit > span { line-height: 24px; }
 .learner-danger { color: var(--danger, #b3261e); }

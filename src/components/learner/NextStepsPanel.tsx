@@ -3,7 +3,7 @@
 // app.learner.enabled === false 时不渲染（不留空白）；对话框动作在本面板内部处理，页面跳转经 learner/navigate 交 App。
 import { useCallback, useEffect, useRef, useState } from "react";
 import { eventBus } from "../../lib/eventbus";
-import { learnerApi, learnerSettings, type LearnerStatus, type RecItem } from "../../lib/learner";
+import { learnerApi, learnerSettings, languageDisplayName, type LearnerStatus, type RecItem } from "../../lib/learner";
 import { learnerStrings } from "../../lib/learnerStrings";
 import Dropdown from "../Dropdown";
 import TracksDialog from "./TracksDialog";
@@ -154,7 +154,8 @@ export default function NextStepsPanel() {
   if (enabled === null || enabled === false) return null;
 
   const items = state.items.filter((it) => !removedKeys.has(it.key));
-  const nativeLangsText = effectiveNativeLangs.map((c) => c.toUpperCase()).join(" / ");
+  // 设计稿 §11.4「你的母语是 {语言名列表} 吗？」——语言名按界面语言生成（Intl.DisplayNames），不显示代码
+  const nativeLangsText = effectiveNativeLangs.map((c) => languageDisplayName(c)).join("、");
   const tooHardKinds = new Set(["continue", "start", "reread"]);
 
   return (
