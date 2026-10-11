@@ -8103,7 +8103,6 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .learner-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
 .learner-head-right { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
 .learner-meta { font-size: 12px; color: var(--text-tertiary, var(--text-secondary)); }
-.learner-count-select { font-size: 12px; }
 .learner-notice { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; font-size: 13px; padding: var(--sp-2) 0; }
 .learner-empty { font-size: 13px; color: var(--text-secondary); margin: var(--sp-2) 0; }
 .learner-error { color: var(--danger, #b3261e); font-size: 13px; margin: var(--sp-2) 0; }
@@ -8146,6 +8145,11 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .learner-tag.is-on { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
 .learner-native-custom { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
 .learner-native-custom input { width: 160px; }
+
+/* 归入行：标题左（可截断）、控件右；hairline 分隔（瑞士风列表行） */
+.learner-assign-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-top: 1px solid var(--hairline); }
+.learner-assign-row:first-of-type { border-top: 0; }
+.learner-assign-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 轨道管理 */
 .learner-track { border-top: 1px solid var(--hairline); padding: var(--sp-3) 0; display: flex; flex-direction: column; gap: var(--sp-2); }

@@ -159,15 +159,30 @@ function parseContextRef(text) {
   return ref && typeof ref === "object" ? ref : null;
 }
 
-/** 材料语言（设计稿 §6.2）：library_items.lang 永远优先，否则 detectLang 兜底（PDF 取前 3 页） */
-function materialLangOf(mat, facts, pdfPagesOfSync) {
+/** 材料语言（设计稿 §6.2）：library_items.lang 永远优先；否则 detectLang 兜底——
+ *  非 PDF 取 markdown 前 3000 字，PDF 取前 3 页。任意语言都可能被检出（Q1 全球化，不写死）。 */
+async function materialLangOf(mat, mdHeadOf, pdfPagesOf) {
   const setLang = lmLex.baseLang(String(mat.lang || ""));
   if (setLang) return setLang;
-  if (mat.sourceType === "pdf") {
-    const pages = pdfPagesOfSync ? pdfPagesOfSync(mat.id) || [] : [];
+  if (String(mat.sourceType) === "pdf") {
+    const pages = pdfPagesOf ? pdfPagesOf(String(mat.id)) || [] : [];
     return lmText.detectLang(pages.slice(0, 3).join("\n"));
   }
-  return "";
+  const head = mdHeadOf ? await mdHeadOf(String(mat.id)) : "";
+  return lmText.detectLang(head);
+}
+
+/** 预载 markdown 头部（语言检测兜底用），返回异步取用器（按需 getDocument，带缓存） */
+function markdownHeadOf() {
+  const cache = new Map();
+  return async (itemId) => {
+    const key = String(itemId);
+    if (!cache.has(key)) {
+      const doc = dbModule.getDocument(key);
+      cache.set(key, String((doc && doc.markdown) || "").slice(0, 3000));
+    }
+    return cache.get(key);
+  };
 }
 
 /** 预载 PDF 页文本（language 检测兜底用），返回同步取用器 */
@@ -859,12 +874,16 @@ async function stepLex() {
     if (Array.isArray(dom) && dom[0]) cardUdcCounts[String(dom[0])] = (cardUdcCounts[String(dom[0])] || 0) + 1;
   }
   const pdfPagesOf = await preloadPdfPages();
-  const matMeta = (facts.materials || []).map((m) => ({
-    id: String(m.id),
-    lang: materialLangOf(m, facts, pdfPagesOf),
-    dominantUdc: dominantUdcOf(facts, String(m.id)),
-    lexicalUdcCounts: {}
-  }));
+  const mdHeadOf = markdownHeadOf();
+  const matMeta = [];
+  for (const m of facts.materials || []) {
+    matMeta.push({
+      id: String(m.id),
+      lang: await materialLangOf(m, mdHeadOf, pdfPagesOf),
+      dominantUdc: dominantUdcOf(facts, String(m.id)),
+      lexicalUdcCounts: {}
+    });
+  }
   const proposals = usingProposals
     ? lmRecommend.proposeTracks({ materials: matMeta, cardUdcCounts, nativeLangs: settings.effectiveNativeLangs, tracks: [], uiLocale: settings.locale, udcLabels })
     : [];
@@ -1390,10 +1409,11 @@ async function buildSnapshot() {
 
   // 材料语言 / PDF 页文本兜底
   const pdfPagesOf = await preloadPdfPages();
+  const mdHeadOf = markdownHeadOf();
   const materialLangCache = new Map();
   const langOfMaterial = async (mat) => {
     if (!materialLangCache.has(mat.id)) {
-      materialLangCache.set(mat.id, materialLangOf(mat, facts, pdfPagesOf));
+      materialLangCache.set(mat.id, await materialLangOf(mat, mdHeadOf, pdfPagesOf));
     }
     return materialLangCache.get(mat.id);
   };

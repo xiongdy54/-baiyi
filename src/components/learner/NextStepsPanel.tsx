@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { eventBus } from "../../lib/eventbus";
 import { learnerApi, learnerSettings, type LearnerStatus, type RecItem } from "../../lib/learner";
 import { learnerStrings } from "../../lib/learnerStrings";
+import Dropdown from "../Dropdown";
 import TracksDialog from "./TracksDialog";
 import SelfExplainDialog from "./SelfExplainDialog";
 import UnitReaderDialog from "./UnitReaderDialog";
@@ -40,6 +41,7 @@ export default function NextStepsPanel() {
   const [status, setStatus] = useState<LearnerStatus | null>(null);
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
   const [tracksOpen, setTracksOpen] = useState(false);
+  const [tracksFocusNative, setTracksFocusNative] = useState(false);
   const [copied, setCopied] = useState(false);
   const [dialog, setDialog] = useState<{ kind: string; item: RecItem } | null>(null);
   const pollRef = useRef<number | null>(null);
@@ -169,25 +171,26 @@ export default function NextStepsPanel() {
             <button className="btn-link" onClick={() => void requestRecommend(true)}>
               {S.panel.refresh}
             </button>
-            <button className="btn-link" onClick={() => setTracksOpen(true)}>
-              {S.panel.tracks}
-            </button>
-            <select
-              className="learner-count-select"
-              value={recCount}
-              aria-label={S.settings.recCount}
-              onChange={(e) => {
-                const n = Number(e.target.value);
-                setRecCount(n);
-                void learnerSettings.write({ recCount: n });
+            <button
+              className="btn-link"
+              onClick={() => {
+                setTracksFocusNative(false);
+                setTracksOpen(true);
               }}
             >
-              {[3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                <option key={n} value={n}>
-                  {n} {S.panel.countSuffix}
-                </option>
-              ))}
-            </select>
+              {S.panel.tracks}
+            </button>
+            <Dropdown
+              value={String(recCount)}
+              title={S.settings.recCount}
+              align="right"
+              options={[3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ value: String(n), label: `${n} ${S.panel.countSuffix}`.trim() }))}
+              onChange={(n) => {
+                const v = Number(n);
+                setRecCount(v);
+                void learnerSettings.write({ recCount: v });
+              }}
+            />
           </div>
         </div>
 
@@ -202,12 +205,24 @@ export default function NextStepsPanel() {
                 >
                   {S.panel.nativeConfirmYes}
                 </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setTracksOpen(true)}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => {
+                    setTracksFocusNative(true);
+                    setTracksOpen(true);
+                  }}
+                >
                   {S.panel.nativeConfirmChange}
                 </button>
               </>
             ) : (
-              <button className="btn btn-secondary btn-sm" onClick={() => setTracksOpen(true)}>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  setTracksFocusNative(true);
+                  setTracksOpen(true);
+                }}
+              >
                 {S.panel.nativeEmptySet}
               </button>
             )}
@@ -285,6 +300,7 @@ export default function NextStepsPanel() {
 
       {tracksOpen && (
         <TracksDialog
+          focusNative={tracksFocusNative}
           onClose={() => setTracksOpen(false)}
           onChanged={() => void requestRecommend()}
         />

@@ -118,18 +118,23 @@ app.whenReady().then(async () => {
     check("kp_states 有该 KP 一行且 level ≥ 2", kpState && Number(kpState.level) >= 2, "≥2", kpState && kpState.level);
 
     console.log("== LM-3 母语生效值驱动提议轨道（不写死语言） ==");
+    // 未设语言属性的书：材料语言靠 detectLang 兜底（非 PDF 取 markdown 前 3000 字）
+    const j = db.createImportedDoc({ title: "LMTEST 日本語の本", markdown: `# 第一章\n${"いろはにほへと ちりぬるを わかよたれそ つねならむ うゐのおくやま けふこえて あさきゆめみし ゑひもせす\n".repeat(12)}`, sourceType: "markdown" });
+    const rRefresh = await learnerRefresh.refresh({ force: true });
+    check("refresh 成功无错（含未设语言的书）", rRefresh.ok === true, true, rRefresh);
     setLearnerSettings({ nativeLangs: ["zh"], nativeConfirmed: true });
     await learnerRefresh.refresh({ force: true });
     const snap1 = await learnerRefresh.buildSnapshot();
     const langProposals1 = snap1.proposals.filter((p) => p.mode === "language");
-    check("nativeLangs=zh → 提议恰好 1 个 en language 轨道", langProposals1.length === 1 && langProposals1[0].lang === "en", ["lang:en"], langProposals1.map((p) => p.key));
+    check("nativeLangs=zh → 提议含 en language 轨道", langProposals1.some((p) => p.lang === "en"), true, langProposals1.map((p) => p.key));
+    check("未设语言的书靠 detectLang 提议（日语书 → lang:ja）", langProposals1.some((p) => p.key === "lang:ja"), true, langProposals1.map((p) => p.key));
     const lexLangs1 = new Set((await learnerDb.all("SELECT DISTINCT lang FROM lexemes")).map((r) => r.lang));
-    check("lexemes 只含 en（中文书不建词项）", lexLangs1.size === 1 && lexLangs1.has("en"), ["en"], [...lexLangs1]);
+    check("lexemes 只含 en/ja（中文书不建词项）", lexLangs1.size === 2 && lexLangs1.has("en") && lexLangs1.has("ja"), ["en", "ja"], [...lexLangs1]);
     setLearnerSettings({ nativeLangs: ["en"], nativeConfirmed: true });
     await learnerRefresh.refresh({ force: true });
     const snap2 = await learnerRefresh.buildSnapshot();
     const langProposals2 = snap2.proposals.filter((p) => p.mode === "language");
-    check("nativeLangs=en → 改为提议 zh 轨道、不再提议 en", langProposals2.length === 1 && langProposals2[0].lang === "zh", ["lang:zh"], langProposals2.map((p) => p.key));
+    check("nativeLangs=en → 提议 zh / ja、不再提议 en", langProposals2.some((p) => p.lang === "zh") && langProposals2.some((p) => p.lang === "ja") && !langProposals2.some((p) => p.lang === "en"), true, langProposals2.map((p) => p.key));
 
     console.log("== LM-4 事件校验 / rec_runs 裁剪 / 刷新不碰调度表 ==");
     const beforeEvents = counts().events;

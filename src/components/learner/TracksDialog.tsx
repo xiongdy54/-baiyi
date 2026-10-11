@@ -2,10 +2,13 @@
 // 上：我的轨道（改名 / mode / 语言或领域 / 状态 / 置顶 / 优先级 / 删除 / 展开归属材料）；
 // 中：建议的轨道（采纳 = saveTrack source=proposal）；下：未归类的材料（归入… / 移出）；
 // 底部：我的母语多选（保存时同时写 nativeConfirmed）+ 重建学习索引。
+// 下拉一律用项目 Dropdown 组件（瑞士风直角 + 统一弹出动效），不用原生 select；
+// focusNative=true 时才滚动到「我的母语」（面板母语入口用），常规打开不滚动。
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   learnerApi,
   learnerSettings,
+  languageDisplayName,
   TRACK_MODES,
   type Track,
   type TrackMode,
@@ -13,13 +16,13 @@ import {
 } from "../../lib/learner";
 import { learnerStrings } from "../../lib/learnerStrings";
 import { udcLabel, UDC_LEAVES } from "../../lib/udc";
-import { languageDisplayName } from "../../lib/learner";
 import { useDialogA11y } from "../../lib/dialogA11y";
+import Dropdown from "../Dropdown";
 import NativeLangsPicker from "./NativeLangsPicker";
 
 type ListResult = Awaited<ReturnType<typeof learnerApi.listTracks>>;
 
-export default function TracksDialog({ onClose, onChanged }: { onClose: () => void; onChanged?: () => void }) {
+export default function TracksDialog({ onClose, onChanged, focusNative }: { onClose: () => void; onChanged?: () => void; focusNative?: boolean }) {
   const S = learnerStrings();
   const ref = useDialogA11y<HTMLDivElement>(onClose);
   const [data, setData] = useState<ListResult | null>(null);
@@ -39,10 +42,11 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
   }, []);
 
   useEffect(() => {
-    // 面板「更改母语」入口会要求滚到「我的母语」
-    const t = window.setTimeout(() => nativeRef.current?.scrollIntoView({ block: "nearest" }), 50);
+    // 仅面板「更改母语」入口要求滚到「我的母语」；常规打开保持从顶部开始
+    if (!focusNative) return;
+    const t = window.setTimeout(() => nativeRef.current?.scrollIntoView({ block: "center" }), 80);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [focusNative]);
 
   const myTracks = useMemo(() => (data?.tracks || []).filter((t) => !t.isProposal), [data]);
   const proposals = useMemo(() => data?.proposals || [], [data]);
@@ -72,10 +76,10 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
 
   async function adopt(key: string) {
     const p = proposals.find((x) => x.key === key);
-    if (!p) return;
+    if (!p) return null;
     setBusy(true);
     try {
-      await learnerApi.saveTrack({
+      const r = await learnerApi.saveTrack({
         label: p.label,
         mode: p.mode,
         lang: p.lang,
@@ -87,9 +91,44 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
       });
       await reload();
       onChanged?.();
+      return r.track || null;
     } finally {
       setBusy(false);
     }
+  }
+
+  /** 未归类材料的「归入」：用户轨道 → member=1；建议轨道 → 采纳并归入（设计稿 §11.4） */
+  async function assign(itemId: string, choice: string) {
+    if (!choice) return;
+    if (choice.startsWith("track:")) {
+      setBusy(true);
+      try {
+        await learnerApi.setTrackMaterial(choice.slice(6), itemId, 1);
+        await reload();
+        onChanged?.();
+      } finally {
+        setBusy(false);
+      }
+    } else if (choice.startsWith("proposal:")) {
+      const track = await adopt(choice.slice(9));
+      if (track) {
+        setBusy(true);
+        try {
+          await learnerApi.setTrackMaterial(track.id, itemId, 1);
+          await reload();
+          onChanged?.();
+        } finally {
+          setBusy(false);
+        }
+      }
+    }
+  }
+
+  function assignOptions(): { value: string; label: string }[] {
+    const opts = [{ value: "", label: S.tracks.assignTo }];
+    for (const t of myTracks) opts.push({ value: `track:${t.id}`, label: t.label });
+    for (const p of proposals) opts.push({ value: `proposal:${p.key}`, label: `${p.label}（${S.tracks.proposalTag}）` });
+    return opts;
   }
 
   async function saveNativeLangs(next: string[]) {
@@ -111,11 +150,14 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
         <div className="modal-scroll learner-dialog-body">
           <h4>
             {S.tracks.myTracks}
-            <button className="btn-link" onClick={() => void learnerApi.saveTrack({ label: S.tracks.trackNamePlaceholder, mode: "concept", udcCodes: ["other"] }).then(() => reload().then(() => onChanged?.()))}>
+            <button
+              className="btn-link"
+              onClick={() => void learnerApi.saveTrack({ label: S.tracks.trackNamePlaceholder, mode: "concept", udcCodes: ["other"] }).then(() => reload().then(() => onChanged?.()))}
+            >
               ＋{S.tracks.addTrack}
             </button>
           </h4>
-          {myTracks.length === 0 && <p className="learner-empty">{S.panel.empty}</p>}
+          {myTracks.length === 0 && <p className="learner-empty">{S.tracks.tracksEmptyHint}</p>}
           {myTracks.map((t) => (
             <div className="learner-track" key={t.id}>
               <div className="learner-track-row">
@@ -128,18 +170,13 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
                     if (v && v !== t.label) void patchTrack(t, { label: v.slice(0, 40) });
                   }}
                 />
-                <select
-                  className="learner-count-select"
+                <Dropdown
                   value={t.mode}
-                  aria-label={S.tracks.modeLabel}
-                  onChange={(e) => void patchTrack(t, { mode: e.target.value as TrackMode })}
-                >
-                  {TRACK_MODES.map((m) => (
-                    <option key={m} value={m}>
-                      {S.tracks.modeNames[m]}
-                    </option>
-                  ))}
-                </select>
+                  title={S.tracks.modeLabel}
+                  align="left"
+                  options={TRACK_MODES.map((m) => ({ value: m, label: S.tracks.modeNames[m] }))}
+                  onChange={(m) => void patchTrack(t, { mode: m as TrackMode })}
+                />
                 <label className="learner-track-check">
                   <input type="checkbox" checked={t.status !== "paused"} onChange={(e) => void patchTrack(t, { status: e.target.checked ? "active" : "paused" })} />
                   <span>{t.status !== "paused" ? S.tracks.statusActive : S.tracks.statusPaused}</span>
@@ -148,18 +185,13 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
                   <input type="checkbox" checked={t.pinned} onChange={(e) => void patchTrack(t, { pinned: e.target.checked })} />
                   <span>{S.tracks.pinnedLabel}</span>
                 </label>
-                <select
-                  className="learner-count-select"
-                  value={t.priority}
-                  aria-label={S.tracks.priorityLabel}
-                  onChange={(e) => void patchTrack(t, { priority: Number(e.target.value) })}
-                >
-                  {[1, 2, 3, 4, 5].map((n) => (
-                    <option key={n} value={n}>
-                      {S.tracks.priorityLabel} {n}
-                    </option>
-                  ))}
-                </select>
+                <Dropdown
+                  value={String(t.priority)}
+                  title={S.tracks.priorityLabel}
+                  align="left"
+                  options={[1, 2, 3, 4, 5].map((n) => ({ value: String(n), label: `${S.tracks.priorityLabel} ${n}` }))}
+                  onChange={(n) => void patchTrack(t, { priority: Number(n) })}
+                />
                 <button
                   className="btn-link learner-danger"
                   onClick={() => {
@@ -196,9 +228,9 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
           ))}
 
           <h4>{S.tracks.proposals}</h4>
-          {proposals.length === 0 && <p className="learner-empty">—</p>}
+          {proposals.length === 0 && <p className="learner-empty">{S.tracks.proposalsEmptyHint}</p>}
           {proposals.map((p) => (
-            <div className="learner-track-row" key={p.key}>
+            <div className="learner-assign-row" key={p.key}>
               <span className="learner-item-title" dir="auto">
                 {p.label}
               </span>
@@ -212,28 +244,17 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
           <h4>{S.tracks.unassigned}</h4>
           {unassigned.length === 0 && <p className="learner-empty">—</p>}
           {unassigned.map((m) => (
-            <div className="learner-track-row" key={m.libraryItemId}>
-              <span className="learner-item-title" dir="auto">
+            <div className="learner-assign-row" key={m.libraryItemId}>
+              <span className="learner-assign-title" dir="auto">
                 {m.title}
                 {!m.lang && <span className="learner-track-sub"> · {S.tracks.unknownLangHint}</span>}
               </span>
-              <select
-                className="learner-count-select"
+              <Dropdown
                 value=""
-                aria-label={S.tracks.assignTo}
-                onChange={(e) => {
-                  const trackId = e.target.value;
-                  if (!trackId) return;
-                  void learnerApi.setTrackMaterial(trackId, m.libraryItemId, 1).then(() => reload().then(() => onChanged?.()));
-                }}
-              >
-                <option value="">{S.tracks.assignTo}</option>
-                {myTracks.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
+                title={S.tracks.assignTo}
+                options={assignOptions()}
+                onChange={(choice) => void assign(m.libraryItemId, choice)}
+              />
             </div>
           ))}
 
@@ -260,7 +281,7 @@ export default function TracksDialog({ onClose, onChanged }: { onClose: () => vo
             {busy ? S.tracks.rebuilding : S.tracks.rebuild}
           </button>
           <button className="btn btn-primary" onClick={onClose}>
-            {S.tracks.saved}
+            {S.tracks.done}
           </button>
         </div>
       </div>
@@ -281,8 +302,8 @@ function TrackMaterials({
   return (
     <>
       {materials.map((m) => (
-        <div className="learner-track-row" key={m.libraryItemId}>
-          <span className="learner-item-title" dir="auto">
+        <div className="learner-assign-row" key={m.libraryItemId}>
+          <span className="learner-assign-title" dir="auto">
             {m.title}
           </span>
           <button className="btn-link" onClick={() => onRemove(m.libraryItemId)}>
