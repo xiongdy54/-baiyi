@@ -258,11 +258,12 @@ async function main() {
     console.log("      过渡:", JSON.stringify({ rail: open.rail && open.rail.transition, controls: open.controlsTransition }));
     console.log("      环境:", JSON.stringify(open.env));
 
-    // A0 自证：量到的就是这几枚钮（文本逐字）
+    // A0 自证：量到的就是这几枚钮（文本逐字；v48.97/D141 起工具栏动作组只剩「截图」——「制卡」钮
+    // 与顶栏常驻制卡台入口重复已删，有选区的制卡走选区浮条，故此处期望集随之下调）
     check(
-      "A0 探针自证（页签＝目录/摘录/图谱；动作钮＝制卡/截图；开关钮＝收起/展开）",
+      "A0 探针自证（页签＝目录/摘录/图谱；动作钮＝截图；开关钮＝收起/展开）",
       (open.tabs || []).map((x) => x.label).join(",") === "目录,摘录,图谱" &&
-        (open.acts || []).map((x) => x.label).join(",") === "制卡,截图" &&
+        (open.acts || []).map((x) => x.label).join(",") === "截图" &&
         ["收起", "展开"].includes((open.toggle || {}).label),
       JSON.stringify({ tabs: (open.tabs || []).map((x) => x.label), acts: (open.acts || []).map((x) => x.label), toggle: open.toggle && open.toggle.label })
     );
@@ -272,11 +273,11 @@ async function main() {
       Boolean(open.tabsRow && open.controls) && Math.abs(open.tabsRow.h - open.controls.h) <= 0.5,
       JSON.stringify({ tabsRowH: open.tabsRow && open.tabsRow.h, controlsH: open.controls && open.controls.h })
     );
-    // A2 页签钮高 = 选区动作钮高（＝D139 主诉求）
+    // A2 页签钮高 = 选区动作钮高（＝D139 主诉求；v48.97/D141 起动作组只剩「截图」，按 ≥1 判）
     const actH = (open.acts || []).map((a) => a.h);
     check(
-      "A2 页签钮高 = 制卡/截图钮高（±0.5）",
-      (open.tabs || []).length === 3 && actH.length === 2 && (open.tabs || []).every((t) => Math.abs(t.h - actH[0]) <= 0.5) && Math.abs(actH[0] - actH[1]) <= 0.5,
+      "A2 页签钮高 = 工具栏动作钮（截图）高（±0.5）",
+      (open.tabs || []).length === 3 && actH.length >= 1 && (open.tabs || []).every((t) => Math.abs(t.h - actH[0]) <= 0.5),
       JSON.stringify({ tabsH: (open.tabs || []).map((t) => t.h), actsH: actH })
     );
     // A3 页签钮与动作钮同顶同底（同一视觉带，不是只有高度相同）

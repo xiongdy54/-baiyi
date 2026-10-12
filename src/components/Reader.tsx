@@ -1614,14 +1614,15 @@ export default function Reader({
   const turnAnimatedDisabledTitle =
     engineKind === "pdf" ? "PDF 为连续滚动容器，不适用翻页过渡" : "翻页过渡在分页/对开模式下生效";
   // D122：与选区相关的动作（批注/制卡/AI 制卡/AI 解释/查词）与「摘录/形式」标注选项全部迁入
-  // 选区浮条（SelectionMenu，随选区出现在鼠标旁）；工具栏只留**不依赖文字选区**的两项：
-  //   · 制卡＝免选区自由制卡（D92 §3.4；有选区时同样 quote 预填）
+  // 选区浮条（SelectionMenu，随选区出现在鼠标旁）；工具栏只留**不依赖文字选区**的一项：
   //   · 截图＝截取阅读区可见内容 → 进入与「点击正文图片」同一条图片挖空制卡流程
   //     （取代原「图片挖空」资源库选图按钮——正文图片本身点击即可挖空，该按钮冗余）
+  // v48.97（D141，用户指令）：原「制卡」钮（免选区自由制卡，D92 §3.4）**删除**——它与顶栏
+  // 常驻「制卡台」入口重复（同一个制卡台面板）；有选区的制卡仍走选区浮条，快捷键
+  // reader.makeCard 与 SelectionPopover 的 manual 动作均不受影响。
   const selBarStyle = useSelectionBarStyle();
   const selActionsGroup = (
     <div className="reader-engine-controls-group reader-sel-actions" data-sel-actions>
-      <button type="button" className="btn-rail" data-sel-act="manual" title={selection ? "就地制卡" : "自由制卡"} onClick={selAct.manual}>制卡</button>
       <button type="button" className="btn-rail" data-sel-act="capture" title="截取当前阅读区域并进入图片挖空制卡" onClick={() => void handleCaptureReader()}>截图</button>
     </div>
   );
