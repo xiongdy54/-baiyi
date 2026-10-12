@@ -580,6 +580,10 @@ export default function Reader({
   const [docAnnotCount, setDocAnnotCount] = useState(0);
   /** 侧栏开合（v48.44/D84：入口恒可用——页签恒可点，不再按数据在场性自动收起） */
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // v48.95（D139）：只有用户亲手点「收起/展开」之后才允许轨宽/工具行让位做滑动过渡；
+  // 挂载期自动展开（由右下角指示器进入导图 ⇒ openMindmapInitially 的 effect）一律瞬时落位——
+  // 与摘录批注轨 data-rail-anim 同一口径（2026-10-09 裁定「进入页面不左→右滑入」）。
+  const [railAnimate, setRailAnimate] = useState(false);
   /** 工具栏两个弹出组（更多 / 阅读设置）：同刻只开一个，点外部/Esc 收起（D5-B） */
   const [toolMenu, setToolMenu] = useState<"more" | "settings" | null>(null);
   /** D130 P1：主题命名就地表（false=未在命名；命名草稿单独存，确认/失焦写入 customThemes） */
@@ -863,6 +867,7 @@ export default function Reader({
     window.addEventListener("wheel", endOnGesture, { passive: true });
     window.addEventListener("pointerdown", endOnGesture);
     window.addEventListener("keydown", endOnGesture);
+    setRailAnimate(true); // v48.95（D139）：用户手势 ⇒ 从此刻起开合走滑动过渡（挂载期自动展开不走）
     setSidebarOpen((v) => !v);
     if (point) {
       // PDF 数值缩放：宽度变化不产生 relocate（页码没变）⇒ 布局落地后自己还原（两帧足够）
@@ -1671,8 +1676,10 @@ export default function Reader({
                 {sidebarOpen ? "收起" : "展开"}
               </button>
               {/* v48.45（D85）：侧栏升级**全高左轨**——一行两格（轨 + 右列），与摘录批注轨同一形态：
-                  贯通到顶、280↔0 滑动动画、展开时工具栏随右列整体右移。 */}
-              <div className="reader-engine-layout">
+                  贯通到顶、280↔0 滑动动画、展开时工具栏随右列整体右移。
+                  v48.95（D139）：data-rail-anim＝用户点过开关才挂 ⇒ 开合过渡只在用户手势后生效
+                  （与摘录批注轨 [`data-rail-anim`] 同一门；挂载期自动展开瞬时落位）。 */}
+              <div className="reader-engine-layout" data-rail-anim={railAnimate ? "1" : undefined}>
                 <div
                   className={`reader-side-rail${sidebarOpen ? "" : " is-closed"}`}
                   data-reader-side-rail

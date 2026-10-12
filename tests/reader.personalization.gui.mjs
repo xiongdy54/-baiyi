@@ -487,7 +487,7 @@ async function main() {
       const r = toggle && toggle.getBoundingClientRect();
       return { w: r && Math.round(r.width), h: r && Math.round(r.height) };
     })()`);
-    check("I2 D127 抽检：侧栏开关钮 40×40", d127 && d127.w === 40 && d127.h === 40, JSON.stringify(d127));
+    check("I2 D127/D139 抽检：侧栏开关钮 40×24（顶部按钮带降到 24 档）", d127 && d127.w === 40 && d127.h === 24, JSON.stringify(d127));
     await cdp.eval(`document.querySelector("[data-reader-sidebar-toggle]")?.click(); true`);
     await wait(800);
     const d127b = await cdp.eval(`(() => {

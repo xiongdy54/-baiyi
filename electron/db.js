@@ -332,6 +332,13 @@ async function initDb() {
   // 重复调用（测试内「重启模拟」/ 幂等演练）＝先关旧连接再从文件重载：close 本身做 checkpoint，
   // 主文件自足后重开即与 sql.js 时代「每次 initDb 全量重读文件」语义一致（迁移/回填段随之重挂）。
   dbFile = path.join(app.getPath("userData"), "library.db");
+  // D137 补（实测）：better-sqlite3 只创建**库文件**，不创建父目录——userData 目录不存在时
+  // `new Database` 抛 "Cannot open database because the directory does not exist"。sql.js 时代
+  // 落盘走 fs 写（自建目录）故无此约束；真实应用由 appLog.init 建 <userData>/logs 顺带保证父目录，
+  // 但**种子脚本**（tests/*.gui.seed.cjs，直接 initDb、不经 appLog）在其套件先删 userData 后必崩——
+  // 且该异常是 unhandled rejection，进程不退出 ⇒ 套件里 execSync 播种**永久挂死**（annotations 等
+  // 12 个 seed 家族套件的表现）。此处自建目录：库层不假设调用方先建目录（对齐 sql.js 旧语义）。
+  try { fs.mkdirSync(path.dirname(dbFile), { recursive: true }); } catch { /* 已存在/无权限：交给下方 open 报错 */ }
   // v23/F11：启动清残留 tmp——tmp 永远不是事实源（sql.js 时代的原子替换残留，新引擎不再产出）
   try { fs.rmSync(dbFile + ".tmp", { force: true }); } catch { /* 忽略 */ }
   if (db && db.open) closeDb();

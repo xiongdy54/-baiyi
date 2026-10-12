@@ -1072,8 +1072,8 @@ try {
     return JSON.stringify({ pos: cs.position, left: cs.left, top: cs.top, w: Math.round(b.getBoundingClientRect().width), h: Math.round(b.getBoundingClientRect().height) });
   })()`)) || "{}");
   check("⑪a2 开关钮＝摘录页同款类对（annot-toggle bar-btn）", typeof tg0.cls === "string" && tg0.cls.includes("annot-toggle") && tg0.cls.includes("bar-btn"), tg0.cls);
-  check("⑪a3 开关钮 fixed (16, 56) 40×40（与右列工具行同带、两态同位同高，D127）",
-    tg0Geom.pos === "fixed" && tg0Geom.left === "16px" && tg0Geom.top === "56px" && tg0Geom.w === 40 && tg0Geom.h === 40, JSON.stringify(tg0Geom));
+  check("⑪a3 开关钮 fixed (16, 56) 40×24（与右列 24 档工具行同带、两态同位同高，D127→D139 降档）",
+    tg0Geom.pos === "fixed" && tg0Geom.left === "16px" && tg0Geom.top === "56px" && tg0Geom.w === 40 && tg0Geom.h === 24, JSON.stringify(tg0Geom));
   await cdp.eval(`(() => { document.querySelector("[data-reader-sidebar-toggle]")?.click(); return 1; })()`);
   await wait(1200);
   const gOpen = JSON.parse(String(await cdp.eval(geom)) || "{}");
@@ -1232,7 +1232,13 @@ try {
 } finally {
   try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
   await wait(500);
-  fs.rmSync(USER_DATA, { recursive: true, force: true });
-  fs.rmSync(FIXDIR, { recursive: true, force: true });
+  // D140 附：Windows 下 electron 退出后目录锁释放有延迟，裸 rmSync 会 EPERM 抛在**摘要之后**——
+  // 结果把「断言结果」信号覆盖成崩溃（进程带异常退出，真实 fail 数被掩盖，2026-10-12 实测）。
+  // 清理改「重试 + 永不抛出」：退出码只由断言结果决定。
+  for (const dir of [USER_DATA, FIXDIR]) {
+    for (let i = 0; i < 10; i++) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); break; } catch { await wait(500); }
+    }
+  }
   process.exit(fail ? 1 : 0);
 }
