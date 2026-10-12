@@ -158,7 +158,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   await wait(3000);
   const engineUp = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
   if (!engineUp) return { click, engineUp };
-  // Word 书首章为空是既有技术债（§9.4 空首章，本批 Non-Goal）：经目录跳到实际章节再断言
+  // syn-3（§9.4 空首章清理）后首章即正文章；保留经目录跳转定位（按标题查找，结构无关）
   if (navTitle) {
     await cdp.eval(`(() => { const b = document.querySelector('[data-reader-sidebar-toggle]'); b?.click(); return b ? 'ok' : 'no btn'; })()`);
     await wait(700);
@@ -255,7 +255,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   console.log("== 5) Word 书选区制卡（contextRef 锚点落库） ==");
   await cdp.eval(clickCardByTitle("FSRSTEST-M6 Word导测"));
   await wait(3000);
-  // 目录跳到非空章（空首章技术债）
+  // 目录跳转到目标章（syn-3 后无空首章，按标题查找与结构无关）
   await cdp.eval(`(() => { const b = document.querySelector('[data-reader-sidebar-toggle]'); b?.click(); return b ? 'ok' : 'no btn'; })()`);
   await wait(700);
   await cdp.eval(`(() => { const el = [...document.querySelectorAll('.reader-toc-item')].find(e => e.textContent.includes('FSRSTEST Word 起源章')); el?.click(); return el ? 'clicked' : 'not found'; })()`);

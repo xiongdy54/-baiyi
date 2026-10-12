@@ -71,7 +71,6 @@ const vtCleared = async (cdp) => {
   return await cdp.eval(`!!document.documentElement.dataset.vt`);
 };
 const cs = (cdp, sel, prop) => cdp.eval(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); return e ? getComputedStyle(e).${prop} : "ABSENT"; })()`);
-const csAll = (cdp, sel, prop) => cdp.eval(`(() => { return [...document.querySelectorAll(${JSON.stringify(sel)})].map((e) => getComputedStyle(e).${prop}); })()`);
 
 try {
   try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
@@ -148,14 +147,16 @@ try {
   await wait(700);
   r2 = await pollVt(cdp, navClick("书架"));
   check("S3 他页→书架过渡在场（闸门期数据已到）", r2.vt === "1", JSON.stringify(r2));
-  await wait(380); // 揭幕（≈300ms）后、shelf-enter 摘除（items 到达+700ms）前的观察窗
+  await wait(380); // 揭幕（≈300ms）后的观察窗（原 stagger 观察窗；动画停用后仍留同窗防竞态）
+  // 2026-10-09 切页动效统一（提交 1d0c070）：书架页面级入场（shelf-item-in stagger 30ms/张）
+  // 已停用删除（grep src=0，keyframes 一并退役），页面入场只由 §5.1 View Transition 承担（上行已验）；
+  // shelf-enter 容器标记只在挂载后 items 空→非空的首个渲染周期武装（Bookshelf enterArmed 单次），
+  // 回访经 shelfCache 首渲染即非空 → 不再重现。原三条探针（容器带 shelf-enter / shelf-item-in
+  // 在播 / 分档递增）按现行口径重写为等价观测。
   const s3container = await cdp.eval(`(() => { const g = document.querySelector(".bookshelf-grid"); return g ? g.className : "ABSENT"; })()`);
-  check("S3 网格容器带 shelf-enter（首个非空渲染周期）", String(s3container).includes("shelf-enter"), s3container);
-  const s3anim = await cs(cdp, ".bookshelf-grid.shelf-enter > .shelf-item", "animationName");
-  check("S3 卡片入场动画 shelf-item-in 在播", s3anim === "shelf-item-in", s3anim);
-  const s3delay = await csAll(cdp, ".bookshelf-grid.shelf-enter > .shelf-item", "animationDelay");
-  const d3 = Array.isArray(s3delay) ? s3delay : [];
-  check("S3 stagger 延迟分档递增（30ms/张 ×≤8）", d3.length >= 2 && d3[1] !== d3[0], JSON.stringify(d3.slice(0, 4)));
+  check("S3 回访网格不带 shelf-enter（无二次入场周期）", String(s3container).includes("bookshelf-grid") && !String(s3container).includes("shelf-enter"), s3container);
+  const s3anim = await cs(cdp, ".bookshelf-grid > .shelf-item", "animationName");
+  check("S3 卡片无逐卡入场动画（stagger 已停用，入场全归 View Transition）", s3anim === "none", s3anim);
   const s3cover = await cdp.eval(`(() => { const c = document.querySelector(".cover-img"); if (!c) return "NO_ASSET"; return c.classList.contains("is-loaded") ? getComputedStyle(c).opacity : "NOT_LOADED"; })()`);
   // 粘贴书无封面资产（cover-img 不渲染，走书脊占位）＝库态限制：封面解码淡入路径以静态证据对账
   // （Bookshelf.tsx onLoad→is-loaded + theme.css cover-img 规则，R2-4 两轮审查已过），此处仅在场时断言终态。
@@ -167,8 +168,11 @@ try {
   await wait(420); // 揭幕后 content-fade-in（200ms）播放中/刚毕、content-enter 摘除（700ms）前
   const s4page = await cdp.eval(`(() => { const p = document.querySelector(".extract-page"); return p ? p.className : "ABSENT"; })()`);
   check("S4 页面根带 content-enter（loaded 首转真周期）", String(s4page).includes("content-enter"), s4page);
+  // 2026-10-09 切页动效统一（提交 1d0c070）：content-enter 整体淡入（content-fade-in）已停用——
+  // 揭幕后整页再从 opacity 0 淡入＝「闪一下」，页面入场只由 §5.1 View Transition 承担；
+  // content-enter 容器类与 data-first-card 首卡抑制标记保留（本段上下两条仍在验）。
   const s4cols = await cs(cdp, ".extract-page.content-enter > .extract-page-cols", "animationName");
-  check("S4 就绪 fade content-fade-in 在播（两态同一份规则）", s4cols === "content-fade-in", s4cols);
+  check("S4 就绪无二次淡入（content-fade-in 已停用，动画不在场）", s4cols === "none", s4cols);
   const s4first = await cdp.eval(`(() => { const p = document.querySelector(".extract-page[data-first-card]"); if (!p) return "NO_MARK"; const f = p.querySelector(".extract-face"); return f ? getComputedStyle(f).animationName : "NO_FACE"; })()`);
   check("S4 首卡抑制：data-first-card 周期内 stage-card-in = none", s4first === "none", s4first);
   const align = async () => cdp.eval(`(() => {
@@ -190,15 +194,17 @@ try {
   console.log("— 场景 5：数据页首载入场完整 —");
   r2 = await pollVt(cdp, navClick("数据"));
   check("S5 摘录(1)→数据(5) = fwd", r2.vt === "1" && r2.dir === "fwd", JSON.stringify(r2));
-  await wait(500); // 揭幕后（≈300ms）+ IPC 数据到达（≈10-50ms）+ 首渲染挂 chart-enter
+  await wait(500); // 揭幕后（≈300ms）+ IPC 数据到达（≈10-50ms）+ 图表挂载
+  // chart v2 rework（D122，§6.1-E4）+ 2026-10-09 切页动效统一（提交 1d0c070）：.chart-enter
+  // 容器类已从全部组件删除（grep src 组件=0），图表首挂载入场（chart-bar-in + 30ms/根 stagger）
+  // 整体停用（keyframes 保留无消费点）——揭幕后数据以终态直出，页面入场只由 §5.1 View Transition
+  // 承担（上行已验 fwd）；折线 chart-redraw 与数据更新几何过渡不受影响。原三条探针（chart-enter
+  // 容器在场 / chart-bar-in 在播 / 分档在场）按现行口径重写为等价观测。
+  const s5charts = await cdp.eval(`document.querySelectorAll(".chart-svg").length`);
   const s5enter = await cdp.eval(`document.querySelectorAll(".chart-enter").length`);
-  check("S5 首挂载 chart-enter 容器在场（≥1）", Number(s5enter) >= 1, s5enter);
-  const s5bars = await csAll(cdp, ".chart-enter .chart-bar", "animationName");
-  const b5 = Array.isArray(s5bars) ? s5bars : [];
-  check("S5 条形族入场 chart-bar-in 在播（揭幕后从头播，未被过渡吞）", b5.some((v) => v === "chart-bar-in"), JSON.stringify(b5.slice(0, 4)));
-  const s5delays = await csAll(cdp, ".chart-enter .chart-bar", "animationDelay");
-  const dl5 = Array.isArray(s5delays) ? s5delays : [];
-  check("S5 stagger 延迟分档在场（30ms/根 ×≤8）", dl5.some((v) => parseFloat(v) > 0), JSON.stringify(dl5.slice(0, 6)));
+  check("S5 图表挂载（.chart-svg ≥1）且 chart-enter 容器类已退役（=0）", Number(s5charts) >= 1 && Number(s5enter) === 0, JSON.stringify({ charts: s5charts, enter: s5enter }));
+  const s5anim = await cs(cdp, ".chart-svg", "animationName");
+  check("S5 图表首挂载无入场动画（终态直出，animation none）", s5anim === "none", s5anim);
   const s5widget = await cs(cdp, ".dash-widget", "animationName") + " / " + await cs(cdp, ".dash-widget", "transitionProperty");
   check("S5 .dash-widget 容器无入场/过渡（E4 收窄）", String(s5widget) === "none / all" || String(s5widget).startsWith("none"), s5widget);
 

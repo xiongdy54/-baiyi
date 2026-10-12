@@ -147,7 +147,7 @@ async function openBookToChapter(cdp, title, navTitle) {
   await wait(3000);
   const engineUp = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
   if (!engineUp) return { click, engineUp };
-  // 空首章技术债：markdown 以 # 开头 → 目录跳到实际章节
+  // syn-3（§9.4 空首章清理）后无空首章；保留目录跳转定位（按标题查找，结构无关）
   await cdp.eval(`(() => { const b = document.querySelector('[data-reader-sidebar-toggle]'); b?.click(); return b ? 'ok' : 'no btn'; })()`);
   await wait(700);
   const jump = await cdp.eval(`(() => {

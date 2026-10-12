@@ -29,7 +29,7 @@ import { normalizePlacement, type WorkbenchPlacement } from "../lib/workbenchLay
 import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
 import Dropdown from "./Dropdown";
-import { DEFAULT_READER_SETTINGS, type ReaderSettings } from "../lib/reader/service";
+import { normalizeReaderSettings, type CustomThemeEntry, type ReaderSettings } from "../lib/reader/service";
 import type { DashLayoutV2, WidgetSize } from "./dashboard/layout";
 import { DICT_CATALOG, type DictCatalogItem } from "../lib/dictCatalog";
 import { DEFAULT_POPUP_FIELDS } from "../lib/dictClient";
@@ -1511,22 +1511,31 @@ function ReaderSection() {
   });
   // D122：选区浮条动作呈现（icon 图标 / text 文字）
   const [selBarStyle, setSelBarStyle] = useState<SelectionBarStyle>(DEFAULT_SELECTION_BAR_STYLE);
+  // D130 R3 P1：主题管理就地表——重命名（行内输入，失焦落库）与删除（就地二次确认，焦点默认落「取消」）
+  const [renameId, setRenameId] = useState<string | null>(null);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
   useEffect(() => {
     settingsStore
-      .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
-      .then((s) =>
-        setCfg({
-          mode: { ...DEFAULT_READER_SETTINGS.mode, ...s.mode },
-          appearance: { ...DEFAULT_READER_SETTINGS.appearance, ...s.appearance }
-        })
-      )
-      .catch(() => setCfg(DEFAULT_READER_SETTINGS));
+      .get<unknown>("app", "readerSettings", null)
+      .then((s) => setCfg(normalizeReaderSettings(s)))
+      .catch(() => setCfg(normalizeReaderSettings(null)));
     void readMultiSelectKey().then(setMultiKey);
     void readAnnotationSettings().then(setAnnot);
     void readExtractCardSettings().then(setExt);
     void settingsStore
       .get<unknown>("app", "selectionBarStyle", DEFAULT_SELECTION_BAR_STYLE)
       .then((v) => setSelBarStyle(normalizeSelectionBarStyle(v)));
+  }, []);
+  // D130 R3：阅读器快捷菜单对同一键的写入经 settings/changed 回灌——滑杆与快捷菜单双向即时一致
+  useEffect(() => {
+    return eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload?.scope !== "app" || payload.key !== "readerSettings") return;
+      void settingsStore
+        .get<unknown>("app", "readerSettings", null)
+        .then((s) => setCfg(normalizeReaderSettings(s)))
+        .catch(() => {});
+    });
   }, []);
   const save = (next: ReaderSettings) => {
     setCfg(next);
@@ -1550,6 +1559,23 @@ function ReaderSection() {
   const saveAnnot = <K extends keyof AnnotationSettings>(key: K, value: AnnotationSettings[K]) => {
     setAnnot((prev) => ({ ...prev, [key]: value }));
     void writeAnnotationSetting(key, value);
+  };
+  // ---------- D130 R3 P1：我的主题管理（重命名/删除只在设置页——progressive disclosure） ----------
+  const renameTheme = (id: string, name: string) => {
+    if (!cfg) return;
+    const trimmed = name.trim().slice(0, 24);
+    if (!trimmed) return; // 空名不落库（保留原名；归一口同样截 24 字符）
+    save({ ...cfg, customThemes: (cfg.customThemes ?? []).map((t) => (t.id === id ? { ...t, name: trimmed } : t)) });
+  };
+  const deleteTheme = (id: string) => {
+    if (!cfg) return;
+    // 删除当前正在使用的主题：外观保持不变（theme=custom + 色值仍在 appearance 上）——
+    // 主题列表只是速记本，不联动清色（行为可预期，设计稿 §4.1）
+    save({ ...cfg, customThemes: (cfg.customThemes ?? []).filter((t) => t.id !== id) });
+  };
+  const fmtDate = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
   if (!cfg) return null;
   const a = cfg.appearance;
@@ -1594,6 +1620,110 @@ function ReaderSection() {
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontFamily: e.target.value } })}
         />
       </div>
+      {/* D130 R3 P2/P3：行距（既有字段接 UI）+ 页边距 + 版心宽度——与阅读器快捷菜单读写同一字段；
+          数值显示 mono + tabular-nums（.mono 的 font-feature-settings "tnum"），拖动时数字宽度不跳动 */}
+      <div className="settings-row" data-reader-setting="lineHeight">
+        <span className="settings-row-label">
+          行距（<span className="mono">{a.lineHeight ?? 1.7}</span>）
+          <SettingsInfo label="行距">正文行距（1.2–2.4）。摘录卡面行高恒跟随本设置（既有契约）；PDF 为固定版式，不适用。</SettingsInfo>
+        </span>
+        <input
+          type="range"
+          min={1.2}
+          max={2.4}
+          step={0.1}
+          value={a.lineHeight ?? 1.7}
+          onChange={(e) => save({ ...cfg, appearance: { ...a, lineHeight: Number(e.target.value) } })}
+        />
+      </div>
+      <div className="settings-row" data-reader-setting="margin">
+        <span className="settings-row-label">
+          页边距（<span className="mono">{a.margin ?? 48}px</span>）
+          <SettingsInfo label="页边距">分页/对开模式的上下边带（0–120px）；滚动模式的排版余白由版心宽度承担；PDF 不适用。</SettingsInfo>
+        </span>
+        <input
+          type="range"
+          min={0}
+          max={120}
+          step={4}
+          value={a.margin ?? 48}
+          onChange={(e) => save({ ...cfg, appearance: { ...a, margin: Number(e.target.value) } })}
+        />
+      </div>
+      <div className="settings-row" data-reader-setting="measure">
+        <span className="settings-row-label">
+          版心宽度（<span className="mono">{a.maxInlineSize ?? 720}px</span>）
+          <SettingsInfo label="版心宽度">滚动模式正文列最大宽度（480–1200px）＝「页边距」在滚动模式的对应物；720px ≈ 每行 42 个全角字。</SettingsInfo>
+        </span>
+        <input
+          type="range"
+          min={480}
+          max={1200}
+          step={20}
+          value={a.maxInlineSize ?? 720}
+          onChange={(e) => save({ ...cfg, appearance: { ...a, maxInlineSize: Number(e.target.value) } })}
+        />
+      </div>
+
+      {/* D130 R3 P1：我的主题管理（行 hover 出操作、hairline 分隔；删除走就地二次确认，焦点默认落「取消」） */}
+      <h4>我的主题</h4>
+      {(cfg.customThemes ?? []).length > 0 ? (
+        <div className="reader-theme-manage-list" data-reader-theme-manage-list>
+          {(cfg.customThemes ?? []).map((t: CustomThemeEntry) => (
+            <div className="reader-theme-manage-row" key={t.id} data-reader-theme-id={t.id}>
+              <span className="reader-theme-swatch" style={{ background: t.bgColor }} aria-hidden="true" />
+              {renameId === t.id ? (
+                <input
+                  className="reader-theme-rename-input"
+                  defaultValue={t.name}
+                  maxLength={24}
+                  autoFocus
+                  aria-label="重命名主题"
+                  onBlur={(e) => {
+                    renameTheme(t.id, e.target.value);
+                    setRenameId(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      renameTheme(t.id, (e.target as HTMLInputElement).value);
+                      setRenameId(null);
+                    } else if (e.key === "Escape") setRenameId(null);
+                  }}
+                />
+              ) : (
+                <span className="reader-theme-manage-name" title={t.name}>
+                  {t.name}
+                </span>
+              )}
+              <span className="reader-theme-manage-date mono">{fmtDate(t.createdAt)}</span>
+              {confirmId === t.id ? (
+                /* D130 R3 实跑修正：key 强制换子树 remount——React 会就地把普通态 span 复用为确认态
+                   （同为 span、子按钮同位复用），autoFocus 只在 mount 时生效，不 remount 焦点永不落
+                   「取消」（设计 §6「焦点默认落取消」契约落空）。 */
+                <span key="confirm" className="reader-theme-manage-actions reader-theme-manage-actions-show">
+                  <button type="button" className="reader-text-btn" data-reader-theme-delete-confirm onClick={() => { deleteTheme(t.id); setConfirmId(null); }}>
+                    确认删除
+                  </button>
+                  <button type="button" className="reader-text-btn" autoFocus onClick={() => setConfirmId(null)}>
+                    取消
+                  </button>
+                </span>
+              ) : (
+                <span className="reader-theme-manage-actions">
+                  <button type="button" className="reader-text-btn" data-reader-theme-rename onClick={() => setRenameId(t.id)}>
+                    重命名
+                  </button>
+                  <button type="button" className="reader-text-btn" data-reader-theme-delete onClick={() => setConfirmId(t.id)}>
+                    删除
+                  </button>
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="reader-theme-empty">在阅读器里把自定义色保存为主题后，会出现在这里。</p>
+      )}
 
       <h4>选区与批注</h4>
       <div className="settings-row">
@@ -2702,6 +2832,212 @@ function GlobalShortcutsBlock() {
   );
 }
 
+// ---------- 主题插件（v48.89 / D132，设计 docs/design/PLUGIN-SYSTEM-D132.md §8）：sec-appearance 子块 ----------
+// 插件来自 <userData>/plugins/ 文件夹（宿主 fail-closed 校验），本期仅支持主题（type:theme）；
+// 启用 = 激活为当前主题（与内置皮肤双槽互斥，激活一方清另一方）；可调项值落 settingsStore
+// 的 `plugin.<id>` 层唯一键 `values`，改动经 settings/changed → 注入链重拉即时生效（§5.3）。
+// 无「卸载」钮（§2.2 第 7 条：删除由用户在文件管理器完成，删后重新扫描即消失）。
+interface PluginSettingDef {
+  id: string;
+  name: string;
+  type: "toggle" | "range" | "dropdown" | "color" | "text";
+  default: unknown;
+  description?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: { label: string; value: string }[];
+}
+interface PluginListItem {
+  id: string;
+  name: string;
+  version: string;
+  author: string;
+  description: string;
+  type: string;
+  status: "ok" | "error";
+  reason?: string;
+  active: boolean;
+  settingsSchema: PluginSettingDef[];
+}
+
+/** #rgb → #rrggbb（HTML color input 只认 7 字符值）；非法回落原值 */
+function hex6(hex: string): string {
+  const m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(hex.trim());
+  return m ? `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}` : hex;
+}
+
+function ThemePluginsBlock() {
+  const [plugins, setPlugins] = useState<PluginListItem[]>([]);
+  const [valuesMap, setValuesMap] = useState<Record<string, Record<string, unknown>>>({});
+  const [actErr, setActErr] = useState<{ id: string; reason: string } | null>(null);
+
+  const reload = useRef(async () => {
+    const api = window.pluginsAPI;
+    if (!api) return;
+    try {
+      const list = (await api.list()) as PluginListItem[];
+      setPlugins(Array.isArray(list) ? list : []);
+      // 显示侧拉各插件 values（生效侧由宿主 assembleVars 读侧归一，§4.5 双侧纪律）
+      const next: Record<string, Record<string, unknown>> = {};
+      for (const p of Array.isArray(list) ? list : []) {
+        if (!p || p.status !== "ok") continue;
+        next[p.id] = (await settingsStore.get<Record<string, unknown>>("plugin." + p.id, "values", {})) || {};
+      }
+      setValuesMap(next);
+    } catch {
+      /* 无桥窗口 / 扫描失败：静默空列表 */
+    }
+  });
+
+  useEffect(() => {
+    void reload.current();
+    const offPush = window.pluginsAPI?.onChanged?.(() => void reload.current());
+    const offEvt = eventBus.on("settings/changed", (p) => {
+      const scope = (p as { scope?: string } | null)?.scope || "";
+      if (scope.startsWith("plugin.")) void reload.current();
+    });
+    return () => {
+      offPush?.();
+      offEvt();
+    };
+  }, []);
+
+  if (!window.pluginsAPI) return null;
+
+  async function setValues(pluginId: string, settingId: string, value: unknown) {
+    const next = { ...(valuesMap[pluginId] || {}), [settingId]: value };
+    setValuesMap({ ...valuesMap, [pluginId]: next });
+    await settingsStore.set("plugin." + pluginId, "values", next);
+    // settingsStore.set 内广播 settings/changed → 注入链重拉即时生效（无需在此另发事件）
+  }
+
+  async function activate(id: string) {
+    setActErr(null);
+    const r = await window.pluginsAPI?.setActive(id);
+    if (r && !r.ok) setActErr({ id, reason: r.reason || "激活失败" });
+    await reload.current();
+  }
+
+  async function deactivate() {
+    setActErr(null);
+    await window.pluginsAPI?.setActive("");
+    await reload.current();
+  }
+
+  const settingValue = (p: PluginListItem, s: PluginSettingDef): unknown => {
+    const v = valuesMap[p.id]?.[s.id];
+    return v === undefined ? s.default : v;
+  };
+
+  return (
+    <>
+      <h4>主题插件</h4>
+      <p className="form-hint">
+        主题插件来自应用数据目录的 plugins 文件夹（本期仅支持主题插件 type:theme，样式经宿主校验后注入）。
+        与内置皮肤互斥——启用一方即停用另一方。
+      </p>
+      {plugins.length === 0 && <p className="form-hint">尚未发现插件：把插件文件夹放入 plugins 目录后点「重新扫描」。</p>}
+      <div className="plugin-list">
+        {plugins.map((p) => (
+          <div key={p.id} className="plugin-item" data-plugin-item={p.id}>
+            <div className="plugin-item-main">
+              <span className="plugin-item-name">{p.name}</span>
+              {p.version && <span className="plugin-item-meta mono">v{p.version}</span>}
+              {p.author && <span className="plugin-item-meta">{p.author}</span>}
+              {p.status === "ok" ? (
+                p.active ? (
+                  <button type="button" className="plugin-text-btn" data-plugin-deactivate onClick={() => void deactivate()}>
+                    停用
+                  </button>
+                ) : (
+                  <button type="button" className="plugin-text-btn" data-plugin-activate onClick={() => void activate(p.id)}>
+                    启用
+                  </button>
+                )
+              ) : (
+                <button type="button" className="plugin-text-btn" disabled title={p.reason}>
+                  启用
+                </button>
+              )}
+              <span className="plugin-item-state">{p.active ? "已激活" : p.status === "ok" ? "未激活" : "校验失败"}</span>
+            </div>
+            {p.status === "error" && <p className="plugin-item-reason">{p.reason}</p>}
+            {p.status === "ok" && actErr?.id === p.id && <p className="plugin-item-reason">{actErr.reason}</p>}
+            {p.status === "ok" && p.description && <p className="form-hint">{p.description}</p>}
+            {p.status === "ok" && (p.settingsSchema?.length || 0) > 0 && (
+              <div className="plugin-settings" data-plugin-settings={p.id}>
+                {p.settingsSchema.map((s) => {
+                  const v = settingValue(p, s);
+                  return (
+                    <div key={s.id} className="settings-row" data-plugin-setting={`${p.id}:${s.id}`}>
+                      <span className="settings-row-label" title={s.description || s.name}>
+                        {s.name}
+                      </span>
+                      {s.type === "toggle" && (
+                        <input
+                          type="checkbox"
+                          checked={v === true}
+                          onChange={(e) => void setValues(p.id, s.id, e.target.checked)}
+                        />
+                      )}
+                      {s.type === "range" && (
+                        <input
+                          type="range"
+                          min={s.min ?? 0}
+                          max={s.max ?? 100}
+                          step={s.step ?? 1}
+                          value={Number(v) || 0}
+                          onChange={(e) => void setValues(p.id, s.id, Number(e.target.value))}
+                        />
+                      )}
+                      {s.type === "dropdown" && (
+                        <select
+                          value={String(v ?? "")}
+                          onChange={(e) => void setValues(p.id, s.id, e.target.value)}
+                        >
+                          {(s.options || []).map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {s.type === "color" && (
+                        <input
+                          type="color"
+                          value={hex6(String(v ?? "#000000"))}
+                          onChange={(e) => void setValues(p.id, s.id, e.target.value)}
+                        />
+                      )}
+                      {s.type === "text" && (
+                        <input
+                          type="text"
+                          maxLength={100}
+                          value={String(v ?? "")}
+                          onChange={(e) => void setValues(p.id, s.id, e.target.value)}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="settings-row">
+        <button type="button" className="btn btn-outline btn-sm" data-plugin-open-folder onClick={() => void window.pluginsAPI?.openFolder()}>
+          打开插件文件夹
+        </button>
+        <button type="button" className="btn btn-outline btn-sm" data-plugin-rescan onClick={() => void reload.current()}>
+          重新扫描
+        </button>
+      </div>
+    </>
+  );
+}
+
 export default function SettingsPanel({
   theme,
   onThemeChange,
@@ -2852,6 +3188,9 @@ export default function SettingsPanel({
                   </button>
                 ))}
               </div>
+              {/* v48.89（D132 §8.1）：主题插件子块——落位 sec-appearance 内「皮肤」与「强调色」之间，
+                  不新增 SECTION_GROUPS 导航项（D114 的 5 组契约零改动）、不新增 sec-* 锚 */}
+              <ThemePluginsBlock />
               <h4>强调色</h4>
               <div className="settings-row accent-row">
                 <input type="color" value={accentColor || "#166a59"} onChange={(e) => onAccentChange(e.target.value)} />

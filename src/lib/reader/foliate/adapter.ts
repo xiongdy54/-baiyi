@@ -6,7 +6,9 @@
 //   view.js: <foliate-view> 自定义元素；open/init/goTo/goToFraction/next/prev/search/clearSearch/
 //            getCFI/resolveCFI/close；'relocate'|'load'|'link'|'external-link' 事件；renderer.setAttribute；
 //            renderer.getContents() → [{doc, index}]；book.toc；book.sections[i].id
-//   paginator.js: 属性 flow/gap/margin/max-column-count/max-inline-size
+//   paginator.js: 属性 flow/gap/margin/max-column-count/max-inline-size/animated
+//            （D130 R3：animated 不在 paginator observedAttributes，但两处消费点都是 hasAttribute
+//             即时读取——setAttribute/removeAttribute 即刻影响下一次翻页，零 vendor 补丁）
 import "../../../../vendor/foliate-js/view.js";
 import type {
   BookSource,
@@ -27,7 +29,7 @@ import type {
   ReaderTocItem,
   RelocateInfo
 } from "../kernel";
-import { fixSvgAspect, injectAppearanceStyle } from "./appearance";
+import { fixSvgAspect, injectAppearanceStyle, type ReaderAppearanceEx } from "./appearance";
 import { getSelectionFromContents, getSelectionGeometryFromContents, pointerToHost } from "./selection";
 import { createMultiHighlight, MULTI_HIGHLIGHT_NAME } from "../multiHighlight";
 import { annotKey, annotSoft, annotSolid } from "../annotColor";
@@ -46,6 +48,7 @@ type FoliateView = HTMLElement & {
   } | null;
   renderer: {
     setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
     getContents(): { doc: Document; index: number }[];
   } | null;
   open(book: unknown): Promise<void>;
@@ -543,6 +546,16 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     // 无单位数字会让 minmax(var(--_margin),1fr) 整条 grid-template-rows 失效，
     // 分页模式页面高度塌缩到内容自适应高度且形成自锁回路（实测每页只剩 ~318px）
     if (a?.margin != null) r.setAttribute("margin", `${a.margin}px`);
+    // D130 R3（P3b）：版心宽度——滚动模式的排版余白（分页列宽的上限）；px 单位同上（v37 教训）。
+    // paginator 文件头白名单已含 max-inline-size（scrolled 分支 columnWidth = maxInlineSize）。
+    const ex = a as ReaderAppearanceEx | null;
+    if (ex?.maxInlineSize != null) r.setAttribute("max-inline-size", `${ex.maxInlineSize}px`);
+    // D130 R3（P4a）：翻页滑动过渡——vendor `animated` 布尔属性按值 toggle；
+    // reduce-motion 已在 resolveAppearance 强制 false，这里照值执行（存储保留意愿、生效面永不挂）。
+    if (ex) {
+      if (ex.turnAnimated === true) r.setAttribute("animated", "");
+      else r.removeAttribute("animated");
+    }
   };
 
   const applyToHost = (a: ReaderAppearance) => {

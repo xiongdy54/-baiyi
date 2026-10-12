@@ -167,6 +167,14 @@ contextBridge.exposeInMainWorld("statsAPI", {
   timeline: (opts) => ipcRenderer.invoke("stats:timeline", opts)
 });
 
+// v48.85（D129，§3.4）：成长反馈只读三通道（M13 GF-1 数据面；照 statsAPI 先例，全部 invoke、零事件推送——
+// 提示由渲染层在评分成功后主动拉取，§4.17-3）
+contextBridge.exposeInMainWorld("growthAPI", {
+  afterReview: (cardId, now) => ipcRenderer.invoke("growth:afterReview", String(cardId), now),
+  sessionSummary: (fromTs, now) => ipcRenderer.invoke("growth:sessionSummary", Number(fromTs) || 0, now),
+  overview: (opts, now) => ipcRenderer.invoke("growth:overview", opts || {}, now)
+});
+
 contextBridge.exposeInMainWorld("issuesAPI", {
   add: (issue) => ipcRenderer.invoke("issues:add", issue),
   list: (cardId) => ipcRenderer.invoke("issues:list", cardId),
@@ -423,6 +431,22 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
     const handler = (_e, payload) => callback(payload);
     ipcRenderer.on("mindmap:changed", handler);
     return () => ipcRenderer.removeListener("mindmap:changed", handler);
+  }
+});
+
+// v48.91（D132，设计 docs/design/PLUGIN-SYSTEM-D132.md §4.4）：插件/主题宿主桥——四 invoke 通道 +
+// plugins:changed 推送订阅（渲染层由 themePlugins.ts 经 onChanged 直连 ipcRenderer，不经 EventBus）。
+// 与 windowAPI 既有模式逐字同构：全部闭包封装 ipcRenderer.invoke/on，onChanged 返回退订函数。
+contextBridge.exposeInMainWorld("pluginsAPI", {
+  list: () => ipcRenderer.invoke("plugins:list"),
+  getActive: () => ipcRenderer.invoke("plugins:getActive"),
+  setActive: (id) => ipcRenderer.invoke("plugins:setActive", id),
+  openFolder: () => ipcRenderer.invoke("plugins:openFolder"),
+  rescan: () => ipcRenderer.invoke("plugins:rescan"),
+  onChanged: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("plugins:changed", handler);
+    return () => ipcRenderer.removeListener("plugins:changed", handler);
   }
 });
 

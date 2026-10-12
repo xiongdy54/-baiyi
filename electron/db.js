@@ -1,10 +1,14 @@
-// SQLite 仓储层（sql.js WASM 实现，接口与将来 better-sqlite3 原生版一致）
+// SQLite 仓储层（v48.92 / D137 起：better-sqlite3 原生引擎，WAL journal 原生落盘；接口与 sql.js 时代一致）
+// 落盘语义（§7.2 D137 登记）：「每次落库即落盘」由 SQLite 事务提交 + synchronous=FULL 的 WAL fsync 承担；
+// persist() 重定义为显式 wal_checkpoint(TRUNCATE)（调用点全部保留），使磁盘单文件 = 完整最新状态。
 // 文档数据模型：LibraryItem + Document，全部带 userId/updatedAt/syncVersion/isDeleted
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const annotationRange = require("./annotationRange");
 const { app } = require("electron");
+const Database = require("better-sqlite3");
+const { attachRun, applyStandardPragmas, normParams } = require("./sqliteCompat");
 const {
   CARD_GEN_PROMPT,
   CARD_FORMULA_PROMPT,
@@ -323,14 +327,24 @@ CREATE INDEX IF NOT EXISTS idx_rec_feedback_key ON rec_feedback(item_key, ts);
 `;
 
 async function initDb() {
-  const initSqlJs = require("sql.js");
-  const SQL = await initSqlJs();
+  // D137（§3.1）：better-sqlite3 同步构造直开文件（文件不存在即创建；崩溃恢复/WAL 回放由 SQLite
+  // 打开时自动完成）——对外保持 async 签名，调用面零改动。
+  // 重复调用（测试内「重启模拟」/ 幂等演练）＝先关旧连接再从文件重载：close 本身做 checkpoint，
+  // 主文件自足后重开即与 sql.js 时代「每次 initDb 全量重读文件」语义一致（迁移/回填段随之重挂）。
   dbFile = path.join(app.getPath("userData"), "library.db");
-  // v23/F11：启动清残留 tmp——tmp 永远不是事实源（rename 原子性保证 library.db
-  // 要么是上一份完整版要么是新完整版，半写的 tmp 只是垃圾）
+  // v23/F11：启动清残留 tmp——tmp 永远不是事实源（sql.js 时代的原子替换残留，新引擎不再产出）
   try { fs.rmSync(dbFile + ".tmp", { force: true }); } catch { /* 忽略 */ }
-  db = fs.existsSync(dbFile) ? new SQL.Database(fs.readFileSync(dbFile)) : new SQL.Database();
-  db.run(SCHEMA);
+  if (db && db.open) closeDb();
+  db = attachRun(new Database(dbFile));
+  applyStandardPragmas(db); // WAL + synchronous=FULL + busy_timeout（§3.7，WAL 标志持久在库头）
+  // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞——损坏早暴露、零行为变更）
+  try {
+    const qc = db.pragma("quick_check", { simple: true });
+    if (qc !== "ok") console.error(`[db] quick_check 异常：${qc}`);
+  } catch (e) {
+    console.error("[db] quick_check 失败：", e);
+  }
+  db.exec(SCHEMA);
   // D121 §1.2：card_links 索引（与其余索引同法放 initDb，IF NOT EXISTS 幂等）
   try {
     db.run("CREATE INDEX IF NOT EXISTS idx_card_links_a ON card_links(card_a)");
@@ -867,41 +881,83 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  // §9.4 历史数据兼容（一次性版本化回填）：① v11 前新卡态卡片 fsrs_json 补 S/D 基线（createEmptyCard
+  // 口径 0/0，§4.4.1「历史缺字段基线回填」）；② 存量 cloze 卡 hint 拆答案物化进 back_markdown（与渲染层
+  // extractClozeAnswer(s) 拼接逐字符等价，tests/legacyBackfill.test.cjs 对拍）。判定/编排见 legacyBackfill.js：
+  // 单事务 + 未匹配行零变更 + settings.app.legacyBackfillV1 标记幂等；数据落盘走本函数末尾 persist()。
+  let legacyBackfillResult = null; // P1 时序：回填结果暂存，完成标记延到 persist() 成功之后才落盘
+  try {
+    const { runLegacyBackfill } = require("./legacyBackfill");
+    const bf = runLegacyBackfill({ db, queryAll, readSettings, writeSettings, now: Date.now });
+    if (bf.ran && (bf.fsrsFixed > 0 || bf.clozeFixed > 0)) {
+      console.log(`[legacyBackfill] fsrs_json 补 S/D ${bf.fsrsFixed} 行；cloze hint 答案物化 ${bf.clozeFixed} 行`);
+    }
+    if (bf.ran) legacyBackfillResult = bf;
+  } catch (e) {
+    console.error("[legacyBackfill] 回填失败（不阻塞启动，下次启动重试）：", e);
+  }
   ensurePromptTemplates();
   persist();
+  // P1 时序：完成标记必须在 persist() 成功之后写（标记是重跑跳过的唯一安全网，先于数据落盘会在
+  // 「标记已写、数据未持久化即崩溃」时把存量旧数据锁死在未回填态）——persist 抛错则此处不执行，
+  // 标记不落盘，下次启动重跑可续（事务零残留；数据已持久化时重跑判定已合规 → 零写入 → 补标记）。
+  if (legacyBackfillResult) {
+    try {
+      legacyBackfillResult.mark();
+    } catch (e) {
+      console.error("[legacyBackfill] 完成标记写入失败（下次启动重跑补记）：", e);
+    }
+  }
 }
 
-// v23/F11（§4.4.9）：原子持久化——同目录 tmp + fsync + rename 原子替换（Windows MOVEFILE_REPLACE_EXISTING）。
-// 任一步失败 throw → IPC reject → UI 封锁评分并经 persistNow 重试；禁止静默降级为非原子覆盖写。
-// tmp 永远不是事实源：rename 原子性保证 library.db 要么是上一份完整版要么是新完整版。
+// v48.92（D137 §3.4）：persist() 重定义——sql.js 时代的「全量导出 + tmp/fsync/rename 原子替换」随
+// 内存库退役；新语义 = 显式 `wal_checkpoint(TRUNCATE)`：把 WAL 合并回主文件并截断，使「磁盘上
+// library.db 单文件 = 完整最新状态」这一既有外部假设继续成立（外部脚本、直接拷贝、旧工具链均安全）。
+// 持久性本身由 SQLite 事务提交 + synchronous=FULL（每次提交 fsync WAL）承担，不再依赖本函数。
+// 失败语义（F37/§4.4.9）：checkpoint 失败（如其他连接持读锁 busy=1、磁盘 I/O 错误）同样 throw →
+// IPC reject → UI 封锁评分并经 persistNow 重试；调用点全部保留、零裁剪。
 function persist() {
-  const tmp = dbFile + ".tmp";
-  const buf = Buffer.from(db.export());
-  const fd = fs.openSync(tmp, "w");
-  try {
-    fs.writeSync(fd, buf);
-    fs.fsyncSync(fd);
-  } catch (e) {
-    // D-9（审计 F37）：写/刷失败必须清掉半成品 tmp。原来 finally 只 closeSync，
-    // 一次落盘失败就在盘上留一份与库同尺寸的残库（实测 528 KB），直到下次成功落盘才被覆盖。
-    try { fs.closeSync(fd); } catch { /* 已被系统关闭 */ }
-    try { fs.rmSync(tmp, { force: true }); } catch { /* 尽力而为 */ }
-    throw e;
-  }
-  fs.closeSync(fd);
-  try {
-    fs.renameSync(tmp, dbFile);
-  } catch (e) {
-    try { fs.rmSync(tmp, { force: true }); } catch { /* 尽力而为 */ }
-    throw e;
+  const busy = db.pragma("wal_checkpoint(TRUNCATE)", { simple: true });
+  if (Number(busy) !== 0) {
+    throw new Error("persist 失败：wal_checkpoint(TRUNCATE) 忙碌（busy=1）——存在并发读，稍后重试");
   }
 }
 
-// v23：纯持久化重试（§4.4.9）——只重试当前内存库的持久化（重导出+原子替换），
+// v23：纯持久化重试（§4.4.9）——D137 后语义 = 重试 checkpoint（WAL 合并回主文件），
 // 绝不重新执行任何业务 mutation；供 UI「重试保存」在 persist 失败后调用
 function persistNow() {
   persist();
   return true;
+}
+
+// D137（v48.92）：应用退出时显式关闭连接——clean shutdown 下 SQLite 自动做 WAL checkpoint
+// 并删除 -wal/-shm sidecar（等价一次 persist() + 文件自足收尾）；异常吞并（退出期尽力而为）
+function closeDb() {
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      /* 退出期尽力而为 */
+    }
+    db = null;
+  }
+}
+
+// D137（§3.6）：在线快照到目标路径（db.backup 页拷贝，不阻塞写路径）——M2 备份改走此口
+async function snapshotTo(destPath) {
+  if (!db || !db.open) throw new Error("主库未打开，无法快照");
+  await db.backup(destPath);
+  return destPath;
+}
+
+// D137：连接级 pragma 读数（journal_mode/synchronous 实测口径，验收与诊断辅助；只读，零副作用）
+function connPragmas() {
+  if (!db || !db.open) return null;
+  return {
+    journalMode: String(db.pragma("journal_mode", { simple: true })),
+    synchronous: Number(db.pragma("synchronous", { simple: true })),
+    busyTimeout: Number(db.pragma("busy_timeout", { simple: true }))
+  };
 }
 
 // ---------- FSRS 参数环境（v23，D20 / §4.4.10：不可变快照 + 活跃指针） ----------
@@ -973,18 +1029,15 @@ function getBackupCounts() {
 }
 
 function listItems() {
-  const stmt = db.prepare(`
+  // D137：步进游标 → .all()（同 queryAll 映射）
+  return db.prepare(`
     SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_json AS progressJson,
            li.lang, li.priority, li.author, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
     FROM library_items li
     LEFT JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.is_deleted = 0
     ORDER BY li.created_at DESC
-  `);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  `).all();
 }
 
 // v38（D35）：书籍语言属性（''=未知）。查词语言路由的书籍级信号；不参与其他逻辑。
@@ -1359,6 +1412,9 @@ function mapCardRow(r) {
         // （src/lib/fsrs.ts 明写「新卡的 S/D 合法为 0（首评前），不能无条件钳进 [1,10]」），
         // 而原判据不区分 state，会把这种合法新卡判成 damaged 并从队列**静默缺席**
         // （m12 夹具 17 条断言因此全红）。非新卡仍按原值域严格判定，F34 的保护不变。
+        // isNewState 同源口径（P3 联动）：electron/legacyBackfill.js needsFsrsBaseline 的 S/D 回填判定
+        // 用**同一表达式**，两处互为镜像——改一处必改另一处（漂移＝回填认新卡而本闸门认非新卡，
+        // S/D=0 基线行会被判 damaged 从队列静默缺席）。
         const isNewState = f.state === "new" || f.state === undefined || f.state === null;
         const bad =
           (f.stability !== undefined && !(Number.isFinite(S) && (isNewState ? S >= 0 : S > 0))) ||
@@ -1821,22 +1877,22 @@ const BROWSER_JOIN = `FROM cards c
   LEFT JOIN library_items li ON li.id = d.library_item_id
   WHERE c.is_deleted = 0`;
 
-// sql.js 同步游标分块消费——30 万行全量物化会把主进程顶上 GB 级，峰值内存必须钳在一个 chunk
+// D137：better-sqlite3 惰性迭代游标分块消费——30 万行全量物化会把主进程顶上 GB 级，
+// 峰值内存必须钳在一个 chunk（await nextTick() 让出点语义与 sql.js 步进时代一致）
 function nextTick() {
   return new Promise((res) => setImmediate(res));
 }
 
 async function scanCards(sql, params, handleRow) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
   let n = 0;
+  const iter = db.prepare(sql).iterate(normParams(params));
   try {
-    while (stmt.step()) {
-      handleRow(stmt.getAsObject());
+    for (const row of iter) {
+      handleRow(row);
       if (++n % 2000 === 0) await nextTick();
     }
   } finally {
-    stmt.free();
+    iter.return?.(); // 提前退出时关闭游标（等价旧 stmt.free()）
   }
   return n;
 }
@@ -1996,7 +2052,9 @@ function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
     if (advanced) throw new Error("评分被拒：该卡的调度状态已前进（同一次呈现被重复提交）。请刷新后重试。");
   }
   const now = Date.now();
-  db.run("BEGIN");
+  // D137（§3.3 加固①）：BEGIN IMMEDIATE（原 saveReview 序列并入 withTransaction 同款语义：
+  // COMMIT 后 persist，persist 失败时内存已提交、禁止重复评分、经 persistNow 重试）
+  db.run("BEGIN IMMEDIATE");
   try {
     // review_seq 分配**保持原语义不变**（§4.4.9 排序不变量：表内唯一、插入序单调、撤销删除后允许复用）。
     // 注意：v48.22 起 op_journal 另用独立的 op_counter 计数器——跨类撤销排序靠 journal，
@@ -2123,7 +2181,7 @@ function undoLastReview() {
   }
   // leech 触发判定（复现复习端触发条件，评分时点数据）
   const triggeredLeech = (after?.lapses ?? 0) >= 8 && !(leechBefore && leechBefore.isLeech === true);
-  db.run("BEGIN");
+  db.run("BEGIN IMMEDIATE"); // D137（§3.3 加固①）：同 withTransaction
   try {
     db.run("UPDATE cards SET fsrs_json = ?, fsrs_config_id = ?, updated_at = ? WHERE id = ?", [
       JSON.stringify(before),
@@ -2852,17 +2910,13 @@ function setDictCache(providerId, language, word, entry, version) {
 // ---------- 阅读器 / 摘录队列（Phase 2） ----------
 
 function getDocument(itemId) {
-  const stmt = db.prepare(`
+  // D137：步进游标取单行 → .get()
+  return db.prepare(`
     SELECT li.title, li.progress_json AS progressJson, d.id AS documentId, d.markdown, li.source_type AS sourceType, li.author
     FROM library_items li
     JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.id = ? AND li.is_deleted = 0
-  `);
-  stmt.bind([itemId]);
-  let row = null;
-  while (stmt.step()) row = stmt.getAsObject();
-  stmt.free();
-  return row;
+  `).get([itemId]) || null;
 }
 
 // v12.2：复习卡「跳转原文」——documentId 反查书架条目 id
@@ -2902,12 +2956,9 @@ function updateProgress(itemId, progress) {
 }
 
 function queryAll(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  // D137（§3.1 映射表）：prepare→bind→step→getAsObject→free 循环 → .all() 一处替换；
+  // 207 处调用点零改动。undefined 绑定在 sqliteCompat.normParams 归一。
+  return db.prepare(sql).all(normParams(params));
 }
 
 function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef,
@@ -3289,14 +3340,21 @@ function logExtractOp(row, opType, before, after, batchId, skipJournal) {
 }
 
 function withTransaction(fn) {
-  db.run("BEGIN");
+  // D137（§3.3）：保留手写 BEGIN → COMMIT / ROLLBACK（F38「撤销只删最大 seq ⇒ 序号稠密」等既有断言零改写）。
+  // 加固①：BEGIN IMMEDIATE——单写者应用下杜绝 deferred→write 升级时的 SQLITE_BUSY 边角。
+  // 加固②：COMMIT 失败显式 ROLLBACK 并 rethrow（与原 catch 对称，不留悬挂事务）。
+  db.run("BEGIN IMMEDIATE");
+  let committed = false;
   try {
     const out = fn();
     db.run("COMMIT");
+    committed = true;
     persist();
     return out;
   } catch (e) {
-    try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
+    if (!committed) {
+      try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
+    }
     throw e;
   }
 }
@@ -4686,6 +4744,229 @@ function getStatsTimeline(opts) {
 
   const built = statsTimeline.buildTimeline(events, { dayStart0: start0, days });
   return { now, cutoffHour: getCutoffHour(), ...built };
+}
+
+// ---------- v48.85（D129，§4.2-22 / §4.17）：成长反馈只读聚合出口（GrowthReadModel 数据面） ----------
+// 分层仿 getStatsTimeline ↔ statsTimeline 先例：本文件只做取数与组装（全部 SELECT、零写路径、零新表，
+// §4.17-3 只读不变量），事件判定口径一律在 electron/growth.js 纯函数模块——**禁止在此实现第二套口径**。
+// 设计稿 docs/design/GROWTH-FEEDBACK-D129.md §3.3；测试 tests/m13.test.cjs（N-1…N-12）。
+const growth = require("./growth");
+
+// 设置读侧：`app.growthFeedback` 对象 {enabled}——**仅严格 false 为关**（含手改文件把整个值写成
+// 布尔 false 的形态），缺失/非法/非对象一律回落开（§7.4 v48.85/D129；与 electron/main.js settings:set
+// 写侧、src/lib/growthSettings.ts 读侧同规）。
+// 关闭＝三出口短路返回 {enabled:false} 且不做任何查询（零渲染零计算，§6.6.2 硬性）。
+function growthFeedbackEnabled() {
+  const v = readSettings().app?.growthFeedback;
+  if (v === false) return false;
+  return !(v && typeof v === "object" && !Array.isArray(v) && v.enabled === false);
+}
+
+// 成长侧取数的卡行 join（R9：复用 TODAY_QUEUE_SQL 的同一 join 写法——contextRef.documentId → documents →
+// library_items；无归属卡不参与书维聚合、仍参与领域维）。只取活跃未删卡；口径与今日队列视图一致。
+const GROWTH_CARD_SQL = `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
+     LEFT JOIN library_items li ON li.id = d.library_item_id
+     WHERE c.is_deleted = 0 AND COALESCE(c.status, 'active') != 'archived'`;
+
+// review_logs 行 → growth.js 证据行：快照防御性解析，损坏/缺失一律 null（缺快照的 v22 前旧日志
+// 不参与判定，§3.2；坏行容错与 mapCardRow/computeTodayQueue 同口径，N-7）。
+function mapGrowthLogRow(r) {
+  const j = (t) => {
+    if (t === null || t === undefined || t === "") return null;
+    try {
+      const v = JSON.parse(t);
+      return v && typeof v === "object" ? v : null;
+    } catch { return null; }
+  };
+  return {
+    id: r.id,
+    cardId: r.card_id,
+    reviewSeq: r.review_seq,
+    reviewedAt: r.reviewed_at,
+    before: j(r.fsrs_before_json),
+    after: j(r.fsrs_after_json),
+    leechBefore: j(r.leech_before_json)
+  };
+}
+
+// 装载一批卡的证据行（卡行 + 各卡全部日志按 review_seq 升序）；fsrs/leech 损坏行按 damaged 跳过（N-7）。
+function loadGrowthCardsWithLogs(extraWhere, params) {
+  const rows = queryAll(
+    `${GROWTH_CARD_SQL}${extraWhere ? ` AND (${extraWhere})` : ""}`,
+    params || []
+  );
+  const byId = new Map();
+  for (const r of rows) {
+    const mapped = mapCardRow(r);
+    if (!mapped || mapped.damaged) continue;
+    // docTitle 回补（复审 P1 必修，同 withDocTitleFallback 先例 db.js:1930）：mapCardRow 逐字段构造
+    // 不透传 SQL 别名列——GROWTH_CARD_SQL 的 JOIN 书名在此回补（sourceRef 书名回落），否则
+    // material 书维 entityLabel/evidence.docTitle 与 Territory 书行 label（§3.1 entityLabel=书名）恒落 UUID。
+    byId.set(mapped.id, {
+      ...mapped,
+      docTitle: r.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null,
+      logs: []
+    });
+  }
+  const ids = [...byId.keys()];
+  for (let i = 0; i < ids.length; i += 400) { // 分批 IN，避免超大集合单语句过长
+    const chunk = ids.slice(i, i + 400);
+    const ph = chunk.map(() => "?").join(",");
+    for (const lr of queryAll(`SELECT * FROM review_logs WHERE card_id IN (${ph}) ORDER BY review_seq ASC`, chunk)) {
+      const c = byId.get(lr.card_id);
+      if (c) c.logs.push(mapGrowthLogRow(lr));
+    }
+  }
+  return [...byId.values()];
+}
+
+// 把一份取数结果并入去重集合（同卡多次命中不同范围时只留一份）。
+function mergeGrowthCards(target, extra) {
+  for (const c of extra) if (!target.has(c.id)) target.set(c.id, c);
+  return target;
+}
+
+// 窄范围派生（R2，§3.3）：afterReview 只取「刚评分的卡 + 同组卡 + 所属书/领域活跃卡集」，不触全库。
+function loadGrowthAfterReviewScope(card) {
+  const scope = new Map();
+  const groupKey = card.siblingKey || card.knowledgePointId;
+  if (groupKey) {
+    mergeGrowthCards(scope, loadGrowthCardsWithLogs("c.sibling_key = ? OR c.knowledge_point_id = ?", [groupKey, groupKey]));
+  }
+  const dom = Array.isArray(card.domain) && card.domain.length ? String(card.domain[0]) : null;
+  const clauses = [];
+  const params = [];
+  if (card.libraryItemId) { clauses.push("li.id = ?"); params.push(card.libraryItemId); }
+  if (dom) { clauses.push("CASE WHEN json_valid(c.domain) THEN json_extract(c.domain, '$[0]') END = ?"); params.push(dom); }
+  if (clauses.length) {
+    mergeGrowthCards(scope, loadGrowthCardsWithLogs(clauses.join(" OR "), params));
+  }
+  return scope;
+}
+
+// 会话/档案路径的聚合范围：种子卡 ∪ 同组卡 ∪ 书/领域成员（与 afterReview 共用同一批 derive 函数，N-9 一致性）。
+function loadGrowthAggregateScope(seedCards) {
+  const scope = new Map();
+  mergeGrowthCards(scope, seedCards);
+  const groupKeys = new Set();
+  const bookIds = new Set();
+  const doms = new Set();
+  for (const c of seedCards) {
+    if (c.siblingKey) groupKeys.add(c.siblingKey);
+    if (c.knowledgePointId) groupKeys.add(c.knowledgePointId);
+    if (c.libraryItemId) bookIds.add(c.libraryItemId);
+    if (Array.isArray(c.domain) && c.domain.length) doms.add(String(c.domain[0]));
+  }
+  if (groupKeys.size) {
+    const keys = [...groupKeys];
+    const ph = keys.map(() => "?").join(",");
+    mergeGrowthCards(scope, loadGrowthCardsWithLogs(`c.sibling_key IN (${ph}) OR c.knowledge_point_id IN (${ph})`, [...keys, ...keys]));
+  }
+  const clauses = [];
+  const params = [];
+  if (bookIds.size) {
+    const ids = [...bookIds];
+    clauses.push(`li.id IN (${ids.map(() => "?").join(",")})`);
+    params.push(...ids);
+  }
+  if (doms.size) {
+    const ds = [...doms];
+    clauses.push(`CASE WHEN json_valid(c.domain) THEN json_extract(c.domain, '$[0]') END IN (${ds.map(() => "?").join(",")})`);
+    params.push(...ds);
+  }
+  if (clauses.length) mergeGrowthCards(scope, loadGrowthCardsWithLogs(clauses.join(" OR "), params));
+  return scope;
+}
+
+// 对刚评分的卡派生全部记忆层命中并做防回灌过滤（§4.17-6③ / §3.2）：
+// 取该卡最新一条日志的 review_seq 为 triggerSeq，只保留 triggerSeq === 该 seq 的命中——
+// 存量历史跨越的 triggerSeq 更小，天然不命中（toast 只消费本出口，R4）。
+function getGrowthAfterReview(cardId, now) {
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  if (!growthFeedbackEnabled()) return { enabled: false }; // 零计算短路：不做任何查询
+  const id = String(cardId || "");
+  if (!id) return { enabled: true, toast: null, others: [] };
+  const rows = queryAll(`${GROWTH_CARD_SQL} AND c.id = ?`, [id]);
+  const mapped = rows.length ? mapCardRow(rows[0]) : null;
+  if (!mapped || mapped.damaged) return { enabled: true, toast: null, others: [] };
+  // docTitle 回补（复审 P1 必修，同 loadGrowthCardsWithLogs）：rows[0] 为原始行（JOIN docTitle 在场），
+  // mapCardRow 输出不带该别名列——toast/汇总证据链 evidence.docTitle（§3.1 entityLabel=书名）依赖它。
+  const card = {
+    ...mapped,
+    docTitle: rows[0].docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null,
+    logs: queryAll("SELECT * FROM review_logs WHERE card_id = ? ORDER BY review_seq ASC", [id]).map(mapGrowthLogRow)
+  };
+  const latestSeq = card.logs.length ? card.logs[card.logs.length - 1].reviewSeq : 0;
+  const keep = (hits) => hits.filter((h) => Number.isFinite(latestSeq) && h.triggerSeq === latestSeq);
+  const hits = keep(growth.deriveCardEvents(card, card.logs, nowMs));
+  const scope = loadGrowthAfterReviewScope(card);
+  const members = [...scope.values()];
+  if (members.length) {
+    hits.push(...keep(growth.deriveGroupEvents(members, nowMs)));
+    hits.push(...keep(growth.deriveMaterialEvents(members, nowMs)));
+  }
+  const picked = growth.pickTopEvent(hits);
+  return { enabled: true, toast: picked.toast, others: picked.others };
+}
+
+// 会话成果汇总（§3.3）：窗口起点 fromTs（ms）→ {enabled, fromTs, hits, folded}。
+// 窗口过滤按「触发日志 reviewed_at 落在窗口内」进行；派生一律喂**全量**日志（首达语义需要完整序列，
+// 否则会把窗口内本已达成的状态误判成新首达——同防回灌一个道理）。
+// hits = 表序可见命中（含 L3——汇总面照常列出）；folded = L2 单日折叠计数（含被折叠完整命中，供展开）。
+function getGrowthSessionSummary(fromTs, now) {
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  if (!growthFeedbackEnabled()) return { enabled: false };
+  const from = Number(fromTs) || 0;
+  const windowCardIds = queryAll(
+    `SELECT DISTINCT r.card_id AS id FROM review_logs r
+     JOIN cards c ON c.id = r.card_id
+     WHERE r.reviewed_at >= ? AND c.is_deleted = 0 AND COALESCE(c.status, 'active') != 'archived'`,
+    [from]
+  ).map((r) => r.id);
+  if (!windowCardIds.length) return { enabled: true, fromTs: from, hits: [], folded: [] };
+  // 分批 IN（复审 P2b 采纳，同 loadGrowthCardsWithLogs 的 400 批先例）：超大窗口避免单语句过长
+  const seed = new Map();
+  for (let i = 0; i < windowCardIds.length; i += 400) {
+    const chunk = windowCardIds.slice(i, i + 400);
+    mergeGrowthCards(seed, loadGrowthCardsWithLogs(`c.id IN (${chunk.map(() => "?").join(",")})`, chunk));
+  }
+  if (!seed.size) return { enabled: true, fromTs: from, hits: [], folded: [] };
+  const cards = [...loadGrowthAggregateScope([...seed.values()]).values()];
+  const hits = [];
+  for (const c of cards) hits.push(...growth.deriveCardEvents(c, c.logs, nowMs));
+  hits.push(...growth.deriveGroupEvents(cards, nowMs));
+  hits.push(...growth.deriveMaterialEvents(cards, nowMs));
+  const inWindow = hits.filter((h) => h.triggerAt >= from);
+  const folded = growth.foldSameDay(inWindow, (ts) => dayStartMs(ts)); // 学习日口径 = D23 切点（N-10）
+  return { enabled: true, fromTs: from, hits: folded.visible, folded: folded.folded };
+}
+
+// 成长总览 / 档案（§3.3）：全库 derive → 近期 L0–L2 档案 + totals + Territory。
+// 全库聚合**只**在仪表盘挂载时触发 + 事件驱动防抖刷新（§4.17-6⑥），不进评分路径、不做每评分全量重算。
+function getGrowthOverview(opts, now) {
+  const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
+  const limit = Math.min(200, Math.max(1, Math.floor(Number(opts && opts.limit) || 30)));
+  if (!growthFeedbackEnabled()) return { enabled: false };
+  const cards = loadGrowthCardsWithLogs("", []);
+  const hits = [];
+  for (const c of cards) hits.push(...growth.deriveCardEvents(c, c.logs, nowMs));
+  hits.push(...growth.deriveGroupEvents(cards, nowMs));
+  hits.push(...growth.deriveMaterialEvents(cards, nowMs));
+  // 档案只收录 L0–L2（§4.17-7①：Growth Records 不收 L3 与取消项）；按 triggerSeq 倒序（近期在前），limit 截断
+  const archive = hits.filter((h) => h.tier <= 2);
+  const recentEvents = [...archive].sort((a, b) => b.triggerSeq - a.triggerSeq).slice(0, limit);
+  const totals = { l0: 0, l1: 0, l2: 0 };
+  for (const h of archive) totals[`l${h.tier}`] += 1;
+  return {
+    enabled: true,
+    now: nowMs,
+    cutoffHour: getCutoffHour(),
+    recentEvents,
+    totals,
+    territory: growth.buildTerritory(cards, nowMs),
+    knowledge: null // GF-2 预留（§3.5）：阻塞于缺口 G1，契约修订前恒为 null
+  };
 }
 
 // ---------- v36（M8-A，§6.5 / D34）：日记条目（第二输入通道） ----------
@@ -7405,6 +7686,11 @@ module.exports = {
   initDb,
   persistDb: persist,
   persistNow,
+  // D137（v48.92）：will-quit 显式关闭（clean shutdown = WAL 自动 checkpoint + 删 -wal/-shm）；
+  // 在线快照（M2 备份经 db.backup 页拷贝）；连接级 pragma 读数（验收/诊断辅助，只读）
+  closeDb,
+  snapshotTo,
+  connPragmas,
   getBackupCounts,
   listItems,
   createFromPaste,
@@ -7502,6 +7788,10 @@ module.exports = {
   addReadingEvent,
   getStatsOverview,
   getStatsTimeline,
+  // v48.85（D129，§4.2-22）：成长反馈只读聚合出口（GrowthReadModel 数据面；零写路径，§4.17-3）
+  getGrowthAfterReview,
+  getGrowthSessionSummary,
+  getGrowthOverview,
   setCardSuspended,
   updateCardLeech,
   resolveLeech,

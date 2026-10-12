@@ -3,6 +3,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import CaptureEditor, { applyCaptureAppearance } from "./components/CaptureEditor";
+// v48.89（D132 §6.4）：捕获窗跟随主题插件（最小子集桥：getActive/onChanged）
+import { installThemePluginBridge } from "./lib/themePlugins";
 import "./theme.css";
 
 declare global {
@@ -26,6 +28,7 @@ declare global {
 }
 
 try {
+  installThemePluginBridge(); // v48.89（D132）：主题插件跟随（桥内自带 try/catch，失败仅告警回落）
   void applyCaptureAppearance().then(() => {
     createRoot(document.getElementById("root")!).render(
       <React.StrictMode>

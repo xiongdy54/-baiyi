@@ -22,7 +22,15 @@ import type {
   RelocateInfo,
   SourceAnchorGeometry
 } from "./kernel";
-import { DEFAULT_READER_SETTINGS, resolveAppearance, type ReaderSettings } from "./foliate/appearance";
+import {
+  CUSTOM_THEMES_MAX,
+  DEFAULT_READER_SETTINGS,
+  normalizeReaderSettings,
+  resolveAppearance,
+  type CustomThemeEntry,
+  type ReaderAppearanceEx,
+  type ReaderSettings
+} from "./foliate/appearance";
 import { READER_ENGINE_VERSION, PDF_ENGINE_VERSION } from "./foliate/version";
 
 export type {
@@ -46,8 +54,8 @@ export type {
   RelocateInfo,
   SourceAnchorGeometry
 };
-export { READER_ENGINE_VERSION, PDF_ENGINE_VERSION, DEFAULT_READER_SETTINGS, resolveAppearance };
-export type { ReaderSettings };
+export { READER_ENGINE_VERSION, PDF_ENGINE_VERSION, DEFAULT_READER_SETTINGS, resolveAppearance, normalizeReaderSettings, CUSTOM_THEMES_MAX };
+export type { ReaderSettings, CustomThemeEntry, ReaderAppearanceEx };
 
 /** 阅读引擎选择（v28 PDF 原生阅读）：默认 foliate（存量调用全部走此分支，零改动） */
 export type ReaderEngineKind = "foliate" | "pdf";

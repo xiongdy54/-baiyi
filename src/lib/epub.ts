@@ -167,7 +167,12 @@ function stableHash(s: string): string {
   return h.toString(36);
 }
 
-export const SYNTH_GENERATOR_VERSION = "syn-2"; // syn-2（v26）：增图片能力（opts.images→OEBPS/images/）；无图输入与 syn-1 结构逐字节同构
+// syn-3（§9.4「粘贴书合成 EPUB 的空首章」结构性清理）：splitMarkdownChapters 不再为「一级标题开头」
+// 的输入压入空壳首章——结构性变更，`# ` 开头的粘贴书旧 CFI/chapterIndex 语义偏移（新章索引 = 旧索引 − 1），
+// 按 §7.1.11 走可降级恢复链（§6.2：CFI→章节+文本→全文搜索→人工提示）；无 `# ` 开头的输入与 syn-2
+// 结构逐字节同构，零影响。运行时无版本消费点：粘贴/导入书每次打开由 buildSyntheticEpub 现场重建
+// （App.tsx loadReaderBook），版本号是 §7.1.11 的结构变更登记与测试契约，不构成门控。
+export const SYNTH_GENERATOR_VERSION = "syn-3";
 
 const synthMd: MarkdownIt = new MarkdownIt({ html: false, linkify: false, typographer: false });
 
@@ -216,7 +221,17 @@ export function splitMarkdownChapters(markdown: string, fallbackTitle?: string):
   for (const line of lines) {
     const m = /^#\s+(.+)$/.exec(line.trim());
     if (m) {
-      flush();
+      // syn-3（§9.4「粘贴书合成 EPUB 的空首章」）：markdown 以一级标题开头时，首个标题行触发的
+      // flush 会压入一个 title/body 双空的空壳首章（目录多一项、阅读器首屏空白）。丢弃判定从严，
+      // 三条同时成立才丢（缺一不可）：
+      // ① chapters.length === 0 —— 只可能是首个标题触发的 flush，后续标题不受影响；
+      // ② cur.title === "" —— 隐式首章尚未遇到任何「# 」行；标题行之后的章恒有标题，
+      //    「# 前言」后紧跟下一标题的合法空首章有标题、不命中，绝不误删；
+      // ③ buf 无任何非空行 —— 标题前只要有一行实际内容就保留为隐式前言章；纯空白行不算内容。
+      // 该结构变更随 SYNTH_GENERATOR_VERSION 升 syn-3 登记（§7.1.11：旧锚点走可降级恢复链）。
+      const isLeadingEmptyShell =
+        chapters.length === 0 && cur.title === "" && !buf.some((l) => l.trim());
+      if (!isLeadingEmptyShell) flush();
       cur = { title: m[1].trim(), bodyHtml: "" };
       buf = [];
     } else {
@@ -346,9 +361,9 @@ ${tocLis}
   const katexCss = opts?.embedKatexCss === false ? "" : katexCssText;
   chapters.forEach((c, i) => {
     const bodyHtml = imageNameSet.size ? rewriteImgSrcs(c.bodyHtml, imageNameSet) : c.bodyHtml;
-    // A-5（审计）：原来只在 `i === 0` 注入 KaTeX 样式，而第 0 章恒是合成出来的空壳章
-    // （§9.4 已登记的「粘贴书空首章」）→ 真实章节一个都拿不到样式，公式渲染成堆叠裸字形。
-    // 样式表只有几十 KB，且每章是独立 xhtml，逐章注入才自包含。
+    // A-5（审计）：KaTeX 样式必须逐章注入——每章是独立 xhtml，只注首页则其余章拿不到样式，
+    // 公式渲染成堆叠裸字形（历史上第 0 章恒是空壳章掩盖了这一点；syn-3 起空壳章已删、
+    // §9.4「粘贴书空首章」清理完毕，逐章注入保持不变）。
     zip.file(`OEBPS/c${i}.xhtml`, xhtmlDoc(c.title || `第 ${i + 1} 章`, bodyHtml, lang, katexCss));
   });
   // 图片字节落包（OEBPS/images/，与 manifest href 对应）

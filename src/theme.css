@@ -5080,6 +5080,184 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .reader-tool-menu-row .dd-menu {
   min-width: 148px;
 }
+/* ---------- D130 R3：阅读设置弹层分组 + 个性化控件（零新 Token，全部既有档位） ---------- */
+/* 「Group with space, not lines」：组间 margin-block ≥ 2× 组内行距（sp-2 vs sp-1），空间先行；
+   hairline 仅作视觉断点（次手段，与 .reader-engine-divider 同一立场）。 */
+.reader-tool-menu-group {
+  margin-block: var(--sp-2);
+}
+.reader-tool-menu-group:first-child {
+  margin-block-start: 0;
+}
+.reader-tool-menu-group + .reader-tool-menu-group {
+  padding-block-start: var(--sp-1);
+  border-top: 1px solid var(--border-subtle);
+}
+.reader-tool-menu-group-label {
+  padding: 0 var(--sp-3) var(--sp-1);
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: color-mix(in srgb, var(--reader-fg, var(--text-helper)) 62%, transparent);
+  white-space: nowrap;
+}
+/* 控件禁用态（swiss：文字与边框 grey-2、不响应 hover；「看着能调、调了没反应」＝硬缺陷，禁用必带 title 说明） */
+.reader-tool-menu-row .dd-btn:disabled,
+.reader-engine-controls .dd-btn:disabled {
+  color: var(--grey-2);
+  border-color: var(--grey-2);
+  cursor: not-allowed;
+}
+/* P1：已存主题条目（下拉内分组）——12×12 色块预览 + 名称截断（全名经 title 可达） */
+.reader-theme-group-label {
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  white-space: nowrap;
+  cursor: default;
+}
+.reader-theme-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.reader-theme-swatch {
+  display: inline-block;
+  inline-size: 12px;
+  block-size: 12px;
+  flex: none;
+  border: 1px solid var(--reader-border, var(--border-strong));
+}
+.reader-theme-option-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* P1：「保存主题」文字按钮（Meta 档 accent 色 hover 下划线，同「跳转原文」语言；不放大、不进 accent 填充） */
+.reader-theme-save-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.reader-theme-save-btn:hover {
+  text-decoration: underline;
+}
+.reader-theme-save-btn:disabled {
+  color: var(--grey-2);
+  cursor: not-allowed;
+  text-decoration: none;
+}
+.reader-custom-color-group {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.reader-color-input {
+  inline-size: 12px;
+  block-size: 12px;
+  padding: 0;
+  border: 1px solid var(--reader-border, var(--border-strong));
+  background: none;
+  cursor: pointer;
+}
+.reader-color-input::-webkit-color-swatch-wrapper { padding: 0; }
+.reader-color-input::-webkit-color-swatch { border: none; }
+/* 命名输入（Plan for growth：max-width 封顶 + 归一截 24 字符，better-typography「Truncate without losing content」） */
+.reader-theme-naming {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.reader-theme-name-input {
+  inline-size: 120px;
+  max-inline-size: 160px;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-meta);
+  color: var(--reader-fg, var(--text-primary));
+  background: transparent;
+  border: 1px solid var(--reader-border, var(--border-strong));
+}
+/* P4b：分页热区 hover chevron 提示——热区几何不动、翻页行为不变，提示浮在其上（零布局变化）；
+   颜色与 .reader-pageinfo 同一混色手法；reduce-motion 下瞬时显隐（过渡只在 no-preference 作用域） */
+.reader-tap-hint {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 24px;
+  block-size: 24px;
+  color: color-mix(in srgb, var(--reader-fg, #1a1a1a) 62%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+.reader-tap-left .reader-tap-hint { left: 12px; }
+.reader-tap-right .reader-tap-hint { right: 12px; }
+.reader-tap-zone:hover .reader-tap-hint { opacity: 1; }
+@media (prefers-reduced-motion: no-preference) {
+  .reader-tap-hint { transition: opacity var(--dur-hover) var(--ease-out-soft); }
+}
+/* ---------- D130 R3：设置页「我的主题」管理列表（行 hover grey-1、hairline 分隔、Meta 文字按钮） ---------- */
+.reader-theme-manage-list {
+  display: flex;
+  flex-direction: column;
+}
+.reader-theme-manage-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.reader-theme-manage-row:first-child { border-top: none; }
+.reader-theme-manage-row:hover { background: var(--grey-1); }
+.reader-theme-manage-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reader-theme-manage-date {
+  flex: none;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
+.reader-theme-manage-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex: none;
+  opacity: 0;
+}
+.reader-theme-manage-row:hover .reader-theme-manage-actions,
+.reader-theme-manage-row:focus-within .reader-theme-manage-actions,
+.reader-theme-manage-actions-show { opacity: 1; }
+.reader-text-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.reader-text-btn:hover { text-decoration: underline; }
+.reader-theme-rename-input {
+  inline-size: 140px;
+  font-size: var(--fs-secondary);
+}
+.reader-theme-empty {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
 /* 内容视口：工具栏之下独立定位上下文——引擎/热区/侧栏只在此范围内绝对定位，盖不住顶栏。
    停靠布局（D2）：一行两格——正文区（.reader-engine-main）吃剩余宽度，侧栏固定 280px 不收缩。 */
 .reader-engine-viewport {
@@ -8236,3 +8414,238 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .learner-udc-edit { display: flex; align-items: flex-start; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
 .learner-udc-edit > span { line-height: 24px; }
 .learner-danger { color: var(--danger, #b3261e); }
+
+/* ============================== M13 成长反馈（v48.85 / D129 批次 B2–B4） ==============================
+   设计稿 docs/design/GROWTH-FEEDBACK-D129.md §5（以下类名即实现契约）；动效全部引用
+   MOTION-DESIGN-SPEC §1 既有 token（不裸写 ms、不新增 token）；双轨 reduce（装饰性入场规则全部
+   收进 no-preference 作用域，reduce 块显式禁用——§3 通用硬规则 2）。颜色纪律：无装饰彩色，
+   单一焦点色只允许出现在「证据」文字按钮与 Territory「已巩固」段（§5.1/§5.3）。 */
+
+/* ---------- B2 复习页微反馈条（§5.1）：绝对定位浮层，不占布局流 → 结构性保证不推挤卡面 ---------- */
+/* 浮层锚点：.review-session 原无定位上下文，设 relative 供 .growth-toast 锚定（其内既有绝对定位
+   后代——.review-face / .tag-input-box——均有更近的 positioned 祖先，锚定不变，已核对）。 */
+.review-session { position: relative; }
+.growth-toast {
+  position: absolute;
+  inset-inline: 0;
+  margin-inline: auto;              /* 720 居中列同一公式（§18.3 对齐锚） */
+  max-width: 720px;
+  bottom: var(--sp-4);
+  z-index: var(--z-sticky);
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-float);  /* 浮层唯一阴影，不混用 --shadow-hover（已废除） */
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: 0;                 /* 默认皮肤方角语言 */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+.growth-toast-text { margin: 0; font-size: var(--fs-body, 14px); color: var(--ink); }
+/* 「证据」＝Meta 档 accent 文字按钮，hover 下划线（§5.4 跳转链接先例），无箭头字符；
+   单一焦点色仅此处（tier 不用颜色表达，§6.6.2） */
+.growth-toast-more {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--accent);
+  padding: 0;
+}
+.growth-toast-more:hover { text-decoration: underline; text-underline-offset: 3px; }
+.growth-toast-detail {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+}
+/* 证据折叠容器（§7 .collapse-clip）作为浮层 flex 子项需通栏 */
+.growth-toast > .collapse-clip { align-self: stretch; width: 100%; }
+.growth-toast-detail .mono { font-family: var(--mono); color: var(--grey-3); font-size: 12px; margin: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  /* 进场：opacity 0→1 + translateY(--shift-sm)→0，--dur-enter(150ms) --ease-enter（§5.1 动效表）。
+     替换＝旧条直卸（单槽替换，无交叉出场——§9 单主角），由父组件 key 重挂实现。 */
+  .growth-toast { animation: growth-toast-in var(--dur-enter) var(--ease-enter) both; }
+  /* 消失（5s 计时到点 / 展开面板关闭后再计 5s）：--dur-exit(100ms) --ease-exit，动画完卸载（组件承担） */
+  .growth-toast.is-closing { animation: growth-toast-out var(--dur-exit) var(--ease-exit) forwards; }
+}
+@keyframes growth-toast-in {
+  from { opacity: 0; transform: translateY(var(--shift-sm)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes growth-toast-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* ---------- B3 会话成果汇总（§5.2）：无卡片化容器堆叠——Meta 档标题 + hairline 行；
+   层级（能力/结构/建制）用文字不用颜色 ---------- */
+.growth-session { width: 100%; margin-top: var(--sp-4); }
+.growth-session-title { margin: 0 0 var(--sp-2); font-size: var(--fs-meta); color: var(--grey-3); }
+.growth-session-list { list-style: none; margin: 0; padding: 0; }
+.growth-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+.growth-session-list > .growth-row:first-child { border-top: 0; }
+.growth-row-tier { font-family: var(--mono); font-size: 12px; color: var(--grey-3); flex: none; }
+.growth-row-text { flex: 1 1 auto; min-width: 0; font-size: var(--fs-body); color: var(--ink); }
+/* 汇总行内的证据折叠容器通栏换行 */
+.growth-row > .collapse-clip { flex-basis: 100%; min-width: 0; }
+.growth-fold-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--fs-meta);
+  color: var(--grey-3);
+  padding: 0;
+  text-align: left;
+}
+.growth-fold-btn:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.growth-fold-list { list-style: none; margin: 0; padding: var(--sp-1) 0 0 var(--sp-6); display: flex; flex-direction: column; }
+
+/* ---------- B4 仪表盘 growth-events（§5.3）：成长记录时间线 + totals 头部计数 ---------- */
+.growth-records { display: flex; flex-direction: column; gap: var(--sp-2); }
+.growth-records-totals { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--grey-3); }
+.growth-record-list { list-style: none; margin: 0; padding: 0; }
+.growth-record {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.growth-record:first-child { border-top: 0; }
+.growth-record-date { font-family: var(--mono); font-size: 12px; color: var(--grey-3); flex: none; font-variant-numeric: tabular-nums; }
+.growth-record-text { flex: 1 1 auto; min-width: 0; font-size: var(--fs-body); color: var(--ink); }
+.growth-record-src {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--grey-3);
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.growth-empty { margin: 0; font-size: var(--fs-meta); color: var(--grey-3); }
+
+/* ---------- B4 仪表盘 territory（§5.3，GF-1 材料/领域巩固地图）：分段条 12px 直角、
+   段间 1px --paper 缝；--grey-1（未学）→ --grey-2（学习中）→ --ink（长期复习）→ --accent
+  （已巩固，单图唯一焦点色）；无圆角无渐变 ---------- */
+.territory-map { display: flex; flex-direction: column; gap: var(--sp-2); }
+.territory-row { display: flex; align-items: center; gap: var(--sp-3); }
+.territory-name {
+  flex: 0 0 30%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+.territory-seg { display: flex; flex: 1 1 auto; height: 12px; gap: 1px; min-width: 0; }
+.territory-seg > i { display: block; height: 100%; min-width: 0; border-radius: 0; }
+.territory-seg-new { background: var(--grey-1); }
+.territory-seg-learning { background: var(--grey-2); }
+.territory-seg-reviewing { background: var(--ink); }
+.territory-seg-consolidated { background: var(--accent); }
+.territory-pct { flex: none; min-width: 3.5em; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--grey-3); font-variant-numeric: tabular-nums; }
+.territory-foot { margin: 0; font-family: var(--mono); font-size: 12px; color: var(--grey-3); }
+/* hover-dim 族（§6.3）：hover 某行时其余行 opacity→0.35；包 hover:hover（§4 新纪律） */
+@media (hover: hover) {
+  .territory-map .territory-row { transition: opacity var(--dur-hover) var(--ease-enter); }
+  .territory-map:has(.territory-row:hover) .territory-row:not(:hover) { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  /* 分段条入场＝chart-seg 族（scaleX 0→1，stagger 40ms/段 ×≤8，--dur-chart-in --ease-enter，
+     §5.3 动效行；40ms 为 §3-6 stagger 预算定值，同书架 30ms/张 先例写法），挂 :root:not([data-vt])
+     入场闸门（MOTION-DESIGN-SPEC §6.3/§5.2）。数据更新的几何呈现随重渲瞬时落位（列表非图表，
+     flex-grow 属布局属性不入过渡——§3 硬规则 1 只动画可复合属性）。 */
+  :root:not([data-vt]) .territory-seg > i {
+    transform-origin: left;
+    animation: territory-seg-in var(--dur-chart-in) var(--ease-enter) both;
+    animation-delay: calc(var(--seg-i, 0) * 40ms);
+  }
+}
+@keyframes territory-seg-in {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+/* reduce 双轨（§3 硬规则 2：每个 keyframes 消费点同文件存在对应 reduce 块）：
+   微反馈条显示/消失瞬时（功能性出现，无装饰位移——§5.1 reduce 行）；分段条无入场位移；
+   territory 行 hover-dim 瞬时（§6.3 opacity 过渡免动；选择器与 hover-dim 规则同特异度，压得住后者） */
+@media (prefers-reduced-motion: reduce) {
+  .growth-toast,
+  .growth-toast.is-closing { animation: none; transition: none; }
+  .territory-seg > i { animation: none; transition: none; }
+  .territory-map .territory-row { transition: none; }
+}
+
+/* ============================================================
+   主题插件（v48.89 / D132，设计 docs/design/PLUGIN-SYSTEM-D132.md §8）
+   —— 设置页 sec-appearance「主题插件」子块；全部走 Token，零硬编码色值
+   ============================================================ */
+.plugin-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 var(--sp-3);
+}
+.plugin-item {
+  border: 1px solid var(--border-subtle);
+  background: var(--grey-1);
+  padding: var(--sp-2) var(--sp-3);
+}
+.plugin-item-main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.plugin-item-name {
+  font-size: var(--fs-secondary);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.plugin-item-meta {
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+}
+.plugin-item-state {
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+}
+.plugin-text-btn {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: var(--fs-meta);
+  color: var(--accent);
+  cursor: pointer;
+}
+.plugin-text-btn:hover:not(:disabled) { text-decoration: underline; }
+.plugin-text-btn:disabled {
+  color: var(--text-helper);
+  cursor: not-allowed;
+}
+/* 校验失败原因 / 激活被拒原因：整行 Meta 档 --error 文字（§8.2） */
+.plugin-item-reason {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-meta);
+  color: var(--error);
+}
+.plugin-settings {
+  margin-top: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}

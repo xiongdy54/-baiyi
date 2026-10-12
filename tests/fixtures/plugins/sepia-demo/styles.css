@@ -1,0 +1,58 @@
+/* @settings
+name: 羊皮纸设置
+description: 示例主题的对外可调项
+settings:
+  - id: paper-tint
+    name: 纸色
+    type: color
+    default: "#f4ede1"
+  - id: heading-accent
+    name: 标题强调色
+    type: color
+    default: "#8a4b2a"
+  - id: radius-panels
+    name: 面板圆角
+    type: dropdown
+    default: "0"
+    options:
+      - label: 直角
+        value: "0"
+      - label: 圆角 6px
+        value: "6px"
+*/
+/* 羊皮纸示例主题 —— 浅档声明在 body（胜 :root、让 body.theme-dark），
+   深档字面重声明（双档创作契约：设置变量只接进被触碰的档）。
+   受审计 Token 全部为字面 hex 或 var(--pl-sepia-demo-*, #hex) 形态（D132 §6.2 规则 5）。 */
+body {
+  --paper: var(--pl-sepia-demo-paper-tint, #f4ede1);
+  --grey-1: #ece2d0;
+  --grey-2: #d8c9b0;
+  --grey-3: #8a7a62;
+  --ink: #3b2f24;                       /* 对 paper-tint 默认 11.15:1 */
+  --text-secondary: #5a4a3a;            /* 7.29:1 */
+  --border-subtle: #ddd0ba;
+  --border-strong: #b0a084;
+  --accent: var(--pl-sepia-demo-heading-accent, #8a4b2a);   /* 对纸色 5.78:1 */
+  --accent-on: #ffffff;                 /* 对 accent 6.73:1 */
+  --radius-panel: var(--pl-sepia-demo-radius-panels, 0);
+  --shadow-panel: 0 8px 24px rgba(58, 44, 30, 0.16);
+  --band-line: #ddd0ba;
+}
+body.theme-dark {
+  --paper: #1f1a15;
+  --grey-1: #2a241d;
+  --grey-2: #3d352a;
+  --grey-3: #96876f;
+  --ink: #e8e0d5;                       /* 13.19:1 */
+  --text-secondary: #b5a897;            /* 7.41:1 */
+  --border-subtle: #33291f;
+  --border-strong: #55483a;
+  --accent: #d9a066;                    /* 7.54:1 */
+  --accent-on: #1f1a15;                 /* 7.54:1 */
+  --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
+  --shadow-panel: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+body {
+  background: var(--paper);
+  color: var(--ink);
+}

@@ -29,13 +29,17 @@ import type { AnnotSort } from "./reader/AnnotationPanel";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
 import {
+  CUSTOM_THEMES_MAX,
   DEFAULT_READER_SETTINGS,
   buildLocator,
+  normalizeReaderSettings,
   resolveAppearance,
   type ContentPointerDownInfo,
   type ContentPointerUpInfo,
+  type CustomThemeEntry,
   type ImageLocateHit,
   type ReaderAppearance,
+  type ReaderAppearanceEx,
   type ReaderDocMark,
   type ReaderImageRef,
   type ReaderKernel,
@@ -60,6 +64,31 @@ import {
 } from "../lib/readingWorkflow";
 
 // D122：§K.4 的 ReaderSelActionsFloat（选区动作组悬浮形态）已退役——被 SelectionMenu（选区浮条）取代。
+
+// D130 R3：快捷菜单预设档（档位值即字段数值；设置页滑杆可取连续值，两者读写同一字段）
+const LINE_HEIGHT_PRESETS = [
+  { value: "1.5", label: "紧凑 1.5" },
+  { value: "1.7", label: "标准 1.7" },
+  { value: "2", label: "宽松 2.0" }
+];
+const MARGIN_PRESETS = [
+  { value: "24", label: "窄 24px" },
+  { value: "48", label: "标准 48px" },
+  { value: "80", label: "宽 80px" }
+];
+const MEASURE_PRESETS = [
+  { value: "600", label: "窄 600px" },
+  { value: "720", label: "标准 720px" },
+  { value: "860", label: "宽 860px" },
+  { value: "1200", label: "全宽 1200px" }
+];
+/** 下拉高亮/展示当前档＝数值上最接近的预设档（§4.2 行距口径；边距/版心同法） */
+function nearestPreset(v: number, presets: { value: string; label: string }[]) {
+  return presets.reduce(
+    (best, p) => (Math.abs(Number(p.value) - v) < Math.abs(Number(best.value) - v) ? p : best),
+    presets[0]
+  );
+}
 
 interface Props {
   title: string;
@@ -191,6 +220,113 @@ function ReaderToolMenu({
       {open && (
         <div className="dd-menu reader-tool-menu" id={`reader-tool-menu-${id}`} data-tool-menu-panel={id}>
           {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * D130 R3（P1）：主题下拉——四个内置档 + 「── 我的主题 ──」分组 + 已存主题条目（12×12 色块预览＝该套 bgColor）。
+ * 共享 Dropdown 不支持条目色块与按条目的 data-* 探针（§4.1 GUI 探针面），故就地实现；
+ * 视觉与交互完全沿用 .dd / .dd-btn / .dd-menu / .dd-item 既有语言（零新控件形态、点外部收起同 Dropdown）。
+ */
+function ReaderThemeDropdown({
+  value,
+  savedThemes,
+  isSavedActive,
+  onSelect,
+  onManage
+}: {
+  value: ReaderAppearance["theme"];
+  savedThemes: CustomThemeEntry[];
+  isSavedActive: (t: CustomThemeEntry) => boolean;
+  onSelect: (t: ReaderAppearance["theme"] | CustomThemeEntry) => void;
+  onManage: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const builtIn: { key: ReaderAppearance["theme"]; label: string }[] = [
+    { key: "paper", label: "纸白" },
+    { key: "sepia", label: "羊皮" },
+    { key: "dark", label: "暗夜" },
+    { key: "custom", label: "自定义" }
+  ];
+  const activeSaved = savedThemes.find(isSavedActive);
+  const currentLabel =
+    value === "custom" && activeSaved ? activeSaved.name : builtIn.find((b) => b.key === value)?.label ?? "自定义";
+  return (
+    <div className="dd" ref={ref} data-reader-theme-dd>
+      <button type="button" className="dd-btn" title="阅读主题" onClick={() => setOpen((v) => !v)}>
+        {currentLabel}
+        <IconChevronDown size={12} className="dd-caret" />
+      </button>
+      {open && (
+        <div className="dd-menu" role="listbox">
+          {builtIn.map((b) => {
+            const on = value === b.key && !activeSaved;
+            return (
+              <button
+                key={b.key}
+                type="button"
+                role="option"
+                aria-selected={on}
+                className={`dd-item${on ? " dd-item-on" : ""}`}
+                onClick={() => {
+                  setOpen(false);
+                  onSelect(b.key);
+                }}
+              >
+                {b.label}
+              </button>
+            );
+          })}
+          {savedThemes.length > 0 && (
+            <>
+              <div className="reader-theme-group-label">── 我的主题 ──</div>
+              {savedThemes.map((t) => {
+                const on = isSavedActive(t);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    className={`dd-item reader-theme-option${on ? " dd-item-on" : ""}`}
+                    data-reader-theme-option={t.id}
+                    title={t.name}
+                    onClick={() => {
+                      setOpen(false);
+                      onSelect(t);
+                    }}
+                  >
+                    <span className="reader-theme-swatch" style={{ background: t.bgColor }} aria-hidden="true" />
+                    <span className="reader-theme-option-name">{t.name}</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+          <button
+            type="button"
+            className="dd-item reader-theme-manage-item"
+            data-reader-theme-manage
+            title="重命名与删除在设置页的「阅读外观」区块"
+            onClick={() => {
+              setOpen(false);
+              onManage();
+            }}
+          >
+            管理主题…
+          </button>
         </div>
       )}
     </div>
@@ -446,6 +582,11 @@ export default function Reader({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /** 工具栏两个弹出组（更多 / 阅读设置）：同刻只开一个，点外部/Esc 收起（D5-B） */
   const [toolMenu, setToolMenu] = useState<"more" | "settings" | null>(null);
+  /** D130 P1：主题命名就地表（false=未在命名；命名草稿单独存，确认/失焦写入 customThemes） */
+  const [themeNaming, setThemeNaming] = useState(false);
+  const [themeNameDraft, setThemeNameDraft] = useState("");
+  const themeNamingRef = useRef(false);
+  themeNamingRef.current = themeNaming;
   /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规） */
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
   /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
@@ -543,16 +684,24 @@ export default function Reader({
 
   useEffect(() => {
     if (!engineMode) return;
+    // D130 R3：读侧统一走 normalizeReaderSettings（DEFAULT 兜底 + 新增字段钳制 + customThemes 清洗）
     settingsStore
-      .get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS)
-      .then((s) => {
-        if (!s) return;
-        setReaderSettings({
-          mode: { ...DEFAULT_READER_SETTINGS.mode, ...s.mode },
-          appearance: { ...DEFAULT_READER_SETTINGS.appearance, ...s.appearance }
-        });
-      })
+      .get<unknown>("app", "readerSettings", null)
+      .then((s) => setReaderSettings(normalizeReaderSettings(s)))
       .catch(() => {});
+  }, [engineMode]);
+
+  // D130 R3：设置页对同一键的写入（主题管理/滑杆）经 settings/changed 广播回灌——双向即时一致
+  useEffect(() => {
+    if (!engineMode) return;
+    return eventBus.on("settings/changed", (p) => {
+      const payload = p as { scope?: string; key?: string } | undefined;
+      if (payload?.scope !== "app" || payload.key !== "readerSettings") return;
+      void settingsStore
+        .get<unknown>("app", "readerSettings", null)
+        .then((s) => setReaderSettings(normalizeReaderSettings(s)))
+        .catch(() => {});
+    });
   }, [engineMode]);
 
   const persistReaderSettings = (next: ReaderSettings) => {
@@ -578,6 +727,42 @@ export default function Reader({
     const next = { ...readerSettingsRef.current, appearance: { ...readerSettingsRef.current.appearance, zoom } };
     persistReaderSettings(next);
     kernelRef.current?.applyAppearance(resolveAppearance(next));
+  };
+
+  // ---------- D130 R3：个性化外观（行距/边距/版心/翻页过渡/自定义主题） ----------
+  /** 行距/边距/版心/动画过渡：与快捷菜单、设置页读写同一字段（appearance.*），双向即时一致 */
+  const changeReaderAppearance = (patch: Partial<ReaderAppearanceEx>) => {
+    const next = normalizeReaderSettings({
+      ...readerSettingsRef.current,
+      appearance: { ...readerSettingsRef.current.appearance, ...patch }
+    });
+    persistReaderSettings(next);
+    kernelRef.current?.applyAppearance(resolveAppearance(next));
+  };
+  /** P1 应用已存主题：写 custom 档 + 该套色值；**不回写**条目本身（重复「保存」才新增，避免别名漂移） */
+  const applySavedTheme = (t: CustomThemeEntry) => {
+    changeReaderAppearance({ theme: "custom", bgColor: t.bgColor, fgColor: t.fgColor });
+  };
+  /** P1 保存当前自定义配色为命名主题（id=ct-时间戳；上限 12 保新弃旧/清洗由 normalizeReaderSettings 统一钳制） */
+  const saveCustomTheme = (rawName: string) => {
+    const cur = readerSettingsRef.current;
+    const a = resolveAppearance(cur);
+    const themes = cur.customThemes ?? [];
+    const entry: CustomThemeEntry = {
+      id: `ct-${Date.now()}`,
+      name: rawName.trim().slice(0, 24) || `我的主题 ${themes.length + 1}`,
+      bgColor: a.bgColor ?? "#fafaf8",
+      fgColor: a.fgColor ?? "#1a1a1a",
+      createdAt: Date.now()
+    };
+    persistReaderSettings(normalizeReaderSettings({ ...cur, customThemes: [...themes, entry] }));
+  };
+  /** 命名确认（Enter / 确定 / 失焦三条路；ref 守卫保证只落一次） */
+  const confirmThemeName = () => {
+    if (!themeNamingRef.current) return;
+    themeNamingRef.current = false;
+    setThemeNaming(false);
+    saveCustomTheme(themeNameDraft);
   };
 
   // 外观变量上提到滚动容器：控件/目录/背景统一随 --reader-* 变化（iframe 内由内核注入）
@@ -749,11 +934,9 @@ export default function Reader({
   // 首屏前应用已保存设置：settings 加载是异步的，这里直接等 store 读完再给内核，
   // 避免 readerSettingsRef 仍是默认值，也避免 paginator 默认对开先画一帧。
   const handleEngineBeforeOpen = useCallback(async (k: ReaderKernel) => {
-    const s = await settingsStore.get<ReaderSettings>("app", "readerSettings", DEFAULT_READER_SETTINGS);
-    const merged: ReaderSettings = {
-      mode: { ...DEFAULT_READER_SETTINGS.mode, ...s?.mode },
-      appearance: { ...DEFAULT_READER_SETTINGS.appearance, ...s?.appearance }
-    };
+    const s = await settingsStore.get<unknown>("app", "readerSettings", null);
+    // D130 R3：读侧统一归一口（含新增字段钳制与 customThemes 清洗）
+    const merged = normalizeReaderSettings(s);
     readerSettingsRef.current = merged;
     setReaderSettings(merged);
     await k.setMode(merged.mode);
@@ -968,10 +1151,13 @@ export default function Reader({
       if (manualOpen || aiPanel || occlEditor) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-      if (e.key === "ArrowRight" || e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
+      // v48.90（D130 P4c）：←/→ 翻页迁入 CommandRegistry（reader.turnPrev/turnNext，可改键）；
+      // PageUp/PageDown/空格/Shift+空格保留壳层硬编码——不进命令表（滚动场景空格语义不冲突、
+      // 这四键不在「可自定义」诉求内，爆炸半径收敛）
+      if (e.key === "PageDown" || (e.key === " " && !e.shiftKey)) {
         e.preventDefault();
         void turnPage(1);
-      } else if (e.key === "ArrowLeft" || e.key === "PageUp" || (e.key === " " && e.shiftKey)) {
+      } else if (e.key === "PageUp" || (e.key === " " && e.shiftKey)) {
         e.preventDefault();
         void turnPage(-1);
       }
@@ -1396,7 +1582,11 @@ export default function Reader({
     "reader.aiCards": { when: () => readerShortcutReady, run: () => selAct.aiCards() },
     "reader.aiExplain": { when: () => readerShortcutReady, run: () => selAct.explain() },
     "reader.extract": { when: () => readerShortcutReady, run: () => selAct.extract() },
-    "reader.lookupWord": { when: () => readerShortcutReady, run: () => selAct.lookup() }
+    "reader.lookupWord": { when: () => readerShortcutReady, run: () => selAct.lookup() },
+    // D130 P4c：翻页键入命令条（←/→ 从壳层 keydown 迁入；焦点/模态守卫由 dispatchKey 统一承担，
+    // 与既有 reader.extract 等命令同一条链；弹层在场的让路语义与迁移前壳层守卫一致）
+    "reader.turnPrev": { when: () => engineMode && !manualOpen && !aiPanel && !occlEditor, run: () => void turnPage(-1) },
+    "reader.turnNext": { when: () => engineMode && !manualOpen && !aiPanel && !occlEditor, run: () => void turnPage(1) }
   });
 
   // D88 §5.2 pageinfo 文案：页码（PDF 的 pageIndex+1）与当前章节名（TOC 按 chapterHref 匹配），
@@ -1409,6 +1599,15 @@ export default function Reader({
   ]
     .filter(Boolean)
     .join(" · ");
+
+  // ---------- D130 R3：快捷菜单派生值 ----------
+  const savedThemes = readerSettings.customThemes ?? [];
+  const resolvedAppearance = resolveAppearance(readerSettings);
+  const pagedLike = readerSettings.mode.flow === "paged"; // 对开（spread）也是 flow=paged
+  // P4a：动画过渡开关仅 foliate 引擎且分页/对开时启用（其余禁用态；PDF 为连续滚动容器不适用）
+  const turnAnimatedEnabled = engineKind === "foliate" && pagedLike;
+  const turnAnimatedDisabledTitle =
+    engineKind === "pdf" ? "PDF 为连续滚动容器，不适用翻页过渡" : "翻页过渡在分页/对开模式下生效";
   // D122：与选区相关的动作（批注/制卡/AI 制卡/AI 解释/查词）与「摘录/形式」标注选项全部迁入
   // 选区浮条（SelectionMenu，随选区出现在鼠标旁）；工具栏只留**不依赖文字选区**的两项：
   //   · 制卡＝免选区自由制卡（D92 §3.4；有选区时同样 quote 预填）
@@ -1590,57 +1789,199 @@ export default function Reader({
                     open={toolMenu === "settings"}
                     onToggle={() => setToolMenu((v) => (v === "settings" ? null : "settings"))}
                   >
-                    <div className="reader-tool-menu-row">
-                      <span className="reader-tool-menu-label mono">模式</span>
-                      <Dropdown
-                        title="阅读模式"
-                        value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
-                        options={[
-                          { value: "scrolled", label: "滚动" },
-                          { value: "paged", label: "分页" },
-                          { value: "spread", label: "对开" }
-                        ]}
-                        onChange={(v) =>
-                          changeReaderMode(
-                            v === "scrolled" ? { flow: "scrolled" } : v === "spread" ? { flow: "paged", spread: true } : { flow: "paged" }
-                          )
-                        }
-                      />
-                    </div>
-                    <div className="reader-tool-menu-row">
-                      <span className="reader-tool-menu-label mono">主题</span>
-                      <Dropdown
-                        title="阅读主题"
-                        value={readerSettings.appearance.theme}
-                        options={[
-                          { value: "paper", label: "纸白" },
-                          { value: "sepia", label: "羊皮" },
-                          { value: "dark", label: "暗夜" },
-                          { value: "custom", label: "自定义" }
-                        ]}
-                        onChange={(t) => changeReaderTheme(t as ReaderAppearance["theme"])}
-                      />
-                    </div>
-                    {engineKind === "pdf" && (
-                      <div className="reader-tool-menu-row">
-                        <span className="reader-tool-menu-label mono">缩放</span>
+                    {/* D130 R3 §5.1：分组 IA——排版（最高频）→ 外观 → 翻页/缩放（低频）；
+                        组间空间先行（margin-block sp-2 ≥ 2× 组内行距），hairline 仅作视觉断点。 */}
+                    <div className="reader-tool-menu-group">
+                      <div className="reader-tool-menu-group-label">排版</div>
+                      <div className="reader-tool-menu-row" data-reader-row="mode">
+                        <span className="reader-tool-menu-label mono">模式</span>
                         <Dropdown
-                          title="缩放"
-                          value={String(readerSettings.appearance.zoom ?? "page-width")}
+                          title="阅读模式"
+                          value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
                           options={[
-                            { value: "page-width", label: "适应宽度" },
-                            { value: "page-fit", label: "适应页面" },
-                            { value: "50", label: "50%" },
-                            { value: "75", label: "75%" },
-                            { value: "100", label: "100%" },
-                            { value: "125", label: "125%" },
-                            { value: "150", label: "150%" },
-                            { value: "200", label: "200%" }
+                            { value: "scrolled", label: "滚动" },
+                            { value: "paged", label: "分页" },
+                            { value: "spread", label: "对开" }
                           ]}
-                          onChange={(v) => changeReaderZoom(v === "page-width" || v === "page-fit" ? v : Number(v))}
+                          onChange={(v) =>
+                            changeReaderMode(
+                              v === "scrolled" ? { flow: "scrolled" } : v === "spread" ? { flow: "paged", spread: true } : { flow: "paged" }
+                            )
+                          }
                         />
                       </div>
-                    )}
+                      <div className="reader-tool-menu-row" data-reader-row="lineHeight">
+                        <span className="reader-tool-menu-label mono">行距</span>
+                        {/* P2：字段与生效链既有（iframe 注入 line-height），本行只是接 UI；PDF 固定版式不适用 → 禁用态 */}
+                        {engineKind === "pdf" ? (
+                          <button type="button" className="dd-btn" disabled title="PDF 为固定版式，不适用行距">
+                            {nearestPreset(resolvedAppearance.lineHeight ?? 1.7, LINE_HEIGHT_PRESETS).label}
+                          </button>
+                        ) : (
+                          <Dropdown
+                            title="行距"
+                            value={nearestPreset(resolvedAppearance.lineHeight ?? 1.7, LINE_HEIGHT_PRESETS).value}
+                            options={LINE_HEIGHT_PRESETS}
+                            onChange={(v) => changeReaderAppearance({ lineHeight: Number(v) })}
+                          />
+                        )}
+                      </div>
+                      {/* P3a：页边距（分页/对开的上下边带）——滚动模式不生效、PDF 不适用；
+                          禁止「看着能调、调了没反应」（R3），禁用态必须带 title 说明 */}
+                      {engineKind !== "pdf" && (
+                        <div className="reader-tool-menu-row" data-reader-row="margin">
+                          <span className="reader-tool-menu-label mono">边距</span>
+                          {pagedLike ? (
+                            <Dropdown
+                              title="页边距"
+                              value={nearestPreset(resolvedAppearance.margin ?? 48, MARGIN_PRESETS).value}
+                              options={MARGIN_PRESETS}
+                              onChange={(v) => changeReaderAppearance({ margin: Number(v) })}
+                            />
+                          ) : (
+                            <button type="button" className="dd-btn" disabled title="页边距在分页/对开模式下生效">
+                              {nearestPreset(resolvedAppearance.margin ?? 48, MARGIN_PRESETS).label}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {/* P3b：版心宽度（滚动模式的排版余白＝「页边距」的滚动对应物，新增解释）；
+                          分页列宽实际由容器宽÷列数决定（此值只是上限），分页下不暴露 */}
+                      {engineKind !== "pdf" && (
+                        <div className="reader-tool-menu-row" data-reader-row="measure">
+                          <span className="reader-tool-menu-label mono">版心</span>
+                          {readerSettings.mode.flow === "scrolled" ? (
+                            <Dropdown
+                              title="版心宽度"
+                              value={nearestPreset(resolvedAppearance.maxInlineSize ?? 720, MEASURE_PRESETS).value}
+                              options={MEASURE_PRESETS}
+                              onChange={(v) => changeReaderAppearance({ maxInlineSize: Number(v) })}
+                            />
+                          ) : (
+                            <button type="button" className="dd-btn" disabled title="版心宽度在滚动模式下生效">
+                              {nearestPreset(resolvedAppearance.maxInlineSize ?? 720, MEASURE_PRESETS).label}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="reader-tool-menu-group">
+                      <div className="reader-tool-menu-group-label">外观</div>
+                      <div className="reader-tool-menu-row" data-reader-row="theme">
+                        <span className="reader-tool-menu-label mono">主题</span>
+                        <ReaderThemeDropdown
+                          value={readerSettings.appearance.theme}
+                          savedThemes={savedThemes}
+                          isSavedActive={(t) =>
+                            readerSettings.appearance.theme === "custom" &&
+                            resolvedAppearance.bgColor === t.bgColor &&
+                            resolvedAppearance.fgColor === t.fgColor
+                          }
+                          onSelect={(t) => (typeof t === "string" ? changeReaderTheme(t) : applySavedTheme(t))}
+                          onManage={() => {
+                            setToolMenu(null);
+                            showToast("在「设置 → 阅读 → 阅读外观」重命名或删除已存主题");
+                          }}
+                        />
+                      </div>
+                      {readerSettings.appearance.theme === "custom" && (
+                        <div className="reader-tool-menu-row" data-reader-row="customColors">
+                          <span className="reader-tool-menu-label mono">自定义色</span>
+                          <span className="reader-custom-color-group">
+                            <input
+                              type="color"
+                              className="reader-color-input"
+                              title="背景色"
+                              value={readerSettings.appearance.bgColor || "#fafaf8"}
+                              onChange={(e) => changeReaderAppearance({ bgColor: e.target.value })}
+                            />
+                            <input
+                              type="color"
+                              className="reader-color-input"
+                              title="文字色"
+                              value={readerSettings.appearance.fgColor || "#1a1a1a"}
+                              onChange={(e) => changeReaderAppearance({ fgColor: e.target.value })}
+                            />
+                            {themeNaming ? (
+                              <span className="reader-theme-naming">
+                                <input
+                                  className="reader-theme-name-input"
+                                  data-reader-theme-name-input
+                                  autoFocus
+                                  maxLength={24}
+                                  placeholder={`我的主题 ${savedThemes.length + 1}`}
+                                  value={themeNameDraft}
+                                  onChange={(e) => setThemeNameDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") confirmThemeName();
+                                    else if (e.key === "Escape") setThemeNaming(false);
+                                  }}
+                                  onBlur={confirmThemeName}
+                                />
+                                <button type="button" className="reader-theme-save-btn" onClick={confirmThemeName}>
+                                  确定
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="reader-theme-save-btn"
+                                data-reader-theme-save
+                                disabled={savedThemes.length >= CUSTOM_THEMES_MAX}
+                                title={savedThemes.length >= CUSTOM_THEMES_MAX ? "最多保存 12 套，请先在设置页删除" : "把当前自定义配色另存为命名主题"}
+                                onClick={() => {
+                                  setThemeNameDraft("");
+                                  setThemeNaming(true);
+                                }}
+                              >
+                                保存主题
+                              </button>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="reader-tool-menu-group">
+                      <div className="reader-tool-menu-group-label">翻页</div>
+                      <div className="reader-tool-menu-row" data-reader-row="turnAnimated">
+                        <span className="reader-tool-menu-label mono">动画过渡</span>
+                        {turnAnimatedEnabled ? (
+                          <Dropdown
+                            title="翻页滑动过渡"
+                            value={readerSettings.appearance.turnAnimated === true ? "on" : "off"}
+                            options={[
+                              { value: "off", label: "关" },
+                              { value: "on", label: "开" }
+                            ]}
+                            onChange={(v) => changeReaderAppearance({ turnAnimated: v === "on" })}
+                          />
+                        ) : (
+                          <button type="button" className="dd-btn" disabled title={turnAnimatedDisabledTitle}>
+                            {readerSettings.appearance.turnAnimated === true ? "开" : "关"}
+                          </button>
+                        )}
+                      </div>
+                      {engineKind === "pdf" && (
+                        <div className="reader-tool-menu-row" data-reader-row="zoom">
+                          <span className="reader-tool-menu-label mono">缩放</span>
+                          <Dropdown
+                            title="缩放"
+                            value={String(readerSettings.appearance.zoom ?? "page-width")}
+                            options={[
+                              { value: "page-width", label: "适应宽度" },
+                              { value: "page-fit", label: "适应页面" },
+                              { value: "50", label: "50%" },
+                              { value: "75", label: "75%" },
+                              { value: "100", label: "100%" },
+                              { value: "125", label: "125%" },
+                              { value: "150", label: "150%" },
+                              { value: "200", label: "200%" }
+                            ]}
+                            onChange={(v) => changeReaderZoom(v === "page-width" || v === "page-fit" ? v : Number(v))}
+                          />
+                        </div>
+                      )}
+                    </div>
                   </ReaderToolMenu>
                 </div>
                 {/* D88 §5.2：页码/章节位（meta 档 mono）——工具栏右端新增；无数据不渲染 */}
@@ -1698,8 +2039,18 @@ export default function Reader({
                 )}
                 {readerSettings.mode.flow === "paged" && (
                   <>
-                    <div className="reader-tap-zone reader-tap-left" title="上一页" onClick={() => void turnPage(-1)} />
-                    <div className="reader-tap-zone reader-tap-right" title="下一页" onClick={() => void turnPage(1)} />
+                    {/* D130 P4b：热区 hover chevron 提示（零布局变化：热区几何不动、翻页行为不变，
+                        提示浮在其上 pointer-events:none，opacity 0→1 过渡在 theme.css no-preference 作用域） */}
+                    <div className="reader-tap-zone reader-tap-left" title="上一页" onClick={() => void turnPage(-1)}>
+                      <span className="reader-tap-hint" data-reader-tap-hint="left" aria-hidden="true">
+                        <IconChevronLeft size={16} />
+                      </span>
+                    </div>
+                    <div className="reader-tap-zone reader-tap-right" title="下一页" onClick={() => void turnPage(1)}>
+                      <span className="reader-tap-hint" data-reader-tap-hint="right" aria-hidden="true">
+                        <IconChevronRight size={16} />
+                      </span>
+                    </div>
                   </>
                 )}
                 {/* v48.44（D84）：图谱页签画布的 portal 宿主——置于 .reader-engine-main 末位（z 5 高于

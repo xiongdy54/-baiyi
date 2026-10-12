@@ -206,7 +206,7 @@ async function openBookProbe(cdp, title) {
     `${idObj.fb2}/${idObj.cbz}`);
 
   console.log("== 3) HTML 阅读（synth 路径） ==");
-  // 空首章技术债（§9.4）：markdown 以 # 开头时首章为空——经目录跳到实际章节再断言
+  // syn-3（§9.4 空首章清理）后首章即正文章；保留目录跳转定位（按标题查找，结构无关）
   await cdp.eval(`location.reload()`);
   await wait(2500);
   await cdp.eval(clickCardByTitle("绩效与工作节奏"));

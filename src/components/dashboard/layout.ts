@@ -16,6 +16,11 @@ export function defaultLayoutV2(hidden: string[]): DashLayoutV2 {
     { id: "timeline", size: "wide" },
     { id: "heatmap", size: "wide" },
     { id: "today", size: "half" },
+    // v48.85（D129 B4，设计稿 §5.3/契约 §6.6.4 字面要求）：成长反馈两 widget 紧跟 today 之后——
+    // growth-events 定 wide（时间线通栏）、territory 定 half（与后随 domains 自然成对）。
+    // 存量用户经 syncHidden「插到默认顺序前驱之后」规则自动可见（D122 一日时间轴同路径，无需迁移）。
+    { id: "growth-events", size: "wide" },
+    { id: "territory", size: "half" },
     { id: "domains", size: "half" },
     { id: "rhythm", size: "half" },
     { id: "ratings", size: "half" },

@@ -130,7 +130,7 @@ try {
 
   // 1. 导航「日记」存在并可切换
   const navLabels = await main.eval(`[...document.querySelectorAll(".nav-item")].map((b) => b.textContent.trim()).join("/")`);
-  check("顶栏导航含「日记」（书架/摘录/复习/卡片/日记/数据；D58 起二项为摘录）", navLabels === "书架/摘录/复习/卡片/日记/数据", navLabels);
+  check("顶栏导航含「日记」（书架/摘录/复习/推荐/卡片/日记/数据；D125 增推荐页签，v48.93/D138 对齐）", navLabels === "书架/摘录/复习/推荐/卡片/日记/数据", navLabels);
   await main.eval(clickByText(".nav-item", "日记"));
   await wait(900);
   const journalMounted = await main.eval(`!!document.querySelector(".journal")`);
@@ -182,7 +182,7 @@ try {
   // 5. 输入即自动保存（零点击）
   await cap.eval(`document.querySelector(".cap-editor-md .ProseMirror")?.focus()`);
   await cap.eval(setPM(".cap-editor-md .ProseMirror", `${MARK} 快速记录随想`));
-  await wait(2200); // 防抖 1.2s + IPC
+  await wait(3600); // 防抖 1.2s + IPC + 主进程事件循环偶发空洞（D137 B6 实测 2000ms 才落「已保存」，2200ms 定点检查属时序竞态，v48.93/D137 放宽）
   const savedState = await cap.eval(`JSON.stringify({
     status: document.querySelector(".cap-status")?.textContent || "",
     dot: document.querySelector(".cap-dot")?.className || "",

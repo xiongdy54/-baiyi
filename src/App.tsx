@@ -29,6 +29,7 @@ import { readingWorkflow, parseContextRef, type ExtractSpan } from "./lib/readin
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
 import { getSkin, SKINS } from "./skins";
 import { applyAccent } from "./lib/accentVar";
+import { useThemePlugin } from "./lib/themePlugins";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
 import { WB_STATE_EVENT, requestWorkbenchToggle, type WorkbenchState } from "./lib/workbenchLayout";
 
@@ -276,6 +277,9 @@ export default function App() {
     applyAccent(accentColor);
   }, [accentColor]);
 
+  // v48.89（D132 §6.4）：主题插件注入链（<style data-plugin-css> + --pl-* 内联变量；多窗口各自调用）
+  useThemePlugin();
+
   async function handleThemeChange(m: ThemeMode) {
     setTheme(m);
     await settingsStore.set("theme", "mode", m);
@@ -285,6 +289,9 @@ export default function App() {
 
   async function handleSkinChange(id: string) {
     setSkinId(id);
+    // v48.89（D132 §7.3/§8.3）：内置皮肤与主题插件双槽互斥——选非 none 皮肤时同步清插件激活
+    //（宿主 setActive 写两槽；skin 列表选中态因 app.skinId 被写回 none 由插件侧驱动回落）
+    if (id !== "none") void window.pluginsAPI?.setActive("");
     await settingsStore.set("app", "skinId", id);
     eventBus.emit("settings/changed", { scope: "app", key: "skinId" });
   }

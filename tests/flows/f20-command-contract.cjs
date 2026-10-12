@@ -63,7 +63,7 @@ app
 
       // ---------- W1 COMMANDS ↔ 文档锁定表 ----------
       flow.section("W1 命令表与文档「默认键位（用户锁定）」逐条对表（§9.1 M4）");
-      flow.eq("命令条数（阅读 5 + 复习 10）", COMMANDS.length, 15);
+      flow.eq("命令条数（阅读 7 + 复习 10；v48.90 / D130 增 reader.turnPrev/turnNext）", COMMANDS.length, 17);
       const scenes = COMMANDS.reduce((a, c) => ((a[c.scene] = (a[c.scene] || 0) + 1), a), {});
       flow.record("场景分组", Object.entries(scenes).map(([k, v]) => `${k} ${v}`).join(" / "));
       const ids = COMMANDS.map((c) => c.id);

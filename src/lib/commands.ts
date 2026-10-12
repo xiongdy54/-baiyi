@@ -23,6 +23,10 @@ export const COMMANDS: CommandDef[] = [
   { id: "reader.aiExplain",   title: "AI 解释",    scene: "阅读", defaultKey: "Ctrl+A" },
   { id: "reader.extract",     title: "摘录",       scene: "阅读", defaultKey: "Ctrl+S" },
   { id: "reader.lookupWord",  title: "查词",       scene: "阅读", defaultKey: "Ctrl+D" },
+  // v48.90（D130 P4c）：翻页键入命令条——←/→ 从 Reader 壳层硬编码 keydown 迁入（可改键；
+  // PageUp/PageDown/空格不进表：避免与滚动场景的空格语义冲突，且不在「可自定义」诉求内）
+  { id: "reader.turnPrev",    title: "上一页",     scene: "阅读", defaultKey: "ArrowLeft" },
+  { id: "reader.turnNext",    title: "下一页",     scene: "阅读", defaultKey: "ArrowRight" },
   { id: "review.showAnswer",  title: "显示答案",   scene: "复习", defaultKey: "Space" },
   { id: "review.again",       title: "评分 Again", scene: "复习", defaultKey: "1" },
   { id: "review.hard",        title: "评分 Hard",  scene: "复习", defaultKey: "2" },

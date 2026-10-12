@@ -1,8 +1,12 @@
-// M2 备份与恢复核心单元测试（无 Electron，显式路径注入）
-// 运行：node tests/backup.test.cjs
+// M2 备份与恢复核心单元测试（无 Electron app，显式路径注入）
+// 运行：ELECTRON_RUN_AS_NODE=1 npx electron tests/backup.test.cjs（D137 §3.9 通道，仓库常驻 electron-ABI 二进制）
+// D137（v48.92）：夹具修复——D-TEST-85 的换入完整性校验（isIntactSqliteFile）要求真实 SQLite 字节，
+// 旧夹具的 "SQLITE-FAKE-*" 文本字节在 HEAD 上即已触发「不是完整可读的 SQLite 文件」中止（既有红）。
+// 改用 better-sqlite3 生成最小真库（fixture_meta.tag 承担内容断言），断言数量与强度不变。
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const Database = require("better-sqlite3");
 const backup = require("../electron/backup");
 
 let pass = 0, fail = 0;
@@ -24,10 +28,32 @@ const P = {
   markerFile: path.join(DATA, "restore-pending.json")
 };
 
+// 真实 SQLite 夹具：fixture_meta.tag = tag（恢复回环的内容断言依据）
+function realSqliteBytes(tag) {
+  const f = path.join(tmp, `fixture-${tag}.db`);
+  try { fs.rmSync(f, { force: true }); } catch { /* 尽力 */ }
+  const d = new Database(f);
+  d.exec("CREATE TABLE IF NOT EXISTS fixture_meta (tag TEXT NOT NULL)");
+  d.prepare("DELETE FROM fixture_meta").run();
+  d.prepare("INSERT INTO fixture_meta (tag) VALUES (?)").run(tag);
+  d.close();
+  return fs.readFileSync(f);
+}
+const readFixtureTag = (file) => {
+  try {
+    const d = new Database(file, { readonly: true });
+    const row = d.prepare("SELECT tag FROM fixture_meta").get();
+    d.close();
+    return row ? row.tag : null;
+  } catch {
+    return `非 SQLite 文件:${fs.readFileSync(file).length}B`;
+  }
+};
+
 function seedData(tag) {
   fs.rmSync(DATA, { recursive: true, force: true });
   fs.mkdirSync(path.join(P.assetsDir, "item-1"), { recursive: true });
-  fs.writeFileSync(P.dbFile, Buffer.from(`SQLITE-FAKE-${tag}-${"x".repeat(1000)}`, "utf-8"));
+  fs.writeFileSync(P.dbFile, realSqliteBytes(tag));
   fs.writeFileSync(P.settingsFile, JSON.stringify({ app: { theme: "dark", tag }, theme: {} }));
   fs.writeFileSync(P.aiConfigFile, JSON.stringify({ keys: { goat: "SECRET" } }));
   fs.writeFileSync(path.join(P.assetsDir, "item-1", "img.png"), Buffer.from([0x89, 0x50, tag.charCodeAt(0), 0x0d, 0x0a]));
@@ -72,7 +98,11 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   check("运行期 library.db 未被直接改动（sql.js 约束）", fs.readFileSync(P.dbFile, "utf-8").includes("DESTROYED"), "db unchanged");
   const applied = backup.applyPendingRestore({ ...P });
   check("applyPendingRestore 返回换入清单", Array.isArray(applied?.restored) && applied.restored.includes("library.db"), JSON.stringify(applied));
-  check("换入后库内容恢复为备份版本", fs.readFileSync(P.dbFile, "utf-8").includes("SQLITE-FAKE-A"), fs.readFileSync(P.dbFile, "utf-8").slice(0, 30));
+  check("换入后库内容恢复为备份版本", readFixtureTag(P.dbFile) === "A", readFixtureTag(P.dbFile));
+  check("恢复换入后目标目录无 -wal/-shm 残留（D137 sidecar 清理）", !fs.existsSync(P.dbFile + "-wal") && !fs.existsSync(P.dbFile + "-shm"), {
+    wal: fs.existsSync(P.dbFile + "-wal"),
+    shm: fs.existsSync(P.dbFile + "-shm")
+  });
   check("资产文件已恢复", fs.existsSync(path.join(P.assetsDir, "item-1", "img.png")), "img.png");
   check("settings.json 已恢复", JSON.parse(fs.readFileSync(P.settingsFile, "utf-8")).app.tag === "A", fs.readFileSync(P.settingsFile, "utf-8"));
   check("staging 与标记已清理", !fs.existsSync(P.stagingDir) && !fs.existsSync(P.markerFile), "cleanup");
@@ -88,10 +118,10 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   check("拒绝缺 backup-meta.json 的 zip", r.ok === false && /不是本软件/.test(r.error || ""), JSON.stringify(r));
   r = await backup.restoreBackup(path.join(BAK, "missing.zip"), { ...opts(), skipSafety: true });
   check("拒绝不存在的文件", r.ok === false && /不存在/.test(r.error || ""), JSON.stringify(r));
-  // 路径穿越条目必须被剔除
+  // 路径穿越条目必须被剔除（library.db 用真实 SQLite 字节——换入完整性校验 D-TEST-85 会拦伪字节）
   const evil = new JSZip();
   evil.file("backup-meta.json", JSON.stringify({ app: "incremental-reading-dev", format: 1 }));
-  evil.file("library.db", Buffer.from("EVIL"));
+  evil.file("library.db", realSqliteBytes("EVIL"));
   evil.file("../escape.txt", Buffer.from("EVIL"));
   const evilZip = path.join(BAK, "evil.zip");
   fs.writeFileSync(evilZip, await evil.generateAsync({ type: "nodebuffer" }));
@@ -99,7 +129,7 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   check("路径穿越 zip 恢复请求成功（穿越条目被剔除）", r.ok === true, JSON.stringify(r));
   backup.applyPendingRestore({ ...P });
   check("穿越文件未落在数据目录外", !fs.existsSync(path.join(tmp, "escape.txt")), path.join(tmp, "escape.txt"));
-  check("合法条目仍换入", fs.readFileSync(P.dbFile, "utf-8") === "EVIL", "EVIL applied");
+  check("合法条目仍换入", readFixtureTag(P.dbFile) === "EVIL", readFixtureTag(P.dbFile));
 
   console.log("== 5) 自动备份：每日一次 + 保留份数轮换 ==");
   fs.rmSync(BAK, { recursive: true, force: true });
@@ -109,7 +139,9 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   fs.writeFileSync(P.settingsFile, JSON.stringify(settingsKeep2));
   const days = [0, 1, 2, 3, 4].map((i) => new Date(Date.now() - i * 86400000));
   let last;
-  for (const d of days) last = await backup.autoBackupIfNeeded({ ...optsAuto(), now: d, flush: () => {} });
+  // 按时间升序（最旧→今天）逐日启动：与真实时序一致——mtime 轮换才保留「最新两天」（今天在列），
+  // 今天的 zip 在场后，「同日第二次启动」才走 already-today 短路（D-TEST-35 按 mtime 轮换的口径）。
+  for (const d of [...days].reverse()) last = await backup.autoBackupIfNeeded({ ...optsAuto(), now: d, flush: () => {} });
   check("第 5 天（最早）备份成功", last?.ok === true && !last.skipped, JSON.stringify(last));
   check("同日第二次启动跳过", (await backup.autoBackupIfNeeded({ ...optsAuto(), now: days[0], flush: () => {} })).skipped === "already-today", "skip");
   let autos = fs.readdirSync(BAK).filter((f) => f.startsWith("backup-auto-"));
