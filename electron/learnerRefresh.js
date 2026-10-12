@@ -255,6 +255,10 @@ async function stepUnits() {
   for (const mat of facts.materials || []) {
     processed += 1;
     status.done = processed;
+    // D143（T3）：让出点上移——原 `processed % 5` 让出在「需重新切分」分支之后，稳态下所有材料
+    // 都在前置 continue 处跳过、恒不命中 ⇒ 405 个材料的判定循环合成一段连续微任务链（实测 +20s
+    // 窗口内 370ms 段的主因之一）。此处按 100 单元无条件让出，不改变任何分支语义。
+    if (processed % 100 === 0) await yieldNow();
     const itemId = String(mat.id);
     const doc = docByItem.get(itemId);
     if (!doc) continue;
@@ -399,7 +403,10 @@ async function stepPasses() {
     byItem.get(item).push({ char_pos: Number(e.charPos) || 0, created_at: Number(e.createdAt) || 0 });
   }
   const mdLenCache = new Map();
+  let passItemDone = 0;
   for (const [itemId, evs] of byItem) {
+    passItemDone += 1;
+    if (passItemDone % 50 === 0) await yieldNow(); // D143（T3）：通读合并批间让出
     const doc = docByItem.get(itemId);
     if (!doc) continue;
     const units = (await unitsOfItem(itemId)).filter((u) => u.md_to != null);
@@ -425,7 +432,10 @@ async function stepPasses() {
 
   // PDF 高水位（设计稿 §6.4）
   const now = Date.now();
+  let pdfHiDone = 0;
   for (const mat of facts.materials || []) {
+    pdfHiDone += 1;
+    if (pdfHiDone % 50 === 0) await yieldNow(); // D143（T3）：PDF 高水位批间让出
     if (String(mat.sourceType) !== "pdf") continue;
     const itemId = String(mat.id);
     const hasUnits = (await learnerDb.all("SELECT COUNT(*) AS n FROM content_units WHERE library_item_id = ?", [itemId]))[0];
@@ -567,7 +577,10 @@ async function stepLinks() {
   const pdfItems = new Set(
     (facts.materials || []).filter((m) => String(m.sourceType) === "pdf").map((m) => String(m.id))
   );
+  let cardDone = 0;
   for (const card of facts.cards || []) {
+    cardDone += 1;
+    if (cardDone % 200 === 0) await yieldNow(); // D143（T3）：逐卡单元定位批间让出（与下方 lexical 循环同口径）
     const kpId = cardKp.get(String(card.id));
     if (!kpId) continue;
     const ref = parseContextRef(card.contextRefJson);
@@ -591,7 +604,10 @@ async function stepLinks() {
       cardsByExtract.get(exId).push(card);
     }
   }
+  let exDone = 0;
   for (const ex of facts.extracts || []) {
+    exDone += 1;
+    if (exDone % 200 === 0) await yieldNow(); // D143（T3）：摘录定位同口径让出
     const exId = String(ex.id);
     const ref = parseContextRef(ex.contextRefJson);
     const unit = await locateUnit(String(ex.documentId), ref, pdfItems.has(String(ex.libraryItemId)));
@@ -876,7 +892,10 @@ async function stepLex() {
   const pdfPagesOf = await preloadPdfPages();
   const mdHeadOf = markdownHeadOf();
   const matMeta = [];
+  let matDone = 0;
   for (const m of facts.materials || []) {
+    matDone += 1;
+    if (matDone % 100 === 0) await yieldNow(); // D143（T3）：材料语言探测批间让出
     matMeta.push({
       id: String(m.id),
       lang: await materialLangOf(m, mdHeadOf, pdfPagesOf),
@@ -908,7 +927,10 @@ async function stepLex() {
 
   // 先清理：不再属于任何 language 轨道（或已删除）的材料 → unit_lex 删除并回减 lexemes
   const unitLexRows = await learnerDb.all("SELECT unit_id AS unitId, lex_json AS lexJson FROM unit_lex");
+  let cleanDone = 0;
   for (const row of unitLexRows) {
+    cleanDone += 1;
+    if (cleanDone % 200 === 0) await yieldNow(); // D143（T3）：清理批间让出
     const unit = (await learnerDb.all("SELECT library_item_id AS itemId FROM content_units WHERE id = ?", [row.unitId]))[0];
     if (!unit || !langMaterials.has(String(unit.itemId))) {
       await decrementLexemes(row.lexJson);
@@ -1112,6 +1134,7 @@ async function stepLex() {
     }
   }
   const stateRows = [];
+  let stateCalcDone = 0;
   for (const [lang, list] of lexemesByLang) {
     for (const lex of list) {
       const id = Number(lex.id);
@@ -1149,15 +1172,19 @@ async function stepLex() {
         lastLookupAt: lastLookup,
         computedAt: Date.now()
       });
+      stateCalcDone += 1;
+      if (stateCalcDone % 2000 === 0) await yieldNow(); // D143（T3）：词项状态计算批间让出（纯计算批）
     }
   }
-  await learnerDb.run("DELETE FROM lexeme_states");
-  for (const r of stateRows) {
-    await learnerDb.run(
-      "INSERT INTO lexeme_states (lexeme_id, state, source, exposure_passes, exposure_tokens, lookups, last_lookup_at, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [r.lexemeId, r.state, r.source, r.exposurePasses, r.exposureTokens, r.lookups, r.lastLookupAt, r.computedAt]
-    );
-  }
+  // D143（T3）：整表覆盖写＝单事务 DELETE + 预编译语句复用 INSERT + 每 1000 行 setImmediate 让出。
+  // 原「DELETE + 逐行 await learnerDb.run」的 await 只走微任务、不产生宏任务让出点，14,252 行
+  // 构成一个连续宏任务（实测 +20s 单段 0.5~0.9s 阻塞）；replaceBatch 与 dictDb.insertRows 同先例，
+  // 行集与列值逐行不变，失败显式 ROLLBACK（整表保持原状，优于原部分提交态）。
+  await learnerDb.replaceBatch(
+    "DELETE FROM lexeme_states",
+    "INSERT INTO lexeme_states (lexeme_id, state, source, exposure_passes, exposure_tokens, lookups, last_lookup_at, computed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    stateRows.map((r) => [r.lexemeId, r.state, r.source, r.exposurePasses, r.exposureTokens, r.lookups, r.lastLookupAt, r.computedAt])
+  );
 
   // 每单元 coverage / learningCount / easeFit（内存缓存，buildSnapshot 使用；设计稿 §9.1-5）
   lexUnitCache = new Map();
@@ -1184,10 +1211,13 @@ async function stepLex() {
     }
     lexStatsCache.set(lang, { rankById, nonStopTotal: ranked.length || 1, knownIds, learningIds, stopIds, keyById, stateKey, lexemes: list, lang });
   }
+  let covDone = 0;
   for (const itemId of [...langMaterials].sort()) {
     const lang = materialLangMap.get(itemId) || "";
     const cache = lexStatsCache.get(lang);
     for (const u of await unitsOfItem(itemId)) {
+      covDone += 1;
+      if (covDone % 200 === 0) await yieldNow(); // D143（T3）：覆盖度计算批间让出
       const row = unitLexMap.get(String(u.id));
       if (!row || !cache) continue;
       const lexArr = parseJsonSafe(row.lexJson, []);

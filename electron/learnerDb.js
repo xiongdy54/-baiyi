@@ -177,6 +177,32 @@ async function run(sql, params) {
   db.run(sql, params || []);
 }
 
+/** D143（T3）：整表覆盖写的批量口。单事务内 DELETE + 预编译语句复用 INSERT，每 chunkSize 行
+ *  setImmediate 让出主进程——根治「逐行 await run() 只走微任务、整个循环是一个连续宏任务」的
+ *  +20s 单段阻塞（lexeme_states 14,252 行实测 0.5~0.9s；同 dictDb.insertRows 先例）。
+ *  事务跨让出点保持打开：BEGIN IMMEDIATE / COMMIT / 失败显式 ROLLBACK（better-sqlite3 的
+ *  db.transaction(fn) 不容纳 async 回调）。连接级可见性：learner.db 全进程唯一连接，事务在途
+ *  期间本模块其它读写同走此连接（部分态可见窗口与改造前逐行 run 的逐条提交语义等价，无新增面）。 */
+async function replaceBatch(deleteSql, insertSql, rows, { chunkSize = 1000 } = {}) {
+  await open();
+  db.run("BEGIN IMMEDIATE");
+  let count = 0;
+  try {
+    if (deleteSql) db.run(deleteSql);
+    const stmt = db.prepare(insertSql);
+    for (const r of rows) {
+      stmt.run(normParams(r));
+      count += 1;
+      if (count % chunkSize === 0) await new Promise((r2) => setImmediate(r2));
+    }
+    db.run("COMMIT");
+  } catch (err) {
+    try { db.run("ROLLBACK"); } catch { /* 忽略 */ }
+    throw err;
+  }
+  return count;
+}
+
 async function all(sql, params) {
   await open();
   return allSync(sql, params || []);
@@ -246,4 +272,4 @@ async function snapshotTo(destPath) {
   return destPath;
 }
 
-module.exports = { open, save, run, all, getMeta, setMeta, reset, saveOnQuit, close, snapshotTo };
+module.exports = { open, save, run, replaceBatch, all, getMeta, setMeta, reset, saveOnQuit, close, snapshotTo };

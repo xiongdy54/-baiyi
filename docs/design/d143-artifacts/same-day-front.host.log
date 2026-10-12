@@ -1,0 +1,20 @@
+[host] dist/index.html exists=true mtime=2026-10-12T05:36:11.927Z
+[host] 其它 electron 实例: 无
+[host] same-day 占位: backup-auto-2026-10-12.zip (存在=true)
+[host] spawn pid=15068 epoch=1791785259053
+[host] 主进程 CPU 采样已启动 @1791785259243 (+190ms) 
+[host] CDP 已连接 @1791785259556 (+503ms)
+[host] addScriptToEvaluateOnNewDocument: {"identifier":"1"}
+[host] Page.bringToFront 已发送（窗口置前，避免后台节流）
+[host] 页内探针: "probe-live since=1791785259670" (第1次尝试 成功)
+[host] 导航坐标缓存: {"数据":{"x":365,"y":28},"日记":{"x":311,"y":28},"书架":{"x":41,"y":27}}
+[host] +3507ms 点击「卡片」→ 版式切换延迟 页内=558ms host=553ms
+[host] +8205ms 点击「复习」→ 版式切换延迟 页内=2711ms host=2707ms
+[host] +20311ms 点击「数据」→ 版式切换延迟 页内=227ms host=455ms
+[host] +45012ms 点击「日记」→ 版式切换延迟 页内=264ms host=324ms
+[host] +75018ms 点击「书架」→ 版式切换延迟 页内=350ms host=432ms
+[host] 观察窗口结束 @+100012ms
+[host] 页内数据 → C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\same-day.page.json
+[host] 主进程 CPU 画像 → C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\same-day.cpuprofile (samples=184697)
+[host] 收尾后 electron 实例: 无
+[host] app 日志 → C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\same-day.app.log

@@ -159,6 +159,21 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   r = await backup.createBackup({ ...P, label: "manual", flush: () => {} });
   check("缺省备份位置生效", r.ok === true && r.file.startsWith(BAK), r.file);
 
+  console.log("== 7) 中断残留清扫（D143 复审 M3）：旧 .snapshot-* 与非今日 .part 回收、当日 .part 保留 ==");
+  const snapOld = path.join(BAK, ".snapshot-orphan");
+  fs.mkdirSync(snapOld, { recursive: true });
+  fs.writeFileSync(path.join(snapOld, "dictionary.db"), "SNAP-ORPHAN");
+  const threeDaysAgo = new Date(Date.now() - 3 * 86400000);
+  fs.utimesSync(snapOld, threeDaysAgo, threeDaysAgo); // 非今日 mtime（mkdtemp 名无日期，mtime 是唯一「今日」判据）
+  const dayStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const partOld = path.join(BAK, `backup-auto-${dayStr(threeDaysAgo)}.zip.part`);
+  fs.writeFileSync(partOld, "PART-OLD");
+  const partToday = path.join(BAK, `backup-auto-${dayStr(new Date())}.zip.part`);
+  fs.writeFileSync(partToday, "PART-TODAY");
+  const swept = backup.sweepBackupOrphans({ ...opts() });
+  check("旧 .snapshot-* 与非今日 .part 被清扫（中断残留孤儿回收）", !fs.existsSync(snapOld) && !fs.existsSync(partOld), JSON.stringify(swept));
+  check("当日 .part 不误删（可能是在途构建）", fs.existsSync(partToday), JSON.stringify({ kept: fs.existsSync(partToday), swept }));
+
   // 清理临时目录
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\nM2 备份单元测试：${pass} 通过 / ${fail} 失败`);

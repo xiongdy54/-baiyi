@@ -1,0 +1,18 @@
+[host] dist/index.html exists=true mtime=2026-10-12T05:36:11.927Z
+[host] 其它 electron 实例: 无
+[host] first-of-day: 今日 auto 备份不存在 → autoBackupIfNeeded 将真实执行
+[host] spawn pid=47420 epoch=1791784492234
+[host] 主进程 CPU 采样已启动 @1791784492403 (+169ms) 
+[host] CDP 已连接 @1791784492997 (+763ms)
+[host] addScriptToEvaluateOnNewDocument: {"identifier":"1"}
+[host] 页内探针: "probe-live since=1791784493069" (第1次尝试 成功)
+[host] +26177ms 点击「卡片」→ 版式切换延迟 页内=1061ms host=1069ms
+[host] +27433ms 点击「复习」→ 版式切换延迟 页内=超时 host=超时
+[host] +42487ms 点击「数据」→ 版式切换延迟 页内=32ms host=393ms
+[host] +45016ms 点击「日记」→ 版式切换延迟 页内=38ms host=70ms
+[host] +75009ms 点击「书架」→ 版式切换延迟 页内=40ms host=174ms
+[host] 观察窗口结束 @+300015ms
+[host] 页内数据 → C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\first-of-day.page.json
+[host] 主进程 CPU 画像 → C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\first-of-day.cpuprofile (samples=538766)
+[host] 收尾后 electron 实例: 无
+[host] app 日志 → C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\first-of-day.app.log

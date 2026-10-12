@@ -1,0 +1,95 @@
+[host] spawn epoch=1791790633955 scenario=same-day userData=C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdata port=9711
+ERR Debugger listening on ws://127.0.0.1:9811/ad827e4b-7aa3-4b38-8876-636e4a858cc6
+ERR For help, see: https://nodejs.org/en/docs/inspector
+OUT [LAG] proc.start epoch=1791790634084 pid=13380 argv1=electron/js2c/browser_init
+OUT [LAG] probe.ready better-sqlite3
+OUT [LAG] probe.ready fs
+OUT [LAG] probe.done @1791790634099
+OUT [LAG] probe.ready desktopCapturer
+ERR Debugger attached.
+OUT [LAG] probe.ready db
+OUT [LAG] probe.ready jszip
+OUT [LAG] probe.ready backup
+OUT [LAG] probe.ready memoryTidy
+OUT [LAG] probe.ready screenCapture
+OUT [LAG] probe.ready dictDb
+OUT [LAG] probe.ready learnerDb
+OUT [LAG] probe.ready learnerRefresh
+ERR (node:13380) Warning: Accessing non-existent property 'prototype' of module exports inside circular dependency
+ERR (Use `electron --trace-warnings ...` to show where the warning was created)
+OUT [LAG] hole 1791790634086 -> 1791790634459 (373ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791790634137 -> 1791790634459 (322ms)
+ERR DevTools listening on ws://127.0.0.1:9711/devtools/browser/04865399-bbae-44c5-a775-fde22a42c2b3
+OUT [LAG] hole 1791790634459 -> 1791790634738 (279ms)
+OUT [LAG] enter initDb epoch=1791790634768
+OUT [LAG] sql.get 159ms [library.db] :: PRAGMA quick_check
+OUT [LAG] sql.pragma 161ms [library.db] :: quick_check
+OUT [LAG] hole 1791790634738 -> 1791790634965 (227ms)
+OUT [LAG] probe.ready legacyBackfill
+OUT [LAG] enter runLegacyBackfill epoch=1791790635006
+OUT [LAG] exit  runLegacyBackfill dur=1ms r={"ran":false,"reason":"marked","fsrsFixed":0,"clozeFixed":0}
+OUT [LAG] exit  initDb dur=245ms
+OUT [LAG] quickCapture.init 1ms
+OUT [LAG] tray.init 41ms
+OUT [LAG] enter memoryTidy.startupBackfillIfDue epoch=1791790635057
+OUT [LAG] reconcileStaleMaterialMapRuns 1ms (n=0)
+OUT [LAG] exit  memoryTidy.startupBackfillIfDue dur=2ms r=false
+OUT [LAG] sql.all 59ms [library.db] ::  SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_jso
+ERR [DIAG-IPC] library:list 慢 59ms @1791790635231
+OUT [LAG] hole 1791790635183 -> 1791790635314 (131ms)
+OUT [LAG] alive @1791790639099 (since proc.start 5015ms)
+ERR [DIAG-MAIN] backfillSidecars 定时器触发 @1791790640067
+OUT [LAG] enter backfillSidecars epoch=1791790640067
+OUT [LAG] exit  backfillSidecars dur=3ms r={"ok":true,"dir":"C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\realdata-userdata\\backups","scanned":1,"written":0,"swept":0}
+ERR [DIAG-MAIN] backfillSidecars 结束 @1791790640070
+OUT [LAG] alive @1791790644113 (since proc.start 10029ms)
+OUT [LAG] alive @1791790649113 (since proc.start 15029ms)
+OUT [LAG] alive @1791790654128 (since proc.start 20044ms)
+ERR [DIAG-IPC] stats:overview 慢 330ms @1791790654317
+OUT [LAG] hole 1791790654265 -> 1791790654649 (384ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791790654310 -> 1791790654649 (339ms)
+ERR [DIAG-MAIN] learnerRefresh 定时器触发 @1791790654649
+OUT [LAG] enter learnerRefresh.refresh epoch=1791790654650 args={}
+OUT [LAG] enter learnerDb.open epoch=1791790654651
+OUT [LAG] sql.get 58ms [learner.db] :: PRAGMA quick_check
+OUT [LAG] sql.pragma 58ms [learner.db] :: quick_check
+OUT [LAG] exit  learnerDb.open dur=76ms
+OUT [LAG] enter learnerDb.open epoch=1791790654753
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] learnerRefresh.phase=passes @1791790654825
+OUT [LAG] hole 1791790654649 -> 1791790654825 (176ms)
+OUT [LAG] enter learnerDb.open epoch=1791790654838
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] learnerRefresh.phase=links @1791790654948
+OUT [LAG] hole 1791790654825 -> 1791790654948 (123ms)
+OUT [LAG] enter learnerDb.open epoch=1791790655262
+OUT [LAG] exit  learnerDb.open dur=1ms
+OUT [LAG] enter learnerDb.open epoch=1791790655288
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] sql.all 25ms [learner.db] :: SELECT * FROM lexemes ORDER BY id ASC
+OUT [LAG] hole 1791790655204 -> 1791790655355 (151ms)
+OUT [LAG] learnerRefresh.phase=lex @1791790655356
+OUT [LAG] exit  learnerRefresh.refresh dur=817ms result={"ok":true,"ms":816} epoch=1791790655467
+ERR [DIAG-MAIN] learnerRefresh 结束 @1791790655467
+OUT [LAG] alive @1791790659144 (since proc.start 25060ms)
+OUT [LAG] alive @1791790664159 (since proc.start 30075ms)
+OUT [LAG] enter autoBackupIfNeeded epoch=1791790665068
+OUT [LAG] exit  autoBackupIfNeeded dur=1ms r={"ok":true,"skipped":"already-today"}
+OUT [LAG] alive @1791790669163 (since proc.start 35079ms)
+OUT [LAG] alive @1791790674167 (since proc.start 40083ms)
+OUT [LAG] alive @1791790679168 (since proc.start 45084ms)
+OUT [LAG] alive @1791790684174 (since proc.start 50090ms)
+OUT [LAG] alive @1791790689174 (since proc.start 55090ms)
+OUT [LAG] alive @1791790694175 (since proc.start 60091ms)
+OUT [LAG] alive @1791790699178 (since proc.start 65094ms)
+OUT [LAG] alive @1791790704184 (since proc.start 70100ms)
+OUT [LAG] sql.all 80ms [library.db] ::  SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_jso
+ERR [DIAG-IPC] library:list 慢 80ms @1791790709043
+OUT [LAG] hole 1791790709018 -> 1791790709147 (129ms)
+OUT [LAG] alive @1791790709187 (since proc.start 75103ms)
+OUT [LAG] alive @1791790714193 (since proc.start 80109ms)
+OUT [LAG] alive @1791790719194 (since proc.start 85110ms)
+OUT [LAG] alive @1791790724194 (since proc.start 90110ms)
+OUT [LAG] alive @1791790729197 (since proc.start 95113ms)
+ERR Debugger ending on ws://127.0.0.1:9811/ad827e4b-7aa3-4b38-8876-636e4a858cc6
+ERR For help, see: https://nodejs.org/en/docs/inspector

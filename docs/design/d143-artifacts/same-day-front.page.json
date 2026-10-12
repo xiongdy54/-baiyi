@@ -1,0 +1,2412 @@
+{
+ "scenario": "same-day",
+ "T0": 1791785259053,
+ "seconds": 100,
+ "port": 9711,
+ "userData": "C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\realdata-userdata",
+ "data": {
+  "anchor": {
+   "epoch": 1791785259670,
+   "perf": 204.7999999821186
+  },
+  "nav": {
+   "startTime": 0,
+   "domInteractive": 166.89999997615814,
+   "dcl": 0,
+   "load": 0,
+   "dur": 0
+  },
+  "fcp": null,
+  "ready": {
+   "atInject": {
+    "state": "interactive",
+    "rootChildren": 0
+   }
+  },
+  "ipc": [
+   {
+    "at": 1791785259671,
+    "ch": "settings.get",
+    "dt": 18
+   },
+   {
+    "at": 1791785259895,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785260104,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785260312,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785260520,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785260728,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785260936,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785261144,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785261352,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785261560,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785261768,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785261976,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785262183,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785262392,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785262600,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785262807,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785263016,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785263223,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785263432,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785263640,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785263847,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785264056,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785264264,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785264472,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785264680,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785264888,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785265096,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785265304,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785265504,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785265712,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785265920,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785266128,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785266335,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785266544,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785266752,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785266960,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785267168,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785267376,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785269970,
+    "ch": "settings.get",
+    "dt": 11
+   },
+   {
+    "at": 1791785270183,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785270391,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785270599,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785270808,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785271008,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785271215,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785271424,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785271632,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785271840,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785272048,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785272255,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785272464,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785272671,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785272880,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785273088,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785273295,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785273504,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785273711,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785273919,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785274128,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785274335,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785274543,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785274751,
+    "ch": "settings.get",
+    "dt": 2
+   },
+   {
+    "at": 1791785274959,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785275168,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785275376,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785275583,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785275791,
+    "ch": "settings.get",
+    "dt": 2
+   },
+   {
+    "at": 1791785276000,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785276208,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785276416,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785276624,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785276831,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785277040,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785277248,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785277456,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785277664,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785277871,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785278072,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785278279,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785278487,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785278688,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785278896,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785279103,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785279311,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785279520,
+    "ch": "settings.get",
+    "dt": 13
+   },
+   {
+    "at": 1791785279736,
+    "ch": "settings.get",
+    "dt": 84
+   },
+   {
+    "at": 1791785280024,
+    "ch": "settings.get",
+    "dt": 347
+   },
+   {
+    "at": 1791785280575,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785280784,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785280991,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785281200,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785281408,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785281616,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785281824,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785282032,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785282240,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785282447,
+    "ch": "settings.get",
+    "dt": 2
+   },
+   {
+    "at": 1791785282656,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785282864,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785283072,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785283280,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785283487,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785283696,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785283904,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785284112,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785284320,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785284528,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785284736,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785284943,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785285152,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785285360,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785285568,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785285775,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785285983,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785286192,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785286400,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785286608,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785286816,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785287024,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785287232,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785287440,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785287648,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785287855,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785288064,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785288272,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785288479,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785288688,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785288895,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785289096,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785289304,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785289511,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785289720,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785289927,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785290136,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785290344,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785290551,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785290760,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785290968,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785291176,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785291383,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785291592,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785291800,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785292008,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785292216,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785292423,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785292632,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785292841,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785293048,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785293256,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785293463,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785293672,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785293879,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785294087,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785294296,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785294504,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785294711,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785294920,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785295128,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785295336,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785295544,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785295752,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785295960,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785296167,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785296718,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785296920,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785297128,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785297336,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785297543,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785297752,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785297960,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785298168,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785298376,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785298584,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785298792,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785298999,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785299207,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785299416,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785299623,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785299832,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785300040,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785300247,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785300456,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785300664,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785300872,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785301080,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785301287,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785301495,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785301696,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785301904,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785302111,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785302320,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785302527,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785302735,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785302944,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785303152,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785303359,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785303560,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785303768,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785303976,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785304184,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785304392,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785304599,
+    "ch": "settings.get",
+    "dt": 2
+   },
+   {
+    "at": 1791785304807,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785305015,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785305224,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785305431,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785305639,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785305848,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785306055,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785306256,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785306464,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785306671,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785306879,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785307080,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785307288,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785307496,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785307704,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785307912,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785308120,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785308328,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785308528,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785308736,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785308943,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785309152,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785309360,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785309567,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785309776,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785309983,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785310192,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785310400,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785310608,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785310816,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785311024,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785311232,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785311439,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785311647,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785311855,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785312064,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785312272,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785312479,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785312680,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785312888,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785313096,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785313304,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785313512,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785313720,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785313927,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785314136,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785314344,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785314552,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785314759,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785314967,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785315175,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785315383,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785315584,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785315792,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785316000,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785316207,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785316415,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785316623,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785316832,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785317040,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785317248,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785317456,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785317664,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785317872,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785318079,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785318288,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785318495,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785318696,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785318904,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785319112,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785319319,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785319527,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785319736,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785319944,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785320152,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785320360,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785320568,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785320776,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785320984,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785321192,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785321400,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785321608,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785321815,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785322024,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785322233,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785322440,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785322648,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785322856,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785323064,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785323272,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785323480,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785323688,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785323896,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785324104,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785324312,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785324520,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785324728,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785324936,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785325144,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785325352,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785325560,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785325768,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785325976,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785326184,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785326391,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785326600,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785326808,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785327016,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785327224,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785327432,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785327640,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785327848,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785328056,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785328263,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785328472,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785328680,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785328887,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785329096,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785329304,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785329512,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785329720,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785329928,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785330136,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785330336,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785330544,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785330752,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785330959,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785331160,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785331368,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785331576,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785331784,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785331991,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785332192,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785332400,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785332608,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785332815,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785333024,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785333232,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785333440,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785333648,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785333856,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785334064,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785334272,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785334480,
+    "ch": "settings.get",
+    "dt": 11
+   },
+   {
+    "at": 1791785334695,
+    "ch": "settings.get",
+    "dt": 2
+   },
+   {
+    "at": 1791785334903,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785335112,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785335320,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785335528,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785335736,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785335943,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785336144,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785336352,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785336560,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785336768,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785336976,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785337176,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785337384,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785337591,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785337799,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785338000,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785338208,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785338416,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785338624,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785338832,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785339040,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785339248,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785339456,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785339664,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785339871,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785340079,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785340288,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785340496,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785340697,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785340904,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785341112,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785341320,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785341528,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785341728,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785341936,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785342143,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785342344,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785342552,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785342760,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785342968,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785343176,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785343384,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785343591,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785343800,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785344008,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785344216,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785344424,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785344632,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785344840,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785345048,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785345255,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785345456,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785345664,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785345871,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785346080,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785346288,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785346495,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785346704,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785346912,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785347120,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785347327,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785347536,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785347744,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785347952,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785348161,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785348368,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785348576,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785348784,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785348992,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785349200,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785349407,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785349616,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785349824,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785350032,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785350240,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785350448,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785350656,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785350864,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785351072,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785351279,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785351488,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785351696,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785351904,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785352111,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785352320,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785352527,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785352728,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785352936,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785353143,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785353352,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785353560,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785353768,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785353976,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785354184,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785354392,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785354600,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785354807,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785355008,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785355215,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785355424,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785355632,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785355839,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785356048,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785356256,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785356464,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785356671,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785356872,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785357080,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785357287,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785357496,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785357704,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785357912,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785358120,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785358328,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785358536,
+    "ch": "settings.get",
+    "dt": 1
+   },
+   {
+    "at": 1791785358744,
+    "ch": "settings.get",
+    "dt": 0
+   },
+   {
+    "at": 1791785358952,
+    "ch": "settings.get",
+    "dt": 0
+   }
+  ],
+  "raf": [
+   {
+    "at": 1791785259844,
+    "gap": 80
+   },
+   {
+    "at": 1791785263138,
+    "gap": 558
+   },
+   {
+    "at": 1791785269975,
+    "gap": 2698
+   },
+   {
+    "at": 1791785279597,
+    "gap": 217
+   },
+   {
+    "at": 1791785296718,
+    "gap": 544
+   },
+   {
+    "at": 1791785304302,
+    "gap": 210
+   },
+   {
+    "at": 1791785334420,
+    "gap": 332
+   }
+  ],
+  "lt": [
+   {
+    "at": 1791785267557,
+    "dur": 2412
+   }
+  ],
+  "clicks": [],
+  "navChanges": [
+   {
+    "t": 1791785259757,
+    "label": "书架"
+   },
+   {
+    "t": 1791785263120,
+    "label": "卡片"
+   },
+   {
+    "t": 1791785269970,
+    "label": "复习"
+   },
+   {
+    "t": 1791785279591,
+    "label": "数据"
+   },
+   {
+    "t": 1791785304329,
+    "label": "日记"
+   },
+   {
+    "t": 1791785334421,
+    "label": "书架"
+   }
+  ]
+ }
+}
