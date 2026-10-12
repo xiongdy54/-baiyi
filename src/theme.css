@@ -3021,7 +3021,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   font-size: var(--fs-secondary);
   line-height: 1.6;
 }
-.wb-free textarea:focus { outline: none; border-color: var(--border-strong); }
+.wb-free textarea:focus { outline: none; } /* D142（V1）：线色/厚化由坞内变体规则承担（旧 border-color: strong 已随去框清理） */
 .wb-free-acts { display: flex; gap: var(--sp-2); justify-content: flex-end; }
 .ai-panel-body { padding: var(--sp-3) var(--sp-4) 0; }
 
@@ -3100,7 +3100,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   resize: none;
   overflow-y: auto;
 }
-.wb-composer textarea:focus { outline: none; border-color: var(--border-strong); }
+.wb-composer textarea:focus { outline: none; } /* D142（V1）：线色/厚化由坞内变体规则承担（旧 border-color: strong 已随去框清理） */
 .wb-composer-send { flex: none; height: 32px; }
 
 /* ---------- v48.51（D91）：解读方式切换器与事后建议 ---------- */
@@ -8102,28 +8102,41 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-chev-btn:hover { color: var(--text-primary); background: var(--grey-1); }
 .wb-manual-toggle { padding: 0; }
 .wb-manual-toggle .wb-title { cursor: pointer; }
-/* 两区以一条细线分界（不以底色区分）：手动区与 AI 区同为 paper 底 */
-.wb-ai { border-top: 1px solid var(--border-strong); }
-.side-dock[data-placement="bottom"] .wb-ai { border-top: 0; border-left: 1px solid var(--border-strong); }
+/* D142（R1）：两区分界线取消——`.wb-ai` 上缘 strong 线与标题行下缘 hairline 相距不足 40px 构成「双线」噪点（用户「杂乱」的典型来源）；
+   两区由标题行下缘 hairline + 留白分界；底部放置的竖缘线同步删除，唯一分隔＝ .wb-manual 的 subtle 右缘线（见本文件 .side-dock[data-placement="bottom"] .wb-manual 处） */
 .wb-manual-body { border-bottom: 0; }
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-tabs,
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-chev-btn { display: none; }
 
-/* 字段：一行起步，clip 高度由 useGrowBox 设定并过渡；框线在外壳，聚焦只变 accent */
+/* 字段：一行起步，clip 高度由 useGrowBox 设定并过渡。
+   D142（R2/R3，V1 下缘一划）：去四边盒框——下缘 1px 保留（聚焦零位移，误写 border:0 会出 1px 位移）；
+   聚焦＝线色 accent + 1px 瞬时厚化（box-shadow 不在过渡里，对齐 MOTION §4「焦点环出现不过渡」）；悬停线色 strong；
+   内距 4px 0 ⇒ 文字左缘 16px 与标题/面板对齐；caret 走 accent（级联至 ProseMirror） */
 .wb-fields { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .wb-field {
   position: relative;
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  caret-color: var(--accent);
   min-width: 0;
 }
-.wb-field:focus-within { border-color: var(--accent); background: var(--paper); }
+.wb-field:hover:not(:focus-within) { border-bottom-color: var(--border-strong); }
+.wb-field:focus-within { border-bottom-color: var(--accent); box-shadow: 0 1px 0 0 var(--accent); }
 .wb-field-clip { overflow: hidden; }
 @media (prefers-reduced-motion: no-preference) {
-  .wb-field { transition: border-color var(--dur) var(--ease); }
+  /* 进 200ms --ease-enter / 出 100ms --ease-exit（hover 属非聚焦态，走「出」档） */
+  .wb-field {
+    transition: border-bottom-color var(--dur-view) var(--ease-enter),
+      background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .wb-field:not(:focus-within) {
+    transition: border-bottom-color var(--dur-exit) var(--ease-exit),
+      background-color var(--dur-hover) var(--ease-out-soft);
+  }
   .wb-field-clip { transition: height var(--dur-panel) var(--ease); }
 }
-.wb-field-inner { padding: 4px var(--sp-2); }
+.wb-field-inner { padding: 4px 0; }
 .wb-field .markdown-editor-compact {
   border: 0;
   padding: 0;
@@ -8179,7 +8192,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   height: 28px;
   padding: 0;
   border: 0;
-  border-bottom: 1px dashed var(--border-strong);
+  border-bottom: 1px solid var(--border-subtle); /* D142（R4）：虚线在 Swiss hairline 纪律里无位置——虚→实 subtle；聚焦 accent 见下 */
   border-radius: 0;
   background: none;
   color: var(--text-primary);
@@ -8216,9 +8229,21 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   transform: rotate(45deg);
 }
 .wb-more .udc-picker, .wb-more .tag-input { gap: var(--sp-1); }
-.wb-more .dd-btn { height: 26px; padding: 0 var(--sp-2); border-color: var(--border-strong); }
+.wb-more .dd-btn { height: 26px; padding: 0; }
 .wb-more .dd-menu { right: auto; left: 0; max-width: calc(var(--wb-w) - 96px); }
 .wb-more .tag-input-box { flex: 1 1 100px; min-width: 100px; }
+/* D142（R5/R8 + §2 #5/#11/#14）：坞内控件线条收敛（作用域 .side-dock，与独立窗口同源）——
+   dd-btn ghost 化（文字 + caret，hover 灰底；base 的 hover 边框色对宽 0 边框已无效果）、
+   标签输入去盒框（四边删 + 下缘 1px subtle 底线常驻；聚焦/建议面板展开转 accent——R11）、禁用描边退役（与 base 禁用一致：grey-1 底 + grey-2 字） */
+.wb-more .tag-input-box input { padding: 0; background: none; border: 0; border-bottom: 1px solid var(--border-subtle); }
+/* R11（D142 终审修复）：坞内 base 与 base :focus/.expanded（L4096/L4097）同为 (0,2,1)，
+   且本规则源序更后——不显式覆盖会被反向压掉（聚焦 accent 不可见）。
+   (0,3,1) 显式取色；不加 transition（同 .wb-line 瞬时色迁）、不加 !important。 */
+.wb-more .tag-input-box input:focus,
+.wb-more .tag-input-box.expanded input { border-bottom-color: var(--accent); }
+.side-dock .dd-btn { border: 0; padding-left: 0; padding-right: 0; color: var(--text-helper); }
+.side-dock .dd-btn:hover { background: var(--grey-1); color: var(--text-primary); }
+.side-dock .btn-outline:disabled { background: var(--grey-1); border-color: transparent; }
 
 /* 页脚：左「更多 ▾」安静灰字，右「制卡」accent 实底；与字段框同缘 */
 .wb-foot { margin-top: 0; padding: 0; justify-content: space-between; }
@@ -8239,26 +8264,67 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   height: 30px;
   min-height: 30px;
   max-height: 168px;
-  padding: 4px var(--sp-2);
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
+  padding: 4px 0 5px; /* D142（V1）：去左右内距（文字左缘 16px 对齐）；底 1px 并入 border 占位 ⇒ 4+20+5+1=30 高度不变 */
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  caret-color: var(--accent);
   resize: none;
   overflow-y: hidden;
   font-size: var(--fs-secondary);
   line-height: 20px;
 }
-.wb-free textarea:focus { border-color: var(--accent); }
+.wb-free textarea:hover { border-bottom-color: var(--border-strong); }
+.wb-free textarea:focus { border-bottom-color: var(--accent); box-shadow: 0 1px 0 0 var(--accent); }
 .wb-free { gap: 0; }
 .wb-free-acts { display: flex; gap: var(--sp-2); justify-content: flex-end; padding-top: var(--sp-2); }
 .wb-free-acts .btn { height: 26px; font-size: var(--fs-secondary); }
 @media (prefers-reduced-motion: no-preference) {
-  .wb-free textarea { transition: height var(--dur-panel) var(--ease), border-color var(--dur) var(--ease); }
-  .wb-composer textarea { transition: height var(--dur-panel) var(--ease), border-color var(--dur) var(--ease); }
+  /* D142（§3.1 机制）：线色进 200ms --ease-enter / 出 100ms --ease-exit（hover 属非聚焦态走「出」档）；高度增长沿用 --dur-panel 不变 */
+  .wb-free textarea {
+    transition: height var(--dur-panel) var(--ease),
+      border-bottom-color var(--dur-view) var(--ease-enter),
+      background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .wb-free textarea:not(:focus) {
+    transition: height var(--dur-panel) var(--ease),
+      border-bottom-color var(--dur-exit) var(--ease-exit),
+      background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .wb-composer textarea {
+    transition: height var(--dur-panel) var(--ease),
+      border-bottom-color var(--dur-view) var(--ease-enter),
+      background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .wb-composer textarea:not(:focus) {
+    transition: height var(--dur-panel) var(--ease),
+      border-bottom-color var(--dur-exit) var(--ease-exit),
+      background-color var(--dur-hover) var(--ease-out-soft);
+  }
 }
-.wb-composer { border-top-color: var(--border-strong); padding: var(--sp-2) var(--wb-pad); }
-.wb-composer textarea { border-color: var(--border-strong); background: var(--paper); overflow-y: hidden; }
-.wb-composer textarea:focus { border-color: var(--accent); }
+/* D142（R9）：占位灰 token 化（此前 textarea 走 UA 默认 → 与 ProseMirror 同 token，消除「一屏两种占位灰」） */
+.wb-free textarea::placeholder { color: var(--text-placeholder); }
+.wb-composer textarea::placeholder { color: var(--text-placeholder); }
+@media (prefers-reduced-motion: reduce) {
+  /* D142（§7 #10）：reduce 下聚焦线瞬时出现——归零全应用 input/textarea 基线（120ms border-color）对坞内输入面的影响 */
+  .wb-field, .wb-free textarea, .wb-composer textarea, .wb-line { transition: none; }
+}
+/* D142（R7）：composer 上缘 strong → subtle（参考稿 .chat-input 的正是这条线——坞内「输入行」的空间承诺） */
+.wb-composer { border-top-color: var(--border-subtle); padding: var(--sp-2) var(--wb-pad); }
+.wb-composer textarea {
+  padding: 5px 0 6px; /* D142（V1）：底 1px 占位 ⇒ 5+20+6+1=32 高度不变（D123 §1.9：与发送钮同高 32 对齐） */
+  border: 0;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  caret-color: var(--accent);
+  overflow-y: hidden;
+}
+.wb-composer textarea:hover { border-bottom-color: var(--border-strong); }
+.wb-composer textarea:focus { border-bottom-color: var(--accent); box-shadow: 0 1px 0 0 var(--accent); }
 .wb-composer-send { min-width: 56px; font-weight: 700; }
+/* D142（§4）：发送钮——hover H1 只变色（深一档，无阴影无位移）；禁用字色 D2 略提亮（D141：无 🚫 光标） */
+.wb-composer-send:hover:not(:disabled) { background: var(--accent-hover); }
+.wb-composer-send:disabled { color: var(--text-placeholder); }
 .wb-thread { padding: 0 var(--wb-pad) var(--sp-3); }
 
 /* 制卡页：知识点区（节标题 ink 下划线、知识点 hairline 分隔） */
@@ -8350,15 +8416,16 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-cloze-btn {
   height: 24px;
   padding: 0 var(--sp-2);
-  background: var(--paper);
-  border: 1px solid var(--border-strong);
+  background: transparent;
+  border: 0;
   color: var(--accent);
   font-size: var(--fs-meta);
   white-space: nowrap;
   cursor: pointer;
 }
-.wb-cloze-btn:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); }
-.wb-cloze-btn:disabled { color: var(--text-placeholder); border-color: var(--border-subtle); cursor: default; }
+/* D142（§2.1 同政策延伸）：填空工具行转文字钮——hover 灰底（原 accent-soft 底 + accent 描边退役）、禁用＝placeholder 字无框 */
+.wb-cloze-btn:hover:not(:disabled) { background: var(--grey-1); }
+.wb-cloze-btn:disabled { color: var(--text-placeholder); cursor: default; }
 .wb-cloze-stat { margin-left: auto; font-size: var(--fs-meta); color: var(--text-helper); white-space: nowrap; }
 @media (prefers-reduced-motion: no-preference) {
   .wb-cloze-btn { transition: background-color var(--dur) var(--ease-out-soft), border-color var(--dur) var(--ease-out-soft), color var(--dur) var(--ease-out-soft); }
