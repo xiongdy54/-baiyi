@@ -1,0 +1,724 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>制卡台样式改版 D142 — 现状复刻 vs 变体 V1/V2/V3</title>
+<style>
+  /* =====================================================================
+     D142 样张：制卡台（CardDock）线条收敛 + 文本输入面改版对照
+     · token / 字体栈 / 尺寸参数与 src/theme.css 一致（除被改动属性）
+     · 每列 .side-dock 宽 400px（产品 --wb-w）；列高 702px（1100×750 内窗 - 顶栏 48）
+     · 对照对象：tests/tmp-d142-dock-manual.png（1100×750 内窗、DPR 2.5）
+     · 机械复核：页尾 #metrics-out 由脚本用 getComputedStyle 实测填充（window.__D142）
+     · 变体静态态类：.is-hover / .is-focus（与真实 :hover/:focus-within 双写，供无头复核）
+     ===================================================================== */
+  :root {
+    /* 灰阶（theme.css :root 原值） */
+    --paper:#fafaf8; --grey-1:#f0f0ee; --grey-2:#d4d4d2; --grey-3:#737373; --ink:#0a0a0a;
+    --text-primary:var(--ink); --text-secondary:#525252; --text-helper:var(--grey-3); --text-placeholder:#8a8a8a;
+    --border-subtle:#e0e0e0; --border-strong:#a3a3a3;
+    --accent:#166a59; --accent-on:#ffffff;
+    --accent-hover: color-mix(in srgb, var(--accent) 88%, #000000);
+    --accent-pressed: color-mix(in srgb, var(--accent) 78%, #000000);
+    /* 字体（theme.css 原栈） */
+    --font-sans:"Inter","Helvetica Neue","Helvetica","Arial","Segoe UI Variable","Segoe UI",system-ui,"PingFang SC","Hiragino Sans GB","Source Han Sans SC","Noto Sans SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;
+    --font-mono:"JetBrains Mono","IBM Plex Mono","SF Mono","Cascadia Code",Consolas,ui-monospace,monospace;
+    /* 字号 / 间距 */
+    --fs-body:14px; --fs-secondary:13px; --fs-meta:12px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-8:32px;
+    --wb-w:400px; --wb-pad:var(--sp-4);
+    /* 动效 token（theme.css 原值） */
+    --ease:cubic-bezier(0.2,0,0.38,0.9); --dur:120ms;
+    --ease-out-soft:cubic-bezier(0.4,0,0.2,1); --dur-hover:160ms;
+    --dur-view:200ms; --ease-enter:cubic-bezier(0,0,0.2,1);
+    --dur-exit:100ms; --ease-exit:cubic-bezier(0.4,0,1,1);
+    --dur-panel:240ms;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:#e8e8e6; color:var(--text-primary); font-family:var(--font-sans);
+    font-size:var(--fs-body); line-height:1.6; padding:var(--sp-8); display:flex; flex-direction:column; gap:var(--sp-8);
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-family:var(--font-mono); font-feature-settings:"tnum"; }
+
+  /* ---------- 页头 ---------- */
+  .page-head h1 { font-size:22px; font-weight:600; letter-spacing:-.01em; }
+  .page-head .lede { margin-top:var(--sp-2); font-size:var(--fs-secondary); color:var(--text-secondary); max-width:1180px; }
+  .page-head .lede b { color:var(--text-primary); font-weight:600; }
+  .page-head code { font-family:var(--font-mono); font-size:12px; background:var(--grey-1); padding:1px 4px; }
+
+  /* ---------- 对照条（每行 2 列；本机内窗宽上限下 4 列不可行，定版 2×2 供同屏对照） ---------- */
+  .rack { display:flex; gap:var(--sp-6,24px); align-items:flex-start; flex-wrap:wrap; max-width:848px; }
+  .col { display:flex; flex-direction:column; gap:var(--sp-2); }
+  .col-label { font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--grey-3); }
+  .col-note { font-size:12px; color:var(--text-helper); width:400px; }
+  .plate { background:var(--paper); outline:1px solid var(--grey-2); }
+
+  /* ---------- 制卡台复刻（结构 = CardDock.tsx / ManualCardEditor.tsx / AIPanel.tsx） ---------- */
+  .side-dock { width:var(--wb-w); height:702px; display:flex; flex-direction:column; background:var(--paper); border-left:1px solid var(--border-subtle); }
+  .wb-head {
+    box-sizing:content-box; height:34px; display:flex; align-items:center; gap:0;
+    padding:0 var(--wb-pad); border-bottom:1px solid var(--border-subtle); flex:none;
+  }
+  .wb-title { flex:none; width:5.2em; font-size:var(--fs-meta); font-weight:600; letter-spacing:.08em; color:var(--text-helper); white-space:nowrap; }
+  .wb-tabs { display:flex; align-self:stretch; gap:2px; min-width:0; }
+  .wb-tabs button {
+    position:relative; height:100%; padding:0 var(--sp-3); background:none; border:0;
+    font-family:inherit; font-size:var(--fs-secondary); line-height:1; color:var(--text-helper); white-space:nowrap; cursor:pointer;
+  }
+  .wb-tabs button.on { color:var(--text-primary); font-weight:600; }
+  .wb-tabs button.on::after { content:""; position:absolute; left:var(--sp-3); right:var(--sp-3); bottom:-1px; height:2px; background:var(--accent); }
+  .wb-chev-btn { margin-left:auto; flex:none; width:22px; height:22px; display:inline-flex; align-items:center; justify-content:center; background:none; border:0; color:var(--text-helper); margin-right:-4px; }
+  .wb-manual { display:flex; flex-direction:column; flex:none; min-height:0; }
+  .wb-manual-body { display:flex; flex-direction:column; gap:var(--sp-2); padding:var(--sp-2) var(--wb-pad); }
+  .wb-fields { display:flex; flex-direction:column; gap:var(--sp-2); min-width:0; }
+
+  /* 手动字段（现状：四边盒框；变体：见下方 .v1/.v2/.v3 块） */
+  .wb-field { position:relative; border:1px solid var(--border-strong); background:var(--paper); min-width:0; }
+  .wb-field.is-focus { border-color:var(--accent); }
+  .wb-field-inner { padding:4px var(--sp-2); }
+  .prose { font-size:var(--fs-secondary); line-height:1.6; min-height:20.8px; color:var(--text-primary); }
+  .pm-ph { color:var(--text-placeholder); }
+  .caret { display:inline-block; width:1px; height:14px; background:var(--text-primary); vertical-align:-2px; }
+  .wb-pick {
+    position:absolute; right:4px; top:4px; height:20px; padding:0 var(--sp-1);
+    border:0; background:var(--paper); color:var(--accent); font-family:inherit; font-size:var(--fs-meta); line-height:20px; white-space:nowrap; cursor:pointer;
+  }
+  .wb-more-toggle { display:inline-flex; align-items:center; gap:var(--sp-1); height:28px; padding:0; background:none; border:0; color:var(--text-helper); font-family:inherit; font-size:var(--fs-meta); cursor:pointer; }
+  .wb-foot { display:flex; justify-content:space-between; align-items:center; }
+  /* 按钮（theme.css 原值） */
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:var(--sp-2); height:40px; padding:0 var(--sp-4);
+    font-family:inherit; font-size:var(--fs-body); font-weight:500; border:1px solid transparent; cursor:pointer;
+    transition:background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .btn:disabled { background:var(--grey-1); color:var(--grey-2); border-color:transparent; cursor:default; }
+  .btn-primary { background:var(--accent); color:var(--accent-on); }
+  .btn-primary:hover:not(:disabled) { background:var(--accent-hover); }
+  .btn-outline { background:transparent; border-color:var(--border-strong); color:var(--text-primary); }
+  .btn-outline:disabled { background:transparent; border-color:var(--grey-2); }  /* 现状特例；新版按 #14 处置删除 */
+  .btn-sm { height:32px; padding:0 var(--sp-3); font-size:var(--fs-secondary); }
+  .wb-foot .btn { height:28px; padding:0 var(--sp-4); min-width:64px; font-size:var(--fs-secondary); font-weight:700; }
+
+  /* AI 区 */
+  .wb-ai { flex:1; min-height:0; display:flex; flex-direction:column; border-top:1px solid var(--border-strong); }
+  .wb-ai-body { flex:1; min-height:0; display:flex; flex-direction:column; }
+  .wb-scroll { flex:1; min-height:0; overflow-y:auto; }
+  .dock-empty { display:flex; flex-direction:column; gap:var(--sp-2); padding:var(--sp-2) var(--wb-pad) var(--sp-3); }
+  .ai-explain-mode { display:flex; align-items:center; gap:var(--sp-2); }
+  .ai-explain-mode-label { font-size:var(--fs-meta); color:var(--text-helper); }
+  .dd-btn {
+    display:inline-flex; align-items:center; gap:6px; background:transparent; border:1px solid var(--border-subtle);
+    color:var(--text-helper); font-family:inherit; font-size:var(--fs-meta); font-weight:500; padding:3px 8px; cursor:pointer;
+  }
+  .wb-free { display:flex; flex-direction:column; }
+  .wb-free textarea {
+    display:block; width:100%; box-sizing:border-box; height:30px; min-height:30px; max-height:168px;
+    padding:4px var(--sp-2); border:1px solid var(--border-strong); background:var(--paper);
+    color:var(--text-primary); font:inherit; font-size:var(--fs-secondary); line-height:20px; resize:none; overflow-y:hidden;
+  }
+  .wb-free-acts { display:flex; gap:var(--sp-2); justify-content:flex-end; padding-top:var(--sp-2); }
+  .wb-free-acts .btn { height:26px; font-size:var(--fs-secondary); }
+  .wb-composer {
+    flex:none; display:flex; align-items:flex-end; gap:var(--sp-2);
+    padding:var(--sp-2) var(--wb-pad); border-top:1px solid var(--border-strong); background:var(--paper);
+  }
+  .wb-composer textarea {
+    flex:1; min-width:0; box-sizing:border-box; height:32px; min-height:32px; max-height:120px;
+    padding:5px var(--sp-2); border:1px solid var(--border-strong); background:var(--paper);
+    color:var(--text-primary); font:inherit; font-size:var(--fs-secondary); line-height:20px; resize:none; overflow-y:auto;
+  }
+  .wb-composer-send { flex:none; height:32px; min-width:56px; font-weight:700; }
+
+  /* =====================================================================
+     线 条 收 敛（全局政策，三变体共用；逐条对应普查 20 条）
+     #9  wb-ai 上缘 strong 线删除（与 #10 标题下缘线重复）
+     #15 composer 上缘 strong → subtle
+     #4/#11 dd-btn 去边框（ghost 文字钮）
+     #14 .btn-outline:disabled 描边退役（走 base：grey-1 底 + grey-2 字）
+     #6  wb-line 虚线 → 实线 subtle；#5 标签输入去框
+     ===================================================================== */
+  .v1 .wb-ai, .v2 .wb-ai, .v3 .wb-ai { border-top:0; }
+  .v1 .wb-composer, .v2 .wb-composer, .v3 .wb-composer { border-top-color:var(--border-subtle); }
+  .v1 .dd-btn, .v2 .dd-btn, .v3 .dd-btn { border:0; padding-left:0; padding-right:0; color:var(--text-helper); }
+  .v1 .dd-btn:hover, .v2 .dd-btn:hover, .v3 .dd-btn:hover { background:var(--grey-1); color:var(--text-primary); }
+  .v1 .btn-outline:disabled, .v2 .btn-outline:disabled, .v3 .btn-outline:disabled { background:var(--grey-1); border-color:transparent; }
+
+  /* 更多展开区（对照条用）：dd-btn ghost、标签输入去框、wb-line 实线 subtle */
+  .v1 .wb-more { border-top:1px solid var(--border-subtle); padding-top:var(--sp-1); display:flex; flex-direction:column; }
+  .v1 .wb-row { display:flex; align-items:center; gap:var(--sp-3); min-height:32px; }
+  .v1 .wb-k { flex:none; width:44px; font-size:var(--fs-meta); color:var(--text-helper); white-space:nowrap; }
+  .v1 .wb-v { flex:1; min-width:0; }
+  .v1 .wb-check { gap:var(--sp-2); font-size:var(--fs-secondary); color:var(--text-secondary); cursor:pointer; }
+  .v1 .wb-check input { appearance:none; -webkit-appearance:none; flex:none; width:13px; height:13px; border:1px solid var(--border-strong); background:var(--paper); position:relative; }
+  .v1 .wb-line {
+    width:100%; height:28px; padding:0; border:0; border-bottom:1px solid var(--border-subtle); border-radius:0;
+    background:none; color:var(--text-primary); font:inherit; font-size:var(--fs-secondary); outline:none;
+  }
+  .v1 .wb-line:focus { border-bottom-color:var(--accent); }
+  .v1 .wb-line::placeholder, .v1 .tag-box input::placeholder { color:var(--text-placeholder); }
+  .v1 .tag-box { display:flex; align-items:center; flex:1; }
+  .v1 .tag-box input { width:100%; height:26px; padding:0; border:0; background:none; color:var(--text-primary); font:inherit; font-size:var(--fs-meta); outline:none; }
+
+  /* =====================================================================
+     输 入 面 变 体（仅文本输入面；机制＝border-bottom-color 过渡 + focus 瞬时 2px
+     box-shadow 厚化 + caret accent + placeholder 原生消失。textarea 不支持伪元素，
+     故四类输入面统一用同一机制，零 DOM 变更、零布局属性动画）
+     ===================================================================== */
+  /* 共用的几何与去框 */
+  .v1 .wb-field, .v2 .wb-field, .v3 .wb-field { background:transparent; }
+  .v1 .wb-field-inner, .v2 .wb-field-inner, .v3 .wb-field-inner { padding:4px 0 4px 0; position:relative; z-index:1; }
+  .v1 .wb-field, .v2 .wb-field, .v3 .wb-field { border:0; border-bottom:1px solid transparent; }
+  .v1 .wb-field { border-bottom-color:var(--border-subtle); }
+  .v1 .wb-field:hover:not(.is-focus), .v1 .wb-field.is-hover:not(.is-focus) { border-bottom-color:var(--border-strong); }
+  .v1 .wb-field.is-focus { border-bottom-color:var(--accent); }
+  .v2 .wb-field.is-hover:not(.is-focus) { background:var(--grey-1); }
+  .v3 .wb-field { background:var(--grey-1); }
+  .v2 .wb-field.is-focus, .v3 .wb-field.is-focus { border-bottom-color:var(--accent); }
+  /* focus 2px 厚化：瞬时（对齐 MOTION §4「焦点环出现不过渡」），不用过渡避免爬行感 */
+  .v1 .wb-field.is-focus, .v2 .wb-field.is-focus, .v3 .wb-field.is-focus { box-shadow:0 1px 0 0 var(--accent); }
+  /* 聚焦迁移动效：进 200ms --ease-enter / 出 100ms --ease-exit；hover 160ms --ease-out-soft */
+  .v1 .wb-field, .v2 .wb-field, .v3 .wb-field {
+    transition: border-bottom-color var(--dur-view) var(--ease-enter), background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .v1 .wb-field:not(:focus-within):not(.is-focus), .v2 .wb-field:not(:focus-within):not(.is-focus), .v3 .wb-field:not(:focus-within):not(.is-focus) {
+    transition: border-bottom-color var(--dur-exit) var(--ease-exit), background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .v1 .wb-field textarea, .v2 .wb-field textarea, .v3 .wb-field textarea { caret-color:var(--accent); }
+  .v1 .prose, .v2 .prose, .v3 .prose { caret-color:var(--accent); }
+  .v1 .caret, .v2 .caret, .v3 .caret { background:var(--accent); }  /* 预览：设计光标色＝accent */
+  /* 「带入…」小字：V3 字段为灰底块，遮底随之 */
+  .v3 .wb-pick { background:var(--grey-1); }
+  .v1 .wb-pick, .v2 .wb-pick { background:var(--paper); }
+
+  /* 自由材料 / 追问输入面（textarea：同机制；border-box 定高使 30/32px 与现状一致。
+     底 1px 透明边占位 + 上下 padding 补偿：自由材料 4/5、追问 5/6 ⇒ 内容行 20px 恰好不被裁） */
+  .v1 .wb-free textarea, .v2 .wb-free textarea, .v3 .wb-free textarea {
+    border:0; border-bottom:1px solid transparent; background:transparent; padding:4px 0 5px; caret-color:var(--accent);
+    transition: border-bottom-color var(--dur-view) var(--ease-enter), background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .v1 .wb-free textarea { border-bottom-color:var(--border-subtle); }
+  .v1 .wb-free textarea:hover, .v1 .wb-free textarea.is-hover { border-bottom-color:var(--border-strong); }
+  .v1 .wb-free textarea:focus, .v1 .wb-free textarea.is-focus,
+  .v2 .wb-free textarea:focus, .v2 .wb-free textarea.is-focus,
+  .v3 .wb-free textarea:focus, .v3 .wb-free textarea.is-focus { border-bottom-color:var(--accent); }
+  .v1 .wb-free textarea:focus, .v2 .wb-free textarea:focus, .v3 .wb-free textarea:focus { box-shadow:0 1px 0 0 var(--accent); }
+  .v2 .wb-free textarea.is-hover, .v3 .wb-free textarea.is-hover { background:var(--grey-1); }
+  .v3 .wb-free textarea { background:var(--grey-1); }
+
+  .v1 .wb-composer textarea, .v2 .wb-composer textarea, .v3 .wb-composer textarea {
+    border:0; border-bottom:1px solid transparent; background:transparent; padding:5px 0 6px; caret-color:var(--accent);
+    transition: border-bottom-color var(--dur-view) var(--ease-enter), background-color var(--dur-hover) var(--ease-out-soft);
+  }
+  .v1 .wb-composer textarea { border-bottom-color:var(--border-subtle); }
+  .v1 .wb-composer textarea:hover { border-bottom-color:var(--border-strong); }
+  .v1 .wb-composer textarea:focus, .v2 .wb-composer textarea:focus, .v3 .wb-composer textarea:focus { border-bottom-color:var(--accent); }
+  .v1 .wb-composer textarea:focus, .v2 .wb-composer textarea:focus, .v3 .wb-composer textarea:focus { box-shadow:0 1px 0 0 var(--accent); }
+  .v3 .wb-composer textarea { background:var(--grey-1); }
+  .v1 .wb-composer textarea::placeholder, .v2 .wb-composer textarea::placeholder, .v3 .wb-composer textarea::placeholder,
+  .v1 .wb-free textarea::placeholder, .v2 .wb-free textarea::placeholder, .v3 .wb-free textarea::placeholder { color:var(--text-placeholder); }
+  .v1 .pm-ph, .v2 .pm-ph, .v3 .pm-ph { color:var(--text-placeholder); }
+
+  /* ---------- 状态样张（字段 4 态 / 发送钮 4 态） ---------- */
+  .states { display:flex; flex-direction:column; gap:var(--sp-4); }
+  .state-row { display:flex; gap:var(--sp-4); align-items:flex-end; flex-wrap:wrap; }
+  .state-cell { display:flex; flex-direction:column; gap:var(--sp-1); }
+  .state-cap { font-size:12px; color:var(--text-helper); letter-spacing:.02em; }
+  .spec { width:240px; background:var(--paper); outline:1px solid var(--grey-2); padding:var(--sp-3); }
+  .spec .wb-field { margin-bottom:2px; }
+  .spec-v0 .wb-field { border:1px solid var(--border-strong); }
+  .spec-v0 .wb-field.is-focus { border-color:var(--accent); }
+  .send-spec { display:inline-flex; }
+  /* 发送钮 hover 候选（H1 深一档 / H2 反白）与禁用候选（D1 grey-2 字 / D2 placeholder 字） */
+  .send-h1 { background:var(--accent-hover) !important; }
+  .send-h2 { background:var(--paper) !important; color:var(--ink) !important; }
+  .send-h2::after { content:""; }
+  .send-d2:disabled { color:var(--text-placeholder); }
+
+  /* ---------- 实测数 ---------- */
+  #metrics-out {
+    background:#111; color:#e8e8e6; font-family:var(--font-mono); font-size:12px; line-height:1.55;
+    padding:var(--sp-4); overflow-x:auto; white-space:pre;
+  }
+  .legend { font-size:12px; color:var(--text-secondary); display:flex; flex-direction:column; gap:var(--sp-1); }
+  .legend b { color:var(--text-primary); }
+</style>
+</head>
+<body>
+
+<header class="page-head">
+  <h1>制卡台样式改版 D142 — 现状复刻 vs 变体 V1 / V2 / V3</h1>
+  <p class="lede">
+    对照对象：<code>tests/tmp-d142-dock-manual.png</code> / <code>-解释.png</code> / <code>-制卡.png</code>（1100×750 内窗、DPR 2.5）。
+    本页与产品同 token、同字体栈、同尺寸参数（每列 <b>400px = --wb-w</b>，列高 702px = 内窗高 − 顶栏 48），仅「被改动属性」不同。
+    变体列 = <b>输入面变体 × 线条收敛政策</b>的完整包；页尾 <b>#metrics-out</b> 为 getComputedStyle 实测数（window.__D142 同源）。
+    静态态类 <code>.is-hover / .is-focus</code> 与真实 <code>:hover / :focus-within</code> 双写，供无头机械复核。
+  </p>
+</header>
+
+<!-- ============ 第一段：四列同屏对照 ============ -->
+<section class="rack">
+
+  <!-- 现状复刻 -->
+  <div class="col plate v0" id="dock-v0-wrap">
+    <div class="col-label">现状复刻（tests 截图逐参数）</div>
+    <aside class="side-dock" id="dock-v0" data-col="v0">
+      <section class="wb-manual">
+        <header class="wb-head">
+          <span class="wb-title">手动制卡</span>
+          <div class="wb-tabs">
+            <button class="on">问答题</button><button>翻转问答</button><button>填空题</button><button>图片挖空</button>
+          </div>
+          <button class="wb-chev-btn" aria-label="收起"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
+        </header>
+        <div class="wb-manual-body">
+          <div class="wb-fields">
+            <div class="wb-field is-focus" data-f="front">
+              <div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div>
+              <button class="wb-pick">带入选区</button>
+            </div>
+            <div class="wb-field" data-f="back">
+              <div class="wb-field-inner"><div class="prose"><span class="pm-ph">背面（答案）</span></div></div>
+            </div>
+          </div>
+          <div class="wb-foot">
+            <button class="wb-more-toggle">更多 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button class="btn btn-primary" disabled>制卡</button>
+          </div>
+        </div>
+      </section>
+      <section class="wb-ai">
+        <header class="wb-head">
+          <span class="wb-title">AI 助手</span>
+          <div class="wb-tabs"><button class="on">解释</button><button>制卡</button></div>
+        </header>
+        <div class="wb-ai-body">
+          <div class="wb-scroll">
+            <div class="dock-empty">
+              <div class="ai-explain-mode">
+                <span class="ai-explain-mode-label mono">解读方式</span>
+                <button class="dd-btn">自动 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+              </div>
+              <div class="wb-free">
+                <textarea rows="1" placeholder="粘贴或输入要处理的文字"></textarea>
+                <div class="wb-free-acts">
+                  <button class="btn btn-primary btn-sm" disabled>AI 解释</button>
+                  <button class="btn btn-outline btn-sm" disabled>AI 制卡</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="wb-composer">
+            <textarea rows="1" placeholder="追问，或自由提问…"></textarea>
+            <button class="btn btn-primary btn-sm wb-composer-send" disabled>发送</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+    <p class="col-note">盒框 6 个（字段×2、下拉、自由材料、禁用描边钮、追问框）、可见线 28 段；`wb-ai` 上缘 strong 线与标题下缘线相距 34px 构成双线噪点。</p>
+  </div>
+
+  <!-- V1 -->
+  <div class="col plate v1" id="dock-v1-wrap">
+    <div class="col-label">V1 下缘一划（静默底线）</div>
+    <aside class="side-dock" id="dock-v1" data-col="v1">
+      <section class="wb-manual">
+        <header class="wb-head">
+          <span class="wb-title">手动制卡</span>
+          <div class="wb-tabs"><button class="on">问答题</button><button>翻转问答</button><button>填空题</button><button>图片挖空</button></div>
+          <button class="wb-chev-btn" aria-label="收起"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
+        </header>
+        <div class="wb-manual-body">
+          <div class="wb-fields">
+            <div class="wb-field is-focus" data-f="front">
+              <div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div>
+              <button class="wb-pick">带入选区</button>
+            </div>
+            <div class="wb-field" data-f="back">
+              <div class="wb-field-inner"><div class="prose"><span class="pm-ph">背面（答案）</span></div></div>
+            </div>
+          </div>
+          <div class="wb-foot">
+            <button class="wb-more-toggle">更多 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button class="btn btn-primary" disabled>制卡</button>
+          </div>
+        </div>
+      </section>
+      <section class="wb-ai">
+        <header class="wb-head">
+          <span class="wb-title">AI 助手</span>
+          <div class="wb-tabs"><button class="on">解释</button><button>制卡</button></div>
+        </header>
+        <div class="wb-ai-body">
+          <div class="wb-scroll">
+            <div class="dock-empty">
+              <div class="ai-explain-mode">
+                <span class="ai-explain-mode-label mono">解读方式</span>
+                <button class="dd-btn">自动 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+              </div>
+              <div class="wb-free">
+                <textarea rows="1" placeholder="粘贴或输入要处理的文字"></textarea>
+                <div class="wb-free-acts">
+                  <button class="btn btn-primary btn-sm" disabled>AI 解释</button>
+                  <button class="btn btn-outline btn-sm" disabled>AI 制卡</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="wb-composer">
+            <textarea rows="1" placeholder="追问，或自由提问…"></textarea>
+            <button class="btn btn-primary btn-sm wb-composer-send" disabled>发送</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+    <p class="col-note">静止 7 段线（2 标题下缘 + 2 字段底线 + 追问栏上缘 + 2 输入面底线）；focus = accent 1px + 瞬时 2px 厚化。</p>
+  </div>
+
+  <!-- V2 -->
+  <div class="col plate v2" id="dock-v2-wrap">
+    <div class="col-label">V2 无痕浮线（参考稿本体）</div>
+    <aside class="side-dock" id="dock-v2" data-col="v2">
+      <section class="wb-manual">
+        <header class="wb-head">
+          <span class="wb-title">手动制卡</span>
+          <div class="wb-tabs"><button class="on">问答题</button><button>翻转问答</button><button>填空题</button><button>图片挖空</button></div>
+          <button class="wb-chev-btn" aria-label="收起"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
+        </header>
+        <div class="wb-manual-body">
+          <div class="wb-fields">
+            <div class="wb-field is-focus" data-f="front">
+              <div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div>
+              <button class="wb-pick">带入选区</button>
+            </div>
+            <div class="wb-field" data-f="back">
+              <div class="wb-field-inner"><div class="prose"><span class="pm-ph">背面（答案）</span></div></div>
+            </div>
+          </div>
+          <div class="wb-foot">
+            <button class="wb-more-toggle">更多 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button class="btn btn-primary" disabled>制卡</button>
+          </div>
+        </div>
+      </section>
+      <section class="wb-ai">
+        <header class="wb-head">
+          <span class="wb-title">AI 助手</span>
+          <div class="wb-tabs"><button class="on">解释</button><button>制卡</button></div>
+        </header>
+        <div class="wb-ai-body">
+          <div class="wb-scroll">
+            <div class="dock-empty">
+              <div class="ai-explain-mode">
+                <span class="ai-explain-mode-label mono">解读方式</span>
+                <button class="dd-btn">自动 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+              </div>
+              <div class="wb-free">
+                <textarea rows="1" placeholder="粘贴或输入要处理的文字"></textarea>
+                <div class="wb-free-acts">
+                  <button class="btn btn-primary btn-sm" disabled>AI 解释</button>
+                  <button class="btn btn-outline btn-sm" disabled>AI 制卡</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="wb-composer">
+            <textarea rows="1" placeholder="追问，或自由提问…"></textarea>
+            <button class="btn btn-primary btn-sm wb-composer-send" disabled>发送</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+    <p class="col-note">静止仅 3 段线（2 标题下缘 + 追问栏上缘）；hover 灰底、focus accent 底线（仅聚焦时出现）。</p>
+  </div>
+
+  <!-- V3 -->
+  <div class="col plate v3" id="dock-v3-wrap">
+    <div class="col-label">V3 灰纸块（以填充代线）</div>
+    <aside class="side-dock" id="dock-v3" data-col="v3">
+      <section class="wb-manual">
+        <header class="wb-head">
+          <span class="wb-title">手动制卡</span>
+          <div class="wb-tabs"><button class="on">问答题</button><button>翻转问答</button><button>填空题</button><button>图片挖空</button></div>
+          <button class="wb-chev-btn" aria-label="收起"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg></button>
+        </header>
+        <div class="wb-manual-body">
+          <div class="wb-fields">
+            <div class="wb-field is-focus" data-f="front">
+              <div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div>
+              <button class="wb-pick">带入选区</button>
+            </div>
+            <div class="wb-field" data-f="back">
+              <div class="wb-field-inner"><div class="prose"><span class="pm-ph">背面（答案）</span></div></div>
+            </div>
+          </div>
+          <div class="wb-foot">
+            <button class="wb-more-toggle">更多 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+            <button class="btn btn-primary" disabled>制卡</button>
+          </div>
+        </div>
+      </section>
+      <section class="wb-ai">
+        <header class="wb-head">
+          <span class="wb-title">AI 助手</span>
+          <div class="wb-tabs"><button class="on">解释</button><button>制卡</button></div>
+        </header>
+        <div class="wb-ai-body">
+          <div class="wb-scroll">
+            <div class="dock-empty">
+              <div class="ai-explain-mode">
+                <span class="ai-explain-mode-label mono">解读方式</span>
+                <button class="dd-btn">自动 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
+              </div>
+              <div class="wb-free">
+                <textarea rows="1" placeholder="粘贴或输入要处理的文字"></textarea>
+                <div class="wb-free-acts">
+                  <button class="btn btn-primary btn-sm" disabled>AI 解释</button>
+                  <button class="btn btn-outline btn-sm" disabled>AI 制卡</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="wb-composer">
+            <textarea rows="1" placeholder="追问，或自由提问…"></textarea>
+            <button class="btn btn-primary btn-sm wb-composer-send" disabled>发送</button>
+          </div>
+        </div>
+      </section>
+    </aside>
+    <p class="col-note">静止 3 段线 + 灰块字段（--grey-1 填充代线）；placeholder 对灰底 3.03:1（≥3）。</p>
+  </div>
+
+</section>
+
+<!-- ============ 第二段：更多展开区（现状 vs 新） ============ -->
+<section>
+  <div class="col-label" style="margin-bottom:8px">「更多」展开区 — 现状 vs 新版（新版以 V1 参数呈现；行 3/4/5/6/7 的处置落点）</div>
+  <div class="rack">
+    <div class="col plate v0">
+      <aside class="side-dock" style="height:auto">
+        <div class="wb-manual-body">
+          <div class="wb-more" style="border-top:1px solid var(--border-subtle);padding-top:4px;display:flex;flex-direction:column">
+            <div class="wb-row" style="display:flex;align-items:center;gap:12px;min-height:32px">
+              <span class="wb-k" style="flex:none;width:44px;font-size:12px;color:var(--text-helper)">领域</span>
+              <div class="wb-v" style="flex:1"><button class="dd-btn" style="border-color:var(--border-strong)">选择领域 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg></button></div>
+            </div>
+            <div class="wb-row" style="display:flex;align-items:center;gap:12px;min-height:32px">
+              <span class="wb-k" style="flex:none;width:44px;font-size:12px;color:var(--text-helper)">标签</span>
+              <div class="wb-v" style="flex:1"><input style="width:100%;height:26px;border:1px solid var(--border-strong);background:transparent;font:inherit;font-size:12px;padding:0 8px" placeholder="如：考研::英语"></div>
+            </div>
+            <label class="wb-row" style="display:flex;align-items:center;gap:12px;min-height:32px">
+              <span class="wb-k" style="flex:none;width:44px;font-size:12px;color:var(--text-helper)">前缀</span>
+              <input class="wb-line" style="flex:1;min-width:0;height:28px;border:0;border-bottom:1px dashed var(--border-strong);background:none;font:inherit;font-size:13px;outline:none" placeholder="自动：取领域名称">
+            </label>
+            <label class="wb-row" style="display:flex;align-items:center;gap:12px;min-height:32px">
+              <span class="wb-k" style="flex:none;width:44px;font-size:12px;color:var(--text-helper)">助记</span>
+              <input class="wb-line" style="flex:1;min-width:0;height:28px;border:0;border-bottom:1px dashed var(--border-strong);background:none;font:inherit;font-size:13px;outline:none" placeholder="例：中位数的「中」＝正中间">
+            </label>
+            <label class="wb-row wb-check" style="display:flex;align-items:center;gap:8px;min-height:32px;font-size:13px;color:var(--text-secondary)">
+              <input type="checkbox" style="appearance:none;-webkit-appearance:none;width:13px;height:13px;border:1px solid var(--border-strong);background:var(--paper)">
+              <span>标注日期</span>
+            </label>
+          </div>
+        </div>
+      </aside>
+      <p class="col-note">现状：下拉 4 边、标签输入 4 边、2 条虚底、勾选 13px 方框 = 4 个线控件。</p>
+    </div>
+    <div class="col plate v1">
+      <aside class="side-dock" style="height:auto">
+        <div class="wb-manual-body">
+          <div class="wb-more">
+            <div class="wb-row">
+              <span class="wb-k">领域</span>
+              <div class="wb-v"><button class="dd-btn">选择领域 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m6 9 6 6 6-6"/></svg></button></div>
+            </div>
+            <div class="wb-row">
+              <span class="wb-k">标签</span>
+              <div class="wb-v tag-box"><input placeholder="如：考研::英语"></div>
+            </div>
+            <label class="wb-row">
+              <span class="wb-k">前缀</span>
+              <input class="wb-line" placeholder="自动：取领域名称">
+            </label>
+            <label class="wb-row">
+              <span class="wb-k">助记</span>
+              <input class="wb-line" placeholder="例：中位数的「中」＝正中间">
+            </label>
+            <label class="wb-row wb-check">
+              <input type="checkbox">
+              <span>标注日期</span>
+            </label>
+          </div>
+        </div>
+      </aside>
+      <p class="col-note">新版：下拉 ghost 化、标签输入去框、虚底→实底 subtle、勾选框保留（控件本体）。线控件 4 → 2（3 条实底 + 1 方框）。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 第三段：字段 4 态（每变体一行） ============ -->
+<section class="states">
+  <div class="col-label">字段 4 态（静止 / 悬停 / 聚焦 / 已输入）— 手动「正面」字段口径</div>
+
+  <div class="state-row v0">
+    <div class="state-cell"><span class="state-cap">现状 · 静止</span><div class="spec spec-v0"><div class="wb-field"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">现状 · 悬停（无变化）</span><div class="spec spec-v0"><div class="wb-field is-hover"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">现状 · 聚焦（accent 1px 四边）</span><div class="spec spec-v0"><div class="wb-field is-focus"><div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">现状 · 已输入</span><div class="spec spec-v0"><div class="wb-field"><div class="wb-field-inner"><div class="prose">统计: 中位数是什么？</div></div></div></div></div>
+  </div>
+
+  <div class="state-row v1">
+    <div class="state-cell"><span class="state-cap">V1 · 静止（底线 subtle）</span><div class="spec"><div class="wb-field st-rest"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V1 · 悬停（底线 strong）</span><div class="spec"><div class="wb-field st-hover is-hover"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V1 · 聚焦（accent +2px）</span><div class="spec"><div class="wb-field st-focus is-focus"><div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V1 · 已输入（提示消失）</span><div class="spec"><div class="wb-field st-filled"><div class="wb-field-inner"><div class="prose">统计: 中位数是什么？</div></div></div></div></div>
+  </div>
+
+  <div class="state-row v2">
+    <div class="state-cell"><span class="state-cap">V2 · 静止（无线）</span><div class="spec"><div class="wb-field st-rest"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V2 · 悬停（grey-1 底）</span><div class="spec"><div class="wb-field st-hover is-hover"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V2 · 聚焦（accent 底线）</span><div class="spec"><div class="wb-field st-focus is-focus"><div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V2 · 已输入（提示消失）</span><div class="spec"><div class="wb-field st-filled"><div class="wb-field-inner"><div class="prose">统计: 中位数是什么？</div></div></div></div></div>
+  </div>
+
+  <div class="state-row v3">
+    <div class="state-cell"><span class="state-cap">V3 · 静止（grey-1 块）</span><div class="spec"><div class="wb-field st-rest"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V3 · 悬停（同静止）</span><div class="spec"><div class="wb-field st-hover"><div class="wb-field-inner"><div class="prose"><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V3 · 聚焦（accent 底线）</span><div class="spec"><div class="wb-field st-focus is-focus"><div class="wb-field-inner"><div class="prose"><span class="caret"></span><span class="pm-ph">正面（问题）</span></div></div></div></div></div>
+    <div class="state-cell"><span class="state-cap">V3 · 已输入（提示消失）</span><div class="spec"><div class="wb-field st-filled"><div class="wb-field-inner"><div class="prose">统计: 中位数是什么？</div></div></div></div></div>
+  </div>
+</section>
+
+<!-- ============ 第四段：发送钮态 ============ -->
+<section class="states">
+  <div class="col-label">发送钮（composer-send）— 静止 / hover 候选 H1·H2 / 禁用候选 D1·D2（hover 只变色，无阴影无位移）</div>
+  <div class="state-row">
+    <div class="state-cell"><span class="state-cap">静止（accent 实底）</span><div class="spec"><span class="send-spec"><button class="btn btn-primary btn-sm wb-composer-send" style="min-width:56px;height:32px">发送</button></span></div></div>
+    <div class="state-cell"><span class="state-cap">悬停 H1 · 深一档（现状档）</span><div class="spec"><span class="send-spec"><button class="btn btn-primary btn-sm wb-composer-send send-h1" style="min-width:56px;height:32px">发送</button></span></div></div>
+    <div class="state-cell"><span class="state-cap">悬停 H2 · 反白幽灵（参考稿同构，无阴影）</span><div class="spec"><span class="send-spec"><button class="btn btn-primary btn-sm wb-composer-send send-h2" style="min-width:56px;height:32px">发送</button></span></div></div>
+    <div class="state-cell"><span class="state-cap">禁用 D1 · 现状（grey-2 字）</span><div class="spec"><span class="send-spec"><button class="btn btn-primary btn-sm wb-composer-send" style="min-width:56px;height:32px" disabled>发送</button></span></div></div>
+    <div class="state-cell"><span class="state-cap">禁用 D2 · placeholder 灰字</span><div class="spec"><span class="send-spec"><button class="btn btn-primary btn-sm wb-composer-send send-d2" style="min-width:56px;height:32px" disabled>发送</button></span></div></div>
+  </div>
+  <p class="legend">
+    <span><b>H1</b>：<code>--accent-hover</code>（accent 88% + 黑）填充，文字仍 <code>--accent-on</code>。 <b>H2</b>：<code>--paper</code> 填充 + <code>--ink</code> 文字（参考稿「反白」的 token 同构；纸面近白 → 块面隐去、文字反相）。</span>
+    <span><b>D1</b>：填充 <code>--grey-1</code> + 文字 <code>--grey-2</code>（现状）。 <b>D2</b>：文字提到 <code>--text-placeholder</code> #8a8a8a（可读性略高，仍远低于正文对比）。</span>
+    <span>两档禁用均 <code>cursor: default</code>（D141：全应用禁用态无 🚫 光标），不响应 hover。</span>
+  </p>
+</section>
+
+<!-- ============ 实测数 ============ -->
+<section>
+  <div class="col-label" style="margin-bottom:8px">实测数（getComputedStyle 机械复读；window.__D142 同源）</div>
+  <pre id="metrics-out">measuring…</pre>
+</section>
+
+<script>
+(() => {
+  const P = (v) => parseFloat(v) || 0;
+  const parseColor = (s) => {
+    if (!s) return null;
+    const m = s.match(/color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)/);
+    if (m) return [+m[1] * 255, +m[2] * 255, +m[3] * 255];
+    const n = s.match(/[\d.]+/g);
+    return n ? n.slice(0, 3).map(Number) : null;
+  };
+  const alpha = (s) => { const m = s.match(/rgba?\(([^)]+)\)/); if (!m) return 1; const parts = m[1].split(","); return parts.length > 3 ? parseFloat(parts[3]) : 1; };
+  const lum = (c) => { const [r,g,b] = c.map(v => { v /= 255; return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); }); return 0.2126*r + 0.7152*g + 0.0722*b; };
+  const ratio = (a, b) => { if (!a || !b) return null; const l1 = lum(a), l2 = lum(b); const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1]; return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100; };
+  const cs = (el) => el ? getComputedStyle(el) : null;
+  const pick = (el, keys) => { if (!el) return null; const s = cs(el); const o = {}; for (const k of keys) o[k] = s[k]; return o; };
+  const r = (el) => el.getBoundingClientRect();
+  // token → 实际计算色（经探针元素解析，color-mix 也得到最终值）
+  const resolve = (v) => { const d = document.createElement("span"); d.style.color = v; document.body.appendChild(d); const c = cs(d).color; d.remove(); return c; };
+
+  const ROOT = cs(document.documentElement);
+  const T = {};
+  for (const k of ["--paper","--grey-1","--accent","--accent-hover","--border-subtle","--border-strong","--text-placeholder","--text-primary"]) T[k] = ROOT.getPropertyValue(k).trim();
+  const R = {}; for (const k of Object.keys(T)) R[k] = resolve(T[k]);
+
+  // 可见边框统计：口径＝border style≠none 且 width>0 且颜色非全透明（非「有宽度的边框」，后者含透明描边与 0 尺寸节点）
+  const visible = (el) => {
+    const s = cs(el); let seg = 0, box = 0;
+    const sides = [ ["borderTopWidth","borderTopStyle","borderTopColor"], ["borderRightWidth","borderRightStyle","borderRightColor"], ["borderBottomWidth","borderBottomStyle","borderBottomColor"], ["borderLeftWidth","borderLeftStyle","borderLeftColor"] ];
+    for (const [w, st, c] of sides) if (P(s[w]) > 0 && s[st] !== "none" && alpha(s[c]) > 0) seg++;
+    if (seg >= 3) box = 1;
+    return { seg, box };
+  };
+  const audit = (root) => {
+    let elems = 0, segs = 0, boxes = 0;
+    for (const el of root.querySelectorAll("*")) {
+      const v = visible(el);
+      if (v.seg > 0) { elems++; segs += v.seg; boxes += v.box; }
+    }
+    return { 可见线元素: elems, 可见线段: segs, 四边盒框: boxes };
+  };
+  const fieldOf = (sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const s = cs(el);
+    return {
+      height: Math.round(r(el).height),
+      borderBottom: s.borderBottomWidth + " " + s.borderBottomStyle + " " + s.borderBottomColor,
+      background: s.backgroundColor,
+      boxShadow: s.boxShadow
+    };
+  };
+  const taOf = (sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return null;
+    const s = cs(el);
+    return { height: Math.round(r(el).height), borderBottom: s.borderBottomWidth + " " + s.borderBottomStyle + " " + s.borderBottomColor, background: s.backgroundColor, padding: s.padding };
+  };
+
+  const out = {};
+  out["tokens"] = T;
+  out["对比度"] = {
+    "accent/paper": ratio(parseColor(R["--accent"]), parseColor(R["--paper"])),
+    "placeholder/paper": ratio(parseColor(R["--text-placeholder"]), parseColor(R["--paper"])),
+    "placeholder/grey-1": ratio(parseColor(R["--text-placeholder"]), parseColor(R["--grey-1"])),
+    "border-subtle/paper": ratio(parseColor(R["--border-subtle"]), parseColor(R["--paper"])),
+    "border-strong/paper": ratio(parseColor(R["--border-strong"]), parseColor(R["--paper"])),
+    "accent-hover上的白字": ratio([255,255,255], parseColor(R["--accent-hover"])),
+    "accent上的白字": ratio([255,255,255], parseColor(R["--accent"]))
+  };
+  out["线条审计"] = { "现状v0": audit(document.getElementById("dock-v0")), "V1": audit(document.getElementById("dock-v1")), "V2": audit(document.getElementById("dock-v2")), "V3": audit(document.getElementById("dock-v3")) };
+  out["字段"] = {
+    "v0静止": fieldOf("#dock-v0 .wb-field[data-f=back]"), "v0聚焦": fieldOf("#dock-v0 .wb-field.is-focus"),
+    "V1静止": fieldOf(".v1 .wb-field.st-rest"), "V1悬停": fieldOf(".v1 .wb-field.st-hover"), "V1聚焦": fieldOf(".v1 .wb-field.st-focus"), "V1已输入": fieldOf(".v1 .wb-field.st-filled"),
+    "V2静止": fieldOf(".v2 .wb-field.st-rest"), "V2悬停": fieldOf(".v2 .wb-field.st-hover"), "V2聚焦": fieldOf(".v2 .wb-field.st-focus"),
+    "V3静止": fieldOf(".v3 .wb-field.st-rest"), "V3聚焦": fieldOf(".v3 .wb-field.st-focus")
+  };
+  out["自由材料textarea"] = { "v0": taOf("#dock-v0 .wb-free textarea"), "V1": taOf("#dock-v1 .wb-free textarea"), "V2": taOf("#dock-v2 .wb-free textarea"), "V3": taOf("#dock-v3 .wb-free textarea") };
+  out["追问textarea"] = { "v0": taOf("#dock-v0 .wb-composer textarea"), "V1": taOf("#dock-v1 .wb-composer textarea"), "V2": taOf("#dock-v2 .wb-composer textarea"), "V3": taOf("#dock-v3 .wb-composer textarea") };
+  const send = (sel) => { const el = document.querySelector(sel); if (!el) return null; const s = cs(el); return { height: Math.round(r(el).height), background: s.backgroundColor, color: s.color, cursor: s.cursor, boxShadow: s.boxShadow }; };
+  out["发送钮"] = { "静止": send(".send-spec .btn:not(.send-h1):not(.send-h2):not(:disabled)"), "悬停H1": send(".send-h1"), "悬停H2": send(".send-h2"), "禁用D1": send("button.wb-composer-send[disabled]:not(.send-d2)"), "禁用D2": send(".send-d2") };
+  out["composer行"] = { "v0": pick(document.querySelector("#dock-v0 .wb-composer"), ["borderTopWidth","borderTopStyle","borderTopColor","height"]), "V1": pick(document.querySelector("#dock-v1 .wb-composer"), ["borderTopWidth","borderTopStyle","borderTopColor","height"]) };
+  out["ai区上缘线"] = { "v0": pick(document.querySelector("#dock-v0 .wb-ai"), ["borderTopWidth","borderTopStyle","borderTopColor"]), "V1": pick(document.querySelector("#dock-v1 .wb-ai"), ["borderTopWidth","borderTopStyle","borderTopColor"]) };
+  out["标题下缘线"] = { "v0": pick(document.querySelector("#dock-v0 .wb-head"), ["borderBottomWidth","borderBottomStyle","borderBottomColor"]), "V1": pick(document.querySelector("#dock-v1 .wb-head"), ["borderBottomWidth","borderBottomStyle","borderBottomColor"]) };
+  out["placeholder与光标色"] = {
+    "占位文本(v0 ProseMirror＝--text-placeholder)": pick(document.querySelector("#dock-v0 .pm-ph"), ["color"]),
+    "占位文本(V1)": pick(document.querySelector("#dock-v1 .pm-ph"), ["color"]),
+    "自由材料textarea占位(v0, 未声明token→UA默认)": "UA 默认（各平台不一；设计改为 --text-placeholder）",
+    "caret(V1)": pick(document.querySelector(".state-row.v1 .wb-field.st-focus .caret"), ["backgroundColor"]),
+    "编辑区caretColor(V1自由材料)": pick(document.querySelector("#dock-v1 .wb-free textarea"), ["caretColor"]),
+    "编辑区caretColor(V1追问)": pick(document.querySelector("#dock-v1 .wb-composer textarea"), ["caretColor"]),
+    "编辑区caretColor(现状追问)": pick(document.querySelector("#dock-v0 .wb-composer textarea"), ["caretColor"])
+  };
+  const ovf = (sel) => { const el = document.querySelector(sel); return el ? el.scrollHeight + "<=" + el.clientHeight + (el.scrollHeight <= el.clientHeight ? " ok" : " 溢出!") : null; };
+  out["textarea行裁切检查"] = { "v0自由材料": ovf("#dock-v0 .wb-free textarea"), "V1自由材料": ovf("#dock-v1 .wb-free textarea"), "V1追问": ovf("#dock-v1 .wb-composer textarea"), "V2追问": ovf("#dock-v2 .wb-composer textarea") };
+  out["几何"] = {
+    "dock宽": Math.round(r(document.getElementById("dock-v0")).width),
+    "dock高": Math.round(r(document.getElementById("dock-v0")).height),
+    "标题行总高": Math.round(r(document.querySelector("#dock-v0 .wb-head")).height),
+    "发送钮宽": Math.round(r(document.querySelector("#dock-v0 .wb-composer-send")).width),
+    "composer内textarea高=发送钮高": taOf("#dock-v0 .wb-composer textarea").height + "=" + send("button.wb-composer-send[disabled]").height,
+    "V1内textarea高=发送钮高": taOf("#dock-v1 .wb-composer textarea").height + "=" + send("#dock-v1 .wb-composer-send").height
+  };
+
+  window.__D142 = out;
+  document.getElementById("metrics-out").textContent = JSON.stringify(out, null, 2);
+})();
+</script>
+</body>
+</html>
