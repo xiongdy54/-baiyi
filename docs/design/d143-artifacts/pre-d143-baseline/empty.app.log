@@ -1,0 +1,66 @@
+[host] spawn epoch=1791783991505 scenario=empty userData=C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\empty-userdata port=9710
+OUT [LAG] proc.start epoch=1791783991601 pid=11692 argv1=electron/js2c/browser_init
+OUT [LAG] probe.ready better-sqlite3
+OUT [LAG] probe.ready fs
+OUT [LAG] probe.done @1791783991612
+OUT [LAG] probe.ready desktopCapturer
+OUT [LAG] probe.ready db
+OUT [LAG] probe.ready backup
+OUT [LAG] probe.ready memoryTidy
+OUT [LAG] probe.ready screenCapture
+OUT [LAG] probe.ready dictDb
+OUT [LAG] probe.ready learnerDb
+OUT [LAG] probe.ready learnerRefresh
+OUT [LAG] hole 1791783991602 -> 1791783991786 (184ms)
+ERR DevTools listening on ws://127.0.0.1:9710/devtools/browser/14ad667a-4fae-4234-a20d-1c0373e4ee11
+OUT [LAG] screenCapture.warmup 注册 @1791783991834
+OUT [LAG] enter initDb epoch=1791783991904
+OUT [LAG] sql.exec 86ms [library.db] ::  CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, cre
+OUT [LAG] probe.ready legacyBackfill
+OUT [LAG] enter runLegacyBackfill epoch=1791783992229
+OUT [LAG] exit  runLegacyBackfill dur=104ms r={"ran":true,"fsrsFixed":0,"clozeFixed":0,"markedAt":1791783992229,"planned":0}
+OUT [LAG] exit  initDb dur=429ms
+OUT [LAG] enter autoBackupIfNeeded epoch=1791783992370
+OUT [LAG] hole 1791783991786 -> 1791783992384 (598ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791783991786 -> 1791783992384 (598ms)
+OUT [LAG] exit  autoBackupIfNeeded dur=121ms r={"ok":true,"file":"C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\empty-userdata\\backups\\backup-auto-2026-10-12.zip","meta":{"app":"incremental-reading-dev","format":1,"label":"auto","createdAt":1791783992371,"includesAIConfig":false,"appVersion":"0.0.1","counts":{"items":0,"cards":0,"extracts":0,"assets":0},"assetFiles":0,"memoryFiles":0}}
+OUT [LAG] enter memoryTidy.startupBackfillIfDue epoch=1791783992491
+OUT [LAG] exit  memoryTidy.startupBackfillIfDue dur=0ms r=false
+OUT [LAG] alive @1791783996607 (since proc.start 5006ms)
+ERR [DIAG-MAIN] backfillSidecars 定时器触发 @1791783997493
+OUT [LAG] enter backfillSidecars epoch=1791783997493
+OUT [LAG] exit  backfillSidecars dur=2ms r={"ok":true,"dir":"C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\empty-userdata\\backups","scanned":1,"written":0,"swept":0}
+ERR [DIAG-MAIN] backfillSidecars 结束 @1791783997495
+OUT [LAG] enter desktopCapturer.getSources thumbnail={"width":1,"height":1} epoch=1791783999841
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791783999771 -> 1791784002186 (2415ms)
+OUT [LAG] hole 1791783999840 -> 1791784002186 (2346ms)
+OUT [LAG] alive @1791784002186 (since proc.start 10585ms)
+OUT [LAG] exit  desktopCapturer.getSources dur=2770ms sources=1 epoch=1791784002611
+OUT [LAG] hole 1791784002186 -> 1791784002618 (432ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791784002186 -> 1791784002618 (432ms)
+OUT [LAG] alive @1791784007193 (since proc.start 15592ms)
+ERR [DIAG-MAIN] learnerRefresh 定时器触发 @1791784011840
+OUT [LAG] enter learnerRefresh.refresh epoch=1791784011840 args={}
+OUT [LAG] enter learnerDb.open epoch=1791784011841
+OUT [LAG] exit  learnerDb.open dur=42ms
+OUT [LAG] enter learnerDb.open epoch=1791784011885
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791784011886
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791784011888
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791784011890
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] exit  learnerRefresh.refresh dur=71ms result={"ok":true,"ms":69} epoch=1791784011911
+ERR [DIAG-MAIN] learnerRefresh 结束 @1791784011911
+OUT [LAG] alive @1791784012193 (since proc.start 20592ms)
+OUT [LAG] alive @1791784017194 (since proc.start 25593ms)
+OUT [LAG] alive @1791784022194 (since proc.start 30594ms)
+OUT [LAG] alive @1791784027195 (since proc.start 35594ms)
+OUT [LAG] alive @1791784032207 (since proc.start 40606ms)
+OUT [LAG] alive @1791784037211 (since proc.start 45610ms)
+OUT [LAG] alive @1791784042224 (since proc.start 50623ms)
+OUT [LAG] alive @1791784047224 (since proc.start 55623ms)
+OUT [LAG] alive @1791784052235 (since proc.start 60634ms)
+OUT [LAG] alive @1791784057241 (since proc.start 65640ms)
+OUT [LAG] alive @1791784062254 (since proc.start 70653ms)

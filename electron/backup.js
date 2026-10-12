@@ -5,6 +5,9 @@
 // 核心函数均接受显式路径（opts.dataDir 等），缺省时从 electron app 取——便于无 Electron 环境跑单元测试。
 // D117（v48.73）：备份列表 meta 走 sidecar 加速缓存（<backupDir>/meta/<zip 名>.json），列表零解压；
 //                回退解析在 worker_threads 内执行——主进程不再被整包读 zip 阻塞（打开设置卡顿根治）。
+// D143（v48.98，T1）：备份**构建**（快照整读 + JSZip DEFLATE + 整包写盘）移入 worker_threads
+//                （electron/backup-build-worker.js）——主进程不再被每日首启备份的 0.3~1.4s 单段
+//                事件循环空洞冻结（诊断 docs/design/STARTUP-LAG-DIAGNOSIS.md §3 R1b）。
 const fs = require("fs");
 const path = require("path");
 const JSZip = require("jszip");
@@ -173,6 +176,50 @@ function swapIn(stagedPath, livePath) {
   return hadLive ? aside : null;
 }
 
+// D143（v48.98，T1）：备份构建（快照整读 + JSZip DEFLATE + 整包写盘）移入 worker_threads。
+// 背景（诊断 STARTUP-LAG-DIAGNOSIS §3 R1b）：这三段在每日首启备份里的主进程执行构成多段
+// 0.3~1.4s 事件循环空洞。worker 只读文件、写 .part 后 rename；零 DB 写路径（快照仍由主进程
+// db.backup() 产出）。worker 内 optional 的只读 quick_check 只上报结果，不影响备份成败。
+function buildZipInWorker(workerData) {
+  return new Promise((resolve) => {
+    let w;
+    try {
+      w = new Worker(path.join(__dirname, "backup-build-worker.js"), { workerData });
+    } catch (e) {
+      resolve({ ok: false, error: `备份构建 worker 启动失败：${e instanceof Error ? e.message : String(e)}` });
+      return;
+    }
+    let settled = false;
+    const finish = (v) => {
+      if (settled) return;
+      settled = true;
+      try { w.terminate(); } catch { /* 尽力 */ }
+      resolve(v);
+    };
+    w.on("message", (m) => {
+      if (!m || typeof m !== "object") return;
+      if (m.type === "quickCheck") {
+        // D137 §3.5 语义（结果仅入应用日志）；D143 起自「启动同步」改「每日备份时后台」执行
+        if (m.result && m.result !== "ok") console.error(`[backup] 快照完整性检查异常：${m.name} quick_check=${m.result}`);
+        else if (m.result) console.log(`[backup] 快照完整性检查通过：${m.name} quick_check=${m.result}`);
+        else console.error(`[backup] 快照完整性检查失败：${m.name} ${m.error || ""}`);
+        return;
+      }
+      if (m.type === "done") {
+        if (m.ok) finish({ ok: true, bytes: Number(m.bytes) || 0 });
+        else finish({ ok: false, error: m.error || "备份构建失败" });
+      }
+    });
+    w.on("error", (e) => finish({ ok: false, error: `备份构建 worker 异常：${e instanceof Error ? e.message : String(e)}` }));
+    w.on("exit", (code) => finish({ ok: false, error: `备份构建 worker 提前退出（code=${code}）` }));
+  });
+}
+
+// D143 复审修复（M3，独立审查必需项）：本进程在途快照目录登记——启动清扫（sweepBackupOrphans）
+// 绝不误删本进程 createBackup 正在写/读的 `.snapshot-*`（防御纵深；常规时序清扫在 +5s、备份在 +30s，
+// 此时集合为空；若用户启动后立即手动备份，登记仍在场，清扫照常放行）。
+const activeSnapshotDirs = new Set();
+
 async function createBackup(opts = {}) {
   const p = resolvePaths(opts);
   const label = ["manual", "auto", "safety"].includes(opts.label) ? opts.label : "manual";
@@ -200,22 +247,28 @@ async function createBackup(opts = {}) {
 
   // D137（§3.6，WAL sidecar 陷阱 M2 对策①）：WAL 下裸 readFileSync 库文件可能缺最近提交
   // 且无事务一致性保证——library.db / dictionary.db 改走注入的 db.backup() 在线快照
-  // （页拷贝，不阻塞写路径，异步）。快照落盘到临时目录、入 zip 后即清。
-  // 未注入快照函数的环境（既有单测 / 无 db 层调用方）退化为 readFileSync——此时调用方
+  // （页拷贝、逐小步 setImmediate 让出，实测不产生 >100ms 主进程单段空洞）。快照落盘到
+  // 临时目录、由构建 worker 读入 zip 后即清。
+  // 未注入快照函数的环境（既有单测 / 无 db 层调用方）退化为直接读库主文件——此时调用方
   // 必须已 flush（checkpoint）过，主文件才自足。
+  // D143（T1）：快照产物「路径」交给 worker 读（原先在主进程 readFileSync 整读入 zip，
+  // 835MB×2 的同步读构成启动期空洞）。
   let snapDir = null;
-  const snapOf = async (liveFile, snapFn, name) => {
+  const snapTo = async (liveFile, snapFn, name) => {
     if (typeof snapFn === "function") {
-      if (!snapDir) snapDir = fs.mkdtempSync(path.join(destDir, ".snapshot-"));
+      if (!snapDir) {
+        snapDir = fs.mkdtempSync(path.join(destDir, ".snapshot-"));
+        activeSnapshotDirs.add(path.resolve(snapDir)); // D143 复审 M3：登记在途快照（启动清扫放行）
+      }
       const snapPath = path.join(snapDir, name);
       await snapFn(snapPath);
-      return fs.readFileSync(snapPath);
+      return snapPath;
     }
-    return fs.readFileSync(liveFile);
+    return liveFile;
   };
 
   try {
-    const zip = new JSZip();
+    const libSrc = await snapTo(p.dbFile, opts.snapshotLibrary, "library.db");
     const meta = {
       app: APP_TAG,
       format: FORMAT,
@@ -226,23 +279,21 @@ async function createBackup(opts = {}) {
       counts: opts.counts || null,
       assetFiles: 0
     };
-    zip.file("library.db", await snapOf(p.dbFile, opts.snapshotLibrary, "library.db"), { compression: "DEFLATE" });
+    const entries = [];
+    entries.push({ zipPath: "library.db", filePath: libSrc, compression: "DEFLATE" });
     if (fs.existsSync(p.settingsFile)) {
-      zip.file("settings.json", fs.readFileSync(p.settingsFile), { compression: "DEFLATE" });
+      entries.push({ zipPath: "settings.json", data: fs.readFileSync(p.settingsFile), compression: "DEFLATE" });
     }
     if (includeAIConfig && fs.existsSync(p.aiConfigFile)) {
       // A-13：剥掉明文形态再打包（safeStorage 密文原样保留）
-      zip.file("ai-config.json", sanitizeAIConfigForBackup(fs.readFileSync(p.aiConfigFile, "utf8")), { compression: "DEFLATE" });
+      entries.push({ zipPath: "ai-config.json", data: sanitizeAIConfigForBackup(fs.readFileSync(p.aiConfigFile, "utf8")), compression: "DEFLATE" });
     }
     // A-4：词典本体随备份走（D137：经 db.backup() 快照，同 library.db）
-    if (fs.existsSync(p.dictDbFile)) {
-      zip.file("dictionary.db", await snapOf(p.dictDbFile, opts.snapshotDict, "dictionary.db"), { compression: "DEFLATE" });
-    }
+    const dictSrc = fs.existsSync(p.dictDbFile) ? await snapTo(p.dictDbFile, opts.snapshotDict, "dictionary.db") : null;
+    if (dictSrc) entries.push({ zipPath: "dictionary.db", filePath: dictSrc, compression: "DEFLATE" });
     if (fs.existsSync(p.dictsDir)) {
       for (const f of walkFiles(p.dictsDir)) {
-        zip.file(`dicts/${f.rel}`, fs.readFileSync(f.full), {
-          compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE"
-        });
+        entries.push({ zipPath: `dicts/${f.rel}`, filePath: f.full, compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE" });
       }
     }
     if (fs.existsSync(p.assetsDir)) {
@@ -254,9 +305,7 @@ async function createBackup(opts = {}) {
       const deleted = opts.deletedItemIds instanceof Set ? opts.deletedItemIds : new Set(opts.deletedItemIds || []);
       for (const f of walkFiles(p.assetsDir)) {
         if (deleted.has(String(f.rel).split(/[\\/]/)[0])) continue;
-        zip.file(`assets/${f.rel}`, fs.readFileSync(f.full), {
-          compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE"
-        });
+        entries.push({ zipPath: `assets/${f.rel}`, filePath: f.full, compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE" });
         meta.assetFiles++;
       }
     }
@@ -264,16 +313,20 @@ async function createBackup(opts = {}) {
     meta.memoryFiles = 0;
     if (fs.existsSync(p.memoryDir)) {
       for (const f of walkFiles(p.memoryDir)) {
-        zip.file(`memory/${f.rel}`, fs.readFileSync(f.full), { compression: "DEFLATE" });
+        entries.push({ zipPath: `memory/${f.rel}`, filePath: f.full, compression: "DEFLATE" });
         meta.memoryFiles++;
       }
     }
-    zip.file("backup-meta.json", JSON.stringify(meta, null, 2), { compression: "DEFLATE" });
-    const buf = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
-    // 先写临时名再改名，避免半成品 zip 被当作可用备份
+    entries.push({ zipPath: "backup-meta.json", data: Buffer.from(JSON.stringify(meta, null, 2), "utf8"), compression: "DEFLATE" });
+    // D143（T1）：构建（整读→DEFLATE→写盘）全部在 worker 线程内，主进程只收消息。
     const tmp = destFile + ".part";
-    fs.writeFileSync(tmp, buf);
-    fs.renameSync(tmp, destFile);
+    const built = await buildZipInWorker({
+      entries,
+      destFile,
+      tmpFile: tmp,
+      quickCheck: dictSrc ? [{ name: "dictionary.db", path: dictSrc }] : []
+    });
+    if (!built.ok) throw new Error(built.error || "备份构建失败");
     // D117：落列表加速 sidecar（缓存，非事实源）。写失败不影响备份本体成功
     //（writeSidecar 内部吞错）；这里连 stat 都取不到时同样放弃，留给下次列表/启动补齐自愈。
     try {
@@ -287,7 +340,10 @@ async function createBackup(opts = {}) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
     // D137：快照临时目录用后即清（含失败路径）
-    if (snapDir) { try { fs.rmSync(snapDir, { recursive: true, force: true }); } catch { /* 尽力 */ } }
+    if (snapDir) {
+      try { fs.rmSync(snapDir, { recursive: true, force: true }); } catch { /* 尽力 */ }
+      activeSnapshotDirs.delete(path.resolve(snapDir)); // D143 复审 M3：注销在途登记
+    }
   }
 }
 
@@ -414,9 +470,54 @@ async function readBackupMeta(file) {
 // D117：启动空闲补齐（由 main.js 在拿到单实例锁后调度）——为缺 sidecar 的旧档后台补写，
 // 让老用户第二次打开设置即全量走 sidecar；顺带回收「zip 已被外部删除」的孤儿 sidecar/半成品。
 // 逐份串行 worker 解析（同时最多一份 895MB 在途，内存可控）；全函数不阻塞主进程事件循环。
+// D143 复审修复（M3，独立审查必需项）：中断残留清扫（对齐 D117 backfillSidecars 启动空闲清扫先例）。
+// 背景：T1 把备份构建移出启动关键路径后，正常退出（托盘退出 / app:relaunch / closeToTray 关）即可
+// 中断在途备份——两类残留此前只靠 createBackup 的 catch/finally 兜底，进程被中断即永久孤儿：
+//   ① destDir/.snapshot-*（mkdtemp 唯一名；每个 ≈ 库快照体积）、② backup-*.zip.part（跨日不再被
+//   同日重试覆盖回收）。本函数挂在启动空闲批次（backfillSidecars → +5s 定时）执行，只清历史残留。
+// 绝不误删在途备份（安全边界）：
+//   - .snapshot-*：跳过本进程登记（activeSnapshotDirs）；且只清 mtime 非今日的——当日残留可能是
+//     他进程在途（单实例锁下理论不并存，防御性保留），次日启动自然回收。
+//   - backup-*.zip.part（文件名含日期：auto=YYYY-MM-DD；manual/safety=YYYYMMDD-HHMMSS）：
+//     日期 = 今日的一律保留（可能是在途构建，同日重试会覆盖复用）；解析不出日期的一律保留（保守）。
+function partFileDayTag(name) {
+  let m = name.match(/^backup-auto-(\d{4}-\d{2}-\d{2})\.zip\.part$/i);
+  if (m) return m[1];
+  m = name.match(/^backup-(?:manual|safety)-(\d{4})(\d{2})(\d{2})-\d{6}(?:-\d+)?\.zip\.part$/i);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return null;
+}
+
+function sweepBackupOrphans(opts = {}) {
+  const dir = getBackupDir(opts);
+  const today = dayTag(opts.now);
+  const out = { ok: true, dir, snapshots: 0, parts: 0 };
+  let names;
+  try { names = fs.readdirSync(dir); } catch { return out; } // 目录不存在/不可读 = 无事可清
+  for (const name of names) {
+    const full = path.join(dir, name);
+    if (name.startsWith(".snapshot-")) {
+      if (activeSnapshotDirs.has(path.resolve(full))) continue; // 本进程在途快照
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      if (dayTag(new Date(st.mtimeMs)) === today) continue; // 今日残留留给次日启动再收（可能仍被占用）
+      try { fs.rmSync(full, { recursive: true, force: true }); out.snapshots++; } catch { /* 尽力：删不掉下次再清 */ }
+      continue;
+    }
+    if (!name.endsWith(".zip.part")) continue;
+    const day = partFileDayTag(name);
+    if (!day || day === today) continue; // 当日在途 .part 不误删
+    try { fs.rmSync(full, { force: true }); out.parts++; } catch { /* 尽力 */ }
+  }
+  return out;
+}
+
 async function backfillSidecars(opts = {}) {
   const dir = getBackupDir(opts);
-  if (!fs.existsSync(dir)) return { ok: true, dir, scanned: 0, written: 0, swept: 0 };
+  // D143 复审修复（M3）：同一启动空闲批次顺带清扫中断残留（.snapshot-* 孤儿 / 跨日 .part）——
+  // 失败只影响残留回收时机，不影响 sidecar 补齐与备份本体语义
+  const orphans = sweepBackupOrphans(opts);
+  if (!fs.existsSync(dir)) return { ok: true, dir, scanned: 0, written: 0, swept: 0, snapshotsSwept: orphans.snapshots, partsSwept: orphans.parts };
   let names;
   try {
     names = fs.readdirSync(dir);
@@ -455,7 +556,7 @@ async function backfillSidecars(opts = {}) {
     if (fs.existsSync(path.join(dir, zipName))) continue;
     try { fs.rmSync(path.join(metaDir, name), { force: true }); swept++; } catch { /* 尽力 */ }
   }
-  return { ok: true, dir, scanned: zips.length, written, swept };
+  return { ok: true, dir, scanned: zips.length, written, swept, snapshotsSwept: orphans.snapshots, partsSwept: orphans.parts };
 }
 
 async function listBackups(opts = {}) {
@@ -735,6 +836,7 @@ module.exports = {
   rotateAutoBackups,
   rotateSafetyBackups,
   backfillSidecars,
+  sweepBackupOrphans,
   getBackupDir,
   getDataInfo,
   readBackupMeta

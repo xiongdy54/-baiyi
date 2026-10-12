@@ -1,0 +1,54 @@
+# [DIAG-TEMP 测量件留档] first-of-day B-1 轮原始输出「摘录」（2026-10-12 13:54:52 起）
+# 说明：B-1 的原始 `first-of-day.app.log` 已被后续轮次（B-2/B-3）覆盖；本文件是当时从原文件
+# 逐行摘出的关键行（非全量，行号为当时原文件行号）。宿主侧输出（点击/连接）完整保留在
+# tests/tmp-lag/first-of-day.host.log。汇总口径见 docs/design/STARTUP-LAG-DIAGNOSIS.md §2.2。
+# T0 = 1791784492234（宿主 spawn）
+8:OUT [LAG] probe.fail desktopCapturer: Cannot redefine property: BrowserWindow      ← 该轮 desktopCapturer 包装失败（我方探针缺陷，已被后续版本修复），dC 归因由 B-2/B-3 与画像给出
+11:OUT [LAG] probe.ready jszip
+20:OUT [LAG] hole 1791784492320 -> 1791784492546 (226ms)
+23:OUT [LAG] enter initDb epoch=1791784492703
+24:OUT [LAG] sql.get 21ms [library.db] :: PRAGMA quick_check
+25:OUT [LAG] sql.pragma 21ms [library.db] :: quick_check
+29:OUT [LAG] exit  initDb dur=40ms
+32:OUT [LAG] enter autoBackupIfNeeded epoch=1791784492943
+33:OUT [LAG] hole 1791784492546 -> 1791784492963 (417ms)
+35:OUT [LAG] sql.get 21642ms [dictionary.db] :: PRAGMA quick_check
+36:OUT [LAG] sql.pragma 21642ms [dictionary.db] :: quick_check
+37:OUT [LAG] hole 1791784493020 -> 1791784514754 (21734ms)
+48:OUT [LAG] hole 1791784514754 -> 1791784517400 (2646ms)
+51:OUT [LAG] sql.all 68ms [library.db] ::  SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_jso
+53:OUT [LAG] hole 1791784517400 -> 1791784518406 (1006ms)
+55:OUT [LAG] hole 1791784518469 -> 1791784518571 (102ms)
+58:OUT [LAG] sql.all 27ms [library.db] :: SELECT id, library_item_id AS libraryItemId, updated_at AS updatedAt, (markdown
+61:OUT [LAG] sql.all 20ms [library.db] :: SELECT id, library_item_id AS libraryItemId, updated_at AS updatedAt, (markdown
+62:OUT [LAG] sql.all 27ms [learner.db] :: SELECT * FROM lexemes ORDER BY id ASC
+65:OUT [LAG] hole 1791784518693 -> 1791784519539 (846ms)
+68:OUT [LAG] fs.readFileSync 346ms :: C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdat…
+69:OUT [LAG] fs.readFileSync 183ms :: (同上路径)
+70:OUT [LAG] fs.readFileSync 122ms :: (同上路径)
+71:OUT [LAG] fs.readFileSync 133ms :: (同上路径)
+72:OUT [LAG] fs.readFileSync 57ms :: (同上路径)
+74:OUT [LAG] hole 1791784522159 -> 1791784523579 (1420ms)
+77:OUT [LAG] jszip.progress ?% cur=library.db
+81:OUT [LAG] hole 1791784534709 -> 1791784535041 (332ms)
+89:OUT [LAG] sql.all 95ms [library.db] ::  SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_jso
+91:OUT [LAG] hole 1791784567292 -> 1791784567419 (127ms)
+93:OUT [LAG] jszip.progress 3.4% cur=dictionary.db
+94:OUT [LAG] hole 1791784574951 -> 1791784575320 (369ms)
+97:OUT [LAG] jszip.progress 12.1% cur=dicts/ecdict-full/source.bin
+98:OUT [LAG] jszip.progress 13.8% cur=dicts/ecdict-full/source.zip
+99:OUT [LAG] jszip.progress 20.7% cur=dicts/jmdict-e/source.gz
+100:OUT [LAG] jszip.progress 31% cur=assets/024e6a53-16e7-4107-8427-5f1c2e616…
+101:OUT [LAG] jszip.progress 41.4% cur=assets/55b2279a-f10a-42ef-ba61-eacb9caad…
+103:OUT [LAG] jszip.progress 60.3% cur=assets/66584057-25c2-4371-83d7-7fb7279ee…
+104:OUT [LAG] jszip.progress 86.2% cur=assets/c20389fd-e98d-4c7b-a2ba-80fc012d0…
+106:OUT [LAG] fs.writeFileSync 906ms :: C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdat…
+109:OUT [LAG] exit  autoBackupIfNeeded dur=90827ms r={"ok":true,"file":"…\\tests\\tmp-lag\\realdata-userdata\\backups\\backup-auto-2026-10-12.zip","meta":{"app":"incremental-reading-dev","format":1,"label":"auto","createdAt":1791784492945,"includesAIConfig":false,"appVersion":"0.0.1","counts":{"items":12,"cards":77,"extracts":30,"assets":224},"assetFiles":26,"memoryFiles":3}}
+113:OUT [LAG] hole 1791784582424 -> 1791784583772 (1348ms)
+# —— 空洞 >100ms 全量（当时汇总，13 段 / 合计 30,914ms）——
+# +312ms 417ms | +786ms 21734ms | +22520ms 2646ms | +25166ms 1006ms | +26459ms 846ms | +29925ms 1420ms
+# +42475ms 332ms | +82717ms 369ms | +90190ms 1348ms | +99538ms 341ms | …（其余 <300ms 段略）
+# —— 宿主侧（完整见 first-of-day.host.log）——
+# [host] +26177ms 点击「卡片」→ 版式切换延迟 页内=1061ms host=1069ms
+# [host] +27433ms 点击「复习」→ 版式切换延迟 页内=超时 host=超时
+# [host] +42487ms 点击「数据」→ 页内=32ms；+45016ms「日记」页内=38ms；+75009ms「书架」页内=40ms

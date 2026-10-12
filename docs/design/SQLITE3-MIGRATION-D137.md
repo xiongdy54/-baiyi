@@ -214,3 +214,12 @@ node <repo>/node_modules/electron/cli.js probe-v12.js   # ELECTRON31_V12_OK abi=
 **§7.3 测试命令通道补注**：
 
 > - 「node 直跑」套件在 better-sqlite3 迁移（D137）后统一经 `ELECTRON_RUN_AS_NODE=1 node node_modules/electron/cli.js tests/<套件>` 执行（仓库常驻 electron-ABI 原生模块，ABI 125；v13/NAPI 随 electron 升级另议）。
+
+---
+
+## 附录 C：v48.98 / D143 增补——启动期阻塞清算对 D137 条的修订
+
+> 上游：`docs/design/STARTUP-LAG-DIAGNOSIS.md`（2026-10-12 只读诊断）+ GUIDE §8.1 D143（用户拍板 T1+T2+T3 全量修）。本附录修订 D137 迁移批留下的两处**启动期阻塞**（均为「结果仅入日志、不阻塞」注释与实测不符的偏差）：
+
+1. **§3.5「启动后 PRAGMA quick_check 一次……不阻塞」修订（仅 dictionary.db）**：`dictDb.open()` 内对 835MB `dictionary.db` 的 `quick_check` 实测 1.2s（热态稳定）~21.6s（B-1 一次性极值），且发生在启动链与「首次查词」同步路径上（诊断 §3 R1a/R1c）。v48.98 起该检查**自 `dictDb.open()` 移除**——`open()`（含首次查词 `dict:lookup`）不再做完整性检查，不再产生 1.2s~21.6s 阻塞；改由 `backup-build-worker.js` 对**每日备份快照文件**以只读连接执行一次（每自然日一次，结果回传主进程入应用日志），保留「损坏早暴露」目的的降频实现。主库（17.5MB，实测 21~163ms）与 learner.db（派生可重建）的启动 quick_check 维持不变。
+2. **§3.6 备份链补充实测口径**：better-sqlite3 `db.backup()` 页拷贝本身（逐小步 setImmediate 让出）实测不产生 >100ms 主进程空洞（诊断 §3 R1 的空洞来自别处）；剩余启动期阻塞实测来自**快照整读（835MB `fs.readFileSync`）+ JSZip DEFLATE（pako 纯主线程）+ `fs.writeFileSync`（~900MB）**——v48.98 起三者连同 zip 构建整体移入 `worker_threads`（`electron/backup-build-worker.js`：只读文件、零 DB 访问、三库单连接纪律不变）；`autoBackupIfNeeded` 自 whenReady 链上的 `await` 改为 30s 延迟后台触发（失败仍只记日志）。备份产物格式/恢复路径/每日一份/轮换/`.part` 断点语义零变化。

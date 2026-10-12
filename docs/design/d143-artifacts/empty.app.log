@@ -1,0 +1,78 @@
+[host] spawn epoch=1791789556542 scenario=empty userData=C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\empty-userdata port=9710
+ERR Debugger listening on ws://127.0.0.1:9810/83d460e2-bcb1-461c-bcd2-d687ebc7e5eb
+ERR For help, see: https://nodejs.org/en/docs/inspector
+OUT [LAG] proc.start epoch=1791789556672 pid=49160 argv1=electron/js2c/browser_init
+OUT [LAG] probe.ready better-sqlite3
+OUT [LAG] probe.ready fs
+OUT [LAG] probe.done @1791789556687
+ERR Debugger attached.
+OUT [LAG] probe.ready desktopCapturer
+OUT [LAG] probe.ready db
+OUT [LAG] probe.ready jszip
+OUT [LAG] probe.ready backup
+OUT [LAG] probe.ready memoryTidy
+OUT [LAG] probe.ready screenCapture
+OUT [LAG] probe.ready dictDb
+OUT [LAG] probe.ready learnerDb
+OUT [LAG] probe.ready learnerRefresh
+ERR (node:49160) Warning: Accessing non-existent property 'prototype' of module exports inside circular dependency
+ERR (Use `electron --trace-warnings ...` to show where the warning was created)
+OUT [LAG] hole 1791789556741 -> 1791789557004 (263ms)
+ERR DevTools listening on ws://127.0.0.1:9710/devtools/browser/fa527c6b-9575-4ff7-ad58-d327ebefb916
+OUT [LAG] hole 1791789557055 -> 1791789557188 (133ms)
+OUT [LAG] enter initDb epoch=1791789557198
+OUT [LAG] sql.exec 119ms [library.db] ::  CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, cre
+OUT [LAG] hole 1791789557248 -> 1791789557378 (130ms)
+OUT [LAG] hole 1791789557378 -> 1791789557515 (137ms)
+OUT [LAG] hole 1791789557515 -> 1791789557628 (113ms)
+OUT [LAG] probe.ready legacyBackfill
+OUT [LAG] enter runLegacyBackfill epoch=1791789557689
+OUT [LAG] exit  runLegacyBackfill dur=1ms r={"ran":true,"fsrsFixed":0,"clozeFixed":0,"markedAt":1791789557690,"planned":0}
+OUT [LAG] exit  initDb dur=624ms
+OUT [LAG] hole 1791789557687 -> 1791789557822 (135ms)
+ERR [quickCapture] 快速记录 全局快捷键不可用：该组合已被系统或其它软件占用，请换一个（Ctrl+Alt+Space）
+ERR [quickCapture] 添加学习材料 全局快捷键不可用：该组合已被系统或其它软件占用，请换一个（Ctrl+Alt+N）
+ERR [quickCapture] 制卡台 全局快捷键不可用：该组合已被系统或其它软件占用，请换一个（Ctrl+Alt+K）
+OUT [LAG] quickCapture.init 3ms
+OUT [LAG] tray.init 45ms
+OUT [LAG] enter memoryTidy.startupBackfillIfDue epoch=1791789557872
+OUT [LAG] reconcileStaleMaterialMapRuns 0ms (n=0)
+OUT [LAG] exit  memoryTidy.startupBackfillIfDue dur=2ms r=false
+OUT [LAG] alive @1791789561684 (since proc.start 5012ms)
+ERR [DIAG-MAIN] backfillSidecars 定时器触发 @1791789562879
+OUT [LAG] enter backfillSidecars epoch=1791789562879
+OUT [LAG] exit  backfillSidecars dur=1ms r={"ok":true,"dir":"C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\empty-userdata\\backups","scanned":0,"written":0,"swept":0}
+ERR [DIAG-MAIN] backfillSidecars 结束 @1791789562880
+OUT [LAG] alive @1791789566687 (since proc.start 10015ms)
+OUT [LAG] alive @1791789571694 (since proc.start 15022ms)
+OUT [LAG] alive @1791789576709 (since proc.start 20037ms)
+ERR [DIAG-MAIN] learnerRefresh 定时器触发 @1791789577076
+OUT [LAG] enter learnerRefresh.refresh epoch=1791789577077 args={}
+OUT [LAG] enter learnerDb.open epoch=1791789577078
+OUT [LAG] exit  learnerDb.open dur=52ms
+OUT [LAG] enter learnerDb.open epoch=1791789577133
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791789577135
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791789577138
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791789577142
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] exit  learnerRefresh.refresh dur=94ms result={"ok":true,"ms":93} epoch=1791789577171
+ERR [DIAG-MAIN] learnerRefresh 结束 @1791789577171
+OUT [LAG] hole 1791789577014 -> 1791789577172 (158ms)
+OUT [LAG] alive @1791789581722 (since proc.start 25050ms)
+OUT [LAG] alive @1791789586732 (since proc.start 30060ms)
+OUT [LAG] enter autoBackupIfNeeded epoch=1791789587884
+OUT [LAG] skip worker-thread 注入（pid=49160）
+OUT [LAG] exit  autoBackupIfNeeded dur=243ms r={"ok":true,"file":"C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\empty-userdata\\backups\\backup-auto-2026-10-12.zip","meta":{"app":"incremental-reading-dev","format":1,"label":"auto","createdAt":1791789587911,"includesAIConfig":false,"appVersion":"0.0.1","counts":{"items":0,"cards":0,"extracts":0,"assets":0},"assetFiles":0,"memoryFiles":0}}
+OUT [LAG] alive @1791789591741 (since proc.start 35069ms)
+OUT [LAG] alive @1791789596745 (since proc.start 40073ms)
+OUT [LAG] alive @1791789601746 (since proc.start 45074ms)
+OUT [LAG] alive @1791789606753 (since proc.start 50081ms)
+OUT [LAG] alive @1791789611758 (since proc.start 55086ms)
+OUT [LAG] alive @1791789616761 (since proc.start 60089ms)
+OUT [LAG] alive @1791789621769 (since proc.start 65097ms)
+OUT [LAG] alive @1791789626775 (since proc.start 70103ms)
+ERR Debugger ending on ws://127.0.0.1:9810/83d460e2-bcb1-461c-bcd2-d687ebc7e5eb
+ERR For help, see: https://nodejs.org/en/docs/inspector

@@ -1,0 +1,166 @@
+[host] spawn epoch=1791785549199 scenario=first-of-day userData=C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdata port=9712
+ERR Debugger listening on ws://127.0.0.1:9812/df7f6b3f-2986-4af4-aa87-5627c13889e0
+ERR For help, see: https://nodejs.org/en/docs/inspector
+OUT [LAG] proc.start epoch=1791785549310 pid=40976 argv1=electron/js2c/browser_init
+OUT [LAG] probe.ready better-sqlite3
+OUT [LAG] probe.ready fs
+OUT [LAG] probe.done @1791785549322
+OUT [LAG] probe.ready desktopCapturer
+OUT [LAG] probe.ready db
+ERR Debugger attached.
+OUT [LAG] probe.ready jszip
+OUT [LAG] probe.ready backup
+OUT [LAG] probe.ready memoryTidy
+OUT [LAG] probe.ready screenCapture
+OUT [LAG] probe.ready dictDb
+OUT [LAG] probe.ready learnerDb
+OUT [LAG] probe.ready learnerRefresh
+ERR (node:40976) Warning: Accessing non-existent property 'prototype' of module exports inside circular dependency
+ERR (Use `electron --trace-warnings ...` to show where the warning was created)
+OUT [LAG] hole 1791785549312 -> 1791785549524 (212ms)
+ERR DevTools listening on ws://127.0.0.1:9712/devtools/browser/5327a973-85b7-445e-96f6-4d4a8b2879e4
+OUT [LAG] screenCapture.warmup 注册 @1791785549563
+OUT [LAG] enter initDb epoch=1791785549645
+OUT [LAG] sql.get 26ms [library.db] :: PRAGMA quick_check
+OUT [LAG] sql.pragma 26ms [library.db] :: quick_check
+OUT [LAG] probe.ready legacyBackfill
+OUT [LAG] enter runLegacyBackfill epoch=1791785549688
+OUT [LAG] exit  runLegacyBackfill dur=4ms r={"ran":false,"reason":"marked","fsrsFixed":0,"clozeFixed":0}
+OUT [LAG] exit  initDb dur=47ms
+OUT [LAG] quickCapture.init 2ms
+OUT [LAG] tray.init 20ms
+OUT [LAG] enter autoBackupIfNeeded epoch=1791785549716
+OUT [LAG] hole 1791785549524 -> 1791785549739 (215ms)
+OUT [LAG] sql.get 1239ms [dictionary.db] :: PRAGMA quick_check
+OUT [LAG] sql.pragma 1239ms [dictionary.db] :: quick_check
+OUT [LAG] hole 1791785549842 -> 1791785551135 (1293ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791785549840 -> 1791785551135 (1295ms)
+OUT [LAG] sql.all 42ms [library.db] ::  SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_jso
+OUT [LAG] fs.readFileSync 206ms :: C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdat
+OUT [LAG] fs.readFileSync 52ms :: C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdat
+OUT [LAG] enter JSZip.generateAsync epoch=1791785553555 files=58
+OUT [LAG] hole 1791785552737 -> 1791785553558 (821ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791785552735 -> 1791785553559 (824ms)
+OUT [LAG] enter learnerDb.open epoch=1791785553562
+OUT [LAG] exit  learnerDb.open dur=13ms
+OUT [LAG] enter learnerDb.open epoch=1791785553589
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791785553608
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] hole 1791785553558 -> 1791785553698 (140ms)
+OUT [LAG] enter learnerDb.open epoch=1791785553860
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791785553877
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] hole 1791785553818 -> 1791785554359 (541ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791785553818 -> 1791785554359 (541ms)
+OUT [LAG] alive @1791785554359 (since proc.start 5049ms)
+OUT [LAG] jszip.progress ?% cur=library.db
+OUT [LAG] enter desktopCapturer.getSources thumbnail={"width":1,"height":1} epoch=1791785557563
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791785557465 -> 1791785559837 (2372ms)
+OUT [LAG] hole 1791785557532 -> 1791785559837 (2305ms)
+OUT [LAG] alive @1791785559837 (since proc.start 10527ms)
+OUT [LAG] exit  desktopCapturer.getSources dur=2345ms sources=1 epoch=1791785559908
+OUT [LAG] alive @1791785564837 (since proc.start 15527ms)
+ERR [DIAG-MAIN] learnerRefresh 定时器触发 @1791785569564
+OUT [LAG] enter learnerRefresh.refresh epoch=1791785569565 args={}
+OUT [LAG] enter learnerDb.open epoch=1791785569566
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791785569579
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791785569598
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] learnerRefresh.phase=links @1791785569682
+OUT [LAG] hole 1791785569542 -> 1791785569682 (140ms)
+OUT [LAG] enter learnerDb.open epoch=1791785569843
+OUT [LAG] exit  learnerDb.open dur=0ms
+OUT [LAG] enter learnerDb.open epoch=1791785569858
+OUT [LAG] exit  learnerDb.open dur=1ms
+OUT [LAG] exit  learnerRefresh.refresh dur=773ms result={"ok":true,"ms":772} epoch=1791785570338
+ERR [DIAG-MAIN] learnerRefresh 结束 @1791785570338
+OUT [LAG] alive @1791785570338 (since proc.start 21028ms)
+OUT [LAG] hole 1791785569805 -> 1791785570338 (533ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791785569805 -> 1791785570338 (533ms)
+OUT [LAG] alive @1791785575338 (since proc.start 26028ms)
+OUT [LAG] alive @1791785580338 (since proc.start 31028ms)
+OUT [LAG] jszip.progress 3.4% cur=dictionary.db
+OUT [LAG] hole 1791785585150 -> 1791785585354 (204ms)
+OUT [LAG] alive @1791785585355 (since proc.start 36045ms)
+OUT [LAG] jszip.progress 13.8% cur=dicts/ecdict-full/source.zip
+OUT [LAG] jszip.progress 20.7% cur=dicts/jmdict-e/source.gz
+OUT [LAG] jszip.progress 41.4% cur=assets/55b2279a-f10a-42ef-ba61-eacb9caad
+OUT [LAG] jszip.progress 60.3% cur=assets/66584057-25c2-4371-83d7-7fb7279ee
+OUT [LAG] jszip.progress 86.2% cur=assets/c20389fd-e98d-4c7b-a2ba-80fc012d0
+OUT [LAG] exit  JSZip.generateAsync dur=35536ms bytes=896627345
+OUT [LAG] fs.writeFileSync 698ms :: C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdat
+OUT [LAG] fs.unlinkSync 66ms :: \\?\C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-use
+OUT [LAG] fs.rmSync 73ms :: C:\Users\xiongdy\Documents\OpenCode\Incremental reading Dev\tests\tmp-lag\realdata-userdat
+OUT [LAG] exit  autoBackupIfNeeded dur=40150ms r={"ok":true,"file":"C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\realdata-userdata\\backups\\backup-auto-2026-10-12.zip","meta":{"app":"incremental-reading-dev","format":1,"label":"auto","createdAt":1791785549718,"includesAIConfig":false,"appVersion":"0.0.1","counts":{"items":12,"cards":77,"extracts":30,"assets":224},"assetFiles":26,"memoryFiles":3}}
+OUT [LAG] enter memoryTidy.startupBackfillIfDue epoch=1791785589867
+OUT [LAG] reconcileStaleMaterialMapRuns 0ms (n=0)
+OUT [LAG] exit  memoryTidy.startupBackfillIfDue dur=1ms r=false
+OUT [LAG] hole 1791785588960 -> 1791785589868 (908ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791785588954 -> 1791785589868 (914ms)
+OUT [LAG] alive @1791785590367 (since proc.start 41057ms)
+ERR [DIAG-MAIN] backfillSidecars 定时器触发 @1791785594874
+OUT [LAG] enter backfillSidecars epoch=1791785594875
+OUT [LAG] exit  backfillSidecars dur=1ms r={"ok":true,"dir":"C:\\Users\\xiongdy\\Documents\\OpenCode\\Incremental reading Dev\\tests\\tmp-lag\\realdata-userdata\\backups","scanned":1,"written":0,"swept":0}
+ERR [DIAG-MAIN] backfillSidecars 结束 @1791785594876
+OUT [LAG] alive @1791785595380 (since proc.start 46070ms)
+OUT [LAG] hole 1791785597896 -> 1791785598079 (183ms)
+OUT [LAG] alive @1791785600386 (since proc.start 51076ms)
+OUT [LAG] alive @1791785605394 (since proc.start 56084ms)
+OUT [LAG] alive @1791785610412 (since proc.start 61102ms)
+OUT [LAG] alive @1791785615418 (since proc.start 66108ms)
+OUT [LAG] alive @1791785620428 (since proc.start 71118ms)
+OUT [LAG] alive @1791785625434 (since proc.start 76124ms)
+OUT [LAG] alive @1791785630443 (since proc.start 81133ms)
+OUT [LAG] alive @1791785635450 (since proc.start 86140ms)
+OUT [LAG] alive @1791785640457 (since proc.start 91147ms)
+OUT [LAG] alive @1791785645467 (since proc.start 96157ms)
+OUT [LAG] alive @1791785650472 (since proc.start 101162ms)
+OUT [LAG] alive @1791785655479 (since proc.start 106169ms)
+OUT [LAG] alive @1791785660485 (since proc.start 111175ms)
+OUT [LAG] alive @1791785665485 (since proc.start 116176ms)
+OUT [LAG] hole 1791785669597 -> 1791785669806 (209ms)
+OUT [LAG] alive @1791785670487 (since proc.start 121177ms)
+OUT [LAG] alive @1791785675495 (since proc.start 126185ms)
+OUT [LAG] alive @1791785680501 (since proc.start 131191ms)
+OUT [LAG] alive @1791785685512 (since proc.start 136202ms)
+OUT [LAG] alive @1791785690520 (since proc.start 141210ms)
+OUT [LAG] alive @1791785695532 (since proc.start 146222ms)
+OUT [LAG] alive @1791785700542 (since proc.start 151232ms)
+OUT [LAG] alive @1791785705551 (since proc.start 156241ms)
+OUT [LAG] alive @1791785710564 (since proc.start 161254ms)
+OUT [LAG] alive @1791785715572 (since proc.start 166262ms)
+OUT [LAG] alive @1791785720578 (since proc.start 171268ms)
+OUT [LAG] alive @1791785725590 (since proc.start 176280ms)
+OUT [LAG] alive @1791785730599 (since proc.start 181289ms)
+OUT [LAG] alive @1791785735610 (since proc.start 186300ms)
+OUT [LAG] alive @1791785740623 (since proc.start 191313ms)
+OUT [LAG] alive @1791785745634 (since proc.start 196324ms)
+OUT [LAG] alive @1791785750642 (since proc.start 201332ms)
+OUT [LAG] alive @1791785755649 (since proc.start 206339ms)
+OUT [LAG] alive @1791785760656 (since proc.start 211346ms)
+OUT [LAG] alive @1791785765664 (since proc.start 216354ms)
+OUT [LAG] hole 1791785765664 -> 1791785765872 (208ms)
+ERR [DIAG-MAIN] 主进程事件循环空洞 1791785767489 -> 1791785767803 (314ms)
+OUT [LAG] hole 1791785767565 -> 1791785767803 (238ms)
+OUT [LAG] alive @1791785770672 (since proc.start 221362ms)
+OUT [LAG] alive @1791785775686 (since proc.start 226376ms)
+OUT [LAG] alive @1791785780686 (since proc.start 231376ms)
+OUT [LAG] alive @1791785785696 (since proc.start 236386ms)
+OUT [LAG] alive @1791785790709 (since proc.start 241399ms)
+OUT [LAG] alive @1791785795719 (since proc.start 246409ms)
+OUT [LAG] alive @1791785800722 (since proc.start 251412ms)
+OUT [LAG] alive @1791785805733 (since proc.start 256423ms)
+OUT [LAG] alive @1791785810738 (since proc.start 261428ms)
+OUT [LAG] alive @1791785815741 (since proc.start 266431ms)
+OUT [LAG] alive @1791785820752 (since proc.start 271442ms)
+OUT [LAG] alive @1791785825761 (since proc.start 276451ms)
+OUT [LAG] alive @1791785830769 (since proc.start 281459ms)
+OUT [LAG] alive @1791785835781 (since proc.start 286471ms)
+OUT [LAG] alive @1791785840790 (since proc.start 291480ms)
+OUT [LAG] alive @1791785845794 (since proc.start 296484ms)
+ERR Debugger ending on ws://127.0.0.1:9812/df7f6b3f-2986-4af4-aa87-5627c13889e0
+ERR For help, see: https://nodejs.org/en/docs/inspector

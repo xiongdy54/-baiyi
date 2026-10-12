@@ -22,13 +22,11 @@ async function open() {
       } catch { /* 忽略 */ }
       db = attachRun(new Database(dbFile)); // 文件不存在即创建；崩溃恢复（WAL 回放）由 SQLite 打开时自动完成
       applyStandardPragmas(db);
-      // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞）
-      try {
-        const qc = db.pragma("quick_check", { simple: true });
-        if (qc !== "ok") console.error(`[dictDb] quick_check 异常：${qc}`);
-      } catch (e) {
-        console.error("[dictDb] quick_check 失败：", e);
-      }
+      // D143（v48.98，T1）：原 D137 §3.5 的启动 `PRAGMA quick_check` 已移除——835MB dictionary.db
+      // 实测 1.2s（热态稳定）~21.6s（一次性极值），且发生在**启动链与「首次查词」同步路径**上
+      // （诊断 STARTUP-LAG-DIAGNOSIS §3 R1a/R1c），与「不阻塞」注释不符。
+      // 完整性检查改由 backup-build-worker.js 对每日备份快照文件以只读连接执行（每天一次、
+      // 结果入应用日志，见 backup.js buildZipInWorker）；损坏仍可被查询路径实时暴露。
       db.exec(`CREATE TABLE IF NOT EXISTS dict_entries (
         source_id TEXT NOT NULL, headword TEXT NOT NULL, headword_norm TEXT NOT NULL,
         phonetic TEXT, pos TEXT, html TEXT,

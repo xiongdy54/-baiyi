@@ -344,6 +344,7 @@ async function initDb() {
   if (db && db.open) closeDb();
   db = attachRun(new Database(dbFile));
   applyStandardPragmas(db); // WAL + synchronous=FULL + busy_timeout（§3.7，WAL 标志持久在库头）
+  await nextTick(); // D143（T4）：initDb 分相让出（0.5/5）——开库 + pragma 相与 quick_check 相拆开
   // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞——损坏早暴露、零行为变更）
   try {
     const qc = db.pragma("quick_check", { simple: true });
@@ -351,7 +352,12 @@ async function initDb() {
   } catch (e) {
     console.error("[db] quick_check 失败：", e);
   }
+  // D143（v48.98，T4）：initDb 分相让出（1/5）——打开 + pragma + quick_check 相结束。
+  // 全仓 initDb 调用点均为 await，签名与语义不变；让出只把同步长宏任务拆成 ≤300ms 段，
+  // 根治「启动前 1s 一段连续 ~700ms 空洞」（诊断 STARTUP-LAG-DIAGNOSIS §3 R4 / §4 T4）。
+  await nextTick();
   db.exec(SCHEMA);
+  await nextTick(); // D143（T4）：initDb 分相让出（1b/5）——SCHEMA 建表相与后续索引/迁移相拆开
   // D121 §1.2：card_links 索引（与其余索引同法放 initDb，IF NOT EXISTS 幂等）
   try {
     db.run("CREATE INDEX IF NOT EXISTS idx_card_links_a ON card_links(card_a)");
@@ -517,6 +523,7 @@ async function initDb() {
   // v15 曾为翻转问答卡加过 cards.reverse_json 列；v16 起翻转问答改为「创建两张独立问答卡」
   // （用户决策 D18：禁止复习期形态变化的卡片，一切卡设计以 FSRS 为核心），列不再使用。
   // 已存在的列留在旧库中无碍（SQLite 容忍多余列，INSERT 显式命名列），新库不再建列。
+  await nextTick(); // D143（T4）：initDb 分相让出（1c/5）——首库 ALTER 迁移段与词典/日记/知识地基段拆开
   // v32（M7，D31）：词典表——dict_sources（来源登记，含留位四件套）+ dictionary_cache（在线缓存，受 Provider 许可约束）
   try {
     db.run(`CREATE TABLE IF NOT EXISTS dict_sources (
@@ -561,6 +568,7 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  await nextTick(); // D143（T4）：initDb 分相让出（2/5）——SCHEMA + 首批 ALTER 迁移相结束
   // v36（M8-A，§4.1/§6.5.2，D34）：journal_entries——流式日记条目（第二输入通道）。
   // 口径：entry_date 为**自然日**（不随学习日切点漂移）；is_draft=1 为「未发送的快速记录草稿」。
   // 草稿全局至多一条由**部分唯一索引**在库层兜底（业务层仍先查后写，索引是防止竞态/脚本误写的护栏）。
@@ -751,6 +759,7 @@ async function initDb() {
     )`);
     db.run("CREATE INDEX IF NOT EXISTS idx_mruns_started ON memory_runs(started_at, is_deleted)");
   } catch { /* 表已存在 */ }
+  await nextTick(); // D143（T4）：initDb 分相让出（3/5）——K1/洞察/记忆运行段结束
   // v48 批1（M15 重做，D41-⑤ / §4.19-7）：材料知识导图数据层（3 表）。
   // map = 每版本一行（结构 JSON 内嵌节点+边+证据；SVG 只是视图，JSON 才是数据）；
   // shard = 分片缓存（逻辑键含 provider+model+modelConfigHash——换模型或关键生成参数不复用旧结果）；
@@ -888,6 +897,8 @@ async function initDb() {
   } catch {
     /* 列已存在 */
   }
+  // D143（T4）：initDb 分相让出（4/5）——导图/作者迁移段结束，进入一次性回填前
+  await nextTick();
   // §9.4 历史数据兼容（一次性版本化回填）：① v11 前新卡态卡片 fsrs_json 补 S/D 基线（createEmptyCard
   // 口径 0/0，§4.4.1「历史缺字段基线回填」）；② 存量 cloze 卡 hint 拆答案物化进 back_markdown（与渲染层
   // extractClozeAnswer(s) 拼接逐字符等价，tests/legacyBackfill.test.cjs 对拍）。判定/编排见 legacyBackfill.js：
@@ -903,6 +914,7 @@ async function initDb() {
   } catch (e) {
     console.error("[legacyBackfill] 回填失败（不阻塞启动，下次启动重试）：", e);
   }
+  await nextTick(); // D143（T4）：initDb 分相让出（5/5）——一次性回填相结束，进入提示词播种/落盘
   ensurePromptTemplates();
   persist();
   // P1 时序：完成标记必须在 persist() 成功之后写（标记是重跑跳过的唯一安全网，先于数据落盘会在

@@ -2,31 +2,6 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen 
 const path = require("path");
 const fs = require("fs");
 
-// [DIAG-TEMP] 主进程忙闲心跳：间隔 >300ms 打点（诊断 D137 回归用，用后即删）
-let __diagLast = Date.now();
-setInterval(() => {
-  const now = Date.now();
-  if (now - __diagLast > 300) console.error(`[DIAG-MAIN] 主进程事件循环空洞 ${__diagLast} -> ${now} (${now - __diagLast}ms)`);
-  __diagLast = now;
-}, 100).unref?.();
-
-// [DIAG-TEMP] 包装 ipcMain.handle：记录每个 handler 的起止（诊断用，用后即删）
-const __diagOrigHandle = ipcMain.handle.bind(ipcMain);
-ipcMain.handle = (channel, handler) => {
-  return __diagOrigHandle(channel, async (...args) => {
-    const t = Date.now();
-    try {
-      const out = await handler(...args);
-      const dur = Date.now() - t;
-      if (dur > 50) console.error(`[DIAG-IPC] ${channel} 慢 ${dur}ms @${t}`);
-      return out;
-    } catch (e) {
-      console.error(`[DIAG-IPC] ${channel} 抛错 @${t}: ${String(e && e.message || e).slice(0, 120)}`);
-      throw e;
-    }
-  });
-};
-
 // 测试隔离开关（仅 e2e/GUI 脚本设置 env 时生效）：词典导入/删除会写主库 dict_sources，
 // e2e 若共用真实 userData 会误删用户已装词典（2026-09-14 实测教训）——spawn 时传临时目录。
 // v34（M12 实测补记）：本块必须在 require("./db") **之前**——db.js 顶部 require 的 settingsStore
@@ -1976,18 +1951,22 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
 }
 
 app.whenReady().then(async () => {
-  screenCapture.warmup();
+  // D143（v48.98）T2：原此处的 screenCapture.warmup()（+8s 抓 1×1 缩略图）已删除——
+  // desktopCapturer 首次调用 2.3~2.8s 一次性初始化会同步阻塞主进程（诊断 R2/§4 T2）；
+  // 改为首次真实截图时自然承担（screenCapture.start 内记录首次耗时）。
   // v48.75（D119）：生命周期锚点——区分「进程启动」（init 横幅）与「窗口就绪」（本行），
   // 两者之间崩溃/卡死时日志可判读。
   appLog.log("INFO", "app", "app ready");
   // v48.80（D124 / 设计稿 §9.1）：应用启动后 20 秒后台触发一次学习索引刷新（回调里再查总开关）
   setTimeout(() => {
-    console.error(`[DIAG-MAIN] learnerRefresh 定时器触发 @${Date.now()}`);
-    if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh().finally(() => console.error(`[DIAG-MAIN] learnerRefresh 结束 @${Date.now()}`));
+    if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh();
   }, 20000);
   Menu.setApplicationMenu(null);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
   createWindow();
+  // D143（v48.98，T4）：窗口原生创建（实测 219ms 级）与后续协议注册/待恢复检查/initDb 之间
+  // 显式让出——避免「建窗 + 全部初始化」合成一段连续 >300ms 的启动空洞（空库场景实测主因）。
+  await new Promise((r) => setImmediate(r));
   // v45.1（用户反馈「书架封面偶尔加载失败」）：协议注册必须先于 await initDb()——窗口先行 +
   // 渲染层先挂载时，封面 <img> 可能抢在协议 handler 注册前发出请求而永久失败（img 无自动重试）。
   // 两个 handler 都只读磁盘文件、不依赖数据库，提前注册无副作用。
@@ -2050,7 +2029,14 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error("[backup] 应用待恢复数据失败：", err);
   }
+  // D143（v48.98，T4）：显式让出——createWindow/协议注册/待恢复检查段与 initDb 段拆成两个宏任务，
+  // 避免「窗口原生创建 + 建表迁移」合成一段连续 >300ms 的启动空洞（诊断 §3 R4 / §4 T4）。
+  await new Promise((r) => setImmediate(r));
   await initDb();
+  // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
+  // 导图对账）移入下一个宏任务——原实现它们与 initDb 共用同一连续宏任务（实测合成 ~730ms 启动空洞）；
+  // 顺序与错误语义不变（各自 try/catch），只是不再拖长启动关键段。
+  await new Promise((r) => setImmediate(r));
   // v36（M8-A）：全局快捷键组初始化（快速记录 / 添加学习材料）+ 随系统启动同步（失败在设置页可见）
   try {
     quickCapture.init({
@@ -2085,24 +2071,30 @@ app.whenReady().then(async () => {
     console.error("[pluginHost] 初始化失败：", err);
   }
   // M2：每日首次启动自动滚动备份（设置可关；失败不阻塞启动）
-  try {
-    const r = await backup.autoBackupIfNeeded(backupOpts());
-    if (!r.ok) console.error("[backup] 自动备份失败：", r.error);
-  } catch (err) {
-    console.error("[backup] 自动备份失败：", err);
-  }
+  // D143（v48.98，T1）：不再在 whenReady 链上 await——原实现在此同步等待 40~90s 备份全链
+  // （835MB quick_check + 快照 + JSZip + 写盘，诊断 STARTUP-LAG-DIAGNOSIS §3 R1）把主进程
+  // UI 线程按在启动段上（点击 15s 无反应实测）。现改为窗口可交互后延迟 30s 后台触发，
+  // 构建已 worker 化（backup.js）；失败仍只记日志。autoBackup 语义不变：每天一份、
+  // 当日已有即跳过、失败/中断不破坏既有备份（未完成则下次启动同日重试，`.part` 不冒充可用备份）。
+  setTimeout(() => {
+    backup
+      .autoBackupIfNeeded(backupOpts())
+      .then((r) => {
+        if (r && !r.ok) console.error("[backup] 自动备份失败：", r.error);
+      })
+      .catch((err) => console.error("[backup] 自动备份失败：", err));
+  }, 30000);
   // D117（v48.73）：启动空闲补齐旧档 sidecar（备份列表零解压加速缓存，诊断报告 §4.1）。
   // 延迟 5s 让启动流程先落定；后台串行 worker 解析、不阻塞主进程（worker_threads，§4.2）。
   // 失败只影响下次列表速度（回退 zip 解析），不影响正确性——sidecar 是缓存，zip 本体是事实源。
+  // D143 复审 M3：同批清扫 backups/ 中断残留（.snapshot-* 孤儿 / 跨日 .part；绝不误删在途备份）。
   setTimeout(() => {
-    console.error(`[DIAG-MAIN] backfillSidecars 定时器触发 @${Date.now()}`);
     try {
       Promise.resolve(backup.backfillSidecars())
         .then((r) => {
-          if (r && (r.written || r.swept)) console.log(`[backup] sidecar 补齐：补写 ${r.written}、回收孤儿 ${r.swept}（${r.dir}）`);
+          if (r && (r.written || r.swept || r.snapshotsSwept || r.partsSwept)) console.log(`[backup] sidecar 补齐：补写 ${r.written}、回收孤儿 ${r.swept}、清残留快照 ${r.snapshotsSwept || 0}、清过期 .part ${r.partsSwept || 0}（${r.dir}）`);
         })
-        .catch((err) => console.error("[backup] sidecar 补齐失败：", err))
-        .finally(() => console.error(`[DIAG-MAIN] backfillSidecars 结束 @${Date.now()}`));
+        .catch((err) => console.error("[backup] sidecar 补齐失败：", err));
     } catch (err) {
       console.error("[backup] sidecar 补齐失败：", err);
     }

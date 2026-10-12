@@ -75,6 +75,13 @@ function createOverlay(display) {
   return { win, picked, setShot: (url) => resolveShot(url), finish };
 }
 
+// D143（v48.98）：8s 预热已退役——`desktopCapturer.getSources` 首次调用的一次性初始化成本
+// （实测 2.3~2.8s，与数据规模无关）原在启动后 8s 的定时器里同步阻塞主进程 UI 线程
+// （点击落该窗口端到端实测 2711ms 无反应）。预热并不消除成本、只是把「首次截图时的等待」
+// 提前成「启动后的冻结」，故改为**首次真实截图自然承担**（遮罩窗口先行显示，等待可见），
+// 并保留首次调用耗时到日志（诊断归因用；不再新增任何主动抓屏）。
+let firstShotLogged = false;
+
 /** 发起一次屏幕截图。返回 PNG dataURL；取消 / 失败 / 已有进行中的截图 ⇒ null。 */
 async function start(senderWc) {
   if (session) return null;
@@ -87,11 +94,16 @@ async function start(senderWc) {
   try {
     for (const [w] of saved) w.setOpacity(0);
     await sleep(100); // 等合成器刷掉透明窗口，避免应用自身入镜
+    const t0 = Date.now();
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
       fetchWindowIcons: false,
       thumbnailSize: { width: Math.round(display.size.width * scale), height: Math.round(display.size.height * scale) }
     });
+    if (!firstShotLogged) {
+      firstShotLogged = true;
+      console.log(`[screenCapture] 首次抓屏 getSources 耗时 ${Date.now() - t0}ms（一次性初始化成本，D143 起不再预热）`);
+    }
     const src = sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
     if (!src || src.thumbnail.isEmpty()) {
       overlay.finish(null);
@@ -125,13 +137,6 @@ async function start(senderWc) {
   }
 }
 
-/** 预热（仅 Windows）：首次 desktopCapturer 调用有一次性的初始化成本（数百毫秒～数秒）。
-    启动后空闲时抓一张 1×1 缩略图把它摊掉；不保存、不外传（mac 上会触发录屏授权弹窗，故不预热）。 */
-function warmup() {
-  if (process.platform !== "win32") return;
-  setTimeout(() => {
-    desktopCapturer.getSources({ types: ["screen"], fetchWindowIcons: false, thumbnailSize: { width: 1, height: 1 } }).catch(() => {});
-  }, 8000);
-}
-
-module.exports = { start, warmup };
+// D143（v48.98）：`warmup()` 已删除（原注释：预热仅 Windows；mac 上会触发录屏授权弹窗）。
+// 调用面（main.js 启动链）同步移除；`start()` 首次调用负责记录一次性初始化成本，见上方。
+module.exports = { start };
