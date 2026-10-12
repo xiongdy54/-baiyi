@@ -336,8 +336,13 @@ textarea:disabled {
   color: var(--grey-2);
   background: var(--grey-1);
   border-color: var(--border-subtle);
-  cursor: not-allowed;
+  cursor: default;
 }
+/* v48.97（D141，用户指令「我的软件中不应该出现禁止图标」）：**全应用禁用态一律 cursor: default，
+   禁用 🚫 光标取值**——🚫 光标刺眼且带有责备感，禁用事实已由色阶（grey-2 字 + grey-1 底）与
+   「可点不可点」的对比表达，不需要光标重复。本规则是 D84（`.btn-rail[disabled]` 已用 default）
+   的全应用化：全仓 12 处一一改过，红线闸门见 tests/flows/f27-restraint-redlines.cjs W7
+   （该闸门按字面串查源码，故此处只写中文描述、不复现该取值）。 */
 /* 勾选/单选保持原生方框外观（颜色由上面 body 的 accent-color 统一上色），只锁尺寸 */
 input[type="checkbox"],
 input[type="radio"] {
@@ -390,7 +395,7 @@ input[type="range"]::-webkit-slider-thumb {
 }
 input[type="range"]:hover::-webkit-slider-thumb { background: var(--accent-hover); }
 input[type="range"]:active::-webkit-slider-thumb { background: var(--accent-pressed); }
-input[type="range"]:disabled { cursor: not-allowed; }
+input[type="range"]:disabled { cursor: default; }
 input[type="range"]:disabled::-webkit-slider-thumb { background: var(--grey-2); }
 input[type="range"]::-moz-range-track {
   height: 4px;
@@ -461,7 +466,7 @@ body.theme-dark select {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M2 1l3 3 3-3' fill='none' stroke='%238a8a86' stroke-width='1.5'/%3E%3C/svg%3E");
 }
 select:hover { border-color: var(--border-strong); }
-select:disabled { color: var(--grey-2); cursor: not-allowed; }
+select:disabled { color: var(--grey-2); cursor: default; }
 select option { background: var(--paper); color: var(--text-primary); }
 
 ::selection { background: var(--accent); color: var(--accent-on); }
@@ -751,7 +756,7 @@ body.has-skin .topbar { background: transparent; }
   background: var(--grey-1);
   color: var(--grey-2);
   border-color: transparent;
-  cursor: not-allowed;
+  cursor: default;
 }
 .btn-outline:disabled { background: transparent; border-color: var(--grey-2); }
 
@@ -3499,7 +3504,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   background: var(--grey-1);
   color: var(--grey-2);
   border-color: transparent;
-  cursor: not-allowed;
+  cursor: default;
 }
 .review-bar .grade:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .review-bar .grade.recommended:focus-visible { outline-color: var(--ink); } /* 填充钮上 outline 取 --ink（§9/§7.4） */
@@ -5071,7 +5076,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 }
 .reader-tool-menu .dd-item:disabled {
   color: var(--text-placeholder);
-  cursor: not-allowed;
+  cursor: default;
 }
 .reader-tool-menu-row {
   display: flex;
@@ -5113,7 +5118,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .reader-engine-controls .dd-btn:disabled {
   color: var(--grey-2);
   border-color: var(--grey-2);
-  cursor: not-allowed;
+  cursor: default;
 }
 /* P1：已存主题条目（下拉内分组）——12×12 色块预览 + 名称截断（全名经 title 可达） */
 .reader-theme-group-label {
@@ -5157,7 +5162,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 }
 .reader-theme-save-btn:disabled {
   color: var(--grey-2);
-  cursor: not-allowed;
+  cursor: default;
   text-decoration: none;
 }
 .reader-custom-color-group {
@@ -7445,7 +7450,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   white-space: nowrap;
 }
 .extract-face .cardmeta .cardmeta-jump:hover { background: var(--grey-1); color: var(--text-primary); }
-.extract-face .cardmeta .cardmeta-jump:disabled { color: var(--grey-2); cursor: not-allowed; }
+.extract-face .cardmeta .cardmeta-jump:disabled { color: var(--grey-2); cursor: default; }
 /* 底部动作栏（2026-10-01）：几何由共用 .stage-bar 提供（元素挂双类 stage-bar extract-face-actions）——
    流内末子节点 + sticky bottom:0 零偏移，长内容钉在滚动口底缘、滚到底自然落在内容末尾，任何窗口高度
    下自己与内容都不被裁（EXCERPT-REVIEW-LAYOUT-REDESIGN v2）。类名保留为作用域/测试钩子。
@@ -7470,7 +7475,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .bar-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .bar-btn.primary:disabled { background: var(--grey-1); border-color: var(--grey-2); color: var(--grey-3); }
 .bar-btn.grow { flex: 1; min-width: 0; }
-.bar-btn:disabled { border-color: var(--grey-2); color: var(--text-placeholder); cursor: not-allowed; }
+.bar-btn:disabled { border-color: var(--grey-2); color: var(--text-placeholder); cursor: default; }
 .bar-btn .caret { font-size: 10px; line-height: 1; color: var(--text-helper); }
 /* 功能簇（v48.36/D76，better-layout「L1 · 一盒一功能」定稿）：一个功能 = 一个 1px --border-strong 盒；
    盒内裸排（mono 数字 / Meta 单位 / 文字钮），**盒内不再套小框**。全栏可见描边只有 --border-strong 一种灰。 */
@@ -7483,7 +7488,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .bar-cluster .unit { font-size: var(--fs-meta); color: var(--text-helper); white-space: nowrap; }
 .bar-cluster .text-btn { border: none; background: none; font-family: var(--sans); font-size: var(--fs-secondary); color: var(--text-primary); padding: 4px var(--sp-2); cursor: pointer; white-space: nowrap; }
 .bar-cluster .text-btn:hover { background: var(--grey-1); }
-.bar-cluster .text-btn:disabled { color: var(--grey-2); cursor: not-allowed; }
+.bar-cluster .text-btn:disabled { color: var(--grey-2); cursor: default; }
 .bar-more { position: relative; display: inline-flex; }
 .bar-pop { position: absolute; right: 0; bottom: calc(100% + var(--sp-2)); min-width: 180px; background: var(--paper); border: 1px solid var(--border-strong); padding: var(--sp-1) 0; z-index: 6; }
 .bar-pop button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--sp-4); height: 32px; padding: 0 var(--sp-3); background: none; border: none; font-size: var(--fs-secondary); color: var(--text-primary); text-align: left; cursor: pointer; }
@@ -8649,7 +8654,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .plugin-text-btn:hover:not(:disabled) { text-decoration: underline; }
 .plugin-text-btn:disabled {
   color: var(--text-helper);
-  cursor: not-allowed;
+  cursor: default;
 }
 /* 校验失败原因 / 激活被拒原因：整行 Meta 档 --error 文字（§8.2） */
 .plugin-item-reason {

@@ -137,6 +137,16 @@ runFlow(flow, async () => {
   flow.check("两个已取消的里程碑不得被重新接上提示", revival.length === 0, "未复活", revival);
   const doc = read("AI_DEVELOPMENT_GUIDE.md");
   flow.check("文档里『取消』标注仍在（标注本身就是防加回的护栏）", /保留在分级表中标注"?(取消|「取消」)/.test(doc) || /标注.{0,4}取消/.test(doc), "护栏未丢", "文档已删掉该标注？");
+
+  // ---------- W7 禁用态不出 🚫 光标（v48.97 / D141，用户指令「我的软件中不应该出现禁止图标」） ----------
+  // 禁用事实由色阶（grey-2 字 + grey-1 底 / 更浅的 placeholder）表达，不由 🚫 光标重复一遍；
+  // D84 已为 .btn-rail[disabled] 立过这一口径，本闸门把它全应用化、防回潮。
+  flow.section("W7 禁用态一律 cursor: default，全应用禁 not-allowed（D141 = D84 口径的全应用化）");
+  const notAllowed = [];
+  for (const f of SRC) if (/not-allowed/.test(read(f))) notAllowed.push(f);
+  flow.check("src/ 零 cursor: not-allowed（含 theme.css 与内联样式）", notAllowed.length === 0, "零处", notAllowed);
+  const cssCursors = read("src/theme.css");
+  flow.check("theme.css 的禁用态声明了 cursor: default（口径在场，不只靠继承）", /:disabled[^{]*\{[^}]*cursor:\s*default/.test(cssCursors), "在场", "禁用态未显式声明 default");
 }).then((s) => {
   process.exit(s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length ? 1 : 0);
 });
