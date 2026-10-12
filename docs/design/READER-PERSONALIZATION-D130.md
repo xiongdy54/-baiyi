@@ -304,7 +304,7 @@ readerSettings
 | F 翻页 | turnAnimated 开→`hasAttribute("animated")` true、关→false；**两态各跑连续 16 次跨章翻页限时 settle 不锁死**（复用 paging 第 3 节）；reduce-motion 模拟（CDP `Emulation.setEmulatedMedia`）→ reduce 下永不挂属性 |
 | G 热区提示 | 真鼠标 hover 左热区 → `data-reader-tap-hint="left"` opacity>0.9；移出→<0.05；点击翻页行为不变（cfi 推进） |
 | H 翻页键 | 按 ←/→ cfi 推进；在 INPUT 聚焦下按键不翻页（焦点守卫）；快捷键设置页改键后新键生效 |
-| I 回归口径 | 全程控制台零错误（同 paging 第 6 节过滤）；D127 几何零漂移（页签行 top/高、开关钮 40×40 断言抽检） |
+| I 回归口径 | 全程控制台零错误（同 paging 第 6 节过滤）；D127 几何零漂移（页签行 top/高、开关钮 **40×24** 断言抽检——D139 把顶部按钮带降到 24 档，抽检值随之同步） |
 
 ### 8.3 存量回归闸门（全绿方可销项）
 

@@ -4908,9 +4908,11 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 /* 阅读工具栏：正常文档流顶栏（稳定 chrome，不再浮动遮书）。
    两组分区——左=导航（目录/翻页），右=显示（模式/主题）；
    组内 8px、组间 16px+，以空间分组而非线条（better-layout：空间优先分组）。 */
-/* v48.45（D85）：阅读器＝**全高左轨**（与摘录批注轨同一形态，用户指令④）——
+/* v48.45（D85，用户指令④）：阅读器＝**全高左轨**（与摘录批注轨同一形态）——
    一行两格：.reader-side-rail（280↔0，两态恒挂载 + width/visibility 过渡，贯通到顶）
-   + 右列（.reader-engine-col：工具栏 + 正文视口，展开时整体右移）。 */
+   + 右列（.reader-engine-col：工具栏 + 正文视口，展开时整体右移）。
+   v48.95（D139）：开合档位自 --dur(120ms) 对齐到 **--dur-panel**（栏/面板开合档，与摘录批注轨同参）；
+   与工具行 padding-left 让位**逐字同参**（D90 教训），reduce 双轨不变（见下 media 块）。 */
 .reader-scroll-engine {
   display: flex;
   flex-direction: column;
@@ -4930,7 +4932,10 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 }
 .reader-side-rail.is-closed { width: 0; visibility: hidden; } /* 收起＝不留空轨（与摘录批注轨同语义） */
 @media (prefers-reduced-motion: no-preference) {
-  .reader-side-rail { transition: width var(--dur) var(--ease), visibility var(--dur) linear; }
+  /* v48.95（D139）：与摘录批注轨同一口径——滑动过渡**仅在用户点过开关后**（[data-rail-anim]）启用；
+     挂载期自动展开（由右下角指示器进入导图）瞬时落位，不做 0→280 的左→右滑入。
+     门由 Reader.tsx 的 railAnimate 供给（点 toggle 时置真）。 */
+  .reader-engine-layout[data-rail-anim] .reader-side-rail { transition: width var(--dur-panel) var(--ease), visibility var(--dur-panel) linear; }
 }
 .reader-side-rail .reader-sidebar { height: 100%; }
 .reader-engine-col {
@@ -4948,9 +4953,9 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   justify-content: flex-start;
   gap: var(--sp-4);
   /* v48.45（D85）：左让位 --sp-16 给浮在轨顶的开关钮（16+40+8，与摘录页头带同一让位）
-     v48.50（D90，用户指令③）：让位**条件化**——轨展开时开关钮浮在轨头（16,60）、不再遮挡工具栏，
+     v48.50（D90，用户指令③）：让位**条件化**——轨展开时开关钮浮在轨头（16,56）、不再遮挡工具栏，
      左让位收回 --sp-4（与正文视口同一页面内距 ⇒ 工具栏与正文左对齐）；轨收起时开关钮浮在工具栏区
-     （16,60）⇒ 64px 让位保留。padding-left 挂 --dur/--ease 过渡，与轨宽动画同步。 */
+     （16,56）⇒ 64px 让位保留。padding-left 挂 --dur-panel/--ease 过渡（D139），与轨宽动画同参。 */
   padding: var(--sp-2) var(--sp-4) var(--sp-2) var(--sp-16);
   border-bottom: 1px solid var(--border-subtle);
   background: var(--reader-bg, var(--paper));
@@ -4960,7 +4965,10 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 }
 .reader-side-rail:not(.is-closed) + .reader-engine-col .reader-engine-controls { padding-left: var(--sp-4); }
 @media (prefers-reduced-motion: no-preference) {
-  .reader-engine-controls { transition: padding-left var(--dur) var(--ease); }
+  /* v48.95（D139）：与 .reader-side-rail 的 width 过渡**逐字同参**（--dur-panel/--ease）+ **同一道门**
+     （[data-rail-anim]，见上）——两量既不能不同参、也不能一个受门一个不受，否则动画期间轨缘与
+     工具行左缘脱拍（D90 已踩过一次；挂载期自动展开时让位同样瞬时落位） */
+  .reader-engine-layout[data-rail-anim] .reader-engine-controls { transition: padding-left var(--dur-panel) var(--ease); }
 }
 .reader-engine-controls-group {
   display: flex;
@@ -5276,21 +5284,25 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 /* ---------- 阅读器侧栏三页签（批 4 Task 15 / 规格 §5.3） ---------- */
 /* 页签行：与 Zotero 侧栏同规——三枚页签、当前项 accent 下划线、直角。
    同刻只显示一个面板（其余不渲染）。 */
-/* D127：页签行＝侧栏主役导航，与右列工具行同带（56 = 8 内距 + 40 钮 + 8 内距）；
+/* D127：页签行＝侧栏主役导航，与右列工具行同带。
+   v48.95（D139）修订：**去定高**——定高（56 = 8 内距 + 40 钮 + 8 内距）把「内距+钮+内距」
+   写死且与右列 24 档工具行错位 15.2px；改由内距定高（8+24+8+hairline），与
+   .reader-engine-controls 逐像素同带（实测两带同顶 48、同高 40.8、同底 88.8）。
    左让位 var(--sp-16)（16+40+8，浮动开关钮 gutter，D85 同一让位 Token）。
    激活态＝全应用页签语言（顶栏同款：文字主色 + 2px accent 下划线，瞬切不做位移动画）。 */
 .reader-sidebar .tabs {
   flex: none;
   display: flex;
   gap: var(--sp-2);
-  height: 56px;
   padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-16);
   border-bottom: 1px solid var(--border-subtle);
 }
 .reader-sidebar .tabs > button[role="tab"] {
   flex: 1;
   min-width: 0;
-  height: 40px;
+  /* D139：40 → 24（＝ .btn-rail，右列「制卡/截图」同档）；字号/字重不动——
+     主役导航与顶栏 .nav-item 同族（--fs-secondary），层级差由字号表达而非高度并排 */
+  height: 24px;
   padding: 0 var(--sp-2);
   background: none;
   border: none;
@@ -7180,11 +7192,13 @@ body.capture-body #root { height: 100vh; }
   border-color: var(--border-subtle);
   color: var(--text-helper);
 }
-/* D127：阅读器侧栏开关钮——两态同位同高（与右列工具行对齐：top 48+8、高 40 = .btn 同高；
-   作废「收起态 56 / 展开态 60」双轨）。摘录页共用基线（40×24 / top 48+12）不动。 */
+/* D127：阅读器侧栏开关钮——两态同位同高，与右列工具行对齐（top 48+8）。
+   v48.95（D139）修订：高度 40 → **24**（＝右列「制卡/截图」同档）——页签行降到 24 档后，
+   24 高钮在该带内自然同顶同底（右列内容带 56–80、中心 68，本钮 top 56 + 24/2 = 68 正中）；
+   宽 40 / 左 16 不变（保 --sp-16 让位 Token 的 16+40+8 语义）。摘录页共用的
+   `.annot-toggle.bar-btn` 基线（40×24、top 48+12）不动，阅读器实例只覆盖 top。 */
 .annot-toggle.bar-btn[data-reader-sidebar-toggle] {
   top: calc(48px + var(--sp-2));
-  height: 40px;
 }
 .annot-toggle.bar-btn:hover { border-color: var(--text-primary); color: var(--text-primary); }
 
