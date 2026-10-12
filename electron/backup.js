@@ -147,6 +147,15 @@ function isJsonObjectFile(file) {
   }
 }
 
+// D137（§3.4 ③ / §3.6，WAL sidecar 陷阱 M2 对策②）：恢复换入库文件时必须同删目标库的
+// -wal/-shm sidecar——换入后 sidecar 名字仍与线上库名匹配，陈旧 WAL 配错配文件 = 损坏。
+// 换入成功后调用；staging 侧的 -wal/-shm 本就不该存在（db.backup() 快照产物无 sidecar）。
+function clearDbSidecars(dbPath) {
+  for (const suffix of ["-wal", "-shm"]) {
+    try { fs.rmSync(dbPath + suffix, { force: true }); } catch { /* 尽力而为 */ }
+  }
+}
+
 // 原写法两步非原子：rename 一旦失败（跨设备 / 杀软实时扫描占用 / 权限 / 磁盘抖动），
 // 线上数据已被删掉而备份又没进去 —— 实测 library.db / assets / memory 三处都会因此被清空。
 // 返回让位文件路径（供整体成功后统一清理，或失败时回滚）。
@@ -186,8 +195,24 @@ async function createBackup(opts = {}) {
     destFile = path.join(destDir, name.replace(/\.zip$/, `-${i}.zip`));
   }
 
-  // 先把内存库刷盘，保证备份的是最新状态
+  // 先把内存库刷盘，保证备份的是最新状态（D137：flush = persist() = wal_checkpoint(TRUNCATE)）
   if (typeof opts.flush === "function") opts.flush();
+
+  // D137（§3.6，WAL sidecar 陷阱 M2 对策①）：WAL 下裸 readFileSync 库文件可能缺最近提交
+  // 且无事务一致性保证——library.db / dictionary.db 改走注入的 db.backup() 在线快照
+  // （页拷贝，不阻塞写路径，异步）。快照落盘到临时目录、入 zip 后即清。
+  // 未注入快照函数的环境（既有单测 / 无 db 层调用方）退化为 readFileSync——此时调用方
+  // 必须已 flush（checkpoint）过，主文件才自足。
+  let snapDir = null;
+  const snapOf = async (liveFile, snapFn, name) => {
+    if (typeof snapFn === "function") {
+      if (!snapDir) snapDir = fs.mkdtempSync(path.join(destDir, ".snapshot-"));
+      const snapPath = path.join(snapDir, name);
+      await snapFn(snapPath);
+      return fs.readFileSync(snapPath);
+    }
+    return fs.readFileSync(liveFile);
+  };
 
   try {
     const zip = new JSZip();
@@ -201,7 +226,7 @@ async function createBackup(opts = {}) {
       counts: opts.counts || null,
       assetFiles: 0
     };
-    zip.file("library.db", fs.readFileSync(p.dbFile), { compression: "DEFLATE" });
+    zip.file("library.db", await snapOf(p.dbFile, opts.snapshotLibrary, "library.db"), { compression: "DEFLATE" });
     if (fs.existsSync(p.settingsFile)) {
       zip.file("settings.json", fs.readFileSync(p.settingsFile), { compression: "DEFLATE" });
     }
@@ -209,9 +234,9 @@ async function createBackup(opts = {}) {
       // A-13：剥掉明文形态再打包（safeStorage 密文原样保留）
       zip.file("ai-config.json", sanitizeAIConfigForBackup(fs.readFileSync(p.aiConfigFile, "utf8")), { compression: "DEFLATE" });
     }
-    // A-4：词典本体随备份走
+    // A-4：词典本体随备份走（D137：经 db.backup() 快照，同 library.db）
     if (fs.existsSync(p.dictDbFile)) {
-      zip.file("dictionary.db", fs.readFileSync(p.dictDbFile), { compression: "DEFLATE" });
+      zip.file("dictionary.db", await snapOf(p.dictDbFile, opts.snapshotDict, "dictionary.db"), { compression: "DEFLATE" });
     }
     if (fs.existsSync(p.dictsDir)) {
       for (const f of walkFiles(p.dictsDir)) {
@@ -260,6 +285,9 @@ async function createBackup(opts = {}) {
   } catch (err) {
     try { fs.rmSync(destFile + ".part", { force: true }); } catch { /* 忽略 */ }
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    // D137：快照临时目录用后即清（含失败路径）
+    if (snapDir) { try { fs.rmSync(snapDir, { recursive: true, force: true }); } catch { /* 尽力 */ } }
   }
 }
 
@@ -607,6 +635,7 @@ function applyPendingRestore(opts = {}) {
       }
       const a = swapIn(stagedDb, p.dbFile);
       if (a) asides.push({ live: p.dbFile, aside: a });
+      clearDbSidecars(p.dbFile); // D137：陈旧 WAL sidecar 与新换入库文件错配 = 损坏，必须同删
       restored.push("library.db");
     }
     const stagedAssets = path.join(p.stagingDir, "assets");
@@ -632,6 +661,7 @@ function applyPendingRestore(opts = {}) {
       if (!isIntactSqliteFile(stagedDictDb)) throw new Error("备份包里的 dictionary.db 不是完整可读的 SQLite 文件；已中止恢复");
       const a = swapIn(stagedDictDb, p.dictDbFile);
       if (a) asides.push({ live: p.dictDbFile, aside: a });
+      clearDbSidecars(p.dictDbFile); // D137：同 library.db
       restored.push("dictionary.db");
     }
     const stagedDicts = path.join(p.stagingDir, "dicts");

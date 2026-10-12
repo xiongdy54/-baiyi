@@ -1,10 +1,14 @@
-// SQLite 仓储层（sql.js WASM 实现，接口与将来 better-sqlite3 原生版一致）
+// SQLite 仓储层（v48.92 / D137 起：better-sqlite3 原生引擎，WAL journal 原生落盘；接口与 sql.js 时代一致）
+// 落盘语义（§7.2 D137 登记）：「每次落库即落盘」由 SQLite 事务提交 + synchronous=FULL 的 WAL fsync 承担；
+// persist() 重定义为显式 wal_checkpoint(TRUNCATE)（调用点全部保留），使磁盘单文件 = 完整最新状态。
 // 文档数据模型：LibraryItem + Document，全部带 userId/updatedAt/syncVersion/isDeleted
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const annotationRange = require("./annotationRange");
 const { app } = require("electron");
+const Database = require("better-sqlite3");
+const { attachRun, applyStandardPragmas, normParams } = require("./sqliteCompat");
 const {
   CARD_GEN_PROMPT,
   CARD_FORMULA_PROMPT,
@@ -323,14 +327,24 @@ CREATE INDEX IF NOT EXISTS idx_rec_feedback_key ON rec_feedback(item_key, ts);
 `;
 
 async function initDb() {
-  const initSqlJs = require("sql.js");
-  const SQL = await initSqlJs();
+  // D137（§3.1）：better-sqlite3 同步构造直开文件（文件不存在即创建；崩溃恢复/WAL 回放由 SQLite
+  // 打开时自动完成）——对外保持 async 签名，调用面零改动。
+  // 重复调用（测试内「重启模拟」/ 幂等演练）＝先关旧连接再从文件重载：close 本身做 checkpoint，
+  // 主文件自足后重开即与 sql.js 时代「每次 initDb 全量重读文件」语义一致（迁移/回填段随之重挂）。
   dbFile = path.join(app.getPath("userData"), "library.db");
-  // v23/F11：启动清残留 tmp——tmp 永远不是事实源（rename 原子性保证 library.db
-  // 要么是上一份完整版要么是新完整版，半写的 tmp 只是垃圾）
+  // v23/F11：启动清残留 tmp——tmp 永远不是事实源（sql.js 时代的原子替换残留，新引擎不再产出）
   try { fs.rmSync(dbFile + ".tmp", { force: true }); } catch { /* 忽略 */ }
-  db = fs.existsSync(dbFile) ? new SQL.Database(fs.readFileSync(dbFile)) : new SQL.Database();
-  db.run(SCHEMA);
+  if (db && db.open) closeDb();
+  db = attachRun(new Database(dbFile));
+  applyStandardPragmas(db); // WAL + synchronous=FULL + busy_timeout（§3.7，WAL 标志持久在库头）
+  // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞——损坏早暴露、零行为变更）
+  try {
+    const qc = db.pragma("quick_check", { simple: true });
+    if (qc !== "ok") console.error(`[db] quick_check 异常：${qc}`);
+  } catch (e) {
+    console.error("[db] quick_check 失败：", e);
+  }
+  db.exec(SCHEMA);
   // D121 §1.2：card_links 索引（与其余索引同法放 initDb，IF NOT EXISTS 幂等）
   try {
     db.run("CREATE INDEX IF NOT EXISTS idx_card_links_a ON card_links(card_a)");
@@ -896,37 +910,54 @@ async function initDb() {
   }
 }
 
-// v23/F11（§4.4.9）：原子持久化——同目录 tmp + fsync + rename 原子替换（Windows MOVEFILE_REPLACE_EXISTING）。
-// 任一步失败 throw → IPC reject → UI 封锁评分并经 persistNow 重试；禁止静默降级为非原子覆盖写。
-// tmp 永远不是事实源：rename 原子性保证 library.db 要么是上一份完整版要么是新完整版。
+// v48.92（D137 §3.4）：persist() 重定义——sql.js 时代的「全量导出 + tmp/fsync/rename 原子替换」随
+// 内存库退役；新语义 = 显式 `wal_checkpoint(TRUNCATE)`：把 WAL 合并回主文件并截断，使「磁盘上
+// library.db 单文件 = 完整最新状态」这一既有外部假设继续成立（外部脚本、直接拷贝、旧工具链均安全）。
+// 持久性本身由 SQLite 事务提交 + synchronous=FULL（每次提交 fsync WAL）承担，不再依赖本函数。
+// 失败语义（F37/§4.4.9）：checkpoint 失败（如其他连接持读锁 busy=1、磁盘 I/O 错误）同样 throw →
+// IPC reject → UI 封锁评分并经 persistNow 重试；调用点全部保留、零裁剪。
 function persist() {
-  const tmp = dbFile + ".tmp";
-  const buf = Buffer.from(db.export());
-  const fd = fs.openSync(tmp, "w");
-  try {
-    fs.writeSync(fd, buf);
-    fs.fsyncSync(fd);
-  } catch (e) {
-    // D-9（审计 F37）：写/刷失败必须清掉半成品 tmp。原来 finally 只 closeSync，
-    // 一次落盘失败就在盘上留一份与库同尺寸的残库（实测 528 KB），直到下次成功落盘才被覆盖。
-    try { fs.closeSync(fd); } catch { /* 已被系统关闭 */ }
-    try { fs.rmSync(tmp, { force: true }); } catch { /* 尽力而为 */ }
-    throw e;
-  }
-  fs.closeSync(fd);
-  try {
-    fs.renameSync(tmp, dbFile);
-  } catch (e) {
-    try { fs.rmSync(tmp, { force: true }); } catch { /* 尽力而为 */ }
-    throw e;
+  const busy = db.pragma("wal_checkpoint(TRUNCATE)", { simple: true });
+  if (Number(busy) !== 0) {
+    throw new Error("persist 失败：wal_checkpoint(TRUNCATE) 忙碌（busy=1）——存在并发读，稍后重试");
   }
 }
 
-// v23：纯持久化重试（§4.4.9）——只重试当前内存库的持久化（重导出+原子替换），
+// v23：纯持久化重试（§4.4.9）——D137 后语义 = 重试 checkpoint（WAL 合并回主文件），
 // 绝不重新执行任何业务 mutation；供 UI「重试保存」在 persist 失败后调用
 function persistNow() {
   persist();
   return true;
+}
+
+// D137（v48.92）：应用退出时显式关闭连接——clean shutdown 下 SQLite 自动做 WAL checkpoint
+// 并删除 -wal/-shm sidecar（等价一次 persist() + 文件自足收尾）；异常吞并（退出期尽力而为）
+function closeDb() {
+  if (db) {
+    try {
+      db.close();
+    } catch {
+      /* 退出期尽力而为 */
+    }
+    db = null;
+  }
+}
+
+// D137（§3.6）：在线快照到目标路径（db.backup 页拷贝，不阻塞写路径）——M2 备份改走此口
+async function snapshotTo(destPath) {
+  if (!db || !db.open) throw new Error("主库未打开，无法快照");
+  await db.backup(destPath);
+  return destPath;
+}
+
+// D137：连接级 pragma 读数（journal_mode/synchronous 实测口径，验收与诊断辅助；只读，零副作用）
+function connPragmas() {
+  if (!db || !db.open) return null;
+  return {
+    journalMode: String(db.pragma("journal_mode", { simple: true })),
+    synchronous: Number(db.pragma("synchronous", { simple: true })),
+    busyTimeout: Number(db.pragma("busy_timeout", { simple: true }))
+  };
 }
 
 // ---------- FSRS 参数环境（v23，D20 / §4.4.10：不可变快照 + 活跃指针） ----------
@@ -998,18 +1029,15 @@ function getBackupCounts() {
 }
 
 function listItems() {
-  const stmt = db.prepare(`
+  // D137：步进游标 → .all()（同 queryAll 映射）
+  return db.prepare(`
     SELECT li.id, li.title, li.source_type AS sourceType, li.cover, li.progress_json AS progressJson,
            li.lang, li.priority, li.author, li.created_at AS createdAt, li.updated_at AS updatedAt, d.markdown
     FROM library_items li
     LEFT JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.is_deleted = 0
     ORDER BY li.created_at DESC
-  `);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  `).all();
 }
 
 // v38（D35）：书籍语言属性（''=未知）。查词语言路由的书籍级信号；不参与其他逻辑。
@@ -1849,22 +1877,22 @@ const BROWSER_JOIN = `FROM cards c
   LEFT JOIN library_items li ON li.id = d.library_item_id
   WHERE c.is_deleted = 0`;
 
-// sql.js 同步游标分块消费——30 万行全量物化会把主进程顶上 GB 级，峰值内存必须钳在一个 chunk
+// D137：better-sqlite3 惰性迭代游标分块消费——30 万行全量物化会把主进程顶上 GB 级，
+// 峰值内存必须钳在一个 chunk（await nextTick() 让出点语义与 sql.js 步进时代一致）
 function nextTick() {
   return new Promise((res) => setImmediate(res));
 }
 
 async function scanCards(sql, params, handleRow) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
   let n = 0;
+  const iter = db.prepare(sql).iterate(normParams(params));
   try {
-    while (stmt.step()) {
-      handleRow(stmt.getAsObject());
+    for (const row of iter) {
+      handleRow(row);
       if (++n % 2000 === 0) await nextTick();
     }
   } finally {
-    stmt.free();
+    iter.return?.(); // 提前退出时关闭游标（等价旧 stmt.free()）
   }
   return n;
 }
@@ -2024,7 +2052,9 @@ function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
     if (advanced) throw new Error("评分被拒：该卡的调度状态已前进（同一次呈现被重复提交）。请刷新后重试。");
   }
   const now = Date.now();
-  db.run("BEGIN");
+  // D137（§3.3 加固①）：BEGIN IMMEDIATE（原 saveReview 序列并入 withTransaction 同款语义：
+  // COMMIT 后 persist，persist 失败时内存已提交、禁止重复评分、经 persistNow 重试）
+  db.run("BEGIN IMMEDIATE");
   try {
     // review_seq 分配**保持原语义不变**（§4.4.9 排序不变量：表内唯一、插入序单调、撤销删除后允许复用）。
     // 注意：v48.22 起 op_journal 另用独立的 op_counter 计数器——跨类撤销排序靠 journal，
@@ -2151,7 +2181,7 @@ function undoLastReview() {
   }
   // leech 触发判定（复现复习端触发条件，评分时点数据）
   const triggeredLeech = (after?.lapses ?? 0) >= 8 && !(leechBefore && leechBefore.isLeech === true);
-  db.run("BEGIN");
+  db.run("BEGIN IMMEDIATE"); // D137（§3.3 加固①）：同 withTransaction
   try {
     db.run("UPDATE cards SET fsrs_json = ?, fsrs_config_id = ?, updated_at = ? WHERE id = ?", [
       JSON.stringify(before),
@@ -2880,17 +2910,13 @@ function setDictCache(providerId, language, word, entry, version) {
 // ---------- 阅读器 / 摘录队列（Phase 2） ----------
 
 function getDocument(itemId) {
-  const stmt = db.prepare(`
+  // D137：步进游标取单行 → .get()
+  return db.prepare(`
     SELECT li.title, li.progress_json AS progressJson, d.id AS documentId, d.markdown, li.source_type AS sourceType, li.author
     FROM library_items li
     JOIN documents d ON d.library_item_id = li.id AND d.is_deleted = 0
     WHERE li.id = ? AND li.is_deleted = 0
-  `);
-  stmt.bind([itemId]);
-  let row = null;
-  while (stmt.step()) row = stmt.getAsObject();
-  stmt.free();
-  return row;
+  `).get([itemId]) || null;
 }
 
 // v12.2：复习卡「跳转原文」——documentId 反查书架条目 id
@@ -2930,12 +2956,9 @@ function updateProgress(itemId, progress) {
 }
 
 function queryAll(sql, params = []) {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  // D137（§3.1 映射表）：prepare→bind→step→getAsObject→free 循环 → .all() 一处替换；
+  // 207 处调用点零改动。undefined 绑定在 sqliteCompat.normParams 归一。
+  return db.prepare(sql).all(normParams(params));
 }
 
 function createExtract({ parentType, parentId, documentId, contentMarkdown, priority, contextRef,
@@ -3317,14 +3340,21 @@ function logExtractOp(row, opType, before, after, batchId, skipJournal) {
 }
 
 function withTransaction(fn) {
-  db.run("BEGIN");
+  // D137（§3.3）：保留手写 BEGIN → COMMIT / ROLLBACK（F38「撤销只删最大 seq ⇒ 序号稠密」等既有断言零改写）。
+  // 加固①：BEGIN IMMEDIATE——单写者应用下杜绝 deferred→write 升级时的 SQLITE_BUSY 边角。
+  // 加固②：COMMIT 失败显式 ROLLBACK 并 rethrow（与原 catch 对称，不留悬挂事务）。
+  db.run("BEGIN IMMEDIATE");
+  let committed = false;
   try {
     const out = fn();
     db.run("COMMIT");
+    committed = true;
     persist();
     return out;
   } catch (e) {
-    try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
+    if (!committed) {
+      try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
+    }
     throw e;
   }
 }
@@ -7656,6 +7686,11 @@ module.exports = {
   initDb,
   persistDb: persist,
   persistNow,
+  // D137（v48.92）：will-quit 显式关闭（clean shutdown = WAL 自动 checkpoint + 删 -wal/-shm）；
+  // 在线快照（M2 备份经 db.backup 页拷贝）；连接级 pragma 读数（验收/诊断辅助，只读）
+  closeDb,
+  snapshotTo,
+  connPragmas,
   getBackupCounts,
   listItems,
   createFromPaste,

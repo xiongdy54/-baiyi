@@ -1862,6 +1862,7 @@ var fsrs = (params) => {
 var BASE_PARAMS = generatorParameters({ enable_fuzz: false });
 var engine = fsrs(BASE_PARAMS);
 var activeConfigId = null;
+var activeMaxIntervalDays = 36500;
 function buildEngineFromConfig(cfg) {
   try {
     const w = cfg?.weights;
@@ -1879,6 +1880,7 @@ function buildEngineFromConfig(cfg) {
       learning_steps: Array.isArray(opts.learningSteps) ? opts.learningSteps : void 0,
       relearning_steps: Array.isArray(opts.relearningSteps) ? opts.relearningSteps : void 0
     });
+    activeMaxIntervalDays = typeof opts.maximumInterval === "number" && opts.maximumInterval > 0 ? opts.maximumInterval : 36500;
     engine = fsrs(params);
     activeConfigId = cfg?.id ?? null;
     return true;
@@ -1912,6 +1914,10 @@ function toDate(now) {
   if (now == null) return /* @__PURE__ */ new Date();
   return now instanceof Date ? now : new Date(now);
 }
+function numOr(v, fallback) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
 function toFsrsCard(state) {
   const base = createEmptyCard();
   if (!state) return base;
@@ -1921,18 +1927,29 @@ function toFsrsCard(state) {
     review: 2,
     relearning: 3
   };
+  const st = stateMap[state.state ?? "new"] ?? 0;
   return {
     ...base,
-    state: stateMap[state.state ?? "new"] ?? 0,
-    due: state.due ? new Date(state.due) : base.due,
-    lapses: state.lapses ?? 0,
+    state: st,
+    due: state.due && Number.isFinite(Number(state.due)) ? new Date(Number(state.due)) : base.due,
+    lapses: Math.max(0, numOr(state.lapses, 0)),
     // 历史卡可能缺 S/D/reps/learningSteps（v11/v20 前的存量数据）：缺省时以库默认基线回填，
     // 由于历史卡调度本已失真，此回填只保证「不再二次失真」，无法还原历史
-    stability: state.stability ?? base.stability,
-    difficulty: state.difficulty ?? base.difficulty,
-    reps: state.reps ?? 0,
+    // 注意：**新卡的 S/D 合法为 0**（首评前），不能无条件钳进 [1,10] —— 那会把 0 变成 1
+    // 并让 ts-fsrs 的新卡路径抛 Invalid memory state。只在「值存在且非法」时归一。
+    // A-2 第二道防线：**新卡的 S/D 恒为 0**（首评前还没有记忆状态），一律取 base ——
+    // 若按传入值钳制，一个非法 state 名会被归一成 new 却带着 D=10，ts-fsrs 会抛
+    // Invalid memory state { difficulty: 10, stability: 0 }。
+    // 非新卡才做值域归一：S 必须 >0、D 必须 ∈[1,10]，否则 ts-fsrs 同样会拒
+    // （那类语义自相矛盾的行由 A-2 的值域闸门挡在队列外，见 F34）。
+    stability: st === 0 || state.stability === void 0 || state.stability === null ? base.stability : (() => {
+      const v = numOr(state.stability, base.stability);
+      return v > 0 ? v : base.stability;
+    })(),
+    difficulty: st === 0 || state.difficulty === void 0 || state.difficulty === null ? base.difficulty : Math.min(10, Math.max(1, numOr(state.difficulty, base.difficulty))),
+    reps: Math.max(0, numOr(state.reps, 0)),
     learning_steps: typeof state.learningSteps === "number" ? state.learningSteps : base.learning_steps,
-    last_review: state.lastReview ? new Date(state.lastReview) : base.last_review
+    last_review: state.lastReview && Number.isFinite(Number(state.lastReview)) ? new Date(Number(state.lastReview)) : base.last_review
   };
 }
 function fromFsrsCard(card) {
@@ -1948,14 +1965,24 @@ function fromFsrsCard(card) {
     lastReview: card.last_review ? card.last_review.getTime() : null
   };
 }
+function clampFutureTime(card, at) {
+  const t = at.getTime();
+  if (card.last_review && card.last_review.getTime() > t) return { ...card, last_review: at };
+  return card;
+}
+function clampItemDue(item, at) {
+  const maxDue = at.getTime() + activeMaxIntervalDays * 864e5;
+  if (item.card.due.getTime() <= maxDue) return item;
+  return { ...item, card: { ...item.card, due: new Date(maxDue) } };
+}
 var fsrsEngine = {
   // §4.4.3 一次计算四档完整结果；评分时复用，保证预览=落库
   preview(cardState, now) {
-    const card = toFsrsCard(cardState);
+    const card = clampFutureTime(toFsrsCard(cardState), toDate(now));
     const at = toDate(now);
     const result = engine.repeat(card, at);
     return ["Again", "Hard", "Good", "Easy"].map((rating) => {
-      const item = result[GRADE_MAP[rating]];
+      const item = clampItemDue(result[GRADE_MAP[rating]], at);
       return {
         rating,
         dueText: formatInterval(item.card.due.getTime() - at.getTime()),
@@ -1965,9 +1992,9 @@ var fsrsEngine = {
     });
   },
   next(cardState, rating, now) {
-    const card = toFsrsCard(cardState);
+    const card = clampFutureTime(toFsrsCard(cardState), toDate(now));
     const at = toDate(now);
-    const result = engine.repeat(card, at)[GRADE_MAP[rating]];
+    const result = clampItemDue(engine.repeat(card, at)[GRADE_MAP[rating]], at);
     return {
       fsrsState: fromFsrsCard(result.card),
       intervalText: formatInterval(result.card.due.getTime() - at.getTime())

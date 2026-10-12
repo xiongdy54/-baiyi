@@ -22,9 +22,11 @@ asarUnpack:
   - "**/*.node"
   # main.js 以原生路径读取窗口图标（electron/main.js），asar 内原生读文件不可靠
   - electron/icon.ico
-# NAPI 预编译（fsrs-rs-nodejs-win32-x64-msvc）与 WASM（sql.js）均无需按 Electron ABI 重编；
-# 关闭 rebuild 免去 node-gyp/VS 构建链依赖。
-npmRebuild: false
+# NAPI 预编译（fsrs-rs-nodejs-win32-x64-msvc）与 WASM（sql.js）均无需按 Electron ABI 重编。
+# D137（v48.92）：better-sqlite3 是 per-ABI 原生模块，必须按 Electron ABI 就位 → npmRebuild true；
+# @electron/rebuild 对 prebuild-install 型模块直接带 electron 运行时参数拉预编译，须带镜像 env
+# npm_config_better_sqlite3_binary_host_mirror（见 docs/BETTER-SQLITE3-PACKAGING.md，免网保底路径亦在其中）。
+npmRebuild: true
 compression: normal
 win:
   target:

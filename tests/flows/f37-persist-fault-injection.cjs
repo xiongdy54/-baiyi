@@ -68,7 +68,16 @@ app
         { name: "createFromPaste", setup: () => ({}), mutate: (d) => d.createFromPaste("F37 新书", ["# 第一章", "", "新正文"].join(NL)), probe: (d) => d.listItems().length },
       ];
 
-      const origRename = fs.renameSync;
+      // D137（v48.92）注入钩子切换：persist() 自「导出+tmp/rename」重定义为 wal_checkpoint(TRUNCATE)，
+      // 旧 fs.renameSync mock 不再落在 persist 路径上。改用 WAL 下真实故障模式＝第二连接持读事务
+      // → checkpoint(TRUNCATE) busy=1 → persist throw（与 tests/persist.test.cjs P2/P3 同法）。
+      const openBlocker = () => {
+        const Database = require("better-sqlite3");
+        const bl = new Database(dbFile);
+        bl.exec("BEGIN");
+        bl.prepare("SELECT COUNT(*) AS n FROM cards").get(); // deferred 读事务真正持有读锁
+        return bl;
+      };
       const rows = [];
       for (const c of CASES) {
         const ctx = c.setup ? c.setup() : {};
@@ -78,17 +87,15 @@ app
 
         let threw = null;
         let injectHit = false;
-        fs.renameSync = (from, to) => {
-          if (String(to).endsWith("library.db")) { injectHit = true; throw new Error("ENOSPC (F37 injected)"); }
-          return origRename(from, to);
-        };
+        const blocker = openBlocker();
         try { c.mutate(db, ctx); } catch (e) { threw = e.message; }
-        finally { fs.renameSync = origRename; }
+        finally { try { blocker.close(); } catch { /* 尽力 */ } }
+        if (threw && /checkpoint/i.test(threw)) injectHit = true;
 
         const afterFail = (() => { try { return JSON.stringify(c.probe(db, ctx)); } catch { return "probe-err"; } })();
         const tmpLeft = fs.existsSync(tmpPath);
         const tmpBytes = tmpLeft ? fs.statSync(tmpPath).size : 0;
-        // 补一次成功落盘，看磁盘是否收敛到内存
+        // 补一次成功落盘，看磁盘是否收敛到内存（读锁已释放，checkpoint 应成功）
         let converged = null;
         try { db.persistNow(); converged = true; } catch (e) { converged = "persistNow 仍失败: " + e.message; }
         try { fs.rmSync(tmpPath, { force: true }); } catch { /* ignore */ }

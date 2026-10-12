@@ -81,8 +81,8 @@ const p2 = (n) => String(n).padStart(2, "0");
 const autoName = `backup-auto-${today.getFullYear()}-${p2(today.getMonth() + 1)}-${p2(today.getDate())}.zip`;
 check("启动时已生成今日自动备份", fs.existsSync(path.join(SHOT, autoName)), autoName);
 
-console.log("== 4) 恢复（staging + 标记，运行期库文件不动） ==");
-const dbBefore = fs.readFileSync(path.join(UD, "library.db"));
+console.log("== 4) 恢复（staging + 标记，运行期不换入） ==");
+const dbBeforeIno = fs.statSync(path.join(UD, "library.db")).ino; // D137/WAL：运行期字节会变（WAL 写+checkpoint），不变量改为「文件未被换入」（inode 不变）
 const restored = JSON.parse(await c.evalJS(`(async () => {
   const r = await window.backupAPI.restore(${JSON.stringify(created.file)});
   return JSON.stringify(r);
@@ -91,7 +91,7 @@ check("恢复成功且要求重启", restored.ok === true && restored.needsResta
 check("已生成恢复前安全备份", /backup-safety-/.test(restored.safetyFile || "") && fs.existsSync(restored.safetyFile || ""), restored.safetyFile);
 check("标记文件已写入", fs.existsSync(path.join(UD, "restore-pending.json")), "restore-pending.json");
 check("staging 已含 library.db", fs.existsSync(path.join(UD, "restore-staging", "library.db")), "staging/library.db");
-check("运行期 library.db 字节未变（sql.js 约束）", Buffer.compare(dbBefore, fs.readFileSync(path.join(UD, "library.db"))) === 0, "db untouched");
+check("运行期 library.db 未被换入（inode 不变，D137/WAL 口径）", fs.statSync(path.join(UD, "library.db")).ino === dbBeforeIno, "db untouched");
 
 console.log("== 5) 重启应用 → 换入生效 ==");
 await c.evalJS(`window.backupAPI.relaunch()`);

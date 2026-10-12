@@ -2,6 +2,31 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen 
 const path = require("path");
 const fs = require("fs");
 
+// [DIAG-TEMP] 主进程忙闲心跳：间隔 >300ms 打点（诊断 D137 回归用，用后即删）
+let __diagLast = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  if (now - __diagLast > 300) console.error(`[DIAG-MAIN] 主进程事件循环空洞 ${__diagLast} -> ${now} (${now - __diagLast}ms)`);
+  __diagLast = now;
+}, 100).unref?.();
+
+// [DIAG-TEMP] 包装 ipcMain.handle：记录每个 handler 的起止（诊断用，用后即删）
+const __diagOrigHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, handler) => {
+  return __diagOrigHandle(channel, async (...args) => {
+    const t = Date.now();
+    try {
+      const out = await handler(...args);
+      const dur = Date.now() - t;
+      if (dur > 50) console.error(`[DIAG-IPC] ${channel} 慢 ${dur}ms @${t}`);
+      return out;
+    } catch (e) {
+      console.error(`[DIAG-IPC] ${channel} 抛错 @${t}: ${String(e && e.message || e).slice(0, 120)}`);
+      throw e;
+    }
+  });
+};
+
 // 测试隔离开关（仅 e2e/GUI 脚本设置 env 时生效）：词典导入/删除会写主库 dict_sources，
 // e2e 若共用真实 userData 会误删用户已装词典（2026-09-14 实测教训）——spawn 时传临时目录。
 // v34（M12 实测补记）：本块必须在 require("./db") **之前**——db.js 顶部 require 的 settingsStore
@@ -25,8 +50,8 @@ let trayHinted = false;
 if (!app.requestSingleInstanceLock()) {
   app.quit();
   // D-TEST-24/25：这里必须**立即返回**。原来只调 app.quit() 就往下走，
-  // 于是第二个实例仍然会走完整启动流程（initDb 末尾必然整库落盘一次），
-  // 实测 12 次里有 3 次改动了在线实例的库文件——覆盖式整库写，等于静默吞掉对方的数据。
+  // 于是第二个实例仍然会走完整启动流程（initDb 会打开同一份库文件做迁移/落盘），
+  // 实测 12 次里有 3 次改动了在线实例的库文件——覆盖式写，等于静默吞掉对方的数据。
   return;
 } else {
   app.on("second-instance", () => {
@@ -905,7 +930,12 @@ const backupOpts = () => ({
   // 批次 C（D-TEST-18）：已软删书的 id 交给备份侧，打包时跳过它们的 assets 目录。
   // backup.js 不 require db 层（它的依赖注入一直是 opts.*），所以在这里塞进来。
   deletedItemIds: new Set(dbModule.listDeletedItemIds()),
-  appVersion: app.getVersion()
+  appVersion: app.getVersion(),
+  // D137（§3.6，WAL sidecar 陷阱 M2 对策①）：三库备份改走 db.backup() 在线快照——
+  // WAL 下裸 readFileSync 可能缺最近提交且无事务一致性保证。dictionary.db 950MB 级为页拷贝，
+  // 速度与内存特性优于旧裸读（learner.db 派生数据不进备份清单）。
+  snapshotLibrary: (dest) => dbModule.snapshotTo(dest),
+  snapshotDict: (dest) => dictDb.snapshotTo(dest)
 });
 ipcMain.handle("backup:info", () => ({
   ...backup.getDataInfo(),
@@ -1952,7 +1982,8 @@ app.whenReady().then(async () => {
   appLog.log("INFO", "app", "app ready");
   // v48.80（D124 / 设计稿 §9.1）：应用启动后 20 秒后台触发一次学习索引刷新（回调里再查总开关）
   setTimeout(() => {
-    if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh();
+    console.error(`[DIAG-MAIN] learnerRefresh 定时器触发 @${Date.now()}`);
+    if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh().finally(() => console.error(`[DIAG-MAIN] learnerRefresh 结束 @${Date.now()}`));
   }, 20000);
   Menu.setApplicationMenu(null);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
@@ -2064,12 +2095,14 @@ app.whenReady().then(async () => {
   // 延迟 5s 让启动流程先落定；后台串行 worker 解析、不阻塞主进程（worker_threads，§4.2）。
   // 失败只影响下次列表速度（回退 zip 解析），不影响正确性——sidecar 是缓存，zip 本体是事实源。
   setTimeout(() => {
+    console.error(`[DIAG-MAIN] backfillSidecars 定时器触发 @${Date.now()}`);
     try {
       Promise.resolve(backup.backfillSidecars())
         .then((r) => {
           if (r && (r.written || r.swept)) console.log(`[backup] sidecar 补齐：补写 ${r.written}、回收孤儿 ${r.swept}（${r.dir}）`);
         })
-        .catch((err) => console.error("[backup] sidecar 补齐失败：", err));
+        .catch((err) => console.error("[backup] sidecar 补齐失败：", err))
+        .finally(() => console.error(`[DIAG-MAIN] backfillSidecars 结束 @${Date.now()}`));
     } catch (err) {
       console.error("[backup] sidecar 补齐失败：", err);
     }
@@ -2114,9 +2147,13 @@ app.on("before-quit", () => {
 
 // M7：词典词条库（独立 dictionary.db）退出兜底落盘（正常路径导入后已即时 save）
 // v48.80（D124）：learner.db 同样退出兜底落盘（正常路径刷新结束时已 save）
+// D137（§3.2-4）：三库显式 close——clean shutdown = WAL 自动 checkpoint + 删 -wal/-shm sidecar
 app.on("will-quit", () => {
   void dictDb.saveOnQuit();
   void learnerDb.saveOnQuit();
+  try { dbModule.closeDb(); } catch { /* 退出期尽力而为 */ }
+  try { dictDb.close(); } catch { /* 退出期尽力而为 */ }
+  try { learnerDb.close(); } catch { /* 退出期尽力而为 */ }
   // v48.75（D119）：退出横幅（生命周期事件；写失败由 appLog 内部静默）
   appLog.log("INFO", "app", "app quit");
 });

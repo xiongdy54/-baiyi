@@ -10,6 +10,7 @@
     "build:renderer": "vite build",
     "build": "npm run build:renderer && node scripts/postbuild-pdf-compat.cjs",
     "start": "electron .",
+    "postinstall": "node scripts/pin-better-sqlite3-electron.cjs",
     "dist": "npm run build && electron-builder --win --publish never",
     "dist:dir": "npm run build && electron-builder --dir --publish never"
   },
@@ -19,6 +20,7 @@
     "@milkdown/react": "^7.22.2",
     "@mozilla/readability": "^0.6.0",
     "@types/markdown-it": "^14.2.0",
+    "better-sqlite3": "^12.11.1",
     "dompurify": "^3.4.14",
     "fsrs-rs-nodejs": "^0.9.1",
     "github-slugger": "^2.0.0",

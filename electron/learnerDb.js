@@ -1,12 +1,16 @@
-// v48.80（D124 / 指导文档 §4.20）：学习者模型派生库 learner.db——独立 SQLite 文件（sql.js），与主库完全隔离。
-// 理由与 dictionary.db 相同（§7.1.8 sql.js 全量回写约束）：词项索引可达数十万行，入主库会拖慢
-// 每次复习评分的 persist() 落盘；且这里全部是**派生数据**，删除可由刷新管线完整重建，不进备份。
-// 写入纪律：learner.db 写入后调用 save()（tmp + fsync + rename 原子写），不走主库 persist()
-// （指导文档 §7.2 已登记例外）。
+// v48.80（D124 / 指导文档 §4.20）：学习者模型派生库 learner.db——独立 SQLite 文件，与主库完全隔离。
+// v48.92（D137）：引擎自 sql.js 迁 better-sqlite3（原生 SQLite，WAL journal 原生落盘，设计稿
+// SQLITE3-MIGRATION-D137 §3.2-1）。理由与 dictionary.db 相同：词项索引可达数十万行，入主库会拖慢
+// 每次复习评分的 persist() checkpoint；且这里全部是**派生数据**，删除可由刷新管线完整重建，不进备份。
+// 写入纪律（D137 新语义，GUIDE §7.2）：「每次落库即落盘」由 SQLite 事务提交 + synchronous=FULL 的
+// WAL fsync 承担；写入后调用 save()＝显式 wal_checkpoint(TRUNCATE)（磁盘单文件 = 完整最新状态），
+// 不走主库 persist()。
 const path = require("path");
 const fs = require("fs");
 const { app } = require("electron");
+const Database = require("better-sqlite3");
 const lmParams = require("./lmParams");
+const { normParams, attachRun, applyStandardPragmas, rmDbFileAndSidecars } = require("./sqliteCompat");
 
 let db = null;
 let dbFile = null;
@@ -83,6 +87,10 @@ CREATE TABLE IF NOT EXISTS lexeme_states (
 );
 `;
 
+// D137（§3.1 映射表）：undefined→null 绑定归一在 sqliteCompat.js 一处兜底（杜绝散点）。
+
+// WAL sidecar 清理改走 sqliteCompat.rmDbFileAndSidecars（含 .tmp 残留）。
+
 function readMetaRaw(key) {
   try {
     const rows = allSync("SELECT value FROM lm_meta WHERE key = ?", [String(key)]);
@@ -93,48 +101,48 @@ function readMetaRaw(key) {
 }
 
 function allSync(sql, params = []) {
-  const stmt = db.prepare(sql);
-  if (params && params.length) stmt.bind(params);
-  const rows = [];
-  while (stmt.step()) rows.push(stmt.getAsObject());
-  stmt.free();
-  return rows;
+  return db.prepare(sql).all(normParams(params));
 }
 
 async function open() {
   if (db) return db;
   if (!openPromise) {
     openPromise = (async () => {
-      const initSqlJs = require("sql.js");
-      const SQL = await initSqlJs();
       dbFile = path.join(app.getPath("userData"), "learner.db");
-      try {
-        fs.rmSync(dbFile + ".tmp", { force: true });
-      } catch {
-        /* 忽略 */
-      }
       const existed = fs.existsSync(dbFile);
-      db = existed ? new SQL.Database(fs.readFileSync(dbFile)) : new SQL.Database();
-      // 重建规则（设计稿 §5.2）：schema_version 不等于代码常量 → 关闭、删除文件、重新建表（全量重建）
+      db = attachRun(new Database(dbFile)); // 文件不存在即创建；崩溃恢复（WAL 回放）由 SQLite 打开时自动完成
+      applyStandardPragmas(db);
+      // D137 B6 修正：learner.db 是**派生可重建**数据（§4.20，删除后刷新管线全量重建、不进备份），
+      // synchronous 降为 NORMAL——WAL 下 commit 不逐次 fsync（词项索引逐行写入曾是 fsync 风暴，
+      // 实测把主进程阻塞 39s），持久性由 save() 的 checkpoint(TRUNCATE) 与「可重建」语义共同承担；
+      // 主库/词典库仍 synchronous=FULL 不变。
+      db.pragma("synchronous = NORMAL");
+      // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞——损坏早暴露、零行为变更）
+      try {
+        const qc = db.pragma("quick_check", { simple: true });
+        if (qc !== "ok") console.error(`[learnerDb] quick_check 异常：${qc}`);
+      } catch (e) {
+        console.error("[learnerDb] quick_check 失败：", e);
+      }
+      // 重建规则（设计稿 §5.2）：schema_version 不等于代码常量 → 关闭、删除文件（含 sidecar）、重新建表（全量重建）
       if (readMetaRaw("schema_version") !== String(lmParams.LEARNER_DB_SCHEMA)) {
         try {
           db.close();
         } catch {
           /* 忽略 */
         }
-        try {
-          fs.rmSync(dbFile, { force: true });
-        } catch {
-          /* 忽略 */
-        }
-        db = new SQL.Database();
+        db = null;
+        rmDbFileAndSidecars(dbFile);
+        db = attachRun(new Database(dbFile));
+        applyStandardPragmas(db);
+        db.pragma("synchronous = NORMAL"); // 同上：派生可重建库（D137 B6 修正）
       }
-      db.run(SCHEMA_SQL);
+      db.exec(SCHEMA_SQL);
       // icu_version / lex_version 任一与当前不同 → 清空词项三表让词项索引重建
       // （不同 ICU 版本的 Intl.Segmenter 切词结果不同，例如 Node 22 把「読んだ」切成 読/ん/だ）
       const icu = String(process.versions.icu || "");
       if (readMetaRaw("icu_version") !== icu || readMetaRaw("lex_version") !== String(lmParams.LEX_VERSION)) {
-        db.run("DELETE FROM lexemes; DELETE FROM unit_lex; DELETE FROM lexeme_states;");
+        db.exec("DELETE FROM lexemes; DELETE FROM unit_lex; DELETE FROM lexeme_states;");
         setMetaSync("icu_version", icu);
         setMetaSync("lex_version", String(lmParams.LEX_VERSION));
       }
@@ -155,19 +163,13 @@ function setMetaSync(key, value) {
   ]);
 }
 
-// 原子落盘（与主库 persist / dictDb.save 同纪律：tmp + fsync + rename）
+// 落盘（D137 重定义）：SQLite 提交语义已保证持久（synchronous=FULL 的 WAL fsync）；
+// save() ＝显式 wal_checkpoint(TRUNCATE)，使磁盘单文件 = 完整最新状态（外部读/拷库安全）。
+// 失败 throw（与主库 persist 同纪律）；不涉及任何 tmp/rename（旧 tmp+fsync+rename 序列随 sql.js 退役）。
 function save() {
   if (!db || !dbFile) return;
-  const tmp = dbFile + ".tmp";
-  const buf = Buffer.from(db.export());
-  const fd = fs.openSync(tmp, "w");
-  try {
-    fs.writeSync(fd, buf);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmp, dbFile);
+  const busy = db.pragma("wal_checkpoint(TRUNCATE)", { simple: true });
+  if (Number(busy) !== 0) throw new Error("learner.db checkpoint 忙碌（busy=1）——稍后重试");
 }
 
 async function run(sql, params) {
@@ -209,15 +211,12 @@ async function reset() {
     db = null;
   }
   if (dbFile) {
-    try {
-      fs.rmSync(dbFile, { force: true });
-    } catch {
-      /* 忽略 */
-    }
+    rmDbFileAndSidecars(dbFile);
   }
 }
 
-// 应用退出时兜底落盘（正常路径刷新结束时已 save）
+// D137：应用退出兜底 = checkpoint 后关闭（clean shutdown = WAL 自动合并 + 删 sidecar）；
+// 正常路径刷新结束时已 save()。
 async function saveOnQuit() {
   try {
     if (db) save();
@@ -226,4 +225,25 @@ async function saveOnQuit() {
   }
 }
 
-module.exports = { open, save, run, all, getMeta, setMeta, reset, saveOnQuit };
+// D137（v48.92）：显式关闭（main.js will-quit 调用）；连带清理 openPromise 以便测试内重开
+function close() {
+  if (openPromise) openPromise = null;
+  if (db) {
+    try {
+      db.close(); // clean close：WAL 自动 checkpoint + 删 -wal/-shm
+    } catch {
+      /* 退出期尽力而为 */
+    }
+    db = null;
+  }
+}
+
+// D137（§3.6）：在线快照到目标路径（db.backup 页拷贝，不阻塞写路径）——预留同法接口，
+// learner.db 目前不进备份清单（派生数据，可整库重建）。
+async function snapshotTo(destPath) {
+  await open();
+  await db.backup(destPath);
+  return destPath;
+}
+
+module.exports = { open, save, run, all, getMeta, setMeta, reset, saveOnQuit, close, snapshotTo };
