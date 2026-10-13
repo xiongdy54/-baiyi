@@ -413,11 +413,17 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
     []
   );
 
-  useEffect(() => {
+  // 题型切换预填。填空题特殊：第一字段是纯文本 textarea，而问答/翻转第一字段是 MarkdownEditor
+  //（Milkdown）——其序列化按 remark 规范以尾随换行收尾（输入 "x" 上报 "x\n"），textarea 会忠实
+  // 渲染成一行多余空行（GrowField 随之撑高）。进入填空态时去掉尾随换行；layout 时机保证
+  // textarea 首帧绘制前已归一（否则先以两行高度闪现一帧）。
+  useLayoutEffect(() => {
     if (mode === "qa" || mode === "imageOcclusion") {
       setFront((f) => (f ? f : ""));
-    } else {
+    } else if (mode === "cloze") {
       // D123：无引用文本时保留用户已写的正面（常驻表单里切题型不应清空输入）
+      setFront((f) => (quote ? quote : f).replace(/[\r\n]+$/, ""));
+    } else {
       setFront((f) => (quote ? quote : f));
     }
   }, [mode, quote]);
