@@ -2923,22 +2923,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   flex: 1;
   min-height: calc(var(--sp-12) + 1px);
 }
-.wb-manual-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  height: 28px;
-  padding: 0 var(--sp-2) 0 0;
-  background: none;
-  border: none;
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: var(--fs-secondary);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-.wb-manual-toggle:hover .wb-chev { color: var(--text-primary); }
-.wb-chev { display: inline-flex; color: var(--text-helper); }
+/* v48.101（D146）：`.wb-manual-toggle`（头行题字钮）与 `.wb-chev` 随 JSX 退役——头行只余页签 + 右端 chevron 单钮 */
 .is-flip { transform: rotate(180deg); }
 .wb-manual-body {
   flex: 1;
@@ -2962,11 +2947,11 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   padding: var(--sp-3) 0;
   border-bottom: none;
   justify-content: flex-start;
+  align-items: center;
 }
-.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-title { writing-mode: vertical-rl; }
+/* v48.101（D146）：题字钮退役后，bottom 收起态的唯一开合钮＝右端 chevron（隐藏页签、保留箭头并居中） */
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .side-dock-meta,
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-manual-body { display: none; }
-.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-manual-toggle { flex-direction: column; height: auto; padding: 0; }
 /* dock 变体的手动表单：引用块压成两行、表单节奏收紧、「更多选项」收起高级字段 */
 .wb-manual-body .card-quote {
   margin: 0 0 var(--sp-3);
@@ -8054,9 +8039,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-manual-body > * { min-width: 0; }
 .side-dock[data-placement="bottom"] .wb-manual-body { border-bottom: none; }
 
-/* 标题行（手动 / AI 两区统一）：左标题 + 紧随的文字页签（选中＝accent 色 + 2px 下划线，无填充块）；34px 高 */
+/* 标题行（D146：头行题字退役）＝页签行（选中＝accent 色 + 2px 下划线，无填充块）；34px 高 */
 .wb-head { height: var(--wb-head-h); padding: 0 var(--wb-pad); gap: var(--sp-3); position: relative; }
-.wb-title { flex: none; font-size: var(--fs-secondary); font-weight: 700; letter-spacing: 0.02em; color: var(--text-primary); }
 .wb-tabs, .dock-tabs { display: flex; align-self: stretch; gap: var(--sp-1); min-width: 0; margin-left: var(--sp-1); }
 .wb-tabs button, .dock-tabs > button[role="tab"] {
   position: relative;
@@ -8098,15 +8082,15 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   cursor: pointer;
 }
 .wb-chev-btn:hover { color: var(--text-primary); background: var(--grey-1); }
-.wb-manual-toggle { padding: 0; }
-.wb-manual-toggle .wb-title { cursor: pointer; }
+/* v48.101（D146）：头行题字钮退役——制卡板块双页签平分整行（右端 chevron 钮除外） */
+.wb-head .dock-tabs { flex: 1; margin-left: 0; }
+.wb-head .dock-tabs > button[role="tab"] { flex: 1; text-align: center; }
 /* D142（R1）：两区分界线取消——`.wb-ai` 上缘 strong 线与标题行下缘 hairline 相距不足 40px 构成「双线」噪点（用户「杂乱」的典型来源）；
    两区由标题行下缘 hairline + 留白分界；底部放置的竖缘线同步删除，唯一分隔＝ .wb-manual 的 subtle 右缘线（见本文件 .side-dock[data-placement="bottom"] .wb-manual 处） */
 .wb-manual-body { border-bottom: 0; }
 /* D144：头行页签改为制卡板块页签（.dock-tabs＝手动制卡｜AI 制卡）；题型页签已移入页签体（wb-cards-modes），
-   收起时随 clip 一并隐藏；此处只需藏头行页签与箭头 */
-.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .dock-tabs,
-.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-chev-btn { display: none; }
+   收起时随 clip 一并隐藏；bottom 收起态藏页签、保留右端 chevron（v48.101/D146：题字钮退役后它是唯一开合钮） */
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .dock-tabs { display: none; }
 
 /* 字段：一行起步，clip 高度由 useGrowBox 设定并过渡。
    D142（R2/R3，V1 下缘一划）：去四边盒框——下缘 1px 保留（聚焦零位移，误写 border:0 会出 1px 位移）；
@@ -8348,17 +8332,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
    · 填空工具行 / 填空输入框
    ========================================================================== */
 .wb-head { gap: 0; }
-.wb-title {
-  flex: none;
-  width: 5.2em;
-  font-size: var(--fs-meta);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--text-helper);
-  white-space: nowrap;
-}
-.wb-manual-toggle { width: 5.2em; flex: none; justify-content: flex-start; }
-.wb-manual-toggle .wb-title { width: auto; }
+/* v48.101（D146）：`.wb-title` / `.wb-manual-toggle` 规则随头行题字钮退役删除（等宽标题列不再存在） */
 .wb-tabs, .dock-tabs { margin-left: 0; gap: 2px; }
 .wb-tabs button, .dock-tabs > button[role="tab"] { padding: 0 var(--sp-3); font-size: var(--fs-secondary); }
 .wb-tabs button.on, .dock-tabs > button[role="tab"].on { color: var(--text-primary); font-weight: 600; }
@@ -8841,10 +8815,11 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 /* D144 #4（§3.3/§4.2/§7/§8）：跨页签幽灵草稿层——field 容器 relative 内 absolute 铺满，
    padding 与输入面一致（.wb-field 输入面＝wb-field-inner 4px 0；.wb-free textarea＝4px 0 5px）；
-   §7 状态矩阵：无线无底纯文字层（hover 不变底、零抬升），hover 仅 chip 文字转 --ink；
+   §7 状态矩阵：无线无底纯文字层（hover 不变底、零抬升）；
+   v48.101（D146 修订）：整层 pointer-events:none 纯指示——点击穿透到输入面，接受唯一路径＝
+   Alt+Enter（点击接受退役：用户实测「一点就自动填入」违背预期）；随点击退役，:hover chip 变色规则一并删除。
    文本 13px（--fs-secondary）--text-placeholder、最多 3 行超出 …；尾部 chip「Alt+Enter 填入」
-   （mono + 1px --border-subtle 下缘线；规格 11px 无 token 档，取最近 --fs-meta 12px）；
-   整层可点＝接受；输入面其余区域（free 的动作区 / field 的「带入…」钮）点击仍聚焦编辑。
+   （mono + 1px --border-subtle 下缘线；规格 11px 无 token 档，取最近 --fs-meta 12px）。
    出现＝挂载后 rAF 翻 .is-in 触发 opacity 0→1（token 时长，transition 在下方 no-preference
    作用域）；消失瞬时＝条件脱落直接卸载（§8，无出场动画）。 */
 .wb-ghost {
@@ -8854,7 +8829,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   align-items: flex-end;
   gap: var(--sp-2);
   padding: 4px 0;
-  cursor: pointer;
+  pointer-events: none;
   overflow: hidden;
   font-size: var(--fs-secondary);
   color: var(--text-placeholder);
@@ -8882,7 +8857,12 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   border-bottom: 1px solid var(--border-subtle);
   white-space: nowrap;
 }
-.wb-ghost:hover .wb-ghost-chip { color: var(--ink); }
+/* v48.101（D146）：幽灵在场时隐藏输入面占位说明——幽灵文字与占位文字同位叠加发虚（用户实测；
+   「粘贴或输入要处理的文字」/「正面（问题）」等均为占位，幽灵即代表框将为该内容，占位失去信息量）。
+   幽灵退场（接受/输入/清空）后占位自然恢复。 */
+.wb-free-input:has(.wb-ghost) textarea::placeholder,
+.wb-field:has(.wb-ghost) textarea::placeholder { color: transparent; }
+.wb-field:has(.wb-ghost) .markdown-editor .ProseMirror[data-placeholder] p:first-child:last-child:has(> br:only-child)::before { content: none; }
 /* 幽灵挂点：free 侧新增 relative 包裹层（textarea 与幽灵同几何）；手动侧 .wb-field 本就 relative */
 .wb-free-input { position: relative; }
 @media (prefers-reduced-motion: no-preference) {

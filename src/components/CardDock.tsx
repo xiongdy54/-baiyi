@@ -1,7 +1,7 @@
-// 制卡台容器（v48.100 / D144 #2，IA 重设计，取代 v48.79 / D123 的「手动区 + AI 区」两段式）
-// 结构：上＝制卡板块（头行 34px：题「制卡」+ 页签「手动制卡｜AI 制卡」+ 右端收起箭头（沿用 D123
-//       manualCollapsed 收合机制，语义＝「制卡板块收起」）；两页签体常驻挂载、display:none 切换保活
-//       ——表单草稿 / AI 面板 / 流式状态跨页签不丢）；
+// 制卡台容器（v48.101 / D146 修订，基础结构＝v48.100 / D144 #2 IA 重设计，取代 v48.79 / D123 的「手动区 + AI 区」两段式）
+// 结构：上＝制卡板块（头行 34px：页签「手动制卡｜AI 制卡」平分整行 + 右端收起箭头（沿用 D123
+//       manualCollapsed 收合机制，语义＝「制卡板块收起」；v48.101：头行左侧「制卡」题字钮退役）；
+//       两页签体常驻挂载、display:none 切换保活——表单草稿 / AI 面板 / 流式状态跨页签不丢）；
 //       下＝解释板块（开合把手 20px + .collapse-clip 内容槽 + 悬浮按钮行槽 + composer 槽；
 //       默认收起＝仅按钮行 + 输入条，无既有内容时把手不在场；发送/内容到达自动展开经
 //       useSelectionActions 的 explainOpen 通道接线，D144 #3）。
@@ -114,19 +114,10 @@ export default function CardDock({
       aria-hidden={!dockOpen}
       onKeyDown={onKeyDown}
     >
-      {/* 制卡板块（D144）：头行＝题「制卡」+ 页签（手动制卡｜AI 制卡）+ 右端收起箭头 */}
+      {/* 制卡板块（D144）：头行＝页签（手动制卡｜AI 制卡，平分整行）+ 右端收起箭头。
+          v48.101（D146）：头行左侧「制卡」题字钮退役（与顶栏入口重复命名；开合收归右端箭头单钮） */}
       <section className={`wb-manual${manualCollapsed ? " is-collapsed" : ""}`} data-testid="wb-cards" aria-label="制卡">
         <header className="wb-head">
-          <button
-            type="button"
-            className="wb-manual-toggle"
-            data-testid="wb-manual-toggle"
-            aria-expanded={!manualCollapsed}
-            title={manualCollapsed ? "展开制卡板块" : "收起制卡板块（草稿保留）"}
-            onClick={onToggleManual}
-          >
-            <span className="wb-title">制卡</span>
-          </button>
           <div className="dock-tabs" role="tablist" aria-label="制卡页签" data-testid="wb-cards-tabs">
             <button
               type="button"
@@ -190,7 +181,8 @@ export default function CardDock({
             title={explainOpen ? "收起解释" : "展开解释"}
             onClick={onToggleExplain}
           >
-            <IconChevronDown size={14} className={explainOpen ? "is-flip" : undefined} />
+            {/* v48.101（D146）：箭头随几何方向——收起态（内容将向上展开）＝向上箭头；展开态（将向下收起）＝向下箭头 */}
+            <IconChevronDown size={14} className={explainOpen ? undefined : "is-flip"} />
           </button>
         )}
         {/* 内容槽走 .collapse-clip 通用折叠（grid 0fr↔1fr）；收起态 visibility 延后隐藏（防 Tab 进入） */}

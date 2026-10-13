@@ -58,9 +58,11 @@ function MdField({
 
 
 /** 制卡台输入字段外壳（D123 修订）：默认一行、随内容伸缩（高度过渡由 CSS 的 --dur-panel/--ease 承担）；
-    右下角可选「带入…」悬停钮（设计稿绿色小字）：点击把外部文本写入该字段。
-    D144 #4（§3.3）：可选幽灵草稿层（宿主构建的节点）——absolute 铺满 field 输入面，整层可点＝接受；
-    幽灵在场时 Alt+Enter（坞内固定键，目标输入面聚焦时）也走接受（onGhostAccept）。 */
+    右下角可选「带入…」悬停钮（设计稿绿色小字）：点击把外部文本写入该字段；无外部文本但有 generate
+    （v48.101/D146「带入 AI 回答」生成链）时点击触发生成（busy 期间显示「生成中…」并忽略再点）。
+    D144 #4（§3.3）：可选幽灵草稿层（宿主构建的节点）——absolute 铺满 field 输入面；
+    v48.101（D146 修订）：幽灵层 pointer-events:none 纯指示，接受唯一路径＝Alt+Enter
+    （坞内固定键，目标输入面聚焦时走 onGhostAccept），点击不再接受。 */
 function GrowField({
   children,
   pick,
@@ -68,7 +70,7 @@ function GrowField({
   onGhostAccept
 }: {
   children: ReactNode;
-  pick?: { label: string; empty: string; get: () => string | null | undefined; apply: (t: string) => void };
+  pick?: { label: string; empty: string; get: () => string | null | undefined; apply: (t: string) => void; generate?: () => void; busy?: boolean };
   ghost?: ReactNode;
   onGhostAccept?: () => void;
 }) {
@@ -102,9 +104,15 @@ function GrowField({
           // 不抢焦点/选区：mousedown 阻止默认，读选区时阅读区选区仍在
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
+            if (pick.busy) return;
             const t = (pick.get() ?? "").trim();
             if (t) {
               pick.apply(t);
+              return;
+            }
+            // v48.101（D146）：无既有文本但有生成链（正面非空）→ 触发生成；否则空态提示
+            if (pick.generate) {
+              pick.generate();
               return;
             }
             setMiss(true);
@@ -112,7 +120,7 @@ function GrowField({
             timer.current = window.setTimeout(() => setMiss(false), 1400);
           }}
         >
-          {miss ? pick.empty : pick.label}
+          {pick.busy ? "生成中…" : miss ? pick.empty : pick.label}
         </button>
       )}
     </div>
@@ -262,10 +270,12 @@ interface PrecheckHit {
   differs: boolean;
 }
 
-/** D144 #4：ManualCardForm 的宿主句柄——幽灵接受（Alt+Enter / 点击幽灵层）时把源全文写入
-    第一文本框（qa/reverse/图片挖空＝正面 front，填空＝挖空文本，四态同为此值）并聚焦、光标落文末 */
+/** D144 #4：ManualCardForm 的宿主句柄——幽灵接受（Alt+Enter）时把源全文写入
+    第一文本框（qa/reverse/图片挖空＝正面 front，填空＝挖空文本，四态同为此值）并聚焦、光标落文末；
+    v48.101（D146）：setBackValue＝「带入 AI 回答」生成链的流式落点（全量覆盖背面，逐 delta 调用）。 */
 export interface ManualFormHandle {
   setFrontValue: (text: string) => void;
+  setBackValue: (text: string) => void;
 }
 
 /** 手动制卡表单体（D88 §8.2 抽取，纯移动）：modal 包装之外的全部内容——
@@ -296,10 +306,14 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   onDisambiguate?: (newCardId: string, otherCardId: string) => void;
   /** D144 #4：幽灵草稿层节点（宿主按 §4.2 派生条件构建；渲染进第一文本框的 field 容器） */
   ghost?: ReactNode;
-  /** D144 #4：幽灵 Alt+Enter 接受回调（点击接受由 ghost 节点自带 onAccept 承担） */
+  /** D144 #4：幽灵 Alt+Enter 接受回调（v48.101/D146：点击接受已退役，此为唯一接受路径） */
   onGhostAccept?: () => void;
   /** D144 #4：第一文本框值镜像上报（宿主只读用于幽灵显示条件；宿主不回写——无损红线） */
   onFrontChange?: (v: string) => void;
+  /** v48.101（D146）：「带入 AI 回答」生成链——无既有回答且正面非空时触发生成（宿主流式写回背面） */
+  onGenerateAnswer?: (question: string) => void;
+  /** v48.101（D146）：生成进行中（pick 钮显示「生成中…」并忽略再点） */
+  answerGenerating?: boolean;
 }>(function ManualCardForm({
   quote,
   imageRegion,
@@ -315,7 +329,9 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   variant = "modal",
   ghost,
   onGhostAccept,
-  onFrontChange
+  onFrontChange,
+  onGenerateAnswer,
+  answerGenerating
 }, ref) {
   const [modeInner, setModeInner] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
   const mode = modeProp ?? modeInner;
@@ -388,6 +404,10 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
       setFrontValue: (text: string) => {
         pendingFrontCaret.current = true;
         setFront(text);
+      },
+      // v48.101（D146）：「带入 AI 回答」生成链的流式落点——全量覆盖背面（逐 delta 调用），不动光标
+      setBackValue: (text: string) => {
+        setBack(text);
       }
     }),
     []
@@ -566,7 +586,20 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   // 页脚（更多 / 制卡）」，说明性长文案收进 title / placeholder；高级字段收进「更多」（hidden 不卸载，载荷不变）。
   if (variant === "dock") {
     const pickSel = onPickSelection ? { label: "带入选区", empty: "没有选区", get: onPickSelection, apply: setFront } : undefined;
-    const pickAns = onPickAnswer ? { label: "带入 AI 回答", empty: "暂无 AI 回答", get: onPickAnswer, apply: setBack } : undefined;
+    // v48.101（D146）：「带入 AI 回答」三态——①有既有回答＝带入；②无既有回答但正面非空且宿主给了
+    // 生成链（问答/翻转；图片挖空的答案来自图内容，不接生成）＝触发生成并流式写回背面；③正面为空＝
+    // 「暂无 AI 回答」空态提示（1.4s 自复）。
+    const canGenerate = (mode === "qa" || mode === "reverse") && !!front.trim() && !!onGenerateAnswer;
+    const pickAns = onPickAnswer
+      ? {
+          label: "带入 AI 回答",
+          empty: "暂无 AI 回答",
+          get: onPickAnswer,
+          apply: setBack,
+          generate: canGenerate ? () => onGenerateAnswer?.(front.trim()) : undefined,
+          busy: answerGenerating
+        }
+      : undefined;
     return (
       <>
         <div
