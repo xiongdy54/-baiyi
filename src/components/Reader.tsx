@@ -656,7 +656,10 @@ export default function Reader({
           // foliate 的章节在 iframe 里，事件根本不冒泡到宿主，本项只影响 PDF 与宿主侧正文。
           t.closest(".reader-engine-host") ||
           // v48.41（D81）：工具栏选区动作组是动作面——点「摘录/制卡」时 mousedown 不得清集合与选区
-          t.closest(".reader-sel-actions"))) return;
+          t.closest(".reader-sel-actions") ||
+          // v48.102（D147）：制卡台坞是选区动作面——「带入选区」要读 Reader 选区快照
+          //（EPUB 引擎选区在 iframe 里只有快照可读），点坞的 mousedown 不得清集合与选区
+          t.closest(".wb-root"))) return;
       clearMultiSelect();
       setSelection(null);
       engineSelRef.current = null;

@@ -1628,8 +1628,15 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     manualQuote,
     // D123：手动表单重置序号 / AI 解释页自由追问线程
     manualSeq,
-    // D123 修订：制卡台「带入选区」——读取阅读区当前选区文字（无选区＝null）
-    readSelectionText: () => A().selectionText(),
+    // D123 修订：制卡台「带入选区」——读取当前选区文字（无选区＝null）。
+    // v48.102（D147）全界面取文口：先读 window 实时选区（摘录/复习/制卡台/书架等宿主 DOM 面
+    // 即时生效——FreeWorkbenchHost 适配器恒空，快照口径在这些界面永远拿不到选区），
+    // 空则回退适配器选区（EPUB/PDF 引擎选区在 iframe 里不进 window.getSelection，只有适配器有）。
+    readSelectionText: () => {
+      const live = (typeof window !== "undefined" ? window.getSelection()?.toString() : "") ?? "";
+      const t = live.trim() || (A().selectionText() ?? "").trim();
+      return t || null;
+    },
     thread,
     runAsk,
     clearThread,
