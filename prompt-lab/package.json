@@ -7,7 +7,8 @@
   "scripts": {
     "start": "electron .",
     "build:vendor": "node ../node_modules/esbuild/bin/esbuild ../src/lib/cards.ts --bundle --format=iife --global-name=cardsLib --outfile=vendor/cards.js",
-    "build:kpscopes": "node ../node_modules/esbuild/bin/esbuild ../electron/kpScopes.js --bundle --format=iife --global-name=kpScopesLib --outfile=vendor/kpScopes.js"
+    "build:kpscopes": "node ../node_modules/esbuild/bin/esbuild ../electron/kpScopes.js --bundle --format=iife --global-name=kpScopesLib --outfile=vendor/kpScopes.js",
+    "build:ste": "node ../node_modules/esbuild/bin/esbuild ../src/lib/steProfiles.ts --bundle --format=iife --global-name=steProfilesLib --outfile=vendor/ste.js"
   },
   "devDependencies": {
     "electron": "^31.0.0"

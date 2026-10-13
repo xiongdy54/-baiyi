@@ -53,6 +53,21 @@
 
 确认后并回主软件：播种 v8（`ensurePromptTemplates` 制卡族 TARGET_VERSION 6/7→8，旧版留痕）+ GUIDE §6.3/§7.4 登记 + 确认面板勾选 UI（**默认不勾选**断言，D94 §7 批 F）。**批 F 的确认面板 UI 同受标签总开关 `app.tagsEnabled`（v48.63/D107）约束。**
 
+## v48.103 候选 v2（2026-10-13，D148 后续：简明解读 = ASD-STE100 直答 + 模板级全局输出语言，待实测）
+
+`prompts-draft.js` 现行候选 `reader-explain-ste`（DRAFT_TAG=`v8-candidate+ste-asd2-globalLang-20261013`；制卡族候选内容不变）。
+
+- **用户第一轮指令（v1，已被 v2 取代）**：简明改写改为「用 ASD-STE100 解释选中文本后，逐句翻译为'中文'进行输出」。
+- **用户第二轮指令（v2，现行）**：①简明改写只写「用 ASD-STE100 解释选中文本」；②模板级新增【输出语言（整体硬约束）】块——全部输出（含 ASD-STE100 解释与简明改写结果、节标题、说明文字、多重解读、追问回答）一律使用 `{{OUTPUT_LANG_NAME}}`（界面语言人读名，渲染层运行时注入；例：界面语言为日语 → 全部内容含 ASD-STE100 结果整体以日语输出）。多语言适配由同一槽位机制承担。
+- **候选 vs 主软件 v3 基线的其余差异（逐字不动之外）**：【简明改写硬规则】块退役；追问/收尾条款去悬挂引用；输出剖面槽位头「改写与全部说明文字」→「全部说明文字」。
+- **测试台配套**：模式下拉「简明解读（reader-explain-ste）」+ 解释管线（双 pack 注入与主软件 cards.ts 同构、材料语言本地粗检、温度 0.3）+ **「解读语言」切换器**（默认跟随界面语言 navigator.language，可强制选 中文/English/日本語/한국어/Français/Deutsch/Español/Русский——`{{OUTPUT_LANG_NAME}}` 与输出 pack 回退链随选择联动）。**首次使用先跑 `npm run build:ste`（生成 vendor/ste.js）再启动**。
+- **实测确认清单（用户逐项看）**：
+  1. 简明改写是否呈现 ASD-STE100 特征（每句一义、主动语态、短句、无成语/文白夹杂）且整体为所选语言——重点试「解读语言=日本語」：全部输出（含改写）应为日语、无英文夹带；
+  2. 与 v3 基线对比：左栏 `reader-explain-ste`「还原为主软件基线」后 A/B 对跑同一材料；
+  3. 稳定性：同材料多跑几次，改写风格与语言是否一致；
+  4. 歧义点/多重解读/术语节是否保持正常（节标题与说明文字也应随所选语言）。
+- **并回主软件的前置（确认后另批实施）**：播种 `reader-explain-ste` v4 + cards.ts explain 注入 `{{OUTPUT_LANG_NAME}}`（`steOutputLangName()` 已入 `src/lib/steProfiles.ts`，覆盖 zh/en/ja/ko/fr/de/es/ru/pt/it）+ **修订 d91-prompts 的「模板正文不含 ASD-STE100」断言与 GUIDE D91 ② 红线表述**——候选正文只出现标准**名称**（用户指令），仍不含规范规则原文与批准词典词表；主软件 v3 与全部测试在候选期保持不变。`{{OUTPUT_LANG_NAME}}` 槽位机制可平移给其他 scope（多语言适配的通用入口）。
+
 ## 隔离边界
 
 - AI 配置存 `%APPDATA%/prompt-lab/ai-config.json`，与主软件完全独立（首次使用需在「AI 配置」里贴一次 Key）。

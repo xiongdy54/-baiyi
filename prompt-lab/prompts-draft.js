@@ -37,6 +37,76 @@ const PATCH_STEP4 = `【建议标签（suggestedTags，v8 候选新增段）】
 
 【第四步：输出格式】`;
 
+// ---------- v48.103 候选 v2（2026-10-13，D148 后续：简明解读 = ASD-STE100 直答 + 模板级全局输出语言） ----------
+// 用户第二轮指令（逐字）：简明改写部分的提示词改为「用 ASD-STE100 解释选中文本」；同时所有的提示词
+// 都增加一个对 AI 整体输出语言 {{OUTPUT_LANG_NAME}} 的规定——例如界面语言为日语时，{{OUTPUT_LANG_NAME}}
+// 就是日语，全部内容（包括其中的 ASD-STE100 结果）也以日语形式输出。
+// v1 → v2 演进：v1 把「逐句翻译为X」写在改写步骤里；v2 改写步骤只保留 ASD-STE100 直答，语言约束
+// 升级为模板级【输出语言（整体硬约束）】块（覆盖全部输出），多语言适配由同一槽位机制承担。
+// 口径变化（相对 D91 §②）：候选模板正文出现 ASD-STE100 标准名称（仍不含规范规则原文与批准词典词表）；
+// 并回主软件前须同步修订 d91-prompts 的「模板正文不含 ASD-STE100」断言与 GUIDE D91 ② 的红线表述。
+// 其余结构（歧义点/多重解读/术语/机器标记/节标题契约/双 pack 槽位）保持主软件 v3 逐字不动；
+// 另随改写指令改判做三处一致性修订：【简明改写硬规则】块整体退役、追问/收尾条款去悬挂引用、
+// 输出剖面槽位头去掉「改写」字样（改写不再按输出剖面执行，仅说明文字沿用）。
+
+// 锚点①：模板开头——首行之后插入【输出语言（整体硬约束）】块（v2 新增：全部输出含 ASD-STE100
+// 结果一律使用 {{OUTPUT_LANG_NAME}}，由渲染层按界面语言注入人读名）
+const STE_ANCHOR_HEAD = `你是阅读助手，负责「简明解读」：按受控语言剖面（CLP）检测并改写用户选中的材料片段。
+
+【任务定义（恒定完整执行）】`;
+const STE_PATCH_HEAD = `你是阅读助手，负责「简明解读」：按受控语言剖面（CLP）检测并改写用户选中的材料片段。
+
+【输出语言（整体硬约束，覆盖你的全部输出）】
+你的全部输出——包括按 ASD-STE100 得出的解释与简明改写结果、节标题、歧义点与术语的说明文字、多重解读、对追问的回答——一律使用「{{OUTPUT_LANG_NAME}}」书写。ASD-STE100 的规则原生面向英语，但其应用结果不得以英语呈现：必须整体以「{{OUTPUT_LANG_NAME}}」的形式表达，禁止夹带英文原句或中英对照。用户消息【解读语言】块标注的语言即「{{OUTPUT_LANG_NAME}}」；两者表述不一致时，以本块为准。
+
+【任务定义（恒定完整执行）】`;
+
+// 锚点②③：任务定义第 2 步整行替换 + 【简明改写硬规则】块整体删除
+const STE_ANCHOR_STEP2 = `2. 简明改写（恒定执行）：这是受控语言改写，不是口语化复述，也不是缩写概括。逐句改写，输出语言与材料语言不同时，改写同时是翻译；改写与原文保持句级对应——原文的每个信息点都必须保留，禁止遗漏、添加或合并事实。改写后的每一句都必须满足下方【简明改写硬规则】与输出语言剖面。`;
+const STE_PATCH_STEP2 = `2. 简明改写（恒定执行）：用 ASD-STE100 解释选中文本。`;
+
+const STE_ANCHOR_RULES = `
+【简明改写硬规则（每条都是硬约束，违反任何一条即不合格）】
+- 句子上限：输出语言剖面的句子规则（长度、分句数）对改写后的每一句分别生效；任何一句超限必须拆成多句，禁止为保留原文的句读节奏而输出超长句。
+- 一句一义：每句只说一个意思，先结论后展开；从句嵌套至多一层；一段只讲一个主题。
+- 语态与施动者：按输出语言剖面执行——主动语态优先；施动者不明时显式写明（如「来源未说明」），禁止用被动句掩蔽施动者。
+- 词汇纪律：按输出语言剖面执行——同一概念只用同一个词；术语首次出现就地用一句白话定义；避免行话、文白夹杂与含糊量词；数字带单位。
+- 逐句自查：输出前把改写稿逐句过一遍——长度、分句、语态、词汇、信息完整五项全部合格才允许输出；任何一项不合格，拆句重写后再输出。
+`;
+
+// 锚点④：追问直答条款去掉对已退役硬规则块的悬挂引用
+const STE_ANCHOR_FOLLOWUP = `直接按追问角度作答（简短聚焦，两到五句；仍用解读语言并遵守输出语言剖面与【简明改写硬规则】）；`;
+const STE_PATCH_FOLLOWUP = `直接按追问角度作答（简短聚焦，两到五句；仍用解读语言并遵守输出语言剖面）；`;
+
+// 锚点⑤：收尾追问条款同上
+const STE_ANCHOR_TAIL = `用户可能在解读后追问；追问时按追问角度作答，仍遵守输出语言、改写剖面与【简明改写硬规则】。`;
+const STE_PATCH_TAIL = `用户可能在解读后追问；追问时按追问角度作答，仍遵守输出语言与输出语言剖面。`;
+
+// 锚点⑥：输出剖面槽位头——改写不再按输出剖面执行（ASD-STE100 直答），槽位只覆盖说明文字
+const STE_ANCHOR_OUTSLOT = `【输出语言改写剖面（改写与全部说明文字按此语言的规则执行）】`;
+const STE_PATCH_OUTSLOT = `【输出语言剖面（全部说明文字按此语言的规则执行）】`;
+
+function applySteCandidate(base) {
+  if (
+    typeof base !== "string" ||
+    !base.includes(STE_ANCHOR_HEAD) ||
+    !base.includes(STE_ANCHOR_STEP2) ||
+    !base.includes(STE_ANCHOR_RULES) ||
+    !base.includes(STE_ANCHOR_FOLLOWUP) ||
+    !base.includes(STE_ANCHOR_TAIL) ||
+    !base.includes(STE_ANCHOR_OUTSLOT)
+  ) {
+    return base; // 锚点失配（主软件提示词结构变化）→ 原样返回，测试台「与主软件一致」状态即如实可见
+  }
+  return base
+    .replace(STE_ANCHOR_HEAD, STE_PATCH_HEAD)
+    .replace(STE_ANCHOR_STEP2, STE_PATCH_STEP2)
+    .replace(STE_ANCHOR_RULES, "")
+    .replace(STE_ANCHOR_FOLLOWUP, STE_PATCH_FOLLOWUP)
+    .replace(STE_ANCHOR_TAIL, STE_PATCH_TAIL)
+    .replace(STE_ANCHOR_OUTSLOT, STE_PATCH_OUTSLOT);
+}
+
 function applyCandidate(base) {
   if (typeof base !== "string" || !base.includes(ANCHOR_SCHEMA) || !base.includes(ANCHOR_STEP4)) {
     return base; // 锚点失配（主软件提示词结构变化）→ 原样返回，测试台「与主软件一致」状态即如实可见
@@ -44,7 +114,9 @@ function applyCandidate(base) {
   return base.replace(ANCHOR_SCHEMA, PATCH_SCHEMA).replace(ANCHOR_STEP4, PATCH_STEP4);
 }
 
-const DRAFT_TAG = "v8-candidate-suggestedTags-20261006";
+// v48.103（2026-10-13）：DRAFT_TAG 随简明解读候选一并 bump——制卡族候选内容不变（未手改的 scope
+// 仅重写 draftTag），reader-explain-ste 候选 v2（ASD-STE100 直答 + 全局输出语言块）随新 tag 播进测试台本地表。
+const DRAFT_TAG = "v8-candidate+ste-asd2-globalLang-20261013";
 
 const DRAFT_SCOPES = {
   // ---- v8 候选族：card-* scope 全部打补丁（内嵌主提示词，两处锚点各命中一次） ----
@@ -59,6 +131,8 @@ const DRAFT_SCOPES = {
   "card-basic": { name: "前置知识卡", content: applyCandidate(P.CARD_BASIC_PROMPT) },
   "card-vocab": { name: "单词制卡", content: applyCandidate(P.CARD_VOCAB_PROMPT) },
   // ---- 基线直引（非制卡族，批 F 不涉及） ----
+  // v48.103（D148 后续）候选 v2：简明解读 = ASD-STE100 直答 + 模板级全局输出语言 {{OUTPUT_LANG_NAME}}
+  "reader-explain-ste": { name: "简明解读", content: applySteCandidate(P.READER_EXPLAIN_STE_PROMPT) },
   // v40（M8-B，D37）：日记洞察 scope（基线直引，主软件 journal-insight v1）
   "journal-insight": { name: "日记洞察", content: P.JOURNAL_INSIGHT_PROMPT },
   // v41（K2-A，D38）+ v43（K2-B）：知识抽取/关系/LKM 三 scope（基线直引）

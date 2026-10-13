@@ -6,6 +6,11 @@
 const $ = (id) => document.getElementById(id);
 const lib = window.cardsLib || {};
 const scopesLib = window.kpScopesLib || null; // v43（K2-B）：LKM 4 scope 出层契约校验器 + 离散度守门（vendor/kpScopes.js）
+const steLib = window.steProfilesLib || null; // v48.103（D148 后续）：简明解读 pack 注入 + 输出语言人读名（vendor/ste.js）
+
+// v48.103（D148 后续）：解释管线 scope——输出 markdown 文本（非 JSON 卡片管线），pack 注入与主软件
+// cards.ts explain 同构：分析 pack 按材料语言回退链解析、输出 pack 恒=STE_OUTPUT_LANG（界面语言）。
+const EXPLAIN_SCOPES = ["reader-explain-ste"];
 
 // v43（K2-B）：LKM 知识模型 scope——出层走封闭契约裁决， temperature 固定 0.1（§4.6 item 7）
 const LKM_SCOPES = ["material-difficulty", "knowledge-probe", "frontier-explain", "structure-analogy"];
@@ -60,11 +65,14 @@ async function init() {
 }
 
 // v43（K2-B）：LKM 控件随模式启用/停用（白名单输入 + ×N 离散度仅 LKM scope 可用）
+// v48.103（D148 后续）：解读语言切换器仅解释管线 scope 可用（默认「跟随界面语言」）
 function updateLkmControls() {
-  const isLkm = LKM_SCOPES.includes($("modeSelect").value);
+  const mode = $("modeSelect").value;
+  const isLkm = LKM_SCOPES.includes(mode);
   $("idWhitelist").disabled = !isLkm;
   $("dispersionN").disabled = !isLkm;
   $("dispersionBtn").disabled = !isLkm;
+  $("outLangSelect").disabled = !EXPLAIN_SCOPES.includes(mode);
 }
 
 async function loadPromptList() {
@@ -221,6 +229,24 @@ async function runPipeline() {
     return;
   }
 
+  // v48.103（D148 后续）：解释管线前置守卫 + 材料语言本地自检（测试台无书语言，CJK/拉丁占比粗判，
+  // 与主软件 bookLangRef 语义对齐——模型侧另有 <!--ste:matLang--> 自检标记兜底）。
+  // 解读语言默认跟随界面语言（navigator.language），可经下拉强制指定（多语言适配实测入口）。
+  const isExplain = EXPLAIN_SCOPES.includes(scope);
+  let matLang = "";
+  let outLangTag = "";
+  let outLangName = "";
+  if (isExplain) {
+    if (!steLib || !steLib.resolveProfile || !steLib.formatProfile) {
+      showError("steProfiles 库未加载：在 prompt-lab 目录执行 npm run build:ste 后重启测试台。");
+      return;
+    }
+    matLang = detectMatLang(text);
+    outLangTag = $("outLangSelect").value || navigator.language || "zh-Hans";
+    outLangName = steLib.steOutputLangName(outLangTag);
+    $("routeLine").textContent += ` · 材料语言自检：${matLang} · 解读语言：${outLangTag}（${outLangName}）`;
+  }
+
   // ③ 上下文打包（材料 + 来源标记；测试台不注入已有卡/画像）
   const source = $("sourceTitle").value.trim();
   const sourceLine = source ? `\n\n【来源】《${source}》` : "";
@@ -228,7 +254,24 @@ async function runPipeline() {
   const isLkm = LKM_SCOPES.includes(scope);
   let lkmInput = null;
   let messages;
-  if (isLkm) {
+  if (isExplain) {
+    // 与主软件 cards.ts explain（mode=ste）同构：双 pack 注入（输出 pack 按解读语言回退链解析）
+    // + {{OUTPUT_LANG_NAME}} 槽位（候选 v2 的模板级全局输出语言块；基线 v3 无此槽位，replace 为 no-op）
+    // + 温度 0.3（D148）
+    const sys = tpl.content
+      .replace("{{ANALYSIS_PROFILE}}", steLib.formatProfile(steLib.resolveProfile(matLang)))
+      .replace("{{OUTPUT_PROFILE}}", steLib.formatProfile(steLib.resolveProfile(outLangTag)))
+      .replace(/\{\{OUTPUT_LANG_NAME\}\}/g, outLangName);
+    const user = [
+      `【选中文本】\n${text}`,
+      source ? `【上下文】${source}` : "",
+      `【材料语言】${matLang}`,
+      `【解读语言】${outLangTag}（${outLangName}）`
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    messages = [{ role: "system", content: sys }, { role: "user", content: user }];
+  } else if (isLkm) {
     const built = buildLkmRequest(scope, text, source);
     messages = [{ role: "system", content: tpl.content }, { role: "user", content: built.userContent }];
     lkmInput = built.validatorInput;
@@ -263,7 +306,8 @@ async function runPipeline() {
     );
   }, 500);
   try {
-    acc = await chatStreamLocal(messages, isLkm ? 0.1 : 0.2, (n) => (thinkChars = n));
+    // v48.103（D148）：简明解读 0.3（受控改写精度任务，与主软件 cards.ts 同温）；LKM 0.1；制卡族 0.2
+    acc = await chatStreamLocal(messages, isExplain ? 0.3 : isLkm ? 0.1 : 0.2, (n) => (thinkChars = n));
   } catch (err) {
     showError(err.message || String(err));
     return;
@@ -276,8 +320,41 @@ async function runPipeline() {
   }
   $("rawOutput").textContent = acc;
 
-  // ⑤⑥ JSON 容错 + Lint（LKM scope 走出层契约裁决展示）
+  // ⑤⑥ JSON 容错 + Lint（LKM scope 走出层契约裁决展示；解释 scope 走 markdown 文本展示）
+  if (isExplain) {
+    renderExplainResult(acc);
+    return;
+  }
   renderResult(acc, scope, lkmInput);
+}
+
+// v48.103（D148 后续）：材料语言本地粗检——CJK 字符与拉丁字母占比二分（zh-Hans / en），
+// 仅测试台用（主软件由书的语言元数据提供 bookLangRef）；结果展示在路由行，模型标记另有自检兜底。
+function detectMatLang(text) {
+  const t = String(text || "").slice(0, 2000);
+  const cjk = (t.match(/[\u4e00-\u9fff]/g) || []).length;
+  const latin = (t.match(/[A-Za-z]/g) || []).length;
+  return cjk >= latin ? "zh-Hans" : "en";
+}
+
+// v48.103（D148 后续）：解释管线结果展示——非 JSON：机器标记解析展示 + 正文剥离标记后整段呈现
+function renderExplainResult(raw) {
+  const box = $("results");
+  box.innerHTML = "";
+  $("explorations").innerHTML = "";
+  const markers = {};
+  for (const m of String(raw).matchAll(/<!--ste:([a-zA-Z]+)=([^>]*?)-->/g)) markers[m[1]] = m[2].trim();
+  const metaBits = Object.entries(markers)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" · ");
+  if (metaBits) box.appendChild(el("div", "meta-block", `机器标记：${escapeHtml(metaBits)}`));
+  const card = el("div", "result-card");
+  card.appendChild(el("div", "rc-head", `<span class="rc-type">简明解读输出（markdown 文本，机器标记已剥离；原文见「原始输出」）</span>`));
+  const body = String(raw)
+    .replace(/<!--ste:[^>]*-->\s*/g, "")
+    .trim();
+  card.appendChild(el("div", "rc-back", `<pre class="raw-output" style="white-space:pre-wrap;margin:0">${escapeHtml(body)}</pre>`));
+  box.appendChild(card);
 }
 
 function chatStreamLocal(messages, temperature, onThinking) {

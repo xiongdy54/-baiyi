@@ -29,6 +29,38 @@ export const STE_PROFILES: Record<string, SteProfile> = {
 /** P0 输出语言恒中文（=界面语言，已拍板）；槽位保留以支持 P1 设置项零改模板升级（D91 §6.3） */
 export const STE_OUTPUT_LANG = "zh-Hans";
 
+/** 输出语言 → 人读名（模板 {{OUTPUT_LANG_NAME}} 槽位按界面语言替换用；v48.103 测试台候选，随界面语言取值） */
+const STE_OUTPUT_LANG_NAMES: Record<string, string> = {
+  "zh-Hans": "中文",
+  en: "English",
+  ja: "日本語",
+  ko: "한국어",
+  fr: "Français",
+  de: "Deutsch",
+  es: "Español",
+  ru: "Русский",
+  pt: "Português",
+  it: "Italiano"
+};
+
+/**
+ * 界面语言（任意 BCP-47 写法）→ 输出语言人读名。回退链与 resolveProfile 同纪律：
+ * 精确键 → zh-* 归并 zh-Hans → 基础语言键 → 缺省回输出语言默认值。
+ * 纯函数、可单测；'zh-TW'→中文 / 'en-US'→English / 'fr'→中文（无该语言 pack 名时回默认）。
+ */
+export function steOutputLangName(lang: string = STE_OUTPUT_LANG): string {
+  const raw = String(lang ?? "").trim().toLowerCase();
+  if (raw) {
+    for (const key of Object.keys(STE_OUTPUT_LANG_NAMES)) {
+      if (key.toLowerCase() === raw) return STE_OUTPUT_LANG_NAMES[key];
+    }
+    const base = raw.split(/[-_]/)[0];
+    if (base === "zh") return STE_OUTPUT_LANG_NAMES["zh-Hans"];
+    if (STE_OUTPUT_LANG_NAMES[base]) return STE_OUTPUT_LANG_NAMES[base];
+  }
+  return STE_OUTPUT_LANG_NAMES[STE_OUTPUT_LANG] ?? "中文";
+}
+
 /**
  * 回退链（D91 §6.2）：精确 locale（zh-Hant-TW→zh-Hans）→ 基础语言（zh→zh-Hans 依赖注册表键）→ en → universal。
  * 纯函数、可单测；'zh-Hant-TW'→zh-Hans / 'fr'→en / ''→universal。

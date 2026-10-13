@@ -27,6 +27,8 @@ const BASELINE_SCOPES = {
   "card-vocab": { name: "单词制卡", content: P.CARD_VOCAB_PROMPT },
   "card-occlusion": { name: "图片挖空", content: P.CARD_OCCLUSION_PROMPT },
   "reader-explain": { name: "阅读解释", content: P.READER_EXPLAIN_PROMPT },
+  // v48.103（D148 后续）：简明解读基线＝主软件 v3 现行文本；候选在 prompts-draft.js（ASD-STE100 直答）
+  "reader-explain-ste": { name: "简明解读", content: P.READER_EXPLAIN_STE_PROMPT },
   "leech-rescue": { name: "难点诊断", content: P.LEECH_RESCUE_PROMPT },
   // v40/v41/v43（M8-B / K2-A / K2-B）：洞察与 LKM 知识模型 scope 基线直引。
   // 补记：此前的 journal-insight / knowledge-extraction / knowledge-relation 只进了 DRAFT_SCOPES，

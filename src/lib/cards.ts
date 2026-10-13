@@ -789,13 +789,15 @@ export const cardGenerator: {
       ]
         .filter(Boolean)
         .join("\n\n");
+      // v48.103（D148）：受控语言改写是精度任务，高温是「简明改写」跑偏（长句/分句堆叠/口语化复述）的主因之一，
+      // 0.7→0.3；追问直答同链路受益（模板侧已声明追问也遵守硬规则）。
       return aiGateway.chat(
         [
           { role: "system", content: sys },
           { role: "user", content: user }
         ],
         onDelta,
-        0.7,
+        0.3,
         onThinking,
         onCancelRegister
       );

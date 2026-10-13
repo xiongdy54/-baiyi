@@ -45,6 +45,7 @@ const {
   // v48.51（D91）：简明解读 scope；v48.74（D118）v1 原文冻结常量（全新库 v1 行留痕用）
   READER_EXPLAIN_STE_PROMPT,
   READER_EXPLAIN_STE_PROMPT_V1,
+  READER_EXPLAIN_STE_PROMPT_V2,
   // v48.74（D118）：通用解释模板 v2（追问四式）的 v1 原文冻结常量（READER_EXPLAIN_PROMPT 已在上方导入＝v2 现行文本）
   READER_EXPLAIN_PROMPT_V1,
   SITUATION_REQUIRED_SCOPES,
@@ -2672,7 +2673,7 @@ function ensurePromptTemplates() {
   } catch { /* 播种失败不阻塞启动 */ }
   // v48.51（D91）：reader-explain-ste 新 scope 首版 v1——简明解读（双 pack 槽位模板，
   // pack 由渲染端按材料语言/输出语言注入，见 src/lib/steProfiles.ts）。零新增 IPC、零 schema 变更。
-  // v48.74（D118）：v1 行用冻结的 READER_EXPLAIN_STE_PROMPT_V1（D91 原文留痕），全新库即 v1+v2 两行。
+  // v48.74（D118）：v1 行用冻结的 READER_EXPLAIN_STE_PROMPT_V1（D91 原文留痕）；全新库即 v1→v2→v3 三行。
   try {
     const steCount = queryAll("SELECT COUNT(*) AS n FROM prompt_templates WHERE scope = 'reader-explain-ste'")[0]?.n || 0;
     if (Number(steCount) === 0) {
@@ -2683,13 +2684,24 @@ function ensurePromptTemplates() {
     }
   } catch { /* 播种失败不阻塞启动 */ }
   // v48.74（D118）：reader-explain-ste v2——节标题语法硬约束（独占一行 + ## 前缀，禁止【】/粗体代替）。
-  // 存量库按 MAX(version)<2 升版播种（card-occlusion v3 同款模式），v1 留痕；getPromptTemplate 按
-  // is_default DESC, version DESC 取行 ⇒ v2 自然生效。
+  // v48.103（D148）：v2 行改用冻结的 READER_EXPLAIN_STE_PROMPT_V2（D118 原文留痕），现行文本（v3）迁出。
   try {
     const steMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'reader-explain-ste'")[0]?.v || 0;
     if (Number(steMaxV) < 2) {
       db.run(
         "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'reader-explain-ste', '简明解读 v2', ?, 2, 1, ?, ?)",
+        [crypto.randomUUID(), READER_EXPLAIN_STE_PROMPT_V2, situationRequiredFor("reader-explain-ste"), now]
+      );
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // v48.103（D148）：reader-explain-ste v3——改写纪律硬化（受控语言改写≠口语化复述 + 【简明改写硬规则】五项），
+  // 配合渲染端 ste 分支降温 0.7→0.3。存量库按 MAX(version)<3 升版播种（v2 同款模式），v1/v2 留痕；
+  // getPromptTemplate 按 is_default DESC, version DESC 取行 ⇒ v3 自然生效。
+  try {
+    const steMaxV3 = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'reader-explain-ste'")[0]?.v || 0;
+    if (Number(steMaxV3) < 3) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'reader-explain-ste', '简明解读 v3', ?, 3, 1, ?, ?)",
         [crypto.randomUUID(), READER_EXPLAIN_STE_PROMPT, situationRequiredFor("reader-explain-ste"), now]
       );
     }

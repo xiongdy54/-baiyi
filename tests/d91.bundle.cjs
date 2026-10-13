@@ -17,7 +17,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// tests/d91.entry.ts
+// ../tests/d91.entry.ts
 var d91_entry_exports = {};
 __export(d91_entry_exports, {
   EXPLAIN_ROUTER_MIN_CHARS: () => EXPLAIN_ROUTER_MIN_CHARS,
@@ -33,11 +33,12 @@ __export(d91_entry_exports, {
   parseSteMarkers: () => parseSteMarkers,
   resolveProfile: () => resolveProfile,
   routeExplainMode: () => routeExplainMode,
+  steOutputLangName: () => steOutputLangName,
   stripSteMarkers: () => stripSteMarkers
 });
 module.exports = __toCommonJS(d91_entry_exports);
 
-// src/lib/explainRouter.ts
+// ../src/lib/explainRouter.ts
 var STE_CATEGORIES = [
   { key: "polysemy", zh: "\u4E00\u8BCD\u591A\u4E49" },
   { key: "pronoun-ref", zh: "\u6307\u4EE3\u4E0D\u660E" },
@@ -178,7 +179,7 @@ function isLikelySameText(source, answer) {
   return hit / total >= EXPLAIN_SAME_TEXT_RATIO;
 }
 
-// electron/ste-profiles/zh-Hans.json
+// ../electron/ste-profiles/zh-Hans.json
 var zh_Hans_default = {
   lang: "zh-Hans",
   name: "\u7B80\u660E\u4E2D\u6587\u5256\u9762 v1",
@@ -215,7 +216,7 @@ var zh_Hans_default = {
   source: "docs/design/STE-PLAIN-DECODE-D91.md"
 };
 
-// electron/ste-profiles/en.json
+// ../electron/ste-profiles/en.json
 var en_default = {
   lang: "en",
   name: "Plain English Profile v1 (controlled-language distillation)",
@@ -252,7 +253,7 @@ var en_default = {
   source: "docs/design/STE-PLAIN-DECODE-D91.md"
 };
 
-// electron/ste-profiles/universal.json
+// ../electron/ste-profiles/universal.json
 var universal_default = {
   lang: "universal",
   name: "Universal plain-language profile v1 (four principles)",
@@ -284,13 +285,37 @@ var universal_default = {
   source: "docs/design/STE-PLAIN-DECODE-D91.md"
 };
 
-// src/lib/steProfiles.ts
+// ../src/lib/steProfiles.ts
 var STE_PROFILES = {
   "zh-Hans": zh_Hans_default,
   en: en_default,
   universal: universal_default
 };
 var STE_OUTPUT_LANG = "zh-Hans";
+var STE_OUTPUT_LANG_NAMES = {
+  "zh-Hans": "\u4E2D\u6587",
+  en: "English",
+  ja: "\u65E5\u672C\u8A9E",
+  ko: "\uD55C\uAD6D\uC5B4",
+  fr: "Fran\xE7ais",
+  de: "Deutsch",
+  es: "Espa\xF1ol",
+  ru: "\u0420\u0443\u0441\u0441\u043A\u0438\u0439",
+  pt: "Portugu\xEAs",
+  it: "Italiano"
+};
+function steOutputLangName(lang = STE_OUTPUT_LANG) {
+  const raw = String(lang ?? "").trim().toLowerCase();
+  if (raw) {
+    for (const key of Object.keys(STE_OUTPUT_LANG_NAMES)) {
+      if (key.toLowerCase() === raw) return STE_OUTPUT_LANG_NAMES[key];
+    }
+    const base = raw.split(/[-_]/)[0];
+    if (base === "zh") return STE_OUTPUT_LANG_NAMES["zh-Hans"];
+    if (STE_OUTPUT_LANG_NAMES[base]) return STE_OUTPUT_LANG_NAMES[base];
+  }
+  return STE_OUTPUT_LANG_NAMES[STE_OUTPUT_LANG] ?? "\u4E2D\u6587";
+}
 function resolveProfile(lang) {
   const raw = String(lang ?? "").trim();
   if (raw) {
@@ -339,5 +364,6 @@ function formatProfile(p) {
   parseSteMarkers,
   resolveProfile,
   routeExplainMode,
+  steOutputLangName,
   stripSteMarkers
 });
