@@ -22,13 +22,15 @@ app.whenReady().then(async () => {
     const prompts = require("../electron/prompts");
     await db.initDb();
 
-    console.log("== P1 全新库：reader-explain-ste 播种（v48.74 / D118 起全新库直接 v1→v2，默认取 v2） ==");
+    console.log("== P1 全新库：reader-explain-ste 播种（v48.103 / D148 起全新库直接 v1→v2→v3，默认取 v3） ==");
     const ste = db.getPromptTemplate("reader-explain-ste");
-    check("reader-explain-ste 存在且 version=2（v1 播种后即被 v2 升版覆盖为默认）", !!ste && ste.version === 2, 2, ste && ste.version);
+    check("reader-explain-ste 存在且 version=3（v1/v2 播种后即被 v3 升版覆盖为默认）", !!ste && ste.version === 3, 3, ste && ste.version);
     const steRows = db.listPromptTemplates().filter((r) => r.scope === "reader-explain-ste");
-    check("v1 行留痕（两行：v1 + v2）", steRows.length === 2 && steRows.some((r) => r.version === 1) && steRows.some((r) => r.version === 2), 2, steRows.map((r) => r.version));
+    check("v1/v2 行留痕（三行：v1 + v2 + v3）", steRows.length === 3 && steRows.some((r) => r.version === 1) && steRows.some((r) => r.version === 2) && steRows.some((r) => r.version === 3), 3, steRows.map((r) => r.version));
     const steV1Row = db.getPromptTemplateVersion("reader-explain-ste", 1);
     check("v1 行内容 = D91 原文冻结常量（READER_EXPLAIN_STE_PROMPT_V1）", !!steV1Row && steV1Row.content === prompts.READER_EXPLAIN_STE_PROMPT_V1, true, !!steV1Row && "len=" + (steV1Row.content || "").length);
+    const steV2Row = db.getPromptTemplateVersion("reader-explain-ste", 2);
+    check("v2 行内容 = D118 原文冻结常量（READER_EXPLAIN_STE_PROMPT_V2）", !!steV2Row && steV2Row.content === prompts.READER_EXPLAIN_STE_PROMPT_V2, true, !!steV2Row && "len=" + (steV2Row.content || "").length);
     check("is_default = 1", !!ste && Number(ste.is_default) === 1, 1, ste && ste.is_default);
     check("situation_required = 0（解释场景不注入记忆情境）", !!ste && Number(ste.situation_required) === 0, 0, ste && ste.situation_required);
     check("内容与 READER_EXPLAIN_STE_PROMPT 常量字面一致", !!ste && ste.content === prompts.READER_EXPLAIN_STE_PROMPT, true, !!ste && "len=" + (ste.content || "").length);
@@ -36,6 +38,7 @@ app.whenReady().then(async () => {
     check("含机器标记契约（ste:matLang / ste:points / ste:readings）", !!ste && ste.content.includes("<!--ste:matLang=") && ste.content.includes("<!--ste:points=") && ste.content.includes("<!--ste:readings="), true, !!ste);
     check("含节标题语法硬约束（v48.74 / D118：## 前缀 + 禁止【】代替）", !!ste && ste.content.includes("## 歧义点") && ste.content.includes("## 简明改写") && ste.content.includes("## 多重解读") && ste.content.includes("## 术语") && ste.content.includes("禁止用【】"), true, !!ste);
     check("含追问直答条款（v48.74 / D118：【用户追问】在场时跳过全流程与机器标记）", !!ste && ste.content.includes("【用户追问】") && ste.content.includes("追问直答") && ste.content.includes("不输出机器标记"), true, !!ste);
+    check("含简明改写硬规则块（v48.103 / D148：受控语言改写≠口语化复述 + 逐句自查五项）", !!ste && ste.content.includes("【简明改写硬规则") && ste.content.includes("不是口语化复述") && ste.content.includes("逐句自查") && ste.content.includes("禁止遗漏、添加或合并事实"), true, !!ste);
     check("含歧义类别封闭集（10 个 key）", !!ste && ["polysemy", "pronoun-ref", "long-nesting", "hidden-agent", "negation-stack", "undefined-term", "register-mix", "quantity-vague", "idiom-figurative", "missing-condition"].every((k) => ste.content.includes(k)), true, !!ste);
     check("完整执行无门控（不出现「已足够清晰」类判定指令）", !!ste && !ste.content.includes("无需解读") && !ste.content.includes("判断是否值得"), true, !!ste);
     check("模板正文不含 ASD-STE100（法务红线，§2.2）", !!ste && !ste.content.includes("ASD-STE100"), true, !!ste);

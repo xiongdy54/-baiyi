@@ -65,6 +65,7 @@
             <option value="card-wording">措辞优化</option>
             <option value="card-basic">前置知识卡</option>
             <option value="card-occlusion">图片材料 → 图片挖空</option>
+            <option value="reader-explain-ste">简明解读（reader-explain-ste）</option>
             <optgroup label="LKM 知识模型（v43 K2-B）">
               <option value="material-difficulty">材料难度画像</option>
               <option value="knowledge-probe">维度探针</option>
@@ -73,6 +74,19 @@
             </optgroup>
           </select>
           <label class="source-field">来源标记 <input id="sourceTitle" type="text" placeholder="书名/章节（可空）" /></label>
+          <label class="source-field">解读语言（简明解读用）
+            <select id="outLangSelect" disabled>
+              <option value="">跟随界面语言</option>
+              <option value="zh-Hans">中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+              <option value="ko">한국어</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="ru">Русский</option>
+            </select>
+          </label>
           <label class="source-field">KP/候选 id 白名单 <input id="idWhitelist" type="text" placeholder="kp-demo-1（逗号分隔，LKM 用）" disabled /></label>
         </div>
         <textarea id="materialText" class="material-text" placeholder="粘贴待制卡的材料文本；图片材料点右侧按钮选择图片"></textarea>
@@ -101,6 +115,7 @@
 
     <script src="../vendor/cards.js"></script>
     <script src="../vendor/kpScopes.js"></script>
+    <script src="../vendor/ste.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
