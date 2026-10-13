@@ -855,6 +855,11 @@ body.has-skin .topbar { background: transparent; }
   .dd-menu.dd-menu-down { transform-origin: 50% 0%; }
   /* 面板「⋯」菜单（D124）：同为浮层菜单族（D120 §8.4），同挂既有 pop-in；恒在按钮下方开 → 顶缘长出 */
   .learner-menu-pop { animation: pop-in 220ms var(--spring) both; transform-origin: 50% 0%; }
+  /* D144 #5 坞内三按钮选单（§8）：浮层菜单族（pop-in 220ms --spring 存量豁免）——特异性盖过
+     上方 .selection-menu 的 sel-bar-in；origin 随翻边（§8：上锚＝选区上方长出 50% 100% /
+     下锚 50% 0%，data-place 由 DockTrioMenu 按 placePopover 翻面结果给出）；reduce 无此规则＝瞬时 */
+  .menu.dock-trio { animation: pop-in 220ms var(--spring) both; transform-origin: 50% 100%; }
+  .menu.dock-trio[data-place="below"] { transform-origin: 50% 0%; }
 }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.92) translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes sel-bar-in { from { opacity: 0; transform: translateY(var(--shift-sm)) scale(var(--scale-in)); } to { opacity: 1; transform: none; } }
@@ -2348,6 +2353,13 @@ body.theme-dark .modal-panel {
 .sel-btn:active { transform: scale(var(--scale-press)); }
 .sel-btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 0; }
 .sel-btn.on { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+/* ---- D144 #5 坞内三按钮选单（方案 §3.3/§4.4）：复用 selection-menu 浮条语法
+   （paper + hairline + --shadow-float）+ sel-btn 同款加高 28px（一行三文字钮
+   「AI 制卡｜复制｜引用」；类名 .dock-trio 即 §10 DOM 契约）。
+   弹出动画在 prefers-reduced-motion: no-preference 块（选区菜单动画区）挂既有 pop-in。 */
+.dock-trio .sel-btn { height: 28px; }
+/* D144 §7 三按钮选单 Focus 列＝「2px accent 外描边」——对 dock-trio 覆盖（D122 既有全局 1px 基线不动） */
+.dock-trio .sel-btn:focus-visible { outline-width: 2px; }
 /* 标注选项钮：开了摘录时折叠态也能一眼看出（图标版靠 accent 着色，文字版靠「摘录·」前缀） */
 .sel-gear.is-extract { color: var(--accent); }
 .sel-chev { display: inline-flex; margin-left: 2px; }
@@ -2903,8 +2915,14 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   min-height: 0;
   min-width: 0;
 }
+/* D144 §3.1/§9（right/window）：制卡板块体 flex:1 伸缩、伸展至解释板块上缘（D123 的 62% 上限退役）；
+   min-height 地板＝头行高（--sp-12 + 1px 下缘）——窗高不足时板块体让位（§9），解释板块收起态
+   （把手+按钮行+输入条）恒完整可见，且头行不被完全挤没（仍可点开）。 */
 .side-dock[data-placement="right"] .wb-manual,
-.side-dock[data-placement="window"] .wb-manual { max-height: 62%; }
+.side-dock[data-placement="window"] .wb-manual {
+  flex: 1;
+  min-height: calc(var(--sp-12) + 1px);
+}
 .wb-manual-toggle {
   display: inline-flex;
   align-items: center;
@@ -2972,20 +2990,9 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .wb-more-toggle:hover { color: var(--text-primary); }
 .form-more[hidden] { display: none; }
 
-.wb-ai {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.wb-ai-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.dock-tabbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* D144：旧 .wb-ai / .wb-ai-body（「AI 区」两段式页签头）随 IA 重设计退役——
+   解释板块（wb-explain）样式见文件末尾 D144 段；制卡板块沿用 .wb-manual 类名（三放置规则零迁移）。 */
+.wb-cards-tabbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .wb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .wb-scroll > .ai-panel { padding-bottom: var(--sp-4); }
 .side-dock .ai-panel { width: auto; max-width: none; flex: none; border-left: none; z-index: auto; animation: none; }
@@ -3103,17 +3110,8 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .wb-composer textarea:focus { outline: none; } /* D142（V1）：线色/厚化由坞内变体规则承担（旧 border-color: strong 已随去框清理） */
 .wb-composer-send { flex: none; height: 32px; }
 
-/* ---------- v48.51（D91）：解读方式切换器与事后建议 ---------- */
-.ai-explain-mode {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-2);
-}
-.ai-explain-mode-label {
-  font-size: var(--fs-meta);
-  color: var(--text-secondary);
-}
+/* ---------- v48.51（D91）→ v48.100（D144）：事后建议轻提示行（解读方式切换器已退役——
+   方式表达唯一归口＝解释板块悬浮按钮行 .wb-mode-bar / .wb-mode-btn） ---------- */
 /* 事后建议轻提示行（ste 完成后 points=0 且改写≈原文 → 「切换到通用解读？」） */
 .ai-suggest {
   display: flex;
@@ -8105,7 +8103,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 /* D142（R1）：两区分界线取消——`.wb-ai` 上缘 strong 线与标题行下缘 hairline 相距不足 40px 构成「双线」噪点（用户「杂乱」的典型来源）；
    两区由标题行下缘 hairline + 留白分界；底部放置的竖缘线同步删除，唯一分隔＝ .wb-manual 的 subtle 右缘线（见本文件 .side-dock[data-placement="bottom"] .wb-manual 处） */
 .wb-manual-body { border-bottom: 0; }
-.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-tabs,
+/* D144：头行页签改为制卡板块页签（.dock-tabs＝手动制卡｜AI 制卡）；题型页签已移入页签体（wb-cards-modes），
+   收起时随 clip 一并隐藏；此处只需藏头行页签与箭头 */
+.side-dock[data-placement="bottom"] .wb-manual.is-collapsed .dock-tabs,
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .wb-chev-btn { display: none; }
 
 /* 字段：一行起步，clip 高度由 useGrowBox 设定并过渡。
@@ -8252,12 +8252,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-more-toggle .is-flip, .wb-more-toggle svg { transition: transform var(--dur) var(--ease-out-soft); }
 .wb-manual-body .manual-similar { margin: 0; padding: var(--sp-2); }
 
-/* AI 区 */
-.wb-ai-head { padding: 0 var(--wb-pad); }
-.dock-tabbody > .wb-scroll { overflow-x: hidden; }
+/* D144：旧 .wb-ai-head 退役（AI 区页签头不存在）；页签体容器更名 .wb-cards-tabbody */
+.wb-cards-tabbody > .wb-scroll { overflow-x: hidden; }
 .dock-empty { padding: var(--sp-2) var(--wb-pad) var(--sp-3); gap: var(--sp-2); }
-.ai-explain-mode { margin-bottom: 0; }
-.ai-explain-mode-label { font-family: inherit; color: var(--text-helper); }
 .wb-free textarea {
   display: block;
   box-sizing: border-box;
@@ -8734,4 +8731,187 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+}
+
+/* ==========================================================================
+   D144（v48.100）：制卡台 IA 重设计 —— 制卡板块（手动/AI 双页签）+ 解释板块（底部收起）
+   设计 docs/design/D144-CARDDOCK-IA-REDESIGN.md §2/§3/§8。
+   · 制卡板块：页签复用 dock-tabs 语法（testid wb-cards-tabs，手动制卡｜AI 制卡）；题型页签
+     移入手动页签体顶部（wb-cards-modes）；板块收合沿用 .wb-manual-clip 既有机制（零改动）
+   · 解释板块（wb-explain）：把手 20px（仅有内容或已展开时在场）/ .collapse-clip 内容槽
+     （展开态上限 55% 相对坞高——cqh 容器参照，right/window 与 bottom 相对列高同值，§3.1/§3.2）/
+     悬浮按钮行槽 28px / composer 槽；justify-content 贴底，内容向上展开；flex 角色＝制卡板块
+     flex:1 伸展（§3.1），解释板块按内容贴底（0 1 auto，超高时自身收缩让位，§9）；
+     上缘不新增分区线（唯一 hairline＝composer 上缘线，D142 纲领 1）
+   动效纪律（D120 R2）：零动画库；把手 chevron rotate 与 hover 底色入 no-preference 作用域；
+   折叠沿用 .collapse-clip 通用规则（reduce 块显式降级见下）；零裸写时长/缓动；hover 零抬升零阴影。
+   ========================================================================== */
+.wb-cards-modes {
+  flex: none;
+  height: 28px;
+  display: flex;
+  align-items: stretch;
+  padding: 0 var(--wb-pad);
+}
+.wb-cards-modes .wb-tabs { align-self: stretch; }
+
+.wb-explain {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* 按钮行/输入条贴底；展开时内容自输入条向上长（§2.1） */
+}
+/* D144 §3.1/§9（right/window）：解释板块按内容贴底（flex 角色与旧 .wb-ai 相反——伸展的是制卡板块）；
+   0 1 auto＝内容超高时板块自身收缩、内部 clip 先让位（min-height:0），收起态三件套（把手+按钮行+输入条）恒完整可见。 */
+.side-dock[data-placement="right"] .wb-explain,
+.side-dock[data-placement="window"] .wb-explain { flex: 0 1 auto; }
+/* bottom：右列占余宽（旧 .wb-ai flex:1 口径），列随 align-items:stretch 全高、列内内容贴底（§3.2） */
+.side-dock[data-placement="bottom"] .wb-explain { flex: 1; }
+.wb-explain-toggle {
+  flex: none;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--text-helper);
+  cursor: pointer;
+}
+.wb-explain-toggle:hover { color: var(--text-primary); background: var(--grey-1); }
+/* 容器参照系（§3.1「max-height 55% 相对坞高」）：坞体为尺寸查询容器，clip 用 cqh 取坞高——
+   解释板块按内容定高后其内部百分比已无定值参照，必须由坞体供给。三放置坞体尺寸全为定值
+   （fixed 定宽高 / 100% / flex 定高），size 收容不改变布局。 */
+.side-dock.card-dock { container-type: size; }
+.wb-explain-clip {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 55cqh; /* 相对坞高（§3.1）；bottom 列＝坞体全高拉伸，同值即相对列高（§3.2） */
+}
+.wb-explain-clip > .collapse-inner { display: flex; flex-direction: column; }
+/* 收起态延后隐藏（防 Tab 进入）——与 .wb-manual-clip 同构（无条件规则 + no-preference 内延迟翻转） */
+.wb-explain-clip:not(.is-open) > .collapse-inner { visibility: hidden; }
+.wb-explain-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.wb-explain-body > .ai-panel { padding-bottom: var(--sp-4); }
+.wb-mode-bar {
+  flex: none;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--wb-pad);
+  margin-bottom: var(--sp-1); /* 行贴输入条上缘 4px（§3.1） */
+}
+/* D144 §3.1/§4.3：四 ghost 文字钮（自动/通用解读/简明解读/自由提问，ExplainModeBar）——
+   ghost＝无框无底，当前方式＝accent 字 + 2px accent 下划线（页签同族语法，::after 对齐行底缘，
+   故 align-self:stretch 拉满 28px 行高）；.idle（空输入∧无语境）＝§7 Empty 态视觉（grey-2 字 +
+   cursor default）但保持可点击——真禁用会封死 §4.3 空格「仅置方式」（含自由提问预选）；
+   .on 恒 accent（§7：当前方式行无状态变化），声明顺序在 .idle 之后以同特异性覆盖字色。 */
+.wb-mode-btn {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: 0;
+  font-size: var(--fs-secondary);
+  line-height: 1;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wb-mode-btn:hover { background: var(--grey-1); }
+.wb-mode-btn.idle { color: var(--grey-2); cursor: default; }
+.wb-mode-btn.on { color: var(--accent); font-weight: 600; }
+.wb-mode-btn.on::after {
+  content: "";
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+}
+/* D144 #4（§3.3/§4.2/§7/§8）：跨页签幽灵草稿层——field 容器 relative 内 absolute 铺满，
+   padding 与输入面一致（.wb-field 输入面＝wb-field-inner 4px 0；.wb-free textarea＝4px 0 5px）；
+   §7 状态矩阵：无线无底纯文字层（hover 不变底、零抬升），hover 仅 chip 文字转 --ink；
+   文本 13px（--fs-secondary）--text-placeholder、最多 3 行超出 …；尾部 chip「Alt+Enter 填入」
+   （mono + 1px --border-subtle 下缘线；规格 11px 无 token 档，取最近 --fs-meta 12px）；
+   整层可点＝接受；输入面其余区域（free 的动作区 / field 的「带入…」钮）点击仍聚焦编辑。
+   出现＝挂载后 rAF 翻 .is-in 触发 opacity 0→1（token 时长，transition 在下方 no-preference
+   作用域）；消失瞬时＝条件脱落直接卸载（§8，无出场动画）。 */
+.wb-ghost {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  padding: 4px 0;
+  cursor: pointer;
+  overflow: hidden;
+  font-size: var(--fs-secondary);
+  color: var(--text-placeholder);
+  text-align: left;
+  opacity: 0;
+}
+.wb-free-input .wb-ghost { padding: 4px 0 5px; }
+.wb-ghost.is-in { opacity: 1; }
+.wb-ghost-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 20px; /* 与 .wb-free textarea 行高一致（幽灵文字对齐真实输入位） */
+}
+.wb-ghost-chip {
+  flex: none;
+  font-size: var(--fs-meta);
+  line-height: 20px;
+  color: var(--text-placeholder);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+.wb-ghost:hover .wb-ghost-chip { color: var(--ink); }
+/* 幽灵挂点：free 侧新增 relative 包裹层（textarea 与幽灵同几何）；手动侧 .wb-field 本就 relative */
+.wb-free-input { position: relative; }
+@media (prefers-reduced-motion: no-preference) {
+  .wb-explain-toggle {
+    transition: background-color var(--dur-hover) var(--ease-out-soft),
+      color var(--dur-hover) var(--ease-out-soft);
+  }
+  .wb-explain-toggle svg { transition: transform var(--dur-panel) var(--ease-out-soft); }
+  /* D120 双速 hover（§3.1）：hover 底色进入 --dur-hover --ease-enter、离开回落 --dur-view --ease-out-soft */
+  .wb-mode-btn { transition: background-color var(--dur-view) var(--ease-out-soft); }
+  .wb-mode-btn:hover { transition: background-color var(--dur-hover) var(--ease-enter); }
+  /* D144 #4 §8：幽灵草稿淡入（挂载后 rAF 翻 .is-in 触发；reduce 块不挂 transition＝瞬时显形） */
+  .wb-ghost.is-in { transition: opacity var(--dur-enter) var(--ease-enter); }
+  /* 折叠 opacity 层（MOTION §7 / 方案 §8）：展开＝内容延迟 50ms 淡入（Follow Through；
+     50ms＝--dur-enter/3，token 派生不裸写）；收起＝内容 opacity 先走（--dur-exit 不延迟）、
+     容器 grid（--dur-panel）后收；visibility 翻转时点与 .wb-manual-clip 同构（开即时显/收延迟藏）。 */
+  .wb-explain-clip.is-open > .collapse-inner {
+    opacity: 1;
+    transition: opacity var(--dur-enter) var(--ease-enter) calc(var(--dur-enter) / 3), visibility 0s;
+  }
+  .wb-explain-clip:not(.is-open) > .collapse-inner {
+    opacity: 0;
+    transition: opacity var(--dur-exit) var(--ease-out-soft), visibility 0s var(--dur-panel);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wb-explain-clip,
+  .wb-explain-clip > .collapse-inner,
+  .wb-explain-toggle,
+  .wb-explain-toggle svg,
+  .wb-mode-btn { transition: none; }
 }

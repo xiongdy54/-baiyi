@@ -126,9 +126,39 @@ if (aiStubState.aiStub === "ok") {
   console.log(`  ⚠ aiAPI 不可覆写（${aiStubState.aiStub}），用户 Key=${hasKey.hasKey ? "已配置" : "未配置"}` + (AI_SKIP ? "：Ctrl+X / Ctrl+A 跳过" : "：走未配置报错路径"));
 }
 
+// D114 守卫契约（Reader.tsx readerShortcutReady）：手动表单/AI 面板/词典面板任一在场时阅读快捷键让路
+//（「弹层开着不触发新动作」）；制卡台手动表单无取消钮（D123）、AI 面板无「关闭」（仅全部拒绝可清）——
+// 键与键之间以重载复位应用态（等价用户重启应用），各键从干净守卫态出发。
+// reload 后 preload 重新暴露 aiAPI（contextBridge 属性不可 redefine），故每次复位后重探 AI 门：
+// 桩可装或未配置 Key 才继续 AI 两键（绝不真实调用）。
+async function aiGate() {
+  const s = parseState(await evalJS(`(() => {
+    try {
+      const fake = { getConfig: async () => null, setConfig: async () => false, test: async () => ({ ok: false, message: 'stub' }), listModels: async () => [], websearch: async () => [], onStream: (cb) => { window.__aiCb = cb; return () => {}; }, chat: (rid) => { window.__aiCb && window.__aiCb(rid, { error: 'GUI-TEST-STUB' }); } };
+      Object.defineProperty(window, 'aiAPI', { value: fake, configurable: true });
+      return JSON.stringify({ ok: window.aiAPI === fake });
+    } catch { return JSON.stringify({ ok: false }); }
+  })()`));
+  if (s.ok === true) return true;
+  const hk = parseState(await evalJS(`(async () => { const c = await window.aiAPI.getConfig().catch(() => null); return JSON.stringify({ hasKey: Boolean(c && c.hasKey) }); })()`));
+  return hk.hasKey === false;
+}
+async function resetReaderState() {
+  await evalJS("window.location.reload()");
+  await sleep(2500);
+  await evalJS(`(async () => { const t = document.querySelector('.book-card[title*="FSRSTEST"]'); if (t) { t.click(); await new Promise((r) => setTimeout(r, 1500)); } return 'reopened'; })()`);
+  for (let i = 0; i < 20; i++) {
+    const ok = await evalJS(`(() => { const k = window.__readerKernel; return !!(k && k.__getContents && k.__getContents().some((e) => e.doc && (e.doc.body?.textContent || '').includes('FSRSTEST'))); })()`);
+    if (ok === true) break;
+    await sleep(500);
+  }
+  return aiGate();
+}
+
 // 2) 阅读快捷键
 console.log("== G2 阅读快捷键 Ctrl+Z / Ctrl+X / Ctrl+A / Ctrl+S ==");
 let selResult = "";
+let aiReady = !AI_SKIP;
 
 // Ctrl+Z → 手动制卡面板（D88 P3：制卡语境 modal-panel → data-card-dock；D92 起坞头为页签条，
 // 手动暂态以「＋制卡」active + 手动 tabbody 表单在场断言，不再有单一标题位）
@@ -138,7 +168,8 @@ await press({ key: "z", ctrlKey: true, bubbles: true, cancelable: true });
 await sleep(500);
 const modalH2 = await evalJS(`(() => {
   const dock = document.querySelector('[data-card-dock]');
-  const form = dock?.querySelector('[data-testid="wb-manual"] textarea');
+  // D144 §10：qa 首框＝GrowField+MdField（ProseMirror），无 textarea
+  const form = dock?.querySelector('[data-testid="wb-manual-body"] .ProseMirror');
   const open = document.documentElement.dataset.wbOpen === '1';
   return JSON.stringify({ dock: !!dock, form: !!form, open });
 })()`);
@@ -146,43 +177,47 @@ check("Ctrl+Z 打开手动制卡面板（制卡台手动区）", JSON.parse(moda
 // D123：制卡台无「取消/关闭」钮——Esc（焦点在台内）收起
 await evalJS(`(() => { const d = document.querySelector('[data-card-dock]'); d?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 'closed'; })()`);
 await sleep(300);
+// 守卫复位（见 resetReaderState 注释）：手动表单在场时后续阅读键会让路——重载回到干净态并重探 AI 门
+aiReady = await resetReaderState();
 
-// Ctrl+X → AI 制卡面板（stub 报错，零网络；D92：制卡页签自动激活）
-if (!AI_SKIP) {
+// Ctrl+X → AI 制卡面板（stub 报错或未配置 Key 的零网络报错；D144：AI 制卡页签自动激活）
+if (aiReady) {
   selResult = await runSelect();
   check("选区菜单出现（重选）", selResult === "menu", selResult);
   await press({ key: "x", ctrlKey: true, bubbles: true, cancelable: true });
   await sleep(700);
   const aiPanel1 = parseState(await evalJS(`(() => {
-    const tab = document.querySelector('[data-testid="dock-tab-cards"]');
+    const tab = document.querySelector('[data-testid="wb-tab-aicards"]');
     const e = document.querySelector('.ai-error');
     return JSON.stringify({ tab: tab ? String(tab.getAttribute('aria-selected')) : 'NO TAB', err: e ? e.textContent.slice(0, 30) : '' });
   })()`));
-  check("Ctrl+X 打开 AI 制卡面板（制卡页签激活）", aiPanel1.tab === "true", JSON.stringify(aiPanel1));
+  check("Ctrl+X 打开 AI 制卡面板（AI 制卡页签激活）", aiPanel1.tab === "true", JSON.stringify(aiPanel1));
   check("AI 制卡面板为 stub 报错（未真实调用）", String(aiPanel1.err).includes("GUI-TEST-STUB") || String(aiPanel1.err).includes("AI"), aiPanel1.err);
   await evalJS(`document.querySelector('[data-card-dock] [data-dock-close]') && document.querySelector('[data-card-dock] [data-dock-close]').click()`);
   await sleep(300);
 } else {
   console.log("  - 跳过 Ctrl+X（AI 桩不可用且已配置 Key）");
 }
+aiReady = await resetReaderState();
 
-// Ctrl+A → AI 解释面板（D92：解释页签自动激活）
-if (!AI_SKIP) {
+// Ctrl+A → AI 解释面板（D144：解释板块内容到达自动展开）
+if (aiReady) {
   selResult = await runSelect();
   check("选区菜单出现（重选）", selResult === "menu", selResult);
   await press({ key: "a", ctrlKey: true, bubbles: true, cancelable: true });
   await sleep(700);
   const aiPanel2 = parseState(await evalJS(`(() => {
-    const tab = document.querySelector('[data-testid="dock-tab-explain"]');
+    const open = document.querySelector('[data-testid="wb-explain-toggle"]')?.getAttribute('aria-expanded');
     const e = document.querySelector('.ai-error');
-    return JSON.stringify({ tab: tab ? String(tab.getAttribute('aria-selected')) : 'NO TAB', err: e ? e.textContent.slice(0, 30) : '' });
+    return JSON.stringify({ open: open ? String(open) : 'NO HANDLE', err: e ? e.textContent.slice(0, 30) : '' });
   })()`));
-  check("Ctrl+A 打开 AI 解释面板（解释页签激活）", aiPanel2.tab === "true", JSON.stringify(aiPanel2));
+  check("Ctrl+A 打开 AI 解释面板（解释板块自动展开）", aiPanel2.open === "true", JSON.stringify(aiPanel2));
   await evalJS(`document.querySelector('[data-card-dock] [data-dock-close]') && document.querySelector('[data-card-dock] [data-dock-close]').click()`);
   await sleep(300);
 } else {
   console.log("  - 跳过 Ctrl+A（AI 桩不可用且已配置 Key）");
 }
+await resetReaderState();
 
 // Ctrl+S → 摘录
 selResult = await runSelect();
@@ -191,11 +226,13 @@ await press({ key: "s", ctrlKey: true, bubbles: true, cancelable: true });
 await sleep(700);
 const toast = await evalJS(`(() => { const t = document.querySelector('.reader-toast'); return t ? t.textContent : 'NO TOAST'; })()`);
 check("Ctrl+S 摘录成功提示", String(toast).includes("已摘录进学习队列"), toast);
+// D58 §6.8-2「次日进队」：新摘录 topic_next_at＝次日切点，当日 listDueExtracts（含
+// workflowAPI.listDue）必不含它——改断言全量事实源 listAll（§6.8-6）验证落库成功
 const extractInQueue = await evalJS(`(async () => {
-  const due = await window.workflowAPI.listDue();
-  return due.some((x) => JSON.stringify(x).includes('FSRSTEST'));
+  const all = await window.workflowAPI.listAll();
+  return all.some((x) => JSON.stringify(x).includes('FSRSTEST'));
 })()`);
-check("摘录进入学习队列", extractInQueue === true, extractInQueue);
+check("摘录已入库（D58 次日进队，不进当日 listDue）", extractInQueue === true, extractInQueue);
 
 // 3) 复习快捷键
 console.log("== G3 复习快捷键 空格 / 1-4 / q / w / d ==");
@@ -270,18 +307,18 @@ await sleep(500);
 await press({ key: "1", bubbles: true, cancelable: true });
 await sleep(1800);
 // 用户可能有真实到期卡（在 4 张测试卡之后出队），故此后不再派发任何按键（直到重载）。
-// 计数口径（沿用复习页既有语义）：评分/标记暂停计入「本轮」，跳过不计入 → 4 个动作后计数=3。
-// 断言「本轮 3 张」（还有后续卡）或「3 张已复习」（进入收尾页）二者其一，且当前卡面不再是测试卡。
+  // 计数口径（复习页 Anki 式改版，2026-10-01）：收尾页 .review-head .review-count 显示「N 张已复习」
+  //（今日口径，跨运行累计——断言 ≥3 而非 ==3）；会话中头部只有三档计数，无「本轮 N 张」。
 const done1 = parseState(await evalJS(`(() => {
   const front = document.querySelector('.review-front');
-  const txt = document.querySelector('.review-session') ? document.querySelector('.review-session').innerText : '';
+  const cnt = document.querySelector('.review-head .review-count');
+  const m = cnt ? cnt.textContent.match(/(\\d+) 张已复习/) : null;
   return JSON.stringify({
-    count3: txt.includes('本轮 3 张'),
-    done3: txt.includes('3 张已复习'),
+    doneCount: m ? parseInt(m[1], 10) : null,
     noTestCard: !front || !front.innerText.includes('FSRSTEST')
   });
 })()`));
-check("四张测试卡处理完（计数=3，当前不再是测试卡）", (done1.count3 === true || done1.done3 === true) && done1.noTestCard === true, JSON.stringify(done1));
+check("四张测试卡处理完（收尾计数≥3 或已离场，当前不再是测试卡）", (done1.doneCount === null || done1.doneCount >= 3) && done1.noTestCard === true, JSON.stringify(done1));
 
 // d → 删除（先 stub confirm 自动确认）
 await evalJS(`(async () => {
@@ -313,6 +350,12 @@ console.log("== G3.5 撤销评分（z / 撤销按钮） ==");
 await evalJS(`(async () => {
   await window.cardsAPI.create({ noteText: 'FSRSTEST M4-6', cardType: 'qa', frontMarkdown: '统计: FSRSTEST 进度差是什么？', backMarkdown: '答案6', priority: 50, tags: [], fsrsJson: JSON.stringify({ state: 'new', due: Date.parse('2000-01-01'), lapses: 0, reps: 0 }) });
   return 'seeded6';
+})()`);
+// 收尾页无底栏（复习页 v2 改版）：若 M4-6 评分后队列即空，底栏「更多」不渲染，撤销按钮无从断言——
+// 垫一张 M4-7（due 晚于 M4-6，出队顺序 M4-6 → M4-7）保证评分后仍在会话中（底栏在场）。
+await evalJS(`(async () => {
+  await window.cardsAPI.create({ noteText: 'FSRSTEST M4-7', cardType: 'qa', frontMarkdown: '统计: FSRSTEST 离散度是什么？', backMarkdown: '答案7', priority: 50, tags: [], fsrsJson: JSON.stringify({ state: 'new', due: Date.parse('2000-01-02'), lapses: 0, reps: 0 }) });
+  return 'seeded7';
 })()`);
 await evalJS("window.location.reload()");
 await sleep(2500);
@@ -376,11 +419,11 @@ await evalJS(`(() => { const gear = document.querySelector('[title=\"设置\"]')
 await sleep(600);
 await evalJS(`(() => { const nav = [...document.querySelectorAll('.settings-nav button')].find((b) => b.textContent === '快捷键'); nav && nav.click(); return 'nav'; })()`);
 await sleep(400);
-// v48.70（D114）：「全局快捷键」并入 sec-shortcuts（子块根保留 id sec-global），
-// .kb-row 计数改作用域断言并修正既有失真（document 级 ===13 是 v36 引入全局快捷键前的旧值）：
-// 14 条应用内键位（阅读 5 + 复习 9，含 v22 撤销评分）+ 3 条全局快捷键 = 17（设计稿 §12-T7 迁移）
+// v48.70（D114）：「全局快捷键」并入 sec-shortcuts（子块根保留 id sec-global），.kb-row 计数作用域断言。
+// 行数随决策演进：应用内 14→17（D121 +辨析 / D130 +上一页·下一页）；全局区 3→5（新增「随系统启动」「
+// 关闭窗口收进托盘」两行，复用 kb-row 样式）→ 现 17 应用内 + 5 全局区 = 22。
 const kbRows = await evalJS(`document.querySelectorAll('#sec-shortcuts .kb-row').length`);
-check("快捷键区块 17 行（14 应用内 + 3 全局）", kbRows === 17, kbRows);
+check("快捷键区块 22 行（17 应用内 + 5 全局区）", kbRows === 22, kbRows);
 
 // 捕获：把「评分 Good」改为 8
 const captureGood = parseState(await evalJS(`(async () => {

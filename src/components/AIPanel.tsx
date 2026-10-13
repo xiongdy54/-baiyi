@@ -1,9 +1,11 @@
 // AI 面板（解释侧栏 / 制卡预览）
 // 批 4（Task 5）：从 Reader.tsx 原样搬出（纯移动，零行为改动）——摘录页与阅读器共用同一份实现。
-// v48.51（D91 §5.2/§5.5）：explain 分支首行加三态「解读方式」切换器（等待回答时也可切换，切换即重跑；
-// 重跑逻辑在宿主 changeExplainMode）+ 答案尾部的事后建议轻提示行（仅 auto 路由进 ste 且 points=0 且
-// 改写≈原文时出现——用户多半更想要概念解释）。
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+// v48.51（D91 §5.5）：答案尾部的事后建议轻提示行（仅 auto 路由进 ste 且 points=0 且改写≈原文时
+// 出现——用户多半更想要概念解释）。
+// v48.100（D144 #3）：explain 分支首行的「解读方式」切换器（D91 §5.2）退役——方式表达唯一归口＝
+// 解释板块悬浮按钮行（ExplainModeBar 四 ghost 钮，本文件导出）；切换即重跑（D91 §5.3）语义保留，
+// 由按钮行 / 事后建议钮经宿主 changeExplainMode 承载。
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { growTextarea } from "../lib/autoGrow";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
@@ -34,33 +36,49 @@ function qualifierLabel(q: CardQualifier): string {
   }
 }
 
+/** D144 §4.3：解释板块「当前方式」四值（三解读方式复用 ExplainModePref 的会话内记忆 + 自由提问） */
+export type ExplainComposerMode = "auto" | "general" | "ste" | "ask";
+
+const EXPLAIN_MODE_ITEMS: Array<[ExplainComposerMode, string]> = [
+  ["auto", "自动"],
+  ["general", "通用解读"],
+  ["ste", "简明解读"],
+  ["ask", "自由提问"]
+];
+
 /**
- * v48.51（D91 §5.2/§4.4）：解读方式三态切换器（自动（默认）｜通用｜简明）。
- * 独立导出：AI 解释页签体的空态指引同位复用（D92——「先开坞、先调方式、内容后到」）。
- * 主文案不出现 ASD-STE100（全球用户不认识该编号，法务上弱化商标使用）。
+ * v48.100（D144 §3.1/§4.3）：解读方式悬浮按钮行（四 ghost 钮）——取代 v48.51（D91 §5.2）的
+ * 解读方式下拉（该导出已退役）。按钮双职＝迁移「当前方式」+（有字时）按该方式发送；
+ * §4.3 语义矩阵与发送路由由宿主 SelectionPanels 承载，本组件只呈现（§7 状态样式在 theme.css）。
  */
-export function ExplainModeSwitcher({
-  value,
-  onChange
+export function ExplainModeBar({
+  mode,
+  hasText,
+  hasContext,
+  onModeSelect
 }: {
-  value: ExplainModePref;
-  onChange: (m: ExplainModePref) => void;
+  mode: ExplainComposerMode;
+  /** 输入框是否有字（§7 空输入态判定之一） */
+  hasText: boolean;
+  /** 是否有解释语境（解释面板在场或追问线程非空） */
+  hasContext: boolean;
+  onModeSelect: (m: ExplainComposerMode) => void;
 }) {
   return (
-    <div className="ai-explain-mode" data-testid="explain-mode" data-value={value}>
-      <span className="ai-explain-mode-label mono">解读方式</span>
-      <Dropdown
-        align="left"
-        title="解读方式"
-        value={value}
-        options={[
-          { value: "auto", label: "自动" },
-          { value: "general", label: "通用解读" },
-          { value: "ste", label: "简明解读" }
-        ]}
-        onChange={(m) => onChange(m as ExplainModePref)}
-      />
-    </div>
+    <>
+      {EXPLAIN_MODE_ITEMS.map(([m, label]) => (
+        <button
+          key={m}
+          type="button"
+          className={`wb-mode-btn${mode === m ? " on" : ""}${!hasText && !hasContext ? " idle" : ""}`}
+          data-mode={m}
+          aria-pressed={mode === m}
+          onClick={() => onModeSelect(m)}
+        >
+          {label}
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -145,28 +163,65 @@ export function ExplainThread({ items, onMake }: { items: AskThreadItem[]; onMak
   );
 }
 
-/** AI 解释页底部输入条：默认单行（与「发送」同高 32px 对齐），随输入增高（≤120px）；Enter 发送、Shift+Enter 换行 */
-export function ChatComposer({ busy, onSend }: { busy: boolean; onSend: (q: string) => void }) {
-  const [text, setText] = useState("");
-  const ref = useRef<HTMLTextAreaElement | null>(null);
+/** AI 解释板块底部输入条：单行 32px 与「发送」同高对齐，随输入增高（≤120px）；Enter 发送、Shift+Enter 换行、IME 组合态不发送。
+ * v48.100（D144 #3）：值受控上提（宿主持有——「引用」头部插入与 #5 选单落点的数据面）；
+ * ref 句柄 insertQuote＝§4.4-c「引用」动作落点：头部插入引用块（既有草稿整体保留在其后，永不覆盖）、
+ * 聚焦输入框并把光标落到文末（板块开合由宿主决定——引用不自动展开，§4.4-c）。 */
+export interface ChatComposerHandle {
+  insertQuote: (text: string) => void;
+}
+
+export const ChatComposer = forwardRef<ChatComposerHandle, {
+  busy: boolean;
+  onSend: (q: string) => void;
+  /** 受控值（宿主上提）；发送成功后由本组件经 onValueChange("") 清空 */
+  value: string;
+  onValueChange: (v: string) => void;
+}>(function ChatComposer({ busy, onSend, value, onValueChange }, ref) {
+  const refEl = useRef<HTMLTextAreaElement | null>(null);
+  // 句柄内读最新值/回调（refs 镜像，句柄身份稳定、无陈旧闭包）
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const onChangeRef = useRef(onValueChange);
+  onChangeRef.current = onValueChange;
   useLayoutEffect(() => {
-    if (ref.current) growTextarea(ref.current, 120);
-  }, [text]);
+    if (refEl.current) growTextarea(refEl.current, 120);
+  }, [value]);
   const send = () => {
-    const q = text.trim();
+    const q = value.trim();
     if (!q || busy) return;
     onSend(q);
-    setText("");
+    onChangeRef.current("");
   };
+  useImperativeHandle(
+    ref,
+    () => ({
+      insertQuote(text: string) {
+        const t = text.trim();
+        if (!t) return;
+        // 引用块（逐行 "> " 前缀）+ 空行；既有草稿保留在其后（§4.4-c 永不覆盖）
+        const block = t.split("\n").map((l) => `> ${l}`).join("\n") + "\n\n";
+        onChangeRef.current(block + valueRef.current);
+        requestAnimationFrame(() => {
+          const el = refEl.current;
+          if (el) {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length); // 光标落文末
+          }
+        });
+      }
+    }),
+    []
+  );
   return (
     <div className="wb-composer" data-testid="wb-composer">
       <textarea
-        ref={ref}
+        ref={refEl}
         rows={1}
-        value={text}
+        value={value}
         aria-label="追问 AI"
         placeholder="追问，或自由提问…"
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
@@ -174,12 +229,12 @@ export function ChatComposer({ busy, onSend }: { busy: boolean; onSend: (q: stri
           }
         }}
       />
-      <button type="button" className="btn btn-primary btn-sm wb-composer-send" disabled={!text.trim() || busy} onClick={send}>
+      <button type="button" className="btn btn-primary btn-sm wb-composer-send" disabled={!value.trim() || busy} onClick={send}>
         发送
       </button>
     </div>
   );
-}
+});
 
 type KpGroup = { kpTitle: string; items: string[] };
 
@@ -497,10 +552,6 @@ export default function AIPanel({
           走宿主既有关闭链含批次 reject。本组件只渲染 .ai-panel-body（全部钩子零改动）。 */}
 
       <div className="ai-panel-body">
-        {/* v48.51（D91 §5.2）：解读方式切换器＝explain 分支首行（等待回答时也可切换，切换即重发） */}
-        {panel.kind === "explain" && (
-          <ExplainModeSwitcher value={explainMode} onChange={(m) => onExplainModeChange?.(m)} />
-        )}
         <blockquote className="ai-quote">{panel.text}</blockquote>
 
         {/* D123：单行进度（计时自算，不再依赖宿主传入的 elapsedSec——摘录页曾硬编码 0）；
