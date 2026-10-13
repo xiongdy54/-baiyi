@@ -3062,10 +3062,16 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   font-size: var(--fs-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
+  /* v48.104（D149 ④）：归档条目以解读原文为「问」，原文可能很长——气泡最多 3 行截断 */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 .wb-a { position: relative; margin-top: var(--sp-2); }
-.wb-a-acts { display: flex; opacity: 0; transition: opacity var(--dur) var(--ease); }
-.wb-a:hover .wb-a-acts, .wb-a:focus-within .wb-a-acts { opacity: 1; }
+/* v48.104（D149 ⑤）：线程「制卡」钮常显（accent 字色轻量呈现）——去悬停才现的隐藏式交互 */
+.wb-a-acts { display: flex; }
+.wb-a-acts .ai-link { color: var(--accent); }
 .wb-composer {
   flex: none;
   display: flex;
@@ -8016,6 +8022,11 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wbw-btn:hover { color: var(--text-primary); background: var(--grey-1); }
 .wbw-btn.on { color: var(--accent); }
 .wbw-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* v48.104（D149 ①）：独立窗口布局塌陷修复——.wb-root 是 SelectionPanels 的坞包裹层，原本无 CSS。
+   主窗口下坞体 position:fixed 无感；window 放置下坞体 position:static + height:100% + container-type:size，
+   父级 auto 高 ⇒ 高度解析为 0，制卡板块与解释板块（justify-content:flex-end 向上溢出）整片重叠。
+   给包裹层确定高度（flex:1）与列向，坞体既有 flex:1 规则随之生效。 */
+.wbw-body .wb-root { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .wbw-body .side-dock[data-placement="window"] { flex: 1; min-height: 0; border: none; }
 
 /* ==========================================================================
@@ -8055,7 +8066,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   cursor: pointer;
 }
 .wb-tabs button:hover, .dock-tabs > button[role="tab"]:hover { background: none; color: var(--text-primary); }
-.wb-tabs button.on, .dock-tabs > button[role="tab"].on { background: none; color: var(--accent); font-weight: 600; }
+/* v48.104（D149 ②）：选中页签字色由 accent 改为主文色（accent 只留给 2px 下划线——
+   字色+线色双 accent 是「杂乱感」来源之一；下划线仍压在头行 hairline 上） */
+.wb-tabs button.on, .dock-tabs > button[role="tab"].on { background: none; color: var(--text-primary); font-weight: 600; }
 .wb-tabs button.on::after, .dock-tabs > button[role="tab"].on::after {
   content: "";
   position: absolute;
@@ -8091,6 +8104,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 /* D144：头行页签改为制卡板块页签（.dock-tabs＝手动制卡｜AI 制卡）；题型页签已移入页签体（wb-cards-modes），
    收起时随 clip 一并隐藏；bottom 收起态藏页签、保留右端 chevron（v48.101/D146：题字钮退役后它是唯一开合钮） */
 .side-dock[data-placement="bottom"] .wb-manual.is-collapsed .dock-tabs { display: none; }
+/* v48.104（D149 ③）：制卡板块收起时头行下缘线与解释板块上缘线直接相邻会叠成 2px 双线——
+   收起态头行让线（唯一分界＝解释板块上缘 hairline） */
+.wb-manual.is-collapsed .wb-head { border-bottom-color: transparent; }
 
 /* 字段：一行起步，clip 高度由 useGrowBox 设定并过渡。
    D142（R2/R3，V1 下缘一划）：去四边盒框——下缘 1px 保留（聚焦零位移，误写 border:0 会出 1px 位移）；
@@ -8720,14 +8736,37 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
    动效纪律（D120 R2）：零动画库；把手 chevron rotate 与 hover 底色入 no-preference 作用域；
    折叠沿用 .collapse-clip 通用规则（reduce 块显式降级见下）；零裸写时长/缓动；hover 零抬升零阴影。
    ========================================================================== */
+/* v48.104（D149 ②）：题型选择＝分段控件（grey-1 轨道 + 纸色选中块 + 微圆角；用户明示本板块
+   可偏离瑞士风零圆角），与头行「下划线页签」语法分离——选择器一眼可辨是按钮组而非页签。
+   覆盖 8043 起 .wb-tabs 全局页签规则（margin/高度/下划线 ::after）。 */
 .wb-cards-modes {
   flex: none;
-  height: 28px;
   display: flex;
-  align-items: stretch;
-  padding: 0 var(--wb-pad);
+  padding: var(--sp-2) var(--wb-pad);
 }
-.wb-cards-modes .wb-tabs { align-self: stretch; }
+.wb-cards-modes .wb-tabs {
+  align-self: center;
+  gap: 2px;
+  margin-left: 0;
+  padding: 2px;
+  background: var(--grey-1);
+  border-radius: 8px;
+}
+.wb-cards-modes .wb-tabs button {
+  height: 24px;
+  padding: 0 var(--sp-3);
+  border-radius: 6px;
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+}
+.wb-cards-modes .wb-tabs button:hover { background: none; color: var(--text-primary); }
+.wb-cards-modes .wb-tabs button.on {
+  background: var(--paper);
+  color: var(--text-primary);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--border-subtle); /* 静态 hairline 环（非阴影抬升），暗色主题下选中块仍可辨 */
+}
+.wb-cards-modes .wb-tabs button.on::after { content: none; }
 
 .wb-explain {
   min-width: 0;
@@ -8735,7 +8774,27 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   display: flex;
   flex-direction: column;
   justify-content: flex-end; /* 按钮行/输入条贴底；展开时内容自输入条向上长（§2.1） */
+  /* v48.104（D149 ③）：制卡/解释两板块常驻分界 hairline（修订 D142「不新增分区线」结论——
+     用户实测两模块分界不清、长文滚动到边缘像被硬切断；收起态此线即两板块唯一分界） */
+  border-top: 1px solid var(--border-subtle);
 }
+/* v48.104（D149 ③）：AI 内容滚动区上缘 24px 渐隐——覆盖层挂在不滚动的父级（collapse-inner /
+   tabbody），内容滚动时从其下穿过、到模块上缘柔和淡出，不再产生「文字还有一半没显示」的硬切断视觉；
+   首屏未滚动时内容不被压暗（与静态 mask 方案的区别）。pointer-events:none 不挡交互。 */
+.wb-explain-clip > .collapse-inner { position: relative; }
+.wb-explain-clip > .collapse-inner::after,
+.wb-cards-tabbody[data-wb-tabbody="aicards"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background: linear-gradient(180deg, var(--paper), transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+.wb-cards-tabbody[data-wb-tabbody="aicards"] { position: relative; }
 /* D144 §3.1/§9（right/window）：解释板块按内容贴底（flex 角色与旧 .wb-ai 相反——伸展的是制卡板块）；
    0 1 auto＝内容超高时板块自身收缩、内部 clip 先让位（min-height:0），收起态三件套（把手+按钮行+输入条）恒完整可见。 */
 .side-dock[data-placement="right"] .wb-explain,
@@ -8776,42 +8835,38 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .wb-explain-body > .ai-panel { padding-bottom: var(--sp-4); }
 .wb-mode-bar {
   flex: none;
-  height: 28px;
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 0 var(--wb-pad);
-  margin-bottom: var(--sp-1); /* 行贴输入条上缘 4px（§3.1） */
+  gap: 2px;
+  padding: 2px;
+  margin: 0 var(--wb-pad) var(--sp-2);
+  background: var(--grey-1);
+  border-radius: 8px;
 }
-/* D144 §3.1/§4.3：四 ghost 文字钮（自动/通用解读/简明解读/自由提问，ExplainModeBar）——
-   ghost＝无框无底，当前方式＝accent 字 + 2px accent 下划线（页签同族语法，::after 对齐行底缘，
-   故 align-self:stretch 拉满 28px 行高）；.idle（空输入∧无语境）＝§7 Empty 态视觉（grey-2 字 +
-   cursor default）但保持可点击——真禁用会封死 §4.3 空格「仅置方式」（含自由提问预选）；
-   .on 恒 accent（§7：当前方式行无状态变化），声明顺序在 .idle 之后以同特异性覆盖字色。 */
+/* v48.104（D149 ②）：解读方式四钮由「页签同族 ghost 语法」改为分段控件（与题型选择同族）——
+   用户实测旧样式与页签长得一样、看不出是按钮。flex:1 四等分（对齐即秩序）；
+   选中＝纸色块 + 静态 hairline 环 + 主文色 500；.idle（空输入∧无语境）＝helper 字色 + cursor default
+   但保持可点击（§4.3 空格「仅置方式」，语义矩阵不变）；声明顺序 .on 在 .idle 后压字色。 */
 .wb-mode-btn {
   position: relative;
-  flex: none;
-  align-self: stretch;
+  flex: 1;
+  height: 24px;
   padding: 0 var(--sp-2);
   background: none;
   border: 0;
-  font-size: var(--fs-secondary);
+  border-radius: 6px;
+  font-size: var(--fs-meta);
   line-height: 1;
   color: var(--text-secondary);
   white-space: nowrap;
   cursor: pointer;
 }
-.wb-mode-btn:hover { background: var(--grey-1); }
-.wb-mode-btn.idle { color: var(--grey-2); cursor: default; }
-.wb-mode-btn.on { color: var(--accent); font-weight: 600; }
-.wb-mode-btn.on::after {
-  content: "";
-  position: absolute;
-  left: var(--sp-2);
-  right: var(--sp-2);
-  bottom: 0;
-  height: 2px;
-  background: var(--accent);
+.wb-mode-btn:hover { color: var(--text-primary); }
+.wb-mode-btn.idle { color: var(--text-helper); cursor: default; }
+.wb-mode-btn.on {
+  background: var(--paper);
+  color: var(--text-primary);
+  font-weight: 500;
+  box-shadow: inset 0 0 0 1px var(--border-subtle);
 }
 /* D144 #4（§3.3/§4.2/§7/§8）：跨页签幽灵草稿层——field 容器 relative 内 absolute 铺满，
    padding 与输入面一致（.wb-field 输入面＝wb-field-inner 4px 0；.wb-free textarea＝4px 0 5px）；
@@ -8871,9 +8926,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
       color var(--dur-hover) var(--ease-out-soft);
   }
   .wb-explain-toggle svg { transition: transform var(--dur-panel) var(--ease-out-soft); }
-  /* D120 双速 hover（§3.1）：hover 底色进入 --dur-hover --ease-enter、离开回落 --dur-view --ease-out-soft */
-  .wb-mode-btn { transition: background-color var(--dur-view) var(--ease-out-soft); }
-  .wb-mode-btn:hover { transition: background-color var(--dur-hover) var(--ease-enter); }
+  /* D120 双速 hover（§3.1）：hover 进入 --dur-hover --ease-enter、离开回落 --dur-view --ease-out-soft；
+     v48.104：hover 改字色（分段控件无底色 hover），选中块背景色同速过渡 */
+  .wb-mode-btn { transition: color var(--dur-view) var(--ease-out-soft), background-color var(--dur-view) var(--ease-out-soft); }
+  .wb-mode-btn:hover { transition: color var(--dur-hover) var(--ease-enter), background-color var(--dur-hover) var(--ease-enter); }
   /* D144 #4 §8：幽灵草稿淡入（挂载后 rAF 翻 .is-in 触发；reduce 块不挂 transition＝瞬时显形） */
   .wb-ghost.is-in { transition: opacity var(--dur-enter) var(--ease-enter); }
   /* 折叠 opacity 层（MOTION §7 / 方案 §8）：展开＝内容延迟 50ms 淡入（Follow Through；
@@ -8887,6 +8943,40 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
     opacity: 0;
     transition: opacity var(--dur-exit) var(--ease-out-soft), visibility 0s var(--dur-panel);
   }
+}
+/* v48.104（D149 ⑤）：解释输出下方追问快捷钮精修——用户实测 btn-outline/secondary 直搬「粗糙笨重」。
+   坞内作用域覆盖：胶囊形（999px）26px 高、12px 字、hairline 描边无底色，hover 仅线色/字色加深
+   （D120：零抬升零阴影）；「就此制卡」（.btn-secondary）转 accent-soft 淡 accent 胶囊并靠右
+   （与四个追问钮语义分层：追问＝继续解读，制卡＝转场动作）。两行 .ai-actions 已并为一行（JSX）。 */
+.side-dock .ai-actions { margin-top: var(--sp-3); align-items: center; }
+.side-dock .ai-actions .btn-outline {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border-color: var(--border-subtle);
+  background: none;
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+}
+.side-dock .ai-actions .btn-outline:hover:not(:disabled) {
+  background: none;
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+.side-dock .ai-actions .btn-secondary {
+  height: 26px;
+  padding: 0 var(--sp-3);
+  margin-inline-start: auto;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--fs-meta);
+}
+.side-dock .ai-actions .btn-secondary:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent-hover, var(--accent)); }
+.side-dock .ai-actions .btn-secondary:disabled { background: var(--accent-soft); opacity: 0.5; }
+@media (prefers-reduced-motion: no-preference) {
+  .side-dock .ai-actions .btn-outline { transition: color var(--dur-hover) var(--ease-enter), border-color var(--dur-hover) var(--ease-enter); }
+  .side-dock .ai-actions .btn-secondary { transition: color var(--dur-hover) var(--ease-enter); }
 }
 @media (prefers-reduced-motion: reduce) {
   .wb-explain-clip,

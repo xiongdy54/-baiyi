@@ -585,14 +585,14 @@ export default function AIPanel({
                 </button>
               </div>
             )}
+            {/* v48.104（D149 ⑤）：追问快捷钮与「就此制卡」合并为一行胶囊链（样式在 theme.css
+                .ai-actions 作用域精修）；「就此制卡」margin-inline-start:auto 靠右、accent-soft 淡色 */}
             <div className="ai-actions">
               {([["通俗解释", "通俗解释"], ["严格定义", "严格定义"], ["举个例子", "举个例子"], ["为什么", "为什么会这样"]] as const).map(([label, q]) => (
                 <button key={label} className="btn btn-outline btn-sm" onClick={() => (onAsk ? onAsk(q) : onExplain(q))}>
                   {label}
                 </button>
               ))}
-            </div>
-            <div className="ai-actions">
               <button className="btn btn-secondary btn-sm" disabled={panel.running} onClick={onMakeCards}>
                 就此制卡
               </button>

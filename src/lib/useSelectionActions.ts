@@ -1054,6 +1054,15 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   function clearThread() {
     setThread([]);
   }
+  // v48.104（D149 ④）：「就此制卡」转场——当前解释面板有已完成的答案则归档为追问线程一条
+  //（原文为问、解读全文为答），随后解释板块自动收起到底；跳转 AI 制卡页签后把手仍在场、
+  // 解释内容可再展开（修复「就此制卡后解释面板消失且无法再打开」）。无线程内容可归档时也收起。
+  function archiveExplainToThread() {
+    if (aiPanel?.kind === "explain" && aiPanel.answer && !aiPanel.running) {
+      setThread((t) => [...t, { id: ++askSeqRef.current, q: aiPanel.text, answer: aiPanel.answer, running: false }]);
+    }
+    setExplainOpen(false);
+  }
 
   // 直接制卡：以原选文为材料 +「本次制卡重点」指令 + 已有卡清单（防重复），
   // 生成 1-3 张补充卡追加到卡片清单末尾；contextRef 沿用同一次选区锚点（跳转原文同一位置）
@@ -1640,6 +1649,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     thread,
     runAsk,
     clearThread,
+    archiveExplainToThread,
     // v48.101（D146）：「带入 AI 回答」生成链（流式写入背面，落点见 ManualFormHandle.setBackValue）
     generateManualAnswer,
     manualAnswerBusy,

@@ -313,7 +313,12 @@ export default function SelectionPanels({
       onRejectAll={sel.rejectAllDrafts}
       onExplain={(q) => sel.runExplain(aiPanel.text, q)}
       onAsk={(q) => void sel.runAsk(q)}
-      onMakeCards={() => sel.runAICards(aiPanel.text, undefined, sel.aiMode)}
+      onMakeCards={() => {
+        // v48.104（D149 ④）：从解释面板「就此制卡」/ 制卡面板「重跑」共用本回调——仅解释来源
+        // 需要先归档（线程留痕）并把解释板块自动收起到底；制卡面板重跑不动解释板块
+        if (aiPanel.kind === "explain") sel.archiveExplainToThread();
+        sel.runAICards(aiPanel.text, undefined, sel.aiMode);
+      }}
       onModeChange={(m) => sel.changeAiMode(m)}
       mode={sel.aiMode}
       onSearchBackground={() => sel.searchAndRetry(aiPanel.text)}
@@ -625,7 +630,15 @@ export default function SelectionPanels({
                  底部输入条（§10 退役项，D144 #3） */
               <>
                 {aiPanel?.kind === "explain" ? aiPanelNode : null}
-                <ExplainThread items={sel.thread} onMake={(answer) => cardsOf(answer)} />
+                {/* v48.104（D149 ④）：线程行内「制卡」同样跳转 AI 制卡页签——解释板块自动收起到底
+                    （内容本就在线程里，无需归档；把手因线程非空仍在场，可再展开） */}
+                <ExplainThread
+                  items={sel.thread}
+                  onMake={(answer) => {
+                    sel.setExplainOpen(false);
+                    cardsOf(answer);
+                  }}
+                />
               </>
             }
             explainModeBar={
