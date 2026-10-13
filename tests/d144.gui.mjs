@@ -1,5 +1,7 @@
 // v48.100（D144 #9）制卡台 IA 重设计行为冒烟：唤坞默认 IA / 双页签草稿保活 / 跨页签幽灵双向 /
 // 解释板块发送自动展开（AI 未配置降级链）/ 解释内容区选区三按钮选单 + 把手与坞收展状态保留。
+// v48.101（D146）S3 按新契约改写：幽灵点击接受退役（Alt+Enter 唯一路径 + pointer-events:none +
+// 点击穿透断言）+ 拒绝闩（目标框主动输入后同源不再提供，源变化后重新提供）。
 // @runtime: node  @tier: 2  @gui: true  @id: D144  @timeout: 300
 // 运行：npm run build 之后 `node tests/d144.gui.mjs`（CDP 驱动 dist 真实应用，自启自关）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-d144-userdata（先清空，全新库），绝不触碰真实库（§7.3）。
@@ -194,15 +196,33 @@ try {
   const freeBack = await cdp.eval(`document.querySelector('[data-testid="wb-free-source"] textarea')?.value || ''`);
   check("AI 侧自由材料跨页签保留", freeBack === "D144 自由材料", freeBack);
 
-  // ---------- S3 跨页签幽灵双向（§4.2：Alt+Enter / 点击接受；无损红线＝接受只写目标框） ----------
+  // ---------- S3 跨页签幽灵双向（§4.2 + v48.101/D146 修订：Alt+Enter 唯一接受路径 + 拒绝闩；无损红线＝接受只写目标框） ----------
   console.log("== S3 跨页签幽灵双向 ==");
   await cdp.eval(setTA('[data-testid="wb-free-source"] textarea', ""));
+  // D146 拒绝闩：S2 曾在 AI 侧输入过「D144 自由材料」——当时的源（手动首框「D144 草稿基线」）已出列；
+  // 源内容变化后幽灵按新源重新提供（快照比对语义），故此处改写手动首框为新源文。
+  // 须先切回手动页签再写 PM：AI 页签下手动表单体 display:none，ProseMirror 无法聚焦
+  await cdp.eval(`document.querySelector('[data-testid="wb-tab-manual"]').click()`);
+  await wait(300);
+  await cdp.eval(clearPM(FRONT_PM));
+  await cdp.eval(setPM(FRONT_PM, "D144 幽灵源文"));
+  await wait(400);
+  await cdp.eval(`document.querySelector('[data-testid="wb-tab-aicards"]').click()`);
   await wait(300);
   const ghostA = parseState(await cdp.eval(`JSON.stringify({
     ghost: !!document.querySelector('[data-testid="wb-free-source"] .wb-ghost'),
-    text: document.querySelector('[data-testid="wb-free-source"] .wb-ghost-text')?.textContent || ''
+    text: document.querySelector('[data-testid="wb-free-source"] .wb-ghost-text')?.textContent || '',
+    pe: getComputedStyle(document.querySelector('[data-testid="wb-free-source"] .wb-ghost') || document.body).pointerEvents
   })`));
-  check("手动侧有字 + AI 侧空 → 自由材料框出现幽灵（源＝手动首框全文）", ghostA.ghost && trimEnd(ghostA.text) === "D144 草稿基线", JSON.stringify(ghostA));
+  check("手动侧有字 + AI 侧空 → 自由材料框出现幽灵（源＝手动首框全文，pointer-events:none）", ghostA.ghost && trimEnd(ghostA.text) === "D144 幽灵源文" && ghostA.pe === "none", JSON.stringify(ghostA));
+  // D146：点击幽灵不再接受（层无 onClick；点击穿透由输入面原生承担）
+  await cdp.eval(`document.querySelector('[data-testid="wb-free-source"] .wb-ghost')?.click()`);
+  await wait(300);
+  const s3click = parseState(await cdp.eval(`JSON.stringify({
+    free: document.querySelector('[data-testid="wb-free-source"] textarea')?.value || '',
+    ghostStill: !!document.querySelector('[data-testid="wb-free-source"] .wb-ghost')
+  })`));
+  check("点击幽灵不接受（D146：接受唯一路径＝Alt+Enter）", s3click.free === "" && s3click.ghostStill, JSON.stringify(s3click));
   await cdp.eval(`(() => {
     const ta = document.querySelector('[data-testid="wb-free-source"] textarea');
     if (!ta) return "no-el";
@@ -215,9 +235,9 @@ try {
     free: document.querySelector('[data-testid="wb-free-source"] textarea')?.value || '',
     ghostGone: !document.querySelector('[data-testid="wb-free-source"] .wb-ghost')
   })`));
-  check("Alt+Enter 接受：全文写入自由材料框且幽灵消失", trimEnd(s3b.free) === "D144 草稿基线" && s3b.ghostGone, JSON.stringify(s3b));
+  check("Alt+Enter 接受：全文写入自由材料框且幽灵消失", trimEnd(s3b.free) === "D144 幽灵源文" && s3b.ghostGone, JSON.stringify(s3b));
   const frontKept = await cdp.eval(`document.querySelector(${JSON.stringify(FRONT_PM)})?.textContent || ''`);
-  check("无损红线：源框（手动首框）不被回写改动", frontKept === "D144 草稿基线", frontKept);
+  check("无损红线：源框（手动首框）不被回写改动", frontKept === "D144 幽灵源文", frontKept);
   await cdp.eval(`document.querySelector('[data-testid="wb-tab-manual"]').click()`);
   await wait(300);
   await cdp.eval(clearPM(FRONT_PM));
@@ -226,16 +246,22 @@ try {
     ghost: !!document.querySelector('[data-testid="wb-manual-body"] .wb-field .wb-ghost'),
     text: document.querySelector('[data-testid="wb-manual-body"] .wb-field .wb-ghost-text')?.textContent || ''
   })`));
-  check("AI 侧有字 + 手动首框空 → 手动首框出现幽灵（反向同步）", ghostB.ghost && trimEnd(ghostB.text) === "D144 草稿基线", JSON.stringify(ghostB));
-  await cdp.eval(`document.querySelector('[data-testid="wb-manual-body"] .wb-field .wb-ghost')?.click()`);
+  check("AI 侧有字 + 手动首框空 → 手动首框出现幽灵（反向同步）", ghostB.ghost && trimEnd(ghostB.text) === "D144 幽灵源文", JSON.stringify(ghostB));
+  // D146：手动侧接受同样只走 Alt+Enter（坞内固定键 handler 挂在 .wb-field 容器）
+  await cdp.eval(`(() => {
+    const f = document.querySelector('[data-testid="wb-manual-body"] .wb-field');
+    if (!f) return "no-el";
+    f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }));
+    return "sent";
+  })()`);
   await wait(400);
   const s3d = parseState(await cdp.eval(`JSON.stringify({
     front: document.querySelector(${JSON.stringify(FRONT_PM)})?.textContent || '',
     ghostGone: !document.querySelector('[data-testid="wb-manual-body"] .wb-field .wb-ghost'),
     free: document.querySelector('[data-testid="wb-free-source"] textarea')?.value || ''
   })`));
-  check("点击幽灵接受：全文写入手动首框且幽灵消失", s3d.front === "D144 草稿基线" && s3d.ghostGone, JSON.stringify(s3d));
-  check("无损红线：源框（自由材料）不被清写", trimEnd(s3d.free) === "D144 草稿基线", s3d.free);
+  check("Alt+Enter 接受（手动侧）：全文写入手动首框且幽灵消失", trimEnd(s3d.front) === "D144 幽灵源文" && s3d.ghostGone, JSON.stringify(s3d));
+  check("无损红线：源框（自由材料）不被清写", trimEnd(s3d.free) === "D144 幽灵源文", s3d.free);
 
   // ---------- S4 解释板块发送与自动展开（§4.3：按钮行双职 + composer 受控；AI 未配置降级链） ----------
   console.log("== S4 解释板块发送与自动展开 ==");
@@ -259,11 +285,21 @@ try {
   const sel1 = await cdp.eval(selectInExplain());
   check("解释内容区程序化选区成功（触发素材＝降级错误文本）", String(sel1).startsWith("selected:"), sel1);
   await wait(200);
-  const s5a = parseState(await cdp.eval(`JSON.stringify({
+  // 选区可能被相邻渲染挤断（毫秒级竞态，与被测行为无关）——首次未触发则重选一次再判
+  let s5a = parseState(await cdp.eval(`JSON.stringify({
     trio: !!document.querySelector('.dock-trio'),
     acts: ["aiCards", "copy", "quote"].filter((a) => !!document.querySelector('[data-trio-act="' + a + '"]')).length,
     place: document.querySelector('.dock-trio')?.getAttribute('data-place') || ''
   })`));
+  if (!s5a.trio) {
+    await cdp.eval(selectInExplain());
+    await wait(300);
+    s5a = parseState(await cdp.eval(`JSON.stringify({
+      trio: !!document.querySelector('.dock-trio'),
+      acts: ["aiCards", "copy", "quote"].filter((a) => !!document.querySelector('[data-trio-act="' + a + '"]')).length,
+      place: document.querySelector('.dock-trio')?.getAttribute('data-place') || ''
+    })`));
+  }
   check("选区上方出现三按钮选单且含 AI 制卡/复制/引用 三钮（§4.4）", s5a.trio && s5a.acts === 3, JSON.stringify(s5a));
   check("选单定位锚合法（prefer above / 放不下翻 below）", s5a.place === "above" || s5a.place === "below", s5a.place);
   await cdp.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
@@ -295,7 +331,7 @@ try {
     tabManual: document.querySelector('[data-testid="wb-tab-manual"]')?.getAttribute('aria-selected'),
     front: document.querySelector(${JSON.stringify(FRONT_PM)})?.textContent || ''
   })`));
-  check("复制：追加写入手动首框（既有输入保留 + 永不覆盖）", s5e.trioGone && s5e.front.includes("D144 草稿基线") && s5e.front.includes("尚未配置"), JSON.stringify(s5e));
+  check("复制：追加写入手动首框（既有输入保留 + 永不覆盖）", s5e.trioGone && s5e.front.includes("D144 幽灵源文") && s5e.front.includes("尚未配置"), JSON.stringify(s5e));
   check("复制落点＝坞展开 + 切「手动制卡」页签", s5e.tabManual === "true", s5e.tabManual);
   await cdp.eval(`document.querySelector('[data-testid="wb-explain-toggle"]').click()`);
   await wait(400);
@@ -316,7 +352,7 @@ try {
   await wait(400);
   const s5h = parseState(await cdp.eval(`JSON.stringify({
     collapsed: document.querySelector('[data-card-dock]')?.getAttribute('data-dock-collapsed') === '1',
-    frontKept: (document.querySelector(${JSON.stringify(FRONT_PM)})?.textContent || '').includes('D144 草稿基线')
+    frontKept: (document.querySelector(${JSON.stringify(FRONT_PM)})?.textContent || '').includes('D144 幽灵源文')
   })`));
   check("坞 Esc 收起（不卸载）：表单草稿保留", s5h.collapsed && s5h.frontKept, JSON.stringify(s5h));
   await cdp.eval(`document.querySelector('[data-testid="workbench-entry"]').click()`);
@@ -324,7 +360,7 @@ try {
   const s5i = parseState(await cdp.eval(`JSON.stringify({
     open: document.querySelector('[data-card-dock]')?.getAttribute('data-dock-collapsed') === null,
     tabManual: document.querySelector('[data-testid="wb-tab-manual"]')?.getAttribute('aria-selected'),
-    frontKept: (document.querySelector(${JSON.stringify(FRONT_PM)})?.textContent || '').includes('D144 草稿基线')
+    frontKept: (document.querySelector(${JSON.stringify(FRONT_PM)})?.textContent || '').includes('D144 幽灵源文')
   })`));
   check("再展开：回默认手动页签且草稿无损（收起 ≠ 关闭）", s5i.open && s5i.tabManual === "true" && s5i.frontKept, JSON.stringify(s5i));
 

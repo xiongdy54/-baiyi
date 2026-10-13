@@ -489,6 +489,15 @@ export const cardGenerator: {
     /** v48.74（D118 §3④）：注册一次性取消闭包（ai:abort） */
     onCancelRegister?: (cancel: () => void) => void
   ): Promise<string>;
+  /** v48.101（D146）：手动制卡「带入 AI 回答」——无既有回答时按制卡规则对问题直答（流式）。
+      内联系统提示词（最小信息/目标 ≤15 字/只输出答案本身/与问题同语言/不编造出处），
+      非 §7.4 受管模板族、零播种；context＝材料引用（如 manualQuote），仅作参考语境。 */
+  answerForCard(
+    question: string,
+    context?: string,
+    onDelta?: (acc: string) => void,
+    onCancelRegister?: (cancel: () => void) => void
+  ): Promise<string>;
 } = {
   async generateCards(sourceText, context, mode, onProgress, onThinking, onCancelRegister) {
     const resolved = mode === "auto" ? detectMode(sourceText) : mode;
@@ -802,6 +811,35 @@ export const cardGenerator: {
       onDelta,
       0.7,
       onThinking,
+      onCancelRegister
+    );
+  },
+
+  // v48.101（D146）：手动制卡「带入 AI 回答」生成链——按制卡规则对问题直答。
+  // 只输出答案本身（最小信息原则）：无前缀、无铺垫、目标 ≤15 字；同语言作答；不编造出处。
+  async answerForCard(question, context, onDelta, onCancelRegister) {
+    const sys = [
+      "你是间隔重复学习软件的制卡助手。用户正在手动制卡的问答题上请求生成答案。",
+      "请严格遵守以下制卡规则作答：",
+      "- 只输出答案本身：不重复问题、不加「答案：」等任何前缀、不写解释铺垫与客套；",
+      "- 简短直接：优先一句话（目标 15 字以内），枚举类问题用顿号列出关键词，宁短勿长；",
+      "- 与问题相同的语言作答；",
+      "- 不确定时给出最主流的答案，禁止编造出处与数字。"
+    ].join("\n");
+    const user = [
+      `【问题】\n${question}`,
+      context ? `【材料引用（作答优先依据；未涵盖时可用通识补充）】\n${context}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    return aiGateway.chat(
+      [
+        { role: "system", content: sys },
+        { role: "user", content: user }
+      ],
+      onDelta,
+      0.4,
+      undefined,
       onCancelRegister
     );
   }

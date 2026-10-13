@@ -1235,6 +1235,29 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     if (p && p.kind === "explain") void runExplain(p.text, null, m);
   }
 
+  // ---------- v48.101（D146）：手动制卡「带入 AI 回答」生成链 ----------
+  // 无既有回答时按制卡规则对正面问题直答（cardGenerator.answerForCard），流式 acc 经 onDelta
+  // 由宿主写入背面字段（ManualFormHandle.setBackValue）；材料引用 manualQuote 作参考语境。
+  // 并发门：生成中再点忽略；失败 showToast（AI 未配置＝既有指引文案）。不接 beginAIRun 面板链
+  // （不落解释面板、无「停止」钮——输出短，取消需求低，登记于 D146）。
+  const [manualAnswerBusy, setManualAnswerBusy] = useState(false);
+  const manualAnswerBusyRef = useRef(false);
+  async function generateManualAnswer(question: string, onDelta: (acc: string) => void) {
+    const q = question.trim();
+    if (!q || manualAnswerBusyRef.current) return;
+    manualAnswerBusyRef.current = true;
+    setManualAnswerBusy(true);
+    try {
+      await cardGenerator.answerForCard(q, manualQuote ?? undefined, onDelta);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(msg.includes("API Key") ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。" : `AI 生成答案失败：${msg}`);
+    } finally {
+      manualAnswerBusyRef.current = false;
+      setManualAnswerBusy(false);
+    }
+  }
+
   // ---------- 摘录 ----------
   /**
    * v48.23（D61 §6.8-11）：多段不相邻选择时把原始 spans 一并交给工作流——主进程按 spans 优先
@@ -1610,6 +1633,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     thread,
     runAsk,
     clearThread,
+    // v48.101（D146）：「带入 AI 回答」生成链（流式写入背面，落点见 ManualFormHandle.setBackValue）
+    generateManualAnswer,
+    manualAnswerBusy,
     // v48.60（D101）：手动表单的标签初值（批注标签继承，可删）——宿主透传 ManualCardForm.initialTags
     manualTagsInitial,
     dictPanel,
