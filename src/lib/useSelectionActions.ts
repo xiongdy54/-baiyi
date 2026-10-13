@@ -222,10 +222,10 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   // v48.52（D92 §4）：右侧学习坞会话态——首次唤起后常驻挂载（收起≠关闭，dockEverOpened 只进不出）
   const [dockEverOpened, setDockEverOpened] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
-  /** v48.52（D92 §3.2）：显式页签选择；新 AI 内容到达时由派生 effect 覆盖（§6.3 内容派生规则） */
-  const [dockTab, setDockTab] = useState<"explain" | "cards">("explain");
-  /** v48.52（D92 §3.4）：手动暂态是否正占坞体（切页签时表单隐藏保活、manualOpen 不动） */
-  const [manualActive, setManualActive] = useState(false);
+  // v48.100（D144 #3）：D92 的 dockTab / manualActive / changeDockTab 随旧「解释｜制卡」页签坞退役
+  //（僵尸状态收口，无读取方）——页签归属由 SelectionPanels 的 cardsTab 承载；新增解释板块开态通道。
+  /** D144 §2.1：解释板块开态（默认收起；发送/内容到达自动展开，把手一键收起/再展开——纯 state，不打断在途流式） */
+  const [explainOpen, setExplainOpen] = useState(false);
   // v25：手动制卡的图片选区（从聚焦工具条「手动制卡」进入时携带；D98 起该链路不可达，P1 评估退役）
   const [manualImage, setManualImage] = useState<{
     dataUrl: string;
@@ -308,15 +308,11 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   function expandDock() {
     wakeDock();
   }
-  /** 显式页签点击：停留所点页签并让手动暂态退场（表单隐藏保活，manualOpen 不动） */
-  function changeDockTab(tab: "explain" | "cards") {
-    setDockTab(tab);
-    setManualActive(false);
-  }
-  // 内容派生（D92 §3.2/§7.5）：**显式点击 > 内容派生**——新内容到达时覆盖显式选择。
-  // 「新内容到达」＝ aiPanel.kind 变化（含 null→kind）**或** startedAt 变化（同 kind 重跑：
-  // 面板已在解释态时再点「AI 解释」仍是新内容，验收 §7.5 要求自动切回对应页签）；
+  // 内容派生（D92 §3.2/§7.5 → D144 §2.1）：**显式点击 > 内容派生**——新 AI 内容到达时唤坞。
+  // 「新内容到达」＝ aiPanel.kind 变化（含 null→kind）**或** startedAt 变化（同 kind 重跑）；
   // 无新内容（完成态 startedAt=undefined、同 kind 流式增量）不打扰用户当前所在页签。
+  // 页签派生（AI 制卡内容→aicards）在 SelectionPanels 的 cardsTab effect；解释内容到达→
+  // 解释板块自动展开在 runExplain / runAsk 入口（§4.3，下）。
   const prevKindRef = useRef<AiPanelState["kind"] | null>(null);
   const prevStartRef = useRef<number | null>(null);
   useEffect(() => {
@@ -329,8 +325,6 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     if (!kind || (!kindChanged && !newRun)) return;
     setDockEverOpened(true);
     setDockOpen(true);
-    setDockTab(kind === "explain" ? "explain" : "cards");
-    setManualActive(false);
   }, [aiPanel?.kind, aiPanel?.startedAt]);
 
   /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
@@ -1036,6 +1030,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       .join("\n\n");
     const fullQ = hist ? `（此前对话，供承接上文）\n${hist}\n\n现在的问题：${q}` : q;
     wakeDock();
+    setExplainOpen(true); // D144 §4.3：追问发送（composer/chips）→ 解释板块自动展开
     setThread((t) => [...t, { id, q, answer: "", running: true, startedAt: Date.now(), thinking: 0 }]);
     try {
       const answer = await cardGenerator.explain(
@@ -1192,6 +1187,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       startedAt: Date.now(),
       thinking: 0
     });
+    setExplainOpen(true); // D144 §4.3：发送/重跑/外部触发（actAIExplain、FreeSource 解释等）→ 解释板块自动展开
     try {
       const answer = await cardGenerator.explain(
         text,
@@ -1409,7 +1405,6 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       setManualQuote(null);
     }
     setManualOpen(true);
-    setManualActive(true);
     wakeDock();
     A().clearSelection();
     // v48.60（D101）：继承初值异步补入（表单打开后 chips 到位即可，不阻塞开坞）；
@@ -1597,7 +1592,6 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     setManualQuote(null);
     setManualOpen(false);
     setManualImage(null);
-    setManualActive(false);
     setManualSeq((n) => n + 1); // D123：制卡台里的表单常驻，靠换 key 清空
     A().onManualSettled?.();
   }
@@ -1627,9 +1621,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     // v48.52（D92）：学习坞会话态（首次唤起后常驻挂载；收起≠关闭）
     dockEverOpened,
     dockOpen,
-    dockTab,
-    manualActive,
-    changeDockTab,
+    // v48.100（D144 #3）：解释板块开态通道（内容到达自动展开；把手开合由宿主经 setExplainOpen）
+    explainOpen,
+    setExplainOpen,
     collapseDock,
     expandDock,
     // v48.51（D91）：解读方式三态（会话内记忆）与切换（面板在场时切换即重跑）
@@ -1701,7 +1695,6 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     startManualWith: (text: string) => {
       setManualQuote(text);
       setManualOpen(true);
-      setManualActive(true);
       wakeDock();
       // v48.60（D101）：继承初值异步补入（同 actManualCard）
       setManualTagsInitial([]);

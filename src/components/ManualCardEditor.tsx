@@ -5,7 +5,11 @@
 // 纯移动，逻辑零改动）——CardDock 手动态直接渲染它。默认导出 `ManualCardEditor` 保留为
 // 「modal 包装 + ManualCardForm」：**图片挖空**（imageOcclusion，来自图片聚焦工具条）继续走
 // modal（大图预览需要幅面），其余三模式走 dock——m6 系列图片挖空断言零迁移。
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+// v48.100（D144 #4）：跨页签幽灵草稿同步的手动侧落点——第一文本框（四题型同为 front state：
+// 问答/翻转/图片挖空＝正面，填空＝挖空文本）值镜像上报（onFrontChange，宿主只读不回写——无损红线）；
+// ManualFormHandle.setFrontValue 写入源全文并聚焦、光标落文末；幽灵层经 ghost/onGhostAccept
+// 渲染进第一字段（GrowField，Alt+Enter 坞内固定键）。表单其余内部状态、载荷、题型页签零改动。
+import { forwardRef, useImperativeHandle, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cardsApi, needsDateStamp, parseCloze, similaritySearch } from "../lib/cards";
 import { bigramJaccard } from "../lib/disambiguateCore.mjs";
 import { PRECHECK_K, answerDiffers, clipText, manualPrecheckText, shouldRunPrecheck } from "../lib/disambiguateUi";
@@ -54,22 +58,42 @@ function MdField({
 
 
 /** 制卡台输入字段外壳（D123 修订）：默认一行、随内容伸缩（高度过渡由 CSS 的 --dur-panel/--ease 承担）；
-    右下角可选「带入…」悬停钮（设计稿绿色小字）：点击把外部文本写入该字段。 */
+    右下角可选「带入…」悬停钮（设计稿绿色小字）：点击把外部文本写入该字段。
+    D144 #4（§3.3）：可选幽灵草稿层（宿主构建的节点）——absolute 铺满 field 输入面，整层可点＝接受；
+    幽灵在场时 Alt+Enter（坞内固定键，目标输入面聚焦时）也走接受（onGhostAccept）。 */
 function GrowField({
   children,
-  pick
+  pick,
+  ghost,
+  onGhostAccept
 }: {
   children: ReactNode;
   pick?: { label: string; empty: string; get: () => string | null | undefined; apply: (t: string) => void };
+  ghost?: ReactNode;
+  onGhostAccept?: () => void;
 }) {
   const [clipRef, innerRef] = useGrowBox<HTMLDivElement, HTMLDivElement>(168);
   const [miss, setMiss] = useState(false);
   const timer = useRef<number | null>(null);
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
   return (
-    <div className="wb-field">
+    <div
+      className="wb-field"
+      onKeyDown={
+        ghost && onGhostAccept
+          ? (e: React.KeyboardEvent) => {
+              // 与 Ctrl+Enter（制卡）/Ctrl+Shift+C（挖空）无冲突（altKey 互斥）；IME 组合态不接管
+              if (e.altKey && e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                onGhostAccept();
+              }
+            }
+          : undefined
+      }
+    >
       <div className="wb-field-clip" ref={clipRef}>
         <div className="wb-field-inner" ref={innerRef}>{children}</div>
+        {ghost}
       </div>
       {pick && (
         <button
@@ -126,8 +150,9 @@ function unwrapCloze(text: string, pos: number): { text: string; caret: number }
   return null;
 }
 
-/** 填空字段：纯文本 textarea（能可靠读写选区），一行起步随内容伸缩；工具行＝挖空 / 同题挖空 / 取消挖空 + 实时「N 张卡 · M 个空」 */
-function ClozeField({ value, onChange, onPick }: { value: string; onChange: (v: string) => void; onPick?: { label: string; get: () => string | null | undefined } }) {
+/** 填空字段：纯文本 textarea（能可靠读写选区），一行起步随内容伸缩；工具行＝挖空 / 同题挖空 / 取消挖空 + 实时「N 张卡 · M 个空」
+    D144 #4：幽灵层/接受回调透传给首字段 GrowField（填空题的第一文本框＝挖空文本）。 */
+function ClozeField({ value, onChange, onPick, ghost, onGhostAccept }: { value: string; onChange: (v: string) => void; onPick?: { label: string; get: () => string | null | undefined }; ghost?: ReactNode; onGhostAccept?: () => void }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const pendingCaret = useRef<[number, number] | null>(null);
   const [hasSel, setHasSel] = useState(false);
@@ -170,7 +195,7 @@ function ClozeField({ value, onChange, onPick }: { value: string; onChange: (v: 
   const keep = (e: React.MouseEvent) => e.preventDefault();
   return (
     <>
-      <GrowField pick={onPick ? { label: onPick.label, empty: "没有选区", get: onPick.get, apply: (t) => onChange(t) } : undefined}>
+      <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={onPick ? { label: onPick.label, empty: "没有选区", get: onPick.get, apply: (t) => onChange(t) } : undefined}>
         <textarea
           ref={ref}
           className="wb-cloze-input"
@@ -237,22 +262,17 @@ interface PrecheckHit {
   differs: boolean;
 }
 
+/** D144 #4：ManualCardForm 的宿主句柄——幽灵接受（Alt+Enter / 点击幽灵层）时把源全文写入
+    第一文本框（qa/reverse/图片挖空＝正面 front，填空＝挖空文本，四态同为此值）并聚焦、光标落文末 */
+export interface ManualFormHandle {
+  setFrontValue: (text: string) => void;
+}
+
 /** 手动制卡表单体（D88 §8.2 抽取，纯移动）：modal 包装之外的全部内容——
-    字段、落库链（onSave → 宿主 handleManualCard）、canSave 校验一字不改。 */
-export function ManualCardForm({
-  quote,
-  imageRegion,
-  tagSuggestions,
-  initialTags,
-  onCancel,
-  onSave,
-  onDisambiguate,
-  onPickSelection,
-  onPickAnswer,
-  mode: modeProp,
-  onModeChange,
-  variant = "modal"
-}: {
+    字段、落库链（onSave → 宿主 handleManualCard）、canSave 校验一字不改。
+    v48.100（D144 #4）：增 ghost / onGhostAccept（幽灵槽，仅宿主派生条件满足时传节点）/
+    onFrontChange（首框值镜像上报）三可选 props；ref 句柄见 ManualFormHandle。 */
+export const ManualCardForm = forwardRef<ManualFormHandle, {
   /** D123 修订 3：题型由宿主控制（题型页签在制卡台标题行里）；不传＝内部自管 */
   mode?: "qa" | "reverse" | "cloze" | "imageOcclusion";
   onModeChange?: (m: "qa" | "reverse" | "cloze" | "imageOcclusion") => void;
@@ -274,7 +294,29 @@ export function ManualCardForm({
   onSave: (payload: ManualCardPayload) => Promise<string | null | void>;
   /** D121 §4.1：「保存并辨析」——保存成功后以新卡为 A、相似卡为 B 打开辨析弹窗（宿主渲染，表单卸载后仍存活）；不传则不显示该按钮 */
   onDisambiguate?: (newCardId: string, otherCardId: string) => void;
-}) {
+  /** D144 #4：幽灵草稿层节点（宿主按 §4.2 派生条件构建；渲染进第一文本框的 field 容器） */
+  ghost?: ReactNode;
+  /** D144 #4：幽灵 Alt+Enter 接受回调（点击接受由 ghost 节点自带 onAccept 承担） */
+  onGhostAccept?: () => void;
+  /** D144 #4：第一文本框值镜像上报（宿主只读用于幽灵显示条件；宿主不回写——无损红线） */
+  onFrontChange?: (v: string) => void;
+}>(function ManualCardForm({
+  quote,
+  imageRegion,
+  tagSuggestions,
+  initialTags,
+  onCancel,
+  onSave,
+  onDisambiguate,
+  onPickSelection,
+  onPickAnswer,
+  mode: modeProp,
+  onModeChange,
+  variant = "modal",
+  ghost,
+  onGhostAccept,
+  onFrontChange
+}, ref) {
   const [modeInner, setModeInner] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
   const mode = modeProp ?? modeInner;
   const setMode = (m: "qa" | "reverse" | "cloze" | "imageOcclusion") => {
@@ -304,6 +346,52 @@ export function ManualCardForm({
   const [tags, setTags] = useState<string[]>(initialTags ?? []);
   // D123：dock 变体的高级字段默认收起（DOM 保持挂载，仅 hidden——载荷与落库链不变）
   const [moreOpen, setMoreOpen] = useState(false);
+
+  // ===== D144 #4（§4.2）：首框值镜像上报 + 幽灵接受 caret 收尾 =====
+  // 四题型第一文本框同为 front state；宿主按镜像判幽灵显示条件（单向：宿主不回写——无损红线）。
+  const onFrontChangeRef = useRef(onFrontChange);
+  onFrontChangeRef.current = onFrontChange;
+  useEffect(() => {
+    onFrontChangeRef.current?.(front);
+  }, [front]);
+  // 接受后光标落文末（挂在 front 提交后的 layout effect，与 ClozeField pendingCaret 同手法）：
+  // qa/reverse/图片挖空＝ProseMirror（Range 折叠到末尾），填空＝textarea（setSelectionRange）。
+  const fieldsRef = useRef<HTMLDivElement | null>(null);
+  const pendingFrontCaret = useRef(false);
+  useLayoutEffect(() => {
+    if (!pendingFrontCaret.current) return;
+    pendingFrontCaret.current = false;
+    const first = fieldsRef.current?.querySelector<HTMLElement>(".wb-field");
+    if (!first) return;
+    const ta = first.querySelector<HTMLTextAreaElement>("textarea");
+    if (ta) {
+      ta.focus({ preventScroll: true });
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+      return;
+    }
+    const pm = first.querySelector<HTMLElement>(".ProseMirror");
+    if (pm) {
+      pm.focus({ preventScroll: true });
+      const s = window.getSelection();
+      if (s) {
+        const range = document.createRange();
+        range.selectNodeContents(pm);
+        range.collapse(false);
+        s.removeAllRanges();
+        s.addRange(range);
+      }
+    }
+  }, [front]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      setFrontValue: (text: string) => {
+        pendingFrontCaret.current = true;
+        setFront(text);
+      }
+    }),
+    []
+  );
 
   useEffect(() => {
     if (mode === "qa" || mode === "imageOcclusion") {
@@ -483,6 +571,7 @@ export function ManualCardForm({
       <>
         <div
           className="wb-fields"
+          ref={fieldsRef}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && canSave && !saving && !checking) {
               e.preventDefault();
@@ -492,16 +581,16 @@ export function ManualCardForm({
         >
           {mode === "reverse" ? (
             <>
-              <GrowField pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="问题（制卡后另生成一张：以它为答案）" label="问题" /></GrowField>
+              <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="问题（制卡后另生成一张：以它为答案）" label="问题" /></GrowField>
               <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="答案（制卡后另生成一张：以它为问题）" label="答案" /></GrowField>
             </>
           ) : mode === "qa" ? (
             <>
-              <GrowField pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（问题）" label="题面" /></GrowField>
+              <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（问题）" label="题面" /></GrowField>
               <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案）" label="答案" /></GrowField>
             </>
           ) : mode === "cloze" ? (
-            <ClozeField value={front} onChange={setFront} onPick={onPickSelection && !front.trim() ? { label: "带入选区", get: onPickSelection } : undefined} />
+            <ClozeField value={front} onChange={setFront} ghost={ghost} onGhostAccept={onGhostAccept} onPick={onPickSelection && !front.trim() ? { label: "带入选区", get: onPickSelection } : undefined} />
           ) : imageRegion ? (
             <>
               <div className="occlusion-stage occlusion-preview manual-region-preview">
@@ -730,7 +819,7 @@ export function ManualCardForm({
         </div>
     </>
   );
-}
+});
 
 /** modal 包装（D88 §8.2 保留形态）：图片挖空继续走 modal——大图预览需要幅面（§8.2）。
     Esc/焦点锁/焦点归还仍由 useDialogA11y 承担（与抽表前一致）。 */

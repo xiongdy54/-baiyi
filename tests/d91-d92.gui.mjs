@@ -1,4 +1,9 @@
-// v48.51/v48.52（D91 + D92）GUI 端到端：解读方式三态切换器/本地路由/事后建议 + 学习坞双页签/收起展开/全局制卡/草稿保活
+// v48.51/v48.52（D91 + D92）GUI 端到端：解读方式切换/本地路由/事后建议 + 制卡板块双页签/收起展开/全局制卡/草稿保活
+// v48.100（D144 #9）：选择器按方案 §10 映射更新——旧 dock-tabs（解释|制卡）退役 → 制卡板块 wb-cards-tabs
+// （手动|AI 制卡）+ 解释板块 wb-explain（把手 wb-explain-toggle / 内容 wb-explain-body / 按钮行 wb-mode-bar）；
+// 手动表单挂点 wb-manual → wb-manual-body；解读方式下拉退役 → 悬浮按钮行按钮 data-mode；
+// 解释空态（data-dock-empty="explain"）退役 → 收起态断言（aria-expanded / 把手显隐）。
+// 语义映射：切「解释页签」→ 切「AI 制卡页签」（草稿保活跨 cardsTab 断言）；新解释内容到达 → 解释板块自动展开。
 // @runtime: node  @tier: 2  @gui: true  @id: D91D92  @timeout: 420
 // 运行：npm run build 之后 `node tests/d91-d92.gui.mjs`（CDP 驱动 dist 真实应用，自启自关）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-d91d92-userdata（先清空，全新库），绝不触碰真实库（§7.3）。
@@ -148,7 +153,7 @@ function makeDrag(cdp) {
   };
 }
 
-/** foliate 引擎章节文档里目标文字的宿主坐标（marks.gui spanRectInEpub 同法） */
+/** foliate 引擎章节文档里目标文字的宿主坐标（marks.gui spanRectInEpub 同法；y2＝末字纵坐标，供对角拖选） */
 const spanRectInEpub = (mark) => `(() => {
   const k = window.__readerKernel;
   const entries = (k && k.__getContents ? k.__getContents() : []).filter((e) => e.doc && e.doc.defaultView && e.doc.defaultView.frameElement);
@@ -165,7 +170,7 @@ const spanRectInEpub = (mark) => `(() => {
       const first = rects[0], last = rects[rects.length - 1];
       if (!first || !last || !first.height) return "";
       const fr = doc.defaultView.frameElement.getBoundingClientRect();
-      return JSON.stringify({ x1: fr.left + first.left + 2, x2: fr.left + last.right - 2, y: fr.top + first.top + first.height / 2, text: range.toString() });
+      return JSON.stringify({ x1: fr.left + first.left + 2, x2: fr.left + last.right - 2, y: fr.top + first.top + first.height / 2, y2: fr.top + last.top + last.height / 2, text: range.toString() });
     }
   }
   return "";
@@ -175,7 +180,9 @@ const spanRectInEpub = (mark) => `(() => {
 async function selectParagraph(cdp, mark) {
   const geo = parseState(await cdp.eval(spanRectInEpub(mark)));
   if (typeof geo.x1 !== "number") return "TEXT NOT FOUND";
-  await makeDrag(cdp)({ x: geo.x1, y: geo.y }, { x: geo.x2, y: geo.y });
+  // 对角拖选（首字 → 末字）：段落在阅读器可能换行，水平拖选只覆盖首行——首行不足
+  // EXPLAIN_ROUTER_MIN_CHARS（20 字）时本地路由器恒 general（G3 曾因此误判），对角线覆盖全段与换行无关
+  await makeDrag(cdp)({ x: geo.x1, y: geo.y }, { x: geo.x2, y: geo.y2 ?? geo.y });
   await wait(900);
   return (await cdp.eval(`!!document.querySelector('.selection-menu')`)) ? "menu" : "no-menu";
 }
@@ -247,30 +254,34 @@ try {
   // ---------- G1 D92：全局制卡（免选区）+ 草稿保活 + 空态常驻 ----------
   console.log("== G1 D92 全局制卡 + 草稿保活 + 空态 ==");
   check("学习坞未挂载（首次唤起前）", (await cdp.eval(`!!document.querySelector('[data-card-dock]')`)) === false, "不应在场");
-  check("无选区点工具栏「制卡」可点（去 disabled）", String(await cdp.eval(clickAct("manual"))) === "clicked", "clicked");
+  // v48.97（D141）起阅读器工具栏免选区「制卡」钮已删除（与顶栏入口重复）——免选区全局制卡
+  // 唯一归口＝顶栏「制卡台」按钮（workbench-entry；D144 IA 下与 d144.gui S1 同源）
+  check("顶栏「制卡台」唤坞（免选区全局制卡）", String(await cdp.eval(`(() => { const b = document.querySelector('[data-testid="workbench-entry"]'); if (!b) return 'NO BTN'; b.click(); return 'clicked'; })()`)) === "clicked", "clicked");
   await wait(500);
   const g1a = parseState(await cdp.eval(`JSON.stringify({
     dock: !!document.querySelector('[data-card-dock]'),
-    manualForm: !!document.querySelector('[data-card-dock] [data-testid="wb-manual"] .ProseMirror'),
-    tabs: !!document.querySelector('[data-testid="dock-tabs"]'),
+    manualForm: !!document.querySelector('[data-card-dock] [data-testid="wb-manual-body"] .ProseMirror'),
+    tabs: !!document.querySelector('[data-testid="wb-cards-tabs"]'),
     // D123：推让改由 html[data-wb-open] 驱动（reader-body-shifted 退役）
     shifted: document.documentElement.dataset.wbOpen === '1'
   })`));
   check("制卡台挂载 + 手动区常驻（空表单可自由制卡）", g1a.dock && g1a.manualForm, JSON.stringify(g1a));
-  check("AI 页签条在位（role=tablist）", g1a.tabs, g1a.tabs);
+  check("制卡板块页签条在位（role=tablist）", g1a.tabs, g1a.tabs);
   check("展开时正文让位（html[data-wb-open]）", g1a.shifted === true, g1a.shifted);
-  await cdp.eval(setPM('[data-card-dock] [data-testid="wb-manual"] .ProseMirror', 'FSRSTEST 草稿句子'));
+  await cdp.eval(setPM('[data-card-dock] [data-testid="wb-manual-body"] .ProseMirror', 'FSRSTEST 草稿句子'));
   await wait(400); // 等 React 状态回流（PM onChange → 表单状态）
-  // 草稿保活：手动区常驻（D123），切 AI 页签不影响表单，草稿仍在（§7.7）
-  await cdp.eval(`document.querySelector('[data-testid="dock-tab-explain"]').click()`);
+  // 草稿保活：手动页签体常驻（D144），切 AI 制卡页签不影响表单，草稿仍在（§7.7 / 方案 §4.1）
+  await cdp.eval(`document.querySelector('[data-testid="wb-tab-aicards"]').click()`);
   await wait(300);
   const g1b = parseState(await cdp.eval(`JSON.stringify({
-    manualVisible: !document.querySelector('[data-card-dock] [data-testid="wb-manual"]')?.classList.contains('is-collapsed'),
-    manualMounted: !!document.querySelector('[data-card-dock] [data-testid="wb-manual"] .ProseMirror'),
-    emptyExplain: !!document.querySelector('[data-dock-empty="explain"]')
+    aicardsOn: document.querySelector('[data-testid="wb-tab-aicards"]')?.getAttribute('aria-selected'),
+    // D144：两页签体常驻保活（display:none 切换）——切走后表单仍在 DOM（草稿无损）
+    manualMounted: !!document.querySelector('[data-card-dock] [data-testid="wb-manual-body"] .ProseMirror'),
+    // D144 §2.1：无解释内容且收起 → 把手不在场（真正只留输入框和按钮）
+    explainHandleAbsent: !document.querySelector('[data-testid="wb-explain-toggle"]')
   })`));
-  check("切页签：手动区常驻不受影响 + 解释页签空态在场", g1b.manualVisible && g1b.manualMounted && g1b.emptyExplain, JSON.stringify(g1b));
-  const draftBack = await cdp.eval(`document.querySelector('[data-card-dock] [data-testid="wb-manual"] .ProseMirror')?.textContent || ''`);
+  check("切 AI 制卡页签：手动表单保活（display:none）+ 解释板块默认收起（无内容把手不在场）", g1b.aicardsOn === "true" && g1b.manualMounted && g1b.explainHandleAbsent === true, JSON.stringify(g1b));
+  const draftBack = await cdp.eval(`document.querySelector('[data-card-dock] [data-testid="wb-manual-body"] .ProseMirror')?.textContent || ''`);
   check("切页签后手动表单草稿仍在", draftBack === "FSRSTEST 草稿句子", draftBack);
   // D123：Esc（焦点在制卡台内）= 收起整个制卡台，状态保留；再点顶栏「制卡台」展开
   await cdp.eval(`(() => { const d = document.querySelector('[data-card-dock]'); d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 'esc'; })()`);
@@ -281,20 +292,22 @@ try {
   await wait(400);
   const g1c = parseState(await cdp.eval(`JSON.stringify({
     dock: !!document.querySelector('[data-card-dock]'),
-    emptyExplain: !!document.querySelector('[data-dock-empty="explain"]'),
     emptyCards: !!document.querySelector('[data-dock-empty="cards"]'),
-    switcherInEmpty: !!document.querySelector('[data-dock-empty="explain"] [data-testid="explain-mode"]'),
+    // D144：解释板块收起态＝悬浮按钮行 + 输入条恒在（§2.1）；空态不再有解释 FreeSource（§10 退役）
+    modeBar: !!document.querySelector('[data-testid="wb-mode-bar"]'),
+    composer: !!document.querySelector('[data-testid="wb-composer"]'),
+    handleAbsent: !document.querySelector('[data-testid="wb-explain-toggle"]'),
     pressed: document.querySelector('[data-testid="workbench-entry"]')?.getAttribute('aria-pressed')
   })`));
-  check("顶栏按钮再展开：制卡台常驻 + 两页签空态在场（页签恒可点）", g1c.dock && g1c.emptyExplain && g1c.emptyCards, JSON.stringify(g1c));
-  check("空态解释页签内含解读方式切换器（方式可先调）", g1c.switcherInEmpty === true, g1c.switcherInEmpty);
+  check("顶栏按钮再展开：制卡台常驻 + 制卡空态在场（页签恒可点）", g1c.dock && g1c.emptyCards, JSON.stringify(g1c));
+  check("解释板块收起态＝按钮行 + 输入条恒在、无内容把手不在场", g1c.modeBar && g1c.composer && g1c.handleAbsent === true, JSON.stringify(g1c));
   check("顶栏「制卡台」按钮 aria-pressed=true", g1c.pressed === "true", g1c.pressed);
   // 空态页签切换（§7.2 两页签可点）
-  await cdp.eval(`document.querySelector('[data-testid="dock-tab-cards"]').click()`);
+  await cdp.eval(`document.querySelector('[data-testid="wb-tab-aicards"]').click()`);
   await wait(250);
-  const cardsTabOn = await cdp.eval(`document.querySelector('[data-testid="dock-tab-cards"]')?.getAttribute('aria-selected')`);
-  check("空态下切到制卡页签（aria-selected 生效）", cardsTabOn === "true", cardsTabOn);
-  await cdp.eval(`document.querySelector('[data-testid="dock-tab-explain"]').click()`);
+  const cardsTabOn = await cdp.eval(`document.querySelector('[data-testid="wb-tab-aicards"]')?.getAttribute('aria-selected')`);
+  check("空态下切到 AI 制卡页签（aria-selected 生效）", cardsTabOn === "true", cardsTabOn);
+  await cdp.eval(`document.querySelector('[data-testid="wb-tab-manual"]').click()`);
   await wait(250);
 
   // ---------- G2 D91：三态默认 + 显式选择 + 切换即重跑 ----------
@@ -305,25 +318,21 @@ try {
   check("点工具栏「AI 解释」发起请求", String(await cdp.eval(clickAct("explain"))) === "clicked", "clicked");
   await wait(700);
   const g2a = parseState(await cdp.eval(`JSON.stringify({
-    mode: document.querySelector('[data-card-dock] [data-testid="explain-mode"]')?.getAttribute('data-value'),
-    tab: document.querySelector('[data-testid="dock-tab-explain"]')?.getAttribute('aria-selected')
+    mode: document.querySelector('[data-testid="wb-mode-bar"] [data-mode="auto"]')?.getAttribute('aria-pressed'),
+    open: document.querySelector('[data-testid="wb-explain-toggle"]')?.getAttribute('aria-expanded')
   })`));
-  check("三态默认 auto（§8.11）+ 解释页签自动激活", g2a.mode === "auto" && g2a.tab === "true", JSON.stringify(g2a));
+  check("当前方式默认 auto + 解释内容到达自动展开（§4.3）", g2a.mode === "true" && g2a.open === "true", JSON.stringify(g2a));
   check("auto 路由：短定义句落通用解读（reader-explain scope）", mock.lastScope === "explain", mock.lastScope);
-  // 切简明 → 即重跑（ste scope）
-  await cdp.eval(`document.querySelector('[data-card-dock] [data-testid="explain-mode"] .dd-btn')?.click()`);
-  await wait(250);
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll('[data-card-dock] [data-testid="explain-mode"] .dd-item')].find((x) => x.textContent === '简明解读'); if (b) b.click(); return !!b; })()`);
+  // 点「简明解读」（输入无字）→ 置为当前方式 + 解释面板在场即重跑（§4.3 语义矩阵 / D91 切换即重跑）
+  await cdp.eval(`document.querySelector('[data-testid="wb-mode-bar"] [data-mode="ste"]')?.click()`);
   await wait(700);
-  const g2b = parseState(await cdp.eval(`JSON.stringify({ mode: document.querySelector('[data-card-dock] [data-testid="explain-mode"]')?.getAttribute('data-value') })`));
-  check("显式选简明解读：切换即重跑（reader-explain-ste scope）", g2b.mode === "ste" && mock.lastScope === "ste", JSON.stringify(g2b) + " scope=" + mock.lastScope);
+  const g2b = parseState(await cdp.eval(`JSON.stringify({ mode: document.querySelector('[data-testid="wb-mode-bar"] [data-mode="ste"]')?.getAttribute('aria-pressed') })`));
+  check("显式选简明解读：切换即重跑（reader-explain-ste scope）", g2b.mode === "true" && mock.lastScope === "ste", JSON.stringify(g2b) + " scope=" + mock.lastScope);
   // 切回自动 → 重跑回通用（中位数句路由 general）
-  await cdp.eval(`document.querySelector('[data-card-dock] [data-testid="explain-mode"] .dd-btn')?.click()`);
-  await wait(250);
-  await cdp.eval(`(() => { const b = [...document.querySelectorAll('[data-card-dock] [data-testid="explain-mode"] .dd-item')].find((x) => x.textContent === '自动'); if (b) b.click(); return !!b; })()`);
+  await cdp.eval(`document.querySelector('[data-testid="wb-mode-bar"] [data-mode="auto"]')?.click()`);
   await wait(700);
-  const g2c = parseState(await cdp.eval(`JSON.stringify({ mode: document.querySelector('[data-card-dock] [data-testid="explain-mode"]')?.getAttribute('data-value') })`));
-  check("切回自动：恢复路由（仍 reader-explain）", g2c.mode === "auto" && mock.lastScope === "explain", JSON.stringify(g2c) + " scope=" + mock.lastScope);
+  const g2c = parseState(await cdp.eval(`JSON.stringify({ mode: document.querySelector('[data-testid="wb-mode-bar"] [data-mode="auto"]')?.getAttribute('aria-pressed') })`));
+  check("切回自动：恢复路由（仍 reader-explain）", g2c.mode === "true" && mock.lastScope === "explain", JSON.stringify(g2c) + " scope=" + mock.lastScope);
 
   // ---------- G3 D91：事后建议（ste marker 驱动，§8.10） ----------
   console.log("== G3 D91 事后建议 ==");
@@ -348,9 +357,10 @@ try {
   // 点击建议 → 按通用解读重发（reader-explain scope）
   await cdp.eval(`(() => { const b = [...document.querySelectorAll('[data-testid="explain-suggest"] button')].find((x) => x.textContent.includes('通用解读')); if (b) b.click(); return !!b; })()`);
   await waitAnswerDone();
-  const g3c = parseState(await cdp.eval(`JSON.stringify({ mode: document.querySelector('[data-card-dock] [data-testid="explain-mode"]')?.getAttribute('data-value'), suggest: !!document.querySelector('[data-testid="explain-suggest"]') })`));
+  // D144：旧解读方式切换器退役（hook explainMode 无独立 DOM 表示）——重跑语义由 mock scope 断言承担
+  const g3c = parseState(await cdp.eval(`JSON.stringify({ suggest: !!document.querySelector('[data-testid="explain-suggest"]') })`));
   check("点建议 → 通用解读重发（reader-explain scope 请求产生）", mock.lastScope === "explain", "scope=" + mock.lastScope);
-  check("建议行消失 + 切换器显式 general", g3c.suggest === false && g3c.mode === "general", JSON.stringify(g3c));
+  check("建议行消失（重跑完成）", g3c.suggest === false, JSON.stringify(g3c));
 
   // ---------- G4 收起 ≠ 关闭（流式状态保留）+ 让位联动（§7.3/§7.8） ----------
   console.log("== G4 收起/展开 + 状态保留 ==");
@@ -380,25 +390,25 @@ try {
   check("收起不丢状态：答案增量在继续（无重启）", g4b.len > before.len, `before=${before.len} after=${g4b.len}`);
   await waitAnswerDone();
 
-  // ---------- G5 内容派生（§7.5） ----------
+  // ---------- G5 内容派生（§7.5 / D144 §2.1） ----------
   console.log("== G5 活动页签内容派生 ==");
-  await cdp.eval(`document.querySelector('[data-testid="dock-tab-cards"]').click()`);
+  await cdp.eval(`document.querySelector('[data-testid="wb-tab-aicards"]').click()`);
   await wait(300);
-  const g5a = await cdp.eval(`document.querySelector('[data-testid="dock-tab-cards"]')?.getAttribute('aria-selected')`);
-  check("显式切到制卡页签（无新内容不回跳）", g5a === "true", g5a);
+  const g5a = await cdp.eval(`document.querySelector('[data-testid="wb-tab-aicards"]')?.getAttribute('aria-selected')`);
+  check("显式切到 AI 制卡页签（无新内容不回跳）", g5a === "true", g5a);
   selState = await selectParagraph(cdp, P_MED);
   check("拖选中位数段（重选）", selState === "menu", selState);
   await cdp.eval(clickAct("explain"));
   await wait(700);
-  const g5b = parseState(await cdp.eval(`JSON.stringify({ explain: document.querySelector('[data-testid="dock-tab-explain"]')?.getAttribute('aria-selected'), cards: document.querySelector('[data-testid="dock-tab-cards"]')?.getAttribute('aria-selected') })`));
-  check("新解释内容到达 → 自动切到解释页签", g5b.explain === "true" && g5b.cards === "false", JSON.stringify(g5b));
+  const g5b = parseState(await cdp.eval(`JSON.stringify({ open: document.querySelector('[data-testid="wb-explain-toggle"]')?.getAttribute('aria-expanded'), cards: document.querySelector('[data-testid="wb-tab-aicards"]')?.getAttribute('aria-selected') })`));
+  check("新解释内容到达 → 解释板块自动展开（页签不被打扰）", g5b.open === "true" && g5b.cards === "true", JSON.stringify(g5b));
   await waitAnswerDone();
   selState = await selectParagraph(cdp, P_MED);
   check("拖选中位数段（重选）", selState === "menu", selState);
   await cdp.eval(clickAct("aiCards"));
   await wait(700);
-  const g5c = parseState(await cdp.eval(`JSON.stringify({ cards: document.querySelector('[data-testid="dock-tab-cards"]')?.getAttribute('aria-selected') })`));
-  check("点「AI 制卡」→ 自动切到制卡页签（mock 空answer 不影响派生）", g5c.cards === "true", JSON.stringify(g5c));
+  const g5c = parseState(await cdp.eval(`JSON.stringify({ cards: document.querySelector('[data-testid="wb-tab-aicards"]')?.getAttribute('aria-selected') })`));
+  check("点「AI 制卡」→ 自动切到 AI 制卡页签（mock 空answer 不影响派生）", g5c.cards === "true", JSON.stringify(g5c));
 
   // ---------- G6 occlusion 归属制卡页签（§7.9） ----------
   // assetsAPI 为 contextBridge 只读暴露（赋值静默失败）——原生选图对话框无法在 CDP 驱动；
@@ -416,11 +426,11 @@ try {
     await cdp.eval(clickAct("occlusion"));
     await wait(2500);
     const g6 = parseState(await cdp.eval(`JSON.stringify({
-      cards: document.querySelector('[data-testid="dock-tab-cards"]')?.getAttribute('aria-selected'),
+      cards: document.querySelector('[data-testid="wb-tab-aicards"]')?.getAttribute('aria-selected'),
       badge: document.querySelector('[data-card-dock] .dock-badge')?.textContent || '',
       drafts: [...document.querySelectorAll('[data-card-dock] .ai-draft')].length
     })`));
-    check("occlusion 面板落制卡页签 + 「图片挖空」徽章在场", g6.cards === "true" && String(g6.badge).includes("图片挖空"), JSON.stringify(g6));
+    check("occlusion 面板落 AI 制卡页签 + 「图片挖空」徽章在场", g6.cards === "true" && String(g6.badge).includes("图片挖空"), JSON.stringify(g6));
     check("occlusion 草稿渲染（图片卡链路完整）", g6.drafts > 0, g6.drafts);
   } else {
     console.log("  - 跳过 G6（assetsAPI 为 contextBridge 只读暴露，原生选图对话框无法驱动；页签映射逻辑为 SelectionPanels 内 3 行条件渲染）");
