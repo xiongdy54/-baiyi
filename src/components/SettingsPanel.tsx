@@ -35,7 +35,7 @@ import { DICT_CATALOG, type DictCatalogItem } from "../lib/dictCatalog";
 import { DEFAULT_POPUP_FIELDS } from "../lib/dictClient";
 import { FIELD_LABELS } from "./DictPanel";
 import { eventBus } from "../lib/eventbus";
-import { memoryApi, type MemoryPendingStats, type MemoryStatus } from "../lib/memory";
+// v48.114（D159）：`import { memoryApi, ... } from "../lib/memory"` 随 MemorySection 摘除（lib/memory.ts 保留）
 import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
 import SettingsInfo from "./SettingsInfo";
@@ -106,8 +106,8 @@ const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: s
     label: "智能",
     items: [
       { id: "ai", label: "AI 服务" },
-      { id: "dict", label: "词典与查词" },
-      { id: "memory", label: "用户记忆" }
+      { id: "dict", label: "词典与查词" }
+      // v48.114（D159）：「用户记忆」（sec-memory）随功能暂时移除——重实装时按 §6.7 回插本项
     ]
   },
   {
@@ -1143,221 +1143,9 @@ function LimitsSection() {
   );
 }
 
-// ---------- 用户记忆（v45，M14-UM1，D39 / §6.7）：唯一入口 sec-memory ----------
-// AI 自主维护（§1.7 有界例外）→ 产品面只做「可见、可控、可停止」：不提供编辑界面（外部编辑器打开），
-// 总开关默认关；首次开启一次性说明 → 补处理预估确认 → 进度可中止（水位线推进，中止不丢进度）。
-function MemorySection() {
-  const [status, setStatus] = useState<MemoryStatus | null>(null);
-  const [introOpen, setIntroOpen] = useState(false);
-  const [preview, setPreview] = useState<MemoryPendingStats | null>(null);
-  const [resetArmed, setResetArmed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
-  // v46（M14-UM2，§6.7.1）：注入预算可调（字；core/目录/主题按 800/1200/2400 配比缩放）
-  const [injectBudget, setInjectBudget] = useState<number | null>(null);
-
-  useEffect(() => {
-    settingsStore
-      .get<Record<string, unknown> | null>("app", "memory", null)
-      .then((m) => setInjectBudget(Number((m as { injectBudget?: number })?.injectBudget) || 4400));
-  }, []);
-
-  async function changeInjectBudget(n: number) {
-    const v = Math.max(200, Math.min(20000, Number(n) || 4400));
-    setInjectBudget(v);
-    const cur = await settingsStore.get<Record<string, unknown> | null>("app", "memory", null);
-    await settingsStore.set("app", "memory", { ...(cur || {}), injectBudget: v });
-  }
-
-  async function refresh() {
-    const st = await memoryApi.status();
-    setStatus(st);
-    return st;
-  }
-  useEffect(() => {
-    void refresh();
-    return eventBus.on("memory/changed", () => void refresh());
-  }, []);
-
-  async function toggle(on: boolean) {
-    setNotice(null);
-    if (on) {
-      const st = await refresh();
-      if (st && !st.introAcked) {
-        setIntroOpen(true);
-      } else {
-        await memoryApi.setEnabled({ enabled: true, introAcked: true });
-        await refresh();
-      }
-    } else {
-      await memoryApi.setEnabled({ enabled: false });
-      setPreview(null);
-      await refresh();
-    }
-  }
-
-  // 首次开启说明 → 确认：生效 + 拉补处理预估（§6.7.2：范围与预估先行，用户确认或取消）
-  async function confirmIntro() {
-    setBusy(true);
-    try {
-      await memoryApi.setEnabled({ enabled: true, introAcked: true });
-      const pv = await memoryApi.backfillPreview();
-      setPreview(pv && pv.entryCount > 0 ? pv : null);
-      setIntroOpen(false);
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function startBackfill() {
-    setBusy(true);
-    try {
-      await memoryApi.backfillStart();
-      setPreview(null);
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function tidyNow() {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const r = await memoryApi.tidyNow();
-      if (!r) setNotice({ ok: false, text: "记忆接口不可用（需重启应用）" });
-      else if (r.skipped) setNotice({ ok: false, text: `未执行：${r.skipped}` });
-      else if (!r.ok) setNotice({ ok: false, text: `整理失败：${r.error || "未知错误"}` });
-      else setNotice({ ok: true, text: `整理完成（应用 ${r.ops ?? 0} 条操作）。` });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function doReset() {
-    setBusy(true);
-    try {
-      await memoryApi.reset();
-      setResetArmed(false);
-      setNotice({ ok: true, text: "记忆已清空并重建脚手架（日记与卡片不受影响）。" });
-      await refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const bf = status?.backfill;
-  return (
-    <SettingsSection id="sec-memory" title="用户记忆（AI 自动维护）">
-      <p className="form-hint">
-        软件把你的日记自动整理成一份本地记忆文件，将来制卡时为「应用类卡片」提供你真实经历过的情境。
-        会发送什么：日记新增/改动片段；何时发送：日记变更防抖后与启动补跑；发到哪里：你自己配置的 AI 模型；
-        不会做什么：不上传遥测、不写卡片正文、不参与复习调度。文件纯本地保存，可随时用编辑器查看修改，可随时关闭。
-      </p>
-      {status && (
-        <>
-          <div className="settings-row">
-            <span>用户记忆</span>
-            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="用户记忆开关">
-              <button className={status.enabled ? "active" : ""} onClick={() => toggle(true)}>开</button>
-              <button className={!status.enabled ? "active" : ""} onClick={() => toggle(false)}>关</button>
-            </div>
-          </div>
-          <div className="settings-row">
-            <span>文件位置</span>
-            <span className="mono fs-meta">{status.memoryDir}</span>
-            <button className="btn-outline btn-sm" onClick={() => void memoryApi.openFolder()}>打开文件夹</button>
-            <button className="btn-outline btn-sm" onClick={() => void memoryApi.openFile("core.md")}>打开 core.md</button>
-          </div>
-          <div className="settings-row">
-            <span>立即整理</span>
-            <button className="btn btn-secondary btn-sm" disabled={busy || !status.enabled || status.pending.entryCount === 0} onClick={() => void tidyNow()}>
-              立即整理（待处理 {status.pending.entryCount} 条）
-            </button>
-            {!status.enabled && <span className="form-hint">开关关闭期间不整理</span>}
-            {status.enabled && status.pending.entryCount === 0 && <span className="form-hint">没有未整理的日记条目</span>}
-          </div>
-          <div className="settings-row">
-            <span>记忆用量</span>
-            <span className="mono fs-meta">
-              core {status.usage.core.chars} 字 / 目录 {status.usage.index.chars} 字 / 主题文件 {status.usage.topics.length} 个 · 合计 ≈ {status.usage.totals.tokens} token
-            </span>
-          </div>
-          <div className="settings-row">
-            <span className="settings-row-label">
-              注入预算
-              <SettingsInfo label="注入预算">制卡时单次注入记忆的字数上限；core/目录/主题按比例分配。</SettingsInfo>
-            </span>
-            <input
-              className="mono input-num input-num-md"
-              type="number"
-              min={200}
-              max={20000}
-              step={200}
-              value={injectBudget ?? 4400}
-              onChange={(e) => void changeInjectBudget(Number(e.target.value))}
-            />
-          </div>
-          {bf?.running && (
-            <div className="settings-row">
-              <span>补处理：已整理 {bf.done}/{bf.total || "?"} 条</span>
-              <button className="btn btn-secondary btn-sm" onClick={() => void memoryApi.backfillCancel()}>中止</button>
-            </div>
-          )}
-          <div className="settings-row">
-            <span>重置记忆</span>
-            {!resetArmed ? (
-              <button className="btn btn-danger-outline btn-sm" onClick={() => setResetArmed(true)}>清空记忆文件…</button>
-            ) : (
-              <>
-                {/* 不可逆删除：瑞士风要求破坏性操作用 error 填充，而不是把全屏唯一
-                    的高饱和焦点色（accent）用在最危险的动作上；确认面板出现时焦点落「取消」（D50 先例，D114 §10） */}
-                <button className="btn btn-danger btn-sm" disabled={busy} onClick={() => void doReset()}>确认清空</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setResetArmed(false)} autoFocus>取消</button>
-              </>
-            )}
-          </div>
-          {resetArmed && (
-            <p className="form-hint">将删除 memory/ 下全部记忆文件并重建空脚手架。只删除记忆，不影响日记与卡片；开关状态保留。</p>
-          )}
-          {preview && (
-            <div className="restore-confirm">
-              <p className="restore-confirm-title">补处理预估</p>
-              <p className="form-hint">
-                待整理日记 {preview.entryCount} 条{preview.truncated ? "（至多统计 1000 条）" : ""}，预计 {preview.batchCount} 批 / {preview.estCalls} 次 AI 调用，
-                约 {preview.estTokens} token。按时间正序分批整理（早期记忆优先），每批完成即推进进度，可随时中止、退出不丢进度。
-              </p>
-              <div className="settings-row">
-                <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void startBackfill()}>开始补处理</button>
-                <button className="btn btn-secondary btn-sm" onClick={() => setPreview(null)} autoFocus>暂不</button>
-              </div>
-            </div>
-          )}
-          {status.lastError && <p className="ai-test-fail">上次整理出错：{status.lastError}</p>}
-          {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
-        </>
-      )}
-
-      {introOpen && (
-        <div className="restore-confirm">
-          <p className="restore-confirm-title">开启用户记忆前请了解</p>
-          <p className="form-hint">
-            ① 发送什么：日记中新增/改动的片段会发送给你配置的 AI 模型，由它整理成记忆条目；
-            ② 何时发送：日记变更防抖后自动整理，以及应用启动时补跑；③ 发到哪里：仅你自己在「AI 服务」里配置的模型，
-            软件不上传遥测；④ 记忆文件在 <span className="mono">{status?.memoryDir ?? "&lt;userData&gt;/memory/"}</span>，
-            纯本地保存，可随时用外部编辑器查看修改，可随时关闭（关闭不删文件）。
-          </p>
-          <div className="settings-row">
-            <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => void confirmIntro()}>已知悉，开启</button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setIntroOpen(false)} autoFocus>取消</button>
-          </div>
-        </div>
-      )}
-    </SettingsSection>
-  );
-}
+// ---------- 用户记忆（v45，M14-UM1，D39 / §6.7）----------
+// v48.114（D159）：用户记忆功能暂时移除——MemorySection（sec-memory）整体摘除，代码存于 git 历史与
+// §6.7 冻结契约（重实装时按契约恢复区块：总开关/文件位置/立即整理/注入预算/补处理/重置记忆/一次性说明）。
 
 // FSRS 参数优化（v12）：从复习记录训练个性化权重（fsrs-rs-nodejs），应用后调度即刻生效
 function FSRSSection() {
@@ -1861,11 +1649,15 @@ function ReaderSection() {
       </div>
 
       <h4>摘录卡编辑器</h4>
-      {/* D95 §E：摘录卡编辑器下方的富文本工具栏开关（关＝整行不渲染，markdown 语法输入不受影响） */}
+      {/* D95 §E：编辑器富文本工具栏开关（v48.114 / D160 全局化：MarkdownEditor 组件内读键 ⇒ 全部带工具条的
+          编辑宿主一并生效——摘录卡、书架粘贴导入等；关＝整行不渲染，markdown 语法输入不受影响） */}
       <div className="settings-row">
         <span className="settings-row-label">
-          摘录卡编辑工具栏
-          <SettingsInfo label="摘录卡编辑工具栏">编辑时选中文字即可用工具条加粗/标题/列表/公式等；关闭后仍可用 markdown 语法输入与快捷键。</SettingsInfo>
+          编辑器富文本工具栏
+          <SettingsInfo label="编辑器富文本工具栏">
+            全局生效：摘录卡、书架「添加书籍」粘贴导入等所有 Markdown 编辑面的底部工具条。
+            编辑时选中文字即可加粗/标题/列表/公式等；关闭后仍可用 markdown 语法输入与快捷键。
+          </SettingsInfo>
         </span>
         <label className="widget-toggle-main">
           <input
@@ -2559,7 +2351,9 @@ function ShortcutsSection() {
   );
 }
 
-// ---------- v36（M8-A，§5.4 / D34）：全局快捷键组（快速记录 / 添加学习材料）+ 随系统启动 ----------
+// ---------- v36（M8-A，§5.4 / D34）：全局快捷键组 + 随系统启动 ----------
+// v48.114（D159）：快速记录行与「失焦自动隐藏」子行随功能暂时移除（配置形状 quickCapture 字段保留，
+// 主进程 readShortcutConfig 闸下强制关闭）；「添加学习材料」「制卡台」两行不受影响。
 // 三条纪律：① 注册失败必须可见（`globalShortcut.register` 被占用时返回 false，静默失效最伤用户）；
 // ② 键位候选要与应用内键位（CommandRegistry）及另一全局键互不冲突——全局键会在**系统层**吞掉按键，
 //    否则「设置里看着没问题、应用内动作却静默失效」；
@@ -2701,7 +2495,6 @@ function GlobalShortcutsBlock() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [capturing]);
 
-  const capture = shortcutStateLabel(status?.quickCapture);
   const add = shortcutStateLabel(status?.addMaterial);
   const wbs = shortcutStateLabel(status?.workbench);
 
@@ -2747,33 +2540,7 @@ function GlobalShortcutsBlock() {
       </h4>
 
       <div className="kb-group">
-        <div className="kb-row">
-          <label className="kb-row-title gs-check">
-            <input
-              type="checkbox"
-              checked={cfg.quickCapture.enabled}
-              onChange={(e) =>
-                void persist({ ...cfg, quickCapture: { ...cfg.quickCapture, enabled: e.target.checked } })
-              }
-            />
-            快速记录（随想随记，弹出小窗）
-          </label>
-          {conflict?.target === "quickCapture" && <span className="kb-conflict">{conflict.message}</span>}
-          {renderKeyButton("quickCapture", cfg.quickCapture.enabled)}
-          <span className={`gs-state mono${capture.cls}`}>{capture.text}</span>
-        </div>
-
-        <label className="gs-check gs-check-sub">
-          <input
-            type="checkbox"
-            checked={cfg.quickCapture.hideOnBlur}
-            onChange={(e) =>
-              void persist({ ...cfg, quickCapture: { ...cfg.quickCapture, hideOnBlur: e.target.checked } })
-            }
-          />
-          失焦时自动隐藏窗口
-          <SettingsInfo label="失焦时自动隐藏">内容已即时保存；不勾选则需按 Esc 关闭。</SettingsInfo>
-        </label>
+        {/* v48.114（D159）：快速记录行与「失焦自动隐藏」子行随功能暂时移除（配置字段与主进程闸保留，重实装时回插） */}
 
         <div className="kb-row">
           <label className="kb-row-title gs-check">
@@ -2821,9 +2588,7 @@ function GlobalShortcutsBlock() {
       <TrayRow />
 
       <div className="settings-row settings-block">
-        <button className="btn btn-outline btn-sm" onClick={() => void shortcutsApi.toggleCapture()}>
-          试一下快速记录
-        </button>
+        {/* v48.114（D159）：「试一下快速记录」随功能暂时移除（shortcutsApi.toggleCapture 保留在 lib/journal.ts） */}
         <button className="btn btn-outline btn-sm" onClick={() => void window.windowAPI?.workbench?.("toggle")}>
           试一下制卡台窗口
         </button>
@@ -3210,7 +2975,7 @@ export default function SettingsPanel({
             {/* 智能 */}
             <AISection />
             <DictSection />
-            <MemorySection />
+            {/* v48.114（D159）：<MemorySection />（sec-memory）随用户记忆功能暂时移除，代码保留待重实装 */}
 
             {/* 数据与效率 */}
             <BackupSection />

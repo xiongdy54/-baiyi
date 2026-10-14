@@ -6,7 +6,6 @@ import Reader from "./components/Reader";
 import ExtractReviewView from "./components/ExtractReviewView";
 import ReviewView from "./components/ReviewView";
 import CardBrowser from "./components/CardBrowser";
-import JournalView from "./components/JournalView";
 import AddBookModal from "./components/AddBookModal";
 import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
 import Dashboard from "./components/dashboard/Dashboard";
@@ -18,9 +17,9 @@ import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
 import { commandRegistry } from "./lib/commands";
 import { libraryApi, type DocPayload } from "./lib/library";
-import { installJournalBridge, shortcutsApi } from "./lib/journal";
-import { installInsightBridge } from "./lib/insight";
-import { installMemoryBridge } from "./lib/memory";
+// v48.114（D159）：日记/洞察/记忆三功能暂时移除（代码保留）——仅保留 shortcutsApi
+//（「添加学习材料」全局快捷键的就地弹模态监听仍在用，见 onOpenAddMaterial）。
+import { shortcutsApi } from "./lib/journal";
 import { installMindmapBridge, mindmapApi } from "./lib/mindmap";
 import { installActivityStore, seedFromRuns } from "./lib/activity";
 import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
@@ -79,14 +78,15 @@ type View =
   | { name: "extractSession"; bookItemIds: string[]; title: string; limits?: Record<string, number> | null; scopeTags?: string[]; scopeKpIds?: string[] }
   | { name: "review"; bookItemIds?: string[]; title?: string; limits?: Record<string, number> | null; scopeTags?: string[]; scopeKpIds?: string[] }
   | { name: "browse"; /** v48.47（D87）：锚点筛选（来自浮窗「已制卡 N 张」点击） */ anchorExtractId?: string | null }
-  | { name: "journal" }
+  // v48.114（D159）：journal（日记）视图随功能暂时移除（代码保留，重实装时按 §6.5 冻结契约回插）
   // v48.81（D125）：学习者模型「推荐」页签（面板模块名仍为「下一步」）——顶栏第 4 位；关闭学习者模型时页签收拢消失
   | { name: "next" }
   | { name: "stats" };
 
 // D120-R2（MOTION-DESIGN-SPEC §5.1）：页序表——顶栏签从左至右的视觉序，与下方 nav 数组同序（不得另造）；
-// v48.81（D125）起第 4 位为「推荐」页签（仅在学习者模型开启时在场，关闭后其余六签页序不变）；
+// v48.81（D125）起第 4 位为「推荐」页签（仅在学习者模型开启时在场，关闭后其余五签页序不变）；
 // queue 与 extractSession 同席（顶栏同钮高亮）⇒ 互切 dir=0；reader 为深度视图（+∞，不列席，见 viewDirOf 特则）。
+// v48.114（D159）：journal（日记）随功能暂时移除退出页序表（stats 6→5；重实装时回插）。
 const VIEW_ORDER: Record<View["name"], number> = {
   shelf: 0,
   queue: 1,
@@ -94,8 +94,7 @@ const VIEW_ORDER: Record<View["name"], number> = {
   review: 2,
   next: 3,
   browse: 4,
-  journal: 5,
-  stats: 6,
+  stats: 5,
   reader: Number.POSITIVE_INFINITY
 };
 
@@ -111,13 +110,13 @@ function viewDirOf(cur: View, next: View): "fwd" | "bwd" | "" {
   return d === 0 ? "" : d > 0 ? "fwd" : "bwd";
 }
 
-// 顶栏静态六签（v12.1 文字主导航）。v48.81（D125）：「推荐」页签按总开关插在复习与卡片之间（见渲染处），不入本表。
+// 顶栏静态五签（v12.1 文字主导航）。v48.81（D125）：「推荐」页签按总开关插在复习与卡片之间（见渲染处），不入本表。
+// v48.114（D159）：「日记」页签随功能暂时移除（JournalView 代码保留，重实装时按 §6.5 回插）。
 const TOP_NAV = [
   { key: "shelf", label: "书架", match: (n: string) => n === "shelf" },
   { key: "queue", label: "摘录", match: (n: string) => n === "queue" || n === "extractSession" },
   { key: "review", label: "复习", match: (n: string) => n === "review" },
   { key: "browse", label: "卡片", match: (n: string) => n === "browse" },
-  { key: "journal", label: "日记", match: (n: string) => n === "journal" },
   { key: "stats", label: "数据", match: (n: string) => n === "stats" }
 ] as const;
 
@@ -217,13 +216,9 @@ export default function App() {
     commandRegistry.install();
   }, []);
 
-  // v36（M8-A）：日记事件桥（主进程写入推送 → EventBus）+ 全局快捷键「添加学习材料」的就地弹模态
-  // v40（M8-B）：洞察事件桥（主进程洞察运行/反馈推送 → EventBus）
-  // v45（M14-UM1）：记忆事件桥（主进程整理/补处理进度推送 → 设置页记忆区）
+  // v48.114（D159）：日记/洞察/记忆三桥随功能暂时移除（installJournalBridge / installInsightBridge /
+  // installMemoryBridge 调用摘除，lib 内函数保留）；「添加学习材料」全局快捷键的就地弹模态监听不受影响。
   useEffect(() => {
-    installJournalBridge();
-    installInsightBridge();
-    installMemoryBridge();
     installMindmapBridge(); // v48.9：导图生成进度桥（批3 遗漏——进度曾永远停在初始值）
     // v48.13（P2）：导图广播 → 全局活动状态（右下角指示器的唯一数据源；与所在界面无关）
     installActivityStore();
@@ -663,9 +658,6 @@ export default function App() {
         }}
       />
     );
-  } else if (view.name === "journal") {
-    topTitle = "日记";
-    mainContent = <JournalView onJumpToDoc={handleJumpToDoc} />;
   } else if (view.name === "next") {
     // v48.81（D125）：「推荐」页签页（顶栏标题沿模块全名「下一步」，同 卡片→卡片浏览 模式）。关闭学习者模型时页签收拢消失，本视图由 App 退回数据页
     topTitle = LS.panel.title;

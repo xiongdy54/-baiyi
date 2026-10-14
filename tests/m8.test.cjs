@@ -220,11 +220,13 @@ app.whenReady().then(async () => {
     check("两键相同 → 拆开（各自回落默认 + 标记冲突）", cfg.quickCapture.accelerator !== cfg.addMaterial.accelerator && cfg.addMaterial.conflictWithCapture === true, "不同 + 标记", `${cfg.quickCapture.accelerator} / ${cfg.addMaterial.accelerator} / ${cfg.addMaterial.conflictWithCapture}`);
 
     // 「失败必须可见」契约：注册成功则 registered=true；未注册则必须给出可读原因（绝不能静默失效）
+    // v48.114（D159）：快速记录经 CAPTURE_DISABLED 闸强制关闭——即使配置 enabled:true 也不注册且无错误
+    //（关闭态语义）；「失败必须可见」契约改在 addMaterial 一侧验（未注册必有可读原因）。
     setShortcuts({ quickCapture: { enabled: true, accelerator: "Ctrl+Alt+Space" }, addMaterial: { enabled: true, accelerator: "Ctrl+Alt+N" }, autoLaunch: false });
     const stOn = quickCapture.applyGlobalShortcuts();
     const visible = (s) => s.registered === true || (typeof s.error === "string" && s.error.length > 0);
-    check("注册结果自洽（未注册必有可读原因）", visible(stOn.quickCapture) && visible(stOn.addMaterial), true, JSON.stringify(stOn));
-    console.log(`  · 实测注册：快速记录=${stOn.quickCapture.registered}（${stOn.quickCapture.accelerator}） 添加材料=${stOn.addMaterial.registered}（${stOn.addMaterial.accelerator}）`);
+    check("注册结果自洽（D159 闸：快速记录强制关闭态；添加材料未注册必有可读原因）", stOn.quickCapture.enabled === false && stOn.quickCapture.registered === false && stOn.quickCapture.error === null && visible(stOn.addMaterial), true, JSON.stringify(stOn));
+    console.log(`  · 实测注册：快速记录=${stOn.quickCapture.registered}（闸下强制关闭） 添加材料=${stOn.addMaterial.registered}（${stOn.addMaterial.accelerator}）`);
 
     setShortcuts({ quickCapture: { enabled: false }, addMaterial: { enabled: false }, autoLaunch: false });
     const st = quickCapture.applyGlobalShortcuts();

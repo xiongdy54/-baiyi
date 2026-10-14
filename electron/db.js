@@ -4781,11 +4781,8 @@ function getStatsTimeline(opts) {
     [start0, to]
   )) events.push(statsTimeline.pointEvent("card", r.created_at));
 
-  // 日记（草稿不算，发送/保存后才是正式条目）
-  for (const r of queryAll(
-    "SELECT created_at FROM journal_entries WHERE is_deleted = 0 AND is_draft = 0 AND created_at >= ? AND created_at < ?",
-    [start0, to]
-  )) events.push(statsTimeline.pointEvent("journal", r.created_at));
+  // v48.114（D159）：日记（journal）维度随功能暂时移除——journal_entries 表与数据保留，
+  // 重实装时按原口径回插（SELECT created_at FROM journal_entries WHERE is_deleted=0 AND is_draft=0 ...）。
 
   const built = statsTimeline.buildTimeline(events, { dayStart0: start0, days });
   return { now, cutoffHour: getCutoffHour(), ...built };

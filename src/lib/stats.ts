@@ -52,7 +52,8 @@ export interface StatsOverview {
 }
 
 // ───────────── 一日时间轴（stats:timeline） ─────────────
-export type TimelineKind = "read" | "extract" | "review" | "card" | "journal";
+// v48.114（D159）：journal（日记）维度随功能暂时移除（表与数据保留，重实装时回插）
+export type TimelineKind = "read" | "extract" | "review" | "card";
 
 export interface TimelineBlock {
   kind: TimelineKind;
@@ -88,7 +89,7 @@ export interface StatsTimeline {
   days: TimelineDay[];
 }
 
-export const TIMELINE_KINDS: TimelineKind[] = ["read", "extract", "review", "card", "journal"];
+export const TIMELINE_KINDS: TimelineKind[] = ["read", "extract", "review", "card"];
 
 export const statsApi = {
   async overview(): Promise<StatsOverview | null> {

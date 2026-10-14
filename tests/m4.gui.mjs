@@ -421,9 +421,10 @@ await evalJS(`(() => { const nav = [...document.querySelectorAll('.settings-nav 
 await sleep(400);
 // v48.70（D114）：「全局快捷键」并入 sec-shortcuts（子块根保留 id sec-global），.kb-row 计数作用域断言。
 // 行数随决策演进：应用内 14→17（D121 +辨析 / D130 +上一页·下一页）；全局区 3→5（新增「随系统启动」「
-// 关闭窗口收进托盘」两行，复用 kb-row 样式）→ 现 17 应用内 + 5 全局区 = 22。
+// 关闭窗口收进托盘」两行，复用 kb-row 样式）→ 22；v48.114（D159）快速记录行随功能暂时移除 → 21
+//（17 应用内 + 4 全局区：添加材料 / 制卡台 / 随系统启动 / 收进托盘）。
 const kbRows = await evalJS(`document.querySelectorAll('#sec-shortcuts .kb-row').length`);
-check("快捷键区块 22 行（17 应用内 + 5 全局区）", kbRows === 22, kbRows);
+check("快捷键区块 21 行（17 应用内 + 4 全局区）", kbRows === 21, kbRows);
 
 // 捕获：把「评分 Good」改为 8
 const captureGood = parseState(await evalJS(`(async () => {
