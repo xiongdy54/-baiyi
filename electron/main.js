@@ -1361,6 +1361,16 @@ ipcMain.handle("journal:flush", () => quickCapture.flushJournal());
 
 // ---------- v40（K1，D37 / §4.2-23）：知识地基 knowledge:*（KnowledgeBase 唯一读写面） ----------
 ipcMain.handle("knowledge:listPoints", (_e, filter) => dbModule.listKnowledgePoints(filter || {}));
+// D158：只读——把若干知识点 id 展开为归并族并集（合同 §6.8-5：匹配集 = 所选知识点的归并族）
+ipcMain.handle("knowledge:resolveFamilies", (_e, ids) => {
+  const list = Array.isArray(ids) ? ids.filter((x) => typeof x === "string" && x !== "") : [];
+  const out = new Set(list);
+  for (const id of list) {
+    const fam = dbModule.resolveKpFamily(id);
+    for (const x of fam ?? []) out.add(String(x));
+  }
+  return [...out];
+});
 ipcMain.handle("knowledge:getPoint", (_e, id) => dbModule.getKnowledgePoint(String(id)));
 ipcMain.handle("knowledge:createPoint", (_e, payload) => dbModule.createKnowledgePoint(payload || {}));
 ipcMain.handle("knowledge:updatePoint", (_e, id, patch) => dbModule.updateKnowledgePoint(String(id), patch || {}));

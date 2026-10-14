@@ -356,9 +356,14 @@ try {
   const fr = JSON.parse(followedRow || "{}");
   check("继承型摘录实时跟随到 30（priority_source=book）", fr.p === 30 && fr.src === "book", followedRow);
 
-  // 12) 筛选牌组（§6.8-5）：保存当前筛选 → 列表可见 → 集中复习路由 → 删除
+  // 12) 筛选方案（§6.8-5，D157）：保存当前筛选 → 列表可见 → 开始复习路由 → 删除
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
   await wait(1600);
+  // D157：弹层 → 创建面板（两步打开）
+  await cdp.eval(`(() => { document.querySelector("[data-scheme-toggle]")?.click(); return true; })()`);
+  await wait(400);
+  await cdp.eval(`(() => { document.querySelector("[data-scheme-new]")?.click(); return true; })()`);
+  await wait(400);
   await cdp.eval(`(() => {
     const inp = document.querySelector("[data-deck-name]");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -367,7 +372,7 @@ try {
     return true;
   })()`);
   await wait(500);
-  // 上限覆写（§6.8-5）：摘录/日 = 1（0 默认 = 继承全局）
+  // 每日上限（§6.8-5）：摘录/日 = 1（留空 = 继承全局）
   await cdp.eval(`(() => {
     const inp = document.querySelector("[data-deck-cap-extracts]");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -377,28 +382,32 @@ try {
   })()`);
   await wait(400);
   const savedDeck = await cdp.eval(`(() => { document.querySelector("[data-deck-save]")?.click(); return true; })()`);
-  check("筛选牌组：保存按钮在位可点", savedDeck === true, savedDeck);
+  check("筛选方案：保存按钮在位可点", savedDeck === true, savedDeck);
   await wait(1500);
   const deckStored = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "reviewScopes") || []))()`);
-  check("筛选牌组：已落盘 settings.app.reviewScopes", String(deckStored).includes("GUI 牌组"), String(deckStored).slice(0, 160));
-  check("筛选牌组：上限覆写随牌组落盘（摘录/日=1）", String(deckStored).includes('"extractReviewsPerDay":1'), String(deckStored).slice(0, 200));
+  check("筛选方案：已落盘 settings.app.reviewScopes", String(deckStored).includes("GUI 牌组"), String(deckStored).slice(0, 160));
+  check("筛选方案：每日上限随方案落盘（摘录/日=1）", String(deckStored).includes('"extractReviewsPerDay":1'), String(deckStored).slice(0, 200));
   const cappedSession = await cdp.eval(`(async () => { const q = await window.sessionAPI.queue(undefined, { scope: { kinds: ["extract"], limits: { extractReviewsPerDay: 1 } } }); return JSON.stringify({ lim: q.limits.extractReviewsPerDay, n: q.extracts.length }); })()`);
   const cs = JSON.parse(cappedSession || "{}");
-  check("筛选牌组：会话按覆写上限截断（摘录/日=1 ⇒ 至多 1 条）", cs.lim === 1 && Number(cs.n) <= 1, cappedSession);
+  check("筛选方案：会话按覆写上限截断（摘录/日=1 ⇒ 至多 1 条）", cs.lim === 1 && Number(cs.n) <= 1, cappedSession);
+  // D157：保存即套用 → 弹层自动打开，新方案行在场
   const deckChip = await cdp.eval(`document.querySelector("[data-deck-item]")?.textContent || ""`);
-  check("筛选牌组：列表出现该牌组", String(deckChip).includes("GUI 牌组"), deckChip);
+  check("筛选方案：弹层出现该方案", String(deckChip).includes("GUI 牌组"), deckChip);
   const startBtn = await cdp.eval(`(() => { const b = document.querySelector("[data-deck-start]"); b?.click(); return !!b; })()`);
-  check("筛选牌组：「集中复习」按钮在位可点", startBtn === true, startBtn);
+  check("筛选方案：「开始复习」按钮在位可点", startBtn === true, startBtn);
   await wait(1800);
   const inSession = await cdp.eval(`!!document.querySelector(".review-wrap") || !!document.querySelector(".extract-page")`);
-  check("筛选牌组：集中复习已进入会话页（复习/摘录）", inSession === true, inSession);
+  check("筛选方案：开始复习已进入会话页（复习/摘录）", inSession === true, inSession);
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
   await wait(1500);
+  // D157：页面重挂载后弹层是关闭的——先点开再删
+  await cdp.eval(`(() => { document.querySelector("[data-scheme-toggle]")?.click(); return true; })()`);
+  await wait(400);
   const delBtn = await cdp.eval(`(() => { const b = document.querySelector("[data-deck-delete]"); b?.click(); return !!b; })()`);
-  check("筛选牌组：删除按钮在位可点", delBtn === true, delBtn);
+  check("筛选方案：删除按钮在位可点", delBtn === true, delBtn);
   await wait(1500);
   const afterDel = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "reviewScopes") || []))()`);
-  check("筛选牌组：删除后已从设置里移除", !String(afterDel).includes("GUI 牌组"), String(afterDel).slice(0, 160));
+  check("筛选方案：删除后已从设置里移除", !String(afterDel).includes("GUI 牌组"), String(afterDel).slice(0, 160));
 
   // 13) §H.1 跳转原文不写阅读进度（差分实测：往返 progress_json 逐字节相等）
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);

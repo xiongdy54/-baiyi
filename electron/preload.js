@@ -324,6 +324,8 @@ contextBridge.exposeInMainWorld("shortcutsAPI", {
 // v40（K1，D37 / §4.2-23）：知识地基——KP / 关系 / 提案 / 外部 ID（KnowledgeBase 渲染层只持 API）
 contextBridge.exposeInMainWorld("knowledgeAPI", {
   listPoints: (filter) => ipcRenderer.invoke("knowledge:listPoints", filter || {}),
+  // D158：只读——所选知识点归并族的并集（含所选 id 本身）
+  resolveFamilies: (ids) => ipcRenderer.invoke("knowledge:resolveFamilies", ids),
   getPoint: (id) => ipcRenderer.invoke("knowledge:getPoint", id),
   createPoint: (payload) => ipcRenderer.invoke("knowledge:createPoint", payload),
   updatePoint: (id, patch) => ipcRenderer.invoke("knowledge:updatePoint", id, patch),

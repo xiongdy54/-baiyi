@@ -1945,6 +1945,14 @@ body.theme-dark .modal-panel {
   height: 2px;
   background: var(--accent);
 }
+/* v48.111（D156）：页签计数（卡片浏览器预设页签）——无括号，次级档 + tabular-nums */
+.seg-tabs .tab-cnt {
+  margin-left: 6px;
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-helper);
+  font-variant-numeric: tabular-nums;
+}
 
 /* 列表项选中：accent 8% 底 + 左缘 2px accent 条 */
 .skin-list { display: flex; flex-direction: column; }
@@ -4206,6 +4214,101 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .cb-deck-pop-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-secondary); padding: 2px 0; cursor: pointer; }
 .cb-deck-pop-list { display: flex; flex-direction: column; max-height: 220px; overflow: auto; min-width: 240px; }
 .cb-deck-pop .cb-search { min-width: 200px; }
+
+/* ---------- D157：筛选方案（原「筛选牌组」）——工具行入口 + 列表弹层 + 创建面板 ---------- */
+.cb-scheme {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;              /* 推到工具行最右，与筛选控件形成独立分组 */
+}
+.cb-scheme-btn { display: inline-flex; align-items: center; gap: var(--sp-1); max-width: 320px; }
+.cb-scheme-btn .n { color: var(--text-helper); font-variant-numeric: tabular-nums; font-weight: 400; }
+.cb-scheme-btn-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+/* 箭头复用全站 .dd-caret，不另写颜色/字号；仅「追加条件」开关需要折叠态旋转 */
+.cb-scheme-disclosure { transform: rotate(-90deg); }
+.cb-scheme-disclosure.is-open { transform: none; }
+.cb-scheme-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+
+.cb-scheme-pop {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  z-index: var(--z-dropdown);     /* 与下拉菜单同层；低于吸顶头带 --z-sticky(200)，两者无重叠区域 */
+  width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  background: var(--paper);
+  border: 1px solid var(--border-strong);
+  font-size: var(--fs-secondary);
+  color: var(--text-primary);
+}
+.cb-scheme-head { display: flex; flex-direction: column; gap: var(--sp-1); }
+.cb-scheme-title { font-size: var(--fs-body); font-weight: 600; }
+.cb-scheme-empty { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2) 0; }
+.cb-scheme-empty-title { font-weight: 600; }
+
+.cb-scheme-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  max-height: 320px; overflow: auto;
+}
+.cb-scheme-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+}
+.cb-scheme-row:hover { background: var(--grey-1); }
+.cb-scheme-row.is-active { background: var(--accent-soft); }
+.cb-scheme-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cb-scheme-name {
+  font-size: var(--fs-secondary); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cb-scheme-flag { margin-left: var(--sp-2); color: var(--accent); font-size: var(--fs-meta); font-weight: 600; }
+.cb-scheme-sum {
+  font-size: var(--fs-meta); color: var(--text-helper);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cb-scheme-actions { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.cb-scheme-del { margin-left: var(--sp-2); color: var(--text-helper); } /* 与前两个按钮拉开 16px（8 gap + 8 margin） */
+.cb-scheme-del:hover { color: var(--error); }
+.cb-scheme-foot { border-top: 1px solid var(--border-subtle); padding-top: var(--sp-3); }
+
+.cb-scheme-editor {
+  display: flex; flex-direction: column; gap: var(--sp-4);
+  padding: var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--paper);
+  font-size: var(--fs-secondary);
+}
+.cb-scheme-editor-title { font-size: var(--fs-body); font-weight: 600; }
+.cb-scheme-field { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+.cb-scheme-label { line-height: 32px; color: var(--text-secondary); }
+.cb-scheme-value { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.cb-scheme-name-input { max-width: 360px; }
+.cb-scheme-cond { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-height: 24px; }
+.cb-scheme-cond-key { color: var(--text-helper); font-size: var(--fs-meta); min-width: 3em; }
+.cb-scheme-builder { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.cb-scheme-caps { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
+.cb-scheme-cap { display: inline-flex; align-items: center; gap: var(--sp-2); font-variant-numeric: tabular-nums; }
+.cb-scheme-cap .input-num { width: 88px; }
+.cb-scheme-editor-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .cb-scheme-pop { animation: cb-scheme-fade var(--dur-enter) var(--ease-enter); }
+  @keyframes cb-scheme-fade { from { opacity: 0; } to { opacity: 1; } }
+}
 .manual-region-preview { margin: 0 0 var(--sp-3); }
 .form-check { margin-bottom: var(--sp-4); }
 
@@ -5479,9 +5582,11 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   margin: 0 var(--sp-4);
   border-top: 1px solid var(--border-subtle);
 }
+/* v48.111（D156）：分表网格模板——旧版只有 8 条轨道，闪卡行 9 格（来源格溢出到行二：
+   「选/来源」表头换行、书名掉行、题面挤进 44px 轨皆源于此），摘录行 7 格同样错位。
+   题面列 minmax(0,1fr) 占主、来源列 120–200px 封顶；行内全格 nowrap+ellipsis 保单行定高（虚拟滚动前提） */
 .cb-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px 56px 72px 40px 40px 44px minmax(72px, 180px);
   gap: var(--sp-2);
   align-items: center;
   padding: var(--sp-2) 0;
@@ -5490,6 +5595,21 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   color: var(--text-secondary);
   cursor: pointer;
 }
+.cb-table .cb-row {
+  grid-template-columns: 28px minmax(0, 1fr) 48px 72px 64px 36px 36px 40px minmax(120px, 200px);
+}
+.cb-table[data-extract-table] .cb-row {
+  grid-template-columns: 28px minmax(0, 1fr) 64px 56px 64px minmax(120px, 200px) 88px;
+}
+.cb-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 摘录表操作格内是按钮，不许被裁；空摘录提示行（唯一格）跨全宽 */
+.cb-row > .cb-act { overflow: visible; }
+.cb-row > .cb-front:only-child { grid-column: 1 / -1; }
 .cb-row:hover { background: var(--grey-1); }
 /* 表头：规范 Meta 档 + 600 + --grey-1 底（此前只有颜色和字距，字重与底色缺失，
    与数据行几乎分不开） */
@@ -7503,16 +7623,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 .cb-pick input { margin: 0; }
 .cb-row.is-selected { border-color: var(--accent); }
-.cb-batch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  align-items: center;
-  padding: var(--sp-2) var(--sp-4);
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: var(--fs-meta);
-  color: var(--text-helper);
-}
+/* D157：原 .cb-batch（牌组行/条件构建器行容器）随两行常驻条退役删除 */
 
 /* ---------- 书级优先级菜单（v48.22 / D58 §6.8-2） ---------- */
 .act.act-text {
@@ -7530,9 +7641,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   line-height: 1.5;
   border-top: 1px solid var(--border-subtle);
 }
-.cb-deck-name { max-width: 220px; }
-.cb-deck { display: inline-flex; gap: var(--sp-1); align-items: center; }
-.cb-deck .n { color: var(--text-helper); font-size: var(--fs-meta); }
+/* D157：原 .cb-deck-name / .cb-deck / .cb-deck .n 随牌组行退役删除 */
 .cb-find { max-width: 120px; }
 
 /* ---------- 卡片浏览页舞台语言（v48.40 / D80）：吸顶头带 + 一盒一功能 + 吸底批量栏 ---------- */
@@ -7553,21 +7662,25 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   font-size: var(--fs-meta);
   color: var(--text-helper);
 }
-/* 一盒一功能（D76 L1 语言）：border-strong 描边盒，40 高，盒内 8px */
+/* v48.111（D156）：描边盒退役——控件自有描边（dd-btn/btn/cb-search）承担可供性，
+   组间 16px 空距承担分组（Better Layout：space groups first），消除「方框套方框」 */
 .cb-cluster {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 40px;
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
 }
 .cb-cluster-grow { flex: 1; min-width: 220px; }
+/* 工具行内控件统一 32px 等高（此前 dd-btn ≈25px / seg-tabs-sm ≈26px / btn-sm·cb-search 32px 三种高度并存） */
+.cb-toolbar .dd-btn { height: 32px; }
+.cb-toolbar .seg-tabs-sm button {
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
 /* 吸底批量栏复用 .stage-bar 几何（72px / band-line 上缘 / padding 自带 16px）；
    页根无水平 padding ⇒ 抵消基线负边距（与 .extract-page .stage-bar 同法） */
 .cb-stage { margin-inline: 0; }
-.cb-stage .cb-cluster { flex-wrap: wrap; height: auto; min-height: 40px; padding: var(--sp-1) var(--sp-3); }
+.cb-stage .cb-cluster { flex-wrap: wrap; height: auto; }
 .cb-stage .bar-hint { white-space: nowrap; }
 .extract-detail-content {
   white-space: pre-wrap;

@@ -175,6 +175,8 @@ declare global {
   interface Window {
     knowledgeAPI?: {
       listPoints: (filter?: KnowledgePointFilter) => Promise<KnowledgePointListResult>;
+      /** D158：只读——所选知识点归并族的并集（含所选 id 本身） */
+      resolveFamilies: (ids: string[]) => Promise<string[]>;
       getPoint: (id: string) => Promise<KnowledgePoint | null>;
       createPoint: (payload: Partial<KnowledgePoint> & { canonicalLabel: string }) => Promise<KnowledgePoint>;
       updatePoint: (id: string, patch: Partial<KnowledgePoint>) => Promise<KnowledgePoint | null>;

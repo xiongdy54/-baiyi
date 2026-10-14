@@ -1025,6 +1025,10 @@ export interface BrowserMetaRow {
   reps: number;
   mem: 0 | 1;
   createdAt: number;
+  /** D158：卡片标签（无标签时省略）；仅供方案表格过滤 */
+  tags?: string[];
+  /** D158：卡片所挂知识点 id（未挂时省略）；仅供方案表格过滤 */
+  kpId?: string;
 }
 export interface BrowserBooksEntry { id: string; title: string }
 export interface BrowserMetaResult { fp: string; total: number; meta: BrowserMetaRow[]; books: BrowserBooksEntry[] }
