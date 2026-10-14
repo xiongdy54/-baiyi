@@ -188,7 +188,7 @@ try {
   check("计数为「4 本」且只有一个「本」字（用户实测的 2本本 缺陷）", /^4 本$/.test(r.count || ""), r.count);
   check("图注卡在位：书名常驻 + meta 含百分比与日期", !!r.capTitle && /%/.test(r.capMeta || "") && /-/.test(r.capMeta || ""), JSON.stringify(r));
   check("进度轨高 2px（§5.3 半档写法）", r.railH === "2px", r.railH);
-  check("封面保持 2:3 且直角", r.cardAspect === "2 / 3" && r.radius === "0px", JSON.stringify(r));
+  check("封面保持 2:3、直角（v48.115/D161 第三轮：圆角只属于文件夹夹体）", r.cardAspect === "2 / 3" && r.radius === "0px", JSON.stringify(r));
   check("卡面上不再有原生 <select>（旧版语言下拉）", r.nativeSelect === 0, r.nativeSelect);
   // v48.22（D58 §6.8-2）：书卡动作条新增「优先」（书级默认优先级 Dropdown）；v48.77（D121 ⑥，
   // 提交 1d0c070）：再补「作者」（library_items.author + library:setItemAuthor 通道）→ 4 枚 → 6 枚
@@ -593,26 +593,35 @@ try {
   r = JSON.parse(await page.eval(`
     ${PRELUDE}
     const f=window.__S.items().find(e=>e.querySelector('.f-face'));
+    const paper=f?.querySelector('.f-papers i')?.getBoundingClientRect();
+    const pocket=f?.querySelector('.f-front')?.getBoundingClientRect();
+    const face=f?.querySelector('.f-face');
     return JSON.stringify({
       folders: window.__S.folderCards().length,
       items: window.__S.items().length,
       count: window.__S.count(),
       renameInput: document.activeElement?.className,
       renameValue: document.activeElement?.value,
-      tab: f?.querySelector('.f-tab')?.textContent,
-      spines: f ? f.querySelectorAll('.f-spines i').length : 0,
-      sum: f?.querySelector('.f-sum')?.textContent.replace(/\\s+/g,' ').trim(),
-      roster: f ? f.querySelectorAll('.f-roster li').length : 0,
-      rosterOpacity: f ? getComputedStyle(f.querySelector('.f-roster')).opacity : null,
+      tabShape: !!f?.querySelector('.f-face > .f-tab') && !!f?.querySelector('.f-face > .f-back'),
+      papers: f ? f.querySelectorAll('.f-papers i').length : 0,
+      faceText: face ? face.textContent.replace(/\s+/g,'') : null,
+      faceImgs: face ? face.querySelectorAll('img').length : -1,
+      cardLabel: f?.querySelector('.book-card')?.getAttribute('aria-label'),
+      // 纸探出袋口的可见高度 与 伸进袋里的深度（「纸插在夹子里」的两条几何证据）
+      show: paper && pocket ? Math.round(pocket.top - paper.top) : null,
+      tuck: paper && pocket ? Math.round(paper.bottom - pocket.top) : null,
     });`));
   check("松手即成文件夹：顶层少一格、多一张文件夹卡",
     r.folders === 1 && r.items === 3 && /^2 本 · 1 个文件夹$/.test(r.count || ""), JSON.stringify(r));
-  check("合集面在场：FOLDER 标签页 + 2 条书脊 + 成员数与均值",
-    r.tab === "FOLDER" && r.spines === 2 && /2\s*本/.test(r.sum || "") && /均值/.test(r.sum || ""), JSON.stringify(r));
+  check("竖版文件夹图标在场：背板 + 外凸标签页 + 前袋 + 2 张白纸（一纸 = 一本书，v48.115/D161 第三轮）",
+    r.tabShape === true && r.papers === 2, JSON.stringify(r));
+  check("卡面零文字、无封面图（不显示书名/计数/均值）",
+    r.faceText === "" && r.faceImgs === 0, JSON.stringify({ text: r.faceText, imgs: r.faceImgs }));
+  check("aria-label 仍报成员数（卡面无文字不牺牲读屏）", /含 2 本/.test(r.cardLabel || ""), r.cardLabel);
+  check("纸自袋口探出 ≥24px、下段伸进袋里 ≥8px（插在夹子里的深度线索）",
+    (r.show ?? 0) >= 24 && (r.tuck ?? 0) >= 8, JSON.stringify({ show: r.show, tuck: r.tuck }));
   check("成组后立刻弹出就地命名输入框（不自动取名）",
     /cap-input/.test(r.renameInput || "") && /未命名/.test(r.renameValue || ""), JSON.stringify(r));
-  check("成员名册列出 2 本书、静止时 opacity=0（hover 才现）",
-    r.roster === 2 && r.rosterOpacity === "0", JSON.stringify(r));
 
   r = await J(`${PRELUDE}
     const i=document.activeElement;
@@ -680,9 +689,10 @@ try {
   r = await J(`${PRELUDE}
     const f=window.__S.folderCard();
     return JSON.stringify({folders: window.__S.folderCards().length,
-      sum: f?.querySelector('.f-sum')?.textContent.replace(/\\s+/g,' ').trim(), items: window.__S.items().length});`, "moved-out");
-  check("把书拖到「返回书架」= 移回书架，文件夹剩 1 本",
-    r.folders === 1 && /1\s*本/.test(r.sum || ""), JSON.stringify(r));
+      label: f?.querySelector('.book-card')?.getAttribute('aria-label'),
+      papers: f ? f.querySelectorAll('.f-papers i').length : 0, items: window.__S.items().length});`, "moved-out");
+  check("把书拖到「返回书架」= 移回书架，文件夹剩 1 本（一纸 = 一本书）",
+    r.folders === 1 && /含 1 本/.test(r.label || "") && r.papers === 1, JSON.stringify(r));
 
   await fire(`const f=window.__S.folderCard();
     f.querySelector('.card-acts [aria-haspopup]').click(); return 1;`);
@@ -720,10 +730,10 @@ try {
   r = await J(`${PRELUDE}
     const f=window.__S.folderCard();
     return JSON.stringify({title: f?.querySelector('.cap-title')?.textContent,
-      sum: f?.querySelector('.f-sum')?.textContent.replace(/\\s+/g,' ').trim(),
-      spines: f ? f.querySelectorAll('.f-spines i').length : 0, count: window.__S.count()});`, "single-folder");
-  check("单成员文件夹建好并可命名（书脊不铺满整张卡）",
-    r.title === "单本夹" && /1\s*本/.test(r.sum || "") && r.spines === 1, JSON.stringify(r));
+      label: f?.querySelector('.book-card')?.getAttribute('aria-label'),
+      papers: f ? f.querySelectorAll('.f-papers i').length : 0, count: window.__S.count()});`, "single-folder");
+  check("单成员文件夹建好并可命名（一张纸居中探出袋口，卡面零文字）",
+    r.title === "单本夹" && /含 1 本/.test(r.label || "") && r.papers === 1, JSON.stringify(r));
 
   console.log("\n[12] 持久化：settings.json 落 app.shelfOrder / shelfFolders，重启不丢");
   const ids = await page.eval(`${PRELUDE} return window.__S.ids()`);
@@ -766,17 +776,24 @@ try {
 
   console.log("\n[13] 全局纪律扫描：字号下限 / 圆角 / 硬编码焦点色");
   r = await J(`const small=[]; const rad=[];
+    // v48.115 / D161 第三轮圆角白名单：夹体三件 6px（表内缩略 3px）、纸片 ≤2px；书卡与书封缩略保持直角
+    const allow=(el,r)=>(
+      (r==='6px' && el.matches('.f-tab,.f-back,.f-front')) ||
+      (r==='3px' && el.matches('.thumb .f-tab,.thumb .f-back,.thumb .f-front')) ||
+      ((r==='2px'||r==='1px') && el.tagName==='I' && el.closest('.f-papers'))
+    );
     document.querySelectorAll('#root *').forEach(el=>{
       const cs=getComputedStyle(el);
       if (cs.display==='none' || cs.visibility==='hidden') return;
       const fs=parseFloat(cs.fontSize);
       if (fs && fs < 11) small.push((el.className||el.tagName)+'='+fs);
-      if (cs.borderTopLeftRadius!=='0px') rad.push((el.className||el.tagName)+'='+cs.borderTopLeftRadius);
+      const br=cs.borderTopLeftRadius;
+      if (br!=='0px' && !allow(el,br)) rad.push((el.className||el.tagName)+'='+br);
     });
     const shelf=document.querySelector('.bookshelf');
     return JSON.stringify({small, rad, container: getComputedStyle(shelf).containerType});`, "scan");
   check("书架里没有 < 11px 的文字", r.small.length === 0, JSON.stringify(r.small.slice(0, 6)));
-  check("书架里没有非 0 圆角", r.rad.length === 0, JSON.stringify(r.rad.slice(0, 6)));
+  check("书架里没有白名单外圆角（夹体 6px、缩略 3px、纸片 ≤2px；书卡直角，v48.115/D161 第三轮）", r.rad.length === 0, JSON.stringify(r.rad.slice(0, 6)));
   check("容器查询宿主在场（工具条逐级退让依赖它）", /inline-size/.test(r.container || ""), r.container);
 
   console.log("\n[14] 封面墙三条交互缺陷回归（v48.20 / D56）");

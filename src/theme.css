@@ -11,6 +11,9 @@
   --grey-2: #d4d4d2;
   --grey-3: #737373;
   --ink: #0a0a0a;
+  /* 文件夹夹体（v48.115 / D161 第三轮）：manila 双色，扁平无渐变无阴影 */
+  --folder-back: #d9c195;
+  --folder-front: #eddcba;
   /* 文字角色 */
   --text-primary: var(--ink);
   --text-secondary: #525252;
@@ -997,7 +1000,7 @@ body.has-skin .topbar { background: transparent; }
    操作只在 hover / 键盘焦点时压住封面底缘（旧版整块黑幕会把封面整块抹掉）。
    **不裁自己的浮层**（v48.20 / D56）：动作条菜单挂在卡内、按需向卡片外展开，
    `overflow: hidden` 会把菜单越界的那截直接切掉（实测 10 个选项全不可点）。
-   卡内需要裁的东西各自有裁剪（`.f-face` / `.f-roster` / `.zone-tip` / 封面图按框取景），
+   卡内需要裁的东西各自有裁剪（`.zone-tip` / 封面图按框取景），
    撤掉后实测无一处溢出。 */
 .book-card {
   position: relative;
@@ -1254,150 +1257,77 @@ body.has-skin .topbar { background: transparent; }
 .shelf-table tr.zone-group { background: var(--accent-soft); box-shadow: inset 0 calc(var(--sp-1) / 2) 0 var(--accent); }
 .shelf-table tr.is-dragging { background: var(--accent-soft); }
 
-/* ---------- 文件夹卡：识别度只靠形状（标签页 + 一排书脊 + 成员数），不引新色 ---------- */
-.f-face { position: absolute; inset: 0; background: var(--grey-1); overflow: hidden; }
+/* ---------- 文件夹卡（v48.115 / D161 第三轮）：竖版文件夹图标——
+   manila 双色夹体（背板 --folder-back 顶部 8% 起 + 左上外凸标签页 + 前袋 --folder-front 顶缘 32%），
+   白色素纸片一摞夹在前袋口（一张纸 = 一本书，≤3，不显示封面图），卡面零文字（无名册/计数/均值）。
+   hover / 键盘焦点：纸组上抬 stagger（transform，motion token）＝「略微抽出」。
+   圆角只给夹体三件（f-tab/f-back/f-front）——书卡与目录表缩略保持直角（第三轮用户裁定） ---------- */
+.f-face { position: absolute; inset: 0; }
+/* 标签页：背板左上外凸的同色块，下缘探进背板 1px 咬合无缝 */
 .f-tab {
   position: absolute;
-  top: 0;
+  z-index: 2; /* 高于纸组：纸的左段藏进标签页、右段探出背板上缘（横版参照的正宗构造） */
   left: 0;
-  width: calc(var(--sp-12) + var(--sp-2));
-  height: var(--sp-3);
-  background: var(--paper);
-  border: 1px solid var(--border-strong);
-  border-top: none;
-  display: flex;
-  align-items: center;
-  padding-left: var(--sp-2);
-  font-size: var(--fs-meta);
-  letter-spacing: 0.08em;
-  color: var(--text-helper);
+  top: 0;
+  width: 44%;
+  height: calc(8% + 1px);
+  background: var(--folder-back);
+  border-radius: 6px 6px 0 0;
 }
-.f-spines {
-  position: absolute;
-  left: var(--sp-4);
-  right: var(--sp-4);
-  top: calc(var(--sp-3) + var(--sp-4));
-  bottom: calc(var(--sp-12) + var(--sp-4));
-  display: flex;
-  justify-content: flex-start;
-  gap: var(--sp-1);
-}
-/* 单条封顶 56px 并左对齐：不封顶时"只有一个成员的文件夹"会画成一大块灰板，反而最不像书脊 */
-.f-spines i {
-  position: relative;
-  flex: 1 1 0;
-  min-width: 0;
-  max-width: calc(var(--sp-8) + var(--sp-6));
-  overflow: hidden;
-  background: var(--paper);
-  outline: 1px solid var(--border-subtle);
-}
-.f-spines i .cover-img,
-.f-spines i .f-mini-cover { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-.f-spines i.rest {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  max-width: none;
-  flex: 0 0 auto;
-  padding: 0 var(--sp-2);
-  background: var(--grey-2);
-  font-family: var(--font-mono);
-  font-size: var(--fs-meta);
-  font-weight: 600;
-  color: var(--text-primary);
-}
-.f-sum {
-  position: absolute;
-  left: var(--sp-4);
-  right: var(--sp-4);
-  bottom: var(--sp-3);
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-}
-.f-sum .n {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-title-l);
-  font-weight: 300;
-  letter-spacing: -0.02em;
-  line-height: 1;
-}
-.f-sum .u { font-size: var(--fs-meta); font-weight: 600; color: var(--text-helper); }
-.f-sum .avg {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-meta);
-  font-weight: 500;
-  color: var(--text-helper);
-}
-.f-roster {
+.f-back {
   position: absolute;
   left: 0;
   right: 0;
-  top: 0;
-  bottom: var(--sp-12);
-  padding: var(--sp-4);
-  background: var(--overlay-ink);
-  color: var(--overlay-text);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  opacity: 0;
-  overflow: hidden;
-  transition: opacity var(--dur) var(--ease);
+  top: 8%;
+  bottom: 0;
+  background: var(--folder-back);
+  border-radius: 6px;
 }
-.bookshelf:not(.is-hover-frozen) .book-card:hover .f-roster,
-.book-card:focus-visible .f-roster,
-.book-card:has(:focus-visible) .f-roster { opacity: 1; }
-.f-roster .rh {
-  font-size: var(--fs-meta);
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--overlay-helper);
-  margin-bottom: var(--sp-1);
-}
-.f-roster ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-.f-roster li { display: flex; gap: var(--sp-2); align-items: flex-start; font-size: var(--fs-secondary); line-height: 1.4; }
-.f-roster li .ix {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: var(--fs-meta);
-  color: var(--overlay-helper);
-  min-width: calc(var(--sp-1) * 4);
-  flex: none;
-}
-.f-roster li .tt {
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.f-roster .more { font-size: var(--fs-meta); color: var(--overlay-helper); margin-top: var(--sp-1); }
-.folder-empty {
+/* 白纸组：顶缘 4%（探到背板上缘之上、标签页右侧露出纸边），底缘锚在容器底（伸进前袋 4% 被遮隐），
+   顶缘按 96/86/76% 阶梯、侧缘逐级内收 2%——一摞尺寸不一的纸；z 序 背板0/纸组1/标签页与前袋2 */
+.f-papers {
   position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  padding: var(--sp-4);
-  color: var(--text-helper);
-  text-align: center;
+  z-index: 1;
+  left: 7%;
+  right: 7%;
+  top: 4%;
+  height: 32%;
 }
-.folder-empty .et { font-size: var(--fs-meta); font-weight: 500; line-height: 1.5; }
-
+.f-papers i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 96%;
+  background: var(--paper);
+  outline: 1px solid var(--border-subtle);
+  border-radius: 2px 2px 0 0;
+  transition: transform var(--dur-enter) var(--ease-enter);
+}
+.f-papers i:nth-child(2) { height: 86%; left: 2%; right: 2%; }
+.f-papers i:nth-child(3) { height: 76%; left: 4%; right: 4%; }
+/* hover / 键盘焦点：纸组上抬 10px（--shift-md + --shift-xs），按夹内位次 stagger 20ms——
+   「从夹子里略微抽出来」；只动 transform，降级环境整段不挂 */
+@media (prefers-reduced-motion: no-preference) {
+  .bookshelf:not(.is-hover-frozen) .book-card:hover .f-papers i,
+  .book-card:focus-visible .f-papers i,
+  .book-card:has(:focus-visible) .f-papers i {
+    transform: translateY(calc((var(--shift-md) + var(--shift-xs)) * -1));
+    transition-delay: calc(var(--ci, 0) * 20ms);
+  }
+}
+/* 前袋：manila 主色大面、零文字；袋口 1px 背板色细边＝「纸插进袋里」的那道边 */
+.f-front {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  top: 32%;
+  bottom: 0;
+  background: var(--folder-front);
+  border-top: 1px solid var(--folder-back);
+  border-radius: 6px;
+}
 /* ---------- 目录表视图：同一份数据与同一套排序能力的第二种形态，只画横向 hairline ---------- */
 .shelf-table { width: 100%; border-collapse: collapse; }
 .shelf-table th {
@@ -1478,10 +1408,12 @@ body.has-skin .topbar { background: transparent; }
   overflow: hidden;
   background: var(--grey-1);
 }
-/* 表格里文件夹缩略＝同一套书脊语言的缩小版（不另发明第二套形状） */
-.shelf-table .thumb .f-spines { inset: 2px; top: 2px; bottom: 2px; left: 2px; right: 2px; gap: 1px; }
-.shelf-table .thumb .f-spines i { max-width: 12px; }
-.shelf-table .thumb .f-spines .rest { padding: 0 2px; font-size: var(--fs-meta); }
+/* 表格里文件夹缩略＝同一语言的缩小版（背板 + 标签页 + 白纸组 + 前袋，直角纸面） */
+.shelf-table .thumb .f-tab { width: 44%; height: calc(8% + 1px); border-radius: 3px 3px 0 0; }
+.shelf-table .thumb .f-back { top: 8%; border-radius: 3px; }
+.shelf-table .thumb .f-papers { left: 9%; right: 9%; top: 5%; height: 31%; }
+.shelf-table .thumb .f-papers i { border-radius: 1px 1px 0 0; }
+.shelf-table .thumb .f-front { top: 34%; border-radius: 3px; }
 /* 新入库的材料：outline 高亮 1.2s（不受封面色影响，深浅两主题都看得见），
    框与拖拽高亮同一块口径＝封面 + 进度轨 */
 .shelf-item.is-fresh .shelf-face {
@@ -2123,7 +2055,7 @@ body.theme-dark .modal-panel {
 @media (prefers-reduced-motion: reduce) {
   .modal-backdrop { animation: none; }
   .card-acts,
-  .f-roster,
+  .f-papers i,
   .shelf-seg button,
   .icon-btn,
   .btn,

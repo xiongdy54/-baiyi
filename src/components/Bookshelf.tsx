@@ -8,7 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from "../lib/library";
 import { eventBus } from "../lib/eventbus";
 import {
-  IconAlert, IconArrowLeft, IconEllipsis, IconFolder, IconFolderPlus, IconLanguages,
+  IconAlert, IconArrowLeft, IconEllipsis, IconFolderPlus, IconLanguages,
   IconLayoutGrid, IconList, IconPencil, IconPlus, IconTrash,
 } from "./icons";
 import Dropdown from "./Dropdown";
@@ -103,8 +103,7 @@ interface DragState { id: string; target: string | null; zone: "before" | "group
 
 const ZONE_BEFORE = 0.28;
 const ZONE_AFTER = 0.72;
-const ROSTER_MAX = 6;
-const SPINE_MAX = 5;
+const PAPERS_MAX = 3;
 const DENSITY_CLASS: Record<ShelfDensity, string> = { sm: "dens-sm", md: "", lg: "dens-lg" };
 
 /* 模块级缓存（stale-while-revalidate）：书架在切页时会被卸载重挂，若每次都从空态起步，
@@ -699,7 +698,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
-    const progress = isFolder ? agg!.progress : itemProgress(entry.item);
+    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——进度轨留空、无均值
+    const progress = isFolder ? 0 : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     return (
       <div
@@ -721,43 +721,20 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           onKeyDown={onCardKeyDown(entry)}
         >
           {isFolder ? (
+            /* v48.115 / D161 第三轮：竖版文件夹图标——背板 + 左上标签页 + 白纸组 + 前袋（z 序 0/1/2）。
+               一张纸 = 一本书（≤3，白色素片、不显示封面图），卡面零文字（无名册/无计数/无均值）；
+               hover / 键盘焦点时纸组上抬 stagger＝「略微抽出」（transform，motion token） */
             <div className="f-face">
-              <span className="f-tab">FOLDER</span>
-              {members.length ? (
-                <>
-                  <div className="f-spines">
-                    {members.slice(0, SPINE_MAX).map((m) => (
-                      <i key={m.id}>
-                        {m.cover && <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
-                          onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}
-                      </i>
-                    ))}
-                    {members.length > SPINE_MAX && <i className="rest">+{members.length - SPINE_MAX}</i>}
-                  </div>
-                  <div className="f-sum">
-                    <span className="n">{agg!.n}</span>
-                    <span className="u">本</span>
-                    <span className="avg">均值 {pct(agg!.progress)}</span>
-                  </div>
-                  <div className="f-roster">
-                    <span className="rh">成员 {agg!.n} 本</span>
-                    <ol>
-                      {members.slice(0, ROSTER_MAX).map((m, i) => (
-                        <li key={m.id}>
-                          <span className="ix">{i + 1}</span>
-                          <span className="tt">{m.title}</span>
-                        </li>
-                      ))}
-                    </ol>
-                    {members.length > ROSTER_MAX && <span className="more">还有 {members.length - ROSTER_MAX} 本，进去看全部</span>}
-                  </div>
-                </>
-              ) : (
-                <div className="folder-empty">
-                  <IconFolder size={24} />
-                  <span className="et">空文件夹<br />把书拖进来，或用卡片动作条的「归入文件夹」</span>
+              <span className="f-tab" aria-hidden="true" />
+              <div className="f-back" aria-hidden="true" />
+              {members.length > 0 && (
+                <div className="f-papers" aria-hidden="true">
+                  {members.slice(0, PAPERS_MAX).map((m, pi) => (
+                    <i key={m.id} style={{ "--ci": String(pi) } as React.CSSProperties} />
+                  ))}
                 </div>
               )}
+              <div className="f-front" aria-hidden="true" />
             </div>
           ) : (
             <div className="book-card-cover">{bookFace(entry.item)}</div>
@@ -786,7 +763,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           onKeyDown={onCardKeyDown(entry)}
         >
           {caption(entry, title, isFolder
-            ? [`${agg!.n} 本`, `均值 ${pct(agg!.progress)}`, agg!.latest ? dayLabel(agg!.latest) : "未读"]
+            ? [`${agg!.n} 本`, agg!.latest ? dayLabel(agg!.latest) : "未读"]
             : [pct(progress), dayLabel(entry.item.updatedAt) || "未读", (entry.item.lang || "").toUpperCase() || "—"])}
         </div>
       </div>
@@ -797,7 +774,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
-    const progress = isFolder ? agg!.progress : itemProgress(entry.item);
+    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——进度轨留空、无均值
+    const progress = isFolder ? 0 : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     // 打开只有一条路径：格子的 onClick（封面格与书名格共用）；键盘经 .t-open 的原生 click 冒泡上来
     const open = () => (isFolder ? openInto(entry.id) : onOpenBook(entry.id));
@@ -816,14 +794,16 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
             「按住条目空白处拖动」自然成立，可拖性改由 cursor: grab + 落点高亮承担。 */}
         <td className="col-cov" onClick={open} title={openLabel}>
           {isFolder ? (
+            /* 目录表缩略＝文件夹卡同一语言的缩小版（背板 + 标签页 + 白纸组 + 前袋） */
             <span className="thumb">
-              <span className="f-spines">
-                {members.slice(0, 3).map((m) => (
-                  <i key={m.id}>{m.cover && <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
-                    onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}</i>
-                ))}
-                {members.length > 3 && <i className="rest">+{members.length - 3}</i>}
-              </span>
+              <span className="f-tab" aria-hidden="true" />
+              <span className="f-back" aria-hidden="true" />
+              {members.length > 0 && (
+                <span className="f-papers" aria-hidden="true">
+                  {members.slice(0, PAPERS_MAX).map((m) => (<i key={m.id} />))}
+                </span>
+              )}
+              <span className="f-front" aria-hidden="true" />
             </span>
           ) : (
             <span className="thumb">{entry.item.cover && <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true"
@@ -838,7 +818,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           </button>
           {isFolder ? (
             <>
-              <div className="t-sub">{agg!.n} 本 · 均值 {pct(agg!.progress)} · 悬停看成员</div>
+              <div className="t-sub">{agg!.n} 本 · 悬停看成员</div>
               <div className="t-members">{members.map((m) => m.title).join(" · ")}</div>
             </>
           ) : (
@@ -846,7 +826,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           )}
           <div className="bar"><i style={{ width: pct(progress) }} /></div>
         </td>
-        <td className="col-num">{pct(progress)}</td>
+        <td className="col-num">{isFolder ? "—" : pct(progress)}</td>
         <td className="col-num">{isFolder ? "—" : <span className="lang">{(entry.item.lang || "").toUpperCase() || "—"}</span>}</td>
         <td className="col-num">{isFolder ? (agg!.latest ? dayLabel(agg!.latest) : "—") : dayLabel(entry.item.updatedAt) || "—"}</td>
         <td className="col-num">{isFolder ? entry.folder.created.slice(5) : dayLabel(entry.item.createdAt)}</td>
