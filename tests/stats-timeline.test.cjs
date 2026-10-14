@@ -61,8 +61,8 @@ console.log("== 瞬时事件：单点块最短 30s；摘录高亮分计 ==");
   const ev = [
     T.pointEvent("extract", D0 + 10 * H, { hl: true }),
     T.pointEvent("extract", D0 + 10 * H + M),
-    T.pointEvent("card", D0 + 15 * H),
-    T.pointEvent("journal", D0 + 22 * H)
+    T.pointEvent("card", D0 + 15 * H)
+    // v48.114（D159）：journal（日记）维度随功能暂时移除——原 `T.pointEvent("journal", D0 + 22 * H)` 摘除
   ];
   const day = T.buildTimeline(ev, { dayStart0: D0, days: 1 }).days[0];
   const ex = day.blocks.find((b) => b.kind === "extract");

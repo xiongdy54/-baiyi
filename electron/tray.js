@@ -1,5 +1,6 @@
 // 系统托盘（v48.79 / D123）：关闭主窗口＝收进托盘继续运行（app.closeToTray，默认开），
-// 托盘左键/双击恢复主窗口，右键菜单：打开主窗口 / 制卡台 / 快速记录 / 退出（唯一真退出入口）。
+// 托盘左键/双击恢复主窗口，右键菜单：打开主窗口 / 制卡台 / 退出（唯一真退出入口）。
+// v48.114（D159）：快速记录暂时移除——菜单项退役（重实装时按 §6.5 回插）。
 const { Tray, Menu, nativeImage } = require("electron");
 const path = require("path");
 
@@ -11,14 +12,13 @@ function loadIcon() {
   return img.isEmpty() ? img : img.resize({ width: 16, height: 16 });
 }
 
-function init({ showMain, toggleWorkbench, toggleCapture, quit }) {
+function init({ showMain, toggleWorkbench, quit }) {
   if (tray) return tray;
   tray = new Tray(loadIcon());
   tray.setToolTip("增量阅读");
   const menu = Menu.buildFromTemplate([
     { label: "打开主窗口", click: () => showMain?.() },
     { label: "制卡台", click: () => toggleWorkbench?.() },
-    { label: "快速记录", click: () => toggleCapture?.() },
     { type: "separator" },
     { label: "退出", click: () => quit?.() }
   ]);

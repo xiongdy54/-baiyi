@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { libraryApi, BOOK_LANGUAGES } from "../lib/library";
 import { importMany } from "../lib/importRouter";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
 import { eventBus } from "../lib/eventbus";
 import { IconAlert, IconClose, IconImport } from "./icons";
+// v48.114（D160）：正文窗 textarea → 统一 Markdown 编辑器（§6.8-15；与摘录/日记同一组件），
+// 底部富文本工具条跟随 `app.extractEditorToolbar` 全局开关（编辑器组件内读键）。
+import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
 
 interface Props {
   onSave: (title: string, markdown: string, lang: string) => Promise<void>;
@@ -23,6 +26,8 @@ export default function AddBookModal({ onSave, onClose }: Props) {
   const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
   const [title, setTitle] = useState("");
   const [markdown, setMarkdown] = useState("");
+  // D160：编辑器实例（focusBlock 等命令能力备用；提交语义由 onCommit/onChange 承担）
+  const mdRef = useRef<MarkdownEditorApi | null>(null);
   // v38（D35）：粘贴书的语言（留空=未知，查词时靠句子语境启发）；批量导入的书到书架卡片上设
   const [lang, setLang] = useState("");
   const [saving, setSaving] = useState(false);
@@ -114,10 +119,21 @@ export default function AddBookModal({ onSave, onClose }: Props) {
         </div>
         <div className="form-field">
           <label>正文（粘贴文本，支持 Markdown）</label>
-          <textarea
+          {/* D160：受控镜像（onChange）保 canSave 门控；commitOnUnmount=false 防关窗误报提交；
+              Esc＝编辑器提交后经 onEscape 走模态关闭（useDismiss 同语义） */}
+          <MarkdownEditor
+            ref={mdRef}
             value={markdown}
-            onChange={(e) => setMarkdown(e.target.value)}
+            onChange={setMarkdown}
+            onCommit={(t) => {
+              if (t !== null) setMarkdown(t);
+            }}
+            onEscape={() => requestClose()}
+            variant="compact"
+            minRows={8}
+            commitOnUnmount={false}
             placeholder="在这里粘贴你的阅读材料…"
+            ariaLabel="正文（粘贴文本，支持 Markdown）"
           />
         </div>
         <p className="form-hint">导入支持 EPUB / PDF / Word / TXT / Markdown / HTML / MOBI / AZW3 / FB2 / CBZ，可一次多选批量导入。</p>

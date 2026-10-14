@@ -1834,6 +1834,11 @@ ipcMain.handle("mindmap:learningStatus", (_e, documentId, nodeIds) => dbModule.l
 // 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；
 // 无 Key 也跳过（§6.7.3「无 Key 零检索」——检索结果只服务即将发出的 AI 调用）。
 ipcMain.handle("memory:retrieve", (_e, payload) => {
+  // v48.114（D159）：用户记忆暂时移除——接地检索恒回 disabled（调用方按「未开启」短路，零 AI 调用）。
+  // 检索实现体原样保留在下方；重实装时删去本早退即可（契约 §4.18 / §6.7 冻结）。
+  void payload;
+  return { ok: false, reason: "disabled", block: null, hitTopics: [] };
+  /* eslint-disable no-unreachable */
   const p = payload || {};
   const mctx = memoryCtx();
   const cfg = memoryTidy.readMemoryConfig(mctx);
@@ -2067,7 +2072,7 @@ app.whenReady().then(async () => {
         if (!focusMainWindow()) createWindow();
       },
       toggleWorkbench: () => workbenchWindow.control("toggle"),
-      toggleCapture: () => quickCapture.toggleCapture(),
+      // v48.114（D159）：快速记录暂时移除——托盘「快速记录」项随 tray.js 同步退役（代码保留）
       quit: () => app.quit()
     });
   } catch (err) {
@@ -2109,12 +2114,8 @@ app.whenReady().then(async () => {
       console.error("[backup] sidecar 补齐失败：", err);
     }
   }, 5000);
-  // v45（M14-UM1，§4.18-11①）：启动补跑——开启 + 有未整理条目 + 距上次成功 ≥12h；失败不阻塞启动
-  try {
-    memoryTidy.startupBackfillIfDue(memoryCtx());
-  } catch (err) {
-    console.error("[memory] 启动补跑失败：", err);
-  }
+  // v48.114（D159）：用户记忆暂时移除——启动补跑（memoryTidy.startupBackfillIfDue）停摆；
+  // memoryTidy 模块与 memory:* IPC 原样保留，重实装时按 §6.7 冻结契约回接。
   // v48.11（§3.8）：导图僵尸对账——上次运行被关闭/中断时 run 行会永远停在 running（实测两条），
   // 启动时统一收敛为 failed_timeout；已完成分片保留在缓存，重新生成自动续跑。失败不阻塞启动。
   try {

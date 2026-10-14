@@ -13,6 +13,11 @@ const PORT = "9228";
 const USER_DATA = path.join(ROOT, "tests", "tmp-m8-userdata");
 const MARK = "FSRSTEST M8";
 
+// v48.114（D159）：日记与快速记录暂时移除（代码保留待重实装，GUIDE §6.5 冻结契约）——本套件随功能搁置。
+// 重实装（quickCapture.js `CAPTURE_DISABLED=false` + App 导航/视图回插）后删除下方早退即可恢复全量断言。
+console.log("·· m8.gui 搁置：日记/快速记录暂时移除（D159，v48.114）——0 通过 / 0 失败");
+process.exit(0);
+
 let pass = 0;
 let fail = 0;
 function check(name, cond, actual) {

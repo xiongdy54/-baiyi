@@ -1,7 +1,8 @@
-// 一日时间轴（甘特图）：把阅读 / 摘录 / 复习 / 制卡 / 日记摊在 24 小时轴上，
+// 一日时间轴（甘特图）：把阅读 / 摘录 / 复习 / 制卡摊在 24 小时轴上，
 // 回答「我这一天的时间花在了哪里、什么时候在学」。
-//  - 日视图：五条泳道（一类一道），每个时段块是一根任务条；今天会画「现在」游标；下方是时间分配汇总。
-//  - 周视图：近 7 天各一行，五类叠成五条细轨，一眼看出作息规律；点某一天下钻到日视图。
+//  - 日视图：四条泳道（一类一道），每个时段块是一根任务条；今天会画「现在」游标；下方是时间分配汇总。
+//  - 周视图：近 7 天各一行，四类叠成四条细轨，一眼看出作息规律；点某一天下钻到日视图。
+// （v48.114 / D159：journal（日记）第五泳道随功能暂时移除，重实装时回插。）
 // 数据口径见 electron/statsTimeline.js（同类事件相隔 ≤ 3~5 分钟并成一块；瞬时事件至少按 30 秒计，时长为估算）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { statsApi, TIMELINE_KINDS, type StatsTimeline, type TimelineBlock, type TimelineDay, type TimelineKind } from "../../lib/stats";
@@ -15,8 +16,8 @@ export const KIND_META: Record<TimelineKind, { label: string; ci: number; unit: 
   read: { label: "阅读", ci: 2, unit: "字" },
   extract: { label: "摘录", ci: 1, unit: "条" },
   review: { label: "复习", ci: 0, unit: "次" },
-  card: { label: "制卡", ci: 4, unit: "张" },
-  journal: { label: "日记", ci: 5, unit: "条" }
+  card: { label: "制卡", ci: 4, unit: "张" }
+  // v48.114（D159）：journal: { label: "日记", ci: 5, unit: "条" } 随功能暂时移除
 };
 const kindColor = (k: TimelineKind, P: Pal) => P.C[KIND_META[k].ci];
 const kindVar = (k: TimelineKind) => (KIND_META[k].ci === 0 ? "var(--accent)" : `var(--chart-${KIND_META[k].ci + 1})`);
@@ -38,8 +39,6 @@ function blockTip(b: TimelineBlock): string {
     lines.push(`摘录 ${b.count - b.hl} 条${b.hl ? ` · 高亮 ${b.hl} 处` : ""}`);
   } else if (b.kind === "card") {
     lines.push(`新建 ${b.count} 张卡`);
-  } else {
-    lines.push(`写了 ${b.count} 条日记`);
   }
   return lines.join("\n");
 }
@@ -50,7 +49,6 @@ function blockLabel(b: TimelineBlock): string {
     case "review": return `${b.count}次`;
     case "extract": return `${b.count}条`;
     case "card": return `${b.count}张`;
-    default: return `${b.count}条`;
   }
 }
 

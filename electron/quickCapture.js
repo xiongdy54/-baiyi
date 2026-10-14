@@ -21,6 +21,11 @@ const PERSIST_TRAILING_MS = 4000;
 const PERSIST_MAX_MS = 20000;
 
 // 修饰键别名 → 规范名（Electron accelerator 合法修饰键；渲染层 eventToCombo 产出 Ctrl/Alt/Shift/Meta）
+
+// v48.114（D159）：日记与快速记录暂时移除（代码保留待重新实装，契约见 GUIDE §6.5）。
+// 闸＝本常量：置 false 即整体恢复（快捷键注册 + 捕获窗口 + 托盘项）。
+// 「添加学习材料 Ctrl+Alt+N」「制卡台 Ctrl+Alt+K」两快捷键与 init 注册链**不受本闸影响**，保持可用。
+const CAPTURE_DISABLED = true;
 const MOD_CANON = {
   ctrl: "Ctrl",
   control: "Ctrl",
@@ -120,7 +125,8 @@ function readShortcutConfig() {
   const sameAccel = accelCapture === accelAdd;
   return {
     quickCapture: {
-      enabled: qc.enabled !== false,
+      // D159：闸下强制视为关闭（status 显示「已关闭」、快捷键不注册；置 CAPTURE_DISABLED=false 即恢复）
+      enabled: !CAPTURE_DISABLED && qc.enabled !== false,
       accelerator: sameAccel ? DEFAULT_ACCEL_CAPTURE : accelCapture,
       hideOnBlur: qc.hideOnBlur !== false
     },
@@ -296,6 +302,7 @@ function positionCapture(win) {
 }
 
 function showCapture() {
+  if (CAPTURE_DISABLED) return; // D159：日记与快速记录暂时移除——窗口不再唤起（代码保留）
   const win = createCaptureWindow();
   if (!win) return;
   if (!captureReady || win.webContents.isLoading()) {

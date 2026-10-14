@@ -13,6 +13,11 @@ const PORT = "9228";
 const USER_DATA = path.join(ROOT, "tests", "tmp-m8b-userdata");
 const MARK = "M8BGUI 今天在思考刻意练习与恒温器反馈回路的相似之处";
 
+// v48.114（D159）：AI 洞察随日记暂时移除（代码保留待重实装，GUIDE §6.5/§4.13 冻结契约）——本套件随功能搁置。
+// 重实装（App 洞察入口回插 + 日记页恢复）后删除下方早退即可恢复全量断言；db 层 m8b.test.cjs 不受影响。
+console.log("·· m8b.gui 搁置：AI 洞察随日记暂时移除（D159，v48.114）——0 通过 / 0 失败");
+process.exit(0);
+
 let pass = 0;
 let fail = 0;
 function check(name, cond, actual) {

@@ -3,7 +3,8 @@
 // 运行：npm run build 之后 `node tests/d125-next-tab.gui.mjs`（CDP 驱动 dist 上的真实应用，可 taskkill electron）
 // 隔离：M7_TEST_USERDATA → tests/tmp-d125-userdata（先清空；默认设置启动，绝不触碰真实库 §7.3）。
 // 断言链（D125，用户指令：页签第 4 位 / 关闭即消失并前滑补位 / 设置归入实验功能 / 导航不挤出画面外；页签文字「推荐」与其余两字签等长）：
-//   ① 顶栏七签、顺序＝书架/摘录/复习/推荐/卡片/日记/数据（「推荐」第 4 位；MOTION-DESIGN-SPEC §5.1 页序表同步）
+//   ① 顶栏六签、顺序＝书架/摘录/复习/推荐/卡片/数据（「推荐」第 4 位；MOTION-DESIGN-SPEC §5.1 页序表同步；
+//      v48.114/D159：「日记」页签随功能暂时移除，七签→六签）
 //   ② 点「推荐」→ 页面挂载 learner 面板（learner-panel-card），顶栏标题＝下一步（模块全名）
 //   ③ 设置左栏出现「实验功能」（D125：左栏 14 项 → 15 项；D114 立约文本记 13 项，DOM 实际计数 14——历史出入以实际为准）→ #sec-lab 内含 #sec-learner（自 sec-widgets 迁入）
 //   ④ 正处「推荐」页时在设置里关闭学习者模型 → 页签经 .nav-collapse 收拢后卸载（回到六签）＋视图退回数据页
@@ -72,9 +73,9 @@ try {
   const navClick = (label) => cdp.eval(`(() => { const b = [...document.querySelectorAll(".topbar-nav .nav-item")].find((x) => x.textContent.trim() === ${JSON.stringify(label)}); b?.click(); return !!b; })()`);
   const title = () => cdp.eval(`document.querySelector(".topbar-title")?.textContent?.trim() || ""`);
 
-  // ① 页签位次（第 4 位；窗口 minWidth 1120 下七签横排不换行——顺手量测高度恒定）
+  // ① 页签位次（第 4 位；窗口 minWidth 1120 下六签横排不换行——顺手量测高度恒定）
   const nav1 = await navTexts();
-  check("① 顶栏七签、顺序正确（推荐第 4 位）", nav1 === "书架,摘录,复习,推荐,卡片,日记,数据", nav1);
+  check("① 顶栏六签、顺序正确（推荐第 4 位；D159 日记签移除）", nav1 === "书架,摘录,复习,推荐,卡片,数据", nav1);
   check("① 顶栏单行（nav 高度 = 单行高，无换行挤出）", (await cdp.eval(`document.querySelector(".topbar-nav").getBoundingClientRect().height`)) < 48, await cdp.eval(`document.querySelector(".topbar-nav").getBoundingClientRect().height`));
 
   // ② 进入「推荐」页
@@ -89,13 +90,13 @@ try {
   check("③ 设置左栏含「实验功能」", (await cdp.eval(`[...document.querySelectorAll(".settings-nav button")].some((b) => b.textContent.trim() === "实验功能")`)) === true, "左栏无该项");
   check("③ #sec-lab 内含 #sec-learner（迁入）", (await cdp.eval(`!!document.querySelector("#sec-lab #sec-learner")`)) === true, "不在 sec-lab");
   check("③ sec-widgets 不再含 learner 子块（迁出）", (await cdp.eval(`!document.querySelector("#sec-widgets #sec-learner")`)) === true, "仍留原地");
-  check("③ 设置左栏共 15 项（14 + 实验功能）", (await cdp.eval(`document.querySelectorAll(".settings-nav button").length`)) === 15, await cdp.eval(`document.querySelectorAll(".settings-nav button").length`));
+  check("③ 设置左栏共 14 项（13 + 实验功能；D159 sec-memory 移除后 15→14）", (await cdp.eval(`document.querySelectorAll(".settings-nav button").length`)) === 14, await cdp.eval(`document.querySelectorAll(".settings-nav button").length`));
 
   // ④ 关闭学习者模型（仍在「下一步」页）：页签收拢卸载 + 视图退回数据页
   await cdp.eval(`(() => { const b = [...document.querySelectorAll("#sec-learner .seg-tabs button")]; b[1]?.click(); return b.length; })()`);
   await wait(900); // > 收拢 200ms + 卸载定时 320ms
   const nav2 = await navTexts();
-  check("④ 关闭后页签消失（回到六签）", nav2 === "书架,摘录,复习,卡片,日记,数据", nav2);
+  check("④ 关闭后页签消失（回到五签）", nav2 === "书架,摘录,复习,卡片,数据", nav2);
   check("④ .nav-collapse 容器已卸载", (await cdp.eval(`!document.querySelector(".nav-collapse")`)) === true, "残留");
   check("④ 视图退回数据页（标题＝统计数据）", (await title()) === "统计数据", await title());
   check("④ learner 面板不再挂载", (await cdp.eval(`!document.querySelector(".learner-panel-card")`)) === true, "仍在");
@@ -104,7 +105,7 @@ try {
   await cdp.eval(`(() => { const b = [...document.querySelectorAll("#sec-learner .seg-tabs button")]; b[0]?.click(); return b.length; })()`);
   await wait(900);
   const nav3 = await navTexts();
-  check("⑤ 重开后页签回第 4 位", nav3 === "书架,摘录,复习,推荐,卡片,日记,数据", nav3);
+  check("⑤ 重开后页签回第 4 位", nav3 === "书架,摘录,复习,推荐,卡片,数据", nav3);
   await cdp.eval(`(() => { document.querySelector(".modal-close")?.click(); return "close"; })()`);
   await wait(700);
   check("⑤ 关设置后点「推荐」面板恢复挂载", (await navClick("推荐")) === true && await (async () => { await wait(1400); return cdp.eval(`!!document.querySelector(".learner-panel-card")`); })() === true, "面板未挂载");

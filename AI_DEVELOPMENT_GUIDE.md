@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件（**v48.113**） — AI 开发指导文档
+# 一站式渐进阅读学习软件（**v48.114**） — AI 开发指导文档
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -822,6 +822,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 
 ## 6.5 日记模块与快速记录（v36，M8-A 已实现；洞察 M8-B 设计见 §9.1 M8-B）
 
+> **⚠ v48.114（D159）暂时移除——本节契约冻结保留**：用户裁定日记功能与全局快捷键快速记录窗口自产品面摘除、将来可能重新实装。顶栏「日记」页签与 journal 视图、快速记录窗口与 Ctrl+Alt+Space 全局快捷键已不在场；`journal_entries` 表、13 条 `journal:*` IPC、`journalAPI` preload 面与全部模块文件（JournalView / quickCapture / preload-capture / capture / lib/journal）**原样保留**，历史数据零改动。重新实装时按本节契约恢复入口即可（quickCapture.js 的 `CAPTURE_DISABLED` 闸复位 + App 导航/视图回接）。日记仍**不进 FSRS 队列**（下方 Non-Goals 不变）。
+
 > 构想来源见 §9.1 M8 引言（D19）。一句话定位：**学习材料的第二输入通道**——软件现有的全部输入通道收的都是「他人创造的」（书 / 文章 / 视频文案），日记收的是「**自己感受到的**」（日常事件引发的感悟与思考）。人在记录感受时的选择倾向，与选择学习材料时的倾向很可能相似，因此日记是已学知识的一种**边界拓展**。
 
 **原则（Non-Goals 硬边界）**：不做强制标签 / 分类 / 双链；不做整理性结构要求；日记**不进 FSRS 队列、不强制制卡**（D18 精神——日记是输入面，不是复习面）；不做云端同步；洞察不自动定时触发。日记只产生 demand signal（§4.13 / K7），**禁直接写 mastery**。
@@ -934,6 +936,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 ## 6.7 用户记忆的可见性与设置（v42，契约 §4.18；批次 §9.1 M14）
 
 > 定位：用户记忆由 **AI 自主维护**（§4.18-14 有界例外），因此产品面**唯一必须做好的事是「可见、可控、可停止」**——**不提供任何编辑界面**（用户 2026-09-15 明确要求：只在设置中提示文件位置，需要时自行用外部编辑器打开）。UI 集中在一处（设置页 `sec-memory`）+ 两处轻标记（制卡确认面板、卡片浏览页）。
+>
+> **⚠ v48.114（D159）暂时移除——本节契约冻结保留**：`sec-memory` 设置区、启动补跑（`startupBackfillIfDue`）与制卡记忆接地检索（`memory:retrieve` 恒回 disabled）已自产品面摘除；memoryTidy / memoryRetrieve / memoryStore 模块、`memory:*` IPC 与 `memory/` 文件树（含既有记忆文件）**原样保留**。日记源（§6.5）同步摘除后本功能整体冻结，重实装时按本节契约恢复设置区与启动钩子。
 
 ### 6.7.1 设置页「记忆」区（`sec-memory`，唯一入口）
 
@@ -1187,6 +1191,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **一句话**：摘录卡的 Markdown 输入方案（Milkdown WYSIWYG + 统一读态渲染管线）抽为通用组件，向全应用文本编辑面铺开——P0 落地快速摘录浮窗、日记三面、手动制卡紧凑档；P1（闪卡面 cloze 金样例先行）与 P2（AI 追问，建议例外）另批。
 - **组件抽取（§J.2）**：`src/components/editor/MarkdownEditor.tsx`＝通用受控封装（Milkdown 装配 + 提交语义 + 工具条三形态随组件走），props：`value`（外部变更≠最近上报值 → 重建编辑器；宿主不得对 value 做归一变换）、`onCommit`（text|null，null＝幂等短路）、`onChange?`（文档变更即报，受控表单镜像用）、`placeholder`、`variant: "full" | "compact"`（compact＝表单字段档：无工具条、hairline 框、矮盒 `minRows`）、`toolbar?`、`commitOnUnmount?`（摘录卡 true，受控表单 false）、`onEscape?`/`onKeyDown?`/`onReady?`。`ExtractEditor` 退化为薄壳（保留块级焦点落点 + 卸载兜底提交两件摘录特有事）。**读态/展示侧**统一走 `src/components/editor/ReadMarkdown.tsx`（react-markdown + remark-gfm + remarkSoftBreaks + rehype-raw/sanitize + rehype-katex 同一份管线），杜绝「同一段 markdown 两处渲染不同」。
 - **P0 面（§J.1 #2/#3/#4）**：① **快速摘录浮窗（CaptureEditor）**：textarea → 完整编辑器（含工具条），onChange 镜像走原 1.2s 防抖自动保存链，Esc＝提交后隐藏（`onEscape`→flush→hide），Ctrl+Enter 发送保留（`onKeyDown` 透传），`focusEnd` 承接「继续向下写」光标语义；② **日记（JournalView 三面）**：条目编辑/草稿续写/当日输入行 → 完整编辑器；统一方案语义（Enter＝换行段落，Esc/失焦/按钮提交）；条目编辑成空＝软删（原口径），草稿编辑提交＝写回**同一条草稿**（`journal:update` 不区分草稿，落库链零新通道），「发送」仍走显式 draftSend（失焦不误发）；展示侧 `journal-entry-md` 同步切 ReadMarkdown；③ **手动制卡（ManualCardForm 9 字段）**：textarea → **紧凑档**（`toolbar={false}`、`minRows=2`），onChange 实时镜像保 canSave 门控与挖空预览逐键响应，落库仍走「创建卡片」单通道。**每面验收口径（§J.3）**：进出编辑往返逐字节不变（幂等短路）、落库链零新写通道、设置键零新增（复用形态键）。
+- **v48.114（D160）新宿主——书架「添加书籍」粘贴正文窗**：AddBookModal 正文 textarea → MarkdownEditor（`variant="compact"`、`minRows=8`、工具条跟随 `app.extractEditorToolbar` 全局开关、onChange 受控镜像、`commitOnUnmount=false`、`onEscape→requestClose` 保持模态 Esc 语义）；设置项更名「**编辑器富文本工具栏**」（原「摘录卡编辑工具栏」），说明文案明示全局作用面（摘录卡 / 粘贴导入等全部带工具条的 Markdown 编辑宿主）——**键名与 `data-testid` 不变**（F18 口径零变更）。日记三面随 D159 暂时摘除，但其 §J.2 宿主契约为重实装时的恢复蓝本。
 - **`.editor` 类名根治（§J.1 #2 顺带义务）**：批注编辑浮层类名 `editor` → **`annot-editor`**（`AnnotationEditor.tsx` + theme.css 既有规则块改名）——Milkdown 根节点自带 `editor` 类的全局冲突自此消除，D95 v1.3 的作用域内逐项抵消块退役；测试选择器 `.editor[data-editor-for]` 族随改。
 - **测试义务**：`tests/extract-editor.gui.mjs` 验收 13 重写为三形态判据（短文零大空白/长文吸底、钉顶让位、选区弹层锚定/居中/塌选收起/按钮保选区）；`tests/m8.gui.mjs`、`tests/m8b.gui.mjs` 输入面改 ProseMirror 交互（focus+selectAll+insertText）；`tests/annotations.gui.mjs`/`tests/marks.gui.mjs` 浮层选择器随 `.annot-editor` 改名；`F18` DOC_KEYS 增 `app.extractEditorToolbarTop` / `app.readerActionsFloat`（round-trip + 非法值矩阵）。
 
@@ -1515,6 +1520,10 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 
 | D158 | **v48.113 方案条件作用于表格**：修正 D105 以来「方案的标签、知识点与第 2 本及以后的来源书只在会话组队生效，浏览器表格只按内容页签与第 1 本书过滤」的缺口（D157 实施第 0 步核对发现）。`cards:listMeta` 行集读侧扩展 `tags?` / `kpId?`；新增只读 IPC `knowledge:resolveFamilies`；新增 `src/lib/schemeFilter.ts`（复用 `tagFilterMatches`；知识点族由主进程 `resolveKpFamily` 求得），取代 `bookScope` 单书等值过滤。语义与会话组队逐条一致（§6.8-5「表格侧语义」）。性能闸门：30 万行下方案过滤单次 ≤ 50 ms、`listMeta` 冷构建耗时增幅 ≤ 25%（基线 4205ms @30 万卡）。零 schema 变更、零迁移、无写路径改动。测试：`tests/schemeFilter.test.cjs`（U1–U8 纯函数矩阵：空条件 null / 多书 IN / `::` 层级前缀 / 多值 OR / 归并族 / 族未解析回退 / AND / 摘录行 kp 恒不命中 + 惰性解析）+ `tests/d158.gui.mjs`（G1–G7 表格等式回归）+ browser.perf 前后对照 | 用户 2026-10-14 指令「请按方案执行」（OPUS 5.5 设计稿 v2 §6.0/§6.2A/§8.4–8.6；实施第 0 步停止规则 1(a) 实况＝会话侧为主进程镜像 `scopeTagMatches`，按 §6.8-5 实施注记以渲染层语义源同族交付） | v48.113 |
 
+| D159 | **v48.114 日记 / 用户记忆 / AI 洞察三功能暂时移除（代码与数据全量保留，待重新实装）**：①**日记与快速记录**——顶栏「日记」页签、journal 视图分支、`installJournalBridge` 退出 App；快速记录全局快捷键与捕获窗口经 quickCapture.js 模块级 `CAPTURE_DISABLED` 闸停用（`showCapture`/`toggleCapture` 早退、快捷键注册强制 enabled=false；**「添加学习材料 Ctrl+Alt+N」「制卡台 Ctrl+Alt+K」两快捷键与 `quickCapture.init` 注册链不受影响**）；托盘菜单「快速记录」项移除；JournalView / InsightPanel / quickCapture / preload-capture / capture / lib/journal 等文件原样保留。②**用户记忆**——设置页 `sec-memory` 区块与 SECTION_GROUPS 对应项移除（左栏 15→14）、`memoryTidy.startupBackfillIfDue` 启动补跑停摆、`memory:retrieve` 制卡接地检索恒回 disabled（模块与 `memory:*` IPC、`memory/` 文件树原样保留）。③**AI 洞察**——InsightPanel 随 JournalView 摘除、`installInsightBridge` 退出（insight.ts / prompts.js journal-insight 模板与 `insights:*`/`meaning:*` IPC 保留）。**数据面零改动**：`journal_entries` / `memory_runs` / `insight_runs` / `personal_meaning_candidates` 四表全部保留；knowledgeLinks 的 `diaryEntryId` 只存于洞察 AI 输出与 `personal_meaning_candidates.evidence_refs_json`，消费面（InsightPanel）移除后**无悬空渲染面**，重实装时原样可读。**统计时间线移除 journal 维度**（statsTimeline KINDS / getStatsTimeline 点事件 / stats.ts TimelineKind / Timeline.tsx KIND_META——表与数据本身保留）。测试：d125（七签→六签、设置左栏 15→14）、m4（kb-row 22→21）、r2-smoke S2/S3（页链去日记）、stats-timeline（去 journal 事件）更新；m8.gui / m14.gui 随功能搁置（早退 + 头注，m14.test.cjs 纯库测不受影响）；`journal:*` IPC 与 preload 面保留 ⇒ f11 命名空间口径不变 | 用户 2026-10-15 指令（「把日记功能和全局快捷键快速唤出的日记面板暂时从软件中移除，但是代码不要丢弃，将来可能会再次实装。用户记忆功能和AI洞察功能同步暂时移除但保留代码，它们和日记是一整套的功能，将来可能重新实装。统计时间线和知识图谱历史引用问题请同步处理一下」） | v48.114 |
+
+| D160 | **v48.114 粘贴导入窗口接入统一 Markdown 编辑器 + 富文本工具栏全局口径**：书架「添加书籍」正文窗（AddBookModal）textarea → `MarkdownEditor`（§6.8-15 组件；`variant="compact"`、`minRows=8`、工具条缺省开、onChange 受控镜像、`commitOnUnmount=false`、`onEscape→requestClose`）——与日记界面 / 摘录界面同一编辑器；底部富文本工具条开关沿用既有键 `app.extractEditorToolbar`（MarkdownEditor 组件内读键 ⇒ 新宿主自动纳管、全局生效），设置项更名「编辑器富文本工具栏」并明示全局作用面；键名与 `data-testid` 不变（F18 零变更）。软件中既有 Markdown 编辑器（摘录卡 / 制卡表单等）全部保留不动 | 用户 2026-10-15 指令（「软件中的 Markdown 编辑器要保留……直接粘贴导入材料的文本窗口，应用与日记界面和摘录界面相同的 Markdown 编辑器。同时底部要有富文本工具栏，并且同样可以在设置中开启或关闭。设置中对富文本工具条的开启和关闭是全局生效的」） | v48.114 |
+
 ## 8.2 已接受偏差（实现与原锁定方案的差异）
 
 | 偏差 | 原锁定 | 现状 | 处置 |
@@ -1599,7 +1608,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | v31 | M1 提示词基线确认并回（v4 候选并回播种 **v6**：取消 **G9** 退出红线 + G6/G7 完善 + CardLint **L16**（L-A 数字密度同日取消、L-B 不做）+ card-literature 专用模板接上，修复死代码） | ✅ v31 实现 |
 | v30 | 复习卡面修复批（**D27** 一卡多挖空同答/分答两形态 + **D28** 看图问答卡背面题面定版 + 遮挡块颜色统一 + **D29** 归属锚强制，提示词播种 v4/v5） | ✅ v30 实现 |
 | M7 | 词典（DictionaryProvider 可插拔：Manager→Provider[]→Entry+Context→快照卡；在线 Free API/Jisho + 本地 StarDict/DSL/ECDICT；设置一键下载） | ✅ v32 实现 |
-| M8 | 日记与 AI 洞察（流式日记 + 洞察按钮 + AI 关联分析，第二输入通道） | ✅ v36 M8-A + v40 M8-B 已实现（与 §9.1 一致，v48.16/D52 更正状态行） |
+| M8 | 日记与 AI 洞察（流式日记 + 洞察按钮 + AI 关联分析，第二输入通道） | ✅ v36 M8-A + v40 M8-B 已实现（与 §9.1 一致，v48.16/D52 更正状态行）；**🟤 v48.114 / D159 暂时移除**——产品面摘除、代码与数据全保留，契约冻结见 §6.5 / §4.13，重实装按冻结契约恢复 |
 | M16 | **摘录复习改版**（摘录并入复习队列 + 真 SM 调度语义 + 双推送引擎无损切换 + 复习范围/筛选牌组 + 四类每日上限 + 统一撤销 + 卡片浏览器 2.0；**位置：用户 2026-09-24 指定，先于 M15 剩余批次与 K 系列推进**） | ✅ **批次 0–4 全部收口、批次 5 E1 完成**（规格 `docs/impl-spec/EXTRACT-REVIEW-OVERHAUL.md` §I 实况：批次 0–3 ✅；批次 4 ✅——查询语法 v1/v2/v3（v48.64/D108）、多选批量、按书分组、筛选牌组、正文查找替换、**真虚拟滚动（v48.66/D110，30 万卡量测）**全部落地，**主进程过滤+分页取数已于 v48.67/D111 收口**（meta/ids 主进程求值 + 行窗口取数，§6.8-6 数据通道）；批次 5 **E1 本地层 ✅**，E2 待 K4–K5 落地（文档化外部依赖）；D67 Reader dock/UI 对齐契约于 v48.26 作为后续增量追加） |
 | M9 | 在线功能（数据收集/反馈/更新/多提供商/API 分发） | ❌ |
 | M10 | 官网 | 🟡 **v48.88 / D131 静态站点已交付**（`website/` 单页：首屏/核心能力/工作流/隐私/技术/下载占位/页脚；设计稿 `docs/design/WEBSITE-M10-D131.md` 含渲染自检记录）；对外发布渠道与正式部署未启动（对应 M9 边界） |
@@ -1607,7 +1616,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | K0–K9 | Learner Knowledge Model（v24 架构定稿，纯文档；实现按 §9.1 M8 实施路线 K0–K9 分批） | 📐 v24 定稿（§4.5–§4.13 + §6.3.11–12 + §7.6 + D24）+ **v33 增补（§4.14 结构连接 + §6.3.11 `structure-analogy` + §6.3.12 K9–K10 + D32）**；实现未启动（K0–K9 见 §9.1 M8）；K1（四表）/K2-A/K2-B 已随 v40–v43 落地；**K3–K9 已被 D124/M17 取代**（L0–L6，§4.20） |
 | 学习者模型 M17 · ✅ v48.80 实现 | 学习者模型与下一步推荐 LM-1（设计 `docs/design/LEARNER-MODEL-REDESIGN-D124.md`；数据页「下一步」面板 + 学习轨道 + KP 五级 + 词项五态 + 13 种推荐；主库 5 张事实表 + 独立派生库 learner.db + 总开关 `app.learner.enabled`） | ✅ **v48.80 实现**（批次 L0–L6 见 §9.1 学习者模型小节；node 测试 161 + electron lm-db 65 + ainextextract 38 断言全绿；tsc/build/闸门对照基线无新增失败；GUI 手测项待主机验证） |
 | M13 | 成长反馈 Growth Feedback（呈现层只读；正反馈分级总表；微反馈 + 会话成果汇总 + 仪表盘四层 + Territory；内部 GF-1 记忆层 → GF-2 知识层） | 🟡 **GF-1 记忆层 v48.85 / D129 实现收口（整批 code-review 终审合格）**（设计 `docs/design/GROWTH-FEEDBACK-D129.md`）：`electron/growth.js` 纯函数（口径唯一居所，取消项显式禁加回）+ db 三只读出口 + `growth:*` IPC 三通道（含主进程 catch 兜底降级）+ 复习页 `.growth-toast` 微反馈条（§6.6.2 五条硬性全过：fire-and-forget 零 await、绝对定位浮层 G-2 ≤1px、零快捷键零通知、pickTop 单槽取最高级、三层短路）+ 收尾页 `.growth-session` 会话汇总 + 仪表盘 `growth-events`/`territory` 两 widget（默认序插 `today` 之后，`syncHidden` 自动带给存量；既有 12 widget 定义零改动）+ `app.growthFeedback` 开关（默认开，关闭三层短路）；测试 **node growth 71 + electron m13 66 + m13.gui 46 断言全绿、tsc/build 0**；闸门基线：F11 L1 既有红（readerActionsSettings.ts）、F18 Y1 既有红（app.selectionBarStyle）、F27 W6 既有红（泄漏清单因 growth.js 取消项头注释新增 2 条注释级条目，判据未变）；**GF-2 阻塞**：契约判定数据面（knowledge_evidence/learner_knowledge_states/Frontier）已被 §4.20 M17 取代，先修 §4.17 再实现 |
-| M14 | 用户记忆 User Memory（AI 自主维护的**分层记忆文件**：`core.md` + `index.md` + `topics/<生活域>/<主题>.md`；日记增量整理；**总量不限、永不淘汰、不做衰减**；制卡按需检索接地——R20 + `memoryRef`；**§1.7 有界例外 + 六护栏**；开关默认关闭、重开后**补处理**关闭期间日记；内部 UM-1 记忆文件与整理管线 → UM-2 接地与检索） | ✅ **v45 UM-1 + v46 UM-2 全部实现**（UM-1：文件树 + memoryTidy 整理管线 + memory_runs + user-memory v1 播种 + sec-memory + M2 备份覆盖 memory/；UM-2：R20 situationRequired 声明位 + memoryRetrieve 宽召回 + 制卡族 v7 + memoryRef 校验与溯源 + 确认面板徽标/二次确认 + 浏览页筛选；完成情况见 §9.1 M14 两 blockquote） |
+| M14 | 用户记忆 User Memory（AI 自主维护的**分层记忆文件**：`core.md` + `index.md` + `topics/<生活域>/<主题>.md`；日记增量整理；**总量不限、永不淘汰、不做衰减**；制卡按需检索接地——R20 + `memoryRef`；**§1.7 有界例外 + 六护栏**；开关默认关闭、重开后**补处理**关闭期间日记；内部 UM-1 记忆文件与整理管线 → UM-2 接地与检索） | ✅ **v45 UM-1 + v46 UM-2 全部实现**（UM-1：文件树 + memoryTidy 整理管线 + memory_runs + user-memory v1 播种 + sec-memory + M2 备份覆盖 memory/；UM-2：R20 situationRequired 声明位 + memoryRetrieve 宽召回 + 制卡族 v7 + memoryRef 校验与溯源 + 确认面板徽标/二次确认 + 浏览页筛选；完成情况见 §9.1 M14 两 blockquote）；**🟤 v48.114 / D159 暂时移除**——sec-memory / 启动补跑 / 制卡接地检索摘除，模块与数据保留，契约冻结见 §6.7 / §4.18 |
 | M15 | 材料知识导图 Material Mind Map（导图=作者视角独立产物、知识图谱=大脑画像，两图独立并行+联结；全屏 Overlay 工作区 + 自底向上递归归并管线 + 区间集合差取文 + 双证据本地校验 + AI 语义审查确认制 + 分片缓存含模型三元组 + 节点制卡联结与 remap；**质量优先于成本**；**位置 M14 之后、可与 K3 并行**） | 📐 **v48 重设计定稿**（D40 补录 + D41/D42，§4.19 v48 全节重写，批次 0–7 见 §9.1 M15）；v47 曾实现已于 2026-09-18 整体回滚（生成质量不达用户预期，快照存 docs/m15-archive/） |
 | D121 | 卡片辨析与制卡语境包（设计 `docs/design/CARD-DISAMBIGUATION-D121.md`；`review.disambiguate` 命令 E 替换对比卡 + `card_links` + `library_items.author` + 手动制卡预检 + R21 语境包/`qualifier` + CardLint L18） | ✅ v48.77 实现（T1–T7；全量回归对照基线见 T8） |
 
@@ -1655,6 +1664,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 ## 9.5 下一步
 
 **路线图靠前 · 全局选中选单（D145，方案已备·延后实施）**：在软件外任意应用选中文字后弹出三按钮选单（AI 制卡 / 复制到手动制卡文本框 / 引用到 AI 解释输入框），或按设置中自定义快捷键直接使用三按钮功能，可在设置中关闭。**方向待定：任意处制卡 vs 材料导入软件内在软件中完成制卡体验——先调整设计再实施**。机制方案 `docs/design/GLOBAL-SELECTION-ACTIONS-D145.md`（P0＝快捷键路径：模拟复制捕获选区 + 四全局键 + 选单小窗；P1＝选中自动弹出，需原生钩子或 UIA 轮询，另立项）。随行交付的坞内部分＝**D144 制卡台 IA 重设计**（制卡/解释两板块、解释板块底部收起、解读方式按钮化 + 自由提问、跨页签幽灵同步、坞内选区三钮选单），本批实施中（设计稿 `docs/design/D144-CARDDOCK-IA-REDESIGN.md`，GUIDE 登记 v48.100，状态见 §9.2 D144 行）。
+
+**日记 / 用户记忆 / AI 洞察（D159，v48.114 暂时移除）**：三功能已自产品面摘除但**代码、IPC、数据表全量保留**（`journal_entries` / `memory_runs` / `insight_runs` / `personal_meaning_candidates` 历史数据零改动）；重新实装时按冻结契约（§6.5 / §6.7 / §4.13）恢复导航、设置区与快捷键——主进程侧复位 quickCapture.js 的 `CAPTURE_DISABLED` 闸 + 回接 `startupBackfillIfDue` / `memory:retrieve`，渲染层回接 App 导航/视图与三桥即可。
 
 **v48.85（D129）已完成 M13 成长反馈 GF-1 记忆层**：设计稿 `docs/design/GROWTH-FEEDBACK-D129.md` 为唯一实现依据，GF-1 批次 A（数据面：`electron/growth.js` 纯函数 + db 三只读出口 + `growth:*` IPC 三通道 + 设置键三侧归一）→ 审查修复（P1 docTitle 回补 + P2 catch 兜底/IN 分批，5/5 采纳）→ 批次 B（呈现层：`.growth-toast` 微反馈条 + `.growth-session` 会话汇总 + 仪表盘 `growth-events`/`territory` 两 widget + `tests/m13.gui.mjs`）→ 整批终审合格。测试 node 71 + electron 66 + gui 46 断言全绿，tsc/build 0，F18/F21/F11/F27 对照基线见 §9.2 M13 行。**GF-2 知识层阻塞**于缺口 G1–G3（判定数据面已被 §4.20 M17 取代）：先按设计稿 §7 修 §4.17/§6.6.1/§6.6.4 契约（G0）再实现。
 

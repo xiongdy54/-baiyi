@@ -13,6 +13,11 @@ const PORT = "9230";
 const USER_DATA = path.join(ROOT, "tests", "tmp-m14-userdata");
 const MARK = "M14GUITEST";
 
+// v48.114（D159）：用户记忆随日记暂时移除（代码保留待重实装，GUIDE §6.7 冻结契约）——本 GUI 套件随功能搁置。
+// 重实装（sec-memory 区块回插 + 启动补跑/检索回接）后删除下方早退即可恢复全量断言；库测 m14.test.cjs 不受影响。
+console.log("·· m14.gui 搁置：用户记忆暂时移除（D159，v48.114）——0 通过 / 0 失败");
+process.exit(0);
+
 let pass = 0;
 let fail = 0;
 function check(name, cond, actual) {

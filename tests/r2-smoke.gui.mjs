@@ -99,8 +99,8 @@ try {
   check("S1 app-shell-in 在播（no-preference 计算样式）", s1anim === "app-shell-in", s1anim);
   check("S1 时长 = --dur-view 0.2s（不拖过 200ms）", s1dur === "0.2s", s1dur);
 
-  // ============ 场景 2：六页签往返方向（§5.1 页序表 + reader 特则） ============
-  console.log("— 场景 2：六页签往返方向 —");
+  // ============ 场景 2：页签往返方向（§5.1 页序表 + reader 特则；D159 后默认五签，推荐开启时六签） ============
+  console.log("— 场景 2：页签往返方向 —");
   let r2 = await pollVt(cdp, navClick("摘录"));
   check("S2 书架(0)→摘录(1) = fwd", r2.vt === "1" && r2.dir === "fwd", JSON.stringify(r2));
   check("S2 过渡结算后 data-vt 清除（finally 路径）", (await vtCleared(cdp)) === false, "data-vt 残留");
@@ -119,19 +119,17 @@ try {
   check("S2 复习(2)→书架(0) = bwd", r2.vt === "1" && r2.dir === "bwd", JSON.stringify(r2));
   await vtCleared(cdp);
   r2 = await pollVt(cdp, navClick("卡片"));
-  check("S2 书架(0)→卡片(3) = fwd", r2.vt === "1" && r2.dir === "fwd", JSON.stringify(r2));
+  check("S2 书架(0)→卡片(4) = fwd", r2.vt === "1" && r2.dir === "fwd", JSON.stringify(r2));
   await vtCleared(cdp);
-  r2 = await pollVt(cdp, navClick("日记"));
-  check("S2 卡片(3)→日记(4) = fwd", r2.vt === "1" && r2.dir === "fwd", JSON.stringify(r2));
-  await vtCleared(cdp);
+  // v48.114（D159）：「日记」页签随功能暂时移除——原 卡片(3)→日记(4)→数据(5) 两步改 卡片(4)→数据(5) 直达
   r2 = await pollVt(cdp, navClick("数据"));
-  check("S2 日记(4)→数据(5) = fwd", r2.vt === "1" && r2.dir === "fwd", JSON.stringify(r2));
+  check("S2 卡片(4)→数据(5) = fwd", r2.vt === "1" && r2.dir === "fwd", JSON.stringify(r2));
   await vtCleared(cdp);
   r2 = await pollVt(cdp, navClick("卡片"));
-  check("S2 数据(5)→卡片(3) = bwd", r2.vt === "1" && r2.dir === "bwd", JSON.stringify(r2));
+  check("S2 数据(5)→卡片(4) = bwd", r2.vt === "1" && r2.dir === "bwd", JSON.stringify(r2));
   await vtCleared(cdp);
   r2 = await pollVt(cdp, navClick("书架"));
-  check("S2 卡片(3)→书架(0) = bwd", r2.vt === "1" && r2.dir === "bwd", JSON.stringify(r2));
+  check("S2 卡片(4)→书架(0) = bwd", r2.vt === "1" && r2.dir === "bwd", JSON.stringify(r2));
   await vtCleared(cdp);
   // reader 特则：进入恒 fwd、离开恒 bwd（不按数值比较）
   r2 = await pollVt(cdp, `(() => { document.querySelector(".shelf-item .book-card")?.click(); return "open"; })()`, 4000);
@@ -143,7 +141,8 @@ try {
 
   // ============ 场景 3：书架往返 stagger（§10-R2） ============
   console.log("— 场景 3：书架往返 stagger —");
-  await pollVt(cdp, navClick("日记"));
+  // v48.114（D159）：日记签移除——原 navClick("日记") 改 卡片（任一非书架页等价）
+  await pollVt(cdp, navClick("卡片"));
   await wait(700);
   r2 = await pollVt(cdp, navClick("书架"));
   check("S3 他页→书架过渡在场（闸门期数据已到）", r2.vt === "1", JSON.stringify(r2));
