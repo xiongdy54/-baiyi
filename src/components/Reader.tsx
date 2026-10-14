@@ -1772,7 +1772,7 @@ export default function Reader({
                       className="dd-item"
                       data-review-extracts
                       disabled={!itemId || !onReviewExtracts}
-                      title="集中复习本书的摘录（遵循每日上限）"
+                      title="开始复习本书的摘录（遵循每日上限）"
                       onClick={() => {
                         setToolMenu(null);
                         onReviewExtracts?.();
@@ -1785,7 +1785,7 @@ export default function Reader({
                       className="dd-item"
                       data-review-cards
                       disabled={!itemId || !onReviewCards}
-                      title="集中复习本书的闪卡（遵循每日上限）"
+                      title="开始复习本书的闪卡（遵循每日上限）"
                       onClick={() => {
                         setToolMenu(null);
                         onReviewCards?.();

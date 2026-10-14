@@ -17,7 +17,7 @@ import RegenCardsModal from "./RegenCardsModal";
 import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
 import ImageLightbox from "./ImageLightbox";
-import { IconVolume } from "./icons";
+import { IconVolume, IconChevronDown } from "./icons";
 import { useDialogA11y } from "../lib/dialogA11y";
 import KnowledgeManager from "./KnowledgeManager";
 // v48.61（D103）：血缘树纯函数（D87 邻接表口径 + D85 聚合计数，复用零新写路径）
@@ -31,7 +31,9 @@ import { readingWorkflow, type DueTopic } from "../lib/readingWorkflow";
 import { extractStatusLabel } from "../lib/sessionQueue";
 import { nextAtText } from "./ExtractCardFace";
 import { settingsStore } from "../lib/settings";
-import { parseCardQuery, cardRowMatches, extractRowMatches, extractScopeConditions } from "../lib/cardQuery";
+import { parseCardQuery, cardRowMatches, extractRowMatches, extractScopeConditions, extractTagsOf } from "../lib/cardQuery";
+// D158：方案条件表格侧过滤（语义与会话组队同源，见 §6.8-5「表格侧语义」）
+import { buildSchemeFilter, cardMatchesScheme, extractMatchesScheme } from "../lib/schemeFilter";
 // v48.60（D101）：标签——批量打标/去标的终值计算 + 词表建议（规则单一源 = src/lib/tags.ts）
 import { applyTagDelta, tagKey, type TagVocabEntry } from "../lib/tags";
 import TagInput from "./TagInput";
@@ -216,6 +218,48 @@ export default function CardBrowser({
   // v48.22（D58 §6.8-6 / O-8 裁定）：摘录正文查找替换（仅选中项、仅正文、纯文本，不做正则）
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
+  // D157：筛选方案（原「筛选牌组」）——入口弹层、创建面板、当前生效方案
+  const [schemeMenuOpen, setSchemeMenuOpen] = useState(false);
+  const [schemeEditorOpen, setSchemeEditorOpen] = useState(false);
+  const [activeSchemeId, setActiveSchemeId] = useState<string | null>(null);
+  const [activeSchemeSig, setActiveSchemeSig] = useState<string>("");
+  const [sigCaptureToken, setSigCaptureToken] = useState(0);
+  const editorSnapshotRef = useRef<{ books: string[]; tags: string[]; kps: { id: string; label: string }[] } | null>(null);
+  const schemeWrapRef = useRef<HTMLSpanElement>(null);
+
+  // D157：当前浏览器筛选的签名——用于判断「方案：X」是否已被用户改动
+  const filterSig = JSON.stringify([
+    kindFilter,
+    bookScope,
+    query.trim(),
+    [...deckExtraBooks].sort(),
+    [...deckTags].sort(),
+    deckKps.map((k) => k.id).sort()
+  ]);
+  // 套用/保存后，在新状态提交后的下一次 effect 里抓取签名
+  useEffect(() => {
+    if (sigCaptureToken > 0) setActiveSchemeSig(filterSig);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sigCaptureToken]);
+  const activeScheme = scopes.find((s) => s.id === activeSchemeId) ?? null;
+  const activeModified = !!activeScheme && activeSchemeSig !== "" && activeSchemeSig !== filterSig;
+
+  // D157：弹层关闭（外部点击 / Esc）——useDismiss 是模态两步走 hook，不适用此处（v2 §6.7 核对）
+  useEffect(() => {
+    if (!schemeMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (schemeWrapRef.current && !schemeWrapRef.current.contains(e.target as Node)) setSchemeMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSchemeMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [schemeMenuOpen]);
 
   const refresh = useCallback(async () => {
     // v48.67（D111）：meta/ids 主进程通道（库指纹变化时清全行缓存）；全量 listAll 退役。
@@ -322,15 +366,33 @@ export default function CardBrowser({
   }, [anchorFilter, extracts]);
 
   // v48.67（D111）：计数口径与原 isDueCard/isLeechOrSuspended 逐字同源（消费轻量行集字段）
+  // v48.111（D156）：补已归档计数——页签直读，纯文字统计行退役
   const counts = useMemo(
     () => ({
       due: metaAll.filter((m) => !m.suspended && (m.due ?? Date.now()) <= Date.now()).length,
       leech: metaAll.filter((m) => m.isLeech || m.suspended).length,
-      suspended: metaAll.filter((m) => m.suspended).length,
-      deferred: metaAll.filter((m) => deferredMap.has(m.id)).length
+      deferred: metaAll.filter((m) => deferredMap.has(m.id)).length,
+      archived: metaAll.filter((m) => m.status === "archived").length
     }),
     [metaAll, deferredMap]
   );
+
+  // v48.111（D156）：知识点页签计数——KnowledgeBase 总数（limit:1 只为取 total；切页签时刷新）
+  const [kpTotal, setKpTotal] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    window.knowledgeAPI
+      ?.listPoints({ limit: 1 })
+      .then((res) => {
+        if (!cancelled) setKpTotal(res?.total ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setKpTotal(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [preset]);
 
   // 类型筛选项从库内实际存在的类型动态生成（未知类型显示原文）
   const typeOptions = useMemo(() => {
@@ -390,15 +452,52 @@ export default function CardBrowser({
     return [{ value: "all", label: "全部来源书" }, ...[...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }))];
   }, [metaAll, extracts]);
 
+  // D158：方案条件作用于表格——来源书（下拉单选 ∪ 追加来源书）+ 标签 + 知识点归并族。
+  // 这几项任何时候都作用于表格（创建面板追加条件即时生效，取消即恢复）；无方案条件时 schemeFilter=null，
+  // 过滤与 v48.111 完全相同。
+  const schemeBookIds = useMemo(
+    () => [...new Set([...(bookScope !== "all" ? [bookScope] : []), ...deckExtraBooks])],
+    [bookScope, deckExtraBooks]
+  );
+  const deckKpKey = deckKps.map((k) => k.id).sort().join("|");
+  const [kpFamilyState, setKpFamilyState] = useState<{ key: string; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!deckKpKey) return;
+    const ids = deckKpKey.split("|");
+    let cancelled = false;
+    window.knowledgeAPI
+      ?.resolveFamilies(ids)
+      .then((fam) => {
+        if (!cancelled) setKpFamilyState({ key: deckKpKey, ids: new Set([...ids, ...fam]) });
+      })
+      .catch(() => {
+        /* 解析失败：保持只按所选知识点本身匹配（只会更少，不会更多） */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deckKpKey]);
+  const schemeFilter = useMemo(
+    () =>
+      buildSchemeFilter({
+        bookItemIds: schemeBookIds,
+        tags: deckTags,
+        kpIds: deckKpKey ? deckKpKey.split("|") : [],
+        // 只采用与当前选择匹配的族；选择刚变化、新族尚未返回时回退为所选 id 本身
+        kpFamily: kpFamilyState && kpFamilyState.key === deckKpKey ? kpFamilyState.ids : null
+      }),
+    [schemeBookIds, deckTags, deckKpKey, kpFamilyState]
+  );
   const scopeMeta = useMemo(
-    () => (bookScope === "all" ? sortedMeta : sortedMeta.filter((m) => String(m.bookId || "") === bookScope)),
-    [sortedMeta, bookScope]
+    () => (schemeFilter ? sortedMeta.filter((m) => cardMatchesScheme(schemeFilter, m)) : sortedMeta),
+    [sortedMeta, schemeFilter]
   );
 
   const scopeExtracts = useMemo(() => {
     const parsed = parseCardQuery(query);
     let list = extracts;
-    if (bookScope !== "all") list = list.filter((e) => String(e.libraryItemId || "") === bookScope);
+    // D158：方案条件（来源书并集 + 标签；知识点条件使摘录行恒不命中）取代原单书等值过滤
+    if (schemeFilter) list = list.filter((e) => extractMatchesScheme(schemeFilter, e.libraryItemId, () => extractTagsOf(e as { tagJson?: string | null })));
     // v48.47（D87）：锚点筛选——摘录表只留闭包内条目（切「摘录」页签可看锚的来源树）
     if (anchorClosure) list = list.filter((e) => anchorClosure.has(String(e.id)));
     // v48.64（D108 §6.8-6 v3）：统一 AST 行判定——kind:card 使摘录行全不命中（原 L378 return []
@@ -423,7 +522,7 @@ export default function CardBrowser({
     else if (sortBy === "priority") sorted.sort((a, b) => Number(b.priority) - Number(a.priority));
     else sorted.sort((a, b) => Number(a.topicNextAt ?? 0) - Number(b.topicNextAt ?? 0));
     return sorted;
-  }, [extracts, bookScope, query, preset, sortBy, anchorClosure]);
+  }, [extracts, schemeFilter, query, preset, sortBy, anchorClosure]);
 
   const cardsMeta = kindFilter === "extract" ? EMPTY_META : scopeMeta;
   const viewExtracts = kindFilter === "card" ? EMPTY_EXTRACTS : scopeExtracts;
@@ -573,11 +672,44 @@ export default function CardBrowser({
     }
   }
 
-  // v48.22（D58 §6.8-5）：筛选牌组——保存当前筛选为复习范围 / 应用 / 集中复习 / 删除
+  // D157：文案辅助（方案摘要 / 会话按钮文案）
+  function kindsLabel(kinds: string[]): string {
+    const c = kinds.includes("card");
+    const e = kinds.includes("extract");
+    if (c && e) return "闪卡 + 摘录";
+    return e ? "摘录" : "闪卡";
+  }
+  function kindsNoun(kinds: string[]): string {
+    const c = kinds.includes("card");
+    const e = kinds.includes("extract");
+    if (c && e) return "闪卡和摘录";
+    return e ? "摘录" : "闪卡";
+  }
+  function bookLabel(id: string): string {
+    return bookOptions.find((o) => o.value === id)?.label ?? "已移除的书";
+  }
+  function startLabel(s: { kinds: string[] }): string {
+    return s.kinds.includes("card") ? "开始复习" : "处理摘录";
+  }
+  function startTitle(s: { kinds: string[] }): string {
+    return s.kinds.includes("card")
+      ? "只复习这个方案范围内的卡片，复习记录照常计入"
+      : "只处理这个方案范围内的摘录，处理记录照常计入";
+  }
+  function describeScope(s: SavedScope): string {
+    const parts: string[] = [kindsLabel(s.kinds)];
+    if (s.bookItemIds.length === 1) parts.push(bookLabel(s.bookItemIds[0]));
+    if (s.bookItemIds.length > 1) parts.push(`${bookLabel(s.bookItemIds[0])} 等 ${s.bookItemIds.length} 本书`);
+    if (s.tags?.length) parts.push(`标签：${s.tags.slice(0, 2).join("、")}${s.tags.length > 2 ? ` 等 ${s.tags.length} 个` : ""}`);
+    if (s.kpIds?.length) parts.push(`知识点 ${s.kpIds.length} 个（仅闪卡）`);
+    if (parts.length === 1) parts.push("不限来源");
+    return parts.join(" · ");
+  }
+
+  // v48.22（D58 §6.8-5）：保存当前筛选为方案 / 套用 / 开始复习 / 删除
   // v48.61（D105）：条件构建器（书多选/标签多选/知识点多选）+「用当前查询创建」提取 book:/tag: 转结构化
-  async function saveDeck() {
-    const fallback = kindFilter === "card" ? "闪卡" : kindFilter === "extract" ? "摘录" : "全部";
-    const name = deckName.trim() || `筛选牌组 · ${fallback}`;
+  // D157：构造逻辑抽为 buildScopeDraft（创建面板「将保存的条件」预览与保存共用同一函数，所见即所存）
+  function buildScopeDraft(): Omit<SavedScope, "id" | "name"> {
     const cond = extractScopeConditions(query);
     const bookItemIds = [
       ...new Set([
@@ -590,9 +722,7 @@ export default function CardBrowser({
       ])
     ];
     const tags = [...new Set([...deckTags, ...cond.tags])];
-    const scope: SavedScope = {
-      id: crypto.randomUUID(),
-      name,
+    return {
       bookItemIds,
       tags,
       kpIds: deckKps.map((k) => k.id),
@@ -601,25 +731,36 @@ export default function CardBrowser({
         ? { ...(deckCapExtracts > 0 ? { extractReviewsPerDay: deckCapExtracts } : {}), ...(deckCapNewCards > 0 ? { newCardsPerDay: deckCapNewCards } : {}) }
         : null
     };
+  }
+  async function saveDeck() {
+    const draft = buildScopeDraft();
+    const fallback = kindFilter === "card" ? "闪卡" : kindFilter === "extract" ? "摘录" : "全部";
+    const name = deckName.trim() || `筛选方案 · ${fallback}`;
+    const scope: SavedScope = { id: crypto.randomUUID(), name, ...draft };
     const next = [...scopes, scope];
     await settingsStore.set("app", "reviewScopes", next);
     setScopes(next);
     setDeckName("");
-    const extra = [
-      tags.length ? `标签 ${tags.length}` : "",
-      scope.kpIds?.length ? `知识点 ${scope.kpIds.length}` : "",
-      bookItemIds.length ? `书 ${bookItemIds.length}` : ""
-    ].filter(Boolean).join(" + ");
-    flashNote(`已保存筛选牌组「${name}」${extra ? `（${extra}）` : ""}`);
+    setDeckCapExtracts(0);
+    setDeckCapNewCards(0);
+    setDeckBookPop(false);
+    setDeckKpPop(false);
+    setDeckBuilderOpen(false);
+    editorSnapshotRef.current = null;
+    setSchemeEditorOpen(false);
+    applyDeck(scope, { silent: true }); // 保存即套用：让表格精确等于方案（先关弹层）
+    setSchemeMenuOpen(true);            // 再自动打开列表，让用户看到新方案
+    flashNote(`已保存并套用方案「${name}」`);
   }
-  function applyDeck(s: SavedScope) {
+  function applyDeck(s: SavedScope, opts?: { silent?: boolean }) {
     setKindFilter(s.kinds.length === 2 ? "both" : s.kinds[0] === "extract" ? "extract" : "card");
     setBookScope(s.bookItemIds[0] || "all");
     setDeckExtraBooks(s.bookItemIds.slice(1));
     setDeckTags(s.tags ?? []);
-    // 知识点 chip 需要 label——经 KnowledgeBase 列表回填（找不到的 id 原样显示，不猜）
+    // 知识点 chip 需要 label——先以 id 占位（filterSig 只取 id，占位→label 补齐不会误标「已改动」），
+    // 再经 KnowledgeBase 列表异步回填（找不到的 id 原样显示，不猜）
     const ids = [...new Set(s.kpIds ?? [])];
-    setDeckKps([]);
+    setDeckKps(ids.map((id) => ({ id, label: id })));
     if (ids.length) {
       window.knowledgeAPI
         ?.listPoints({ limit: 1000 })
@@ -629,13 +770,66 @@ export default function CardBrowser({
         })
         .catch(() => setDeckKps(ids.map((id) => ({ id, label: id }))));
     }
-    setDeckBuilderOpen(Boolean(s.tags?.length || s.kpIds?.length || s.bookItemIds.length > 1));
-    flashNote(`已应用「${s.name}」`);
+    // D157：方案即完整条件——套用时清空搜索框（即时值 + 防抖值都清，否则 300ms 后回填旧词）
+    setQuery("");
+    setQueryInput("");
+    setActiveSchemeId(s.id);
+    setActiveSchemeSig("");
+    setSigCaptureToken((t) => t + 1);
+    setSchemeMenuOpen(false);
+    if (!opts?.silent) flashNote(`已套用方案「${s.name}」`);
+  }
+  function exitScheme(opts?: { silent?: boolean }) {
+    setKindFilter("card");
+    setBookScope("all");
+    setDeckExtraBooks([]);
+    setDeckTags([]);
+    setDeckKps([]);
+    setActiveSchemeId(null);
+    setActiveSchemeSig("");
+    if (!opts?.silent) flashNote("已退出方案");
   }
   async function deleteDeck(id: string) {
+    const target = scopes.find((s) => s.id === id);
     const next = scopes.filter((s) => s.id !== id);
     await settingsStore.set("app", "reviewScopes", next);
     setScopes(next);
+    if (id === activeSchemeId) exitScheme({ silent: true }); // 删除当前方案 = 同时退出方案
+    if (target) flashNote(`已删除方案「${target.name}」`);
+  }
+  function openSchemeEditor() {
+    editorSnapshotRef.current = { books: deckExtraBooks, tags: deckTags, kps: deckKps };
+    setDeckName("");
+    setDeckCapExtracts(0);
+    setDeckCapNewCards(0);
+    setDeckBuilderOpen(deckExtraBooks.length > 0 || deckTags.length > 0 || deckKps.length > 0);
+    setSchemeMenuOpen(false);
+    setSchemeEditorOpen(true);
+  }
+  function cancelSchemeEditor() {
+    const snap = editorSnapshotRef.current;
+    if (snap) {
+      setDeckExtraBooks(snap.books);
+      setDeckTags(snap.tags);
+      setDeckKps(snap.kps);
+    }
+    editorSnapshotRef.current = null;
+    setDeckBookPop(false);
+    setDeckKpPop(false);
+    setDeckBuilderOpen(false);
+    setSchemeEditorOpen(false);
+  }
+  function startScheme(s: SavedScope) {
+    if (!onStartSession) return;
+    setSchemeMenuOpen(false);
+    onStartSession({
+      bookItemIds: s.bookItemIds,
+      tags: s.tags,
+      kpIds: s.kpIds,
+      kinds: s.kinds,
+      name: s.name,
+      limits: (s.limits as Record<string, number> | null) ?? null
+    });
   }
 
   /** 查找替换（O-8：仅选中项、仅正文、纯文本；逐条落 edit 操作日志，撤销按次回退） */
@@ -848,35 +1042,33 @@ export default function CardBrowser({
 
   return (
     <div className="queue-wrap" ref={wrapRef}>
-      {/* v48.40（D80）：吸顶头带——计数 meta + preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline） */}
+      {/* v48.40（D80）：吸顶头带——preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline）。
+          v48.111（D156）：纯文字统计行退役，计数归一进页签（.tab-cnt，无括号） */}
       <div className="cb-head">
         <div className="cb-head-inner">
-          <div className="review-count mono">
-            共 {metaAll.length} 张 · 到期 {counts.due} · 难点 {counts.leech} · 暂停 {counts.suspended}
-          </div>
           <div className="seg-tabs" role="tablist" aria-label="卡片预设范围">
             <button className={preset === "all" ? "active" : ""} onClick={() => setPreset("all")}>
-              全部卡片
+              全部卡片<span className="tab-cnt">{metaAll.length}</span>
             </button>
             <button className={preset === "due" ? "active" : ""} onClick={() => setPreset("due")}>
-              到期卡片 ({counts.due})
+              到期卡片<span className="tab-cnt">{counts.due}</span>
             </button>
             <button className={preset === "leech" ? "active" : ""} onClick={() => setPreset("leech")}>
-              记忆难点 ({counts.leech})
+              记忆难点<span className="tab-cnt">{counts.leech}</span>
             </button>
             {/* v34（M12，§4.16）：今日同源暂缓——被同源卡延后到明日的卡（点开行详情可见原因） */}
             {counts.deferred > 0 && (
               <button className={preset === "deferred" ? "active" : ""} onClick={() => setPreset("deferred")}>
-                今日暂缓 ({counts.deferred})
+                今日暂缓<span className="tab-cnt">{counts.deferred}</span>
               </button>
             )}
             {/* v40（K1，D37）：知识地基管理面（§9.1 K1-4 最小管理页） */}
             <button className={preset === "knowledge" ? "active" : ""} onClick={() => setPreset("knowledge")}>
-              知识点
+              知识点{kpTotal != null && <span className="tab-cnt">{kpTotal}</span>}
             </button>
             {/* v48.60（D102）：已归档（不再关心）——默认列表不含归档，这里显式进入 */}
             <button className={preset === "archived" ? "active" : ""} onClick={() => setPreset("archived")}>
-              已归档
+              已归档<span className="tab-cnt">{counts.archived}</span>
             </button>
           </div>
         </div>
@@ -946,6 +1138,101 @@ export default function CardBrowser({
           </div>
           <Dropdown title="按来源书筛选" value={bookScope} options={bookOptions} onChange={setBookScope} />
         </div>
+        {/* D157：筛选方案入口（原「筛选牌组」常驻行） */}
+        <span className="cb-scheme" data-deck-bar ref={schemeWrapRef}>
+          <button
+            type="button"
+            className={`btn btn-sm cb-scheme-btn${activeScheme && !activeModified ? " is-active" : " btn-outline"}`}
+            data-scheme-toggle
+            aria-haspopup="dialog"
+            aria-expanded={schemeMenuOpen}
+            title={
+              !activeScheme
+                ? "筛选方案：把常用的筛选条件存下来，之后一键套用，或只复习这个范围"
+                : activeModified
+                  ? `方案「${activeScheme.name}」（已改动）：${describeScope(activeScheme)}。当前筛选已偏离这个方案，重新套用可恢复。`
+                  : `方案「${activeScheme.name}」：${describeScope(activeScheme)}。表格已按此方案筛选；页签、类型、状态和搜索框仍可在其上继续筛选。`
+            }
+            onClick={() => setSchemeMenuOpen((v) => !v)}
+          >
+            {activeScheme ? (
+              <>
+                <span className="cb-scheme-btn-label">方案：{activeScheme.name}</span>
+                {activeModified && <span className="n"> · 已改动</span>}
+              </>
+            ) : (
+              <>
+                筛选方案
+                {scopes.length > 0 && <span className="n"> {scopes.length}</span>}
+              </>
+            )}
+            <IconChevronDown size={12} className="dd-caret" />
+          </button>
+          {activeScheme && !activeModified && onStartSession && (
+            <button type="button" className="btn btn-outline btn-sm" data-scheme-start-active
+              title={startTitle(activeScheme)} onClick={() => startScheme(activeScheme)}>
+              {startLabel(activeScheme)}
+            </button>
+          )}
+          {activeScheme && (
+            <button type="button" className="btn btn-outline btn-sm" data-scheme-exit
+              title="退出方案：清除这个方案带来的筛选条件" onClick={() => exitScheme()}>
+              退出方案
+            </button>
+          )}
+          {schemeMenuOpen && (
+            <div className="cb-scheme-pop" role="dialog" aria-label="筛选方案" data-scheme-menu>
+              <div className="cb-scheme-head">
+                <span className="cb-scheme-title">筛选方案</span>
+                <span className="form-hint">把常用的筛选条件存成方案，之后可一键套用，或只复习这个范围。不会移动或复制卡片。</span>
+              </div>
+              {scopes.length === 0 ? (
+                <div className="cb-scheme-empty" data-scheme-empty>
+                  <span className="cb-scheme-empty-title">还没有筛选方案</span>
+                  <span className="form-hint">先用搜索框和上方筛选找到想要的卡片，再点下面的按钮，把这组条件存成方案。</span>
+                </div>
+              ) : (
+                <ul className="cb-scheme-list">
+                  {scopes.map((s) => (
+                    <li key={s.id} className={`cb-scheme-row${s.id === activeSchemeId ? " is-active" : ""}`} data-deck-item>
+                      <div className="cb-scheme-info">
+                        <span className="cb-scheme-name" title={s.name}>
+                          {s.name}
+                          {s.id === activeSchemeId && (
+                            <span className="cb-scheme-flag">{activeModified ? "当前 · 已改动" : "当前"}</span>
+                          )}
+                        </span>
+                        <span className="cb-scheme-sum">{describeScope(s)}</span>
+                      </div>
+                      <div className="cb-scheme-actions">
+                        <button type="button" className="btn btn-outline btn-sm" data-deck-apply
+                          title="套用：把卡片表切换到这个方案的条件" onClick={() => applyDeck(s)}>
+                          套用
+                        </button>
+                        {onStartSession && (
+                          <button type="button" className="btn btn-outline btn-sm" data-deck-start
+                            title={startTitle(s)} onClick={() => startScheme(s)}>
+                            {startLabel(s)}
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-outline btn-sm cb-scheme-del" data-deck-delete
+                          title="删除这个方案（卡片不受影响）" onClick={() => void deleteDeck(s.id)}>
+                          删除
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="cb-scheme-foot">
+                <button type="button" className={`btn btn-sm ${scopes.length === 0 ? "btn-primary" : "btn-outline"}`}
+                  data-scheme-new onClick={openSchemeEditor}>
+                  ＋ 将当前筛选存为方案
+                </button>
+              </div>
+            </div>
+          )}
+        </span>
       </div>
 
       {/* v48.47（D87）：锚点筛选条——来自阅读/摘录浮窗「已制卡 N 张」或卡详情血缘树「查看卡片」；计数＝闭包内卡数 */}
@@ -959,175 +1246,207 @@ export default function CardBrowser({
         </div>
       )}
       {/* v48.40（D80）：批量动作条移至吸底 stage-bar（见页尾）——未选中时此处不再常驻空条 */}
-      {/* v48.22（D58 §6.8-5）：筛选牌组＝保存下来的复习范围（不移动卡片，故复习记录照常入 FSRS） */}
-      <div className="cb-batch" data-deck-bar>
-        <span className="mono">筛选牌组</span>
-        <input
-          className="cb-search cb-deck-name"
-          data-deck-name
-          placeholder="牌组名称（可留空自动命名）"
-          value={deckName}
-          onChange={(e) => setDeckName(e.target.value)}
-        />
-        <button className="btn btn-outline btn-sm" data-deck-save onClick={() => void saveDeck()}>
-          保存当前筛选
-        </button>
-        {/* v48.61（D105）：条件构建器开关——书多选 / 标签多选 / 知识点多选 */}
-        <button
-          className={`btn btn-sm ${deckBuilderOpen ? "btn-primary" : "btn-outline"}`}
-          data-deck-builder-toggle
-          title="展开条件构建器：按书 / 标签 / 知识点组合保存范围（条件间 AND）"
-          onClick={() => setDeckBuilderOpen((v) => !v)}
-        >
-          条件构建器
-        </button>
-        <span className="mono">上限覆写</span>
-        <input
-          className="mono input-num"
-          data-deck-cap-extracts
-          type="number"
-          min={0}
-          max={9999}
-          title="该范围的摘录处理上限（0=继承全局；只能收紧）"
-          value={deckCapExtracts}
-          onChange={(e) => setDeckCapExtracts(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))}
-        />
-        <span className="form-hint">摘录/日</span>
-        <input
-          className="mono input-num"
-          data-deck-cap-newcards
-          type="number"
-          min={0}
-          max={9999}
-          title="该范围的新卡上限（0=继承全局；只能收紧）"
-          value={deckCapNewCards}
-          onChange={(e) => setDeckCapNewCards(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))}
-        />
-        <span className="form-hint">新卡/日</span>
-        {scopes.map((s) => (
-          <span className="cb-deck" data-deck-item key={s.id}>
-            <button className="btn btn-outline btn-sm" data-deck-apply title="把浏览器的筛选切到该范围" onClick={() => applyDeck(s)}>
-              {s.name}
-              <span className="n">
-                {" "}
-                {s.kinds.join("/")}
-                {s.bookItemIds.length ? ` · 书 ${s.bookItemIds.length}` : ""}
-                {s.tags?.length ? ` · 标签 ${s.tags.length}` : ""}
-                {s.kpIds?.length ? ` · 知识点 ${s.kpIds.length}` : ""}
-              </span>
-            </button>
-            {onStartSession && (
-              <button
-                className="btn btn-outline btn-sm"
-                data-deck-start
-                title="按该范围开始集中复习（记录照常计入 FSRS）"
-                onClick={() => onStartSession({ bookItemIds: s.bookItemIds, tags: s.tags, kpIds: s.kpIds, kinds: s.kinds, name: s.name, limits: (s.limits as Record<string, number> | null) ?? null })}
-              >
-                集中复习
-              </button>
-            )}
-            <button className="btn btn-outline btn-sm" data-deck-delete onClick={() => void deleteDeck(s.id)}>
-              删除
-            </button>
-          </span>
-        ))}
-        {scopes.length === 0 && <span className="form-hint">把当前「类别 + 来源书」筛选存下来，即可反复进入同一复习范围。</span>}
-      </div>
+      {/* D157：新建筛选方案面板（按需出现；替代原「筛选牌组」常驻行 + 条件构建器行） */}
+      {schemeEditorOpen && (() => {
+        const draft = buildScopeDraft();
+        const noScope = draft.bookItemIds.length === 0 && !draft.tags?.length && !draft.kpIds?.length;
+        return (
+          <section className="cb-scheme-editor" data-scheme-editor aria-label="新建筛选方案"
+            onKeyDown={(e) => { if (e.key === "Escape") cancelSchemeEditor(); }}>
+            <div className="cb-scheme-editor-title">新建筛选方案</div>
 
-      {/* v48.61（D105）：条件构建器行——书多选 + 标签多选（词表建议）+ 知识点多选（KnowledgeBase 检索口径） */}
-      {deckBuilderOpen && (
-        <div className="cb-batch" data-deck-builder>
-          <span className="mono">条件</span>
-          <span className="cb-deck-chips">
-            {deckExtraBooks.map((id) => (
-              <span key={id} className="tag-chip tag-chip-static" data-deck-book-chip>
-                {bookOptions.find((o) => o.value === id)?.label ?? id}
-                <button
-                  className="cb-deck-chip-x"
-                  aria-label="移除该书条件"
-                  onClick={() => setDeckExtraBooks((b) => b.filter((x) => x !== id))}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            <button className="btn btn-outline btn-sm" data-deck-add-book onClick={() => setDeckBookPop((v) => !v)}>
-              ＋书
-            </button>
-          </span>
-          {deckBookPop && (
-            <span className="cb-deck-pop" data-deck-book-pop>
-              {bookOptions.filter((o) => o.value !== "all").map((o) => (
-                <label key={o.value} className="cb-deck-pop-row">
-                  <input
-                    type="checkbox"
-                    checked={deckExtraBooks.includes(o.value)}
-                    onChange={(e) =>
-                      setDeckExtraBooks((b) => (e.target.checked ? [...b, o.value] : b.filter((x) => x !== o.value)))
-                    }
-                  />
-                  {o.label}
-                </label>
-              ))}
-              {bookOptions.filter((o) => o.value !== "all").length === 0 && <span className="form-hint">暂无可选书</span>}
-            </span>
-          )}
-          {tagsEnabled && (
-            <span className="cb-deck-tags" data-deck-tags>
-              <TagInput value={deckTags} onChange={setDeckTags} suggestions={tagVocab} ariaLabel="牌组标签条件" placeholder="标签条件（层级前缀，回车确认）" />
-            </span>
-          )}
-          <span className="cb-deck-chips">
-            {deckKps.map((k) => (
-              <span key={k.id} className="tag-chip tag-chip-static" data-deck-kp-chip>
-                {k.label}
-                <button
-                  className="cb-deck-chip-x"
-                  aria-label="移除该知识点条件"
-                  onClick={() => setDeckKps((ks) => ks.filter((x) => x.id !== k.id))}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            <button className="btn btn-outline btn-sm" data-deck-add-kp onClick={() => setDeckKpPop((v) => !v)}>
-              ＋知识点
-            </button>
-          </span>
-          {deckKpPop && (
-            <span className="cb-deck-pop cb-deck-pop-col" data-deck-kp-pop>
-              <input
-                className="cb-search"
-                data-deck-kp-search
-                placeholder="搜索知识点（名称/别名）…"
-                value={kpQuery}
-                onChange={(e) => setKpQuery(e.target.value)}
-              />
-              <span className="cb-deck-pop-list">
-                {kpOptions.map((p) => (
-                  <label key={p.id} className="cb-deck-pop-row">
-                    <input
-                      type="checkbox"
-                      checked={deckKps.some((k) => k.id === p.id)}
-                      onChange={(e) =>
-                        setDeckKps((ks) =>
-                          e.target.checked ? [...ks, { id: p.id, label: p.label }] : ks.filter((x) => x.id !== p.id)
-                        )
-                      }
-                    />
-                    {p.label}
-                    {p.status === "merged" && <span className="form-hint">（已归并，匹配时自动展开）</span>}
+            <div className="cb-scheme-field">
+              <span className="cb-scheme-label">方案名称</span>
+              <div className="cb-scheme-value">
+                <input
+                  className="cb-search cb-scheme-name-input"
+                  data-deck-name
+                  autoFocus
+                  placeholder="例如：考研英语（留空则自动命名）"
+                  value={deckName}
+                  onChange={(e) => setDeckName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") void saveDeck(); }}
+                />
+              </div>
+            </div>
+
+            <div className="cb-scheme-field">
+              <span className="cb-scheme-label">将保存的条件</span>
+              <div className="cb-scheme-value" data-scheme-preview>
+                <div className="cb-scheme-cond">
+                  <span className="cb-scheme-cond-key">内容</span>
+                  <span>{kindsLabel(draft.kinds)}</span>
+                  <span className="form-hint">（在上方工具行切换）</span>
+                </div>
+                {draft.bookItemIds.length > 0 && (
+                  <div className="cb-scheme-cond">
+                    <span className="cb-scheme-cond-key">来源书</span>
+                    {draft.bookItemIds.map((id) => <span key={id} className="tag-chip tag-chip-static">{bookLabel(id)}</span>)}
+                  </div>
+                )}
+                {!!draft.tags?.length && (
+                  <div className="cb-scheme-cond">
+                    <span className="cb-scheme-cond-key">标签</span>
+                    {draft.tags.map((t) => <span key={t} className="tag-chip tag-chip-static">{t}</span>)}
+                  </div>
+                )}
+                {deckKps.length > 0 && (
+                  <div className="cb-scheme-cond">
+                    <span className="cb-scheme-cond-key">知识点</span>
+                    {deckKps.map((k) => <span key={k.id} className="tag-chip tag-chip-static">{k.label}</span>)}
+                    <span className="form-hint">（仅闪卡）</span>
+                  </div>
+                )}
+                {noScope && (
+                  <span className="form-hint">未限定来源书、标签或知识点：这个方案将包含所有{kindsNoun(draft.kinds)}。</span>
+                )}
+                <span className="form-hint">页签、类型、状态、排序和「记忆接地」不属于方案，不会保存。</span>
+                {query.trim() !== "" && (
+                  <span className="form-hint">搜索框里只有 book: 和 tag: 条件会被保存，其余内容不会保存。</span>
+                )}
+              </div>
+            </div>
+
+            <div className="cb-scheme-field">
+              <span className="cb-scheme-label">追加条件</span>
+              <div className="cb-scheme-value">
+                <div>
+                  <button type="button" className="btn btn-outline btn-sm" data-deck-builder-toggle
+                    aria-expanded={deckBuilderOpen} onClick={() => setDeckBuilderOpen((v) => !v)}>
+                    追加条件（可选）
+                    <IconChevronDown size={12} className={`dd-caret cb-scheme-disclosure${deckBuilderOpen ? " is-open" : ""}`} />
+                  </button>
+                </div>
+                <span className="form-hint" data-scheme-live-hint>追加的条件会立即作用于下方表格；点「取消」可撤销。</span>
+                {deckBuilderOpen && (
+                  <div className="cb-scheme-builder" data-deck-builder>
+                    <span className="cb-deck-chips">
+                      {deckExtraBooks.map((id) => (
+                        <span key={id} className="tag-chip tag-chip-static" data-deck-book-chip>
+                          {bookOptions.find((o) => o.value === id)?.label ?? id}
+                          <button
+                            className="cb-deck-chip-x"
+                            aria-label="移除该书条件"
+                            onClick={() => setDeckExtraBooks((b) => b.filter((x) => x !== id))}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                      <button className="btn btn-outline btn-sm" data-deck-add-book onClick={() => setDeckBookPop((v) => !v)}>
+                        ＋ 来源书
+                      </button>
+                    </span>
+                    {deckBookPop && (
+                      <span className="cb-deck-pop" data-deck-book-pop>
+                        {bookOptions.filter((o) => o.value !== "all").map((o) => (
+                          <label key={o.value} className="cb-deck-pop-row">
+                            <input
+                              type="checkbox"
+                              checked={deckExtraBooks.includes(o.value)}
+                              onChange={(e) =>
+                                setDeckExtraBooks((b) => (e.target.checked ? [...b, o.value] : b.filter((x) => x !== o.value)))
+                              }
+                            />
+                            {o.label}
+                          </label>
+                        ))}
+                        {bookOptions.filter((o) => o.value !== "all").length === 0 && <span className="form-hint">暂无可选书</span>}
+                      </span>
+                    )}
+                    {tagsEnabled && (
+                      <span className="cb-deck-tags" data-deck-tags>
+                        <TagInput value={deckTags} onChange={setDeckTags} suggestions={tagVocab} ariaLabel="方案标签条件" placeholder="标签（回车确认，支持层级前缀）" />
+                      </span>
+                    )}
+                    <span className="cb-deck-chips">
+                      {deckKps.map((k) => (
+                        <span key={k.id} className="tag-chip tag-chip-static" data-deck-kp-chip>
+                          {k.label}
+                          <button
+                            className="cb-deck-chip-x"
+                            aria-label="移除该知识点条件"
+                            onClick={() => setDeckKps((ks) => ks.filter((x) => x.id !== k.id))}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                      <button className="btn btn-outline btn-sm" data-deck-add-kp onClick={() => setDeckKpPop((v) => !v)}>
+                        ＋ 知识点
+                      </button>
+                    </span>
+                    {deckKpPop && (
+                      <span className="cb-deck-pop cb-deck-pop-col" data-deck-kp-pop>
+                        <input
+                          className="cb-search"
+                          data-deck-kp-search
+                          placeholder="搜索知识点（名称/别名）…"
+                          value={kpQuery}
+                          onChange={(e) => setKpQuery(e.target.value)}
+                        />
+                        <span className="cb-deck-pop-list">
+                          {kpOptions.map((p) => (
+                            <label key={p.id} className="cb-deck-pop-row">
+                              <input
+                                type="checkbox"
+                                checked={deckKps.some((k) => k.id === p.id)}
+                                onChange={(e) =>
+                                  setDeckKps((ks) =>
+                                    e.target.checked ? [...ks, { id: p.id, label: p.label }] : ks.filter((x) => x.id !== p.id)
+                                  )
+                                }
+                              />
+                              {p.label}
+                              {p.status === "merged" && <span className="form-hint">（已归并，匹配时自动展开）</span>}
+                            </label>
+                          ))}
+                          {kpOptions.length === 0 && <span className="form-hint">无匹配知识点</span>}
+                        </span>
+                      </span>
+                    )}
+                    {deckKps.length > 0 && <span className="form-hint" data-deck-kp-hint>知识点条件只对闪卡生效，摘录不会被选中</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="cb-scheme-field">
+              <span className="cb-scheme-label">每日上限</span>
+              <div className="cb-scheme-value">
+                <div className="cb-scheme-caps">
+                  <label className="cb-scheme-cap">
+                    新卡最多
+                    <input className="mono input-num" data-deck-cap-newcards type="number" min={0} max={9999}
+                      placeholder="沿用全局"
+                      value={deckCapNewCards === 0 ? "" : deckCapNewCards}
+                      onChange={(e) => setDeckCapNewCards(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))} />
+                    张/天
                   </label>
-                ))}
-                {kpOptions.length === 0 && <span className="form-hint">无匹配知识点</span>}
-              </span>
-            </span>
-          )}
-          {deckKps.length > 0 && <span className="form-hint" data-deck-kp-hint>知识点条件仅对闪卡生效（摘录行不命中）</span>}
-        </div>
-      )}
+                  <label className="cb-scheme-cap">
+                    摘录最多
+                    <input className="mono input-num" data-deck-cap-extracts type="number" min={0} max={9999}
+                      placeholder="沿用全局"
+                      value={deckCapExtracts === 0 ? "" : deckCapExtracts}
+                      onChange={(e) => setDeckCapExtracts(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))} />
+                    条/天
+                  </label>
+                </div>
+                <span className="form-hint">不作用于表格显示；仅在点「开始复习 / 处理摘录」时限制该范围当天的新卡与摘录处理量（与全局取较小值）。留空 = 沿用全局。</span>
+              </div>
+            </div>
 
-      {loaded && cardsMeta.length === 0 && viewExtracts.length === 0 && (
+            <div className="cb-scheme-editor-actions">
+              <button type="button" className="btn btn-outline btn-sm" data-scheme-cancel onClick={cancelSchemeEditor}>取消</button>
+              <button type="button" className="btn btn-primary btn-sm" data-deck-save onClick={() => void saveDeck()}>保存方案</button>
+            </div>
+          </section>
+        );
+      })()}
+
+      {/* v48.111（D156）：空态按可见视图收敛——摘录页签自带行内提示，不再叠加全局空态；
+          摘录页签下闪卡表恒空（cardsMeta 强制空集），表头纯噪声，一并隐藏 */}
+      {loaded && kindFilter !== "extract" && cardsMeta.length === 0 && (kindFilter === "card" || viewExtracts.length === 0) && (
         <div className="empty-state">
           <p className="empty-text">
             {metaAll.length === 0 ? "还没有卡片。在阅读器中选中文字即可制卡。" : "没有符合筛选条件的卡片。"}
@@ -1135,6 +1454,7 @@ export default function CardBrowser({
         </div>
       )}
 
+      {/* v48.111（D156）：摘录页签下不渲染恒空的闪卡表（cardsMeta 强制空集，表头纯噪声） */}
       {preset === "leech" ? (
         <div className="queue-list">
           {/* v48.67（D111）：该视图未虚拟化（queue-row 变高不可窗口化）——只列前 LEECH_LIST_CAP 条 + 计数提示 */}
@@ -1165,7 +1485,7 @@ export default function CardBrowser({
             </div>
           ))}
         </div>
-      ) : (
+      ) : kindFilter !== "extract" && (
         <div className="cb-table" role="table" ref={cardTableRef}>
           <div className="cb-row cb-row-head" role="row">
             <span className="cb-pick">选</span>
@@ -1206,7 +1526,11 @@ export default function CardBrowser({
                 {frontPreview(c)}
               </span>
               <span>{typeLabel(c.cardType)}</span>
-              <span>{statusOf(c)}{deferredMap.has(c.id) ? " · 同源暂缓" : ""}</span>
+              {/* v48.111（D156）：状态列 ellipsis 可能截断「· 同源暂缓」后缀，title 保全文可读 */}
+              <span title={`${statusOf(c)}${deferredMap.has(c.id) ? " · 同源暂缓" : ""}`}>
+                {statusOf(c)}
+                {deferredMap.has(c.id) ? " · 同源暂缓" : ""}
+              </span>
               <span className="mono">{dueText(c)}</span>
               <span className="cb-num mono">{c.fsrs?.reps ?? 0}</span>
               <span className="cb-num mono">{c.fsrs?.lapses ?? 0}</span>
@@ -1265,7 +1589,7 @@ export default function CardBrowser({
               <span className="cb-src" title={e.docTitle}>
                 {e.docTitle}
               </span>
-              <span>
+              <span className="cb-act">
                 {/* 原「学习队列」页的管理动作之一：跳转回原文位置（§6.8-8 进度安全：跳转不写阅读进度） */}
                 {onJumpToDoc && e.contextRef?.documentId ? (
                   <button

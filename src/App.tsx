@@ -636,7 +636,7 @@ export default function App() {
         scopeLimits={view.limits ?? null}
         scopeTags={view.scopeTags}
         scopeKpIds={view.scopeKpIds}
-        header={`集中复习：《${view.title}》`}
+        header={`处理摘录：《${view.title}》`}
         onExit={() => changeView({ name: "shelf" })}
         onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}

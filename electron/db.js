@@ -1839,7 +1839,20 @@ function cardMetaRow(r) {
     lapses: fsrs && Number.isFinite(Number(fsrs.lapses)) ? Number(fsrs.lapses) : 0,
     reps: fsrs && Number.isFinite(Number(fsrs.reps)) ? Number(fsrs.reps) : 0,
     mem: r.memory_ref_json ? 1 : 0,
-    createdAt: r.created_at
+    createdAt: r.created_at,
+    // D158：方案表格过滤所需的只读字段（空值省略，压缩 30 万行的 IPC 体积；内联解析与
+    // queryCardBrowserIds 的 evalViewOf 同款写法——坏 JSON / 非串元素丢弃）
+    ...(r.tags_json
+      ? (() => {
+          try {
+            const v = JSON.parse(r.tags_json);
+            return Array.isArray(v) && v.length ? { tags: v.filter((t) => typeof t === "string") } : {};
+          } catch {
+            return {};
+          }
+        })()
+      : {}),
+    ...(r.knowledge_point_id ? { kpId: String(r.knowledge_point_id) } : {})
   };
 }
 
@@ -1939,7 +1952,8 @@ async function getCardBrowserMeta() {
   const meta = [];
   await scanCards(
     `SELECT c.id, c.priority, c.status, c.card_type, c.fsrs_json, c.leech_json,
-            c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.created_at,
+            c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.tags_json,
+            c.knowledge_point_id, c.created_at,
             li.id AS library_item_id, li.title AS docTitle
      ${BROWSER_JOIN}
      ORDER BY c.created_at DESC`,

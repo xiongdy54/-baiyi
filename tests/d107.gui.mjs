@@ -117,6 +117,11 @@ try {
   await wait(600);
   const batch = await cdp.eval(`(() => JSON.stringify({ bar: !!document.querySelector("[data-batch-tag-add]"), barAny: !!document.querySelector("[data-batch-archive-cards]") }))()`);
   check("关闭后批量条无「打标签」（批量条本身在场）", String(batch).includes('"bar":false') && String(batch).includes('"barAny":true'), batch);
+  // D157：创建面板两步打开后再操作构建器开关
+  await cdp.eval(`(() => { document.querySelector('[data-scheme-toggle]')?.click(); return "t"; })()`);
+  await wait(400);
+  await cdp.eval(`(() => { document.querySelector('[data-scheme-new]')?.click(); return "n"; })()`);
+  await wait(400);
   await cdp.eval(`(() => { document.querySelector('[data-deck-builder-toggle]')?.click(); return "opened"; })()`);
   await wait(400);
   const builder = await cdp.eval(`(() => JSON.stringify({ tagRow: !!document.querySelector("[data-deck-tags]"), kpBtn: !!document.querySelector("[data-deck-add-kp]") }))()`);

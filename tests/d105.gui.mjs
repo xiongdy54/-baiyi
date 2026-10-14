@@ -79,8 +79,12 @@ try {
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return "nav"; })()`);
   await wait(1800);
 
-  // 1) 打开条件构建器 → 标签 chip
-  check("条件构建器开关在场", (await cdp.eval(`(() => { const b = document.querySelector('[data-deck-builder-toggle]'); if (!b) return "NOTFOUND"; b.click(); return "CLICKED"; })()`)) === "CLICKED", "无开关");
+  // 1) 打开创建面板（D157：弹层 → 新建）→ 条件构建器 → 标签 chip
+  check("方案入口在场可开", (await cdp.eval(`(() => { const t = document.querySelector('[data-scheme-toggle]'); if (!t) return "NOTFOUND"; t.click(); return "CLICKED"; })()`)) === "CLICKED", "无入口");
+  await wait(400);
+  check("创建面板可开（＋ 将当前筛选存为方案）", (await cdp.eval(`(() => { const b = document.querySelector('[data-scheme-new]'); if (!b) return "NOTFOUND"; b.click(); return "CLICKED"; })()`)) === "CLICKED", "无新建钮");
+  await wait(400);
+  check("追加条件开关在场", (await cdp.eval(`(() => { const b = document.querySelector('[data-deck-builder-toggle]'); if (!b) return "NOTFOUND"; b.click(); return "CLICKED"; })()`)) === "CLICKED", "无开关");
   await wait(400);
   const builder = await cdp.eval(`(() => JSON.stringify({ row: !!document.querySelector('[data-deck-builder]'), tagInput: !!document.querySelector('[data-deck-tags] .tag-input-box input'), kpBtn: !!document.querySelector('[data-deck-add-kp]'), bookBtn: !!document.querySelector('[data-deck-add-book]') }))()`);
   check("构建器行 + 标签输入 + ＋书/＋知识点 在场", String(builder).includes('"row":true') && String(builder).includes('"tagInput":true') && String(builder).includes('"kpBtn":true') && String(builder).includes('"bookBtn":true'), builder);
@@ -97,17 +101,17 @@ try {
   await wait(400);
   const hint = await cdp.eval(`(() => JSON.stringify({ chip: !!document.querySelector('[data-deck-kp-chip]'), hint: document.querySelector('[data-deck-kp-hint]')?.textContent ?? "" }))()`);
   check("知识点候选经 KnowledgeBase 检索命中并勾选", kpPick === "PICKED", kpPick);
-  check("知识点 chip 在场且「仅对闪卡生效」提示如实显示", String(hint).includes('"chip":true') && String(hint).includes("知识点条件仅对闪卡生效"), hint);
+  check("知识点 chip 在场且「仅对闪卡生效」提示如实显示", String(hint).includes('"chip":true') && String(hint).includes("知识点条件只对闪卡生效"), hint);
   await cdp.eval(`(() => { document.querySelector('[data-deck-kp-chip] .cb-deck-chip-x')?.click(); return "removed"; })()`);
   await wait(300);
 
-  // 3) 保存 → scope 落库（tags=[考研]）→ 牌组 chip 显示「标签 1」
+  // 3) 保存 → scope 落库（tags=[考研]）→ 弹层自动打开，方案行显示摘要「标签：考研」
   await cdp.eval(`(() => { document.querySelector('[data-deck-save]')?.click(); return "saved"; })()`);
   await wait(600);
   const scopeVal = await cdp.eval(`(async () => { const scopes = await window.settingsAPI.get("app", "reviewScopes"); const s = (scopes ?? []).find((x) => (x.tags ?? []).includes("考研")); return JSON.stringify({ found: !!s, tags: s?.tags, kinds: s?.kinds }); })()`);
   check("scope 落库：tags=[考研]（从构建器转结构化）", String(scopeVal).includes('"found":true') && String(scopeVal).includes("考研"), scopeVal);
-  const deckChip = await cdp.eval(`(() => { const b = document.querySelector('[data-deck-item] [data-deck-apply]'); return b ? b.textContent : "NONE"; })()`);
-  check("已存牌组 chip 显示「标签 1」", String(deckChip).includes("标签 1"), deckChip);
+  const deckChip = await cdp.eval(`(() => { const li = document.querySelector('[data-deck-item]'); return li ? li.textContent : "NONE"; })()`);
+  check("已存方案行显示名称与「标签：考研」摘要", String(deckChip).includes("标签：考研"), deckChip);
 
   // 4) 会话过滤（db 级 e2e）：tags 条件只放行标签卡；kpIds 条件只放行持 KP 卡；无条件两卡都回
   const sessionRaw = String(await cdp.eval(`(async () => { const withTag = await window.sessionAPI.queue(undefined, { scope: { kinds: ["card"], tags: ["考研"] } }); const withKp = await window.sessionAPI.queue(undefined, { scope: { kinds: ["card"], kpIds: [${JSON.stringify(ids.kp)}] } }); const none = await window.sessionAPI.queue(undefined, { scope: { kinds: ["card"] } }); const front = (q) => q.items.map((it) => it.card?.noteText ?? "").join("|"); return JSON.stringify({ tag: front(withTag), kp: front(withKp), none: front(none) }); })()`));
@@ -117,12 +121,41 @@ try {
   check("会话按 kpIds 过滤：只回持 KP 卡", session.kp.includes("标签卡") && !session.kp.includes("无标签卡"), sessionRaw);
   check("无条件 scope：两卡都回（不误伤）", session.none.includes("标签卡") && session.none.includes("无标签卡"), sessionRaw);
 
-  // 5) 集中复习 e2e：按该 scope 进入复习页，队首是标签卡
+  // 5) 开始复习 e2e：按该 scope 进入复习页，队首是标签卡
   await cdp.eval(`(() => { document.querySelector('[data-deck-item] [data-deck-start]')?.click(); return "start"; })()`);
   await wait(2500);
   const review = await cdp.eval(`(() => JSON.stringify({ face: document.querySelector(".review-front")?.textContent ?? "", plain: document.body.textContent.includes(${JSON.stringify(PLAIN_MARK)}) }))()`);
-  check("集中复习按 scope 过滤：队首为标签卡", String(review).includes(TAG_MARK.slice(8, 16)) || String(review).includes("标签卡"), review);
+  check("开始复习按 scope 过滤：队首为标签卡", String(review).includes(TAG_MARK.slice(8, 16)) || String(review).includes("标签卡"), review);
   check("未标记卡未进入会话", String(review).includes('"plain":false'), review);
+
+  // 6) D157 方案状态回归：保存含知识点的方案 → 不误标「已改动」；改动搜索 → 已改动；退出 → 恢复
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return !!b; })()`);
+  await wait(1600);
+  await cdp.eval(`(() => { document.querySelector('[data-scheme-toggle]')?.click(); return "t"; })()`);
+  await wait(400);
+  await cdp.eval(`(() => { document.querySelector('[data-scheme-new]')?.click(); return "n"; })()`);
+  await wait(400);
+  await cdp.eval(`(() => { document.querySelector('[data-deck-builder-toggle]')?.click(); return "b"; })()`);
+  await wait(300);
+  await cdp.eval(`(() => { document.querySelector('[data-deck-add-kp]')?.click(); return "pop"; })()`);
+  await wait(500);
+  await typeEnter(cdp, `[data-deck-kp-search]`, "D105 测试知识点");
+  await wait(900);
+  await cdp.eval(`(() => { const rows = [...document.querySelectorAll('[data-deck-kp-pop] .cb-deck-pop-row')]; const hit = rows.find((r) => r.textContent.includes("D105 测试知识点")); hit?.querySelector('input').click(); return !!hit; })()`);
+  await wait(300);
+  await cdp.eval(`(() => { document.querySelector('[data-deck-save]')?.click(); return "s"; })()`);
+  await wait(1800);
+  const st1 = await cdp.eval(`(() => { const t = document.querySelector('[data-scheme-toggle]'); return JSON.stringify({ txt: t?.textContent ?? "", active: !!document.querySelector('[data-scheme-start-active]') }); })()`);
+  check("保存含知识点方案后：工具行显示「方案：」且不误标「已改动」", String(st1).includes("方案：") && !String(st1).includes("已改动"), st1);
+  check("保存含知识点方案后：「开始复习」在位（start-active）", String(st1).includes('"active":true'), st1);
+  await cdp.eval(`(() => { const i = document.querySelector(".cb-toolbar input.cb-search"); const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; setter.call(i, "改动探针"); i.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+  await wait(700);
+  const st2 = await cdp.eval(`(() => { const t = document.querySelector('[data-scheme-toggle]'); return JSON.stringify({ txt: t?.textContent ?? "", active: !!document.querySelector('[data-scheme-start-active]') }); })()`);
+  check("搜索改动后：工具行标「已改动」且「开始复习」消失", String(st2).includes("已改动") && String(st2).includes('"active":false'), st2);
+  await cdp.eval(`(() => { document.querySelector('[data-scheme-exit]')?.click(); return "e"; })()`);
+  await wait(800);
+  const st3 = await cdp.eval(`(() => document.querySelector('[data-scheme-toggle]')?.textContent.trim() || "")()`);
+  check("退出方案后：工具行恢复「筛选方案」开头", String(st3).startsWith("筛选方案"), st3);
 
   console.log(`\n==== d105.gui：${pass} 通过 / ${fail} 失败 ====`);
   try { cdp.ws.close(); } catch { /* 已断开 */ }
