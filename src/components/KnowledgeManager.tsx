@@ -446,7 +446,7 @@ export default function KnowledgeManager() {
             <option value="">领域（可空）</option>
             {UDC_LEAVES.map((d) => (
               <option key={d.code} value={d.code}>
-                {d.code} {d.label}
+                {d.label}
               </option>
             ))}
           </select>
