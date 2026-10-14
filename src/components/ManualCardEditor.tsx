@@ -10,6 +10,7 @@
 // ManualFormHandle.setFrontValue 写入源全文并聚焦、光标落文末；幽灵层经 ghost/onGhostAccept
 // 渲染进第一字段（GrowField，Alt+Enter 坞内固定键）。表单其余内部状态、载荷、题型页签零改动。
 import { forwardRef, useImperativeHandle, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cardsApi, needsDateStamp, parseCloze, similaritySearch } from "../lib/cards";
 import { bigramJaccard } from "../lib/disambiguateCore.mjs";
 import { PRECHECK_K, answerDiffers, clipText, manualPrecheckText, shouldRunPrecheck } from "../lib/disambiguateUi";
@@ -898,19 +899,53 @@ export default function ManualCardEditor({
   );
 }
 
-/** UDC 领域多选（M5/R17）：选中的标签以 chip 展示（点击移除），菜单只列受控清单 */
+/** UDC 领域多选（M5/R17）：选中的标签以 chip 展示（点击移除），菜单只列受控清单。
+ *  v48.106（D151）：①菜单项只显领域名（UDC 分类号退役，与 chip 的 udcLabel 同口径——用户实测
+ *  「领域名前不应带数字」）；②菜单 createPortal 到 body + fixed 定位——「更多」折叠区
+ *  .collapse-inner 的 overflow:hidden（grid 0fr↔1fr 收合所需）会把 absolute 菜单盒拦腰裁掉
+ *  （超出折叠区下缘的部分永久不可见，菜单内滚到底也救不回，用户实测「滚不动了文字还是显示不全」），
+ *  portal 是唯一彻底逃逸；贴窗口底放不下翻向上；宿主滚动即收起（fixed 菜单不随锚点移动）。 */
 function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; minWidth: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    // fixed 菜单不随滚动移动：任何宿主滚动（capture 捕获坞内滚动容器）直接收起，防菜单悬空脱锚
+    const onScroll = (e: Event) => {
+      if (menuRef.current && e.target instanceof Node && menuRef.current.contains(e.target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    document.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("scroll", onScroll, true);
+    };
   }, [open]);
-  const options = [...UDC_LEAVES.map((l) => ({ code: l.code, label: `${l.code} ${l.label}` })), { code: UDC_OTHER, label: "其他" }];
+  function toggle() {
+    if (!open) {
+      const r = btnRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const GAP = 4; // 与 .dd-menu top: calc(100% + 4px) 同值
+      const MENU_H = 240; // .udc-menu max-height；受控清单 25 项恒超限 ⇒ 实际渲染高度恒 = 240
+      const flipUp = r.bottom + GAP + MENU_H > window.innerHeight;
+      setPos({
+        top: flipUp ? Math.max(GAP, r.top - GAP - MENU_H) : r.bottom + GAP,
+        left: r.left,
+        minWidth: r.width
+      });
+    }
+    setOpen((o) => !o);
+  }
+  const options = [...UDC_LEAVES.map((l) => ({ code: l.code, label: l.label })), { code: UDC_OTHER, label: "其他" }];
   return (
     <div className="udc-picker" ref={ref}>
       {value.length > 0 && (
@@ -932,12 +967,17 @@ function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[
       )}
       {value.length < UDC_MAX && (
         <div className="dd">
-          <button type="button" className="dd-btn" onClick={() => setOpen((o) => !o)}>
+          <button ref={btnRef} type="button" className="dd-btn" onClick={toggle}>
             {value.length === 0 ? "选择领域" : "再加一个领域"}
             <IconChevronDown size={12} className="dd-caret" />
           </button>
-          {open && (
-            <div className="dd-menu dd-menu-left udc-menu" role="listbox">
+          {open && pos && createPortal(
+            <div
+              className="dd-menu dd-menu-left udc-menu"
+              role="listbox"
+              ref={menuRef}
+              style={{ position: "fixed", top: pos.top, left: pos.left, right: "auto", minWidth: pos.minWidth }}
+            >
               {options.map((o) => (
                 <button
                   key={o.code}
@@ -954,7 +994,8 @@ function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[
                   {o.label}
                 </button>
               ))}
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       )}

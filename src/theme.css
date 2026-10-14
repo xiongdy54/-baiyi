@@ -8736,37 +8736,73 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
    动效纪律（D120 R2）：零动画库；把手 chevron rotate 与 hover 底色入 no-preference 作用域；
    折叠沿用 .collapse-clip 通用规则（reduce 块显式降级见下）；零裸写时长/缓动；hover 零抬升零阴影。
    ========================================================================== */
-/* v48.104（D149 ②）：题型选择＝分段控件（grey-1 轨道 + 纸色选中块 + 微圆角；用户明示本板块
-   可偏离瑞士风零圆角），与头行「下划线页签」语法分离——选择器一眼可辨是按钮组而非页签。
-   覆盖 8043 起 .wb-tabs 全局页签规则（margin/高度/下划线 ::after）。 */
+/* v48.104（D149 ②）→ v48.110（D155）：题型选择＝四枚等宽文本钮（无轨道灰底——D154 直角化后
+   用户再裁定灰底轨道也偏离整体风格，全部拆除）；选中态＝顶栏「制卡台」按钮 is-on 同款语言
+   （accent-soft 软底 + accent 字 + 600，theme.css .topbar-wb），hover＝grey-1 软底（topbar-wb
+   hover 同款——轨道拆除后由 hover/选中填充承担控件可供性，Better Layout「控件须与静态文本可辨」）；
+   字号 11px meta → 13px secondary（Better Typography 12px 下限 + 与顶栏按钮同族）。
+   覆盖 8043 起 .wb-tabs 全局页签规则（margin/高度/下划线 ::after）。
+   v48.105（D150）：轨道与钮 flex:1 占满整行、四等分——上下两条选择器同族必须同宽。 */
 .wb-cards-modes {
   flex: none;
   display: flex;
-  padding: var(--sp-2) var(--wb-pad);
+  /* v48.108（D153 ②）：上缘 8px＝与解读方式行（D153 ① 对称边距）同节奏；下缘 0——轨道→首字段
+     间距由 wb-manual-body 的 padding-top 8px 独供给（原 8+8 叠成 16px，字段随本决策上移 8px） */
+  padding: var(--sp-2) var(--wb-pad) 0;
 }
 .wb-cards-modes .wb-tabs {
+  flex: 1;
+  min-width: 0;
   align-self: center;
   gap: 2px;
   margin-left: 0;
-  padding: 2px;
-  background: var(--grey-1);
-  border-radius: 8px;
 }
 .wb-cards-modes .wb-tabs button {
+  flex: 1;
+  min-width: 0;
   height: 24px;
-  padding: 0 var(--sp-3);
-  border-radius: 6px;
-  font-size: var(--fs-meta);
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-secondary);
   color: var(--text-secondary);
 }
-.wb-cards-modes .wb-tabs button:hover { background: none; color: var(--text-primary); }
+.wb-cards-modes .wb-tabs button:hover { background: var(--grey-1); color: var(--text-primary); }
 .wb-cards-modes .wb-tabs button.on {
-  background: var(--paper);
-  color: var(--text-primary);
-  font-weight: 500;
-  box-shadow: inset 0 0 0 1px var(--border-subtle); /* 静态 hairline 环（非阴影抬升），暗色主题下选中块仍可辨 */
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
 }
 .wb-cards-modes .wb-tabs button.on::after { content: none; }
+@media (prefers-reduced-motion: no-preference) {
+  /* D120 双速 hover（§3.1，与 .topbar-wb/.wb-mode-btn 同款）：hover 进入 --dur-hover --ease-enter、离开回落 --dur-view --ease-out-soft（hover 新增底色，transition 补 background-color） */
+  .wb-cards-modes .wb-tabs button { transition: color var(--dur-view) var(--ease-out-soft), background-color var(--dur-view) var(--ease-out-soft); }
+  .wb-cards-modes .wb-tabs button:hover { transition: color var(--dur-hover) var(--ease-enter), background-color var(--dur-hover) var(--ease-enter); }
+}
+
+/* v48.108（D153 ③）→ v48.110（D155）：头行板块页签（手动制卡｜AI 制卡）＝两枚等宽文本钮——
+   灰底轨道拆除（D155），选中态＝顶栏「制卡台」按钮 is-on 同款（accent-soft 软底 + accent 字 +
+   600），hover＝grey-1 软底，字号 13px secondary；下划线形式被用户否决（凌乱），flex:1 平分与
+   右端 chevron（D146）不动。覆盖 8055 起 stretch/下划线 ::after 与 8352 起字号内边距。 */
+.wb-head .dock-tabs {
+  align-self: center;
+}
+.wb-head .dock-tabs > button[role="tab"] {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+}
+.wb-head .dock-tabs > button[role="tab"]:hover { background: var(--grey-1); color: var(--text-primary); }
+.wb-head .dock-tabs > button[role="tab"].on {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.wb-head .dock-tabs > button[role="tab"].on::after { content: none; }
+@media (prefers-reduced-motion: no-preference) {
+  /* D120 双速 hover（§3.1，与 .wb-mode-btn 同款）：hover 进入 --dur-hover --ease-enter、离开回落 --dur-view --ease-out-soft */
+  .wb-head .dock-tabs > button[role="tab"] { transition: color var(--dur-view) var(--ease-out-soft), background-color var(--dur-view) var(--ease-out-soft); }
+  .wb-head .dock-tabs > button[role="tab"]:hover { transition: color var(--dur-hover) var(--ease-enter), background-color var(--dur-hover) var(--ease-enter); }
+}
 
 .wb-explain {
   min-width: 0;
@@ -8837,15 +8873,16 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   flex: none;
   display: flex;
   gap: 2px;
-  padding: 2px;
-  margin: 0 var(--wb-pad) var(--sp-2);
-  background: var(--grey-1);
-  border-radius: 8px;
+  /* v48.108（D153 ①）→ v48.110（D155）：上下对称 8px——在解释板块上缘 hairline 与 composer 上缘
+     hairline 之间垂直居中；左右 16px 与题型行、composer 同槽；灰底轨道拆除（D155），行内四枚
+     等宽文本钮的 hover/选中填充承担控件可供性 */
+  margin: var(--sp-2) var(--wb-pad);
 }
-/* v48.104（D149 ②）：解读方式四钮由「页签同族 ghost 语法」改为分段控件（与题型选择同族）——
-   用户实测旧样式与页签长得一样、看不出是按钮。flex:1 四等分（对齐即秩序）；
-   选中＝纸色块 + 静态 hairline 环 + 主文色 500；.idle（空输入∧无语境）＝helper 字色 + cursor default
-   但保持可点击（§4.3 空格「仅置方式」，语义矩阵不变）；声明顺序 .on 在 .idle 后压字色。 */
+/* v48.104（D149 ②）→ v48.110（D155）：解读方式四钮＝等宽文本钮（与题型选择同族；灰底轨道与
+   圆角均已拆除——D154/D155，选中态＝顶栏「制卡台」按钮 is-on 同款 accent-soft 软底 + accent 字
+   + 600）。flex:1 四等分（对齐即秩序）；hover＝grey-1 软底（topbar-wb 同款）；
+   .idle（空输入∧无语境）＝helper 字色 + cursor default 但保持可点击（§4.3 空格「仅置方式」，
+   语义矩阵不变）；声明顺序 .on 在 .idle 后压字色。 */
 .wb-mode-btn {
   position: relative;
   flex: 1;
@@ -8853,20 +8890,21 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   padding: 0 var(--sp-2);
   background: none;
   border: 0;
-  border-radius: 6px;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-secondary);
   line-height: 1;
   color: var(--text-secondary);
   white-space: nowrap;
   cursor: pointer;
 }
-.wb-mode-btn:hover { color: var(--text-primary); }
+.wb-mode-btn:hover { background: var(--grey-1); color: var(--text-primary); }
 .wb-mode-btn.idle { color: var(--text-helper); cursor: default; }
+/* idle 悬停不显 hover 底（视觉 idle 语义，D144 §4.3）；:not(.on) 排除「选中∧idle」（空输入时
+   「自动」两态叠加）——否则 (0,3,0) 的 idle:hover 会压掉 (0,2,0) 的 .on 选中底色 */
+.wb-mode-btn.idle:not(.on):hover { background: none; color: var(--text-helper); }
 .wb-mode-btn.on {
-  background: var(--paper);
-  color: var(--text-primary);
-  font-weight: 500;
-  box-shadow: inset 0 0 0 1px var(--border-subtle);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
 }
 /* D144 #4（§3.3/§4.2/§7/§8）：跨页签幽灵草稿层——field 容器 relative 内 absolute 铺满，
    padding 与输入面一致（.wb-field 输入面＝wb-field-inner 4px 0；.wb-free textarea＝4px 0 5px）；
