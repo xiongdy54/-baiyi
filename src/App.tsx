@@ -718,7 +718,7 @@ export default function App() {
             title="制卡台（Ctrl+K）"
             onClick={requestWorkbenchToggle}
           >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3" y="5" width="18" height="14" rx="1" />
               <path d="M7 10h10M7 14h6" />
             </svg>
@@ -726,9 +726,9 @@ export default function App() {
             {wb.busy && <i className="topbar-wb-dot" aria-hidden="true" />}
           </button>
           <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M18.92 10.02 22.13 9.66A10.4 10.4 0 0 1 22.13 14.34L18.92 13.98A7.2 7.2 0 0 1 17.18 17L19.09 19.61A10.4 10.4 0 0 1 15.04 21.95L13.74 18.99A7.2 7.2 0 0 1 10.26 18.99L8.96 21.95A10.4 10.4 0 0 1 4.91 19.61L6.82 17A7.2 7.2 0 0 1 5.08 13.98L1.87 14.34A10.4 10.4 0 0 1 1.87 9.66L5.08 10.02A7.2 7.2 0 0 1 6.82 7L4.91 4.39A10.4 10.4 0 0 1 8.96 2.05L10.26 5.01A7.2 7.2 0 0 1 13.74 5.01L15.04 2.05A10.4 10.4 0 0 1 19.09 4.39L17.18 7A7.2 7.2 0 0 1 18.92 10.02Z" />
               <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
           <div className="win-controls">
