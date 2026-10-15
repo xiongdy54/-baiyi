@@ -926,19 +926,7 @@ body.has-skin .topbar { background: transparent; }
 }
 .shelf-spacer { flex: 1 1 var(--sp-6); }
 .shelf-hint { font-size: var(--fs-meta); font-weight: 500; color: var(--text-helper); white-space: nowrap; }
-.shelf-kbd {
-  font-family: var(--font-mono);
-  font-size: var(--fs-meta);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-subtle);
-  padding: calc(var(--sp-1) / 2) var(--sp-1);
-  white-space: nowrap;
-}
-/* 快捷键做进主按钮标签的一部分，不再单占一格（工具条横向预算很紧） */
-.shelf-kbd-in {
-  color: var(--accent-on);
-  border-color: color-mix(in srgb, var(--accent-on) 45%, transparent);
-}
+/* 主行动纯文字后（v48.119/D164）快捷键小键标两组样式已无消费者，随之退役 */
 .shelf-seg { display: flex; border: 1px solid var(--border-subtle); border-radius: var(--radius); }
 .shelf-seg button {
   position: relative;
@@ -986,7 +974,7 @@ body.has-skin .topbar { background: transparent; }
 /* 单调退让阶梯：900 收密度、1100 收提示、1280 收分组标签。
    反例（实测踩过）：阈值各回各的非单调排列会让 760 / 900 两处挤成两行。 */
 @container shelf (max-width: 1280px) { .shelf-label { display: none; } }
-@container shelf (max-width: 1100px) { .shelf-hint, .shelf-kbd, .shelf-kbd-in { display: none; } }
+@container shelf (max-width: 1100px) { .shelf-hint { display: none; } }
 @container shelf (max-width: 900px) { .shelf-group.is-density { display: none; } }
 
 /* 网格：列宽下限走 Token，剩余宽度由 1fr 等分吸收 → 任意窗口宽度右侧富余恒为 0。

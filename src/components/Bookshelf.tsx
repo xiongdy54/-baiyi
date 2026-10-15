@@ -9,7 +9,7 @@ import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from ".
 import { eventBus } from "../lib/eventbus";
 import {
   IconAlert, IconArrowLeft, IconEllipsis, IconFolderPlus, IconLanguages,
-  IconLayoutGrid, IconList, IconPencil, IconPlus, IconTrash,
+  IconLayoutGrid, IconList, IconPencil, IconTrash,
 } from "./icons";
 import Dropdown from "./Dropdown";
 import {
@@ -974,16 +974,11 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
         <Dropdown value={sort} options={SHELF_SORTS} onChange={(v) => setSort(v as ShelfSort)} title="排序方式" align="left" />
       </span>
       <span className="shelf-spacer" />
-      <span className="shelf-hint">
-        {manual ? "拖到书上成组 · Alt+←/→ 重排" : "非手动顺序，拖拽已停用"}
-      </span>
-      <span className="shelf-hint">
-        <span className="shelf-kbd">Ctrl</span>+<span className="shelf-kbd">Alt</span>+<span className="shelf-kbd">N</span> 添加
-      </span>
+      {/* 拖拽提示只余停用说明（v48.120/D165）：手动顺序下的操作说明文字退役，Alt+←/→ 键盘等价语义不变 */}
+      {!manual && <span className="shelf-hint">非手动顺序，拖拽已停用</span>}
+      {/* 主行动纯文字（v48.119/D164）：快捷键 Ctrl+Alt+N 的注册契约不变（§4.2-21），按钮不再复述 */}
       <button type="button" className="btn btn-primary btn-sm" onClick={onAddMaterial}>
-        <IconPlus />
         添加材料
-        <span className="shelf-kbd shelf-kbd-in">Ctrl+Alt+N</span>
       </button>
     </div>
   );
