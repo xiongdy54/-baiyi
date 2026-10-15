@@ -1124,7 +1124,10 @@ export default function CardBrowser({
             ]}
             onChange={setSortBy}
           />
-          {/* v46（M14-UM2，§6.7.3）：记忆接地筛选——情境来自记忆的卡（含「来源存疑」） */}
+          {/* v46（M14-UM2，§6.7.3）：记忆接地筛选——情境来自记忆的卡（含「来源存疑」）。
+              v49.5（D179）：随用户记忆功能暂时移除（D159 同批口径，v48.114 摘除时遗漏的本面）——
+              按钮自产品面摘除，memFilter 状态与过滤链（`if (memFilter)` 行）原样保留；
+              重实装时按 §6.7.3 回插本钮。
           <button
             className={`btn btn-sm ${memFilter ? "btn-primary" : "btn-outline"}`}
             title="只显示情境来自用户记忆的卡片"
@@ -1132,6 +1135,7 @@ export default function CardBrowser({
           >
             记忆接地
           </button>
+          */}
         </div>
         {/* v48.22（D58 §6.8-6）：类别切换（闪卡 / 摘录 / 全部） + 按来源书筛选 */}
         <div className="cb-cluster">
@@ -1310,7 +1314,8 @@ export default function CardBrowser({
                 {noScope && (
                   <span className="form-hint">未限定来源书、标签或知识点：这个方案将包含所有{kindsNoun(draft.kinds)}。</span>
                 )}
-                <span className="form-hint">页签、类型、状态、排序和「记忆接地」不属于方案，不会保存。</span>
+                {/* v49.5（D179）：「记忆接地」随用户记忆功能暂时移除，文案同步摘除（重实装时回插该列举） */}
+                <span className="form-hint">页签、类型、状态、排序不属于方案，不会保存。</span>
                 {query.trim() !== "" && (
                   <span className="form-hint">搜索框里只有 book: 和 tag: 条件会被保存，其余内容不会保存。</span>
                 )}

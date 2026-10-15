@@ -130,10 +130,12 @@ runFlow(flow, async () => {
     await measure(h, "设置");
     await realClick(h, "button");
     await h.evaluate(`const b=[...document.querySelectorAll('button')].find(x=>/添加材料/.test(x.textContent||'')); if(b) b.click(); return !!b;`);
+    await wait(600);
+    await h.evaluate(`const it=[...document.querySelectorAll('[role=menu] .dd-item')].find(x=>/粘贴材料/.test(x.textContent||'')); if(it) it.click(); return !!it;`);
     await wait(2000);
-    p = await h.shot("f48v-13-添加材料模态");
+    p = await h.shot("f48v-13-粘贴材料编辑器");
     flow.record("截图", path.basename(p));
-    await measure(h, "添加材料模态");
+    await measure(h, "粘贴材料编辑器");
 
     flow.section("V5 小屏与高 DPI 复拍（同一批界面）");
     await h.send("Emulation.setDeviceMetricsOverride", { width: 1111, height: 800, deviceScaleFactor: 1.5, mobile: false });

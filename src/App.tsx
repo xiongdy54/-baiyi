@@ -7,7 +7,10 @@ import Reader from "./components/Reader";
 import ExtractReviewView from "./components/ExtractReviewView";
 import ReviewView from "./components/ReviewView";
 import CardBrowser from "./components/CardBrowser";
-import AddBookModal from "./components/AddBookModal";
+// v49.3（D177）：添加材料两分——书架选单「粘贴材料」与 Ctrl+Alt+N 的全窗口编辑器
+import PasteMaterialModal from "./components/PasteMaterialModal";
+// 选单「导入文件」的进度/报告模态（挂载即开文件选择器）
+import ImportFilesModal from "./components/ImportFilesModal";
 import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
 import Dashboard from "./components/dashboard/Dashboard";
 // v48.80（D124）：数据页顶部「下一步」面板（不是 WidgetDef，不进布局编辑）；v48.81（D125）迁为顶栏独立页签页
@@ -163,9 +166,12 @@ export default function App() {
   }, []);
   // D123：独立制卡台窗口建卡后，主窗口各页刷新
   useEffect(() => window.windowAPI?.onCardsChanged?.(() => eventBus.emit("cards/changed")), []);
-  // v36（M8-A）：添加材料模态提升到 App 级——全局快捷键 Ctrl+Alt+N 与书架入口共用同一模态，
-  // 且快捷键呼出时**不切换视图**（阅读位置与复习会话原地保留，D34-⑤）
-  const [addMaterialOpen, setAddMaterialOpen] = useState(false);
+  // v36（M8-A）：添加材料模态提升到 App 级——书架入口与全局快捷键共用；且快捷键呼出时
+  // **不切换视图**（阅读位置与复习会话原地保留，D34-⑤）。
+  // v49.3（D177）：原四合一 AddBookModal 两分——书架「添加材料」选单「粘贴材料」项与
+  // Ctrl+Alt+N（直达粘贴编辑器）走 pasteOpen；选单「导入文件」项走 importOpen。
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   /* v48.15 / D51：顶栏「书架」被点时自增——已在书架时点它也要能退出文件夹回顶层（Bookshelf 的第二条出路） */
   const [shelfTopTick, setShelfTopTick] = useState(0);
   const [view, setView] = useState<View>({ name: "shelf" });
@@ -292,7 +298,7 @@ export default function App() {
         /* 播种失败不影响启动 */
       }
     })();
-    return shortcutsApi.onOpenAddMaterial(() => setAddMaterialOpen(true));
+    return shortcutsApi.onOpenAddMaterial(() => setPasteOpen(true));
   }, []);
 
   // M4：设置弹窗打开期间抑制全局快捷键（弹窗无输入焦点时按键不得触发其下层的复习/阅读动作）
@@ -732,7 +738,8 @@ export default function App() {
     mainContent = (
       <Bookshelf
         onOpenBook={openBook}
-        onAddMaterial={() => setAddMaterialOpen(true)}
+        onImportFiles={() => setImportOpen(true)}
+        onPasteMaterial={() => setPasteOpen(true)}
         topLevelSignal={shelfTopTick}
       />
     );
@@ -823,16 +830,17 @@ export default function App() {
       </div>
       {/* v48.13（P2）：全局后台活动指示器——生成任务在主进程持有，与当前界面无关 */}
       <BackgroundActivity onOpenMap={(documentId, mapId, resumeRunId) => void openMaterialMap(documentId, mapId, resumeRunId)} />
-      {addMaterialOpen && (
-        <AddBookModal
+      {importOpen && <ImportFilesModal onClose={() => setImportOpen(false)} />}
+      {pasteOpen && (
+        <PasteMaterialModal
           onSave={async (title, markdown, lang) => {
             const created = await libraryApi.createFromPaste(title, markdown);
             // v38（D35）：粘贴书随建册带上语言属性（空=未知）
             if (created && lang) await libraryApi.setItemLang(created.id, lang);
             eventBus.emit("library/changed");
-            // D120：成功关窗收口到 AddBookModal 的 requestClose()（两步走出场），父级不再直接卸载
+            // D120：成功关窗收口到 PasteMaterialModal 的 requestClose()（两步走出场），父级不再直接卸载
           }}
-          onClose={() => setAddMaterialOpen(false)}
+          onClose={() => setPasteOpen(false)}
         />
       )}
       {settingsOpen && (

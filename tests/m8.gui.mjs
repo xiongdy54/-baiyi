@@ -3,7 +3,7 @@
 // 覆盖（§9.1 M8-A 验收 ①–⑧；db/协议层由 tests/m8.test.cjs 锁定）：
 //   导航「日记」→ 主窗口输入行提交一条 → 全局快捷键状态（两键）→ toggleCapture 弹出捕获窗口
 //   → 捕获窗口输入即自动保存 → 不发送隐藏再呼出仍可续写 → 发送定格为一条且主窗口实时出现
-//   → Ctrl+Alt+N 就地弹出「添加书籍」且不切视图 → 设置页 sec-global 冲突拒绝 → 重启不丢 → 清理
+//   → Ctrl+Alt+N 就地弹出「粘贴材料」编辑器且不切视图（v49.3/D177 改直达粘贴） → 设置页 sec-global 冲突拒绝 → 重启不丢 → 清理
 import { spawn, execSync } from "node:child_process";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
@@ -247,7 +247,7 @@ try {
   check("发送后草稿行消失、输入行回来", ms.draft === false && ms.composerBack === true, mainAfterSend);
   check("发送内容含续写文本（发送定格的是最新内容）", String(ms.text).includes("续写并发送"), mainAfterSend);
 
-  // 9. Ctrl+Alt+N 同一入口：就地弹出「添加书籍」，不切换视图
+  // 9. Ctrl+Alt+N 同一入口：就地弹出「粘贴材料」编辑器（v49.3/D177 改直达粘贴），不切换视图
   const addReq = await main.eval(`(async () => await window.shortcutsAPI.requestAddMaterial())()`);
   check("requestAddMaterial 调用成功", addReq === true, addReq);
   await wait(900);
@@ -257,7 +257,7 @@ try {
     journalStillMounted: !!document.querySelector(".journal")
   })`);
   const mm = JSON.parse(modalState || "{}");
-  check("弹出「添加书籍」模态", mm.modal === true && mm.heading === "添加书籍", modalState);
+  check("弹出「粘贴材料」编辑器（D177：Ctrl+Alt+N 直达粘贴，不再开四合一模态）", mm.modal === true && mm.heading === "粘贴材料", modalState);
   check("弹模态不切换视图（日记页仍在，阅读/复习现场不被打断）", mm.journalStillMounted === true, modalState);
   await main.eval(`document.querySelector(".modal-close")?.click()`);
   await wait(500);
