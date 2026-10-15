@@ -112,7 +112,9 @@ function app_main() {
 
     // ---------- E4 玻璃拟态已下线 ----------
     flow.section("E4 第二皮肤（玻璃拟态）不得复活（v48.14 删除、swiss 规范禁止）");
-    const glass = [...css, ...tsx].filter((f) => /backdrop-filter|下蛋|Dream.*glass|glassmorphism/i.test(f.t)).map((f) => rel(f.p));
+    // v49.0 / D170（P6）：src/skins/_lab/ 是仅 DEV 注册的引擎能力回归样本，含受控 backdrop-filter
+    //（顶栏玻璃，同屏 1 处，§2.12 预算）——扫描范围收窄豁免该目录（生产构建产物搜不到 skin-lab）。
+    const glass = [...css, ...tsx].filter((f) => !f.p.includes(`${ROOT}\\src\\skins\\_lab`) && !f.p.replace(/\\/g, "/").includes("src/skins/_lab") && /backdrop-filter|下蛋|Dream.*glass|glassmorphism/i.test(f.t)).map((f) => rel(f.p));
     flow.check("src 内不得出现 backdrop-filter/玻璃拟态", glass.length === 0, "无", glass);
     const skinsDir = path.join(ROOT, "src", "skins");
     const skins = fs.existsSync(skinsDir) ? fs.readdirSync(skinsDir) : [];

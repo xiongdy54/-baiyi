@@ -11,6 +11,14 @@ const BUILTIN: SkinEntry[] = [
   { manifest: claudeManifest, load: () => import("./claude").then((m) => m.default) },
 ];
 
+// v49.0 / D170（P6）：引擎能力回归样本——仅开发环境注册；生产构建产物搜不到 skin-lab
+if (import.meta.env.DEV) {
+  BUILTIN.push({
+    manifest: (await import("./_lab/manifest")).labManifest,
+    load: () => import("./_lab/index").then((m) => m.default),
+  });
+}
+
 export const SKINS: readonly SkinEntry[] = BUILTIN;
 export const DEFAULT_SKIN_ID = "none";
 

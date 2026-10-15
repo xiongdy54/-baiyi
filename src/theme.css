@@ -660,6 +660,52 @@ body.skin-chrome-transparent { background: transparent; }
 /* 透明 chrome 的背景层需要透出：顶栏去底色，仅保留 hairline */
 body.skin-chrome-transparent .topbar { background: transparent; }
 
+/* ---------- 皮肤卡片（v49.0 / P7，设置页皮肤选择） ---------- */
+.skin-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.skin-card {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  grid-template-areas: "preview name" "preview desc" "preview meta";
+  column-gap: var(--sp-3);
+  row-gap: 2px;
+  align-items: center;
+  text-align: left;
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+.skin-card:hover { background: var(--grey-1); }
+.skin-card.active { border-color: var(--accent); }
+.skin-card.disabled { opacity: 0.45; cursor: default; }
+.skin-card-preview {
+  grid-area: preview;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  width: 64px;
+  height: 40px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+.skin-card-preview i { display: block; }
+.skin-card-name { grid-area: name; font-size: var(--fs-secondary); font-weight: 500; color: var(--text-primary); }
+.skin-card-desc {
+  grid-area: desc;
+  font-size: var(--fs-meta);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.skin-card-meta { grid-area: meta; font-size: var(--fs-meta); color: var(--grey-3); }
+
 /* ---------- 顶栏（48px，hairline 下缘） ---------- */
 
 .topbar {

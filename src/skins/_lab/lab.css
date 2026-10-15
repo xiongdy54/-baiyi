@@ -1,0 +1,33 @@
+/* 引擎实验台 CSS（仅 DEV，v49.0 / D170 P6）
+   能力样本：@property 色相循环动画（仅 motion-full）+ 顶栏受控玻璃拟态（backdrop-filter 全应用唯一 1 处，
+   满足 A7 预算「同屏 ≤3、不在阅读正文滚动容器」）+ 透明 chrome 验证（chrome:"transparent" 由宿主挂类）。 */
+
+/* @property：--skin-lab-hue 注册为 <angle> 可插值 → 缓慢色相循环（A6：motion-full 作用域） */
+@property --skin-lab-hue {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+body.skin-skin-lab.motion-full {
+  --skin-lab-hue: 0deg;
+  animation: skin-skin-lab-hue-cycle 24s linear infinite;
+}
+@keyframes skin-skin-lab-hue-cycle {
+  from { --skin-lab-hue: 0deg; }
+  to { --skin-lab-hue: 360deg; }
+}
+/* 色相消费者：前景层画布滤镜（演示 Token 化 @property 动画；停止动画时静止） */
+body.skin-skin-lab [data-lab-hue] {
+  filter: hue-rotate(var(--skin-lab-hue));
+}
+
+/* 受控玻璃拟态：顶栏毛玻璃（backdrop-filter ×1；A7 预算内） */
+body.skin-skin-lab [data-ui="topbar"] {
+  background: color-mix(in srgb, var(--paper) 55%, transparent);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+/* 透明 chrome 下的活动卡/弹层保持实底（surface Token 已随 base） */
+body.skin-skin-lab [data-ui="card-interactive"],
+body.skin-skin-lab [data-ui="dialog"] {
+  background: var(--surface-overlay);
+}

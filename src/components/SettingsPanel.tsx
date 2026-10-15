@@ -2948,16 +2948,37 @@ export default function SettingsPanel({
                 </button>
               </div>
               <h4>皮肤</h4>
-              <div className="skin-list">
-                {SKINS.map((s) => (
-                  <button
-                    key={s.manifest.id}
-                    className={skinId === s.manifest.id ? "active" : ""}
-                    onClick={() => onSkinChange(s.manifest.id)}
-                  >
-                    {s.manifest.name}
-                  </button>
-                ))}
+              {/* v49.0 / P7：皮肤卡片——名称 + 一行描述 + 明/暗预览色块 + 动效标签；
+                  requiresChrome 不满足时置灰并提示（Electron 31 / Chromium 126 当前恒满足） */}
+              <div className="skin-list skin-cards">
+                {SKINS.map((s) => {
+                  const m = s.manifest;
+                  const chromeShort = typeof navigator !== "undefined" && m.requiresChrome
+                    ? (() => {
+                        const v = /Chrom(?:e|ium)\/(\d+)/.exec(navigator.userAgent)?.[1];
+                        return v ? Number(v) < m.requiresChrome : false;
+                      })()
+                    : false;
+                  const motionLabel = { none: "无动效", subtle: "动效：轻", rich: "动效：丰富" }[m.features?.motion ?? "subtle"];
+                  return (
+                    <button
+                      key={m.id}
+                      className={`skin-card${skinId === m.id ? " active" : ""}${chromeShort ? " disabled" : ""}`}
+                      disabled={chromeShort}
+                      title={chromeShort ? `需要 Chromium ≥ ${m.requiresChrome}` : m.description}
+                      onClick={() => onSkinChange(m.id)}
+                    >
+                      <span className="skin-card-preview" aria-hidden="true">
+                        {m.preview.light.slice(0, 4).map((c, i) => (
+                          <i key={i} style={{ background: c }} />
+                        ))}
+                      </span>
+                      <span className="skin-card-name">{m.name}</span>
+                      {m.description && <span className="skin-card-desc">{m.description}</span>}
+                      <span className="skin-card-meta">{motionLabel}</span>
+                    </button>
+                  );
+                })}
               </div>
               {/* v48.89（D132 §8.1）：主题插件子块——落位 sec-appearance 内「皮肤」与「强调色」之间，
                   不新增 SECTION_GROUPS 导航项（D114 的 5 组契约零改动）、不新增 sec-* 锚 */}
