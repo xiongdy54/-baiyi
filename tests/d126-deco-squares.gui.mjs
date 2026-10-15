@@ -4,7 +4,7 @@
 // 隔离：M7_TEST_USERDATA → tests/tmp-d126-userdata（先清空；默认设置启动，绝不触碰真实库 §7.3）。
 // 断言链（D126，用户指令：六处方块退役；去掉后不留不协调空白；条目方块的改色功能由右缘色条承担）：
 //   ① 书架空态：empty-text 在场、empty-deco/empty-sq 不在场（垂直居中文案自然补位）
-//   ② 粘贴导入一本无封面书 → 书架卡无 .book-card-spine、.book-card-title 在场（灰底+左下标题回落形态）
+//   ② 粘贴导入一本无封面书 → 书架卡无 .book-card-spine、.book-card-title 在场（v48.122/D167 起为暖纸默认封面形态）
 //   ③ 摘录页空态：review-count「0 条待处理」在场且无 .count-dot；空态无 .empty-deco
 //   ④ 复习页空态（如在场）：empty-state 内无 .empty-deco
 //   ⑤ 卡片页空态：empty-text 在场（还没有卡片）、无 .empty-deco
@@ -85,13 +85,23 @@ try {
   await wait(900);
   const modalUp = await cdp.eval(`!!document.querySelector(".modal-panel[role=dialog]")`);
   check("② 添加材料模态打开", modalUp === true, modalUp);
-  await cdp.eval(`(() => {
-    const ta = document.querySelector(".modal-panel textarea");
-    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
-    setter.call(ta, "D126 无封面测试书\\n正文第二行，用于粘贴导入回落形态验证。");
-    ta.dispatchEvent(new Event("input", { bubbles: true }));
-    return !!ta;
+  // v48.114/D160 起正文窗是 Milkdown/ProseMirror（textarea 已退役）——聚焦 + insertText（d91-d92 同法）
+  const pasted = await cdp.eval(`(() => {
+    const pm = document.querySelector(".modal-panel .ProseMirror");
+    if (!pm) return false;
+    pm.focus();
+    document.execCommand("selectAll", false, null);
+    document.execCommand("insertText", false, "D126 无封面测试书\\n正文第二行，用于粘贴导入回落形态验证。");
+    return pm.textContent.includes("D126 无封面测试书");
   })()`);
+  check("② 正文写入 ProseMirror 编辑器（D160 后无 textarea）", pasted === true, JSON.stringify(pasted));
+  // 等 onChange 镜像把正文同步进 React 态（canSave 门控解除）再点保存——insertText 后镜像非瞬时
+  let enabled = false;
+  for (let i = 0; i < 20 && !enabled; i++) {
+    await wait(300);
+    enabled = (await cdp.eval(`(() => { const b = [...document.querySelectorAll(".modal-panel button")].find((x) => x.textContent.includes("保存到书架")); return b ? !b.disabled : false; })()`)) === true;
+  }
+  check("② 保存按钮随正文镜像解禁（canSave 门控）", enabled === true, JSON.stringify(enabled));
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".modal-panel button")].find((x) => x.textContent.includes("保存到书架")); b?.click(); return !!b; })()`);
   let cardUp = null;
   for (let i = 0; i < 20; i++) {
@@ -102,7 +112,7 @@ try {
     })()`)) || {};
     if (cardUp.title) break;
   }
-  check("② 无封面书入库：书卡标题在场（灰底+左下标题回落形态）", cardUp?.title === true, JSON.stringify(cardUp));
+  check("② 无封面书入库：书卡标题在场（v48.122/D167 起为暖纸默认封面形态）", cardUp?.title === true, JSON.stringify(cardUp));
   check("② 无封面书入库：书脊小方块退役（.book-card-spine 不在场）", cardUp?.spine === false, JSON.stringify(cardUp));
 
   // ③ 摘录页空态：0 条待处理（无方点）+ 空态无装饰
