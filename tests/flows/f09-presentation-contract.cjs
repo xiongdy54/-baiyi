@@ -141,7 +141,8 @@ function app_main() {
     const guide = read(path.join(ROOT, "AI_DEVELOPMENT_GUIDE.md"));
     flow.check("指南仍是单一版本标题（无正文/标题版本不一致）", /^# .*v(\d+\.\d+)/m.test(guide.slice(0, 300)), true, guide.slice(0, 60));
     const themeTxt = read(path.join(ROOT, "src", "theme.css"));
-    flow.check("theme.css 仍定义强调色基线 #002fa7（§accent 默认值）", /#002fa7/i.test(themeTxt), true, false);
+    // v49.0 / D169：基线 accent 自 v48.35/D75 起为深绿 #166a59（IKB 退役，GUIDE §5.1 同步修正）——陈旧断言一并校准
+    flow.check("theme.css 仍定义强调色基线 #166a59（§accent 默认值，v48.35/D75 深绿）", /#166a59/i.test(themeTxt), true, false);
     const accentTxt = read(path.join(ROOT, "src", "lib", "accentVar.ts"));
     flow.check("applyAccent 同时写 body（780ea84 修复不回退：只写 :root 会被 body.theme-dark 盖掉）", /document\.body/.test(accentTxt) && /setProperty\("--accent"/.test(accentTxt), true, { body: /document\.body/.test(accentTxt) });
 
