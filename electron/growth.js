@@ -224,25 +224,31 @@ function deriveCardEvents(card, logs, now) {
     }
   }
 
-  // —— relearning-recovery（§6.6.1 序 10）——
-  // 口径：存在日志 L 使 before.state==="relearning" && after.state==="review"（D129）。
-  // 序列值 = 该日志是否构成「遗忘后康复」跨越（1/0）；掉回（再次遗忘）后再度康复 = 新跨越（真实的重做）。
+  // —— relearning-recovery（§6.6.1 序 10；D175 修订：每卡仅首次）——
+  // 口径：存在日志 L 使 before.state==="relearning" && after.state==="review"，且为该卡**首次**成立。
+  // D175（v49.1，用户 2026-10-15 裁定）：不再沿用 firstCrossings 的「掉回重新武装」——FSRS 里每次
+  // 遗忘都会各走一遍 relearning→review，逐次计报会在难书上刷屏、稀释反馈成就感（§4.17-6①
+  // 「每个 (事件类型, 实体, 维度) 只报一次」的字面语义；②「真实的重做」再触发只适用于
+  // stability 阈值类事件的回落后再跨越，如 retention-60/180）。撤销回退语义不变：
+  // 首条康复日志被撤销后，下一条康复自然成为「首次」（重放一致性 N-4/N-9）。
   const relearnSeries = all
     .filter((l) => l.before && typeof l.before === "object" && l.after && typeof l.after === "object")
+    .sort((a, b) => a.reviewSeq - b.reviewSeq)
     .map((l) => ({
       seq: l.reviewSeq,
       at: l.reviewedAt,
       value: l.before.state === "relearning" && l.after.state === "review" ? 1 : 0
     }));
-  for (const c of firstCrossings(relearnSeries, 1)) {
-    const trigger = all.find((l) => l.reviewSeq === c.seq);
+  const firstRecovery = relearnSeries.find((p) => p.value === 1); // 只取首次跨越，不再武装
+  if (firstRecovery) {
+    const trigger = all.find((l) => l.reviewSeq === firstRecovery.seq);
     hits.push(makeHit({
       type: "relearning-recovery",
       entityId: card.id,
       entityLabel: frontSummary(card),
       dimension: "recovery",
-      triggerSeq: c.seq,
-      triggerAt: c.at,
+      triggerSeq: firstRecovery.seq,
+      triggerAt: firstRecovery.at,
       evidence: cardEvidence(card, {
         lapses: trigger && Number.isFinite(Number(trigger.after.lapses)) ? Number(trigger.after.lapses) : undefined
       })
