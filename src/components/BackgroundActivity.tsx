@@ -142,7 +142,7 @@ export function BackgroundActivity({ onOpenMap }: BackgroundActivityProps) {
         }
       }}
     >
-      <div className="bg-activity-card" role="status" aria-live="polite">
+      <div className="bg-activity-card" data-ui="card-interactive" role="status" aria-live="polite">
         {hiddenCount > 0 && (
           <button type="button" className="bg-activity-more" onClick={() => setShowAll(true)}>
             另有 {hiddenCount} 项 · 点此全展开

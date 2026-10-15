@@ -1049,7 +1049,18 @@ export interface TodayQueue {
 export type DeferredReason = NonNullable<TodayQueue["deferred"][number]["deferReason"]>;
 
 export const cardsApi = {
-  create: async (card: unknown) => (await window.cardsAPI?.create(card)) ?? { id: "" },
+  create: async (card: unknown) => {
+    const r = (await window.cardsAPI?.create(card)) ?? { id: "" };
+    // v49.0 / D174：ui/card-created（皮肤 API，建卡成功；cardsApi.create 为全建卡路径汇点）
+    if (r?.id) {
+      try {
+        const { eventBus } = await import("./eventbus");
+        const { UI_EVENTS } = await import("../skins/runtime/uiEvents");
+        eventBus.emit(UI_EVENTS.cardCreated, {});
+      } catch { /* 皮肤事件可选 */ }
+    }
+    return r;
+  },
   update: async (card: unknown) => (await window.cardsAPI?.update(card)) ?? false,
   get: async (id: string) => ((await window.cardsAPI?.get(id)) ?? null) as CardRecord | null,
   /** v48.61（D103）：生成信息区只读 join（AI 卡批次/提示词/当时 CardLint） */

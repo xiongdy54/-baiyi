@@ -748,9 +748,10 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
         {...itemProps(entry)}
       >
         {/* .shelf-face = 封面 + 进度轨那一整块，拖拽/新入库的高亮框画在它身上（§5.4） */}
-        <div className="shelf-face">
+        <div className="shelf-face" data-ui="card">
         <div
           className="book-card"
+          data-ui="shelf-item"
           tabIndex={0}
           role="button"
           title={title}
@@ -992,7 +993,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
       {/* 拖拽提示只余停用说明（v48.120/D165）：手动顺序下的操作说明文字退役，Alt+←/→ 键盘等价语义不变 */}
       {!manual && <span className="shelf-hint">非手动顺序，拖拽已停用</span>}
       {/* 主行动纯文字（v48.119/D164）：快捷键 Ctrl+Alt+N 的注册契约不变（§4.2-21），按钮不再复述 */}
-      <button type="button" className="btn btn-primary btn-sm" onClick={onAddMaterial}>
+      <button type="button" className="btn btn-primary btn-sm" data-ui="button-primary" onClick={onAddMaterial}>
         添加材料
       </button>
     </div>

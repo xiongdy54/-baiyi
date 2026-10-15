@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { eventBus } from "./eventbus";
+import { UI_EVENTS } from "../skins/runtime/uiEvents";
 
 /**
  * 模态 / 全屏 Overlay 的可访问性装配 —— 纯表现层交互，不涉任何业务逻辑。
@@ -84,12 +86,16 @@ export function useDialogA11y<T extends HTMLElement>(onClose: () => void) {
       if (!target.hasAttribute("tabindex") && target === panel) panel.setAttribute("tabindex", "-1");
       target.focus({ preventScroll: true });
     }
+    // v49.0 / D174：ui/overlay-open（皮肤 API，纯表现层）
+    try { eventBus.emit(UI_EVENTS.overlayOpen, { kind: "dialog" }); } catch { /* 事件层故障不碍模态 */ }
 
     return () => {
       document.removeEventListener("keydown", onKey, true);
       const i = stack.indexOf(panel);
       if (i >= 0) stack.splice(i, 1);
       if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+      // v49.0 / D174：ui/overlay-close（皮肤 API）
+      try { eventBus.emit(UI_EVENTS.overlayClose, { kind: "dialog" }); } catch { /* 同上 */ }
     };
   }, []);
 

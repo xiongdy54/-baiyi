@@ -112,7 +112,9 @@ function app_main() {
 
     // ---------- E4 玻璃拟态已下线 ----------
     flow.section("E4 第二皮肤（玻璃拟态）不得复活（v48.14 删除、swiss 规范禁止）");
-    const glass = [...css, ...tsx].filter((f) => /backdrop-filter|下蛋|Dream.*glass|glassmorphism/i.test(f.t)).map((f) => rel(f.p));
+    // v49.0 / D170（P6）：src/skins/_lab/ 是仅 DEV 注册的引擎能力回归样本，含受控 backdrop-filter
+    //（顶栏玻璃，同屏 1 处，§2.12 预算）——扫描范围收窄豁免该目录（生产构建产物搜不到 skin-lab）。
+    const glass = [...css, ...tsx].filter((f) => !f.p.includes(`${ROOT}\\src\\skins\\_lab`) && !f.p.replace(/\\/g, "/").includes("src/skins/_lab") && /backdrop-filter|下蛋|Dream.*glass|glassmorphism/i.test(f.t)).map((f) => rel(f.p));
     flow.check("src 内不得出现 backdrop-filter/玻璃拟态", glass.length === 0, "无", glass);
     const skinsDir = path.join(ROOT, "src", "skins");
     const skins = fs.existsSync(skinsDir) ? fs.readdirSync(skinsDir) : [];
@@ -141,9 +143,12 @@ function app_main() {
     const guide = read(path.join(ROOT, "AI_DEVELOPMENT_GUIDE.md"));
     flow.check("指南仍是单一版本标题（无正文/标题版本不一致）", /^# .*v(\d+\.\d+)/m.test(guide.slice(0, 300)), true, guide.slice(0, 60));
     const themeTxt = read(path.join(ROOT, "src", "theme.css"));
-    flow.check("theme.css 仍定义强调色基线 #002fa7（§accent 默认值）", /#002fa7/i.test(themeTxt), true, false);
+    // v49.0 / D169：基线 accent 自 v48.35/D75 起为深绿 #166a59（IKB 退役，GUIDE §5.1 同步修正）——陈旧断言一并校准
+    flow.check("theme.css 仍定义强调色基线 #166a59（§accent 默认值，v48.35/D75 深绿）", /#166a59/i.test(themeTxt), true, false);
     const accentTxt = read(path.join(ROOT, "src", "lib", "accentVar.ts"));
-    flow.check("applyAccent 同时写 body（780ea84 修复不回退：只写 :root 会被 body.theme-dark 盖掉）", /document\.body/.test(accentTxt) && /setProperty\("--accent"/.test(accentTxt), true, { body: /document\.body/.test(accentTxt) });
+    // v49.0 / D172：applyAccent 改写 --user-accent 三件套（内联 --accent 会压掉皮肤 accent）；
+    // 「同时写 body」的修复纪律不变（只写 :root 会被 body.theme-dark 的声明盖掉）
+    flow.check("applyAccent 同时写 body（780ea84 修复不回退：只写 :root 会被 body.theme-dark 盖掉）", /document\.body/.test(accentTxt) && /setProperty\("--user-accent"/.test(accentTxt), true, { body: /document\.body/.test(accentTxt) });
 
     // ---------- E7 书墙与空态两条新规则（v48.15 / D51）----------
     flow.section("E7 书墙网格与空态两条例外不得回退（docs/swiss-international-style.md「画廊 / 状态设计」，正本 §5.3/§5.4）");

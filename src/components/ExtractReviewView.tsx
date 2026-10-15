@@ -1105,7 +1105,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           会话态＝动作栏（ExtractActionsBar）；查看态＝只读模式提示（几何不跳，信息零丢失）。
           data-page-hint 在查看态落在这条提示上（会话态仍在头带），既有测试钩子保持不变。 */}
       {viewing ? (
-        <div className="stage-bar extract-face-actions">
+        <div className="stage-bar extract-face-actions" data-ui="stage-bar">
           <div className="stage-bar-inner">
             <span className="bar-hint" data-page-hint>查看态：只读 · 不推进调度 · Esc 返回队列</span>
           </div>

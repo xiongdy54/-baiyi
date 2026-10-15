@@ -186,12 +186,20 @@ export default function ReviewView({
     if (!el) return;
     return attachRipple(el);
   }, [showBack]);
+  // v49.0 / D174：ui/review-flip（皮肤 API，纯表现层——翻面即发）
+  useEffect(() => {
+    if (showBack) eventBus.emit("ui/review-flip", {});
+  }, [showBack]);
   /** 显示答案的**生效**快捷键（随设置变化；不许把「空格」写死） */
   const hint = bindingHint("review.showAnswer");
   const [startedAt, setStartedAt] = useState(Date.now());
   const [loading, setLoading] = useState(true);
   const [doneCount, setDoneCount] = useState(0);
   const [sessionDone, setSessionDone] = useState(false);
+  // v49.0 / D174：ui/session-complete（皮肤 API——复习会话收口单点）
+  useEffect(() => {
+    if (sessionDone) eventBus.emit("ui/session-complete", { kind: "review" });
+  }, [sessionDone]);
   // D88 §7.2：进度轨真实分母（分母 0 ⇒ 整个进度轨不渲染，禁假动画）
   const progressDenominator = doneCount + counts.new + counts.learning + counts.review;
   const progressPct =
@@ -438,6 +446,8 @@ export default function ReviewView({
         setSaveError(true);
         return;
       }
+      // v49.0 / D174：ui/review-grade（皮肤 API，评分成功边界后）
+      eventBus.emit("ui/review-grade", { grade: rating });
       // v48.85（D129 B2，§4.17-6⑥/§6.6.2 非阻塞硬性）：评分成功边界（COMMIT + persist + IPC 成功）后的
       // 成长反馈拉取——fire-and-forget：不 await、不进 actionBusy、失败静默（growthApi 内部已兜底降级），
       // 绝不阻塞评分→下一张卡路径；设置关闭（growthEnabledRef=false）时完全不调用（读取路径短路）。
@@ -932,7 +942,7 @@ export default function ReviewView({
         )}
       </div>
 
-      <div className="review-session">
+      <div className="review-session" data-ui="review-card">
         {deferredPanel}
 
         {/* v23（§4.4.9）：persist 失败横幅——停留当前卡、封锁动作，重试成功后自动恢复 */}

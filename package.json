@@ -10,6 +10,7 @@
     "build:renderer": "vite build",
     "build": "npm run build:renderer && node scripts/postbuild-pdf-compat.cjs",
     "start": "electron .",
+    "skin-audit": "node scripts/skin-audit.mjs",
     "postinstall": "node scripts/pin-better-sqlite3-electron.cjs",
     "dist": "npm run build && electron-builder --win --publish never",
     "dist:dir": "npm run build && electron-builder --dir --publish never"

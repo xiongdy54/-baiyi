@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件（**v48.123**） — AI 开发指导文档
+# 一站式渐进阅读学习软件（**v49.0**） — AI 开发指导文档
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -401,8 +401,8 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 ### 4.15 插件/主题体系（✅ v48.91 / D132 实现；实现规范＝`docs/design/PLUGIN-SYSTEM-D132.md`）
 
 - 插件 = 文件夹 `<userData>/plugins/<id>/`（plugin.json 全字段 schema 见 D132 §3.1 + styles.css + 可选 versions.json / data.json；`main.js` 为预留位，**本期宿主不读取不执行**，能力开放须先立守门契约）。`versions.json` 本期＝兼容性声明校验面（拒载时给出最近兼容版本提示；多版本真回落属 M11 更新渠道）。
-- 主题是特殊插件（type:theme，本期唯一支持类型）：styles.css 为整套 Token 覆盖层（浅档声明 `body`、深档 `body.theme-dark`，同受 swiss 皮肤层五条边界），经宿主 fail-closed 校验（@import/url() 白名单、CSS 转义解码后扫描、块扫描字符串感知、受审计 Token 值形态、亮暗对比 ≥4.5:1 机器审计）后由渲染层 `<style data-plugin-css>` 注入，`--pl-<id>-<key>` 可调变量写 body 内联；`/* @settings */` 受限 YAML 子集声明可调项（五类型，落 SettingsStore `plugin.<id>` 层唯一键 `values`，读侧归一）。
-- 皮肤体系：内置 `src/skins/<id>/`（构建期注册表，评审门禁）与主题插件（运行时扫描，机器门禁）**互斥共存**：`app.skinId` 与 `app.activeThemePlugin` 双槽，激活一方即清另一方；每套皮肤只改表现层；亮暗对比 ≥4.5:1（内置=评审实测，插件=宿主审计拒载）；先规范后代码。
+- 主题是特殊插件（type:theme，本期唯一支持类型）：styles.css 为整套 Token 覆盖层（浅档声明 `body`、深档 `body.theme-dark`，同受 §5.5 应用级不变量 A1–A9），经宿主 fail-closed 校验（@import/url() 白名单、CSS 转义解码后扫描、块扫描字符串感知、受审计 Token 值形态、亮暗对比 ≥4.5:1 机器审计）后由渲染层 `<style data-plugin-css>` 注入，`--pl-<id>-<key>` 可调变量写 body 内联；`/* @settings */` 受限 YAML 子集声明可调项（五类型，落 SettingsStore `plugin.<id>` 层唯一键 `values`，读侧归一）。
+- 皮肤体系（v49.0 / D169–D171 重构）：内置 `src/skins/<id>/`（构建期注册表，门禁 = **评审 + `scripts/skin-audit.mjs` 机器审计**：无网络资源、两档 Token 集合完整、对比度 ≥4.5:1、动效全在 motion-full 作用域、@keyframes 命名空间、IACVT 差集空、体积 ≤60KB）与主题插件（运行时扫描，机器门禁）**互斥共存**：`app.skinId` 与 `app.activeThemePlugin` 双槽，激活一方即清另一方；每套皮肤只改表现层；亮暗对比 ≥4.5:1（内置=skin-audit 机器审计，插件=宿主审计拒载）；先规范后代码。皮肤引擎 v2 架构（清单/懒加载/CSS 层叠层注入、SkinHost、组件级 Token）见 D170/D171 与 `docs/skins/AUTHORING.md`。
 
 ### 4.16 同源卡延后 Sibling Burying（v34 定契约并实现，✅ 见 §9.1 M12；队列视图契约；**非 FSRS 契约**）
 
@@ -568,7 +568,7 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 
 ## 5.1 瑞士风基线
 
-唯一视觉规范：`docs/swiss-international-style.md`（Token、字号阶梯、灰阶、单一焦点色、直角无阴影、Lucide 图标、禁止清单、五项必查）。全局主 accent 锁定 IKB 蓝 `#002FA7`（深色提亮 `#5B7FE8`），用户可在设置中自定义（写 `--accent` 变量）。所有色值/字号/间距走 `src/theme.css` Token，业务组件禁止硬编码。
+唯一视觉规范：`docs/swiss-international-style.md`（Token、字号阶梯、灰阶、单一焦点色、直角无阴影、Lucide 图标、禁止清单、五项必查；**v49.0 / D169 起本文作用域 = 默认皮肤**）。全局主 accent 默认深绿 `#166a59`（深色提亮同色相 `#3fa08a`，v48.35 / D75 用户裁定，原克莱因蓝 IKB 退役），用户可在设置中自定义（运行时内联写 `--user-accent` 三件套、theme.css `var(--user-accent, <基线>)` 兜底，v49.0 / D172）。所有色值/字号/间距走 `src/theme.css` Token，业务组件禁止硬编码。
 
 设计哲学七条：单一焦点色 / 极致字号对比（越大越细）/ 无衬线 / 直角纯色 / 8px 网格 / hairline 分割 / 克制。
 
@@ -625,13 +625,27 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 
 ## 5.5 皮肤体系
 
-默认皮肤 = 瑞士风（`skinId:"none"` 即基线本体）；注册表当前仅登记这一支（原第二皮肤「下蛋 Dream 玻璃拟态」已下线删除）。新皮肤按 §4.15 规范另立，先规范后代码。
+**v49.0 / D169 约束分层**：瑞士风规则（直角、零阴影、hover 纪律、`--spring` 冻结、浮层 150/100ms、8px 网格、Hairline 等）的**作用域 = 默认皮肤（`skinId:"none"`）这一支**，不再作为全软件约束。**应用级不变量（所有皮肤必须遵守，机器可查部分由 `scripts/skin-audit.mjs` 审计）**：
 
-**当前状态：机制在场、皮肤为零**（v48.14 / D50 明确）。`--shadow-panel`、`--radius-pill` 两个 Token 与 `docs/swiss-international-style.md`「皮肤层」一节**目前是零消费者的预留扩展点**——基线取值即瑞士风默认（面板阴影同 `--shadow-float`、`--radius-pill: 0`），**没有任何实现覆盖它们则外观完全不变**。它们服务 §9.1 **M11「界面自定义与主题社区」**：将来加皮肤时只需整套替换 Token，不必再往组件上打补丁。这不是对基线（直角 / 零阴影 / 单一焦点色）的放松，也不得被引用为在基线界面里引入圆角、渐变、玻璃拟质的理由。
+| # | 不变量 |
+| --- | --- |
+| A1 | 只改表现层：皮肤不得改业务逻辑、数据、持久化格式（皮肤自己的设置项除外） |
+| A2 | 纯本地：皮肤 CSS/JS 不得引用网络资源；资源随构建打包 |
+| A3 | 可读性：正文三阶文字、accent 当文字、accent 底上的文字均 ≥ 4.5:1；键盘焦点指示 ≥ 3:1 |
+| A4 | 明暗两档完整：浅色里覆盖过的每个颜色 Token，深色里也必须覆盖 |
+| A5 | 引用有效：`var(--x)` 引用集合 − `--x:` 声明集合 = 空（IACVT；F09 E1 扫描范围含 `src/skins/**`） |
+| A6 | 动效可关闭：系统「减少动态效果」或应用内「关闭动画」（`body.motion-off`）时，皮肤不得播放任何非必要动画；无每秒闪烁 > 3 次的效果 |
+| A7 | 性能预算：持续动画只动 transform/opacity/canvas；backdrop-filter 同屏 ≤ 3；装饰层 pointer-events:none；单皮肤 CSS ≤ 60KB |
+| A8 | 可完全卸载：切回默认皮肤后无任何残留（样式元素、body 类、事件监听、定时器） |
+| A9 | 先规范后代码：新增皮肤或扩展皮肤 API（`SKIN_API_VERSION`），先在 GUIDE 登记 D 号 + bump 版本 |
 
-**v48.23（D63）新增第三个零消费者扩展点 `--field-line`**（默认 `transparent`）：内联编辑器（`.review-editable`）的描边色。基线取值即"无框"（当前默认皮肤的视觉处理，与闪卡一致）；皮肤把它改为实色即显形，**行为与布局零改动**。两套承载方式都已在样张中验证：`box-shadow: inset 0 0 0 1px var(--field-line)`（环形，实测零布局影响：宽 720→720、行数 2→2）与 `border: 1px solid var(--field-line)`（边框，实测 720→718）。**禁止用 `outline` 承载**：`:focus-visible` 的键盘焦点环也是 outline，实测会被特异性挤掉，违反"不得移除焦点环且无替代"。深色档纪律同 §5.1——`--field-line` 的显形值必须声明在 `body` 上（`--border-subtle` 在 `body.theme-dark` 被改写）。
+默认皮肤 = 瑞士风（`skinId:"none"` 即基线本体），其设计语言见 `docs/swiss-international-style.md`（**仅约束默认皮肤**）。其他皮肤遵守应用级不变量 A1–A9 与各自 `src/skins/<id>/DESIGN.md`；皮肤作者指南 = `docs/skins/AUTHORING.md`（层叠层纪律、求值层纪律、组件级 Token、部件表、检查清单）。内置皮肤门禁见 §4.15。
 
-**v48.31（D71）新增扩展点 `--band-line`**（默认 `transparent`，已实现）：舞台带缘 hairline 色——钉底栏上缘（`.stage-bar` border-top）与吸顶头带下缘（`.extract-page-head`/`.review-head` border-bottom）共用一枚。基线取值即「隐藏」（2026-10-02 用户裁定：默认皮肤不画这两条线）；border 仍占 1px，**几何零改动**，皮肤层赋实色即显形（声明在 `body` 上，同 §5.1 深色档纪律）。它是带缘**成对**边界（头带下缘 + 底栏上缘）的唯一色源，皮肤显形时两线同时出现、不得只显其一。
+`--shadow-panel`、`--radius-pill`、`--field-line`、`--band-line` 仍是预留扩展点（基线取值即默认皮肤外观，无人覆盖则外观完全不变）。
+
+**v48.23（D63）扩展点 `--field-line`**（默认 `transparent`）：内联编辑器（`.review-editable`）的描边色。基线取值即"无框"（当前默认皮肤的视觉处理，与闪卡一致）；皮肤把它改为实色即显形，**行为与布局零改动**。两套承载方式都已在样张中验证：`box-shadow: inset 0 0 0 1px var(--field-line)`（环形，实测零布局影响）与 `border: 1px solid var(--field-line)`（边框，实测 720→718）。**禁止用 `outline` 承载**：`:focus-visible` 的键盘焦点环也是 outline，实测会被特异性挤掉，违反"不得移除焦点环且无替代"。深色档纪律同 §5.1——`--field-line` 的显形值必须声明在 `body` 上（`--border-subtle` 在 `body.theme-dark` 被改写）。
+
+**v48.31（D71）扩展点 `--band-line`**：舞台带缘 hairline 色——钉底栏上缘（`.stage-bar` border-top）与吸顶头带下缘（`.extract-page-head`/`.review-head` border-bottom）共用一枚。基线取值＝`--border-subtle`（D74 撤回 D71 的隐藏）；border 仍占 1px，**几何零改动**，皮肤层整枚替换（显形值须声明在 `body` 上，同 §5.1 深色档纪律）。它是带缘**成对**边界（头带下缘 + 底栏上缘）的唯一色源，皮肤显形时两线同时出现、不得只显其一。
 
 ---
 
@@ -1531,6 +1545,12 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D166 | **v48.121 顶栏右侧图标视觉统一（纯表现层：`src/App.tsx` 两处内联 SVG 属性，零 CSS / 零 schema / 零 IPC / 零测试改动）**：用户实测右上角图标大小不一——制卡台入口图标偏小（15×15 / strokeWidth 1.6），设置齿轮偏大且齿形繁复（18×18、Feather 式长齿廓路径），窗控三键（16×16 / strokeWidth 1.5）观感为基准。裁定：①制卡台图标改 16×16 / strokeWidth 1.5，与窗控三键同规格；②设置图标改 16×16 / strokeWidth 1.5：两轮迭代——初版「外圈 + 八向短齿」与次版「外圈+短齿+中心孔」均被用户否决（前者读作太阳/亮度，后者「更丑了」）；**定稿＝用户参照图的六齿齿轮直描轮廓**（24 视框齿顶 r=10.4 / 齿根 r=7.2、六齿每 60°（齿位左右 + 四斜角、顶/底中央凹口）、齿顶弧 26° / 齿根缺口 28°、中心孔 r=3；fill none + strokeLinecap/linejoin round，与制卡台图标同线宽勾线风格）；`title="设置"` 与 `data-testid="workbench-entry"` 钩子不变（d104/d107/d112/d125/d144/d91-d92/extract 等套件选择器不受影响）；§5.2「右侧仅设置齿轮 + 窗控三键」语义不变 | 用户 2026-10-15 指令（「把制卡台图标、设置图标的大小统一为与最小化、最大化、关闭按钮视觉上相同的大小，并把设置图标的样式调整得更简洁一些」→「这个设置图标更丑了，改成图片中这个形状，但是样式要进行调整，匹配制卡台图标的样式，也就是用相同粗细的线条勾勒出来的样式」，附六齿齿轮参照图） | v48.121 |
 | D167 | **v48.122 无封面默认封面「暖纸」（纯表现层：Bookshelf.tsx + theme.css，零 schema / 零 IPC）**：用户实测书架大量导入材料无封面，灰底 + 左下标题（D126③ 回落形态）观感差——改为暖纸封面：暖米白纵向渐变（--cover-warm-1/2，深主题同族暖深档四 token）+ 左缘书脊淡影 + 居中排版（24×1 细规线 ::before / 书名 18-500 clamp4 暖墨 --cover-warm-title / 有作者底部署名 12px --cover-warm-meta 无作者不渲染、书名 margin:auto 0 余量居中两态同语言）；封面解码重试失败回落同形态（CoverImg 兜底同渲染 DefaultCover）；目录表无封面缩略改暖纸底 + 首字符花押 .thumb-mono（CJK 首字 / 拉丁大写首字母）。.book-card-title 类名保留（annotations/extract/marks/multiselect/d126/f49b 选择器锁定）、直角零圆角不动白名单、无动效零动效规范面；文件夹纸堆 zinc 回退刻意不动（D161 第五轮已审定形态）。§5.4 书架图注卡同步。 | 用户 2026-10-15 指令「为没有封面的材料设计一个默认封面，简洁、稍微带一点温暖、有高级感」 | 已实施 |
 | D168 | **v48.123 母语多选控件改选单（纯表现层：NativeLangsPicker.tsx + learnerStrings.ts + theme.css，零 schema / 零 IPC / 零设置键，nativeLangs 数据语义不变）**：用户实测设置页「学习者知识模型」下「我的母语」46 个语言标签全量平铺（两列词云约六行 + 自定义输入行），纵向占用过大——改为 **dd 族多选选单**（设计稿 D124 §11.6「多选标签列表」控件形态就此取代，设置页 sec-learner 与 TracksDialog §11.4 两宿主同源生效）：触发钮 .dd-btn 一行收纳（已选语言名「、」连接、空态占位文字 --text-placeholder 区分、title 悬停示全量、max-width 224px 截断），弹层 .dd-menu（paper + hairline + --shadow-float + --z-dropdown、--spring pop-in 220ms 存量豁免，§8.4）+ 弹层内 .learner-native-list 限高 320px 滚动（46 项 .dd-item 勾选行，选中态沿用 dd-item-on accent 语言，aria-multiselectable）+ 末行 .learner-native-custom「其他语言代码」输入（hairline 分隔、回车或按钮添加、2–3 字母校验原样）。**弹层定位＝dd-menu-left 贴触发钮左缘展开**：宽档 `.settings-content` 自身 overflow-y:auto 是滚动裁切面（D114 §6.2 立约），right:0 默认对齐使弹层向左探出滚动容器、LTR 左溢不可滚＝直接裁切（CDP 实测弹层探出区块左缘部分整块不绘制，D126 R4.2 同源教训在设置页的翻版；列表区 flex-column 为 .dd-item 竖排所需——.dd-menu 的 flex 直排被中间滚动层打断）；垂直翻边 dd-menu-up/down 用 useLayoutEffect 按最近滚动祖先可见盒实测（绘制前落位无闪烁，兜底 window.innerHeight）；点外部收起 / Esc 收起同 Dropdown 惯例（Esc 在 window capture 层拦截——dialogA11y 在 document capture 层监听 Esc 关模态，须先于它截停，同 SettingsPanel 快捷键捕获先例）。learner-tag 类保留（快测 / 领域多选仍在用，仅母语不再消费）。零新增动效 token、零新增颜色。 | 用户 2026-10-15 指令（「关于我的母语的选择占用了太多空间，请把它改为一个选单，而不是把选项全部直接列出来。同时，这个选单的样式和动效要符合项目的设计规范」） | v48.123 |
+| D169 | **v49.0 皮肤约束分层（文档契约；实施见 P1，GUIDE §5.5/§4.15 同步）**：瑞士风规则（直角 / 零阴影 / hover 不动 / `--spring` 冻结 / 浮层 150/100ms / 8px 网格 / Hairline / D120 hover 纪律）的**作用域自本版起 = 默认皮肤（`skinId:"none"`）一支**，不再是全软件宪法；其他皮肤遵守**应用级不变量 A1–A9**（只改表现层 / 纯本地 / 对比度 ≥4.5:1 / 明暗两档完整 / IACVT 差集空 / 动效可关 / 性能预算 / 可完全卸载 / 先规范后代码，§5.5 表）与各自 `src/skins/<id>/DESIGN.md`。机器闸门影响（同一提交登记）：F09 E6 `#002fa7` 陈旧断言随 §5.1 文本修正同步为现行深绿基线；后续 D170-D173 实施期的闸门期望文本同步（F09 L146 accent 断言、E3 `!important` 棘轮基线、E4 backdrop-filter 对 `src/skins/_lab/` 豁免）逐项在对应 D 号登记。`docs/skins/AUTHORING.md` 为皮肤作者指南正本 | 用户提供的 Claude Opus 5.5《皮肤引擎 v2 与 Claude 皮肤实施方案》§1 裁决（2026-10-15「请你按照方案执行」） | v49.0 |
+| D170 | **v49.0 皮肤引擎 v2（架构契约；实施 P2）**：`src/skins/` 重构为**清单驱动 + 懒加载**引擎——`SkinManifest`（id/name/modes/chrome: solid\|transparent/accentPolicy: free\|locked/defaultAccent/preview/features/requiresChrome/apiVersion）+ `SkinModule`（css?inline / Background / Overlay / activate(ctx)→cleanup）+ `SkinHost`（App 内唯一挂载点：`<style data-skin-css>` 激活注入停用移除、body 类 skin-<id>/has-skin/skin-chrome-transparent/motion-full\|reduced\|off 自动管理、html[data-skin]、背景层 z:-1 / 前景层 pointer-events:none、ErrorBoundary + onFail 回落默认）；**CSS 层叠层** `@layer vendor, base, skin`（theme.css 包裹 base 层、皮肤自动包裹 skin 层，skin 层声明恒压 base 层与选择器权重无关；第三方 CSS 保持无层 import 原样——RECON §4 裁决，零视觉变化优先）；**动效等级** `app.motionLevel`（system\|off）→ body 三态类 + motion-off 总开关（base 层 !important 压过 skin 层，F09 E3 棘轮基线 3→7 受控例外）；App.tsx 旧 body 类 effect（L258-268）删除。**View Transitions 不新建 withViewTransition 包装**：D120 的 changeView 已含 startViewTransition 完整基础设施，皮肤覆盖 `::view-transition-*` 动画即可（RECON §6 裁决，避免双层嵌套）。类型 / 注册表 / 宿主 / runtime（motionLevel / springEasing）契约见 `docs/skins/AUTHORING.md` | 同上（方案 §2） | v49.0 |
+| D171 | **v49.0 组件级 Token（实施 P3）**：在语义 Token 之下新增一层**组件级 Token**（声明于 `body` 规则、base 层，求值层纪律 §5.1——必须与被覆盖 Token 同元素求值）：表面六枚（--surface-canvas/chrome/card/card-fill/overlay/input）、圆角六枚（--radius-xs/control/input/card/popover/dialog）、阴影三枚（--shadow-card/popover/dialog）、描边两枚（--border-card/input）、焦点三枚（--focus-outline-width/color/offset）、皮肤动效钩子（--press-scale 基线 1 零消费）。**默认值全部指向现有 Token＝默认皮肤逐像素零变化**；theme.css 消费点按类别迁移（表面→圆角→阴影→描边→焦点，每迁一类截图比对一次）；分类表落 `docs/skins/component-map.md`（皮肤结构规则选择器的唯一查询表）；防御性 `border-radius:0` 归类迁移、永久直角处（阅读正文等）加注保留；`50%` 圆形 / 制卡坞 AI 胶囊 999px / 书架文件夹 `--f-r` 不动 | 同上（方案 §2.11 / §3.3 Q2 裁决） | v49.0 |
+| D172 | **v49.0 强调色按皮肤记忆（实施 P2）**：`applyAccent` 改写 **`--user-accent` / `--user-interactive-accent` / `--user-accent-on`** 三件套（不再内联 `--accent`；空值移除；`--interactive-accent` 在 theme.css 零声明的死键一并退役），theme.css 的 accent 声明改为 `var(--user-accent, <原值>)` 兜底（浅色档随声明位置迁 body 规则、:root 保留字面兜底——内联写 body 与 documentElement 两处的现状路径保持，computed-value 链由 accent.gui.mjs 全程把关，预期零断言修改）；存储**默认皮肤沿用 `app.accentColor`**（旧数据与测试零影响），其他皮肤新键 **`app.accentBySkin`**（Record\<skinId,string\>）；设置页 accentPolicy=locked 时隐藏强调色行、「恢复默认」只清当前皮肤用户值。F09 L146 断言文本同步 `setProperty("--user-accent"`（D169 登记的合法闸门同步） | 同上（方案 §2.8 Q1 裁决） | v49.0 |
+| D173 | **v49.0 Claude（陶土）皮肤（实施 P4）**：第一支 v2 皮肤 `src/skins/claude/`（manifest + index + claude.css + DESIGN.md）：暖奶油纸面 #f5f5f3/#0b0b0a、纯白卡片弹层、柔和双层阴影（浅 .05-.08 / 深 .30-.50）、圆角阶梯 4/8/10/12/16/999px、**陶土双角色**——`--accent` 浅档 #ae5630（白字 5.03:1）/ 深档 #d97757 配深字（6.34:1）满足 A3，`--skin-brand` #d97757 纯装饰（选区/进度/光晕）；整组换灰阶（边界③升应用级）、派生档不写自动跟随、批注 8 色 / 图表 2-6 / 语义色 / 文件夹 / 封面暖纸 / 字体字号**不覆盖**（功能色与基线一致）；焦点走 outline（2px / 85% accent / 偏移 2px，跟随圆角）；动效＝CDS 档：expo 曲线、按压缩放 0.98、弹层弹簧（linear() 四预设 SNAPPY/BOUNCY/GENTLE/HEAVY_SNAP，scripts/gen-spring.mjs 预计算）、视图切换淡入上浮（D120 VT 之上的 CSS 覆盖）、**全部在 body.motion-full 作用域**；chrome:solid 无背景装饰层、无玻璃拟态、无 hover 位移、无逐条入场；灰阶半透明 border 的背景/color-mix 消费点单独指定实色（P4 检查） | 同上（方案 §3） | v49.0 |
+| D174 | **v49.0 皮肤 API v2（实施 P5；SKIN_API_VERSION 1→2）**：**ui/\* 表现层事件**七枚登记 eventBus 白名单（ui/view-change=App.changeView、ui/overlay-open+close=useDialogA11y 挂卸、ui/review-flip=ReviewView 翻面、ui/review-grade=评分成功边界、ui/session-complete=sessionDone 收口单点、ui/card-created=cardsApi.create 汇点）——发出点均为纯表现层一行 emit，零业务语义；**data-ui 部件属性** 20 处 / 15 种（topbar/view/shelf-item/card/card-interactive/dialog×3/menu/sidebar/seg-tabs/button-icon×4/button-primary/review-card/reader-surface/stage-bar）——只加属性不改类名、测试选择器零依赖；claude.css 容器级规则换 `[data-ui]` 选择器（card/card-interactive/shelf-item/dialog/menu，按钮与未挂部件暂用类名并在 AUTHORING §4.5 登记）；P5 缩减版裁决：button-secondary/input/toast/tooltip/popover 等细粒度部件延后（方案 §6 分期建议「P5–P7 按需推迟」），部件表随批次增量更新 | 同上（方案 §2.9.5 / P5） | v49.0 |
 
 ## 8.2 已接受偏差（实现与原锁定方案的差异）
 
@@ -1670,6 +1690,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | 用户画像接线（`context.userProfile`） | —（v42 §4.18-14） | `src/lib/cards.ts` 的画像注入槽（「用户画像（R9 个性化例子优先用）」）至今无调用方。画像语义＝泛化偏好（R9「优先用」、无拒用纪律），与记忆不同；若要接线须**先改本文档**并写清与记忆的边界（同为「你的东西」的两个槽不得互相覆盖） |
 
 ## 9.5 下一步
+
+**v49.0（D169–D174）皮肤引擎 v2 + Claude 皮肤已完成**：侦察结论 `docs/skins/RECON.md`（Chromium 126 / F09 既有红基线 / D120 VT 已在场的差异裁决）、作者指南 `docs/skins/AUTHORING.md`、组件 Token 分类表 `docs/skins/component-map.md`。实施链：P0 基线设施（`tests/skin-baseline-shot.mjs` 8 视图×浅深 + `tests/lib/png-pixel-diff.mjs` 零依赖像素对比，机器面 10 张逐像素确定性）→ P1 治理（约束分层：瑞士风作用域=默认皮肤，§5.5 重写 A1–A9）→ P2 引擎骨架（@layer vendor,base,skin + SkinHost + `--user-accent` 三件套 + `app.motionLevel` 动效等级 + `scripts/skin-audit.mjs`）→ P3 组件级 Token（22 枚声明、31 规则 50 消费点迁移，默认皮肤逐像素零变化实证）→ P4 Claude（陶土）皮肤（Token 两档 + 结构/动效规则，accent 按皮肤记忆全链路）→ P5 皮肤 API（ui/* 七事件 + data-ui 20 处，SKIN_API_VERSION=2）→ P6 `_lab` 引擎实验台（仅 DEV）→ P7 设置页皮肤卡片。验收：tsc/build 0、P2/P3 截图 10/10 逐像素=基线、P4 SMOKE 27/0、accent.gui 16/0 零断言修改、F09/F11/F27 与 main 同红集合、F18 84/84、skin-audit 全过、D132 互斥不变。**后续候选**（未排期）：data-ui 细粒度部件补批（button-secondary/input/toast/tooltip/popover）、阅读会话 ui/session-complete 发出点、皮肤过渡交叉淡化（方案 P7 可选项）。
 
 **路线图靠前 · 全局选中选单（D145，方案已备·延后实施）**：在软件外任意应用选中文字后弹出三按钮选单（AI 制卡 / 复制到手动制卡文本框 / 引用到 AI 解释输入框），或按设置中自定义快捷键直接使用三按钮功能，可在设置中关闭。**方向待定：任意处制卡 vs 材料导入软件内在软件中完成制卡体验——先调整设计再实施**。机制方案 `docs/design/GLOBAL-SELECTION-ACTIONS-D145.md`（P0＝快捷键路径：模拟复制捕获选区 + 四全局键 + 选单小窗；P1＝选中自动弹出，需原生钩子或 UIA 轮询，另立项）。随行交付的坞内部分＝**D144 制卡台 IA 重设计**（制卡/解释两板块、解释板块底部收起、解读方式按钮化 + 自由提问、跨页签幽灵同步、坞内选区三钮选单），本批实施中（设计稿 `docs/design/D144-CARDDOCK-IA-REDESIGN.md`，GUIDE 登记 v48.100，状态见 §9.2 D144 行）。
 

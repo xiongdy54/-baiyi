@@ -13,3 +13,6 @@ tests/tmp-*
 release/
 capture.html.bak
 .workbuddy/
+
+# 皮肤引擎截图产物（本机渲染基线，重跑 tests/skin-baseline-shot.mjs 再生）
+tests/__skin-*/

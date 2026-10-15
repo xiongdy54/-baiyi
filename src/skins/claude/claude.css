@@ -1,0 +1,171 @@
+/* ============================================================================
+   Claude（陶土）皮肤 · v49.0 / D173
+   设计语言：src/skins/claude/DESIGN.md；部件选择器来源：docs/skins/component-map.md
+   纪律：skin 层由 SkinHost 包裹（@layer skin）——本文件全部规则恒压 base 层；
+   颜色 Token 两档各声明一次（A4）；动效全部在 body.motion-full 作用域（A6，VT 例外）；
+   不覆盖：批注 8 色 / 图表 2-6 / 语义色 / 文件夹 / 封面暖纸 / 字体字号 / --overlay-*。
+   ============================================================================ */
+
+/* ============ 1. Token：浅色 ============ */
+body.skin-claude {
+  /* 灰阶与文字（CDS surface-0 族；整组换，边界③） */
+  --paper: #f5f5f3;
+  --grey-1: #ebebe8;
+  --grey-2: #d6d5d1;
+  --grey-3: #666663;
+  --ink: #151515;
+  --text-secondary: #525252;
+  --text-placeholder: #8a8a8a;
+  /* 描边：CDS 半透明发丝边（纸面/白卡上叠出自然淡线；全 theme.css 仅 7 处 1-2px 细线元素
+     把它当背景色用，半透明叠加视觉等效，无需实色特例——P4 检查结论） */
+  --border-subtle: rgba(20, 20, 20, 0.10);
+  --border-strong: rgba(20, 20, 20, 0.20);
+  /* 陶土双角色（A3）：--accent 浅档加深一档保对比，--skin-brand 纯装饰 */
+  --accent: var(--user-accent, #ae5630);
+  --accent-on: var(--user-accent-on, #ffffff);
+  --skin-brand: #d97757;
+  --skin-brand-soft: color-mix(in srgb, var(--skin-brand) 12%, transparent);
+  /* 组件表面（P3 组件级 Token；body 层的 var() 引用在本元素重新求值——直接覆盖即生效） */
+  --surface-chrome: #f5f5f3;
+  --surface-card: #ffffff;
+  --surface-card-fill: #ffffff;
+  --surface-overlay: #ffffff;
+  --surface-input: #ffffff;
+  /* 圆角阶梯（CDS 十档收敛到组件 Token；嵌套圆角「内 = 外 − 内边距」） */
+  --radius: 8px;
+  --radius-panel: 12px;
+  --radius-pill: 999px;
+  --radius-xs: 4px;
+  --radius-control: 8px;
+  --radius-input: 8px;
+  --radius-card: 10px;
+  --radius-popover: 12px;
+  --radius-dialog: 16px;
+  /* 阴影（浅色 .05–.08 双层柔影；不用 CDS「0 0 0 1px 描边环」——弹层已有 1px border） */
+  --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 2px 8px 0 rgba(0, 0, 0, 0.08);
+  --skin-shadow-card-hover: 0 2px 4px 0 rgba(0, 0, 0, 0.05), 0 6px 16px 0 rgba(0, 0, 0, 0.08);
+  --shadow-panel: var(--skin-shadow-card-hover);
+  --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+  --shadow-popover: var(--shadow-float);
+  --shadow-dialog: 0 4px 8px 0 rgba(0, 0, 0, 0.06), 0 12px 28px -2px rgba(0, 0, 0, 0.08);
+  /* 焦点：outline 承载（跟随圆角；不用 box-shadow 光环——避免与 --field-line/卡片阴影互相覆盖） */
+  --focus-outline-width: 2px;
+  --focus-outline-color: color-mix(in srgb, var(--accent) 85%, transparent);
+  --focus-outline-offset: 2px;
+  /* 动效（CDS 档；--ease-exit 不变） */
+  --ease-out-soft: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-hover: 150ms;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-enter: 200ms;
+  --dur-exit: 120ms;
+  --dur-view: 240ms;
+  --spring: var(--ease-spring-snappy);
+  --ease-spring-snappy: linear(0, 0.0465, 0.1522, 0.2848, 0.4227, 0.5526, 0.6670, 0.7627, 0.8396, 0.8987, 0.9425, 0.9734, 0.9941, 1.0070, 1.0142, 1.0173, 1.0178, 1.0167, 1.0147, 1.0123, 1.0098, 1.0076, 1.0056, 1.0039, 1.0026, 1.0016, 1.0009, 1.0004, 1);
+  --dur-spring-snappy: 503ms;
+  --ease-spring-bouncy: linear(0, 0.0696, 0.2371, 0.4281, 0.6151, 0.7859, 0.9101, 0.9974, 1.0537, 1.0791, 1.0851, 1.0777, 1.0637, 1.0474, 1.0307, 1.0173, 1.0070, 0.9998, 0.9952, 0.9932, 0.9928, 0.9935, 0.9947, 0.9961, 0.9975, 0.9986, 0.9995, 1.0001, 1);
+  --dur-spring-bouncy: 457ms;
+  --ease-spring-gentle: linear(0, 0.1369, 0.4174, 0.7300, 0.9735, 1.1296, 1.1895, 1.1808, 1.1336, 1.0724, 1.0202, 0.9832, 0.9658, 0.9633, 0.9708, 0.9819, 0.9931, 1.0012, 1.0059, 1.0072, 1.0063, 1.0043, 1.0020, 1.0003, 0.9991, 0.9986, 0.9987, 0.9990, 1);
+  --dur-spring-gentle: 799ms;
+  --ease-spring-heavy: linear(0, 0.2125, 0.3915, 0.5227, 0.6255, 0.7063, 0.7730, 0.8220, 0.8603, 0.8921, 0.9153, 0.9336, 0.9479, 0.9597, 0.9684, 0.9752, 0.9809, 0.9850, 0.9882, 0.9908, 0.9929, 0.9944, 0.9956, 0.9966, 0.9973, 0.9979, 0.9984, 0.9987, 1);
+  --dur-spring-heavy: 456ms;
+  --press-scale: 0.98;
+}
+
+/* ============ 2. Token：深色（浅色里声明过的颜色 Token 全部重写，A4） ============ */
+body.skin-claude.theme-dark {
+  --paper: #0b0b0a;
+  --grey-1: #1a1a19;
+  --grey-2: #2c2c2a;
+  --grey-3: #8a8a86;
+  --ink: #f5f5f5;
+  --text-secondary: #a3a3a3;
+  --text-placeholder: #7a7a76;
+  --border-subtle: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --accent: var(--user-accent, #d97757);
+  --accent-on: var(--user-accent-on, #0a0a0a);
+  --skin-brand: #d97757;
+  --skin-brand-soft: color-mix(in srgb, var(--skin-brand) 18%, transparent);
+  --surface-chrome: #0b0b0a;
+  --surface-card: #1a1a19;
+  --surface-card-fill: #1a1a19;
+  --surface-overlay: #222220;
+  --surface-input: #1a1a19;
+  /* 圆角与动效两档同值（浅色块已覆盖，非颜色 Token 不需重复——skin 层浅色块恒在场） */
+  --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.30), 0 2px 8px 0 rgba(0, 0, 0, 0.40);
+  --skin-shadow-card-hover: 0 2px 4px 0 rgba(0, 0, 0, 0.30), 0 6px 16px 0 rgba(0, 0, 0, 0.40);
+  --shadow-panel: var(--skin-shadow-card-hover);
+  --shadow-float: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.50), 0 2px 6px rgba(0, 0, 0, 0.40);
+  --shadow-popover: var(--shadow-float);
+  --shadow-dialog: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 12px 28px -2px rgba(0, 0, 0, 0.50);
+  --focus-outline-color: color-mix(in srgb, var(--accent) 85%, transparent);
+}
+
+/* ============ 3. 结构规则（选择器来自 docs/skins/component-map.md） ============ */
+
+/* 选区高亮：品牌软底 + 原文字色（CDS clay-light 语义） */
+body.skin-claude ::selection {
+  background: var(--skin-brand-soft);
+  color: var(--ink);
+}
+
+/* 卡片静态阴影（--shadow-card 首批消费者：书架卡面与活动卡——默认皮肤零阴影，Claude 引入柔影）
+   v49.0 / D174（P5-4）：容器级部件优先走 data-ui 公开接口 */
+body.skin-claude [data-ui="card"],
+body.skin-claude [data-ui="card-interactive"] {
+  box-shadow: var(--shadow-card);
+}
+
+/* 可点击卡片 hover 阴影抬升（只变阴影不位移——CDS 同款；书卡/活动卡） */
+body.skin-claude.motion-full [data-ui="card"],
+body.skin-claude.motion-full [data-ui="card-interactive"] {
+  transition: box-shadow 200ms var(--ease-out-soft);
+}
+body.skin-claude [data-ui="shelf-item"]:hover [data-ui="card"],
+body.skin-claude [data-ui="shelf-item"]:has(:focus-visible) [data-ui="card"],
+body.skin-claude [data-ui="card-interactive"]:hover {
+  box-shadow: var(--skin-shadow-card-hover);
+}
+
+/* 卡片圆角：书卡卡面（默认皮肤「永久直角」裁定仅约束默认皮肤，D169/D173——皮肤用结构规则给圆角） */
+body.skin-claude [data-ui="card"] {
+  border-radius: var(--radius-card);
+  overflow: hidden;
+}
+
+/* 单一边框原则（CDS 规则 4）：带阴影弹层内部的次级按钮去边框
+   （弹层容器：dialog/menu 已挂 data-ui；未挂部件的浮层暂用类名——AUTHORING §4.5 登记） */
+body.skin-claude :is([data-ui="dialog"], [data-ui="menu"], .dd-menu, .menu, .selection-menu, .settings-info-tip, .colorpop, .annot-editor, .model-dropdown, .md-tb-menu, .growth-toast, .occlusion-editor-rail) :is(.btn-secondary, .btn-outline) {
+  border-color: transparent;
+}
+
+/* ============ 4. 动效规则（全部在 motion-full 作用域下，A6） ============ */
+
+/* 按压缩放（BOUNCY 语义；排除 settle/涟漪白名单元素——.btn-primary/.grade/.bar-btn.primary，
+   避免 transform 动画互相覆盖，D88 §5.4 白名单纪律的皮肤版） */
+body.skin-claude.motion-full :is(.btn-secondary, .btn-outline, .icon-btn, .dd-btn, .topbar-wb, .nav-item, .seg-tabs button, .act, .cap-more):active {
+  transform: scale(var(--press-scale));
+  transition: transform 120ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* 弹层弹簧弹出（覆盖 pop-in 的时长与缓动——SNAPPY 503ms 弹簧；选择器 = theme.css pop-in 白名单，
+   .dd-menu 已挂 data-ui="menu" 双保险） */
+body.skin-claude.motion-full :is(.annot-editor, .extract-face-toolbar.is-float-pop, [data-ui="menu"], .dd-menu, .learner-menu-pop, .menu.dock-trio) {
+  animation-duration: var(--dur-spring-snappy);
+  animation-timing-function: var(--ease-spring-snappy);
+}
+
+/* 视图切换：新页淡入上浮（old 快照恒垫底不淡出——D120 揭幕式覆盖率 ≡1 的透底教训，
+   只动 new 的 opacity+transform 不露画布底；特异性 html+attr+:root (0,2,1) 压过基线
+   :root[data-vt-dir] (0,2,0) 的方向动画；withViewTransition 不新建——D120 changeView 已在场） */
+html[data-skin="claude"]:root::view-transition-new(root) {
+  animation: skin-claude-rise-in var(--dur-view) var(--ease-enter) both;
+}
+@keyframes skin-claude-rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+/* reduce 降级对齐基线做法：瞬时切换 */
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="claude"]:root::view-transition-new(root) { animation: none; }
+}

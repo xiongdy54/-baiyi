@@ -65,6 +65,9 @@ interface Props {
   onSkinChange: (id: string) => void;
   accentColor: string;
   onAccentChange: (color: string) => void;
+  /** v49.0 / D170：应用内动效等级（跟随系统 / 关闭动画） */
+  motionSetting: "system" | "off";
+  onMotionChange: (v: "system" | "off") => void;
   onClose: () => void;
 }
 
@@ -2810,6 +2813,8 @@ export default function SettingsPanel({
   onSkinChange,
   accentColor,
   onAccentChange,
+  motionSetting,
+  onMotionChange,
   onClose
 }: Props) {
   const [activeNav, setActiveNav] = useState("appearance");
@@ -2893,6 +2898,7 @@ export default function SettingsPanel({
     <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
       <div
         className="modal-panel modal-panel-wide settings-panel"
+        data-ui="dialog"
         data-show={show ? "in" : "out"}
         ref={panelRef}
         role="dialog"
@@ -2911,7 +2917,7 @@ export default function SettingsPanel({
         </div>
 
         <div className="settings-layout modal-scroll" ref={layoutRef}>
-          <nav className="settings-nav" aria-label="设置分区">
+          <nav className="settings-nav" data-ui="sidebar" aria-label="设置分区">
             {SECTION_GROUPS.map((g) => (
               <Fragment key={g.label}>
                 {/* 组标题：非交互 div，不进 Tab 序、不进 .settings-nav button 查询集（§5.4） */}
@@ -2933,7 +2939,7 @@ export default function SettingsPanel({
           <div className="settings-content">
             <SettingsSection id="sec-appearance" title="主题与颜色">
               <h4>主题模式</h4>
-              <div className="seg-tabs">
+              <div className="seg-tabs" data-ui="seg-tabs">
                 <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
                   浅色
                 </button>
@@ -2942,24 +2948,65 @@ export default function SettingsPanel({
                 </button>
               </div>
               <h4>皮肤</h4>
-              <div className="skin-list">
-                {SKINS.map((s) => (
-                  <button
-                    key={s.id}
-                    className={skinId === s.id ? "active" : ""}
-                    onClick={() => onSkinChange(s.id)}
-                  >
-                    {s.name}
-                  </button>
-                ))}
+              {/* v49.0 / P7：皮肤卡片——名称 + 一行描述 + 明/暗预览色块 + 动效标签；
+                  requiresChrome 不满足时置灰并提示（Electron 31 / Chromium 126 当前恒满足） */}
+              <div className="skin-list skin-cards">
+                {SKINS.map((s) => {
+                  const m = s.manifest;
+                  const chromeShort = typeof navigator !== "undefined" && m.requiresChrome
+                    ? (() => {
+                        const v = /Chrom(?:e|ium)\/(\d+)/.exec(navigator.userAgent)?.[1];
+                        return v ? Number(v) < m.requiresChrome : false;
+                      })()
+                    : false;
+                  const motionLabel = { none: "无动效", subtle: "动效：轻", rich: "动效：丰富" }[m.features?.motion ?? "subtle"];
+                  return (
+                    <button
+                      key={m.id}
+                      className={`skin-card${skinId === m.id ? " active" : ""}${chromeShort ? " disabled" : ""}`}
+                      disabled={chromeShort}
+                      title={chromeShort ? `需要 Chromium ≥ ${m.requiresChrome}` : m.description}
+                      onClick={() => onSkinChange(m.id)}
+                    >
+                      <span className="skin-card-preview" aria-hidden="true">
+                        {m.preview.light.slice(0, 4).map((c, i) => (
+                          <i key={i} style={{ background: c }} />
+                        ))}
+                      </span>
+                      <span className="skin-card-name">{m.name}</span>
+                      {m.description && <span className="skin-card-desc">{m.description}</span>}
+                      <span className="skin-card-meta">{motionLabel}</span>
+                    </button>
+                  );
+                })}
               </div>
               {/* v48.89（D132 §8.1）：主题插件子块——落位 sec-appearance 内「皮肤」与「强调色」之间，
                   不新增 SECTION_GROUPS 导航项（D114 的 5 组契约零改动）、不新增 sec-* 锚 */}
               <ThemePluginsBlock />
-              <h4>强调色</h4>
-              <div className="settings-row accent-row">
-                <input type="color" value={accentColor || "#166a59"} onChange={(e) => onAccentChange(e.target.value)} />
-                <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
+              {/* v49.0 / D172：强调色按皮肤记忆——显示值 = 当前皮肤用户值 || 皮肤默认 accent；
+                  accentPolicy=locked 的皮肤隐藏本行（「恢复默认」只清当前皮肤的用户值） */}
+              {SKINS.find((s) => s.manifest.id === skinId)?.manifest.accentPolicy !== "locked" && (
+                <>
+                  <h4>强调色</h4>
+                  <div className="settings-row accent-row">
+                    <input
+                      type="color"
+                      value={accentColor || SKINS.find((s) => s.manifest.id === skinId)?.manifest.defaultAccent?.[theme] || "#166a59"}
+                      onChange={(e) => onAccentChange(e.target.value)}
+                    />
+                    <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
+                  </div>
+                </>
+              )}
+              {/* v49.0 / D170（P2-6）：应用内动效等级——关闭动画 = body.motion-off 总开关（压过皮肤动效） */}
+              <h4>动画</h4>
+              <div className="seg-tabs">
+                <button className={motionSetting === "system" ? "active" : ""} onClick={() => onMotionChange("system")}>
+                  跟随系统
+                </button>
+                <button className={motionSetting === "off" ? "active" : ""} onClick={() => onMotionChange("off")}>
+                  关闭动画
+                </button>
               </div>
             </SettingsSection>
 

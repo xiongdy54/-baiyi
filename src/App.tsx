@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
+import "./styles/layers.css"; // v49.0 / D170：层序预注册，必须先于 theme.css
 import "./theme.css";
 import Bookshelf from "./components/Bookshelf";
 import Reader from "./components/Reader";
@@ -26,7 +27,11 @@ import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
 import { BackgroundActivity } from "./components/BackgroundActivity";
 import { readingWorkflow, parseContextRef, type ExtractSpan } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
-import { getSkin, SKINS } from "./skins";
+// v49.0 / D170：皮肤引擎 v2——清单注册表 + SkinHost（body 类/CSS 注入/层渲染归宿主管）
+import { DEFAULT_SKIN_ID, loadSkin } from "./skins";
+import { SkinHost } from "./skins/SkinHost";
+import { motionClass, resolveMotion, type MotionSetting } from "./skins/runtime/motionLevel";
+import type { MotionLevel } from "./skins/types";
 import { applyAccent } from "./lib/accentVar";
 import { useThemePlugin } from "./lib/themePlugins";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
@@ -122,8 +127,15 @@ const TOP_NAV = [
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
-  const [skinId, setSkinId] = useState("none");
+  const [skinId, setSkinId] = useState<string>(DEFAULT_SKIN_ID);
+  // v49.0 / D172：accentColor = **当前生效**的用户 accent（随皮肤切换换值）；
+  // accentColorLegacy = 默认皮肤的原键（app.accentColor，旧数据兼容）；accentBySkin = 其他皮肤各自记忆
   const [accentColor, setAccentColor] = useState("");
+  const [accentColorLegacy, setAccentColorLegacy] = useState("");
+  const [accentBySkin, setAccentBySkin] = useState<Record<string, string>>({});
+  // v49.0 / D170：动效等级——应用内设置（system|off）× 系统 reduce → body 三态类
+  const [motionSetting, setMotionSetting] = useState<MotionSetting>("system");
+  const [motion, setMotion] = useState<MotionLevel>("full");
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -178,14 +190,33 @@ export default function App() {
     let settled = false;
     Promise.all([
       settingsStore.get<ThemeMode>("theme", "mode", "light"),
-      settingsStore.get<string>("app", "skinId", "none"),
-      settingsStore.get<string>("app", "accentColor", "")
+      settingsStore.get<string>("app", "skinId", DEFAULT_SKIN_ID),
+      settingsStore.get<string>("app", "accentColor", ""),
+      settingsStore.get<Record<string, string>>("app", "accentBySkin", {}),
+      settingsStore.get<MotionSetting>("app", "motionLevel", "system")
     ])
-      .then(([m, s, a]) => {
+      .then(async ([m, s, a, abs, ml]) => {
         settled = true;
         setTheme(m === "dark" ? "dark" : "light");
-        setSkinId(s);
-        setAccentColor(a);
+        // v49.0 / D170：首渲染前预加载已保存皮肤（避免闪一下默认皮）；加载失败回落默认
+        let skin = DEFAULT_SKIN_ID;
+        if (s && s !== DEFAULT_SKIN_ID) {
+          try {
+            await loadSkin(s);
+            skin = s;
+          } catch (err) {
+            console.error("[skin] 已保存皮肤加载失败，回落默认", err);
+            skin = DEFAULT_SKIN_ID;
+          }
+        }
+        setSkinId(skin);
+        setAccentBySkin(abs || {});
+        setAccentColorLegacy(a);
+        // v49.0 / D172：accent 按皮肤记忆——默认皮肤用原键，其他皮肤用 accentBySkin[skinId]
+        const eff = skin === DEFAULT_SKIN_ID ? a : (abs || {})[skin] || "";
+        setAccentColor(eff);
+        setMotionSetting(ml === "off" ? "off" : "system");
+        setMotion(resolveMotion(ml === "off" ? "off" : "system"));
         setLoaded(true);
       })
       .catch((err) => {
@@ -209,6 +240,22 @@ export default function App() {
     document.body.classList.remove("theme-light", "theme-dark");
     document.body.classList.add(theme === "dark" ? "theme-dark" : "theme-light");
   }, [theme]);
+
+  // v49.0 / D170（P2-6）：动效等级 → body 三态类（motion-full/reduced/off 三选一）；
+  // 设置变化与系统 reduce 变化都经这里落类。默认「跟随系统」时 zero-diff（基线无这些类以外的变化）。
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => {
+      const level = resolveMotion(motionSetting);
+      const cls = motionClass(level);
+      document.body.classList.remove("motion-full", "motion-reduced", "motion-off");
+      document.body.classList.add(cls);
+      setMotion(level);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [motionSetting]);
 
   // M4：CommandRegistry 全局键位分发（§4.2-2 落地）——读覆盖键位 + 装 keydown 监听
   useEffect(() => {
@@ -256,19 +303,8 @@ export default function App() {
   }, [settingsOpen]);
 
   useEffect(() => {
-    // 以**解析后**的皮肤为准，而不是持久化的原始 skinId：注册表里已删除的旧 id 会回落到
-    // 默认皮肤，此时若仍按原始值挂 has-skin，body 与顶栏背景被清空却没有皮肤层垫在下面，
-    // 整页会透出窗口底色。
-    const resolvedSkin = getSkin(skinId);
-    document.body.classList.toggle("has-skin", resolvedSkin.id !== "none");
-    document.body.classList.remove(
-      ...SKINS.filter((s) => s.bodyClass).map((s) => s.bodyClass as string)
-    );
-    if (resolvedSkin.bodyClass) document.body.classList.add(resolvedSkin.bodyClass);
-  }, [skinId]);
-
-  useEffect(() => {
-    // 单一入口：自定义 accent 必须同步 --accent-on，否则浅色 accent 上白字不可读
+    // 单一入口：自定义 accent 必须同步 --accent-on，否则浅色 accent 上白字不可读。
+    // v49.0 / D172：改写 --user-accent 三件套（body 类管理已归 SkinHost，见上）
     applyAccent(accentColor);
   }, [accentColor]);
 
@@ -282,19 +318,47 @@ export default function App() {
     eventBus.emit("settings/changed", { scope: "theme", key: "mode" });
   }
 
+  // v49.0 / D170：切皮肤 = 先懒加载（SkinHost 的 useLayoutEffect 从缓存同步取模块，不闪默认皮）
+  // 再切 state；D132 双槽互斥（非 none 皮肤清插件激活）保持不变。
+  // v49.0 / D172：accent 按皮肤记忆——切皮时把该皮肤的记忆值（默认皮肤=原键）应用到 --user-accent。
   async function handleSkinChange(id: string) {
+    try {
+      await loadSkin(id);
+    } catch (err) {
+      console.error("[skin] 皮肤加载失败，保持当前皮肤", err);
+      return;
+    }
     setSkinId(id);
+    const eff = id === DEFAULT_SKIN_ID ? accentColorLegacy : accentBySkin[id] || "";
+    setAccentColor(eff);
+    applyAccent(eff);
     // v48.89（D132 §7.3/§8.3）：内置皮肤与主题插件双槽互斥——选非 none 皮肤时同步清插件激活
     //（宿主 setActive 写两槽；skin 列表选中态因 app.skinId 被写回 none 由插件侧驱动回落）
-    if (id !== "none") void window.pluginsAPI?.setActive("");
+    if (id !== DEFAULT_SKIN_ID) void window.pluginsAPI?.setActive("");
     await settingsStore.set("app", "skinId", id);
     eventBus.emit("settings/changed", { scope: "app", key: "skinId" });
   }
 
+  // v49.0 / D172：accent 写入按当前皮肤分流——默认皮肤沿用 app.accentColor（旧数据/旧测试零影响），
+  // 其他皮肤写 app.accentBySkin[skinId]
   async function handleAccentChange(color: string) {
     setAccentColor(color);
-    await settingsStore.set("app", "accentColor", color);
+    if (skinId === DEFAULT_SKIN_ID) {
+      setAccentColorLegacy(color);
+      await settingsStore.set("app", "accentColor", color);
+    } else {
+      const next = { ...accentBySkin, [skinId]: color };
+      setAccentBySkin(next);
+      await settingsStore.set("app", "accentBySkin", next);
+    }
     eventBus.emit("settings/changed", { scope: "app", key: "accentColor" });
+  }
+
+  // v49.0 / D170（P2-6）：应用内动效等级设置（跟随系统 / 关闭动画）
+  async function handleMotionChange(v: MotionSetting) {
+    setMotionSetting(v);
+    await settingsStore.set("app", "motionLevel", v);
+    eventBus.emit("settings/changed", { scope: "app", key: "motionLevel" });
   }
 
   // 阅读内核分流（v20 一切皆书）：文件书读原书字节；粘贴书惰性确定性合成 EPUB（同 generatorVersion 结构恒同，CFI 稳定）
@@ -342,6 +406,8 @@ export default function App() {
     const host = document as unknown as { startViewTransition?: (update: () => void) => { finished: Promise<void> } };
     const cur = viewRef.current; // 当前视图镜像（§5.1 方向判定的同步读取点）
     const nextView = typeof next === "function" ? next(cur) : next;
+    // v49.0 / D174：ui/view-change（皮肤 API，纯表现层）
+    eventBus.emit("ui/view-change", { from: cur.name, to: nextView.name });
     const dir = viewDirOf(cur, nextView);
     if (typeof host.startViewTransition !== "function") {
       // 降级（§5.1）：不写 dataset，瞬时切换，方向动效自然不在场
@@ -534,9 +600,6 @@ export default function App() {
     );
   }
 
-  const skin = getSkin(skinId);
-  const SkinComponent = skin.component;
-
   let mainContent: ReactNode = null;
   let topTitle = "";
   // v48.81（D125）：界面文字（「推荐」页签 /「下一步」标题）取自学习者字符串表（§11.9）；静态六签渲染器
@@ -683,12 +746,14 @@ export default function App() {
           <button onClick={() => setLoadError(null)}>知道了</button>
         </div>
       )}
-      {skin.id !== "none" && (
-        <div className="skin-layer">
-          <SkinComponent {...skin.props} />
-        </div>
-      )}
-      <header className="topbar">
+      {/* v49.0 / D170：皮肤引擎 v2 唯一挂载点——CSS 注入/移除、body 类、背景/前景层、activate 生命周期 */}
+      <SkinHost
+        skinId={skinId}
+        mode={theme}
+        motion={motion}
+        onFail={() => void handleSkinChange(DEFAULT_SKIN_ID)}
+      />
+      <header className="topbar" data-ui="topbar">
         {/* 文字主导航（v12.1）：常驻左侧，当前项 accent 高亮；书架视图不再渲染品牌字块。
             v48.81（D125）：「下一步」页签按总开关插在复习与卡片之间（顶栏第 4 位）；
             关闭学习者模型时经 .nav-collapse 横向收拢后卸载，右侧签前滑补位 */}
@@ -725,24 +790,24 @@ export default function App() {
             <span>制卡台</span>
             {wb.busy && <i className="topbar-wb-dot" aria-hidden="true" />}
           </button>
-          <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)}>
+          <button className="icon-btn" title="设置" data-ui="button-icon" onClick={() => setSettingsOpen(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M18.92 10.02 22.13 9.66A10.4 10.4 0 0 1 22.13 14.34L18.92 13.98A7.2 7.2 0 0 1 17.18 17L19.09 19.61A10.4 10.4 0 0 1 15.04 21.95L13.74 18.99A7.2 7.2 0 0 1 10.26 18.99L8.96 21.95A10.4 10.4 0 0 1 4.91 19.61L6.82 17A7.2 7.2 0 0 1 5.08 13.98L1.87 14.34A10.4 10.4 0 0 1 1.87 9.66L5.08 10.02A7.2 7.2 0 0 1 6.82 7L4.91 4.39A10.4 10.4 0 0 1 8.96 2.05L10.26 5.01A7.2 7.2 0 0 1 13.74 5.01L15.04 2.05A10.4 10.4 0 0 1 19.09 4.39L17.18 7A7.2 7.2 0 0 1 18.92 10.02Z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
           <div className="win-controls">
-            <button className="icon-btn" title="最小化" onClick={() => window.windowAPI?.minimize()}>
+            <button className="icon-btn" title="最小化" data-ui="button-icon" onClick={() => window.windowAPI?.minimize()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M5 12h14" />
               </svg>
             </button>
-            <button className="icon-btn" title="最大化/还原" onClick={() => window.windowAPI?.maximize()}>
+            <button className="icon-btn" title="最大化/还原" data-ui="button-icon" onClick={() => window.windowAPI?.maximize()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="5" y="5" width="14" height="14" />
               </svg>
             </button>
-            <button className="icon-btn win-close" title="关闭" onClick={() => window.windowAPI?.close()}>
+            <button className="icon-btn win-close" title="关闭" data-ui="button-icon" onClick={() => window.windowAPI?.close()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M18 6 6 18" />
                 <path d="m6 6 12 12" />
@@ -751,7 +816,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      <div className="app-main">
+      <div className="app-main" data-ui="view">
         {mainContent}
         {/* D123：无阅读上下文的页面（书架/复习/卡片/日记/数据）挂自由制卡台宿主；阅读器与摘录页自带宿主 */}
         {view.name !== "reader" && view.name !== "queue" && view.name !== "extractSession" && <FreeWorkbenchHost />}
@@ -778,6 +843,8 @@ export default function App() {
           onSkinChange={handleSkinChange}
           accentColor={accentColor}
           onAccentChange={handleAccentChange}
+          motionSetting={motionSetting}
+          onMotionChange={handleMotionChange}
           onClose={() => setSettingsOpen(false)}
         />
       )}
