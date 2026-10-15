@@ -19,6 +19,12 @@
   --folder-paper-1: #e4e4e7;
   --folder-paper-2: #d4d4d8;
   --folder-paper-3: #a1a1aa;
+  /* 无封面默认封面「暖纸」（v48.122 / D167）：暖米白渐变两端 + 暖墨书名 + 暖灰署名；
+     皮肤无关的中性暖色（不动 accent 族），深主题在同名 token 上换暖深档 */
+  --cover-warm-1: #f8f4ec;
+  --cover-warm-2: #efe8da;
+  --cover-warm-title: #3d362b;
+  --cover-warm-meta: #8a7d68;
   /* 文字角色 */
   --text-primary: var(--ink);
   --text-secondary: #525252;
@@ -180,6 +186,11 @@ body.theme-dark {
   --grey-1: #1c1c1a;
   --grey-2: #33332f;
   --grey-3: #8a8a86;
+  /* 暖纸默认封面深色档（v48.122 / D167）：暖深棕渐变 + 暖米字 */
+  --cover-warm-1: #2b2721;
+  --cover-warm-2: #221e18;
+  --cover-warm-title: #e8e1d3;
+  --cover-warm-meta: #998e7a;
   --ink: #f5f5f2;
   --text-primary: var(--ink);
   --text-secondary: #b5b5b0;
@@ -1018,28 +1029,62 @@ body.has-skin .topbar { background: transparent; }
 /* D120-R2（MOTION-DESIGN-SPEC §10-R2）：封面解码淡入——bookasset:// 逐张解码是书架
    「生硬」的第二波硬显来源；解码完成（TSX 侧 onLoad 置 is-loaded）前不显示，150ms 淡入落地。
    no-preference 外无 opacity:0 —— reduce / 无动画环境图片直接显（§3.2 双轨制）。
-   失败回落骨架（灰底 + .book-card-title）与无封面占位态不是 .cover-img，表现不变；
+   失败回落与无封面占位态（.default-cover，v48.122/D167）不是 .cover-img，表现不变；
    重试链 ?r=N 不动，每次重试的加载重新走同一规则（§10-R2）。 */
 @media (prefers-reduced-motion: no-preference) {
   .cover-img { opacity: 0; transition: opacity var(--dur-enter) var(--ease-enter); }
   .cover-img.is-loaded { opacity: 1; }
 }
-/* 无封面：灰底 + 左下对齐标题（沿用既有骨架，不另发明一套；v48.82/D126：accent 书脊小方块退役，
-   标题位置不动——方块仅 8×8，移除不留洞） */
-.book-card-title {
-  align-self: flex-end;
-  margin: 0;
-  padding: var(--sp-4);
+/* 无封面默认封面「暖纸」（v48.122 / D167）：灰底 + 左下标题（v48.82/D126③ 回落形态）废止——
+   暖米白纵向渐变 + 左缘书脊淡影 + 居中排版（细规线 / 书名 / 有作者时底部署名）。
+   封面解码重试失败的回落同此形态（CoverImg 兜底同渲染 DefaultCover）。
+   直角零圆角（圆角白名单不变）、无动效；.book-card-title 类名保留（多处测试选择器锁定）。 */
+.default-cover {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--sp-6) var(--sp-4) var(--sp-4);
+  background:
+    linear-gradient(to right, color-mix(in srgb, var(--cover-warm-title) 8%, transparent), transparent 16%),
+    linear-gradient(to bottom, var(--cover-warm-1), var(--cover-warm-2));
+}
+.default-cover .book-card-title {
+  /* margin auto 0：书名在「顶 padding 与署名之间」的余量内垂直居中——
+     无署名时即整卡居中，两态同一套语言且永不与署名相叠 */
+  margin: auto 0;
   font-size: var(--fs-title-s);
-  font-weight: 400;
-  line-height: 1.35;
+  font-weight: 500;
+  line-height: 1.45;
   letter-spacing: -0.01em;
-  color: var(--text-primary);
-  text-align: left;
+  text-align: center;
+  color: var(--cover-warm-title);
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
+}
+/* 书名上方细规线：封面式克制装饰（24×1，title 色 35%） */
+.default-cover .book-card-title::before {
+  content: "";
+  display: block;
+  width: 24px;
+  height: 1px;
+  margin: 0 auto var(--sp-3);
+  background: color-mix(in srgb, var(--cover-warm-title) 35%, transparent);
+}
+/* 署名钉底缘（真实封面的标题/作者分层）；无作者不渲染，书名居中不受影响 */
+.default-cover .dc-author {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  text-align: center;
+  color: var(--cover-warm-meta);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cap-rail { height: calc(var(--sp-1) / 2); background: var(--grey-2); }
@@ -1476,6 +1521,18 @@ body.has-skin .topbar { background: transparent; }
   --f-tri: 5px;
 }
 .shelf-table .thumb:has(.f-back) { width: 32px; } /* 体 32 + 标签页 4 ＝ 与书缩略 36 同宽整格（v48.118/D163） */
+/* 无封面缩略＝暖纸默认封面的缩小同语言（v48.122 / D167）：暖纸渐变底 + 书名首字符花押，直角无动效 */
+.shelf-table .thumb-mono {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(to bottom, var(--cover-warm-1), var(--cover-warm-2));
+  color: var(--cover-warm-title);
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
 /* 新入库的材料：outline 高亮 1.2s（不受封面色影响，深浅两主题都看得见），
    框与拖拽高亮同一块口径＝封面 + 进度轨 */
 .shelf-item.is-fresh .shelf-face {

@@ -22,19 +22,32 @@ import {
 } from "../lib/shelf";
 
 // v45.1（用户反馈「封面偶尔加载失败」）：bookasset 协议注册现已提前（main.js），此处再兜底——
-// 启动早期偶发请求失败时自动重试（至多 3 次，400ms 间隔）；仍失败则回落无封面骨架（灰底+标题）。
+// 启动早期偶发请求失败时自动重试（至多 3 次，400ms 间隔）；仍失败则回落暖纸默认封面（v48.122/D167）。
 const COVER_RETRY_MAX = 3;
-function CoverImg({ itemId, filename, title }: { itemId: string; filename: string; title: string }) {
+
+/* v48.122 / D167：无封面默认封面「暖纸」——暖纸渐变底 + 居中书名（上方细规线）+ 有作者时底部署名。
+   .book-card-title 类名保留（annotations/extract/marks/multiselect/d126/f49b 选择器锁定）。 */
+function DefaultCover({ title, author }: { title: string; author?: string | null }) {
+  return (
+    <div className="default-cover">
+      <p className="book-card-title">{title}</p>
+      {author ? <p className="dc-author">{author}</p> : null}
+    </div>
+  );
+}
+
+/* 目录表无封面缩略的花押：CJK 取首字、拉丁取首字母大写（v48.122 / D167） */
+function titleMonogram(title: string): string {
+  return title.trim().charAt(0).toUpperCase();
+}
+
+function CoverImg({ itemId, filename, title, author }: { itemId: string; filename: string; title: string; author?: string | null }) {
   const [attempt, setAttempt] = useState(0);
   // D120-R2（MOTION-DESIGN-SPEC §10-R2）：封面解码淡入——解码完成（onLoad）前 is-loaded 不在场，
-  // img 在 no-preference 环境下 opacity:0；成功后 150ms 淡入。失败回落骨架（灰底+title）不走此规则。
+  // img 在 no-preference 环境下 opacity:0；成功后 150ms 淡入。失败回落暖纸封面（D167）不走此规则。
   const [loaded, setLoaded] = useState(false);
   if (attempt > COVER_RETRY_MAX) {
-    return (
-      <>
-        <p className="book-card-title">{title}</p>
-      </>
-    );
+    return <DefaultCover title={title} author={author} />;
   }
   return (
     <img
@@ -713,9 +726,9 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
 
   const bookFace = (item: LibraryItem) =>
     item.cover ? (
-      <CoverImg itemId={item.id} filename={item.cover} title={item.title} />
+      <CoverImg itemId={item.id} filename={item.cover} title={item.title} author={item.author} />
     ) : (
-      <p className="book-card-title">{item.title}</p>
+      <DefaultCover title={item.title} author={item.author} />
     );
 
   // index：视觉阅读序（先行后列＝entries 渲染序），供入场 stagger 的 --i（clamp 到 0-7 共 8 档，§3.6 预算）
@@ -846,8 +859,10 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
               <span className="f-front" aria-hidden="true" />
             </span>
           ) : (
-            <span className="thumb">{entry.item.cover && <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true"
-              onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}</span>
+            <span className="thumb">{entry.item.cover
+              ? <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true"
+                onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />
+              : <span className="thumb-mono" aria-hidden="true">{titleMonogram(entry.item.title)}</span>}</span>
           )}
         </td>
         <td className="col-main" onClick={open}>
