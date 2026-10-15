@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
+import "./styles/layers.css"; // v49.0 / D170：层序预注册，必须先于 theme.css
 import "./theme.css";
 import Bookshelf from "./components/Bookshelf";
 import Reader from "./components/Reader";
@@ -26,7 +27,11 @@ import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
 import { BackgroundActivity } from "./components/BackgroundActivity";
 import { readingWorkflow, parseContextRef, type ExtractSpan } from "./lib/readingWorkflow";
 import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
-import { getSkin, SKINS } from "./skins";
+// v49.0 / D170：皮肤引擎 v2——清单注册表 + SkinHost（body 类/CSS 注入/层渲染归宿主管）
+import { DEFAULT_SKIN_ID, loadSkin } from "./skins";
+import { SkinHost } from "./skins/SkinHost";
+import { motionClass, resolveMotion, type MotionSetting } from "./skins/runtime/motionLevel";
+import type { MotionLevel } from "./skins/types";
 import { applyAccent } from "./lib/accentVar";
 import { useThemePlugin } from "./lib/themePlugins";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
@@ -122,8 +127,11 @@ const TOP_NAV = [
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
-  const [skinId, setSkinId] = useState("none");
+  const [skinId, setSkinId] = useState<string>(DEFAULT_SKIN_ID);
   const [accentColor, setAccentColor] = useState("");
+  // v49.0 / D170：动效等级——应用内设置（system|off）× 系统 reduce → body 三态类
+  const [motionSetting, setMotionSetting] = useState<MotionSetting>("system");
+  const [motion, setMotion] = useState<MotionLevel>("full");
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -178,14 +186,27 @@ export default function App() {
     let settled = false;
     Promise.all([
       settingsStore.get<ThemeMode>("theme", "mode", "light"),
-      settingsStore.get<string>("app", "skinId", "none"),
-      settingsStore.get<string>("app", "accentColor", "")
+      settingsStore.get<string>("app", "skinId", DEFAULT_SKIN_ID),
+      settingsStore.get<string>("app", "accentColor", ""),
+      settingsStore.get<MotionSetting>("app", "motionLevel", "system")
     ])
-      .then(([m, s, a]) => {
+      .then(async ([m, s, a, ml]) => {
         settled = true;
         setTheme(m === "dark" ? "dark" : "light");
-        setSkinId(s);
+        // v49.0 / D170：首渲染前预加载已保存皮肤（避免闪一下默认皮）；加载失败回落默认
+        let skin = DEFAULT_SKIN_ID;
+        if (s && s !== DEFAULT_SKIN_ID) {
+          try {
+            await loadSkin(s);
+            skin = s;
+          } catch (err) {
+            console.error("[skin] 已保存皮肤加载失败，回落默认", err);
+          }
+        }
+        setSkinId(skin);
         setAccentColor(a);
+        setMotionSetting(ml === "off" ? "off" : "system");
+        setMotion(resolveMotion(ml === "off" ? "off" : "system"));
         setLoaded(true);
       })
       .catch((err) => {
@@ -209,6 +230,22 @@ export default function App() {
     document.body.classList.remove("theme-light", "theme-dark");
     document.body.classList.add(theme === "dark" ? "theme-dark" : "theme-light");
   }, [theme]);
+
+  // v49.0 / D170（P2-6）：动效等级 → body 三态类（motion-full/reduced/off 三选一）；
+  // 设置变化与系统 reduce 变化都经这里落类。默认「跟随系统」时 zero-diff（基线无这些类以外的变化）。
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const apply = () => {
+      const level = resolveMotion(motionSetting);
+      const cls = motionClass(level);
+      document.body.classList.remove("motion-full", "motion-reduced", "motion-off");
+      document.body.classList.add(cls);
+      setMotion(level);
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [motionSetting]);
 
   // M4：CommandRegistry 全局键位分发（§4.2-2 落地）——读覆盖键位 + 装 keydown 监听
   useEffect(() => {
@@ -256,19 +293,8 @@ export default function App() {
   }, [settingsOpen]);
 
   useEffect(() => {
-    // 以**解析后**的皮肤为准，而不是持久化的原始 skinId：注册表里已删除的旧 id 会回落到
-    // 默认皮肤，此时若仍按原始值挂 has-skin，body 与顶栏背景被清空却没有皮肤层垫在下面，
-    // 整页会透出窗口底色。
-    const resolvedSkin = getSkin(skinId);
-    document.body.classList.toggle("has-skin", resolvedSkin.id !== "none");
-    document.body.classList.remove(
-      ...SKINS.filter((s) => s.bodyClass).map((s) => s.bodyClass as string)
-    );
-    if (resolvedSkin.bodyClass) document.body.classList.add(resolvedSkin.bodyClass);
-  }, [skinId]);
-
-  useEffect(() => {
-    // 单一入口：自定义 accent 必须同步 --accent-on，否则浅色 accent 上白字不可读
+    // 单一入口：自定义 accent 必须同步 --accent-on，否则浅色 accent 上白字不可读。
+    // v49.0 / D172：改写 --user-accent 三件套（body 类管理已归 SkinHost，见上）
     applyAccent(accentColor);
   }, [accentColor]);
 
@@ -282,11 +308,19 @@ export default function App() {
     eventBus.emit("settings/changed", { scope: "theme", key: "mode" });
   }
 
+  // v49.0 / D170：切皮肤 = 先懒加载（SkinHost 的 useLayoutEffect 从缓存同步取模块，不闪默认皮）
+  // 再切 state；D132 双槽互斥（非 none 皮肤清插件激活）保持不变。
   async function handleSkinChange(id: string) {
+    try {
+      await loadSkin(id);
+    } catch (err) {
+      console.error("[skin] 皮肤加载失败，保持当前皮肤", err);
+      return;
+    }
     setSkinId(id);
     // v48.89（D132 §7.3/§8.3）：内置皮肤与主题插件双槽互斥——选非 none 皮肤时同步清插件激活
     //（宿主 setActive 写两槽；skin 列表选中态因 app.skinId 被写回 none 由插件侧驱动回落）
-    if (id !== "none") void window.pluginsAPI?.setActive("");
+    if (id !== DEFAULT_SKIN_ID) void window.pluginsAPI?.setActive("");
     await settingsStore.set("app", "skinId", id);
     eventBus.emit("settings/changed", { scope: "app", key: "skinId" });
   }
@@ -295,6 +329,13 @@ export default function App() {
     setAccentColor(color);
     await settingsStore.set("app", "accentColor", color);
     eventBus.emit("settings/changed", { scope: "app", key: "accentColor" });
+  }
+
+  // v49.0 / D170（P2-6）：应用内动效等级设置（跟随系统 / 关闭动画）
+  async function handleMotionChange(v: MotionSetting) {
+    setMotionSetting(v);
+    await settingsStore.set("app", "motionLevel", v);
+    eventBus.emit("settings/changed", { scope: "app", key: "motionLevel" });
   }
 
   // 阅读内核分流（v20 一切皆书）：文件书读原书字节；粘贴书惰性确定性合成 EPUB（同 generatorVersion 结构恒同，CFI 稳定）
@@ -534,9 +575,6 @@ export default function App() {
     );
   }
 
-  const skin = getSkin(skinId);
-  const SkinComponent = skin.component;
-
   let mainContent: ReactNode = null;
   let topTitle = "";
   // v48.81（D125）：界面文字（「推荐」页签 /「下一步」标题）取自学习者字符串表（§11.9）；静态六签渲染器
@@ -683,11 +721,13 @@ export default function App() {
           <button onClick={() => setLoadError(null)}>知道了</button>
         </div>
       )}
-      {skin.id !== "none" && (
-        <div className="skin-layer">
-          <SkinComponent {...skin.props} />
-        </div>
-      )}
+      {/* v49.0 / D170：皮肤引擎 v2 唯一挂载点——CSS 注入/移除、body 类、背景/前景层、activate 生命周期 */}
+      <SkinHost
+        skinId={skinId}
+        mode={theme}
+        motion={motion}
+        onFail={() => void handleSkinChange(DEFAULT_SKIN_ID)}
+      />
       <header className="topbar">
         {/* 文字主导航（v12.1）：常驻左侧，当前项 accent 高亮；书架视图不再渲染品牌字块。
             v48.81（D125）：「下一步」页签按总开关插在复习与卡片之间（顶栏第 4 位）；
@@ -778,6 +818,8 @@ export default function App() {
           onSkinChange={handleSkinChange}
           accentColor={accentColor}
           onAccentChange={handleAccentChange}
+          motionSetting={motionSetting}
+          onMotionChange={handleMotionChange}
           onClose={() => setSettingsOpen(false)}
         />
       )}

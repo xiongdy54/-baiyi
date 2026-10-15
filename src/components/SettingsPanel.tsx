@@ -65,6 +65,9 @@ interface Props {
   onSkinChange: (id: string) => void;
   accentColor: string;
   onAccentChange: (color: string) => void;
+  /** v49.0 / D170：应用内动效等级（跟随系统 / 关闭动画） */
+  motionSetting: "system" | "off";
+  onMotionChange: (v: "system" | "off") => void;
   onClose: () => void;
 }
 
@@ -2810,6 +2813,8 @@ export default function SettingsPanel({
   onSkinChange,
   accentColor,
   onAccentChange,
+  motionSetting,
+  onMotionChange,
   onClose
 }: Props) {
   const [activeNav, setActiveNav] = useState("appearance");
@@ -2945,11 +2950,11 @@ export default function SettingsPanel({
               <div className="skin-list">
                 {SKINS.map((s) => (
                   <button
-                    key={s.id}
-                    className={skinId === s.id ? "active" : ""}
-                    onClick={() => onSkinChange(s.id)}
+                    key={s.manifest.id}
+                    className={skinId === s.manifest.id ? "active" : ""}
+                    onClick={() => onSkinChange(s.manifest.id)}
                   >
-                    {s.name}
+                    {s.manifest.name}
                   </button>
                 ))}
               </div>
@@ -2960,6 +2965,16 @@ export default function SettingsPanel({
               <div className="settings-row accent-row">
                 <input type="color" value={accentColor || "#166a59"} onChange={(e) => onAccentChange(e.target.value)} />
                 <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
+              </div>
+              {/* v49.0 / D170（P2-6）：应用内动效等级——关闭动画 = body.motion-off 总开关（压过皮肤动效） */}
+              <h4>动画</h4>
+              <div className="seg-tabs">
+                <button className={motionSetting === "system" ? "active" : ""} onClick={() => onMotionChange("system")}>
+                  跟随系统
+                </button>
+                <button className={motionSetting === "off" ? "active" : ""} onClick={() => onMotionChange("off")}>
+                  关闭动画
+                </button>
               </div>
             </SettingsSection>
 

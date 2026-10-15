@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import CaptureEditor, { applyCaptureAppearance } from "./components/CaptureEditor";
 // v48.89（D132 §6.4）：捕获窗跟随主题插件（最小子集桥：getActive/onChanged）
 import { installThemePluginBridge } from "./lib/themePlugins";
+import "./styles/layers.css"; // v49.0 / D170：层序预注册，先于 theme.css
 import "./theme.css";
 
 declare global {

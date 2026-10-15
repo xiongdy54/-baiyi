@@ -8,6 +8,7 @@ import { applyCaptureAppearance } from "./components/CaptureEditor";
 // v48.89（D132 §6.4）：制卡台窗口跟随主题插件（主 preload 全量桥，随 preload.js 注入）
 import { installThemePluginBridge } from "./lib/themePlugins";
 import { eventBus } from "./lib/eventbus";
+import "./styles/layers.css"; // v49.0 / D170：层序预注册，先于 theme.css
 import "./theme.css";
 
 function WorkbenchWindow() {

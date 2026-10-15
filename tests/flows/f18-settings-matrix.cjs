@@ -287,6 +287,7 @@ app
         ["app", "activeThemePlugin", "sepia-demo"], // v48.89 / D132 主题插件激活指针（非默认值才验得出往返；空串=未激活；与 app.skinId 双槽互斥）
         ["app", "learner", { enabled: true, nativeLangs: ["zh", "en"], nativeConfirmed: true, recCount: 8 }], // v48.80 / D124 学习者知识模型（对象键，设计稿 §11.6）
         ["app", "accentColor", "#0057ff"],
+        ["app", "motionLevel", "off"], // v49.0 / D170 动效等级（"system"|"off"，非默认值才验得出往返）
         ["app", "mindmapMaxCalls", 40],
         ["app", "mindmapPricing", { input: 1.5, output: 6 }],
         ["app", "mindmapConcurrency", 3],

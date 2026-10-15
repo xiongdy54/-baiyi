@@ -1,0 +1,6 @@
+/* 皮肤引擎 v2 · CSS 层叠层序（v49.0 / D170）
+   必须是全应用第一个加载的 CSS（三入口在 theme.css 之前 import 本文件）。
+   vendor 层预注册占位（第三方 CSS 现保持无层 import 原样，RECON §4 裁决——无层样式恒高于任何层，
+   现状即依赖此序，迁层有视觉漂移风险）；theme.css 包裹于 base 层；皮肤由 SkinHost 包裹于 skin 层。
+   skin 层声明恒压 base 层（与选择器权重无关）；无层（第三方/插件 data-plugin-css）压过所有层。 */
+@layer vendor, base, skin;

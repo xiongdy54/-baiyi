@@ -33,14 +33,16 @@ export function accentOnColor(color: string): string | null {
 
 /** 应用自定义 accent（同时写 --accent-on）；color 为空则恢复主题默认。
  *
- * 为什么必须写 body、而不是只写 documentElement（v48.14 修复的缺陷）：
- * theme.css 的深色档不是挂在 :root 上，而是 `body.theme-dark { --accent: #5b7fe8; --accent-on: … }`
- * —— 声明在 body 上的规则**胜过**从 :root 继承的值，而整个应用都渲染在 body 子树里。
- * 所以只写 :root 时：浅色模式正常（body 不声明 --accent，继承得到自定义色），
- * 深色模式下 :root 拿到了自定义色、body 却把它重新声明回 IKB 蓝，
- * 结果全应用（主按钮 / 导航高亮 / accent-soft / 原生控件 accent-color）全部回落到蓝色。
- * 内联样式优先级高于任何选择器，写在 body 上即可同时压过浅色与深色两套主题声明。
- * 仍保留 :root 一份，供极少数从 documentElement 取值的场景（如独立窗口尚未挂主题类时）。
+ * v49.0 / D172（皮肤引擎 v2）：改写 `--user-accent` / `--user-interactive-accent` / `--user-accent-on`
+ * 三件套（不再内联 `--accent`）——内联写 `--accent` 会压掉任何皮肤的 accent（皮肤按皮肤记忆 accent，
+ * D172），改写用户值后 theme.css 以 `var(--user-accent, <基线>)` 兜底：默认皮肤用基线，
+ * 其他皮肤在自己的 Token 块里引用。写入前先移除旧版可能残留的 `--accent` 等内联属性（升级自愈）。
+ *
+ * 为什么必须写 body、而不是只写 documentElement（v48.14 修复的缺陷，机制不变）：
+ * theme.css 的深色档声明在 `body.theme-dark` 上——声明在 body 上的规则**胜过**从 :root 继承的值，
+ * 而整个应用都渲染在 body 子树里。`--accent` 的浅色档现在也声明在 body 规则（var(--user-accent,…)
+ * 兜底），内联写 body 即同时压过浅色与深色两档；documentElement 一份照旧保留，
+ * 供极少数从 documentElement 取值的场景（如独立窗口尚未挂主题类时）。
  */
 export function applyAccent(color: string | undefined | null): void {
   const value = (color ?? "").trim();
@@ -48,17 +50,21 @@ export function applyAccent(color: string | undefined | null): void {
   for (const el of [document.body, document.documentElement]) {
     if (!el) continue;
     const s = el.style;
+    // 旧版内联残留自愈（D172）：--accent / --interactive-accent / --accent-on 不再由内联承载
+    s.removeProperty("--accent");
+    s.removeProperty("--interactive-accent");
+    s.removeProperty("--accent-on");
     if (!value) {
-      s.removeProperty("--accent");
-      s.removeProperty("--interactive-accent");
-      s.removeProperty("--accent-on");
+      s.removeProperty("--user-accent");
+      s.removeProperty("--user-interactive-accent");
+      s.removeProperty("--user-accent-on");
       continue;
     }
-    s.setProperty("--interactive-accent", value);
-    s.setProperty("--accent", value);
+    s.setProperty("--user-interactive-accent", value);
+    s.setProperty("--user-accent", value);
     // 深色主题默认反白是纯黑；若自定义 accent 本身是深色，必须换成纯白，
     // 否则主按钮就成了黑字压深蓝底。取不到亮度（非 hex）时撤销内联，交回主题档。
-    if (on) s.setProperty("--accent-on", on);
-    else s.removeProperty("--accent-on");
+    if (on) s.setProperty("--user-accent-on", on);
+    else s.removeProperty("--user-accent-on");
   }
 }

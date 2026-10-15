@@ -3,7 +3,9 @@
    唯一视觉规范：单一焦点色 IKB 蓝 / 直角纯色平面 / Hairline / 8px 网格
    业务组件禁止写死颜色、圆角、阴影，统一走变量
    ============================================================ */
-
+/* v49.0 / D170（P2-1）：theme.css 整体置于 base 层——皮肤层（skin）声明恒压本层、与选择器权重
+   无关；第三方 CSS 保持无层 import（RECON §4）。层序预注册在 src/styles/layers.css（最先加载）。 */
+@layer base {
 :root {
   /* 灰阶 */
   --paper: #fafaf8;
@@ -33,7 +35,9 @@
   /* 描边 */
   --border-subtle: #e0e0e0;
   --border-strong: #a3a3a3;
-  /* 焦点色（全应用唯一 accent）：v48.35/D75 默认改用户裁定的深绿（原克莱因蓝 IKB 退役；可经设置改任何色） */
+  /* 焦点色（全应用唯一 accent）：v48.35/D75 默认改用户裁定的深绿（原克莱因蓝 IKB 退役；可经设置改任何色）。
+     v49.0 / D172：自定义强调色由运行时内联写 --user-accent 三件套（applyAccent），此处以 var() 兜底——
+     :root 保留字面基线值（供 documentElement 继承路径），body/body.theme-dark 各重取一次用户值。 */
   --accent: #166a59;
   --accent-on: #ffffff;
   --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -263,6 +267,19 @@ body {
 
 button { font-family: inherit; }
 
+/* v49.0 / D170（P2-6）：应用内「关闭动画」总开关（app.motionLevel="off" → body.motion-off）。
+   base 层的 !important 按层叠层规则压过 skin 层的 !important（层序 vendor,base,skin 中 base 的
+   important 强于 skin 的 important）——皮肤动效可被整体关停（A6）；默认「跟随系统」不命中本规则，
+   默认皮肤零变化。0.01ms 而非 0：保留 animationend/transitionend 事件语义。 */
+body.motion-off *,
+body.motion-off *::before,
+body.motion-off *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
 /* 原生表单控件的勾选/滑块/进度强调色统一跟随主 accent。
    accent-color 是可继承属性，写在 body 上即覆盖全应用（瑞士风硬规则：
    同一界面内只允许一个高饱和焦点色；不设置时 Chromium 会画系统蓝 = 第二焦点色）。 */
@@ -277,6 +294,10 @@ body { accent-color: var(--accent); }
    在 body 上重新声明后，皮肤只需覆盖 --accent，派生档自动跟随。
    (用户自定义强调色走 documentElement 内联样式，两者都在 :root 求值，本就不受影响。) */
 body {
+  /* v49.0 / D172：accent 用户值优先，否则回落基线（浅色档与 ：root 同值）——皮肤在 skin 层覆盖
+     --accent 时同样会被这里重新求值，派生档自动跟随；内联 --user-accent 写在 body 上直接命中 */
+  --accent: var(--user-accent, #166a59);
+  --accent-on: var(--user-accent-on, #ffffff);
   --accent-soft: color-mix(in srgb, var(--accent) 8%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #000000);
   --accent-pressed: color-mix(in srgb, var(--accent) 78%, #000000);
@@ -312,6 +333,9 @@ body {
 }
 /* 深色提亮档同理：body.theme-dark 比上面的 body 特异性高，会覆盖它 */
 body.theme-dark {
+  /* v49.0 / D172：深色档 accent 用户值优先（内联 --user-accent 命中），否则回落深色基线 */
+  --accent: var(--user-accent, #3fa08a);
+  --accent-on: var(--user-accent-on, #0a0a0a);
   --accent-soft: color-mix(in srgb, var(--accent) 16%, transparent);
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff);
   --accent-pressed: color-mix(in srgb, var(--accent) 78%, #ffffff);
@@ -598,9 +622,19 @@ select option { background: var(--paper); color: var(--text-primary); }
   z-index: -1;
   overflow: hidden;
 }
-body.has-skin { background: transparent; }
-/* 皮肤背景层需要透出：顶栏去底色，仅保留 hairline */
-body.has-skin .topbar { background: transparent; }
+/* 皮肤前景层（v49.0 / D170）：庆祝/装饰动画承载面，恒不挡点击（A7） */
+.skin-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  overflow: hidden;
+}
+/* v49.0 / D170（P2-5）：透明 chrome 改由清单字段驱动（SkinHost 挂 body.skin-chrome-transparent），
+   不再由「有皮肤就清底」——实底皮肤（chrome:"solid"）保持 body/顶栏原样 */
+body.skin-chrome-transparent { background: transparent; }
+/* 透明 chrome 的背景层需要透出：顶栏去底色，仅保留 hairline */
+body.skin-chrome-transparent .topbar { background: transparent; }
 
 /* ---------- 顶栏（48px，hairline 下缘） ---------- */
 
@@ -9205,3 +9239,4 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   .wb-explain-toggle svg,
   .wb-mode-btn { transition: none; }
 }
+} /* @layer base 收尾（v49.0 / D170，P2-1）——与文件首行 @layer base { 配对 */
