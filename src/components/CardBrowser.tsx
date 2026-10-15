@@ -554,6 +554,16 @@ export default function CardBrowser({
     if (kind === "card") setSelCards(next);
     else setSelExtracts(next);
   }
+  // v49.2（D176）：左侧复选框＝直接勾选/取消，逐个叠加不清空既有选择——
+  // 修饰键语义（Ctrl/Shift）只属于行点击；复选框不需要也不消费快捷键
+  function togglePick(kind: "card" | "extract", id: string) {
+    const next = new Set(kind === "card" ? selCards : selExtracts);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setAnchorId(id);
+    if (kind === "card") setSelCards(next);
+    else setSelExtracts(next);
+  }
   function selectAllOf(kind: "card" | "extract") {
     if (kind === "card") setSelCards(new Set(cardsMeta.map((m) => m.id)));
     else setSelExtracts(new Set(scopeExtracts.map((e) => e.id)));
@@ -1511,6 +1521,10 @@ export default function CardBrowser({
               key={c.id}
               className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
               role="row"
+              onMouseDown={(ev) => {
+                // v49.2（D176）：Shift+点击范围选时浏览器原生会在按下阶段扩选文字——只拦 shift 按下，click 照常派发
+                if (ev.shiftKey) ev.preventDefault();
+              }}
               onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : setDetailId(c.id))}
               title="Ctrl/⌘ 点击多选 · Shift 点击范围选"
             >
@@ -1519,15 +1533,14 @@ export default function CardBrowser({
                   type="checkbox"
                   checked={selCards.has(c.id)}
                   onClick={(ev) => ev.stopPropagation()}
-                  onChange={() => toggleSel("card", c.id, { shiftKey: false, ctrlKey: false, metaKey: false })}
+                  onChange={() => togglePick("card", c.id)}
                 />
               </span>
-              <span className="cb-front" title={frontPreview(c)}>
-                {frontPreview(c)}
-              </span>
+              <span className="cb-front">{frontPreview(c)}</span>
               <span>{typeLabel(c.cardType)}</span>
-              {/* v48.111（D156）：状态列 ellipsis 可能截断「· 同源暂缓」后缀，title 保全文可读 */}
-              <span title={`${statusOf(c)}${deferredMap.has(c.id) ? " · 同源暂缓" : ""}`}>
+              {/* v49.2（D176）：题面/状态/来源列各自的全文 title 与行提示互相覆盖、悬停重复刷屏，一律退役——
+                  行级 title 统一为快捷键提示；行上 title 在场，F75 省略号可达性（祖先带 title 即可达）不受影响 */}
+              <span>
                 {statusOf(c)}
                 {deferredMap.has(c.id) ? " · 同源暂缓" : ""}
               </span>
@@ -1535,10 +1548,7 @@ export default function CardBrowser({
               <span className="cb-num mono">{c.fsrs?.reps ?? 0}</span>
               <span className="cb-num mono">{c.fsrs?.lapses ?? 0}</span>
               <span className="cb-num mono">{c.priority}</span>
-              {/* D-TEST-80：来源列会被 CSS 单行裁切（theme.css .cb-src），却不带 title，
-                  而同一行的题面列（上方 .cb-front）一直带着——实测 12033 行里 597 处全文不可达。
-                  这里补上与题面同样的 title，让被省略号吃掉的尾部可以悬停读到。 */}
-              <span className="cb-src" title={srcLabel(c)}>{srcLabel(c)}</span>
+              <span className="cb-src">{srcLabel(c)}</span>
             </div>
             );
           })}
@@ -1566,29 +1576,29 @@ export default function CardBrowser({
               key={e.id}
               className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
               role="row"
+              onMouseDown={(ev) => {
+                // v49.2（D176）：同闪卡行——Shift+点击扩选文字的原生行为在按下阶段拦掉
+                if (ev.shiftKey) ev.preventDefault();
+              }}
               onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("extract", e.id, ev) : setExtractDetailId(e.id))}
-              title="点击查看详情 · Ctrl/⌘ 多选 · Shift 范围选（左侧复选框直接勾选）"
+              title="Ctrl/⌘ 点击多选 · Shift 点击范围选"
             >
               <span className="cb-pick">
                 <input
                   type="checkbox"
                   checked={selExtracts.has(e.id)}
                   onClick={(ev) => ev.stopPropagation()}
-                  onChange={() => toggleSel("extract", e.id, { shiftKey: false, ctrlKey: false, metaKey: false })}
+                  onChange={() => togglePick("extract", e.id)}
                 />
               </span>
-              <span className="cb-front" title={e.contentMarkdown}>
-                {(e.contentMarkdown || "").slice(0, 90)}
-              </span>
+              <span className="cb-front">{(e.contentMarkdown || "").slice(0, 90)}</span>
               <span>{extractStatusLabel(e.status)}</span>
               <span className="cb-num mono">
                 {e.priority}
                 {e.prioritySource === "user" ? " ·改" : ""}
               </span>
               <span className="mono">{nextAtText(e.topicNextAt)}</span>
-              <span className="cb-src" title={e.docTitle}>
-                {e.docTitle}
-              </span>
+              <span className="cb-src">{e.docTitle}</span>
               <span className="cb-act">
                 {/* 原「学习队列」页的管理动作之一：跳转回原文位置（§6.8-8 进度安全：跳转不写阅读进度） */}
                 {onJumpToDoc && e.contextRef?.documentId ? (
