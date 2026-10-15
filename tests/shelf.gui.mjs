@@ -182,7 +182,14 @@ try {
       cardAspect: card ? getComputedStyle(card).aspectRatio : null,
       radius: card ? getComputedStyle(card).borderTopLeftRadius : null,
       nativeSelect: document.querySelectorAll('.book-card select').length,
-      acts: it[0]?.querySelectorAll('.card-acts .act').length,
+      // v48.117 / D162：动作条退役 + 名称行（名称 + ⋯）在场
+      acts: document.querySelectorAll('.bookshelf .card-acts').length,
+      capRow: !!it[0]?.querySelector('.cap-row'),
+      moreBtn: !!it[0]?.querySelector('.cap-more-btn'),
+      // 12 字截断：找一本全名超 12 字的书，卡面只显前 12 字 + …，title 属性存全名
+      cut: (() => { const p = [...document.querySelectorAll('.cap-title')]
+        .find(x => (x.getAttribute('title') || '').length > 12);
+        return p ? { t: p.textContent, full: p.getAttribute('title') } : null; })(),
     });`));
   check("4 本书渲染为 4 个条目", r.items === 4, JSON.stringify(r));
   check("计数为「4 本」且只有一个「本」字（用户实测的 2本本 缺陷）", /^4 本$/.test(r.count || ""), r.count);
@@ -190,9 +197,10 @@ try {
   check("进度轨高 2px（§5.3 半档写法）", r.railH === "2px", r.railH);
   check("封面保持 2:3、直角（v48.115/D161 第三轮：圆角只属于文件夹夹体）", r.cardAspect === "2 / 3" && r.radius === "0px", JSON.stringify(r));
   check("卡面上不再有原生 <select>（旧版语言下拉）", r.nativeSelect === 0, r.nativeSelect);
-  // v48.22（D58 §6.8-2）：书卡动作条新增「优先」（书级默认优先级 Dropdown）；v48.77（D121 ⑥，
-  // 提交 1d0c070）：再补「作者」（library_items.author + library:setItemAuthor 通道）→ 4 枚 → 6 枚
-  check("动作条 6 枚（重命名/作者/语言/优先/归入/删除）", r.acts === 6, r.acts);
+  check("动作条退役 + 图注名称行（名称 + ⋯ 更多按钮）在场（v48.117/D162）",
+    r.acts === 0 && r.capRow === true && r.moreBtn === true, JSON.stringify({ acts: r.acts, capRow: r.capRow, moreBtn: r.moreBtn }));
+  check("书名单行截前 12 字 + …、title 属性存全名（v48.117/D162）",
+    r.cut === null || (r.cut.t === r.cut.full.slice(0, 12) + "…" && r.cut.full.length > 12), JSON.stringify(r.cut));
 
   console.log("\n[3] 网格几何：四个视口宽度下右侧富余必须为 0");
   const widths = [620, 900, 1100, 1600];
@@ -512,7 +520,11 @@ try {
     const vals=picks.map(e=>e?getComputedStyle(e).cursor:'MISSING');
     return JSON.stringify({vals, uniq:[...new Set(vals)].join(',')});`);
   const cu = JSON.parse(cursorUniform);
-  check("卡片内部光标只有一个值（#2 不再来回跳）", cu.uniq === "pointer", JSON.stringify(cu));
+  // #2：一个条目内部只允许一种光标。旧写法（封面 pointer、进度轨/图注 grab）会在 2px 分界上反复翻。
+  //    v48.117 / D162：cap-title 成为「点击就地改名」件，text 光标是有意的编辑示能——只豁免它一个。
+  check("卡片内部光标统一 pointer、仅 cap-title 豁免为 text（#2 不再来回跳 + 改名示能）",
+    cu.uniq === "pointer,text" && cu.vals[0] === "pointer" && cu.vals[1] === "pointer"
+      && cu.vals[2] === "text" && cu.vals[3] === "pointer", JSON.stringify(cu));
   const rowCursor = await page.eval(`${PRELUDE}
     const seg=[...document.querySelectorAll('.shelf-bar .shelf-group')][0];
     [...seg.querySelectorAll('button')][1].click(); return 1;`);
@@ -593,8 +605,10 @@ try {
   r = JSON.parse(await page.eval(`
     ${PRELUDE}
     const f=window.__S.items().find(e=>e.querySelector('.f-face'));
+    const rights=[...f?.querySelectorAll('.f-papers i')||[]].map(p=>p.getBoundingClientRect().right);
     const paper=f?.querySelector('.f-papers i')?.getBoundingClientRect();
     const pocket=f?.querySelector('.f-front')?.getBoundingClientRect();
+    const back=f?.querySelector('.f-back')?.getBoundingClientRect();
     const face=f?.querySelector('.f-face');
     return JSON.stringify({
       folders: window.__S.folderCards().length,
@@ -602,24 +616,27 @@ try {
       count: window.__S.count(),
       renameInput: document.activeElement?.className,
       renameValue: document.activeElement?.value,
-      tabShape: !!f?.querySelector('.f-face > .f-tab') && !!f?.querySelector('.f-face > .f-back'),
+      shape: !!f?.querySelector('.f-face > .f-back') && !!f?.querySelector('.f-face > .f-front'),
       papers: f ? f.querySelectorAll('.f-papers i').length : 0,
-      faceText: face ? face.textContent.replace(/\s+/g,'') : null,
+      faceText: face ? face.textContent.replace(/\\s+/g,'') : null,
       faceImgs: face ? face.querySelectorAll('img').length : -1,
       cardLabel: f?.querySelector('.book-card')?.getAttribute('aria-label'),
-      // 纸探出袋口的可见高度 与 伸进袋里的深度（「纸插在夹子里」的两条几何证据）
-      show: paper && pocket ? Math.round(pocket.top - paper.top) : null,
-      tuck: paper && pocket ? Math.round(paper.bottom - pocket.top) : null,
+      // v48.117/D162 几何证据：盖板右缘内缩 --f-gap 露出书脊缝（≈10px），
+      // 最前一张纸探出盖板右缘（缝里能看到书），相邻纸缘阶梯 --f-step（≈3px/条）→ 数得出台数
+      mouth: paper && pocket && back ? Math.round(back.right - pocket.right) : null,
+      peek: paper && pocket ? Math.round(paper.right - pocket.right) : null,
+      step: rights.length >= 2 ? Math.round(rights[0] - rights[1]) : null,
     });`));
   check("松手即成文件夹：顶层少一格、多一张文件夹卡",
     r.folders === 1 && r.items === 3 && /^2 本 · 1 个文件夹$/.test(r.count || ""), JSON.stringify(r));
-  check("竖版文件夹图标在场：背板 + 外凸标签页 + 前袋 + 2 张白纸（一纸 = 一本书，v48.115/D161 第三轮）",
-    r.tabShape === true && r.papers === 2, JSON.stringify(r));
+  check("竖版文件夹卡在场：背板 + 盖板 + 2 张纸（一纸 = 一本书，v48.116/D161 第五轮）",
+    r.shape === true && r.papers === 2, JSON.stringify(r));
   check("卡面零文字、无封面图（不显示书名/计数/均值）",
     r.faceText === "" && r.faceImgs === 0, JSON.stringify({ text: r.faceText, imgs: r.faceImgs }));
   check("aria-label 仍报成员数（卡面无文字不牺牲读屏）", /含 2 本/.test(r.cardLabel || ""), r.cardLabel);
-  check("纸自袋口探出 ≥24px、下段伸进袋里 ≥8px（插在夹子里的深度线索）",
-    (r.show ?? 0) >= 24 && (r.tuck ?? 0) >= 8, JSON.stringify({ show: r.show, tuck: r.tuck }));
+  check("盖板口沿缝 8-12px、纸缘探出缝 8-12px、相邻纸缘阶梯 ≈3px（数书口的几何证据，v48.117/D162）",
+    (r.mouth ?? 0) >= 8 && (r.mouth ?? 99) <= 12 && (r.peek ?? 0) >= 8 && r.step === 3,
+    JSON.stringify({ mouth: r.mouth, peek: r.peek, step: r.step }));
   check("成组后立刻弹出就地命名输入框（不自动取名）",
     /cap-input/.test(r.renameInput || "") && /未命名/.test(r.renameValue || ""), JSON.stringify(r));
 
@@ -694,26 +711,53 @@ try {
   check("把书拖到「返回书架」= 移回书架，文件夹剩 1 本（一纸 = 一本书）",
     r.folders === 1 && /含 1 本/.test(r.label || "") && r.papers === 1, JSON.stringify(r));
 
+  // v48.118 / D163 回归：拖一本书** onto 文件夹卡**（groupInto 归入已有夹分支）——
+  // 旧版会把 sourceId 留一份幽灵副本在 order 里，解散时暴露成第二张卡（用户实测同名书多出一本）。
+  // 手势三拍分 tick 发（dragstart → dragover → drop），与 [8] 同序列
+  await fire(`const a=window.__S.items().find(e=>e.querySelector('.book-card-cover'));
+    return window.__S.fire(a,'dragstart', ...window.__S.pt(a,0.5));`);
+  await wait(400);
+  await fire(`const f=window.__S.folderCard(); const [x,y]=window.__S.pt(f,0.5);
+    window.__S.fire(f,'dragover',x,y); return 1;`);
+  await wait(400);
+  await fire(`const f=window.__S.folderCard(); const [x,y]=window.__S.pt(f,0.5);
+    window.__S.fire(f,'drop',x,y); return 1;`);
+  await wait(300);
+  await fire(`const f=window.__S.folderCard(); return window.__S.fire(f,'dragend');`);
+  await wait(700);
+  r = await J(`${PRELUDE}
+    const f=window.__S.folderCard();
+    return JSON.stringify({ label: f?.querySelector('.book-card')?.getAttribute('aria-label'),
+      papers: f ? f.querySelectorAll('.f-papers i').length : 0, items: window.__S.items().length });`, "drag-into-folder");
+  check("再拖一本入夹：文件夹报 2 本（groupInto 归入已有夹分支）",
+    /含 2 本/.test(r.label || "") && r.papers === 2 && r.items === 3, JSON.stringify(r));
+
   await fire(`const f=window.__S.folderCard();
-    f.querySelector('.card-acts [aria-haspopup]').click(); return 1;`);
+    f.querySelector('.cap [aria-haspopup]').click(); return 1;`);
   await wait(450);
   r = await J(`${PRELUDE}
     const f=window.__S.folderCard();
     return JSON.stringify({menu:[...f.querySelectorAll('.dd-menu .dd-item')].map(b=>b.textContent.trim())});`, "folder-menu");
-  check("文件夹菜单只有「全部移回书架」与「解散」，没有删除",
-    r.menu?.some(t => /移回书架/.test(t)) && r.menu?.some(t => /解散/.test(t)) && !r.menu?.some(t => /删除/.test(t)), JSON.stringify(r));
+  check("文件夹菜单＝重命名/全部移回书架/解散，没有删除（重命名主路径在点名称，菜单项是键盘等价）",
+    r.menu?.some(t => /重命名/.test(t)) && r.menu?.some(t => /移回书架/.test(t)) && r.menu?.some(t => /解散/.test(t)) && !r.menu?.some(t => /删除/.test(t)), JSON.stringify(r));
   await fire(`const f=window.__S.folderCard();
     const item=f && [...f.querySelectorAll('.dd-menu .dd-item')].find(b=>b.textContent.includes('解散'));
     if (item) item.click(); return !!item;`);
   await wait(800);
   r = await J(`${PRELUDE}
-    return JSON.stringify({folders: window.__S.folderCards().length, items: window.__S.items().length, count: window.__S.count()});`, "dissolved");
-  check("解散后 4 本书全回到顶层、一本没少", r.folders === 0 && r.items === 4 && r.count === "4 本", JSON.stringify(r));
+    const ids=window.__S.items().map(e=>e.dataset.entry);
+    return JSON.stringify({folders: window.__S.folderCards().length, items: window.__S.items().length,
+      count: window.__S.count(), uniq: new Set(ids).size === ids.length});`, "dissolved");
+  check("解散后 4 本书全回到顶层、一本没少、无一重复（幽灵副本回归，v48.118/D163）",
+    r.folders === 0 && r.items === 4 && r.count === "4 本" && r.uniq === true, JSON.stringify(r));
 
-  console.log("\n[11] 动作条菜单路径（不依赖拖拽）：新建文件夹并放入");
+  console.log("\n[11] 图注 ⋯ 菜单路径（不依赖拖拽）：新建文件夹并放入（下钻两跳）");
   await fire(`const it=window.__S.items()[0];
-    const btns=[...it.querySelectorAll('.card-acts [aria-haspopup]')];
-    btns[btns.length-1].click(); return 1;`);
+    it.querySelector('.cap [aria-haspopup]').click(); return 1;`);
+  await wait(450);
+  await fire(`const it=window.__S.items()[0];
+    const b=[...it.querySelectorAll('.dd-menu .dd-item')].find(x=>x.getAttribute('aria-label')==='归入文件夹');
+    if (b) b.click(); return !!b;`);
   await wait(450);
   r = await J(`${PRELUDE}
     const it=window.__S.items()[0];
@@ -721,7 +765,7 @@ try {
     const hit=[...it.querySelectorAll('.dd-menu .dd-item')].find(b=>b.textContent.includes('新建'));
     if (hit) hit.click();
     return JSON.stringify({rows, clicked: !!hit});`, "group-menu");
-  check("书的归组菜单含「新建文件夹并放入」", r.rows?.some(t => /新建/.test(t)) && r.clicked, JSON.stringify(r));
+  check("⋯ 更多菜单可下钻到归组，含「新建文件夹并放入」", r.rows?.some(t => /新建/.test(t)) && r.clicked, JSON.stringify(r));
   await wait(700);
   await fire(`const i=document.activeElement;
     if (i && i.classList.contains('cap-input')) { window.__S.setValue(i,'单本夹'); i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})); }
@@ -776,11 +820,10 @@ try {
 
   console.log("\n[13] 全局纪律扫描：字号下限 / 圆角 / 硬编码焦点色");
   r = await J(`const small=[]; const rad=[];
-    // v48.115 / D161 第三轮圆角白名单：夹体三件 6px（表内缩略 3px）、纸片 ≤2px；书卡与书封缩略保持直角
+    // v48.117 / D162 圆角白名单：夹体两件与纸片 6px（表内缩略同族 3px）；书卡与书封缩略保持直角
     const allow=(el,r)=>(
-      (r==='6px' && el.matches('.f-tab,.f-back,.f-front')) ||
-      (r==='3px' && el.matches('.thumb .f-tab,.thumb .f-back,.thumb .f-front')) ||
-      ((r==='2px'||r==='1px') && el.tagName==='I' && el.closest('.f-papers'))
+      (r==='6px' && (el.matches('.f-back,.f-front') || (el.tagName==='I' && el.closest('.f-papers')))) ||
+      (r==='3px' && (el.matches('.thumb .f-back,.thumb .f-front') || (el.tagName==='I' && el.closest('.thumb .f-papers'))))
     );
     document.querySelectorAll('#root *').forEach(el=>{
       const cs=getComputedStyle(el);
@@ -793,31 +836,81 @@ try {
     const shelf=document.querySelector('.bookshelf');
     return JSON.stringify({small, rad, container: getComputedStyle(shelf).containerType});`, "scan");
   check("书架里没有 < 11px 的文字", r.small.length === 0, JSON.stringify(r.small.slice(0, 6)));
-  check("书架里没有白名单外圆角（夹体 6px、缩略 3px、纸片 ≤2px；书卡直角，v48.115/D161 第三轮）", r.rad.length === 0, JSON.stringify(r.rad.slice(0, 6)));
+  check("书架里没有白名单外圆角（夹体/纸片 6px、缩略 3px；书卡直角，v48.117/D162）", r.rad.length === 0, JSON.stringify(r.rad.slice(0, 6)));
   check("容器查询宿主在场（工具条逐级退让依赖它）", /inline-size/.test(r.container || ""), r.container);
+
+  console.log("\n[13b] 点名称就地改名 + 失焦保存 + 12 字截断（v48.117/D162）");
+  const longTitle = "超长书名测试一二三四五六七"; // 13 字 → 卡面显 12 字 + …
+  const firstBook = `window.__S.items().find(e=>e.querySelector('.book-card-cover'))`;
+  await fire(`const it=${firstBook};
+    it.querySelector('.cap-title').click(); return 1;`);
+  await wait(450);
+  r = await J(`${PRELUDE}
+    const it=${firstBook};
+    const i=it.querySelector('.cap-input');
+    if (!i) return JSON.stringify({err:'点名称没出输入框'});
+    const pre=i.value;
+    window.__S.setValue(i, ${JSON.stringify(longTitle)});
+    i.blur();
+    return JSON.stringify({pre});`, "click-rename");
+  check("点击名称出现输入框且显全名（含改名前原名）", !!r.pre && !r.err, JSON.stringify(r));
+  await wait(700);
+  r = await J(`${PRELUDE}
+    const it=${firstBook};
+    const t=it.querySelector('.cap-title');
+    return JSON.stringify({ input: !!it.querySelector('.cap-input'),
+      t: t?.textContent, full: t?.getAttribute('title') });`, "blur-saved");
+  check("失焦即自动保存：输入框收起、卡面截 12 字 + …、title 属性存全名",
+    r.input === false && r.t === longTitle.slice(0, 12) + "…" && r.full === longTitle, JSON.stringify(r));
+  // 注意：page.eval 的外层包装不 return 内层 IIFE——顶层直接 return，别再包一层 IIFE
+  const saved = JSON.parse(await page.eval(`try { const l=await window.libraryAPI.list();
+    return JSON.stringify({ok:true, titles:l.map(i=>i.title)}); } catch (e) { return JSON.stringify({ok:false, err:String(e && e.message || e)}); }`));
+  check("改名落库（library_items.title）", saved.ok === true && saved.titles.includes(longTitle), JSON.stringify(saved));
+  // 输入时显全名：再点一次，输入框 value 必须是完整 13 字
+  await fire(`const it=${firstBook};
+    it.querySelector('.cap-title').click(); return 1;`);
+  await wait(450);
+  r = await J(`${PRELUDE}
+    const i=${firstBook}.querySelector('.cap-input');
+    const v=i?.value;
+    i?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+    return JSON.stringify({v});`, "rename-full");
+  check("输入时显示全名（Esc 取消不动）", r.v === longTitle, JSON.stringify(r));
 
   console.log("\n[14] 封面墙三条交互缺陷回归（v48.20 / D56）");
   const bookCard = `window.__S.items().find(e=>e.querySelector('.book-card-cover'))`;
   const bookId = await page.eval(`${PRELUDE} return ${bookCard}.dataset.entry;`);
 
   // ① 卡内菜单：整体在滚动容器可视区内、选项全部可命中。
-  //    改前 `.dd-menu`（更靠后、同权重）覆盖掉 `.dd-menu-up` 的 top:auto → top/bottom 双非 auto、
-  //    盒高按约束解成 0，内容只朝下溢流再被 `.book-card{overflow:hidden}` 剪掉 → 10 个选项命中 0/10。
+  //    v48.117/D162：入口改图注 ⋯ 两跳（⋯ → 根菜单「书籍语言」→ 下钻语言列表 +「‹ 更多操作」返回）。
   await fire(`const card=${bookCard};
-    card.querySelector('button[aria-label="书籍语言"]').click(); return 1;`);
+    card.querySelector('.cap [aria-haspopup]').click(); return 1;`);
+  await wait(450);
+  r = await J(`${PRELUDE}
+    const root=[...document.querySelectorAll('.dd-menu .dd-item')].map(b=>b.textContent.trim());
+    const b=[...document.querySelectorAll('.dd-menu .dd-item')].find(x=>x.getAttribute('aria-label')==='书籍语言');
+    if (b) b.click();
+    return JSON.stringify({root, drilled: !!b});`, "more-root");
+  check("⋯ 更多操作根菜单在场（重命名/作者/语言/优先级/归入/删除全收拢）",
+    r.drilled === true && r.root?.some(t => /重命名/.test(t)) && r.root?.some(t => /设置作者/.test(t))
+      && r.root?.some(t => /优先级/.test(t)) && r.root?.some(t => /归入文件夹/.test(t)) && r.root?.some(t => /删除/.test(t)),
+    JSON.stringify(r));
   await wait(450);
   r = await J(`${PRELUDE}
     const menu=document.querySelector('.dd-menu');
     if(!menu) return JSON.stringify({err:'菜单没开'});
     const sr=menu.closest('.bookshelf').getBoundingClientRect(), mr=menu.getBoundingClientRect();
     const items=[...menu.querySelectorAll('.dd-item')];
+    const opts=items.filter(el=>!el.matches('.dd-back'));
     const hits=items.filter(el=>{ const b=el.getBoundingClientRect();
       return document.elementFromPoint(b.left+b.width/2, b.top+b.height/2)===el; }).length;
-    return JSON.stringify({ cls:menu.className, items:items.length, hits,
+    return JSON.stringify({ cls:menu.className, items:items.length, opts:opts.length, hits,
+      hasBack: items.some(el=>el.matches('.dd-back')),
       inShelf: mr.top>=sr.top-0.5 && mr.bottom<=sr.bottom+0.5 && mr.left>=sr.left-0.5 && mr.right<=sr.right+0.5,
       box:{top:Math.round(mr.top), bottom:Math.round(mr.bottom), left:Math.round(mr.left), right:Math.round(mr.right)}});`, "card-menu");
-  check(`卡内菜单整体落在滚动容器可视区内（按可视区实测翻边：${r.cls}）`, r.inShelf === true, JSON.stringify(r));
-  check(`卡内菜单 10 个选项全部可命中（${r.hits}/${r.items}）`, r.items === 10 && r.hits === r.items, JSON.stringify(r));
+  check(`语言下钻菜单整体落在滚动容器可视区内（按可视区实测翻边：${r.cls}）`, r.inShelf === true, JSON.stringify(r));
+  check(`语言菜单 10 个选项 + 返回项全部可命中（${r.hits}/${r.items}）`,
+    r.opts === 10 && r.hasBack === true && r.hits === r.items, JSON.stringify(r));
   await fire(`const jp=[...document.querySelectorAll('.dd-menu .dd-item')].find(b=>b.textContent.trim()==='日语');
     if (jp) jp.click(); return !!jp;`);
   await wait(700);
@@ -850,8 +943,7 @@ try {
   check("在空白处松手完成重排：第 4 条落到第 1、2 条之间",
     idsA === [arrB[0], arrB[3], arrB[1], arrB[2]].join(","), JSON.stringify({ before: idsB, after: idsA }));
 
-  // ③ 拖/长按之后的动作条残留：显形判据是 `:focus-visible`，鼠标按下的焦点不算。
-  //    改前焦点滞留在卡上（`div[tabindex=0]` + 拖拽吃掉 click）→ `:focus-within` 把 40px ink 条钉住。
+  // ③ 拖/长按之后的残留：v48.117/D162 动作条已退役——卡上不应再有 card-acts，也不应有卡住的菜单/焦点。
   const cp = JSON.parse(await page.eval(`${PRELUDE}
     const c=window.__S.items()[0].querySelector('.book-card').getBoundingClientRect();
     return JSON.stringify({ x:Math.round(c.left+c.width/2), y:Math.round(c.top+c.height*0.4) });`));
@@ -867,35 +959,28 @@ try {
   r = await J(`${PRELUDE}
     const cards=window.__S.items().map(e=>e.querySelector('.book-card'));
     return JSON.stringify({
-      op: window.__S.items().map(e=>getComputedStyle(e.querySelector('.card-acts')).opacity),
-      focusWithin: cards.some(c=>c.matches(':focus-within')),
+      acts: document.querySelectorAll('.bookshelf .card-acts').length,
+      menu: !!document.querySelector('.dd-menu'),
+      input: document.querySelectorAll('.cap-input').length,
       focusVisible: cards.some(c=>c.matches(':focus-visible')) });`, "residue");
-  check("拖/长按之后动作条不残留（焦点还在也不显形——改前 :focus-within 会把它钉在屏上）",
-    r.op.every(v => v === "0") && r.focusVisible === false, JSON.stringify(r));
+  check("拖/长按之后无残留：动作条已退役（无 card-acts）、无卡住菜单/改名框/假焦点（v48.117/D162）",
+    r.acts === 0 && r.menu === false && r.input === 0 && r.focusVisible === false, JSON.stringify(r));
 
-  // 键盘可达不回退：必须由**真实 Tab 键**把焦点送进卡片（程序化 focus() 的 `:focus-visible`
-  // 取决于浏览器记录的输入模态，CDP 合成键不保证翻转它——实测会得到假红）。
-  // 焦点可能落在卡本身（`.book-card:focus-visible`）或卡内按钮（`:has(:focus-visible)`），两条都算显形。
+  // 键盘可达不回退：必须由**真实 Tab 键**把焦点送进图注行（v48.117/D162 动作条退役后，
+  // 键盘路径＝Tab 到 ⋯ 更多按钮；程序化 focus() 的 `:focus-visible` 取决于输入模态，CDP 合成键不保证）。
   let kbdHit = null;
-  for (let i = 0; i < 30 && !kbdHit?.onCard; i++) {
+  for (let i = 0; i < 30 && !kbdHit?.onMore; i++) {
     await page.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
     await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
     await wait(90);
     kbdHit = await J(`${PRELUDE}
-      const el=document.activeElement, c=el?.closest?.('.book-card');
-      return JSON.stringify({ onCard: !!c, active:(el?.className||el?.tagName||'').toString().slice(0,40),
-        elFv: el ? el.matches(':focus-visible') : null,
-        fv: c ? c.matches(':focus-visible') : null,
-        hasFv: c ? c.matches(':has(:focus-visible)') : null,
-        acts: c ? getComputedStyle(c.querySelector('.card-acts')).opacity : null });`, "kbd");
+      const el=document.activeElement;
+      return JSON.stringify({ onMore: el?.classList?.contains('cap-more-btn') === true,
+        active:(el?.className||el?.tagName||'').toString().slice(0,40),
+        elFv: el ? el.matches(':focus-visible') : null });`, "kbd");
   }
-  await wait(260); // 等 opacity 过渡走完（--dur 量级）
-  const kbdSettled = kbdHit?.onCard ? await J(`${PRELUDE}
-    const el=document.activeElement, c=el?.closest?.('.book-card');
-    return JSON.stringify({ onCard: !!c, acts: c ? getComputedStyle(c.querySelector('.card-acts')).opacity : null });`, "kbd-settled") : null;
-  check("键盘 Tab 走到卡片时动作条显形（`:focus-visible` 成立、opacity=1，键盘可达不回退）",
-    kbdHit?.onCard === true && (kbdHit.elFv === true || kbdHit.fv === true || kbdHit.hasFv === true) && kbdSettled?.acts === "1",
-    JSON.stringify({ kbdHit, kbdSettled }));
+  check("键盘 Tab 可达图注名称行的 ⋯ 更多按钮（动作条退役后的键盘路径，v48.117/D162）",
+    kbdHit?.onMore === true && kbdHit.elFv === true, JSON.stringify(kbdHit));
 
   console.log(`\nShelf GUI: ${pass} 通过 / ${fail} 失败`);
   process.exit(fail > 0 ? 1 : 0);

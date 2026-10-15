@@ -162,9 +162,16 @@ export function ensureOrder(state: ShelfState, itemIds: string[]): ShelfState {
   const foldersNow = new Set(state.folders.map((f) => f.id));
   const missing = itemIds.filter((id) => !known.has(id) && !folderOf(state, id));
   const gone = new Set<string>([...state.order].filter((id) => isFolderId(id) ? !foldersNow.has(id) : !itemIds.includes(id)));
-  if (!missing.length && !gone.size) return state;
-  const order = state.order.filter((id) => !gone.has(id));
-  return { ...state, order: [...missing, ...order] };
+  // v48.118 / D163：载入即去重——治愈历史幽灵副本（旧版 groupInto 把夹内书写回过 order，
+  // 脏 settings.shelfOrder 会在解散/移出时暴露成重复卡）
+  const clean = dedupe(state.order).filter((id) => !gone.has(id));
+  if (!missing.length && clean.length === state.order.length) return state;
+  return { ...state, order: [...missing, ...clean] };
+}
+
+/** order 去重（保序保首现）——幽灵副本防御的唯一出口，勿在别处绕过它拼 order */
+function dedupe(arr: string[]): string[] {
+  return [...new Set(arr)];
 }
 
 export function topEntries(state: ShelfState, items: LibraryItem[]): ShelfEntry[] {
@@ -305,7 +312,11 @@ export function groupInto(state: ShelfState, sourceId: string, targetId: string,
     const folders = cleared.folders.map((f) =>
       f.id === targetFolder.id ? { ...f, items: [...f.items, sourceId] } : f
     );
-    return { state: { order: insertAfter(cleared.order, targetFolder.id, sourceId), folders }, renameId: null };
+    // v48.118 / D163：成员只住在 folder.items，**不再写回 order**——
+    // 旧版在这里 insertAfter 把 sourceId 留了一份幽灵副本在 order 里，平时被
+    // topEntries 的「夹内书不在顶层」过滤遮蔽，解散/全部移出把成员 splice 回 order
+    // 时即暴露成第二张卡（用户实测「解散后同名书多出一本」）。
+    return { state: { order: cleared.order, folders }, renameId: null };
   }
 
   const srcFolder = folderOf(state, sourceId);
@@ -355,8 +366,10 @@ export function dissolveFolder(state: ShelfState, folderId: string): ShelfState 
   if (!folder) return state;
   const i = state.order.indexOf(folderId);
   const order = [...state.order];
-  order.splice(i, 1, ...folder.items);
-  return { order, folders: state.folders.filter((f) => f.id !== folderId) };
+  // indexOf −1 护栏：splice(-1) 会误换末位条目（v48.118 / D163）
+  order.splice(i < 0 ? order.length : i, 1, ...folder.items);
+  // v48.118 / D163：落位即去重——历史幽灵副本在解散这一刻就地治愈，不再等下次载入
+  return { order: dedupe(order), folders: state.folders.filter((f) => f.id !== folderId) };
 }
 
 /** 全部移回书架：空文件夹保留（用户数据不悄悄消失） */
@@ -365,9 +378,10 @@ export function moveAllOut(state: ShelfState, folderId: string): ShelfState {
   if (!folder || !folder.items.length) return state;
   const i = state.order.indexOf(folderId);
   const order = [...state.order];
-  order.splice(i + 1, 0, ...folder.items);
+  order.splice(i < 0 ? order.length : i + 1, 0, ...folder.items);
+  // v48.118 / D163：同 dissolveFolder——落位即去重
   return {
-    order,
+    order: dedupe(order),
     folders: state.folders.map((f) => (f.id === folderId ? { ...f, items: [] } : f)),
   };
 }
