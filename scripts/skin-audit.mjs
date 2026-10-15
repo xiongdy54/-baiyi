@@ -199,9 +199,11 @@ function auditSkin(skinId, cssFiles) {
   }
 
   // 5 动效作用域（A6）：含 animation/transition/transform 的规则，选择器须含 .motion-full（VT 伪元素例外）
+  // @keyframes 的 from/to/百分比内部块不是选择器，跳过
   for (const r of rules) {
     if (!/animation\s*:|animation-name|transition\s*:|transform\s*:/.test(r.body)) continue;
     if (r.context.includes("::view-transition") || r.selector.includes("::view-transition")) continue;
+    if (/^(from|to|[+-]?\d+(\.\d+)?%)\s*(,\s*([+-]?\d+(\.\d+)?%)\s*)*$/.test(r.selector)) continue;
     if (!r.selector.includes(".motion-full") && !r.context.includes(".motion-full")) {
       problems.push(`[A6] 动效规则未挂 .motion-full：${r.selector.slice(0, 90)}`);
     }

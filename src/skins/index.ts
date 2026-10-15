@@ -3,9 +3,12 @@
 // 未知 id 回落默认皮肤（getSkinEntry 永不失败——旧持久化值安全降级，D132 互斥不变）。
 import type { SkinEntry, SkinModule } from "./types";
 import { swissManifest } from "./swiss/manifest";
+import { claudeManifest } from "./claude/manifest";
 
 const BUILTIN: SkinEntry[] = [
   { manifest: swissManifest, load: async () => ({}) },
+  // v49.0 / D173：Claude（陶土）——第一支 v2 皮肤，懒加载不进主包
+  { manifest: claudeManifest, load: () => import("./claude").then((m) => m.default) },
 ];
 
 export const SKINS: readonly SkinEntry[] = BUILTIN;

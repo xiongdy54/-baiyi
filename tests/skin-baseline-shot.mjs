@@ -11,6 +11,8 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PORT = "9541";
 const OUT = path.join(ROOT, "tests", process.argv[2] || "__skin-baseline__");
+// 第三参数 = 皮肤 id（缺省 none=默认皮肤基线；"claude" → 播种时写 settings.json app.skinId，启动即 Claude 外观）
+const SKIN = process.argv[3] && process.argv[3] !== "none" ? process.argv[3] : null;
 const USER_DATA = path.join(ROOT, "tests", "tmp-skin-userdata");
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 let electron = null;
@@ -65,14 +67,33 @@ try {
   fs.mkdirSync(OUT, { recursive: true });
   const log = openSync(path.join(ROOT, "tests", "tmp-skin-shot.log"), "w");
 
-  // 1) 播种
-  await new Promise((res, rej) => {
-    const p = spawn("npx", ["electron", "tests/tmp-skin-baseline.seed.cjs"], {
-      cwd: ROOT, shell: true, stdio: ["ignore", log, log],
-      env: { ...process.env, M7_TEST_USERDATA: USER_DATA },
-    });
-    p.on("exit", (c) => (c === 0 ? res() : rej(new Error("seed 失败 " + c))));
-  });
+  // 1) 播种（Windows 句柄释放延迟：rmSync 后立即 spawn 可能 EBUSY——失败重试，间隔让杀毒/句柄释放）
+  let seeded = false, seedErr = null;
+  for (let i = 0; i < 3 && !seeded; i++) {
+    if (i > 0) await wait(1800);
+    try {
+      fs.rmSync(USER_DATA, { recursive: true, force: true });
+      await new Promise((res, rej) => {
+        const p = spawn("npx", ["electron", "tests/skin-baseline.seed.cjs"], {
+          cwd: ROOT, shell: true, stdio: ["ignore", log, log],
+          env: { ...process.env, M7_TEST_USERDATA: USER_DATA },
+        });
+        p.on("exit", (c) => (c === 0 ? res() : rej(new Error("seed 失败 " + c))));
+      });
+      seeded = true;
+    } catch (e) {
+      seedErr = e;
+    }
+  }
+  if (!seeded) throw seedErr;
+  // 皮肤预置（P4-6）：写 settings.json app.skinId，启动首帧即目标皮肤外观
+  if (SKIN) {
+    const sp = path.join(USER_DATA, "settings.json");
+    const conf = fs.existsSync(sp) ? JSON.parse(fs.readFileSync(sp, "utf8")) : {};
+    conf.app = { ...(conf.app || {}), skinId: SKIN };
+    fs.writeFileSync(sp, JSON.stringify(conf, null, 2));
+    console.log("skin 预置 →", SKIN);
+  }
   await wait(600);
 
   // 2) 主应用

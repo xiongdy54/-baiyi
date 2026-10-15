@@ -128,7 +128,11 @@ const TOP_NAV = [
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [skinId, setSkinId] = useState<string>(DEFAULT_SKIN_ID);
+  // v49.0 / D172：accentColor = **当前生效**的用户 accent（随皮肤切换换值）；
+  // accentColorLegacy = 默认皮肤的原键（app.accentColor，旧数据兼容）；accentBySkin = 其他皮肤各自记忆
   const [accentColor, setAccentColor] = useState("");
+  const [accentColorLegacy, setAccentColorLegacy] = useState("");
+  const [accentBySkin, setAccentBySkin] = useState<Record<string, string>>({});
   // v49.0 / D170：动效等级——应用内设置（system|off）× 系统 reduce → body 三态类
   const [motionSetting, setMotionSetting] = useState<MotionSetting>("system");
   const [motion, setMotion] = useState<MotionLevel>("full");
@@ -188,9 +192,10 @@ export default function App() {
       settingsStore.get<ThemeMode>("theme", "mode", "light"),
       settingsStore.get<string>("app", "skinId", DEFAULT_SKIN_ID),
       settingsStore.get<string>("app", "accentColor", ""),
+      settingsStore.get<Record<string, string>>("app", "accentBySkin", {}),
       settingsStore.get<MotionSetting>("app", "motionLevel", "system")
     ])
-      .then(async ([m, s, a, ml]) => {
+      .then(async ([m, s, a, abs, ml]) => {
         settled = true;
         setTheme(m === "dark" ? "dark" : "light");
         // v49.0 / D170：首渲染前预加载已保存皮肤（避免闪一下默认皮）；加载失败回落默认
@@ -201,10 +206,15 @@ export default function App() {
             skin = s;
           } catch (err) {
             console.error("[skin] 已保存皮肤加载失败，回落默认", err);
+            skin = DEFAULT_SKIN_ID;
           }
         }
         setSkinId(skin);
-        setAccentColor(a);
+        setAccentBySkin(abs || {});
+        setAccentColorLegacy(a);
+        // v49.0 / D172：accent 按皮肤记忆——默认皮肤用原键，其他皮肤用 accentBySkin[skinId]
+        const eff = skin === DEFAULT_SKIN_ID ? a : (abs || {})[skin] || "";
+        setAccentColor(eff);
         setMotionSetting(ml === "off" ? "off" : "system");
         setMotion(resolveMotion(ml === "off" ? "off" : "system"));
         setLoaded(true);
@@ -310,6 +320,7 @@ export default function App() {
 
   // v49.0 / D170：切皮肤 = 先懒加载（SkinHost 的 useLayoutEffect 从缓存同步取模块，不闪默认皮）
   // 再切 state；D132 双槽互斥（非 none 皮肤清插件激活）保持不变。
+  // v49.0 / D172：accent 按皮肤记忆——切皮时把该皮肤的记忆值（默认皮肤=原键）应用到 --user-accent。
   async function handleSkinChange(id: string) {
     try {
       await loadSkin(id);
@@ -318,6 +329,9 @@ export default function App() {
       return;
     }
     setSkinId(id);
+    const eff = id === DEFAULT_SKIN_ID ? accentColorLegacy : accentBySkin[id] || "";
+    setAccentColor(eff);
+    applyAccent(eff);
     // v48.89（D132 §7.3/§8.3）：内置皮肤与主题插件双槽互斥——选非 none 皮肤时同步清插件激活
     //（宿主 setActive 写两槽；skin 列表选中态因 app.skinId 被写回 none 由插件侧驱动回落）
     if (id !== DEFAULT_SKIN_ID) void window.pluginsAPI?.setActive("");
@@ -325,9 +339,18 @@ export default function App() {
     eventBus.emit("settings/changed", { scope: "app", key: "skinId" });
   }
 
+  // v49.0 / D172：accent 写入按当前皮肤分流——默认皮肤沿用 app.accentColor（旧数据/旧测试零影响），
+  // 其他皮肤写 app.accentBySkin[skinId]
   async function handleAccentChange(color: string) {
     setAccentColor(color);
-    await settingsStore.set("app", "accentColor", color);
+    if (skinId === DEFAULT_SKIN_ID) {
+      setAccentColorLegacy(color);
+      await settingsStore.set("app", "accentColor", color);
+    } else {
+      const next = { ...accentBySkin, [skinId]: color };
+      setAccentBySkin(next);
+      await settingsStore.set("app", "accentBySkin", next);
+    }
     eventBus.emit("settings/changed", { scope: "app", key: "accentColor" });
   }
 

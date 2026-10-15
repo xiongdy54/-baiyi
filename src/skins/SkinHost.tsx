@@ -73,7 +73,7 @@ export function SkinHost({ skinId, mode, motion, onFail }: Props) {
         getMotion: () => (body.classList.contains("motion-full") ? "full" : body.classList.contains("motion-off") ? "off" : "reduced"),
         body,
         signal: ac.signal,
-        onUiEvent: (type, handler) => {
+        onUiEvent: <T = unknown,>(type: string, handler: (payload: T) => void) => {
           const off = eventBus.on(type as never, handler as (p?: unknown) => void);
           ac.signal.addEventListener("abort", off, { once: true });
           return off;

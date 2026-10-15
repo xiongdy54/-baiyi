@@ -2961,11 +2961,21 @@ export default function SettingsPanel({
               {/* v48.89（D132 §8.1）：主题插件子块——落位 sec-appearance 内「皮肤」与「强调色」之间，
                   不新增 SECTION_GROUPS 导航项（D114 的 5 组契约零改动）、不新增 sec-* 锚 */}
               <ThemePluginsBlock />
-              <h4>强调色</h4>
-              <div className="settings-row accent-row">
-                <input type="color" value={accentColor || "#166a59"} onChange={(e) => onAccentChange(e.target.value)} />
-                <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
-              </div>
+              {/* v49.0 / D172：强调色按皮肤记忆——显示值 = 当前皮肤用户值 || 皮肤默认 accent；
+                  accentPolicy=locked 的皮肤隐藏本行（「恢复默认」只清当前皮肤的用户值） */}
+              {SKINS.find((s) => s.manifest.id === skinId)?.manifest.accentPolicy !== "locked" && (
+                <>
+                  <h4>强调色</h4>
+                  <div className="settings-row accent-row">
+                    <input
+                      type="color"
+                      value={accentColor || SKINS.find((s) => s.manifest.id === skinId)?.manifest.defaultAccent?.[theme] || "#166a59"}
+                      onChange={(e) => onAccentChange(e.target.value)}
+                    />
+                    <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
+                  </div>
+                </>
+              )}
               {/* v49.0 / D170（P2-6）：应用内动效等级——关闭动画 = body.motion-off 总开关（压过皮肤动效） */}
               <h4>动画</h4>
               <div className="seg-tabs">
