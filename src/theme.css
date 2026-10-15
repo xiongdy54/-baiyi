@@ -355,6 +355,26 @@ body {
   --text-primary: var(--ink);
   --text-helper: var(--grey-3);
 }
+
+/* —— 浮层家族圆角统一消费组件 Token（v49.1 / D175：皮肤全局生效结构性修复）——
+   此前弹层/菜单全部「零 border-radius 声明」（瑞士直角靠省略表达），--radius-popover 基线零消费
+   ＝皮肤改圆角对浮层全局不生效（用户裁定：改弧度必须对全局所有的角生效）。
+   现默认值 = --radius-panel = 0 → 默认皮肤逐像素不变；皮肤覆盖 --radius-popover 即全家族生效。
+   机器闸门：scripts/skin-audit.mjs 第 8 项（浮层表面必须被圆角 Token 覆盖；豁免清单见该脚本）。
+   行级部件（菜单项 hover/选中底）消费 --radius-xs，弹层内圆角「内 = 外 − 内边距」。 */
+.menu, .selection-menu, .settings-info-tip, .annot-editor, .colorpop, .reader-toast,
+.image-focus-toolbar, .tag-suggest-v4, .cb-scheme-pop, .occlusion-editor-rail,
+.occlusion-editor-confirm, .model-dropdown, .dd-menu, .source-peek, .bar-pop,
+.extract-face-toolbar.is-float-pop, .md-tb-menu, .learner-menu-pop, .growth-toast {
+  border-radius: var(--radius-popover);
+}
+.dd-item, .model-option, .md-tb-menu-item, .learner-menu-pop button, .bar-pop button,
+.occlusion-editor-badge {
+  border-radius: var(--radius-xs);
+}
+/* 行贴边弹层：圆角下裁剪行底色（默认皮肤无圆角，声明零视觉影响） */
+.learner-menu-pop { overflow: hidden; }
+
 /* 深色提亮档同理：body.theme-dark 比上面的 body 特异性高，会覆盖它 */
 body.theme-dark {
   /* v49.0 / D172：深色档 accent 用户值优先（内联 --user-accent 命中），否则回落深色基线 */
@@ -2423,7 +2443,14 @@ body.theme-dark .modal-panel {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* v49.1 / D175-d：空态/短内容时吸底批量栏跟随内容末尾＝悬浮屏幕中间（用户实测：卡片页空态底栏不贴底）。
+     改纵向 flex：子项 flex:none（保持块流自然高度、超高照常滚动），stage-bar 以 margin-top:auto
+     钉到滚动口底缘；内容超高时自由空间为零自然回落流内位置——sticky bottom:0 滚动钉底行为不变。 */
+  display: flex;
+  flex-direction: column;
 }
+.queue-wrap > * { flex: none; }
+.queue-wrap > .stage-bar { margin-top: auto; }
 .queue-list {
   max-width: 760px;
   margin: 0 auto;
@@ -7537,7 +7564,7 @@ body.capture-body #root { height: 100vh; }
   color: var(--text-primary);
   background: var(--paper);
   border: 1px solid var(--border-subtle);
-  border-radius: 0;
+  border-radius: var(--radius-input); /* v49.1 / D175：输入件圆角 Token 化（原显式 0） */
   padding: var(--sp-1) var(--sp-2);
 }
 .menu-comment:focus { outline: none; border-color: var(--border-strong); }
@@ -7734,6 +7761,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   gap: var(--sp-2);
   background: var(--paper);
   border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control); /* v49.1 / D175：按钮族圆角 Token 化（.btn/.icon-btn 同族；原零声明） */
   color: var(--text-primary);
   font-size: var(--fs-secondary);
   padding: 0 var(--sp-4);
@@ -8795,7 +8823,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-popover);  /* 浮层唯一阴影，不混用 --shadow-hover（已废除） */
   padding: var(--sp-2) var(--sp-4);
-  border-radius: 0;                 /* 默认皮肤方角语言 */
+  border-radius: var(--radius-popover); /* v49.1 / D175：随浮层家族统一消费 Token（原显式 0 退役） */
   display: flex;
   flex-direction: column;
   align-items: flex-start;

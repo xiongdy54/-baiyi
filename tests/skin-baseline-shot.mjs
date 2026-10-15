@@ -103,6 +103,15 @@ try {
   });
   const page = await connect();
   await wait(5200);
+  // 先把真实 OS 窗口调大到 ≥ 模拟视口（用户实测：setDeviceMetricsOverride 只改页面视口不改窗口，
+  // 观感＝内容按 1440×900 排版却被小窗口裁切「内容巨大溢出」）。窗口 ≥ 视口即无此观感；
+  // 截图仍走 Page.captureScreenshot 的 1440×900 视口，像素基线不受影响。
+  const win0 = await page.send("Browser.getWindowForTarget");
+  const wid = win0.result?.windowId;
+  if (wid != null) {
+    await page.send("Browser.setWindowBounds", { windowId: wid, bounds: { windowState: "normal" } });
+    await page.send("Browser.setWindowBounds", { windowId: wid, bounds: { width: 1464, height: 984 } });
+  }
   await page.send("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await wait(900);
 

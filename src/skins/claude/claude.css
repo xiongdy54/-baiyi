@@ -1,5 +1,5 @@
 /* ============================================================================
-   Claude（陶土）皮肤 · v49.0 / D173
+   陶土（Claude）皮肤 · v49.1 / D175（v49.0 / D173 建；D175 补选中强调统一）
    设计语言：src/skins/claude/DESIGN.md；部件选择器来源：docs/skins/component-map.md
    纪律：skin 层由 SkinHost 包裹（@layer skin）——本文件全部规则恒压 base 层；
    颜色 Token 两档各声明一次（A4）；动效全部在 body.motion-full 作用域（A6，VT 例外）；
@@ -169,3 +169,84 @@ html[data-skin="claude"]:root::view-transition-new(root) {
 @media (prefers-reduced-motion: reduce) {
   html[data-skin="claude"]:root::view-transition-new(root) { animation: none; }
 }
+
+/* ============ 5. 选中强调统一（v49.1 / D175）============
+   全应用「被选中」＝「制卡台」按钮 is-on 同款语言：--accent-soft 软底 + accent 字 + 圆角。
+   基线残存的两种瑞士指示——下划线（::after / inset box-shadow / border-bottom）与
+   左缘条（border-left）——在 skin 层全部退役；仅动颜色/底/圆角，零动效属性（A6 不适用）。
+   选择器来源：docs/skins/component-map.md + theme.css 选中态全量盘点（D175 审计）。 */
+
+/* 顶栏主役导航页签（书架/摘录/复习/…） */
+body.skin-claude .topbar-nav .nav-item { border-radius: var(--radius-control); }
+body.skin-claude .topbar-nav .nav-item.active {
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+
+/* 设置面板导航（宽档左缘条 / 窄档底线一并退役）与设置皮肤列表 */
+body.skin-claude .settings-nav button,
+body.skin-claude .skin-list button { border-left-color: transparent; border-radius: var(--radius-xs); }
+body.skin-claude .settings-nav button.active,
+body.skin-claude .skin-list button.active { color: var(--accent); border-bottom-color: transparent; }
+
+/* 文字页签族：卡片浏览器等 .seg-tabs / 选区浮条·阅读器 .seg / 制卡台 .wb-tabs·.dock-tabs */
+/* .seg-tabs 基线内衬「上 0 / 下 8px」是下划线语言的让位几何——填充语言下软底会整体偏下
+   （用户实测「全部卡片 77」强调底偏下，D175-b）；改对称 var(--sp-1)，纵向总高不变 */
+body.skin-claude .seg-tabs button { padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-xs); }
+body.skin-claude .seg-tabs button.active { background: var(--accent-soft); }
+body.skin-claude .seg-tabs button.active::after { content: none; }
+body.skin-claude .seg button.on {
+  border-bottom-color: transparent;
+  background: var(--accent-soft);
+  border-radius: var(--radius-xs);
+}
+body.skin-claude .wb-tabs button.on,
+body.skin-claude .dock-tabs > button[role="tab"].on { background: var(--accent-soft); border-radius: var(--radius-xs); }
+body.skin-claude .wb-tabs button.on::after,
+body.skin-claude .dock-tabs > button[role="tab"].on::after { content: none; }
+
+/* 阅读器侧栏页签与目录（文字色留给 reader 主题，只换底与指示） */
+body.skin-claude .reader-sidebar .tabs > button[role="tab"] { border-radius: var(--radius-xs); }
+body.skin-claude .reader-sidebar .tabs > button[role="tab"].on { background: var(--accent-soft); box-shadow: none; }
+body.skin-claude .reader-toc-item { border-left-color: transparent; border-radius: var(--radius-xs); }
+body.skin-claude .reader-toc-item.active { background: var(--accent-soft); }
+
+/* 下拉菜单项：左缘选中条 → 软底（含阅读引擎控件、母语多选、⋯ 选单等同族） */
+body.skin-claude .dd-item { border-left-color: transparent; }
+body.skin-claude .dd-item-on {
+  border-left-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+body.skin-claude .reader-engine-controls .dd-item-on {
+  border-left-color: transparent;
+  background: var(--accent-soft);
+  color: var(--reader-fg, var(--text-primary));
+}
+
+/* 标签建议行：左缘条 → 软底（soft 底基线已有） */
+body.skin-claude .tag-suggest-row { border-left-color: transparent; border-radius: var(--radius-xs); }
+body.skin-claude .tag-suggest-row.active { border-left-color: transparent; }
+
+/* 书架段控：左缘 2px 点条退役（soft 底 + accent 字基线已备） */
+body.skin-claude .shelf-seg button[aria-pressed="true"]::before { content: none; }
+/* 书架工具条两组段控（视图/密度）去框（D175-c，用户实测「大框套小框」）——
+   容器 hairline 框 + 内部圆角选中药丸＝填充语言下的双重框；affordance 改由
+   选中 soft 底 + hover grey-1 承担（与制卡台三轨 D155、卡片浏览器工具行 D156 同一口径）。
+   默认皮肤保持瑞士「框式分段控件」语言不动。 */
+body.skin-claude .shelf-seg { border-color: transparent; }
+body.skin-claude .shelf-seg button + button { border-left-color: transparent; }
+
+/* 遮挡编辑器段控滑移指示：底线 → 圆角软底 */
+body.skin-claude .occl-seg-ind { border-bottom-color: transparent; border-radius: var(--radius-xs); }
+
+/* ============ 6. 选单满 bleed（v49.1 / D175-b）============
+   圆角选单内行级软底/hover 底若与选单上下缘之间留内衬白边，首/末行被选中时观感割裂
+   （用户实测「全部类型」选单首行白边）。修法＝CDS full-bleed：去块向内衬 + overflow:hidden，
+   行底由容器 12px 圆角统一裁切（行自身 4px 圆角仅在非贴边时可见）。
+   适用面＝行贴边的三类选单（.dd-menu 家族含 .zmenu / 阅读器 .md-tb-menu / 底栏 .bar-pop）；
+   .tag-suggest-v4 本就无内衬，仅补圆角裁切。面板类弹层（cb-scheme-pop 等自带内衬）不适用。 */
+body.skin-claude .dd-menu,
+body.skin-claude .md-tb-menu,
+body.skin-claude .bar-pop { padding-block: 0; overflow: hidden; }
+body.skin-claude .tag-suggest-v4 { overflow: hidden; }

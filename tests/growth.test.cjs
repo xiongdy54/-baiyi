@@ -136,6 +136,15 @@ console.log("== P-5 relearning-recovery：relearning→review 命中一次；无
   check("dimension=recovery", hits[0].dimension === "recovery", "recovery", hits[0].dimension);
   const old = card({ id: "p5-b", logs: [log({ reviewSeq: 1, before: null, after: null })] });
   check("无快照旧日志不参与判定（零命中）", growth.deriveCardEvents(old, old.logs, NOW).length === 0, [], growth.deriveCardEvents(old, old.logs, NOW).length);
+  // D175（v49.1）：再次遗忘后的再度康复不重复计报——每卡仅首次（§4.17-6① 字面语义）
+  const recurred = card({ id: "p5-c", logs: [
+    log({ reviewSeq: 1, before: fsrsOf("review", 10), after: fsrsOf("relearning", 2) }),  // 遗忘①
+    log({ reviewSeq: 2, before: fsrsOf("relearning", 2), after: fsrsOf("review", 12) }),  // 康复① → 报（seq=2）
+    log({ reviewSeq: 3, before: fsrsOf("review", 12), after: fsrsOf("relearning", 2) }),  // 遗忘②
+    log({ reviewSeq: 4, before: fsrsOf("relearning", 2), after: fsrsOf("review", 14) })   // 康复② → 不报
+  ] });
+  const recHits = growth.deriveCardEvents(recurred, recurred.logs, NOW).filter((h) => h.type === "relearning-recovery");
+  check("再次遗忘后的再度康复不重复计报（仅 seq=2 首次）", recHits.length === 1 && recHits[0].triggerSeq === 2, { n: 1, seq: 2 }, { n: recHits.length, seq: recHits[0] && recHits[0].triggerSeq });
 }
 
 // ---------------------------------------------------------------- P-6

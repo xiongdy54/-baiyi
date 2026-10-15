@@ -7,7 +7,7 @@ import { claudeManifest } from "./claude/manifest";
 
 const BUILTIN: SkinEntry[] = [
   { manifest: swissManifest, load: async () => ({}) },
-  // v49.0 / D173：Claude（陶土）——第一支 v2 皮肤，懒加载不进主包
+  // v49.0 / D173：陶土（Claude）——第一支 v2 皮肤，懒加载不进主包
   { manifest: claudeManifest, load: () => import("./claude").then((m) => m.default) },
 ];
 

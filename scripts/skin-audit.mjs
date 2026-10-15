@@ -9,6 +9,8 @@
 //   5 动效规则都挂 body.motion-full（::view-transition-* 例外）—— A6
 //   6 @keyframes 名以 skin-<id>- 开头
 //   7 单皮肤 CSS ≤ 60KB                                    —— A7
+//   8 theme.css 浮层表面必须被圆角 Token 覆盖（v49.1 / D175：皮肤改 --radius-popover 全局生效的
+//     机器闸门；禁止新增「零 border-radius 声明」的浮层＝省略式直角。豁免＝画布/功能图形）
 // 退出码：0 = 全部通过；1 = 存在违规。
 "use strict";
 import fs from "node:fs";
@@ -212,7 +214,49 @@ function auditSkin(skinId, cssFiles) {
   return problems;
 }
 
+// ---------- theme.css Token 消费完整性（v49.1 / D175） ----------
+// 浮层表面判定：position:fixed|absolute 且（有 box-shadow 或 有 border 系声明）且挂 z-index。
+// 覆盖判定：选择器末段复合子命中任一 border-radius: var(--radius-*) 声明（含浮层家族统一规则）。
+// 豁免（非浮层的画布/功能图形，D175 登记）：.img-region-overlay（图片选区高亮框，直角属功能语义）。
+function checkThemeRadiusCoverage() {
+  const rules = parseRules(stripComments(THEME));
+  const covered = new Set();
+  for (const r of rules) {
+    if (!/border-radius\s*:\s*var\(--radius-/.test(r.body)) continue;
+    for (const part of r.selector.split(",")) {
+      const segs = part.trim().split(/\s+/);
+      if (segs.length) covered.add(segs[segs.length - 1]);
+    }
+  }
+  const EXEMPT = new Set([".img-region-overlay"]);
+  const problems = [];
+  for (const r of rules) {
+    if (r.body.includes("border-radius")) continue;
+    const pos = /position\s*:\s*(fixed|absolute)/.test(r.body);
+    const hasZ = /z-index\s*:/.test(r.body);
+    const floaty = /box-shadow\s*:/.test(r.body) || (/border[^:]*:/.test(r.body) && hasZ);
+    if (!pos || !hasZ || !floaty) continue;
+    for (const part of r.selector.split(",")) {
+      // 覆盖判定按「类」粒度：定位特化（.annot-toggle.bar-btn ← .bar-btn 基类已消费 Token）不误报
+      const segs = part.trim().split(/\s+/);
+      const last = segs[segs.length - 1] || "";
+      const classes = last.match(/\.[\w-]+/g) || [];
+      const hit = covered.has(last) || classes.some((c) => covered.has(c));
+      if (!hit && !EXEMPT.has(last)) {
+        problems.push(`[D175] 浮层表面未被圆角 Token 覆盖（皮肤改 --radius-popover 不生效）：${part.trim()}`);
+      }
+    }
+  }
+  return problems;
+}
+
 function main() {
+  let failed = false;
+  const themeProblems = checkThemeRadiusCoverage();
+  console.log(`\n== skin-audit: theme.css Token 消费完整性（D175） ==`);
+  if (!themeProblems.length) console.log("  ✓ 通过");
+  else { failed = true; themeProblems.forEach((p) => console.log("  ✗ " + p)); }
+
   const args = process.argv.slice(2);
   const dirs = fs.readdirSync(SKINS_DIR).filter((d) => {
     const p = path.join(SKINS_DIR, d);
@@ -220,7 +264,6 @@ function main() {
     if (args.length) return args.includes(d);
     return fs.readdirSync(p).some((f) => f.endsWith(".css"));
   });
-  let failed = false;
   if (!dirs.length) console.log("skin-audit：无可审计的皮肤 CSS（swiss 默认皮肤无 CSS，合规）");
   for (const id of dirs) {
     const files = fs.readdirSync(path.join(SKINS_DIR, id)).filter((f) => f.endsWith(".css")).map((f) => path.join(SKINS_DIR, id, f));
