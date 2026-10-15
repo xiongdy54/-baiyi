@@ -158,8 +158,10 @@ try {
     await wait(1200);
   }
 
-  // ── 添加书籍模态 + 焦点陷阱核查 ─────────────────────────────────────────
-  const addClicked = await main.ev(`(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes("添加")); if(!b) return false; b.click(); return true; })()`);
+  // ── 粘贴材料编辑器（v49.3/D177 两步入口）+ 焦点陷阱核查 ─────────────────
+  const addClicked = await main.ev(`(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes("添加材料")); if(!b) return false; b.click(); return true; })()`);
+  await wait(600);
+  await main.ev(`(() => { const it=[...document.querySelectorAll('[role=menu] .dd-item')].find(x=>x.textContent.includes("粘贴材料")); if(it) it.click(); return !!it; })()`);
   await wait(1500);
   const modalFacts = await main.ev(`JSON.stringify({
     hasDialog: !!document.querySelector('[role=dialog],.modal,.dialog'),
@@ -167,9 +169,9 @@ try {
     activeInModal: (()=>{const a=document.activeElement;return a? a.tagName+"."+(a.className||"").toString().slice(0,30):null})(),
     inputs: document.querySelectorAll('input,textarea,select').length
   })`);
-  await shot(main, "12-添加模态");
-  results.push({ page: "12-添加模态", addClicked, modal: JSON.parse(modalFacts || "{}") });
-  console.log(`  12-添加模态: ${modalFacts}`);
+  await shot(main, "12-粘贴材料编辑器");
+  results.push({ page: "12-粘贴材料编辑器", addClicked, modal: JSON.parse(modalFacts || "{}") });
+  console.log(`  12-粘贴材料编辑器: ${modalFacts}`);
   await main.ev(`(() => { const e=new KeyboardEvent('keydown',{key:'Escape',bubbles:true}); document.dispatchEvent(e); window.dispatchEvent(e); return 1; })()`);
   await wait(800);
 

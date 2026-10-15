@@ -82,9 +82,12 @@ try {
 
   // ② 粘贴导入无封面书 → 回落形态＝灰底 + 左下标题，无书脊方块
   await cdp.eval(`(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent.includes("添加材料")); b?.click(); return !!b; })()`);
+  await wait(500);
+  // v49.3/D177：按钮弹两项选单，粘贴导入走「粘贴材料」项
+  await cdp.eval(`(() => { const it = [...document.querySelectorAll("[role=menu] .dd-item")].find((x) => x.textContent.includes("粘贴材料")); it?.click(); return !!it; })()`);
   await wait(900);
   const modalUp = await cdp.eval(`!!document.querySelector(".modal-panel[role=dialog]")`);
-  check("② 添加材料模态打开", modalUp === true, modalUp);
+  check("② 添加材料选单 → 粘贴材料编辑器打开", modalUp === true, modalUp);
   // v48.114/D160 起正文窗是 Milkdown/ProseMirror（textarea 已退役）——聚焦 + insertText（d91-d92 同法）
   const pasted = await cdp.eval(`(() => {
     const pm = document.querySelector(".modal-panel .ProseMirror");

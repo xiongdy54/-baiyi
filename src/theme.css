@@ -903,6 +903,29 @@ body.skin-chrome-transparent .topbar { background: transparent; }
 }
 .btn-outline:disabled { background: transparent; border-color: var(--grey-2); }
 
+/* 文字按钮（链接式动作档，v49.4 / D178）：learner 面板与对话框的行内动作
+   （刷新 / 学习轨道 / 打开原文 / 展开材料 / 移出…全仓 12 处）。此前 .btn-link 零规则
+   ＝浏览器默认灰盒，瑞士基线与皮肤体系（组件 Token / 焦点 outline / hover 纪律）都不生效
+   （用户实测：推荐页右上两钮在陶土与默认皮肤下都不随动）。形态＝纯文字：透明底、无边框、
+   secondary 色阶、hover 只进色（D120），focus 走全局 outline 且跟随 --radius-xs（皮肤圆角）。 */
+.btn-link {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: var(--fs-secondary);
+  color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+.btn-link:hover { color: var(--text-primary); }
+.btn-link:disabled { color: var(--grey-2); background: none; cursor: default; }
+/* 危险变体（.learner-danger，定义在 learner 区）与 hover 的优先级补丁：
+   :hover 是 (0,2,0) 会盖过 (0,1,0) 的变体色，危险链接悬停不得回中性色 */
+.btn-link.learner-danger:hover { color: var(--error-hover); }
+
 /* ---------- buttons-ctas 通用交互语言（D88 §4；D120/方案 §4 修订：hover 禁抬升。一次定义三界面复用，全部挂在既有类名上，零 DOM） ----------
    缓动分层：按钮级走 --ease-out-soft/--dur-hover(160)/--dur-press(60)；栏/面板级仍走 --ease/--dur。
    hover 只变底色（块外既有 --grey 族规则）与图标随动；hover 抬升（translateY 上浮）与
@@ -1832,6 +1855,67 @@ body.skin-chrome-transparent .topbar { background: transparent; }
 .modal-panel-wide {
   width: 980px;
   max-height: 92vh;
+}
+
+/* ---------- 粘贴材料全窗口编辑器（v49.3 / D177，PasteMaterialModal） ----------
+   「添加材料」选单「粘贴材料」项与 Ctrl+Alt+N 的出口：近满窗文档面（四边各退 --sp-16/2），
+   头行 = 标题 + 书名/语言两字段 + 关闭；正文区 flex 撑满（MarkdownEditor variant="full"
+   无框文档面，dock-bottom 工具条随内容流/超长时吸滚动口底）；底行 = 能力提示 + 取消/保存。 */
+.modal-panel.paste-modal {
+  width: calc(100% - var(--sp-16));
+  height: calc(100% - var(--sp-16));
+  max-width: none;
+  max-height: none;
+}
+/* 头行（D177-b 用户反馈）：说明文字退役，单行「标题 + 书名框 + 语言选框 + 关闭」
+   align-items:center 垂直居中对齐；书名/语言提示收进 placeholder / aria-label / title */
+.paste-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-6);
+}
+.paste-head h2 { margin: 0; flex: none; }
+.paste-head .paste-title { flex: 1 1 auto; min-width: 0; }
+.paste-head select { flex: none; min-width: 96px; }
+.paste-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  padding: 0 var(--sp-6);
+}
+/* Milkdown 三层进 flex 链（extract 卡面同款纪律）＋ ProseMirror 自身 flex:1
+   （D177-b 用户反馈：点空白即入输入态——PM 撑满 .milkdown，短文时整面可点、
+   长文时 .milkdown 自己滚动、工具条钉在窗口底缘不随内容滚走） */
+.paste-editor .markdown-editor { flex: 1 1 auto; min-height: 0; }
+.paste-editor .markdown-editor > [data-milkdown-root] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.paste-editor .markdown-editor .milkdown {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.paste-editor .markdown-editor .ProseMirror { flex: 1 1 auto; }
+.paste-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-6) var(--sp-6);
+}
+.paste-foot .notice-bar { flex: 1 1 auto; min-width: 0; }
+.paste-foot-hint {
+  font-size: var(--fs-meta);
+  font-weight: 500;
+  color: var(--text-helper);
 }
 /* v48.70（D114 §6.2）：窄窗口断点用容器查询（对齐 D51 书架工具条先例，860px 一档）。
    容器放在设置面板根上而不是 .settings-layout —— @container 规则不能命中容器自身，
@@ -5857,6 +5941,25 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 }
 .dd-item:hover { background: var(--grey-1); }
 .dd-item-on { border-left-color: var(--accent); color: var(--accent); }
+/* 添加材料选单的来源项（v49.3 / D177）：主行（图标+名称）+ 说明行（Meta 档 helper 色），
+   两行结构故放开 nowrap；说明行只作辨认，不承担可读长文（单行截断足够） */
+.dd-item.add-source-item { white-space: normal; }
+.add-source-main {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-secondary);
+  font-weight: 500;
+  color: inherit;
+}
+.add-source-desc {
+  display: block;
+  font-size: var(--fs-meta);
+  color: var(--text-helper);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* v48.117 / D162：下钻式菜单的返回项（helper 色 + 底部 hairline 与选项区分）；
    危险项（删除）用语义色，仅此一处允许在菜单里出现 */
 .dd-back { color: var(--text-helper); border-bottom: 1px solid var(--border-subtle); margin-bottom: 2px; }
@@ -8734,7 +8837,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .learner-meta { font-size: 12px; color: var(--text-tertiary, var(--text-secondary)); }
 .learner-notice { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; font-size: 13px; padding: var(--sp-2) 0; }
 .learner-empty { font-size: 13px; color: var(--text-secondary); margin: var(--sp-2) 0; }
-.learner-error { color: var(--danger, #b3261e); font-size: 13px; margin: var(--sp-2) 0; }
+.learner-error { color: var(--error); font-size: 13px; margin: var(--sp-2) 0; }
 .learner-copied { font-size: 12px; color: var(--text-secondary); margin: 0; }
 .learner-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .learner-item { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-3) 0; border-top: 1px solid var(--hairline); }
@@ -8800,7 +8903,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 /* 领域多选行（v48.80 D124 §11.4）：标签在左、learner-tag 芯片多选在右，可换行 */
 .learner-udc-edit { display: flex; align-items: flex-start; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; }
 .learner-udc-edit > span { line-height: 24px; }
-.learner-danger { color: var(--danger, #b3261e); }
+.learner-danger { color: var(--error); }
 
 /* ============================== M13 成长反馈（v48.85 / D129 批次 B2–B4） ==============================
    设计稿 docs/design/GROWTH-FEEDBACK-D129.md §5（以下类名即实现契约）；动效全部引用

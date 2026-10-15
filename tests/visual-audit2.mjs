@@ -145,9 +145,11 @@ try {
   await main.ev(`(() => { const e=new KeyboardEvent('keydown',{key:'Escape',bubbles:true}); document.dispatchEvent(e); return 1; })()`);
   await wait(1000);
 
-  // ── 添加材料模态：焦点陷阱 + Escape ─────────────────────────────────────
+  // ── 粘贴材料编辑器（v49.3/D177 两步入口：选单 → 粘贴材料）：焦点陷阱 + Escape ────
   await gotoNav("书架");
   const add = await main.ev(`(() => { const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes("添加材料")); if(!b) return false; b.click(); return true; })()`);
+  await wait(600);
+  await main.ev(`(() => { const it=[...document.querySelectorAll('[role=menu] .dd-item')].find(x=>x.textContent.includes("粘贴材料")); if(it) it.click(); return !!it; })()`);
   await wait(1600);
   const m1 = asObj(await main.ev(`JSON.stringify({
     dialog: !!document.querySelector('[role=dialog],[aria-modal="true"],.modal'),
@@ -155,7 +157,7 @@ try {
     active: document.activeElement ? document.activeElement.tagName + "." + String(document.activeElement.className).slice(0,24) : null,
     inputs: document.querySelectorAll('input,textarea,select').length
   })`) || "{}");
-  await shot(main, "31-添加材料模态");
+  await shot(main, "31-粘贴材料编辑器");
   // Tab 十次，看焦点是否被关在模态里
   const trap = await main.ev(`(async()=>{
     const box=document.querySelector('[role=dialog],[aria-modal="true"],.modal');
@@ -167,8 +169,8 @@ try {
     }
     return box.contains(document.activeElement) ? "in-modal" : "ESCAPED:"+(document.activeElement?.tagName||"?");
   })()`);
-  results.push({ page: "添加材料模态", add, ...m1, trap });
-  console.log(`  添加材料模态: opened=${add} dialog=${m1.dialog} ariaModal=${m1.ariaModal} active=${m1.active} Tab×10→${trap}`);
+  results.push({ page: "粘贴材料编辑器", add, ...m1, trap });
+  console.log(`  粘贴材料编辑器: opened=${add} dialog=${m1.dialog} ariaModal=${m1.ariaModal} active=${m1.active} Tab×10→${trap}`);
   await main.ev(`(() => { const e=new KeyboardEvent('keydown',{key:'Escape',bubbles:true}); document.dispatchEvent(e); return 1; })()`);
   await wait(1200);
   const closed = await main.ev(`!document.querySelector('[role=dialog],[aria-modal="true"]')`);

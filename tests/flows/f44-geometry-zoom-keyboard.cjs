@@ -321,6 +321,10 @@ const b=[...document.querySelectorAll('.nav-item')].find((x)=>(x.textContent||''
       const o = JSON.parse(String((await val(MARKOPENER, "null")) || "null") || "null");
       if (!o) return false;
       await realClick(o.x, o.y);
+      await wait(500);
+      // v49.3/D177：真实鼠标点开的是两项选单，对话框走「粘贴材料」项（程序化 click，
+      // 焦点仍留在真实点击过的触发钮上——dialogA11y 的 opener 判定不受影响）
+      await val(`const it=[...document.querySelectorAll('[role=menu] .dd-item')].find(x=>/粘贴材料/.test(x.textContent||'')); if(it){it.click(); return true;} return false;`, false);
       await wait(900);
       return (await val(`return document.querySelectorAll('[role="dialog"]').length`, 0)) === 1;
     };

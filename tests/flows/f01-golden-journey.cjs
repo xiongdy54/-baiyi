@@ -75,9 +75,12 @@ runFlow(flow, async () => {
     const primaryBtns = await val(h, `return ${countOf(".btn-primary")}`, 0);
     flow.check("空态不堆重复主行动按钮", primaryBtns <= 2, "≤2", primaryBtns);
     const modalOpens = await val(h, `const b=[...document.querySelectorAll('button')].find(x=>/添加材料/.test(x.textContent||'')); if(b){b.click(); return true;} return false;`, false);
+    await wait(600);
+    // v49.3/D177：按钮弹两项选单，对话框走「粘贴材料」项
+    await val(h, `const it=[...document.querySelectorAll('[role=menu] .dd-item')].find(x=>/粘贴材料/.test(x.textContent||'')); if(it){it.click(); return true;} return false;`, false);
     await wait(1600);
     const modalTxt = String((await val(h, `const m=document.querySelector('[class*=modal],[role=dialog]'); return m? m.innerText.replace(/\\s+/g,' ').slice(0,140):''`, "")) || "");
-    flow.check("「添加材料」真的打开添加对话框", modalOpens === true && /添加书籍|书名|正文/.test(modalTxt), true, { modalOpens, head: modalTxt.slice(0, 70) });
+    flow.check("「添加材料」选单真的打开粘贴对话框", modalOpens === true && /粘贴材料|书名|正文/.test(modalTxt), true, { modalOpens, head: modalTxt.slice(0, 70) });
     await val(h, `const m=document.querySelector('[class*=modal],[role=dialog]'); const x=m&&[...m.querySelectorAll('button')].find(b=>/取消|关闭/.test(b.textContent||'')); if(x)x.click(); return !!x;`, false);
     await wait(900);
 

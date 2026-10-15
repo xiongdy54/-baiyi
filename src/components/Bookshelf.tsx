@@ -8,7 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from "../lib/library";
 import { eventBus } from "../lib/eventbus";
 import {
-  IconAlert, IconArrowLeft, IconEllipsis, IconFolderPlus, IconLanguages,
+  IconAlert, IconArrowLeft, IconEllipsis, IconFolderPlus, IconImport, IconLanguages,
   IconLayoutGrid, IconList, IconPencil, IconTrash,
 } from "./icons";
 import Dropdown from "./Dropdown";
@@ -110,13 +110,14 @@ function CardMenu({ label, children }: { label: string; children: React.ReactNod
 
 interface Props {
   onOpenBook: (itemId: string) => void;
-  /** 添加材料模态（v36）：由 App 级持有——书架入口与全局快捷键 Ctrl+Alt+N 共用同一模态 */
-  onAddMaterial: () => void;
+  /** 添加材料选单（v49.3 / D177）的两条出口，均由 App 级持模态：书架选单与全局快捷键 Ctrl+Alt+N（直达粘贴）共用 */
+  onImportFiles: () => void;
+  onPasteMaterial: () => void;
   /** 顶栏「书架」被点击时自增（App 级）：已在书架时也用它退出文件夹回顶层（§5.4 三条出路之一） */
   topLevelSignal: number;
 }
 
-type MenuKind = "lang" | "group" | "folder" | "priority" | "more";
+type MenuKind = "lang" | "group" | "folder" | "priority" | "more" | "add";
 interface DragState { id: string; target: string | null; zone: "before" | "group" | "after" | null }
 
 const ZONE_BEFORE = 0.28;
@@ -132,7 +133,7 @@ const shelfCache: {
   prefs: { mode: ShelfViewMode; density: ShelfDensity; sort: ShelfSort } | null;
 } = { items: null, shelf: null, prefs: null };
 
-export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }: Props) {
+export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, topLevelSignal }: Props) {
   const [items, setItems] = useState<LibraryItem[]>(shelfCache.items ?? []);
   const [shelf, setShelf] = useState<ShelfState>(shelfCache.shelf ?? EMPTY_SHELF);
   // 数据是否已就绪：有缓存＝立刻就绪；冷启动＝等首次加载完成，期间不渲染空态
@@ -145,6 +146,9 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
   const [renaming, setRenaming] = useState<{ id: string; value: string; field?: "author" } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ id: string; kind: MenuKind } | null>(null);
+  // 添加材料选单的触发钮（D177）：选单项点击先把焦点归还触发钮再开模态——
+  // menu 关闭语义（焦点回触发点）+ dialogA11y「归还触发元素」契约在两步入口下都成立
+  const addBtnRef = useRef<HTMLButtonElement>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   // 原生拖拽结束后浏览器不重判 :hover（拖动期间 hover 不更新）→ 被拖那张卡会顶着起手那一刻的
   // hover 状态，动作条留在屏上直到下一次真实鼠标移动。这段时间里 hover 是「假」的，先按下不表，
@@ -992,10 +996,43 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
       <span className="shelf-spacer" />
       {/* 拖拽提示只余停用说明（v48.120/D165）：手动顺序下的操作说明文字退役，Alt+←/→ 键盘等价语义不变 */}
       {!manual && <span className="shelf-hint">非手动顺序，拖拽已停用</span>}
-      {/* 主行动纯文字（v48.119/D164）：快捷键 Ctrl+Alt+N 的注册契约不变（§4.2-21），按钮不再复述 */}
-      <button type="button" className="btn btn-primary btn-sm" data-ui="button-primary" onClick={onAddMaterial}>
-        添加材料
-      </button>
+      {/* 主行动纯文字（v48.119/D164）＋ 选单两分（v49.3/D177）：按钮点击弹「导入文件 / 粘贴材料」
+          两项选单，原四合一导入面板收拢于此；快捷键 Ctrl+Alt+N 的注册契约不变（§4.2-21，直达粘贴） */}
+      <span className="dd">
+        <button
+          type="button"
+          ref={addBtnRef}
+          className="btn btn-primary btn-sm"
+          data-ui="button-primary"
+          aria-haspopup="menu"
+          aria-expanded={menu?.kind === "add"}
+          onClick={() => setMenu(menu?.kind === "add" ? null : { id: "__toolbar__", kind: "add" })}
+        >
+          添加材料
+        </button>
+        {menu?.kind === "add" && (
+          <div className="dd-menu" role="menu" aria-label="添加材料">
+            <button
+              type="button"
+              role="menuitem"
+              className="dd-item add-source-item"
+              onClick={() => { setMenu(null); addBtnRef.current?.focus(); onImportFiles(); }}
+            >
+              <span className="add-source-main"><IconImport size={14} /> 导入文件</span>
+              <span className="add-source-desc">EPUB / PDF / Word / TXT / Markdown…</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="dd-item add-source-item"
+              onClick={() => { setMenu(null); addBtnRef.current?.focus(); onPasteMaterial(); }}
+            >
+              <span className="add-source-main"><IconPencil size={14} /> 粘贴材料</span>
+              <span className="add-source-desc">全窗口 Markdown 编辑器，可设书名与语言</span>
+            </button>
+          </div>
+        )}
+      </span>
     </div>
   );
 

@@ -133,6 +133,21 @@ body.skin-claude [data-ui="card"] {
   overflow: hidden;
 }
 
+/* 文件夹卡修订（v49.3 / D177-b，用户实测两缺陷）：
+   ① 悬停 3D 开盖被裁——.shelf-face 级 overflow:hidden 把越出卡盒的盖板/纸片切掉
+     （基线 .book-card 特意不裁：批注菜单要越界展开，开盖动画同理）；
+   ② 静止态右侧白条——卡面级阴影画在「封面整格」矩形上，而夹体右侧有 12px 标签页
+     退让 + 10px 口沿缝的空档，阴影把空档一勾就成了一条亮带。
+   修法＝文件夹卡放开裁切与卡面阴影，静态阴影改挂背板夹体（.f-back＝夹体真实轮廓，
+   悬停时基线「背板浮起投影」以 :hover 规则接管）。两缺陷同源，一并收口。 */
+body.skin-claude [data-ui="card"]:has(.f-face) {
+  overflow: visible;
+  box-shadow: none;
+}
+body.skin-claude .book-card:has(.f-face) .f-back {
+  box-shadow: var(--shadow-card);
+}
+
 /* 单一边框原则（CDS 规则 4）：带阴影弹层内部的次级按钮去边框
    （弹层容器：dialog/menu 已挂 data-ui；未挂部件的浮层暂用类名——AUTHORING §4.5 登记） */
 body.skin-claude :is([data-ui="dialog"], [data-ui="menu"], .dd-menu, .menu, .selection-menu, .settings-info-tip, .colorpop, .annot-editor, .model-dropdown, .md-tb-menu, .growth-toast, .occlusion-editor-rail) :is(.btn-secondary, .btn-outline) {

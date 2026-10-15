@@ -984,15 +984,19 @@ async function caseE7() {
   const res = await withApp({ caseName: "e7", fresh: false, userData: dir }, async (h) => {
     const p = await checkUsable(h, "E7 只读期");
     flow.record("E7 只读期首屏", String(p.head).slice(0, 90));
-    // ① 走真实 UI：添加材料对话框输入 → 点「添加」→ 界面说什么？
+    // ① 走真实 UI：添加材料选单 → 粘贴材料编辑器输入 → 点「保存到书架」→ 界面说什么？
     const opened = await val(h, `const b=[...document.querySelectorAll('button')].find(x=>/添加材料/.test(x.textContent||'')); if(b){b.click(); return true;} return false;`, false);
+    await wait(600);
+    await val(h, `const it=[...document.querySelectorAll('[role=menu] .dd-item')].find(x=>/粘贴材料/.test(x.textContent||'')); if(it){it.click(); return true;} return false;`, false);
     await wait(1200);
     const filled = await val(
       h,
-      `function setInput(el,v){ const proto=el.tagName==='TEXTAREA'?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype; const set=Object.getOwnPropertyDescriptor(proto,'value').set; set.call(el,v); el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }
+      `function setInput(el,v){ const set=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set; set.call(el,v); el.dispatchEvent(new Event('input',{bubbles:true})); el.dispatchEvent(new Event('change',{bubbles:true})); }
        const m=document.querySelector('[role=dialog],.modal-panel'); if(!m) return 'no-modal';
-       const ti=m.querySelector('input[placeholder]'); const ta=m.querySelector('textarea'); if(!ti||!ta) return 'no-fields:'+m.querySelectorAll('input,textarea').length;
-       setInput(ti, ${JSON.stringify(phantom)}); setInput(ta, ${JSON.stringify(MD)});
+       const ti=m.querySelector('input[placeholder]'); const pm=m.querySelector('.ProseMirror'); if(!ti||!pm) return 'no-fields:'+m.querySelectorAll('input,.ProseMirror').length;
+       setInput(ti, ${JSON.stringify(phantom)});
+       pm.focus(); document.execCommand('selectAll', false, null); document.execCommand('insertText', false, ${JSON.stringify(MD)});
+       if(!pm.textContent.includes('第一章')) return 'paste-failed';
        const btn=[...m.querySelectorAll('button')].find(b=>/保存到书架/.test(b.textContent||'')&&!b.disabled); if(!btn) return 'no-save-btn'; btn.click(); return 'clicked:'+(btn.textContent||'').trim();`,
       "eval-fail"
     );
