@@ -1691,6 +1691,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 
 ## 9.5 下一步
 
+**v49.0（D169–D174）皮肤引擎 v2 + Claude 皮肤已完成**：侦察结论 `docs/skins/RECON.md`（Chromium 126 / F09 既有红基线 / D120 VT 已在场的差异裁决）、作者指南 `docs/skins/AUTHORING.md`、组件 Token 分类表 `docs/skins/component-map.md`。实施链：P0 基线设施（`tests/skin-baseline-shot.mjs` 8 视图×浅深 + `tests/lib/png-pixel-diff.mjs` 零依赖像素对比，机器面 10 张逐像素确定性）→ P1 治理（约束分层：瑞士风作用域=默认皮肤，§5.5 重写 A1–A9）→ P2 引擎骨架（@layer vendor,base,skin + SkinHost + `--user-accent` 三件套 + `app.motionLevel` 动效等级 + `scripts/skin-audit.mjs`）→ P3 组件级 Token（22 枚声明、31 规则 50 消费点迁移，默认皮肤逐像素零变化实证）→ P4 Claude（陶土）皮肤（Token 两档 + 结构/动效规则，accent 按皮肤记忆全链路）→ P5 皮肤 API（ui/* 七事件 + data-ui 20 处，SKIN_API_VERSION=2）→ P6 `_lab` 引擎实验台（仅 DEV）→ P7 设置页皮肤卡片。验收：tsc/build 0、P2/P3 截图 10/10 逐像素=基线、P4 SMOKE 27/0、accent.gui 16/0 零断言修改、F09/F11/F27 与 main 同红集合、F18 84/84、skin-audit 全过、D132 互斥不变。**后续候选**（未排期）：data-ui 细粒度部件补批（button-secondary/input/toast/tooltip/popover）、阅读会话 ui/session-complete 发出点、皮肤过渡交叉淡化（方案 P7 可选项）。
+
 **路线图靠前 · 全局选中选单（D145，方案已备·延后实施）**：在软件外任意应用选中文字后弹出三按钮选单（AI 制卡 / 复制到手动制卡文本框 / 引用到 AI 解释输入框），或按设置中自定义快捷键直接使用三按钮功能，可在设置中关闭。**方向待定：任意处制卡 vs 材料导入软件内在软件中完成制卡体验——先调整设计再实施**。机制方案 `docs/design/GLOBAL-SELECTION-ACTIONS-D145.md`（P0＝快捷键路径：模拟复制捕获选区 + 四全局键 + 选单小窗；P1＝选中自动弹出，需原生钩子或 UIA 轮询，另立项）。随行交付的坞内部分＝**D144 制卡台 IA 重设计**（制卡/解释两板块、解释板块底部收起、解读方式按钮化 + 自由提问、跨页签幽灵同步、坞内选区三钮选单），本批实施中（设计稿 `docs/design/D144-CARDDOCK-IA-REDESIGN.md`，GUIDE 登记 v48.100，状态见 §9.2 D144 行）。
 
 **日记 / 用户记忆 / AI 洞察（D159，v48.114 暂时移除）**：三功能已自产品面摘除但**代码、IPC、数据表全量保留**（`journal_entries` / `memory_runs` / `insight_runs` / `personal_meaning_candidates` 历史数据零改动）；重新实装时按冻结契约（§6.5 / §6.7 / §4.13）恢复导航、设置区与快捷键——主进程侧复位 quickCapture.js 的 `CAPTURE_DISABLED` 闸 + 回接 `startupBackfillIfDue` / `memory:retrieve`，渲染层回接 App 导航/视图与三桥即可。
