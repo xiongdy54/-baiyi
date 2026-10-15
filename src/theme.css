@@ -8636,12 +8636,23 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .learner-placement-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: var(--sp-2); }
 .learner-placement-bandops { display: flex; gap: var(--sp-3); }
 
-/* 标签多选（母语 / 快测共用） */
-.learner-native-list { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 标签多选（快测 / 领域多选共用；母语已改 dd 选单，v48.123 / D168） */
 .learner-tag { font-size: 12px; padding: 3px 10px; border: 1px solid var(--hairline); background: none; cursor: pointer; }
 .learner-tag.is-on { background: var(--accent); color: var(--accent-on); border-color: var(--accent); }
-.learner-native-custom { display: flex; gap: var(--sp-2); margin-top: var(--sp-2); }
-.learner-native-custom input { width: 160px; }
+
+/* 母语多选选单（v48.123 / D168）：dd 族多选弹层取代全量平铺标签（D124 §11.6 初版形态）——
+   触发钮一行收纳，弹层内限高滚动 + 末行「其他语言代码」输入（hairline 分隔）。
+   dd-menu-left 贴触发钮左缘展开：宽档 .settings-content 自滚（overflow-y:auto），
+   right:0 对齐会让弹层向左探出滚动容器被裁（LTR 左溢不可滚，D126 R4.2 同源教训）。
+   视觉/动效全走 .dd/.dd-menu/.dd-item 既有语言（pop-in 220ms --spring 存量豁免，§8.4），零新控件形态 */
+.learner-native { align-self: flex-start; }
+.learner-native-btn { max-width: 224px; }
+.learner-native-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.learner-native-summary.is-empty { color: var(--text-placeholder); }
+.learner-native-menu { width: 216px; padding-bottom: 0; }
+.learner-native-list { display: flex; flex-direction: column; max-height: 320px; overflow-y: auto; }
+.learner-native-custom { display: flex; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-top: 1px solid var(--hairline); }
+.learner-native-custom input { flex: 1; min-width: 0; width: auto; }
 
 /* 归入行：标题左（可截断）、控件右；hairline 分隔（瑞士风列表行） */
 .learner-assign-row { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-top: 1px solid var(--hairline); }
