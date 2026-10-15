@@ -344,8 +344,11 @@ try {
   // 11) 书架书级优先级（§6.8-2）：改一次书优先级 → 继承型摘录实时跟随
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
   await wait(1800);
+  // v48.117 / D162：动作条退役 → 优先级入口改走图注 ⋯ 更多菜单（下钻两跳）
+  const openedMore = await cdp.eval(`(() => { const btn = document.querySelector('.cap [aria-label="更多操作"]'); btn?.click(); return !!btn; })()`);
+  await wait(500);
   const openedPriority = await cdp.eval(`(() => { const btn = document.querySelector("[data-book-priority]"); btn?.click(); return !!btn; })()`);
-  check("书架：书卡动作条有「优先级」入口", openedPriority === true, openedPriority);
+  check("书架：书 ⋯ 更多菜单有「优先级」下钻入口", openedMore === true && openedPriority === true, { openedMore, openedPriority });
   await wait(700);
   const picked30 = await cdp.eval(`(() => { const items = [...document.querySelectorAll(".dd-item")]; const b2 = items.find((x) => x.textContent.trim() === "优先级 30"); b2?.click(); return !!b2; })()`);
   check("书架：可选「优先级 30」", picked30 === true, picked30);

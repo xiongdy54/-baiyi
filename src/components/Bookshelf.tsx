@@ -8,7 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from "../lib/library";
 import { eventBus } from "../lib/eventbus";
 import {
-  IconAlert, IconArrowLeft, IconEllipsis, IconFolder, IconFolderPlus, IconLanguages,
+  IconAlert, IconArrowLeft, IconEllipsis, IconFolderPlus, IconLanguages,
   IconLayoutGrid, IconList, IconPencil, IconPlus, IconTrash,
 } from "./icons";
 import Dropdown from "./Dropdown";
@@ -76,7 +76,9 @@ function CardMenu({ label, children }: { label: string; children: React.ReactNod
       down: overUp > 0 && overDown < overUp,
       left: overRightAnchored > 0 && overLeftAnchored <= overRightAnchored,
     });
-  }, []);
+    // v48.117 / D162：deps 带 label——下钻式菜单（更多操作 → 语言/优先级/归组）同位换内容时
+    // 组件只会 update 不会重挂，[] 依赖会让放置量测停在首层内容的高度上
+  }, [label]);
   const { down, left } = place;
   return (
     <div
@@ -84,6 +86,9 @@ function CardMenu({ label, children }: { label: string; children: React.ReactNod
       className={`dd-menu dd-menu-${down ? "down" : "up"}${left ? " dd-menu-left" : ""}`}
       role="menu"
       aria-label={label}
+      /* v48.117 / D162：菜单位于 .cap（图注点击靶＝打开书/进文件夹）内，必须整体挡冒泡——
+         否则点任何菜单项都会顺手开书/进夹（旧 card-acts 由容器 stopBubble 承担，退役后改挂这里） */
+      onClick={(e) => e.stopPropagation()}
     >
       {children}
     </div>
@@ -98,13 +103,12 @@ interface Props {
   topLevelSignal: number;
 }
 
-type MenuKind = "lang" | "group" | "folder" | "priority";
+type MenuKind = "lang" | "group" | "folder" | "priority" | "more";
 interface DragState { id: string; target: string | null; zone: "before" | "group" | "after" | null }
 
 const ZONE_BEFORE = 0.28;
 const ZONE_AFTER = 0.72;
-const ROSTER_MAX = 6;
-const SPINE_MAX = 5;
+const PAPERS_MAX = 3;
 const DENSITY_CLASS: Record<ShelfDensity, string> = { sm: "dens-sm", md: "", lg: "dens-lg" };
 
 /* 模块级缓存（stale-while-revalidate）：书架在切页时会被卸载重挂，若每次都从空态起步，
@@ -498,33 +502,79 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     </p>
   );
 
-  const caption = (entry: ShelfEntry, title: string, meta: (string | null)[]) => (
-    <>
-      {renaming?.id === entry.id ? (
-        <input
-          className="cap-input"
-          autoFocus
-          value={renaming.value}
-          title={renaming.field === "author" ? "作者（留空=未知），回车保存，Esc 取消" : "回车保存，Esc 取消"}
-          aria-label={renaming.field === "author" ? "修改作者" : entry.kind === "folder" ? "修改文件夹名" : "修改书名"}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => setRenaming({ id: entry.id, value: e.target.value, field: renaming.field })}
-          onBlur={() => void commitRename()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
-            else if (e.key === "Escape") { e.preventDefault(); setRenaming(null); }
-            e.stopPropagation();
-          }}
-        />
-      ) : (
-        <p className="cap-title" title={title}>{title}</p>
-      )}
-      {metaLine(meta)}
-    </>
+  /* v48.117 / D162：图注两行——①名称行（名称 + 右端 ⋯ 更多按钮）②meta 行。
+     名称单行截断（书籍 JS 截 12 字 + …、文件夹 CSS ellipsis），title 属性恒存全名；
+     点击名称就地改名（cap-input，Enter/失焦保存、Esc 取消）；操作全部收拢进 ⋯ 菜单（D162） */
+  const caption = (entry: ShelfEntry, title: string, meta: (string | null)[]) => {
+    const isFolder = entry.kind === "folder";
+    const menuKind: MenuKind = isFolder ? "folder" : "more";
+    // v48.117 / D162：菜单归属按 id 判（不限根层）——下钻（lang/priority/group）时菜单仍要挂在这张卡上
+    const menuOpen = menu?.id === entry.id;
+    const display = !isFolder && title.length > 12 ? `${title.slice(0, 12)}…` : title;
+    return (
+      <>
+        <div className="cap-row">
+          {renaming?.id === entry.id ? (
+            <input
+              className="cap-input"
+              autoFocus
+              value={renaming.value}
+              title={renaming.field === "author" ? "作者（留空=未知），回车保存，Esc 取消" : "回车保存，Esc 取消"}
+              aria-label={renaming.field === "author" ? "修改作者" : entry.kind === "folder" ? "修改文件夹名" : "修改书名"}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setRenaming({ id: entry.id, value: e.target.value, field: renaming.field })}
+              onBlur={() => void commitRename()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
+                else if (e.key === "Escape") { e.preventDefault(); setRenaming(null); }
+                e.stopPropagation();
+              }}
+            />
+          ) : (
+            <p
+              className="cap-title"
+              title={title}
+              onClick={(e) => { e.stopPropagation(); setRenaming({ id: entry.id, value: title }); }}
+            >
+              {display}
+            </p>
+          )}
+          <span className="dd cap-more">
+            <button
+              type="button"
+              className="cap-more-btn"
+              title={isFolder ? "文件夹操作" : "更多操作"}
+              aria-label={isFolder ? "文件夹操作" : "更多操作"}
+              aria-haspopup="true"
+              onClick={(e) => { e.stopPropagation(); setMenu(menuOpen ? null : { id: entry.id, kind: menuKind }); }}
+            >
+              <IconEllipsis />
+            </button>
+            {menuOpen && (entry.kind === "folder"
+              ? menu.kind === "folder" ? folderMenu(entry.folder) : null
+              : menu.kind === "more" ? moreMenu(entry)
+              : menu.kind === "lang" ? langMenu(entry.item, entry.id)
+              : menu.kind === "priority" ? priorityMenu(entry.item, entry.id)
+              : menu.kind === "group" ? groupMenu(entry, entry.id)
+              : null)}
+          </span>
+        </div>
+        {metaLine(meta)}
+      </>
+    );
+  };
+
+  // v48.117 / D162：下钻式子菜单的返回项（回到「更多操作」根菜单）
+  const backToMore = (id: string) => (
+    <button type="button" role="menuitem" className="dd-item dd-back" key="back"
+      onClick={() => setMenu({ id, kind: "more" })}>
+      ‹ 更多操作
+    </button>
   );
 
-  const langMenu = (item: LibraryItem) => (
+  const langMenu = (item: LibraryItem, backId?: string) => (
     <CardMenu label="书籍语言">
+      {backId && backToMore(backId)}
       {BOOK_LANGUAGES.map((l) => (
         <button
           key={l.value || "unknown"}
@@ -541,8 +591,9 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
   );
 
   // v48.22（D58 §6.8-2）：书级默认优先级（新建摘录继承；继承型摘录实时跟随）
-  const priorityMenu = (item: LibraryItem) => (
+  const priorityMenu = (item: LibraryItem, backId?: string) => (
     <CardMenu label="优先级">
+      {backId && backToMore(backId)}
       {[10, 30, 50, 70, 90].map((p) => (
         <button
           key={p}
@@ -559,10 +610,11 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     </CardMenu>
   );
 
-  const groupMenu = (entry: ShelfEntry) => {
+  const groupMenu = (entry: ShelfEntry, backId?: string) => {
     const inFolder = entry.kind === "book" ? folderOf(shelf, entry.id) : null;
     return (
       <CardMenu label="归入文件夹">
+        {backId && backToMore(backId)}
         {entry.kind === "book" && (
           <button type="button" role="menuitem" className="dd-item" onClick={() => createFolder(entry.id)}>
             新建文件夹并放入
@@ -591,6 +643,11 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
 
   const folderMenu = (f: ShelfFolder) => (
     <CardMenu label="文件夹操作">
+      {/* v48.117 / D162：重命名主路径是点名称（键盘等价保留菜单项）；无删除——解散不删书记录 */}
+      <button type="button" role="menuitem" className="dd-item"
+        onClick={() => { setMenu(null); setRenaming({ id: f.id, value: f.name }); }}>
+        重命名
+      </button>
       <button type="button" role="menuitem" className="dd-item" onClick={() => { setMenu(null); commit(moveAllOut(shelf, f.id)); }}>
         把 {f.items.length} 本全部移回书架
       </button>
@@ -599,6 +656,42 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
       </button>
     </CardMenu>
   );
+
+  /* v48.117 / D162：书籍 ⋯ 根菜单——除重命名走「点名称就地改」外的全部操作收拢于此；
+     语言/优先级/归组为下钻式（点入同位换内容）。重命名留菜单项作键盘等价路径 */
+  const moreMenu = (entry: ShelfEntry) => {
+    if (entry.kind !== "book") return null; // 类型收窄：只在书籍卡上被调用
+    const item = entry.item;
+    return (
+      <CardMenu label="更多操作">
+        <button type="button" role="menuitem" className="dd-item" aria-label="重命名"
+          onClick={() => { setMenu(null); setRenaming({ id: entry.id, value: item.title }); }}>
+          重命名
+        </button>
+        <button type="button" role="menuitem" className="dd-item" aria-label="作者"
+          title={item.author ? `作者：${item.author}（点击修改）` : "设置作者（留空=未知）"}
+          onClick={() => { setMenu(null); setRenaming({ id: entry.id, value: item.author ?? "", field: "author" }); }}>
+          设置作者{item.author ? `：${item.author}` : ""}
+        </button>
+        <button type="button" role="menuitem" className="dd-item" aria-label="书籍语言"
+          onClick={() => setMenu({ id: entry.id, kind: "lang" })}>
+          书籍语言
+        </button>
+        <button type="button" role="menuitem" className="dd-item" aria-label="优先级" data-book-priority
+          onClick={() => setMenu({ id: entry.id, kind: "priority" })}>
+          优先级
+        </button>
+        <button type="button" role="menuitem" className="dd-item" aria-label="归入文件夹"
+          onClick={() => setMenu({ id: entry.id, kind: "group" })}>
+          归入文件夹
+        </button>
+        <button type="button" role="menuitem" className="dd-item dd-item-danger" aria-label="删除"
+          onClick={() => { setError(null); setMenu(null); setPendingDelete(item.id); }}>
+          删除…
+        </button>
+      </CardMenu>
+    );
+  };
 
   const confirmBox = (id: string, title: string) => (
     <div className="book-card-confirm" onClick={(e) => e.stopPropagation()}>
@@ -615,77 +708,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     </div>
   );
 
-  /* 动作条与它的菜单一律挡住冒泡：整张卡本身就是点击靶（打开书 / 进文件夹），
-     不挡的话点「重命名」「归入文件夹」「删除」会顺手把书打开——实测踩过，测试也是这么抓出来的 */
-  const stopBubble = (e: React.MouseEvent) => e.stopPropagation();
-
-  const actionsOf = (entry: ShelfEntry) => {
-    if (pendingDelete === entry.id && entry.kind === "book") return confirmBox(entry.id, entry.item.title);
-    if (entry.kind === "folder") {
-      return (
-        <div className="card-acts" onClick={stopBubble}>
-          <button className="act" title="重命名文件夹" aria-label="重命名文件夹"
-            onClick={() => setRenaming({ id: entry.id, value: entry.folder.name })}>
-            <IconPencil />
-          </button>
-          <span className="dd">
-            <button className="act" title="文件夹操作" aria-label="文件夹操作" aria-haspopup="true"
-              onClick={() => setMenu(menu?.id === entry.id && menu.kind === "folder" ? null : { id: entry.id, kind: "folder" })}>
-              <IconEllipsis />
-            </button>
-            {menu?.id === entry.id && menu.kind === "folder" && folderMenu(entry.folder)}
-          </span>
-          <span className="act-spacer" />
-        </div>
-      );
-    }
-    const item = entry.item;
-    return (
-      <div className="card-acts" onClick={stopBubble}>
-        <button className="act" title="重命名" aria-label="重命名"
-          onClick={() => setRenaming({ id: item.id, value: item.title })}>
-          <IconPencil />
-        </button>
-        <button className="act act-text" title={item.author ? `作者：${item.author}（点击修改）` : "设置作者（留空=未知）"} aria-label="作者"
-          onClick={() => setRenaming({ id: item.id, value: item.author ?? "", field: "author" })}>
-          作者
-        </button>
-        <span className="dd">
-          <button className="act" title="书籍语言（查词按它路由）" aria-label="书籍语言" aria-haspopup="true"
-            onClick={() => setMenu(menu?.id === item.id && menu.kind === "lang" ? null : { id: item.id, kind: "lang" })}>
-            <IconLanguages />
-          </button>
-          {menu?.id === item.id && menu.kind === "lang" && langMenu(item)}
-        </span>
-        {/* v48.22（D58 §6.8-2）：书级优先级（用户要求：书架上为书籍手动设置优先级） */}
-        <span className="dd">
-          <button
-            className="act act-text"
-            title="书级默认优先级（新建摘录继承；继承型摘录实时跟随）"
-            aria-label="优先级"
-            aria-haspopup="true"
-            data-book-priority
-            onClick={() => setMenu(menu?.id === item.id && menu.kind === "priority" ? null : { id: item.id, kind: "priority" })}
-          >
-            优先
-          </button>
-          {menu?.id === item.id && menu.kind === "priority" && priorityMenu(item)}
-        </span>
-        <span className="dd">
-          <button className="act" title="归入文件夹" aria-label="归入文件夹" aria-haspopup="true"
-            onClick={() => setMenu(menu?.id === item.id && menu.kind === "group" ? null : { id: item.id, kind: "group" })}>
-            <IconFolderPlus />
-          </button>
-          {menu?.id === item.id && menu.kind === "group" && groupMenu(entry)}
-        </span>
-        <span className="act-spacer" />
-        <button className="act is-danger" title="删除" aria-label="删除"
-          onClick={() => { setError(null); setMenu(null); setPendingDelete(item.id); }}>
-          <IconTrash />
-        </button>
-      </div>
-    );
-  };
+  /* v48.117 / D162：card-acts 动作条整体退役——书籍与文件夹的操作全部收进图注名称行的 ⋯ 菜单
+     （见 caption / moreMenu / folderMenu），删除确认框仍就地压卡。 */
 
   const bookFace = (item: LibraryItem) =>
     item.cover ? (
@@ -699,7 +723,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
-    const progress = isFolder ? agg!.progress : itemProgress(entry.item);
+    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——进度轨留空、无均值
+    const progress = isFolder ? 0 : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     return (
       <div
@@ -721,48 +746,32 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           onKeyDown={onCardKeyDown(entry)}
         >
           {isFolder ? (
+            /* v48.116 / D161 第五轮：竖版文件夹（参照 uiverse mighty-pig-13 转置 90°，开口朝右、折边在左）——
+               背板 + 纸组（一层 = 一本书，≤3；纸即封面：inline bookasset:// 背景，无封面回退锌灰）+ 盖板
+               （z 序 0/1/2，标签页为两板伪元素）。纸右缘按 --ci 阶梯退，从盖板口沿缝露出书脊边；
+               hover / 键盘焦点绕左折边 3D 开盖（rotateY 阶梯，stagger 20ms）；卡面零文字 */
             <div className="f-face">
-              <span className="f-tab">FOLDER</span>
-              {members.length ? (
-                <>
-                  <div className="f-spines">
-                    {members.slice(0, SPINE_MAX).map((m) => (
-                      <i key={m.id}>
-                        {m.cover && <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
-                          onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}
-                      </i>
-                    ))}
-                    {members.length > SPINE_MAX && <i className="rest">+{members.length - SPINE_MAX}</i>}
-                  </div>
-                  <div className="f-sum">
-                    <span className="n">{agg!.n}</span>
-                    <span className="u">本</span>
-                    <span className="avg">均值 {pct(agg!.progress)}</span>
-                  </div>
-                  <div className="f-roster">
-                    <span className="rh">成员 {agg!.n} 本</span>
-                    <ol>
-                      {members.slice(0, ROSTER_MAX).map((m, i) => (
-                        <li key={m.id}>
-                          <span className="ix">{i + 1}</span>
-                          <span className="tt">{m.title}</span>
-                        </li>
-                      ))}
-                    </ol>
-                    {members.length > ROSTER_MAX && <span className="more">还有 {members.length - ROSTER_MAX} 本，进去看全部</span>}
-                  </div>
-                </>
-              ) : (
-                <div className="folder-empty">
-                  <IconFolder size={24} />
-                  <span className="et">空文件夹<br />把书拖进来，或用卡片动作条的「归入文件夹」</span>
+              <div className="f-back" aria-hidden="true" />
+              {members.length > 0 && (
+                <div className="f-papers" aria-hidden="true">
+                  {members.slice(0, PAPERS_MAX).map((m, pi) => (
+                    <i
+                      key={m.id}
+                      style={{
+                        "--ci": String(pi),
+                        ...(m.cover ? { backgroundImage: `url(bookasset://${m.id}/${m.cover})` } : {}),
+                      } as React.CSSProperties}
+                    />
+                  ))}
                 </div>
               )}
+              <div className="f-front" aria-hidden="true" />
             </div>
           ) : (
             <div className="book-card-cover">{bookFace(entry.item)}</div>
           )}
-          {actionsOf(entry)}
+          {/* v48.117 / D162：动作条退役，删除的就地二次确认仍压在卡上（触发口在图注 ⋯ 菜单） */}
+          {pendingDelete === entry.id && entry.kind === "book" && confirmBox(entry.id, entry.item.title)}
           {drag?.target === entry.id && drag.zone === "group" && (
             <span className="zone-tip">
               {drag.id === entry.id ? "" : entry.kind === "folder"
@@ -771,7 +780,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
             </span>
           )}
         </div>
-        <div className="cap-rail"><i style={{ width: pct(progress) }} /></div>
+        {/* v48.118 / D163：文件夹卡不渲染进度轨——聚合进度在夹上全面不显示（既有裁定补彻底） */}
+        {!isFolder && <div className="cap-rail"><i style={{ width: pct(progress) }} /></div>}
         </div>
         {/* 批次 D（D-TEST-16）：图注（书名）此前渲染在带 onClick 的 .book-card **之外**，
             于是"点书名不开书、点封面才开"。点击与键盘行为与书卡同源（不改 .shelf-item，
@@ -786,7 +796,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           onKeyDown={onCardKeyDown(entry)}
         >
           {caption(entry, title, isFolder
-            ? [`${agg!.n} 本`, `均值 ${pct(agg!.progress)}`, agg!.latest ? dayLabel(agg!.latest) : "未读"]
+            ? [`${agg!.n} 本`, agg!.latest ? dayLabel(agg!.latest) : "未读"]
             : [pct(progress), dayLabel(entry.item.updatedAt) || "未读", (entry.item.lang || "").toUpperCase() || "—"])}
         </div>
       </div>
@@ -797,7 +807,8 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
-    const progress = isFolder ? agg!.progress : itemProgress(entry.item);
+    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——进度轨留空、无均值
+    const progress = isFolder ? 0 : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     // 打开只有一条路径：格子的 onClick（封面格与书名格共用）；键盘经 .t-open 的原生 click 冒泡上来
     const open = () => (isFolder ? openInto(entry.id) : onOpenBook(entry.id));
@@ -816,14 +827,23 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
             「按住条目空白处拖动」自然成立，可拖性改由 cursor: grab + 落点高亮承担。 */}
         <td className="col-cov" onClick={open} title={openLabel}>
           {isFolder ? (
+            /* 目录表缩略＝文件夹卡同一语言的缩小版（.thumb 重设几何变量；无 hover 动效） */
             <span className="thumb">
-              <span className="f-spines">
-                {members.slice(0, 3).map((m) => (
-                  <i key={m.id}>{m.cover && <img className="cover-img" src={`bookasset://${m.id}/${m.cover}`} alt="" aria-hidden="true"
-                    onLoad={(e) => e.currentTarget.classList.add("is-loaded")} />}</i>
-                ))}
-                {members.length > 3 && <i className="rest">+{members.length - 3}</i>}
-              </span>
+              <span className="f-back" aria-hidden="true" />
+              {members.length > 0 && (
+                <span className="f-papers" aria-hidden="true">
+                  {members.slice(0, PAPERS_MAX).map((m, pi) => (
+                    <i
+                      key={m.id}
+                      style={{
+                        "--ci": String(pi),
+                        ...(m.cover ? { backgroundImage: `url(bookasset://${m.id}/${m.cover})` } : {}),
+                      } as React.CSSProperties}
+                    />
+                  ))}
+                </span>
+              )}
+              <span className="f-front" aria-hidden="true" />
             </span>
           ) : (
             <span className="thumb">{entry.item.cover && <img className="cover-img" src={`bookasset://${entry.item.id}/${entry.item.cover}`} alt="" aria-hidden="true"
@@ -838,7 +858,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           </button>
           {isFolder ? (
             <>
-              <div className="t-sub">{agg!.n} 本 · 均值 {pct(agg!.progress)} · 悬停看成员</div>
+              <div className="t-sub">{agg!.n} 本 · 悬停看成员</div>
               <div className="t-members">{members.map((m) => m.title).join(" · ")}</div>
             </>
           ) : (
@@ -846,7 +866,7 @@ export default function Bookshelf({ onOpenBook, onAddMaterial, topLevelSignal }:
           )}
           <div className="bar"><i style={{ width: pct(progress) }} /></div>
         </td>
-        <td className="col-num">{pct(progress)}</td>
+        <td className="col-num">{isFolder ? "—" : pct(progress)}</td>
         <td className="col-num">{isFolder ? "—" : <span className="lang">{(entry.item.lang || "").toUpperCase() || "—"}</span>}</td>
         <td className="col-num">{isFolder ? (agg!.latest ? dayLabel(agg!.latest) : "—") : dayLabel(entry.item.updatedAt) || "—"}</td>
         <td className="col-num">{isFolder ? entry.folder.created.slice(5) : dayLabel(entry.item.createdAt)}</td>
