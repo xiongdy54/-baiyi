@@ -2898,6 +2898,7 @@ export default function SettingsPanel({
     <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
       <div
         className="modal-panel modal-panel-wide settings-panel"
+        data-ui="dialog"
         data-show={show ? "in" : "out"}
         ref={panelRef}
         role="dialog"
@@ -2916,7 +2917,7 @@ export default function SettingsPanel({
         </div>
 
         <div className="settings-layout modal-scroll" ref={layoutRef}>
-          <nav className="settings-nav" aria-label="设置分区">
+          <nav className="settings-nav" data-ui="sidebar" aria-label="设置分区">
             {SECTION_GROUPS.map((g) => (
               <Fragment key={g.label}>
                 {/* 组标题：非交互 div，不进 Tab 序、不进 .settings-nav button 查询集（§5.4） */}
@@ -2938,7 +2939,7 @@ export default function SettingsPanel({
           <div className="settings-content">
             <SettingsSection id="sec-appearance" title="主题与颜色">
               <h4>主题模式</h4>
-              <div className="seg-tabs">
+              <div className="seg-tabs" data-ui="seg-tabs">
                 <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
                   浅色
                 </button>

@@ -109,31 +109,33 @@ body.skin-claude ::selection {
   color: var(--ink);
 }
 
-/* 卡片静态阴影（--shadow-card 首批消费者：书架卡面与活动卡——默认皮肤零阴影，Claude 引入柔影） */
-body.skin-claude .shelf-face,
-body.skin-claude .bg-activity-card {
+/* 卡片静态阴影（--shadow-card 首批消费者：书架卡面与活动卡——默认皮肤零阴影，Claude 引入柔影）
+   v49.0 / D174（P5-4）：容器级部件优先走 data-ui 公开接口 */
+body.skin-claude [data-ui="card"],
+body.skin-claude [data-ui="card-interactive"] {
   box-shadow: var(--shadow-card);
 }
 
 /* 可点击卡片 hover 阴影抬升（只变阴影不位移——CDS 同款；书卡/活动卡） */
-body.skin-claude.motion-full .shelf-face,
-body.skin-claude.motion-full .bg-activity-card {
+body.skin-claude.motion-full [data-ui="card"],
+body.skin-claude.motion-full [data-ui="card-interactive"] {
   transition: box-shadow 200ms var(--ease-out-soft);
 }
-body.skin-claude .shelf-item:hover .shelf-face,
-body.skin-claude .shelf-item:has(:focus-visible) .shelf-face,
-body.skin-claude .bg-activity-card:hover {
+body.skin-claude [data-ui="shelf-item"]:hover [data-ui="card"],
+body.skin-claude [data-ui="shelf-item"]:has(:focus-visible) [data-ui="card"],
+body.skin-claude [data-ui="card-interactive"]:hover {
   box-shadow: var(--skin-shadow-card-hover);
 }
 
 /* 卡片圆角：书卡卡面（默认皮肤「永久直角」裁定仅约束默认皮肤，D169/D173——皮肤用结构规则给圆角） */
-body.skin-claude .shelf-face {
+body.skin-claude [data-ui="card"] {
   border-radius: var(--radius-card);
   overflow: hidden;
 }
 
-/* 单一边框原则（CDS 规则 4）：带阴影弹层内部的次级按钮去边框 */
-body.skin-claude :is(.modal-panel, .dd-menu, .menu, .selection-menu, .settings-info-tip, .colorpop, .annot-editor, .model-dropdown, .md-tb-menu, .growth-toast, .occlusion-editor-rail) :is(.btn-secondary, .btn-outline) {
+/* 单一边框原则（CDS 规则 4）：带阴影弹层内部的次级按钮去边框
+   （弹层容器：dialog/menu 已挂 data-ui；未挂部件的浮层暂用类名——AUTHORING §4.5 登记） */
+body.skin-claude :is([data-ui="dialog"], [data-ui="menu"], .dd-menu, .menu, .selection-menu, .settings-info-tip, .colorpop, .annot-editor, .model-dropdown, .md-tb-menu, .growth-toast, .occlusion-editor-rail) :is(.btn-secondary, .btn-outline) {
   border-color: transparent;
 }
 
@@ -146,8 +148,9 @@ body.skin-claude.motion-full :is(.btn-secondary, .btn-outline, .icon-btn, .dd-bt
   transition: transform 120ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* 弹层弹簧弹出（覆盖 pop-in 的时长与缓动——SNAPPY 503ms 弹簧；选择器 = theme.css pop-in 白名单） */
-body.skin-claude.motion-full :is(.annot-editor, .extract-face-toolbar.is-float-pop, .dd-menu, .learner-menu-pop, .menu.dock-trio) {
+/* 弹层弹簧弹出（覆盖 pop-in 的时长与缓动——SNAPPY 503ms 弹簧；选择器 = theme.css pop-in 白名单，
+   .dd-menu 已挂 data-ui="menu" 双保险） */
+body.skin-claude.motion-full :is(.annot-editor, .extract-face-toolbar.is-float-pop, [data-ui="menu"], .dd-menu, .learner-menu-pop, .menu.dock-trio) {
   animation-duration: var(--dur-spring-snappy);
   animation-timing-function: var(--ease-spring-snappy);
 }

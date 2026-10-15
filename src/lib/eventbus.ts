@@ -8,6 +8,7 @@
 // v48（M15 重做，D41/D42）：+ mindmap/changed（导图生成进度与完成广播）
 // v48.80（D124 §11.3）：+ learner/navigate（「下一步」面板 emit、App 订阅分派动作）
 //                      + learner/changed（任一 learner 对话框完成写入后 emit、面板重取推荐）
+// v49.0（D174 皮肤 API）：+ ui/*（纯表现层动效事件——皮肤经 ctx.onUiEvent 订阅；见 src/skins/runtime/uiEvents.ts）
 // （D132 插件变更推送不走本表：实现为 window.pluginsAPI.onChanged 直连 ipcRenderer
 //   "plugins:changed"，不经 EventBus——曾登记的 plugins/changed 为死条目，已删除。）
 export const ALLOWED_EVENTS = [
@@ -28,7 +29,14 @@ export const ALLOWED_EVENTS = [
   "memory/changed",
   "mindmap/changed", // v48（M15 重做，D41/D42）：导图生成进度与完成广播
   "learner/navigate", // v48.80（D124）：面板动作 → App 导航（open-book / jump / review / extract-session）
-  "learner/changed" // v48.80（D124）：对话框完成写入 → NextStepsPanel 重新请求推荐
+  "learner/changed", // v48.80（D124）：对话框完成写入 → NextStepsPanel 重新请求推荐
+  "ui/view-change", // v49.0（D174）：主视图切换（App.changeView）
+  "ui/overlay-open", // v49.0（D174）：模态打开（useDialogA11y）
+  "ui/overlay-close", // v49.0（D174）：模态关闭
+  "ui/review-flip", // v49.0（D174）：复习卡片翻面
+  "ui/review-grade", // v49.0（D174）：复习评分提交后
+  "ui/session-complete", // v49.0（D174）：复习会话完成
+  "ui/card-created" // v49.0（D174）：制卡成功
 ] as const;
 
 export type AppEvent = (typeof ALLOWED_EVENTS)[number];

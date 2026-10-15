@@ -73,7 +73,7 @@ export default function Dropdown({
         <IconChevronDown size={12} className="dd-caret" />
       </button>
       {open && (
-        <div className={`dd-menu${align === "left" ? " dd-menu-left" : ""}`} role="listbox">
+        <div className={`dd-menu${align === "left" ? " dd-menu-left" : ""}`} data-ui="menu" role="listbox">
           {options.map((o) => {
             const on = multiple ? selected.has(o.value) : o.value === value;
             return (

@@ -406,6 +406,8 @@ export default function App() {
     const host = document as unknown as { startViewTransition?: (update: () => void) => { finished: Promise<void> } };
     const cur = viewRef.current; // 当前视图镜像（§5.1 方向判定的同步读取点）
     const nextView = typeof next === "function" ? next(cur) : next;
+    // v49.0 / D174：ui/view-change（皮肤 API，纯表现层）
+    eventBus.emit("ui/view-change", { from: cur.name, to: nextView.name });
     const dir = viewDirOf(cur, nextView);
     if (typeof host.startViewTransition !== "function") {
       // 降级（§5.1）：不写 dataset，瞬时切换，方向动效自然不在场
@@ -751,7 +753,7 @@ export default function App() {
         motion={motion}
         onFail={() => void handleSkinChange(DEFAULT_SKIN_ID)}
       />
-      <header className="topbar">
+      <header className="topbar" data-ui="topbar">
         {/* 文字主导航（v12.1）：常驻左侧，当前项 accent 高亮；书架视图不再渲染品牌字块。
             v48.81（D125）：「下一步」页签按总开关插在复习与卡片之间（顶栏第 4 位）；
             关闭学习者模型时经 .nav-collapse 横向收拢后卸载，右侧签前滑补位 */}
@@ -788,24 +790,24 @@ export default function App() {
             <span>制卡台</span>
             {wb.busy && <i className="topbar-wb-dot" aria-hidden="true" />}
           </button>
-          <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)}>
+          <button className="icon-btn" title="设置" data-ui="button-icon" onClick={() => setSettingsOpen(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M18.92 10.02 22.13 9.66A10.4 10.4 0 0 1 22.13 14.34L18.92 13.98A7.2 7.2 0 0 1 17.18 17L19.09 19.61A10.4 10.4 0 0 1 15.04 21.95L13.74 18.99A7.2 7.2 0 0 1 10.26 18.99L8.96 21.95A10.4 10.4 0 0 1 4.91 19.61L6.82 17A7.2 7.2 0 0 1 5.08 13.98L1.87 14.34A10.4 10.4 0 0 1 1.87 9.66L5.08 10.02A7.2 7.2 0 0 1 6.82 7L4.91 4.39A10.4 10.4 0 0 1 8.96 2.05L10.26 5.01A7.2 7.2 0 0 1 13.74 5.01L15.04 2.05A10.4 10.4 0 0 1 19.09 4.39L17.18 7A7.2 7.2 0 0 1 18.92 10.02Z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
           <div className="win-controls">
-            <button className="icon-btn" title="最小化" onClick={() => window.windowAPI?.minimize()}>
+            <button className="icon-btn" title="最小化" data-ui="button-icon" onClick={() => window.windowAPI?.minimize()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M5 12h14" />
               </svg>
             </button>
-            <button className="icon-btn" title="最大化/还原" onClick={() => window.windowAPI?.maximize()}>
+            <button className="icon-btn" title="最大化/还原" data-ui="button-icon" onClick={() => window.windowAPI?.maximize()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="5" y="5" width="14" height="14" />
               </svg>
             </button>
-            <button className="icon-btn win-close" title="关闭" onClick={() => window.windowAPI?.close()}>
+            <button className="icon-btn win-close" title="关闭" data-ui="button-icon" onClick={() => window.windowAPI?.close()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M18 6 6 18" />
                 <path d="m6 6 12 12" />
@@ -814,7 +816,7 @@ export default function App() {
           </div>
         </div>
       </header>
-      <div className="app-main">
+      <div className="app-main" data-ui="view">
         {mainContent}
         {/* D123：无阅读上下文的页面（书架/复习/卡片/日记/数据）挂自由制卡台宿主；阅读器与摘录页自带宿主 */}
         {view.name !== "reader" && view.name !== "queue" && view.name !== "extractSession" && <FreeWorkbenchHost />}

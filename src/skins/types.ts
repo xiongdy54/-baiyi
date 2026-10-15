@@ -2,7 +2,7 @@
 // SKIN_API_VERSION：新增 data-ui 部件、ui/* 事件、清单字段时 +1（AUTHORING.md §4）
 import type { ComponentType } from "react";
 
-export const SKIN_API_VERSION = 1;
+export const SKIN_API_VERSION = 2;
 
 export type ColorMode = "light" | "dark";
 export type MotionLevel = "full" | "reduced" | "off";

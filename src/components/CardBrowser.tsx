@@ -1623,7 +1623,7 @@ export default function CardBrowser({
       {/* v48.40（D80）：吸底舞台栏（与摘录/复习页同几何：72px、band-line 上缘、距窗缘 16px）——
           批量动作收入这里；全选/反选**常驻**（空选择态的入口，extract.gui 批量流程的起手），
           计数与批量动作按选中态渐进披露；data-batch-bar / 各按钮钩子与文案逐字保留 */}
-      <div className="stage-bar cb-stage" data-batch-bar>
+      <div className="stage-bar cb-stage" data-batch-bar data-ui="stage-bar">
         <div className="cb-cluster cb-cluster-grow">
           {selCards.size + selExtracts.size === 0 ? (
             <span className="bar-hint">普通点击行查看详情 · Ctrl/⌘ 多选 · Shift 范围选</span>
@@ -1876,7 +1876,7 @@ export function ExtractDetail({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="摘录详情" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label="摘录详情" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>摘录详情</h2>
           <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
@@ -2141,7 +2141,7 @@ function CardDetail({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="卡片详情" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label="卡片详情" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>卡片详情</h2>
           <button className="icon-btn modal-close" title="关闭" onClick={onClose}>

@@ -71,24 +71,26 @@ src/skins/
 - `activate(ctx)`：JS 动效与订阅入口。`ctx.signal`（停用时 abort）——**所有监听必须传它**；`ctx.onUiEvent(type, handler)` 订阅 `ui/*` 事件（自动随停用取消）；`ctx.getMode()/getMotion()` 读当前明暗与动效等级。返回值（若为函数）作为 cleanup 调用。
 - 皮肤模块异常（activate 抛错 / 层渲染抛错）→ ErrorBoundary + `onFail` 回落默认皮肤。
 
-### 4.4 `ui/*` 事件（皮肤 API，D174）
+### 4.4 `ui/*` 事件（皮肤 API，D174；SKIN_API_VERSION 2）
 
 | 事件 | 载荷 | 发出位置 |
 | --- | --- | --- |
-| `ui/view-change` | `{ from, to }` | 主视图切换处 |
-| `ui/overlay-open` / `ui/overlay-close` | `{ kind: "dialog"\|"popover"\|"menu"\|"toast" }` | 通用弹层/对话框组件 |
-| `ui/review-flip` | `{}` | 复习卡片翻面 |
-| `ui/review-grade` | `{ grade }` | 复习评分提交后 |
-| `ui/session-complete` | `{ kind: "review" \| "reading" }` | 复习/阅读会话完成 |
-| `ui/card-created` | `{}` | 制卡成功 |
+| `ui/view-change` | `{ from, to }` | 主视图切换（App.changeView） |
+| `ui/overlay-open` / `ui/overlay-close` | `{ kind: "dialog" }` | useDialogA11y 挂载/卸载（全部模态） |
+| `ui/review-flip` | `{}` | 复习卡片翻面（showBack 翻真） |
+| `ui/review-grade` | `{ grade }` | 复习评分成功边界后 |
+| `ui/session-complete` | `{ kind: "review" }` | 复习会话收口（sessionDone）；`"reading"` 发出点待批次 |
+| `ui/card-created` | `{}` | cardsApi.create 成功（全建卡路径汇点） |
 
 事件名常量在 `src/skins/runtime/uiEvents.ts`；eventBus 白名单（`src/lib/eventbus.ts` `ALLOWED_EVENTS`）同步登记。**新增事件必须 bump `SKIN_API_VERSION` 并登记 GUIDE D 号**。
 
-### 4.5 `data-ui` 部件属性（公开选择器接口，D174）
+### 4.5 `data-ui` 部件属性（公开选择器接口，D174；SKIN_API_VERSION 2）
 
-皮肤结构规则**优先用 `[data-ui="…"]`**，不依赖 theme.css 内部类名（类名重构不破坏皮肤）。当前部件表：
+皮肤结构规则**优先用 `[data-ui="…"]`**，不依赖 theme.css 内部类名（类名重构不破坏皮肤）。
 
-`topbar` / `sidebar` / `view` / `card` / `card-interactive` / `button-primary` / `button-secondary` / `button-icon` / `input` / `seg-tabs` / `menu` / `menu-item` / `popover` / `dialog` / `toast` / `tooltip` / `review-card` / `reader-surface` / `stage-bar` / `shelf-item`
+**已挂载（P5 批次，20 处）**：`topbar`（App 顶栏）/ `view`（app-main）/ `sidebar`（设置导航）/ `shelf-item`（书卡容器）/ `card`（shelf-face 卡面）/ `card-interactive`（右下活动卡）/ `dialog`（modal-panel ×3）/ `menu`（dd-menu）/ `seg-tabs`（主题模式分段）/ `button-icon`（顶栏 4 钮）/ `button-primary`（添加材料）/ `review-card`（复习卡容器）/ `reader-surface`（阅读正文容器）/ `stage-bar`（摘录/卡片舞台栏）
+
+**待后续批次**（claude.css 等皮肤暂以类名选择器消费）：`button-secondary` / `button-outline` / `input` / `popover` / `toast` / `tooltip` / `menu-item` / `card`（泛化到全部卡类）
 
 新增部件属性 = 扩展皮肤 API → bump `SKIN_API_VERSION` + GUIDE 登记。
 
