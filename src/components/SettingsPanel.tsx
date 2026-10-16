@@ -118,6 +118,7 @@ const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: s
     items: [
       { id: "backup", label: "备份与恢复" },
       { id: "logs", label: "日志" },
+      { id: "updates", label: "软件更新" },
       { id: "shortcuts", label: "快捷键" },
       { id: "widgets", label: "统计仪表盘" },
       { id: "lab", label: "实验功能" }
@@ -1833,6 +1834,191 @@ function LogsSection() {
   );
 }
 
+// ---------- 软件更新（v49.6 / D180）：检查更新唯一 UI 入口（sec-updates） ----------
+// 状态快照与事件同构自 electron/updater.js（update:status / update:event）；
+// source 分流：github＝完整流程；store＝MSIX 包身份，商店托管更新（自更新禁用）；
+// dev＝开发模式；unconfigured＝打包时未写入更新源（占位 slug）。
+type UpdateSource = "github" | "store" | "dev" | "unconfigured";
+type UpdateStateName =
+  | "idle"
+  | "checking"
+  | "available"
+  | "not-available"
+  | "downloading"
+  | "downloaded"
+  | "error";
+interface UpdateInfoLite {
+  version?: string;
+  releaseName?: string;
+  releaseDate?: string;
+}
+interface UpdateProgressLite {
+  percent?: number;
+  transferred?: number;
+  total?: number;
+  bytesPerSecond?: number;
+}
+interface UpdateSnapshot {
+  source: UpdateSource;
+  enabled: boolean;
+  currentVersion: string;
+  state: UpdateStateName;
+  info: UpdateInfoLite | null;
+  progress: UpdateProgressLite | null;
+  error: string | null;
+}
+type UpdateEventPayload = {
+  type: UpdateStateName;
+  info: UpdateInfoLite | null;
+  progress: UpdateProgressLite | null;
+  error: string | null;
+};
+
+// preload 暴露（局部断言，先例＝backupAPI）
+function updateAPI() {
+  return (window as unknown as {
+    updateAPI?: {
+      status: () => Promise<UpdateSnapshot>;
+      check: () => Promise<UpdateSnapshot>;
+      download: () => Promise<UpdateSnapshot>;
+      install: () => Promise<boolean>;
+      onEvent: (cb: (e: UpdateEventPayload) => void) => () => void;
+    };
+  }).updateAPI!;
+}
+
+const UPDATE_SOURCE_HINT: Record<UpdateSource, string> = {
+  github: "更新由 GitHub Releases 提供；发现新版本后需你确认才会下载与安装。",
+  store: "当前版本由 Microsoft Store 安装，更新由商店自动管理，无需手动检查。",
+  dev: "开发模式不检查更新。",
+  unconfigured: "打包时未写入更新源（发布前需在 electron-builder.yml 填写 GitHub 仓库并重新打包）。"
+};
+
+function UpdateSection() {
+  const [snap, setSnap] = useState<UpdateSnapshot | null>(null);
+  const [autoOn, setAutoOn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const api = updateAPI();
+    if (!api) return;
+    void api.status().then((s) => {
+      if (alive) setSnap(s);
+    });
+    void settingsStore.get<unknown>("app", "updateAutoCheck", true).then((v) => {
+      if (alive) setAutoOn(v !== false);
+    });
+    const off = api.onEvent((e) => {
+      if (!alive) return;
+      setSnap((prev) =>
+        prev
+          ? { ...prev, state: e.type, info: e.info ?? prev.info, progress: e.progress, error: e.error }
+          : prev
+      );
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  if (!snap || autoOn === null) return null;
+
+  const isGithub = snap.source === "github";
+  const st = snap.state;
+
+  // 状态行（github 渠道下随检查-下载状态机流转；其余渠道只显示说明）
+  let statusLine = "";
+  if (isGithub) {
+    if (st === "checking") statusLine = "正在检查更新…";
+    else if (st === "not-available") statusLine = "已是最新版本。";
+    else if (st === "available") statusLine = `发现新版本 v${snap.info?.version ?? "?"}，可下载安装。`;
+    else if (st === "downloading")
+      statusLine =
+        snap.progress?.percent !== undefined && snap.progress.percent !== null
+          ? `正在下载更新… ${snap.progress.percent}%`
+          : "正在下载更新…";
+    else if (st === "downloaded")
+      statusLine = `更新包已就绪（v${snap.info?.version ?? "?"}），重启后自动安装。`;
+    else if (st === "error") statusLine = `检查失败：${snap.error ?? "未知错误"}`;
+  }
+
+  const checking = st === "checking";
+
+  return (
+    <SettingsSection id="sec-updates" title="软件更新">
+      <p className="form-hint">
+        当前版本 v{snap.currentVersion}。{UPDATE_SOURCE_HINT[snap.source]}
+      </p>
+      {isGithub && (
+        <>
+          <div className="settings-row">
+            <span className="settings-row-label">
+              自动检查更新
+              <SettingsInfo label="自动检查更新">
+                启动后联网查询 GitHub 最新发布版本（只检查、不下载）；关闭后不再自动检查，
+                随时可在下方手动检查。检查请求不含任何个人数据。
+              </SettingsInfo>
+            </span>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="自动检查更新">
+              <button
+                className={autoOn ? "active" : ""}
+                onClick={() => {
+                  setAutoOn(true);
+                  void settingsStore.set("app", "updateAutoCheck", true);
+                }}
+              >
+                开启
+              </button>
+              <button
+                className={!autoOn ? "active" : ""}
+                onClick={() => {
+                  setAutoOn(false);
+                  void settingsStore.set("app", "updateAutoCheck", false);
+                }}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row-label">{statusLine}</span>
+            {st === "available" ? (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void updateAPI().download();
+                }}
+              >
+                下载更新
+              </button>
+            ) : st === "downloaded" ? (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  void updateAPI().install();
+                }}
+              >
+                重启并安装
+              </button>
+            ) : (
+              <button
+                className="btn btn-outline btn-sm"
+                disabled={checking || st === "downloading"}
+                onClick={() => {
+                  void updateAPI().check();
+                }}
+              >
+                {st === "downloading" ? "下载中…" : checking ? "检查中…" : "检查更新"}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </SettingsSection>
+  );
+}
+
 function BackupSection() {
   const [info, setInfo] = useState<BackupInfo | null>(null);
   const [list, setList] = useState<{ backupDir: string; backups: BackupEntry[] } | null>(null);
@@ -3027,6 +3213,7 @@ export default function SettingsPanel({
             {/* 数据与效率 */}
             <BackupSection />
             <LogsSection />
+            <UpdateSection />
             <ShortcutsSection />
             <DashboardSection />
             {/* v48.81（D125，用户指令）：实验功能——学习者知识模型设置迁入（sec-learner 子块 id 保留），

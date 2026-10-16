@@ -41,6 +41,19 @@ contextBridge.exposeInMainWorld("logsAPI", {
   report: (payload) => ipcRenderer.send("logs:rendererError", payload)
 });
 
+// v49.6（D180）：软件更新——状态快照 / 手动检查 / 确认后下载 / 重启安装 + 事件推送订阅
+contextBridge.exposeInMainWorld("updateAPI", {
+  status: () => ipcRenderer.invoke("update:status"),
+  check: () => ipcRenderer.invoke("update:check"),
+  download: () => ipcRenderer.invoke("update:download"),
+  install: () => ipcRenderer.invoke("update:install"),
+  onEvent: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on("update:event", handler);
+    return () => ipcRenderer.removeListener("update:event", handler);
+  }
+});
+
 contextBridge.exposeInMainWorld("libraryAPI", {
   list: () => ipcRenderer.invoke("library:list"),
   createFromPaste: (title, markdown) => ipcRenderer.invoke("library:createFromPaste", title, markdown),
