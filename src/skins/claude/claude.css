@@ -1,5 +1,5 @@
 /* ============================================================================
-   陶土（Claude）皮肤 · v49.1 / D175（v49.0 / D173 建；D175 补选中强调统一）
+   陶土（Claude）皮肤 · v49.10 / D183（v49.0 / D173 建；D175 选中强调统一；D183 对齐 CDS 2.0 动效档）
    设计语言：src/skins/claude/DESIGN.md；部件选择器来源：docs/skins/component-map.md
    纪律：skin 层由 SkinHost 包裹（@layer skin）——本文件全部规则恒压 base 层；
    颜色 Token 两档各声明一次（A4）；动效全部在 body.motion-full 作用域（A6，VT 例外）；
@@ -156,11 +156,12 @@ body.skin-claude :is([data-ui="dialog"], [data-ui="menu"], .dd-menu, .menu, .sel
 
 /* ============ 4. 动效规则（全部在 motion-full 作用域下，A6） ============ */
 
-/* 按压缩放（BOUNCY 语义；排除 settle/涟漪白名单元素——.btn-primary/.grade/.bar-btn.primary，
-   避免 transform 动画互相覆盖，D88 §5.4 白名单纪律的皮肤版） */
+/* 按压缩放（BOUNCY 语义；CDS 2.0「按压 60ms」档——利落捕捉曲线不变，只提速；
+   回程（松开）走各部件基线过渡＝快按慢放。排除 settle/涟漪白名单元素——
+   .btn-primary/.grade/.bar-btn.primary，避免 transform 动画互相覆盖，D88 §5.4 白名单纪律的皮肤版） */
 body.skin-claude.motion-full :is(.btn-secondary, .btn-outline, .icon-btn, .dd-btn, .topbar-wb, .nav-item, .seg-tabs button, .act, .cap-more):active {
   transform: scale(var(--press-scale));
-  transition: transform 120ms cubic-bezier(0.32, 0.72, 0, 1);
+  transition: transform 60ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 /* 弹层弹簧弹出（覆盖 pop-in 的时长与缓动——SNAPPY 503ms 弹簧；选择器 = theme.css pop-in 白名单，
@@ -172,9 +173,11 @@ body.skin-claude.motion-full :is(.annot-editor, .extract-face-toolbar.is-float-p
 
 /* 视图切换：新页淡入上浮（old 快照恒垫底不淡出——D120 揭幕式覆盖率 ≡1 的透底教训，
    只动 new 的 opacity+transform 不露画布底；特异性 html+attr+:root (0,2,1) 压过基线
-   :root[data-vt-dir] (0,2,0) 的方向动画；withViewTransition 不新建——D120 changeView 已在场） */
+   :root[data-vt-dir] (0,2,0) 的方向动画；withViewTransition 不新建——D120 changeView 已在场。
+   时长 450ms＝CDS 2.0「页面级大转场」档（EASE_OUT_EXPO 前载缓动，主体运动前 ~40% 完成）；
+   不改 --dur-view Token——基线 8 处消费面（wb-tabs/wb-mode 颜色过渡等）不属页面级转场） */
 html[data-skin="claude"]:root::view-transition-new(root) {
-  animation: skin-claude-rise-in var(--dur-view) var(--ease-enter) both;
+  animation: skin-claude-rise-in 450ms var(--ease-enter) both;
 }
 @keyframes skin-claude-rise-in {
   from { opacity: 0; transform: translateY(4px); }
