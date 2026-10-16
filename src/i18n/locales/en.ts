@@ -2217,7 +2217,9 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "每周左右": "About weekly",
   // —— 批 6：皮肤（skins/*/manifest.ts；SettingsPanel 渲染期 T()）——
   "陶土": "Terracotta",
-  "瑞士（默认）": "Swiss (default)",
+  "瑞士": "Swiss",
+  "轻装上阵": "Travel light",
+  "闲庭信步": "A leisurely stroll",
   "引擎实验台（DEV）": "Engine Lab (DEV)",
   "暖纸底、衬线标题，克制强调色": "Warm paper, serif headings, restrained accent",
   "黑白灰、单强调色、直角网格": "Black/white/grey, one accent, right angles on a grid",

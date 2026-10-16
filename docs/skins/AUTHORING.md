@@ -61,7 +61,8 @@ src/skins/
 | `defaultAccent` | `{light,dark}`，设置页「恢复默认」显示用；真正生效值写在皮肤 CSS |
 | `preview` | `{light[],dark[]}` 3–5 个设置页预览色块 |
 | `features.viewTransitions` | 声明用（body 类 `skin-vt`）；VT 动画由皮肤 CSS 覆盖 `::view-transition-*` 实现（D120 的 changeView 已在场，勿再包 startViewTransition） |
-| `features.motion` | `"none" \| "subtle" \| "rich"`，仅设置页标签 |
+| `features.motion` | `"none" \| "subtle" \| "rich"`，设置页标签（皮肤未声明 `tagline` 时仍显示） |
+| `tagline` | 可选；设置页皮肤卡名称后的气质短标（v49.15 / D188，SKIN_API_VERSION 2→3）；缺省回落动效标签 |
 | `requiresChrome` | 最低 Chromium 版本，不满足时设置页置灰 |
 
 ### 4.3 SkinModule 与生命周期
