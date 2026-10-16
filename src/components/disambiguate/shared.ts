@@ -1,6 +1,7 @@
 // D121 §3 辨析弹窗共享的取数/展示小函数（无 React）
 import type { CardRecord } from "../../lib/cards";
 import { ORIGIN_MAX } from "../../lib/disambiguateUi";
+import { t } from "../../lib/i18n";
 
 export type CardWithTitle = CardRecord & { docTitle?: string };
 
@@ -22,8 +23,8 @@ export function sourceOf(card: CardWithTitle): CardSource {
 
 /** 「《书名》· 作者」展示串；无书名 → 「来源未知」 */
 export function sourceLabel(src: CardSource): string {
-  if (!src.title) return "来源未知";
-  return `《${src.title}》${src.author ? " · " + src.author : ""}`;
+  if (!src.title) return t("来源未知");
+  return t("《{title}》{author}", { title: src.title, author: src.author ? ` · ${src.author}` : "" });
 }
 
 /**

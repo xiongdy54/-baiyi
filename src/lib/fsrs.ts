@@ -12,6 +12,7 @@ import {
   type Grade,
   type FSRSParameters
 } from "ts-fsrs";
+import { t } from "./i18n";
 
 const BASE_PARAMS: FSRSParameters = generatorParameters({ enable_fuzz: false });
 let engine = fsrs(BASE_PARAMS);
@@ -209,9 +210,9 @@ export const fsrsEngine = {
 
 function formatInterval(ms: number): string {
   const days = ms / 86400000;
-  if (days < 1 / 24) return `${Math.max(1, Math.round(ms / 60000))} 分钟`;
-  if (days < 1) return `${Math.round(days * 24)} 小时`;
-  if (days < 30) return `${Math.round(days)} 天`;
-  if (days < 365) return `${(days / 30).toFixed(1)} 个月`;
-  return `${(days / 365).toFixed(1)} 年`;
+  if (days < 1 / 24) return t("{n} 分钟", { n: Math.max(1, Math.round(ms / 60000)) });
+  if (days < 1) return t("{n} 小时", { n: Math.round(days * 24) });
+  if (days < 30) return t("{n} 天", { n: Math.round(days) });
+  if (days < 365) return t("{n} 个月", { n: (days / 30).toFixed(1) });
+  return t("{n} 年", { n: (days / 365).toFixed(1) });
 }

@@ -78,6 +78,7 @@ const DOC_KEYS = [
   "app.growthFeedback", // §7.4 v48.85 / D129（成长反馈总开关：对象 {enabled} 默认开，仅严格 false 为关；关闭=零渲染零计算）
   "app.legacyBackfillV1", // §9.4 一次性版本化回填完成标记（时间戳；挂载点 persist() 成功后由 legacyBackfill.js mark() 写入，对象键 = MARKER_KEY 逐字面量）
   "app.activeThemePlugin", // §7.4 v48.89 / D132（激活的主题插件 id，空串=未激活；与 app.skinId 双槽互斥，pluginCore.nextAppearanceState 锁定矩阵；`plugin.<id>` 动态 scope 免逐键登记——见 GUIDE §7.4 D132 豁免段）
+  "app.language", // §7.4 v49.8 / D182（界面语言：enum zh-CN|zh-TW|en|ja，默认 zh-CN；写侧 electron/i18n.js normalizeLanguage、读侧 src/lib/i18n.ts normalizeLocale）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
 ];
 /** 文档点了但明写未实现的键：这些必须**没有**消费者，出现即反向漂移 */
@@ -273,6 +274,7 @@ app
         ["app", "workbenchPlacement", "bottom"],          // D123 制卡台放置位置（默认 "right"）
         ["app", "closeToTray", false],                    // D123 关闭收进托盘（默认 true）
         ["app", "updateAutoCheck", false],                // D180 自动检查更新（默认 true；非默认值才验得出往返）
+        ["app", "language", "ja"],                        // D182 界面语言（默认 zh-CN；enum 四值，非法写侧回落）
         ["app", "extractFaceFontFollow", false],          // v48.54 / D95 摘录卡字号跟随（默认 true）
         ["app", "extractFaceFontSize", 22],               // v48.54 / D95 独立字号（默认 17；文件层往返原值）
         ["app", "extractFaceFontFamily", " Georgia, serif "], // v48.54 / D95 独立字体（文件层往返字节一致；trim 归一在读写两侧）
@@ -495,6 +497,17 @@ app
         JSON.stringify([[], [1], 42, "y"].map(normGrowth)),
         JSON.stringify([{ enabled: true }, { enabled: true }, { enabled: true }, { enabled: true }]));
       flow.eq("growthFeedback：默认常量开", JSON.stringify(extNorm.DEFAULT_GROWTH_FEEDBACK), JSON.stringify({ enabled: true }));
+
+      // ---------- Y4e D182 界面语言键：主进程写侧归一（electron/i18n.js normalizeLanguage） ----------
+      flow.section("Y4e 界面语言归一（主进程写侧 electron/i18n.js normalizeLanguage，§7.4 v49.8 / D182）");
+      const mainI18nNorm = require(path.join(ROOT, "electron", "i18n.js"));
+      flow.eq("language：四值原样保留",
+        JSON.stringify(["zh-CN", "zh-TW", "en", "ja"].map(mainI18nNorm.normalizeLanguage)),
+        JSON.stringify(["zh-CN", "zh-TW", "en", "ja"]));
+      flow.eq("language：非法一律回落 zh-CN（'zh'/'en-US'/42/null/undefined/'中文'/对象）",
+        JSON.stringify(["zh", "en-US", 42, null, undefined, "中文", {}].map(mainI18nNorm.normalizeLanguage)),
+        JSON.stringify(Array(7).fill("zh-CN")));
+      flow.eq("language：默认常量 zh-CN", mainI18nNorm.DEFAULT_LANG, "zh-CN");
 
       const mem = require(path.join(ROOT, "electron", "memoryTidy.js"));
       flow.eq("清空后记忆总开关回到默认关", mem.readMemoryConfig({ readSettings: () => st.readSettings() }).enabled, false);

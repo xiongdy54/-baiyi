@@ -45,6 +45,7 @@ import {
   IconCodeBlock, IconHr, IconMathBlock, IconMark, IconDetails, IconUndo, IconRedo, IconHeading
 } from "./toolbarIcons";
 import { useExtractEditorToolbar, useExtractEditorToolbarFloat, useExtractEditorToolbarTop } from "../../lib/extractCardSettings";
+import { useT } from "../../lib/i18n";
 
 // ---------- math 扩展（官方 kit 无 math 预设；按 crepe latex feature 同款 $remark/$nodeSchema 装配） ----------
 
@@ -298,6 +299,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   },
   ref
 ) {
+  const T = useT();
   /** listener 是否观察到过 doc 变更（提交语义的判据） */
   const dirtyRef = useRef(false);
   /** 最近一次 listener 序列化结果（卸载阶段编辑器可能已销毁，提交兜底用它） */
@@ -522,25 +524,25 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   /** 工具条按钮（D97 用户指令：统一图标 + 悬停 title 显示功能名称）：
       行内七（含标注）+ 块级九（含标题下拉/折叠/表格）+ 历史二。tb 钩子保留给测试与样式。 */
   const BUTTONS: Array<{ tb: string; title: string; icon: ReactNode; run: () => void; menu?: boolean }> = [
-    { tb: "bold", title: "加粗", icon: <GlyphBold />, run: () => call(toggleStrongCommand.key) },
-    { tb: "italic", title: "斜体", icon: <GlyphItalic />, run: () => call(toggleEmphasisCommand.key) },
-    { tb: "strike", title: "删除线", icon: <GlyphStrike />, run: () => call(toggleStrikethroughCommand.key) },
-    { tb: "code", title: "行内代码", icon: <IconCodeInline />, run: () => call(toggleInlineCodeCommand.key) },
-    { tb: "link", title: "链接（选中文字后点此；再点一次取消）", icon: <IconLink />, run: () => call(toggleLinkCommand.key, {}) },
-    { tb: "inlineMath", title: "行内公式", icon: <IconInlineMath />, run: () => call(toggleInlineMathCommand.key) },
-    { tb: "mark", title: "标注（==高亮==）", icon: <IconMark />, run: () => call(toggleMarkCommand.key) },
-    { tb: "h", title: "标题层级", icon: <IconHeading />, menu: true, run: () => setHMenuOpen((v) => !v) },
-    { tb: "quote", title: "引用", icon: <IconQuote />, run: () => call(wrapInBlockquoteCommand.key) },
-    { tb: "ul", title: "无序列表", icon: <IconUl />, run: () => call(wrapInBulletListCommand.key) },
-    { tb: "ol", title: "有序列表", icon: <IconOl />, run: () => call(wrapInOrderedListCommand.key) },
-    { tb: "task", title: "待办事项（任务列表）", icon: <IconTask />, run: taskList },
-    { tb: "details", title: "折叠列表（<details>，读态可折叠）", icon: <IconDetails />, run: insertDetails },
-    { tb: "table", title: "表格（3×3）", icon: <IconTable />, run: () => call(insertTableCommand.key, { row: 3, col: 3 }) },
-    { tb: "codeBlock", title: "代码块", icon: <IconCodeBlock />, run: () => call(createCodeBlockCommand.key) },
-    { tb: "hr", title: "分隔线", icon: <IconHr />, run: () => call(insertHrCommand.key) },
-    { tb: "mathBlock", title: "公式块", icon: <IconMathBlock />, run: () => call(insertMathBlockCommand.key) },
-    { tb: "undo", title: "撤销（编辑器内历史）", icon: <IconUndo />, run: () => call(undoCommand.key) },
-    { tb: "redo", title: "重做", icon: <IconRedo />, run: () => call(redoCommand.key) }
+    { tb: "bold", title: T("加粗"), icon: <GlyphBold />, run: () => call(toggleStrongCommand.key) },
+    { tb: "italic", title: T("斜体"), icon: <GlyphItalic />, run: () => call(toggleEmphasisCommand.key) },
+    { tb: "strike", title: T("删除线"), icon: <GlyphStrike />, run: () => call(toggleStrikethroughCommand.key) },
+    { tb: "code", title: T("行内代码"), icon: <IconCodeInline />, run: () => call(toggleInlineCodeCommand.key) },
+    { tb: "link", title: T("链接（选中文字后点此；再点一次取消）"), icon: <IconLink />, run: () => call(toggleLinkCommand.key, {}) },
+    { tb: "inlineMath", title: T("行内公式"), icon: <IconInlineMath />, run: () => call(toggleInlineMathCommand.key) },
+    { tb: "mark", title: T("标注（==高亮==）"), icon: <IconMark />, run: () => call(toggleMarkCommand.key) },
+    { tb: "h", title: T("标题层级"), icon: <IconHeading />, menu: true, run: () => setHMenuOpen((v) => !v) },
+    { tb: "quote", title: T("引用"), icon: <IconQuote />, run: () => call(wrapInBlockquoteCommand.key) },
+    { tb: "ul", title: T("无序列表"), icon: <IconUl />, run: () => call(wrapInBulletListCommand.key) },
+    { tb: "ol", title: T("有序列表"), icon: <IconOl />, run: () => call(wrapInOrderedListCommand.key) },
+    { tb: "task", title: T("待办事项（任务列表）"), icon: <IconTask />, run: taskList },
+    { tb: "details", title: T("折叠列表（<details>，读态可折叠）"), icon: <IconDetails />, run: insertDetails },
+    { tb: "table", title: T("表格（3×3）"), icon: <IconTable />, run: () => call(insertTableCommand.key, { row: 3, col: 3 }) },
+    { tb: "codeBlock", title: T("代码块"), icon: <IconCodeBlock />, run: () => call(createCodeBlockCommand.key) },
+    { tb: "hr", title: T("分隔线"), icon: <IconHr />, run: () => call(insertHrCommand.key) },
+    { tb: "mathBlock", title: T("公式块"), icon: <IconMathBlock />, run: () => call(insertMathBlockCommand.key) },
+    { tb: "undo", title: T("撤销（编辑器内历史）"), icon: <IconUndo />, run: () => call(undoCommand.key) },
+    { tb: "redo", title: T("重做"), icon: <IconRedo />, run: () => call(redoCommand.key) }
   ];
 
   // ---------- 悬浮态＝选区锚定弹层（§K.3，与 SelectionMenu/AnnotationEditor 同一族定位逻辑） ----------
@@ -684,7 +686,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
               {b.icon}
             </button>
             {hMenuOpen && (
-              <span className="md-tb-menu" role="menu" aria-label="标题层级">
+              <span className="md-tb-menu" role="menu" aria-label={T("标题层级")}>
                 {([["1", "标题 1"], ["2", "标题 2"], ["3", "标题 3"], ["0", "正文"]] as const).map(([lv, label]) => (
                   <button
                     key={lv}
@@ -697,7 +699,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
                       applyHeading(Number(lv));
                     }}
                   >
-                    {label}
+                    {T(label)}
                   </button>
                 ))}
               </span>

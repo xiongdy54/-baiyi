@@ -127,10 +127,11 @@ export interface HeadingResultLike {
   wrongCard: Side | null;
 }
 
-/** §3.3 UI 表：各 verdict 的标题；单卡模式的 missing-qualifier 不存在「两张」，改写为单卡措辞 */
-export function verdictHeading(res: HeadingResultLike, labels: Record<string, string>, single: boolean): string {
-  if (res.verdict === "one-wrong") return `卡 ${res.wrongCard ?? "A"} 可能有误`;
-  if (res.verdict === "missing-qualifier" && single) return "问题缺少限定条件";
+/** §3.3 UI 表：各 verdict 的标题；单卡模式的 missing-qualifier 不存在「两张」，改写为单卡措辞。
+ *  tr 为可选翻译回调（默认恒等）：zh-CN 输出不变（供 node 零依赖测试），UI 调用方传 T。 */
+export function verdictHeading(res: HeadingResultLike, labels: Record<string, string>, single: boolean, tr: (s: string) => string = (s) => s): string {
+  if (res.verdict === "one-wrong") return tr("卡 {side} 可能有误").replace("{side}", res.wrongCard ?? "A");
+  if (res.verdict === "missing-qualifier" && single) return tr("问题缺少限定条件");
   return labels[res.verdict] ?? res.verdict;
 }
 
@@ -139,10 +140,10 @@ export function duplicateArchiveSuggestion(keepCard: Side | null): Side {
   return (keepCard ?? "A") === "A" ? "B" : "A";
 }
 
-/** §3.5：复习页背面「已辨析」提示文案；单卡链接（other 为 null）显示「已辨析（单卡）」 */
-export function disambHintText(other: { front: string } | null, verdictLabel: string | null): string {
-  if (!other) return "已辨析（单卡）";
-  const base = `已与「${clipText(other.front, 30)}」辨析`;
+/** §3.5：复习页背面「已辨析」提示文案；单卡链接（other 为 null）显示「已辨析（单卡）」。tr 同 verdictHeading。 */
+export function disambHintText(other: { front: string } | null, verdictLabel: string | null, tr: (s: string) => string = (s) => s): string {
+  if (!other) return tr("已辨析（单卡）");
+  const base = tr("已与「{front}」辨析").replace("{front}", clipText(other.front, 30));
   return verdictLabel ? `${base} · ${verdictLabel}` : base;
 }
 

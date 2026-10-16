@@ -2,6 +2,7 @@
 // 写路径全部经主进程（sql.js 单实例）；主进程写入后推 `journal:changed`，此处桥接为 EventBus
 // 事件（§4.2-1「EventBus 唯一事实通道」），日记页与将来的洞察页订阅它刷新。
 import { eventBus } from "./eventbus";
+import { t } from "./i18n";
 
 export interface JournalEntry {
   id: string;
@@ -172,6 +173,9 @@ export function isTodayJournalDate(dateStr: string): boolean {
 }
 
 /** `09-14 周日`（withYear 时 `2026-09-14 周日`）——非法输入原样返回 */
+/** 星期显示名（getDay() 下标 → 词典键；zh-CN 原样，en/ja 走词典） */
+const WEEKDAY_KEYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"] as const;
+
 export function journalDateLabel(dateStr: string, opts: { withYear?: boolean } = {}): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || ""));
   if (!m) return String(dateStr || "");
@@ -180,7 +184,8 @@ export function journalDateLabel(dateStr: string, opts: { withYear?: boolean } =
   // 批次 D（D-TEST-19）：形状对了不等于日子存在。"2026-02-30" 原来会静默进位到 3/2，
   // 于是标签写着「02-30」而星期是 3/2 的——那是 D-TEST-07（写入侧不校验）在显示层的落点。
   if (date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) return "";
-  const label = `${pad2(mo)}-${pad2(d)} 周${"日一二三四五六"[date.getDay()]}`;
+  // 星期名按当前语言渲染（zh 键稳定，en/ja 走词典；journalDateLabel 仅作展示，不入库）
+  const label = `${pad2(mo)}-${pad2(d)} ${t(WEEKDAY_KEYS[date.getDay()] ?? "周一")}`;
   return opts.withYear ? `${y}-${label}` : label;
 }
 

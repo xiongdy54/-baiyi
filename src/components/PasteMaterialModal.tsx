@@ -9,6 +9,7 @@ import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
 import { IconAlert, IconClose } from "./icons";
 import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
+import { useT } from "../lib/i18n";
 
 interface Props {
   onSave: (title: string, markdown: string, lang: string) => Promise<void>;
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export default function PasteMaterialModal({ onSave, onClose }: Props) {
+  const T = useT();
   // D120 §8.1：出场两步走——Esc / 遮罩 / 关闭·取消按钮 / 保存成功自动关，全部收口到 requestClose
   const { show, requestClose } = useDismiss(onClose);
   const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
@@ -48,29 +50,29 @@ export default function PasteMaterialModal({ onSave, onClose }: Props) {
 
   return (
     <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
-      <div className="modal-panel paste-modal" data-show={show ? "in" : "out"} ref={panelRef} role="dialog" aria-modal="true" aria-label="粘贴材料" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel paste-modal" data-show={show ? "in" : "out"} ref={panelRef} role="dialog" aria-modal="true" aria-label={T("粘贴材料")} onClick={(e) => e.stopPropagation()}>
         {/* D177-b（用户反馈）：说明文字退役——书名/语言提示收进 placeholder / aria-label / title，
             头行单行「标题 + 书名框 + 语言选框 + 关闭」垂直居中对齐 */}
         <div className="paste-head">
-          <h2>粘贴材料</h2>
+          <h2>{T("粘贴材料")}</h2>
           <input
             className="paste-title"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="书名（留空取正文第一行）"
-            aria-label="书名（留空取正文第一行）"
+            placeholder={T("书名（留空取正文第一行）")}
+            aria-label={T("书名（留空取正文第一行）")}
           />
           <select
             value={lang}
             onChange={(e) => setLang(e.target.value)}
-            aria-label="语言（查词按它路由词典；留空自动识别）"
-            title="语言（查词按它路由词典；留空自动识别）"
+            aria-label={T("语言（查词按它路由词典；留空自动识别）")}
+            title={T("语言（查词按它路由词典；留空自动识别）")}
           >
             {BOOK_LANGUAGES.map((l) => (
-              <option key={l.value || "unknown"} value={l.value}>{l.label}</option>
+              <option key={l.value || "unknown"} value={l.value}>{T(l.label)}</option>
             ))}
           </select>
-          <button className="icon-btn modal-close" title="关闭" aria-label="关闭" onClick={requestClose}>
+          <button className="icon-btn modal-close" title={T("关闭")} aria-label={T("关闭")} onClick={requestClose}>
             <IconClose size={18} />
           </button>
         </div>
@@ -85,8 +87,8 @@ export default function PasteMaterialModal({ onSave, onClose }: Props) {
             onEscape={() => requestClose()}
             variant="full"
             commitOnUnmount={false}
-            placeholder="在这里粘贴你的阅读材料…"
-            ariaLabel="正文（粘贴文本，支持 Markdown）"
+            placeholder={T("在这里粘贴你的阅读材料…")}
+            ariaLabel={T("正文（粘贴文本，支持 Markdown）")}
             onReady={() => mdRef.current?.focusEnd()}
           />
         </div>
@@ -97,11 +99,11 @@ export default function PasteMaterialModal({ onSave, onClose }: Props) {
               <span>{saveError}</span>
             </p>
           )}
-          <span className="paste-foot-hint">支持 Markdown</span>
+          <span className="paste-foot-hint">{T("支持 Markdown")}</span>
           <span className="form-actions-spacer" />
-          <button className="btn btn-secondary" onClick={requestClose}>取消</button>
+          <button className="btn btn-secondary" onClick={requestClose}>{T("取消")}</button>
           <button className="btn btn-primary" disabled={!canSave} onClick={handleSave}>
-            {saving ? "保存中…" : "保存到书架"}
+            {saving ? T("保存中…") : T("保存到书架")}
           </button>
         </div>
       </div>

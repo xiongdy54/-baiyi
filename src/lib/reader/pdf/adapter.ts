@@ -30,6 +30,7 @@ import type {
   SourceAnchorGeometry
 } from "../kernel";
 import { createMultiHighlight } from "../multiHighlight";
+import { t } from "../../i18n";
 import { drawBadges } from "../badges";
 import { annotSoft, annotSolid } from "../annotColor";
 // 百分比换算的唯一实现面（v25 M5）：选区像素框 → 页内百分比走 pxShapeToPct，不另造一套换算
@@ -809,7 +810,8 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
           const page = e.dest != null ? await outlineDestToPage(doc as never, e.dest) : null;
           if (page == null) continue; // dest 解析失败 → 跳过
           const title = String(e.title || "").trim();
-          const label = `${title || "未命名章节"} ·第 ${page + 1} 页`;
+          // 目录标签是纯展示（不入库），渲染期取当前语言
+          const label = t("{title} ·第 {n} 页", { title: title || t("未命名章节"), n: page + 1 });
           out.push({ label, href: `pdfpage:${page}`, subitems: await walk(e.items) });
         }
         return out;

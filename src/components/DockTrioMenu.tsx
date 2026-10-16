@@ -8,6 +8,7 @@
 // DOM 契约（§10）：.dock-trio + 每钮 data-trio-act="aiCards|copy|quote"。
 import { useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { placePopover, type PopoverRect } from "../lib/popoverPlace";
+import { useT } from "../lib/i18n";
 
 export function DockTrioMenu({
   anchor,
@@ -47,6 +48,7 @@ export function DockTrioMenu({
   }, [anchor.x, anchor.y, anchor.width, anchor.height, container?.x, container?.y, container?.width, container?.height]);
   // 点钮不夺走正文选区（SelectionMenu 既有手法）：选区保持在场，动作读取后由宿主关闭选单
   const keepSel = (e: ReactMouseEvent) => e.preventDefault();
+  const T = useT();
   return (
     <div
       ref={ref}
@@ -55,14 +57,14 @@ export function DockTrioMenu({
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
     >
       <div className="sel-row">
-        <button type="button" className="sel-btn" data-trio-act="aiCards" title="交给 AI 制卡" onMouseDown={keepSel} onClick={() => onAiCards(text)}>
-          AI 制卡
+        <button type="button" className="sel-btn" data-trio-act="aiCards" title={T("交给 AI 制卡")} onMouseDown={keepSel} onClick={() => onAiCards(text)}>
+          {T("AI 制卡")}
         </button>
-        <button type="button" className="sel-btn" data-trio-act="copy" title="复制到手动制卡文本框" onMouseDown={keepSel} onClick={() => onCopy(text)}>
-          复制
+        <button type="button" className="sel-btn" data-trio-act="copy" title={T("复制到手动制卡文本框")} onMouseDown={keepSel} onClick={() => onCopy(text)}>
+          {T("复制")}
         </button>
-        <button type="button" className="sel-btn" data-trio-act="quote" title="引用到 AI 解释输入框" onMouseDown={keepSel} onClick={() => onQuote(text)}>
-          引用
+        <button type="button" className="sel-btn" data-trio-act="quote" title={T("引用到 AI 解释输入框")} onMouseDown={keepSel} onClick={() => onQuote(text)}>
+          {T("引用")}
         </button>
       </div>
     </div>

@@ -11,6 +11,7 @@ import {
   type DashLayoutV2, type WidgetSize
 } from "./layout";
 import { IconGrip } from "../icons";
+import { useT } from "../../lib/i18n";
 
 interface WidgetConfig {
   dataKey: string;
@@ -28,6 +29,7 @@ const dashCache: {
 } = { overview: null, layout: null, hidden: [], configs: {} };
 
 export default function Dashboard() {
+  const T = useT();
   const [overview, setOverviewState] = useState<StatsOverview | null>(dashCache.overview);
   const setOverview = useCallback((o: StatsOverview) => { dashCache.overview = o; setOverviewState(o); }, []);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +66,7 @@ export default function Dashboard() {
         const o = await statsApi.overview();
         if (!alive) return;
         if (o) setOverview(o);
-        else setError("统计服务不可用（statsAPI 未注入）");
+        else setError(T("统计服务不可用（statsAPI 未注入）"));
       } catch (err) {
         if (alive) setError(err instanceof Error ? err.message : String(err));
       }
@@ -175,10 +177,10 @@ export default function Dashboard() {
     if (!def || !overview) return null;
     const cfg = getConfig(def);
     const size = layout?.sizes[widgetId] === "half" ? "half" : "wide";
-    const chartOptions = [...new Map(def.dataKeys.flatMap((dk) => (def.charts[dk] || []).map((c) => [c.id, { value: c.id, label: c.label, dk }]))).values()];
+    const chartOptions = [...new Map(def.dataKeys.flatMap((dk) => (def.charts[dk] || []).map((c) => [c.id, { value: c.id, label: T(c.label), dk }]))).values()];
     const dataOptions = def.dataKeys.map((dk) => ({
       value: dk,
-      label: def.dataLabels?.[dk] ?? (dk === "domains-main" ? "按主类" : dk === "domains-detail" ? "按二级" : dk === "duration-hist" ? "时长分布" : dk === "duration-by-field" ? "按领域" : dk)
+      label: T(def.dataLabels?.[dk] ?? (dk === "domains-main" ? "按主类" : dk === "domains-detail" ? "按二级" : dk === "duration-hist" ? "时长分布" : dk === "duration-by-field" ? "按领域" : dk))
     }));
     return (
       <div
@@ -202,16 +204,16 @@ export default function Dashboard() {
           <button
             type="button"
             className="icon-btn dash-widget-reorder"
-            aria-label={`${def.title} · 重新排列：Alt + 左/右方向键前移或后移`}
+            aria-label={`${T(def.title)} · ${T("重新排列：Alt + 左/右方向键前移或后移")}`}
             onKeyDown={onWidgetHeadKeyDown(widgetId)}
           >
             <IconGrip size={16} className="dash-grip" />
           </button>
-          <span className="dash-widget-title">{def.title}</span>
+          <span className="dash-widget-title">{T(def.title)}</span>
           <div className="dash-widget-tools" onClick={(e) => e.stopPropagation()}>
             {chartOptions.length > 1 && (
               <Dropdown
-                title="切换图型"
+                title={T("切换图型")}
                 value={cfg.chart}
                 options={chartOptions}
                 onChange={(chartId) => {
@@ -224,7 +226,7 @@ export default function Dashboard() {
             )}
             {dataOptions.length > 1 && (
               <Dropdown
-                title="选择数据"
+                title={T("选择数据")}
                 value={cfg.dataKey}
                 options={dataOptions}
                 onChange={(dk) => {

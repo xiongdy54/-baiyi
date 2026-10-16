@@ -3,6 +3,9 @@
 //      + DictionaryEntry/ReadingContext 类型 + 四种单词卡快照组装（buildVocabDrafts）。
 // 在线 HTTP 与本地文件 IO 在主进程 electron/dictStore.js 实现；本模块只保留可单元测试的纯逻辑，
 // Manager 通过注入的 provider 对象工作（lookup(rawText, ctx)），因此 node 单测无需网络。
+// i18n：仅用户可见的报错前缀走 t()（查询词/词典数据仍按原文入库；L420 的「超时」子串匹配
+// 依赖 zh 报错原文，保持不译以免控制流分叉）。
+import { t } from "./i18n";
 
 export type DictCapability =
   | "definition"
@@ -394,7 +397,7 @@ export class DictionaryManager {
   async lookup(rawText: string, ctx: DictLookupContext = {}): Promise<DictLookupResult> {
     this.errors = [];
     const candidates = wordCandidates(rawText);
-    if (candidates.length === 0) throw new Error("未输入可查询的单词");
+    if (candidates.length === 0) throw new Error(t("未输入可查询的单词"));
     // v38 D35：语言路由五级链；解析结果统一下发（Provider 内缓存键/语言标签与判定一致）
     const language = resolveLookupLanguage({
       word: candidates[0],
@@ -422,7 +425,7 @@ export class DictionaryManager {
       }
     }
     const detail = this.errors.length ? `（${this.errors.map((e) => `${e.providerId}: ${e.message}`).join("；")}）` : "";
-    throw new Error(`未找到释义${detail}`);
+    throw new Error(`${t("未找到释义")}${detail}`);
   }
 }
 

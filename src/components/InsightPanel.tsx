@@ -18,6 +18,7 @@ import {
   type InsightRun,
   type PersonalMeaningCandidate
 } from "../lib/insight";
+import { useT } from "../lib/i18n";
 
 type Step = "range" | "preview" | "running" | "done";
 
@@ -42,6 +43,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
   onClose: () => void;
   onJumpToDoc?: (docId: string, anchor: { anchorText: string }, returnTo?: "browse") => void;
 }) {
+  const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [step, setStep] = useState<Step>("range");
   const [rangeKind, setRangeKind] = useState<InsightRangeKind>("30d");
@@ -86,7 +88,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
         rangeFrom: rangeKind === "custom" ? customFrom : undefined,
         rangeTo: rangeKind === "custom" ? customTo : undefined
       });
-      if (!p) throw new Error("证据包装配失败（主进程不可用）");
+      if (!p) throw new Error(T("证据包装配失败（主进程不可用）"));
       setPkg(p);
       setStep("preview");
     } catch (err) {
@@ -102,7 +104,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
     let localRun: InsightRun | null = null;
     try {
       const tpl = await window.promptsAPI?.get("journal-insight");
-      if (!tpl?.content) throw new Error("洞察提示词（journal-insight）未播种");
+      if (!tpl?.content) throw new Error(T("洞察提示词（journal-insight）未播种"));
       localRun = await insightsApi.createRun({
         rangeKind,
         rangeFrom: pkg.range.from,
@@ -112,7 +114,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
         evidencePackage: pkg,
         promptScope: "journal-insight"
       });
-      if (!localRun) throw new Error("洞察运行记录创建失败");
+      if (!localRun) throw new Error(T("洞察运行记录创建失败"));
       setRun(localRun);
       setStep("running");
       setStreamChars(0);
@@ -171,14 +173,14 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
         {
           cardType: "qa",
           front: claim,
-          back: (evidence || []).join("；") || "（无证据记录）",
-          contextPrefix: "洞察:",
-          sourceRef: { title: `AI 洞察 ${fmtDate(run?.createdAt ?? Date.now())}` },
+          back: (evidence || []).join("；") || T("（无证据记录）"),
+          contextPrefix: T("洞察:"),
+          sourceRef: { title: T("AI 洞察 {time}", { time: fmtDate(run?.createdAt ?? Date.now()) }) },
           prioritySuggestion: 40
         },
-        { sourceTitle: "AI 洞察" }
+        { sourceTitle: T("AI 洞察") }
       );
-      setNotice(`已入库 ${ids.length} 张卡（经 CardLint，可在「卡片」页查看质检问题）`);
+      setNotice(T("已入库 {n} 张卡（经 CardLint，可在「卡片」页查看质检问题）", { n: ids.length }));
       eventBus.emit("cards/changed");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -189,7 +191,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
     setError("");
     try {
       await insightsApi.meaningCreate({ label, kind: meaningKind, sourceInsightRunId: run?.id, evidenceRefs: refs });
-      setNotice(`已沉淀为 Personal Meaning 候选（${meaningKind}），确认后才成事实`);
+      setNotice(T("已沉淀为 Personal Meaning 候选（{kind}），确认后才成事实", { kind: meaningKind }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -209,11 +211,11 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
   function RefChip({ kind, id }: { kind: string; id?: string }) {
     if (!id) return null;
     const label =
-      kind === "diary" ? `日记 ${diaryById.get(id)?.entryDate ?? ""}` :
-      kind === "kp" ? `知识点 ${kpById.get(id)?.canonicalLabel ?? id.slice(0, 8)}` :
-      kind === "card" ? `卡片 ${(cardById.get(id)?.front || id).slice(0, 18)}` :
-      kind === "extract" ? `摘录 ${(extractById.get(id)?.text || id).slice(0, 18)}` :
-      `来源 ${pkg?.sources.find((s) => s.documentId === id)?.title ?? id.slice(0, 8)}`;
+      kind === "diary" ? T("日记 {date}", { date: diaryById.get(id)?.entryDate ?? "" }) :
+      kind === "kp" ? T("知识点 {label}", { label: kpById.get(id)?.canonicalLabel ?? id.slice(0, 8) }) :
+      kind === "card" ? T("卡片 {front}", { front: (cardById.get(id)?.front || id).slice(0, 18) }) :
+      kind === "extract" ? T("摘录 {text}", { text: (extractById.get(id)?.text || id).slice(0, 18) }) :
+      T("来源 {title}", { title: pkg?.sources.find((s) => s.documentId === id)?.title ?? id.slice(0, 8) });
     return <span className="ins-ref-chip mono">{label}</span>;
   }
 
@@ -222,29 +224,29 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
       <div className="ins-evidence">
         {ids.diaryEntryId && (
           <details>
-            <summary><RefChip kind="diary" id={ids.diaryEntryId} /> 日记原文</summary>
-            <blockquote className="ins-quote card-marked">{diaryById.get(ids.diaryEntryId)?.text || "（原文不在本次证据包内）"}</blockquote>
+            <summary><RefChip kind="diary" id={ids.diaryEntryId} /> {T("日记原文")}</summary>
+            <blockquote className="ins-quote card-marked">{diaryById.get(ids.diaryEntryId)?.text || T("（原文不在本次证据包内）")}</blockquote>
           </details>
         )}
         {ids.knowledgePointId && <RefChip kind="kp" id={ids.knowledgePointId} />}
         {ids.cardId && (
           <details>
-            <summary><RefChip kind="card" id={ids.cardId} /> 卡面</summary>
+            <summary><RefChip kind="card" id={ids.cardId} /> {T("卡面")}</summary>
             <blockquote className="ins-quote card-marked">
-              正面：{cardById.get(ids.cardId)?.front || "—"}<br />
-              背面：{cardById.get(ids.cardId)?.back || "—"}
+              {T("正面：")}{cardById.get(ids.cardId)?.front || "—"}<br />
+              {T("背面：")}{cardById.get(ids.cardId)?.back || "—"}
             </blockquote>
           </details>
         )}
         {ids.extractId && (
           <details>
-            <summary><RefChip kind="extract" id={ids.extractId} /> 摘录原文</summary>
+            <summary><RefChip kind="extract" id={ids.extractId} /> {T("摘录原文")}</summary>
             <blockquote className="ins-quote card-marked">{extractById.get(ids.extractId)?.text || "—"}</blockquote>
           </details>
         )}
         {ids.documentId && (
           <button className="journal-link" onClick={() => openDoc(ids.documentId, cardById.get(ids.cardId ?? "")?.front || "")}>
-            打开来源
+            {T("打开来源")}
           </button>
         )}
       </div>
@@ -253,10 +255,10 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel ins-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="洞察 · 日记与已学知识" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel ins-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("洞察 · 日记与已学知识")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>洞察 · 日记 × 已学知识</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <h2>{T("洞察 · 日记 × 已学知识")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -266,23 +268,23 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
         <div className="modal-scroll">
           {noKey && step === "range" && (
             <div className="kmg-msg kmg-msg-error">
-              未配置 AI 服务 Key——洞察需要 AI 参与，属可选项。可在 设置 → AI 服务 配置后使用；日记本身不受影响。
+              {T("未配置 AI 服务 Key——洞察需要 AI 参与，属可选项。可在 设置 → AI 服务 配置后使用；日记本身不受影响。")}
             </div>
           )}
           {(error || notice) && (
             <div className={`kmg-msg ${error ? "kmg-msg-error" : ""}`}>
               {error || notice}
-              <button className="journal-link" onClick={() => { setError(""); setNotice(""); }}>关闭</button>
+              <button className="journal-link" onClick={() => { setError(""); setNotice(""); }}>{T("关闭")}</button>
             </div>
           )}
 
           {step === "range" && (
             <div className="ins-step">
-              <p className="ins-step-hint">选择洞察范围（按需触发，不会自动分析）：</p>
+              <p className="ins-step-hint">{T("选择洞察范围（按需触发，不会自动分析）：")}</p>
               <div className="seg-tabs seg-tabs-flush">
                 {RANGE_OPTIONS.map((o) => (
                   <button key={o.value} className={rangeKind === o.value ? "active" : ""} onClick={() => setRangeKind(o.value)}>
-                    {o.label}
+                    {T(o.label)}
                   </button>
                 ))}
               </div>
@@ -294,19 +296,19 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                 </div>
               )}
               <button className="btn btn-primary" disabled={rangeKind === "custom" && !customFrom} onClick={() => void buildPreview()}>
-                装配证据包（预览）
+                {T("装配证据包（预览）")}
               </button>
 
               {history.length > 0 && (
                 <>
-                  <p className="kmg-sec">历史运行</p>
+                  <p className="kmg-sec">{T("历史运行")}</p>
                   <div className="ins-history">
                     {history.map((h) => (
                       <div key={h.id} className="ins-history-row">
                         <span className="mono">{fmtDate(h.createdAt)}</span>
                         <span className="mono">{h.rangeKind}</span>
-                        <span className="mono">{h.entryCount} 条</span>
-                        <span className={`mono ins-status-${h.status}`}>{h.status === "done" ? "完成" : h.status === "failed" ? "失败" : h.status === "running" ? "进行中" : "取消"}</span>
+                        <span className="mono">{T("{n} 条", { n: h.entryCount })}</span>
+                        <span className={`mono ins-status-${h.status}`}>{h.status === "done" ? T("完成") : h.status === "failed" ? T("失败") : h.status === "running" ? T("进行中") : T("取消")}</span>
                         <button
                           className="journal-link"
                           disabled={h.status !== "done"}
@@ -318,7 +320,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                             setStep("done");
                           }}
                         >
-                          查看
+                          {T("查看")}
                         </button>
                       </div>
                     ))}
@@ -330,51 +332,51 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
 
           {step === "preview" && pkg && (
             <div className="ins-step">
-              <p className="ins-step-hint">发送前预览——以下内容将发送给 AI（隐私透明，§9.1 M8-B-1）：</p>
+              <p className="ins-step-hint">{T("发送前预览——以下内容将发送给 AI（隐私透明，§9.1 M8-B-1）：")}</p>
               <ul className="ins-pkg-list mono">
-                <li>日记 {pkg.diarySpans.length} 条（含原文）</li>
-                <li>知识点 {pkg.kpSubgraph.kps.length} 个 · 关系边 {pkg.kpSubgraph.edges.length} 条</li>
-                <li>相关卡 {pkg.cards.length} 张 · 相关摘录 {pkg.extracts.length} 条</li>
-                <li>来源 {pkg.sources.length} 份</li>
+                <li>{T("日记 {n} 条（含原文）", { n: pkg.diarySpans.length })}</li>
+                <li>{T("知识点 {n} 个 · 关系边 {m} 条", { n: pkg.kpSubgraph.kps.length, m: pkg.kpSubgraph.edges.length })}</li>
+                <li>{T("相关卡 {n} 张 · 相关摘录 {m} 条", { n: pkg.cards.length, m: pkg.extracts.length })}</li>
+                <li>{T("来源 {n} 份", { n: pkg.sources.length })}</li>
                 <li className={pkg.grounded ? "" : "ins-warn"}>
-                  预估 token ≈ {pkg.tokenEstimated} / 预算 {pkg.tokenBudget}
-                  {!pkg.grounded && "（已按 grounding 优先级裁剪：越靠后的依据先裁）"}
+                  {T("预估 token ≈ {est} / 预算 {budget}", { est: pkg.tokenEstimated, budget: pkg.tokenBudget })}
+                  {!pkg.grounded && T("（已按 grounding 优先级裁剪：越靠后的依据先裁）")}
                 </li>
               </ul>
               <div className="ins-diary-preview">
                 {pkg.diarySpans.slice(0, 6).map((s) => (
                   <p key={s.entryId} className="mono">{s.entryDate} · {s.text.slice(0, 80)}{s.text.length > 80 ? "…" : ""}</p>
                 ))}
-                {pkg.diarySpans.length === 0 && <p className="mono">（该范围内没有已发送的日记条目）</p>}
+                {pkg.diarySpans.length === 0 && <p className="mono">{T("（该范围内没有已发送的日记条目）")}</p>}
               </div>
               <div className="ins-actions">
-                <button className="btn btn-outline" onClick={() => setStep("range")}>重选范围</button>
+                <button className="btn btn-outline" onClick={() => setStep("range")}>{T("重选范围")}</button>
                 <button className="btn btn-primary" disabled={noKey || pkg.diarySpans.length === 0 || busyRef.current} onClick={() => void sendToAI()}>
-                  {noKey ? "未配置 AI Key" : "发送并生成洞察"}
+                  {noKey ? T("未配置 AI Key") : T("发送并生成洞察")}
                 </button>
               </div>
-              {pkg.diarySpans.length === 0 && <p className="mono ins-warn">范围内没有日记，先生成一条再试。</p>}
+              {pkg.diarySpans.length === 0 && <p className="mono ins-warn">{T("范围内没有日记，先生成一条再试。")}</p>}
             </div>
           )}
 
           {step === "running" && (
             <div className="ins-step ins-running">
-              <p className="mono">AI 思考中…{thinkChars > 0 ? `（已思考 ${thinkChars} 字）` : ""}</p>
-              <p className="mono">已接收 {streamChars} 字</p>
-              <p className="mono ins-warn">GLM 推理模型首字前可能有约 40 秒静默，属正常现象。</p>
+              <p className="mono">{T("AI 思考中…")}{thinkChars > 0 ? T("（已思考 {n} 字）", { n: thinkChars }) : ""}</p>
+              <p className="mono">{T("已接收 {n} 字", { n: streamChars })}</p>
+              <p className="mono ins-warn">{T("GLM 推理模型首字前可能有约 40 秒静默，属正常现象。")}</p>
             </div>
           )}
 
           {step === "done" && run && (
             <div className="ins-step">
               {run.status === "failed" && (
-                <div className="kmg-msg kmg-msg-error">本次洞察失败：{run.errorText || "未知错误"}（可重试）</div>
+                <div className="kmg-msg kmg-msg-error">{T("本次洞察失败：{msg}（可重试）", { msg: run.errorText || T("未知错误") })}</div>
               )}
               {output && (
                 <>
                   {output.observation && output.observation.length > 0 && (
                     <>
-                      <p className="kmg-sec">观察</p>
+                      <p className="kmg-sec">{T("观察")}</p>
                       <ul className="ins-list">
                         {output.observation.map((o, i) => <li key={i}>{o}</li>)}
                       </ul>
@@ -382,11 +384,11 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                   )}
                   {output.knowledgeLinks && output.knowledgeLinks.length > 0 && (
                     <>
-                      <p className="kmg-sec">知识关联（点击展开原文）</p>
+                      <p className="kmg-sec">{T("知识关联（点击展开原文）")}</p>
                       <ul className="ins-list">
                         {output.knowledgeLinks.map((l, i) => (
                           <li key={i}>
-                            {l.note || "（无说明）"}
+                            {l.note || T("（无说明）")}
                             <EvidenceBlock ids={l} />
                           </li>
                         ))}
@@ -395,18 +397,18 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                   )}
                   {output.interpretations && output.interpretations.length > 0 && (
                     <>
-                      <p className="kmg-sec">解释（假设 · 点击「选它」参与竞争二选）</p>
+                      <p className="kmg-sec">{T("解释（假设 · 点击「选它」参与竞争二选）")}</p>
                       <ul className="ins-list">
                         {output.interpretations.map((it, i) => (
                           <li key={i} className={feedback.chosenInterpretation === i ? "ins-chosen" : ""}>
                             {it.claim} <span className="mono ins-conf">{it.confidence ? `(${it.confidence})` : ""}</span>
-                            {(it.evidence ?? []).map((ev, j) => <p key={j} className="mono ins-ev">依据：{ev}</p>)}
+                            {(it.evidence ?? []).map((ev, j) => <p key={j} className="mono ins-ev">{T("依据：")}{ev}</p>)}
                             <div className="ins-item-actions">
                               <button className="journal-link" onClick={() => void saveFeedback({ chosenInterpretation: i })}>
-                                {feedback.chosenInterpretation === i ? "已选" : "选它"}
+                                {feedback.chosenInterpretation === i ? T("已选") : T("选它")}
                               </button>
-                              <button className="journal-link" onClick={() => void makeCard(it.claim, it.evidence)}>就此制卡</button>
-                              <button className="journal-link" onClick={() => void saveMeaning(it.claim, (it.evidence ?? []).map((e) => ({ diaryEntryId: undefined, note: e })))}>沉淀为个人意义</button>
+                              <button className="journal-link" onClick={() => void makeCard(it.claim, it.evidence)}>{T("就此制卡")}</button>
+                              <button className="journal-link" onClick={() => void saveMeaning(it.claim, (it.evidence ?? []).map((e) => ({ diaryEntryId: undefined, note: e })))}>{T("沉淀为个人意义")}</button>
                             </div>
                           </li>
                         ))}
@@ -415,14 +417,14 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                   )}
                   {output.alternativeInterpretations && output.alternativeInterpretations.length > 0 && (
                     <>
-                      <p className="kmg-sec">竞争解释（防确认偏误）</p>
+                      <p className="kmg-sec">{T("竞争解释（防确认偏误）")}</p>
                       <ul className="ins-list">
                         {output.alternativeInterpretations.map((it, i) => (
                           <li key={i}>
                             {it.claim}
-                            {(it.evidence ?? []).map((ev, j) => <p key={j} className="mono ins-ev">依据：{ev}</p>)}
+                            {(it.evidence ?? []).map((ev, j) => <p key={j} className="mono ins-ev">{T("依据：")}{ev}</p>)}
                             <div className="ins-item-actions">
-                              <button className="journal-link" onClick={() => void makeCard(it.claim, it.evidence)}>就此制卡</button>
+                              <button className="journal-link" onClick={() => void makeCard(it.claim, it.evidence)}>{T("就此制卡")}</button>
                             </div>
                           </li>
                         ))}
@@ -431,13 +433,13 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                   )}
                   {output.questions && output.questions.length > 0 && (
                     <>
-                      <p className="kmg-sec">追问（缺口已随本次运行记录，K4/K7 接入 Frontier 后可消费）</p>
+                      <p className="kmg-sec">{T("追问（缺口已随本次运行记录，K4/K7 接入 Frontier 后可消费）")}</p>
                       <ul className="ins-list">
                         {output.questions.map((q, i) => (
                           <li key={i}>
                             {q}
                             <span className="ins-item-actions">
-                              <button className="journal-link" onClick={() => void makeCard(q, undefined)}>就此制卡</button>
+                              <button className="journal-link" onClick={() => void makeCard(q, undefined)}>{T("就此制卡")}</button>
                             </span>
                           </li>
                         ))}
@@ -446,7 +448,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                   )}
                   {output.uncertainties && output.uncertainties.length > 0 && (
                     <>
-                      <p className="kmg-sec">不确定</p>
+                      <p className="kmg-sec">{T("不确定")}</p>
                       <ul className="ins-list ins-uncertain">
                         {output.uncertainties.map((u, i) => <li key={i}>{u}</li>)}
                       </ul>
@@ -454,13 +456,13 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                   )}
                   {output.structureConnection && (
                     <>
-                      <p className="kmg-sec">结构连接（{output.structureConnection.connectionMode === "analogy" ? "类比" : output.structureConnection.connectionMode === "abstraction" ? "抽象" : "组合"}）</p>
+                      <p className="kmg-sec">{T("结构连接（{mode}）", { mode: output.structureConnection.connectionMode === "analogy" ? T("类比") : output.structureConnection.connectionMode === "abstraction" ? T("抽象") : T("组合") })}</p>
                       <div className="ins-structure">
-                        <p>候选领域：<strong>{output.structureConnection.candidateDomain || "—"}</strong></p>
-                        <p>已持有结构：{output.structureConnection.ownedStructure?.structureLabel || "—"}{output.structureConnection.ownedStructure?.knowledgePointIds?.length ? `（${output.structureConnection.ownedStructure.knowledgePointIds.map((id) => kpById.get(id)?.canonicalLabel || id.slice(0, 8)).join("、")}）` : ""}</p>
+                        <p>{T("候选领域：")}<strong>{output.structureConnection.candidateDomain || "—"}</strong></p>
+                        <p>{T("已持有结构：")}{output.structureConnection.ownedStructure?.structureLabel || "—"}{output.structureConnection.ownedStructure?.knowledgePointIds?.length ? T("（{list}）", { list: output.structureConnection.ownedStructure.knowledgePointIds.map((id) => kpById.get(id)?.canonicalLabel || id.slice(0, 8)).join("、") }) : ""}</p>
                         <p>{output.structureConnection.whyThisDomain}</p>
                         <table className="ins-mapping">
-                          <thead><tr><th>已有知识侧</th><th>候选领域侧</th><th>置信</th></tr></thead>
+                          <thead><tr><th>{T("已有知识侧")}</th><th>{T("候选领域侧")}</th><th>{T("置信")}</th></tr></thead>
                           <tbody>
                             {(output.structureConnection.slotMapping ?? []).map((m, i) => (
                               <tr key={i}>
@@ -473,23 +475,23 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
                         </table>
                         {(output.structureConnection.disanalogy ?? []).length > 0 && (
                           <div>
-                            <p className="ins-ev">主要差异（防把类比当同构）：</p>
+                            <p className="ins-ev">{T("主要差异（防把类比当同构）：")}</p>
                             <ul className="ins-list ins-uncertain">{(output.structureConnection.disanalogy ?? []).map((d, i) => <li key={i}>{d}</li>)}</ul>
                           </div>
                         )}
                         {(output.structureConnection.falsifiableQuestions ?? []).length > 0 && (
                           <div>
-                            <p className="ins-ev">可证伪追问：</p>
+                            <p className="ins-ev">{T("可证伪追问：")}</p>
                             <ul className="ins-list">{(output.structureConnection.falsifiableQuestions ?? []).map((q, i) => <li key={i}>{q}</li>)}</ul>
                           </div>
                         )}
                         <div className="ins-item-actions">
-                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "accepted" })}>接受（开始收集该领域材料）</button>
-                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "rejected:invalid" })}>结构不成立</button>
-                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "rejected:uninterested" })}>不感兴趣</button>
-                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "rejected:too-hard" })}>太难</button>
+                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "accepted" })}>{T("接受（开始收集该领域材料）")}</button>
+                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "rejected:invalid" })}>{T("结构不成立")}</button>
+                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "rejected:uninterested" })}>{T("不感兴趣")}</button>
+                          <button className="journal-link" onClick={() => void saveFeedback({ structureVerdict: "rejected:too-hard" })}>{T("太难")}</button>
                         </div>
-                        {feedback.structureVerdict && <p className="mono">结构反馈已记录：{feedback.structureVerdict}</p>}
+                        {feedback.structureVerdict && <p className="mono">{T("结构反馈已记录：")}{feedback.structureVerdict}</p>}
                       </div>
                     </>
                   )}
@@ -498,15 +500,15 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
 
               {run.status === "done" && (
                 <>
-                  <p className="kmg-sec">反馈（只影响洞察效用权重，永不写 mastery）</p>
+                  <p className="kmg-sec">{T("反馈（只影响洞察效用权重，永不写 mastery）")}</p>
                   <div className="ins-feedback">
                     {(["useful", "partially-useful", "irrelevant", "uncertain"] as const).map((v) => (
                       <button key={v} className={`btn btn-sm ${feedback.utility === v ? "btn-primary" : "btn-outline"}`} onClick={() => void saveFeedback({ utility: v })}>
-                        {v === "useful" ? "有用" : v === "partially-useful" ? "部分有用" : v === "irrelevant" ? "无关" : "不确定"}
+                        {v === "useful" ? T("有用") : v === "partially-useful" ? T("部分有用") : v === "irrelevant" ? T("无关") : T("不确定")}
                       </button>
                     ))}
                   </div>
-                  <p className="kmg-sec">沉淀候选类型</p>
+                  <p className="kmg-sec">{T("沉淀候选类型")}</p>
                   <select className="dd-btn" value={meaningKind} onChange={(e) => setMeaningKind(e.target.value as PersonalMeaningCandidate["kind"])}>
                     {(["Concept", "Preference", "Value", "Interest", "Experience", "Question", "Choice"] as const).map((k) => (
                       <option key={k} value={k}>{k}</option>
@@ -517,7 +519,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
 
               <div className="ins-actions">
                 <button className="btn btn-outline" onClick={() => { setStep("range"); setOutput(null); setRun(null); setPkg(null); }}>
-                  再来一次
+                  {T("再来一次")}
                 </button>
               </div>
             </div>

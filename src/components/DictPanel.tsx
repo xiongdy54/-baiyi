@@ -6,6 +6,7 @@ import type { DictionaryEntry, ReadingContext, VocabKind } from "../lib/dict";
 import { VOCAB_KINDS, VOCAB_KIND_LABEL } from "../lib/dict";
 import { DEFAULT_POPUP_FIELDS, loadVocabKinds, playAudioUrl, saveVocabKinds, speakText } from "../lib/dictClient";
 import { IconVolume } from "./icons";
+import { useT } from "../lib/i18n";
 
 export interface DictPanelState {
   selectedText: string;
@@ -62,6 +63,7 @@ export function DictPanel({
   onSelectLanguage: (lang: string) => void;
   onMakeCards: (entry: DictionaryEntry, ctx: ReadingContext, kinds: VocabKind[]) => void;
 }) {
+  const T = useT();
   const [showAll, setShowAll] = useState(false);
   // 查词失败时列出已装词典——帮用户分辨「在线挂了/没装对应语言的词典」
   // （CC-CEDICT 头词是中文，英文词查不到属预期，需装 ECDICT——2026-09-14 用户实测反馈）
@@ -105,8 +107,8 @@ export function DictPanel({
   return (
     <div className="ai-panel dict-panel">
       <div className="ai-panel-head">
-        <span className="ai-panel-title">查词{panel.fromCache ? "（缓存）" : ""}</span>
-        <button className="icon-btn" title="关闭" onClick={onClose}>
+        <span className="ai-panel-title">{T("查词")}{panel.fromCache ? T("（缓存）") : ""}</span>
+        <button className="icon-btn" title={T("关闭")} onClick={onClose}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M18 6 6 18" />
             <path d="m6 6 12 12" />
@@ -116,37 +118,37 @@ export function DictPanel({
       <div className="ai-panel-body">
         <blockquote className="ai-quote">{panel.selectedText}</blockquote>
         {/* v38（D35）：语言切换 chips——纯汉字串消歧的最终兜底（自动路由错时一键改语言重查） */}
-        <div className="dict-lang-row" role="group" aria-label="查词语言">
+        <div className="dict-lang-row" role="group" aria-label={T("查词语言")}>
           {DICT_LANG_CHIPS.map((chip) => {
             const active = chip.value === "auto" ? !manualLang : manualLang === chip.value;
             return (
               <button
                 key={chip.value}
                 className={`dict-lang-chip${active ? " active" : ""}`}
-                title={chip.value === "auto" ? "自动：按词内/句子/书籍语言识别" : `以${chip.label}查词`}
+                title={chip.value === "auto" ? T("自动：按词内/句子/书籍语言识别") : T("以{lang}查词", { lang: T(chip.label) })}
                 onClick={() => onSelectLanguage(chip.value)}
               >
-                {chip.label}
+                {T(chip.label)}
               </button>
             );
           })}
         </div>
-        {panel.running && <div className="ai-streaming mono">正在查询…（在线失败可重试或切本地，不阻塞阅读）</div>}
+        {panel.running && <div className="ai-streaming mono">{T("正在查询…（在线失败可重试或切本地，不阻塞阅读）")}</div>}
         {panel.error && !panel.running && (
           <div className="ai-error">
             {panel.error}
             {installed.length > 0 && (
               <div className="dict-meta mt-2">
-                已装词典：{installed.map((s) => `${s.name}（${s.entry_count} 词条）`).join("、")}
-                {installed.every((s) => s.format.startsWith("cedict")) && " —— CC-CEDICT 是中→英词典（头词为中文），查英文单词请安装 ECDICT 完整版"}
+                {T("已装词典：")}{installed.map((s) => T("{name}（{n} 词条）", { name: s.name, n: s.entry_count })).join(T("、"))}
+                {installed.every((s) => s.format.startsWith("cedict")) && T(" —— CC-CEDICT 是中→英词典（头词为中文），查英文单词请安装 ECDICT 完整版")}
               </div>
             )}
             {installed.length === 0 && (
-              <div className="dict-meta mt-2">尚未安装任何本地词典——设置 → 词典/下载 一键安装。</div>
+              <div className="dict-meta mt-2">{T("尚未安装任何本地词典——设置 → 词典/下载 一键安装。")}</div>
             )}
             <div className="ai-actions mt-2">
-              <button className="btn btn-outline btn-sm" onClick={onRetry}>重试</button>
-              <button className="btn btn-outline btn-sm" onClick={onUseLocal}>使用本地词典</button>
+              <button className="btn btn-outline btn-sm" onClick={onRetry}>{T("重试")}</button>
+              <button className="btn btn-outline btn-sm" onClick={onUseLocal}>{T("使用本地词典")}</button>
             </div>
           </div>
         )}
@@ -158,7 +160,7 @@ export function DictPanel({
                 <span className="dict-phon mono">{entry.pronunciation}</span>
               )}
               {fields.audio && can("audio") && (
-                <button className="btn btn-outline btn-sm" title="播放发音" aria-label="播放发音" onClick={speak}><IconVolume /></button>
+                <button className="btn btn-outline btn-sm" title={T("播放发音")} aria-label={T("播放发音")} onClick={speak}><IconVolume /></button>
               )}
             </div>
             {fields.definition && (
@@ -169,56 +171,56 @@ export function DictPanel({
               </div>
             )}
             {fields.partOfSpeech && entry.partOfSpeech?.length && can("partOfSpeech") ? (
-              <div className="dict-meta">词性：{entry.partOfSpeech.join(" / ")}</div>
+              <div className="dict-meta">{T("词性：")}{entry.partOfSpeech.join(" / ")}</div>
             ) : null}
             {fields.examples && entry.examples?.length && can("examples") ? (
-              <div className="dict-meta">例句：{entry.examples.slice(0, 2).join(" ／ ")}</div>
+              <div className="dict-meta">{T("例句：")}{entry.examples.slice(0, 2).join(" ／ ")}</div>
             ) : null}
             {fields.synonyms && entry.synonyms?.length && can("synonyms") ? (
-              <div className="dict-meta">同义：{entry.synonyms.slice(0, 6).join("，")}</div>
+              <div className="dict-meta">{T("同义：")}{entry.synonyms.slice(0, 6).join("，")}</div>
             ) : null}
             {fields.antonyms && entry.antonyms?.length && can("antonyms") ? (
-              <div className="dict-meta">反义：{entry.antonyms.slice(0, 6).join("，")}</div>
+              <div className="dict-meta">{T("反义：")}{entry.antonyms.slice(0, 6).join("，")}</div>
             ) : null}
             {fields.etymology && entry.etymology && can("etymology") ? (
-              <div className="dict-meta">词源：{entry.etymology}</div>
+              <div className="dict-meta">{T("词源：")}{entry.etymology}</div>
             ) : null}
             {reading?.sentence && (
-              <div className="dict-meta">原句：{reading.sentence}</div>
+              <div className="dict-meta">{T("原句：")}{reading.sentence}</div>
             )}
-            <div className="dict-meta mono">来源：{entry.source}{panel.providerId ? `（${panel.providerId}）` : ""}{panel.mode ? ` · ${panel.mode}` : ""}</div>
+            <div className="dict-meta mono">{T("来源：")}{entry.source}{panel.providerId ? `（${panel.providerId}）` : ""}{panel.mode ? ` · ${panel.mode}` : ""}</div>
             <div className="ai-actions ai-actions-stack mt-2">
-              <div className="dict-meta">单词卡形式（{entry.language || "?"} · 按语言记忆）：</div>
+              <div className="dict-meta">{T("单词卡形式（{lang} · 按语言记忆）：", { lang: entry.language || "?" })}</div>
               <div className="settings-row check-row">
                 {VOCAB_KINDS.map((k) => (
                   <label key={k} className="check-inline">
                     <input type="checkbox" checked={kinds.includes(k)} onChange={() => toggleKind(k)} />
-                    {VOCAB_KIND_LABEL[k]}
+                    {T(VOCAB_KIND_LABEL[k])}
                   </label>
                 ))}
               </div>
               <button
                 className="btn btn-primary btn-sm"
                 disabled={kinds.length === 0}
-                title={kinds.length === 0 ? "至少勾选一种卡片" : undefined}
+                title={kinds.length === 0 ? T("至少勾选一种卡片") : undefined}
                 onClick={() => {
                   if (!entry || !reading || kinds.length === 0) return;
                   // 一键制卡：按勾选的快照卡入库（dictJson 随插入一次写入，调用方处理）
                   onMakeCards(entry, reading, kinds);
                 }}
               >
-                {kinds.length === 0 ? "一键制卡（未勾选）" : `一键制卡（${kinds.length} 张）`}
+                {kinds.length === 0 ? T("一键制卡（未勾选）") : T("一键制卡（{n} 张）", { n: kinds.length })}
               </button>
               {entry.definitions.length > 2 && (
                 <button className="btn btn-outline btn-sm" onClick={() => setShowAll((v) => !v)}>
-                  {showAll ? "收起" : `展开全部 ${entry.definitions.length} 条`}
+                  {showAll ? T("收起") : T("展开全部 {n} 条", { n: entry.definitions.length })}
                 </button>
               )}
             </div>
           </>
         )}
         {!entry && !panel.running && !panel.error && (
-          <div className="dict-meta">未找到释义，可换本地词典重试，或手动制卡。</div>
+          <div className="dict-meta">{T("未找到释义，可换本地词典重试，或手动制卡。")}</div>
         )}
       </div>
     </div>

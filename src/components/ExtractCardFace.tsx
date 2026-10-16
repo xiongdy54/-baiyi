@@ -17,6 +17,7 @@ import {
 } from "../lib/editor/markdownOffsetMap";
 import { ExtractEditor, type ExtractEditorApi } from "./editor/ExtractEditor";
 import { useExtractFaceTypography } from "../lib/extractCardSettings";
+import { t, useT } from "../lib/i18n";
 
 const DAY = 86400000;
 
@@ -32,13 +33,13 @@ function fmtTime(t: number): string {
 
 /** 距下次推送的文案（与队列口径一致：到期显示「现已到期」） */
 export function nextAtText(nextAt?: number, now = Date.now()): string {
-  const t = Number(nextAt);
-  if (!Number.isFinite(t)) return "";
-  const delta = t - now;
-  if (delta <= 0) return "现已到期";
+  const at = Number(nextAt);
+  if (!Number.isFinite(at)) return "";
+  const delta = at - now;
+  if (delta <= 0) return t("现已到期");
   const days = delta / DAY;
-  if (days < 1) return "今日稍后推送";
-  return `${Math.round(days)} 天后推送`;
+  if (days < 1) return t("今日稍后推送");
+  return t("{n} 天后推送", { n: Math.round(days) });
 }
 
 /** `quote_range_json`（字符串或数组）→ 规范化区间；坏数据一律空数组（不抛） */
@@ -155,6 +156,7 @@ export default function ExtractCardFace({
   onOffsetMap?: (map: OffsetMap | null) => void;
   handlers: ExtractFaceHandlers;
 }) {
+  const T = useT();
   const depth = Number(extract.depth) || 1;
   const bodyRef = useRef<HTMLDivElement | null>(null);
   /** viewOnly 落点滚动用：第一个可映射区间（尽力而为，§C.5） */
@@ -174,7 +176,7 @@ export default function ExtractCardFace({
   /** v1.4：批注块节点——读态直排正文下、编辑态经 footer 进编辑器（正文与工具条之间） */
   const annotBlock = ownComment ? (
     <div className="extract-face-annot" data-testid="extract-face-comment" data-noedit="1">
-      <div className="sec-label">批注</div>
+      <div className="sec-label">{T("批注")}</div>
       <div className="extract-face-annot-text">{ownComment}</div>
     </div>
   ) : null;
@@ -418,7 +420,7 @@ export default function ExtractCardFace({
       <div className="sec sec-quote">
         {/* D97：编辑态节标签经 header 插槽进编辑器（工具条钉顶时排到标签之前＝「固定在摘录原文的
             上面」）；读态/查看态仍由宿主直排（无双份）。 */}
-        {(!editing || viewOnly || !handlers.onEdit) && <div className="sec-label">摘录原文</div>}
+        {(!editing || viewOnly || !handlers.onEdit) && <div className="sec-label">{T("摘录原文")}</div>}
         <div className="extract-face-body" ref={bodyRef} onClick={onBodyClick} onKeyDown={onBodyKeyDown} data-editing={editing ? "1" : undefined}>
           {viewOnly || !handlers.onEdit || !editing ? <ReadMarkdown text={bodyText} /> : null}
           {!viewOnly && handlers.onEdit && editing && (
@@ -427,7 +429,7 @@ export default function ExtractCardFace({
               defaultValue={bodyText}
               pendingFocusIndex={pendingFocusRef.current}
               footer={annotBlock}
-              header={<div className="sec-label">摘录原文</div>}
+              header={<div className="sec-label">{T("摘录原文")}</div>}
               onCommit={handleEditorCommit}
             />
           )}
@@ -447,8 +449,8 @@ export default function ExtractCardFace({
       {typeof madeCardCount === "number" && (
         <div className="extract-face-derived sec cardmeta">
           {extract.createdAt ? <span className="mono">{fmtTime(extract.createdAt)}</span> : null}
-          {depth > 1 ? <span>第{depth}层摘录</span> : null}
-          <span className="mono">{madeCardCount > 0 ? `已制卡 ${madeCardCount} 张` : "尚未就此制卡"}</span>
+          {depth > 1 ? <span>{T("第{n}层摘录", { n: depth })}</span> : null}
+          <span className="mono">{madeCardCount > 0 ? T("已制卡 {n} 张", { n: madeCardCount }) : T("尚未就此制卡")}</span>
           {handlers.onJumpToSource && (
             <button
               type="button"
@@ -456,11 +458,11 @@ export default function ExtractCardFace({
               onClick={() => handlers.onJumpToSource?.()}
               title={
                 extract.contextRef?.parentExtractId
-                  ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
-                  : "跳回材料中的原位置（不写入阅读进度）"
+                  ? T("回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）")
+                  : T("跳回材料中的原位置（不写入阅读进度）")
               }
             >
-              跳转原文
+              {T("跳转原文")}
             </button>
           )}
         </div>
@@ -487,6 +489,7 @@ export function ExtractActionsBar({
   busy?: boolean;
   handlers: ExtractFaceHandlers;
 }) {
+  const T = useT();
   const [postponeDays, setPostponeDays] = useState(7);
   /**
    * 优先级滑块去闪（v48.32/D72 去抖 + v48.33/D73 草稿保留）：滑块是受控值，而 onPriority 每次都走
@@ -566,9 +569,9 @@ export function ExtractActionsBar({
             settle(e.currentTarget);
             handlers.onAdvance?.();
           }}
-          title="处理完这条，按 A-Factor 推进调度（快捷键：空格）"
+          title={T("处理完这条，按 A-Factor 推进调度（快捷键：空格）")}
         >
-          下一条
+          {T("下一条")}
         </button>
       )}
 
@@ -582,11 +585,11 @@ export function ExtractActionsBar({
             max={36500}
             value={postponeDays}
             onChange={(e) => setPostponeDays(Math.max(1, Math.min(36500, Number(e.target.value) || 1)))}
-            aria-label="推迟天数"
+            aria-label={T("推迟天数")}
           />
-          <span className="unit">天</span>
+          <span className="unit">{T("天")}</span>
           <button className="text-btn" disabled={busy} onClick={() => handlers.onPostpone?.(postponeDays)}>
-            推迟
+            {T("推迟")}
           </button>
         </span>
       )}
@@ -594,8 +597,8 @@ export function ExtractActionsBar({
       {handlers.onPriority && (
         /* 优先级簇（v48.36/D76，L1）：一盒一功能——标签/滑轨/数字盒内裸排，滑轨维持 140×20（D75 裁定）。
             值走本地草稿（shownPriority），停手 350ms 才提交（D72 去闪）。 */
-        <label className="bar-cluster" title="优先级：拖动滑块或直接输入数字（数字越大越靠后）">
-          <span className="unit">优先级</span>
+        <label className="bar-cluster" title={T("优先级：拖动滑块或直接输入数字（数字越大越靠后）")}>
+          <span className="unit">{T("优先级")}</span>
           <span className="prio-track">
             <span className="prio-fill" style={{ width: `${shownPriority}%` }} />
             <input
@@ -604,7 +607,7 @@ export function ExtractActionsBar({
               max={100}
               step={1}
               value={shownPriority}
-              aria-label="优先级"
+              aria-label={T("优先级")}
               onChange={(e) => queuePriority(Number(e.target.value))}
             />
           </span>
@@ -615,15 +618,15 @@ export function ExtractActionsBar({
             max={100}
             step={1}
             value={shownPriority}
-            aria-label="优先级数值"
+            aria-label={T("优先级数值")}
             onChange={(e) => queuePriority(Number(e.target.value))}
           />
         </label>
       )}
 
       {handlers.onGraduate && (
-        <button className="bar-btn" disabled={busy} onClick={() => handlers.onGraduate?.()} title="处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器">
-          毕业
+        <button className="bar-btn" disabled={busy} onClick={() => handlers.onGraduate?.()} title={T("处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器")}>
+          {T("毕业")}
         </button>
       )}
 
@@ -636,7 +639,7 @@ export function ExtractActionsBar({
             aria-controls="extract-bar-more"
             onClick={() => setMoreOpen((v) => !v)}
           >
-            更多<span className="caret">▲</span>
+            {T("更多")}<span className="caret">▲</span>
           </button>
           {moreOpen && (
             <div className="bar-pop" id="extract-bar-more" data-pop>
@@ -649,11 +652,11 @@ export function ExtractActionsBar({
                   }}
                   title={
                     extract.contextRef?.parentExtractId
-                      ? "回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）"
-                      : "跳回材料中的原位置（不写入阅读进度）"
+                      ? T("回到父摘录卡片，并高亮这条子摘录所引的那一段（不推进调度）")
+                      : T("跳回材料中的原位置（不写入阅读进度）")
                   }
                 >
-                  跳转原文
+                  {T("跳转原文")}
                 </button>
               )}
               {handlers.onUndo && (
@@ -663,9 +666,9 @@ export function ExtractActionsBar({
                     setMoreOpen(false);
                     handlers.onUndo?.();
                   }}
-                  title="撤销最近一次操作（Z）"
+                  title={T("撤销最近一次操作（Z）")}
                 >
-                  撤销<span className="k mono">Z</span>
+                  {T("撤销")}<span className="k mono">Z</span>
                 </button>
               )}
             </div>

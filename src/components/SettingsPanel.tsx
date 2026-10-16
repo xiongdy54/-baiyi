@@ -55,6 +55,8 @@ import {
   type InterleaveMode
 } from "../lib/sessionQueue";
 import { rerankExtractsNow, readMultiSelectKey, MULTI_SELECT_KEYS, DEFAULT_MULTI_SELECT_KEY, type ExtractEngine, type MultiSelectKey } from "../lib/readingWorkflow";
+// v49.8（D182）：界面语言——语言切换区块（sec-language，唯一切换入口）
+import { LANGUAGES, getLocale, setLocale, normalizeLocale, useT, type Locale } from "../lib/i18n";
 
 export type ThemeMode = "light" | "dark";
 
@@ -86,6 +88,35 @@ function SkeletonBlock({ h = 40 }: { h?: number }) {
   return <div className="skeleton" style={{ height: h }} />;
 }
 
+// ---------- 界面语言（v49.8 / D182，sec-language）：语言切换唯一入口 ----------
+// 语言名一律用该语言自称（LANGUAGES.name，不做翻译——切换器惯例）；切换即时全量生效并落盘 app.language。
+function LanguageSection() {
+  const T = useT();
+  const [locale, setLocaleState] = useState<Locale>(getLocale());
+  return (
+    <SettingsSection id="sec-language" title={T("语言")}>
+      <h4>{T("界面语言")}</h4>
+      <div className="settings-row">
+        <select
+          value={locale}
+          onChange={(e) => {
+            const v = normalizeLocale(e.target.value);
+            setLocaleState(v);
+            void setLocale(v);
+          }}
+        >
+          {LANGUAGES.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="form-hint">{T("切换后立即生效：界面文字、图表、悬停提示与 AI 输出语言同步更新。")}</p>
+    </SettingsSection>
+  );
+}
+
 // ---------- 新信息架构（v48.70 / D114，设计稿 §5）----------
 // 14 项平铺导航收编为 5 组 13 项；组标题为非交互 div，不进 .settings-nav button 查询集；
 // 13 个导航项与 13 个 card-fill 区块一一对应（区块常挂载、无条件卸载，滚动定位一一可达）。
@@ -93,7 +124,7 @@ function SkeletonBlock({ h = 40 }: { h?: number }) {
 // 设置自 sec-widgets 迁入——左栏按钮 14 → 15（D114 立约文本记 13 项，DOM 实际计数 14，历史出入以实际为准）；
 // 可达性沿用 92vh + 导航自滚兜底（D116）。
 const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: string }> }> = [
-  { label: "界面", items: [{ id: "appearance", label: "主题与颜色" }] },
+  { label: "界面", items: [{ id: "appearance", label: "主题与颜色" }, { id: "language", label: "语言" }] },
   { label: "阅读", items: [{ id: "reader", label: "阅读" }] },
   {
     label: "复习与调度",
@@ -158,6 +189,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 // ---------- 统计仪表盘设置（组件可见性 + 宽窄 / 重置布局） ----------
 function DashboardSection() {
+  const T = useT();
   const [hidden, setHidden] = useState<string[]>([]);
   const [sizes, setSizes] = useState<Record<string, WidgetSize>>({});
   const [loaded, setLoaded] = useState(false);
@@ -193,15 +225,15 @@ function DashboardSection() {
   }
 
   return (
-    <SettingsSection id="sec-widgets" title="统计仪表盘">
+    <SettingsSection id="sec-widgets" title={T("统计仪表盘")}>
       {!loaded ? (
         <SkeletonBlock h={120} />
       ) : (
         <>
           <h4>
-            统计组件
-            <SettingsInfo label="统计组件">
-              宽幅＝通栏一行；窄幅＝半幅，相邻窄幅自动两两成行。拖动组件标题栏可交换位置。
+            {T("统计组件")}
+            <SettingsInfo label={T("统计组件")}>
+              {T("宽幅＝通栏一行；窄幅＝半幅，相邻窄幅自动两两成行。拖动组件标题栏可交换位置。")}
             </SettingsInfo>
           </h4>
           <div className="widget-list">
@@ -215,18 +247,18 @@ function DashboardSection() {
                   />
                   <span>{w.title}</span>
                 </label>
-                <div className="seg-tabs seg-tabs-sm" role="group" aria-label={`${w.title}宽度`}>
+                <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("{title}宽度", { title: w.title })}>
                   <button
                     className={(sizes[w.id] ?? "wide") === "wide" ? "active" : ""}
                     onClick={() => setWidgetSize(w.id, "wide")}
                   >
-                    宽幅
+                    {T("宽幅")}
                   </button>
                   <button
                     className={sizes[w.id] === "half" ? "active" : ""}
                     onClick={() => setWidgetSize(w.id, "half")}
                   >
-                    窄幅
+                    {T("窄幅")}
                   </button>
                 </div>
               </div>
@@ -234,7 +266,7 @@ function DashboardSection() {
           </div>
           {/* sec-dashreset 撤销（D114）：「恢复默认排列与宽度」收编为本节一行 */}
           <div className="settings-row">
-            <button className="btn btn-secondary btn-sm" onClick={resetLayout}>恢复默认排列与宽度</button>
+            <button className="btn btn-secondary btn-sm" onClick={resetLayout}>{T("恢复默认排列与宽度")}</button>
           </div>
         </>
       )}
@@ -334,6 +366,7 @@ function LearnerBlock() {
 }
 
 function AISection() {
+  const T = useT();
   const [cfg, setCfg] = useState<AIConfig | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [models, setModels] = useState<string[]>([]);
@@ -373,8 +406,8 @@ function AISection() {
       setLocalDetect(null);
       setNotice(
         next?.hasKey
-          ? { ok: true, text: "已切换服务，并自动恢复了该服务之前保存的 API Key。" }
-          : { ok: true, text: "已切换服务。请粘贴该服务的 API Key 并保存。" }
+          ? { ok: true, text: T("已切换服务，并自动恢复了该服务之前保存的 API Key。") }
+          : { ok: true, text: T("已切换服务。请粘贴该服务的 API Key 并保存。") }
       );
     }
   }
@@ -411,14 +444,14 @@ function AISection() {
     setModelsOpen(false);
     setBusy("test");
     try {
-      const saved = await withTimeout(doSave(), 15000, "保存配置");
+      const saved = await withTimeout(doSave(), 15000, T("保存配置"));
       // aiConfigUsable：本地预设免 Key（v48.68 / D112，与主进程 needKey 纪律对齐）
       if (!saved || !aiConfigUsable(saved)) {
-        setNotice({ ok: false, text: "请先粘贴 API Key，点击「保存配置」后再测试" });
+        setNotice({ ok: false, text: T("请先粘贴 API Key，点击「保存配置」后再测试") });
         return;
       }
-      const result = await withTimeout(aiGateway.test(), 90000, "测试连接");
-      setNotice({ ok: result.ok, text: result.ok ? "连接正常，AI 制卡 / 解释可用" : result.message });
+      const result = await withTimeout(aiGateway.test(), 90000, T("测试连接"));
+      setNotice({ ok: result.ok, text: result.ok ? T("连接正常，AI 制卡 / 解释可用") : result.message });
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -430,14 +463,14 @@ function AISection() {
     setNotice(null);
     setBusy("models");
     try {
-      await withTimeout(doSave(), 15000, "保存配置");
-      const list = await withTimeout(aiGateway.listModels(), 30000, "拉取模型列表");
+      await withTimeout(doSave(), 15000, T("保存配置"));
+      const list = await withTimeout(aiGateway.listModels(), 30000, T("拉取模型列表"));
       setModels(list);
       setModelFilter("");
       setModelsOpen(list.length > 0);
       setNotice({
         ok: true,
-        text: list.length > 0 ? `已拉取 ${list.length} 个模型 — 点击「模型名」框从列表选择` : "服务未返回模型列表，请手输"
+        text: list.length > 0 ? T("已拉取 {n} 个模型 — 点击「模型名」框从列表选择", { n: list.length }) : T("服务未返回模型列表，请手输")
       });
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -453,9 +486,9 @@ function AISection() {
     setModelsOpen(false);
     setBusy("detect");
     try {
-      const r = await withTimeout(aiGateway.detectLocal(), 20000, "检测本地服务");
+      const r = await withTimeout(aiGateway.detectLocal(), 20000, T("检测本地服务"));
       if (!r) {
-        setNotice({ ok: false, text: "当前应用不支持本地探测，请重启应用后再试" });
+        setNotice({ ok: false, text: T("当前应用不支持本地探测，请重启应用后再试") });
         return;
       }
       setLocalDetect(r);
@@ -465,10 +498,10 @@ function AISection() {
         setModelFilter("");
         setNotice({
           ok: true,
-          text: `检测到 ${r.runtimeName || "本地服务"}（${r.baseUrl}）· ${(r.models || []).length} 个模型已填入「模型名」下拉`
+          text: T("检测到 {name}（{url}）· {n} 个模型已填入「模型名」下拉", { name: r.runtimeName || T("本地服务"), url: r.baseUrl, n: (r.models || []).length })
         });
       } else {
-        setNotice({ ok: false, text: r.message || "未检测到本地模型服务" });
+        setNotice({ ok: false, text: r.message || T("未检测到本地模型服务") });
       }
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -486,13 +519,13 @@ function AISection() {
     : models;
 
   return (
-    <SettingsSection id="sec-ai" title="AI 服务">
+    <SettingsSection id="sec-ai" title={T("AI 服务")}>
       {GROUP_ORDER.map((g) => {
         const items = presets.filter((p) => (p.group || "official") === g);
         if (items.length === 0) return null;
         return (
           <div key={g} className="ai-preset-group">
-            <p className="ai-preset-group-label">{GROUP_LABELS[g] || g}</p>
+            <p className="ai-preset-group-label">{T(GROUP_LABELS[g] || g)}</p>
             <div className="skin-list">
               {items.map((p) => (
                 <button
@@ -511,24 +544,24 @@ function AISection() {
 
       {presetMeta?.keyUrl && (
         <p className="form-hint">
-          在{" "}
+          {T("在")}{" "}
           <a href={presetMeta.keyUrl} target="_blank" rel="noreferrer">
             {presetMeta.name}
           </a>{" "}
-          创建 Key。{presetMeta.hint}
+          {T("创建 Key。")}{presetMeta.hint}
         </p>
       )}
 
       {cfg.preset === "local" && (
         <div className="settings-row settings-row-wrap">
           <button className="btn btn-outline btn-sm" disabled={busy !== ""} onClick={handleDetectLocal}>
-            {busy === "detect" ? "检测中…" : "检测本地服务"}
+            {busy === "detect" ? T("检测中…") : T("检测本地服务")}
           </button>
           {localDetect && (
             <span className={localDetect.detected ? "ai-test-ok" : "ai-test-fail"}>
               {localDetect.detected
-                ? `已检测到 ${localDetect.runtimeName || "本地服务"}`
-                : (localDetect.message || "未检测到本地模型服务")}
+                ? T("已检测到 {name}", { name: localDetect.runtimeName || T("本地服务") })
+                : (localDetect.message || T("未检测到本地模型服务"))}
             </span>
           )}
         </div>
@@ -537,7 +570,7 @@ function AISection() {
       <div className="ai-fields">
         {cfg.preset === "custom" && (
           <div className="form-field">
-            <label>Base URL（OpenAI 兼容，含 /v1）</label>
+            <label>{T("Base URL（OpenAI 兼容，含 /v1）")}</label>
             <input
               value={cfg.baseUrl}
               placeholder="https://api.example.com/v1"
@@ -548,8 +581,8 @@ function AISection() {
         {cfg.preset === "local" && (
           <div className="form-field">
             <label>
-              服务地址（Ollama 默认 11434，LM Studio 默认 1234）
-              <SettingsInfo label="服务地址">本机服务无需 API Key；端口 Ollama 11434 / LM Studio 1234。</SettingsInfo>
+              {T("服务地址（Ollama 默认 11434，LM Studio 默认 1234）")}
+              <SettingsInfo label={T("服务地址")}>{T("本机服务无需 API Key；端口 Ollama 11434 / LM Studio 1234。")}</SettingsInfo>
             </label>
             <input
               className="mono"
@@ -559,19 +592,19 @@ function AISection() {
             />
             {!/\/v\d+$/.test(cfg.baseUrl.trim()) && (
               <p className="ai-test-fail">
-                地址缺少 /v1 后缀 —— OpenAI 兼容端点通常需要它（如 http://127.0.0.1:1234/v1）
+                {T("地址缺少 /v1 后缀 —— OpenAI 兼容端点通常需要它（如 http://127.0.0.1:1234/v1）")}
               </p>
             )}
           </div>
         )}
 
         <div className="form-field" ref={modelsRef}>
-          <label>模型名</label>
+          <label>{T("模型名")}</label>
           <div className="model-select">
             <input
               className="mono"
               value={modelInput}
-              placeholder={presetMeta?.model || "模型名（可手输）"}
+              placeholder={presetMeta?.model || T("模型名（可手输）")}
               onChange={(e) => {
                 const v = e.target.value;
                 setModelInput(v);
@@ -608,7 +641,7 @@ function AISection() {
                   ))}
                 {filtered.length === 0 && (
                   <div className="model-option model-empty mono">
-                    列表无匹配 — 将直接使用手输的模型名
+                    {T("列表无匹配 — 将直接使用手输的模型名")}
                   </div>
                 )}
               </div>
@@ -618,12 +651,12 @@ function AISection() {
 
         {/glm-5\.[2-9]/i.test(cfg.model) && (
           <div className="form-field">
-            <label>思考强度（低更快；仅 GLM-5.2+ 生效）</label>
+            <label>{T("思考强度（低更快；仅 GLM-5.2+ 生效）")}</label>
             <div className="seg-tabs">
               {[
-                { id: "low", label: "低" },
-                { id: "high", label: "中" },
-                { id: "max", label: "强" }
+                { id: "low", label: T("低") },
+                { id: "high", label: T("中") },
+                { id: "max", label: T("强") }
               ].map((o) => (
                 <button
                   key={o.id}
@@ -639,7 +672,7 @@ function AISection() {
 
         {cfg.preset !== "local" && (
           <div className="form-field">
-            <label>API Key {cfg.hasKey ? "（已保存）" : "（尚未保存 — 填好后点「保存配置」）"}</label>
+            <label>{T("API Key {state}", { state: cfg.hasKey ? T("（已保存）") : T("（尚未保存 — 填好后点「保存配置」）") })}</label>
             <input
               type="password"
               value={apiKey}
@@ -652,13 +685,13 @@ function AISection() {
 
       <div className="settings-row settings-row-wrap">
         <button className="btn btn-primary btn-sm" disabled={busy !== ""} onClick={handleSave}>
-          {busy === "save" ? "保存中…" : "保存配置"}
+          {busy === "save" ? T("保存中…") : T("保存配置")}
         </button>
         <button className="btn btn-secondary btn-sm" disabled={busy !== ""} onClick={handleTest}>
-          {busy === "test" ? "测试中…" : "测试连接"}
+          {busy === "test" ? T("测试中…") : T("测试连接")}
         </button>
         <button className="btn btn-outline btn-sm" disabled={busy !== ""} onClick={handleFetchModels}>
-          {busy === "models" ? "拉取中…" : "拉取模型列表"}
+          {busy === "models" ? T("拉取中…") : T("拉取模型列表")}
         </button>
       </div>
 
@@ -671,8 +704,9 @@ function AISection() {
 // ---------- 调度规则（v48.70 / D114）：学习日 + 同源卡延后物理合并 ----------
 // 两个 h4 子块的根元素保留 id sec-learningday / sec-siblingbury（m12 直达定位，设计稿 §5.3/§12-T4）。
 function ScheduleSection() {
+  const T = useT();
   return (
-    <SettingsSection id="sec-schedule" title="调度规则">
+    <SettingsSection id="sec-schedule" title={T("调度规则")}>
       <div id="sec-learningday">
         <LearningDayBlock />
       </div>
@@ -686,6 +720,7 @@ function ScheduleSection() {
 // 学习日（v23，D21/§4.4.8）：统计口径的「新一天」起点 = 本地钟面 0-23 时，默认 0（午夜）。
 // 仅影响统计（今日完成度/热力/日聚合）；FSRS 调度间隔与优化训练不受其影响。
 function LearningDayBlock() {
+  const T = useT();
   const [cutoff, setCutoff] = useState<number | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -693,7 +728,7 @@ function LearningDayBlock() {
   }, []);
   const options = Array.from({ length: 24 }, (_, h) => ({
     value: String(h),
-    label: h === 0 ? "午夜 0 点（默认）" : `凌晨/上午 ${h} 点`
+    label: h === 0 ? T("午夜 0 点（默认）") : T("凌晨/上午 {h} 点", { h })
   }));
   async function update(v: string) {
     const h = Number(v);
@@ -704,17 +739,17 @@ function LearningDayBlock() {
   }
   return (
     <>
-      <h4>学习日</h4>
+      <h4>{T("学习日")}</h4>
       <div className="settings-row">
         <span className="settings-row-label">
-          新一天从
-          <SettingsInfo label="新一天从">凌晨的学习计入前一天。仅影响统计与热力图，不影响 FSRS 复习间隔。</SettingsInfo>
+          {T("新一天从")}
+          <SettingsInfo label={T("新一天从")}>{T("凌晨的学习计入前一天。仅影响统计与热力图，不影响 FSRS 复习间隔。")}</SettingsInfo>
         </span>
         {cutoff !== null && (
-          <Dropdown value={String(cutoff)} options={options} align="left" onChange={update} title="学习日切点" />
+          <Dropdown value={String(cutoff)} options={options} align="left" onChange={update} title={T("学习日切点")} />
         )}
       </div>
-      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，统计口径即时生效。</p>}
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">{T("已保存，统计口径即时生效。")}</p>}
     </>
   );
 }
@@ -722,6 +757,7 @@ function LearningDayBlock() {
 // 同源卡延后（v34，M12/D33/§4.16）：同一制卡来源单元的多张卡同一学习日只放行一张、其余延至次日。
 // 延后是队列视图而非调度写入——不改 FSRS 的 due/S/D，不产生复习日志，次日自动解封。
 function SiblingBuryBlock() {
+  const T = useT();
   const [cfg, setCfg] = useState<{ enabled: boolean; newCards: boolean; reviewCards: boolean; perDay: number; sourceTextLimit: number } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -748,28 +784,28 @@ function SiblingBuryBlock() {
   return (
     <>
       <h4>
-        同源卡延后
-        <SettingsInfo label="同源卡延后">同源组同日只放行一张，防互相泄题；不改调度，次日自动解封，仍可在卡片浏览页主动复习。</SettingsInfo>
+        {T("同源卡延后")}
+        <SettingsInfo label={T("同源卡延后")}>{T("同源组同日只放行一张，防互相泄题；不改调度，次日自动解封，仍可在卡片浏览页主动复习。")}</SettingsInfo>
       </h4>
       {cfg && (
         <>
           <div className="settings-row">
-            <span>同源卡延后</span>
-            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="同源卡延后开关">
-              <button className={cfg.enabled ? "active" : ""} onClick={() => update({ enabled: true })}>开</button>
-              <button className={!cfg.enabled ? "active" : ""} onClick={() => update({ enabled: false })}>关</button>
+            <span>{T("同源卡延后")}</span>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("同源卡延后开关")}>
+              <button className={cfg.enabled ? "active" : ""} onClick={() => update({ enabled: true })}>{T("开")}</button>
+              <button className={!cfg.enabled ? "active" : ""} onClick={() => update({ enabled: false })}>{T("关")}</button>
             </div>
           </div>
           <div className="settings-row">
-            <span>新卡同源延后（Bury new siblings）</span>
+            <span>{T("新卡同源延后")}</span>
             <input type="checkbox" checked={cfg.newCards} onChange={(e) => update({ newCards: e.target.checked })} />
           </div>
           <div className="settings-row">
-            <span>复习卡同源延后（Bury review siblings）</span>
+            <span>{T("复习卡同源延后")}</span>
             <input type="checkbox" checked={cfg.reviewCards} onChange={(e) => update({ reviewCards: e.target.checked })} />
           </div>
           <div className="settings-row">
-            <span>同源组每日放行</span>
+            <span>{T("同源组每日放行")}</span>
             <input
               className="mono input-num"
               type="number"
@@ -778,12 +814,12 @@ function SiblingBuryBlock() {
               value={cfg.perDay}
               onChange={(e) => update({ perDay: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
             />
-            <span>张</span>
+            <span>{T("张")}</span>
           </div>
           <div className="settings-row settings-row-wrap">
             <span className="settings-row-label">
-              短材料阈值
-              <SettingsInfo label="短材料阈值">该字符数以内才按「同一次选区」建组（长选区各卡锚定不同知识点，不延后）。</SettingsInfo>
+              {T("短材料阈值")}
+              <SettingsInfo label={T("短材料阈值")}>{T("该字符数以内才按「同一次选区」建组（长选区各卡锚定不同知识点，不延后）。")}</SettingsInfo>
             </span>
             <input
               className="mono input-num input-num-md"
@@ -797,7 +833,7 @@ function SiblingBuryBlock() {
           </div>
         </>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，队列即时生效。</p>}
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">{T("已保存，队列即时生效。")}</p>}
     </>
   );
 }
@@ -805,8 +841,9 @@ function SiblingBuryBlock() {
 // ---------- 卡面与标签（v48.70 / D114）：卡面信息密度 + 标签功能总开关物理合并 ----------
 // data-cf-* / tags-enabled-toggle / data-tags-on/off 钩原样保留（d104/d107 为 document 级查询，位置无关）。
 function CardTagsSection() {
+  const T = useT();
   return (
-    <SettingsSection id="sec-cardtags" title="卡面与标签">
+    <SettingsSection id="sec-cardtags" title={T("卡面与标签")}>
       <WorkbenchBlock />
       <CardFaceBlock />
       <TagsBlock />
@@ -816,6 +853,7 @@ function CardTagsSection() {
 
 // 制卡台放置位置（v48.79，D123）：右侧（默认）/ 底部。与使用习惯相关、很少调整，所以放设置而不放在面板上。
 function WorkbenchBlock() {
+  const T = useT();
   const [placement, setPlacement] = useState<WorkbenchPlacement | null>(null);
   useEffect(() => {
     void settingsStore.get<unknown>("app", "workbenchPlacement", "right").then((v) => setPlacement(normalizePlacement(v)));
@@ -827,17 +865,17 @@ function WorkbenchBlock() {
   return (
     <>
       <h4>
-        制卡台
-        <SettingsInfo label="制卡台">
-          手动制卡、AI 制卡、AI 解释都在制卡台里；顶栏「制卡台」按钮或 Ctrl+K 开合。最大化时向内推，非最大化时窗口会向右变宽（屏幕放不下则向内推）。
+        {T("制卡台")}
+        <SettingsInfo label={T("制卡台")}>
+          {T("手动制卡、AI 制卡、AI 解释都在制卡台里；顶栏「制卡台」按钮或 Ctrl+K 开合。最大化时向内推，非最大化时窗口会向右变宽（屏幕放不下则向内推）。")}
         </SettingsInfo>
       </h4>
       <div className="settings-row">
-        <span className="settings-row-label">放置位置</span>
-        <div className="seg-tabs" role="radiogroup" aria-label="制卡台放置位置">
+        <span className="settings-row-label">{T("放置位置")}</span>
+        <div className="seg-tabs" role="radiogroup" aria-label={T("制卡台放置位置")}>
           {(["right", "bottom"] as const).map((m) => (
             <button key={m} role="radio" aria-checked={placement === m} data-wb-placement={m} className={placement === m ? "active" : ""} onClick={() => void change(m)}>
-              {m === "right" ? "右侧" : "底部"}
+              {m === "right" ? T("右侧") : T("底部")}
             </button>
           ))}
         </div>
@@ -849,6 +887,7 @@ function WorkbenchBlock() {
 // 卡面信息密度（v48.61，D104/D94 设计稿 §3.5）：背面辅助字段三开关
 // 纯显示开关：关闭即不渲染对应块；不改卡内数据、不影响 CardLint。作用于复习页背面与卡详情预览（同一组件）。
 function CardFaceBlock() {
+  const T = useT();
   const [cfg, setCfg] = useState<{ mnemonic: boolean; example: boolean; sourceRef: boolean } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -872,26 +911,26 @@ function CardFaceBlock() {
   return (
     <>
       <h4>
-        卡面信息密度
-        <SettingsInfo label="卡面信息密度">关闭即不渲染对应块；不改卡内数据，也不影响制卡时的质检。</SettingsInfo>
+        {T("卡面信息密度")}
+        <SettingsInfo label={T("卡面信息密度")}>{T("关闭即不渲染对应块；不改卡内数据，也不影响制卡时的质检。")}</SettingsInfo>
       </h4>
       {cfg && (
         <>
           <div className="settings-row">
-            <span>显示助记</span>
+            <span>{T("显示助记")}</span>
             <input type="checkbox" data-cf-mnemonic checked={cfg.mnemonic} onChange={(e) => update({ mnemonic: e.target.checked })} />
           </div>
           <div className="settings-row">
-            <span>显示例子</span>
+            <span>{T("显示例子")}</span>
             <input type="checkbox" data-cf-example checked={cfg.example} onChange={(e) => update({ example: e.target.checked })} />
           </div>
           <div className="settings-row">
-            <span>显示来源</span>
+            <span>{T("显示来源")}</span>
             <input type="checkbox" data-cf-source checked={cfg.sourceRef} onChange={(e) => update({ sourceRef: e.target.checked })} />
           </div>
         </>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，卡面即时生效。</p>}
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">{T("已保存，卡面即时生效。")}</p>}
     </>
   );
 }
@@ -901,6 +940,7 @@ function CardFaceBlock() {
 // 复习页标签区与快捷打标、浏览器批量打标/去标、卡详情标签区、筛选牌组构建器标签条件。
 // 只隐藏入口与展示——已存标签数据零改动，重新打开即恢复；查询 tag: 与已存 scope 照常生效。
 function TagsBlock() {
+  const T = useT();
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   useEffect(() => {
@@ -916,20 +956,20 @@ function TagsBlock() {
   }
   return (
     <>
-      <h4>标签功能</h4>
+      <h4>{T("标签功能")}</h4>
       {enabled !== null && (
         <div className="settings-row">
           <span className="settings-row-label">
-            启用标签功能
-            <SettingsInfo label="启用标签功能">关闭隐藏全部标签入口与展示（AI 标签建议同停）；已存标签数据原样保留，重开即恢复。</SettingsInfo>
+            {T("启用标签功能")}
+            <SettingsInfo label={T("启用标签功能")}>{T("关闭隐藏全部标签入口与展示（AI 标签建议同停）；已存标签数据原样保留，重开即恢复。")}</SettingsInfo>
           </span>
-          <div className="seg-tabs seg-tabs-sm" role="group" aria-label="标签功能开关" data-testid="tags-enabled-toggle">
-            <button className={enabled ? "active" : ""} data-tags-on onClick={() => update(true)}>开</button>
-            <button className={!enabled ? "active" : ""} data-tags-off onClick={() => update(false)}>关</button>
+          <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("标签功能开关")} data-testid="tags-enabled-toggle">
+            <button className={enabled ? "active" : ""} data-tags-on onClick={() => update(true)}>{T("开")}</button>
+            <button className={!enabled ? "active" : ""} data-tags-off onClick={() => update(false)}>{T("关")}</button>
           </div>
         </div>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，各界面即时生效。</p>}
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">{T("已保存，各界面即时生效。")}</p>}
     </>
   );
 }
@@ -938,6 +978,7 @@ function TagsBlock() {
 // 实验项必须带「实验功能 · 早期开发阶段」标识与说明（用户口径）；切换推送引擎为**无损**操作
 // （每引擎私有子空间互不覆盖，A→B→A 往返逐字段等值，指南 §6.8-4）。
 function ExtractReviewSection() {
+  const T = useT();
   const [cfg, setCfg] = useState<{ mergeIntoReview: boolean; interleave: InterleaveMode; engine: ExtractEngine } | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const [rerankNote, setRerankNote] = useState<string | null>(null);
@@ -958,11 +999,11 @@ function ExtractReviewSection() {
     setRerankNote(null);
     try {
       const r = await rerankExtractsNow();
-      if (!r.ok) setRerankNote(`未能重排：${r.reason || "未知原因"}`);
-      else if (r.usedAI) setRerankNote(`已按 AI 重排 ${r.count} 条（之后的摘录写操作会自动刷新）`);
-      else setRerankNote(`未采用 AI 结果：${r.reason || "输出未通过本地裁决"}——当前用本地因子序`);
+      if (!r.ok) setRerankNote(T("未能重排：{reason}", { reason: r.reason || T("未知原因") }));
+      else if (r.usedAI) setRerankNote(T("已按 AI 重排 {n} 条（之后的摘录写操作会自动刷新）", { n: r.count }));
+      else setRerankNote(T("未采用 AI 结果：{reason}——当前用本地因子序", { reason: r.reason || T("输出未通过本地裁决") }));
     } catch (e) {
-      setRerankNote(`重排失败：${e instanceof Error ? e.message : String(e)}`);
+      setRerankNote(T("重排失败：{msg}", { msg: e instanceof Error ? e.message : String(e) }));
     } finally {
       setBusyRerank(false);
     }
@@ -979,40 +1020,39 @@ function ExtractReviewSection() {
     window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
   }
   return (
-    <SettingsSection id="sec-extracts" title="摘录复习">
+    <SettingsSection id="sec-extracts" title={T("摘录复习")}>
       {cfg && (
         <>
           <div className="settings-row">
             <span className="settings-row-label">
-              并入复习队列（传统 SuperMemo 方式）
-              <SettingsInfo label="并入复习队列">开启后复习时按混编规则推送摘录卡，可就地处理；关闭时摘录在顶栏「摘录」页连续处理。</SettingsInfo>
+              {T("并入复习队列（传统 SuperMemo 方式）")}
+              <SettingsInfo label={T("并入复习队列")}>{T("开启后复习时按混编规则推送摘录卡，可就地处理；关闭时摘录在顶栏「摘录」页连续处理。")}</SettingsInfo>
             </span>
-            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="摘录并入复习队列">
-              <button className={cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: true })}>开</button>
-              <button className={!cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: false })}>关</button>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("摘录并入复习队列")}>
+              <button className={cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: true })}>{T("开")}</button>
+              <button className={!cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: false })}>{T("关")}</button>
             </div>
           </div>
           <div className="settings-row">
             <span className="settings-row-label">
-              混编规则
-              <SettingsInfo label="混编规则">切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。</SettingsInfo>
+              {T("混编规则")}
+              <SettingsInfo label={T("混编规则")}>{T("切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。")}</SettingsInfo>
             </span>
             <Dropdown
               value={cfg.interleave}
               align="left"
               options={[
-                { value: "quota-1-4", label: "上限 1:4（每 4 张卡至多 1 条摘录，SuperMemo 口径）" },
-                { value: "by-due", label: "按到期时间自然混排" }
+                { value: "quota-1-4", label: T("上限 1:4（每 4 张卡至多 1 条摘录，SuperMemo 口径）") },
+                { value: "by-due", label: T("按到期时间自然混排") }
               ]}
               onChange={(v) => void update({ interleave: v as InterleaveMode })}
             />
           </div>
           <div className="settings-row">
             <span className="settings-row-label">
-              摘录推送引擎
-              <SettingsInfo label="摘录推送引擎">
-                实验引擎按本地因子（优先级/逾期/搁置/同书连击）排序并给逐条可验证理由；AI 重排只影响处理顺序、
-                经本地裁决过滤；{frontierNote}。切回 SuperMemo 无损。
+              {T("摘录推送引擎")}
+              <SettingsInfo label={T("摘录推送引擎")}>
+                {T("实验引擎按本地因子（优先级/逾期/搁置/同书连击）排序并给逐条可验证理由；AI 重排只影响处理顺序、经本地裁决过滤；{note}。切回 SuperMemo 无损。", { note: frontierNote })}
               </SettingsInfo>
             </span>
             <Dropdown
@@ -1028,11 +1068,11 @@ function ExtractReviewSection() {
           {cfg.engine === "ai-next-extract" && (
             <>
               {/* 实验标识句按契约保留行内（D114 §9）；完整语义入「摘录推送引擎」tooltip */}
-              <p className="form-hint">实验功能 · 早期开发阶段。</p>
+              <p className="form-hint">{T("实验功能 · 早期开发阶段。")}</p>
               <div className="settings-row">
-                <span>AI 重排</span>
+                <span>{T("AI 重排")}</span>
                 <button className="btn btn-outline btn-sm" data-rerank-now disabled={busyRerank} onClick={() => void runRerank()}>
-                  立即重排（对当前到期批）
+                  {T("立即重排（对当前到期批）")}
                 </button>
               </div>
               {rerankNote && <p className="form-hint">{rerankNote}</p>}
@@ -1040,7 +1080,7 @@ function ExtractReviewSection() {
           )}
         </>
       )}
-      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，队列即时生效。</p>}
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">{T("已保存，队列即时生效。")}</p>}
     </SettingsSection>
   );
 }
@@ -1049,6 +1089,7 @@ function ExtractReviewSection() {
 // 硬边界（复习上限 ≥ 新上限 × 5）由**主进程 settings:set 兜底拒写**，此处只做即时提示；
 // 用量为派生值（review_logs / extract_ops），重启不漂移。
 function LimitsSection() {
+  const T = useT();
   const [limits, setLimits] = useState<Limits | null>(null);
   const [state, setState] = useState<LimitsState | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
@@ -1101,30 +1142,30 @@ function LimitsSection() {
   return (
     <SettingsSection
       id="sec-limits"
-      title="每日上限"
+      title={T("每日上限")}
       info={
-        <SettingsInfo label="每日上限">
-          四类上限按学习日（「新一天从」时刻）计算，全部范围共享同一份额度；填 0 表示不限制。
+        <SettingsInfo label={T("每日上限")}>
+          {T("四类上限按学习日（「新一天从」时刻）计算，全部范围共享同一份额度；填 0 表示不限制。")}
         </SettingsInfo>
       }
     >
       {limits && (
         <>
-          {num("每日新卡片上限", "newCardsPerDay", "首次作答的卡片张数")}
+          {num(T("每日新卡片上限"), "newCardsPerDay", T("首次作答的卡片张数"))}
           {num(
-            "每日卡片复习上限",
+            T("每日卡片复习上限"),
             "cardReviewsPerDay",
-            "卡片作答总次数（新卡与复习卡共用）",
-            <SettingsInfo label="每日卡片复习上限">
-              硬边界：不得低于新卡上限的 5 倍；低于 10 倍时给出提示（Anki 经验：20 张新卡约 200 次复习/日）。
+            T("卡片作答总次数（新卡与复习卡共用）"),
+            <SettingsInfo label={T("每日卡片复习上限")}>
+              {T("硬边界：不得低于新卡上限的 5 倍；低于 10 倍时给出提示（Anki 经验：20 张新卡约 200 次复习/日）。")}
             </SettingsInfo>
           )}
-          {num("每日新摘录上限", "newExtractsPerDay", "新引入的摘录条数")}
-          {num("每日摘录处理上限", "extractReviewsPerDay", "到期摘录的处理条数")}
+          {num(T("每日新摘录上限"), "newExtractsPerDay", T("新引入的摘录条数"))}
+          {num(T("每日摘录处理上限"), "extractReviewsPerDay", T("到期摘录的处理条数"))}
           <div className="settings-row">
             <span className="settings-row-label">
-              复习上限用尽后仍发新卡与新摘录
-              <SettingsInfo label="复习上限用尽后仍发新卡与新摘录">关闭（默认）＝防积压的结构闸：复习额度用尽即停发新卡与新摘录。</SettingsInfo>
+              {T("复习上限用尽后仍发新卡与新摘录")}
+              <SettingsInfo label={T("复习上限用尽后仍发新卡与新摘录")}>{T("关闭（默认）＝防积压的结构闸：复习额度用尽即停发新卡与新摘录。")}</SettingsInfo>
             </span>
             <input
               type="checkbox"
@@ -1134,17 +1175,20 @@ function LimitsSection() {
           </div>
           {state && (
             <p className="form-hint">
-              今日已用：新卡 {state.usage.newCards}/{state.limits.newCardsPerDay || "∞"} · 复习 {state.usage.cardReviews}/
-              {state.limits.cardReviewsPerDay || "∞"} · 新摘录 {state.usage.newExtracts}/{state.limits.newExtractsPerDay || "∞"} ·
-              摘录处理 {state.usage.extractReviews}/{state.limits.extractReviewsPerDay || "∞"}
-              {state.newBlocked ? "（复习额度已用尽，新卡与新摘录已停发）" : ""}
+              {T("今日已用：新卡 {a}/{b} · 复习 {c}/{d} · 新摘录 {e}/{f} · 摘录处理 {g}/{h}", {
+                a: state.usage.newCards, b: state.limits.newCardsPerDay || "∞",
+                c: state.usage.cardReviews, d: state.limits.cardReviewsPerDay || "∞",
+                e: state.usage.newExtracts, f: state.limits.newExtractsPerDay || "∞",
+                g: state.usage.extractReviews, h: state.limits.extractReviewsPerDay || "∞"
+              })}
+              {state.newBlocked ? T("（复习额度已用尽，新卡与新摘录已停发）") : ""}
             </p>
           )}
         </>
       )}
-      {errors.length > 0 && <p className="ai-test-err">{errors.join("；")}</p>}
-      {errors.length === 0 && advisory.length > 0 && <p className="form-hint">提示：{advisory.join("；")}</p>}
-      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">已保存，队列即时生效。</p>}
+      {errors.length > 0 && <p className="ai-test-err">{errors.join(T("；"))}</p>}
+      {errors.length === 0 && advisory.length > 0 && <p className="form-hint">{T("提示：")}{advisory.join(T("；"))}</p>}
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">{T("已保存，队列即时生效。")}</p>}
     </SettingsSection>
   );
 }
@@ -1155,6 +1199,7 @@ function LimitsSection() {
 
 // FSRS 参数优化（v12）：从复习记录训练个性化权重（fsrs-rs-nodejs），应用后调度即刻生效
 function FSRSSection() {
+  const T = useT();
   const [stats, setStats] = useState<{ reviewCount: number; cardCount: number; minRecommended: number; enough: boolean } | null>(null);
   const [activeSource, setActiveSource] = useState<string | null>(null);
   const [trainedW, setTrainedW] = useState<number[] | null>(null);
@@ -1196,10 +1241,10 @@ function FSRSSection() {
         setMetrics({ logLoss: result.logLoss ?? 0, rmseBins: result.rmseBins ?? 0 });
         setNotice({
           ok: true,
-          text: `训练完成：${result.reviewCount} 条复习记录（${result.cardCount} 张卡）。点击「应用」后新权重立即生效。`
+          text: T("训练完成：{reviews} 条复习记录（{cards} 张卡）。点击「应用」后新权重立即生效。", { reviews: result.reviewCount, cards: result.cardCount })
         });
       } else {
-        setNotice({ ok: false, text: result.error || "训练失败" });
+        setNotice({ ok: false, text: result.error || T("训练失败") });
       }
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -1217,9 +1262,9 @@ function FSRSSection() {
     if (result?.ok) {
       setTrainedW(null);
       setActiveSource("optimizer");
-      setNotice({ ok: true, text: "已应用优化权重，复习调度即刻使用新参数。" });
+      setNotice({ ok: true, text: T("已应用优化权重，复习调度即刻使用新参数。") });
     } else {
-      setNotice({ ok: false, text: "应用失败，请重试。" });
+      setNotice({ ok: false, text: T("应用失败，请重试。") });
     }
   }
 
@@ -1228,34 +1273,34 @@ function FSRSSection() {
     const result = await api.reset();
     if (result?.ok) {
       setActiveSource("default");
-      setNotice({ ok: true, text: "已恢复 FSRS 默认参数。" });
+      setNotice({ ok: true, text: T("已恢复 FSRS 默认参数。") });
     } else {
-      setNotice({ ok: false, text: "恢复失败，请重试。" });
+      setNotice({ ok: false, text: T("恢复失败，请重试。") });
     }
   }
 
   return (
-    <SettingsSection id="sec-fsrs" title="FSRS 参数优化">
+    <SettingsSection id="sec-fsrs" title={T("FSRS 参数优化")}>
       {stats && (
         <p className="form-hint">
-          复习记录 <span className="mono">{stats.reviewCount}</span> 条
-          {stats.enough ? "，可优化" : `（建议 ${stats.minRecommended}+ 条后再优化）`}
+          {T("复习记录 {n} 条", { n: stats.reviewCount })}
+          {stats.enough ? T("，可优化") : T("（建议 {min}+ 条后再优化）", { min: stats.minRecommended })}
         </p>
       )}
-      <p className="form-hint">当前参数：{activeSource === "optimizer" ? "优化权重" : "默认参数"}</p>
+      <p className="form-hint">{T("当前参数：")}{activeSource === "optimizer" ? T("优化权重") : T("默认参数")}</p>
 
       <div className="settings-row settings-row-wrap">
         <button className="btn btn-primary btn-sm" disabled={busy} onClick={handleTrain}>
-          {busy ? `训练中… ${progress !== null ? progress + "%" : ""}` : "开始优化"}
+          {busy ? T("训练中… {pct}%", { pct: progress !== null ? progress : "" }) : T("开始优化")}
         </button>
         {trainedW && (
           <button className="btn btn-secondary btn-sm" onClick={handleApply}>
-            应用优化结果
+            {T("应用优化结果")}
           </button>
         )}
         {activeSource === "optimizer" && (
           <button className="btn btn-outline btn-sm" onClick={handleReset}>
-            恢复默认
+            {T("恢复默认")}
           </button>
         )}
       </div>
@@ -1289,6 +1334,7 @@ function togglePaletteColor(current: string[], color: string): string[] {
 
 // ---------- 阅读外观（v20 R1b）：与阅读器快捷控件共用 settings.app.readerSettings ----------
 function ReaderSection() {
+  const T = useT();
   const [cfg, setCfg] = useState<ReaderSettings | null>(null);
   // v48.23（D61 §6.8-11）：多段选择的修饰键（app.multiSelectKey；默认 Ctrl / macOS 建议 Meta）
   const [multiKey, setMultiKey] = useState<MultiSelectKey | null>(null);
@@ -1374,30 +1420,30 @@ function ReaderSection() {
   if (!cfg) return null;
   const a = cfg.appearance;
   return (
-    <SettingsSection id="sec-reader" title="阅读">
-      <h4>阅读外观</h4>
+    <SettingsSection id="sec-reader" title={T("阅读")}>
+      <h4>{T("阅读外观")}</h4>
       <div className="settings-row">
         <span className="settings-row-label">
-          主题预设
-          <SettingsInfo label="主题预设">与阅读器顶栏「主题」菜单读写同一份设置。</SettingsInfo>
+          {T("主题预设")}
+          <SettingsInfo label={T("主题预设")}>{T("与阅读器顶栏「主题」菜单读写同一份设置。")}</SettingsInfo>
         </span>
         <div className="seg-tabs">
           {(["paper", "sepia", "dark", "custom"] as const).map((t) => (
             <button key={t} className={a.theme === t ? "active" : ""} onClick={() => save({ ...cfg, appearance: { ...a, theme: t } })}>
-              {t === "paper" ? "纸白" : t === "sepia" ? "羊皮" : t === "dark" ? "暗夜" : "自定义"}
+              {t === "paper" ? T("纸白") : t === "sepia" ? T("羊皮") : t === "dark" ? T("暗夜") : T("自定义")}
             </button>
           ))}
         </div>
       </div>
       {a.theme === "custom" && (
         <div className="settings-row">
-          <span>自定义色</span>
-          <input type="color" value={a.bgColor || "#fafaf8"} onChange={(e) => save({ ...cfg, appearance: { ...a, bgColor: e.target.value } })} title="背景色" />
-          <input type="color" value={a.fgColor || "#1a1a1a"} onChange={(e) => save({ ...cfg, appearance: { ...a, fgColor: e.target.value } })} title="文字色" />
+          <span>{T("自定义色")}</span>
+          <input type="color" value={a.bgColor || "#fafaf8"} onChange={(e) => save({ ...cfg, appearance: { ...a, bgColor: e.target.value } })} title={T("背景色")} />
+          <input type="color" value={a.fgColor || "#1a1a1a"} onChange={(e) => save({ ...cfg, appearance: { ...a, fgColor: e.target.value } })} title={T("文字色")} />
         </div>
       )}
       <div className="settings-row">
-        <span>字号（{a.fontSize ?? 17}px）</span>
+        <span>{T("字号（{n}px）", { n: a.fontSize ?? 17 })}</span>
         <input
           type="range"
           min={12}
@@ -1407,10 +1453,10 @@ function ReaderSection() {
         />
       </div>
       <div className="form-field">
-        <label>正文字体</label>
+        <label>{T("正文字体")}</label>
         <input
           value={a.fontFamily ?? ""}
-          placeholder="留空使用默认多语言衬线栈"
+          placeholder={T("留空使用默认多语言衬线栈")}
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontFamily: e.target.value } })}
         />
       </div>
@@ -1418,8 +1464,10 @@ function ReaderSection() {
           数值显示 mono + tabular-nums（.mono 的 font-feature-settings "tnum"），拖动时数字宽度不跳动 */}
       <div className="settings-row" data-reader-setting="lineHeight">
         <span className="settings-row-label">
-          行距（<span className="mono">{a.lineHeight ?? 1.7}</span>）
-          <SettingsInfo label="行距">正文行距（1.2–2.4）。摘录卡面行高恒跟随本设置（既有契约）；PDF 为固定版式，不适用。</SettingsInfo>
+          {T("行距（")}
+          <span className="mono">{a.lineHeight ?? 1.7}</span>
+          {T("）")}
+          <SettingsInfo label={T("行距")}>{T("正文行距（1.2–2.4）。摘录卡面行高恒跟随本设置（既有契约）；PDF 为固定版式，不适用。")}</SettingsInfo>
         </span>
         <input
           type="range"
@@ -1432,8 +1480,10 @@ function ReaderSection() {
       </div>
       <div className="settings-row" data-reader-setting="margin">
         <span className="settings-row-label">
-          页边距（<span className="mono">{a.margin ?? 48}px</span>）
-          <SettingsInfo label="页边距">分页/对开模式的上下边带（0–120px）；滚动模式的排版余白由版心宽度承担；PDF 不适用。</SettingsInfo>
+          {T("页边距（")}
+          <span className="mono">{a.margin ?? 48}px</span>
+          {T("）")}
+          <SettingsInfo label={T("页边距")}>{T("分页/对开模式的上下边带（0–120px）；滚动模式的排版余白由版心宽度承担；PDF 不适用。")}</SettingsInfo>
         </span>
         <input
           type="range"
@@ -1446,8 +1496,10 @@ function ReaderSection() {
       </div>
       <div className="settings-row" data-reader-setting="measure">
         <span className="settings-row-label">
-          版心宽度（<span className="mono">{a.maxInlineSize ?? 720}px</span>）
-          <SettingsInfo label="版心宽度">滚动模式正文列最大宽度（480–1200px）＝「页边距」在滚动模式的对应物；720px ≈ 每行 42 个全角字。</SettingsInfo>
+          {T("版心宽度（")}
+          <span className="mono">{a.maxInlineSize ?? 720}px</span>
+          {T("）")}
+          <SettingsInfo label={T("版心宽度")}>{T("滚动模式正文列最大宽度（480–1200px）＝「页边距」在滚动模式的对应物；720px ≈ 每行 42 个全角字。")}</SettingsInfo>
         </span>
         <input
           type="range"
@@ -1472,7 +1524,7 @@ function ReaderSection() {
                   defaultValue={t.name}
                   maxLength={24}
                   autoFocus
-                  aria-label="重命名主题"
+                  aria-label={T("重命名主题")}
                   onBlur={(e) => {
                     renameTheme(t.id, e.target.value);
                     setRenameId(null);
@@ -1496,19 +1548,19 @@ function ReaderSection() {
                    「取消」（设计 §6「焦点默认落取消」契约落空）。 */
                 <span key="confirm" className="reader-theme-manage-actions reader-theme-manage-actions-show">
                   <button type="button" className="reader-text-btn" data-reader-theme-delete-confirm onClick={() => { deleteTheme(t.id); setConfirmId(null); }}>
-                    确认删除
+                    {T("确认删除")}
                   </button>
                   <button type="button" className="reader-text-btn" autoFocus onClick={() => setConfirmId(null)}>
-                    取消
+                    {T("取消")}
                   </button>
                 </span>
               ) : (
                 <span className="reader-theme-manage-actions">
                   <button type="button" className="reader-text-btn" data-reader-theme-rename onClick={() => setRenameId(t.id)}>
-                    重命名
+                    {T("重命名")}
                   </button>
                   <button type="button" className="reader-text-btn" data-reader-theme-delete onClick={() => setConfirmId(t.id)}>
-                    删除
+                    {T("删除")}
                   </button>
                 </span>
               )}
@@ -1516,29 +1568,29 @@ function ReaderSection() {
           ))}
         </div>
       ) : (
-        <p className="reader-theme-empty">在阅读器里把自定义色保存为主题后，会出现在这里。</p>
+        <p className="reader-theme-empty">{T("在阅读器里把自定义色保存为主题后，会出现在这里。")}</p>
       )}
 
-      <h4>选区与批注</h4>
+      <h4>{T("选区与批注")}</h4>
       <div className="settings-row">
         <span className="settings-row-label">
-          多段选择修饰键
-          <SettingsInfo label="多段选择修饰键">按住它再选不相邻段＝加选；重复选＝移出；Esc 清空。Ctrl+Z/X/S/A/D 等纯键盘组合不受影响。</SettingsInfo>
+          {T("多段选择修饰键")}
+          <SettingsInfo label={T("多段选择修饰键")}>{T("按住它再选不相邻段＝加选；重复选＝移出；Esc 清空。Ctrl+Z/X/S/A/D 等纯键盘组合不受影响。")}</SettingsInfo>
         </span>
         <Dropdown
           value={multiKey ?? DEFAULT_MULTI_SELECT_KEY}
           align="left"
           options={MULTI_SELECT_KEYS.map((k) => ({
             value: k,
-            label: k === "Meta" ? "Meta（macOS 的 Command）" : k
+            label: k === "Meta" ? T("Meta（macOS 的 Command）") : k
           }))}
           onChange={(v) => saveMultiKey(v as MultiSelectKey)}
         />
       </div>
       <div className="settings-row">
         <span className="settings-row-label">
-          默认标注模式
-          <SettingsInfo label="默认标注模式">高亮＝点色只做纯批注；摘录+高亮＝点色同时建一条摘录。都可在选区菜单里临时切换。</SettingsInfo>
+          {T("默认标注模式")}
+          <SettingsInfo label={T("默认标注模式")}>{T("高亮＝点色只做纯批注；摘录+高亮＝点色同时建一条摘录。都可在选区菜单里临时切换。")}</SettingsInfo>
         </span>
         <div className="seg-tabs">
           {([["highlight", "高亮"], ["extract", "摘录+高亮"]] as const).map(([id, label]) => (
@@ -1548,15 +1600,15 @@ function ReaderSection() {
               data-annot-mode={id}
               onClick={() => saveAnnot("annotateMode", id)}
             >
-              {label}
+              {T(label)}
             </button>
           ))}
         </div>
       </div>
       <div className="settings-row">
         <span className="settings-row-label">
-          默认标注形式
-          <SettingsInfo label="默认标注形式">高亮＝底色；下划线＝批注色 2px 色线。都可在选区菜单里临时切换。</SettingsInfo>
+          {T("默认标注形式")}
+          <SettingsInfo label={T("默认标注形式")}>{T("高亮＝底色；下划线＝批注色 2px 色线。都可在选区菜单里临时切换。")}</SettingsInfo>
         </span>
         <div className="seg-tabs">
           {([["highlight", "高亮"], ["underline", "下划线"]] as const).map(([id, label]) => (
@@ -1566,15 +1618,15 @@ function ReaderSection() {
               data-annot-form={id}
               onClick={() => saveAnnot("annotateForm", id)}
             >
-              {label}
+              {T(label)}
             </button>
           ))}
         </div>
       </div>
       <div className="settings-row">
         <span className="settings-row-label">
-          批注色板
-          <SettingsInfo label="批注色板">勾选的颜色与顺序＝调色排里出现的颜色与顺序；点色即执行当前模式的动作。</SettingsInfo>
+          {T("批注色板")}
+          <SettingsInfo label={T("批注色板")}>{T("勾选的颜色与顺序＝调色排里出现的颜色与顺序；点色即执行当前模式的动作。")}</SettingsInfo>
         </span>
         <div className="annot-palette-pick" data-annot-palette>
           {ANNOT_COLORS.map((c) => {
@@ -1586,7 +1638,7 @@ function ReaderSection() {
                 className={`swatch${on ? " on" : ""}`}
                 data-palette-color={c}
                 aria-pressed={on}
-                title={on ? `${c}（点击移出色板）` : `${c}（点击加入色板，最多 8 支）`}
+                title={on ? T("{c}（点击移出色板）", { c }) : T("{c}（点击加入色板，最多 8 支）", { c })}
                 style={{ background: `var(--annot-${c})` }}
                 onClick={() => saveAnnot("annotatePalette", togglePaletteColor(annot.annotatePalette, c))}
               />
@@ -1596,8 +1648,8 @@ function ReaderSection() {
       </div>
       <div className="settings-row">
         <span className="settings-row-label">
-          自定义取色
-          <SettingsInfo label="自定义取色">调色排末位是否显示「自定义…」入口。</SettingsInfo>
+          {T("自定义取色")}
+          <SettingsInfo label={T("自定义取色")}>{T("调色排末位是否显示「自定义…」入口。")}</SettingsInfo>
         </span>
         <div className="seg-tabs">
           {([[true, "显示"], [false, "隐藏"]] as const).map(([id, label]) => (
@@ -1607,15 +1659,15 @@ function ReaderSection() {
               data-annot-custom={String(id)}
               onClick={() => saveAnnot("annotateCustomEnabled", id)}
             >
-              {label}
+              {T(label)}
             </button>
           ))}
         </div>
       </div>
       <div className="settings-row">
         <span className="settings-row-label">
-          批注栏默认筛选
-          <SettingsInfo label="批注栏默认筛选">批注栏打开时的初始筛选；栏顶段控与本键同一份设置。</SettingsInfo>
+          {T("批注栏默认筛选")}
+          <SettingsInfo label={T("批注栏默认筛选")}>{T("批注栏打开时的初始筛选；栏顶段控与本键同一份设置。")}</SettingsInfo>
         </span>
         <div className="seg-tabs">
           {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
@@ -1625,7 +1677,7 @@ function ReaderSection() {
               data-annot-filter={id}
               onClick={() => saveAnnot("annotationFilter", id)}
             >
-              {label}
+              {T(label)}
             </button>
           ))}
         </div>
@@ -1633,8 +1685,8 @@ function ReaderSection() {
       {/* D122：选区浮条里「批注/制卡/AI 制卡/AI 解释/查词」的呈现——图标（默认）或文字 */}
       <div className="settings-row">
         <span className="settings-row-label">
-          选区浮条按钮样式
-          <SettingsInfo label="选区浮条按钮样式">选中文字时出现在文字旁的浮条里，动作按钮用图标（悬停显示名称）或文字标签。</SettingsInfo>
+          {T("选区浮条按钮样式")}
+          <SettingsInfo label={T("选区浮条按钮样式")}>{T("选中文字时出现在文字旁的浮条里，动作按钮用图标（悬停显示名称）或文字标签。")}</SettingsInfo>
         </span>
         <div className="seg-tabs">
           {([["icon", "图标"], ["text", "文字"]] as const).map(([id, label]) => (
@@ -1648,21 +1700,20 @@ function ReaderSection() {
                 void settingsStore.set("app", "selectionBarStyle", id);
               }}
             >
-              {label}
+              {T(label)}
             </button>
           ))}
         </div>
       </div>
 
-      <h4>摘录卡编辑器</h4>
+      <h4>{T("摘录卡编辑器")}</h4>
       {/* D95 §E：编辑器富文本工具栏开关（v48.114 / D160 全局化：MarkdownEditor 组件内读键 ⇒ 全部带工具条的
           编辑宿主一并生效——摘录卡、书架粘贴导入等；关＝整行不渲染，markdown 语法输入不受影响） */}
       <div className="settings-row">
         <span className="settings-row-label">
-          编辑器富文本工具栏
-          <SettingsInfo label="编辑器富文本工具栏">
-            全局生效：摘录卡、书架「添加书籍」粘贴导入等所有 Markdown 编辑面的底部工具条。
-            编辑时选中文字即可加粗/标题/列表/公式等；关闭后仍可用 markdown 语法输入与快捷键。
+          {T("编辑器富文本工具栏")}
+          <SettingsInfo label={T("编辑器富文本工具栏")}>
+            {T("全局生效：摘录卡、书架「添加书籍」粘贴导入等所有 Markdown 编辑面的底部工具条。编辑时选中文字即可加粗/标题/列表/公式等；关闭后仍可用 markdown 语法输入与快捷键。")}
           </SettingsInfo>
         </span>
         <label className="widget-toggle-main">
@@ -1672,14 +1723,14 @@ function ReaderSection() {
             checked={ext.extractEditorToolbar}
             onChange={(e) => saveExtract({ ...ext, extractEditorToolbar: e.target.checked })}
           />
-          <span>编辑时显示</span>
+          <span>{T("编辑时显示")}</span>
         </label>
       </div>
       {/* D95 v1.4→§K.3：工具栏形态——dock（钉底/钉顶）/悬浮＝选区锚定弹层 */}
       <div className="settings-row">
         <span className="settings-row-label">
-          工具栏形态
-          <SettingsInfo label="工具栏形态">悬浮＝工具条弹层锚定当前选中的文字；关闭＝随文档流固定在顶部或底部。</SettingsInfo>
+          {T("工具栏形态")}
+          <SettingsInfo label={T("工具栏形态")}>{T("悬浮＝工具条弹层锚定当前选中的文字；关闭＝随文档流固定在顶部或底部。")}</SettingsInfo>
         </span>
         <label className="widget-toggle-main">
           <input
@@ -1688,14 +1739,14 @@ function ReaderSection() {
             checked={ext.extractEditorToolbarFloat}
             onChange={(e) => saveExtract({ ...ext, extractEditorToolbarFloat: e.target.checked })}
           />
-          <span>悬浮于选中文字</span>
+          <span>{T("悬浮于选中文字")}</span>
         </label>
       </div>
       {/* §K.2：dock 态钉底/钉顶（悬浮态优先于本键；钉顶时工具条吸顶并让开吸顶头带） */}
       <div className="settings-row">
         <span className="settings-row-label">
-          工具栏固定位置（非悬浮时）
-          <SettingsInfo label="工具栏固定位置">开启＝钉顶（吸顶并让开吸顶头带）；关闭＝钉底。悬浮形态优先于本键。</SettingsInfo>
+          {T("工具栏固定位置（非悬浮时）")}
+          <SettingsInfo label={T("工具栏固定位置")}>{T("开启＝钉顶（吸顶并让开吸顶头带）；关闭＝钉底。悬浮形态优先于本键。")}</SettingsInfo>
         </span>
         <label className="widget-toggle-main">
           <input
@@ -1704,12 +1755,12 @@ function ReaderSection() {
             checked={ext.extractEditorToolbarTop}
             onChange={(e) => saveExtract({ ...ext, extractEditorToolbarTop: e.target.checked })}
           />
-          <span>固定在顶部</span>
+          <span>{T("固定在顶部")}</span>
         </label>
       </div>
       {/* D95 §F.2：摘录卡字号——默认跟随阅读界面，可独立自定义字号/字体（行高恒跟随） */}
       <div className="settings-row">
-        <span>摘录卡字号</span>
+        <span>{T("摘录卡字号")}</span>
         <label className="widget-toggle-main">
           <input
             type="checkbox"
@@ -1717,13 +1768,13 @@ function ReaderSection() {
             checked={ext.extractFaceFontFollow}
             onChange={(e) => saveExtract({ ...ext, extractFaceFontFollow: e.target.checked })}
           />
-          <span>跟随阅读界面字号/字体</span>
+          <span>{T("跟随阅读界面字号/字体")}</span>
         </label>
       </div>
       {!ext.extractFaceFontFollow && (
         <>
           <div className="settings-row">
-            <span>摘录卡字号（{ext.extractFaceFontSize}px）</span>
+            <span>{T("摘录卡字号（{n}px）", { n: ext.extractFaceFontSize })}</span>
             <input
               type="range"
               min={10}
@@ -1734,11 +1785,11 @@ function ReaderSection() {
             />
           </div>
           <div className="form-field">
-            <label>摘录卡字体</label>
+            <label>{T("摘录卡字体")}</label>
             <input
               data-testid="setting-extract-font-family"
               value={ext.extractFaceFontFamily}
-              placeholder="留空使用应用默认字体"
+              placeholder={T("留空使用应用默认字体")}
               onChange={(e) => saveExtract({ ...ext, extractFaceFontFamily: e.target.value })}
             />
           </div>
@@ -1807,28 +1858,28 @@ function logsAPI() {
 }
 
 function LogsSection() {
+  const T = useT();
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   async function openFolder() {
     try {
       const ok = await logsAPI().openFolder();
       setNotice(
         ok
-          ? { ok: true, text: "已在系统文件管理器中打开日志文件夹。" }
-          : { ok: false, text: "打开日志文件夹失败，请重试。" }
+          ? { ok: true, text: T("已在系统文件管理器中打开日志文件夹。") }
+          : { ok: false, text: T("打开日志文件夹失败，请重试。") }
       );
     } catch (err) {
-      setNotice({ ok: false, text: `打开日志文件夹失败：${err instanceof Error ? err.message : String(err)}` });
+      setNotice({ ok: false, text: T("打开日志文件夹失败：{msg}", { msg: err instanceof Error ? err.message : String(err) }) });
     }
   }
   return (
-    <SettingsSection id="sec-logs" title="日志">
+    <SettingsSection id="sec-logs" title={T("日志")}>
       <p className="form-hint">
-        软件运行与错误信息记录在本地日志文件中（只含时间、错误消息与运行状态，不含书籍内容）。
-        遇到问题时，可将日志文件发送给开发者协助排查。
+        {T("软件运行与错误信息记录在本地日志文件中（只含时间、错误消息与运行状态，不含书籍内容）。遇到问题时，可将日志文件发送给开发者协助排查。")}
       </p>
       <div className="settings-row">
         <button className="btn btn-outline btn-sm" onClick={openFolder}>
-          打开日志文件夹
+          {T("打开日志文件夹")}
         </button>
       </div>
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
@@ -1897,6 +1948,7 @@ const UPDATE_SOURCE_HINT: Record<UpdateSource, string> = {
 };
 
 function UpdateSection() {
+  const T = useT();
   const [snap, setSnap] = useState<UpdateSnapshot | null>(null);
   const [autoOn, setAutoOn] = useState<boolean | null>(null);
 
@@ -1932,37 +1984,36 @@ function UpdateSection() {
   // 状态行（github 渠道下随检查-下载状态机流转；其余渠道只显示说明）
   let statusLine = "";
   if (isGithub) {
-    if (st === "checking") statusLine = "正在检查更新…";
-    else if (st === "not-available") statusLine = "已是最新版本。";
-    else if (st === "available") statusLine = `发现新版本 v${snap.info?.version ?? "?"}，可下载安装。`;
+    if (st === "checking") statusLine = T("正在检查更新…");
+    else if (st === "not-available") statusLine = T("已是最新版本。");
+    else if (st === "available") statusLine = T("发现新版本 v{version}，可下载安装。", { version: snap.info?.version ?? "?" });
     else if (st === "downloading")
       statusLine =
         snap.progress?.percent !== undefined && snap.progress.percent !== null
-          ? `正在下载更新… ${snap.progress.percent}%`
-          : "正在下载更新…";
+          ? T("正在下载更新… {pct}%", { pct: snap.progress.percent })
+          : T("正在下载更新…");
     else if (st === "downloaded")
-      statusLine = `更新包已就绪（v${snap.info?.version ?? "?"}），重启后自动安装。`;
-    else if (st === "error") statusLine = `检查失败：${snap.error ?? "未知错误"}`;
+      statusLine = T("更新包已就绪（v{version}），重启后自动安装。", { version: snap.info?.version ?? "?" });
+    else if (st === "error") statusLine = T("检查失败：{msg}", { msg: snap.error ?? T("未知错误") });
   }
 
   const checking = st === "checking";
 
   return (
-    <SettingsSection id="sec-updates" title="软件更新">
+    <SettingsSection id="sec-updates" title={T("软件更新")}>
       <p className="form-hint">
-        当前版本 v{snap.currentVersion}。{UPDATE_SOURCE_HINT[snap.source]}
+        {T("当前版本 v{version}。", { version: snap.currentVersion })}{T(UPDATE_SOURCE_HINT[snap.source])}
       </p>
       {isGithub && (
         <>
           <div className="settings-row">
             <span className="settings-row-label">
-              自动检查更新
-              <SettingsInfo label="自动检查更新">
-                启动后联网查询 GitHub 最新发布版本（只检查、不下载）；关闭后不再自动检查，
-                随时可在下方手动检查。检查请求不含任何个人数据。
+              {T("自动检查更新")}
+              <SettingsInfo label={T("自动检查更新")}>
+                {T("启动后联网查询 GitHub 最新发布版本（只检查、不下载）；关闭后不再自动检查，随时可在下方手动检查。检查请求不含任何个人数据。")}
               </SettingsInfo>
             </span>
-            <div className="seg-tabs seg-tabs-sm" role="group" aria-label="自动检查更新">
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("自动检查更新")}>
               <button
                 className={autoOn ? "active" : ""}
                 onClick={() => {
@@ -1970,7 +2021,7 @@ function UpdateSection() {
                   void settingsStore.set("app", "updateAutoCheck", true);
                 }}
               >
-                开启
+                {T("开启")}
               </button>
               <button
                 className={!autoOn ? "active" : ""}
@@ -1979,7 +2030,7 @@ function UpdateSection() {
                   void settingsStore.set("app", "updateAutoCheck", false);
                 }}
               >
-                关闭
+                {T("关闭")}
               </button>
             </div>
           </div>
@@ -1992,7 +2043,7 @@ function UpdateSection() {
                   void updateAPI().download();
                 }}
               >
-                下载更新
+                {T("下载更新")}
               </button>
             ) : st === "downloaded" ? (
               <button
@@ -2001,7 +2052,7 @@ function UpdateSection() {
                   void updateAPI().install();
                 }}
               >
-                重启并安装
+                {T("重启并安装")}
               </button>
             ) : (
               <button
@@ -2011,7 +2062,7 @@ function UpdateSection() {
                   void updateAPI().check();
                 }}
               >
-                {st === "downloading" ? "下载中…" : checking ? "检查中…" : "检查更新"}
+                {st === "downloading" ? T("下载中…") : checking ? T("检查中…") : T("检查更新")}
               </button>
             )}
           </div>
@@ -2050,6 +2101,7 @@ const OSS_ITEMS: Array<{ name: string; license: string; note?: string }> = [
 ];
 
 function AboutSection() {
+  const T = useT();
   const [version, setVersion] = useState("");
 
   useEffect(() => {
@@ -2067,15 +2119,14 @@ function AboutSection() {
   }, []);
 
   return (
-    <SettingsSection id="sec-about" title="关于">
+    <SettingsSection id="sec-about" title={T("关于")}>
       <p className="form-hint">
-        增量阅读{version ? ` · 版本 v${version}` : ""}
+        {T("增量阅读")}{version ? T(" · 版本 v{version}", { version }) : ""}
         <br />
-        本地优先的桌面渐进阅读学习软件：数据全部保存在本机；核心功能零网络、零账号，
-        仅在显式配置 AI 服务或检查更新时联网。
+        {T("本地优先的桌面渐进阅读学习软件：数据全部保存在本机；核心功能零网络、零账号，仅在显式配置 AI 服务或检查更新时联网。")}
       </p>
-      <h4>开源许可</h4>
-      <p className="form-hint">本应用构建于以下开源项目之上，感谢原作者与贡献者。</p>
+      <h4>{T("开源许可")}</h4>
+      <p className="form-hint">{T("本应用构建于以下开源项目之上，感谢原作者与贡献者。")}</p>
       <ul className="oss-list">
         {OSS_ITEMS.map((it) => (
           <li key={it.name}>
@@ -2084,18 +2135,19 @@ function AboutSection() {
               <span className="oss-name">{it.name}</span>
               <span className="oss-lic">{it.license}</span>
             </span>
-            {it.note && <span className="oss-note">{it.note}</span>}
+            {it.note && <span className="oss-note">{T(it.note)}</span>}
           </li>
         ))}
       </ul>
       <p className="form-hint oss-tail">
-        清单覆盖运行时直接依赖；各组件的完整许可证文本与版权声明，以其官方发布页为准。
+        {T("清单覆盖运行时直接依赖；各组件的完整许可证文本与版权声明，以其官方发布页为准。")}
       </p>
     </SettingsSection>
   );
 }
 
 function BackupSection() {
+  const T = useT();
   const [info, setInfo] = useState<BackupInfo | null>(null);
   const [list, setList] = useState<{ backupDir: string; backups: BackupEntry[] } | null>(null);
   const [autoOn, setAutoOn] = useState(true);
@@ -2146,11 +2198,11 @@ function BackupSection() {
       if (r.ok) {
         setNotice({
           ok: true,
-          text: r.skipped ? "今日自动备份已存在，无需重复。" : `备份完成：${r.file?.split(/[\\/]/).pop() ?? ""}`
+          text: r.skipped ? T("今日自动备份已存在，无需重复。") : T("备份完成：{file}", { file: r.file?.split(/[\\/]/).pop() ?? "" })
         });
         await reload();
       } else {
-        setNotice({ ok: false, text: `备份失败：${r.error}` });
+        setNotice({ ok: false, text: T("备份失败：{msg}", { msg: r.error ?? "" }) });
       }
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -2169,11 +2221,11 @@ function BackupSection() {
         setConfirmFile(null);
         setNotice({
           ok: true,
-          text: `恢复完成（当前数据已安全备份至 ${r.safetyFile?.split(/[\\/]/).pop() ?? ""}）。重启应用后生效——重启前请勿继续使用软件。`
+          text: T("恢复完成（当前数据已安全备份至 {file}）。重启应用后生效——重启前请勿继续使用软件。", { file: r.safetyFile?.split(/[\\/]/).pop() ?? "" })
         });
         await reload();
       } else {
-        setNotice({ ok: false, text: `恢复失败：${r.error}` });
+        setNotice({ ok: false, text: T("恢复失败：{msg}", { msg: r.error ?? "" }) });
       }
     } catch (err) {
       setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
@@ -2188,41 +2240,41 @@ function BackupSection() {
   }
 
   return (
-    <SettingsSection id="sec-backup" title="数据备份与恢复">
+    <SettingsSection id="sec-backup" title={T("数据备份与恢复")}>
       {info && (
         <p className="form-hint">
-          当前数据：<span className="mono">{info.counts.items}</span> 本书 ·{" "}
-          <span className="mono">{info.counts.cards}</span> 张卡 ·{" "}
-          <span className="mono">{info.counts.extracts}</span> 条摘录（库{" "}
-          <span className="mono">{fmtBytes(info.dbBytes)}</span>，资产{" "}
+          {T("当前数据：")}{T("{n} 本书", { n: info.counts.items })} ·{" "}
+          {T("{n} 张卡", { n: info.counts.cards })} ·{" "}
+          {T("{n} 条摘录", { n: info.counts.extracts })}（{T("库")}{" "}
+          <span className="mono">{fmtBytes(info.dbBytes)}</span>，{T("资产")}{" "}
           <span className="mono">{fmtBytes(info.assetBytes)}</span>）
         </p>
       )}
 
       <div className="backup-toolbar">
         <button className="btn btn-primary btn-sm" disabled={busy !== "" || restored} onClick={doBackup}>
-          {busy === "backup" ? "备份中…" : "立即备份"}
+          {busy === "backup" ? T("备份中…") : T("立即备份")}
         </button>
         <label className="backup-checkline">
           <input type="checkbox" checked={includeKey} onChange={(e) => setIncludeKey(e.target.checked)} />
-          包含 AI Key（ai-config.json，默认不备）
+          {T("包含 AI Key（ai-config.json，默认不备）")}
         </label>
-        <button className="btn btn-outline btn-sm" onClick={() => backupAPI().openDir()}>打开备份文件夹</button>
-        <button className="btn btn-outline btn-sm" onClick={changeDir}>更改备份位置</button>
+        <button className="btn btn-outline btn-sm" onClick={() => backupAPI().openDir()}>{T("打开备份文件夹")}</button>
+        <button className="btn btn-outline btn-sm" onClick={changeDir}>{T("更改备份位置")}</button>
       </div>
       {list && (
         <p className="form-hint settings-block">
-          备份位置：<span className="mono">{list.backupDir}</span>
+          {T("备份位置：")}<span className="mono">{list.backupDir}</span>
         </p>
       )}
 
       <div className="backup-toolbar settings-block">
-        <span className="backup-row-title">每日首次启动自动备份</span>
-        <div className="seg-tabs seg-tabs-sm" role="group" aria-label="自动备份开关">
-          <button className={autoOn ? "active" : ""} onClick={() => toggleAuto(true)}>开</button>
-          <button className={!autoOn ? "active" : ""} onClick={() => toggleAuto(false)}>关</button>
+        <span className="backup-row-title">{T("每日首次启动自动备份")}</span>
+        <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("自动备份开关")}>
+          <button className={autoOn ? "active" : ""} onClick={() => toggleAuto(true)}>{T("开")}</button>
+          <button className={!autoOn ? "active" : ""} onClick={() => toggleAuto(false)}>{T("关")}</button>
         </div>
-        <span className="backup-row-title">保留</span>
+        <span className="backup-row-title">{T("保留")}</span>
         <input
           className="mono input-num"
           type="number"
@@ -2231,21 +2283,20 @@ function BackupSection() {
           value={keep}
           onChange={(e) => changeKeep(Number(e.target.value))}
         />
-        <span className="backup-row-title">份（超出删最旧）</span>
+        <span className="backup-row-title">{T("份（超出删最旧）")}</span>
       </div>
 
       {confirmFile && (
         <div className="restore-confirm">
-          <p className="restore-confirm-title">确认恢复</p>
+          <p className="restore-confirm-title">{T("确认恢复")}</p>
           <p className="form-hint">
-            将用「<span className="mono">{confirmFile.name}</span>」覆盖当前全部数据（书架、卡片、复习记录、摘录、设置）。
-            恢复前会自动安全备份当前数据；完成后需重启应用生效，重启前请勿继续使用软件。
+            {T("将用「{name}」覆盖当前全部数据（书架、卡片、复习记录、摘录、设置）。恢复前会自动安全备份当前数据；完成后需重启应用生效，重启前请勿继续使用软件。", { name: confirmFile.name })}
           </p>
           <div className="settings-row">
             <button className="btn btn-danger btn-sm" disabled={busy !== ""} onClick={doRestore}>
-              {busy === "restore" ? "恢复中…" : "确认恢复"}
+              {busy === "restore" ? T("恢复中…") : T("确认恢复")}
             </button>
-            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmFile(null)} autoFocus>取消</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setConfirmFile(null)} autoFocus>{T("取消")}</button>
           </div>
         </div>
       )}
@@ -2253,7 +2304,7 @@ function BackupSection() {
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
       {restored && (
         <div className="settings-row settings-block">
-          <button className="btn btn-primary btn-sm" onClick={() => backupAPI().relaunch()}>重启应用</button>
+          <button className="btn btn-primary btn-sm" onClick={() => backupAPI().relaunch()}>{T("重启应用")}</button>
         </div>
       )}
 
@@ -2263,15 +2314,15 @@ function BackupSection() {
             <div className="backup-row" key={b.path}>
               <div className="backup-row-main">
                 <span className="backup-row-title">
-                  <span className="backup-tag">{BACKUP_LABEL[b.label] || b.label}</span>
+                  <span className="backup-tag">{T(BACKUP_LABEL[b.label] || b.label)}</span>
                   {fmtTime(b.createdAt)}
-                  {b.includesAIConfig && " · 含 Key"}
-                  {!b.valid && " · 清单损坏"}
+                  {b.includesAIConfig && T(" · 含 Key")}
+                  {!b.valid && T(" · 清单损坏")}
                 </span>
                 <span className="backup-row-sub">
                   {fmtBytes(b.sizeBytes)}
-                  {b.counts ? ` · ${b.counts.items} 书 · ${b.counts.cards} 卡` : ""}
-                  {typeof b.assetFiles === "number" ? ` · ${b.assetFiles} 资产` : ""}
+                  {b.counts ? T(" · {items} 书 · {cards} 卡", { items: b.counts.items, cards: b.counts.cards }) : ""}
+                  {typeof b.assetFiles === "number" ? T(" · {n} 资产", { n: b.assetFiles }) : ""}
                 </span>
               </div>
               <button
@@ -2279,7 +2330,7 @@ function BackupSection() {
                 disabled={busy !== "" || restored}
                 onClick={() => setConfirmFile({ path: b.path, name: b.file })}
               >
-                恢复
+                {T("恢复")}
               </button>
             </div>
           ))}
@@ -2288,7 +2339,7 @@ function BackupSection() {
 
       <div className="settings-row settings-block">
         <button className="btn btn-danger-outline btn-sm" disabled={restored} onClick={pickRestoreFile}>
-          从备份文件恢复…
+          {T("从备份文件恢复…")}
         </button>
       </div>
     </SettingsSection>
@@ -2297,6 +2348,7 @@ function BackupSection() {
 
 // ---------- 词典与查词（v32，D31；v48.70/D114 由「词典/下载」改名）----------
 function DictSection() {
+  const T = useT();
   const [mode, setMode] = useState<"local" | "online" | "auto">("auto");
   const [fields, setFields] = useState<Record<string, boolean>>(DEFAULT_POPUP_FIELDS);
   const [audioSource, setAudioSource] = useState<"tts" | "online">("tts");
@@ -2325,14 +2377,14 @@ function DictSection() {
         setBusy(null);
         setNotice(
           msg.state === "done-capped"
-            ? `词典已下载并建好索引（已索引 ${msg.count ?? 0} 词条，达到安全上限有截断），选中单词即可查词`
-            : `词典已下载并建好索引（共 ${msg.count ?? 0} 词条），选中单词即可查词（本地优先于在线超时）`
+            ? T("词典已下载并建好索引（已索引 {n} 词条，达到安全上限有截断），选中单词即可查词", { n: msg.count ?? 0 })
+            : T("词典已下载并建好索引（共 {n} 词条），选中单词即可查词（本地优先于在线超时）", { n: msg.count ?? 0 })
         );
         refreshSources();
       }
       if (msg.state === "saved") {
         setBusy(null);
-        setNotice("文件已下载，但该格式暂不支持自动建索引（已存于 dicts 目录）");
+        setNotice(T("文件已下载，但该格式暂不支持自动建索引（已存于 dicts 目录）"));
       }
       if (msg.state === "error") setBusy(null);
     });
@@ -2388,7 +2440,7 @@ function DictSection() {
     setNotice(null);
     try {
       const r = await window.dictAPI.importFile(picked.path);
-      setNotice(r ? `已导入「${r.name}」（${r.count} 词条），可在阅读器选中查词` : "导入取消");
+      setNotice(r ? T("已导入「{name}」（{n} 词条），可在阅读器选中查词", { name: r.name, n: r.count }) : T("导入取消"));
       refreshSources();
     } catch (err) {
       setNotice(err instanceof Error ? err.message : String(err));
@@ -2396,100 +2448,100 @@ function DictSection() {
   }
 
   return (
-    <SettingsSection id="sec-dict" title="词典与查词">
+    <SettingsSection id="sec-dict" title={T("词典与查词")}>
       <div className="settings-row">
         <span className="settings-row-label">
-          词典来源
-          <SettingsInfo label="词典来源">本地＝不联网；在线＝Free Dictionary / Jisho；自动＝在线优先，失败/超时回落本地。</SettingsInfo>
+          {T("词典来源")}
+          <SettingsInfo label={T("词典来源")}>{T("本地＝不联网；在线＝Free Dictionary / Jisho；自动＝在线优先，失败/超时回落本地。")}</SettingsInfo>
         </span>
-        <div className="seg-tabs" role="radiogroup" aria-label="词典来源">
+        <div className="seg-tabs" role="radiogroup" aria-label={T("词典来源")}>
           {(["local", "online", "auto"] as const).map((m) => (
             <button key={m} className={mode === m ? "active" : ""} onClick={() => changeMode(m)}>
-              {m === "local" ? "本地词典" : m === "online" ? "在线词典" : "自动"}
+              {m === "local" ? T("本地词典") : m === "online" ? T("在线词典") : T("自动")}
             </button>
           ))}
         </div>
       </div>
 
       <h4>
-        弹窗显示字段
-        <SettingsInfo label="弹窗显示字段">默认开拼写/音标/发音/释义；例句关闭不影响原句保存与挖空卡。</SettingsInfo>
+        {T("弹窗显示字段")}
+        <SettingsInfo label={T("弹窗显示字段")}>{T("默认开拼写/音标/发音/释义；例句关闭不影响原句保存与挖空卡。")}</SettingsInfo>
       </h4>
       <div className="settings-row check-row">
         {FIELD_LABELS.map((f) => (
           <label key={f.key} className="check-inline">
             <input type="checkbox" checked={!!fields[f.key]} onChange={() => toggleField(f.key)} />
-            {f.label}
+            {T(f.label)}
           </label>
         ))}
       </div>
 
-      <h4>单词卡发音</h4>
+      <h4>{T("单词卡发音")}</h4>
       <div className="settings-row">
         <span className="settings-row-label">
-          发音来源
-          <SettingsInfo label="发音来源">TTS＝离线可用（Windows 需语言语音包）；在线＝真人音频，缺失时回落 TTS。</SettingsInfo>
+          {T("发音来源")}
+          <SettingsInfo label={T("发音来源")}>{T("TTS＝离线可用（Windows 需语言语音包）；在线＝真人音频，缺失时回落 TTS。")}</SettingsInfo>
         </span>
-        <div className="seg-tabs" role="radiogroup" aria-label="发音来源">
-          <button className={audioSource === "tts" ? "active" : ""} onClick={() => changeAudioSource("tts")}>系统 TTS</button>
-          <button className={audioSource === "online" ? "active" : ""} onClick={() => changeAudioSource("online")}>在线音频</button>
+        <div className="seg-tabs" role="radiogroup" aria-label={T("发音来源")}>
+          <button className={audioSource === "tts" ? "active" : ""} onClick={() => changeAudioSource("tts")}>{T("系统 TTS")}</button>
+          <button className={audioSource === "online" ? "active" : ""} onClick={() => changeAudioSource("online")}>{T("在线音频")}</button>
         </div>
       </div>
       <div className="settings-row">
         <label className="check-inline">
           <input type="checkbox" checked={autoSpeak} onChange={(e) => changeAutoSpeak(e.target.checked)} />
-          自动发音（出到单词卡即朗读，无需手动点击）
+          {T("自动发音（出到单词卡即朗读，无需手动点击）")}
         </label>
       </div>
 
       <h4>
-        一键下载
-        <SettingsInfo label="一键下载">版权不明的第三方包（StarDict 朗道/牛津等）仅本地导入；Wiktionary 全量仅在线 API。</SettingsInfo>
+        {T("一键下载")}
+        <SettingsInfo label={T("一键下载")}>{T("版权不明的第三方包（StarDict 朗道/牛津等）仅本地导入；Wiktionary 全量仅在线 API。")}</SettingsInfo>
       </h4>
       {DICT_CATALOG.filter((c) => c.suitable === "download").map((c) => {
         const pg = progress[c.id];
         return (
           <div key={c.id} className="dict-catalog-row">
             <div>
-              <div><strong>{c.name}</strong> <span className="mono">{c.estSizeLabel}</span> <span className="dict-tag">{c.recommendLevel}</span></div>
-              <div className="form-hint">{c.desc}。{c.recommend}（{c.license}，{c.updateFreq}）</div>
+              <div><strong>{c.name}</strong> <span className="mono">{T(c.estSizeLabel)}</span> <span className="dict-tag">{T(c.recommendLevel)}</span></div>
+              <div className="form-hint">{T(c.desc)}{T(c.recommend)}（{c.license}，{T(c.updateFreq)}）</div>
               {pg && (pg.state === "downloading" || pg.state === "indexing") && (
                 <div className="mono">
-                  {pg.state === "downloading" ? `下载中… ${pg.progress}%` : `建索引中… 已 ${pg.count ?? 0} 词条（期间界面保持响应）`}
+                  {pg.state === "downloading" ? T("下载中… {pct}%", { pct: pg.progress }) : T("建索引中… 已 {n} 词条（期间界面保持响应）", { n: pg.count ?? 0 })}
                 </div>
               )}
             </div>
             <button className="btn btn-outline btn-sm" disabled={busy === c.id} onClick={() => download(c)}>
-              {busy === c.id ? "下载中…" : sources.some((s) => s.name === c.name) ? "更新" : "下载"}
+              {busy === c.id ? T("下载中…") : sources.some((s) => s.name === c.name) ? T("更新") : T("下载")}
             </button>
           </div>
         );
       })}
       <div className="settings-row">
-        <button className="btn btn-outline btn-sm" onClick={importLocal}>本地导入词典文件…</button>
+        <button className="btn btn-outline btn-sm" onClick={importLocal}>{T("本地导入词典文件…")}</button>
       </div>
 
       {sources.length > 0 && (
         <>
-          <h4>已安装词典</h4>
+          <h4>{T("已安装词典")}</h4>
           {sources.map((s) => (
             <div key={s.id} className="dict-catalog-row">
               <div>
-                <strong>{s.name}</strong> <span className="mono">{s.format}{s.lang ? ` · ${s.lang}` : ""} · {s.entry_count} 词条</span>
-                {Number(s.entry_count) === 0 && <div className="form-hint">未建索引——点右侧「更新」重新下载解析，或删除后本地导入。</div>}
+                <strong>{s.name}</strong> <span className="mono">{s.format}{s.lang ? ` · ${s.lang}` : ""} · {T("{n} 词条", { n: s.entry_count })}</span>
+                {Number(s.entry_count) === 0 && <div className="form-hint">{T("未建索引——点右侧「更新」重新下载解析，或删除后本地导入。")}</div>}
               </div>
               <div className="row-actions">
                 <button
                   className="btn btn-outline btn-sm"
                   onClick={() => window.dictAPI?.toggleSource(s.id, !s.enabled).then(refreshSources)}
                 >
-                  {s.enabled ? "停用" : "启用"}
+                  {s.enabled ? T("停用") : T("启用")}
                 </button>
                 <button
                   className="btn btn-outline btn-sm"
                   onClick={() => window.dictAPI?.removeSource(s.id).then(refreshSources)}
                 >
-                  删除
+                  {T("删除")}
                 </button>
               </div>
             </div>
@@ -2503,6 +2555,7 @@ function DictSection() {
 
 // ---------- M4 快捷键自定义（§9.1 M4）：键位捕获 + 冲突检测 + 恢复默认，落 settings.app.keybindings ----------
 function ShortcutsSection() {
+  const T = useT();
   const [bindings, setBindings] = useState<Record<string, string>>({});
   const [capturing, setCapturing] = useState<string | null>(null); // 正在捕获新键位的命令 id
   const [conflict, setConflict] = useState<{ id: string; with: string } | null>(null);
@@ -2568,42 +2621,42 @@ function ShortcutsSection() {
   return (
     <SettingsSection
       id="sec-shortcuts"
-      title="快捷键"
+      title={T("快捷键")}
       info={
-        <SettingsInfo label="快捷键">
-          点键位框后按新组合键（Esc 取消）；与其他动作冲突的键位不会被保存；输入框内的编辑键不受影响。
+        <SettingsInfo label={T("快捷键")}>
+          {T("点键位框后按新组合键（Esc 取消）；与其他动作冲突的键位不会被保存；输入框内的编辑键不受影响。")}
         </SettingsInfo>
       }
     >
       <div className="settings-row settings-block-b">
-        <button className="btn btn-outline btn-sm" onClick={resetAllBindings}>全部恢复默认</button>
+        <button className="btn btn-outline btn-sm" onClick={resetAllBindings}>{T("全部恢复默认")}</button>
       </div>
-      <h4>应用内快捷键</h4>
+      <h4>{T("应用内快捷键")}</h4>
       {groups.map(([label, defs]) => (
         <div key={label} className="kb-group">
-          <div className="kb-group-label mono">{label}</div>
+          <div className="kb-group-label mono">{T(label)}</div>
           {defs.map((def) => {
             const binding = bindings[def.id] ?? def.defaultKey;
             const customized = binding !== def.defaultKey;
-            const conflictMsg = conflict?.id === def.id ? `与「${conflict.with}」冲突` : null;
+            const conflictMsg = conflict?.id === def.id ? T("与「{title}」冲突", { title: conflict.with }) : null;
             return (
               <div className="kb-row" key={def.id}>
-                <span className="kb-row-title">{def.title}</span>
+                <span className="kb-row-title">{T(def.title)}</span>
                 {conflictMsg && <span className="kb-conflict">{conflictMsg}</span>}
                 <button
                   className={`kb-key mono${capturing === def.id ? " capturing" : ""}`}
-                  title="点击后按下新键位"
+                  title={T("点击后按下新键位")}
                   onClick={() => { setConflict(null); setCapturing(def.id); }}
                 >
-                  {capturing === def.id ? "按下新键…" : binding}
+                  {capturing === def.id ? T("按下新键…") : binding}
                 </button>
                 <button
                   className="btn btn-secondary btn-sm kb-reset"
                   disabled={!customized}
-                  title="恢复默认键位"
+                  title={T("恢复默认键位")}
                   onClick={() => resetOne(def.id)}
                 >
-                  恢复
+                  {T("恢复")}
                 </button>
               </div>
             );
@@ -2641,18 +2694,19 @@ const DEFAULT_GLOBAL_SHORTCUTS: GlobalShortcutsConfig = {
 
 type GlobalTarget = "quickCapture" | "addMaterial" | "workbench";
 
-function shortcutStateLabel(s?: { enabled: boolean; registered: boolean; error: string | null }): {
+function shortcutStateLabel(s: { enabled: boolean; registered: boolean; error: string | null } | undefined, T: (k: string) => string): {
   text: string;
   cls: string;
 } {
   if (!s) return { text: "—", cls: "" };
-  if (!s.enabled) return { text: "已关闭", cls: "" };
-  if (s.registered) return { text: "已注册", cls: " on" };
-  return { text: s.error ? "被占用" : "未注册", cls: " err" };
+  if (!s.enabled) return { text: T("已关闭"), cls: "" };
+  if (s.registered) return { text: T("已注册"), cls: " on" };
+  return { text: s.error ? T("被占用") : T("未注册"), cls: " err" };
 }
 
 // D123：关闭主窗口＝收进系统托盘（默认开）；关闭则点关闭按钮直接退出应用
 function TrayRow() {
+  const T = useT();
   const [on, setOn] = useState<boolean | null>(null);
   useEffect(() => {
     void settingsStore.get<unknown>("app", "closeToTray", true).then((v) => setOn(v !== false));
@@ -2670,13 +2724,14 @@ function TrayRow() {
             void settingsStore.set("app", "closeToTray", e.target.checked);
           }}
         />
-        关闭窗口时收进系统托盘继续运行（托盘菜单「退出」才真正退出）
+        {T("关闭窗口时收进系统托盘继续运行（托盘菜单「退出」才真正退出）")}
       </label>
     </div>
   );
 }
 
 function GlobalShortcutsBlock() {
+  const T = useT();
   const [cfg, setCfg] = useState<GlobalShortcutsConfig>(DEFAULT_GLOBAL_SHORTCUTS);
   const [status, setStatus] = useState<ShortcutStatus | null>(null);
   const [capturing, setCapturing] = useState<GlobalTarget | null>(null);
@@ -2735,7 +2790,7 @@ function GlobalShortcutsBlock() {
       if (!combo) return;
       const isFnKey = /^F([1-9]|1[0-9]|2[0-4])$/.test(combo);
       if (!combo.includes("+") && !isFnKey) {
-        setConflict({ target, message: "需带 Ctrl / Alt / Shift 修饰键（或使用 F1–F24）" });
+        setConflict({ target, message: T("需带 Ctrl / Alt / Shift 修饰键（或使用 F1–F24）") });
         return;
       }
       setCapturing(null);
@@ -2744,12 +2799,12 @@ function GlobalShortcutsBlock() {
         .filter((k) => k !== target)
         .map((k) => current[k].accelerator);
       if (others.includes(combo)) {
-        setConflict({ target, message: "与另一个全局快捷键相同" });
+        setConflict({ target, message: T("与另一个全局快捷键相同") });
         return;
       }
       const hit = commandRegistry.conflictWith(combo, "");
       if (hit) {
-        setConflict({ target, message: `与应用内「${hit.title}」冲突` });
+        setConflict({ target, message: T("与应用内「{title}」冲突", { title: hit.title }) });
         return;
       }
       setConflict(null);
@@ -2760,8 +2815,8 @@ function GlobalShortcutsBlock() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [capturing]);
 
-  const add = shortcutStateLabel(status?.addMaterial);
-  const wbs = shortcutStateLabel(status?.workbench);
+  const add = shortcutStateLabel(status?.addMaterial, T);
+  const wbs = shortcutStateLabel(status?.workbench, T);
 
   function renderKeyButton(target: GlobalTarget, enabled: boolean) {
     const binding = cfg[target].accelerator;
@@ -2779,17 +2834,17 @@ function GlobalShortcutsBlock() {
       <>
         <button
           className={`kb-key mono${capturing === target ? " capturing" : ""}`}
-          title={enabled ? "点击后按下新组合键" : "该快捷键已关闭"}
+          title={enabled ? T("点击后按下新组合键") : T("该快捷键已关闭")}
           disabled={!enabled}
           onClick={() => {
             setConflict(null);
             setCapturing(target);
           }}
         >
-          {capturing === target ? "按下新键…" : binding}
+          {capturing === target ? T("按下新键…") : binding}
         </button>
-        <button className="btn btn-secondary btn-sm kb-reset" disabled={isDefault} title="恢复默认" onClick={reset}>
-          恢复
+        <button className="btn btn-secondary btn-sm kb-reset" disabled={isDefault} title={T("恢复默认")} onClick={reset}>
+          {T("恢复")}
         </button>
       </>
     );
@@ -2798,9 +2853,9 @@ function GlobalShortcutsBlock() {
   return (
     <div id="sec-global">
       <h4>
-        全局快捷键
-        <SettingsInfo label="全局快捷键">
-          软件无焦点时也生效（需运行中，可配合「随系统启动」）；状态「被占用」＝系统层冲突，换一个组合即可。
+        {T("全局快捷键")}
+        <SettingsInfo label={T("全局快捷键")}>
+          {T("软件无焦点时也生效（需运行中，可配合「随系统启动」）；状态「被占用」＝系统层冲突，换一个组合即可。")}
         </SettingsInfo>
       </h4>
 
@@ -2814,7 +2869,7 @@ function GlobalShortcutsBlock() {
               checked={cfg.addMaterial.enabled}
               onChange={(e) => void persist({ ...cfg, addMaterial: { ...cfg.addMaterial, enabled: e.target.checked } })}
             />
-            添加学习材料（弹出「添加书籍」）
+            {T("添加学习材料（弹出「添加书籍」）")}
           </label>
           {conflict?.target === "addMaterial" && <span className="kb-conflict">{conflict.message}</span>}
           {renderKeyButton("addMaterial", cfg.addMaterial.enabled)}
@@ -2828,7 +2883,7 @@ function GlobalShortcutsBlock() {
               checked={cfg.workbench.enabled}
               onChange={(e) => void persist({ ...cfg, workbench: { ...cfg.workbench, enabled: e.target.checked } })}
             />
-            制卡台（弹出独立窗口：手动制卡 / AI 制卡 / AI 解释）
+            {T("制卡台（弹出独立窗口：手动制卡 / AI 制卡 / AI 解释）")}
           </label>
           {conflict?.target === "workbench" && <span className="kb-conflict">{conflict.message}</span>}
           {renderKeyButton("workbench", cfg.workbench.enabled)}
@@ -2842,10 +2897,10 @@ function GlobalShortcutsBlock() {
               checked={cfg.autoLaunch}
               onChange={(e) => void persist({ ...cfg, autoLaunch: e.target.checked })}
             />
-            随系统启动（开机自动运行，保证全局快捷键随时可用）
+            {T("随系统启动（开机自动运行，保证全局快捷键随时可用）")}
           </label>
           <span className={`gs-state mono${status?.autoLaunch ? " on" : ""}`}>
-            {status?.autoLaunch ? "已开启" : "已关闭"}
+            {status?.autoLaunch ? T("已开启") : T("已关闭")}
           </span>
         </div>
       </div>
@@ -2855,7 +2910,7 @@ function GlobalShortcutsBlock() {
       <div className="settings-row settings-block">
         {/* v48.114（D159）：「试一下快速记录」随功能暂时移除（shortcutsApi.toggleCapture 保留在 lib/journal.ts） */}
         <button className="btn btn-outline btn-sm" onClick={() => void window.windowAPI?.workbench?.("toggle")}>
-          试一下制卡台窗口
+          {T("试一下制卡台窗口")}
         </button>
       </div>
     </div>
@@ -2898,6 +2953,7 @@ function hex6(hex: string): string {
 }
 
 function ThemePluginsBlock() {
+  const T = useT();
   const [plugins, setPlugins] = useState<PluginListItem[]>([]);
   const [valuesMap, setValuesMap] = useState<Record<string, Record<string, unknown>>>({});
   const [actErr, setActErr] = useState<{ id: string; reason: string } | null>(null);
@@ -2945,7 +3001,7 @@ function ThemePluginsBlock() {
   async function activate(id: string) {
     setActErr(null);
     const r = await window.pluginsAPI?.setActive(id);
-    if (r && !r.ok) setActErr({ id, reason: r.reason || "激活失败" });
+    if (r && !r.ok) setActErr({ id, reason: r.reason || T("激活失败") });
     await reload.current();
   }
 
@@ -2962,12 +3018,11 @@ function ThemePluginsBlock() {
 
   return (
     <>
-      <h4>主题插件</h4>
+      <h4>{T("主题插件")}</h4>
       <p className="form-hint">
-        主题插件来自应用数据目录的 plugins 文件夹（本期仅支持主题插件 type:theme，样式经宿主校验后注入）。
-        与内置皮肤互斥——启用一方即停用另一方。
+        {T("主题插件来自应用数据目录的 plugins 文件夹（本期仅支持主题插件 type:theme，样式经宿主校验后注入）。与内置皮肤互斥——启用一方即停用另一方。")}
       </p>
-      {plugins.length === 0 && <p className="form-hint">尚未发现插件：把插件文件夹放入 plugins 目录后点「重新扫描」。</p>}
+      {plugins.length === 0 && <p className="form-hint">{T("尚未发现插件：把插件文件夹放入 plugins 目录后点「重新扫描」。")}</p>}
       <div className="plugin-list">
         {plugins.map((p) => (
           <div key={p.id} className="plugin-item" data-plugin-item={p.id}>
@@ -2978,19 +3033,19 @@ function ThemePluginsBlock() {
               {p.status === "ok" ? (
                 p.active ? (
                   <button type="button" className="plugin-text-btn" data-plugin-deactivate onClick={() => void deactivate()}>
-                    停用
+                    {T("停用")}
                   </button>
                 ) : (
                   <button type="button" className="plugin-text-btn" data-plugin-activate onClick={() => void activate(p.id)}>
-                    启用
+                    {T("启用")}
                   </button>
                 )
               ) : (
                 <button type="button" className="plugin-text-btn" disabled title={p.reason}>
-                  启用
+                  {T("启用")}
                 </button>
               )}
-              <span className="plugin-item-state">{p.active ? "已激活" : p.status === "ok" ? "未激活" : "校验失败"}</span>
+              <span className="plugin-item-state">{p.active ? T("已激活") : p.status === "ok" ? T("未激活") : T("校验失败")}</span>
             </div>
             {p.status === "error" && <p className="plugin-item-reason">{p.reason}</p>}
             {p.status === "ok" && actErr?.id === p.id && <p className="plugin-item-reason">{actErr.reason}</p>}
@@ -3058,10 +3113,10 @@ function ThemePluginsBlock() {
       </div>
       <div className="settings-row">
         <button type="button" className="btn btn-outline btn-sm" data-plugin-open-folder onClick={() => void window.pluginsAPI?.openFolder()}>
-          打开插件文件夹
+          {T("打开插件文件夹")}
         </button>
         <button type="button" className="btn btn-outline btn-sm" data-plugin-rescan onClick={() => void reload.current()}>
-          重新扫描
+          {T("重新扫描")}
         </button>
       </div>
     </>
@@ -3079,6 +3134,7 @@ export default function SettingsPanel({
   onMotionChange,
   onClose
 }: Props) {
+  const T = useT();
   const [activeNav, setActiveNav] = useState("appearance");
   const layoutRef = useRef<HTMLDivElement>(null);
   // D120 §8.1：出场两步走——Esc / 遮罩点击 / 关闭按钮收口到同一 requestClose；
@@ -3165,12 +3221,12 @@ export default function SettingsPanel({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="设置"
+        aria-label={T("设置")}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2>设置</h2>
-          <button className="icon-btn modal-close" title="关闭" aria-label="关闭设置" onClick={requestClose}>
+          <h2>{T("设置")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} aria-label={T("关闭设置")} onClick={requestClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -3179,11 +3235,11 @@ export default function SettingsPanel({
         </div>
 
         <div className="settings-layout modal-scroll" ref={layoutRef}>
-          <nav className="settings-nav" data-ui="sidebar" aria-label="设置分区">
+          <nav className="settings-nav" data-ui="sidebar" aria-label={T("设置分区")}>
             {SECTION_GROUPS.map((g) => (
               <Fragment key={g.label}>
                 {/* 组标题：非交互 div，不进 Tab 序、不进 .settings-nav button 查询集（§5.4） */}
-                <div className="settings-nav-group">{g.label}</div>
+                <div className="settings-nav-group">{T(g.label)}</div>
                 {g.items.map((s) => (
                   <button
                     key={s.id}
@@ -3191,7 +3247,7 @@ export default function SettingsPanel({
                     aria-current={activeNav === s.id ? "true" : undefined}
                     onClick={() => jumpTo(s.id)}
                   >
-                    {s.label}
+                    {T(s.label)}
                   </button>
                 ))}
               </Fragment>
@@ -3199,17 +3255,17 @@ export default function SettingsPanel({
           </nav>
 
           <div className="settings-content">
-            <SettingsSection id="sec-appearance" title="主题与颜色">
-              <h4>主题模式</h4>
+            <SettingsSection id="sec-appearance" title={T("主题与颜色")}>
+              <h4>{T("主题模式")}</h4>
               <div className="seg-tabs" data-ui="seg-tabs">
                 <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
-                  浅色
+                  {T("浅色")}
                 </button>
                 <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>
-                  深色
+                  {T("深色")}
                 </button>
               </div>
-              <h4>皮肤</h4>
+              <h4>{T("皮肤")}</h4>
               {/* v49.0 / P7：皮肤卡片——名称 + 一行描述 + 明/暗预览色块 + 动效标签；
                   requiresChrome 不满足时置灰并提示（Electron 31 / Chromium 126 当前恒满足） */}
               <div className="skin-list skin-cards">
@@ -3221,13 +3277,13 @@ export default function SettingsPanel({
                         return v ? Number(v) < m.requiresChrome : false;
                       })()
                     : false;
-                  const motionLabel = { none: "无动效", subtle: "动效：轻", rich: "动效：丰富" }[m.features?.motion ?? "subtle"];
+                  const motionLabel = { none: T("无动效"), subtle: T("动效：轻"), rich: T("动效：丰富") }[m.features?.motion ?? "subtle"];
                   return (
                     <button
                       key={m.id}
                       className={`skin-card${skinId === m.id ? " active" : ""}${chromeShort ? " disabled" : ""}`}
                       disabled={chromeShort}
-                      title={chromeShort ? `需要 Chromium ≥ ${m.requiresChrome}` : m.description}
+                      title={chromeShort ? T("需要 Chromium ≥ {n}", { n: m.requiresChrome }) : m.description ? T(m.description) : undefined}
                       onClick={() => onSkinChange(m.id)}
                     >
                       <span className="skin-card-preview" aria-hidden="true">
@@ -3235,8 +3291,8 @@ export default function SettingsPanel({
                           <i key={i} style={{ background: c }} />
                         ))}
                       </span>
-                      <span className="skin-card-name">{m.name}</span>
-                      {m.description && <span className="skin-card-desc">{m.description}</span>}
+                      <span className="skin-card-name">{T(m.name)}</span>
+                      {m.description && <span className="skin-card-desc">{T(m.description)}</span>}
                       <span className="skin-card-meta">{motionLabel}</span>
                     </button>
                   );
@@ -3249,28 +3305,31 @@ export default function SettingsPanel({
                   accentPolicy=locked 的皮肤隐藏本行（「恢复默认」只清当前皮肤的用户值） */}
               {SKINS.find((s) => s.manifest.id === skinId)?.manifest.accentPolicy !== "locked" && (
                 <>
-                  <h4>强调色</h4>
+                  <h4>{T("强调色")}</h4>
                   <div className="settings-row accent-row">
                     <input
                       type="color"
                       value={accentColor || SKINS.find((s) => s.manifest.id === skinId)?.manifest.defaultAccent?.[theme] || "#166a59"}
                       onChange={(e) => onAccentChange(e.target.value)}
                     />
-                    <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>恢复默认</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => onAccentChange("")}>{T("恢复默认")}</button>
                   </div>
                 </>
               )}
               {/* v49.0 / D170（P2-6）：应用内动效等级——关闭动画 = body.motion-off 总开关（压过皮肤动效） */}
-              <h4>动画</h4>
+              <h4>{T("动画")}</h4>
               <div className="seg-tabs">
                 <button className={motionSetting === "system" ? "active" : ""} onClick={() => onMotionChange("system")}>
-                  跟随系统
+                  {T("跟随系统")}
                 </button>
                 <button className={motionSetting === "off" ? "active" : ""} onClick={() => onMotionChange("off")}>
-                  关闭动画
+                  {T("关闭动画")}
                 </button>
               </div>
             </SettingsSection>
+
+            {/* v49.8（D182）：界面语言（sec-language，唯一切换入口）——与左栏导航一致，「界面」组内紧跟主题与颜色 */}
+            <LanguageSection />
 
             <ReaderSection />
 
@@ -3294,8 +3353,8 @@ export default function SettingsPanel({
             <DashboardSection />
             {/* v48.81（D125，用户指令）：实验功能——学习者知识模型设置迁入（sec-learner 子块 id 保留），
                 与既有实验项同带「早期开发阶段」标识；左栏按钮 14 → 15 */}
-            <SettingsSection id="sec-lab" title="实验功能">
-              <p className="form-hint">实验功能 · 早期开发阶段。</p>
+            <SettingsSection id="sec-lab" title={T("实验功能")}>
+              <p className="form-hint">{T("实验功能 · 早期开发阶段。")}</p>
               <div id="sec-learner">
                 <LearnerBlock />
               </div>

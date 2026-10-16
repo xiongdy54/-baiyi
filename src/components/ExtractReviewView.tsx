@@ -17,6 +17,7 @@ import { createMultiHighlight } from "../lib/reader/multiHighlight";
 import { rectFromMappedOffsets, rectFromOffsets, type BodyAnnotationGroup } from "../lib/reader/bodyAnnotations";
 import type { OffsetMap } from "../lib/editor/markdownOffsetMap";
 import type { PopoverRect } from "../lib/popoverPlace";
+import { useT } from "../lib/i18n";
 
 /** 选区快照（卡面 onSelection 回调的载荷；null＝无选区） */
 type FaceSelection = { rect: { x: number; y: number; width: number; height: number }; ranges: Array<{ start: number; end: number }>; text: string } | null;
@@ -86,6 +87,7 @@ export function splitChain(chain: Array<{ id: string; text: string; depth: numbe
  * （查看态，只读、不推进调度、不改队列，出口＝「返回队列」）；>6 级折叠成「…N 级」，点开逐项可达。
  */
 export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, scopeTags, scopeKpIds, header, onExit, onExtract, onMaterialName, onOpenAnchorCards }: Props) {
+  const T = useT();
   const [items, setItems] = useState<DueTopic[]>([]);
   const [engine, setEngine] = useState<ExtractEngine>("sm19-default");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
@@ -613,7 +615,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
         await readingWorkflow.updateContent(current.id, text);
         eventBus.emit("workflow/changed");
         await refresh();
-        setFlash("正文已保存");
+        setFlash(T("正文已保存"));
         window.setTimeout(() => setFlash(null), 1800);
       } catch {
         /* 与 run 同径：投影不回流即视为未生效，不弹错（提交方已有幂等短路兜底） */
@@ -643,11 +645,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     if (viewing) return;
     const r = await undoApi.last();
     if (r.ok) {
-      setFlash("已撤销最近一次操作");
+      setFlash(T("已撤销最近一次操作"));
       window.setTimeout(() => setFlash(null), 1800);
       await refresh();
     } else {
-      setFlash(r.reason || "没有可撤销的操作");
+      setFlash(r.reason || T("没有可撤销的操作"));
       window.setTimeout(() => setFlash(null), 1800);
     }
   }, [refresh, viewing]);
@@ -742,7 +744,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       }
     }
     if (!anchor) {
-      setFlash("该摘录没有跳转位置数据（较早版本创建）");
+      setFlash(T("该摘录没有跳转位置数据（较早版本创建）"));
       window.setTimeout(() => setFlash(null), 1800);
       return;
     }
@@ -800,7 +802,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   if (!loaded) {
     return (
       <div className="extract-page">
-        <div className="empty-state"><p className="empty-text">加载中…</p></div>
+        <div className="empty-state"><p className="empty-text">{T("加载中…")}</p></div>
       </div>
     );
   }
@@ -809,22 +811,22 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     return (
       <div className="extract-page">
         {/* D126：D88 §6.5 的 8px accent 预览方点退役——计数只留「数字 + 条待处理」（数字 mono 600，间距走既有 gap） */}
-        <div className="review-count mono"><b>0</b> 条待处理</div>
+        <div className="review-count mono"><b>0</b> {T("条待处理")}</div>
         <div className="empty-state">
           <p className="empty-text">
             {bookItemIds && bookItemIds.length
-              ? "这本书没有待处理的摘录。在阅读时选中一段文字点「摘录」，新摘录会在下一个学习日进队。"
-              : "队列是空的。在阅读时选中一段文字点「摘录」，它会在下一个学习日出现在这里。"}
+              ? T("这本书没有待处理的摘录。在阅读时选中一段文字点「摘录」，新摘录会在下一个学习日进队。")
+              : T("队列是空的。在阅读时选中一段文字点「摘录」，它会在下一个学习日出现在这里。")}
           </p>
           {/* 空态也要能撤销上一次操作（用户要求 Ctrl+Z 配置好：处理完最后一条后撤销入口不得消失） */}
           {undoAvailable && (
             <button className="primary" data-undo-empty onClick={() => void undo()}>
-              撤销最近一次操作（Z）
+              {T("撤销最近一次操作（Z）")}
             </button>
           )}
           {onExit && (
             <button onClick={onExit} style={{ marginLeft: 8 }}>
-              返回阅读
+              {T("返回阅读")}
             </button>
           )}
         </div>
@@ -836,11 +838,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   const { head, hidden, tail } = splitChain(chain);
   const levelNode = (n: { id: string; text: string; depth: number }) =>
     n.id === shownId ? (
-      <span key={n.id} className="crumb-here" aria-current="page" title={`第${n.depth}层（当前）`}>
+      <span key={n.id} className="crumb-here" aria-current="page" title={T("第{n}层（当前）", { n: n.depth })}>
         {crumbName(n.text)}
       </span>
     ) : (
-      <button key={n.id} type="button" className="crumb-item" onClick={() => void openLevel(n.id)} title={`第${n.depth}层：${n.text}`}>
+      <button key={n.id} type="button" className="crumb-item" onClick={() => void openLevel(n.id)} title={T("第{n}层：{text}", { n: n.depth, text: n.text })}>
         {crumbName(n.text)}
       </button>
     );
@@ -849,11 +851,11 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   // 无锚数据的旧卡点击后 flash 有界失败（见 jumpCrumbRoot），无出口时维持 span。
   const parts: ReactNode[] = [
     canJumpRoot ? (
-      <button key="doc" type="button" className="crumb-root" onClick={() => void jumpCrumbRoot()} title="跳转到原文位置">
-        原文
+      <button key="doc" type="button" className="crumb-root" onClick={() => void jumpCrumbRoot()} title={T("跳转到原文位置")}>
+        {T("原文")}
       </button>
     ) : (
-      <span key="doc" className="crumb-root">原文</span>
+      <span key="doc" className="crumb-root">{T("原文")}</span>
     )
   ];
   const pushLevel = (n: { id: string; text: string; depth: number }, keyPrefix = "") => {
@@ -872,12 +874,12 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           aria-expanded={crumbOpen}
           data-crumb-more
           onClick={() => setCrumbOpen((v) => !v)}
-          title={`还有 ${hidden.length} 级被折叠，点开逐层可达`}
+          title={T("还有 {n} 级被折叠，点开逐层可达", { n: hidden.length })}
         >
-          …{hidden.length} 级
+          {T("…{n} 级", { n: hidden.length })}
         </button>
         {crumbOpen && (
-          <span className="dd-menu dd-menu-left" role="listbox" aria-label="被折叠的层级">
+          <span className="dd-menu dd-menu-left" role="listbox" aria-label={T("被折叠的层级")}>
             {hidden.map((n) => (
               <button
                 key={n.id}
@@ -888,7 +890,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
                 data-crumb-hidden
                 onClick={() => void openLevel(n.id)}
               >
-                <span className="mono n">第{n.depth}层</span>
+                <span className="mono n">{T("第{n}层", { n: n.depth })}</span>
                 <span className="crumb-menu-name">{crumbName(n.text)}</span>
               </button>
             ))}
@@ -906,9 +908,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
    */
   const faceHandlers = {
     onAdvance: () => void advance(),
-    onPostpone: (days: number) => void run(() => readingWorkflow.postponeDays(current!.id, days), `已推迟 ${days} 天`),
+    onPostpone: (days: number) => void run(() => readingWorkflow.postponeDays(current!.id, days), T("已推迟 {n} 天", { n: days })),
     onPriority: (p: number) => void commitPriority(p),
-    onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), "已毕业：不再推送，仍保留在卡片浏览器"),
+    onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), T("已毕业：不再推送，仍保留在卡片浏览器")),
     onEdit: (text: string) => void commitEditContent(text),
     // 「跳转原文」按层级分流（规格 §1.2 D62）：有父摘录＝回父卡（查看态 + 高亮所引那段），
     // 根摘录＝跳源文档（逐字保持既有行为，含 returnTo="queue" 现场恢复语义）
@@ -983,13 +985,13 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
           data-annot-toggle
           aria-expanded={annotOpen}
           aria-controls="extract-annot-panel"
-          title={annotOpen ? "收起批注栏" : "展开批注栏"}
+          title={annotOpen ? T("收起批注栏") : T("展开批注栏")}
           onClick={() => {
             setRailAnimate(true);
             setAnnotOpen((v) => !v);
           }}
         >
-          {annotOpen ? "收起" : "展开"}
+          {annotOpen ? T("收起") : T("展开")}
         </button>
       )}
 
@@ -1055,22 +1057,22 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
             {/* 快捷键提示：**仅会话态**（查看态的模式提示已搬到底栏，不重复表达） */}
             {!viewing && (
               <span className="extract-page-hint mono" data-page-hint>
-                空格＝下一条 · Z＝撤销 · 点正文编辑 · 点高亮批注
+                {T("空格＝下一条 · Z＝撤销 · 点正文编辑 · 点高亮批注")}
               </span>
             )}
             {viewing && (
-              <button className="crumb-exit" data-crumb-exit onClick={closeViewing} title="回到摘录会话（Esc）">
-                返回队列
+              <button className="crumb-exit" data-crumb-exit onClick={closeViewing} title={T("回到摘录会话（Esc）")}>
+                {T("返回队列")}
               </button>
             )}
             {onExit && (
               <button className="extract-exit" onClick={onExit}>
-                返回阅读
+                {T("返回阅读")}
               </button>
             )}
             {/* 计数恒最右（v5/D72）：与面包屑同一行、右缘与卡面右缘对齐（用户裁定 ①）
                 D126：D88 §6.5 的预览方点退役——只留「数字 + 条待处理」（外层 .review-count 类保留） */}
-            <span className="review-count mono"><b>{items.length}</b> 条待处理</span>
+            <span className="review-count mono"><b>{items.length}</b> {T("条待处理")}</span>
           </div>
         </div>
 
@@ -1107,7 +1109,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       {viewing ? (
         <div className="stage-bar extract-face-actions" data-ui="stage-bar">
           <div className="stage-bar-inner">
-            <span className="bar-hint" data-page-hint>查看态：只读 · 不推进调度 · Esc 返回队列</span>
+            <span className="bar-hint" data-page-hint>{T("查看态：只读 · 不推进调度 · Esc 返回队列")}</span>
           </div>
         </div>
       ) : (

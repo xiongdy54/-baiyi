@@ -7,6 +7,7 @@ import { diffSegments, duplicateArchiveSuggestion, verdictHeading, type Editable
 import type { CardDraft, CardRecord } from "../../lib/cards";
 import ContrastDraftList from "../ContrastDraftList";
 import { IconAlert } from "../icons";
+import { useT } from "../../lib/i18n";
 
 const FIELD_LABEL: Record<keyof EditableFields, string> = { contextPrefix: "前缀", front: "问题", back: "答案" };
 
@@ -21,25 +22,26 @@ export interface ContrastState {
 export const fixKey = (f: { card: Side; field: string }) => `${f.card}:${f.field}`;
 
 function FixRow({ fix, before, adopted, onAdopt }: { fix: DisambiguateFix; before: string; adopted: boolean; onAdopt: () => void }) {
+  const T = useT();
   const d = diffSegments(before, fix.after);
   return (
     <div className="disamb-fix card-outlined" data-testid="disamb-fix">
       <div className="disamb-fix-head">
-        <span className="mono">卡 {fix.card} · {FIELD_LABEL[fix.field]}</span>
+        <span className="mono">{T("卡 {side} · {field}", { side: fix.card, field: T(FIELD_LABEL[fix.field]) })}</span>
         {adopted ? (
-          <span className="form-hint state-ok">已采纳（待保存）</span>
+          <span className="form-hint state-ok">{T("已采纳（待保存）")}</span>
         ) : (
-          <button type="button" className="btn btn-primary btn-sm" onClick={onAdopt}>采纳</button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onAdopt}>{T("采纳")}</button>
         )}
       </div>
-      <div className="disamb-diff" aria-label="原值">
-        <span className="disamb-diff-tag">原值</span>
+      <div className="disamb-diff" aria-label={T("原值")}>
+        <span className="disamb-diff-tag">{T("原值")}</span>
         {d.prefix}
         {d.beforeMid && <mark className="disamb-del">{d.beforeMid}</mark>}
         {d.suffix}
       </div>
-      <div className="disamb-diff" aria-label="新值">
-        <span className="disamb-diff-tag">新值</span>
+      <div className="disamb-diff" aria-label={T("新值")}>
+        <span className="disamb-diff-tag">{T("新值")}</span>
         {d.prefix}
         {d.afterMid && <mark className="disamb-add">{d.afterMid}</mark>}
         {d.suffix}
@@ -62,26 +64,27 @@ function ArchiveButton({
   onArchive: (side: Side) => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
-  if (already) return <span className="form-hint state-ok">卡 {side} 已归档</span>;
+  const T = useT();
+  if (already) return <span className="form-hint state-ok">{T("卡 {side} 已归档", { side })}</span>;
   if (confirming) {
     return (
-      <span className="disamb-confirm" role="group" aria-label={`确认归档卡 ${side}`}>
-        <span className="form-hint">确认归档卡 {side}？（不再复习，可在卡片浏览中恢复）</span>
+      <span className="disamb-confirm" role="group" aria-label={T("确认归档卡 {side}", { side })}>
+        <span className="form-hint">{T("确认归档卡 {side}？（不再复习，可在卡片浏览中恢复）", { side })}</span>
         <button
           type="button"
           className="btn btn-primary btn-sm"
           disabled={busy}
           onClick={() => void onArchive(side).finally(() => setConfirming(false))}
         >
-          确认归档
+          {T("确认归档")}
         </button>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => setConfirming(false)}>取消</button>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => setConfirming(false)}>{T("取消")}</button>
       </span>
     );
   }
   return (
     <button type="button" className={`btn ${primary ? "btn-primary" : "btn-outline"} btn-sm`} disabled={busy} onClick={() => setConfirming(true)}>
-      归档卡 {side}
+      {T("归档卡 {side}", { side })}
     </button>
   );
 }
@@ -113,7 +116,9 @@ export default function DiagnosisPanel({
   onGenerateContrast: () => void;
 }) {
   const v = result.verdict;
-  const heading = verdictHeading(result, VERDICT_LABELS, single);
+  const T = useT();
+  const T_LABELS = Object.fromEntries(Object.entries(VERDICT_LABELS).map(([k, val]) => [k, T(val)]));
+  const heading = verdictHeading(result, T_LABELS, single, T);
   const showFixes = (v === "missing-qualifier" || v === "one-wrong") && result.fixes.length > 0;
   const suggested = duplicateArchiveSuggestion(result.keepCard);
   const other: Side = suggested === "A" ? "B" : "A";
@@ -122,14 +127,14 @@ export default function DiagnosisPanel({
       <span className={`judge-verdict disamb-verdict v-${v}`} data-testid="disamb-verdict" data-verdict={v}>
         {heading}
       </span>
-      <div className="judge-explanation">{result.explanation || "（模型未给出说明）"}</div>
+      <div className="judge-explanation">{result.explanation || T("（模型未给出说明）")}</div>
 
       {result.evidence.length > 0 && (
-        <ul className="disamb-evidence" aria-label="依据">
+        <ul className="disamb-evidence" aria-label={T("依据")}>
           {result.evidence.map((e, i) => (
             <li key={i} className={e.verified ? "" : "is-unverified"}>
-              <span className="mono">卡 {e.card}</span>「{e.quote}」
-              {!e.verified && <span className="disamb-tag">未能在原文中核实</span>}
+              <span className="mono">{T("卡 {side}", { side: e.card })}</span>「{e.quote}」
+              {!e.verified && <span className="disamb-tag">{T("未能在原文中核实")}</span>}
             </li>
           ))}
         </ul>
@@ -167,14 +172,14 @@ export default function DiagnosisPanel({
           {contrast.drafts === null && (
             <div className="ai-actions">
               <button type="button" className="btn btn-primary btn-sm" disabled={contrast.running} onClick={onGenerateContrast}>
-                {contrast.running ? "生成中…" : "生成对比卡"}
+                {contrast.running ? T("生成中…") : T("生成对比卡")}
               </button>
             </div>
           )}
           {contrast.running && (
             <p className="form-hint">
-              AI 正在为这两张卡生成对比卡…（{contrast.progress} 字）
-              {contrast.thinking && "（模型思考中，静默数十秒属正常）"}
+              {T("AI 正在为这两张卡生成对比卡…（{n} 字）", { n: contrast.progress })}
+              {contrast.thinking && T("（模型思考中，静默数十秒属正常）")}
             </p>
           )}
           {contrast.error && <p className="ai-draft-warnings"><IconAlert size={14} /> {contrast.error}</p>}
@@ -189,8 +194,8 @@ export default function DiagnosisPanel({
         </div>
       )}
 
-      {v === "insufficient" && <p className="form-hint">依据不足，请对照原文手动修改。</p>}
-      <p className="form-hint">AI 判断仅供参考，不会自动修改任何卡片；采纳的修改需点「保存修改」才会落库。</p>
+      {v === "insufficient" && <p className="form-hint">{T("依据不足，请对照原文手动修改。")}</p>}
+      <p className="form-hint">{T("AI 判断仅供参考，不会自动修改任何卡片；采纳的修改需点「保存修改」才会落库。")}</p>
     </div>
   );
 }

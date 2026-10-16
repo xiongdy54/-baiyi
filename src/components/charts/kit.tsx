@@ -7,6 +7,8 @@
 //   字号恒定（11/12px），标签用 textW() 量过再放、放不下就 fit() 截断，标题/图例/脚注走 HTML 自动折行。
 //   图元素颜色一律取自 theme.css 的 token（palette()），深浅色/皮肤自适应。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+// v49.8（D182）：图表文案随界面语言（fmtDur/fmtMin/星期标签）
+import { getLocale, t } from "../../lib/i18n";
 
 // ───────────────────────── 配色 ─────────────────────────
 
@@ -152,25 +154,54 @@ export function niceTicks(max: number, want = 4, integer = false): number[] {
 
 export function fmtDur(ms: number): string {
   const s = Math.round(ms / 1000);
-  if (s < 60) return `${s} 秒`;
+  if (s < 60) return t("{n} 秒", { n: s });
   const m = Math.floor(s / 60), r = s % 60;
-  if (m < 60) return r ? `${m} 分 ${r} 秒` : `${m} 分`;
+  if (m < 60) return r ? t("{m} 分 {r} 秒", { m, r }) : t("{m} 分", { m });
   const h = Math.floor(m / 60), mm = m % 60;
-  return mm ? `${h} 小时 ${mm} 分` : `${h} 小时`;
+  return mm ? t("{h} 小时 {mm} 分", { h, mm }) : t("{h} 小时", { h });
 }
 
-/** 分钟级时长：<1 分显示「不足 1 分」 */
+/** 分钟级时长：<1 分显示「不足 1 分」（v49.8 / D182：文案走 i18n） */
 export function fmtMin(ms: number): string {
   const m = Math.round(ms / 60000);
-  if (m < 1) return ms > 0 ? "不足 1 分" : "0 分";
-  if (m < 60) return `${m} 分`;
+  if (m < 1) return ms > 0 ? t("不足 1 分") : t("0 分");
+  if (m < 60) return t("{n} 分", { n: m });
   const h = Math.floor(m / 60), r = m % 60;
-  return r ? `${h} 小时 ${r} 分` : `${h} 小时`;
+  return r ? t("{h} 小时 {r} 分", { h, r }) : t("{h} 小时", { h });
 }
 
-export const WEEK_ZH = ["日", "一", "二", "三", "四", "五", "六"];
+// v49.8（D182）：星期标签随界面语言——短式（周X / Mon / 月）与全式（周一 / Monday / 月曜日）
+
+const WEEK_SHORT_BY_LOCALE: Record<string, string[]> = {
+  "zh-CN": ["周日", "周一", "周二", "周三", "周四", "周五", "周六"],
+  "zh-TW": ["週日", "週一", "週二", "週三", "週四", "週五", "週六"],
+  en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+  ja: ["日", "月", "火", "水", "木", "金", "土"]
+};
+const WEEK_FULL_BY_LOCALE: Record<string, string[]> = {
+  "zh-CN": ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
+  "zh-TW": ["週一", "週二", "週三", "週四", "週五", "週六", "週日"],
+  en: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
+  ja: ["月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日"]
+};
+const weekTable = (tbl: Record<string, string[]>, i: number): string => {
+  const arr = tbl[getLocale()] ?? tbl["zh-CN"];
+  return arr[((i % 7) + 7) % 7] ?? "";
+};
+export const weekShort = (weekdayIndex: number): string => weekTable(WEEK_SHORT_BY_LOCALE, weekdayIndex);
+export const weekFull = (weekdayIndex: number): string => weekTable(WEEK_FULL_BY_LOCALE, weekdayIndex);
+
+const WEEK_MINI_BY_LOCALE: Record<string, string[]> = {
+  "zh-CN": ["日", "一", "二", "三", "四", "五", "六"],
+  "zh-TW": ["日", "一", "二", "三", "四", "五", "六"],
+  en: ["S", "M", "T", "W", "T", "F", "S"],
+  ja: ["日", "月", "火", "水", "木", "金", "土"]
+};
+export const weekMini = (weekdayIndex: number): string => weekTable(WEEK_MINI_BY_LOCALE, weekdayIndex);
+
+export const WEEK_ZH = ["日", "一", "二", "三", "四", "五", "六"]; // 兼容旧签名（zh 简写；新代码用 weekShort/weekFull）
 export const md = (t: number) => `${new Date(t).getMonth() + 1}/${new Date(t).getDate()}`;
-export const mdw = (t: number) => `${md(t)} 周${WEEK_ZH[new Date(t).getDay()]}`;
+export const mdw = (t: number) => `${md(t)} ${weekShort(new Date(t).getDay())}`;
 export const hhmm = (t: number) => {
   const d = new Date(t);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;

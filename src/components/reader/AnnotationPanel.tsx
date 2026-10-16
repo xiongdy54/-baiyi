@@ -13,6 +13,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { annotColorCss } from "../AnnotationEditor";
 import { IconEllipsis } from "../icons";
+import { useT } from "../../lib/i18n";
 
 export interface AnnotItem {
   id: string;
@@ -92,6 +93,7 @@ export default function AnnotationPanel({
   sort?: AnnotSort;
   onSort?: (s: AnnotSort) => void;
 }) {
+  const T = useT();
   const [sortState, setSortState] = useState<AnnotSort>("pos");
   const sort = sortProp ?? sortState;
   const setSort = (s: AnnotSort) => (onSortProp ? onSortProp(s) : setSortState(s));
@@ -175,18 +177,18 @@ export default function AnnotationPanel({
     <aside className="annot-side" ref={boxRef} style={{ width }} data-annot-panel>
       {showHead && (
       <div className="annot-side-head">
-        {showCount && <span className="mono" data-annot-count>{`注解 ${listed.length}`}</span>}
+        {showCount && <span className="mono" data-annot-count>{T("注解 {n}", { n: listed.length })}</span>}
         <span className="filter" data-annot-filterseg>
           {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
             <button key={id} className={filter === id ? "on" : ""} data-f={id} onClick={() => onFilter(id)}>
-              {label}
+              {T(label)}
             </button>
           ))}
         </span>
         <span className="sort" data-annot-sortseg>
           {([["pos", "位置"], ["time", "时间"]] as const).map(([id, label]) => (
             <button key={id} className={sort === id ? "on" : ""} data-sort={id} onClick={() => setSort(id)}>
-              {label}
+              {T(label)}
             </button>
           ))}
         </span>
@@ -208,7 +210,7 @@ export default function AnnotationPanel({
               data-whole={isWhole ? "1" : undefined}
               role="button"
               tabIndex={0}
-              title="点击条目：文中跳到锚点并短暂强调"
+              title={T("点击条目：文中跳到锚点并短暂强调")}
               onClick={() => {
                 // 点条目＝跳转（样张 §5.3「点击条目 → 文中滚动到锚点并短暂强调」）；
                 // ⋯ 选单 / 删除确认 / 输入区不触发（各自 stopPropagation）；选单开着时点条目＝先收单
@@ -230,7 +232,7 @@ export default function AnnotationPanel({
                 <div className="zbody-quote">
                   <i className="zbar" data-annot-color="" aria-hidden="true" style={{ background: annotCss }} />
                   <p className={`zq${isWhole ? " tag-whole" : ""}`} data-zq>
-                    {isWhole ? "本条批注 · 锚在整卡" : it.quote}
+                    {isWhole ? T("本条批注 · 锚在整卡") : it.quote}
                   </p>
                 </div>
                 {/* 「没写批注就不显示批注行」（R33）：纯高亮与无批注条目只留引文 */}
@@ -256,7 +258,7 @@ export default function AnnotationPanel({
                   <p
                     className="zn"
                     data-zn
-                    title="点一下改批注"
+                    title={T("点一下改批注")}
                     onClick={(e) => {
                       e.stopPropagation();
                       setEditingId(it.id);
@@ -272,14 +274,14 @@ export default function AnnotationPanel({
                 <p className="zmeta mono">
                   <span>{fmtTime(it.time)}</span>
                   <span className={`kind-tag${it.kind === "extract" ? " t-extract" : ""}`} data-kindtag>
-                    {it.kind === "extract" ? "摘录" : "高亮"}
+                    {it.kind === "extract" ? T("摘录") : T("高亮")}
                   </span>
                   {it.locatable === false ? (
-                    <span className="kind-tag t-unlocated" data-annot-unlocated title="这条没有可定位的锚点（老数据或导航失败）">
-                      不可定位
+                    <span className="kind-tag t-unlocated" data-annot-unlocated title={T("这条没有可定位的锚点（老数据或导航失败）")}>
+                      {T("不可定位")}
                     </span>
                   ) : (
-                    <span>{isWhole ? "整卡" : "段锚"}</span>
+                    <span>{isWhole ? T("整卡") : T("段锚")}</span>
                   )}
                   {/* 删除确认态（R4：删除入口在 ⋯ 选单里；确认/取消回到行内常显——§8.2 破坏性操作退路） */}
                   {confirmId === it.id && (
@@ -294,7 +296,7 @@ export default function AnnotationPanel({
                           setConfirmId(null);
                         }}
                       >
-                        确认删除
+                        {T("确认删除")}
                       </button>
                       <button
                         type="button"
@@ -305,7 +307,7 @@ export default function AnnotationPanel({
                           setConfirmId(null);
                         }}
                       >
-                        取消
+                        {T("取消")}
                       </button>
                     </span>
                   )}
@@ -314,10 +316,10 @@ export default function AnnotationPanel({
                     type="button"
                     className="zdots"
                     data-zdots=""
-                    aria-label="更多操作"
+                    aria-label={T("更多操作")}
                     aria-haspopup="menu"
                     aria-expanded={menuFor === it.id}
-                    title="更多操作"
+                    title={T("更多操作")}
                 onClick={(e) => {
                   e.stopPropagation();
                   openMenu(it, e.currentTarget);
@@ -360,7 +362,7 @@ export default function AnnotationPanel({
                         >
                           <span className="zmenu-check" aria-hidden="true">{it.color === c ? "✓" : ""}</span>
                           <span className="zmenu-swatch" style={{ background: annotColorCss(c) }} aria-hidden="true" />
-                          <span className="zmenu-name">{colorName(c)}</span>
+                          <span className="zmenu-name">{T(colorName(c))}</span>
                         </button>
                       ))}
                       <div className="zmenu-sep" aria-hidden="true" />
@@ -379,7 +381,7 @@ export default function AnnotationPanel({
                     onKeyDown={(e) => e.stopPropagation()}
                   >
                     <span className="zmenu-check" aria-hidden="true" />
-                    <span className="zmenu-name">{it.comment ? "编辑批注" : "添加批注"}</span>
+                    <span className="zmenu-name">{it.comment ? T("编辑批注") : T("添加批注")}</span>
                   </button>
                   <div className="zmenu-sep" aria-hidden="true" />
                   <button
@@ -396,14 +398,14 @@ export default function AnnotationPanel({
                     onKeyDown={(e) => e.stopPropagation()}
                   >
                     <span className="zmenu-check" aria-hidden="true" />
-                    <span className="zmenu-name">{isWhole ? "删除批注" : it.kind === "highlight" ? "删除高亮" : "删除摘录"}</span>
+                    <span className="zmenu-name">{isWhole ? T("删除批注") : it.kind === "highlight" ? T("删除高亮") : T("删除摘录")}</span>
                   </button>
                 </div>
               )}
             </div>
           );
         })}
-        {listed.length === 0 && <p className="annot-empty mono">（筛选后无条目）</p>}
+        {listed.length === 0 && <p className="annot-empty mono">{T("（筛选后无条目）")}</p>}
       </div>
     </aside>
   );

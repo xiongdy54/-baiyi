@@ -2,6 +2,7 @@
 // 队列口径唯一在 db 侧（§4.2-26 computeSessionQueue）；本模块只做类型化封装与默认值，
 // 禁止在组件内自行归并卡片与摘录（§4.2-26 口径唯一精神）。
 import { settingsStore } from "./settings";
+import { t } from "./i18n";
 import type { DueTopic, ExtractEngine, ExtractStatusPatch } from "./readingWorkflow";
 
 export type InterleaveMode = "quota-1-4" | "by-due";
@@ -102,11 +103,11 @@ export async function fetchSessionQueue(opts?: {
   return res;
 }
 
-/** 摘要（复习页节奏提示：本轮还剩多少、被上限拦下多少） */
+/** 摘要（复习页节奏提示：本轮还剩多少、被上限拦下多少）——渲染期取当前语言 */
 export function sessionSummary(q: SessionQueue | null): string {
   if (!q) return "";
   const blocked = q.blocked.cards.length + q.blocked.extracts.length;
-  return `${q.items.length} 条待处理${blocked > 0 ? ` · ${blocked} 条未放行` : ""}`;
+  return t("{n} 条待处理", { n: q.items.length }) + (blocked > 0 ? t(" · {n} 条未放行", { n: blocked }) : "");
 }
 
 /** 每日上限状态（§6.8-5） */

@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { settingsStore } from "../lib/settings";
 import { DEFAULT_CARD_FACE_EXTRAS, normalizeCardFaceExtras, type CardFaceExtras } from "../lib/cardFaceExtras";
 import type { CardRecord } from "../lib/cards";
+import { useT } from "../lib/i18n";
 
 export default function CardFaceExtrasBlock({ card }: { card: Pick<CardRecord, "mnemonic" | "example" | "sourceRef"> }) {
+  const T = useT();
   const [extras, setExtras] = useState<CardFaceExtras>(DEFAULT_CARD_FACE_EXTRAS);
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +34,7 @@ export default function CardFaceExtrasBlock({ card }: { card: Pick<CardRecord, "
     <div className="card-extras" data-testid="card-face-extras">
       {blocks.map((b) => (
         <div key={b.key} className="review-mnemonic" data-testid={`card-extra-${b.key}`}>
-          <span className="book-card-label">{b.label}</span>
+          <span className="book-card-label">{T(b.label)}</span>
           {b.text}
         </div>
       ))}

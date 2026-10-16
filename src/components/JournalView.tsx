@@ -15,12 +15,14 @@ import {
   todayJournalDate,
   type JournalEntry
 } from "../lib/journal";
+import { useT } from "../lib/i18n";
 
 const PAGE_SIZE = 200;
 
 export default function JournalView({ onJumpToDoc }: {
   onJumpToDoc?: (docId: string, anchor: { anchorText: string }, returnTo?: "browse") => void;
 }) {
+  const T = useT();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -31,6 +33,7 @@ export default function JournalView({ onJumpToDoc }: {
   const [editText, setEditText] = useState("");
   const [composerText, setComposerText] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [draftEditing, setDraftEditing] = useState(false);
   const [accelerator, setAccelerator] = useState("Ctrl+Alt+Space");
   const [busy, setBusy] = useState(false);
@@ -170,6 +173,9 @@ export default function JournalView({ onJumpToDoc }: {
   async function copyEntry(entry: JournalEntry) {
     try {
       await navigator.clipboard.writeText(entry.contentMarkdown);
+      // 「已复制」反馈：短暂置值后回落（按钮文字随之切回「复制」）
+      setCopiedId(entry.id);
+      window.setTimeout(() => setCopiedId((cur) => (cur === entry.id ? null : cur)), 1500);
     } catch {
       /* 剪贴板不可用：静默（不阻塞编辑） */
     }
@@ -189,7 +195,7 @@ export default function JournalView({ onJumpToDoc }: {
         <input
           className="journal-search"
           value={queryInput}
-          placeholder="搜索日记内容…"
+          placeholder={T("搜索日记内容…")}
           onChange={(e) => setQueryInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") setQuery(queryInput.trim());
@@ -201,7 +207,7 @@ export default function JournalView({ onJumpToDoc }: {
         />
         {query && (
           <span className="journal-search-meta mono">
-            命中 {total} 条
+            {T("命中 {n} 条", { n: total })}
             <button
               className="journal-link"
               onClick={() => {
@@ -209,27 +215,27 @@ export default function JournalView({ onJumpToDoc }: {
                 setQuery("");
               }}
             >
-              清除
+              {T("清除")}
             </button>
           </span>
         )}
         <span className="journal-toolbar-spacer" />
         {/* v40（M8-B）：洞察入口（日记页主操作，按需触发） */}
         <button className="btn btn-primary btn-sm" onClick={() => setInsightOpen(true)}>
-          洞察
+          {T("洞察")}
         </button>
-        <span className="journal-count mono">{total} 条</span>
+        <span className="journal-count mono">{T("{n} 条", { n: total })}</span>
       </div>
 
       {entries.length === 0 && (
         <div className="journal-empty">
-          <p className="journal-empty-title">{query ? "没有匹配的日记" : "日记还是空的"}</p>
+          <p className="journal-empty-title">{query ? T("没有匹配的日记") : T("日记还是空的")}</p>
           <p className="journal-empty-text">
             {query ? (
-              "换个词试试，或清除搜索。"
+              T("换个词试试，或清除搜索。")
             ) : (
               <>
-                按下 <span className="mono journal-kbd">{accelerator}</span> 随时弹出快速记录窗口，记下随想；也可以直接在下面写。
+                {T("按下")} <span className="mono journal-kbd">{accelerator}</span> {T("随时弹出快速记录窗口，记下随想；也可以直接在下面写。")}
               </>
             )}
           </p>
@@ -240,9 +246,9 @@ export default function JournalView({ onJumpToDoc }: {
         <div className="journal-day" key={group.date} id={`journal-day-${group.date}`}>
           <div className="journal-day-head">
             <span className="journal-day-date mono">{journalDateLabel(group.date, { withYear: true })}</span>
-            {group.date === today && <span className="journal-day-today">今天</span>}
+            {group.date === today && <span className="journal-day-today">{T("今天")}</span>}
             <span className="journal-day-count mono">
-              {group.sent.length + (group.draft ? 1 : 0)} 条
+              {T("{n} 条", { n: group.sent.length + (group.draft ? 1 : 0) })}
             </span>
           </div>
 
@@ -263,7 +269,7 @@ export default function JournalView({ onJumpToDoc }: {
                       className="journal-edit-md"
                       onReady={() => editMdRef.current?.focusBlock(0)}
                     />
-                    <span className="journal-edit-hint mono">Esc 保存 · 失焦保存 · Enter 换行</span>
+                    <span className="journal-edit-hint mono">{T("Esc 保存 · 失焦保存 · Enter 换行")}</span>
                   </div>
                 ) : (
                   <div className="journal-entry-md">
@@ -279,17 +285,17 @@ export default function JournalView({ onJumpToDoc }: {
                     setEditText(entry.contentMarkdown);
                   }}
                 >
-                  编辑
+                  {T("编辑")}
                 </button>
                 <button className="journal-link" onClick={() => void copyEntry(entry)}>
-                  复制
+                  {copiedId === entry.id ? T("已复制") : T("复制")}
                 </button>
                 <button
                   className={`journal-link${confirmDeleteId === entry.id ? " journal-link-danger" : ""}`}
                   onClick={() => void deleteEntry(entry.id)}
                   onBlur={() => setConfirmDeleteId(null)}
                 >
-                  {confirmDeleteId === entry.id ? "确认删除" : "删除"}
+                  {confirmDeleteId === entry.id ? T("确认删除") : T("删除")}
                 </button>
               </div>
             </article>
@@ -299,7 +305,7 @@ export default function JournalView({ onJumpToDoc }: {
             <article className="journal-entry journal-draft">
               <span className="journal-entry-time mono">{formatClock(group.draft.createdAt)}</span>
               <div className="journal-entry-body">
-                <span className="journal-draft-label mono">草稿 · 未发送</span>
+                <span className="journal-draft-label mono">{T("草稿 · 未发送")}</span>
                 {draftEditing ? (
                   <div className="journal-edit">
                     {/* §J P0：草稿续写用完整编辑器；提交＝写回同一条草稿（不误发），发送仍走显式按钮 */}
@@ -313,7 +319,7 @@ export default function JournalView({ onJumpToDoc }: {
                       className="journal-edit-md"
                       onReady={() => draftMdRef.current?.focusBlock(0)}
                     />
-                    <span className="journal-edit-hint mono">Esc 存草稿 · 失焦存草稿 · 发送按钮定格</span>
+                    <span className="journal-edit-hint mono">{T("Esc 存草稿 · 失焦存草稿 · 发送按钮定格")}</span>
                   </div>
                 ) : (
                   <div className="journal-entry-md">
@@ -323,7 +329,7 @@ export default function JournalView({ onJumpToDoc }: {
               </div>
               <div className="journal-entry-actions">
                 <button className="journal-link" disabled={busy} onClick={() => void sendDraft(group.draft!)}>
-                  发送
+                  {T("发送")}
                 </button>
                 <button
                   className="journal-link"
@@ -332,14 +338,14 @@ export default function JournalView({ onJumpToDoc }: {
                     setEditText(group.draft!.contentMarkdown);
                   }}
                 >
-                  继续写
+                  {T("继续写")}
                 </button>
                 <button
                   className={`journal-link${confirmDeleteId === group.draft.id ? " journal-link-danger" : ""}`}
                   onClick={() => void deleteEntry(group.draft!.id)}
                   onBlur={() => setConfirmDeleteId(null)}
                 >
-                  {confirmDeleteId === group.draft.id ? "确认删除" : "删除"}
+                  {confirmDeleteId === group.draft.id ? T("确认删除") : T("删除")}
                 </button>
               </div>
             </article>
@@ -352,7 +358,7 @@ export default function JournalView({ onJumpToDoc }: {
                 value={composerText}
                 variant="full"
                 minRows={2}
-                placeholder="记下此刻的想法…（Enter 换行 · Esc 或失焦提交）"
+                placeholder={T("记下此刻的想法…（Enter 换行 · Esc 或失焦提交）")}
                 onChange={setComposerText}
                 onCommit={(t) => {
                   if (t !== null && t.trim()) void submitComposer(t);
@@ -360,9 +366,9 @@ export default function JournalView({ onJumpToDoc }: {
                 className="journal-composer-md"
               />
               <div className="journal-composer-foot">
-                <span className="journal-composer-hint mono">Esc 提交 · 失焦提交</span>
+                <span className="journal-composer-hint mono">{T("Esc 提交 · 失焦提交")}</span>
                 <button className="btn btn-primary btn-sm" disabled={!composerText.trim() || busy} onClick={() => void submitComposer()}>
-                  记下
+                  {T("记下")}
                 </button>
               </div>
             </div>
@@ -373,7 +379,7 @@ export default function JournalView({ onJumpToDoc }: {
       {entries.length < total && (
         <div className="journal-more">
           <button className="btn btn-outline btn-sm" disabled={loading} onClick={() => setLimit((n) => n + PAGE_SIZE)}>
-            {loading ? "加载中…" : `加载更早（还有 ${total - entries.length} 条）`}
+            {loading ? T("加载中…") : T("加载更早（还有 {n} 条）", { n: total - entries.length })}
           </button>
         </div>
       )}

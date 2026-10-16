@@ -37,6 +37,7 @@ import { buildSchemeFilter, cardMatchesScheme, extractMatchesScheme } from "../l
 // v48.60（D101）：标签——批量打标/去标的终值计算 + 词表建议（规则单一源 = src/lib/tags.ts）
 import { applyTagDelta, tagKey, type TagVocabEntry } from "../lib/tags";
 import TagInput from "./TagInput";
+import { t, useT } from "../lib/i18n";
 
 /** v48.22（D58 §6.8-5）：筛选牌组（复习范围）——保存的过滤条件，零 schema 变更。
  *  v48.61（D105）：结构扩展 tags[] / kpIds[]（向后兼容，缺省 = 不限）；过滤语义见 §6.8-5 */
@@ -67,15 +68,16 @@ const TYPE_LABELS: Record<string, string> = {
   mnemonic: "助记",
   formula: "公式"
 };
-const typeLabel = (t: string) => TYPE_LABELS[t] || t;
+const typeLabel = (k: string) => t(TYPE_LABELS[k]) || k;
 
 const STATE_LABELS: Record<string, string> = { new: "新卡", learning: "学习中", relearning: "学习中", review: "复习中" };
 
 function statusOf(c: CardRecord): string {
   // v48.60（D102）：生命周期归档最先可见（与挂起正交——归档 + 挂起显示「已归档」，挂起态在详情/meta 可见）
-  if ((c as { status?: string | null }).status === "archived") return "已归档";
-  if (c.leech?.suspended) return "已暂停";
-  return STATE_LABELS[c.fsrs?.state ?? "new"] ?? "复习中";
+  if ((c as { status?: string | null }).status === "archived") return t("已归档");
+  if (c.leech?.suspended) return t("已暂停");
+  const s = STATE_LABELS[c.fsrs?.state ?? "new"];
+  return s ? t(s) : t("复习中");
 }
 
 // 到期判定与难点口径（v48.67 / D111 起内联在轻量行集过滤器中，字段口径不变：
@@ -83,11 +85,11 @@ function statusOf(c: CardRecord): string {
 
 function formatDue(ms: number): string {
   const days = ms / 86400000;
-  if (days < 1 / 24) return `${Math.max(1, Math.round(ms / 60000))} 分钟`;
-  if (days < 1) return `${Math.round(days * 24)} 小时`;
-  if (days < 30) return `${Math.round(days)} 天`;
-  if (days < 365) return `${(days / 30).toFixed(1)} 个月`;
-  return `${(days / 365).toFixed(1)} 年`;
+  if (days < 1 / 24) return `${Math.max(1, Math.round(ms / 60000))} ${t("分钟")}`;
+  if (days < 1) return `${Math.round(days * 24)} ${t("小时")}`;
+  if (days < 30) return `${Math.round(days)} ${t("天", { n: Math.round(days) })}`;
+  if (days < 365) return `${(days / 30).toFixed(1)} ${t("个月")}`;
+  return `${(days / 365).toFixed(1)} ${t("年")}`;
 }
 
 function dueText(c: CardRecord): string {
@@ -95,13 +97,13 @@ function dueText(c: CardRecord): string {
   const due = c.fsrs?.due;
   if (!due) return "—";
   const diff = due - Date.now();
-  return diff <= 0 ? "已到期" : formatDue(diff);
+  return diff <= 0 ? t("已到期") : formatDue(diff);
 }
 
 // 浏览列表显示完整原文（挖空内容可见，Anki 浏览器同语义）；图片挖空带标记前缀
 function frontPreview(c: CardRecord): string {
   const text = c.frontMarkdown || c.noteText;
-  if (c.cardType === "imageOcclusion") return `[图片遮挡] ${text}`;
+  if (c.cardType === "imageOcclusion") return t("[图片遮挡] {text}", { text });
   if (c.cardType === "cloze") return parseCloze(text).render(null);
   return text;
 }
@@ -159,6 +161,7 @@ export default function CardBrowser({
   /** 清除锚点筛选（回 App 摘掉视图字段） */
   onClearAnchorFilter?: () => void;
 }) {
+  const T = useT();
   const tagsEnabled = useTagsEnabled();
   // v48.67（D111）：全库轻量行集（cards:listMeta，无题面/答案大列）——排序/预设/页签/计数的数据面
   const [metaAll, setMetaAll] = useState<BrowserMetaRow[]>([]);
@@ -399,7 +402,7 @@ export default function CardBrowser({
     const present = new Map<string, string>();
     for (const m of metaAll) present.set(m.cardType, typeLabel(m.cardType));
     return [
-      { value: "all", label: "全部类型" },
+      { value: "all", label: t("全部类型") },
       ...[...present.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }))
     ];
   }, [metaAll]);
@@ -446,10 +449,10 @@ export default function CardBrowser({
   const bookOptions = useMemo(() => {
     const m = new Map<string, string>();
     for (const c of metaAll) {
-      if (c.bookId) m.set(String(c.bookId), String(c.docTitle || "未知材料"));
+      if (c.bookId) m.set(String(c.bookId), String(c.docTitle || t("未知材料")));
     }
-    for (const e of extracts) if (e.libraryItemId) m.set(String(e.libraryItemId), String(e.docTitle || "未知材料"));
-    return [{ value: "all", label: "全部来源书" }, ...[...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }))];
+    for (const e of extracts) if (e.libraryItemId) m.set(String(e.libraryItemId), String(e.docTitle || t("未知材料")));
+    return [{ value: "all", label: t("全部来源书") }, ...[...m.entries()].sort((a, b) => a[1].localeCompare(b[1])).map(([value, label]) => ({ value, label }))];
   }, [metaAll, extracts]);
 
   // D158：方案条件作用于表格——来源书（下拉单选 ∪ 追加来源书）+ 标签 + 知识点归并族。
@@ -633,11 +636,11 @@ export default function CardBrowser({
       if (r?.ok) {
         setSelCards(new Set());
         setTagDraft([]);
-        flashNote(`已更新 ${r.count ?? ids.length} 张卡的标签`);
+        flashNote(T("已更新 {n} 张卡的标签", { n: r.count ?? ids.length }));
         eventBus.emit("cards/changed");
         await refresh();
       } else {
-        flashNote(r?.reason || "标签写入失败，整批未执行");
+        flashNote(r?.reason || T("标签写入失败，整批未执行"));
       }
     } finally {
       setBatchBusy(false);
@@ -646,17 +649,17 @@ export default function CardBrowser({
   async function runCardBatch(op: string, payload?: unknown) {
     const ids = [...selCards];
     if (ids.length === 0) return;
-    if (op === "delete" && !window.confirm(`删除选中的 ${ids.length} 张卡？（软删，可在备份中找回）`)) return;
+    if (op === "delete" && !window.confirm(T("删除选中的 {n} 张卡？（软删，可在备份中找回）", { n: ids.length }))) return;
     setBatchBusy(true);
     try {
       const r = await cardsApi.batch(op, ids, payload);
       if (r?.ok) {
         setSelCards(new Set());
-        flashNote(`已处理 ${r.count ?? ids.length} 张卡`);
+        flashNote(T("已处理 {n} 张卡", { n: r.count ?? ids.length }));
         eventBus.emit("cards/changed");
         await refresh();
       } else {
-        flashNote(r?.reason || "批量操作失败，整批未执行");
+        flashNote(r?.reason || T("批量操作失败，整批未执行"));
       }
     } finally {
       setBatchBusy(false);
@@ -665,17 +668,17 @@ export default function CardBrowser({
   async function runExtractBatch(op: string, payload?: unknown) {
     const ids = [...selExtracts];
     if (ids.length === 0) return;
-    if (op === "delete" && !window.confirm(`删除选中的 ${ids.length} 条摘录？（软删，可在备份中找回）`)) return;
+    if (op === "delete" && !window.confirm(T("删除选中的 {n} 条摘录？（软删，可在备份中找回）", { n: ids.length }))) return;
     setBatchBusy(true);
     try {
       const r = (await readingWorkflow.batch(op as never, ids, payload as never)) as { ok?: boolean; count?: number; skipped?: Array<{ reason: string }>; reason?: string };
       if (r?.ok) {
         setSelExtracts(new Set());
-        const skipped = Array.isArray(r.skipped) && r.skipped.length ? `（${r.skipped.length} 条按规则跳过）` : "";
-        flashNote(`已处理 ${r.count ?? ids.length} 条摘录${skipped}`);
+        const skipped = Array.isArray(r.skipped) && r.skipped.length ? T("（{n} 条按规则跳过）", { n: r.skipped.length }) : "";
+        flashNote(T("已处理 {n} 条摘录", { n: r.count ?? ids.length }) + skipped);
         await refresh();
       } else {
-        flashNote(r?.reason || "批量操作失败，整批未执行");
+        flashNote(r?.reason || T("批量操作失败，整批未执行"));
       }
     } finally {
       setBatchBusy(false);
@@ -686,33 +689,33 @@ export default function CardBrowser({
   function kindsLabel(kinds: string[]): string {
     const c = kinds.includes("card");
     const e = kinds.includes("extract");
-    if (c && e) return "闪卡 + 摘录";
-    return e ? "摘录" : "闪卡";
+    if (c && e) return T("闪卡 + 摘录");
+    return e ? T("摘录") : T("闪卡");
   }
   function kindsNoun(kinds: string[]): string {
     const c = kinds.includes("card");
     const e = kinds.includes("extract");
-    if (c && e) return "闪卡和摘录";
-    return e ? "摘录" : "闪卡";
+    if (c && e) return T("闪卡和摘录");
+    return e ? T("摘录") : T("闪卡");
   }
   function bookLabel(id: string): string {
-    return bookOptions.find((o) => o.value === id)?.label ?? "已移除的书";
+    return bookOptions.find((o) => o.value === id)?.label ?? T("已移除的书");
   }
   function startLabel(s: { kinds: string[] }): string {
-    return s.kinds.includes("card") ? "开始复习" : "处理摘录";
+    return s.kinds.includes("card") ? T("开始复习") : T("处理摘录");
   }
   function startTitle(s: { kinds: string[] }): string {
     return s.kinds.includes("card")
-      ? "只复习这个方案范围内的卡片，复习记录照常计入"
-      : "只处理这个方案范围内的摘录，处理记录照常计入";
+      ? T("只复习这个方案范围内的卡片，复习记录照常计入")
+      : T("只处理这个方案范围内的摘录，处理记录照常计入");
   }
   function describeScope(s: SavedScope): string {
     const parts: string[] = [kindsLabel(s.kinds)];
     if (s.bookItemIds.length === 1) parts.push(bookLabel(s.bookItemIds[0]));
-    if (s.bookItemIds.length > 1) parts.push(`${bookLabel(s.bookItemIds[0])} 等 ${s.bookItemIds.length} 本书`);
-    if (s.tags?.length) parts.push(`标签：${s.tags.slice(0, 2).join("、")}${s.tags.length > 2 ? ` 等 ${s.tags.length} 个` : ""}`);
-    if (s.kpIds?.length) parts.push(`知识点 ${s.kpIds.length} 个（仅闪卡）`);
-    if (parts.length === 1) parts.push("不限来源");
+    if (s.bookItemIds.length > 1) parts.push(T("{book} 等 {n} 本书", { book: bookLabel(s.bookItemIds[0]), n: s.bookItemIds.length }));
+    if (s.tags?.length) parts.push(T("标签：{tags}{more}", { tags: s.tags.slice(0, 2).join("、"), more: s.tags.length > 2 ? T(" 等 {n} 个", { n: s.tags.length }) : "" }));
+    if (s.kpIds?.length) parts.push(T("知识点 {n} 个（仅闪卡）", { n: s.kpIds.length }));
+    if (parts.length === 1) parts.push(T("不限来源"));
     return parts.join(" · ");
   }
 
@@ -744,8 +747,8 @@ export default function CardBrowser({
   }
   async function saveDeck() {
     const draft = buildScopeDraft();
-    const fallback = kindFilter === "card" ? "闪卡" : kindFilter === "extract" ? "摘录" : "全部";
-    const name = deckName.trim() || `筛选方案 · ${fallback}`;
+    const fallback = kindFilter === "card" ? T("闪卡") : kindFilter === "extract" ? T("摘录") : T("全部");
+    const name = deckName.trim() || T("筛选方案 · {kind}", { kind: fallback });
     const scope: SavedScope = { id: crypto.randomUUID(), name, ...draft };
     const next = [...scopes, scope];
     await settingsStore.set("app", "reviewScopes", next);
@@ -760,7 +763,7 @@ export default function CardBrowser({
     setSchemeEditorOpen(false);
     applyDeck(scope, { silent: true }); // 保存即套用：让表格精确等于方案（先关弹层）
     setSchemeMenuOpen(true);            // 再自动打开列表，让用户看到新方案
-    flashNote(`已保存并套用方案「${name}」`);
+    flashNote(T("已保存并套用方案「{name}」", { name }));
   }
   function applyDeck(s: SavedScope, opts?: { silent?: boolean }) {
     setKindFilter(s.kinds.length === 2 ? "both" : s.kinds[0] === "extract" ? "extract" : "card");
@@ -787,7 +790,7 @@ export default function CardBrowser({
     setActiveSchemeSig("");
     setSigCaptureToken((t) => t + 1);
     setSchemeMenuOpen(false);
-    if (!opts?.silent) flashNote(`已套用方案「${s.name}」`);
+    if (!opts?.silent) flashNote(T("已套用方案「{name}」", { name: s.name }));
   }
   function exitScheme(opts?: { silent?: boolean }) {
     setKindFilter("card");
@@ -797,7 +800,7 @@ export default function CardBrowser({
     setDeckKps([]);
     setActiveSchemeId(null);
     setActiveSchemeSig("");
-    if (!opts?.silent) flashNote("已退出方案");
+    if (!opts?.silent) flashNote(T("已退出方案"));
   }
   async function deleteDeck(id: string) {
     const target = scopes.find((s) => s.id === id);
@@ -805,7 +808,7 @@ export default function CardBrowser({
     await settingsStore.set("app", "reviewScopes", next);
     setScopes(next);
     if (id === activeSchemeId) exitScheme({ silent: true }); // 删除当前方案 = 同时退出方案
-    if (target) flashNote(`已删除方案「${target.name}」`);
+    if (target) flashNote(T("已删除方案「{name}」", { name: target.name }));
   }
   function openSchemeEditor() {
     editorSnapshotRef.current = { books: deckExtraBooks, tags: deckTags, kps: deckKps };
@@ -846,7 +849,7 @@ export default function CardBrowser({
   async function runFindReplace() {
     const needle = findText;
     if (!needle) {
-      flashNote("请先填写要查找的文字");
+      flashNote(T("请先填写要查找的文字"));
       return;
     }
     const ids = [...selExtracts];
@@ -861,7 +864,7 @@ export default function CardBrowser({
         await readingWorkflow.updateContent(id, text.split(needle).join(replaceText));
         changed += 1;
       }
-      flashNote(changed > 0 ? `已替换 ${changed} 条摘录的正文` : "选中的摘录里没有该文字");
+      flashNote(changed > 0 ? T("已替换 {n} 条摘录的正文", { n: changed }) : T("选中的摘录里没有该文字"));
       await refresh();
     } finally {
       setBatchBusy(false);
@@ -1056,29 +1059,29 @@ export default function CardBrowser({
           v48.111（D156）：纯文字统计行退役，计数归一进页签（.tab-cnt，无括号） */}
       <div className="cb-head">
         <div className="cb-head-inner">
-          <div className="seg-tabs" role="tablist" aria-label="卡片预设范围">
+          <div className="seg-tabs" role="tablist" aria-label={T("卡片预设范围")}>
             <button className={preset === "all" ? "active" : ""} onClick={() => setPreset("all")}>
-              全部卡片<span className="tab-cnt">{metaAll.length}</span>
+              {T("全部卡片")}<span className="tab-cnt">{metaAll.length}</span>
             </button>
             <button className={preset === "due" ? "active" : ""} onClick={() => setPreset("due")}>
-              到期卡片<span className="tab-cnt">{counts.due}</span>
+              {T("到期卡片")}<span className="tab-cnt">{counts.due}</span>
             </button>
             <button className={preset === "leech" ? "active" : ""} onClick={() => setPreset("leech")}>
-              记忆难点<span className="tab-cnt">{counts.leech}</span>
+              {T("记忆难点")}<span className="tab-cnt">{counts.leech}</span>
             </button>
             {/* v34（M12，§4.16）：今日同源暂缓——被同源卡延后到明日的卡（点开行详情可见原因） */}
             {counts.deferred > 0 && (
               <button className={preset === "deferred" ? "active" : ""} onClick={() => setPreset("deferred")}>
-                今日暂缓<span className="tab-cnt">{counts.deferred}</span>
+                {T("今日暂缓")}<span className="tab-cnt">{counts.deferred}</span>
               </button>
             )}
             {/* v40（K1，D37）：知识地基管理面（§9.1 K1-4 最小管理页） */}
             <button className={preset === "knowledge" ? "active" : ""} onClick={() => setPreset("knowledge")}>
-              知识点{kpTotal != null && <span className="tab-cnt">{kpTotal}</span>}
+              {T("知识点")}{kpTotal != null && <span className="tab-cnt">{kpTotal}</span>}
             </button>
             {/* v48.60（D102）：已归档（不再关心）——默认列表不含归档，这里显式进入 */}
             <button className={preset === "archived" ? "active" : ""} onClick={() => setPreset("archived")}>
-              已归档<span className="tab-cnt">{counts.archived}</span>
+              {T("已归档")}<span className="tab-cnt">{counts.archived}</span>
             </button>
           </div>
         </div>
@@ -1093,34 +1096,34 @@ export default function CardBrowser({
         <div className="cb-cluster cb-cluster-grow">
           <input
             className="cb-search"
-            placeholder='搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）'
+            placeholder={T('搜索题面、答案、前缀、来源、领域、标签…（支持 -排除、kind:、book:、status:、priority<=30）')}
             value={queryInput}
             onChange={(e) => setQueryInput(e.target.value)}
           />
         </div>
         <div className="cb-cluster">
-          <Dropdown title="按卡片类型筛选" value={typeFilter} options={typeOptions} onChange={setTypeFilter} />
+          <Dropdown title={T("按卡片类型筛选")} value={typeFilter} options={typeOptions} onChange={setTypeFilter} />
           <Dropdown
-            title="按复习状态筛选"
+            title={T("按复习状态筛选")}
             value={stateFilter}
             options={[
-              { value: "all", label: "全部状态" },
-              { value: "new", label: "新卡" },
-              { value: "learning", label: "学习中" },
-              { value: "review", label: "复习中" },
-              { value: "suspended", label: "已暂停" },
-              { value: "archived", label: "已归档" }
+              { value: "all", label: T("全部状态") },
+              { value: "new", label: T("新卡") },
+              { value: "learning", label: T("学习中") },
+              { value: "review", label: T("复习中") },
+              { value: "suspended", label: T("已暂停") },
+              { value: "archived", label: T("已归档") }
             ]}
             onChange={setStateFilter}
           />
           <Dropdown
-            title="排序方式"
+            title={T("排序方式")}
             value={sortBy}
             options={[
-              { value: "due", label: "按到期时间" },
-              { value: "created", label: "按创建时间" },
-              { value: "priority", label: "按优先级" },
-              { value: "lapses", label: "按遗忘次数" }
+              { value: "due", label: T("按到期时间") },
+              { value: "created", label: T("按创建时间") },
+              { value: "priority", label: T("按优先级") },
+              { value: "lapses", label: T("按遗忘次数") }
             ]}
             onChange={setSortBy}
           />
@@ -1139,18 +1142,18 @@ export default function CardBrowser({
         </div>
         {/* v48.22（D58 §6.8-6）：类别切换（闪卡 / 摘录 / 全部） + 按来源书筛选 */}
         <div className="cb-cluster">
-          <div className="seg-tabs seg-tabs-sm" role="group" aria-label="条目类别">
+          <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("条目类别")}>
             <button className={kindFilter === "card" ? "active" : ""} data-kind-card onClick={() => setKindFilter("card")}>
-              闪卡
+              {T("闪卡")}
             </button>
             <button className={kindFilter === "extract" ? "active" : ""} data-kind-extract onClick={() => setKindFilter("extract")}>
-              摘录
+              {T("摘录")}
             </button>
             <button className={kindFilter === "both" ? "active" : ""} data-kind-both onClick={() => setKindFilter("both")}>
-              全部
+              {T("全部")}
             </button>
           </div>
-          <Dropdown title="按来源书筛选" value={bookScope} options={bookOptions} onChange={setBookScope} />
+          <Dropdown title={T("按来源书筛选")} value={bookScope} options={bookOptions} onChange={setBookScope} />
         </div>
         {/* D157：筛选方案入口（原「筛选牌组」常驻行） */}
         <span className="cb-scheme" data-deck-bar ref={schemeWrapRef}>
@@ -1162,21 +1165,21 @@ export default function CardBrowser({
             aria-expanded={schemeMenuOpen}
             title={
               !activeScheme
-                ? "筛选方案：把常用的筛选条件存下来，之后一键套用，或只复习这个范围"
+                ? T("筛选方案：把常用的筛选条件存下来，之后一键套用，或只复习这个范围")
                 : activeModified
-                  ? `方案「${activeScheme.name}」（已改动）：${describeScope(activeScheme)}。当前筛选已偏离这个方案，重新套用可恢复。`
-                  : `方案「${activeScheme.name}」：${describeScope(activeScheme)}。表格已按此方案筛选；页签、类型、状态和搜索框仍可在其上继续筛选。`
+                  ? T("方案「{name}」（已改动）：{scope}。当前筛选已偏离这个方案，重新套用可恢复。", { name: activeScheme.name, scope: describeScope(activeScheme) })
+                  : T("方案「{name}」：{scope}。表格已按此方案筛选；页签、类型、状态和搜索框仍可在其上继续筛选。", { name: activeScheme.name, scope: describeScope(activeScheme) })
             }
             onClick={() => setSchemeMenuOpen((v) => !v)}
           >
             {activeScheme ? (
               <>
-                <span className="cb-scheme-btn-label">方案：{activeScheme.name}</span>
-                {activeModified && <span className="n"> · 已改动</span>}
+                <span className="cb-scheme-btn-label">{T("方案：")}{activeScheme.name}</span>
+                {activeModified && <span className="n"> · {T("已改动")}</span>}
               </>
             ) : (
               <>
-                筛选方案
+                {T("筛选方案")}
                 {scopes.length > 0 && <span className="n"> {scopes.length}</span>}
               </>
             )}
@@ -1190,20 +1193,20 @@ export default function CardBrowser({
           )}
           {activeScheme && (
             <button type="button" className="btn btn-outline btn-sm" data-scheme-exit
-              title="退出方案：清除这个方案带来的筛选条件" onClick={() => exitScheme()}>
-              退出方案
+              title={T("退出方案：清除这个方案带来的筛选条件")} onClick={() => exitScheme()}>
+              {T("退出方案")}
             </button>
           )}
           {schemeMenuOpen && (
-            <div className="cb-scheme-pop" role="dialog" aria-label="筛选方案" data-scheme-menu>
+            <div className="cb-scheme-pop" role="dialog" aria-label={T("筛选方案")} data-scheme-menu>
               <div className="cb-scheme-head">
-                <span className="cb-scheme-title">筛选方案</span>
-                <span className="form-hint">把常用的筛选条件存成方案，之后可一键套用，或只复习这个范围。不会移动或复制卡片。</span>
+                <span className="cb-scheme-title">{T("筛选方案")}</span>
+                <span className="form-hint">{T("把常用的筛选条件存成方案，之后可一键套用，或只复习这个范围。不会移动或复制卡片。")}</span>
               </div>
               {scopes.length === 0 ? (
                 <div className="cb-scheme-empty" data-scheme-empty>
-                  <span className="cb-scheme-empty-title">还没有筛选方案</span>
-                  <span className="form-hint">先用搜索框和上方筛选找到想要的卡片，再点下面的按钮，把这组条件存成方案。</span>
+                  <span className="cb-scheme-empty-title">{T("还没有筛选方案")}</span>
+                  <span className="form-hint">{T("先用搜索框和上方筛选找到想要的卡片，再点下面的按钮，把这组条件存成方案。")}</span>
                 </div>
               ) : (
                 <ul className="cb-scheme-list">
@@ -1213,15 +1216,15 @@ export default function CardBrowser({
                         <span className="cb-scheme-name" title={s.name}>
                           {s.name}
                           {s.id === activeSchemeId && (
-                            <span className="cb-scheme-flag">{activeModified ? "当前 · 已改动" : "当前"}</span>
+                            <span className="cb-scheme-flag">{activeModified ? T("当前 · 已改动") : T("当前")}</span>
                           )}
                         </span>
                         <span className="cb-scheme-sum">{describeScope(s)}</span>
                       </div>
                       <div className="cb-scheme-actions">
                         <button type="button" className="btn btn-outline btn-sm" data-deck-apply
-                          title="套用：把卡片表切换到这个方案的条件" onClick={() => applyDeck(s)}>
-                          套用
+                          title={T("套用：把卡片表切换到这个方案的条件")} onClick={() => applyDeck(s)}>
+                          {T("套用")}
                         </button>
                         {onStartSession && (
                           <button type="button" className="btn btn-outline btn-sm" data-deck-start
@@ -1230,8 +1233,8 @@ export default function CardBrowser({
                           </button>
                         )}
                         <button type="button" className="btn btn-outline btn-sm cb-scheme-del" data-deck-delete
-                          title="删除这个方案（卡片不受影响）" onClick={() => void deleteDeck(s.id)}>
-                          删除
+                          title={T("删除这个方案（卡片不受影响）")} onClick={() => void deleteDeck(s.id)}>
+                          {T("删除")}
                         </button>
                       </div>
                     </li>
@@ -1241,7 +1244,7 @@ export default function CardBrowser({
               <div className="cb-scheme-foot">
                 <button type="button" className={`btn btn-sm ${scopes.length === 0 ? "btn-primary" : "btn-outline"}`}
                   data-scheme-new onClick={openSchemeEditor}>
-                  ＋ 将当前筛选存为方案
+                  {T("＋ 将当前筛选存为方案")}
                 </button>
               </div>
             </div>
@@ -1252,10 +1255,10 @@ export default function CardBrowser({
       {/* v48.47（D87）：锚点筛选条——来自阅读/摘录浮窗「已制卡 N 张」或卡详情血缘树「查看卡片」；计数＝闭包内卡数 */}
       {anchorFilter && (
         <div className="cb-anchor-bar" data-anchor-filter-bar>
-          <span className="mono">锚点筛选</span>
-          <span data-anchor-filter-count>{`已制卡 ${metaAll.filter((m) => anchorClosure?.has(String(m.extractId || ""))).length} 张（含全部子层级）`}</span>
-          <button className="crumb-exit" data-anchor-filter-clear onClick={clearAnchorFilter} title="清除锚点筛选，回到全部条目">
-            清除
+          <span className="mono">{T("锚点筛选")}</span>
+          <span data-anchor-filter-count>{T("已制卡 {n} 张（含全部子层级）", { n: metaAll.filter((m) => anchorClosure?.has(String(m.extractId || ""))).length })}</span>
+          <button className="crumb-exit" data-anchor-filter-clear onClick={clearAnchorFilter} title={T("清除锚点筛选，回到全部条目")}>
+            {T("清除")}
           </button>
         </div>
       )}
@@ -1265,18 +1268,18 @@ export default function CardBrowser({
         const draft = buildScopeDraft();
         const noScope = draft.bookItemIds.length === 0 && !draft.tags?.length && !draft.kpIds?.length;
         return (
-          <section className="cb-scheme-editor" data-scheme-editor aria-label="新建筛选方案"
+          <section className="cb-scheme-editor" data-scheme-editor aria-label={T("新建筛选方案")}
             onKeyDown={(e) => { if (e.key === "Escape") cancelSchemeEditor(); }}>
-            <div className="cb-scheme-editor-title">新建筛选方案</div>
+            <div className="cb-scheme-editor-title">{T("新建筛选方案")}</div>
 
             <div className="cb-scheme-field">
-              <span className="cb-scheme-label">方案名称</span>
+              <span className="cb-scheme-label">{T("方案名称")}</span>
               <div className="cb-scheme-value">
                 <input
                   className="cb-search cb-scheme-name-input"
                   data-deck-name
                   autoFocus
-                  placeholder="例如：考研英语（留空则自动命名）"
+                  placeholder={T("例如：考研英语（留空则自动命名）")}
                   value={deckName}
                   onChange={(e) => setDeckName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") void saveDeck(); }}
@@ -1285,54 +1288,54 @@ export default function CardBrowser({
             </div>
 
             <div className="cb-scheme-field">
-              <span className="cb-scheme-label">将保存的条件</span>
+              <span className="cb-scheme-label">{T("将保存的条件")}</span>
               <div className="cb-scheme-value" data-scheme-preview>
                 <div className="cb-scheme-cond">
-                  <span className="cb-scheme-cond-key">内容</span>
+                  <span className="cb-scheme-cond-key">{T("内容")}</span>
                   <span>{kindsLabel(draft.kinds)}</span>
-                  <span className="form-hint">（在上方工具行切换）</span>
+                  <span className="form-hint">{T("（在上方工具行切换）")}</span>
                 </div>
                 {draft.bookItemIds.length > 0 && (
                   <div className="cb-scheme-cond">
-                    <span className="cb-scheme-cond-key">来源书</span>
+                    <span className="cb-scheme-cond-key">{T("来源书")}</span>
                     {draft.bookItemIds.map((id) => <span key={id} className="tag-chip tag-chip-static">{bookLabel(id)}</span>)}
                   </div>
                 )}
                 {!!draft.tags?.length && (
                   <div className="cb-scheme-cond">
-                    <span className="cb-scheme-cond-key">标签</span>
+                    <span className="cb-scheme-cond-key">{T("标签")}</span>
                     {draft.tags.map((t) => <span key={t} className="tag-chip tag-chip-static">{t}</span>)}
                   </div>
                 )}
                 {deckKps.length > 0 && (
                   <div className="cb-scheme-cond">
-                    <span className="cb-scheme-cond-key">知识点</span>
+                    <span className="cb-scheme-cond-key">{T("知识点")}</span>
                     {deckKps.map((k) => <span key={k.id} className="tag-chip tag-chip-static">{k.label}</span>)}
-                    <span className="form-hint">（仅闪卡）</span>
+                    <span className="form-hint">{T("（仅闪卡）")}</span>
                   </div>
                 )}
                 {noScope && (
-                  <span className="form-hint">未限定来源书、标签或知识点：这个方案将包含所有{kindsNoun(draft.kinds)}。</span>
+                  <span className="form-hint">{T("未限定来源书、标签或知识点：这个方案将包含所有{kind}。", { kind: kindsNoun(draft.kinds) })}</span>
                 )}
                 {/* v49.5（D179）：「记忆接地」随用户记忆功能暂时移除，文案同步摘除（重实装时回插该列举） */}
-                <span className="form-hint">页签、类型、状态、排序不属于方案，不会保存。</span>
+                <span className="form-hint">{T("页签、类型、状态、排序不属于方案，不会保存。")}</span>
                 {query.trim() !== "" && (
-                  <span className="form-hint">搜索框里只有 book: 和 tag: 条件会被保存，其余内容不会保存。</span>
+                  <span className="form-hint">{T("搜索框里只有 book: 和 tag: 条件会被保存，其余内容不会保存。")}</span>
                 )}
               </div>
             </div>
 
             <div className="cb-scheme-field">
-              <span className="cb-scheme-label">追加条件</span>
+              <span className="cb-scheme-label">{T("追加条件")}</span>
               <div className="cb-scheme-value">
                 <div>
                   <button type="button" className="btn btn-outline btn-sm" data-deck-builder-toggle
                     aria-expanded={deckBuilderOpen} onClick={() => setDeckBuilderOpen((v) => !v)}>
-                    追加条件（可选）
+                    {T("追加条件（可选）")}
                     <IconChevronDown size={12} className={`dd-caret cb-scheme-disclosure${deckBuilderOpen ? " is-open" : ""}`} />
                   </button>
                 </div>
-                <span className="form-hint" data-scheme-live-hint>追加的条件会立即作用于下方表格；点「取消」可撤销。</span>
+                <span className="form-hint" data-scheme-live-hint>{T("追加的条件会立即作用于下方表格；点「取消」可撤销。")}</span>
                 {deckBuilderOpen && (
                   <div className="cb-scheme-builder" data-deck-builder>
                     <span className="cb-deck-chips">
@@ -1341,7 +1344,7 @@ export default function CardBrowser({
                           {bookOptions.find((o) => o.value === id)?.label ?? id}
                           <button
                             className="cb-deck-chip-x"
-                            aria-label="移除该书条件"
+                            aria-label={T("移除该书条件")}
                             onClick={() => setDeckExtraBooks((b) => b.filter((x) => x !== id))}
                           >
                             ×
@@ -1349,7 +1352,7 @@ export default function CardBrowser({
                         </span>
                       ))}
                       <button className="btn btn-outline btn-sm" data-deck-add-book onClick={() => setDeckBookPop((v) => !v)}>
-                        ＋ 来源书
+                        {T("＋ 来源书")}
                       </button>
                     </span>
                     {deckBookPop && (
@@ -1366,12 +1369,12 @@ export default function CardBrowser({
                             {o.label}
                           </label>
                         ))}
-                        {bookOptions.filter((o) => o.value !== "all").length === 0 && <span className="form-hint">暂无可选书</span>}
+                        {bookOptions.filter((o) => o.value !== "all").length === 0 && <span className="form-hint">{T("暂无可选书")}</span>}
                       </span>
                     )}
                     {tagsEnabled && (
                       <span className="cb-deck-tags" data-deck-tags>
-                        <TagInput value={deckTags} onChange={setDeckTags} suggestions={tagVocab} ariaLabel="方案标签条件" placeholder="标签（回车确认，支持层级前缀）" />
+                        <TagInput value={deckTags} onChange={setDeckTags} suggestions={tagVocab} ariaLabel={T("方案标签条件")} placeholder={T("标签（回车确认，支持层级前缀）")} />
                       </span>
                     )}
                     <span className="cb-deck-chips">
@@ -1380,7 +1383,7 @@ export default function CardBrowser({
                           {k.label}
                           <button
                             className="cb-deck-chip-x"
-                            aria-label="移除该知识点条件"
+                            aria-label={T("移除该知识点条件")}
                             onClick={() => setDeckKps((ks) => ks.filter((x) => x.id !== k.id))}
                           >
                             ×
@@ -1388,7 +1391,7 @@ export default function CardBrowser({
                         </span>
                       ))}
                       <button className="btn btn-outline btn-sm" data-deck-add-kp onClick={() => setDeckKpPop((v) => !v)}>
-                        ＋ 知识点
+                        {T("＋ 知识点")}
                       </button>
                     </span>
                     {deckKpPop && (
@@ -1396,7 +1399,7 @@ export default function CardBrowser({
                         <input
                           className="cb-search"
                           data-deck-kp-search
-                          placeholder="搜索知识点（名称/别名）…"
+                          placeholder={T("搜索知识点（名称/别名）…")}
                           value={kpQuery}
                           onChange={(e) => setKpQuery(e.target.value)}
                         />
@@ -1413,47 +1416,47 @@ export default function CardBrowser({
                                 }
                               />
                               {p.label}
-                              {p.status === "merged" && <span className="form-hint">（已归并，匹配时自动展开）</span>}
+                              {p.status === "merged" && <span className="form-hint">{T("（已归并，匹配时自动展开）")}</span>}
                             </label>
                           ))}
-                          {kpOptions.length === 0 && <span className="form-hint">无匹配知识点</span>}
+                          {kpOptions.length === 0 && <span className="form-hint">{T("无匹配知识点")}</span>}
                         </span>
                       </span>
                     )}
-                    {deckKps.length > 0 && <span className="form-hint" data-deck-kp-hint>知识点条件只对闪卡生效，摘录不会被选中</span>}
+                    {deckKps.length > 0 && <span className="form-hint" data-deck-kp-hint>{T("知识点条件只对闪卡生效，摘录不会被选中")}</span>}
                   </div>
                 )}
               </div>
             </div>
 
             <div className="cb-scheme-field">
-              <span className="cb-scheme-label">每日上限</span>
+              <span className="cb-scheme-label">{T("每日上限")}</span>
               <div className="cb-scheme-value">
                 <div className="cb-scheme-caps">
                   <label className="cb-scheme-cap">
-                    新卡最多
+                    {T("新卡最多")}
                     <input className="mono input-num" data-deck-cap-newcards type="number" min={0} max={9999}
-                      placeholder="沿用全局"
+                      placeholder={T("沿用全局")}
                       value={deckCapNewCards === 0 ? "" : deckCapNewCards}
                       onChange={(e) => setDeckCapNewCards(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))} />
-                    张/天
+                    {T("张/天")}
                   </label>
                   <label className="cb-scheme-cap">
-                    摘录最多
+                    {T("摘录最多")}
                     <input className="mono input-num" data-deck-cap-extracts type="number" min={0} max={9999}
-                      placeholder="沿用全局"
+                      placeholder={T("沿用全局")}
                       value={deckCapExtracts === 0 ? "" : deckCapExtracts}
                       onChange={(e) => setDeckCapExtracts(Math.max(0, Math.min(9999, Number(e.target.value) || 0)))} />
-                    条/天
+                    {T("条/天")}
                   </label>
                 </div>
-                <span className="form-hint">不作用于表格显示；仅在点「开始复习 / 处理摘录」时限制该范围当天的新卡与摘录处理量（与全局取较小值）。留空 = 沿用全局。</span>
+                <span className="form-hint">{T("不作用于表格显示；仅在点「开始复习 / 处理摘录」时限制该范围当天的新卡与摘录处理量（与全局取较小值）。留空 = 沿用全局。")}</span>
               </div>
             </div>
 
             <div className="cb-scheme-editor-actions">
-              <button type="button" className="btn btn-outline btn-sm" data-scheme-cancel onClick={cancelSchemeEditor}>取消</button>
-              <button type="button" className="btn btn-primary btn-sm" data-deck-save onClick={() => void saveDeck()}>保存方案</button>
+              <button type="button" className="btn btn-outline btn-sm" data-scheme-cancel onClick={cancelSchemeEditor}>{T("取消")}</button>
+              <button type="button" className="btn btn-primary btn-sm" data-deck-save onClick={() => void saveDeck()}>{T("保存方案")}</button>
             </div>
           </section>
         );
@@ -1464,7 +1467,7 @@ export default function CardBrowser({
       {loaded && kindFilter !== "extract" && cardsMeta.length === 0 && (kindFilter === "card" || viewExtracts.length === 0) && (
         <div className="empty-state">
           <p className="empty-text">
-            {metaAll.length === 0 ? "还没有卡片。在阅读器中选中文字即可制卡。" : "没有符合筛选条件的卡片。"}
+            {metaAll.length === 0 ? T("还没有卡片。在阅读器中选中文字即可制卡。") : T("没有符合筛选条件的卡片。")}
           </p>
         </div>
       )}
@@ -1474,14 +1477,14 @@ export default function CardBrowser({
         <div className="queue-list">
           {/* v48.67（D111）：该视图未虚拟化（queue-row 变高不可窗口化）——只列前 LEECH_LIST_CAP 条 + 计数提示 */}
           {cardsMeta.length > leechListIds.length && (
-            <div className="form-hint">{`共 ${cardsMeta.length} 条，仅列出前 ${LEECH_LIST_CAP} 条（其余请用查询缩小范围）`}</div>
+            <div className="form-hint">{T("共 {total} 条，仅列出前 {cap} 条（其余请用查询缩小范围）", { total: cardsMeta.length, cap: LEECH_LIST_CAP })}</div>
           )}
           {leechListIds.map((id) => rowCache.get(id)).filter((c): c is BrowserCard => Boolean(c)).map((c) => (
             <div key={c.id} className="queue-row" onClick={() => setDetailId(c.id)}>
               <div className="queue-row-head">
                 <span>
-                  {c.leech?.suspended ? "已暂停" : "处理中"} · 遗忘 {c.fsrs?.lapses ?? 0} 次
-                  {c.docTitle ? ` · 来自 ${srcLabel(c)}` : ""}
+                  {c.leech?.suspended ? T("已暂停") : T("处理中")} · {T("遗忘 {n} 次", { n: c.fsrs?.lapses ?? 0 })}
+                  {c.docTitle ? T(" · 来自 {src}", { src: srcLabel(c) }) : ""}
                 </span>
                 <span className="mono">P{c.priority}</span>
               </div>
@@ -1494,7 +1497,7 @@ export default function CardBrowser({
                     setLeechTarget(c);
                   }}
                 >
-                  六步处理
+                  {T("六步处理")}
                 </button>
               </div>
             </div>
@@ -1503,15 +1506,15 @@ export default function CardBrowser({
       ) : kindFilter !== "extract" && (
         <div className="cb-table" role="table" ref={cardTableRef}>
           <div className="cb-row cb-row-head" role="row">
-            <span className="cb-pick">选</span>
-            <span>题面</span>
-            <span>类型</span>
-            <span>状态</span>
-            <span>到期</span>
-            <span className="cb-num">复习</span>
-            <span className="cb-num">遗忘</span>
-            <span className="cb-num">优先</span>
-            <span>来源</span>
+            <span className="cb-pick">{T("选")}</span>
+            <span>{T("题面")}</span>
+            <span>{T("类型")}</span>
+            <span>{T("状态")}</span>
+            <span>{T("到期")}</span>
+            <span className="cb-num">{T("复习")}</span>
+            <span className="cb-num">{T("遗忘")}</span>
+            <span className="cb-num">{T("优先")}</span>
+            <span>{T("来源")}</span>
           </div>
           {cardsMeta.length > 0 && <div style={{ height: win.card.start * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (cardsMeta.length * rowH)) : 1) }} aria-hidden="true" />}
           {cardsMeta.slice(win.card.start, win.card.end).map((m) => {
@@ -1531,7 +1534,7 @@ export default function CardBrowser({
                 if (ev.shiftKey) ev.preventDefault();
               }}
               onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : setDetailId(c.id))}
-              title="Ctrl/⌘ 点击多选 · Shift 点击范围选"
+              title={T("Ctrl/⌘ 点击多选 · Shift 点击范围选")}
             >
               <span className="cb-pick">
                 <input
@@ -1547,7 +1550,7 @@ export default function CardBrowser({
                   行级 title 统一为快捷键提示；行上 title 在场，F75 省略号可达性（祖先带 title 即可达）不受影响 */}
               <span>
                 {statusOf(c)}
-                {deferredMap.has(c.id) ? " · 同源暂缓" : ""}
+                {deferredMap.has(c.id) ? T(" · 同源暂缓") : ""}
               </span>
               <span className="mono">{dueText(c)}</span>
               <span className="cb-num mono">{c.fsrs?.reps ?? 0}</span>
@@ -1567,13 +1570,13 @@ export default function CardBrowser({
       {kindFilter !== "card" && (
         <div className="cb-table" role="table" data-extract-table ref={extractTableRef}>
           <div className="cb-row cb-row-head" role="row">
-            <span className="cb-pick">选</span>
-            <span>摘录内容</span>
-            <span>状态</span>
-            <span className="cb-num">优先</span>
-            <span>下次推送</span>
-            <span>来源</span>
-            <span>操作</span>
+            <span className="cb-pick">{T("选")}</span>
+            <span>{T("摘录内容")}</span>
+            <span>{T("状态")}</span>
+            <span className="cb-num">{T("优先")}</span>
+            <span>{T("下次推送")}</span>
+            <span>{T("来源")}</span>
+            <span>{T("操作")}</span>
           </div>
           {viewExtracts.length > 0 && <div style={{ height: win.extract.start * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewExtracts.length * rowH)) : 1) }} aria-hidden="true" />}
           {viewExtracts.slice(win.extract.start, win.extract.end).map((e) => (
@@ -1586,7 +1589,7 @@ export default function CardBrowser({
                 if (ev.shiftKey) ev.preventDefault();
               }}
               onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("extract", e.id, ev) : setExtractDetailId(e.id))}
-              title="Ctrl/⌘ 点击多选 · Shift 点击范围选"
+              title={T("Ctrl/⌘ 点击多选 · Shift 点击范围选")}
             >
               <span className="cb-pick">
                 <input
@@ -1597,10 +1600,10 @@ export default function CardBrowser({
                 />
               </span>
               <span className="cb-front">{(e.contentMarkdown || "").slice(0, 90)}</span>
-              <span>{extractStatusLabel(e.status)}</span>
+              <span>{T(extractStatusLabel(e.status))}</span>
               <span className="cb-num mono">
                 {e.priority}
-                {e.prioritySource === "user" ? " ·改" : ""}
+                {e.prioritySource === "user" ? T(" ·改") : ""}
               </span>
               <span className="mono">{nextAtText(e.topicNextAt)}</span>
               <span className="cb-src">{e.docTitle}</span>
@@ -1618,7 +1621,7 @@ export default function CardBrowser({
                       }, "browse");
                     }}
                   >
-                    跳转原文
+                    {T("跳转原文")}
                   </button>
                 ) : (
                   <span className="form-hint">—</span>
@@ -1629,7 +1632,7 @@ export default function CardBrowser({
           {viewExtracts.length > 0 && <div style={{ height: (viewExtracts.length - win.extract.end) * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (viewExtracts.length * rowH)) : 1) }} aria-hidden="true" />}
           {viewExtracts.length === 0 && (
             <div className="cb-row" role="row">
-              <span className="cb-front">没有符合筛选条件的摘录。</span>
+              <span className="cb-front">{T("没有符合筛选条件的摘录。")}</span>
             </div>
           )}
         </div>
@@ -1641,37 +1644,37 @@ export default function CardBrowser({
       <div className="stage-bar cb-stage" data-batch-bar data-ui="stage-bar">
         <div className="cb-cluster cb-cluster-grow">
           {selCards.size + selExtracts.size === 0 ? (
-            <span className="bar-hint">普通点击行查看详情 · Ctrl/⌘ 多选 · Shift 范围选</span>
+            <span className="bar-hint">{T("普通点击行查看详情 · Ctrl/⌘ 多选 · Shift 范围选")}</span>
           ) : (
             <span className="mono" data-sel-count>
-              已选 闪卡 {selCards.size} · 摘录 {selExtracts.size}
+              {T("已选 闪卡 {a} · 摘录 {b}", { a: selCards.size, b: selExtracts.size })}
             </span>
           )}
           {kindFilter !== "extract" && (
             <>
               <button className="btn btn-outline btn-sm" data-sel-all-cards onClick={() => selectAllOf("card")}>
-                全选闪卡
+                {T("全选闪卡")}
               </button>
               <button className="btn btn-outline btn-sm" onClick={() => invertOf("card")}>
-                反选闪卡
+                {T("反选闪卡")}
               </button>
             </>
           )}
           {kindFilter !== "card" && (
             <>
               <button className="btn btn-outline btn-sm" data-sel-all-extracts onClick={() => selectAllOf("extract")}>
-                全选摘录
+                {T("全选摘录")}
               </button>
               <button className="btn btn-outline btn-sm" onClick={() => invertOf("extract")}>
-                反选摘录
+                {T("反选摘录")}
               </button>
             </>
           )}
           {selCards.size > 0 && (
             <>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>批量暂停</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>批量恢复</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>推迟 7 天</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("suspend")}>{T("批量暂停")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runCardBatch("resume")}>{T("批量恢复")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-cards onClick={() => void runCardBatch("postpone", { days: 7 })}>{T("推迟 7 天")}</button>
               {/* v48.60（D101）：批量打标/去标（v1 仅闪卡行；浮层内 TagInput + 词表建议）；v48.63（D107）受标签总开关控制 */}
               {tagsEnabled && (
               <button
@@ -1683,7 +1686,7 @@ export default function CardBrowser({
                   setTagDraft([]);
                 }}
               >
-                打标签
+                {T("打标签")}
               </button>
               )}
               {tagsEnabled && (
@@ -1696,21 +1699,21 @@ export default function CardBrowser({
                   setTagDraft([]);
                 }}
               >
-                去标签
+                {T("去标签")}
               </button>
               )}
               {/* v48.60（D102）：批量归档/恢复（生命周期；不评分、不动 FSRS） */}
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive-cards onClick={() => void runCardBatch("archive")}>归档</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-restore-cards onClick={() => void runCardBatch("restore")}>恢复</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>删除</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive-cards onClick={() => void runCardBatch("archive")}>{T("归档")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-restore-cards onClick={() => void runCardBatch("restore")}>{T("恢复")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-cards onClick={() => void runCardBatch("delete")}>{T("删除")}</button>
               {tagPop && (
                 <span className="cb-tag-pop" data-batch-tag-pop>
                   <TagInput
                     value={tagDraft}
                     onChange={setTagDraft}
                     suggestions={tagVocab}
-                    ariaLabel={tagPop === "add" ? "要添加的标签" : "要移除的标签"}
-                    placeholder={tagPop === "add" ? "输入要添加的标签，回车确认" : "输入要移除的标签（含::子级）"}
+                    ariaLabel={tagPop === "add" ? T("要添加的标签") : T("要移除的标签")}
+                    placeholder={tagPop === "add" ? T("输入要添加的标签，回车确认") : T("输入要移除的标签（含::子级）")}
                   />
                   <button
                     className="btn btn-primary btn-sm"
@@ -1722,7 +1725,7 @@ export default function CardBrowser({
                       void runSetTags(mode, tagDraft);
                     }}
                   >
-                    应用到 {selCards.size} 张
+                    {T("应用到 {n} 张", { n: selCards.size })}
                   </button>
                 </span>
               )}
@@ -1730,15 +1733,15 @@ export default function CardBrowser({
           )}
           {selExtracts.size > 0 && (
             <>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-extracts onClick={() => void runExtractBatch("postponeDays", { days: 7 })}>推迟 7 天</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 30 })}>优先级 30</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 70 })}>优先级 70</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>毕业</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>召回</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-postpone-extracts onClick={() => void runExtractBatch("postponeDays", { days: 7 })}>{T("推迟 7 天")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 30 })}>{T("优先级 30")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_priority", { priority: 70 })}>{T("优先级 70")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-graduate onClick={() => void runExtractBatch("set_status", { status: "resolved" })}>{T("毕业")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "open" })}>{T("召回")}</button>
               {/* v48.22（D58 §6.4.2）：状态机另两个出口——归档（留痕）/ 不再关心（可召回） */}
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive onClick={() => void runExtractBatch("set_status", { status: "archived" })}>归档</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "dismissed" })}>不再关心</button>
-              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>删除</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-archive onClick={() => void runExtractBatch("set_status", { status: "archived" })}>{T("归档")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} onClick={() => void runExtractBatch("set_status", { status: "dismissed" })}>{T("不再关心")}</button>
+              <button className="btn btn-outline btn-sm" disabled={batchBusy} data-batch-delete-extracts onClick={() => void runExtractBatch("delete")}>{T("删除")}</button>
             </>
           )}
           {selCards.size + selExtracts.size > 0 && (
@@ -1749,16 +1752,16 @@ export default function CardBrowser({
                 setSelExtracts(new Set());
               }}
             >
-              清除选择
+              {T("清除选择")}
             </button>
           )}
           {batchNote && <span className="form-hint" data-batch-note>{batchNote}</span>}
         </div>
         {selExtracts.size > 0 && (
           <div className="cb-cluster">
-            <input className="cb-search cb-find" data-find-input placeholder="查找" value={findText} onChange={(e) => setFindText(e.target.value)} />
-            <input className="cb-search cb-find" data-replace-input placeholder="替换为" value={replaceText} onChange={(e) => setReplaceText(e.target.value)} />
-            <button className="btn btn-outline btn-sm" disabled={batchBusy} data-find-replace onClick={() => void runFindReplace()}>正文查找替换</button>
+            <input className="cb-search cb-find" data-find-input placeholder={T("查找")} value={findText} onChange={(e) => setFindText(e.target.value)} />
+            <input className="cb-search cb-find" data-replace-input placeholder={T("替换为")} value={replaceText} onChange={(e) => setReplaceText(e.target.value)} />
+            <button className="btn btn-outline btn-sm" disabled={batchBusy} data-find-replace onClick={() => void runFindReplace()}>{T("正文查找替换")}</button>
           </div>
         )}
       </div>
@@ -1774,8 +1777,12 @@ export default function CardBrowser({
             (() => {
               const r = deferredMap.get(detail.id);
               if (!r) return undefined;
-              const front = r.siblingFront ? `「${r.siblingFront.slice(0, 20)}${r.siblingFront.length > 20 ? "…" : ""}」` : "";
-              return r.kind === "reviewed" ? `同源卡今日已评分：${front}，明日解封` : `与今日已放行的${front || "同源卡"}同源，明日解封`;
+              const front = r.siblingFront ? `${r.siblingFront.slice(0, 20)}${r.siblingFront.length > 20 ? "…" : ""}` : "";
+              return r.kind === "reviewed"
+                ? T("同源卡今日已评分：「{front}」，明日解封", { front })
+                : front
+                  ? T("与今日已放行的「{front}」同源，明日解封", { front })
+                  : T("与今日已放行的同源卡同源，明日解封");
             })()
           }
           onClose={() => setDetailId(null)}
@@ -1835,6 +1842,7 @@ export function ExtractDetail({
   onJumpToDoc?: JumpToDoc;
   onChanged: () => Promise<void> | void;
 }) {
+  const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -1856,7 +1864,7 @@ export function ExtractDetail({
     try {
       const r = (await readingWorkflow.batch(op as never, [extract.id], payload as never)) as { ok?: boolean; reason?: string };
       if (!r?.ok) {
-        setNote(r?.reason || "操作失败，未执行");
+        setNote(r?.reason || T("操作失败，未执行"));
         return;
       }
       await onChanged();
@@ -1880,21 +1888,21 @@ export function ExtractDetail({
   }
 
   const meta: [string, string][] = [
-    ["状态", extractStatusLabel(extract.status)],
-    ["优先级", `P${extract.priority}${extract.prioritySource === "user" ? " · 改" : ""}`],
-    ["下次推送", nextAtText(extract.topicNextAt)],
-    ["来源", extract.docTitle || "—"],
-    ["引文", ranges?.length ? `${ranges.length} 段（${extract.parentType === "extract" ? "父卡正文坐标" : "本条正文"}）` : "—"],
-    ["批注", extract.comment || "—"],
-    ["创建时间", extract.createdAt ? new Date(extract.createdAt).toLocaleString() : "—"]
+    [T("状态"), T(extractStatusLabel(extract.status))],
+    [T("优先级"), `P${extract.priority}${extract.prioritySource === "user" ? T(" · 改") : ""}`],
+    [T("下次推送"), nextAtText(extract.topicNextAt)],
+    [T("来源"), extract.docTitle || "—"],
+    [T("引文"), ranges?.length ? T("{n} 段（{type}）", { n: ranges.length, type: extract.parentType === "extract" ? T("父卡正文坐标") : T("本条正文") }) : "—"],
+    [T("批注"), extract.comment || "—"],
+    [T("创建时间"), extract.createdAt ? new Date(extract.createdAt).toLocaleString() : "—"]
   ];
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label="摘录详情" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label={T("摘录详情")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>摘录详情</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <h2>{T("摘录详情")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -1919,36 +1927,36 @@ export function ExtractDetail({
           <div className="cb-actions">
             {(extract.contextRef?.documentId || extract.documentId || extract.document_id) && onJumpToDoc && (
               <button className="btn btn-outline btn-sm" data-extract-detail-jump onClick={jump}>
-                跳转原文
+                {T("跳转原文")}
               </button>
             )}
             <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("postponeDays", { days: 7 })}>
-              推迟 7 天
+              {T("推迟 7 天")}
             </button>
             <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_priority", { priority: 30 })}>
-              优先级 30
+              {T("优先级 30")}
             </button>
             <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_priority", { priority: 70 })}>
-              优先级 70
+              {T("优先级 70")}
             </button>
             <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "resolved" })}>
-              毕业
+              {T("毕业")}
             </button>
             <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "open" })}>
-              召回
+              {T("召回")}
             </button>
             <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "archived" })}>
-              归档
+              {T("归档")}
             </button>
             <button className="btn btn-outline btn-sm" disabled={busy} onClick={() => void run("set_status", { status: "dismissed" })}>
-              不再关心
+              {T("不再关心")}
             </button>
             <button
               className="btn btn-outline btn-sm"
               disabled={busy}
-              onClick={() => void run("delete", undefined, { confirm: "删除这条摘录？（软删，可在备份中找回）", closeAfter: true })}
+              onClick={() => void run("delete", undefined, { confirm: T("删除这条摘录？（软删，可在备份中找回）"), closeAfter: true })}
             >
-              删除
+              {T("删除")}
             </button>
           </div>
         </div>
@@ -1994,6 +2002,7 @@ function CardDetail({
   /** v34（M12）：今日同源暂缓原因（不在暂缓组时为 undefined） */
   deferredNote?: string;
 }) {
+  const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [issues, setIssues] = useState<CardIssueRecord[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -2096,13 +2105,13 @@ function CardDetail({
   }
 
   async function resetNew() {
-    if (!window.confirm("重置为新卡？该卡的调度进度（稳定度/难度/复习次数/遗忘次数）将被清零。")) return;
+    if (!window.confirm(T("重置为新卡？该卡的调度进度（稳定度/难度/复习次数/遗忘次数）将被清零。"))) return;
     await cardsApi.update({ ...card, fsrs: { state: "new", due: Date.now(), lapses: 0 } });
     eventBus.emit("cards/changed");
   }
 
   async function handleDelete() {
-    if (!window.confirm(`确定删除这张卡片？\n\n${card.frontMarkdown || card.noteText}`)) return;
+    if (!window.confirm(`${T("确定删除这张卡片？")}\n\n${card.frontMarkdown || card.noteText}`)) return;
     await cardsApi.remove(card.id);
     eventBus.emit("cards/changed");
     onClose();
@@ -2137,29 +2146,29 @@ function CardDetail({
 
   const f = card.fsrs ?? {};
   const meta: [string, string][] = [
-    ["类型", typeLabel(card.cardType)],
-    ["状态", statusOf(card) + (deferredNote ? `（${deferredNote}）` : "")],
-    ["到期", dueText(card)],
-    ["复习 / 遗忘", `${f.reps ?? 0} 次 / ${f.lapses ?? 0} 次`],
+    [T("类型"), typeLabel(card.cardType)],
+    [T("状态"), statusOf(card) + (deferredNote ? T("（{note}）", { note: deferredNote }) : "")],
+    [T("到期"), dueText(card)],
+    [T("复习 / 遗忘"), T("{reps} 次 / {lapses} 次", { reps: f.reps ?? 0, lapses: f.lapses ?? 0 })],
     [
-      "稳定度 / 难度",
+      T("稳定度 / 难度"),
       f.stability != null && f.difficulty != null ? `${f.stability.toFixed(2)} / ${f.difficulty.toFixed(2)}` : "—"
     ],
-    ["优先级", `P${card.priority}`],
-    ["来源", srcLabel(card)],
-    ["领域", (card.domain ?? []).join("、") || "—"],
+    [T("优先级"), `P${card.priority}`],
+    [T("来源"), srcLabel(card)],
+    [T("领域"), (card.domain ?? []).join("、") || "—"],
     // v40（K1）：legacy knowledge_point_id（正式 KP 之外的原值；归一提案见「知识点」页签）
-    ["知识点", card.knowledgePointId || "—"],
-    ["生成方式", card.generatedBy === "ai" ? "AI 生成" : "手动"],
-    ["创建时间", new Date(card.createdAt).toLocaleString()]
+    [T("知识点"), card.knowledgePointId || "—"],
+    [T("生成方式"), card.generatedBy === "ai" ? T("AI 生成") : T("手动")],
+    [T("创建时间"), new Date(card.createdAt).toLocaleString()]
   ];
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label="卡片详情" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label={T("卡片详情")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>卡片详情</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <h2>{T("卡片详情")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -2175,10 +2184,10 @@ function CardDetail({
           {card.memoryRefJson && (
             <div className="cb-issues">
               <span className={`lint ${card.memoryRefJson.verified ? "lint-info" : "lint-warn"}`}>
-                {card.memoryRefJson.verified ? "情境来自记忆" : "情境来源存疑（来源可能已变更）"}
+                {card.memoryRefJson.verified ? T("情境来自记忆") : T("情境来源存疑（来源可能已变更）")}
               </span>
               <div className="mono fs-meta mt-2">
-                引用记忆行：{card.memoryRefJson.line}
+                {T("引用记忆行：")}{card.memoryRefJson.line}
               </div>
             </div>
           )}
@@ -2195,41 +2204,41 @@ function CardDetail({
           {/* v48.61（D103）：生成信息区（AI 卡）——批次/提示词/当时质检如实展示 + 重新生成入口；手动卡无批次区（meta 生成方式=手动） */}
           {card.generatedBy === "ai" && (
             <div className="cb-geninfo" data-testid="card-detail-geninfo">
-              <p className="cb-section-title">生成信息</p>
+              <p className="cb-section-title">{T("生成信息")}</p>
               {genInfo ? (
                 <>
                   <dl className="cb-meta cb-gen-meta">
-                    <dt>生成批次</dt>
+                    <dt>{T("生成批次")}</dt>
                     <dd data-testid="geninfo-batch">
-                      {genInfo.batch ? new Date(genInfo.batch.createdAt).toLocaleString() : "—（批次缺失）"}
+                      {genInfo.batch ? new Date(genInfo.batch.createdAt).toLocaleString() : T("—（批次缺失）")}
                       {genInfo.batch?.model ? ` · ${genInfo.batch.model}` : ""}
                     </dd>
-                    <dt>提示词</dt>
+                    <dt>{T("提示词")}</dt>
                     <dd data-testid="geninfo-template">
                       {genInfo.template
                         ? `${genInfo.template.scope} · ${genInfo.template.name} · v${genInfo.template.version}`
                         : "—"}
                     </dd>
-                    <dt>当时质检</dt>
+                    <dt>{T("当时质检")}</dt>
                     <dd data-testid="geninfo-lint">
                       {(() => {
                         const lint = genInfo.issues.filter((i) => i.source === "lint");
-                        if (lint.length === 0) return "无提示";
+                        if (lint.length === 0) return T("无提示");
                         const open = lint.filter((i) => i.status === "open").length;
-                        return `${lint.length} 条${open ? `（${open} 条未处理）` : "（均已处理）"}`;
+                        return open ? T("{n} 条（{m} 条未处理）", { n: lint.length, m: open }) : T("{n} 条（均已处理）", { n: lint.length });
                       })()}
                     </dd>
                   </dl>
                   {card.contextRef?.extractId ? (
                     <button className="btn btn-outline btn-sm" data-testid="regen-cards" onClick={() => setRegenOpen(true)}>
-                      用当前提示词重新生成
+                      {T("用当前提示词重新生成")}
                     </button>
                   ) : (
-                    <span className="form-hint">无来源摘录，无法重新生成</span>
+                    <span className="form-hint">{T("无来源摘录，无法重新生成")}</span>
                   )}
                 </>
               ) : (
-                <p className="form-hint">生成信息加载中…</p>
+                <p className="form-hint">{T("生成信息加载中…")}</p>
               )}
             </div>
           )}
@@ -2237,7 +2246,7 @@ function CardDetail({
           {/* v48.61（D103）：来源谱系（血缘树）——本卡所属摘录向上到根、向下到叶；D85 聚合计数；空态如实显示「无来源锚」 */}
           {lineage.hasSource ? (
             <div className="cb-lineage" data-testid="card-detail-lineage">
-              <p className="cb-section-title">来源谱系</p>
+              <p className="cb-section-title">{T("来源谱系")}</p>
               <ul className="cb-lineage-list">
                 {[...lineage.ancestors, ...lineage.descendants].map((n) => (
                   <li
@@ -2245,22 +2254,22 @@ function CardDetail({
                     className={"cb-lineage-item" + (n.isCurrent ? " current" : "")}
                     style={{ paddingLeft: `calc(var(--sp-3) * ${Math.min(n.depth, 6)})` }}
                   >
-                    <span className="cb-lineage-label">{n.label || "（空引文）"}</span>
-                    <span className="cb-lineage-count mono" title="该节点及全部子孙摘录上的卡数（D85 聚合口径）">
+                    <span className="cb-lineage-label">{n.label || T("（空引文）")}</span>
+                    <span className="cb-lineage-count mono" title={T("该节点及全部子孙摘录上的卡数（D85 聚合口径）")}>
                       {n.count}
                     </span>
                     {n.documentId && onJumpToDoc && (
-                      <button className="btn btn-outline btn-sm" onClick={() => jumpNode(n)} title="跳转到该摘录的原文位置">
-                        跳原文
+                      <button className="btn btn-outline btn-sm" onClick={() => jumpNode(n)} title={T("跳转到该摘录的原文位置")}>
+                        {T("跳原文")}
                       </button>
                     )}
                     <button
                       className="btn btn-outline btn-sm"
                       data-testid="lineage-view-cards"
                       onClick={() => onOpenAnchorFilter(n.id)}
-                      title="按该锚点筛选浏览器（含全部子层级）"
+                      title={T("按该锚点筛选浏览器（含全部子层级）")}
                     >
-                      查看卡片
+                      {T("查看卡片")}
                     </button>
                   </li>
                 ))}
@@ -2268,14 +2277,14 @@ function CardDetail({
             </div>
           ) : (
             <div className="cb-lineage" data-testid="card-detail-lineage-empty">
-              <p className="form-hint">无来源锚</p>
+              <p className="form-hint">{T("无来源锚")}</p>
             </div>
           )}
 
           {/* v48.61（D103）：同源组（§4.16）——组内全部卡列表，本卡高亮；复习页「同源暂缓」提示保持原样（不加点跳） */}
           {siblingMembers.length > 0 && (
             <div className="cb-sibling" data-testid="card-detail-sibling">
-              <p className="cb-section-title">同源组（{siblingMembers.length} 张）</p>
+              <p className="cb-section-title">{T("同源组（{n} 张）", { n: siblingMembers.length })}</p>
               <ul className="cb-sibling-list">
                 {siblingMembers.map((m) => (
                   <li
@@ -2285,13 +2294,13 @@ function CardDetail({
                     onClick={() => {
                       if (m.id !== card.id) onOpenCard(m.id);
                     }}
-                    title={m.id === card.id ? undefined : "查看这张同源卡的详情"}
+                    title={m.id === card.id ? undefined : T("查看这张同源卡的详情")}
                   >
                     <span className="mono">{typeLabel(m.cardType)}</span>
-                    <span className="cb-sibling-front">{frontPreview(m).replace(/\s+/g, " ").slice(0, 40) || "（空题面）"}</span>
+                    <span className="cb-sibling-front">{frontPreview(m).replace(/\s+/g, " ").slice(0, 40) || T("（空题面）")}</span>
                     <span>{statusOf(m)}</span>
                     <span className="mono">{dueText(m)}</span>
-                    {deferredMap.has(m.id) && <span className="lint lint-warn">今日暂缓</span>}
+                    {deferredMap.has(m.id) && <span className="lint lint-warn">{T("今日暂缓")}</span>}
                   </li>
                 ))}
               </ul>
@@ -2302,15 +2311,15 @@ function CardDetail({
               v48.63（D107）：标签功能总开关关闭时整块不渲染 */}
           {tagsEnabled && (
           <div className="cb-tags" data-testid="card-detail-tags">
-            <span className="cb-tags-label">标签</span>
+            <span className="cb-tags-label">{T("标签")}</span>
             {tagEditing ? (
               <span className="cb-tags-editor">
-                <TagInput value={tagDraft} onChange={setTagDraft} suggestions={tagVocab} ariaLabel="标签" />
+                <TagInput value={tagDraft} onChange={setTagDraft} suggestions={tagVocab} ariaLabel={T("标签")} />
                 <button className="btn btn-primary btn-sm" data-tags-save onClick={() => void saveTags()}>
-                  保存
+                  {T("保存")}
                 </button>
                 <button className="btn btn-outline btn-sm" onClick={() => setTagEditing(false)}>
-                  取消
+                  {T("取消")}
                 </button>
               </span>
             ) : (
@@ -2324,7 +2333,7 @@ function CardDetail({
                     ))}
                   </span>
                 ) : (
-                  <span className="form-hint">无标签</span>
+                  <span className="form-hint">{T("无标签")}</span>
                 )}
                 <button
                   className="btn btn-outline btn-sm"
@@ -2334,7 +2343,7 @@ function CardDetail({
                     setTagEditing(true);
                   }}
                 >
-                  编辑
+                  {T("编辑")}
                 </button>
               </span>
             )}
@@ -2343,7 +2352,7 @@ function CardDetail({
 
           {issues.length > 0 && (
             <div className="cb-issues">
-              <p className="cb-issues-title">质检问题（CardLint / 相似检索）</p>
+              <p className="cb-issues-title">{T("质检问题（CardLint / 相似检索）")}</p>
               {issues.map((it) => (
                 <div key={it.id} className="cb-issue-line">
                   <span className={`lint lint-${it.severity}`}>
@@ -2359,45 +2368,45 @@ function CardDetail({
               // v35：资源库选图卡（imageSource="library"）隐藏跳转；旧卡无锚点置灰提示，不再跳回开头
               hasSourceAnchor(card.contextRef) ? (
                 <button className="btn btn-outline btn-sm" onClick={jump}>
-                  跳转原文
+                  {T("跳转原文")}
                 </button>
               ) : (
-                <button className="btn btn-outline btn-sm" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
-                  跳转原文
+                <button className="btn btn-outline btn-sm" disabled title={T("该卡制卡时未记录原文位置（旧卡），无法跳转")}>
+                  {T("跳转原文")}
                 </button>
               )
             )}
             {card.cardType === "imageOcclusion" && card.occlusionJson && (
               <button className="btn btn-outline btn-sm" onClick={() => setLightboxOpen(true)}>
-                查看原图
+                {T("查看原图")}
               </button>
             )}
             <button className="btn btn-outline btn-sm" onClick={toggleSuspend}>
-              {card.leech?.suspended ? "恢复调度" : "暂停调度"}
+              {card.leech?.suspended ? T("恢复调度") : T("暂停调度")}
             </button>
             {/* v48.60（D102）：生命周期归档/恢复（与暂停调度正交；不评分、不动 FSRS） */}
             <button className="btn btn-outline btn-sm" data-detail-archive onClick={toggleArchive}>
-              {isArchived ? "恢复（解除归档）" : "不再关心"}
+              {isArchived ? T("恢复（解除归档）") : T("不再关心")}
             </button>
             <button className="btn btn-outline btn-sm" onClick={() => postpone(1)}>
-              推迟 1 天
+              {T("推迟 1 天")}
             </button>
             <button className="btn btn-outline btn-sm" onClick={() => postpone(7)}>
-              推迟 7 天
+              {T("推迟 7 天")}
             </button>
             <button className="btn btn-outline btn-sm" onClick={resetNew}>
-              重置为新卡
+              {T("重置为新卡")}
             </button>
             {card.leech?.isLeech && (
               <button className="btn btn-secondary btn-sm" onClick={() => onOpenLeech(card)}>
-                六步处理
+                {T("六步处理")}
               </button>
             )}
             <button className="btn btn-outline btn-sm review-delete" onClick={handleDelete}>
-              删除
+              {T("删除")}
             </button>
           </div>
-          <p className="form-hint">题面与答案可直接点击编辑（失焦落库，挖空卡自动回填挖空语法）；复习评分请回到「复习」页。</p>
+          <p className="form-hint">{T("题面与答案可直接点击编辑（失焦落库，挖空卡自动回填挖空语法）；复习评分请回到「复习」页。")}</p>
           {lightboxOpen && card.occlusionJson && (
             <ImageLightbox
               assetPath={card.occlusionJson.assetPath}
@@ -2491,6 +2500,7 @@ export function CardFace({
     noteText?: string;
   }) => Promise<void> | void;
 }) {
+  const T = useT();
   const md = (s: string) => (
     <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
   );
@@ -2535,7 +2545,7 @@ export function CardFace({
   const speakBtn = dj ? (
     <button
       className="vocab-speak-btn"
-      title="播放发音"
+      title={T("播放发音")}
       onClick={(e) => {
         e.stopPropagation();
         void playVocabAudio(dj);
@@ -2564,7 +2574,7 @@ export function CardFace({
         {/* R8（D98/v48.57）：复习页翻面只走底栏「显示答案」（onReveal 不传＝卡面无按钮——
         此前渲染出无 onClick 的死按钮）；onReveal 在场的调用方（若有）仍显示 */}
         {!showBack && onReveal && (
-          <button className="btn btn-primary" onClick={onReveal}>显示答案</button>
+          <button className="btn btn-primary" onClick={onReveal}>{T("显示答案")}</button>
         )}
       </>,
       <>
@@ -2697,6 +2707,7 @@ export function CardFace({
 
 // ---------- Leech 六步处理向导（§8.7） ----------
 export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRecord; onClose: () => void; onDone: () => void }) {
+  const T = useT();
   // D121：辨析弹窗可能改写卡面文字——向导后续的全行 update 必须基于最新行，否则会用旧文案覆盖
   const [freshCard, setFreshCard] = useState<CardRecord | null>(null);
   const card = freshCard ?? cardProp;
@@ -2739,13 +2750,13 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
     }
   }
 
-  const steps = ["诊断", "补卡", "问法", "取舍", "暂缓", "助记"];
+  const steps = [T("诊断"), T("补卡"), T("问法"), T("取舍"), T("暂缓"), T("助记")];
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="记忆难点六步处理" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("记忆难点六步处理")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>记忆难点 · 六步处理</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <h2>{T("记忆难点 · 六步处理")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -2768,18 +2779,18 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
 
           {/* D121 §3.1：辨析（选另一张卡并排对照，可 AI 诊断、就地修正、归档或生成对比卡） */}
           <div className="ai-actions mb-4">
-            <button className="btn btn-outline btn-sm" data-testid="leech-disamb-btn" onClick={() => setDisambOpen(true)}>辨析</button>
+            <button className="btn btn-outline btn-sm" data-testid="leech-disamb-btn" onClick={() => setDisambOpen(true)}>{T("辨析")}</button>
           </div>
 
           {step === 0 && (
             <div>
-              <p className="form-hint">Step 1 · 明显原因？用 AI 诊断遗忘原因（歧义/干扰/缺前置/过载/是否题残留）。</p>
+              <p className="form-hint">{T("Step 1 · 明显原因？用 AI 诊断遗忘原因（歧义/干扰/缺前置/过载/是否题残留）。")}</p>
               <button className="btn btn-primary btn-sm" disabled={running} onClick={runDiagnose}>
-                {running ? "诊断中…" : "AI 诊断"}
+                {running ? T("诊断中…") : T("AI 诊断")}
               </button>
               {diagnosis && (
                 <div className="review-mnemonic mt-3">
-                  <span className="book-card-label">诊断</span>
+                  <span className="book-card-label">{T("诊断")}</span>
                   {diagnosis.diagnosis || diagnosis.analysis}
                   {diagnosis.suggestions && diagnosis.suggestions.length > 0 && (
                     <ul className="plain-list">
@@ -2792,17 +2803,17 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
           )}
           {step === 1 && (
             <div>
-              <p className="form-hint">Step 2 · 补充卡片。对卡内不熟的术语补前置知识卡；若存在相似卡，点「辨析」比较并修正。</p>
+              <p className="form-hint">{T("Step 2 · 补充卡片。对卡内不熟的术语补前置知识卡；若存在相似卡，点「辨析」比较并修正。")}</p>
             </div>
           )}
           {step === 2 && (
             <div>
-              <p className="form-hint">Step 3 · 考察点不对？在阅读器重新选中文本，用「AI 制卡」换一种问法，然后删除或降优先这张卡。</p>
+              <p className="form-hint">{T("Step 3 · 考察点不对？在阅读器重新选中文本，用「AI 制卡」换一种问法，然后删除或降优先这张卡。")}</p>
             </div>
           )}
           {step === 3 && (
             <div>
-              <p className="form-hint">Step 4 · 不重要？放弃最难的 10% 可换取约 3 倍学习吞吐——删除是理性决策不是失败。</p>
+              <p className="form-hint">{T("Step 4 · 不重要？放弃最难的 10% 可换取约 3 倍学习吞吐——删除是理性决策不是失败。")}</p>
               <div className="settings-row">
                 <button
                   className="btn btn-outline btn-sm"
@@ -2811,7 +2822,7 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
                     onDone();
                   }}
                 >
-                  删除这张卡
+                  {T("删除这张卡")}
                 </button>
                 <button
                   className="btn btn-outline btn-sm"
@@ -2820,14 +2831,14 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
                     onDone();
                   }}
                 >
-                  降优先级到 20
+                  {T("降优先级到 20")}
                 </button>
               </div>
             </div>
           )}
           {step === 4 && (
             <div>
-              <p className="form-hint">Step 5 · 暂缓？推迟到指定日期自动恢复（备考冲刺期先搁置）。</p>
+              <p className="form-hint">{T("Step 5 · 暂缓？推迟到指定日期自动恢复（备考冲刺期先搁置）。")}</p>
               <button
                 className="btn btn-outline btn-sm"
                 onClick={async () => {
@@ -2836,13 +2847,13 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
                   onDone();
                 }}
               >
-                推迟 30 天并暂停
+                {T("推迟 30 天并暂停")}
               </button>
             </div>
           )}
           {step === 5 && (
             <div>
-              <p className="form-hint">Step 6 · 助记。在阅读器选中卡面关键词用「AI 解释」，把助记方法填入卡片（编辑后重置为新卡）。</p>
+              <p className="form-hint">{T("Step 6 · 助记。在阅读器选中卡面关键词用「AI 解释」，把助记方法填入卡片（编辑后重置为新卡）。")}</p>
             </div>
           )}
 
@@ -2856,7 +2867,7 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
                 onDone();
               }}
             >
-              处理完成 · 重置为新卡
+              {T("处理完成 · 重置为新卡")}
             </button>
             <button
               className="btn btn-outline btn-sm"
@@ -2866,7 +2877,7 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
                 onDone();
               }}
             >
-              仅恢复（不重置）
+              {T("仅恢复（不重置）")}
             </button>
           </div>
         </div>

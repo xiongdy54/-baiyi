@@ -90,7 +90,7 @@ try {
   check("③ 设置左栏含「实验功能」", (await cdp.eval(`[...document.querySelectorAll(".settings-nav button")].some((b) => b.textContent.trim() === "实验功能")`)) === true, "左栏无该项");
   check("③ #sec-lab 内含 #sec-learner（迁入）", (await cdp.eval(`!!document.querySelector("#sec-lab #sec-learner")`)) === true, "不在 sec-lab");
   check("③ sec-widgets 不再含 learner 子块（迁出）", (await cdp.eval(`!document.querySelector("#sec-widgets #sec-learner")`)) === true, "仍留原地");
-  check("③ 设置左栏共 16 项（D181 v49.7 增「关于」sec-about，15→16）", (await cdp.eval(`document.querySelectorAll(".settings-nav button").length`)) === 16, await cdp.eval(`document.querySelectorAll(".settings-nav button").length`));
+  check("③ 设置左栏共 17 项（D182 v49.8 增「语言」sec-language，16→17）", (await cdp.eval(`document.querySelectorAll(".settings-nav button").length`)) === 17, await cdp.eval(`document.querySelectorAll(".settings-nav button").length`));
 
   // ④ 关闭学习者模型（仍在「下一步」页）：页签收拢卸载 + 视图退回数据页
   await cdp.eval(`(() => { const b = [...document.querySelectorAll("#sec-learner .seg-tabs button")]; b[1]?.click(); return b.length; })()`);

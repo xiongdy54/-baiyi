@@ -22,6 +22,7 @@ import { IconChevronDown, IconClose } from "./icons";
 import OcclusionShapes from "./OcclusionShapes";
 import MarkdownEditor from "./editor/MarkdownEditor";
 import TagInput from "./TagInput";
+import { useT } from "../lib/i18n";
 // v48.63（D107）：标签功能总开关——手动表单标签行受其控制
 import { useTagsEnabled } from "../lib/tagSettings";
 import type { TagVocabEntry } from "../lib/tags";
@@ -75,6 +76,7 @@ function GrowField({
   ghost?: ReactNode;
   onGhostAccept?: () => void;
 }) {
+  const T = useT();
   const [clipRef, innerRef] = useGrowBox<HTMLDivElement, HTMLDivElement>(168);
   const [miss, setMiss] = useState(false);
   const timer = useRef<number | null>(null);
@@ -121,7 +123,7 @@ function GrowField({
             timer.current = window.setTimeout(() => setMiss(false), 1400);
           }}
         >
-          {pick.busy ? "生成中…" : miss ? pick.empty : pick.label}
+          {pick.busy ? T("生成中…") : miss ? pick.empty : pick.label}
         </button>
       )}
     </div>
@@ -162,6 +164,7 @@ function unwrapCloze(text: string, pos: number): { text: string; caret: number }
 /** 填空字段：纯文本 textarea（能可靠读写选区），一行起步随内容伸缩；工具行＝挖空 / 同题挖空 / 取消挖空 + 实时「N 张卡 · M 个空」
     D144 #4：幽灵层/接受回调透传给首字段 GrowField（填空题的第一文本框＝挖空文本）。 */
 function ClozeField({ value, onChange, onPick, ghost, onGhostAccept }: { value: string; onChange: (v: string) => void; onPick?: { label: string; get: () => string | null | undefined }; ghost?: ReactNode; onGhostAccept?: () => void }) {
+  const T = useT();
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const pendingCaret = useRef<[number, number] | null>(null);
   const [hasSel, setHasSel] = useState(false);
@@ -204,14 +207,14 @@ function ClozeField({ value, onChange, onPick, ghost, onGhostAccept }: { value: 
   const keep = (e: React.MouseEvent) => e.preventDefault();
   return (
     <>
-      <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={onPick ? { label: onPick.label, empty: "没有选区", get: onPick.get, apply: (t) => onChange(t) } : undefined}>
+      <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={onPick ? { label: onPick.label, empty: T("没有选区"), get: onPick.get, apply: (t) => onChange(t) } : undefined}>
         <textarea
           ref={ref}
           className="wb-cloze-input"
           rows={1}
           value={value}
-          aria-label="挖空文本"
-          placeholder="输入一段话，选中文字后点「挖空」"
+          aria-label={T("挖空文本")}
+          placeholder={T("输入一段话，选中文字后点「挖空」")}
           onChange={(e) => onChange(e.target.value)}
           onSelect={sync}
           onKeyUp={sync}
@@ -226,17 +229,17 @@ function ClozeField({ value, onChange, onPick, ghost, onGhostAccept }: { value: 
         />
       </GrowField>
       <div className="wb-cloze-bar">
-        <button type="button" className="wb-cloze-btn" disabled={!hasSel} onMouseDown={keep} onClick={() => apply(false)} title="选中文字后点击：新建一题（c1、c2…，Ctrl+Shift+C）">
-          挖空
+        <button type="button" className="wb-cloze-btn" disabled={!hasSel} onMouseDown={keep} onClick={() => apply(false)} title={T("选中文字后点击：新建一题（c1、c2…，Ctrl+Shift+C）")}>
+          {T("挖空")}
         </button>
-        <button type="button" className="wb-cloze-btn" disabled={!hasSel || ords.length === 0} onMouseDown={keep} onClick={() => apply(true)} title="与上一个挖空同属一题，复习时一起遮（Ctrl+Alt+Shift+C）">
-          同题挖空
+        <button type="button" className="wb-cloze-btn" disabled={!hasSel || ords.length === 0} onMouseDown={keep} onClick={() => apply(true)} title={T("与上一个挖空同属一题，复习时一起遮（Ctrl+Alt+Shift+C）")}>
+          {T("同题挖空")}
         </button>
-        <button type="button" className="wb-cloze-btn" disabled={!inBlank} onMouseDown={keep} onClick={remove} title="光标放在某个挖空里，点击还原为普通文字">
-          取消挖空
+        <button type="button" className="wb-cloze-btn" disabled={!inBlank} onMouseDown={keep} onClick={remove} title={T("光标放在某个挖空里，点击还原为普通文字")}>
+          {T("取消挖空")}
         </button>
         <span className="wb-cloze-stat mono" aria-live="polite">
-          {blanks === 0 ? "尚无挖空" : `${ords.length} 张卡 · ${blanks} 个空`}
+          {blanks === 0 ? T("尚无挖空") : T("{cards} 张卡 · {blanks} 个空", { cards: ords.length, blanks })}
         </span>
       </div>
     </>
@@ -334,6 +337,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   onGenerateAnswer,
   answerGenerating
 }, ref) {
+  const T = useT();
   const [modeInner, setModeInner] = useState<"qa" | "reverse" | "cloze" | "imageOcclusion">(imageRegion ? "imageOcclusion" : "qa");
   const mode = modeProp ?? modeInner;
   const setMode = (m: "qa" | "reverse" | "cloze" | "imageOcclusion") => {
@@ -488,7 +492,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
             id: c.id,
             front: c.frontMarkdown || c.noteText || f.front || "",
             back: otherBack,
-            source: title ? `《${title}》${author}` : "来源未知",
+            source: title ? `《${title}》${author}` : T("来源未知"),
             score: f.score,
             differs: answerDiffers(back, otherBack, bigramJaccard(back, otherBack))
           });
@@ -556,17 +560,17 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   // D121 §4.1：相似已有卡预检面板（内联、不弹窗；每个 front 文本只出现一次）；modal / dock 两种形态共用
   const hitsPanel =
     hits && hits.length > 0 ? (
-          <div className="manual-similar" data-testid="manual-similar-panel" role="region" aria-label="相似已有卡">
-            <p className="manual-similar-title">发现 {hits.length} 张相似已有卡——确认不是重复或矛盾后再保存</p>
+          <div className="manual-similar" data-testid="manual-similar-panel" role="region" aria-label={T("相似已有卡")}>
+            <p className="manual-similar-title">{T("发现 {n} 张相似已有卡——确认不是重复或矛盾后再保存", { n: hits.length })}</p>
             <ul className="manual-similar-list">
               {hits.map((h) => (
                 <li key={h.id} className="manual-similar-item" data-testid="manual-similar-item">
                   <div className="disamb-candidate-q">{clipText(h.front, 80)}</div>
-                  <div className="disamb-candidate-a">答：{clipText(h.back, 60) || "（无）"}</div>
+                  <div className="disamb-candidate-a">{T("答：")}{clipText(h.back, 60) || T("（无）")}</div>
                   <div className="disamb-candidate-meta">
                     <span>{h.source}</span>
-                    <span className="mono">相似 {Math.round(h.score * 100)}%</span>
-                    {h.differs && <span className="disamb-tag">答案不同</span>}
+                    <span className="mono">{T("相似 {n}%", { n: Math.round(h.score * 100) })}</span>
+                    {h.differs && <span className="disamb-tag">{T("答案不同")}</span>}
                     {onDisambiguate && (
                       <button
                         type="button"
@@ -574,7 +578,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
                         disabled={saving}
                         onClick={() => void save(h.id)}
                       >
-                        保存并辨析
+                        {T("保存并辨析")}
                       </button>
                     )}
                   </div>
@@ -582,8 +586,8 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
               ))}
             </ul>
             <div className="manual-similar-actions">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setHits(null)}>返回修改</button>
-              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => void save()}>仍然保存</button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setHits(null)}>{T("返回修改")}</button>
+              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => void save()}>{T("仍然保存")}</button>
             </div>
           </div>
         
@@ -592,15 +596,15 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   // D123 修订（用户 2026-10-10，还原 制卡台-融合优化版-v3.html）：dock 形态只留「引用 · 题型 · 正面/背面框 ·
   // 页脚（更多 / 制卡）」，说明性长文案收进 title / placeholder；高级字段收进「更多」（hidden 不卸载，载荷不变）。
   if (variant === "dock") {
-    const pickSel = onPickSelection ? { label: "带入选区", empty: "没有选区", get: onPickSelection, apply: setFront } : undefined;
+    const pickSel = onPickSelection ? { label: T("带入选区"), empty: T("没有选区"), get: onPickSelection, apply: setFront } : undefined;
     // v48.101（D146）：「带入 AI 回答」三态——①有既有回答＝带入；②无既有回答但正面非空且宿主给了
     // 生成链（问答/翻转；图片挖空的答案来自图内容，不接生成）＝触发生成并流式写回背面；③正面为空＝
     // 「暂无 AI 回答」空态提示（1.4s 自复）。
     const canGenerate = (mode === "qa" || mode === "reverse") && !!front.trim() && !!onGenerateAnswer;
     const pickAns = onPickAnswer
       ? {
-          label: "带入 AI 回答",
-          empty: "暂无 AI 回答",
+          label: T("带入 AI 回答"),
+          empty: T("暂无 AI 回答"),
           get: onPickAnswer,
           apply: setBack,
           generate: canGenerate ? () => onGenerateAnswer?.(front.trim()) : undefined,
@@ -621,27 +625,27 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
         >
           {mode === "reverse" ? (
             <>
-              <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="问题（制卡后另生成一张：以它为答案）" label="问题" /></GrowField>
-              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="答案（制卡后另生成一张：以它为问题）" label="答案" /></GrowField>
+              <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder={T("问题（制卡后另生成一张：以它为答案）")} label={T("问题")} /></GrowField>
+              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder={T("答案（制卡后另生成一张：以它为问题）")} label={T("答案")} /></GrowField>
             </>
           ) : mode === "qa" ? (
             <>
-              <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（问题）" label="题面" /></GrowField>
-              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案）" label="答案" /></GrowField>
+              <GrowField ghost={ghost} onGhostAccept={onGhostAccept} pick={front.trim() ? undefined : pickSel}><MdField minRows={1} value={front} onChange={setFront} placeholder={T("正面（问题）")} label={T("题面")} /></GrowField>
+              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder={T("背面（答案）")} label={T("答案")} /></GrowField>
             </>
           ) : mode === "cloze" ? (
-            <ClozeField value={front} onChange={setFront} ghost={ghost} onGhostAccept={onGhostAccept} onPick={onPickSelection && !front.trim() ? { label: "带入选区", get: onPickSelection } : undefined} />
+            <ClozeField value={front} onChange={setFront} ghost={ghost} onGhostAccept={onGhostAccept} onPick={onPickSelection && !front.trim() ? { label: T("带入选区"), get: onPickSelection } : undefined} />
           ) : imageRegion ? (
             <>
               <div className="occlusion-stage occlusion-preview manual-region-preview">
                 <img src={imageRegion.dataUrl} alt="" className="occlusion-img" />
                 <OcclusionShapes occlusion={{ shapes: [imageRegion.shape] }} cardOrd={0} />
               </div>
-              <GrowField><MdField minRows={1} value={front} onChange={setFront} placeholder="正面（默认「图中遮挡区域对应的是什么？」）" label="正面（图片挖空）" /></GrowField>
-              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder="背面（答案，必填）" label="背面（图片挖空）" /></GrowField>
+              <GrowField><MdField minRows={1} value={front} onChange={setFront} placeholder={T("正面（默认「图中遮挡区域对应的是什么？」）")} label={T("正面（图片挖空）")} /></GrowField>
+              <GrowField pick={back.trim() ? undefined : pickAns}><MdField minRows={1} value={back} onChange={setBack} placeholder={T("背面（答案，必填）")} label={T("背面（图片挖空）")} /></GrowField>
             </>
           ) : (
-            <p className="wb-empty">点上方「图片挖空」开始截图</p>
+            <p className="wb-empty">{T("点上方「图片挖空」开始截图")}</p>
           )}
         </div>
 
@@ -651,31 +655,31 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
         <div className={`collapse-clip wb-more-clip${moreOpen ? " is-open" : ""}`} data-testid="manual-more" aria-hidden={!moreOpen}>
           <div className="collapse-inner">
             <div className="wb-more">
-              <div className="wb-row" title="对齐 R17：UDC 受控清单，≤2 个，首个为主领域">
-                <span className="wb-k">领域</span>
+              <div className="wb-row" title={T("对齐 R17：UDC 受控清单，≤2 个，首个为主领域")}>
+                <span className="wb-k">{T("领域")}</span>
                 <div className="wb-v"><UdcPicker value={domain} onChange={setDomain} /></div>
               </div>
               {tagsEnabled && (
-                <div className="wb-row" title="自由组织词汇，用 :: 分层级，如「考研::英语」">
-                  <span className="wb-k">标签</span>
-                  <div className="wb-v"><TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" /></div>
+                <div className="wb-row" title={T("自由组织词汇，用 :: 分层级，如「考研::英语」")}>
+                  <span className="wb-k">{T("标签")}</span>
+                  <div className="wb-v"><TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel={T("标签")} /></div>
                 </div>
               )}
-              <label className="wb-row" title="只能写领域/学科名，禁止泄漏答案（规则 16）">
-                <span className="wb-k">前缀</span>
-                <input className="wb-line" type="text" value={contextPrefix} onChange={(e) => { touched.current.prefix = true; setContextPrefix(e.target.value); }} placeholder="自动：取领域名称" />
+              <label className="wb-row" title={T("只能写领域/学科名，禁止泄漏答案（规则 16）")}>
+                <span className="wb-k">{T("前缀")}</span>
+                <input className="wb-line" type="text" value={contextPrefix} onChange={(e) => { touched.current.prefix = true; setContextPrefix(e.target.value); }} placeholder={T("自动：取领域名称")} />
               </label>
-              <label className="wb-row" title="规则 7：克制使用">
-                <span className="wb-k">助记</span>
-                <input className="wb-line" type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="例：中位数的「中」＝正中间" />
+              <label className="wb-row" title={T("规则 7：克制使用")}>
+                <span className="wb-k">{T("助记")}</span>
+                <input className="wb-line" type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder={T("例：中位数的「中」＝正中间")} />
               </label>
-              <label className="wb-row" title="同组卡片共享同一 knowledgePointId">
-                <span className="wb-k">知识点</span>
-                <input className="wb-line" type="text" value={knowledgePointId} onChange={(e) => setKnowledgePointId(e.target.value)} placeholder="例：kp-中位数" />
+              <label className="wb-row" title={T("同组卡片共享同一 knowledgePointId")}>
+                <span className="wb-k">{T("知识点")}</span>
+                <input className="wb-line" type="text" value={knowledgePointId} onChange={(e) => setKnowledgePointId(e.target.value)} placeholder={T("例：kp-中位数")} />
               </label>
-              <label className="wb-row wb-check" title="规则 19：统计数字 / 版本 / 价格等易变内容勾选，写入今日日期">
+              <label className="wb-row wb-check" title={T("规则 19：统计数字 / 版本 / 价格等易变内容勾选，写入今日日期")}>
                 <input type="checkbox" checked={dateStamped} onChange={(e) => { touched.current.date = true; setDateStamped(e.target.checked); }} />
-                <span>标注日期</span>
+                <span>{T("标注日期")}</span>
               </label>
             </div>
           </div>
@@ -683,7 +687,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
 
         <div className="form-actions wb-foot">
           <button type="button" className="wb-more-toggle" data-testid="manual-more-toggle" aria-expanded={moreOpen} onClick={() => setMoreOpen((v) => !v)}>
-            更多
+            {T("更多")}
             <IconChevronDown size={12} className={moreOpen ? "is-flip" : undefined} />
           </button>
           <button
@@ -696,7 +700,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
               void onCreateClick();
             }}
           >
-            {saving ? "保存中…" : checking ? "检查中…" : "制卡"}
+            {saving ? T("保存中…") : checking ? T("检查中…") : T("制卡")}
           </button>
         </div>
       </>
@@ -709,62 +713,62 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
 
         <div className="seg-tabs">
           <button className={mode === "qa" ? "active" : ""} onClick={() => setMode("qa")}>
-            问答题
+            {T("问答题")}
           </button>
           <button className={mode === "reverse" ? "active" : ""} onClick={() => setMode("reverse")}>
-            翻转问答
+            {T("翻转问答")}
           </button>
           <button className={mode === "cloze" ? "active" : ""} onClick={() => setMode("cloze")}>
-            填空题
+            {T("填空题")}
           </button>
           <button className={mode === "imageOcclusion" ? "active" : ""} onClick={() => setMode("imageOcclusion")}>
-            图片挖空
+            {T("图片挖空")}
           </button>
         </div>
 
         {mode === "reverse" ? (
           <>
-            <p className="form-hint">翻转问答：一次性创建两张互为翻转的独立问答卡（B 面留空则自动正反互换），各自有独立的复习调度。</p>
+            <p className="form-hint">{T("翻转问答：一次性创建两张互为翻转的独立问答卡（B 面留空则自动正反互换），各自有独立的复习调度。")}</p>
             <div className="form-field">
-              <label>A 面 · 题面（建议「领域前缀: 问题」）</label>
-              <MdField value={front} onChange={setFront} placeholder="例：统计: 中位数是什么？" label="题面" />
+              <label>{T("A 面 · 题面（建议「领域前缀: 问题」）")}</label>
+              <MdField value={front} onChange={setFront} placeholder={T("例：统计: 中位数是什么？")} label={T("题面")} />
             </div>
             <div className="form-field">
-              <label>A 面 · 答案（目标 ≤15 字）</label>
-              <MdField value={back} onChange={setBack} placeholder="例：排序后位于中间位置的数" label="答案" />
+              <label>{T("A 面 · 答案（目标 ≤15 字）")}</label>
+              <MdField value={back} onChange={setBack} placeholder={T("例：排序后位于中间位置的数")} label={T("答案")} />
             </div>
             <div className="form-field">
-              <label>B 面 · 题面（留空则自动用 A 面答案反向提问）</label>
-              <MdField value={bFront} onChange={setBFront} placeholder="例：统计: 排序后位于中间位置的数叫什么？" label="B 面 · 题面" />
+              <label>{T("B 面 · 题面（留空则自动用 A 面答案反向提问）")}</label>
+              <MdField value={bFront} onChange={setBFront} placeholder={T("例：统计: 排序后位于中间位置的数叫什么？")} label={T("B 面 · 题面")} />
             </div>
             <div className="form-field">
-              <label>B 面 · 答案（留空则自动用 A 面题面）</label>
-              <MdField value={bBack} onChange={setBBack} placeholder="例：中位数" label="B 面 · 答案" />
+              <label>{T("B 面 · 答案（留空则自动用 A 面题面）")}</label>
+              <MdField value={bBack} onChange={setBBack} placeholder={T("例：中位数")} label={T("B 面 · 答案")} />
             </div>
           </>
         ) : mode === "qa" ? (
           <>
             <div className="form-field">
-              <label>正面（问题，建议「领域前缀: 问题」）</label>
-              <MdField value={front} onChange={setFront} placeholder="例：统计: 中位数是什么？" label="题面" />
+              <label>{T("正面（问题，建议「领域前缀: 问题」）")}</label>
+              <MdField value={front} onChange={setFront} placeholder={T("例：统计: 中位数是什么？")} label={T("题面")} />
             </div>
             <div className="form-field">
-              <label>背面（答案，目标 ≤15 字）</label>
-              <MdField value={back} onChange={setBack} placeholder="例：排序后位于中间位置的数" label="答案" />
+              <label>{T("背面（答案，目标 ≤15 字）")}</label>
+              <MdField value={back} onChange={setBack} placeholder={T("例：排序后位于中间位置的数")} label={T("答案")} />
             </div>
           </>
         ) : mode === "cloze" ? (
           <div className="form-field">
             <label>
-              挖空文本（用 **双星号** 或〔括号〕包住答案，自动转 Anki 挖空；多挖空用 c1/c2 编号语法）
+              {T("挖空文本（用 **双星号** 或〔括号〕包住答案，自动转 Anki 挖空；多挖空用 c1/c2 编号语法）")}
             </label>
-            <MdField value={front} onChange={setFront} label="挖空文本" />
+            <MdField value={front} onChange={setFront} label={T("挖空文本")} />
             <p className="form-preview mono">{front.replace(/\*\*(.+?)\*\*/g, "〔$1〕")}</p>
           </div>
         ) : (
           <>
             <p className="form-hint">
-              图片挖空：正面按所选区域遮挡，答案面显示原图与答案文本。区域来自阅读器中的图片选区。
+              {T("图片挖空：正面按所选区域遮挡，答案面显示原图与答案文本。区域来自阅读器中的图片选区。")}
             </p>
             {imageRegion ? (
               <>
@@ -773,17 +777,17 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
                   <OcclusionShapes occlusion={{ shapes: [imageRegion.shape] }} cardOrd={0} />
                 </div>
                 <div className="form-field">
-                  <label>正面（问题，默认「图中遮挡区域对应的是什么？」）</label>
-                  <MdField value={front} onChange={setFront} placeholder="图中遮挡区域对应的是什么？" label="正面（图片挖空）" />
+                  <label>{T("正面（问题，默认「图中遮挡区域对应的是什么？」）")}</label>
+                  <MdField value={front} onChange={setFront} placeholder={T("图中遮挡区域对应的是什么？")} label={T("正面（图片挖空）")} />
                 </div>
                 <div className="form-field">
-                  <label>背面（答案，必填）</label>
-                  <MdField value={back} onChange={setBack} placeholder="例：海马体" label="背面（图片挖空）" />
+                  <label>{T("背面（答案，必填）")}</label>
+                  <MdField value={back} onChange={setBack} placeholder={T("例：海马体")} label={T("背面（图片挖空）")} />
                 </div>
               </>
             ) : (
               <p className="form-hint">
-                尚未选择图片区域：请关闭本窗口，点击阅读材料中的图片进入聚焦，用工具条框选区域后选择「手动制卡」。
+                {T("尚未选择图片区域：请关闭本窗口，点击阅读材料中的图片进入聚焦，用工具条框选区域后选择「手动制卡」。")}
               </p>
             )}
           </>
@@ -793,48 +797,48 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
             D123：dock 变体收进「更多选项」（hidden 不卸载） */}
         <div className="form-more" data-testid="manual-more" hidden={false}>
         <div className="form-field">
-          <label>领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）</label>
+          <label>{T("领域标签（对齐 R17：UDC 受控清单，≤2 个、首个为主领域）")}</label>
           <UdcPicker value={domain} onChange={setDomain} />
         </div>
         {/* v48.60（D101）：用户标签——回车/逗号/顿号确认 chip；词表建议；继承初值可删；
             v48.63（D107）：总开关关闭时整行不渲染，tags 恒空提交（继承初值一并失效） */}
         {tagsEnabled && (
           <div className="form-field">
-            <label>标签（可选；自由组织词汇，用 :: 分层级，如「考研::英语」）</label>
-            <TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel="标签" />
+            <label>{T("标签（可选；自由组织词汇，用 :: 分层级，如「考研::英语」）")}</label>
+            <TagInput value={tags} onChange={setTags} suggestions={tagSuggestions ?? null} ariaLabel={T("标签")} />
           </div>
         )}
         <div className="form-field">
-          <label>上下文前缀（可选；只能写领域/学科名，禁止泄漏答案——规则16）</label>
+          <label>{T("上下文前缀（可选；只能写领域/学科名，禁止泄漏答案——规则16）")}</label>
           <input
             type="text"
             value={contextPrefix}
             onChange={(e) => setContextPrefix(e.target.value)}
-            placeholder="例：统计:"
+            placeholder={T("例：统计:")}
           />
         </div>
         <div className="form-field">
-          <label>助记（可选，规则7 克制使用）</label>
-          <input type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder="例：中位数的「中」= 位置在正中间" />
+          <label>{T("助记（可选，规则7 克制使用）")}</label>
+          <input type="text" value={mnemonic} onChange={(e) => setMnemonic(e.target.value)} placeholder={T("例：中位数的「中」= 位置在正中间")} />
         </div>
         <div className="form-field">
-          <label>知识点分组（可选；同组卡片共享同一 knowledgePointId）</label>
+          <label>{T("知识点分组（可选；同组卡片共享同一 knowledgePointId）")}</label>
           <input
             type="text"
             value={knowledgePointId}
             onChange={(e) => setKnowledgePointId(e.target.value)}
-            placeholder="例：kp-中位数"
+            placeholder={T("例：kp-中位数")}
           />
         </div>
         <div className="form-field form-check">
           <label className="backup-checkline">
             <input type="checkbox" checked={dateStamped} onChange={(e) => setDateStamped(e.target.checked)} />
-            标注日期（规则19：统计数字/版本/价格等易变内容勾选，写入今日日期）
+            {T("标注日期（规则19：统计数字/版本/价格等易变内容勾选，写入今日日期）")}
           </label>
         </div>
 
         <div className="form-field">
-          <label>优先级（0-100，越高越先复习）</label>
+          <label>{T("优先级（0-100，越高越先复习）")}</label>
           <input type="range" min={0} max={100} value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
           <span className="mono">{priority}</span>
         </div>
@@ -843,7 +847,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
         {hitsPanel}
 
         <div className="form-actions">
-          <button className="btn btn-secondary" onClick={onCancel}>取消</button>
+          <button className="btn btn-secondary" onClick={onCancel}>{T("取消")}</button>
           <button
             ref={createBtnRef}
             className="btn btn-primary"
@@ -854,7 +858,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
               void onCreateClick();
             }}
           >
-            {saving ? "保存中…" : checking ? "检查相似卡…" : "创建卡片"}
+            {saving ? T("保存中…") : checking ? T("检查相似卡…") : T("创建卡片")}
           </button>
         </div>
     </>
@@ -878,13 +882,14 @@ export default function ManualCardEditor({
   onCancel: () => void;
   onSave: (payload: ManualCardPayload) => Promise<string | null | void>;
 }) {
+  const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onCancel);
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="手动制卡" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("手动制卡")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>手动制卡</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onCancel}>
+          <h2>{T("手动制卡")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={onCancel}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -906,6 +911,7 @@ export default function ManualCardEditor({
  *  （超出折叠区下缘的部分永久不可见，菜单内滚到底也救不回，用户实测「滚不动了文字还是显示不全」），
  *  portal 是唯一彻底逃逸；贴窗口底放不下翻向上；宿主滚动即收起（fixed 菜单不随锚点移动）。 */
 function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const T = useT();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; minWidth: number } | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -945,7 +951,7 @@ function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[
     }
     setOpen((o) => !o);
   }
-  const options = [...UDC_LEAVES.map((l) => ({ code: l.code, label: l.label })), { code: UDC_OTHER, label: "其他" }];
+  const options = [...UDC_LEAVES.map((l) => ({ code: l.code, label: l.label })), { code: UDC_OTHER, label: T("其他") }];
   return (
     <div className="udc-picker" ref={ref}>
       {value.length > 0 && (
@@ -955,11 +961,11 @@ function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[
               key={code}
               type="button"
               className="udc-chip"
-              title={i === 0 ? "主领域（点击移除）" : "点击移除"}
+              title={i === 0 ? T("主领域（点击移除）") : T("点击移除")}
               onClick={() => onChange(value.filter((c) => c !== code))}
             >
               {udcLabel(code)}
-              {i === 0 && <span className="udc-chip-main mono">主</span>}
+              {i === 0 && <span className="udc-chip-main mono">{T("主")}</span>}
               <IconClose size={12} />
             </button>
           ))}
@@ -968,7 +974,7 @@ function UdcPicker({ value, onChange }: { value: string[]; onChange: (v: string[
       {value.length < UDC_MAX && (
         <div className="dd">
           <button ref={btnRef} type="button" className="dd-btn" onClick={toggle}>
-            {value.length === 0 ? "选择领域" : "再加一个领域"}
+            {value.length === 0 ? T("选择领域") : T("再加一个领域")}
             <IconChevronDown size={12} className="dd-caret" />
           </button>
           {open && pos && createPortal(

@@ -7,6 +7,9 @@ import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import { aiGateway } from "../lib/ai";
+// v49.8（D182）：AI 输出语言随界面语言
+import { getLocale, useT } from "../lib/i18n";
+import { steOutputLangName } from "../lib/steProfiles";
 import type { CardRecord } from "../lib/cards";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconAlert } from "./icons";
@@ -30,6 +33,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 };
 
 export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; onClose: () => void }) {
+  const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [answer, setAnswer] = useState("");
   const [running, setRunning] = useState(false);
@@ -48,12 +52,14 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
     setResult(null);
     try {
       const tpl = await window.promptsAPI?.get("review-answer-judge");
+      // v49.8（D182）：判答说明随界面语言——zh-CN 保持原文零变化，其余语言注入指令行
+      const langLine = getLocale() === "zh-CN" ? "" : `【输出语言】${steOutputLangName()}\n\n`;
       const raw = await aiGateway.chat(
         [
           { role: "system", content: tpl?.content || FALLBACK_PROMPT },
           {
             role: "user",
-            content: `【题面】\n${front}\n\n【标准答案】\n${card.backMarkdown}\n\n【学生答案】\n${userAnswer}`
+            content: `${langLine}【题面】\n${front}\n\n【标准答案】\n${card.backMarkdown}\n\n【学生答案】\n${userAnswer}`
           }
         ],
         undefined,
@@ -94,13 +100,13 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="AI 判答"
+        aria-label={T("AI 判答")}
         data-testid="answer-judge-modal"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2>AI 判答</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <h2>{T("AI 判答")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
             </svg>
@@ -109,14 +115,14 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
         <div className="modal-scroll">
           {front && (
             <>
-              <span className="book-card-label">题面</span>
+              <span className="book-card-label">{T("题面")}</span>
               <div className="judge-front">{md(front)}</div>
             </>
           )}
           <textarea
             className="judge-input"
             data-testid="judge-input"
-            placeholder="输入你认为的答案…"
+            placeholder={T("输入你认为的答案…")}
             rows={3}
             value={answer}
             disabled={running}
@@ -129,22 +135,22 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
               disabled={running || !answer.trim()}
               onClick={judge}
             >
-              让 AI 判断
+              {T("让 AI 判断")}
             </button>
           </div>
-          {running && <p className="form-hint">AI 正在把你的答案与标准答案比对…</p>}
+          {running && <p className="form-hint">{T("AI 正在把你的答案与标准答案比对…")}</p>}
           {!running && error && (
             <p className="ai-draft-warnings"><IconAlert size={14} /> {error}</p>
           )}
           {!running && result && (
             <div className="judge-result">
               <span className={`judge-verdict${result.verdict ? ` ${result.verdict}` : " unknown"}`} data-testid="judge-verdict">
-                {result.verdict ? VERDICT_LABEL[result.verdict] : "无法解析"}
+                {result.verdict ? T(VERDICT_LABEL[result.verdict]) : T("无法解析")}
               </span>
               <div className="judge-explanation" data-testid="judge-explanation">{result.explanation}</div>
             </div>
           )}
-          <p className="form-hint">AI 判断仅供参考：不写入任何数据，评分仍由你决定。</p>
+          <p className="form-hint">{T("AI 判断仅供参考：不写入任何数据，评分仍由你决定。")}</p>
         </div>
       </div>
     </div>
