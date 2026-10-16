@@ -30,6 +30,8 @@ asarUnpack:
   - "**/*.node"
   # main.js 以原生路径读取窗口图标（electron/main.js），asar 内原生读文件不可靠
   - electron/icon.ico
+  # v49.14（D187）：主题跟随图标（icon-light/dark.png + tray-black/white.ico）运行时原生读取
+  - electron/icons/**
 # NAPI 预编译（fsrs-rs-nodejs-win32-x64-msvc）与 WASM（sql.js）均无需按 Electron ABI 重编。
 # D137（v48.92）：better-sqlite3 是 per-ABI 原生模块，必须按 Electron ABI 就位 → npmRebuild true；
 # @electron/rebuild 对 prebuild-install 型模块直接带 electron 运行时参数拉预编译，须带镜像 env
@@ -50,7 +52,8 @@ nsis:
   allowElevation: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  # 快捷方式显示名用中文；exe/安装目录名仍走 ASCII 的 productName，规避 NSIS 文件名兼容风险
-  shortcutName: 增量阅读
+  # 快捷方式显示名用软件定名 Nutation（v49.14 / D187）；exe/安装目录名仍走 ASCII 的 productName，
+  # 规避 NSIS 文件名兼容风险；productName 刻意不动＝userData 目录稳定（见上方注释）
+  shortcutName: Nutation
   deleteAppDataOnUninstall: false # 卸载不删 userData（本地优先：数据归用户）
   artifactName: ${name}-${version}-setup.${ext}

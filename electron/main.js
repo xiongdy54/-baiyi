@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -10,6 +10,11 @@ const fs = require("fs");
 if (process.env.M7_TEST_USERDATA) {
   app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));
 }
+
+// v49.14（D187）：系统通知身份——Windows 通知署名按 AUMID（AppUserModelId）解析，无快捷方式可解析时
+// 回落显示 AUMID 原文。取字面品牌串「Nutation」使 dev 与打包版均稳定显示品牌名（appId 格式串在 dev 下
+// 会显示 com.incrementalreading.desktop 原文）；托盘气泡 electron.app.Electron 顶栏问题即此修复。
+app.setAppUserModelId("Nutation");
 
 // v48.23（D61 §6.8-11）：多段选择的纯函数内核（唯一实现面，见 electron/annotationRange.js 头注）。
 // 主进程用它装配 spans 载荷（extracts:spanSet 与 db.createExtract 同一模块）。
@@ -1904,6 +1909,26 @@ ipcMain.handle("shortcuts:apply", () => quickCapture.applyGlobalShortcuts());
 // 「添加学习材料」：主窗口前置 + 就地弹出添加模态（不切换视图，阅读位置与复习会话原地保留）
 ipcMain.handle("library:requestAdd", () => sendToMainWindow("library:openAddMaterial"));
 
+// v49.14（D187）：系统亮/暗主题跟随——窗口/任务栏图标与托盘 mono 就地换色。
+// 浅色系统=纸底绿线主图标、深色系统=深林底白线图标；托盘＝单色 mark 反色（深色任务栏用白）。
+// 纯主进程表现层：BrowserWindow.setIcon / Tray.setImage 均支持运行时热替换，零 IPC、零设置键。
+function applyThemeIcons() {
+  const dark = nativeTheme.shouldUseDarkColors;
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.setIcon(path.join(__dirname, "icons", dark ? "icon-dark.png" : "icon-light.png"));
+    }
+  } catch {
+    /* 换图失败不阻断 */
+  }
+  try {
+    tray.refreshIcon();
+  } catch {
+    /* 托盘未就绪时静默 */
+  }
+}
+nativeTheme.on("updated", applyThemeIcons);
+
 function createWindow() {  // 防重入：已存在**主窗口**时不再创建（macOS activate 与启动路径共用此函数）
   // D123：不能再按 getAllWindows().length 判断——隐藏常驻的快速记录/制卡台窗口也计入，会让主窗口关掉后再也建不出来
   if (mainWindow && !mainWindow.isDestroyed()) return;
@@ -1915,7 +1940,8 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
     minWidth: 1120,
     minHeight: 640,
     frame: false,
-    icon: path.join(__dirname, "icon.ico"),
+    // v49.14（D187）：窗口/任务栏图标按系统主题取亮/暗变体（运行时切换由 applyThemeIcons 跟随）
+    icon: path.join(__dirname, "icons", nativeTheme.shouldUseDarkColors ? "icon-dark.png" : "icon-light.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

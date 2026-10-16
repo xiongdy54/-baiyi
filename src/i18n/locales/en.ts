@@ -362,7 +362,6 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "检查更新": "Check for updates",
 
   // —— 关于 ——
-  "增量阅读": "Incremental Reading",
   " · 版本 v{version}": " · version v{version}",
   "本地优先的桌面渐进阅读学习软件：数据全部保存在本机；核心功能零网络、零账号，仅在显式配置 AI 服务或检查更新时联网。":
     "A local-first desktop incremental-reading study app: all data stays on this machine; core features need no network and no account. The app goes online only when you configure an AI service or check for updates.",

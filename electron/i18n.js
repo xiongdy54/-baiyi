@@ -13,11 +13,10 @@ const DEFAULT_LANG = "zh-CN";
 // ---------- 自然键词典（en / ja；zh-CN 恒等；zh-TW 见下方转换） ----------
 
 const EN = {
-  "增量阅读": "Incremental Reading",
   "打开主窗口": "Open main window",
   "制卡台": "Workbench",
   "退出": "Quit",
-  "增量阅读仍在运行": "Incremental Reading is still running",
+  "Nutation仍在运行": "Nutation is still running",
   "已收进系统托盘；点击托盘图标恢复，右键菜单可退出。":
     "Minimized to the system tray. Click the tray icon to restore; right-click for the menu to quit.",
   "EPUB 电子书": "EPUB e-books",
@@ -34,11 +33,10 @@ const EN = {
 };
 
 const JA = {
-  "增量阅读": "インクリメンタル・リーディング",
   "打开主窗口": "メインウィンドウを開く",
   "制卡台": "ワークベンチ",
   "退出": "終了",
-  "增量阅读仍在运行": "インクリメンタル・リーディングは動作中です",
+  "Nutation仍在运行": "Nutationは動作中です",
   "已收进系统托盘；点击托盘图标恢复，右键菜单可退出。":
     "システムトレイに格納しました。アイコンをクリックで復元、右クリックメニューから終了できます。",
   "EPUB 电子书": "EPUB 電子書籍",
