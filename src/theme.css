@@ -689,7 +689,7 @@ body.skin-chrome-transparent .topbar { background: transparent; }
 .skin-card {
   display: grid;
   grid-template-columns: 64px 1fr;
-  grid-template-areas: "preview name" "preview desc" "preview meta";
+  grid-template-areas: "preview name" "preview meta";
   column-gap: var(--sp-3);
   row-gap: 2px;
   align-items: center;
@@ -716,14 +716,6 @@ body.skin-chrome-transparent .topbar { background: transparent; }
 }
 .skin-card-preview i { display: block; }
 .skin-card-name { grid-area: name; font-size: var(--fs-secondary); font-weight: 500; color: var(--text-primary); }
-.skin-card-desc {
-  grid-area: desc;
-  font-size: var(--fs-meta);
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .skin-card-meta { grid-area: meta; font-size: var(--fs-meta); color: var(--grey-3); }
 
 /* ---------- 顶栏（48px，hairline 下缘） ---------- */
