@@ -181,6 +181,8 @@ const screenCapture = require("./screenCapture");
 // v49.6（D180）：软件更新——electron-updater GitHub Releases provider；IPC 四通道与事件推送在其内注册
 const updater = require("./updater");
 const tray = require("./tray");
+// v49.8（D182）：主进程界面语言（托盘/系统对话框文案）；语言真源 = settings.json app.language
+const mainI18n = require("./i18n");
 const { journalDateOf } = require("./journalTime");
 const {
   wordToMarkdown,
@@ -273,6 +275,8 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "closeToTray") value = value !== false;
   // D180：自动检查更新开关（默认开，仅显式 false 为关；与 closeToTray 同口径）
   if (scope === "app" && key === "updateAutoCheck") value = value !== false;
+  // v49.8（D182）：界面语言写侧归一（enum 四值，非法回落 zh-CN；与渲染层 normalizeLocale 同规）
+  if (scope === "app" && key === "language") value = mainI18n.normalizeLanguage(value);
   if (scope === "app" && key === "extractFaceFontFollow") value = value === true;
   if (scope === "app" && key === "extractFaceFontSize") {
     const n = Math.round(Number(value));
@@ -304,6 +308,11 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
   writeSettings(all);
+  // v49.8（D182）：界面语言落盘后同步主进程 i18n 状态并就地重建托盘菜单（零新增 IPC）
+  if (scope === "app" && key === "language") {
+    mainI18n.onLanguageWritten(value);
+    tray.rebuild();
+  }
   // v36（M8-A）：全局快捷键组改动即时生效（重注册；被占用等失败经 shortcuts:status 在设置页可见）
   if (scope === "app" && key === "globalShortcuts") {
     try {
@@ -390,7 +399,7 @@ ipcMain.handle("library:setItemAuthor", (_e, id, author) => dbModule.setLibraryI
 
 ipcMain.handle("library:pickEpub", async () => {
   const result = await dialog.showOpenDialog({
-    filters: [{ name: "EPUB 电子书", extensions: ["epub"] }],
+    filters: [{ name: mainI18n.tMain("EPUB 电子书"), extensions: ["epub"] }],
     properties: ["openFile"]
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -406,15 +415,16 @@ ipcMain.handle("library:createFromEpub", (_e, payload) => {
 });
 
 // ---------- M6-1（v26）导入格式扩展：Word（含内嵌图）/ TXT / Markdown（转换在主进程，见 importers.js） ----------
-const IMPORT_PICK_FILTERS = {
-  word: { name: "Word 文档", extensions: ["docx"] },
-  txt: { name: "文本文档", extensions: ["txt"] },
-  markdown: { name: "Markdown 文档", extensions: ["md", "markdown"] }
-};
+// v49.8（D182）：过滤器名走主进程 i18n——惰性求值（函数形式），避免模块加载期语言尚未装载
+const IMPORT_PICK_FILTERS = () => ({
+  word: { name: mainI18n.tMain("Word 文档"), extensions: ["docx"] },
+  txt: { name: mainI18n.tMain("文本文档"), extensions: ["txt"] },
+  markdown: { name: mainI18n.tMain("Markdown 文档"), extensions: ["md", "markdown"] }
+});
 
 async function pickImportFile(kind) {
   const result = await dialog.showOpenDialog({
-    filters: [IMPORT_PICK_FILTERS[kind]],
+    filters: [IMPORT_PICK_FILTERS()[kind]],
     properties: ["openFile"]
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -489,9 +499,9 @@ const IMPORT_ALL_EXTENSIONS = ["epub", "pdf", "docx", "txt", "md", "markdown", "
 ipcMain.handle("library:pickImportFiles", async () => {
   const result = await dialog.showOpenDialog({
     filters: [
-      { name: "全部支持的阅读材料", extensions: IMPORT_ALL_EXTENSIONS },
-      { name: "电子书", extensions: ["epub", "pdf", "mobi", "azw3", "azw", "fb2", "fbz", "cbz"] },
-      { name: "文档", extensions: ["docx", "txt", "md", "markdown", "html", "htm"] }
+      { name: mainI18n.tMain("全部支持的阅读材料"), extensions: IMPORT_ALL_EXTENSIONS },
+      { name: mainI18n.tMain("电子书"), extensions: ["epub", "pdf", "mobi", "azw3", "azw", "fb2", "fbz", "cbz"] },
+      { name: mainI18n.tMain("文档"), extensions: ["docx", "txt", "md", "markdown", "html", "htm"] }
     ],
     properties: ["openFile", "multiSelections"]
   });
@@ -690,7 +700,11 @@ async function runExtractRerank() {
   const cfg = getAIConfig();
   if (cfg.preset !== "local" && !cfg.apiKey) return { ok: false, usedAI: false, reason: "未配置 AI Key（保持本地因子序）" };
   const callAI = async ({ candidates }) => {
-    const reply = await mindmapChat({ system: sys, user: JSON.stringify({ candidates }), temperature: 0.1 });
+    // v49.8（D182）：重排理由随界面语言——zh-CN 保持原样零变化，其余语言在 system 侧追加指令行
+    const lang = mainI18n.getMainLang();
+    const langNames = { "zh-CN": "简体中文", "zh-TW": "繁體中文", en: "English", ja: "日本語" };
+    const sysWithLang = lang === "zh-CN" ? sys : `${sys}\n\n【输出语言】理由（reason 字段）一律用${langNames[lang] || "简体中文"}书写。`;
+    const reply = await mindmapChat({ system: sysWithLang, user: JSON.stringify({ candidates }), temperature: 0.1 });
     return reply.text;
   };
   const { items, usedAI, issues } = await rankWithAI(due, Date.now(), callAI);
@@ -853,7 +867,7 @@ ipcMain.handle("similarity:find", (_e, text, k) => findSimilarCards(String(text 
 // ---------- M1.1 图片挖空卡（D16）：选本地图 → 落盘 assets/ → 入 assets 表 → 返回 bookasset URL + dataURL ----------
 ipcMain.handle("assets:pickOcclusionImage", async (_e, ownerKey) => {
   const result = await dialog.showOpenDialog({
-    filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+    filters: [{ name: mainI18n.tMain("图片"), extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
     properties: ["openFile"]
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -935,7 +949,7 @@ ipcMain.handle("backup:create", async (_e, opts) => {
 ipcMain.handle("backup:list", () => backup.listBackups());
 ipcMain.handle("backup:pickDir", async () => {
   const result = await dialog.showOpenDialog({
-    title: "选择备份保存位置",
+    title: mainI18n.tMain("选择备份保存位置"),
     properties: ["openDirectory", "createDirectory"]
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -947,8 +961,8 @@ ipcMain.handle("backup:openDir", async () => {
 });
 ipcMain.handle("backup:pickFile", async () => {
   const result = await dialog.showOpenDialog({
-    title: "选择备份文件",
-    filters: [{ name: "备份文件", extensions: ["zip"] }],
+    title: mainI18n.tMain("选择备份文件"),
+    filters: [{ name: mainI18n.tMain("备份文件"), extensions: ["zip"] }],
     properties: ["openFile"]
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -1970,6 +1984,8 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
 }
 
 app.whenReady().then(async () => {
+  // v49.8（D182）：主进程界面语言——窗口创建前装载（托盘/对话框首帧即正确语言）
+  mainI18n.initMainLocale(SETTINGS_FILE);
   // D143（v48.98）T2：原此处的 screenCapture.warmup()（+8s 抓 1×1 缩略图）已删除——
   // desktopCapturer 首次调用 2.3~2.8s 一次性初始化会同步阻塞主进程（诊断 R2/§4 T2）；
   // 改为首次真实截图时自然承担（screenCapture.start 内记录首次耗时）。

@@ -36,6 +36,8 @@ import { SkinHost } from "./skins/SkinHost";
 import { motionClass, resolveMotion, type MotionSetting } from "./skins/runtime/motionLevel";
 import type { MotionLevel } from "./skins/types";
 import { applyAccent } from "./lib/accentVar";
+// v49.8（D182）：多语言 i18n——initLocale 启动装载 / useT 渲染订阅 / t 自然键翻译
+import { initLocale, useT, t } from "./lib/i18n";
 import { useThemePlugin } from "./lib/themePlugins";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
 import { WB_STATE_EVENT, requestWorkbenchToggle, type WorkbenchState } from "./lib/workbenchLayout";
@@ -129,6 +131,7 @@ const TOP_NAV = [
 ] as const;
 
 export default function App() {
+  const T = useT(); // v49.8（D182）：语言切换时整树重渲染（顶栏导航/标题/按钮提示全量跟随）
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [skinId, setSkinId] = useState<string>(DEFAULT_SKIN_ID);
   // v49.0 / D172：accentColor = **当前生效**的用户 accent（随皮肤切换换值）；
@@ -199,10 +202,13 @@ export default function App() {
       settingsStore.get<string>("app", "skinId", DEFAULT_SKIN_ID),
       settingsStore.get<string>("app", "accentColor", ""),
       settingsStore.get<Record<string, string>>("app", "accentBySkin", {}),
-      settingsStore.get<MotionSetting>("app", "motionLevel", "system")
+      settingsStore.get<MotionSetting>("app", "motionLevel", "system"),
+      // v49.8（D182）：界面语言——首绘前装载（setLoaded 之前），零闪烁
+      settingsStore.get<string>("app", "language", "zh-CN")
     ])
-      .then(async ([m, s, a, abs, ml]) => {
+      .then(async ([m, s, a, abs, ml, lang]) => {
         settled = true;
+        initLocale(lang);
         setTheme(m === "dark" ? "dark" : "light");
         // v49.0 / D170：首渲染前预加载已保存皮肤（避免闪一下默认皮）；加载失败回落默认
         let skin = DEFAULT_SKIN_ID;
@@ -233,7 +239,7 @@ export default function App() {
     // 8 秒兜底：IPC 若因环境异常挂起，强制进入界面（用默认设置），不再无限白屏
     const timer = window.setTimeout(() => {
       if (!settled) {
-        setLoadError("设置读取超时（IPC 无响应），已使用默认设置继续启动。");
+        setLoadError(t("设置读取超时（IPC 无响应），已使用默认设置继续启动。"));
         setLoaded(true);
       }
     }, 8000);
@@ -600,7 +606,7 @@ export default function App() {
       <div className="app-loading">
         <div className="loading-brand">
           <span className="brand-mark" />
-          <span>渐进阅读 · 正在启动…</span>
+          <span>{t("渐进阅读 · 正在启动…")}</span>
         </div>
       </div>
     );
@@ -619,7 +625,7 @@ export default function App() {
         if (item.key === "shelf") setShelfTopTick((t) => t + 1);
       }}
     >
-      {item.label}
+      {T(item.label)}
     </button>
   );
 
@@ -681,7 +687,7 @@ export default function App() {
   } else if (view.name === "queue") {
     // v48.22（D58 §6.8）：原「学习队列」列表页退役——列表职能迁入卡片浏览器，
     // 本页改为**沉浸式摘录连续处理页**（一屏一条、连续推进、正文可就地编辑）
-    topTitle = sessionMaterial || "摘录";
+    topTitle = sessionMaterial || T("摘录");
     mainContent = (
       <ExtractReviewView
         onJumpToDoc={handleJumpToDoc}
@@ -692,7 +698,7 @@ export default function App() {
     );
   } else if (view.name === "extractSession") {
     // 本书范围会话（阅读器「复习摘录」入口）：只处理该书摘录，退出回阅读
-    topTitle = sessionMaterial || "摘录";
+    topTitle = sessionMaterial || T("摘录");
     mainContent = (
       <ExtractReviewView
         onJumpToDoc={handleJumpToDoc}
@@ -700,7 +706,7 @@ export default function App() {
         scopeLimits={view.limits ?? null}
         scopeTags={view.scopeTags}
         scopeKpIds={view.scopeKpIds}
-        header={`处理摘录：《${view.title}》`}
+        header={T("处理摘录：《{title}》", { title: view.title })}
         onExit={() => changeView({ name: "shelf" })}
         onMaterialName={setSessionMaterial}
         onExtract={(text, ctx) => void handleExtract(text, undefined, ctx)}
@@ -709,10 +715,10 @@ export default function App() {
     );
   } else if (view.name === "review") {
     // v48.41（D81）：顶栏显示当前卡材料名（无材料名回落「复习」/「复习 · 牌组名」）
-    topTitle = sessionMaterial || (view.title ? `复习 · ${view.title}` : "复习");
+    topTitle = sessionMaterial || (view.title ? T("复习 · {title}", { title: view.title }) : T("复习"));
     mainContent = <ReviewView onJumpToDoc={handleJumpToDoc} bookItemIds={view.bookItemIds} scopeLimits={view.limits ?? null} scopeTags={view.scopeTags} scopeKpIds={view.scopeKpIds} onMaterialName={setSessionMaterial} />;
   } else if (view.name === "browse") {
-    topTitle = "卡片浏览";
+    topTitle = T("卡片浏览");
     mainContent = (
       <CardBrowser
         onJumpToDoc={handleJumpToDoc}
@@ -732,7 +738,7 @@ export default function App() {
     topTitle = LS.panel.title;
     mainContent = <NextStepsPanel />;
   } else if (view.name === "stats") {
-    topTitle = "统计数据";
+    topTitle = T("统计数据");
     mainContent = <Dashboard />;
   } else {
     mainContent = (
@@ -750,7 +756,7 @@ export default function App() {
       {loadError && (
         <div className="startup-warning">
           <span>{loadError}</span>
-          <button onClick={() => setLoadError(null)}>知道了</button>
+          <button onClick={() => setLoadError(null)}>{T("知道了")}</button>
         </div>
       )}
       {/* v49.0 / D170：皮肤引擎 v2 唯一挂载点——CSS 注入/移除、body 类、背景/前景层、activate 生命周期 */}
@@ -787,34 +793,34 @@ export default function App() {
             className={`topbar-wb${wb.open ? " is-on" : ""}`}
             data-testid="workbench-entry"
             aria-pressed={wb.open}
-            title="制卡台（Ctrl+K）"
+            title={T("制卡台（Ctrl+K）")}
             onClick={requestWorkbenchToggle}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="3" y="5" width="18" height="14" rx="1" />
               <path d="M7 10h10M7 14h6" />
             </svg>
-            <span>制卡台</span>
+            <span>{T("制卡台")}</span>
             {wb.busy && <i className="topbar-wb-dot" aria-hidden="true" />}
           </button>
-          <button className="icon-btn" title="设置" data-ui="button-icon" onClick={() => setSettingsOpen(true)}>
+          <button className="icon-btn" title={T("设置")} data-ui="button-icon" onClick={() => setSettingsOpen(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M18.92 10.02 22.13 9.66A10.4 10.4 0 0 1 22.13 14.34L18.92 13.98A7.2 7.2 0 0 1 17.18 17L19.09 19.61A10.4 10.4 0 0 1 15.04 21.95L13.74 18.99A7.2 7.2 0 0 1 10.26 18.99L8.96 21.95A10.4 10.4 0 0 1 4.91 19.61L6.82 17A7.2 7.2 0 0 1 5.08 13.98L1.87 14.34A10.4 10.4 0 0 1 1.87 9.66L5.08 10.02A7.2 7.2 0 0 1 6.82 7L4.91 4.39A10.4 10.4 0 0 1 8.96 2.05L10.26 5.01A7.2 7.2 0 0 1 13.74 5.01L15.04 2.05A10.4 10.4 0 0 1 19.09 4.39L17.18 7A7.2 7.2 0 0 1 18.92 10.02Z" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
           <div className="win-controls">
-            <button className="icon-btn" title="最小化" data-ui="button-icon" onClick={() => window.windowAPI?.minimize()}>
+            <button className="icon-btn" title={T("最小化")} data-ui="button-icon" onClick={() => window.windowAPI?.minimize()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M5 12h14" />
               </svg>
             </button>
-            <button className="icon-btn" title="最大化/还原" data-ui="button-icon" onClick={() => window.windowAPI?.maximize()}>
+            <button className="icon-btn" title={T("最大化/还原")} data-ui="button-icon" onClick={() => window.windowAPI?.maximize()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="5" y="5" width="14" height="14" />
               </svg>
             </button>
-            <button className="icon-btn win-close" title="关闭" data-ui="button-icon" onClick={() => window.windowAPI?.close()}>
+            <button className="icon-btn win-close" title={T("关闭")} data-ui="button-icon" onClick={() => window.windowAPI?.close()}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M18 6 6 18" />
                 <path d="m6 6 12 12" />

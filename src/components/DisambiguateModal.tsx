@@ -4,6 +4,9 @@
 // 不碰 FSRS：修改问题不重置调度；归档走 cardsApi.batch("archive")（D102 语义）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { aiConfigUsable, aiGateway } from "../lib/ai";
+// v49.8（D182）：AI 输出语言随界面语言
+import { getLocale } from "../lib/i18n";
+import { steOutputLangName } from "../lib/steProfiles";
 import { cardsApi, generateContrastDrafts, applyCardTextEdit, type CardRecord } from "../lib/cards";
 import { cardLinksApi } from "../lib/cardLinks";
 import {
@@ -268,10 +271,12 @@ export default function DisambiguateModal({
       if (!tpl?.content) throw new Error("提示词模板缺失（card-disambiguate）：请到 设置 → 提示词 检查模板是否被删除。");
       const snap = { A: a.cur, B: hasB && b ? b.cur : null };
       const input = buildDisambiguateInput({ a: sideInput(a, originA), b: hasB && b ? sideInput(b, originB) : null });
+      // v49.8（D182）：诊断说明随界面语言——zh-CN 保持原文零变化，其余语言注入指令行
+      const langLine = getLocale() === "zh-CN" ? "" : `【输出语言】${steOutputLangName()}\n\n`;
       const raw = await aiGateway.chat(
         [
           { role: "system", content: tpl.content },
-          { role: "user", content: input }
+          { role: "user", content: `${langLine}${input}` }
         ],
         undefined,
         0.2

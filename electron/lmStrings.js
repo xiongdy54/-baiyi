@@ -157,4 +157,120 @@ const en = {
   }
 };
 
-module.exports = { zh, en };
+// v49.8（D182）：日文表（键与 zh/en 完全一致）
+const ja = {
+  kindNames: {
+    "continue": "続きを読む",
+    "start": "読み始める",
+    "extract-batch": "抽出を処理",
+    "extract-to-card": "抽出からカード作成",
+    "reinforce": "強化",
+    "cross-material": "別の説明を読む",
+    "self-explain": "自己説明",
+    "practice": "練習",
+    "find-material": "素材が不足",
+    "reread": "再読",
+    "context-reel": "文脈リール",
+    "sentence-mine": "文を拾う",
+    "placement": "語彙チェック"
+  },
+  modeNames: {
+    language: "言語習得",
+    concept: "概念構築",
+    procedural: "スキル練習",
+    factual: "事実の記憶",
+    narrative: "読書体験"
+  },
+  levelNames: ["未接触", "接触済み", "学習中", "定着中", "定着"],
+  fadingSuffix: "· 忘却進行中",
+  bandNames: { easy: "易しい", optimal: "最適", intensive: "辞書が必要", hard: "難しすぎる" },
+  relationNames: {
+    prerequisite: "前提",
+    part_of: "一部",
+    related_to: "関連",
+    contrasts_with: "対比",
+    example_of: "例",
+    application_of: "応用",
+    generalization_of: "一般化",
+    specialization_of: "特殊化"
+  },
+  kpNamesSep: "、",
+  copyQuerySuffix: "入門",
+  titles: {
+    "continue": "『{material}』の続きを読む：{unitTitle}",
+    "start": "『{material}』を読み始める",
+    "extract-batch": "期限の来た抽出 {count} 件を処理",
+    "extract-to-card": "抽出からカードを作成：「{snippet}…」",
+    "reinforce": "「{kpName}」を強化",
+    "cross-material": "別の説明：『{material}』{unitTitle}",
+    "self-explain": "「{kpName}」を自分の言葉で説明する",
+    "practice-unit": "練習：『{material}』{unitTitle}",
+    "practice-card": "「{kpName}」の応用問題カードを作る",
+    "find-material": "「{prereqName}」を扱う素材を探す",
+    "reread": "再読：『{material}』{unitTitle}",
+    "context-reel": "文脈リール：{word}",
+    "sentence-mine": "文を {count} つ拾う",
+    "placement": "語彙チェック（{trackLabel}）"
+  },
+  reasons: {
+    continueConcept: "前回ここを読んだのは {daysAgo} 日前です。次の節は約 {minutes} 分で、学習中の「{kpNames}」に関わります。",
+    continueConceptPlain: "前回ここを読んだのは {daysAgo} 日前です。次の節は約 {minutes} 分です。",
+    continueLanguage: "次の節の既知語カバー率は約 {coveragePct}%（{bandLabel}）。学習中の語が {learningCount} 個含まれ、約 {minutes} 分です。",
+    continueOther: "前回ここを読んだのは {daysAgo} 日前。次の節は約 {minutes} 分です。",
+    startConcept: "最初の節は約 {minutes} 分です。",
+    startLanguage: "冒頭の節の既知語カバー率は約 {coveragePct}%（{bandLabel}）。",
+    "extract-batch": "{count} 件の抽出が期限を迎え、最古のものは {maxOverdueDays} 日待機しています。最初：「{topSnippet}…」",
+    "extract-to-card": "この抽出は {processCount} 回読みましたが、まだカードがありません。",
+    reinforceFading: "「{kpName}」はかつて定着していましたが、平均想起率が {meanRPct}% まで下がっています。原文を読み返しましょう。",
+    reinforceStuck: "「{kpName}」のカードは最近繰り返し忘れています（平均想起率 {meanRPct}%）。",
+    "cross-material": "「{kpName}」を学習中です。『{material}』の「{unitTitle}」でも扱われています。別の角度から見てみましょう。",
+    "self-explain": "「{kpName}」は定着中です。資料を見ずに「{relatedName}」との関係を説明してみましょう。",
+    "practice-unit": "これは練習の節で、学習中の知識点に関わります。",
+    "practice-card": "「{kpName}」にはまだ応用問題カードがありません。暗唱より解けることが大切です。",
+    "find-material": "「{kpName}」を学ぶには先に「{prereqName}」の理解が必要ですが、書庫にそれを扱う素材がありません。",
+    reread: "この節は {passCount} 回読み、学習中の語が {learningCount} 個あります。再読のタイミングです。",
+    "context-reel": "「{word}」はあなたの素材の中の {sentenceCount} 文に出てきます。続けて読んでみましょう。",
+    "sentence-mine": "最近読んだ内容に、あと 1 語だけの文が {count} あります。",
+    placement: "まず {minutes} 分で語彙量を估算すると、推奨の精度が上がります。"
+  }
+};
+
+// v49.8（D182）：zh-TW＝zh 表の深转换（opencc cn→twp + 领域词覆盖，懒加载一次）
+let twTable = null;
+function zhTwTable() {
+  if (twTable) return twTable;
+  const OV = [["材料导图", "材料心智圖"], ["导图", "心智圖"], ["制卡", "製卡"], ["摘录", "摘錄"]];
+  try {
+    const OpenCC = require("opencc-js");
+    const conv = OpenCC.Converter({ from: "cn", to: "twp" });
+    const conv1 = (s) => {
+      let o = s;
+      for (const [k, v] of OV) o = o.split(k).join(v);
+      try { return conv(o); } catch { return o; }
+    };
+    const deep = (x) => {
+      if (typeof x === "string") return conv1(x);
+      if (Array.isArray(x)) return x.map(deep);
+      if (x && typeof x === "object") {
+        const o = {};
+        for (const k of Object.keys(x)) o[k] = deep(x[k]);
+        return o;
+      }
+      return x;
+    };
+    twTable = deep(zh);
+  } catch {
+    twTable = zh; // opencc 不可用回落简体（推荐文字降级，不阻塞）
+  }
+  return twTable;
+}
+
+/** 界面语言 → 字符串表（zh-CN/zh 恒 zh；en/ja 查表；zh-TW 深转换；未知回落 zh） */
+function pick(lang) {
+  if (lang === "en") return en;
+  if (lang === "ja") return ja;
+  if (lang === "zh-TW") return zhTwTable();
+  return zh;
+}
+
+module.exports = { zh, en, ja, pick };

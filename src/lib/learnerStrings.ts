@@ -1,11 +1,13 @@
-// v48.80（D124 / 设计稿 §11.9）：学习者模型渲染层界面文字表（{ zh, en }，两套键必须完全相同）。
+// v48.80（D124 / 设计稿 §11.9）：学习者模型渲染层界面文字表（{ zh, en, ja }，各语言键必须完全相同）。
 // 代码中不得出现硬编码的用户可见文字——面板 / 对话框 / 设置子块 / 知识点页等级标签只从这里取。
-// learnerLocale() 是界面语言唯一取值点：v1 恒 "zh"，全局 i18n 落地时只改这一个函数。
+// v49.8（D182）：learnerLocale() 接全局 i18n（返回完整 Locale）；zh-TW＝zh 表深转换（twDeep），ja 查表。
+
+import { getLocale, twDeep, type Locale } from "./i18n";
 
 export type LearnerStrings = typeof zh;
 
-export function learnerLocale(): "zh" | "en" {
-  return "zh";
+export function learnerLocale(): Locale {
+  return getLocale();
 }
 
 const zh = {
@@ -359,9 +361,189 @@ const en: typeof zh = {
   }
 };
 
+// v49.8（D182）：日文表（键与 zh/en 完全一致）
+const ja: typeof zh = {
+  panel: {
+    title: "次のステップ",
+    tab: "おすすめ",
+    headerMeta: (generatedAt: string, count: number) => `${generatedAt} · ${count} 件の候補から選出`,
+    refresh: "更新",
+    tracks: "学習トラック…",
+    countSuffix: "件",
+    nativeConfirm: (langs: string) => `${langs} はあなたの母語ですか？`,
+    nativeConfirmYes: "はい",
+    nativeConfirmChange: "変更…",
+    nativeEmpty: "先に母語を設定すると、どの素材が外国語か判定できます。",
+    nativeEmptySet: "設定…",
+    usingProposals: "これらのおすすめは、書庫から推定した学習トラックに基づきます。",
+    confirmTracks: "トラックを確定",
+    indexing: (phase: string, done: number, total: number) => `学習インデックスを作成中…（${phase} ${done}/${total}）`,
+    empty: "まだおすすめはありません。書庫に素材を追加するか、閲読中に抽出・カード作成してみてください。",
+    retry: "再試行",
+    menuSnooze: "後で",
+    menuDismiss: "やめておく",
+    menuNotInterested: "興味がない",
+    menuTooHard: "難しすぎる",
+    menuTooEasy: "易しすぎる",
+    primaryButton: {
+      continue: "続ける",
+      start: "始める",
+      "extract-batch": "処理する",
+      "extract-to-card": "原文を開く",
+      "cross-material": "見てみる",
+      "self-explain": "書いてみる",
+      practice: "練習する",
+      "find-material": "検索語をコピー",
+      reread: "再読",
+      "context-reel": "読んでみる",
+      "sentence-mine": "文を選ぶ",
+      placement: "始める"
+    },
+    reinforceReview: "復習",
+    reinforceReread: "原文を再読",
+    copied: "検索語をコピーしました"
+  },
+  kinds: {
+    continue: "続きを読む",
+    start: "読み始める",
+    "extract-batch": "抽出を処理",
+    "extract-to-card": "抽出からカード",
+    reinforce: "強化",
+    "cross-material": "別の説明",
+    "self-explain": "自己説明",
+    practice: "練習",
+    "find-material": "素材が不足",
+    reread: "再読",
+    "context-reel": "文脈リール",
+    "sentence-mine": "文拾い",
+    placement: "語彙チェック"
+  },
+  tracks: {
+    dialogTitle: "学習トラック",
+    myTracks: "マイトラック",
+    modeLabel: "処理方式",
+    modeNames: {
+      language: "言語習得",
+      concept: "概念構築",
+      procedural: "スキル練習",
+      factual: "事実の記憶",
+      narrative: "読書体験"
+    },
+    statusLabel: "状態",
+    statusActive: "進行中",
+    statusPaused: "一時停止",
+    pinnedLabel: "ピン留め",
+    priorityLabel: "優先度",
+    delete: "削除",
+    addTrack: "トラックを作成",
+    nameLabel: "名前",
+    langLabel: "言語",
+    udcLabel: "分野",
+    modeLangUnavailable: "言語情報なし",
+    proposals: "トラックの候補",
+    proposalsEmptyHint: "書籍の言語を設定するか、閲読中にカードを作ると、書庫からトラック候補が表示されます。",
+    proposalTag: "候補",
+    adopt: "採用",
+    tracksEmptyHint: "まだトラックがありません：「トラックの候補」から採用するか、新規作成してください。",
+    done: "完了",
+    unassigned: "未分類の素材",
+    assignTo: "振り分け…",
+    remove: "外す",
+    unknownLangHint: "言語未設定 — 書籍の属性で設定してください",
+    nativeLangs: "私の母語",
+    nativeLangsHint: "どの言語を外国語と見なすかの判定に使われます。複数選択可。",
+    nativePlaceholder: "母語を選択…",
+    otherLangPlaceholder: "その他の言語コード",
+    add: "追加",
+    rebuild: "学習インデックスを再構築",
+    rebuilding: "再構築中…",
+    saved: "保存しました",
+    confirmDelete: "このトラックを削除しますか？",
+    materialsCount: (n: number) => `素材 ${n} 件`,
+    expandMaterials: "所属素材",
+    trackNamePlaceholder: "トラック名"
+  },
+  settings: {
+    title: "学習者知識モデル",
+    enabledLabel: "学習者知識モデルを有効化",
+    enabledInfo:
+      "閲読・抽出・カード作成・復習の記録から習熟度を推定し、統計ページに「次のステップ」を提示します。すべてローカルで計算され、ネットワークも AI も使いません。オフにすると計算と記録を停止します。既存データは保持され、再度オンにすると復帰します。",
+    on: "オン",
+    off: "オフ",
+    nativeLangs: "私の母語",
+    recCount: "おすすめの件数",
+    manageTracks: "学習トラックを管理…",
+    rebuild: "学習インデックスを再構築",
+    frontierReady: "知識ポイントの準備度に接続済み（学習推奨の更新後に反映）",
+    frontierOff: "知識ポイントの準備度は無効（学習者知識モデルがオフ）"
+  },
+  selfExplain: {
+    title: "自己説明",
+    prompt: (kpName: string, relatedName: string, relationLabel: string) =>
+      `資料を見ずに「${kpName}」を自分の言葉で説明し、「${relatedName}」との関係（${relationLabel}）を述べてください。書いた後、原文と照らし合わせましょう。`,
+    inputPlaceholder: "自分の言葉で書いてみてください…",
+    openSource: "原文と照合",
+    ratingClear: "説明できた",
+    ratingPartial: "部分的に",
+    ratingStuck: "詰まった",
+    save: "保存",
+    saved: "記録しました。次の復習で会いましょう。"
+  },
+  unitReader: {
+    title: "再読",
+    markDone: "読み終えた",
+    openInReader: "リーダーで開く",
+    passes: (n: number) => `${n} 回読了`
+  },
+  contextReel: {
+    title: "文脈リール",
+    allClear: "すべて理解した",
+    stillUnclear: "まだよく分からない",
+    openSource: "原文",
+    empty: "この語を含む文はまだ見つかっていません。"
+  },
+  sentenceMine: {
+    title: "文拾い",
+    openToCard: "原文を開いてカード作成",
+    markKnown: "この語は知っている",
+    markUnknown: "この語は知らない",
+    skip: "スキップ",
+    empty: "最近読んだ内容に、あと 1 語だけの文はまだありません。"
+  },
+  placement: {
+    title: "語彙チェック",
+    intro: "知っている語にチェックして語彙量を推定します。約 2 分。",
+    bandLabel: (from: number, to: number) => `第 ${from}–${to} 高頻度語`,
+    knowAll: "すべて知っている",
+    knowNone: "すべて知らない",
+    submit: "送信",
+    empty: "語彙インデックスが未作成です。先に素材を読みましょう。"
+  },
+  km: {
+    levelNames: ["未接触", "接触済み", "学習中", "定着中", "定着"],
+    fadingSuffix: "· 忘却進行中",
+    metricsLine: (n: number, meanRPct: number, stablePct: number, hasDeep: boolean) =>
+      `カード ${n} 枚を復習済み、平均想起率 ${meanRPct}%、${stablePct}% が安定；応用問題・自己説明${hasDeep ? "あり" : "なし"}`
+  },
+  relations: {
+    prerequisite: "前提",
+    part_of: "一部",
+    related_to: "関連",
+    contrasts_with: "対比",
+    example_of: "例",
+    application_of: "応用",
+    generalization_of: "一般化",
+    specialization_of: "特殊化"
+  }
+};
+
 const STRINGS: Record<"zh" | "en", LearnerStrings> = { zh, en };
 
-/** 界面文字唯一取值点：learnerLocale() 决定语言 */
+/** 界面文字唯一取值点：全局 i18n locale 决定语言（zh-TW＝zh 深转换、ja 查表、缺译回落 zh/en） */
 export function learnerStrings(): LearnerStrings {
-  return STRINGS[learnerLocale()];
+  const loc = learnerLocale();
+  if (loc === "en") return en;
+  if (loc === "ja") return ja;
+  if (loc === "zh-TW") return twDeep(zh);
+  return zh;
 }

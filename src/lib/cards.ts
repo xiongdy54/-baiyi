@@ -9,8 +9,10 @@ export { applyCardTextEdit } from "./disambiguateUi";
 import { autoQueueKpAiProcessing } from "./kpExtract";
 import { clampPct, normalizeShape, occlusionShapes, type OcclusionShape } from "./occlusion";
 import { settingsStore } from "./settings";
+// v49.8（D182）：AI 输出语言随界面语言（general explain 注入指令行；zh-CN 零变化）
+import { getLocale } from "./i18n";
 // v48.51（D91）：简明解读的 CLP pack 注入（回退链 + 格式化）
-import { formatProfile, resolveProfile, STE_OUTPUT_LANG } from "./steProfiles";
+import { formatProfile, resolveProfile, steOutputLang, steOutputLangName } from "./steProfiles";
 // v48.60（D101）：标签规范常量（L17 与 tags.ts 同源，禁第二份阈值）
 import { TAG_MAX_DEPTH, TAG_MAX_LEN, TAG_MAX_PER_CARD, type TagVocabEntry } from "./tags";
 
@@ -774,7 +776,9 @@ export const cardGenerator: {
       if (!tpl) throw new Error("提示词模板缺失（reader-explain-ste）");
       const matLang = String(opts.matLang ?? "").trim();
       const analysis = resolveProfile(matLang);
-      const output = resolveProfile(STE_OUTPUT_LANG);
+      // v49.8（D182）：输出语言随界面语言（zh-CN 行为与原 STE_OUTPUT_LANG 恒等）
+      const outLang = steOutputLang();
+      const output = resolveProfile(outLang);
       const sys = tpl.content
         .replace("{{ANALYSIS_PROFILE}}", formatProfile(analysis))
         .replace("{{OUTPUT_PROFILE}}", formatProfile(output));
@@ -782,7 +786,7 @@ export const cardGenerator: {
         `【选中文本】\n${sourceText}`,
         context ? `【上下文】${context}` : "",
         `【材料语言】${matLang || "未标注——请自检材料语言并在 <!--ste:matLang=…--> 标记中报告"}`,
-        `【解读语言】${STE_OUTPUT_LANG}（简体中文）`,
+        `【解读语言】${outLang}（${steOutputLangName(outLang)}）`,
         // v48.74（D118 追加）：追问必须送达——此前 ste 分支丢掉 question，四个追问按钮与
         // 初次解读发出的请求逐字相同 ⇒ 回复几乎一样（模板侧另有「追问直答」条款配合）
         question ? `【用户追问】${question}` : ""
@@ -804,7 +808,9 @@ export const cardGenerator: {
     }
     const tpl = await window.promptsAPI?.get("reader-explain");
     const sys = tpl?.content || "你是阅读助手。";
-    const user = `【选中文本】\n${sourceText}\n\n${context ? `【上下文】${context}` : ""}\n\n${question ? `【用户追问】${question}` : "请解释这段文字。"}`;
+    // v49.8（D182）：输出语言随界面语言——zh-CN 保持原文零变化（测试基线），其余语言注入指令行
+    const langLine = getLocale() === "zh-CN" ? "" : `【输出语言】${steOutputLangName()}\n\n`;
+    const user = `${langLine}【选中文本】\n${sourceText}\n\n${context ? `【上下文】${context}` : ""}\n\n${question ? `【用户追问】${question}` : "请解释这段文字。"}`;
     return aiGateway.chat(
       [
         { role: "system", content: sys },

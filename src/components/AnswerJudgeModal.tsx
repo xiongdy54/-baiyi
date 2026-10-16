@@ -7,6 +7,9 @@ import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import { aiGateway } from "../lib/ai";
+// v49.8（D182）：AI 输出语言随界面语言
+import { getLocale } from "../lib/i18n";
+import { steOutputLangName } from "../lib/steProfiles";
 import type { CardRecord } from "../lib/cards";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconAlert } from "./icons";
@@ -48,12 +51,14 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
     setResult(null);
     try {
       const tpl = await window.promptsAPI?.get("review-answer-judge");
+      // v49.8（D182）：判答说明随界面语言——zh-CN 保持原文零变化，其余语言注入指令行
+      const langLine = getLocale() === "zh-CN" ? "" : `【输出语言】${steOutputLangName()}\n\n`;
       const raw = await aiGateway.chat(
         [
           { role: "system", content: tpl?.content || FALLBACK_PROMPT },
           {
             role: "user",
-            content: `【题面】\n${front}\n\n【标准答案】\n${card.backMarkdown}\n\n【学生答案】\n${userAnswer}`
+            content: `${langLine}【题面】\n${front}\n\n【标准答案】\n${card.backMarkdown}\n\n【学生答案】\n${userAnswer}`
           }
         ],
         undefined,

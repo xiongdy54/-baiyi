@@ -1147,7 +1147,8 @@ function computeAutoDone(snapshot, view) {
 // ---------- 主入口 recommend(snapshot, opts) ----------
 
 function recommend(snapshot) {
-  const strings = lmStrings[snapshot.settings?.locale === "en" ? "en" : "zh"];
+  // v49.8（D182）：locale 由 learnerRefresh.learnerLocale() 下发（zh-CN/zh-TW/en/ja）；pick 归一查表
+  const strings = lmStrings.pick(snapshot.settings?.locale);
   const view = buildView(snapshot);
   const dbTracks = (snapshot.tracks || []).map((t) => ({ ...t }));
   const usingProposals = dbTracks.length === 0;

@@ -69,9 +69,14 @@ function learnerSettings() {
   return { enabled, nativeLangs, nativeConfirmed: l.nativeConfirmed === true, recCount, effectiveNativeLangs, locale: learnerLocale() };
 }
 
-// 界面语言（设计稿 §11.9-2）：v1 恒 "zh"，全局 i18n 落地时只改这一个函数
+// 界面语言（设计稿 §11.9-2）：v49.8（D182）起随 app.language（主进程 i18n 状态，settings:set 写路径同步）；
+// lmStrings.pick() 消费该值（zh-CN/zh→zh、en/ja 查表、zh-TW 深转换、未知回落 zh）
 function learnerLocale() {
-  return "zh";
+  try {
+    return require("./i18n").getMainLang();
+  } catch {
+    return "zh-CN";
+  }
 }
 
 // ---------- 单飞与状态 ----------
