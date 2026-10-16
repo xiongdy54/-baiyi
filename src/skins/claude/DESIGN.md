@@ -5,10 +5,10 @@
 ## 允许
 
 - 暖奶油纸面（浅 #f5f5f3 / 深 #0b0b0a）、纯白卡片与弹层、柔和双层阴影（浅 .05–.08 / 深 .30–.50）、hover 阴影抬升（只变阴影不位移）。
-- 圆角阶梯 4 / 8 / 10 / 12 / 16 / 999px（组件级 Token 承载；嵌套圆角「内 = 外 − 内边距」）。**全应用浮层/菜单圆角经 `--radius-popover`、行级部件经 `--radius-xs` 全局生效（D175 起基线消费，皮肤零结构规则）**。
+- 圆角阶梯 4 / 8 / 10 / 12 / 16 / 999px（组件级 Token 承载；嵌套圆角「内 = 外 − 内边距」）。**全应用浮层/菜单圆角经 `--radius-popover`、行级部件经 `--radius-xs` 全局生效（D175 起基线消费，皮肤零结构规则）**。**输入件 12px（v49.11 / D184）**：`--radius-input` 8→12px 对齐 CDS 2.0「输入框圆角 12px」档（用户点名采用），10 处消费面随 Token 全局生效；其余档位对齐 CDS（按钮 8=rounded-lg、卡片 10=rounded-panel、浮层 12、对话框 16、胶囊 999）。
 - 陶土强调色双角色：`--accent` 浅档 #ae5630（白字 5.03:1）/ 深档 #d97757 配深字（6.34:1）；`--skin-brand: #d97757` 纯装饰（选区底、进度条、品牌点、光晕）。
 - **选中强调统一（D175）**：全应用「被选中」＝ `--accent-soft` 软底 + accent 字（顶栏「制卡台」is-on 同款语言）+ `--radius-xs/control` 圆角；基线的下划线（`::after` / inset box-shadow / border-bottom）与左缘条（border-left）两类瑞士遗留指示在 skin 层全部退役。**填充语言的几何随行（D175-b/c）**：下划线让位用的非对称内衬（`.seg-tabs` 上 0/下 8px）在皮肤层改对称；**圆角选单满 bleed**——`.dd-menu`/`.md-tb-menu`/`.bar-pop` 块向内衬归零 + `overflow:hidden`，行底由容器圆角统一裁切，首/末行选中不留白边；**框式分段控件退役**——`.shelf-seg` 容器框与分隔线在皮肤层去框（软底填充下「框套框」），affordance 交给选中底 + hover。
-- CDS 动效档：expo 曲线（cubic-bezier(0.16,1,0.3,1)）、按压缩放 `--press-scale: 0.98`、弹层弹簧（linear() 四预设）、视图切换淡入上浮（覆盖 D120 VT 动画）——**全部在 `body.motion-full` 作用域下**。**CDS 2.0 时长档对齐（v49.10 / D183，权威＝Skill tokens.md §7）**：按压 60ms（利落捕捉曲线不变）、视图切换 450ms（页面级大转场档，只动 skin 层 VT 规则、`--dur-view` Token 不动）；其余档位已一致——卡片悬停阴影 200ms、弹层弹簧 SNAPPY、悬停变色 150ms、退出 120ms。2.0 手册其余描述（输入框 12px、0.5px 发丝边、color-mix()）不采用——Skill 组件与 preset 未改。
+- CDS 动效档：expo 曲线（cubic-bezier(0.16,1,0.3,1)）、按压缩放 `--press-scale: 0.98`、弹层弹簧（linear() 四预设）、视图切换淡入上浮（覆盖 D120 VT 动画）——**全部在 `body.motion-full` 作用域下**。**CDS 2.0 时长档对齐（v49.10 / D183，权威＝Skill tokens.md §7）**：按压 60ms（利落捕捉曲线不变）、视图切换 450ms（页面级大转场档，只动 skin 层 VT 规则、`--dur-view` Token 不动）；其余档位已一致——卡片悬停阴影 200ms、弹层弹簧 SNAPPY、悬停变色 150ms、退出 120ms。2.0 手册其余描述（0.5px 发丝边）不采用——Skill 组件与 preset 未改；输入框 12px 已由 D184 用户点名采用；color-mix() 皮肤已用（品牌软底/焦点环）。
 - 焦点环走 outline（2px / 85% accent / 偏移 2px，跟随圆角）。
 
 ## 不允许
