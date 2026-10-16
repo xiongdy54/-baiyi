@@ -121,7 +121,9 @@ const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: s
       { id: "updates", label: "软件更新" },
       { id: "shortcuts", label: "快捷键" },
       { id: "widgets", label: "统计仪表盘" },
-      { id: "lab", label: "实验功能" }
+      { id: "lab", label: "实验功能" },
+      // v49.7（D181）：开源许可与应用信息（纯信息节，零设置键）
+      { id: "about", label: "关于" }
     ]
   }
 ];
@@ -2019,6 +2021,80 @@ function UpdateSection() {
   );
 }
 
+// ---------- 关于（v49.7 / D181）：应用信息 + 开源许可清单 ----------
+// 纯信息节：零设置键、零交互控件。许可清单为静态数据手工维护，口径＝运行时直接依赖
+// （不列构建期工具与测试依赖）；许可类型以 node_modules 各包 package.json 实测为准；
+// 不写版本号——版本随升级漂移，清单只固化「用了什么、什么许可」。版本号复用
+// update:status 快照（currentVersion，真源 package.json version，D180），不新增 IPC。
+const OSS_ITEMS: Array<{ name: string; license: string; note?: string }> = [
+  { name: "Electron", license: "MIT", note: "应用框架（含 Chromium / Node.js）" },
+  { name: "React · React DOM", license: "MIT", note: "界面框架" },
+  { name: "better-sqlite3", license: "MIT", note: "SQLite 存储" },
+  { name: "sql.js", license: "MIT", note: "SQLite（WASM）" },
+  { name: "ts-fsrs", license: "MIT", note: "FSRS 调度内核" },
+  { name: "fsrs-rs-nodejs", license: "MIT", note: "FSRS 参数优化（Rust）" },
+  { name: "pdfjs-dist", license: "Apache-2.0", note: "PDF 引擎" },
+  { name: "epub-ts", license: "BSD-2-Clause", note: "EPUB 解析（@likecoin/epub-ts）" },
+  { name: "mammoth", license: "BSD-2-Clause", note: "Word 导入" },
+  { name: "Readability", license: "Apache-2.0", note: "正文提取（@mozilla/readability）" },
+  { name: "Milkdown", license: "MIT", note: "Markdown 编辑器 · 基于 ProseMirror（@milkdown/kit · @milkdown/react）" },
+  { name: "react-markdown", license: "MIT", note: "Markdown 渲染（remark / rehype / unified 管线）" },
+  { name: "markdown-it", license: "MIT", note: "Markdown 解析" },
+  { name: "turndown", license: "MIT", note: "HTML → Markdown" },
+  { name: "micromark-extension-mark", license: "ISC" },
+  { name: "github-slugger", license: "ISC" },
+  { name: "KaTeX", license: "MIT", note: "数学公式渲染" },
+  { name: "DOMPurify", license: "MPL-2.0 / Apache-2.0", note: "HTML 净化" },
+  { name: "JSZip", license: "MIT / GPL-3.0", note: "ZIP 处理" },
+  { name: "electron-updater", license: "MIT", note: "检查更新" }
+];
+
+function AboutSection() {
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    const api = updateAPI();
+    void api
+      .status()
+      .then((s) => {
+        if (alive) setVersion(s.currentVersion);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  return (
+    <SettingsSection id="sec-about" title="关于">
+      <p className="form-hint">
+        增量阅读{version ? ` · 版本 v${version}` : ""}
+        <br />
+        本地优先的桌面渐进阅读学习软件：数据全部保存在本机；核心功能零网络、零账号，
+        仅在显式配置 AI 服务或检查更新时联网。
+      </p>
+      <h4>开源许可</h4>
+      <p className="form-hint">本应用构建于以下开源项目之上，感谢原作者与贡献者。</p>
+      <ul className="oss-list">
+        {OSS_ITEMS.map((it) => (
+          <li key={it.name}>
+            {/* 主行（名称 + 许可证两端对齐）+ meta 说明行——书架图注/批注条目同款两行语言 */}
+            <span className="oss-head">
+              <span className="oss-name">{it.name}</span>
+              <span className="oss-lic">{it.license}</span>
+            </span>
+            {it.note && <span className="oss-note">{it.note}</span>}
+          </li>
+        ))}
+      </ul>
+      <p className="form-hint oss-tail">
+        清单覆盖运行时直接依赖；各组件的完整许可证文本与版权声明，以其官方发布页为准。
+      </p>
+    </SettingsSection>
+  );
+}
+
 function BackupSection() {
   const [info, setInfo] = useState<BackupInfo | null>(null);
   const [list, setList] = useState<{ backupDir: string; backups: BackupEntry[] } | null>(null);
@@ -3224,6 +3300,9 @@ export default function SettingsPanel({
                 <LearnerBlock />
               </div>
             </SettingsSection>
+
+            {/* v49.7（D181）：关于——纯信息节（应用信息 + 开源许可），左栏按钮 15 → 16 */}
+            <AboutSection />
           </div>
         </div>
       </div>
