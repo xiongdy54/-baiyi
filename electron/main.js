@@ -178,6 +178,8 @@ const workbenchWindow = require("./workbenchWindow");
 // 不触碰插件目录，§4.7），对 <userData>/plugins/ 零写入（§4.6）；IPC 四通道 + plugins:changed 广播在其内注册
 const pluginHost = require("./pluginHost");
 const screenCapture = require("./screenCapture");
+// v49.6（D180）：软件更新——electron-updater GitHub Releases provider；IPC 四通道与事件推送在其内注册
+const updater = require("./updater");
 const tray = require("./tray");
 const { journalDateOf } = require("./journalTime");
 const {
@@ -269,6 +271,8 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   // D123：制卡台放置位置（right/bottom，非法回落 right）与「关闭窗口收进托盘」（仅严格 false 为关）
   if (scope === "app" && key === "workbenchPlacement") value = value === "bottom" ? "bottom" : "right";
   if (scope === "app" && key === "closeToTray") value = value !== false;
+  // D180：自动检查更新开关（默认开，仅显式 false 为关；与 closeToTray 同口径）
+  if (scope === "app" && key === "updateAutoCheck") value = value !== false;
   if (scope === "app" && key === "extractFaceFontFollow") value = value === true;
   if (scope === "app" && key === "extractFaceFontSize") {
     const n = Math.round(Number(value));
@@ -2084,6 +2088,19 @@ app.whenReady().then(async () => {
     pluginHost.init({ readSettings, writeSettings });
   } catch (err) {
     console.error("[pluginHost] 初始化失败：", err);
+  }
+  // v49.6（D180）：软件更新——update:* 四通道 + 启动 15s 延迟自动检查（仅打包版 GitHub 渠道，
+  // Store/dev/e2e 与开关关闭均跳过；联网面与例外登记见 §7.2）。事件推送不聚焦窗口（托盘隐藏态照投）。
+  try {
+    updater.init({
+      readSettings,
+      log: appLog,
+      sendToMain: (channel, payload) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+      }
+    });
+  } catch (err) {
+    console.error("[updater] 初始化失败：", err);
   }
   // M2：每日首次启动自动滚动备份（设置可关；失败不阻塞启动）
   // D143（v48.98，T1）：不再在 whenReady 链上 await——原实现在此同步等待 40~90s 备份全链

@@ -73,6 +73,7 @@ const DOC_KEYS = [
   "app.selectionBarStyle", // D122（选区浮条动作呈现 icon/text；取代 D95 §K.4 readerActionsFloat）
   "app.cardFaceExtras", // §7.4 v48.61 / D104（卡面信息密度三开关：背面辅助字段助记/例子/来源）
   "app.workbenchPlacement", "app.closeToTray", // §7.4 v48.79 / D123（制卡台放置位置 / 关闭收进托盘）
+  "app.updateAutoCheck", // §7.2 / D180（自动检查更新开关：默认开，仅严格 false 为关；消费者 electron/updater.js + 设置页）
   "app.tagsEnabled", // §7.4 v48.63 / D107（标签功能总开关：默认开，仅严格 false 为关；隐藏入口不动数据）
   "app.growthFeedback", // §7.4 v48.85 / D129（成长反馈总开关：对象 {enabled} 默认开，仅严格 false 为关；关闭=零渲染零计算）
   "app.legacyBackfillV1", // §9.4 一次性版本化回填完成标记（时间戳；挂载点 persist() 成功后由 legacyBackfill.js mark() 写入，对象键 = MARKER_KEY 逐字面量）
@@ -271,6 +272,7 @@ app
         ["app", "selectionBarStyle", "text"],             // D122 选区浮条动作呈现（默认 "icon"）
         ["app", "workbenchPlacement", "bottom"],          // D123 制卡台放置位置（默认 "right"）
         ["app", "closeToTray", false],                    // D123 关闭收进托盘（默认 true）
+        ["app", "updateAutoCheck", false],                // D180 自动检查更新（默认 true；非默认值才验得出往返）
         ["app", "extractFaceFontFollow", false],          // v48.54 / D95 摘录卡字号跟随（默认 true）
         ["app", "extractFaceFontSize", 22],               // v48.54 / D95 独立字号（默认 17；文件层往返原值）
         ["app", "extractFaceFontFamily", " Georgia, serif "], // v48.54 / D95 独立字体（文件层往返字节一致；trim 归一在读写两侧）
