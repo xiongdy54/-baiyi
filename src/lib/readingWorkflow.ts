@@ -4,6 +4,7 @@
 // 切换＝换 Provider + 投影目标引擎的值到公共列（无损判据见指南 §6.8-4）。
 // 渲染层只依赖本接口，不得感知具体引擎的内部状态。
 import { settingsStore } from "./settings";
+import { t } from "./i18n";
 
 export type ExtractEngine = "sm19-default" | "ai-next-extract";
 export const EXTRACT_ENGINES: ExtractEngine[] = ["sm19-default", "ai-next-extract"];
@@ -206,7 +207,7 @@ function call<K extends keyof NonNullable<Window["workflowAPI"]>>(
   ...args: Parameters<NonNullable<Window["workflowAPI"]>[K]>
 ): Promise<unknown> {
   const api = window.workflowAPI;
-  if (!api) throw new Error("API 不可用");
+  if (!api) throw new Error(t("API 不可用"));
   return (api[method] as (...a: unknown[]) => Promise<unknown>)(...args);
 }
 
@@ -317,7 +318,7 @@ export async function getLimitsUsage(now?: number): Promise<ExtractDailyUsage | 
 
 /** 手动跑一次 AI 重排（E1；实验引擎生效时才有意义；无 Key 会如实返回 reason） */
 export async function rerankExtractsNow(): Promise<{ ok: boolean; usedAI?: boolean; count?: number; reason?: string }> {
-  if (!window.workflowAPI?.rerankNow) return { ok: false, reason: "API 不可用" };
+  if (!window.workflowAPI?.rerankNow) return { ok: false, reason: t("API 不可用") };
   return (await window.workflowAPI.rerankNow()) as { ok: boolean; usedAI?: boolean; count?: number; reason?: string };
 }
 
@@ -333,7 +334,7 @@ export interface UndoInfo {
 /** 跨类撤销（§6.8-7）：Ctrl+Z 撤销最近一次操作——卡片评分或摘录操作由 journal 决定 */
 export const undoApi = {
   async last(): Promise<{ ok: boolean; kind?: string; reason?: string; count?: number; opType?: string | null }> {
-    if (!window.undoAPI) return { ok: false, reason: "API 不可用" };
+    if (!window.undoAPI) return { ok: false, reason: t("API 不可用") };
     return (await window.undoAPI.last()) as { ok: boolean; kind?: string; reason?: string };
   },
   async info(): Promise<UndoInfo> {

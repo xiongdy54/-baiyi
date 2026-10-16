@@ -17,6 +17,7 @@ import {
 } from "../../lib/occlusion";
 import type { OcclusionRegion } from "../../lib/cards";
 import { settle } from "../../lib/press";
+import { useT } from "../../lib/i18n";
 
 type Tool = "rect" | "ellipse" | "polygon";
 
@@ -27,7 +28,8 @@ const TOOLS: { id: Tool; label: string; title: string }[] = [
 ];
 
 const CLOSE_HIT_PX = 12;
-const DEFAULT_FRONT = "图中遮挡区域对应的是什么？";
+// v49.8（D182）：默认题面为运行期翻译（键 = zh 原文）
+const DEFAULT_FRONT_KEY = "图中遮挡区域对应的是什么？";
 
 /** 编辑态单块遮罩：形状 + 答案 label + 稳定 id（keyed 渲染/选中；落库前按序重排 ord） */
 export interface EditorMask extends OcclusionShape {
@@ -161,6 +163,7 @@ function ShapeNode({ shape, className, style }: { shape: OcclusionShape; classNa
 }
 
 export default function OcclusionEditor({ image, onAISuggest, origin, onClose, onSubmit }: Props) {
+  const T = useT();
   const [tool, setTool] = useState<Tool>("rect");
   const [imgUrl, setImgUrl] = useState(image.dataUrl); // 当前图（「裁剪图片」应用后替换为裁剪图）
   const [masks, setMasks] = useState<EditorMask[]>([]);
@@ -707,13 +710,13 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
       className={`occlusion-editor-layer${entered ? " occlusion-editor-in" : ""}`}
       role="dialog"
       aria-modal="true"
-      aria-label="图片挖空编辑器"
+      aria-label={T("图片挖空编辑器")}
       data-testid="occlusion-editor"
     >
       <div className="occlusion-editor-main">
         {/* R1：单行紧凑工具条——随主区在流内定位（与右栏无覆盖可能），无提示文案 */}
-        <div className="occlusion-editor-toolbar" role="toolbar" aria-label="挖空编辑工具">
-          <div className={`occl-seg${cropMode ? " cropping" : ""}`} role="tablist" aria-label="遮罩形状" ref={segRef}>
+        <div className="occlusion-editor-toolbar" role="toolbar" aria-label={T("挖空编辑工具")}>
+          <div className={`occl-seg${cropMode ? " cropping" : ""}`} role="tablist" aria-label={T("遮罩形状")} ref={segRef}>
             <div className="occl-seg-ind" style={{ left: segInd.left, width: segInd.width }} />
             {TOOLS.map((t) => (
               <button
@@ -723,10 +726,10 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
                 aria-pressed={tool === t.id}
                 data-tool={t.id}
                 data-testid={`occl-tool-${t.id}`}
-                title={t.title}
+                title={T(t.title)}
                 onClick={() => switchTool(t.id)}
               >
-                {t.label}
+                {T(t.label)}
               </button>
             ))}
           </div>
@@ -736,10 +739,10 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
             aria-pressed={cropMode}
             data-testid="occl-crop"
             disabled={aiBusy || saving}
-            title="裁剪图片：框选保留区域，遮罩随新图重映射"
+            title={T("裁剪图片：框选保留区域，遮罩随新图重映射")}
             onClick={() => (cropMode ? exitCrop() : setCropMode(true))}
           >
-            {cropMode ? "退出裁剪" : "裁剪图片"}
+            {cropMode ? T("退出裁剪") : T("裁剪图片")}
           </button>
           <span className="occl-toolbar-div" />
           {cropMode ? (
@@ -749,13 +752,13 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
                 className="btn btn-primary btn-sm"
                 data-testid="occl-crop-apply"
                 disabled={!cropArmed}
-                title="应用裁剪"
+                title={T("应用裁剪")}
                 onClick={() => void applyCrop()}
               >
-                应用裁剪
+                {T("应用裁剪")}
               </button>
               <button type="button" className="btn btn-sm" data-testid="occl-crop-cancel" onClick={exitCrop}>
-                取消裁剪
+                {T("取消裁剪")}
               </button>
             </>
           ) : (
@@ -766,14 +769,14 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
                   className="btn btn-outline btn-sm"
                   disabled={aiBusy || saving || cropMode}
                   data-testid="occl-ai"
-                  title="AI 识别适合挖空的区域，导入为可编辑遮罩建议"
+                  title={T("AI 识别适合挖空的区域，导入为可编辑遮罩建议")}
                   onClick={() => void runAI()}
                 >
-                  {aiBusy ? <><span className="occl-spin" />AI 识别中…</> : "AI 挖空"}
+                  {aiBusy ? <><span className="occl-spin" />{T("AI 识别中…")}</> : T("AI 挖空")}
                 </button>
               )}
               <button type="button" className="btn btn-outline btn-sm" disabled={undoLen === 0} data-testid="occl-undo" onClick={undo}>
-                撤销
+                {T("撤销")}
               </button>
               <button
                 type="button"
@@ -787,7 +790,7 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
                   setSelId(null);
                 }}
               >
-                清空
+                {T("清空")}
               </button>
               <button
                 type="button"
@@ -796,7 +799,7 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
                 data-testid="occl-save"
                 onClick={(e) => void save(e)}
               >
-                {saving ? "保存中…" : masks.length ? `创建 ${cardCount} 张卡片` : "创建卡片"}
+                {saving ? T("保存中…") : masks.length ? T("创建 {n} 张卡片", { n: cardCount }) : T("创建卡片")}
               </button>
             </>
           )}
@@ -833,7 +836,7 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
                   type="button"
                   className={`occlusion-editor-badge${m.id === selId ? " sel" : ""}`}
                   style={{ left: `${b.x}%`, top: `${b.y}%`, pointerEvents: cropMode ? "none" : undefined }}
-                  title={`区域 ${i + 1}`}
+                  title={T("区域 {n}", { n: i + 1 })}
                   onClick={() => setSelId(m.id)}
                 >
                   {i + 1}
@@ -924,8 +927,8 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
         </div>
       </div>
 
-      <aside className="occlusion-editor-rail" aria-label="遮罩区域列表">
-        <div className="occlusion-editor-rail-label">制卡模式</div>
+      <aside className="occlusion-editor-rail" aria-label={T("遮罩区域列表")}>
+        <div className="occlusion-editor-rail-label">{T("制卡模式")}</div>
         <div className="occlusion-editor-modes">
           <button
             type="button"
@@ -934,7 +937,7 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
             data-testid="occl-mode-split"
             onClick={() => setMode("split")}
           >
-            逐块拆卡
+            {T("逐块拆卡")}
           </button>
           <button
             type="button"
@@ -943,28 +946,28 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
             data-testid="occl-mode-single"
             onClick={() => setMode("single")}
           >
-            整图一卡
+            {T("整图一卡")}
           </button>
         </div>
         {mode === "split" && (
           <label className="occlusion-editor-check">
             <input type="checkbox" checked={shared} data-testid="occl-shared" onChange={(e) => setShared(e.target.checked)} />
-            共遮呈现（其余区域保持遮挡，Anki 风格）
+            {T("共遮呈现（其余区域保持遮挡，Anki 风格）")}
           </label>
         )}
-        <div className="occlusion-editor-rail-label">题面（全部卡片共享）</div>
+        <div className="occlusion-editor-rail-label">{T("题面（全部卡片共享）")}</div>
         <textarea
           className="occlusion-editor-input"
           rows={2}
           value={frontText}
-          placeholder={DEFAULT_FRONT}
-          aria-label="题面"
+          placeholder={T(DEFAULT_FRONT_KEY)}
+          aria-label={T("题面")}
           data-testid="occl-front"
           onChange={(e) => setFrontText(e.target.value)}
         />
         <div className="occlusion-editor-rail-label">
-          遮罩区域
-          <span className="occlusion-editor-rail-count mono" data-testid="occl-count">{masks.length ? `${masks.length} 块` : ""}</span>
+          {T("遮罩区域")}
+          <span className="occlusion-editor-rail-count mono" data-testid="occl-count">{masks.length ? T("{n} 块", { n: masks.length }) : ""}</span>
         </div>
         <div className="occlusion-editor-list">
           {masks.map((m, i) => (
@@ -977,8 +980,8 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
               <span className="occlusion-editor-row-num mono">{i + 1}</span>
               <input
                 value={m.label}
-                placeholder={`区域 ${i + 1} 的答案`}
-                aria-label={`区域 ${i + 1} 答案`}
+                placeholder={T("区域 {n} 的答案", { n: i + 1 })}
+                aria-label={T("区域 {n} 答案", { n: i + 1 })}
                 onChange={(e) => {
                   const v = e.target.value;
                   setMasks((prev) => prev.map((x) => (x.id === m.id ? { ...x, label: v } : x)));
@@ -988,8 +991,8 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
               <button
                 type="button"
                 className="occlusion-editor-row-del"
-                title={`删除区域 ${i + 1}`}
-                aria-label={`删除区域 ${i + 1}`}
+                title={T("删除区域 {n}", { n: i + 1 })}
+                aria-label={T("删除区域 {n}", { n: i + 1 })}
                 data-testid="occl-row-del"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1003,22 +1006,22 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
               </button>
             </div>
           ))}
-          {masks.length === 0 && <p className="occlusion-editor-empty">还没有遮罩——用顶部工具在图上框选。</p>}
+          {masks.length === 0 && <p className="occlusion-editor-empty">{T("还没有遮罩——用顶部工具在图上框选。")}</p>}
         </div>
         <p className="occlusion-editor-count" data-testid="occl-note">
           {masks.length
-            ? `${masks.length} 块遮罩 → ${mode === "single" ? "1" : masks.length} 张卡片；同图多卡互为同源（同日只放行一张）。`
-            : "同图多卡互为同源（siblingKey=图片资产），落库走手动制卡链。"}
+            ? T("{n} 块遮罩 → {m} 张卡片；同图多卡互为同源（同日只放行一张）。", { n: masks.length, m: mode === "single" ? "1" : masks.length })
+            : T("同图多卡互为同源（siblingKey=图片资产），落库走手动制卡链。")}
         </p>
       </aside>
 
-      <div className={`occlusion-editor-confirm${confirmOpen ? " show" : ""}`} role="alertdialog" aria-label="未保存提示">
-        <p>有未保存的遮罩，关闭将丢弃</p>
-        <button type="button" className="btn btn-sm" onClick={() => setConfirmOpen(false)}>继续编辑</button>
-        <button type="button" className="btn btn-sm btn-danger" onClick={onClose}>丢弃并关闭</button>
+      <div className={`occlusion-editor-confirm${confirmOpen ? " show" : ""}`} role="alertdialog" aria-label={T("未保存提示")}>
+        <p>{T("有未保存的遮罩，关闭将丢弃")}</p>
+        <button type="button" className="btn btn-sm" onClick={() => setConfirmOpen(false)}>{T("继续编辑")}</button>
+        <button type="button" className="btn btn-sm btn-danger" onClick={onClose}>{T("丢弃并关闭")}</button>
       </div>
 
-      <button type="button" className="image-focus-close" title="关闭（Esc）" aria-label="关闭编辑器" data-testid="occl-close" onClick={() => (dirty ? setConfirmOpen(true) : onClose())}>
+      <button type="button" className="image-focus-close" title={T("关闭（Esc）")} aria-label={T("关闭编辑器")} data-testid="occl-close" onClick={() => (dirty ? setConfirmOpen(true) : onClose())}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
           <path d="M18 6 6 18" />
           <path d="m6 6 12 12" />

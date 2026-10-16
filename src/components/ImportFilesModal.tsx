@@ -9,6 +9,7 @@ import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
 import { eventBus } from "../lib/eventbus";
 import { IconAlert, IconClose, IconImport } from "./icons";
+import { useT } from "../lib/i18n";
 
 /** 导入结果报告（原 AddBookModal 同构）：成功/失败分列，失败带原因 */
 interface ImportReport {
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export default function ImportFilesModal({ onClose }: Props) {
+  const T = useT();
   // D120 §8.1：出场两步走——Esc / 遮罩 / 关闭按钮 / 全部导入成功自动关，收口到 requestClose
   const { show, requestClose } = useDismiss(onClose);
   const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
@@ -79,10 +81,10 @@ export default function ImportFilesModal({ onClose }: Props) {
 
   return (
     <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
-      <div className="modal-panel" data-show={show ? "in" : "out"} ref={panelRef} role="dialog" aria-modal="true" aria-label="导入文件" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" data-show={show ? "in" : "out"} ref={panelRef} role="dialog" aria-modal="true" aria-label={T("导入文件")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>导入文件</h2>
-          <button className="icon-btn modal-close" title="关闭" aria-label="关闭" onClick={requestClose}>
+          <h2>{T("导入文件")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} aria-label={T("关闭")} onClick={requestClose}>
             <IconClose size={18} />
           </button>
         </div>
@@ -90,14 +92,14 @@ export default function ImportFilesModal({ onClose }: Props) {
           {importing ? (
             <p className="form-hint" aria-live="polite">
               {progress
-                ? `导入中… (${progress.done}/${progress.total}) ${progress.current}`
-                : "正在打开文件选择器…"}
+                ? T("导入中… ({done}/{total}) {name}", { done: progress.done, total: progress.total, name: progress.current })
+                : T("正在打开文件选择器…")}
             </p>
           ) : (
             report ? (
               <div className="import-report has-fail">
                 <span className="import-report-title">
-                  导入成功 {report.okList.length} 本 · 失败 {report.failList.length} 个
+                  {T("导入成功 {n} 本 · 失败 {m} 个", { n: report.okList.length, m: report.failList.length })}
                 </span>
                 {report.okList.length > 0 && (
                   <ul>
@@ -109,13 +111,14 @@ export default function ImportFilesModal({ onClose }: Props) {
                 <ul>
                   {report.failList.map((o, i) => (
                     <li key={`fail-${i}-${o.name}`} className="bad">
-                      {o.name}（{o.error || "未知原因"}）
+                      {/* o.error 是 importRouter 的 zh 稳定文案（纯函数层不依赖 i18n），渲染期取当前语言 */}
+                      {o.name}（{o.error ? T(o.error) : T("未知原因")}）
                     </li>
                   ))}
                 </ul>
               </div>
             ) : (
-              !error && <p className="form-hint">正在打开文件选择器…</p>
+              !error && <p className="form-hint">{T("正在打开文件选择器…")}</p>
             )
           )}
           {error && (
@@ -127,10 +130,10 @@ export default function ImportFilesModal({ onClose }: Props) {
           <div className="form-actions">
             <button className="btn btn-outline" disabled={importing} onClick={() => void runImport()}>
               <IconImport />
-              {importing ? "导入中…" : "导入文件"}
+              {importing ? T("导入中…") : T("导入文件")}
             </button>
             <span className="form-actions-spacer" />
-            <button className="btn btn-secondary" onClick={requestClose}>关闭</button>
+            <button className="btn btn-secondary" onClick={requestClose}>{T("关闭")}</button>
           </div>
         </div>
       </div>

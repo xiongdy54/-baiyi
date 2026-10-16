@@ -4,6 +4,7 @@
 // 正交肘形连线、4px 网格坐标（布局层保证）。色值由调用方解析自 CSS 变量（交互视图）或写死（自包含导出）。
 
 import type { LayoutResult, LayoutNode } from "./layout";
+import { t } from "../i18n";
 
 export interface MapTheme {
   paper: string;
@@ -83,7 +84,7 @@ function renderNode(n: LayoutNode, parent: LayoutNode | null, theme: MapTheme, o
     parts.push(
       `<rect x="${bx}" y="${by}" width="20" height="20" fill="${theme.paper}" stroke="${theme.border}" stroke-width="1"/>` +
         `<text x="${bx + 10}" y="${by + 10}" text-anchor="middle" dominant-baseline="central" font-size="11" fill="${theme.inkSoft}">＋</text>` +
-        `<title>尚无更深结构 · 可深化</title>`
+        `<title>${t("尚无更深结构 · 可深化")}</title>`
     );
   }
   if (n.collapsed) {

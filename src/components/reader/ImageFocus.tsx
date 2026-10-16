@@ -14,6 +14,7 @@ import {
   type OcclusionShape,
   type OcclusionPoint
 } from "../../lib/occlusion";
+import { useT } from "../../lib/i18n";
 
 type Tool = "rect" | "ellipse" | "polygon";
 
@@ -42,6 +43,7 @@ interface Props {
 }
 
 export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: Props) {
+  const T = useT();
   const [tool, setTool] = useState<Tool>("rect");
   const [shape, setShape] = useState<OcclusionShape | null>(null);
   const [draft, setDraft] = useState<OcclusionShape | null>(null);
@@ -212,12 +214,12 @@ export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: P
       className={`image-focus-layer${entered ? " image-focus-in" : ""}`}
       role="dialog"
       aria-modal="true"
-      aria-label="图片聚焦选区"
+      aria-label={T("图片聚焦选区")}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="image-focus-toolbar" role="toolbar" aria-label="选区工具">
+      <div className="image-focus-toolbar" role="toolbar" aria-label={T("选区工具")}>
         <div className="image-focus-tools">
           {TOOLS.map((t) => (
             <button
@@ -227,15 +229,15 @@ export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: P
               aria-pressed={tool === t.id}
               onClick={() => switchTool(t.id)}
             >
-              {t.label}
+              {T(t.label)}
             </button>
           ))}
         </div>
-        <span className="image-focus-hint">{activeHint}</span>
+        <span className="image-focus-hint">{activeHint ? T(activeHint) : ""}</span>
         <div className="image-focus-actions">
           {(shape || draft) && (
             <button type="button" className="btn btn-outline btn-sm" onClick={resetSelection}>
-              清除选区
+              {T("清除选区")}
             </button>
           )}
           <button
@@ -244,7 +246,7 @@ export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: P
             disabled={!usable || busy}
             onClick={() => shape && onSubmit("ai", { shape, bbox: shapeBBox(shape) })}
           >
-            AI 制卡
+            {T("AI 制卡")}
           </button>
           <button
             type="button"
@@ -261,7 +263,7 @@ export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: P
               });
             }}
           >
-            挖空编辑
+            {T("挖空编辑")}
           </button>
         </div>
       </div>
@@ -322,7 +324,7 @@ export default function ImageFocus({ image, origin, busy, onClose, onSubmit }: P
         {image.alt && <p className="image-focus-caption">{image.alt}</p>}
       </div>
 
-      <button type="button" className="image-focus-close" title="退出聚焦（Esc）" aria-label="退出聚焦" onClick={onClose}>
+      <button type="button" className="image-focus-close" title={T("退出聚焦（Esc）")} aria-label={T("退出聚焦")} onClick={onClose}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
           <path d="M18 6 6 18" />
           <path d="m6 6 12 12" />

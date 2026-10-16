@@ -26,6 +26,7 @@ import { buildReadingContext, loadDictSettings, lookupWord } from "./dictClient"
 import { libraryApi } from "./library";
 import { normalizeShape, shapeBBox, type OcclusionRect, type OcclusionShape } from "./occlusion";
 import { eventBus } from "./eventbus";
+import { t, useT } from "./i18n";
 import type { DictPanelState } from "../components/DictPanel";
 import type { ImageFocusSubmit } from "../components/reader/ImageFocus";
 import type { OcclusionEditorSubmit } from "../components/editor/OcclusionEditor";
@@ -118,7 +119,7 @@ function cropImageDataUrl(dataUrl: string, bbox: OcclusionRect): Promise<string>
       const w = img.naturalWidth;
       const h = img.naturalHeight;
       if (!w || !h) {
-        reject(new Error("图片尺寸不可用"));
+        reject(new Error(t("图片尺寸不可用")));
         return;
       }
       const sx = Math.max(0, Math.floor((bbox.x / 100) * w));
@@ -130,13 +131,13 @@ function cropImageDataUrl(dataUrl: string, bbox: OcclusionRect): Promise<string>
       canvas.height = sh;
       const ctx = canvas.getContext("2d");
       if (!ctx) {
-        reject(new Error("画布不可用"));
+        reject(new Error(t("画布不可用")));
         return;
       }
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
       resolve(canvas.toDataURL("image/png"));
     };
-    img.onerror = () => reject(new Error("图片解码失败"));
+    img.onerror = () => reject(new Error(t("图片解码失败")));
     img.src = dataUrl;
   });
 }
@@ -206,6 +207,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   const { showToast, sourceTextRef, occlusionSourceRef } = adapter;
   // v48.63（D107）：标签功能总开关——AI 卡的批注标签继承与手动表单预填受其控制（关＝不继承不预填）
   const tagsEnabled = useTagsEnabled();
+  const T = useT();
   // 动作是渲染期创建的普通函数（与抽出前一致）；回调里一律读最新的 adapter，避免快照过期
   const adapterRef = useRef(adapter);
   adapterRef.current = adapter;
@@ -332,18 +334,18 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     // 制卡台自由截图（页面无归属书籍）：落到固定的 workbench-assets 资产目录（主进程 createAssetForItem 识别）
     const ownerKey = A().ownerKey() || (occlEditor?.workbench ? "workbench-assets" : "");
     if (!ownerKey) {
-      showToast("无法确定图片归属的书籍");
+      showToast(T("无法确定图片归属的书籍"));
       return null;
     }
     const m = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl);
     if (!m) {
-      showToast("图片数据不可用");
+      showToast(T("图片数据不可用"));
       return null;
     }
     const ext = m[1] === "jpeg" ? "jpg" : m[1];
     const saved = await window.assetsAPI?.saveImage(ownerKey, ext, m[2]);
     if (!saved || (saved as { error?: string }).error || !saved.assetPath) {
-      showToast((saved as { error?: string } | null)?.error || "图片保存失败");
+      showToast((saved as { error?: string } | null)?.error || T("图片保存失败"));
       return null;
     }
     return saved.assetPath;
@@ -450,14 +452,14 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     });
     if (p.mode === "imageOcclusion") {
       if (!p.imageRegion) {
-        showToast("缺少图片选区，无法创建图片挖空卡");
+        showToast(T("缺少图片选区，无法创建图片挖空卡"));
         return null;
       }
       const assetPath = await ensureImageAsset(p.imageRegion.dataUrl);
       if (!assetPath) return null;
       const shape = normalizeShape({ ...p.imageRegion.shape, ord: 0 });
       const imgId = await createSingleCard({
-        front: p.front.trim() || "图中遮挡区域对应的是什么？",
+        front: p.front.trim() || T("图中遮挡区域对应的是什么？"),
         back: p.back,
         cardType: "imageOcclusion",
         cardOrd: 0,
@@ -473,7 +475,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       eventBus.emit("cards/changed");
       setManualOpen(false);
       setManualImage(null);
-      showToast("图片挖空卡已创建（复习正面遮挡所选区域）");
+      showToast(T("图片挖空卡已创建（复习正面遮挡所选区域）"));
       return imgId;
     }
     if (p.mode === "reverse") {
@@ -491,7 +493,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       eventBus.emit("cards/changed");
       setManualOpen(false);
       setManualImage(null);
-      showToast("已创建 2 张互为翻转的独立卡片");
+      showToast(T("已创建 2 张互为翻转的独立卡片"));
       return flipId;
     }
     if (p.mode === "cloze") {
@@ -506,7 +508,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         eventBus.emit("cards/changed");
         setManualOpen(false);
         setManualImage(null);
-        showToast("卡片已创建，可在复习视图查看");
+        showToast(T("卡片已创建，可在复习视图查看"));
         return clozeId;
       }
       const groupKey = srcKey ?? `act:cloze-${crypto.randomUUID()}`;
@@ -518,7 +520,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       eventBus.emit("cards/changed");
       setManualOpen(false);
       setManualImage(null);
-      showToast(`已创建 ${ords.length} 张挖空卡（每个编号一张）`);
+      showToast(T("已创建 {n} 张挖空卡（每个编号一张）", { n: ords.length }));
       return firstId;
     }
     const qaId = await createSingleCard({ front: p.front, back: p.back, cardType: "qa", siblingKey: srcKey, ...meta });
@@ -542,7 +544,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       A().clearAnchor();
       // v35：正文图片链路——制卡来源=engine（图片锚点已由点击快照）
       occlusionSourceRef.current = "engine";
-      const label = `[图片选区] ${focused.alt || "正文图片"}`;
+      const label = T("[图片选区] {text}", { text: focused.alt || T("正文图片") });
       A().focus.close();
       wakeDock();
       setAiPanel({
@@ -586,13 +588,13 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel({
         kind: "occlusion",
-        text: `[图片选区] ${focused.alt || "正文图片"}`,
+        text: T("[图片选区] {text}", { text: focused.alt || T("正文图片") }),
         image: undefined,
         running: false,
         startedAt: undefined,
         thinking: undefined,
         error: msg.includes("API Key")
-          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
+          ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。")
           : msg
       });
     } finally {
@@ -631,14 +633,14 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     if (occlEditor) return;
     const capture = window.assetsAPI?.captureScreen;
     if (!capture) {
-      showToast("当前环境无法截图");
+      showToast(T("当前环境无法截图"));
       return;
     }
     const dataUrl = await capture();
     if (!dataUrl) return;
     A().clearKernelSelection?.();
     occlusionSourceRef.current = "engine";
-    setOcclEditor({ image: { dataUrl, alt: "屏幕截图" }, origin: null, workbench: true });
+    setOcclEditor({ image: { dataUrl, alt: T("屏幕截图") }, origin: null, workbench: true });
   }
 
   function closeOcclusionEditor() {
@@ -662,8 +664,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       showToast(msg.includes("API Key")
-        ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
-        : `AI 挖空失败：${msg}`);
+        ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。")
+        : T("AI 挖空失败：{msg}", { msg }));
       return [];
     }
   }
@@ -675,14 +677,14 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     if (!occlEditor) return;
     const assetPath = await ensureImageAsset(p.imageDataUrl);
     if (!assetPath) {
-      showToast("图片资产落盘失败，未创建卡片");
+      showToast(T("图片资产落盘失败，未创建卡片"));
       return;
     }
     const shapes = p.masks.map((m, i) => normalizeShape({ ...m, ord: i }));
     if (shapes.length === 0) return;
     // rects 恒为形状包围盒（兼容旧渲染与 L11 校验），shapes 为精确轮廓
     const rects = shapes.map((s) => ({ ...shapeBBox(s), ord: s.ord }));
-    const front = p.frontText.trim() || "图中遮挡区域对应的是什么？";
+    const front = p.frontText.trim() || T("图中遮挡区域对应的是什么？");
     const siblingKey = `img:${assetPath}`;
     if (p.mode === "single") {
       await createSingleCard({
@@ -698,7 +700,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       for (let i = 0; i < shapes.length; i++) {
         await createSingleCard({
           front,
-          back: p.masks[i].label || `区域 ${i + 1}`,
+          back: p.masks[i].label || T("区域 {n}", { n: i + 1 }),
           cardType: "imageOcclusion",
           cardOrd: i,
           siblingKey,
@@ -712,8 +714,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     eventBus.emit("cards/changed");
     setOcclEditor(null);
     showToast(p.mode === "single"
-      ? "图片挖空卡已创建（复习正面遮挡全部区域）"
-      : `已创建 ${shapes.length} 张图片挖空卡（复习正面遮挡各区域）`);
+      ? T("图片挖空卡已创建（复习正面遮挡全部区域）")
+      : T("已创建 {n} 张图片挖空卡（复习正面遮挡各区域）", { n: shapes.length }));
   }
 
   // ---------- AI 制卡（Phase 13 主路径；M1.2 材料类型路由） ----------
@@ -804,7 +806,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         startedAt: undefined,
         thinking: undefined,
         error: msg.includes("API Key")
-          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
+          ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。")
           : msg,
         mode,
         routeLabel: shownRoute.label,
@@ -817,7 +819,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
   async function runOcclusionCards() {
     const ownerKey = A().ownerKey();
     if (!ownerKey) {
-      showToast("无法确定图片归属的书籍");
+      showToast(T("无法确定图片归属的书籍"));
       return;
     }
     // 图片入口无文本选区：清掉可能残留的选区锚点，避免把旧锚点挂到新卡上
@@ -855,7 +857,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       if (seq !== aiRunSeq.current) return;
       setAiPanel({
         kind: "occlusion",
-        text: `[图片] ${picked.filename}`,
+        text: T("[图片] {name}", { name: picked.filename }),
         image: { dataUrl: picked.dataUrl, assetPath: picked.assetPath },
         running: false,
         progress: undefined,
@@ -872,13 +874,13 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel({
         kind: "occlusion",
-        text: `[图片] ${picked.filename}`,
+        text: T("[图片] {name}", { name: picked.filename }),
         image: undefined,
         running: false,
         startedAt: undefined,
         thinking: undefined,
         error: msg.includes("API Key")
-          ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
+          ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。")
           : msg
       });
     }
@@ -888,9 +890,9 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     if (!d.occlusion || (aiPanel?.accepted?.has(draftIndex) ?? true)) return;
     const ord = d.ord ?? d.occlusion.ord ?? 0;
     const card = {
-      noteText: d.front || "图中遮挡区域对应的是什么？",
+      noteText: d.front || T("图中遮挡区域对应的是什么？"),
       cardType: "imageOcclusion",
-      frontMarkdown: d.front || "图中遮挡区域对应的是什么？",
+      frontMarkdown: d.front || T("图中遮挡区域对应的是什么？"),
       backMarkdown: d.back || d.occlusion.label || "",
       clozeOrds: [],
       cardOrd: ord,
@@ -940,7 +942,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       p && p.drafts ? { ...p, accepted: new Set([...(p.accepted ?? []), draftIndex]) } : p
     );
     eventBus.emit("cards/changed");
-    showToast("遮挡卡已接受，进 FSRS 队列");
+    showToast(T("遮挡卡已接受，进 FSRS 队列"));
   }
 
   // ---------- 联网补充事件背景后重试制卡 ----------
@@ -952,7 +954,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         .map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}`)
         .join("\n\n");
       if (!webContext) {
-        setAiPanel((p) => (p && p.kind === "cards" ? { ...p, searching: false, error: "未检索到相关背景，建议手动补充来源后再制卡。" } : p));
+        setAiPanel((p) => (p && p.kind === "cards" ? { ...p, searching: false, error: T("未检索到相关背景，建议手动补充来源后再制卡。") } : p));
         return;
       }
       await runAICards(text, webContext);
@@ -1047,7 +1049,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         running: false,
         startedAt: undefined,
         thinking: undefined,
-        error: msg.includes("API Key") ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。" : msg
+        error: msg.includes("API Key") ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。") : msg
       });
     }
   }
@@ -1121,7 +1123,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
           followUpStarted: { ...(p.followUpStarted ?? {}), [item]: undefined }
         } as typeof p;
       });
-      showToast("补充卡已生成，请确认后接受");
+      showToast(T("补充卡已生成，请确认后接受"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setAiPanel((p) =>
@@ -1166,7 +1168,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         : p
     );
     eventBus.emit("cards/changed");
-    showToast(expandedCount > 1 ? `已接受，分答拆为 ${expandedCount} 张卡进 FSRS 队列` : "已接受，进 FSRS 队列");
+    showToast(expandedCount > 1 ? T("已接受，分答拆为 {n} 张卡进 FSRS 队列", { n: expandedCount }) : T("已接受，进 FSRS 队列"));
   }
 
   async function rejectAllDrafts() {
@@ -1227,7 +1229,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         thinking: undefined,
         error:
           msg.includes("API Key")
-            ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。"
+            ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。")
             : msg
       });
     }
@@ -1260,7 +1262,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       await cardGenerator.answerForCard(q, manualQuote ?? undefined, onDelta);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      showToast(msg.includes("API Key") ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。" : `AI 生成答案失败：${msg}`);
+      showToast(msg.includes("API Key") ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。") : T("AI 生成答案失败：{msg}", { msg }));
     } finally {
       manualAnswerBusyRef.current = false;
       setManualAnswerBusy(false);
@@ -1353,7 +1355,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       created = true;
     }
     eventBus.emit("workflow/changed");
-    showToast(created ? "已摘录进学习队列" : "此处没有可挂靠的来源，未创建摘录");
+    showToast(created ? T("已摘录进学习队列") : T("此处没有可挂靠的来源，未创建摘录"));
   }
 
   /**
@@ -1487,7 +1489,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     const raw = (rawOverride ?? A().selectionText() ?? "").trim();
     if (!raw || dictBusy) return;
     if (!rawOverride && !isVocabSelection(raw)) {
-      showToast("所选过长，已走 AI 制卡更合适");
+      showToast(T("所选过长，已走 AI 制卡更合适"));
       return;
     }
     setDictBusy(true);
@@ -1578,7 +1580,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
         back: v.back,
         cloze: v.cloze ?? null,
         example: v.example,
-        sourceRef: A().labels.sourceTitle ? { title: A().labels.sourceTitle } : { title: `词典:${entry.source}` },
+        sourceRef: A().labels.sourceTitle ? { title: A().labels.sourceTitle } : { title: T("词典:{source}", { source: entry.source }) },
         prioritySuggestion: 50,
         ruleNotes: ["R2", "R14", "R16"],
         warnings: [],
@@ -1590,7 +1592,7 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     }
     eventBus.emit("cards/changed");
     setDictPanel(null);
-    showToast(`已创建 ${n} 张单词卡（${drafts.map((v) => VOCAB_KIND_LABEL[v.kind]).join("/")}）`);
+    showToast(T("已创建 {n} 张单词卡（{kinds}）", { n, kinds: drafts.map((v) => T(VOCAB_KIND_LABEL[v.kind])).join("/") }));
   }
 
   // 制卡模式的按书记忆（settings.app.materialTypes）——与面板同源，宿主只读对齐

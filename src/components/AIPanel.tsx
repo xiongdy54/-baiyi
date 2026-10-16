@@ -17,6 +17,7 @@ import Dropdown from "./Dropdown";
 import OcclusionShapes from "./OcclusionShapes";
 import { IconAlert, IconCheck, IconChevronDown, IconClose, IconPencil } from "./icons";
 import type { AskThreadItem } from "../lib/useSelectionActions";
+import { useT } from "../lib/i18n";
 
 // 防 AI 返回字段类型漂移导致渲染崩溃（ruleNotes/warnings 可能是字符串）
 function toList(v: unknown): string[] {
@@ -25,14 +26,14 @@ function toList(v: unknown): string[] {
   return [];
 }
 
-/** D121 §2.6：归属标签文案 */
-function qualifierLabel(q: CardQualifier): string {
+/** D121 §2.6：归属标签文案（模块级纯函数——tr 由调用方传 useT 的 T，node 侧缺省恒等） */
+function qualifierLabel(q: CardQualifier, tr: (s: string) => string = (s) => s): string {
   switch (q.stance) {
-    case "author": return "作者观点";
-    case "reported": return q.holder ? `转述·${q.holder}` : "转述";
-    case "criticized": return q.holder ? `批判对象·${q.holder}` : "批判对象";
-    case "consensus": return "公认";
-    default: return "归属未定";
+    case "author": return tr("作者观点");
+    case "reported": return q.holder ? `${tr("转述")}·${q.holder}` : tr("转述");
+    case "criticized": return q.holder ? `${tr("批判对象")}·${q.holder}` : tr("批判对象");
+    case "consensus": return tr("公认");
+    default: return tr("归属未定");
   }
 }
 
@@ -75,11 +76,17 @@ export function ExplainModeBar({
           aria-pressed={mode === m}
           onClick={() => onModeSelect(m)}
         >
-          {label}
+          <ModeLabel label={label} />
         </button>
       ))}
     </>
   );
+}
+
+/** EXPLAIN_MODE_ITEMS 是模块级常量（label 存键），渲染时经 useT 翻译 */
+function ModeLabel({ label }: { label: string }) {
+  const T = useT();
+  return <>{T(label)}</>;
 }
 
 // ---------- D123：计时与状态行（静态方块点、无动画；计时自算——摘录页曾硬编码 elapsedSec=0） ----------
@@ -114,17 +121,18 @@ export function AIStatus({
   label?: string;
 }) {
   const now = useNow(true);
+  const T = useT();
   const chars = progress || thinking || 0;
-  const text = label ?? (progress ? "生成中" : thinking ? "思考中" : "等待响应");
+  const text = label ?? (progress ? T("生成中") : thinking ? T("思考中") : T("等待响应"));
   return (
     <div className="ai-status" role="status" aria-live="polite" data-testid="ai-status">
       <span className="ai-status-dot" aria-hidden="true" />
       <span>{text}</span>
       <span className="mono ai-status-time">{fmtElapsed(startedAt ? now - startedAt : 0)}</span>
-      {chars > 0 && <span className="mono ai-status-chars">{chars} 字</span>}
+      {chars > 0 && <span className="mono ai-status-chars">{T("{n} 字", { n: chars })}</span>}
       {onStop && (
         <button type="button" className="btn btn-outline btn-sm ai-status-stop" onClick={onStop}>
-          停止
+          {T("停止")}
         </button>
       )}
     </div>
@@ -133,6 +141,7 @@ export function AIStatus({
 
 /** AI 解释页：自由追问线程（每条回复悬停出现「制卡」＝以该回复为材料走 AI 制卡） */
 export function ExplainThread({ items, onMake }: { items: AskThreadItem[]; onMake: (answer: string) => void }) {
+  const T = useT();
   if (items.length === 0) return null;
   return (
     <div className="wb-thread" data-testid="wb-thread">
@@ -151,7 +160,7 @@ export function ExplainThread({ items, onMake }: { items: AskThreadItem[]; onMak
               {!it.running && (
                 <div className="wb-a-acts">
                   <button type="button" className="ai-link" onClick={() => onMake(it.answer as string)}>
-                    制卡
+                    {T("制卡")}
                   </button>
                 </div>
               )}
@@ -178,6 +187,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, {
   value: string;
   onValueChange: (v: string) => void;
 }>(function ChatComposer({ busy, onSend, value, onValueChange }, ref) {
+  const T = useT();
   const refEl = useRef<HTMLTextAreaElement | null>(null);
   // 句柄内读最新值/回调（refs 镜像，句柄身份稳定、无陈旧闭包）
   const valueRef = useRef(value);
@@ -219,8 +229,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, {
         ref={refEl}
         rows={1}
         value={value}
-        aria-label="追问 AI"
-        placeholder="追问，或自由提问…"
+        aria-label={T("追问 AI")}
+        placeholder={T("追问，或自由提问…")}
         onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -230,7 +240,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, {
         }}
       />
       <button type="button" className="btn btn-primary btn-sm wb-composer-send" disabled={!value.trim() || busy} onClick={send}>
-        发送
+        {T("发送")}
       </button>
     </div>
   );
@@ -256,6 +266,7 @@ function FollowUpList({
   onExploration: (item: string, kpTitle: string, srcKey?: string) => void;
   onFollowUpCards: (item: string, kpTitle: string, hint?: string) => void | Promise<void>;
 }) {
+  const T = useT();
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [edited, setEdited] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<string | null>(null);
@@ -298,13 +309,13 @@ function FollowUpList({
   return (
     <div className="ai-kps" data-testid="ai-kps">
       <div className="ai-kps-head">
-        <span className="ai-kps-title">知识点与后续可补</span>
+        <span className="ai-kps-title">{T("知识点与后续可补")}</span>
         <button
           type="button"
           className="ai-link"
           onClick={() => setChecked(picked.length === all.length ? new Set() : new Set(all.map((x) => x.item)))}
         >
-          {picked.length === all.length ? "取消全选" : "全选"}
+          {picked.length === all.length ? T("取消全选") : T("全选")}
         </button>
       </div>
       {groups.map((g, gi) => (
@@ -318,7 +329,7 @@ function FollowUpList({
             const isOpen = open.has(item);
             const explainBtn = exp?.running ? (
               <button type="button" className="ai-kp-explain is-busy" disabled>
-                解释中
+                {T("解释中")}
               </button>
             ) : exp?.answer ? (
               <button
@@ -334,7 +345,7 @@ function FollowUpList({
                   })
                 }
               >
-                {isOpen ? "收起" : "展开"}
+                {isOpen ? T("收起") : T("展开")}
                 <IconChevronDown size={11} className={isOpen ? "is-flip" : undefined} />
               </button>
             ) : (
@@ -347,7 +358,7 @@ function FollowUpList({
                   setOpen((s) => new Set(s).add(item));
                 }}
               >
-                {exp?.error ? "重试" : "解释"}
+                {exp?.error ? T("重试") : T("解释")}
               </button>
             );
             return (
@@ -357,7 +368,7 @@ function FollowUpList({
                     type="checkbox"
                     className="ai-kp-check"
                     checked={checked.has(item)}
-                    aria-label={`选择：${text}`}
+                    aria-label={T("选择：{text}", { text })}
                     onChange={() => toggle(item)}
                   />
                   {editing === item ? (
@@ -366,7 +377,7 @@ function FollowUpList({
                         className="ai-kp-edit"
                         value={draft}
                         autoFocus
-                        aria-label="编辑条目"
+                        aria-label={T("编辑条目")}
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && !e.nativeEvent.isComposing) commitEdit(item);
@@ -376,27 +387,27 @@ function FollowUpList({
                           }
                         }}
                       />
-                      <button type="button" className="ai-icon" title="确定" onClick={() => commitEdit(item)}>
+                      <button type="button" className="ai-icon" title={T("确定")} onClick={() => commitEdit(item)}>
                         <IconCheck size={13} />
                       </button>
-                      <button type="button" className="ai-icon" title="取消" onClick={() => setEditing(null)}>
+                      <button type="button" className="ai-icon" title={T("取消")} onClick={() => setEditing(null)}>
                         <IconClose size={13} />
                       </button>
                     </>
                   ) : (
                     <>
                       <span className="ai-kp-text">{text}</span>
-                      <button type="button" className="ai-icon ai-kp-pencil" title="编辑条目（改成你想了解的内容再点解释）" onClick={() => startEdit(item)}>
+                      <button type="button" className="ai-icon ai-kp-pencil" title={T("编辑条目（改成你想了解的内容再点解释）")} onClick={() => startEdit(item)}>
                         <IconPencil size={13} />
                       </button>
                       {explainBtn}
                     </>
                   )}
                 </div>
-                {exp?.running && <div className="ai-kp-note mono">AI 正在回答…</div>}
+                {exp?.running && <div className="ai-kp-note mono">{T("AI 正在回答…")}</div>}
                 {exp?.error && <div className="ai-error">{exp.error}</div>}
                 {err && <div className="lint lint-error">{err}</div>}
-                {busy && <div className="ai-kp-note mono">补充制卡中…</div>}
+                {busy && <div className="ai-kp-note mono">{T("补充制卡中…")}</div>}
                 {isOpen && exp?.answer && (
                   <div className="ai-kp-exp">
                     <div className="ai-answer">
@@ -412,7 +423,7 @@ function FollowUpList({
                           disabled={busy || panel.running}
                           onClick={() => void onFollowUpCards(text, g.kpTitle, exp.answer)}
                         >
-                          制卡
+                          {T("制卡")}
                         </button>
                       </div>
                     )}
@@ -425,9 +436,9 @@ function FollowUpList({
       ))}
       {picked.length > 0 && (
         <div className="ai-kps-bar" data-testid="ai-kps-bar">
-          <span>已选 {picked.length} 项</span>
+          <span>{T("已选 {n} 项", { n: picked.length })}</span>
           <button type="button" className="btn btn-primary btn-sm" disabled={making || panel.running} onClick={() => void makeAll()}>
-            {making ? "制卡中…" : `制卡 (${picked.length})`}
+            {making ? T("制卡中…") : T("制卡 ({n})", { n: picked.length })}
           </button>
         </div>
       )}
@@ -516,6 +527,7 @@ export default function AIPanel({
   onStop?: () => void;
   elapsedTick?: number;
 }) {
+  const T = useT();
   const [qualInput, setQualInput] = useState<Record<number, string>>({});
   const [editing, setEditing] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<number, { front?: string; back?: string }>>({});
@@ -559,7 +571,7 @@ export default function AIPanel({
         {(panel.kind === "cards" || isOcclusion) && panel.running && (
           <AIStatus startedAt={panel.startedAt} thinking={panel.thinking} progress={panel.progress} onStop={onStop} />
         )}
-        {panel.searching && <div className="ai-streaming mono">正在联网检索事件背景…</div>}
+        {panel.searching && <div className="ai-streaming mono">{T("正在联网检索事件背景…")}</div>}
         {panel.error && <div className="ai-error">{panel.error}</div>}
 
         {panel.kind === "explain" && panel.running && !panel.answer && (
@@ -579,9 +591,9 @@ export default function AIPanel({
             {/* v48.51（D91 §5.5）：事后建议——路由错配的语义级纠偏，点击即按通用解读重跑（reader-explain scope） */}
             {suggestGeneral && (
               <div className="ai-suggest" data-testid="explain-suggest">
-                <span>这段更像概念解释，切换到通用解读？</span>
+                <span>{T("这段更像概念解释，切换到通用解读？")}</span>
                 <button className="btn btn-outline btn-sm" onClick={() => onExplainModeChange?.("general")}>
-                  切换到通用解读
+                  {T("切换到通用解读")}
                 </button>
               </div>
             )}
@@ -590,11 +602,11 @@ export default function AIPanel({
             <div className="ai-actions">
               {([["通俗解释", "通俗解释"], ["严格定义", "严格定义"], ["举个例子", "举个例子"], ["为什么", "为什么会这样"]] as const).map(([label, q]) => (
                 <button key={label} className="btn btn-outline btn-sm" onClick={() => (onAsk ? onAsk(q) : onExplain(q))}>
-                  {label}
+                  {T(label)}
                 </button>
               ))}
               <button className="btn btn-secondary btn-sm" disabled={panel.running} onClick={onMakeCards}>
-                就此制卡
+                {T("就此制卡")}
               </button>
             </div>
           </>
@@ -603,27 +615,31 @@ export default function AIPanel({
         {/* M1.2：材料类型路由展示 + 手动覆盖 */}
         {panel.kind === "cards" && (
           <div className="ai-route-row" data-testid="ai-route-row">
-            <span className="ai-route-label">材料类型</span>
+            <span className="ai-route-label">{T("材料类型")}</span>
             <Dropdown
               align="left"
-              title="材料类型"
+              title={T("材料类型")}
               value={mode}
               options={[
-                { value: "auto", label: "自动识别" },
-                { value: "card-generation", label: "概念论述" },
-                { value: "card-formula", label: "公式推导" },
-                { value: "card-seq", label: "流程背诵" },
-                { value: "card-enum", label: "枚举清单" },
-                { value: "card-literature", label: "文学/诗歌背诵" }
+                { value: "auto", label: T("自动识别") },
+                { value: "card-generation", label: T("概念论述") },
+                { value: "card-formula", label: T("公式推导") },
+                { value: "card-seq", label: T("流程背诵") },
+                { value: "card-enum", label: T("枚举清单") },
+                { value: "card-literature", label: T("文学/诗歌背诵") }
               ]}
               onChange={(m) => onModeChange(m as CardGenMode)}
             />
             <span className="ai-route-meta mono">
-              {panel.routeLabel ? `${mode === "auto" ? `识别为${panel.routeLabel} · ` : ""}默认形式：${panel.routeForm}` : ""}
+              {panel.routeLabel
+                ? mode === "auto"
+                  ? T("识别为{label} · 默认形式：{form}", { label: panel.routeLabel, form: panel.routeForm ?? "" })
+                  : T("默认形式：{form}", { form: panel.routeForm ?? "" })
+                : ""}
             </span>
             {(panel.drafts?.length || panel.error) && !panel.running && (
-              <button type="button" className="ai-link ai-route-rerun" title="按当前材料类型重新生成" onClick={onMakeCards}>
-                重跑
+              <button type="button" className="ai-link ai-route-rerun" title={T("按当前材料类型重新生成")} onClick={onMakeCards}>
+                {T("重跑")}
               </button>
             )}
           </div>
@@ -667,7 +683,7 @@ export default function AIPanel({
           <>
             {panel.blockReasons && panel.blockReasons.length > 0 && (
               <div className="ai-block-reasons">
-                <p>该{isOcclusion ? "图片" : "文本"}依赖未建立的理解：</p>
+                <p>{T(isOcclusion ? "该图片依赖未建立的理解：" : "该文本依赖未建立的理解：")}</p>
                 <ul>{panel.blockReasons.map((r, i) => <li key={i}>{r}</li>)}</ul>
                 {!isOcclusion && !panel.searched && (
                   <div className="ai-actions">
@@ -676,12 +692,12 @@ export default function AIPanel({
                       disabled={panel.searching || panel.running}
                       onClick={onSearchBackground}
                     >
-                      {panel.searching ? "检索中…" : "搜索网络补充背景后重试"}
+                      {panel.searching ? T("检索中…") : T("搜索网络补充背景后重试")}
                     </button>
                   </div>
                 )}
                 {!isOcclusion && panel.searched && (
-                  <p className="form-hint">已注入联网检索到的事件背景；若仍提示缺背景，建议手动补充来源文本。</p>
+                  <p className="form-hint">{T("已注入联网检索到的事件背景；若仍提示缺背景，建议手动补充来源文本。")}</p>
                 )}
               </div>
             )}
@@ -689,7 +705,7 @@ export default function AIPanel({
               if (panel.accepted?.has(i)) {
                 return (
                   <div key={i} className="ai-draft card-fill ai-draft-accepted">
-                    <div className="ai-draft-accepted-badge">已加入 FSRS 队列</div>
+                    <div className="ai-draft-accepted-badge">{T("已加入 FSRS 队列")}</div>
                     <div className="ai-draft-front">
                       <div className="ai-draft-text">{String(rawDraft?.front ?? "")}</div>
                     </div>
@@ -767,7 +783,7 @@ export default function AIPanel({
                             setEditing(null);
                           }}
                         >
-                          完成
+                          {T("完成")}
                         </button>
                       </div>
                     </>
@@ -778,10 +794,10 @@ export default function AIPanel({
                         {/* v30（D27）：分答多空卡徽标——接受时自动拆成每空一张 */}
                         {d.cardType === "cloze" && d.clozeMode === "per-blank" && (
                           <span className="ai-draft-supplement mono">
-                            分答·拆{Math.max(2, parseCloze(d.cloze || d.front || "").ords.length)}张
+                            {T("分答·拆{n}张", { n: Math.max(2, parseCloze(d.cloze || d.front || "").ords.length) })}
                           </span>
                         )}
-                        {panel.supplemental?.has(i) && <span className="ai-draft-supplement mono">补充</span>}
+                        {panel.supplemental?.has(i) && <span className="ai-draft-supplement mono">{T("补充")}</span>}
                         {d.contextPrefix && <span className="ai-draft-prefix mono">{d.contextPrefix}</span>}
                         {/* D121 §2.6：R21 归属标签——unknown 用既有 warn 色（lint-warn），其余沿用前缀行同款样式 */}
                         {d.qualifier && (
@@ -791,7 +807,7 @@ export default function AIPanel({
                             data-testid="draft-qualifier"
                             data-stance={d.qualifier.stance}
                           >
-                            {qualifierLabel(d.qualifier)}
+                            {qualifierLabel(d.qualifier, T)}
                           </span>
                         )}
                         <div className="ai-draft-text">
@@ -802,7 +818,7 @@ export default function AIPanel({
                       </div>
                       <div className="ai-draft-back">{d.back}</div>
                       {dIsOcc && occlLabel && (
-                        <div className="ai-draft-notes mono">区域 {(d.ord ?? d.occlusion?.ord ?? 0) + 1} · {occlLabel}</div>
+                        <div className="ai-draft-notes mono">{T("区域 {n} · {label}", { n: (d.ord ?? d.occlusion?.ord ?? 0) + 1, label: occlLabel })}</div>
                       )}
                       {toList(d.ruleNotes).length > 0 && (
                         <div className="ai-draft-notes mono">{toList(d.ruleNotes).join(" · ")}</div>
@@ -816,9 +832,9 @@ export default function AIPanel({
                         <div className="ai-draft-issues">
                           <span
                             className={`lint ${d.memoryRefValid ? "lint-info" : "lint-warn"}`}
-                            title={`引用记忆行：${d.memoryRef}${d.memoryRefValid ? "" : "\n（该行未能在本次注入的记忆块中找到——可能记忆已被整理更新）"}`}
+                            title={`${T("引用记忆行：")}${d.memoryRef}${d.memoryRefValid ? "" : "\n" + T("（该行未能在本次注入的记忆块中找到——可能记忆已被整理更新）")}`}
                           >
-                            {d.memoryRefValid ? "情境来自记忆" : "情境来源存疑"}
+                            {d.memoryRefValid ? T("情境来自记忆") : T("情境来源存疑")}
                           </span>
                         </div>
                       )}
@@ -837,7 +853,7 @@ export default function AIPanel({
                           <input
                             className="mono"
                             style={{ flex: 1, minWidth: 0 }}
-                            placeholder="补限定（如：桑德尔认为，）"
+                            placeholder={T("补限定（如：桑德尔认为，）")}
                             value={qualInput[i] ?? ""}
                             onChange={(e) => setQualInput((v) => ({ ...v, [i]: e.target.value }))}
                           />
@@ -855,32 +871,32 @@ export default function AIPanel({
                               });
                             }}
                           >
-                            补上
+                            {T("补上")}
                           </button>
                         </div>
                       )}
                       <div className="ai-actions">
                         {dIsOcc ? (
-                          <button className="btn btn-primary btn-sm" onClick={() => onAcceptOcclusion(d, i)}>接受</button>
+                          <button className="btn btn-primary btn-sm" onClick={() => onAcceptOcclusion(d, i)}>{T("接受")}</button>
                         ) : d.memoryRef && d.memoryRefValid === false && !memoryWarnArmed.has(i) ? (
                           <button
                             className="btn btn-secondary btn-sm"
-                            title="情境来源存疑：该记忆引用未能校验。再点一次确认接受（可自行决定保留），点「编辑」可删掉情境。"
+                            title={T("情境来源存疑：该记忆引用未能校验。再点一次确认接受（可自行决定保留），点「编辑」可删掉情境。")}
                             onClick={() => setMemoryWarnArmed((s) => new Set([...s, i]))}
                           >
-                            情境存疑·仍接受？
+                            {T("情境存疑·仍接受？")}
                           </button>
                         ) : (
-                          <button className="btn btn-primary btn-sm" onClick={() => onAccept(d, i)}>接受</button>
+                          <button className="btn btn-primary btn-sm" onClick={() => onAccept(d, i)}>{T("接受")}</button>
                         )}
-                        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(i)}>编辑</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setEditing(i)}>{T("编辑")}</button>
                         {d.cardType === "qa" && (
                           <button
                             className="btn btn-secondary btn-sm"
-                            title="拆为两张互为翻转的独立问答卡（各自有独立 FSRS 调度状态）"
+                            title={T("拆为两张互为翻转的独立问答卡（各自有独立 FSRS 调度状态）")}
                             onClick={() => onSplitReverse(i)}
                           >
-                            转翻转卡
+                            {T("转翻转卡")}
                           </button>
                         )}
                       </div>
@@ -891,7 +907,7 @@ export default function AIPanel({
             })}
             {(panel.kind === "cards" || isOcclusion) && !panel.running && panel.drafts && panel.drafts.length > 0 && (
               <div className="ai-actions">
-                <button className="btn btn-outline btn-sm" onClick={onRejectAll}>整批拒绝</button>
+                <button className="btn btn-outline btn-sm" onClick={onRejectAll}>{T("整批拒绝")}</button>
               </div>
             )}
           </>

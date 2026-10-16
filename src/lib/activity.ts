@@ -7,6 +7,9 @@
 // ③ 终态停留直到用户处置（打开/关闭），避免「生成完成」一闪而过看不见。
 
 import { eventBus } from "./eventbus";
+// tr：展示口径纯函数在渲染期取当前语言；describeTask 的参数名 t（任务对象）与本模块
+// 历史签名一致（测试直接驱动），故翻译函数用别名避开遮蔽。
+import { t as tr } from "./i18n";
 
 export type ActivityPhase =
   | "running"
@@ -269,15 +272,15 @@ export interface IndicatorView {
 export function describeTask(t: ActivityTask | null): IndicatorView | null {
   if (!t) return null;
   const pct = t.total > 0 ? Math.max(0, Math.min(100, Math.round((t.done / t.total) * 100))) : null;
-  const callsLine = t.budget > 0 ? `${t.calls} / ${t.budget} 次调用` : t.calls > 0 ? `${t.calls} 次调用` : "";
-  const title = t.title || "材料知识导图";
+  const callsLine = t.budget > 0 ? tr("{calls} / {budget} 次调用", { calls: t.calls, budget: t.budget }) : t.calls > 0 ? tr("{n} 次调用", { n: t.calls }) : "";
+  const title = t.title || tr("材料知识导图");
 
   switch (t.phase) {
     case "running":
       return {
-        short: pct === null ? "导图生成中" : `导图生成中 · ${pct}%`,
+        short: pct === null ? tr("导图生成中") : tr("导图生成中 · {pct}%", { pct }),
         heading: title,
-        detail: [t.label ? `正在处理：${t.label}` : "正在分析材料结构", pct === null ? "" : `${t.done} / ${t.total}`, callsLine]
+        detail: [t.label ? tr("正在处理：{label}", { label: t.label }) : tr("正在分析材料结构"), pct === null ? "" : `${t.done} / ${t.total}`, callsLine]
           .filter(Boolean)
           .join(" · "),
         tone: "busy",
@@ -287,56 +290,56 @@ export function describeTask(t: ActivityTask | null): IndicatorView | null {
     case "section_ready":
       // 首层就绪即已可用；深挖是「可继续」而不是「未完成」——不得显示成失败
       return {
-        short: t.published ? "导图已可用 · 可继续深化" : "已生成候选版本",
+        short: t.published ? tr("导图已可用 · 可继续深化") : tr("已生成候选版本"),
         heading: title,
         detail: t.published
-          ? "首层结构已就绪，可打开查看；更深的分支按需继续生成。"
-          : "新版首层已生成并保存为候选版本（已发布的旧版本不受影响）；打开即可查看这一版。",
+          ? tr("首层结构已就绪，可打开查看；更深的分支按需继续生成。")
+          : tr("新版首层已生成并保存为候选版本（已发布的旧版本不受影响）；打开即可查看这一版。"),
         tone: t.published ? "done" : "partial",
         percent: 100,
         canOpen: true
       };
     case "completed":
       // 「已更新」而非「生成完成」：深化随时会让它继续长大
-      return { short: "导图已更新", heading: title, detail: callsLine ? `共 ${callsLine}` : "", tone: "done", percent: 100, canOpen: true };
+      return { short: tr("导图已更新"), heading: title, detail: callsLine ? tr("共 {line}", { line: callsLine }) : "", tone: "done", percent: 100, canOpen: true };
     case "partial":
       return {
-        short: "导图已部分更新",
+        short: tr("导图已部分更新"),
         heading: title,
-        detail: "部分阶段未完成，旧版本仍然可用。" + (callsLine ? ` · ${callsLine}` : ""),
+        detail: tr("部分阶段未完成，旧版本仍然可用。") + (callsLine ? tr(" · {line}", { line: callsLine }) : ""),
         tone: "partial",
         percent: pct,
         canOpen: Boolean(t.mapId)
       };
     case "review_failed":
       return {
-        short: "导图待确认",
+        short: tr("导图待确认"),
         heading: title,
-        detail: `语义评审提出 ${t.issues ?? 0} 处问题，已生成的结构在确认修复前不发布；旧版本仍然可用。`,
+        detail: tr("语义评审提出 {n} 处问题，已生成的结构在确认修复前不发布；旧版本仍然可用。", { n: t.issues ?? 0 }),
         tone: "warn",
         percent: null,
         canOpen: false
       };
     case "failed":
       return {
-        short: "导图生成失败",
+        short: tr("导图生成失败"),
         heading: title,
-        detail: `${t.code ? failureReason(t.code) : "生成中断"}（旧版本仍然可用）`,
+        detail: tr("{reason}（旧版本仍然可用）", { reason: t.code ? failureReason(t.code) : tr("生成中断") }),
         tone: "error",
         percent: null,
         canOpen: false
       };
     case "interrupted":
       return {
-        short: "导图生成被中断 · 可继续",
+        short: tr("导图生成被中断 · 可继续"),
         heading: title,
-        detail: "应用关闭时这一轮没跑完（不是失败）。已完成的阶段保留在缓存，继续生成零重复计费。",
+        detail: tr("应用关闭时这一轮没跑完（不是失败）。已完成的阶段保留在缓存，继续生成零重复计费。"),
         tone: "partial",
         percent: pct,
         canOpen: true
       };
     case "cancelled":
-      return { short: "已取消", heading: title, detail: "已完成的阶段保留在缓存，重新生成会自动续跑。", tone: "warn", percent: null, canOpen: false };
+      return { short: tr("已取消"), heading: title, detail: tr("已完成的阶段保留在缓存，重新生成会自动续跑。"), tone: "warn", percent: null, canOpen: false };
     default:
       // 阶段已由 normalizeStage 收敛；这里再兜一层：**宁可什么都不显示，也不编造状态**
       return null;
@@ -353,5 +356,5 @@ function failureReason(code: string): string {
     json: "模型输出无法解析",
     cancelled: "已取消"
   };
-  return map[code] || "生成中断";
+  return map[code] ? tr(map[code]) : tr("生成中断");
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useDialogA11y } from "../lib/dialogA11y";
 import OcclusionShapes from "./OcclusionShapes";
 import type { OcclusionShape } from "../lib/occlusion";
+import { useT } from "../lib/i18n";
 
 export default function ImageLightbox({
   assetPath,
@@ -24,23 +25,24 @@ export default function ImageLightbox({
   const [showShapes, setShowShapes] = useState(true);
   // 此前本组件是全仓唯一绑定了 Esc 的模态；现统一走 useDialogA11y
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  const T = useT();
 
   const clamp = (v: number) => Math.min(4, Math.max(0.4, v));
   return (
     <div className="modal-backdrop image-lightbox-backdrop" onClick={onClose}>
-      <div className="image-lightbox" ref={panelRef} role="dialog" aria-modal="true" aria-label="原图查看" onClick={(e) => e.stopPropagation()}>
+      <div className="image-lightbox" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("原图查看")} onClick={(e) => e.stopPropagation()}>
         <div className="image-lightbox-bar">
-          <span className="image-lightbox-title">原图</span>
+          <span className="image-lightbox-title">{T("原图")}</span>
           <div className="image-lightbox-tools">
             {rects.length > 0 && (
               <button className="btn btn-outline btn-sm" onClick={() => setShowShapes((v) => !v)}>
-                {showShapes ? "隐藏遮挡" : "显示遮挡"}
+                {showShapes ? T("隐藏遮挡") : T("显示遮挡")}
               </button>
             )}
-            <button className="btn btn-outline btn-sm" aria-label="缩小" onClick={() => setScale((s) => clamp(+(s - 0.2).toFixed(2)))}>−</button>
+            <button className="btn btn-outline btn-sm" aria-label={T("缩小")} onClick={() => setScale((s) => clamp(+(s - 0.2).toFixed(2)))}>−</button>
             <span className="mono image-lightbox-zoom">{Math.round(scale * 100)}%</span>
-            <button className="btn btn-outline btn-sm" aria-label="放大" onClick={() => setScale((s) => clamp(+(s + 0.2).toFixed(2)))}>＋</button>
-            <button className="btn btn-secondary btn-sm" onClick={onClose}>关闭</button>
+            <button className="btn btn-outline btn-sm" aria-label={T("放大")} onClick={() => setScale((s) => clamp(+(s + 0.2).toFixed(2)))}>＋</button>
+            <button className="btn btn-secondary btn-sm" onClick={onClose}>{T("关闭")}</button>
           </div>
         </div>
         <div

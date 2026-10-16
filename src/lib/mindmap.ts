@@ -2,6 +2,7 @@
 // 与 journal.ts/memory.ts 同构：window.mindmapAPI 薄包装 + 主进程推送桥接为 EventBus `mindmap/changed`。
 
 import { eventBus } from "./eventbus";
+import { t } from "./i18n";
 
 export interface MapNodeRecord {
   id: string;
@@ -275,7 +276,7 @@ declare global {
 export const mindmapApi = {
   preview: (params: MindmapCollectParams) => window.mindmapAPI?.preview(params),
   generate: (params: MindmapCollectParams) => window.mindmapAPI?.generate(params),
-  deepen: (params: MindmapDeepenParams) => window.mindmapAPI?.deepen(params) ?? Promise.resolve({ status: "invalid" as const, error: "深不可用" }),
+  deepen: (params: MindmapDeepenParams) => window.mindmapAPI?.deepen(params) ?? Promise.resolve({ status: "invalid" as const, error: t("深不可用") }),
   cancel: (runId: string) => window.mindmapAPI?.cancel(runId),
   repairConfirm: (runId: string) => window.mindmapAPI?.repairConfirm(runId),
   list: (documentId: string) => window.mindmapAPI?.list(documentId) ?? Promise.resolve([]),

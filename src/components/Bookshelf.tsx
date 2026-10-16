@@ -12,6 +12,7 @@ import {
   IconLayoutGrid, IconList, IconPencil, IconTrash,
 } from "./icons";
 import Dropdown from "./Dropdown";
+import { useT } from "../lib/i18n";
 import {
   createFolderWith, dayLabel, dissolveFolder, ensureOrder, folderAggregate, folderEntries, findFolder,
   folderOf, forgetItem, groupInto, itemProgress, loadShelf, moveAllOut, moveStep, renameFolder,
@@ -134,6 +135,7 @@ const shelfCache: {
 } = { items: null, shelf: null, prefs: null };
 
 export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, topLevelSignal }: Props) {
+  const T = useT();
   const [items, setItems] = useState<LibraryItem[]>(shelfCache.items ?? []);
   const [shelf, setShelf] = useState<ShelfState>(shelfCache.shelf ?? EMPTY_SHELF);
   // 数据是否已就绪：有缓存＝立刻就绪；冷启动＝等首次加载完成，期间不渲染空态
@@ -303,7 +305,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
       });
       eventBus.emit("library/changed");
     } catch (err) {
-      setError(`删除《${title}》失败：${err instanceof Error ? err.message : String(err)}`);
+      setError(T("删除《{title}》失败：{msg}", { title, msg: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -315,7 +317,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
       await libraryApi.setItemLang(id, lang);
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, lang } : it)));
     } catch (err) {
-      setError(`设置语言失败：${err instanceof Error ? err.message : String(err)}`);
+      setError(T("设置语言失败：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -325,10 +327,10 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     setError(null);
     try {
       const r = await libraryApi.setPriority(id, priority);
-      if (!r?.ok) throw new Error("设置失败");
+      if (!r?.ok) throw new Error(T("设置失败"));
       setItems((prev) => prev.map((it) => (it.id === id ? { ...it, priority } : it)));
     } catch (err) {
-      setError(`设置优先级失败：${err instanceof Error ? err.message : String(err)}`);
+      setError(T("设置优先级失败：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -345,7 +347,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
         await libraryApi.setItemAuthor(cur.id, next);
         eventBus.emit("library/changed");
       } catch (err) {
-        setError(`修改作者失败：${err instanceof Error ? err.message : String(err)}`);
+        setError(T("修改作者失败：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
       }
       return;
     }
@@ -361,7 +363,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
       await libraryApi.setItemTitle(cur.id, next);
       eventBus.emit("library/changed");
     } catch (err) {
-      setError(`改名失败：${err instanceof Error ? err.message : String(err)}`);
+      setError(T("改名失败：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
     }
   }
 
@@ -488,7 +490,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     if (dir === null) return;
     e.preventDefault();
     e.stopPropagation();
-    if (!manual) { setError("拖拽与逐格移动仅在「手动顺序」下可用"); return; }
+    if (!manual) { setError(T("拖拽与逐格移动仅在「手动顺序」下可用")); return; }
     step(entry.id, dir);
     // 重排后焦点要跟着这一条走（否则列表重渲染把焦点丢回 body，连按不动）。
     // 原先这里硬查 `.book-card`——目录表里没有它，于是**目录表视图的 Alt+方向键一直连按不了**（v48.18 修）。
@@ -536,8 +538,8 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
               className="cap-input"
               autoFocus
               value={renaming.value}
-              title={renaming.field === "author" ? "作者（留空=未知），回车保存，Esc 取消" : "回车保存，Esc 取消"}
-              aria-label={renaming.field === "author" ? "修改作者" : entry.kind === "folder" ? "修改文件夹名" : "修改书名"}
+              title={renaming.field === "author" ? T("作者（留空=未知），回车保存，Esc 取消") : T("回车保存，Esc 取消")}
+              aria-label={renaming.field === "author" ? T("修改作者") : entry.kind === "folder" ? T("修改文件夹名") : T("修改书名")}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => setRenaming({ id: entry.id, value: e.target.value, field: renaming.field })}
               onBlur={() => void commitRename()}
@@ -560,8 +562,8 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
             <button
               type="button"
               className="cap-more-btn"
-              title={isFolder ? "文件夹操作" : "更多操作"}
-              aria-label={isFolder ? "文件夹操作" : "更多操作"}
+              title={isFolder ? T("文件夹操作") : T("更多操作")}
+              aria-label={isFolder ? T("文件夹操作") : T("更多操作")}
               aria-haspopup="true"
               onClick={(e) => { e.stopPropagation(); setMenu(menuOpen ? null : { id: entry.id, kind: menuKind }); }}
             >
@@ -585,12 +587,12 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
   const backToMore = (id: string) => (
     <button type="button" role="menuitem" className="dd-item dd-back" key="back"
       onClick={() => setMenu({ id, kind: "more" })}>
-      ‹ 更多操作
+      {T("‹ 更多操作")}
     </button>
   );
 
   const langMenu = (item: LibraryItem, backId?: string) => (
-    <CardMenu label="书籍语言">
+    <CardMenu label={T("书籍语言")}>
       {backId && backToMore(backId)}
       {BOOK_LANGUAGES.map((l) => (
         <button
@@ -609,7 +611,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
 
   // v48.22（D58 §6.8-2）：书级默认优先级（新建摘录继承；继承型摘录实时跟随）
   const priorityMenu = (item: LibraryItem, backId?: string) => (
-    <CardMenu label="优先级">
+    <CardMenu label={T("优先级")}>
       {backId && backToMore(backId)}
       {[10, 30, 50, 70, 90].map((p) => (
         <button
@@ -620,21 +622,21 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           className={`dd-item${(item.priority ?? 50) === p ? " dd-item-on" : ""}`}
           onClick={() => void handleSetPriority(item.id, p)}
         >
-          优先级 {p}
+          {T("优先级 {n}", { n: p })}
         </button>
       ))}
-      <div className="dd-note">新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。</div>
+      <div className="dd-note">{T("新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。")}</div>
     </CardMenu>
   );
 
   const groupMenu = (entry: ShelfEntry, backId?: string) => {
     const inFolder = entry.kind === "book" ? folderOf(shelf, entry.id) : null;
     return (
-      <CardMenu label="归入文件夹">
+      <CardMenu label={T("归入文件夹")}>
         {backId && backToMore(backId)}
         {entry.kind === "book" && (
           <button type="button" role="menuitem" className="dd-item" onClick={() => createFolder(entry.id)}>
-            新建文件夹并放入
+            {T("新建文件夹并放入")}
           </button>
         )}
         {shelf.folders.map((f) => (
@@ -651,7 +653,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
         ))}
         {inFolder && (
           <button type="button" role="menuitem" className="dd-item" onClick={() => leaveFolder(entry.id)}>
-            移出「{inFolder.name}」
+            {T("移出「{name}」", { name: inFolder.name })}
           </button>
         )}
       </CardMenu>
@@ -659,17 +661,17 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
   };
 
   const folderMenu = (f: ShelfFolder) => (
-    <CardMenu label="文件夹操作">
+    <CardMenu label={T("文件夹操作")}>
       {/* v48.117 / D162：重命名主路径是点名称（键盘等价保留菜单项）；无删除——解散不删书记录 */}
       <button type="button" role="menuitem" className="dd-item"
         onClick={() => { setMenu(null); setRenaming({ id: f.id, value: f.name }); }}>
-        重命名
+        {T("重命名")}
       </button>
       <button type="button" role="menuitem" className="dd-item" onClick={() => { setMenu(null); commit(moveAllOut(shelf, f.id)); }}>
-        把 {f.items.length} 本全部移回书架
+        {T("把 {n} 本全部移回书架", { n: f.items.length })}
       </button>
       <button type="button" role="menuitem" className="dd-item" onClick={() => { setMenu(null); commit(dissolveFolder(shelf, f.id)); }}>
-        解散文件夹（不删书记录）
+        {T("解散文件夹（不删书记录）")}
       </button>
     </CardMenu>
   );
@@ -680,31 +682,31 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     if (entry.kind !== "book") return null; // 类型收窄：只在书籍卡上被调用
     const item = entry.item;
     return (
-      <CardMenu label="更多操作">
-        <button type="button" role="menuitem" className="dd-item" aria-label="重命名"
+      <CardMenu label={T("更多操作")}>
+        <button type="button" role="menuitem" className="dd-item" aria-label={T("重命名")}
           onClick={() => { setMenu(null); setRenaming({ id: entry.id, value: item.title }); }}>
-          重命名
+          {T("重命名")}
         </button>
-        <button type="button" role="menuitem" className="dd-item" aria-label="作者"
-          title={item.author ? `作者：${item.author}（点击修改）` : "设置作者（留空=未知）"}
+        <button type="button" role="menuitem" className="dd-item" aria-label={T("作者")}
+          title={item.author ? T("作者：{name}（点击修改）", { name: item.author }) : T("设置作者（留空=未知）")}
           onClick={() => { setMenu(null); setRenaming({ id: entry.id, value: item.author ?? "", field: "author" }); }}>
-          设置作者{item.author ? `：${item.author}` : ""}
+          {item.author ? T("设置作者：{name}", { name: item.author }) : T("设置作者")}
         </button>
-        <button type="button" role="menuitem" className="dd-item" aria-label="书籍语言"
+        <button type="button" role="menuitem" className="dd-item" aria-label={T("书籍语言")}
           onClick={() => setMenu({ id: entry.id, kind: "lang" })}>
-          书籍语言
+          {T("书籍语言")}
         </button>
-        <button type="button" role="menuitem" className="dd-item" aria-label="优先级" data-book-priority
+        <button type="button" role="menuitem" className="dd-item" aria-label={T("优先级")} data-book-priority
           onClick={() => setMenu({ id: entry.id, kind: "priority" })}>
-          优先级
+          {T("优先级")}
         </button>
-        <button type="button" role="menuitem" className="dd-item" aria-label="归入文件夹"
+        <button type="button" role="menuitem" className="dd-item" aria-label={T("归入文件夹")}
           onClick={() => setMenu({ id: entry.id, kind: "group" })}>
-          归入文件夹
+          {T("归入文件夹")}
         </button>
-        <button type="button" role="menuitem" className="dd-item dd-item-danger" aria-label="删除"
+        <button type="button" role="menuitem" className="dd-item dd-item-danger" aria-label={T("删除")}
           onClick={() => { setError(null); setMenu(null); setPendingDelete(item.id); }}>
-          删除…
+          {T("删除…")}
         </button>
       </CardMenu>
     );
@@ -712,14 +714,14 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
 
   const confirmBox = (id: string, title: string) => (
     <div className="book-card-confirm" onClick={(e) => e.stopPropagation()}>
-      <span className="book-card-confirm-title">确定删除《{title}》吗？</span>
+      <span className="book-card-confirm-title">{T("确定删除《{title}》吗？", { title })}</span>
       <div className="book-card-confirm-actions">
         <button className="btn btn-danger btn-sm" onClick={() => void confirmDelete(id, title)}>
-          确认删除
+          {T("确认删除")}
         </button>
         {/* 焦点落在「取消」而不是「确认删除」：一次误按 Enter 不该删书（D50） */}
         <button className="btn btn-outline btn-sm" autoFocus onClick={() => setPendingDelete(null)}>
-          取消
+          {T("取消")}
         </button>
       </div>
     </div>
@@ -759,7 +761,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           tabIndex={0}
           role="button"
           title={title}
-          aria-label={isFolder ? `打开文件夹「${title}」，含 ${agg!.n} 本` : `打开《${title}》`}
+          aria-label={isFolder ? T("打开文件夹「{title}」，含 {n} 本", { title, n: agg!.n }) : T("打开《{title}》", { title })}
           onClick={() => (isFolder ? openInto(entry.id) : onOpenBook(entry.id))}
           onKeyDown={onCardKeyDown(entry)}
         >
@@ -793,8 +795,8 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           {drag?.target === entry.id && drag.zone === "group" && (
             <span className="zone-tip">
               {drag.id === entry.id ? "" : entry.kind === "folder"
-                ? `归入「${title.length > 10 ? `${title.slice(0, 10)}…` : title}」`
-                : `与《${title.length > 10 ? `${title.slice(0, 10)}…` : title}》成组`}
+                ? T("归入「{title}」", { title: title.length > 10 ? `${title.slice(0, 10)}…` : title })
+                : T("与《{title}》成组", { title: title.length > 10 ? `${title.slice(0, 10)}…` : title })}
             </span>
           )}
         </div>
@@ -809,13 +811,13 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           className="cap"
           role="button"
           tabIndex={0}
-          aria-label={isFolder ? `打开文件夹「${title}」，含 ${agg!.n} 本` : `打开《${title}》`}
+          aria-label={isFolder ? T("打开文件夹「{title}」，含 {n} 本", { title, n: agg!.n }) : T("打开《{title}》", { title })}
           onClick={() => (isFolder ? openInto(entry.id) : onOpenBook(entry.id))}
           onKeyDown={onCardKeyDown(entry)}
         >
           {caption(entry, title, isFolder
-            ? [`${agg!.n} 本`, agg!.latest ? dayLabel(agg!.latest) : "未读"]
-            : [pct(progress), dayLabel(entry.item.updatedAt) || "未读", (entry.item.lang || "").toUpperCase() || "—"])}
+            ? [T("{n} 本", { n: agg!.n }), agg!.latest ? dayLabel(agg!.latest) : T("未读")]
+            : [pct(progress), dayLabel(entry.item.updatedAt) || T("未读"), (entry.item.lang || "").toUpperCase() || "—"])}
         </div>
       </div>
     );
@@ -830,7 +832,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     // 打开只有一条路径：格子的 onClick（封面格与书名格共用）；键盘经 .t-open 的原生 click 冒泡上来
     const open = () => (isFolder ? openInto(entry.id) : onOpenBook(entry.id));
-    const openLabel = isFolder ? `打开文件夹「${title}」，含 ${agg!.n} 本` : `打开《${title}》`;
+    const openLabel = isFolder ? T("打开文件夹「{title}」，含 {n} 本", { title, n: agg!.n }) : T("打开《{title}》", { title });
     return (
       <tr
         key={entry.id}
@@ -878,11 +880,11 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           </button>
           {isFolder ? (
             <>
-              <div className="t-sub">{agg!.n} 本 · 悬停看成员</div>
+              <div className="t-sub">{T("{n} 本 · 悬停看成员", { n: agg!.n })}</div>
               <div className="t-members">{members.map((m) => m.title).join(" · ")}</div>
             </>
           ) : (
-            <div className="t-sub">{entry.item.progressJson ? lastReadDisplay(entry.item) : "尚未开始 · 全文开头"}</div>
+            <div className="t-sub">{entry.item.progressJson ? lastReadDisplay(entry.item) : T("尚未开始 · 全文开头")}</div>
           )}
           <div className="bar"><i style={{ width: pct(progress) }} /></div>
         </td>
@@ -893,11 +895,11 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
         <td className="col-act">
           {pendingDelete === entry.id && !isFolder ? confirmBox(entry.id, entry.item.title) : (
             <>
-              <button className="act" title={isFolder ? "重命名文件夹" : "重命名"} aria-label="重命名"
+              <button className="act" title={isFolder ? T("重命名文件夹") : T("重命名")} aria-label={T("重命名")}
                 onClick={() => setRenaming({ id: entry.id, value: title })}><IconPencil /></button>
               {isFolder ? (
                 <span className="dd">
-                  <button className="act" title="文件夹操作" aria-label="文件夹操作" aria-haspopup="true"
+                  <button className="act" title={T("文件夹操作")} aria-label={T("文件夹操作")} aria-haspopup="true"
                     onClick={() => setMenu(menu?.id === entry.id && menu.kind === "folder" ? null : { id: entry.id, kind: "folder" })}>
                     <IconEllipsis />
                   </button>
@@ -906,19 +908,19 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
               ) : (
                 <>
                   <span className="dd">
-                    <button className="act" title="书籍语言" aria-label="书籍语言" aria-haspopup="true"
+                    <button className="act" title={T("书籍语言")} aria-label={T("书籍语言")} aria-haspopup="true"
                       onClick={() => setMenu(menu?.id === entry.id && menu.kind === "lang" ? null : { id: entry.id, kind: "lang" })}>
                       <IconLanguages />
                     </button>
                     {menu?.id === entry.id && menu.kind === "lang" && langMenu(entry.item)}                  </span>
                   <span className="dd">
-                    <button className="act" title="归入文件夹" aria-label="归入文件夹" aria-haspopup="true"
+                    <button className="act" title={T("归入文件夹")} aria-label={T("归入文件夹")} aria-haspopup="true"
                       onClick={() => setMenu(menu?.id === entry.id && menu.kind === "group" ? null : { id: entry.id, kind: "group" })}>
                       <IconFolderPlus />
                     </button>
                     {menu?.id === entry.id && menu.kind === "group" && groupMenu(entry)}
                   </span>
-                  <button className="act is-danger" title="删除" aria-label="删除"
+                  <button className="act is-danger" title={T("删除")} aria-label={T("删除")}
                     onClick={() => { setError(null); setMenu(null); setPendingDelete(entry.id); }}><IconTrash /></button>
                 </>
               )}
@@ -941,11 +943,11 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     <div className="shelf-bar">
       <span className="shelf-count">
         {openFolder ? (
-          <><b>{entries.length}</b> 本</>
+          <><b>{entries.length}</b> {T("本", { n: entries.length })}</>
         ) : (
           <>
-            <b>{bookCount}</b> 本
-            {folderCount > 0 && <> · <b>{folderCount}</b> 个文件夹</>}
+            <b>{bookCount}</b> {T("本", { n: bookCount })}
+            {folderCount > 0 && <> · <b>{folderCount}</b> {T("个文件夹", { n: folderCount })}</>}
           </>
         )}
       </span>
@@ -954,7 +956,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           <button
             type="button"
             className={`btn btn-outline btn-sm${drag?.target === "__root" && drag.zone === "group" ? " is-hot" : ""}`}
-            title="返回书架顶层；把书拖到这里 = 移回书架"
+            title={T("返回书架顶层；把书拖到这里 = 移回书架")}
             onClick={backToTop}
             onDragOver={(e) => {
               if (!drag || !manual || drag.id === openFolderId) return;
@@ -970,32 +972,32 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
             }}
           >
             <IconArrowLeft size={14} />
-            返回书架
+            {T("返回书架")}
           </button>
           <span className="crumb-sep" />
           <span className="crumb-here">{openFolder.name}</span>
         </span>
       )}
-      <span className="shelf-group" role="group" aria-label="视图">
-        <span className="shelf-label">视图</span>
+      <span className="shelf-group" role="group" aria-label={T("视图")}>
+        <span className="shelf-label">{T("视图")}</span>
         <span className="shelf-seg">
-          {segBtn(mode === "wall", "封面墙", () => setMode("wall"), <IconLayoutGrid />)}
-          {segBtn(mode === "table", "目录表", () => setMode("table"), <IconList />)}
+          {segBtn(mode === "wall", T("封面墙"), () => setMode("wall"), <IconLayoutGrid />)}
+          {segBtn(mode === "table", T("目录表"), () => setMode("table"), <IconList />)}
         </span>
       </span>
-      <span className="shelf-group is-density" role="group" aria-label="密度">
-        <span className="shelf-label">密度</span>
+      <span className="shelf-group is-density" role="group" aria-label={T("密度")}>
+        <span className="shelf-label">{T("密度")}</span>
         <span className="shelf-seg">
-          {SHELF_DENSITIES.map((d) => segBtn(density === d.value, d.label, () => setDensity(d.value), d.label))}
+          {SHELF_DENSITIES.map((d) => segBtn(density === d.value, T(d.label), () => setDensity(d.value), T(d.label)))}
         </span>
       </span>
-      <span className="shelf-group" role="group" aria-label="排序">
-        <span className="shelf-label">排序</span>
-        <Dropdown value={sort} options={SHELF_SORTS} onChange={(v) => setSort(v as ShelfSort)} title="排序方式" align="left" />
+      <span className="shelf-group" role="group" aria-label={T("排序")}>
+        <span className="shelf-label">{T("排序")}</span>
+        <Dropdown value={sort} options={SHELF_SORTS.map((s) => ({ ...s, label: T(s.label) }))} onChange={(v) => setSort(v as ShelfSort)} title={T("排序方式")} align="left" />
       </span>
       <span className="shelf-spacer" />
       {/* 拖拽提示只余停用说明（v48.120/D165）：手动顺序下的操作说明文字退役，Alt+←/→ 键盘等价语义不变 */}
-      {!manual && <span className="shelf-hint">非手动顺序，拖拽已停用</span>}
+      {!manual && <span className="shelf-hint">{T("非手动顺序，拖拽已停用")}</span>}
       {/* 主行动纯文字（v48.119/D164）＋ 选单两分（v49.3/D177）：按钮点击弹「导入文件 / 粘贴材料」
           两项选单，原四合一导入面板收拢于此；快捷键 Ctrl+Alt+N 的注册契约不变（§4.2-21，直达粘贴） */}
       <span className="dd">
@@ -1008,18 +1010,18 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           aria-expanded={menu?.kind === "add"}
           onClick={() => setMenu(menu?.kind === "add" ? null : { id: "__toolbar__", kind: "add" })}
         >
-          添加材料
+          {T("添加材料")}
         </button>
         {menu?.kind === "add" && (
-          <div className="dd-menu" role="menu" aria-label="添加材料">
+          <div className="dd-menu" role="menu" aria-label={T("添加材料")}>
             <button
               type="button"
               role="menuitem"
               className="dd-item add-source-item"
               onClick={() => { setMenu(null); addBtnRef.current?.focus(); onImportFiles(); }}
             >
-              <span className="add-source-main"><IconImport size={14} /> 导入文件</span>
-              <span className="add-source-desc">EPUB / PDF / Word / TXT / Markdown…</span>
+              <span className="add-source-main"><IconImport size={14} /> {T("导入文件")}</span>
+              <span className="add-source-desc">{T("EPUB / PDF / Word / TXT / Markdown…")}</span>
             </button>
             <button
               type="button"
@@ -1027,8 +1029,8 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
               className="dd-item add-source-item"
               onClick={() => { setMenu(null); addBtnRef.current?.focus(); onPasteMaterial(); }}
             >
-              <span className="add-source-main"><IconPencil size={14} /> 粘贴材料</span>
-              <span className="add-source-desc">全窗口 Markdown 编辑器，可设书名与语言</span>
+              <span className="add-source-main"><IconPencil size={14} /> {T("粘贴材料")}</span>
+              <span className="add-source-desc">{T("全窗口 Markdown 编辑器，可设书名与语言")}</span>
             </button>
           </div>
         )}
@@ -1045,7 +1047,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           <span>{error}</span>
           <span className="notice-bar-actions">
             <button className="btn btn-outline btn-sm" onClick={() => setError(null)}>
-              知道了
+              {T("知道了")}
             </button>
           </span>
         </p>
@@ -1059,8 +1061,8 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
         <div className="empty-state">
           <p className="empty-text">
             {openFolder
-              ? "这个文件夹还是空的。把书拖到另一本书上，或用卡片动作条的「归入文件夹」往里放。"
-              : "书架还是空的。用右上角的「添加材料」，或按 Ctrl+Alt+N，粘贴一段文本、导入 EPUB / Word / TXT / Markdown，开始你的渐进阅读。"}
+              ? T("这个文件夹还是空的。把书拖到另一本书上，或用卡片动作条的「归入文件夹」往里放。")
+              : T("书架还是空的。用右上角的「添加材料」，或按 Ctrl+Alt+N，粘贴一段文本、导入 EPUB / Word / TXT / Markdown，开始你的渐进阅读。")}
           </p>
         </div>
       ) : mode === "wall" ? (
@@ -1071,11 +1073,11 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
             <thead>
               <tr>
                 <th className="col-cov" />
-                <th>书名 / 上次阅读</th>
-                <th className="col-num">进度</th>
-                <th className="col-num">语言</th>
-                <th className="col-num">最近</th>
-                <th className="col-num">添加</th>
+                <th>{T("书名 / 上次阅读")}</th>
+                <th className="col-num">{T("进度")}</th>
+                <th className="col-num">{T("语言")}</th>
+                <th className="col-num">{T("最近")}</th>
+                <th className="col-num">{T("添加")}</th>
                 <th className="col-act" />
               </tr>
             </thead>

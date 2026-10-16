@@ -2503,7 +2503,7 @@ function DictSection() {
         return (
           <div key={c.id} className="dict-catalog-row">
             <div>
-              <div><strong>{c.name}</strong> <span className="mono">{c.estSizeLabel}</span> <span className="dict-tag">{c.recommendLevel}</span></div>
+              <div><strong>{c.name}</strong> <span className="mono">{T(c.estSizeLabel)}</span> <span className="dict-tag">{T(c.recommendLevel)}</span></div>
               <div className="form-hint">{T(c.desc)}{T(c.recommend)}（{c.license}，{T(c.updateFreq)}）</div>
               {pg && (pg.state === "downloading" || pg.state === "indexing") && (
                 <div className="mono">
@@ -3283,7 +3283,7 @@ export default function SettingsPanel({
                       key={m.id}
                       className={`skin-card${skinId === m.id ? " active" : ""}${chromeShort ? " disabled" : ""}`}
                       disabled={chromeShort}
-                      title={chromeShort ? T("需要 Chromium ≥ {n}", { n: m.requiresChrome }) : m.description}
+                      title={chromeShort ? T("需要 Chromium ≥ {n}", { n: m.requiresChrome }) : m.description ? T(m.description) : undefined}
                       onClick={() => onSkinChange(m.id)}
                     >
                       <span className="skin-card-preview" aria-hidden="true">
@@ -3291,8 +3291,8 @@ export default function SettingsPanel({
                           <i key={i} style={{ background: c }} />
                         ))}
                       </span>
-                      <span className="skin-card-name">{m.name}</span>
-                      {m.description && <span className="skin-card-desc">{m.description}</span>}
+                      <span className="skin-card-name">{T(m.name)}</span>
+                      {m.description && <span className="skin-card-desc">{T(m.description)}</span>}
                       <span className="skin-card-meta">{motionLabel}</span>
                     </button>
                   );
@@ -3328,10 +3328,10 @@ export default function SettingsPanel({
               </div>
             </SettingsSection>
 
-            <ReaderSection />
-
-            {/* v49.8（D182）：界面语言（sec-language，唯一切换入口） */}
+            {/* v49.8（D182）：界面语言（sec-language，唯一切换入口）——与左栏导航一致，「界面」组内紧跟主题与颜色 */}
             <LanguageSection />
+
+            <ReaderSection />
 
             {/* 复习与调度（D114 §5.2）：摘录复习 → 每日上限 → 调度规则 → 卡面与标签 → FSRS */}
             <ExtractReviewSection />

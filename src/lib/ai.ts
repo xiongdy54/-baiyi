@@ -1,4 +1,5 @@
 // AIGateway 渲染层客户端（文档§3.11）— 所有 AI 功能经此，不直调 LLM
+import { t } from "./i18n";
 
 // 供应商注册表元数据（v48.68 / D112）：随 ai:getConfig 下发，仅公开字段、永不含 Key
 export interface AiPresetMeta {
@@ -77,7 +78,7 @@ export const aiGateway = {
     await window.aiAPI?.setConfig(partial);
   },
   async test(): Promise<{ ok: boolean; message: string }> {
-    if (!window.aiAPI) return { ok: false, message: "API 不可用" };
+    if (!window.aiAPI) return { ok: false, message: t("API 不可用") };
     return window.aiAPI.test();
   },
   async listModels(): Promise<string[]> {
@@ -104,7 +105,7 @@ export const aiGateway = {
   ): Promise<string> {
     return new Promise((resolve, reject) => {
       if (!window.aiAPI) {
-        reject(new Error("AI API 不可用"));
+        reject(new Error(t("AI API 不可用")));
         return;
       }
       const requestId = Math.random().toString(36).slice(2);

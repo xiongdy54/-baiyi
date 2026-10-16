@@ -2,6 +2,7 @@
 // 编排在渲染层（同制卡管线 §4.3）：buildPackage → createRun → ai:chat 流式 → completeRun/failRun；
 // 反馈只写 insight_runs（永不写 mastery）；Personal Meaning 候选确认后才成事实（§4.13-3）。
 import { eventBus } from "./eventbus";
+import { t } from "./i18n";
 
 export interface InsightDiarySpan {
   entryId: string;
@@ -239,13 +240,13 @@ export function parseInsightOutput(raw: string): InsightOutput {
   for (const cand of candidates) {
     try {
       const parsed = JSON.parse(cand) as InsightOutput;
-      if (!parsed || typeof parsed !== "object") throw new Error("AI 返回不是对象");
+      if (!parsed || typeof parsed !== "object") throw new Error(t("AI 返回不是对象"));
       return parsed;
     } catch (err) {
       lastErr = err;
     }
   }
-  throw new Error(`洞察输出解析失败：${lastErr instanceof Error ? lastErr.message : String(lastErr)}`);
+  throw new Error(t("洞察输出解析失败：{msg}", { msg: lastErr instanceof Error ? lastErr.message : String(lastErr) }));
 }
 
 /** Evidence Package → 用户消息文本（禁全库直发的对照物：只发包内内容，ID 显式标出供引用） */

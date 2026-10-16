@@ -27,6 +27,7 @@ import {
   type ReactNode
 } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "../lib/i18n";
 
 // §8.2 的交互常量（设计稿定值）。淡出的视觉时长在 CSS 里走 --dur-tip-out；
 // 这里的 CLOSE_GRACE_MS 是浮层延迟卸载的宽限窗（指针 200ms 内移入可取消消失），取 §8.2 的 200ms。
@@ -49,6 +50,7 @@ interface Props {
 }
 
 export default function SettingsInfo({ label, children }: Props) {
+  const T = useT();
   const [phase, setPhase] = useState<Phase>("closed");
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -210,7 +212,7 @@ export default function SettingsInfo({ label, children }: Props) {
         type="button"
         ref={btnRef}
         className="settings-info"
-        aria-label={`${label}的说明`}
+        aria-label={T("{label}的说明", { label })}
         // 淡出（closing）期间保持 true：读屏播报与视觉消失同步，200ms 后才翻 false
         aria-expanded={phase !== "closed"}
         onPointerEnter={onPointerEnter}

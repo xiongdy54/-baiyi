@@ -32,6 +32,7 @@ import { useTagsEnabled } from "../lib/tagSettings";
 import { growthApi, readGrowthFeedbackEnabled, type GrowthEventHit, type GrowthFoldEntry, type GrowthSessionSummaryResult } from "../lib/growth";
 import { growthEventText, growthEvidenceLines, growthFoldText, growthTierLabel } from "../lib/growthStrings";
 import GrowthToast from "./GrowthToast";
+import { useT } from "../lib/i18n";
 
 // A-1（审计）：渲染期调用不得抛。原写法 `previews?.items ?? fsrsEngine.preview(current!.fsrs)`
 // 在 previews 为 null 时会同步抛，被根错误边界接管 → 整应用停止渲染。这里降级为空列表。
@@ -91,6 +92,7 @@ function GrowthFoldRow({ fold }: { fold: GrowthFoldEntry }) {
 }
 
 function GrowthSessionSummary({ fromTs }: { fromTs: number }) {
+  const T = useT();
   const [result, setResult] = useState<GrowthSessionSummaryResult | null>(null);
   useEffect(() => {
     let alive = true;
@@ -106,7 +108,7 @@ function GrowthSessionSummary({ fromTs }: { fromTs: number }) {
   if (hits.length === 0 && folded.length === 0) return null; // 空态：不渲染本块（G-8）
   return (
     <div className="growth-session" data-growth-session>
-      <p className="growth-session-title">本轮成果</p>
+      <p className="growth-session-title">{T("本轮成果")}</p>
       <ul className="growth-session-list">
         {hits.map((h) => (
           <GrowthRow key={h.key} hit={h} />
@@ -142,6 +144,7 @@ export default function ReviewView({
   /** v48.41（D81）：当前卡材料名上报（顶栏中间显示；无材料名时回调空串＝回落「复习」字样） */
   onMaterialName?: (name: string) => void;
 } = {}) {
+  const T = useT();
   const tagsEnabled = useTagsEnabled();
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
@@ -468,7 +471,7 @@ export default function ReviewView({
             cardId: current.id,
             ruleId: "LEECH",
             severity: "warn",
-            message: `连续遗忘 ${lapses} 次，已自动暂停`,
+            message: T("连续遗忘 {n} 次，已自动暂停", { n: lapses }),
             source: "lint"
           });
           await cardsApi.updateLeech(current.id, { isLeech: true, suspended: true, suspendedAt: Date.now() });
@@ -505,7 +508,7 @@ export default function ReviewView({
           cardId: current.id,
           ruleId: "MARK",
           severity: "warn",
-          message: "复习中标记待改",
+          message: T("复习中标记待改"),
           source: "review-mark"
         });
         await cardsApi.setSuspended(current.id, true, "review-mark");
@@ -617,7 +620,7 @@ export default function ReviewView({
   // 需求3：删除当前卡（确认后软删），继续下一张
   async function handleDelete() {
     if (!current || actionBusyRef.current || saveError) return;
-    if (!window.confirm(`确定删除这张卡片？\n\n${current.frontMarkdown || current.noteText}`)) return;
+    if (!window.confirm(`${T("确定删除这张卡片？")}\n\n${current.frontMarkdown || current.noteText}`)) return;
     actionBusyRef.current = true;
     try {
       try {
@@ -772,15 +775,19 @@ export default function ReviewView({
 
   // v34（M12，§4.16）：延后原因可读化——reviewed=同源卡今日已评分；revealed=同组今日放行名额已被占
   function deferReasonText(r?: TodayQueue["deferred"][number]["deferReason"]): string {
-    if (!r) return "同源卡今日已放行";
-    const f = r.siblingFront ? `「${r.siblingFront.slice(0, 20)}${r.siblingFront.length > 20 ? "…" : ""}」` : "";
-    return r.kind === "reviewed" ? `同源卡今日已评分：${f}` : `与今日已放行的${f || "同源卡"}同源`;
+    if (!r) return T("同源卡今日已放行");
+    const f = r.siblingFront ? `${r.siblingFront.slice(0, 20)}${r.siblingFront.length > 20 ? "…" : ""}` : "";
+    return r.kind === "reviewed"
+      ? T("同源卡今日已评分：「{front}」", { front: f })
+      : f
+        ? T("与今日已放行的「{front}」同源", { front: f })
+        : T("与今日已放行的同源卡同源");
   }
 
   const deferredPanel = deferred.length > 0 && (
     <div className="review-deferred">
       <button className="review-jump" onClick={() => setDeferredOpen((v) => !v)}>
-        同源暂缓 {deferred.length} 张（明日自动解封）
+        {T("同源暂缓 {n} 张（明日自动解封）", { n: deferred.length })}
       </button>
       {deferredOpen && (
         <ul className="deferred-list">
@@ -798,7 +805,7 @@ export default function ReviewView({
   if (loading) {
     return (
       <div className="review-wrap">
-        <div className="empty-state"><p className="empty-text">加载中…</p></div>
+        <div className="empty-state"><p className="empty-text">{T("加载中…")}</p></div>
       </div>
     );
   }
@@ -837,7 +844,7 @@ export default function ReviewView({
         {/* 头带：全宽吸顶（与摘录页同一配方），计数在最右 */}
         <div className="review-head">
           <div className="review-head-inner">
-            <div className="review-count mono">摘录 · 合并复习</div>
+            <div className="review-count mono">{T("摘录 · 合并复习")}</div>
           </div>
         </div>
         <div className="review-session">
@@ -856,13 +863,13 @@ export default function ReviewView({
             D88 §7.2：进度轨随头带（收尾页分母>0 时呈满格——doneCount/分母=100%）。 */}
         <div className="review-head">
           <div className="review-head-inner">
-            <div className="review-count mono">{doneCount} 张已复习</div>
+            <div className="review-count mono">{T("{n} 张已复习", { n: doneCount })}</div>
           </div>
           {progressDenominator > 0 && (
             <div
               className="review-progress"
               role="progressbar"
-              aria-label="今日复习进度"
+              aria-label={T("今日复习进度")}
               aria-valuemin={0}
               aria-valuemax={progressDenominator}
               aria-valuenow={doneCount}
@@ -874,7 +881,7 @@ export default function ReviewView({
         <div className="review-session">
           <div className="empty-state">
             <p className="empty-text">
-              {doneCount > 0 ? "到期卡片已清空，休息一下。" : "今日到期卡片已清空。"}
+              {doneCount > 0 ? T("到期卡片已清空，休息一下。") : T("今日到期卡片已清空。")}
             </p>
             {deferredPanel}
             {/* v48.85（D129 B3，§5.2）：会话成果汇总——deferredPanel 之后；仅 doneCount>0 时驱动
@@ -883,11 +890,11 @@ export default function ReviewView({
             <div className="settings-row">
               {undoInfo && (
                 <button className="btn btn-secondary btn-sm" onClick={undoLastGrade}>
-                  撤销评分{undoInfo.rating ? `（${undoInfo.rating}）` : ""}
+                  {undoInfo.rating ? T("撤销评分（{rating}）", { rating: undoInfo.rating }) : T("撤销评分")}
                 </button>
               )}
               <button className="btn btn-secondary btn-sm" onClick={() => window.location.reload()}>
-                刷新
+                {T("刷新")}
               </button>
             </div>
           </div>
@@ -909,19 +916,19 @@ export default function ReviewView({
           <div className="review-count" data-review-counts>
             <span className="qi">
               <span className="lab">
-                未学习
+                {T("未学习")}
               </span>
               <span className={`qi-num${bumpKeys.new ? " bump" : ""}`}>{counts.new}</span>
             </span>
             <span className="qi">
               <span className="lab">
-                学习中
+                {T("学习中")}
               </span>
               <span className={`qi-num${bumpKeys.learning ? " bump" : ""}`}>{counts.learning}</span>
             </span>
             <span className="qi">
               <span className="lab">
-                待复习
+                {T("待复习")}
               </span>
               <span className={`qi-num${bumpKeys.review ? " bump" : ""}`}>{counts.review}</span>
             </span>
@@ -948,7 +955,7 @@ export default function ReviewView({
         {/* v23（§4.4.9）：persist 失败横幅——停留当前卡、封锁动作，重试成功后自动恢复 */}
         {saveError && (
           <div className="save-error" role="alert">
-            <span>保存失败：刚才的操作尚未写入磁盘，已停留在本卡。</span>
+            <span>{T("保存失败：刚才的操作尚未写入磁盘，已停留在本卡。")}</span>
             <button
               className="btn btn-secondary btn-sm"
               onClick={async () => {
@@ -958,14 +965,14 @@ export default function ReviewView({
                 } catch { /* 仍失败则保持错误态 */ }
               }}
             >
-              重试保存
+              {T("重试保存")}
             </button>
           </div>
         )}
 
         {previewError && (
           <div className="save-error" role="alert">
-            <span>这张卡的调度状态无法解析，已暂停对它评分：{previewError}</span>
+            <span>{T("这张卡的调度状态无法解析，已暂停对它评分：{msg}", { msg: previewError })}</span>
           </div>
         )}
 
@@ -999,19 +1006,19 @@ export default function ReviewView({
             <button
               className="bar-btn ghost review-tag-add"
               data-testid="review-tag-add"
-              title="给这张卡加标签（如「错题」），可在卡片浏览器按 tag: 筛选"
+              title={T("给这张卡加标签（如「错题」），可在卡片浏览器按 tag: 筛选")}
               onClick={() => {
                 setTagOpen((v) => !v);
                 setTagDraft([]);
               }}
             >
-              ＋ 标签
+              {T("＋ 标签")}
             </button>
             {tagOpen && (
               <span className="review-tag-editor">
-                <TagInput value={tagDraft} onChange={setTagDraft} suggestions={tagVocab} ariaLabel="标签" placeholder="输入标签，回车确认" />
+                <TagInput value={tagDraft} onChange={setTagDraft} suggestions={tagVocab} ariaLabel={T("标签")} placeholder={T("输入标签，回车确认")} />
                 <button className="btn btn-primary btn-sm" data-testid="review-tag-apply" disabled={tagDraft.length === 0} onClick={() => void applyQuickTags()}>
-                  保存
+                  {T("保存")}
                 </button>
               </span>
             )}
@@ -1024,16 +1031,16 @@ export default function ReviewView({
         {showBack && (() => {
           const link = latestLink(cardLinks);
           if (!link) return null;
-          const label = link.verdict ? VERDICT_LABELS[link.verdict] : null;
+          const label = link.verdict ? T(VERDICT_LABELS[link.verdict]) : null;
           return (
             <button
               type="button"
               className="review-disamb-hint"
               data-testid="review-disamb-hint"
-              title="查看或修改这次辨析"
+              title={T("查看或修改这次辨析")}
               onClick={() => setDisamb(link.other ? { presetOther: link.other.id } : {})}
             >
-              {disambHintText(link.other, label)}
+              {disambHintText(link.other, label, T)}
             </button>
           );
         })()}
@@ -1052,14 +1059,14 @@ export default function ReviewView({
             className="bar-btn primary grow"
             data-reveal
             disabled={saveError || !current}
-            title={`显示答案（快捷键：${hint || "未绑定"}，可在设置里改）`}
+            title={T("显示答案（快捷键：{hint}，可在设置里改）", { hint: hint || T("未绑定") })}
             onClick={(e) => {
               // D88 §4.2：settle 回弹＝真实点击主 CTA 的按压反馈（animationend 自摘）
               settle(e.currentTarget);
               setShowBack(true);
             }}
           >
-            显示答案
+            {T("显示答案")}
           </button>
         ) : (
           <div className="grade-row grade-grid">
@@ -1074,14 +1081,14 @@ export default function ReviewView({
                   ref={recommended ? goodBtnRef : undefined}
                   className={`grade grade-${p.rating.toLowerCase()}${recommended ? " recommended" : ""}`}
                   disabled={saveError}
-                  title={`${RATING_LABEL[p.rating]}（快捷键：${gradeHint || "未绑定"}）· 间隔 ${p.dueText}`}
+                  title={T("{label}（快捷键：{hint}）· 间隔 {due}", { label: T(RATING_LABEL[p.rating]), hint: gradeHint || T("未绑定"), due: p.dueText })}
                   onClick={(e) => {
                     settle(e.currentTarget);
                     void grade(p.rating);
                   }}
                 >
                   <span className="grade-name">
-                    {RATING_LABEL[p.rating]}
+                    {T(RATING_LABEL[p.rating])}
                   </span>
                   <span className="grade-due mono">{p.dueText}</span>
                 </button>
@@ -1095,30 +1102,30 @@ export default function ReviewView({
             className="bar-btn ghost"
             data-testid="review-judge-btn"
             disabled={!canJudge || saveError}
-            title={canJudge ? "AI 判答：把你的答案交给 AI，与标准答案比对是否等价" : "该卡没有标准答案文本，无法 AI 判答"}
+            title={canJudge ? T("AI 判答：把你的答案交给 AI，与标准答案比对是否等价") : T("该卡没有标准答案文本，无法 AI 判答")}
             onClick={() => setJudgeOpen(true)}
           >
-            AI 判答
+            {T("AI 判答")}
           </button>
           {current!.contextRef?.documentId && onJumpToDoc && current!.contextRef.imageSource !== "library" && (
             hasSourceAnchor(current!.contextRef) ? (
-              <button className="bar-btn ghost" onClick={handleJumpToSource} title="跳转原文（不写入阅读进度）">
-                跳转原文
+              <button className="bar-btn ghost" onClick={handleJumpToSource} title={T("跳转原文（不写入阅读进度）")}>
+                {T("跳转原文")}
               </button>
             ) : (
-              <button className="bar-btn ghost" disabled title="该卡制卡时未记录原文位置（旧卡），无法跳转">
-                跳转原文
+              <button className="bar-btn ghost" disabled title={T("该卡制卡时未记录原文位置（旧卡），无法跳转")}>
+                {T("跳转原文")}
               </button>
             )
           )}
           {current!.cardType === "imageOcclusion" && current!.occlusionJson && (
             <button className="bar-btn ghost" onClick={() => setLightboxOpen(true)}>
-              查看原图
+              {T("查看原图")}
             </button>
           )}
           <span className="bar-more" data-menu ref={barMoreRef}>
             <button className="bar-btn ghost" data-toggle aria-expanded={barMoreOpen} onClick={() => setBarMoreOpen((v) => !v)}>
-              更多<span className="caret">▲</span>
+              {T("更多")}<span className="caret">▲</span>
             </button>
             {barMoreOpen && (
               <div className="bar-pop" data-pop>
@@ -1129,7 +1136,7 @@ export default function ReviewView({
                       undoLastGrade();
                     }}
                   >
-                    撤销评分{undoInfo.rating ? `（${undoInfo.rating}）` : ""}<span className="k mono">Z</span>
+                    {undoInfo.rating ? T("撤销评分（{rating}）", { rating: undoInfo.rating }) : T("撤销评分")}<span className="k mono">Z</span>
                   </button>
                 )}
                 <button
@@ -1138,7 +1145,7 @@ export default function ReviewView({
                     setDisamb({});
                   }}
                 >
-                  辨析 / 有疑问<span className="k mono">{bindingHint("review.disambiguate")}</span>
+                  {T("辨析 / 有疑问")}<span className="k mono">{bindingHint("review.disambiguate")}</span>
                 </button>
                 <button
                   onClick={() => {
@@ -1146,7 +1153,7 @@ export default function ReviewView({
                     markAndSuspend();
                   }}
                 >
-                  标记并暂停<span className="k mono">Q</span>
+                  {T("标记并暂停")}<span className="k mono">Q</span>
                 </button>
                 {/* v48.60（D102）：不再关心＝归档（cards.status），与「标记并暂停」（Leech 挂起）正交 */}
                 <button
@@ -1156,7 +1163,7 @@ export default function ReviewView({
                     void archiveAndNext();
                   }}
                 >
-                  不再关心（归档）
+                  {T("不再关心（归档）")}
                 </button>
                 <button
                   onClick={() => {
@@ -1164,7 +1171,7 @@ export default function ReviewView({
                     skip();
                   }}
                 >
-                  跳过<span className="k mono">W</span>
+                  {T("跳过")}<span className="k mono">W</span>
                 </button>
                 <button
                   className="danger"
@@ -1173,7 +1180,7 @@ export default function ReviewView({
                     handleDelete();
                   }}
                 >
-                  删除<span className="k mono">D</span>
+                  {T("删除")}<span className="k mono">D</span>
                 </button>
               </div>
             )}

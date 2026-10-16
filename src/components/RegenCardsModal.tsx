@@ -12,6 +12,7 @@ type BrowserCardRecord = CardRecord & { docTitle?: string };
 import { readingWorkflow } from "../lib/readingWorkflow";
 import { eventBus } from "../lib/eventbus";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { useT } from "../lib/i18n";
 import { IconAlert } from "./icons";
 
 const KNOWN_SCOPES: ReadonlySet<string> = new Set([
@@ -39,6 +40,7 @@ export default function RegenCardsModal({
   batchScope: string | null;
   onClose: () => void;
 }) {
+  const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
   const [running, setRunning] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -69,10 +71,10 @@ export default function RegenCardsModal({
       try {
         // 源＝该摘录正文（设计稿 §3.2：「源 = 该摘录正文」）；摘录不存在/正文为空即如实报错
         const extractId = card.contextRef?.extractId;
-        if (!extractId) throw new Error("该卡没有来源摘录，无法重新生成");
+        if (!extractId) throw new Error(T("该卡没有来源摘录，无法重新生成"));
         const extract = await readingWorkflow.getTopic(extractId);
         const sourceText = String(extract?.contentMarkdown ?? "").trim();
-        if (!sourceText) throw new Error("来源摘录不存在或正文为空");
+        if (!sourceText) throw new Error(T("来源摘录不存在或正文为空"));
         sourceTextRef.current = sourceText;
         const mode: CardGenMode = batchScope && KNOWN_SCOPES.has(batchScope) ? (batchScope as CardGenMode) : "auto";
         const title = card.docTitle || card.sourceRef?.title || undefined;
@@ -91,7 +93,7 @@ export default function RegenCardsModal({
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (!cancelled) setError(msg.includes("API Key") ? "AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。" : msg);
+        if (!cancelled) setError(msg.includes("API Key") ? T("AI 服务尚未配置：请先在 设置 → AI 服务 中选择服务、粘贴 API Key 并保存。") : msg);
       } finally {
         if (!cancelled) { setRunning(false); setThinking(false); }
       }
@@ -129,10 +131,10 @@ export default function RegenCardsModal({
         onClose();
       }}
     >
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label="用当前提示词重新生成" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" aria-label={T("用当前提示词重新生成")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2>用当前提示词重新生成</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={onClose}>
+          <h2>{T("用当前提示词重新生成")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
               <path d="m6 6 12 12" />
@@ -141,24 +143,24 @@ export default function RegenCardsModal({
         </div>
         <div className="modal-scroll">
           <p className="form-hint">
-            从来源摘录正文按当前活跃提示词重新产卡；接受＝新建卡（原卡与它的复习记录原样保留，是否归档由你决定）。
+            {T("从来源摘录正文按当前活跃提示词重新产卡；接受＝新建卡（原卡与它的复习记录原样保留，是否归档由你决定）。")}
           </p>
           {running && (
             <p className="form-hint">
-              AI 正在按当前提示词重新生成…（{progress} 字）
-              {thinking && "（模型思考中，静默数十秒属正常）"}
+              {T("AI 正在按当前提示词重新生成…（{n} 字）", { n: progress })}
+              {thinking && T("（模型思考中，静默数十秒属正常）")}
             </p>
           )}
           {!running && error && (
             <>
               <p className="ai-draft-warnings"><IconAlert size={14} /> {error}</p>
               <div className="ai-actions">
-                <button className="btn btn-secondary btn-sm" onClick={() => setReloadKey((k) => k + 1)}>重试</button>
+                <button className="btn btn-secondary btn-sm" onClick={() => setReloadKey((k) => k + 1)}>{T("重试")}</button>
               </div>
             </>
           )}
           {!running && !error && drafts !== null && drafts.length === 0 && (
-            <p className="form-hint">本次没有产出可接受的卡片（模型未返回草稿）。</p>
+            <p className="form-hint">{T("本次没有产出可接受的卡片（模型未返回草稿）。")}</p>
           )}
           {!running && !error && (drafts ?? []).map((d, i) => (
             <div key={i} className={`ai-draft ${accepted.has(i) || skipped.has(i) ? "card-fill ai-draft-accepted" : "card-outlined"}`}>
@@ -170,20 +172,20 @@ export default function RegenCardsModal({
               <div className="ai-draft-back">{d.back}</div>
               <div className="ai-actions">
                 {accepted.has(i) ? (
-                  <span className="form-hint state-ok">已入库（新建卡）</span>
+                  <span className="form-hint state-ok">{T("已入库（新建卡）")}</span>
                 ) : skipped.has(i) ? (
-                  <span className="form-hint">已放弃</span>
+                  <span className="form-hint">{T("已放弃")}</span>
                 ) : (
                   <>
-                    <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => void acceptOne(d, i)}>入库</button>
-                    <button className="btn btn-secondary btn-sm" disabled={saving} onClick={() => setSkipped(new Set([...skipped, i]))}>放弃</button>
+                    <button className="btn btn-primary btn-sm" disabled={saving} onClick={() => void acceptOne(d, i)}>{T("入库")}</button>
+                    <button className="btn btn-secondary btn-sm" disabled={saving} onClick={() => setSkipped(new Set([...skipped, i]))}>{T("放弃")}</button>
                   </>
                 )}
               </div>
             </div>
           ))}
           {!running && !error && drafts !== null && drafts.length > 0 && pendingCount === 0 && (
-            <p className="form-hint">全部处理完毕，可关闭。原卡未改动。</p>
+            <p className="form-hint">{T("全部处理完毕，可关闭。原卡未改动。")}</p>
           )}
         </div>
       </div>

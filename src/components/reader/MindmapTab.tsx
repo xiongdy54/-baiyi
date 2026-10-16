@@ -14,6 +14,7 @@ import { layoutMap, type MapNodeLike } from "../../lib/mindmap/layout";
 import type { MapStructure, MapNodeRecord, MapPreview, MaterialMapMeta, MapIssue } from "../../lib/mindmap";
 import { mindmapApi, buildStructureCardPackage } from "../../lib/mindmap";
 import { eventBus } from "../../lib/eventbus";
+import { useT } from "../../lib/i18n";
 
 const GRANULARITY_OPTIONS = [
   { value: "overview", label: "概览" },
@@ -73,6 +74,7 @@ function resolveTheme() {
 }
 
 export default function MindmapTab({ kernel, documentId, title, canvasHost, onJumpToText, onMakeCardsFromNode, initialMapId, initialResumeRunId }: MindmapTabProps) {
+  const T = useT();
   const [phase, setPhase] = useState<Phase>("loading");
   const [collect, setCollect] = useState<{ tocItems: { anchor: string; label: string; children?: unknown[] }[]; unitAnchors: string[]; textByUnit: Record<string, string> } | null>(null);
   const [collectMsg, setCollectMsg] = useState("");
@@ -177,7 +179,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       for (let i = 0; i < anchors.length; i++) {
         if (!alive) return;
         textByUnit[anchors[i].anchor] = await kernel.getSectionText(anchors[i].anchor);
-        if (alive) setCollectMsg(`正在提取原文 ${i + 1}/${anchors.length}`);
+        if (alive) setCollectMsg(T("正在提取原文 {i}/{n}", { i: i + 1, n: anchors.length }));
       }
       const tocItems = flattenToc(kernel.getTOC());
       if (!alive) return;
@@ -261,7 +263,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     if (!params) return;
     const pv = await mindmapApi.preview(params);
     if (!pv || pv.error) {
-      setFailText(pv?.error || "预览失败");
+      setFailText(pv?.error || T("预览失败"));
       setPhase("failed");
       return;
     }
@@ -287,7 +289,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       await refreshVersions();
       if (result.mapId) await loadMap(await mindmapApi.get(result.mapId));
       setMapReady(true);
-      setPartialNote("导图已生成，部分细节未展开（预算触顶 / 个别分支调用失败 / 仍有未处置的结构性缺口）；可重新生成续跑（已完成部分走缓存）。");
+      setPartialNote(T("导图已生成，部分细节未展开（预算触顶 / 个别分支调用失败 / 仍有未处置的结构性缺口）；可重新生成续跑（已完成部分走缓存）。"));
       setPhase("done");
     } else if (result.status === "section_ready") {
       // 首层就绪：立即显示首层结构，随后自动续跑深挖（详细生成是产品承诺；状态全程为「深挖中」而非「完成」）
@@ -304,8 +306,8 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       // 画布上带＋号的节点点开深化；想一次跑完的人用下方「自动深挖全部」（显式选择，不是默认）。
       setSectionNote(
         result.expandPlan && result.expandPlan.firstWaveNodes
-          ? `首层结构已就绪，现在就可以看。更深的枝条按需展开：点画布上带＋号的节点，用「深化此节点」。`
-          : "首层结构已就绪，现在就可以看。"
+          ? T("首层结构已就绪，现在就可以看。更深的枝条按需展开：点画布上带＋号的节点，用「深化此节点」。")
+          : T("首层结构已就绪，现在就可以看。")
       );
     } else if (result.status === "review_failed") {
       setIssues(result.issues || []);
@@ -315,7 +317,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       await loadMap(active); // 旧图继续可读
       setPhase(active ? "done" : "empty");
     } else {
-      setFailText(result.error || `生成失败（${result.code || "unknown"}）`);
+      setFailText(result.error || T("生成失败（{code}）", { code: result.code || "unknown" }));
       setPhase("failed");
     }
   };
@@ -329,7 +331,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     try {
       return await mindmapApi.generate({ ...params, resumeRunId: runId });
     } catch (err) {
-      setFailText(`深挖续跑异常：${err instanceof Error ? err.message : String(err)}`);
+      setFailText(T("深挖续跑异常：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
       setPhase("failed");
       return null;
     }
@@ -346,28 +348,28 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     if (!params || !activeMap || deepenBusy) return;
     if ((node.childIds || []).length) return; // 已有子结构 = 展开，不是深化
     setDeepenBusy(true);
-    setDeepenNote(`正在深化「${node.title}」…（可以离开这里，任务会在后台继续）`);
+    setDeepenNote(T("正在深化「{title}」…（可以离开这里，任务会在后台继续）", { title: node.title }));
     try {
       const r = await mindmapApi.deepen({
         ...params,
         mapId: activeMap.id,
         nodeId: node.id,
-        deepenLabel: `深化 · ${node.title}`
+        deepenLabel: T("深化 · {title}", { title: node.title })
       });
       if (r.status === "review_failed") {
-        setDeepenNote(`「${node.title}」的语义评审提出 ${r.issues?.length ?? 0} 处问题，该分支未发布（其余分支不受影响）`);
+        setDeepenNote(T("「{title}」的语义评审提出 {n} 处问题，该分支未发布（其余分支不受影响）", { title: node.title, n: r.issues?.length ?? 0 }));
       } else if (r.status === "invalid" || r.status === "failed") {
-        setDeepenNote(r.error || "深化未完成");
+        setDeepenNote(r.error || T("深化未完成"));
       } else if (r.status === "cancelled") {
-        setDeepenNote("深化已取消（已完成的阶段保留在缓存）");
+        setDeepenNote(T("深化已取消（已完成的阶段保留在缓存）"));
       } else {
-        setDeepenNote(`已深化「${node.title}」`);
+        setDeepenNote(T("已深化「{title}」", { title: node.title }));
       }
       const fresh = await mindmapApi.get(activeMap.id);
       if (fresh) await loadMap(fresh);
       await refreshVersions();
     } catch (err) {
-      setDeepenNote(`深化异常：${err instanceof Error ? err.message : String(err)}`);
+      setDeepenNote(T("深化异常：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
     } finally {
       setDeepenBusy(false);
     }
@@ -390,7 +392,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       const next = lastRunId ? await runDeepen(lastRunId) : await mindmapApi.generate(params);
       if (next) await applyResult(next, { resume: true });
     } catch (err) {
-      setFailText(`深挖全部异常：${err instanceof Error ? err.message : String(err)}`);
+      setFailText(T("深挖全部异常：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
       setPhase("failed");
     } finally {
       setDeepenBusy(false);
@@ -412,7 +414,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       // v48.11（§3.10）：先只跑首层（立即可看），随后自动续跑深挖
       result = await mindmapApi.generate({ ...params, stopAfterSection: true });
     } catch (err) {
-      setFailText(`生成调用异常：${err instanceof Error ? err.message : String(err)}`);
+      setFailText(T("生成调用异常：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
       setPhase("failed");
       return;
     }
@@ -434,9 +436,9 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     if (rid) {
       setLastRunId(rid);
       await mindmapApi.cancel(rid);
-      setProgress((prev) => ({ done: prev?.done ?? 0, total: prev?.total ?? 0, label: "已请求取消，等待当前调用中断…" }));
+      setProgress((prev) => ({ done: prev?.done ?? 0, total: prev?.total ?? 0, label: T("已请求取消，等待当前调用中断…") }));
     } else {
-      setProgress((prev) => ({ done: prev?.done ?? 0, total: prev?.total ?? 0, label: "未找到运行中的任务（可能已结束），请稍候" }));
+      setProgress((prev) => ({ done: prev?.done ?? 0, total: prev?.total ?? 0, label: T("未找到运行中的任务（可能已结束），请稍候") }));
     }
   };
 
@@ -449,7 +451,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     try {
       result = await mindmapApi.repairConfirm(lastRunId);
     } catch (err) {
-      setFailText(`修复调用异常：${err instanceof Error ? err.message : String(err)}`);
+      setFailText(T("修复调用异常：{msg}", { msg: err instanceof Error ? err.message : String(err) }));
       setPhase("failed");
       return;
     }
@@ -459,10 +461,10 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       await refreshVersions();
       await loadMap(active);
     } else if (result.status === "failed_final") {
-      setFailText(`语义评审修复后仍未通过（一次 repair 上限），可重新生成`);
+      setFailText(T("语义评审修复后仍未通过（一次 repair 上限），可重新生成"));
       setPhase("failed");
     } else {
-      setFailText(result.error || "修复失败");
+      setFailText(result.error || T("修复失败"));
       setPhase("failed");
     }
   };
@@ -662,7 +664,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     // 与 card-structure 提示词「你拿不到原文全文，只考作者组织方式」直接矛盾——改发**有界结构语义包**。
     if (!onMakeCardsFromNode || !structure) return;
     const section = buildStructureCardPackage(node, structure, 1200);
-    const focus = `结构卡：${node.title}`;
+    const focus = T("结构卡：{title}", { title: node.title });
     onMakeCardsFromNode({ nodeId: node.id, label: node.title, section, focus, unitAnchors: node.unitAnchors || [] });
   };
 
@@ -672,7 +674,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     const blob = new Blob([svgStr], { type: "image/svg+xml" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${title || "材料知识导图"}.svg`;
+    a.download = `${title || T("材料知识导图")}.svg`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -688,22 +690,22 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
   const deepenableCount = structure ? structure.nodes.filter((n) => !(n.childIds || []).length && (n.sourceSpans || []).length > 0).length : 0;
 
   const statusLine = (() => {
-    if (phase === "collecting") return collectMsg || "正在提取原文…";
-    if (phase === "loading") return "正在加载…";
+    if (phase === "collecting") return collectMsg || T("正在提取原文…");
+    if (phase === "loading") return T("正在加载…");
     if (phase === "running" || phase === "section_ready") {
       const elapsed = runStartedAt ? Math.max(0, Math.round((nowTick - runStartedAt) / 1000)) : 0;
-      const mm = elapsed >= 60 ? `${Math.floor(elapsed / 60)} 分 ${elapsed % 60} 秒` : `${elapsed} 秒`;
+      const mm = elapsed >= 60 ? T("{m} 分 {s} 秒", { m: Math.floor(elapsed / 60), s: elapsed % 60 }) : T("{n} 秒", { n: elapsed });
       // v48.11：只报**可计算**的口径（已完成 N 个结构单元 + 预算用量），禁虚假百分比
       const done = progress?.done ?? 0;
-      const budgetPart = budgetInfo ? ` · 本次预算 ${budgetInfo.calls}/${budgetInfo.budget}` : "";
-      const labelPart = progress?.label ? ` · 当前：${progress.label}` : "";
+      const budgetPart = budgetInfo ? ` · ${T("本次预算 {a}/{b}", { a: budgetInfo.calls, b: budgetInfo.budget })}` : "";
+      const labelPart = progress?.label ? ` · ${T("当前：{label}", { label: progress.label })}` : "";
       const head =
         phase === "section_ready"
-          ? `首层结构已就绪（${done} 个结构单元），正在继续详细展开…`
+          ? T("首层结构已就绪（{n} 个结构单元），正在继续详细展开…", { n: done })
           : done > 0
-            ? `已完成 ${done} 个结构单元，仍有分支在展开`
-            : "正在等待模型响应…";
-      return `${head}${labelPart}${budgetPart} · 已等待 ${mm}（单次调用超 8 分钟将自动中止；失败会重试，不会静默中断）`;
+            ? T("已完成 {n} 个结构单元，仍有分支在展开", { n: done })
+            : T("正在等待模型响应…");
+      return `${head}${labelPart}${budgetPart} · ${T("已等待 {mm}（单次调用超 8 分钟将自动中止；失败会重试，不会静默中断）", { mm })}`;
     }
     return "";
   })();
@@ -711,12 +713,12 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
   // ---------- 画布（portal 进宿主覆盖层；宿主未就位的首帧只落页签面板） ----------
   const canvasView = canvasHost ? (
     createPortal(
-      <div className="reader-map-stage" role="region" aria-label="材料知识导图" tabIndex={0} onKeyDown={handleKeyDown}>
+      <div className="reader-map-stage" role="region" aria-label={T("材料知识导图")} tabIndex={0} onKeyDown={handleKeyDown}>
         <div className="reader-map-top">
-          <span className="mindmap-top-title">材料知识导图 · {title}</span>
+          <span className="mindmap-top-title">{T("材料知识导图 · {title}", { title })}</span>
           <div className="mindmap-top-actions">
             <button className="btn btn-outline btn-sm" onClick={fitView}>
-              适应窗口
+              {T("适应窗口")}
             </button>
             <button className="btn btn-outline btn-sm" onClick={() => setView((v) => ({ ...v, zoom: Math.min(2.5, v.zoom + 0.15) }))}>
               +
@@ -725,7 +727,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
               −
             </button>
             <button className="btn btn-outline btn-sm" onClick={exportSvg}>
-              导出 SVG
+              {T("导出 SVG")}
             </button>
           </div>
         </div>
@@ -785,21 +787,21 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
                 dangerouslySetInnerHTML={{ __html: sanitizedSvg }}
               />
               {!selectedId && phase === "done" && (
-                <div className="mindmap-canvas-tip">单击节点选中 · 再击展开/收起（纯界面）· 带＋号的节点可「深化」（按需生成更深结构）· 选中后在左侧页签制卡或跳正文</div>
+                <div className="mindmap-canvas-tip">{T("单击节点选中 · 再击展开/收起（纯界面）· 带＋号的节点可「深化」（按需生成更深结构）· 选中后在左侧页签制卡或跳正文")}</div>
               )}
             </>
           ) : (phase === "done" || mapReady) ? (
-            <div className="mindmap-canvas-hint">此范围暂无可显示的导图。</div>
+            <div className="mindmap-canvas-hint">{T("此范围暂无可显示的导图。")}</div>
           ) : phase === "empty" ? (
             <div className="mindmap-empty">
               <div className="mindmap-empty-mark" aria-hidden="true" />
-              <p className="mindmap-empty-title">尚未生成</p>
-              <p className="mindmap-empty-desc">导图会根据这份材料本身的组织方式建立结构。</p>
+              <p className="mindmap-empty-title">{T("尚未生成")}</p>
+              <p className="mindmap-empty-desc">{T("导图会根据这份材料本身的组织方式建立结构。")}</p>
             </div>
           ) : phase === "unsupported" ? (
-            <div className="mindmap-canvas-hint">当前材料没有可提取的文本结构（无目录且无章节），无法生成导图。</div>
+            <div className="mindmap-canvas-hint">{T("当前材料没有可提取的文本结构（无目录且无章节），无法生成导图。")}</div>
           ) : phase === "failed" ? (
-            <div className="mindmap-canvas-hint mindmap-fail">{failText || "生成失败"}</div>
+            <div className="mindmap-canvas-hint mindmap-fail">{failText || T("生成失败")}</div>
           ) : phase === "loading" || phase === "collecting" ? (
             <div className="mindmap-skeleton" aria-label={statusLine}>
               <div className="mindmap-skeleton-row" style={{ width: "30%" }} />
@@ -810,7 +812,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
             </div>
           ) : (
             <div className="mindmap-canvas-hint" aria-label={statusLine}>
-              {statusLine || "准备中…"}
+              {statusLine || T("准备中…")}
             </div>
           )}
         </div>
@@ -835,14 +837,13 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
             <>
               {(phase === "empty" || phase === "preview" || phase === "done") && (
                 <section className="mindmap-side-sec">
-                  <h3>生成范围与覆盖</h3>
-                  <p className="mindmap-hint">范围：整份材料（{title}）。章节识别能力完善后将恢复范围选择。</p>
+                  <h3>{T("生成范围与覆盖")}</h3>
+                  <p className="mindmap-hint">{T("范围：整份材料（{title}）。章节识别能力完善后将恢复范围选择。", { title })}</p>
                   <p className="mindmap-hint">
-                    生成先落地**一层可用结构**（首层），更深的枝条按需深化——不为你看不到的细节预先付费；
-                    每次深挖都只读该节点对应的原文范围，永不截断。
+                    {T("生成先落地**一层可用结构**（首层），更深的枝条按需深化——不为你看不到的细节预先付费；每次深挖都只读该节点对应的原文范围，永不截断。")}
                   </p>
                   <button className="btn btn-primary btn-sm mindmap-wide" onClick={handlePreview} disabled={!collect}>
-                    {phase === "done" ? "重新生成（先预览）" : "发送前预览"}
+                    {phase === "done" ? T("重新生成（先预览）") : T("发送前预览")}
                   </button>
                   {/* v48.13：整树深挖从「自动发生」改为「显式选择」——默认只到首层，够用且快 */}
                   {phase === "done" && deepenableCount > 0 && (
@@ -856,11 +857,11 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
                       disabled={deepenBusy || runInFlight}
                       title={
                         runInFlight
-                          ? "正在生成/深挖中——等它结束再点（也可以先「停止深挖」）"
-                          : "把图上所有可深化节点一次跑完：每个节点约 1 次调用，另加终编辑与评审各 1 次（章节分析走缓存）。不需要的话就别点——按需点节点深化更省。"
+                          ? T("正在生成/深挖中——等它结束再点（也可以先「停止深挖」）")
+                          : T("把图上所有可深化节点一次跑完：每个节点约 1 次调用，另加终编辑与评审各 1 次（章节分析走缓存）。不需要的话就别点——按需点节点深化更省。")
                       }
                     >
-                      {deepenBusy ? "深挖中…" : runInFlight ? "自动深挖全部（等待当前任务）" : `自动深挖全部（${deepenableCount} 个可深化节点）`}
+                      {deepenBusy ? T("深挖中…") : runInFlight ? T("自动深挖全部（等待当前任务）") : T("自动深挖全部（{n} 个可深化节点）", { n: deepenableCount })}
                     </button>
                   )}
                   {sectionNote && <p className="mindmap-hint">{sectionNote}</p>}
@@ -869,88 +870,101 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
               )}
               {phase === "preview" && preview && (
                 <section className="mindmap-side-sec mindmap-preview">
-                  <h3>发送前预览</h3>
+                  <h3>{T("发送前预览")}</h3>
                   <ul className="mindmap-preview-list">
-                    <li>材料：{title}</li>
-                    <li>范围：整份材料</li>
+                    <li>{T("材料：{title}", { title })}</li>
+                    <li>{T("范围：整份材料")}</li>
                     <li>
-                      首次生成（首层）：{preview.newCalls || 0} 次结构分析调用——终编辑与评审要等后续完整生成／「自动深挖全部」时才跑（{preview.fixedCalls || 2} 次）
+                      {T("首次生成（首层）：{n} 次结构分析调用——终编辑与评审要等后续完整生成／「自动深挖全部」时才跑（{fixed} 次）", { n: preview.newCalls || 0, fixed: preview.fixedCalls || 2 })}
                     </li>
-                    <li>缓存命中：{preview.cacheHits || 0}</li>
-                    <li>需发送：{preview.newCalls || 0}（首层）</li>
+                    <li>{T("缓存命中：{n}", { n: preview.cacheHits || 0 })}</li>
+                    <li>{T("需发送：{n}（首层）", { n: preview.newCalls || 0 })}</li>
                     <li>
-                      深挖：首层完成后按需进行（点节点深化，或页签「自动深挖全部」）；单轮总调用上限＝本次预算 {preview.budget || 300}（全局预算，含 section/深挖/补漏/归并/评审）
+                      {T("深挖：首层完成后按需进行（点节点深化，或页签「自动深挖全部」）；单轮总调用上限＝本次预算 {budget}（全局预算，含 section/深挖/补漏/归并/评审）", { budget: preview.budget || 300 })}
                     </li>
                     <li>
-                      当前策略：批量深挖 {preview.strategy?.expandBatch ?? 1} 个/次 · 递归深度 {preview.strategy?.expandDepth ?? 1} · 原子启发式{" "}
-                      {preview.strategy?.atomicHeuristic ? "开" : "关"} · 单片上限 {(preview.strategy?.maxPayloadChars ?? 6000).toLocaleString()} 字 · 补漏轮次{" "}
-                      {preview.strategy?.gapFillMaxRounds ?? 2}
+                      {T("当前策略：批量深挖 {batch} 个/次 · 递归深度 {depth} · 原子启发式 {atomic} · 单片上限 {chars} 字 · 补漏轮次 {rounds}", {
+                        batch: preview.strategy?.expandBatch ?? 1,
+                        depth: preview.strategy?.expandDepth ?? 1,
+                        atomic: preview.strategy?.atomicHeuristic ? T("开") : T("关"),
+                        chars: (preview.strategy?.maxPayloadChars ?? 6000).toLocaleString(),
+                        rounds: preview.strategy?.gapFillMaxRounds ?? 2
+                      })}
                     </li>
-                    <li className="mindmap-hint">首层完成即先落一版可看的图（状态「深挖中」），深挖按预算继续并可随时中断/续跑。</li>
+                    <li className="mindmap-hint">{T("首层完成即先落一版可看的图（状态「深挖中」），深挖按预算继续并可随时中断/续跑。")}</li>
                     <li>
                       <label className="mindmap-hint check-inline">
                         <input type="checkbox" checked={forceRebuild} onChange={(e) => setForceRebuild(e.target.checked)} />
-                        强制重算（忽略缓存与分片复用；用于前后对比/benchmark，所有调用都实发）
+                        {T("强制重算（忽略缓存与分片复用；用于前后对比/benchmark，所有调用都实发）")}
                       </label>
                     </li>
-                    <li>待发送原文字数：{preview.charsExact?.toLocaleString()}（精确）</li>
+                    <li>{T("待发送原文字数：{chars}（精确）", { chars: preview.charsExact?.toLocaleString() ?? "" })}</li>
                     <li>
-                      预计 Token：{preview.estInputTokens?.toLocaleString()} 输入 / {preview.estOutputTokens?.toLocaleString()} 输出（估算）
+                      {T("预计 Token：{input} 输入 / {output} 输出（估算）", {
+                        input: preview.estInputTokens?.toLocaleString() ?? "",
+                        output: preview.estOutputTokens?.toLocaleString() ?? ""
+                      })}
                     </li>
                     <li>
-                      预计费用：
+                      {T("预计费用：")}
                       {preview.hasPricing
-                        ? `¥ ${(preview.estCost as number).toFixed(2)}（基于估算）`
-                        : "单价未配置，仅显示 Token（可在设置中填写模型单价）"}
+                        ? T("¥ {cost}（基于估算）", { cost: (preview.estCost as number).toFixed(2) })
+                        : T("单价未配置，仅显示 Token（可在设置中填写模型单价）")}
                     </li>
                   </ul>
                   <button className="btn btn-primary btn-sm mindmap-wide" onClick={handleGenerate}>
-                    确认生成
+                    {T("确认生成")}
                   </button>
                   <button className="btn btn-outline btn-sm mindmap-wide" onClick={() => setPhase(structure ? "done" : "empty")}>
-                    取消
+                    {T("取消")}
                   </button>
                 </section>
               )}
               {(phase === "running" || phase === "section_ready") && (
                 <section className="mindmap-side-sec">
-                  <h3>{phase === "section_ready" ? "首层已就绪" : "生成中"}</h3>
+                  <h3>{phase === "section_ready" ? T("首层已就绪") : T("生成中")}</h3>
                   <p className="mindmap-status">{statusLine}</p>
                   {coverageNote && <p className="mindmap-hint">{coverageNote}</p>}
                   {expandPlan && (
                     <>
                       <p className="mindmap-hint">
-                        首波深挖：{expandPlan.firstWaveNodes} 个结构单元 · 计划调用 {expandPlan.plannedCalls} 次 ·
-                        作用域合计 {expandPlan.spanChars.toLocaleString()} 字（上限 {expandPlan.maxPayloadChars || 6000} 字/次）
+                        {T("首波深挖：{n} 个结构单元 · 计划调用 {calls} 次 · 作用域合计 {chars} 字（上限 {max} 字/次）", {
+                          n: expandPlan.firstWaveNodes,
+                          calls: expandPlan.plannedCalls,
+                          chars: expandPlan.spanChars.toLocaleString(),
+                          max: expandPlan.maxPayloadChars || 6000
+                        })}
                       </p>
                       <p className="mindmap-hint">
-                        第 2 层以后按模型判定动态追加；预算 {budgetInfo?.budget ?? preview?.budget ?? 300} 触顶会停为「部分完成」。
-                        当前已完成 {progress?.done ?? 0} 个结构单元。
+                        {T("第 2 层以后按模型判定动态追加；预算 {budget} 触顶会停为「部分完成」。当前已完成 {done} 个结构单元。", {
+                          budget: budgetInfo?.budget ?? preview?.budget ?? 300,
+                          done: progress?.done ?? 0
+                        })}
                       </p>
                     </>
                   )}
                   <button className="btn btn-outline btn-sm mindmap-wide" onClick={handleCancel} disabled={cancelRequested}>
-                    {cancelRequested ? "取消中…" : "停止深挖"}
+                    {cancelRequested ? T("取消中…") : T("停止深挖")}
                   </button>
                 </section>
               )}
               {phase === "review_failed" && (
                 <section className="mindmap-side-sec mindmap-fail-sec">
-                  <h3>语义评审未通过</h3>
+                  <h3>{T("语义评审未通过")}</h3>
                   <ul className="mindmap-issue-list">
                     {issues.map((it, i) => (
                       <li key={i}>
                         <span className="mindmap-issue-sev">{it.severity}</span> {it.note || it.type}
-                        <span className="mindmap-issue-scope">（{it.repairScope}）</span>
+                        <span className="mindmap-issue-scope">{T("（{scope}）", { scope: it.repairScope })}</span>
                       </li>
                     ))}
                   </ul>
-                  <p className="mindmap-hint">确认后将仅重跑对应归并阶段并复审一次（费用按预估另行计算）。旧有效导图不受影响。</p>
+                  <p className="mindmap-hint">{T("确认后将仅重跑对应归并阶段并复审一次（费用按预估另行计算）。旧有效导图不受影响。")}</p>
                   <button className="btn btn-primary btn-sm mindmap-wide" onClick={handleRepair}>
-                    确认修复
+                    {T("确认修复")}
                   </button>
                   <button className="btn btn-outline btn-sm mindmap-wide" onClick={() => setPhase(structure ? "done" : "empty")}>
-                    暂不处理
+                    {T("暂不处理")}
                   </button>
                 </section>
               )}
@@ -958,16 +972,16 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
                 <>
                   {partialNote && (
                     <section className="mindmap-side-sec">
-                      <h3>部分完成</h3>
+                      <h3>{T("部分完成")}</h3>
                       <p className="mindmap-hint">{partialNote}</p>
                     </section>
                   )}
                   <section className="mindmap-side-sec">
-                    <h3>节点搜索</h3>
+                    <h3>{T("节点搜索")}</h3>
                     <input
                       className="mindmap-search"
                       value={search}
-                      placeholder="搜索标题 / 摘要"
+                      placeholder={T("搜索标题 / 摘要")}
                       onChange={(e) => setSearch(e.target.value)}
                     />
                     {searchResults.length > 0 && (
@@ -982,35 +996,41 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
                   </section>
                   {selectedNode && (
                     <section className="mindmap-side-sec mindmap-node-detail">
-                      <h3>节点详情</h3>
+                      <h3>{T("节点详情")}</h3>
                       <p className="mindmap-node-title">{selectedNode.title}</p>
-                      {selectedNode.authorialRole && <p className="mindmap-meta">作者组织作用：{ROLE_LABEL[selectedNode.authorialRole] || selectedNode.authorialRole}</p>}
-                      {selectedNode.progression && <p className="mindmap-meta">作者如何展开：{selectedNode.progression}</p>}
-                      {selectedNode.groupingBasis?.explanation && <p className="mindmap-meta">归并依据：{selectedNode.groupingBasis.explanation}</p>}
+                      {selectedNode.authorialRole && (
+                        <p className="mindmap-meta">
+                          {T("作者组织作用：{role}", {
+                            role: ROLE_LABEL[selectedNode.authorialRole] ? T(ROLE_LABEL[selectedNode.authorialRole]) : selectedNode.authorialRole
+                          })}
+                        </p>
+                      )}
+                      {selectedNode.progression && <p className="mindmap-meta">{T("作者如何展开：{text}", { text: selectedNode.progression })}</p>}
+                      {selectedNode.groupingBasis?.explanation && <p className="mindmap-meta">{T("归并依据：{text}", { text: selectedNode.groupingBasis.explanation })}</p>}
                       {(selectedNode.evidence || []).slice(0, 3).map((ev, i) => (
                         <blockquote key={i} className="mindmap-quote">
-                          “{ev.quote}”
-                          {ev.positionAmbiguous ? <span className="mindmap-meta">（位置多处命中）</span> : null}
+                          {T("“{quote}”", { quote: ev.quote })}
+                          {ev.positionAmbiguous ? <span className="mindmap-meta">{T("（位置多处命中）")}</span> : null}
                         </blockquote>
                       ))}
                       {learnStatus && (
                         <p className="mindmap-meta">
-                          {learnStatus.cardCount > 0 ? `已有 ${learnStatus.cardCount} 张卡` : "已有 0 张卡"}
-                          {learnStatus.kpExists ? " · 知识点已存在" : ""}
+                          {T("已有 {n} 张卡", { n: learnStatus.cardCount })}
+                          {learnStatus.kpExists ? ` · ${T("知识点已存在")}` : ""}
                         </p>
                       )}
                       <div className="mindmap-node-actions">
                         <button className="btn btn-outline btn-sm" onClick={() => void jumpToText(selectedNode)} disabled={!selectedNode.unitAnchors?.length && !(selectedNode.evidence || []).length}>
-                          跳到正文
+                          {T("跳到正文")}
                         </button>
                         {onMakeCardsFromNode && (
                           <button className="btn btn-primary btn-sm" onClick={() => makeCards(selectedNode)}>
-                            就此制卡
+                            {T("就此制卡")}
                           </button>
                         )}
                         {selectedNode.childIds?.length > 0 && (
                           <button className="btn btn-outline btn-sm" onClick={() => toggleExpand(selectedNode.id)}>
-                            {expandedIds.has(selectedNode.id) ? "收起子树" : "展开子树"}
+                            {expandedIds.has(selectedNode.id) ? T("收起子树") : T("展开子树")}
                           </button>
                         )}
                         {/* v48.13 P4：无子结构但有作用域 → 可深化。与「展开」是两件事：
@@ -1020,30 +1040,30 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
                             className="btn btn-outline btn-sm"
                             onClick={() => void deepenNode(selectedNode)}
                             disabled={deepenBusy || runInFlight}
-                            title="这个节点还没有更细的结构。深化会只针对它对应的原文继续分析（不影响其他分支），可以在后台运行。"
+                            title={T("这个节点还没有更细的结构。深化会只针对它对应的原文继续分析（不影响其他分支），可以在后台运行。")}
                           >
-                            {deepenBusy ? "深化中…" : "深化此节点"}
+                            {deepenBusy ? T("深化中…") : T("深化此节点")}
                           </button>
                         )}
                       </div>
                       {/* 「没画出来」≠「没有更深的内容」——把两者的区别写在用户看得见的地方 */}
                       {!(selectedNode.childIds || []).length && (selectedNode.sourceSpans || []).length > 0 && (
-                        <p className="mindmap-meta">此节点尚无更细结构（图上画＋号标记）——按需深化即可，不必等整图跑完。</p>
+                        <p className="mindmap-meta">{T("此节点尚无更细结构（图上画＋号标记）——按需深化即可，不必等整图跑完。")}</p>
                       )}
                       {!(selectedNode.childIds || []).length && !(selectedNode.sourceSpans || []).length && (
-                        <p className="mindmap-meta">此节点已是终态（原子结构/纯过渡文字），没有可继续深化的原文范围。</p>
+                        <p className="mindmap-meta">{T("此节点已是终态（原子结构/纯过渡文字），没有可继续深化的原文范围。")}</p>
                       )}
                       {deepenNote && <p className="mindmap-meta">{deepenNote}</p>}
                     </section>
                   )}
                 </>
               )}
-              {phase === "empty" && <p className="mindmap-hint">生成 = 用户主动触发 + 发送前预览；无截断，全文实测发送。</p>}
+              {phase === "empty" && <p className="mindmap-hint">{T("生成 = 用户主动触发 + 发送前预览；无截断，全文实测发送。")}</p>}
             </>
           ) : (
             <section className="mindmap-side-sec">
-              <h3>AI 未配置</h3>
-              <p className="mindmap-hint">配置 AI Key 后可生成新的材料知识导图。已有导图仍可阅读、展开、跳正文与制卡。</p>
+              <h3>{T("AI 未配置")}</h3>
+              <p className="mindmap-hint">{T("配置 AI Key 后可生成新的材料知识导图。已有导图仍可阅读、展开、跳正文与制卡。")}</p>
             </section>
           )}
           {/* v48.13：历史版本 = **只读**操作，必须任何状态都可见。
@@ -1052,37 +1072,37 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
               真实现场：一次失败的收尾把已发布版本置为未激活，用户重开页签只看到「尚未生成」，
               以为 73 节点的成果丢了，而版本其实就在库里、点一下就能激活。 */}
           <section className="mindmap-side-sec">
-            <h3>历史版本</h3>
+            <h3>{T("历史版本")}</h3>
             {/* v48.13：空态但有版本时必须说清楚——否则「尚未生成」会让用户以为成果丢了。
             现场：一次失败的收尾把已发布版本置为未激活，用户重开页签看到的就是「尚未生成」。 */}
             {versions.length > 0 && !mapReady && !structure && (
               <p className="mindmap-hint">
-            当前没有已发布的版本，但历史里有 {versions.length} 个——点下面任意一版即可激活查看（成果没有丢）。
+                {T("当前没有已发布的版本，但历史里有 {n} 个——点下面任意一版即可激活查看（成果没有丢）。", { n: versions.length })}
               </p>
             )}
-            {versions.length === 0 && <p className="mindmap-hint">暂无其他版本。</p>}
+            {versions.length === 0 && <p className="mindmap-hint">{T("暂无其他版本。")}</p>}
             <ul className="mindmap-versions">
               {versions.map((v) => (
             <li key={v.id} className={v.id === activeMap?.id ? "is-active" : ""}>
               <button
                 className="mindmap-version-pick"
-                title={`${v.title || "（未命名）"} · ${new Date(v.createdAt).toLocaleString()}`}
+                title={`${v.title || T("（未命名）")} · ${new Date(v.createdAt).toLocaleString()}`}
                 onClick={async () => {
                   const meta = await mindmapApi.setActive(v.id);
                   if (meta) await loadMap({ ...meta, structure: (await mindmapApi.get(v.id))?.structure ?? null });
                 }}
               >
                 <span className="mindmap-version-title">
-                  {v.title || "（未命名）"}
-                  {v.isActive ? "（当前）" : ""}
+                  {v.title || T("（未命名）")}
+                  {v.isActive ? T("（当前）") : ""}
                 </span>
                 <span className="mindmap-version-time">{new Date(v.createdAt).toLocaleString()}</span>
               </button>
               <button
                 className="mindmap-version-del"
-                title="删除此版本"
+                title={T("删除此版本")}
                 onClick={async () => {
-                  if (!window.confirm(`删除版本「${v.title || "未命名"}」？该操作不可恢复（生成缓存保留，不影响卡片）。`)) return;
+                  if (!window.confirm(T("删除版本「{title}」？该操作不可恢复（生成缓存保留，不影响卡片）。", { title: v.title || T("未命名") }))) return;
                   await mindmapApi.remove(v.id);
                   if (v.id === activeMap?.id) {
                     const active = await mindmapApi.getActive(documentId, "book");
@@ -1093,7 +1113,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
                   }
                 }}
               >
-                删除
+                {T("删除")}
               </button>
             </li>
               ))}

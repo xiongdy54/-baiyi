@@ -16,6 +16,7 @@ import TimelineWidget from "../charts/Timeline";
 // 自取数（useGrowthOverview 防抖 hook，Timeline 先例），不进 StatsOverview、不改 stats:overview 刷新链。
 import GrowthEventsWidget from "./GrowthEventsWidget";
 import TerritoryWidget from "./TerritoryWidget";
+import { t } from "../../lib/i18n";
 
 export type ChartMode = string; // 图型 id，如 "months" / "columns"
 
@@ -69,11 +70,11 @@ function domainItems(o: StatsOverview, key: string): { label: string; count: num
     const byMain = new Map<string, number>();
     for (const d of o.domainMain) byMain.set(d.label, (byMain.get(d.label) || 0) + d.count);
     const rows = [...byMain.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
-    if (o.unclassified > 0) rows.push({ label: "未分类", count: o.unclassified });
+    if (o.unclassified > 0) rows.push({ label: t("未分类"), count: o.unclassified });
     return rows;
   }
   const rows = o.domainDetail.map((d) => ({ label: d.label, count: d.count }));
-  if (o.unclassified > 0) rows.push({ label: "未分类", count: o.unclassified });
+  if (o.unclassified > 0) rows.push({ label: t("未分类"), count: o.unclassified });
   return rows.sort((a, b) => b.count - a.count);
 }
 
@@ -85,13 +86,13 @@ const HEAT_RANGES: Record<string, number> = {
 const heatSlice = (o: StatsOverview, dk: string) =>
   o.heatDays.slice(-(HEAT_RANGES[dk] ?? 90)).map((d) => ({ date: d.date, value: d.count }));
 const HEAT_KEYS = Object.keys(HEAT_RANGES);
+// 图型 label 存 zh 键，渲染处（Dashboard chartOptions / 设置页）经 T() 翻译
 const HEAT_CHARTS = [
   { id: "months", label: "日历热力" },
   { id: "columns", label: "日柱" },
   { id: "weekday", label: "星期剖面" },
   { id: "cumulative", label: "累计曲线" }
 ];
-const HEAT_EMPTY = "所选范围暂无复习记录";
 
 export const WIDGETS: WidgetDef[] = [
   {
@@ -143,10 +144,11 @@ export const WIDGETS: WidgetDef[] = [
     render: (o, dk, chart) => {
       const c = normalizeChartId("heatmap", chart);
       const days = heatSlice(o, dk);
-      if (c === "columns") return <DailyColumns days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
-      if (c === "weekday") return <WeekdayBars days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
-      if (c === "cumulative") return <CumulativeArea days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
-      return <HeatCalendar days={days} unit="张" emptyMsg={HEAT_EMPTY} />;
+      const empty = t("所选范围暂无复习记录");
+      if (c === "columns") return <DailyColumns days={days} unit={t("张")} emptyMsg={empty} />;
+      if (c === "weekday") return <WeekdayBars days={days} unit={t("张")} emptyMsg={empty} />;
+      if (c === "cumulative") return <CumulativeArea days={days} unit={t("张")} emptyMsg={empty} />;
+      return <HeatCalendar days={days} unit={t("张")} emptyMsg={empty} />;
     }
   },
   {
@@ -176,8 +178,8 @@ export const WIDGETS: WidgetDef[] = [
     render: (o, dk, chart) => {
       const items = domainItems(o, dk);
       return normalizeChartId("domains", chart) === "treemap"
-        ? <DomainTreemap items={items} unit="卡" />
-        : <DomainBars items={items} unit="卡" />;
+        ? <DomainTreemap items={items} unit={t("卡")} />
+        : <DomainBars items={items} unit={t("卡")} />;
     }
   },
   {
@@ -277,8 +279,8 @@ export const WIDGETS: WidgetDef[] = [
       const c = normalizeChartId("reading", chart);
       const all = o.readingDays.map((d) => ({ date: d.date, value: d.chars }));
       if (c === "rhist") return <ReadingHist days={all} />;
-      if (c === "bars") return <DailyColumns days={all.slice(-60)} unit="字" emptyMsg="近 60 天暂无阅读记录" />;
-      return <HeatCalendar days={all.slice(-84)} unit="字" emptyMsg="近 12 周暂无阅读记录" />;
+      if (c === "bars") return <DailyColumns days={all.slice(-60)} unit={t("字")} emptyMsg={t("近 60 天暂无阅读记录")} />;
+      return <HeatCalendar days={all.slice(-84)} unit={t("字")} emptyMsg={t("近 12 周暂无阅读记录")} />;
     }
   },
   // —— v48.85（D129 B4，§5.3）：成长反馈两 widget（Growth / Territory 层）——

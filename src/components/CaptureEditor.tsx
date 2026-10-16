@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { formatClock, journalDateLabel, todayJournalDate, type JournalEntry } from "../lib/journal";
 import { applyAccent } from "../lib/accentVar";
 import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
+import { useT } from "../lib/i18n";
 
 const AUTOSAVE_DEBOUNCE_MS = 1200;
 const TOAST_MS = 2600;
@@ -31,6 +32,7 @@ export async function applyCaptureAppearance(): Promise<void> {
 }
 
 export default function CaptureEditor() {
+  const T = useT();
   const [text, setText] = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -159,7 +161,7 @@ export default function CaptureEditor() {
       const day = await api.day();
       setToday(day.date);
       setTodayCount(day.count);
-      showToast(`已记入 ${journalDateLabel(res.entry.entryDate)} 日记 · ${formatClock(res.entry.sentAt || Date.now())}`);
+      showToast(T("已记入 {date} 日记 · {time}", { date: journalDateLabel(res.entry.entryDate), time: formatClock(res.entry.sentAt || Date.now()) }));
       focusEditor();
     } catch {
       setSaveState("error");
@@ -260,41 +262,41 @@ export default function CaptureEditor() {
     setForeignDraft(null);
     setContinuingForeign(false);
     setConfirmDiscard(false);
-    showToast("已丢弃该草稿");
+    showToast(T("已丢弃该草稿"));
   }
 
   const statusText =
     saveState === "error"
-      ? "保存失败，稍后重试"
+      ? T("保存失败，稍后重试")
       : saveState === "typing"
-        ? "输入中…"
+        ? T("输入中…")
         : saveState === "saved" && savedAt
-          ? `已保存 ${formatClock(savedAt)}`
-          : "输入即自动保存";
+          ? T("已保存 {time}", { time: formatClock(savedAt) })
+          : T("输入即自动保存");
 
   return (
     <div className="cap-shell" ref={shellRef}>
       <header className="cap-header">
-        <span className="cap-title">快速记录</span>
+        <span className="cap-title">{T("快速记录")}</span>
         <span className="cap-meta mono">
-          {journalDateLabel(today)} · 今日已记 {todayCount} 条
+          {journalDateLabel(today)} · {T("今日已记 {n} 条", { n: todayCount })}
         </span>
       </header>
 
       {foreignDraft && !continuingForeign && (
         <div className="cap-notice">
           <span className="cap-notice-text">
-            {journalDateLabel(foreignDraft.entryDate)} 有未发送草稿
+            {T("{date} 有未发送草稿", { date: journalDateLabel(foreignDraft.entryDate) })}
           </span>
           <span className="cap-notice-actions">
             <button className="cap-link" onClick={continueForeignDraft}>
-              继续写
+              {T("继续写")}
             </button>
             <button
               className={`cap-link${confirmDiscard ? " cap-link-danger" : ""}`}
               onClick={() => void discardForeignDraft()}
             >
-              {confirmDiscard ? "确认丢弃" : "丢弃"}
+              {confirmDiscard ? T("确认丢弃") : T("丢弃")}
             </button>
           </span>
         </div>
@@ -302,7 +304,7 @@ export default function CaptureEditor() {
       {continuingForeign && foreignDraft && (
         <div className="cap-notice">
           <span className="cap-notice-text">
-            正在续写 {journalDateLabel(foreignDraft.entryDate)} 的草稿 · 发送后归入那天
+            {T("正在续写 {date} 的草稿 · 发送后归入那天", { date: journalDateLabel(foreignDraft.entryDate) })}
           </span>
         </div>
       )}
@@ -325,9 +327,9 @@ export default function CaptureEditor() {
           onEscape={handleEscape}
           onKeyDown={handleKeyDown}
           onReady={focusEditor}
-          placeholder="随手写点什么…（支持 Markdown，输入即自动保存）"
+          placeholder={T("随手写点什么…（支持 Markdown，输入即自动保存）")}
           className="cap-editor-md"
-          toolbarLabel="快速记录工具栏"
+          toolbarLabel={T("快速记录工具栏")}
         />
       </div>
 
@@ -342,9 +344,9 @@ export default function CaptureEditor() {
         </span>
         <span className="cap-actions">
           {toast && <span className="cap-toast">{toast}</span>}
-          <span className="cap-hint mono">Ctrl+Enter 发送 · Esc 隐藏</span>
+          <span className="cap-hint mono">{T("Ctrl+Enter 发送 · Esc 隐藏")}</span>
           <button className="btn btn-primary btn-sm" disabled={!text.trim() || sending} onClick={() => void send()}>
-            发送
+            {T("发送")}
           </button>
         </span>
       </footer>

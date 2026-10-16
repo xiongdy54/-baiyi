@@ -21,6 +21,7 @@ import AIPanel, { ChatComposer, ExplainModeBar, ExplainThread, type ChatComposer
 import { DockTrioMenu } from "./DockTrioMenu";
 import type { PopoverRect } from "../lib/popoverPlace";
 import { DictPanel } from "./DictPanel";
+import { useT } from "../lib/i18n";
 import OcclusionEditor from "./editor/OcclusionEditor";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { growTextarea } from "../lib/autoGrow";
@@ -48,6 +49,7 @@ import {
  *  作用域）；消失瞬时＝条件脱落直接卸载（§8，无出场动画）。 */
 function GhostLayer({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement | null>(null);
+  const T = useT();
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -57,7 +59,7 @@ function GhostLayer({ text }: { text: string }) {
   return (
     <div ref={ref} className="wb-ghost" data-accept-key="Alt+Enter" aria-hidden="true">
       <span className="wb-ghost-text">{text}</span>
-      <span className="wb-ghost-chip mono">Alt+Enter 填入</span>
+      <span className="wb-ghost-chip mono">{T("Alt+Enter 填入")}</span>
     </div>
   );
 }
@@ -86,6 +88,7 @@ function FreeSource({
 }) {
   const t = text.trim();
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const T = useT();
   const caretEndPending = useRef(false);
   useLayoutEffect(() => {
     if (ref.current) growTextarea(ref.current, 168);
@@ -117,8 +120,8 @@ function FreeSource({
         <textarea
           ref={ref}
           value={text}
-          placeholder="粘贴或输入要处理的文字"
-          aria-label="待处理文字"
+          placeholder={T("粘贴或输入要处理的文字")}
+          aria-label={T("待处理文字")}
           rows={1}
           onChange={(e) => onTextChange(e.target.value)}
         />
@@ -129,10 +132,10 @@ function FreeSource({
         <div className="collapse-inner">
           <div className="wb-free-acts">
             <button type="button" className={`btn btn-sm ${prefer === "explain" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onExplain(t)}>
-              AI 解释
+              {T("AI 解释")}
             </button>
             <button type="button" className={`btn btn-sm ${prefer === "cards" ? "btn-primary" : "btn-outline"}`} disabled={!t} onClick={() => onCards(t)}>
-              AI 制卡
+              {T("AI 制卡")}
             </button>
           </div>
         </div>

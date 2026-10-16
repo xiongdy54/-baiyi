@@ -13,6 +13,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { IconChevronDown, IconChevronRight } from "./icons";
 import { isDockLayoutApplied, setDockLayout, type WorkbenchDockPlacement } from "../lib/workbenchLayout";
+import { useT } from "../lib/i18n";
 
 /** 制卡板块页签（D144）：manual＝手动制卡表单；aicards＝自由材料 / AI 制卡草稿面板 */
 export type CardsTab = "manual" | "aicards";
@@ -63,6 +64,7 @@ export default function CardDock({
   /** composer 槽（wb-composer testid 保留） */
   explainComposer: ReactNode;
 }) {
+  const T = useT();
   const dockRef = useRef<HTMLElement | null>(null);
 
   // 登记布局：展开且非独立窗口才推让/外延（串行仲裁与同步动画见 workbenchLayout）。
@@ -110,15 +112,15 @@ export default function CardDock({
       data-placement={placement}
       data-dock-collapsed={dockOpen ? undefined : "1"}
       role="complementary"
-      aria-label="制卡台"
+      aria-label={T("制卡台")}
       aria-hidden={!dockOpen}
       onKeyDown={onKeyDown}
     >
       {/* 制卡板块（D144）：头行＝页签（手动制卡｜AI 制卡，平分整行）+ 右端收起箭头。
           v48.101（D146）：头行左侧「制卡」题字钮退役（与顶栏入口重复命名；开合收归右端箭头单钮） */}
-      <section className={`wb-manual${manualCollapsed ? " is-collapsed" : ""}`} data-testid="wb-cards" aria-label="制卡">
+      <section className={`wb-manual${manualCollapsed ? " is-collapsed" : ""}`} data-testid="wb-cards" aria-label={T("制卡")}>
         <header className="wb-head">
-          <div className="dock-tabs" role="tablist" aria-label="制卡页签" data-testid="wb-cards-tabs">
+          <div className="dock-tabs" role="tablist" aria-label={T("制卡页签")} data-testid="wb-cards-tabs">
             <button
               type="button"
               role="tab"
@@ -127,7 +129,7 @@ export default function CardDock({
               data-testid="wb-tab-manual"
               onClick={() => onTabChange("manual")}
             >
-              手动制卡
+              {T("手动制卡")}
             </button>
             <button
               type="button"
@@ -137,13 +139,13 @@ export default function CardDock({
               data-testid="wb-tab-aicards"
               onClick={() => onTabChange("aicards")}
             >
-              AI 制卡
+              {T("AI 制卡")}
             </button>
           </div>
           <button
             type="button"
             className="wb-chev-btn"
-            aria-label={manualCollapsed ? "展开制卡板块" : "收起制卡板块"}
+            aria-label={manualCollapsed ? T("展开制卡板块") : T("收起制卡板块")}
             aria-expanded={!manualCollapsed}
             onClick={onToggleManual}
           >
@@ -171,14 +173,14 @@ export default function CardDock({
         </div>
       </section>
       {/* 解释板块（D144）：恒在坞底；收起态仅按钮行 + 输入条，把手仅在有内容或已展开时在场 */}
-      <section className="wb-explain" data-testid="wb-explain" aria-label="AI 解释">
+      <section className="wb-explain" data-testid="wb-explain" aria-label={T("AI 解释")}>
         {explainHandleVisible && (
           <button
             type="button"
             className="wb-explain-toggle"
             data-testid="wb-explain-toggle"
             aria-expanded={explainOpen}
-            title={explainOpen ? "收起解释" : "展开解释"}
+            title={explainOpen ? T("收起解释") : T("展开解释")}
             onClick={onToggleExplain}
           >
             {/* v48.101（D146）：箭头随几何方向——收起态（内容将向上展开）＝向上箭头；展开态（将向下收起）＝向下箭头 */}

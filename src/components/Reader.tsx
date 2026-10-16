@@ -22,6 +22,7 @@ import SelectionPanels from "./SelectionPanels";
 import AnnotationEditor from "./AnnotationEditor";
 import { useSelectionBarStyle } from "../lib/selectionBarSettings";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
+import { useT } from "../lib/i18n";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
 import MindmapTab from "./reader/MindmapTab";
@@ -245,6 +246,7 @@ function ReaderThemeDropdown({
   onManage: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const T = useT();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -255,17 +257,17 @@ function ReaderThemeDropdown({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
   const builtIn: { key: ReaderAppearance["theme"]; label: string }[] = [
-    { key: "paper", label: "纸白" },
-    { key: "sepia", label: "羊皮" },
-    { key: "dark", label: "暗夜" },
-    { key: "custom", label: "自定义" }
+    { key: "paper", label: T("纸白") },
+    { key: "sepia", label: T("羊皮") },
+    { key: "dark", label: T("暗夜") },
+    { key: "custom", label: T("自定义") }
   ];
   const activeSaved = savedThemes.find(isSavedActive);
   const currentLabel =
-    value === "custom" && activeSaved ? activeSaved.name : builtIn.find((b) => b.key === value)?.label ?? "自定义";
+    value === "custom" && activeSaved ? activeSaved.name : builtIn.find((b) => b.key === value)?.label ?? T("自定义");
   return (
     <div className="dd" ref={ref} data-reader-theme-dd>
-      <button type="button" className="dd-btn" title="阅读主题" onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="dd-btn" title={T("阅读主题")} onClick={() => setOpen((v) => !v)}>
         {currentLabel}
         <IconChevronDown size={12} className="dd-caret" />
       </button>
@@ -291,7 +293,7 @@ function ReaderThemeDropdown({
           })}
           {savedThemes.length > 0 && (
             <>
-              <div className="reader-theme-group-label">── 我的主题 ──</div>
+              <div className="reader-theme-group-label">{T("── 我的主题 ──")}</div>
               {savedThemes.map((t) => {
                 const on = isSavedActive(t);
                 return (
@@ -319,13 +321,13 @@ function ReaderThemeDropdown({
             type="button"
             className="dd-item reader-theme-manage-item"
             data-reader-theme-manage
-            title="重命名与删除在设置页的「阅读外观」区块"
+            title={T("重命名与删除在设置页的「阅读外观」区块")}
             onClick={() => {
               setOpen(false);
               onManage();
             }}
           >
-            管理主题…
+            {T("管理主题…")}
           </button>
         </div>
       )}
@@ -357,6 +359,7 @@ export default function Reader({
   onReviewCards,
   onOpenAnchorCards
 }: Props) {
+  const T = useT();
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
@@ -757,7 +760,7 @@ export default function Reader({
     const themes = cur.customThemes ?? [];
     const entry: CustomThemeEntry = {
       id: `ct-${Date.now()}`,
-      name: rawName.trim().slice(0, 24) || `我的主题 ${themes.length + 1}`,
+      name: rawName.trim().slice(0, 24) || T("我的主题 {n}", { n: themes.length + 1 }),
       bgColor: a.bgColor ?? "#fafaf8",
       fgColor: a.fgColor ?? "#1a1a1a",
       createdAt: Date.now()
@@ -935,7 +938,7 @@ export default function Reader({
       })
       .catch(() => {
         // 主进程往返失败（理论上不可达）：不静默改集合，避免菜单与库不一致
-        showToast("多段选择暂不可用");
+        showToast(T("多段选择暂不可用"));
       });
   }, [showToast]);
 
@@ -1059,7 +1062,7 @@ export default function Reader({
       if (occlEditor || (manualOpen && manualImage)) return; // 挖空编辑器/弹窗在场时不重复进入（制卡台常驻不算）
       const dataUrl = await loadImageDataUrl(img.src);
       if (!dataUrl) {
-        showToast("无法读取这张图片的内容（可能来自外部链接）");
+        showToast(T("无法读取这张图片的内容（可能来自外部链接）"));
         return;
       }
       setSelection(null);
@@ -1088,13 +1091,13 @@ export default function Reader({
     // 制卡台常驻后 manualOpen / aiPanel 常为真（表单常驻、AI 面板留存）——不能再当作「弹层在场」拦截，
     // 否则截图钮永远静默无反应（用户 2026-10-10 反馈）。只有图片挖空编辑器 / 图片挖空弹窗在场才拦。
     if (occlEditor || (manualOpen && manualImage)) {
-      showToast("请先完成或关闭当前的图片挖空");
+      showToast(T("请先完成或关闭当前的图片挖空"));
       return;
     }
     const box = scrollRef.current?.getBoundingClientRect();
     const capture = window.assetsAPI?.captureRegion;
     if (!box || box.width < 8 || box.height < 8 || !capture) {
-      showToast("当前环境无法截图");
+      showToast(T("当前环境无法截图"));
       return;
     }
     setSelection(null);
@@ -1102,16 +1105,16 @@ export default function Reader({
     await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
     const dataUrl = await capture({ x: box.left, y: box.top, width: box.width, height: box.height });
     if (!dataUrl) {
-      showToast("截图失败");
+      showToast(T("截图失败"));
       return;
     }
     imageAnchorRef.current = {
       locator: kernelRef.current?.getCurrentLocation() ?? null,
       chapterIndex: engineChapterRef.current,
-      alt: "页面截图",
+      alt: T("页面截图"),
       contextText: undefined
     };
-    openOcclusionEditor({ dataUrl, alt: "页面截图" }, undefined);
+    openOcclusionEditor({ dataUrl, alt: T("页面截图") }, undefined);
   }, [manualOpen, manualImage, occlEditor, openOcclusionEditor, showToast]);
 
   /** v25：选区提交前把整图落盘（assets 表）——卡片 occlusion_json 需要稳定的 assetPath */
@@ -1119,18 +1122,18 @@ export default function Reader({
     async (dataUrl: string): Promise<string | null> => {
       const ownerKey = itemId || contextRef?.documentId || "";
       if (!ownerKey) {
-        showToast("无法确定图片归属的书籍");
+        showToast(T("无法确定图片归属的书籍"));
         return null;
       }
       const m = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl);
       if (!m) {
-        showToast("图片数据不可用");
+        showToast(T("图片数据不可用"));
         return null;
       }
       const ext = m[1] === "jpeg" ? "jpg" : m[1];
       const saved = await window.assetsAPI?.saveImage(ownerKey, ext, m[2]);
       if (!saved || (saved as { error?: string }).error || !saved.assetPath) {
-        showToast((saved as { error?: string } | null)?.error || "图片保存失败");
+        showToast((saved as { error?: string } | null)?.error || T("图片保存失败"));
         return null;
       }
       return saved.assetPath;
@@ -1216,7 +1219,7 @@ export default function Reader({
             cfi: imgA.locator?.cfi,
             chapterIndex: imgA.chapterIndex,
             pageIndex: imgA.locator?.pageIndex,
-            anchorText: fallbackText || "〔正文图片〕"
+            anchorText: fallbackText || T("〔正文图片〕")
           }),
           imageSource: "engine" as const,
           imageAnchor: { alt: imgA.alt, contextText: imgA.contextText }
@@ -1602,7 +1605,7 @@ export default function Reader({
   // D121 §2.2：目录可嵌套，旧实现只查顶层 → 子章节恒无章节名；改取路径末项
   const chapterLabel = tocPathByHref(tocItems, tocActiveHref).slice(-1)[0];
   const readerPageInfoText = [
-    relocPage != null ? `第 ${relocPage + 1} 页` : null,
+    relocPage != null ? T("第 {n} 页", { n: relocPage + 1 }) : null,
     chapterLabel ?? null
   ]
     .filter(Boolean)
@@ -1615,7 +1618,7 @@ export default function Reader({
   // P4a：动画过渡开关仅 foliate 引擎且分页/对开时启用（其余禁用态；PDF 为连续滚动容器不适用）
   const turnAnimatedEnabled = engineKind === "foliate" && pagedLike;
   const turnAnimatedDisabledTitle =
-    engineKind === "pdf" ? "PDF 为连续滚动容器，不适用翻页过渡" : "翻页过渡在分页/对开模式下生效";
+    engineKind === "pdf" ? T("PDF 为连续滚动容器，不适用翻页过渡") : T("翻页过渡在分页/对开模式下生效");
   // D122：与选区相关的动作（批注/制卡/AI 制卡/AI 解释/查词）与「摘录/形式」标注选项全部迁入
   // 选区浮条（SelectionMenu，随选区出现在鼠标旁）；工具栏只留**不依赖文字选区**的一项：
   //   · 截图＝截取阅读区可见内容 → 进入与「点击正文图片」同一条图片挖空制卡流程
@@ -1626,7 +1629,7 @@ export default function Reader({
   const selBarStyle = useSelectionBarStyle();
   const selActionsGroup = (
     <div className="reader-engine-controls-group reader-sel-actions" data-sel-actions>
-      <button type="button" className="btn-rail" data-sel-act="capture" title="截取当前阅读区域并进入图片挖空制卡" onClick={() => void handleCaptureReader()}>截图</button>
+      <button type="button" className="btn-rail" data-sel-act="capture" title={T("截取当前阅读区域并进入图片挖空制卡")} onClick={() => void handleCaptureReader()}>{T("截图")}</button>
     </div>
   );
 
@@ -1674,10 +1677,10 @@ export default function Reader({
                 data-reader-sidebar-toggle
                 aria-expanded={sidebarOpen}
                 aria-controls="reader-sidebar"
-                title={sidebarOpen ? "收起侧栏" : "展开侧栏"}
+                title={sidebarOpen ? T("收起侧栏") : T("展开侧栏")}
                 onClick={toggleSidebar}
               >
-                {sidebarOpen ? "收起" : "展开"}
+                {sidebarOpen ? T("收起") : T("展开")}
               </button>
               {/* v48.45（D85）：侧栏升级**全高左轨**——一行两格（轨 + 右列），与摘录批注轨同一形态：
                   贯通到顶、280↔0 滑动动画、展开时工具栏随右列整体右移。
@@ -1732,7 +1735,7 @@ export default function Reader({
                         <MindmapTab
                           kernel={kernelRef.current}
                           documentId={contextRef.documentId}
-                          title={title || sourceTitle || "未命名材料"}
+                          title={title || sourceTitle || T("未命名材料")}
                           canvasHost={mapLayerHost}
                           initialMapId={openMindmapMapId || null}
                           initialResumeRunId={resumeOnce}
@@ -1754,15 +1757,15 @@ export default function Reader({
                       v48.50（D90 增补）：分隔线移到组首——「图片挖空」与翻页贴得太近（用户指令），
                       用 hairline 在选区动作组与翻页/菜单组之间给出可见断点。 */}
                   <span className="reader-engine-divider" aria-hidden="true" />
-                  <button className="btn btn-outline btn-sm reader-nav-btn" title="上一页（←）" aria-label="上一页" onClick={() => void turnPage(-1)}>
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title={T("上一页（←）")} aria-label={T("上一页")} onClick={() => void turnPage(-1)}>
                     <IconChevronLeft />
                   </button>
-                  <button className="btn btn-outline btn-sm reader-nav-btn" title="下一页（→ / 空格）" aria-label="下一页" onClick={() => void turnPage(1)}>
+                  <button className="btn btn-outline btn-sm reader-nav-btn" title={T("下一页（→ / 空格）")} aria-label={T("下一页")} onClick={() => void turnPage(1)}>
                     <IconChevronRight />
                   </button>
                   <ReaderToolMenu
                     id="more"
-                    label="更多"
+                    label={T("更多")}
                     open={toolMenu === "more"}
                     onToggle={() => setToolMenu((v) => (v === "more" ? null : "more"))}
                   >
@@ -1772,47 +1775,47 @@ export default function Reader({
                       className="dd-item"
                       data-review-extracts
                       disabled={!itemId || !onReviewExtracts}
-                      title="开始复习本书的摘录（遵循每日上限）"
+                      title={T("开始复习本书的摘录（遵循每日上限）")}
                       onClick={() => {
                         setToolMenu(null);
                         onReviewExtracts?.();
                       }}
                     >
-                      复习摘录
+                      {T("复习摘录")}
                     </button>
                     <button
                       type="button"
                       className="dd-item"
                       data-review-cards
                       disabled={!itemId || !onReviewCards}
-                      title="开始复习本书的闪卡（遵循每日上限）"
+                      title={T("开始复习本书的闪卡（遵循每日上限）")}
                       onClick={() => {
                         setToolMenu(null);
                         onReviewCards?.();
                       }}
                     >
-                      复习闪卡
+                      {T("复习闪卡")}
                     </button>
                   </ReaderToolMenu>
                   <ReaderToolMenu
                     id="settings"
-                    label="阅读设置"
+                    label={T("阅读设置")}
                     open={toolMenu === "settings"}
                     onToggle={() => setToolMenu((v) => (v === "settings" ? null : "settings"))}
                   >
                     {/* D130 R3 §5.1：分组 IA——排版（最高频）→ 外观 → 翻页/缩放（低频）；
                         组间空间先行（margin-block sp-2 ≥ 2× 组内行距），hairline 仅作视觉断点。 */}
                     <div className="reader-tool-menu-group">
-                      <div className="reader-tool-menu-group-label">排版</div>
+                      <div className="reader-tool-menu-group-label">{T("排版")}</div>
                       <div className="reader-tool-menu-row" data-reader-row="mode">
-                        <span className="reader-tool-menu-label mono">模式</span>
+                        <span className="reader-tool-menu-label mono">{T("模式")}</span>
                         <Dropdown
-                          title="阅读模式"
+                          title={T("阅读模式")}
                           value={readerSettings.mode.flow === "scrolled" ? "scrolled" : readerSettings.mode.spread ? "spread" : "paged"}
                           options={[
-                            { value: "scrolled", label: "滚动" },
-                            { value: "paged", label: "分页" },
-                            { value: "spread", label: "对开" }
+                            { value: "scrolled", label: T("滚动") },
+                            { value: "paged", label: T("分页") },
+                            { value: "spread", label: T("对开") }
                           ]}
                           onChange={(v) =>
                             changeReaderMode(
@@ -1822,17 +1825,17 @@ export default function Reader({
                         />
                       </div>
                       <div className="reader-tool-menu-row" data-reader-row="lineHeight">
-                        <span className="reader-tool-menu-label mono">行距</span>
+                        <span className="reader-tool-menu-label mono">{T("行距")}</span>
                         {/* P2：字段与生效链既有（iframe 注入 line-height），本行只是接 UI；PDF 固定版式不适用 → 禁用态 */}
                         {engineKind === "pdf" ? (
-                          <button type="button" className="dd-btn" disabled title="PDF 为固定版式，不适用行距">
-                            {nearestPreset(resolvedAppearance.lineHeight ?? 1.7, LINE_HEIGHT_PRESETS).label}
+                          <button type="button" className="dd-btn" disabled title={T("PDF 为固定版式，不适用行距")}>
+                            {T(nearestPreset(resolvedAppearance.lineHeight ?? 1.7, LINE_HEIGHT_PRESETS).label)}
                           </button>
                         ) : (
                           <Dropdown
-                            title="行距"
+                            title={T("行距")}
                             value={nearestPreset(resolvedAppearance.lineHeight ?? 1.7, LINE_HEIGHT_PRESETS).value}
-                            options={LINE_HEIGHT_PRESETS}
+                            options={LINE_HEIGHT_PRESETS.map((p) => ({ ...p, label: T(p.label) }))}
                             onChange={(v) => changeReaderAppearance({ lineHeight: Number(v) })}
                           />
                         )}
@@ -1841,17 +1844,17 @@ export default function Reader({
                           禁止「看着能调、调了没反应」（R3），禁用态必须带 title 说明 */}
                       {engineKind !== "pdf" && (
                         <div className="reader-tool-menu-row" data-reader-row="margin">
-                          <span className="reader-tool-menu-label mono">边距</span>
+                          <span className="reader-tool-menu-label mono">{T("边距")}</span>
                           {pagedLike ? (
                             <Dropdown
-                              title="页边距"
+                              title={T("页边距")}
                               value={nearestPreset(resolvedAppearance.margin ?? 48, MARGIN_PRESETS).value}
-                              options={MARGIN_PRESETS}
+                              options={MARGIN_PRESETS.map((p) => ({ ...p, label: T(p.label) }))}
                               onChange={(v) => changeReaderAppearance({ margin: Number(v) })}
                             />
                           ) : (
-                            <button type="button" className="dd-btn" disabled title="页边距在分页/对开模式下生效">
-                              {nearestPreset(resolvedAppearance.margin ?? 48, MARGIN_PRESETS).label}
+                            <button type="button" className="dd-btn" disabled title={T("页边距在分页/对开模式下生效")}>
+                              {T(nearestPreset(resolvedAppearance.margin ?? 48, MARGIN_PRESETS).label)}
                             </button>
                           )}
                         </div>
@@ -1860,26 +1863,26 @@ export default function Reader({
                           分页列宽实际由容器宽÷列数决定（此值只是上限），分页下不暴露 */}
                       {engineKind !== "pdf" && (
                         <div className="reader-tool-menu-row" data-reader-row="measure">
-                          <span className="reader-tool-menu-label mono">版心</span>
+                          <span className="reader-tool-menu-label mono">{T("版心")}</span>
                           {readerSettings.mode.flow === "scrolled" ? (
                             <Dropdown
-                              title="版心宽度"
+                              title={T("版心宽度")}
                               value={nearestPreset(resolvedAppearance.maxInlineSize ?? 720, MEASURE_PRESETS).value}
-                              options={MEASURE_PRESETS}
+                              options={MEASURE_PRESETS.map((p) => ({ ...p, label: T(p.label) }))}
                               onChange={(v) => changeReaderAppearance({ maxInlineSize: Number(v) })}
                             />
                           ) : (
-                            <button type="button" className="dd-btn" disabled title="版心宽度在滚动模式下生效">
-                              {nearestPreset(resolvedAppearance.maxInlineSize ?? 720, MEASURE_PRESETS).label}
+                            <button type="button" className="dd-btn" disabled title={T("版心宽度在滚动模式下生效")}>
+                              {T(nearestPreset(resolvedAppearance.maxInlineSize ?? 720, MEASURE_PRESETS).label)}
                             </button>
                           )}
                         </div>
                       )}
                     </div>
                     <div className="reader-tool-menu-group">
-                      <div className="reader-tool-menu-group-label">外观</div>
+                      <div className="reader-tool-menu-group-label">{T("外观")}</div>
                       <div className="reader-tool-menu-row" data-reader-row="theme">
-                        <span className="reader-tool-menu-label mono">主题</span>
+                        <span className="reader-tool-menu-label mono">{T("主题")}</span>
                         <ReaderThemeDropdown
                           value={readerSettings.appearance.theme}
                           savedThemes={savedThemes}
@@ -1891,25 +1894,25 @@ export default function Reader({
                           onSelect={(t) => (typeof t === "string" ? changeReaderTheme(t) : applySavedTheme(t))}
                           onManage={() => {
                             setToolMenu(null);
-                            showToast("在「设置 → 阅读 → 阅读外观」重命名或删除已存主题");
+                            showToast(T("在「设置 → 阅读 → 阅读外观」重命名或删除已存主题"));
                           }}
                         />
                       </div>
                       {readerSettings.appearance.theme === "custom" && (
                         <div className="reader-tool-menu-row" data-reader-row="customColors">
-                          <span className="reader-tool-menu-label mono">自定义色</span>
+                          <span className="reader-tool-menu-label mono">{T("自定义色")}</span>
                           <span className="reader-custom-color-group">
                             <input
                               type="color"
                               className="reader-color-input"
-                              title="背景色"
+                              title={T("背景色")}
                               value={readerSettings.appearance.bgColor || "#fafaf8"}
                               onChange={(e) => changeReaderAppearance({ bgColor: e.target.value })}
                             />
                             <input
                               type="color"
                               className="reader-color-input"
-                              title="文字色"
+                              title={T("文字色")}
                               value={readerSettings.appearance.fgColor || "#1a1a1a"}
                               onChange={(e) => changeReaderAppearance({ fgColor: e.target.value })}
                             />
@@ -1920,7 +1923,7 @@ export default function Reader({
                                   data-reader-theme-name-input
                                   autoFocus
                                   maxLength={24}
-                                  placeholder={`我的主题 ${savedThemes.length + 1}`}
+                                  placeholder={T("我的主题 {n}", { n: savedThemes.length + 1 })}
                                   value={themeNameDraft}
                                   onChange={(e) => setThemeNameDraft(e.target.value)}
                                   onKeyDown={(e) => {
@@ -1930,7 +1933,7 @@ export default function Reader({
                                   onBlur={confirmThemeName}
                                 />
                                 <button type="button" className="reader-theme-save-btn" onClick={confirmThemeName}>
-                                  确定
+                                  {T("确定")}
                                 </button>
                               </span>
                             ) : (
@@ -1939,13 +1942,13 @@ export default function Reader({
                                 className="reader-theme-save-btn"
                                 data-reader-theme-save
                                 disabled={savedThemes.length >= CUSTOM_THEMES_MAX}
-                                title={savedThemes.length >= CUSTOM_THEMES_MAX ? "最多保存 12 套，请先在设置页删除" : "把当前自定义配色另存为命名主题"}
+                                title={savedThemes.length >= CUSTOM_THEMES_MAX ? T("最多保存 12 套，请先在设置页删除") : T("把当前自定义配色另存为命名主题")}
                                 onClick={() => {
                                   setThemeNameDraft("");
                                   setThemeNaming(true);
                                 }}
                               >
-                                保存主题
+                                {T("保存主题")}
                               </button>
                             )}
                           </span>
@@ -1953,34 +1956,34 @@ export default function Reader({
                       )}
                     </div>
                     <div className="reader-tool-menu-group">
-                      <div className="reader-tool-menu-group-label">翻页</div>
+                      <div className="reader-tool-menu-group-label">{T("翻页")}</div>
                       <div className="reader-tool-menu-row" data-reader-row="turnAnimated">
-                        <span className="reader-tool-menu-label mono">动画过渡</span>
+                        <span className="reader-tool-menu-label mono">{T("动画过渡")}</span>
                         {turnAnimatedEnabled ? (
                           <Dropdown
-                            title="翻页滑动过渡"
+                            title={T("翻页滑动过渡")}
                             value={readerSettings.appearance.turnAnimated === true ? "on" : "off"}
                             options={[
-                              { value: "off", label: "关" },
-                              { value: "on", label: "开" }
+                              { value: "off", label: T("关") },
+                              { value: "on", label: T("开") }
                             ]}
                             onChange={(v) => changeReaderAppearance({ turnAnimated: v === "on" })}
                           />
                         ) : (
                           <button type="button" className="dd-btn" disabled title={turnAnimatedDisabledTitle}>
-                            {readerSettings.appearance.turnAnimated === true ? "开" : "关"}
+                            {readerSettings.appearance.turnAnimated === true ? T("开") : T("关")}
                           </button>
                         )}
                       </div>
                       {engineKind === "pdf" && (
                         <div className="reader-tool-menu-row" data-reader-row="zoom">
-                          <span className="reader-tool-menu-label mono">缩放</span>
+                          <span className="reader-tool-menu-label mono">{T("缩放")}</span>
                           <Dropdown
-                            title="缩放"
+                            title={T("缩放")}
                             value={String(readerSettings.appearance.zoom ?? "page-width")}
                             options={[
-                              { value: "page-width", label: "适应宽度" },
-                              { value: "page-fit", label: "适应页面" },
+                              { value: "page-width", label: T("适应宽度") },
+                              { value: "page-fit", label: T("适应页面") },
                               { value: "50", label: "50%" },
                               { value: "75", label: "75%" },
                               { value: "100", label: "100%" },
@@ -2008,7 +2011,7 @@ export default function Reader({
                 {engineError ? (
                   <div className="reader-engine-error" role="alert">
                     <p className="reader-engine-error-title">
-                      这本书没能打开
+                      {T("这本书没能打开")}
                     </p>
                     <p className="reader-engine-error-msg mono">{engineError}</p>
                     <div className="reader-engine-error-actions">
@@ -2019,14 +2022,14 @@ export default function Reader({
                           setEngineRetry((n) => n + 1);
                         }}
                       >
-                        重试
+                        {T("重试")}
                       </button>
                       <button className="btn btn-outline btn-sm" onClick={() => setEngineError(null)}>
-                        关闭提示
+                        {T("关闭提示")}
                       </button>
                     </div>
                     <p className="reader-engine-error-hint">
-                      常见原因：文件格式不受支持、文件本身损坏，或导出时缺失资源。
+                      {T("常见原因：文件格式不受支持、文件本身损坏，或导出时缺失资源。")}
                     </p>
                   </div>
                 ) : (
@@ -2052,12 +2055,12 @@ export default function Reader({
                   <>
                     {/* D130 P4b：热区 hover chevron 提示（零布局变化：热区几何不动、翻页行为不变，
                         提示浮在其上 pointer-events:none，opacity 0→1 过渡在 theme.css no-preference 作用域） */}
-                    <div className="reader-tap-zone reader-tap-left" title="上一页" onClick={() => void turnPage(-1)}>
+                    <div className="reader-tap-zone reader-tap-left" title={T("上一页")} onClick={() => void turnPage(-1)}>
                       <span className="reader-tap-hint" data-reader-tap-hint="left" aria-hidden="true">
                         <IconChevronLeft size={16} />
                       </span>
                     </div>
-                    <div className="reader-tap-zone reader-tap-right" title="下一页" onClick={() => void turnPage(1)}>
+                    <div className="reader-tap-zone reader-tap-right" title={T("下一页")} onClick={() => void turnPage(1)}>
                       <span className="reader-tap-hint" data-reader-tap-hint="right" aria-hidden="true">
                         <IconChevronRight size={16} />
                       </span>
@@ -2105,8 +2108,8 @@ export default function Reader({
           {sourcePeek && sourcePeek.occlusion?.assetPath && (
             <div className="source-peek">
               <div className="source-peek-head">
-                <span>原图对照（未在正文中定位到该图）</span>
-                <button className="source-peek-close" onClick={() => setSourcePeek(null)} title="关闭" aria-label="关闭"><IconClose size={16} /></button>
+                <span>{T("原图对照（未在正文中定位到该图）")}</span>
+                <button className="source-peek-close" onClick={() => setSourcePeek(null)} title={T("关闭")} aria-label={T("关闭")}><IconClose size={16} /></button>
               </div>
               <div className="occlusion-stage source-peek-stage">
                 <img src={sourcePeek.occlusion.assetPath} alt="" className="occlusion-img" />

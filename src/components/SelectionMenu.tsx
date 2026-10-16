@@ -12,6 +12,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { placePopover, type PopoverRect } from "../lib/popoverPlace";
 import type { SelectionBarStyle } from "../lib/selectionBarSettings";
+import { useT } from "../lib/i18n";
 import {
   IconSelAiCards,
   IconSelCard,
@@ -89,6 +90,7 @@ export default function SelectionMenu({
   /** 四个选区动作；缺省＝不渲染动作区 */
   actions?: SelectionBarActions;
 }) {
+  const T = useT();
   const ref = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -146,8 +148,8 @@ export default function SelectionMenu({
 
   const isIcon = barStyle === "icon";
   const extract = mode === "extract";
-  const gearTitle = `标注选项：${extract ? "摘录+" : ""}${FORM_LABEL[form]}`;
-  const gearText = `${extract ? "摘录·" : ""}${FORM_LABEL[form]}`;
+  const gearTitle = T("标注选项：{detail}", { detail: `${extract ? T("摘录+") : ""}${T(FORM_LABEL[form])}` });
+  const gearText = `${extract ? T("摘录·") : ""}${T(FORM_LABEL[form])}`;
 
   const actBtn = (key: string, label: string, title: string, icon: ReactNode, onClick: () => void, extra?: string) => (
     <button
@@ -169,7 +171,7 @@ export default function SelectionMenu({
       ref={ref}
       className={`menu selection-menu sel-bar${byLocked ? " menu-locked" : ""}`}
       role="dialog"
-      aria-label="选中文字"
+      aria-label={T("选中文字")}
       data-sel-actions
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
     >
@@ -179,8 +181,8 @@ export default function SelectionMenu({
             ref={textRef}
             className="menu-comment"
             rows={2}
-            placeholder="写批注…（Ctrl+Enter 用上次的颜色保存）"
-            aria-label="批注内容"
+            placeholder={T("写批注…（Ctrl+Enter 用上次的颜色保存）")}
+            aria-label={T("批注内容")}
             tabIndex={commentOpen ? 0 : -1}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -201,30 +203,35 @@ export default function SelectionMenu({
       <div className="sel-row">
         {colors.length > 0 && (
           <div className="swatches">
-            {colors.map((c) => (
-              <button
-                key={c}
-                type="button"
-                className="swatch"
-                data-color={c}
-                title={`${COLOR_NAMES[c] ?? c}色${extract ? " · 摘录+" : " · "}${FORM_LABEL[form]}${comment.trim() ? "（附批注）" : ""}`}
-                aria-label={`标注色 ${c}`}
-                style={{ background: c.startsWith("#") ? c : `var(--annot-${c})` }}
-                onMouseDown={keepSel}
-                onClick={() => pick(c)}
-              />
-            ))}
+            {colors.map((c) => {
+              const colorWord = T(COLOR_NAMES[c] ?? c);
+              const formWord = T(FORM_LABEL[form]);
+              const note = comment.trim() ? T("（附批注）") : "";
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  className="swatch"
+                  data-color={c}
+                  title={extract ? T("{color}色 · 摘录+{form}{note}", { color: colorWord, form: formWord, note }) : T("{color}色 · {form}{note}", { color: colorWord, form: formWord, note })}
+                  aria-label={T("标注色 {c}", { c })}
+                  style={{ background: c.startsWith("#") ? c : `var(--annot-${c})` }}
+                  onMouseDown={keepSel}
+                  onClick={() => pick(c)}
+                />
+              );
+            })}
           </div>
         )}
 
         {actions && (
           <>
             <i className="sel-sep" aria-hidden="true" />
-            {actBtn("note", "批注", "批注（先写再点颜色）", <IconSelNote />, toggleComment, commentOpen ? "on" : undefined)}
-            {actBtn("manual", "制卡", "就地制卡 · Ctrl+Z", <IconSelCard />, actions.manual)}
-            {actBtn("aiCards", "AI 制卡", "AI 制卡 · Ctrl+X", <IconSelAiCards />, actions.aiCards)}
-            {actBtn("explain", "AI 解释", "AI 解释 · Ctrl+A", <IconSelExplain />, actions.explain)}
-            {actBtn("lookup", "查词", "查词 · Ctrl+D", <IconSelLookup />, actions.lookup)}
+            {actBtn("note", T("批注"), T("批注（先写再点颜色）"), <IconSelNote />, toggleComment, commentOpen ? "on" : undefined)}
+            {actBtn("manual", T("制卡"), T("就地制卡 · Ctrl+Z"), <IconSelCard />, actions.manual)}
+            {actBtn("aiCards", T("AI 制卡"), T("AI 制卡 · Ctrl+X"), <IconSelAiCards />, actions.aiCards)}
+            {actBtn("explain", T("AI 解释"), T("AI 解释 · Ctrl+A"), <IconSelExplain />, actions.explain)}
+            {actBtn("lookup", T("查词"), T("查词 · Ctrl+D"), <IconSelLookup />, actions.lookup)}
           </>
         )}
 
@@ -253,13 +260,13 @@ export default function SelectionMenu({
                   data-annot-extract
                   aria-pressed={extract}
                   tabIndex={optsOpen ? 0 : -1}
-                  title="点颜色时同时进入学习队列"
+                  title={T("点颜色时同时进入学习队列")}
                   onMouseDown={keepSel}
                   onClick={() => onModeChange?.(extract ? "highlight" : "extract")}
                 >
-                  摘录
+                  {T("摘录")}
                 </button>
-                <span className="sel-seg" role="group" aria-label="标记形式">
+                <span className="sel-seg" role="group" aria-label={T("标记形式")}>
                   {(["highlight", "underline"] as const).map((f) => (
                     <button
                       key={f}
@@ -270,7 +277,7 @@ export default function SelectionMenu({
                       onMouseDown={keepSel}
                       onClick={() => onFormChange?.(f)}
                     >
-                      {FORM_LABEL[f]}
+                      {T(FORM_LABEL[f])}
                     </button>
                   ))}
                 </span>

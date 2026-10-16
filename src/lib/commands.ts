@@ -8,6 +8,7 @@
 // 安全边界：输入焦点（input/textarea/contentEditable）内绝不劫持（编辑态 Ctrl+Z/Ctrl+A 保持原语义）；
 //           e.repeat 忽略（长按不连发）；抑制集合非空时全部放行（设置弹窗/键位捕获期间）。
 import { settingsStore } from "./settings";
+import { t } from "./i18n";
 
 export interface CommandDef {
   id: string;
@@ -103,7 +104,7 @@ export function bindingHint(id: string): string {
   if (!combo) return "";
   return combo
     .split("+")
-    .map((part) => KEY_LABEL[part] ?? part)
+    .map((part) => (KEY_LABEL[part] ? t(KEY_LABEL[part]) : part))
     .join("+");
 }
 

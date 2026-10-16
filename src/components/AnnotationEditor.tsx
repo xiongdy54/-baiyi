@@ -15,6 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { placePopover, type PopoverRect } from "../lib/popoverPlace";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { ANNOT_COLORS, type AnnotColor } from "./SelectionMenu";
+import { useT } from "../lib/i18n";
 
 /** 已保存态的迟到窗口：防抖落库后短暂显示「已保存」再隐去 */
 const SAVED_HINT_MS = 1400;
@@ -79,6 +80,7 @@ export default function AnnotationEditor({
   onMakeCard,
   onOpenCards
 }: AnnotationEditorProps) {
+  const T = useT();
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [text, setText] = useState(comment ?? "");
@@ -187,7 +189,7 @@ export default function AnnotationEditor({
     closeAndSave();
   }
 
-  const deleteLabel = kind === "highlight" ? "删除高亮" : "删除摘录";
+  const deleteLabel = kind === "highlight" ? T("删除高亮") : T("删除摘录");
 
   return (
     <div
@@ -195,7 +197,7 @@ export default function AnnotationEditor({
       className="annot-editor"
       role="dialog"
       aria-modal="false"
-      aria-label={kind === "highlight" ? "编辑高亮" : "编辑摘录"}
+      aria-label={kind === "highlight" ? T("编辑高亮") : T("编辑摘录")}
       data-editor-kind={kind}
       data-editor-for={extractId}
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: 0 }}
@@ -205,8 +207,8 @@ export default function AnnotationEditor({
         rows={3}
         value={text}
         // 不放解释性小字（R38：清空＝删批注属直觉）；placeholder 只作输入提示
-        placeholder="写批注"
-        aria-label="批注文字"
+        placeholder={T("写批注")}
+        aria-label={T("批注文字")}
         onChange={(e) => setText(e.target.value)}
         onBlur={handleBlur}
       />
@@ -215,14 +217,14 @@ export default function AnnotationEditor({
           type="button"
           className="colorbtn"
           data-colorbtn
-          title="高亮颜色"
-          aria-label="高亮颜色"
+          title={T("高亮颜色")}
+          aria-label={T("高亮颜色")}
           aria-expanded={colorOpen}
           style={{ background: annotColorCss(color) }}
           onClick={() => setColorOpen((v) => !v)}
         />
         <span className="save-state" data-savestate>
-          {saveState === "saving" ? "正在保存…" : saveState === "saved" ? "已保存" : ""}
+          {saveState === "saving" ? T("正在保存…") : saveState === "saved" ? T("已保存") : ""}
         </span>
         {/* v48.46（D86）：「已制卡 N 张」（聚合口径）+「就此制卡」并入底行（v48.45 的独立学档行作废）——
             就此制卡＝.make-card（与 .del 同规格、黑色文字）；摘录页宿主不传计数时不渲染，底行照旧 */}
@@ -233,28 +235,28 @@ export default function AnnotationEditor({
               className="cardcount mono"
               data-cardcount
               data-open-cards
-              title="查看这个锚点下的全部卡片（含子摘录等所有子层级产出的卡）"
+              title={T("查看这个锚点下的全部卡片（含子摘录等所有子层级产出的卡）")}
               onClick={onOpenCards}
             >
-              已制卡 {cardCount} 张
+              {T("已制卡 {n} 张", { n: cardCount })}
             </button>
           ) : (
             <span className="cardcount mono" data-cardcount>
-              已制卡 {cardCount} 张
+              {T("已制卡 {n} 张", { n: cardCount })}
             </span>
           ))}
         {onMakeCard && (
           <button type="button" className="make-card" data-make-card onClick={onMakeCard}>
-            就此制卡
+            {T("就此制卡")}
           </button>
         )}
         {confirmDelete ? (
           <>
             <button type="button" className="del" data-del-confirmed onClick={() => void onDelete()}>
-              确认{deleteLabel}
+              {kind === "highlight" ? T("确认删除高亮") : T("确认删除摘录")}
             </button>
             <button type="button" className="del-cancel" data-del-cancel onClick={() => setConfirmDelete(false)}>
-              取消
+              {T("取消")}
             </button>
           </>
         ) : (
@@ -272,7 +274,7 @@ export default function AnnotationEditor({
                 type="button"
                 className="swatch"
                 data-color={c}
-                title={`用这支色：${c}`}
+                title={T("用这支色：{color}", { color: c })}
                 style={{ background: annotColorCss(c) }}
                 onClick={() => {
                   setColorOpen(false);
@@ -283,7 +285,7 @@ export default function AnnotationEditor({
           </div>
           {customEnabled && (
             <div className="customrow">
-              <span>自定义</span>
+              <span>{T("自定义")}</span>
               <input
                 type="color"
                 data-customcolor

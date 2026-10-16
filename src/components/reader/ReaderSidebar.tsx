@@ -6,6 +6,7 @@
 // （MindmapTab 经 mapPanel 注入；原 mapTree 树形目录退役）。
 import type { ReaderTocItem } from "../../lib/reader/service";
 import type { AnnotFilter, AnnotSort } from "./AnnotationPanel";
+import { useT } from "../../lib/i18n";
 
 export type ReaderTab = "toc" | "extracts" | "map";
 
@@ -54,6 +55,7 @@ export default function ReaderSidebar({
   extractsPanel,
   mapPanel
 }: ReaderSidebarProps) {
+  const T = useT();
   const flat = flatten(tocItems);
   // v48.44（D84）：页签**恒可点**（三枚恒在且都可进，空数据＝页签内空态文案，不 disabled）。
   // 着陆页签＝会话记忆；唯一下探：会话停在「目录」而目录无数据、其他页签有内容时，
@@ -71,7 +73,7 @@ export default function ReaderSidebar({
       : tab;
 
   return (
-    <nav className="reader-sidebar" id="reader-sidebar" aria-label="阅读器侧栏" data-reader-sidebar>
+    <nav className="reader-sidebar" id="reader-sidebar" aria-label={T("阅读器侧栏")} data-reader-sidebar>
       {/* D127：页签（目录/摘录/图谱）＝主役导航，升为侧栏第一行（与右列工具行同带高 56，
           左让位 --sp-16 给浮动开关钮）；激活态＝全应用页签语言（文字 + 2px accent 下划线）。
           旧「栏头行」（筛选/排序段控）降级为摘录页签内的上下文工具行（见 extracts 分支）。 */}
@@ -86,14 +88,14 @@ export default function ReaderSidebar({
             data-sidebar-tab={id}
             onClick={() => onTabChange(id)}
           >
-            {label}
+            {T(label)}
           </button>
         ))}
       </div>
 
       {shown === "toc" && (
         <div className="reader-toc-list" data-panel="toc">
-          {flat.length === 0 && <p className="reader-toc-empty">本书没有目录数据。</p>}
+          {flat.length === 0 && <p className="reader-toc-empty">{T("本书没有目录数据。")}</p>}
           {flat.map(({ item, level }, i) => (
             <button
               key={`${item.href}-${i}`}
@@ -103,7 +105,7 @@ export default function ReaderSidebar({
               title={item.label}
               aria-current={item.href && item.href === activeHref ? "location" : undefined}
             >
-              {item.label || "(无标题)"}
+              {item.label || T("(无标题)")}
             </button>
           ))}
         </div>
@@ -117,25 +119,25 @@ export default function ReaderSidebar({
             <span className="filter" data-annot-filterseg>
               {([["all", "全部"], ["extract", "摘录"], ["highlight", "高亮"]] as const).map(([id, label]) => (
                 <button key={id} className={filter === id ? "on" : ""} data-f={id} onClick={() => onFilter(id)}>
-                  {label}
+                  {T(label)}
                 </button>
               ))}
             </span>
             <span className="sort" data-annot-sortseg>
               {([["pos", "位置"], ["time", "时间"]] as const).map(([id, label]) => (
                 <button key={id} className={sort === id ? "on" : ""} data-sort={id} onClick={() => onSort(id)}>
-                  {label}
+                  {T(label)}
                 </button>
               ))}
             </span>
           </div>
-          {extractsPanel ?? <p className="reader-toc-empty">本书暂无批注。</p>}
+          {extractsPanel ?? <p className="reader-toc-empty">{T("本书暂无批注。")}</p>}
         </div>
       )}
 
       {shown === "map" && (
         <div className="reader-side-panel reader-map-panel" data-panel="map">
-          {mapPanel ?? <p className="reader-toc-empty">图谱页签暂不可用。</p>}
+          {mapPanel ?? <p className="reader-toc-empty">{T("图谱页签暂不可用。")}</p>}
         </div>
       )}
     </nav>

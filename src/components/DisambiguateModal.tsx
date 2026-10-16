@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { aiConfigUsable, aiGateway } from "../lib/ai";
 // v49.8（D182）：AI 输出语言随界面语言
-import { getLocale } from "../lib/i18n";
+import { getLocale, useT } from "../lib/i18n";
 import { steOutputLangName } from "../lib/steProfiles";
 import { cardsApi, generateContrastDrafts, applyCardTextEdit, type CardRecord } from "../lib/cards";
 import { cardLinksApi } from "../lib/cardLinks";
@@ -45,7 +45,8 @@ export interface DisambiguateCloseResult {
 type SideData = { card: CardWithTitle; orig: EditableFields; cur: EditableFields };
 
 const EMPTY_CONTRAST: ContrastState = { running: false, progress: 0, thinking: false, error: "", drafts: null };
-const NO_KEY_HINT = "未配置 AI 服务 Key：请先在 设置 → AI 服务 中配置后再使用「AI 诊断」（手动修改与保存不受影响）。";
+// v49.8：提示语改为运行期翻译（键 = zh 原文）
+const NO_KEY_HINT_KEY = "未配置 AI 服务 Key：请先在 设置 → AI 服务 中配置后再使用「AI 诊断」（手动修改与保存不受影响）。";
 
 function toSide(card: CardWithTitle): SideData {
   const f = fieldsOfCard(card);
@@ -76,6 +77,7 @@ export default function DisambiguateModal({
   origin: "review" | "browser" | "manual";
   onClose: (result: DisambiguateCloseResult) => void;
 }) {
+  const T = useT();
   // ---- 会话状态 ----
   const [all, setAll] = useState<CardWithTitle[]>([]);
   const [loadingAll, setLoadingAll] = useState(true);
@@ -232,12 +234,12 @@ export default function DisambiguateModal({
       let bigChange = false;
       const saved: Side[] = [];
       if (dirtyA) {
-        if (!(await saveOne(a))) throw new Error("保存卡 A 失败");
+        if (!(await saveOne(a))) throw new Error(T("保存卡 A 失败"));
         saved.push("A");
         if (isBigFrontChange(bigramJaccard(a.orig.front, a.cur.front))) bigChange = true;
       }
       if (dirtyB && b) {
-        if (!(await saveOne(b))) throw new Error("保存卡 B 失败");
+        if (!(await saveOne(b))) throw new Error(T("保存卡 B 失败"));
         saved.push("B");
         if (isBigFrontChange(bigramJaccard(b.orig.front, b.cur.front))) bigChange = true;
       }
@@ -249,7 +251,7 @@ export default function DisambiguateModal({
       // 此次尚无链接才补写 manual（已诊断过的会话已有链接，不再新增）
       if (!linkIdRef.current) await writeLink("manual", "");
       eventBus.emit("cards/changed");
-      setNotice(`已保存卡 ${saved.join("、")} 的修改。${bigChange ? "改动较大，如需按新卡重新学习，可在卡片浏览中手动重置。" : ""}`);
+      setNotice(T("已保存卡 {sides} 的修改。{big}", { sides: saved.join("、"), big: bigChange ? T("改动较大，如需按新卡重新学习，可在卡片浏览中手动重置。") : "" }));
     } catch (err) {
       if (mounted.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -268,7 +270,7 @@ export default function DisambiguateModal({
     try {
       // 提示词只放模板库，缺失即报错（不在代码里放兜底提示词）
       const tpl = await window.promptsAPI?.get("card-disambiguate");
-      if (!tpl?.content) throw new Error("提示词模板缺失（card-disambiguate）：请到 设置 → 提示词 检查模板是否被删除。");
+      if (!tpl?.content) throw new Error(T("提示词模板缺失（card-disambiguate）：请到 设置 → 提示词 检查模板是否被删除。"));
       const snap = { A: a.cur, B: hasB && b ? b.cur : null };
       const input = buildDisambiguateInput({ a: sideInput(a, originA), b: hasB && b ? sideInput(b, originB) : null });
       // v49.8（D182）：诊断说明随界面语言——zh-CN 保持原文零变化，其余语言注入指令行
@@ -312,13 +314,13 @@ export default function DisambiguateModal({
     setError("");
     try {
       const r = await cardsApi.batch("archive", [target.card.id]);
-      if (!r?.ok) throw new Error(r?.reason || "归档失败");
+      if (!r?.ok) throw new Error(r?.reason || T("归档失败"));
       archivedIdsRef.current.push(target.card.id);
       changedRef.current = true;
       if (!mounted.current) return;
       setArchivedSides((prev) => new Set([...prev, side]));
       eventBus.emit("cards/changed");
-      setNotice(`已归档卡 ${side}（不再复习，可在卡片浏览中恢复）。`);
+      setNotice(T("已归档卡 {side}（不再复习，可在卡片浏览中恢复）。", { side }));
     } catch (err) {
       if (mounted.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -360,13 +362,13 @@ export default function DisambiguateModal({
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="卡片辨析"
+        aria-label={T("卡片辨析")}
         data-testid="disamb-modal"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h2>{step === "pick" ? "辨析 · 选择另一张卡" : single ? "辨析 · 单卡" : "辨析 · 对照两张卡"}</h2>
-          <button className="icon-btn modal-close" title="关闭" onClick={close}>
+          <h2>{step === "pick" ? T("辨析 · 选择另一张卡") : single ? T("辨析 · 单卡") : T("辨析 · 对照两张卡")}</h2>
+          <button className="icon-btn modal-close" title={T("关闭")} onClick={close}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
               <path d="M18 6 6 18" />
             </svg>
@@ -402,17 +404,17 @@ export default function DisambiguateModal({
                     onChange={(p) => patchSide("B", p)}
                   />
                 ) : (
-                  <section className="disamb-pane disamb-pane-single" aria-label="单卡模式">
-                    <h3 className="disamb-pane-title">单卡模式</h3>
-                    <p className="form-hint">没有对照卡：只诊断卡 A（{srcA.title ? `《${srcA.title}》` : "来源未知"}）本身是否问得不清、缺少限定。</p>
+                  <section className="disamb-pane disamb-pane-single" aria-label={T("单卡模式")}>
+                    <h3 className="disamb-pane-title">{T("单卡模式")}</h3>
+                    <p className="form-hint">{T("没有对照卡：只诊断卡 A（{title}）本身是否问得不清、缺少限定。", { title: srcA.title ? `《${srcA.title}》` : T("来源未知") })}</p>
                   </section>
                 )}
               </div>
 
               {error && <p className="ai-draft-warnings"><IconAlert size={14} /> {error}</p>}
               {notice && <p className="form-hint state-ok" role="status">{notice}</p>}
-              {aiUsable === false && <p className="form-hint">{NO_KEY_HINT}</p>}
-              {diagnosing && <p className="form-hint">AI 正在诊断…</p>}
+              {aiUsable === false && <p className="form-hint">{T(NO_KEY_HINT_KEY)}</p>}
+              {diagnosing && <p className="form-hint">{T("AI 正在诊断…")}</p>}
 
               {result && snapshot && (
                 <DiagnosisPanel

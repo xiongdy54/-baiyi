@@ -12,6 +12,7 @@
 import { useMemo, useRef, useState } from "react";
 import { IconClose } from "./icons";
 import { normalizeTag, tagKey, type TagVocabEntry } from "../lib/tags";
+import { useT } from "../lib/i18n";
 
 /** 收回动效时长（theme.css .tag-suggest-v4.closing .collapse-clip 的 --dur-view 同步；ms） */
 const CLOSE_MS = 200;
@@ -58,6 +59,7 @@ export function TagInput({
   ariaLabel?: string;
   disabled?: boolean;
 }) {
+  const T = useT();
   const [text, setText] = useState("");
   const [invalid, setInvalid] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -112,11 +114,12 @@ export function TagInput({
     if (!trimmed) return;
     const r = normalizeTag(trimmed);
     if (!r.ok) {
-      setInvalid(r.reason);
+      // r.reason 是 lib/tags 的 zh 稳定键（纯函数层不依赖 i18n），渲染期取当前语言
+      setInvalid(T(r.reason));
       return;
     }
     if (value.some((v) => tagKey(v) === tagKey(r.tag))) {
-      setInvalid("已有相同标签");
+      setInvalid(T("已有相同标签"));
       setText("");
       setActive(-1);
       return;
@@ -156,7 +159,7 @@ export function TagInput({
       {value.length > 0 && (
         <span className="tag-chips">
           {value.map((t) => (
-            <button key={t} type="button" className="tag-chip" title="点击移除" disabled={disabled} onClick={() => remove(t)}>
+            <button key={t} type="button" className="tag-chip" title={T("点击移除")} disabled={disabled} onClick={() => remove(t)}>
               {t}
               <IconClose size={12} />
             </button>
@@ -192,20 +195,20 @@ export function TagInput({
           <span
             className={`tag-suggest tag-suggest-v4${closing ? " closing" : ""}`}
             role="listbox"
-            aria-label="标签建议"
+            aria-label={T("标签建议")}
           >
             <span className={`collapse-clip${closing ? "" : " is-open"}`}>
               <span className="tag-suggest-body collapse-inner">
                 {filtered.length === 0 ? (
                   <span className="tag-suggest-empty" data-testid="tag-suggest-empty">
-                    回车新建「{text.trim()}」
+                    {T("回车新建「{name}」", { name: text.trim() })}
                   </span>
                 ) : (
                   filtered.map((s, i) => {
                     const parts = splitPrefix(s.display, text);
                     const meta = [
-                      s.cardCount > 0 ? `卡 ${s.cardCount}` : "",
-                      s.extractCount > 0 ? `批注 ${s.extractCount}` : ""
+                      s.cardCount > 0 ? T("卡 {n}", { n: s.cardCount }) : "",
+                      s.extractCount > 0 ? T("批注 {n}", { n: s.extractCount }) : ""
                     ].filter(Boolean).join(" · ");
                     return (
                       <button

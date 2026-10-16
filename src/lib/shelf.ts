@@ -11,6 +11,7 @@
 // 全部函数按「输入 state → 输出新 state」写（不就地改），既方便组件用 useState 套，
 // 也方便单测直接喂夹具断言，不需要起 Electron。
 import { settingsStore } from "./settings";
+import { t } from "./i18n";
 import type { LibraryItem } from "./library";
 
 export type ShelfSort = "manual" | "recent" | "added" | "title";
@@ -300,9 +301,9 @@ export interface GroupResult {
  */
 export function groupInto(state: ShelfState, sourceId: string, targetId: string, openFolderId: string | null): GroupResult {
   if (!sourceId || !targetId || sourceId === targetId) return { state, renameId: null };
-  if (isFolderId(sourceId)) return { state, renameId: null, refused: "暂不支持文件夹互相嵌套（一层为限）" };
+  if (isFolderId(sourceId)) return { state, renameId: null, refused: t("暂不支持文件夹互相嵌套（一层为限）") };
   const targetFolder = isFolderId(targetId) ? findFolder(state, targetId) : null;
-  if (openFolderId) return { state, renameId: null, refused: "文件夹内不再嵌套，请先返回书架" };
+  if (openFolderId) return { state, renameId: null, refused: t("文件夹内不再嵌套，请先返回书架") };
 
   if (targetFolder) {
     if (targetFolder.items.includes(sourceId)) return { state, renameId: null };
@@ -322,13 +323,13 @@ export function groupInto(state: ShelfState, sourceId: string, targetId: string,
   const srcFolder = folderOf(state, sourceId);
   const tgtFolder = folderOf(state, targetId);
   if (srcFolder && tgtFolder && srcFolder.id === tgtFolder.id)
-    return { state, renameId: null, refused: "两本书已在同一文件夹里" };
+    return { state, renameId: null, refused: t("两本书已在同一文件夹里") };
   if (tgtFolder) {
     // 目标已在某文件夹里：等价于把 source 归入那个文件夹（**不做隐式合并**，见 §5.4）
     return groupInto(state, sourceId, tgtFolder.id, null);
   }
   const id = nextFolderId(state);
-  const folder: ShelfFolder = { id, name: DEFAULT_FOLDER_NAME, items: [targetId, sourceId], created: today() };
+  const folder: ShelfFolder = { id, name: t(DEFAULT_FOLDER_NAME), items: [targetId, sourceId], created: today() };
   const cleared = detach(state, sourceId);
   const order = cleared.order.map((x) => (x === targetId ? id : x));
   return { state: { order, folders: [...cleared.folders, folder] }, renameId: id };
@@ -344,7 +345,7 @@ function insertAfter(arr: string[], anchor: string, id: string): string[] {
 /** 建一个只放这本书的文件夹（「归入文件夹」菜单里的「新建文件夹并放入」） */
 export function createFolderWith(state: ShelfState, bookId: string): { state: ShelfState; folderId: string } {
   const id = nextFolderId(state);
-  const folder: ShelfFolder = { id, name: DEFAULT_FOLDER_NAME, items: [bookId], created: today() };
+  const folder: ShelfFolder = { id, name: t(DEFAULT_FOLDER_NAME), items: [bookId], created: today() };
   const cleared = detach(state, bookId);
   const at = state.order.indexOf(bookId);
   const order = [...cleared.order];
