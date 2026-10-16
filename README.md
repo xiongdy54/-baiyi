@@ -29,6 +29,41 @@ English | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md)
 <p><sub>FSRS review — card back with the four grade buttons</sub></p>
 </div>
 
+<div align="center">
+<img src="docs/assets/workbench.png" alt="Card dock with manual and AI card creation" width="100%" />
+<p><sub>Card dock — manual &amp; AI card creation side by side</sub></p>
+</div>
+
+**The card dock** puts manual and AI card creation in one place — docked beside your reading, or as a standalone window summoned by a global shortcut. Paste any text in free mode, or work straight from what you are reading.
+
+**AI card modes.** Select text and Nutation routes it locally by material type — no cloud round-trip needed to decide the form:
+
+| Material type | Default card form |
+| --- | --- |
+| Concept | Q&amp;A (convertible to flip-card) |
+| Formula | Q&amp;A with LaTeX |
+| Sequence | sequence continuation |
+| Enumeration | cloze |
+| Image | image occlusion |
+| Literature / poetry | Q&amp;A |
+| Vocabulary | four-card set (recognition / recall / listening / sentence cloze) |
+
+Auto mode detects the type with local heuristics and you can always override it. Every draft passes CardLint quality checks and waits for your confirmation before entering the review queue — AI only drafts, you decide.
+
+<div align="center">
+<img src="docs/assets/excerpt-sidebar.png" alt="Reader with the excerpt sidebar" width="100%" />
+<p><sub>Excerpt sidebar — annotations beside the text</sub></p>
+</div>
+
+**The excerpt sidebar** keeps every annotation one click away while you read: jump between your notes and the exact source passage, add comments, colors and tags in place — the reading context is never lost.
+
+<div align="center">
+<img src="docs/assets/stats.png" alt="Stats dashboard" width="100%" />
+<p><sub>Dashboard — every signal computed from your own review logs</sub></p>
+</div>
+
+**The dashboard** turns your library into readable signals: a per-day timeline across reading, excerpting, reviewing and card-making; learning heatmap; due forecast; domain distribution; grade breakdown; stability &amp; difficulty distributions; your trained FSRS parameters — nothing invented, all derived from auditable evidence.
+
 ## Why "Nutation"?
 
 When a plant grows, its tip slowly draws circles in the air, sensing its surroundings before choosing a direction. This movement is called **circumnutation**. It has no map, and no standard answer. Every plant feels the world at its own rhythm and finds its own way.
@@ -62,10 +97,10 @@ Everything runs on your machine. AI is optional and only ever produces drafts �
 | --- | --- |
 | **Reading kernel — everything is a book** | EPUB, MOBI, AZW3, FB2, CBZ open directly; PDF has a native reader; Word, TXT, Markdown and HTML are imported as books in one click. TOC sidebar, scroll or paginated modes, multiple paper looks, and progress that returns you to the exact spot where you stopped. |
 | **Excerpts & in-place annotation** | Select any passage to excerpt it; annotate in place, browse annotations in a dedicated panel. Excerpts are scheduled with SuperMemo semantics and processed one at a time in an immersive view — jump back to the source context anytime. |
-| **AI card generation** | Select text, get card drafts: cloze, Q&amp;A, flip-card and image occlusion. Material type is routed locally, and every card passes CardLint quality checks before entering your queue. AI only drafts — you confirm. Without any AI service, manual card creation works exactly the same. |
+| **Card dock & AI card generation** | One dock for manual and AI card creation — in the main window or as a standalone window with a global shortcut. Select text, get drafts in four forms (cloze, Q&amp;A, flip-card, image occlusion); material type is routed locally and every card passes CardLint quality checks. AI only drafts — you confirm; without any AI service, manual card creation works exactly the same. |
 | **FSRS spaced repetition** | Drill-style continuous review: four grades, auto-advance, one-click undo, jump-to-source and back. Memory lapses are detected automatically and walked through with a rescue wizard. FSRS parameters can be retrained in Settings from your own review logs. |
 | **Learner model & next step** | A structured "Next" panel recommends what to read and reinforce. Knowledge points carry five mastery levels derived from auditable learning evidence; your learner memory is maintained as local Markdown files that ground card creation. |
-| **Data, stats & backup** | A dashboard with activity heatmap, completion, domain distribution and grade breakdown. A card browser with query syntax and batch operations. Manual and automatic backup coexist — your data always leaves with you. |
+| **Data, stats & backup** | A dashboard with a per-day activity timeline, learning heatmap, due forecast, domain distribution and grade breakdown. A card browser with query syntax and batch operations. Manual and automatic backup coexist — your data always leaves with you. |
 
 More built in: **material mind maps & knowledge graph** · **dictionary** (online + local StarDict / DSL / ECDICT) · **journal with AI insights** · **fully remappable shortcuts** · **quick capture** from anywhere with global shortcuts · **UDC domain classification** · **skins** (Swiss International Style baseline, light/dark).
 
