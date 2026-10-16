@@ -1,5 +1,5 @@
 /* ============================================================================
-   陶土（Claude）皮肤 · v49.11 / D184（v49.0 / D173 建；D175 选中强调统一；D183 对齐 CDS 2.0 动效档；D184 输入件圆角 12px）
+   陶土（Claude）皮肤 · v49.12 / D185（v49.0 / D173 建；D175 选中强调统一；D183 对齐 CDS 2.0 动效档；D184 输入件圆角 12px；D185 发丝边/骨架扫光/数字等宽）
    设计语言：src/skins/claude/DESIGN.md；部件选择器来源：docs/skins/component-map.md
    纪律：skin 层由 SkinHost 包裹（@layer skin）——本文件全部规则恒压 base 层；
    颜色 Token 两档各声明一次（A4）；动效全部在 body.motion-full 作用域（A6，VT 例外）；
@@ -69,6 +69,17 @@ body.skin-claude {
   --ease-spring-heavy: linear(0, 0.2125, 0.3915, 0.5227, 0.6255, 0.7063, 0.7730, 0.8220, 0.8603, 0.8921, 0.9153, 0.9336, 0.9479, 0.9597, 0.9684, 0.9752, 0.9809, 0.9850, 0.9882, 0.9908, 0.9929, 0.9944, 0.9956, 0.9966, 0.9973, 0.9979, 0.9984, 0.9987, 1);
   --dur-spring-heavy: 456ms;
   --press-scale: 0.98;
+}
+
+/* 发丝边（CDS 2.0「0.5px 发丝边」档，v49.12 / D185）：基线 1px 细线描边/分隔线已 Token 化
+   （--bw-hairline，183+3 处消费面），此处按 CDS --cds-ring-hairline 同条件阶梯降宽——
+   ≥2dppx 屏 0.5px、≥3dppx 屏 calc(1px/3)。100%/125%/150% 显示缩放下保持 1px（与官方一致，
+   发丝边只在 2x 屏可见）；accent/选中类描边不参与（高饱和选中边保持 1px 字重）。 */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 2dppx), (resolution >= 2x) {
+  body.skin-claude { --bw-hairline: 0.5px; }
+}
+@media (-webkit-min-device-pixel-ratio: 3), (min-resolution: 3dppx), (resolution >= 3x) {
+  body.skin-claude { --bw-hairline: calc(1px / 3); }
 }
 
 /* ============ 2. Token：深色（浅色里声明过的颜色 Token 全部重写，A4） ============ */
@@ -188,6 +199,26 @@ html[data-skin="claude"]:root::view-transition-new(root) {
   html[data-skin="claude"]:root::view-transition-new(root) { animation: none; }
 }
 
+/* 骨架屏扫光（CDS SkeletonShimmer 同配方，v49.12 / D185）：基线 .skeleton 1.2s 脉冲
+   （skeleton-pulse）退役，改白 45% 渐变带 1.8s 扫过（Dashboard kpi/chart 与设置节加载架
+   同类全覆盖）。OS 减动效（prefers-reduced-motion: reduce）时扫光不启用、骨架静止——
+   比基线脉冲的既有行为更符合无障碍（瑞士不动）；motion-off（E3 总开关）仍兜底杀动画。 */
+body.skin-claude.motion-full .skeleton { animation: none; position: relative; overflow: hidden; }
+@media (prefers-reduced-motion: no-preference) {
+  body.skin-claude.motion-full .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.45) 50%, transparent 100%);
+    animation: skin-claude-skel-sweep 1.8s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+@keyframes skin-claude-skel-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 /* ============ 5. 选中强调统一（v49.1 / D175）============
    全应用「被选中」＝「制卡台」按钮 is-on 同款语言：--accent-soft 软底 + accent 字 + 圆角。
    基线残存的两种瑞士指示——下划线（::after / inset box-shadow / border-bottom）与
@@ -268,3 +299,9 @@ body.skin-claude .dd-menu,
 body.skin-claude .md-tb-menu,
 body.skin-claude .bar-pop { padding-block: 0; overflow: hidden; }
 body.skin-claude .tag-suggest-v4 { overflow: hidden; }
+
+/* ============ 7. 数字等宽（v49.12 / D185）============
+   CDS rules A7「会变化的数字加 tabular-nums」——基线已覆盖 25+ 处（图表 svg text /
+   页签计数 / grade-due / cb 计数等），此处补皮肤层缺口：书架进度行（pct · 日期）、
+   书架表格进度列、复习计数与复习 meta（日期区间）。数字不抖宽，读感更稳。 */
+body.skin-claude :is(.cap-meta, .col-num, .review-count, .review-meta) { font-variant-numeric: tabular-nums; }
