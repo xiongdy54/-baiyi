@@ -2121,7 +2121,7 @@ function AboutSection() {
   return (
     <SettingsSection id="sec-about" title={T("关于")}>
       <p className="form-hint">
-        {T("增量阅读")}{version ? T(" · 版本 v{version}", { version }) : ""}
+        {"Nutation"}{version ? T(" · 版本 v{version}", { version }) : ""}
         <br />
         {T("本地优先的桌面渐进阅读学习软件：数据全部保存在本机；核心功能零网络、零账号，仅在显式配置 AI 服务或检查更新时联网。")}
       </p>
