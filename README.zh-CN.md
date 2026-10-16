@@ -6,7 +6,7 @@
 
 **本地优先的渐进阅读学习软件 —— 阅读、摘录、记住。**
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)](./LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6)](#快速开始)
 [![Electron](https://img.shields.io/badge/Electron-31-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
@@ -20,18 +20,13 @@
 ---
 
 <div align="center">
-<img src="docs/assets/screenshot-reader.png" alt="阅读视图——浅色与深色主题" width="100%" />
-<p><sub>阅读视图 · 浅色 / 深色主题</sub></p>
+<img src="docs/assets/shelf.png" alt="书架" width="100%" />
+<p><sub>书架 —— 全部藏书一页呈现</sub></p>
 </div>
 
 <div align="center">
-<img src="docs/assets/screenshot-workflow.png" alt="摘录队列与 FSRS 复习——浅色与深色主题" width="100%" />
-<p><sub>摘录队列（左）与 FSRS 复习（右）· 浅色 / 深色主题</sub></p>
-</div>
-
-<div align="center">
-<img src="docs/assets/screenshot-more.png" alt="书架与卡片浏览器" width="100%" />
-<p><sub>书架（左）与卡片浏览器（右）</sub></p>
+<img src="docs/assets/review-back.png" alt="复习卡片背面与四档评分按钮" width="100%" />
+<p><sub>FSRS 复习 —— 卡片背面与四档评分按钮</sub></p>
 </div>
 
 ## 为什么叫 Nutation？
@@ -146,7 +141,7 @@ Nutation 处于活跃开发中，欢迎反馈与问题报告。
 
 ## 许可证
 
-基于 [GNU Affero General Public License v3.0](./LICENSE)（AGPL-3.0）授权。
+基于 [PolyForm Noncommercial License 1.0.0](./LICENSE) 授权：允许学习、修改、分发与非商业使用；商业使用请联系作者获得授权。
 
 ## 致谢
 

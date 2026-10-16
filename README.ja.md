@@ -6,7 +6,7 @@
 
 **ローカルファーストのインクリメンタルリーディング・スタジオ —— 読んで、抜き書きして、記憶する。**
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)](./LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6)](#はじめに)
 [![Electron](https://img.shields.io/badge/Electron-31-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
@@ -20,18 +20,13 @@
 ---
 
 <div align="center">
-<img src="docs/assets/screenshot-reader.png" alt="閲覧ビュー――ライトテーマとダークテーマ" width="100%" />
-<p><sub>閲覧ビュー · ライト / ダークテーマ</sub></p>
+<img src="docs/assets/shelf.png" alt="本棚" width="100%" />
+<p><sub>本棚 —— すべての蔵書を一枚に</sub></p>
 </div>
 
 <div align="center">
-<img src="docs/assets/screenshot-workflow.png" alt="抜き書きキューと FSRS 復習――ライトテーマとダークテーマ" width="100%" />
-<p><sub>抜き書きキュー（左）と FSRS 復習（右） · ライト / ダークテーマ</sub></p>
-</div>
-
-<div align="center">
-<img src="docs/assets/screenshot-more.png" alt="本棚とカードブラウザ" width="100%" />
-<p><sub>本棚（左）とカードブラウザ（右）</sub></p>
+<img src="docs/assets/review-back.png" alt="カード裏面と四段階評価ボタン" width="100%" />
+<p><sub>FSRS 復習 —— カードの裏面と四段階評価ボタン</sub></p>
 </div>
 
 ## なぜ「Nutation」なのか
@@ -146,7 +141,7 @@ Nutation は活発に開発中です。フィードバックと問題報告を�
 
 ## ライセンス
 
-[GNU Affero General Public License v3.0](./LICENSE)（AGPL-3.0）の下でライセンスされています。
+[PolyForm Noncommercial License 1.0.0](./LICENSE) の下でライセンスされています。学習・改変・頒布を含む非商用の利用は自由に行えます。商用利用については作者までご連絡ください。
 
 ## 謝辞
 

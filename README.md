@@ -6,7 +6,7 @@
 
 **A local-first incremental reading studio — read, excerpt, remember.**
 
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue)](./LICENSE)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6)](#getting-started)
 [![Electron](https://img.shields.io/badge/Electron-31-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
@@ -20,18 +20,13 @@ English | [简体中文](./README.zh-CN.md) | [日本語](./README.ja.md)
 ---
 
 <div align="center">
-<img src="docs/assets/screenshot-reader.png" alt="Reader in light and dark themes" width="100%" />
-<p><sub>Reading view — light &amp; dark theme</sub></p>
+<img src="docs/assets/shelf.png" alt="Bookshelf" width="100%" />
+<p><sub>Bookshelf — the whole library on one page</sub></p>
 </div>
 
 <div align="center">
-<img src="docs/assets/screenshot-workflow.png" alt="Excerpt queue and FSRS review in light and dark themes" width="100%" />
-<p><sub>Excerpt queue (left) &amp; FSRS review (right) — light &amp; dark theme</sub></p>
-</div>
-
-<div align="center">
-<img src="docs/assets/screenshot-more.png" alt="Bookshelf and card browser" width="100%" />
-<p><sub>Bookshelf (left) &amp; card browser (right)</sub></p>
+<img src="docs/assets/review-back.png" alt="Review card back with four grade buttons" width="100%" />
+<p><sub>FSRS review — card back with the four grade buttons</sub></p>
 </div>
 
 ## Why "Nutation"?
@@ -146,7 +141,7 @@ The project is currently developed in a single-author, design-doc-driven workflo
 
 ## License
 
-Licensed under the [GNU Affero General Public License v3.0](./LICENSE) (AGPL-3.0).
+Licensed under the [PolyForm Noncommercial License 1.0.0](./LICENSE). You are free to use, study, modify and redistribute Nutation for any noncommercial purpose — learning, personal study and hobby projects included. For commercial use, please contact the author.
 
 ## Acknowledgments
 
