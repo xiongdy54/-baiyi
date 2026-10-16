@@ -2,7 +2,7 @@
 // SKIN_API_VERSION：新增 data-ui 部件、ui/* 事件、清单字段时 +1（AUTHORING.md §4）
 import type { ComponentType } from "react";
 
-export const SKIN_API_VERSION = 2;
+export const SKIN_API_VERSION = 3; // v49.15 / D188：清单新增 tagline
 
 export type ColorMode = "light" | "dark";
 export type MotionLevel = "full" | "reduced" | "off";
@@ -13,6 +13,8 @@ export interface SkinManifest {
   /** 设置页显示名 */
   name: string;
   description?: string;
+  /** 设置页皮肤卡名称后的气质短标（D188）；缺省回落动效标签 */
+  tagline?: string;
   apiVersion: number;
   /** 内置皮肤必须同时支持两档 */
   modes: ColorMode[];

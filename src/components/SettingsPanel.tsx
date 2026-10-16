@@ -3266,7 +3266,8 @@ export default function SettingsPanel({
                 </button>
               </div>
               <h4>{T("皮肤")}</h4>
-              {/* v49.0 / P7：皮肤卡片——名称 + 明/暗预览色块 + 动效标签（v49.10 / D183 起描述只保留在悬停 title）；
+              {/* v49.0 / P7：皮肤卡片——名称 + 明/暗预览色块 + 第二行标注（v49.10 / D183 起描述只保留在悬停 title；
+                  v49.15 / D188 标注改为气质短标 manifest.tagline，缺省回落动效标签）；
                   requiresChrome 不满足时置灰并提示（Electron 31 / Chromium 126 当前恒满足） */}
               <div className="skin-list skin-cards">
                 {SKINS.map((s) => {
@@ -3292,7 +3293,7 @@ export default function SettingsPanel({
                         ))}
                       </span>
                       <span className="skin-card-name">{T(m.name)}</span>
-                      <span className="skin-card-meta">{motionLabel}</span>
+                      <span className="skin-card-meta">{m.tagline ? T(m.tagline) : motionLabel}</span>
                     </button>
                   );
                 })}
