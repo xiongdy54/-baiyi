@@ -2237,6 +2237,40 @@ body.theme-dark .modal-panel {
 
 .settings-row { display: flex; align-items: center; gap: var(--sp-3); }
 
+/* ---------- 关于 · 开源许可清单（v49.7 / D181） ----------
+   自适应网格（窄容器自然落单列）；条目 = 主行（名称 + 许可证两端对齐）+ meta 说明行。
+   零描边零阴影直角清单（swiss 基线；圆角 Token 钩子供皮肤接管，D171/D175 同口径）。 */
+.oss-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-2) var(--sp-6);
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  list-style: none;
+}
+.oss-list li { min-width: 0; }
+.oss-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-secondary);
+  line-height: 1.6;
+}
+.oss-name { color: var(--text-primary); }
+.oss-lic {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+.oss-note {
+  display: block;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.oss-tail { margin-top: calc(var(--sp-2) * -1); }
+
 /* ---------- 设置面板工具类（收口此前散落在 tsx 里的 23 处内联样式） ----------
    规范「对齐法则」：子元素间距用 grid/flex gap，禁用逐个 margin 硬堆；
    「Token 落地」：色值/字号/间距一律走 Token，业务组件不写一次性覆盖。 */
