@@ -3,7 +3,10 @@
 // 契约：docs/design/MINDMAP-V2-P0-CONTRACT.md「M3」。守护：提示词 few-shot 必须被 electron/mindmapOutline.js 100% 接受，
 // 且提示词里列出的类型/版式/关系码与解析器常量一致。
 const path = require("path");
-const P = require(path.join(__dirname, "..", "prompt-lab", "mindmapV2Prompts.js"));
+const crypto = require("crypto");
+const P = require(path.join(__dirname, "..", "electron", "mindmapV2Prompts.js"));
+const Shell = require(path.join(__dirname, "..", "prompt-lab", "mindmapV2Prompts.js"));
+const PR = require(path.join(__dirname, "..", "electron", "prompts.js"));
 const O = require(path.join(__dirname, "..", "electron", "mindmapOutline.js"));
 
 let pass = 0, fail = 0;
@@ -32,6 +35,24 @@ function feed(ex, basePath) {
   return { nodes, drops, stats: p.end() };
 }
 const cjk = (s) => (s.match(/[㐀-鿿]/g) || []).length;
+
+// 迁入前（prompt-lab 版）三段 system 文本的冻结指纹——T2 逐字迁入守护；改提示词须同时升版本并更新此表
+const FROZEN = {
+  OUTLINE_SYSTEM: { len: 2182, sha256: "1ad231fd6f7818d95044801001b260b1bf3ac8aa4d971d0c7f91e686b9823bbf", main: "MATERIAL_MAP_OUTLINE_PROMPT" },
+  EXPAND_SYSTEM: { len: 1799, sha256: "e92e3d0dff4773a1e17562cab5afed7e7d9dcba8b82ec5f059db52d5de5d2a86", main: "MATERIAL_MAP_EXPAND_PROMPT" },
+  EXPLAIN_SYSTEM: { len: 524, sha256: "14bb4bb7d4bb44c569ab4bfed3f47f413be96c3651cbd3c91e6e62b4003c0778", main: "MATERIAL_MAP_EXPLAIN_PROMPT" }
+};
+console.log("---- 0 迁入逐字守护（prompts.js 常量 === 冻结文本） ----");
+{
+  for (const [k, f] of Object.entries(FROZEN)) {
+    const c = PR[f.main];
+    check(`prompts.js 导出 ${f.main}`, typeof c === "string");
+    check(`${f.main} 长度与 sha256 === 迁入前 ${k}`, c.length === f.len && crypto.createHash("sha256").update(c).digest("hex") === f.sha256, { len: c && c.length });
+    check(`${k} (electron/mindmapV2Prompts) === ${f.main}`, P[k] === c);
+    check(`${k} (prompt-lab 薄壳) === ${f.main}`, Shell[k] === c);
+  }
+  check("薄壳导出名与 electron 版一致", JSON.stringify(Object.keys(Shell)) === JSON.stringify(Object.keys(P)));
+}
 
 console.log("---- 1 导出与版本 ----");
 {

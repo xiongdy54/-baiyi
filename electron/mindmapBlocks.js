@@ -113,4 +113,33 @@ function blockTextLength(blocks, fromNo, toNo) {
   return pick(blocks, fromNo, toNo).reduce((n, b) => n + (b.end - b.start), 0);
 }
 
-module.exports = { BLOCKS_VERSION, segmentBlocks, renderNumbered, blockRangeToSpan, blockTextLength };
+// ---- v2 主软件（D192 / X1）：逐单元切块 + 全局编号 ----
+// 每个提取单元各自 segmentBlocks（碎块不跨单元合并），坐标按 unitBase 平移到线性化全文，块号全材料递增。
+// 因而单元按文档顺序逐个送入时，已送入前缀的块恒等于全量切分的前缀（前缀稳定）。
+// linearization＝mindmapCore.buildLinearization 产物 { units, unitBase, text }（单元间 "\n"，D44 UTF-16 坐标）。
+// opts：segmentBlocks 选项 + { fromUnit=0, startNo=1 }（增量：只切 fromUnit 起的单元，块号从 startNo 起）。
+// 返回 Block[] = { no, start, end, heading, unit /* 单元下标 */ }。
+const UNIT_BLOCKS_VERSION = 1;
+
+function segmentUnits(linearization, opts) {
+  const lin = linearization || {};
+  const units = Array.isArray(lin.units) ? lin.units : [];
+  const bases = Array.isArray(lin.unitBase) ? lin.unitBase : [];
+  const text = typeof lin.text === "string" ? lin.text : "";
+  const o = opts || {};
+  const fromUnit = Math.max(0, Math.floor(Number(o.fromUnit) || 0));
+  let no = Math.max(1, Math.floor(Number(o.startNo) || 1));
+  const out = [];
+  for (let i = fromUnit; i < units.length; i++) {
+    const base = bases[i];
+    if (!(base >= 0)) continue;
+    const end = i + 1 < units.length && bases[i + 1] >= base ? bases[i + 1] - 1 : text.length;
+    const slice = text.slice(base, Math.max(base, end));
+    for (const b of segmentBlocks(slice, o)) {
+      out.push({ no: no++, start: b.start + base, end: b.end + base, heading: b.heading, unit: i });
+    }
+  }
+  return out;
+}
+
+module.exports = { BLOCKS_VERSION, UNIT_BLOCKS_VERSION, segmentBlocks, segmentUnits, renderNumbered, blockRangeToSpan, blockTextLength };

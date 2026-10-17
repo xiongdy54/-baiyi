@@ -40,6 +40,10 @@ const {
   MATERIAL_MAP_GLOBAL_PROMPT,
   MATERIAL_MAP_EDITORIAL_PROMPT,
   MATERIAL_MAP_REVIEW_PROMPT,
+  // v49.19（D192）：材料导图 v2 行协议三段 system
+  MATERIAL_MAP_OUTLINE_PROMPT,
+  MATERIAL_MAP_EXPAND_PROMPT,
+  MATERIAL_MAP_EXPLAIN_PROMPT,
   // v48.22（D58 / E1）：摘录重排 scope
   EXTRACT_RERANK_PROMPT,
   // v48.51（D91）：简明解读 scope；v48.74（D118）v1 原文冻结常量（全新库 v1 行留痕用）
@@ -892,6 +896,54 @@ async function initDb() {
       }
     }
   } catch { /* 表已存在 */ }
+  // v49.19（D192，MINDMAP-V2-IMPL-PLAN §3.1）：导图 v2——节点/边两表 + 版本行视图列 + 账本新列。
+  // 节点 id = `${map_id}|${node_id}`（路径式 node_id，X6）；落库粒度 = 一个任务（commitMaterialMapJob 单事务）。
+  try {
+    db.run(`CREATE TABLE IF NOT EXISTS material_map_nodes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL, map_id TEXT NOT NULL, node_id TEXT NOT NULL,
+      parent_id TEXT, ord INTEGER NOT NULL,
+      title TEXT NOT NULL, type TEXT NOT NULL, time_text TEXT, pattern_hint TEXT,
+      block_start INTEGER, block_end INTEGER, spans_json TEXT,
+      state TEXT NOT NULL,
+      source TEXT NOT NULL,
+      warnings_json TEXT, explain_json TEXT, job_id TEXT,
+      created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+      sync_version INTEGER NOT NULL DEFAULT 0, is_deleted INTEGER NOT NULL DEFAULT 0
+    )`);
+    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_mmnodes_key ON material_map_nodes(map_id, node_id)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_mmnodes_parent ON material_map_nodes(map_id, parent_id, ord)");
+    db.run(`CREATE TABLE IF NOT EXISTS material_map_edges (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, map_id TEXT NOT NULL,
+      from_id TEXT NOT NULL, to_id TEXT NOT NULL, code TEXT NOT NULL,
+      origin TEXT NOT NULL DEFAULT 'text', job_id TEXT,
+      created_at INTEGER NOT NULL, is_deleted INTEGER NOT NULL DEFAULT 0
+    )`);
+    db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_mmedges_key ON material_map_edges(map_id, from_id, to_id, code)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_mmedges_to ON material_map_edges(map_id, to_id)");
+  } catch { /* 表已存在 */ }
+  try {
+    db.run("ALTER TABLE material_maps ADD COLUMN view_json TEXT");
+  } catch {
+    /* 列已存在 */
+  }
+  // 账本新列（守卫式 ALTER；`trigger` 是 SQLite 关键字，统一加引号）
+  for (const [col, type] of [
+    ["model", "TEXT"],
+    ["ttfn_ms", "INTEGER"],
+    ["lines", "INTEGER"],
+    ["lines_dropped", "INTEGER"],
+    ["drop_json", "TEXT"],
+    ["rels_dropped", "INTEGER"],
+    ["reasoning_chars", "INTEGER"],
+    ["trigger", "TEXT"]
+  ]) {
+    try {
+      db.run(`ALTER TABLE material_map_calls ADD COLUMN "${col}" ${type}`);
+    } catch {
+      /* 列已存在 */
+    }
+  }
   // D121 §1.1：书籍作者（可空；导入时取得到才填，绝不猜）
   try {
     db.run("ALTER TABLE library_items ADD COLUMN author TEXT");
@@ -2761,6 +2813,24 @@ function ensurePromptTemplates() {
         db.run(
           "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
           [crypto.randomUUID(), scope, name, content, MM_TARGETS[scope] || 2, situationRequiredFor(scope), now]
+        );
+      }
+    }
+  } catch { /* 播种失败不阻塞启动 */ }
+  // v49.19（D192，IMPL-PLAN §4.4）：导图 v2 行协议三 scope，目标版本 1（MAX(version) < 目标即插入；situationRequiredFor 返回 0）。
+  // 消费引擎 = electron/mindmapEngineV2.js（运行时 getPromptTemplate(scope).content 作 system）。
+  try {
+    const MM2_TARGETS = { "material-map-outline": 1, "material-map-expand": 1, "material-map-explain": 1 };
+    for (const [scope, name, content] of [
+      ["material-map-outline", "导图框架 v1", MATERIAL_MAP_OUTLINE_PROMPT],
+      ["material-map-expand", "导图深挖 v1", MATERIAL_MAP_EXPAND_PROMPT],
+      ["material-map-explain", "节点讲解 v1", MATERIAL_MAP_EXPLAIN_PROMPT]
+    ]) {
+      const maxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope])[0]?.v || 0;
+      if (Number(maxV) < MM2_TARGETS[scope]) {
+        db.run(
+          "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+          [crypto.randomUUID(), scope, name, content, MM2_TARGETS[scope], situationRequiredFor(scope), now]
         );
       }
     }
@@ -6716,7 +6786,13 @@ function mapMaterialMapRow(r, includeStructure) {
     nodeRemap: r.node_remap_json ? JSON.parse(r.node_remap_json) : null,
     isActive: !!r.is_active,
     createdAt: r.created_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    // v49.19（D192）：v2 版本行判别（createMaterialMapV2 保证 structure_json 以 {"schemaVersion":2 开头，免整份解析）与视图态
+    schemaVersion: typeof r.structure_json === "string" && r.structure_json.startsWith('{"schemaVersion":2') ? 2 : 1,
+    view: (() => {
+      if (!r.view_json) return null;
+      try { return JSON.parse(r.view_json); } catch { return null; }
+    })()
   };
   if (includeStructure) {
     try {
@@ -6820,24 +6896,232 @@ function setActiveMaterialMap(id) {
 // v48.5（用户反馈「想删掉错误版本的导图」）：用户可见历史 = 真删（DELETE 行）；
 // material_map_shards 是缓存（用户不可见、重建可复用），保留不随删——与「已删除」语义分离。
 // 删 active 时同一持久化轮内顺延（事务语义）：同 scope 最新剩余版本升 active；历史多 active 一并纠偏。
+// v49.19（D192，IMPL-PLAN §2-4）：同一事务内连带物理删除该版本的 v2 nodes/edges（扩展 §7.2 例外）；v1 行为不变。
 function deleteMaterialMap(id) {
-  const rows = queryAll("SELECT document_id, scope_anchor, is_active FROM material_maps WHERE id = ?", [String(id)]);
-  if (!rows.length) return false;
-  const { document_id, scope_anchor, is_active } = rows[0];
-  db.run("DELETE FROM material_maps WHERE id = ?", [String(id)]);
-  if (is_active) {
-    db.run(
-      "UPDATE material_maps SET is_active = 0 WHERE document_id = ? AND scope_anchor = ? AND is_active = 1",
-      [document_id, scope_anchor]
-    );
-    const next = queryAll(
-      "SELECT id FROM material_maps WHERE document_id = ? AND scope_anchor = ? AND is_deleted = 0 ORDER BY created_at DESC, rowid DESC LIMIT 1",
-      [document_id, scope_anchor]
-    );
-    if (next.length) db.run("UPDATE material_maps SET is_active = 1 WHERE id = ?", [next[0].id]);
+  return withTransaction(() => {
+    const rows = queryAll("SELECT document_id, scope_anchor, is_active FROM material_maps WHERE id = ?", [String(id)]);
+    if (!rows.length) return false;
+    const { document_id, scope_anchor, is_active } = rows[0];
+    db.run("DELETE FROM material_maps WHERE id = ?", [String(id)]);
+    db.run("DELETE FROM material_map_nodes WHERE map_id = ?", [String(id)]);
+    db.run("DELETE FROM material_map_edges WHERE map_id = ?", [String(id)]);
+    if (is_active) {
+      db.run(
+        "UPDATE material_maps SET is_active = 0 WHERE document_id = ? AND scope_anchor = ? AND is_active = 1",
+        [document_id, scope_anchor]
+      );
+      const next = queryAll(
+        "SELECT id FROM material_maps WHERE document_id = ? AND scope_anchor = ? AND is_deleted = 0 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        [document_id, scope_anchor]
+      );
+      if (next.length) db.run("UPDATE material_maps SET is_active = 1 WHERE id = ?", [next[0].id]);
+    }
+    return true;
+  });
+}
+
+// ===== v49.19（D192，IMPL-PLAN §3.2）：导图 v2 仓储（nodes / edges / view / explain / 账本计数）=====
+// 与 tests/lib/mindmapMemoryStore.cjs 同名同签名同返回形态；语义由 tests/m15v2.store.contract.cjs 锁定（两种实现共用）。
+const MM_NODE_STATES = new Set(["more", "open", "floor", "stub"]);
+const MM_NODE_SOURCES = new Set(["toc", "ai", "local", "v1ext"]);
+const MM_V2_GENERATOR = "m15v2-engine-1";
+
+function mmJsonOrNull(s) {
+  if (s == null) return null;
+  try { return JSON.parse(s); } catch { return null; }
+}
+function mmNum(v) {
+  return Number.isFinite(Number(v)) && v !== null && v !== "" ? Number(v) : null;
+}
+
+function mapMaterialMapNodeRow(r) {
+  return {
+    nodeId: r.node_id,
+    parentId: r.parent_id ?? null,
+    ord: r.ord,
+    title: r.title,
+    type: r.type,
+    time: r.time_text ?? null,
+    pattern: r.pattern_hint ?? null,
+    blockStart: r.block_start ?? null,
+    blockEnd: r.block_end ?? null,
+    spans: mmJsonOrNull(r.spans_json),
+    state: r.state,
+    source: r.source,
+    warnings: mmJsonOrNull(r.warnings_json),
+    explain: mmJsonOrNull(r.explain_json),
+    jobId: r.job_id ?? null
+  };
+}
+
+// upsert 语义：新行必填 nodeId/ord/title/type/state/source；已存在则「未定义（undefined）字段保持原值」；
+// jobId 未显式给出时盖本次任务的 jobId。非法 state/source 抛错（整个事务回滚）。
+function mmUpsertNodeRow(mapId, row, jobId, now) {
+  if (!row || row.nodeId == null || String(row.nodeId) === "") throw new Error("节点缺 nodeId");
+  const nodeId = String(row.nodeId);
+  const ex = queryAll("SELECT * FROM material_map_nodes WHERE map_id = ? AND node_id = ?", [mapId, nodeId]);
+  const base = ex.length ? mapMaterialMapNodeRow(ex[0]) : {
+    nodeId, parentId: null, ord: undefined, title: undefined, type: undefined, time: null, pattern: null,
+    blockStart: null, blockEnd: null, spans: null, state: undefined, source: undefined, warnings: null, explain: null, jobId: null
+  };
+  for (const k of Object.keys(base)) {
+    if (k !== "nodeId" && row[k] !== undefined) base[k] = row[k];
   }
+  if (row.jobId === undefined && jobId != null) base.jobId = String(jobId);
+  if (!Number.isFinite(Number(base.ord))) throw new Error("节点 " + nodeId + " 缺有限 ord");
+  if (typeof base.title !== "string" || typeof base.type !== "string" || !base.type) throw new Error("节点 " + nodeId + " 缺 title/type");
+  if (!MM_NODE_STATES.has(base.state)) throw new Error("节点 " + nodeId + " state 非法: " + base.state);
+  if (!MM_NODE_SOURCES.has(base.source)) throw new Error("节点 " + nodeId + " source 非法: " + base.source);
+  const params = [
+    base.parentId == null ? null : String(base.parentId), Number(base.ord), base.title, base.type,
+    base.time == null ? null : String(base.time), base.pattern == null ? null : String(base.pattern),
+    mmNum(base.blockStart), mmNum(base.blockEnd),
+    base.spans == null ? null : JSON.stringify(base.spans),
+    base.state, base.source,
+    base.warnings == null ? null : JSON.stringify(base.warnings),
+    base.explain == null ? null : JSON.stringify(base.explain),
+    base.jobId == null ? null : String(base.jobId)
+  ];
+  if (ex.length) {
+    db.run(
+      `UPDATE material_map_nodes SET parent_id = ?, ord = ?, title = ?, type = ?, time_text = ?, pattern_hint = ?,
+        block_start = ?, block_end = ?, spans_json = ?, state = ?, source = ?, warnings_json = ?, explain_json = ?, job_id = ?,
+        updated_at = ?, sync_version = sync_version + 1, is_deleted = 0
+       WHERE map_id = ? AND node_id = ?`,
+      [...params, now, mapId, nodeId]
+    );
+  } else {
+    db.run(
+      `INSERT INTO material_map_nodes (id, user_id, map_id, node_id, parent_id, ord, title, type, time_text, pattern_hint,
+        block_start, block_end, spans_json, state, source, warnings_json, explain_json, job_id,
+        created_at, updated_at, sync_version, is_deleted)
+       VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)`,
+      [mapId + "|" + nodeId, mapId, nodeId, ...params, now, now]
+    );
+  }
+}
+
+function mmUpsertEdgeRow(mapId, e, jobId, now) {
+  if (!e || e.fromId == null || e.toId == null || !e.code) throw new Error("边缺 fromId/toId/code");
+  const from = String(e.fromId), to = String(e.toId), code = String(e.code);
+  const id = mapId + "|" + from + "|" + to + "|" + code;
+  const origin = e.origin ? String(e.origin) : "text";
+  const jid = e.jobId !== undefined ? (e.jobId == null ? null : String(e.jobId)) : (jobId != null ? String(jobId) : null);
+  const ex = queryAll("SELECT id FROM material_map_edges WHERE map_id = ? AND from_id = ? AND to_id = ? AND code = ?", [mapId, from, to, code]);
+  if (ex.length) {
+    db.run("UPDATE material_map_edges SET origin = ?, job_id = ?, is_deleted = 0 WHERE id = ?", [origin, jid, ex[0].id]);
+  } else {
+    db.run(
+      "INSERT INTO material_map_edges (id, user_id, map_id, from_id, to_id, code, origin, job_id, created_at, is_deleted) VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+      [id, mapId, from, to, code, origin, jid, now]
+    );
+  }
+}
+
+/** 新建 v2 版本行（不激活）+ 写入骨架节点（单事务）。structure_json 只存元信息，首键恒为 schemaVersion:2。 */
+function createMaterialMapV2({
+  documentId, title = null, meta = {}, skeleton = [], sourceRevisionHash = null,
+  provider = null, model = null, modelConfigHash = null, promptVersion = null
+} = {}) {
+  if (documentId == null || String(documentId) === "") throw new Error("createMaterialMapV2 缺 documentId");
+  const now = Date.now();
+  const mapId = crypto.randomUUID();
+  const structure = Object.assign({ schemaVersion: 2 }, meta || {}, { schemaVersion: 2 });
+  const rows = Array.isArray(skeleton) ? skeleton : [];
+  withTransaction(() => {
+    db.run(
+      `INSERT INTO material_maps (id, user_id, document_id, scope_anchor, scope_kind, granularity, title,
+        structure_json, node_count, source_revision_hash, prompt_version, generator_version,
+        provider, model, model_config_hash, node_remap_json, is_active, created_at, updated_at, sync_version, is_deleted)
+       VALUES (?, 'local-user', ?, 'book', 'book', 'v2', ?, ?, 0, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, 0, 0)`,
+      [
+        mapId, String(documentId), title ?? structure.title ?? null, JSON.stringify(structure),
+        sourceRevisionHash, Number.isFinite(Number(promptVersion)) && promptVersion !== null ? Number(promptVersion) : null,
+        MM_V2_GENERATOR, provider, model, modelConfigHash, now, now
+      ]
+    );
+    for (const r of rows) mmUpsertNodeRow(mapId, r, null, now);
+    const n = queryAll("SELECT COUNT(*) AS n FROM material_map_nodes WHERE map_id = ? AND is_deleted = 0", [mapId])[0]?.n || 0;
+    db.run("UPDATE material_maps SET node_count = ? WHERE id = ?", [Number(n), mapId]);
+  });
+  return { mapId };
+}
+
+/** 一个任务的全部产物单事务落库：节点 upsert / 状态 / 边 / node_count / 可选激活（旧激活版本降为历史）。 */
+function commitMaterialMapJob({ mapId, jobId = null, upserts = [], states = [], edges = [], activate = false } = {}) {
+  const id = String(mapId);
+  return withTransaction(() => {
+    const mrows = queryAll("SELECT document_id, scope_anchor FROM material_maps WHERE id = ? AND is_deleted = 0", [id]);
+    if (!mrows.length) throw new Error("commitMaterialMapJob：版本不存在 " + id);
+    const now = Date.now();
+    for (const r of upserts || []) mmUpsertNodeRow(id, r, jobId, now);
+    for (const st of states || []) {
+      if (!st || st.nodeId == null) continue;
+      if (!MM_NODE_STATES.has(st.state)) throw new Error("state 非法: " + st.state);
+      db.run(
+        "UPDATE material_map_nodes SET state = ?, updated_at = ?, sync_version = sync_version + 1 WHERE map_id = ? AND node_id = ? AND is_deleted = 0",
+        [st.state, now, id, String(st.nodeId)]
+      );
+    }
+    for (const e of edges || []) mmUpsertEdgeRow(id, e, jobId, now);
+    const n = Number(queryAll("SELECT COUNT(*) AS n FROM material_map_nodes WHERE map_id = ? AND is_deleted = 0", [id])[0]?.n || 0);
+    db.run("UPDATE material_maps SET node_count = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?", [n, now, id]);
+    if (activate) {
+      db.run(
+        "UPDATE material_maps SET is_active = 0, updated_at = ?, sync_version = sync_version + 1 WHERE document_id = ? AND scope_anchor = ? AND id != ? AND is_active = 1 AND is_deleted = 0",
+        [now, mrows[0].document_id, mrows[0].scope_anchor, id]
+      );
+      db.run("UPDATE material_maps SET is_active = 1 WHERE id = ?", [id]);
+    }
+    return { nodeCount: n };
+  });
+}
+
+function listMaterialMapNodes(mapId) {
+  return queryAll(
+    "SELECT * FROM material_map_nodes WHERE map_id = ? AND is_deleted = 0 ORDER BY parent_id, ord, node_id",
+    [String(mapId)]
+  ).map(mapMaterialMapNodeRow);
+}
+
+function listMaterialMapEdges(mapId) {
+  return queryAll(
+    "SELECT * FROM material_map_edges WHERE map_id = ? AND is_deleted = 0 ORDER BY created_at, rowid",
+    [String(mapId)]
+  ).map((r) => ({ fromId: r.from_id, toId: r.to_id, code: r.code, origin: r.origin, jobId: r.job_id ?? null }));
+}
+
+/** 写节点讲解（写当前行，不新建版本）；节点不存在返回 false。 */
+function setMaterialMapNodeExplain(mapId, nodeId, explain) {
+  const ex = queryAll("SELECT id FROM material_map_nodes WHERE map_id = ? AND node_id = ? AND is_deleted = 0", [String(mapId), String(nodeId)]);
+  if (!ex.length) return false;
+  db.run(
+    "UPDATE material_map_nodes SET explain_json = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?",
+    [explain == null ? null : JSON.stringify(explain), Date.now(), ex[0].id]
+  );
   persist();
   return true;
+}
+
+/** 写视图态（版式覆盖/折叠；离散动作才写）；版本不存在返回 false。view=null 清空。 */
+function setMaterialMapView(mapId, view) {
+  const ex = queryAll("SELECT id FROM material_maps WHERE id = ? AND is_deleted = 0", [String(mapId)]);
+  if (!ex.length) return false;
+  db.run(
+    "UPDATE material_maps SET view_json = ?, updated_at = ?, sync_version = sync_version + 1 WHERE id = ?",
+    [view == null ? null : JSON.stringify(view), Date.now(), String(mapId)]
+  );
+  persist();
+  return true;
+}
+
+/** 封顶第 3 门计数：某文档、某 trigger、created_at >= sinceMs（绝对毫秒时间戳）的账本行数。trigger 缺省＝不筛。 */
+function countMaterialMapCallsSince(documentId, { trigger, sinceMs } = {}) {
+  const conds = ["document_id = ?"];
+  const args = [String(documentId)];
+  if (trigger != null) { conds.push('"trigger" = ?'); args.push(String(trigger)); }
+  if (Number.isFinite(Number(sinceMs))) { conds.push("created_at >= ?"); args.push(Number(sinceMs)); }
+  return Number(queryAll(`SELECT COUNT(*) AS n FROM material_map_calls WHERE ${conds.join(" AND ")}`, args)[0]?.n || 0);
 }
 
 /**
@@ -7137,15 +7421,25 @@ function saveMaterialMapCall({
   parentNodeId = null,
   spanChars = null,
   promptTokens = null,
-  completionTokens = null
+  completionTokens = null,
+  // v49.19（D192，§4.6）：v2 新列
+  model = null,
+  ttfnMs = null,
+  lines = null,
+  linesDropped = null,
+  dropJson = null,
+  relsDropped = null,
+  reasoningChars = null,
+  trigger = null
 } = {}) {
   const id = crypto.randomUUID();
   const now = Date.now();
   db.run(
     `INSERT INTO material_map_calls (id, user_id, run_id, document_id, run_kind, node_anchor, span_hash, chars,
       outcome, error_code, finish_reason, attempt, wall_ms, ttft_ms, first_byte_ms, depth, parent_node_id, span_chars,
-      prompt_tokens, completion_tokens, created_at)
-     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      prompt_tokens, completion_tokens, created_at,
+      model, ttfn_ms, lines, lines_dropped, drop_json, rels_dropped, reasoning_chars, "trigger")
+     VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       String(runId),
@@ -7166,7 +7460,15 @@ function saveMaterialMapCall({
       Number.isFinite(Number(spanChars)) ? Number(spanChars) : null,
       Number.isFinite(Number(promptTokens)) ? Number(promptTokens) : null,
       Number.isFinite(Number(completionTokens)) ? Number(completionTokens) : null,
-      now
+      now,
+      model ? String(model) : null,
+      mmNum(ttfnMs),
+      mmNum(lines),
+      mmNum(linesDropped),
+      dropJson == null ? null : (typeof dropJson === "string" ? dropJson : JSON.stringify(dropJson)),
+      mmNum(relsDropped),
+      mmNum(reasoningChars),
+      trigger ? String(trigger) : null
     ]
   );
   persist();
@@ -7197,7 +7499,15 @@ function listMaterialMapCalls(runId, limit = 2000) {
     spanChars: r.span_chars,
     promptTokens: r.prompt_tokens,
     completionTokens: r.completion_tokens,
-    createdAt: r.created_at
+    createdAt: r.created_at,
+    model: r.model ?? null,
+    ttfnMs: r.ttfn_ms ?? null,
+    lines: r.lines ?? null,
+    linesDropped: r.lines_dropped ?? null,
+    dropJson: r.drop_json ?? null,
+    relsDropped: r.rels_dropped ?? null,
+    reasoningChars: r.reasoning_chars ?? null,
+    trigger: r.trigger ?? null
   }));
 }
 
@@ -7923,6 +8233,14 @@ module.exports = {
   getActiveMaterialMap,
   setActiveMaterialMap,
   deleteMaterialMap,
+  // v49.19（D192）：导图 v2 仓储
+  createMaterialMapV2,
+  commitMaterialMapJob,
+  listMaterialMapNodes,
+  listMaterialMapEdges,
+  setMaterialMapNodeExplain,
+  setMaterialMapView,
+  countMaterialMapCallsSince,
   saveMaterialMapShard,
   getMaterialMapShard,
   listMaterialMapShards,
