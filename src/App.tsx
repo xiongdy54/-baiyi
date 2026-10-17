@@ -145,7 +145,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // D123：制卡台状态（宿主面板经 wb:state 事件同步；顶栏按钮只读它，静态方块点、无动画）
+  // D123：制卡台状态（宿主面板经 wb:state 事件同步；顶栏按钮只读它）
   const [wb, setWb] = useState<WorkbenchState>({ open: false, busy: false, draft: false });
   const settingsOpenRef = useRef(false);
   useEffect(() => {
@@ -801,7 +801,6 @@ export default function App() {
               <path d="M7 10h10M7 14h6" />
             </svg>
             <span>{T("制卡台")}</span>
-            {wb.busy && <i className="topbar-wb-dot" aria-hidden="true" />}
           </button>
           <button className="icon-btn" title={T("设置")} data-ui="button-icon" onClick={() => setSettingsOpen(true)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

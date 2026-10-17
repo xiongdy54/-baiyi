@@ -474,6 +474,10 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       "click",
       (ev: MouseEvent) => {
         if (markRanges.size === 0) return;
+        // 拖选收尾的 click 不算「点标记」：此刻选区仍未折叠＝本次是滑选手势，
+        // 只出选区操作选单、不弹批注浮层（用户 2026-10-17：点高亮才弹浮层）
+        const sel = doc.getSelection();
+        if (sel && !sel.isCollapsed) return;
         const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
         if (!hit) return;
         ev.preventDefault();

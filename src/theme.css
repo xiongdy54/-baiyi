@@ -3283,6 +3283,10 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .wb-cards-tabbody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .wb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .wb-scroll > .ai-panel { padding-bottom: var(--sp-4); }
+/* 坞内 AI 面板撑满滚动视口：否则面板高度=内容高度，.ai-panel-body（overflow-y:auto）恰在
+   材料类型行下缘截断——「材料类型」下拉展开只露上缘一条边（用户 2026-10-17 实测）。
+   撑满后 body 的 flex:1 延到坞底，选单在下部留白内完整展开；两个皮肤都走此基础规则。 */
+.side-dock .wb-scroll > .ai-panel { min-height: 100%; box-sizing: border-box; }
 .side-dock .ai-panel { width: auto; max-width: none; flex: none; border-left: none; z-index: auto; animation: none; }
 /* AI 页签条：复用左栏页签语法（role=tablist/tab、active=.on） */
 .dock-tabs { display: flex; gap: var(--sp-1); min-width: 0; flex: none; }
@@ -8388,7 +8392,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   }
 }
 
-/* ---------- 顶栏「制卡台」按钮（D123）：安静的文字按钮，展开时浅绿底；状态点为静态方块（无呼吸/闪烁） ---------- */
+/* ---------- 顶栏「制卡台」按钮（D123）：安静的文字按钮，展开时浅绿底；无状态点（用户 2026-10-17：去掉忙碌小方块） ---------- */
 .topbar-wb {
   position: relative;
   display: inline-flex;
@@ -8408,14 +8412,6 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .topbar-wb:hover { background: var(--grey-1); color: var(--text-primary); }
 .topbar-wb.is-on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .topbar-wb svg { display: block; flex: none; }
-.topbar-wb-dot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 6px;
-  height: 6px;
-  background: var(--accent);
-}
 .wb-toast {
   position: fixed;
   left: 50%;

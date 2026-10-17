@@ -909,6 +909,9 @@ export default function Reader({
       return;
     }
     engineSelRef.current = sel;
+    // 滑选＝离开批注浮层语境：先前点高亮弹出的浮层随之收起（用户 2026-10-17：
+    // 滑选只出操作选单；浮层唯一入口是 markClick，此处不关会一直挂着）
+    setMarkEditor(null);
     // v48.24 批3（§4 写入侧）：源锚几何与选区同时采集（handleExtract 跑时选区已被清掉）
     engineAnchorGeomRef.current = k?.getSourceAnchor?.() ?? null;
     const geom = k?.getSelectionGeometry();

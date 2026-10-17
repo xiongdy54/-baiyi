@@ -288,6 +288,10 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
   };
   const onMarkClick = (ev: MouseEvent) => {
     if (markEntries.length === 0) return;
+    // 拖选收尾的 click 不算「点标记」：选区仍未折叠＝滑选手势，只出选区选单、不弹批注浮层
+    // （与 foliate 适配器同口径；用户 2026-10-17：点高亮才弹浮层）
+    const sel = container.ownerDocument.getSelection?.();
+    if (sel && !sel.isCollapsed) return;
     const hit = hitMark(ev.clientX, ev.clientY);
     if (!hit) return;
     // 捕获相位处理 + 阻止传播：点标记＝浮层，不连带触发底下的链接/图片聚焦
