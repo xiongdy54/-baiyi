@@ -140,7 +140,7 @@ const stable = (d) => { const { stats, ...rest } = d; return JSON.stringify(rest
 // ════════════════════════════════════════════════════════════
 console.log("---- tsload / measure ----");
 {
-  check("tsload：无扩展名相对导入可解析（layout → patterns/tree）", typeof L.layoutGraph === "function" && L.implementedPatterns().join() === "chain,tree");
+  check("tsload：无扩展名相对导入可解析（layout → patterns/tree）", typeof L.layoutGraph === "function" && L.implementedPatterns().join() === "argument,chain,compare,grid,layered,timeline,tree");
   check("CJK 1em / ASCII 0.55em / 空格 0.3em", M.textWidth("中文", 10) === 20 && Math.abs(M.textWidth("ab", 10) - 11) < 1e-9 && Math.abs(M.textWidth(" ", 10) - 3) < 1e-9);
   const s1 = M.cardSize({ title: "有理数＝两整数之比", type: "定义" });
   check("卡片尺寸 4px 整数、高 48", s1.w % 4 === 0 && s1.h === 48 && s1.w >= M.CARD.minW, s1);
@@ -326,7 +326,7 @@ console.log("---- ⑤ 不重叠 / 网格 / id 唯一 ----");
   check("四态：more / floor / open / collapsed(+N)", d.byId.A2.state === "more" && d.byId.A1.state === "floor" && d.byId.B.state === "open"
     && L.layoutGraph(G.setCollapsed(sample(), "D", true)).byId.D.state === "collapsed" && L.layoutGraph(G.setCollapsed(sample(), "D", true)).byId.D.count === 6);
   check("框标注「版式 · 来源」", d.byId["F:B"].text === "链 · 模型提示" && d.byId["F:B"].pattern === "chain" && d.byId["F:B"].how === "hint");
-  check("未实现版式回落 tree 并记 fallbackFrom（TODO(T6)）", d.groups.A.pattern === "tree" && d.groups.A.fallbackFrom === "timeline" && d.groups.C.fallbackFrom === "argument" && d.groups.D.fallbackFrom === "compare");
+  check("T6：五个版式均已实现，样张无回落", d.groups.A.pattern === "timeline" && d.groups.C.pattern === "argument" && d.groups.D.pattern === "compare" && Object.values(d.groups).every((g) => g.fallbackFrom === null));
   check("材料级标签", d.material.key === "mixed" || typeof d.material.label === "string");
 }
 
@@ -449,6 +449,7 @@ console.log("---- 框架扩展面（registerPattern / absorb / ctx.rel / places 
       return ctx.frame(h, { w: x - 56, h: Math.max(...items.map((i) => i.h)), items, places, edges });
     },
   };
+  const builtinCompare = stable(L.layoutGraph(sample()));
   L.registerPattern(cols);
   const d = L.layoutGraph(sample());
   check("registerPattern 生效：D 组按 compare 渲染、无 fallback", d.groups.D.pattern === "compare" && d.groups.D.fallbackFrom === null && d.groups.D.framed);
@@ -464,7 +465,7 @@ console.log("---- 框架扩展面（registerPattern / absorb / ctx.rel / places 
   check("absorb 下增量 ≡ 全量", stable(d1) === stable(L.layoutGraph(s1)));
   check("absorb 下链外子树不变（A/B/C/E）", ["A", "B", "C", "E"].every((id) => subtreeRel(d0, s0, id) === subtreeRel(d1, s1, id)));
   L.unregisterPattern("compare");
-  check("unregister 后回落 tree", L.layoutGraph(sample()).groups.D.fallbackFrom === "compare");
+  check("unregister 后恢复内置 compare（T6 起不再回落 tree）", stable(L.layoutGraph(sample())) === builtinCompare && L.layoutGraph(sample()).groups.D.fallbackFrom === null);
   // 「据」关系画成 目标 → 本节点
   L.registerPattern({ key: "layered", layout(h, kids, ctx) {
     const places = []; let y = 0; for (const k of kids) { places.push({ id: k.id, x: 0, y }); y += k.h + 16; }
@@ -509,6 +510,231 @@ console.log("---- ⑧ 性能：2,000 节点单组变化重排（10 次中位） 
   check(`2,000+ 节点（${nodeCount}）单组变化重排中位 ${med.toFixed(2)}ms ≤ 16ms`, nodeCount >= 2000 && visible >= 2000 && med <= 16, times);
   check("增量只重算脏链（≤ 深度 + 新叶）", last.stats.recomputed <= 6, last.stats);
   check("大图增量 ≡ 全量", stable(last) === stable(L.layoutGraph(s)));
+}
+
+// ════════════════════════════════════════════════════════════
+// T6：其余五个版式（timeline / layered / argument / compare / grid）
+// ════════════════════════════════════════════════════════════
+function t6Load() {
+  ordSeq = 0;
+  const types = ["理由", "证据", "反方观点", "反驳", "理由", "例证"];
+  const times = ["约前 530", "1872", "1000", "前 300", "公元 2", "现代"];
+  const gtypes = ["证据", "要点", "要点", "证据", "证据", "要点"];
+  const nodes = [
+    mk("Q", null, "背景", "旁组", { state: "open" }), mk("Q1", "Q", "要点", "q1"), mk("Q2", "Q", "要点", "q2"),
+    mk("P", null, "分类", "T6 组", { state: "open" }),
+  ];
+  for (let i = 0; i < 6; i++) {
+    nodes.push(mk(`k${i}`, "P", types[i], `子块 ${i} 的标题文字`, { time: times[i], state: "open" }));
+    nodes.push(mk(`k${i}a`, `k${i}`, gtypes[i], `属性甲 ${i}`));
+    nodes.push(mk(`k${i}b`, `k${i}`, gtypes[(i + 1) % 6], `属性乙 ${i} 稍长一点的文字内容`));
+  }
+  const edges = [
+    { from: "k1", to: "k0", code: "据" }, { from: "k2", to: "k1", code: "推" }, { from: "k4", to: "k2", code: "因" },
+    { from: "k3", to: "k2", code: "驳" }, { from: "k5", to: "k4", code: "比" }, { from: "k1", to: "k5", code: "比" },
+  ];
+  return { meta: { mapId: "t6", title: "T6" }, nodes, edges, view: { patterns: {}, collapsed: [] } };
+}
+const t6 = (pat) => G.setManualPattern(G.createGraph(t6Load()), "P", pat);
+console.log("---- T6 ⑨ 五个新版式：不重叠 / 4px / 确定性 / S2 / 无回落 ----");
+for (const pat of ["timeline", "layered", "argument", "compare", "grid"]) {
+  const s = t6(pat);
+  const d = L.layoutGraph(s);
+  check(`${pat}：P 组按该版式渲染、带框、无回落`, d.groups.P.pattern === pat && d.groups.P.framed && d.groups.P.fallbackFrom === null && d.byId["F:P"].pattern === pat, d.groups.P);
+  const iss = overlapIssues(d);
+  check(`${pat}：卡片两两不重叠、卡片在框内`, iss.length === 0, iss.slice(0, 5));
+  check(`${pat}：全部坐标 4px 网格整数、id 唯一、组内边端点在画面`, onGrid(d) && new Set(d.items.map((i) => i.id)).size === d.items.length && d.edges.every((e) => d.byId[e.from] && d.byId[e.to]));
+  const ref = stable(d);
+  let same = true;
+  for (let i = 0; i < 100; i++) if (stable(L.layoutGraph(s)) !== ref) { same = false; break; }
+  let sameFresh = true;
+  for (let i = 0; i < 100; i++) if (stable(L.layoutGraph(t6(pat))) !== ref) { sameFresh = false; break; }
+  check(`${pat}：×100 逐字节一致（含重新建图）`, same && sameFresh);
+  // S2：深挖 k2 的子 k2a；链外子树（Q 组、非链上的兄弟；对照因孙级同行耦合只验 Q）刚性不变，重算 ≤ 链长 + 新叶
+  const cache = L.createLayoutCache();
+  const d0 = L.layoutGraph(s, { cache });
+  const s1 = G.applyDelta(s, { mapId: "t6", kind: "nodes", nodes: [mk("k2a1", "k2a", "证据", "深挖一"), mk("k2a2", "k2a", "证据", "深挖二")], states: [{ id: "k2a", state: "open" }] });
+  const d1 = L.layoutGraph(s1, { cache });
+  const chain = new Set([ROOT, "k2a", ...G.ancestors(s1, "k2a")]);
+  const outside = G.visibleIds(s).filter((id) => id !== ROOT && !chain.has(id) && (pat === "compare" ? !["k0", "k1", "k2", "k3", "k4", "k5"].includes(id) && !/^k\d[ab]$/.test(id) : true));
+  const bad = outside.filter((id) => subtreeRel(d0, s, id) !== subtreeRel(d1, s1, id));
+  check(`${pat}：S2 链外 ${outside.length} 棵子树相对坐标不变`, bad.length === 0, bad);
+  check(`${pat}：S2 只重算脏链（${d1.stats.recomputed}）`, d1.stats.recomputed <= chain.size + 3, d1.stats);
+  check(`${pat}：增量 ≡ 全量`, stable(d1) === stable(L.layoutGraph(s1)));
+}
+
+console.log("---- T6 ⑩ 时间线 ----");
+{
+  const s = t6("timeline");
+  const d = L.layoutGraph(s);
+  const ks = ["k0", "k1", "k2", "k3", "k4", "k5"];
+  const xs = ks.map((k) => d.byId[k].x);
+  check("按原文顺序从左到右（时间文本并不单调）", xs.every((x, i) => !i || x > xs[i - 1]), xs);
+  check("每个子一个 date（text＝timeText）与 tick，一条 axis", ks.every((k, i) => d.byId["DT:" + k] && d.byId["DT:" + k].text === ["约前 530", "1872", "1000", "前 300", "公元 2", "现代"][i] && d.byId["TK:" + k] && d.byId["DT:" + k].kind === "date")
+    && d.byId["AX:P"] && d.byId["AX:P"].kind === "axis" && d.items.filter((i) => i.kind === "axis" && i.nid === "P").length === 1);
+  check("date 在子块上方、tick 对准子块锚点中线、axis 覆盖全部子块", ks.every((k) => d.byId["DT:" + k].y + d.byId["DT:" + k].h <= d.byId[k].y && d.byId["TK:" + k].x <= d.byId[k].x + d.byId[k].w / 2 + 4 && d.byId["TK:" + k].x + 4 >= d.byId[k].x)
+    && d.byId["AX:P"].x <= d.byId.k0.x && d.byId["AX:P"].x + d.byId["AX:P"].w >= d.byId.k5.x + d.byId.k5.w);
+  check("样张 A（叙事+时间）为时间线、4 个 date", d.byId["DT:A1"] === undefined && L.layoutGraph(sample()).items.filter((i) => i.kind === "date").length === 4);
+  // LOD：>12 子时「另有 N 项」在末尾且无 date/tick
+  ordSeq = 0;
+  const nodes = [mk("T", null, "背景", "多事件", { state: "open", hint: "timeline" })];
+  for (let i = 0; i < 15; i++) nodes.push(mk("T" + String(i).padStart(2, "0"), "T", "叙事", "事件 " + i, { time: String(1900 + i) }));
+  const dl = L.layoutGraph(G.createGraph({ meta: { mapId: "tl", title: "TL" }, nodes, edges: [], view: null }));
+  check("LOD：「另有 N 项」在最右、无 date/tick", dl.byId["MORE:T"].x > dl.byId.T06.x && !dl.byId["DT:MORE:T"] && !dl.byId["TK:MORE:T"] && dl.items.filter((i) => i.kind === "date").length === 7);
+}
+
+console.log("---- T6 ⑪ 论证图 ----");
+{
+  const d = L.layoutGraph(sample());
+  const c3 = d.byId.C3, c4 = d.byId.C4;
+  check("反驳 C4 位于其针对的反方 C3 下方（y 更大、水平居中对齐）", c4.y >= c3.y + c3.h + 4 && Math.abs((c4.x + c4.w / 2) - (c3.x + c3.w / 2)) <= 4, [c3, c4]);
+  check("支持方在左、反方在右（C1 < C2 < C3）", d.byId.C1.x < d.byId.C2.x && d.byId.C2.x < d.byId.C3.x);
+  check("论点居中在上（C 在框内水平居中、y 小于子块）", d.byId.C.y < d.byId.C1.y && Math.abs((d.byId.C.x + d.byId.C.w / 2) - (d.byId["F:C"].x + d.byId["F:C"].w / 2)) <= 4);
+  const imp = d.edges.filter((e) => e.group === "C" && e.implicit);
+  check("向上隐含线：C1/C2 → C 为「支」、C3 → C 为「驳」，implicit=true、未被消化", imp.length === 3 && imp.every((e) => e.to === "C" && e.kind === "rel")
+    && imp.find((e) => e.from === "C3").code === "驳" && imp.find((e) => e.from === "C1").code === "支" && !d.consumed.some((k) => k.startsWith("C1|C|")));
+  check("驳 关系（C4→C3）经 ctx.rel 消化；C4 据 B 是跨组关系，未消化", d.consumed.includes("C4|C3|驳") && !d.consumed.includes("C4|B|据") && d.edges.some((e) => e.kind === "rel" && e.from === "C4" && e.to === "C3" && !e.implicit));
+  check("同版式嵌套并框：C1 下的证据无自己的框，在 F:C 内", !d.byId["F:C1"] && d.groups.C1.framed === false && d.groups.C1.pattern === "argument" && d.byId.C1a && d.byId.C1a.group === "C" && d.byId.C1a.y > d.byId.C1.y);
+  check("tf 错开终点分位（0..1，互不相同）", (() => { const t = imp.map((e) => e.tf); return t.every((v) => v > 0 && v < 1) && new Set(t).size === t.length; })());
+  // 多条反驳叠放 + 无目标反驳
+  let s = sample();
+  s = G.applyDelta(s, { mapId: "m1", kind: "nodes", nodes: [mk("C5", "C", "反驳", "又一条反驳，文字相当长以致比反方更宽出一截来测试"), mk("C6", "C", "反驳", "无目标的反驳")], edges: [{ from: "C5", to: "C3", code: "驳" }] });
+  const d2 = L.layoutGraph(s);
+  check("同一反方下多条反驳向下叠放且不重叠；无目标反驳也不重叠", overlapIssues(d2).length === 0 && d2.byId.C5.y >= d2.byId.C4.y + d2.byId.C4.h + 4 && d2.byId.C5.y >= d2.byId.C3.y + d2.byId.C3.h + 4 && d2.byId.C6.y > d2.byId.C3.y, [d2.byId.C4, d2.byId.C5, d2.byId.C6]);
+  // 只有反驳（无第一行）
+  ordSeq = 0;
+  const sr = G.createGraph({ meta: { mapId: "ar", title: "AR" }, nodes: [mk("R", null, "论点", "只有反驳", { state: "open", hint: "argument" }), mk("R1", "R", "反驳", "单独反驳")], edges: [], view: null });
+  check("仅有反驳的论点组不抛错且不重叠", (() => { const dd = L.layoutGraph(sr); return overlapIssues(dd).length === 0 && !!dd.byId.R1; })());
+}
+
+console.log("---- T6 ⑫ 对照 ----");
+{
+  const d = L.layoutGraph(sample());
+  check("同行同维度 y 对齐（D1a/D2a、D1b/D2b、栏头 D1/D2）", d.byId.D1a.y === d.byId.D2a.y && d.byId.D1b.y === d.byId.D2b.y && d.byId.D1.y === d.byId.D2.y && d.byId.D1b.y > d.byId.D1a.y && d.byId.D1a.y > d.byId.D1.y);
+  check("栏左右排列、各一条 lane，栏间 vs（比）经 ctx.rel 消化", d.byId.D2.x > d.byId.D1.x + d.byId.D1.w && d.byId["LN:D1"] && d.byId["LN:D2"] && d.consumed.includes("D2|D1|比") && d.edges.some((e) => e.kind === "rel" && e.code === "比" && e.group === "D"));
+  check("absorb：D1/D2 记 absorbedBy D，孙卡在 lane 内", d.groups.D1.absorbedBy === "D" && d.groups.D2.absorbedBy === "D" && inside(d.byId.D1a, d.byId["LN:D1"]) && inside(d.byId.D2b, d.byId["LN:D2"]) && inside(d.byId.D1, d.byId["LN:D1"]));
+  // 行高不等（某格带子树/框）仍同行对齐
+  let s = sample();
+  s = G.applyDelta(s, { mapId: "m1", kind: "nodes", nodes: [mk("D1a1", "D1a", "要点", "子要点一"), mk("D1a2", "D1a", "要点", "子要点二"), mk("D1a3", "D1a", "要点", "子要点三")], states: [{ id: "D1a", state: "open" }] });
+  const d2 = L.layoutGraph(s);
+  check("某格长出子树后：D1a/D2a 仍同 y，下一行 D1b/D2b 同 y 且在其下方", d2.byId.D1a.y === d2.byId.D2a.y && d2.byId.D1b.y === d2.byId.D2b.y && d2.byId.D1b.y >= d2.byId.D1a1.y + d2.byId.D1a1.h && overlapIssues(d2).length === 0, [d2.byId.D1a, d2.byId.D2a, d2.byId.D1b, d2.byId.D2b]);
+  // 三栏、行数不等
+  const dt = L.layoutGraph(t6("compare"));
+  check("六栏：同序号行 y 对齐（k*a 同 y、k*b 同 y），无孙的栏不影响", ["k0", "k1", "k2", "k3", "k4", "k5"].every((k) => dt.byId[k + "a"].y === dt.byId.k0a.y && dt.byId[k + "b"].y === dt.byId.k0b.y && dt.byId[k].y === dt.byId.k0.y));
+  // 栏数不同的比较：加一个无孙的栏
+  const s3 = G.applyDelta(sample(), { mapId: "m1", kind: "nodes", nodes: [mk("D3", "D", "分类", "第三类（无属性）")] });
+  const d3 = L.layoutGraph(s3);
+  check("带无孙栏：不抛错、不重叠、栏头同 y", overlapIssues(d3).length === 0 && d3.byId.D3.y === d3.byId.D1.y && onGrid(d3));
+}
+
+console.log("---- T6 ⑬ 网格 ----");
+{
+  const ok = [];
+  for (const n of [2, 3, 4, 5, 7, 9, 10, 12]) {
+    ordSeq = 0;
+    const nodes = [mk("Gp", null, "分类", "网格组", { state: "open", hint: "grid" })];
+    for (let i = 0; i < n; i++) nodes.push(mk("g" + String(i).padStart(2, "0"), "Gp", "要点", "格子 " + "字".repeat(1 + (i % 4) * 2)));
+    const d = L.layoutGraph(G.createGraph({ meta: { mapId: "gr", title: "GR" }, nodes, edges: [], view: null }));
+    const ids = nodes.slice(1).map((x) => x.id);
+    const colsSeen = new Set(ids.map((i) => d.byId[i].x)).size;
+    const want = Math.ceil(Math.sqrt(n));
+    const stepOk = (() => { const xs = [...new Set(ids.map((i) => d.byId[i].x))].sort((a, b) => a - b); return xs.every((x, i) => !i || x - xs[i - 1] === xs[1] - xs[0]); })();
+    const rowsOk = new Set(ids.map((i) => d.byId[i].y)).size === Math.ceil(n / want);
+    ok.push([n, colsSeen === want && stepOk && rowsOk && d.groups.Gp.pattern === "grid" && overlapIssues(d).length === 0, colsSeen, want]);
+  }
+  check("列数 = ⌈√n⌉、列距相等、行数 = ⌈n/列⌉（n=2..12）", ok.every((r) => r[1]), ok.filter((r) => !r[1]));
+  const d = L.layoutGraph(t6("grid"));
+  check("原文顺序行优先：k0..k5 为 3 列 2 行", d.byId.k0.x < d.byId.k1.x && d.byId.k1.x < d.byId.k2.x && d.byId.k3.x === d.byId.k0.x && d.byId.k3.y > d.byId.k0.y && d.byId.k0.y === d.byId.k2.y);
+}
+
+console.log("---- T6 ⑭ 分层图 ----");
+{
+  const d = L.layoutGraph(G.setManualPattern(sample(), "B", "layered"));
+  const y = (id) => d.byId[id].y;
+  check("据/推/因 最长路自上而下（B1 < B2 < B3 < B5 < B6 的 y；B4 无前驱与 B1 同在第 0 层）", y("B1") < y("B2") && y("B2") < y("B3") && y("B3") < y("B5") && y("B5") < y("B6") && y("B4") === y("B1") && y("B4") < y("B5"));
+  check("流边画成 前提→结论（「据」反转）且已消化", d.edges.some((e) => e.group === "B" && e.kind === "rel" && e.from === "B1" && e.to === "B2" && e.code === "据") && d.consumed.includes("B2|B1|据"));
+  check("多边汇入同一卡片时 tf 错开（B5 有 B3、B4 两入边）", (() => { const t = d.edges.filter((e) => e.group === "B" && e.to === "B5").map((e) => e.tf); return t.length === 2 && t[0] !== t[1] && t.every((v) => v > 0 && v < 1); })());
+  // 重心法：下层按前驱中心排序
+  ordSeq = 0;
+  const nodes = [mk("Y", null, "命题", "重心", { state: "open", hint: "layered" }),
+    mk("X1", "Y", "前提", "前提一前提一前提一前提一"), mk("X2", "Y", "前提", "前提二"), mk("X3", "Y", "前提", "前提三"),
+    mk("Z1", "Y", "推导", "推出一"), mk("Z2", "Y", "推导", "推出二")];
+  const edges = [{ from: "Z1", to: "X3", code: "据" }, { from: "Z2", to: "X1", code: "据" }];
+  const db = L.layoutGraph(G.createGraph({ meta: { mapId: "bc", title: "BC" }, nodes, edges, view: null }));
+  check("重心法：Z2（前驱 X1 在左）排到 Z1（前驱 X3 在右）左侧；无前驱的 X2 仍在第 0 层", db.byId.Z2.x < db.byId.Z1.x && db.byId.X2.y === db.byId.X1.y && db.byId.Z1.y > db.byId.X1.y);
+  // 有环：a→b→c→a
+  const cyc = () => {
+    ordSeq = 0;
+    return G.createGraph({ meta: { mapId: "cy", title: "CY" }, nodes: [mk("Cy", null, "命题", "环", { state: "open", hint: "layered" }), mk("a", "Cy", "推导", "甲"), mk("b", "Cy", "推导", "乙"), mk("c", "Cy", "推导", "丙"), mk("e", "Cy", "推导", "丁"), mk("sf", "Cy", "推导", "自环")],
+      edges: [{ from: "a", to: "b", code: "推" }, { from: "b", to: "c", code: "推" }, { from: "c", to: "a", code: "推" }, { from: "c", to: "e", code: "因" }, { from: "sf", to: "sf", code: "推" }], view: null });
+  };
+  const dc = L.layoutGraph(cyc());
+  const ref = stable(dc);
+  let same = true;
+  for (let i = 0; i < 100; i++) if (stable(L.layoutGraph(cyc())) !== ref) { same = false; break; }
+  check("有环：不抛错、×100 确定性、按原文顺序断环（a 在 b 上、b 在 c 上，回边 c→a 仍画出）", same && dc.byId.a.y < dc.byId.b.y && dc.byId.b.y < dc.byId.c.y && dc.byId.e.y > dc.byId.c.y
+    && dc.edges.some((e) => e.kind === "rel" && e.from === "c" && e.to === "a") && overlapIssues(dc).length === 0 && onGrid(dc));
+  check("有环：自环不画、不消化", !dc.edges.some((e) => e.from === "sf" && e.to === "sf") && !dc.consumed.includes("sf|sf|推"));
+  // 全环（无源点）
+  ordSeq = 0;
+  const full = G.createGraph({ meta: { mapId: "f", title: "F" }, nodes: [mk("F", null, "命题", "全环", { state: "open", hint: "layered" }), mk("f1", "F", "推导", "1"), mk("f2", "F", "推导", "2"), mk("f3", "F", "推导", "3")],
+    edges: [{ from: "f1", to: "f2", code: "推" }, { from: "f2", to: "f3", code: "推" }, { from: "f3", to: "f1", code: "推" }], view: null });
+  const df = L.layoutGraph(full);
+  check("全环（无源点）：f1<f2<f3 层序", df.byId.f1.y < df.byId.f2.y && df.byId.f2.y < df.byId.f3.y);
+}
+
+console.log("---- T6 ⑮ 性能：新版式 ----");
+{
+  const pats = ["timeline", "grid", "argument", "layered", "compare"];
+  const load = bigLoad();
+  for (const n of load.nodes) {
+    const m = /^t\d+\.(\d+)$/.exec(n.id);
+    if (m) n.patternHint = pats[Number(m[1]) % 5];
+  }
+  load.meta = { mapId: "big6", title: "大图 T6" };
+  let s = G.createGraph(load);
+  const nodeCount = Object.keys(s.nodes).length;
+  const cache = L.createLayoutCache();
+  const d0 = L.layoutGraph(s, { cache });
+  check("2,000+ 节点图：新版式组均按版式渲染", ["timeline", "grid", "argument", "layered", "compare"].every((p) => Object.values(d0.groups).some((g) => g.pattern === p && g.fallbackFrom === null)) && overlapIssues(d0).length === 0 && onGrid(d0));
+  for (let i = 0; i < 5; i++) { s = G.applyDelta(s, { mapId: "big6", kind: "nodes", nodes: [mk(`w${i}`, "t3.4.6", "例证", "预热 " + i)] }); L.layoutGraph(s, { cache }); }
+  const times = [];
+  let last;
+  for (let i = 0; i < 10; i++) {
+    // 变化落在 timeline / grid / argument / layered / compare 各组的某个小节里
+    const sec = `t${i % 8}.${i % 5 === 0 ? 0 : i % 5 === 1 ? 1 : i % 5 === 2 ? 2 : i % 5 === 3 ? 3 : 4}`;
+    const grp = `${sec}.${(i * 7) % 12}`;
+    s = G.applyDelta(s, { mapId: "big6", kind: "nodes", nodes: [mk(`n${i}`, grp, "例证", "新增 " + i)] });
+    const t0 = process.hrtime.bigint();
+    last = L.layoutGraph(s, { cache });
+    times.push(Number(process.hrtime.bigint() - t0) / 1e6);
+  }
+  times.sort((a, b) => a - b);
+  const med = (times[4] + times[5]) / 2;
+  console.log(`      节点 ${nodeCount}（五种新版式混排）；单组变化重排 10 次中位 ${med.toFixed(2)}ms（min ${times[0].toFixed(2)} / max ${times[9].toFixed(2)}），重算块 ${last.stats.recomputed}/${last.stats.visited}`);
+  check(`2,000+ 节点（${nodeCount}）新版式混排单组重排中位 ${med.toFixed(2)}ms ≤ 16ms`, nodeCount >= 2000 && med <= 16, times);
+  check("新版式增量只重算脏链；增量 ≡ 全量", last.stats.recomputed <= 8 && stable(last) === stable(L.layoutGraph(s)), last.stats);
+  // 单组 2,000 子（LOD 展开）：每个版式一次全量布局，防二次复杂度
+  const flat = (pat) => {
+    ordSeq = 0;
+    const nodes = [mk("Fl", null, "分类", "平铺", { state: "open", hint: pat })];
+    const edges = [];
+    for (let i = 0; i < 2000; i++) {
+      nodes.push(mk("f" + String(i).padStart(4, "0"), "Fl", i % 7 === 3 ? "反驳" : i % 11 === 5 ? "反方观点" : "要点", "项 " + i, { time: String(1000 + i), state: "floor" }));
+      if (i) edges.push({ from: "f" + String(i).padStart(4, "0"), to: "f" + String(i - 1 - (i % 3)).padStart(4, "0"), code: i % 3 ? "据" : "比" });
+    }
+    return G.createGraph({ meta: { mapId: "fl", title: "FL" }, nodes, edges, view: null });
+  };
+  const flatTimes = {};
+  for (const p of pats) {
+    const fs = flat(p);
+    const t0 = process.hrtime.bigint();
+    const dd = L.layoutGraph(fs, { lodExpanded: ["Fl"] });
+    flatTimes[p] = Number(process.hrtime.bigint() - t0) / 1e6;
+    if (!dd.byId.f1999) flatTimes[p] = Infinity;
+  }
+  console.log(`      单组 2,000 子全量布局（ms）：${pats.map((p) => `${p} ${flatTimes[p].toFixed(1)}`).join(" / ")}`);
+  check("单组 2,000 子（含关系边）各版式全量布局均 ≤ 200ms（无二次复杂度）", pats.every((p) => flatTimes[p] <= 200), flatTimes);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

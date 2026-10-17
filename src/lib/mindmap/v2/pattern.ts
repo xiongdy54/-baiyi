@@ -1,6 +1,6 @@
 // 材料导图 v2 · 版式选择（MINDMAP-V2-IMPL-PLAN §5.1 pattern.ts；设计稿 §15.4 / §15.8 S5）。
 // 组级优先级：① 手动（view.patterns）> ② 模型提示（父行 `{版式}`，校验前提成立）> ③ 规则表 1–7。
-// 选择器只决定「想要的版式」；某版式尚未实现时由 layout.ts 回落到 tree 并在 Display.groups 记 fallbackFrom。
+// 选择器只决定「想要的版式」；七个版式均已实现（T6）。仅当版式被撤销注册时，layout.ts 才回落 tree 并在 Display.groups 记 fallbackFrom。
 // 材料级标签 materialLabel() 只用于画布左上角提示，不覆盖组级选择。
 // S5 lockPattern()：一个任务内版式最多变更一次（开始按提示/规则定，结束时规则复核一次，之后锁定）。
 

@@ -7047,13 +7047,47 @@ function createMaterialMapV2({
   return { mapId };
 }
 
-/** 一个任务的全部产物单事务落库：节点 upsert / 状态 / 边 / node_count / 可选激活（旧激活版本降为历史）。 */
-function commitMaterialMapJob({ mapId, jobId = null, upserts = [], states = [], edges = [], activate = false } = {}) {
+/**
+ * T3 交接要点 2（整枝替换）：软删除各根节点的 ai/local 后代（根自身与 toc/v1ext 行不动、遇之停止下探）及触及它们的边。
+ * 只在 commitMaterialMapJob 的事务内调用；随后同事务 upsert 同 id 行会把它们复活（is_deleted = 0）。
+ */
+function mmSoftDeleteSubtrees(mapId, rootIds, now) {
+  const live = queryAll("SELECT node_id, parent_id, source FROM material_map_nodes WHERE map_id = ? AND is_deleted = 0", [mapId]);
+  const kids = new Map();
+  for (const n of live) {
+    if (n.parent_id == null) continue;
+    if (!kids.has(n.parent_id)) kids.set(n.parent_id, []);
+    kids.get(n.parent_id).push(n);
+  }
+  const gone = new Set();
+  const stack = (rootIds || []).map(String);
+  while (stack.length) {
+    const p = stack.pop();
+    for (const k of kids.get(p) || []) {
+      if (gone.has(k.node_id) || (k.source !== "ai" && k.source !== "local")) continue;
+      gone.add(k.node_id);
+      stack.push(k.node_id);
+    }
+  }
+  for (const nid of gone) {
+    db.run(
+      "UPDATE material_map_nodes SET is_deleted = 1, updated_at = ?, sync_version = sync_version + 1 WHERE map_id = ? AND node_id = ? AND is_deleted = 0",
+      [now, mapId, nid]
+    );
+    db.run("UPDATE material_map_edges SET is_deleted = 1 WHERE map_id = ? AND (from_id = ? OR to_id = ?) AND is_deleted = 0", [mapId, nid, nid]);
+  }
+  return [...gone];
+}
+
+/** 一个任务的全部产物单事务落库：节点 upsert / 状态 / 边 / node_count / 可选激活（旧激活版本降为历史）。
+ *  replaceSubtrees（可选，nodeId[]）：先在同一事务内软删除这些节点的旧 AI 子孙（整枝替换），再写本任务产物。 */
+function commitMaterialMapJob({ mapId, jobId = null, upserts = [], states = [], edges = [], activate = false, replaceSubtrees = [] } = {}) {
   const id = String(mapId);
   return withTransaction(() => {
     const mrows = queryAll("SELECT document_id, scope_anchor FROM material_maps WHERE id = ? AND is_deleted = 0", [id]);
     if (!mrows.length) throw new Error("commitMaterialMapJob：版本不存在 " + id);
     const now = Date.now();
+    if (Array.isArray(replaceSubtrees) && replaceSubtrees.length) mmSoftDeleteSubtrees(id, replaceSubtrees, now);
     for (const r of upserts || []) mmUpsertNodeRow(id, r, jobId, now);
     for (const st of states || []) {
       if (!st || st.nodeId == null) continue;

@@ -277,6 +277,48 @@ function runStoreContract(store, assert) {
     assert.strictEqual(store.countMaterialMapCallsSince(uid("c6"), { trigger: "click", sinceMs: 0 }), 0);
   });
 
+  console.log("---- 契约 C7 整枝替换（replaceSubtrees） ----");
+  step("旧 AI 子孙软删除、同 id 复活、toc 子与根自身不动、触及的边一并软删", () => {
+    const { mapId } = v2(uid("c7"), [N("t1", null, 1000), N("t2", "t1", 2000), N("t3", null, 3000)]);
+    const ai = (id, p, ord, extra = {}) => U(id, p, ord, { source: "ai", state: "floor", ...extra });
+    store.commitMaterialMapJob({
+      mapId, jobId: "old",
+      upserts: [ai("t1.1", "t1", 1001, { state: "open" }), ai("t1.1.1", "t1.1", 1002), ai("t1.2", "t1", 1003), ai("t1.3", "t1", 1004, { state: "open" }), ai("t1.3.1", "t1.3", 1005),
+        U("t1.g9", "t1", 9999, { source: "local", state: "stub" }), ai("t3.1", "t3", 3001)],
+      edges: [{ fromId: "t1.3", toId: "t3", code: "支" }, { fromId: "t3.1", toId: "t1.3.1", code: "据" }, { fromId: "t1.1", toId: "t3", code: "因" }, { fromId: "t3.1", toId: "t2", code: "比" }]
+    });
+    const out = store.commitMaterialMapJob({
+      mapId, jobId: "new", replaceSubtrees: ["t1"],
+      upserts: [ai("t1.1", "t1", 1001, { title: "新一" }), ai("t1.2", "t1", 1003, { title: "新二" })],
+      states: [{ nodeId: "t1", state: "open" }],
+      edges: [{ fromId: "t1.1", toId: "t3", code: "因" }]
+    });
+    const ids = nodeIds(store.listMaterialMapNodes(mapId)).sort();
+    assert.deepStrictEqual(ids, ["t1", "t1.1", "t1.2", "t2", "t3", "t3.1"].sort());
+    assert.deepStrictEqual(out, { nodeCount: 6 });
+    const by = Object.fromEntries(store.listMaterialMapNodes(mapId).map((r) => [r.nodeId, r]));
+    assert.strictEqual(by["t1.1"].title, "新一");
+    assert.strictEqual(by["t1.1"].jobId, "new");
+    assert.strictEqual(by["t1"].state, "open");
+    const es = store.listMaterialMapEdges(mapId).map((e) => `${e.fromId}>${e.toId}:${e.code}`).sort();
+    assert.deepStrictEqual(es, ["t1.1>t3:因", "t3.1>t2:比"]);
+    assert.strictEqual(store.getMaterialMap(mapId).nodeCount, 6);
+  });
+  step("replaceSubtrees 与非法行同事务：整体回滚（旧子孙不丢）", () => {
+    const { mapId } = v2(uid("c7"));
+    store.commitMaterialMapJob({ mapId, jobId: "old", upserts: [U("t1.1", "t1", 1001, { source: "ai" }), U("t1.1.1", "t1.1", 1002, { source: "ai" })] });
+    const before = store.listMaterialMapNodes(mapId);
+    assert.throws(() => store.commitMaterialMapJob({ mapId, jobId: "bad", replaceSubtrees: ["t1"], upserts: [U("t1.1", "t1", 1001, { source: "ai", state: "bogus" })] }));
+    assert.deepStrictEqual(store.listMaterialMapNodes(mapId), before);
+  });
+  step("缺省 / 空数组不软删除任何行", () => {
+    const { mapId } = v2(uid("c7"));
+    store.commitMaterialMapJob({ mapId, jobId: "a", upserts: [U("t1.1", "t1", 1001, { source: "ai" })] });
+    store.commitMaterialMapJob({ mapId, jobId: "b", replaceSubtrees: [], upserts: [] });
+    store.commitMaterialMapJob({ mapId, jobId: "c", upserts: [] });
+    assert.strictEqual(store.listMaterialMapNodes(mapId).length, 3);
+  });
+
   return steps;
 }
 

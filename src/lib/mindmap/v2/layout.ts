@@ -40,7 +40,7 @@
 //
 // 6. 注册：在 patterns/<key>.ts 导出 `export const <key>: PatternDef = { key, layout }`，然后把它加入下方
 //    BUILTIN 表（一行 import + 一项）。测试或插件也可调用 registerPattern(def)（会使缓存失效）。
-//    未注册的版式在布局时回落到 tree，并在 Display.groups[id].fallbackFrom 记下原选择（TODO(T6)）。
+//    未注册的版式在布局时回落到 tree，并在 Display.groups[id].fallbackFrom 记下原选择（七个内置版式均已注册；仅在插件撤销注册时才会回落）。
 //
 // 7. 缓存：createLayoutCache() 得到的对象传入 opts.cache 即启用增量重排：每组按
 //    「子树 rev（graph.ts 维护）+ 版式选择 + 视图偏好 + 子块引用序列 + 注册表版本」判定是否复用；
@@ -55,6 +55,11 @@ import { HOW_NAMES, PATTERN_NAMES, groupFacts, lockPattern, materialLabel, selec
 import { descendantCount } from "./graph";
 import { tree } from "./patterns/tree";
 import { chain } from "./patterns/chain";
+import { timeline } from "./patterns/timeline";
+import { layered } from "./patterns/layered";
+import { argument } from "./patterns/argument";
+import { compare } from "./patterns/compare";
+import { grid } from "./patterns/grid";
 
 // ───────────────────────── 常量 ─────────────────────────
 
@@ -277,7 +282,11 @@ export interface LayoutOptions {
 const BUILTIN: Partial<Record<PatternKey, PatternDef>> = {
   tree,
   chain,
-  // TODO(T6): timeline, layered, argument, compare, grid —— import 后加到这里
+  timeline,
+  layered,
+  argument,
+  compare,
+  grid,
 };
 
 const REGISTRY = new Map<PatternKey, PatternDef>(Object.entries(BUILTIN) as [PatternKey, PatternDef][]);

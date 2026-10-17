@@ -20,6 +20,8 @@
 //   C5 deleteMaterialMap：物理删除该版本 nodes/edges，不触碰其它版本；删激活版本则同 scope 最新剩余版本顺延激活（沿用 v1 语义）。
 //   C6 saveMaterialMapCall 新列（model/ttfnMs/lines/linesDropped/dropJson/relsDropped/reasoningChars/trigger）读回一致；
 //      dropJson 以字符串存取（对象入参会 JSON.stringify）；countMaterialMapCallsSince 的 sinceMs 为绝对毫秒时间戳（created_at >= sinceMs）。
+//   C7 commitMaterialMapJob({ replaceSubtrees: nodeId[] })：同事务内先软删除（is_deleted=1）各根的 ai/local 后代
+//      （根自身与 toc/v1ext 行不动）及触及它们的边，再执行 upsert/states/edges（同 id 行被复活）；任一行非法则连软删除一并回滚。
 //   非契约（实现细节，不要在引擎里依赖）：id 的具体值、created_at 的取值、边列表在同毫秒下的稳定顺序（两者均按插入序）。
 const crypto = require("crypto");
 
@@ -194,12 +196,37 @@ function createMemoryStore({ now = () => Date.now() } = {}) {
       return { mapId: row.id };
     });
   }
-  function commitMaterialMapJob({ mapId, jobId = null, upserts = [], states = [], edges: edgeRows = [], activate = false } = {}) {
+  // C7（T3 交接要点 2）：整枝替换——各根节点的 ai/local 后代（不含根自身；遇 toc/v1ext 停止下探）先软删除，
+  // 连同触及它们的边；随后同事务的 upsert/边写入会把同 id 的行复活。返回被软删除的 nodeId（引擎不依赖其顺序）。
+  function softDeleteSubtrees(mapId, rootIds, t) {
+    const live = nodes.filter((n) => n.map_id === mapId && !n.is_deleted);
+    const kids = new Map();
+    for (const n of live) {
+      if (n.parent_id == null) continue;
+      if (!kids.has(n.parent_id)) kids.set(n.parent_id, []);
+      kids.get(n.parent_id).push(n);
+    }
+    const gone = new Set();
+    const stack = (rootIds || []).map(String);
+    while (stack.length) {
+      const p = stack.pop();
+      for (const k of kids.get(p) || []) {
+        if (gone.has(k.node_id) || (k.source !== "ai" && k.source !== "local")) continue;
+        gone.add(k.node_id);
+        stack.push(k.node_id);
+      }
+    }
+    for (const n of live) if (gone.has(n.node_id)) { n.is_deleted = 1; n.updated_at = t; }
+    for (const e of edges) if (e.map_id === mapId && !e.is_deleted && (gone.has(e.from_id) || gone.has(e.to_id))) e.is_deleted = 1;
+    return [...gone];
+  }
+  function commitMaterialMapJob({ mapId, jobId = null, upserts = [], states = [], edges: edgeRows = [], activate = false, replaceSubtrees = [] } = {}) {
     const id = String(mapId);
     return tx(() => {
       const m = findMap(id);
       if (!m) throw new Error("commitMaterialMapJob：版本不存在 " + id);
       const t = now();
+      if (Array.isArray(replaceSubtrees) && replaceSubtrees.length) softDeleteSubtrees(id, replaceSubtrees, t);
       for (const r of upserts || []) upsertNode(id, r, jobId, t);
       for (const st of states || []) {
         if (!st || st.nodeId == null) continue;
