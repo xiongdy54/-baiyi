@@ -1,0 +1,580 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>材料导图 v2 · 结构画布样张</title>
+<style>
+:root{color-scheme:light;--paper:#fafaf8;--ink:#0a0a0a;--t2:#525252;--t3:#737373;--b1:#e0e0e0;--b2:#a3a3a3;--accent:#166a59;--accent-soft:rgba(22,106,89,.08);
+  --font:-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif;font-family:var(--font)}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--paper);color:var(--ink)}
+.app{display:grid;grid-template-columns:minmax(0,1fr) 288px;grid-template-rows:48px minmax(0,1fr);height:100vh}
+.bar{grid-column:1/3;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid var(--b1);min-width:0}
+.bar h1{font-size:14px;font-weight:600;margin:0 8px 0 0;white-space:nowrap}
+button,select{font:inherit;font-size:12px;height:28px;padding:0 12px;border:1px solid var(--b2);background:var(--paper);color:var(--ink);cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--ink)}
+button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.status{margin-left:auto;font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#stage{position:relative;overflow:hidden;cursor:grab;min-width:0}
+#stage.drag{cursor:grabbing}
+svg#cv{width:100%;height:100%;display:block;user-select:none}
+aside{border-left:1px solid var(--b1);padding:16px;overflow:auto;font-size:13px;line-height:1.6}
+aside h2{font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--t3);margin:0 0 8px;text-transform:uppercase}
+aside section{padding-bottom:16px;margin-bottom:16px;border-bottom:1px solid var(--b1)}
+aside section:last-child{border-bottom:0}
+.kv{display:grid;grid-template-columns:56px 1fr;gap:4px 8px;font-size:12px}
+.kv dt{color:var(--t3)}.kv dd{margin:0}
+.title{font-size:15px;font-weight:600;margin:4px 0 8px}
+.tag{display:inline-block;font-size:11px;padding:0 6px;border:1px solid var(--b2);color:var(--t2);line-height:18px}
+.rels{list-style:none;margin:0;padding:0}
+.rels li{padding:4px 0;border-top:1px solid var(--b1);font-size:12px;cursor:pointer}
+.rels li:hover{color:var(--accent)}
+.rels b{font-weight:600;margin-right:4px}
+.hint{color:var(--t2);font-size:12px}
+.legend{display:grid;grid-template-columns:44px 1fr;gap:6px 8px;align-items:center;font-size:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <h1>材料导图 v2 · 结构画布样张</h1>
+    <button class="primary" id="btnStream" title="从空白开始，按模型输出顺序逐行长出">▶ 演示流式生成</button>
+    <button id="btnFit">适应窗口</button>
+    <button id="btnRel" title="默认只在悬停/选中时画跨组关系；打开后全部画出">全部关系</button>
+    <button id="btnFocus" title="选中节点后，弱化与它无关的部分">关系透视</button>
+    <span class="status" id="status"></span>
+  </div>
+  <div id="stage"><svg id="cv" aria-label="材料导图画布"></svg></div>
+  <aside id="side"></aside>
+</div>
+<script>
+"use strict";
+// ───────────────────────── 示例数据：一份「说明 + 证明 + 论证 + 对比 + 叙事」混合材料 ─────────────────────────
+// 每行对应 v2 行协议里模型输出的一行：层级（p）、类型（t）、标题（s）、版式提示（hint）、关系（rel: [码, 目标]）。
+// st:'more' = 模型标记「+」（还有结构可深挖）；deep:1 = 首轮不生成、深挖时才流式长出。
+const D = [
+  {id:'R',  p:null, t:'材料',   s:'√2 与第一次数学危机', hint:'tree'},
+  {id:'A',  p:'R', t:'背景',    s:'「万物皆数」的信念与破裂', hint:'timeline'},
+  {id:'A1', p:'A', t:'叙事',    s:'学派确立「万物皆数」', meta:'约前 530'},
+  {id:'A2', p:'A', t:'叙事',    s:'希帕索斯发现不可公度', meta:'约前 470', st:'more', rel:[['因','C']]},
+  {id:'A3', p:'A', t:'叙事',    s:'欧多克索斯建立比例论', meta:'约前 370'},
+  {id:'A4', p:'A', t:'叙事',    s:'戴德金分割奠基实数', meta:'1872'},
+  {id:'B',  p:'R', t:'命题',    s:'√2 不是有理数', hint:'layered'},
+  {id:'B1', p:'B', t:'定义',    s:'有理数＝两整数之比'},
+  {id:'B2', p:'B', t:'前提',    s:'反设 √2＝p/q，p、q 互素', rel:[['据','B1']]},
+  {id:'B3', p:'B', t:'推导',    s:'p²＝2q²，故 p² 为偶数', rel:[['据','B2']]},
+  {id:'B4', p:'B', t:'引理',    s:'平方为偶 ⇒ 本身为偶', st:'more'},
+  {id:'B4a',p:'B4',t:'前提',    s:'反设 p 为奇数 2k+1', deep:1},
+  {id:'B4b',p:'B4',t:'推导',    s:'p²＝4k²+4k+1 为奇数', deep:1},
+  {id:'B4c',p:'B4',t:'结论',    s:'与 p² 为偶矛盾，引理成立', deep:1},
+  {id:'B5', p:'B', t:'推导',    s:'p 为偶，代回得 q 也为偶', rel:[['据','B3'],['据','B4']]},
+  {id:'B6', p:'B', t:'结论',    s:'与互素矛盾，命题得证', rel:[['据','B5'],['据','B2']]},
+  {id:'C',  p:'R', t:'论点',    s:'危机推动了数学的严格化', hint:'argument'},
+  {id:'C1', p:'C', t:'理由',    s:'几何量取代算术数', rel:[['据','A3']]},
+  {id:'C1a',p:'C1',t:'证据',    s:'《原本》第五卷比例论'},
+  {id:'C2', p:'C', t:'理由',    s:'催生连续量的精确理论', st:'more', rel:[['据','A4']]},
+  {id:'C2a',p:'C2',t:'证据',    s:'穷竭法逼近曲边面积', deep:1},
+  {id:'C2b',p:'C2',t:'证据',    s:'比例论可处理不可公度量', deep:1, rel:[['据','A3']]},
+  {id:'C3', p:'C', t:'反方观点', s:'「危机」是后世的夸大'},
+  {id:'C4', p:'C', t:'反驳',    s:'不可公度确实改写了证明', rel:[['驳','C3'],['据','B']]},
+  {id:'D',  p:'R', t:'对比',    s:'有理数与无理数', hint:'compare'},
+  {id:'D1', p:'D', t:'分类',    s:'有理数'},
+  {id:'D1a',p:'D1',t:'要点',    s:'可以写成 p/q'},
+  {id:'D1b',p:'D1',t:'要点',    s:'小数有限或循环'},
+  {id:'D1c',p:'D1',t:'例证',    s:'1/3、0.75'},
+  {id:'D2', p:'D', t:'分类',    s:'无理数', rel:[['比','D1']]},
+  {id:'D2a',p:'D2',t:'要点',    s:'不能写成 p/q'},
+  {id:'D2b',p:'D2',t:'要点',    s:'小数无限不循环'},
+  {id:'D2c',p:'D2',t:'例证',    s:'√2、π', rel:[['例','B']]},
+];
+const BY = {}, CH = {};
+D.forEach(n => { BY[n.id] = n; n.st0 = n.st; (CH[n.p] = CH[n.p] || []).push(n); });
+
+const PAT_NAME = {tree:'大纲树', chain:'链', timeline:'时间线', layered:'分层图', argument:'论证图', compare:'对照', grid:'网格'};
+const REL = { // 码 → 名称与线型（结构＝直角线；关系＝曲线）
+  '支':{name:'支持', dash:'',      mk:'arrow', w:1.25},
+  '驳':{name:'反驳', dash:'',      mk:'bar',   w:1.25},
+  '据':{name:'依据', dash:'5 3',   mk:'open',  w:1.25},
+  '推':{name:'推出', dash:'',      mk:'arrow', w:2},
+  '因':{name:'导致', dash:'',      mk:'arrow', w:1.75},
+  '比':{name:'对比', dash:'',      mk:'dot',   w:1},
+  '例':{name:'例示', dash:'1.5 3', mk:'open',  w:1.25},
+  '答':{name:'回答', dash:'8 3 2 3', mk:'arrow', w:1.25},
+};
+
+// ───────────────────────── 状态 ─────────────────────────
+let revealed = new Set(D.filter(n => !n.deep).map(n => n.id));
+const collapsed = new Set();
+const override = {};           // 用户手动指定的版式（视图偏好，不改结构）
+const fresh = {};              // id → 出现时刻（流式生成中的虚线态）
+let selected = null, hovered = null, relAll = false, focusMode = false, busy = false;
+let view = {tx: 40, ty: 40, k: 1}, viewT = null;
+let disp = {}, targ = {}, leaving = {}, edges = [], consumed = new Set(), groupPat = {};
+
+// ───────────────────────── 测量 ─────────────────────────
+const mctx = document.createElement('canvas').getContext('2d');
+const FONT = getComputedStyle(document.documentElement).getPropertyValue('--font');
+function textW(s, size, weight) { mctx.font = `${weight || 400} ${size}px ${FONT}`; return mctx.measureText(s).width; }
+const r4 = v => Math.ceil(v / 4) * 4;
+function measure(n) {
+  if (n.p === null) return {w: Math.max(160, r4(textW(n.s, 15, 600) + 32)), h: 56};
+  return {w: Math.max(96, r4(Math.max(textW(n.s, 13), textW(n.t, 11)) + 28)), h: 48};
+}
+
+// ───────────────────────── 版式选择（本地确定性：手动 > 模型提示 > 规则 > 大纲树） ─────────────────────────
+const kidsOf = n => (CH[n.id] || []).filter(k => revealed.has(k.id));
+const isOpen = n => kidsOf(n).length > 0 && !collapsed.has(n.id);
+function sibFlow(kids) { // 同组内「据/推/因」边数
+  const ids = new Set(kids.map(k => k.id)); let c = 0;
+  kids.forEach(k => (k.rel || []).forEach(([code, t]) => { if (ids.has(t) && '据推因'.includes(code)) c++; }));
+  return c;
+}
+function inferPattern(n, kids) {
+  const ts = kids.map(k => k.t), share = f => ts.filter(f).length / ts.length;
+  if (kids.every(k => k.meta) || share(t => t === '叙事') >= .75) return 'timeline';
+  if (n.t === '论点' || ts.includes('反方观点') || share(t => t === '理由' || t === '证据') >= .5) return 'argument';
+  if (n.t === '对比' || kids.some(k => (k.rel || []).some(r => r[0] === '比'))) return kids.length >= 2 ? 'compare' : 'tree';
+  if (kids.length >= 3 && sibFlow(kids) >= kids.length - 1) return 'layered';
+  if (share(t => '推导步骤前提结论'.includes(t)) >= .6) return 'chain';
+  if (kids.length >= 6 && kids.every(k => !CH[k.id])) return 'grid';
+  return 'tree';
+}
+function patternOf(n, kids) {
+  if (override[n.id]) return {pat: override[n.id], how: '手动'};
+  if (n.hint && (n.hint !== 'compare' || kids.length >= 2)) return {pat: n.hint, how: '模型提示'};
+  return {pat: inferPattern(n, kids), how: '自动推断'};
+}
+
+// ───────────────────────── 组合布局：每组＝一个块，块内由版式排布，块外只做刚性平移 ─────────────────────────
+const PAD = 16, HG = 24;
+function shift(dst, blk, dx, dy) { blk.items.forEach(it => dst.items.push({...it, x: it.x + dx, y: it.y + dy})); blk.edges.forEach(e => dst.edges.push(e)); }
+function cardBlock(n, wOverride) {
+  const m = measure(n); const w = wOverride || m.w;
+  return {w, h: m.h, items: [{id: n.id, kind: 'card', x: 0, y: 0, w, h: m.h}], edges: [], anchor: {x: 0, y: 0, w, h: m.h}};
+}
+function block(n, parentPat) {
+  if (!isOpen(n)) return cardBlock(n);
+  const kids = kidsOf(n), {pat, how} = patternOf(n, kids);
+  groupPat[n.id] = {pat, how};
+  return PATTERNS[pat](n, kids, measure(n), parentPat, how);
+}
+function framed(n, H, body, center, pat, how) {
+  const label = `${PAT_NAME[pat]} · ${how}`, lw = r4(textW(label, 11)) + 24;
+  const fw = Math.max(center ? H.w + 2 * lw : H.w + lw, body.w) + 2 * PAD, hx = center ? (fw - H.w) / 2 : PAD, by = PAD + H.h + HG;
+  const out = {w: fw, h: by + body.h + PAD, items: [], edges: [], anchor: {x: hx, y: PAD, w: H.w, h: H.h}};
+  out.items.push({id: 'F:' + n.id, kind: 'frame', x: 0, y: 0, w: fw, h: out.h, nid: n.id, label});
+  out.items.push({id: n.id, kind: 'card', x: hx, y: PAD, w: H.w, h: H.h});
+  shift(out, body, PAD + (center ? (fw - 2 * PAD - body.w) / 2 : 0), by);
+  return out;
+}
+function relEdge(from, to, code, implicit) {
+  if (!implicit) consumed.add(from + '|' + to + '|' + code);
+  // 「X 依据 Y」画成 Y → X（前提流向结论）；其余按「本节点 → 目标」
+  return code === '据' ? {kind: 'rel', from: to, to: from, code} : {kind: 'rel', from, to, code};
+}
+const PATTERNS = {
+  tree(n, kids, H) {
+    const bl = kids.map(k => block(k, 'tree')); const GV = 20, X0 = H.w + 56; let y = 0; const ys = [];
+    bl.forEach(b => { ys.push(y); y += b.h + GV; });
+    const mid = i => ys[i] + bl[i].anchor.y + bl[i].anchor.h / 2;
+    let hy = (mid(0) + mid(bl.length - 1)) / 2 - H.h / 2, off = 0; if (hy < 0) { off = -hy; hy = 0; }
+    const out = {w: X0 + Math.max(...bl.map(b => b.w)), h: Math.max(y - GV + off, hy + H.h), items: [], edges: [], anchor: {x: 0, y: hy, w: H.w, h: H.h}};
+    out.items.push({id: n.id, kind: 'card', x: 0, y: hy, w: H.w, h: H.h});
+    bl.forEach((b, i) => { shift(out, b, X0, ys[i] + off); out.edges.push({kind: 'tree', from: n.id, to: kids[i].id}); });
+    return out;
+  },
+  chain(n, kids, H, pp, how) {
+    const bl = kids.map(k => block(k, 'chain')); const body = {w: Math.max(...bl.map(b => b.w)), h: 0, items: [], edges: []}; let y = 0;
+    bl.forEach((b, i) => { shift(body, b, 0, y); y += b.h + 28; if (i) body.edges.push({kind: 'seq', from: kids[i - 1].id, to: kids[i].id}); });
+    body.h = y - 28; return framed(n, H, body, false, 'chain', how);
+  },
+  timeline(n, kids, H, pp, how) {
+    const bl = kids.map(k => block(k, 'timeline')); const body = {w: 0, h: 0, items: [], edges: []}; let x = 0; const TOP = 40;
+    bl.forEach((b, i) => {
+      shift(body, b, x, TOP);
+      body.items.push({id: 'DT:' + kids[i].id, kind: 'date', x, y: 0, w: b.w, h: 20, text: kids[i].meta || ''});
+      x += b.w + 24;
+    });
+    body.w = x - 24; body.h = TOP + Math.max(...bl.map(b => b.h));
+    body.items.push({id: 'AX:' + n.id, kind: 'axis', x: 0, y: 24, w: body.w, h: 0});
+    return framed(n, H, body, false, 'timeline', how);
+  },
+  layered(n, kids, H, pp, how) {
+    const ids = new Set(kids.map(k => k.id)), bl = {}, flow = [];
+    kids.forEach(k => { bl[k.id] = block(k, 'layered'); });
+    kids.forEach(k => (k.rel || []).forEach(([c, t]) => { if (!ids.has(t) || !'据推因'.includes(c)) return; const e = relEdge(k.id, t, c); flow.push(e); }));
+    const L = {}; kids.forEach(k => L[k.id] = 0);
+    for (let it = 0; it < kids.length; it++) flow.forEach(e => { if (L[e.to] < L[e.from] + 1) L[e.to] = L[e.from] + 1; });
+    const rows = []; kids.forEach(k => (rows[L[k.id]] = rows[L[k.id]] || []).push(k));
+    const cx = {}, GX = 32, GY = 36; let y = 0; const body = {w: 0, h: 0, items: [], edges: flow.slice()}; const place = [];
+    rows.forEach((row, ri) => {
+      // 重心法：下层节点尽量对齐其前驱的中心（减少交叉、让跨层边走两侧通道）
+      const want = row.map((k, i) => { const pr = flow.filter(e => e.to === k.id && cx[e.from] != null).map(e => cx[e.from]); return {k, c: pr.length ? pr.reduce((a, b) => a + b) / pr.length : (ri ? 1e6 + i : null)}; });
+      let x = 0;
+      if (ri) want.sort((a, b) => a.c - b.c);
+      want.forEach(({k, c}) => {
+        const w = bl[k.id].w; let left = ri && c < 1e6 ? c - w / 2 : x; left = Math.max(left, x);
+        cx[k.id] = left + w / 2; place.push({k, x: left, y}); x = left + w + GX;
+      });
+      y += Math.max(...row.map(k => bl[k.id].h)) + GY;
+    });
+    const minX = Math.min(...place.map(p => p.x));
+    place.forEach(p => { shift(body, bl[p.k.id], p.x - minX, p.y); body.w = Math.max(body.w, p.x - minX + bl[p.k.id].w); });
+    body.h = y - GY; return framed(n, H, body, false, 'layered', how);
+  },
+  argument(n, kids, H, parentPat, how) {
+    const sup = [], obj = [], reb = [];
+    kids.forEach(k => (k.t === '反方观点' ? obj : k.t === '反驳' ? reb : sup).push(k));
+    const row = [...sup, ...obj], bl = {}; kids.forEach(k => bl[k.id] = block(k, 'argument'));
+    const body = {w: 0, h: 0, items: [], edges: []}; let x = 0; const pos = {};
+    row.forEach((k, i) => { if (i && k === obj[0]) x += 24; pos[k.id] = {x, y: 0}; x += bl[k.id].w + 32; });
+    const rowH = Math.max(...row.map(k => bl[k.id].h)); let maxX = x - 32;
+    reb.forEach(k => {
+      const tgt = (k.rel || []).find(r => r[0] === '驳' && obj.some(o => o.id === r[1]));
+      const tb = tgt ? pos[tgt[1]] : null; const tx = tb ? tb.x + bl[tgt[1]].anchor.x + bl[tgt[1]].anchor.w / 2 - bl[k.id].w / 2 : maxX + 32;
+      pos[k.id] = {x: Math.max(0, tx), y: rowH + 48}; maxX = Math.max(maxX, pos[k.id].x + bl[k.id].w);
+      if (tgt) body.edges.push(relEdge(k.id, tgt[1], '驳'));
+    });
+    kids.forEach(k => shift(body, bl[k.id], pos[k.id].x, pos[k.id].y));
+    row.forEach((k, i) => body.edges.push({...relEdge(k.id, n.id, obj.includes(k) ? '驳' : '支', true), tf: (i + 1) / (row.length + 1)}));
+    body.w = maxX; body.h = Math.max(...kids.map(k => pos[k.id].y + bl[k.id].h));
+    if (parentPat === 'argument') { // 同版式嵌套：并入外层框，不再套框
+      const out = {w: Math.max(H.w, body.w), h: 0, items: [], edges: []}; const hx = (out.w - H.w) / 2;
+      out.items.push({id: n.id, kind: 'card', x: hx, y: 0, w: H.w, h: H.h}); shift(out, body, (out.w - body.w) / 2, H.h + 40);
+      out.h = H.h + 40 + body.h; out.anchor = {x: hx, y: 0, w: H.w, h: H.h}; return out;
+    }
+    return framed(n, H, body, true, 'argument', how);
+  },
+  compare(n, kids, H, pp, how) {
+    const cols = kids.map(k => ({k, rows: isOpen(k) ? kidsOf(k) : []}));
+    const colW = cols.map(c => Math.max(measure(c.k).w, ...c.rows.map(r => measure(r).w)) + 24);
+    const nRows = Math.max(...cols.map(c => c.rows.length)); const rowH = 48, GAP = 56;
+    const body = {w: 0, h: 0, items: [], edges: []}; let x = 0;
+    const laneH = 12 + 48 + 16 + nRows * (rowH + 8) - 8 + 12;
+    cols.forEach((c, ci) => {
+      body.items.push({id: 'LN:' + c.k.id, kind: 'lane', x, y: 0, w: colW[ci], h: laneH});
+      body.items.push({id: c.k.id, kind: 'card', x: x + 12, y: 12, w: colW[ci] - 24, h: 48});
+      c.rows.forEach((r, ri) => body.items.push({id: r.id, kind: 'card', x: x + 12, y: 12 + 48 + 16 + ri * (rowH + 8), w: colW[ci] - 24, h: rowH}));
+      x += colW[ci] + GAP;
+    });
+    kids.forEach(k => (k.rel || []).forEach(([c, t]) => { if (c === '比' && kids.some(o => o.id === t)) body.edges.push(relEdge(k.id, t, '比')); }));
+    body.w = x - GAP; body.h = laneH;
+    return framed(n, H, body, false, 'compare', how);
+  },
+  grid(n, kids, H, pp, how) {
+    const bl = kids.map(k => block(k, 'grid')); const cols = Math.ceil(Math.sqrt(kids.length));
+    const cw = Math.max(...bl.map(b => b.w)), ch = Math.max(...bl.map(b => b.h));
+    const body = {w: cols * (cw + 16) - 16, h: Math.ceil(kids.length / cols) * (ch + 16) - 16, items: [], edges: []};
+    bl.forEach((b, i) => shift(body, b, (i % cols) * (cw + 16), Math.floor(i / cols) * (ch + 16)));
+    return framed(n, H, body, false, 'grid', how);
+  },
+};
+
+// ───────────────────────── 布局总入口 + 关系边（未被版式消化的＝跨组关系） ─────────────────────────
+function rep(id) { // 端点提升：隐藏/折叠的端点挂到最近的可见祖先
+  const chain = []; for (let n = BY[id]; n; n = BY[n.p]) chain.unshift(n);
+  for (const n of chain) { if (!revealed.has(n.id)) return BY[n.p] ? BY[n.p].id : null; if (collapsed.has(n.id)) return n.id; }
+  return id;
+}
+function computeLayout() {
+  consumed = new Set(); groupPat = {};
+  const root = block(BY.R, null); const items = {};
+  root.items.forEach(it => items[it.id] = it);
+  const es = root.edges.slice(), cross = [];
+  D.forEach(n => (n.rel || []).forEach(([c, t]) => {
+    if (!revealed.has(n.id) && !rep(n.id)) return;
+    if (consumed.has(n.id + '|' + t + '|' + c)) return;
+    const a = rep(n.id), b = rep(t); if (!a || !b || a === b || !items[a] || !items[b]) return;
+    const e = relEdge(a, b, c, true); e.cross = true; e.orig = [n.id, t]; cross.push(e);
+  }));
+  return {items, edges: es.concat(cross)};
+}
+
+// ───────────────────────── 动画：块外刚性平移 + 锚点不动 + 新节点淡入 ─────────────────────────
+let anim = null;
+function relayout(anchorId) {
+  const L = computeLayout(); const prevView = {...view};
+  let anchorBefore = null;
+  if (anchorId && disp[anchorId]) anchorBefore = {x: disp[anchorId].x * view.k + view.tx, y: disp[anchorId].y * view.k + view.ty};
+  Object.keys(disp).forEach(id => { if (!L.items[id]) leaving[id] = {...disp[id]}; });
+  targ = L.items; edges = L.edges;
+  Object.keys(targ).forEach(id => {
+    if (!disp[id]) { // 新元素：从父卡片位置长出
+      const n = BY[id.replace(/^[A-Z]+:/, '')]; const par = n && n.p && disp[n.p];
+      disp[id] = par && id === n.id ? {...targ[id], x: par.x + par.w - targ[id].w, y: par.y, o: 0} : {...targ[id], o: 0};
+    }
+  });
+  viewT = {...view};
+  if (anchorBefore && targ[anchorId]) { viewT.tx = anchorBefore.x - targ[anchorId].x * view.k; viewT.ty = anchorBefore.y - targ[anchorId].y * view.k; }
+  startAnim(prevView);
+}
+function startAnim(v0) {
+  const from = {}; Object.keys(disp).forEach(id => from[id] = {...disp[id]});
+  const lv0 = {}; Object.keys(leaving).forEach(id => lv0[id] = {...leaving[id]});
+  const t0 = performance.now(), DUR = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 260;
+  if (anim) cancelAnimationFrame(anim);
+  const step = now => {
+    const p = DUR ? Math.min(1, (now - t0) / DUR) : 1, e = 1 - Math.pow(1 - p, 3);
+    Object.keys(targ).forEach(id => {
+      const a = from[id] || targ[id], b = targ[id];
+      disp[id] = {...b, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e, w: a.w + (b.w - a.w) * e, h: a.h + (b.h - a.h) * e, o: (a.o ?? 1) + (1 - (a.o ?? 1)) * e};
+    });
+    Object.keys(lv0).forEach(id => { leaving[id] = {...lv0[id], o: (lv0[id].o ?? 1) * (1 - e)}; });
+    view = {tx: v0.tx + (viewT.tx - v0.tx) * e, ty: v0.ty + (viewT.ty - v0.ty) * e, k: v0.k + (viewT.k - v0.k) * e};
+    Object.keys(disp).forEach(id => { if (!targ[id]) delete disp[id]; });
+    render();
+    if (p < 1) anim = requestAnimationFrame(step); else { anim = null; leaving = {}; render(); }
+  };
+  anim = requestAnimationFrame(step);
+}
+
+// ───────────────────────── 边几何：结构＝直角线，关系＝曲线；穿过卡片时绕到侧边通道 ─────────────────────────
+function side(r, s) { return s === 'T' ? [r.x + r.w / 2, r.y] : s === 'B' ? [r.x + r.w / 2, r.y + r.h] : s === 'L' ? [r.x, r.y + r.h / 2] : [r.x + r.w, r.y + r.h / 2]; }
+function cub(p0, c0, c1, p1, t) { const u = 1 - t; return [u*u*u*p0[0] + 3*u*u*t*c0[0] + 3*u*t*t*c1[0] + t*t*t*p1[0], u*u*u*p0[1] + 3*u*u*t*c0[1] + 3*u*t*t*c1[1] + t*t*t*p1[1]]; }
+function ancestorsOf(id) { const s = new Set(); for (let n = BY[id]; n; n = BY[n.p]) s.add(n.id); return s; }
+function hits(pts, skip, cross) {
+  // 障碍物＝卡片；跨组边另把「不包含任一端点的组框」也当障碍（跨组线不得横穿别的组）
+  const keep = cross ? new Set([...ancestorsOf(skip[0]), ...ancestorsOf(skip[1])]) : null;
+  const obs = Object.values(disp).filter(d => (d.kind === 'card' && !skip.includes(d.id)) || (cross && d.kind === 'frame' && !keep.has(d.nid)));
+  return obs.filter(c => pts.some(([x, y]) => x > c.x - 4 && x < c.x + c.w + 4 && y > c.y - 4 && y < c.y + c.h + 4));
+}
+function samples(s, c0, c1, t) { const n = Math.min(80, Math.max(6, Math.ceil(Math.hypot(t[0] - s[0], t[1] - s[1]) / 14))); const out = []; for (let i = 1; i < n; i++) out.push(cub(s, c0, c1, t, i / n)); return out; }
+function relPath(a, b, e) {
+  let s, t;
+  const ac = [a.x + a.w / 2, a.y + a.h / 2], bc = [b.x + b.w / 2, b.y + b.h / 2];
+  const dx = bc[0] - ac[0], dy = bc[1] - ac[1];
+  if (Math.abs(dy) > Math.abs(dx) * .6 && (b.y >= a.y + a.h || b.y + b.h <= a.y)) {
+    const down = dy > 0; s = side(a, down ? 'B' : 'T'); t = side(b, down ? 'T' : 'B');
+    if (e.tf != null) t[0] = b.x + b.w * e.tf;
+    const k = Math.max(24, Math.abs(t[1] - s[1]) / 2) * (down ? 1 : -1);
+    let c0 = [s[0], s[1] + k], c1 = [t[0], t[1] - k];
+    const h = hits(samples(s, c0, c1, t), [a.id, b.id], e.cross);
+    if (h.length) { // 侧边通道：绕开挡路的卡片 / 组框
+      const lx = Math.min(...h.map(c => c.x)) - 10, rx = Math.max(...h.map(c => c.x + c.w)) + 10;
+      const gx = Math.abs(lx - s[0]) <= Math.abs(rx - s[0]) ? lx : rx, q = down ? 20 : -20;
+      return `M${s}C${s[0]},${s[1] + q} ${gx},${s[1] + q} ${gx},${s[1] + 2 * q}L${gx},${t[1] - 2 * q}C${gx},${t[1] - q} ${t[0]},${t[1] - q} ${t}`;
+    }
+    return `M${s}C${c0} ${c1} ${t}`;
+  }
+  const right = dx > 0; s = side(a, right ? 'R' : 'L'); t = side(b, right ? 'L' : 'R');
+  const k = Math.max(32, Math.min(160, Math.abs(t[0] - s[0]) / 2)) * (right ? 1 : -1);
+  return `M${s}C${s[0] + k},${s[1]} ${t[0] - k},${t[1]} ${t}`;
+}
+function edgeSvg(e) {
+  const a = disp[e.from], b = disp[e.to]; if (!a || !b) return '';
+  const op = Math.min(a.o ?? 1, b.o ?? 1);
+  if (e.kind === 'tree') {
+    const f = disp['F:' + e.to]; const s = side(a, 'R'); const tx = f ? f.x : b.x, ty = b.y + b.h / 2, mx = s[0] + 28;
+    return `<path d="M${s}H${mx}V${ty}H${tx}" fill="none" stroke="var(--b2)" stroke-width="1" opacity="${op}"/>`;
+  }
+  if (e.kind === 'seq') {
+    const s = side(a, 'B'), t = side(b, 'T');
+    return `<path d="M${s}L${t[0]},${t[1] - 2}" stroke="var(--b2)" stroke-width="1" marker-end="url(#m-arrow-s)" opacity="${op}"/>`;
+  }
+  const st = REL[e.code], hot = isHot(e);
+  if (e.cross && !relAll && !hot) return '';
+  // 端点已展开成组框时，关系挂在整个框上（关系指向「这一整段结构」）；组内父子之间仍连卡片
+  const ea = endRect(e.from, e.to) || a, eb = endRect(e.to, e.from) || b;
+  const col = hot ? 'a' : 'n', d = relPath(ea, eb, e);
+  const dim = focusMode && selected && !hot ? .15 : e.cross && !hot ? .55 : 1;
+  const mkS = e.code === '比' ? `marker-start="url(#m-dot-${col})"` : '';
+  let out = `<path d="${d}" fill="none" stroke="${hot ? 'var(--accent)' : 'var(--t2)'}" stroke-width="${st.w + (hot ? .5 : 0)}" stroke-dasharray="${st.dash}" ${mkS} marker-end="url(#m-${st.mk}-${col})" opacity="${op * dim}"/>`;
+  if (hot || e.code === '比') {
+    const m = midOf(d), label = e.code === '比' ? 'vs' : st.name;
+    out += `<g opacity="${op * dim}"><rect x="${m[0] - 15}" y="${m[1] - 9}" width="30" height="18" fill="var(--paper)"/><text x="${m[0]}" y="${m[1] + 4}" font-size="11" text-anchor="middle" fill="${hot ? 'var(--accent)' : 'var(--t2)'}">${label}</text></g>`;
+  }
+  return out;
+}
+function endRect(id, other) { const f = disp['F:' + id]; if (!f) return null; if (ancestorsOf(other).has(id)) return null; return {...f, id}; }
+let measurePath = null;
+function midOf(d) { if (!measurePath) { measurePath = document.createElementNS('http://www.w3.org/2000/svg', 'path'); hiddenSvg.appendChild(measurePath); } measurePath.setAttribute('d', d); const L = measurePath.getTotalLength(); const p = measurePath.getPointAtLength(L / 2); return [p.x, p.y]; }
+const hiddenSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); hiddenSvg.style.cssText = 'position:absolute;width:0;height:0;visibility:hidden'; document.body.appendChild(hiddenSvg);
+function isHot(e) { const f = hovered || selected; if (!f) return false; const o = e.orig || [e.from, e.to]; return [e.from, e.to, ...o].includes(f); }
+
+// ───────────────────────── 渲染 ─────────────────────────
+const svg = document.getElementById('cv');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+function stateOf(n) {
+  if (n.st === 'streaming') return 'streaming';
+  if (kidsOf(n).length) return collapsed.has(n.id) ? 'collapsed' : 'open';
+  return n.st === 'more' ? 'more' : 'floor';
+}
+function related(id) { const s = new Set([id]); edges.forEach(e => { if (e.kind !== 'rel') return; const o = e.orig || [e.from, e.to]; if ([e.from, e.to, ...o].includes(id)) { s.add(e.from); s.add(e.to); } }); for (let n = BY[id]; n; n = BY[n.p]) s.add(n.id); return s; }
+function crossCount(id) { return edges.filter(e => e.cross && (e.from === id || e.to === id)).length; }
+function render() {
+  const now = performance.now(), rel = focusMode && selected ? related(selected) : null;
+  const all = {...leaving, ...disp}; const L = Object.values(all);
+  const frames = [], deco = [], cards = [];
+  L.forEach(d => {
+    const o = d.o ?? 1;
+    if (d.kind === 'frame') {
+      const sel = selected === d.nid;
+      frames.push(`<g opacity="${o * (rel && !rel.has(d.nid) ? .35 : 1)}"><rect x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" fill="var(--paper)" stroke="${sel ? 'var(--accent)' : 'var(--b1)'}" stroke-width="1"/>`
+        + `<text x="${d.x + d.w - 12}" y="${d.y + 20}" font-size="11" text-anchor="end" fill="var(--t3)" data-frame="${d.nid}" style="cursor:pointer">${esc(d.label)}</text></g>`);
+    } else if (d.kind === 'lane') {
+      deco.push(`<rect x="${d.x}" y="${d.y}" width="${d.w}" height="${d.h}" fill="rgba(10,10,10,.025)" stroke="var(--b1)" opacity="${o}"/>`);
+    } else if (d.kind === 'axis') {
+      deco.push(`<line x1="${d.x}" y1="${d.y}" x2="${d.x + d.w}" y2="${d.y}" stroke="var(--b2)" opacity="${o}"/>`);
+    } else if (d.kind === 'date') {
+      deco.push(`<g opacity="${o}"><circle cx="${d.x + d.w / 2}" cy="${d.y + 24}" r="3" fill="var(--ink)"/><text x="${d.x + d.w / 2}" y="${d.y + 12}" font-size="11" text-anchor="middle" fill="var(--t2)">${esc(d.text)}</text></g>`);
+    } else if (d.kind === 'card') {
+      const n = BY[d.id], isRoot = n.p === null, st = stateOf(n), sel = selected === d.id, hov = hovered === d.id;
+      const isFresh = fresh[d.id] && now - fresh[d.id] < 700, dim = rel && !rel.has(d.id) ? .35 : 1;
+      const stroke = sel ? 'var(--accent)' : isFresh || st === 'streaming' ? 'var(--accent)' : hov ? 'var(--ink)' : 'var(--b2)';
+      const dash = isFresh || st === 'streaming' ? 'stroke-dasharray="4 3"' : '';
+      let g = `<g data-id="${d.id}" transform="translate(${d.x},${d.y})" opacity="${o * dim}" style="cursor:pointer">`;
+      g += `<rect width="${d.w}" height="${d.h}" fill="${isRoot ? 'var(--accent)' : 'var(--paper)'}" stroke="${isRoot ? 'var(--accent)' : stroke}" stroke-width="${sel ? 2 : 1}" ${dash}/>`;
+      if (isRoot) g += `<text x="16" y="34" font-size="15" font-weight="600" fill="#fff">${esc(n.s)}</text>`;
+      else g += `<text x="12" y="18" font-size="11" fill="var(--t3)">${esc(n.t)}</text><text x="12" y="36" font-size="13" fill="var(--ink)">${esc(n.s)}</text>`;
+      if (st === 'more') g += `<g data-act="deepen" data-id="${d.id}" transform="translate(${d.w - 10},${d.h / 2 - 10})"><rect width="20" height="20" fill="var(--paper)" stroke="var(--accent)"/><path d="M6 10H14M10 6V14" stroke="var(--accent)" stroke-width="1.5"/><title>深挖此节点</title></g>`;
+      if (st === 'floor' && !isRoot) g += `<circle cx="${d.w - 10}" cy="${d.h / 2}" r="2.5" fill="var(--b2)"><title>已触底：没有更深的结构</title></circle>`;
+      if (st === 'collapsed') g += `<g transform="translate(${d.w - 14},${d.h / 2 - 10})"><rect width="28" height="20" fill="var(--ink)"/><text x="14" y="14" font-size="11" text-anchor="middle" fill="var(--paper)">+${countDesc(n)}</text></g>`;
+      if (st === 'streaming') g += `<circle cx="${d.w - 10}" cy="${d.h / 2}" r="3" fill="var(--accent)"><animate attributeName="opacity" values="1;.2;1" dur="1s" repeatCount="indefinite"/></circle>`;
+      const cc = !relAll && !(hovered === d.id || selected === d.id) ? crossCount(d.id) : 0;
+      if (cc) g += `<g transform="translate(${d.w - 30},-9)"><rect width="26" height="18" fill="var(--paper)" stroke="var(--t2)"/><text x="13" y="13" font-size="11" text-anchor="middle" fill="var(--t2)">↗${cc}</text><title>${cc} 条跨组关系，悬停或选中查看</title></g>`;
+      cards.push(g + '</g>');
+    }
+  });
+  const es = edges.map(edgeSvg).join('');
+  svg.innerHTML = defs() + `<g transform="translate(${view.tx},${view.ty}) scale(${view.k})">${frames.join('')}${deco.join('')}${es}${cards.join('')}</g>`;
+  if (Object.keys(fresh).some(id => now - fresh[id] < 720) && !anim) requestAnimationFrame(render);
+}
+function countDesc(n) { let c = 0; (CH[n.id] || []).forEach(k => { if (revealed.has(k.id)) c += 1 + countDesc(k); }); return c; }
+function defs() {
+  const mk = (id, col, body, refX) => `<marker id="${id}" viewBox="0 0 10 10" refX="${refX}" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse" markerUnits="userSpaceOnUse">${body.replace(/COL/g, col)}</marker>`;
+  let s = '<defs>';
+  [['n', '#525252'], ['a', '#166a59']].forEach(([k, c]) => {
+    s += mk(`m-arrow-${k}`, c, '<path d="M0,1 L9,5 L0,9 Z" fill="COL"/>', 9);
+    s += mk(`m-open-${k}`, c, '<path d="M1,1 L9,5 L1,9" fill="none" stroke="COL" stroke-width="1.4"/>', 9);
+    s += mk(`m-bar-${k}`, c, '<path d="M9,0 V10 M4,0 V10" stroke="COL" stroke-width="1.6"/>', 9);
+    s += mk(`m-dot-${k}`, c, '<circle cx="5" cy="5" r="3" fill="COL"/>', 5);
+  });
+  s += mk('m-arrow-s', '#a3a3a3', '<path d="M0,1 L9,5 L0,9 Z" fill="COL"/>', 9);
+  return s + '</defs>';
+}
+
+// ───────────────────────── 侧栏 ─────────────────────────
+const side_ = document.getElementById('side');
+function relList(id) {
+  const out = [];
+  D.forEach(n => (n.rel || []).forEach(([c, t]) => {
+    if (n.id === id && revealed.has(t)) out.push({c, dir: '→', other: t});
+    if (t === id && revealed.has(n.id)) out.push({c, dir: '←', other: n.id});
+  }));
+  const n = BY[id]; const par = n && BY[n.p];
+  if (par && groupPat[par.id] && groupPat[par.id].pat === 'argument' && n.t !== '反驳') out.unshift({c: n.t === '反方观点' ? '驳' : '支', dir: '→', other: par.id, implicit: true});
+  return out;
+}
+function renderSide() {
+  const legend = Object.entries(REL).map(([c, r]) => `<svg width="44" height="14" aria-hidden="true"><line x1="2" y1="7" x2="34" y2="7" stroke="#525252" stroke-width="${r.w}" stroke-dasharray="${r.dash}"/>${r.mk === 'bar' ? '<path d="M36,1V13M40,1V13" stroke="#525252" stroke-width="1.6"/>' : r.mk === 'dot' ? '<circle cx="38" cy="7" r="3" fill="#525252"/><circle cx="4" cy="7" r="3" fill="#525252"/>' : r.mk === 'open' ? '<path d="M34,2L42,7L34,12" fill="none" stroke="#525252" stroke-width="1.4"/>' : '<path d="M34,2L42,7L34,12Z" fill="#525252"/>'}</svg><span>${r.name}<span class="hint">（${c}）</span></span>`).join('');
+  let top = '';
+  if (selected) {
+    const n = BY[selected], st = stateOf(n), gp = groupPat[n.id];
+    const stTxt = {more: '还有结构，可深挖', floor: '已触底（不再提供深挖）', open: '已展开', collapsed: '已折叠', streaming: '正在生成…'}[st];
+    const rl = relList(n.id);
+    top = `<section><h2>选中节点</h2><span class="tag">${esc(n.t)}</span><div class="title">${esc(n.s)}</div>
+      <dl class="kv"><dt>状态</dt><dd>${stTxt}</dd>${gp ? `<dt>版式</dt><dd>${PAT_NAME[gp.pat]}（${gp.how}）</dd>` : ''}<dt>原文</dt><dd class="hint">段落 @${(D.indexOf(n) * 3 + 1)}–${(D.indexOf(n) * 3 + 3)}（点击跳正文）</dd></dl>
+      ${gp ? `<div class="row"><label class="hint" for="patSel">排列方式</label><select id="patSel"><option value="">自动</option>${Object.entries(PAT_NAME).map(([k, v]) => `<option value="${k}" ${override[n.id] === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>` : ''}
+      <div class="row">${st === 'more' ? '<button class="primary" id="btnDeep">深挖此节点</button>' : ''}${st === 'open' || st === 'collapsed' ? `<button id="btnFold">${st === 'open' ? '折叠' : '展开'}</button>` : ''}</div></section>
+      <section><h2>关系（${rl.length}）<span class="hint" style="text-transform:none;letter-spacing:0;font-weight:400">　→ 本节点指向　← 指向本节点</span></h2>${rl.length ? `<ul class="rels">${rl.map(r => `<li data-go="${r.other}"><b>${REL[r.c].name}</b>${r.dir} ${esc(BY[r.other].s)}${r.implicit ? ' <span class="hint">（由版式隐含）</span>' : ''}</li>`).join('')}</ul>` : '<p class="hint">没有关系边。</p>'}</section>`;
+  } else {
+    top = `<section><h2>怎么看这张图</h2><p class="hint">每一组子结构按它自己的组织方式排列：叙事→时间线、证明→分层依赖图、论点→论证图、对比→对照栏，其余为大纲树。框右上角写着版式和来源（模型提示 / 自动推断 / 手动）。</p>
+      <p class="hint"><b>直角线是结构，曲线是关系。</b>组内关系常显；跨组关系默认收成卡片右上角的 ↗N，悬停或选中时画出。</p>
+      <p class="hint">带 <b style="color:var(--accent)">＋</b> 的末端可以深挖（试试「平方为偶 ⇒ 本身为偶」）；灰点表示已触底。双击已展开节点可折叠。</p></section>`;
+  }
+  side_.innerHTML = top + `<section><h2>关系图例</h2><div class="legend">${legend}</div></section>`;
+  const ps = document.getElementById('patSel'); if (ps) ps.onchange = () => { if (ps.value) override[selected] = ps.value; else delete override[selected]; relayout(selected); renderSide(); };
+  const bd = document.getElementById('btnDeep'); if (bd) bd.onclick = () => deepen(selected);
+  const bf = document.getElementById('btnFold'); if (bf) bf.onclick = () => toggleFold(selected);
+  side_.querySelectorAll('[data-go]').forEach(li => li.onclick = () => goTo(li.dataset.go));
+}
+function status(t) { document.getElementById('status').textContent = t || `节点 ${revealed.size} · 关系 ${edges.filter(e => e.kind === 'rel').length}（跨组 ${edges.filter(e => e.cross).length}）`; }
+
+// ───────────────────────── 动作 ─────────────────────────
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function deepen(id) {
+  const n = BY[id]; if (busy || stateOf(n) !== 'more') return; busy = true;
+  n.st = 'streaming'; render(); renderSide(); status('深挖中：' + n.s);
+  await sleep(500); // 模拟首字等待
+  const kids = (CH[id] || []).filter(k => k.deep && !revealed.has(k.id));
+  if (!kids.length) { n.st = 'floor'; status('回判：该节点之下没有可区分的结构，已封顶'); }
+  for (const k of kids) { revealed.add(k.id); fresh[k.id] = performance.now(); relayout(id); await sleep(380); }
+  if (kids.length) { n.st = 'open'; status(); }
+  busy = false; relayout(id); renderSide();
+}
+function toggleFold(id) { if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id); relayout(id); renderSide(); status(); }
+function goTo(id) {
+  const r = rep(id); selected = r; const d = targ[r]; if (!d) return;
+  const st = svg.getBoundingClientRect(); viewT = {...view, tx: st.width / 2 - (d.x + d.w / 2) * view.k, ty: st.height / 2 - (d.y + d.h / 2) * view.k};
+  startAnim({...view}); renderSide();
+}
+function fit(animate) {
+  const its = Object.values(targ); if (!its.length) return;
+  const x0 = Math.min(...its.map(i => i.x)), y0 = Math.min(...its.map(i => i.y)), x1 = Math.max(...its.map(i => i.x + i.w)), y1 = Math.max(...its.map(i => i.y + i.h));
+  const st = svg.getBoundingClientRect(), k = Math.min(1, (st.width - 48) / (x1 - x0), (st.height - 48) / (y1 - y0));
+  viewT = {k, tx: (st.width - (x1 - x0) * k) / 2 - x0 * k, ty: (st.height - (y1 - y0) * k) / 2 - y0 * k};
+  if (animate) startAnim({...view}); else { view = {...viewT}; render(); }
+}
+async function streamDemo() {
+  if (busy) return; busy = true; selected = null; hovered = null; collapsed.clear(); Object.keys(override).forEach(k => delete override[k]);
+  D.forEach(n => { n.st = n.st0; });
+  revealed = new Set(['R']); disp = {}; leaving = {};
+  const st = svg.getBoundingClientRect(); view = {tx: 32, ty: st.height / 2 - 28, k: .8};
+  relayout(); renderSide();
+  const order = D.filter(n => !n.deep && n.id !== 'R');
+  for (let i = 0; i < order.length; i++) {
+    const n = order[i]; revealed.add(n.id); fresh[n.id] = performance.now();
+    status(`生成中 · 第 ${i + 1}/${order.length} 行：${n.id.length > 1 ? n.id : n.id}  [${n.t}] ${n.s}`);
+    relayout('R'); await sleep(210);
+  }
+  busy = false; status(); fit(true); renderSide();
+}
+
+// ───────────────────────── 交互：平移 / 缩放 / 选中 / 悬停 ─────────────────────────
+let drag = null;
+svg.addEventListener('pointerdown', ev => {
+  const act = ev.target.closest('[data-act]'); if (act) { deepen(act.dataset.id); return; }
+  const fr = ev.target.closest('[data-frame]'); if (fr) { selected = fr.dataset.frame; render(); renderSide(); return; }
+  const c = ev.target.closest('[data-id]');
+  if (c) { selected = selected === c.dataset.id ? null : c.dataset.id; render(); renderSide(); return; }
+  drag = {x: ev.clientX, y: ev.clientY, tx: view.tx, ty: view.ty}; document.getElementById('stage').classList.add('drag'); svg.setPointerCapture(ev.pointerId);
+});
+svg.addEventListener('pointermove', ev => {
+  if (drag) { view.tx = drag.tx + ev.clientX - drag.x; view.ty = drag.ty + ev.clientY - drag.y; render(); return; }
+  const c = ev.target.closest('[data-id]'); const h = c ? c.dataset.id : null;
+  if (h !== hovered) { hovered = h; if (!anim) render(); }
+});
+svg.addEventListener('pointerup', () => { drag = null; document.getElementById('stage').classList.remove('drag'); });
+svg.addEventListener('dblclick', ev => { const c = ev.target.closest('[data-id]'); if (c && (kidsOf(BY[c.dataset.id]).length)) toggleFold(c.dataset.id); });
+svg.addEventListener('wheel', ev => {
+  ev.preventDefault(); const r = svg.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+  const k2 = Math.max(.25, Math.min(2, view.k * Math.exp(-ev.deltaY * .0015)));
+  view.tx = mx - (mx - view.tx) * k2 / view.k; view.ty = my - (my - view.ty) * k2 / view.k; view.k = k2; render();
+}, {passive: false});
+document.getElementById('btnFit').onclick = () => fit(true);
+document.getElementById('btnStream').onclick = streamDemo;
+const bRel = document.getElementById('btnRel'); bRel.onclick = () => { relAll = !relAll; bRel.classList.toggle('on', relAll); render(); };
+const bFoc = document.getElementById('btnFocus'); bFoc.onclick = () => { focusMode = !focusMode; bFoc.classList.toggle('on', focusMode); render(); };
+addEventListener('keydown', ev => { if (ev.key === 'Escape') { selected = null; render(); renderSide(); } });
+addEventListener('resize', () => render());
+
+// 初始：直接给出完整首轮结果
+relayout(); if (anim) { cancelAnimationFrame(anim); anim = null; } leaving = {}; disp = {}; Object.keys(targ).forEach(id => disp[id] = {...targ[id], o: 1}); fit(false); renderSide(); status();
+// 自测钩子：#deepen=B4 / #pattern=C:tree / #stream
+(function () {
+  const h = decodeURIComponent(location.hash.slice(1)); if (!h) return;
+  const [k, v] = h.split('=');
+  if (k === 'deepen') setTimeout(() => { selected = v; deepen(v); }, 300);
+  if (k === 'pattern') { const [id, pat] = v.split(':'); override[id] = pat; selected = id; relayout(id); renderSide(); }
+  if (k === 'stream') setTimeout(streamDemo, 300);
+  if (k === 'focus') { const d = targ['F:' + v] || targ[v]; view = {k: 1, tx: 16 - d.x, ty: 16 - d.y}; selected = v; render(); renderSide(); }
+  if (k === 'focusdeepen') { const [id, tg] = v.split(':'); const d = targ['F:' + id]; view = {k: 1, tx: 16 - d.x, ty: 16 - d.y}; render(); setTimeout(() => { selected = tg; deepen(tg); }, 300); }
+  if (k === 'select') { selected = v; render(); renderSide(); }
+})();
+</script>
+</body>
+</html>
