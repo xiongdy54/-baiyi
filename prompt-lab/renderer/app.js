@@ -122,6 +122,7 @@ async function refreshConfigState() {
 }
 
 $("configToggle").onclick = () => $("configPanel").classList.toggle("hidden");
+$("benchOpen").onclick = () => window.labAPI.openBench().catch(fatal);
 $("cfgSave").onclick = async () => {
   try {
     const partial = { baseUrl: $("cfgBaseUrl").value.trim(), model: $("cfgModel").value.trim() };

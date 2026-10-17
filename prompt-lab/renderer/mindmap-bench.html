@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>导图 v2 基准</title>
+    <link rel="stylesheet" href="./mindmap-bench.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="brand">导图 v2 基准 <span class="mono">MINDMAP V2 BENCH</span></span>
+      <span class="model-box">当前模型：<b id="modelLine" class="mono">读取中…</b></span>
+      <button id="modelRefresh" class="btn btn-outline btn-sm">刷新模型</button>
+      <span class="spacer"></span>
+      <span class="hint">换模型：回到主测试台窗口，点右上角「AI 配置」改 Base URL / 模型 / Key 并保存，再回本页点「刷新模型」。</span>
+    </header>
+
+    <main class="grid">
+      <section class="col col-left">
+        <div class="pane-head">材料</div>
+        <div class="row-line">
+          <label>标题 <input id="titleInput" type="text" placeholder="材料名（可空）" /></label>
+        </div>
+        <div class="row-line">
+          <button id="pickBtn" class="btn btn-outline btn-sm">载入文件（txt / md / docx / epub）</button>
+          <button id="sampleBtn" class="btn btn-outline btn-sm">载入示例</button>
+          <button id="clearBtn" class="btn btn-outline btn-sm">清空</button>
+        </div>
+        <textarea id="materialText" class="material-text" placeholder="粘贴材料文本，或载入文件 / 示例"></textarea>
+        <div id="materialInfo" class="mono info-line"></div>
+        <div class="row-line">
+          <label>并发数 <input id="concInput" type="number" min="1" max="8" value="4" style="width:3.5em" /></label>
+          <button id="runBtn" class="btn btn-primary">运行</button>
+          <button id="cancelBtn" class="btn btn-outline" disabled>取消</button>
+          <span id="statusLine" class="mono info-line"></span>
+        </div>
+        <div id="errorLine" class="error-line hidden"></div>
+
+        <div class="pane-head">汇总（对照设计稿 §11）</div>
+        <div id="summary" class="summary"></div>
+        <div id="kpi" class="kpi"></div>
+      </section>
+
+      <section class="col col-mid">
+        <div class="pane-head">结构树（点 + 深挖；点节点看原文）</div>
+        <div id="tree" class="tree"></div>
+      </section>
+
+      <section class="col col-right">
+        <div class="pane-head">详情</div>
+        <div id="detailHead" class="detail-head">未选中节点</div>
+        <div id="detailBlocks" class="detail-blocks"></div>
+        <div class="row-line"><button id="explainBtn" class="btn btn-outline btn-sm" disabled>explain：这一部分作者在做什么</button></div>
+        <div id="explainOut" class="explain-out"></div>
+      </section>
+    </main>
+
+    <section class="lower">
+      <div class="pane-head">本次 run 的逐调用记录</div>
+      <div class="table-wrap"><table id="callsTable" class="tbl"></table></div>
+
+      <div class="pane-head">
+        <span>历史</span>
+        <span class="spacer"></span>
+        <button id="compareBtn" class="btn btn-outline btn-sm">并排对比所选（需勾 2 条）</button>
+        <button id="exportBtn" class="btn btn-outline btn-sm">导出 CSV（勾选的；不勾则全部）</button>
+        <button id="historyRefresh" class="btn btn-outline btn-sm">刷新</button>
+      </div>
+      <div id="exportInfo" class="mono info-line"></div>
+      <div class="table-wrap"><table id="historyTable" class="tbl"></table></div>
+      <div id="compareBox" class="table-wrap"></div>
+    </section>
+
+    <script src="./mindmap-bench.js"></script>
+  </body>
+</html>

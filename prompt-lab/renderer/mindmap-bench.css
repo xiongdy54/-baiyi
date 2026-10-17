@@ -1,0 +1,66 @@
+/* 导图 v2 基准页样式（沿用测试台的极简基线） */
+:root {
+  --ink: #111; --bg: #fff; --grey-1: #f5f5f4; --grey-2: #e7e5e4; --grey-4: #a8a29e;
+  --text-1: #1c1917; --text-helper: #78716c; --accent: #002fa7; --ok: #15803d; --bad: #b91c1c;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--text-1); background: var(--bg); font-size: 14px; }
+.mono { font-family: Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
+.hidden { display: none !important; }
+.spacer { flex: 1; }
+.topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--grey-2); position: sticky; top: 0; background: var(--bg); z-index: 2; }
+.brand { font-weight: 700; }
+.brand .mono { color: var(--text-helper); font-size: 12px; margin-left: 6px; }
+.hint { color: var(--text-helper); font-size: 12px; }
+.btn { font: inherit; border: 1px solid var(--ink); background: var(--bg); padding: 5px 12px; cursor: pointer; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn-primary { background: var(--ink); color: #fff; }
+.btn-sm { padding: 3px 9px; font-size: 12px; }
+.grid { display: grid; grid-template-columns: 360px minmax(380px, 1fr) 360px; gap: 0; height: 62vh; min-height: 420px; }
+.col { border-right: 1px solid var(--grey-2); padding: 0 12px 12px; overflow: auto; }
+.col:last-child { border-right: none; }
+.pane-head { display: flex; align-items: center; gap: 8px; font-weight: 600; padding: 10px 0 6px; font-size: 13px; }
+.row-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.row-line input[type="text"] { width: 260px; }
+input, textarea { font: inherit; border: 1px solid var(--grey-4); padding: 3px 6px; }
+.material-text { width: 100%; height: 190px; resize: vertical; }
+.info-line { font-size: 12px; color: var(--text-helper); }
+.error-line { border: 1px solid var(--bad); background: #fef2f2; color: var(--bad); padding: 6px 8px; margin: 6px 0; font-size: 12px; white-space: pre-wrap; }
+.summary { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; font-size: 13px; }
+.summary .k { color: var(--text-helper); }
+.kpi { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+.kpi-chip { font-size: 12px; padding: 3px 8px; border: 1px solid; }
+.kpi-chip.pass { color: var(--ok); border-color: var(--ok); background: #f0fdf4; }
+.kpi-chip.fail { color: var(--bad); border-color: var(--bad); background: #fef2f2; }
+.kpi-chip.na { color: var(--text-helper); border-color: var(--grey-2); background: var(--grey-1); }
+
+.tree { font-size: 13px; line-height: 1.5; }
+.node { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; padding: 2px 4px; border-bottom: 1px solid var(--grey-1); cursor: pointer; }
+.node:hover { background: var(--grey-1); }
+.node.selected { background: #e8edfb; }
+.node .p { color: var(--text-helper); font-size: 12px; min-width: 3em; }
+.node .ty { color: var(--accent); font-size: 12px; }
+.node .ti { font-weight: 600; }
+.node .tm, .node .rg, .node .pt { color: var(--text-helper); font-size: 12px; }
+.node .rel { font-size: 12px; color: #7c2d12; background: #fff7ed; padding: 0 4px; }
+.node .rel.late { border: 1px dashed #c2410c; }
+.node .mk { font-size: 12px; color: var(--text-helper); }
+.node .plus { border: 1px solid var(--accent); color: var(--accent); background: #fff; padding: 0 7px; cursor: pointer; font-weight: 700; }
+.node .plus:hover { background: var(--accent); color: #fff; }
+.node .warn { color: #b45309; cursor: help; }
+.node.chapter .ti { font-size: 14px; }
+.badge { font-size: 11px; padding: 0 6px; border: 1px solid var(--grey-4); color: var(--text-helper); }
+.badge.run { color: var(--accent); border-color: var(--accent); }
+.badge.err { color: var(--bad); border-color: var(--bad); }
+
+.detail-head { font-weight: 600; margin-bottom: 6px; }
+.detail-blocks { font-size: 13px; line-height: 1.7; max-height: 34vh; overflow: auto; border: 1px solid var(--grey-2); padding: 6px 8px; background: var(--grey-1); }
+.detail-blocks .blk { margin-bottom: 6px; }
+.explain-out { margin-top: 6px; white-space: pre-wrap; font-size: 13px; line-height: 1.7; }
+
+.lower { padding: 0 16px 24px; border-top: 1px solid var(--grey-2); }
+.table-wrap { overflow-x: auto; }
+.tbl { border-collapse: collapse; font-size: 12px; min-width: 100%; }
+.tbl th, .tbl td { border: 1px solid var(--grey-2); padding: 3px 7px; text-align: left; white-space: nowrap; }
+.tbl th { background: var(--grey-1); }
+.tbl td.err { color: var(--bad); white-space: normal; max-width: 260px; }

@@ -199,6 +199,9 @@ ipcMain.handle("lab:pickImage", async () => {
   return { name: path.basename(p), dataUrl: `data:${mime};base64,${buf.toString("base64")}` };
 });
 
+// ---------- 导图 v2 基准页（独立窗口；逻辑在 mindmapBench*.js） ----------
+require("./mindmapBenchMain").register({ app, ipcMain, dialog, BrowserWindow, getAIConfig, chatStream });
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,

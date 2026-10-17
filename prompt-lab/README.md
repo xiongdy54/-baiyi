@@ -77,3 +77,7 @@
 ## 管线复刻范围（§4.3）
 
 材料类型路由（cards.ts `detectMaterialType`）→ 取模板（本地 prompts.local.json）→ 上下文打包（材料+来源标记）→ 流式生成（主进程 chatStream，Key 不进渲染层）→ JSON 容错（cards.ts `extractJson`）→ CardLint（cards.ts `lintCard`）→ 结果展示。AIGenBatch 留痕与入库步骤在测试台中省略。
+
+## 导图 v2 基准页
+
+页头「导图 v2 基准」按钮打开独立窗口，用当前 AI 配置实测材料导图 v2 行协议（框架/深挖/explain 的耗时、token、丢弃率、结构）。非技术用户的操作步骤见 [MINDMAP-V2-BENCH.md](./MINDMAP-V2-BENCH.md)；设计依据见 `docs/design/MINDMAP-V2-FAST-PROGRESSIVE.md` §6、§11。纯函数与编排在 `mindmapBenchCore.js` / `mindmapBenchRunner.js`（回归：`node tests/m15v2.bench.test.cjs`），历史记录写入 `%APPDATA%/prompt-lab/mindmap-v2-bench.jsonl`。

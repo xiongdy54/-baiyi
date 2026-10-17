@@ -11,6 +11,24 @@ contextBridge.exposeInMainWorld("labAPI", {
   applyDraft: (scope) => ipcRenderer.invoke("lab:prompts:applyDraft", scope),
   pickImage: () => ipcRenderer.invoke("lab:pickImage"),
   chat: (requestId, messages, temperature) => ipcRenderer.send("lab:chat", requestId, messages, temperature),
+  // 导图 v2 基准页
+  openBench: () => ipcRenderer.invoke("bench:open"),
+  bench: {
+    config: () => ipcRenderer.invoke("bench:config"),
+    sample: () => ipcRenderer.invoke("bench:sample"),
+    pickMaterial: () => ipcRenderer.invoke("bench:pickMaterial"),
+    start: (payload) => ipcRenderer.invoke("bench:start", payload),
+    cancel: (runId) => ipcRenderer.invoke("bench:cancel", runId),
+    expand: (runId, nodePath) => ipcRenderer.invoke("bench:expand", runId, nodePath),
+    explain: (runId, nodePath) => ipcRenderer.invoke("bench:explain", runId, nodePath),
+    history: () => ipcRenderer.invoke("bench:history"),
+    exportCsv: (runIds) => ipcRenderer.invoke("bench:exportCsv", runIds),
+    onEvent: (callback) => {
+      const handler = (_e, ev) => callback(ev);
+      ipcRenderer.on("bench:event", handler);
+      return () => ipcRenderer.removeListener("bench:event", handler);
+    }
+  },
   onStream: (callback) => {
     const handler = (_e, requestId, msg) => callback(requestId, msg);
     ipcRenderer.on("lab:stream", handler);
