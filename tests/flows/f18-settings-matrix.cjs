@@ -77,6 +77,7 @@ const DOC_KEYS = [
   "app.tagsEnabled", // §7.4 v48.63 / D107（标签功能总开关：默认开，仅严格 false 为关；隐藏入口不动数据）
   "app.growthFeedback", // §7.4 v48.85 / D129（成长反馈总开关：对象 {enabled} 默认开，仅严格 false 为关；关闭=零渲染零计算）
   "app.legacyBackfillV1", // §9.4 一次性版本化回填完成标记（时间戳；挂载点 persist() 成功后由 legacyBackfill.js mark() 写入，对象键 = MARKER_KEY 逐字面量）
+  "app.mindmapModel", "app.mindmapPrefetch", "app.mindmapExplainAuto", // §5.5 / D192（材料导图 v2：导图模型 string 空=跟随全局 / 悬停预取对象 {enabled,dailyLimit} / 选中自动讲解 仅严格 true 为开）
   "app.activeThemePlugin", // §7.4 v48.89 / D132（激活的主题插件 id，空串=未激活；与 app.skinId 双槽互斥，pluginCore.nextAppearanceState 锁定矩阵；`plugin.<id>` 动态 scope 免逐键登记——见 GUIDE §7.4 D132 豁免段）
   "app.language", // §7.4 v49.8 / D182（界面语言：enum zh-CN|zh-TW|en|ja，默认 zh-CN；写侧 electron/i18n.js normalizeLanguage、读侧 src/lib/i18n.ts normalizeLocale）
   "dashboard.layout", "theme.mode", // §5.4 先例 / §5.3
@@ -296,6 +297,9 @@ app
         ["app", "mindmapMaxCalls", 40],
         ["app", "mindmapPricing", { input: 1.5, output: 6 }],
         ["app", "mindmapConcurrency", 3],
+        ["app", "mindmapModel", "deepseek-ai/DeepSeek-V4.1-Flash"], // D192 导图模型（非默认值才验得出往返）
+        ["app", "mindmapPrefetch", { enabled: false, dailyLimit: 12 }], // D192 悬停预取（对象键，非默认值）
+        ["app", "mindmapExplainAuto", true], // D192 选中节点自动讲解（默认关，非默认值）
         ["app", "mindmapRetryMax", 2],
         ["app", "mindmapSectionChunkChars", 6000],
         ["app", "fsrsConfigId", "cfg-default"],
@@ -391,6 +395,7 @@ app
         { materialTypes: null }, { shelfOrder: "abc" }, { dictVocabKinds: { en: "qa" } },
         { dictMode: "随便" }, { autoBackupEnabled: "yes" }, { autoBackupKeep: -3 },
         { mindmapConcurrency: 0 }, { mindmapConcurrency: "很多" }, { mindmapRetryMax: -1 },
+        { mindmapModel: 42 }, { mindmapPrefetch: "开" }, { mindmapPrefetch: { enabled: "yes", dailyLimit: -5 } }, { mindmapExplainAuto: "yes" },
         { mindmapSectionChunkChars: 0 }, { mindmapPricing: "免费" }, { globalShortcuts: null },
         { accentColor: "不色" }, { skinId: 42 },
         // 批 4 / §9.2：就地批注四键——枚举越界、色板非数组/含非法项，都必须不致崩
@@ -410,7 +415,7 @@ app
         }
         flow.check(`非法 ${Object.keys(b)[0]} 不致崩`, err === null, "不抛", err);
       }
-      write({ dayCutoffHour: 0, siblingBury: null, memory: null, materialTypes: null, shelfOrder: null, dictVocabKinds: null, dictMode: null, autoBackupEnabled: null, autoBackupKeep: null, mindmapConcurrency: null, mindmapRetryMax: null, mindmapSectionChunkChars: null, mindmapPricing: null, globalShortcuts: null, accentColor: null, skinId: null, annotateMode: null, annotatePalette: null, annotateCustomEnabled: null, annotationFilter: null });
+      write({ dayCutoffHour: 0, siblingBury: null, memory: null, materialTypes: null, shelfOrder: null, dictVocabKinds: null, dictMode: null, autoBackupEnabled: null, autoBackupKeep: null, mindmapConcurrency: null, mindmapRetryMax: null, mindmapModel: null, mindmapPrefetch: null, mindmapExplainAuto: null, mindmapSectionChunkChars: null, mindmapPricing: null, globalShortcuts: null, accentColor: null, skinId: null, annotateMode: null, annotatePalette: null, annotateCustomEnabled: null, annotationFilter: null });
       // 批 4：四键读侧归一——非法值必须回落默认，且合法值必须原样保留（非空转对照）
       write({ annotateMode: "乱写", annotationFilter: "乱写", annotateCustomEnabled: "yes", annotatePalette: ["bogus", "red", "red", "#aabbcc", 42] });
       const normBad = db.readAnnotationSettings();

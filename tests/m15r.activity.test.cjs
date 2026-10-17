@@ -261,6 +261,29 @@ console.log("---- M15R-A7 引擎子事件不得污染状态（真实现场：运
     check("A8⑧：重复关闭同一条不产生重复记录", A.isDismissed("r1") === true);
     A.resetDismissalsForTests();
   }
+  // ---- D192 / IMPL-PLAN §4.10：材料导图 v2 的阶段序列夹具（activity.ts 零改动，阶段全在 KNOWN_PHASES 内） ----
+  {
+    const V2RUN = "v2-run-1";
+    const seq = (terminal, extra) => {
+      A.resetActivity();
+      emit({ runId: V2RUN, documentId: DOC, title: "优绩主义", stage: "running", done: 3, total: 12, calls: 3, label: "框架 3/12 段" });
+      const mid = A.primaryTask();
+      emit(Object.assign({ runId: V2RUN, documentId: DOC, title: "优绩主义", stage: terminal, done: terminal === "completed" ? 12 : 5, total: 12, calls: 5 }, extra || {}));
+      return { mid, end: A.primaryTask() };
+    };
+    const r1 = seq("completed", { mapId: "map-v2", published: true, label: "框架 12/12 段" });
+    check("V2-①：running 阶段保留「框架 3/12 段」标签且 3/12", r1.mid.phase === "running" && r1.mid.label === "框架 3/12 段" && r1.mid.done === 3 && r1.mid.total === 12, r1.mid);
+    check("V2-②：running → completed 终态可打开", r1.end.phase === "completed" && r1.end.mapId === "map-v2" && A.describeTask(r1.end).canOpen === true, r1.end);
+    const r2 = seq("partial", { mapId: "map-v2", published: true });
+    check("V2-③：running → partial 归一为 partial", r2.end.phase === "partial", r2.end);
+    const r3 = seq("cancelled", { mapId: null });
+    check("V2-④：running → cancelled 归一为 cancelled", r3.end.phase === "cancelled", r3.end);
+    const r4 = seq("failed", { mapId: null, code: "network" });
+    check("V2-⑤：running → failed 带错误码、不可打开", r4.end.phase === "failed" && r4.end.code === "network" && A.describeTask(r4.end).canOpen === false, r4.end);
+    A.resetActivity();
+    emit({ runId: "v2-all", documentId: DOC, stage: "running", done: 3, total: 12, calls: 3, label: "深挖 3/12 段" });
+    check("V2-⑥：深挖全部的标签「深挖 3/12 段」同样走 running 口径", A.primaryTask().label === "深挖 3/12 段" && A.primaryTask().phase === "running", A.primaryTask());
+  }
   A.resetActivity();
 })().finally(() => {
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);

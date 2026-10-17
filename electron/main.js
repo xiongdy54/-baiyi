@@ -309,6 +309,17 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
       (value !== null && typeof value === "object" && !Array.isArray(value) && value.enabled === false);
     value = { enabled: !off };
   }
+  // D192（材料导图 v2，§5.5）：三个新键逐字面量归一（对象键勿用变量间接，防 F18 扫描器误报）
+  if (scope === "app" && key === "mindmapModel") value = typeof value === "string" ? value.trim() : "";
+  if (scope === "app" && key === "mindmapExplainAuto") value = value === true;
+  if (scope === "app" && key === "mindmapPrefetch") {
+    const src = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    const lim = Math.floor(Number(src.dailyLimit));
+    value = {
+      enabled: src.enabled === false ? false : true,
+      dailyLimit: Number.isFinite(lim) && lim >= 0 ? lim : 30
+    };
+  }
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
@@ -1852,6 +1863,58 @@ ipcMain.handle("mindmap:setActive", (_e, id) => dbModule.setActiveMaterialMap(id
 ipcMain.handle("mindmap:delete", (_e, id) => dbModule.deleteMaterialMap(id));
 ipcMain.handle("mindmap:runs", (_e, documentId) => dbModule.listMaterialMapRuns(documentId));
 ipcMain.handle("mindmap:learningStatus", (_e, documentId, nodeIds) => dbModule.listMindmapLearningStatus(documentId, nodeIds || []));
+
+// ============ 材料导图 v2（D192 / MINDMAP-V2-IMPL-PLAN §4.2，T4 接线）============
+// 引擎为单例（electron/mindmapEngineV2.js，依赖全部注入）；懒创建——首次 IPC 调用时才建，
+// 与 v1 handler 同样在调用时才取 dbModule / ai / readSettings，不依赖模块加载顺序。
+// store 门面＝db.js 导出的同名函数子集（签名同 tests/lib/mindmapMemoryStore.cjs）。
+const MINDMAP_V2_STORE_FNS = [
+  "createMaterialMapV2", "commitMaterialMapJob", "listMaterialMapNodes", "listMaterialMapEdges",
+  "setMaterialMapNodeExplain", "setMaterialMapView", "countMaterialMapCallsSince",
+  "getMaterialMap", "getActiveMaterialMap", "deleteMaterialMap",
+  "saveMaterialMapCall", "listMaterialMapCalls", "getMaterialMapShard", "saveMaterialMapShard",
+  "createMaterialMapRun", "updateMaterialMapRun", "getMaterialMapRun", "listMaterialMapRuns"
+];
+let mindmapEngineV2Singleton = null;
+function getMindmapEngineV2() {
+  if (mindmapEngineV2Singleton) return mindmapEngineV2Singleton;
+  const store = {};
+  for (const name of MINDMAP_V2_STORE_FNS) {
+    store[name] = (...args) => dbModule[name](...args);
+  }
+  const { createMindmapEngineV2 } = require("./mindmapEngineV2");
+  mindmapEngineV2Singleton = createMindmapEngineV2({
+    store,
+    chatStream: (opts, send) => chatStream(opts, send),
+    readSettings: () => readSettings(),
+    getAIConfig: () => getAIConfig(),
+    getPromptTemplate: (scope) => getPromptTemplate(scope),
+    // 仅「生成整图」「深挖全部」两类 run 走既有指示器通道
+    broadcastChanged: (payload) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send("mindmap:changed", payload);
+      }
+    },
+    broadcastDelta: (payload) => {
+      for (const w of BrowserWindow.getAllWindows()) {
+        if (!w.isDestroyed()) w.webContents.send("mindmap:delta", payload);
+      }
+    }
+  });
+  return mindmapEngineV2Singleton;
+}
+ipcMain.handle("mindmap:graphLoad", (_e, p) => getMindmapEngineV2().graphLoad(p));
+ipcMain.handle("mindmap:graphFeed", (_e, p) => getMindmapEngineV2().graphFeed(p));
+ipcMain.handle("mindmap:graphEstimate", (_e, p) => getMindmapEngineV2().graphEstimate(p));
+ipcMain.handle("mindmap:graphGenerate", (_e, p) => getMindmapEngineV2().graphGenerate(p));
+ipcMain.handle("mindmap:graphExpand", (_e, p) => getMindmapEngineV2().graphExpand(p));
+ipcMain.handle("mindmap:graphExpandAll", (_e, p) => getMindmapEngineV2().graphExpandAll(p));
+ipcMain.handle("mindmap:graphExplain", (_e, p) => getMindmapEngineV2().graphExplain(p));
+ipcMain.handle("mindmap:graphCancel", (_e, p) => getMindmapEngineV2().graphCancel(p));
+ipcMain.handle("mindmap:graphResume", (_e, p) => getMindmapEngineV2().graphResume(p));
+ipcMain.handle("mindmap:graphSetView", (_e, p) => getMindmapEngineV2().graphSetView(p));
+ipcMain.handle("mindmap:graphMetrics", (_e, p) => getMindmapEngineV2().graphMetrics(p));
+ipcMain.handle("mindmap:graphNodeText", (_e, p) => getMindmapEngineV2().graphNodeText(p));
 
 // v46（M14-UM2，§4.18-7/8）：制卡记忆接地检索——Stage A 本地宽召回（memoryRetrieve 纯函数）。
 // 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；

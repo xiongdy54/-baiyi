@@ -6,6 +6,7 @@
 // v40（M8-B）：+ insight/changed（主进程洞察运行/反馈变化推送 → 洞察面板刷新）
 // v45（M14-UM1）：+ memory/changed（主进程记忆整理/补处理进度推送 → 设置页记忆区刷新）
 // v48（M15 重做，D41/D42）：+ mindmap/changed（导图生成进度与完成广播）
+// D192（材料导图 v2）：+ mindmap/delta（主进程 mindmap:delta 增量批次推送 → 导图页签合入）
 // v48.80（D124 §11.3）：+ learner/navigate（「下一步」面板 emit、App 订阅分派动作）
 //                      + learner/changed（任一 learner 对话框完成写入后 emit、面板重取推荐）
 // v49.0（D174 皮肤 API）：+ ui/*（纯表现层动效事件——皮肤经 ctx.onUiEvent 订阅；见 src/skins/runtime/uiEvents.ts）
@@ -28,6 +29,7 @@ export const ALLOWED_EVENTS = [
   "insight/changed",
   "memory/changed",
   "mindmap/changed", // v48（M15 重做，D41/D42）：导图生成进度与完成广播
+  "mindmap/delta", // D192：材料导图 v2 增量批次（≤100ms 一批）
   "learner/navigate", // v48.80（D124）：面板动作 → App 导航（open-book / jump / review / extract-session）
   "learner/changed", // v48.80（D124）：对话框完成写入 → NextStepsPanel 重新请求推荐
   "ui/view-change", // v49.0（D174）：主视图切换（App.changeView）

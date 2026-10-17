@@ -446,6 +446,24 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
     const handler = (_e, payload) => callback(payload);
     ipcRenderer.on("mindmap:changed", handler);
     return () => ipcRenderer.removeListener("mindmap:changed", handler);
+  },
+  // 材料导图 v2（D192 / MINDMAP-V2-IMPL-PLAN §4.2）：12 个 invoke + mindmap:delta 增量推送订阅
+  graphLoad: (p) => ipcRenderer.invoke("mindmap:graphLoad", p),
+  graphFeed: (p) => ipcRenderer.invoke("mindmap:graphFeed", p),
+  graphEstimate: (p) => ipcRenderer.invoke("mindmap:graphEstimate", p),
+  graphGenerate: (p) => ipcRenderer.invoke("mindmap:graphGenerate", p),
+  graphExpand: (p) => ipcRenderer.invoke("mindmap:graphExpand", p),
+  graphExpandAll: (p) => ipcRenderer.invoke("mindmap:graphExpandAll", p),
+  graphExplain: (p) => ipcRenderer.invoke("mindmap:graphExplain", p),
+  graphCancel: (p) => ipcRenderer.invoke("mindmap:graphCancel", p),
+  graphResume: (p) => ipcRenderer.invoke("mindmap:graphResume", p),
+  graphSetView: (p) => ipcRenderer.invoke("mindmap:graphSetView", p),
+  graphMetrics: (p) => ipcRenderer.invoke("mindmap:graphMetrics", p),
+  graphNodeText: (p) => ipcRenderer.invoke("mindmap:graphNodeText", p),
+  onDelta: (callback) => {
+    const handler = (_e, payload) => callback(payload);
+    ipcRenderer.on("mindmap:delta", handler);
+    return () => ipcRenderer.removeListener("mindmap:delta", handler);
   }
 });
 

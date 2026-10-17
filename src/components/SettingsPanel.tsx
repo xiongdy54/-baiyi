@@ -365,6 +365,191 @@ function LearnerBlock() {
   );
 }
 
+// 材料导图（D192 / MINDMAP-V2-IMPL-PLAN §5.4）：AI 服务区下方子块——导图模型 / 并发数 / 悬停预取 / 选中节点自动讲解。
+// 写侧归一在 main.js settings:set（mindmapModel / mindmapPrefetch / mindmapExplainAuto）；mindmapConcurrency 由引擎读侧夹 1–8。
+function MindmapSettingsBlock({ models }: { models: string[] }) {
+  const T = useT();
+  const [ready, setReady] = useState(false);
+  const [model, setModel] = useState("");
+  const [open, setOpen] = useState(false);
+  const [concurrency, setConcurrency] = useState(4);
+  const [prefetch, setPrefetch] = useState<{ enabled: boolean; dailyLimit: number }>({ enabled: true, dailyLimit: 30 });
+  const [explainAuto, setExplainAuto] = useState(false);
+  const [savedTick, setSavedTick] = useState(0);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let alive = true;
+    void Promise.all([
+      settingsStore.get<unknown>("app", "mindmapModel", ""),
+      settingsStore.get<unknown>("app", "mindmapConcurrency", 4),
+      settingsStore.get<unknown>("app", "mindmapPrefetch", null),
+      settingsStore.get<unknown>("app", "mindmapExplainAuto", false)
+    ]).then(([m, c, p, x]) => {
+      if (!alive) return;
+      setModel(typeof m === "string" ? m : "");
+      const cn = Math.round(Number(c));
+      setConcurrency(Number.isFinite(cn) ? Math.max(1, Math.min(8, cn)) : 4);
+      const po = p && typeof p === "object" && !Array.isArray(p) ? (p as { enabled?: unknown; dailyLimit?: unknown }) : {};
+      const lim = Math.floor(Number(po.dailyLimit));
+      setPrefetch({ enabled: po.enabled !== false, dailyLimit: Number.isFinite(lim) && lim >= 0 ? lim : 30 });
+      setExplainAuto(x === true);
+      setReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+  async function save(key: string, value: unknown) {
+    await settingsStore.set("app", key, value);
+    setSavedTick((t) => t + 1);
+    window.setTimeout(() => setSavedTick((t) => t + 1), 2000);
+  }
+  const filtered = model.trim() ? models.filter((m) => m.toLowerCase().includes(model.trim().toLowerCase())) : models;
+  return (
+    <div id="sec-mindmap">
+      <h4>{T("材料导图")}</h4>
+      {ready && (
+        <>
+          <div className="form-field" ref={boxRef}>
+            <label>{T("导图模型")}</label>
+            <div className="model-select">
+              <input
+                className="mono"
+                value={model}
+                placeholder={T("留空 = 跟随全局模型")}
+                onChange={(e) => {
+                  setModel(e.target.value);
+                  if (models.length > 0) setOpen(true);
+                }}
+                onFocus={() => {
+                  if (models.length > 0) setOpen(true);
+                }}
+                onBlur={() => void save("mindmapModel", model.trim())}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") setOpen(false);
+                }}
+              />
+              {open && models.length > 0 && (
+                <div className="model-dropdown">
+                  {filtered
+                    .filter((m) => m !== model)
+                    .map((m) => (
+                      <button
+                        key={m}
+                        className={`model-option mono${m === model ? " model-option-active" : ""}`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          setModel(m);
+                          setOpen(false);
+                          void save("mindmapModel", m);
+                        }}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  {filtered.length === 0 && <div className="model-option model-empty mono">{T("列表无匹配 — 将直接使用手输的模型名")}</div>}
+                </div>
+              )}
+            </div>
+            <p className="form-hint">{T("留空则使用上方「模型名」。导图框架与深挖不需要深度思考，推荐速度快的非推理模型，如 deepseek-ai/DeepSeek-V4.1-Flash；服务商地址与 Key 沿用上方配置。")}</p>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row-label">
+              {T("并发数")}
+              <SettingsInfo label={T("并发数")}>{T("同时进行的导图请求数（1–8，默认 4）；遇到限流会自动降档。")}</SettingsInfo>
+            </span>
+            <input
+              className="mono input-num"
+              type="number"
+              min={1}
+              max={8}
+              value={concurrency}
+              onChange={(e) => setConcurrency(Math.max(1, Math.min(8, Math.round(Number(e.target.value)) || 4)))}
+              onBlur={() => void save("mindmapConcurrency", concurrency)}
+            />
+          </div>
+          <div className="settings-row">
+            <span className="settings-row-label">
+              {T("悬停预取")}
+              <SettingsInfo label={T("悬停预取")}>{T("鼠标停在可深挖节点上时提前在后台深挖，点开即得；每日调用次数有上限。")}</SettingsInfo>
+            </span>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("悬停预取开关")}>
+              <button
+                className={prefetch.enabled ? "active" : ""}
+                onClick={() => {
+                  const next = { ...prefetch, enabled: true };
+                  setPrefetch(next);
+                  void save("mindmapPrefetch", next);
+                }}
+              >
+                {T("开")}
+              </button>
+              <button
+                className={!prefetch.enabled ? "active" : ""}
+                onClick={() => {
+                  const next = { ...prefetch, enabled: false };
+                  setPrefetch(next);
+                  void save("mindmapPrefetch", next);
+                }}
+              >
+                {T("关")}
+              </button>
+            </div>
+          </div>
+          <div className="settings-row">
+            <span>{T("每日预取上限")}</span>
+            <input
+              className="mono input-num"
+              type="number"
+              min={0}
+              max={1000}
+              value={prefetch.dailyLimit}
+              disabled={!prefetch.enabled}
+              onChange={(e) => setPrefetch({ ...prefetch, dailyLimit: Math.max(0, Math.floor(Number(e.target.value)) || 0) })}
+              onBlur={() => void save("mindmapPrefetch", prefetch)}
+            />
+            <span>{T("次")}</span>
+          </div>
+          <div className="settings-row">
+            <span className="settings-row-label">
+              {T("选中节点自动讲解")}
+              <SettingsInfo label={T("选中节点自动讲解")}>{T("选中节点时自动请求一次「作者在这里做什么」的讲解（消耗一次调用，结果缓存）。")}</SettingsInfo>
+            </span>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("选中节点自动讲解开关")}>
+              <button
+                className={explainAuto ? "active" : ""}
+                onClick={() => {
+                  setExplainAuto(true);
+                  void save("mindmapExplainAuto", true);
+                }}
+              >
+                {T("开")}
+              </button>
+              <button
+                className={!explainAuto ? "active" : ""}
+                onClick={() => {
+                  setExplainAuto(false);
+                  void save("mindmapExplainAuto", false);
+                }}
+              >
+                {T("关")}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+      {savedTick % 2 === 1 && <p className="ai-test-ok settings-saved">{T("已保存。")}</p>}
+    </div>
+  );
+}
+
 function AISection() {
   const T = useT();
   const [cfg, setCfg] = useState<AIConfig | null>(null);
@@ -697,6 +882,8 @@ function AISection() {
 
       {(busy === "test" || busy === "models" || busy === "save") && <SkeletonBlock h={32} />}
       {notice && <p className={notice.ok ? "ai-test-ok" : "ai-test-fail"}>{notice.text}</p>}
+
+      <MindmapSettingsBlock models={models} />
     </SettingsSection>
   );
 }

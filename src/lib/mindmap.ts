@@ -269,6 +269,8 @@ declare global {
   pendingRuns: () => Promise<ResumableMapRun[]>;
       learningStatus: (documentId: string, nodeIds: string[]) => Promise<Record<string, { cardCount: number; kpExists: boolean }>>;
       onChanged: (cb: (payload: { runId?: string; stage?: string; done?: number; total?: number; label?: string; mapId?: string }) => void) => () => void;
+      /** D192 材料导图 v2：mindmap:delta 增量推送订阅（返回退订函数） */
+      onDelta?: (cb: (payload: unknown) => void) => () => void;
     };
   }
 }
@@ -294,7 +296,13 @@ export const mindmapApi = {
 /** App 级桥安装（App.tsx useEffect 一次）：主进程 mindmap:changed → EventBus mindmap/changed */
 export function installMindmapBridge(): () => void {
   if (!window.mindmapAPI) return () => {};
-  return window.mindmapAPI.onChanged((payload) => {
+  const offChanged = window.mindmapAPI.onChanged((payload) => {
     eventBus.emit("mindmap/changed", payload);
   });
+  // D192（材料导图 v2）：主进程 mindmap:delta → EventBus mindmap/delta
+  const offDelta = window.mindmapAPI.onDelta ? window.mindmapAPI.onDelta((payload) => eventBus.emit("mindmap/delta", payload)) : () => {};
+  return () => {
+    offChanged();
+    offDelta();
+  };
 }

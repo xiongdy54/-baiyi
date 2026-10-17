@@ -332,12 +332,13 @@ function backoffDelayMs(err, attempt) {
   return base + Math.floor(Math.random() * 300);
 }
 
-function chatStream({ messages, temperature, abortSignal, retry }, send) {
+// T4（D192）：可选 model 覆盖（导图模型，共用全局服务商地址与 Key）与 maxTokens；缺省时请求体与此前逐字节一致
+function chatStream({ messages, temperature, abortSignal, retry, model, maxTokens }, send) {
   const maxAttempts = Math.max(1, Math.min(5, Number(retry && retry.maxAttempts) || 1));
   const onRetry = retry && typeof retry.onRetry === "function" ? retry.onRetry : null;
   let attempt = 1;
   const run = () =>
-    chatStreamOnce({ messages, temperature, abortSignal }, send).catch(async (err) => {
+    chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }, send).catch(async (err) => {
       const code = err && err.code;
       const retriable = (err && err.retriable) || code === "rate_limit" || code === "network" || code === "http";
       // 关键纪律（§3.7）：流已开始（服务端可能已生成并计费）→ 不重试，如实记为 unknown_outcome
@@ -357,7 +358,7 @@ function chatStream({ messages, temperature, abortSignal, retry }, send) {
   return run();
 }
 
-function chatStreamOnce({ messages, temperature, abortSignal }, send) {
+function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }, send) {
   // v48.12 P0：TTFT / 首字节打点（只测量，不改变任何调用行为）
   const startedAt = Date.now();
   let firstByteMs = null;
@@ -375,8 +376,9 @@ function chatStreamOnce({ messages, temperature, abortSignal }, send) {
   }
   const url = new URL(cfg.baseUrl.replace(/\/$/, "") + "/chat/completions");
   const isHttps = url.protocol === "https:";
+  const useModel = (typeof model === "string" && model.trim()) || cfg.model;
   const bodyObj = {
-    model: cfg.model,
+    model: useModel,
     messages,
     temperature: typeof temperature === "number" ? temperature : 0.7,
     stream: true,
@@ -384,8 +386,11 @@ function chatStreamOnce({ messages, temperature, abortSignal }, send) {
     stream_options: { include_usage: true }
   };
   // 思考强度：仅 GLM-5.2+ 接受 reasoning_effort；GLM-5.3 系思考无法关闭，low = 最轻推理档
-  if (supportsReasoningEffort(cfg.model)) {
+  if (supportsReasoningEffort(useModel)) {
     bodyObj.reasoning_effort = cfg.reasoningEffort || "low";
+  }
+  if (typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0) {
+    bodyObj.max_tokens = Math.floor(maxTokens);
   }
   const body = JSON.stringify(bodyObj);
   const headers = { "Content-Type": "application/json" };
