@@ -1462,16 +1462,6 @@ export default function CardBrowser({
         );
       })()}
 
-      {/* v48.111（D156）：空态按可见视图收敛——摘录页签自带行内提示，不再叠加全局空态；
-          摘录页签下闪卡表恒空（cardsMeta 强制空集），表头纯噪声，一并隐藏 */}
-      {loaded && kindFilter !== "extract" && cardsMeta.length === 0 && (kindFilter === "card" || viewExtracts.length === 0) && (
-        <div className="empty-state">
-          <p className="empty-text">
-            {metaAll.length === 0 ? T("还没有卡片。在阅读器中选中文字即可制卡。") : T("没有符合筛选条件的卡片。")}
-          </p>
-        </div>
-      )}
-
       {/* v48.111（D156）：摘录页签下不渲染恒空的闪卡表（cardsMeta 强制空集，表头纯噪声） */}
       {preset === "leech" ? (
         <div className="queue-list">
@@ -1561,6 +1551,17 @@ export default function CardBrowser({
             );
           })}
           {cardsMeta.length > 0 && <div style={{ height: (cardsMeta.length - win.card.end) * rowH * (rowH > 0 ? Math.min(1, SCROLL_CAP / (cardsMeta.length * rowH)) : 1) }} aria-hidden="true" />}
+        </div>
+      )}
+
+      {/* v49.16（D189）：空态块移到视图分支之后——表头恒贴工具行正下方（此前空态块在表格之前，
+          零行时把表头挤到屏幕中部，用户实测）；摘录页签自带行内提示，不叠加全局空态；
+          摘录页签下闪卡表恒空（cardsMeta 强制空集），表头纯噪声，一并由本条件收敛 */}
+      {loaded && kindFilter !== "extract" && cardsMeta.length === 0 && (kindFilter === "card" || viewExtracts.length === 0) && (
+        <div className="empty-state">
+          <p className="empty-text">
+            {metaAll.length === 0 ? T("还没有卡片。在阅读器中选中文字即可制卡。") : T("没有符合筛选条件的卡片。")}
+          </p>
         </div>
       )}
       </>
