@@ -199,3 +199,136 @@ export function buildStructureCardPackageV2(node: V2Node, graph: GraphState, opt
   if (text.length > maxChars) text = text.slice(0, maxChars);
   return { text, mindmapNodeId, unitAnchors, authorialRole };
 }
+
+// ---------- 画布适配：材料根抬升（T8） ----------
+// 主进程骨架 / v1 适配都有唯一的材料根行（parentId=null，标题＝材料名）；画布已有合成根卡（ROOT_ID，
+// 标题取 meta.title），直接合入会出现「材料名 → 材料名」两层。渲染层统一把材料根行抬掉：
+// 其子节点 parentId 改为 null（挂合成根），根行本身不进 GraphState；与根相连的关系、根的状态一并略去。
+// 点击合成根卡时，调用方用返回的 rootId 映射回真实节点（详情 / 讲解 / 跳正文）。
+
+/** 材料根行 id：parentId 为 null 的第一行（按 ord、id 稳定） */
+export function findRootId(nodes: readonly V2Node[]): string | null {
+  let best: V2Node | null = null;
+  for (const n of nodes) {
+    if (n.parentId != null) continue;
+    if (!best || n.ord < best.ord || (n.ord === best.ord && n.id < best.id)) best = n;
+  }
+  return best ? best.id : null;
+}
+
+export function liftNodes(nodes: readonly V2Node[] | undefined, rootId: string | null): V2Node[] | undefined {
+  if (!nodes) return undefined;
+  if (!rootId) return nodes.slice();
+  const out: V2Node[] = [];
+  for (const n of nodes) {
+    if (n.id === rootId) continue;
+    out.push(n.parentId === rootId ? { ...n, parentId: null } : n);
+  }
+  return out;
+}
+
+export function liftDelta(d: MindmapDelta, rootId: string | null): MindmapDelta {
+  if (!rootId) return d;
+  return {
+    ...d,
+    nodes: liftNodes(d.nodes, rootId),
+    states: d.states ? d.states.filter((s) => s.id !== rootId) : undefined,
+    edges: d.edges ? d.edges.filter((e) => e.from !== rootId && e.to !== rootId) : undefined,
+    removed: d.removed ? d.removed.filter((id) => id !== rootId) : undefined,
+  };
+}
+
+/** graphLoad 结果 → 画布可用（根已抬升）；无图返回 null */
+export function liftLoad(load: GraphLoadResult): { load: GraphLoad; rootId: string | null; rootNode: V2Node | null } | null {
+  if (!load || !load.meta) return null;
+  const rootId = findRootId(load.nodes);
+  const rootNode = rootId ? load.nodes.find((n) => n.id === rootId) ?? null : null;
+  return {
+    load: {
+      meta: load.meta,
+      nodes: liftNodes(load.nodes, rootId) ?? [],
+      edges: load.edges.filter((e) => e.from !== rootId && e.to !== rootId),
+      view: load.view,
+      textReady: load.textReady,
+    },
+    rootId,
+    rootNode,
+  };
+}
+
+/** 目录骨架预览（无图时 ≤300ms 本地画出，零调用）：目录树 → 只读 V2Node（id 前缀 `p`，state 'more'） */
+export interface TocLike {
+  anchor: string;
+  label: string;
+  children?: TocLike[];
+}
+export function tocPreviewNodes(toc: readonly TocLike[]): V2Node[] {
+  const out: V2Node[] = [];
+  let seq = 0;
+  const walk = (list: readonly TocLike[], parentId: string | null) => {
+    for (const t of list || []) {
+      const id = `p${seq}`;
+      out.push({
+        id, parentId, ord: seq * 1000, title: String(t.label || "").trim() || "—", type: "其他", timeText: null, patternHint: null,
+        blockStart: null, blockEnd: null, spans: null, state: "more", source: "toc", warnings: null, explain: null, jobId: null,
+      });
+      seq++;
+      if (t.children && t.children.length) walk(t.children, id);
+    }
+  };
+  walk(toc, null);
+  return out;
+}
+
+// ---------- 实测读数条（§5.2 MetricsBar；字段与 RunMetrics 一一对应） ----------
+
+export type TFn = (key: string, params?: Record<string, string | number>) => string;
+
+/** RunMetrics 全部字段（顺序即复制文本顺序）；tests/m15v2.cardpkg.test.cjs 守护与引擎 RunMetrics 键集一致 */
+export const METRICS_FIELDS = [
+  "model", "startedAt", "ttfnMs", "firstTtftMs", "frameworkMs", "calls", "cacheHits", "promptTokens", "completionTokens",
+  "reasoningChars", "lines", "linesDropped", "byReason", "relsDropped", "concurrencyNow", "rateLimitDowngrades",
+] as const satisfies readonly (keyof RunMetrics)[];
+
+export const DROP_REASON_LABEL: Readonly<Record<string, string>> = {
+  unparsable: "无法解析", orphan: "无父节点", out_of_scope: "越界", duplicate: "重复", truncated: "截断",
+};
+
+export interface MetricsSegment {
+  /** 本段展示的 RunMetrics 字段 */
+  fields: (keyof RunMetrics)[];
+  text: string;
+}
+
+const secs = (ms: number | null | undefined): string => (ms == null || !Number.isFinite(ms) ? "—" : `${(ms / 1000).toFixed(1)}s`);
+
+export function metricsSegments(m: RunMetrics, T: TFn): MetricsSegment[] {
+  const reasons = Object.keys(m.byReason || {})
+    .filter((k) => (m.byReason[k] || 0) > 0)
+    .sort()
+    .map((k) => `${T(DROP_REASON_LABEL[k] || k)} ${m.byReason[k]}`)
+    .join(" / ");
+  return [
+    { fields: ["model"], text: m.model || T("（跟随全局）") },
+    { fields: ["ttfnMs"], text: T("首节点 {s}", { s: secs(m.ttfnMs) }) },
+    { fields: ["firstTtftMs"], text: T("首字 {s}", { s: secs(m.firstTtftMs) }) },
+    { fields: ["frameworkMs"], text: T("框架完成 {s}", { s: secs(m.frameworkMs) }) },
+    { fields: ["calls", "cacheHits"], text: T("调用 {n}（缓存 {m}）", { n: m.calls, m: m.cacheHits }) },
+    { fields: ["promptTokens", "completionTokens"], text: T("token 入 {a} / 出 {b}", { a: m.promptTokens, b: m.completionTokens }) },
+    { fields: ["reasoningChars"], text: T("思考 {n} 字", { n: m.reasoningChars }) },
+    {
+      fields: ["lines", "linesDropped", "byReason"],
+      text: T("丢弃行 {a}/{b}", { a: m.linesDropped, b: m.lines }) + (reasons ? `（${reasons}）` : ""),
+    },
+    { fields: ["relsDropped"], text: T("关系丢弃 {n}", { n: m.relsDropped }) },
+    { fields: ["concurrencyNow", "rateLimitDowngrades"], text: T("并发 {c}（降档 {d}）", { c: m.concurrencyNow, d: m.rateLimitDowngrades }) },
+  ];
+}
+
+/** 「复制读数」：多行纯文本（含开始时间），供用户贴回调参 */
+export function metricsCopyText(m: RunMetrics, T: TFn): string {
+  const lines = [T("材料导图实测读数")];
+  lines.push(`${T("开始时间")}: ${Number.isFinite(m.startedAt) ? new Date(m.startedAt).toISOString() : "—"}`);
+  for (const s of metricsSegments(m, T)) lines.push(s.text);
+  return lines.join("\n");
+}

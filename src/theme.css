@@ -9465,3 +9465,118 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   .wb-mode-btn { transition: none; }
 }
 } /* @layer base 收尾（v49.0 / D170，P2-1）——与文件首行 @layer base { 配对 */
+
+/* ===================== 材料导图 v2 画布与面板（D192 / MINDMAP-V2-IMPL-PLAN §5.2–5.3） =====================
+   画布 SVG 由 src/lib/mindmap/v2/svg.ts 生成，颜色只用 var(--token)；这里只管容器、读数条与面板小件。 */
+.mindmap-canvas.mm2-canvas {
+  padding: 0;
+  display: block;
+  gap: 0;
+}
+.mm2-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  font-family: var(--font-sans);
+}
+.mm2-svg [data-node-id],
+.mm2-svg [data-act] {
+  cursor: pointer;
+}
+.mm2-metrics-wrap {
+  border-top: 1px solid var(--border-subtle);
+  background: var(--paper);
+  padding: var(--sp-2) var(--sp-4);
+}
+.mm2-metrics {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.mm2-metrics-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.mm2-metrics-copy {
+  flex: none;
+}
+.mm2-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.mm2-detail-block {
+  margin-top: var(--sp-3);
+}
+.mm2-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--sp-1);
+}
+.mm2-explain {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0;
+}
+.mm2-rel-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mm2-rel-item,
+.mm2-link {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+}
+.mm2-rel-item:hover,
+.mm2-link:hover {
+  text-decoration: underline;
+}
+.mm2-rel-item:focus-visible,
+.mm2-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.mm2-source {
+  max-height: 240px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.mm2-badge {
+  display: inline-block;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 4px;
+  margin-right: 6px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  vertical-align: 1px;
+}
+.mm2-badge-old {
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}

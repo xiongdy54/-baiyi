@@ -131,6 +131,8 @@ export interface Delta {
   states?: { id: string; state: V2NodeState }[];
   edges?: V2Edge[];
   explainDelta?: { nodeId: string; text: string };
+  /** 引擎扩展：整枝替换残留 / 提交失败的流式节点——渲染层删除这些节点（及其子列表项、相连关系） */
+  removed?: string[];
   jobDone?: JobDone;
   metrics?: RunMetrics;
 }

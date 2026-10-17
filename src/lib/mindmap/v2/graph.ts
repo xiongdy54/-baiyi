@@ -65,6 +65,11 @@ class Cow<T> {
     if (!this.copy) this.copy = { ...this.base };
     this.copy[k] = v;
   }
+  delete(k: string): void {
+    if (!Object.prototype.hasOwnProperty.call(this.copy ?? this.base, k)) return;
+    if (!this.copy) this.copy = { ...this.base };
+    delete this.copy[k];
+  }
   result(): Readonly<Record<string, T>> {
     return this.copy ?? this.base;
   }
@@ -96,6 +101,38 @@ export function applyDelta(state: GraphState, delta: Delta, trusted = false): Gr
     if (!set) m.set(p, (set = new Set()));
     set.add(id);
   };
+
+  // 删除（delta.removed）：先删后合入——同批既删又发的 id 以合入为准（重新出现）
+  const revived = new Set((delta.nodes ?? []).map((n) => n.id));
+  for (const id of delta.removed ?? []) {
+    if (revived.has(id)) continue;
+    const prev = nodes.get(id);
+    if (!prev) continue;
+    nodes.delete(id);
+    addMember(removeFrom, parentKey(prev.parentId), id);
+    touch(prev.parentId);
+    if (children.get(id)) children.delete(id);
+    for (const e of outE.get(id) ?? EMPTY_EDGES) {
+      const li = inE.get(e.to);
+      if (li) inE.set(e.to, li.filter((x) => x.from !== id));
+      edgeCount--;
+      const ta = nodes.get(e.to);
+      touch(ta ? ta.parentId : null);
+    }
+    for (const e of inE.get(id) ?? EMPTY_EDGES) {
+      const lo = outE.get(e.from);
+      if (lo) {
+        const next = lo.filter((x) => x.to !== id);
+        if (next.length !== lo.length) edgeCount -= lo.length - next.length;
+        outE.set(e.from, next);
+      }
+      const fa = nodes.get(e.from);
+      touch(fa ? fa.parentId : null);
+    }
+    if (outE.get(id)) outE.delete(id);
+    if (inE.get(id)) inE.delete(id);
+    dirty.add(ROOT_ID);
+  }
 
   for (const n of delta.nodes ?? []) {
     const prev = nodes.get(n.id);
