@@ -50,8 +50,11 @@ export interface MindmapTabProps {
   initialMapId?: string | null;
   /** 应用重启后「继续生成」：原文送完后 graphResume(runId)，重排尚未 outline 的作用域 */
   initialResumeRunId?: string | null;
-  /** 阅读透镜「在图谱中打开」：要选中并居中的节点（seq 变化即重新聚焦） */
-  focusRequest?: { nodeId: string; seq: number } | null;
+  /** 阅读透镜「在图谱中打开」：要选中并居中的节点（seq 变化即重新聚焦）；flash＝透镜展示过的节点，
+   *  到位后短暂框一个高亮区，便于在整图里认出刚才那一片结构 */
+  focusRequest?: { nodeId: string; seq: number; flash?: string[] } | null;
+  /** focusRequest 用完即通知宿主清掉（页签切走会卸载本组件，留着会在下次进来时重复聚焦 / 重复高亮） */
+  onFocusConsumed?: () => void;
 }
 
 const V2_GENERATOR = "m15v2-engine-1";
@@ -69,7 +72,7 @@ interface RunInfo {
 }
 
 
-export default function MindmapTab({ kernel, documentId, title, canvasHost, onJumpToText, onMakeCardsFromNode, initialMapId, initialResumeRunId, focusRequest }: MindmapTabProps) {
+export default function MindmapTab({ kernel, documentId, title, canvasHost, onJumpToText, onMakeCardsFromNode, initialMapId, initialResumeRunId, focusRequest, onFocusConsumed }: MindmapTabProps) {
   const T = useT();
   const [graph, setGraphState] = useState<GraphState>(() => emptyGraph(null));
   const graphRef = useRef(graph);
@@ -105,6 +108,14 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
   const [explainBusy, setExplainBusy] = useState<Record<string, string>>({}); // nodeId → jobId
   const explainWaiters = useRef<Map<string, (ok: boolean) => void>>(new Map()); // jobId → resolve
   const canvasRef = useRef<MindmapCanvasHandle>(null);
+  const [flash, setFlash] = useState<{ ids: string[]; seq: number } | null>(null);
+  const flashTimer = useRef<number | null>(null);
+  const flashNow = useCallback((ids: string[], seq: number) => {
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    setFlash({ ids: [...ids], seq });
+    flashTimer.current = window.setTimeout(() => setFlash(null), 4200);
+  }, []);
+  useEffect(() => () => { if (flashTimer.current) window.clearTimeout(flashTimer.current); }, []);
   const tocRef = useRef<TocItem[]>([]);
   const feedOffRef = useRef<(() => void) | null>(null);
 
@@ -424,6 +435,17 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     persistView(g);
   };
 
+  /** 定位到节点并**保证可见**（第四轮 B）：画布/宿主（浮窗 portal）可能还没就位 → 有限重试直到 reveal 命中 */
+  const revealNode = (id: string, tries = 8) => {
+    let left = tries;
+    const tick = () => {
+      if (canvasRef.current && canvasRef.current.reveal(id)) return;
+      if (left-- <= 0) return;
+      window.setTimeout(tick, 120);
+    };
+    tick();
+  };
+
   const focusNode = (id: string) => {
     const g0 = graphRef.current;
     let g = g0;
@@ -433,7 +455,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       persistView(g);
     }
     setSelectedId(id);
-    window.setTimeout(() => canvasRef.current?.center(id), 320);
+    revealNode(id);
   };
 
   // 阅读透镜「在图谱中打开」：图载入后选中并居中（材料根映射为合成根卡）
@@ -446,6 +468,8 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     focusSeqRef.current = focusRequest.seq;
     if (id === ROOT_ID) setSelectedId(ROOT_ID);
     else focusNode(id);
+    if (focusRequest.flash?.length) flashNow(focusRequest.flash, focusRequest.seq);
+    onFocusConsumed?.(); // 用掉就回执（宿主清掉 focusRequest，免得重新进入页签时再来一遍）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest, loading, preview, nodeCount]);
 
@@ -645,6 +669,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
               onDeepen={(id) => (preview ? setNotice(T("先生成导图，再深挖单个节点。")) : void handleDeepen(id))}
               onToggleCollapse={toggleCollapse}
               onPrefetch={preview ? undefined : handlePrefetch}
+              flashIds={flash?.ids ?? null}
             />
           )}
         </div>,

@@ -14,6 +14,7 @@ import { buildCanvasSvg, type SvgLabels } from "../../../lib/mindmap/v2/svg";
 import {
   growthScope,
   lodFrames,
+  LOD,
   monotoneFrames,
   planTransition,
   throttleStep,
@@ -29,6 +30,8 @@ import { useT } from "../../../lib/i18n";
 export interface MindmapCanvasHandle {
   fit(): void;
   center(id: string): void;
+  /** 定位并保证**可见**：缩放低于 LOD 阈值时深层节点被摘要卡隐藏，先抬到阈值再居中；返回是否命中（布局未就位 → false，调用方可重试） */
+  reveal(id: string): boolean;
   zoomBy(factor: number): void;
   /** 自包含静态 SVG（已过 DOMPurify） */
   exportSvg(): string;
@@ -47,6 +50,14 @@ export interface MindmapCanvasV2Props {
   onToggleCollapse: (id: string) => void;
   /** 悬停 400ms（X4 同意与配额由主进程判定） */
   onPrefetch?: (id: string) => void;
+  /** 给定后接管双击：不再折叠切换（阅读透镜用它＝双击跳到原文） */
+  onNodeDoubleClick?: (id: string) => void;
+  /** 指针进出节点（null＝离开画布）；阅读透镜用它把节点对应的段落也亮起来 */
+  onHoverNode?: (id: string | null) => void;
+  /** 阅读位置所在节点（阅读透镜）：整卡用主题色底 + 白字（与主节点同款），浏览别处时仍看得出读到哪 */
+  readingId?: string | null;
+  /** 短暂高亮的区域（阅读透镜「在完整图谱中打开」）：把这批节点整体框一个主题色高亮区，淡出（约 2.4s） */
+  flashIds?: readonly string[] | null;
 }
 
 const ZMIN = 0.1;
@@ -147,7 +158,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     const fr = freshRef.current;
     const freshOn = performance.now() < fr.until;
     const labelZoom = view.k >= 0.8 ? 1 : 0.5; // route 只用 zoom 判「≥0.8 常显关系名」
-    const key = [d, p.graph, p.selectedId, hovered, p.relAll, p.focus, lod.join("|"), labelZoom, freshOn ? fr.ids : null, frameOpRef.current, p.rootTitle];
+    const key = [d, p.graph, p.selectedId, hovered, p.relAll, p.focus, lod.join("|"), labelZoom, freshOn ? fr.ids : null, frameOpRef.current, p.rootTitle, p.readingId, p.flashIds];
     const prev = contentKeyRef.current;
     const same = !!prev && prev.length === key.length && prev.every((v, i) => v === key[i]);
     const vp = svg.firstElementChild as SVGGElement | null;
@@ -170,7 +181,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       d,
       routed,
       { view: { tx: 0, ty: 0, k: 1 }, selected: p.selectedId, hovered, opacity: frameOpRef.current.opacity, leaving: frameOpRef.current.leaving, fresh: freshOn ? fr.ids : undefined, lodCollapsed: lod },
-      { fragment: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2c-" },
+      { fragment: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2c-", reading: p.readingId, flash: p.flashIds },
     );
     svg.innerHTML = `<g class="mm2-viewport" transform="${transform}">${inner}</g>`;
   }, []);
@@ -280,7 +291,10 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
 
   useEffect(() => {
     requestPaint();
-  }, [selectedId, relAll, focus, requestPaint]);
+    // flashIds 也要进依赖：连着两次「在完整图谱中打开」可能选中同一个节点（selectedId 不变），
+    // 只靠 selectedId 的重绘会漏掉第二次的高亮区。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, relAll, focus, props.flashIds, requestPaint]);
 
   // 清理时必须把句柄置空：React StrictMode 开发态会「挂载→清理→再挂载」，若只取消不置空，
   // requestPaint 见 rafRef 非空就以为已排帧，从此再不绘制（2026-10-18 用户实测：画布全程空白）。
@@ -335,6 +349,21 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         userMovedRef.current = true;
         viewEpochRef.current++;
         requestPaint();
+      },
+      reveal(id: string) {
+        const d = targetRef.current;
+        const box = boxRef.current;
+        const it = d?.byId[id];
+        if (!d || !box || !it) return false; // 布局/画布未就位：调用方重试
+        const r = box.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) return false; // 宿主还没有尺寸（浮窗/portal 未就位）
+        // 低于 LOD.zoom 时「深层节点」被摘要卡吞掉、不绘制 → 先抬到阈值，否则居中到空处（用户实测：跳过来却看不到那个点）
+        const k = Math.max(viewRef.current.k, LOD.zoom);
+        viewRef.current = { k, tx: Math.round(r.width / 2 - (it.x + it.w / 2) * k), ty: Math.round(r.height / 2 - (it.y + it.h / 2) * k) };
+        userMovedRef.current = true;
+        viewEpochRef.current++;
+        requestPaint();
+        return true;
       },
       zoomBy(factor: number) {
         const box = boxRef.current;
@@ -413,12 +442,19 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
   const onDoubleClick = (e: React.MouseEvent) => {
     const el = (e.target as Element).closest?.("[data-node-id]") as Element | null;
     const id = el?.getAttribute("data-node-id");
-    if (id && id !== ROOT_ID && (live.current.graph.children[id]?.length ?? 0) > 0) onToggleCollapse(id);
+    if (!id || id === ROOT_ID) return;
+    const custom = live.current.onNodeDoubleClick;
+    if (custom) {
+      custom(id);
+      return;
+    }
+    if ((live.current.graph.children[id]?.length ?? 0) > 0) onToggleCollapse(id);
   };
 
   const setHover = (id: string | null) => {
     if (hoverRef.current === id) return;
     hoverRef.current = id;
+    live.current.onHoverNode?.(id);
     if (hoverTimer.current != null) {
       window.clearTimeout(hoverTimer.current);
       hoverTimer.current = null;

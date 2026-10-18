@@ -214,6 +214,32 @@ console.error = (...a) => { errors.push(a.map(String).join(" ").slice(0, 800)); 
   check("就此制卡：回调收到 v2 结构语义包", await until(() => made.length === 1) && /^v2:/.test(made[0].nodeId) && made[0].section.length <= 1200 && made[0].section.includes("【结构语义包】"), made[0]);
   check("交互过程无渲染错误", !errors.length, errors.slice(0, 3));
 
+  console.log("---- 阅读透镜「在完整图谱中打开」：聚焦 + 透镜区域短暂高亮（第六轮 D194 需求③） ----");
+  {
+    const focusId = kids[0].nodeId;
+    const region = [target, ...kids.map((k) => k.nodeId)];
+    let req = { nodeId: focusId, seq: Date.now(), flash: region };
+    let consumed = 0;
+    const props = () => ({
+      kernel, documentId: "doc-dom", title: "测试材料", canvasHost: host, onJumpToText: () => {},
+      onMakeCardsFromNode: (p) => made.push(p),
+      focusRequest: req,
+      onFocusConsumed: () => { consumed++; req = null; },
+    });
+    rootEl.render(React.createElement(React.StrictMode, null, React.createElement(MindmapTab, props())));
+    const flashRect = () => host.querySelector("svg rect.mm2-flash");
+    check("跳过来后选中被指定的节点（居中定位）", await until(() => !!host.querySelector(`svg [data-sel="1"][data-node-id="${focusId}"]`), 6000), host.innerHTML.slice(-400));
+    check("把透镜展示过的区域整块框出来（主题色高亮区，便于认位置）", await until(() => !!flashRect(), 6000), flashRect() && flashRect().outerHTML);
+    check("高亮区按区域节点的包围盒算（有宽高）", !!flashRect() && Number(flashRect().getAttribute("width")) > 0 && Number(flashRect().getAttribute("height")) > 0, flashRect() && flashRect().outerHTML);
+    check("用完即回执宿主清掉 focusRequest", consumed === 1, consumed);
+    check("强调是短暂的：过了一会儿自动撤掉", await until(() => !flashRect(), 8000), !!flashRect());
+    // 切走页签会卸载本组件：再回来时不该重复聚焦 / 重复高亮（focusRequest 已被宿主清掉）
+    rootEl.render(React.createElement(React.StrictMode, null, React.createElement(MindmapTab, { ...props(), key: "again" })));
+    await sleep(500);
+    check("切走再回来不重复聚焦 / 重复高亮", !flashRect() && !host.querySelector("svg [data-sel='1']"), { flash: !!flashRect(), sel: !!host.querySelector("svg [data-sel='1']") });
+    check("跳转后无渲染错误", !errors.length, errors.slice(0, 3));
+  }
+
   rootEl.unmount();
   console.error = origErr;
   console.log(`\n结果：${pass} 通过，${fail} 失败`);

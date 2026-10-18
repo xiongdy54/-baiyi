@@ -266,7 +266,7 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 ### 9.4 结构图（阅读透镜 v2「聚焦图谱」，取代 9.3 的结构轨 + 列表面板）
 用户第二轮反馈（2026-10-18）：结构轨像阅读进度条、点轨任意处都弹同一菜单；列表看不出对应正文哪几段；祖先项「第一章」一点就跳去目录页、回不来；要的是**真正的图谱**——从完整图谱裁出、聚焦当前段落及与之相连的部分，并在正文里强调对应段落。
 - **入口**：工具栏「结构图」开关（`localStorage mm2.lens.open`）。结构轨删除。（第一稿是右侧停靠栏，同日第三轮被否，见下「摆放」。）
-- **裁图**（`src/lib/mindmap/v2/focus.ts` `buildFocus`，纯函数）：焦点 F＝阅读位置最深节点 / 用户点选节点；整体 W＝F 的父；成员＝W 的子（>7 取以 F 为中心的窗口 + 与 F 相连者，其余折「另 N 项」）；F 的下一层 ≤5；关系：一端在图内的全部边，图外对端作「别处」节点 ≤5（碰 F 3 分 > 碰 F 的子 / W 2 分 > 只碰其他成员 1 分；1 分的 ≤2 个，且对端在图内某点子树里的不算别处）。W 以上只留标题链（纯文字，不可点、不跳）。
+- **裁图**（`v2/focus.ts` `buildFocus`，纯函数；第五轮已随本方案整体退役，见 §12）：焦点 F＝阅读位置最深节点 / 用户点选节点；整体 W＝F 的父；成员＝W 的子（>7 取以 F 为中心的窗口 + 与 F 相连者，其余折「另 N 项」）；F 的下一层 ≤5；关系：一端在图内的全部边，图外对端作「别处」节点 ≤5（碰 F 3 分 > 碰 F 的子 / W 2 分 > 只碰其他成员 1 分；1 分的 ≤2 个，且对端在图内某点子树里的不算别处）。W 以上只留标题链（纯文字，不可点、不跳）。
 - **排版·纵向树**（`layoutTree`，tree / grid 版式）：左结构、右关系——左侧树干串成员（F 加重 + 左侧强调条，子缩进挂 F 下），图内关系画成卡片右侧的弧（3 条泳道），通往别处的关系连到右列卡片（卡片标「所在整体 · 类型」）；关系码徽标沿曲线避让。线型 / 端头沿用 `REL_STYLE`；碰 F 的关系用 accent。
 - **摆放与排法随结构类型（第三轮，用户 2026-10-18）**：右侧栏窄而挤、装不下时间轴等宽结构。做法＝「由 AI 返回的参数决定用哪个 UI 组件展示」：AI 生成图谱时每组本就附带 `{版式}` 提示（`patternHint`；无则 `selectPattern` 规则推断，手动覆盖优先），聚焦图取「整体」这一组的版式 → 排法家族 + 摆放：
   - tree / grid → 纵向树，**浮窗**；argument → 论证图（论点在上，支持一侧在左下，反方观点 / 反驳 / 让步在右下），**浮窗**；
@@ -277,15 +277,15 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 - **图 ↔ 正文**：`mindmap:graphNodeAnchors`（零 AI）给节点每个单元一对首尾 ≤32 字原文探针 → 内核可选能力 `setStructureHighlights(regions)`（foliate：`src/lib/reader/textRange.ts` 去空白比对找回 Range → CSS Custom Highlight `structure-focus` / `structure-hover`，章节重载自动重画、销毁时清除）。焦点节点的段落常亮；指针停在图中任一节点，它的段落也亮。PDF 暂未实现强调（能力缺省 → 静默降级）。
 - **导航纪律**：单击节点＝在图里换焦点（「浏览中」，正文不动；正在读的那一点仍有标记，可「回到正在读的段落」）；双击 / 详情「跳到原文」才跳，跳前记下最初的阅读位置 → 面板顶部「回到刚才读的位置」。
 - **详情**：类型 + 标题 + 讲解（已缓存则显示；否则「它在说什么」按需 1 次调用，走 `graphExplain`）+ 深挖 + 在完整图谱中打开 + 关系图例。
-- **测试**：`tests/m15v2.focus.test.cjs`（38）、`tests/m15v2.textrange.test.cjs`（7）、`tests/m15v2.lens.dom.test.cjs` 重写（30）、engine +3、ipc 15 通道。
+- **测试**：`focus.test.cjs`（38，第五轮已随裁图模块退役，见 §12）、`tests/m15v2.textrange.test.cjs`（7）、`tests/m15v2.lens.dom.test.cjs` 重写（30 → 第五轮再重写为 41）、engine +3、ipc 15 通道。
 - 待登记（随 T10）：IPC `mindmap:graphNodeAnchors`；内核契约 `setStructureHighlights` / `ReaderStructureRegion`。
 
 ## 10. 交接说明（2026-10-18，给下一位接手的 agent）
 
-**现状**：T1–T9 已提交（main：…ed08589 → 06846f2）。「结构图」（§9.4）为现行方案，§9.3 的结构轨 + 列表面板已被用户否决并删除。结构图**未在真实应用里验收过**（开发沙箱跑不了 Electron，只做了 jsdom 页面测试与离线渲染预览）。
+**现状**：T1–T9 已提交（main：…ed08589 → 06846f2）。「结构图」（§9.4）为第二轮方案，**第五轮已由 §12 取代**（透镜改为内嵌完整图谱画布；§9.4 的裁图 / 纵向树 / 按版式选摆放退役，§9.3 的结构轨 + 列表面板已被用户否决并删除）。结构图**未在真实应用里验收过**（开发沙箱跑不了 Electron，只做了 jsdom 页面测试与离线渲染预览）。
 
 **结构图入口文件**
-- `src/lib/mindmap/v2/focus.ts`：`buildFocus`（从完整图谱裁出聚焦小图）+ `layoutFocus`（按版式选排法：`layoutTree` / `layoutTopdown` / `layoutFlow` / `layoutColumns`；`FAMILY_OF` / `HOST_OF` 决定排法与浮窗 / 下方）。纯函数，测试 `tests/m15v2.focus.test.cjs`。
+- ~~`v2/focus.ts`：`buildFocus`（从完整图谱裁出聚焦小图）+ `layoutFocus`（按版式选排法；`FAMILY_OF` / `HOST_OF`）~~ **第五轮已退役**（见 §12）：透镜改为内嵌完整图谱画布，不再自绘裁图；其单测 `focus.test.cjs` 一并删除。
 - `src/components/reader/MindmapLens.tsx`：面板组件（定位、生成本节、正文强调、浏览 / 跟随、跳转与「回到刚才读的位置」、浮窗拖动缩放、下方拖高、浮窗 / 下方切换）。页面测试 `tests/m15v2.lens.dom.test.cjs`。
 - `src/components/Reader.tsx`：工具栏「结构图」开关、两个宿主 `.reader-lens-float-host`（正文视口覆盖层）/ `.reader-lens-dock-host`（右列末行）。
 - `electron/mindmapEngineV2.js`：`graphLocate` / `graphEnsureMap` / `graphNodeAnchors`（均零 AI）。
@@ -298,7 +298,57 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 2. 时间线排法里同一行卡片之间的关系弧会擦过时间轴；`wrapText` 会在英文单词中间断行。
 3. 浮窗初始几何依赖 `floatHost` 尺寸；窗口缩放后不会自动收回越界的浮窗。
 4. 关系线是启发式路由（`routeRel`：端口按相对位置选，穿卡时侧绕），复杂图仍可能交叉；未接 `route.ts` 的通道路由。
-5. 用户口头方向：按结构类型选「最优展示形式」——目前只用到整体这一组的 `{版式}`；可考虑让 outline 提示词对每组显式给出展示建议，或支持用户在图里切换排法（`layoutFocus` 已有 `opts.family`，UI 未暴露）。
+5. ~~用户口头方向：按结构类型选「最优展示形式」~~ **第五轮已作废**（见 §12）：透镜改为内嵌完整图谱画布，排法一律沿用完整图谱的块组合布局（不再有 `layoutFocus` 的家族选型 / `opts.family`）。
 6. T10 文档落盘（见 AI_DEVELOPMENT_GUIDE §9.5）与 GUI 套件适配。
 
-**验证方式**：`node tests/m15v2.{focus,textrange,lens.dom,engine,ipc,tab.dom}.test.cjs` 全绿；`node node_modules/typescript/bin/tsc --noEmit -p .` 为 0；真实效果需 `npm run dev` 打开一本已生成图谱的 EPUB，点工具栏「结构图」。用户的应用日志与数据库在 `%APPDATA%/incremental-reading-dev`（`logs/main.log`、`library.db`）。
+**验证方式**：`node tests/m15v2.{textrange,lens.dom,engine,ipc,tab.dom}.test.cjs` 全绿（`focus.test.cjs` 第五轮已退役）；`node node_modules/typescript/bin/tsc --noEmit -p .` 为 0；真实效果需 `npm run dev` 打开一本已生成图谱的 EPUB，点工具栏「结构图」。用户的应用日志与数据库在 `%APPDATA%/incremental-reading-dev`（`logs/main.log`、`library.db`）。
+
+## 11. 第四轮打磨（2026-10-18，用户第二轮实测反馈）
+
+用户：结构图（§9.4）功能方向对，但① 图样式与完整图谱不一致；② 浮窗「在完整图谱中打开」跳过去却不定位到该节点；③ 信息冗余（顶端「跟随阅读」、面包屑、底部「正在读 其余 N 段」说明）；④ 工具栏「结构图」开关样式与同排按钮不统一、点亮后内容贴边；⑤ 点「跳到原文」错跳目录页（BUG）；⑥ 点「它在说什么」输出里同一句重复两遍（BUG）；⑦ 输出无法收起。
+
+决策与实现（本分支 `feat/mindmap-lens-polish`）：
+1. **样式统一**：结构图 SVG 改用完整图谱同一套视觉 Token（对齐 `src/lib/mindmap/v2/svg.ts`：卡片底 `--paper`、描边 `--border-strong`；标题 `--ink`；元信息 `--text-secondary`；关系 `--text-secondary`（碰焦点转 accent）；装饰 `--paper` / `--border-subtle`）；卡片去圆角成直角 hairline；**图区底改 `--paper`**（对齐完整图谱 `.reader-map-stage` 的底），使卡片与底色关系一致。图内不再用阅读区 currentColor 混色；面板外壳（头 / 详情 / 按钮）仍随阅读主题。
+2. **「在完整图谱中打开」定位**：`MindmapCanvasHandle` 增 `reveal(id): boolean`——命中布局项才返回 true；先把缩放抬到 `LOD.zoom`（0.5）以上（否则深层节点被 LOD 摘要卡隐藏，居中到空处＝实测「没定位」），再居中。`MindmapTab` 聚焦改为**有限重试**调用 `reveal`（画布 / 布局晚于请求就绪也生效）。
+3. **去冗余**：去头部「跟随阅读」字样（保留「浏览中」与「回到正在读的段落」，后者是导航纪律的一部分）；去头部面包屑行（`mm2-focus-crumbs`，`buildFocus` 的 `crumbs` 字段随之不再消费）；去详情「正在读」徽标 + 节点标题行（即用户所指「正在读 其余 N 段」），点选节点后由图内高亮承担识别；去图内 reading tag 文字（保留阅读位置的强调色条）。
+4. **「结构图」开关**：去图标，只留文字；`reader-lens-btn` 明确 `padding: 0 var(--sp-3)` 与同排 `.btn-sm` 一致。
+5. **「跳到原文」**：旧实现「先 `goTo({href: unitAnchor})` 再 `goTo({search: 首 20 字})`」——兜底是**整书搜索、命中即止**，命中落在目录页就跳目录（与 §9.2 旧结构轨同因）。改为**仅在锚点跳转失败时**才用文本搜索兜底；正常路径只按单元锚点跳。精确段落由既有正文强调（§9.4「图 ↔ 正文」）在跳转后的单元里承担。
+6. **输出重复（根因）**：React StrictMode 下 `App.tsx` 的 `installMindmapBridge()` 被调两次（返回值被丢弃、无清理）→ `window.mindmapAPI.onDelta` 注册两份 → `mindmap:delta` 在 EventBus 上发两次 → 结构图对每条增量应用两次 → 讲解文本被追加两遍（大纲 / 深挖因节点按 id 覆盖，看不出）。修：`installMindmapBridge` 加安装守卫（与 `installActivityStore` 一致）。
+7. **讲解收起**：结构图讲解复用制卡台「AI 解释」的收起机制与样式类（`CardDock.tsx`：`.collapse-clip.wb-explain-clip` + `.collapse-inner` + `.wb-explain-toggle`，内容在上、把手在下、同箭头方向），默认展开（内容到达即展开）、点把手收起；结构图不是坞体（无尺寸查询容器）→ 局部覆盖 `.mm2-focus .wb-explain-clip`（`max-height: none`）、把滚动放到 `.collapse-inner`、并去掉 D149③ 的坞内顶缘 24px 渐隐（在浮窗里会压暗首行）。皮肤改动仍一处生效（换肤改 `.wb-explain-*` 两处同步）。
+
+测试：`tests/m15v2.lens.dom.test.cjs` 增/改用例（去冗余文案、讲解可收起、跳转不再整书搜索）；`node tests/m15v2.*.test.cjs` 全绿；`tsc --noEmit` 为 0。
+待登记（随 T10）：无新 IPC / 内核契约（`reveal` 是画布组件方法，非内核契约）；本轮决策同上并入 T10 的 §4.19 / D 编号登记。
+
+## 12. 第五轮打磨（2026-10-18，用户第三轮实测反馈）
+
+用户：① 结构图里「展开解释 / 收起解释」的横条走到解释内容**下方**了，应在上方；② 解释上方带方框的「定义」二字要去掉；③ **浮窗里的图与完整图谱排布对不上**（图 2 vs 图 3）——要的是「以当前阅读段落所处节点为中心、展示完整结构图」的**左右排布清晰结构**，子节点分叉默认收起（点击才展开，免得图太大），并复用完整图谱生成时的**生长动画**到所有展开动作；④ 设置页皮肤卡「陶土」右侧四字说明改「从容以赴」。
+
+决策与实现（本分支 `feat/mindmap-lens-polish`）：
+1. **解释横条移到内容上方 + 去「定义」框**：`MindmapLens.tsx` 详情区改为**把手在上**（`.wb-explain-toggle` 先于 `.collapse-clip` 渲染），箭头随几何翻向（展开＝朝上＝收起／收起＝朝下＝展开，`.is-flip`），`title` 随开合在「收起解释 / 展开解释」间切换。同时删除详情区标题行（`mm2-focus-detail-title`，即用户所指带方框的「定义」二字）——节点身份由图内高亮承担（承接第四轮 §11-3 去标题行的口径）。
+2. **放弃「自绘裁图」，改为内嵌完整图谱画布**（本轮主体）：删除透镜裁图模块（`v2/focus.ts`：`buildFocus` 裁图 + `layoutFocus` 四排法 + `FAMILY_OF` / `HOST_OF`）与其单测（`focus.test.cjs`）；`MindmapLens.tsx` 不再自绘 `.mm2f-*`，改为直接渲染 `<MindmapCanvasV2 graph={lensGraph} …>`——**与图谱页签同一份 `GraphState`、同一套 `layoutGraph` / `routeRelations` / `buildCanvasSvg`**，从而**天然获得完整图谱的左右排布与生长动画**，不再有「透镜一套排法、图谱另一套」的不一致。
+3. **折叠口径（透镜唯一改动的输入）**：`lensGraph = setView(graph, { collapsed })`——除**阅读节点的祖先链**（`ancestors(graph, readingId)`）外，所有有子节点的默认收起（`collapsed` 集合）；用户手动开合过的节点记 `overrides: Map<id, boolean>` 真值，**不随阅读位置重置**；`setView` 用 `new Set` 重建（graph.ts 纯 reducer 语义不变）。
+4. **单击＝选中并开合分叉、展开走生长动画**：`onSelect(id)` → `setSel` + 有子节点则翻转其 `collapsed`；`onToggleCollapse(id)`（画布「+N」徽标）同逻辑。**折叠 / 展开与「整图生成」走同一代码路径**——`layoutGraph` 增量重排 → `planTransition`（新进入帧记 `freshRef`、`FRESH_MS=1200` 虚线描边 + `frameOp.opacity` 过渡），故展开动作自带完整图谱同款生长动画（用户要求 ③「把这个展开动画应用到所有图谱的展开动作」）。
+5. **画布补三个最小能力**（`MindmapCanvasV2.tsx`，不改既有语义）：`onNodeDoubleClick?`（给了就接管双击——透镜用它＝双击跳原文，不再折叠切换）、`onHoverNode?`（指针进出节点回调 `null` ——透镜用它点亮对应段落）、`readingId?`（阅读位置节点加左条 + `data-reading`，浏览别处时仍看得出读到哪）。`svg.ts` 的 `SvgOptions` 增 `reading`，卡片加 `${isReading ? data("reading","1") : ""}` + 左侧 3px `--accent` 条。
+6. **折叠带动画的一个坑（已修）**：`toggleCollapse` / `onSelect` 的 `setOverrides` **更新器必须纯**——原先把 `!collapsedRef.current.has(id)` 写在更新器内，React 18 StrictMode 重放更新器时 ref 已被上一次渲染改过 → 结果被翻转（实测点了展开反而收起）。修法＝把 `next` 在更新器**外**算好。
+7. **摆放**：`host` 一律 `float`（`hostPref==="auto"` → `"float"`），不再按版式推断（完整图谱要地方）；浮窗默认几何 `FLOAT_MIN_W=420` / `MAX_W=640` / `MIN_H=340` / `MAX_H=580`，右下角；用户拖过 / 缩放过之后记住（`mm2.lens.float`）。
+8. **设置页短标**：`src/skins/claude/manifest.ts` `tagline` 「闲庭信步」→「从容以赴」（`SKIN_API_VERSION=3` 契约不动）；en/ja 词典键同步（`Calmly committed` / `悠然と挑む`）；`AI_DEVELOPMENT_GUIDE.md` D188 行同步订正。
+9. **退役**：透镜裁图模块 `v2/focus.ts` 与其单测 `focus.test.cjs`（全仓 grep 确认无其它引用 / 无 f11 等闸门引用）；`src/theme.css` 删 `.mm2-focus-svg` + `@keyframes mm2-focus-in` + 整段 `.mm2f-*`（约 40 行）+ `.mm2-focus-legend*`，`.mm2-focus-canvas` 改 `display:flex` 包住画布。§9.4 的「裁图 / 排版·纵向树 / 摆放与排法随结构类型」三步随之作废（保留为历史叙述）。
+
+测试：`tests/m15v2.lens.dom.test.cjs` 重写为**画布 DOM 断言**（41 项全绿）——选择器改 `.mm2-focus-canvas svg` 的 `g[data-node-id]` / `[data-sel='1']` / `[data-reading='1']` / `[data-act="unfold"]` / `[data-edge-id]` / `rect[stroke-dasharray]`（生长动画证据）；覆盖「阅读节点被标出且居中 / 同整体成员都在图上 / 关系线带标签 / 结构类型 / 默认收起 / 点击展开且带生长动画 / 单击选中 / 回到跟随 / 双击跳原文 + 回到刚才读的位置 / 讲解把手在内容上方 / 在完整图谱中打开 / 摆放切换 / 关闭清强调」。`node tests/m15v2.*.test.cjs` 全绿（17 套件）、`tsc --noEmit` 为 0。
+登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D193 / v49.20** 已登记；D188 行「陶土＝从容以赴」已订正；§4.19 相关条款随 T10 落盘。无新 IPC / 内核契约。
+
+## 13. 第六轮打磨（2026-10-18，用户第四轮实测反馈）
+
+用户：「从截图中可以看到，阅读界面的结构图面板中当前正在阅读图谱节点的高亮方式是加了一个主题色的框，且框的粗细不均匀，左侧线较粗，其他方向较细。我希望把当前阅读节点的高亮方式改成图中『动物化的后现代』那个主节点的强调方式，即整个节点使用主题色底色、白色文字。这样当前阅读节点会更明显。另外，虽然当前节点的子节点被收起，但其父节点太长太多，占用空间过大。以图中为例，父节点仅保留到『御宅族系文化所展现的后现代主义姿态』这个节点，其余更高层级的父节点请省略，不与展示。如果用户想查看更多父节点，需点击『在完整图谱中打开』按钮跳转到完整图谱。跳转后应该将阅读界面结构图所展示内容在完整结构图当中的相应区域，以高亮区域形式短暂强调，以便快速定位。」
+
+决策与实现（本分支 `feat/mindmap-lens-polish`）：
+
+1. **阅读节点＝顶卡同款强调（需求①）**（`svg.ts`）：删掉阅读节点左侧那条 3px `--accent` 填充（用户所指「框粗细不均、左侧较粗」的来源，第五轮 §12-5 的遗留），改为**整卡主题色底 + 白字**——`fill` 走 `isRoot || isReading ? "var(--accent)" : "var(--paper)"`，类型行与标题行的文字色走 `isReading ? "var(--accent-on)"`，描边也并入 `isRoot || isReading` 分支走 `--accent`（否则主题色底上会压一条 `--border-strong` 灰边）。`data-reading` 探针与「阅读节点居中」逻辑不变。
+2. **父链截断：以阅读节点的直接父节点为图顶（需求②）**（`MindmapLens.tsx`）：第五轮口径是「整树 + 除祖先链外全收起」，父链一路铺到书根 / 目录 / 章，占掉大半画布。新口径＝新增纯函数 `pruneToCut(state, cut)`：`cut = graph.nodes[readingId].parentId`，`keep = cut 的整棵子树`；`cut` 自身不进 `nodes`，其直接子节点 `parentId` 置 `null`（挂到合成根 `ROOT_ID`）；`cut.title` 交给画布顶卡的 `rootTitle` 呈现——于是透镜里只剩「截断点的标题（顶卡）+ 截断点下面那一层成员及其分支」，书根 / 目录 / 章一律不再出现。`patterns[cut]` 迁到 `patterns[ROOT_ID]` 以免组框与版式标签丢失；折叠集合仍为「除顶卡外所有有子节点默认收起」，`overrides: Map<id, boolean>` 手动开合记忆不变。想看更高层父节点的唯一通道＝「在完整图谱中打开」。
+3. **跳转后把透镜展示过的区域框出来（需求③）**：透镜侧算出 `lensRegionIds`＝顶节点（`cut`）+ 其下**所有未收起的后代**（即透镜实际画出来的那一片），`onOpenInMap(nodeId, region)` 一并交出；`Reader.tsx` 的 `mapFocus` / `MindmapTab.tsx` 的 `focusRequest` 增可选 `flash?: string[]`，`MindmapTab` 用 `flashNow` 置 4.2s 定时状态并透传给画布 `flashIds`；`buildCanvasSvg` 在卡片之后追加 `<rect class="mm2-flash">`（区域节点的包围盒外扩 8px，`rx=6`），样式落在 `theme.css`：`.mm2-flash { fill: var(--accent); fill-opacity: .1; stroke: var(--accent) }` + `@keyframes mm2-flash`（12% 淡入 → 60% 保持 → 100% 淡出，2400ms forwards），到点由定时器把元素撤掉。
+4. **画布补一处重绘依赖**（`MindmapCanvasV2.tsx`）：`flashIds` 必须进 `requestPaint` 的依赖数组——连着两次「在完整图谱中打开」可能选中同一个节点（`selectedId` 不变），只靠 `selectedId` 触发的重绘会漏掉第二次的高亮区。
+5. **一次性消费**：`focusRequest` 用掉即由 `MindmapTab` 经 `onFocusConsumed` 回执，`Reader` 把 `mapFocus` 清空——图谱页签切走会卸载 `MindmapTab`，留着旧请求会在下次进来时重复聚焦 / 重复高亮（`focusSeqRef` 只能挡同一次挂载内的重放）。
+
+测试：`tests/m15v2.lens.dom.test.cjs`（44 项全绿）按新语义改写受影响断言——「上方是它所属的整体（父节点卡也在图上）」→「以阅读节点的直接父节点为顶、更高层级父节点不展示、顶卡承载截断点标题」；「第二章分叉默认收起」→ 把阅读位置挪到未生成细分的第二章（阅读节点＝目录层级的「第二章」→ 以书根下一层为顶，「第一章」有子节点故默认收起）→ 点「+3」徽标展开（虚线描边＝生长动画证据）/ 点节点收起 / 再点又展开；「在完整图谱中打开」处补断言同步带出 `region`（含顶节点与各成员、不含被截断的祖先）。`tests/m15v2.tab.dom.test.cjs`（26 项全绿）增一节：传 `focusRequest{nodeId, seq, flash}` → 画布选中指定节点 + `.mm2-flash` 出现（有宽高）→ 反馈 `onFocusConsumed` → 过一会儿自动撤掉 → 再挂载（模拟切走页签再回来）不重复聚焦 / 不重复高亮。`tsc --noEmit` 为 0；`node tests/m15v2.*.test.cjs` 全绿（`m15v2.db` 为 `@runtime: electron`，node 直跑不适用）。
+
+登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D194 / v49.21**。无新 IPC / 内核契约。

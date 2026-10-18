@@ -2219,7 +2219,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "陶土": "Terracotta",
   "瑞士": "Swiss",
   "轻装上阵": "Travel light",
-  "闲庭信步": "A leisurely stroll",
+  "从容以赴": "Calmly committed",
   "引擎实验台（DEV）": "Engine Lab (DEV)",
   "暖纸底、衬线标题，克制强调色": "Warm paper, serif headings, restrained accent",
   "黑白灰、单强调色、直角网格": "Black/white/grey, one accent, right angles on a grid",
@@ -2395,7 +2395,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "反方一侧": "Opposing side",
   "相关的别处": "Related elsewhere",
   "拖动调整高度": "Drag to resize height",
-  "这一组的结构类型（{how}）——决定图的排法与摆放位置": "Structure type of this group ({how}) — decides how the graph is laid out and where it's shown",
+  "这一组的结构类型（{how}）": "Structure type of this group ({how})",
   "放到正文下方": "Show below the text",
   "改成浮窗": "Show as floating window",
 };

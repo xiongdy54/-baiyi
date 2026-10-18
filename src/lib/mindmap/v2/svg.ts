@@ -123,6 +123,10 @@ export interface SvgOptions {
   graph?: GraphState;
   /** 根卡标题；缺省 graph.meta.title（应与 layoutGraph 的 rootTitle 一致） */
   rootTitle?: string;
+  /** 阅读位置所在节点（阅读透镜用）：整卡 accent 底 + 白字 + `data-reading`，与「选中」区分 */
+  reading?: string | null;
+  /** 短暂高亮的区域（阅读透镜「在完整图谱中打开」）：把这批节点整体框一个 accent 高亮区（CSS 淡出） */
+  flash?: readonly string[] | null;
 }
 
 // ───────────────────────── 端头 ─────────────────────────
@@ -154,6 +158,7 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
   const pre = escapeXml(opts.idPrefix ?? "mm2-");
   const selected = st ? null : frameState.selected ?? null;
   const hovered = st ? null : frameState.hovered ?? null;
+  const reading = st ? null : opts.reading ?? null;
   const opMap = st ? {} : frameState.opacity ?? {};
   const fresh = st ? new Set<string>() : new Set(frameState.fresh ?? []);
   const lodSet = frameState.lodCollapsed ?? [];
@@ -227,11 +232,13 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
     const sel = selected === d.id;
     const hov = hovered === d.id;
     const isFresh = fresh.has(d.id);
+    const isReading = reading === d.id;
     const streaming = state === "streaming";
-    const stroke = isRoot ? "var(--accent)" : sel || isFresh || streaming ? "var(--accent)" : hov ? "var(--ink)" : "var(--border-strong)";
+    // 正在阅读的节点与根卡同一套强调（整卡主题色底 + 白字），描边也走主题色，免得底上压一条灰边
+    const stroke = isRoot || isReading ? "var(--accent)" : sel || isFresh || streaming ? "var(--accent)" : hov ? "var(--ink)" : "var(--border-strong)";
     const dash = !isRoot && (isFresh || streaming) ? ' stroke-dasharray="4 3"' : "";
-    let g = `<g transform="translate(${num(d.x)},${num(d.y)})"${data("node-id", d.id)}${attrOp(o * dimOf(d.id))}>`;
-    g += `<rect width="${num(d.w)}" height="${num(d.h)}" fill="${isRoot ? "var(--accent)" : "var(--paper)"}" stroke="${stroke}" stroke-width="${sel ? 2 : 1}"${dash}/>`;
+    let g = `<g transform="translate(${num(d.x)},${num(d.y)})"${data("node-id", d.id)}${sel ? data("sel", "1") : ""}${isReading ? data("reading", "1") : ""}${attrOp(o * dimOf(d.id))}>`;
+    g += `<rect width="${num(d.w)}" height="${num(d.h)}" fill="${isRoot || isReading ? "var(--accent)" : "var(--paper)"}" stroke="${stroke}" stroke-width="${sel ? 2 : 1}"${dash}/>`;
     const node = isRoot ? null : opts.graph?.nodes[d.id] ?? null;
     const title = isRoot ? opts.rootTitle ?? opts.graph?.meta?.title ?? "" : node ? node.title : "";
     if (isRoot) {
@@ -240,8 +247,8 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
       const muted = state === "stub";
       // 目录节点与「其他」类型不显示类型行（「其他 目录」这类标签只是噪音），标题垂直居中
       const typeText = node && node.source !== "toc" && node.type && node.type !== "其他" ? String(node.type) : "";
-      if (typeText) g += `<text x="12" y="18" font-size="${CARD.typeSize}" fill="var(--text-secondary)">${escapeXml(fitText(typeText, CARD.typeSize, titleRoom(d.w)))}</text>`;
-      g += `<text x="12" y="${typeText ? 36 : num(d.h / 2 + 5)}" font-size="${CARD.titleSize}"${node && node.source === "toc" ? ' font-weight="600"' : ""} fill="${muted ? "var(--text-secondary)" : "var(--ink)"}">${escapeXml(fitText(title, CARD.titleSize, titleRoom(d.w)))}</text>`;
+      if (typeText) g += `<text x="12" y="18" font-size="${CARD.typeSize}" fill="${isReading ? "var(--accent-on)" : "var(--text-secondary)"}">${escapeXml(fitText(typeText, CARD.typeSize, titleRoom(d.w)))}</text>`;
+      g += `<text x="12" y="${typeText ? 36 : num(d.h / 2 + 5)}" font-size="${CARD.titleSize}"${node && node.source === "toc" ? ' font-weight="600"' : ""} fill="${isReading ? "var(--accent-on)" : muted ? "var(--text-secondary)" : "var(--ink)"}">${escapeXml(fitText(title, CARD.titleSize, titleRoom(d.w)))}</text>`;
     }
     const bx = d.w - 10, by_ = d.h / 2;
     if (!isRoot && (state === "more" || state === "stub")) {
@@ -307,7 +314,20 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
     }
   }
 
-  const body = framesOut.join("") + decoOut.join("") + structOut.join("") + relOut.join("") + cardsOut.join("") + labelOut.join("");
+  // 阅读透镜「在完整图谱中打开」：透镜展示过的区域整体强调一下（CSS 淡出，样式见 theme.css 的 .mm2-flash）
+  let flashOut = "";
+  if (!st && opts.flash && opts.flash.length) {
+    const want = new Set(opts.flash);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const it of display.items) {
+      if (!want.has(it.id)) continue;
+      x0 = Math.min(x0, it.x); y0 = Math.min(y0, it.y);
+      x1 = Math.max(x1, it.x + it.w); y1 = Math.max(y1, it.y + it.h);
+    }
+    if (x1 > x0) flashOut = `<rect class="mm2-flash" x="${num(x0 - 8)}" y="${num(y0 - 8)}" width="${num(x1 - x0 + 16)}" height="${num(y1 - y0 + 16)}" rx="6"/>`;
+  }
+
+  const body = framesOut.join("") + decoOut.join("") + structOut.join("") + relOut.join("") + cardsOut.join("") + labelOut.join("") + flashOut;
 
   if (st) {
     const pad = Math.max(0, opts.pad ?? 24);

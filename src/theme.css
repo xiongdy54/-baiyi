@@ -9566,7 +9566,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .reader-lens-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  /* v11 第四轮：去掉图标后只留文字——显式给出与同排 .btn-sm 一致的横向内边距，
+     避免点亮（accent-soft 底）时文字贴边。 */
+  padding: 0 var(--sp-3);
 }
 .reader-lens-btn.is-on {
   border-color: var(--accent);
@@ -9586,11 +9588,14 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   min-width: 0;
   display: flex;
   flex-direction: column;
-  color: var(--reader-fg, var(--text-primary));
-  --mm2-accent: color-mix(in srgb, var(--accent) 78%, currentColor);
-  --mm2-line: color-mix(in srgb, currentColor 28%, transparent);
-  --mm2-faint: color-mix(in srgb, currentColor 10%, transparent);
-  background: var(--reader-bg, var(--paper));
+  /* 第四轮 A：与完整图谱（.reader-map-stage）同一套地面与字色——paper 底 + text-primary；
+     此前取读物自身配色（--reader-bg/--reader-fg），换书换肤时图的样子会跟着变、与完整图谱对不上。
+     第五轮：画的是同一张完整图谱画布（.mm2-focus-canvas > .mindmap-canvas），样式天然同源。 */
+  color: var(--text-primary);
+  background: var(--paper);
+  --mm2-accent: var(--accent);
+  --mm2-line: var(--border-strong);
+  --mm2-faint: var(--border-subtle);
   font-size: 13px;
   pointer-events: auto;
 }
@@ -9686,16 +9691,6 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   cursor: pointer;
 }
 .mm2-focus-x:hover { opacity: 1; }
-.mm2-focus-crumbs {
-  margin-top: 6px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: color-mix(in srgb, currentColor 55%, transparent);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mm2-focus-crumb + .mm2-focus-crumb::before { content: " › "; opacity: 0.7; }
 .mm2-focus-progress { height: 2px; margin-top: 8px; background: var(--mm2-faint); }
 .mm2-focus-progress > span { display: block; height: 100%; background: var(--mm2-accent); transition: width 200ms linear; }
 .mm2-focus-empty {
@@ -9709,11 +9704,29 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   flex: 1 1 auto;
   min-width: 0;
   min-height: 120px;
-  overflow: auto;
-  overscroll-behavior: contain;
+  position: relative;
+  display: flex;
 }
-.mm2-focus-svg { display: block; animation: mm2-focus-in 180ms ease-out; }
-@keyframes mm2-focus-in { from { opacity: 0; } to { opacity: 1; } }
+/* 第五轮：面板里放的就是完整图谱画布本身（.mindmap-canvas.mm2-canvas），不再是裁出来的小图 */
+.mm2-focus-canvas > .mindmap-canvas {
+  flex: 1 1 auto;
+  padding: var(--sp-2);
+}
+/* 第六轮：阅读透镜「在完整图谱中打开」——把透镜展示过的那片区域整块框出来，短暂强调（约 2.4s 淡出），便于快速定位 */
+.mindmap-canvas svg .mm2-flash {
+  fill: var(--accent);
+  fill-opacity: 0.1;
+  stroke: var(--accent);
+  stroke-width: 2;
+  pointer-events: none;
+  animation: mm2-flash 2400ms ease-out forwards;
+}
+@keyframes mm2-flash {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  60% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .mm2-focus-note {
   margin: 8px 12px;
   font-size: 12px;
@@ -9734,71 +9747,25 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 @keyframes mm2-focus-blink { 50% { opacity: 0.25; } }
 
-/* —— 图 —— */
-.mm2f-frame { fill: color-mix(in srgb, currentColor 2.5%, transparent); stroke: var(--mm2-faint); }
-.mm2f-axis { stroke: var(--mm2-line); stroke-width: 1.2; }
-.mm2f-tick { fill: var(--reader-bg, var(--paper)); stroke: var(--mm2-line); stroke-width: 1.2; }
-.mm2f-tick.is-focus { fill: var(--mm2-accent); stroke: var(--mm2-accent); }
-.mm2f-label { font-size: 11px; fill: color-mix(in srgb, currentColor 50%, transparent); }
-.mm2f-seq path { fill: none; stroke: color-mix(in srgb, currentColor 45%, transparent); stroke-width: 1.2; }
-.mm2f-tree-line { fill: none; stroke: var(--mm2-line); stroke-width: 1; }
-.mm2f-tree-line.is-strong { stroke: color-mix(in srgb, currentColor 55%, transparent); stroke-width: 1.4; }
-.mm2f-gap rect { fill: none; stroke: var(--mm2-line); stroke-dasharray: 3 3; }
-.mm2f-gap text { font-size: 11px; fill: color-mix(in srgb, currentColor 55%, transparent); }
-.mm2f-node { cursor: pointer; outline: none; }
-.mm2f-card { fill: var(--reader-bg, var(--paper)); stroke: var(--mm2-line); stroke-width: 1; transition: stroke 120ms ease, fill 120ms ease; }
-.mm2f-title { fill: currentColor; font-size: 13px; }
-.mm2f-meta { font-size: 11px; fill: color-mix(in srgb, currentColor 52%, transparent); }
-.mm2f-node.is-whole .mm2f-card { fill: color-mix(in srgb, currentColor 5%, var(--reader-bg, var(--paper))); }
-.mm2f-node.is-whole .mm2f-title { font-weight: 600; }
-.mm2f-node.is-member:not(.is-linked) { opacity: 0.62; }
-.mm2f-node.is-external .mm2f-card { stroke-dasharray: 4 3; }
-.mm2f-node.is-external:not(.is-linked) { opacity: 0.7; }
-.mm2f-node.is-focus .mm2f-card {
-  fill: color-mix(in srgb, var(--mm2-accent) 12%, var(--reader-bg, var(--paper)));
-  stroke: var(--mm2-accent);
-  stroke-width: 1.6;
-}
-.mm2f-node.is-focus .mm2f-title { font-weight: 600; }
-.mm2f-node.is-focus .mm2f-meta { fill: var(--mm2-accent); }
-.mm2f-node.is-hover .mm2f-card,
-.mm2f-node:focus-visible .mm2f-card { stroke: var(--mm2-accent); }
-.mm2f-node.is-hover { opacity: 1; }
-.mm2f-reading-bar { fill: var(--mm2-accent); }
-.mm2f-reading-tag { font-size: 10px; fill: var(--mm2-accent); }
-.mm2f-rel path { fill: none; stroke: color-mix(in srgb, currentColor 42%, transparent); }
-.mm2f-rel.is-focus path { stroke: var(--mm2-accent); }
-.mm2f-rel:not(.is-focus):not(.is-lit) { opacity: 0.6; }
-.mm2f-rel.is-lit path { stroke-width: 2.2; }
-.mm2f-rel-badge circle { fill: var(--reader-bg, var(--paper)); stroke: color-mix(in srgb, currentColor 42%, transparent); }
-.mm2f-rel.is-focus .mm2f-rel-badge circle { stroke: var(--mm2-accent); }
-.mm2f-rel-badge text { font-size: 10px; text-anchor: middle; fill: currentColor; }
-.mm2f-rel.is-focus .mm2f-rel-badge text { fill: var(--mm2-accent); }
-.mm2f-mk { fill: color-mix(in srgb, currentColor 42%, transparent); }
-.mm2f-mk-line { stroke: color-mix(in srgb, currentColor 42%, transparent); stroke-width: 1.4; }
-.mm2f-mk.mm2f-mk-a { fill: var(--mm2-accent); }
-.mm2f-mk-line.mm2f-mk-a { stroke: var(--mm2-accent); }
-
 /* —— 详情 —— */
 .mm2-focus-detail {
   flex: 0 0 auto;
   max-height: 42%;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   padding: 10px 12px 10px;
-  border-top: 1px solid var(--mm2-faint);
+  border-top: 1px solid var(--border-subtle);
 }
-.mm2-focus-detail-meta { display: flex; gap: 6px; min-height: 18px; }
-.mm2-focus-type,
-.mm2-focus-reading {
-  font-size: 11px;
-  line-height: 18px;
-  padding: 0 6px;
-  border: 1px solid var(--mm2-faint);
-  color: color-mix(in srgb, currentColor 62%, transparent);
-}
-.mm2-focus-reading { border-color: var(--mm2-accent); color: var(--mm2-accent); }
-.mm2-focus-detail-title { margin: 6px 0 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
-.mm2-focus-explain { margin: 6px 0 0; font-size: 13px; line-height: 1.65; color: color-mix(in srgb, currentColor 80%, transparent); }
+/* 第四轮 D3：解释收起复用制卡台「AI 解释板块」同一套骨架（.collapse-clip.wb-explain-clip + .collapse-inner +
+   .wb-explain-toggle）——换肤时一处改、两处同步。浮窗不是坞体（无尺寸查询容器）：55cqh 失去参照、
+   D149③ 的顶缘 24px 渐隐会压暗首行，故此处各自覆盖；正文仍在 .collapse-inner 内滚动。
+   第五轮：把手挪到正文上方（用户要求），故不再需要坞内的「内容在上」几何假设。 */
+.mm2-focus-explain-wrap { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.mm2-focus .wb-explain-clip { flex: 1 1 auto; min-height: 0; max-height: none; }
+.mm2-focus .wb-explain-clip > .collapse-inner { min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.mm2-focus .wb-explain-clip > .collapse-inner::after { content: none; background: none; }
+.mm2-focus-explain { margin: 4px 0 0; font-size: 13px; line-height: 1.65; color: var(--text-primary); }
 .mm2-focus-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .mm2-focus-btn {
   font: inherit;
@@ -9822,35 +9789,13 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   cursor: pointer;
 }
 .mm2-focus-link:hover { text-decoration: underline; }
-.mm2-focus-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 10px;
-  font-size: 11px;
-  color: color-mix(in srgb, currentColor 55%, transparent);
-}
-.mm2-focus-legend-item b {
-  display: inline-grid;
-  place-items: center;
-  width: 16px;
-  height: 16px;
-  margin-right: 4px;
-  border: 1px solid var(--mm2-line);
-  border-radius: 50%;
-  font-weight: 400;
-  font-size: 10px;
-  color: currentColor;
-}
 .mm2-focus button:focus-visible {
   outline: 2px solid var(--mm2-accent);
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .mm2-focus-svg,
   .mm2-focus.is-float,
   .mm2-focus-live::before,
-  .mm2f-card,
   .mm2-focus-progress > span {
     animation: none;
     transition: none;

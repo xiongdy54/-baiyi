@@ -618,7 +618,7 @@ export default function Reader({
   const [lensFloatHost, setLensFloatHost] = useState<HTMLDivElement | null>(null);
   const [lensDockHost, setLensDockHost] = useState<HTMLDivElement | null>(null);
   const lensSupported = !!lensKernel && typeof lensKernel.getReadingProbe === "function";
-  const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number } | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number; flash?: string[] } | null>(null);
   /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
   const [annotSort, setAnnotSort] = useState<AnnotSort>("pos");
   /** v48.44（D84）：图谱页签画布的 portal 宿主（.reader-engine-main 内覆盖层；空＝不渲染画布） */
@@ -1767,6 +1767,7 @@ export default function Reader({
                           initialMapId={openMindmapMapId || null}
                           initialResumeRunId={resumeOnce}
                           focusRequest={mapFocus}
+                          onFocusConsumed={() => setMapFocus(null)}
                           onJumpToText={() => setSidebarOpen(false)}
                           onMakeCardsFromNode={(payload) => {
                             // v48.5 批C：结构制卡——mode=card-structure（导图节点专用分支，对作者组织结构出题）
@@ -1794,12 +1795,6 @@ export default function Reader({
                       title={lensOpen ? T("关闭结构图") : T("结构图：看正在读的这一段在全书结构中的位置")}
                       onClick={() => setLensOpen(!lensOpen)}
                     >
-                      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3">
-                        <rect x="1.5" y="1.5" width="5" height="3.2" rx="0.6" />
-                        <rect x="7.5" y="5.4" width="5" height="3.2" rx="0.6" />
-                        <rect x="7.5" y="9.6" width="5" height="3.2" rx="0.6" />
-                        <path d="M3.4 4.7V11.2H7.5M3.4 7H7.5" />
-                      </svg>
                       <span>{T("结构图")}</span>
                     </button>
                   )}
@@ -2129,10 +2124,10 @@ export default function Reader({
                   open={lensOpen}
                   onClose={() => setLensOpen(false)}
                   hidden={sidebarOpen && sidebarTab === "map"}
-                  onOpenInMap={(nodeId) => {
+                  onOpenInMap={(nodeId, region) => {
                     setSidebarTab("map");
                     setSidebarOpen(true);
-                    if (nodeId) setMapFocus({ nodeId, seq: Date.now() });
+                    if (nodeId) setMapFocus({ nodeId, seq: Date.now(), flash: region });
                   }}
                 />
               </div>

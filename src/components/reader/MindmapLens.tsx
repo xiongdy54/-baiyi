@@ -1,31 +1,35 @@
 // 结构透镜 v2「聚焦图谱」——阅读正文时，在正文右侧看到「正在读的这一段」在材料结构里的位置（用户 2026-10-18 第二轮）。
 // 第一版（右缘细轨 + 文字列表面板）被否：像阅读进度条、点轨任意处都弹同一菜单、看不出列表项对应哪几段、
-// 点「第一章」跳去目录页且回不来。本版：
-//   · 入口＝工具栏「结构图」开关（Reader 控制 open）；
+// 点「第一章」跳去目录页且回不来。
+// 演化：
 //   · 第三轮（同日）：右侧栏太窄、装不下时间轴等宽结构 → 按整体这一组的「版式」选排法与摆放：
 //     AI 生成图谱时就给每组附带了 `{版式}` 提示（无则规则推断），窄高的（树 / 网格 / 论证图）放浮窗，
 //     宽矮的（链 / 时间线 / 分层 / 对照）放正文下方；用户可手动切换（记住偏好），浮窗可拖动、缩放；
-//   · 内容＝真正的节点-连线图，从完整图谱裁出（src/lib/mindmap/v2/focus.ts）：上方是它所属的整体，
-//     左侧树干串起同一整体下的各部分（当前这点加粗、它的下一层挂在下面），右侧是与它相关的别处内容，
-//     关系线标出「支持 / 反驳 / 依据 / 推出 …」；
+//   · 第四轮：复用整套阅读透镜交互（题材 Token 对齐、reveal 定位、去冗余、跳到原文、讲解可收起）；
+//   · 第五轮（2026-10-18，本轮）：**并入完整图谱画布**（用户实测：裁图版式与完整图谱的左右排布对不上）。
+//     面板里不再是「裁出来的小图」，而是与图谱页签**同一套 MindmapCanvasV2** 画**完整结构图**：
+//       · 以「当前阅读段落所处节点」为中心（canvas.reveal）；
+//       · 子节点分叉默认收起（除阅读节点祖先链外全部折叠，避免整图过大），单击节点＝展开 / 收起其分叉；
+//       · 展开沿用画布的生长动画（planTransition 进入帧 + 「刚到达」描边），与完整图谱生成时同一套。
 //   · 图 ↔ 正文：焦点节点对应的段落在正文里底色强调，指针停在图里任何节点上，它对应的段落也亮起来
-//     （kernel.setStructureHighlights）；
-//   · 单击图中节点＝在图里换焦点查看（不跳转正文）；双击或「跳到原文」才跳，跳之前记下阅读位置，
+//     （canvas.onHoverNode → kernel.setStructureHighlights）；
+//   · 单击图中节点＝选中（并展开 / 收起它的分叉）；双击或「跳到原文」才跳，跳之前记下阅读位置，
 //     面板顶部出现「回到刚才读的位置」；浏览别处时随时「回到正在读的段落」。
 // 数据：kernel.getReadingProbe → mindmap:graphLocate（零 AI）；图走 graphLoad + EventBus mindmap/delta；
 //      段落强调锚走 mindmap:graphNodeAnchors（零 AI）；原文送入与图谱页签共用 mindmapFeed 单例。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ReaderKernel, ReaderLocation, ReaderStructureRegion } from "../../lib/reader/kernel";
-import type { GraphState, RelCode, V2Node } from "../../lib/mindmap/v2/types";
-import { applyDelta, createGraph } from "../../lib/mindmap/v2/graph";
-import { REL_STYLE } from "../../lib/mindmap/v2/route";
-import { buildFocus, layoutFocus, type FocusBox, type FocusHost, type FocusLayout, type FocusModel } from "../../lib/mindmap/v2/focus";
-import { HOW_NAMES, PATTERN_NAMES } from "../../lib/mindmap/v2/pattern";
+import type { GraphState, V2Edge, V2Node, PatternKey } from "../../lib/mindmap/v2/types";
+import { ROOT_ID } from "../../lib/mindmap/v2/types";
+import { ancestors, applyDelta, childrenOf, createGraph, setView } from "../../lib/mindmap/v2/graph";
+import { groupFacts, selectPattern, HOW_NAMES, PATTERN_NAMES } from "../../lib/mindmap/v2/pattern";
+import MindmapCanvasV2, { type MindmapCanvasHandle } from "./mindmap/MindmapCanvasV2";
 import { mindmapV2Api, type GraphLocate, type MindmapDelta, type NodeAnchor } from "../../lib/mindmapV2";
 import { ensureFed, resetFeed, subscribeFeed, type FeedState } from "../../lib/mindmapFeed";
 import { eventBus } from "../../lib/eventbus";
 import { useT } from "../../lib/i18n";
+import { IconChevronDown } from "../icons";
 
 export interface MindmapLensProps {
   kernel: ReaderKernel | null;
@@ -37,20 +41,25 @@ export interface MindmapLensProps {
   /** 图谱页签正盖在正文上时隐藏（状态保留） */
   hidden: boolean;
   /** 「在完整图谱中打开」：切到图谱页签并聚焦该节点 */
-  onOpenInMap: (nodeId: string | null) => void;
+  onOpenInMap: (nodeId: string | null, region?: string[]) => void;
   /** 浮窗宿主（正文视口内的覆盖层）；缺省＝就地渲染（测试） */
   floatHost?: HTMLElement | null;
   /** 正文下方宿主；缺省＝就地渲染（测试） */
   dockHost?: HTMLElement | null;
 }
 
-type HostPref = "auto" | FocusHost;
+type HostPref = "auto" | "float" | "dock";
 interface FloatGeom { x: number; y: number; w: number; h: number; user: boolean }
 const K_HOST = "mm2.lens.host";
 const K_FLOAT = "mm2.lens.float";
 const K_DOCK = "mm2.lens.dockH";
 const DOCK_MIN = 180;
 const DOCK_DEFAULT = 300;
+/** 浮窗默认尺寸（完整图谱要地方；用户拖过 / 缩放过之后记住） */
+const FLOAT_MIN_W = 420;
+const FLOAT_MAX_W = 640;
+const FLOAT_MIN_H = 340;
+const FLOAT_MAX_H = 580;
 
 function readJSON<T>(key: string, fallback: T): T {
   try {
@@ -68,7 +77,30 @@ function writeJSON(key: string, v: unknown) {
   }
 }
 
-const MARKERS = ["arrow", "bar", "open", "dot"] as const;
+/**
+ * 第五轮 · 父链截断：以 `cut`（阅读节点的直接父节点）为**顶**的剪枝图。
+ * keep = cut 的整棵子树；cut 自身不进 nodes、其直接子节点改挂 ROOT_ID（cut 的标题由画布顶卡 rootTitle 呈现），
+ * 其余更高层级父节点（章 / 目录 / 书根）一律不展示。边只留两端都在子树里的。
+ */
+function pruneToCut(state: GraphState, cut: string): GraphState {
+  if (!state.meta || !state.nodes[cut]) return state;
+  const keep = new Set<string>();
+  const stack = [cut];
+  while (stack.length) {
+    const id = stack.pop()!;
+    if (!state.nodes[id] || keep.has(id)) continue;
+    keep.add(id);
+    for (const c of state.children[id] ?? []) stack.push(c);
+  }
+  const nodes: V2Node[] = [];
+  const edges: V2Edge[] = [];
+  for (const id of keep) {
+    if (id === cut) continue;
+    nodes.push({ ...state.nodes[id], parentId: state.nodes[id].parentId === cut ? null : state.nodes[id].parentId });
+    for (const e of state.outEdges[id] ?? []) if (e.to !== cut && keep.has(e.to)) edges.push(e);
+  }
+  return createGraph({ meta: state.meta, nodes, edges, view: null }, state.mapId ?? undefined);
+}
 
 export default function MindmapLens({ kernel, documentId, title, open, onClose, hidden, onOpenInMap, floatHost, dockHost }: MindmapLensProps) {
   const T = useT();
@@ -82,13 +114,17 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
   busyRef.current = busy;
   const [note, setNote] = useState("");
   const [hasKey, setHasKey] = useState(true);
-  /** 浏览别处：图的焦点＝用户点选的节点；null＝跟随阅读 */
-  const [picked, setPicked] = useState<string | null>(null);
+  /** 浏览别处：选中＝用户点选的节点；null＝跟随阅读 */
+  const [sel, setSel] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
+  /** 折叠覆盖：用户手动展开 / 收起过的节点（记真值，不随阅读位置自动重置） */
+  const [overrides, setOverrides] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   /** 「跳到原文」前的阅读位置 */
   const [backLoc, setBackLoc] = useState<ReaderLocation | null>(null);
   const [explainLocal, setExplainLocal] = useState<Record<string, string>>({});
   const [explainBusy, setExplainBusy] = useState<string | null>(null);
+  /** 「它在说什么」输出开合（第四轮 D3：复用制卡台 AI 解释板块同一套收起——.wb-explain-toggle + .collapse-clip） */
+  const [explainOpen, setExplainOpen] = useState(true);
   const [hostPref, setHostPrefState] = useState<HostPref>(() => {
     const v = readJSON<string>(K_HOST, "auto");
     return v === "float" || v === "dock" ? v : "auto";
@@ -110,6 +146,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
   /** 正文强调锚缓存：`${mapId}|${nodeId}` → 锚（null＝无区间 / 原文未到） */
   const anchorCache = useRef<Map<string, NodeAnchor[] | null>>(new Map());
   const explainJobRef = useRef<string | null>(null);
+  const canvasRef = useRef<MindmapCanvasHandle>(null);
 
   const supported = !!kernel && !!documentId && typeof kernel.getReadingProbe === "function" && typeof kernel.getSectionAnchors === "function";
   const active = open && !hidden && supported;
@@ -177,10 +214,12 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     setGraph(null);
     setBusy(null);
     setNote("");
-    setPicked(null);
+    setSel(null);
     setHoverId(null);
+    setOverrides(new Map());
     setBackLoc(null);
     setExplainLocal({});
+    setExplainOpen(true);
     anchorCache.current.clear();
     retriedRef.current = false;
   }, [documentId, kernel]);
@@ -255,20 +294,74 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     });
   }, [active, loadGraph, scheduleLocate]);
 
-  // ---------- 派生：聚焦小图 ----------
+  // ---------- 派生：父链截断后的子图 + 透镜折叠（默认分叉收起） ----------
   const readingId = loc?.nodeId && graph && graph.mapId === loc.mapId && graph.nodes[loc.nodeId] ? loc.nodeId : null;
-  const focusId = picked && graph?.nodes[picked] ? picked : readingId;
-  const model: FocusModel | null = useMemo(() => (graph && focusId ? buildFocus(graph, focusId) : null), [graph, focusId]);
-  const typeLabel = useCallback((n: V2Node) => (n.source !== "toc" && n.type && n.type !== "其他" ? T(String(n.type)) : ""), [T]);
-  const layout: FocusLayout | null = useMemo(
-    () => (model ? layoutFocus(model, Math.max(300, (fl?.w ?? 440) - 2), { type: typeLabel, more: (k) => T("另 {n} 项", { n: k }) }) : null),
-    [model, fl?.w, typeLabel, T],
-  );
-  const host: FocusHost = hostPref === "auto" ? layout?.host ?? "float" : hostPref;
+  const focusId = sel && sel !== ROOT_ID && graph?.nodes[sel] ? sel : readingId;
+  /** 截断点＝阅读节点的直接父节点（第六轮：它成为图的顶；更高层级父节点不展示） */
+  const cutId = readingId && graph ? graph.nodes[readingId]?.parentId ?? null : null;
+  const cutNode = cutId && graph?.nodes[cutId] ? graph.nodes[cutId] : null;
+  /**
+   * 第五轮 / 第六轮：透镜画的是**完整结构图**（同一份 GraphState、同一画布），只改两处口径——
+   * ① 父链截断：以阅读节点的直接父节点为顶（更上层父节点不展示，想看更多父节点就跳完整图谱）；
+   * ② 折叠：除顶节点（必展开）外，所有有子节点的默认收起，避免整图过大；用户手动开合过的节点用
+   *    overrides 记住真值，不随阅读位置被重置。
+   */
+  const lensGraph = useMemo(() => {
+    if (!graph) return null;
+    const collapsed = new Set<string>();
+    if (cutId && graph.nodes[cutId]) {
+      const pruned = pruneToCut(graph, cutId);
+      for (const id of Object.keys(pruned.nodes)) {
+        if ((pruned.children[id]?.length ?? 0) === 0) continue;
+        if (overrides.get(id) ?? true) collapsed.add(id);
+      }
+      const patterns: Record<string, PatternKey> = { ...(graph.view.patterns as Record<string, PatternKey>) };
+      delete patterns[cutId];
+      patterns[ROOT_ID] = graph.view.patterns[cutId] ?? selectPattern(groupFacts(graph, cutId, childrenOf(graph, cutId)));
+      return setView(pruned, { patterns, collapsed: [...collapsed] });
+    }
+    const chain = readingId ? new Set(ancestors(graph, readingId)) : new Set<string>();
+    for (const id of Object.keys(graph.nodes)) {
+      if ((graph.children[id]?.length ?? 0) === 0) continue;
+      const o = overrides.get(id);
+      if (o !== undefined ? o : !chain.has(id)) collapsed.add(id);
+    }
+    return setView(graph, { patterns: graph.view.patterns, collapsed: [...collapsed] });
+  }, [graph, readingId, cutId, overrides]);
+  const collapsedRef = useRef<ReadonlySet<string>>(new Set());
+  collapsedRef.current = lensGraph?.collapsed ?? new Set();
+
+  /** 「在完整图谱中打开」后短暂强调的区域＝透镜当前**展示出来的**节点（顶节点 + 未收起的后代） */
+  const lensRegionIds = useMemo(() => {
+    if (!graph || !cutId || !graph.nodes[cutId]) return readingId ? [readingId] : [];
+    const out: string[] = [cutId];
+    const collapsed = lensGraph?.collapsed;
+    const walk = (id: string) => {
+      for (const c of graph.children[id] ?? []) {
+        out.push(c);
+        if (!collapsed?.has(c)) walk(c);
+      }
+    };
+    walk(cutId);
+    return out;
+  }, [graph, cutId, readingId, lensGraph]);
+
+  /** 画布内可达的选中 / 焦点（sel 可能指向被截断掉的祖先层级，回落为 null，避免画布选不中虚 id） */
+  const lensFocusId = lensGraph && focusId && lensGraph.nodes[focusId] ? focusId : null;
+
+  /** 版式标签（保留「图谱类型」，如图中的「论证图」）：按焦点所在组的规则 / 提示 / 手动求 */
+  const patternSel = useMemo(() => {
+    if (!graph) return null;
+    const gid = focusId ? graph.nodes[focusId]?.parentId ?? ROOT_ID : ROOT_ID;
+    if (gid !== ROOT_ID && !graph.nodes[gid]) return null;
+    return selectPattern(groupFacts(graph, gid, childrenOf(graph, gid)));
+  }, [graph, focusId]);
+
+  const host: "float" | "dock" = hostPref === "auto" ? "float" : hostPref;
 
   const scopeNode = loc?.scopeNodeId && graph ? graph.nodes[loc.scopeNodeId] ?? null : null;
   const scopeStreaming = scopeNode?.state === "streaming";
-  const needsGenerate = !!loc?.ready && !loc.scopeOutlined && !loc.scopeFloor && !!loc.scopeNodeId && !scopeStreaming && !picked;
+  const needsGenerate = !!loc?.ready && !loc.scopeOutlined && !loc.scopeFloor && !!loc.scopeNodeId && !scopeStreaming && !sel;
 
   // ---------- 正文强调 ----------
   const [anchorTick, setAnchorTick] = useState(0);
@@ -315,6 +408,51 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
   }, [kernel, active, focusId, hoverId, anchorTick, graph?.mapId]);
   useEffect(() => () => kernel?.setStructureHighlights?.([]), [kernel]);
 
+  // ---------- 画布交互 ----------
+  /** 定位到节点并**保证可见**（画布 / 宿主可能还没就位 → 有限重试直到 reveal 命中） */
+  const revealNode = useCallback((id: string, tries = 8) => {
+    let left = tries;
+    const tick = () => {
+      if (canvasRef.current?.reveal(id)) return;
+      if (left-- <= 0) return;
+      window.setTimeout(tick, 120);
+    };
+    tick();
+  }, []);
+
+  // 跟随阅读：阅读位置换了（或刚回到跟随）→ 把阅读节点移到视野中心（浏览别处时不打扰）
+  useEffect(() => {
+    if (sel || !readingId) return;
+    revealNode(readingId);
+  }, [readingId, sel, graph?.mapId, revealNode]);
+
+  const toggleCollapse = useCallback((id: string) => {
+    if (id === ROOT_ID) return;
+    // 目标值在更新器**外**算好：更新器必须纯（React StrictMode 会重放它，ref 在两次重放之间会变）
+    const next = !collapsedRef.current.has(id);
+    setSel(id);
+    setOverrides((m) => new Map(m).set(id, next));
+  }, []);
+
+  const onSelect = useCallback(
+    (id: string | null) => {
+      setNote("");
+      if (!id || id === ROOT_ID) {
+        setSel(null);
+        return;
+      }
+      setSel(id);
+      // 第五轮：单击＝展开 / 收起它的分叉（子节点分叉默认收起，点一下才长出来）
+      if ((graphRef.current?.children[id]?.length ?? 0) > 0) {
+        const next = !collapsedRef.current.has(id);
+        setOverrides((m) => new Map(m).set(id, next));
+      }
+    },
+    [],
+  );
+
+  const onHover = useCallback((id: string | null) => setHoverId(id && id !== ROOT_ID ? id : null), []);
+
   // ---------- 动作 ----------
   const jumpTo = async (id: string) => {
     const g = graphRef.current;
@@ -328,10 +466,14 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
       }
       // 记下最初的阅读位置（连跳几次也只回到最初那里）
       if (here) setBackLoc((prev) => prev ?? here);
-      await kernel.goTo({ href: t.unitAnchor });
-      const probe = (t.text || "").replace(/\s+/g, " ").trim().slice(0, 20);
-      if (probe.length >= 6) await kernel.goTo({ search: probe }).catch(() => false);
-      setPicked(null); // 跳过去就是在读它了：回到跟随
+      const ok = await kernel.goTo({ href: t.unitAnchor });
+      // 第四轮 D1：整书搜索是「命中即止」，命中落在目录页时会把读者甩到目录（§9.2 旧结构轨同因）。
+      // 只在 href 跳转失败（该书没有这个单元锚）时才用「前 20 字」兜底。
+      if (!ok) {
+        const probe = (t.text || "").replace(/\s+/g, " ").trim().slice(0, 20);
+        if (probe.length >= 6) await kernel.goTo({ search: probe }).catch(() => false);
+      }
+      setSel(null); // 跳过去就是在读它了：回到跟随
     } catch {
       /* 跳转是尽力而为 */
     }
@@ -340,7 +482,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     if (!kernel || !backLoc) return;
     const target = backLoc;
     setBackLoc(null);
-    setPicked(null);
+    setSel(null);
     try {
       await kernel.goTo(target);
     } catch {
@@ -393,6 +535,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     const g = graphRef.current;
     if (!g?.mapId) return;
     setNote("");
+    setExplainOpen(true); // 与制卡台一致：内容到达即展开（用户随时可用上方的开合把手收起）
     try {
       const r = await mindmapV2Api.explain(g.mapId, id);
       if (r.cached) {
@@ -414,16 +557,16 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     const el = floatHost;
     return { w: el?.clientWidth || window.innerWidth || 1200, h: el?.clientHeight || window.innerHeight || 800 };
   };
-  // 浮窗初始几何：按图的自然尺寸给（时间轴宽而矮、树窄而高），右下角；用户拖过 / 缩放过之后就记住
+  // 浮窗初始几何：完整图谱默认给一块够大的窗口，右下角；用户拖过 / 缩放过之后就记住
   useEffect(() => {
-    if (host !== "float" || !layout || fl?.user) return;
+    if (host !== "float" || fl?.user) return;
     const B = bounds();
-    const w = Math.round(Math.max(380, Math.min(B.w * 0.62, layout.width + 4)));
-    const h = Math.round(Math.max(320, Math.min(B.h - 32, layout.height + 210)));
+    const w = Math.round(Math.min(Math.max(FLOAT_MIN_W, B.w * 0.52), FLOAT_MAX_W));
+    const h = Math.round(Math.min(Math.max(FLOAT_MIN_H, B.h * 0.62), FLOAT_MAX_H));
     const g = { x: Math.max(8, B.w - w - 16), y: Math.max(8, B.h - h - 16), w, h, user: false };
     if (!fl || Math.abs(fl.w - g.w) > 24 || Math.abs(fl.h - g.h) > 24) setFl(g);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, layout?.width, layout?.height, fl?.user]);
+  }, [host, fl?.user]);
   const dragRef = useRef<{ kind: "move" | "size" | "dock"; x: number; y: number; g: FloatGeom | null; h: number } | null>(null);
   const startDrag = (kind: "move" | "size" | "dock") => (e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -453,33 +596,20 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     else if (fl) writeJSON(K_FLOAT, fl);
   };
 
-  // 焦点换了：画布滚到焦点卡
-  const canvasRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = canvasRef.current;
-    const b = layout?.boxes.find((x) => x.role === "focus");
-    if (!el || !b) return;
-    const top = b.y - 24, bottom = b.y + b.h + 24;
-    if (top < el.scrollTop || bottom > el.scrollTop + el.clientHeight) el.scrollTo?.({ top: Math.max(0, top - el.clientHeight / 3), behavior: "smooth" });
-  }, [layout, focusId]);
-
   if (!supported || !open || hidden || feed.unsupported) return null;
 
   const pct = feed.total ? Math.round((feed.done / feed.total) * 100) : 0;
   const reading = !feed.complete && !feed.error;
   const focusNode = focusId && graph ? graph.nodes[focusId] ?? null : null;
   const explainText = focusId ? graph?.explain[focusId] || focusNode?.explain || explainLocal[focusId] || "" : "";
-  const relName = (c: string) => T(REL_STYLE[c as RelCode]?.name ?? c);
-  const codes = layout ? [...new Set(layout.paths.filter((p) => p.kind === "rel").map((p) => p.code as RelCode))] : [];
-  const nodeTitle = (id: string) => graph?.nodes[id]?.title ?? "";
-  const crumbs = model?.crumbs ?? (loc?.scopeTitles ?? []);
+  /** 顶卡标题：截断点（阅读节点的直接父节点）存在时用它，否则回落到书 / 材料标题 */
+  const rootTitle = cutNode?.title || graph?.meta?.title || title;
+  const patternName = patternSel ? T(PATTERN_NAMES[patternSel.pattern]) : "";
+  const patternHow = patternSel ? T(HOW_NAMES[patternSel.how]) : "";
 
   const dragProps = { onPointerMove: onDrag, onPointerUp: endDrag, onPointerCancel: endDrag };
   const style: React.CSSProperties =
-    host === "float" ? (fl ? { left: fl.x, top: fl.y, width: fl.w, height: fl.h } : { right: 16, bottom: 16, width: 440, height: 480 }) : { height: dockH };
-  const patternName = model ? T(PATTERN_NAMES[model.pattern]) : "";
-  const patternHow = model ? T(HOW_NAMES[model.patternHow]) : "";
-  const decorText = (t?: string) => (t === "@con" ? T("反方一侧") : t === "@others" ? T("相关的别处") : t ?? "");
+    host === "float" ? (fl ? { left: fl.x, top: fl.y, width: fl.w, height: fl.h } : { right: 16, bottom: 16, width: 520, height: 480 }) : { height: dockH };
 
   const panel = (
     <aside
@@ -489,7 +619,6 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
       style={style}
       data-mm2-focus
       data-host={host}
-      data-family={layout?.family ?? ""}
     >
       {host === "dock" && (
         <div className="mm2-focus-dock-resize" role="separator" aria-orientation="horizontal" aria-label={T("拖动调整高度")} onPointerDown={startDrag("dock")} {...dragProps} />
@@ -497,15 +626,16 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
       <header className="mm2-focus-head" onPointerDown={host === "float" ? startDrag("move") : undefined} {...(host === "float" ? dragProps : {})}>
         <div className="mm2-focus-head-row">
           <span className="mm2-focus-title">{T("结构图")}</span>
-          <span className={`mm2-focus-mode${picked ? " is-browsing" : ""}`}>{picked ? T("浏览中") : T("跟随阅读")}</span>
+          {/* 第四轮：跟随阅读是默认态，不再用文字说明；仅浏览他人节点时给出模式提示 */}
+          {sel && <span className="mm2-focus-mode is-browsing">{T("浏览中")}</span>}
           {patternName && (
-            <span className="mm2-focus-pattern" title={T("这一组的结构类型（{how}）——决定图的排法与摆放位置", { how: patternHow })} data-mm2-pattern={model?.pattern}>
+            <span className="mm2-focus-pattern" title={T("这一组的结构类型（{how}）", { how: patternHow })} data-mm2-pattern={patternSel?.pattern}>
               {patternName}
             </span>
           )}
           <span className="mm2-focus-spacer" />
-          {picked && readingId && (
-            <button type="button" className="mm2-focus-chip" onClick={() => setPicked(null)} data-mm2-follow>
+          {sel && readingId && (
+            <button type="button" className="mm2-focus-chip" onClick={() => setSel(null)} data-mm2-follow>
               {T("回到正在读的段落")}
             </button>
           )}
@@ -513,10 +643,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
             type="button"
             className="mm2-focus-x mm2-focus-host"
             data-mm2-host-toggle
-            onClick={() => {
-              const next: FocusHost = host === "float" ? "dock" : "float";
-              setHostPref(layout && next === layout.host ? "auto" : next);
-            }}
+            onClick={() => setHostPref(host === "float" ? "dock" : "float")}
             title={host === "float" ? T("放到正文下方") : T("改成浮窗")}
             aria-label={host === "float" ? T("放到正文下方") : T("改成浮窗")}
           >
@@ -538,15 +665,6 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
             </svg>
           </button>
         </div>
-        {crumbs.length > 0 && (
-          <div className="mm2-focus-crumbs" aria-label={T("所在位置")}>
-            {crumbs.map((c, i) => (
-              <span key={i} className="mm2-focus-crumb">
-                {c}
-              </span>
-            ))}
-          </div>
-        )}
         {backLoc && (
           <button type="button" className="mm2-focus-back" onClick={() => void goBack()} data-mm2-back>
             <span aria-hidden="true">←</span> {T("回到刚才读的位置")}
@@ -578,224 +696,79 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
       )}
 
       <div className="mm2-focus-body">
-      <div className="mm2-focus-canvas" ref={canvasRef}>
-        {reading && !loc && <p className="mm2-focus-note">{T("正在读取原文 {i}/{n}", { i: feed.done, n: feed.total })}</p>}
-        {feed.error && <p className="mm2-focus-note">{T("读取原文出错：{msg}", { msg: feed.error })}</p>}
-        {loc?.ready && !graph && !needsGenerate && <p className="mm2-focus-note">{T("这本书还没有图谱。")}</p>}
-        {loc?.ready && loc.scopeFloor && !focusNode && <p className="mm2-focus-note">{T("这一节篇幅很短，不需要单独的图谱。")}</p>}
-        {layout && model && (
-          <svg
-            key={focusId ?? ""}
-            className="mm2-focus-svg"
-            width={layout.width}
-            height={layout.height}
-            viewBox={`0 0 ${layout.width} ${layout.height}`}
-            role="img"
-            aria-label={T("「{t}」所在的结构", { t: focusNode?.title ?? "" })}
-            onMouseLeave={() => setHoverId(null)}
-          >
-            <defs>
-              {(["n", "a"] as const).flatMap((tone) =>
-                MARKERS.map((k) => (
-                  <marker key={`${tone}-${k}`} id={`mm2f-${tone}-${k}`} viewBox="0 0 10 10" refX={k === "dot" ? 5 : 9} refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    {k === "arrow" && <path d="M1,1 L9,5 L1,9 Z" className={`mm2f-mk mm2f-mk-${tone}`} />}
-                    {k === "open" && <path d="M1,1 L9,5 L1,9" fill="none" className={`mm2f-mk-line mm2f-mk-${tone}`} />}
-                    {k === "bar" && <path d="M8,0 L8,10" className={`mm2f-mk-line mm2f-mk-${tone}`} />}
-                    {k === "dot" && <circle cx="5" cy="5" r="3" className={`mm2f-mk mm2f-mk-${tone}`} />}
-                  </marker>
-                )),
-              )}
-            </defs>
-            {layout.decor.map((d, i) =>
-              d.kind === "frame" ? (
-                <rect key={`d${i}`} className="mm2f-frame" x={d.x} y={d.y} width={d.w} height={d.h} />
-              ) : d.kind === "axis" ? (
-                <path key={`d${i}`} className="mm2f-axis" d={`M${d.x},${d.y} H${d.x + (d.w ?? 0)}`} />
-              ) : d.kind === "tick" ? (
-                <circle key={`d${i}`} className={`mm2f-tick${d.text ? " is-focus" : ""}`} cx={d.x} cy={d.y} r={d.text ? 5 : 3.5} />
-              ) : (
-                <text key={`d${i}`} className="mm2f-label" x={d.x} y={d.y}>
-                  {decorText(d.text)}
-                </text>
-              ),
-            )}
-            <g className="mm2f-seq">
-              {layout.paths
-                .filter((p) => p.kind === "seq")
-                .map((p) => (
-                  <path key={p.key} d={p.d} markerEnd="url(#mm2f-n-arrow)" />
-                ))}
-            </g>
-            <g className="mm2f-tree">
-              {layout.paths
-                .filter((p) => p.kind === "tree")
-                .map((p) => (
-                  <path key={p.key} d={p.d} className={`mm2f-tree-line${p.strong ? " is-strong" : ""}`} />
-                ))}
-            </g>
-            {layout.gaps.map((gp) => (
-              <g key={gp.key} className="mm2f-gap">
-                <rect x={gp.x} y={gp.y} width={gp.w} height={gp.h} rx="3" />
-                <text x={gp.x + 10} y={gp.y + gp.h / 2 + 4}>
-                  {T("另 {n} 项", { n: gp.count })}
-                </text>
-              </g>
-            ))}
-            {layout.boxes.map((b) => (
-              <NodeCard
-                key={b.id}
-                b={b}
-                reading={b.id === readingId}
-                hover={b.id === hoverId}
-                hint={T("单击：在图中查看；双击：跳到原文")}
-                readingLabel={T("正在读")}
-                onEnter={() => setHoverId(b.id)}
-                onClick={() => {
-                  setNote("");
-                  setPicked(b.id === readingId ? null : b.id);
-                }}
-                onDouble={() => void jumpTo(b.id)}
-              />
-            ))}
-            <g className="mm2f-rels">
-              {layout.paths
-                .filter((p) => p.kind === "rel")
-                .map((p) => {
-                  const st = REL_STYLE[p.code as RelCode];
-                  const tone = p.touchesFocus ? "a" : "n";
-                  const lit = hoverId != null && (p.from === hoverId || p.to === hoverId);
-                  return (
-                    <g key={p.key} className={`mm2f-rel${p.touchesFocus ? " is-focus" : ""}${lit ? " is-lit" : ""}`}>
-                      <title>{`${nodeTitle(p.from as string)} ${relName(p.code as string)} → ${nodeTitle(p.to as string)}`}</title>
-                      {p.d && <path
-                        d={p.d}
-                        strokeDasharray={st?.dash || undefined}
-                        strokeWidth={st?.width ?? 1.25}
-                        markerEnd={st ? `url(#mm2f-${tone}-${st.end})` : undefined}
-                        markerStart={st?.start ? `url(#mm2f-${tone}-${st.start})` : undefined}
-                      />}
-                      <g className="mm2f-rel-badge" transform={`translate(${p.lx},${p.ly})`}>
-                        <circle r="8" />
-                        <text y="3.5">{p.code}</text>
-                      </g>
-                    </g>
-                  );
-                })}
-            </g>
-          </svg>
-        )}
-      </div>
-
-      {focusNode && (
-        <section className="mm2-focus-detail" aria-label={T("节点详情")}>
-          <div className="mm2-focus-detail-meta">
-            {typeLabel(focusNode) && <span className="mm2-focus-type">{typeLabel(focusNode)}</span>}
-            {focusId === readingId && <span className="mm2-focus-reading">{T("正在读")}</span>}
-          </div>
-          <p className="mm2-focus-detail-title">{focusNode.title}</p>
-          {explainText ? (
-            <p className="mm2-focus-explain">{explainText}</p>
-          ) : explainBusy === focusId ? (
-            <p className="mm2-focus-note mm2-focus-live">{T("正在说明…")}</p>
-          ) : null}
-          <div className="mm2-focus-actions">
-            <button type="button" className="mm2-focus-btn" onClick={() => void jumpTo(focusNode.id)} data-mm2-jump>
-              {T("跳到原文")}
-            </button>
-            {!explainText && explainBusy !== focusId && hasKey && focusNode.source !== "toc" && (
-              <button type="button" className="mm2-focus-btn" onClick={() => void explain(focusNode.id)} title={T("用一两句话说明这一部分在论证 / 说明什么（约 1 次调用）")}>
-                {T("它在说什么")}
-              </button>
-            )}
-            {(focusNode.state === "more" || focusNode.state === "stub") && hasKey && (
-              <button type="button" className="mm2-focus-btn" onClick={() => void deepen(focusNode.id)} disabled={!!busy} title={T("把这一点再分出一层")}>
-                {T("深挖")}
-              </button>
-            )}
-            <span className="mm2-focus-spacer" />
-            <button type="button" className="mm2-focus-link" onClick={() => onOpenInMap(focusNode.id)}>
-              {T("在完整图谱中打开")}
-            </button>
-          </div>
-          {codes.length > 0 && (
-            <div className="mm2-focus-legend" aria-label={T("关系图例")}>
-              {codes.map((c) => (
-                <span key={c} className="mm2-focus-legend-item">
-                  <b>{c}</b>
-                  {relName(c)}
-                </span>
-              ))}
-            </div>
+        <div className="mm2-focus-canvas">
+          {reading && !loc && <p className="mm2-focus-note">{T("正在读取原文 {i}/{n}", { i: feed.done, n: feed.total })}</p>}
+          {feed.error && <p className="mm2-focus-note">{T("读取原文出错：{msg}", { msg: feed.error })}</p>}
+          {loc?.ready && !graph && <p className="mm2-focus-note">{T("这本书还没有图谱。")}</p>}
+          {loc?.ready && loc.scopeFloor && !focusNode && <p className="mm2-focus-note">{T("这一节篇幅很短，不需要单独的图谱。")}</p>}
+          {lensGraph && (
+            <MindmapCanvasV2
+              ref={canvasRef}
+              graph={lensGraph}
+              rootTitle={rootTitle}
+              selectedId={lensFocusId}
+              anchorId={lensFocusId}
+              readingId={readingId}
+              relAll={false}
+              focus={false}
+              onSelect={onSelect}
+              onDeepen={(id) => void deepen(id)}
+              onToggleCollapse={toggleCollapse}
+              onHoverNode={onHover}
+              onNodeDoubleClick={(id) => void jumpTo(id)}
+            />
           )}
-        </section>
-      )}
+        </div>
+
+        {focusNode && (
+          <section className="mm2-focus-detail" aria-label={T("节点详情")}>
+            {explainText ? (
+              /* 收起复用制卡台 AI 解释板块同一套（.wb-explain-toggle + .collapse-clip.wb-explain-clip + .collapse-inner）；
+                 第五轮：把手在**内容上方**（用户要求）→ 箭头随几何：展开＝朝上（收起）／收起＝朝下（展开）；换肤一处改、两处同步。 */
+              <div className="mm2-focus-explain-wrap">
+                <button
+                  type="button"
+                  className="wb-explain-toggle"
+                  aria-expanded={explainOpen}
+                  title={explainOpen ? T("收起解释") : T("展开解释")}
+                  onClick={() => setExplainOpen((v) => !v)}
+                >
+                  <IconChevronDown size={14} className={explainOpen ? "is-flip" : undefined} />
+                </button>
+                <div className={`collapse-clip wb-explain-clip${explainOpen ? " is-open" : ""}`} aria-hidden={!explainOpen}>
+                  <div className="collapse-inner">
+                    <p className="mm2-focus-explain">{explainText}</p>
+                  </div>
+                </div>
+              </div>
+            ) : explainBusy === focusId ? (
+              <p className="mm2-focus-note mm2-focus-live">{T("正在说明…")}</p>
+            ) : null}
+            <div className="mm2-focus-actions">
+              <button type="button" className="mm2-focus-btn" onClick={() => void jumpTo(focusNode.id)} data-mm2-jump>
+                {T("跳到原文")}
+              </button>
+              {!explainText && explainBusy !== focusId && hasKey && focusNode.source !== "toc" && (
+                <button type="button" className="mm2-focus-btn" onClick={() => void explain(focusNode.id)} title={T("用一两句话说明这一部分在论证 / 说明什么（约 1 次调用）")}>
+                  {T("它在说什么")}
+                </button>
+              )}
+              {(focusNode.state === "more" || focusNode.state === "stub") && hasKey && (
+                <button type="button" className="mm2-focus-btn" onClick={() => void deepen(focusNode.id)} disabled={!!busy} title={T("把这一点再分出一层")}>
+                  {T("深挖")}
+                </button>
+              )}
+              <span className="mm2-focus-spacer" />
+              <button type="button" className="mm2-focus-link" onClick={() => onOpenInMap(focusNode.id, lensRegionIds)}>
+                {T("在完整图谱中打开")}
+              </button>
+            </div>
+          </section>
+        )}
       </div>
       {note && <p className="mm2-focus-note mm2-focus-note-foot">{note}</p>}
       {host === "float" && <div className="mm2-focus-size" aria-hidden="true" onPointerDown={startDrag("size")} {...dragProps} />}
     </aside>
   );
   return hostEl ? createPortal(panel, hostEl) : panel;
-}
-
-function NodeCard({
-  b,
-  reading,
-  hover,
-  hint,
-  readingLabel,
-  onEnter,
-  onClick,
-  onDouble,
-}: {
-  b: FocusBox;
-  reading: boolean;
-  hover: boolean;
-  hint: string;
-  readingLabel: string;
-  onEnter: () => void;
-  onClick: () => void;
-  onDouble: () => void;
-}) {
-  const metaY = 7 + 11;
-  const titleTop = 7 + (b.meta ? 15 : 0);
-  return (
-    <g
-      className={`mm2f-node is-${b.role}${b.linked ? " is-linked" : ""}${reading ? " is-reading" : ""}${hover ? " is-hover" : ""}`}
-      transform={`translate(${b.x},${b.y})`}
-      data-node-id={b.id}
-      tabIndex={0}
-      role="button"
-      aria-label={b.lines.join("")}
-      onMouseEnter={onEnter}
-      onFocus={onEnter}
-      onClick={onClick}
-      onDoubleClick={onDouble}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onDouble();
-        else if (e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
-    >
-      <title>{hint}</title>
-      <rect className="mm2f-card" width={b.w} height={b.h} rx={b.role === "whole" ? 4 : 3} />
-      {reading && <rect className="mm2f-reading-bar" x="0" y="0" width="3" height={b.h} />}
-      {b.meta && (
-        <text className="mm2f-meta" x="10" y={metaY}>
-          {b.meta}
-        </text>
-      )}
-      {reading && b.role !== "focus" && (
-        <text className="mm2f-reading-tag" x={b.w - 8} y={metaY} textAnchor="end">
-          {readingLabel}
-        </text>
-      )}
-      {b.lines.map((ln, i) => (
-        <text key={i} className="mm2f-title" x="10" y={titleTop + (i + 1) * b.line - (b.line - b.font) / 2 - 2} style={{ fontSize: b.font }}>
-          {ln}
-        </text>
-      ))}
-    </g>
-  );
 }

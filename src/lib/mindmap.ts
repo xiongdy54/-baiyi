@@ -293,15 +293,23 @@ export const mindmapApi = {
     window.mindmapAPI?.onChanged(cb) ?? (() => {})
 };
 
-/** App 级桥安装（App.tsx useEffect 一次）：主进程 mindmap:changed → EventBus mindmap/changed */
+let bridgeInstalled = false;
+
+/** App 级桥安装（App.tsx useEffect 一次）：主进程 mindmap:changed → EventBus mindmap/changed
+ *  安装守卫（同 `installActivityStore`）：React StrictMode 下挂载效应会跑两遍，
+ *  无守卫就注册两份 onDelta → 同一条 mindmap:delta 在 EventBus 上发两次 →
+ *  结构图对同一段流式文本应用两遍（讲解文本出现「同一句重复两遍」）。 */
 export function installMindmapBridge(): () => void {
+  if (bridgeInstalled) return () => {};
   if (!window.mindmapAPI) return () => {};
+  bridgeInstalled = true;
   const offChanged = window.mindmapAPI.onChanged((payload) => {
     eventBus.emit("mindmap/changed", payload);
   });
   // D192（材料导图 v2）：主进程 mindmap:delta → EventBus mindmap/delta
   const offDelta = window.mindmapAPI.onDelta ? window.mindmapAPI.onDelta((payload) => eventBus.emit("mindmap/delta", payload)) : () => {};
   return () => {
+    bridgeInstalled = false;
     offChanged();
     offDelta();
   };
