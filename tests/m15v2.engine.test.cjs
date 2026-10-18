@@ -526,6 +526,14 @@ const KNOWN = (() => {
     const row = L.store.listMaterialMapNodes(e1.mapId).find((x) => x.nodeId === l2.nodeId);
     check("生成后：定位到最深的 AI 节点，块区间包含阅读位置，链从根到节点", l2.scopeOutlined && row && row.source === "ai" && row.blockStart <= l2.block && l2.block <= row.blockEnd && l2.chain.includes(l0.scopeNodeId), { l2, row });
     check("交互生成不进全局指示器", !L.changes.length, L.changes);
+    // 正文强调锚
+    const na = L.engine.graphNodeAnchors({ mapId: e1.mapId, nodeIds: [l2.nodeId, l0.scopeNodeId, "nope"] });
+    const a2 = na.anchors[l2.nodeId];
+    const flat = (x) => x.replace(/\s+/g, "");
+    check("节点锚：AI 节点一段、单元＝u2、首尾探针都是该单元原文片段", Array.isArray(a2) && a2.length === 1 && a2[0].unitAnchor === "u2.xhtml" && a2[0].head.length > 0 && a2[0].head.length <= 32 && a2[0].tail.length <= 32 && flat(u2).includes(flat(a2[0].head)) && flat(u2).includes(flat(a2[0].tail)), a2);
+    check("节点锚：块区间与节点一致；不存在的 id 不返回", a2[0].blockStart === row.blockStart && a2[0].blockEnd === row.blockEnd && !("nope" in na.anchors), { a2, row });
+    const top = L.store.listMaterialMapNodes(e1.mapId).find((x) => x.source === "toc" && x.parentId == null && x.blockStart != null && x.blockEnd != null && x.blockEnd > x.blockStart && (() => { const b = L.engine.graphNodeAnchors({ mapId: e1.mapId, nodeIds: [x.nodeId] }).anchors[x.nodeId]; return b && b.length >= 2; })());
+    check("跨单元的节点按单元切段（每段各自首尾）", !!top, null);
   }
 
   console.log(`\n结果：${pass} 通过，${fail} 失败`);

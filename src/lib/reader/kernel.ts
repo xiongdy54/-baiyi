@@ -166,6 +166,19 @@ export interface MarkPointerInfo {
   rect: ReaderRect | null;
 }
 
+/** 结构强调（2026-10-18 阅读透镜 v2）：图谱节点对应的正文段落。按首尾原文探针在该单元里找回 Range，
+ *  只画绘制层（CSS Custom Highlight），不碰正文 DOM。tone：focus＝图谱焦点（正在读 / 点选的那一点），hover＝指针停在图里某个节点上。 */
+export interface ReaderStructureRegion {
+  key: string;
+  /** 提取单元锚（与 getSectionAnchors 同口径） */
+  unitAnchor: string;
+  /** 段首原文（≤32 字） */
+  head: string;
+  /** 段尾原文（≤32 字） */
+  tail: string;
+  tone: "focus" | "hover";
+}
+
 export interface ReaderKernel {
   open(source: BookSource, init?: { location?: ReaderLocation }): Promise<void>;
   /** 跳转：CFI 位置 / 页码（PDF 引擎）/ 章节索引 / 目录 href / 文本搜索定位（返回是否发生导航） */
@@ -242,6 +255,11 @@ export interface ReaderKernel {
    * 取不到正文片段时 text 为空串（按单元开头定位）；引擎未就绪返回 null。
    */
   getReadingProbe?(): { unitAnchor: string; text: string } | null;
+  /**
+   * 结构强调（2026-10-18 阅读透镜 v2，可选能力）：整体替换当前强调段；空数组＝清空。
+   * 章节重新加载后由内核自行重画；找不到探针的段静默跳过。
+   */
+  setStructureHighlights?(regions: ReaderStructureRegion[]): void;
   destroy(): void;
   /** 重定位（进度/统计/目录高亮数据源） */
   on(event: "relocate", handler: (info: RelocateInfo) => void): () => void;

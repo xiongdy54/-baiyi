@@ -47,6 +47,8 @@
 //       原文未送到该单元 → { ready:false }；text 为该处正文的一小段（空白不敏感匹配；找不到按单元开头）
 //   graphEnsureMap({ documentId, title? }) -> { mapId, created }                     阅读透镜「为这一节生成」前确保有 v2 版本：
 //       已有激活 v2 版本直接返回；否则（无图或激活的是旧版）新建仅含目录骨架的 v2 版本并激活（零调用；旧版留在历史里）
+//   graphNodeAnchors({ mapId, nodeIds }) -> { anchors: { [nodeId]: { unitAnchor, head, tail, blockStart, blockEnd }[] } }
+//       阅读透镜「正文强调」：节点块区间按单元切段，每段给首尾 ≤32 字原文探针（零 AI）；原文未到 / 无区间 → 不含该 id
 //   另：readMindmapSettings() -> MindmapSettings；idle() -> Promise（测试用：调度器排空）；scheduler（只读引用）
 //
 // ===================== 广播 =====================
@@ -1297,6 +1299,47 @@ function createMindmapEngineV2(deps) {
     return out;
   }
 
+  // ---------- 阅读透镜：节点 → 正文强调锚 ----------
+  /** 片段（首尾探针）长度：够在一章里唯一，又不至于跨越渲染差异（软连字符、注音等）太多 */
+  const ANCHOR_PROBE = 32;
+  function graphNodeAnchors(p) {
+    const o = p || {};
+    const g = loadGraph(String(o.mapId));
+    const out = {};
+    if (!g || !g.S) return { anchors: out };
+    const S = g.S;
+    const blocks = blocksFor(g);
+    if (!blocks || !blocks.length) return { anchors: out };
+    const ids = Array.isArray(o.nodeIds) ? o.nodeIds.slice(0, 64).map(String) : [];
+    for (const id of ids) {
+      const row = g.byId.get(id);
+      if (!row || row.blockStart == null || row.blockEnd == null) continue;
+      const lo = Math.max(1, row.blockStart), hi = Math.min(blocks.length, row.blockEnd);
+      if (lo > hi) continue;
+      // 按单元切段：一节点可能跨章（单元），每个单元给一对首尾探针
+      const segs = [];
+      let cur = null;
+      for (let no = lo; no <= hi; no++) {
+        const b = blocks[no - 1];
+        if (!b) continue;
+        if (!cur || cur.unit !== b.unit) {
+          cur = { unit: b.unit, first: b, last: b };
+          segs.push(cur);
+        } else cur.last = b;
+      }
+      const list = [];
+      for (const sg of segs) {
+        const unitAnchor = S.units[sg.unit];
+        if (unitAnchor == null) continue;
+        const head = S.linear.text.slice(sg.first.start, Math.min(sg.first.end, sg.first.start + ANCHOR_PROBE));
+        const tail = S.linear.text.slice(Math.max(sg.last.start, sg.last.end - ANCHOR_PROBE), sg.last.end);
+        list.push({ unitAnchor: String(unitAnchor), head, tail, blockStart: sg.first.no, blockEnd: sg.last.no });
+      }
+      if (list.length) out[id] = list;
+    }
+    return { anchors: out };
+  }
+
   // ---------- 阅读透镜：定位 / 确保有图 ----------
   /** 空白不敏感查找：probe 去空白后取前 24 字，在 hay 的去空白形态里找，映射回 hay 的下标；找不到返回 -1 */
   function looseIndexOf(hay, probe) {
@@ -1409,7 +1452,7 @@ function createMindmapEngineV2(deps) {
 
   return {
     graphLoad, graphFeed, graphEstimate, graphGenerate, graphExpand, graphExpandAll, graphExplain, graphCancel,
-    graphResume, graphSetView, graphMetrics, graphNodeText, graphLocate, graphEnsureMap,
+    graphResume, graphSetView, graphMetrics, graphNodeText, graphLocate, graphEnsureMap, graphNodeAnchors,
     readMindmapSettings, idle, scheduler,
   };
 }

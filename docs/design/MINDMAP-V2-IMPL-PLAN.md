@@ -262,3 +262,20 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 - **原文送入**：`src/lib/mindmapFeed.ts` 进程内单例（内核实例 + documentId），图谱页签与透镜共用，杜绝两处交错送入导致 out_of_order；已送完的文档再开页签不重送；主进程 LRU 挤出后 reset 重送。透镜只在用户展开过之后才送原文。
 - **测试**：`tests/m15v2.lens.dom.test.cjs`（17 项）、`tests/m15v2.engine.test.cjs` 透镜段（10 项）。
 - 待登记：AI_DEVELOPMENT_GUIDE §4.19 / IPC 清单（`mindmap:graphLocate` / `mindmap:graphEnsureMap`）/ 内核契约（`getReadingProbe`）随 T10 一并写入。
+
+### 9.4 结构图（阅读透镜 v2「聚焦图谱」，取代 9.3 的结构轨 + 列表面板）
+用户第二轮反馈（2026-10-18）：结构轨像阅读进度条、点轨任意处都弹同一菜单；列表看不出对应正文哪几段；祖先项「第一章」一点就跳去目录页、回不来；要的是**真正的图谱**——从完整图谱裁出、聚焦当前段落及与之相连的部分，并在正文里强调对应段落。
+- **入口**：工具栏「结构图」开关（`localStorage mm2.lens.open`）。结构轨删除。（第一稿是右侧停靠栏，同日第三轮被否，见下「摆放」。）
+- **裁图**（`src/lib/mindmap/v2/focus.ts` `buildFocus`，纯函数）：焦点 F＝阅读位置最深节点 / 用户点选节点；整体 W＝F 的父；成员＝W 的子（>7 取以 F 为中心的窗口 + 与 F 相连者，其余折「另 N 项」）；F 的下一层 ≤5；关系：一端在图内的全部边，图外对端作「别处」节点 ≤5（碰 F 3 分 > 碰 F 的子 / W 2 分 > 只碰其他成员 1 分；1 分的 ≤2 个，且对端在图内某点子树里的不算别处）。W 以上只留标题链（纯文字，不可点、不跳）。
+- **排版·纵向树**（`layoutTree`，tree / grid 版式）：左结构、右关系——左侧树干串成员（F 加重 + 左侧强调条，子缩进挂 F 下），图内关系画成卡片右侧的弧（3 条泳道），通往别处的关系连到右列卡片（卡片标「所在整体 · 类型」）；关系码徽标沿曲线避让。线型 / 端头沿用 `REL_STYLE`；碰 F 的关系用 accent。
+- **摆放与排法随结构类型（第三轮，用户 2026-10-18）**：右侧栏窄而挤、装不下时间轴等宽结构。做法＝「由 AI 返回的参数决定用哪个 UI 组件展示」：AI 生成图谱时每组本就附带 `{版式}` 提示（`patternHint`；无则 `selectPattern` 规则推断，手动覆盖优先），聚焦图取「整体」这一组的版式 → 排法家族 + 摆放：
+  - tree / grid → 纵向树，**浮窗**；argument → 论证图（论点在上，支持一侧在左下，反方观点 / 反驳 / 让步在右下），**浮窗**；
+  - chain（先后箭头）/ timeline（时间轴 + 刻度，卡片元信息带时间）/ layered（只画关系）→ 横向流程，**正文下方**；compare → 对照分栏（每栏挂该成员的子 ≤4），**正文下方**；别处节点排在最下一行；
+  - 浮窗＝`.reader-lens-float-host`（正文视口覆盖层，空时不拦指针），标题栏拖动、右下角缩放，初始宽高按图的自然尺寸，用户动过后记住（`mm2.lens.float`）；下方＝`.reader-lens-dock-host`（右列末行，正文让位），上缘拖高（`mm2.lens.dockH`），图在左、详情在右；
+  - 头部显示结构类型（标注来源：模型提示 / 自动推断 / 手动），一键在浮窗 / 下方之间切换（`mm2.lens.host`，切回与类型默认一致时恢复「自动」）。
+  - 关系线：按两卡相对位置选端口；同一行的走上方弧（泳道）；会穿过中间卡片时从侧面绕行；父与它下挂的子之间不再画线，只在子卡角上挂关系码。
+- **图 ↔ 正文**：`mindmap:graphNodeAnchors`（零 AI）给节点每个单元一对首尾 ≤32 字原文探针 → 内核可选能力 `setStructureHighlights(regions)`（foliate：`src/lib/reader/textRange.ts` 去空白比对找回 Range → CSS Custom Highlight `structure-focus` / `structure-hover`，章节重载自动重画、销毁时清除）。焦点节点的段落常亮；指针停在图中任一节点，它的段落也亮。PDF 暂未实现强调（能力缺省 → 静默降级）。
+- **导航纪律**：单击节点＝在图里换焦点（「浏览中」，正文不动；正在读的那一点仍有标记，可「回到正在读的段落」）；双击 / 详情「跳到原文」才跳，跳前记下最初的阅读位置 → 面板顶部「回到刚才读的位置」。
+- **详情**：类型 + 标题 + 讲解（已缓存则显示；否则「它在说什么」按需 1 次调用，走 `graphExplain`）+ 深挖 + 在完整图谱中打开 + 关系图例。
+- **测试**：`tests/m15v2.focus.test.cjs`（38）、`tests/m15v2.textrange.test.cjs`（7）、`tests/m15v2.lens.dom.test.cjs` 重写（30）、engine +3、ipc 15 通道。
+- 待登记（随 T10）：IPC `mindmap:graphNodeAnchors`；内核契约 `setStructureHighlights` / `ReaderStructureRegion`。

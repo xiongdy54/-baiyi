@@ -26,9 +26,11 @@ import type {
   ReaderModeConfig,
   ReaderRect,
   ReaderSelection,
+  ReaderStructureRegion,
   ReaderTocItem,
   RelocateInfo
 } from "../kernel";
+import { buildTextIndex, findFlatSpan, spanToRange } from "../textRange";
 import { fixSvgAspect, injectAppearanceStyle, type ReaderAppearanceEx } from "./appearance";
 import { getSelectionFromContents, getSelectionGeometryFromContents, pointerToHost } from "./selection";
 import { createMultiHighlight, MULTI_HIGHLIGHT_NAME } from "../multiHighlight";
@@ -364,6 +366,59 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   const paintAllMarks = () => {
     for (const index of docs.keys()) paintMarksForDoc(index);
   };
+
+  // ---------- 阅读透镜 v2：结构强调（图谱节点 ↔ 正文段落） ----------
+  // 与标记同一套绘制层做法；名字独立（structure-focus / structure-hover），优先级低于摘录标记之下的选区、高于无。
+  const STRUCT_NAMES = { focus: "structure-focus", hover: "structure-hover" } as const;
+  let structRegions: ReaderStructureRegion[] = [];
+  const structStyles = new Map<Document, HTMLStyleElement>();
+  const structCss = () => {
+    const focus = evalColor("color-mix(in srgb, var(--accent) 13%, transparent)", "rgba(22, 106, 89, 0.13)");
+    const hover = evalColor("color-mix(in srgb, var(--accent) 26%, transparent)", "rgba(22, 106, 89, 0.26)");
+    return `::highlight(${STRUCT_NAMES.focus}){background-color:${focus};}\n::highlight(${STRUCT_NAMES.hover}){background-color:${hover};}`;
+  };
+  const paintStructForDoc = (index: number) => {
+    const doc = docs.get(index);
+    if (!doc) return;
+    const win = winOf(doc);
+    if (!win?.CSS?.highlights || typeof win.Highlight !== "function") return;
+    win.CSS.highlights.delete(STRUCT_NAMES.focus);
+    win.CSS.highlights.delete(STRUCT_NAMES.hover);
+    const mine = structRegions.filter((r) => resolveSectionIndex(r.unitAnchor) === index);
+    if (!mine.length) return;
+    let el = structStyles.get(doc);
+    if (!el || !el.isConnected) {
+      el = doc.createElement("style");
+      el.setAttribute("data-reader-structure", "1");
+      (doc.head ?? doc.documentElement)?.appendChild(el);
+      structStyles.set(doc, el);
+    }
+    const css = structCss();
+    if (el.textContent !== css) el.textContent = css;
+    const root = (doc.body || doc.documentElement) as Node | null;
+    if (!root) return;
+    const idx = buildTextIndex(root);
+    const by: Record<"focus" | "hover", Range[]> = { focus: [], hover: [] };
+    for (const r of mine) {
+      const span = findFlatSpan(idx, r.head, r.tail);
+      const range = span ? spanToRange(doc, idx, span) : null;
+      if (range) by[r.tone === "hover" ? "hover" : "focus"].push(range);
+    }
+    const HL = win.Highlight as new (...ranges: Range[]) => { priority?: number };
+    if (by.focus.length) {
+      const h = new HL(...by.focus);
+      h.priority = -2;
+      win.CSS.highlights.set(STRUCT_NAMES.focus, h);
+    }
+    if (by.hover.length) {
+      const h = new HL(...by.hover);
+      h.priority = -1;
+      win.CSS.highlights.set(STRUCT_NAMES.hover, h);
+    }
+  };
+  const paintAllStruct = () => {
+    for (const index of docs.keys()) paintStructForDoc(index);
+  };
   /** 主题切换后重算各文档的注入样式（值派生自 --accent，深浅两档不同） */
   const refreshMarkStyles = () => {
     markStyles.forEach((_, doc) => ensureMarkStyle(doc));
@@ -489,6 +544,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       true
     );
     paintMarksForDoc(index);
+    paintStructForDoc(index);
     // v25 图片点选：正文图片点击 → 语义化为 ReaderImageRef（src + 宿主坐标框）。
     // 链接内的图片让位给链接（foliate 自带的 click 处理器负责导航），不dual触发图片聚焦。
     doc.addEventListener("click", (ev: MouseEvent) => {
@@ -711,6 +767,9 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       });
       // 阅读主题联动软件主题（暗夜/纸白），accent 派生档跟着变——标记的注入色要重算
       refreshMarkStyles();
+      structStyles.forEach((el) => {
+        el.textContent = structCss();
+      });
     },
 
     getTOC(): ReaderTocItem[] {
@@ -741,6 +800,11 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
         text = "";
       }
       return { unitAnchor, text };
+    },
+
+    setStructureHighlights(regions) {
+      structRegions = Array.isArray(regions) ? regions.filter((r) => r && r.unitAnchor && r.head) : [];
+      paintAllStruct();
     },
 
     getSectionAnchors() {
@@ -892,6 +956,13 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       markRanges.clear();
       markStyles.clear();
       docMarks = [];
+      docs.forEach((doc) => {
+        const hl = winOf(doc)?.CSS?.highlights;
+        hl?.delete(STRUCT_NAMES.focus);
+        hl?.delete(STRUCT_NAMES.hover);
+      });
+      structRegions = [];
+      structStyles.clear();
       hoveredMarkId = null;
       try {
         view.close();

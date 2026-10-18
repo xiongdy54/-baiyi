@@ -9557,291 +9557,171 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--text-secondary);
 }
 
-/* ===================== 结构透镜（阅读透镜，2026-10-18） =====================
-   正文右缘一根结构轨（按章节篇幅分段，珠子标当前位置）+ 轨旁玻璃面板（祖先阶梯 / 要点之线 / 关系）。
-   只用阅读区自己的前景 / 背景与全局 accent：浅色、护眼、暗色阅读主题下都成立。
-   注意：Reader 把 --reader-bg 缺省设为 transparent、--reader-fg 缺省设为 inherit——inherit 不能进 color-mix，
-   所以前景一律经 color 继承后用 currentColor 混色；背景以 --paper 打底、--reader-bg 叠在上层。
-   唯一动效：珠子沿线滑动 + 新要点落到线上；prefers-reduced-motion 下全部关闭。 */
-.mm2-lens-rail {
-  position: absolute;
-  top: 18px;
-  bottom: 18px;
-  right: 6px;
-  width: 18px;
-  z-index: 6;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--reader-fg, var(--text-primary));
-  --mm2-accent: color-mix(in srgb, var(--accent) 74%, currentColor);
-  cursor: pointer;
+/* ===================== 结构图（阅读透镜 v2「聚焦图谱」，2026-10-18 第二轮） =====================
+   工具栏「结构图」开关 → 按这一组结构的版式选摆放（第三轮：右侧栏太窄、装不下时间轴）：
+   浮窗＝.reader-lens-float-host（正文视口内的覆盖层，空时不拦指针）；下方＝.reader-lens-dock-host（右列末行，正文让位）。
+   面板里是从完整图谱裁出的小图：上方整体、左侧树干串起同一整体的各部分（焦点加重）、右侧通往别处的关系。
+   配色只用阅读区前景 / 背景与全局 accent（前景经 currentColor 混色——--reader-fg 可能是 inherit，不能进 color-mix）。
+   瑞士风：直角为主（卡片 3px 微圆角只为在小尺寸里区分卡片与线）、1px hairline、无阴影渐变。 */
+.reader-lens-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.mm2-lens-rail-track {
+.reader-lens-btn.is-on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.reader-lens-float-host {
   position: absolute;
-  top: 0;
+  inset: 0;
+  z-index: 7;
+  pointer-events: none;
+}
+.reader-lens-float-host:empty { display: none; }
+.reader-lens-dock-host { flex: 0 0 auto; min-height: 0; }
+.reader-lens-dock-host:empty { display: none; }
+.mm2-focus {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--reader-fg, var(--text-primary));
+  --mm2-accent: color-mix(in srgb, var(--accent) 78%, currentColor);
+  --mm2-line: color-mix(in srgb, currentColor 28%, transparent);
+  --mm2-faint: color-mix(in srgb, currentColor 10%, transparent);
+  background: var(--reader-bg, var(--paper));
+  font-size: 13px;
+  pointer-events: auto;
+}
+.mm2-focus.is-float {
+  position: absolute;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  box-shadow: 0 18px 48px -20px color-mix(in srgb, currentColor 40%, transparent), 0 2px 8px -4px color-mix(in srgb, currentColor 20%, transparent);
+  animation: mm2-focus-pop 160ms ease-out;
+}
+@keyframes mm2-focus-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.mm2-focus.is-float .mm2-focus-head { cursor: move; user-select: none; }
+.mm2-focus.is-dock {
+  position: relative;
+  width: 100%;
+  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+}
+.mm2-focus-dock-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  height: 8px;
+  cursor: row-resize;
+  z-index: 2;
+  touch-action: none;
+}
+.mm2-focus-dock-resize:hover { background: color-mix(in srgb, var(--mm2-accent) 18%, transparent); }
+.mm2-focus-size {
+  position: absolute;
+  right: 0;
   bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--mm2-line) 50%, var(--mm2-line) 58%, transparent 58%, transparent 70%, var(--mm2-line) 70%, var(--mm2-line) 78%, transparent 78%);
 }
-.mm2-lens-rail-seg {
-  position: absolute;
-  left: -1px;
-  width: 3px;
-  margin-top: 1px;
-  background: color-mix(in srgb, currentColor 14%, transparent);
-  transition: width 160ms ease, left 160ms ease;
+/* 主体：浮窗＝图在上、详情在下；下方区＝图在左、详情在右（宽矮的空间横着用） */
+.mm2-focus-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.mm2-focus.is-dock .mm2-focus-body { flex-direction: row; }
+.mm2-focus.is-dock .mm2-focus-detail { flex: 0 0 300px; max-height: none; border-top: 0; border-left: 1px solid var(--mm2-faint); }
+.mm2-focus-pattern {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  background: var(--mm2-faint);
+  color: color-mix(in srgb, currentColor 70%, transparent);
 }
-.mm2-lens-rail-seg.is-done {
-  background: color-mix(in srgb, currentColor 30%, transparent);
+.mm2-focus-head {
+  flex: 0 0 auto;
+  padding: 10px 12px 8px;
+  border-bottom: 1px solid var(--mm2-faint);
 }
-.mm2-lens-rail:hover .mm2-lens-rail-seg {
-  left: -1.5px;
-  width: 4px;
-}
-.mm2-lens-rail-bead {
-  position: absolute;
-  left: -4px;
-  width: 9px;
-  height: 9px;
-  margin-top: -4.5px;
-  border-radius: 50%;
-  background: var(--mm2-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mm2-accent) 22%, transparent);
-  transition: top 420ms cubic-bezier(0.2, 0.9, 0.25, 1);
-}
-.mm2-lens-rail:focus-visible {
-  outline: 2px solid var(--mm2-accent);
-  outline-offset: 2px;
-}
-
-.mm2-lens {
-  position: absolute;
-  top: 16px;
-  right: 30px;
-  z-index: 6;
-  width: min(336px, calc(100% - 72px));
-  max-height: calc(100% - 32px);
+.mm2-focus-head-row {
   display: flex;
-  flex-direction: column;
-  color: var(--reader-fg, var(--text-primary));
-  /* 阅读主题可能与软件主题不同（暗色阅读 + 浅色软件）：强调色向阅读前景色偏移，暗底上也看得清 */
-  --mm2-accent: color-mix(in srgb, var(--accent) 74%, currentColor);
-  background:
-    linear-gradient(color-mix(in srgb, var(--reader-bg, transparent) 86%, transparent), color-mix(in srgb, var(--reader-bg, transparent) 86%, transparent)),
-    color-mix(in srgb, var(--paper) 86%, transparent);
-  -webkit-backdrop-filter: blur(18px) saturate(1.15);
-  backdrop-filter: blur(18px) saturate(1.15);
-  border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
-  border-radius: 10px;
-  box-shadow: 0 18px 48px -24px color-mix(in srgb, currentColor 45%, transparent);
-  overflow: hidden;
-  animation: mm2-lens-in 200ms ease-out;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
 }
-@keyframes mm2-lens-in {
-  from { opacity: 0; transform: translateX(8px); }
-  to { opacity: 1; transform: none; }
+.mm2-focus-title { font-weight: 600; font-size: 13px; }
+.mm2-focus-mode {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--mm2-faint);
+  color: color-mix(in srgb, currentColor 58%, transparent);
 }
-.mm2-lens-progress {
-  height: 2px;
-  background: color-mix(in srgb, currentColor 6%, transparent);
-}
-.mm2-lens-progress > span {
-  display: block;
-  height: 100%;
-  background: var(--mm2-accent);
-  transition: width 200ms linear;
-}
-.mm2-lens-body {
-  padding: 16px 18px 6px;
-  overflow: auto;
-  min-height: 0;
-}
-.mm2-lens-path {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 12px;
-}
-.mm2-lens-path-item {
-  display: block;
-  max-width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
+.mm2-focus-mode.is-browsing { border-color: var(--mm2-accent); color: var(--mm2-accent); }
+.mm2-focus-spacer { flex: 1 1 auto; }
+.mm2-focus-chip,
+.mm2-focus-back {
   font: inherit;
   font-size: 12px;
+  line-height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--mm2-accent);
+  background: none;
+  color: var(--mm2-accent);
+  cursor: pointer;
+}
+.mm2-focus-chip:hover,
+.mm2-focus-back:hover { background: color-mix(in srgb, var(--mm2-accent) 10%, transparent); }
+.mm2-focus-back { display: inline-flex; gap: 6px; margin-top: 8px; }
+.mm2-focus-x {
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.mm2-focus-x:hover { opacity: 1; }
+.mm2-focus-crumbs {
+  margin-top: 6px;
+  font-size: 12px;
   line-height: 1.5;
-  text-align: left;
-  color: color-mix(in srgb, currentColor 52%, transparent);
-  white-space: nowrap;
+  color: color-mix(in srgb, currentColor 55%, transparent);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
-button.mm2-lens-path-item { cursor: pointer; }
-button.mm2-lens-path-item:hover { color: var(--reader-fg, var(--ink)); }
-
-/* 要点之线：一根细线 + 每点一个空心小圈；当前点由滑动的珠子标出 */
-.mm2-lens-thread {
-  position: relative;
-  list-style: none;
-  margin: 0;
-  padding: 0 0 0 22px;
+.mm2-focus-crumb + .mm2-focus-crumb::before { content: " › "; opacity: 0.7; }
+.mm2-focus-progress { height: 2px; margin-top: 8px; background: var(--mm2-faint); }
+.mm2-focus-progress > span { display: block; height: 100%; background: var(--mm2-accent); transition: width 200ms linear; }
+.mm2-focus-empty {
+  flex: 0 0 auto;
+  padding: 12px;
+  border-bottom: 1px solid var(--mm2-faint);
 }
-.mm2-lens-thread::before {
-  content: "";
-  position: absolute;
-  left: 7px;
-  top: 10px;
-  bottom: 10px;
-  width: 1px;
-  background: color-mix(in srgb, currentColor 16%, transparent);
+.mm2-focus-empty-text { margin: 0 0 8px; font-size: 13px; }
+.mm2-focus-generate { margin-bottom: 4px; }
+.mm2-focus-canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 120px;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
-.mm2-lens-bead {
-  position: absolute;
-  left: 3px;
-  top: -4.5px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--mm2-accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--mm2-accent) 18%, transparent);
-  transition: transform 380ms cubic-bezier(0.2, 0.9, 0.25, 1);
-  z-index: 1;
-}
-.mm2-lens-item {
-  position: relative;
-  padding: 3px 0;
-}
-.mm2-lens-item::before {
-  content: "";
-  position: absolute;
-  left: -18px;
-  top: 12px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: color-mix(in srgb, currentColor 32%, transparent);
-}
-.mm2-lens-item-btn {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.55;
-  text-align: left;
-  color: color-mix(in srgb, currentColor 60%, transparent);
-  cursor: pointer;
-}
-.mm2-lens-item-btn:hover { color: var(--reader-fg, var(--ink)); }
-.mm2-lens-item.is-current .mm2-lens-item-btn {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.45;
-  color: var(--reader-fg, var(--ink));
-}
-.mm2-lens-item-title { min-width: 0; }
-.mm2-lens-item-type {
-  flex: none;
-  font-size: 11px;
-  font-weight: 400;
-  color: var(--mm2-accent);
-}
-.mm2-lens-item.is-stub .mm2-lens-item-btn { color: color-mix(in srgb, currentColor 42%, transparent); }
-.mm2-lens-item.is-streaming::before {
-  border-color: var(--mm2-accent);
-  animation: mm2-lens-pulse 1.1s ease-in-out infinite;
-}
-@keyframes mm2-lens-pulse {
-  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--mm2-accent) 20%, transparent); }
-}
-.mm2-lens-item.is-fresh,
-.mm2-lens-kid.is-fresh {
-  animation: mm2-lens-drop 260ms ease-out both;
-}
-@keyframes mm2-lens-drop {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: none; }
-}
-.mm2-lens-item-row {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.mm2-lens-item-row > .mm2-lens-item-btn { flex: 1; min-width: 0; }
-.mm2-lens-deepen {
-  flex: none;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--mm2-accent);
-  cursor: pointer;
-}
-.mm2-lens-deepen:hover { text-decoration: underline; }
-.mm2-lens-deepen:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
-.mm2-lens-kids {
-  list-style: none;
-  margin: 6px 0 4px;
-  padding: 0 0 0 12px;
-  border-left: 1px solid color-mix(in srgb, var(--mm2-accent) 45%, transparent);
-}
-.mm2-lens-kid > button {
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 12.5px;
-  line-height: 1.55;
-  text-align: left;
-  color: color-mix(in srgb, currentColor 72%, transparent);
-  cursor: pointer;
-}
-.mm2-lens-kid > button:hover { color: var(--reader-fg, var(--ink)); }
-.mm2-lens-kid.is-more {
-  font-size: 12px;
-  color: color-mix(in srgb, currentColor 45%, transparent);
-}
-.mm2-lens-rels {
-  list-style: none;
-  margin: 12px 0 0;
-  padding: 10px 0 0;
-  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
-}
-.mm2-lens-rels button {
-  padding: 2px 0;
-  border: 0;
-  background: none;
-  font: inherit;
+.mm2-focus-svg { display: block; animation: mm2-focus-in 180ms ease-out; }
+@keyframes mm2-focus-in { from { opacity: 0; } to { opacity: 1; } }
+.mm2-focus-note {
+  margin: 8px 12px;
   font-size: 12px;
   line-height: 1.55;
-  text-align: left;
-  color: color-mix(in srgb, currentColor 62%, transparent);
-  cursor: pointer;
+  color: color-mix(in srgb, currentColor 55%, transparent);
 }
-.mm2-lens-rels button:hover { color: var(--mm2-accent); }
-.mm2-lens-empty { padding: 4px 0 6px; }
-.mm2-lens-empty-text {
-  margin: 0 0 10px;
-  font-size: 14px;
-  line-height: 1.5;
-}
-.mm2-lens-generate { width: 100%; }
-.mm2-lens-note {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.55;
-  color: color-mix(in srgb, currentColor 52%, transparent);
-}
-.mm2-lens-live::before {
+.mm2-focus-note-foot { flex: 0 0 auto; }
+.mm2-focus-live::before {
   content: "";
   display: inline-block;
   width: 6px;
@@ -9850,17 +9730,89 @@ button.mm2-lens-path-item:hover { color: var(--reader-fg, var(--ink)); }
   border-radius: 50%;
   background: var(--mm2-accent);
   vertical-align: 1px;
-  animation: mm2-lens-blink 1.1s ease-in-out infinite;
+  animation: mm2-focus-blink 1.1s ease-in-out infinite;
 }
-@keyframes mm2-lens-blink { 50% { opacity: 0.25; } }
-.mm2-lens-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px 8px 18px;
-  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+@keyframes mm2-focus-blink { 50% { opacity: 0.25; } }
+
+/* —— 图 —— */
+.mm2f-frame { fill: color-mix(in srgb, currentColor 2.5%, transparent); stroke: var(--mm2-faint); }
+.mm2f-axis { stroke: var(--mm2-line); stroke-width: 1.2; }
+.mm2f-tick { fill: var(--reader-bg, var(--paper)); stroke: var(--mm2-line); stroke-width: 1.2; }
+.mm2f-tick.is-focus { fill: var(--mm2-accent); stroke: var(--mm2-accent); }
+.mm2f-label { font-size: 11px; fill: color-mix(in srgb, currentColor 50%, transparent); }
+.mm2f-seq path { fill: none; stroke: color-mix(in srgb, currentColor 45%, transparent); stroke-width: 1.2; }
+.mm2f-tree-line { fill: none; stroke: var(--mm2-line); stroke-width: 1; }
+.mm2f-tree-line.is-strong { stroke: color-mix(in srgb, currentColor 55%, transparent); stroke-width: 1.4; }
+.mm2f-gap rect { fill: none; stroke: var(--mm2-line); stroke-dasharray: 3 3; }
+.mm2f-gap text { font-size: 11px; fill: color-mix(in srgb, currentColor 55%, transparent); }
+.mm2f-node { cursor: pointer; outline: none; }
+.mm2f-card { fill: var(--reader-bg, var(--paper)); stroke: var(--mm2-line); stroke-width: 1; transition: stroke 120ms ease, fill 120ms ease; }
+.mm2f-title { fill: currentColor; font-size: 13px; }
+.mm2f-meta { font-size: 11px; fill: color-mix(in srgb, currentColor 52%, transparent); }
+.mm2f-node.is-whole .mm2f-card { fill: color-mix(in srgb, currentColor 5%, var(--reader-bg, var(--paper))); }
+.mm2f-node.is-whole .mm2f-title { font-weight: 600; }
+.mm2f-node.is-member:not(.is-linked) { opacity: 0.62; }
+.mm2f-node.is-external .mm2f-card { stroke-dasharray: 4 3; }
+.mm2f-node.is-external:not(.is-linked) { opacity: 0.7; }
+.mm2f-node.is-focus .mm2f-card {
+  fill: color-mix(in srgb, var(--mm2-accent) 12%, var(--reader-bg, var(--paper)));
+  stroke: var(--mm2-accent);
+  stroke-width: 1.6;
 }
-.mm2-lens-link {
+.mm2f-node.is-focus .mm2f-title { font-weight: 600; }
+.mm2f-node.is-focus .mm2f-meta { fill: var(--mm2-accent); }
+.mm2f-node.is-hover .mm2f-card,
+.mm2f-node:focus-visible .mm2f-card { stroke: var(--mm2-accent); }
+.mm2f-node.is-hover { opacity: 1; }
+.mm2f-reading-bar { fill: var(--mm2-accent); }
+.mm2f-reading-tag { font-size: 10px; fill: var(--mm2-accent); }
+.mm2f-rel path { fill: none; stroke: color-mix(in srgb, currentColor 42%, transparent); }
+.mm2f-rel.is-focus path { stroke: var(--mm2-accent); }
+.mm2f-rel:not(.is-focus):not(.is-lit) { opacity: 0.6; }
+.mm2f-rel.is-lit path { stroke-width: 2.2; }
+.mm2f-rel-badge circle { fill: var(--reader-bg, var(--paper)); stroke: color-mix(in srgb, currentColor 42%, transparent); }
+.mm2f-rel.is-focus .mm2f-rel-badge circle { stroke: var(--mm2-accent); }
+.mm2f-rel-badge text { font-size: 10px; text-anchor: middle; fill: currentColor; }
+.mm2f-rel.is-focus .mm2f-rel-badge text { fill: var(--mm2-accent); }
+.mm2f-mk { fill: color-mix(in srgb, currentColor 42%, transparent); }
+.mm2f-mk-line { stroke: color-mix(in srgb, currentColor 42%, transparent); stroke-width: 1.4; }
+.mm2f-mk.mm2f-mk-a { fill: var(--mm2-accent); }
+.mm2f-mk-line.mm2f-mk-a { stroke: var(--mm2-accent); }
+
+/* —— 详情 —— */
+.mm2-focus-detail {
+  flex: 0 0 auto;
+  max-height: 42%;
+  overflow: auto;
+  padding: 10px 12px 10px;
+  border-top: 1px solid var(--mm2-faint);
+}
+.mm2-focus-detail-meta { display: flex; gap: 6px; min-height: 18px; }
+.mm2-focus-type,
+.mm2-focus-reading {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--mm2-faint);
+  color: color-mix(in srgb, currentColor 62%, transparent);
+}
+.mm2-focus-reading { border-color: var(--mm2-accent); color: var(--mm2-accent); }
+.mm2-focus-detail-title { margin: 6px 0 0; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.mm2-focus-explain { margin: 6px 0 0; font-size: 13px; line-height: 1.65; color: color-mix(in srgb, currentColor 80%, transparent); }
+.mm2-focus-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.mm2-focus-btn {
+  font: inherit;
+  font-size: 12px;
+  line-height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--mm2-line);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.mm2-focus-btn:hover:not(:disabled) { border-color: var(--mm2-accent); color: var(--mm2-accent); }
+.mm2-focus-btn:disabled { opacity: 0.5; cursor: default; }
+.mm2-focus-link {
   padding: 0;
   border: 0;
   background: none;
@@ -9869,38 +9821,37 @@ button.mm2-lens-path-item:hover { color: var(--reader-fg, var(--ink)); }
   color: var(--mm2-accent);
   cursor: pointer;
 }
-.mm2-lens-link:hover { text-decoration: underline; }
-.mm2-lens-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: color-mix(in srgb, currentColor 50%, transparent);
-  cursor: pointer;
+.mm2-focus-link:hover { text-decoration: underline; }
+.mm2-focus-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: color-mix(in srgb, currentColor 55%, transparent);
 }
-.mm2-lens-close:hover {
-  color: var(--reader-fg, var(--ink));
-  background: color-mix(in srgb, currentColor 7%, transparent);
+.mm2-focus-legend-item b {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  border: 1px solid var(--mm2-line);
+  border-radius: 50%;
+  font-weight: 400;
+  font-size: 10px;
+  color: currentColor;
 }
-.mm2-lens button:focus-visible {
+.mm2-focus button:focus-visible {
   outline: 2px solid var(--mm2-accent);
   outline-offset: 2px;
-  border-radius: 3px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .mm2-lens,
-  .mm2-lens-bead,
-  .mm2-lens-rail-bead,
-  .mm2-lens-rail-seg,
-  .mm2-lens-item.is-fresh,
-  .mm2-lens-kid.is-fresh,
-  .mm2-lens-item.is-streaming::before,
-  .mm2-lens-live::before {
+  .mm2-focus-svg,
+  .mm2-focus.is-float,
+  .mm2-focus-live::before,
+  .mm2f-card,
+  .mm2-focus-progress > span {
     animation: none;
     transition: none;
   }

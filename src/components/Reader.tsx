@@ -599,6 +599,25 @@ export default function Reader({
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
   // 结构透镜（2026-10-18）：内核就绪后才挂载；「在图谱中打开」经 focusRequest 让图谱页签聚焦节点
   const [lensKernel, setLensKernel] = useState<ReaderKernel | null>(null);
+  /** 结构图（阅读透镜 v2）：工具栏开关，跨会话记住 */
+  const [lensOpen, setLensOpenState] = useState<boolean>(() => {
+    try {
+      return window.localStorage?.getItem("mm2.lens.open") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setLensOpen = useCallback((v: boolean) => {
+    setLensOpenState(v);
+    try {
+      window.localStorage?.setItem("mm2.lens.open", v ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+  }, []);
+  const [lensFloatHost, setLensFloatHost] = useState<HTMLDivElement | null>(null);
+  const [lensDockHost, setLensDockHost] = useState<HTMLDivElement | null>(null);
+  const lensSupported = !!lensKernel && typeof lensKernel.getReadingProbe === "function";
   const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number } | null>(null);
   /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
   const [annotSort, setAnnotSort] = useState<AnnotSort>("pos");
@@ -1766,6 +1785,24 @@ export default function Reader({
                       v48.50（D90 增补）：分隔线移到组首——「图片挖空」与翻页贴得太近（用户指令），
                       用 hairline 在选区动作组与翻页/菜单组之间给出可见断点。 */}
                   <span className="reader-engine-divider" aria-hidden="true" />
+                  {lensSupported && (
+                    <button
+                      type="button"
+                      className={`btn btn-outline btn-sm reader-lens-btn${lensOpen ? " is-on" : ""}`}
+                      data-reader-lens-toggle
+                      aria-pressed={lensOpen}
+                      title={lensOpen ? T("关闭结构图") : T("结构图：看正在读的这一段在全书结构中的位置")}
+                      onClick={() => setLensOpen(!lensOpen)}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3">
+                        <rect x="1.5" y="1.5" width="5" height="3.2" rx="0.6" />
+                        <rect x="7.5" y="5.4" width="5" height="3.2" rx="0.6" />
+                        <rect x="7.5" y="9.6" width="5" height="3.2" rx="0.6" />
+                        <path d="M3.4 4.7V11.2H7.5M3.4 7H7.5" />
+                      </svg>
+                      <span>{T("结构图")}</span>
+                    </button>
+                  )}
                   <button className="btn btn-outline btn-sm reader-nav-btn" title={T("上一页（←）")} aria-label={T("上一页")} onClick={() => void turnPage(-1)}>
                     <IconChevronLeft />
                   </button>
@@ -2078,11 +2115,19 @@ export default function Reader({
                 )}
                 {/* v48.44（D84）：图谱页签画布的 portal 宿主——置于 .reader-engine-main 末位（z 5 高于
                     翻页热区 z 4 与错误面板），空时 display:none 不遮正文；画布经 MindmapTab portal 落入 */}
-                {/* 结构透镜：正文右缘结构轨 + 就地图谱面板（图谱页签盖住正文时隐藏） */}
+                <div className="reader-map-layer" data-reader-map-layer ref={setMapLayerHost} />
+                </div>
+                {/* 结构图（阅读透镜 v2）：按这一组结构的版式选摆放——浮窗（落在正文视口内的覆盖层 .reader-lens-float-host）
+                    或正文下方（.reader-lens-dock-host，正文让位）；图谱页签盖住正文时隐藏 */}
+                <div className="reader-lens-float-host" data-reader-lens-float ref={setLensFloatHost} />
                 <MindmapLens
+                  floatHost={lensFloatHost}
+                  dockHost={lensDockHost}
                   kernel={lensKernel}
                   documentId={contextRef?.documentId ?? null}
                   title={title || sourceTitle || T("未命名材料")}
+                  open={lensOpen}
+                  onClose={() => setLensOpen(false)}
                   hidden={sidebarOpen && sidebarTab === "map"}
                   onOpenInMap={(nodeId) => {
                     setSidebarTab("map");
@@ -2090,9 +2135,8 @@ export default function Reader({
                     if (nodeId) setMapFocus({ nodeId, seq: Date.now() });
                   }}
                 />
-                <div className="reader-map-layer" data-reader-map-layer ref={setMapLayerHost} />
-                </div>
               </div>
+              <div className="reader-lens-dock-host" data-reader-lens-dock ref={setLensDockHost} />
               </div>
               </div>
             </>

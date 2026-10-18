@@ -66,6 +66,9 @@ export interface GraphLocate {
   scopeOutlined?: boolean;
 }
 
+/** graphNodeAnchors：节点 → 正文强调锚（每单元一段：首尾原文探针） */
+export interface NodeAnchor { unitAnchor: string; head: string; tail: string; blockStart: number; blockEnd: number }
+
 interface V2Bridge {
   graphLoad: (p: string | { documentId: string } | { mapId: string }) => Promise<GraphLoadResult>;
   graphFeed: (p: GraphFeedParams) => Promise<GraphFeedResult>;
@@ -81,6 +84,7 @@ interface V2Bridge {
   graphNodeText: (p: { mapId: string; nodeId: string }) => Promise<GraphNodeText>;
   graphLocate?: (p: { documentId: string; unitAnchor: string; text: string; mapId?: string }) => Promise<GraphLocate>;
   graphEnsureMap?: (p: { documentId: string; title?: string }) => Promise<{ mapId: string; created: boolean }>;
+  graphNodeAnchors?: (p: { mapId: string; nodeIds: string[] }) => Promise<{ anchors: Record<string, NodeAnchor[]> }>;
   onDelta?: (cb: (payload: MindmapDelta) => void) => () => void;
 }
 
@@ -112,6 +116,8 @@ export const mindmapV2Api = {
     bridge()?.graphLocate?.(p) ?? Promise.resolve({ ready: false }),
   ensureMap: (documentId: string, title?: string): Promise<{ mapId: string; created: boolean }> =>
     bridge()?.graphEnsureMap?.({ documentId, title }) ?? NO_BRIDGE(),
+  nodeAnchors: (mapId: string, nodeIds: string[]): Promise<{ anchors: Record<string, NodeAnchor[]> }> =>
+    bridge()?.graphNodeAnchors?.({ mapId, nodeIds }) ?? Promise.resolve({ anchors: {} }),
   /** 直连订阅（一般用 EventBus `mindmap/delta`；本方法供不经 EventBus 的场景） */
   onDelta: (cb: (payload: MindmapDelta) => void): (() => void) => bridge()?.onDelta?.(cb) ?? (() => {}),
 };
