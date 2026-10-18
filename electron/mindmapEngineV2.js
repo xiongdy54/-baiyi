@@ -2,7 +2,7 @@
 "use strict";
 // 材料导图 v2 · 主进程引擎（D192 / MINDMAP-V2-IMPL-PLAN §2、§4.2、§4.5–4.10；T3）。
 // 依赖全部注入（store / chatStream / 设置 / AI 配置 / 提示词 / 广播 / 时钟），node 可测；不 require electron / db.js / ai.js。
-// T4 接线：main.js 以 createMindmapEngineV2(deps) 建一个单例，每个方法外包一层 ipcMain.handle(`mindmap:<方法名>`, (_e, p) => engine.<方法名>(p))。
+// T4 接线：main.js 以 createMindmapEngineV2(deps) 建一个单例，每个方法外包一层 ipcMain.handle（通道名＝"mindmap:" + 方法名，转调 engine 同名方法）。
 //
 // ===================== deps =====================
 //   store                 db.js 子集（同名同签名；内存版 tests/lib/mindmapMemoryStore.cjs）：

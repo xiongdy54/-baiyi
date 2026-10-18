@@ -1719,6 +1719,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 
 **v49.19（D192）M15 材料导图 v2 主软件实施进行中**：实施方案 `docs/design/MINDMAP-V2-IMPL-PLAN.md`（任务 T1–T10，关键路径 (T1∥T2∥T5)→(T3→T4)∥(T6∥T7)→T8→T9→T10）；完成后用户在 Windows 上按交付说明跑 electron 套件并用导图面板读数条回传实测。
 
+**进度（2026-10-18）**：T1–T9 已实施并提交；用户 Windows 实测三轮后的修复与新增功能「结构图」（阅读透镜，阅读正文时按段落聚焦的图谱，按结构版式选浮窗 / 正文下方，正文段落强调）已实施（提交 9844212 → 06846f2），设计与取舍记录在 `docs/design/MINDMAP-V2-IMPL-PLAN.md` §9（9.3 第一稿已被用户否决、9.4 为现行方案），**接手请先读该文件 §10 交接说明**。剩余：T10——把 §9 的契约（新 IPC `mindmap:graphLocate` / `graphEnsureMap` / `graphNodeAnchors`；内核可选能力 `getReadingProbe` / `setStructureHighlights`）连同 D192 原定条款一并写入本文档 §4.19 / §4.1 / §7.2–7.4，并补 GUI 套件；结构图尚待用户在真实应用里验收。
+
 **v49.18（D191）M15 材料导图 v2 重设计已定案，下一步＝P0 基准实验**：设计稿 `docs/design/MINDMAP-V2-FAST-PROGRESSIVE.md` rev.2（§12 阶段与任务拆解表 T1–T22、§11 KPI、§15 结构画布与稳定性契约 S1–S8），样张 `design-samples/mindmap-v2-canvas.html`。P0 只动 prompt-lab 与提示词（行协议 outline / expand / explain 三个 scope），用两份固定基准材料（2,688 字文章 + 13 万字长书）× 2–3 个候选模型实测；达 KPI 再开 P1 引擎，未达则回设计稿调整。
 
 **v49.9（D182 收尾）多语言 i18n 剩余界面迁移已完成**：v49.8 首批（App 壳/设置面板/数据页/成长反馈/学习者模型/AI 输出语言）之外的全部界面已迁移——Reader 全家、制卡与选区链、AI 与知识面板、仪表与日志、编辑器与词典、CardBrowser，及 lib 层构造期显示串（activity/sessionQueue/insight/fsrs/journal/dict/ai/readingWorkflow/mindmap/render/commands/pdf adapter）；en/ja 词典扩至 2031 键（两集合一致）；纯函数层稳定键在渲染期 T()、数据/dev 串不译（分类口径见 §8.1 D182 行）；SettingsPanel 右栏模块顺序对齐左侧导航的修复随本批一并交付。验证：i18n-check OK、tsc 0、build ✓、node+GUI 测试全绿（清单见 D182 行）。

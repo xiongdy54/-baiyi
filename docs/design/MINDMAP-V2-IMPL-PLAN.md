@@ -279,3 +279,26 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 - **详情**：类型 + 标题 + 讲解（已缓存则显示；否则「它在说什么」按需 1 次调用，走 `graphExplain`）+ 深挖 + 在完整图谱中打开 + 关系图例。
 - **测试**：`tests/m15v2.focus.test.cjs`（38）、`tests/m15v2.textrange.test.cjs`（7）、`tests/m15v2.lens.dom.test.cjs` 重写（30）、engine +3、ipc 15 通道。
 - 待登记（随 T10）：IPC `mindmap:graphNodeAnchors`；内核契约 `setStructureHighlights` / `ReaderStructureRegion`。
+
+## 10. 交接说明（2026-10-18，给下一位接手的 agent）
+
+**现状**：T1–T9 已提交（main：…ed08589 → 06846f2）。「结构图」（§9.4）为现行方案，§9.3 的结构轨 + 列表面板已被用户否决并删除。结构图**未在真实应用里验收过**（开发沙箱跑不了 Electron，只做了 jsdom 页面测试与离线渲染预览）。
+
+**结构图入口文件**
+- `src/lib/mindmap/v2/focus.ts`：`buildFocus`（从完整图谱裁出聚焦小图）+ `layoutFocus`（按版式选排法：`layoutTree` / `layoutTopdown` / `layoutFlow` / `layoutColumns`；`FAMILY_OF` / `HOST_OF` 决定排法与浮窗 / 下方）。纯函数，测试 `tests/m15v2.focus.test.cjs`。
+- `src/components/reader/MindmapLens.tsx`：面板组件（定位、生成本节、正文强调、浏览 / 跟随、跳转与「回到刚才读的位置」、浮窗拖动缩放、下方拖高、浮窗 / 下方切换）。页面测试 `tests/m15v2.lens.dom.test.cjs`。
+- `src/components/Reader.tsx`：工具栏「结构图」开关、两个宿主 `.reader-lens-float-host`（正文视口覆盖层）/ `.reader-lens-dock-host`（右列末行）。
+- `electron/mindmapEngineV2.js`：`graphLocate` / `graphEnsureMap` / `graphNodeAnchors`（均零 AI）。
+- `src/lib/reader/kernel.ts` + `src/lib/reader/foliate/adapter.ts` + `src/lib/reader/textRange.ts`：`getReadingProbe`、`setStructureHighlights`（CSS Custom Highlight，按首尾原文探针找回 Range）。
+- 样式：`src/theme.css` 末尾「结构图（阅读透镜 v2」一节；文案 en / ja 已补齐（`node scripts/i18n-check.mjs` OK）。
+- localStorage 视图偏好（非设置键，不进 F18）：`mm2.lens.open` / `mm2.lens.host` / `mm2.lens.float` / `mm2.lens.dockH`。
+
+**已知未完成 / 待打磨**
+1. PDF 引擎未实现 `setStructureHighlights`（能力缺省→无正文强调）；`getReadingProbe` 在 PDF 只给页、不给段落片段，定位粒度是页。
+2. 时间线排法里同一行卡片之间的关系弧会擦过时间轴；`wrapText` 会在英文单词中间断行。
+3. 浮窗初始几何依赖 `floatHost` 尺寸；窗口缩放后不会自动收回越界的浮窗。
+4. 关系线是启发式路由（`routeRel`：端口按相对位置选，穿卡时侧绕），复杂图仍可能交叉；未接 `route.ts` 的通道路由。
+5. 用户口头方向：按结构类型选「最优展示形式」——目前只用到整体这一组的 `{版式}`；可考虑让 outline 提示词对每组显式给出展示建议，或支持用户在图里切换排法（`layoutFocus` 已有 `opts.family`，UI 未暴露）。
+6. T10 文档落盘（见 AI_DEVELOPMENT_GUIDE §9.5）与 GUI 套件适配。
+
+**验证方式**：`node tests/m15v2.{focus,textrange,lens.dom,engine,ipc,tab.dom}.test.cjs` 全绿；`node node_modules/typescript/bin/tsc --noEmit -p .` 为 0；真实效果需 `npm run dev` 打开一本已生成图谱的 EPUB，点工具栏「结构图」。用户的应用日志与数据库在 `%APPDATA%/incremental-reading-dev`（`logs/main.log`、`library.db`）。
