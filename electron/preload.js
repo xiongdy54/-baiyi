@@ -460,6 +460,8 @@ contextBridge.exposeInMainWorld("mindmapAPI", {
   graphSetView: (p) => ipcRenderer.invoke("mindmap:graphSetView", p),
   graphMetrics: (p) => ipcRenderer.invoke("mindmap:graphMetrics", p),
   graphNodeText: (p) => ipcRenderer.invoke("mindmap:graphNodeText", p),
+  graphLocate: (p) => ipcRenderer.invoke("mindmap:graphLocate", p),
+  graphEnsureMap: (p) => ipcRenderer.invoke("mindmap:graphEnsureMap", p),
   onDelta: (callback) => {
     const handler = (_e, payload) => callback(payload);
     ipcRenderer.on("mindmap:delta", handler);

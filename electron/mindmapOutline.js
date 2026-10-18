@@ -66,7 +66,8 @@ function parseLine(s) {
   if (!m) return null;
   const segs = m[1].split(".").map(Number);
   if (segs.some((n) => !(n >= 1))) return null;
-  const title = m[3].trim();
+  // 标题尾部残留的多余区间记号（模型偶尔写成「… @120 @122 .」）去掉，不进标题
+  const title = m[3].replace(/(?:\s*@\s*\d+(?:\s*[-–—~～－]\s*\d+)?)+\s*$/, "").trim();
   if (!title) return null;
   let a = Number(m[5]);
   let b = m[6] != null ? Number(m[6]) : a;

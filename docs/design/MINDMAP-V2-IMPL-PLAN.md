@@ -241,3 +241,24 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 6. §7.3 登记新测试（每个带 `@runtime` 头）与 `tests/lib/tsload.cjs` 用法。
 7. §7.4 新 scope 三个（消费方 `electron/mindmapEngineV2.js`，旧 5 个保留到 P5）；新设置键与 `app.mindmapConcurrency` 默认值语义。
 8. §8.1 D41-③④⑤、D44–D49、D84 各加「v49.19 / D192 起由 v2 替代或修订」指针；D191 标「已实施（除 P5/P6）」。
+
+## 9. 实测后增补（2026-10-18，用户 Windows 实测反馈）
+
+### 9.1 修复
+- `npm run dev` 曾因「dist 存在即优先」加载旧构建：dev 脚本改为 `electron . --dev-server`（df79865）。
+- 画布空白：React StrictMode 双挂载下 rafRef 未置空 → 从不绘制；关系 0 条：`material_map_edges` INSERT 列数不符；解析器同父同区间判重 → 改接受（OUTLINE_VERSION 2）（ef33046）。
+- 测试面补齐：`tests/m15v2.tab.dom.test.cjs`（jsdom + 真实页签 + 真实引擎，包 StrictMode）、`tests/lib/nodeSqliteShim.cjs` + `tests/m15v2.realdb.test.cjs`（node:sqlite 跑真实 db.js SQL）。
+
+### 9.2 调整（f2ce944）
+- 实测读数条从界面移除（读数仍写入 `material_map_runs.output_json.metrics`）。
+- 去重：标题为「目录 / Contents / 索引 / 版权页 …」的作用域直接封顶；模型把目标标题再写一遍的顶层「回声」节点不建行、子挂目标；目录节点与「其他」类型不显示类型行。
+- 流畅：平移 / 同档缩放只改外层 transform；几何未变不起过渡；过渡不与用户拖动抢视图；>200 节点的图首次打开默认收起 AI 第 2 层以下。
+
+### 9.3 结构透镜（阅读透镜）
+用户：阅读正文时随时查看所读段落的图谱，或就地为所在段落生成，不必跳到图谱页签；要「炫酷高端但简洁干净」。
+- **形态**：正文右缘 3px 结构轨（按章节篇幅分段：已生成实、未生成虚；强调色珠子标当前位置）；点轨展开轨旁玻璃面板：祖先阶梯 / 一根细线串起同层要点、珠子停在正在读的那一点并随阅读滑动 / 当前点的下一层 / 关系 ≤3 行 / 「在图谱中打开」。唯一动效＝珠子滑动 + 新要点落线；尊重 reduced-motion。只用阅读区前景 / 背景与 accent（前景经 currentColor 混色，适配 `--reader-fg: inherit`）。
+- **定位**：内核可选能力 `getReadingProbe()` → `{ unitAnchor, text(所在段落开头 ≤80 字) }`（foliate 取 relocate 的可见起点 Range；PDF 取当前页、text 空）→ `mindmap:graphLocate` 在线性化原文里空白不敏感查找 → 块号 → 包含该块的最深节点（及所在目录作用域）。零 AI。
+- **就地生成**：`mindmap:graphEnsureMap`（无激活 v2 版本时建仅含目录骨架的 v2 版本并激活，零调用；旧版留历史）→ `graphExpand(所在目录节点, click)` 只 outline 该作用域（约 1 次调用；交互容器 run，不进全局指示器）。
+- **原文送入**：`src/lib/mindmapFeed.ts` 进程内单例（内核实例 + documentId），图谱页签与透镜共用，杜绝两处交错送入导致 out_of_order；已送完的文档再开页签不重送；主进程 LRU 挤出后 reset 重送。透镜只在用户展开过之后才送原文。
+- **测试**：`tests/m15v2.lens.dom.test.cjs`（17 项）、`tests/m15v2.engine.test.cjs` 透镜段（10 项）。
+- 待登记：AI_DEVELOPMENT_GUIDE §4.19 / IPC 清单（`mindmap:graphLocate` / `mindmap:graphEnsureMap`）/ 内核契约（`getReadingProbe`）随 T10 一并写入。

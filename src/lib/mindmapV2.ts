@@ -49,6 +49,23 @@ export interface GraphExpandResult { jobId?: string; skipped?: GraphExpandSkippe
 export type GraphExplainResult = { jobId: string; waiting?: boolean; cached?: undefined } | { cached: true; explain: string | null; jobId?: undefined };
 export interface GraphNodeText { text: string | null; unitAnchor: string | null }
 
+/** graphLocate：阅读位置 → 图谱节点（阅读透镜） */
+export interface GraphLocate {
+  ready: boolean;
+  mapId?: string | null;
+  nodeId?: string | null;
+  /** 根 → 节点 */
+  chain?: string[];
+  block?: number;
+  totalBlocks?: number;
+  complete?: boolean;
+  /** 所在目录节点（目录骨架 id，与图里 source='toc' 行同 id） */
+  scopeNodeId?: string | null;
+  scopeTitles?: string[];
+  scopeFloor?: boolean;
+  scopeOutlined?: boolean;
+}
+
 interface V2Bridge {
   graphLoad: (p: string | { documentId: string } | { mapId: string }) => Promise<GraphLoadResult>;
   graphFeed: (p: GraphFeedParams) => Promise<GraphFeedResult>;
@@ -62,6 +79,8 @@ interface V2Bridge {
   graphSetView: (p: { mapId: string; view: V2View }) => Promise<boolean>;
   graphMetrics: (p: { mapId: string }) => Promise<RunMetrics>;
   graphNodeText: (p: { mapId: string; nodeId: string }) => Promise<GraphNodeText>;
+  graphLocate?: (p: { documentId: string; unitAnchor: string; text: string; mapId?: string }) => Promise<GraphLocate>;
+  graphEnsureMap?: (p: { documentId: string; title?: string }) => Promise<{ mapId: string; created: boolean }>;
   onDelta?: (cb: (payload: MindmapDelta) => void) => () => void;
 }
 
@@ -89,6 +108,10 @@ export const mindmapV2Api = {
   metrics: (mapId: string): Promise<RunMetrics | null> => bridge()?.graphMetrics({ mapId }) ?? Promise.resolve(null),
   nodeText: (mapId: string, nodeId: string): Promise<GraphNodeText> =>
     bridge()?.graphNodeText({ mapId, nodeId }) ?? Promise.resolve({ text: null, unitAnchor: null }),
+  locate: (p: { documentId: string; unitAnchor: string; text: string; mapId?: string }): Promise<GraphLocate> =>
+    bridge()?.graphLocate?.(p) ?? Promise.resolve({ ready: false }),
+  ensureMap: (documentId: string, title?: string): Promise<{ mapId: string; created: boolean }> =>
+    bridge()?.graphEnsureMap?.({ documentId, title }) ?? NO_BRIDGE(),
   /** 直连订阅（一般用 EventBus `mindmap/delta`；本方法供不经 EventBus 的场景） */
   onDelta: (cb: (payload: MindmapDelta) => void): (() => void) => bridge()?.onDelta?.(cb) ?? (() => {}),
 };

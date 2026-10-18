@@ -34,6 +34,7 @@ import NodeDetailV2 from "./mindmap/NodeDetailV2";
 import { eventBus } from "../../lib/eventbus";
 import { settingsStore } from "../../lib/settings";
 import { useT } from "../../lib/i18n";
+import { ensureFed, flattenToc, resetFeed, subscribeFeed, type TocItem } from "../../lib/mindmapFeed";
 
 export interface MindmapTabProps {
   kernel: import("../../lib/reader/kernel").ReaderKernel;
@@ -49,6 +50,8 @@ export interface MindmapTabProps {
   initialMapId?: string | null;
   /** 应用重启后「继续生成」：原文送完后 graphResume(runId)，重排尚未 outline 的作用域 */
   initialResumeRunId?: string | null;
+  /** 阅读透镜「在图谱中打开」：要选中并居中的节点（seq 变化即重新聚焦） */
+  focusRequest?: { nodeId: string; seq: number } | null;
 }
 
 const V2_GENERATOR = "m15v2-engine-1";
@@ -65,13 +68,8 @@ interface RunInfo {
   label: string;
 }
 
-interface TocItem {
-  anchor: string;
-  label: string;
-  children?: TocItem[];
-}
 
-export default function MindmapTab({ kernel, documentId, title, canvasHost, onJumpToText, onMakeCardsFromNode, initialMapId, initialResumeRunId }: MindmapTabProps) {
+export default function MindmapTab({ kernel, documentId, title, canvasHost, onJumpToText, onMakeCardsFromNode, initialMapId, initialResumeRunId, focusRequest }: MindmapTabProps) {
   const T = useT();
   const [graph, setGraphState] = useState<GraphState>(() => emptyGraph(null));
   const graphRef = useRef(graph);
@@ -108,6 +106,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
   const explainWaiters = useRef<Map<string, (ok: boolean) => void>>(new Map()); // jobId → resolve
   const canvasRef = useRef<MindmapCanvasHandle>(null);
   const tocRef = useRef<TocItem[]>([]);
+  const feedOffRef = useRef<(() => void) | null>(null);
 
   const mapId = preview ? null : graph.mapId;
   const isV1 = !!meta && meta.schemaVersion !== 2;
@@ -274,33 +273,26 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       if (!alive) return;
       setLoading(false);
 
-      const anchors = kernel.getSectionAnchors?.() || [];
-      if (!anchors.length || !kernel.getSectionText) {
-        setUnsupported(true);
-        return;
-      }
-      const unitAnchors = anchors.map((a) => a.anchor);
-      setFeed({ done: 0, total: anchors.length });
-      for (let i = 0; i < anchors.length; i++) {
+      // 原文送入走进程内单例（与阅读透镜共用；已送完的文档再开页签不重送）
+      const offFeed = subscribeFeed(kernel, documentId, (st) => {
         if (!alive) return;
-        let text = "";
-        try {
-          text = await kernel.getSectionText(anchors[i].anchor);
-        } catch {
-          text = "";
-        }
-        if (!alive) return;
-        try {
-          await mindmapV2Api.feed({ documentId, title, tocItems: tocRef.current, unitAnchors, index: i, text, last: i === anchors.length - 1 });
-        } catch (err) {
-          if (alive) setFeed({ done: i, total: anchors.length, error: err instanceof Error ? err.message : String(err) });
-          return;
-        }
-        if (alive) setFeed({ done: i + 1, total: anchors.length });
-      }
+        if (st.unsupported) setUnsupported(true);
+        setFeed({ done: st.done, total: st.total, error: st.error });
+      });
+      feedOffRef.current = offFeed;
+      let st = await ensureFed(kernel, documentId, title);
       if (!alive) return;
+      if (st.unsupported || st.error) return;
       try {
-        setEstimate(await mindmapV2Api.estimate(documentId));
+        let est = await mindmapV2Api.estimate(documentId);
+        if (!est.textReady) {
+          // 主进程会话已被 LRU 挤出（同时开过 3 份以上文档）：重送一遍
+          resetFeed(kernel, documentId);
+          st = await ensureFed(kernel, documentId, title);
+          if (!alive || !st.complete) return;
+          est = await mindmapV2Api.estimate(documentId);
+        }
+        if (alive) setEstimate(est);
       } catch {
         /* 预估失败不阻塞 */
       }
@@ -318,6 +310,8 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     })();
     return () => {
       alive = false;
+      feedOffRef.current?.();
+      feedOffRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kernel, documentId, initialMapId]);
@@ -441,6 +435,19 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
     setSelectedId(id);
     window.setTimeout(() => canvasRef.current?.center(id), 320);
   };
+
+  // 阅读透镜「在图谱中打开」：图载入后选中并居中（材料根映射为合成根卡）
+  const focusSeqRef = useRef(-1);
+  const nodeCount = Object.keys(graph.nodes).length;
+  useEffect(() => {
+    if (!focusRequest || focusRequest.seq === focusSeqRef.current || loading || preview) return;
+    const id = focusRequest.nodeId === rootRef.current.id ? ROOT_ID : focusRequest.nodeId;
+    if (id !== ROOT_ID && !graphRef.current.nodes[id]) return; // 等图载入 / 增量到达
+    focusSeqRef.current = focusRequest.seq;
+    if (id === ROOT_ID) setSelectedId(ROOT_ID);
+    else focusNode(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest, loading, preview, nodeCount]);
 
   // 选中节点（画布 id → 真实节点）
   const selected: { node: V2Node; isRoot: boolean } | null = useMemo(() => {
@@ -819,16 +826,4 @@ function defaultCollapsed(nodes: readonly V2Node[]): string[] {
     .filter((n) => n.source === "ai" && hasKids.has(n.id) && n.parentId != null && byId.get(n.parentId)?.source === "ai")
     .map((n) => n.id)
     .sort();
-}
-
-function flattenToc(items: { label: string; href: string; subitems?: { label: string; href: string; subitems?: unknown[] }[] }[]): TocItem[] {
-  const walk = (list: { label: string; href: string; subitems?: unknown[] }[]): TocItem[] =>
-    (list || [])
-      .filter((t) => t.href)
-      .map((t) => ({
-        anchor: t.href,
-        label: String(t.label || "").replace(/\s*·第 \d+ 页$/, ""),
-        children: t.subitems ? walk(t.subitems as { label: string; href: string; subitems?: unknown[] }[]) : undefined,
-      }));
-  return walk(items || []);
 }

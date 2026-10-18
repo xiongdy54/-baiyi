@@ -26,6 +26,7 @@ import { useT } from "../lib/i18n";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
 import MindmapTab from "./reader/MindmapTab";
+import MindmapLens from "./reader/MindmapLens";
 import type { AnnotSort } from "./reader/AnnotationPanel";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
@@ -596,6 +597,9 @@ export default function Reader({
   themeNamingRef.current = themeNaming;
   /** 批 4 Task 15：侧栏页签（**会话内**视图偏好，不落设置键——与 §5.3 栏内排序同规） */
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
+  // 结构透镜（2026-10-18）：内核就绪后才挂载；「在图谱中打开」经 focusRequest 让图谱页签聚焦节点
+  const [lensKernel, setLensKernel] = useState<ReaderKernel | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number } | null>(null);
   /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
   const [annotSort, setAnnotSort] = useState<AnnotSort>("pos");
   /** v48.44（D84）：图谱页签画布的 portal 宿主（.reader-engine-main 内覆盖层；空＝不渲染画布） */
@@ -959,6 +963,7 @@ export default function Reader({
 
   const handleEngineReady = useCallback((k: ReaderKernel) => {
     kernelRef.current = k;
+    setLensKernel(k);
     setEngineError(null);
     setTocItems(k.getTOC());
     void k.setMode(readerSettingsRef.current.mode);
@@ -1742,6 +1747,7 @@ export default function Reader({
                           canvasHost={mapLayerHost}
                           initialMapId={openMindmapMapId || null}
                           initialResumeRunId={resumeOnce}
+                          focusRequest={mapFocus}
                           onJumpToText={() => setSidebarOpen(false)}
                           onMakeCardsFromNode={(payload) => {
                             // v48.5 批C：结构制卡——mode=card-structure（导图节点专用分支，对作者组织结构出题）
@@ -2072,6 +2078,18 @@ export default function Reader({
                 )}
                 {/* v48.44（D84）：图谱页签画布的 portal 宿主——置于 .reader-engine-main 末位（z 5 高于
                     翻页热区 z 4 与错误面板），空时 display:none 不遮正文；画布经 MindmapTab portal 落入 */}
+                {/* 结构透镜：正文右缘结构轨 + 就地图谱面板（图谱页签盖住正文时隐藏） */}
+                <MindmapLens
+                  kernel={lensKernel}
+                  documentId={contextRef?.documentId ?? null}
+                  title={title || sourceTitle || T("未命名材料")}
+                  hidden={sidebarOpen && sidebarTab === "map"}
+                  onOpenInMap={(nodeId) => {
+                    setSidebarTab("map");
+                    setSidebarOpen(true);
+                    if (nodeId) setMapFocus({ nodeId, seq: Date.now() });
+                  }}
+                />
                 <div className="reader-map-layer" data-reader-map-layer ref={setMapLayerHost} />
                 </div>
               </div>

@@ -9556,3 +9556,352 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   border-color: var(--border-strong);
   color: var(--text-secondary);
 }
+
+/* ===================== 结构透镜（阅读透镜，2026-10-18） =====================
+   正文右缘一根结构轨（按章节篇幅分段，珠子标当前位置）+ 轨旁玻璃面板（祖先阶梯 / 要点之线 / 关系）。
+   只用阅读区自己的前景 / 背景与全局 accent：浅色、护眼、暗色阅读主题下都成立。
+   注意：Reader 把 --reader-bg 缺省设为 transparent、--reader-fg 缺省设为 inherit——inherit 不能进 color-mix，
+   所以前景一律经 color 继承后用 currentColor 混色；背景以 --paper 打底、--reader-bg 叠在上层。
+   唯一动效：珠子沿线滑动 + 新要点落到线上；prefers-reduced-motion 下全部关闭。 */
+.mm2-lens-rail {
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  right: 6px;
+  width: 18px;
+  z-index: 6;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--reader-fg, var(--text-primary));
+  --mm2-accent: color-mix(in srgb, var(--accent) 74%, currentColor);
+  cursor: pointer;
+}
+.mm2-lens-rail-track {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+.mm2-lens-rail-seg {
+  position: absolute;
+  left: -1px;
+  width: 3px;
+  margin-top: 1px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  transition: width 160ms ease, left 160ms ease;
+}
+.mm2-lens-rail-seg.is-done {
+  background: color-mix(in srgb, currentColor 30%, transparent);
+}
+.mm2-lens-rail:hover .mm2-lens-rail-seg {
+  left: -1.5px;
+  width: 4px;
+}
+.mm2-lens-rail-bead {
+  position: absolute;
+  left: -4px;
+  width: 9px;
+  height: 9px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: var(--mm2-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--mm2-accent) 22%, transparent);
+  transition: top 420ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.mm2-lens-rail:focus-visible {
+  outline: 2px solid var(--mm2-accent);
+  outline-offset: 2px;
+}
+
+.mm2-lens {
+  position: absolute;
+  top: 16px;
+  right: 30px;
+  z-index: 6;
+  width: min(336px, calc(100% - 72px));
+  max-height: calc(100% - 32px);
+  display: flex;
+  flex-direction: column;
+  color: var(--reader-fg, var(--text-primary));
+  /* 阅读主题可能与软件主题不同（暗色阅读 + 浅色软件）：强调色向阅读前景色偏移，暗底上也看得清 */
+  --mm2-accent: color-mix(in srgb, var(--accent) 74%, currentColor);
+  background:
+    linear-gradient(color-mix(in srgb, var(--reader-bg, transparent) 86%, transparent), color-mix(in srgb, var(--reader-bg, transparent) 86%, transparent)),
+    color-mix(in srgb, var(--paper) 86%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+  backdrop-filter: blur(18px) saturate(1.15);
+  border: 1px solid color-mix(in srgb, currentColor 11%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px -24px color-mix(in srgb, currentColor 45%, transparent);
+  overflow: hidden;
+  animation: mm2-lens-in 200ms ease-out;
+}
+@keyframes mm2-lens-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
+}
+.mm2-lens-progress {
+  height: 2px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+.mm2-lens-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--mm2-accent);
+  transition: width 200ms linear;
+}
+.mm2-lens-body {
+  padding: 16px 18px 6px;
+  overflow: auto;
+  min-height: 0;
+}
+.mm2-lens-path {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+}
+.mm2-lens-path-item {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: left;
+  color: color-mix(in srgb, currentColor 52%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+button.mm2-lens-path-item { cursor: pointer; }
+button.mm2-lens-path-item:hover { color: var(--reader-fg, var(--ink)); }
+
+/* 要点之线：一根细线 + 每点一个空心小圈；当前点由滑动的珠子标出 */
+.mm2-lens-thread {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 22px;
+}
+.mm2-lens-thread::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+}
+.mm2-lens-bead {
+  position: absolute;
+  left: 3px;
+  top: -4.5px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--mm2-accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--mm2-accent) 18%, transparent);
+  transition: transform 380ms cubic-bezier(0.2, 0.9, 0.25, 1);
+  z-index: 1;
+}
+.mm2-lens-item {
+  position: relative;
+  padding: 3px 0;
+}
+.mm2-lens-item::before {
+  content: "";
+  position: absolute;
+  left: -18px;
+  top: 12px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 32%, transparent);
+}
+.mm2-lens-item-btn {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: left;
+  color: color-mix(in srgb, currentColor 60%, transparent);
+  cursor: pointer;
+}
+.mm2-lens-item-btn:hover { color: var(--reader-fg, var(--ink)); }
+.mm2-lens-item.is-current .mm2-lens-item-btn {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--reader-fg, var(--ink));
+}
+.mm2-lens-item-title { min-width: 0; }
+.mm2-lens-item-type {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--mm2-accent);
+}
+.mm2-lens-item.is-stub .mm2-lens-item-btn { color: color-mix(in srgb, currentColor 42%, transparent); }
+.mm2-lens-item.is-streaming::before {
+  border-color: var(--mm2-accent);
+  animation: mm2-lens-pulse 1.1s ease-in-out infinite;
+}
+@keyframes mm2-lens-pulse {
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--mm2-accent) 20%, transparent); }
+}
+.mm2-lens-item.is-fresh,
+.mm2-lens-kid.is-fresh {
+  animation: mm2-lens-drop 260ms ease-out both;
+}
+@keyframes mm2-lens-drop {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+.mm2-lens-item-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.mm2-lens-item-row > .mm2-lens-item-btn { flex: 1; min-width: 0; }
+.mm2-lens-deepen {
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--mm2-accent);
+  cursor: pointer;
+}
+.mm2-lens-deepen:hover { text-decoration: underline; }
+.mm2-lens-deepen:disabled { opacity: 0.5; cursor: default; text-decoration: none; }
+.mm2-lens-kids {
+  list-style: none;
+  margin: 6px 0 4px;
+  padding: 0 0 0 12px;
+  border-left: 1px solid color-mix(in srgb, var(--mm2-accent) 45%, transparent);
+}
+.mm2-lens-kid > button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  text-align: left;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  cursor: pointer;
+}
+.mm2-lens-kid > button:hover { color: var(--reader-fg, var(--ink)); }
+.mm2-lens-kid.is-more {
+  font-size: 12px;
+  color: color-mix(in srgb, currentColor 45%, transparent);
+}
+.mm2-lens-rels {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.mm2-lens-rels button {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: left;
+  color: color-mix(in srgb, currentColor 62%, transparent);
+  cursor: pointer;
+}
+.mm2-lens-rels button:hover { color: var(--mm2-accent); }
+.mm2-lens-empty { padding: 4px 0 6px; }
+.mm2-lens-empty-text {
+  margin: 0 0 10px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.mm2-lens-generate { width: 100%; }
+.mm2-lens-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: color-mix(in srgb, currentColor 52%, transparent);
+}
+.mm2-lens-live::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--mm2-accent);
+  vertical-align: 1px;
+  animation: mm2-lens-blink 1.1s ease-in-out infinite;
+}
+@keyframes mm2-lens-blink { 50% { opacity: 0.25; } }
+.mm2-lens-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 8px 18px;
+  border-top: 1px solid color-mix(in srgb, currentColor 8%, transparent);
+}
+.mm2-lens-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--mm2-accent);
+  cursor: pointer;
+}
+.mm2-lens-link:hover { text-decoration: underline; }
+.mm2-lens-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: color-mix(in srgb, currentColor 50%, transparent);
+  cursor: pointer;
+}
+.mm2-lens-close:hover {
+  color: var(--reader-fg, var(--ink));
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+.mm2-lens button:focus-visible {
+  outline: 2px solid var(--mm2-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm2-lens,
+  .mm2-lens-bead,
+  .mm2-lens-rail-bead,
+  .mm2-lens-rail-seg,
+  .mm2-lens-item.is-fresh,
+  .mm2-lens-kid.is-fresh,
+  .mm2-lens-item.is-streaming::before,
+  .mm2-lens-live::before {
+    animation: none;
+    transition: none;
+  }
+}

@@ -1915,6 +1915,9 @@ ipcMain.handle("mindmap:graphResume", (_e, p) => getMindmapEngineV2().graphResum
 ipcMain.handle("mindmap:graphSetView", (_e, p) => getMindmapEngineV2().graphSetView(p));
 ipcMain.handle("mindmap:graphMetrics", (_e, p) => getMindmapEngineV2().graphMetrics(p));
 ipcMain.handle("mindmap:graphNodeText", (_e, p) => getMindmapEngineV2().graphNodeText(p));
+// 阅读透镜（2026-10-18）：阅读位置 → 图谱节点；为所在章节生成前确保有 v2 版本
+ipcMain.handle("mindmap:graphLocate", (_e, p) => getMindmapEngineV2().graphLocate(p));
+ipcMain.handle("mindmap:graphEnsureMap", (_e, p) => getMindmapEngineV2().graphEnsureMap(p));
 
 // v46（M14-UM2，§4.18-7/8）：制卡记忆接地检索——Stage A 本地宽召回（memoryRetrieve 纯函数）。
 // 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；

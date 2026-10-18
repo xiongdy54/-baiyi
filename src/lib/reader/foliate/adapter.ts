@@ -219,6 +219,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   const docs = new Map<number, Document>();
   let lastRelocate: RelocateInfo | null = null;
+  /** 阅读透镜探针：最近一次 relocate 的可见起点 Range 与章节下标（getReadingProbe 用） */
+  let lastProbe: { range: Range | null; index: number } | null = null;
   let appearance: ReaderAppearance | null = null;
   let currentFlow: "scrolled" | "paged" = "scrolled";
   let pendingMode: ReaderModeConfig | null = null;
@@ -515,8 +517,10 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       cfi: string;
       fraction: number;
       section?: { current: number; total: number };
+      range?: Range;
     };
     const chapterIndex = d.section?.current ?? 0;
+    lastProbe = { range: d.range ?? null, index: chapterIndex };
     const info: RelocateInfo = {
       location: { cfi: d.cfi },
       fraction: typeof d.fraction === "number" ? d.fraction : 0,
@@ -720,6 +724,25 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
 
     // v48 批1：提取单元清单（spine 顺序即文档序）。无 createDocument 的格式（如 CBZ 图片书）单元仍在列，
     // 但 getSectionText 取到空串——由业务预览层如实显示 0 字。
+    // 阅读透镜：可见起点所在段落的开头片段（段落粒度足够：主进程按块定位）
+    getReadingProbe() {
+      if (!lastProbe) return null;
+      const sections = (view.book?.sections ?? []) as { id?: string; href?: string }[];
+      const sec = sections[lastProbe.index];
+      const unitAnchor = String(sec?.id ?? sec?.href ?? "");
+      if (!unitAnchor) return null;
+      let text = "";
+      try {
+        const node = lastProbe.range?.startContainer ?? null;
+        const el = node ? ((node.nodeType === 3 ? node.parentElement : node) as Element | null) : null;
+        const block = el?.closest?.("p,li,h1,h2,h3,h4,h5,h6,blockquote,dd,dt,td,th,figcaption,pre") ?? el;
+        text = String(block?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+      } catch {
+        text = "";
+      }
+      return { unitAnchor, text };
+    },
+
     getSectionAnchors() {
       const sections = (view.book?.sections ?? []) as { id?: string; href?: string }[];
       return sections

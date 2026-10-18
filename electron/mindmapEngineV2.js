@@ -41,6 +41,12 @@
 //   graphSetView({ mapId, view }) -> true
 //   graphMetrics({ mapId }) -> RunMetrics                                 内存优先；重启后由账本 + run.output 重聚合
 //   graphNodeText({ mapId, nodeId }) -> { text, unitAnchor }              区间原文，零 AI；原文未到 → { text:null, unitAnchor:null }
+//   graphLocate({ documentId, unitAnchor, text, mapId? }) -> LocateResult           阅读透镜：阅读位置 → 块号 → 最深节点（零 AI）
+//       LocateResult = { ready, mapId, nodeId, chain: string[]（根 → 节点）, block, totalBlocks, complete,
+//                        scopeNodeId（所在目录节点）, scopeTitles: string[]（根以下目录标题链）, scopeFloor, scopeOutlined }
+//       原文未送到该单元 → { ready:false }；text 为该处正文的一小段（空白不敏感匹配；找不到按单元开头）
+//   graphEnsureMap({ documentId, title? }) -> { mapId, created }                     阅读透镜「为这一节生成」前确保有 v2 版本：
+//       已有激活 v2 版本直接返回；否则（无图或激活的是旧版）新建仅含目录骨架的 v2 版本并激活（零调用；旧版留在历史里）
 //   另：readMindmapSettings() -> MindmapSettings；idle() -> Promise（测试用：调度器排空）；scheduler（只读引用）
 //
 // ===================== 广播 =====================
@@ -1291,6 +1297,107 @@ function createMindmapEngineV2(deps) {
     return out;
   }
 
+  // ---------- 阅读透镜：定位 / 确保有图 ----------
+  /** 空白不敏感查找：probe 去空白后取前 24 字，在 hay 的去空白形态里找，映射回 hay 的下标；找不到返回 -1 */
+  function looseIndexOf(hay, probe) {
+    const want = String(probe || "").replace(/\s+/g, "").slice(0, 24);
+    if (want.length < 4) return -1;
+    const map = [];
+    let flat = "";
+    for (let i = 0; i < hay.length; i++) {
+      if (/\s/.test(hay[i])) continue;
+      map.push(i);
+      flat += hay[i];
+    }
+    const k = flat.indexOf(want);
+    return k < 0 ? -1 : map[k];
+  }
+
+  function graphLocate(p) {
+    const o = p || {};
+    const docId = String(o.documentId == null ? "" : o.documentId);
+    const S = sessions.get(docId);
+    const notReady = { ready: false };
+    if (!S || !S.blocks.length) return notReady;
+    const ui = Core.linearUnitIndexOf ? Core.linearUnitIndexOf(S.linear, String(o.unitAnchor || "")) : S.units.indexOf(String(o.unitAnchor || ""));
+    if (ui < 0 || ui >= S.unitsReady) return notReady;
+    touch(S);
+    const base = S.linear.unitBase[ui];
+    const end = ui + 1 < S.linear.unitBase.length ? S.linear.unitBase[ui + 1] - 1 : S.linear.text.length;
+    const off = looseIndexOf(S.linear.text.slice(base, end), o.text);
+    const pos = base + Math.max(0, off);
+    // 所在块：本单元内首个 end > pos 的块；单元无块（空单元）→ 之前最近的块
+    let blk = null;
+    for (const b of S.blocks) {
+      if (b.unit < ui) { blk = b; continue; }
+      if (b.unit > ui) break;
+      blk = b;
+      if (b.end > pos) break;
+    }
+    if (!blk) blk = S.blocks[0];
+    const no = blk.no;
+    const out = {
+      ready: true, mapId: null, nodeId: null, chain: [], block: no, totalBlocks: S.blocks.length, complete: !!S.complete,
+      scopeNodeId: null, scopeTitles: [], scopeFloor: false, scopeOutlined: false,
+    };
+    const sc = S.scopes.filter((x) => x.blockFrom <= no && no <= x.blockTo).sort((a, b) => b.depth - a.depth)[0] || null;
+    if (sc) {
+      out.scopeNodeId = sc.nodeId;
+      out.scopeTitles = (sc.path || []).slice();
+      out.scopeFloor = !!sc.floor;
+    }
+    let map = null;
+    try { map = o.mapId ? store.getMaterialMap(String(o.mapId)) : store.getActiveMaterialMap(docId, "book"); } catch { map = null; }
+    if (!map) return out;
+    const g = loadGraph(map.id);
+    if (!g) return out;
+    out.mapId = map.id;
+    if (sc) out.scopeOutlined = outlinedScopeIds(g.rows).has(sc.scopeId) || g.rows.some((r) => r.parentId === sc.nodeId && r.source !== "toc");
+    let best = null, bestDepth = -1, bestSpan = Infinity;
+    for (const r of g.rows) {
+      if (r.blockStart == null || r.blockEnd == null || r.blockStart > no || r.blockEnd < no) continue;
+      const dep = V.rowDepth(g.byId, r.nodeId) + (r.source === "local" ? -0.5 : 0);
+      const span = r.blockEnd - r.blockStart;
+      if (dep > bestDepth || (dep === bestDepth && span < bestSpan)) { best = r; bestDepth = dep; bestSpan = span; }
+    }
+    if (!best) return out;
+    out.nodeId = best.nodeId;
+    const chain = [];
+    const guard = new Set();
+    for (let cur = best; cur && !guard.has(cur.nodeId); cur = cur.parentId != null ? g.byId.get(cur.parentId) : null) {
+      guard.add(cur.nodeId);
+      chain.unshift(cur.nodeId);
+    }
+    out.chain = chain;
+    return out;
+  }
+
+  function graphEnsureMap(p) {
+    const o = p || {};
+    const docId = String(o.documentId == null ? "" : o.documentId);
+    let active = null;
+    try { active = store.getActiveMaterialMap(docId, "book"); } catch { active = null; }
+    if (active && active.schemaVersion === 2) return { mapId: active.id, created: false };
+    const S = sessions.get(docId);
+    if (!S || !S.complete) throw codeErr("no_text", "原文尚未送完（先 graphFeed）");
+    touch(S);
+    if (o.title && String(o.title).trim()) S.title = String(o.title).trim();
+    const ai = aiInfo();
+    const pv = { outline: promptOf("outline").version, expand: promptOf("expand").version, explain: promptOf("explain").version };
+    const skeleton = V.skeletonRows(S.skeleton, S.blocks, Infinity, S.scopes);
+    const { mapId } = store.createMaterialMapV2({
+      documentId: docId, title: S.title,
+      meta: { title: S.title, blocksVersion: B.UNIT_BLOCKS_VERSION, outlineVersion: O.OUTLINE_VERSION, promptVersions: pv, model: ai.model },
+      skeleton, sourceRevisionHash: S.revisionHash, provider: ai.provider, model: ai.model,
+      modelConfigHash: V.modelConfigHash({ model: ai.model, reasoningEffort: ai.reasoningEffort, maxTokens: MAX_TOKENS.outline }),
+      promptVersion: pv.outline,
+    });
+    store.commitMaterialMapJob({ mapId, jobId: null, upserts: [], activate: true });
+    consent.add(mapId);
+    emitDelta({ documentId: docId, mapId, jobId: null, kind: "skeleton", nodes: skeleton.map(toV2Node) });
+    return { mapId, created: true };
+  }
+
   async function idle() {
     for (let i = 0; i < 200; i++) {
       await scheduler.idle();
@@ -1302,7 +1409,7 @@ function createMindmapEngineV2(deps) {
 
   return {
     graphLoad, graphFeed, graphEstimate, graphGenerate, graphExpand, graphExpandAll, graphExplain, graphCancel,
-    graphResume, graphSetView, graphMetrics, graphNodeText,
+    graphResume, graphSetView, graphMetrics, graphNodeText, graphLocate, graphEnsureMap,
     readMindmapSettings, idle, scheduler,
   };
 }

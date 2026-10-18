@@ -100,8 +100,8 @@ console.log("---- ③ MindmapTab 不再引用 v1 生成 / 深化 / 修复 / 预�
   const banned = ["mindmapApi.generate", "mindmapApi.deepen", "mindmapApi.repairConfirm", "mindmapApi.preview", "buildMapSvg", "layoutMap", "dangerouslySetInnerHTML"];
   const hit = banned.filter((b) => src.includes(b));
   check("无 v1 生成/深化/修复/预览/旧渲染调用", !hit.length, hit);
-  check("使用 v2 客户端（load/feed/estimate/generate/expand/expandAll/explain/cancel/resume/setView/metrics）",
-    ["mindmapV2Api.load", "mindmapV2Api.feed", "mindmapV2Api.estimate", "mindmapV2Api.generate", "mindmapV2Api.expand(", "mindmapV2Api.expandAll", "mindmapV2Api.explain", "mindmapV2Api.cancel", "mindmapV2Api.resume", "mindmapV2Api.setView", "mindmapV2Api.metrics"].every((k) => src.includes(k)));
+  check("使用 v2 客户端（load/ensureFed 共享送原文/estimate/generate/expand/expandAll/explain/cancel/resume/setView/metrics）",
+    ["mindmapV2Api.load", "ensureFed(", "mindmapV2Api.estimate", "mindmapV2Api.generate", "mindmapV2Api.expand(", "mindmapV2Api.expandAll", "mindmapV2Api.explain", "mindmapV2Api.cancel", "mindmapV2Api.resume", "mindmapV2Api.setView", "mindmapV2Api.metrics"].every((k) => src.includes(k)));
   check("订阅 EventBus mindmap/delta 与 mindmap/changed", src.includes('"mindmap/delta"') && src.includes('"mindmap/changed"'));
   check("宿主契约 Props 未变（kernel/documentId/title/canvasHost/onJumpToText/onMakeCardsFromNode/initialMapId/initialResumeRunId）",
     ["kernel:", "documentId:", "title:", "canvasHost:", "onJumpToText:", "onMakeCardsFromNode?:", "initialMapId?:", "initialResumeRunId?:"].every((k) => src.includes(k)));

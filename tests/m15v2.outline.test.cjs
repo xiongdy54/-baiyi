@@ -132,6 +132,8 @@ console.log("---- 5 丢弃理由 ----");
   const d = run("1 [论点] 甲 @1-10 +\n1.1 [理由] 乙 @1-3 .\n1.2 [理由] 乙 @4-5 .\n1.3 [理由] 丙 @1-3 .\n1 [论点] 重复路径 @11 .\n2 [论点] 戊 @11-12 .\n2.1 [理由] 乙 @11 .\n1.4 [理由] 钳制后同区间 @0-3 .\n1.5 [理由] 甲子 @1-10 .\n");
   check("duplicate：同父同标题 / 同路径（后者丢）", eq(reasons(d), ["duplicate", "duplicate"]) && d.by("1.1").title === "乙", d.drops);
   check("同父同区间（含钳制后同区间）接受并标 same_range（OUTLINE_VERSION 2）", d.by("1.3") && d.by("1.3").warnings.includes("same_range") && d.by("1.4") && d.by("1.4").warnings.includes("same_range") && O.OUTLINE_VERSION === 2, d.drops);
+  const dupAt = run("1 [反方观点] 御宅族系文化是日本文化的正统继承 @3 @5 .\n");
+  check("标题尾部多余的 @区间 记号不进标题（2026-10-18 实测）", dupAt.by("1") && dupAt.by("1").title === "御宅族系文化是日本文化的正统继承" && dupAt.by("1").blockFrom === 5, dupAt.nodes && dupAt.nodes[0]);
   check("不同父的同标题不算重复", d.by("2.1") && d.by("2.1").title === "乙");
   check("子区间等于父区间不算重复（不同父）", d.by("1.5") && d.by("1.5").blockTo === 10, d.drops);
 

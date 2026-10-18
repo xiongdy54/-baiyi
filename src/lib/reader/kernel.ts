@@ -236,6 +236,12 @@ export interface ReaderKernel {
    */
   getSourceAnchor?(): SourceAnchorGeometry | null;
   getCurrentLocation(): ReaderLocation | null;
+  /**
+   * 阅读位置探针（2026-10-18 阅读透镜，可选能力）：当前阅读位置所在的提取单元锚（与 getSectionAnchors 同口径）
+   * + 该处正文的一小段（所在段落开头 ≤80 字，空白已归一）。主进程据此在线性化原文里定位块号 → 图谱节点。
+   * 取不到正文片段时 text 为空串（按单元开头定位）；引擎未就绪返回 null。
+   */
+  getReadingProbe?(): { unitAnchor: string; text: string } | null;
   destroy(): void;
   /** 重定位（进度/统计/目录高亮数据源） */
   on(event: "relocate", handler: (info: RelocateInfo) => void): () => void;

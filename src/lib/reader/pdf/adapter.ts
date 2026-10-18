@@ -569,6 +569,12 @@ export function createPdfKernel(host: HTMLElement): ReaderKernel {
     },
 
     // v48 批1（M15 §4.19-4）：提取单元 = 逐页（anchor = "pdfpage:<0基页码>"，与目录 href 同域）。
+    // 阅读透镜：PDF 单元＝页；片段取不到时按页首定位
+    getReadingProbe() {
+      if (!doc || totalPages <= 0) return null;
+      return { unitAnchor: `pdfpage:${currentPage - 1}`, text: "" };
+    },
+
     getSectionAnchors() {
       if (!doc || totalPages <= 0) return [];
       return Array.from({ length: totalPages }, (_, i) => ({ anchor: `pdfpage:${i}` }));

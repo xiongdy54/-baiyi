@@ -1,7 +1,7 @@
 // @runtime: node
 // 材料导图 v2 · IPC 接线静态回归（node tests/m15v2.ipc.test.cjs）。依据 IMPL-PLAN §4.2 / §6 T4 ②：
-// 解析 main.js 与 preload.js 源码——mindmap:graph* 通道双向一致；12 个齐全；mindmap:delta 主进程发送、preload 订阅；
-// 引擎 12 个方法名与通道一一对应；settings:set 含三个新键的字面量归一。
+// 解析 main.js 与 preload.js 源码——mindmap:graph* 通道双向一致；14 个齐全（含阅读透镜 graphLocate / graphEnsureMap）；mindmap:delta 主进程发送、preload 订阅；
+// 引擎 14 个方法名与通道一一对应；settings:set 含三个新键的字面量归一。
 const fs = require("fs");
 const path = require("path");
 
@@ -15,21 +15,21 @@ const main = read("electron/main.js");
 const preload = read("electron/preload.js");
 const engine = read("electron/mindmapEngineV2.js");
 
-const EXPECTED = ["graphLoad", "graphFeed", "graphEstimate", "graphGenerate", "graphExpand", "graphExpandAll", "graphExplain", "graphCancel", "graphResume", "graphSetView", "graphMetrics", "graphNodeText"];
+const EXPECTED = ["graphLoad", "graphFeed", "graphEstimate", "graphGenerate", "graphExpand", "graphExpandAll", "graphExplain", "graphCancel", "graphResume", "graphSetView", "graphMetrics", "graphNodeText", "graphLocate", "graphEnsureMap"];
 
 const mainCh = new Set([...main.matchAll(/ipcMain\.handle\(\s*"mindmap:(graph\w+)"/g)].map((m) => m[1]));
 const preCh = new Set([...preload.matchAll(/ipcRenderer\.invoke\(\s*"mindmap:(graph\w+)"/g)].map((m) => m[1]));
 const preKeys = new Set([...preload.matchAll(/^\s+(graph\w+):\s*\(/gm)].map((m) => m[1]));
 
 console.log("---- 通道登记 ----");
-check("main 注册全部 12 个 mindmap:graph*", EXPECTED.every((n) => mainCh.has(n)) && mainCh.size === 12, [...mainCh]);
-check("preload 调用全部 12 个 mindmap:graph*", EXPECTED.every((n) => preCh.has(n)) && preCh.size === 12, [...preCh]);
+check("main 注册全部 14 个 mindmap:graph*", EXPECTED.every((n) => mainCh.has(n)) && mainCh.size === 14, [...mainCh]);
+check("preload 调用全部 14 个 mindmap:graph*", EXPECTED.every((n) => preCh.has(n)) && preCh.size === 14, [...preCh]);
 check("main ⊆ preload 且 preload ⊆ main（双向一致）", [...mainCh].every((n) => preCh.has(n)) && [...preCh].every((n) => mainCh.has(n)), { mainCh: [...mainCh], preCh: [...preCh] });
 check("preload 暴露的方法名 ≡ 通道名（graphX → mindmap:graphX）", EXPECTED.every((n) => preKeys.has(n)) && [...preKeys].every((n) => preCh.has(n)), [...preKeys]);
 check("每个 main handler 转发到引擎同名方法", EXPECTED.every((n) => new RegExp(`"mindmap:${n}"[^\\n]*\\.${n}\\(p\\)`).test(main)), null);
-check("引擎导出全部 12 个方法", EXPECTED.every((n) => new RegExp(`\\b${n}\\b`).test(engine.slice(engine.lastIndexOf("return {")))), null);
+check("引擎导出全部 14 个方法", EXPECTED.every((n) => new RegExp(`\\b${n}\\b`).test(engine.slice(engine.lastIndexOf("return {")))), null);
 check("未新增非 graph 的 v2 通道漂移：main 中 mindmap:graph* 无重复注册",
-  [...main.matchAll(/ipcMain\.handle\(\s*"mindmap:graph\w+"/g)].length === 12, null);
+  [...main.matchAll(/ipcMain\.handle\(\s*"mindmap:graph\w+"/g)].length === 14, null);
 
 console.log("---- mindmap:delta 推送 ----");
 check("main 向窗口发送 mindmap:delta", /webContents\.send\(\s*"mindmap:delta"/.test(main), null);

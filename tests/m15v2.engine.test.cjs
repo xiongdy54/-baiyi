@@ -500,6 +500,34 @@ const KNOWN = (() => {
     check("送完后其余作用域跑完、run completed", last && last.stage === "completed" && E.log.calls.length === est.scopes, { last, calls: E.log.calls.length });
   }
 
+  // ======================================================== 阅读透镜：graphLocate / graphEnsureMap
+  console.log("---- 阅读透镜：定位 / 为本节生成 ----");
+  {
+    const L = mkEnv();
+    check("未送原文 → ready:false", L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u2.xhtml", text: "x" }).ready === false);
+    feedAll(L.engine, BOOK);
+    const u2 = BOOK.tb["u2.xhtml"];
+    const probe = u2.slice(Math.floor(u2.length * 0.6), Math.floor(u2.length * 0.6) + 40).replace(/\s+/g, "  ");
+    const l0 = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u2.xhtml", text: probe });
+    check("无图：ready、无 mapId，给出所在目录节点与标题链", l0.ready && l0.mapId === null && l0.scopeNodeId && l0.scopeTitles.join("/").includes("1.1 背景") && !l0.scopeFloor && !l0.scopeOutlined, l0);
+    const lStart = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u2.xhtml", text: "" });
+    check("空白不敏感：段中位置的块号 > 单元开头的块号", l0.block > lStart.block && l0.totalBlocks > 10, { mid: l0.block, start: lStart.block });
+    const lShort = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u4.xhtml", text: "很短的一段正文" });
+    check("短章：scopeFloor=true（不提供生成）", lShort.ready && lShort.scopeFloor === true, lShort);
+    const e1 = L.engine.graphEnsureMap({ documentId: BOOK.documentId, title: BOOK.title });
+    check("ensureMap：新建骨架 v2 版本并激活、零调用", e1.created && L.store.getMaterialMap(e1.mapId).isActive && L.log.calls.length === 0, e1);
+    check("ensureMap 幂等：已有激活 v2 直接返回", L.engine.graphEnsureMap({ documentId: BOOK.documentId }).mapId === e1.mapId && !L.engine.graphEnsureMap({ documentId: BOOK.documentId }).created);
+    const l1 = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u2.xhtml", text: probe });
+    check("骨架图：定位到目录节点、未 outline", l1.mapId === e1.mapId && l1.nodeId === l0.scopeNodeId && l1.chain[l1.chain.length - 1] === l1.nodeId && l1.chain.length >= 2 && !l1.scopeOutlined, l1);
+    const r = L.engine.graphExpand({ mapId: e1.mapId, nodeId: l0.scopeNodeId, trigger: "click" });
+    await settle(L.engine);
+    check("为本节生成：只调用该作用域一次", r.jobId && !r.skipped && L.log.calls.length === 1 && L.log.calls[0].kind === "outline", { r, calls: L.log.calls.length });
+    const l2 = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u2.xhtml", text: probe });
+    const row = L.store.listMaterialMapNodes(e1.mapId).find((x) => x.nodeId === l2.nodeId);
+    check("生成后：定位到最深的 AI 节点，块区间包含阅读位置，链从根到节点", l2.scopeOutlined && row && row.source === "ai" && row.blockStart <= l2.block && l2.block <= row.blockEnd && l2.chain.includes(l0.scopeNodeId), { l2, row });
+    check("交互生成不进全局指示器", !L.changes.length, L.changes);
+  }
+
   console.log(`\n结果：${pass} 通过，${fail} 失败`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });
