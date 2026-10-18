@@ -130,7 +130,8 @@ console.log("---- 5 丢弃理由 ----");
   check("钳制到父区间并 clamped++", s.by("1.2").blockFrom === 8 && s.by("1.2").blockTo === 10 && s.by("1.2").warnings.includes("clamped") && s.by("2").blockTo === 20 && s.stats.clamped === 2, s.stats);
 
   const d = run("1 [论点] 甲 @1-10 +\n1.1 [理由] 乙 @1-3 .\n1.2 [理由] 乙 @4-5 .\n1.3 [理由] 丙 @1-3 .\n1 [论点] 重复路径 @11 .\n2 [论点] 戊 @11-12 .\n2.1 [理由] 乙 @11 .\n1.4 [理由] 钳制后同区间 @0-3 .\n1.5 [理由] 甲子 @1-10 .\n");
-  check("duplicate：同父同标题 / 同区间 / 同路径（后者丢）", eq(reasons(d), ["duplicate", "duplicate", "duplicate", "duplicate"]) && d.by("1.1").title === "乙", d.drops);
+  check("duplicate：同父同标题 / 同路径（后者丢）", eq(reasons(d), ["duplicate", "duplicate"]) && d.by("1.1").title === "乙", d.drops);
+  check("同父同区间（含钳制后同区间）接受并标 same_range（OUTLINE_VERSION 2）", d.by("1.3") && d.by("1.3").warnings.includes("same_range") && d.by("1.4") && d.by("1.4").warnings.includes("same_range") && O.OUTLINE_VERSION === 2, d.drops);
   check("不同父的同标题不算重复", d.by("2.1") && d.by("2.1").title === "乙");
   check("子区间等于父区间不算重复（不同父）", d.by("1.5") && d.by("1.5").blockTo === 10, d.drops);
 

@@ -140,10 +140,11 @@ console.error = (...a) => { errors.push(a.map(String).join(" ").slice(0, 800)); 
   const host = w.document.getElementById("host");
   const made = [];
   const rootEl = createRoot(w.document.getElementById("root"));
-  rootEl.render(React.createElement(MindmapTab, {
+  // 与 src/main.tsx 一致包 StrictMode：开发态 effect 会「挂载→清理→再挂载」（2026-10-18 用户实测画布空白即由此而来）
+  rootEl.render(React.createElement(React.StrictMode, null, React.createElement(MindmapTab, {
     kernel, documentId: "doc-dom", title: "测试材料", canvasHost: host, onJumpToText: () => {},
     onMakeCardsFromNode: (p) => made.push(p),
-  }));
+  })));
   const svgCards = () => host.querySelectorAll("svg [data-node-id]").length;
   const panel = () => w.document.getElementById("root").textContent || "";
   const btn = (re) => [...w.document.querySelectorAll("button")].find((b) => re.test(b.textContent || ""));

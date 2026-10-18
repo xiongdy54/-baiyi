@@ -7012,7 +7012,7 @@ function mmUpsertEdgeRow(mapId, e, jobId, now) {
     db.run("UPDATE material_map_edges SET origin = ?, job_id = ?, is_deleted = 0 WHERE id = ?", [origin, jid, ex[0].id]);
   } else {
     db.run(
-      "INSERT INTO material_map_edges (id, user_id, map_id, from_id, to_id, code, origin, job_id, created_at, is_deleted) VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+      "INSERT INTO material_map_edges (id, user_id, map_id, from_id, to_id, code, origin, job_id, created_at, is_deleted) VALUES (?, 'local-user', ?, ?, ?, ?, ?, ?, ?, 0)",
       [id, mapId, from, to, code, origin, jid, now]
     );
   }

@@ -51,6 +51,8 @@ export interface MindmapCanvasV2Props {
 
 const ZMIN = 0.1;
 const ZMAX = 2.5;
+/** 适配窗口时的最低缩放（低于 0.5 走 LOD 摘要卡，0.35 仍能看清框标题） */
+const FIT_MIN = 0.35;
 const HOVER_PREFETCH_MS = 400;
 const FRESH_MS = 1200;
 
@@ -170,8 +172,13 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     if (!box || !d) return;
     const r = box.getBoundingClientRect();
     const W = Math.max(1, r.width), H = Math.max(1, r.height);
-    const k = Math.max(ZMIN, Math.min(1, (W - 48) / Math.max(1, d.bounds.w), (H - 48) / Math.max(1, d.bounds.h)));
-    viewRef.current = { k, tx: Math.round((W - d.bounds.w * k) / 2), ty: 24 };
+    // 整图放得下就整图适配；放不下（书级导图常是窄高的长条，2026-10-18 实测 3604×16832）则按宽度适配、
+    // 顶部对齐，缩放不低于 FIT_MIN（再小字就看不清了），纵向靠拖拽浏览。
+    const kAll = Math.min(1, (W - 48) / Math.max(1, d.bounds.w), (H - 48) / Math.max(1, d.bounds.h));
+    const kW = Math.min(1, (W - 48) / Math.max(1, d.bounds.w));
+    const k = Math.max(ZMIN, kAll >= FIT_MIN ? kAll : Math.max(FIT_MIN, kW));
+    const tx = d.bounds.w * k <= W ? Math.round((W - d.bounds.w * k) / 2) : 24;
+    viewRef.current = { k, tx, ty: 24 };
   }, []);
 
   // ---------- 布局（节流） ----------
@@ -239,14 +246,21 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     requestPaint();
   }, [selectedId, relAll, focus, requestPaint]);
 
-  useEffect(
-    () => () => {
+  // 清理时必须把句柄置空：React StrictMode 开发态会「挂载→清理→再挂载」，若只取消不置空，
+  // requestPaint 见 rafRef 非空就以为已排帧，从此再不绘制（2026-10-18 用户实测：画布全程空白）。
+  // 再挂载时补一次布局（清理可能吞掉了首帧）。
+  useEffect(() => {
+    requestLayout();
+    return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
       if (pendingRef.current != null) window.clearTimeout(pendingRef.current);
+      pendingRef.current = null;
       if (hoverTimer.current != null) window.clearTimeout(hoverTimer.current);
-    },
-    [],
-  );
+      hoverTimer.current = null;
+      throttleRef.current = { last: null };
+    };
+  }, [requestLayout]);
 
   // 容器尺寸变化（侧栏拖宽 / portal 宿主就位）：未手动移动过视图时重新适配
   useEffect(() => {

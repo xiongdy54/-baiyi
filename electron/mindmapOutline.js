@@ -6,7 +6,9 @@
 
 const { blockTextLength } = require("./mindmapBlocks.js");
 
-const OUTLINE_VERSION = 1;
+// v2（2026-10-18 实测）：同父同区间不再判重复（一个原文块常含多个论点；判重致 18% 行丢弃并连带 orphan），
+// 改为接受并加 warning 'same_range'；同父同标题、同路径仍丢。升版使旧缓存（只存已接受行）失效。
+const OUTLINE_VERSION = 2;
 
 // §8.1 类型表（「结论」同属论证/证明两族，只列一次）+ 兜底「其他」
 const TYPES = [
@@ -129,13 +131,14 @@ function createLineParser(opts) {
     if (from > to) { drop(raw, "out_of_scope"); return; }
     if (from !== p.from || to !== p.to) { stats.clamped++; warnings.push("clamped"); }
 
-    // 同父同标题 / 同区间 → 后者丢
+    // 同父同标题 → 后者丢；同父同区间 → 接受并标 same_range（OUTLINE_VERSION 2）
     const pk = parentPath == null ? "" : parentPath;
     let ck = childKeys.get(pk);
     if (!ck) { ck = { titles: new Set(), ranges: new Set() }; childKeys.set(pk, ck); }
     const tk = normTitle(p.title);
     const rk = `${from}-${to}`;
-    if (ck.titles.has(tk) || ck.ranges.has(rk)) { drop(raw, "duplicate"); return; }
+    if (ck.titles.has(tk)) { drop(raw, "duplicate"); return; }
+    if (ck.ranges.has(rk)) warnings.push("same_range");
 
     // 类型
     let type = p.rawType;
