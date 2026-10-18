@@ -64,6 +64,15 @@ function prefersReducedMotion(): boolean {
   }
 }
 
+function sameGeometry(a: Display, b: Display): boolean {
+  if (a.items.length !== b.items.length || a.edges.length !== b.edges.length) return false;
+  for (let i = 0; i < a.items.length; i++) {
+    const x = a.items[i], y = b.items[i];
+    if (x.id !== y.id || x.x !== y.x || x.y !== y.y || x.w !== y.w || x.h !== y.h || x.state !== y.state || x.count !== y.count || x.text !== y.text) return false;
+  }
+  return true;
+}
+
 const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(function MindmapCanvasV2(props, ref) {
   const { graph, rootTitle, selectedId, anchorId, relAll, focus, onSelect, onDeepen, onToggleCollapse, onPrefetch } = props;
   const T = useT();
@@ -81,7 +90,9 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
   const pendingRef = useRef<number | null>(null);
   const targetRef = useRef<Display | null>(null); // 最近一次布局终态
   const shownRef = useRef<Display | null>(null); // 当前帧（插值中）
-  const trRef = useRef<{ tr: Transition; t0: number } | null>(null);
+  const trRef = useRef<{ tr: Transition; t0: number; epoch: number } | null>(null);
+  /** 用户每次主动改视图（拖动 / 滚轮 / 适配 / 居中）+1；过渡动画只在规划后用户没动过视图时才接管视图（否则与拖动打架） */
+  const viewEpochRef = useRef(0);
   const frameOpRef = useRef<{ opacity: Record<string, number>; leaving: ReturnType<typeof transitionFrame>["leaving"] }>({ opacity: {}, leaving: [] });
   const viewRef = useRef<View>({ tx: 24, ty: 24, k: 1 });
   const userMovedRef = useRef(false);
@@ -116,45 +127,64 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
   relNameRef.current = relName;
 
   // ---------- 绘制 ----------
+  // 性能（2026-10-18 实测：数万字材料的整图拖动卡顿）：内容层只在「内容相关输入」变化时重建
+  // （帧几何 / 选中 / 悬停 / 开关 / LOD 档 / 关系标签缩放档 / 刚到达描边）；平移与同档缩放只改外层 <g> 的 transform，
+  // 不再每个指针事件重做 路由 + SVG 串 + innerHTML。
+  const contentKeyRef = useRef<unknown[] | null>(null);
   const paint = useCallback(() => {
     const svg = svgRef.current;
     const d = shownRef.current;
     if (!svg) return;
     if (!d) {
       svg.innerHTML = "";
+      contentKeyRef.current = null;
       return;
     }
     const p = live.current;
     const view = viewRef.current;
     const hovered = hoverRef.current;
     const lod = lodFrames(d, view.k);
+    const fr = freshRef.current;
+    const freshOn = performance.now() < fr.until;
+    const labelZoom = view.k >= 0.8 ? 1 : 0.5; // route 只用 zoom 判「≥0.8 常显关系名」
+    const key = [d, p.graph, p.selectedId, hovered, p.relAll, p.focus, lod.join("|"), labelZoom, freshOn ? fr.ids : null, frameOpRef.current, p.rootTitle];
+    const prev = contentKeyRef.current;
+    const same = !!prev && prev.length === key.length && prev.every((v, i) => v === key[i]);
+    const vp = svg.firstElementChild as SVGGElement | null;
+    const transform = `translate(${view.tx},${view.ty}) scale(${view.k})`;
+    if (same && vp) {
+      vp.setAttribute("transform", transform);
+      return;
+    }
+    contentKeyRef.current = key;
     const routed = routeRelations(p.graph, d, {
       relAll: p.relAll,
       hovered,
       selected: p.selectedId,
       focus: p.focus && !!p.selectedId,
-      zoom: view.k,
+      zoom: labelZoom,
       lodCollapsed: lod,
       relName: relNameRef.current,
     });
-    const fr = freshRef.current;
-    const fresh = performance.now() < fr.until ? fr.ids : undefined;
-    svg.innerHTML = buildCanvasSvg(
+    const inner = buildCanvasSvg(
       d,
       routed,
-      { view, selected: p.selectedId, hovered, opacity: frameOpRef.current.opacity, leaving: frameOpRef.current.leaving, fresh, lodCollapsed: lod },
+      { view: { tx: 0, ty: 0, k: 1 }, selected: p.selectedId, hovered, opacity: frameOpRef.current.opacity, leaving: frameOpRef.current.leaving, fresh: freshOn ? fr.ids : undefined, lodCollapsed: lod },
       { fragment: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2c-" },
     );
+    svg.innerHTML = `<g class="mm2-viewport" transform="${transform}">${inner}</g>`;
   }, []);
 
   const tick = useCallback(
-    (now: number) => {
+    () => {
       rafRef.current = null;
+      // 用 performance.now() 而非 rAF 回调时间戳：两者时基不保证一致（jsdom 下 rAF 时间戳恒小于 t0，过渡永不结束）
+      const now = performance.now();
       const cur = trRef.current;
       if (cur) {
         const f = transitionFrame(cur.tr, now - cur.t0);
         shownRef.current = f.display;
-        viewRef.current = f.view;
+        if (cur.epoch === viewEpochRef.current) viewRef.current = f.view;
         frameOpRef.current = { opacity: f.opacity, leaving: f.leaving };
         if (f.done) trRef.current = null;
       }
@@ -196,6 +226,12 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     if (!prev && !userMovedRef.current) {
       fitTo(d);
     }
+    // 几何未变（只是讲解 / 状态以外的字段 / 指标变了）：不起过渡动画，直接换帧
+    if (prev && !trRef.current && sameGeometry(prev, d)) {
+      shownRef.current = d;
+      requestPaint();
+      return;
+    }
     const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.anchorId, reducedMotion: prefersReducedMotion() });
     if (prev) {
       const enteredCards = tr.enter.filter((id) => d.byId[id] && d.byId[id].kind === "card");
@@ -204,7 +240,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         window.setTimeout(requestPaint, FRESH_MS + 20); // 到期后去掉「刚到达」描边
       }
     }
-    trRef.current = { tr, t0: performance.now() };
+    trRef.current = { tr, t0: performance.now(), epoch: viewEpochRef.current };
     requestPaint();
   }, [fitTo, frameLabel, requestPaint]);
 
@@ -282,6 +318,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     () => ({
       fit() {
         userMovedRef.current = false;
+        viewEpochRef.current++;
         trRef.current = null;
         if (targetRef.current) shownRef.current = targetRef.current;
         fitTo(targetRef.current);
@@ -296,6 +333,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         const k = viewRef.current.k;
         viewRef.current = { k, tx: Math.round(r.width / 2 - (it.x + it.w / 2) * k), ty: Math.round(r.height / 2 - (it.y + it.h / 2) * k) };
         userMovedRef.current = true;
+        viewEpochRef.current++;
         requestPaint();
       },
       zoomBy(factor: number) {
@@ -323,6 +361,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     if (k === v.k) return;
     viewRef.current = { k, tx: cx - ((cx - v.tx) * k) / v.k, ty: cy - ((cy - v.ty) * k) / v.k };
     userMovedRef.current = true;
+        viewEpochRef.current++;
     requestPaint();
   };
 
@@ -422,6 +461,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
             e.preventDefault();
             viewRef.current = { ...viewRef.current, tx: d.tx + dx, ty: d.ty + dy };
             userMovedRef.current = true;
+        viewEpochRef.current++;
             requestPaint();
           }
           return;

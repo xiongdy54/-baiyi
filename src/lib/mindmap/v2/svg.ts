@@ -238,8 +238,10 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
       g += `<text x="16" y="${num(d.h / 2 + 5)}" font-size="${CARD.rootSize}" font-weight="600" fill="var(--accent-on)">${escapeXml(fitText(title, CARD.rootSize * CARD.rootBold, titleRoom(d.w, true)))}</text>`;
     } else {
       const muted = state === "stub";
-      g += `<text x="12" y="18" font-size="${CARD.typeSize}" fill="var(--text-secondary)">${escapeXml(fitText(node ? String(node.type ?? "") : "", CARD.typeSize, titleRoom(d.w)))}</text>`;
-      g += `<text x="12" y="36" font-size="${CARD.titleSize}" fill="${muted ? "var(--text-secondary)" : "var(--ink)"}">${escapeXml(fitText(title, CARD.titleSize, titleRoom(d.w)))}</text>`;
+      // 目录节点与「其他」类型不显示类型行（「其他 目录」这类标签只是噪音），标题垂直居中
+      const typeText = node && node.source !== "toc" && node.type && node.type !== "其他" ? String(node.type) : "";
+      if (typeText) g += `<text x="12" y="18" font-size="${CARD.typeSize}" fill="var(--text-secondary)">${escapeXml(fitText(typeText, CARD.typeSize, titleRoom(d.w)))}</text>`;
+      g += `<text x="12" y="${typeText ? 36 : num(d.h / 2 + 5)}" font-size="${CARD.titleSize}"${node && node.source === "toc" ? ' font-weight="600"' : ""} fill="${muted ? "var(--text-secondary)" : "var(--ink)"}">${escapeXml(fitText(title, CARD.titleSize, titleRoom(d.w)))}</text>`;
     }
     const bx = d.w - 10, by_ = d.h / 2;
     if (!isRoot && (state === "more" || state === "stub")) {

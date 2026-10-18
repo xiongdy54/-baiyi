@@ -128,6 +128,8 @@ w.mindmapAPI = {
 for (const m of ["graphLoad", "graphFeed", "graphEstimate", "graphGenerate", "graphExpand", "graphExpandAll", "graphExplain", "graphCancel", "graphResume", "graphSetView", "graphMetrics", "graphNodeText"]) {
   w.mindmapAPI[m] = inv((p) => engine[m](p));
 }
+const stages = [];
+changedL.add((p) => stages.push(p.stage));
 w.aiAPI = { getConfig: async () => ({ hasKey: true, preset: "siliconflow" }) };
 w.addEventListener("error", (e) => errors.push(String(e.error && e.error.stack || e.message)));
 const origErr = console.error;
@@ -164,15 +166,30 @@ console.error = (...a) => { errors.push(a.map(String).join(" ").slice(0, 800)); 
   const sawEarly = await until(() => aiCard() || !!firstStreamEnds(), 8000, 5);
   check("首个 AI 节点在第一次流结束前已画到画布上", sawEarly && aiCard() && !firstStreamEnds(), { aiCard: aiCard(), ended: !!firstStreamEnds(), calls: streamLog.length });
   check("生成中面板显示「框架 n/m 段」与「停止」", await until(() => /框架 \d+\/\d+ 段/.test(panel()) && !!btn(/^停止$/)), panel().slice(0, 300));
+  await until(() => stages.includes("completed"), 15000);
   await engine.idle();
   check("全部作用域完成（面板出现「重新生成」）", await until(() => !!btn(/^重新生成$/), 15000), panel().slice(0, 300));
-  await sleep(400);
+  await sleep(500); // 等最后一次布局过渡（260ms）结束
   const n1 = svgCards();
   const mapId = store.getActiveMaterialMap("doc-dom", "book").id;
   const rows = store.listMaterialMapNodes(mapId);
   check("画布卡片数 ≈ 已落库节点数（根抬升后 = 行数 - 1 + 合成根）", n1 >= Math.min(rows.length, 30) * 0.5 && n1 > 15, { n1, rows: rows.length });
   check("材料名只出现一次（无「材料名 → 材料名」两层）", (host.innerHTML.match(/测试材料/g) || []).length <= 2, (host.innerHTML.match(/测试材料/g) || []).length);
-  check("读数条出现并带模型名与调用数", /DeepSeek-V4-Flash · 首节点 [\d.]+s/.test(host.textContent) && /调用 \d+（缓存 \d+）/.test(host.textContent), host.textContent.slice(-300));
+  {
+    // 性能：拖动平移只改外层 transform，不重建内容（同一个 <g> 元素、innerHTML 未重写）
+    await sleep(1200); // 等最后几批增量合入与布局过渡全部落定（静止画面上测平移）
+    const canvasEl = host.querySelector(".mm2-canvas");
+    const vp0 = host.querySelector("svg > g.mm2-viewport");
+    const t0 = vp0 && vp0.getAttribute("transform");
+    const fire = (type, x, buttons) => canvasEl.dispatchEvent(new w.MouseEvent(type, { bubbles: true, clientX: x, clientY: 300, buttons }));
+    fire("pointerdown", 500, 1);
+    for (let x = 510; x <= 640; x += 10) fire("pointermove", x, 1);
+    fire("pointerup", 640, 0);
+    await sleep(200); // 等拖拽后的「吞掉合成 click」窗口（120ms）过去
+    const vp1 = host.querySelector("svg > g.mm2-viewport");
+    check("拖动平移：内容层不重建（同一元素）、只改 transform", vp0 && vp1 === vp0 && vp1.getAttribute("transform") !== t0, { same: vp1 === vp0, t0, t1: vp1 && vp1.getAttribute("transform") });
+  }
+  check("画布下方不再有读数条", !/首节点 [\d.]+s/.test(host.textContent) && !/复制读数/.test(host.textContent), host.textContent.slice(-300));
   check("生成过程无渲染错误", !errors.length, errors.slice(0, 3));
 
   console.log("---- 交互：选中 / 深挖 / 讲解 / 制卡 ----");

@@ -26,12 +26,11 @@ import {
   type GraphNodeText,
   type MindmapDelta,
 } from "../../lib/mindmapV2";
-import type { GraphState, PatternKey, RunMetrics, V2Meta, V2Node } from "../../lib/mindmap/v2/types";
+import type { GraphState, PatternKey, V2Meta, V2Node } from "../../lib/mindmap/v2/types";
 import { ROOT_ID } from "../../lib/mindmap/v2/types";
-import { applyDelta, ancestors, createGraph, emptyGraph, setCollapsed, setManualPattern } from "../../lib/mindmap/v2/graph";
+import { applyDelta, ancestors, createGraph, emptyGraph, setCollapsed, setManualPattern, setView } from "../../lib/mindmap/v2/graph";
 import MindmapCanvasV2, { type MindmapCanvasHandle } from "./mindmap/MindmapCanvasV2";
 import NodeDetailV2 from "./mindmap/NodeDetailV2";
-import MetricsBar from "./mindmap/MetricsBar";
 import { eventBus } from "../../lib/eventbus";
 import { settingsStore } from "../../lib/settings";
 import { useT } from "../../lib/i18n";
@@ -156,7 +155,10 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       rootRef.current = { id: lifted.rootId, node: lifted.rootNode };
       setPreview(false);
       setMeta(r.meta as V2Meta & { isActive?: boolean; schemaVersion?: number });
-      setGraph(createGraph(lifted.load, id));
+      // 大图（>200 节点）且用户从未存过视图：默认收起第 2 层以下的 AI 分支（只是初始显示，不写库）
+      let g0 = createGraph(lifted.load, id);
+      if (!lifted.load.view && lifted.load.nodes.length > 200) g0 = setView(g0, { patterns: {}, collapsed: defaultCollapsed(lifted.load.nodes) });
+      setGraph(g0);
       setSelectedId(null);
       flushBuffer(id);
       mindmapV2Api.metrics(id)
@@ -638,11 +640,6 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
               onPrefetch={preview ? undefined : handlePrefetch}
             />
           )}
-          {!preview && graph.metrics && (
-            <div className="mm2-metrics-wrap">
-              <MetricsBar metrics={graph.metrics as RunMetrics} />
-            </div>
-          )}
         </div>,
         canvasHost,
       )
@@ -812,6 +809,16 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
       </div>
     </>
   );
+}
+
+/** 大图初始收起：有 AI 父节点（AI 第 2 层及以下）且自身有子节点的 AI 节点 */
+function defaultCollapsed(nodes: readonly V2Node[]): string[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const hasKids = new Set(nodes.map((n) => n.parentId).filter((x): x is string => !!x));
+  return nodes
+    .filter((n) => n.source === "ai" && hasKids.has(n.id) && n.parentId != null && byId.get(n.parentId)?.source === "ai")
+    .map((n) => n.id)
+    .sort();
 }
 
 function flattenToc(items: { label: string; href: string; subitems?: { label: string; href: string; subitems?: unknown[] }[] }[]): TocItem[] {

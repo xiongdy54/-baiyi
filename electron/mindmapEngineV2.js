@@ -657,7 +657,7 @@ function createMindmapEngineV2(deps) {
       trigger: opts.trigger || "auto", force: false, noCache: !!opts.noCache,
       scopeRange: { blockFrom: sc.blockFrom, blockTo: sc.blockTo }, basePath: sc.scopeId,
       // 多作用域节点的各分片互不覆盖目标状态（hadChildren=true），截断只回标分片内链
-      target: { nodeId: sc.nodeId, depth: sc.depth, blockFrom: sc.blockFrom, blockTo: sc.blockTo, hadChildren: (sk && sk.childIds.length > 0) || sc.part > 0 },
+      target: { nodeId: sc.nodeId, title: sk ? sk.title : (sc.path || [])[sc.path.length - 1], depth: sc.depth, blockFrom: sc.blockFrom, blockTo: sc.blockTo, hadChildren: (sk && sk.childIds.length > 0) || sc.part > 0 },
       levels, aliases, userText, prompt, ai, maxTokens: MAX_TOKENS.outline, nodeAnchor: `blk:${sc.blockFrom}-${sc.blockTo}`,
       blocks: S.blocks, linear: S.linear, oldDescendants: [], v1Target: null, prevTargetState: prev,
     }, signal, ctl);
@@ -932,7 +932,7 @@ function createMindmapEngineV2(deps) {
     return runStructJob({
       kind: "expand", jobId: o.jobId, mapId, documentId: S.documentId, runId: o.runId, gen: null, trigger: o.trigger, force: !!o.force,
       noCache: false, scopeRange: { blockFrom: row.blockStart, blockTo: row.blockEnd }, basePath: nodeId,
-      target: { nodeId, depth, blockFrom: row.blockStart, blockTo: row.blockEnd, hadChildren },
+      target: { nodeId, title: row.title, depth, blockFrom: row.blockStart, blockTo: row.blockEnd, hadChildren },
       levels, aliases, userText, prompt, ai, maxTokens: MAX_TOKENS.expand, nodeAnchor: `blk:${row.blockStart}-${row.blockEnd}#${nodeId}`,
       blocks, linear: S.linear, oldDescendants, v1Target: g.v1 && row.source === "v1ext" ? row : null, prevTargetState: row.state,
     }, signal, ctl);

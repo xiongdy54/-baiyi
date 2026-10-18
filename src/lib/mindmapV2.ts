@@ -280,7 +280,8 @@ export function tocPreviewNodes(toc: readonly TocLike[]): V2Node[] {
   return out;
 }
 
-// ---------- 实测读数条（§5.2 MetricsBar；字段与 RunMetrics 一一对应） ----------
+// ---------- 诊断读数（2026-10-18 起界面不再显示读数条——用户：图谱空间紧张、这不是用户该关心的；
+// 读数仍写入 material_map_runs.output_json.metrics 供调参；本组函数保留作诊断文本格式，字段与 RunMetrics 一一对应） ----------
 
 export type TFn = (key: string, params?: Record<string, string | number>) => string;
 

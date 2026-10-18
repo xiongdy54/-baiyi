@@ -73,6 +73,19 @@ const SCOPE_PART_MAX = 12000;
 const STATES = ["more", "open", "floor", "stub"];
 const SOURCES = ["toc", "ai", "local", "v1ext"];
 const REF_CAP = 120;
+
+// ---------- 标题归一 / 目录页识别（2026-10-18 实测：「目录」页被当正文分析，长出整套重复章节） ----------
+/** 书的「目录 / 索引 / 版权页」等前后附件：标题命中即整段封顶（零调用；它们只是标题清单，结构已在骨架里） */
+const FRONT_MATTER_RE = /^(目\s*录|目\s*次|总\s*目|contents?|table\s+of\s+contents|索\s*引|index|版\s*权(页|信息|声明)?|copyright|封\s*面|cover|扉\s*页|title\s*page)$/i;
+/** 标题比较用归一：去空白 / 引号 / 标点 / 章节编号前缀（第一章、1-1、1.2、Chapter 3 …） */
+function normTitleForCompare(t) {
+  let s = String(t == null ? "" : t).normalize("NFKC").toLowerCase();
+  s = s.replace(/^\s*(第\s*[一二三四五六七八九十百千零〇两\d]+\s*[章节部篇卷回讲课]|chapter\s*\d+|part\s*\d+|section\s*\d+|[\d一二三四五六七八九十]+(?:\s*[.\-－–—·．]\s*\d+)*\s*[.、．:：]?)\s*/i, "");
+  return s.replace(/[\s"'“”‘’「」『』《》〈〉()（）\[\]【】,，.。:：;；!！?？、·—–\-_*]/g, "");
+}
+function isFrontMatterTitle(t) {
+  return FRONT_MATTER_RE.test(String(t == null ? "" : t).normalize("NFKC").trim());
+}
 const EXPAND_REF_CAP = 60;
 
 // ---------- 类型映射（设计稿 §8.1 末段；旧 17 值 authorialRole ↔ v2 类型） ----------
@@ -279,7 +292,7 @@ function planScopes(skeleton, blocks, unitsReady) {
         unitFrom: uFrom,
         unitTo: uTo,
         chars,
-        floor: chars < SCOPE_FLOOR_CHARS,
+        floor: chars < SCOPE_FLOOR_CHARS || isFrontMatterTitle(n.title),
         depth: n.depth,
         path: pathTitles(skeleton, n.nodeId),
       });
@@ -537,6 +550,10 @@ function createJobAssembler(opts) {
   const aliases = o.aliases || null;
   const force = !!o.force;
 
+  // 回声节点：顶层节点标题与目标同名（模型把「第一章 X」再写一遍成「X」）→ 不建行，其子直接挂目标
+  const targetNorm = normTitleForCompare(target.title);
+  const echo = new Set();
+  const effLevel = new Map(); // nodeId → 相对目标的实际层级（回声层不计）
   const rows = new Map(); // nodeId → row（本任务产出，接受顺序）
   const order = [];
   const relLevel = new Map();
@@ -546,11 +563,11 @@ function createJobAssembler(opts) {
   let lastId = null;
   let done = false;
 
-  const parentOf = (pp) => (pp == null || pp === basePath ? targetId : pp);
+  const parentOf = (pp) => (pp == null || pp === basePath || echo.has(pp) ? targetId : pp);
   const resolve = (t) => {
     if (typeof t !== "string") return null;
     if (t[0] === "#") return aliases && Object.prototype.hasOwnProperty.call(aliases.aliasToNode, t) ? aliases.aliasToNode[t] : null;
-    return t;
+    return echo.has(t) ? targetId : t;
   };
   const addEdge = (fromId, code, rawTarget) => {
     const toId = resolve(rawTarget);
@@ -564,9 +581,18 @@ function createJobAssembler(opts) {
 
   function onNode(node) {
     if (done || !node) return { nodes: [], states: [], edges: [] };
+    const isTop = node.parentPath == null || node.parentPath === basePath;
+    if (isTop && targetNorm && normTitleForCompare(node.title) === targetNorm) {
+      echo.add(node.path);
+      const es0 = [];
+      for (const r of node.rels || []) { const e = addEdge(targetId, r.code, r.target); if (e) es0.push(e); }
+      return { nodes: [], states: [], edges: es0 };
+    }
     const parentId = parentOf(node.parentPath);
-    const lvl = String(node.path).split(".").length - baseSegs;
-    const depth = (Number(target.depth) || 0) + lvl;
+    const lvl = String(node.path).split(".").length - baseSegs; // 模型视角层级（第 2 门细则用）
+    const eff = parentId === targetId ? 1 : (effLevel.get(parentId) || lvl - 1) + 1;
+    effLevel.set(node.path, eff);
+    const depth = (Number(target.depth) || 0) + eff;
     const seq = seqOf.get(parentId) || 0;
     seqOf.set(parentId, seq + 1);
     const row = makeRow({
@@ -597,7 +623,7 @@ function createJobAssembler(opts) {
 
   function onRel(rel) {
     if (done || !rel) return { nodes: [], states: [], edges: [] };
-    const e = addEdge(rel.from, rel.code, rel.target);
+    const e = addEdge(echo.has(rel.from) ? targetId : rel.from, rel.code, rel.target);
     return { nodes: [], states: [], edges: e ? [e] : [] };
   }
 
@@ -846,4 +872,5 @@ module.exports = {
   deriveCardFields,
   modelConfigHash, cacheKeyOf,
   sha256, blockRangeOfSpans, rowDepth,
+  normTitleForCompare, isFrontMatterTitle,
 };

@@ -355,5 +355,39 @@ console.log("---- 缓存键（§4.5） ----");
   check("modelConfigHash 含 ENGINE_VERSION/UNIT_BLOCKS_VERSION/OUTLINE_VERSION", k.modelConfigHash === V.sha256(JSON.stringify(["m", null, "m15v2-engine-1", 1, O.OUTLINE_VERSION, 3000])));
 }
 
+// ---------------------------------------------------------------- 去重（2026-10-18 实测：「其他 目录 → 分类 目录」）
+console.log("---- 去重：目录页封顶 / 回声节点并入目标 ----");
+{
+  check("前后附件标题识别", ["目录", "目 录", "Contents", "CONTENTS", "Table of Contents", "索引", "版权页", "封面"].every(V.isFrontMatterTitle) && !["目录学导论", "第一章 目录的历史", "前言"].some(V.isFrontMatterTitle));
+  check("标题归一去编号前缀", V.normTitleForCompare("第一章 御宅族的拟日本") === V.normTitleForCompare("御宅族的拟日本") && V.normTitleForCompare("1-2 御宅族的拟日本") === V.normTitleForCompare("「御宅族的拟日本」") && V.normTitleForCompare("Chapter 3: Data") === "data");
+  const lin = linearOf(["toc.xhtml", "c1.xhtml"], { "toc.xhtml": "目录\n" + "第一章 甲乙丙丁戊己庚辛\n".repeat(60), "c1.xhtml": unitText(lcg(5), 3000) });
+  const sk = V.buildSkeleton({ title: "书", tocItems: [{ anchor: "toc.xhtml", label: "目录" }, { anchor: "c1.xhtml", label: "第一章 御宅族的拟日本" }], unitAnchors: ["toc.xhtml", "c1.xhtml"] });
+  const bl = B.segmentUnits(lin);
+  const scs = V.planScopes(sk, bl, Infinity);
+  const tocScope = scs.find((x) => sk.byId.get(x.nodeId).title === "目录");
+  check("「目录」作用域即使 >400 字也封顶（零调用）", tocScope && tocScope.chars >= 400 && tocScope.floor === true, tocScope && { chars: tocScope.chars, floor: tocScope.floor });
+  // 回声：顶层「御宅族的拟日本」与目标「第一章 御宅族的拟日本」同名 → 不建行，子挂目标，关系改指目标
+  const ch = scs.find((x) => sk.byId.get(x.nodeId).title.startsWith("第一章"));
+  const asm = V.createJobAssembler({ kind: "outline", jobId: "j", basePath: ch.scopeId, target: { nodeId: ch.nodeId, title: "第一章 御宅族的拟日本", depth: 1, blockFrom: ch.blockFrom, blockTo: ch.blockTo, hadChildren: false }, levels: 3, blocks: bl, aliases: V.buildAliasTable([]) });
+  const P0 = ch.scopeId;
+  const a = ch.blockFrom, b = ch.blockTo, m = Math.floor((a + b) / 2);
+  const out = [];
+  const lines = [
+    { path: `${P0}.1`, parentPath: P0, title: "御宅族的拟日本", type: "分类", blockFrom: a, blockTo: b, more: true, rels: [] },
+    { path: `${P0}.1.1`, parentPath: `${P0}.1`, title: "前半", type: "论点", blockFrom: a, blockTo: m, more: true, rels: [] },
+    { path: `${P0}.1.1.1`, parentPath: `${P0}.1.1`, title: "细节", type: "证据", blockFrom: a, blockTo: a, more: false, rels: [] },
+    { path: `${P0}.1.2`, parentPath: `${P0}.1`, title: "后半", type: "理由", blockFrom: m + 1, blockTo: b, more: true, rels: [{ code: "支", target: `${P0}.1` }, { code: "支", target: `${P0}.1.1` }] },
+  ];
+  for (const n of lines) out.push(asm.onNode(n));
+  const res = asm.finish({ finishReason: "stop" });
+  const ids = res.upserts.filter((r) => r.source === "ai").map((r) => [r.nodeId, r.parentId]);
+  check("回声节点不建行，其子直接挂目标", !ids.some(([id]) => id === `${P0}.1`) && J(ids.filter(([, p]) => p === ch.nodeId).map(([id]) => id)) === J([`${P0}.1.1`, `${P0}.1.2`]), ids);
+  check("指向回声节点的关系落到目标；其余关系照常", res.edges.some((e) => e.fromId === `${P0}.1.2` && e.toId === ch.nodeId) && res.edges.some((e) => e.toId === `${P0}.1.1`), res.edges);
+  check("目标 open（有子）", res.targetState === "open");
+  check("流式增量中从未下发回声节点", !out.some((dl) => dl.nodes.some((r) => r.nodeId === `${P0}.1`)));
+  const deep = res.upserts.find((r) => r.nodeId === `${P0}.1.1`);
+  check("第 2 门按模型视角层级（回声层计入）：1.1 是第 2 层 < 3 层且有子 → open", deep && deep.state === "open", deep && deep.state);
+}
+
 console.log(`\n${fail === 0 ? "ALL PASS" : "FAILED"} — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

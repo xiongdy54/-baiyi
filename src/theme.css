@@ -9485,30 +9485,6 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .mm2-svg [data-act] {
   cursor: pointer;
 }
-.mm2-metrics-wrap {
-  border-top: 1px solid var(--border-subtle);
-  background: var(--paper);
-  padding: var(--sp-2) var(--sp-4);
-}
-.mm2-metrics {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
-.mm2-metrics-text {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.mm2-metrics-copy {
-  flex: none;
-}
 .mm2-toggle {
   display: inline-flex;
   align-items: center;

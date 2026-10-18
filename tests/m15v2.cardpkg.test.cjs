@@ -106,6 +106,7 @@ console.log("---- ③ MindmapTab 不再引用 v1 生成 / 深化 / 修复 / 预�
   check("宿主契约 Props 未变（kernel/documentId/title/canvasHost/onJumpToText/onMakeCardsFromNode/initialMapId/initialResumeRunId）",
     ["kernel:", "documentId:", "title:", "canvasHost:", "onJumpToText:", "onMakeCardsFromNode?:", "initialMapId?:", "initialResumeRunId?:"].every((k) => src.includes(k)));
   const canvas = fs.readFileSync(path.join(root, "src", "components", "reader", "mindmap", "MindmapCanvasV2.tsx"), "utf8");
+  check("界面不再显示实测读数条（用户 2026-10-18）", !src.includes("MetricsBar") && !fs.existsSync(path.join(root, "src", "components", "reader", "mindmap", "MetricsBar.tsx")));
   check("画布：交互帧 buildCanvasSvg 不过 DOMPurify，仅导出过（X5）", /exportSvg\(\)[\s\S]*DOMPurify\.sanitize/.test(canvas) && (canvas.match(/DOMPurify\.sanitize/g) || []).length === 1);
 }
 
