@@ -2062,8 +2062,14 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
   });
   // 加载顺序（v11.2）：dist 存在则直接用（生产产物优先，避免 devURL 连接超时挂起导致白屏）；
   // dist 不存在（纯开发场景）才走 vite dev server，失败再报错
+  // D192 修订：`npm run dev` 显式传 --dev-server（脚本里 wait-on 已确认 5173 就绪）→ 优先 dev server，
+  // 否则旧 dist 会盖住最新源码（2026-10-18 用户实测：dev 下仍跑旧页面）。npm start / 打包版行为不变。
   const distIndex = path.join(__dirname, "../dist/index.html");
-  if (fs.existsSync(distIndex)) {
+  if (!app.isPackaged && process.argv.includes("--dev-server")) {
+    win.loadURL("http://localhost:5173").catch(() => {
+      if (fs.existsSync(distIndex)) win.loadFile(distIndex);
+    });
+  } else if (fs.existsSync(distIndex)) {
     win.loadFile(distIndex);
   } else if (!app.isPackaged) {
     win.loadURL("http://localhost:5173").catch(() => {
