@@ -110,7 +110,7 @@ try {
   const cdp = await connect();
   await wait(2500);
 
-  // 0. 启动 + 种子：1 本书 15 卡（FSRSTEST-M13-* 显式 id＝确定性表序；A 组康复 6 / B 组长期 2 / C 组新卡 5）
+  // 0. 启动 + 种子：1 本书 22 卡（FSRSTEST-M13-* 显式 id＝确定性表序；A 组康复 7 / B 组长期 2 / C 组新卡 5 / D 组领域进入 8）
   const booted = await cdp.eval(`!!document.querySelector("#root")`);
   check("应用启动（根节点挂载）", booted === true, booted);
   const seeded = await cdp.eval(`(async () => {
@@ -140,10 +140,27 @@ try {
     // A7＝无 contextRef 的备胎康复卡（不入 Territory 书维、不影响 G-7 表序），保证 G-5/G-6 评分时
     // 队列不至清空——收尾页分支会卸载微反馈条，单卡会话的 toast 会被收尾渲染竞态吞掉
     await mkSafe("FSRSTEST-M13-A7", "FSRSTEST M13 康复七", learn(now + DAYP), 1); ids["FSRSTEST-M13-A7"] = true;
+    // D 组（v49.23 / D196）：8 张各带一个**不同 UDC 领域码**的卡，建后种一条巩固日志（review/30）
+    // → 每条产一个 domain-entry（数据页「成长记录」的来源之一，8 条 = 2 页供 G-10 分页断言）；
+    // 无 contextRef（不入 Territory 书维）；每个领域仅 1 张（<8 样本门槛 → 不入领域行）；
+    // due 移入未来（不入今日队列）；日志先于会话起点（不入汇总窗口）；各材料累计 <50 张（不产 material）。
+    const DOMAINS = ["004", "159.9", "316", "32", "33", "37", "51", "53"];
+    for (let i = 1; i <= 8; i++) {
+      const did = "FSRSTEST-M13-D" + i;
+      const dfsrs = fresh(now - 60000);
+      try {
+        const r = await window.cardsAPI.create({ id: did, noteText: "FSRSTEST M13 领域" + i + " 笔记", cardType: "qa", frontMarkdown: "FSRSTEST M13 领域" + i, backMarkdown: "答案", priority: 1, tags: [], domain: [DOMAINS[i - 1]], fsrsJson: JSON.stringify(dfsrs) });
+        if (!r || !r.id) failed[did] = "blank";
+      } catch (e) { failed[did] = String(e && e.message).slice(0, 120); }
+      ids[did] = true;
+      try {
+        await window.cardsAPI.review(did, review(30, now + 30 * DAYP), "good", 1000, dfsrs);
+      } catch (e) { failed[did + "-review"] = String(e && e.message).slice(0, 120); }
+    }
     const all = await window.cardsAPI.listAll();
     return { doc: book.documentId, n: Object.keys(ids).length, failed, inDb: all.filter((c) => c.id.startsWith("FSRSTEST-M13")).length };
   })()`);
-  check("种子：1 本书 14 卡建卡成功（A1-A7/B1-B2/C1-C5）", seeded && seeded.n === 14 && seeded.inDb === 14 && Object.keys(seeded.failed || {}).length === 0, seeded);
+  check("种子：1 本书 22 卡建卡成功（A1-A7/B1-B2/C1-C5 + D1-D8 领域进入）", seeded && seeded.n === 22 && seeded.inDb === 22 && Object.keys(seeded.failed || {}).length === 0, seeded);
 
   // 页内工具：注入评分（explicit after state；before=卡当前态，过 A-7 守卫）/ 改 due
   await cdp.eval(`(async () => {
@@ -316,15 +333,17 @@ try {
   await cdp.eval(nav("数据"));
   await wait(2000);
   const dash = await cdp.eval(`(() => {
-    const order = [...document.querySelectorAll("[data-widget]")].map((el) => el.getAttribute("data-widget"));
-    const records = [...document.querySelectorAll('[data-widget="growth-events"] [data-growth-record]')];
+    const el = document.querySelector('[data-widget="growth-events"]');
+    const order = [...document.querySelectorAll("[data-widget]")].map((x) => x.getAttribute("data-widget"));
+    const records = [...el.querySelectorAll("[data-growth-record]")];
     const trow = document.querySelector('[data-widget="territory"] [data-territory-row]');
     return {
       order,
       ge: order.includes("growth-events"), te: order.includes("territory"),
       rows: records.length,
-      first: records[0]?.getAttribute("data-growth-event") || "",
-      last: records[records.length - 1]?.getAttribute("data-growth-event") || "",
+      events: records.map((r) => r.getAttribute("data-growth-event")),
+      pages: [...el.querySelectorAll(".growth-pager-btn")].map((b) => b.textContent.trim()),
+      current: el.querySelector('[aria-current="page"]')?.textContent.trim() || "",
       aria: trow ? trow.querySelector(".territory-seg")?.getAttribute("aria-label") : "",
       pct: trow ? trow.querySelector(".territory-pct")?.textContent : ""
     };
@@ -332,8 +351,15 @@ try {
   const idxToday = dash.order.indexOf("today");
   check("G-10: growth-events 与 territory 两 widget 在场", dash.ge && dash.te, dash.order);
   check("G-10: 默认序两 widget 紧跟 today 之后", dash.order.indexOf("growth-events") === idxToday + 1 && dash.order.indexOf("territory") === idxToday + 2, dash.order);
-  check("G-10: 成长记录行数 = 档案预期（7×relearning-recovery + 1×retention-180 = 8）", dash.rows === 8, dash.rows);
-  check("G-10: 档案倒序首行/末行类型", dash.first === "relearning-recovery" && dash.last === "retention-180", { first: dash.first, last: dash.last });
+  check("G-10: 成长记录首页 6 行（每页 6 条，D195）", dash.rows === 6, dash.rows);
+  check("G-10: 档案只含聚合/稀有型（domain-entry；material 因各材料累计 <50 张不产，D196）",
+    dash.events.length > 0 && dash.events.every((e) => e === "domain-entry"), dash.events);
+  check("G-10: 分页在场：共 2 页（8 条 / 6）且当前页 = 1", dash.pages.length === 2 && dash.current === "1", { pages: dash.pages, current: dash.current });
+  // G-10（分页翻页）：点第 2 页 → 2 行
+  await cdp.eval(`(() => { const el = document.querySelector('[data-widget="growth-events"]'); const b = [...el.querySelectorAll(".growth-pager-btn")].find((x) => x.textContent.trim() === "2"); if (!b) return false; b.click(); return true; })()`);
+  await wait(300);
+  const dashP2 = await cdp.eval(`(() => { const el = document.querySelector('[data-widget="growth-events"]'); return { rows: el.querySelectorAll("[data-growth-record]").length, current: el.querySelector('[aria-current="page"]')?.textContent.trim() || "" }; })()`);
+  check("G-10: 点第 2 页 → 2 行且当前页 = 2", dashP2.rows === 2 && dashP2.current === "2", dashP2);
   check("G-10: Territory 分段条 aria 与种子一致（共 14：未学 5 · 学习中 0 · 长期复习 7 · 已巩固 2）",
     dash.aria === "共 14 张：未学 5 · 学习中 0 · 长期复习 7 · 已巩固 2", dash.aria);
   check("G-10: 覆盖率 = 2/14 → 14%", dash.pct === "14%", dash.pct);
@@ -383,7 +409,7 @@ try {
     const layout = await window.settingsAPI.get("dashboard", "layout");
     return { rows, ge: order.includes("growth-events"), te: order.includes("territory"), gf, layoutOrder: layout && layout.order };
   })()`);
-  check("G-12: 重启后成长记录行不变（8 行）", reboot.rows === 8, reboot.rows);
+  check("G-12: 重启后成长记录首页 6 行（分页默认回到第 1 页，D195）", reboot.rows === 6, reboot.rows);
   check("G-12: 重启后两 widget 在场", reboot.ge && reboot.te, reboot);
   check("G-12: 设置项持久化（growthFeedback.enabled=true）", reboot.gf && reboot.gf.enabled === true, reboot.gf);
   check("G-12: 重排后的 dashboard.layout 持久化", reboot.layoutOrder && reboot.layoutOrder.indexOf("growth-events") < reboot.layoutOrder.indexOf("today"), reboot.layoutOrder);

@@ -8,6 +8,8 @@
 import type { GrowthEventHit, GrowthEventType, GrowthTerritoryRow, GrowthTotals } from "./growth";
 // v49.8（D182）：成长反馈文案随界面语言
 import { t } from "./i18n";
+// v49.23（D196）：领域维信号的展示名走 udcLabel（D151 口径：界面只显领域名、不显分类号）
+import { udcLabel } from "./udc";
 
 type Hit = GrowthEventHit;
 
@@ -16,13 +18,20 @@ export function growthTierLabel(tier: Hit["tier"]): string {
   return t({ 0: "能力", 1: "结构", 2: "建制", 3: "次要" }[tier] ?? "");
 }
 
-// 材料名：书维 = evidence.docTitle（书名）；领域维 = entityLabel（UDC 主领域码，无书名可回补）
+// 材料 / 领域名（v49.23 / D196）：书维 = evidence.docTitle（书名）；领域维 = UDC 主领域码 → udcLabel（领域名）
 function materialName(h: Hit): string {
-  return String(h.evidence.docTitle || h.entityLabel || "");
+  if (h.evidence.docTitle) return String(h.evidence.docTitle);
+  return udcLabel(String(h.entityLabel || ""));
 }
 
-// —— §6.6.1 文案列（示例即定稿，D129-G4 随稿登记；插值参数 = hit 的结构化字段） ——
-// 12 个键 ≡ 12 个事件类型（B1 验收：文案表键集合 ≡ §6.6.1 的 12 个 type）。
+// material 的关口号 N（v49.23 / D196）：dimension = `${kind}:${N}`（如 "book:150"）
+function materialGate(h: Hit): number {
+  const n = Number(String(h.dimension || "").split(":")[1]);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// —— §6.6.1 文案列（示例即定稿，随稿登记；插值参数 = hit 的结构化字段） ——
+// 11 个键 ≡ 11 个事件类型（v49.23 / D196：`group` 退役，不再是枚举成员）。
 const GROWTH_EVENT_TEMPLATES: Record<GrowthEventType, (h: Hit) => string> = {
   // —— L0 能力（GF-2 预留：类型在场、判定阻塞于缺口 G1，出现即按表渲染） ——
   "transfer-first": (h) => t("首次迁移成功：你把『{name}』用到了新情境里", { name: h.entityLabel }),
@@ -31,15 +40,15 @@ const GROWTH_EVENT_TEMPLATES: Record<GrowthEventType, (h: Hit) => string> = {
   "kp-functional": (h) => t("『{name}』达到 functional：第一次能脱离提示讲清楚", { name: h.entityLabel }),
   // —— L1 结构（GF-2 预留） ——
   "structure-link": (h) => t("你确认了一条跨领域连接：『{name}』", { name: h.entityLabel }),
-  "domain-entry": (h) => t("开始进入新领域：{name}", { name: h.entityLabel }),
+  "domain-entry": (h) => t("开始进入新领域：{name}", { name: udcLabel(String(h.entityId || h.entityLabel || "")) }),
   // —— L2 建制（GF-1） ——
+  // material（v49.23 / D196 重定义）：某材料**累计「曾进入长期记忆」的卡数**达到关口 N（dimension = `${kind}:${N}`）。
   "material": (h) => {
-    const name = materialName(h);
+    const n = materialGate(h);
     return h.evidence.docTitle
-      ? (h.dimension === "full" ? t("《{name}》已全部进入长期记忆", { name }) : t("《{name}》已过半进入长期记忆", { name }))
-      : (h.dimension === "full" ? t("领域「{name}」已全部进入长期记忆", { name }) : t("领域「{name}」已过半进入长期记忆", { name }));
+      ? t("《{name}》已有 {n} 张卡进入长期记忆", { name: materialName(h), n })
+      : t("『{label}』已有 {n} 张卡进入长期记忆", { label: materialName(h), n });
   },
-  "group": (h) => t("这一组 {n} 张卡全部进入长期复习", { n: h.evidence.groupSize ?? h.entityLabel }),
   "leech-recovery": () => t("那张总记不住的卡稳住了"),
   "relearning-recovery": () => t("这张卡遗忘后又回来了"),
   "retention-180": () => t("这张卡半年不用复习了"),
@@ -89,10 +98,10 @@ export function growthRecordDate(ts: number): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-// 行尾来源（书名《XX》/ 领域码；无来源给空串）
+// 行尾来源（书名《XX》/ 领域名；无来源给空串）
 export function growthRecordSource(h: Hit): string {
   if (h.evidence.docTitle) return `《${h.evidence.docTitle}》`;
-  if (h.type === "material") return String(h.entityLabel || "");
+  if (h.type === "material" || h.type === "domain-entry") return udcLabel(String(h.entityId || ""));
   return "";
 }
 

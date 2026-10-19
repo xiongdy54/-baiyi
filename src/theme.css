@@ -9051,6 +9051,53 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 .growth-empty { margin: 0; font-size: var(--fs-meta); color: var(--grey-3); }
 
+/* ---------- 成长记录分页控件（v49.22 / D195）：直角 hairline 钮 + mono 页码；
+   当前页以主题色底 + 白字强调（--accent / --accent-on），省略号就地展开数字输入框 ---------- */
+.growth-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+.growth-pager-btn,
+.growth-pager-gap {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 var(--sp-1);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--bw-hairline) solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.growth-pager-btn:hover,
+.growth-pager-gap:hover { background: var(--grey-1); }
+.growth-pager-btn[aria-current="page"] {
+  background: var(--accent);
+  color: var(--accent-on);
+  border-color: var(--accent);
+}
+.growth-pager-input {
+  width: 46px;
+  height: 26px;
+  padding: 0 var(--sp-1);
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--bw-hairline) solid var(--accent);
+  border-radius: var(--radius-xs);
+}
+
 /* ---------- B4 仪表盘 territory（§5.3，GF-1 材料/领域巩固地图）：分段条 12px 直角、
    段间 1px --paper 缝；--grey-1（未学）→ --grey-2（学习中）→ --ink（长期复习）→ --accent
   （已巩固，单图唯一焦点色）；无圆角无渐变 ---------- */
