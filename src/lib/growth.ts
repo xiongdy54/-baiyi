@@ -7,12 +7,13 @@ import { eventBus } from "./eventbus";
 import { settingsStore } from "./settings";
 import { DEFAULT_GROWTH_FEEDBACK, normalizeGrowthFeedback } from "./growthSettings";
 
-// 事件类型封闭枚举（§6.6.1 全表；GF-1 只产出 tier 2/3 行，L0/L1 为 GF-2 预留、判定阻塞于缺口 G1）。
-// 取消项（"consolidate-21d" / "learning-graduate"）不是枚举成员——判定函数显式排除（electron/growth.js 头注释）。
+// 事件类型封闭枚举（§6.6.1 总表）：tier 0/1 多为 GF-2 预留（阻塞于缺口 G1）；例外＝ `domain-entry` 的
+// GF-1 简化版（v49.23 / D196：某 UDC 领域首次出现「曾进入长期记忆」的卡），tier 1 已实际产出。
+// 取消 / 退役项（"consolidate-21d" / "learning-graduate" / "group"）不是枚举成员——判定函数显式排除（electron/growth.js 头注释）。
 export type GrowthEventType =
   | "transfer-first" | "application-first" | "kp-strong" | "kp-functional" // L0（GF-2）
-  | "structure-link" | "domain-entry"                                       // L1（GF-2）
-  | "material" | "group" | "leech-recovery" | "relearning-recovery" | "retention-180" // L2（GF-1）
+  | "structure-link" | "domain-entry"                                       // L1（domain-entry GF-1 简化版已产出）
+  | "material" | "leech-recovery" | "relearning-recovery" | "retention-180" // L2（GF-1；group 已于 D196 退役）
   | "retention-60";                                                         // L3（GF-1，仅汇总）
 
 // 证据链（可追溯，§4.17-4③/§4.17-7；跳转原文锚有则给）
@@ -103,9 +104,10 @@ declare global {
 
 const DISABLED = { enabled: false } as const;
 
-// limit 归一（取数封装与 useGrowthOverview 同规共用）：非有限值 → 默认 30，下限钳 1。
-function normalizeOverviewLimit(opts?: { limit?: number }): number {
-  return opts && Number.isFinite(opts.limit) ? Math.max(1, Math.floor(opts.limit as number)) : 30;
+// limit 归一（取数封装与 useGrowthOverview 同规共用）：v49.22（D195）默认不再钳到 30——
+// 成长记录改分页展示，取全量档案；显式给 limit 才截断（下限钳 1）。返回 undefined = 不截断。
+function normalizeOverviewLimit(opts?: { limit?: number }): number | undefined {
+  return opts && Number.isFinite(opts.limit) ? Math.max(1, Math.floor(opts.limit as number)) : undefined;
 }
 
 // overview 在途请求表（键见 growthApi.overview 注）：settle 即删，永不持有已完成/已失败条目。
@@ -135,7 +137,7 @@ export const growthApi = {
   // 完成/失败即清在途引用——失败不缓存，下次调用重发。never-throws 契约不变（失败仍降级 DISABLED）。
   overview(opts?: { limit?: number }, now?: number): Promise<GrowthOverviewResult> {
     if (!window.growthAPI) return Promise.resolve(DISABLED);
-    const key = `${normalizeOverviewLimit(opts)}|${now === undefined ? "" : now}`;
+    const key = `${normalizeOverviewLimit(opts) ?? "all"}|${now === undefined ? "" : now}`;
     const hit = overviewInflight.get(key);
     if (hit) return hit;
     const p = window.growthAPI.overview(opts, now).then(

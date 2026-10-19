@@ -8,17 +8,23 @@
 //  - 判定口径（首达/跨越/康复、阈值、tier、投放面）**只在本文件**；复习提示、会话汇总、仪表盘三个
 //    消费端一律经 IPC 消费本模块输出，禁止任何组件自行实现口径（§4.2-22，同 §4.2-20 精神）。
 //
-// 取消项登记（§6.6.1 序 13/14，用户 2026-09-15 判定，**禁加回**）：
-//  - "consolidate-21d"（单卡巩固 21 天）：普通卡数次成功复习即达——频率高、区分度低，不产任何事件。
-//  - "learning-graduate"（学习步毕业 Learning → Review）：每张新卡必经、零信息量，不产任何事件。
-//  两者不是 GrowthEventType 枚举成员；deriveCardEvents 内显式跳过（见函数内注释）。
+// 取消项 / 退役项登记（**禁加回**）：
+//  - "consolidate-21d"（单卡巩固 21 天，§6.6.1 序 13）：普通卡数次成功复习即达——频率高、区分度低，不产任何事件。
+//  - "learning-graduate"（学习步毕业 Learning → Review，§6.6.1 序 14）：每张新卡必经、零信息量，不产任何事件。
+//  - "group"（组级毕业，v49.23 / D196 退役）：原口径 =「当前 sibling_key / knowledge_point_id 组内全员达同一阶段」，
+//    属**现状集合型**——新增同组卡即便「全员达标」不成立（重新武装）→ 事件重复触发且时点漂移；且「组」对用户不可见
+//    （无法点开看是哪几张，无展示价值）。**整体移除**（不是 GrowthEventType 枚举成员）。
+//  以上均不是 GrowthEventType 枚举成员；deriveCardEvents / 本文件不再产出。
 //
-// 阈值定稿值（D129 登记，随设计稿 §3.2/§7-G4；改值须先改文档，实现不得另调）：
+// 阈值定稿值（D129 首次登记；v49.23 / D196 修订，随设计稿 GROWTH-SIGNALS-RESIGN §2；改值须先改文档，实现不得另调）：
 //  - 巩固（consolidated）≡ fsrs.state==="review" 且 stability > 21 天——与 stats:overview 漏斗「已巩固」同口径（禁止第二套）。
-//  - material 样本门槛：活跃卡 ≥8；覆盖率两档：首达 ≥50%（half「过半」）、=100%（full「全覆盖」）。
-//  - group 组大小 ≥2。
+//  - material（**重定义**）：某书 / 某领域**累计「曾进入长期记忆」的卡数**首达关口 N（N = 50, 100, 150, …，每 50 一档、无上限）。
+//    「曾进入长期记忆」= 该卡存在某条可读日志其 after 满足 isConsolidated；历史上限锚定，**单调不减**（不随材料扩容漂移）。
+//  - Territory 行样本门槛：活跃卡 ≥8（保留；**不再是 material 事件门槛**）。
+//  - domain-entry（GF-1 简化版，v49.23 / D196）：某 UDC 主领域码**首次**出现「曾进入长期记忆」的卡。
 //  - leech-recovery 稳定阈值 = 21 天（与「已巩固」同阈值）。
-//  - retention-60 / retention-180：after.stability 首达 60 / 180。
+//  - retention-60 / retention-180：after.stability **首次**达 60 / 180（v49.23 / D196 改「只取首个跨档点」，不再重新武装）。
+//  - 全记忆层事件一律 **P3 一次即永**（取序列首个跨档点；不掉回重新武装）——见 firstCrossing。
 //
 // 证据行形状（由 electron/db.js 聚合出口映射后传入；node 测试按同形状手工构造）：
 //  - card：mapCardRow 输出 + docTitle（本模块只读以下字段：id / frontMarkdown / noteText / siblingKey /
@@ -31,17 +37,16 @@
 
 // ---------- 常量（§6.6.1 分级总表 → 机读） ----------
 
-// 事件类型封闭枚举 + 固定表序（§6.6.1 序 1–12；同级排序、折叠留显均按此序）。
-// 序 13/14 为取消项（见文件头），不是枚举成员。
+// 事件类型封闭枚举 + 固定表序（§6.6.1 分级总表序；同级排序、折叠留显均按此序）。
+// 取消 / 退役项（learning-graduate / consolidate-21d / group）不是枚举成员（见文件头登记）。
 const TYPE_ORDER = [
   "transfer-first",      // L0（GF-2，阻塞于缺口 G1，本期不产出）
   "application-first",   // L0（GF-2）
   "kp-strong",           // L0（GF-2）
   "kp-functional",       // L0（GF-2）
   "structure-link",      // L1（GF-2）
-  "domain-entry",        // L1（GF-2）
-  "material",            // L2（GF-1）
-  "group",               // L2（GF-1）
+  "domain-entry",        // L1（GF-1 简化版已产出；GF-2 升级为 Frontier 口径）
+  "material",            // L2（GF-1，累计巩固关口）
   "leech-recovery",      // L2（GF-1）
   "relearning-recovery", // L2（GF-1）
   "retention-180",       // L2（GF-1）
@@ -52,7 +57,7 @@ const TYPE_ORDER = [
 const TIER_BY_TYPE = {
   "transfer-first": 0, "application-first": 0, "kp-strong": 0, "kp-functional": 0,
   "structure-link": 1, "domain-entry": 1,
-  "material": 2, "group": 2, "leech-recovery": 2, "relearning-recovery": 2, "retention-180": 2,
+  "material": 2, "leech-recovery": 2, "relearning-recovery": 2, "retention-180": 2,
   "retention-60": 3
 };
 
@@ -69,36 +74,27 @@ const THRESHOLDS = Object.freeze({
   consolidatedStabilityDays: 21, // 巩固：stability > 21（漏斗同源）
   retention60Days: 60,
   retention180Days: 180,
-  materialSampleMin: 8,
-  materialHalfRatio: 0.5,
-  materialFullRatio: 1,
-  groupMinSize: 2,
+  materialSampleMin: 8, // Territory 行样本门槛（保留；不再是 material 事件门槛）
+  materialHalfRatio: 0.5, // Territory 现状标记 crossedHalf（保留；现状口径，非事件口径）
+  materialFullRatio: 1,   // Territory 现状标记 crossedFull（保留；现状口径，非事件口径）
+  materialStep: 50,     // v49.23（D196）：材料累计巩固关口步长——每 50 一档、无上限
   leechRecoveryStabilityDays: 21
 });
 
 // ---------- 通用底座 ----------
 
-// firstCrossings(series, threshold)：任意 (实体, 维度) 的时间序列的首达记录（§3.2 通用底座）。
-// 输入 series = [{seq, at, value}]（seq=review_seq，at=reviewed_at，value=指标值）；
-// 输出 = [{seq, at}]：value 首次越过阈值（>=）的序列点。
-//  - 按 seq 升序扫描；「值掉回阈值下方」即重新武装（armed）——
-//    日志被撤销删除 = 序列自然回退 = 事件自动消失（§4.17-6②，静默）；
-//    重评再跨越产生新 triggerSeq（真实的重做，§4.17-6②）。
+// firstCrossing(series, threshold)：任意 (实体, 维度) 时间序列的**首个**跨档点（§3.2 通用底座）。
+// 输入 series = [{seq, at, value}]（seq=review_seq，at=reviewed_at，value=指标值）；输出 = {seq, at} | null。
+// v49.23（D196）语义变更——**只取首个跨档点，不再「掉回阈值下方即重新武装」**（P3 一次即永）：
+//  - 旧 armed 语义会让「值掉回阈值下、之后再次跨过」产生第二次命中（A2 反模式）；单卡 stability 类事件
+//    掉回的真实来源常是「一次遗忘」，逐次重报会在难卡上重复刷同一条里程碑。
+//  - 撤销回退语义不变：日志被物理删除 = 序列自然回退 = 若首个跨档点消失则顺延到下一个（§4.17-6②，静默）。
 //  - 阈值判定一律 value >= threshold（首达语义）。
-function firstCrossings(series, threshold) {
+function firstCrossing(series, threshold) {
   const pts = (series || [])
     .filter((p) => p && Number.isFinite(p.seq) && Number.isFinite(p.value))
     .sort((a, b) => a.seq - b.seq);
-  const out = [];
-  let armed = true; // 初始视为未达成（序列之前无证据）
-  for (const p of pts) {
-    if (p.value >= threshold) {
-      if (armed) { out.push({ seq: p.seq, at: p.at }); armed = false; }
-    } else {
-      armed = true;
-    }
-  }
-  return out;
+  return pts.find((p) => p.value >= threshold) || null;
 }
 
 // 命中对象（§3.1 GrowthEventHit 的普通对象形式；key = `${type}:${entityId}:${dimension}`，§4.17-6①）。
@@ -165,22 +161,15 @@ function isConsolidated(fsrs) {
   );
 }
 
-// 某成员卡在给定 seq 时刻的状态重放：取其 ≤seq 的最新可读 after 快照的 state；首条快照之前视为 "new"。
-// 例外：全无可读快照的卡（v22 前旧历史，无法定位时刻）按当前状态恒定参与——其当前状态此后不再变化
-// （再评分即产生快照，退出该分支），故与「per-grade 并 ≡ 窗口重算」的一致性（N-9）不冲突。
-// （重放只依赖日志快照——缺快照的旧日志不推进状态，宁可少报不可误报。）
-function memberStateAt(card, seq) {
-  const logs = (card.logs || []).filter((l) => l && Number.isFinite(l.reviewSeq)).sort((a, b) => a.reviewSeq - b.reviewSeq);
-  if (!logs.length || !logs.some((l) => l.after && typeof l.after === "object")) {
-    const cur = card.fsrs && typeof card.fsrs === "object" ? card.fsrs : null;
-    return cur && typeof cur.state === "string" ? cur.state : "new";
-  }
-  let st = "new";
-  for (const l of logs) {
-    if (l.reviewSeq > seq) break;
-    if (l.after && typeof l.after === "object" && typeof l.after.state === "string") st = l.after.state;
-  }
-  return st;
+// 「曾进入长期记忆」的历史锚点（v49.23 / D196）：该卡**最早**一条 after 满足 isConsolidated 的可读日志。
+// 无此类日志（含 v22 前无可读快照的旧卡）→ null（不贡献计数 / 锚点）——历史累计必须有真实评分时刻可锚，
+// 故本口径不用旧的「按当前状态恒定参与」妥协（宁可少报不可误报）。
+function everConsolidatedSeq(card) {
+  const logs = (card.logs || [])
+    .filter((l) => l && Number.isFinite(l.reviewSeq) && l.after && typeof l.after === "object")
+    .sort((a, b) => a.reviewSeq - b.reviewSeq);
+  for (const l of logs) if (isConsolidated(l.after)) return { seq: l.reviewSeq, at: l.reviewedAt };
+  return null;
 }
 
 // ---------- 单卡事件（§3.2 deriveCardEvents） ----------
@@ -208,29 +197,28 @@ function deriveCardEvents(card, logs, now) {
     { type: "retention-60", threshold: THRESHOLDS.retention60Days }
   ];
   for (const def of retentionDefs) {
-    for (const c of firstCrossings(retentionSeries, def.threshold)) {
-      const trigger = usable.find((l) => l.reviewSeq === c.seq);
-      hits.push(makeHit({
-        type: def.type,
-        entityId: card.id,
-        entityLabel: frontSummary(card),
-        dimension: def.type === "retention-60" ? "60" : "180",
-        triggerSeq: c.seq,
-        triggerAt: c.at,
-        evidence: cardEvidence(card, {
-          stabilityDays: trigger && Number.isFinite(Number(trigger.after.stability)) ? Number(trigger.after.stability) : undefined
-        })
-      }));
-    }
+    const c = firstCrossing(retentionSeries, def.threshold); // 首次跨档（不再重新武装，D196）
+    if (!c) continue;
+    const trigger = usable.find((l) => l.reviewSeq === c.seq);
+    hits.push(makeHit({
+      type: def.type,
+      entityId: card.id,
+      entityLabel: frontSummary(card),
+      dimension: def.type === "retention-60" ? "60" : "180",
+      triggerSeq: c.seq,
+      triggerAt: c.at,
+      evidence: cardEvidence(card, {
+        stabilityDays: trigger && Number.isFinite(Number(trigger.after.stability)) ? Number(trigger.after.stability) : undefined
+      })
+    }));
   }
 
-  // —— relearning-recovery（§6.6.1 序 10；D175 修订：每卡仅首次）——
+  // —— relearning-recovery（每卡仅首次）——
   // 口径：存在日志 L 使 before.state==="relearning" && after.state==="review"，且为该卡**首次**成立。
-  // D175（v49.1，用户 2026-10-15 裁定）：不再沿用 firstCrossings 的「掉回重新武装」——FSRS 里每次
-  // 遗忘都会各走一遍 relearning→review，逐次计报会在难书上刷屏、稀释反馈成就感（§4.17-6①
-  // 「每个 (事件类型, 实体, 维度) 只报一次」的字面语义；②「真实的重做」再触发只适用于
-  // stability 阈值类事件的回落后再跨越，如 retention-60/180）。撤销回退语义不变：
-  // 首条康复日志被撤销后，下一条康复自然成为「首次」（重放一致性 N-4/N-9）。
+  // D175（v49.1，用户 2026-10-15 裁定）：不再「掉回重新武装」——FSRS 里每次遗忘都会各走一遍
+  // relearning→review，逐次计报会在难书上刷屏、稀释反馈成就感（§4.17-6①「每个 (事件类型, 实体, 维度)
+  // 只报一次」的字面语义）。v49.23（D196）把同一原则推广到**全记忆层**（retention / leech / material 同样只取首达）。
+  // 撤销回退语义不变：首条康复日志被撤销后，下一条康复自然成为「首次」（重放一致性 N-4/N-9）。
   const relearnSeries = all
     .filter((l) => l.before && typeof l.before === "object" && l.after && typeof l.after === "object")
     .sort((a, b) => a.reviewSeq - b.reviewSeq)
@@ -272,7 +260,8 @@ function deriveCardEvents(card, logs, now) {
         at: l.reviewedAt,
         value: l.after.state === "review" && Number(l.after.stability) >= THRESHOLDS.leechRecoveryStabilityDays ? 1 : 0
       }));
-    for (const c of firstCrossings(leechSeries, 1)) {
+    const c = firstCrossing(leechSeries, 1); // 首次稳定（不再重新武装，D196）
+    if (c) {
       hits.push(makeHit({
         type: "leech-recovery",
         entityId: card.id,
@@ -292,65 +281,50 @@ function deriveCardEvents(card, logs, now) {
   return hits.sort(compareHits);
 }
 
-// ---------- 组级事件（§3.2 deriveGroupEvents） ----------
+// ---------- 领域进入（GF-1 简化版，§3.2 deriveDomainEvents） ----------
 
-// deriveGroupEvents(cardsWithLogs, now)：同组卡行（各卡带 logs）→ 组毕业命中。
-// 口径（D129）：组成员 = 活跃卡（非挂起/非归档/未删），按 sibling_key（非 NULL，优先）或
-// knowledge_point_id（非 NULL）分组，组大小 ≥2；「全组 fsrs.state==="review"」按重放序列求首达
-// （组内任一成员日志时刻上，全体成员按各自最新可读快照均为 review）；dimension="review"。
-// 触发时刻 = 跨越点的 review_seq（即组内造成全体达标的最新一条日志）。
-// 重放语义保证与撤销/窗口重算一致（N-4/N-9）：成员日志被撤销 → 重放回退 → 事件消失。
-function deriveGroupEvents(cardsWithLogs, now) {
+// deriveDomainEvents(cardsWithLogs, now)：全量活跃卡行 → 每个 UDC 主领域码的首个「曾进入长期记忆」锚点。
+// 口径（v49.23 / D196；GF-2 将把 domain-entry 升级为 Frontier 口径）：
+//  某领域**首次**出现「曾进入长期记忆」的卡 → 一条 domain-entry（entity = 领域码，dimension = "entry"）。
+//  - 「曾进入长期记忆」= 该卡存在某条可读日志其 after 满足 isConsolidated（review ∧ stability>21，漏斗同源）。
+//  - 触发 = 该领域内**最早**的这类日志（argmin review_seq）；单调首次语义（一旦达成永不复报，P3）。
+//  - 证据链 = 造成该首达的那张卡的 cardEvidence（可追溯到卡与来源，§4.17-7②）。
+function deriveDomainEvents(cardsWithLogs, now) {
   void now;
   const cards = (cardsWithLogs || []).filter(isActiveCard);
-  const groups = new Map();
+  const first = new Map(); // domain → { seq, at, card }
   for (const c of cards) {
-    const key = c.siblingKey || c.knowledgePointId; // 双键并存时取 sibling_key（§3.2 字面序）
-    if (!key) continue;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(c);
+    const dom = Array.isArray(c.domain) && c.domain.length ? String(c.domain[0]) : null;
+    if (!dom) continue;
+    const a = everConsolidatedSeq(c);
+    if (!a) continue;
+    const cur = first.get(dom);
+    if (!cur || a.seq < cur.seq) first.set(dom, { seq: a.seq, at: a.at, card: c });
   }
   const hits = [];
-  for (const [key, members] of groups) {
-    if (members.length < THRESHOLDS.groupMinSize) continue; // D129：组 ≥2
-    const events = [];
-    for (const m of members) {
-      for (const l of m.logs || []) if (l && Number.isFinite(l.reviewSeq)) events.push(l);
-    }
-    events.sort((a, b) => a.reviewSeq - b.reviewSeq);
-    const series = events.map((e) => ({
-      seq: e.reviewSeq,
-      at: e.reviewedAt,
-      value: members.every((m) => memberStateAt(m, e.reviewSeq) === "review") ? 1 : 0
+  for (const [dom, a] of first) {
+    hits.push(makeHit({
+      type: "domain-entry",
+      entityId: dom,
+      entityLabel: dom, // 展示名由文案层 udcLabel 映射
+      dimension: "entry",
+      triggerSeq: a.seq,
+      triggerAt: a.at,
+      evidence: cardEvidence(a.card)
     }));
-    for (const c of firstCrossings(series, 1)) {
-      hits.push(makeHit({
-        type: "group",
-        entityId: String(key),
-        entityLabel: String(members.length), // §3.1：组级 entityLabel = 组大小
-        dimension: "review",
-        triggerSeq: c.seq,
-        triggerAt: c.at,
-        evidence: {
-          cardIds: members.map((m) => m.id),
-          cardFronts: members.map(frontSummary),
-          groupSize: members.length
-        }
-      }));
-    }
   }
   return hits.sort(compareHits);
 }
 
 // ---------- 材料级事件（§3.2 deriveMaterialEvents） ----------
 
-// deriveMaterialEvents(cardsWithLogs, now, params)：书/领域 → 活跃卡集（各卡带 logs）→ 材料级跨越命中。
-// 口径（D129）：
-//  - 覆盖率 = consolidated 卡数 / 活跃卡总数；consolidated ≡ isConsolidated(fsrs)（review 且 stability>21，漏斗同源）。
-//  - 样本门槛：活跃卡 ≥8 才参与（不足不产事件、不入 Territory 行）。
-//  - 阈值两档：首达 ≥50%（dimension="half"「过半」）、=100%（dimension="full"「全覆盖」）。
+// deriveMaterialEvents(cardsWithLogs, now, params)：书 / 领域 → 活跃卡集 → **累计巩固关口**命中。
+// 口径（v49.23 / D196，取代 D129 的「覆盖率过半 / 全覆盖」）：
+//  - 关口 N = THRESHOLDS.materialStep 的整数倍（50, 100, 150, …, **无上限**）。
+//  - 量 = 该材料**累计「曾进入长期记忆」的卡数**（每卡自其最早的达标日志起计入）；**单调不减**
+//    → 每个关口恰好命中一次、不随材料扩容漂移、不重新武装（P2 单调性 / P3 一次即永）。
 //  - 实体两键：书（libraryItemId，经 contextRef.documentId 归属——join 在 db 出口完成）与 UDC 主领域码（domain[0]）。
-// 覆盖率按重放序列求首达（组级同语义）；params 为预留位（阈值定稿在本模块，不外放）。
+//  - dimension = `${kind}:${N}`（如 "book:150"）；params 为预留位（关口定稿在本模块，不外放）。
 function deriveMaterialEvents(cardsWithLogs, now, params) {
   void now;
   void params;
@@ -376,37 +350,19 @@ function deriveMaterialEvents(cardsWithLogs, now, params) {
   return hits.sort(compareHits);
 }
 
-// 单个材料（书或领域）的覆盖率首达命中。
+// 单个材料（书或领域）的「累计巩固关口」命中。
+// 每个成员贡献一个历史锚点 = 其「曾进入长期记忆」的最早日志；按 seq 升序即为累计计数的到达顺序，
+// 故第 N 个锚点就是「累计数首次达到 N」的那一刻（N = 50, 100, 150, …）。新增卡只会追加更晚的锚点，
+// **不会重排已有锚点** → 历史关口不漂移。
 function materialCrossings(entityId, members, kind) {
-  const total = members.length;
-  if (total < THRESHOLDS.materialSampleMin) return []; // D129：样本门槛 活跃卡 ≥8
-  const events = [];
+  const anchors = [];
   for (const m of members) {
-    for (const l of m.logs || []) if (l && Number.isFinite(l.reviewSeq)) events.push(l);
+    const a = everConsolidatedSeq(m);
+    if (a) anchors.push(a);
   }
-  events.sort((a, b) => a.reviewSeq - b.reviewSeq);
-  // 成员在某 seq 是否 consolidated（重放）：首条可读快照之前一律视为未巩固（new）——
-  // **禁止**回退到当前状态：那会把「尚未发生」的巩固倒填进历史，把首达时刻前移（N-9 实测踩过）。
-  // 例外：全无可读快照的卡（v22 前旧历史）按当前状态恒定参与（与 memberStateAt 同一妥协，见其注释）。
-  const consolidatedAt = (card, seq) => {
-    const logs = (card.logs || []).filter((l) => l && Number.isFinite(l.reviewSeq) && l.after && typeof l.after === "object")
-      .sort((a, b) => a.reviewSeq - b.reviewSeq);
-    if (!logs.length) {
-      const cur = card.fsrs && typeof card.fsrs === "object" ? card.fsrs : null;
-      return isConsolidated(cur) ? 1 : 0;
-    }
-    let snap = null;
-    for (const l of logs) {
-      if (l.reviewSeq > seq) break;
-      snap = l.after;
-    }
-    return isConsolidated(snap) ? 1 : 0; // snap=null（首条快照之前）→ isConsolidated(null)=false
-  };
-  const series = events.map((e) => {
-    let consolidated = 0;
-    for (const m of members) consolidated += consolidatedAt(m, e.reviewSeq);
-    return { seq: e.reviewSeq, at: e.reviewedAt, value: consolidated / total };
-  });
+  if (!anchors.length) return [];
+  anchors.sort((a, b) => a.seq - b.seq || a.at - b.at);
+  const total = anchors.length;
   const label = kind === "book"
     ? String((members.find((m) => m.docTitle) || {}).docTitle || entityId)
     : String(entityId); // 领域维 entityLabel = UDC 主领域码（展示名由文案层映射）
@@ -414,22 +370,17 @@ function materialCrossings(entityId, members, kind) {
     ? { libraryItemId: String(entityId), docTitle: label }
     : {};
   const hits = [];
-  const defs = [
-    { dimension: "full", threshold: THRESHOLDS.materialFullRatio },
-    { dimension: "half", threshold: THRESHOLDS.materialHalfRatio }
-  ];
-  for (const def of defs) {
-    for (const c of firstCrossings(series, def.threshold)) {
-      hits.push(makeHit({
-        type: "material",
-        entityId: String(entityId),
-        entityLabel: label,
-        dimension: def.dimension,
-        triggerSeq: c.seq,
-        triggerAt: c.at,
-        evidence
-      }));
-    }
+  for (let n = THRESHOLDS.materialStep; n <= total; n += THRESHOLDS.materialStep) {
+    const a = anchors[n - 1];
+    hits.push(makeHit({
+      type: "material",
+      entityId: String(entityId),
+      entityLabel: label,
+      dimension: `${kind}:${n}`,
+      triggerSeq: a.seq,
+      triggerAt: a.at,
+      evidence
+    }));
   }
   return hits;
 }
@@ -547,12 +498,12 @@ function deriveKnowledgeEvents(k1RelationRows, kpStateRows, learningEventRows, n
 
 module.exports = {
   // 底座与口径
-  firstCrossings,
+  firstCrossing,
   isConsolidated,
   compareHits,
   // 事件派生（GF-1 记忆层）
   deriveCardEvents,
-  deriveGroupEvents,
+  deriveDomainEvents,
   deriveMaterialEvents,
   buildTerritory,
   // 选级 / 折叠
@@ -560,7 +511,7 @@ module.exports = {
   foldSameDay,
   // GF-2 预留（不实现，见函数注释）
   deriveKnowledgeEvents,
-  // 机读常量（§6.6.1 表序 / tier / 投放面 / D129 阈值定稿值）
+  // 机读常量（§6.6.1 表序 / tier / 投放面 / D196 阈值定稿值）
   TYPE_ORDER,
   TIER_BY_TYPE,
   SURFACE_BY_TYPE,

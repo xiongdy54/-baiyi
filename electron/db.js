@@ -5015,7 +5015,7 @@ function getGrowthAfterReview(cardId, now) {
   const scope = loadGrowthAfterReviewScope(card);
   const members = [...scope.values()];
   if (members.length) {
-    hits.push(...keep(growth.deriveGroupEvents(members, nowMs)));
+    hits.push(...keep(growth.deriveDomainEvents(members, nowMs)));
     hits.push(...keep(growth.deriveMaterialEvents(members, nowMs)));
   }
   const picked = growth.pickTopEvent(hits);
@@ -5047,26 +5047,36 @@ function getGrowthSessionSummary(fromTs, now) {
   const cards = [...loadGrowthAggregateScope([...seed.values()]).values()];
   const hits = [];
   for (const c of cards) hits.push(...growth.deriveCardEvents(c, c.logs, nowMs));
-  hits.push(...growth.deriveGroupEvents(cards, nowMs));
+  hits.push(...growth.deriveDomainEvents(cards, nowMs));
   hits.push(...growth.deriveMaterialEvents(cards, nowMs));
   const inWindow = hits.filter((h) => h.triggerAt >= from);
   const folded = growth.foldSameDay(inWindow, (ts) => dayStartMs(ts)); // 学习日口径 = D23 切点（N-10）
   return { enabled: true, fromTs: from, hits: folded.visible, folded: folded.folded };
 }
 
+// 成长记录档案**白名单**（v49.23 / D196 取代 D195 的「剔除集」）：数据页「成长记录」只收聚合 / 稀有型
+// —— `material`（材料累计巩固关口）与 `domain-entry`（领域首次形成长期记忆）；全部逐卡型
+// （leech-recovery / relearning-recovery / retention-60 / retention-180）只进提示条与会话汇总（用户 2026-10-19 裁定）。
+// 注意：仅影响成长记录列表（recentEvents）；判定口径仍在 electron/growth.js，本处只做投放面筛选。
+const GROWTH_ARCHIVE_TYPES = new Set(["material", "domain-entry"]);
+
 // 成长总览 / 档案（§3.3）：全库 derive → 近期 L0–L2 档案 + totals + Territory。
 // 全库聚合**只**在仪表盘挂载时触发 + 事件驱动防抖刷新（§4.17-6⑥），不进评分路径、不做每评分全量重算。
 function getGrowthOverview(opts, now) {
   const nowMs = Number.isFinite(Number(now)) ? Number(now) : Date.now();
-  const limit = Math.min(200, Math.max(1, Math.floor(Number(opts && opts.limit) || 30)));
+  // v49.22（D195）：默认不再截断（成长记录改分页展示，取全量档案）；显式传 opts.limit 才生效。
+  const rawLimit = opts && opts.limit;
+  const limit = rawLimit == null
+    ? Infinity
+    : Number.isFinite(Number(rawLimit)) ? Math.max(1, Math.floor(Number(rawLimit))) : Infinity;
   if (!growthFeedbackEnabled()) return { enabled: false };
   const cards = loadGrowthCardsWithLogs("", []);
   const hits = [];
   for (const c of cards) hits.push(...growth.deriveCardEvents(c, c.logs, nowMs));
-  hits.push(...growth.deriveGroupEvents(cards, nowMs));
+  hits.push(...growth.deriveDomainEvents(cards, nowMs));
   hits.push(...growth.deriveMaterialEvents(cards, nowMs));
-  // 档案只收录 L0–L2（§4.17-7①：Growth Records 不收 L3 与取消项）；按 triggerSeq 倒序（近期在前），limit 截断
-  const archive = hits.filter((h) => h.tier <= 2);
+  // 档案只收白名单类型（D196：material / domain-entry）；按 triggerSeq 倒序（近期在前），显式 limit 才截断
+  const archive = hits.filter((h) => h.tier <= 2 && GROWTH_ARCHIVE_TYPES.has(h.type));
   const recentEvents = [...archive].sort((a, b) => b.triggerSeq - a.triggerSeq).slice(0, limit);
   const totals = { l0: 0, l1: 0, l2: 0 };
   for (const h of archive) totals[`l${h.tier}`] += 1;

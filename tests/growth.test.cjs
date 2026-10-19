@@ -2,9 +2,9 @@
 // @runtime: node
 // 运行：node tests/growth.test.cjs
 // 依据：docs/design/GROWTH-FEEDBACK-D129.md §3.2（判定口径唯一居所 electron/growth.js）+ §6.1（断言清单 P-1…P-14）。
-// 覆盖：首次语义 / 撤销回退 / 重评再触发 / 取消项 / relearning-recovery / leech-recovery / retention 双档 /
-//       group 门槛与双键 / material 样本门槛与两档两维 / pickTopEvent 序 / foldSameDay / isConsolidated /
-//       territory 聚合 / 纯度（同输入全等 + 零时钟零随机）。
+// 覆盖：只取首达（P3 一次即永）/ 撤销回退 / 取消项 / relearning-recovery / leech-recovery / retention 双档 /
+//       domain-entry / material 累计巩固关口（每 50 一档、无上限、扩容不漂移）/ pickTopEvent 序 / foldSameDay /
+//       isConsolidated / territory 聚合 / 纯度（同输入全等 + 零时钟零随机）。group 已于 D196 退役。
 // 测试内零网络零库：全部夹具为手工构造的证据行（形状见 electron/growth.js 文件头）。
 "use strict";
 const path = require("path");
@@ -94,19 +94,19 @@ console.log("== P-2 撤销回退：删掉跨档日志重算 → retention-180 �
 }
 
 // ---------------------------------------------------------------- P-3
-console.log("== P-3 重评再触发：[180→回落30→180] 产生第二次命中，triggerSeq=最后一条（真实的重做） ==");
+console.log("== P-3 只取首达（D196）：[180→回落30→180] 只报一次，triggerSeq=首条（不再重新武装） ==");
 {
   const series = [
     { seq: 1, at: NOW + 1, value: 180 },
     { seq: 2, at: NOW + 2, value: 30 },
     { seq: 3, at: NOW + 3, value: 180 }
   ];
-  const crossings = growth.firstCrossings(series, 180);
-  check("回落再跨越产生两次命中", crossings.length === 2, 2, crossings.length);
-  check("第二次命中 triggerSeq=最后一条", crossings[1].seq === 3, 3, crossings[1].seq);
+  const c1 = growth.firstCrossing(series, 180);
+  check("回落再跨越仍只返回首个跨档点（seq=1）", c1 && c1.seq === 1, 1, c1 && c1.seq);
+  check("从未跨档 → null", growth.firstCrossing(series, 999) === null, null, growth.firstCrossing(series, 999));
   const c = card({ id: "p3-card", logs: series.map((p) => log({ reviewSeq: p.seq, after: fsrsOf("review", p.value) })) });
   const r180 = growth.deriveCardEvents(c, c.logs, NOW).filter((h) => h.type === "retention-180");
-  check("deriveCardEvents 同语义：两条 retention-180，末条 triggerSeq=3", r180.length === 2 && r180[1].triggerSeq === 3, [1, 3], r180.map((h) => h.triggerSeq));
+  check("deriveCardEvents 同语义：仅一条 retention-180（首条 seq=1，不掉回重新武装）", r180.length === 1 && r180[0].triggerSeq === 1, [1], r180.map((h) => h.triggerSeq));
 }
 
 // ---------------------------------------------------------------- P-4
@@ -184,74 +184,84 @@ console.log("== P-7 retention 双档同日：单条直越 180 → pickTop 只报
 }
 
 // ---------------------------------------------------------------- P-8
-console.log("== P-8 group：组=2 全 review 命中；组=1 不命中；1 张 learning 不命中；sibling_key 与 knowledge_point_id 双键成立 ==");
+console.log("== P-8 group 退役（D196）+ domain-entry（GF-1 简化版）：某领域首次出现「曾进入长期记忆」的卡 ==");
 {
-  const mk = (id, key, state) => card({
-    id, siblingKey: key, knowledgePointId: null,
-    logs: [log({ after: fsrsOf(state, 10) })]
-  });
-  const g2 = [mk("g-a", "sg-1", "review"), mk("g-b", "sg-1", "review")];
-  const h2 = growth.deriveGroupEvents(g2, NOW);
-  check("组=2 卡全 review → 命中一次", h2.length === 1 && h2[0].type === "group", 1, h2.length);
-  check("dimension=review，entityLabel=组大小", h2[0] && h2[0].dimension === "review" && h2[0].entityLabel === "2", ["review", "2"], h2[0] && [h2[0].dimension, h2[0].entityLabel]);
-  const g1 = [mk("g-c", "sg-2", "review")];
-  check("组=1 卡不命中（≥2 门槛）", growth.deriveGroupEvents(g1, NOW).length === 0, 0, growth.deriveGroupEvents(g1, NOW).length);
-  const gMixed = [mk("g-d", "sg-3", "review"), mk("g-e", "sg-3", "learning")];
-  check("组内 1 张 learning 不命中", growth.deriveGroupEvents(gMixed, NOW).length === 0, 0, growth.deriveGroupEvents(gMixed, NOW).length);
-  const kp = [
-    card({ id: "g-f", knowledgePointId: "kp-1", logs: [log({ after: fsrsOf("review", 10) })] }),
-    card({ id: "g-g", knowledgePointId: "kp-1", logs: [log({ after: fsrsOf("review", 10) })] })
+  check("group 不在 TYPE_ORDER", !growth.TYPE_ORDER.includes("group"), true, growth.TYPE_ORDER);
+  check("TIER/SURFACE 无 group 键", growth.TIER_BY_TYPE.group === undefined && growth.SURFACE_BY_TYPE.group === undefined, true, Object.keys(growth.TIER_BY_TYPE));
+  check("deriveGroupEvents 已退役（不再导出）", typeof growth.deriveGroupEvents === "undefined", true, typeof growth.deriveGroupEvents);
+
+  // domain-entry：每个 UDC 主领域码取**最早**的巩固日志为锚点
+  const d = [
+    card({ id: "d-a", domain: ["004"], logs: [log({ reviewSeq: 5, after: fsrsOf("learning", 2) }), log({ reviewSeq: 9, after: fsrsOf("review", 30) })] }),
+    card({ id: "d-b", domain: ["004"], logs: [log({ reviewSeq: 7, after: fsrsOf("review", 40) })] }),
+    card({ id: "d-c", domain: ["159.9"], logs: [log({ reviewSeq: 12, after: fsrsOf("review", 50) })] })
   ];
-  const hKp = growth.deriveGroupEvents(kp, NOW);
-  check("knowledge_point_id 分键同样成立", hKp.length === 1 && hKp[0].entityId === "kp-1", "kp-1", hKp[0] && hKp[0].entityId);
-  check("重放触发时刻 = 组内造成全体达标的最新日志", h2[0].triggerSeq === Math.max(...g2.flatMap((m) => m.logs.map((l) => l.reviewSeq))), true, h2[0].triggerSeq);
+  const de = growth.deriveDomainEvents(d, NOW);
+  check("每个领域一条，锚点取最早（004→7 / 159.9→12）",
+    de.length === 2 && de.find((h) => h.entityId === "004").triggerSeq === 7 && de.find((h) => h.entityId === "159.9").triggerSeq === 12,
+    "004→7 / 159.9→12", de.map((h) => `${h.entityId}→${h.triggerSeq}`));
+  check("dimension=entry；tier=1（L1 结构）", de.every((h) => h.dimension === "entry" && h.tier === 1), true, de.map((h) => [h.dimension, h.tier]));
+  check("证据链指向造成首达的那张卡", de.find((h) => h.entityId === "004").evidence.cardIds[0] === "d-b", "d-b", de.find((h) => h.entityId === "004").evidence.cardIds);
+  check("无巩固日志的领域不命中", growth.deriveDomainEvents([card({ id: "d-d", domain: ["7"], logs: [log({ after: fsrsOf("review", 10) })] })], NOW).length === 0, 0, growth.deriveDomainEvents([card({ id: "d-d", domain: ["7"], logs: [log({ after: fsrsOf("review", 10) })] })], NOW).length);
 }
 
 // ---------------------------------------------------------------- P-9
-console.log("== P-9 material：8 卡 4 巩固 → half；7 卡样本不命中；100% → full；书维与领域维独立 ==");
+console.log("== P-9 material 累计巩固关口（D196）：每 50 一档、无上限、扩容不漂移；书维/领域维独立 ==");
 {
-  const mkBook = (n, consolidated) => {
+  // mkBook(n, fromSeq)：造 n 张「曾进入长期记忆」的卡（每张一条巩固日志，seq 递增）
+  const mkBook = (n, fromSeq = 1) => {
     const cards = [];
     for (let i = 0; i < n; i++) {
-      const done = i < consolidated;
       cards.push(card({
-        id: `m-${n}-${i}`,
+        id: `m-${fromSeq}-${i}`,
         libraryItemId: "li-book",
         docTitle: "样本书",
         domain: ["004"],
-        logs: [log({ after: done ? fsrsOf("review", 30) : fsrsOf("learning", 2) })]
+        logs: [log({ reviewSeq: fromSeq + i, after: fsrsOf("review", 30) })]
       }));
     }
     return cards;
   };
-  const half = growth.deriveMaterialEvents(mkBook(8, 4), NOW);
-  check("8 卡 4 巩固（50%）→ half 命中", half.some((h) => h.dimension === "half"), true, half.map((h) => h.dimension));
-  check("书维命中 entityId=libraryItemId", half.some((h) => h.entityId === "li-book"), true, half.map((h) => h.entityId));
-  check("领域维独立命中（domain[0]=004）", half.some((h) => h.entityId === "004"), true, half.map((h) => h.entityId));
-  check("7 卡样本（<8）任何覆盖率不命中", growth.deriveMaterialEvents(mkBook(7, 7), NOW).length === 0, 0, growth.deriveMaterialEvents(mkBook(7, 7), NOW).length);
-  const full = growth.deriveMaterialEvents(mkBook(8, 8), NOW);
-  check("100% → full 命中", full.some((h) => h.dimension === "full"), true, full.map((h) => h.dimension));
-  const both = growth.deriveMaterialEvents(mkBook(8, 8), NOW);
-  check("一次性从 0 跳到 100%：书维 half 与 full 都报（不同维度，各自首达）", both.filter((h) => h.dimension === "half" && h.entityId === "li-book").length === 1 && both.filter((h) => h.dimension === "full" && h.entityId === "li-book").length === 1, [1, 1], [both.filter((h) => h.dimension === "half" && h.entityId === "li-book").length, both.filter((h) => h.dimension === "full" && h.entityId === "li-book").length]);
+  check("49 张（<50）零命中（关口自 50 起）", growth.deriveMaterialEvents(mkBook(49), NOW).length === 0, 0, growth.deriveMaterialEvents(mkBook(49), NOW).length);
+  const h50 = growth.deriveMaterialEvents(mkBook(50), NOW);
+  check("50 张 → 恰两条（book:50 + domain:50）",
+    h50.length === 2 && h50.some((h) => h.dimension === "book:50") && h50.some((h) => h.dimension === "domain:50"),
+    "book:50 / domain:50", h50.map((h) => `${h.entityId}/${h.dimension}`));
+  const b50 = h50.find((h) => h.dimension === "book:50");
+  check("book:50 的 triggerSeq = 第 50 个锚点（seq=50）", b50.triggerSeq === 50, 50, b50.triggerSeq);
+  check("书维 evidence.docTitle = 书名", b50.evidence && b50.evidence.docTitle === "样本书", "样本书", b50.evidence && b50.evidence.docTitle);
+  const h150 = growth.deriveMaterialEvents(mkBook(150), NOW);
+  const bookDims = h150.filter((h) => h.dimension.startsWith("book:")).map((h) => h.dimension);
+  check("150 张 → 每维度三档（50/100/150，无上限步进）", bookDims.length === 3 && bookDims.includes("book:100") && bookDims.includes("book:150"), ["book:50", "book:100", "book:150"], bookDims);
+  check("book:100 的 triggerSeq = 100", h150.find((h) => h.dimension === "book:100").triggerSeq === 100, 100, h150.find((h) => h.dimension === "book:100").triggerSeq);
+  // 扩容不重触发（P2 单调性 + P3 一次即永）：先 50 张，再追加 30 张（seq 51..80）
+  const grown = growth.deriveMaterialEvents(mkBook(50).concat(mkBook(30, 51)), NOW);
+  check("扩容不重触发：追加 30 张后 book:50 的 triggerSeq 仍 =50（历史不漂移）", grown.find((h) => h.dimension === "book:50").triggerSeq === 50, 50, grown.find((h) => h.dimension === "book:50").triggerSeq);
+  check("仍不产生 100 档（总数 80 <100）", grown.filter((h) => h.dimension === "book:100").length === 0, 0, grown.filter((h) => h.dimension === "book:100").length);
+  // 领域维独立：无 libraryItemId → 只产领域维
+  const onlyDomain = [];
+  for (let i = 0; i < 50; i++) onlyDomain.push(card({ id: `od-${i}`, domain: ["004"], logs: [log({ reviewSeq: i + 1, after: fsrsOf("review", 30) })] }));
+  const od = growth.deriveMaterialEvents(onlyDomain, NOW);
+  check("无 libraryItemId → 只产领域维命中", od.length === 1 && od[0].dimension === "domain:50", "domain:50", od.map((h) => h.dimension));
 }
 
 // ---------------------------------------------------------------- P-10
 console.log("== P-10 pickTopEvent 序：跨 tier 取高；同 tier 按表序；同表序按实体 id 字典序；L3 不进 toast；others 保留 ==");
 {
   const hL3 = hit("retention-60", "c-1");
-  const hGroup = hit("group", "sg-9");
-  const hMaterialZ = hit("material", "zz-book", { dimension: "half" });
-  const hMaterialA = hit("material", "aa-book", { dimension: "half" });
+  const hLeech = hit("leech-recovery", "c-9");
+  const hMaterialZ = hit("material", "zz-book", { dimension: "book:50" });
+  const hMaterialA = hit("material", "aa-book", { dimension: "book:50" });
   const hR180 = hit("retention-180", "c-2");
   const hL0 = hit("kp-functional", "kp-1");
-  const { toast, others } = growth.pickTopEvent([hL3, hGroup, hMaterialZ, hMaterialA, hR180, hL0]);
+  const { toast, others } = growth.pickTopEvent([hL3, hLeech, hMaterialZ, hMaterialA, hR180, hL0]);
   check("跨 tier 取高（L0 命中 toast）", toast && toast.type === "kp-functional", "kp-functional", toast && toast.type);
-  const noL0 = growth.pickTopEvent([hL3, hGroup, hMaterialZ, hMaterialA, hR180]);
-  check("同级按表序（material 先于 group / retention-180）", noL0.toast && noL0.toast.type === "material", "material", noL0.toast && noL0.toast.type);
+  const noL0 = growth.pickTopEvent([hL3, hLeech, hMaterialZ, hMaterialA, hR180]);
+  check("同级按表序（material 先于 leech-recovery / retention-180）", noL0.toast && noL0.toast.type === "material", "material", noL0.toast && noL0.toast.type);
   const sameType = growth.pickTopEvent([hMaterialZ, hMaterialA]);
   check("同表序按实体 id 字典序（aa < zz）", sameType.toast && sameType.toast.entityId === "aa-book", "aa-book", sameType.toast && sameType.toast.entityId);
   check("L3 永不入 toast（surface 过滤）", growth.pickTopEvent([hL3]).toast === null, null, growth.pickTopEvent([hL3]).toast);
-  check("others 保留被挤掉项（不丢弃，含 L3）", eq(others.map((h) => h.type), ["material", "material", "group", "retention-180", "retention-60"]), ["material", "material", "group", "retention-180", "retention-60"], others.map((h) => h.type));
+  check("others 保留被挤掉项（不丢弃，含 L3）", eq(others.map((h) => h.type), ["material", "material", "leech-recovery", "retention-180", "retention-60"]), ["material", "material", "leech-recovery", "retention-180", "retention-60"], others.map((h) => h.type));
 }
 
 // ---------------------------------------------------------------- P-11
@@ -286,27 +296,24 @@ console.log("== P-12 isConsolidated 口径唯一：与漏斗同值域（review �
   check("learning + stability 100 → false", growth.isConsolidated(fsrsOf("learning", 100)) === false, false, growth.isConsolidated(fsrsOf("learning", 100)));
   check("relearning + stability 100 → false", growth.isConsolidated(fsrsOf("relearning", 100)) === false, false, growth.isConsolidated(fsrsOf("relearning", 100)));
   check("fsrs 缺失 → false", growth.isConsolidated(null) === false, false, growth.isConsolidated(null));
-  // 挂起卡排除：8 卡中 1 张已巩固卡被挂起 → 活跃样本 7 <8，任何覆盖率不命中（若误计入则 4/8=50% 会误报 half）
+  // 挂起 / 归档卡排除（isActiveCard 口径）：用「排除后恰好只剩 50 张可达标」验证累计计数不含它们
   const cards = [];
-  for (let i = 0; i < 8; i++) {
-    const done = i < 4;
+  for (let i = 0; i < 51; i++) {
     cards.push(card({
       id: `p12-${i}`, libraryItemId: "li-p12", docTitle: "挂起样本书", domain: ["004"],
-      leech: i === 0 && done ? { isLeech: false, suspended: true } : null,
-      logs: [log({ after: done ? fsrsOf("review", 30) : fsrsOf("learning", 2) })]
+      leech: i === 0 ? { isLeech: true, suspended: true } : null,
+      logs: [log({ reviewSeq: i + 1, after: fsrsOf("review", 30) })]
     }));
   }
-  check("挂起卡不计入 material 样本（活跃 7<8 → 零命中）", growth.deriveMaterialEvents(cards, NOW).length === 0, 0, growth.deriveMaterialEvents(cards, NOW).length);
-  const grp = [
-    card({ id: "p12-g1", siblingKey: "sg-p12", logs: [log({ after: fsrsOf("review", 10) })] }),
-    card({ id: "p12-g2", siblingKey: "sg-p12", leech: { isLeech: false, suspended: true }, logs: [log({ after: fsrsOf("review", 10) })] })
+  const susp = growth.deriveMaterialEvents(cards, NOW);
+  check("挂起卡不计入累计（51 张中 1 张挂起 → 活跃恰 50 → 达 book:50）", susp.filter((h) => h.dimension === "book:50").length === 1, 1, susp.map((h) => h.dimension));
+  check("挂起的是最早锚点 → triggerSeq 顺延到第 50 个活跃锚点（seq=51）", susp.find((h) => h.dimension === "book:50").triggerSeq === 51, 51, susp.find((h) => h.dimension === "book:50").triggerSeq);
+  const arc = [
+    card({ id: "p12-a1", status: "archived", domain: ["7"], logs: [log({ reviewSeq: 1, after: fsrsOf("review", 30) })] }),
+    card({ id: "p12-a2", domain: ["7"], logs: [log({ reviewSeq: 2, after: fsrsOf("review", 30) })] })
   ];
-  check("挂起卡不计入 group 样本（组内活跃仅 1 <2 → 零命中）", growth.deriveGroupEvents(grp, NOW).length === 0, 0, growth.deriveGroupEvents(grp, NOW).length);
-  const archived = [
-    card({ id: "p12-a1", siblingKey: "sg-p12b", status: "archived", logs: [log({ after: fsrsOf("review", 10) })] }),
-    card({ id: "p12-a2", siblingKey: "sg-p12b", logs: [log({ after: fsrsOf("review", 10) })] })
-  ];
-  check("归档卡不计入 group 样本", growth.deriveGroupEvents(archived, NOW).length === 0, 0, growth.deriveGroupEvents(archived, NOW).length);
+  const arcDe = growth.deriveDomainEvents(arc, NOW);
+  check("归档卡被排除：领域 7 的锚点顺延到活跃卡（seq=2）", arcDe.length === 1 && arcDe[0].entityId === "7" && arcDe[0].triggerSeq === 2, "7→2", arcDe.map((h) => `${h.entityId}→${h.triggerSeq}`));
 }
 
 // ---------------------------------------------------------------- P-13
@@ -358,9 +365,9 @@ console.log("== P-14 纯度：同输入两次调用输出 JSON.stringify 全等�
   const a1 = growth.deriveCardEvents(pair[0], pair[0].logs, NOW);
   const a2 = growth.deriveCardEvents(pair[0], pair[0].logs, NOW);
   check("deriveCardEvents 同输入两次全等", eq(a1, a2), true, "全等");
-  const g1 = growth.deriveGroupEvents(pair, NOW);
-  const g2 = growth.deriveGroupEvents(pair.map((c) => ({ ...c, logs: c.logs.map((l) => ({ ...l })) })), NOW);
-  check("deriveGroupEvents 同输入两次全等", eq(g1, g2), true, "全等");
+  const d1 = growth.deriveDomainEvents(pair, NOW);
+  const d2 = growth.deriveDomainEvents(pair.map((c) => ({ ...c, logs: c.logs.map((l) => ({ ...l })) })), NOW);
+  check("deriveDomainEvents 同输入两次全等", eq(d1, d2), true, "全等");
   const m1 = growth.deriveMaterialEvents(pair, NOW, {});
   const m2 = growth.deriveMaterialEvents(pair.map((c) => ({ ...c, logs: c.logs.map((l) => ({ ...l })) })), NOW, {});
   check("deriveMaterialEvents 同输入两次全等", eq(m1, m2), true, "全等");

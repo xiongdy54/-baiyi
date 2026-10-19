@@ -121,6 +121,9 @@ app.whenReady().then(async () => {
       check("territory.rows 为数组且行键齐全", Array.isArray(ov.territory.rows) && ov.territory.rows.every((r) => ["kind", "id", "label", "total", "new", "learning", "reviewing", "consolidated", "coverage", "crossedHalf", "crossedFull"].every((k) => k in r)), true, ov.territory.rows.length);
       check("knowledge 为 null（GF-2 预留，§3.5）", ov.knowledge === null, null, ov.knowledge);
       check("limit 截断生效（limit:2）", db.getGrowthOverview({ limit: 2 }).recentEvents.length <= 2, true, db.getGrowthOverview({ limit: 2 }).recentEvents.length);
+      // v49.22（D195）：档案剔除逐卡泛滥的两类（relearning-recovery 每卡一条 / retention-180 每卡一条）
+      check("档案剔除逐卡泛滥类型（relearning-recovery / retention-180 不入成长记录，D195）",
+        ov.recentEvents.every((h) => h.type !== "relearning-recovery" && h.type !== "retention-180"), true, ov.recentEvents.map((h) => h.type));
       if (ms > 500) console.log(`  ⚠ R2 计时注记：getGrowthOverview 耗时 ${ms}ms（>500ms，报告注名）`);
       else console.log(`  ⓘ R2 计时注记：getGrowthOverview 耗时 ${ms}ms`);
     }
@@ -156,8 +159,21 @@ app.whenReady().then(async () => {
     // ---------------------------------------------------------------- N-4
     console.log("== N-4 撤销联动：undoLastReview 后对应事件从汇总/档案消失（静默回退） ==");
     {
-      const before = db.getGrowthOverview({});
-      check("撤销前档案含 m13-jump 的 retention-180", before.recentEvents.some((h) => h.entityId === "m13-jump" && h.type === "retention-180"), true, before.recentEvents.filter((h) => h.entityId === "m13-jump").map((h) => h.type));
+      // v49.22（D195）：retention-180 已移出成长记录档案——撤销联动改以会话汇总为主探针（汇总面仍全量产出该类型）
+      const beforeSum = db.getGrowthSessionSummary(0);
+      // L2 项可能被单日折叠进 folded（§4.17-6⑤），故「在场」= 可见 ∪ 折叠
+      const sumHas = (s, id, type) =>
+        s.hits.some((h) => h.entityId === id && h.type === type) ||
+        s.folded.some((f) => f.hits.some((h) => h.entityId === id && h.type === type));
+      check("撤销前会话汇总含 m13-jump 的 retention-180（可见或折叠）",
+        sumHas(beforeSum, "m13-jump", "retention-180"), true,
+        {
+          hits: beforeSum.hits.filter((h) => h.entityId === "m13-jump").map((h) => h.type),
+          folded: beforeSum.folded.flatMap((f) => f.hits).filter((h) => h.entityId === "m13-jump").map((h) => h.type)
+        });
+      check("撤销前档案不含 m13-jump 的 retention-180（该类型已移出档案，D195）",
+        db.getGrowthOverview({}).recentEvents.every((h) => !(h.entityId === "m13-jump" && h.type === "retention-180")), true,
+        db.getGrowthOverview({}).recentEvents.filter((h) => h.entityId === "m13-jump").map((h) => h.type));
       const undo = db.undoLastReview();
       check("undoLastReview 成功", undo && undo.ok === true, true, undo);
       const after = db.getGrowthOverview({});
@@ -173,7 +189,9 @@ app.whenReady().then(async () => {
       const sum = db.getGrowthSessionSummary(from);
       check("enabled 且形状正确", sum.enabled === true && "fromTs" in sum && Array.isArray(sum.hits) && Array.isArray(sum.folded), true, Object.keys(sum));
       check("窗口外日志不计入（m13-win-old 的 retention-60 缺席）", sum.hits.every((h) => h.entityId !== "m13-win-old") && sum.folded.every((f) => f.hits.every((h) => h.entityId !== "m13-win-old")), true, "无 win-old");
-      check("组毕业命中在场（sg-m13，dimension=review）", sum.hits.some((h) => h.type === "group" && h.entityId === "sg-m13" && h.dimension === "review"), true, sum.hits.filter((h) => h.type === "group").map((h) => h.entityId));
+      check("domain-entry 命中在场（领域 004，dimension=entry；v49.23 / D196 取代 group）",
+        sum.hits.some((h) => h.type === "domain-entry" && h.entityId === "004" && h.dimension === "entry"), true,
+        sum.hits.filter((h) => h.type === "domain-entry").map((h) => h.entityId));
       check("L3 照常列出（m13-undo 的 retention-60 在 hits）", sum.hits.some((h) => h.type === "retention-60" && h.entityId === "m13-undo"), true, sum.hits.filter((h) => h.type === "retention-60").map((h) => h.entityId));
       check("行序 = 表序（TYPE_ORDER 下标非降）", (() => {
         const idx = (h) => require(path.join(ROOT, "electron", "growth.js")).TYPE_ORDER.indexOf(h.type);
@@ -182,21 +200,9 @@ app.whenReady().then(async () => {
       const f180 = sum.folded.find((f) => f.type === "retention-180");
       check("retention-180 折叠：可见首条 fold-1、折叠 fold-2（count=1）", Boolean(f180) && f180.count === 1 && f180.hits.length === 1 && f180.hits[0].entityId === "m13-fold-2" && sum.hits.some((h) => h.type === "retention-180" && h.entityId === "m13-fold-1"),
         { visible: "m13-fold-1", folded: "m13-fold-2" }, f180 && { folded: f180.hits.map((h) => h.entityId) });
-      // material 折叠断言（复审 P3-2 改写）：书维（libraryItemId=randomUUID）与领域维（"004"）同日同型，
-      // 孰可见孰折入取决于 compareHits 的实体 id 字典序——不假设 randomUUID 与 "004" 的相对顺序，
-      // 只断言显式已知事实「两实体恰一可见一折入 + 折叠 count=1」。
-      const fMats = sum.folded.filter((f) => f.type === "material");
-      const visMatIds = sum.hits.filter((h) => h.type === "material").map((h) => h.entityId);
-      const matPair = [bookA.id, "004"].sort().join("|");
-      check("material 双维同日折叠：书/领域两实体恰一可见一折入（不依赖 id 字典序，复审 P3-2）",
-        fMats.length === 1 && fMats[0].count === 1 && fMats[0].hits.length === 1 && visMatIds.length === 1
-          && [...visMatIds, fMats[0].hits[0].entityId].sort().join("|") === matPair,
-        { pair: matPair, visible: 1, folded: 1 }, { visible: visMatIds, folded: fMats.map((f) => f.hits.map((h) => h.entityId)) });
-      const matBookHit = [...sum.hits, ...fMats.flatMap((f) => f.hits)].find((h) => h.type === "material" && h.entityId === bookA.id);
-      check("material 书维命中 entityLabel/evidence.docTitle=实际书名（sessionSummary 装载 docTitle 回补，复审 P1 回归锁）",
-        Boolean(matBookHit) && matBookHit.entityLabel === bookA.title && Boolean(matBookHit.evidence) && matBookHit.evidence.docTitle === bookA.title,
-        { entityLabel: bookA.title, docTitle: bookA.title },
-        matBookHit && { entityLabel: matBookHit.entityLabel, docTitle: matBookHit.evidence && matBookHit.evidence.docTitle });
+      // material 累计关口自 50 起（v49.23 / D196）：本套件的书样本远小于 50 → 会话窗口内不应出现任何 material
+      const allWin = [...sum.hits, ...sum.folded.flatMap((f) => f.hits)];
+      check("样本远小于 50 → 窗口内无 material 事件（关口自 50 起，D196）", allWin.every((h) => h.type !== "material"), true, allWin.filter((h) => h.type === "material").map((h) => h.entityId));
     }
 
     // ---------------------------------------------------------------- N-6
@@ -248,15 +254,10 @@ app.whenReady().then(async () => {
       const rowB = ovFree.territory.rows.find((r) => r.id === bookB.id);
       check("解挂后书 B 行在场：total=8、consolidated=4、coverage=0.5", Boolean(rowB) && rowB.total === 8 && rowB.consolidated === 4 && Math.abs(rowB.coverage - 0.5) < 1e-9, { total: 8, consolidated: 4, coverage: 0.5 }, rowB && { total: rowB.total, consolidated: rowB.consolidated, coverage: rowB.coverage });
       check("解挂后 crossedHalf=true（现状标记）", Boolean(rowB) && rowB.crossedHalf === true, true, rowB && rowB.crossedHalf);
-      check("解挂后 material half 事件可派生（书维 + 领域维）", ovFree.recentEvents.some((h) => h.type === "material" && h.dimension === "half" && h.entityId === bookB.id) && ovFree.recentEvents.some((h) => h.type === "material" && h.dimension === "half" && h.entityId === "159.9"), true, ovFree.recentEvents.filter((h) => h.type === "material").map((h) => `${h.entityId}:${h.dimension}`));
-      // 复审 P1 回归锁：overview 装载路径 docTitle 回补——书行 label 与书维事件书名（非 UUID/undefined）
+      check("解挂后 material 仍不产（4 <50，关口自 50 起，D196）", ovFree.recentEvents.every((h) => h.type !== "material" || (h.entityId !== bookB.id && h.entityId !== "159.9")), true, ovFree.recentEvents.filter((h) => h.type === "material").map((h) => h.entityId));
+      // 复审 P1 回归锁：overview 装载路径 docTitle 回补——书行 label = 实际书名（非 UUID/undefined）
       check("territory 书行 label=实际书名（overview 装载 docTitle 回补，复审 P1）",
         Boolean(rowB) && rowB.label === bookB.title, bookB.title, rowB && rowB.label);
-      const matHitB = ovFree.recentEvents.find((h) => h.type === "material" && h.entityId === bookB.id);
-      check("material 书维事件 entityLabel/evidence.docTitle=实际书名（复审 P1）",
-        Boolean(matHitB) && matHitB.entityLabel === bookB.title && Boolean(matHitB.evidence) && matHitB.evidence.docTitle === bookB.title,
-        { entityLabel: bookB.title, docTitle: bookB.title },
-        matHitB && { entityLabel: matHitB.entityLabel, docTitle: matHitB.evidence && matHitB.evidence.docTitle });
     }
 
     // ---------------------------------------------------------------- N-9
@@ -283,8 +284,42 @@ app.whenReady().then(async () => {
         console.log("      full  独有：", canon(full).filter((s) => !canon(union).includes(s)));
       }
       check("会话内确有命中（非空转）", union.length > 0, true, union.map(sig));
-      check("材料 half 命中在会话窗口内被捕获", union.some((h) => h.type === "material" && h.dimension === "half" && h.entityId === bookC.id), true, union.filter((h) => h.type === "material").map((h) => `${h.entityId}:${h.dimension}`));
-      check("组毕业命中在会话窗口内被捕获", union.some((h) => h.type === "group" && h.entityId === "sg-c9"), true, union.filter((h) => h.type === "group").map((h) => h.entityId));
+      check("domain-entry 命中在会话窗口内被捕获（领域 51 首达，D196）", union.some((h) => h.type === "domain-entry" && h.entityId === "51"), true, union.filter((h) => h.type === "domain-entry").map((h) => h.entityId));
+      check("group 已退役 → 永不出现（D196）", union.every((h) => h.type !== "group"), true, union.map((h) => h.type));
+    }
+
+    // ---------------------------------------------------------------- N-13（v49.23 / D196：material 累计巩固关口）
+    console.log("== N-13 material 累计巩固关口（D196）：50 张首达 book:50 / domain:50；扩容不漂移；docTitle 回补 ==");
+    {
+      const bookD = db.createFromPaste("M13 材料关口书D", "# D\n\n正文。");
+      for (let i = 0; i < 50; i++) mkCard(`m13-d${i}`, bookD, ["8"]);
+      for (let i = 0; i < 49; i++) grade(`m13-d${i}`, { stability: 30 });
+      const ov49 = db.getGrowthOverview({});
+      check("49 张曾进入长期记忆 → 无 material 事件（关口自 50 起）",
+        ov49.recentEvents.every((h) => h.type !== "material" || h.entityId !== bookD.id), true,
+        ov49.recentEvents.filter((h) => h.type === "material").map((h) => h.entityId));
+      grade("m13-d49", { stability: 30 });
+      const ov50 = db.getGrowthOverview({});
+      const matB = ov50.recentEvents.find((h) => h.type === "material" && h.entityId === bookD.id && h.dimension === "book:50");
+      check("第 50 张 → book:50 命中", Boolean(matB), true, ov50.recentEvents.filter((h) => h.type === "material").map((h) => `${h.entityId}:${h.dimension}`));
+      check("书维 evidence.docTitle=实际书名（overview 装载回补，P1 回归锁）",
+        Boolean(matB) && matB.evidence && matB.evidence.docTitle === bookD.title, bookD.title, matB && matB.evidence && matB.evidence.docTitle);
+      check("领域维 domain:50 同时命中（domain[0]=8）",
+        ov50.recentEvents.some((h) => h.type === "material" && h.entityId === "8" && h.dimension === "domain:50"), true,
+        ov50.recentEvents.filter((h) => h.type === "material" && h.entityId === "8").map((h) => h.dimension));
+      const sumD = db.getGrowthSessionSummary(0);
+      const sumMat = [...sumD.hits, ...sumD.folded.flatMap((f) => f.hits)].find((h) => h.type === "material" && h.entityId === bookD.id);
+      check("会话汇总同样回补 docTitle（P1 回归锁，sessionSummary 路径）",
+        Boolean(sumMat) && sumMat.evidence && sumMat.evidence.docTitle === bookD.title, bookD.title, sumMat && sumMat.evidence && sumMat.evidence.docTitle);
+      const seq50 = matB && matB.triggerSeq;
+      for (let i = 0; i < 5; i++) mkCard(`m13-dx${i}`, bookD, ["8"]);
+      for (let i = 0; i < 5; i++) grade(`m13-dx${i}`, { stability: 30 });
+      const ovGrow = db.getGrowthOverview({});
+      const matB2 = ovGrow.recentEvents.find((h) => h.type === "material" && h.entityId === bookD.id && h.dimension === "book:50");
+      check("扩容（+5）后 book:50 的 triggerSeq 不变（历史不漂移，P2/P3）", Boolean(matB2) && matB2.triggerSeq === seq50, seq50, matB2 && matB2.triggerSeq);
+      check("仍不足下一档（55 <100）→ 无 book:100",
+        ovGrow.recentEvents.every((h) => !(h.type === "material" && h.entityId === bookD.id && h.dimension === "book:100")), true,
+        ovGrow.recentEvents.filter((h) => h.type === "material").map((h) => `${h.entityId}:${h.dimension}`));
     }
 
     // ---------------------------------------------------------------- N-10
