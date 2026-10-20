@@ -17,9 +17,12 @@
 //     面板顶部出现「回到刚才读的位置」；浏览别处时随时「回到正在读的段落」。
 // 数据：kernel.getReadingProbe → mindmap:graphLocate（零 AI）；图走 graphLoad + EventBus mindmap/delta；
 //      段落强调锚走 mindmap:graphNodeAnchors（零 AI）；原文送入与图谱页签共用 mindmapFeed 单例。
+//   · 第七轮（2026-10-19，D197）：面板搬进**独立窗口**（`electron/lensWindow.js` + `src/lens.tsx`）。
+//     本组件因此不再自己决定「浮窗 / 正文下方」摆放，也不再自绘拖动与右下角缩放——窗口的四边 / 边角缩放
+//     由系统原生承担，标题行是窗口拖动区（CSS `-webkit-app-region: drag`）。面板需要的「内核子集」
+//     由宿主注入（阅读窗口直传真实内核；独立窗口传经 preload 桥代理的 LensKernel，见 src/lib/lensBridge.ts）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import type { ReaderKernel, ReaderLocation, ReaderStructureRegion } from "../../lib/reader/kernel";
+import type { ReaderLocation, ReaderStructureRegion, ReaderTocItem, RelocateInfo, SectionUnitInfo } from "../../lib/reader/kernel";
 import type { GraphState, V2Edge, V2Node, PatternKey } from "../../lib/mindmap/v2/types";
 import { ROOT_ID } from "../../lib/mindmap/v2/types";
 import { ancestors, applyDelta, childrenOf, createGraph, setView } from "../../lib/mindmap/v2/graph";
@@ -32,49 +35,36 @@ import { useT } from "../../lib/i18n";
 import { IconChevronDown } from "../icons";
 
 export interface MindmapLensProps {
-  kernel: ReaderKernel | null;
+  kernel: LensKernel | null;
   documentId: string | null;
   title: string;
-  /** 工具栏「结构图」开关 */
+  /** 工具栏「结构图」开关（独立窗口＝常开，由窗口可见性控制） */
   open: boolean;
   onClose: () => void;
   /** 图谱页签正盖在正文上时隐藏（状态保留） */
   hidden: boolean;
   /** 「在完整图谱中打开」：切到图谱页签并聚焦该节点 */
   onOpenInMap: (nodeId: string | null, region?: string[]) => void;
-  /** 浮窗宿主（正文视口内的覆盖层）；缺省＝就地渲染（测试） */
-  floatHost?: HTMLElement | null;
-  /** 正文下方宿主；缺省＝就地渲染（测试） */
-  dockHost?: HTMLElement | null;
+  /** 独立窗口模式：承载面板的窗口当前是否可见（关闭＝隐藏，面板仍挂载；缺省＝就地渲染，恒可见） */
+  visible?: boolean;
+  /** 独立窗口模式：当前是否置顶（提供 onPin 时才渲染置顶钮；就地渲染＝不提供） */
+  pinned?: boolean;
+  onPin?: () => void;
 }
 
-type HostPref = "auto" | "float" | "dock";
-interface FloatGeom { x: number; y: number; w: number; h: number; user: boolean }
-const K_HOST = "mm2.lens.host";
-const K_FLOAT = "mm2.lens.float";
-const K_DOCK = "mm2.lens.dockH";
-const DOCK_MIN = 180;
-const DOCK_DEFAULT = 300;
-/** 浮窗默认尺寸（完整图谱要地方；用户拖过 / 缩放过之后记住） */
-const FLOAT_MIN_W = 420;
-const FLOAT_MAX_W = 640;
-const FLOAT_MIN_H = 340;
-const FLOAT_MAX_H = 580;
-
-function readJSON<T>(key: string, fallback: T): T {
-  try {
-    const raw = window.localStorage?.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-function writeJSON(key: string, v: unknown) {
-  try {
-    window.localStorage?.setItem(key, JSON.stringify(v));
-  } catch {
-    /* 忽略 */
-  }
+/**
+ * 结构图只用到内核的这几件事。阅读窗口直传真实内核（结构上是它的超集），独立窗口传 IPC 代理
+ * （src/lib/lensBridge.ts）——组件因此既能在窗口里跑、也能在测试里就地渲染。
+ */
+export interface LensKernel {
+  getTOC(): ReaderTocItem[];
+  getSectionAnchors?(): SectionUnitInfo[];
+  getSectionText?(startAnchor: string, endAnchor?: string): Promise<string>;
+  getReadingProbe?(): { unitAnchor: string; text: string } | null;
+  getCurrentLocation(): ReaderLocation | null;
+  goTo(target: ReaderLocation | { href: string } | { search: string }): Promise<boolean>;
+  setStructureHighlights?(regions: ReaderStructureRegion[]): void;
+  on(event: "relocate", handler: (info: RelocateInfo) => void): () => void;
 }
 
 /**
@@ -102,7 +92,7 @@ function pruneToCut(state: GraphState, cut: string): GraphState {
   return createGraph({ meta: state.meta, nodes, edges, view: null }, state.mapId ?? undefined);
 }
 
-export default function MindmapLens({ kernel, documentId, title, open, onClose, hidden, onOpenInMap, floatHost, dockHost }: MindmapLensProps) {
+export default function MindmapLens({ kernel, documentId, title, open, onClose, hidden, onOpenInMap, visible, pinned, onPin }: MindmapLensProps) {
   const T = useT();
   const [feed, setFeed] = useState<FeedState>({ done: 0, total: 0, complete: false, unsupported: false });
   const [loc, setLoc] = useState<GraphLocate | null>(null);
@@ -125,31 +115,26 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
   const [explainBusy, setExplainBusy] = useState<string | null>(null);
   /** 「它在说什么」输出开合（第四轮 D3：复用制卡台 AI 解释板块同一套收起——.wb-explain-toggle + .collapse-clip） */
   const [explainOpen, setExplainOpen] = useState(true);
-  const [hostPref, setHostPrefState] = useState<HostPref>(() => {
-    const v = readJSON<string>(K_HOST, "auto");
-    return v === "float" || v === "dock" ? v : "auto";
-  });
-  const setHostPref = (v: HostPref) => {
-    setHostPrefState(v);
-    writeJSON(K_HOST, v);
-  };
-  const [fl, setFl] = useState<FloatGeom | null>(() => {
-    const g = readJSON<FloatGeom | null>(K_FLOAT, null);
-    return g && [g.x, g.y, g.w, g.h].every(Number.isFinite) ? g : null;
-  });
-  const [dockH, setDockH] = useState<number>(() => {
-    const v = Number(readJSON<number>(K_DOCK, DOCK_DEFAULT));
-    return Number.isFinite(v) && v >= DOCK_MIN ? v : DOCK_DEFAULT;
-  });
   const docRef = useRef(documentId);
   docRef.current = documentId;
   /** 正文强调锚缓存：`${mapId}|${nodeId}` → 锚（null＝无区间 / 原文未到） */
   const anchorCache = useRef<Map<string, NodeAnchor[] | null>>(new Map());
+  /**
+   * 锚缓存失效计数（D199）：缓存一旦被清（增量来了 / 图谱重载 / 窗口重新呼出），必须**重取一次**才谈得上
+   * 重建强调。旧实现只在 `focusId` 变化时才重取，于是「窗口收起再呼出」或「纯增量清缓存」时强调会一直缺口。
+   */
+  const [anchorEpoch, setAnchorEpoch] = useState(0);
   const explainJobRef = useRef<string | null>(null);
   const canvasRef = useRef<MindmapCanvasHandle>(null);
 
   const supported = !!kernel && !!documentId && typeof kernel.getReadingProbe === "function" && typeof kernel.getSectionAnchors === "function";
   const active = open && !hidden && supported;
+  /**
+   * 「面板在场」（D199）：独立窗口下关闭＝隐藏，面板仍挂载——窗口不可见时对用户而言面板已不在场，
+   * 正文强调（结构图独占的绘制层）必须收回；窗口再被呼出时随之重新贴上。
+   * 就地渲染（测试 / 直传内核）无 visible 语义 → 恒在场。
+   */
+  const onStage = active && (visible ?? true);
 
   // ---------- 图 ----------
   const loadGraph = useCallback(async () => {
@@ -265,6 +250,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
       setGraph((cur) => (cur && cur.mapId === d.mapId ? applyDelta(cur, d as Parameters<typeof applyDelta>[1]) : cur));
       if (d.nodes && d.nodes.length) {
         anchorCache.current.clear();
+        setAnchorEpoch((n) => n + 1); // D199：清缓存即安排重取，否则强调重建不出来
         scheduleLocate(300);
       }
       if (d.jobDone && d.jobId) {
@@ -288,6 +274,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
       const p = raw as { documentId?: string; stage?: string };
       if (p && p.documentId != null && String(p.documentId) === String(docRef.current) && p.stage && p.stage !== "running") {
         anchorCache.current.clear();
+        setAnchorEpoch((n) => n + 1); // D199：图谱重载后同样要重取锚（否则强调留缺口）
         void loadGraph();
         scheduleLocate(200);
       }
@@ -357,8 +344,6 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     return selectPattern(groupFacts(graph, gid, childrenOf(graph, gid)));
   }, [graph, focusId]);
 
-  const host: "float" | "dock" = hostPref === "auto" ? "float" : hostPref;
-
   const scopeNode = loc?.scopeNodeId && graph ? graph.nodes[loc.scopeNodeId] ?? null : null;
   const scopeStreaming = scopeNode?.state === "streaming";
   const needsGenerate = !!loc?.ready && !loc.scopeOutlined && !loc.scopeFloor && !!loc.scopeNodeId && !scopeStreaming && !sel;
@@ -387,10 +372,18 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     return () => {
       alive = false;
     };
-  }, [active, wantAnchors, graph?.mapId]);
+  }, [active, wantAnchors, graph?.mapId, anchorEpoch]);
+  // 窗口收起 / 重新呼出（D199）：收起＝面板不在场，锚缓存随之作废；呼出时安排重取，强调才能随面板回到正文。
+  useEffect(() => {
+    if (visible === false) {
+      anchorCache.current.clear();
+      return;
+    }
+    setAnchorEpoch((n) => n + 1);
+  }, [visible]);
   useEffect(() => {
     if (!kernel?.setStructureHighlights) return;
-    if (!active) {
+    if (!onStage) {
       kernel.setStructureHighlights([]);
       return;
     }
@@ -405,7 +398,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     add(focusId, "focus");
     if (hoverId && hoverId !== focusId) add(hoverId, "hover");
     kernel.setStructureHighlights(regions);
-  }, [kernel, active, focusId, hoverId, anchorTick, graph?.mapId]);
+  }, [kernel, onStage, focusId, hoverId, anchorTick, graph?.mapId]);
   useEffect(() => () => kernel?.setStructureHighlights?.([]), [kernel]);
 
   // ---------- 画布交互 ----------
@@ -551,50 +544,8 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
     }
   };
 
-  // ---------- 浮窗：拖动 / 缩放；下方区：拖高 ----------
-  const hostEl = host === "float" ? floatHost : dockHost;
-  const bounds = () => {
-    const el = floatHost;
-    return { w: el?.clientWidth || window.innerWidth || 1200, h: el?.clientHeight || window.innerHeight || 800 };
-  };
-  // 浮窗初始几何：完整图谱默认给一块够大的窗口，右下角；用户拖过 / 缩放过之后就记住
-  useEffect(() => {
-    if (host !== "float" || fl?.user) return;
-    const B = bounds();
-    const w = Math.round(Math.min(Math.max(FLOAT_MIN_W, B.w * 0.52), FLOAT_MAX_W));
-    const h = Math.round(Math.min(Math.max(FLOAT_MIN_H, B.h * 0.62), FLOAT_MAX_H));
-    const g = { x: Math.max(8, B.w - w - 16), y: Math.max(8, B.h - h - 16), w, h, user: false };
-    if (!fl || Math.abs(fl.w - g.w) > 24 || Math.abs(fl.h - g.h) > 24) setFl(g);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [host, fl?.user]);
-  const dragRef = useRef<{ kind: "move" | "size" | "dock"; x: number; y: number; g: FloatGeom | null; h: number } | null>(null);
-  const startDrag = (kind: "move" | "size" | "dock") => (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    if (kind === "move" && (e.target as HTMLElement).closest("button")) return;
-    dragRef.current = { kind, x: e.clientX, y: e.clientY, g: fl, h: dockH };
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    e.preventDefault();
-  };
-  const onDrag = (e: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const dx = e.clientX - d.x, dy = e.clientY - d.y;
-    if (d.kind === "dock") {
-      setDockH(Math.max(DOCK_MIN, Math.min((window.innerHeight || 900) * 0.7, d.h - dy)));
-      return;
-    }
-    if (!d.g) return;
-    const B = bounds();
-    if (d.kind === "move") setFl({ ...d.g, x: Math.max(0, Math.min(B.w - 80, d.g.x + dx)), y: Math.max(0, Math.min(B.h - 40, d.g.y + dy)), user: true });
-    else setFl({ ...d.g, w: Math.max(320, Math.min(B.w - d.g.x, d.g.w + dx)), h: Math.max(240, Math.min(B.h - d.g.y, d.g.h + dy)), user: true });
-  };
-  const endDrag = () => {
-    const d = dragRef.current;
-    dragRef.current = null;
-    if (!d) return;
-    if (d.kind === "dock") writeJSON(K_DOCK, dockH);
-    else if (fl) writeJSON(K_FLOAT, fl);
-  };
+  // ---------- 窗口承载（第七轮 D197）：拖动与四边 / 边角缩放交给独立窗口的原生能力 ----------
+  // 标题行是窗口拖动区（CSS `-webkit-app-region: drag`），面板填满窗口；不再有浮窗几何 / 正文下方拖高。
 
   if (!supported || !open || hidden || feed.unsupported) return null;
 
@@ -607,23 +558,9 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
   const patternName = patternSel ? T(PATTERN_NAMES[patternSel.pattern]) : "";
   const patternHow = patternSel ? T(HOW_NAMES[patternSel.how]) : "";
 
-  const dragProps = { onPointerMove: onDrag, onPointerUp: endDrag, onPointerCancel: endDrag };
-  const style: React.CSSProperties =
-    host === "float" ? (fl ? { left: fl.x, top: fl.y, width: fl.w, height: fl.h } : { right: 16, bottom: 16, width: 520, height: 480 }) : { height: dockH };
-
   const panel = (
-    <aside
-      className={`mm2-focus is-${host}`}
-      role="complementary"
-      aria-label={T("结构图")}
-      style={style}
-      data-mm2-focus
-      data-host={host}
-    >
-      {host === "dock" && (
-        <div className="mm2-focus-dock-resize" role="separator" aria-orientation="horizontal" aria-label={T("拖动调整高度")} onPointerDown={startDrag("dock")} {...dragProps} />
-      )}
-      <header className="mm2-focus-head" onPointerDown={host === "float" ? startDrag("move") : undefined} {...(host === "float" ? dragProps : {})}>
+    <aside className="mm2-focus" role="complementary" aria-label={T("结构图")} data-mm2-focus>
+      <header className="mm2-focus-head">
         <div className="mm2-focus-head-row">
           <span className="mm2-focus-title">{T("结构图")}</span>
           {/* 第四轮：跟随阅读是默认态，不再用文字说明；仅浏览他人节点时给出模式提示 */}
@@ -639,26 +576,22 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
               {T("回到正在读的段落")}
             </button>
           )}
-          <button
-            type="button"
-            className="mm2-focus-x mm2-focus-host"
-            data-mm2-host-toggle
-            onClick={() => setHostPref(host === "float" ? "dock" : "float")}
-            title={host === "float" ? T("放到正文下方") : T("改成浮窗")}
-            aria-label={host === "float" ? T("放到正文下方") : T("改成浮窗")}
-          >
-            {host === "float" ? (
+          {onPin && (
+            <button
+              type="button"
+              className={`mm2-focus-x mm2-focus-pin${pinned ? " is-on" : ""}`}
+              data-mm2-pin
+              aria-pressed={!!pinned}
+              onClick={onPin}
+              title={T("窗口置顶")}
+              aria-label={T("窗口置顶")}
+            >
               <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3">
-                <rect x="1.5" y="1.5" width="11" height="11" />
-                <path d="M1.5 8.5H12.5" />
+                <path d="M9.2 1.6 12.4 4.8 10.6 6.6 10.9 9.6 4.4 3.1 7.4 3.4z" />
+                <path d="M6.6 7.4 2.8 11.2" />
               </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.3">
-                <rect x="1.5" y="1.5" width="11" height="11" />
-                <rect x="6" y="6" width="5" height="4.5" />
-              </svg>
-            )}
-          </button>
+            </button>
+          )}
           <button type="button" className="mm2-focus-x" data-mm2-close onClick={onClose} aria-label={T("关闭结构图")} title={T("关闭结构图")}>
             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
               <path d="M2 2L10 10M10 2L2 10" stroke="currentColor" strokeWidth="1.4" />
@@ -767,8 +700,7 @@ export default function MindmapLens({ kernel, documentId, title, open, onClose, 
         )}
       </div>
       {note && <p className="mm2-focus-note mm2-focus-note-foot">{note}</p>}
-      {host === "float" && <div className="mm2-focus-size" aria-hidden="true" onPointerDown={startDrag("size")} {...dragProps} />}
     </aside>
   );
-  return hostEl ? createPortal(panel, hostEl) : panel;
+  return panel;
 }

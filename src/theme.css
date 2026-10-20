@@ -9605,9 +9605,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 
 /* ===================== 结构图（阅读透镜 v2「聚焦图谱」，2026-10-18 第二轮） =====================
-   工具栏「结构图」开关 → 按这一组结构的版式选摆放（第三轮：右侧栏太窄、装不下时间轴）：
-   浮窗＝.reader-lens-float-host（正文视口内的覆盖层，空时不拦指针）；下方＝.reader-lens-dock-host（右列末行，正文让位）。
-   面板里是从完整图谱裁出的小图：上方整体、左侧树干串起同一整体的各部分（焦点加重）、右侧通往别处的关系。
+   工具栏「结构图」开关 → 打开**独立窗口**（v49.24 / D197：原先按版式选的「浮窗 / 正文下方」两种摆放退役，
+   `.reader-lens-float-host` / `.reader-lens-dock-host` 两个宿主与自绘拖动、右下角缩放一并删除；
+   拖动标题行与四边 / 边角缩放交给窗口自身——标题行是 `-webkit-app-region: drag` 拖动区）。
+   面板里是与完整图谱页签同一套画布（.mm2-focus-canvas > .mindmap-canvas）；
    配色只用阅读区前景 / 背景与全局 accent（前景经 currentColor 混色——--reader-fg 可能是 inherit，不能进 color-mix）。
    瑞士风：直角为主（卡片 3px 微圆角只为在小尺寸里区分卡片与线）、1px hairline、无阴影渐变。 */
 .reader-lens-btn {
@@ -9622,15 +9623,19 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--accent);
   background: var(--accent-soft);
 }
-.reader-lens-float-host {
-  position: absolute;
-  inset: 0;
-  z-index: 7;
-  pointer-events: none;
+/* 独立窗口的根：填满窗口；面板随之撑满（窗口四边 / 边角缩放由系统原生承担） */
+.lens-body { margin: 0; overflow: hidden; }
+.lens-root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--text-primary);
 }
-.reader-lens-float-host:empty { display: none; }
-.reader-lens-dock-host { flex: 0 0 auto; min-height: 0; }
-.reader-lens-dock-host:empty { display: none; }
+.lens-root .mm2-focus { flex: 1 1 auto; min-height: 0; }
+/* 标题行＝窗口拖动区（无边框窗口移动窗口的唯一手段）；行内控件必须显式让开，否则点不动 */
+.lens-root .mm2-focus-head { -webkit-app-region: drag; user-select: none; }
+.lens-root .mm2-focus-head button { -webkit-app-region: no-drag; }
 .mm2-focus {
   min-width: 0;
   display: flex;
@@ -9646,44 +9651,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   font-size: 13px;
   pointer-events: auto;
 }
-.mm2-focus.is-float {
-  position: absolute;
-  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-  box-shadow: 0 18px 48px -20px color-mix(in srgb, currentColor 40%, transparent), 0 2px 8px -4px color-mix(in srgb, currentColor 20%, transparent);
-  animation: mm2-focus-pop 160ms ease-out;
-}
-@keyframes mm2-focus-pop { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.mm2-focus.is-float .mm2-focus-head { cursor: move; user-select: none; }
-.mm2-focus.is-dock {
-  position: relative;
-  width: 100%;
-  border-top: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-}
-.mm2-focus-dock-resize {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: -4px;
-  height: 8px;
-  cursor: row-resize;
-  z-index: 2;
-  touch-action: none;
-}
-.mm2-focus-dock-resize:hover { background: color-mix(in srgb, var(--mm2-accent) 18%, transparent); }
-.mm2-focus-size {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 14px;
-  height: 14px;
-  cursor: nwse-resize;
-  touch-action: none;
-  background: linear-gradient(135deg, transparent 50%, var(--mm2-line) 50%, var(--mm2-line) 58%, transparent 58%, transparent 70%, var(--mm2-line) 70%, var(--mm2-line) 78%, transparent 78%);
-}
-/* 主体：浮窗＝图在上、详情在下；下方区＝图在左、详情在右（宽矮的空间横着用） */
+/* 主体：图在上、详情在下（v49.24 / D197：面板进独立窗口后只有这一种摆法——窗口可自由拉伸到任意比例） */
 .mm2-focus-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.mm2-focus.is-dock .mm2-focus-body { flex-direction: row; }
-.mm2-focus.is-dock .mm2-focus-detail { flex: 0 0 300px; max-height: none; border-top: 0; border-left: 1px solid var(--mm2-faint); }
 .mm2-focus-pattern {
   font-size: 11px;
   line-height: 18px;
@@ -9738,6 +9707,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   cursor: pointer;
 }
 .mm2-focus-x:hover { opacity: 1; }
+/* 置顶钮（独立窗口）：开启态用主题色点出——与制卡台窗口的置顶钮同语言 */
+.mm2-focus-x.is-on { opacity: 1; color: var(--mm2-accent); }
 .mm2-focus-progress { height: 2px; margin-top: 8px; background: var(--mm2-faint); }
 .mm2-focus-progress > span { display: block; height: 100%; background: var(--mm2-accent); transition: width 200ms linear; }
 .mm2-focus-empty {
@@ -9841,7 +9812,6 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .mm2-focus.is-float,
   .mm2-focus-live::before,
   .mm2-focus-progress > span {
     animation: none;
