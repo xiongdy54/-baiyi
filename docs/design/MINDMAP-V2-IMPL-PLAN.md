@@ -265,7 +265,7 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 
 ### 9.4 结构图（阅读透镜 v2「聚焦图谱」，取代 9.3 的结构轨 + 列表面板）
 用户第二轮反馈（2026-10-18）：结构轨像阅读进度条、点轨任意处都弹同一菜单；列表看不出对应正文哪几段；祖先项「第一章」一点就跳去目录页、回不来；要的是**真正的图谱**——从完整图谱裁出、聚焦当前段落及与之相连的部分，并在正文里强调对应段落。
-- **入口**：工具栏「结构图」开关（`localStorage mm2.lens.open`）。结构轨删除。（第一稿是右侧停靠栏，同日第三轮被否，见下「摆放」。）
+- **入口**：工具栏「结构图」开关（`localStorage mm2.lens.open`；**v49.28 / D202 起该跨会话记忆退役**——独立窗口不再随阅读会话自动弹出，开关每个阅读会话从「关」开始）。结构轨删除。（第一稿是右侧停靠栏，同日第三轮被否，见下「摆放」。）
 - **裁图**（`v2/focus.ts` `buildFocus`，纯函数；第五轮已随本方案整体退役，见 §12）：焦点 F＝阅读位置最深节点 / 用户点选节点；整体 W＝F 的父；成员＝W 的子（>7 取以 F 为中心的窗口 + 与 F 相连者，其余折「另 N 项」）；F 的下一层 ≤5；关系：一端在图内的全部边，图外对端作「别处」节点 ≤5（碰 F 3 分 > 碰 F 的子 / W 2 分 > 只碰其他成员 1 分；1 分的 ≤2 个，且对端在图内某点子树里的不算别处）。W 以上只留标题链（纯文字，不可点、不跳）。
 - **排版·纵向树**（`layoutTree`，tree / grid 版式）：左结构、右关系——左侧树干串成员（F 加重 + 左侧强调条，子缩进挂 F 下），图内关系画成卡片右侧的弧（3 条泳道），通往别处的关系连到右列卡片（卡片标「所在整体 · 类型」）；关系码徽标沿曲线避让。线型 / 端头沿用 `REL_STYLE`；碰 F 的关系用 accent。
 - **摆放与排法随结构类型（第三轮，用户 2026-10-18）**：右侧栏窄而挤、装不下时间轴等宽结构。做法＝「由 AI 返回的参数决定用哪个 UI 组件展示」：AI 生成图谱时每组本就附带 `{版式}` 提示（`patternHint`；无则 `selectPattern` 规则推断，手动覆盖优先），聚焦图取「整体」这一组的版式 → 排法家族 + 摆放：
@@ -291,7 +291,7 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 - `electron/mindmapEngineV2.js`：`graphLocate` / `graphEnsureMap` / `graphNodeAnchors`（均零 AI）。
 - `src/lib/reader/kernel.ts` + `src/lib/reader/foliate/adapter.ts` + `src/lib/reader/textRange.ts`：`getReadingProbe`、`setStructureHighlights`（CSS Custom Highlight，按首尾原文探针找回 Range）。
 - 样式：`src/theme.css` 末尾「结构图（阅读透镜 v2」一节；文案 en / ja 已补齐（`node scripts/i18n-check.mjs` OK）。
-- localStorage 视图偏好（非设置键，不进 F18）：`mm2.lens.open` / `mm2.lens.host` / `mm2.lens.float` / `mm2.lens.dockH`。
+- localStorage 视图偏好（非设置键，不进 F18）：`mm2.lens.open` / `mm2.lens.host` / `mm2.lens.float` / `mm2.lens.dockH`（后三者随 D197 退役；`mm2.lens.open` 随 **v49.28 / D202** 退役）。
 
 **已知未完成 / 待打磨**
 1. PDF 引擎未实现 `setStructureHighlights`（能力缺省→无正文强调）；`getReadingProbe` 在 PDF 只给页、不给段落片段，定位粒度是页。
@@ -369,7 +369,7 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
    - 窗口状态：主进程在 show / hide / pin 后把 `{visible, pinned}` 播给两窗——主窗口据此同步工具栏开关（窗口被关掉＝按钮同步取消），结构图窗口据此同步置顶钮。
    阅读窗口侧只多出「宿主」职责（推上下文 / 阅读位置、应答请求、离开阅读界面时收窗并清强调）；面板不再渲染在阅读窗口内。
 3. **面板组件零改口径**（改 `src/components/reader/MindmapLens.tsx`）：仍是同一份实现——同一套完整图谱画布（`MindmapCanvasV2`）、父链截断到阅读节点的直接父节点、阅读节点整卡主题色底 + 白字、单击展开 / 收起、双击或「跳到原文」才跳、讲解可收起、「在完整图谱中打开」带区域。只把「内核」换成宿主注入的 **`LensKernel` 子集**（`getTOC` / `getSectionAnchors` / `getSectionText` / `getReadingProbe` / `getCurrentLocation` / `goTo` / `setStructureHighlights` / `on("relocate")`）：阅读窗口可直传真实内核（结构上是超集；DOM 测试里的假内核同样满足），独立窗口传 `src/lib/lensBridge.ts` 的 IPC 代理（同步取值走缓存、异步取文与跳转走回执、强调与开图谱走单向命令）。原文送入（`src/lib/mindmapFeed.ts`）的形参类型同步收窄为 `FeedKernel`（只取文那三件事），两宿主共用同一份送入流程与进度订阅。
-4. **退役**（改 `src/theme.css` / `Reader.tsx`）：`浮窗 / 正文下方` 两种摆放、`data-mm2-host-toggle` 与 `data-host`、自绘拖动（标题行 `onPointerDown`）/ 拖高（`.mm2-focus-dock-resize`）/ 右下角缩放（`.mm2-focus-size`）、`.reader-lens-float-host` 与 `.reader-lens-dock-host` 两个宿主及其样式、`@keyframes mm2-focus-pop`、localStorage 三键（`mm2.lens.host` / `mm2.lens.float` / `mm2.lens.dockH`）全部删除；`mm2.lens.open` 保留（工具栏开关照样跨会话记住）。
+4. **退役**（改 `src/theme.css` / `Reader.tsx`）：`浮窗 / 正文下方` 两种摆放、`data-mm2-host-toggle` 与 `data-host`、自绘拖动（标题行 `onPointerDown`）/ 拖高（`.mm2-focus-dock-resize`）/ 右下角缩放（`.mm2-focus-size`）、`.reader-lens-float-host` 与 `.reader-lens-dock-host` 两个宿主及其样式、`@keyframes mm2-focus-pop`、localStorage 三键（`mm2.lens.host` / `mm2.lens.float` / `mm2.lens.dockH`）全部删除；`mm2.lens.open` 保留（工具栏开关照样跨会话记住）。**v49.28 / D202 修订**：该记忆在独立窗口下会让窗口随阅读会话自动弹出（用户 2026-10-21 实测），已退役——`lensOpen` 初始态恒「关」，显隐只由工具栏按钮与窗口关闭钮驱动。
 5. **主题 / 皮肤统一**（`src/lens.tsx`）：结构图窗口与制卡台窗口共用同一套引导——`styles/layers.css` + `theme.css`、`installThemePluginBridge()`（皮肤插件注入链）、每次呼出重读主题 / 强调色（`lens:window` 推送时重跑 `applyCaptureAppearance()`）、`initLocale(app.language)` 首绘前装载。换肤一处改、两窗同步生效。
 
 测试：`tests/m15v2.lens.dom.test.cjs` 受影响的三条「摆放切换」断言改写为一条「标出结构类型；面板已不含『浮窗 / 正文下方』摆放切换（改由独立窗口承载）」——面板仍就地渲染（跨进程宿主与窗口行为由 electron 侧承担）。`tsc --noEmit` 0；`npm run build` ✓（新增 `dist/lens.html`）；`node tests/m15v2.*.test.cjs` 全绿（`lens.dom` 42/0）；F21 进程间桥对账 7/7（新增通道「主进程注册 ↔ 桥面调用」两头齐、无死通道、文档点名通道全部落地）。
