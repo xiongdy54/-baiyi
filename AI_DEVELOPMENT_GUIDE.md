@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件（**v49.25**） — AI 开发指导文档
+# 一站式渐进阅读学习软件（**v49.27**） — AI 开发指导文档
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -1591,6 +1591,10 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 
 | D199 | **v49.25 结构图独立窗口的「正文强调」生命周期修正（D197 交付缺陷；用户 2026-10-19 实测）**：现象＝关掉结构图窗口后，阅读页面里当前段落的**焦点强调**（与之前悬停过节点的**悬停强调**）仍亮着，不随面板收走。根因两条：① 面板进独立窗口后**关闭＝隐藏**（面板仍挂载在结构图窗口里），而**主阅读窗口那侧没人收回强调层**——旧实现是面板自己 `setStructureHighlights([])`，但那要求面板「不在场」；② 面板的锚缓存会被 `mindmap/delta`（有新节点）与 `mindmap/changed` 清空，而重取只在 `focusId` 变化时触发 → 窗口收起再呼出（阅读位置未变的常见情形）时强调重建不出来（实测锚缓存已为 0）。修法三处，全落在阅读透镜既有文件内（**零新 IPC / 零 schema / 零设置键 / 零内核契约**）：① `src/components/Reader.tsx` 在 `lens:window` 广播 `visible:false` 时立即 `kernel.setStructureHighlights([])`（原「离开阅读界面延迟收窗并清强调」保留）；② `src/components/reader/MindmapLens.tsx` 新增可选宿主语义 `visible`（缺省＝就地渲染恒在场）与派生量 `onStage = active && (visible ?? true)`，正文强调 effect 改由 `onStage` 门控——收起即收回、呼出即重贴（`src/lens.tsx` 从 `lens:window` 广播维护 `visible` 并传入）；③ 新增 `anchorEpoch` 失效计数——上列两处清缓存时一律 `setAnchorEpoch(n+1)`，锚重取 effect 增该依赖，补齐「清了缓存却没人重取」的既有缺口。验证：`tsc --noEmit` 0、`npm run build` ✓、`node tests/m15v2.lens.dom.test.cjs` **44/0**（新增一节：窗口收起 → 强调收回（面板仍在场）→ 重新呼出 → 焦点段重新贴上；就地渲染无 `visible` 语义故既有断言不变） | 用户 2026-10-19 实测反馈（「为什么我关闭了结构图谱之后，阅读页面的文本仍然处于高亮强调的状态？」附截图） | v49.25 |
 
+| D200 | **v49.26 结构图窗口「呼出请求被加载态吞没」修复（D197 交付缺陷；用户 2026-10-20 实测）**：现象＝主窗口收进托盘再回来后点「结构图」按钮：按钮高亮（渲染层 `lensOpen=true`）但结构图窗口**永不出现**，且主进程不广播「已隐藏」去纠正按钮（主进程日志：11:37 结构图用过之后到 11:42 退出前零渲染活动）。根因（已用主进程驱动脚本复现证明）＝`electron/lensWindow.js` 的 show 挂起机制只有**一次性**消费者：① `pendingShow` 只能被 `once("ready-to-show")` 消费，而该监听器在窗口**首次**加载完成时即被消耗；② `loaded` 标记只在新建窗口时复位，页面 reload（vite 重启 full-reload / 断连重连自动刷新等）既不复位 `loaded` 也不重挂监听。于是「窗口不可见 + 页面正在加载」时点击呼出 → `show()` 把请求挂进 `pendingShow` 后静默返回（该分支不广播），加载完成后无人消费 → 窗口永不出现；加载若悬挂（vite 半死：端口在、请求不回）则**永久卡死**。修法三处，全落 `electron/lensWindow.js`（**零新 IPC / 零 schema / 零设置键，`win:lens` 对外契约不变**）：① `did-start-loading` 复位 `loaded=false`（语义改为「当前这份文档已可显示」）；② `once("ready-to-show")` 改 `on`（幂等），`did-finish-load` 兜底消费 `pendingShow` 后再 `broadcastState`——两条路都保证挂起的 show 在加载完成时**自动落地**；③ 安全阀：`show()` 挂起时武装 2s 定时器，加载悬挂时最迟 2s 强制 `reveal`（宁可短暂主题色白板，不让窗口凭空消失）；`hide()` 取消挂起请求与定时器（后写优先）。另补一个同文件鲁棒性缺口：`reveal()` 增加离屏守卫——窗口 bounds 与所有显示器 workArea 无交集（显示器休眠 / 重排后常见）时重新贴主窗口定位。同构隐患待办：`electron/workbenchWindow.js` 存在**完全相同**的 `once("ready-to-show")` + 挂起无兜底模式，本轮未动（一次一个最小单元），已在 §9.5 登记。验证：新增回归套件 `tests/lensWindow.test.cjs`（@runtime electron，**9/0**：重载吞没自愈 / 悬挂加载 2s 安全阀 / 离屏重定位 / hide 后写优先四组）；`node tests/m15v2.lens.dom.test.cjs` 44/0；`node tests/flows/f21-ipc-bridge.cjs` 7/7；`tsc --noEmit` 0（f11 的 L1 / L6 两条失败为本仓既有文档漂移，基线复测结果相同，与本修复无关） | 用户 2026-10-20 实测反馈（「我已经点击了结构图，结构图按钮现在处于高亮强调的状态，但是并没有结构图窗口弹出来。这个 bug 是怎么回事？」附截图） | v49.26 |
+
+| D201 | **v49.27 制卡台窗口「呼出请求被加载态吞没」修复（D200 同构隐患销项；D123 交付缺陷）**：`electron/workbenchWindow.js`（独立制卡台，D123）存在与 D200 完全相同的缺陷模式——`pendingShow` 只有 `once("ready-to-show")` 一个消费者（首次加载后即被消耗），`loaded` 不随页面 reload 复位，且本模块**连 `did-finish-load` 监听都没有**。触发面比结构图更宽：制卡台由全局快捷键 / 托盘菜单呼出，「窗口不可见 + 页面加载中」时按键/点菜单 → show 请求被静默吞掉（该分支不广播、不发 `win:workbenchShown`），加载悬挂时永久卡死。修法与 D200 逐条同构，全落 `electron/workbenchWindow.js`（**零新 IPC / 零 schema / 零设置键，`win:workbench` 对外契约不变**）：① `did-start-loading` 复位 `loaded=false`；② `ready-to-show` 改幂等 `on`，新增 `did-finish-load` 兜底消费（消费即 `reveal`，`win:workbenchShown` 随 reveal 自然补发，渲染层同步语义不变）；③ 2s 安全阀强制 `reveal`；④ `hide()` 取消挂起请求与定时器（后写优先）；⑤ `reveal()` 增加与 D200 相同的离屏守卫（完全离屏时重新贴鼠标所在屏幕右缘）。验证：新增回归套件 `tests/workbenchWindow.test.cjs`（@runtime electron，**9/0**，四组断言与 `tests/lensWindow.test.cjs` 同构：重载吞没自愈 / 悬挂加载 2s 安全阀 / 离屏重贴 / hide 后写优先）；`npx tsc --noEmit` 0；`node tests/flows/f21-ipc-bridge.cjs` 7/7 | 用户 2026-10-20 指令（「请同时修复制卡台的同构隐患」，承接 D200 §9.5 登记项） | v49.27 |
+
 ## 8.2 已接受偏差（实现与原锁定方案的差异）
 
 | 偏差 | 原锁定 | 现状 | 处置 |
@@ -1729,6 +1733,10 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | 用户画像接线（`context.userProfile`） | —（v42 §4.18-14） | `src/lib/cards.ts` 的画像注入槽（「用户画像（R9 个性化例子优先用）」）至今无调用方。画像语义＝泛化偏好（R9「优先用」、无拒用纪律），与记忆不同；若要接线须**先改本文档**并写清与记忆的边界（同为「你的东西」的两个槽不得互相覆盖） |
 
 ## 9.5 下一步
+
+**v49.27（D201）制卡台窗口「呼出请求被加载态吞没」已修复（D200 同构隐患销项）**：`workbenchWindow.js`（独立制卡台，全局快捷键 / 托盘呼出）存在与 D200 完全相同的缺陷——`pendingShow` 只有 `once("ready-to-show")` 一个消费者、`loaded` 不随 reload 复位、且无 `did-finish-load` 监听；「窗口不可见 + 页面加载中」时按键 / 点菜单的呼出被静默吞掉（悬挂加载时永久卡死）。修法与 D200 逐条同构：`did-start-loading` 复位 `loaded`、`ready-to-show` 改幂等 `on` + 新增 `did-finish-load` 兜底消费（`win:workbenchShown` 随 reveal 自然补发）、2s 安全阀强制 reveal、`hide()` 取消挂起、`reveal()` 离屏守卫。验证：新增 `tests/workbenchWindow.test.cjs` 9/0（与 `lensWindow.test.cjs` 四组断言同构）、`tsc` 0、`f21` 7/7。至此两个常驻小窗口（结构图 / 制卡台）的呼出状态机对齐同一套纪律。
+
+**v49.26（D200）结构图窗口「呼出请求被加载态吞没」已修复**：现象＝主窗口收进托盘再回来点「结构图」，按钮高亮但窗口永不出现（用户 2026-10-20 实测）。根因＝`lensWindow.js` 的 `pendingShow` 只有 `once("ready-to-show")` 一个消费者（首次加载后即被消耗），页面 reload 既不复位 `loaded` 也不重挂监听——「窗口不可见 + 加载中」时点击的 show 请求被静默吞掉且永不落地（vite 悬挂时永久卡死）。修法：`did-start-loading` 复位 `loaded`、`ready-to-show` 改幂等 `on` + `did-finish-load` 兜底消费后广播、2s 安全阀强制 reveal、`hide()` 取消挂起；顺补 `reveal()` 离屏守卫（显示器休眠/重排后自动重新贴边）。验证：新增 `tests/lensWindow.test.cjs` 9/0、`m15v2.lens.dom.test.cjs` 44/0、`f21` 7/7、`tsc` 0。**同构隐患**：`workbenchWindow.js`（制卡台）有一模一样的模式，本轮未动——将来制卡台若出现「按钮高亮但窗口不弹」按同方修（**已由 D201 修复**）。
 
 **v49.25（D199）结构图窗口的「正文强调」生命周期已修正**：面板进独立窗口后「关闭＝隐藏」，此前关窗后正文的焦点/悬停强调会一直亮着（用户实测）。现在三处对齐：主阅读窗口在 `lens:window` 报「不可见」时立即收回强调层；面板以宿主注入的 `visible` 派生 `onStage`，收起即收回、呼出即重贴；并新增 `anchorEpoch` 失效计数，补齐「增量/图谱重载清了锚缓存却没人重取」的既有缺口。验证：`tsc` 0、`npm run build` ✓、`m15v2.lens.dom.test.cjs` 44/0（新增「收起→收回→呼出→重贴」一节）。仍待你在真实应用里确认关窗后正文不再残留强调色。
 
