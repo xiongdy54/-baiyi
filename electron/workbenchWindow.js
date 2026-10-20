@@ -12,7 +12,28 @@ let quitting = false;
 let pinned = true;
 let positioned = false;
 let pendingShow = false;
+let pendingShowTimer = null;
 let loaded = false;
+
+/** 挂起中的呼出请求作废（hide 后写优先 / 窗口销毁时清理） */
+function cancelPendingShow() {
+  pendingShow = false;
+  if (pendingShowTimer != null) {
+    clearTimeout(pendingShowTimer);
+    pendingShowTimer = null;
+  }
+}
+
+/** 消费一次挂起的呼出（ready-to-show / did-finish-load / 安全阀三路共用，幂等） */
+function consumePendingShow() {
+  if (!pendingShow) return;
+  pendingShow = false;
+  if (pendingShowTimer != null) {
+    clearTimeout(pendingShowTimer);
+    pendingShowTimer = null;
+  }
+  reveal();
+}
 
 function themeBackground() {
   try {
@@ -53,7 +74,7 @@ function createWindow() {
   w.on("closed", () => {
     if (win === w) win = null;
     loaded = false;
-    pendingShow = false;
+    cancelPendingShow();
   });
   // 导航防护（与主窗口同规则）
   w.webContents.on("will-navigate", (event, url) => {
@@ -61,12 +82,23 @@ function createWindow() {
     event.preventDefault();
   });
   w.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  w.once("ready-to-show", () => {
+  // 每次开始加载都复位 loaded（v201）：语义＝「当前这份文档已可显示」。旧实现只在新建窗口时
+  // 复位，页面 reload（vite 重启 full-reload / 断连重连自动刷新）后 loaded 保持陈旧 true，
+  // show() 只能靠 isLoading() 兜底，挂起的呼出请求就此失去消费者（D200 同构缺陷）。
+  w.webContents.on("did-start-loading", () => {
+    loaded = false;
+  });
+  // 就绪即消费挂起的呼出。旧实现是 once——监听器首次加载后即被消耗，之后任何「加载中 show()」
+  // 挂起的 pendingShow 永远无人消费（全局快捷键 / 托盘呼出同样中招）。改 on + 幂等消费。
+  w.on("ready-to-show", () => {
     loaded = true;
-    if (pendingShow) {
-      pendingShow = false;
-      reveal();
-    }
+    consumePendingShow();
+  });
+  // v201：兜底消费挂起的呼出——ready-to-show 偶发不触发（隐藏窗 reload）时，加载完成本身就是
+  // 「可显示」信号；consumePendingShow 内部走 reveal，`win:workbenchShown` 随 reveal 自然补发，
+  // 渲染层同步语义不变。
+  w.webContents.on("did-finish-load", () => {
+    consumePendingShow();
   });
   const distHtml = path.join(__dirname, "../dist/workbench.html");
   if (fs.existsSync(distHtml)) {
@@ -92,10 +124,25 @@ function position(w) {
   }
 }
 
+/** 屏幕布局变化（显示器休眠 / 拔出 / 重排）后，上次的位置可能落在任何工作区之外——
+ * 此时 show 出来用户也看不见。完全离屏（与所有 workArea 零交集）才判离屏：
+ * 用户故意拖到边缘只露一条的摆放不动。（与 lensWindow.offScreen 同判据，D201） */
+function offScreen(w) {
+  try {
+    const b = w.getBounds();
+    return !screen.getAllDisplays().some((d) => {
+      const a = d.workArea;
+      return b.x < a.x + a.width && b.x + b.width > a.x && b.y < a.y + a.height && b.y + b.height > a.y;
+    });
+  } catch {
+    return false;
+  }
+}
+
 function reveal() {
   const w = win;
   if (!w || w.isDestroyed()) return;
-  if (!positioned) {
+  if (!positioned || offScreen(w)) {
     position(w);
     positioned = true;
   }
@@ -110,6 +157,14 @@ function show() {
   const w = createWindow();
   if (!loaded || w.webContents.isLoading()) {
     pendingShow = true;
+    // v201 安全阀：加载悬挂（vite 半死：端口在、请求不回）时 pendingShow 无事件可消费，
+    // 最迟 2s 强制显示——宁可短暂主题色白板，不让快捷键/托盘呼出没反应（D200 同构缺陷）。
+    if (pendingShowTimer == null) {
+      pendingShowTimer = setTimeout(() => {
+        pendingShowTimer = null;
+        consumePendingShow();
+      }, 2000);
+    }
     return state();
   }
   reveal();
@@ -117,6 +172,8 @@ function show() {
 }
 
 function hide() {
+  // v201：用户显式要收，挂起中的呼出作废（后写优先；否则安全阀会把刚收的窗又弹出来）
+  cancelPendingShow();
   if (win && !win.isDestroyed() && win.isVisible()) win.hide();
   return state();
 }
