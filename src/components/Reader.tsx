@@ -602,22 +602,9 @@ export default function Reader({
   const [sidebarTab, setSidebarTab] = useState<ReaderTab>("toc");
   // 结构透镜（2026-10-18）：内核就绪后才挂载；「在图谱中打开」经 focusRequest 让图谱页签聚焦节点
   const [lensKernel, setLensKernel] = useState<ReaderKernel | null>(null);
-  /** 结构图（阅读透镜 v2）：工具栏开关，跨会话记住 */
-  const [lensOpen, setLensOpenState] = useState<boolean>(() => {
-    try {
-      return window.localStorage?.getItem("mm2.lens.open") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const setLensOpen = useCallback((v: boolean) => {
-    setLensOpenState(v);
-    try {
-      window.localStorage?.setItem("mm2.lens.open", v ? "1" : "0");
-    } catch {
-      /* 忽略 */
-    }
-  }, []);
+  /** 结构图（阅读透镜 v2）：工具栏开关。v49.28（D202）：独立窗口不跨会话记忆——每个阅读会话从「关」开始，
+   * 否则上次离开阅读时窗口开着的用户，下次点开任意书都会被自动弹出的置顶窗口打断 */
+  const [lensOpen, setLensOpen] = useState(false);
   const lensSupported = !!lensKernel && typeof lensKernel.getReadingProbe === "function";
   const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number; flash?: string[] } | null>(null);
 
