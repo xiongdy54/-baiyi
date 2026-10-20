@@ -179,6 +179,8 @@ const dictStore = require("./dictStore");
 const quickCapture = require("./quickCapture");
 // D123：独立制卡台窗口与系统托盘（见 docs/design/CARD-WORKBENCH-D123.md）
 const workbenchWindow = require("./workbenchWindow");
+// v49.24（D197）：独立结构图窗口（阅读透镜 v2 面板承载；IPC 四通道 + lens:window 广播在其内注册）
+const lensWindow = require("./lensWindow");
 // v48.89（D132，设计 docs/design/PLUGIN-SYSTEM-D132.md）：插件/主题宿主——惰性扫描（启动主流程
 // 不触碰插件目录，§4.7），对 <userData>/plugins/ 零写入（§4.6）；IPC 四通道 + plugins:changed 广播在其内注册
 const pluginHost = require("./pluginHost");
@@ -2186,6 +2188,8 @@ app.whenReady().then(async () => {
   // D123：独立制卡台窗口 + 系统托盘（失败不阻塞启动）
   try {
     workbenchWindow.init({ readSettings });
+    // v49.24（D197）：独立结构图窗口（与制卡台同纪律：隐藏复用 + 默认置顶 + 贴主窗口右侧）
+    lensWindow.init({ readSettings, getMainWindow: () => mainWindow });
     tray.init({
       showMain: () => {
         if (!focusMainWindow()) createWindow();
@@ -2277,6 +2281,7 @@ app.on("before-quit", () => {
   appQuitting = true;
   quickCapture.prepareQuit();
   workbenchWindow.prepareQuit();
+  lensWindow.prepareQuit();
   tray.destroy();
 });
 

@@ -26,7 +26,10 @@ import { useT } from "../lib/i18n";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
 import MindmapTab from "./reader/MindmapTab";
-import MindmapLens from "./reader/MindmapLens";
+// v49.24（D197）：结构图（阅读透镜 v2）搬进独立窗口——面板不再渲染在本窗口，
+// 本窗口只做「宿主」：推上下文 / 阅读位置，应请求取文、跳正文、画强调（types 见 lib/lensBridge）。
+import type { LensAsk, LensPush } from "../lib/lensBridge";
+import type { ReaderLocation, ReaderStructureRegion } from "../lib/reader/kernel";
 import type { AnnotSort } from "./reader/AnnotationPanel";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
@@ -615,10 +618,126 @@ export default function Reader({
       /* 忽略 */
     }
   }, []);
-  const [lensFloatHost, setLensFloatHost] = useState<HTMLDivElement | null>(null);
-  const [lensDockHost, setLensDockHost] = useState<HTMLDivElement | null>(null);
   const lensSupported = !!lensKernel && typeof lensKernel.getReadingProbe === "function";
   const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number; flash?: string[] } | null>(null);
+
+  // ---------- 结构图独立窗口的宿主侧（v49.24 / D197）----------
+  // 面板住在结构图窗口（`src/lens.tsx`），正文与内核留在本窗口：上下文 / 阅读位置经主进程**推**过去，
+  // 面板的取文 / 跳正文 / 正文强调 / 「在完整图谱中打开」经主进程**请求**回来。本窗口不渲染面板。
+  const [lensVisible, setLensVisible] = useState(false);
+  const lensDocId = contextRef?.documentId ?? null;
+  const lensTitle = title || sourceTitle || T("未命名材料");
+  const lensTitleRef = useRef(lensTitle);
+  lensTitleRef.current = lensTitle;
+  /** 「在完整图谱中打开」的执行体（结构图窗口请求触发；用 ref 逃开依赖抖动） */
+  const lensOpenInMapRef = useRef<(nodeId: string | null, region?: string[]) => void>(() => {});
+  lensOpenInMapRef.current = (nodeId, region) => {
+    setSidebarTab("map");
+    setSidebarOpen(true);
+    if (nodeId) setMapFocus({ nodeId, seq: Date.now(), flash: region });
+  };
+
+  /** 推一份上下文（文档 / 标题 / 目录 / 单元锚）与当前阅读位置——结构图窗口据此定位 */
+  const pushLensContext = useCallback(() => {
+    const k = kernelRef.current;
+    const api = window.lensAPI;
+    if (!k || !api) return;
+    const payload: LensPush = {
+      kind: "context",
+      payload: {
+        documentId: lensDocId,
+        title: lensTitleRef.current,
+        toc: k.getTOC?.() ?? [],
+        anchors: k.getSectionAnchors?.() ?? []
+      }
+    };
+    api.push(payload);
+    api.push({ kind: "reading", payload: { probe: k.getReadingProbe?.() ?? null, location: k.getCurrentLocation?.() ?? null, fraction: 0 } });
+  }, [lensDocId]);
+
+  // 窗口可见性 / 置顶状态（主进程广播）：窗口被关掉时工具栏开关同步取消，反之亦然
+  useEffect(() => {
+    const off = window.lensAPI?.onWindow?.((s) => {
+      const visible = !!s?.visible;
+      setLensVisible(visible);
+      if (!visible) {
+        setLensOpen(false);
+        // D199：关闭＝隐藏（面板仍挂载在结构图窗口里）——正文强调是结构图独占的绘制层，必须跟着收回，
+        // 否则段落会一直亮着（用户 2026-10-19 实测：关掉结构图后正文仍是焦点/悬停强调色）
+        kernelRef.current?.setStructureHighlights?.([]);
+      }
+    });
+    return () => off?.();
+  }, [setLensOpen]);
+
+  // 工具栏开关 → 窗口开关（内核就绪后才开：窗口一开就会来取上下文）
+  useEffect(() => {
+    if (!lensSupported) return;
+    void window.lensAPI?.control?.(lensOpen ? "show" : "hide");
+  }, [lensOpen, lensSupported]);
+
+  // 窗口可见且内核就绪：推上下文；之后每次重定位再推一次阅读位置
+  useEffect(() => {
+    if (!lensSupported || !lensOpen || !lensVisible) return;
+    const k = kernelRef.current;
+    if (!k) return;
+    pushLensContext();
+    return k.on("relocate", pushLensContext);
+  }, [lensSupported, lensOpen, lensVisible, lensDocId, lensTitle, pushLensContext]);
+
+  // 结构图窗口的请求 / 命令（面板进不去内核，全在这里落地）
+  useEffect(() => {
+    const off = window.lensAPI?.onAsk?.((msg: LensAsk) => {
+      const k = kernelRef.current;
+      if (!msg || !k) return;
+      const api = window.lensAPI;
+      const reply = (id: number, ok: boolean, value?: unknown) => api?.reply?.({ id, ok, value });
+      switch (msg.kind) {
+        case "refresh":
+          pushLensContext();
+          break;
+        case "sectionText": {
+          const run = k.getSectionText ? k.getSectionText(msg.payload.anchor) : Promise.resolve("");
+          Promise.resolve(run)
+            .then((text) => reply(msg.id, true, String(text ?? "")))
+            .catch(() => reply(msg.id, false));
+          break;
+        }
+        case "goto": {
+          Promise.resolve(k.goTo(msg.payload.target as ReaderLocation))
+            .then((ok) => reply(msg.id, true, !!ok))
+            .catch(() => reply(msg.id, false));
+          break;
+        }
+        case "highlights":
+          k.setStructureHighlights?.((msg.payload as ReaderStructureRegion[]) || []);
+          break;
+        case "openInMap":
+          lensOpenInMapRef.current(msg.payload?.nodeId ?? null, msg.payload?.region);
+          break;
+      }
+    });
+    return () => off?.();
+  }, [pushLensContext]);
+
+  // 离开阅读界面：收起结构图窗口并清正文强调（强调是结构图独占的绘制层）。
+  // 延到下一个宏任务执行：StrictMode 下挂载效应会「跑一遍 → 清理 → 再跑一遍」，
+  // 若在清理里直接收窗，主进程的 lens:window「已隐藏」广播会在重新订阅之后到达，
+  // 反而把工具栏开关与 localStorage 一并关掉（开发态每次挂载都会关一次）。
+  const lensCloseTimerRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (lensCloseTimerRef.current != null) {
+      window.clearTimeout(lensCloseTimerRef.current);
+      lensCloseTimerRef.current = null;
+    }
+    return () => {
+      lensCloseTimerRef.current = window.setTimeout(() => {
+        lensCloseTimerRef.current = null;
+        void window.lensAPI?.control?.("hide");
+        kernelRef.current?.setStructureHighlights?.([]);
+      }, 0);
+    };
+  }, []);
   /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
   const [annotSort, setAnnotSort] = useState<AnnotSort>("pos");
   /** v48.44（D84）：图谱页签画布的 portal 宿主（.reader-engine-main 内覆盖层；空＝不渲染画布） */
@@ -2112,26 +2231,7 @@ export default function Reader({
                     翻页热区 z 4 与错误面板），空时 display:none 不遮正文；画布经 MindmapTab portal 落入 */}
                 <div className="reader-map-layer" data-reader-map-layer ref={setMapLayerHost} />
                 </div>
-                {/* 结构图（阅读透镜 v2）：按这一组结构的版式选摆放——浮窗（落在正文视口内的覆盖层 .reader-lens-float-host）
-                    或正文下方（.reader-lens-dock-host，正文让位）；图谱页签盖住正文时隐藏 */}
-                <div className="reader-lens-float-host" data-reader-lens-float ref={setLensFloatHost} />
-                <MindmapLens
-                  floatHost={lensFloatHost}
-                  dockHost={lensDockHost}
-                  kernel={lensKernel}
-                  documentId={contextRef?.documentId ?? null}
-                  title={title || sourceTitle || T("未命名材料")}
-                  open={lensOpen}
-                  onClose={() => setLensOpen(false)}
-                  hidden={sidebarOpen && sidebarTab === "map"}
-                  onOpenInMap={(nodeId, region) => {
-                    setSidebarTab("map");
-                    setSidebarOpen(true);
-                    if (nodeId) setMapFocus({ nodeId, seq: Date.now(), flash: region });
-                  }}
-                />
               </div>
-              <div className="reader-lens-dock-host" data-reader-lens-dock ref={setLensDockHost} />
               </div>
               </div>
             </>

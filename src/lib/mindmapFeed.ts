@@ -1,14 +1,24 @@
-// 材料导图 v2 · 原文送入（graphFeed）的进程内单例（2026-10-18 阅读透镜引入）。
+﻿// 材料导图 v2 · 原文送入（graphFeed）的进程内单例（2026-10-18 阅读透镜引入）。
 // 图谱页签与阅读透镜都要把正文按文档顺序逐单元送进主进程常驻会话；两处各送一遍会交错乱序（主进程要求严格顺序，
 // 乱序抛 out_of_order）。这里按「内核实例 + documentId」只跑一条送入流程，双方订阅同一份进度。
 // 主进程会话有 LRU（3 份文档）：被挤出后 graphLocate 返回 ready:false，调用方 reset() 后重新 ensure 即可。
-import type { ReaderKernel } from "./reader/kernel";
+import type { ReaderTocItem, SectionUnitInfo } from "./reader/kernel";
 import { mindmapV2Api } from "./mindmapV2";
 
 export interface TocItem {
   anchor: string;
   label: string;
   children?: TocItem[];
+}
+
+/**
+ * 原文送入只需要内核的取文能力（v49.24 / D197）：阅读窗口直传真实内核（结构上是它的超集），
+ * 结构图独立窗口传经 preload 桥代理的 LensKernel（src/lib/lensBridge.ts）——同一份送入流程两处共用。
+ */
+export interface FeedKernel {
+  getTOC(): ReaderTocItem[];
+  getSectionAnchors?(): SectionUnitInfo[];
+  getSectionText?(startAnchor: string, endAnchor?: string): Promise<string>;
 }
 
 export interface FeedState {
@@ -30,7 +40,7 @@ interface Entry {
   toc: TocItem[];
 }
 
-const byKernel = new WeakMap<ReaderKernel, Map<string, Entry>>();
+const byKernel = new WeakMap<FeedKernel, Map<string, Entry>>();
 
 export function flattenToc(items: { label: string; href: string; subitems?: { label: string; href: string; subitems?: unknown[] }[] }[]): TocItem[] {
   const walk = (list: { label: string; href: string; subitems?: unknown[] }[]): TocItem[] =>
@@ -44,7 +54,7 @@ export function flattenToc(items: { label: string; href: string; subitems?: { la
   return walk(items || []);
 }
 
-function entryOf(kernel: ReaderKernel, documentId: string): Entry {
+function entryOf(kernel: FeedKernel, documentId: string): Entry {
   let m = byKernel.get(kernel);
   if (!m) byKernel.set(kernel, (m = new Map()));
   let e = m.get(documentId);
@@ -67,16 +77,16 @@ function emit(e: Entry, s: FeedState) {
 }
 
 /** 当前进度（未开始＝0/0） */
-export function feedState(kernel: ReaderKernel, documentId: string): FeedState {
+export function feedState(kernel: FeedKernel, documentId: string): FeedState {
   return entryOf(kernel, documentId).state;
 }
 
 /** 目录（ensureFed 首次运行后可用；页签本地画骨架预览用） */
-export function feedToc(kernel: ReaderKernel): TocItem[] {
+export function feedToc(kernel: FeedKernel): TocItem[] {
   return flattenToc(kernel.getTOC());
 }
 
-export function subscribeFeed(kernel: ReaderKernel, documentId: string, fn: Listener): () => void {
+export function subscribeFeed(kernel: FeedKernel, documentId: string, fn: Listener): () => void {
   const e = entryOf(kernel, documentId);
   e.listeners.add(fn);
   fn(e.state);
@@ -84,7 +94,7 @@ export function subscribeFeed(kernel: ReaderKernel, documentId: string, fn: List
 }
 
 /** 确保该文档原文已按顺序送入主进程（已在送 / 已送完则复用同一个 Promise） */
-export function ensureFed(kernel: ReaderKernel, documentId: string, title: string): Promise<FeedState> {
+export function ensureFed(kernel: FeedKernel, documentId: string, title: string): Promise<FeedState> {
   const e = entryOf(kernel, documentId);
   if (e.promise) return e.promise;
   e.promise = (async () => {
@@ -120,7 +130,7 @@ export function ensureFed(kernel: ReaderKernel, documentId: string, title: strin
 }
 
 /** 主进程会话被 LRU 挤出后：清掉本地「已送完」记录，下次 ensureFed 从第 0 个单元重送 */
-export function resetFeed(kernel: ReaderKernel, documentId: string): void {
+export function resetFeed(kernel: FeedKernel, documentId: string): void {
   const e = entryOf(kernel, documentId);
   if (e.promise && !e.state.complete && !e.state.error) return; // 正在送：不打断
   e.promise = null;

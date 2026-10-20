@@ -15,7 +15,9 @@ export default defineConfig({
         main: resolve(__dirname, "index.html"),
         capture: resolve(__dirname, "capture.html"),
         // D123：独立制卡台窗口（主进程按 dist/workbench.html 载入）
-        workbench: resolve(__dirname, "workbench.html")
+        workbench: resolve(__dirname, "workbench.html"),
+        // v49.24 / D197：独立结构图窗口（主进程按 dist/lens.html 载入）
+        lens: resolve(__dirname, "lens.html")
       }
     }
   }

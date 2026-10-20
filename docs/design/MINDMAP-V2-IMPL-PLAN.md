@@ -352,3 +352,27 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 测试：`tests/m15v2.lens.dom.test.cjs`（44 项全绿）按新语义改写受影响断言——「上方是它所属的整体（父节点卡也在图上）」→「以阅读节点的直接父节点为顶、更高层级父节点不展示、顶卡承载截断点标题」；「第二章分叉默认收起」→ 把阅读位置挪到未生成细分的第二章（阅读节点＝目录层级的「第二章」→ 以书根下一层为顶，「第一章」有子节点故默认收起）→ 点「+3」徽标展开（虚线描边＝生长动画证据）/ 点节点收起 / 再点又展开；「在完整图谱中打开」处补断言同步带出 `region`（含顶节点与各成员、不含被截断的祖先）。`tests/m15v2.tab.dom.test.cjs`（26 项全绿）增一节：传 `focusRequest{nodeId, seq, flash}` → 画布选中指定节点 + `.mm2-flash` 出现（有宽高）→ 反馈 `onFocusConsumed` → 过一会儿自动撤掉 → 再挂载（模拟切走页签再回来）不重复聚焦 / 不重复高亮。`tsc --noEmit` 为 0；`node tests/m15v2.*.test.cjs` 全绿（`m15v2.db` 为 `@runtime: electron`，node 直跑不适用）。
 
 登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D194 / v49.21**。无新 IPC / 内核契约。
+
+## 14. 第七轮打磨（2026-10-19，用户第五轮实测反馈）：结构图面板改为独立窗口
+
+用户：「从图中可以看到，悬浮结构图当前只有拖动右下角可以改变大小，并且它是当前窗口内部的结构，悬浮结构图窗口如果向外拖动超出软件窗口的内容就消失了，所以我希望把它改成一个独立的窗口，这样它可以放到主阅读界面外面不会遮挡阅读内容，同时它作为一个窗口也可以实现拖动四边或者边角方便地调整大小。这样结构图放到正文下方的功能也不需要了，可以一并去掉。」
+
+追问后用户拍板两条：(a) 窗口样式＝**无边框、与应用一致**（沿用软件自绘语言，不用系统原生标题栏）；(b) **默认始终置顶**，与全局快捷键唤出的制卡台窗口统一——**并且两个窗口要统一：将来换皮肤要一处修改两窗同步生效**。
+
+决策与实现：
+
+1. **窗口承载**（新增 `electron/lensWindow.js` / `lens.html` / `src/lens.tsx`）：与独立制卡台窗口（`workbenchWindow.js`）逐条同构——无边框自绘、**默认置顶**（窗口内可切）、关闭＝隐藏（单例复用，真正退出才销毁）、`ready-to-show` 后才 show、首次呼出**优先贴主窗口右侧**（放不下退左侧、再退工作区右缘，保证默认不遮正文）。**四边 / 边角缩放＝系统原生**（`resizable: true`；无边框窗口在 Windows 上仍带原生缩放边框，无需自绘把手）；面板头行＝窗口拖动区（`.lens-root .mm2-focus-head { -webkit-app-region: drag; user-select: none }`，行内按钮显式 `no-drag`）；头行沿用同一套窗口控件语言——置顶钮（`data-mm2-pin`，`is-on` 时点主题色）+ 关闭钮。`vite.config.ts` 增 `lens` 多入口（产物 `dist/lens.html`）。
+2. **跨窗口接线**（改 `electron/main.js` / `electron/preload.js` / `src/components/Reader.tsx`）：面板住在结构图窗口，正文与内核留在阅读窗口——全经主进程转发（§4.2-17 新增 `win:lens` / `lens:ask` / `lens:reply` / `lens:push` 四通道 + 一条 `lens:window` 状态推送）：
+   - 阅读窗口 → 结构图窗口（**推**）：上下文（文档 / 标题 / 目录 / 单元锚，`getTOC` / `getSectionAnchors` 必须同步可用 → 推完本地缓存）与阅读位置（探针 + 当前定位，每次 `relocate` 再推一次，并在结构图窗口 `on("relocate")` 语义下分发）；
+   - 结构图窗口 → 阅读窗口（**请求**）：`sectionText`（区间原文，取文靠阅读窗口的内核）与 `goto`（跳正文）——带 `id` 等回执（8s 超时兜底）；
+   - 结构图窗口 → 阅读窗口（**命令**，不等回执）：`highlights`（正文强调）与 `openInMap`（在完整图谱中打开）；
+   - 窗口状态：主进程在 show / hide / pin 后把 `{visible, pinned}` 播给两窗——主窗口据此同步工具栏开关（窗口被关掉＝按钮同步取消），结构图窗口据此同步置顶钮。
+   阅读窗口侧只多出「宿主」职责（推上下文 / 阅读位置、应答请求、离开阅读界面时收窗并清强调）；面板不再渲染在阅读窗口内。
+3. **面板组件零改口径**（改 `src/components/reader/MindmapLens.tsx`）：仍是同一份实现——同一套完整图谱画布（`MindmapCanvasV2`）、父链截断到阅读节点的直接父节点、阅读节点整卡主题色底 + 白字、单击展开 / 收起、双击或「跳到原文」才跳、讲解可收起、「在完整图谱中打开」带区域。只把「内核」换成宿主注入的 **`LensKernel` 子集**（`getTOC` / `getSectionAnchors` / `getSectionText` / `getReadingProbe` / `getCurrentLocation` / `goTo` / `setStructureHighlights` / `on("relocate")`）：阅读窗口可直传真实内核（结构上是超集；DOM 测试里的假内核同样满足），独立窗口传 `src/lib/lensBridge.ts` 的 IPC 代理（同步取值走缓存、异步取文与跳转走回执、强调与开图谱走单向命令）。原文送入（`src/lib/mindmapFeed.ts`）的形参类型同步收窄为 `FeedKernel`（只取文那三件事），两宿主共用同一份送入流程与进度订阅。
+4. **退役**（改 `src/theme.css` / `Reader.tsx`）：`浮窗 / 正文下方` 两种摆放、`data-mm2-host-toggle` 与 `data-host`、自绘拖动（标题行 `onPointerDown`）/ 拖高（`.mm2-focus-dock-resize`）/ 右下角缩放（`.mm2-focus-size`）、`.reader-lens-float-host` 与 `.reader-lens-dock-host` 两个宿主及其样式、`@keyframes mm2-focus-pop`、localStorage 三键（`mm2.lens.host` / `mm2.lens.float` / `mm2.lens.dockH`）全部删除；`mm2.lens.open` 保留（工具栏开关照样跨会话记住）。
+5. **主题 / 皮肤统一**（`src/lens.tsx`）：结构图窗口与制卡台窗口共用同一套引导——`styles/layers.css` + `theme.css`、`installThemePluginBridge()`（皮肤插件注入链）、每次呼出重读主题 / 强调色（`lens:window` 推送时重跑 `applyCaptureAppearance()`）、`initLocale(app.language)` 首绘前装载。换肤一处改、两窗同步生效。
+
+测试：`tests/m15v2.lens.dom.test.cjs` 受影响的三条「摆放切换」断言改写为一条「标出结构类型；面板已不含『浮窗 / 正文下方』摆放切换（改由独立窗口承载）」——面板仍就地渲染（跨进程宿主与窗口行为由 electron 侧承担）。`tsc --noEmit` 0；`npm run build` ✓（新增 `dist/lens.html`）；`node tests/m15v2.*.test.cjs` 全绿（`lens.dom` 42/0）；F21 进程间桥对账 7/7（新增通道「主进程注册 ↔ 桥面调用」两头齐、无死通道、文档点名通道全部落地）。
+
+登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D197 / v49.24**、§4.2-17（4 通道 + 1 推送）、§9.5。零 schema / 零设置键 / 零内核契约 / 零调度改动。真实窗口行为（拖动 / 四边缩放 / 置顶 / 跨窗口同步 / 换肤同步）待用户实机验收。
+

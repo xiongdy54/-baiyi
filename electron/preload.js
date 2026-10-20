@@ -34,6 +34,40 @@ contextBridge.exposeInMainWorld("windowAPI", {
   }
 });
 
+// v49.24（D197）：独立结构图窗口桥（窗口控制 + 两窗口之间的请求 / 回执 / 推送 / 状态，全经主进程转发）。
+// 与 windowAPI 既有模式逐字同构；on* 订阅一律返回退订函数。
+contextBridge.exposeInMainWorld("lensAPI", {
+  /** 窗口控制：toggle / show / hide / pin（两窗口共用，返回值＝{visible, pinned}） */
+  control: (action) => ipcRenderer.invoke("win:lens", action),
+  /** 结构图窗口 → 阅读窗口：请求 / 命令（带 id 才等回执） */
+  ask: (payload) => ipcRenderer.send("lens:ask", payload),
+  onAsk: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on("lens:askIn", handler);
+    return () => ipcRenderer.removeListener("lens:askIn", handler);
+  },
+  /** 阅读窗口 → 结构图窗口：请求回执 */
+  reply: (payload) => ipcRenderer.send("lens:reply", payload),
+  onReply: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on("lens:replyIn", handler);
+    return () => ipcRenderer.removeListener("lens:replyIn", handler);
+  },
+  /** 阅读窗口 → 结构图窗口：上下文 / 阅读位置推送 */
+  push: (payload) => ipcRenderer.send("lens:push", payload),
+  onPush: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on("lens:pushIn", handler);
+    return () => ipcRenderer.removeListener("lens:pushIn", handler);
+  },
+  /** 窗口可见性 + 置顶状态（两窗口共用） */
+  onWindow: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on("lens:window", handler);
+    return () => ipcRenderer.removeListener("lens:window", handler);
+  }
+});
+
 // v48.75（D119）：应用日志——openFolder 打开 logs 目录；report 为渲染层错误转发
 // （fire-and-forget send：不回执，报告失败不触发新错误）
 contextBridge.exposeInMainWorld("logsAPI", {

@@ -10,7 +10,9 @@
 //   阅读节点整卡标出且居中、顶卡＝截断点（父节点标题，更高层级不出现）、同一整体的成员都在图上、关系线带标签、头部标出结构类型 →
 //   正文强调焦点段落 → 悬停节点强调它的段落 → 分叉默认收起（折叠徽标）→ 点击展开（走同一套生长动画：刚到达虚线描边）→
 //   点击收起 → 单击＝选中（不跳正文）→ 回到正在读的段落 → 跳到原文（记下位置）→ 回到刚才读的位置 →
-//   讲解可收起（把手在内容上方）→ 在完整图谱中打开（带当前节点 id + 透镜区域）→ 摆放切换 → 关闭清强调。
+//   讲解可收起（把手在内容上方）→ 在完整图谱中打开（带当前节点 id + 透镜区域）→ 关闭清强调。
+// 第七轮（D197）：面板搬进独立窗口——本套件就地把面板渲染出来（独立窗口的跨进程宿主与窗口行为
+//   由 electron 侧承担），因此只断言「面板本体不再暴露摆放切换（data-mm2-host-toggle / data-host）」。
 const path = require("path");
 const root = path.join(__dirname, "..");
 
@@ -139,10 +141,14 @@ console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
   const opened = [];
   let closed = 0;
   let setOpen = null;
+  let setVis = null;
   function Host() {
     const [open, so] = React.useState(false);
+    // D199：独立窗口「关闭＝隐藏」，面板仍挂载 → visible 由宿主给出，收起时正文强调必须收回
+    const [vis, sv] = React.useState(true);
     setOpen = so;
-    return React.createElement(Lens, { kernel, documentId: "doc-lens", title: "透镜测试", open, hidden: false, onClose: () => { closed++; so(false); }, onOpenInMap: (id, region) => opened.push({ id, region }) });
+    setVis = sv;
+    return React.createElement(Lens, { kernel, documentId: "doc-lens", title: "透镜测试", open, hidden: false, visible: vis, onClose: () => { closed++; so(false); }, onOpenInMap: (id, region) => opened.push({ id, region }) });
   }
   const rootEl = createRoot(w.document.getElementById("root"));
   rootEl.render(React.createElement(React.StrictMode, null, React.createElement(Host)));
@@ -275,7 +281,7 @@ console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
   click(toggle());
   check("再点把手展开回来", await until(() => !!clip() && clip().classList.contains("is-open")) && !!toggle().querySelector(".is-flip"));
 
-  console.log("---- 在完整图谱中打开 / 摆放 / 关闭 ----");
+  console.log("---- 在完整图谱中打开 / 关闭 ----");
   await until(() => selId() === loc1.nodeId, 4000);
   click([...w.document.querySelectorAll(".mm2-focus-link")].find((b) => /在完整图谱中打开/.test(b.textContent)));
   check("「在完整图谱中打开」带上当前节点 id", opened.length === 1 && opened[0].id === loc1.nodeId, { opened, want: loc1.nodeId });
@@ -286,11 +292,20 @@ console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
     Array.isArray(opened[0].region) && opened[0].region.includes(fRow.parentId) && opened[0].region.includes(loc1.nodeId) && sibs.every((r) => opened[0].region.includes(r.nodeId)) && !opened[0].region.includes("t0"),
     opened[0],
   );
-  check("默认浮在正文上方（完整图谱要地方），并标出结构类型", $(".mm2-focus").getAttribute("data-host") === "float" && !!$("[data-mm2-pattern]"), [$(".mm2-focus").getAttribute("data-host"), ($("[data-mm2-pattern]") || {}).textContent]);
-  click($("[data-mm2-host-toggle]"));
-  check("手动切到正文下方", await until(() => $(".mm2-focus").getAttribute("data-host") === "dock"));
-  click($("[data-mm2-host-toggle]"));
-  check("再切回浮窗（记住偏好）", await until(() => $(".mm2-focus").getAttribute("data-host") === "float") && w.localStorage.getItem("mm2.lens.host") === '"float"', w.localStorage.getItem("mm2.lens.host"));
+  // 第七轮（D197）：面板搬进独立窗口，「浮窗 / 正文下方」摆放切换与自绘拖动 / 缩放退役——
+  // 面板本体不再暴露摆放开关与 data-host（窗口的四边 / 边角缩放由系统原生承担）。
+  check(
+    "标出结构类型；面板已不含「浮窗 / 正文下方」摆放切换（改由独立窗口承载）",
+    !!$("[data-mm2-pattern]") && !$("[data-mm2-host-toggle]") && $(".mm2-focus").getAttribute("data-host") === null,
+    [($("[data-mm2-pattern]") || {}).textContent, $(".mm2-focus").getAttribute("data-host")]
+  );
+  // D199（用户 2026-10-19 实测）：独立窗口「关闭＝隐藏」时面板仍挂载，正文强调必须跟着收回。
+  // 面板仍打开的前提下把窗口置为不可见，断言强调层收空；再呼出（visible=true）断言重新贴上。
+  console.log("---- 窗口收起（关闭＝隐藏）时正文强调收回 ----");
+  setVis(false);
+  check("窗口不可见：正文强调收回（不再是焦点/悬停亮着）", await until(() => lastHl().length === 0, 4000) && !!$(".mm2-focus"), lastHl());
+  setVis(true);
+  check("窗口重新呼出：强调随面板回到正文（焦点段重新贴上）", await until(() => lastHl().some((r) => r.tone === "focus" && r.unitAnchor === "u1.xhtml"), 4000), lastHl());
   click($("[data-mm2-close]"));
   check("关闭：面板消失、正文强调清空", await until(() => !$(".mm2-focus")) && closed === 1 && lastHl().length === 0, lastHl());
   check("全程无渲染错误", !errors.length, errors.slice(0, 3));
