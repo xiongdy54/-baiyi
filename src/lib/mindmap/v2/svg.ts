@@ -275,7 +275,7 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
       g += `<g transform="translate(${num(bx - 10)},${num(by_ - 10)})"${data("act", "deepen")}${data("node-id", d.id)}>` +
         `<rect width="20" height="20" fill="var(--paper)" stroke="var(--accent)"/><path d="M6 10H14M10 6V14" stroke="var(--accent)" stroke-width="1.5"/>` +
         `<title>${escapeXml(state === "stub" ? L.stub : L.deepen)}</title></g>`;
-    } else if (!isRoot && state === "floor") {
+    } else if (!isRoot && state === "floor" && !lens) {
       g += `<circle cx="${num(bx)}" cy="${num(by_)}" r="2.5" fill="var(--border-strong)"><title>${escapeXml(L.floor)}</title></circle>`;
     } else if (state === "collapsed") {
       const n = d.count ?? 0;
