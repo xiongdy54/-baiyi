@@ -26,6 +26,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = false;
 w.HTMLElement.prototype.scrollIntoView = function () {};
 // 画布要靠 getBoundingClientRect 算适配 / 居中 / reveal：jsdom 默认全 0 → 会和 MindmapCanvasV2 的「宿主无尺寸」守卫打架
 w.HTMLElement.prototype.getBoundingClientRect = function () { return { x: 0, y: 0, left: 0, top: 0, width: 1000, height: 700, right: 1000, bottom: 700 }; };
+// D204：被点节点卡片是 SVG <g>，jsdom 的 SVGElement 默认 0×0；给它同尺寸以便捕获屏幕锚点。
+w.SVGElement.prototype.getBoundingClientRect = function () { return { x: 0, y: 0, left: 0, top: 0, width: 1000, height: 700, right: 1000, bottom: 700 }; };
 
 require("./lib/tsload.cjs");
 const React = require("react");
@@ -85,13 +87,15 @@ const relocate = (unitAnchor, text) => { probe = { unitAnchor, text }; for (cons
 
 // ---------- 假流式模型（第 2 行带一条「支」关系指向第 1 行） ----------
 const calls = [];
-function genLines(lo, hi) {
+function genLines(lo, hi, nested = false) {
   const n = hi - lo + 1, k = Math.min(3, n), out = [];
   let s = lo;
   for (let i = 1; i <= k; i++) {
     const size = Math.floor(n / k) + (i <= n % k ? 1 : 0), from = s, to = s + size - 1;
     s = to + 1;
     out.push(`${i} [论点] 要点${from}到${to} @${from}-${to} ${size >= 2 ? "+" : "."}${i === 2 ? " &支1" : ""}`);
+    // D204 夹具：第二章的最后一行再长一个子节点，供「展开时节点固定 + 窗口缓动」断言
+    if (nested && i === k) out.push(`${i}.1 [证据] 子点${to} @${to}-${to} .`);
   }
   return out;
 }
@@ -105,7 +109,7 @@ async function chatStream(opts, send) {
     const user = opts.messages[1].content;
     const m = /【原文块号】\[(\d+)\](?:–\[(\d+)\])?/.exec(user);
     calls.push({ lo: Number(m[1]), hi: Number(m[2] || m[1]), kind });
-    raw = genLines(Number(m[1]), Number(m[2] || m[1])).map((l) => l + "\n").join("");
+    raw = genLines(Number(m[1]), Number(m[2] || m[1]), /【乙/.test(user)).map((l) => l + "\n").join("");
   }
   for (let i = 0; i < raw.length; i += 10) { send({ delta: raw.slice(i, i + 10) }); await sleep(10); }
   return { usage: { prompt_tokens: 1, completion_tokens: 1 }, finishReason: "stop", ttftMs: 1, firstByteMs: 1 };
@@ -320,6 +324,24 @@ console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
     { read: readId(), engineLoc: locU2b.nodeId },
   );
   check("顶卡＝阅读节点的直接父节点（第二章）", svgText().includes("第二章"), svgText().slice(0, 160));
+
+  console.log("---- D204 展开：被点节点屏幕固定 / fit 带 anchorScreen+animate / 保留生长动画 ----");
+  const fold33 = () => $(`.mm2-focus-canvas svg [data-act="unfold"][data-node-id="t3.3"]`);
+  check("第二章的深层分叉默认收起（t3.3 折叠徽标）", await until(() => !!fold33(), 8000), { fold: !!fold33(), ids: svgIds() });
+  const r33 = card("t3.3") ? card("t3.3").getBoundingClientRect() : null;
+  const viewBefore = $(".mm2-focus-canvas svg > g") ? $(".mm2-focus-canvas svg > g").getAttribute("transform") : null;
+  const fitBefore = fitCalls.length;
+  click(fold33());
+  check("点折叠徽标：子节点画出来", await until(() => !!$(`.mm2-focus-canvas svg [data-node-id^="t3.3."]`), 4000), svgIds());
+  const expandCall = fitCalls.slice(fitBefore).find((c) => c.animate === true) || null;
+  check(
+    "展开 fit 带旧屏幕锚点（被点卡片中心）+ animate",
+    !!expandCall && !!expandCall.anchorScreen && !!r33 && Math.abs(expandCall.anchorScreen.x - (r33.left + r33.width / 2)) <= 2 && Math.abs(expandCall.anchorScreen.y - (r33.top + r33.height / 2)) <= 2 && expandCall.anchor && expandCall.anchor.id === "t3.3",
+    { call: expandCall, r33: r33 ? { x: r33.left, y: r33.top, w: r33.width, h: r33.height } : null },
+  );
+  check("同比例展开不再 setViewScale（画布 viewport transform 不变，生长动画不被重置）", ($(".mm2-focus-canvas svg > g") || {}).getAttribute && $(".mm2-focus-canvas svg > g").getAttribute("transform") === viewBefore, { before: viewBefore, after: $(".mm2-focus-canvas svg > g") ? $(".mm2-focus-canvas svg > g").getAttribute("transform") : null });
+  check("展开保留 planTransition 生长动画（新节点带刚到达虚线描边）", $$(".mm2-focus-canvas svg rect[stroke-dasharray]").length >= 1, $$(".mm2-focus-canvas svg rect[stroke-dasharray]").length);
+  check("窗口缓动期间宿主反向位移（translate）", /translate\(/.test(($(".lens-graph") || {}).style ? $(".lens-graph").style.transform : ""), ($(".lens-graph") || {}).style ? $(".lens-graph").style.transform : "");
   relocate("u1.xhtml", "【甲第2段】");
   await until(() => readId() === loc1.nodeId, 8000);
 

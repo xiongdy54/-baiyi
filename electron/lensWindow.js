@@ -33,6 +33,8 @@ let pendingShow = false;
 let pendingShowTimer = null;
 /** 隐藏期间 fit 暂存的窗口 bounds（show 时应用；不抢焦点） */
 let pendingFit = null;
+/** D204：展开/收起的 bounds 缓动（{ timer, win, to }） */
+let boundsAnim = null;
 let loaded = false;
 let registered = false;
 
@@ -105,6 +107,7 @@ function createWindow() {
     broadcastState();
   });
   w.on("closed", () => {
+    stopBoundsAnim(false);
     if (win === w) win = null;
     loaded = false;
     pendingFit = null;
@@ -237,10 +240,74 @@ function applyPendingFit(w) {
   }
 }
 
+/** D204：窗口 bounds 缓动曲线，与渲染层宿主反向位移使用同一条 cubic-bezier(.2,.7,.2,1)。 */
+const EASE = [0.2, 0.7, 0.2, 1];
+function easeAt(t) {
+  const [x1, y1, x2, y2] = EASE;
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  let u = t;
+  for (let i = 0; i < 8; i++) {
+    const x = ((ax * u + bx) * u + cx) * u;
+    const d = (3 * ax * u + 2 * bx) * u + cx;
+    if (Math.abs(x - t) < 1e-5) return ((ay * u + by) * u + cy) * u;
+    if (Math.abs(d) < 1e-6) break;
+    u -= (x - t) / d;
+  }
+  let lo = 0, hi = 1;
+  u = t;
+  for (let i = 0; i < 24; i++) {
+    const x = ((ax * u + bx) * u + cx) * u;
+    if (Math.abs(x - t) < 1e-5) break;
+    if (x < t) lo = u; else hi = u;
+    u = (lo + hi) / 2;
+  }
+  return ((ay * u + by) * u + cy) * u;
+}
+
+/** 终止上一条 bounds 动画；finish=true 时先把窗口补到目标（hide/关闭前用）。 */
+function stopBoundsAnim(finish) {
+  if (!boundsAnim) return;
+  clearInterval(boundsAnim.timer);
+  const { win: w, to } = boundsAnim;
+  boundsAnim = null;
+  if (finish && w && !w.isDestroyed()) {
+    try { w.setBounds(to, false); } catch { /* 窗口正在销毁 */ }
+  }
+}
+
+/** D204：可见窗口从 from 到 to 的 180ms bounds 缓动；渲染层同时做宿主反向位移。 */
+function animateBounds(w, from, to, ms = 180) {
+  stopBoundsAnim(false);
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    if (!win || win.isDestroyed() || win !== w) {
+      stopBoundsAnim(false);
+      return;
+    }
+    const p = Math.min(1, (Date.now() - t0) / ms);
+    const e = easeAt(p);
+    const b = {
+      x: Math.round(from.x + (to.x - from.x) * e),
+      y: Math.round(from.y + (to.y - from.y) * e),
+      width: Math.max(1, Math.round(from.width + (to.width - from.width) * e)),
+      height: Math.max(1, Math.round(from.height + (to.height - from.height) * e)),
+    };
+    try { w.setBounds(b, false); } catch { /* 定位失败不阻塞 */ }
+    if (p >= 1) {
+      clearInterval(timer);
+      boundsAnim = null;
+      try { w.setBounds(to, false); } catch { /* ignore */ }
+    }
+  }, 16);
+  boundsAnim = { timer, win: w, to: { ...to } };
+}
+
 /**
  * lens:fit —— 渲染层量图谱 content / anchor，主进程按窗口所在显示器 workArea 算 s、锚点落位、钳制，
  * 再 setBounds。mode=fit 且 tier=focus 是**探测**（完整内容已低于可读下限）：不落窗，渲染层随后派生
  * 聚焦内容再发 focus。隐藏时只暂存 bounds，show/reveal 时应用；自动尺寸更新不 focus。
+ * D204：可选的 anchorScreen（点击节点旧屏幕点）优先级最高；animate=true 时窗口 bounds 做 180ms 缓动。
  */
 function fit(payload) {
   const content = payload && payload.content ? payload.content : null;
@@ -256,20 +323,27 @@ function fit(payload) {
     workArea: area,
     mode,
     anchor: payload.anchor || null,
+    anchorScreen: payload.anchorScreen || null,
     current: payload.current || null,
     bounds,
   });
   const probe = mode === "fit" && r.tier === "focus";
   if (!probe) {
     if (w && w.isVisible()) {
-      try {
-        w.setBounds(r.bounds, false);
-      } catch {
-        /* 定位失败不阻塞显示 */
+      if (payload.animate === true) {
+        animateBounds(w, w.getBounds(), r.bounds, 180);
+      } else {
+        stopBoundsAnim(false);
+        try {
+          w.setBounds(r.bounds, false);
+        } catch {
+          /* 定位失败不阻塞显示 */
+        }
       }
       pendingFit = null;
     } else {
       // 隐藏 / 首帧未显示：暂存，show 时应用（不抢焦点）
+      stopBoundsAnim(false);
       pendingFit = { ...r.bounds };
     }
   }
@@ -285,6 +359,7 @@ function fit(payload) {
 function reveal() {
   const w = win;
   if (!w || w.isDestroyed()) return;
+  stopBoundsAnim(true);
   // v49.29 / D203：隐藏期间算好的尺寸先落，再判断是否需要贴边——纸片窗口不设主题底色（透明由纸片承担）
   applyPendingFit(w);
   if (!positioned || offScreen(w)) {
@@ -319,6 +394,8 @@ function show() {
 function hide() {
   // v200：用户显式要收，挂起中的呼出作废（后写优先；否则安全阀会把刚收的窗又弹出来）
   cancelPendingShow();
+  // D204：缓动中隐藏 → 先补到目标，下次呼出不会停在中途尺寸
+  stopBoundsAnim(true);
   if (win && !win.isDestroyed() && win.isVisible()) win.hide();
   broadcastState();
   return state();

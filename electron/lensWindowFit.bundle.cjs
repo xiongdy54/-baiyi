@@ -1,4 +1,4 @@
-// v49.29（D203）：生成产物——esbuild 打包 src/lib/lensWindowFit.ts（主进程与渲染层共用同一份 fit 几何）；禁止手改，
+// v49.30（D204）：生成产物——esbuild 打包 src/lib/lensWindowFit.ts（主进程与渲染层共用同一份 fit 几何）；禁止手改，
 // 新鲜度由 tests/lensWindowFit.artifact.test.cjs 把守。
 
 "use strict";
@@ -97,9 +97,16 @@ function computeFit(input) {
   let oldAnchor = null;
   let anchorCx = 0;
   let anchorCy = 0;
-  if (bounds && anchor) {
+  if (anchor) {
     anchorCx = anchor.x + anchor.w / 2;
     anchorCy = anchor.y + anchor.h / 2;
+  }
+  const screenAnchor = input.anchorScreen && finite(input.anchorScreen.x) && finite(input.anchorScreen.y) ? { x: input.anchorScreen.x, y: input.anchorScreen.y } : null;
+  if (anchor && screenAnchor) {
+    oldAnchor = screenAnchor;
+    desiredX = Math.round(screenAnchor.x - LENS_PAD_SIDE - anchorCx * scale);
+    desiredY = Math.round(screenAnchor.y - LENS_PAD_TOP - anchorCy * scale);
+  } else if (bounds && anchor) {
     oldAnchor = {
       x: bounds.x + view.offsetX + anchorCx * view.scale,
       y: bounds.y + view.offsetY + anchorCy * view.scale

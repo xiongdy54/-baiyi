@@ -80,6 +80,8 @@ export interface MindmapCanvasV2Props {
   onExpandAll?: () => void;
   /** D203 结构图纸片窗口的选中 / 悬停口径：选中＝整卡主题色（不是外圈），悬停描边 accent。完整图谱不传。 */
   lensStyle?: boolean;
+  /** D204：false＝不做画布内视图锚点补偿（锚点由结构图窗口/宿主负责）。完整图谱默认 true。 */
+  viewAnchor?: boolean;
   /** 顶卡类型行（透镜的截断点类型）；不传＝顶卡只显示标题（完整图谱现状）。 */
   rootType?: string;
 }
@@ -275,7 +277,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       requestPaint();
       return;
     }
-    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.anchorId, reducedMotion: prefersReducedMotion() });
+    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.viewAnchor === false ? null : p.anchorId, reducedMotion: prefersReducedMotion() });
     if (prev) {
       const enteredCards = tr.enter.filter((id) => d.byId[id] && d.byId[id].kind === "card");
       if (enteredCards.length) {

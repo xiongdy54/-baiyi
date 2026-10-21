@@ -12,7 +12,7 @@ require("./lib/tsload.cjs");
 const ROOT = path.join(__dirname, "..");
 const SRC = path.join(ROOT, "src", "lib", "lensWindowFit.ts");
 const ARTIFACT = path.join(ROOT, "electron", "lensWindowFit.bundle.cjs");
-const BANNER = "// v49.29（D203）：生成产物——esbuild 打包 src/lib/lensWindowFit.ts（主进程与渲染层共用同一份 fit 几何）；禁止手改，\n// 新鲜度由 tests/lensWindowFit.artifact.test.cjs 把守。\n";
+const BANNER = "// v49.30（D204）：生成产物——esbuild 打包 src/lib/lensWindowFit.ts（主进程与渲染层共用同一份 fit 几何）；禁止手改，\n// 新鲜度由 tests/lensWindowFit.artifact.test.cjs 把守。\n";
 const REBUILD = 'node -e "require(\'esbuild\').buildSync({entryPoints:[\'src/lib/lensWindowFit.ts\'],bundle:true,platform:\'node\',format:\'cjs\',outfile:\'electron/lensWindowFit.bundle.cjs\',banner:{js:...}})"（banner 见本文件）';
 
 let pass = 0, fail = 0;

@@ -156,6 +156,13 @@ export default function MindmapLens({
   const [anchorEpoch, setAnchorEpoch] = useState(0);
   const explainJobRef = useRef<string | null>(null);
   const canvasRef = useRef<MindmapCanvasHandle>(null);
+  /** D204：图谱宿主（窗口缓动时做反向位移，让内容/被点节点在屏幕上不动） */
+  const hostRef = useRef<HTMLDivElement>(null);
+  const growRaf = useRef<number | null>(null);
+  const growToken = useRef(0);
+  /** D204：下一次 fit 用哪颗节点的旧屏幕位置钉住（展开/收起/深挖） */
+  const pendingExpandRef = useRef<{ anchorScreen: { x: number; y: number }; nodeId: string } | null>(null);
+  const pendingExpandTimer = useRef<number | null>(null);
 
   // ---------- 纸片窗口（D203） ----------
   const [showAll, setShowAll] = useState(false);
@@ -315,7 +322,10 @@ export default function MindmapLens({
       if (d.jobDone && d.jobId) {
         if (d.jobId === busyRef.current) {
           setBusy(null);
-          if (!d.jobDone.ok && !(d.jobDone as { aborted?: boolean }).aborted) showStatus(T("没能生成：{msg}", { msg: d.jobDone.error || "" }), 6000);
+          if (!d.jobDone.ok && !(d.jobDone as { aborted?: boolean }).aborted) {
+            pendingExpandRef.current = null;
+            showStatus(T("没能生成：{msg}", { msg: d.jobDone.error || "" }), 6000);
+          }
           scheduleLocate(0);
         }
         if (d.jobId === explainJobRef.current) {
@@ -469,17 +479,82 @@ export default function MindmapLens({
   );
   const callFit = fit ?? fallbackFit;
 
+  /** D204：被点节点卡片中心在屏幕 DIP 的当前位置（改 overrides 之前调用）。 */
+  const captureNodeScreen = useCallback((id: string) => {
+    try {
+      const el = document.querySelector(`.mm2-focus-canvas svg g[data-node-id="${String(id)}"]`);
+      const r = el?.getBoundingClientRect();
+      if (!r || r.width <= 0 || r.height <= 0) return null;
+      return { x: Math.round(window.screenX + r.left + r.width / 2), y: Math.round(window.screenY + r.top + r.height / 2) };
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const markExpanding = useCallback((id: string) => {
+    const anchorScreen = captureNodeScreen(id);
+    if (!anchorScreen) {
+      pendingExpandRef.current = null;
+      return;
+    }
+    pendingExpandRef.current = { anchorScreen, nodeId: id };
+    if (pendingExpandTimer.current != null) window.clearTimeout(pendingExpandTimer.current);
+    pendingExpandTimer.current = window.setTimeout(() => {
+      pendingExpandRef.current = null;
+      pendingExpandTimer.current = null;
+    }, 30000);
+  }, [captureNodeScreen]);
+
+  /**
+   * D204：窗口 bounds 正在缓动时，宿主按「目标原点 − 当前窗口原点」反向平移，
+   * 使内容（尤其被点节点）在整个缓动期间停在目标屏幕位置；窗口/纸片绕它生长。
+   */
+  const startHostFix = useCallback((target: { x: number; y: number }) => {
+    if (growRaf.current != null) cancelAnimationFrame(growRaf.current);
+    const token = ++growToken.current;
+    const t0 = performance.now();
+    const tick = () => {
+      if (token !== growToken.current) return;
+      const el = hostRef.current;
+      if (el) {
+        const dx = target.x - window.screenX;
+        const dy = target.y - window.screenY;
+        el.style.transform = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 ? "" : `translate(${dx}px, ${dy}px)`;
+      }
+      if (performance.now() - t0 < 280) growRaf.current = requestAnimationFrame(tick);
+      else {
+        growRaf.current = null;
+        if (hostRef.current) hostRef.current.style.transform = "";
+      }
+    };
+    growRaf.current = requestAnimationFrame(tick);
+  }, []);
+
+  useEffect(() => () => {
+    if (growRaf.current != null) cancelAnimationFrame(growRaf.current);
+    if (pendingExpandTimer.current != null) window.clearTimeout(pendingExpandTimer.current);
+  }, []);
+
   const requestFit = useCallback(async () => {
     if (!active || !graph || !lensGraph) return;
     const token = ++fitSeqRef.current;
     fitBusyRef.current = true;
+    // D204：展开/收起/深挖带旧的被点节点屏幕点；本次请求结束即消费
+    const pending = pendingExpandRef.current;
+    pendingExpandRef.current = null;
+    if (pendingExpandTimer.current != null) {
+      window.clearTimeout(pendingExpandTimer.current);
+      pendingExpandTimer.current = null;
+    }
+    const expandReq = pending ? { anchorScreen: pending.anchorScreen, animate: true as const } : {};
+    const pinId = pending?.nodeId ?? null;
     try {
       const view = canvasRef.current?.getView();
       const current = view
         ? { scale: view.scale, offsetX: LENS_PAD_SIDE + view.tx, offsetY: LENS_PAD_TOP + view.ty }
         : { scale: 1, offsetX: LENS_PAD_SIDE, offsetY: LENS_PAD_TOP };
       const anchorOf = (d: Display) => {
-        const id = sel && d.byId[sel] ? sel : readingId && d.byId[readingId] ? readingId : ROOT_ID;
+        const id = pinId && d.byId[pinId] ? pinId : sel && d.byId[sel] ? sel : readingId && d.byId[readingId] ? readingId : ROOT_ID;
         const it = d.byId[id];
         return it ? { id, ...rectOf(it) } : null;
       };
@@ -488,31 +563,33 @@ export default function MindmapLens({
         const m = measureGraph(allGraph ?? lensGraph, undefined, true);
         const key = `all|${m.content.w}x${m.content.h}`;
         if (fitted && lastFitRef.current === key) return;
-        const r = await callFit({ content: m.content, anchor: anchorOf(m.d), current, mode: "all" });
+        const r = await callFit({ content: m.content, anchor: anchorOf(m.d), current, mode: "all", ...expandReq });
         if (token !== fitSeqRef.current) return;
         setFitState({ scale: r.scale, tier: r.tier, content: m.content, bounds: r.bounds });
         setFocusN(null);
         setFitted(true);
         lastFitRef.current = key;
+        if (pending) startHostFix({ x: r.bounds.x, y: r.bounds.y });
         return;
       }
 
       const base = measureGraph(lensGraph, undefined, true);
       const baseKey = `auto|${base.content.w}x${base.content.h}`;
       if (fitted && lastFitRef.current === baseKey) return;
-      const probe = await callFit({ content: base.content, anchor: anchorOf(base.d), current, mode: "fit" });
+      const probe = await callFit({ content: base.content, anchor: anchorOf(base.d), current, mode: "fit", ...expandReq });
       if (token !== fitSeqRef.current) return;
       const total = rootKids.length;
       if (!readingId || probe.tier !== "focus" || total <= 1) {
         // 完整内容放得下（或没有可裁剪的子项）：按探测结果落窗；total<=1 时强制聚焦口径
         const r = probe.tier === "focus"
-          ? await callFit({ content: base.content, anchor: anchorOf(base.d), current, mode: "focus" })
+          ? await callFit({ content: base.content, anchor: anchorOf(base.d), current, mode: "focus", ...expandReq })
           : probe;
         if (token !== fitSeqRef.current) return;
         setFitState({ scale: r.scale, tier: r.tier, content: base.content, bounds: r.bounds });
         setFocusN(null);
         setFitted(true);
         lastFitRef.current = baseKey;
+        if (pending) startHostFix({ x: r.bounds.x, y: r.bounds.y });
         return;
       }
 
@@ -528,12 +605,13 @@ export default function MindmapLens({
         return;
       }
       const fm = measureGraph(fg, { [ROOT_ID]: choice.n });
-      const r = await callFit({ content: fm.content, anchor: anchorOf(fm.d), current, mode: "focus" });
+      const r = await callFit({ content: fm.content, anchor: anchorOf(fm.d), current, mode: "focus", ...expandReq });
       if (token !== fitSeqRef.current) return;
       setFitState({ scale: r.scale, tier: r.tier, content: fm.content, bounds: r.bounds });
       setFocusN(choice.n);
       setFitted(true);
       lastFitRef.current = fkey;
+      if (pending) startHostFix({ x: r.bounds.x, y: r.bounds.y });
       // 选中节点若落在被裁掉的尾部：清掉选中，避免「选中了看不见的节点」
       if (sel) {
         const top = lensGraph.nodes[sel]?.parentId == null ? sel : ancestors(lensGraph, sel)[0];
@@ -548,23 +626,26 @@ export default function MindmapLens({
     } finally {
       fitBusyRef.current = false;
     }
-  }, [active, graph, lensGraph, allGraph, focusGraph, rootKids.length, sel, readingId, showAll, fitted, measureGraph, callFit, T]);
+  }, [active, graph, lensGraph, allGraph, focusGraph, rootKids.length, sel, readingId, showAll, fitted, measureGraph, callFit, startHostFix, T]);
 
   const requestFitRef = useRef(requestFit);
   requestFitRef.current = requestFit;
-  // 内容变化 debounce 80ms；只由「图的结构 / 折叠 / 预设 / 文档」触发，选中与阅读位置移动不触发窗口 resize。
+  // 内容变化 debounce 80ms；展开/收起（pending）立即 fit，不等防抖，让窗口缓动与图生长同步。
+  // 只由「图的结构 / 折叠 / 预设 / 文档 / 阅读位置」触发；选中不触发窗口 resize。
   useEffect(() => {
     if (!active || !lensGraph) return;
-    const t = window.setTimeout(() => void requestFitRef.current(), 80);
+    const pending = pendingExpandRef.current;
+    const t = window.setTimeout(() => void requestFitRef.current(), pending ? 0 : 80);
     return () => window.clearTimeout(t);
   }, [active, lensGraph, showAll, documentId, readingId, rootTitle]);
 
-  // 比例由宿主决定：内容 / 预设变化后把画布设到同一比例（tx/ty 归零，整张图贴内容原点）
-  const fitKey = `${displayGraph?.mapId ?? ""}|${displayGraph?.clock ?? 0}|${focusN ?? ""}|${showAll ? "all" : "auto"}|${fitState?.scale ?? ""}|${fitState?.content.w ?? 0}x${fitState?.content.h ?? 0}`;
+  // 比例由宿主决定：只有「图 / 比例 / 聚焦档 / 全图」变化才重设画布比例（tx/ty 归零）。
+  // D204：同比例的内容变化（展开/收起）不再 setViewScale，避免清掉 planTransition 生长动画。
+  const scaleKey = `${displayGraph?.mapId ?? ""}|${fitState?.scale ?? ""}|${showAll ? "all" : focusN ?? "auto"}`;
   useEffect(() => {
     if (fitted && fitState) canvasRef.current?.setViewScale(fitState.scale);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fitKey]);
+  }, [scaleKey]);
 
   // ---------- 控制轨 / 状态 ----------
   const hideRailIfIdle = useCallback(() => {
@@ -660,13 +741,14 @@ export default function MindmapLens({
   const toggleCollapse = useCallback(
     (id: string) => {
       if (id === ROOT_ID) return;
+      markExpanding(id); // 在改 overrides / 布局之前捕获被点节点的旧屏幕位置
       const next = !collapsedRef.current.has(id);
       setSel(id);
       setExplainFor(null);
       setOverrides((m) => new Map(m).set(id, next));
       showRailTemporarily(2500);
     },
-    [showRailTemporarily],
+    [showRailTemporarily, markExpanding],
   );
 
   const onSelect = useCallback(
@@ -757,14 +839,19 @@ export default function MindmapLens({
   const deepen = async (id: string) => {
     const g = graphRef.current;
     if (!g?.mapId) return;
+    // D204：深挖的新子节点到达后，窗口也要绕这颗节点生长（AI 可能延迟数秒，锚点先记下）
+    markExpanding(id);
     try {
       const r = await mindmapV2Api.expand({ mapId: g.mapId, nodeId: id, trigger: "click" });
-      if (r.skipped) showStatus(T(SKIP[r.skipped] || r.skipped));
-      else {
+      if (r.skipped) {
+        pendingExpandRef.current = null;
+        showStatus(T(SKIP[r.skipped] || r.skipped));
+      } else {
         setBusy(r.jobId || null);
         showStatus(T("正在把这一点再分出一层…"), 2600);
       }
     } catch (err) {
+      pendingExpandRef.current = null;
       showStatus(T("没能生成：{msg}", { msg: err instanceof Error ? err.message : String(err) }), 6000);
     }
   };
@@ -911,7 +998,7 @@ export default function MindmapLens({
             )}
           </div>
         ) : displayGraph ? (
-          <div className="mm2-focus-canvas lens-graph" style={{ left: LENS_PAD_SIDE, top: LENS_PAD_TOP, width: hostW, height: hostH }}>
+          <div ref={hostRef} className="mm2-focus-canvas lens-graph" style={{ left: LENS_PAD_SIDE, top: LENS_PAD_TOP, width: hostW, height: hostH }}>
             <MindmapCanvasV2
               ref={canvasRef}
               graph={displayGraph}
@@ -924,6 +1011,7 @@ export default function MindmapLens({
               focus={false}
               autoFit={false}
               lensStyle
+              viewAnchor={false}
               maxChildren={displayMax}
               noLod={showAll || focusN == null}
               onExpandAll={() => setShowAll(true)}

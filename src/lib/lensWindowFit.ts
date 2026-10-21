@@ -63,6 +63,11 @@ export interface LensFitInput {
   current?: LensView | null;
   /** 当前窗口 bounds（窗口坐标＝DIP）。省略＝在工作区居中。 */
   bounds?: LensRect | null;
+  /**
+   * D204：被点击节点中心在**旧布局**下的屏幕 DIP 位置。提供时优先用它反算新原点，
+   * 保证展开/收起后该节点屏幕位置不动（用新布局的 anchor 矩形 × 新比例）。
+   */
+  anchorScreen?: { x: number; y: number } | null;
 }
 
 export interface LensFitResult {
@@ -156,9 +161,19 @@ export function computeFit(input: LensFitInput): LensFitResult {
   let oldAnchor: { x: number; y: number } | null = null;
   let anchorCx = 0;
   let anchorCy = 0;
-  if (bounds && anchor) {
+  if (anchor) {
     anchorCx = anchor.x + anchor.w / 2;
     anchorCy = anchor.y + anchor.h / 2;
+  }
+  const screenAnchor = input.anchorScreen && finite(input.anchorScreen.x) && finite(input.anchorScreen.y)
+    ? { x: input.anchorScreen.x, y: input.anchorScreen.y }
+    : null;
+  if (anchor && screenAnchor) {
+    // D204：旧屏幕位置由渲染层在改布局之前给出，主进程只用它 + 新布局矩形/新比例反算原点。
+    oldAnchor = screenAnchor;
+    desiredX = Math.round(screenAnchor.x - LENS_PAD_SIDE - anchorCx * scale);
+    desiredY = Math.round(screenAnchor.y - LENS_PAD_TOP - anchorCy * scale);
+  } else if (bounds && anchor) {
     oldAnchor = {
       x: bounds.x + view.offsetX + anchorCx * view.scale,
       y: bounds.y + view.offsetY + anchorCy * view.scale,

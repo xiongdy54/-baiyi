@@ -100,6 +100,33 @@ app.whenReady().then(async () => {
     const fitBody = lensSrc.slice(lensSrc.indexOf("function fit("), lensSrc.indexOf("function reveal("));
     check("F8 fit 路径不抢焦点（自动尺寸更新只 setBounds，无 focus 调用）", !/\.focus\(\)/.test(fitBody), "fit() 内无 focus 调用");
 
+    console.log("== G D204 展开/收起：anchorScreen 钉住节点 + 180ms bounds 缓动 ==");
+    const wa2 = screen.getDisplayMatching(w.getBounds()).workArea;
+    const anchorScreen = { x: wa2.x + 400, y: wa2.y + 300 };
+    const gTarget = lensWindow.fit({
+      content: { w: 1000, h: 152 }, mode: "fit", animate: true,
+      anchor: { id: "n1", x: 0, y: 52, w: 400, h: 48 }, anchorScreen,
+    });
+    const gFrom = w.getBounds();
+    await sleep(55);
+    const gMid = w.getBounds();
+    await sleep(320);
+    const gEnd = w.getBounds();
+    check("G1 缓动中：窗口 bounds 处于起止之间（不是瞬时跳到终点）", gMid.width > gFrom.width && gMid.width < gEnd.width, { from: gFrom, mid: gMid, end: gEnd, target: gTarget.bounds });
+    check("G2 ~180ms 后到达目标（±1px）", Math.abs(gEnd.width - gTarget.bounds.width) <= 1 && Math.abs(gEnd.height - gTarget.bounds.height) <= 1, { end: gEnd, target: gTarget.bounds });
+    const gAx = gEnd.x + 16 + 200 * gTarget.scale;
+    const gAy = gEnd.y + 32 + 76 * gTarget.scale;
+    check("G3 被点节点中心仍在 anchorScreen（±1px，非贴边）", Math.abs(gAx - anchorScreen.x) <= 1 && Math.abs(gAy - anchorScreen.y) <= 1 && !gTarget.clamped, { ax: gAx, ay: gAy, anchorScreen, target: gTarget });
+    // 缓动中 hide：先补到目标再隐藏，下次呼出不会停在中途尺寸
+    const g2 = lensWindow.fit({ content: { w: 1200, h: 152 }, mode: "fit", animate: true, anchor: { id: "n1", x: 0, y: 52, w: 400, h: 48 }, anchorScreen });
+    await sleep(45);
+    lensWindow.control("hide");
+    await sleep(350);
+    lensWindow.control("show");
+    await sleep(500);
+    const gShow = w.getBounds();
+    check("G4 缓动中 hide 先补到目标；再次 show 尺寸即目标（±1px）", Math.abs(gShow.width - g2.bounds.width) <= 1 && Math.abs(gShow.height - g2.bounds.height) <= 1, { show: gShow, target: g2.bounds });
+
     console.log("== B 隐藏 + 重载进行中 show() → 重载完成自动恢复（D200 主症状） ==");
     w.hide();
     w.webContents.reload();

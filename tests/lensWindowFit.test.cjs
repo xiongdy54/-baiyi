@@ -197,6 +197,43 @@ console.log("---- 锚点：非贴边不漂移 / 贴边 clamped ----");
   );
 }
 
+console.log("---- D204 展开/收起：anchorScreen 钉住被点节点 ----");
+{
+  const r = F.computeFit({
+    content: size(1000, 152), workArea: rect(0, 0, 1920, 1040), mode: "fit",
+    anchor: { x: 0, y: 52, w: 400, h: 48 }, anchorScreen: { x: 400, y: 300 },
+    // 故意给一组与 anchorScreen 矛盾的旧 bounds/current：新的旧屏幕点必须优先
+    bounds: rect(900, 700, 600, 300), current: { scale: 1, offsetX: 16, offsetY: 32 },
+  });
+  const ax = r.bounds.x + 16 + (0 + 400 / 2) * r.scale;
+  const ay = r.bounds.y + 32 + (52 + 48 / 2) * r.scale;
+  check(
+    "anchorScreen 优先：节点中心回到旧屏幕点 (400,300)，不受旧 bounds/current 影响",
+    Math.abs(ax - 400) <= 1 && Math.abs(ay - 300) <= 1 && Math.abs(r.bounds.x - 184) <= 1 && Math.abs(r.bounds.y - 192) <= 1 && r.anchorDrift <= 1 && !r.clamped,
+    { bounds: r.bounds, scale: r.scale, ax, ay, drift: r.anchorDrift, clamped: r.clamped },
+  );
+  const edge = F.computeFit({
+    content: size(1000, 152), workArea: rect(0, 0, 1920, 1040), mode: "fit",
+    anchor: { x: 0, y: 52, w: 400, h: 48 }, anchorScreen: { x: 1900, y: 100 },
+  });
+  check(
+    "anchorScreen 贴右缘：原点被钳制、clamped=true、漂移如实（不伪造钉住）",
+    edge.clamped && edge.bounds.x === 1920 - edge.bounds.width && edge.anchorDrift > 8,
+    { bounds: edge.bounds, drift: edge.anchorDrift, clamped: edge.clamped },
+  );
+  const scaled = F.computeFit({
+    content: size(2400, 152), workArea: rect(0, 0, 1920, 1040), mode: "fit",
+    anchor: { x: 0, y: 52, w: 400, h: 48 }, anchorScreen: { x: 300, y: 400 },
+  });
+  const sx = scaled.bounds.x + 16 + 200 * scaled.scale;
+  const sy = scaled.bounds.y + 32 + 76 * scaled.scale;
+  check(
+    "比例变化（1→0.7225）时仍把节点中心钉在旧屏幕点（≤1px）",
+    Math.abs(scaled.scale - 1734 / 2400) < 1e-9 && Math.abs(sx - 300) <= 1 && Math.abs(sy - 400) <= 1 && !scaled.clamped,
+    { scale: scaled.scale, bounds: scaled.bounds, sx, sy, drift: scaled.anchorDrift },
+  );
+}
+
 console.log("---- min / max 钳制与零尺寸防御 ----");
 {
   const tinyContent = F.computeFit({ content: size(1, 1), workArea: rect(0, 0, 1000, 800), mode: "fit" });

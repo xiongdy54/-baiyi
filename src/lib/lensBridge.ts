@@ -48,6 +48,10 @@ export interface LensFitRequest {
   /** 当前画布视图（内容坐标 → 窗口局部）；首次 fit 可省 */
   current?: LensFitView | null;
   mode: "fit" | "focus" | "all";
+  /** D204：被点节点中心在旧布局下的屏幕 DIP 位置（展开/收起时钉住该节点） */
+  anchorScreen?: { x: number; y: number } | null;
+  /** D204：窗口 bounds 用 180ms 缓动（展开/收起）；隐藏时只暂存 */
+  animate?: boolean;
 }
 
 export type LensFitTier = "100%" | "scaled" | "focus" | "all";
