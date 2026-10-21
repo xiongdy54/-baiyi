@@ -1,0 +1,1225 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>结构图 · 悬浮图谱（D203 / v49.29 样张）</title>
+<style>
+:root{
+  color-scheme:light;
+  --paper:#fafaf8; --ink:#0a0a0a; --t2:#525252; --t3:#737373;
+  --b1:#e0e0e0; --b2:#a3a3a3; --grey-1:#f0f0ee;
+  --accent:#166a59; --accent-on:#ffffff;
+  --accent-soft:color-mix(in srgb,var(--accent) 8%,transparent);
+  --shadow-float:0 8px 24px rgba(10,10,10,.12);
+  --font:-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font-family:var(--font);background:var(--paper);color:var(--ink);overflow:hidden}
+button{font:inherit}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{display:flex;flex-direction:column;height:100vh}
+.topbar{flex:0 0 auto;border-bottom:1px solid var(--b1);padding:10px 16px;display:flex;flex-direction:column;gap:8px;background:var(--paper)}
+.toprow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:28px}
+.brand{font-size:14px;font-weight:600;white-space:nowrap}
+.chip{font-size:11px;line-height:18px;padding:0 6px;border:1px solid var(--b2);color:var(--t2);white-space:nowrap}
+.chip.subtle{border-color:var(--b1);color:var(--t3)}
+.spacer{flex:1 1 auto}
+.sep{width:1px;height:18px;background:var(--b1)}
+.seg{display:inline-flex;align-items:center}
+.seg button{height:26px;padding:0 10px;font-size:12px;line-height:24px;border:1px solid var(--b1);background:var(--paper);color:var(--t2);cursor:pointer;white-space:nowrap;margin-left:-1px}
+.seg button:first-child{margin-left:0}
+.seg button:hover{border-color:var(--b2);color:var(--ink)}
+.seg button.on{background:var(--ink);border-color:var(--ink);color:var(--paper);position:relative;z-index:1}
+.seg button[data-toggle].on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.btn{height:26px;padding:0 10px;font-size:12px;line-height:24px;border:1px solid var(--b2);background:var(--paper);color:var(--ink);cursor:pointer}
+.btn:hover{border-color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-on)}
+
+.stage-wrap{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) 340px}
+.stage{position:relative;overflow:hidden;min-width:0;background:var(--paper)}
+.inspector{border-left:1px solid var(--b1);padding:14px 16px 24px;overflow:auto;background:var(--paper)}
+.inspector h2{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin:18px 0 6px}
+.inspector h2:first-child{margin-top:0}
+.kv{display:grid;grid-template-columns:96px minmax(0,1fr);gap:3px 8px;font-size:11px;line-height:17px}
+.kv span{color:var(--t3)}
+.kv b{font-weight:500;color:var(--ink);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.ledger{width:100%;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
+.ledger th{text-align:left;font-weight:500;color:var(--t3);padding:4px 0 4px 6px;border-bottom:1px solid var(--b1);white-space:nowrap}
+.ledger td{padding:4px 0 4px 6px;border-bottom:1px solid var(--b1);color:var(--t2);white-space:nowrap}
+.ledger th:first-child,.ledger td:first-child{padding-left:0}
+.ledger th:nth-child(2),.ledger td:nth-child(2),.ledger th:nth-child(4),.ledger td:nth-child(4){text-align:right}
+.ledger td .tier-sub{display:block;color:var(--t3);font-size:10px;line-height:14px;font-weight:400}
+.ledger tr.is-current td{color:var(--accent)}
+.ledger tr.is-current td .tier-sub{color:color-mix(in srgb,var(--accent) 65%,transparent)}
+.ledger tr.is-current td:first-child{font-weight:600}
+.judge{list-style:none;margin:0;padding:0;font-size:11px;line-height:1.6;color:var(--t2)}
+.judge li{display:flex;gap:6px;padding:3px 0;border-bottom:1px solid var(--b1)}
+.judge li:last-child{border-bottom:0}
+.judge .mark{width:12px;color:var(--accent);font-weight:600}
+.judge .warn .mark{color:var(--t3)}
+.notes{margin:0;padding-left:16px;font-size:11px;line-height:1.65;color:var(--t2)}
+.notes li{margin-bottom:5px}
+
+/* ---------- 阅读界面（主场景） ---------- */
+.reader{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--paper)}
+.stage:not(.mode-reader) .reader{display:none}
+.reader-top{flex:0 0 48px;display:flex;align-items:center;gap:18px;padding:0 20px;border-bottom:1px solid var(--b1);font-size:12px;color:var(--t2);user-select:none}
+.reader-nav{display:flex;gap:16px;white-space:nowrap}
+.reader-nav span:first-child{color:var(--ink);font-weight:600}
+.reader-title{flex:1 1 auto;text-align:center;color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reader-tools{display:flex;gap:12px;white-space:nowrap;font-size:11px;color:var(--t3)}
+.reader-body{flex:1 1 auto;overflow:auto;padding:34px 0 90px}
+.reader-col{max-width:720px;margin:0 auto;padding:0 28px}
+.reader-kicker{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--t3);margin-bottom:14px}
+.reader-col p{font-size:15.5px;line-height:1.95;margin:0 0 18px;color:var(--ink)}
+.reader-col p.note{background:color-mix(in srgb,var(--ink) 5%,transparent);padding:4px 8px;margin-left:-8px}
+.reader-col p.is-reading-para{background:var(--accent-soft)}
+.reader-col p.is-linked{background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.reader-col p.is-jump{background:color-mix(in srgb,var(--accent) 22%,transparent)}
+.reader-col p{cursor:text}
+
+.wall-note{display:none;position:absolute;left:24px;top:22px;z-index:2;align-items:center;gap:8px;padding:4px 8px;border:1px solid var(--b2);background:var(--paper);color:var(--t2);font-size:11px}
+.stage:not(.mode-reader) .wall-note{display:inline-flex}
+.stage.mode-dark .wall-note{background:#151a22;border-color:#2a3340;color:#c8d0da}
+
+/* 浅壁纸：纸感 + 很轻的网格 */
+.stage.mode-light{background:
+  radial-gradient(1100px 760px at 18% 8%,#ffffff 0,#f4f0e7 46%,#e6e0d3 100%)}
+.stage.mode-light::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:linear-gradient(color-mix(in srgb,var(--ink) 5%,transparent) 1px,transparent 1px),linear-gradient(90deg,color-mix(in srgb,var(--ink) 5%,transparent) 1px,transparent 1px);
+  background-size:40px 40px;opacity:.45}
+/* 深壁纸：深色主题下测深色卡片 */
+.stage.mode-dark{--paper:#101010;--ink:#f5f5f2;--t2:#b5b5b0;--t3:#8a8a86;--b1:#2a2a27;--b2:#4a4a46;--grey-1:#1c1c1a;
+  --accent:#3fa08a;--accent-on:#0a0a0a;--accent-soft:color-mix(in srgb,var(--accent) 16%,transparent);
+  --shadow-float:0 8px 24px rgba(0,0,0,.5);
+  background:radial-gradient(1000px 700px at 76% 16%,#1d2a3a 0,#0d1117 52%,#05070a 100%)}
+.stage.mode-dark::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background-image:radial-gradient(circle at 12% 22%,rgba(255,255,255,.55) 0 1px,transparent 1.5px),radial-gradient(circle at 68% 62%,rgba(255,255,255,.35) 0 1px,transparent 1.5px),radial-gradient(circle at 41% 81%,rgba(255,255,255,.4) 0 1px,transparent 1.5px);
+  background-size:340px 300px,460px 380px,520px 420px;opacity:.5}
+/* 花哨壁纸：高饱和、有清晰形状，专门测纸片底的边界与阴影 */
+.stage.mode-busy{background:linear-gradient(135deg,#ff9a3c 0%,#ff4e8a 28%,#7a5cff 58%,#1fb6ff 100%)}
+.stage.mode-busy::before{content:"";position:absolute;inset:-12%;pointer-events:none;
+  background:
+    radial-gradient(circle at 18% 26%,rgba(255,255,255,.85) 0 110px,transparent 112px),
+    radial-gradient(circle at 82% 68%,rgba(10,10,10,.55) 0 150px,transparent 152px),
+    radial-gradient(circle at 62% 18%,rgba(255,235,120,.95) 0 70px,transparent 72px),
+    radial-gradient(circle at 30% 78%,rgba(0,90,255,.7) 0 130px,transparent 132px);
+  filter:blur(22px);opacity:.85}
+.stage.mode-busy::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(135deg,rgba(255,255,255,.18) 0 2px,transparent 2px 28px);mix-blend-mode:overlay}
+
+/* ---------- 纸片图谱窗口（窗口 = 纸片表面，尺寸随图谱） ---------- */
+.lens-window{position:absolute;z-index:5;background:color-mix(in srgb,var(--paper) 94%,transparent);border:1px solid var(--b1);box-shadow:var(--shadow-float);transition:width 180ms cubic-bezier(.2,.7,.2,1),height 180ms cubic-bezier(.2,.7,.2,1),left 180ms cubic-bezier(.2,.7,.2,1),top 180ms cubic-bezier(.2,.7,.2,1);will-change:width,height,left,top}
+.lens-window.is-hidden{visibility:hidden;pointer-events:none}
+.lens-canvas{position:absolute;inset:0}
+.graph{position:absolute;left:16px;top:32px;display:block}
+.graph svg{display:block;overflow:visible}
+
+.mm-svg text{font-family:var(--font)}
+.mm-svg .edge-line{stroke:var(--ink);stroke-width:1.2;fill:none;opacity:.55;vector-effect:non-scaling-stroke}
+.mm-svg .rel-label,.mm-svg .time{font-size:11px;fill:var(--t3)}
+.mm-svg .card-rect{stroke-width:1}
+.mm-svg .node{cursor:pointer;outline:none}
+.mm-svg .node.is-root .card-rect{fill:var(--accent);stroke:var(--accent)}
+.mm-svg .node.is-reading:not(.is-root) .card-rect{fill:var(--accent);stroke:var(--accent)}
+.mm-svg .node.is-reading:not(.is-root) .type,.mm-svg .node.is-reading:not(.is-root) .title{fill:var(--accent-on)}
+.mm-svg .node.is-hover .card-rect,.mm-svg .node:focus-visible .card-rect{stroke:var(--accent);stroke-width:2}
+.mm-svg .node.is-selected .card-rect{fill:var(--accent);stroke:var(--accent)}
+.mm-svg .node.is-selected .type{fill:color-mix(in srgb,var(--accent-on) 72%,transparent)}
+.mm-svg .node.is-selected .title{fill:var(--accent-on)}
+.mm-svg .type{font-size:11px}
+.mm-svg .title{font-size:13px;font-weight:500}
+.mm-svg .node.is-root .title{font-size:15px;font-weight:600}
+.mm-svg .node.is-root .type{font-size:11px;fill:color-mix(in srgb,var(--accent-on) 72%,transparent)}
+.mm-svg .more-text{font-size:12px;fill:var(--t2)}
+.mm-svg .node.more .card-rect{stroke-dasharray:3 3}
+.mm-svg .node.more:hover .card-rect{stroke:var(--accent);stroke-dasharray:none}
+
+.lens-rail{position:absolute;left:16px;right:16px;top:4px;height:24px;display:flex;align-items:center;gap:6px;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity 120ms ease,transform 120ms ease;z-index:9}
+.lens-window.rail-on .lens-rail,.lens-window.rail-forced .lens-rail{opacity:1;pointer-events:auto;transform:none}
+.rail-title{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--b2);background:var(--paper);color:var(--ink);cursor:grab;user-select:none;white-space:nowrap;flex:0 0 auto}
+.rail-title:active{cursor:grabbing}
+.rail-grip{width:8px;height:12px;display:inline-block;background-image:radial-gradient(circle,currentColor 1px,transparent 1.2px);background-size:4px 4px;color:var(--t3)}
+.rail-title b{font-size:11px;font-weight:600}
+.rail-center{flex:1 1 auto;min-width:0;display:flex;align-items:center;justify-content:center;gap:4px}
+.rail-pattern{font-size:10px;line-height:16px;padding:0 4px;border:1px solid var(--b1);color:var(--t3)}
+.rail-actions{display:flex;align-items:center;justify-content:center;gap:4px;min-width:0}
+.rail-actions[hidden]{display:none}
+.rail-action{height:24px;padding:0 7px;font-size:11px;line-height:22px;border:1px solid var(--b1);background:transparent;color:var(--ink);cursor:pointer;white-space:nowrap}
+.rail-action:hover{border-color:var(--accent);color:var(--accent)}
+.rail-action.primary{border-color:var(--accent);color:var(--accent)}
+.rail-action:disabled{opacity:.45;cursor:default}
+.rail-btn{height:24px;padding:0 7px;font-size:11px;line-height:22px;border:1px solid var(--b1);background:var(--paper);color:var(--t2);cursor:pointer;white-space:nowrap;flex:0 0 auto}
+.rail-btn:hover{border-color:var(--b2);color:var(--ink)}
+.rail-btn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.rail-close{width:24px;padding:0;font-size:14px;line-height:22px;text-align:center}
+
+.lens-explain{position:absolute;display:none;width:300px;max-height:230px;overflow:auto;padding:10px 12px 12px;border:1px solid var(--b2);background:var(--paper);z-index:8;opacity:0;transform:translateY(2px);transition:opacity 140ms ease,transform 140ms ease}
+.lens-explain.is-on{display:block;opacity:1;transform:none}
+.lens-explain-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.lens-explain-head b{font-size:11px;font-weight:600;color:var(--t2);letter-spacing:.04em}
+.lens-explain-head span{flex:1 1 auto;min-width:0;font-size:10px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lens-explain-head button{padding:0;border:0;background:none;font-size:10px;color:var(--t3);cursor:pointer}
+.lens-explain-head button:hover{color:var(--accent)}
+.lens-explain p{margin:0;font-size:12px;line-height:1.7;color:var(--ink)}
+.lens-status{position:absolute;left:16px;bottom:48px;max-width:calc(100% - 32px);display:none;padding:4px 8px;border:1px solid var(--b1);background:var(--paper);font-size:11px;line-height:1.5;color:var(--t2);z-index:10}
+.lens-status.is-on{display:block}
+.lens-mode-chip{position:absolute;left:16px;bottom:16px;display:none;align-items:center;gap:6px;padding:3px 6px 3px 8px;border:1px solid var(--b2);background:var(--paper);font-size:10px;color:var(--t2);z-index:9}
+.lens-mode-chip.is-on{display:inline-flex}
+.lens-mode-chip button{padding:0 4px;border:0;background:none;font-size:10px;color:var(--accent);cursor:pointer}
+.lens-mode-chip button:hover{text-decoration:underline}
+
+.bare .topbar,.bare .inspector{display:none}
+.bare .stage-wrap{display:block}
+.bare .stage{position:fixed;inset:0}
+.no-anim *{transition:none!important;animation:none!important}
+
+#measureHost{position:fixed;left:-100000px;top:0;width:4200px;height:2600px;opacity:0;pointer-events:none;z-index:-1}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="toprow">
+      <div class="brand">结构图 · 悬浮图谱</div>
+      <span class="chip">D203 / v49.29</span>
+      <span class="chip subtle">设计样张 · 零产品代码</span>
+      <span class="spacer"></span>
+      <div class="seg" id="modeTabs">
+        <button data-mode="reader" class="on">阅读界面</button>
+        <button data-mode="light">浅壁纸</button>
+        <button data-mode="dark">深壁纸</button>
+        <button data-mode="busy">花哨壁纸</button>
+      </div>
+    </div>
+    <div class="toprow">
+      <div class="seg" id="presetTabs">
+        <button data-preset="real" class="on">真实样张</button>
+        <button data-preset="timeline">4 卡时间线</button>
+        <button data-preset="tree">7 卡树</button>
+        <button data-preset="argument">12 卡论证</button>
+      </div>
+      <span class="sep"></span>
+      <div class="seg" id="toggleTabs">
+        <button data-toggle="rail" aria-pressed="false">常显控制轨</button>
+      </div>
+      <span class="spacer"></span>
+      <button class="btn" id="toggleWindow">收起结构图</button>
+      <button class="btn" id="reset">重置</button>
+    </div>
+  </header>
+
+  <main class="stage-wrap">
+    <section class="stage mode-reader" id="stage">
+      <div class="reader" id="reader">
+        <div class="reader-top">
+          <nav class="reader-nav"><span>书架</span><span>摘录</span><span>复习</span><span>推荐</span><span>卡片</span><span>数据</span></nav>
+          <div class="reader-title">动物化的后现代</div>
+          <div class="reader-tools"><span>制卡台</span><span>设置</span><span>—</span><span>□</span><span>×</span></div>
+        </div>
+        <div class="reader-body">
+          <div class="reader-col">
+            <div class="reader-kicker">第三章 · 超扁平</div>
+            <p class="is-reading-para" data-para="para-root">风格对于整个日本动画界有深远的影响。一九八〇年代中期起，成为吉卜力工作室的底之一。知名作品有《银河铁道999》、《宇宙战舰大和号完结篇》、《一休和尚》、《龙猫》、CG动画电影《最终幻想：灵魂深处》等。</p>
+            <p class="note" data-para="para-e1">译注：狩野山雪（1590-1651）活跃于十七世纪的京都狩野派画家，将传统水墨的装饰性重新诠释，以强调垂直、水平的几何构图而闻名。</p>
+            <p class="note" data-para="para-e2">译注：曾我萧白（1730-1781）江户时代的画家，以笔触细致、风格大胆著称。画风强烈令人印象深刻，受到当时一般民众的广大喜爱。</p>
+            <p class="note">译注：玩具 / 手办模型的造型师。</p>
+            <p class="note">译注：BOME 出生于大阪，本名是秘密，八〇年代创作了许多美少女手办模型，接受村上隆的委托制作「Project Ko2」原型，现为海洋堂制作部长，并且是世界知名的原型师与艺术家。</p>
+            <p>参考《超扁平》所收录的文章，以及《超扁平日本美术论》。关于手办模型的讨论，于二〇〇八年八月二十日「Wonder Festival 2000」所举行的演讲中曾被反复提及。</p>
+            <p>即使不管这评论家的讨论，无论谁都能轻易看出来御宅族系作品中日本印象的痕迹。八〇年代初受到狂热支持的高桥留美子漫画《福星小子》，便是以混合了民俗学与都市传说成为独持作品闻名。这是一个以鬼、雪女与弁财天为原型的外星人、异人陆续现身并引发各种事端的搞笑喜剧，这里充分表现了御宅族的幻想被包装在日常生活里的状态。</p>
+            <p>这种对日本印象的喜好，即使到动画和游戏已被世界所接受的现今，仍持续给予强烈的规范。甚至可说到目前为止，这种喜爱才被认为是御宅族的条件。</p>
+          </div>
+        </div>
+      </div>
+      <div class="wall-note" id="wallNote">阅读界面已最小化 · 浅色壁纸</div>
+
+      <div class="lens-window" id="lensWin">
+        <div class="lens-canvas">
+          <div class="graph" id="graphHost"></div>
+
+          <div class="lens-rail" id="rail">
+            <div class="rail-title" id="railTitle" title="拖动窗口">
+              <span class="rail-grip" aria-hidden="true"></span>
+              <b>结构图</b>
+            </div>
+            <div class="rail-center">
+              <span class="rail-pattern" id="railPattern">论证图</span>
+              <div class="rail-actions" id="railActions" hidden>
+                <button class="rail-action primary" data-act="jump" title="跳到原文">跳到原文</button>
+                <button class="rail-action" data-act="explain" title="它在说什么">它在说什么</button>
+                <button class="rail-action" data-act="deepen" title="深挖">深挖</button>
+                <button class="rail-action" data-act="map" title="在完整图谱中打开">在完整图谱中打开</button>
+              </div>
+            </div>
+            <button class="rail-btn" id="railPin" aria-pressed="true" title="窗口置顶">置顶</button>
+            <button class="rail-btn rail-close" id="railClose" title="关闭结构图" aria-label="关闭结构图">×</button>
+          </div>
+
+          <div class="lens-explain" id="explain">
+            <div class="lens-explain-head">
+              <b>它在说什么</b>
+              <span id="explainTitle"></span>
+              <button data-act="closeExplain">收起</button>
+            </div>
+            <p>这一组把「超扁平」放回日本美术史的长线里：金田伊功的构图对应狩野山雪的几何性，手办造型的进化对应佛像雕刻的重复。它不证明直接的影响关系，而是搭一条可比较的结构线，让读者看到相似性从哪里来。</p>
+          </div>
+
+          <div class="lens-mode-chip" id="modeChip">
+            <span id="modeChipText">全图 · 0.42×</span>
+            <button id="backFocus">回到聚焦</button>
+          </div>
+
+          <div class="lens-status" id="status"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="inspector">
+      <h2>尺寸账本</h2>
+      <div class="kv">
+        <span>舞台工作区</span><b id="mStage">—</b>
+        <span>内容边界</span><b id="mContent">—</b>
+        <span>全图内容</span><b id="mFullContent">—</b>
+        <span>窗口留白</span><b>左/右 16 · 上 32 · 下 16</b>
+        <span>期望窗口</span><b id="mDesired">—</b>
+        <span>最大窗口（92%）</span><b id="mMax">—</b>
+        <span>缩放 s</span><b id="mScale">—</b>
+        <span>档位</span><b id="mTier">—</b>
+        <span>实际窗口</span><b id="mWin">—</b>
+        <span>纸片底尺寸</span><b id="mPlate">—</b>
+        <span>纸片底策略</span><b>94% 纸 + 发丝线 + 浮动阴影</b>
+        <span>窗口位置</span><b id="mPos">—</b>
+        <span>锚点漂移</span><b id="mDrift">—</b>
+      </div>
+
+      <h2>全部预设</h2>
+      <table class="ledger">
+        <thead><tr><th>预设</th><th>内容</th><th>档位</th><th>窗口</th></tr></thead>
+        <tbody id="mTable"></tbody>
+      </table>
+
+      <h2>判定</h2>
+      <ul class="judge" id="mJudge"></ul>
+
+      <h2>怎么读这张样张</h2>
+      <ul class="notes">
+        <li>主场景是「图谱悬浮在阅读界面之上」，不是壁纸；三组壁纸只模拟阅读界面最小化后的专注场景。</li>
+        <li>纸片底就是窗口表面，不是固定底板：图谱收缩/展开或切预设时，纸片跟着窗口一起变大小。</li>
+        <li>静息时只有图谱与纸片；指针进入窗口上缘 32px 才浮出控制轨。</li>
+        <li>点节点 → 整卡主题色强调（与根节点同款，无外框/双框）；动作在控制轨居中位置出现，控制轨会自动亮 2.5s。</li>
+        <li>「它在说什么」从控制轨下方展开纸片卡，窗口尺寸不变。</li>
+        <li>「常显控制轨」只是样张辅助；产品里控制轨自动隐藏。</li>
+      </ul>
+    </aside>
+  </main>
+</div>
+<div id="measureHost" aria-hidden="true"></div>
+<pre id="measureJson" hidden></pre>
+
+<script>
+"use strict";
+(() => {
+  const NS = "http://www.w3.org/2000/svg";
+  const MIN_W = 360, MIN_H = 160, FLOOR = 0.62, MAX_RATIO = 0.92;
+  const PAD_X = 32, PAD_TOP = 32, PAD_BOTTOM = 16;
+  const EM = { cjk: 1, ascii: 0.55, space: 0.3, other: 0.6 };
+  const CARD = {
+    titleSize: 13, typeSize: 11, rootSize: 15, rootBold: 1.06,
+    padX: 24, badgeW: 20, minW: 96, maxW: 320, h: 48,
+    rootPadX: 32, rootMinW: 160, rootMaxW: 400, rootH: 56,
+    moreW: 112, moreH: 32
+  };
+
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const stage = $("#stage");
+  const reader = $("#reader");
+  const lensWin = $("#lensWin");
+  const graphHost = $("#graphHost");
+  const measureHost = $("#measureHost");
+  const measureJson = $("#measureJson");
+
+  const q = new URLSearchParams(location.search);
+  const state = {
+    mode: q.get("mode") || "reader",
+    preset: q.get("preset") || "real",
+    rail: q.get("rail") === "1",
+    hidden: q.get("hidden") === "1",
+    showAll: q.get("all") === "1",
+    selected: q.get("select") || null,
+    explain: q.get("explain") === "1",
+    pinned: q.get("pin") !== "0",
+    anchorDrift: 0,
+    clamped: false,
+    windowSizeBeforeExplain: null,
+    current: null
+  };
+
+  // ---------- 确定性估宽（与产品 measure.ts 同口径） ----------
+  const isCjk = (cp) =>
+    (cp >= 0x1100 && cp <= 0x11ff) || (cp >= 0x2e80 && cp <= 0x303f) ||
+    (cp >= 0x3040 && cp <= 0x9fff) || (cp >= 0xa960 && cp <= 0xa97f) ||
+    (cp >= 0xac00 && cp <= 0xd7af) || (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) || (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1f300 && cp <= 0x1faff) ||
+    (cp >= 0x20000 && cp <= 0x3ffff);
+  const charEm = (cp) => cp < 0x80 ? (cp === 0x20 ? EM.space : cp < 0x20 ? 0 : EM.ascii) : isCjk(cp) ? EM.cjk : EM.other;
+  const textWidth = (text, size) => {
+    let em = 0;
+    for (const ch of String(text ?? "")) em += charEm(ch.codePointAt(0) || 0);
+    return em * size;
+  };
+  const r4 = (v) => Math.ceil(v / 4 - 1e-9) * 4;
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+  const fitText = (text, size, maxW) => {
+    const s = String(text ?? "");
+    if (textWidth(s, size) <= maxW) return s;
+    const ell = "…";
+    const budget = maxW - textWidth(ell, size);
+    let w = 0, out = "";
+    for (const ch of s) {
+      const cw = charEm(ch.codePointAt(0) || 0) * size;
+      if (w + cw > budget) break;
+      w += cw; out += ch;
+    }
+    return out + ell;
+  };
+  const cardW = (title, type) => {
+    const tw = Math.max(textWidth(title, CARD.titleSize), textWidth(type || "", CARD.typeSize));
+    return Math.min(CARD.maxW, Math.max(CARD.minW, r4(tw + CARD.padX + CARD.badgeW)));
+  };
+  const rootW = (title) => {
+    const tw = textWidth(title, CARD.rootSize) * CARD.rootBold;
+    return Math.min(CARD.rootMaxW, Math.max(CARD.rootMinW, r4(tw + CARD.rootPadX)));
+  };
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+
+  // ---------- 数据 ----------
+  const PRESETS = {
+    real: {
+      id: "real", name: "真实样张", pattern: "论证图", layout: "stack",
+      root: { type: "论点", title: "村上隆的美术史类比" },
+      children: [
+        { type: "证据", title: "金田伊功的构图与狩野山雪、曾我萧白的关联" },
+        { type: "证据", title: "手办造型进化重复佛像雕刻的历史" }
+      ],
+      baseMore: 6,
+      moreLabel: "其余 {n} 段"
+    },
+    timeline: {
+      id: "timeline", name: "4 卡时间线", pattern: "时间线", layout: "timeline",
+      root: { type: "材料", title: "√2 与第一次数学危机" },
+      children: [
+        { type: "叙事", title: "学派确立「万物皆数」", time: "约前 530" },
+        { type: "叙事", title: "希帕索斯发现不可公度", time: "约前 470" },
+        { type: "叙事", title: "欧多克索斯建立比例论", time: "约前 370" },
+        { type: "叙事", title: "戴德金分割奠基实数", time: "1872" }
+      ],
+      moreLabel: "另有 {n} 项"
+    },
+    tree: {
+      id: "tree", name: "7 卡树", pattern: "大纲树", layout: "stack",
+      root: { type: "材料", title: "论证的七层结构" },
+      children: [
+        { type: "命题", title: "核心命题：严格化不是偶然" },
+        { type: "前提", title: "不可公度量的发现" },
+        { type: "前提", title: "几何量与算术量的分离" },
+        { type: "推导", title: "比例论替代数的算术" },
+        { type: "证据", title: "《原本》第五卷的文本" },
+        { type: "反方", title: "实用计算并不需要严格性" },
+        { type: "结论", title: "危机催生了公理化的传统" }
+      ],
+      moreLabel: "另有 {n} 项"
+    },
+    argument: {
+      id: "argument", name: "12 卡论证", pattern: "论证图", layout: "argument",
+      root: { type: "论点", title: "危机推动了数学的严格化" },
+      children: [
+        { type: "理由", title: "几何量取代算术数" },
+        { type: "证据", title: "《原本》第五卷比例论" },
+        { type: "理由", title: "连续量的精确理论" },
+        { type: "证据", title: "穷竭法逼近曲边面积" },
+        { type: "理由", title: "实数系的算术化" },
+        { type: "证据", title: "戴德金分割与康托尔序列" },
+        { type: "反方", title: "严格化只是少数人的兴趣" },
+        { type: "反驳", title: "微积分基础危机反证其必要" },
+        { type: "理由", title: "公理化成为现代数学范式" },
+        { type: "证据", title: "希尔伯特《几何基础》" },
+        { type: "反方", title: "形式化会牺牲直观" },
+        { type: "反驳", title: "直观与形式在教学中互补" }
+      ],
+      moreLabel: "另有 {n} 项"
+    }
+  };
+  const PRESET_IDS = Object.keys(PRESETS);
+
+  // ---------- 布局 ----------
+  const moreText = (label, n) => String(label || "另有 {n} 项").replace("{n}", String(n));
+
+  function buildData(presetId, visible, moreCount) {
+    const p = PRESETS[presetId];
+    const kids = p.children.slice(0, visible).map((c, i) => ({
+      ...c,
+      id: `${presetId}-c${i}`,
+      para: i === 0 ? "para-e1" : i === 1 ? "para-e2" : null,
+      reading: false
+    }));
+    const totalMore = (p.baseMore || 0) + moreCount;
+    return {
+      id: p.id, pattern: p.pattern, layout: p.layout,
+      root: { ...p.root, id: "root", para: "para-root", reading: true },
+      children: kids,
+      more: totalMore > 0 ? { id: "more", type: "more", title: moreText(p.moreLabel, totalMore), count: totalMore } : null,
+      total: p.children.length
+    };
+  }
+
+  function layoutStack(data) {
+    const rootCard = { id: "root", kind: "node", node: data.root, w: rootW(data.root.title), h: CARD.rootH, isRoot: true };
+    const gapY = 20, gapX = 56;
+    let y = 0;
+    const kids = [];
+    for (const c of data.children) {
+      const w = cardW(c.title, c.type);
+      kids.push({ id: c.id, kind: "node", node: c, x: rootCard.w + gapX, y, w, h: CARD.h });
+      y += CARD.h + gapY;
+    }
+    let moreItem = null;
+    if (data.more) {
+      moreItem = { id: "more", kind: "more", node: data.more, x: rootCard.w + gapX, y, w: CARD.moreW, h: CARD.moreH };
+      y += CARD.moreH;
+    }
+    const kidsBottom = kids.length ? kids[kids.length - 1].y + kids[kids.length - 1].h : 0;
+    const contentBottom = moreItem ? moreItem.y + moreItem.h : kidsBottom;
+    const rootY = Math.max(0, Math.round((contentBottom - rootCard.h) / 2));
+    rootCard.x = 0; rootCard.y = rootY;
+    const items = [rootCard, ...kids];
+    if (moreItem) items.push(moreItem);
+    const edges = kids.map((k) => ({
+      x1: rootCard.w, y1: rootY + rootCard.h / 2,
+      x2: k.x, y2: k.y + k.h / 2
+    }));
+    const maxKidW = Math.max(0, ...kids.map((k) => k.w), moreItem ? moreItem.w : 0);
+    return {
+      items, edges,
+      bounds: { w: rootCard.w + gapX + maxKidW, h: Math.max(contentBottom, rootY + rootCard.h) }
+    };
+  }
+
+  function layoutTimeline(data) {
+    const rootCard = { id: "root", kind: "node", node: data.root, x: 0, y: 0, w: rootW(data.root.title), h: CARD.rootH, isRoot: true };
+    const gapX = 24, axisY = CARD.rootH + 28, childY = axisY + 24;
+    let x = 0;
+    const kids = [];
+    const times = [];
+    for (const c of data.children) {
+      const w = cardW(c.title, c.type);
+      const item = { id: c.id, kind: "node", node: c, x, y: childY, w, h: CARD.h };
+      kids.push(item);
+      times.push({ x: x + w / 2, text: c.time || "" });
+      x += w + gapX;
+    }
+    const totalW = Math.max(rootCard.w, x - gapX);
+    return {
+      items: [rootCard, ...kids],
+      edges: [],
+      timeline: { axisY, totalW, ticks: times, rootX: rootCard.w / 2 },
+      bounds: { w: totalW, h: childY + CARD.h }
+    };
+  }
+
+  function layoutArgument(data) {
+    const rootCard = { id: "root", kind: "node", node: data.root, w: rootW(data.root.title), h: CARD.rootH, isRoot: true };
+    const gapX = 32, childY = CARD.rootH + 48;
+    let x = 0;
+    const kids = [];
+    for (const c of data.children) {
+      const w = cardW(c.title, c.type);
+      kids.push({ id: c.id, kind: "node", node: c, x, y: childY, w, h: CARD.h });
+      x += w + gapX;
+    }
+    let moreItem = null;
+    if (data.more) {
+      moreItem = { id: "more", kind: "more", node: data.more, x, y: childY + (CARD.h - CARD.moreH) / 2, w: CARD.moreW, h: CARD.moreH };
+      x += CARD.moreW;
+    }
+    const rowW = x;
+    const totalW = Math.max(rootCard.w, rowW);
+    rootCard.x = Math.round((totalW - rootCard.w) / 2);
+    rootCard.y = 0;
+    const rootCx = rootCard.x + rootCard.w / 2;
+    const edges = kids.map((k) => ({ rootCx, rootBottom: CARD.rootH, kidCx: k.x + k.w / 2, kidTop: childY }));
+    const items = [rootCard, ...kids];
+    if (moreItem) items.push(moreItem);
+    return { items, edges, bounds: { w: totalW, h: childY + CARD.h } };
+  }
+
+  function layoutFor(data) {
+    if (data.layout === "timeline") return layoutTimeline(data);
+    if (data.layout === "argument") return layoutArgument(data);
+    return layoutStack(data);
+  }
+
+  // ---------- SVG ----------
+  function nodeMarkup(item) {
+    const n = item.node;
+    const isRoot = !!item.isRoot;
+    const maxText = item.w - (isRoot ? CARD.rootPadX : CARD.padX + CARD.badgeW);
+    const title = fitText(n.title, isRoot ? CARD.rootSize : CARD.titleSize, maxText);
+    const type = fitText(n.type || "", CARD.typeSize, maxText);
+    const tx = item.x + (isRoot ? 16 : 12);
+    const fill = isRoot ? "var(--accent)" : "var(--paper)";
+    const stroke = isRoot ? "var(--accent)" : "var(--b2)";
+    const typeFill = isRoot ? "rgba(255,255,255,.72)" : "var(--t3)";
+    const titleFill = isRoot ? "var(--accent-on)" : "var(--ink)";
+    const cls = ["node", isRoot ? "is-root" : "", n.reading ? "is-reading" : ""].filter(Boolean).join(" ");
+    return `<g class="${cls}" data-id="${esc(item.id)}" ${n.para ? `data-para="${esc(n.para)}"` : ""} tabindex="0" role="button" aria-label="${esc(n.title)}">
+      <rect class="card-rect" x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="${fill}" stroke="${stroke}"/>
+      <text class="type" x="${tx}" y="${item.y + (isRoot ? 18 : 17)}" fill="${typeFill}">${esc(type)}</text>
+      <text class="title" x="${tx}" y="${item.y + (isRoot ? 39 : 36)}" fill="${titleFill}">${esc(title)}</text>
+    </g>`;
+  }
+
+  function moreMarkup(item) {
+    return `<g class="node more" data-id="more" data-more="1" tabindex="0" role="button" aria-label="${esc(item.node.title)}">
+      <rect class="card-rect" x="${item.x}" y="${item.y}" width="${item.w}" height="${item.h}" fill="var(--paper)" stroke="var(--b1)"/>
+      <text class="more-text" x="${item.x + item.w / 2}" y="${item.y + item.h / 2 + 4}" text-anchor="middle">${esc(item.node.title)} +</text>
+    </g>`;
+  }
+
+  function edgeMarkup(e) {
+    const mx = Math.round((e.x1 + e.x2) / 2);
+    return `<path class="edge-line" d="M${e.x1},${e.y1} H${mx} V${e.y2} H${e.x2}"/>`;
+  }
+
+  function argEdgeMarkup(e) {
+    const my = Math.round((e.rootBottom + e.kidTop) / 2);
+    return `<path class="edge-line" d="M${e.rootCx},${e.rootBottom} V${my} H${e.kidCx} V${e.kidTop}"/>`;
+  }
+
+  function buildInner(data, layout) {
+    let out = '<g class="edges">';
+    if (data.layout === "argument") {
+      for (const e of layout.edges) out += argEdgeMarkup(e);
+    } else {
+      for (const e of layout.edges) out += edgeMarkup(e);
+    }
+    if (layout.timeline) {
+      const t = layout.timeline;
+      out += `<path class="edge-line" d="M${t.rootX},${CARD.rootH} V${t.axisY}"/>`;
+      out += `<path class="edge-line" d="M0,${t.axisY} H${t.totalW}"/>`;
+      for (const tick of t.ticks) {
+        out += `<path class="edge-line" d="M${tick.x},${t.axisY} V${t.axisY + 8}"/>`;
+      }
+    }
+    out += "</g>";
+    if (layout.timeline) {
+      const t = layout.timeline;
+      for (const tick of t.ticks) {
+        if (!tick.text) continue;
+        out += `<text class="time" x="${tick.x}" y="${t.axisY - 8}" text-anchor="middle">${esc(tick.text)}</text>`;
+      }
+    }
+    // 一条关系标签：只在有第一条边时画
+    if (layout.edges.length && data.layout !== "timeline") {
+      const e = layout.edges[0];
+      const lx = data.layout === "argument" ? Math.round((e.rootCx + e.kidCx) / 2) : Math.round((e.x1 + e.x2) / 2);
+      const ly = data.layout === "argument" ? Math.round((e.rootBottom + e.kidTop) / 2) - 5 : e.y1 - 6;
+      out += `<text class="rel-label" x="${lx}" y="${ly}" text-anchor="middle">据</text>`;
+    }
+    for (const item of layout.items) {
+      out += item.kind === "more" ? moreMarkup(item) : nodeMarkup(item);
+    }
+    return out;
+  }
+
+  const measureCache = new Map();
+  function measureData(presetId, visible, moreCount) {
+    const key = `${presetId}:${visible}:${moreCount}`;
+    if (measureCache.has(key)) return measureCache.get(key);
+    const data = buildData(presetId, visible, moreCount);
+    const layout = layoutFor(data);
+    const inner = buildInner(data, layout);
+    const wrap = document.createElementNS(NS, "svg");
+    wrap.setAttribute("class", "mm-svg");
+    wrap.setAttribute("width", "4200");
+    wrap.setAttribute("height", "2600");
+    wrap.setAttribute("viewBox", "0 0 4200 2600");
+    wrap.style.overflow = "visible";
+    wrap.innerHTML = `<g class="graph">${inner}</g>`;
+    measureHost.appendChild(wrap);
+    let bbox = { x: 0, y: 0, width: layout.bounds.w, height: layout.bounds.h };
+    try {
+      const g = wrap.querySelector("g.graph");
+      const b = g.getBBox();
+      if (b.width > 0 && b.height > 0) bbox = b;
+    } catch {}
+    wrap.remove();
+    const content = { w: Math.ceil(bbox.width), h: Math.ceil(bbox.height) };
+    const result = { data, layout, content };
+    measureCache.set(key, result);
+    return result;
+  }
+
+  function computeTier(content, stageW, stageH, all) {
+    const maxW = Math.max(MIN_W, Math.floor(stageW * MAX_RATIO));
+    const maxH = Math.max(MIN_H, Math.floor(stageH * MAX_RATIO));
+    // 留白不参与缩放：s 的上限由「内容 × s + 固定留白 ≤ 工作区上限」解出
+    const maxS = Math.min(1, (maxW - PAD_X) / Math.max(1, content.w), (maxH - PAD_TOP - PAD_BOTTOM) / Math.max(1, content.h));
+    const s = Math.max(0.1, all ? maxS : Math.min(1, maxS));
+    let tier;
+    if (all) tier = s >= 0.999 ? "100% 完整" : "全图（显式）";
+    else if (s >= 0.999) tier = "100% 完整";
+    else if (s >= FLOOR - 1e-9) tier = "缩放完整";
+    else tier = "需聚焦";
+    const winW = Math.min(maxW, Math.max(MIN_W, Math.floor(content.w * s + PAD_X)));
+    const winH = Math.min(maxH, Math.max(MIN_H, Math.floor(content.h * s + PAD_TOP + PAD_BOTTOM)));
+    return { s, tier, winW, winH, maxW, maxH, maxS };
+  }
+
+  function chooseDefault(presetId) {
+    const total = PRESETS[presetId].children.length;
+    const full = measureData(presetId, total, 0);
+    const t = computeTier(full.content, stage.clientWidth, stage.clientHeight, false);
+    if (t.s >= FLOOR - 1e-9 || total <= 1) {
+      return { mode: "fit", data: full.data, layout: full.layout, content: full.content, s: t.s, tier: t.tier, winW: t.winW, winH: t.winH, total };
+    }
+    let best = null;
+    for (let n = total - 1; n >= 1; n--) {
+      const focus = measureData(presetId, n, total - n);
+      const ft = computeTier(focus.content, stage.clientWidth, stage.clientHeight, false);
+      if (ft.s >= FLOOR - 1e-9) { best = { n, focus, ft }; break; }
+    }
+    if (!best) {
+      const focus = measureData(presetId, 1, total - 1);
+      const ft = computeTier(focus.content, stage.clientWidth, stage.clientHeight, false);
+      best = { n: 1, focus, ft };
+    }
+    const s = Math.max(FLOOR, best.ft.s);
+    return {
+      mode: "focus", n: best.n, more: total - best.n,
+      data: best.focus.data, layout: best.focus.layout, content: best.focus.content,
+      s, tier: `聚焦（${best.n}/${total}）`,
+      winW: Math.max(MIN_W, Math.floor(best.focus.content.w * s + PAD_X)),
+      winH: Math.max(MIN_H, Math.floor(best.focus.content.h * s + PAD_TOP + PAD_BOTTOM)),
+      total
+    };
+  }
+
+  function itemById(layout, id) {
+    return layout.items.find((it) => it.id === id) || null;
+  }
+
+  function drawGraph(chosen) {
+    const svgW = Math.max(1, Math.floor(chosen.content.w * chosen.s));
+    const svgH = Math.max(1, Math.floor(chosen.content.h * chosen.s));
+    graphHost.style.width = `${svgW}px`;
+    graphHost.style.height = `${svgH}px`;
+    graphHost.innerHTML = `<svg class="mm-svg" width="${svgW}" height="${svgH}" viewBox="0 0 ${chosen.content.w} ${chosen.content.h}" preserveAspectRatio="xMinYMin meet" role="img" aria-label="材料结构图"><g class="graph">${buildInner(chosen.data, chosen.layout)}</g></svg>`;
+    syncNodeClasses();
+  }
+
+  function syncNodeClasses() {
+    const svg = graphHost.querySelector("svg");
+    if (!svg) return;
+    $$(".node", svg).forEach((g) => {
+      g.classList.toggle("is-selected", g.dataset.id === state.selected);
+    });
+  }
+
+  function placeWindow(chosen, prev, preserve) {
+    const anchorId = state.selected && itemById(chosen.layout, state.selected) ? state.selected : "root";
+    let oldScreen = null;
+    if (preserve && prev) {
+      const oldId = state.selected && itemById(prev.layout, state.selected) ? state.selected : "root";
+      const oldItem = itemById(prev.layout, oldId);
+      if (oldItem) {
+        oldScreen = {
+          x: prev.left + 16 + oldItem.x * prev.s + oldItem.w * prev.s / 2,
+          y: prev.top + 32 + oldItem.y * prev.s + oldItem.h * prev.s / 2
+        };
+      }
+    }
+    const item = itemById(chosen.layout, anchorId);
+    const localX = 16 + (item ? item.x * chosen.s + item.w * chosen.s / 2 : 0);
+    const localY = 32 + (item ? item.y * chosen.s + item.h * chosen.s / 2 : 0);
+    let left, top;
+    if (oldScreen) {
+      left = oldScreen.x - localX;
+      top = oldScreen.y - localY;
+    } else {
+      left = stage.clientWidth - chosen.winW - Math.max(24, Math.round(stage.clientWidth * 0.04));
+      top = Math.max(24, Math.round(stage.clientHeight * 0.12));
+    }
+    const desiredLeft = Math.round(left), desiredTop = Math.round(top);
+    left = Math.round(clamp(left, 8, Math.max(8, stage.clientWidth - chosen.winW - 8)));
+    top = Math.round(clamp(top, 8, Math.max(8, stage.clientHeight - chosen.winH - 8)));
+    chosen.left = left; chosen.top = top;
+    lensWin.style.left = `${left}px`;
+    lensWin.style.top = `${top}px`;
+    lensWin.style.width = `${chosen.winW}px`;
+    lensWin.style.height = `${chosen.winH}px`;
+
+    const newItem = itemById(chosen.layout, anchorId);
+    if (oldScreen && newItem) {
+      const ax = left + 16 + newItem.x * chosen.s + newItem.w * chosen.s / 2;
+      const ay = top + 32 + newItem.y * chosen.s + newItem.h * chosen.s / 2;
+      state.anchorDrift = Math.hypot(ax - oldScreen.x, ay - oldScreen.y);
+      state.clamped = Math.abs(left - desiredLeft) > 0.5 || Math.abs(top - desiredTop) > 0.5;
+    } else {
+      state.anchorDrift = 0;
+      state.clamped = false;
+    }
+  }
+
+  function renderCurrent(preserve = true) {
+    const before = state.current;
+    let chosen;
+    if (state.showAll) {
+      const total = PRESETS[state.preset].children.length;
+      const full = measureData(state.preset, total, 0);
+      const t = computeTier(full.content, stage.clientWidth, stage.clientHeight, true);
+      chosen = { mode: "all", data: full.data, layout: full.layout, content: full.content, s: t.s, tier: t.tier, winW: t.winW, winH: t.winH, total };
+    } else {
+      chosen = chooseDefault(state.preset);
+    }
+    drawGraph(chosen);
+    placeWindow(chosen, before, preserve);
+    state.current = chosen;
+    syncNodeClasses();
+    if (state.selected && !itemById(chosen.layout, state.selected)) {
+      state.selected = null; state.explain = false;
+    }
+    updateRailActions();
+    if (state.explain) positionExplain();
+    updateModeChip();
+    updateLedger();
+  }
+
+  // ---------- 控制轨 / 解释卡 ----------
+  let railTimer = null;
+  function showRailTemporarily(ms = 2500) {
+    lensWin.classList.add("rail-on");
+    if (railTimer) clearTimeout(railTimer);
+    railTimer = setTimeout(() => {
+      if (!state.rail) lensWin.classList.remove("rail-on");
+    }, ms);
+  }
+
+  function updateRailActions() {
+    const actions = $("#railActions");
+    const pattern = $("#railPattern");
+    if (!state.current || !state.selected) {
+      actions.hidden = true;
+      pattern.hidden = false;
+      return;
+    }
+    actions.hidden = false;
+    pattern.hidden = true;
+    const narrow = state.current.winW < 520;
+    const labels = {
+      jump: narrow ? "原文" : "跳到原文",
+      explain: narrow ? "解释" : "它在说什么",
+      deepen: "深挖",
+      map: narrow ? "全图" : "在完整图谱中打开"
+    };
+    $$("[data-act]", actions).forEach((b) => {
+      b.textContent = labels[b.dataset.act];
+    });
+  }
+
+  function positionExplain() {
+    const box = $("#explain");
+    const cur = state.current;
+    const item = cur && state.selected ? itemById(cur.layout, state.selected) : null;
+    if (!item) { box.classList.remove("is-on"); return; }
+    box.classList.add("is-on");
+    const bw = Math.min(420, cur.winW - 32);
+    box.style.width = `${bw}px`;
+    box.style.left = `${Math.round((cur.winW - bw) / 2)}px`;
+    box.style.top = "36px";
+    box.style.maxHeight = `${Math.max(64, cur.winH - 36 - 16)}px`;
+  }
+
+  function updateModeChip() {
+    const chip = $("#modeChip");
+    const cur = state.current;
+    if (!cur || cur.mode !== "all") { chip.classList.remove("is-on"); return; }
+    chip.classList.add("is-on");
+    $("#modeChipText").textContent = `全图 · ${cur.s.toFixed(2)}×`;
+  }
+
+  let statusTimer = null;
+  function showStatus(text, ms = 2600) {
+    const el = $("#status");
+    el.textContent = text;
+    el.classList.add("is-on");
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = setTimeout(() => el.classList.remove("is-on"), ms);
+  }
+
+  function selectNode(id) {
+    const cur = state.current;
+    state.selected = id && cur && itemById(cur.layout, id) ? id : null;
+    state.explain = false;
+    state.windowSizeBeforeExplain = null;
+    $("#explain").classList.remove("is-on");
+    syncNodeClasses();
+    updateRailActions();
+    if (state.selected) showRailTemporarily(2500);
+  }
+
+  // ---------- 账本 ----------
+  function updateLedger() {
+    const cur = state.current;
+    if (!cur) return;
+    const sw = stage.clientWidth, sh = stage.clientHeight;
+    const content = cur.content;
+    const desiredW = Math.max(MIN_W, content.w + PAD_X);
+    const desiredH = Math.max(MIN_H, content.h + PAD_TOP + PAD_BOTTOM);
+    const full = measureData(state.preset, PRESETS[state.preset].children.length, 0);
+    $("#mStage").textContent = `${sw} × ${sh}`;
+    $("#mContent").textContent = `${content.w} × ${content.h}`;
+    $("#mFullContent").textContent = `${full.content.w} × ${full.content.h}`;
+    $("#mDesired").textContent = `${desiredW} × ${Math.max(MIN_H, content.h + PAD_TOP + PAD_BOTTOM)}`;
+    $("#mMax").textContent = `${Math.floor(sw * MAX_RATIO)} × ${Math.floor(sh * MAX_RATIO)}`;
+    $("#mScale").textContent = `${cur.s.toFixed(3)} ×`;
+    $("#mTier").textContent = cur.tier;
+    $("#mWin").textContent = `${cur.winW} × ${cur.winH}`;
+    $("#mPos").textContent = `(${cur.left}, ${cur.top})`;
+    $("#mDrift").textContent = `${state.anchorDrift.toFixed(1)} px${state.clamped ? " · 边缘钳制" : ""}`;
+    const plateW = cur.winW, plateH = cur.winH;
+    $("#mPlate").textContent = `${plateW} × ${plateH} · = 窗口`;
+
+    const rows = [];
+    for (const id of PRESET_IDS) {
+      if (id === state.preset) {
+        rows.push({
+          id, name: PRESETS[id].name, content,
+          tier: cur.tier, winW: cur.winW, winH: cur.winH, s: cur.s
+        });
+      } else {
+        const d = chooseDefault(id);
+        rows.push({ id, name: PRESETS[id].name, content: d.content, tier: d.tier, winW: d.winW, winH: d.winH, s: d.s });
+      }
+    }
+    $("#mTable").innerHTML = rows.map((r) => `<tr class="${r.id === state.preset ? "is-current" : ""}"><td>${esc(r.name)}</td><td>${r.content.w}×${r.content.h}</td><td>${esc(r.tier)}<span class="tier-sub">${r.s.toFixed(2)}×</span></td><td>${r.winW}×${r.winH}</td></tr>`).join("");
+
+    const contentFits = content.w * cur.s + PAD_X <= cur.winW + 1.5 && content.h * cur.s + PAD_TOP + PAD_BOTTOM <= cur.winH + 1.5;
+    const focused = cur.mode === "focus";
+    const judge = [
+      {
+        ok: contentFits,
+        text: focused
+          ? `聚焦内容完整；有意不全显（另有 ${cur.more || 0} 项，点「另有 N 项」可展开全部）`
+          : contentFits ? "内容完整落在窗口内，无裁切" : "内容超出窗口（不应发生）"
+      },
+      {
+        ok: cur.s >= FLOOR - 1e-9 || cur.mode === "all",
+        text: cur.mode === "all" ? `全图模式：显式选择低于可读下限（${cur.s.toFixed(2)}×）` : `缩放 ${cur.s.toFixed(2)}× ≥ 0.62 可读下限`
+      },
+      {
+        ok: state.anchorDrift <= 8 || state.clamped || !state.current,
+        text: `阅读节点作为锚点，漂移 ${state.anchorDrift.toFixed(1)} px${state.clamped ? "（贴边，已钳制）" : ""}`
+      },
+      {
+        ok: state.explain ? state.windowSizeBeforeExplain === `${cur.winW}×${cur.winH}` : false,
+        text: state.explain
+          ? (state.windowSizeBeforeExplain === `${cur.winW}×${cur.winH}` ? "解释浮层打开，窗口尺寸不变" : "解释浮层打开后窗口尺寸变了（不应发生）")
+          : "解释浮层未打开；打开后可复核窗口尺寸不变"
+      },
+      {
+        ok: true,
+        text: `纸片底 = 窗口表面：${cur.winW}×${cur.winH}；图谱收缩/展开时随窗口一起变`
+      }
+    ];
+    $("#mJudge").innerHTML = judge.map((j) => `<li class="${j.ok ? "" : "warn"}"><span class="mark">${j.ok ? "✓" : "—"}</span><span>${esc(j.text)}</span></li>`).join("");
+
+    measureJson.textContent = JSON.stringify({
+      stage: { w: sw, h: sh },
+      current: {
+        preset: state.preset, mode: cur.mode, tier: cur.tier,
+        content: cur.content, scale: Number(cur.s.toFixed(4)),
+        window: { w: cur.winW, h: cur.winH, x: cur.left, y: cur.top },
+        anchorDrift: Number(state.anchorDrift.toFixed(2)), clamped: state.clamped
+      },
+      presets: rows.map((r) => ({
+        id: r.id, name: r.name, content: r.content,
+        tier: r.tier, scale: Number(r.s.toFixed(4)), window: { w: r.winW, h: r.winH }
+      })),
+      judge: judge.map((j) => ({ ok: j.ok, text: j.text })),
+      toggles: { rail: state.rail, showAll: state.showAll, plate: "always-on" }
+    }, null, 2);
+  }
+
+  // ---------- UI 同步 ----------
+  function syncUI() {
+    $$("#modeTabs button").forEach((b) => b.classList.toggle("on", b.dataset.mode === state.mode));
+    $$("#presetTabs button").forEach((b) => b.classList.toggle("on", b.dataset.preset === state.preset));
+    $$("#toggleTabs button").forEach((b) => {
+      b.classList.toggle("on", state.rail);
+      b.setAttribute("aria-pressed", String(state.rail));
+    });
+    $("#toggleWindow").textContent = state.hidden ? "呼出结构图" : "收起结构图";
+    $("#railPin").setAttribute("aria-pressed", String(state.pinned));
+    $("#railPattern").textContent = PRESETS[state.preset].pattern;
+    lensWin.classList.toggle("rail-forced", state.rail);
+    lensWin.classList.toggle("is-hidden", state.hidden);
+    updateRailActions();
+  }
+
+  function setMode(mode) {
+    if (!["reader", "light", "dark", "busy"].includes(mode)) return;
+    state.mode = mode;
+    stage.className = `stage mode-${mode}${mode === "dark" ? " theme-dark" : ""}`;
+    const label = { reader: "", light: "浅色壁纸", dark: "深色壁纸", busy: "花哨壁纸" }[mode];
+    $("#wallNote").textContent = mode === "reader" ? "" : `阅读界面已最小化 · ${label}`;
+    syncUI();
+    updateLedger();
+  }
+
+  function setPreset(id) {
+    if (!PRESETS[id]) return;
+    state.preset = id;
+    state.showAll = false;
+    state.selected = null;
+    state.explain = false;
+    state.windowSizeBeforeExplain = null;
+    $("#explain").classList.remove("is-on");
+    syncUI();
+    renderCurrent(true);
+  }
+
+  function setShowAll(on) {
+    state.showAll = on;
+    if (!on) { state.selected = null; state.explain = false; $("#explain").classList.remove("is-on"); }
+    renderCurrent(true);
+  }
+
+  function setToggle(key, on) {
+    if (key !== "rail") return;
+    state.rail = on;
+    lensWin.classList.toggle("rail-forced", on);
+    if (on) lensWin.classList.add("rail-on");
+    else if (!state.explain) lensWin.classList.remove("rail-on");
+    syncUI();
+  }
+
+  function setHidden(hidden) {
+    state.hidden = hidden;
+    if (hidden) {
+      state.rail = false;
+      lensWin.classList.remove("rail-forced", "rail-on");
+    } else {
+      lensWin.classList.add("rail-on");
+      setTimeout(() => { if (!state.rail) lensWin.classList.remove("rail-on"); }, 1600);
+    }
+    syncUI();
+  }
+
+  function resetAll() {
+    state.mode = "reader";
+    state.preset = "real";
+    state.rail = false;
+    state.hidden = false;
+    state.showAll = false;
+    state.selected = null;
+    state.explain = false;
+    state.windowSizeBeforeExplain = null;
+    state.pinned = true;
+    state.anchorDrift = 0;
+    setMode("reader");
+    lensWin.classList.remove("rail-on", "rail-forced");
+    $("#explain").classList.remove("is-on");
+    syncUI();
+    renderCurrent(false);
+  }
+
+  // ---------- 事件 ----------
+  $("#modeTabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-mode]");
+    if (b) setMode(b.dataset.mode);
+  });
+  $("#presetTabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-preset]");
+    if (b) setPreset(b.dataset.preset);
+  });
+  $("#toggleTabs").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-toggle]");
+    if (!b) return;
+    setToggle("rail", !state.rail);
+  });
+  $("#toggleWindow").addEventListener("click", () => setHidden(!state.hidden));
+  $("#reset").addEventListener("click", resetAll);
+  $("#railPin").addEventListener("click", (e) => {
+    e.stopPropagation();
+    state.pinned = !state.pinned;
+    syncUI();
+    showStatus(state.pinned ? "窗口已置顶。" : "窗口取消置顶。");
+  });
+  $("#railClose").addEventListener("click", (e) => { e.stopPropagation(); setHidden(true); });
+  $("#backFocus").addEventListener("click", (e) => { e.stopPropagation(); setShowAll(false); });
+
+  $("#railActions").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act]");
+    if (!b || !state.selected) return;
+    e.stopPropagation();
+    const item = itemById(state.current.layout, state.selected);
+    if (b.dataset.act === "jump") {
+      const para = item && item.node.para;
+      if (state.mode !== "reader") { showStatus("阅读界面已最小化；已请求主窗口跳到原文（样张模拟）。"); return; }
+      const target = para ? document.querySelector(`[data-para="${para}"]`) : null;
+      if (!target) { showStatus("这个节点还没有原文锚点。"); return; }
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.classList.add("is-jump");
+      setTimeout(() => target.classList.remove("is-jump"), 1200);
+      showStatus("已跳到原文，并短暂强调对应段落。");
+    } else if (b.dataset.act === "explain") {
+      state.windowSizeBeforeExplain = `${state.current.winW}×${state.current.winH}`;
+      state.explain = true;
+      $("#explainTitle").textContent = item ? item.node.title : "";
+      positionExplain();
+      updateLedger();
+    } else if (b.dataset.act === "deepen") {
+      showStatus("正在把这一点再分出一层…（样张只演示浮层状态）");
+      b.disabled = true;
+      setTimeout(() => { b.disabled = false; showStatus("已收到深挖请求（样张模拟）。"); }, 1200);
+    } else if (b.dataset.act === "map") {
+      showStatus("已请求主窗口打开完整图谱，并聚焦当前节点（样张模拟）。");
+    }
+  });
+
+  $("#explain").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-act='closeExplain']");
+    if (!b) return;
+    e.stopPropagation();
+    state.explain = false;
+    $("#explain").classList.remove("is-on");
+    updateLedger();
+  });
+
+  function activateMore() {
+    if (state.current && state.current.mode === "focus") setShowAll(true);
+    else showStatus("「其余 N 段」是图谱摘要；样张没有建模这些段，真实产品里由 LOD 展开或完整图谱承载。", 3600);
+  }
+  graphHost.addEventListener("click", (e) => {
+    const node = e.target.closest(".node");
+    if (!node) { selectNode(null); return; }
+    if (node.dataset.more) { activateMore(); return; }
+    selectNode(node.dataset.id);
+  });
+  graphHost.addEventListener("pointerover", (e) => {
+    const node = e.target.closest(".node");
+    if (!node || node.dataset.more) return;
+    const id = node.dataset.id;
+    $$(".node", graphHost).forEach((g) => g.classList.toggle("is-hover", g.dataset.id === id));
+    $$(".reader-col p").forEach((p) => p.classList.remove("is-linked"));
+    const para = node.dataset.para;
+    if (para) document.querySelector(`[data-para="${para}"]`)?.classList.add("is-linked");
+  });
+  graphHost.addEventListener("pointerout", (e) => {
+    if (e.relatedTarget && graphHost.contains(e.relatedTarget)) return;
+    $$(".node", graphHost).forEach((g) => g.classList.remove("is-hover"));
+    $$(".reader-col p").forEach((p) => p.classList.remove("is-linked"));
+  });
+  graphHost.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const node = e.target.closest(".node");
+    if (!node) return;
+    e.preventDefault();
+    if (node.dataset.more) activateMore();
+    else selectNode(node.dataset.id);
+  });
+
+  lensWin.addEventListener("pointermove", (e) => {
+    if (state.hidden) return;
+    const r = lensWin.getBoundingClientRect();
+    const nearTop = e.clientY - r.top <= 48;
+    lensWin.classList.toggle("rail-on", nearTop);
+  });
+  lensWin.addEventListener("pointerleave", () => {
+    if (!state.rail) lensWin.classList.remove("rail-on");
+  });
+
+  // 拖动窗口：按住标题胶囊
+  let drag = null;
+  $("#railTitle").addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    drag = { x: e.clientX, y: e.clientY, left: state.current.left, top: state.current.top };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    lensWin.classList.add("rail-on");
+  });
+  $("#railTitle").addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const left = clamp(drag.left + (e.clientX - drag.x), 8, Math.max(8, stage.clientWidth - state.current.winW - 8));
+    const top = clamp(drag.top + (e.clientY - drag.y), 8, Math.max(8, stage.clientHeight - state.current.winH - 8));
+    state.current.left = Math.round(left);
+    state.current.top = Math.round(top);
+    lensWin.style.left = `${state.current.left}px`;
+    lensWin.style.top = `${state.current.top}px`;
+    if (state.explain) positionExplain();
+    $("#mPos").textContent = `(${state.current.left}, ${state.current.top})`;
+  });
+  $("#railTitle").addEventListener("pointerup", (e) => {
+    if (!drag) return;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+    drag = null;
+  });
+
+  // Esc 收起
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !state.hidden && !e.defaultPrevented) setHidden(true);
+  });
+
+  // 窗口尺寸变化
+  let resizeTimer = null;
+  const ro = new ResizeObserver(() => {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (!state.current) return;
+      renderCurrent(true);
+    }, 80);
+  });
+  ro.observe(stage);
+
+  // ---------- 初始化 ----------
+  function applyParams() {
+    if (q.get("chrome") === "0") document.body.classList.add("bare");
+    if (q.get("anim") === "0") document.body.classList.add("no-anim");
+    if (state.rail) lensWin.classList.add("rail-forced");
+    if (state.hidden) lensWin.classList.add("is-hidden");
+    setMode(state.mode);
+    syncUI();
+  }
+
+  function init() {
+    applyParams();
+    renderCurrent(false);
+    if (!state.rail && q.get("anim") !== "0") {
+      lensWin.classList.add("rail-on");
+      setTimeout(() => { if (!state.rail) lensWin.classList.remove("rail-on"); }, 1600);
+    }
+    const wantExplain = state.explain;
+    if (state.selected) selectNode(state.selected);
+    if (wantExplain && state.selected) {
+      state.explain = true;
+      state.windowSizeBeforeExplain = `${state.current.winW}×${state.current.winH}`;
+      $("#explainTitle").textContent = itemById(state.current.layout, state.selected)?.node.title || "";
+      positionExplain();
+      updateLedger();
+    }
+  }
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(init).catch(init);
+    else init();
+  }));
+})();
+</script>
+</body>
+</html>
