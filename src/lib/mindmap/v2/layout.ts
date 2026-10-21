@@ -275,6 +275,13 @@ export interface LayoutOptions {
   frameLabel?: (pattern: PatternKey, how: PatternHow) => string;
   /** 根卡标题；默认 state.meta.title */
   rootTitle?: string;
+  /**
+   * 每组最多显示的子节点数（v49.29 / D203 结构图纸片窗口聚焦档）。
+   * 超出部分由布局合成「另有 N 项」卡（112×32 虚线），而不是把节点从图里删掉。
+   */
+  maxChildren?: Readonly<Record<string, number>>;
+  /** 显式全图：跳过 LOD 的 12 子项上限（结构图纸片窗口的「展开全部」用）。 */
+  noLod?: boolean;
 }
 
 // ───────────────────────── 注册表 ─────────────────────────
@@ -497,7 +504,10 @@ export function layoutGraph(state: GraphState, opts: LayoutOptions = {}): Displa
     const def = REGISTRY.get(sel.pattern) ?? (REGISTRY.get("tree") as PatternDef);
     const key = def.key;
     const lodOpen = lod.has(id);
-    const shown = kids.length > LAYOUT.LOD_MAX && !lodOpen ? kids.slice(0, LAYOUT.LOD_SHOW) : kids;
+    const limitRaw = opts.maxChildren?.[id];
+    const limit = limitRaw != null && Number.isFinite(limitRaw) ? Math.max(1, Math.floor(limitRaw)) : null;
+    const baseShown = opts.noLod || limit != null ? kids : kids.length > LAYOUT.LOD_MAX && !lodOpen ? kids.slice(0, LAYOUT.LOD_SHOW) : kids;
+    const shown = limit != null ? baseShown.slice(0, limit) : baseShown;
     const hidden = kids.length - shown.length;
 
     // 子块（先算，供依赖比较）
@@ -522,7 +532,7 @@ export function layoutGraph(state: GraphState, opts: LayoutOptions = {}): Displa
     const moreS = hidden > 0 ? more(id, hidden) : null;
 
     const deps: unknown[] = [
-      "group", revOf(id), parentPattern, sel.pattern, sel.how, sel.rule, key, lodOpen, registryVersion, frameLabel,
+      "group", revOf(id), parentPattern, sel.pattern, sel.how, sel.rule, key, lodOpen, opts.noLod === true, limit, registryVersion, frameLabel,
       id === ROOT_ID ? rootTitle : null, moreS,
     ];
     for (let i = 0; i < kidSealed.length; i++) {
