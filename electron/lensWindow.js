@@ -1,18 +1,28 @@
 // 独立结构图窗口（v49.24 / D197）——阅读界面的「结构图」（阅读透镜 v2）从主窗口内的浮层 / 正文下方
-// 改为独立窗口：可拖到主阅读界面之外不遮正文，拖动四边 / 边角用系统原生缩放。
+// 改为独立窗口：可拖到主阅读界面之外不遮正文。
+//
+// v49.29 / D203：窗口改为内容自适应「纸片图谱」——transparent / frame:false / resizable:false /
+// hasShadow:false / roundedCorners:false / backgroundColor:#00000000；尺寸不再由用户原生拖拽，而由渲染层量
+// 图谱 layout bounds，经 invoke `lens:fit` 交主进程按窗口所在显示器 workArea 算 s / 锚点落位 / 钳制，再
+// setBounds 程序化驱动。纸片是窗口表面（渲染层 inset:0），所以窗口 = 内容 + 固定留白（左右 16 / 上 32 / 下 16）。
+// 明确不做：点击穿透 / 锁定 / 鼠标穿透 API（窗口矩形内仍拦截点击；纸片是可见实体）。
 //
 // 纪律与独立制卡台窗口（workbenchWindow.js）逐条同构：① 关闭＝隐藏（单例复用，真正退出才销毁）；
 // ② 首次呼出贴近主窗口右侧（放不下就退到工作区右缘），之后保留用户拖到的位置；③ 默认置顶，可在窗口内切换；
 // ④ 就绪后才 show（杜绝白闪）；⑤ 与制卡台共用主 preload 桥与同一套主题 / 皮肤引导（换肤一处改两窗同步）。
+// v49.26 / D200 的呼出状态机（did-start-loading 复位 / 幂等 ready-to-show / did-finish-load 兜底 / 2s 安全阀 /
+// hide 后写优先 / 离屏守卫）原样保留。
 //
 // 跨窗口数据流（面板跑在结构图窗口，正文与内核仍住在主窗口 → 全经主进程转发）：
 //   结构图窗口 --lens:ask--> 主进程 --lens:askIn--> 主窗口（取区间原文 / 跳正文 / 正文强调 / 在完整图谱中打开 / 刷新上下文）
+//   结构图窗口 --lens:fit(invoke)--> 主进程（算 s / 落位 / 钳制 / setBounds，返回实际值）
 //   主窗口 --lens:reply--> 主进程 --lens:replyIn--> 结构图窗口（请求回执：取文、跳转结果）
 //   主窗口 --lens:push--> 主进程 --lens:pushIn--> 结构图窗口（上下文：文档 / 标题 / 目录 / 单元锚；阅读位置探针）
 //   主进程 --lens:window--> 两窗口（可见性 + 置顶状态；主窗口据此同步工具栏开关，结构图窗口据此同步置顶钮）
 const { BrowserWindow, screen, ipcMain, app } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { computeFit } = require("./lensWindowFit.bundle.cjs");
 
 let win = null;
 let ctx = null;
@@ -21,6 +31,8 @@ let pinned = true;
 let positioned = false;
 let pendingShow = false;
 let pendingShowTimer = null;
+/** 隐藏期间 fit 暂存的窗口 bounds（show 时应用；不抢焦点） */
+let pendingFit = null;
 let loaded = false;
 let registered = false;
 
@@ -44,13 +56,31 @@ function consumePendingShow() {
   reveal();
 }
 
-function themeBackground() {
-  try {
-    const mode = ctx?.readSettings?.()?.theme?.mode;
-    return mode === "dark" ? "#111111" : "#fafaf8";
-  } catch {
-    return "#fafaf8";
-  }
+/**
+ * 窗口创建选项的唯一来源（纯函数，测试直接断言）。
+ * `transparent` / `roundedCorners` 没有运行时 getter，不能靠 win.isResizable() 反推——必须从这里验。
+ */
+function lensWindowOptions(options = {}) {
+  return {
+    width: 360,
+    height: 248,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    hasShadow: false,
+    roundedCorners: false,
+    backgroundColor: "#00000000",
+    show: false,
+    title: "结构图",
+    icon: path.join(__dirname, "icon.ico"),
+    alwaysOnTop: options.pinned !== false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
+  };
 }
 
 /** 主窗口（结构图的服务对象）：销毁或未建时为 null */
@@ -66,25 +96,7 @@ function mainWin() {
 function createWindow() {
   if (win && !win.isDestroyed()) return win;
   loaded = false;
-  win = new BrowserWindow({
-    width: 520,
-    height: 660,
-    minWidth: 380,
-    minHeight: 320,
-    frame: false,
-    show: false,
-    resizable: true,
-    title: "结构图",
-    icon: path.join(__dirname, "icon.ico"),
-    alwaysOnTop: pinned,
-    backgroundColor: themeBackground(),
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      backgroundThrottling: false
-    }
-  });
+  win = new BrowserWindow(lensWindowOptions({ pinned }));
   const w = win;
   w.on("close", (e) => {
     if (quitting) return;
@@ -95,6 +107,7 @@ function createWindow() {
   w.on("closed", () => {
     if (win === w) win = null;
     loaded = false;
+    pendingFit = null;
     cancelPendingShow();
   });
   // 导航防护（与主窗口 / 制卡台同规则）
@@ -201,14 +214,83 @@ function offScreen(w) {
   }
 }
 
+/** 当前窗口所在显示器的工作区（窗口未建时回落到主窗口 / 主显示器） */
+function workAreaFor(w) {
+  try {
+    if (w && !w.isDestroyed()) return screen.getDisplayMatching(w.getBounds()).workArea;
+    const m = mainWin();
+    if (m) return screen.getDisplayMatching(m.getBounds()).workArea;
+  } catch {
+    /* 显示器查询失败不阻塞 */
+  }
+  return screen.getPrimaryDisplay().workArea;
+}
+
+function applyPendingFit(w) {
+  if (!pendingFit) return;
+  const b = pendingFit;
+  pendingFit = null;
+  try {
+    w.setBounds(b, false);
+  } catch {
+    /* 定位失败不阻塞显示 */
+  }
+}
+
+/**
+ * lens:fit —— 渲染层量图谱 content / anchor，主进程按窗口所在显示器 workArea 算 s、锚点落位、钳制，
+ * 再 setBounds。mode=fit 且 tier=focus 是**探测**（完整内容已低于可读下限）：不落窗，渲染层随后派生
+ * 聚焦内容再发 focus。隐藏时只暂存 bounds，show/reveal 时应用；自动尺寸更新不 focus。
+ */
+function fit(payload) {
+  const content = payload && payload.content ? payload.content : null;
+  const w = win && !win.isDestroyed() ? win : null;
+  const area = workAreaFor(w);
+  if (!content || !Number.isFinite(content.w) || !Number.isFinite(content.h)) {
+    return { scale: 1, bounds: area, workArea: area, clamped: false, tier: "100%" };
+  }
+  const mode = payload.mode === "focus" ? "focus" : payload.mode === "all" ? "all" : "fit";
+  const bounds = w ? w.getBounds() : null;
+  const r = computeFit({
+    content: { w: content.w, h: content.h },
+    workArea: area,
+    mode,
+    anchor: payload.anchor || null,
+    current: payload.current || null,
+    bounds,
+  });
+  const probe = mode === "fit" && r.tier === "focus";
+  if (!probe) {
+    if (w && w.isVisible()) {
+      try {
+        w.setBounds(r.bounds, false);
+      } catch {
+        /* 定位失败不阻塞显示 */
+      }
+      pendingFit = null;
+    } else {
+      // 隐藏 / 首帧未显示：暂存，show 时应用（不抢焦点）
+      pendingFit = { ...r.bounds };
+    }
+  }
+  return {
+    scale: r.scale,
+    bounds: probe && bounds ? bounds : r.bounds,
+    workArea: r.workArea,
+    clamped: r.clamped,
+    tier: r.tier,
+  };
+}
+
 function reveal() {
   const w = win;
   if (!w || w.isDestroyed()) return;
+  // v49.29 / D203：隐藏期间算好的尺寸先落，再判断是否需要贴边——纸片窗口不设主题底色（透明由纸片承担）
+  applyPendingFit(w);
   if (!positioned || offScreen(w)) {
     position(w);
     positioned = true;
   }
-  w.setBackgroundColor?.(themeBackground());
   w.setAlwaysOnTop(pinned);
   if (w.isMinimized()) w.restore();
   w.show();
@@ -296,9 +378,22 @@ function init(options) {
   if (registered) return;
   registered = true;
   ipcMain.handle("win:lens", (_e, action) => control(String(action || "toggle")));
+  ipcMain.handle("lens:fit", (_e, payload) => fit(payload));
   ipcMain.on("lens:ask", (_e, payload) => relayAsk(payload));
   ipcMain.on("lens:reply", (_e, payload) => relayReply(payload));
   ipcMain.on("lens:push", (_e, payload) => relayPush(payload));
 }
 
-module.exports = { init, control, show, hide, toggle, prepareQuit, relayAsk, relayReply, relayPush };
+module.exports = {
+  init,
+  control,
+  show,
+  hide,
+  toggle,
+  prepareQuit,
+  relayAsk,
+  relayReply,
+  relayPush,
+  lensWindowOptions,
+  fit,
+};

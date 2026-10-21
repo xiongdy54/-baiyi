@@ -31,6 +31,7 @@ import MindmapCanvasV2, { type MindmapCanvasHandle } from "./mindmap/MindmapCanv
 import { mindmapV2Api, type GraphLocate, type MindmapDelta, type NodeAnchor } from "../../lib/mindmapV2";
 import { ensureFed, resetFeed, subscribeFeed, type FeedState } from "../../lib/mindmapFeed";
 import { eventBus } from "../../lib/eventbus";
+import type { LensFitReply, LensFitRequest } from "../../lib/lensBridge";
 import { useT } from "../../lib/i18n";
 import { IconChevronDown } from "../icons";
 
@@ -50,6 +51,8 @@ export interface MindmapLensProps {
   /** 独立窗口模式：当前是否置顶（提供 onPin 时才渲染置顶钮；就地渲染＝不提供） */
   pinned?: boolean;
   onPin?: () => void;
+  /** 内容自适应纸片窗口（D203）：渲染层量 content/anchor，主进程算尺寸并 setBounds */
+  fit?: (req: LensFitRequest) => Promise<LensFitReply>;
 }
 
 /**
