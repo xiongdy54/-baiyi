@@ -622,3 +622,13 @@ type LensFitReply = {
 - DOM：`tests/m15v2.lens.dom.test.cjs` **53/0**——展开后仍不 `setViewScale`（viewport transform 不变）、新节点保留刚到达虚线描边、宿主出现 `translate(...)` 反向位移；fit 请求带 `anchorScreen`（被点卡片中心）与 `animate:true`、`anchor.id` 为被点节点。
 - 回归：`f21` 7/7、skin-audit 双 ✓、样张 24/0、纯 v2（svg 59 / layout 166 / core 99 / route 41 / engine 102）全绿、`tsc` 0、`npm run build` ✓。
 - **未做**：真实应用 GUI 自动化在本次会话被权限闸门拦下（GUI 脚本需要单独实机授权），因此「点击展开的丝滑手感 / 节点 0px 漂移 / 窗口 180ms 观感」尚待用户 `npm run dev` 实机验收；若 D198 黑边在真机出现，回退 `animate`（保留 anchorScreen 与宿主反向位移为空操作即可）或缩短时长。D204 未新增 schema / 设置键 / IPC 通道 / AI 调用。
+
+## 16. 交接（2026-10-21，D204 之后）
+
+- **当前状态**：分支 `feat/floating-atlas-d203`，HEAD `daf7a52`（D204 / v49.30）；`main` 仍为 `e43dbe1`，未动。D203（纸片图谱）+ D204（展开/收起锚点与窗口缓动）均已提交；工作树除本任务外的既有未跟踪文件外是干净的。
+- **用户反馈（2026-10-21，D204 实机后）**：「效果还是不好」——本会话未给出更具体的现象（仍闪 / 节点漂 / 黑边 / 生长动画被截断 / 缓动曲线不适 / 深挖延迟路径），**下一个会话必须先复现并采集，再改代码，不要凭猜测继续调**。
+- **复现时至少采集**：① 被点卡片中心屏幕坐标（点击前 / 16ms 步进 / 稳定后；目标 ≤2px）；② 窗口 `getBounds()` 逐帧（是否单调、有无黑边/中间尺寸回跳）；③ `.lens-graph` 的 `style.transform` 与 `window.screenX` 的逐帧关系（rAF 是否被 React 重渲染清掉、是否比原生 `setBounds` 滞后）；④ 画布 viewport transform 与 `planTransition` 是否仍在跑（新节点虚线/入场）；⑤ 走的是 `unfold`（本版）还是 AI `deepen`（延迟数秒，锚点 30s 清除）；⑥ 是否 D198 黑边。
+- **已知实现要点**：`lens:fit` 新增 `anchorScreen`（旧屏幕点）+ `animate`；主进程 180ms `cubic-bezier(.2,.7,.2,1)` 缓动 `setBounds`；渲染层宿主 rAF 直写 `transform = 目标原点 − 当前窗口原点`；同比例内容变化不 `setViewScale`；画布 `viewAnchor={false}`；展开 fit 跳过 80ms 防抖。
+- **已知风险 / 可能方向（不是结论）**：宿主反向位移是 rAF 直写 style，可能与原生窗口缓动不同步；比例变化时仍会 `setViewScale` 取消画布过渡；AI 深挖的锚点可能过期；D198 透明窗口 resize 黑边；若原生窗口缓动无法做到丝滑，可评估「窗口目标瞬时 + 纸片/宿主在窗内动画」的替代（设计稿 §14.7 的阴影裁切一并裁定）。
+- **机械基线（daf7a52 当时）**：`lensWindowFit` 38/0、artifact 4/0、`lensWindow` 24/0（含 D200 9）、`m15v2.lens.dom` 53/0、canvas 12/0、tab 26/0、pure v2（svg 59 / layout 166 / core 99 / route 41 / engine 102）、f21 7/7、skin-audit ✓、样张 24/0、tsc 0、build ✓；f11 14/16（既有 L1 `readerActionsSettings.ts` / L6 表数）。真实 GUI 自动化因权限闸门未在会话内运行，用户实机反馈为负面。
+- **入口**：设计稿 §15（D204 规格）、§14.7（T6 观察）；GUIDE §8.1 D204、§4.2-17、§4.19；代码 `src/components/reader/MindmapLens.tsx`、`electron/lensWindow.js`、`src/lib/lensWindowFit.ts`、`src/components/reader/mindmap/MindmapCanvasV2.tsx`；临时 GUI/seed 脚本已清理（需要时按 §15.3 重建，GUI 需单独实机授权）。
