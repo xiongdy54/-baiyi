@@ -35,6 +35,14 @@ export interface MindmapCanvasHandle {
   zoomBy(factor: number): void;
   /** 自包含静态 SVG（已过 DOMPurify） */
   exportSvg(): string;
+  /** 布局内容边界（100% 内容坐标；布局未就位＝null）。结构图纸片窗口用它算窗口尺寸。 */
+  getBounds(): { w: number; h: number } | null;
+  /** 节点在内容坐标系的矩形；不存在＝null。结构图纸片窗口用它把阅读节点换算成屏幕锚点。 */
+  getNodeRect(id: string): { x: number; y: number; w: number; h: number } | null;
+  /** 宿主指定比例：k=s、内容原点贴容器左上（0,0）。结构图纸片窗口由窗口尺寸反推比例，不再让画布用 48px 内边距自行 fit。 */
+  setViewScale(scale: number): void;
+  /** 显式恢复一次「画布自行适配」（完整图谱页签的默认行为）；之后的重排仍由 autoFit prop 决定。 */
+  autoFit(): void;
 }
 
 export interface MindmapCanvasV2Props {
@@ -58,6 +66,10 @@ export interface MindmapCanvasV2Props {
   readingId?: string | null;
   /** 短暂高亮的区域（阅读透镜「在完整图谱中打开」）：把这批节点整体框一个主题色高亮区，淡出（约 2.4s） */
   flashIds?: readonly string[] | null;
+  /** 自动适配（默认 true＝完整图谱页签现状）；结构图纸片窗口传 false，由 setViewScale 决定比例。 */
+  autoFit?: boolean;
+  /** 每次布局内容边界变化（首次 / 尺寸变化）回调；结构图纸片窗口据此量 content。 */
+  onLayout?: (bounds: { w: number; h: number }) => void;
 }
 
 const ZMIN = 0.1;
@@ -233,9 +245,16 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     d = mono.display;
     sizesRef.current = mono.sizes;
     const prev = shownRef.current;
+    const prevTarget = targetRef.current;
     targetRef.current = d;
     if (!prev && !userMovedRef.current) {
-      fitTo(d);
+      // 结构图纸片窗口由宿主决定比例（setViewScale），画布不得用 48px 内边距抢先 fit；
+      // 以 k=1、内容原点贴容器左上起步，宿主随后按窗口尺寸设比例。
+      if (live.current.autoFit === false) viewRef.current = { k: 1, tx: 0, ty: 0 };
+      else fitTo(d);
+    }
+    if (!prevTarget || prevTarget.bounds.w !== d.bounds.w || prevTarget.bounds.h !== d.bounds.h) {
+      live.current.onLayout?.({ w: d.bounds.w, h: d.bounds.h });
     }
     // 几何未变（只是讲解 / 状态以外的字段 / 指标变了）：不起过渡动画，直接换帧
     if (prev && !trRef.current && sameGeometry(prev, d)) {
@@ -317,7 +336,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     const box = boxRef.current;
     if (!box || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (!userMovedRef.current && targetRef.current) {
+      if (!userMovedRef.current && targetRef.current && live.current.autoFit !== false) {
         fitTo(targetRef.current);
         requestPaint();
       }
@@ -378,6 +397,33 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         const routed = routeRelations(p.graph, d, { relAll: true, geometry: "all", relName: relNameRef.current });
         const raw = buildCanvasSvg(d, routed, {}, { static: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2x-" });
         return DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } });
+      },
+      getBounds() {
+        const d = targetRef.current;
+        return d ? { w: d.bounds.w, h: d.bounds.h } : null;
+      },
+      getNodeRect(id: string) {
+        const it = targetRef.current?.byId[id];
+        return it ? { x: it.x, y: it.y, w: it.w, h: it.h } : null;
+      },
+      setViewScale(scale: number) {
+        const k = Number.isFinite(scale) && scale > 0 ? scale : 1;
+        userMovedRef.current = true;
+        viewEpochRef.current++;
+        trRef.current = null;
+        frameOpRef.current = { opacity: {}, leaving: [] };
+        if (targetRef.current) shownRef.current = targetRef.current;
+        viewRef.current = { k, tx: 0, ty: 0 };
+        requestPaint();
+      },
+      autoFit() {
+        userMovedRef.current = false;
+        viewEpochRef.current++;
+        trRef.current = null;
+        frameOpRef.current = { opacity: {}, leaving: [] };
+        if (targetRef.current) shownRef.current = targetRef.current;
+        fitTo(targetRef.current);
+        requestPaint();
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
