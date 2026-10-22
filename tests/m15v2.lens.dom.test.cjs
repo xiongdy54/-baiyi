@@ -1,4 +1,4 @@
-// @runtime: node
+// @runtime: system-node
 // 结构图（阅读透镜 v2「聚焦图谱」）端到端 DOM 回归（node tests/m15v2.lens.dom.test.cjs）。
 // 真实 MindmapLens.tsx（tsload 转译，包 React.StrictMode）+ jsdom + 真实主进程引擎 + 内存 store + 假流式模型 + 假内核
 // （getReadingProbe / relocate / goTo / getCurrentLocation / setStructureHighlights 记录）。

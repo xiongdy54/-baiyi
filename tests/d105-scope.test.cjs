@@ -1,4 +1,5 @@
 // D105 批E 筛选牌组快捷条件 db 层回归（electron 直跑：npx electron tests/d105-scope.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：设计稿 docs/design/CARD-SYSTEM-ANKI-ADAPTATION-D94.md §3.4 + GUIDE §6.8-5/§4.2-26（D105）
 // 覆盖：readReviewScopes 归一（tags/kpIds）/ applyScope 过滤矩阵（tags OR·层级前缀·大小写不敏感·两行 kind /

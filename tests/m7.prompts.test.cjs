@@ -1,4 +1,5 @@
 // M7 card-vocab 播种回归（v32）：新 scope 首版 v1 生效 + 既有 v6 不受影响 + 幂等
+// @runtime: electron
 // 运行：node_modules/.bin/electron tests/m7.prompts.test.cjs
 // 隔离 userData：必须在 require electron/db.js 之前 setPath，避免触碰真实库。
 const path = require("path");

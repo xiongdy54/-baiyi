@@ -1,4 +1,5 @@
 // v23/F11 持久化边界测试（electron 直跑：npx electron tests/persist.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库。
 // D137（v48.92）：persist() 自「全量导出+tmp/fsync/rename」重定义为 wal_checkpoint(TRUNCATE)——
 // 故障注入钩子同步切换：旧 writeSync/renameSync mock 不再落在 persist 的路径上，改用

@@ -3,6 +3,17 @@
 // 重新打包：node_modules/.bin/esbuild src/lib/dict.ts src/lib/dictCatalog.ts --bundle --platform=node --format=cjs --outdir=tests/tmp-m7 --log-level=silent
 //           node_modules/.bin/esbuild electron/dictStore.js --bundle --platform=node --format=cjs --external:electron --external:sql.js --outfile=tests/tmp-m7/dictStore.cjs --log-level=silent
 //           （v38 起 dictStore 打包必须 --external:sql.js：内联会让 sql-wasm.wasm 相对 bundle 目录定位失败）
+{
+  // C-01：统一测试入口不保证 tests/tmp-m7 已存在，运行时自行预构建。
+  const path = require("path");
+  const esbuild = require("esbuild");
+  const ROOT = path.resolve(__dirname, "..");
+  const OUT = path.join(__dirname, "tmp-m7");
+  esbuild.buildSync({ entryPoints: [path.join(ROOT, "src/lib/dict.ts"), path.join(ROOT, "src/lib/dictCatalog.ts")],
+    bundle: true, platform: "node", format: "cjs", outdir: OUT, logLevel: "silent" });
+  esbuild.buildSync({ entryPoints: [path.join(ROOT, "electron/dictStore.js")], bundle: true, platform: "node", format: "cjs",
+    external: ["electron", "sql.js", "better-sqlite3"], outfile: path.join(OUT, "dictStore.cjs"), logLevel: "silent" });
+}
 const dictMod = require("./tmp-m7/dict.js");
 const catMod = require("./tmp-m7/dictCatalog.js");
 const d = { ...dictMod, ...catMod };
@@ -10,6 +21,7 @@ const d = { ...dictMod, ...catMod };
 const store = require("./tmp-m7/dictStore.cjs");
 const fs = require("fs");
 const path = require("path");
+const PERF = Number(process.env.NUT_PERF_FACTOR || 1); // C-01：慢机器/CI 可用 NUT_PERF_FACTOR 放宽绝对耗时阈值
 
 let pass = 0, fail = 0;
 function check(name, cond, expected, actual) {
@@ -163,7 +175,7 @@ console.log("== M7-4 Manager：auto 在线优先 + 回落本地 + 缓存许可 =
   cedictLines.push(`詞5 词5 [ci5] /dup/`); // 重复头词——Set 去重后总数不变
   const t0 = Date.now();
   const cedictRows = await collect(store.parseCedictText(cedictLines.join("\n")));
-  check("CC-CEDICT 3 万行解析（应秒级，O(n²) 回归会超时）", cedictRows.length === 60000 && Date.now() - t0 < 15000, 60000, `${cedictRows.length} @ ${Date.now() - t0}ms`);
+  check("CC-CEDICT 3 万行解析（应秒级，O(n²) 回归会超时）", cedictRows.length === 60000 && Date.now() - t0 < 15000 * PERF, 60000, `${cedictRows.length} @ ${Date.now() - t0}ms`);
   check("CC-CEDICT 释义解析/拼音字段", cedictRows[0].headword === "詞0" && cedictRows[0].phonetic === "ci2" && cedictRows[0].html.includes("gloss 0"), true, cedictRows[0]);
   // ECDICT CSV：字段内逗号、双写引号、跨行字段（引号配平）
   const csvText = "word,phonetic,translation,pos\n" +

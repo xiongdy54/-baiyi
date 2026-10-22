@@ -1,4 +1,5 @@
 // v43 K2-B 回归测试（db 层，electron 直跑：npx electron tests/k2b.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：§6.3.11 余下 4 scope 播种 v1（三要素：判定锚语 + evidence 引用要求 + 封闭选项清单）；
 //       §6.3.12 KnowledgeLint K4/K7/K8 报告型检查；§4.6 出层契约裁决 + 离散度守门；

@@ -1,4 +1,5 @@
 // D101/D102 批A+批B db 层回归（electron 直跑：npx electron tests/d101-lifecycle.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：设计稿 docs/design/CARD-SYSTEM-ANKI-ADAPTATION-D94.md §1/§2 + GUIDE §4.1/§4.2-20（D101/D102）
 // 覆盖：归档排除式队列过滤（未知值仍入队）/ 归档零 FSRS 写入 / 与挂起正交 / 恢复回原 due /

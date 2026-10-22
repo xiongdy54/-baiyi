@@ -1,4 +1,5 @@
 // v45 M14-UM1 用户记忆回归测试（db 层，electron 直跑：npx electron tests/m14.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db + 全新 memory/ 文件树，绝不触碰真实库（§7.3）。
 // 契约：§4.18 + §6.7 + §9.1 M14 + D39——不删不改写（op 词表封闭于追加与标记）/ 永不淘汰 /
 //       水位线补处理（分批时间正序可续跑）/ 手写区保护 / user-memory v1 播种 / 零 FSRS 影响。

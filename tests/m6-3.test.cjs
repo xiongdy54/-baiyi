@@ -1,4 +1,5 @@
 // M6-3（v30）HTML 导入 + 路由表测试
+// @runtime: system-node
 // 运行：node tests/m6-3.test.cjs
 // HTML 转换依赖浏览器 DOM——测试用 jsdom（devDependency）构造全局 window/document/DOMParser，
 // 再把 src/lib/htmlImport.ts 用 esbuild 打成 CJS 后 require（与 m5/m6-1 的「打包后测」模式一致）。

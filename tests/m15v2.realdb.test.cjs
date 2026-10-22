@@ -1,4 +1,4 @@
-// @runtime: node
+// @runtime: system-node
 // 材料导图 v2 · 真实 electron/db.js 回归（node tests/m15v2.realdb.test.cjs）。
 // 沙箱跑不了 better-sqlite3（win32 原生模块），这里用 tests/lib/nodeSqliteShim.cjs 以 node:sqlite 冒充，
 // 跑「真实 db.js 的 SQL」：① store 契约 C1–C7 ② 引擎 + 真实 db 端到端（含关系边落库、run 终态）。

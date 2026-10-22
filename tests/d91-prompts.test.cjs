@@ -1,4 +1,5 @@
 // v48.51（D91 §8.1/§8.2）「简明解读」提示词播种回归：reader-explain-ste 种子行 + 既有 reader-explain 零改动。
+// @runtime: electron
 // 运行：node_modules/.bin/electron tests/d91-prompts.test.cjs（须先关应用）
 // 隔离 userData：必须在 require electron/db.js 之前 setPath，绝不触碰真实库（§7.3）。
 const { app } = require("electron");
