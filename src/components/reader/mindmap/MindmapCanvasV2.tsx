@@ -35,6 +35,16 @@ export interface MindmapCanvasHandle {
   zoomBy(factor: number): void;
   /** 自包含静态 SVG（已过 DOMPurify） */
   exportSvg(): string;
+  /** 布局内容边界（100% 内容坐标；布局未就位＝null）。结构图纸片窗口用它算窗口尺寸。 */
+  getBounds(): { w: number; h: number } | null;
+  /** 节点在内容坐标系的矩形；不存在＝null。结构图纸片窗口用它把阅读节点换算成屏幕锚点。 */
+  getNodeRect(id: string): { x: number; y: number; w: number; h: number } | null;
+  /** 宿主指定比例：k=s、内容原点贴容器左上（0,0）。结构图纸片窗口由窗口尺寸反推比例，不再让画布用 48px 内边距自行 fit。 */
+  setViewScale(scale: number): void;
+  /** 当前视图（内容坐标 → 容器坐标）：k、tx、ty。宿主算锚点屏幕位置用。 */
+  getView(): { scale: number; tx: number; ty: number } | null;
+  /** 显式恢复一次「画布自行适配」（完整图谱页签的默认行为）；之后的重排仍由 autoFit prop 决定。 */
+  autoFit(): void;
 }
 
 export interface MindmapCanvasV2Props {
@@ -58,6 +68,22 @@ export interface MindmapCanvasV2Props {
   readingId?: string | null;
   /** 短暂高亮的区域（阅读透镜「在完整图谱中打开」）：把这批节点整体框一个主题色高亮区，淡出（约 2.4s） */
   flashIds?: readonly string[] | null;
+  /** 自动适配（默认 true＝完整图谱页签现状）；结构图纸片窗口传 false，由 setViewScale 决定比例。 */
+  autoFit?: boolean;
+  /** 每次布局内容边界变化（首次 / 尺寸变化）回调；结构图纸片窗口据此量 content。 */
+  onLayout?: (bounds: { w: number; h: number }) => void;
+  /** 每组最多显示的子节点数（D203 聚焦档）；超出由布局合成「另有 N 项」卡。 */
+  maxChildren?: Readonly<Record<string, number>>;
+  /** 显式全图：跳过 LOD 的 12 子项上限（结构图纸片窗口「展开全部」用）。 */
+  noLod?: boolean;
+  /** 点「另有 N 项」时接管（缺省＝LOD 展开）；结构图纸片窗口用它切到显式全图。 */
+  onExpandAll?: () => void;
+  /** D203 结构图纸片窗口的选中 / 悬停口径：选中＝整卡主题色（不是外圈），悬停描边 accent。完整图谱不传。 */
+  lensStyle?: boolean;
+  /** D204：false＝不做画布内视图锚点补偿（锚点由结构图窗口/宿主负责）。完整图谱默认 true。 */
+  viewAnchor?: boolean;
+  /** 顶卡类型行（透镜的截断点类型）；不传＝顶卡只显示标题（完整图谱现状）。 */
+  rootType?: string;
 }
 
 const ZMIN = 0.1;
@@ -123,6 +149,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       floor: T("已触底：没有更深的结构"),
       streaming: T("正在生成"),
       unfold: (n: number) => T("展开 {n} 个子节点", { n }),
+      collapse: (n: number) => T("收起 {n} 个子节点", { n }),
       more: (n: number) => T("另有 {n} 项", { n }),
       cross: (n: number) => T("{n} 条跨组关系，悬停或选中查看", { n }),
       stub: T("其余部分，可深挖"),
@@ -158,7 +185,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     const fr = freshRef.current;
     const freshOn = performance.now() < fr.until;
     const labelZoom = view.k >= 0.8 ? 1 : 0.5; // route 只用 zoom 判「≥0.8 常显关系名」
-    const key = [d, p.graph, p.selectedId, hovered, p.relAll, p.focus, lod.join("|"), labelZoom, freshOn ? fr.ids : null, frameOpRef.current, p.rootTitle, p.readingId, p.flashIds];
+    const key = [d, p.graph, p.selectedId, hovered, p.relAll, p.focus, lod.join("|"), labelZoom, freshOn ? fr.ids : null, frameOpRef.current, p.rootTitle, p.readingId, p.flashIds, p.lensStyle, p.rootType];
     const prev = contentKeyRef.current;
     const same = !!prev && prev.length === key.length && prev.every((v, i) => v === key[i]);
     const vp = svg.firstElementChild as SVGGElement | null;
@@ -181,7 +208,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       d,
       routed,
       { view: { tx: 0, ty: 0, k: 1 }, selected: p.selectedId, hovered, opacity: frameOpRef.current.opacity, leaving: frameOpRef.current.leaving, fresh: freshOn ? fr.ids : undefined, lodCollapsed: lod },
-      { fragment: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2c-", reading: p.readingId, flash: p.flashIds },
+      { fragment: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2c-", reading: p.readingId, flash: p.flashIds, lensStyle: p.lensStyle, rootType: p.rootType },
     );
     svg.innerHTML = `<g class="mm2-viewport" transform="${transform}">${inner}</g>`;
   }, []);
@@ -226,16 +253,23 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
   const doLayout = useCallback(() => {
     pendingRef.current = null;
     const p = live.current;
-    let d = layoutGraph(p.graph, { cache: cacheRef.current, locks: locksRef.current, lodExpanded: lodRef.current, frameLabel, rootTitle: p.rootTitle });
+    let d = layoutGraph(p.graph, { cache: cacheRef.current, locks: locksRef.current, lodExpanded: lodRef.current, frameLabel, rootTitle: p.rootTitle, maxChildren: p.maxChildren, noLod: p.noLod });
     if (d.locks) locksRef.current = d.locks;
     const scope = growthScope(p.graph);
     const mono = monotoneFrames(d, sizesRef.current, scope);
     d = mono.display;
     sizesRef.current = mono.sizes;
     const prev = shownRef.current;
+    const prevTarget = targetRef.current;
     targetRef.current = d;
     if (!prev && !userMovedRef.current) {
-      fitTo(d);
+      // 结构图纸片窗口由宿主决定比例（setViewScale），画布不得用 48px 内边距抢先 fit；
+      // 以 k=1、内容原点贴容器左上起步，宿主随后按窗口尺寸设比例。
+      if (live.current.autoFit === false) viewRef.current = { k: 1, tx: 0, ty: 0 };
+      else fitTo(d);
+    }
+    if (!prevTarget || prevTarget.bounds.w !== d.bounds.w || prevTarget.bounds.h !== d.bounds.h) {
+      live.current.onLayout?.({ w: d.bounds.w, h: d.bounds.h });
     }
     // 几何未变（只是讲解 / 状态以外的字段 / 指标变了）：不起过渡动画，直接换帧
     if (prev && !trRef.current && sameGeometry(prev, d)) {
@@ -243,7 +277,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       requestPaint();
       return;
     }
-    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.anchorId, reducedMotion: prefersReducedMotion() });
+    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.viewAnchor === false ? null : p.anchorId, reducedMotion: prefersReducedMotion() });
     if (prev) {
       const enteredCards = tr.enter.filter((id) => d.byId[id] && d.byId[id].kind === "card");
       if (enteredCards.length) {
@@ -285,9 +319,10 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     setLodExpanded(new Set());
   }, [mapKey]);
 
+  const layoutOptsKey = JSON.stringify({ m: props.maxChildren ?? null, n: props.noLod === true });
   useEffect(() => {
     requestLayout();
-  }, [graph, rootTitle, lodExpanded, requestLayout]);
+  }, [graph, rootTitle, lodExpanded, layoutOptsKey, requestLayout]);
 
   useEffect(() => {
     requestPaint();
@@ -317,7 +352,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     const box = boxRef.current;
     if (!box || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
-      if (!userMovedRef.current && targetRef.current) {
+      if (!userMovedRef.current && targetRef.current && live.current.autoFit !== false) {
         fitTo(targetRef.current);
         requestPaint();
       }
@@ -376,8 +411,39 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         if (!d) return "";
         const p = live.current;
         const routed = routeRelations(p.graph, d, { relAll: true, geometry: "all", relName: relNameRef.current });
-        const raw = buildCanvasSvg(d, routed, {}, { static: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2x-" });
+        const raw = buildCanvasSvg(d, routed, {}, { static: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2x-", lensStyle: p.lensStyle, rootType: p.rootType });
         return DOMPurify.sanitize(raw, { USE_PROFILES: { svg: true, svgFilters: true } });
+      },
+      getBounds() {
+        const d = targetRef.current;
+        return d ? { w: d.bounds.w, h: d.bounds.h } : null;
+      },
+      getNodeRect(id: string) {
+        const it = targetRef.current?.byId[id];
+        return it ? { x: it.x, y: it.y, w: it.w, h: it.h } : null;
+      },
+      getView() {
+        const v = viewRef.current;
+        return { scale: v.k, tx: v.tx, ty: v.ty };
+      },
+      setViewScale(scale: number) {
+        const k = Number.isFinite(scale) && scale > 0 ? scale : 1;
+        userMovedRef.current = true;
+        viewEpochRef.current++;
+        trRef.current = null;
+        frameOpRef.current = { opacity: {}, leaving: [] };
+        if (targetRef.current) shownRef.current = targetRef.current;
+        viewRef.current = { k, tx: 0, ty: 0 };
+        requestPaint();
+      },
+      autoFit() {
+        userMovedRef.current = false;
+        viewEpochRef.current++;
+        trRef.current = null;
+        frameOpRef.current = { opacity: {}, leaving: [] };
+        if (targetRef.current) shownRef.current = targetRef.current;
+        fitTo(targetRef.current);
+        requestPaint();
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -430,7 +496,16 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         onToggleCollapse(nid);
         return;
       }
+      if (kind === "collapse" && nid) {
+        onToggleCollapse(nid);
+        return;
+      }
       if (kind === "lod-expand") {
+        // 结构图纸片窗口：「另有 N 项」＝显式展开全部；完整图谱仍走 LOD 展开
+        if (live.current.onExpandAll) {
+          live.current.onExpandAll();
+          return;
+        }
         const gid = act.getAttribute("data-group-id");
         if (gid) setLodExpanded((prev) => new Set(prev).add(gid));
         return;

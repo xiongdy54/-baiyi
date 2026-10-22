@@ -64,6 +64,7 @@ function LensWindow() {
         visible={visible}
         pinned={pinned}
         onPin={() => void window.lensAPI?.control("pin").then((s) => setPinned(!!s?.pinned))}
+        fit={window.lensAPI?.fit}
       />
     </div>
   );

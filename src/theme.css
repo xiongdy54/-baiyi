@@ -9604,13 +9604,11 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--text-secondary);
 }
 
-/* ===================== 结构图（阅读透镜 v2「聚焦图谱」，2026-10-18 第二轮） =====================
-   工具栏「结构图」开关 → 打开**独立窗口**（v49.24 / D197：原先按版式选的「浮窗 / 正文下方」两种摆放退役，
-   `.reader-lens-float-host` / `.reader-lens-dock-host` 两个宿主与自绘拖动、右下角缩放一并删除；
-   拖动标题行与四边 / 边角缩放交给窗口自身——标题行是 `-webkit-app-region: drag` 拖动区）。
-   面板里是与完整图谱页签同一套画布（.mm2-focus-canvas > .mindmap-canvas）；
-   配色只用阅读区前景 / 背景与全局 accent（前景经 currentColor 混色——--reader-fg 可能是 inherit，不能进 color-mix）。
-   瑞士风：直角为主（卡片 3px 微圆角只为在小尺寸里区分卡片与线）、1px hairline、无阴影渐变。 */
+/* ===================== 结构图（阅读透镜 v2「纸片图谱」，D197 / D203） =====================
+   工具栏「结构图」开关 → 打开**独立窗口**；v49.29 / D203 起窗口是内容自适应纸片：
+   窗口尺寸 = 图谱 layout bounds + 固定留白（左右 16 / 上 32 / 下 16），纸片 `inset:0` 与窗口同尺寸，
+   由主进程 `lens:fit` 的 setBounds 驱动（原生 resize 退役）。控制轨在上缘，四动作居中；解释卡从轨下展开。
+   瑞士风：直角、1px 发丝线、单一 accent；唯一的浮层阴影是纸片的 --shadow-float。 */
 .reader-lens-btn {
   display: inline-flex;
   align-items: center;
@@ -9623,114 +9621,275 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--accent);
   background: var(--accent-soft);
 }
-/* 独立窗口的根：填满窗口；面板随之撑满（窗口四边 / 边角缩放由系统原生承担） */
-.lens-body { margin: 0; overflow: hidden; }
+/* 独立窗口的根：窗口本身透明，纸片（.lens-window）才是表面 */
+.lens-body { margin: 0; overflow: hidden; background: transparent; }
 .lens-root {
+  position: relative;
   height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: var(--paper);
+  overflow: hidden;
+  background: transparent;
   color: var(--text-primary);
 }
-.lens-root .mm2-focus { flex: 1 1 auto; min-height: 0; }
-/* 标题行＝窗口拖动区（无边框窗口移动窗口的唯一手段）；行内控件必须显式让开，否则点不动 */
-.lens-root .mm2-focus-head { -webkit-app-region: drag; user-select: none; }
-.lens-root .mm2-focus-head button { -webkit-app-region: no-drag; }
-.mm2-focus {
+
+/* ===== 纸片 = 窗口表面（D203 §7.1）：94% paper + 1px b1 + --shadow-float；直角；inset:0 ===== */
+.mm2-focus.lens-window {
+  position: absolute;
+  inset: 0;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  /* 第四轮 A：与完整图谱（.reader-map-stage）同一套地面与字色——paper 底 + text-primary；
-     此前取读物自身配色（--reader-bg/--reader-fg），换书换肤时图的样子会跟着变、与完整图谱对不上。
-     第五轮：画的是同一张完整图谱画布（.mm2-focus-canvas > .mindmap-canvas），样式天然同源。 */
+  overflow: hidden;
+  background: color-mix(in srgb, var(--paper) 94%, transparent);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-float);
+  border-radius: 0;
   color: var(--text-primary);
-  background: var(--paper);
-  --mm2-accent: var(--accent);
-  --mm2-line: var(--border-strong);
-  --mm2-faint: var(--border-subtle);
   font-size: 13px;
   pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
-/* 主体：图在上、详情在下（v49.24 / D197：面板进独立窗口后只有这一种摆法——窗口可自由拉伸到任意比例） */
-.mm2-focus-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.mm2-focus-pattern {
-  font-size: 11px;
-  line-height: 18px;
-  padding: 0 6px;
-  background: var(--mm2-faint);
-  color: color-mix(in srgb, currentColor 70%, transparent);
+.lens-canvas { position: absolute; inset: 0; }
+
+/* 图谱内容区：left 16 / top 32；宽高由宿主按 content × s 设（inline style） */
+.lens-graph { position: absolute; }
+.lens-graph > .mindmap-canvas {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: block;
+  overflow: visible;
 }
-.mm2-focus-head {
-  flex: 0 0 auto;
-  padding: 10px 12px 8px;
-  border-bottom: 1px solid var(--mm2-faint);
-}
-.mm2-focus-head-row {
+
+/* ===== 控制轨（D203 §7.3）：上缘 48px 悬停浮出；左标题 / 中动作 / 右置顶 + 关闭 ===== */
+.lens-rail {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: 4px;
+  height: 24px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 24px;
+  gap: 6px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  z-index: 9;
 }
-.mm2-focus-title { font-weight: 600; font-size: 13px; }
-.mm2-focus-mode {
-  font-size: 11px;
-  line-height: 18px;
-  padding: 0 6px;
-  border: 1px solid var(--mm2-faint);
-  color: color-mix(in srgb, currentColor 58%, transparent);
+.mm2-focus.lens-window.is-rail-on .lens-rail {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
 }
-.mm2-focus-mode.is-browsing { border-color: var(--mm2-accent); color: var(--mm2-accent); }
-.mm2-focus-spacer { flex: 1 1 auto; }
-.mm2-focus-chip,
-.mm2-focus-back {
-  font: inherit;
-  font-size: 12px;
-  line-height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--mm2-accent);
-  background: none;
-  color: var(--mm2-accent);
-  cursor: pointer;
-}
-.mm2-focus-chip:hover,
-.mm2-focus-back:hover { background: color-mix(in srgb, var(--mm2-accent) 10%, transparent); }
-.mm2-focus-back { display: inline-flex; gap: 6px; margin-top: 8px; }
-.mm2-focus-x {
-  width: 24px;
+.lens-rail-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 24px;
-  display: inline-grid;
-  place-items: center;
-  border: 0;
-  background: none;
-  color: inherit;
-  opacity: 0.6;
-  cursor: pointer;
-}
-.mm2-focus-x:hover { opacity: 1; }
-/* 置顶钮（独立窗口）：开启态用主题色点出——与制卡台窗口的置顶钮同语言 */
-.mm2-focus-x.is-on { opacity: 1; color: var(--mm2-accent); }
-.mm2-focus-progress { height: 2px; margin-top: 8px; background: var(--mm2-faint); }
-.mm2-focus-progress > span { display: block; height: 100%; background: var(--mm2-accent); transition: width 200ms linear; }
-.mm2-focus-empty {
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: grab;
+  user-select: none;
+  white-space: nowrap;
   flex: 0 0 auto;
-  padding: 12px;
-  border-bottom: 1px solid var(--mm2-faint);
+  -webkit-app-region: drag;
 }
-.mm2-focus-empty-text { margin: 0 0 8px; font-size: 13px; }
-.mm2-focus-generate { margin-bottom: 4px; }
-.mm2-focus-canvas {
+.lens-rail-title:active { cursor: grabbing; }
+.lens-rail-grip {
+  width: 8px;
+  height: 12px;
+  display: inline-block;
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.2px);
+  background-size: 4px 4px;
+  color: var(--text-secondary);
+}
+.lens-rail-title b { font-size: 11px; font-weight: 600; }
+.lens-rail-center {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 120px;
-  position: relative;
   display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
-/* 第五轮：面板里放的就是完整图谱画布本身（.mindmap-canvas.mm2-canvas），不再是裁出来的小图 */
-.mm2-focus-canvas > .mindmap-canvas {
+.lens-rail-pattern {
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.lens-rail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+.lens-rail-action {
+  height: 24px;
+  padding: 0 7px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 22px;
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+}
+.lens-rail-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.lens-rail-action.is-primary { border-color: var(--accent); color: var(--accent); }
+.lens-rail-action:disabled { opacity: 0.45; cursor: default; }
+.lens-rail-btn {
+  height: 24px;
+  padding: 0 7px;
+  font: inherit;
+  font-size: 11px;
+  line-height: 22px;
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  -webkit-app-region: no-drag;
+}
+.lens-rail-btn:hover { border-color: var(--border-strong); color: var(--ink); }
+.lens-rail-btn.is-on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.lens-rail-close { width: 24px; padding: 0; font-size: 14px; line-height: 22px; text-align: center; }
+.lens-rail.is-narrow { gap: 4px; }
+.lens-rail.is-narrow .lens-rail-action { padding: 0 5px; }
+.lens-rail.is-narrow .lens-rail-actions { gap: 3px; }
+
+/* ===== 解释卡（D203 §7.4）：轨下 36px、水平居中、min(420, winW-32)、不改变窗口 ===== */
+.lens-explain {
+  position: absolute;
+  top: 36px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 32px));
+  max-height: calc(100% - 52px);
+  overflow: auto;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  box-shadow: none;
+  z-index: 8;
+  border-radius: var(--radius-popover);
+}
+.lens-explain-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.lens-explain-head b { font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.04em; }
+.lens-explain-head span {
   flex: 1 1 auto;
-  padding: var(--sp-2);
+  min-width: 0;
+  font-size: 10px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-/* 第六轮：阅读透镜「在完整图谱中打开」——把透镜展示过的那片区域整块框出来，短暂强调（约 2.4s 淡出），便于快速定位 */
+.lens-explain-head button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.lens-explain-head button:hover { color: var(--accent); }
+.lens-explain p { margin: 0; font-size: 12px; line-height: 1.7; color: var(--ink); white-space: pre-wrap; }
+.lens-explain p.lens-explain-note { color: var(--text-secondary); }
+
+/* ===== 状态条 / 模式胶囊 / 返回胶囊 ===== */
+.lens-status {
+  position: absolute;
+  left: 16px;
+  bottom: 48px;
+  max-width: calc(100% - 32px);
+  padding: 4px 8px;
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  z-index: 10;
+  border-radius: var(--radius-popover);
+}
+.lens-mode-chip {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  font-size: 10px;
+  color: var(--text-secondary);
+  z-index: 9;
+  border-radius: var(--radius-popover);
+}
+.lens-mode-chip button {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 10px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.lens-mode-chip button:hover { text-decoration: underline; }
+.lens-chips {
+  position: absolute;
+  left: 16px;
+  top: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  z-index: 7;
+}
+.lens-chip {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--paper);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.lens-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ===== 种子卡（D203 §4.4）：320×200 + 留白 = 360×248 ===== */
+.lens-seed {
+  position: absolute;
+  left: 16px;
+  top: 32px;
+  width: 320px;
+  height: 200px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: auto;
+  z-index: 6;
+  border-radius: var(--radius-popover);
+}
+.lens-seed-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+.lens-seed-note { margin: 0; font-size: 11px; line-height: 1.55; color: var(--text-secondary); }
+.lens-seed-generate { align-self: flex-start; margin: 0; }
+.lens-seed-progress { height: 2px; margin-top: auto; background: var(--border-subtle); flex: 0 0 auto; }
+.lens-seed-progress > span { display: block; height: 100%; background: var(--accent); transition: width 200ms linear; }
+
+/* 第六轮：阅读透镜「在完整图谱中打开」——把透镜展示过的那片区域整块框出来，短暂强调（约 2.4s 淡出） */
 .mindmap-canvas svg .mm2-flash {
   fill: var(--accent);
   fill-opacity: 0.1;
@@ -9745,76 +9904,26 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   60% { opacity: 1; }
   100% { opacity: 0; }
 }
-.mm2-focus-note {
-  margin: 8px 12px;
-  font-size: 12px;
-  line-height: 1.55;
-  color: color-mix(in srgb, currentColor 55%, transparent);
-}
-.mm2-focus-note-foot { flex: 0 0 auto; }
-.mm2-focus-live::before {
-  content: "";
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 8px;
-  border-radius: 50%;
-  background: var(--mm2-accent);
-  vertical-align: 1px;
-  animation: mm2-focus-blink 1.1s ease-in-out infinite;
-}
-@keyframes mm2-focus-blink { 50% { opacity: 0.25; } }
 
-/* —— 详情 —— */
-.mm2-focus-detail {
-  flex: 0 0 auto;
-  max-height: 42%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 10px 12px 10px;
-  border-top: 1px solid var(--border-subtle);
-}
-/* 第四轮 D3：解释收起复用制卡台「AI 解释板块」同一套骨架（.collapse-clip.wb-explain-clip + .collapse-inner +
-   .wb-explain-toggle）——换肤时一处改、两处同步。浮窗不是坞体（无尺寸查询容器）：55cqh 失去参照、
-   D149③ 的顶缘 24px 渐隐会压暗首行，故此处各自覆盖；正文仍在 .collapse-inner 内滚动。
-   第五轮：把手挪到正文上方（用户要求），故不再需要坞内的「内容在上」几何假设。 */
-.mm2-focus-explain-wrap { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; }
-.mm2-focus .wb-explain-clip { flex: 1 1 auto; min-height: 0; max-height: none; }
-.mm2-focus .wb-explain-clip > .collapse-inner { min-height: 0; overflow-y: auto; overflow-x: hidden; }
-.mm2-focus .wb-explain-clip > .collapse-inner::after { content: none; background: none; }
-.mm2-focus-explain { margin: 4px 0 0; font-size: 13px; line-height: 1.65; color: var(--text-primary); }
-.mm2-focus-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.mm2-focus-btn {
-  font: inherit;
-  font-size: 12px;
-  line-height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--mm2-line);
-  background: none;
-  color: inherit;
-  cursor: pointer;
-}
-.mm2-focus-btn:hover:not(:disabled) { border-color: var(--mm2-accent); color: var(--mm2-accent); }
-.mm2-focus-btn:disabled { opacity: 0.5; cursor: default; }
-.mm2-focus-link {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 12px;
-  color: var(--mm2-accent);
-  cursor: pointer;
-}
-.mm2-focus-link:hover { text-decoration: underline; }
-.mm2-focus button:focus-visible {
-  outline: 2px solid var(--mm2-accent);
+.mm2-focus button:focus-visible,
+.lens-window button:focus-visible {
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  .lens-rail { transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+  .lens-explain { animation: lens-explain-in var(--dur-enter) var(--ease-enter); }
+}
+@keyframes lens-explain-in {
+  from { opacity: 0; transform: translate(-50%, 2px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .mm2-focus-live::before,
-  .mm2-focus-progress > span {
-    animation: none;
-    transition: none;
+  .lens-rail,
+  .lens-explain,
+  .lens-seed-progress > span {
+    animation: none !important;
+    transition: none !important;
   }
 }

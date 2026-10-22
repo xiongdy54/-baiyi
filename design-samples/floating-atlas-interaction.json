@@ -1,0 +1,1080 @@
+{
+  "url": "file:///C:/Users/xiongdy/Documents/OpenCode/Incremental%20reading%20Dev/design-samples/floating-atlas.html?chrome=1&mode=reader&preset=real&anim=0",
+  "checks": [
+    {
+      "name": "初始窗口 = 内容 + 留白",
+      "ok": true,
+      "actual": {
+        "w": 568,
+        "h": 216,
+        "x": 611,
+        "y": 97
+      }
+    },
+    {
+      "name": "初始 100% 完整",
+      "ok": true,
+      "actual": "100% 完整"
+    },
+    {
+      "name": "纸片底 = 窗口表面",
+      "ok": true,
+      "actual": [
+        568,
+        216
+      ]
+    },
+    {
+      "name": "选中节点整卡主题色（与根同色）",
+      "ok": true,
+      "actual": {
+        "selected": true,
+        "ring": false,
+        "fill": "rgb(22, 106, 89)",
+        "rootFill": "rgb(22, 106, 89)",
+        "titleFill": "rgb(255, 255, 255)",
+        "rootTitleFill": "rgb(255, 255, 255)"
+      }
+    },
+    {
+      "name": "选中节点无外圈/双框",
+      "ok": true,
+      "actual": {
+        "selected": true,
+        "ring": false,
+        "fill": "rgb(22, 106, 89)",
+        "rootFill": "rgb(22, 106, 89)",
+        "titleFill": "rgb(255, 255, 255)",
+        "rootTitleFill": "rgb(255, 255, 255)"
+      }
+    },
+    {
+      "name": "选后控制轨自动亮起",
+      "ok": true,
+      "actual": {
+        "on": true,
+        "opacity": "1",
+        "actionsHidden": false,
+        "labels": [
+          "跳到原文",
+          "它在说什么",
+          "深挖",
+          "在完整图谱中打开"
+        ],
+        "noOverlap": true,
+        "box": [
+          751,
+          1036
+        ]
+      }
+    },
+    {
+      "name": "动作在控制轨内且不重叠",
+      "ok": true,
+      "actual": {
+        "on": true,
+        "opacity": "1",
+        "actionsHidden": false,
+        "labels": [
+          "跳到原文",
+          "它在说什么",
+          "深挖",
+          "在完整图谱中打开"
+        ],
+        "noOverlap": true,
+        "box": [
+          751,
+          1036
+        ]
+      }
+    },
+    {
+      "name": "宽窗使用完整动作文案",
+      "ok": true,
+      "actual": [
+        "跳到原文",
+        "它在说什么",
+        "深挖",
+        "在完整图谱中打开"
+      ]
+    },
+    {
+      "name": "解释打开不改窗口尺寸",
+      "ok": true,
+      "actual": {
+        "open": true,
+        "win": "568pxx216px",
+        "rect": [
+          420,
+          107
+        ],
+        "fits": true
+      }
+    },
+    {
+      "name": "解释卡在纸片内",
+      "ok": true,
+      "actual": {
+        "open": true,
+        "win": "568pxx216px",
+        "rect": [
+          420,
+          107
+        ],
+        "fits": true
+      }
+    },
+    {
+      "name": "解释关闭后动作仍在轨内",
+      "ok": true,
+      "actual": {
+        "on": true,
+        "opacity": "1",
+        "actionsHidden": false,
+        "labels": [
+          "跳到原文",
+          "它在说什么",
+          "深挖",
+          "在完整图谱中打开"
+        ],
+        "noOverlap": true,
+        "box": [
+          751,
+          1036
+        ]
+      }
+    },
+    {
+      "name": "窄窗动作自动缩短",
+      "ok": true,
+      "actual": [
+        "原文",
+        "解释",
+        "深挖",
+        "全图"
+      ]
+    },
+    {
+      "name": "窄窗轨内动作仍不重叠",
+      "ok": true,
+      "actual": {
+        "on": true,
+        "opacity": "1",
+        "actionsHidden": false,
+        "labels": [
+          "原文",
+          "解释",
+          "深挖",
+          "全图"
+        ],
+        "noOverlap": true,
+        "box": [
+          760,
+          924
+        ]
+      }
+    },
+    {
+      "name": "纸片底随预设变大小（真实 568×216 / 树 448×504 / 时间线 796×204）",
+      "ok": true,
+      "actual": {
+        "real": {
+          "w": 568,
+          "h": 216,
+          "x": 611,
+          "y": 97
+        },
+        "tree": {
+          "w": 448,
+          "h": 504,
+          "x": 619,
+          "y": 8
+        },
+        "timeline": {
+          "w": 796,
+          "h": 204,
+          "x": 424,
+          "y": 208
+        },
+        "realAgain": {
+          "w": 568,
+          "h": 216,
+          "x": 428,
+          "y": 152
+        }
+      }
+    },
+    {
+      "name": "实际纸片矩形 = 窗口（树/时间线）",
+      "ok": true,
+      "actual": {
+        "plateTree": [
+          448,
+          504
+        ],
+        "plateTimeline": [
+          796,
+          204
+        ]
+      }
+    },
+    {
+      "name": "12 卡默认聚焦且 s ≥ 0.62",
+      "ok": true,
+      "actual": {
+        "preset": "argument",
+        "mode": "focus",
+        "tier": "聚焦（8/12）",
+        "content": {
+          "w": 1716,
+          "h": 152
+        },
+        "scale": 0.6393,
+        "window": {
+          "w": 1129,
+          "h": 160,
+          "x": 8,
+          "y": 218
+        },
+        "anchorDrift": 40.5,
+        "clamped": true
+      }
+    },
+    {
+      "name": "聚焦时窄动作文案仍可容纳",
+      "ok": true,
+      "actual": {
+        "on": true,
+        "opacity": "1",
+        "actionsHidden": false,
+        "labels": [
+          "跳到原文",
+          "它在说什么",
+          "深挖",
+          "在完整图谱中打开"
+        ],
+        "noOverlap": true,
+        "box": [
+          429,
+          714
+        ]
+      }
+    },
+    {
+      "name": "12 卡聚焦里解释卡不出窗",
+      "ok": true,
+      "actual": {
+        "fits": true,
+        "card": [
+          420,
+          107
+        ],
+        "win": [
+          1129,
+          160
+        ]
+      }
+    },
+    {
+      "name": "展开全部为显式全图",
+      "ok": true,
+      "actual": {
+        "preset": "argument",
+        "mode": "all",
+        "tier": "全图（显式）",
+        "content": {
+          "w": 2400,
+          "h": 152
+        },
+        "scale": 0.4571,
+        "window": {
+          "w": 1129,
+          "h": 160,
+          "x": 21,
+          "y": 241
+        },
+        "anchorDrift": 0.58,
+        "clamped": false
+      }
+    },
+    {
+      "name": "全图胶囊可见",
+      "ok": true,
+      "actual": {
+        "on": true,
+        "text": "全图 · 0.46×"
+      }
+    },
+    {
+      "name": "回到聚焦",
+      "ok": true,
+      "actual": {
+        "preset": "argument",
+        "mode": "focus",
+        "tier": "聚焦（8/12）",
+        "content": {
+          "w": 1716,
+          "h": 152
+        },
+        "scale": 0.6393,
+        "window": {
+          "w": 1129,
+          "h": 160,
+          "x": 28,
+          "y": 236
+        },
+        "anchorDrift": 0.33,
+        "clamped": false
+      }
+    },
+    {
+      "name": "窄舞台聚焦档位自适应",
+      "ok": true,
+      "actual": {
+        "preset": "argument",
+        "mode": "focus",
+        "tier": "聚焦（5/12）",
+        "content": {
+          "w": 1044,
+          "h": 152
+        },
+        "scale": 0.6389,
+        "window": {
+          "w": 699,
+          "h": 160,
+          "x": 53,
+          "y": 236
+        },
+        "anchorDrift": 190,
+        "clamped": true
+      }
+    },
+    {
+      "name": "窄舞台窗口不超 92% 工作区",
+      "ok": true,
+      "actual": {
+        "w": 699,
+        "h": 160,
+        "x": 53,
+        "y": 236
+      }
+    },
+    {
+      "name": "控制轨 2.5s 后自动隐藏",
+      "ok": true,
+      "actual": {
+        "on": false,
+        "opacity": "0",
+        "actionsHidden": false,
+        "labels": [
+          "跳到原文",
+          "它在说什么",
+          "深挖",
+          "在完整图谱中打开"
+        ],
+        "noOverlap": true,
+        "box": [
+          609,
+          894
+        ]
+      }
+    }
+  ],
+  "data": {
+    "initial": {
+      "ledger": {
+        "stage": {
+          "w": 1228,
+          "h": 812
+        },
+        "current": {
+          "preset": "real",
+          "mode": "fit",
+          "tier": "100% 完整",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216,
+            "x": 611,
+            "y": 97
+          },
+          "anchorDrift": 0,
+          "clamped": false
+        },
+        "presets": [
+          {
+            "id": "real",
+            "name": "真实样张",
+            "content": {
+              "w": 536,
+              "h": 168
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 568,
+              "h": 216
+            }
+          },
+          {
+            "id": "timeline",
+            "name": "4 卡时间线",
+            "content": {
+              "w": 764,
+              "h": 156
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 796,
+              "h": 204
+            }
+          },
+          {
+            "id": "tree",
+            "name": "7 卡树",
+            "content": {
+              "w": 416,
+              "h": 456
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 448,
+              "h": 504
+            }
+          },
+          {
+            "id": "argument",
+            "name": "12 卡论证",
+            "content": {
+              "w": 1716,
+              "h": 152
+            },
+            "tier": "聚焦（8/12）",
+            "scale": 0.6393,
+            "window": {
+              "w": 1129,
+              "h": 160
+            }
+          }
+        ],
+        "judge": [
+          {
+            "ok": true,
+            "text": "内容完整落在窗口内，无裁切"
+          },
+          {
+            "ok": true,
+            "text": "缩放 1.00× ≥ 0.62 可读下限"
+          },
+          {
+            "ok": true,
+            "text": "阅读节点作为锚点，漂移 0.0 px"
+          },
+          {
+            "ok": false,
+            "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+          },
+          {
+            "ok": true,
+            "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+          }
+        ],
+        "toggles": {
+          "rail": false,
+          "showAll": false,
+          "plate": "always-on"
+        }
+      },
+      "plate": [
+        568,
+        216
+      ]
+    },
+    "selected": {
+      "selected": {
+        "selected": true,
+        "ring": false,
+        "fill": "rgb(22, 106, 89)",
+        "rootFill": "rgb(22, 106, 89)",
+        "titleFill": "rgb(255, 255, 255)",
+        "rootTitleFill": "rgb(255, 255, 255)"
+      },
+      "rail": {
+        "on": true,
+        "opacity": "1",
+        "actionsHidden": false,
+        "labels": [
+          "跳到原文",
+          "它在说什么",
+          "深挖",
+          "在完整图谱中打开"
+        ],
+        "noOverlap": true,
+        "box": [
+          751,
+          1036
+        ]
+      }
+    },
+    "explain": {
+      "open": true,
+      "win": "568pxx216px",
+      "rect": [
+        420,
+        107
+      ],
+      "fits": true
+    },
+    "treeRail": {
+      "on": true,
+      "opacity": "1",
+      "actionsHidden": false,
+      "labels": [
+        "原文",
+        "解释",
+        "深挖",
+        "全图"
+      ],
+      "noOverlap": true,
+      "box": [
+        760,
+        924
+      ]
+    },
+    "sizes": {
+      "sizes": {
+        "real": {
+          "w": 568,
+          "h": 216,
+          "x": 611,
+          "y": 97
+        },
+        "tree": {
+          "w": 448,
+          "h": 504,
+          "x": 619,
+          "y": 8
+        },
+        "timeline": {
+          "w": 796,
+          "h": 204,
+          "x": 424,
+          "y": 208
+        },
+        "realAgain": {
+          "w": 568,
+          "h": 216,
+          "x": 428,
+          "y": 152
+        }
+      },
+      "plateTree": [
+        448,
+        504
+      ],
+      "plateTimeline": [
+        796,
+        204
+      ]
+    },
+    "argument": {
+      "focus": {
+        "stage": {
+          "w": 1228,
+          "h": 812
+        },
+        "current": {
+          "preset": "argument",
+          "mode": "focus",
+          "tier": "聚焦（8/12）",
+          "content": {
+            "w": 1716,
+            "h": 152
+          },
+          "scale": 0.6393,
+          "window": {
+            "w": 1129,
+            "h": 160,
+            "x": 8,
+            "y": 218
+          },
+          "anchorDrift": 40.5,
+          "clamped": true
+        },
+        "presets": [
+          {
+            "id": "real",
+            "name": "真实样张",
+            "content": {
+              "w": 536,
+              "h": 168
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 568,
+              "h": 216
+            }
+          },
+          {
+            "id": "timeline",
+            "name": "4 卡时间线",
+            "content": {
+              "w": 764,
+              "h": 156
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 796,
+              "h": 204
+            }
+          },
+          {
+            "id": "tree",
+            "name": "7 卡树",
+            "content": {
+              "w": 416,
+              "h": 456
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 448,
+              "h": 504
+            }
+          },
+          {
+            "id": "argument",
+            "name": "12 卡论证",
+            "content": {
+              "w": 1716,
+              "h": 152
+            },
+            "tier": "聚焦（8/12）",
+            "scale": 0.6393,
+            "window": {
+              "w": 1129,
+              "h": 160
+            }
+          }
+        ],
+        "judge": [
+          {
+            "ok": true,
+            "text": "聚焦内容完整；有意不全显（另有 4 项，点「另有 N 项」可展开全部）"
+          },
+          {
+            "ok": true,
+            "text": "缩放 0.64× ≥ 0.62 可读下限"
+          },
+          {
+            "ok": true,
+            "text": "阅读节点作为锚点，漂移 40.5 px（贴边，已钳制）"
+          },
+          {
+            "ok": false,
+            "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+          },
+          {
+            "ok": true,
+            "text": "纸片底 = 窗口表面：1129×160；图谱收缩/展开时随窗口一起变"
+          }
+        ],
+        "toggles": {
+          "rail": false,
+          "showAll": false,
+          "plate": "always-on"
+        }
+      },
+      "all": {
+        "stage": {
+          "w": 1228,
+          "h": 812
+        },
+        "current": {
+          "preset": "argument",
+          "mode": "all",
+          "tier": "全图（显式）",
+          "content": {
+            "w": 2400,
+            "h": 152
+          },
+          "scale": 0.4571,
+          "window": {
+            "w": 1129,
+            "h": 160,
+            "x": 21,
+            "y": 241
+          },
+          "anchorDrift": 0.58,
+          "clamped": false
+        },
+        "presets": [
+          {
+            "id": "real",
+            "name": "真实样张",
+            "content": {
+              "w": 536,
+              "h": 168
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 568,
+              "h": 216
+            }
+          },
+          {
+            "id": "timeline",
+            "name": "4 卡时间线",
+            "content": {
+              "w": 764,
+              "h": 156
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 796,
+              "h": 204
+            }
+          },
+          {
+            "id": "tree",
+            "name": "7 卡树",
+            "content": {
+              "w": 416,
+              "h": 456
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 448,
+              "h": 504
+            }
+          },
+          {
+            "id": "argument",
+            "name": "12 卡论证",
+            "content": {
+              "w": 2400,
+              "h": 152
+            },
+            "tier": "全图（显式）",
+            "scale": 0.4571,
+            "window": {
+              "w": 1129,
+              "h": 160
+            }
+          }
+        ],
+        "judge": [
+          {
+            "ok": true,
+            "text": "内容完整落在窗口内，无裁切"
+          },
+          {
+            "ok": true,
+            "text": "全图模式：显式选择低于可读下限（0.46×）"
+          },
+          {
+            "ok": true,
+            "text": "阅读节点作为锚点，漂移 0.6 px"
+          },
+          {
+            "ok": false,
+            "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+          },
+          {
+            "ok": true,
+            "text": "纸片底 = 窗口表面：1129×160；图谱收缩/展开时随窗口一起变"
+          }
+        ],
+        "toggles": {
+          "rail": false,
+          "showAll": true,
+          "plate": "always-on"
+        }
+      },
+      "back": {
+        "stage": {
+          "w": 1228,
+          "h": 812
+        },
+        "current": {
+          "preset": "argument",
+          "mode": "focus",
+          "tier": "聚焦（8/12）",
+          "content": {
+            "w": 1716,
+            "h": 152
+          },
+          "scale": 0.6393,
+          "window": {
+            "w": 1129,
+            "h": 160,
+            "x": 28,
+            "y": 236
+          },
+          "anchorDrift": 0.33,
+          "clamped": false
+        },
+        "presets": [
+          {
+            "id": "real",
+            "name": "真实样张",
+            "content": {
+              "w": 536,
+              "h": 168
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 568,
+              "h": 216
+            }
+          },
+          {
+            "id": "timeline",
+            "name": "4 卡时间线",
+            "content": {
+              "w": 764,
+              "h": 156
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 796,
+              "h": 204
+            }
+          },
+          {
+            "id": "tree",
+            "name": "7 卡树",
+            "content": {
+              "w": 416,
+              "h": 456
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 448,
+              "h": 504
+            }
+          },
+          {
+            "id": "argument",
+            "name": "12 卡论证",
+            "content": {
+              "w": 1716,
+              "h": 152
+            },
+            "tier": "聚焦（8/12）",
+            "scale": 0.6393,
+            "window": {
+              "w": 1129,
+              "h": 160
+            }
+          }
+        ],
+        "judge": [
+          {
+            "ok": true,
+            "text": "聚焦内容完整；有意不全显（另有 4 项，点「另有 N 项」可展开全部）"
+          },
+          {
+            "ok": true,
+            "text": "缩放 0.64× ≥ 0.62 可读下限"
+          },
+          {
+            "ok": true,
+            "text": "阅读节点作为锚点，漂移 0.3 px"
+          },
+          {
+            "ok": false,
+            "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+          },
+          {
+            "ok": true,
+            "text": "纸片底 = 窗口表面：1129×160；图谱收缩/展开时随窗口一起变"
+          }
+        ],
+        "toggles": {
+          "rail": false,
+          "showAll": false,
+          "plate": "always-on"
+        }
+      },
+      "rail": {
+        "on": true,
+        "opacity": "1",
+        "actionsHidden": false,
+        "labels": [
+          "跳到原文",
+          "它在说什么",
+          "深挖",
+          "在完整图谱中打开"
+        ],
+        "noOverlap": true,
+        "box": [
+          429,
+          714
+        ]
+      },
+      "explain": {
+        "fits": true,
+        "card": [
+          420,
+          107
+        ],
+        "win": [
+          1129,
+          160
+        ]
+      },
+      "chip": {
+        "on": true,
+        "text": "全图 · 0.46×"
+      }
+    },
+    "narrow": {
+      "ledger": {
+        "stage": {
+          "w": 760,
+          "h": 715
+        },
+        "current": {
+          "preset": "argument",
+          "mode": "focus",
+          "tier": "聚焦（5/12）",
+          "content": {
+            "w": 1044,
+            "h": 152
+          },
+          "scale": 0.6389,
+          "window": {
+            "w": 699,
+            "h": 160,
+            "x": 53,
+            "y": 236
+          },
+          "anchorDrift": 190,
+          "clamped": true
+        },
+        "presets": [
+          {
+            "id": "real",
+            "name": "真实样张",
+            "content": {
+              "w": 536,
+              "h": 168
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 568,
+              "h": 216
+            }
+          },
+          {
+            "id": "timeline",
+            "name": "4 卡时间线",
+            "content": {
+              "w": 764,
+              "h": 156
+            },
+            "tier": "缩放完整",
+            "scale": 0.873,
+            "window": {
+              "w": 699,
+              "h": 184
+            }
+          },
+          {
+            "id": "tree",
+            "name": "7 卡树",
+            "content": {
+              "w": 416,
+              "h": 456
+            },
+            "tier": "100% 完整",
+            "scale": 1,
+            "window": {
+              "w": 448,
+              "h": 504
+            }
+          },
+          {
+            "id": "argument",
+            "name": "12 卡论证",
+            "content": {
+              "w": 1044,
+              "h": 152
+            },
+            "tier": "聚焦（5/12）",
+            "scale": 0.6389,
+            "window": {
+              "w": 699,
+              "h": 160
+            }
+          }
+        ],
+        "judge": [
+          {
+            "ok": true,
+            "text": "聚焦内容完整；有意不全显（另有 7 项，点「另有 N 项」可展开全部）"
+          },
+          {
+            "ok": true,
+            "text": "缩放 0.64× ≥ 0.62 可读下限"
+          },
+          {
+            "ok": true,
+            "text": "阅读节点作为锚点，漂移 190.0 px（贴边，已钳制）"
+          },
+          {
+            "ok": false,
+            "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+          },
+          {
+            "ok": true,
+            "text": "纸片底 = 窗口表面：699×160；图谱收缩/展开时随窗口一起变"
+          }
+        ],
+        "toggles": {
+          "rail": false,
+          "showAll": false,
+          "plate": "always-on"
+        }
+      },
+      "win": {
+        "win": "699pxx160px @ 53px,236px",
+        "stage": "760x715"
+      }
+    },
+    "autoHide": {
+      "on": false,
+      "opacity": "0",
+      "actionsHidden": false,
+      "labels": [
+        "跳到原文",
+        "它在说什么",
+        "深挖",
+        "在完整图谱中打开"
+      ],
+      "noOverlap": true,
+      "box": [
+        609,
+        894
+      ]
+    }
+  },
+  "pass": 24,
+  "fail": 0
+}

@@ -71,6 +71,8 @@ export interface SvgLabels {
   floor: string;
   streaming: string;
   unfold: (n: number) => string;
+  /** 透镜里已展开分叉节点的「收起」徽标（完整图谱没有这个徽标，双击折叠） */
+  collapse: (n: number) => string;
   more: (n: number) => string;
   cross: (n: number) => string;
   stub: string;
@@ -83,6 +85,7 @@ export const DEFAULT_LABELS: SvgLabels = {
   floor: "已触底：没有更深的结构",
   streaming: "正在生成",
   unfold: (n) => `展开 ${n} 个子节点`,
+  collapse: (n) => `收起 ${n} 个子节点`,
   more: (n) => `另有 ${n} 项`,
   cross: (n) => `${n} 条跨组关系，悬停或选中查看`,
   stub: "其余部分，可深挖",
@@ -127,6 +130,13 @@ export interface SvgOptions {
   reading?: string | null;
   /** 短暂高亮的区域（阅读透镜「在完整图谱中打开」）：把这批节点整体框一个 accent 高亮区（CSS 淡出） */
   flash?: readonly string[] | null;
+  /**
+   * D203 结构图纸片窗口口径：选中＝整卡 accent（不是外圈）；hover 描边用 accent；
+   * 「另有 N 项」卡描边用 b1。完整图谱不传（保持外圈选中 + ink hover + b2 more）。
+   */
+  lensStyle?: boolean;
+  /** 顶卡类型行（透镜的截断点类型）；不传＝顶卡只显示标题（完整图谱现状） */
+  rootType?: string;
 }
 
 // ───────────────────────── 端头 ─────────────────────────
@@ -218,7 +228,7 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
     if (d.kind === "more") {
       const n = d.count ?? 0;
       let g = `<g transform="translate(${num(d.x)},${num(d.y)})"${data("act", "lod-expand")}${data("group-id", d.nid)}${attrOp(o * dimOf(d.nid))}>`;
-      g += `<rect width="${num(d.w)}" height="${num(d.h)}" fill="var(--paper)" stroke="var(--border-strong)" stroke-dasharray="3 3"/>`;
+      g += `<rect width="${num(d.w)}" height="${num(d.h)}" fill="var(--paper)" stroke="${opts.lensStyle ? "var(--border-subtle)" : "var(--border-strong)"}" stroke-dasharray="3 3"/>`;
       g += `<text x="12" y="${num(d.h / 2 + 4)}" font-size="12" fill="var(--text-secondary)">${escapeXml(fitText(L.more(n), 12, d.w - 16))}</text>`;
       cardsOut.push(g + "</g>");
       return;
@@ -234,28 +244,38 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
     const isFresh = fresh.has(d.id);
     const isReading = reading === d.id;
     const streaming = state === "streaming";
-    // 正在阅读的节点与根卡同一套强调（整卡主题色底 + 白字），描边也走主题色，免得底上压一条灰边
-    const stroke = isRoot || isReading ? "var(--accent)" : sel || isFresh || streaming ? "var(--accent)" : hov ? "var(--ink)" : "var(--border-strong)";
-    const dash = !isRoot && (isFresh || streaming) ? ' stroke-dasharray="4 3"' : "";
+    // D203：透镜里「选中」＝根/阅读节点同款整卡 accent（不是外圈）；完整图谱仍用外圈选中
+    const lens = !!opts.lensStyle;
+    const fillSel = lens && sel;
+    const strong = isRoot || isReading || fillSel;
+    // 正在阅读 / 选中 / 根卡同一套强调（整卡主题色底 + 白字），描边也走主题色，免得底上压一条灰边
+    const stroke = strong || sel || isFresh || streaming ? "var(--accent)" : hov ? (lens ? "var(--accent)" : "var(--ink)") : "var(--border-strong)";
+    const dash = !strong && (isFresh || streaming) ? ' stroke-dasharray="4 3"' : "";
+    const strokeWidth = hov || (sel && !lens) ? 2 : 1;
     let g = `<g transform="translate(${num(d.x)},${num(d.y)})"${data("node-id", d.id)}${sel ? data("sel", "1") : ""}${isReading ? data("reading", "1") : ""}${attrOp(o * dimOf(d.id))}>`;
-    g += `<rect width="${num(d.w)}" height="${num(d.h)}" fill="${isRoot || isReading ? "var(--accent)" : "var(--paper)"}" stroke="${stroke}" stroke-width="${sel ? 2 : 1}"${dash}/>`;
+    g += `<rect width="${num(d.w)}" height="${num(d.h)}" fill="${strong ? "var(--accent)" : "var(--paper)"}" stroke="${stroke}" stroke-width="${strokeWidth}"${dash}/>`;
     const node = isRoot ? null : opts.graph?.nodes[d.id] ?? null;
     const title = isRoot ? opts.rootTitle ?? opts.graph?.meta?.title ?? "" : node ? node.title : "";
     if (isRoot) {
-      g += `<text x="16" y="${num(d.h / 2 + 5)}" font-size="${CARD.rootSize}" font-weight="600" fill="var(--accent-on)">${escapeXml(fitText(title, CARD.rootSize * CARD.rootBold, titleRoom(d.w, true)))}</text>`;
+      const rootType = opts.rootType ?? "";
+      if (rootType) {
+        g += `<text x="16" y="18" font-size="${CARD.typeSize}" fill="var(--accent-on)" fill-opacity="0.72">${escapeXml(fitText(rootType, CARD.typeSize, titleRoom(d.w, true)))}</text>`;
+      }
+      g += `<text x="16" y="${rootType ? 39 : num(d.h / 2 + 5)}" font-size="${CARD.rootSize}" font-weight="600" fill="var(--accent-on)">${escapeXml(fitText(title, CARD.rootSize * CARD.rootBold, titleRoom(d.w, true)))}</text>`;
     } else {
       const muted = state === "stub";
+      const strongText = isReading || fillSel;
       // 目录节点与「其他」类型不显示类型行（「其他 目录」这类标签只是噪音），标题垂直居中
       const typeText = node && node.source !== "toc" && node.type && node.type !== "其他" ? String(node.type) : "";
-      if (typeText) g += `<text x="12" y="18" font-size="${CARD.typeSize}" fill="${isReading ? "var(--accent-on)" : "var(--text-secondary)"}">${escapeXml(fitText(typeText, CARD.typeSize, titleRoom(d.w)))}</text>`;
-      g += `<text x="12" y="${typeText ? 36 : num(d.h / 2 + 5)}" font-size="${CARD.titleSize}"${node && node.source === "toc" ? ' font-weight="600"' : ""} fill="${isReading ? "var(--accent-on)" : muted ? "var(--text-secondary)" : "var(--ink)"}">${escapeXml(fitText(title, CARD.titleSize, titleRoom(d.w)))}</text>`;
+      if (typeText) g += `<text x="12" y="18" font-size="${CARD.typeSize}" fill="${strongText ? "var(--accent-on)" : "var(--text-secondary)"}"${strongText ? ' fill-opacity="0.72"' : ""}>${escapeXml(fitText(typeText, CARD.typeSize, titleRoom(d.w)))}</text>`;
+      g += `<text x="12" y="${typeText ? 36 : num(d.h / 2 + 5)}" font-size="${CARD.titleSize}"${node && node.source === "toc" ? ' font-weight="600"' : ""} fill="${strongText ? "var(--accent-on)" : muted ? "var(--text-secondary)" : "var(--ink)"}">${escapeXml(fitText(title, CARD.titleSize, titleRoom(d.w)))}</text>`;
     }
     const bx = d.w - 10, by_ = d.h / 2;
     if (!isRoot && (state === "more" || state === "stub")) {
       g += `<g transform="translate(${num(bx - 10)},${num(by_ - 10)})"${data("act", "deepen")}${data("node-id", d.id)}>` +
         `<rect width="20" height="20" fill="var(--paper)" stroke="var(--accent)"/><path d="M6 10H14M10 6V14" stroke="var(--accent)" stroke-width="1.5"/>` +
         `<title>${escapeXml(state === "stub" ? L.stub : L.deepen)}</title></g>`;
-    } else if (!isRoot && state === "floor") {
+    } else if (!isRoot && state === "floor" && !lens) {
       g += `<circle cx="${num(bx)}" cy="${num(by_)}" r="2.5" fill="var(--border-strong)"><title>${escapeXml(L.floor)}</title></circle>`;
     } else if (state === "collapsed") {
       const n = d.count ?? 0;
@@ -268,6 +288,16 @@ export function buildCanvasSvg(display: Display, routed: RouteResult, frameState
       g += `<circle cx="${num(bx)}" cy="${num(by_)}" r="3" fill="var(--accent)">` +
         (st ? "" : `<animate attributeName="opacity" values="1;.2;1" dur="1s" repeatCount="indefinite"/>`) +
         `<title>${escapeXml(L.streaming)}</title></circle>`;
+    }
+    // 透镜里已展开分叉的节点：给一个「收起」徽标（D203 单击＝选中，不再用单击折叠；完整图谱仍双击折叠）
+    if (lens && !isRoot && state === "open") {
+      const n = opts.graph?.children[d.id]?.length ?? 0;
+      if (n > 0) {
+        g += `<g transform="translate(${num(d.w - 24)},${num(by_ - 10)})"${data("act", "collapse")}${data("node-id", d.id)}>` +
+          `<rect width="20" height="20" fill="var(--paper)" stroke="var(--accent)"/>` +
+          `<path d="M6 10H14" stroke="var(--accent)" stroke-width="1.5"/>` +
+          `<title>${escapeXml((L.collapse ?? DEFAULT_LABELS.collapse)(n))}</title></g>`;
+      }
     }
     // ↗N（跨组关系默认不画线，只计数；hover/选中或「全部关系」时线已画出，不再显示计数）
     const cc = routed.crossCount[d.id] ?? 0;

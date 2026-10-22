@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld("windowAPI", {
 contextBridge.exposeInMainWorld("lensAPI", {
   /** 窗口控制：toggle / show / hide / pin（两窗口共用，返回值＝{visible, pinned}） */
   control: (action) => ipcRenderer.invoke("win:lens", action),
+  /** 内容自适应纸片窗口（D203）：渲染层量 content/anchor，主进程算 s / 落位 / 钳制并 setBounds */
+  fit: (payload) => ipcRenderer.invoke("lens:fit", payload),
   /** 结构图窗口 → 阅读窗口：请求 / 命令（带 id 才等回执） */
   ask: (payload) => ipcRenderer.send("lens:ask", payload),
   onAsk: (cb) => {

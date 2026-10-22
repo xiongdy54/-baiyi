@@ -26,8 +26,48 @@ export interface LensWindowState {
   pinned: boolean;
 }
 
+/** 纸片窗口 fit 请求（D203）：渲染层量内容，主进程算尺寸 / 落位 */
+export interface LensFitAnchor {
+  id?: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface LensFitView {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface LensFitRequest {
+  content: { w: number; h: number };
+  /** 锚点（内容坐标；通常是阅读节点或当前选中节点） */
+  anchor?: LensFitAnchor | null;
+  /** 当前画布视图（内容坐标 → 窗口局部）；首次 fit 可省 */
+  current?: LensFitView | null;
+  mode: "fit" | "focus" | "all";
+  /** D204：被点节点中心在旧布局下的屏幕 DIP 位置（展开/收起时钉住该节点） */
+  anchorScreen?: { x: number; y: number } | null;
+  /** D204：窗口 bounds 用 180ms 缓动（展开/收起）；隐藏时只暂存 */
+  animate?: boolean;
+}
+
+export type LensFitTier = "100%" | "scaled" | "focus" | "all";
+
+export interface LensFitReply {
+  scale: number;
+  bounds: { x: number; y: number; width: number; height: number };
+  workArea: { x: number; y: number; width: number; height: number };
+  clamped: boolean;
+  tier: LensFitTier;
+}
+
 interface LensBridge {
   control: (action: "show" | "hide" | "toggle" | "pin") => Promise<LensWindowState>;
+  /** v49.29 / D203：内容自适应纸片窗口（主进程 setBounds） */
+  fit?: (payload: LensFitRequest) => Promise<LensFitReply>;
   ask: (payload: LensAsk) => void;
   onAsk: (cb: (payload: LensAsk) => void) => () => void;
   reply: (payload: { id: number; ok: boolean; value?: unknown }) => void;

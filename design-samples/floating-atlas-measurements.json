@@ -1,0 +1,1037 @@
+[
+  {
+    "name": "floating-atlas-reader",
+    "viewport": "1440x900",
+    "query": "chrome=0&mode=reader&preset=real&rail=0&ticks=0&anim=0",
+    "win": "568pxx216px @ 814px,108px",
+    "ledger": {
+      "stage": {
+        "w": 1440,
+        "h": 900
+      },
+      "current": {
+        "preset": "real",
+        "mode": "fit",
+        "tier": "100% 完整",
+        "content": {
+          "w": 536,
+          "h": 168
+        },
+        "scale": 1,
+        "window": {
+          "w": 568,
+          "h": 216,
+          "x": 814,
+          "y": 108
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1936,
+            "h": 152
+          },
+          "tier": "聚焦（9/12）",
+          "scale": 0.6674,
+          "window": {
+            "w": 1324,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "缩放 1.00× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": false,
+          "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": false,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-reader-controls",
+    "viewport": "1440x900",
+    "query": "chrome=0&mode=reader&preset=real&rail=1&ticks=1&select=real-c0&explain=1&anim=0",
+    "win": "568pxx216px @ 814px,108px",
+    "ledger": {
+      "stage": {
+        "w": 1440,
+        "h": 900
+      },
+      "current": {
+        "preset": "real",
+        "mode": "fit",
+        "tier": "100% 完整",
+        "content": {
+          "w": 536,
+          "h": 168
+        },
+        "scale": 1,
+        "window": {
+          "w": 568,
+          "h": 216,
+          "x": 814,
+          "y": 108
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1936,
+            "h": 152
+          },
+          "tier": "聚焦（9/12）",
+          "scale": 0.6674,
+          "window": {
+            "w": 1324,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "缩放 1.00× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": true,
+          "text": "解释浮层打开，窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": true,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-selected",
+    "viewport": "1440x900",
+    "query": "chrome=0&mode=reader&preset=real&rail=1&select=real-c0&anim=0",
+    "win": "568pxx216px @ 814px,108px",
+    "ledger": {
+      "stage": {
+        "w": 1440,
+        "h": 900
+      },
+      "current": {
+        "preset": "real",
+        "mode": "fit",
+        "tier": "100% 完整",
+        "content": {
+          "w": 536,
+          "h": 168
+        },
+        "scale": 1,
+        "window": {
+          "w": 568,
+          "h": 216,
+          "x": 814,
+          "y": 108
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1936,
+            "h": 152
+          },
+          "tier": "聚焦（9/12）",
+          "scale": 0.6674,
+          "window": {
+            "w": 1324,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "缩放 1.00× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": false,
+          "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": true,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-wallpaper-light",
+    "viewport": "1440x900",
+    "query": "chrome=0&mode=light&preset=real&rail=0&ticks=0&anim=0",
+    "win": "568pxx216px @ 814px,108px",
+    "ledger": {
+      "stage": {
+        "w": 1440,
+        "h": 900
+      },
+      "current": {
+        "preset": "real",
+        "mode": "fit",
+        "tier": "100% 完整",
+        "content": {
+          "w": 536,
+          "h": 168
+        },
+        "scale": 1,
+        "window": {
+          "w": 568,
+          "h": 216,
+          "x": 814,
+          "y": 108
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1936,
+            "h": 152
+          },
+          "tier": "聚焦（9/12）",
+          "scale": 0.6674,
+          "window": {
+            "w": 1324,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "缩放 1.00× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": false,
+          "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": false,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-wallpaper-dark",
+    "viewport": "1440x900",
+    "query": "chrome=0&mode=dark&preset=real&rail=0&ticks=0&anim=0",
+    "win": "568pxx216px @ 814px,108px",
+    "ledger": {
+      "stage": {
+        "w": 1440,
+        "h": 900
+      },
+      "current": {
+        "preset": "real",
+        "mode": "fit",
+        "tier": "100% 完整",
+        "content": {
+          "w": 536,
+          "h": 168
+        },
+        "scale": 1,
+        "window": {
+          "w": 568,
+          "h": 216,
+          "x": 814,
+          "y": 108
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1936,
+            "h": 152
+          },
+          "tier": "聚焦（9/12）",
+          "scale": 0.6674,
+          "window": {
+            "w": 1324,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "缩放 1.00× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": false,
+          "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": false,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-wallpaper-busy",
+    "viewport": "1440x900",
+    "query": "chrome=0&mode=busy&preset=real&rail=0&ticks=0&anim=0",
+    "win": "568pxx216px @ 814px,108px",
+    "ledger": {
+      "stage": {
+        "w": 1440,
+        "h": 900
+      },
+      "current": {
+        "preset": "real",
+        "mode": "fit",
+        "tier": "100% 完整",
+        "content": {
+          "w": 536,
+          "h": 168
+        },
+        "scale": 1,
+        "window": {
+          "w": 568,
+          "h": 216,
+          "x": 814,
+          "y": 108
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1936,
+            "h": 152
+          },
+          "tier": "聚焦（9/12）",
+          "scale": 0.6674,
+          "window": {
+            "w": 1324,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "缩放 1.00× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": false,
+          "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": false,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-sample",
+    "viewport": "1568x896",
+    "query": "chrome=1&mode=reader&preset=real&rail=1&ticks=1&select=real-c0&explain=1&anim=0",
+    "win": "568pxx216px @ 611px,97px",
+    "ledger": {
+      "stage": {
+        "w": 1228,
+        "h": 811
+      },
+      "current": {
+        "preset": "real",
+        "mode": "fit",
+        "tier": "100% 完整",
+        "content": {
+          "w": 536,
+          "h": 168
+        },
+        "scale": 1,
+        "window": {
+          "w": 568,
+          "h": 216,
+          "x": 611,
+          "y": 97
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1716,
+            "h": 152
+          },
+          "tier": "聚焦（8/12）",
+          "scale": 0.6393,
+          "window": {
+            "w": 1129,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "缩放 1.00× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": true,
+          "text": "解释浮层打开，窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：568×216；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": true,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-size-12-focus",
+    "viewport": "1568x896",
+    "query": "chrome=1&mode=reader&preset=argument&rail=0&ticks=0&anim=0",
+    "win": "1129pxx160px @ 50px,97px",
+    "ledger": {
+      "stage": {
+        "w": 1228,
+        "h": 811
+      },
+      "current": {
+        "preset": "argument",
+        "mode": "focus",
+        "tier": "聚焦（8/12）",
+        "content": {
+          "w": 1716,
+          "h": 152
+        },
+        "scale": 0.6393,
+        "window": {
+          "w": 1129,
+          "h": 160,
+          "x": 50,
+          "y": 97
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 1716,
+            "h": 152
+          },
+          "tier": "聚焦（8/12）",
+          "scale": 0.6393,
+          "window": {
+            "w": 1129,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "聚焦内容完整；有意不全显（另有 4 项，点「另有 N 项」可展开全部）"
+        },
+        {
+          "ok": true,
+          "text": "缩放 0.64× ≥ 0.62 可读下限"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": false,
+          "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：1129×160；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": false,
+        "showAll": false,
+        "plate": "always-on"
+      }
+    }
+  },
+  {
+    "name": "floating-atlas-size-12-all",
+    "viewport": "1568x896",
+    "query": "chrome=1&mode=reader&preset=argument&all=1&rail=0&ticks=0&anim=0",
+    "win": "1129pxx160px @ 50px,97px",
+    "ledger": {
+      "stage": {
+        "w": 1228,
+        "h": 811
+      },
+      "current": {
+        "preset": "argument",
+        "mode": "all",
+        "tier": "全图（显式）",
+        "content": {
+          "w": 2400,
+          "h": 152
+        },
+        "scale": 0.4571,
+        "window": {
+          "w": 1129,
+          "h": 160,
+          "x": 50,
+          "y": 97
+        },
+        "anchorDrift": 0,
+        "clamped": false
+      },
+      "presets": [
+        {
+          "id": "real",
+          "name": "真实样张",
+          "content": {
+            "w": 536,
+            "h": 168
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 568,
+            "h": 216
+          }
+        },
+        {
+          "id": "timeline",
+          "name": "4 卡时间线",
+          "content": {
+            "w": 764,
+            "h": 156
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 796,
+            "h": 204
+          }
+        },
+        {
+          "id": "tree",
+          "name": "7 卡树",
+          "content": {
+            "w": 416,
+            "h": 456
+          },
+          "tier": "100% 完整",
+          "scale": 1,
+          "window": {
+            "w": 448,
+            "h": 504
+          }
+        },
+        {
+          "id": "argument",
+          "name": "12 卡论证",
+          "content": {
+            "w": 2400,
+            "h": 152
+          },
+          "tier": "全图（显式）",
+          "scale": 0.4571,
+          "window": {
+            "w": 1129,
+            "h": 160
+          }
+        }
+      ],
+      "judge": [
+        {
+          "ok": true,
+          "text": "内容完整落在窗口内，无裁切"
+        },
+        {
+          "ok": true,
+          "text": "全图模式：显式选择低于可读下限（0.46×）"
+        },
+        {
+          "ok": true,
+          "text": "阅读节点作为锚点，漂移 0.0 px"
+        },
+        {
+          "ok": false,
+          "text": "解释浮层未打开；打开后可复核窗口尺寸不变"
+        },
+        {
+          "ok": true,
+          "text": "纸片底 = 窗口表面：1129×160；图谱收缩/展开时随窗口一起变"
+        }
+      ],
+      "toggles": {
+        "rail": false,
+        "showAll": true,
+        "plate": "always-on"
+      }
+    }
+  }
+]
