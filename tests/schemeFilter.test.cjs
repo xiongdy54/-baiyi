@@ -4,7 +4,7 @@
 // 契约：GUIDE §6.8-5「表格侧语义」（D158）；标签分隔符＝项目约定 `::`（tags.ts TAG_SEP）
 "use strict";
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 const sf = require(path.join(ROOT, "tests", "schemeFilter.bundle.cjs"));
 
 let pass = 0, fail = 0;

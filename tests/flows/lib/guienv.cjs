@@ -9,7 +9,7 @@ const fs = require("fs");
 const path = require("path");
 const { ROOT, tmpUserDataDir, freshDir } = require("./harness.cjs");
 
-const ELECTRON = path.join(ROOT, "node_modules", "electron", "dist", "electron.exe");
+const ELECTRON = require("../../lib/electronBin.cjs")();
 
 function newestMtime(dir) {
   let m = 0;

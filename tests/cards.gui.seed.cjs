@@ -2,7 +2,7 @@
 // ——早期版本摘录没有 contextRef，队列头部至今都是这种卡；用户在它上面「摘录」曾静默不落库。
 const { app } = require("electron");
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 
 app.whenReady().then(async () => {
   if (process.env.M7_TEST_USERDATA) app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));

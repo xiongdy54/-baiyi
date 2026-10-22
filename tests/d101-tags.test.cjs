@@ -5,7 +5,7 @@
 // 契约：设计稿 docs/design/CARD-SYSTEM-ANKI-ADAPTATION-D94.md §1 + GUIDE §4.1/§6.3.4/§6.8-6（D101）
 "use strict";
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 const tags = require(path.join(ROOT, "tests", "d101-tags.bundle.cjs"));
 const cardQuery = require(path.join(ROOT, "tests", "d101-cardquery.bundle.cjs"));
 const cards = require(path.join(ROOT, "tests", "m1.cards.bundle.cjs"));

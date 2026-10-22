@@ -2,7 +2,7 @@
 // 供 d158.gui.mjs G1–G7 表格等式回归（OPUS 方案 v2 §8.5）
 const { app } = require("electron");
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 
 app.whenReady().then(async () => {
   if (process.env.M7_TEST_USERDATA) app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));

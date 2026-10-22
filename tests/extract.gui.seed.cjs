@@ -1,7 +1,7 @@
 // M16 摘录复习页 GUI 播种（一次性进程；先建库并造一条**已到期**摘录，再启动真实应用）
 const { app } = require("electron");
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 
 app.whenReady().then(async () => {
   if (process.env.M7_TEST_USERDATA) app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));

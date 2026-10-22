@@ -65,17 +65,9 @@ function isCleanPass(r, s) {
   );
 }
 
-/** 找 electron 可执行文件：.cmd 需要 shell:true 才能 spawnSync，直接指向 dist/electron.exe 最稳 */
+/** 找当前平台的 Electron 可执行文件（Windows / Linux / macOS 由 electron 包自行解析） */
 function electronExe() {
-  const cands = [
-    path.join(ROOT, "node_modules", "electron", "dist", "electron.exe"),
-    path.join(ROOT, "node_modules", ".bin", "electron.cmd"),
-  ];
-  for (const c of cjs_exist(cands)) if (fs.existsSync(c)) return c;
-  return "electron";
-}
-function cjs_exist(arr) {
-  return arr;
+  return require("../lib/electronBin.cjs")();
 }
 
 function appendLine(tag, msg) {
@@ -134,7 +126,12 @@ function main() {
       while (attempts < 2) {
         attempts++;
         const t0 = Date.now();
-        const exe = f.runtime === "electron" ? electronExe() : process.execPath;
+        // 与 C-01 一致：非 electron 流程也走 Electron 二进制（ELECTRON_RUN_AS_NODE=1），
+        // 因为 better-sqlite3 只装了 Electron ABI 的二进制，系统 Node 直跑会 ABI 不匹配。
+        const exe = electronExe();
+        const childEnv = { ...process.env };
+        if (f.runtime === "electron") delete childEnv.ELECTRON_RUN_AS_NODE;
+        else childEnv.ELECTRON_RUN_AS_NODE = "1";
         // 先删旧结果文件：否则流程崩溃时会读到上一轮的 JSON，把「没跑」误判成「跑过且通过」
         const resultFile = path.join(RESULTS_DIR, `${f.id}.last.json`);
         try {
@@ -147,7 +144,7 @@ function main() {
           encoding: "utf8",
           timeout: f.timeoutSec * 1000,
           env: {
-            ...process.env,
+            ...childEnv,
             FLOW_CYCLE: String(cycle),
             FLOW_SEED: String((Date.now() % 100000000) + attempts * 7),
             ELECTRON_DISABLE_SECURITY_WARNINGS: "1",

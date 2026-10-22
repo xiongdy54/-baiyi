@@ -4,7 +4,7 @@
 //   逐行 execRawSql 35 万次会拖到不可接受；拼接内容全部为本脚本受控字面量（无注入面）。
 const { app } = require("electron");
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 
 const CARDS = Number(process.env.PERF_CARDS || 300000);
 const EXTRACTS = Number(process.env.PERF_EXTRACTS || 50000);

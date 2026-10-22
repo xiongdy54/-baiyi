@@ -6,7 +6,7 @@
 // 契约：GUIDE §6.8-6 v3（v48.64 / D108）
 "use strict";
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 const q = require(path.join(ROOT, "tests", "d108-query.bundle.cjs"));
 
 let pass = 0, fail = 0;
