@@ -1,4 +1,4 @@
-// @runtime: node
+// @runtime: system-node
 // 结构画布 · 宿主几何 API 回归（v49.29 / D203 · T2；node 直跑）。
 // 覆盖：MindmapCanvasV2 的 getBounds / getNodeRect / setViewScale / autoFit / autoFit=false / onLayout；
 //       并锁定「完整图谱页签默认自动适配行为不变」（autoFit 缺省＝true）。
