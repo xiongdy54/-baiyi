@@ -2,7 +2,7 @@
 // 批量行走 execRawSql 多行 VALUES 拼接（500 行/批，内容为本脚本受控字面量，无注入面）。
 const { app } = require("electron");
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 const COUNT = 600;
 
 app.whenReady().then(async () => {

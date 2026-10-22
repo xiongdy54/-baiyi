@@ -2,7 +2,7 @@
 // 供卡详情「生成信息区 / 血缘树 / 同源组 / 重新生成入口」的 GUI 断言驱动
 const { app } = require("electron");
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 
 app.whenReady().then(async () => {
   if (process.env.M7_TEST_USERDATA) app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));

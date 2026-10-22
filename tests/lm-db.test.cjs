@@ -5,7 +5,7 @@ const { app } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 
 let pass = 0;
 let fail = 0;

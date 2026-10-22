@@ -1,7 +1,7 @@
 // D107 GUI 播种（一次性进程）：一张当日到期卡带「脑科学」标签，供标签总开关断言
 const { app } = require("electron");
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 
 app.whenReady().then(async () => {
   if (process.env.M7_TEST_USERDATA) app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));

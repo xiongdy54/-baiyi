@@ -90,9 +90,7 @@ function mk(p) {
   return p;
 }
 function electronExe() {
-  const c = path.join(ROOT, "node_modules", "electron", "dist", "electron.exe");
-  if (fs.existsSync(c)) return c;
-  return process.execPath;
+  return require("../lib/electronBin.cjs")();
 }
 
 // ---------- 子进程管理：只清理自己起的进程（按 PID），绝不 taskkill /IM electron.exe ----------

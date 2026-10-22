@@ -4,7 +4,7 @@
 // 契约：设计稿 docs/design/CARD-SYSTEM-ANKI-ADAPTATION-D94.md §3.1 + GUIDE §6.8-6 行详情（D103）
 "use strict";
 const path = require("path");
-const ROOT = "C:/Users/xiongdy/Documents/OpenCode/Incremental reading Dev";
+const ROOT = require("path").resolve(__dirname, "..");
 const lineage = require(path.join(ROOT, "tests", "d103-lineage.bundle.cjs"));
 
 let pass = 0, fail = 0;
