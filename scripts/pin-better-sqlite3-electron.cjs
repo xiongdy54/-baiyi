@@ -37,8 +37,15 @@ function verifyElectronAbi() {
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" }
   });
   if (r.status !== 0 || !String(r.stdout || "").includes("PIN_OK")) {
+    const stderr = String(r.stderr || "");
+    // C-07：无头 Linux/CI 上最常见的失败是缺少 Electron 动态链接的系统库，原始报错只有一行 ld 错误
+    const linuxLibsHint = /error while loading shared libraries/i.test(stderr)
+      ? "\nLinux 缺少 Electron 运行所需系统库。安装方法：\n" +
+        "  Debian/Ubuntu: sudo apt-get install -y libgtk-3-0 libnss3 libxss1 libgbm1 libasound2 xvfb   （Ubuntu 24.04 起 libasound2 改名 libasound2t64）\n" +
+        "  Fedora/RHEL/Amazon Linux: sudo dnf install -y gtk3 nss libXScrnSaver mesa-libgbm alsa-lib xorg-x11-server-Xvfb"
+      : "";
     throw new Error(
-      `electron-ABI 验证失败（status=${r.status}）\nstdout: ${r.stdout}\nstderr: ${r.stderr}`
+      `electron-ABI 验证失败（status=${r.status}）\nstdout: ${r.stdout}\nstderr: ${r.stderr}${linuxLibsHint}`
     );
   }
   process.stdout.write(String(r.stdout).trim() + "\n");
@@ -60,7 +67,14 @@ function main() {
     [bin, "--runtime", "electron", "--target", electronVer, "--verbose"],
     { cwd: bs3Dir, env, stdio: ["ignore", "pipe", "pipe"], timeout: 300000 }
   );
-  verifyElectronAbi();
+  if (process.env.NUTATION_SKIP_ABI_VERIFY === "1") {
+    // C-07：只做构建、不启动 Electron 的 CI 步骤可用它跳过验证（此时无法加载 Electron 二进制）
+    process.stdout.write(
+      "[pin-better-sqlite3] 警告：NUTATION_SKIP_ABI_VERIFY=1，已跳过 electron-ABI 验证（仅适用于不运行 Electron 的构建环境）\n"
+    );
+  } else {
+    verifyElectronAbi();
+  }
   process.stdout.write(`[pin-better-sqlite3] 已钉定 electron-ABI（electron ${electronVer}）\n`);
 }
 
@@ -72,5 +86,6 @@ try {
   console.error(
     "  cd node_modules/better-sqlite3 && npx prebuild-install --runtime electron --target <electron 版本>"
   );
+  console.error("[pin-better-sqlite3] 只做构建、不运行 Electron 的环境可设置 NUTATION_SKIP_ABI_VERIFY=1 跳过验证");
   process.exit(1);
 }
