@@ -1,4 +1,5 @@
 // v48 批2 M15 重做——编排引擎回归（electron 隔离库 + fake chat 注入：npx electron tests/m15r.engine.test.cjs）
+// @runtime: electron
 // 契约：§4.19 v48 + D41/D42——自底向上归并（section 组/merge/global/editorial/review 五类调用）/
 // 分片缓存（同键命中零调用；换粒度/模型失效）/ 本地校验拒绝（假证据/坏 JSON 一次修复/二次即败）/
 // 语义评审确认制（FAIL → waiting_user；repair 一次上限）/ 取消保留已缓存分片 / remap / 旧图永不因失败消失。

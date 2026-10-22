@@ -1,4 +1,5 @@
 // v40 M8-B AI 洞察回归测试（db 层，electron 直跑：npx electron tests/m8b.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：§4.13 + §9.1 M8-B + D37——Evidence Package 禁全库直发 / insight_runs 反馈永不写 mastery /
 //       PMC 确认后才成事实 / journal-insight v1 播种 / 范围口径（自然日）。

@@ -1,4 +1,5 @@
 // v36（M8-A）日记与快速记录回归测试（db 层 + 快捷键配置，electron 直跑：npx electron tests/m8.test.cjs）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：§4.1 journal_entries / §6.5 日记模块 / §4.2-21 JournalCapture / 决策 D34。
 // 覆盖：自然日边界（00:00·23:59·跨月·跨年·闰年）/ 条目 CRUD 与软删 / 排序分页 / 搜索（含通配符转义）/

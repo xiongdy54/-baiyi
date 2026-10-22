@@ -1,4 +1,5 @@
 // v34 M12 同源卡延后 Sibling Burying 回归测试（db 层，electron 直跑：npx electron tests/m12.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：§4.16 + D33——延后是队列视图（不写 fsrs_json/不改 due/不写 review_logs），口径唯一（§4.2-20）。
 // 覆盖：组额度规则（perDay/已评分消耗/步进卡豁免/挂起排除）/ 长选区不建组 / 开关矩阵 /

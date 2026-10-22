@@ -3,6 +3,7 @@
 // 契约：docs/design/MINDMAP-V2-IMPL-PLAN.md §5.1 / §6 T5 ①–⑧；设计稿 §15.4 / §15.6 / §15.8 S1 S2 S5 S7。
 // 经 tests/lib/tsload.cjs 直接加载 TS（不依赖 esbuild）。
 "use strict";
+const PERF = Number(process.env.NUT_PERF_FACTOR || 1); // C-01：慢机器/CI 可用 NUT_PERF_FACTOR 放宽绝对耗时阈值
 const path = require("path");
 require("./lib/tsload.cjs");
 const V2 = path.join(__dirname, "..", "src", "lib", "mindmap", "v2");
@@ -507,7 +508,7 @@ console.log("---- ⑧ 性能：2,000 节点单组变化重排（10 次中位） 
   // 全量参考
   const tf0 = process.hrtime.bigint(); L.layoutGraph(s); const full = Number(process.hrtime.bigint() - tf0) / 1e6;
   console.log(`      节点 ${nodeCount}，可见卡片 ${visible}；单组变化重排 10 次中位 ${med.toFixed(2)}ms（min ${times[0].toFixed(2)} / max ${times[9].toFixed(2)}），重算块 ${last.stats.recomputed}/${last.stats.visited}；无缓存全量 ${full.toFixed(2)}ms`);
-  check(`2,000+ 节点（${nodeCount}）单组变化重排中位 ${med.toFixed(2)}ms ≤ 16ms`, nodeCount >= 2000 && visible >= 2000 && med <= 16, times);
+  check(`2,000+ 节点（${nodeCount}）单组变化重排中位 ${med.toFixed(2)}ms ≤ 16ms`, nodeCount >= 2000 && visible >= 2000 && med <= 16 * PERF, times);
   check("增量只重算脏链（≤ 深度 + 新叶）", last.stats.recomputed <= 6, last.stats);
   check("大图增量 ≡ 全量", stable(last) === stable(L.layoutGraph(s)));
 }
@@ -712,7 +713,7 @@ console.log("---- T6 ⑮ 性能：新版式 ----");
   times.sort((a, b) => a - b);
   const med = (times[4] + times[5]) / 2;
   console.log(`      节点 ${nodeCount}（五种新版式混排）；单组变化重排 10 次中位 ${med.toFixed(2)}ms（min ${times[0].toFixed(2)} / max ${times[9].toFixed(2)}），重算块 ${last.stats.recomputed}/${last.stats.visited}`);
-  check(`2,000+ 节点（${nodeCount}）新版式混排单组重排中位 ${med.toFixed(2)}ms ≤ 16ms`, nodeCount >= 2000 && med <= 16, times);
+  check(`2,000+ 节点（${nodeCount}）新版式混排单组重排中位 ${med.toFixed(2)}ms ≤ 16ms`, nodeCount >= 2000 && med <= 16 * PERF, times);
   check("新版式增量只重算脏链；增量 ≡ 全量", last.stats.recomputed <= 8 && stable(last) === stable(L.layoutGraph(s)), last.stats);
   // 单组 2,000 子（LOD 展开）：每个版式一次全量布局，防二次复杂度
   const flat = (pat) => {
@@ -734,7 +735,7 @@ console.log("---- T6 ⑮ 性能：新版式 ----");
     if (!dd.byId.f1999) flatTimes[p] = Infinity;
   }
   console.log(`      单组 2,000 子全量布局（ms）：${pats.map((p) => `${p} ${flatTimes[p].toFixed(1)}`).join(" / ")}`);
-  check("单组 2,000 子（含关系边）各版式全量布局均 ≤ 200ms（无二次复杂度）", pats.every((p) => flatTimes[p] <= 200), flatTimes);
+  check("单组 2,000 子（含关系边）各版式全量布局均 ≤ 200ms（无二次复杂度）", pats.every((p) => flatTimes[p] <= 200 * PERF), flatTimes);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

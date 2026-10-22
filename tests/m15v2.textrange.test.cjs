@@ -1,4 +1,4 @@
-// @runtime: node
+// @runtime: system-node
 // 正文文本定位（阅读透镜 v2「正文强调」）：node tests/m15v2.textrange.test.cjs
 // 首尾探针 → Range：空白不敏感、跨元素、跳过 script/style（注音与 canonical 同口径保留）、tail 缺失回落、找不到返回 null。
 const path = require("path");

@@ -1,4 +1,5 @@
 // v40 K1 知识地基回归测试（db 层，electron 直跑：npx electron tests/k1.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：§4.6 + D37 + §4.2-23 KnowledgeBase——四表 / 唯一约束 / prerequisite 无环（K3 纯本地）/
 //       merge 可回滚（merged_into + alias 并入还原）/ 生命周期 / 软删除 / 旧字段迁移只回填 proposals。

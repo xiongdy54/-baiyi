@@ -1,4 +1,5 @@
 // D103 批C 生成信息区 db 层回归（electron 直跑：npx electron tests/d103-geninfo.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：设计稿 docs/design/CARD-SYSTEM-ANKI-ADAPTATION-D94.md §3.2 + GUIDE §6.8-6 行详情（D103）
 // 覆盖：getCardGenInfo join（批次/模型快照/提示词版本/当时 card_issues）/ 缺卡 null / 手动卡批次为 null /

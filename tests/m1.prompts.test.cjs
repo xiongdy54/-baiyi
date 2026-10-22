@@ -1,4 +1,5 @@
 // M1 提示词播种回归（v31 定基线；v46/UM-2 升 v7：R20 记忆情境接地段 + situation_required 声明位）。
+// @runtime: electron
 // 运行：node_modules/.bin/electron tests/m1.prompts.test.cjs
 // 隔离 userData：必须在 require electron/db.js 之前 setPath，避免触碰真实库。
 const { app } = require("electron");

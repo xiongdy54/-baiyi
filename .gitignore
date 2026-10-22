@@ -8,6 +8,7 @@ tmp-l2-*.png
 
 # 测试运行期临时产物（userdata 隔离目录 / 运行时下载与生成的 fixture / 打包产物）
 tests/tmp-*
+tests/.results/
 
 # electron-builder 打包产物（renderer 构建产物在 dist/，勿混用）
 release/

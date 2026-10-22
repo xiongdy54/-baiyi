@@ -1,4 +1,4 @@
-// @runtime: node
+// @runtime: system-node
 // 材料导图 v2 · 页签端到端 DOM 回归（node tests/m15v2.tab.dom.test.cjs）。
 // 真实 MindmapTab.tsx（tsload 转译）+ jsdom + 真实主进程引擎 mindmapEngineV2 + 内存 store + 假流式模型。
 // window.mindmapAPI 按 preload.js 同名同形装配（invoke 走 JSON 往返模拟 IPC 结构化克隆；delta/changed 异步推送）。

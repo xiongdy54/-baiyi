@@ -1,4 +1,5 @@
 // v48 批1 M15 重做——数据层回归（3 表 + 仓储；electron 直跑：npx electron tests/m15r.db.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：§4.19-7 + D41-⑤——map 每版本一行且 active 互斥（失败永不触碰旧图）/
 // shard 逻辑键含 provider+model+modelConfigHash（换模型不复用旧结果）/ run 留痕可审计。

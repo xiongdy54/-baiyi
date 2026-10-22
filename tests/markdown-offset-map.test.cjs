@@ -1,5 +1,5 @@
 // D95 §G.2 验收 1：源偏移 ↔ 渲染 DOM 双向映射金样例（node 直跑：node tests/markdown-offset-map.test.cjs）
-// @runtime: node  @tier: 1  @gui: false  @id: MDOMAP  @timeout: 300
+// @runtime: system-node  @tier: 1  @gui: false  @id: MDOMAP  @timeout: 300
 // 契约：①语料集往返——渲染文本与源一致（去语法符号）；②已知区间 srcToRange 的 Range 文本 = 源区间解码文本；
 //       ③domToSrc(srcToRange(s,e)) 端点回写一致；④缝隙端点吸附（**bold** 整段区间 → 绘制文本 = bold）。
 // 渲染路径：node 环境用 react-dom/server 把**真实读态组件管线**（react-markdown + remark-gfm + remark-math +

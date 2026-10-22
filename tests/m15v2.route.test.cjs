@@ -3,6 +3,7 @@
 // 契约：docs/design/MINDMAP-V2-IMPL-PLAN.md §5.1 route.ts / §6 T7 ①–④；设计稿 §15.6 / §15.7。
 // Display 一律由 layoutGraph 真实生成；所有组手动锁定 tree / chain（不依赖其余版式的实现进度）。
 "use strict";
+const PERF = Number(process.env.NUT_PERF_FACTOR || 1); // C-01：慢机器/CI 可用 NUT_PERF_FACTOR 放宽绝对耗时阈值
 const path = require("path");
 require("./lib/tsload.cjs");
 const V2 = path.join(__dirname, "..", "src", "lib", "mindmap", "v2");
@@ -289,12 +290,12 @@ console.log("---- ① 跨组边穿卡 0（密采样）/ ② 平行分道 ≥4px 
   times.sort((a, b) => a - b);
   const med = times[Math.floor(times.length / 2)];
   console.log(`      ④ 500 边全量路由（relAll，${db.items.length} 元素）：中位 ${med.toFixed(1)}ms，最快 ${times[0].toFixed(1)}ms，最慢 ${times[times.length - 1].toFixed(1)}ms`);
-  check("④ 500 边路由 ≤30ms（中位）", med <= 30, times);
+  check("④ 500 边路由 ≤30ms（中位）", med <= 30 * PERF, times);
   const t1 = process.hrtime.bigint();
   R.routeRelations(big, db, {});
   const msDefault = Number(process.hrtime.bigint() - t1) / 1e6;
   console.log(`      默认策略（只算 hot 几何）：${msDefault.toFixed(1)}ms`);
-  check("默认策略（只统计 ↗N）≤10ms", msDefault <= 10, msDefault);
+  check("默认策略（只统计 ↗N）≤10ms", msDefault <= 10 * PERF, msDefault);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

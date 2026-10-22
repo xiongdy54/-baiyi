@@ -1,4 +1,5 @@
 // D111 主进程过滤 + 分页取数 db 层回归（electron 直跑：npx electron tests/d111-mpquery.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：GUIDE §6.8-6 数据通道（v48.67 / D111）
 // 覆盖：①主进程求值（queryCardBrowserIds）× 渲染层引擎（tests/d108-query.bundle.cjs 与主进程消费

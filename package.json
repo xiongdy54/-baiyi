@@ -3,7 +3,13 @@
   "version": "0.0.1",
   "private": true,
   "main": "electron/main.js",
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "typecheck": "tsc --noEmit",
+    "i18n:check": "node scripts/i18n-check.mjs",
     "dev:renderer": "vite",
     "dev:electron": "electron .",
     "dev": "concurrently -k \"npm run dev:renderer\" \"wait-on http://localhost:5173 && electron . --dev-server\"",
@@ -56,6 +62,7 @@
     "concurrently": "^9.0.1",
     "electron": "^31.0.0",
     "electron-builder": "^26.15.3",
+    "esbuild": "0.25.12",
     "jsdom": "^30.0.1",
     "typescript": "^5.5.3",
     "vite": "^6.0.0",

@@ -1,4 +1,5 @@
 // v41 K2-A AI 抽取归一与关系回归测试（db 层，electron 直跑：npx electron tests/k2a.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库（§7.3）。
 // 契约：D38 / §4.6「AI 抽取归一硬性规范」——三层确定性架构：同输入重复跑零新增；跨书 kp1 碰撞拆分；
 //       normKey 命中自动归一；AI 新名撞已有强制转 link；目标越界降级；prerequisite 建环丢弃；

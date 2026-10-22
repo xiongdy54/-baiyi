@@ -1,4 +1,5 @@
 // v22 撤销评分回归测试（db 层，electron 直跑：npx electron tests/undo.test.cjs，须先关应用）
+// @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库。
 // 覆盖：saveReview 快照落库 / getLastUndoableReview 选取 / undoLastReview 恢复快照+移除日志 /
 //       无快照日志不可撤销 / 多卡撤销次序（后评先撤）/ leech 触发后撤销回退挂起与 issue / 已删卡不可撤销
