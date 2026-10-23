@@ -30,7 +30,7 @@
 | 测试文件 | 归属 | 说明 |
 | --- | --- | --- |
 | `tests/applog.test.cjs` | 待确认 | 报告 U-28 曾标为 Linux/Xvfb 环境差异；Windows 仍失败，暂不归属到 C-01。2026-10-23 复核：本机宿主全局注入 `ELECTRON_RUN_AS_NODE=1`，第 11 节 spawn 的 Electron 子进程继承该变量后以 Node 身份启动（`app` undefined），故无崩溃日志；C-09 改动前基线同样失败，与本项无关（runner 对 electron-node 运行时本身也设置该变量，属于测试脚手架的宿主环境差异）。 |
-| `tests/assets-integrity.test.cjs` | 未归属（时序竞态，C-22 遗留） | **2026-10-24 C-23 期间发现**：断言 (4a) `dryRun 列出无主文件与 .part` 间歇失败。根因：测试以 `minAgeMs: 0` 写入 `stray-occl.png` 后立即扫描，`sweepOrphanAssetFiles` 的 `now - mtimeMs >= minAgeMs` 中 NTFS mtime 为亚毫秒精度（如 1000.4ms）而 `Date.now()` 截断到毫秒（1000），同毫秒内 `1000 - 1000.4 = -0.4 < 0` → 文件不列入孤儿清单。**在干净 main worktree（`16bb298`）上复现 8 轮 4 败**，与 C-23 无关（本项未动 assets 域）；C-22 当轮全量通过属运气。候选修法（未实施，超出 C-23 范围）：产品侧 `Math.floor(mtimeMs)` 对齐毫秒精度，或测试侧回拨 stray 文件 mtime（但需同步调整 4d 的年龄断言）。**后续每个会话的全量都有约半数概率踩中**，建议主控单列修复。 |
+| `tests/assets-integrity.test.cjs` | 已修复（主控跟进 `c332f58` / 合并 `a1be98e`，2026-10-24） | **2026-10-24 C-23 期间发现**：断言 (4a) 间歇失败。根因：测试以 `minAgeMs: 0` 写入 `stray-occl.png` 后立即扫描，`sweepOrphanAssetFiles` 的 `now - mtimeMs >= minAgeMs` 中 NTFS mtime 为亚毫秒精度而 `Date.now()` 截断到毫秒，同毫秒内差值为负 → 文件不列入孤儿清单；干净 main worktree 复现 8 轮 4 败，与 C-23 无关。**主控修复**：测试侧把 stray 文件 mtime 确定性回拨 1s（`fs.utimesSync`），4d 的 1h 年龄断言不受影响（1s < 1h 仍不列）；连跑 6/6 通过。产品语义未动。 |
 | `tests/d111-artifact.test.cjs` | 已修复（C-03） | Windows CRLF 导致产物逐字节比较失败；C-03 改为规范化后比较并通过。 |
 | `tests/i18n.test.cjs` | 已修复（C-06） | en / ja 各缺 17 个键；C-06 补齐后 `i18n-check` 退出码 0、测试转绿。 |
 | `tests/lensWindowFit.artifact.test.cjs` | 已修复（C-03） | D203 合并后新增；现场重打包 7053 B vs 仓库 7224 B，差值 171 B；C-03 改为规范化后比较并通过。 |
