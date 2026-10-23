@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`a5aaac1`（C-06 合并；账本上一版于 `63e36c4`）。
+> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`b8ebf24`（C-45 合并；账本上一版于 `8f09e72`）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -16,13 +16,13 @@
 
 ## 1. 当前状态（2026-10-23）
 
-- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。main 现在与报告快照的测试规模一致。
+- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 按报告预期新增 1 个 guard 测试，现为 90 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：89 个 `tests/*.test.cjs`，分布 **27 electron / 7 system-node / 55 electron-node**，与报告 §0 期望一致。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
+- **测试规模**：90 个 `tests/*.test.cjs`，分布 **27 electron / 7 system-node / 56 electron-node**（C-45 新增 guard 测试，落在 electron-node）；报告基线为 89 个，C-45 按报告预期 +1。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06。
-- **下一项**：**C-45**（10 条 Electron 流程测试跑完不退出）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45。
+- **下一项**：**C-08**（`bookasset://` 路径穿越，P0；阶段 1 首项）。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
 
@@ -32,7 +32,7 @@
 | `tests/d111-artifact.test.cjs` | 已修复（C-03） | Windows CRLF 导致产物逐字节比较失败；C-03 改为规范化后比较并通过。 |
 | `tests/i18n.test.cjs` | 已修复（C-06） | en / ja 各缺 17 个键；C-06 补齐后 `i18n-check` 退出码 0、测试转绿。 |
 | `tests/lensWindowFit.artifact.test.cjs` | 已修复（C-03） | D203 合并后新增；现场重打包 7053 B vs 仓库 7224 B，差值 171 B；C-03 改为规范化后比较并通过。 |
-| `tests/lensWindow.test.cjs` | 未归属（时序 flake） | C-02 后两次全量均失败于 G1（55ms 采样 180ms 缓动）；该文件与 `electron/lensWindow.js` 未被 C-02 改动，单独连跑 3 次 1 过 2 败。C-04 全量本轮通过；C-05 与 `tsc` 并行的首轮复现，随后单独跑与干净全量均通过。 |
+| `tests/lensWindow.test.cjs` | 未归属（时序 flake） | C-02 后两次全量均失败于 G1（55ms 采样 180ms 缓动）；该文件与 `electron/lensWindow.js` 未被 C-02 改动，单独连跑 3 次 1 过 2 败。C-04 全量本轮通过；C-05 与 `tsc` 并行的首轮复现，随后单独跑与干净全量均通过。C-45 全量复现（G1），直跑同样 1 败；本项只改 `tests/flows` 与新增 guard，与该文件无关。 |
 | `tests/m1.prompts.test.cjs` | 已修复（C-05） | prompt 版本期望 7，实际 8（过期期望）；C-05 改为引用 `db.CARD_PROMPT_TARGET_VERSION` 并通过。 |
 | `tests/m14.test.cjs` | 待确认 | Windows `EBUSY: rename ... library.db -> .pre-restore`（恢复换入）；暂不归属，执行 C-13 时复核。 |
 | `tests/m15v2.route.test.cjs` | 未归属（性能阈值 flake） | C-05 全量中位 30.5ms vs 阈值 ≤30ms（最快 26.2 / 最慢 32.9）；单独跑通过。该测试只 import `src/lib/mindmap/v2`，不 require `electron/db.js`，与 C-05 改动无关。 |
@@ -44,6 +44,7 @@
 > C-04 后全量 84 过 / 5 败：失败集合 = applog、i18n、m1.prompts、m14、m7.prompts；`lensWindow` 本轮通过，无新增失败文件。
 > C-05 后：全量首轮与 `npm run typecheck` 并行，84 过 / 5 败（`lensWindow` G1 + `m15v2.route` ④）；无并行负载的干净全量 85 过 / 4 败（applog、i18n、m14、m15v2.route）。`m15v2.route` 单独跑通过，`lensWindow` 单独跑 3 套件全通过。
 > C-06 后：全量 89 个 **87 过 / 2 败**（applog、m14）；i18n 转绿，`lensWindow` 与 `m15v2.route` 本轮均通过；失败集合无新增。
+> C-45 后：全量 90 个 **87 过 / 3 败**（applog、lensWindow G1、m14）；新增的 `flow-exit-guard` 通过，无新增失败文件。流程套件额外复跑 10 条：F84 / F86 / F88 各 3/4 为流程内既有行为断言（F84 = 已登记 D-TEST-88，F86 / F88 与 2026-09-24 旧结果一致），不计入 `tests/*.test.cjs` 失败。
 
 ## 2. 执行顺序与状态
 
@@ -60,7 +61,7 @@
 | 5 | C-04 | 完成 | `cfa14ae` / `190bb35` | `file` 现识别为文本；报告给的 `epub` 过滤词命中 0 个测试，改用 `m6-1`；验收见 §3.5。 |
 | 6 | C-05 | 完成 | `bc8492d` / `65ea513` | 目标版本导出为 `CARD_PROMPT_TARGET_VERSION`；两个测试改引用常量；验收见 §3.6。 |
 | 7 | C-06 | 完成 | `95108e5` / `a5aaac1` | 补齐 en / ja 各 17 键；验收见 §3.7。 |
-| 8 | C-45 | 待做 | — | 10 条 Electron 流程测试跑完不退出。 |
+| 8 | C-45 | 完成 | `b66d345` / `b8ebf24` | 10 条流程补显式退出 + `flow-exit-guard`；验收见 §3.8。 |
 
 ### 阶段 1 · 首发前必须完成（P0）
 
@@ -254,6 +255,27 @@
   - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":55,"electron":27,"system-node":7}`（未新增测试，分布不变）。
 - **偏离**：无。
 
+### 3.8 C-45 · 10 条 Electron 流程测试跑完不退出
+
+- **提交**：`b66d345 fix(C-45): Electron 流程测试补显式退出并加防回归闸门`；合并 `b8ebf24`。
+- **改动**：
+  - 10 个 `@tier 1` 流程（F76 / F77 / F84 / F85 / F86 / F87 / F88 / F89 / F91 / F92）：`.catch(...)` 后补 `.finally(() => setTimeout(() => app.exit(process.exitCode || 0), 200));`，流程逻辑未动。
+  - 新增 `tests/flow-exit-guard.test.cjs`：静态扫描 `tests/flows/f*.cjs`，要求所有 `@runtime: electron` 流程出现 `app.exit` / `app.quit` / `quit(`；首行显式声明 `// @runtime: electron-node`（见偏离）。
+- **验收（2026-10-23，Windows）**：
+  - 改动前锚点命令 → 恰好 10 个文件，与报告清单逐字一致；10 个文件 `tail -5` 均与报告模板一致（无需中止改写）。
+  - 改动前 `node tests/flow-exit-guard.test.cjs` → 失败并列出上述 10 个文件；改动后 → PASS。
+  - `node scripts/run-tests.mjs flow-exit-guard` → 1 通过 / 0 失败（94ms，electron-node）。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":56,"electron":27,"system-node":7}`（90 个，符合报告 89 → 90）。
+  - `node tests/flows/run.cjs --only F76,F84,F92 --cycles 1` → **F76 PASS 1537ms 8/8、F84 FAIL 1303ms 3/4、F92 PASS 1114ms 6/6**；命令墙钟 4s，无 `RETRY` 行，三条均远低于 60 秒。
+  - 额外把其余 7 条同批文件各跑 1 轮：F77 PASS 7/7（1.9s）、F85 PASS 4/4、F86 FAIL 3/4（18.6s）、F87 PASS 2/2（93.1s）、F88 FAIL 3/4、F89 PASS 5/5、F91 PASS 12/12；7 条总计 118s，全部自行退出，无 `RETRY`。F87 的 93s 是其持久化延迟测量本身，不是空等。
+  - `npm test` → 90 个 **87 过 / 3 败 / 0 超时**；失败集合 = applog、lensWindow（G1 时序 flake，直跑复现）、m14；无新增失败文件。
+  - `npm run typecheck` → exit 0。
+- **偏离**：
+  1. **guard 测试首行加了 `// @runtime: electron-node`**。报告给的代码首行注释含字面 `@runtime: electron`，C-01 的 `classify()` 读前 5 行，会把纯文件扫描测试误判为真实 Electron 运行时；实测该分类会启动完整 Electron（含 GPU / network 子进程）并永不退出，正是 C-45 的症状，runner 需人工停止。显式头使其落到 electron-node，测试语义不变。
+  2. 报告验收只要求 F76 / F84 / F92；额外把 10 个文件全部跑过一轮，用于证明每条都自行退出（见上）。
+  3. F84 的 3/4 是流程内 S4 行为断言（`pendingToday` 与队列实发差额 2 / 3 / 2），即已登记的 **D-TEST-88**（测试战役记录逐字一致）；F86 / F88 的 3/4 与 2026-09-24 旧结果一致。三者均发生在退出之前，与本次收尾改动无关，不是新增失败。
+  4. 改动前基线（同机 89 个）为 87 过 / 2 败（applog、m14）；改动后全量因 `lensWindow` G1 flake 落到 87 过 / 3 败，失败集合无新增文件。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -267,5 +289,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-45**。
-- 基线：89 个测试；C-06 后 87 过 / 2 败（Windows，2026-10-23；失败集合见 §1.1）。
+- 当前下一项：**C-08**（阶段 1 首发前必须完成，P0）。
+- 基线：90 个测试；C-45 后全量 87 过 / 3 败（Windows，2026-10-23；applog、lensWindow G1、m14，见 §1.1）。
