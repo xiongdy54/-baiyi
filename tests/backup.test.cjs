@@ -118,7 +118,7 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   check("拒绝缺 backup-meta.json 的 zip", r.ok === false && /不是本软件/.test(r.error || ""), JSON.stringify(r));
   r = await backup.restoreBackup(path.join(BAK, "missing.zip"), { ...opts(), skipSafety: true });
   check("拒绝不存在的文件", r.ok === false && /不存在/.test(r.error || ""), JSON.stringify(r));
-  // 路径穿越条目必须被剔除（library.db 用真实 SQLite 字节——换入完整性校验 D-TEST-85 会拦伪字节）
+  // C-12：路径穿越条目从「跳过」改为「整体中止」——包里出现越界路径说明文件被篡改，不应部分恢复
   const evil = new JSZip();
   evil.file("backup-meta.json", JSON.stringify({ app: "incremental-reading-dev", format: 1 }));
   evil.file("library.db", realSqliteBytes("EVIL"));
@@ -126,10 +126,13 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   const evilZip = path.join(BAK, "evil.zip");
   fs.writeFileSync(evilZip, await evil.generateAsync({ type: "nodebuffer" }));
   r = await backup.restoreBackup(evilZip, { ...opts(), skipSafety: true });
-  check("路径穿越 zip 恢复请求成功（穿越条目被剔除）", r.ok === true, JSON.stringify(r));
-  backup.applyPendingRestore({ ...P });
+  // yauzl 在条目读取阶段即拒绝 ../ 条目（invalid relative path）→ 走「无法读取备份文件」分支；
+  // extractAll 自检的「越界」是第二道防线（面向 yauzl 放行但 path 解析越界的名字）。两者都是整体中止。
+  check("路径穿越 zip 整体中止恢复（C-12：不再跳过穿越条目）", r.ok === false && /越界|无效|非法|无法读取/.test(r.error || ""), JSON.stringify(r));
+  const appliedEvil = backup.applyPendingRestore({ ...P });
+  check("中止后无标记、未换入任何东西", appliedEvil === false, JSON.stringify(appliedEvil));
   check("穿越文件未落在数据目录外", !fs.existsSync(path.join(tmp, "escape.txt")), path.join(tmp, "escape.txt"));
-  check("合法条目仍换入", readFixtureTag(P.dbFile) === "EVIL", readFixtureTag(P.dbFile));
+  check("中止即整体不换入（library.db 保持原样）", readFixtureTag(P.dbFile) === "A", readFixtureTag(P.dbFile));
 
   console.log("== 5) 自动备份：每日一次 + 保留份数轮换 ==");
   fs.rmSync(BAK, { recursive: true, force: true });
