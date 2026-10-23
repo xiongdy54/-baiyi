@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`7647752`（C-11 合并；账本上一版于 `d1735e8`）。
+> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`b75c31d`（C-12 合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -18,11 +18,11 @@
 
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：95 个 `tests/*.test.cjs`，分布 **29 electron / 7 system-node / 59 electron-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version` 落在 electron；C-11 `userData` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 各按报告预期 +1 / +1 / +2 / +1 / +1。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。
+- **测试规模**：96 个 `tests/*.test.cjs`，分布 **60 electron-node / 29 electron / 7 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11。
-- **下一项**：**C-12**（备份/恢复流式化，ZIP64 / >2 GiB，P0）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12。
+- **下一项**：**C-13**（恢复流程：重启走 quit、learner.db 重建、设备相关设置不覆盖；P1；同时复核 m14 EBUSY）。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
@@ -75,7 +75,7 @@
 | 10 | C-09 | 完成 | `ff3b448` / `2400489` | 构建期 CSP + 权限处理器 + foliate 脚本剔除；验收见 §3.10。 |
 | 11 | C-10 | 完成 | `b20d4dd` / `d1735e8` | user_version + 事务化 MIGRATIONS + 迁移前快照 + app_meta；验收见 §3.11。 |
 | 12 | C-11 | 完成 | `e3b6aa5` / `7647752` | D-02 已答复（见 §1 决策记录）；userData.js 纯函数化；验收见 §3.12。 |
-| 13 | C-12 | 待做 | — | 备份/恢复流式化，ZIP64 / >2 GiB。 |
+| 13 | C-12 | 完成 | `83b318c` / `b75c31d` | 备份/恢复流式化（yazl/yauzl，ZIP64）；验收见 §3.13。 |
 | 14 | C-13 | 待做 | — | 恢复流程（退出清理 / learner.db / 设备设置）；同时复核 m14 EBUSY。 |
 | 15 | C-14 | 待做 | — | 备份轮换按 mtime 排序。 |
 | 16 | C-15 | 待做 | — | settings.json 两份实现合并。 |
@@ -395,6 +395,34 @@
 
 
 
+### 3.13 C-12 · 备份/恢复流式化，支持 ZIP64 与 >2 GiB 文件
+
+- **提交**：`83b318c fix(C-12): 备份/恢复流式化（yazl/yauzl，自动 ZIP64）`；合并 `b75c31d`。
+- **改动**（8 文件，+324/−76）：
+  - `electron/backup-build-worker.js`：JSZip 整包内存生成改为 **yazl 流式**（文件条目由 yazl 内部 ReadStream 读取，内存与文件大小无关）；`.part` 写完 **fsync 后再改名**（断电不留「改名成功但内容未落盘」的备份）；头注释 ③ 由「逐字节等价」改为「流式写入，自动 ZIP64」。quick_check 步骤原样保留。
+  - 新建 `electron/zipRead.js`：yauzl Promise 封装——`openZip` / `forEachEntry` / `readEntryText` / `readBackupMeta`（只读中央目录 + 单个小条目，GB 级备份毫秒级）/ `extractAll`（逐条目 pipe 落盘；拒绝反斜杠、绝对路径、`..` 越界）。
+  - `electron/backup-meta-worker.js`：整包 `readFile` + `JSZip.loadAsync` 改为 `readBackupMeta`（消灭 2 GiB 的 `ERR_FS_FILE_TOO_LARGE` 上限）。
+  - `electron/backup.js`：`restoreBackup` 改为 readBackupMeta 校验 → openZip/forEachEntry 确认 `library.db` 并累加 `uncompressedSize` → **解包前磁盘空间预检**（`fs.statfsSync`，需 `total×1.1 + 200MB`）→ `extractAll` 流式解包；`createBackup` 构建前同做空间检查（需 `total + 200MB`）；`isIntactSqliteFile` 改为只读 100 字节头 + 页大小/页数与 stat 自洽（原实现为看头部而整文件 readFileSync，>2GiB 即抛错、校验反成拦路虎）；worker 不可用的同步兜底 `readBackupMetaSync` 一并改走 zipRead（见偏离 4）；JSZip require 移除，剩余 `readFileSync` 仅 settings/ai-config/sidecar/marker 小 JSON（报告第 8 步复查通过）。
+  - `tests/backup.test.cjs` 第 4 节：穿越条目从「跳过」改为「整体中止」的期望同步（见偏离 3）。
+  - 新建 `tests/backup-zip64.test.cjs`（electron-node，`NUT_BIG_TESTS=1` 门控，默认跳过）。
+  - `package.json`：`+yazl 3.3.1`、`+yauzl 3.4.0`（`--save-exact`）；JSZip 保留（importers / main / epub 仍在用）。
+- **验收（2026-10-23，Windows；Electron 31.7.7 / Node 24.15.0）**：
+  - `node scripts/run-tests.mjs backup backup-zip64` → **2 通过 / 0 失败**（改动前基线 backup 1 过 / 0 败）。
+  - `NUT_BIG_TESTS=1` 大文件实测 → **6 通过 / 0 失败**（29.7s）：4.5 GB 稀疏文件（`openSync`+`ftruncateSync`）作为 dictionary.db 走 `createBackup`（打包 19.5s，zip 4.7 MB——4.5 GB 零被 DEFLATE）→ `readBackupMeta` 与 `backup.readBackupMeta`（sidecar/worker 路径）都读回清单（meta 解析 6ms）→ `extractAll` 解出（9.2s）后 library.db / dictionary.db **大小逐字节比对一致（ZIP64 条目无截断）**；`process.memoryUsage().rss` 峰值 **71 MB** < 500 MB。quick_check 对稀疏零文件报「file is not a database」属预期（仅入日志，不影响备份成败，顺带证明上报路径存活）。
+  - 真机主进程探针（临时脚本，已删；真实 Electron + 隔离 userData + 真实 `db.backup()` 快照，即 IPC `backup:create`/`backup:restore` 同路径）→ **7/7**：createBackup 成功、listBackups valid、破坏当前库后 restoreBackup 受理且需重启、staging 解包、`applyPendingRestore` 换入、换入后卡片数与材料标题与备份前一致。
+  - 流程差分：**F82**（0/1，prep 子进程 `app undefined`——node 分支流程以 Electron-as-node 启动、其 spawn 的 electron 子进程继承 `ELECTRON_RUN_AS_NODE=1`）与 **F05**（15/16，「备份含 settings.json」假 + apply 后 rimraf `library.db` EBUSY）在 **main 基线 worktree** 上逐项一致——均为既有失败，非本项回归；F05 B1 恰好以 JSZip 逐条目读出 yazl 产物的全部 5 个条目，证明跨库兼容。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":60,"electron":29,"system-node":7}`（96 个，报告 95 → +1）。
+  - `npm run typecheck` → exit 0。
+  - `npm test`（无并行负载）→ 96 个 **94 过 / 2 败 / 0 超时**；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
+- **偏离**：
+  1. **4.5 GB 条目实际是 DEFLATE 而非报告所写 STORE**：`createBackup` 对 `dictionary.db` 硬编码 DEFLATE（`isAlreadyCompressed` 只作用于 dicts/assets 按扩展名），改压缩策略超出本项范围。ZIP64 触发条件是 `uncompressedSize > 4 GiB`（与压缩方式无关），实测 yazl 产出的 ZIP64 条目可被 yauzl 正确解出；副作用是 4.5 GB 零被压成 4.7 MB 的 zip。
+  2. **穿越条目的第一道拦截发生在 yauzl 自身**：含 `../` / 绝对路径条目的 zip 在 `openZip`/`forEachEntry` 阶段即被 yauzl 以 `invalid relative path` 拒绝，错误消息为「无法读取备份文件（不是有效的 zip）：invalid relative path: ../」而非 `extractAll` 的「条目路径越界」——两者语义都是整体中止；`extractAll` 的自检保留为第二道防线（面向 yauzl 放行但 path 解析越界的名字）。`backup.test.cjs` 断言相应放宽为 `/越界|无效|非法|无法读取/`。
+  3. **报告只提 f82 的期望，实际还有 `tests/backup.test.cjs:129`** 断言「路径穿越 zip 恢复请求成功（穿越条目被剔除）」——按新语义改为断言「整体中止、无标记、未换入任何东西、library.db 保持原样」。
+  4. **`readBackupMetaSync`（worker 不可用时的同步兜底）报告未点名**：其 `readFileSync` + `JSZip.loadAsync` 同样有 2 GiB 上限且整包进内存，一并改为 zipRead 流式实现（函数名沿用既有调用方，本就是 async）。
+  5. 磁盘空间检查用 `fs.statfsSync`（Node ≥18.15，Windows 走 GetDiskFreeSpaceExW）；statfs 不可用时**跳过预检**、写盘失败照常报错（报告未写降级路径，防御性处理）。
+  6. 报告「手动：设置页立即备份→恢复走一遍」以真机主进程探针覆盖（见验收）：设置页 UI 胶水（IPC `backup:create`/`backup:restore`）本项未改，改的全是主进程逻辑，探针与 IPC 调用同一函数同一参数（`backupOpts()` 等价复刻）。
+  7. 测试副产物 `tests/m15r.activity.bundle.cjs` / `m15r.layout.bundle.cjs` 全量后变脏，提交前已还原；提交用显式路径（8 文件）。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -408,5 +436,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-12**（阶段 1 首发前必须完成，P0：备份/恢复流式化，ZIP64 / >2 GiB）。
-- 基线：95 个测试；C-11 后干净全量 92 过 / 3 败（Windows，2026-10-23；applog、lensWindow G1 flake、m14，见 §1.1）。
+- 当前下一项：**C-13**（阶段 1 首发前必须完成，P1：恢复流程——`app:relaunch` 改走 quit、learner.db 换入后重建、设备相关设置不随恢复覆盖；同时复核 m14 EBUSY；依赖 C-12 已就绪）。
+- 基线：96 个测试；C-12 后干净全量 94 过 / 2 败（Windows，2026-10-23；applog、m14，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。
