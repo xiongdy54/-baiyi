@@ -152,4 +152,6 @@ app
   .catch((e) => {
     flow.check("流程未崩溃", false, "不抛", String((e && e.stack) || e).slice(0, 400));
     process.exitCode = 1;
-  });
+  })
+  // C-45：Electron 主进程不会自行退出；延迟 200 ms，让结果文件与日志先写完
+  .finally(() => setTimeout(() => app.exit(process.exitCode || 0), 200));
