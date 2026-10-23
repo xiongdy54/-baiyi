@@ -982,19 +982,44 @@ async function initDb() {
 // 内存库退役；新语义 = 显式 `wal_checkpoint(TRUNCATE)`：把 WAL 合并回主文件并截断，使「磁盘上
 // library.db 单文件 = 完整最新状态」这一既有外部假设继续成立（外部脚本、直接拷贝、旧工具链均安全）。
 // 持久性本身由 SQLite 事务提交 + synchronous=FULL（每次提交 fsync WAL）承担，不再依赖本函数。
-// 失败语义（F37/§4.4.9）：checkpoint 失败（如其他连接持读锁 busy=1、磁盘 I/O 错误）同样 throw →
-// IPC reject → UI 封锁评分并经 persistNow 重试；调用点全部保留、零裁剪。
+// 失败语义（C-17 修订，此前 F37/§4.4.9 版本）：checkpoint 失败（如其他连接持读锁 busy=1、磁盘
+// I/O 错误）**不再 throw**——业务写入在 COMMIT 时已持久化，忙碌只意味着「WAL 暂未合并回主文件」；
+// 旧行为会把已提交的写入误报为失败（IPC reject → UI 显示保存失败 → 用户重试产生重复数据）。
+// 新行为：记日志 + 2s 后一次 PASSIVE checkpoint 补合并（下次写入也会再试 TRUNCATE）。
+// 调用点全部保留、零裁剪（83 处，全部在业务事务提交之后）。
+let checkpointRetryTimer = null;
 function persist() {
-  const busy = db.pragma("wal_checkpoint(TRUNCATE)", { simple: true });
-  if (Number(busy) !== 0) {
-    throw new Error("persist 失败：wal_checkpoint(TRUNCATE) 忙碌（busy=1）——存在并发读，稍后重试");
+  let busy = 0;
+  let err = null;
+  try { busy = Number(db.pragma("wal_checkpoint(TRUNCATE)", { simple: true })) || 0; }
+  catch (e) { err = e && e.message; busy = 1; }
+  // busy=1 是 pragma 的正常返回值（不抛异常）——与异常同属「checkpoint 未完成」，
+  // 两种形态都记同一条日志（报告代码只在 catch 记，busy 路径静默不可观察，故并入；前缀保持不变）
+  if (busy !== 0) {
+    console.error("[db] checkpoint 失败（数据已提交，仅合并延后）：" + (err || `busy=${busy}`));
+    if (!checkpointRetryTimer) {
+      checkpointRetryTimer = setTimeout(() => {
+        checkpointRetryTimer = null;
+        try { db && db.open && db.pragma("wal_checkpoint(PASSIVE)"); } catch { /* 下次写入再试 */ }
+      }, 2000);
+      if (checkpointRetryTimer.unref) checkpointRetryTimer.unref();
+    }
   }
 }
 
+// C-17：严格 checkpoint——忙碌即抛。供两处必须「主文件此刻自足」的入口使用：
+//   ① persistNow（UI「重试保存」，F37 M4 收敛判据依赖其可观察的失败语义）；
+//   ② 备份前 flush（main.js backupOpts 注入 backup.js 的 opts.flush，备份开始时必须已合并）。
+function checkpointStrict() {
+  const b = Number(db.pragma("wal_checkpoint(TRUNCATE)", { simple: true }));
+  if (b !== 0) throw new Error("checkpoint busy");
+}
+
 // v23：纯持久化重试（§4.4.9）——D137 后语义 = 重试 checkpoint（WAL 合并回主文件），
-// 绝不重新执行任何业务 mutation；供 UI「重试保存」在 persist 失败后调用
+// 绝不重新执行任何业务 mutation；供 UI「重试保存」调用。C-17 起走严格语义：
+// 业务写路径的 persist() 已不抛错，这里的失败必须仍然可观察（不静默假成功）。
 function persistNow() {
-  persist();
+  checkpointStrict();
   return true;
 }
 
@@ -2109,8 +2134,8 @@ function deleteCard(id) {
 }
 
 // v23（§4.4.9）：评分落库事务化——BEGIN → 日志+卡状态 → COMMIT → persist（COMMIT 后持久化）。
-// review 成功边界 = COMMIT + persist 成功 + IPC 成功；persist 失败 throw → IPC reject →
-// UI 停留当前卡并经 persistNow 重试（内存已提交、禁止重复评分）；禁止自动 rollback。
+// review 成功边界 = COMMIT + persist 成功 + IPC 成功；persist 失败语义已按 C-17 修订（见 persist() 上方
+// 注释）：checkpoint 忙碌不再 throw，评分成功返回；「重试保存」走 persistNow 的严格 checkpoint。
 // 快照集：before（v22）/after/leech_before/评分所用 config/评分前 config/review_seq。
 function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
   const card = getCard(cardId);
@@ -2134,7 +2159,8 @@ function saveReview(cardId, fsrsState, rating, durationMs, fsrsBefore) {
   }
   const now = Date.now();
   // D137（§3.3 加固①）：BEGIN IMMEDIATE（原 saveReview 序列并入 withTransaction 同款语义：
-  // COMMIT 后 persist，persist 失败时内存已提交、禁止重复评分、经 persistNow 重试）
+  // COMMIT 后 persist；C-17 起 persist 忙碌不再抛错——内存已提交即成功返回，禁止重复评分的
+  // 兜底由上方 A-7 陈旧快照拒绝承担）
   db.run("BEGIN IMMEDIATE");
   try {
     // review_seq 分配**保持原语义不变**（§4.4.9 排序不变量：表内唯一、插入序单调、撤销删除后允许复用）。
@@ -8083,6 +8109,8 @@ module.exports = {
   initDb,
   persistDb: persist,
   persistNow,
+  // C-17：严格 checkpoint（忙碌即抛）——persistNow 与备份前 flush 的底层（见上方注释）
+  checkpointStrict,
   // D137（v48.92）：will-quit 显式关闭（clean shutdown = WAL 自动 checkpoint + 删 -wal/-shm）；
   // 在线快照（M2 备份经 db.backup 页拷贝）；连接级 pragma 读数（验收/诊断辅助，只读）
   closeDb,

@@ -6,6 +6,9 @@
 //       这条流程**主动制造故障**：让落盘失败、留半截 tmp、外部改库、进程被杀，
 //       然后验证文档承诺的恢复语义：原子替换（tmp 永不是事实源）、失败可重试且**绝不重放业务动作**、
 //       重启后撤销账本一致、后台任务收敛成 interrupted 而不是 failed。
+//       C-17 修订：D137 后 persist = wal_checkpoint(TRUNCATE)，G1/G2 改用第二连接持读事务注入
+//       busy；checkpoint busy 不再让业务写入失败（成功返回、提交在 WAL），「绝不重放」由
+//       写入口 A-7 陈旧快照拒绝 + persistNow 严格收敛共同承担。
 //
 // 依据：§4.4.8/§4.4.9 L172（成功边界 = COMMIT + persist + IPC；失败封锁；重试不重放 mutation）、
 //       §7.2 L874（每次落库即落盘）、db.js 原子写实现（L679–692）、
@@ -57,39 +60,45 @@ app
           fsrsJson: JSON.stringify(fsrs()),
         }).id;
 
-      // ---------- G1 落盘失败：正式库必须原封不动 ----------
-      flow.section("G1 persist 失败时正式库不受损（§4.4.9 原子替换 / db.js:679–692）");
+      // ---------- G1 checkpoint busy：写入成功、正式库不受损（C-17 新语义） ----------
+      flow.section("G1 checkpoint busy 时写入成功且正式库不受损（C-17 / §4.4.9）");
       const victim = mk("A");
       db.persistNow();
       const goodBytes = fs.readFileSync(dbFile);
       const snapGood = snapshotAll(await audit(dbFile), TABLES);
-      // 注入故障：把 tmp 路径占成一个目录 → openSync(tmp,'w') 必失败
-      fs.mkdirSync(tmpFile, { recursive: true });
+      // 注入故障（D137 后 WAL 的真实模式；旧「tmp 路径占目录」注入随 sql.js 时代的 persist 退役已失效）：
+      // 第二连接持读事务 → wal_checkpoint(TRUNCATE) busy=1。C-17 前 persist 抛错 → IPC reject →
+      // UI 误报保存失败；C-17 后写入成功返回，提交在 WAL，主文件仍为上一完整版本。
+      const Database = require("better-sqlite3");
+      const blocker = new Database(dbFile);
+      blocker.exec("BEGIN");
+      blocker.prepare("SELECT 1 FROM cards LIMIT 1").get(); // deferred 读事务真正持有读锁
       let threw = null;
       try {
         db.saveReview(victim, { ...fsrs(), reps: 2, due: Date.now() + 86400000 }, "Good", 700, fsrs());
       } catch (e) {
         threw = String(e && e.message ? e.message : e);
+      } finally {
+        try { blocker.close(); } catch { /* 尽力 */ }
       }
-      flow.check("persist 失败必须抛出而非静默降级（禁止非原子覆盖写）", !!threw, "抛出异常", threw);
+      flow.check("C-17：checkpoint busy 时评分成功返回（已提交的写入不再被误报为失败）", !threw, "成功", threw);
       const afterBytes = fs.readFileSync(dbFile);
-      flow.eq("失败后正式库文件字节不变（要么上一份完整、要么新完整）", afterBytes.length, goodBytes.length);
+      flow.eq("busy 窗口内正式库主文件字节不变（提交在 WAL；要么上一份完整、要么新完整）", afterBytes.length, goodBytes.length);
       const reopened = await audit(dbFile);
       const snapReopened = snapshotAll(reopened, TABLES);
-      flow.check("磁盘上仍是失败前的完整快照（未出现半截写）", Object.keys(diffSnapshots(snapGood, snapReopened)).length === 0, "{}", summaryOf(diffSnapshots(snapGood, snapReopened)) || "{}");
-      flow.eq("tmp 占位目录未被当作事实源（没有被改名成正式库）", fs.existsSync(dbFile) && fs.statSync(dbFile).size, goodBytes.length);
+      flow.check("主文件仍是 busy 前的完整快照（未出现半截写，合并由 persistNow 完成）", Object.keys(diffSnapshots(snapGood, snapReopened)).length === 0, "{}", summaryOf(diffSnapshots(snapGood, snapReopened)) || "{}");
+      flow.eq("主文件未被半途改写（大小与 busy 前一致）", fs.existsSync(dbFile) && fs.statSync(dbFile).size, goodBytes.length);
 
-      // ---------- G2 重试只重放持久化，不重放业务 ----------
-      flow.section("G2 persistNow 重试不重放业务 mutation（§4.4.9 L172）");
+      // ---------- G2 收敛只补持久化，不重放业务 ----------
+      flow.section("G2 persistNow 收敛不重放业务 mutation（§4.4.9 / C-17）");
       const memLogs = db.listAllReviewLogs().length;
-      flow.check("失败的那次评分在内存里已提交（COMMIT 先于 persist，不回滚）", memLogs, (await audit(dbFile)).count("review_logs") + 1);
-      fs.rmSync(tmpFile, { recursive: true, force: true });
+      flow.check("busy 窗口内那次评分已提交（COMMIT 先于 checkpoint，同连接可读）", memLogs, (await audit(dbFile)).count("review_logs") + 1);
       const retry = db.persistNow();
-      flow.eq("障碍清除后重试成功", retry, true);
+      flow.eq("读锁释放后 persistNow（严格）合并成功", retry, true);
       const a2 = await audit(dbFile);
-      flow.eq("重试后磁盘日志数恰为内存日志数（不多不少＝没有重放）", a2.count("review_logs"), memLogs);
+      flow.eq("收敛后磁盘日志数恰为内存日志数（不多不少＝没有重放）", a2.count("review_logs"), memLogs);
       const g2Card = a2.one("SELECT fsrs_json FROM cards WHERE id = ?", [victim]);
-      flow.eq("重试落的是那一次评分的结果（不是两次）", JSON.parse(g2Card.fsrs_json).reps, 2);
+      flow.eq("落盘的是那一次评分的结果（不是两次）", JSON.parse(g2Card.fsrs_json).reps, 2);
 
       // ---------- G3 半截 tmp 残留 ----------
       flow.section("G3 崩溃留下的半截 tmp 在下次启动被清理（db.js:210）");

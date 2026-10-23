@@ -7,15 +7,16 @@
 //   非原子写法。三件事同一个形状：**主路径全绿，故障路径无人测**。
 //   既有 F01–F36 里没有任何一条注入过 IO 故障 —— 这类缺陷它们结构上就拦不住。
 //
-// 本层不针对某个函数，而是把 db.js 导出的**每一个 mutating 函数**过一遍同一套判据：
-//   M1 异常必须传出（不得静默吞 —— 吞了 UI 就以为保存成功）
-//   M2 内存态是否已被改写（决定 UI 提示的真实性：「尚未写入磁盘」对不对）
-//   M3 失败后 library.db.tmp 是否残留（persist 的 finally 只关 fd，不清 tmp）
-//   M4 补一次 persistNow 后，磁盘是否收敛到与内存一致（不留下永久分歧）
+// 本层不针对某个函数，而是把 db.js 导出的**每一个 mutating 函数**过一遍同一套判据（C-17 新语义）：
+//   M1 checkpoint busy 时业务写入必须**成功返回**（不抛错——数据在 COMMIT 已持久化，抛错＝UI 误报
+//      「保存失败」→ 用户重试产生重复数据；失败只允许记日志延后合并）
+//   M2 内存态必须已改写且同连接可读（提交真实可见，不是假成功）
+//   M3 失败后 library.db.tmp 是否残留（persist 不再产出 tmp）
+//   M4 补一次 persistNow（严格 checkpoint）后，磁盘是否收敛到与内存一致（不留下永久分歧）
 //   M5 【最严】失败瞬间内存态不得「只改了一半」—— 那才是真数据损坏
 //
 // 依据：§7.2 L874（每次落库即落盘，日记防抖为唯一例外）、§7.1.4（重启不丢数据）、
-//       §4.4.9（成功边界 = COMMIT + persist + IPC）、§4.4.5（fsrs_json 八字段完整往返）。
+//       §4.4.9（成功边界 = COMMIT + persist + IPC）、§4.4.5（fsrs_json 八字段完整往返）、C-17。
 "use strict";
 const path = require("path");
 const fs = require("fs");
@@ -70,7 +71,8 @@ app
 
       // D137（v48.92）注入钩子切换：persist() 自「导出+tmp/rename」重定义为 wal_checkpoint(TRUNCATE)，
       // 旧 fs.renameSync mock 不再落在 persist 路径上。改用 WAL 下真实故障模式＝第二连接持读事务
-      // → checkpoint(TRUNCATE) busy=1 → persist throw（与 tests/persist.test.cjs P2/P3 同法）。
+      // → checkpoint(TRUNCATE) busy=1（与 tests/persist.test.cjs P2/P3 同法）。C-17 后 persist()
+      // 不再抛错——注入命中改为捕获 persist 的「[db] checkpoint 失败」日志（只记日志、延后合并）。
       const openBlocker = () => {
         const Database = require("better-sqlite3");
         const bl = new Database(dbFile);
@@ -87,20 +89,23 @@ app
 
         let threw = null;
         let injectHit = false;
+        let ckLog = null;
+        const origErr = console.error;
+        console.error = (...a) => { const s = String(a && a[0] || ""); if (s.includes("[db] checkpoint")) ckLog = s; origErr(...a); };
         const blocker = openBlocker();
         try { c.mutate(db, ctx); } catch (e) { threw = e.message; }
-        finally { try { blocker.close(); } catch { /* 尽力 */ } }
-        if (threw && /checkpoint/i.test(threw)) injectHit = true;
+        finally { console.error = origErr; try { blocker.close(); } catch { /* 尽力 */ } }
+        if (ckLog) injectHit = true;
 
         const afterFail = (() => { try { return JSON.stringify(c.probe(db, ctx)); } catch { return "probe-err"; } })();
         const tmpLeft = fs.existsSync(tmpPath);
         const tmpBytes = tmpLeft ? fs.statSync(tmpPath).size : 0;
-        // 补一次成功落盘，看磁盘是否收敛到内存（读锁已释放，checkpoint 应成功）
+        // 补一次成功落盘，看磁盘是否收敛到内存（读锁已释放，严格 checkpoint 应成功）
         let converged = null;
         try { db.persistNow(); converged = true; } catch (e) { converged = "persistNow 仍失败: " + e.message; }
         try { fs.rmSync(tmpPath, { force: true }); } catch { /* ignore */ }
 
-        rows.push({ name: c.name, injectHit, threw, memoryChanged: before !== afterFail, before, afterFail, tmpLeft, tmpBytes, converged });
+        rows.push({ name: c.name, injectHit, threw, ckLogged: !!ckLog, memoryChanged: before !== afterFail, before, afterFail, tmpLeft, tmpBytes, converged });
         console.log(`  ${c.name.padEnd(20)} 注入=${injectHit ? "y" : "n"} 抛错=${threw ? "y" : "n"} 内存已改=${before !== afterFail ? "y" : "n"} tmp残留=${tmpLeft ? `y(${tmpBytes}B)` : "n"} 补盘收敛=${converged === true ? "y" : "n"}`);
       }
 
@@ -108,16 +113,19 @@ app
       flow.check("F37-0 注入确实命中了 persist() 的落盘那一步（否则整层是空跑）",
         injected.length >= CASES.length - 3, `${CASES.length - 3}+`, injected.length);
 
-      // M1 异常必须传出：静默吞掉的函数会让 UI 误报「已保存」
-      const swallowed = injected.filter((r) => !r.threw);
-      flow.check("F37-1 persist 失败必须传出异常（吞掉=UI 误报已保存）", swallowed.length === 0, "0 个静默", JSON.stringify(swallowed.map((x) => x.name)));
-      if (swallowed.length) flow.record("F37-1 静默吞掉 persist 错误的函数", swallowed.map((x) => x.name).join(","));
+      // M1（C-17 新语义）：checkpoint busy 时业务写入必须成功返回——抛错＝把已提交的写入
+      // 误报为失败（IPC reject → UI 显示保存失败 → 用户重试产生重复数据）
+      const misreported = injected.filter((r) => r.threw);
+      flow.check("F37-1 checkpoint busy 时业务写入必须成功返回（不误报失败，失败只记日志）", misreported.length === 0, "0 个抛错", JSON.stringify(misreported.map((x) => `${x.name}:${String(x.threw).slice(0, 60)}`)));
+      if (misreported.length) flow.record("F37-1 checkpoint busy 时仍抛错的函数", misreported.map((x) => x.name).join(","));
 
-      // M2 内存态已改但落盘失败 → 这就是 §4.4.9 的「COMMIT 与 persist 不是同一件事」
+      // M2 提交真实可见：写入返回成功的同时，数据必须真的已 COMMIT（同连接读回）。
+      // probe 无法观察变更的用例（undo 净零 / saveSkip·postpone 的探测面不含本用例 / 无读出口）
+      // 不算失败，单独记录（实测 16 例中 9 例可观察，阈值取 8 留 1 例裕量）。
       const dirtyMem = injected.filter((r) => r.memoryChanged);
-      flow.record("F37-2 落盘失败但内存已改写（UI 若提示「尚未写入磁盘」即为误导）", `${dirtyMem.length}/${injected.length}：${dirtyMem.map((x) => x.name).join(",")}`);
-      flow.check("F37-2 这类函数必须让调用方有机会知道（返回值或抛错），不得既改内存又静默",
-        dirtyMem.every((r) => r.threw), "全部抛错", JSON.stringify(dirtyMem.filter((r) => !r.threw).map((x) => x.name)));
+      const blind = injected.filter((r) => !r.memoryChanged).map((x) => x.name);
+      flow.record("F37-2 busy 窗口内提交已可见（memoryChanged）的用例", `${dirtyMem.length}/${injected.length}；probe 盲区：${blind.join(",") || "无"}`);
+      flow.check("F37-2 写入不得是假成功（提交在 busy 窗口内同连接可读）", dirtyMem.length >= 8, "≥8", dirtyMem.length);
 
       // M3 tmp 残留
       const leaked = injected.filter((r) => r.tmpLeft);
