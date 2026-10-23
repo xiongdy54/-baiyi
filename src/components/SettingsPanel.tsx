@@ -57,6 +57,7 @@ import {
 import { rerankExtractsNow, readMultiSelectKey, MULTI_SELECT_KEYS, DEFAULT_MULTI_SELECT_KEY, type ExtractEngine, type MultiSelectKey } from "../lib/readingWorkflow";
 // v49.8（D182）：界面语言——语言切换区块（sec-language，唯一切换入口）
 import { LANGUAGES, getLocale, setLocale, normalizeLocale, useT, type Locale } from "../lib/i18n";
+import { computeSettingsNotices, type SettingsNotice, type SettingsNoticesInput } from "../lib/settingsNotices";
 
 export type ThemeMode = "light" | "dark";
 
@@ -1988,12 +1989,21 @@ function ReaderSection() {
 
 // ---------- M2 备份与恢复（§9.1 M2）：手动备份/恢复 + 每日首启自动滚动备份 ----------
 type BackupCounts = { items: number; cards: number; extracts: number; assets: number };
+// D206：最近一次启动期自动备份的结局快照（main.js 内存态，本轮没跑过时为 null）
+interface LastAutoBackup {
+  at: number;
+  ok: boolean;
+  skipped: boolean;
+  error: string | null;
+  clockSkewSuspected: boolean;
+}
 interface BackupInfo {
   dbBytes: number;
   assetFiles: number;
   assetBytes: number;
   counts: BackupCounts;
   backupDir: string;
+  lastAuto?: LastAutoBackup | null;
 }
 interface BackupEntry {
   file: string;
@@ -2330,6 +2340,74 @@ function AboutSection() {
         {T("清单覆盖运行时直接依赖；各组件的完整许可证文本与版权声明，以其官方发布页为准。")}
       </p>
     </SettingsSection>
+  );
+}
+
+// ---------- D206：设置页置顶通知框（有待告知内容才渲染；级别与数据源见 src/lib/settingsNotices.ts） ----------
+function noticeText(n: SettingsNotice, T: ReturnType<typeof useT>): string {
+  switch (n.kind) {
+    case "update":
+      return T("发现新版本 v{version}，可到「软件更新」下载安装。", n.params);
+    case "update-ready":
+      return T("更新包已就绪（v{version}），重启后自动安装。", n.params);
+    case "update-error":
+      return T("更新检查出错：{msg}", n.params);
+    case "backup-failed":
+      return T("自动备份失败：{msg}", n.params);
+    case "clock-skew":
+      return T("检测到系统时钟可能被回拨过，请核对系统时间，否则自动备份可能多日停摆。");
+    case "backup-none":
+      return T("还没有任何备份，建议立即创建一份。");
+    case "backup-stale":
+      return T("已 {days} 天没有备份，建议立即备份一次。", n.params);
+  }
+}
+
+function SettingsNotices() {
+  const T = useT();
+  const [notices, setNotices] = useState<SettingsNotice[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const input: SettingsNoticesInput = {};
+      const bapi = backupAPI();
+      if (bapi) {
+        try {
+          const [info, list] = await Promise.all([bapi.info(), bapi.list()]);
+          input.latestBackupAt = list.backups.reduce<number | null>(
+            (acc, b) => (acc == null || b.createdAt > acc ? b.createdAt : acc),
+            null
+          );
+          input.lastAuto = info.lastAuto ?? null;
+        } catch { /* 拿不到备份快照就少报这一类，不阻塞更新类 */ }
+      }
+      const uapi = updateAPI();
+      if (uapi) {
+        try {
+          const snap = await uapi.status();
+          input.updateState = snap.state;
+          input.updateVersion = snap.info?.version ?? null;
+          input.updateError = snap.error ?? null;
+        } catch { /* 同上 */ }
+      }
+      if (alive) setNotices(computeSettingsNotices(input));
+    };
+    void load();
+    const timer = window.setInterval(() => { void load(); }, 60000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+  if (notices.length === 0) return null;
+  return (
+    <div className="settings-notices" role="status">
+      {notices.map((n) => (
+        <div key={n.kind} className="settings-notice" data-level={n.level}>
+          <span>{noticeText(n, T)}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -3442,6 +3520,7 @@ export default function SettingsPanel({
           </nav>
 
           <div className="settings-content">
+            <SettingsNotices />
             <SettingsSection id="sec-appearance" title={T("主题与颜色")}>
               <h4>{T("主题模式")}</h4>
               <div className="seg-tabs" data-ui="seg-tabs">

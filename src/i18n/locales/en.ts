@@ -2416,4 +2416,10 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "收起 {n} 个子节点": { one: "Collapse {n} child node", other: "Collapse {n} child nodes" },
   "《{name}》已有 {n} 张卡进入长期记忆": { one: "{name}: {n} card is now in long-term memory", other: "{name}: {n} cards are now in long-term memory" },
   "『{label}』已有 {n} 张卡进入长期记忆": { one: "{label}: {n} card is now in long-term memory", other: "{label}: {n} cards are now in long-term memory" },
+  "发现新版本 v{version}，可到「软件更新」下载安装。": "A new version v{version} is available — see “Software updates” to download and install.",
+  "更新检查出错：{msg}": "Update check failed: {msg}",
+  "自动备份失败：{msg}": "Automatic backup failed: {msg}",
+  "检测到系统时钟可能被回拨过，请核对系统时间，否则自动备份可能多日停摆。": "Your system clock may have been rolled back. Check the system time, or automatic backups may stall for days.",
+  "还没有任何备份，建议立即创建一份。": "No backup exists yet — create one now.",
+  "已 {days} 天没有备份，建议立即备份一次。": "No backup for {days} days — create one now.",
 };

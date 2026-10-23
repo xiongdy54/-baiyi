@@ -984,10 +984,14 @@ const backupOpts = () => ({
   snapshotLibrary: (dest) => dbModule.snapshotTo(dest),
   snapshotDict: (dest) => dictDb.snapshotTo(dest)
 });
+// D206：最近一次启动期自动备份的结局（内存态，设置页通知框经 backup:info 消费；
+// 不落盘——重启后由下一轮自动备份重新产生，未产生期间以磁盘备份年龄兜底）
+let lastAutoBackup = null;
 ipcMain.handle("backup:info", () => ({
   ...backup.getDataInfo(),
   counts: dbModule.getBackupCounts(),
-  backupDir: backup.getBackupDir()
+  backupDir: backup.getBackupDir(),
+  lastAuto: lastAutoBackup
 }));
 ipcMain.handle("backup:create", async (_e, opts) => {
   try {
@@ -2287,9 +2291,25 @@ app.whenReady().then(async () => {
     backup
       .autoBackupIfNeeded(backupOpts())
       .then((r) => {
+        lastAutoBackup = {
+          at: Date.now(),
+          ok: !!(r && r.ok),
+          skipped: !!(r && r.skipped),
+          error: r && !r.ok ? r.error || null : null,
+          clockSkewSuspected: !!(r && r.clockSkewSuspected)
+        };
         if (r && !r.ok) console.error("[backup] 自动备份失败：", r.error);
       })
-      .catch((err) => console.error("[backup] 自动备份失败：", err));
+      .catch((err) => {
+        lastAutoBackup = {
+          at: Date.now(),
+          ok: false,
+          skipped: false,
+          error: err instanceof Error ? err.message : String(err),
+          clockSkewSuspected: false
+        };
+        console.error("[backup] 自动备份失败：", err);
+      });
   }, 30000);
   // D117（v48.73）：启动空闲补齐旧档 sidecar（备份列表零解压加速缓存，诊断报告 §4.1）。
   // 延迟 5s 让启动流程先落定；后台串行 worker 解析、不阻塞主进程（worker_threads，§4.2）。
