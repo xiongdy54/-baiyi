@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`b8ebf24`（C-45 合并；账本上一版于 `8f09e72`）。
+> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`7bb6809`（C-08 合并；账本上一版于 `d79b0e4`）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -16,13 +16,13 @@
 
 ## 1. 当前状态（2026-10-23）
 
-- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 按报告预期新增 1 个 guard 测试，现为 90 个。
+- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试，现为 91 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：90 个 `tests/*.test.cjs`，分布 **27 electron / 7 system-node / 56 electron-node**（C-45 新增 guard 测试，落在 electron-node）；报告基线为 89 个，C-45 按报告预期 +1。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。
+- **测试规模**：91 个 `tests/*.test.cjs`，分布 **27 electron / 7 system-node / 57 electron-node**（C-45 guard 与 C-08 `bookasset-path` 均落在 electron-node）；报告基线为 89 个，C-45 / C-08 各按报告预期 +1。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45。
-- **下一项**：**C-08**（`bookasset://` 路径穿越，P0；阶段 1 首项）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08。
+- **下一项**：**C-09**（渲染页无 CSP + 无权限请求处理器，P0；依赖 C-08，已完成）。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
 
@@ -32,10 +32,10 @@
 | `tests/d111-artifact.test.cjs` | 已修复（C-03） | Windows CRLF 导致产物逐字节比较失败；C-03 改为规范化后比较并通过。 |
 | `tests/i18n.test.cjs` | 已修复（C-06） | en / ja 各缺 17 个键；C-06 补齐后 `i18n-check` 退出码 0、测试转绿。 |
 | `tests/lensWindowFit.artifact.test.cjs` | 已修复（C-03） | D203 合并后新增；现场重打包 7053 B vs 仓库 7224 B，差值 171 B；C-03 改为规范化后比较并通过。 |
-| `tests/lensWindow.test.cjs` | 未归属（时序 flake） | C-02 后两次全量均失败于 G1（55ms 采样 180ms 缓动）；该文件与 `electron/lensWindow.js` 未被 C-02 改动，单独连跑 3 次 1 过 2 败。C-04 全量本轮通过；C-05 与 `tsc` 并行的首轮复现，随后单独跑与干净全量均通过。C-45 全量复现（G1），直跑同样 1 败；本项只改 `tests/flows` 与新增 guard，与该文件无关。 |
+| `tests/lensWindow.test.cjs` | 未归属（时序 flake） | C-02 后两次全量均失败于 G1（55ms 采样 180ms 缓动）；该文件与 `electron/lensWindow.js` 未被 C-02 改动，单独连跑 3 次 1 过 2 败。C-04 全量本轮通过；C-05 与 `tsc` 并行的首轮复现，随后单独跑与干净全量均通过。C-45 全量复现（G1），直跑同样 1 败；本项只改 `tests/flows` 与新增 guard，与该文件无关。C-08 全量本轮通过。 |
 | `tests/m1.prompts.test.cjs` | 已修复（C-05） | prompt 版本期望 7，实际 8（过期期望）；C-05 改为引用 `db.CARD_PROMPT_TARGET_VERSION` 并通过。 |
 | `tests/m14.test.cjs` | 待确认 | Windows `EBUSY: rename ... library.db -> .pre-restore`（恢复换入）；暂不归属，执行 C-13 时复核。 |
-| `tests/m15v2.route.test.cjs` | 未归属（性能阈值 flake） | C-05 全量中位 30.5ms vs 阈值 ≤30ms（最快 26.2 / 最慢 32.9）；单独跑通过。该测试只 import `src/lib/mindmap/v2`，不 require `electron/db.js`，与 C-05 改动无关。 |
+| `tests/m15v2.route.test.cjs` | 未归属（性能阈值 flake） | C-05 全量中位 30.5ms vs 阈值 ≤30ms（最快 26.2 / 最慢 32.9）；单独跑通过。该测试只 import `src/lib/mindmap/v2`，不 require `electron/db.js`，与 C-05 改动无关。C-08 全量复现（中位 30.7ms，最快 28.4 / 最慢 33.3）；不 require `electron/main.js`，与本项无关。 |
 | `tests/m7.prompts.test.cjs` | 已修复（C-05） | 主制卡 prompt 期望 v6，实际 8（过期期望）；C-05 改为引用 `db.CARD_PROMPT_TARGET_VERSION` 并通过。 |
 
 > 说明：C-01 在合并 D203 前是 85 个测试 79 过 / 6 败；合并后为 89 个 82 过 / 7 败。新增的唯一失败是 `lensWindowFit.artifact`，属 C-03，不是 C-01 回归。
@@ -45,6 +45,7 @@
 > C-05 后：全量首轮与 `npm run typecheck` 并行，84 过 / 5 败（`lensWindow` G1 + `m15v2.route` ④）；无并行负载的干净全量 85 过 / 4 败（applog、i18n、m14、m15v2.route）。`m15v2.route` 单独跑通过，`lensWindow` 单独跑 3 套件全通过。
 > C-06 后：全量 89 个 **87 过 / 2 败**（applog、m14）；i18n 转绿，`lensWindow` 与 `m15v2.route` 本轮均通过；失败集合无新增。
 > C-45 后：全量 90 个 **87 过 / 3 败**（applog、lensWindow G1、m14）；新增的 `flow-exit-guard` 通过，无新增失败文件。流程套件额外复跑 10 条：F84 / F86 / F88 各 3/4 为流程内既有行为断言（F84 = 已登记 D-TEST-88，F86 / F88 与 2026-09-24 旧结果一致），不计入 `tests/*.test.cjs` 失败。
+> C-08 后：全量 91 个 **88 过 / 3 败**（applog、m14、m15v2.route 阈值 flake）；新增 `bookasset-path` 通过，`lensWindow` 本轮通过，无新增失败文件。
 
 ## 2. 执行顺序与状态
 
@@ -67,7 +68,7 @@
 
 | # | 编号 | 状态 | 提交 / 合并 | 备注 |
 | --- | --- | --- | --- | --- |
-| 9 | C-08 | 待做 | — | `bookasset://` 路径穿越。 |
+| 9 | C-08 | 完成 | `3081287` / `7bb6809` | 纯函数路径校验 + 真实 Electron 探针；验收见 §3.9。 |
 | 10 | C-09 | 待做 | — | 渲染页无 CSP + 无权限请求处理器；依赖 C-08。 |
 | 11 | C-10 | 待做 | — | schema 版本化 + 事务化迁移 + 迁移前快照。 |
 | 12 | C-11 | 待做 | — | 冻结发布身份；⛔ 决策 D-02。 |
@@ -276,6 +277,28 @@
   3. F84 的 3/4 是流程内 S4 行为断言（`pendingToday` 与队列实发差额 2 / 3 / 2），即已登记的 **D-TEST-88**（测试战役记录逐字一致）；F86 / F88 的 3/4 与 2026-09-24 旧结果一致。三者均发生在退出之前，与本次收尾改动无关，不是新增失败。
   4. 改动前基线（同机 89 个）为 87 过 / 2 败（applog、m14）；改动后全量因 `lensWindow` G1 flake 落到 87 过 / 3 败，失败集合无新增文件。
 
+### 3.9 C-08 · `bookasset://` 协议路径穿越
+
+- **提交**：`3081287 fix(C-08): bookasset 路径穿越收口为纯函数校验，pdfres 补目录包含检查`；合并 `7bb6809`。
+- **改动**：
+  - 新建 `electron/bookassetPath.js`：`resolveBookassetPath(userData, requestUrl)` 纯函数；itemId `^[A-Za-z0-9_-]{1,128}$`、filename `^[A-Za-z0-9_-][A-Za-z0-9._-]{0,254}$`；`path.resolve` 后要求落在 `userData/assets` 内，非法返回 `null`。
+  - `electron/main.js`：bookasset handler 改用该函数；`types` 表提为 handler 外的 `BOOKASSET_TYPES`（内容原样）；读取由同步 `readFileSync` 改为 `fs.promises.readFile`。
+  - `electron/main.js` pdfres handler：按报告第 3 步补 `path.resolve` + `startsWith(root + sep)` 包含校验（filename 仍走原 `^[A-Za-z0-9._-]+$` 白名单）。
+  - 新建 `tests/bookasset-path.test.cjs`：报告给定的 2 正例 + 6 反例，默认 electron-node 运行时。
+- **验收（2026-10-23，Windows）**：
+  - TDD：先落测试 → `node scripts/run-tests.mjs bookasset-path` 失败（`MODULE_NOT_FOUND: ../electron/bookassetPath`）；实现后 → **1 通过 / 0 失败**（87ms）。
+  - 真实 Electron 协议探针（临时脚本，已删）：`net.fetch` 合法路径 → 200 `image/png`；`bookasset://../secret.txt`、`bookasset://%2e%2e/secret.txt`、`bookasset://<id>/..%2Fsecret.txt`、`.hidden`、`a.b/<file>` → 全部 400；缺失文件 → 404；响应中无 `TOP-SECRET` 泄漏。
+  - 真实应用隔离 GUI 探针（临时脚本，已删；`M7_TEST_USERDATA` 指向 `tests/tmp-d161-userdata` 的副本）：书架 1 张 `.cover-img` + 5 张文件夹纸片背景全部从 `bookasset://` 加载成功（naturalWidth 400），遮挡图 `occl-*.png` 160×90 加载成功；渲染层 `fetch("bookasset://../settings.json")` → 400；截图目视确认封面正常显示。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":57,"electron":27,"system-node":7}`（91 个，符合报告 90 → 91）。
+  - `npm run build` → 成功；`npm run typecheck` → exit 0。
+  - `npm test` → 91 个 **88 过 / 3 败 / 0 超时**；失败集合 = applog、m14、m15v2.route（性能阈值 flake，中位 30.7ms vs ≤30ms），均为既有项；新增测试通过，无新增失败文件。
+- **偏离**：
+  1. 报告验收写 `npm run build && npx electron .` 后检查真实库；按报告 §0 第 3 条改为隔离 userData（既有测试种子副本）启动真实应用的 GUI 探针，未触碰真实 userData。书架封面 / 文件夹纸片 / 遮挡图均实测加载并目视确认。
+  2. 「词典发音」在当前代码中不经 `bookasset://`：`src/lib/dictClient.ts` 的 `playAudioUrl` 直接播放词典服务 URL，缺失时走系统 TTS；全仓无 `dict-audio` 资产构造（只有 MIME 表保留音频类型）。因此无 bookasset 音频路径可复测，`mp3/ogg/wav/m4a` 映射原样保留。
+  3. pdfres 的 `filename=".."` 原可通过旧白名单，但 `readFileSync` 读目录必抛错（落到 404）；本次按报告第 3 步补包含校验后显式返回 400，属加固。
+  4. 全量中 `m15v2.route` 复现性能阈值 flake；该测试不 require `electron/main.js`，与本项无关（见 §1.1）。
+  5. 临时探针与隔离 userData 均已清理，未入库；提交只含 3 个源文件。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -289,5 +312,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-08**（阶段 1 首发前必须完成，P0）。
-- 基线：90 个测试；C-45 后全量 87 过 / 3 败（Windows，2026-10-23；applog、lensWindow G1、m14，见 §1.1）。
+- 当前下一项：**C-09**（阶段 1 首发前必须完成，P0；依赖 C-08，已完成）。
+- 基线：91 个测试；C-08 后全量 88 过 / 3 败（Windows，2026-10-23；applog、m14、m15v2.route 阈值 flake，见 §1.1）。
