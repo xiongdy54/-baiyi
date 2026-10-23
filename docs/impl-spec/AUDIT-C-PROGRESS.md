@@ -390,7 +390,7 @@
   3. **app-update.yml 验收改跑完整 NSIS 目标**：`--dir` 目标不生成 app-update.yml（electron-builder 只为安装器目标写更新描述）；`--win --publish never` 实测生成且 owner/repo 正确。
   4. 报告步骤 5 说「约 10 处」：实际改动 10 个文件、11 处路径/守卫（含 5 个 GUI 套件）；backup-meta 的 `app: "incremental-reading-dev"` 字面量（backup.test / f05 / f39 / f43 / f82）与 `nodeSqliteShim.getName()` 是冻结格式标识/显示名，按报告明确不改。
   5. **首轮全量 `card-links` 超时一次**（180s，单独复跑同样超时）；重跑 `scripts/pin-better-sqlite3-electron.cjs`（PIN_OK abi=125，绑定文件实际未被 electron-builder 改动）后单独跑通过（840ms），干净全量第二轮通过。未复现、根因未定位（疑似打包后环境瞬时状态或系统级停顿），判定与本项代码无关；如再复现应单独立项排查。
-  6. **文档收口待办（未在本项内做）**：`AI_DEVELOPMENT_GUIDE.md` §4:80 仍记载库文件在 `%APPDATA%/incremental-reading-dev/library.db`——按仓库规约改 GUIDE 需版本 bump + §8.1 决策号收口，超出报告 C-11 步骤清单，留待单独文档回合（建议与 GUIDE 其他过时路径一并收口）。`docs/HISTORY.md` 等历史叙述不属现状描述，不改。
+  6. **文档收口（已补做，2026-10-23 第二回合）**：GUIDE §4:80 旧数据路径 `%APPDATA%/incremental-reading-dev/library.db` 已改为 pinUserData 固定的 `<appData>/Nutation`（打包）/ `Nutation-dev`（开发），§8.1 登记决策 **D205**（显式接管并废止 D133 / D187 的旧冻结条款），标题版本 bump v49.30 → v49.31；提交 `718cfcc`，合并 `dfda976`。f11 闸门回到基线 14/16（L1 `vendor/kpScopes.js` 与 L6 表数声明为既有失败，与本改动无关）；`tests/userData.test.cjs` 文件头因被 §8.1 点名而补「直跑」运行时声明（f11 L9 要求）。
   7. 测试副产物 `tests/m15r.activity.bundle.cjs` / `m15r.layout.bundle.cjs` 在全量后变脏，提交前已还原；临时探针与沙箱均删除未入库。
 
 
