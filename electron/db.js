@@ -1802,13 +1802,31 @@ const TODAY_QUEUE_SQL = `SELECT c.*, li.title AS docTitle, li.id AS library_item
        AND COALESCE(c.status, 'active') != 'archived'
      ORDER BY c.created_at ASC`;
 
+// C-18b（审计）：到期超集快速路径——与 TODAY_QUEUE_SQL 完全相同，只多一个 due 条件。
+// fsrs_json 只存在于 cards 表（documents / library_items 均无此列），DUE_EXPR 不加别名也不会歧义。
+// 被排除的只有「due 是数值且 > now」的行，它们在原 JS 逻辑里也会被 (fsrs?.due ?? nowMs) <= nowMs
+// 排除；fsrs 为空、JSON 损坏、due 缺失或非数值的表达式值为 NULL，照常取回交给 JS 判定——结果集不变。
+// DUE_EXPR 与 idx_cards_due（schemaVersion MIGRATIONS v3）引用同一常量，保证表达式索引可命中。
+const { DUE_EXPR } = require("./schemaVersion");
+const TODAY_QUEUE_DUE_SQL = `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
+     LEFT JOIN library_items li ON li.id = d.library_item_id
+     WHERE c.is_deleted = 0
+       AND COALESCE(c.status, 'active') != 'archived'
+       AND (${DUE_EXPR} IS NULL OR ${DUE_EXPR} <= ?)
+     ORDER BY c.created_at ASC`;
+
 /**
  * 今日队列视图（§4.2-20）：到期筛选（新卡 fsrs_json NULL 视为 due=now）+ 挂起排除 +
  * 同源组额度 + 规范序排序一次算完。now 可注入（测试跨日场景，同 §4.4.4 preview/next 时间注入精神）。
+ * C-18b：`opts.withDamaged === false` 走 SQL 到期超集快速路径（命中 idx_cards_due，避免 10 万卡
+ * 全表扫描）；默认 false 未传 = 原来的全量参考实现（测试 f13 / f48b / f69b 依赖 damaged 列表）。
+ * 快速路径不保证 damaged 完整 → 返回空数组并以 damagedOmitted: true 显式标记。
  */
-function computeTodayQueue(now = Date.now()) {
+function computeTodayQueue(now = Date.now(), opts = {}) {
   const nowMs = Number.isFinite(now) ? now : Date.now();
-  const rows = queryAll(TODAY_QUEUE_SQL);
+  const withDamaged = !(opts && opts.withDamaged === false);
+  const rows = withDamaged ? queryAll(TODAY_QUEUE_SQL) : queryAll(TODAY_QUEUE_DUE_SQL, [nowMs]);
   // 批次 A（D-TEST-06）：调度/挂起状态无法判定的行（fsrs_json 或 leech_json 损坏）从队列缺席，
   // 但经 damaged 字段照常可见——卡片浏览与 getCard 仍给出口，用户不会以为卡丢了。
   const mapped = rows.map(mapCardRow);
@@ -1826,13 +1844,14 @@ function computeTodayQueue(now = Date.now()) {
     .filter((c) => deferredMap.has(c.id))
     .sort(queueMemberOrder)
     .map((c) => ({ ...c, deferReason: deferredMap.get(c.id) }));
-  return { cards, deferred, damaged, now: nowMs };
+  return { cards, deferred, damaged: withDamaged ? damaged : [], damagedOmitted: !withDamaged, now: nowMs };
 }
 
 function listDueCards(now) {
   // v34（M12 §4.2-20）：口径唯一——队列 = computeTodayQueue().cards（同源延后在此生效）；
   // 旧排序（due 升序、同 due 优先级高在前，§11.5）由 queueMemberOrder 保持。
-  return computeTodayQueue(now).cards;
+  // C-18b：生产调用走快速路径（到期超集 SQL + idx_cards_due），不再全表扫描。
+  return computeTodayQueue(now, { withDamaged: false }).cards;
 }
 
 function listAllCards() {
@@ -2118,10 +2137,10 @@ function listCardsBySibling(key) {
 }
 
 /** 浏览器侧今日暂缓（cards:deferredToday）：调度语义唯一源仍是 computeTodayQueue（§4.16），
- *  这里只消除全量卡行的 IPC 传输——返回暂缓 id + 延后原因。 */
+ *  这里只消除全量卡行的 IPC 传输——返回暂缓 id + 延后原因。C-18b：走快速路径（不需要 damaged）。 */
 function listDeferredToday(now) {
   const n = Number(now);
-  return computeTodayQueue(Number.isFinite(n) ? n : Date.now()).deferred.map((c) => ({ id: c.id, deferReason: c.deferReason }));
+  return computeTodayQueue(Number.isFinite(n) ? n : Date.now(), { withDamaged: false }).deferred.map((c) => ({ id: c.id, deferReason: c.deferReason }));
 }
 
 function deleteCard(id) {
@@ -4359,7 +4378,7 @@ function computeCardCounts(nowTs, opts) {
   const limits = limitsForScope(readLimits(), scope);
   const remaining = limitsRemaining(limits, getDailyUsage(now));
   const ignore = limits.ignoreReviewLimitForNew;
-  const q = computeTodayQueue(now);
+  const q = computeTodayQueue(now, { withDamaged: false });
   let cardBudget = remaining.cardReviews;
   let newBudget = remaining.newCards;
   const out = { new: 0, learning: 0, review: 0 };
@@ -4402,7 +4421,7 @@ function computeSessionQueue(nowTs, opts) {
   const remaining = limitsRemaining(limits, usage);
   const newBlocked = !limits.ignoreReviewLimitForNew && remaining.cardReviews <= 0;
 
-  const q = computeTodayQueue(now);
+  const q = computeTodayQueue(now, { withDamaged: false });
   const isNewCard = (c) => (c.fsrs?.reps ?? 0) === 0 || (c.fsrs?.state ?? "new") === "new";
   const cards = [];
   const blockedCards = [];
@@ -8177,6 +8196,7 @@ module.exports = {
   getCardGenInfo,
   listDueCards,
   computeTodayQueue,
+  TODAY_QUEUE_DUE_SQL, // C-18b：快速路径 SQL（EXPLAIN QUERY PLAN 验证 idx_cards_due 命中用）
   listAllCards,
   getCardBrowserMeta,
   queryCardBrowserIds,
