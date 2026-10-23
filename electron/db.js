@@ -2110,27 +2110,34 @@ function hasTextOrTagLeaf(node) {
   return node.kids.some(hasTextOrTagLeaf);
 }
 
-const BROWSER_JOIN = `FROM cards c
+// C-43：INDEXED BY 主键——不加的话规划器会选 C-18a 的 idx_cards_due(is_deleted=?)，
+// 对每个分块全扫 is_deleted=0 的全部索引项（实测 10 万卡 50 块 6.8 s vs 主键 0.45 s）。
+const BROWSER_JOIN = `FROM cards c INDEXED BY sqlite_autoindex_cards_1
   LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
   LEFT JOIN library_items li ON li.id = d.library_item_id
   WHERE c.is_deleted = 0`;
 
-// D137：better-sqlite3 惰性迭代游标分块消费——30 万行全量物化会把主进程顶上 GB 级，
+// D137：分块消费（C-43 起不再用游标，按块主键取整行）——30 万行全量物化会把主进程顶上 GB 级，
 // 峰值内存必须钳在一个 chunk（await nextTick() 让出点语义与 sql.js 步进时代一致）
 function nextTick() {
   return new Promise((res) => setImmediate(res));
 }
 
-async function scanCards(sql, params, handleRow) {
+// C-43：不得跨 await 持有游标——游标打开期间，同一连接上的写入会抛 "This database connection is busy executing a query"。
+// 做法：同步取出有序 id（只有 id，内存小），再按块用主键取整行；块与块之间让出主进程。
+async function scanCards(cols, handleRow, chunk = 2000) {
+  const ids = db.prepare("SELECT id FROM cards WHERE is_deleted = 0 ORDER BY created_at DESC").pluck().all();
+  // BROWSER_JOIN 以 "WHERE c.is_deleted = 0" 结尾，所以这里用 AND 拼接
+  const stmt = db.prepare(`SELECT ${cols} ${BROWSER_JOIN} AND c.id IN (SELECT value FROM json_each(?))`);
   let n = 0;
-  const iter = db.prepare(sql).iterate(normParams(params));
-  try {
-    for (const row of iter) {
-      handleRow(row);
-      if (++n % 2000 === 0) await nextTick();
+  for (let i = 0; i < ids.length; i += chunk) {
+    const part = ids.slice(i, i + chunk);
+    const byId = new Map(stmt.all(JSON.stringify(part)).map((r) => [r.id, r]));
+    for (const id of part) {
+      const r = byId.get(id);
+      if (r) { handleRow(r); n++; } // 两次让出之间被删除的卡自然跳过
     }
-  } finally {
-    iter.return?.(); // 提前退出时关闭游标（等价旧 stmt.free()）
+    if (i + chunk < ids.length) await nextTick();
   }
   return n;
 }
@@ -2156,13 +2163,10 @@ async function getCardBrowserMeta() {
   }
   const meta = [];
   await scanCards(
-    `SELECT c.id, c.priority, c.status, c.card_type, c.fsrs_json, c.leech_json,
-            c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.tags_json,
-            c.knowledge_point_id, c.created_at,
-            li.id AS library_item_id, li.title AS docTitle
-     ${BROWSER_JOIN}
-     ORDER BY c.created_at DESC`,
-    [],
+    `c.id, c.priority, c.status, c.card_type, c.fsrs_json, c.leech_json,
+     c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.tags_json,
+     c.knowledge_point_id, c.created_at,
+     li.id AS library_item_id, li.title AS docTitle`,
     (r) => meta.push(cardMetaRow(r))
   );
   browserFp = fp;
@@ -2193,13 +2197,10 @@ async function queryCardBrowserIds(query) {
   } else {
     const meta = [];
     await scanCards(
-      `SELECT c.id, c.priority, c.status, c.card_type, c.fsrs_json, c.leech_json,
-              c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.created_at,
-              c.front_markdown, c.back_markdown, c.note_text, c.context_prefix, c.tags_json, c.domain,
-              li.id AS library_item_id, li.title AS docTitle
-       ${BROWSER_JOIN}
-       ORDER BY c.created_at DESC`,
-      [],
+      `c.id, c.priority, c.status, c.card_type, c.fsrs_json, c.leech_json,
+       c.memory_ref_json, c.context_ref_json, c.source_ref_json, c.created_at,
+       c.front_markdown, c.back_markdown, c.note_text, c.context_prefix, c.tags_json, c.domain,
+       li.id AS library_item_id, li.title AS docTitle`,
       (r) => {
         const m = cardMetaRow(r);
         if (cardQueryCore.cardRowMatches(parsed, evalViewOf(r, m))) meta.push(m);
