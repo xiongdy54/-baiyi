@@ -79,6 +79,10 @@ app.whenReady().then(async () => {
     // ---- S4 孤儿扫描：dryRun 清单 / partOnly 只清 .part / 全删 ----
     fs.writeFileSync(path.join(dir, "stray-occl.png"), "stray");
     fs.writeFileSync(path.join(dir, "occl-stale.part"), "part");
+    // NTFS mtime 有亚毫秒精度而 Date.now() 只到毫秒——刚写完的文件可能出现 now - mtime < 0
+    //（C-22 竞态，账本 §1.1）。把无主文件 mtime 确定性回拨 1s，minAgeMs 判据不再依赖写入时序。
+    const aged1s = new Date(Date.now() - 1000);
+    fs.utimesSync(path.join(dir, "stray-occl.png"), aged1s, aged1s);
     const relStray = `${itemId}/stray-occl.png`;
     const relPart = `${itemId}/occl-stale.part`;
     const dry = db.sweepOrphanAssetFiles({ dryRun: true, minAgeMs: 0 });
