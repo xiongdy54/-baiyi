@@ -413,15 +413,11 @@ async function initDb() {
     await schema.snapshotBeforeMigration(db, app.getPath("userData"), startVersion, schema.SCHEMA_VERSION);
   }
   applyStandardPragmas(db); // WAL + synchronous=FULL + busy_timeout（§3.7，WAL 标志持久在库头）
-  await nextTick(); // D143（T4）：initDb 分相让出（0.5/5）——开库 + pragma 相与 quick_check 相拆开
-  // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞——损坏早暴露、零行为变更）
-  try {
-    const qc = db.pragma("quick_check", { simple: true });
-    if (qc !== "ok") console.error(`[db] quick_check 异常：${qc}`);
-  } catch (e) {
-    console.error("[db] quick_check 失败：", e);
-  }
-  // D143（v48.98，T4）：initDb 分相让出（1/5）——打开 + pragma + quick_check 相结束。
+  // C-23：启动 quick_check 已移除（把 D143 对 dictionary.db 的裁决推广到主库——quick_check 要
+  // 整读库文件，库越大启动越慢、首屏越晚可交互）；完整性检查改由备份 worker 对快照只读执行、
+  // 每天一次（backup.js），且检查结果参与备份轮换决策。learner.db 同理（派生可重建，不检查）。
+  await nextTick(); // D143（T4）：initDb 分相让出（0.5/5）——开库 + pragma 相与建表相拆开
+  // D143（v48.98，T4）：initDb 分相让出（1/5）——打开 + pragma 相结束。
   // 全仓 initDb 调用点均为 await，签名与语义不变；让出只把同步长宏任务拆成 ≤300ms 段，
   // 根治「启动前 1s 一段连续 ~700ms 空洞」（诊断 STARTUP-LAG-DIAGNOSIS §3 R4 / §4 T4）。
   await nextTick();

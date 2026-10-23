@@ -320,7 +320,13 @@ contextBridge.exposeInMainWorld("backupAPI", {
   openDir: () => ipcRenderer.invoke("backup:openDir"),
   pickFile: () => ipcRenderer.invoke("backup:pickFile"),
   restore: (file) => ipcRenderer.invoke("backup:restore", file),
-  relaunch: () => ipcRenderer.send("app:relaunch")
+  relaunch: () => ipcRenderer.send("app:relaunch"),
+  // C-23：主库快照完整性检查不通过 → 主进程推送（payload = { message, integrity }，此时旧备份轮换已暂停）
+  onIntegrityWarning: (callback) => {
+    const handler = (_e, payload) => callback(payload);
+    ipcRenderer.on("backup:integrityWarning", handler);
+    return () => ipcRenderer.removeListener("backup:integrityWarning", handler);
+  }
 });
 
 contextBridge.exposeInMainWorld("aiAPI", {

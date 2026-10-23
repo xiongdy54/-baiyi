@@ -8,6 +8,7 @@ export type SettingsNoticeKind =
   | "update-ready" // 绿：更新包已下载就绪
   | "update-error" // 红：更新检查出错
   | "backup-failed" // 红：最近一次自动备份失败
+  | "backup-integrity" // 红：主库快照完整性检查发现问题，旧备份轮换已暂停（C-23）
   | "clock-skew" // 黄：系统时钟疑似被回拨（C-14 探测位）
   | "backup-none" // 黄：还没有任何备份
   | "backup-stale"; // 黄：超过阈值天数没有备份
@@ -29,7 +30,13 @@ export interface SettingsNoticesInput {
   /** backup:list 里最新一份备份的 createdAt；一份备份都没有 → null */
   latestBackupAt?: number | null;
   /** backup:info 的 lastAuto（最近一次启动期自动备份的结局；本轮还没跑过 → null） */
-  lastAuto?: { ok?: boolean; error?: string | null; clockSkewSuspected?: boolean } | null;
+  lastAuto?: {
+    ok?: boolean;
+    error?: string | null;
+    clockSkewSuspected?: boolean;
+    /** C-23：主库快照 quick_check 不通过（true = 已暂停删除旧备份，需用户介入） */
+    integrityWarning?: boolean;
+  } | null;
   now?: number;
 }
 
@@ -49,6 +56,8 @@ export function computeSettingsNotices(input: SettingsNoticesInput): SettingsNot
   if (lastAuto && lastAuto.ok === false) {
     out.push({ level: "error", kind: "backup-failed", params: { msg: lastAuto.error ?? "" } });
   }
+  // C-23：备份本体成功但主库快照 quick_check 不通过——轮换已暂停，此时备份是唯一自救途径
+  if (lastAuto?.integrityWarning) out.push({ level: "error", kind: "backup-integrity" });
   if (lastAuto?.clockSkewSuspected) out.push({ level: "warn", kind: "clock-skew" });
   // 「未提供」（没查过备份列表）与「明确为 null」（查了、确实一份都没有）语义不同：前者不产通知
   if (input.latestBackupAt === null) {

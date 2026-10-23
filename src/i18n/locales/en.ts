@@ -2421,6 +2421,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "发现新版本 v{version}，可到「软件更新」下载安装。": "A new version v{version} is available — see “Software updates” to download and install.",
   "更新检查出错：{msg}": "Update check failed: {msg}",
   "自动备份失败：{msg}": "Automatic backup failed: {msg}",
+  "数据库完整性检查发现问题，已暂停删除旧备份。请先不要清理备份，并导出诊断信息。": "A database integrity check found problems. Deletion of old backups is paused. Please keep your backups and export diagnostic information.",
   "检测到系统时钟可能被回拨过，请核对系统时间，否则自动备份可能多日停摆。": "Your system clock may have been rolled back. Check the system time, or automatic backups may stall for days.",
   "还没有任何备份，建议立即创建一份。": "No backup exists yet — create one now.",
   "已 {days} 天没有备份，建议立即备份一次。": "No backup for {days} days — create one now.",

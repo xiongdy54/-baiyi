@@ -60,6 +60,22 @@ function seedData(tag) {
   fs.writeFileSync(path.join(P.assetsDir, "item-1", "original.epub"), Buffer.from("PK-FAKE-EPUB-" + tag));
 }
 
+// C-23 夹具：多页真库 + 中部整页写坏（页头损坏 → quick_check 必报 btreeInitPage 错；
+// 只坏 payload 字节可能结构完好而漏检，整页覆盖才是确定性损坏）
+function corruptSqliteBytes() {
+  const f = path.join(tmp, "fixture-corrupt.db");
+  try { fs.rmSync(f, { force: true }); } catch { /* 尽力 */ }
+  const d = new Database(f);
+  d.exec("CREATE TABLE payload (id INTEGER PRIMARY KEY, v TEXT)");
+  const ins = d.prepare("INSERT INTO payload(v) VALUES (?)");
+  d.transaction(() => { for (let i = 0; i < 3000; i++) ins.run("x".repeat(200) + i); })();
+  d.close();
+  const buf = fs.readFileSync(f);
+  const mid = Math.floor(buf.length / 2);
+  for (let i = mid; i < mid + 2 * 4096 && i < buf.length; i++) buf[i] = (buf[i] * 7 + 0x5a) & 0xff;
+  return buf;
+}
+
 const counts = { items: 3, cards: 42, extracts: 7, assets: 2 };
 const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
 
@@ -218,6 +234,47 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   check("safety：protect 保护刚生成的新档、清掉最旧的旧档", fs.existsSync(sfNew) && !fs.existsSync(sfOld1), JSON.stringify({ sfNew: fs.existsSync(sfNew), sfOld1: fs.existsSync(sfOld1), sfOld2: fs.existsSync(sfOld2) }));
   backup.rotateSafetyBackups(BAK, 1);
   check("safety 差分：无 protect 时同样会删掉刚生成的新档（复现缺陷）", !fs.existsSync(sfNew), sfNew);
+
+  console.log("== 9) C-23：启动 quick_check 移除；快照完整性检查参与备份轮换决策 ==");
+  // 9a 静态守卫：启动路径不再执行 quick_check——应用日志里 [db]/[learnerDb] quick_check 行的唯一来源就是这两处
+  const dbjsSrc = fs.readFileSync(path.join(__dirname, "..", "electron", "db.js"), "utf8");
+  const learnerSrc = fs.readFileSync(path.join(__dirname, "..", "electron", "learnerDb.js"), "utf8");
+  check("db.js 无 quick_check pragma（D143 裁决推广到主库，检查移到备份 worker）", !/pragma\(\s*["']quick_check["']/.test(dbjsSrc), "db.js 仍含 quick_check 调用");
+  check("learnerDb.js 无 quick_check pragma（派生可重建库不检查）", !/pragma\(\s*["']quick_check["']/.test(learnerSrc), "learnerDb.js 仍含 quick_check 调用");
+
+  // 9b 快照注入：正常库 → integrity[library.db] === "ok"；未注入快照 → 不检查在线文件
+  fs.rmSync(BAK, { recursive: true, force: true });
+  fs.mkdirSync(BAK, { recursive: true });
+  seedData("D");
+  const snapLib = async (dest) => { fs.copyFileSync(P.dbFile, dest); };
+  r = await backup.createBackup({ ...opts(), label: "manual", flush: () => {} });
+  check("未注入快照时不检查在线主库文件", r.ok === true && r.integrity["library.db"] === undefined, JSON.stringify(r.integrity));
+  r = await backup.createBackup({ ...opts(), label: "manual", flush: () => {}, snapshotLibrary: snapLib });
+  check("快照注入后备份成功", r.ok === true, JSON.stringify(r));
+  check("正常库快照 integrity[library.db] === ok", r.integrity["library.db"] === "ok", JSON.stringify(r.integrity));
+
+  // 9c 坏库快照（中部整页写坏）→ 备份本体照常成功，但轮换暂停、旧备份数量不变
+  fs.rmSync(BAK, { recursive: true, force: true });
+  fs.mkdirSync(BAK, { recursive: true });
+  fs.writeFileSync(P.settingsFile, JSON.stringify({ app: { autoBackupEnabled: true, autoBackupKeep: 2 } }));
+  const past = new Date(Date.now() - 5 * 86400000);
+  const oldA = path.join(BAK, "backup-auto-2026-03-01.zip");
+  const oldB = path.join(BAK, "backup-auto-2026-03-02.zip");
+  for (const f of [oldA, oldB]) { fs.writeFileSync(f, realSqliteBytes("OLD")); fs.utimesSync(f, past, past); }
+  fs.writeFileSync(P.dbFile, corruptSqliteBytes()); // 快照函数原样复制坏字节 → worker 只读 quick_check 报损坏页
+  r = await backup.autoBackupIfNeeded({ ...optsAuto(), now: new Date(), flush: () => {}, snapshotLibrary: snapLib });
+  check("坏库自动备份本体仍成功", r.ok === true && !r.skipped, JSON.stringify(r.ok === true ? { ok: r.ok, integrityWarning: r.integrityWarning } : r));
+  check("坏库返回 integrityWarning（已暂停删除旧备份）", typeof r.integrityWarning === "string" && r.integrityWarning.includes("已暂停删除旧备份"), JSON.stringify(r.integrityWarning));
+  check("坏库 integrity[library.db] !== ok", typeof r.integrity["library.db"] === "string" && r.integrity["library.db"] !== "ok", JSON.stringify(r.integrity));
+  check("旧备份数量不变（轮换未执行，两份旧档都在）", fs.existsSync(oldA) && fs.existsSync(oldB) && fs.readdirSync(BAK).filter((f) => f.startsWith("backup-auto-")).length === 3, JSON.stringify(fs.readdirSync(BAK).filter((f) => f.startsWith("backup-auto-"))));
+
+  // 9d 库修复后：次日自动备份恢复轮换（暂停只在完整性不通过时发生）
+  seedData("E");
+  fs.writeFileSync(P.settingsFile, JSON.stringify({ app: { autoBackupEnabled: true, autoBackupKeep: 2 } }));
+  const tomorrow = new Date(Date.now() + 86400000);
+  r = await backup.autoBackupIfNeeded({ ...optsAuto(), now: tomorrow, flush: () => {}, snapshotLibrary: snapLib });
+  check("修复后备份成功且无 integrityWarning", r.ok === true && !r.integrityWarning && r.integrity["library.db"] === "ok", JSON.stringify({ ok: r.ok, w: r.integrityWarning, i: r.integrity }));
+  check("轮换恢复执行（总数回到 keep=2）", fs.readdirSync(BAK).filter((f) => f.startsWith("backup-auto-")).length === 2, JSON.stringify(fs.readdirSync(BAK).filter((f) => f.startsWith("backup-auto-"))));
 
   // 清理临时目录
   fs.rmSync(tmp, { recursive: true, force: true });
