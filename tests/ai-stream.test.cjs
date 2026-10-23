@@ -5,6 +5,10 @@
 // 服务端：http.createServer 模拟 OpenAI 兼容 /chat/completions；隔离 userData（app.setPath），
 // 绝不触碰真实配置（C-11 口径）。C-19a 与 C-19b（fetch 传输层）共用本套件。
 const { app } = require("electron");
+// C-19b：走 net.fetch 后 Chromium 会在 userData 里初始化网络磁盘缓存并锁住文件，
+// 测试末尾的 rmSync(userData) 会被无限期卡住（进程 25s+ 不退）。禁用 http 缓存——
+// 本套件验证的是 SSE 解析与错误语义，与缓存无关。
+app.commandLine.appendSwitch("disable-http-cache");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
@@ -191,6 +195,14 @@ app.whenReady().then(async () => {
       check("(h) 有 [DONE] 时 done 恰好 1 次", doneCount === 1, 1, doneCount);
       check("(h) 正文完整", deltas === "AB", "AB", deltas);
       await closeServer(server);
+    }
+
+    // ---- (i) C-19b：传输层选择 Electron 网络栈（继承系统代理路径的离线判据） ----
+    {
+      const transport = require(path.join(ROOT, "electron", "aiTransport.js"));
+      const uses = transport.usesElectronNet();
+      check("(i) app ready 后传输层选择 Electron net.fetch（系统代理路径）", uses === true, true, uses);
+      check("(i) pickFetch 返回可调用实现", typeof transport.pickFetch() === "function", "function", typeof transport.pickFetch());
     }
   } catch (e) {
     fail += 1;

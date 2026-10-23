@@ -2,9 +2,10 @@
 // Key 用 safeStorage 加密存储；流式输出经 WebContents 发送到渲染层
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
-const https = require("https");
-const http = require("http");
 const { safeStorage } = require("electron");
+// C-19b：网络传输统一走 aiTransport（Electron net.fetch 优先——Chromium 网络栈继承系统代理；
+// 测试 / 纯 Node 回落 globalThis.fetch）。Node http/https 栈不读系统代理，海外预设需代理才可达。
+const { postSSE, getJSON } = require("./aiTransport");
 // C-15：ai-config.json 与 settings.json 共用同一套 JSON 文件读写（BOM / 留档 / 原子写 + fsync）
 const { readJsonObject, writeJsonAtomic } = require("./jsonFile");
 
@@ -347,6 +348,71 @@ function backoffDelayMs(err, attempt) {
 // 与 classifyHttpError 的「只有 408/429/5xx 可重试」共同构成重试判定的唯一来源
 const NET_CODES = new Set(["ECONNRESET", "EPIPE", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "ECONNABORTED"]);
 
+// C-19b：fetch 层的网络失败不带 Node 系统码——undici 是 TypeError("fetch failed") + cause 链
+// （AggregateError.errors 里才有 code），Chromium net.fetch 是 TypeError("… net::ERR_XXX …"）。
+// 先还原成系统码，再走 C-19a 第 5 步的同一段归类规则。
+const CHROMIUM_NET_CODES = {
+  ERR_CONNECTION_REFUSED: "ECONNREFUSED",
+  ERR_CONNECTION_RESET: "ECONNRESET",
+  ERR_CONNECTION_CLOSED: "ECONNRESET",
+  ERR_NETWORK_CHANGED: "ECONNRESET",
+  ERR_EMPTY_RESPONSE: "ECONNRESET",
+  ERR_CONNECTION_TIMED_OUT: "ETIMEDOUT",
+  ERR_TIMED_OUT: "ETIMEDOUT",
+  ERR_NAME_NOT_RESOLVED: "ENOTFOUND",
+  ERR_ADDRESS_UNREACHABLE: "ENETUNREACH",
+  ERR_HOST_UNREACHABLE: "EHOSTUNREACH"
+};
+
+function unwrapSysCode(err) {
+  let e = err;
+  for (let i = 0; e && i < 4; i += 1) {
+    if (typeof e.code === "string" && e.code) return e.code;
+    if (Array.isArray(e.errors)) {
+      for (const c of e.errors) {
+        if (c && typeof c.code === "string" && c.code) return c.code;
+      }
+    }
+    const m = typeof e.message === "string" ? e.message.match(/net::(ERR_[A-Z_]+)/) : null;
+    if (m) return CHROMIUM_NET_CODES[m[1]] || m[1];
+    e = e.cause;
+  }
+  return null;
+}
+
+/** 连接期 / 读流期失败的统一归类：ECONNREFUSED 给可读文案，其余按第 5 步规则归 network / timeout */
+function classifyNetError(err, { cfg, host, streamStarted }) {
+  if (err && err.code === "timeout") {
+    // 传输层空闲超时（v45 语义）：code 已是 timeout，保持不重试
+    err.streamStarted = streamStarted;
+    return err;
+  }
+  if (err && err.code === "truncated") return err; // 已归类，不重复处理
+  const sysCode = unwrapSysCode(err);
+  if (sysCode === "ECONNREFUSED") {
+    const e =
+      cfg.preset === "local"
+        ? new Error(
+            "无法连接本地模型服务（localhost 被拒绝）。请确认：① 已安装并启动 Ollama（或 LM Studio 已加载模型并开启本地服务）；② 端口正确（Ollama 11434 / LM Studio 1234）"
+          )
+        : new Error(`无法连接 AI 服务（${host} 连接被拒绝）`);
+    e.code = "network";
+    e.retriable = true;
+    e.streamStarted = streamStarted;
+    return e;
+  }
+  if (!err.code && sysCode) err.code = sysCode; // fetch 的 TypeError 本身无 code，还原系统码
+  // ↓ C-19a 第 5 步（与原 req.on("error") 同一段规则）
+  if (err.code === "ETIMEDOUT") err.code = "timeout";
+  else if (!err.code || NET_CODES.has(err.code)) {
+    err.sysCode = err.code || null;
+    err.code = "network";
+  }
+  err.retriable = err.code === "network" && !streamStarted; // timeout 保持原语义：不重试
+  err.streamStarted = streamStarted;
+  return err;
+}
+
 // T4（D192）：可选 model 覆盖（导图模型，共用全局服务商地址与 Key）与 maxTokens；缺省时请求体与此前逐字节一致
 function chatStream({ messages, temperature, abortSignal, retry, model, maxTokens }, send) {
   const maxAttempts = Math.max(1, Math.min(5, Number(retry && retry.maxAttempts) || 1));
@@ -393,7 +459,6 @@ function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }
     return Promise.reject(abortErrorOf(abortSignal));
   }
   const url = new URL(cfg.baseUrl.replace(/\/$/, "") + "/chat/completions");
-  const isHttps = url.protocol === "https:";
   const useModel = (typeof model === "string" && model.trim()) || cfg.model;
   const bodyObj = {
     model: useModel,
@@ -413,252 +478,165 @@ function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }
   const body = JSON.stringify(bodyObj);
   const headers = { "Content-Type": "application/json" };
   if (cfg.apiKey) headers.Authorization = `Bearer ${cfg.apiKey}`;
-  headers["Content-Length"] = Buffer.byteLength(body);
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let streamStarted = false; // 是否已收到响应（收到响应后的失败 = 结果未知）
-    const finish = (fn, val) => {
-      if (settled) return;
-      settled = true;
-      fn(val);
-    };
-    const onAbort = () => {
-      const err = abortErrorOf(abortSignal);
+  // C-19b：Content-Length 由传输层按 body 自行计算（fetch 规范中手设属 forbidden header，会被忽略）
+  return (async () => {
+    let streamStarted = false; // 是否已收到响应（收到响应后的失败 = 结果未知，§3.7）
+    let resp;
+    try {
+      // C-19b：传输层优先 Electron net.fetch（Chromium 网络栈，继承系统代理）；
+      // 120s 空闲超时覆盖「连接 / 响应头 / 每个正文 chunk」全程（v45 补记语义，读流期间有数据即重置）
+      resp = await postSSE(url.href, { headers, body, signal: abortSignal, idleMs: 120000 });
+    } catch (err) {
+      if (abortSignal && abortSignal.aborted) throw abortErrorOf(abortSignal);
+      throw classifyNetError(err, { cfg, host: url.host, streamStarted });
+    }
+    streamStarted = true;
+
+    if (resp.status !== 200) {
+      let errText = "";
       try {
-        req.destroy(err);
-      } catch {
-        /* 已结束则忽略 */
+        for await (const t of resp.textChunks()) errText += t;
+      } catch (err) {
+        if (abortSignal && abortSignal.aborted) throw abortErrorOf(abortSignal);
+        throw classifyNetError(err, { cfg, host: url.host, streamStarted: true });
       }
-      finish(reject, err);
+      const e = classifyHttpError(resp.status, errText, { "retry-after": resp.header("retry-after") });
+      e.streamStarted = false; // 未开始产出正文，可安全重试
+      throw e;
+    }
+
+    let buf = "";
+    let usage = null; // v48：末块 usage（prompt/completion tokens；GLM 计入 reasoning）
+    let finishReason = null; // v48.11：截断判定（length）所需
+    // 思考模型（GLM 等）先输出 reasoning_content 再输出正文；thinking 计数节流转发（v10.4）
+    let thinkAcc = 0;
+    let lastThinkSent = 0;
+    // C-19a 第 2/8 步：done 只发一次（[DONE] 与收尾双路径共用）；逐行解析抽成 handleLine，
+    // 便于流结束时补处理没有换行符的末行
+    let doneSent = false;
+    let sawDone = false;
+    const sendDoneOnce = (p) => {
+      if (doneSent) return;
+      doneSent = true;
+      send({ done: true, ...p });
     };
-    if (abortSignal) abortSignal.addEventListener("abort", onAbort, { once: true });
-    const req = (isHttps ? https : http).request(
-      {
-        hostname: url.hostname,
-        port: url.port || (isHttps ? 443 : 80),
-        path: url.pathname + url.search,
-        method: "POST",
-        headers
-      },
-      (res) => {
-        // C-19a 第 1 步：Node 内部用 StringDecoder 拼接跨 chunk 的多字节字符（此后 data 事件给的是字符串）
-        res.setEncoding("utf8");
-        streamStarted = true;
-        if (res.statusCode !== 200) {
-          let errText = "";
-          res.on("data", (c) => (errText += c));
-          res.on("end", () => {
-            const e = classifyHttpError(res.statusCode, errText, res.headers);
-            e.streamStarted = false; // 未开始产出正文，可安全重试
-            finish(reject, e);
-          });
-          return;
+    const handleLine = (line) => {
+      // 返回 true 表示遇到 [DONE]
+      if (!line.startsWith("data:")) return false;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") {
+        sawDone = true;
+        return true;
+      }
+      try {
+        const json = JSON.parse(data);
+        if (json.usage) usage = json.usage;
+        const choice = json.choices?.[0] || {};
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+        const d = choice.delta || {};
+        if (ttftMs == null && (d.content || (typeof (d.reasoning_content ?? d.reasoning) === "string" && (d.reasoning_content ?? d.reasoning)))) {
+          ttftMs = Date.now() - startedAt;
         }
-        let buf = "";
-        let usage = null; // v48：末块 usage（prompt/completion tokens；GLM 计入 reasoning）
-        let finishReason = null; // v48.11：截断判定（length）所需
-        // 思考模型（GLM 等）先输出 reasoning_content 再输出正文；thinking 计数节流转发（v10.4）
-        let thinkAcc = 0;
-        let lastThinkSent = 0;
-        // C-19a 第 2/8 步：done 只发一次（[DONE] 与 end 双路径共用）；逐行解析抽成 handleLine，
-        // 便于 end 时补处理没有换行符的末行
-        let doneSent = false;
-        let sawDone = false;
-        const sendDoneOnce = (p) => {
-          if (doneSent) return;
-          doneSent = true;
-          send({ done: true, ...p });
-        };
-        const handleLine = (line) => {
-          // 返回 true 表示遇到 [DONE]
-          if (!line.startsWith("data:")) return false;
-          const data = line.slice(5).trim();
-          if (data === "[DONE]") {
-            sawDone = true;
-            return true;
+        if (d.content) send({ delta: d.content });
+        const think = d.reasoning_content ?? d.reasoning;
+        if (typeof think === "string" && think) {
+          thinkAcc += think.length;
+          const now = Date.now();
+          if (now - lastThinkSent > 400) {
+            send({ thinking: thinkAcc });
+            lastThinkSent = now;
           }
-          try {
-            const json = JSON.parse(data);
-            if (json.usage) usage = json.usage;
-            const choice = json.choices?.[0] || {};
-            if (choice.finish_reason) finishReason = choice.finish_reason;
-            const d = choice.delta || {};
-            if (ttftMs == null && (d.content || (typeof (d.reasoning_content ?? d.reasoning) === "string" && (d.reasoning_content ?? d.reasoning)))) {
-              ttftMs = Date.now() - startedAt;
-            }
-            if (d.content) send({ delta: d.content });
-            const think = d.reasoning_content ?? d.reasoning;
-            if (typeof think === "string" && think) {
-              thinkAcc += think.length;
-              const now = Date.now();
-              if (now - lastThinkSent > 400) {
-                send({ thinking: thinkAcc });
-                lastThinkSent = now;
-              }
-            }
-          } catch {
-            /* 忽略不完整行 */
-          }
-          return false;
-        };
-        // C-19a 第 3 步：200 但内容类型不对——text/html 多为网关/代理页；application/json 是
-        // 服务端忽略 stream:true 的整包回复。其余类型（含缺失）继续按 SSE 解析（有些本地服务
-        // 不规范地设置 content-type，不要误杀，由第 2 步的截断规则兜底）。
-        const contentType = String(res.headers["content-type"] || "").toLowerCase();
-        if (contentType.includes("text/html") || contentType.includes("application/json")) {
-          let whole = "";
-          res.on("data", (c) => {
-            if (firstByteMs == null) firstByteMs = Date.now() - startedAt;
-            whole += c;
-          });
-          res.on("error", (err) => {
-            err.streamStarted = true;
-            finish(reject, err);
-          });
-          res.on("end", () => {
-            if (contentType.includes("application/json")) {
-              let json = null;
-              try {
-                json = JSON.parse(whole);
-              } catch {
-                json = null;
-              }
-              const content = json?.choices?.[0]?.message?.content;
-              if (typeof content === "string" && content) {
-                // 整包 JSON：作为一次 delta 发出并正常结束
-                if (ttftMs == null) ttftMs = Date.now() - startedAt;
-                if (json.usage) usage = json.usage;
-                if (json.choices[0].finish_reason) finishReason = json.choices[0].finish_reason;
-                send({ delta: content });
-                sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
-                finish(resolve, { usage, finishReason, ttftMs, firstByteMs });
-                return;
-              }
-            }
-            const e = new Error(`AI 服务返回了非流式内容（content-type: ${contentType || "缺失"}）：${redact(whole).slice(0, 200)}`);
-            e.code = "bad_content_type";
-            e.retriable = false;
-            e.streamStarted = true;
-            finish(reject, e);
-          });
-          return;
         }
-        res.on("data", (chunk) => {
-          if (settled) return; // [DONE] 之后的残余数据不再转发
+      } catch {
+        /* 忽略不完整行 */
+      }
+      return false;
+    };
+
+    // C-19a 第 3 步：200 但内容类型不对——text/html 多为网关/代理页；application/json 是
+    // 服务端忽略 stream:true 的整包回复。其余类型（含缺失）继续按 SSE 解析（有些本地服务
+    // 不规范地设置 content-type，不要误杀，由第 2 步的截断规则兜底）。
+    const contentType = String(resp.header("content-type") || "").toLowerCase();
+    if (contentType.includes("text/html") || contentType.includes("application/json")) {
+      let whole = "";
+      try {
+        for await (const t of resp.textChunks()) {
           if (firstByteMs == null) firstByteMs = Date.now() - startedAt;
-          buf += chunk; // setEncoding 之后 chunk 已是字符串（第 1 步）
-          let idx;
-          while ((idx = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, idx).trim();
-            buf = buf.slice(idx + 1);
-            if (handleLine(line)) {
-              sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
-              finish(resolve, { usage, finishReason, ttftMs, firstByteMs });
-              return;
-            }
-          }
-        });
-        res.on("end", () => {
-          if (settled) return;
-          if (buf.trim()) handleLine(buf.trim()); // 末行没有换行符
-          if (sawDone || finishReason) {
+          whole += t;
+        }
+      } catch (err) {
+        if (abortSignal && abortSignal.aborted) throw abortErrorOf(abortSignal);
+        err.streamStarted = true;
+        throw err;
+      }
+      if (contentType.includes("application/json")) {
+        let json = null;
+        try {
+          json = JSON.parse(whole);
+        } catch {
+          json = null;
+        }
+        const content = json?.choices?.[0]?.message?.content;
+        if (typeof content === "string" && content) {
+          // 整包 JSON：作为一次 delta 发出并正常结束
+          if (ttftMs == null) ttftMs = Date.now() - startedAt;
+          if (json.usage) usage = json.usage;
+          if (json.choices[0].finish_reason) finishReason = json.choices[0].finish_reason;
+          send({ delta: content });
+          sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
+          return { usage, finishReason, ttftMs, firstByteMs };
+        }
+      }
+      const e = new Error(`AI 服务返回了非流式内容（content-type: ${contentType || "缺失"}）：${redact(whole).slice(0, 200)}`);
+      e.code = "bad_content_type";
+      e.retriable = false;
+      e.streamStarted = true;
+      throw e;
+    }
+
+    // SSE 流（C-19a 第 1/2 步：多字节解码由传输层 TextDecoder(stream:true) 保证；行级规则同前）
+    try {
+      for await (const chunk of resp.textChunks()) {
+        if (firstByteMs == null) firstByteMs = Date.now() - startedAt;
+        buf += chunk;
+        let idx;
+        while ((idx = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, idx).trim();
+          buf = buf.slice(idx + 1);
+          if (handleLine(line)) {
             sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
-            finish(resolve, { usage, finishReason, ttftMs, firstByteMs });
-            return;
+            return { usage, finishReason, ttftMs, firstByteMs }; // [DONE] 之后的残余数据不再消费
           }
-          // C-19a 第 2 步：既没有 [DONE] 也没有 finish_reason 的提前收尾 = 截断，不是成功
-          const e = new Error("AI 响应在完成前中断：没有收到结束标记，结果可能不完整");
-          e.code = "truncated";
-          e.streamStarted = true;
-          e.retriable = false;
-          finish(reject, e);
-        });
-        res.on("error", (err) => {
-          err.streamStarted = true;
-          finish(reject, err);
-        });
+        }
       }
-    );
-    req.on("close", () => {
-      if (abortSignal && abortSignal.aborted) finish(reject, abortErrorOf(abortSignal));
-    });
-    req.on("error", (err) => {
-      if (abortSignal && abortSignal.aborted) {
-        finish(reject, abortErrorOf(abortSignal));
-        return;
+    } catch (err) {
+      if (abortSignal && abortSignal.aborted) throw abortErrorOf(abortSignal);
+      if (err && err.code === "timeout") {
+        err.streamStarted = true; // 正文读到一半超时 = 结果未知（v45 语义：不重试）
+        throw err;
       }
-      if (err.code === "ECONNREFUSED") {
-        const e =
-          cfg.preset === "local"
-            ? new Error(
-                "无法连接本地模型服务（localhost 被拒绝）。请确认：① 已安装并启动 Ollama（或 LM Studio 已加载模型并开启本地服务）；② 端口正确（Ollama 11434 / LM Studio 1234）"
-              )
-            : new Error(`无法连接 AI 服务（${url.host} 连接被拒绝）`);
-        e.code = "network";
-        e.retriable = true;
-        e.streamStarted = streamStarted;
-        finish(reject, e);
-        return;
-      }
-      // C-19a 第 5 步：瞬时网络错误（ECONNRESET/EPIPE/ENOTFOUND/EAI_AGAIN/…）统一归 network
-      // 并保留原始系统码到 .sysCode；ETIMEDOUT → timeout 维持不重试语义
-      if (err.code === "ETIMEDOUT") err.code = "timeout";
-      else if (!err.code || NET_CODES.has(err.code)) {
-        err.sysCode = err.code || null;
-        err.code = "network";
-      }
-      err.retriable = err.code === "network" && !streamStarted; // timeout 保持原语义：不重试
-      err.streamStarted = streamStarted;
-      finish(reject, err);
-    });
-    // socket 不活动超时（v45 补记）：流式响应期间任何数据都会重置计时；GLM 思考期有 reasoning_content
-    // 持续流出不会误杀。缺了它，网络黑洞（连接建立但服务端永不应答）会让 IPC 永不 resolve——
-    // 设置页「测试连接」曾因此永久置灰，只能重启设置窗口。
-    req.setTimeout(120000, () => {
-      const err = new Error("AI 连接超时：120 秒无数据响应，已自动中断（请检查网络或服务地址）");
-      err.code = "timeout";
-      err.streamStarted = streamStarted;
-      req.destroy(err);
-      finish(reject, err);
-    });
-    req.write(body);
-    req.end();
-  });
+      err.streamStarted = true; // 正文读到一半失败 = 结果未知（§3.7）
+      throw err;
+    }
+    if (buf.trim()) handleLine(buf.trim()); // 末行没有换行符
+    if (sawDone || finishReason) {
+      sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
+      return { usage, finishReason, ttftMs, firstByteMs };
+    }
+    // C-19a 第 2 步：既没有 [DONE] 也没有 finish_reason 的提前收尾 = 截断，不是成功
+    const e = new Error("AI 响应在完成前中断：没有收到结束标记，结果可能不完整");
+    e.code = "truncated";
+    e.streamStarted = true;
+    e.retriable = false;
+    throw e;
+  })();
 }
 
 function requestJSON(url, headers, timeoutMs) {
-  const u = new URL(url);
-  const isHttps = u.protocol === "https:";
-  return new Promise((resolve, reject) => {
-    const req = (isHttps ? https : http).request(
-      {
-        hostname: u.hostname,
-        port: u.port || (isHttps ? 443 : 80),
-        path: u.pathname + u.search,
-        method: "GET",
-        headers
-      },
-      (res) => {
-        res.setEncoding("utf8"); // C-19a 第 1 步：多字节安全（此后 data 事件给的是字符串）
-        let body = "";
-        res.on("data", (c) => (body += c));
-        res.on("end", () => {
-          try {
-            resolve({ status: res.statusCode, json: JSON.parse(body) });
-          } catch {
-            resolve({ status: res.statusCode, json: null });
-          }
-        });
-      }
-    );
-    req.on("error", reject);
-    // 拉取模型列表/在线词典等 JSON 请求：30 秒无数据即断（防黑洞连接挂死调用方）；
-    // 本地运行时探测用更短的 4 秒探针超时（v48.68 / D112）
-    req.setTimeout(timeoutMs || 30000, () => {
-      req.destroy(new Error("请求超时：30 秒无响应，已自动中断"));
-    });
-    req.end();
-  });
+  // C-19b：改走传输层 getJSON（Electron net.fetch 优先——继承系统代理；res.text() 内部按
+  // UTF-8 解码，多字节安全）。返回形状与旧实现一致：{ status, json }；HTTP 错误状态不抛错、
+  // 坏 JSON 时 json 为 null；超时（默认 30s，探测 4s）以 code:"timeout" reject。
+  return getJSON(url, { headers, timeoutMs });
 }
 
 /** 本地预设的模型列表降级源：Ollama 原生 /api/tags（同源，/v1/models 不可用或为空时兜底） */
