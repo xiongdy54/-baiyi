@@ -2602,6 +2602,9 @@ function getCardGenInfo(cardId) {
   return { card, batch, template, issues };
 }
 
+// 制卡族播种目标版本（测试经 db.CARD_PROMPT_TARGET_VERSION 引用，升版只改这里）
+const CARD_PROMPT_TARGET_VERSION = 8;
+
 function ensurePromptTemplates() {
   const now = Date.now();
   // 播种：按 scope 查最新 version，低于目标版本才插入新版本（旧版本保留作留痕）
@@ -2620,13 +2623,12 @@ function ensurePromptTemplates() {
   // v46（M14-UM2，§4.18-13）统一升到 7：组装 R20 记忆情境接地段（v6 基础文本不变，旧版本行留痕）。
   // v8（D121，v48.77）统一升到 8：R21 限定完整性（归属/应然实然/时空范围/框架口径四层）+ 输出字段 qualifier
   //   + 自检「限定排查」；请求装配新增【前后文】【相关已有卡】块（模板外注入）。旧版本行留痕。
-  const TARGET_VERSION = 8;
   const seedScope = (scope, name, content) => {
     const rows = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope]);
-    if (Number(rows[0]?.v || 0) >= TARGET_VERSION) return;
+    if (Number(rows[0]?.v || 0) >= CARD_PROMPT_TARGET_VERSION) return;
     db.run(
       "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-      [crypto.randomUUID(), scope, name, content, TARGET_VERSION, situationRequiredFor(scope), now]
+      [crypto.randomUUID(), scope, name, content, CARD_PROMPT_TARGET_VERSION, situationRequiredFor(scope), now]
     );
   };
   seedScope("card-generation", "主制卡 v8", CARD_GEN_PROMPT);
@@ -8203,6 +8205,7 @@ module.exports = {
   listAIGenBatches,
   setAIGenBatchStatus,
   ensurePromptTemplates,
+  CARD_PROMPT_TARGET_VERSION,
   getPromptTemplate,
   getPromptTemplateVersion,
   listPromptTemplates,
