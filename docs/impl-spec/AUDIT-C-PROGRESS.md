@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`7bb6809`（C-08 合并；账本上一版于 `d79b0e4`）。
+> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`2400489`（C-09 合并；账本上一版于 `1ceccbb`）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -16,19 +16,19 @@
 
 ## 1. 当前状态（2026-10-23）
 
-- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试，现为 91 个。
+- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个，现为 93 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：91 个 `tests/*.test.cjs`，分布 **27 electron / 7 system-node / 57 electron-node**（C-45 guard 与 C-08 `bookasset-path` 均落在 electron-node）；报告基线为 89 个，C-45 / C-08 各按报告预期 +1。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。
+- **测试规模**：93 个 `tests/*.test.cjs`，分布 **28 electron / 7 system-node / 58 electron-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 各按报告预期 +1 / +1 / +2。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08。
-- **下一项**：**C-09**（渲染页无 CSP + 无权限请求处理器，P0；依赖 C-08，已完成）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09。
+- **下一项**：**C-10**（数据库 schema 版本化 + 事务化迁移 + 迁移前快照，P0；依赖 C-01，已完成）。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
 
 | 测试文件 | 归属 | 说明 |
 | --- | --- | --- |
-| `tests/applog.test.cjs` | 待确认 | 报告 U-28 曾标为 Linux/Xvfb 环境差异；Windows 仍失败，暂不归属到 C-01。 |
+| `tests/applog.test.cjs` | 待确认 | 报告 U-28 曾标为 Linux/Xvfb 环境差异；Windows 仍失败，暂不归属到 C-01。2026-10-23 复核：本机宿主全局注入 `ELECTRON_RUN_AS_NODE=1`，第 11 节 spawn 的 Electron 子进程继承该变量后以 Node 身份启动（`app` undefined），故无崩溃日志；C-09 改动前基线同样失败，与本项无关（runner 对 electron-node 运行时本身也设置该变量，属于测试脚手架的宿主环境差异）。 |
 | `tests/d111-artifact.test.cjs` | 已修复（C-03） | Windows CRLF 导致产物逐字节比较失败；C-03 改为规范化后比较并通过。 |
 | `tests/i18n.test.cjs` | 已修复（C-06） | en / ja 各缺 17 个键；C-06 补齐后 `i18n-check` 退出码 0、测试转绿。 |
 | `tests/lensWindowFit.artifact.test.cjs` | 已修复（C-03） | D203 合并后新增；现场重打包 7053 B vs 仓库 7224 B，差值 171 B；C-03 改为规范化后比较并通过。 |
@@ -46,6 +46,7 @@
 > C-06 后：全量 89 个 **87 过 / 2 败**（applog、m14）；i18n 转绿，`lensWindow` 与 `m15v2.route` 本轮均通过；失败集合无新增。
 > C-45 后：全量 90 个 **87 过 / 3 败**（applog、lensWindow G1、m14）；新增的 `flow-exit-guard` 通过，无新增失败文件。流程套件额外复跑 10 条：F84 / F86 / F88 各 3/4 为流程内既有行为断言（F84 = 已登记 D-TEST-88，F86 / F88 与 2026-09-24 旧结果一致），不计入 `tests/*.test.cjs` 失败。
 > C-08 后：全量 91 个 **88 过 / 3 败**（applog、m14、m15v2.route 阈值 flake）；新增 `bookasset-path` 通过，`lensWindow` 本轮通过，无新增失败文件。
+> C-09 后：全量 93 个 **91 过 / 2 败**（applog、m14）；新增 `csp-policy` / `csp-enforcement` 通过，`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。
 
 ## 2. 执行顺序与状态
 
@@ -69,7 +70,7 @@
 | # | 编号 | 状态 | 提交 / 合并 | 备注 |
 | --- | --- | --- | --- | --- |
 | 9 | C-08 | 完成 | `3081287` / `7bb6809` | 纯函数路径校验 + 真实 Electron 探针；验收见 §3.9。 |
-| 10 | C-09 | 待做 | — | 渲染页无 CSP + 无权限请求处理器；依赖 C-08。 |
+| 10 | C-09 | 完成 | `ff3b448` / `2400489` | 构建期 CSP + 权限处理器 + foliate 脚本剔除；验收见 §3.10。 |
 | 11 | C-10 | 待做 | — | schema 版本化 + 事务化迁移 + 迁移前快照。 |
 | 12 | C-11 | 待做 | — | 冻结发布身份；⛔ 决策 D-02。 |
 | 13 | C-12 | 待做 | — | 备份/恢复流式化，ZIP64 / >2 GiB。 |
@@ -299,6 +300,39 @@
   4. 全量中 `m15v2.route` 复现性能阈值 flake；该测试不 require `electron/main.js`，与本项无关（见 §1.1）。
   5. 临时探针与隔离 userData 均已清理，未入库；提交只含 3 个源文件。
 
+### 3.10 C-09 · 渲染页面无 CSP + 无权限请求处理器
+
+- **提交**：`ff3b448 fix(C-09): 构建期注入 CSP，权限请求默认拒绝，foliate 剔除脚本`；合并 `2400489`。
+- **改动**：
+  - 新建 `src/lib/cspPolicy.ts`：`CSP_DIRECTIVES` / `CSP_POLICY`（唯一策略源）与 `cspPlugin()`（`apply: "build"`，`transformIndexHtml` 在 `<head>` 后注入 meta）。
+  - `vite.config.ts`：`plugins: [react(), cspPlugin()]`。
+  - 新建 `src/lib/cspReport.ts`：`securitypolicyviolation` 监听，`console.warn` + `logsAPI.report({ kind: "console", message })`；同一违规去重、上限 20 条；四个入口首行 `import "./lib/cspReport"`（main / lens / workbench / capture）。
+  - 新建 `electron/permissions.js`：`ALLOWED_PERMISSIONS = { "clipboard-sanitized-write" }`；`installPermissionHandlers(session)` 同时设置 request 与 check 处理器，拒绝时输出 `[perm] denied <name>`。
+  - `electron/main.js`：`whenReady` 内、`createWindow()` 前安装权限处理器；新增 `app.on("web-contents-created")` + `console-message` 兜底日志（只记含 `Content Security Policy` 的消息，排除 Electron 的 Insecure-CSP 开发警告）。
+  - `src/lib/reader/foliate/adapter.ts`：`load` 事件里 `stripActiveContent(doc)` 删除 `script` 与所有 `on*` 属性（纵深防御）。
+  - 新增 `tests/csp-policy.test.cjs`（electron-node）、`tests/csp-enforcement.test.cjs`（electron）。
+- **验收（2026-10-23，Windows；Electron 31.7.7）**：
+  - `npm run build` → 成功；`rg -c "Content-Security-Policy" dist/index.html dist/lens.html dist/workbench.html dist/capture.html` → 各 `1`。
+  - `rg -o "new Function\(|(^|[^A-Za-z0-9_$])eval\(" dist/assets/*.js` → `new Function(` 1 处（`main-*.js` 的 setImmediate polyfill 字符串回调分支）、`eval(` 0 处；真实应用探针运行期 `window.__fnCalls() = 0`（走过 EPUB / PDF / 设置页后），该分支未被调用。
+  - `node scripts/run-tests.mjs csp-policy csp-enforcement` → **2 通过 / 0 失败**。`csp-enforcement` 直跑 **10/10**：对照窗口（无 CSP）同一 blob iframe 内联脚本会执行；CSP 下同源外部脚本照常执行、blob iframe 内联脚本与主文档动态内联脚本被拦、`securitypolicyviolation` 可捕获 `script-src`、权限从默认 granted 差分到 denied、聚焦窗口 `clipboard.writeText` 仍 ok。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":58,"electron":28,"system-node":7}`（93 个；报告 91 → +2）。
+  - `npm run typecheck` → exit 0。
+  - `npm test`（无并行负载）→ 93 个 **91 过 / 2 败 / 0 超时**；失败集合 = applog、m14（均为既有未归属项），新增 CSP 测试通过，无新增失败文件。
+  - 真实应用隔离 GUI 探针（临时脚本，已删；`M7_TEST_USERDATA` 指向 `%TEMP%\incremental-reading-flows\flow-c09-csp-userdata`）→ **18/18**：
+    * 带 `<script>` 与 `onclick` 的 EPUB：正文渲染出 “Scripted chapter”；父窗口未收到 `PWNED-C09`；应用日志恰有 1 条 `[CSP] ... "script-src 'self' 'wasm-unsafe-eval'"`；CDP isolated world 读到 script 数 0、`data-pwned` / `data-clicked` 均为 null（适配器清理生效）。
+    * 书架封面经 `bookasset://` 在 CSP 下 `naturalWidth > 0`；PDF（150 页）pdf.js canvas 正常渲染；设置页可打开；lens / workbench 窗口在 CSP 下 `#root` 正常挂载。
+    * 主流程日志无其他 `[CSP]` 记录。截图：`tests/flows/results/c09-epub.png`、`c09-settings.png`、`c09-pdf.png`（目视确认正文 / PDF 正常）。
+- **偏离**：
+  1. 策略提取为 `src/lib/cspPolicy.ts`（报告为 `vite.config.ts` 内联），同时供测试复用；渲染包不含该常量（`rg "nutation-csp|CSP_DIRECTIVES" dist/assets/*.js` → 0）。
+  2. `media-src` 在报告基础上加 `https:`：在线词典真人发音（`settings.app.dictAudioSource="online"` 时渲染层 `new Audio(url)` 直连 dictionaryapi.dev 的 https 音频）。报告验收允许「按被拦截资源类型补充指令并写明原因」；`img-src https:` 仍按报告保留（决策 D-08 未答复）。
+  3. 报告第 2 步的 `logsAPI.write("warn", ...)` 不存在（preload 只有 `openFolder` / `report`）；改用现有 `logsAPI.report({ kind: "console" })` 转发，保留 `console.warn`。
+  4. 新增主进程 `console-message` 兜底日志：实测 `securitypolicyviolation` 只在违规文档触发、不冒泡到父文档，报告第 2 步的渲染层上报无法记录 EPUB blob iframe 的违规；兜底把 Chromium 拒绝消息（含 `script-src`）写入 `main.log`。
+  5. 权限处理器提取到 `electron/permissions.js`（报告为 main.js 内联），便于纯逻辑矩阵测试；`session.defaultSession` 覆盖四窗口（全仓无自定义 partition）。
+  6. foliate 的 `load` 事件在 iframe 解析完成之后才触发，**不能**阻止首屏内联 `<script>` 执行；真实拦截靠 CSP。适配器清理只覆盖 load 后仍可触发的 `on*` 与再插入脚本（报告称「第二道防线」，此处明确其时序边界）。
+  7. capture 窗口未实测：D159 已设 `CAPTURE_DISABLED`（快速记录暂停），窗口不会创建；`dist/capture.html` 的 CSP 由构建验收 + `csp-policy` 注入契约覆盖。主题插件切换与在线词典发音未实测（隔离 userData 无插件 / 词典）；策略已为 `style-src 'unsafe-inline'`、`media-src https:` 预留。
+  8. 构建注入未做成「读取 dist」的回归测试（需先构建）；注入逻辑由 `csp-policy` 的 `transformIndexHtml` 契约测试 + 验收命令覆盖。
+  9. `tests/tmp-c09/` 为测试临时打包产物（`tests/tmp-*` 忽略）；探针脚本与隔离 userData 已清理，未入库。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -312,5 +346,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-09**（阶段 1 首发前必须完成，P0；依赖 C-08，已完成）。
-- 基线：91 个测试；C-08 后全量 88 过 / 3 败（Windows，2026-10-23；applog、m14、m15v2.route 阈值 flake，见 §1.1）。
+- 当前下一项：**C-10**（阶段 1 首发前必须完成，P0；依赖 C-01，已完成）。
+- 基线：93 个测试；C-09 后全量 91 过 / 2 败（Windows，2026-10-23；applog、m14，见 §1.1）。
