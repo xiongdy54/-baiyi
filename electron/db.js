@@ -1240,6 +1240,9 @@ function listDeletedItemIds() {
   return queryAll("SELECT id FROM library_items WHERE is_deleted = 1").map((r) => String(r.id));
 }
 
+// C-22 复用前提：createAssetForItem 按 (library_item_id, hash) 内容寻址去重——同一份图片字节
+// 会被多张卡共用同一个 path。今后任何「删卡/删书顺带删文件」的逻辑都必须先确认 assets 表里
+// 没有其他行引用同一 path，再动磁盘文件。
 function addAssetRow(itemId, kind, relPath, hash, now) {
   db.run(
     `INSERT INTO assets (id, library_item_id, kind, path, hash, created_at, updated_at, sync_version, is_deleted)
@@ -1269,15 +1272,93 @@ function createAssetForItem(ownerKey, kind, ext, dataBuf) {
   const dir = path.join(app.getPath("userData"), "assets", itemId);
   fs.mkdirSync(dir, { recursive: true });
   const cleanExt = ["png", "jpg", "jpeg", "gif", "webp"].includes(String(ext).toLowerCase()) ? String(ext).toLowerCase() : "png";
+  // C-22：内容寻址去重——同一张图在同一本书里多次挖空制卡，直接复用既有资产行与文件
+  //（软删行不复用：软删书的资产视为已退出流通，其回收时机属 D-06 产品决策）。
+  const hash = sha256(buf);
+  const dup = queryAll("SELECT path FROM assets WHERE library_item_id = ? AND hash = ? AND is_deleted = 0 LIMIT 1", [itemId, hash])[0];
+  if (dup && fs.existsSync(path.join(dir, dup.path))) {
+    return { itemId, filename: dup.path, assetPath: `bookasset://${itemId}/${dup.path}` };
+  }
   const filename = `occl-${Date.now()}-${crypto.randomBytes(3).toString("hex")}.${cleanExt}`;
-  fs.writeFileSync(path.join(dir, filename), buf);
-  addAssetRow(itemId, kind || "image-occlusion", filename, sha256(buf), Date.now());
+  // C-22：写 .part 临时文件 → 事务内插库 → 改名。任何一步失败都清理——插库失败=事务回滚+删 .part；
+  // rename 失败=行已提交而文件不在 → 先删行再删 .part。不再产生「无行引用的孤儿文件 / 无文件的悬空行」。
+  const finalPath = path.join(dir, filename);
+  const tmpPath = finalPath + ".part";
+  fs.writeFileSync(tmpPath, buf);
+  try {
+    withTransaction(() => addAssetRow(itemId, kind || "image-occlusion", filename, hash, Date.now()));
+    fs.renameSync(tmpPath, finalPath);
+  } catch (e) {
+    // renameSync 失败时库里已有行而文件不存在；插库失败时事务已回滚，DELETE 零命中即 no-op。
+    try {
+      db.run("DELETE FROM assets WHERE library_item_id = ? AND path = ?", [itemId, filename]);
+      persist();
+    } catch { /* 尽力 */ }
+    try { fs.rmSync(tmpPath, { force: true }); } catch { /* 尽力 */ }
+    throw e;
+  }
   persist();
   return { itemId, filename, assetPath: `bookasset://${itemId}/${filename}` };
 }
 
 function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest("hex");
+}
+
+// C-22：资产孤儿文件维护扫描。判定「孤儿」= assets 表里（**含软删行**——软删书的文件是否回收
+// 属 D-06 产品决策，本函数不替它做）没有任何行引用、且（修改时间早于 minAgeMs 或以 .part 结尾）
+// 的文件。dryRun=true（默认）只列清单不删；dryRun=false 删除。partOnly=true 时只删 .part 中断残留，
+// 其余孤儿仅列清单（启动自愈只敢清 .part——真正无主的文件可能是「恢复备份/手工搬运」留下的）。
+// 返回 { skipped, orphans, removed, keptForDecision }：orphans=全部孤儿清单、removed=实际已删、
+// keptForDecision=因 partOnly 保留待 D-06 决策的孤儿。
+function sweepOrphanAssetFiles({ dryRun = true, minAgeMs = 3600_000, partOnly = false } = {}) {
+  const empty = { skipped: true, orphans: [], removed: [], keptForDecision: [] };
+  if (!db || !db.open) return empty;
+  const assetsRoot = path.join(app.getPath("userData"), "assets");
+  let itemDirs = [];
+  try {
+    itemDirs = fs.readdirSync(assetsRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch {
+    return empty; // assets 目录不存在（全新库）——无事可扫
+  }
+  const referenced = new Set(
+    queryAll("SELECT library_item_id AS item, path FROM assets").map((r) => `${r.item}/${r.path}`)
+  );
+  const now = Date.now();
+  const orphans = [];
+  const removed = [];
+  const keptForDecision = [];
+  for (const itemDir of itemDirs) {
+    let files = [];
+    try {
+      files = fs.readdirSync(path.join(assetsRoot, itemDir));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const rel = `${itemDir}/${f}`;
+      if (referenced.has(rel)) continue;
+      const isPart = f.endsWith(".part");
+      let ageOk = false;
+      try {
+        ageOk = now - fs.statSync(path.join(assetsRoot, itemDir, f)).mtimeMs >= minAgeMs;
+      } catch {
+        continue; // stat 失败（正被改名/删除）——本轮跳过，下轮再扫
+      }
+      if (!isPart && !ageOk) continue;
+      orphans.push(rel);
+      if (dryRun) continue;
+      if (partOnly && !isPart) {
+        keptForDecision.push(rel);
+        continue;
+      }
+      try {
+        fs.rmSync(path.join(assetsRoot, itemDir, f), { force: true });
+        removed.push(rel);
+      } catch { /* 尽力：删不掉的下一轮再扫 */ }
+    }
+  }
+  return { skipped: false, orphans, removed, keptForDecision };
 }
 
 // D121 §1.1：导入时的作者归一（trim；空→NULL；超 200 截断而非拒绝，导入不应因元数据失败）
@@ -3179,6 +3260,9 @@ function createExtract({ parentType, parentId, documentId, contentMarkdown, prio
   // 批次 E（D-TEST-15 T3 档）：extracts 是「挂在文档上的行」，父文档不存在就别插
   // （插进去就是日后没人踩得到的悬空行）。返回 false 不抛错，与 T1/T2 档一致。
   if (!rowExists("documents", documentId)) return false;
+  // C-22：parentType=extract 时父摘录必须存在且未软删——否则会造出树里没有可见父节点的
+  // 悬空子摘录（extracts 表带 is_deleted 软删位，rowExists 默认连软删一起过滤）。
+  if (String(parentType) === "extract" && !rowExists("extracts", parentId)) return false;
   // v48.23（D61 §6.8-11）：多段不相邻选择——渲染层只把 spans 原样过桥（不做归一），
   // 文本与区间都由 annotationRange 在这里装配（**spans 优先**，与单段路径同一实现面）。
   // 仅在 spans 真给出内容时启用，既有单段调用（不传 spans）逐字节不变。
@@ -5987,7 +6071,8 @@ function buildKpExtractionInput({ clusterKeys, sources } = {}) {
   const titleByDoc = new Map();
   if (docIds.length) {
     const ph = docIds.map(() => "?").join(",");
-    for (const r of queryAll(`SELECT d.id AS documentId, li.title FROM documents d JOIN library_items li ON li.id = d.library_item_id WHERE d.id IN (${ph})`, docIds)) {
+    // C-22：已软删书籍的标题不得进入发给 AI 的提示词（li.is_deleted 过滤）
+    for (const r of queryAll(`SELECT d.id AS documentId, li.title FROM documents d JOIN library_items li ON li.id = d.library_item_id WHERE d.id IN (${ph}) AND li.is_deleted = 0`, docIds)) {
       titleByDoc.set(r.documentId, r.title);
     }
   }
@@ -8323,6 +8408,7 @@ module.exports = {
   getDictCache,
   setDictCache,
   createAssetForItem,
+  sweepOrphanAssetFiles,
   getActiveFsrsConfig,
   getActiveConfigId,
   insertFsrsConfig,

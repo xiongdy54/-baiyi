@@ -2300,6 +2300,18 @@ app.whenReady().then(async () => {
       console.error("[backup] sidecar 补齐失败：", err);
     }
   }, 5000);
+  // C-22：启动 5 分钟后资产孤儿清扫——只自愈删除 .part 中断残留；真正无主的孤儿文件
+  //（可能是恢复备份/手工搬运留下的）只记日志不自动删（回收属 D-06 产品决策）。失败不阻塞启动。
+  setTimeout(() => {
+    try {
+      const r = dbModule.sweepOrphanAssetFiles({ dryRun: false, partOnly: true });
+      if (r && !r.skipped && r.orphans.length) {
+        console.log(`[assets] 孤儿清扫：删 .part ${r.removed.length} 个、仅登记未删 ${r.keptForDecision.length} 个（回收属 D-06）：${r.orphans.slice(0, 20).join("、")}${r.orphans.length > 20 ? "…" : ""}`);
+      }
+    } catch (err) {
+      console.error("[assets] 孤儿清扫失败：", err);
+    }
+  }, 300000);
   // v48.114（D159）：用户记忆暂时移除——启动补跑（memoryTidy.startupBackfillIfDue）停摆；
   // memoryTidy 模块与 memory:* IPC 原样保留，重实装时按 §6.7 冻结契约回接。
   // v48.11（§3.8）：导图僵尸对账——上次运行被关闭/中断时 run 行会永远停在 running（实测两条），
