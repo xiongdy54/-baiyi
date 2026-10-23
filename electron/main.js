@@ -244,41 +244,9 @@ protocol.registerSchemesAsPrivileged([
   { scheme: "pdfres", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
 ]);
 
-const SETTINGS_FILE = path.join(app.getPath("userData"), "settings.json");
-
-function readSettings() {
-  try {
-    const v = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
-    // 批次 A（D-TEST-09）：合法 JSON 但非对象时同样兜底。保留 { app, theme } 形状——
-    // settings:set 的 all[scope][key] = value 依赖它。不做自愈写回，不覆盖用户文件。
-    return v && typeof v === "object" && !Array.isArray(v) ? v : { app: {}, theme: {} };
-  } catch (err) {
-    // D-TEST-30：与 settingsStore.js 同源的一处（两份长期分叉，见下方注释）。
-    // 解析失败原来是静默兜底，随后任何一次设置写入都会覆盖掉用户原有偏好且现场不可追；
-    // 这里把损坏文件改名留证，行为与 settingsStore 保持一致。
-    try {
-      if (err && err.code !== "ENOENT") {
-        const keep = SETTINGS_FILE + ".corrupt";
-        fs.rmSync(keep, { force: true });
-        fs.renameSync(SETTINGS_FILE, keep);
-      }
-    } catch {
-      /* 留证失败不影响兜底 */
-    }
-    return { app: {}, theme: {} };
-  }
-}
-
-// 注意：electron/settingsStore.js 另有一份 readSettings（db.js 与各仓储路径用它），
-// 两份长期分叉待后续批次合并。
-
-function writeSettings(all) {
-  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-  // D-TEST-30：同上——裸 writeFileSync 写一半就是截断文件，改为 .tmp + 原子 rename。
-  const tmp = SETTINGS_FILE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(all, null, 2), "utf-8");
-  fs.renameSync(tmp, SETTINGS_FILE);
-}
+// C-15：settings.json 读写唯一实现（主进程 IPC 与 db / 优化器 / 插件共用；默认形状 { app, theme }）。
+// 必须位于 pinUserData() 之后——settingsStore 在模块加载时固化 SETTINGS_FILE。
+const { SETTINGS_FILE, readSettings, writeSettings } = require("./settingsStore");
 
 ipcMain.handle("settings:get", (_e, scope, key) => {
   const all = readSettings();

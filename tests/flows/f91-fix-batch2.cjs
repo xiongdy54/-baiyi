@@ -69,15 +69,17 @@ app
 
       fs.writeFileSync(sf, "{ 这不是合法 JSON", "utf-8");
       const onCorrupt = ss.readSettings();
-      const kept = fs.existsSync(sf + ".corrupt");
-      const keptBody = kept ? fs.readFileSync(sf + ".corrupt", "utf-8") : "";
-      flow.record("损坏后", `readSettings=${JSON.stringify(onCorrupt)} · .corrupt 存在=${kept} · 内容前 20 字=${JSON.stringify(keptBody.slice(0, 20))}`);
-      flow.check("损坏文件必须被留证为 settings.json.corrupt（原来是被静默覆盖）", kept && keptBody.indexOf("这不是合法 JSON") >= 0, "留证且内容一致", kept ? "已留证" : "未留证");
-      flow.check("损坏时读取仍须兜底为空对象（不许抛错打断启动）", onCorrupt && typeof onCorrupt === "object", "对象", typeof onCorrupt);
+      // C-15：留档名改为带时间戳的 settings.json.corrupt-<stamp>（保留最近 5 份）
+      const corrupts = () => fs.readdirSync(dir).filter((f) => f.startsWith("settings.json.corrupt-")).sort();
+      const kept = corrupts();
+      const keptBody = kept.length ? fs.readFileSync(path.join(dir, kept[kept.length - 1]), "utf-8") : "";
+      flow.record("损坏后", `readSettings=${JSON.stringify(onCorrupt)} · 留档=${kept.length} · 内容前 20 字=${JSON.stringify(keptBody.slice(0, 20))}`);
+      flow.check("损坏文件必须留档为 settings.json.corrupt-<时间戳>（原来是被静默覆盖）", kept.length === 1 && keptBody.indexOf("这不是合法 JSON") >= 0, "留档且内容一致", kept.length ? "已留档" : "未留档");
+      flow.check("损坏时读取仍须兜底为默认形状（不许抛错打断启动）", onCorrupt && typeof onCorrupt === "object" && onCorrupt.app && typeof onCorrupt.app === "object", "对象含 app", JSON.stringify(onCorrupt));
       ss.writeSettings({ app: { b: "新值" } });
       const afterCorrupt = ss.readSettings();
       flow.check("留证之后再写入必须正常（留证不能把写入路径弄坏）", afterCorrupt?.app?.b === "新值", "app.b=新值", JSON.stringify(afterCorrupt.app));
-      flow.check("留证文件在后续写入后仍应存在（不许被顺带清掉）", fs.existsSync(sf + ".corrupt"), "仍在", fs.existsSync(sf + ".corrupt") ? "仍在" : "被清");
+      flow.check("留证文件在后续写入后仍应存在（不许被顺带清掉）", corrupts().length >= 1, "仍在", corrupts().length);
 
       /* ── S3：D-TEST-35 备份滚动按 mtime，不按文件名 ── */
       flow.section("S3 备份滚动按文件 mtime（D-TEST-35）");
