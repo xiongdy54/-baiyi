@@ -117,6 +117,9 @@ export default function DisambiguateModal({
   const panelRef = useDialogA11y<HTMLDivElement>(close);
 
   // ---- 加载：全部卡 + AI 可用性 + A 的原文（打开即显示，均为本地读；无网络调用） ----
+  // C-18c 复核：此处保留 listAll 全集——rankDisambiguationCandidates 要对全库卡面
+  // （front/back/noteText 文本）算 bigram Jaccard 相似度，meta 通道轻量行不含正文文本，
+  // 分页接口给不了全集打分；弹窗按需打开、非每评分一次，成本可接受。
   useEffect(() => {
     let cancelled = false;
     void (async () => {

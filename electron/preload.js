@@ -181,6 +181,9 @@ contextBridge.exposeInMainWorld("cardsAPI", {
   // v34（M12，§4.2-20）：今日队列视图 {cards, deferred[]}（同源暂缓清单含延后原因）
   todayQueue: (now) => ipcRenderer.invoke("cards:todayQueue", now),
   listAll: () => ipcRenderer.invoke("cards:listAll"),
+  // C-18c：计数/分组专用（主进程聚合，替代渲染层 listAll 全量计数）
+  countByExtract: () => ipcRenderer.invoke("cards:countByExtract"),
+  listWithKnowledgePoint: () => ipcRenderer.invoke("cards:listWithKnowledgePoint"),
   // v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数（meta/ids 轻量行集 + 行窗口按需取）
   listMeta: () => ipcRenderer.invoke("cards:listMeta"),
   queryIds: (query) => ipcRenderer.invoke("cards:queryIds", query),

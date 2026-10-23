@@ -72,7 +72,9 @@ export default function KnowledgeManager() {
 
   const loadLegacyCards = useCallback(async () => {
     try {
-      const all = await cardsApi.listAll();
+      // C-18c：只取「有 knowledgePointId 的卡」（cards:listWithKnowledgePoint）——KP 簇与提案
+      // 受影响卡都源自 KP 聚类，卡必有 kp；不再 listAll 全量取卡（无 kp 的卡对两张表都是死数据）。
+      const all = await cardsApi.listWithKnowledgePoint();
       const byKp = new Map<string, CardRecord[]>();
       const byId = new Map<string, CardRecord>();
       for (const c of all) {

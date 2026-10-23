@@ -254,14 +254,10 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     } catch {
       setUndoAvailable(false);
     }
-    // 派生信息：这条摘录已经制过几张卡（按 contextRef.extractId 关联，§4.2-16 上下文引用）
+    // 派生信息：这条摘录已经制过几张卡（按 contextRef.extractId 关联，§4.2-16 上下文引用）。
+    // C-18c：改走主进程 SQL 聚合（cards:countByExtract）——不再 listAll 全量取卡到渲染层。
     try {
-      const all = await cardsApi.listAll();
-      const counts: Record<string, number> = {};
-      for (const c of all as Array<{ contextRef?: { extractId?: string } | null; isDeleted?: number }>) {
-        const id = c?.contextRef?.extractId;
-        if (id) counts[id] = (counts[id] || 0) + 1;
-      }
+      const counts = await cardsApi.countByExtract();
       setCardCounts(counts);
     } catch {
       /* 计数是增强信息，失败不影响处理 */

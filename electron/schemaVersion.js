@@ -5,15 +5,29 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const SCHEMA_VERSION = 2; // 每新增一个 MIGRATIONS 项就 +1，并与最后一项的 version 相等
+const SCHEMA_VERSION = 3; // 每新增一个 MIGRATIONS 项就 +1，并与最后一项的 version 相等
 
-/** 未来的迁移写在这里：{ version: 3, name: "…", up(db) { db.exec("…") } }。禁止修改已发布的项。 */
+// C-18a（审计）：due 表达式——只在「JSON 合法且 $.due 是数值」时取出，其余一律为 NULL
+// （NULL = 交给 JS 精确判定，见 db.js 的 TODAY_QUEUE_DUE_SQL 快速路径）。
+// 建索引与查询必须引用**同一个常量字符串**，SQLite 才能把查询表达式匹配到索引。
+const DUE_EXPR = "(CASE WHEN json_valid(fsrs_json) AND json_type(fsrs_json, '$.due') IN ('integer','real') THEN json_extract(fsrs_json, '$.due') END)";
+
+/** 未来的迁移写在这里：{ version: 4, name: "…", up(db) { db.exec("…") } }。禁止修改已发布的项。 */
 const MIGRATIONS = [
   {
     version: 2,
     name: "app_meta",
     up(db) {
       db.exec("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)");
+    }
+  },
+  {
+    // C-18a：复习队列到期筛选下推到 SQL 的表达式索引（cards.fsrs_json 的 $.due）。
+    // 不要改成生成列——生成列会改变 SELECT c.* 的结果形状，影响 mapCardRow 与备份比对。
+    version: 3,
+    name: "idx_cards_due",
+    up(db) {
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(is_deleted, ${DUE_EXPR})`);
     }
   }
 ];
@@ -66,4 +80,4 @@ function runMigrations(db) {
   return v;
 }
 
-module.exports = { SCHEMA_VERSION, MIGRATIONS, DbTooNewError, readUserVersion, assertNotTooNew, snapshotBeforeMigration, runMigrations };
+module.exports = { SCHEMA_VERSION, MIGRATIONS, DUE_EXPR, DbTooNewError, readUserVersion, assertNotTooNew, snapshotBeforeMigration, runMigrations };

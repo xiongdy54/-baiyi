@@ -28,6 +28,10 @@ declare global {
       listDue: () => Promise<unknown[]>;
       todayQueue?: (now?: number) => Promise<unknown>;
       listAll: () => Promise<unknown[]>;
+      /** C-18c：extractId → 已制卡数（主进程 SQL 聚合，替代渲染层 listAll 全量计数） */
+      countByExtract?: () => Promise<Record<string, number>>;
+      /** C-18c：带 knowledgePointId 的卡子集（KnowledgeManager 专用，形状同 listAll） */
+      listWithKnowledgePoint?: () => Promise<unknown[]>;
       /** v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数（meta/ids 轻量行集 + 行窗口按需取） */
       listMeta?: () => Promise<unknown>;
       queryIds?: (query: string) => Promise<unknown>;
@@ -1076,6 +1080,11 @@ export const cardsApi = {
   todayQueue: async (now?: number) =>
     ((await window.cardsAPI?.todayQueue?.(now)) ?? { cards: [], deferred: [], now: Date.now() }) as TodayQueue,
   listAll: async () => ((await window.cardsAPI?.listAll()) ?? []) as (CardRecord & { docTitle?: string })[],
+  // C-18c：计数/分组专用（主进程聚合，不再全量取卡到渲染层）
+  countByExtract: async () =>
+    ((await window.cardsAPI?.countByExtract?.()) ?? {}) as Record<string, number>,
+  listWithKnowledgePoint: async () =>
+    ((await window.cardsAPI?.listWithKnowledgePoint?.()) ?? []) as (CardRecord & { docTitle?: string })[],
   // v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数
   listMeta: async () =>
     ((await window.cardsAPI?.listMeta?.()) ?? { fp: "", total: 0, meta: [], books: [] }) as BrowserMetaResult,

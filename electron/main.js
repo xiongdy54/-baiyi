@@ -774,9 +774,13 @@ ipcMain.handle("cards:get", (_e, id) => getCard(String(id)));
 // v48.61（D103，D94 设计稿 §3.2）：生成信息区只读 join（card + 批次 + 提示词 + card_issues；零写路径）
 ipcMain.handle("cards:genInfo", (_e, id) => dbModule.getCardGenInfo(String(id)));
 ipcMain.handle("cards:listDue", () => listDueCards());
-// v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试
-ipcMain.handle("cards:todayQueue", (_e, now) => computeTodayQueue(Number.isFinite(now) ? Number(now) : undefined));
+// v34（M12，§4.2-20）：今日队列视图（放行卡 + 同源暂缓清单）；now 可注入供测试。
+// C-18b：IPC 走到期超集快速路径（idx_cards_due）；渲染层无 damaged 消费点（类型保持 Array）。
+ipcMain.handle("cards:todayQueue", (_e, now) => computeTodayQueue(Number.isFinite(now) ? Number(now) : undefined, { withDamaged: false }));
 ipcMain.handle("cards:listAll", () => listAllCards());
+// C-18c：计数/分组专用接口——替代「全量 listAll 取回再在渲染层数数」（10 万卡 ≈ 96 MB IPC 负载）
+ipcMain.handle("cards:countByExtract", () => dbModule.countCardsByExtract());
+ipcMain.handle("cards:listWithKnowledgePoint", () => dbModule.listCardsWithKnowledgePoint());
 // v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数——meta/ids 轻量行集 + 行窗口按需取 +
 // 同源组行 + 今日暂缓 id（浏览器侧退役全量 listAll 消费；契约见 GUIDE §6.8-6）
 ipcMain.handle("cards:listMeta", () => dbModule.getCardBrowserMeta());
