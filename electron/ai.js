@@ -1,8 +1,10 @@
 // AI 网关 — 主进程统一 LLM 通道（文档§3.11 AIGateway）
 // Key 用 safeStorage 加密存储；流式输出经 WebContents 发送到渲染层
+// C-20：safeStorage 只经 ./keyVault 访问（strength/encrypt/decrypt）；系统加密不可用时
+// Key 只留本次运行内存（sessionKeys），绝不落明文盘——修复「明文保存却读不出来」。
 const { app, BrowserWindow } = require("electron");
 const path = require("path");
-const { safeStorage } = require("electron");
+const keyVault = require("./keyVault");
 // C-19b：网络传输统一走 aiTransport（Electron net.fetch 优先——Chromium 网络栈继承系统代理；
 // 测试 / 纯 Node 回落 globalThis.fetch）。Node http/https 栈不读系统代理，海外预设需代理才可达。
 const { postSSE, getJSON } = require("./aiTransport");
@@ -174,6 +176,10 @@ function aiConfigPath() {
   return path.join(app.getPath("userData"), "ai-config.json");
 }
 
+// C-20：preset → key，只在本进程内存里，不落盘。系统密钥库不可用（none / weak）时保存的
+// Key、以及从旧版明文配置迁移出来的 Key 都放这里——重启后需重新输入，但绝不留明文在磁盘。
+const sessionKeys = new Map();
+
 function readConfig() {
   // C-15：统一走 jsonFile（BOM 容忍 / 非对象留档）
   const cfg = readJsonObject(aiConfigPath(), () => ({
@@ -183,14 +189,30 @@ function readConfig() {
     apiKeyEnc: null,
     keys: {}
   }));
-  // v10.3 迁移：旧版全局 Key 归档到其所属预设，实现按服务商留存
+  // v10.3 迁移：旧版全局 Key 归档到其所属预设，实现按服务商留存（仅密文形态）
   if (!cfg.keys || typeof cfg.keys !== "object") cfg.keys = {};
   if (cfg.apiKeyEnc && cfg.preset && cfg.keys[cfg.preset] === undefined) {
     cfg.keys[cfg.preset] = cfg.apiKeyEnc;
   }
-  if (cfg.apiKeyPlain && cfg.preset && cfg.keys[cfg.preset] === undefined) {
-    cfg.keys[cfg.preset] = "plain:" + cfg.apiKeyPlain;
+  // C-20：明文 Key 一律不落盘——存量 apiKeyPlain 与 keys 里的 "plain:" 值移进内存 sessionKeys，
+  // 然后把清理后的配置写回磁盘。这些明文 Key 在旧版就读不出来（getAIConfig 只解密 apiKeyEnc），
+  // 删除不会让任何现有功能变差。
+  let plainMigrated = false;
+  if (cfg.apiKeyPlain) {
+    const p = cfg.preset || "custom";
+    if (!sessionKeys.has(p)) sessionKeys.set(p, String(cfg.apiKeyPlain));
+    delete cfg.apiKeyPlain;
+    plainMigrated = true;
   }
+  for (const k of Object.keys(cfg.keys)) {
+    const v = cfg.keys[k];
+    if (typeof v === "string" && v.startsWith("plain:")) {
+      if (!sessionKeys.has(k)) sessionKeys.set(k, v.slice(6));
+      delete cfg.keys[k];
+      plainMigrated = true;
+    }
+  }
+  if (plainMigrated) writeConfig(cfg);
   return cfg;
 }
 
@@ -218,12 +240,24 @@ function modelIdsFromJson(json) {
 
 function getAIConfig() {
   const cfg = readConfig();
+  const st = keyVault.strength();
   let apiKey = "";
-  if (cfg.apiKeyEnc && safeStorage.isEncryptionAvailable()) {
+  // keyStorage：Key 当前从哪来——"encrypted"（密文落盘可解）/ "session"（仅本进程内存）/ "none"
+  let keyStorage = "none";
+  if (cfg.apiKeyEnc && st !== "none") {
     try {
-      apiKey = safeStorage.decryptString(Buffer.from(cfg.apiKeyEnc, "base64"));
+      apiKey = keyVault.decrypt(cfg.apiKeyEnc);
     } catch {
       apiKey = "";
+    }
+    if (apiKey) keyStorage = "encrypted";
+  }
+  // C-20：密文解不出（或没有密文）时回落 sessionKeys——修复「保存了 Key 却读不出来」
+  if (!apiKey) {
+    const sessionKey = sessionKeys.get(cfg.preset || "custom");
+    if (sessionKey) {
+      apiKey = sessionKey;
+      keyStorage = "session";
     }
   }
   const preset = PRESETS[cfg.preset] || PRESETS.custom;
@@ -233,6 +267,8 @@ function getAIConfig() {
     model: cfg.model,
     apiKey,
     hasKey: Boolean(apiKey),
+    keyStorage,
+    encryptionStrength: st,
     keyUrl: preset.keyUrl || "",
     hint: preset.hint || "",
     presetName: preset.name,
@@ -255,12 +291,18 @@ function setAIConfig(partial) {
     // 只恢复该服务自己存过的 Key；从没配过则置空（绝不串用别家的 Key）
     const presetKey = cfg.keys[partial.preset];
     if (presetKey !== undefined && presetKey !== null) {
-      cfg.apiKeyEnc = presetKey.startsWith("plain:") ? null : presetKey;
-      if (presetKey.startsWith("plain:")) cfg.apiKeyPlain = presetKey.slice(6);
+      if (typeof presetKey === "string" && presetKey.startsWith("plain:")) {
+        // C-20：旧明文形态只进内存 sessionKeys，从 cfg.keys 删除，不再写回 apiKeyPlain
+        sessionKeys.set(partial.preset, presetKey.slice(6));
+        delete cfg.keys[partial.preset];
+        cfg.apiKeyEnc = null;
+      } else {
+        cfg.apiKeyEnc = presetKey;
+      }
     } else {
       cfg.apiKeyEnc = null;
-      cfg.apiKeyPlain = null;
     }
+    delete cfg.apiKeyPlain; // 纵深防御：任何分支都不再落明文形态
   }
   if (typeof partial.baseUrl === "string") {
     cfg.baseUrl = partial.baseUrl;
@@ -277,16 +319,19 @@ function setAIConfig(partial) {
   if (partial.apiKey !== undefined) {
     if (!partial.apiKey) {
       cfg.apiKeyEnc = null;
+      sessionKeys.delete(cfg.preset || "custom");
       if (cfg.preset) delete cfg.keys[cfg.preset];
-    } else if (safeStorage.isEncryptionAvailable()) {
-      cfg.apiKeyEnc = safeStorage.encryptString(partial.apiKey).toString("base64");
+    } else if (keyVault.strength() === "secure") {
+      cfg.apiKeyEnc = keyVault.encrypt(partial.apiKey);
       // 按服务商留存一份，切换回来时自动恢复
       if (cfg.preset) cfg.keys[cfg.preset] = cfg.apiKeyEnc;
     } else {
-      // 系统加密不可用时退回明文（本地单用户环境），并标记
-      cfg.apiKeyPlain = partial.apiKey;
+      // C-20：系统密钥库不可用（或仅 basic_text 弱后端）——Key 只留本次运行内存，绝不落盘。
+      // 修复「明文保存却读不出来」：旧实现写 apiKeyPlain / "plain:"，但 getAIConfig 从不读它们。
+      sessionKeys.set(cfg.preset || "custom", partial.apiKey);
       cfg.apiKeyEnc = null;
-      if (cfg.preset) cfg.keys[cfg.preset] = "plain:" + partial.apiKey;
+      delete cfg.apiKeyPlain;
+      if (cfg.preset) delete cfg.keys[cfg.preset];
     }
   }
   writeConfig(cfg);

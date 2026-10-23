@@ -865,6 +865,10 @@ function AISection() {
               placeholder={cfg.hasKey ? "••••••••" : "cmd-… / sk-…"}
               onChange={(e) => setApiKey(e.target.value)}
             />
+            {/* C-20：系统密钥库不可用时 Key 只留本次运行内存（不落盘），重启后需重新输入 */}
+            {cfg.keyStorage === "session" && (
+              <p className="form-hint">{T("系统密钥库不可用，Key 只在本次运行期间有效。Linux 用户请安装并解锁 GNOME Keyring 或 KWallet。")}</p>
+            )}
           </div>
         )}
       </div>
