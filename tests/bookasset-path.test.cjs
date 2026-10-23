@@ -1,0 +1,16 @@
+"use strict";
+const assert = require("assert");
+const path = require("path");
+const { resolveBookassetPath: r } = require("../electron/bookassetPath");
+const UD = path.resolve("/tmp/ud");
+const ok = (u) => assert.ok(r(UD, u), u);
+const bad = (u) => assert.strictEqual(r(UD, u), null, u);
+ok("bookasset://0f8e2c1a-1111-4222-8333-944455556666/cover.jpg");
+ok("bookasset://workbench-assets/occl-1-abc.png");
+bad("bookasset://../settings.json");
+bad("bookasset://%2e%2e/library.db");
+bad("bookasset://./ai-config.json");
+bad("bookasset://abc/..%2Fsettings.json");
+bad("bookasset://abc/.hidden");
+bad("bookasset://a.b/x.png");
+console.log("bookasset-path ok");
