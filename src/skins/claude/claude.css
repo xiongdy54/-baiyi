@@ -167,6 +167,16 @@ body.skin-claude :is([data-ui="dialog"], [data-ui="menu"], .dd-menu, .menu, .sel
 
 /* ============ 4. 动效规则（全部在 motion-full 作用域下，A6） ============ */
 
+/* D206 设置页通知框：陶土保留有机「出现」档（用户 2026-10-23 裁定——该动效适配陶土，
+   瑞士底走 theme.css 的 240ms 轻快默认）。数值照抄 nutation-design 09-motion：
+   900ms＝bloom_open，220ms 级联＝字标间隔。声明在 body.skin-claude（不限 motion 档）——
+   motion-off 总开关会整体杀动画，token 本身无害。 */
+body.skin-claude {
+  --notice-in-dur: 900ms;
+  --notice-delay-2: 220ms;
+  --notice-delay-3: 440ms;
+}
+
 /* 按压缩放（BOUNCY 语义；CDS 2.0「按压 60ms」档——利落捕捉曲线不变，只提速；
    回程（松开）走各部件基线过渡＝快按慢放。排除 settle/涟漪白名单元素——
    .btn-primary/.grade/.bar-btn.primary，避免 transform 动画互相覆盖，D88 §5.4 白名单纪律的皮肤版） */
