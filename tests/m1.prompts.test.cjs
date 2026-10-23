@@ -23,13 +23,13 @@ app.whenReady().then(async () => {
     const prompts = require("../electron/prompts");
     await db.initDb();
 
-    console.log("== P1 全新库：card-literature 播种专用文学模板（v7 = v6 专用模板 + R20 不适用段） ==");
+    console.log(`== P1 全新库：card-literature 播种专用文学模板（v${db.CARD_PROMPT_TARGET_VERSION} = v6 专用模板 + R20 不适用段） ==`);
     const lit = db.getPromptTemplate("card-literature");
-    check("card-literature 最新版本 = 7", !!lit && lit.version === 7, 7, lit && lit.version);
+    check(`card-literature 最新版本 = ${db.CARD_PROMPT_TARGET_VERSION}`, !!lit && lit.version === db.CARD_PROMPT_TARGET_VERSION, db.CARD_PROMPT_TARGET_VERSION, lit && lit.version);
     check("内容为专用文学模板（含 L1 逐句全覆盖骨架）", !!lit && lit.content.includes("L1 续写卡为骨架"), "含 L1", lit && lit.content.slice(0, 40));
     check("内容 ≠ 序列模板（不再由 card-seq 承接）", !!lit && lit.content !== prompts.CARD_SEQ_PROMPT, "≠seq", !!lit && lit.content === prompts.CARD_SEQ_PROMPT);
     check("内容与 CARD_LITERATURE_PROMPT 字面一致", !!lit && lit.content === prompts.CARD_LITERATURE_PROMPT, "==CARD_LITERATURE_PROMPT", false);
-    check("v7 内容含 R20 段且注明不适用", !!lit && lit.content.includes("记忆情境接地（R20）——本卡型不适用"), "含 R20 NA 段", false);
+    check(`v${db.CARD_PROMPT_TARGET_VERSION} 内容含 R20 段且注明不适用`, !!lit && lit.content.includes("记忆情境接地（R20）——本卡型不适用"), "含 R20 NA 段", false);
     check("situation_required = 0（文学卡不需要现实情境）", !!lit && Number(lit.situation_required) === 0, 0, lit && lit.situation_required);
     const genSit = db.getPromptTemplate("card-generation");
     check("card-generation situation_required = 1（R15 应用卡需要情境）", !!genSit && Number(genSit.situation_required) === 1, 1, genSit && genSit.situation_required);
@@ -38,7 +38,7 @@ app.whenReady().then(async () => {
     const insightSit = db.getPromptTemplate("journal-insight");
     check("journal-insight situation_required = 0（直接消费日记原文，注入冗余）", !!insightSit && Number(insightSit.situation_required) === 0, 0, insightSit && insightSit.situation_required);
 
-    console.log("== P2 存量库升级路径：v6 行（UM-1 前基线）→ 补播 v7 新内容 ==");
+    console.log(`== P2 存量库升级路径：v6 行（UM-1 前基线）→ 补播 v${db.CARD_PROMPT_TARGET_VERSION} 新内容 ==`);
     // 还原 UM-2 之前库状态：card-generation / card-literature 只有 v6 行
     db.execRawSql("DELETE FROM prompt_templates WHERE scope = 'card-generation'");
     db.execRawSql("DELETE FROM prompt_templates WHERE scope = 'card-literature'");
@@ -54,13 +54,13 @@ app.whenReady().then(async () => {
     db.ensurePromptTemplates();
     const gen2 = db.getPromptTemplate("card-generation");
     const lit2 = db.getPromptTemplate("card-literature");
-    check("存量库 card-generation 补播 v7", gen2.version === 7, 7, gen2.version);
-    check("存量库 v7 内容已取消 G9（无「退出红线」）", !gen2.content.includes("退出红线"), "无 G9", gen2.content.includes("退出红线"));
-    check("存量库 v7 内容含「不做空」表述与 R20 情境段",
+    check(`存量库 card-generation 补播 v${db.CARD_PROMPT_TARGET_VERSION}`, gen2.version === db.CARD_PROMPT_TARGET_VERSION, db.CARD_PROMPT_TARGET_VERSION, gen2.version);
+    check(`存量库 v${db.CARD_PROMPT_TARGET_VERSION} 内容已取消 G9（无「退出红线」）`, !gen2.content.includes("退出红线"), "无 G9", gen2.content.includes("退出红线"));
+    check(`存量库 v${db.CARD_PROMPT_TARGET_VERSION} 内容含「不做空」表述与 R20 情境段`,
       gen2.content.includes("不做空") && gen2.content.includes("记忆情境接地（R20"), "含不做空+R20", false);
-    check("存量库 v7 内容含 memoryRef 输出契约", gen2.content.includes("memoryRef"), "含 memoryRef", false);
+    check(`存量库 v${db.CARD_PROMPT_TARGET_VERSION} 内容含 memoryRef 输出契约`, gen2.content.includes("memoryRef"), "含 memoryRef", false);
     check("补播行 situation_required = 1（随播种写入）", Number(gen2.situation_required) === 1, 1, gen2.situation_required);
-    check("存量库 card-literature 补播 v7 专用模板", lit2.version === 7 && lit2.content === prompts.CARD_LITERATURE_PROMPT, "v7 专用", `${lit2.version}/${lit2.content === prompts.CARD_LITERATURE_PROMPT}`);
+    check(`存量库 card-literature 补播 v${db.CARD_PROMPT_TARGET_VERSION} 专用模板`, lit2.version === db.CARD_PROMPT_TARGET_VERSION && lit2.content === prompts.CARD_LITERATURE_PROMPT, `v${db.CARD_PROMPT_TARGET_VERSION} 专用`, `${lit2.version}/${lit2.content === prompts.CARD_LITERATURE_PROMPT}`);
     check("旧 v6 行保留留痕（不覆盖）", db.listPromptTemplates().filter((t) => t.scope === "card-literature").length === 2, 2, db.listPromptTemplates().filter((t) => t.scope === "card-literature").length);
 
     console.log("== P3 幂等：重复 ensurePromptTemplates 不再插入 ==");
@@ -68,7 +68,7 @@ app.whenReady().then(async () => {
     db.ensurePromptTemplates();
     check("重复播种不新增行（幂等）", db.listPromptTemplates().length === beforeCount, beforeCount, db.listPromptTemplates().length);
 
-    console.log("== P4 主制卡 v7 内容抽查（G6/G7 对齐；R18 无数字门槛；R20 记忆接地契约） ==");
+    console.log(`== P4 主制卡 v${db.CARD_PROMPT_TARGET_VERSION} 内容抽查（G6/G7 对齐；R18 无数字门槛；R20 记忆接地契约） ==`);
     const gen = db.getPromptTemplate("card-generation").content;
     check("R18 已取消数字硬性门槛（无 ≥2 计数、无 L15 引用）",
       !gen.includes("≥2 个阿拉伯数字") && !gen.includes("L15"), "无硬性门槛", false);

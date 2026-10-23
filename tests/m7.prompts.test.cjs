@@ -26,7 +26,7 @@ function check(name, cond, expected, actual) {
   check("card-vocab 含四卡专属条款", vocab && vocab.content.includes("必产四张卡"), true, false);
   check("card-vocab 含挖空条款", vocab && vocab.content.includes("{{c1::}}"), true, false);
   const main = db.getPromptTemplate("card-generation");
-  check("主制卡仍为 v6（不受 M7 影响）", main && main.version === 6, "v6", main && main.version);
+  check(`主制卡仍为 v${db.CARD_PROMPT_TARGET_VERSION}（不受 M7 影响）`, main && main.version === db.CARD_PROMPT_TARGET_VERSION, `v${db.CARD_PROMPT_TARGET_VERSION}`, main && main.version);
   const before = db.listPromptTemplates().filter((t) => t.scope === "card-vocab").length;
   await db.ensurePromptTemplates();
   const after = db.listPromptTemplates().filter((t) => t.scope === "card-vocab").length;
