@@ -778,6 +778,9 @@ ipcMain.handle("cards:listDue", () => listDueCards());
 // C-18b：IPC 走到期超集快速路径（idx_cards_due）；渲染层无 damaged 消费点（类型保持 Array）。
 ipcMain.handle("cards:todayQueue", (_e, now) => computeTodayQueue(Number.isFinite(now) ? Number(now) : undefined, { withDamaged: false }));
 ipcMain.handle("cards:listAll", () => listAllCards());
+// C-18c：计数/分组专用接口——替代「全量 listAll 取回再在渲染层数数」（10 万卡 ≈ 96 MB IPC 负载）
+ipcMain.handle("cards:countByExtract", () => dbModule.countCardsByExtract());
+ipcMain.handle("cards:listWithKnowledgePoint", () => dbModule.listCardsWithKnowledgePoint());
 // v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数——meta/ids 轻量行集 + 行窗口按需取 +
 // 同源组行 + 今日暂缓 id（浏览器侧退役全量 listAll 消费；契约见 GUIDE §6.8-6）
 ipcMain.handle("cards:listMeta", () => dbModule.getCardBrowserMeta());

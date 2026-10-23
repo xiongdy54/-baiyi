@@ -1869,6 +1869,37 @@ function listAllCards() {
   return rows.map(mapCardRowWithDocTitle);
 }
 
+// C-18c（审计）：计数/分组专用接口——替代「listAllCards 全量取回再在渲染层数数」的用法
+// （10 万卡时 listAllCards ≈ 1.3s + ~96 MB IPC 负载，而这处只需要 extractId → 张数的映射）。
+// 口径与旧渲染层逻辑一致：listAllCards 本就过滤 is_deleted=0，且 mapCardRow 对损坏 context_ref_json
+// 置 contextRef=null ⇒ 渲染层取不到 extractId；SQL 侧用 json_valid + IS NOT NULL 等价排除。
+function countCardsByExtract() {
+  const out = {};
+  for (const r of queryAll(
+    // 注意：输出别名不能叫 id——cards 表本身有 id 列，SQLite 的 GROUP BY 会优先解析到表列
+    // （实测按卡 id 分组、每卡 n=1），必须用不冲突的别名 + 按表达式分组（报告原 SQL 的 AS id 在本表上会被遮蔽）。
+    `SELECT json_extract(context_ref_json,'$.extractId') AS extract_id, COUNT(*) AS n FROM cards
+     WHERE is_deleted=0 AND json_valid(context_ref_json) AND json_extract(context_ref_json,'$.extractId') IS NOT NULL
+     GROUP BY json_extract(context_ref_json,'$.extractId')`
+  )) {
+    out[String(r.extract_id)] = Number(r.n) || 0;
+  }
+  return out;
+}
+
+// C-18c（审计）：KnowledgeManager 只需要「有 knowledgePointId 的卡」（KP 簇与提案受影响卡
+// 都源自 KP 聚类，卡必有 kp）；行形状与排序与 listAllCards 一致（created_at DESC + docTitle JOIN）。
+function listCardsWithKnowledgePoint() {
+  const rows = queryAll(
+    `SELECT c.*, li.title AS docTitle, li.id AS library_item_id FROM cards c
+     LEFT JOIN documents d ON d.id = CASE WHEN json_valid(c.context_ref_json) THEN json_extract(c.context_ref_json, '$.documentId') END
+     LEFT JOIN library_items li ON li.id = d.library_item_id
+     WHERE c.is_deleted = 0 AND c.knowledge_point_id IS NOT NULL AND c.knowledge_point_id != ''
+     ORDER BY c.created_at DESC`
+  );
+  return rows.map(mapCardRowWithDocTitle);
+}
+
 // ===== v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数 =====
 // 求值引擎＝cardQuery.bundle.cjs（src/lib/cardQuery.ts 的 esbuild 单源产物）——渲染层/主进程/测试
 // 三方消费同一份编译产物，命中集逐行一致由构造保证；禁止手改产物（新鲜度 tests/d111-artifact.test.cjs 把守）。
@@ -8198,6 +8229,8 @@ module.exports = {
   computeTodayQueue,
   TODAY_QUEUE_DUE_SQL, // C-18b：快速路径 SQL（EXPLAIN QUERY PLAN 验证 idx_cards_due 命中用）
   listAllCards,
+  countCardsByExtract, // C-18c：extractId → 张数（替代渲染层 listAll 全量计数）
+  listCardsWithKnowledgePoint, // C-18c：带 KP 的卡子集（KnowledgeManager 专用）
   getCardBrowserMeta,
   queryCardBrowserIds,
   getCardsWindow,

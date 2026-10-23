@@ -1556,18 +1556,15 @@ export default function Reader({
     let cancelled = false;
     const load = async () => {
       try {
-        const [rows, cards] = await Promise.all([
+        const [rows, counts] = await Promise.all([
           window.workflowAPI?.listAll?.() ?? Promise.resolve([]),
-          cardsApi.listAll().catch(() => [])
+          // C-18c：直卡计数改走主进程 SQL 聚合（cards:countByExtract）——10 万卡不再全量取卡到渲染层
+          cardsApi.countByExtract().catch(() => ({}) as Record<string, number>)
         ]);
         if (cancelled) return;
         // v48.45（D85）：已制卡数＝**聚合口径**——该条摘录及其全部子孙摘录上的卡之和（用户点名：
-        // 子摘录、子子摘录以及更下层的摘录产生的制卡都算进去）。先按直卡统计，再沿父→子邻接表聚合。
-        const counts: Record<string, number> = {};
-        for (const c of cards as Array<{ contextRef?: { extractId?: string } | null; isDeleted?: number }>) {
-          const id = c?.contextRef?.extractId;
-          if (id && !c.isDeleted) counts[id] = (counts[id] || 0) + 1;
-        }
+        // 子摘录、子子摘录以及更下层的摘录产生的制卡都算进去）。直卡计数已由主进程聚合（C-18c），
+        // 这里只沿父→子邻接表聚合。
         const parentToChildren = new Map<string, string[]>();
         for (const r of rows as Array<{ id?: string; contextRef?: { parentExtractId?: string | null } | null }>) {
           const pid = r?.contextRef?.parentExtractId;
