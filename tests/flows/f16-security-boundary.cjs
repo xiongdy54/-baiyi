@@ -100,7 +100,11 @@ runFlow(flow, async () => {
   flow.record("SettingsPanel 里出现 apiKey 的位置数", (read("src/components/SettingsPanel.tsx").match(/apiKey/g) || []).length);
   flow.eq("主进程不把 Key 写进日志", inElectron(/console\.(log|error|warn)\([^)]*(apiKey|keys\[|secret)/).length, 0);
   flow.eq("渲染层日志不打 Key", inSrc(/console\.(log|error|warn)\([^)]*apiKey/).length, 0);
-  flow.check("Key 只经 safeStorage 加密落盘", /safeStorage\.encryptString|safeStorage\.decryptString/.test(ai), true);
+  // C-20：safeStorage 调用已收口到 electron/keyVault.js（ai.js 不再直接引用）——判据随迁移：
+  // ① keyVault.js 必须经 safeStorage 加解密；② ai.js 不得再出现直接的 encrypt/decrypt 调用。
+  const keyVault = read("electron/keyVault.js");
+  flow.check("Key 只经 safeStorage 加密落盘（调用收口在 keyVault.js）",
+    /safeStorage\.encryptString|safeStorage\.decryptString/.test(keyVault) && !/safeStorage\.(encryptString|decryptString)/.test(ai), true);
   flow.check("默认备份排除 ai-config.json（§9.1 M2；F05 已端到端验证）", /includeAIConfig\s*&&/.test(read("electron/backup.js")), true);
   flow.check("不引入远程模块（remote 是已知高危面）", /\b@electron\/remote\b|Electron\.remote/.test(main + preload), false);
 

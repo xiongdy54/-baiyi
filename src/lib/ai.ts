@@ -44,6 +44,10 @@ export interface AIConfig {
   baseUrl: string;
   model: string;
   hasKey: boolean;
+  /** C-20：Key 当前来源——encrypted（密文落盘可解）/ session（仅本进程内存）/ none */
+  keyStorage?: "encrypted" | "session" | "none";
+  /** C-20：系统密钥库强度——secure / weak（Linux basic_text，等同明文）/ none */
+  encryptionStrength?: "secure" | "weak" | "none";
   reasoningEffort?: string;
   presets?: AiPresetMeta[];
 }

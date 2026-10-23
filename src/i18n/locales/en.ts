@@ -96,6 +96,8 @@ export const en: Record<string, string | { one: string; other: string }> = {
     "Switched services. The API key saved for this service has been restored automatically.",
   "已切换服务。请粘贴该服务的 API Key 并保存。":
     "Switched services. Paste this service's API key and save.",
+  "系统密钥库不可用，Key 只在本次运行期间有效。Linux 用户请安装并解锁 GNOME Keyring 或 KWallet。":
+    "System keychain unavailable. The key is kept in memory for this session only. On Linux, install and unlock GNOME Keyring or KWallet.",
   "保存配置": "Save settings",
   "请先粘贴 API Key，点击「保存配置」后再测试": "Paste an API key and click \"Save settings\" first, then test.",
   "测试连接": "Test connection",
