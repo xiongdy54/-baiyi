@@ -200,6 +200,9 @@ function buildZipInWorker(workerData) {
       return;
     }
     let settled = false;
+    // C-23：快照 quick_check 结果（name → "ok" | 错误文本）——不只写日志，随 done 一起带出，
+    // 供 autoBackupIfNeeded 参与轮换决策（主库损坏时暂停删除旧备份）。
+    const integrity = {};
     const finish = (v) => {
       if (settled) return;
       settled = true;
@@ -209,6 +212,7 @@ function buildZipInWorker(workerData) {
     w.on("message", (m) => {
       if (!m || typeof m !== "object") return;
       if (m.type === "quickCheck") {
+        integrity[m.name] = m.result !== undefined ? String(m.result) : String(m.error || "");
         // D137 §3.5 语义（结果仅入应用日志）；D143 起自「启动同步」改「每日备份时后台」执行
         if (m.result && m.result !== "ok") console.error(`[backup] 快照完整性检查异常：${m.name} quick_check=${m.result}`);
         else if (m.result) console.log(`[backup] 快照完整性检查通过：${m.name} quick_check=${m.result}`);
@@ -216,7 +220,7 @@ function buildZipInWorker(workerData) {
         return;
       }
       if (m.type === "done") {
-        if (m.ok) finish({ ok: true, bytes: Number(m.bytes) || 0 });
+        if (m.ok) finish({ ok: true, bytes: Number(m.bytes) || 0, integrity });
         else finish({ ok: false, error: m.error || "备份构建失败" });
       }
     });
@@ -344,7 +348,12 @@ async function createBackup(opts = {}) {
       entries,
       destFile,
       tmpFile: tmp,
-      quickCheck: dictSrc ? [{ name: "dictionary.db", path: dictSrc }] : []
+      // C-23：主库快照也纳入 quick_check（只在确实是快照时检查——注入了 snapshotLibrary 才检查；
+      // 未注入的环境（既有单测 / 直读主文件）不检查在线文件，避免与打开中的连接并发读写）。
+      quickCheck: [
+        ...(libSrc !== p.dbFile ? [{ name: "library.db", path: libSrc }] : []),
+        ...(dictSrc ? [{ name: "dictionary.db", path: dictSrc }] : [])
+      ]
     });
     if (!built.ok) throw new Error(built.error || "备份构建失败");
     // D117：落列表加速 sidecar（缓存，非事实源）。写失败不影响备份本体成功
@@ -354,7 +363,8 @@ async function createBackup(opts = {}) {
     } catch { /* 忽略：sidecar 缺失只影响下次列表速度 */ }
     // A-13（审计）：safety 备份纳入滚动清理，否则每执行一次「恢复」就多一份且永不删除
     if (label === "safety") rotateSafetyBackups(destDir, opts.safetyKeep || SAFETY_KEEP, new Set([path.basename(destFile)]));
-    return { ok: true, file: destFile, meta };
+    // C-23：透传快照 quick_check 结果（无检查项时为空对象），供调用方（autoBackupIfNeeded）决策
+    return { ok: true, file: destFile, meta, integrity: built.integrity || {} };
   } catch (err) {
     try { fs.rmSync(destFile + ".part", { force: true }); } catch { /* 忽略 */ }
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -630,6 +640,17 @@ async function autoBackupIfNeeded(opts = {}) {
   }
   const r = await createBackup({ ...opts, label: "auto", includeAIConfig: false });
   if (!r.ok || r.skipped) return r;
+  // C-23：主库快照完整性检查不通过 → 暂停轮换。主库已损坏时照常轮换，keep 天之后所有
+  // 「损坏前」的好备份都会被删光（此时备份反而是唯一自救途径）；本体备份照常产出，
+  // 由 main.js 把 integrityWarning 推给渲染层提示用户（backup:integrityWarning 事件）。
+  const libQc = r.integrity && r.integrity["library.db"];
+  if (libQc !== undefined && libQc !== "ok") {
+    return {
+      ...r,
+      integrityWarning: "数据库完整性检查发现问题，已暂停删除旧备份。请先不要清理备份，并导出诊断信息。",
+      clockSkewSuspected: detectClockSkew(dir, opts.now)
+    };
+  }
   // C-14：刚生成的备份 mtime = 当前系统时间，时钟回拨后它会排到最前当"最旧"——必须 protect
   rotateAutoBackups(dir, keep, new Set([path.basename(r.file)]));
   return { ...r, clockSkewSuspected: detectClockSkew(dir, opts.now) };

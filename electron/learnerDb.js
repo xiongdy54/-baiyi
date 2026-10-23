@@ -117,13 +117,9 @@ async function open() {
       // 实测把主进程阻塞 39s），持久性由 save() 的 checkpoint(TRUNCATE) 与「可重建」语义共同承担；
       // 主库/词典库仍 synchronous=FULL 不变。
       db.pragma("synchronous = NORMAL");
-      // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞——损坏早暴露、零行为变更）
-      try {
-        const qc = db.pragma("quick_check", { simple: true });
-        if (qc !== "ok") console.error(`[learnerDb] quick_check 异常：${qc}`);
-      } catch (e) {
-        console.error("[learnerDb] quick_check 失败：", e);
-      }
+      // C-23：启动 quick_check 已移除——learner.db 是可重建的派生库（§4.20，删除后刷新管线全量
+      // 重建、不进备份），不需要完整性检查（D143 裁决：quick_check 移出启动路径，改由备份 worker
+      // 对快照只读执行；主库快照的检查结果参与备份轮换决策，见 backup.js）。
       // 重建规则（设计稿 §5.2）：schema_version 不等于代码常量 → 关闭、删除文件（含 sidecar）、重新建表（全量重建）
       if (readMetaRaw("schema_version") !== String(lmParams.LEARNER_DB_SCHEMA)) {
         try {

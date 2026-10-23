@@ -2000,6 +2000,8 @@ interface LastAutoBackup {
   skipped: boolean;
   error: string | null;
   clockSkewSuspected: boolean;
+  /** C-23：主库快照 quick_check 不通过（true = 已暂停删除旧备份） */
+  integrityWarning: boolean;
 }
 interface BackupInfo {
   dbBytes: number;
@@ -2032,6 +2034,8 @@ function backupAPI() {
       pickFile: () => Promise<string | null>;
       restore: (file: string) => Promise<{ ok: boolean; error?: string; needsRestart?: boolean; safetyFile?: string | null }>;
       relaunch: () => void;
+      // C-23：主库快照完整性检查不通过的主进程推送（payload = { message, integrity }）
+      onIntegrityWarning?: (callback: (payload: { message: string; integrity?: Record<string, string> }) => void) => () => void;
     };
   }).backupAPI!;
 }
@@ -2359,6 +2363,8 @@ function noticeText(n: SettingsNotice, T: ReturnType<typeof useT>): string {
       return T("更新检查出错：{msg}", n.params);
     case "backup-failed":
       return T("自动备份失败：{msg}", n.params);
+    case "backup-integrity":
+      return T("数据库完整性检查发现问题，已暂停删除旧备份。请先不要清理备份，并导出诊断信息。");
     case "clock-skew":
       return T("检测到系统时钟可能被回拨过，请核对系统时间，否则自动备份可能多日停摆。");
     case "backup-none":
@@ -2374,6 +2380,7 @@ const NOTICE_TARGETS: Partial<Record<SettingsNoticeKind, { sectionId: string; fl
   "update-ready": { sectionId: "sec-updates" },
   "update-error": { sectionId: "sec-updates" },
   "backup-failed": { sectionId: "sec-backup" },
+  // backup-integrity（C-23）：处置是「保留备份 + 导出诊断信息」，应用内无对应可操作按钮，不给「处理」入口
   "backup-none": { sectionId: "sec-backup", flashAction: "backup-now" },
   "backup-stale": { sectionId: "sec-backup", flashAction: "backup-now" }
   // clock-skew：应用内无可操作项（要去系统设置改时间），不给「处理」按钮

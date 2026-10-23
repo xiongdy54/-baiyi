@@ -41,6 +41,12 @@ r = computeSettingsNotices({ updateState: "error", updateError: "ENOTFOUND", now
 check("更新检查出错 → error/update-error 且带 msg", r.length === 1 && r[0].level === "error" && r[0].kind === "update-error" && r[0].params.msg === "ENOTFOUND", r);
 r = computeSettingsNotices({ lastAuto: { ok: false, error: "磁盘空间不足", clockSkewSuspected: false }, now: NOW });
 check("自动备份失败 → error/backup-failed 且带 msg", r.length === 1 && r[0].level === "error" && r[0].kind === "backup-failed" && r[0].params.msg === "磁盘空间不足", r);
+// C-23：主库快照 quick_check 不通过——备份本体成功但轮换已暂停，属最需用户介入的红条
+r = computeSettingsNotices({ lastAuto: { ok: true, error: null, clockSkewSuspected: false, integrityWarning: true }, now: NOW });
+check("完整性告警 → error/backup-integrity", r.length === 1 && r[0].level === "error" && r[0].kind === "backup-integrity", r);
+check("无 integrityWarning → 不产通知", computeSettingsNotices({ lastAuto: { ok: true, error: null, clockSkewSuspected: false, integrityWarning: false }, now: NOW }).length === 0, "");
+r = computeSettingsNotices({ lastAuto: { ok: false, error: "x", clockSkewSuspected: false, integrityWarning: true }, now: NOW });
+check("备份失败与完整性告警同在 → 两条 error 稳定排序", JSON.stringify(kinds(r)) === JSON.stringify(["backup-failed", "backup-integrity"]), kinds(r));
 
 console.log("== 4) 黄：备份停摆 ==");
 r = computeSettingsNotices({ latestBackupAt: null, now: NOW });

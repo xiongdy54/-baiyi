@@ -2270,9 +2270,18 @@ app.whenReady().then(async () => {
           ok: !!(r && r.ok),
           skipped: !!(r && r.skipped),
           error: r && !r.ok ? r.error || null : null,
-          clockSkewSuspected: !!(r && r.clockSkewSuspected)
+          clockSkewSuspected: !!(r && r.clockSkewSuspected),
+          integrityWarning: !!(r && r.integrityWarning)
         };
         if (r && !r.ok) console.error("[backup] 自动备份失败：", r.error);
+        // C-23：主库快照 quick_check 不通过 → 已暂停删除旧备份（轮换被 autoBackupIfNeeded 拦下）。
+        // 推送渲染层提示用户保留备份并导出诊断信息；设置页通知框（D206）经 lastAuto 同源提示。
+        if (r && r.integrityWarning) {
+          console.error("[backup] 数据库完整性检查发现问题，已暂停删除旧备份：", r.integrity);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send("backup:integrityWarning", { message: r.integrityWarning, integrity: r.integrity });
+          }
+        }
       })
       .catch((err) => {
         lastAutoBackup = {
@@ -2280,7 +2289,8 @@ app.whenReady().then(async () => {
           ok: false,
           skipped: false,
           error: err instanceof Error ? err.message : String(err),
-          clockSkewSuspected: false
+          clockSkewSuspected: false,
+          integrityWarning: false
         };
         console.error("[backup] 自动备份失败：", err);
       });
