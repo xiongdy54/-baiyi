@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`0e4136a`（C-17 合并）。
+> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`68daaee`（C-18 合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -18,11 +18,11 @@
 
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：99 个 `tests/*.test.cjs`，分布 **61 electron-node / 30 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 **99 个 = 61 electron-node / 30 electron / 8 system-node**。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。**C-17 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：失败集合与 C-16 基线完全一致（仅 applog）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。流程侧（非 99 套件）：C-17 改动前基线 F37 8/8、F35 12/13（M1a）、F04 31/33（G1 两处——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败）；C-17 后 F37 8/8（新语义）、F35 **14/14**、F04 **33/33**（后两者修复既有失败，非放宽）。
+- **测试规模**：100 个 `tests/*.test.cjs`，分布 **61 electron-node / 31 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node；C-18 `today-queue-fastpath` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1，C-18 按验收新增 1 个。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 99；C-18 新增 `today-queue-fastpath.test.cjs`（electron）后为 **100 个 = 61 electron-node / 31 electron / 8 system-node**。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。**C-17 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：失败集合与 C-16 基线完全一致（仅 applog）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-18 后一次全量为 100 个 99 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项）；新增 `today-queue-fastpath` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。流程侧（非 99 套件）：C-17 改动前基线 F37 8/8、F35 12/13（M1a）、F04 31/33（G1 两处——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败）；C-17 后 F37 8/8（新语义）、F35 **14/14**、F04 **33/33**（后两者修复既有失败，非放宽）。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17。
-- **下一项**：**C-18**（10 万卡复习性能；P1；阶段 2 首项，分 3 个提交 C-18a/b/c）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17、C-18。
+- **下一项**：**C-19**（AI 流式传输；P1；多字节乱码/截断当成功/非 SSE 当成功/4xx 被重试/不走系统代理；报告分 C-19a（第 1–6 步）与 C-19b（第 7 步代理）两个提交）。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
@@ -86,8 +86,8 @@
 
 | # | 编号 | 状态 | 提交 / 合并 | 备注 |
 | --- | --- | --- | --- | --- |
-| 19 | C-18 | 待做 | — | 10 万卡复习性能。 |
-| 20 | C-19 | 待做 | — | AI 流式传输。 |
+| 19 | C-18 | 完成 | `0a46124` + `5083437` + `2042187` + `12b0385` + `1864cee` / `68daaee` | 10 万卡复习性能；基准脚本 + a 索引 / b 快速路径 / c 专用接口 + 等价测试共 5 提交，验收见 §3.19。 |
+| 20 | C-19 | 待做 | — | AI 流式传输。 | |
 | 21 | C-20 | 待做 | — | API Key 存储。 |
 | 22 | C-21 | 待做 | — | 写入口参数校验。 |
 | 23 | C-22 | 待做 | — | 软删除过滤 / 资产孤儿。 |
@@ -550,6 +550,30 @@
   4. m14 的备份 flush 注入同步改 checkpointStrict：报告步骤 2 要求「备份 opts.flush 调用它」，生产注入点在 main.js，测试注入同步保持同语义（该测试原本就模仿 main.js）。
   5. persist.test.cjs P2 的 blocker 语句改为报告验收给定的 `SELECT 1 FROM cards LIMIT 1`（原为等价的读 review_logs 持锁）。
 
+### 3.19 C-18 · 复习队列与全量取卡在 10 万卡规模下的性能
+
+- **提交**（分支 `fix/c18-review-queue-perf`，5 个）：`0a46124 chore(bench): 规模基准脚本（审计附录 A）`、`5083437 fix(C-18a): due 表达式索引 idx_cards_due（MIGRATIONS v3，SCHEMA_VERSION 3）`、`2042187 fix(C-18b): 热路径改走到期超集快速路径（TODAY_QUEUE_DUE_SQL + idx_cards_due），生产调用方全部切换`、`12b0385 fix(C-18c): 计数/分组改走专用接口……`、`1864cee fix(C-18): 新增 today-queue-fastpath 测试……`；合并 `68daaee`。
+- **改动**（11 文件，+367/−29）：
+  - `electron/schemaVersion.js`：`DUE_EXPR` 常量（json_valid + json_type in ('integer','real') 才取 $.due，否则 NULL）+ MIGRATIONS v3 `idx_cards_due ON cards(is_deleted, DUE_EXPR)`；`SCHEMA_VERSION` 2→3 并导出 `DUE_EXPR`。未用生成列（报告明示会改变 `SELECT c.*` 形状）。
+  - `electron/db.js`：`TODAY_QUEUE_DUE_SQL`（与 TODAY_QUEUE_SQL 同一 JOIN，只多 `DUE_EXPR IS NULL OR DUE_EXPR <= ?`）；`computeTodayQueue(now, opts)` 增加 `withDamaged`（默认 true = 原全量参考实现，f13/f48b/f69b 不受影响；false 走快速路径，`damaged: []` + `damagedOmitted: true`）；`listDueCards` / `listDeferredToday` / `computeCardCounts` / `computeSessionQueue` 与 main.js IPC `cards:todayQueue` 全部切换快速路径（`rg "computeTodayQueue\("` 锚点全量核对，测试调用点不动）；导出 `TODAY_QUEUE_DUE_SQL`。新增 `countCardsByExtract()`（SQL 聚合 extractId→张数）与 `listCardsWithKnowledgePoint()`（非空 KP 活卡，形状同 listAllCards）。
+  - `electron/main.js` / `electron/preload.js` / `src/lib/cards.ts`：IPC `cards:countByExtract` / `cards:listWithKnowledgePoint` + preload 两行 + cardsApi 两个包装。
+  - 渲染层：`Reader.tsx`（已制卡数直卡计数改 `countByExtract`，聚合口径 D85 不变）、`ExtractReviewView.tsx`（同）、`KnowledgeManager.tsx`（改 `listWithKnowledgePoint`，byKp/byId 构造逻辑不变）；`DisambiguateModal.tsx` **保留 listAll** 并补注释（rankDisambiguationCandidates 需全库卡面文本算 bigram Jaccard，meta 轻量行无正文列）。
+  - 新增 `tests/today-queue-fastpath.test.cjs`（electron，25 断言）与 `scripts/bench-queue.cjs`（附录 A 原样）。
+- **验收（2026-10-24，Windows；Electron 31.7.7 / Node 24.15.0）**：
+  - 本机基线（改动前，附录 A 约定）：`BENCH_N=10000` 全量队列中位 80.0ms / listAll 80.2ms（9.6 MB）/ RSS 181MB；`BENCH_N=100000` 全量队列中位 1245.6ms / listAll 1350.8ms（95.9 MB）/ RSS 812MB（与报告 Linux 基线 2644/2542ms 同数量级；改动前第二参数被忽略、两行结果相同 ✓）。
+  - `node scripts/run-tests.mjs schema-version` → 1 通过（迁移链 v2→v3 兼容；探针证实新库 user_version=3 且 `idx_cards_due` 存在）。
+  - `node scripts/run-tests.mjs today-queue-fastpath` → 1 通过 / 0 失败，直跑 **25/25**：播种覆盖 fsrs NULL / 非法 JSON / due 缺失 / due 字符串 / 已到期 / 未到期 / leech 挂起 / 归档 / 已删除 / 同源组（perDay=1 恰 1 放行 1 延后），三个 now（播种时刻 / +1 天 / +400 天）下两条路径 `cards` 逐 id 与 `deferred`（id:kind）完全相同；EXPLAIN QUERY PLAN 含 `SEARCH c USING INDEX idx_cards_due`；C-18c 两接口口径（含按 extractId 而非卡 id 聚合、排除已删/损坏 context_ref_json、非空 KP 活卡）。
+  - 验收基准（最终树）：`BENCH_N=100000` 全量中位 1930.5ms vs 快速路径中位 315.8ms = **16.4% ≤ 25%**，输出「索引命中：是」；`BENCH_N=100000 BENCH_DUE_EVERY=100`（1% 到期）快速路径中位 **148.7ms < 300ms**，同样「索引命中：是」；两轮到期张数（10000/1000）两路径一致。
+  - `npm run typecheck` → exit 0。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":61,"electron":31,"system-node":8}`（100 个，+1 electron）。
+  - `npm test`（无并行负载）→ 100 个 **99 过 / 1 败 / 0 超时**；唯一失败 = applog（§1.1 既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
+- **偏离**：
+  1. **countCardsByExtract 的报告原 SQL 有别名遮蔽缺陷**：`json_extract(...) AS id` 的输出别名 `id` 与 cards 表自身的 `id` 列同名，SQLite 的 `GROUP BY id` 优先解析到表列——实测按卡 id 分组、每卡 n=1，JS 侧同键覆盖后 extract-A 3 张只剩 1（探针复现）。改为 `AS extract_id` + `GROUP BY json_extract(context_ref_json,'$.extractId')`（语义与报告意图一致，按提取点聚合）；测试 S4-1 钉住该行为。
+  2. **getStatsOverview（db.js，queryAll(TODAY_QUEUE_SQL) 直扫）未改**：报告 C-18b 的锚点命令是 `rg "computeTodayQueue\(" electron/`，该处不调用 computeTodayQueue 且其 KPI 阈值是「今日 24 点」而非 now（快速路径参数化后语义可适配但超出报告步骤），保持全量参考实现；统计页打开才调用、非每评分一次。后续如需再优化可单列。
+  3. 报告要求渲染层类型「damaged 保持 Array」：快速路径返回 `damaged: []` + 新键 `damagedOmitted`，`src/lib/sessionQueue.ts` 类型声明未动（渲染层无 damaged 消费点，rg 复核）。
+  4. bench 脚本与 5 提交结构：报告 §0 要求「一项一提交」但 C-18 自身明确分 3 提交，附录 A 另要求 bench 脚本单独提交（可与 C-18a 同批），测试文件按仓库惯例（C-03 先例：分支多提交 + 单次 --no-ff 合并）作第 5 个提交。
+  5. 本机 Windows 首次运行基准无「基准失败」行、退出码 0；RSS 从基线 812MB 降到 ~685MB（快速路径不再全量物化 10 万行）。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -563,6 +587,6 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-18**（阶段 2 正确性与规模，P1：10 万卡复习队列/全量取卡性能；报告要求分 3 个提交 C-18a 索引 / C-18b 快速路径 / C-18c 替换全量调用）。
-- 基线：99 个测试；C-17 后全量 98 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。C-17 已改 `persist()` 语义：busy 只记日志（前缀 `[db] checkpoint 失败`），严格语义在 `persistNow` / `checkpointStrict`（备份 flush）——后续会话若遇依赖「persist 抛错」的旧期望，按新语义更新。
-- **Token 账（Goal 要求，每会话收尾时更新本行）**：额度 2 亿（GLM 5.3）。**2026-10-24 起改为登记实测计量值**：C-17 单元在全新上下文代理会话中执行，运行时计量 **9.23M**（90 次工具调用，含两轮全量测试；其自估 0.35M 系口径错误，弃用）；C-16 单元在编排会话内直接执行，运行时计量 ~2.8M。C-01…C-15 无计量记录（会话内直改，规模与 C-16 相近），按每项上界 2M 估算 ≤32M。**累计 ≈ 44M（其中 12M 为实测），剩余 ≥156M**——单项成本实测区间 3–10M，下一项 C-18（分 3 提交，较重）预估 ≤10M，余额充足，**继续用 GLM 5.3**。**切换触发线**：累计 ≥1.8 亿，或剩余余额 < 20M（约两项成本）时，新会话改用 GLM 5.3 Flash 最高思考强度，且此后沿用。
+- 当前下一项：**C-19**（阶段 2 正确性与规模，P1：AI 流式传输——多字节乱码 / 截断当成功 / 非 SSE 当成功 / 4xx 被重试 / 不走系统代理；报告分 **C-19a**（第 1–6 步一个提交）与 **C-19b**（第 7 步系统代理单独提交）；报告小节约在 §C-19（`rg -n "C-19" 报告` 定位，锚点 `rg -n "chunk.toString|errText \+= c|body \+= c|\[DONE\]|code === \"http\"|ETIMEDOUT|require\(\"https\"\)" electron/ai.js`））。
+- 基线：100 个测试；C-18 后全量 99 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。C-17 已改 `persist()` 语义：busy 只记日志（前缀 `[db] checkpoint 失败`），严格语义在 `persistNow` / `checkpointStrict`（备份 flush）。C-18 后 schema `user_version = 3`（idx_cards_due），新库自动到位；`computeTodayQueue` 增加 `damagedOmitted` 键。
+- **Token 账（Goal 要求，每会话收尾时更新本行）**：额度 2 亿（GLM 5.3）。**2026-10-24 起改为登记实测计量值**：C-17 单元在全新上下文代理会话中执行，运行时计量 **9.23M**（90 次工具调用，含两轮全量测试；其自估 0.35M 系口径错误，弃用）；C-16 单元在编排会话内直接执行，运行时计量 ~2.8M。C-01…C-15 无计量记录（会话内直改，规模与 C-16 相近），按每项上界 2M 估算 ≤32M。C-18 单元在全新上下文代理会话执行，**无运行时计量输出**，按 C-17 实测口径（90 次 ≈9.23M，均值 ~102K/次）对 ~45 次工具调用（含 4 次 10 万卡基准、1 轮全量测试、多段大文件读取）线性外推并上浮大上下文读取，**诚实估算 ≈5M（口径：线性外推，非实测）**。**累计 ≈ 49M（其中 12M 为实测），剩余 ≥151M**——下一项 C-19（分 2 提交，中等规模）预估 ≤8M，余额充足，**继续用 GLM 5.3**。**切换触发线**：累计 ≥1.8 亿，或剩余余额 < 20M（约两项成本）时，新会话改用 GLM 5.3 Flash 最高思考强度，且此后沿用。
