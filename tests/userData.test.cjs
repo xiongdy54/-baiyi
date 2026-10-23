@@ -1,6 +1,7 @@
 "use strict";
 // C-11：pinUserData 的目录解析纯函数（electron/userData.js）三条路径 + Windows 真实占用差分。
 // @runtime: electron-node
+// 直跑：node scripts/run-tests.mjs userData（runner 按 @runtime 分流到 electron-node）
 const assert = require("assert");
 const fs = require("fs");
 const os = require("os");
