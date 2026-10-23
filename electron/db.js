@@ -1203,17 +1203,19 @@ function createFromPaste(title, markdown) {
   const itemId = crypto.randomUUID();
   const docId = crypto.randomUUID();
   const now = Date.now();
-  db.run(
-    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, 'paste', NULL, NULL, ?, ?, 0, 0)`,
-    [itemId, cleanTitle, now, now]
-  );
-  db.run(
-    `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, ?, ?, '[]', NULL, ?, ?, 0, 0)`,
-    [docId, itemId, String(markdown), now, now]
-  );
-  persist();
+  // C-47：书目与文档必须同一事务（persist() 由 withTransaction 在 COMMIT 后调用）
+  withTransaction(() => {
+    db.run(
+      `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, created_at, updated_at, sync_version, is_deleted)
+       VALUES (?, 'local-user', ?, 'paste', NULL, NULL, ?, ?, 0, 0)`,
+      [itemId, cleanTitle, now, now]
+    );
+    db.run(
+      `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
+       VALUES (?, ?, ?, '[]', NULL, ?, ?, 0, 0)`,
+      [docId, itemId, String(markdown), now, now]
+    );
+  });
   // v40：追加 documentId（增量字段，供洞察 Evidence Package 来源 JOIN 等使用；既有 {id,title} 不变）
   return { id: itemId, title: cleanTitle, documentId: docId };
 }
@@ -1373,34 +1375,45 @@ function createFromEpub(title, markdown, toc, coverDataUrl, epubData, sourceName
   fs.mkdirSync(dir, { recursive: true });
   let coverRel = null;
 
-  if (coverDataUrl) {
-    const m = /^data:image\/(\w+);base64,(.+)$/.exec(String(coverDataUrl));
-    if (m) {
-      const ext = m[1] === "jpeg" ? "jpg" : m[1];
-      const buf = Buffer.from(m[2], "base64");
-      fs.writeFileSync(path.join(dir, `cover.${ext}`), buf);
-      coverRel = `cover.${ext}`;
-      addAssetRow(itemId, "image-cover", coverRel, sha256(buf), now);
+  // C-47：文件、资产行、书目、文档必须一起成功或一起失败——两条独立的自动提交 INSERT 在磁盘将满时
+  // 会只落第一条，留下"书架上有书、打开没有正文"的半条事实（审计 U-29 实测）。persist() 由 withTransaction 在 COMMIT 后调用。
+  try {
+    withTransaction(() => {
+      if (coverDataUrl) {
+        const m = /^data:image\/(\w+);base64,(.+)$/.exec(String(coverDataUrl));
+        if (m) {
+          const ext = m[1] === "jpeg" ? "jpg" : m[1];
+          const buf = Buffer.from(m[2], "base64");
+          fs.writeFileSync(path.join(dir, `cover.${ext}`), buf);
+          coverRel = `cover.${ext}`;
+          addAssetRow(itemId, "image-cover", coverRel, sha256(buf), now);
+        }
+      }
+
+      if (epubData && epubData.length) {
+        const buf = Buffer.from(epubData);
+        fs.writeFileSync(path.join(dir, "original.epub"), buf);
+        addAssetRow(itemId, "epub-original", "original.epub", sha256(buf), now);
+      }
+
+      db.run(
+        `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, author, created_at, updated_at, sync_version, is_deleted)
+         VALUES (?, 'local-user', ?, 'epub', ?, ?, ?, ?, ?, 0, 0)`,
+        [itemId, cleanTitle, sourceName || null, coverRel, cleanImportAuthor(author), now, now]
+      );
+      db.run(
+        `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
+         VALUES (?, ?, ?, '[]', ?, ?, ?, 0, 0)`,
+        [docId, itemId, String(markdown), JSON.stringify(toc || []), now, now]
+      );
+    });
+  } catch (e) {
+    // 只在事务没有提交时清理本次新建的资产目录（persist() 在 COMMIT 之后抛错时行已落库，文件必须保留）
+    if (!rowExists("library_items", itemId, false)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 忽略 */ }
     }
+    throw e;
   }
-
-  if (epubData && epubData.length) {
-    const buf = Buffer.from(epubData);
-    fs.writeFileSync(path.join(dir, "original.epub"), buf);
-    addAssetRow(itemId, "epub-original", "original.epub", sha256(buf), now);
-  }
-
-  db.run(
-    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, author, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, 'epub', ?, ?, ?, ?, ?, 0, 0)`,
-    [itemId, cleanTitle, sourceName || null, coverRel, cleanImportAuthor(author), now, now]
-  );
-  db.run(
-    `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, ?, ?, '[]', ?, ?, ?, 0, 0)`,
-    [docId, itemId, String(markdown), JSON.stringify(toc || []), now, now]
-  );
-  persist();
   return { id: itemId, title: cleanTitle, cover: coverRel };
 }
 
@@ -1432,35 +1445,46 @@ function createImportedDoc({ title, markdown, sourceType, sourceName, originalNa
   const dir = path.join(app.getPath("userData"), "assets", itemId);
   fs.mkdirSync(dir, { recursive: true });
 
-  if (originalBuf && originalBuf.length) {
-    // 写盘名与 assets.path 必须是同一个变量：读侧按 assets.path 取文件
-    const safeName = safeAssetFileName(originalName, "original.bin");
-    fs.writeFileSync(path.join(dir, safeName), originalBuf);
-    addAssetRow(itemId, `${sourceType}-original`, safeName, sha256(originalBuf), now);
-  }
-  for (const im of images || []) {
-    const buf = Buffer.isBuffer(im.bytes) ? im.bytes : Buffer.from(im.bytes);
-    if (!buf.length) continue;
-    if (!/^[\w.-]+$/.test(String(im.filename))) continue; // 文件名防穿越（导入器产出的 img-N.ext 恒命中）
-    // 批次 C（D-TEST-17）：这道护栏漏了「合法却危险」的名字——`..` 过 [\w.-]+ 后
-    // writeFileSync(dir/..) 抛 EISDIR，整本导入失败。同一套净化在这里再过一遍，纯点名字直接跳过。
-    const safeImg = safeAssetFileName(im.filename, "");
-    if (!safeImg) continue;
-    fs.writeFileSync(path.join(dir, safeImg), buf);
-    addAssetRow(itemId, "image-content", safeImg, sha256(buf), now);
-  }
+  // C-47：文件、资产行、书目、文档必须一起成功或一起失败——两条独立的自动提交 INSERT 在磁盘将满时
+  // 会只落第一条，留下"书架上有书、打开没有正文"的半条事实（审计 U-29 实测）。persist() 由 withTransaction 在 COMMIT 后调用。
+  try {
+    withTransaction(() => {
+      if (originalBuf && originalBuf.length) {
+        // 写盘名与 assets.path 必须是同一个变量：读侧按 assets.path 取文件
+        const safeName = safeAssetFileName(originalName, "original.bin");
+        fs.writeFileSync(path.join(dir, safeName), originalBuf);
+        addAssetRow(itemId, `${sourceType}-original`, safeName, sha256(originalBuf), now);
+      }
+      for (const im of images || []) {
+        const buf = Buffer.isBuffer(im.bytes) ? im.bytes : Buffer.from(im.bytes);
+        if (!buf.length) continue;
+        if (!/^[\w.-]+$/.test(String(im.filename))) continue; // 文件名防穿越（导入器产出的 img-N.ext 恒命中）
+        // 批次 C（D-TEST-17）：这道护栏漏了「合法却危险」的名字——`..` 过 [\w.-]+ 后
+        // writeFileSync(dir/..) 抛 EISDIR，整本导入失败。同一套净化在这里再过一遍，纯点名字直接跳过。
+        const safeImg = safeAssetFileName(im.filename, "");
+        if (!safeImg) continue;
+        fs.writeFileSync(path.join(dir, safeImg), buf);
+        addAssetRow(itemId, "image-content", safeImg, sha256(buf), now);
+      }
 
-  db.run(
-    `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, author, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, 'local-user', ?, ?, ?, NULL, ?, ?, ?, 0, 0)`,
-    [itemId, cleanTitle, String(sourceType), sourceName || null, cleanImportAuthor(author), now, now]
-  );
-  db.run(
-    `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
-     VALUES (?, ?, ?, '[]', NULL, ?, ?, 0, 0)`,
-    [docId, itemId, String(markdown), now, now]
-  );
-  persist();
+      db.run(
+        `INSERT INTO library_items (id, user_id, title, source_type, source_url, cover, author, created_at, updated_at, sync_version, is_deleted)
+         VALUES (?, 'local-user', ?, ?, ?, NULL, ?, ?, ?, 0, 0)`,
+        [itemId, cleanTitle, String(sourceType), sourceName || null, cleanImportAuthor(author), now, now]
+      );
+      db.run(
+        `INSERT INTO documents (id, library_item_id, markdown, blocks_json, toc_json, created_at, updated_at, sync_version, is_deleted)
+         VALUES (?, ?, ?, '[]', NULL, ?, ?, 0, 0)`,
+        [docId, itemId, String(markdown), now, now]
+      );
+    });
+  } catch (e) {
+    // 只在事务没有提交时清理本次新建的资产目录（persist() 在 COMMIT 之后抛错时行已落库，文件必须保留）
+    if (!rowExists("library_items", itemId, false)) {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+    }
+    throw e;
+  }
   return { id: itemId, title: cleanTitle };
 }
 
