@@ -331,6 +331,55 @@ CREATE TABLE IF NOT EXISTS rec_feedback (
 CREATE INDEX IF NOT EXISTS idx_rec_feedback_key ON rec_feedback(item_key, ts);
 `;
 
+// C-10：库内事实（schema 相关状态）进 app_meta；未迁移的旧库回落 settings（兼容旧库）。
+function readAppMeta(key) {
+  try {
+    const row = db.prepare("SELECT value FROM app_meta WHERE key = ?").get(key);
+    return row ? row.value : undefined;
+  } catch {
+    return undefined; // v2 迁移前表不存在
+  }
+}
+
+function writeAppMeta(key, value) {
+  try {
+    db.run(
+      "INSERT INTO app_meta (key, value, updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+      [key, String(value), Date.now()]
+    );
+  } catch (e) {
+    if (!/no such table/i.test(String(e && e.message))) throw e;
+    // 过渡期（基线 v23 迁移先于 MIGRATIONS 运行）：仍落 settings，随后由 migrateSettingsFactsToAppMeta 搬入
+    const s = readSettings();
+    if (!s.app) s.app = {};
+    s.app[key] = value;
+    writeSettings(s);
+  }
+}
+
+function migrateSettingsFactsToAppMeta() {
+  try {
+    const s = readSettings();
+    for (const key of ["fsrsConfigId", "legacyBackfillV1"]) {
+      const v = s.app?.[key];
+      if (v === undefined || v === null) continue;
+      if (readAppMeta(key) !== undefined) continue;
+      writeAppMeta(key, v);
+    }
+  } catch (e) {
+    console.error("[db] settings 事实迁入 app_meta 失败（下次启动重试）：", e);
+  }
+}
+
+// C-10：显式判断列是否存在，替代「ALTER + try/catch 吞错」——磁盘满/只读/语法错误不再被当成
+// 「列已存在」。标识符加引号（material_map_calls.trigger 是 SQLite 关键字）。
+function addColumnIfMissing(table, column, typeSql) {
+  const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all(table).map((r) => r.name);
+  if (cols.includes(column)) return false;
+  db.exec(`ALTER TABLE "${table}" ADD COLUMN "${column}" ${typeSql}`);
+  return true;
+}
+
 async function initDb() {
   // D137（§3.1）：better-sqlite3 同步构造直开文件（文件不存在即创建；崩溃恢复/WAL 回放由 SQLite
   // 打开时自动完成）——对外保持 async 签名，调用面零改动。
@@ -346,8 +395,23 @@ async function initDb() {
   try { fs.mkdirSync(path.dirname(dbFile), { recursive: true }); } catch { /* 已存在/无权限：交给下方 open 报错 */ }
   // v23/F11：启动清残留 tmp——tmp 永远不是事实源（sql.js 时代的原子替换残留，新引擎不再产出）
   try { fs.rmSync(dbFile + ".tmp", { force: true }); } catch { /* 忽略 */ }
+  const fileExisted = fs.existsSync(dbFile) && fs.statSync(dbFile).size > 0;
   if (db && db.open) closeDb();
   db = attachRun(new Database(dbFile));
+  // C-10：库比程序新 → 拒绝打开，不读不写（快照/基线/迁移全部不执行）
+  const schema = require("./schemaVersion");
+  let startVersion;
+  try {
+    startVersion = schema.assertNotTooNew(db);
+  } catch (e) {
+    try { db.close(); } catch { /* 忽略 */ }
+    db = null;
+    throw e; // 交给 main.js 处理（DB_TOO_NEW → 提示升级并退出）
+  }
+  // C-10：已有数据的库从低版本升级前先做快照（新库不快照）
+  if (fileExisted && startVersion < schema.SCHEMA_VERSION) {
+    await schema.snapshotBeforeMigration(db, app.getPath("userData"), startVersion, schema.SCHEMA_VERSION);
+  }
   applyStandardPragmas(db); // WAL + synchronous=FULL + busy_timeout（§3.7，WAL 标志持久在库头）
   await nextTick(); // D143（T4）：initDb 分相让出（0.5/5）——开库 + pragma 相与 quick_check 相拆开
   // D137 §3.5：启动 quick_check 一次（结果仅入应用日志，不阻塞——损坏早暴露、零行为变更）
@@ -361,6 +425,7 @@ async function initDb() {
   // 全仓 initDb 调用点均为 await，签名与语义不变；让出只把同步长宏任务拆成 ≤300ms 段，
   // 根治「启动前 1s 一段连续 ~700ms 空洞」（诊断 STARTUP-LAG-DIAGNOSIS §3 R4 / §4 T4）。
   await nextTick();
+  // ===== 基线迁移（schema v1）已冻结：禁止在此新增 ALTER/CREATE；新结构变化写入 electron/schemaVersion.js 的 MIGRATIONS =====
   db.exec(SCHEMA);
   await nextTick(); // D143（T4）：initDb 分相让出（1b/5）——SCHEMA 建表相与后续索引/迁移相拆开
   // D121 §1.2：card_links 索引（与其余索引同法放 initDb，IF NOT EXISTS 幂等）
@@ -368,23 +433,11 @@ async function initDb() {
     db.run("CREATE INDEX IF NOT EXISTS idx_card_links_a ON card_links(card_a)");
     db.run("CREATE INDEX IF NOT EXISTS idx_card_links_b ON card_links(card_b)");
   } catch { /* 忽略 */ }
-  try {
-    db.run("ALTER TABLE library_items ADD COLUMN progress_json TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("library_items", "progress_json", "TEXT");
   // v38（D35）：library_items.lang——书籍语言属性（空=未知）；查词语言路由的书籍级信号
-  try {
-    db.run("ALTER TABLE library_items ADD COLUMN lang TEXT NOT NULL DEFAULT ''");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("library_items", "lang", "TEXT NOT NULL DEFAULT ''");
   // 统计管线 v1：cards.domain（JSON 数组字符串，如 '["51","32"]'，≤2 个、首个为主）
-  try {
-    db.run("ALTER TABLE cards ADD COLUMN domain TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("cards", "domain", "TEXT");
   // 旧卡回填：按 context_prefix 关键词映射 UDC，匹配不到留 NULL（未分类），只回填一次
   try {
     const backfilled = queryAll("SELECT id, context_prefix FROM cards WHERE domain IS NULL AND is_deleted = 0 AND context_prefix IS NOT NULL");
@@ -404,11 +457,7 @@ async function initDb() {
     );
   } catch { /* 表尚不存在等场景 */ }
   // v12.3：extracts.context_ref_json（跳转原文锚点：anchorText/anchorRatio）
-  try {
-    db.run("ALTER TABLE extracts ADD COLUMN context_ref_json TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("extracts", "context_ref_json", "TEXT");
   // v48.22（D58）：摘录复习改版的数据面——摘录状态机 / A-Factor / 计数 / 书级优先级 / 双引擎子空间
   for (const [col, type] of [
     ["status", "TEXT NOT NULL DEFAULT 'open'"],
@@ -431,11 +480,7 @@ async function initDb() {
     // 'extract'＝摘录（现有语义不变）。存量行 NULL ⇒ 一律按摘录对待（零语义变更）。
     ["kind", "TEXT"]
   ]) {
-    try {
-      db.run(`ALTER TABLE extracts ADD COLUMN ${col} ${type}`);
-    } catch {
-      /* 列已存在 */
-    }
+    addColumnIfMissing("extracts", col, type);
   }
   // 存量回填：NULL 一律按摘录（幂等，重复执行无副作用）
   try {
@@ -443,12 +488,8 @@ async function initDb() {
   } catch {
     /* 列不存在等异常不阻塞启动 */
   }
-  try {
-    // 书级默认优先级（默认 50 ＝与摘录默认同值，存量语义零变更）
-    db.run("ALTER TABLE library_items ADD COLUMN priority INTEGER NOT NULL DEFAULT 50");
-  } catch {
-    /* 列已存在 */
-  }
+  // 书级默认优先级（默认 50 ＝与摘录默认同值，存量语义零变更）
+  addColumnIfMissing("library_items", "priority", "INTEGER NOT NULL DEFAULT 50");
   try {
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_extract_ops_seq ON extract_ops(seq)");
     db.run("CREATE INDEX IF NOT EXISTS idx_extract_ops_batch ON extract_ops(batch_id)");
@@ -457,32 +498,16 @@ async function initDb() {
     db.run("CREATE INDEX IF NOT EXISTS idx_extracts_status ON extracts(status)");
   } catch { /* 表尚不存在等场景 */ }
   // v22：review_logs.fsrs_before_json（撤销评分——该次评分前的 FSRS 全字段快照；旧日志与未传快照的调用为 NULL，不可撤销）
-  try {
-    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_before_json TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("review_logs", "fsrs_before_json", "TEXT");
   // v23：FSRS 数据完整性加固列（§4.4.9/§4.4.10）
-  try {
-    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_after_json TEXT"); // 评分后全字段快照（Undo 一致性校验/审计）
-  } catch { /* 列已存在 */ }
-  try {
-    db.run("ALTER TABLE review_logs ADD COLUMN leech_before_json TEXT"); // 评分前 leech 快照（撤销精确恢复，F10）
-  } catch { /* 列已存在 */ }
-  try {
-    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_config_id TEXT"); // 本次评分所用参数配置
-  } catch { /* 列已存在 */ }
-  try {
-    db.run("ALTER TABLE review_logs ADD COLUMN fsrs_before_config_id TEXT"); // 评分前状态归属配置（撤销恢复）
-  } catch { /* 列已存在 */ }
-  try {
-    db.run("ALTER TABLE cards ADD COLUMN fsrs_config_id TEXT"); // 当前状态最近一次调度写入所用配置（§4.4.10 滚动语义）
-  } catch { /* 列已存在 */ }
+  addColumnIfMissing("review_logs", "fsrs_after_json", "TEXT"); // 评分后全字段快照（Undo 一致性校验/审计）
+  addColumnIfMissing("review_logs", "leech_before_json", "TEXT"); // 评分前 leech 快照（撤销精确恢复，F10）
+  addColumnIfMissing("review_logs", "fsrs_config_id", "TEXT"); // 本次评分所用参数配置
+  addColumnIfMissing("review_logs", "fsrs_before_config_id", "TEXT"); // 评分前状态归属配置（撤销恢复）
+  addColumnIfMissing("cards", "fsrs_config_id", "TEXT"); // 当前状态最近一次调度写入所用配置（§4.4.10 滚动语义）
   try {
     // review_seq：全局插入序（§4.4.9 排序不变量）。存量回填=rowid（精确保留既有顺序），新写入事务内 MAX+1
-    const hasSeq = queryAll("SELECT COUNT(*) AS n FROM pragma_table_info('review_logs') WHERE name='review_seq'")[0]?.n || 0;
-    if (!hasSeq) {
-      db.run("ALTER TABLE review_logs ADD COLUMN review_seq INTEGER");
+    if (addColumnIfMissing("review_logs", "review_seq", "INTEGER")) {
       db.run("UPDATE review_logs SET review_seq = rowid WHERE review_seq IS NULL");
     }
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_review_logs_seq ON review_logs(review_seq)");
@@ -545,34 +570,20 @@ async function initDb() {
   } catch { /* 表已存在 */ }
   // v38（M7，D35）：dict_sources.lang——来源词典语言，本地多来源命中同一词头时语言优先的依据。
   // 存量行按 format 回填（幂等，新格式解析器在 dictStore.js 落库时 upsert 自带派生）。
-  try {
-    db.run("ALTER TABLE dict_sources ADD COLUMN lang TEXT NOT NULL DEFAULT ''");
-  } catch { /* 列已存在 */ }
+  addColumnIfMissing("dict_sources", "lang", "TEXT NOT NULL DEFAULT ''");
   try {
     for (const [fmt, lang] of Object.entries(DICT_FORMAT_LANG)) {
       db.run("UPDATE dict_sources SET lang=? WHERE lang='' AND format=?", [lang, fmt]);
     }
   } catch { /* 回填失败下次启动重试 */ }
   // v32（M7）：cards.dict_json（Entry 快照 + providerId + 查词版本；存量 NULL 前向兼容）
-  try {
-    db.run("ALTER TABLE cards ADD COLUMN dict_json TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("cards", "dict_json", "TEXT");
   // v34（M12，D33/§4.16）：cards.sibling_key——同源组标识（同一制卡来源单元的多张卡共享）。
   // 只服务「今日队列视图」（computeTodayQueue），不参与 FSRS 调度；存量行 NULL=不参与延后，无回填。
-  try {
-    db.run("ALTER TABLE cards ADD COLUMN sibling_key TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("cards", "sibling_key", "TEXT");
   // v48.60（D102，§4.1）：cards.status——卡片生命周期（active/archived）。
   // NULL 视同 active（零回填）；只影响 TODAY_QUEUE_SQL 视图过滤，不改任何 FSRS 字段。
-  try {
-    db.run("ALTER TABLE cards ADD COLUMN status TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("cards", "status", "TEXT");
   await nextTick(); // D143（T4）：initDb 分相让出（2/5）——SCHEMA + 首批 ALTER 迁移相结束
   // v36（M8-A，§4.1/§6.5.2，D34）：journal_entries——流式日记条目（第二输入通道）。
   // 口径：entry_date 为**自然日**（不随学习日切点漂移）；is_draft=1 为「未发送的快速记录草稿」。
@@ -678,14 +689,12 @@ async function initDb() {
   // v41（K2-A，D38）：knowledge_proposals.fingerprint——提案幂等键（sha1(kind+部件)；同键任何状态含已拒绝
   // 已存在即跳过，否决即事实）。存量行 NULL=无指纹（旧迁移提案），不参与去重。
   try {
-    db.run("ALTER TABLE knowledge_proposals ADD COLUMN fingerprint TEXT");
+    addColumnIfMissing("knowledge_proposals", "fingerprint", "TEXT");
     db.run("CREATE INDEX IF NOT EXISTS idx_kprop_fp ON knowledge_proposals(fingerprint, is_deleted)");
   } catch { /* 列已存在 */ }
   // v46（M14-UM2，D39 / §4.18-9 v44 原则制）：prompt_templates.situation_required——R20 scope 声明位
   // （提示词播种时随模板写入；注入管线只对 1 的 scope 装配【用户记忆】块）。存量行按注册表回填。
-  try {
-    db.run("ALTER TABLE prompt_templates ADD COLUMN situation_required INTEGER");
-  } catch { /* 列已存在 */ }
+  addColumnIfMissing("prompt_templates", "situation_required", "INTEGER");
   try {
     for (const [scope, val] of Object.entries(SITUATION_REQUIRED_SCOPES)) {
       db.run("UPDATE prompt_templates SET situation_required = ? WHERE scope = ?", [val ? 1 : 0, scope]);
@@ -693,9 +702,7 @@ async function initDb() {
     db.run("UPDATE prompt_templates SET situation_required = 0 WHERE situation_required IS NULL");
   } catch { /* 回填失败不阻塞启动 */ }
   // v46（M14-UM2，§4.18-10）：cards.memory_ref_json——记忆溯源（{line, verified}；NULL=未用记忆）
-  try {
-    db.run("ALTER TABLE cards ADD COLUMN memory_ref_json TEXT");
-  } catch { /* 列已存在 */ }
+  addColumnIfMissing("cards", "memory_ref_json", "TEXT");
   // v40（M8-B，§4.13/§9.1 M8-B-4）：洞察运行记录（append-only 事实 + 反馈载体；永不写 mastery）。
   try {
     db.run(`CREATE TABLE IF NOT EXISTS insight_runs (
@@ -889,11 +896,7 @@ async function initDb() {
       ["parent_node_id", "TEXT"],
       ["span_chars", "INTEGER"]
     ]) {
-      try {
-        db.run(`ALTER TABLE material_map_calls ADD COLUMN ${col} ${type}`);
-      } catch {
-        /* 列已存在 */
-      }
+      addColumnIfMissing("material_map_calls", col, type);
     }
   } catch { /* 表已存在 */ }
   // v49.19（D192，MINDMAP-V2-IMPL-PLAN §3.1）：导图 v2——节点/边两表 + 版本行视图列 + 账本新列。
@@ -922,11 +925,7 @@ async function initDb() {
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_mmedges_key ON material_map_edges(map_id, from_id, to_id, code)");
     db.run("CREATE INDEX IF NOT EXISTS idx_mmedges_to ON material_map_edges(map_id, to_id)");
   } catch { /* 表已存在 */ }
-  try {
-    db.run("ALTER TABLE material_maps ADD COLUMN view_json TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("material_maps", "view_json", "TEXT");
   // 账本新列（守卫式 ALTER；`trigger` 是 SQLite 关键字，统一加引号）
   for (const [col, type] of [
     ["model", "TEXT"],
@@ -938,28 +937,20 @@ async function initDb() {
     ["reasoning_chars", "INTEGER"],
     ["trigger", "TEXT"]
   ]) {
-    try {
-      db.run(`ALTER TABLE material_map_calls ADD COLUMN "${col}" ${type}`);
-    } catch {
-      /* 列已存在 */
-    }
+    addColumnIfMissing("material_map_calls", col, type);
   }
   // D121 §1.1：书籍作者（可空；导入时取得到才填，绝不猜）
-  try {
-    db.run("ALTER TABLE library_items ADD COLUMN author TEXT");
-  } catch {
-    /* 列已存在 */
-  }
+  addColumnIfMissing("library_items", "author", "TEXT");
   // D143（T4）：initDb 分相让出（4/5）——导图/作者迁移段结束，进入一次性回填前
   await nextTick();
   // §9.4 历史数据兼容（一次性版本化回填）：① v11 前新卡态卡片 fsrs_json 补 S/D 基线（createEmptyCard
   // 口径 0/0，§4.4.1「历史缺字段基线回填」）；② 存量 cloze 卡 hint 拆答案物化进 back_markdown（与渲染层
   // extractClozeAnswer(s) 拼接逐字符等价，tests/legacyBackfill.test.cjs 对拍）。判定/编排见 legacyBackfill.js：
-  // 单事务 + 未匹配行零变更 + settings.app.legacyBackfillV1 标记幂等；数据落盘走本函数末尾 persist()。
+  // 单事务 + 未匹配行零变更 + app_meta.legacyBackfillV1 标记幂等（C-10 前在 settings）；数据落盘走本函数末尾 persist()。
   let legacyBackfillResult = null; // P1 时序：回填结果暂存，完成标记延到 persist() 成功之后才落盘
   try {
     const { runLegacyBackfill } = require("./legacyBackfill");
-    const bf = runLegacyBackfill({ db, queryAll, readSettings, writeSettings, now: Date.now });
+    const bf = runLegacyBackfill({ db, queryAll, readSettings, writeSettings, readAppMeta, writeAppMeta, now: Date.now });
     if (bf.ran && (bf.fsrsFixed > 0 || bf.clozeFixed > 0)) {
       console.log(`[legacyBackfill] fsrs_json 补 S/D ${bf.fsrsFixed} 行；cloze hint 答案物化 ${bf.clozeFixed} 行`);
     }
@@ -970,6 +961,11 @@ async function initDb() {
   await nextTick(); // D143（T4）：initDb 分相让出（5/5）——一次性回填相结束，进入提示词播种/落盘
   ensurePromptTemplates();
   persist();
+  // C-10：基线（v1）完成后写版本并执行事务化迁移（每项一个事务 + 同事务写 user_version）；
+  // 再把 settings 里的库内事实搬进 app_meta。必须在 mark() 之前——标记落点依赖 app_meta 已建。
+  if (schema.readUserVersion(db) < 1) db.pragma("user_version = 1");
+  schema.runMigrations(db);
+  migrateSettingsFactsToAppMeta();
   // P1 时序：完成标记必须在 persist() 成功之后写（标记是重跑跳过的唯一安全网，先于数据落盘会在
   // 「标记已写、数据未持久化即崩溃」时把存量旧数据锁死在未回填态）——persist 抛错则此处不执行，
   // 标记不落盘，下次启动重跑可续（事务零残留；数据已持久化时重跑判定已合规 → 零写入 → 补标记）。
@@ -1055,10 +1051,11 @@ function getConfigRow(id) {
   };
 }
 
-// 活跃配置 = settings.app.fsrsConfigId 指针所指行（指针缺失/悬空回退 cfg-default）
+// 活跃配置 = 指针所指行（C-10 起指针存 app_meta；未迁移旧库回落 settings.app.fsrsConfigId）。
+// 指针缺失/悬空回退 cfg-default。
 function getActiveFsrsConfig() {
-  const s = readSettings();
-  const id = s.app?.fsrsConfigId;
+  const fromMeta = readAppMeta("fsrsConfigId");
+  const id = fromMeta !== undefined && fromMeta !== null && fromMeta !== "" ? fromMeta : readSettings().app?.fsrsConfigId;
   return (id && getConfigRow(id)) || getConfigRow(DEFAULT_CONFIG_ID);
 }
 
@@ -1080,12 +1077,10 @@ function insertFsrsConfig(weights, schedulerOptions, source) {
 }
 
 // 移动活跃指针（切换配置只改变指针，绝不修改配置内容；§4.4.10 不可变约束）
+// C-10：指针存 app_meta（库内事实与库同恢复）；v2 迁移前表不存在时 writeAppMeta 回落 settings。
 function setActiveFsrsConfig(id) {
   if (!getConfigRow(id)) throw new Error(`FSRS 配置不存在: ${id}`);
-  const s = readSettings();
-  if (!s.app) s.app = {};
-  s.app.fsrsConfigId = id;
-  writeSettings(s);
+  writeAppMeta("fsrsConfigId", id);
   return id;
 }
 

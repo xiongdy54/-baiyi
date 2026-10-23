@@ -12,6 +12,8 @@ const fs = require("fs");
 const path = require("path");
 const JSZip = require("jszip");
 const { Worker } = require("worker_threads");
+const Database = require("better-sqlite3");
+const schema = require("./schemaVersion");
 
 const APP_TAG = "incremental-reading-dev";
 const FORMAT = 1;
@@ -702,6 +704,23 @@ async function restoreBackup(file, opts = {}) {
       if (!dest.startsWith(path.resolve(p.stagingDir) + path.sep)) continue; // 防 zip 路径穿越
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       fs.writeFileSync(dest, await entry.async("nodebuffer"));
+    }
+    // C-10：备份来自更新版本的 Nutation → 拒绝恢复（旧程序打开新库会静默破坏数据）
+    const stagedDb = path.join(p.stagingDir, "library.db");
+    try {
+      const probe = new Database(stagedDb, { readonly: true, fileMustExist: true });
+      let uv = 0;
+      try { uv = Number(probe.pragma("user_version", { simple: true })) || 0; } finally { probe.close(); }
+      for (const sidecar of ["-wal", "-shm"]) {
+        try { fs.rmSync(stagedDb + sidecar, { force: true }); } catch { /* 忽略 */ }
+      }
+      if (uv > schema.SCHEMA_VERSION) {
+        try { fs.rmSync(p.stagingDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+        return { ok: false, error: "该备份来自更新版本的 Nutation，请先升级程序再恢复" };
+      }
+    } catch (e) {
+      try { fs.rmSync(p.stagingDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+      return { ok: false, error: `备份中的 library.db 无法读取：${e instanceof Error ? e.message : String(e)}` };
     }
     fs.writeFileSync(p.markerFile, JSON.stringify({ stagedAt: Date.now(), source: String(file), meta }, null, 2));
   } catch (err) {

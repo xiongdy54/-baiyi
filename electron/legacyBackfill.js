@@ -33,14 +33,15 @@
 //
 // 写路径：单事务（BEGIN→UPDATE→COMMIT，异常 ROLLBACK 后 rethrow）；数据持久化走挂载点 initDb 末尾的
 // persist()（与全部既有迁移同一原子写路径，不新增 §7.2 例外）。
-// 完成标记（P1 时序纪律）：runLegacyBackfill **不写 settings**，只回传 mark() 回调——挂载点必须在
-// persist() 成功之后才调 mark() 落盘 settings.app.legacyBackfillV1（v23 fsrsWeights 先例是「先写
-// settings 后 persist」，本回填不能照抄：标记是重跑跳过的唯一安全网，先于数据落盘会在「标记已写、
-// 数据未持久化即崩溃」时把存量旧数据永久锁死在未回填态）。标记存在即跳过；未标记但全库已合规 →
+// 完成标记（P1 时序纪律）：runLegacyBackfill **不写标记**，只回传 mark() 回调——挂载点必须在
+// persist() 成功之后才调 mark() 落盘（C-10 起为 app_meta.legacyBackfillV1；未迁移旧库回落
+// settings.app.legacyBackfillV1。v23 fsrsWeights 先例是「先写 settings 后 persist」，本回填不能
+// 照抄：标记是重跑跳过的唯一安全网，先于数据落盘会在「标记已写、数据未持久化即崩溃」时把存量
+// 旧数据永久锁死在未回填态）。标记存在即跳过；未标记但全库已合规 →
 // 零写入后照常标记。崩溃中断：文件库只在上次完整 persist 版本，重启后未标记 → 重跑（事务保证中途
 // 失败零残留；数据已 persist 而标记未写 → 重跑判定已合规 → 零写入 → 补标记）。
 
-// 与 settings.json 的 app 对象键（无 settings 表；照 db.js v23「settings.app.fsrsWeights 迁移」先例）
+// 标记键：C-10 起存库内 app_meta（与库同恢复）；未迁移旧库读 settings.app 同键回落
 const MARKER_KEY = "legacyBackfillV1";
 
 // ---------- ① fsrs_json 缺 S/D 判定（纯函数） ----------
@@ -174,10 +175,13 @@ function parseClozeOrdsField(text) {
  *   标记是重跑跳过的唯一安全网，先于数据落盘会把未回填的存量数据永久锁死在旧形态。
  */
 function runLegacyBackfill(deps) {
-  const { db, queryAll, readSettings, writeSettings } = deps;
+  const { db, queryAll, readSettings, writeSettings, readAppMeta, writeAppMeta } = deps;
   const now = typeof deps.now === "function" ? deps.now : Date.now;
+  // C-10：标记优先读 app_meta（库内事实），未迁移旧库回落 settings
+  const metaMarker = typeof readAppMeta === "function" ? readAppMeta(MARKER_KEY) : undefined;
   const s0 = readSettings();
-  if (s0 && s0.app && s0.app[MARKER_KEY] !== undefined && s0.app[MARKER_KEY] !== null) {
+  const settingsMarker = s0 && s0.app ? s0.app[MARKER_KEY] : undefined;
+  if ((metaMarker !== undefined && metaMarker !== null) || (settingsMarker !== undefined && settingsMarker !== null)) {
     return { ran: false, reason: "marked", fsrsFixed: 0, clozeFixed: 0 };
   }
   const rows = queryAll(
@@ -235,6 +239,10 @@ function runLegacyBackfill(deps) {
     markedAt,
     planned: updates.length,
     mark: () => {
+      if (typeof writeAppMeta === "function") {
+        writeAppMeta(MARKER_KEY, markedAt); // C-10：标记只写库内 app_meta（挂载点保证表已存在）
+        return;
+      }
       const s1 = readSettings();
       s1.app = { ...(s1.app || {}), [MARKER_KEY]: markedAt };
       writeSettings(s1);
