@@ -7,7 +7,12 @@ const path = require("path");
 
 (async () => {
   const SQL = await initSqlJs();
-  const file = path.join(process.env.APPDATA, "incremental-reading-dev", "library.db");
+  // C-11：不再默认指向真实 userData；由 NUTATION_USER_DATA 显式指定（runner/流程会注入临时目录）
+  if (!process.env.NUTATION_USER_DATA) {
+    console.error("缺少 NUTATION_USER_DATA 环境变量（指向待清理的 userData 目录）；拒绝默认碰真实数据目录。");
+    process.exit(1);
+  }
+  const file = path.join(process.env.NUTATION_USER_DATA, "library.db");
   if (!fs.existsSync(file)) {
     console.error("找不到 library.db：" + file);
     process.exit(1);

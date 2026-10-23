@@ -19,11 +19,9 @@
 "use strict";
 
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
-const APP_DIR = "incremental-reading-dev";
 
 // ---------- 参数 ----------
 
@@ -40,13 +38,12 @@ function parseArgs(argv) {
 }
 
 function defaultDbPath() {
-  const base =
-    process.platform === "win32"
-      ? path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), APP_DIR)
-      : process.platform === "darwin"
-        ? path.join(os.homedir(), "Library", "Application Support", APP_DIR)
-        : path.join(os.homedir(), ".config", APP_DIR);
-  return path.join(base, "library.db");
+  // C-11：不再默认指向真实 userData；用 NUTATION_USER_DATA 显式指定（--db 仍可覆盖）
+  if (!process.env.NUTATION_USER_DATA) {
+    console.error("缺少 NUTATION_USER_DATA 环境变量（指向 userData 目录）；拒绝默认碰真实数据目录。也可用 --db <path> 指定。");
+    process.exit(1);
+  }
+  return path.join(process.env.NUTATION_USER_DATA, "library.db");
 }
 
 function loadSqlJs() {

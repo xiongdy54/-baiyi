@@ -1,7 +1,7 @@
 // FSRSTEST 测试数据一次性清理（reader.engine.mjs 异常路径泄漏的存量回收，D85 第 1 项）。
 // @runtime: electron  @tier: 2  @gui: false  @id: FSRSTEST-CLEANUP  @timeout: 60
 // 运行前提：**真实应用已关闭**（sql.js 全量落盘，双进程互吞）；`npx electron tests/fsrstest.cleanup.cjs`
-// 可用 FSRSTEST_USERDATA 指到别处做演练（缺省＝真实 userData，即 reader.engine 驱动的那个库）。
+// 目标目录：FSRSTEST_USERDATA（演练）> NUTATION_USER_DATA，缺省报错退出（C-11：不默认指向真实 userData）。
 // 清理口径与该套件第 8 步一致：FSRSTEST 卡先删（cards:delete 同口径）→ `library:delete`（deleteItem
 // 级联软删 item/documents/assets）；另扫一遍 FSRSTEST 摘录兜底（该套件本不造摘录，防旧泄漏）。
 const { app } = require("electron");
@@ -9,11 +9,15 @@ const path = require("path");
 const ROOT = path.resolve(__dirname, "..");
 
 app.whenReady().then(async () => {
-  // 一次性脚本（electron tests/xx.cjs）的应用名不是 package.json 的 name ⇒ userData 默认落到
-  // Roaming/Electron（实测踩过：跑完报 0 条）——必须显式指到真实应用的数据目录。
-  app.setPath("userData", process.env.FSRSTEST_USERDATA
-    ? path.resolve(process.env.FSRSTEST_USERDATA)
-    : path.join(app.getPath("appData"), "incremental-reading-dev"));
+  // C-11：演练用 FSRSTEST_USERDATA 优先，否则 NUTATION_USER_DATA；都缺省就报错退出，
+  // 不再回落真实应用数据目录（测试不应默认指向真实 userData）。
+  const target = process.env.FSRSTEST_USERDATA || process.env.NUTATION_USER_DATA;
+  if (!target) {
+    console.error("缺少 FSRSTEST_USERDATA 或 NUTATION_USER_DATA 环境变量；拒绝默认碰真实数据目录。");
+    app.exit(1);
+    return;
+  }
+  app.setPath("userData", path.resolve(target));
   const db = require(path.join(ROOT, "electron", "db.js"));
   await db.initDb();
 

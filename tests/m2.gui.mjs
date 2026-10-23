@@ -6,7 +6,12 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const UD = path.join(process.env.APPDATA, "incremental-reading-dev");
+// C-11：userData 由 NUTATION_USER_DATA 显式指定（与被驱动的应用同一环境变量；缺省报错退出）
+if (!process.env.NUTATION_USER_DATA) {
+  console.error("缺少 NUTATION_USER_DATA 环境变量（指向应用 userData 目录）。");
+  process.exit(1);
+}
+const UD = process.env.NUTATION_USER_DATA;
 const SHOT = path.join(UD, "backups"); // 备份目录
 
 let pass = 0, fail = 0;

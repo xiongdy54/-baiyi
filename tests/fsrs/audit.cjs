@@ -10,7 +10,14 @@ const getArg = (name, def) => {
   const i = args.indexOf(name);
   return i >= 0 && args[i + 1] ? args[i + 1] : def;
 };
-const DB_PATH = getArg("--db", "C:/Users/xiongdy/AppData/Roaming/incremental-reading-dev/library.db");
+// C-11：缺省库改为 NUTATION_USER_DATA 指定；未设置时报错退出，绝不默认指向真实数据目录
+const DB_PATH = getArg("--db", process.env.NUTATION_USER_DATA
+  ? path.join(process.env.NUTATION_USER_DATA, "library.db")
+  : null);
+if (!DB_PATH) {
+  console.error("缺少 --db <path> 或 NUTATION_USER_DATA 环境变量；拒绝默认指向真实数据目录。");
+  process.exit(1);
+}
 const PREFIX = getArg("--card-prefix", "FSRSTEST");
 const WEIGHTS_FILE = getArg("--weights", null);
 

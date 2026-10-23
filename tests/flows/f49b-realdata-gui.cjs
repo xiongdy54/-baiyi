@@ -10,14 +10,14 @@
 //       只有真数据能答。
 //
 // 硬约束：
-//   · 只读原件：%APPDATA%\incremental-reading-dev 全程只做 stat 指纹比对，不 open 不写。
+//   · 只读原件：原件目录由 NUTATION_USER_DATA 显式指定（C-11：缺省报错退出，不默认指向真实
+//     %APPDATA%），全程只做 stat 指纹比对，不 open 不写。
 //   · 沙箱 = tmpUserDataDir("f49")，由本流程自己把副本拷进去，launch({fresh:false})。
 //   · 不改 tests/flows/lib/：需要任意目录时用「把数据搬进 lib 给的目录」代替「改 lib 的映射」。
 //   · 只 kill 自己 spawn 的 PID（guienv.shutdown 已是这个语义）。
 //   · 每项测量做两遍（reproducible 才算缺陷）。
 "use strict";
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { Flow, runFlow, ROOT, tmpUserDataDir } = require("./lib/harness.cjs");
 const { launch, shutdown, wait, distFreshness } = require("./lib/guienv.cjs");
@@ -32,7 +32,11 @@ const flow = new Flow({
 });
 
 const COPY_DIR = path.join(ROOT, "tests", "tmp-f49-realdata");
-const APPDATA = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "incremental-reading-dev");
+if (!process.env.NUTATION_USER_DATA) {
+  console.error("F49B 缺少 NUTATION_USER_DATA（指向作为原件的真实/候选 userData 目录，只读）；缺省拒绝运行。");
+  process.exit(1);
+}
+const APPDATA = path.resolve(process.env.NUTATION_USER_DATA);
 const BASELINE = path.join(ROOT, "tests", "flows", "fixtures", "f10-perf-baseline.json");
 
 /** 只读指纹：路径 → size|mtime（绝不 open 内容） */

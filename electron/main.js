@@ -11,10 +11,29 @@ if (process.env.M7_TEST_USERDATA) {
   app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));
 }
 
+// C-11（D-02 已答复）：冻结发布身份——数据目录由这里固定，与 productName 解耦。
+// 打包版 = <appData>/Nutation，开发版 = <appData>/Nutation-dev；测试一律经
+// NUTATION_USER_DATA / M7_TEST_USERDATA 指向临时目录（命中即跳过迁移，绝不碰真实数据）。
+// 旧目录 incremental-reading-dev 首次启动改名迁移；改名失败（文件被占用/跨盘/权限）
+// 继续用旧目录——绝不新建空目录造成「数据消失」。
+const NUTATION_APP_ID = "io.github.xiongdy54.nutation";
+(function pinUserData() {
+  if (process.env.M7_TEST_USERDATA) return; // 上方 M7 块已 setPath；测试隔离不做旧目录迁移
+  if (process.env.NUTATION_USER_DATA) {
+    app.setPath("userData", path.resolve(process.env.NUTATION_USER_DATA));
+    return;
+  }
+  const { resolveUserData } = require("./userData");
+  const r = resolveUserData({ appData: app.getPath("appData"), isPackaged: app.isPackaged });
+  if (r.error) {
+    console.error("[pinUserData] 旧数据目录迁移失败，继续使用旧目录：", r.error && r.error.message);
+  }
+  app.setPath("userData", r.dir);
+})();
+
 // v49.14（D187）：系统通知身份——Windows 通知署名按 AUMID（AppUserModelId）解析，无快捷方式可解析时
-// 回落显示 AUMID 原文。取字面品牌串「Nutation」使 dev 与打包版均稳定显示品牌名（appId 格式串在 dev 下
-// 会显示 com.incrementalreading.desktop 原文）；托盘气泡 electron.app.Electron 顶栏问题即此修复。
-app.setAppUserModelId("Nutation");
+// 回落显示 AUMID 原文。C-11 起与 appId 统一（通知归属、任务栏固定图标依赖二者一致）。
+app.setAppUserModelId(NUTATION_APP_ID);
 
 // v48.23（D61 §6.8-11）：多段选择的纯函数内核（唯一实现面，见 electron/annotationRange.js 头注）。
 // 主进程用它装配 spans 载荷（extracts:spanSet 与 db.createExtract 同一模块）。
