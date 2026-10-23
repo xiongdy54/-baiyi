@@ -776,6 +776,13 @@ function validateAndAuditCss(cssText, schema, pluginId) {
     }
   }
 
+  // C-44：image-set() / -webkit-image-set() 接受"字符串形式的 URL"（不经 url()），可绕过上面的 url() 检查发起网络请求；
+  // src() 是 CSS 新增的 URL 函数，同理。Token 覆盖层没有正当用例 → 一律拒绝（fail-closed）。
+  const urlFnRe = /(?:-webkit-)?image-set\s*\(|(?<![\w-])src\s*\(/gi;
+  while ((m = urlFnRe.exec(scanForbidden))) {
+    return { ok: false, reason: failWithLine("styles.css 含 image-set()/src()（可用字符串 URL 联网，零网络红线一律拒绝）", m.index) };
+  }
+
   // 规则 4/5 + §6.6：档位块选择器形态、受审计 Token 值形态、accent 配对、对比度数值审计
   const ext = extractAuditedDeclarations(scanStruct, pluginId, failWithLine);
   if (!ext.ok) return { ok: false, reason: ext.reason };

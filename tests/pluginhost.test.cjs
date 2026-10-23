@@ -173,6 +173,14 @@ const goodManifest = (patch) =>
     check("@import 大小写拒（@Import）", !v('body { background: url(x) }\n@IMPORT "y.css";\nbody { --paper: #fafaf8; }').ok, "");
     check("url(http) 拒", !v('body { background: url(http://x/y.png); --paper: #fafaf8; }').ok, "");
     check("url(javascript:) 拒", !v('body { background: url(javascript:alert(1)); --paper: #fafaf8; }').ok, "");
+    // C-44：image-set()/src() 接受字符串形式的 URL（不经 url()），可绕过 url() 规则发网络请求——零网络红线一律拒
+    const c44Base = "body.theme-dark { --ink: #888888; --paper: #101010; }";
+    check("image-set(字符串 URL) 拒（C-44）", !v(c44Base + ' a { background-image: image-set("https://example.com/u20.png" 1x); }').ok, "");
+    check("-webkit-image-set(字符串 URL) 拒（C-44）", !v(c44Base + ' a { background-image: -webkit-image-set("https://example.com/u20.png" 1x); }').ok, "");
+    check("IMAGE-SET 大写拒（C-44）", !v(c44Base + ' a { background-image: IMAGE-SET("https://example.com/u20.png" 1x); }').ok, "");
+    check("src(字符串 URL) 拒（C-44）", !v(c44Base + ' a { background-image: src("https://example.com/u20.png"); }').ok, "");
+    check("基准 CSS 过（C-44 对照）", v(c44Base).ok === true, v(c44Base).reason);
+    check("--src-tone 名字含 src 的自定义属性不误伤（C-44）", v(c44Base + " :root { --src-tone: #123456; }").ok === true, "");
     check("url(data:image/png;base64,…) 过", v('body { background: url(data:image/png;base64,iVBORw0KGgo=); --paper: #fafaf8; }').ok === true, v('body { background: url(data:image/png;base64,iVBORw0KGgo=); --paper: #fafaf8; }').reason);
     check("注释内禁忌串忽略", v('/* 示例：@import url("https://x") 仅供参考 */\nbody { --paper: #fafaf8; }').ok === true, "");
     check("组合选择器拒（body, body.theme-dark）", !v("body, body.theme-dark { --paper: #fafaf8; }").ok, "");
