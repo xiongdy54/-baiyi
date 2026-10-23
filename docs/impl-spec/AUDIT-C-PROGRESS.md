@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`d1735e8`（C-10 合并；账本上一版于 `2400489`）。
+> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`7647752`（C-11 合并；账本上一版于 `d1735e8`）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -18,11 +18,12 @@
 
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：94 个 `tests/*.test.cjs`，分布 **29 electron / 7 system-node / 58 electron-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 各按报告预期 +1 / +1 / +2 / +1。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
+- **测试规模**：95 个 `tests/*.test.cjs`，分布 **29 electron / 7 system-node / 59 electron-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version` 落在 electron；C-11 `userData` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 各按报告预期 +1 / +1 / +2 / +1 / +1。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10。
-- **下一项**：**C-11**（冻结发布身份：appId / productName / userData 目录 / 发布仓库，P0；⛔ 决策 D-02，未答复前只做不依赖决策的子步骤）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11。
+- **下一项**：**C-12**（备份/恢复流式化，ZIP64 / >2 GiB，P0）。
+- **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
 
@@ -73,7 +74,7 @@
 | 9 | C-08 | 完成 | `3081287` / `7bb6809` | 纯函数路径校验 + 真实 Electron 探针；验收见 §3.9。 |
 | 10 | C-09 | 完成 | `ff3b448` / `2400489` | 构建期 CSP + 权限处理器 + foliate 脚本剔除；验收见 §3.10。 |
 | 11 | C-10 | 完成 | `b20d4dd` / `d1735e8` | user_version + 事务化 MIGRATIONS + 迁移前快照 + app_meta；验收见 §3.11。 |
-| 12 | C-11 | 待做 | — | 冻结发布身份；⛔ 决策 D-02。 |
+| 12 | C-11 | 完成 | `e3b6aa5` / `7647752` | D-02 已答复（见 §1 决策记录）；userData.js 纯函数化；验收见 §3.12。 |
 | 13 | C-12 | 待做 | — | 备份/恢复流式化，ZIP64 / >2 GiB。 |
 | 14 | C-13 | 待做 | — | 恢复流程（退出清理 / learner.db / 设备设置）；同时复核 m14 EBUSY。 |
 | 15 | C-14 | 待做 | — | 备份轮换按 mtime 排序。 |
@@ -363,6 +364,37 @@
   6. **流程侧观察（非 C-10 回归）**：F43 A2b-1 仍红（`database disk image is malformed`），已用最小探针确认是 D137（2026-10-12 起 better-sqlite3）后既有夹具问题——F43 用 sql.js 覆盖仍被旧连接占用的库文件，按旧顺序先执行 `journal_mode = wal` 也同样首读即 malformed；失败发生在 C-10 新增的 pragma 读取之前，与本项无关。F43 的 P0-4（settings 格式版本键）与 A4/A5 不在 C-10 范围。F50 的 S3/S4/S5 仍未绿：剩余盲吞站点都在非 ALTER 的建表/回填/backup.js，C-10 只按报告消除 ALTER 吞错；S2 的 `pragmaTableInfo` 探针为正则 `PRAGMA table_info`，不匹配 `pragma_table_info()` 表值函数（`columnHelper` 已识别 `addColumnIfMissing`）。
   7. 临时探针与隔离 userData 均已删除，未入库；提交只含 8 个源/测试文件。
 
+### 3.12 C-11 · 冻结发布身份：appId / productName / userData 目录 / 发布仓库
+
+- **决策 D-02（本项前置，用户 2026-10-23 逐项确认）**：发布仓库 `xiongdy54/Nutation`；appId `io.github.xiongdy54.nutation`；productName `Nutation`；author `xiongdy54` + GitHub noreply 邮箱。详见 §1 决策记录。
+- **提交**：`e3b6aa5 fix(C-11): 冻结发布身份 appId/productName/userData 目录/发布仓库（D-02 已答复）`；合并 `7647752`。
+- **改动**（18 文件）：
+  - 新建 `electron/userData.js`：`resolveUserData({ appData, isPackaged, existsSync, renameSync })` 纯函数——目标 `<appData>/Nutation`（打包）或 `Nutation-dev`（开发）；旧目录 `incremental-reading-dev` 存在且目标不存在时整目录改名迁移，改名抛错则回退旧目录并带出 error。
+  - `electron/main.js`：`pinUserData()` IIFE（M7_TEST_USERDATA → NUTATION_USER_DATA → resolveUserData，M7 优先且命中即跳过迁移）；`setAppUserModelId(NUTATION_APP_ID)` 与 appId 统一。
+  - `electron-builder.yml`：appId / productName=Nutation / publish owner=xiongdy54 repo=Nutation / `artifactName: Nutation-${version}-win-${arch}-setup.${ext}`；冻结注释更新（数据目录由 pinUserData 固定、与 productName 解耦）。
+  - `package.json`：`name: nutation` + productName / description / author / homepage / repository；`npm install --package-lock-only` 同步 lock（diff 仅 2 个 name 字段 + C-01 engines 补录）。
+  - `electron/backup.js`：`APP_TAG` 加冻结注释，值不改。
+  - 测试/脚本不再默认指向真实 userData，改 `NUTATION_USER_DATA` 必填、缺省报错退出：`tests/m4.cleanup.cjs`、`tests/fsrstest.cleanup.cjs`（FSRSTEST_USERDATA 优先保留）、`tests/fsrs/audit.cjs`、`scripts/mindmap-profile.cjs`、`tests/flows/f49b-realdata-gui.cjs`、`tests/m2.gui.mjs`、`tests/m6-1/m6-2/m6-2native/m6-3.gui.mjs`。
+  - `scripts/run-tests.mjs`：`runOne` 为每个测试注入 `NUTATION_USER_DATA = fs.mkdtempSync(...)`，close 后 `rmSync`（maxRetries 5）。
+  - 新增 `tests/userData.test.cjs`（electron-node，6 场景）。
+- **验收（2026-10-23，Windows；Electron 31.7.7）**：
+  - 迁移三条路径（dev 新装 / 打包新装 / 改名迁移 / 目标已存在不改名 / 注入 EBUSY 回退 / **Windows 真实占用差分**：better-sqlite3 只读连接占住 `legacy/library.db` → 真实 `renameSync` 失败回退旧目录，连接关闭后同一改名成功——证明失败确由占用引起）：`node scripts/run-tests.mjs userData` → 1 通过 / 0 失败（123ms）。
+  - 真实应用启动冒烟（临时探针，已删；`NUTATION_USER_DATA` 指向临时目录）→ **4/4**：library.db 建在该目录、main.log 落在该目录、日志无迁移失败、二次启动复用同目录（追加第二会话头）。
+  - `npm run build` 无需（dist 既有）；`npx electron-builder --dir --publish never` 成功（包内 `Nutation.exe`）；完整 NSIS `npx electron-builder --win --publish never` → `release/win-unpacked/resources/app-update.yml` = `owner: xiongdy54 / repo: Nutation / provider: github`；安装包 `release/Nutation-0.0.1-win-x64-setup.exe`（121 MB）。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":59,"electron":29,"system-node":7}`（95 个，报告 94 → +1）。
+  - `npm run typecheck` → exit 0。
+  - `npm test` 两轮：首轮 91 过 / 3 败 / 1 超时（`card-links` 超时，见偏离 5）；复跑钉定脚本后干净第二轮 **92 过 / 3 败 / 0 超时**，失败集合 = applog、lensWindow（G1 时序 flake）、m14，无新增失败文件。
+- **偏离**：
+  1. **pinUserData 提取为 `electron/userData.js` 纯函数**（报告要求内联在 main.js）。原因：实测 **Windows 上 Electron 的 `app.getPath("appData")` 不跟随 `%APPDATA%` 环境变量**（设了仍返回真实 Roaming，探针实证）——报告验收设想的「沙箱 APPDATA 迁移实测」在本机不可行，这也正是本仓一直用 `M7_TEST_USERDATA` 自定义开关隔离的原因。纯函数化（fs 可注入）+ fs 级测试（含真实占用差分）覆盖报告三条验收路径，且满足执行规则 4（绝不触碰真实 userData）。真实应用侧用 NUTATION_USER_DATA 启动冒烟补接线验证。
+  2. **报告验收 1/2（真实迁移 / 真实占用下启动）改由单元测试覆盖**，未在真实 `%APPDATA%` 上演练迁移——用户自己的下次 dev 启动会触发真实改名迁移（这正是特性）；日志若出现「迁移失败，继续使用旧目录」属预期回退，数据不丢。
+  3. **app-update.yml 验收改跑完整 NSIS 目标**：`--dir` 目标不生成 app-update.yml（electron-builder 只为安装器目标写更新描述）；`--win --publish never` 实测生成且 owner/repo 正确。
+  4. 报告步骤 5 说「约 10 处」：实际改动 10 个文件、11 处路径/守卫（含 5 个 GUI 套件）；backup-meta 的 `app: "incremental-reading-dev"` 字面量（backup.test / f05 / f39 / f43 / f82）与 `nodeSqliteShim.getName()` 是冻结格式标识/显示名，按报告明确不改。
+  5. **首轮全量 `card-links` 超时一次**（180s，单独复跑同样超时）；重跑 `scripts/pin-better-sqlite3-electron.cjs`（PIN_OK abi=125，绑定文件实际未被 electron-builder 改动）后单独跑通过（840ms），干净全量第二轮通过。未复现、根因未定位（疑似打包后环境瞬时状态或系统级停顿），判定与本项代码无关；如再复现应单独立项排查。
+  6. **文档收口待办（未在本项内做）**：`AI_DEVELOPMENT_GUIDE.md` §4:80 仍记载库文件在 `%APPDATA%/incremental-reading-dev/library.db`——按仓库规约改 GUIDE 需版本 bump + §8.1 决策号收口，超出报告 C-11 步骤清单，留待单独文档回合（建议与 GUIDE 其他过时路径一并收口）。`docs/HISTORY.md` 等历史叙述不属现状描述，不改。
+  7. 测试副产物 `tests/m15r.activity.bundle.cjs` / `m15r.layout.bundle.cjs` 在全量后变脏，提交前已还原；临时探针与沙箱均删除未入库。
+
+
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -376,5 +408,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-11**（阶段 1 首发前必须完成，P0；⛔ 决策 D-02，未答复前只做不依赖决策的子步骤）。
-- 基线：94 个测试；C-10 后全量 92 过 / 2 败（Windows，2026-10-23；applog、m14，见 §1.1）。
+- 当前下一项：**C-12**（阶段 1 首发前必须完成，P0：备份/恢复流式化，ZIP64 / >2 GiB）。
+- 基线：95 个测试；C-11 后干净全量 92 过 / 3 败（Windows，2026-10-23；applog、lensWindow G1 flake、m14，见 §1.1）。
