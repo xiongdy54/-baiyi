@@ -537,11 +537,14 @@ async function initDb() {
     }
   } catch { /* 表尚不存在等场景 */ }
   // v23（D20）：存量 settings.app.fsrsWeights 迁移——播种为 optimizer config 行并设指针后删除该字段（双事实源废除）
+  // C-48：设指针与删旧字段必须在同一次 writeSettings 里完成。原来先调 setActiveFsrsConfig(id)（它自己读-改-写一次
+  // settings.json），再把开头读到的旧快照 s0 写回，刚写下的指针被覆盖：用户优化过的参数静默回落为默认参数，且不会再重试。
+  // 中途崩溃也安全：行已提交而 settings 未写时，旧字段仍在，下次启动重跑，insertFsrsConfig 按指纹返回同一行。
   try {
     const s0 = readSettings();
     if (Array.isArray(s0.app?.fsrsWeights) && s0.app.fsrsWeights.length === 21 && !s0.app?.fsrsConfigId) {
       const id = insertFsrsConfig(s0.app.fsrsWeights, DEFAULT_SCHEDULER_OPTIONS, "optimizer");
-      setActiveFsrsConfig(id);
+      s0.app.fsrsConfigId = id;
       delete s0.app.fsrsWeights;
       writeSettings(s0);
     }
