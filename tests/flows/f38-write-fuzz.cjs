@@ -429,14 +429,15 @@ op("undo", 14, (db, M, S, rng) => {
 op("skip", 5, (db, M, S, rng) => {
   // 真实用户序：卡在今日队列里 → 另一个视图把它删了 / 另一条路径删了书 → 用户仍按「跳过」。
   // 12 次里给 1 次打在**本轮已被软删**的卡上（这是交错长跑独有的组合，人工旅程不会排到它）。
+  // C-21：saveSkip 落了父行校验（rowExists("cards") 连软删一起过滤）——已删卡/幽灵卡的跳过
+  // 现在被拒收（false、零落盘），模型只在受理时记账；被拒的那次是对「拒收口径」的现场采样。
   const deleted = [...M.cards.entries()].filter(([, c]) => c.deleted).map(([id]) => id);
   const ids = liveCards(M);
   const target = deleted.length && rng.bool(F38_DEAD_SKIP) ? rng.pick(deleted) : ids.length ? rng.pick(ids) : null;
   if (!target) return;
-  db.saveSkip(target);
+  if (db.saveSkip(target) !== true) { S.note = "跳过被拒（卡已软删/不存在）"; return; }
   M.skips.push({ cardId: target, ghost: !ids.includes(target) });
   gain(M, "review_skips");
-  S.note = M.skips[M.skips.length - 1].ghost ? "跳过了一张已删的卡" : "";
 });
 
 // 幽灵卡跳过（saveSkip 不校验父行）不进 S1 随机池：S1 的 (a) 组必须只报产品自己造出的悬挂，
@@ -823,7 +824,7 @@ function buildProbes(db, M) {
   }, (ret, ch) => (ret.first && !ch) ? "撤销返回 ok 但磁盘没动" : (ret.first && ret.second && !ch ? "两次撤销只落了一次" : null));
   if (openIssue) ok("resolveCardIssue(活 issue 收口 → 真的改了盘)", "ok", () => db.resolveCardIssue(openIssue), (ret, ch) => ch ? null : `返回 ${J(ret)} 但 issue 没收口`);
   if (anyKp) ok("updateKnowledgePoint(活 KP 改描述 → 真的改了盘)", "ok", () => db.updateKnowledgePoint(anyKp, { description: "F38 终局改" }), (ret, ch) => ch ? null : `返回真值却没写盘`);
-  if (cfgIds.length) ok("setActiveFsrsConfig(切回已有配置 → 指针真动了)", "ok", () => db.setActiveFsrsConfig(cfgIds[0]), (ret, ch) => (nz(ret) === nz(cfgIds[0]) ? null : `返回 ${J(ret)} 与 settings.json 的指针不符`));
+  if (cfgIds.length) ok("setActiveFsrsConfig(切回已有配置 → 指针真动了)", "ok", () => db.setActiveFsrsConfig(cfgIds[0]), (ret, ch) => (nz(ret) === nz(cfgIds[0]) ? null : `返回 ${J(ret)} 与活跃指针（C-10 起存 app_meta）不符`));
   ok("createFromPaste(新书 → 两张都落)", "ok", () => db.createFromPaste("F38 终局书", "# 章\n\n终局正文。"), (ret, ch) => (ret && ret.id && ch ? null : `返回 ${J(ret)} 而盘上${ch ? "有" : "没"}变化`));
 
   // ---- D. 载荷校验（写入口对非法值诚不诚实）----
@@ -839,6 +840,41 @@ function buildProbes(db, M) {
     (ret) => (!ret || !ret.r ? null : `updateCard 接受并落库了一份没有 due 的 fsrs_json，返回 ${J(ret.r)}；读口 normalizeFsrs 事后把它伪装成 ${J(ret.back)}（§4.4.5 八字段契约在写侧不设防，坏值只在读侧被兜住）`));
   ok("saveReview(after 缺 due 但 before 齐备)", "ghost", () => { if (!liveCard) return "n/a"; const cur = db.getCard(liveCard).fsrs; try { db.saveReview(liveCard, { state: "review", lapses: 0 }, "Good", 500, cur); return "no-throw"; } catch { return "THROW"; } },
     (ret, ch) => (ret !== "no-throw" || !ch ? null : "评分写入口不校验 fsrsState 形状：cards.fsrs_json 被写成缺 due 的半成品"));
+
+  // ---- D2. C-21 写入口参数校验（非法载荷必须拒收且零落盘；合法载荷必须受理）----
+  let liveItem = [...M.items.entries()].filter(([, v]) => !v.deleted).map(([id]) => id)[0] || null;
+  if (liveItem) {
+    flow.record("F38-D2 C-21 参数校验探针用长跑存续活书目", "coverage");
+  } else {
+    // 长跑可能把书目全软删了；S7 探针本来就允许改盘（本节头注），自建一本活书保证判据非空跑
+    const made = db.createFromPaste("F38 C-21 参数校验书", "# 章\n\n参数校验正文。");
+    if (made && made.id) { liveItem = nz(made.id); flow.record("F38-D2 C-21 参数校验探针自建活书目（长跑末书目全被软删）", "coverage"); }
+  }
+  if (liveItem) {
+    for (const [pos, label] of [[Infinity, "Infinity"], [NaN, "NaN"], [-5, "-5"]]) {
+      ok(`addReadingEvent(位置=${label})`, "payload", () => db.addReadingEvent(liveItem, pos),
+        (ret, ch) => (ret === false && !ch) ? null : `返回 ${J(ret)}${ch ? "且改了盘" : ""}（非有限/负值位置必须拒收，否则当日阅读字数被一条坏事件污染）`);
+    }
+    // 非法语言标签（singleton 后无子标签）单独成探针：拒收且零落盘
+    ok("setLibraryItemLang(en-us-x 必须拒)", "payload", () => db.setLibraryItemLang(liveItem, "en-us-x"),
+      (ret, ch) => (ret === false && !ch) ? null : `返回 ${J(ret)}${ch ? "且改了盘" : ""}（BCP 47 singleton 后必须再跟子标签，en-us-x 非法）`);
+    // 合法标签（含大小写混写与显式清空）必须受理；这条会真实写盘，属合法写，judge 只看返回值与落值
+    ok("setLibraryItemLang(en-US/zh-Hans-CN/ja/空串必须收)", "payload", () => {
+      const en = db.setLibraryItemLang(liveItem, "en-US");
+      const enV = db.listItems().find((i) => nz(i.id) === nz(liveItem))?.lang;
+      const zh = db.setLibraryItemLang(liveItem, "zh-Hans-CN");
+      const zhV = db.listItems().find((i) => nz(i.id) === nz(liveItem))?.lang;
+      const ja = db.setLibraryItemLang(liveItem, "ja");
+      const empty = db.setLibraryItemLang(liveItem, "");
+      const emptyV = db.listItems().find((i) => nz(i.id) === nz(liveItem))?.lang;
+      return { en, enV, zh, zhV, ja, empty, emptyV };
+    }, (ret) => (ret.en === true && ret.enV === "en-us" && ret.zh === true && ret.zhV === "zh-hans-cn" && ret.ja === true && ret.empty === true && ret.emptyV === "")
+      ? null
+      : `en-US=${J(ret.en)}(落 ${J(ret.enV)}) zh-Hans-CN=${J(ret.zh)}(落 ${J(ret.zhV)}) ja=${J(ret.ja)} ""=${J(ret.empty)}(落 ${J(ret.emptyV)})`);
+    // 报告验收点名的字面「不存在的id」（与 A 组 NOPE 探针互补：非 UUID 形状的字符串 id 也走同一条拒收路径）
+    ok("saveSkip(不存在的id)", "payload", () => db.saveSkip("不存在的id"), (ret, ch) => (ret === false && !ch) ? null : `返回 ${J(ret)}${ch ? "且改了盘" : ""}（幽灵卡跳过必须拒收）`);
+    ok("resolveCardIssue(不存在的id)", "payload", () => db.resolveCardIssue("不存在的id"), (ret, ch) => (ret === false && !ch) ? null : `返回 ${J(ret)}${ch ? "且改了盘" : ""}（幽灵 issue 的「已处理」必须拒收）`);
+  }
   return P;
 }
 
@@ -1075,8 +1111,13 @@ app
         flow.eq("F38-8e 磁盘配置行数 = 模型（含 cfg-default）", a.count("fsrs_configs"), M.configs.size + 1);
         const dupFp = a.rows("SELECT config_fingerprint AS f, COUNT(*) AS n FROM fsrs_configs GROUP BY f HAVING n > 1");
         flow.check("F38-8f 参数指纹唯一（§4.4.10 同一配置只有一个 config_id）", dupFp.length === 0, "无重复指纹", J(dupFp).slice(0, 90));
-        const ptr = (safeParse(fs.readFileSync(path.join(dir_of(dbFile), "settings.json"), "utf8")) || {}).app?.fsrsConfigId;
-        flow.check("F38-8g settings.json 的活跃指针必须指向库里真实存在的配置行（§4.4.10 同生共死）", !ptr || !!a.one("SELECT id FROM fsrs_configs WHERE id = ?", [ptr]), nz(ptr) || "（无指针）", a.one("SELECT COUNT(*) AS n FROM fsrs_configs")?.n);
+        // C-10 起活跃指针存库内 app_meta（未迁移旧库回落 settings.app.fsrsConfigId）；settings.json
+        // 在全新流程目录里可能从未被写过（C-10 后 setActiveFsrsConfig 不再落 settings），
+        // 直接 readFileSync 会在这种目录上 ENOENT 崩掉整条流程——指针判据按 C-10 事实源取。
+        const settingsPtr = (() => { try { return (safeParse(fs.readFileSync(path.join(dir_of(dbFile), "settings.json"), "utf8")) || {}).app?.fsrsConfigId; } catch { return undefined; } })();
+        const metaPtr = a.one("SELECT value FROM app_meta WHERE key = 'fsrsConfigId'")?.value;
+        const ptr = metaPtr !== undefined && metaPtr !== null && metaPtr !== "" ? metaPtr : settingsPtr;
+        flow.check("F38-8g 活跃指针（C-10 起存 app_meta，旧库回落 settings）必须指向库里真实存在的配置行（§4.4.10 同生共死）", !ptr || !!a.one("SELECT id FROM fsrs_configs WHERE id = ?", [ptr]), nz(ptr) || "（无指针）", a.one("SELECT COUNT(*) AS n FROM fsrs_configs")?.n);
         const openOnDead = a.rows("SELECT ci.id FROM card_issues ci JOIN cards c ON c.id = ci.card_id WHERE c.is_deleted = 1 AND ci.status = 'open'");
         flow.check("F38-8h 删卡后不得留 open issue（deleteCard 的收口承诺）", openOnDead.length === 0, "零条", openOnDead.length);
         // 撤销的物理删除不留洞：现存 seq 必须能由「插入序单调 + 撤销只删最大 seq」解释
