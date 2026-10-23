@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`2400489`（C-09 合并；账本上一版于 `1ceccbb`）。
+> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`d1735e8`（C-10 合并；账本上一版于 `2400489`）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -16,13 +16,13 @@
 
 ## 1. 当前状态（2026-10-23）
 
-- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个，现为 93 个。
+- **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：93 个 `tests/*.test.cjs`，分布 **28 electron / 7 system-node / 58 electron-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 各按报告预期 +1 / +1 / +2。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。
+- **测试规模**：94 个 `tests/*.test.cjs`，分布 **29 electron / 7 system-node / 58 electron-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 各按报告预期 +1 / +1 / +2 / +1。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09。
-- **下一项**：**C-10**（数据库 schema 版本化 + 事务化迁移 + 迁移前快照，P0；依赖 C-01，已完成）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10。
+- **下一项**：**C-11**（冻结发布身份：appId / productName / userData 目录 / 发布仓库，P0；⛔ 决策 D-02，未答复前只做不依赖决策的子步骤）。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
 
@@ -47,6 +47,7 @@
 > C-45 后：全量 90 个 **87 过 / 3 败**（applog、lensWindow G1、m14）；新增的 `flow-exit-guard` 通过，无新增失败文件。流程套件额外复跑 10 条：F84 / F86 / F88 各 3/4 为流程内既有行为断言（F84 = 已登记 D-TEST-88，F86 / F88 与 2026-09-24 旧结果一致），不计入 `tests/*.test.cjs` 失败。
 > C-08 后：全量 91 个 **88 过 / 3 败**（applog、m14、m15v2.route 阈值 flake）；新增 `bookasset-path` 通过，`lensWindow` 本轮通过，无新增失败文件。
 > C-09 后：全量 93 个 **91 过 / 2 败**（applog、m14）；新增 `csp-policy` / `csp-enforcement` 通过，`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。
+> C-10 后：全量 94 个 **92 过 / 2 败**（applog、m14）；新增 `schema-version` 通过，无新增失败文件。`m15v2.dbstatic` 曾因静态守卫断言旧 ALTER 字面量短暂转红，随本项同步更新为新契约后转绿（不是产品缺陷）。
 
 ## 2. 执行顺序与状态
 
@@ -71,7 +72,7 @@
 | --- | --- | --- | --- | --- |
 | 9 | C-08 | 完成 | `3081287` / `7bb6809` | 纯函数路径校验 + 真实 Electron 探针；验收见 §3.9。 |
 | 10 | C-09 | 完成 | `ff3b448` / `2400489` | 构建期 CSP + 权限处理器 + foliate 脚本剔除；验收见 §3.10。 |
-| 11 | C-10 | 待做 | — | schema 版本化 + 事务化迁移 + 迁移前快照。 |
+| 11 | C-10 | 完成 | `b20d4dd` / `d1735e8` | user_version + 事务化 MIGRATIONS + 迁移前快照 + app_meta；验收见 §3.11。 |
 | 12 | C-11 | 待做 | — | 冻结发布身份；⛔ 决策 D-02。 |
 | 13 | C-12 | 待做 | — | 备份/恢复流式化，ZIP64 / >2 GiB。 |
 | 14 | C-13 | 待做 | — | 恢复流程（退出清理 / learner.db / 设备设置）；同时复核 m14 EBUSY。 |
@@ -333,6 +334,35 @@
   8. 构建注入未做成「读取 dist」的回归测试（需先构建）；注入逻辑由 `csp-policy` 的 `transformIndexHtml` 契约测试 + 验收命令覆盖。
   9. `tests/tmp-c09/` 为测试临时打包产物（`tests/tmp-*` 忽略）；探针脚本与隔离 userData 已清理，未入库。
 
+### 3.11 C-10 · 数据库 schema 版本化 + 事务化迁移 + 迁移前快照
+
+- **提交**：`b20d4dd fix(C-10): schema 版本化 + 事务化迁移 + 迁移前快照`；合并 `d1735e8`。
+- **改动**：
+  - 新建 `electron/schemaVersion.js`：`SCHEMA_VERSION = 2`；`MIGRATIONS` v2 = `app_meta(key,value,updated_at)`；`DbTooNewError`（code `DB_TOO_NEW`）；`readUserVersion` / `assertNotTooNew` / `snapshotBeforeMigration` / `runMigrations`（每项一个事务 + 同事务写 `user_version`，版本必须连续）。
+  - `electron/db.js`：开库后先 `assertNotTooNew`（库比程序新 → 关库抛出，不写任何东西）；已有数据且版本落后 → `db.backup()` 快照到 `userData/backups/pre-migration/`（保留最近 3 份）；基线代码块首行加冻结横幅；24 处 `ALTER TABLE … catch` 全部改为 `addColumnIfMissing`（`pragma_table_info` 显式探测，标识符加引号）；末尾写 `user_version = 1` 后执行 `runMigrations`，再 `migrateSettingsFactsToAppMeta`（`fsrsConfigId` / `legacyBackfillV1` 从 settings 复制进 `app_meta`）。
+  - `electron/legacyBackfill.js`：标记读 `app_meta` 优先、旧库回落 settings；`mark()` 经注入的 `writeAppMeta` 只写 `app_meta`（未注入时保持设置存储，兼容纯单测）。
+  - `electron/main.js`：`initDb()` 外捕获 `DB_TOO_NEW` → `dialog.showMessageBoxSync` 提示「数据版本过新」+ 数据文件夹，`app.exit(1)`；其他错误原样上抛。
+  - `electron/backup.js`：`restoreBackup` 解包后以只读连接读 staging 的 `user_version`，大于 `SCHEMA_VERSION` → 删 staging、返回「该备份来自更新版本的 Nutation，请先升级程序再恢复」；打不开也删 staging 并返回可读错误。
+  - 新增 `tests/schema-version.test.cjs`（`@runtime: electron`，5 场景 13 断言）。
+  - `tests/legacyBackfill.test.cjs` P5 改为从 `app_meta` 读/清标记；`tests/m15v2.dbstatic.test.cjs` 的两条静态守卫从「ALTER 字面量」改为「addColumnIfMissing 契约」，并新增 helper 定义断言。
+- **验收（2026-10-23，Windows；Electron 31.7.7）**：
+  - 改动前基线：`npm test` → 93 个 91 过 / 2 败（applog、m14）。
+  - `node scripts/run-tests.mjs schema-version` → **1 通过 / 0 失败**；直跑 **13/13**：新库 `user_version = 2` 且无快照；`user_version = 3` → `DB_TOO_NEW` 且库文件 sha256 不变；v0 旧库升级 → 1 份 `library-v0-to-v2-*.db`、快照 `quick_check = ok`；二次 `initDb` 不新增快照；连续 5 次旧库升级 → 快照恰为 3 份。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":58,"electron":29,"system-node":7}`（94 个）。
+  - `npm test`（无并行负载）→ 94 个 **92 过 / 2 败 / 0 超时**；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
+  - `npm run typecheck` → exit 0。
+  - **真实开发库拷贝升级**（临时探针，已删；原库只读 `db.backup()` 到隔离 userData，启动后 6/6）：`user_version 0 → 2`；生成 1 份 v0→v2 快照且 `quick_check = ok`；`app_meta` 有 `legacyBackfillV1` 与 `fsrsConfigId`；`main.log` 无 db 错误；**原库 sha256 前后一致**（未触碰）。
+  - **恢复版本闸门**（临时探针，已删）：`user_version=99` 的备份 → `ok:false` + 「更新版本」且 staging 已删；`user_version=0` 的备份 → `ok:true` + staging 落盘（正反对照）。
+  - 历史流程抽查：**F43** 的 P0-1（库内 schema 版本判据）由红转绿（`user_version = 2`）；**F50** 仍红 3 项（见偏离 6）。
+- **偏离**：
+  1. **迁移执行点**：报告要求放在「legacy 回填与最后一次 `persist()` 之后、`return` 之前」。实际顺序为 `legacy 回填 → ensurePromptTemplates → persist → user_version=1 → runMigrations → 搬 settings 事实 → mark()`。唯一差异是 `mark()` 移到迁移之后：v2 迁移才建 `app_meta`，标记必须在表存在后落库，否则首次升级会把标记写回 settings（报告要求「写标记只写 app_meta」）。
+  2. `addColumnIfMissing` 对表名/列名加双引号（报告示例未加）。这是报告第 4 步「942 行列名带双引号，传入时去掉引号再在 SQL 中加回」的必要实现；`trigger` 是 SQLite 关键字。
+  3. `writeAppMeta` 在 `app_meta` 尚不存在时回落 settings（基线 v23 `fsrsWeights` 迁移会先调 `setActiveFsrsConfig`）。迁移完成后正常写入只落 `app_meta`；随后 `migrateSettingsFactsToAppMeta` 把 settings 里的旧值复制进库。
+  4. `fsrsConfigId` 按报告「复制进 app_meta」，未删除 settings 中的旧副本；读取侧以 `app_meta` 优先。这样 F43 C2a-3（迁移后 settings 里仍有指针）保持原样，旧版代码也有回落值。
+  5. 测试契约同步：`legacyBackfill.test.cjs` P5 的标记读写改查 `app_meta`（追加读/清 helper，断言数不变）；`m15v2.dbstatic.test.cjs` 两条静态守卫原样钉住旧 ALTER 字面量，改为 `addColumnIfMissing` 契约并 +1 条 helper 定义断言。未删除任何测试。
+  6. **流程侧观察（非 C-10 回归）**：F43 A2b-1 仍红（`database disk image is malformed`），已用最小探针确认是 D137（2026-10-12 起 better-sqlite3）后既有夹具问题——F43 用 sql.js 覆盖仍被旧连接占用的库文件，按旧顺序先执行 `journal_mode = wal` 也同样首读即 malformed；失败发生在 C-10 新增的 pragma 读取之前，与本项无关。F43 的 P0-4（settings 格式版本键）与 A4/A5 不在 C-10 范围。F50 的 S3/S4/S5 仍未绿：剩余盲吞站点都在非 ALTER 的建表/回填/backup.js，C-10 只按报告消除 ALTER 吞错；S2 的 `pragmaTableInfo` 探针为正则 `PRAGMA table_info`，不匹配 `pragma_table_info()` 表值函数（`columnHelper` 已识别 `addColumnIfMissing`）。
+  7. 临时探针与隔离 userData 均已删除，未入库；提交只含 8 个源/测试文件。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -346,5 +376,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-10**（阶段 1 首发前必须完成，P0；依赖 C-01，已完成）。
-- 基线：93 个测试；C-09 后全量 91 过 / 2 败（Windows，2026-10-23；applog、m14，见 §1.1）。
+- 当前下一项：**C-11**（阶段 1 首发前必须完成，P0；⛔ 决策 D-02，未答复前只做不依赖决策的子步骤）。
+- 基线：94 个测试；C-10 后全量 92 过 / 2 败（Windows，2026-10-23；applog、m14，见 §1.1）。
