@@ -288,7 +288,7 @@ app.whenReady().then(async () => {
 
     console.log("== M14-12 M2 备份/恢复覆盖 memory/（§4.18-15） ==");
     const bkDir = path.join(tmp, "bk");
-    const b = await backup.createBackup({ dataDir: tmp, backupDir: bkDir, label: "manual", flush: () => db.persistDb() });
+    const b = await backup.createBackup({ dataDir: tmp, backupDir: bkDir, label: "manual", flush: () => db.checkpointStrict() });
     check("备份成功", b.ok, true, b.error);
     const JSZip = require(path.join(ROOT, "node_modules", "jszip"));
     const zip = await JSZip.loadAsync(fs.readFileSync(b.file));

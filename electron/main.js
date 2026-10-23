@@ -940,7 +940,9 @@ ipcMain.handle("screen-capture:start", (e) => screenCapture.start(e.sender));
 
 // ---------- M2 数据备份与恢复（§9.1 M2） ----------
 const backupOpts = () => ({
-  flush: () => dbModule.persistDb(),
+  // C-17：备份前 flush 走严格 checkpoint（忙碌即抛）——备份开始时主文件必须自足；
+  // 业务写路径的 persist() 已不抛错（只记日志延后合并），此处不能用它。
+  flush: () => dbModule.checkpointStrict(),
   counts: dbModule.getBackupCounts(),
   // 批次 C（D-TEST-18）：已软删书的 id 交给备份侧，打包时跳过它们的 assets 目录。
   // backup.js 不 require db 层（它的依赖注入一直是 opts.*），所以在这里塞进来。

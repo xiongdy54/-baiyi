@@ -14,6 +14,8 @@
 //       而 saveReview 的签名里**就带着 fsrsBefore**（撤销用的全字段快照），却从不拿它
 //       与 card.fsrs 比对（:1432-1436 只读了 leech 与 fsrsConfigId）——陈旧写防护的输入齐备、
 //       判断缺失。本层把这条链逐环钉成实测。
+//       C-17 修订：persist() 的 checkpoint busy 不再抛错（记日志延后合并），M1 的「误报失败」
+//       路径已修复；A-7 陈旧写防护（M2b/M5）保留为纵深防御，仍逐环钉死。
 //
 // 依据：§4.4.9（成功边界 / 撤销不变量集）、§4.4.5（fsrs_json 八字段往返）、
 //       §7.1.4（重启不丢数据）、§7.2（落库即落盘）、§4.4.4（连续模式评分后不得重复出现）。
@@ -54,26 +56,36 @@ app
         reps: (f.reps || 0) + 1, learningSteps: 0, lastReview: f.due,
       });
 
-      // ── M1 前提取证：persist 抛错时，事务其实已经 COMMIT ──────────────────
+      // ── M1 前提取证（C-17 新语义）：checkpoint busy 时评分成功返回，事务其实已经 COMMIT ──
+      // D137 后 persist = wal_checkpoint(TRUNCATE)，旧 renameSync mock 不再落在路径上；改用第二连接
+      // 持读事务注入真实 busy。C-17 前 persist 抛错 → IPC reject → UI 误报失败（本层最初发现的裂缝）；
+      // C-17 后 persist 只记日志延后合并，评分成功返回。陈旧写防护（A-7）保留为纵深防御。
       const k1 = mk(1);
       const f1 = db.getCard(k1.id).fsrs;
-      const origRename = fs.renameSync;
       let threw = null;
-      fs.renameSync = () => { throw new Error("ENOSPC (simulated by F35)"); };
+      let ckLog = null;
+      const origErr = console.error;
+      console.error = (...a) => { const s = String(a && a[0] || ""); if (s.includes("[db] checkpoint")) ckLog = s; origErr(...a); };
+      const Database = require("better-sqlite3");
+      const blocker = new Database(dbFile);
+      blocker.exec("BEGIN");
+      blocker.prepare("SELECT 1 FROM cards LIMIT 1").get(); // deferred 读事务真正持有读锁
       try {
         db.saveReview(k1.id, nextGood(f1), "Good", 3000, f1);
       } catch (e) { threw = e.message; } finally {
-        fs.renameSync = origRename;
+        console.error = origErr;
+        try { blocker.close(); } catch { /* 尽力 */ }
       }
-      flow.check("M1a persist() 抛错会一路传出 saveReview（IPC 因此 reject）", threw !== null, "抛错", String(threw));
+      flow.check("M1a C-17：checkpoint busy 时 saveReview 成功返回（已提交的写入不再被误报为失败）", threw === null, "成功", String(threw));
+      flow.check("M1a-2 checkpoint 失败只记日志（不静默吞，日志可见）", ckLog !== null, "[db] checkpoint 失败…", String(ckLog));
       const committed = logCount(k1.id);
       const fsrsAdvanced = JSON.stringify(db.getCard(k1.id).fsrs) !== JSON.stringify(f1);
       flow.check(
-        "M1b persist 失败时评分**已经 COMMIT 进库**（这正是 §4.4.9 成功边界与 UI 提示的裂缝）",
+        "M1b 评分**已经 COMMIT 进库**（busy 只延后 WAL 合并，不回滚提交）",
         committed === 1 && fsrsAdvanced,
         "日志 1 条 + 卡态已推进", `日志 ${committed} 条 · 卡态推进=${fsrsAdvanced}`
       );
-      flow.record("M1 UI 横幅文案", "「刚才的操作尚未写入磁盘，已停留在本卡」—— 实际：操作已 COMMIT，只是没落盘");
+      flow.record("M1 UI 横幅文案（历史）", "「刚才的操作尚未写入磁盘，已停留在本卡」—— C-17 前的误报路径已移除：操作已 COMMIT 且成功返回");
 
       // ── M2 渲染层据此停在原卡 → 同一张卡再次可评 ──────────────────────────
       // 「重试保存」只做 persistNow() + setSaveError(false)，不推进卡片（ReviewView.tsx:427-435）
