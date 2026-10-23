@@ -4,8 +4,7 @@
 // 渲染层不额外发 IPC（D182 ③：零新增 IPC）。
 "use strict";
 
-const fs = require("fs");
-const path = require("path");
+const { readJsonObject } = require("./jsonFile");
 
 const LANGS = ["zh-CN", "zh-TW", "en", "ja"];
 const DEFAULT_LANG = "zh-CN";
@@ -116,12 +115,9 @@ function normalizeLanguage(v) {
 /** 启动时装载（main.js 在 userData 就绪后调用；settingsFile 由调用方传入） */
 function initMainLocale(file) {
   settingsFile = file;
-  try {
-    const v = JSON.parse(fs.readFileSync(file, "utf-8"));
-    currentLang = normalizeLanguage(v && v.app ? v.app.language : undefined);
-  } catch {
-    currentLang = DEFAULT_LANG;
-  }
+  // C-15：与 settingsStore 共用 jsonFile 读取（BOM 容忍 / 非对象留档），避免主进程语言与设置页读到两套结果
+  const v = readJsonObject(file, () => ({}));
+  currentLang = normalizeLanguage(v && v.app ? v.app.language : undefined);
   if (currentLang === "zh-TW") ensureTwConvert();
   return currentLang;
 }

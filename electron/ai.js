@@ -1,11 +1,12 @@
 // AI 网关 — 主进程统一 LLM 通道（文档§3.11 AIGateway）
 // Key 用 safeStorage 加密存储；流式输出经 WebContents 发送到渲染层
 const { app, BrowserWindow } = require("electron");
-const fs = require("fs");
 const path = require("path");
 const https = require("https");
 const http = require("http");
 const { safeStorage } = require("electron");
+// C-15：ai-config.json 与 settings.json 共用同一套 JSON 文件读写（BOM / 留档 / 原子写 + fsync）
+const { readJsonObject, writeJsonAtomic } = require("./jsonFile");
 
 // 供应商注册表（v48.68 / D112，设计 docs/design/AI-PROVIDER-REGISTRY-D112.md）：
 // 单一来源驱动设置页 UI（经 ai:getConfig 下发元数据，无 Key）。
@@ -173,24 +174,27 @@ function aiConfigPath() {
 }
 
 function readConfig() {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(aiConfigPath(), "utf-8"));
-    // v10.3 迁移：旧版全局 Key 归档到其所属预设，实现按服务商留存
-    if (!cfg.keys || typeof cfg.keys !== "object") cfg.keys = {};
-    if (cfg.apiKeyEnc && cfg.preset && cfg.keys[cfg.preset] === undefined) {
-      cfg.keys[cfg.preset] = cfg.apiKeyEnc;
-    }
-    if (cfg.apiKeyPlain && cfg.preset && cfg.keys[cfg.preset] === undefined) {
-      cfg.keys[cfg.preset] = "plain:" + cfg.apiKeyPlain;
-    }
-    return cfg;
-  } catch {
-    return { preset: "goat", baseUrl: PRESETS.goat.baseUrl, model: PRESETS.goat.model, apiKeyEnc: null, keys: {} };
+  // C-15：统一走 jsonFile（BOM 容忍 / 非对象留档）
+  const cfg = readJsonObject(aiConfigPath(), () => ({
+    preset: "goat",
+    baseUrl: PRESETS.goat.baseUrl,
+    model: PRESETS.goat.model,
+    apiKeyEnc: null,
+    keys: {}
+  }));
+  // v10.3 迁移：旧版全局 Key 归档到其所属预设，实现按服务商留存
+  if (!cfg.keys || typeof cfg.keys !== "object") cfg.keys = {};
+  if (cfg.apiKeyEnc && cfg.preset && cfg.keys[cfg.preset] === undefined) {
+    cfg.keys[cfg.preset] = cfg.apiKeyEnc;
   }
+  if (cfg.apiKeyPlain && cfg.preset && cfg.keys[cfg.preset] === undefined) {
+    cfg.keys[cfg.preset] = "plain:" + cfg.apiKeyPlain;
+  }
+  return cfg;
 }
 
 function writeConfig(cfg) {
-  fs.writeFileSync(aiConfigPath(), JSON.stringify(cfg, null, 2), "utf-8");
+  writeJsonAtomic(aiConfigPath(), cfg);
 }
 
 // 注册表元数据（v48.68 / D112）：随 ai:getConfig 下发渲染层驱动 UI——只含公开字段，永不含 Key

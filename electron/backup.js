@@ -16,6 +16,8 @@ const { openZip, forEachEntry, extractAll, readBackupMeta: readZipBackupMeta } =
 const { Worker } = require("worker_threads");
 const Database = require("better-sqlite3");
 const schema = require("./schemaVersion");
+// C-15：settings.json 读取与全仓共用同一实现（BOM / 非对象留档）
+const { readJsonObject } = require("./jsonFile");
 
 // C-11：冻结的备份格式标识，与应用名无关——改值会让既有备份全部无法恢复（restore 按 app+format 校验）。
 const APP_TAG = "incremental-reading-dev";
@@ -69,11 +71,7 @@ function resolvePaths(opts = {}) {
 }
 
 function readAppSettings(settingsFile) {
-  try {
-    return JSON.parse(fs.readFileSync(settingsFile, "utf-8")) || {};
-  } catch {
-    return {};
-  }
+  return readJsonObject(settingsFile, () => ({}));
 }
 
 // 备份位置：设置 app.backupDir，缺省 userData/backups/
