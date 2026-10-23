@@ -19,6 +19,8 @@ app.setAppUserModelId("Nutation");
 // v48.23（D61 §6.8-11）：多段选择的纯函数内核（唯一实现面，见 electron/annotationRange.js 头注）。
 // 主进程用它装配 spans 载荷（extracts:spanSet 与 db.createExtract 同一模块）。
 const annotationRange = require("./annotationRange");
+// C-08：bookasset:// 路径解析（纯函数，越界/非法 id 返回 null）
+const { resolveBookassetPath } = require("./bookassetPath");
 
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
@@ -2106,24 +2108,19 @@ app.whenReady().then(async () => {
   // v45.1（用户反馈「书架封面偶尔加载失败」）：协议注册必须先于 await initDb()——窗口先行 +
   // 渲染层先挂载时，封面 <img> 可能抢在协议 handler 注册前发出请求而永久失败（img 无自动重试）。
   // 两个 handler 都只读磁盘文件、不依赖数据库，提前注册无副作用。
-  protocol.handle("bookasset", (request) => {
+  const BOOKASSET_TYPES = {
+    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+    gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
+    // v32（M7）：词典发音音频（dict-audio 经 bookasset 播放）
+    mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav", m4a: "audio/mp4"
+  };
+  protocol.handle("bookasset", async (request) => {
+    const file = resolveBookassetPath(app.getPath("userData"), request.url);
+    if (!file) return new Response("bad request", { status: 400 });
     try {
-      const url = new URL(request.url);
-      const itemId = url.hostname;
-      const filename = decodeURIComponent(url.pathname).replace(/^\//, "");
-      if (!itemId || !/^[A-Za-z0-9._-]+$/.test(filename)) {
-        return new Response("bad request", { status: 400 });
-      }
-      const file = path.join(app.getPath("userData"), "assets", itemId, filename);
-      const data = fs.readFileSync(file);
-      const ext = path.extname(filename).slice(1).toLowerCase();
-      const types = {
-        jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
-        gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
-        // v32（M7）：词典发音音频（dict-audio 经 bookasset 播放）
-        mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav", m4a: "audio/mp4"
-      };
-      return new Response(data, { headers: { "content-type": types[ext] || "application/octet-stream" } });
+      const data = await fs.promises.readFile(file);
+      const ext = path.extname(file).slice(1).toLowerCase();
+      return new Response(data, { headers: { "content-type": BOOKASSET_TYPES[ext] || "application/octet-stream" } });
     } catch {
       return new Response("not found", { status: 404 });
     }
@@ -2147,8 +2144,13 @@ app.whenReady().then(async () => {
       if (!/^[A-Za-z0-9._-]+$/.test(filename)) {
         return new Response("bad request", { status: 400 });
       }
-      const data = fs.readFileSync(path.join(pdfjsResBase, dir, filename));
-      const ext = path.extname(filename).slice(1).toLowerCase();
+      const root = path.resolve(pdfjsResBase);
+      const file = path.resolve(root, dir, filename);
+      if (!file.startsWith(root + path.sep)) {
+        return new Response("bad request", { status: 400 });
+      }
+      const data = fs.readFileSync(file);
+      const ext = path.extname(file).slice(1).toLowerCase();
       const types = { ttf: "font/ttf", otf: "font/otf", woff: "font/woff", woff2: "font/woff2", pfb: "application/octet-stream", bcmap: "application/octet-stream" };
       return new Response(data, { headers: { "content-type": types[ext] || "application/octet-stream" } });
     } catch {
