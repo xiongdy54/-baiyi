@@ -2031,44 +2031,31 @@ body.skin-chrome-transparent .topbar { background: transparent; }
 body.theme-dark .settings-notice { background: color-mix(in srgb, var(--success) 18%, transparent); }
 body.theme-dark .settings-notice[data-level="warn"] { background: color-mix(in srgb, var(--warning) 22%, transparent); }
 
-/* D206 入场动效与「处理」闪烁引导。
-   缓动/时长对齐 nutation-design 09-motion：出现类 = --ease-out 曲线 cubic-bezier(.33,1,.68,1)、
-   开花 900ms；级联间隔照抄字标 220ms；闪烁环 = 短距离「来回」cubic-bezier(.65,0,.35,1)、
-   时长照抄「完成」行 1.25s。全部收在 no-preference 闸内（§11 降级纪律）；
-   flash-hold = 减动效环境下的静态高亮替代（同一停止条件：点击或滚出视口）。 */
+/* D206 入场动效与「处理」高亮引导。
+   瑞士（默认/底）＝轻快档：出现缓动 cubic-bezier(.33,1,.68,1)（nutation-design 09-motion「出现」曲线）
+   240ms、无级联；陶土（claude.css）经 --notice-in-* token 换有机档（900ms bloom_open + 220ms 字标级联）。
+   高亮＝警示黄阴影光晕（box-shadow 呼吸；缓动＝短距离「来回」cubic-bezier(.65,0,.35,1)、时长照抄「完成」行
+   1250ms）——不用直角描边环（与直角框组合违和，用户裁定）。
+   全部收在 no-preference 闸内（§11 降级纪律）；flash-hold = 减动效/静态替代（同一停止条件：
+   点击或滚出视口）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .settings-notice { animation: settings-notice-in 900ms cubic-bezier(0.33, 1, 0.68, 1) both; }
-  .settings-notices .settings-notice:nth-child(2) { animation-delay: 220ms; }
-  .settings-notices .settings-notice:nth-child(3) { animation-delay: 440ms; }
-  .flash-blink { position: relative; }
-  .flash-blink::after {
-    content: "";
-    position: absolute;
-    inset: -4px;
-    border: 2px solid var(--warning);
-    border-radius: inherit;
-    animation: settings-flash-ring 1250ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
-    pointer-events: none;
+  .settings-notice {
+    animation: settings-notice-in var(--notice-in-dur, 240ms) var(--notice-in-ease, cubic-bezier(0.33, 1, 0.68, 1)) both;
+    animation-delay: var(--notice-delay, 0ms);
   }
+  .settings-notices .settings-notice:nth-child(2) { animation-delay: var(--notice-delay-2, 0ms); }
+  .settings-notices .settings-notice:nth-child(3) { animation-delay: var(--notice-delay-3, 0ms); }
+  .flash-blink { animation: settings-flash-glow 1250ms cubic-bezier(0.65, 0, 0.35, 1) infinite; }
 }
 @keyframes settings-notice-in {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: none; }
 }
-@keyframes settings-flash-ring {
-  0%, 100% { opacity: 0; }
-  50% { opacity: 1; }
+@keyframes settings-flash-glow {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 0%, transparent); }
+  50% { box-shadow: 0 0 12px 3px color-mix(in srgb, var(--warning) 60%, transparent); }
 }
-/* .btn 全局 overflow:hidden 会把外扩 4px 的环整个裁掉——闪烁态必须放开 */
-.flash-blink, .flash-hold { position: relative; overflow: visible; }
-.flash-hold::after {
-  content: "";
-  position: absolute;
-  inset: -4px;
-  border: 2px solid var(--warning);
-  border-radius: inherit;
-  pointer-events: none;
-}
+.flash-hold { box-shadow: 0 0 12px 3px color-mix(in srgb, var(--warning) 60%, transparent); }
 /* 深色下阴影减弱，层次改以 hairline 描边区分 */
 body.theme-dark .modal-panel {
   box-shadow: none;
