@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -21,6 +21,8 @@ app.setAppUserModelId("Nutation");
 const annotationRange = require("./annotationRange");
 // C-08：bookasset:// 路径解析（纯函数，越界/非法 id 返回 null）
 const { resolveBookassetPath } = require("./bookassetPath");
+// C-09：权限请求默认拒绝（仅剪贴板写入放行），创建任何窗口前安装
+const { installPermissionHandlers } = require("./permissions");
 
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
@@ -86,6 +88,19 @@ ipcMain.on("logs:rendererError", (_e, payload) => {
   } catch {
     /* 静默：日志通道永不外溢 */
   }
+});
+// C-09：CSP 拒绝兜底日志——EPUB 在 blob: iframe 内被拦的脚本，securitypolicyviolation 不冒泡到父文档
+// （实测），只在 Chromium console 里可见，故从 webContents 的 console-message 统一落盘。
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("console-message", (_e, _level, message) => {
+    if (!/Content Security Policy/i.test(message)) return;
+    if (/Electron Security Warning/.test(message)) return; // 无 CSP 时的开发期警告，不是违规记录
+    try {
+      appLog.log("WARN", "csp", `[CSP] ${message}`);
+    } catch {
+      /* 日志失败不影响业务 */
+    }
+  });
 });
 ipcMain.handle("logs:openFolder", () => {
   appLog.ensureDir();
@@ -2100,6 +2115,8 @@ app.whenReady().then(async () => {
     if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh();
   }, 20000);
   Menu.setApplicationMenu(null);
+  // C-09：收紧默认 session 的权限请求与检查（必须早于任何窗口创建；四窗口均未使用自定义 partition）
+  installPermissionHandlers(session.defaultSession);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
   createWindow();
   // D143（v48.98，T4）：窗口原生创建（实测 219ms 级）与后续协议注册/待恢复检查/initDb 之间

@@ -213,6 +213,21 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     }
   };
 
+  // C-09 纵深防御（真实拦截靠 CSP）：剔除 EPUB 文档里的脚本与内联事件处理器。
+  // load 事件晚于文档解析——首屏内联 <script> 由 CSP 拦截，这里清理的是之后仍可触发的 on* 与再插入脚本。
+  const stripActiveContent = (doc: Document): void => {
+    try {
+      doc.querySelectorAll("script").forEach((s) => s.remove());
+      doc.querySelectorAll("*").forEach((el) => {
+        for (const attr of Array.from(el.attributes)) {
+          if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+        }
+      });
+    } catch {
+      /* 单点失败不阻断阅读 */
+    }
+  };
+
   const relocateHandlers = new Set<(info: RelocateInfo) => void>();
   const linkHandlers = new Set<(info: LinkInfo) => void>();
   const pointerHandlers = new Set<(pos: ContentPointerUpInfo) => void>();
@@ -484,6 +499,7 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
 
   on("load", (e: CustomEvent) => {
     const { doc, index } = e.detail as { doc: Document; index: number };
+    stripActiveContent(doc);
     docs.set(index, doc);
     if (appearance) injectAppearanceStyle(doc, appearance, currentFlow);
     if (currentFlow !== "paged") fixSvgAspect(doc);

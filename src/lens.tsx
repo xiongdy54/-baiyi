@@ -3,6 +3,7 @@
 // 只把「内核」换成经 preload 桥代理到阅读窗口的 LensKernel（src/lib/lensBridge.ts）。
 // 窗口纪律与独立制卡台窗口同构：无边框自绘 + 默认置顶（可在窗口内切换）+ 关闭＝隐藏 + 每次呼出重读外观。
 // 主题 / 皮肤跟随主应用（同一套 theme.css + 皮肤桥）——换肤一处改，两窗同步生效。
+import "./lib/cspReport";
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import MindmapLens from "./components/reader/MindmapLens";

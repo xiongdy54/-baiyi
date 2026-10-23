@@ -2,6 +2,7 @@
 // 与主窗口共用同一套制卡台组件（手动制卡 / AI 制卡 / AI 解释，自由模式：无来源锚，粘贴文字做 AI 处理）；
 // 主题跟随主应用——单例窗口只隐藏不销毁，所以每次呼出（win:workbenchShown）都重读外观。
 // v49.8（D182）：界面语言跟随主应用——首绘前经 settingsAPI 读 app.language（localStorage 缓存兜底零闪烁）。
+import "./lib/cspReport";
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
