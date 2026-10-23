@@ -327,6 +327,7 @@ package.json 现无 YAML 库；引入 js-yaml 等违反本批「零新依赖」�
 3. **禁忌构造**（scan 副本上检测，命中即拒载并给出行号）：
    - `@import`（任意大小写）——零网络红线的静态入口，连相对路径一并禁止（相对 URL 会解析到应用自身 origin，语义混乱且无正当用例）。
    - `url(...)` 中除 `data:image/` 开头的任何取值——即仅允许内嵌 data 图（纹理/噪点等自包含资源）；`http(s):`、`file:`、`javascript:`、相对路径全部拒绝。
+   - `image-set()` / `-webkit-image-set()` / `src()`（任意大小写）——三者都接受**字符串形式的 URL**（不经 `url()`），可绕过 url() 规则发起网络请求（C-44）；Token 覆盖层没有正当用例，一律拒绝（fail-closed）。
    - 任意位置的 `javascript:`。
    - `position: fixed` **不禁**（玻璃面板等皮肤 legitimately 用得到；UI 伪装残余风险见 §9.2 表）。
 4. **选择器形态**：Token 覆盖块的顶层选择器仅允许单选择器 `:root`、`html`、`body`、`body.theme-light`、`body.theme-dark`（含逗号的组合选择器 → 拒载：组合选择器让档位归属无法静态判定）。其余选择器（组件级微调）不在此限、不受审计。
@@ -443,10 +444,10 @@ package.json 现无 YAML 库；引入 js-yaml 等违反本批「零新依赖」�
 | --- | --- | --- | --- | --- |
 | S1 | 文件夹扫描 | 路径逃逸（`../`、符号链接把读取面引出 plugins 目录） | id charset 校验 + 目录名逐字相等 + `realpath` 前缀核对（§4.2）；清单内相对路径禁 `..`（§3.1） | 无已知残余 |
 | S2 | 清单/数据解析 | JSON 炸弹、超长字段 | 64KB 上限 + 字段长度上限 + 非 theme 拒载（§3.1/3.3） | 无 |
-| S3 | styles.css 注入 | **网络外呼**（@import / url(http) 打破零网络红线） | fail-closed 校验器（§6.2 规则 3）：@import 全禁、url() 仅 data:image | 无（静态可判定） |
+| S3 | styles.css 注入 | **网络外呼**（@import / url(http) / image-set() 等字符串 URL 打破零网络红线） | fail-closed 校验器（§6.2 规则 3）：@import 全禁、url() 仅 data:image、image-set()/src() 全禁（C-44） | 无（静态可判定） |
 | S4 | styles.css 注入 | 脚本执行（javascript: URI 等） | 同上 + `javascript:` 全文禁；Chromium 现代版 CSS 本已不执行脚本，此条为纵深 | 无 |
 | S5 | styles.css 注入 | **UI 伪装**（position:fixed 全屏覆盖层仿造登录框钓 AI Key 等敏感输入） | 结构上不执行脚本、无网络可回传；主题是用户自装内容（威胁模型 = 用户给自己机器装样式，与装任何 userstyle 同级） | **接受并登记**：本机伪装面存在；缓解靠 M11 签名/来源机制（不在本期） |
-| S6 | styles.css 注入 | 属性选择器 + url() 逐字符外传（CSS exfiltration） | url() 已仅剩 data:image——无远端可收 | 无网络出口即无外传通道 |
+| S6 | styles.css 注入 | 属性选择器 + url() 逐字符外传（CSS exfiltration） | url() 已仅剩 data:image，image-set()/src() 亦全禁（C-44，字符串 URL 同样无远端可收） | 无网络出口即无外传通道 |
 | S7 | @settings 解析 | 解析器被畸形输入打挂（ReDoS/深递归） | 受限文法逐行解析、无回溯正则、行数/行长/项数上限（§3.4）；解析在宿主、失败即拒载 | 无 |
 | S8 | 设置值写路径 | 脏值直写 CSS 变量（`var()` 注入恶意值串） | `assembleVars` 类型钳制：color 必须过 `#rgb/#rrggbb`、range 数值钳制、dropdown ∈ options、text ≤100 字符（§4.5/§3.4）；注入 body 的只有归一后标量 | 无 |
 | S9 | IPC 面 | 渲染层借 plugins:* 做任意文件读写 | 四通道无路径参数（openFolder 打开固定目录）；读面只限 plugins 目录一层 | 无 |
