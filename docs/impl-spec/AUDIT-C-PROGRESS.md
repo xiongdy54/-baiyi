@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`7b1c4dc`（C-14 合并）。
+> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`4f80aa1`（C-15 合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -14,15 +14,15 @@
 6. **测试副产物**：`tests/*.bundle.cjs`、`tests/.results/`、`tests/tmp-*` 可能变脏；提交用显式路径，不要 `git add -A`。
 7. **锚点优先**：报告行号只作参考；先 `rg -n "锚点"` 定位，找不到或代码与描述不一致时停下，按 §0 第 7 条回报。
 
-## 1. 当前状态（2026-10-23）
+## 1. 当前状态（2026-10-24）
 
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：97 个 `tests/*.test.cjs`，分布 **61 electron-node / 29 electron / 7 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。
+- **测试规模**：99 个 `tests/*.test.cjs`，分布 **61 electron-node / 30 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 **99 个 = 61 electron-node / 30 electron / 8 system-node**。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14。
-- **下一项**：**C-15**（settings.json 两份实现合并 + BOM/非对象/留档/fsync；P1；依赖 C-11 已就绪）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15。
+- **下一项**：**C-16**（撤销评分选错卡：最近评分的卡被删除后会撤销另一张卡的更早评分；P1；无依赖）。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
@@ -36,7 +36,7 @@
 | `tests/lensWindow.test.cjs` | 未归属（时序 flake） | C-02 后两次全量均失败于 G1（55ms 采样 180ms 缓动）；该文件与 `electron/lensWindow.js` 未被 C-02 改动，单独连跑 3 次 1 过 2 败。C-04 全量本轮通过；C-05 与 `tsc` 并行的首轮复现，随后单独跑与干净全量均通过。C-45 全量复现（G1），直跑同样 1 败；本项只改 `tests/flows` 与新增 guard，与该文件无关。C-08 全量本轮通过。 |
 | `tests/m1.prompts.test.cjs` | 已修复（C-05） | prompt 版本期望 7，实际 8（过期期望）；C-05 改为引用 `db.CARD_PROMPT_TARGET_VERSION` 并通过。 |
 | `tests/m14.test.cjs` | 已修复（C-13） | D137 后主库是 better-sqlite3 原生连接，Windows 上连接不关 rename `library.db -> .pre-restore` 必 EBUSY；真实路径 `applyPendingRestore` 在启动期 initDb 之前执行、从无此占用。C-13 让测试对齐真实时序（先 `closeDb` 再换入再 `initDb`）；随之暴露 M14-13 的过期期望 `version === 7`（该段此前因 EBUSY 中断从未执行到），按 C-05 手法改引用 `db.CARD_PROMPT_TARGET_VERSION`。 |
-| `tests/m15v2.route.test.cjs` | 未归属（性能阈值 flake） | C-05 全量中位 30.5ms vs 阈值 ≤30ms（最快 26.2 / 最慢 32.9）；单独跑通过。该测试只 import `src/lib/mindmap/v2`，不 require `electron/db.js`，与 C-05 改动无关。C-08 全量复现（中位 30.7ms，最快 28.4 / 最慢 33.3）；不 require `electron/main.js`，与本项无关。 |
+| `tests/m15v2.route.test.cjs` | 未归属（性能阈值 flake） | C-05 全量中位 30.5ms vs 阈值 ≤30ms（最快 26.2 / 最慢 32.9）；单独跑通过。该测试只 import `src/lib/mindmap/v2`，不 require `electron/db.js`，与 C-05 改动无关。C-08 全量复现（中位 30.7ms，最快 28.4 / 最慢 33.3）；不 require `electron/main.js`，与本项无关。C-15 前基线（98 个）与最终树复跑（99 个）均复现（中位 48.4ms，全程并行负载），与本项无关。 |
 | `tests/m7.prompts.test.cjs` | 已修复（C-05） | 主制卡 prompt 期望 v6，实际 8（过期期望）；C-05 改为引用 `db.CARD_PROMPT_TARGET_VERSION` 并通过。 |
 
 > 说明：C-01 在合并 D203 前是 85 个测试 79 过 / 6 败；合并后为 89 个 82 过 / 7 败。新增的唯一失败是 `lensWindowFit.artifact`，属 C-03，不是 C-01 回归。
@@ -78,7 +78,7 @@
 | 13 | C-12 | 完成 | `83b318c` / `b75c31d` | 备份/恢复流式化（yazl/yauzl，ZIP64）；验收见 §3.13。 |
 | 14 | C-13 | 完成 | `dc9a2a8` / `00d7a66` | relaunch 走 quit / learner.db 换库让位 / 设备设置保留；m14 EBUSY 已复核修复，验收见 §3.14。 |
 | 15 | C-14 | 完成 | `96cfb7a` / `7b1c4dc` | 轮换 protect + clockSkewSuspected；验收见 §3.15。 |
-| 16 | C-15 | 待做 | — | settings.json 两份实现合并。 |
+| 16 | C-15 | 完成 | `17384fc` / `4f80aa1` | settings.json 两份实现合并到 jsonFile；验收见 §3.16。 |
 | 17 | C-16 | 待做 | — | 撤销评分选错卡。 |
 | 18 | C-17 | 待做 | — | persist 把已提交写入误报失败。 |
 
@@ -476,6 +476,37 @@
 
 
 
+### 3.16 C-15 · settings.json 两份实现合并 + BOM/非对象/留档/fsync
+
+- **提交**：`17384fc fix(C-15): settings.json 两份实现合并到 jsonFile（BOM/留档/原子写）`；合并 `4f80aa1`。
+- **改动**（8 文件，+211/−101）：
+  - 新建 `electron/jsonFile.js`（报告代码原样）：`preserveCorrupt` 把损坏文件改名为 `.corrupt-<ISO 时间戳>` 并按名称时间序保留最近 5 份；`readJsonObject` 去 UTF-8 BOM、缺失→fallback、解析失败或非对象→留档后 fallback；`writeJsonAtomic` 走 tmp → `writeFileSync(fd)` → `fsyncSync(fd)` → rename →（POSIX）fsync 目录，失败删 tmp 并抛出。
+  - `electron/settingsStore.js`：改为基于 jsonFile 的两行实现，默认形状统一 `{ app: {}, theme: {} }`；`SETTINGS_FILE` 仍在模块加载时固化（pinUserData 之后）。
+  - `electron/main.js`：删除自带的 `SETTINGS_FILE/readSettings/writeSettings`，改为 `require("./settingsStore")`（位置仍在 pinUserData 与 `require("./db")` 之后，加载顺序不变）。
+  - `electron/backup.js`：`readAppSettings` 改 `readJsonObject`（BOM 可读；坏 JSON / 非对象留档后回默认）。
+  - `electron/ai.js`：`readConfig` 改 `readJsonObject`（v10.3 Key 迁移逻辑保持），`writeConfig` 改 `writeJsonAtomic`；顺手移除已无用的 `fs` 引入。
+  - `electron/i18n.js`：`initMainLocale` 的直读 `JSON.parse(fs.readFileSync)` 一并收口到 `readJsonObject`。
+  - 新增 `tests/settings-file.test.cjs`（`@runtime: electron`，11 断言）：① BOM；② null 返回默认形状 + 留档内容逐字一致；③ 连续 7 次损坏后恰好保留最近 5 份（按实际生成的时间戳集合逐一比对）；④ 写后可解析、读回一致、无 `.tmp`；⑤ 静态断言 `jsonFile.js` 不含 `fs.writeSync(` 且必须用 `writeFileSync(fd)` + `fsyncSync(fd)`。
+  - `tests/flows/f91-fix-batch2.cjs` S2：留档名断言由固定 `settings.json.corrupt` 更新为 `.corrupt-<时间戳>`，兜底断言同步为默认形状含 `app`（未删断言）。
+- **验收（2026-10-24，Windows；Electron 31.7.7 / Node 24.18.0）**：
+  - 改动前基线：`npm test` → 98 个 96 过 / 2 败（applog、`m15v2.route`）。
+  - `node scripts/run-tests.mjs settings-file` → 1 通过 / 0 失败；直跑 **11/11**。
+  - `node scripts/run-tests.mjs d105-scope m12 d101-lifecycle legacyBackfill m14 backup restore-flow userData` → **9 通过 / 0 失败**。
+  - `node tests/flows/run.cjs --only F91 --cycles 1` → **PASS 12/12（1664ms）**。
+  - `rg -n "function readSettings" electron` → 仅 `electron/settingsStore.js:10` 一处。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":61,"electron":30,"system-node":8}`（99 个，本项 +1）。
+  - `npm run typecheck` → exit 0。
+  - `npm test`（最终树复跑，无并行负载）→ 99 个 **97 过 / 2 败 / 0 超时**；失败集合 = applog + `m15v2.route`（性能阈值 flake，中位 48.4ms），与改动前基线同一集合，无新增失败文件。
+  - **真实应用冒烟**（临时探针，已删；`NUTATION_USER_DATA` 指向临时目录 + CDP 9333）→ **8/8**：预置带 BOM 的 settings.json 启动后未被判损坏（无 `.corrupt-*`）；`settingsAPI.get('app','language')` 读出 `ja`；`settingsAPI.set('app','smokeC15','ok')` 落盘为合法 JSON，原 `ja` 保留、无 `.tmp`、无新留档；主日志无 pinUserData / settings 报错。
+- **偏离**：
+  1. **F91 S2 是过期期望更新**（执行规则 6 / C-05 手法）：D-TEST-30 的固定 `.corrupt` 文件名被 C-15 的 `.corrupt-<stamp>`（保留 5 份）取代；只改期望值与描述，未删除断言；兜底断言同时收紧为「对象含 app」，用于证明默认形状已统一。`docs/test-flows/DEFECTS.md` 的 D-TEST-30 条目是历史档案，未改。
+  2. **i18n 的第三份读取一并收口**：报告第 4 步要求检查其它直接读写 settings.json 的位置；`electron/i18n.js:initMainLocale` 虽经注入路径直读、`rg "settings.json"` 只命中注释，但它是实际存在的第三份解析（带 BOM 时会让主进程语言回落默认、与设置页不一致），故一并走 `readJsonObject`。
+  3. **backup.js 保留两处原样读取**：备份载荷 `fs.readFileSync(p.settingsFile)` 必须逐字节进 zip（不能解析后再序列化，会改变用户文件内容）；`isJsonObjectFile(stagedSettings)` 校验的是暂存目录里的备份内容，不能因校验触发留档改名。二者不属于「settings 的运行期读取入口」，未动。
+  4. **默认形状从 `{}` 统一为 `{ app: {}, theme: {} }`**：报告明示两份默认不同并要求统一；`settings:set` 的 `all[scope][key]` 与 db 侧 `readSettings().app?.x` 均已兼容，受影响的 9 套件全绿。
+  5. **备份目录读取对非对象收紧**：原 `readAppSettings` 的 `JSON.parse(...) || {}` 对 `null` 兜底、对 `[]` 会把数组漏给调用方；统一后数组同样留档并回默认，属报告「非对象留档」的预期行为。
+  6. **ai-config 坏文件从静默回默认改为留档**：报告第 5 步要求共用实现；写路径同时获得 fsync，坏文件留下 `.corrupt-*` 供排查。
+  7. 测试基数更正：C-14 后实际是 98 个（`settings-notices.test.cjs` 随 D206 合入），C-15 新增 1 个后为 99；本项未新增决策号。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -489,5 +520,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-15**（阶段 1 首发前必须完成，P1：settings.json 两份实现合并 + BOM/非对象/留档/fsync；依赖 C-11 已就绪）。
-- 基线：97 个测试；C-14 后全量 95 过 / 2 败（Windows，2026-10-23；applog 既有 + `m15v2.route` 阈值 flake，单独跑通过，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。
+- 当前下一项：**C-16**（阶段 1 首发前必须完成，P1：撤销评分在「最近评分卡已删除」时撤销错的卡；无依赖）。
+- 基线：99 个测试；C-15 后全量 97 过 / 2 败（Windows，2026-10-24；applog 既有 + `m15v2.route` 阈值 flake，单独跑通过，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。
