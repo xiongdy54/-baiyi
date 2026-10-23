@@ -1143,9 +1143,15 @@ function setLibraryItemLang(id, lang) {
   // 权威清单，与 D-TEST-77 同一情形，记为渲染层侧的后续项。
   if (rawInput !== "" && raw === "") return false;
   const t = raw.toLowerCase();
-  // 子标签允许 1 个字符：BCP-47 的单字符子标签是合法的（如 en-US-x 的私有段 x），
-  // 早先写成 {2,8} 会把这类合法值误拒 —— 形状校验要宽、存在性校验才该严（后者主进程做不了）。
+  // D-TEST-75 形状闸门（宽收）：只挡结构性脏值（"not-a-lang"/"中文"/"12"……），子标签长度放得宽。
   if (raw !== "" && !/^[a-z]{2,3}(-[a-z0-9]{1,8})*$/.test(t)) return false;
+  // C-21 标准校验（第二道）：形状正则拦不住「单字符子标签（singleton）后面没再跟子标签」的形态——
+  // BCP 47 规定 singleton 之后必须至少再有一个子标签，en-us-x / zh-a / en-x 都是非法值
+  //（Intl.getCanonicalLocales 对其抛 RangeError）。早先注释把 en-US-x 当「合法的私有段」是误读：
+  // 合法形态是 en-US-x-foo（x 后必须再跟内容）。空串（显式清空）不经此校验（空串会抛 RangeError）。
+  if (raw !== "") {
+    try { Intl.getCanonicalLocales(raw); } catch { return false; }
+  }
   // 批次 E（D-TEST-15 T2 档）：目标行不存在或已软删时不再返回真的「已删除 / 已保存」。
   if (!rowExists("library_items", id)) return false;
   db.run("UPDATE library_items SET lang=?, updated_at=? WHERE id=? AND is_deleted=0", [t, Date.now(), String(id)]);
@@ -2386,9 +2392,13 @@ function execRawSql(sql, params = []) {
 }
 
 function saveSkip(cardId) {
+  // C-21：跳过记录落库前查父行。rowExists("cards") 连软删一起过滤（is_deleted=0）——
+  // 幽灵 id 与已删卡的「跳过」都拒收（false、零落盘），不再给 review_skips 留悬挂行
+  //（队列没刷新时用户仍可能对已删卡按「跳过」，旧实现照单全收）。cardId 一并 String() 归一。
+  if (!rowExists("cards", cardId)) return false;
   db.run("INSERT INTO review_skips (id, card_id, skipped_at) VALUES (?, ?, ?)", [
     crypto.randomUUID(),
-    cardId,
+    String(cardId),
     Date.now()
   ]);
   persist();
@@ -2400,10 +2410,18 @@ function addReadingEvent(itemId, charPos) {
   // 批次 E（D-TEST-15 T1 档）：reading_events 自己没有软删位，校验挂在父表 library_items 上；
   // 任意 itemId 都能插事件的话，统计侧迟早出现无人认领的字数。返回 false 不抛错。
   if (!rowExists("library_items", itemId)) return false;
+  // C-21：charPos 只收非负有限数。旧的 Math.max(0, Math.round(Number(x) || 0)) 挡不住 Infinity
+  //（Infinity || 0 仍是 Infinity，会原样入库把「当日阅读字数 = 相邻事件正增量之和」顶成 Infinity，
+  // 经 IPC 序列化还可能变 null），NaN/负值又被静默改写成 0 落库。上限用文档长度在 db.js 没有
+  // 现成来源（无 plain_len / plainLen / markdown_length 列，也无 LENGTH(markdown) 查询；learner
+  // 子系统的 sections.plain_len 是分节索引、非整篇文档长度），按审计口径只做有限性与非负校验。
+  const n = Number(charPos);
+  if (!Number.isFinite(n) || n < 0) return false;
+  const pos = Math.round(n);
   db.run("INSERT INTO reading_events (id, item_id, char_pos, created_at) VALUES (?, ?, ?, ?)", [
     crypto.randomUUID(),
     String(itemId),
-    Math.max(0, Math.round(Number(charPos) || 0)),
+    pos,
     Date.now()
   ]);
   persist();
@@ -2494,9 +2512,12 @@ function listCardIssues(cardId) {
 }
 
 function resolveCardIssue(id) {
-  db.run("UPDATE card_issues SET status = 'fixed', resolved_at = ? WHERE id = ?", [Date.now(), id]);
+  // C-21：db.run 带参数时返回 better-sqlite3 的 RunResult（sqliteCompat attachRun）——
+  // 行不存在 / 未匹配到时 changes=0，返回 false；不再无论是否更新到行都恒返 true
+  //（幽灵 id 的「已处理」是假成功）。id 一并 String() 归一。
+  const info = db.run("UPDATE card_issues SET status = 'fixed', resolved_at = ? WHERE id = ?", [Date.now(), String(id)]);
   persist();
-  return true;
+  return Boolean(info && info.changes > 0);
 }
 
 // D121 §1.2：card_links —— 卡片辨析链接（只读展示用，不参与 FSRS / 队列）
