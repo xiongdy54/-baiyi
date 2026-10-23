@@ -1031,7 +1031,9 @@ ipcMain.handle("backup:restore", async (_e, file) => {
 });
 ipcMain.on("app:relaunch", () => {
   app.relaunch();
-  app.exit(0);
+  // C-13：app.exit() 不触发 before-quit/will-quit，会跳过草稿刷盘与三库显式关闭（WAL checkpoint）；
+  // 改走 quit——before-quit 置 appQuitting（D123）后关闭不会被拦成收进托盘。
+  app.quit();
 });
 
 // ---------- AI 网关 ----------

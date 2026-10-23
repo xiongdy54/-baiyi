@@ -299,14 +299,18 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(memDir, "core.md"), "# 被改乱的记忆", "utf8");
     const rRestore = await backup.restoreBackup(b.file, { dataDir: tmp, skipSafety: true });
     check("restore 解包 + 标记", rRestore.ok, true, rRestore.error);
+    // D137 后主库是 better-sqlite3 原生连接，Windows 上连接不关 rename library.db 必 EBUSY；
+    // 真实路径 applyPendingRestore 在启动期 initDb 之前执行、从无此占用——测试对齐真实时序。
+    db.closeDb();
     const applied = backup.applyPendingRestore({ dataDir: tmp });
     check("applyPendingRestore 换入 memory/", applied && applied.restored.includes("memory"), true, applied && applied.restored);
     check("恢复后记忆内容与备份一致", memoryStore.readText(memDir, "core.md").includes("读书项目"), true, memoryStore.readText(memDir, "core.md").slice(0, 80));
+    await db.initDb(); // 重开连接，供后续 M14-13+ 使用
 
-    console.log("== M14-13（UM-2）v7 播种 + R20 situationRequired 声明矩阵 ==");
+    console.log("== M14-13（UM-2）制卡模板播种 + R20 situationRequired 声明矩阵 ==");
     const genTpl = db.getPromptTemplate("card-generation");
-    check("card-generation v7 播种且含 R20 情境段 + memoryRef",
-      genTpl && genTpl.version === 7 && genTpl.content.includes("记忆情境接地（R20") && genTpl.content.includes("memoryRef"), true, genTpl && genTpl.version);
+    check("card-generation 播种于目标版本且含 R20 情境段 + memoryRef",
+      genTpl && genTpl.version === db.CARD_PROMPT_TARGET_VERSION && genTpl.content.includes("记忆情境接地（R20") && genTpl.content.includes("memoryRef"), true, genTpl && genTpl.version);
     check("situation_required 矩阵（generation/mnemonic/probe=1，formula/journal-insight=0）",
       Number(genTpl.situation_required) === 1
       && Number(db.getPromptTemplate("card-mnemonic").situation_required) === 1

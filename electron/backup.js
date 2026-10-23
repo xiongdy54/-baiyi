@@ -758,6 +758,37 @@ async function restoreBackup(file, opts = {}) {
 }
 
 // 启动时（initDb 之前）检查标记：把 staging 换入数据目录。返回 false=无待恢复
+// C-13：设备相关设置不随恢复覆盖——settings.json 随备份整体换入时，会把另一台机器 /
+// 另一时期的设备相关值带进来。换入前先读线上 settings，换入后把设备键写回（线上没设过的键
+// 也一并删掉，不让备份机残留值泄漏）。清单按报告第 4 步要求对实际代码核实，只保留真实存在的：
+//   app.backupDir（backup.js 备份位置）、app.closeToTray（D123 托盘）、
+//   app.globalShortcuts.autoLaunch（开机自启，quickCapture.js）；「窗口位置/尺寸」无持久化键。
+const DEVICE_KEYS = ["backupDir", "closeToTray"];
+
+function writeSettingsJsonAtomic(file, value) {
+  const tmp = file + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), "utf-8");
+  fs.renameSync(tmp, file);
+}
+
+function preserveDeviceSettings(p, liveApp) {
+  if (!liveApp || typeof liveApp !== "object") liveApp = {};
+  let merged;
+  try { merged = JSON.parse(fs.readFileSync(p.settingsFile, "utf-8")) || {}; } catch { return; }
+  if (!merged || typeof merged !== "object" || Array.isArray(merged)) return;
+  merged.app = merged.app && typeof merged.app === "object" ? merged.app : {};
+  for (const k of DEVICE_KEYS) {
+    if (k in liveApp) merged.app[k] = liveApp[k];
+    else delete merged.app[k];
+  }
+  if (liveApp.globalShortcuts && typeof liveApp.globalShortcuts === "object") {
+    merged.app.globalShortcuts = merged.app.globalShortcuts && typeof merged.app.globalShortcuts === "object" ? merged.app.globalShortcuts : {};
+    if ("autoLaunch" in liveApp.globalShortcuts) merged.app.globalShortcuts.autoLaunch = liveApp.globalShortcuts.autoLaunch;
+    else delete merged.app.globalShortcuts.autoLaunch;
+  }
+  try { writeSettingsJsonAtomic(p.settingsFile, merged); } catch { /* 尽力：写失败保留换入结果 */ }
+}
+
 function applyPendingRestore(opts = {}) {
   const p = resolvePaths(opts);
   if (!fs.existsSync(p.markerFile)) return false;
@@ -784,6 +815,19 @@ function applyPendingRestore(opts = {}) {
       if (a) asides.push({ live: p.dbFile, aside: a });
       clearDbSidecars(p.dbFile); // D137：陈旧 WAL sidecar 与新换入库文件错配 = 损坏，必须同删
       restored.push("library.db");
+      // C-13：learner.db 是派生可重建数据、不进备份清单（§4.20）。换库后靠 learnerRefresh 的
+      // 「水位超前则清零重算」启发式纠正并不可靠（恢复后先产生新阅读事件 / 时钟回拨即失守），
+      // 这里直接让位 → 启动时 learner.db 不存在即新建并由刷新管线全量重建，恒与新库一致。
+      // .pre-restore 只保留一份：先删旧残留在让位。
+      const learnerFile = path.join(p.dataDir, "learner.db");
+      for (const suf of ["", "-wal", "-shm"]) {
+        const f = learnerFile + suf;
+        if (fs.existsSync(f)) {
+          try { fs.rmSync(f + ".pre-restore", { force: true }); } catch { /* 尽力 */ }
+          try { fs.renameSync(f, f + ".pre-restore"); } catch { /* 尽力 */ }
+        }
+      }
+      restored.push("learner.db(reset)");
     }
     const stagedAssets = path.join(p.stagingDir, "assets");
     if (fs.existsSync(stagedAssets)) {
@@ -823,7 +867,11 @@ function applyPendingRestore(opts = {}) {
     const stagedSettings = path.join(p.stagingDir, "settings.json");
     if (fs.existsSync(stagedSettings)) {
       if (!isJsonObjectFile(stagedSettings)) throw new Error("备份包里的 settings.json 不是合法 JSON 对象；已中止恢复");
+      // C-13：设备相关键以线上为准——必须在换入**前**读线上值，换入后再写回
+      let liveAppBefore = null;
+      try { liveAppBefore = (JSON.parse(fs.readFileSync(p.settingsFile, "utf-8")) || {}).app || null; } catch { /* 无线上 settings */ }
       fs.copyFileSync(stagedSettings, p.settingsFile);
+      preserveDeviceSettings(p, liveAppBefore); // C-13：设备相关键不随备份覆盖
       restored.push("settings.json");
     }
     const stagedAI = path.join(p.stagingDir, "ai-config.json");
