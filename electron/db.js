@@ -2206,18 +2206,21 @@ function fsrsStatesEqual(a, b) {
   return true;
 }
 
-// v22/v23 撤销评分：最近一条「有评分前快照且有评分后快照且卡未删且卡当前状态==评分后状态」的日志。
+// v22/v23 撤销评分：全局最新一条日志，且该条本身可撤销（有评分前后双快照、卡未删、卡当前状态==评分后状态）。
+// C-16：最新日志不可撤销（卡已删/无快照/状态不一致）时返回 null，禁止在 SQL 里过滤后回落到更早日志——
+// 否则「评 B → 评 A → 删 A」会把 B 的评分撤销掉。
 // v23 起排序不变量 = review_seq（表内唯一、插入序单调；禁按 id/reviewed_at 排序）；
 // 旧日志（v22 及以前，无 fsrs_after_json）与状态不一致的日志均按 §4.4.9 不可撤销（UI 不出现撤销按钮）。
 function getLastUndoableReview() {
   const rows = queryAll(
-    `SELECT r.id AS logId, r.card_id AS cardId, r.rating, r.reviewed_at AS reviewedAt, r.review_seq AS reviewSeq
-     FROM review_logs r JOIN cards c ON c.id = r.card_id AND c.is_deleted = 0
-     WHERE r.fsrs_before_json IS NOT NULL AND r.fsrs_after_json IS NOT NULL
+    `SELECT r.id AS logId, r.card_id AS cardId, r.rating, r.reviewed_at AS reviewedAt, r.review_seq AS reviewSeq,
+            (r.fsrs_before_json IS NOT NULL AND r.fsrs_after_json IS NOT NULL) AS hasSnaps,
+            c.is_deleted AS cardDeleted
+     FROM review_logs r LEFT JOIN cards c ON c.id = r.card_id
      ORDER BY r.review_seq DESC LIMIT 1`
   );
   const log = rows[0];
-  if (!log) return null;
+  if (!log || !log.hasSnaps || log.cardDeleted !== 0) return null;
   const card = getCard(log.cardId);
   if (!card) return null;
   let after;
@@ -2227,7 +2230,8 @@ function getLastUndoableReview() {
     return null;
   }
   if (!fsrsStatesEqual(card.fsrs, after)) return null;
-  return log;
+  const { hasSnaps, cardDeleted, ...out } = log;
+  return out;
 }
 
 // v23 撤销评分（§4.4.9：复习回退而非附加动作）——事务内恢复评分前确切状态：

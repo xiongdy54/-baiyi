@@ -2,7 +2,8 @@
 // @runtime: electron
 // 隔离：userData 指向临时目录，全新 library.db，绝不触碰真实库。
 // 覆盖：saveReview 快照落库 / getLastUndoableReview 选取 / undoLastReview 恢复快照+移除日志 /
-//       无快照日志不可撤销 / 多卡撤销次序（后评先撤）/ leech 触发后撤销回退挂起与 issue / 已删卡不可撤销
+//       无快照日志不可撤销 / 多卡撤销次序（后评先撤）/ leech 触发后撤销回退挂起与 issue / 已删卡不可撤销 /
+//       最新日志的卡已删时不回落撤销别的卡（C-16）
 const { app } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -130,6 +131,20 @@ app.whenReady().then(async () => {
     const seqs3 = db.listAllReviewLogs().map((l) => l.reviewSeq);
     check("撤销后新评分复用被删序号（允许复用不变量）", seqs3[seqs3.length - 1] === seqDeleted, seqDeleted, seqs3[seqs3.length - 1]);
     check("全表 review_seq 无重复", new Set(seqs3).size === seqs3.length, seqs3.length, new Set(seqs3).size);
+
+    console.log("== U10 C-16：最新日志的卡已删 → 不得回落撤销别的卡的更早评分 ==");
+    const P = mkCard("FSRSTEST UNDO P"); // 场景里的 B：先评、此后未再复习
+    const Q = mkCard("FSRSTEST UNDO Q"); // 场景里的 A：后评、然后软删
+    const beforeP = { state: "new", due: T0, lapses: 0, reps: 0, learningSteps: [] };
+    const afterP = { state: "review", due: T0 + 86400000, lapses: 0, reps: 1, learningSteps: [] };
+    db.saveReview(P, afterP, "Good", 10, beforeP);
+    db.saveReview(Q, { state: "review", due: T0 + 86400000, lapses: 0, reps: 1 }, "Good", 20, { state: "new", due: T0, lapses: 0, reps: 0 });
+    db.deleteCard(Q);
+    check("最新日志的卡已删 → getLastUndoableReview 为 null（不回落）", db.getLastUndoableReview() === null, null, db.getLastUndoableReview());
+    const u10 = db.undoLastReview();
+    check("撤销拒绝", u10.ok === false, "ok:false", u10);
+    check("B（P）的 fsrs 不变（未误撤销别的卡）", eq(db.getCard(P).fsrs, afterP), afterP, db.getCard(P).fsrs);
+    check("B（P）的评分日志仍在", db.listAllReviewLogs().some((l) => l.cardId === P), true, db.listAllReviewLogs().map((l) => l.cardId));
 
     console.log(`\n撤销评分测试：${pass} 通过 / ${fail} 失败`);
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 临时目录清理失败无碍 */ }
