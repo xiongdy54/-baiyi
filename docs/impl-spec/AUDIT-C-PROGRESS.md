@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`ea91c71`（C-19 合并）。
+> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`f427e49`（C-20 合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -18,11 +18,11 @@
 
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：101 个 `tests/*.test.cjs`，分布 **61 electron-node / 32 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node；C-18 `today-queue-fastpath` 落在 electron；C-19 `ai-stream` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1，C-18 按验收新增 1 个，C-19 按验收新增 1 个。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 99；C-18 新增 `today-queue-fastpath.test.cjs`（electron）后为 100；C-19 新增 `ai-stream.test.cjs`（electron）后为 **101 个 = 61 electron-node / 32 electron / 8 system-node**。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。**C-17 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：失败集合与 C-16 基线完全一致（仅 applog）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-18 后一次全量为 100 个 99 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项）；新增 `today-queue-fastpath` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-19 后一次全量为 101 个 100 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项，第 11 节子进程崩溃日志两条，与 C-19 无关）；新增 `ai-stream` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。流程侧（非 99 套件）：C-17 改动前基线 F37 8/8、F35 12/13（M1a）、F04 31/33（G1 两处——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败）；C-17 后 F37 8/8（新语义）、F35 **14/14**、F04 **33/33**（后两者修复既有失败，非放宽）。
+- **测试规模**：102 个 `tests/*.test.cjs`，分布 **61 electron-node / 33 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node；C-18 `today-queue-fastpath` 落在 electron；C-19 `ai-stream` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1，C-18 按验收新增 1 个，C-19 按验收新增 1 个。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 99；C-18 新增 `today-queue-fastpath.test.cjs`（electron）后为 100；C-19 新增 `ai-stream.test.cjs`（electron）后为 **101 个 = 61 electron-node / 32 electron / 8 system-node**；C-20 新增 `ai-keyvault.test.cjs`（electron）后为 **102 个 = 61 electron-node / 33 electron / 8 system-node**。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。**C-17 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：失败集合与 C-16 基线完全一致（仅 applog）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-18 后一次全量为 100 个 99 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项）；新增 `today-queue-fastpath` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-19 后一次全量为 101 个 100 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项，第 11 节子进程崩溃日志两条，与 C-19 无关）；新增 `ai-stream` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-20 后一次全量为 102 个 101 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项）；新增 `ai-keyvault` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。流程侧（非 99 套件）：C-17 改动前基线 F37 8/8、F35 12/13（M1a）、F04 31/33（G1 两处——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败）；C-17 后 F37 8/8（新语义）、F35 **14/14**、F04 **33/33**（后两者修复既有失败，非放宽）。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17、C-18、C-19。
-- **下一项**：**C-20**（API Key：系统加密不可用时「明文保存却读不出来」；同步 safeStorage API 将被移除；P1）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17、C-18、C-19、C-20。
+- **下一项**：**C-21**（写入口参数校验：阅读位置 / 语言标签 / 跳过记录 / 问题标记；P2）。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
@@ -88,7 +88,7 @@
 | --- | --- | --- | --- | --- |
 | 19 | C-18 | 完成 | `0a46124` + `5083437` + `2042187` + `12b0385` + `1864cee` / `68daaee` | 10 万卡复习性能；基准脚本 + a 索引 / b 快速路径 / c 专用接口 + 等价测试共 5 提交，验收见 §3.19。 |
 | 20 | C-19 | 完成 | `93b5320` + `c9c2dc4` / `ea91c71` | AI 流式传输；a 多字节/截断/非 SSE/4xx/脱敏 + b fetch 传输层系统代理两提交，验收见 §3.20。 |
-| 21 | C-20 | 待做 | — | API Key 存储。 |
+| 21 | C-20 | 完成 | `369477c` / `f427e49` | API Key 收口 keyVault；会话内存 + 明文迁移清除，验收见 §3.21。 |
 | 22 | C-21 | 待做 | — | 写入口参数校验。 |
 | 23 | C-22 | 待做 | — | 软删除过滤 / 资产孤儿。 |
 | 24 | C-23 | 待做 | — | 启动 quick_check 阻塞。 |
@@ -609,6 +609,40 @@
   8. 测试副产物 `tests/m15r.activity.bundle.cjs` / `m15r.layout.bundle.cjs` 全量后变脏，合并后已还原；提交用显式路径（3 文件）。
 
 
+### 3.21 C-20 · API Key：系统加密不可用时「明文保存却读不出来」+ safeStorage 收口 keyVault
+
+- **提交**：`369477c fix(C-20): API Key 收口 keyVault——加密不可用时只留会话内存，不再明文落盘读不出`；合并 `f427e49`。
+- **改动**（8 文件，+249/−15）：
+  - 新建 `electron/keyVault.js`（报告代码原样 + 顶部 TODO）：`strength()`（"secure" / Linux `basic_text` → "weak" / 不可用 → "none"）与 `encrypt` / `decrypt`；**全仓 safeStorage 调用只出现在此文件**；TODO 登记 C-24 升级后改 `isAsyncEncryptionAvailable` / `encryptStringAsync` / `decryptStringAsync` 并把 `getAIConfig` 改 async（本项不做）。
+  - `electron/ai.js`：
+    * 模块级 `const sessionKeys = new Map()`（preset → key，只留内存不落盘）；`safeStorage` 直接引用替换为 `keyVault`。
+    * `getAIConfig`：先解密 `apiKeyEnc`（`strength() !== "none"` 时）；为空回落 `sessionKeys.get(cfg.preset || "custom")`——修复「保存了 Key 却读不出来」；返回新增 `keyStorage`（encrypted/session/none）与 `encryptionStrength`。
+    * `setAIConfig` Key 分支：secure → 加密落盘 + `keys[preset]` 留存（同现状）；否则（none/weak）→ `sessionKeys.set`、`apiKeyEnc = null`、`delete cfg.apiKeyPlain`、删 `keys[preset]`，**不再写明文**；清除分支同步 `sessionKeys.delete`。
+    * 预设切换分支：`plain:` 旧值只进 `sessionKeys` 后从 `cfg.keys` 删除，不再写回 `apiKeyPlain`；分支尾 `delete cfg.apiKeyPlain` 纵深防御。
+    * `readConfig` 迁移：存量 `apiKeyPlain` 与 `keys` 里所有 `plain:` 值移进 `sessionKeys` 后 `writeConfig` 清盘（这些 Key 旧版本就读不出来，删除不损失功能）；v10.3 密文归档逻辑不变。
+  - `src/lib/ai.ts`：`AIConfig` 增 `keyStorage?` / `encryptionStrength?`（含注释）。
+  - `src/components/SettingsPanel.tsx`：API Key 字段下 `keyStorage === "session"` 时渲染 `form-hint` 提示（报告给定文案）。
+  - `src/i18n/locales/en.ts` / `ja.ts`：提示文案各 +1 键（zh 即键本身）。
+  - `tests/flows/f16-security-boundary.cjs`：U4 的「Key 只经 safeStorage 加密落盘」静态判据锚点随迁移——keyVault.js 必须含 `safeStorage.encryptString|decryptString`，且 ai.js 不得再直接出现二者（判据收紧）。
+  - 新增 `tests/ai-keyvault.test.cjs`（electron，25 断言）：真 keyVault 先留底，再按报告验收注入 require.cache stub（strength "none" + encrypt 抛错）。
+- **验收（2026-10-24，Windows；Electron 31.7.7）**：
+  - 改动前基线：`ai-stream` / `d112-providers` / `m15v2.ai` 3 套件全过；流程 F16 **31/32**（既有失败 = 幽灵通道）、F41 **58/68**（10 败均为 C-19 语义既有差量，含 RST·T2 机读码族 / usage 钳制 / 残缺卡片等）。
+  - `node scripts/run-tests.mjs ai-keyvault` → 1 通过 / 0 失败；直跑 **25/25**：Phase 1（注入 none）`setAIConfig({apiKey:"sk-test-123456"})` → `getAIConfig().apiKey` 读回、`keyStorage="session"`、`ai-config.json` 不含 `sk-test`、无 `apiKeyPlain`、无 `plain:`、setAIConfig 返回体剥 apiKey 带 keyStorage、切预设不串用 / 切回内存恢复、清除后全空；Phase 2 预写含 `apiKeyPlain` + 两个 `plain:` 键的旧配置并重载模块 → 当前预设 Key 本次运行可用、磁盘明文全清、其他预设同样迁移、迁移幂等；Phase 3 注入 "secure"（**真实 DPAPI encrypt/decrypt**）→ 密文落盘、`keys[preset]` 留存、解密读回、切回恢复、清除全删——与修改前行为一致。
+  - `node scripts/run-tests.mjs ai-stream d112-providers m15v2.ai ai-keyvault` → **4 通过 / 0 失败**。
+  - `node scripts/i18n-check.mjs` → 1800 键 OK，退出码 0。
+  - `npm run typecheck` → exit 0。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":61,"electron":33,"system-node":8}`（102 个，报告 101 → +1）。
+  - 流程复跑：F16 **31/32**（失败仍仅幽灵通道，keyVault 判据 ✓）、F41 **58/68**（失败集合与基线逐条一致，两条 Key 断言 ✓）——均无新增失败。
+  - `npm test`（无并行负载）→ 102 个 **101 过 / 1 败 / 0 超时**；唯一失败 = applog（§1.1 既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
+- **偏离**：
+  1. **未做「旧实现差分」**：缺陷路径（保存后读不出）只在 safeStorage 不可用环境触发，本机 Windows 恒 secure（DPAPI），旧代码在本机全量里该路径不红；新测试靠 keyVault stub 注入模拟 none，而旧代码不经 keyVault，无法复用同一注入点。缺陷存在性以报告证据静态证实（改动前 `rg -n "apiKeyPlain" electron` 只有写入与备份剥离、无读取）。
+  2. **清除 Key 分支补 `sessionKeys.delete`**（报告未点名）：否则 none 环境下「清除 Key」后 getAIConfig 仍从 sessionKeys 读回旧 Key，清除语义失效——修复「保存却读不出」的对称面。
+  3. **f16 流程 U4 静态判据锚点随迁移**（报告未点名）：safeStorage 调用收口 keyVault 后原判据（读 ai.js）必失效，按 C-17 口径更新判据读 keyVault.js 并收紧「ai.js 不得再直接出现 safeStorage 加解密」；失败集合与基线一致，未放宽。
+  4. `getSelectedStorageBackend` 在 Linux 才探测（报告代码原样）；本机 Windows 上 "weak" 分支未实机触发，由 Phase 1 stub 的 "none" 路径与代码审读覆盖。
+  5. 测试 Phase 3 的 encrypt/decrypt 用真实 safeStorage（真 keyVault 留底后注入），非自造对称函数——报告「真实 encrypt/decrypt」的字面要求。
+  6. 测试不发网络请求，无需 C-19 的 `disable-http-cache` 开关（已在文件头注明差异原因）。
+  7. 测试副产物 `tests/m15r.activity.bundle.cjs` / `m15r.layout.bundle.cjs` 全量后变脏，提交前已还原；提交用显式路径（8 文件）。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -622,6 +656,6 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-20**（阶段 2 正确性与规模，P1：API Key——系统加密不可用时「明文保存却读不出来」（`getAIConfig` 只解密 `apiKeyEnc` 从不读 `apiKeyPlain`）+ 同步 safeStorage API 将在 Electron 46 移除（改 `isAsyncEncryptionAvailable` / `encryptStringAsync` / `decryptStringAsync`，`basic_text` 后端检测）；报告小节约在 :1513（`rg -n "C-20" 报告` 定位，锚点 `rg -n "isEncryptionAvailable|apiKeyPlain|\"plain:\"" electron/ai.js`）。
-- 基线：101 个测试；C-19 后全量 100 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。C-17 已改 `persist()` 语义：busy 只记日志（前缀 `[db] checkpoint 失败`），严格语义在 `persistNow` / `checkpointStrict`（备份 flush）。C-18 后 schema `user_version = 3`（idx_cards_due），新库自动到位；`computeTodayQueue` 增加 `damagedOmitted` 键。C-19 后 AI 网关走 `electron/aiTransport.js`（net.fetch 优先，fetch 层错误先经 `unwrapSysCode`/`CHROMIUM_NET_CODES` 还原系统码再归类）；写 `tests/ai-stream.test.cjs` 同款 electron 测试时注意：必须 `app.commandLine.appendSwitch("disable-http-cache")`，否则 net.fetch 的磁盘缓存会锁住 userData、rmSync 卡死进程退出。
+- 当前下一项：**C-21**（阶段 2 正确性与规模，P2：写入口参数校验——`addReadingEvent` 放过 `Infinity`/`NaN` 负值、`setLibraryItemLang` 正则放过 `en-us-x`、`saveSkip` 不查卡存在、`resolveCardIssue` 恒返 true；验收在 `tests/flows/f38-write-fuzz.cjs` 增用例；报告小节约在 :1556（`rg -n "C-21" 报告` 定位，锚点 `rg -n "^function addReadingEvent" electron/db.js`、`docPlainLengthOf` 找不到现成文档长度源就只做有限性检查并回报）。
+- 基线：102 个测试（61 electron-node / 33 electron / 8 system-node）；C-20 后全量 101 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。C-17 已改 `persist()` 语义：busy 只记日志（前缀 `[db] checkpoint 失败`），严格语义在 `persistNow` / `checkpointStrict`（备份 flush）。C-18 后 schema `user_version = 3`（idx_cards_due），新库自动到位；`computeTodayQueue` 增加 `damagedOmitted` 键。C-19 后 AI 网关走 `electron/aiTransport.js`（net.fetch 优先，fetch 层错误先经 `unwrapSysCode`/`CHROMIUM_NET_CODES` 还原系统码再归类）；写 `tests/ai-stream.test.cjs` 同款 electron 测试时注意：必须 `app.commandLine.appendSwitch("disable-http-cache")`，否则 net.fetch 的磁盘缓存会锁住 userData、rmSync 卡死进程退出。C-20 后 safeStorage 只经 `electron/keyVault.js` 访问（strength/encrypt/decrypt；`ai.js` 的 `getAIConfig` 带 `keyStorage`/`encryptionStrength`；明文 Key 只进内存 sessionKeys）；写需要 stub 加密环境的测试用 `require.cache[require.resolve("../electron/keyVault.js")] = { exports: stub }` 注入（参照 `tests/ai-keyvault.test.cjs`）。
 - **Token 账与执行协议（2026-10-24 用户指令更新）**：**Token 计账终止**——用户指示不再计算 Token 消耗（停更前最后已知状态：累计约 49M / 2 亿，其中 12M 实测，本行留档停更）。**新协议**：主控（编排会话）固定 GLM 5.3；执行单元（新会话）全部改用 **GLM 5.3 Flash 最高思考强度**（代理定义 `.zcode/agents/audit-flash.md`）；每个执行单元完成后，主控必须**审查一遍是否真正正确解决了报告中要解决的问题**（对照报告小节核 diff + 抽跑验收），审查通过才继续下一项（C-16 主控自做；C-17 / C-18 主控已复核 diff 与验收实测，均通过：C-17 persist 新语义与 checkpointStrict 落位、第二连接持读事务验收断言逐字落实；C-18 索引/快速路径/专用接口三段提交、`AS id` 别名遮蔽偏离属实、基准 140.5ms<300ms 与索引命中由主控独立复跑证实）。
