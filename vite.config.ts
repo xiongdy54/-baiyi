@@ -1,9 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
+import { cspPlugin } from "./src/lib/cspPolicy";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspPlugin()],
   base: "./",
   server: { port: 5173, strictPort: true },
   build: {
