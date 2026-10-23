@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`b86659c`（C-16 合并）。
+> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`0e4136a`（C-17 合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -19,10 +19,10 @@
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
 - **测试规模**：99 个 `tests/*.test.cjs`，分布 **61 electron-node / 30 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 **99 个 = 61 electron-node / 30 electron / 8 system-node**。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。**C-17 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：失败集合与 C-16 基线完全一致（仅 applog）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。流程侧（非 99 套件）：C-17 改动前基线 F37 8/8、F35 12/13（M1a）、F04 31/33（G1 两处——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败）；C-17 后 F37 8/8（新语义）、F35 **14/14**、F04 **33/33**（后两者修复既有失败，非放宽）。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16。
-- **下一项**：**C-17**（`persist()` 把已提交的写入误报为失败；P2；无依赖）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17。
+- **下一项**：**C-18**（10 万卡复习性能；P1；阶段 2 首项，分 3 个提交 C-18a/b/c）。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
@@ -80,7 +80,7 @@
 | 15 | C-14 | 完成 | `96cfb7a` / `7b1c4dc` | 轮换 protect + clockSkewSuspected；验收见 §3.15。 |
 | 16 | C-15 | 完成 | `17384fc` / `4f80aa1` | settings.json 两份实现合并到 jsonFile；验收见 §3.16。 |
 | 17 | C-16 | 完成 | `d063014` / `b86659c` | 撤销评分不回落；验收见 §3.17。 |
-| 18 | C-17 | 待做 | — | persist 把已提交写入误报失败。 |
+| 18 | C-17 | 完成 | `a0da0fe` / `0e4136a` | persist busy 不再误报失败；验收见 §3.18。 |
 
 ### 阶段 2 · 正确性与规模
 
@@ -526,6 +526,30 @@
   2. 报告给的替换代码用 `// ……保持原样……` 省略 after 解析与 `fsrsStatesEqual` 判定，实际逐字保留原实现；函数头注释按新语义改述（报告未提注释，顺带更新）。
   3. 修复同时覆盖「最新日志无快照（v22 旧日志形态）」的回落变体：旧实现同样会跳过它撤销更早的别的卡，新实现统一返回 null——即报告修复步骤「先取全局最新一条日志，再判断它是否可撤销」的字面行为，非额外改动。
 
+### 3.18 C-17 · `persist()` 把已提交的写入误报为失败
+
+- **提交**：`a0da0fe fix(C-17): persist() 不再把已提交的写入误报为失败——checkpoint busy 只记日志延后合并`；合并 `0e4136a`。
+- **改动**（7 文件，+133/−72）：
+  - `electron/db.js`：`persist()` 按报告代码重写——checkpoint busy/异常不抛错，记日志 + 2s 后一次 PASSIVE 补合并（timer unref，回调检查 `db && db.open`）；**busy=1 是 pragma 的正常返回值（不抛异常），与异常同属「checkpoint 未完成」，两种形态都记同一条日志**（报告代码只在 catch 记，busy 路径静默不可观察，故并入；消息前缀 `[db] checkpoint 失败（数据已提交，仅合并延后）：` 保持报告原样）。新增 `checkpointStrict()`（忙碌即抛 `checkpoint busy`）并导出；`persistNow` 改调它（严格语义保留，UI「重试保存」失败可观察）。83 个 `persist()` 调用点零改动；`saveReview` / `deleteCard` 上方描述旧失败语义的注释同步改述。
+  - `electron/main.js`：`backupOpts` 的 `flush` 由 `dbModule.persistDb()` 改为 `dbModule.checkpointStrict()`（备份开始时主文件必须自足，不能用不抛错的 persist）。
+  - `tests/m14.test.cjs`：M14-12 备份 flush 注入同步改为 `db.checkpointStrict()`（与 main.js 生产注入同语义）。
+  - `tests/persist.test.cjs`：P2 翻转为「checkpoint 忙碌 → 写入 API 成功返回 + 提交数据同连接可读 + 主文件逐字节未变 + persistNow 严格收敛」（blocker 改用报告验收给定的 `BEGIN; SELECT 1 FROM cards LIMIT 1`，原为读 review_logs 的等价持锁）；P3 保留「忙碌窗口内 persistNow 仍 throw」；文件头注释改述新语义；14 断言数量不变。
+  - `tests/flows/f37-persist-fault-injection.cjs`：注入命中改经 console.error 捕获 `[db] checkpoint` 日志判定（旧法靠 throw 消息）；M1（F37-1）翻转为「busy 时业务写入必须成功返回，不误报失败」；M2（F37-2）改为「提交真实可见」（实测 9/16 用例可观察，阈值 ≥8，probe 盲区用例单独记录）；F37-0/3/4/5/6 判据不变。
+  - `tests/flows/f35-stale-grade-guard.cjs`：M1 的 renameSync 旧注入（D137 后已失效）换为第二连接持读事务；M1a 翻转为「成功返回」+ 新增 M1a-2「checkpoint 失败只记日志（可观察）」；M1b 判据不变；头部注释补 C-17 说明。
+  - `tests/flows/f04-crash-recovery.cjs`：G1 的 tmp 目录占位旧注入（D137 后已失效）换为持读事务注入；断言「busy 时评分成功返回 + 主文件字节不变 + 快照完整」；G2 去掉清 tmp 障碍，断言「persistNow 严格收敛不重放」；头部注释补 C-17 说明。
+- **验收（2026-10-24，Windows；Electron 31.7.7 / Node 24.15.0）**：
+  - 改动前基线：`node scripts/run-tests.mjs persist undo m12` → 3 通过 / 0 失败；流程 `--only F04,F35,F37` → F37 8/8 过、F35 12/13（M1a）、F04 31/33（G1 两处）——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败。
+  - 改动后：`node scripts/run-tests.mjs persist undo m12` → **3 通过 / 0 失败**（persist 直跑 **14/14**，P2 五断言即报告验收场景：第二连接开读事务不提交时写入 API 返回成功、数据可读）。
+  - `node tests/flows/run.cjs --only F04,F35,F37 --cycles 1` → **F04 33/33、F35 14/14、F37 8/8**（F37-0 注入 16/16 命中、F37-2 可观察 9/16）。
+  - `npm run typecheck` → exit 0。
+  - `npm test`（无并行负载）→ 99 个 **98 过 / 1 败 / 0 超时**；唯一失败 = applog（§1.1 既有未归属项），失败集合与 C-16 基线完全一致，无新增失败文件。
+- **偏离**：
+  1. **persist() 在 busy 正常返回路径也记日志**：报告代码只在 catch 分支记日志，而 busy=1 是 `db.pragma` 的正常返回值（不抛异常）——不记日志则报告步骤 3 要求验证的「checkpoint 失败只记日志」在 busy 路径不可观察（首轮 F37/F35 用日志判定注入即因此 0 命中）。两种形态并入同一条日志，消息前缀保持报告原样。
+  2. **f35 / f04 的旧注入一并换新**：报告步骤 3 只点名 f37，但 f35 M1（renameSync mock）与 f04 G1（tmp 目录占位）注入自 D137 起就不再落在 persist 路径上，两流程在 main 上已是失败项（与 C-17 无关的既有失败）。按「等期望 persist 失败即 reject 的测试按新语义更新」的口径一并换为第二连接持读事务注入 + 新语义断言，改后 14/14、33/33（修复既有失败，未放宽任何断言；f35 M2b/M5 的 A-7 陈旧写防护断言逐字保留）。
+  3. F37-2 可观察阈值 ≥8 为本项自定（报告未给数值；实测 9/16 用例 probe 可观察提交，盲区用例在 record 中单独列出）。
+  4. m14 的备份 flush 注入同步改 checkpointStrict：报告步骤 2 要求「备份 opts.flush 调用它」，生产注入点在 main.js，测试注入同步保持同语义（该测试原本就模仿 main.js）。
+  5. persist.test.cjs P2 的 blocker 语句改为报告验收给定的 `SELECT 1 FROM cards LIMIT 1`（原为等价的读 review_logs 持锁）。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -539,6 +563,6 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-17**（阶段 1 首发前必须完成，P2：`persist()` 把已提交的写入误报为失败；无依赖）。
-- 基线：99 个测试；C-16 后全量 98 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，`m15v2.route` 本轮通过，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。
-- **Token 账（Goal 要求，每会话收尾时更新本行）**：额度 2 亿（GLM 5.3）。C-01…C-15 各会话未留逐会话记录，按每项上界 2M 估算累计 ≤32M；**C-16 本会话估算 ~0.2M**（无子代理，直改直验）。累计估算 ≤32.2M，余额充足——**下一会话（C-17）继续用 GLM 5.3**；若后续累计估算逼近 1.6 亿（留 20% 裕量），新会话改用 GLM 5.3 Flash 最高思考强度，且此后所有会话沿用 Flash。
+- 当前下一项：**C-18**（阶段 2 正确性与规模，P1：10 万卡复习队列/全量取卡性能；报告要求分 3 个提交 C-18a 索引 / C-18b 快速路径 / C-18c 替换全量调用）。
+- 基线：99 个测试；C-17 后全量 98 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。C-17 已改 `persist()` 语义：busy 只记日志（前缀 `[db] checkpoint 失败`），严格语义在 `persistNow` / `checkpointStrict`（备份 flush）——后续会话若遇依赖「persist 抛错」的旧期望，按新语义更新。
+- **Token 账（Goal 要求，每会话收尾时更新本行）**：额度 2 亿（GLM 5.3）。C-01…C-15 各会话未留逐会话记录，按每项上界 2M 估算累计 ≤32M；C-16 会话估算 ~0.2M；**C-17 本会话估算 ~0.35M**（无子代理；流程基线/验收各跑两轮 + 全量测试）。累计估算 ≤32.55M，余额充足——**下一会话（C-18）继续用 GLM 5.3**；若后续累计估算逼近 1.6 亿（留 20% 裕量），新会话改用 GLM 5.3 Flash 最高思考强度，且此后所有会话沿用 Flash。
