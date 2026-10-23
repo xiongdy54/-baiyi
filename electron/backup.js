@@ -355,7 +355,7 @@ async function createBackup(opts = {}) {
       writeSidecar(destFile, statKeyOf(fs.statSync(destFile)), meta);
     } catch { /* 忽略：sidecar 缺失只影响下次列表速度 */ }
     // A-13（审计）：safety 备份纳入滚动清理，否则每执行一次「恢复」就多一份且永不删除
-    if (label === "safety") rotateSafetyBackups(destDir, opts.safetyKeep || SAFETY_KEEP);
+    if (label === "safety") rotateSafetyBackups(destDir, opts.safetyKeep || SAFETY_KEEP, new Set([path.basename(destFile)]));
     return { ok: true, file: destFile, meta };
   } catch (err) {
     try { fs.rmSync(destFile + ".part", { force: true }); } catch { /* 忽略 */ }
@@ -626,17 +626,23 @@ async function autoBackupIfNeeded(opts = {}) {
     return { ok: false, error: `备份位置不可写（${dir}）：${err.message}` };
   }
   const today = `backup-auto-${dayTag(opts.now)}.zip`;
-  if (fs.existsSync(path.join(dir, today))) return { ok: true, skipped: "already-today" };
+  if (fs.existsSync(path.join(dir, today))) {
+    // C-14：时钟回拨后"今天"的文件可能是几天前以未来日期建的——跳过路径同样要带出 skew 提示
+    return { ok: true, skipped: "already-today", clockSkewSuspected: detectClockSkew(dir, opts.now) };
+  }
   const r = await createBackup({ ...opts, label: "auto", includeAIConfig: false });
   if (!r.ok || r.skipped) return r;
-  rotateAutoBackups(dir, keep);
-  return r;
+  // C-14：刚生成的备份 mtime = 当前系统时间，时钟回拨后它会排到最前当"最旧"——必须 protect
+  rotateAutoBackups(dir, keep, new Set([path.basename(r.file)]));
+  return { ...r, clockSkewSuspected: detectClockSkew(dir, opts.now) };
 }
 
-// safety 备份的滚动清理（按文件名字典序 = 时间序，与 auto 同策略）
-function rotateSafetyBackups(dir, keep = SAFETY_KEEP) {
-  const safeties = listByMtimeAsc(dir, SAFETY_RE);
-  for (const f of safeties.slice(0, Math.max(0, safeties.length - keep))) {
+// safety 备份的滚动清理（按 mtime 排序，与 auto 同策略）。protect：本轮刚生成的文件名——
+// C-14：时钟回拨时它 mtime 最小、会被当"最旧"先删，必须从删除候选中排除。
+function rotateSafetyBackups(dir, keep = SAFETY_KEEP, protect = new Set()) {
+  const safeties = listByMtimeAsc(dir, SAFETY_RE).filter((f) => !protect.has(f));
+  const keepOthers = Math.max(0, keep - protect.size);
+  for (const f of safeties.slice(0, Math.max(0, safeties.length - keepOthers))) {
     try { fs.rmSync(path.join(dir, f), { force: true }); } catch { /* 单个删除失败不影响其余 */ }
     removeSidecar(dir, f); // D117：zip 被轮转掉，它的列表 sidecar 一并清（漏删也只是无害孤儿）
   }
@@ -644,7 +650,8 @@ function rotateSafetyBackups(dir, keep = SAFETY_KEEP) {
 
 // D-TEST-35：按**文件修改时间**排序，不按文件名。文件名里的日期来自系统时钟，时钟回拨（用户改时间、
 // 同步服务拉回旧时间、跨时区迁移）会产出"看起来更旧"的新备份，字典序把它排到最前当"最旧"删掉——
-// 于是越新的备份越先被清。mtime 由文件系统给，不受文件名里那个日期影响。
+// 于是越新的备份越先被清。按 mtime 排序；但时钟回拨时 mtime 同样不可信（新文件的 mtime 就是当前
+// 系统时间，被调回后最新备份的 mtime 反而最小），调用方必须用 protect 保护刚创建的文件（C-14）。
 function listByMtimeAsc(dir, re) {
   let names;
   try {
@@ -662,9 +669,26 @@ function listByMtimeAsc(dir, re) {
     .map((x) => x.f);
 }
 
-function rotateAutoBackups(dir, keep) {
-  const autos = listByMtimeAsc(dir, AUTO_RE);
-  for (const f of autos.slice(0, Math.max(0, autos.length - keep))) {
+// C-14：时钟回拨检测——目录里若有 mtime 晚于「当前时间 + 1 天」的自动备份，说明时钟被回拨过
+//（那些备份是在"未来"建的）。只提示、不自动删除任何文件。
+function detectClockSkew(dir, now) {
+  const base = now ? now.getTime() : Date.now();
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!AUTO_RE.test(f)) continue;
+      let m = 0;
+      try { m = fs.statSync(path.join(dir, f)).mtimeMs; } catch { continue; }
+      if (m > base + 86400000) return true;
+    }
+  } catch { /* 目录不可读时放弃检测，不影响备份主流程 */ }
+  return false;
+}
+
+// C-14：同 rotateSafetyBackups——protect 排除本轮刚生成的文件，keepOthers 保证保留总数仍为 keep
+function rotateAutoBackups(dir, keep, protect = new Set()) {
+  const autos = listByMtimeAsc(dir, AUTO_RE).filter((f) => !protect.has(f));
+  const keepOthers = Math.max(0, keep - protect.size);
+  for (const f of autos.slice(0, Math.max(0, autos.length - keepOthers))) {
     try {
       fs.rmSync(path.join(dir, f), { force: true });
     } catch { /* 单个删除失败不影响其余 */ }

@@ -177,6 +177,48 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   check("旧 .snapshot-* 与非今日 .part 被清扫（中断残留孤儿回收）", !fs.existsSync(snapOld) && !fs.existsSync(partOld), JSON.stringify(swept));
   check("当日 .part 不误删（可能是在途构建）", fs.existsSync(partToday), JSON.stringify({ kept: fs.existsSync(partToday), swept }));
 
+  console.log("== 8) C-14：时钟回拨——rotate protect 保护刚创建的备份 ==");
+  fs.rmSync(BAK, { recursive: true, force: true });
+  fs.mkdirSync(BAK, { recursive: true });
+  seedData("C");
+  fs.writeFileSync(P.settingsFile, JSON.stringify({ app: { autoBackupEnabled: true, autoBackupKeep: 3 } }));
+  // 造 3 个自动备份，mtime 全部拨到「当前时间 + 2 天」：模拟备份先建在"未来"、系统时钟再被拨回。
+  // 回拨后新备份的 mtime（= 现在）比这 3 份都小 → 旧实现按 mtime 升序会把它当"最旧"立刻删掉。
+  const future = new Date(Date.now() + 2 * 86400000);
+  for (let i = 1; i <= 3; i++) {
+    const f = path.join(BAK, `backup-auto-2026-01-0${i}.zip`);
+    fs.writeFileSync(f, realSqliteBytes(`ROT${i}`));
+    fs.utimesSync(f, future, future);
+  }
+  r = await backup.autoBackupIfNeeded({ ...optsAuto(), now: new Date(), flush: () => {} });
+  const c14New = r.file ? path.basename(r.file) : null;
+  check("时钟回拨后新备份生成成功", r.ok === true && !r.skipped && !!c14New, JSON.stringify(r));
+  check("返回 clockSkewSuspected（目录里有未来 mtime 的自动备份）", r.clockSkewSuspected === true, r.clockSkewSuspected);
+  let autosC14 = fs.readdirSync(BAK).filter((f) => f.startsWith("backup-auto-"));
+  check("新备份未被轮换删除（C-14 protect）", autosC14.includes(c14New), JSON.stringify(autosC14));
+  check("保留总数 = keep（3）", autosC14.length === 3, JSON.stringify(autosC14));
+  check("被删的是 3 份未来 mtime 旧档中的一份", autosC14.filter((f) => f.startsWith("backup-auto-2026-01-")).length === 2, JSON.stringify(autosC14));
+  const skipR = await backup.autoBackupIfNeeded({ ...optsAuto(), now: new Date(), flush: () => {} });
+  check("同日再启动跳过且带出 clockSkewSuspected", skipR.skipped === "already-today" && skipR.clockSkewSuspected === true, JSON.stringify(skipR));
+  // 差分：不带 protect 的旧行为会把刚生成的备份当"最旧"删掉——证明本用例确实覆盖了缺陷。
+  // 补回第 3 份旧档（前面 protect 轮换已删掉一份），恢复到「3 旧 + 1 新、keep=3」的缺陷现场。
+  fs.writeFileSync(path.join(BAK, "backup-auto-2026-01-04.zip"), realSqliteBytes("ROT4"));
+  fs.utimesSync(path.join(BAK, "backup-auto-2026-01-04.zip"), future, future);
+  backup.rotateAutoBackups(BAK, 3);
+  check("差分：无 protect 时新备份会被当最旧删除（复现缺陷）", !fs.existsSync(path.join(BAK, c14New)), c14New);
+  // safety 分支同策略：新档 mtime=当前（时钟已回拨），两份旧档 mtime 在"未来"（回拨前所建）
+  const sfNew = path.join(BAK, "backup-safety-20990101-000001.zip");
+  fs.writeFileSync(sfNew, "SAFETY-PROTECT");
+  const sfOld1 = path.join(BAK, "backup-safety-20990101-000002.zip");
+  const sfOld2 = path.join(BAK, "backup-safety-20990101-000003.zip");
+  fs.writeFileSync(sfOld1, "SAFETY-OLD1");
+  fs.writeFileSync(sfOld2, "SAFETY-OLD2");
+  for (const f of [sfOld1, sfOld2]) fs.utimesSync(f, future, future);
+  backup.rotateSafetyBackups(BAK, 2, new Set([path.basename(sfNew)]));
+  check("safety：protect 保护刚生成的新档、清掉最旧的旧档", fs.existsSync(sfNew) && !fs.existsSync(sfOld1), JSON.stringify({ sfNew: fs.existsSync(sfNew), sfOld1: fs.existsSync(sfOld1), sfOld2: fs.existsSync(sfOld2) }));
+  backup.rotateSafetyBackups(BAK, 1);
+  check("safety 差分：无 protect 时同样会删掉刚生成的新档（复现缺陷）", !fs.existsSync(sfNew), sfNew);
+
   // 清理临时目录
   fs.rmSync(tmp, { recursive: true, force: true });
   console.log(`\nM2 备份单元测试：${pass} 通过 / ${fail} 失败`);
