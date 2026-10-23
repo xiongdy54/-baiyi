@@ -2187,7 +2187,23 @@ app.whenReady().then(async () => {
   // D143（v48.98，T4）：显式让出——createWindow/协议注册/待恢复检查段与 initDb 段拆成两个宏任务，
   // 避免「窗口原生创建 + 建表迁移」合成一段连续 >300ms 的启动空洞（诊断 §3 R4 / §4 T4）。
   await new Promise((r) => setImmediate(r));
-  await initDb();
+  // C-10：库比程序新（DB_TOO_NEW）→ 提示升级并退出，绝不写这份数据；其他错误保持原样上抛
+  try {
+    await initDb();
+  } catch (e) {
+    if (e && e.code === "DB_TOO_NEW") {
+      dialog.showMessageBoxSync({
+        type: "error",
+        title: "数据版本过新",
+        message: e.message,
+        detail: `数据文件夹：${app.getPath("userData")}\n本程序不会修改这份数据。`,
+        buttons: ["退出"]
+      });
+      app.exit(1);
+      return;
+    }
+    throw e;
+  }
   // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
   // 导图对账）移入下一个宏任务——原实现它们与 initDb 共用同一连续宏任务（实测合成 ~730ms 启动空洞）；
   // 顺序与错误语义不变（各自 try/catch），只是不再拖长启动关键段。

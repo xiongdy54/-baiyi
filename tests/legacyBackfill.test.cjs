@@ -20,6 +20,7 @@ const esbuild = require("esbuild");
 
 const ROOT = path.join(__dirname, "..");
 const LB = require(path.join(ROOT, "electron", "legacyBackfill.js"));
+const Database = require("better-sqlite3");
 
 let pass = 0, fail = 0;
 function check(name, cond, expected, actual) {
@@ -358,9 +359,19 @@ app.whenReady().then(async () => {
     // ================================================================ P5 真库集成（db.js initDb 挂载）
     console.log("== P5 真库集成：initDb 挂载 / 重启触发 / 二次重启零写入 ==");
     {
-      const marked0 = st.readSettings();
-      check("新空库首启：initDb 挂载即写完成标记", marked0 && marked0.app && typeof marked0.app.legacyBackfillV1 === "number",
-        "number", marked0 && marked0.app && marked0.app.legacyBackfillV1);
+      // C-10：完成标记落库内 app_meta（settings 只在未迁移旧库/过渡期作回落）
+      const metaMarker = () => {
+        const c = new Database(dbFile, { readonly: true });
+        try { return c.prepare("SELECT value FROM app_meta WHERE key = 'legacyBackfillV1'").get()?.value; } finally { c.close(); }
+      };
+      const clearMarker = () => {
+        db.execRawSql("DELETE FROM app_meta WHERE key = 'legacyBackfillV1'");
+        const s = st.readSettings();
+        if (s.app) { delete s.app.legacyBackfillV1; st.writeSettings(s); }
+      };
+      const marker0 = metaMarker();
+      check("新空库首启：initDb 挂载即写完成标记（app_meta）", typeof marker0 === "string" && Number(marker0) > 0,
+        "number-like string", marker0);
 
       // 造夹具（createCard 落库即 persist；execRawSql 后手动 persistDb 再重启，文件库才含夹具）
       db.createCard({ id: "bf-new-legacy", noteText: "n", frontMarkdown: "f", backMarkdown: "b" }); // 新卡默认 3 字段 fsrs_json = v11 前 shape
@@ -401,9 +412,7 @@ app.whenReady().then(async () => {
       const clozeHintBefore = db.getCard("bf-cloze-hint");
 
       // 清标记 → 重启模拟（initDb 从文件重载后挂载回填）
-      const s = st.readSettings();
-      delete s.app.legacyBackfillV1;
-      st.writeSettings(s);
+      clearMarker();
       await db.initDb();
 
       const newLegacy = db.getCard("bf-new-legacy");
@@ -431,11 +440,11 @@ app.whenReady().then(async () => {
         .filter((id) => !cmpRow(untouchedBefore, id));
       check("真库：未匹配行（review态/8字段/损坏/无hint/已有back/软删）行级零漂移", drift5.length === 0, "零漂移",
         drift5.map((id) => ({ id, diff: rowDiff(id) })));
-      const marked1 = st.readSettings();
-      check("真库：重启后完成标记重新写入", marked1 && marked1.app && typeof marked1.app.legacyBackfillV1 === "number", "number", marked1 && marked1.app && marked1.app.legacyBackfillV1);
+      const marker1 = metaMarker();
+      check("真库：重启后完成标记重新写入（app_meta）", typeof marker1 === "string" && Number(marker1) > 0, "number-like string", marker1);
 
       // 二次重启：标记在场 → 挂载回填零写入（行级 + 标记值不变）
-      const markerBefore = marked1.app.legacyBackfillV1;
+      const markerBefore = marker1;
       const allBefore = {};
       for (const id of ["bf-new-legacy", "bf-review-legacy", "bf-modern", "bf-cloze-hint", "bf-cloze-perblank", "bf-cloze-nohint", "bf-cloze-withback", "bf-broken", "bf-deleted"]) {
         allBefore[id] = db.getCard(id);
@@ -443,7 +452,7 @@ app.whenReady().then(async () => {
       await db.initDb();
       const drift6 = Object.keys(allBefore).filter((id) => !cmpRow(allBefore, id));
       check("二次重启：全部行零漂移（标记短路）", drift6.length === 0, "零漂移", drift6);
-      check("二次重启：标记时间戳不变（未重写）", st.readSettings().app.legacyBackfillV1 === markerBefore, markerBefore, st.readSettings().app.legacyBackfillV1);
+      check("二次重启：标记时间戳不变（未重写）", metaMarker() === markerBefore, markerBefore, metaMarker());
     }
 
     console.log(`\n==== legacyBackfill.test：${pass} 通过 / ${fail} 失败 ====`);

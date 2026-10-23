@@ -37,7 +37,7 @@ console.log("---- 1 DDL ----");
   check("idx_mmedges_key 唯一索引 (map_id, from_id, to_id, code)", has(/idx_mmedges_key ON material_map_edges\(map_id, from_id, to_id, code\)/));
   check("idx_mmedges_to (map_id, to_id)", has(/idx_mmedges_to ON material_map_edges\(map_id, to_id\)/));
   check("两张新表建在 v48 导图建表段之后（material_map_calls 之后）", src.indexOf("CREATE TABLE IF NOT EXISTS material_map_nodes") > src.indexOf("CREATE TABLE IF NOT EXISTS material_map_calls"));
-  check("material_maps.view_json 守卫式 ALTER", has(/ALTER TABLE material_maps ADD COLUMN view_json TEXT/));
+  check("material_maps.view_json 守卫式补列（C-10：addColumnIfMissing）", has(/addColumnIfMissing\("material_maps", "view_json", "TEXT"\)/));
 }
 
 console.log("---- 2 账本新列 ----");
@@ -45,7 +45,8 @@ console.log("---- 2 账本新列 ----");
   for (const col of ["model", "ttfn_ms", "lines", "lines_dropped", "drop_json", "rels_dropped", "reasoning_chars", "trigger"]) {
     check(`calls 补列循环含 "${col}"`, has(new RegExp(`\\["${col}", "(TEXT|INTEGER)"\\]`)));
   }
-  check("补列走守卫式 ALTER（try/catch，列名加引号）", has(/ALTER TABLE material_map_calls ADD COLUMN "\$\{col\}"/));
+  check("补列走守卫式补列（C-10：addColumnIfMissing，列存在即跳过）", has(/addColumnIfMissing\("material_map_calls", col, type\)/));
+  check("addColumnIfMissing 定义存在（pragma_table_info 判存在）", /function addColumnIfMissing[\s\S]*?pragma_table_info/.test(src));
   const save = fnBody("saveMaterialMapCall");
   check("saveMaterialMapCall 接收新字段", ["model", "ttfnMs", "lines", "linesDropped", "dropJson", "relsDropped", "reasoningChars", "trigger"].every((k) => new RegExp(`\\b${k}\\b`).test(save)));
   check('saveMaterialMapCall INSERT 含 "trigger" 引号列', /\n\s+model, ttfn_ms, lines, lines_dropped, drop_json, rels_dropped, reasoning_chars, "trigger"\)/.test(save));
