@@ -332,7 +332,7 @@ export async function buildSyntheticEpub(
     `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="uid">urn:uuid:synthetic-${stableHash(title + " " + markdown + imageHashSuffix(images))}</dc:identifier>
+    <dc:identifier id="uid">urn:uuid:synthetic-${stableHash(title + "\u0000" + markdown + imageHashSuffix(images))}</dc:identifier>
     <dc:title>${escapeXml(title)}</dc:title>
     <dc:language>${lang}</dc:language>
     <meta property="dcterms:modified">2026-09-10T00:00:00Z</meta>
