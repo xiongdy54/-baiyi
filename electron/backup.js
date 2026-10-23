@@ -8,9 +8,11 @@
 // D143（v48.98，T1）：备份**构建**（快照整读 + JSZip DEFLATE + 整包写盘）移入 worker_threads
 //                （electron/backup-build-worker.js）——主进程不再被每日首启备份的 0.3~1.4s 单段
 //                事件循环空洞冻结（诊断 docs/design/STARTUP-LAG-DIAGNOSIS.md §3 R1b）。
+// C-12：备份/恢复全面流式化（yazl 写 / yauzl 读，自动 ZIP64）。JSZip 的整文件整包内存路径
+//                在 >2GiB 抛 ERR_FS_FILE_TOO_LARGE、>4GiB 产出损坏 zip；备份与恢复自此与文件大小解耦。
 const fs = require("fs");
 const path = require("path");
-const JSZip = require("jszip");
+const { openZip, forEachEntry, extractAll, readBackupMeta: readZipBackupMeta } = require("./zipRead");
 const { Worker } = require("worker_threads");
 const Database = require("better-sqlite3");
 const schema = require("./schemaVersion");
@@ -126,21 +128,28 @@ function sanitizeAIConfigForBackup(text) {
 // 换入前的内容校验（D-TEST-85/87）：SQLite 头部 + 页大小/页数 与文件长度是否自洽。
 // 0 字节、垃圾字节、以及"头部还在但正文被截断"三类都能被这一步拦下，且不引入第二个 WASM 实例。
 // 边界：不校验应用 schema（那需要真开库），本函数只回答"它是不是一个完整的 SQLite 文件"。
+// C-12：只读 100 字节头 + stat 自洽性判断——原实现为看 100 字节头而 readFileSync 整个库文件
+//（dictionary.db 835MB / 未来 >2GiB 直接抛 ERR_FS_FILE_TOO_LARGE，校验反而变成恢复的拦路虎）。
 function isIntactSqliteFile(file) {
-  let buf;
+  let fd;
   try {
-    buf = fs.readFileSync(file);
+    fd = fs.openSync(file, "r");
+    const size = fs.fstatSync(fd).size;
+    if (size < 512) return false;
+    const buf = Buffer.alloc(100);
+    if (fs.readSync(fd, buf, 0, 100, 0) < 100) return false;
+    if (buf.subarray(0, 16).toString("latin1") !== "SQLite format 3\u0000") return false;
+    let pageSize = buf.readUInt16BE(16);
+    if (pageSize === 1) pageSize = 65536;
+    if (pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) return false;
+    const pageCount = buf.readUInt32BE(28);
+    if (pageCount <= 0) return false;
+    return size >= pageSize * pageCount;
   } catch {
     return false;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* 忽略 */ } }
   }
-  if (buf.length < 512) return false;
-  if (buf.subarray(0, 16).toString("latin1") !== "SQLite format 3\u0000") return false;
-  let pageSize = (buf[16] << 8) | buf[17];
-  if (pageSize === 1) pageSize = 65536;
-  if (pageSize < 512 || pageSize > 65536 || (pageSize & (pageSize - 1)) !== 0) return false;
-  const pageCount = (buf[28] << 24) | (buf[29] << 16) | (buf[30] << 8) | buf[31];
-  if (pageCount <= 0) return false;
-  return buf.length >= pageSize * pageCount;
 }
 
 // settings.json / ai-config.json 这类必须是"JSON 对象整体"才允许覆盖（D-TEST-87）
@@ -321,6 +330,16 @@ async function createBackup(opts = {}) {
       }
     }
     entries.push({ zipPath: "backup-meta.json", data: Buffer.from(JSON.stringify(meta, null, 2), "utf8"), compression: "DEFLATE" });
+    // C-12：构建前磁盘空间检查（按源文件大小估算；压缩后只会更小，200MB 为元数据/系统余量）
+    let total = 0;
+    for (const e of entries) total += e.data !== undefined ? e.data.length : fs.statSync(e.filePath).size;
+    try {
+      const st = fs.statfsSync(destDir);
+      const need = total + 200 * 1024 * 1024;
+      if (st.bavail * st.bsize < need) {
+        return { ok: false, error: `备份位置磁盘空间不足（${destDir}，需要约 ${(Math.ceil((need / 1024 ** 3) * 10) / 10).toFixed(1)} GB）` };
+      }
+    } catch { /* statfs 不可用则跳过预检，写盘失败照常报错 */ }
     // D143（T1）：构建（整读→DEFLATE→写盘）全部在 worker 线程内，主进程只收消息。
     const tmp = destFile + ".part";
     const built = await buildZipInWorker({
@@ -419,19 +438,12 @@ function parseMetaInWorker(file, timeoutMs = 60000) {
   });
 }
 
-// 同步兜底（worker 不可用时仍可用）：会阻塞主进程，仅作防御回退，正常路径不再走到这里。
+// 同步兜底（worker 不可用时仍可用）：仅作防御回退，正常路径不再走到这里。
+// C-12：改为 zipRead 流式实现（旧 JSZip.loadAsync(readFileSync) 有 2GiB 上限且整包进内存；
+// 本函数本就是 async，名字沿用既有调用方）。
 async function readBackupMetaSync(file) {
-  let buf;
   try {
-    buf = fs.readFileSync(file);
-  } catch {
-    return null;
-  }
-  try {
-    const zip = await JSZip.loadAsync(buf);
-    const entry = zip.file("backup-meta.json");
-    if (!entry) return null;
-    return JSON.parse(await entry.async("string"));
+    return await readZipBackupMeta(file);
   } catch {
     return null;
   }
@@ -661,27 +673,37 @@ function rotateAutoBackups(dir, keep) {
 }
 
 // 从备份 zip 恢复：校验 → 安全备份当前数据 → 解包到 staging + 写标记（重启时换入生效）
+// C-12：全程流式——meta 与 library.db 确认只读中央目录；解包逐条目 pipe 落盘；解包前按
+// 中央目录声明的总大小做磁盘空间预检。条目路径越界/绝对路径/反斜杠 → 整体中止（旧实现跳过）。
 async function restoreBackup(file, opts = {}) {
   const p = resolvePaths(opts);
   if (!fs.existsSync(file)) return { ok: false, error: "备份文件不存在" };
-  let zip;
+  let meta;
   try {
-    zip = await JSZip.loadAsync(fs.readFileSync(file));
+    meta = await readZipBackupMeta(file);
   } catch {
     return { ok: false, error: "无法读取备份文件（不是有效的 zip）" };
   }
-  const metaEntry = zip.file("backup-meta.json");
-  if (!metaEntry) return { ok: false, error: "这不是本软件生成的备份文件（缺少 backup-meta.json）" };
-  let meta;
-  try {
-    meta = JSON.parse(await metaEntry.async("string"));
-  } catch {
-    return { ok: false, error: "备份清单损坏（backup-meta.json 无法解析）" };
-  }
+  if (!meta) return { ok: false, error: "这不是本软件生成的备份文件（缺少 backup-meta.json）" };
   if (meta.app !== APP_TAG || Number(meta.format) !== FORMAT) {
     return { ok: false, error: "备份格式不匹配（来自其他应用或版本格式）" };
   }
-  if (!zip.file("library.db")) return { ok: false, error: "备份不完整：缺少 library.db" };
+  let total = 0;
+  let hasLibraryDb = false;
+  try {
+    const zip = await openZip(file);
+    try {
+      await forEachEntry(zip, async (entry) => {
+        if (entry.fileName === "library.db") hasLibraryDb = true;
+        total += Number(entry.uncompressedSize) || 0;
+        return true;
+      });
+    } finally { try { zip.close(); } catch { /* 已关闭 */ } }
+  } catch (e) {
+    // yauzl 对 ../、绝对路径条目直接报 invalid relative path——同样是整体中止，消息带上原因
+    return { ok: false, error: `无法读取备份文件（不是有效的 zip）：${e instanceof Error ? e.message : String(e)}` };
+  }
+  if (!hasLibraryDb) return { ok: false, error: "备份不完整：缺少 library.db" };
 
   // 恢复保护：先对当前数据做一次安全备份（防误恢复本身丢数据）
   let safetyFile = null;
@@ -699,13 +721,17 @@ async function restoreBackup(file, opts = {}) {
   try {
     fs.rmSync(p.stagingDir, { recursive: true, force: true });
     fs.mkdirSync(p.stagingDir, { recursive: true });
-    for (const entry of Object.values(zip.files)) {
-      if (entry.dir) continue;
-      const dest = path.resolve(p.stagingDir, entry.name);
-      if (!dest.startsWith(path.resolve(p.stagingDir) + path.sep)) continue; // 防 zip 路径穿越
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.writeFileSync(dest, await entry.async("nodebuffer"));
-    }
+    // C-12：解包前磁盘空间检查（按中央目录声明的解压后总大小估算，1.1 倍 + 200MB 余量）
+    try {
+      const st = fs.statfsSync(path.dirname(p.stagingDir));
+      const need = total * 1.1 + 200 * 1024 * 1024;
+      if (st.bavail * st.bsize < need) {
+        try { fs.rmSync(p.stagingDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
+        return { ok: false, error: `磁盘空间不足，无法解包备份（需要约 ${(Math.ceil((need / 1024 ** 3) * 10) / 10).toFixed(1)} GB）` };
+      }
+    } catch { /* statfs 不可用则跳过预检，解包写盘失败照常报错 */ }
+    // C-12：流式解包（zipRead.extractAll）；包内出现越界路径 = 文件被篡改，整体中止而非部分恢复
+    await extractAll(file, p.stagingDir);
     // C-10：备份来自更新版本的 Nutation → 拒绝恢复（旧程序打开新库会静默破坏数据）
     const stagedDb = path.join(p.stagingDir, "library.db");
     try {
