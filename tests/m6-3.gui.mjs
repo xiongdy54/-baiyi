@@ -9,6 +9,11 @@ import path from "node:path";
 import JSZip from "jszip";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+// C-11：userData 不再默认指向真实目录；NUTATION_USER_DATA 必填（与应用 spawn 同环境）
+if (!process.env.NUTATION_USER_DATA) {
+  console.error("缺少 NUTATION_USER_DATA 环境变量（指向应用 userData 目录）。");
+  process.exit(1);
+}
 const PORT = "9224";
 const FIXDIR = path.join(ROOT, "tests", "tmp-m63-fixtures");
 
@@ -199,7 +204,7 @@ async function openBookProbe(cdp, title) {
     return JSON.stringify({ html: pick("绩效与工作节奏")?.id, fb2: pick("FSRSTEST-M6-3 夹具书")?.id, cbz: pick("FSRSTEST-M6-3 漫画")?.id });
   })()`);
   const idObj = JSON.parse(ids);
-  const UD = path.join(process.env.APPDATA, "incremental-reading-dev", "assets");
+  const UD = path.join(process.env.NUTATION_USER_DATA, "assets");
   check("html-original 落盘", fs.existsSync(path.join(UD, String(idObj.html), "original.html")), idObj.html);
   check("ebook-original 落盘且扩展名保真（.fb2/.cbz）",
     fs.existsSync(path.join(UD, String(idObj.fb2), "original.fb2")) && fs.existsSync(path.join(UD, String(idObj.cbz), "original.cbz")),

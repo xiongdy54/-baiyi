@@ -15,6 +15,7 @@ const { Worker } = require("worker_threads");
 const Database = require("better-sqlite3");
 const schema = require("./schemaVersion");
 
+// C-11：冻结的备份格式标识，与应用名无关——改值会让既有备份全部无法恢复（restore 按 app+format 校验）。
 const APP_TAG = "incremental-reading-dev";
 const FORMAT = 1;
 const AUTO_RE = /^backup-auto-\d{4}-\d{2}-\d{2}\.zip$/;

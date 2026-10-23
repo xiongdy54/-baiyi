@@ -1,18 +1,19 @@
 # electron-builder 打包配置（§9.4 技术债「electron-builder 打包」P0 落地）
-# 约束（v49.6 / D180 修订）：本地优先 —— 依旧零遥测、CLI 一律 --publish never（不自动上传）；
+# 约束（v49.6 / D180 修订；C-11 冻结）：本地优先 —— 依旧零遥测、CLI 一律 --publish never（不自动上传）；
 # publish 仅作为 electron-updater 的更新源声明（打包时生成资源内 app-update.yml），
-# owner/repo 为占位符：发布前必须填入真实 GitHub slug（见 §9.5 v49.6 待办）。
-appId: com.incrementalreading.desktop
-# productName 保持与 package.json name 一致：Electron 的 userData 目录默认取 app 名，
-# 改成别的显示名会把数据目录从 %APPDATA%/incremental-reading-dev 迁走（违背 §2 记载的数据路径，重启丢数据观感）。
-# 对外显示名由 nsis.shortcutName（桌面/开始菜单快捷方式）承担。
-productName: incremental-reading-dev
+# owner/repo = xiongdy54/Nutation（真实 GitHub slug，D-02 冻结，勿再改动）。
+# C-11（D-02 已答复，2026-10-23）：发布身份冻结——appId / productName / 数据目录 / 更新源。
+# 数据目录由 electron/main.js 的 pinUserData() 固定（打包版 <appData>/Nutation、开发版
+# <appData>/Nutation-dev、旧目录 incremental-reading-dev 首启改名迁移），与 productName 解耦；
+# 此后改名不再迁走数据目录。appId 的 io.github. 前缀是 Flathub 对 GitHub 托管应用的强制命名。
+appId: io.github.xiongdy54.nutation
+productName: Nutation
 # D180：更新源 = GitHub Releases。版本号唯一真源 = package.json version（两渠道同步 bump）；
 # Microsoft Store 渠道不走此配置（运行时 process.windowsStore 分流，electron/updater.js 禁用自更新）。
 publish:
   provider: github
-  owner: YOUR_GITHUB_USERNAME
-  repo: incremental-reading
+  owner: xiongdy54
+  repo: Nutation
 directories:
   # vite 的 renderer 产物占用 dist/（D6：dist 存在则优先加载），打包产物必须另立目录，禁止混用。
   output: release
@@ -52,8 +53,8 @@ nsis:
   allowElevation: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  # 快捷方式显示名用软件定名 Nutation（v49.14 / D187）；exe/安装目录名仍走 ASCII 的 productName，
-  # 规避 NSIS 文件名兼容风险；productName 刻意不动＝userData 目录稳定（见上方注释）
+  # 快捷方式显示名 = productName = Nutation（v49.14 / D187 定名，C-11 冻结）；
+  # 数据目录由 main.js pinUserData() 固定，与 productName 解耦（见文件头注释）
   shortcutName: Nutation
   deleteAppDataOnUninstall: false # 卸载不删 userData（本地优先：数据归用户）
-  artifactName: ${name}-${version}-setup.${ext}
+  artifactName: Nutation-${version}-win-${arch}-setup.${ext}

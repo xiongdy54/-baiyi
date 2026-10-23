@@ -7,6 +7,11 @@ import fs, { openSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+// C-11：userData 不再默认指向真实目录；NUTATION_USER_DATA 必填（与应用 spawn 同环境）
+if (!process.env.NUTATION_USER_DATA) {
+  console.error("缺少 NUTATION_USER_DATA 环境变量（指向应用 userData 目录）。");
+  process.exit(1);
+}
 const PORT = "9224";
 const FIXDIR = path.join(ROOT, "tests", "tmp-m62-fixtures");
 
@@ -211,7 +216,7 @@ const BOOK = "FSRSTEST-M6-2 导测";
     return it ? it.id : "missing";
   })()`);
   const itemId = itemIdRaw;
-  check("pdf-original 落盘", itemId && fs.existsSync(path.join(process.env.APPDATA, "incremental-reading-dev", "assets", String(itemId), "original.pdf")), String(itemId));
+  check("pdf-original 落盘", itemId && fs.existsSync(path.join(process.env.NUTATION_USER_DATA, "assets", String(itemId), "original.pdf")), String(itemId));
 
   console.log("== 3) 打开 PDF 书：目录跳章 + 正文渲染 ==");
   const r1 = await openBookToChapter(cdp, BOOK, "FSRSTEST Chapter One");

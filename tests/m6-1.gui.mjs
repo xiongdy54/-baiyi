@@ -10,6 +10,11 @@ import zlib from "node:zlib";
 import JSZip from "jszip";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+// C-11：userData 不再默认指向真实目录；NUTATION_USER_DATA 必填（与应用 spawn 同环境）
+if (!process.env.NUTATION_USER_DATA) {
+  console.error("缺少 NUTATION_USER_DATA 环境变量（指向应用 userData 目录）。");
+  process.exit(1);
+}
 const PORT = "9224";
 const FIXDIR = path.join(ROOT, "tests", "tmp-m6-fixtures");
 
@@ -209,7 +214,7 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   check("source_type 落库 word/txt/markdown", kinds?.w === "word" && kinds?.t === "txt" && kinds?.m === "markdown", kinds);
 
   console.log("== 2) assets 落盘（原文件 + 内嵌图，M2 备份范围） ==");
-  const UD = path.join(process.env.APPDATA, "incremental-reading-dev", "assets");
+  const UD = path.join(process.env.NUTATION_USER_DATA, "assets");
   const disk = JSON.parse(await cdp.eval(`(async () => {
     const xs = await window.libraryAPI.list();
     const w = xs.find((x) => x.title === "FSRSTEST-M6 Word导测");

@@ -8,6 +8,11 @@ import fs, { openSync } from "node:fs";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+// C-11：userData 不再默认指向真实目录；NUTATION_USER_DATA 必填（与应用 spawn 同环境）
+if (!process.env.NUTATION_USER_DATA) {
+  console.error("缺少 NUTATION_USER_DATA 环境变量（指向应用 userData 目录）。");
+  process.exit(1);
+}
 const PORT = "9224";
 const FIXDIR = path.join(ROOT, "tests", "tmp-m62n-fixtures");
 
@@ -186,7 +191,7 @@ async function pdfRenderState(cdp) {
   })()`);
   const srcObj = typeof srcType === "string" ? JSON.parse(srcType) : srcType;
   check("source_type=pdf 落库", srcObj?.t === "pdf", String(srcType).slice(0, 120));
-  check("pdf-original 落盘", srcObj?.id && fs.existsSync(path.join(process.env.APPDATA, "incremental-reading-dev", "assets", String(srcObj.id), "original.pdf")), String(srcObj?.id));
+  check("pdf-original 落盘", srcObj?.id && fs.existsSync(path.join(process.env.NUTATION_USER_DATA, "assets", String(srcObj.id), "original.pdf")), String(srcObj?.id));
 
   console.log("== 2) 打开 PDF 书：原生渲染（canvas + 文本层，非合成 EPUB） ==");
   const r1 = await openPdfBook(cdp);

@@ -1,5 +1,13 @@
 {
-  "name": "incremental-reading-dev",
+  "name": "nutation",
+  "productName": "Nutation",
+  "description": "Nutation —— 本地优先的桌面渐进阅读学习软件（PDF/EPUB/Word/TXT/MD/HTML 阅读、摘录批注、AI 制卡、FSRS 复习、材料导图与知识图谱）",
+  "author": {
+    "name": "xiongdy54",
+    "email": "152503729+xiongdy54@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/xiongdy54/Nutation",
+  "repository": "github:xiongdy54/Nutation",
   "version": "0.0.1",
   "private": true,
   "main": "electron/main.js",

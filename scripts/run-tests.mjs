@@ -5,6 +5,7 @@
 //   node scripts/run-tests.mjs --list          # 只打印每个文件判定的运行时
 //   node scripts/run-tests.mjs --timeout=300   # 单个测试超时秒数（默认 180，可被文件头 @timeout 覆盖）
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -67,6 +68,10 @@ function runOne(file, runtime, timeoutSec) {
     // 宿主（如 Qoder/Electron 工具链）可能带有 ELECTRON_RUN_AS_NODE=1；真实 Electron 运行时必须清掉，
     // 否则 app 为 undefined、所有 electron 测试假失败。
     if (runtime === "electron") delete childEnv.ELECTRON_RUN_AS_NODE;
+    // C-11：每个测试注入独立的临时 NUTATION_USER_DATA（main.js pinUserData 命中即用），
+    // 隔离 electron 运行时的 userData；结束后删除（Windows 下目录可能被短暂占用，重试）。
+    const tmpUserData = fs.mkdtempSync(path.join(os.tmpdir(), "nutation-test-"));
+    childEnv.NUTATION_USER_DATA = tmpUserData;
     const child = spawn(cmd, args, {
       cwd: ROOT,
       env: childEnv,
@@ -81,6 +86,9 @@ function runOne(file, runtime, timeoutSec) {
     const timer = setTimeout(() => { timedOut = true; killTree(child); }, timeoutSec * 1000);
     child.on("close", (code) => {
       clearTimeout(timer);
+      try {
+        fs.rmSync(tmpUserData, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      } catch { /* 删不掉留给系统临时目录，不掩盖测试结果 */ }
       const status = timedOut ? "timeout" : code === 0 ? "pass" : "fail";
       resolve({ file: path.relative(ROOT, file).replace(/\\/g, "/"), runtime, status, code, ms: Date.now() - t0, tail: out.slice(-4000) });
     });
