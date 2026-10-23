@@ -72,4 +72,27 @@ function writeJsonAtomic(file, obj) {
   }
 }
 
-module.exports = { readJsonObject, writeJsonAtomic, preserveCorrupt };
+/** C-46：原子写文本——同目录 tmp → fsync → rename（Windows 偶发占用时退避重试）→（POSIX）fsync 目录；失败时删除 tmp 并抛出 */
+function writeTextAtomic(file, text) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    const fd = fs.openSync(tmp, "w");
+    // 同 writeJsonAtomic：必须用 writeFileSync(fd, …)，不要改用 fs.writeSync——磁盘将满时会静默短写
+    try { fs.writeFileSync(fd, String(text), "utf8"); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    for (let i = 0; ; i++) {
+      try { fs.renameSync(tmp, file); break; } catch (e) {
+        if (i >= 5 || !["EPERM", "EBUSY", "EACCES"].includes(e.code)) throw e;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50 * (i + 1)); // 杀毒/索引器短暂占用：退避重试
+      }
+    }
+  } catch (e) {
+    try { fs.rmSync(tmp, { force: true }); } catch { /* 忽略 */ }
+    throw e;
+  }
+  if (process.platform !== "win32") {
+    try { const d = fs.openSync(path.dirname(file), "r"); fs.fsyncSync(d); fs.closeSync(d); } catch { /* 部分文件系统不支持 */ }
+  }
+}
+
+module.exports = { readJsonObject, writeJsonAtomic, writeTextAtomic, preserveCorrupt };

@@ -6,6 +6,7 @@
 // 本模块零 Electron 依赖（纯 node），可被 tests/m14.test.cjs 直连单测。
 const fs = require("fs");
 const path = require("path");
+const { writeTextAtomic } = require("./jsonFile"); // C-46：记忆文件含用户手写区，一律原子写
 
 const MEMORY_DIR_NAME = "memory";
 const CORE_FILE = "core.md";
@@ -89,14 +90,22 @@ function ensureTree(dir) {
     fs.mkdirSync(topicsDir, { recursive: true });
     created.push(`${TOPICS_DIR}/`);
   }
+  // C-46：清理原子写崩溃残留（*.tmp-<pid>-<时间戳>；tmp 永远不是事实源）
+  (function sweep(d, depth) {
+    for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, ent.name);
+      if (ent.isDirectory() && depth < 3) sweep(p, depth + 1);
+      else if (ent.isFile() && /\.tmp-\d+-\d+$/.test(ent.name)) { try { fs.rmSync(p, { force: true }); } catch { /* 忽略 */ } }
+    }
+  })(dir, 0);
   const corePath = path.join(dir, CORE_FILE);
   if (!fs.existsSync(corePath)) {
-    fs.writeFileSync(corePath, CORE_SCAFFOLD, "utf8");
+    writeTextAtomic(corePath, CORE_SCAFFOLD);
     created.push(CORE_FILE);
   }
   const indexPath = path.join(dir, INDEX_FILE);
   if (!fs.existsSync(indexPath)) {
-    fs.writeFileSync(indexPath, INDEX_SCAFFOLD, "utf8");
+    writeTextAtomic(indexPath, INDEX_SCAFFOLD);
     created.push(INDEX_FILE);
   }
   // v45.1 升级：v45 初版脚手架的手写区只有 HTML 注释标记（Markdown 预览不可见），用户找不到区域。
@@ -117,7 +126,7 @@ function ensureTree(dir) {
       const between = lines.slice(openIdx + 1, closeIdx);
       if (between.some((l) => l.trim())) continue; // 用户已写内容：绝不触碰
       const next = [...lines.slice(0, openIdx + 1), "", HANDWRITTEN_HINT, "", ...lines.slice(closeIdx)];
-      fs.writeFileSync(p, next.join("\n"), "utf8");
+      writeTextAtomic(p, next.join("\n"));
     } catch { /* 单文件升级失败不阻塞 */ }
   }
   return created;
@@ -314,7 +323,7 @@ function applyOps(dir, ops) {
                 }
                 markLine(lines, idx, "已并入");
                 lines.push(line);
-                fs.writeFileSync(path.join(dir, v.rel), lines.join(eol), "utf8");
+                writeTextAtomic(path.join(dir, v.rel), lines.join(eol));
                 touchedTopics = touchedTopics || v.rel !== CORE_FILE;
               } else {
                 const tag = String(op.tag ?? "").trim();
@@ -326,7 +335,7 @@ function applyOps(dir, ops) {
                   continue;
                 }
                 markLine(lines, idx, tag);
-                fs.writeFileSync(path.join(dir, v.rel), lines.join(eol), "utf8");
+                writeTextAtomic(path.join(dir, v.rel), lines.join(eol));
                 touchedTopics = touchedTopics || v.rel !== CORE_FILE;
               }
               res.status = "applied";
@@ -397,7 +406,7 @@ function rebuildIndex(dir) {
       }
     }
   }
-  fs.writeFileSync(path.join(dir, INDEX_FILE), lines.join("\n") + "\n", "utf8");
+  writeTextAtomic(path.join(dir, INDEX_FILE), lines.join("\n") + "\n");
 }
 
 // ---------- 用量统计（§6.7.1 注入预算行的三段用量） ----------
