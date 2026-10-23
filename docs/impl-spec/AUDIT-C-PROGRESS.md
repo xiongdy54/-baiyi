@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`190bb35`（C-04 合并；账本建立于 `91824ee`）。
+> **更新时间**：2026-10-23。**本账最近更新时 main HEAD**：`65ea513`（C-05 合并；账本建立于 `91824ee`）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -19,10 +19,10 @@
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。main 现在与报告快照的测试规模一致。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
 - **测试规模**：89 个 `tests/*.test.cjs`，分布 **27 electron / 7 system-node / 55 electron-node**，与报告 §0 期望一致。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04。
-- **下一项**：**C-05**（两个过期的 prompt 版本期望）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05。
+- **下一项**：**C-06**（i18n：en / ja 各缺键；以执行时实测为准）。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
 
@@ -30,17 +30,19 @@
 | --- | --- | --- |
 | `tests/applog.test.cjs` | 待确认 | 报告 U-28 曾标为 Linux/Xvfb 环境差异；Windows 仍失败，暂不归属到 C-01。 |
 | `tests/d111-artifact.test.cjs` | 已修复（C-03） | Windows CRLF 导致产物逐字节比较失败；C-03 改为规范化后比较并通过。 |
-| `tests/i18n.test.cjs` | **C-06** | en / ja 各缺 4 个键；C-06 修复前预期失败。 |
+| `tests/i18n.test.cjs` | **C-06** | en / ja 各缺 17 个键（2026-10-23 实测；账本此前记 4 为过期数）；C-06 修复前预期失败。 |
 | `tests/lensWindowFit.artifact.test.cjs` | 已修复（C-03） | D203 合并后新增；现场重打包 7053 B vs 仓库 7224 B，差值 171 B；C-03 改为规范化后比较并通过。 |
-| `tests/lensWindow.test.cjs` | 未归属（时序 flake） | C-02 后两次全量均失败于 G1（55ms 采样 180ms 缓动）；该文件与 `electron/lensWindow.js` 未被 C-02 改动，单独连跑 3 次 1 过 2 败。C-04 全量本轮通过。 |
-| `tests/m1.prompts.test.cjs` | **C-05** | prompt 版本期望 7，实际 8（过期期望）。 |
+| `tests/lensWindow.test.cjs` | 未归属（时序 flake） | C-02 后两次全量均失败于 G1（55ms 采样 180ms 缓动）；该文件与 `electron/lensWindow.js` 未被 C-02 改动，单独连跑 3 次 1 过 2 败。C-04 全量本轮通过；C-05 与 `tsc` 并行的首轮复现，随后单独跑与干净全量均通过。 |
+| `tests/m1.prompts.test.cjs` | 已修复（C-05） | prompt 版本期望 7，实际 8（过期期望）；C-05 改为引用 `db.CARD_PROMPT_TARGET_VERSION` 并通过。 |
 | `tests/m14.test.cjs` | 待确认 | Windows `EBUSY: rename ... library.db -> .pre-restore`（恢复换入）；暂不归属，执行 C-13 时复核。 |
-| `tests/m7.prompts.test.cjs` | **C-05** | 主制卡 prompt 期望 v6，实际 8（过期期望）。 |
+| `tests/m15v2.route.test.cjs` | 未归属（性能阈值 flake） | C-05 全量中位 30.5ms vs 阈值 ≤30ms（最快 26.2 / 最慢 32.9）；单独跑通过。该测试只 import `src/lib/mindmap/v2`，不 require `electron/db.js`，与 C-05 改动无关。 |
+| `tests/m7.prompts.test.cjs` | 已修复（C-05） | 主制卡 prompt 期望 v6，实际 8（过期期望）；C-05 改为引用 `db.CARD_PROMPT_TARGET_VERSION` 并通过。 |
 
 > 说明：C-01 在合并 D203 前是 85 个测试 79 过 / 6 败；合并后为 89 个 82 过 / 7 败。新增的唯一失败是 `lensWindowFit.artifact`，属 C-03，不是 C-01 回归。
 > C-02 后两次全量均 81 过 / 8 败：多出的 `lensWindow` G1 是时序 flake（非 C-02 代码路径），其余 7 败与上表一致；20 个受 C-02 影响的测试 19 过 / 1 败（m14 既有 EBUSY），与基线相同。
 > C-03 后全量 83 过 / 6 败：失败集合 = applog、i18n、lensWindow（时序 flake 本轮复现）、m1.prompts、m14、m7.prompts；两个 artifact 已不再失败，无新增失败文件。
 > C-04 后全量 84 过 / 5 败：失败集合 = applog、i18n、m1.prompts、m14、m7.prompts；`lensWindow` 本轮通过，无新增失败文件。
+> C-05 后：全量首轮与 `npm run typecheck` 并行，84 过 / 5 败（`lensWindow` G1 + `m15v2.route` ④）；无并行负载的干净全量 85 过 / 4 败（applog、i18n、m14、m15v2.route）。`m15v2.route` 单独跑通过，`lensWindow` 单独跑 3 套件全通过。
 
 ## 2. 执行顺序与状态
 
@@ -55,8 +57,8 @@
 | 3 | C-02 | 完成 | `f927189` / `4938cfa` | 32 个 ROOT + 3 处 Electron 二进制 + flows node 分支；验收见 §3.3。 |
 | 4 | C-03 | 完成 | `d1a7ca4` + `829932c` + `42682e0` / `5b920b2` | `.gitattributes` 与行尾规范化各单独提交；验收见 §3.4。 |
 | 5 | C-04 | 完成 | `cfa14ae` / `190bb35` | `file` 现识别为文本；报告给的 `epub` 过滤词命中 0 个测试，改用 `m6-1`；验收见 §3.5。 |
-| 6 | C-05 | 待做 | — | 两个过期 prompt 版本期望。 |
-| 7 | C-06 | 待做 | — | 报告记 en / ja 各缺 17 键；当前实测各缺 4 键（以执行 C-06 时为准）。 |
+| 6 | C-05 | 完成 | `bc8492d` / `65ea513` | 目标版本导出为 `CARD_PROMPT_TARGET_VERSION`；两个测试改引用常量；验收见 §3.6。 |
+| 7 | C-06 | 待做 | — | 报告记 en / ja 各缺 17 键；2026-10-23 实测亦为 17（以执行 C-06 时为准）。 |
 | 8 | C-45 | 待做 | — | 10 条 Electron 流程测试跑完不退出。 |
 
 ### 阶段 1 · 首发前必须完成（P0）
@@ -218,6 +220,24 @@
   - 报告验收写的 `node scripts/run-tests.mjs epub` 命中 **0 个测试**（仓库无文件名含 epub 的套件）；改用直接覆盖 `src/lib/epub.ts` 的 `m6-1`（其文件头明确要求改 epub.ts 后该套件全绿），并以全量 `npm test` 兜底。
   - 报告给出的 `node -e` 命令在 Git Bash 下输出了 `ok`，但未改写文件（NUL 仍为 1、字节数不变）——命令行参数中的 NUL 在 Windows 上被吞。最终用「定位唯一个 0x00 字节并以 ASCII 码 `[92,117,48,48,48,48]` 拼接」的等价手法完成同一变换；diff 与上述验收证明结果与报告要求一致。
 
+### 3.6 C-05 · 两个过期的测试期望（prompt 版本号）
+
+- **提交**：`bc8492d fix(C-05): 制卡族目标版本改为导出常量，更新过期测试期望`；合并 `65ea513`。
+- **改动**：
+  - `electron/db.js`：函数内 `const TARGET_VERSION = 8;` 提升为模块级 `const CARD_PROMPT_TARGET_VERSION = 8;`（置于 `ensurePromptTemplates` 之前），`seedScope` 内 2 处引用改名；`module.exports` 在 `ensurePromptTemplates` 后导出该常量。
+  - `tests/m1.prompts.test.cjs`：P1/P2/P4 中指向当前目标版本的文案与断言改引用 `db.CARD_PROMPT_TARGET_VERSION`（`lit.version`、`gen2.version`、`lit2.version`）。
+  - `tests/m7.prompts.test.cjs`：主制卡版本断言（原 `=== 6`）改引用 `db.CARD_PROMPT_TARGET_VERSION`。
+  - 模拟旧库夹具按报告保持不变：`OLD-V6-CONTENT` / `OLD-LIT-V6-CONTENT`、v6 行插入、`还原成功：card-generation 停在 v6`、`旧 v6 行保留留痕`。
+- **验收（2026-10-23，Windows）**：
+  - `node scripts/run-tests.mjs m1.prompts m7.prompts` → **2 通过 / 0 失败**（改动前基线 0 通过 / 2 失败）。
+  - 内容断言（R18 / R20 / memoryRef / G9 等）全部通过，未触发报告第 3 步的「内容升版导致断言失败 → 停止回报」。
+  - `npm run typecheck` → exit 0。
+  - `npm test`（无并行负载）→ 89 个 **85 过 / 4 败 / 0 超时**；失败集合 = applog、i18n、m14、m15v2.route；m1.prompts / m7.prompts 已转绿。
+- **偏离**：
+  - 首轮全量与 `npm run typecheck` 并行执行，结果为 84 过 / 5 败，多出 `lensWindow` G1（已知时序 flake）与 `m15v2.route`（中位 31.5ms vs 阈值 ≤30ms）；停止并行后的干净全量为 85 过 / 4 败。`m15v2.route` 单独跑通过，且只 import `src/lib/mindmap/v2`、不 require `electron/db.js`，判定为性能阈值 flake，已在 §1.1 登记为未归属。
+  - 报告要求「文案中的 v7/v6 改为模板字符串」；只改了指向**当前目标版本**的断言名与日志标题。历史沿革文案（m1 第 1 行「v46/UM-2 升 v7」、P1 中「v6 专用模板」、m7 第 1 行「既有 v6」）与模拟旧库夹具保留原样，避免篡改版本历史与夹具语义。
+  - 顺带更正本账 C-06 的过期计数：§1.1 与 §2 原记「各缺 4 键」，本次 i18n 实测输出为 en / ja 各缺 17 键（与报告一致）。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -231,5 +251,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-05**。
-- 基线：89 个测试；C-04 后 84 过 / 5 败（Windows，2026-10-23；失败集合见 §1.1）。
+- 当前下一项：**C-06**。
+- 基线：89 个测试；C-05 后 85 过 / 4 败（Windows，2026-10-23；失败集合见 §1.1）。
