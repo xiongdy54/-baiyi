@@ -1984,7 +1984,9 @@ body.skin-chrome-transparent .topbar { background: transparent; }
   flex: 1;
   min-width: 0;
   max-width: 720px;
-  padding-top: var(--sp-1);
+  /* D206：顶部留白交给 .modal-header 的 margin-bottom——这里不能有 padding-top：
+     sticky 通知框会被父容器 padding 挡在滚动口顶缘下方，内容从框上方缝隙穿过 */
+  padding-top: 0;
   min-height: 0;
   overflow-y: auto;
   /* v48.70（D114 §6.1）：区块列表纵向排布，块间距 = --sp-6（替代旧 hairline 分隔节） */
@@ -2029,22 +2031,44 @@ body.skin-chrome-transparent .topbar { background: transparent; }
 body.theme-dark .settings-notice { background: color-mix(in srgb, var(--success) 18%, transparent); }
 body.theme-dark .settings-notice[data-level="warn"] { background: color-mix(in srgb, var(--warning) 22%, transparent); }
 
-/* D206 入场动效与「处理」闪烁引导：全部收在 no-preference 闸内（§11 降级纪律）。
+/* D206 入场动效与「处理」闪烁引导。
+   缓动/时长对齐 nutation-design 09-motion：出现类 = --ease-out 曲线 cubic-bezier(.33,1,.68,1)、
+   开花 900ms；级联间隔照抄字标 220ms；闪烁环 = 短距离「来回」cubic-bezier(.65,0,.35,1)、
+   时长照抄「完成」行 1.25s。全部收在 no-preference 闸内（§11 降级纪律）；
    flash-hold = 减动效环境下的静态高亮替代（同一停止条件：点击或滚出视口）。 */
 @media (prefers-reduced-motion: no-preference) {
-  .settings-notice { animation: settings-notice-in 220ms cubic-bezier(0.2, 0, 0, 1) both; }
-  .flash-blink { animation: settings-flash-blink 900ms ease-in-out infinite; }
+  .settings-notice { animation: settings-notice-in 900ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+  .settings-notices .settings-notice:nth-child(2) { animation-delay: 220ms; }
+  .settings-notices .settings-notice:nth-child(3) { animation-delay: 440ms; }
+  .flash-blink { position: relative; }
+  .flash-blink::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border: 2px solid var(--warning);
+    border-radius: inherit;
+    animation: settings-flash-ring 1250ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+    pointer-events: none;
+  }
 }
 @keyframes settings-notice-in {
-  from { opacity: 0; transform: translateY(-10px); }
+  from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: none; }
 }
-@keyframes settings-flash-blink {
-  /* 环用 --warning：目标按钮多为 accent 实底（如「立即备份」），同色环不可见；警示黄在明暗两主题都与目标形成对比 */
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warning) 0%, transparent); }
-  50% { box-shadow: 0 0 0 3px var(--warning); }
+@keyframes settings-flash-ring {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
-.flash-hold { box-shadow: 0 0 0 3px var(--warning); }
+/* .btn 全局 overflow:hidden 会把外扩 4px 的环整个裁掉——闪烁态必须放开 */
+.flash-blink, .flash-hold { position: relative; overflow: visible; }
+.flash-hold::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 2px solid var(--warning);
+  border-radius: inherit;
+  pointer-events: none;
+}
 /* 深色下阴影减弱，层次改以 hairline 描边区分 */
 body.theme-dark .modal-panel {
   box-shadow: none;
@@ -2073,6 +2097,8 @@ body.theme-dark .modal-panel {
   background: var(--grey-1);
   color: var(--text-primary);
   padding: var(--sp-6);
+  /* D206：「处理」/导航滚动落点让过置顶通知框（框高约 45px + 间距），标题不被压住 */
+  scroll-margin-top: 64px;
 }
 .settings-section h3 {
   margin: 0 0 var(--sp-2);
@@ -2202,7 +2228,10 @@ body.theme-dark .modal-panel {
     overflow: hidden;
   }
   /* 窄档：回到整体滚动，导航为 sticky 横条 */
-  .settings-layout.modal-scroll { overflow-y: auto; flex: 1 1 auto; }
+  /* D206：窄档滚动容器是 .settings-layout 本身——padding-top 会让 sticky 通知框
+     被父容器顶住、无法贴到滚动口顶缘（内容从框上方穿过）；顶距由 .modal-header 的
+     margin-bottom 提供，置 0 不损失视觉间距 */
+  .settings-layout.modal-scroll { overflow-y: auto; flex: 1 1 auto; padding-top: 0; }
   .settings-content { max-width: none; padding-top: 0; overflow: visible; }
   .settings-nav { position: sticky; padding-top: 0; max-height: none; height: auto; overflow-y: visible; }
   .settings-nav::before,
