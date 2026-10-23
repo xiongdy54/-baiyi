@@ -57,7 +57,7 @@ import {
 import { rerankExtractsNow, readMultiSelectKey, MULTI_SELECT_KEYS, DEFAULT_MULTI_SELECT_KEY, type ExtractEngine, type MultiSelectKey } from "../lib/readingWorkflow";
 // v49.8（D182）：界面语言——语言切换区块（sec-language，唯一切换入口）
 import { LANGUAGES, getLocale, setLocale, normalizeLocale, useT, type Locale } from "../lib/i18n";
-import { computeSettingsNotices, type SettingsNotice, type SettingsNoticesInput } from "../lib/settingsNotices";
+import { computeSettingsNotices, type SettingsNotice, type SettingsNoticeKind, type SettingsNoticesInput } from "../lib/settingsNotices";
 
 export type ThemeMode = "light" | "dark";
 
@@ -2236,6 +2236,7 @@ function UpdateSection() {
             {st === "available" ? (
               <button
                 className="btn btn-secondary btn-sm"
+                data-action="download-update"
                 onClick={() => {
                   void updateAPI().download();
                 }}
@@ -2363,9 +2364,24 @@ function noticeText(n: SettingsNotice, T: ReturnType<typeof useT>): string {
   }
 }
 
+// 「处理」按钮去向：滚到对应区块；带 flash 的再让目标按钮闪烁高亮（点击或滚出视口才停）
+const NOTICE_TARGETS: Partial<Record<SettingsNoticeKind, { sectionId: string; flashAction?: string }>> = {
+  update: { sectionId: "sec-updates", flashAction: "download-update" },
+  "update-ready": { sectionId: "sec-updates" },
+  "update-error": { sectionId: "sec-updates" },
+  "backup-failed": { sectionId: "sec-backup" },
+  "backup-none": { sectionId: "sec-backup", flashAction: "backup-now" },
+  "backup-stale": { sectionId: "sec-backup", flashAction: "backup-now" }
+  // clock-skew：应用内无可操作项（要去系统设置改时间），不给「处理」按钮
+};
+
 function SettingsNotices() {
   const T = useT();
   const [notices, setNotices] = useState<SettingsNotice[]>([]);
+  // 关闭＝本会话内忽略该条（重开设置页即复位；条件本身未消除，下轮打开仍会提示）
+  const [dismissed, setDismissed] = useState<ReadonlySet<SettingsNoticeKind>>(new Set());
+  const stopFlashRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -2401,14 +2417,77 @@ function SettingsNotices() {
       window.clearInterval(timer);
     };
   }, []);
-  if (notices.length === 0) return null;
+
+  // 卸载（关闭设置页）时兜底清掉闪烁态
+  useEffect(() => () => stopFlashRef.current?.(), []);
+
+  const startFlash = (action: string) => {
+    stopFlashRef.current?.();
+    const btn = document.querySelector<HTMLElement>(`[data-action="${action}"]`);
+    if (!btn) return; // 目标按钮不在场（如更新态不含下载钮）→ 只滚动不闪烁
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    btn.classList.add(reduce ? "flash-hold" : "flash-blink");
+    const onBtnClick = () => stopFlashRef.current?.();
+    btn.addEventListener("click", onBtnClick);
+    // 滚出视口即停（用户规格）。先「入画」武装再检测离画——smooth 滚动途中按钮起初在视口外，不能误停
+    let armed = false;
+    let raf = 0;
+    const check = () => {
+      const r = btn.getBoundingClientRect();
+      const inView = r.bottom > 0 && r.top < window.innerHeight;
+      if (!armed && inView) armed = true;
+      else if (armed && !inView) { stopFlashRef.current?.(); return; }
+      raf = requestAnimationFrame(check);
+    };
+    stopFlashRef.current = () => {
+      btn.classList.remove("flash-blink", "flash-hold");
+      btn.removeEventListener("click", onBtnClick);
+      cancelAnimationFrame(raf);
+      stopFlashRef.current = null;
+    };
+    raf = requestAnimationFrame(check);
+  };
+
+  const handle = (n: SettingsNotice) => {
+    const t = NOTICE_TARGETS[n.kind];
+    if (!t) return;
+    const sec = document.getElementById(t.sectionId);
+    if (!sec) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    sec.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    if (t.flashAction) startFlash(t.flashAction);
+  };
+
+  const visible = notices.filter((n) => !dismissed.has(n.kind));
+  if (visible.length === 0) return null;
   return (
     <div className="settings-notices" role="status">
-      {notices.map((n) => (
-        <div key={n.kind} className="settings-notice" data-level={n.level}>
-          <span>{noticeText(n, T)}</span>
-        </div>
-      ))}
+      {visible.map((n) => {
+        const t = NOTICE_TARGETS[n.kind];
+        return (
+          <div key={n.kind} className="settings-notice" data-level={n.level}>
+            <span className="settings-notice-text">{noticeText(n, T)}</span>
+            <span className="settings-notice-actions">
+              {t && (
+                <button className="btn btn-outline btn-sm" onClick={() => handle(n)}>
+                  {T("处理")}
+                </button>
+              )}
+              <button
+                className="icon-btn settings-notice-close"
+                title={T("关闭提醒")}
+                aria-label={T("关闭提醒")}
+                onClick={() => setDismissed((s) => new Set(s).add(n.kind))}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2519,7 +2598,7 @@ function BackupSection() {
       )}
 
       <div className="backup-toolbar">
-        <button className="btn btn-primary btn-sm" disabled={busy !== "" || restored} onClick={doBackup}>
+        <button className="btn btn-primary btn-sm" disabled={busy !== "" || restored} data-action="backup-now" onClick={doBackup}>
           {busy === "backup" ? T("备份中…") : T("立即备份")}
         </button>
         <label className="backup-checkline">
