@@ -2372,14 +2372,16 @@ function SettingsNotices() {
       const input: SettingsNoticesInput = {};
       const bapi = backupAPI();
       if (bapi) {
-        try {
-          const [info, list] = await Promise.all([bapi.info(), bapi.list()]);
-          input.latestBackupAt = list.backups.reduce<number | null>(
+        // info 与 list 分别取：backupDir 坏掉（不可读/指向文件）时 list 会 reject——
+        // 那正是最需要红框（自动备份失败）的场景，不能让一个源拖垮另一个
+        const [infoR, listR] = await Promise.allSettled([bapi.info(), bapi.list()]);
+        if (infoR.status === "fulfilled") input.lastAuto = infoR.value.lastAuto ?? null;
+        if (listR.status === "fulfilled") {
+          input.latestBackupAt = listR.value.backups.reduce<number | null>(
             (acc, b) => (acc == null || b.createdAt > acc ? b.createdAt : acc),
             null
           );
-          input.lastAuto = info.lastAuto ?? null;
-        } catch { /* 拿不到备份快照就少报这一类，不阻塞更新类 */ }
+        }
       }
       const uapi = updateAPI();
       if (uapi) {
