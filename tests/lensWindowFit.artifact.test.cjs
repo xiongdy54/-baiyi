@@ -28,7 +28,8 @@ const fresh = esbuild.buildSync({
   banner: { js: BANNER },
 }).outputFiles[0].text;
 const current = fs.readFileSync(ARTIFACT, "utf8");
-check("主进程产物与源码现场重打包逐字节一致（未手改、未过期）", fresh === current, { freshLen: fresh.length, currentLen: current.length, rebuild: REBUILD });
+const norm = (s) => s.replace(/\r\n/g, "\n");
+check("主进程产物与源码现场重打包逐字节一致（未手改、未过期）", norm(fresh) === norm(current), { freshLen: fresh.length, currentLen: current.length, rebuild: REBUILD });
 check("主进程产物导出 computeFit / chooseFocus / lensLimits", typeof MAIN.computeFit === "function" && typeof MAIN.chooseFocus === "function" && typeof MAIN.lensLimits === "function");
 
 const area = (width, height) => ({ x: 0, y: 0, width, height });

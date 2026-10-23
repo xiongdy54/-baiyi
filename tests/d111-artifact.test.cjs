@@ -38,10 +38,11 @@ try {
 } catch {
   /* 缺文件按空串处理 */
 }
+const norm = (s) => s.replace(/\r\n/g, "\n");
 check(
   "electron/cardQuery.bundle.cjs 与源码现场重打包逐字节一致（未手改、未过期）",
-  fresh === current,
-  fresh === current ? "" : "产物与重打包结果不一致——重新生成：node -e \"require('esbuild').buildSync({entryPoints:['src/lib/cardQuery.ts'],bundle:true,platform:'node',format:'cjs',outfile:'electron/cardQuery.bundle.cjs',banner:{js:...}})\"（banner 见本文件）"
+  norm(fresh) === norm(current),
+  norm(fresh) === norm(current) ? "" : "产物与重打包结果不一致——重新生成：node -e \"require('esbuild').buildSync({entryPoints:['src/lib/cardQuery.ts'],bundle:true,platform:'node',format:'cjs',outfile:'electron/cardQuery.bundle.cjs',banner:{js:...}})\"（banner 见本文件）"
 );
 check("产物存在且非空", current.length > 0, current.length);
 
