@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`4f80aa1`（C-15 合并）。
+> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`b86659c`（C-16 合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -19,10 +19,10 @@
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
 - **测试规模**：99 个 `tests/*.test.cjs`，分布 **61 electron-node / 30 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 **99 个 = 61 electron-node / 30 electron / 8 system-node**。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15。
-- **下一项**：**C-16**（撤销评分选错卡：最近评分的卡被删除后会撤销另一张卡的更早评分；P1；无依赖）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16。
+- **下一项**：**C-17**（`persist()` 把已提交的写入误报为失败；P2；无依赖）。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
@@ -79,7 +79,7 @@
 | 14 | C-13 | 完成 | `dc9a2a8` / `00d7a66` | relaunch 走 quit / learner.db 换库让位 / 设备设置保留；m14 EBUSY 已复核修复，验收见 §3.14。 |
 | 15 | C-14 | 完成 | `96cfb7a` / `7b1c4dc` | 轮换 protect + clockSkewSuspected；验收见 §3.15。 |
 | 16 | C-15 | 完成 | `17384fc` / `4f80aa1` | settings.json 两份实现合并到 jsonFile；验收见 §3.16。 |
-| 17 | C-16 | 待做 | — | 撤销评分选错卡。 |
+| 17 | C-16 | 完成 | `d063014` / `b86659c` | 撤销评分不回落；验收见 §3.17。 |
 | 18 | C-17 | 待做 | — | persist 把已提交写入误报失败。 |
 
 ### 阶段 2 · 正确性与规模
@@ -507,6 +507,25 @@
   6. **ai-config 坏文件从静默回默认改为留档**：报告第 5 步要求共用实现；写路径同时获得 fsync，坏文件留下 `.corrupt-*` 供排查。
   7. 测试基数更正：C-14 后实际是 98 个（`settings-notices.test.cjs` 随 D206 合入），C-15 新增 1 个后为 99；本项未新增决策号。
 
+### 3.17 C-16 · 撤销评分：最新日志的卡已删时不回落撤销别的卡
+
+- **提交**：`d063014 fix(C-16): 撤销评分不再回落——最新日志的卡已删时返回 null，不撤销别的卡`；合并 `b86659c`。
+- **改动**（2 文件，+26/−7）：
+  - `electron/db.js` `getLastUndoableReview`：按报告代码原样重写——先取**全局最新一条日志**（`LEFT JOIN cards`，SQL 层不再过滤已删卡/无快照日志，改带出 `hasSnaps` / `cardDeleted` 辅助字段），该条本身不可撤销（无双快照、卡已删/不存在）即返回 `null`，**不向更早日志回落**；after 解析与 `fsrsStatesEqual` 判定保持原样；返回前剥离两个辅助字段，调用方可见字段（logId/cardId/rating/reviewedAt/reviewSeq）不变。函数头注释同步改述新语义。
+  - `tests/undo.test.cjs` 新增 U10（4 断言）：建 P、Q → 评 P → 评 Q → 软删 Q → `getLastUndoableReview()` 为 `null`、`undoLastReview().ok === false`、P 的 fsrs 不变、P 的评分日志仍在（比报告验收多一条日志存留断言）。
+- **验收（2026-10-24，Windows；Electron 31.7.7 / Node 24.15.0）**：
+  - 改动前基线：`node scripts/run-tests.mjs undo` → 1 通过 / 0 失败（29 断言）。
+  - **TDD 差分**：先落 U10 再改实现 → undo 套件失败，明细与报告缺陷逐字一致：`getLastUndoableReview()` 返回了 P 的日志（期望 null）、`undoLastReview()` `ok:true` 且把 P 的 fsrs 从 `review/reps:1` 回退成 `new/reps:0`、P 的评分日志被物理删除；U1–U9 其余 29 断言全过（4 败全在 U10）。
+  - 改实现后：`node scripts/run-tests.mjs undo` → 1 通过 / 0 失败（**33/33**）。
+  - 关联套件：`node scripts/run-tests.mjs undo m12 m13` → 3 通过 / 0 失败；独立脚本 `npx electron tests/fsrs/simulate.test.cjs`（不在 runner 99 个内，S7 直接调 `undoLastReview`）→ **451 通过 / 0 失败**。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":61,"electron":30,"system-node":8}`（99 个不变，本项只扩既有套件）。
+  - `npm run typecheck` → exit 0。
+  - `npm test`（无并行负载）→ 99 个 **98 过 / 1 败 / 0 超时**；唯一失败 = applog（§1.1 既有未归属项），`m15v2.route` 本轮通过，无新增失败文件。
+- **偏离**：
+  1. U10 比报告验收多一条「P 的评分日志仍在」断言（撤销被拒时日志不得被物理删除），属同一场景的收紧，非范围扩大。
+  2. 报告给的替换代码用 `// ……保持原样……` 省略 after 解析与 `fsrsStatesEqual` 判定，实际逐字保留原实现；函数头注释按新语义改述（报告未提注释，顺带更新）。
+  3. 修复同时覆盖「最新日志无快照（v22 旧日志形态）」的回落变体：旧实现同样会跳过它撤销更早的别的卡，新实现统一返回 null——即报告修复步骤「先取全局最新一条日志，再判断它是否可撤销」的字面行为，非额外改动。
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -520,5 +539,5 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-16**（阶段 1 首发前必须完成，P1：撤销评分在「最近评分卡已删除」时撤销错的卡；无依赖）。
-- 基线：99 个测试；C-15 后全量 97 过 / 2 败（Windows，2026-10-24；applog 既有 + `m15v2.route` 阈值 flake，单独跑通过，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。
+- 当前下一项：**C-17**（阶段 1 首发前必须完成，P2：`persist()` 把已提交的写入误报为失败；无依赖）。
+- 基线：99 个测试；C-16 后全量 98 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，`m15v2.route` 本轮通过，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。
