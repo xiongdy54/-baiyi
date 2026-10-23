@@ -293,11 +293,18 @@ function setAIConfig(partial) {
   return safe;
 }
 
+// C-19a 第 6 步：错误正文脱敏——部分服务商会在错误响应里回显 Key 片段，这些文本会进 UI 与日志
+function redact(s) {
+  return String(s || "")
+    .replace(/(Bearer\s+)[^\s"']+/gi, "$1***")
+    .replace(/\b(sk|ak|pk|key)[-_][A-Za-z0-9_\-]{6,}/gi, "$1-***");
+}
+
 // v48 批2（M15 §4.19-8）：机读错误码——超时/限流/网络/HTTP/无 Key/取消，多级管线重试与失败状态机需要；
 // 中文 message 不变（渲染层展示不受影响），仅附 .code。
 // v48.11（§3.7）：附 status / retryAfterMs（供 429 退避优先遵循 Retry-After）。
 function classifyHttpError(status, errText, headers) {
-  const err = new Error(`AI 服务错误 ${status}: ${String(errText || "").slice(0, 300)}`);
+  const err = new Error(`AI 服务错误 ${status}: ${redact(errText).slice(0, 300)}`);
   err.code = status === 429 ? "rate_limit" : "http";
   err.status = status;
   err.retriable = status === 429 || status === 408 || (status >= 500 && status <= 599);
@@ -336,6 +343,10 @@ function backoffDelayMs(err, attempt) {
   return base + Math.floor(Math.random() * 300);
 }
 
+// C-19a 第 5 步：可归为瞬时网络错误的系统码——统一归 code:"network"（原码保留在 .sysCode），
+// 与 classifyHttpError 的「只有 408/429/5xx 可重试」共同构成重试判定的唯一来源
+const NET_CODES = new Set(["ECONNRESET", "EPIPE", "ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "EHOSTUNREACH", "ECONNABORTED"]);
+
 // T4（D192）：可选 model 覆盖（导图模型，共用全局服务商地址与 Key）与 maxTokens；缺省时请求体与此前逐字节一致
 function chatStream({ messages, temperature, abortSignal, retry, model, maxTokens }, send) {
   const maxAttempts = Math.max(1, Math.min(5, Number(retry && retry.maxAttempts) || 1));
@@ -344,7 +355,10 @@ function chatStream({ messages, temperature, abortSignal, retry, model, maxToken
   const run = () =>
     chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }, send).catch(async (err) => {
       const code = err && err.code;
-      const retriable = (err && err.retriable) || code === "rate_limit" || code === "network" || code === "http";
+      // C-19a 第 4 步：只认 err.retriable === true。408/429/5xx 由 classifyHttpError 置位、
+      // ECONNREFUSED 分支置位、其余网络错误按 NET_CODES 归类置位；4xx / cancelled / truncated
+      // 一律 false——旧写法的 `code === "http"` 会让 400/401/403/404 也吃满指数退避
+      const retriable = err && err.retriable === true;
       // 关键纪律（§3.7）：流已开始（服务端可能已生成并计费）→ 不重试，如实记为 unknown_outcome
       if (!retriable || err.streamStarted || attempt >= maxAttempts || (abortSignal && abortSignal.aborted)) throw err;
       const delay = backoffDelayMs(err, attempt);
@@ -427,6 +441,8 @@ function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }
         headers
       },
       (res) => {
+        // C-19a 第 1 步：Node 内部用 StringDecoder 拼接跨 chunk 的多字节字符（此后 data 事件给的是字符串）
+        res.setEncoding("utf8");
         streamStarted = true;
         if (res.statusCode !== 200) {
           let errText = "";
@@ -444,47 +460,118 @@ function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }
         // 思考模型（GLM 等）先输出 reasoning_content 再输出正文；thinking 计数节流转发（v10.4）
         let thinkAcc = 0;
         let lastThinkSent = 0;
+        // C-19a 第 2/8 步：done 只发一次（[DONE] 与 end 双路径共用）；逐行解析抽成 handleLine，
+        // 便于 end 时补处理没有换行符的末行
+        let doneSent = false;
+        let sawDone = false;
+        const sendDoneOnce = (p) => {
+          if (doneSent) return;
+          doneSent = true;
+          send({ done: true, ...p });
+        };
+        const handleLine = (line) => {
+          // 返回 true 表示遇到 [DONE]
+          if (!line.startsWith("data:")) return false;
+          const data = line.slice(5).trim();
+          if (data === "[DONE]") {
+            sawDone = true;
+            return true;
+          }
+          try {
+            const json = JSON.parse(data);
+            if (json.usage) usage = json.usage;
+            const choice = json.choices?.[0] || {};
+            if (choice.finish_reason) finishReason = choice.finish_reason;
+            const d = choice.delta || {};
+            if (ttftMs == null && (d.content || (typeof (d.reasoning_content ?? d.reasoning) === "string" && (d.reasoning_content ?? d.reasoning)))) {
+              ttftMs = Date.now() - startedAt;
+            }
+            if (d.content) send({ delta: d.content });
+            const think = d.reasoning_content ?? d.reasoning;
+            if (typeof think === "string" && think) {
+              thinkAcc += think.length;
+              const now = Date.now();
+              if (now - lastThinkSent > 400) {
+                send({ thinking: thinkAcc });
+                lastThinkSent = now;
+              }
+            }
+          } catch {
+            /* 忽略不完整行 */
+          }
+          return false;
+        };
+        // C-19a 第 3 步：200 但内容类型不对——text/html 多为网关/代理页；application/json 是
+        // 服务端忽略 stream:true 的整包回复。其余类型（含缺失）继续按 SSE 解析（有些本地服务
+        // 不规范地设置 content-type，不要误杀，由第 2 步的截断规则兜底）。
+        const contentType = String(res.headers["content-type"] || "").toLowerCase();
+        if (contentType.includes("text/html") || contentType.includes("application/json")) {
+          let whole = "";
+          res.on("data", (c) => {
+            if (firstByteMs == null) firstByteMs = Date.now() - startedAt;
+            whole += c;
+          });
+          res.on("error", (err) => {
+            err.streamStarted = true;
+            finish(reject, err);
+          });
+          res.on("end", () => {
+            if (contentType.includes("application/json")) {
+              let json = null;
+              try {
+                json = JSON.parse(whole);
+              } catch {
+                json = null;
+              }
+              const content = json?.choices?.[0]?.message?.content;
+              if (typeof content === "string" && content) {
+                // 整包 JSON：作为一次 delta 发出并正常结束
+                if (ttftMs == null) ttftMs = Date.now() - startedAt;
+                if (json.usage) usage = json.usage;
+                if (json.choices[0].finish_reason) finishReason = json.choices[0].finish_reason;
+                send({ delta: content });
+                sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
+                finish(resolve, { usage, finishReason, ttftMs, firstByteMs });
+                return;
+              }
+            }
+            const e = new Error(`AI 服务返回了非流式内容（content-type: ${contentType || "缺失"}）：${redact(whole).slice(0, 200)}`);
+            e.code = "bad_content_type";
+            e.retriable = false;
+            e.streamStarted = true;
+            finish(reject, e);
+          });
+          return;
+        }
         res.on("data", (chunk) => {
+          if (settled) return; // [DONE] 之后的残余数据不再转发
           if (firstByteMs == null) firstByteMs = Date.now() - startedAt;
-          buf += chunk.toString("utf-8");
+          buf += chunk; // setEncoding 之后 chunk 已是字符串（第 1 步）
           let idx;
           while ((idx = buf.indexOf("\n")) >= 0) {
             const line = buf.slice(0, idx).trim();
             buf = buf.slice(idx + 1);
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (data === "[DONE]") {
-              send({ done: true, usage, finishReason, ttftMs, firstByteMs });
+            if (handleLine(line)) {
+              sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
               finish(resolve, { usage, finishReason, ttftMs, firstByteMs });
               return;
-            }
-            try {
-              const json = JSON.parse(data);
-              if (json.usage) usage = json.usage;
-              const choice = json.choices?.[0] || {};
-              if (choice.finish_reason) finishReason = choice.finish_reason;
-              const d = choice.delta || {};
-              if (ttftMs == null && (d.content || (typeof (d.reasoning_content ?? d.reasoning) === "string" && (d.reasoning_content ?? d.reasoning)))) {
-                ttftMs = Date.now() - startedAt;
-              }
-              if (d.content) send({ delta: d.content });
-              const think = d.reasoning_content ?? d.reasoning;
-              if (typeof think === "string" && think) {
-                thinkAcc += think.length;
-                const now = Date.now();
-                if (now - lastThinkSent > 400) {
-                  send({ thinking: thinkAcc });
-                  lastThinkSent = now;
-                }
-              }
-            } catch {
-              /* 忽略不完整行 */
             }
           }
         });
         res.on("end", () => {
-          send({ done: true, usage, finishReason, ttftMs, firstByteMs });
-          finish(resolve, { usage, finishReason, ttftMs, firstByteMs });
+          if (settled) return;
+          if (buf.trim()) handleLine(buf.trim()); // 末行没有换行符
+          if (sawDone || finishReason) {
+            sendDoneOnce({ usage, finishReason, ttftMs, firstByteMs });
+            finish(resolve, { usage, finishReason, ttftMs, firstByteMs });
+            return;
+          }
+          // C-19a 第 2 步：既没有 [DONE] 也没有 finish_reason 的提前收尾 = 截断，不是成功
+          const e = new Error("AI 响应在完成前中断：没有收到结束标记，结果可能不完整");
+          e.code = "truncated";
+          e.streamStarted = true;
+          e.retriable = false;
+          finish(reject, e);
         });
         res.on("error", (err) => {
           err.streamStarted = true;
@@ -513,8 +600,14 @@ function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }
         finish(reject, e);
         return;
       }
-      err.code = err.code === "ETIMEDOUT" ? "timeout" : err.code || "network";
-      err.retriable = err.code === "network" && !streamStarted;
+      // C-19a 第 5 步：瞬时网络错误（ECONNRESET/EPIPE/ENOTFOUND/EAI_AGAIN/…）统一归 network
+      // 并保留原始系统码到 .sysCode；ETIMEDOUT → timeout 维持不重试语义
+      if (err.code === "ETIMEDOUT") err.code = "timeout";
+      else if (!err.code || NET_CODES.has(err.code)) {
+        err.sysCode = err.code || null;
+        err.code = "network";
+      }
+      err.retriable = err.code === "network" && !streamStarted; // timeout 保持原语义：不重试
       err.streamStarted = streamStarted;
       finish(reject, err);
     });
@@ -546,6 +639,7 @@ function requestJSON(url, headers, timeoutMs) {
         headers
       },
       (res) => {
+        res.setEncoding("utf8"); // C-19a 第 1 步：多字节安全（此后 data 事件给的是字符串）
         let body = "";
         res.on("data", (c) => (body += c));
         res.on("end", () => {
