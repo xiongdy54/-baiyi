@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`68daaee`（C-18 合并）。
+> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`ea91c71`（C-19 合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -18,11 +18,11 @@
 
 - **报告快照对齐**：报告是在 `feat/floating-atlas-d203`（D203/D204 纸片图谱）功能分支的打包提交上产出的。该分支已于 2026-10-23 以 `--no-ff` 合入 main：`dde0a81`（分支 HEAD `1267cad`，32 文件 +6590/−509）。C-45 前 main 与报告快照的 89 个测试规模一致；C-45 与 C-08 按报告预期各新增 1 个测试、C-09 新增 2 个、C-10 新增 1 个，现为 94 个。
 - **D203/D204 功能状态**：代码已进 main，但 **D204 实机 UX 仍未验收**（用户反馈「效果还是不好」；D205 窗内 morph 已实机否决并还原到 `1267cad`）。C-31/C-32/C-33 的 lensWindow 锚点现在存在，但仍按报告执行，不要假定该功能已验收。
-- **测试规模**：100 个 `tests/*.test.cjs`，分布 **61 electron-node / 31 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node；C-18 `today-queue-fastpath` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1，C-18 按验收新增 1 个。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 99；C-18 新增 `today-queue-fastpath.test.cjs`（electron）后为 **100 个 = 61 electron-node / 31 electron / 8 system-node**。
-- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。**C-17 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：失败集合与 C-16 基线完全一致（仅 applog）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-18 后一次全量为 100 个 99 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项）；新增 `today-queue-fastpath` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。流程侧（非 99 套件）：C-17 改动前基线 F37 8/8、F35 12/13（M1a）、F04 31/33（G1 两处——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败）；C-17 后 F37 8/8（新语义）、F35 **14/14**、F04 **33/33**（后两者修复既有失败，非放宽）。
+- **测试规模**：101 个 `tests/*.test.cjs`，分布 **61 electron-node / 32 electron / 8 system-node**（C-45 guard、C-08 `bookasset-path`、C-09 `csp-policy` 落在 electron-node；C-09 `csp-enforcement` 与 C-10 `schema-version`、C-15 `settings-file` 落在 electron；C-11 `userData` 与 C-12 `backup-zip64` 落在 electron-node；C-13 `restore-flow` 落在 electron-node；C-18 `today-queue-fastpath` 落在 electron；C-19 `ai-stream` 落在 electron）；报告基线为 89 个，C-45 / C-08 / C-09 / C-10 / C-11 / C-12 / C-13 各按报告预期 +1 / +1 / +2 / +1 / +1 / +1 / +1，C-18 按验收新增 1 个，C-19 按验收新增 1 个。C-12 的 `backup-zip64` **默认跳过**（`NUT_BIG_TESTS=1` 时运行，普通全量不计入失败）。**测试基数更正**：C-14 后记为 97，实际 98——`settings-notices.test.cjs`（system-node）随 D206 批次合入，非审计项改动；C-15 新增 `settings-file.test.cjs`（electron）后为 99；C-18 新增 `today-queue-fastpath.test.cjs`（electron）后为 100；C-19 新增 `ai-stream.test.cjs`（electron）后为 **101 个 = 61 electron-node / 32 electron / 8 system-node**。
+- **本机 Windows 基线（2026-10-23，C-02 前）**：`npm test` → **89 个：82 过 / 7 败 / 0 超时**；结果写入 `tests/.results/latest.json`。C-02 后两次全量均为 **81 过 / 8 败**，多出的 `lensWindow` G1 是时序 flake（见 §1.1），其余 7 败归属不变。**C-03 后一次全量为 83 过 / 6 败**：两个 artifact 失败已消除，`lensWindow` G1 本轮回落到失败集，其余 5 败归属不变。**C-04 后一次全量为 84 过 / 5 败**：`lensWindow` 本轮通过，其余 5 败归属不变，无新增失败文件。**C-05 后全量为 85 过 / 4 败**：m1.prompts / m7.prompts 转绿；失败集合 = applog、i18n、m14、m15v2.route（性能阈值 flake，单独跑通过；与 `tsc` 并行的首轮另有 `lensWindow` G1）。**C-06 后全量为 87 过 / 2 败**：i18n 转绿；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-45 后全量为 90 个 87 过 / 3 败**：guard 测试通过；多出的 `lensWindow` G1 是时序 flake（直跑复现），失败集合 = applog、lensWindow、m14，无新增失败文件。**C-08 后全量为 91 个 88 过 / 3 败**：新增 `bookasset-path` 通过；失败集合 = applog、m14、`m15v2.route`（性能阈值 flake，中位 30.7ms vs ≤30ms，与本项无关），`lensWindow` 本轮通过，无新增失败文件。**C-09 后全量为 93 个 91 过 / 2 败**：新增 `csp-policy` / `csp-enforcement` 均通过；失败集合 = applog、m14（均为既有未归属项）；`lensWindow` 与 `m15v2.route` 本轮通过，无新增失败文件。**C-10 后全量为 94 个 92 过 / 2 败**：新增 `schema-version` 13 断言全过；失败集合 = applog、m14（均为既有未归属项），`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-11 后两轮全量均为 95 个**：首轮 91 过 / 3 败 / 1 超时（applog、lensWindow G1 flake、m14 + `card-links` 超时）；复跑钉定脚本后单独跑 `card-links` 通过（840ms），干净第二轮 **92 过 / 3 败 / 0 超时**（applog、lensWindow G1、m14，无新增失败文件）。**C-12 后全量为 96 个 94 过 / 2 败 / 0 超时**（applog、m14，均为既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-13 后一次全量为 97 个 96 过 / 1 败 / 0 超时**：**m14 转绿**（EBUSY 复核修复 + 过期期望更新，见 §3.14），失败集合仅剩 applog（既有未归属项）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-14 后一次全量为 97 个 95 过 / 2 败 / 0 超时**：失败集合 = applog（既有未归属项）+ `m15v2.route`（性能阈值 flake，单独复跑通过，与备份改动无关）；`lensWindow` 本轮通过，无新增失败文件。**C-15 前基线（2026-10-24，含 D206 批次）为 98 个 96 过 / 2 败**（applog、`m15v2.route`）；**C-15 后最终树复跑 99 个 97 过 / 2 败 / 0 超时**，失败集合与基线一致，无新增失败文件。**C-16 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：唯一失败 = applog（既有未归属项）；`m15v2.route` 本轮通过，无新增失败文件。**C-17 后一次全量为 99 个 98 过 / 1 败 / 0 超时**：失败集合与 C-16 基线完全一致（仅 applog）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-18 后一次全量为 100 个 99 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项）；新增 `today-queue-fastpath` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。**C-19 后一次全量为 101 个 100 过 / 1 败 / 0 超时**：唯一失败 = applog（§1.1 既有未归属项，第 11 节子进程崩溃日志两条，与 C-19 无关）；新增 `ai-stream` 通过，`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。流程侧（非 99 套件）：C-17 改动前基线 F37 8/8、F35 12/13（M1a）、F04 31/33（G1 两处——F35/F04 的旧注入自 D137 起已失效，属 main 既有失败）；C-17 后 F37 8/8（新语义）、F35 **14/14**、F04 **33/33**（后两者修复既有失败，非放宽）。
 - **报告 Linux 基线**：89 个 66 过 / 23 败（见报告 §1.3 / 附录 C）。跨平台比较以本机实测为准，并在回报中注明平台。
-- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17、C-18。
-- **下一项**：**C-19**（AI 流式传输；P1；多字节乱码/截断当成功/非 SSE 当成功/4xx 被重试/不走系统代理；报告分 C-19a（第 1–6 步）与 C-19b（第 7 步代理）两个提交）。
+- **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17、C-18、C-19。
+- **下一项**：**C-20**（API Key：系统加密不可用时「明文保存却读不出来」；同步 safeStorage API 将被移除；P1）。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
@@ -87,7 +87,7 @@
 | # | 编号 | 状态 | 提交 / 合并 | 备注 |
 | --- | --- | --- | --- | --- |
 | 19 | C-18 | 完成 | `0a46124` + `5083437` + `2042187` + `12b0385` + `1864cee` / `68daaee` | 10 万卡复习性能；基准脚本 + a 索引 / b 快速路径 / c 专用接口 + 等价测试共 5 提交，验收见 §3.19。 |
-| 20 | C-19 | 待做 | — | AI 流式传输。 | |
+| 20 | C-19 | 完成 | `93b5320` + `c9c2dc4` / `ea91c71` | AI 流式传输；a 多字节/截断/非 SSE/4xx/脱敏 + b fetch 传输层系统代理两提交，验收见 §3.20。 |
 | 21 | C-20 | 待做 | — | API Key 存储。 |
 | 22 | C-21 | 待做 | — | 写入口参数校验。 |
 | 23 | C-22 | 待做 | — | 软删除过滤 / 资产孤儿。 |
@@ -574,6 +574,41 @@
   4. bench 脚本与 5 提交结构：报告 §0 要求「一项一提交」但 C-18 自身明确分 3 提交，附录 A 另要求 bench 脚本单独提交（可与 C-18a 同批），测试文件按仓库惯例（C-03 先例：分支多提交 + 单次 --no-ff 合并）作第 5 个提交。
   5. 本机 Windows 首次运行基准无「基准失败」行、退出码 0；RSS 从基线 812MB 降到 ~685MB（快速路径不再全量物化 10 万行）。
 
+### 3.20 C-19 · AI 流式传输：多字节乱码 / 截断当成功 / 非 SSE 当成功 / 4xx 被重试 / 不走系统代理
+
+- **提交**（分支 `fix/c19-ai-stream`，2 个）：`93b5320 fix(C-19a): AI 流式传输修正——setEncoding 多字节拼接、截断/非 SSE 不再当成功、4xx 不重试、瞬时网络错误归类、错误正文脱敏`、`c9c2dc4 fix(C-19b): AI 网关切换 fetch 传输层——Electron net.fetch 优先，继承系统代理`；合并 `ea91c71`。
+- **改动**（3 文件，+640/−159）：
+  - **C-19a**（`electron/ai.js`，报告第 1–6 步）：
+    * 第 1 步：响应回调首行 `res.setEncoding("utf8")`（StringDecoder 拼接跨 chunk 多字节字符），`chunk.toString("utf-8")` 改 `chunk`；`requestJSON` 响应回调同样处理。
+    * 第 2/8 步：done 只发一次（`sendDoneOnce`）；逐行解析抽成 `handleLine`，end 时补处理无换行符的末行；既无 `[DONE]` 也无 `finish_reason` 的提前收尾按 `code:"truncated"`（`retriable:false`、`streamStarted:true`）拒绝。
+    * 第 3 步：200 分支检查 content-type——`text/html` 与整包 `application/json` 不再静默当「空成功」；JSON 整包有 `choices[0].message.content` 则作为一次 delta 发出并正常结束（usage/finishReason 透传），否则 `bad_content_type`（消息附脱敏后前 200 字）；其余类型（含缺失）继续按 SSE 解析。
+    * 第 4 步：`chatStream` 重试判定改 `err && err.retriable === true`（4xx / cancelled / truncated 不再吃指数退避）。
+    * 第 5 步：`NET_CODES`（ECONNRESET/EPIPE/ENOTFOUND/EAI_AGAIN/ENETUNREACH/EHOSTUNREACH/ECONNABORTED）统一归 `network`（原系统码保留 `.sysCode`）；ETIMEDOUT→`timeout` 维持不重试。
+    * 第 6 步：`redact()` 脱敏 Bearer 与 sk/ak/pk/key 形态；`classifyHttpError` 错误正文先脱敏再进消息。
+  - **C-19b**（新建 `electron/aiTransport.js` + `electron/ai.js` 切换，报告第 7 步）：
+    * `postSSE(url,{headers,body,signal,idleMs})` / `getJSON(url,{headers,timeoutMs})`；`pickFetch` 优先 `electron.net.fetch`（Chromium 网络栈，app ready 后可用，**继承系统代理**），测试/纯 Node 回落 `globalThis.fetch`。
+    * 正文解码统一 `TextDecoder("utf-8")` 的 `stream:true`（第 1 步规则在传输层保持）；空闲超时（默认 120s）覆盖「连接 / 响应头 / 每个正文 chunk」全程、收到数据即重置（v45 网络黑洞防护语义）；调用方提前停止消费（[DONE]）自动 `reader.cancel()` 断开。
+    * `chatStreamOnce` 重写为 async 流程（非 200 错误体读取 + classifyHttpError、content-type 分流、SSE 行级规则全部保留）；`requestJSON` 委托 `getJSON`（返回形状 `{status,json}` 不变）。
+    * fetch 层错误先还原系统码（undici cause 链 + `AggregateError.errors`；Chromium `net::ERR_*` 映射表 `CHROMIUM_NET_CODES`）再走第 5 步同一段归类；ECONNREFUSED 友好文案、abort 归因（`abortErrorOf(signal)`）保留；`Content-Length` 改由 fetch 层自行计算（forbidden header）。
+  - 新增 `tests/ai-stream.test.cjs`（electron 运行时，报告验收场景 a–h + C-19b 传输层判据 i，20 断言）：`http.createServer` 模拟 OpenAI 兼容端点，`setAIConfig({preset:"local"})` + 指向 `127.0.0.1` baseUrl（本地预设免 Key），隔离 userData。
+- **验收（2026-10-24，Windows；Electron 31.7.7）**：
+  - C-19a 后：`node scripts/run-tests.mjs ai-stream` → **1 通过 / 0 失败**，直跑 **18/18**：(a) 「中」字第 2 字节处切断分两次写出 → 拼出 `中文测试` 且无 U+FFFD；(b) 无 [DONE] 无 finish_reason → `truncated` 且不重试；(c) `finish_reason:"stop"` 无 [DONE] → resolve；(d) 200+text/html → `bad_content_type` 不重试；(e) 200 整包 JSON → content 一次 delta + done 恰 1 次 + usage 透传；(f) 401 + maxAttempts 3 → 服务端只收 1 次请求、code `http`/status 401、错误消息中 `sk-abcdef…` 被脱敏；(g) 503 → 恰 3 次请求；(h) [DONE] 时 done 恰 1 次。
+  - C-19b 后：同一套件不改 a–h 断言复跑 → **20/20 全过**（(i) app ready 后 `usesElectronNet()===true` + `pickFetch()` 可调用）；`node scripts/run-tests.mjs d112-providers` → **通过**（listModels /api/tags 降级与 detectLocalRuntime 探针经 `getJSON` 的本地服务器回归）。
+  - `npm run typecheck` → exit 0（C-19a、C-19b 后各一次）。
+  - `node scripts/run-tests.mjs --list | tail -1` → `{"electron-node":61,"electron":32,"system-node":8}`（101 个，本项 +1 electron）。
+  - `npm test`（合并前最终树，无并行负载）→ 101 个 **100 过 / 1 败 / 0 超时**；唯一失败 = applog（§1.1 既有未归属项，第 11 节崩溃日志两条，与 C-19 无关）；`lensWindow` / `m15v2.route` 本轮通过，无新增失败文件。
+  - C-19b 手工验收（Windows 系统代理 + OpenAI 预设「测试连接」）**未执行**——本机无 Clash 等代理与 OpenAI Key；以 (i) 传输层选择判据（生产路径选 Electron net.fetch = 系统代理路径）+ d112 本地服务器经 net.fetch 的回归作离线替代，见偏离 3。
+- **偏离**：
+  1. **报告第 2 步给的 `handleLine` 代码把 `usage/finishReason` 闭包进函数**：实现按报告结构照搬（状态外提为回调外的局部变量），语义与报告一致；报告省略的 `:457-477` JSON 解析/usage/finishReason/ttft/think 节流逻辑逐字搬入。
+  2. **第 3 步的 `bad_content_type` 补 `streamStarted:true`**（报告只要求 `retriable:false`）：200 响应已收到，按 §3.7「流已开始」纪律记录，防将来重试判定误吞。
+  3. **C-19b 手工代理验收未执行**（本机无系统代理与海外服务商 Key）：以套件 (i) 断言生产环境 app ready 后选择 Electron net.fetch（该路径继承系统代理，与词典 main.js:1134 同一网络栈）+ d112-providers 经 net.fetch 的本地服务器回归作为离线替代；待有代理环境时可在设置页复测 OpenAI 预设。
+  4. **fetch 层错误码还原为本项必要新增**（报告第 7 步未展开）：undici 的 `TypeError("fetch failed")` 不带 Node 系统码（藏在 cause 链 / AggregateError.errors），Chromium net.fetch 报 `net::ERR_*`——不还原则第 5 步归类与 ECONNREFUSED 友好文案全部失效。`CHROMIUM_NET_CODES` 只映射常见网络错误，未知 `ERR_*` 原样透传走「非 NET_CODES 保留原 code」分支。
+  5. **net.fetch 会初始化 Chromium 磁盘缓存锁住 userData**：测试进程末尾 `fs.rmSync(userData)` 被无限期卡死（输出全部完成后进程 25s+ 不退，逐场景二分定位 + `disable-http-cache` 差分证实）。测试首行 `app.commandLine.appendSwitch("disable-http-cache")` 后 4.8s 干净退出；残余 EBUSY 由既有 try/catch 兜住（%TEMP% 可能残留小目录，无害）。生产行为不受影响（只是测试进程开关）。
+  6. **fetch 默认跟随 3xx 重定向**（Node http.request 不跟随，旧实现对 3xx 按 `code:"http"` 报错）：OpenAI 兼容端点不重定向 POST，影响面可忽略；如遇网关重定向行为差异属 fetch 规范语义。
+  7. 测试文件首行的 U+FFFD 字面量在写入时被转成 U+0096（工具链编码损坏），已改为 `"\uFFFD"` 转义（断言语义不变）；临时探针（bisect/netfetch-probe 共 6 个 `tests/tmp-c19-*`）已全部删除，未入库。
+  8. 测试副产物 `tests/m15r.activity.bundle.cjs` / `m15r.layout.bundle.cjs` 全量后变脏，合并后已还原；提交用显式路径（3 文件）。
+
+
 ## 4. 每项收尾时必须更新本账本
 
 1. 把对应行状态改为 **完成**（或 **中止** / **部分**）。
@@ -587,6 +622,6 @@
 
 - 报告：`C:\Users\xiongdy\Desktop\report_confirmed.md`；只读 §0、§3 和目标 C-xx 小节。
 - 进度：本文件 + `git log --grep 'C-xx'`。
-- 当前下一项：**C-19**（阶段 2 正确性与规模，P1：AI 流式传输——多字节乱码 / 截断当成功 / 非 SSE 当成功 / 4xx 被重试 / 不走系统代理；报告分 **C-19a**（第 1–6 步一个提交）与 **C-19b**（第 7 步系统代理单独提交）；报告小节约在 §C-19（`rg -n "C-19" 报告` 定位，锚点 `rg -n "chunk.toString|errText \+= c|body \+= c|\[DONE\]|code === \"http\"|ETIMEDOUT|require\(\"https\"\)" electron/ai.js`））。
-- 基线：100 个测试；C-18 后全量 99 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。C-17 已改 `persist()` 语义：busy 只记日志（前缀 `[db] checkpoint 失败`），严格语义在 `persistNow` / `checkpointStrict`（备份 flush）。C-18 后 schema `user_version = 3`（idx_cards_due），新库自动到位；`computeTodayQueue` 增加 `damagedOmitted` 键。
+- 当前下一项：**C-20**（阶段 2 正确性与规模，P1：API Key——系统加密不可用时「明文保存却读不出来」（`getAIConfig` 只解密 `apiKeyEnc` 从不读 `apiKeyPlain`）+ 同步 safeStorage API 将在 Electron 46 移除（改 `isAsyncEncryptionAvailable` / `encryptStringAsync` / `decryptStringAsync`，`basic_text` 后端检测）；报告小节约在 :1513（`rg -n "C-20" 报告` 定位，锚点 `rg -n "isEncryptionAvailable|apiKeyPlain|\"plain:\"" electron/ai.js`）。
+- 基线：101 个测试；C-19 后全量 100 过 / 1 败（Windows，2026-10-24；仅 applog 既有未归属项，见 §1.1）。C-12 的 `backup-zip64` 默认跳过，`NUT_BIG_TESTS=1` 才跑（需临时盘 ≥6GB）。C-17 已改 `persist()` 语义：busy 只记日志（前缀 `[db] checkpoint 失败`），严格语义在 `persistNow` / `checkpointStrict`（备份 flush）。C-18 后 schema `user_version = 3`（idx_cards_due），新库自动到位；`computeTodayQueue` 增加 `damagedOmitted` 键。C-19 后 AI 网关走 `electron/aiTransport.js`（net.fetch 优先，fetch 层错误先经 `unwrapSysCode`/`CHROMIUM_NET_CODES` 还原系统码再归类）；写 `tests/ai-stream.test.cjs` 同款 electron 测试时注意：必须 `app.commandLine.appendSwitch("disable-http-cache")`，否则 net.fetch 的磁盘缓存会锁住 userData、rmSync 卡死进程退出。
 - **Token 账与执行协议（2026-10-24 用户指令更新）**：**Token 计账终止**——用户指示不再计算 Token 消耗（停更前最后已知状态：累计约 49M / 2 亿，其中 12M 实测，本行留档停更）。**新协议**：主控（编排会话）固定 GLM 5.3；执行单元（新会话）全部改用 **GLM 5.3 Flash 最高思考强度**（代理定义 `.zcode/agents/audit-flash.md`）；每个执行单元完成后，主控必须**审查一遍是否真正正确解决了报告中要解决的问题**（对照报告小节核 diff + 抽跑验收），审查通过才继续下一项（C-16 主控自做；C-17 / C-18 主控已复核 diff 与验收实测，均通过：C-17 persist 新语义与 checkpointStrict 落位、第二连接持读事务验收断言逐字落实；C-18 索引/快速路径/专用接口三段提交、`AS id` 别名遮蔽偏离属实、基准 140.5ms<300ms 与索引命中由主控独立复跑证实）。
