@@ -273,7 +273,7 @@ app
         ["app", "extractEditorToolbarTop", true],         // v48.55 / D95 §K.2 dock 态钉顶（默认 false＝吸底；非默认值才验得出往返）
         ["app", "selectionBarStyle", "text"],             // D122 选区浮条动作呈现（默认 "icon"）
         ["app", "workbenchPlacement", "bottom"],          // D123 制卡台放置位置（默认 "right"）
-        ["app", "closeToTray", false],                    // D123 关闭收进托盘（默认 true）
+        ["app", "closeToTray", false],                    // D123 关闭收进托盘（平台默认 v49.37/D208：win/mac 开、linux 关；显式 false 全平台尊重，往返仍成立）
         ["app", "updateAutoCheck", false],                // D180 自动检查更新（默认 true；非默认值才验得出往返）
         ["app", "language", "ja"],                        // D182 界面语言（默认 zh-CN；enum 四值，非法写侧回落）
         ["app", "extractFaceFontFollow", false],          // v48.54 / D95 摘录卡字号跟随（默认 true）
