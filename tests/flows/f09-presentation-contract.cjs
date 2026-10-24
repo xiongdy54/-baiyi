@@ -68,13 +68,20 @@ function app_main() {
 
     // ---------- E1 Token 有定义才有引用 ----------
     flow.section("E1 Token 引用的每个变量必须有定义（§5.1 Token 体系 / v48.14 派生层缺陷）");
-    const defined = new Set([...allCss.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
-    const used = [...allCss.matchAll(/var\(\s*(--[\w-]+)\s*([,)])/g)];
+    // C-35a：扫描前剥离 CSS 注释（注释里的示例代码不是引用——theme.css 分节注释的
+    // `var(--token)` 会被当成引用造成假阳性）；并豁免由 TS setProperty 注入的 Token
+    // （src/**/*.ts* 中 setProperty("--xxx"，报告 C-35 步骤 1：如 --wb-main-w 由
+    // workbenchLayout.ts 动态写入）。
+    const allCssE1 = allCss.replace(/\/\*[\s\S]*?\*\//g, "");
+    const setPropTokens = new Set([...allTsx.matchAll(/setProperty\(\s*[`'"](--[\w-]+)/g)].map((m) => m[1]));
+    const defined = new Set([...allCssE1.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+    const used = [...allCssE1.matchAll(/var\(\s*(--[\w-]+)\s*([,)])/g)];
     const undefinedTokens = new Map();
     for (const m of used) {
       const [, name, sep] = m;
       if (defined.has(name)) continue;
       if (sep === ",") continue; // 带 fallback 的 var() 允许外部注入
+      if (setPropTokens.has(name)) continue; // C-35a：TS setProperty 注入视为已定义
       undefinedTokens.set(name, (undefinedTokens.get(name) || 0) + 1);
     }
     flow.record("Token 定义数 / 引用数", `${defined.size} / ${used.length}`);
@@ -85,7 +92,11 @@ function app_main() {
 
     // ---------- E2 硬编码色值 ----------
     flow.section("E2 禁止硬编码色值（§7.1.6 L860）");
-    const hexHits = tsx.filter((f) => /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/.test(f.t)).map((f) => rel(f.p));
+    // C-35c：按 C-35b 的 COLOR_ALLOW 豁免口径重算——皮肤清单 manifest.ts / 强调色计算
+    // accentVar.ts / EPUB 注入 appearance.ts 本来就应含色值（报告 C-35 证据 3），
+    // 与 scripts/consistency-check.mjs 的豁免清单保持同一口径。
+    const colorAllowRe = /^src\/skins\/[^/]+\/manifest\.ts$|^src\/lib\/accentVar\.ts$|^src\/lib\/reader\/foliate\/appearance\.ts$/;
+    const hexHits = tsx.filter((f) => /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/.test(f.t) && !colorAllowRe.test(rel(f.p))).map((f) => rel(f.p));
     for (const h of hexHits) console.log(`    · ${h}`);
     ratchet(flow, "hardcodedHexFiles", hexHits.length, { direction: "down" });
     newBaseline.hardcodedHexFiles = Math.min(newBaseline.hardcodedHexFiles ?? Infinity, hexHits.length);

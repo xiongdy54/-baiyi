@@ -58,6 +58,12 @@ jobs:
             *)       echo "unknown os"; exit 1 ;;
           esac
 
+      # C-35c：一致性机器闸门（规则 1-8：未定义 Token / 颜色字面量棘轮 / !important+svg
+      # 棘轮 / 动效时长 / 编辑器白名单 / IME 守卫 / hover-opacity 棘轮 / skin-audit+i18n-check）。
+      # npm ci 之后、测试之前；这是阻断性步骤（无 continue-on-error）——基线只许变小。
+      - name: Consistency lint (C-35 gate)
+        run: npm run lint:consistency
+
       - name: Run tests (non-blocking; results uploaded below)
         continue-on-error: true
         shell: bash
