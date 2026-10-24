@@ -5,6 +5,9 @@ declare global {
     settingsAPI?: {
       get: (scope: string, key?: string) => Promise<unknown>;
       set: (scope: string, key: string, value: unknown) => Promise<boolean>;
+      // C-31：主进程 settings:set 写入成功后的变更广播（发给未发起写入的窗口）——
+      // 单向推送（D123 / D180 同口径，不计入 IPC 注册清单，事件名与载荷形状见 electron/main.js 头注）
+      onChanged?: (cb: (payload: { scope: string; key: string }) => void) => () => void;
     };
     // v23（D20/§4.4.10）：FSRS 参数环境——活跃配置完整快照 + 主进程事实层推送（F9 热生效）
     fsrsAPI?: {

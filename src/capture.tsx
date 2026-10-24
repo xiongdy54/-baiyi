@@ -4,6 +4,7 @@ import "./lib/cspReport";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import CaptureEditor, { applyCaptureAppearance } from "./components/CaptureEditor";
+import { WindowSkin } from "./skins/WindowSkin"; // C-31：独立窗口外观挂载点（settings:changed 即时同步换肤 / 动效 / 强调色）
 // v48.89（D132 §6.4）：捕获窗跟随主题插件（最小子集桥：getActive/onChanged）
 import { installThemePluginBridge } from "./lib/themePlugins";
 import "./styles/layers.css"; // v49.0 / D170：层序预注册，先于 theme.css
@@ -34,6 +35,8 @@ try {
   void applyCaptureAppearance().then(() => {
     createRoot(document.getElementById("root")!).render(
       <React.StrictMode>
+        {/* C-31：独立窗口外观挂载点（皮肤 CSS / html[data-skin] / 动效三态与主窗口同步） */}
+        <WindowSkin />
         <CaptureEditor />
       </React.StrictMode>
     );

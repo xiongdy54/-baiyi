@@ -8,7 +8,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isImeComposing } from "../lib/ime";
 import { formatClock, journalDateLabel, todayJournalDate, type JournalEntry } from "../lib/journal";
-import { applyAccent } from "../lib/accentVar";
+// C-31：外观唯一读取面 + 落类 + WindowSkin 反压（applyCaptureAppearance 保留为呼出重读入口）
+import { applyAppearanceToDocument, readAppearance } from "../skins/runtime/readAppearance";
+import { requestWindowSkinRefresh } from "../skins/WindowSkin";
 import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
 import { useT } from "../lib/i18n";
 
@@ -19,17 +21,17 @@ type SaveState = "idle" | "typing" | "saved" | "error";
 
 // 捕获窗口是**长生命周期的单例**（首次呼出创建后只隐藏不销毁），故主题/强调色不能只在启动时读一次——
 // 每次呼出都重读（用户中途切了主题，下次呼出必须一致；main 侧同时更新窗口底色防白闪）。
+// C-31：实现改为唯一读取面 readAppearance + 共享落类逻辑 applyAppearanceToDocument——
+// 原实现只切 theme-dark/light + app.accentColor 原键，皮肤 CSS / 动效三态 / 非默认皮肤的
+// accentBySkin 记忆值都同步不到；现在与主窗口（App.tsx）和 WindowSkin 同源。末尾反压本窗口
+// 已挂载的 WindowSkin 刷新（皮肤 CSS / html[data-skin] / 背景层由 SkinHost 主管）。
 export async function applyCaptureAppearance(): Promise<void> {
   try {
-    const mode = (await window.settingsAPI?.get("theme", "mode")) as string | undefined;
-    document.body.classList.toggle("theme-dark", mode === "dark");
-    document.body.classList.toggle("theme-light", mode !== "dark");
-    const accent = (await window.settingsAPI?.get("app", "accentColor")) as string | undefined;
-    // 与主窗口同一入口：自定义 accent 时同步反白档 --accent-on
-    applyAccent(accent);
+    applyAppearanceToDocument(await readAppearance());
   } catch {
     document.body.classList.add("theme-light");
   }
+  requestWindowSkinRefresh();
 }
 
 export default function CaptureEditor() {

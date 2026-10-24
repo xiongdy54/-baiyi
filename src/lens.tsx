@@ -2,12 +2,14 @@
 // 阅读透镜 v2 的面板从主窗口内的浮层 / 正文下方搬进独立窗口：面板本身（MindmapLens）一字不改地复用，
 // 只把「内核」换成经 preload 桥代理到阅读窗口的 LensKernel（src/lib/lensBridge.ts）。
 // 窗口纪律与独立制卡台窗口同构：无边框自绘 + 默认置顶（可在窗口内切换）+ 关闭＝隐藏 + 每次呼出重读外观。
-// 主题 / 皮肤跟随主应用（同一套 theme.css + 皮肤桥）——换肤一处改，两窗同步生效。
+// 主题 / 皮肤跟随主应用（同一套 theme.css；C-31 起换肤 / 动效 / 强调色由主进程 settings:changed 广播
+// 经 <WindowSkin /> 即时同步——SkinHost 独立窗口挂载点，呼出时另经 applyCaptureAppearance 重读兜底）。
 import "./lib/cspReport";
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import MindmapLens from "./components/reader/MindmapLens";
 import { applyCaptureAppearance } from "./components/CaptureEditor";
+import { WindowSkin } from "./skins/WindowSkin";
 import { createLensKernel } from "./lib/lensBridge";
 import { installThemePluginBridge } from "./lib/themePlugins";
 import { installMindmapBridge } from "./lib/mindmap";
@@ -54,6 +56,8 @@ function LensWindow() {
 
   return (
     <div className="lens-root">
+      {/* C-31：独立窗口外观挂载点——皮肤 CSS / html[data-skin] / 动效三态与主窗口同步（settings:changed） */}
+      <WindowSkin />
       <MindmapLens
         kernel={bridge.kernel}
         documentId={ctx.documentId}

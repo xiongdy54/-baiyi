@@ -33,6 +33,8 @@ import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib
 // v49.0 / D170：皮肤引擎 v2——清单注册表 + SkinHost（body 类/CSS 注入/层渲染归宿主管）
 import { DEFAULT_SKIN_ID, loadSkin } from "./skins";
 import { SkinHost } from "./skins/SkinHost";
+// C-31：外观读取唯一实现面（初始化与独立窗口 WindowSkin 共用；本文件 effect 仍用 resolveMotion/motionClass）
+import { readAppearance } from "./skins/runtime/readAppearance";
 import { motionClass, resolveMotion, type MotionSetting } from "./skins/runtime/motionLevel";
 import type { MotionLevel } from "./skins/types";
 import { applyAccent } from "./lib/accentVar";
@@ -198,37 +200,23 @@ export default function App() {
   useEffect(() => {
     let settled = false;
     Promise.all([
-      settingsStore.get<ThemeMode>("theme", "mode", "light"),
-      settingsStore.get<string>("app", "skinId", DEFAULT_SKIN_ID),
-      settingsStore.get<string>("app", "accentColor", ""),
-      settingsStore.get<Record<string, string>>("app", "accentBySkin", {}),
-      settingsStore.get<MotionSetting>("app", "motionLevel", "system"),
+      // C-31：外观读取唯一实现面（与独立窗口 WindowSkin 共用）——逻辑逐行搬自本段原实现，
+      // 语义不变：loadSkin 失败回落默认皮肤、D172 有效强调色（默认皮肤用原键 / 其他皮肤用 accentBySkin）
+      readAppearance(),
       // v49.8（D182）：界面语言——首绘前装载（setLoaded 之前），零闪烁
       settingsStore.get<string>("app", "language", "zh-CN")
     ])
-      .then(async ([m, s, a, abs, ml, lang]) => {
+      .then(async ([ap, lang]) => {
         settled = true;
         initLocale(lang);
-        setTheme(m === "dark" ? "dark" : "light");
-        // v49.0 / D170：首渲染前预加载已保存皮肤（避免闪一下默认皮）；加载失败回落默认
-        let skin = DEFAULT_SKIN_ID;
-        if (s && s !== DEFAULT_SKIN_ID) {
-          try {
-            await loadSkin(s);
-            skin = s;
-          } catch (err) {
-            console.error("[skin] 已保存皮肤加载失败，回落默认", err);
-            skin = DEFAULT_SKIN_ID;
-          }
-        }
-        setSkinId(skin);
-        setAccentBySkin(abs || {});
-        setAccentColorLegacy(a);
-        // v49.0 / D172：accent 按皮肤记忆——默认皮肤用原键，其他皮肤用 accentBySkin[skinId]
-        const eff = skin === DEFAULT_SKIN_ID ? a : (abs || {})[skin] || "";
-        setAccentColor(eff);
-        setMotionSetting(ml === "off" ? "off" : "system");
-        setMotion(resolveMotion(ml === "off" ? "off" : "system"));
+        setTheme(ap.mode);
+        // v49.0 / D170：首渲染前预加载已保存皮肤在 readAppearance 内完成（失败回落默认）
+        setSkinId(ap.skinId);
+        setAccentBySkin(ap.accentBySkin);
+        setAccentColorLegacy(ap.accentLegacy);
+        setAccentColor(ap.accent);
+        setMotionSetting(ap.motionSetting);
+        setMotion(ap.motion);
         setLoaded(true);
       })
       .catch((err) => {
