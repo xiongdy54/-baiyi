@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import ReadMarkdown from "./editor/ReadMarkdown";
 import "katex/dist/katex.min.css";
 import { isImeComposing } from "../lib/ime";
 import { cardsApi, parseCloze, type CardDraft } from "../lib/cards";
@@ -2230,9 +2228,8 @@ export default function Reader({
             <article className="reader-markdown">
               <h1 className="reader-title">{title}</h1>
               {contextLabel && <p className="reader-context">{contextLabel}</p>}
-              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {markdown}
-              </ReactMarkdown>
+              {/* C-34a：粘贴书 markdown 读态统一走 ReadMarkdown（GFM/软换行/HTML 净化） */}
+              <ReadMarkdown text={markdown} />
             </article>
             </>
           )}

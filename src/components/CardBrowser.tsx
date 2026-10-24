@@ -7,9 +7,7 @@
 // 含查询条件的查询由主进程求值（cards:queryIds，求值引擎与渲染层同一份 cardQuery 单源产物）。
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isImeComposing } from "../lib/ime";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import ReadMarkdown from "./editor/ReadMarkdown";
 import { parseCloze, extractClozeAnswers, cardsApi, hasSourceAnchor, type CardRecord, type CardIssueRecord, type CardGenInfo, type TodayQueue, type BrowserMetaRow } from "../lib/cards";
 import { playVocabAudio } from "../lib/dictClient";
 import { eventBus } from "../lib/eventbus";
@@ -2505,9 +2503,9 @@ export function CardFace({
   }) => Promise<void> | void;
 }) {
   const T = useT();
-  const md = (s: string) => (
-    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
-  );
+  // C-34a：卡面读态统一走 ReadMarkdown（GFM/软换行/==高亮==/HTML 净化）——与编辑器（Milkdown，
+  // 启用 GFM）同一套语义；此前此处只开数学，编辑器里写的表格在卡面上会显示成一堆竖线。
+  const md = (s: string) => <ReadMarkdown text={s} />;
 
   // D88 §7.3：双面常挂 + 非当前面 inert（可达性/编辑安全硬性）——useLayoutEffect 在绘制前对调，
   // 保证「EditableText 只在背面可编辑」的契约在两种动效路径（3D 翻卡 / reduce 瞬时）下都成立；
