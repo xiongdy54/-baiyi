@@ -24,6 +24,7 @@ import {
   type Transition,
   type View,
 } from "../../../lib/mindmap/v2/animate";
+import { perfEnd, perfFrame } from "../../../lib/mindmap/v2/perf";
 import { HOW_NAMES, PATTERN_NAMES, type PatternHow, type PatternLocks } from "../../../lib/mindmap/v2/pattern";
 import { useT } from "../../../lib/i18n";
 
@@ -128,6 +129,8 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
   const targetRef = useRef<Display | null>(null); // 最近一次布局终态
   const shownRef = useRef<Display | null>(null); // 当前帧（插值中）
   const trRef = useRef<{ tr: Transition; t0: number; epoch: number } | null>(null);
+  /** C-32 A1：过渡上一帧的时刻（perfFrame 记相邻过渡帧间隔；无过渡/终帧时置空） */
+  const transPrevRef = useRef<number | null>(null);
   /** 用户每次主动改视图（拖动 / 滚轮 / 适配 / 居中）+1；过渡动画只在规划后用户没动过视图时才接管视图（否则与拖动打架） */
   const viewEpochRef = useRef(0);
   const frameOpRef = useRef<{ opacity: Record<string, number>; leaving: ReturnType<typeof transitionFrame>["leaving"] }>({ opacity: {}, leaving: [] });
@@ -224,7 +227,17 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         shownRef.current = f.display;
         if (cur.epoch === viewEpochRef.current) viewRef.current = f.view;
         frameOpRef.current = { opacity: f.opacity, leaving: f.leaving };
-        if (f.done) trRef.current = null;
+        if (f.done) {
+          trRef.current = null;
+          transPrevRef.current = null;
+          perfEnd(); // C-32 A1：过渡结束＝测量窗终点（perf 未开启时无操作）
+        } else {
+          const prev = transPrevRef.current;
+          if (prev != null) perfFrame(now - prev); // C-32 A1：相邻过渡帧间隔
+          transPrevRef.current = now;
+        }
+      } else {
+        transPrevRef.current = null;
       }
       paint();
       if (trRef.current) rafRef.current = requestAnimationFrame(tick);
@@ -314,6 +327,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     sizesRef.current = {};
     shownRef.current = null;
     targetRef.current = null;
+    if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
     trRef.current = null;
     userMovedRef.current = false;
     setLodExpanded(new Set());
@@ -368,6 +382,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       fit() {
         userMovedRef.current = false;
         viewEpochRef.current++;
+        if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
         if (targetRef.current) shownRef.current = targetRef.current;
         fitTo(targetRef.current);
@@ -430,6 +445,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         const k = Number.isFinite(scale) && scale > 0 ? scale : 1;
         userMovedRef.current = true;
         viewEpochRef.current++;
+        if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
         frameOpRef.current = { opacity: {}, leaving: [] };
         if (targetRef.current) shownRef.current = targetRef.current;
@@ -439,6 +455,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       autoFit() {
         userMovedRef.current = false;
         viewEpochRef.current++;
+        if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
         frameOpRef.current = { opacity: {}, leaving: [] };
         if (targetRef.current) shownRef.current = targetRef.current;

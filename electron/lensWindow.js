@@ -280,6 +280,7 @@ function stopBoundsAnim(finish) {
 function animateBounds(w, from, to, ms = 180) {
   stopBoundsAnim(false);
   const t0 = Date.now();
+  let boundsCount = 0; // C-32 A1：本次缓动的 setBounds 次数（逐帧 + 收尾）
   const timer = setInterval(() => {
     if (!win || win.isDestroyed() || win !== w) {
       stopBoundsAnim(false);
@@ -293,11 +294,12 @@ function animateBounds(w, from, to, ms = 180) {
       width: Math.max(1, Math.round(from.width + (to.width - from.width) * e)),
       height: Math.max(1, Math.round(from.height + (to.height - from.height) * e)),
     };
-    try { w.setBounds(b, false); } catch { /* 定位失败不阻塞 */ }
+    try { w.setBounds(b, false); boundsCount++; } catch { /* 定位失败不阻塞 */ }
     if (p >= 1) {
       clearInterval(timer);
       boundsAnim = null;
-      try { w.setBounds(to, false); } catch { /* ignore */ }
+      try { w.setBounds(to, false); boundsCount++; } catch { /* ignore */ }
+      console.log("[lens] setBounds x" + boundsCount); // C-32 A1：逐帧 setBounds 计数（C-33 Phase B 的基线）
     }
   }, 16);
   boundsAnim = { timer, win: w, to: { ...to } };
