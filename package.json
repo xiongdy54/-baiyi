@@ -17,6 +17,7 @@
   "scripts": {
     "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
+    "lint:consistency": "node scripts/consistency-check.mjs",
     "i18n:check": "node scripts/i18n-check.mjs",
     "dev:renderer": "vite",
     "dev:electron": "electron .",
