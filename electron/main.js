@@ -219,6 +219,8 @@ const { rankWithAI, rerankFingerprint } = require("./aiNextExtract");
 const dbModule = require("./db");
 const optimizer = require("./optimizer");
 const backup = require("./backup");
+// C-39（审计，GUIDE v49.42 / D213）：导出到 Anki Phase 1——纯函数模块，不 require electron
+const ankiExport = require("./ankiExport");
 // C-38c（审计）：本机设备 ID（device.json，不进备份、不随恢复覆盖）——备份 meta 与恢复确认提示用
 const { getDeviceId } = require("./deviceId");
 // v45（M14-UM1，D39）：用户记忆——文件树真源（memoryStore）+ 整理编排（memoryTidy，AI 调用经
@@ -1028,6 +1030,25 @@ ipcMain.handle("backup:pickDir", async () => {
 });
 ipcMain.handle("backup:openDir", async () => {
   await shell.openPath(backup.getBackupDir());
+  return true;
+});
+// C-39（审计）：导出到 Anki——dialog 选目录 → writeExport(listAllCards())。
+// 「打开文件夹」不走任意路径通道：主进程只记住最近一次导出目录（anki:export 自己创建的），anki:openDir 只开它。
+let lastAnkiExportDir = null;
+ipcMain.handle("anki:export", async () => {
+  const r = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] });
+  if (r.canceled || !r.filePaths.length) return { ok: false, canceled: true };
+  try {
+    const out = ankiExport.writeExport({ cards: dbModule.listAllCards(), userData: app.getPath("userData"), outRoot: r.filePaths[0] });
+    if (out && out.ok) lastAnkiExportDir = out.dir;
+    return out;
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+});
+ipcMain.handle("anki:openDir", async () => {
+  if (!lastAnkiExportDir) return false;
+  await shell.openPath(lastAnkiExportDir);
   return true;
 });
 ipcMain.handle("backup:pickFile", async () => {
