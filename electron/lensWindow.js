@@ -240,7 +240,9 @@ function applyPendingFit(w) {
   }
 }
 
-/** D204：窗口 bounds 缓动曲线，与渲染层宿主反向位移使用同一条 cubic-bezier(.2,.7,.2,1)。 */
+/** D204：窗口 bounds 缓动曲线，与渲染层宿主反向位移使用同一条 cubic-bezier(.2,.7,.2,1)。
+ * C-32 A4：与 src/theme.css 的 --mm-ease Token 保持一致，两处注释互相指向；主进程读不到 CSS，
+ * 曲线以本常量为准（皮肤覆盖 --mm-ease 只影响渲染层 CSS 过渡，窗口缓动仍用这里）——改这里须同步 Token。 */
 const EASE = [0.2, 0.7, 0.2, 1];
 function easeAt(t) {
   const [x1, y1, x2, y2] = EASE;

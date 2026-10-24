@@ -168,6 +168,15 @@
   --dur-chart: 300ms;   /* 图表数据更新过渡 */
   --dur-chart-in: 400ms;/* 图表首次入场（含 stagger 总预算 ≤640ms，§6.3） */
 
+  /* —— 结构图谱过渡（审计 C-32 A4）：JS 侧 src/lib/mindmap/v2/animate.ts 的 readMotion()
+     每次 planTransition 读取一次，皮肤可覆盖（换肤后下一场过渡自然生效）。
+     ms / s 单位均可（readMotion 按单位换算；CSS 产物压缩会把 ms 归一成 s）。--mm-ease 与
+     electron/lensWindow.js 的 EASE（D204 窗口缓动曲线）保持一致，两处注释互相指向。 —— */
+  --mm-move: 260ms;   /* 旧元素位移 */
+  --mm-enter: 240ms;  /* 新元素淡入 + 位移 */
+  --mm-exit: 200ms;   /* 离场淡出 */
+  --mm-ease: cubic-bezier(0.2, 0.7, 0.2, 1); /* 与 lensWindow.js EASE 同一条曲线 */
+
   /* —— 缓动（全应用一族，elegance-sophistication：无回弹） —— */
   --ease-enter: cubic-bezier(0, 0, 0.2, 1);   /* 入场专用：快起步缓着陆（ease-out 族） */
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);    /* 出场专用：缓起步快离场（ease-in 族） */
