@@ -30,8 +30,12 @@
 
 （C-34d 登记；C-35 的机器闸门按这份清单检查——清单之外的文件出现新的 `<textarea>` 即为违规。）
 
-这些输入是「一次性输入」（AI 输入框、答题框、标签输入等）或契约内长文本面（批注），保留裸 textarea，
-但必须遵守上方行为规则（Esc 提交、IME 守卫等）：
+这些输入按「是否存在提交/取消键语义」分两档（2026-10-24 C-34 对抗审查后按实态收敛；C-35 机器闸门按此检查）：
+
+- **有提交/取消键语义的面**（文件内存在提交或取消的 `onKeyDown` 分支）：必须带 `isImeComposing` 守卫（`src/lib/ime.ts`，C-27）；Esc / Ctrl+Enter 语义按上方行为规则表（提交并退出，不是放弃）。
+- **一次性输入面**（textarea 本体无提交键）：Esc 归弹窗/浮层关闭语义＝**放弃**（关闭/收起由弹窗层或容器承担），不适用「Esc 提交」；存在键分支处仍须 IME 守卫。
+
+白名单清单（文件 + 用途）：
 
 | 文件 | 用途 |
 |---|---|
@@ -44,6 +48,27 @@
 | `src/components/editor/CardFields.tsx` | `ClozeField`（填空源文本——挖空工具要操作原始文本选区） |
 | `src/components/AnnotationEditor.tsx` | 批注编辑浮层（400 ms 防抖 + 失焦保存；Esc＝保存并收起——契约「长文本面」档） |
 | `src/components/reader/AnnotationPanel.tsx` | 批注列表就地编辑（失焦 / Ctrl+Enter / Esc＝保存并收起，C-34c 统一） |
+
+逐文件实态（2026-10-24 对抗审查核实，行号以当期为准）：
+
+| 文件 | 档 | IME 守卫 | Esc 实态 |
+|---|---|---|---|
+| `SelectionPanels.tsx`（待处理文字 trio） | 一次性 | trio 容器层有（onKey :477） | textarea 无提交键；Esc＝关闭 trio（放弃，:479） |
+| `SelectionMenu.tsx`（选区批注速记） | 提交键 | 有（:192） | Ctrl+Enter＝保存；Esc＝收面板**不保存（放弃）**（:196-198） |
+| `SelfExplainDialog.tsx`（自我解释作答） | 一次性 | 0 | textarea 无 onKeyDown；Esc＝useDialogA11y 关窗（放弃） |
+| `OcclusionEditor.tsx`（遮挡区标签） | 一次性 | 0 | textarea 无提交键；Esc＝编辑器级逐层退出链（裁剪草稿→…→dirty 确认→关窗，:656-668） |
+| `AIPanel.tsx`（AI 对话与草稿） | 提交键 | 有（3 处） | composer Enter＝发送；条目内联编辑 Enter＝提交、**Esc＝放弃**（:382-384） |
+| `AnswerJudgeModal.tsx`（答题输入） | 一次性 | 0 | textarea 无键语义；Esc＝useDialogA11y 关窗（作答弃） |
+| `AnnotationEditor.tsx`（批注浮层） | 提交键（保存并收起） | 0（文件内；Esc 走 dialogA11y） | Esc＝`closeAndSave`＝**保存并收起**；另有 400 ms 防抖 + 失焦保存 |
+| `reader/AnnotationPanel.tsx`（批注就地编辑） | 提交键 | 有（4 处） | Esc＝保存并收起（C-34c）；Ctrl+Enter＝保存；失焦保存 |
+| `editor/CardFields.tsx`（ClozeField） | 提交键（在包装层） | 有（ClozeDraftEditor） | textarea 本体只有 Ctrl+Shift+C 挖空键；提交＝Esc / Ctrl+Enter（包装层，IME 守卫在） |
+
+> **已知例外（C-27 族既有缺口，登记待单列收编，本契约不修代码）**：`src/lib/dialogA11y.ts` 的
+> document 级 Esc 处理器（:49-55）无 IME 守卫——组字中按 Esc（输入法取消候选）会直接关闭模态；
+> 所有 useDialogA11y 模态共享此路径（SelfExplainDialog / AnswerJudgeModal / AnnotationEditor 的
+> 「保存并收起」/ ManualCardEditor 等）。C-27 的 31 处守卫只覆盖组件内 onKeyDown，未收编该共享库。
+> C-35 闸门的机检查询＝「文件内 `onKeyDown` 存在提交/取消分支 ⇒ 其附近有 `isImeComposing`（或显式
+> 豁免标记）」，`dialogA11y.ts` 列为已知例外行，不得据弹窗层路径报组件级违规。
 
 > 补登说明（C-34 偏离）：报告 C-34d 的白名单只列了前 7 项，但其证据 6 把批注两套编辑行为
 > （`AnnotationEditor.tsx` / `reader/AnnotationPanel.tsx` 的 textarea）定为「保留、只统一按键语义」
