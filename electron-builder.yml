@@ -33,10 +33,10 @@ asarUnpack:
   - electron/icon.ico
   # v49.14（D187）：主题跟随图标（icon-light/dark.png + tray-black/white.ico）运行时原生读取
   - electron/icons/**
-# NAPI 预编译（fsrs-rs-nodejs-win32-x64-msvc）与 WASM（sql.js）均无需按 Electron ABI 重编。
-# D137（v48.92）：better-sqlite3 是 per-ABI 原生模块，必须按 Electron ABI 就位 → npmRebuild true；
-# @electron/rebuild 对 prebuild-install 型模块直接带 electron 运行时参数拉预编译，须带镜像 env
-# npm_config_better_sqlite3_binary_host_mirror（见 docs/BETTER-SQLITE3-PACKAGING.md，免网保底路径亦在其中）。
+# C-24（D207，2026-10-24）：better-sqlite3 升 v13（NAPI）——预编译内置 npm tarball（prebuilds/），
+# 同一二进制跨 Node / Electron 通用，与 fsrs-rs-nodejs（NAPI）、sql.js（WASM）一样无需按 ABI 重编；
+# per-ABI 拉取（prebuild-install + npmmirror 镜像 env）路线随 v12 退役（Electron 45 无 v12 预编译）。
+# 见 docs/BETTER-SQLITE3-PACKAGING.md。
 npmRebuild: true
 compression: normal
 win:
@@ -58,3 +58,10 @@ nsis:
   shortcutName: Nutation
   deleteAppDataOnUninstall: false # 卸载不删 userData（本地优先：数据归用户）
   artifactName: Nutation-${version}-win-${arch}-setup.${ext}
+# C-24（2026-10-24）：Linux 打包段——暂只有 Wayland 策略：executableArgs 写进 .desktop 启动项
+# （Exec 行跟 --ozone-platform=x11），与 electron/main.js 顶部的运行期开关双保险（报告 C-24 第 6 步；
+# appendSwitch 是否足够早生效、两者是否都需要，待 Wayland 实机验证 U-03）。
+# 完整 Linux 打包矩阵（target/category/图标等）属 C-30，不在本项展开。
+linux:
+  executableArgs:
+    - --ozone-platform=x11

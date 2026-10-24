@@ -273,7 +273,7 @@ async function runRound(ctx, { kind, trigger, entries = null, topicRels = null }
 async function runIngestRound(ctx, trigger) {
   const cfg = readMemoryConfig(ctx);
   if (!cfg.enabled) return { ok: false, skipped: "用户记忆未开启" };
-  if (typeof ctx.hasKey === "function" && !ctx.hasKey()) return { ok: false, skipped: "未配置 AI Key" };
+  if (typeof ctx.hasKey === "function" && !(await ctx.hasKey())) return { ok: false, skipped: "未配置 AI Key" };
   const st = s();
   const exec = async () => {
     const entries = ctx.db.listJournalEntriesSince({
@@ -361,7 +361,7 @@ function backfillStats(ctx) {
 async function runBackfill(ctx) {
   const cfg = readMemoryConfig(ctx);
   if (!cfg.enabled) return { ok: false, skipped: "用户记忆未开启" };
-  if (typeof ctx.hasKey === "function" && !ctx.hasKey()) return { ok: false, skipped: "未配置 AI Key" };
+  if (typeof ctx.hasKey === "function" && !(await ctx.hasKey())) return { ok: false, skipped: "未配置 AI Key" };
   const st = s();
   if (st.backfill.running) return { ok: false, skipped: "补处理已在进行中" };
   st.backfillAbort = false;

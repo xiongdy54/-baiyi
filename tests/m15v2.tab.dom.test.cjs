@@ -113,7 +113,7 @@ const engine = createMindmapEngineV2({
   broadcastDelta: (p) => { const c = clone(p); setTimeout(() => deltaL.forEach((f) => f(c)), 0); },
   broadcastChanged: (p) => { const c = clone(p); setTimeout(() => changedL.forEach((f) => f(c)), 0); },
 });
-const inv = (fn) => (p) => new Promise((res, rej) => setTimeout(() => { try { res(clone(fn(clone(p)))); } catch (e) { rej(e); } }, 1));
+const inv = (fn) => (p) => new Promise((res, rej) => setTimeout(async () => { try { res(clone(await fn(clone(p)))); } catch (e) { rej(e); } }, 1)); // C-24：引擎 graph* 已 async（keyVault safeStorage 异步化传导），先 await 再 clone
 const errors = [];
 w.mindmapAPI = {
   list: async (docId) => clone(store.listMaterialMaps(docId)),

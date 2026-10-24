@@ -7,8 +7,8 @@
 **A local-first incremental reading studio — read, excerpt, remember.**
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6)](#getting-started)
-[![Electron](https://img.shields.io/badge/Electron-31-47848F)](https://www.electronjs.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%2064--bit%20%28x64%20%2F%20ARM64%29-0078D6)](#getting-started)
+[![Electron](https://img.shields.io/badge/Electron-45-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](https://www.typescriptlang.org/)
 ![Local-first](https://img.shields.io/badge/local--first-100%25%20offline-2EA043)
@@ -124,7 +124,7 @@ More built in: **material mind maps & knowledge graph** · **dictionary** (onlin
 
 | Layer | Choice |
 | --- | --- |
-| Desktop shell | Electron 31 + Vite 6 |
+| Desktop shell | Electron 45 + Vite 6 |
 | Frontend | React 18 + TypeScript (strict) |
 | Reader kernel | foliate-js (vendored snapshot) behind an anti-corruption layer, CFI anchors |
 | Storage | SQLite (better-sqlite3, WAL), atomic persist on every write |
@@ -137,7 +137,7 @@ More built in: **material mind maps & knowledge graph** · **dictionary** (onlin
 
 ### Download
 
-Grab the Windows installer from the [Releases](https://github.com/xiongdy54/Nutation/releases) page. The setup wizard lets you pick the installation directory; uninstalling never deletes your data.
+Grab the Windows installer from the [Releases](https://github.com/xiongdy54/Nutation/releases) page. Nutation requires **Windows 10/11 64-bit (x64 / ARM64)** — there is no 32-bit (ia32) build, since Electron 44+ no longer ships Windows 32-bit binaries. The setup wizard lets you pick the installation directory; uninstalling never deletes your data.
 
 ### Build from source
 

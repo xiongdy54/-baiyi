@@ -95,10 +95,13 @@ function readPricing(ctx) {
   }
 }
 
-function modelConfigHashOf(ctx) {
+// C-24（Electron 45）：safeStorage 异步化后 getAIConfig 为 async——本文件三个消费点
+// （modelConfigHashOf / providerModelOf / preview）及其宿主 generate 随之 async；
+// 对外全部经 ipcMain.handle（原生支持 Promise）。
+async function modelConfigHashOf(ctx) {
   // 关键生成参数指纹：模型档 + 编排器版本 + 深挖变体（prompt/变体任何改动即整体缓存失效——宁重算不误复用）
   try {
-    const cfg = require("./ai").getAIConfig();
+    const cfg = await require("./ai").getAIConfig();
     return sha256([cfg.model, cfg.reasoningEffort || "low", GENERATOR_VERSION, EXPAND_VARIANT].join("|"));
   } catch {
     return sha256([GENERATOR_VERSION, EXPAND_VARIANT].join("|"));
@@ -115,9 +118,9 @@ function maxCallsOf(ctx) {
   }
 }
 
-function providerModelOf() {
+async function providerModelOf() {
   try {
-    const cfg = require("./ai").getAIConfig();
+    const cfg = await require("./ai").getAIConfig();
     return { provider: cfg.preset || "custom", model: cfg.model || "" };
   } catch {
     return { provider: "custom", model: "" };
@@ -593,12 +596,12 @@ function finalizeUser(call, childSummaries) {
 
 // ---------- 预览（零 AI 调用） ----------
 
-function preview(ctx, params) {
+async function preview(ctx, params) {
   const { plan, error } = buildCallPayloads(params, (scope) => templateText(ctx, scope), safeSettings(ctx));
   if (error) return { error };
   const hashMemo = new Map();
-  const { provider, model } = providerModelOf();
-  const cfgHash = modelConfigHashOf(ctx);
+  const { provider, model } = await providerModelOf();
+  const cfgHash = await modelConfigHashOf(ctx);
   let newCalls = 0;
   let cacheHits = 0;
   let charsNew = 0;
@@ -707,8 +710,8 @@ function promptVersion(ctx, scope) {
 // ---------- 生成 ----------
 
 async function generate(ctx, params, runId) {
-  const { provider, model } = providerModelOf();
-  const cfgHash = modelConfigHashOf(ctx);
+  const { provider, model } = await providerModelOf();
+  const cfgHash = await modelConfigHashOf(ctx);
   const common = { documentId: params.documentId, granularity: params.granularity, provider, model, modelConfigHash: cfgHash };
   const budget = maxCallsOf(ctx);
   // v48.13 P4（D46）：「增量深化」= **以已存地图为基底的作用域受限 generate**。复用同一条管线、
@@ -917,7 +920,7 @@ async function generate(ctx, params, runId) {
     const mergeCalls = resolved.filter((c) => c.runKind === "merge");
     const globalCalls = resolved.filter((c) => c.runKind === "global");
 
-    const est = preview(ctx, params);
+    const est = await preview(ctx, params);
     // v48.13 P4：深化的计划量由调用方实测给出（目标节点的分片数 + 1 次增量评审），不用全量预估充数
     const plannedCalls = plannedCallsFor(deepenOnly, params, est);
     ctx.db.updateMaterialMapRun(run.id, {

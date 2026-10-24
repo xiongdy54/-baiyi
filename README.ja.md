@@ -7,8 +7,8 @@
 **ローカルファーストのインクリメンタルリーディング・スタジオ —— 読んで、抜き書きして、記憶する。**
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6)](#はじめに)
-[![Electron](https://img.shields.io/badge/Electron-31-47848F)](https://www.electronjs.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%2064--bit%20%28x64%20%2F%20ARM64%29-0078D6)](#はじめに)
+[![Electron](https://img.shields.io/badge/Electron-45-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](https://www.typescriptlang.org/)
 ![Local-first](https://img.shields.io/badge/local--first-100%25%20offline-2EA043)
@@ -124,7 +124,7 @@ flowchart LR
 
 | レイヤー | 採用技術 |
 | --- | --- |
-| デスクトップシェル | Electron 31 + Vite 6 |
+| デスクトップシェル | Electron 45 + Vite 6 |
 | フロントエンド | React 18 + TypeScript（strict モード） |
 | 閲読カーネル | foliate-js（vendor 固定スナップショット）+ 防腐層、CFI アンカー |
 | ストレージ | SQLite（better-sqlite3、WAL）、全書き込みをアトミックに永続化 |
@@ -137,7 +137,7 @@ flowchart LR
 
 ### ダウンロード
 
-[Releases](https://github.com/xiongdy54/Nutation/releases) ページから Windows インストーラを入手できます。ウィザード式でインストール先を選択可能。アンインストールしてもデータは削除されません。
+[Releases](https://github.com/xiongdy54/Nutation/releases) ページから Windows インストーラを入手できます。Nutation は **Windows 10/11 の 64 ビット（x64 / ARM64）** 専用です —— 32 ビット（ia32）版は提供されません（Electron 44 以降、Windows 32 ビットバイナリの提供が終了したため）。ウィザード式でインストール先を選択可能。アンインストールしてもデータは削除されません。
 
 ### ソースからビルド
 

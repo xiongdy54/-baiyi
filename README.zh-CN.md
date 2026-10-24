@@ -7,8 +7,8 @@
 **本地优先的渐进阅读学习软件 —— 阅读、摘录、记住。**
 
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6)](#快速开始)
-[![Electron](https://img.shields.io/badge/Electron-31-47848F)](https://www.electronjs.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%2064--bit%20%28x64%20%2F%20ARM64%29-0078D6)](#快速开始)
+[![Electron](https://img.shields.io/badge/Electron-45-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6)](https://www.typescriptlang.org/)
 ![Local-first](https://img.shields.io/badge/纯本地-100%25%20离线-2EA043)
@@ -134,7 +134,7 @@ flowchart LR
 
 ### 下载
 
-前往 [Releases](https://github.com/xiongdy54/Nutation/releases) 页面获取 Windows 安装包。向导式安装，可自选安装目录；卸载不会删除你的数据。
+前往 [Releases](https://github.com/xiongdy54/Nutation/releases) 页面获取 Windows 安装包。Nutation 需要 **Windows 10/11 64 位（x64 / ARM64）**——不提供 32 位（ia32）版本（Electron 44 起不再发布 Windows 32 位构建）。向导式安装，可自选安装目录；卸载不会删除你的数据。
 
 ### 从源码构建
 

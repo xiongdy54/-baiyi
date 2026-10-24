@@ -2,6 +2,14 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen,
 const path = require("path");
 const fs = require("fs");
 
+// C-24：Wayland 下无法程序化定位/改尺寸窗口（BrowserWindow 文档），结构图谱与捕获窗口依赖这些能力 → 默认走 XWayland。
+// 设置环境变量 NUTATION_WAYLAND=1 可强制原生 Wayland（仅用于测试）。
+// （Electron 38 起 --ozone-platform 默认 auto——Wayland 会话下默认即原生 Wayland，故须显式压回 x11。）
+if (process.platform === "linux" && process.env.NUTATION_WAYLAND !== "1" &&
+    !process.argv.some((a) => a.startsWith("--ozone-platform"))) {
+  app.commandLine.appendSwitch("ozone-platform", "x11");
+}
+
 // 测试隔离开关（仅 e2e/GUI 脚本设置 env 时生效）：词典导入/删除会写主库 dict_sources，
 // e2e 若共用真实 userData 会误删用户已装词典（2026-09-14 实测教训）——spawn 时传临时目录。
 // v34（M12 实测补记）：本块必须在 require("./db") **之前**——db.js 顶部 require 的 settingsStore
@@ -110,8 +118,12 @@ ipcMain.on("logs:rendererError", (_e, payload) => {
 });
 // C-09：CSP 拒绝兜底日志——EPUB 在 blob: iframe 内被拦的脚本，securitypolicyviolation 不冒泡到父文档
 // （实测），只在 Chromium console 里可见，故从 webContents 的 console-message 统一落盘。
+// C-24：Electron 35 起 console-message 的位置参数（level/message/line/sourceId）已弃用，改从
+// 事件对象取（`{ level, message, lineNumber, sourceId, frame }`，level 为字符串）；45 上旧形态仍
+// 可用但按文档迁移，防后续版本移除时 CSP 兜底日志静默失效。
 app.on("web-contents-created", (_event, contents) => {
-  contents.on("console-message", (_e, _level, message) => {
+  contents.on("console-message", (event) => {
+    const message = event.message;
     if (!/Content Security Policy/i.test(message)) return;
     if (/Electron Security Warning/.test(message)) return; // 无 CSP 时的开发期警告，不是违规记录
     try {
@@ -403,7 +415,19 @@ ipcMain.on("win:cardsChanged", (e) => {
   }
 });
 
-ipcMain.handle("library:list", () => listItems());
+// C-24（Electron 45）：渲染层挂载显著变快——书架首帧的 library:list 会抢在 initDb 的
+// addColumnIfMissing("library_items","author")（db.js D121 段）之前到达（v10.2「先建窗、库并行」
+// 的时序窗口；Electron 31 上渲染层从未赢过这场赛跑，45 上新库首启稳定复现
+// `no such column: li.author` → 空书架）。library:list 与 mindmap:pendingRuns（首帧图谱面板
+// 就会问「有无未完成运行」，新库的 material_map_runs 表也由 initDb 建）都在挂载期到达，
+// 在此统一加 ready 闸：initDb 成功后放行；
+// DB_TOO_NEW / initDb 抛错路径应用随即退出（whenReady 上抛），闸不解析无副作用。
+let resolveDbReadyGate;
+const dbReadyGate = new Promise((r) => { resolveDbReadyGate = r; });
+ipcMain.handle("library:list", async () => {
+  await dbReadyGate;
+  return listItems();
+});
 
 ipcMain.handle("library:createFromPaste", (_e, title, markdown) => {
   const md = String(markdown || "");
@@ -719,7 +743,7 @@ async function runExtractRerank() {
   const tpl = getPromptTemplate("extract-rerank");
   const sys = typeof tpl === "string" ? tpl : tpl && tpl.content;
   if (!sys) return { ok: false, usedAI: false, reason: "未播种 extract-rerank 提示词" };
-  const cfg = getAIConfig();
+  const cfg = await getAIConfig();
   if (cfg.preset !== "local" && !cfg.apiKey) return { ok: false, usedAI: false, reason: "未配置 AI Key（保持本地因子序）" };
   const callAI = async ({ candidates }) => {
     // v49.8（D182）：重排理由随界面语言——zh-CN 保持原样零变化，其余语言在 system 侧追加指令行
@@ -1017,8 +1041,8 @@ ipcMain.on("app:relaunch", () => {
 // ---------- AI 网关 ----------
 // §7.5「渲染层不持有明文 Key」：解密只发生在主进程，返回体剥掉 apiKey
 // （ai:setConfig 早就是 `const { apiKey, ...safe }` 的剥法，这里对齐；hasKey/preset/baseUrl/model 照旧）。
-ipcMain.handle("ai:getConfig", () => {
-  const { apiKey, ...safe } = getAIConfig();
+ipcMain.handle("ai:getConfig", async () => {
+  const { apiKey, ...safe } = await getAIConfig();
   return safe;
 });
 ipcMain.handle("ai:setConfig", (_e, partial) => setAIConfig(partial || {}));
@@ -1665,9 +1689,9 @@ const memoryCtx = () => ({
   readSettings,
   writeSettings,
   userData: app.getPath("userData"),
-  hasKey: () => {
+  hasKey: async () => {
     try {
-      const cfg = getAIConfig();
+      const cfg = await getAIConfig();
       return Boolean(cfg.hasKey) || cfg.preset === "local";
     } catch {
       return false;
@@ -1756,9 +1780,9 @@ const mindmapCtx = () => ({
   db: dbModule,
   readSettings,
   writeSettings,
-  hasKey: () => {
+  hasKey: async () => {
     try {
-      const cfg = getAIConfig();
+      const cfg = await getAIConfig();
       return Boolean(cfg.hasKey) || cfg.preset === "local";
     } catch {
       return false;
@@ -1780,7 +1804,11 @@ ipcMain.handle("mindmap:generate", (_e, params) =>
 // v48.13 P4：增量深化——「展开」是纯 UI（零调用），「深化」走这里创建后台任务
 ipcMain.handle("mindmap:deepen", (_e, params) => mindmapEngine.deepen(mindmapCtx(), params || {}));
 // v48.13 P3（D47）：可续跑运行——应用重启后发现未跑完的 run，供指示器提示「可继续生成」
-ipcMain.handle("mindmap:pendingRuns", () => dbModule.listResumableMaterialMapRuns());
+ipcMain.handle("mindmap:pendingRuns", async () => {
+  // C-24：首帧即到达的 db 依赖 IPC 之一（见 dbReadyGate 注释）——新库的表由 initDb 建
+  await dbReadyGate;
+  return dbModule.listResumableMaterialMapRuns();
+});
 ipcMain.handle("mindmap:cancel", (_e, runId) => {
   mindmapEngine.cancelRun(runId);
   return true;
@@ -1941,7 +1969,7 @@ ipcMain.handle("mindmap:graphNodeAnchors", (_e, p) => getMindmapEngineV2().graph
 // v46（M14-UM2，§4.18-7/8）：制卡记忆接地检索——Stage A 本地宽召回（memoryRetrieve 纯函数）。
 // 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；
 // 无 Key 也跳过（§6.7.3「无 Key 零检索」——检索结果只服务即将发出的 AI 调用）。
-ipcMain.handle("memory:retrieve", (_e, payload) => {
+ipcMain.handle("memory:retrieve", async (_e, payload) => {
   // v48.114（D159）：用户记忆暂时移除——接地检索恒回 disabled（调用方按「未开启」短路，零 AI 调用）。
   // 检索实现体原样保留在下方；重实装时删去本早退即可（契约 §4.18 / §6.7 冻结）。
   void payload;
@@ -1951,7 +1979,7 @@ ipcMain.handle("memory:retrieve", (_e, payload) => {
   const mctx = memoryCtx();
   const cfg = memoryTidy.readMemoryConfig(mctx);
   if (!cfg.enabled) return { ok: false, reason: "disabled", block: null, hitTopics: [] };
-  if (!mctx.hasKey()) return { ok: false, reason: "no-key", block: null, hitTopics: [] };
+  if (!(await mctx.hasKey())) return { ok: false, reason: "no-key", block: null, hitTopics: [] };
   const dir = memoryStore.resolveMemoryDir(mctx.userData);
   memoryStore.ensureTree(dir);
   const usage = memoryStore.usageStats(dir);
@@ -2203,6 +2231,8 @@ app.whenReady().then(async () => {
     }
     throw e;
   }
+  // C-24：放行 library:list 的启动闸（见 handler 注册处注释）
+  resolveDbReadyGate();
   // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
   // 导图对账）移入下一个宏任务——原实现它们与 initDb 共用同一连续宏任务（实测合成 ~730ms 启动空洞）；
   // 顺序与错误语义不变（各自 try/catch），只是不再拖长启动关键段。
