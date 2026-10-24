@@ -58,3 +58,10 @@ nsis:
   shortcutName: Nutation
   deleteAppDataOnUninstall: false # 卸载不删 userData（本地优先：数据归用户）
   artifactName: Nutation-${version}-win-${arch}-setup.${ext}
+# C-24（2026-10-24）：Linux 打包段——暂只有 Wayland 策略：executableArgs 写进 .desktop 启动项
+# （Exec 行跟 --ozone-platform=x11），与 electron/main.js 顶部的运行期开关双保险（报告 C-24 第 6 步；
+# appendSwitch 是否足够早生效、两者是否都需要，待 Wayland 实机验证 U-03）。
+# 完整 Linux 打包矩阵（target/category/图标等）属 C-30，不在本项展开。
+linux:
+  executableArgs:
+    - --ozone-platform=x11

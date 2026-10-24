@@ -2,6 +2,14 @@ const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen,
 const path = require("path");
 const fs = require("fs");
 
+// C-24：Wayland 下无法程序化定位/改尺寸窗口（BrowserWindow 文档），结构图谱与捕获窗口依赖这些能力 → 默认走 XWayland。
+// 设置环境变量 NUTATION_WAYLAND=1 可强制原生 Wayland（仅用于测试）。
+// （Electron 38 起 --ozone-platform 默认 auto——Wayland 会话下默认即原生 Wayland，故须显式压回 x11。）
+if (process.platform === "linux" && process.env.NUTATION_WAYLAND !== "1" &&
+    !process.argv.some((a) => a.startsWith("--ozone-platform"))) {
+  app.commandLine.appendSwitch("ozone-platform", "x11");
+}
+
 // 测试隔离开关（仅 e2e/GUI 脚本设置 env 时生效）：词典导入/删除会写主库 dict_sources，
 // e2e 若共用真实 userData 会误删用户已装词典（2026-09-14 实测教训）——spawn 时传临时目录。
 // v34（M12 实测补记）：本块必须在 require("./db") **之前**——db.js 顶部 require 的 settingsStore
