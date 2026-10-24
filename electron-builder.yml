@@ -33,10 +33,10 @@ asarUnpack:
   - electron/icon.ico
   # v49.14（D187）：主题跟随图标（icon-light/dark.png + tray-black/white.ico）运行时原生读取
   - electron/icons/**
-# NAPI 预编译（fsrs-rs-nodejs-win32-x64-msvc）与 WASM（sql.js）均无需按 Electron ABI 重编。
-# D137（v48.92）：better-sqlite3 是 per-ABI 原生模块，必须按 Electron ABI 就位 → npmRebuild true；
-# @electron/rebuild 对 prebuild-install 型模块直接带 electron 运行时参数拉预编译，须带镜像 env
-# npm_config_better_sqlite3_binary_host_mirror（见 docs/BETTER-SQLITE3-PACKAGING.md，免网保底路径亦在其中）。
+# C-24（D207，2026-10-24）：better-sqlite3 升 v13（NAPI）——预编译内置 npm tarball（prebuilds/），
+# 同一二进制跨 Node / Electron 通用，与 fsrs-rs-nodejs（NAPI）、sql.js（WASM）一样无需按 ABI 重编；
+# per-ABI 拉取（prebuild-install + npmmirror 镜像 env）路线随 v12 退役（Electron 45 无 v12 预编译）。
+# 见 docs/BETTER-SQLITE3-PACKAGING.md。
 npmRebuild: true
 compression: normal
 win:
