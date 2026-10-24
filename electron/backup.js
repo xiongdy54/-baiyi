@@ -807,10 +807,12 @@ async function restoreBackup(file, opts = {}) {
 // 启动时（initDb 之前）检查标记：把 staging 换入数据目录。返回 false=无待恢复
 // C-13：设备相关设置不随恢复覆盖——settings.json 随备份整体换入时，会把另一台机器 /
 // 另一时期的设备相关值带进来。换入前先读线上 settings，换入后把设备键写回（线上没设过的键
-// 也一并删掉，不让备份机残留值泄漏）。清单按报告第 4 步要求对实际代码核实，只保留真实存在的：
-//   app.backupDir（backup.js 备份位置）、app.closeToTray（D123 托盘）、
-//   app.globalShortcuts.autoLaunch（开机自启，quickCapture.js）；「窗口位置/尺寸」无持久化键。
-const DEVICE_KEYS = ["backupDir", "closeToTray"];
+// 也一并删掉，不让备份机残留值泄漏）。
+// C-38d（审计）：设备键清单迁移到 electron/settingsLayers.js（设置分层唯一真源，含 layerOf 与
+// DEVICE_FILES）——本模块只消费 DEVICE_KEYS；app.globalShortcuts.autoLaunch（开机自启，
+// quickCapture.js）仍由下方嵌套特判保留（它是嵌套对象键，不在 DEVICE_KEYS 平铺清单里）；
+// 「窗口位置/尺寸」无持久化键。
+const { DEVICE_KEYS } = require("./settingsLayers");
 
 function writeSettingsJsonAtomic(file, value) {
   const tmp = file + ".tmp";
