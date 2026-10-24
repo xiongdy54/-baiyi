@@ -240,7 +240,9 @@ function applyPendingFit(w) {
   }
 }
 
-/** D204：窗口 bounds 缓动曲线，与渲染层宿主反向位移使用同一条 cubic-bezier(.2,.7,.2,1)。 */
+/** D204：窗口 bounds 缓动曲线，与渲染层宿主反向位移使用同一条 cubic-bezier(.2,.7,.2,1)。
+ * C-32 A4：与 src/theme.css 的 --mm-ease Token 保持一致，两处注释互相指向；主进程读不到 CSS，
+ * 曲线以本常量为准（皮肤覆盖 --mm-ease 只影响渲染层 CSS 过渡，窗口缓动仍用这里）——改这里须同步 Token。 */
 const EASE = [0.2, 0.7, 0.2, 1];
 function easeAt(t) {
   const [x1, y1, x2, y2] = EASE;
@@ -280,6 +282,7 @@ function stopBoundsAnim(finish) {
 function animateBounds(w, from, to, ms = 180) {
   stopBoundsAnim(false);
   const t0 = Date.now();
+  let boundsCount = 0; // C-32 A1：本次缓动的 setBounds 次数（逐帧 + 收尾）
   const timer = setInterval(() => {
     if (!win || win.isDestroyed() || win !== w) {
       stopBoundsAnim(false);
@@ -293,11 +296,12 @@ function animateBounds(w, from, to, ms = 180) {
       width: Math.max(1, Math.round(from.width + (to.width - from.width) * e)),
       height: Math.max(1, Math.round(from.height + (to.height - from.height) * e)),
     };
-    try { w.setBounds(b, false); } catch { /* 定位失败不阻塞 */ }
+    try { w.setBounds(b, false); boundsCount++; } catch { /* 定位失败不阻塞 */ }
     if (p >= 1) {
       clearInterval(timer);
       boundsAnim = null;
-      try { w.setBounds(to, false); } catch { /* ignore */ }
+      try { w.setBounds(to, false); boundsCount++; } catch { /* ignore */ }
+      console.log("[lens] setBounds x" + boundsCount); // C-32 A1：逐帧 setBounds 计数（C-33 Phase B 的基线）
     }
   }, 16);
   boundsAnim = { timer, win: w, to: { ...to } };

@@ -28,6 +28,58 @@ export const MOTION = {
   throttle: 250,
 } as const;
 
+/** 一次过渡实际生效的动效时长（ms；C-32 A4 起来自 CSS Token，读不到时＝MOTION 常量） */
+export interface MotionTiming {
+  move: number;
+  enter: number;
+  exit: number;
+}
+
+/**
+ * C-32 A4：动效时长读自主题 Token（--mm-move / --mm-enter / --mm-exit，见 src/theme.css 动效段），
+ * 皮肤可覆盖——每次开始过渡（planTransition）读取一次，换肤后自然生效。
+ * 单位：ms 或 s（CSS 产物压缩会把 260ms 归一成 .26s——必须按单位换算，否则过渡会被读成 0.26ms）；
+ * 读不到 / 非法 / 无 DOM（node 测试）时回落 MOTION 常量。曲线 Token --mm-ease 由 CSS 消费；
+ * 主进程 lensWindow.js 的 EASE（D204 窗口缓动）与其保持一致，两处注释互相指向。
+ */
+export function readMotion(): MotionTiming {
+  try {
+    const cs = typeof document !== "undefined" && typeof getComputedStyle === "function" && document.documentElement
+      ? getComputedStyle(document.documentElement)
+      : null;
+    const num = (name: string, fallback: number): number => {
+      if (!cs) return fallback;
+      const raw = (cs.getPropertyValue(name) || "").trim();
+      if (!raw) return fallback;
+      const v = parseFloat(raw);
+      if (!Number.isFinite(v) || v <= 0) return fallback;
+      return /s$/i.test(raw) && !/ms$/i.test(raw) ? v * 1000 : v;
+    };
+    return { move: num("--mm-move", MOTION.move), enter: num("--mm-enter", MOTION.enter), exit: num("--mm-exit", MOTION.exit) };
+  } catch {
+    return { move: MOTION.move, enter: MOTION.enter, exit: MOTION.exit };
+  }
+}
+
+/**
+ * C-32 A5：应用动效三态解析（原 MindmapCanvasV2 的 prefersReducedMotion() 布尔值升级）。
+ * body 含 motion-off → "off"（直接跳到终态）；含 motion-reduced → "reduced"（时长减半、只做透明度过渡）；
+ * 否则看系统 prefers-reduced-motion（命中＝"off"，与既有行为一致）；都不是 → "full"。
+ * body 类由主窗口 / 独立窗口的外观挂载点统一落（readAppearance → applyAppearanceToDocument，C-31）。
+ */
+export function motionPreference(): "off" | "reduced" | "full" {
+  try {
+    const cls = typeof document !== "undefined" && document.body ? document.body.classList : null;
+    if (cls) {
+      if (cls.contains("motion-off")) return "off";
+      if (cls.contains("motion-reduced")) return "reduced";
+    }
+    return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "off" : "full";
+  } catch {
+    return "full";
+  }
+}
+
 export const LOD = {
   /** 低于此缩放启用摘要卡 */
   zoom: 0.5,
@@ -130,7 +182,10 @@ export interface TransitionOptions {
   view: View;
   /** S3 锚点（用户操作的节点；流式整图时传根或当前聚焦节点）；null = 不补偿 */
   anchorId?: string | null;
+  /** 旧开关（系统 prefers-reduced-motion 的旧语义＝瞬时）；与 motionMode 并存，true 视同 "off" */
   reducedMotion?: boolean;
+  /** C-32 A5：应用动效三态——off＝直接跳终态；reduced＝时长减半、只做透明度过渡；full＝完整动画 */
+  motionMode?: "off" | "reduced" | "full";
 }
 
 export interface Transition {
@@ -143,13 +198,30 @@ export interface Transition {
   viewTo: View;
   /** 0 = 瞬时（reduced-motion 或首帧） */
   duration: number;
+  /** C-32 A4：本过渡生效的时长档（planTransition 开始时读一次 CSS Token）；缺省＝MOTION 常量 */
+  motion?: MotionTiming;
 }
 
 export function planTransition(prev: Display | null, next: Display, opts: TransitionOptions): Transition {
-  const instant = !!opts.reducedMotion || !prev;
+  const instant = !!opts.reducedMotion || opts.motionMode === "off" || !prev;
   const pm = parentMap(next);
   const from: Record<string, AnimRect> = {};
   const enter: string[] = [];
+  if (opts.motionMode === "reduced" && !instant) {
+    // C-32 A5「只做透明度过渡」：几何直接到终态（无位移），入场原地淡入（o=0）、离场原地淡出，视图不动；
+    // 时长取 Token 三档最大值的一半。
+    for (const it of next.items) {
+      const p = prev ? prev.byId[it.id] : undefined;
+      if (p) from[it.id] = { x: it.x, y: it.y, w: it.w, h: it.h, o: 1 };
+      else {
+        from[it.id] = { x: it.x, y: it.y, w: it.w, h: it.h, o: 0 };
+        enter.push(it.id);
+      }
+    }
+    const motion = readMotion();
+    const duration = Math.ceil(Math.max(motion.move, motion.enter, motion.exit) / 2);
+    return { to: next, from, enter, leaving: prev ? prev.items.filter((it) => !next.byId[it.id]) : [], viewFrom: { ...opts.view }, viewTo: { ...opts.view }, duration, motion };
+  }
   for (const it of next.items) {
     const p = prev ? prev.byId[it.id] : undefined;
     if (p) from[it.id] = { x: p.x, y: p.y, w: p.w, h: p.h, o: 1 };
@@ -164,8 +236,9 @@ export function planTransition(prev: Display | null, next: Display, opts: Transi
   if (prev && a && prev.byId[a] && next.byId[a]) {
     viewTo = compensateView(screenOf(prev.byId[a], opts.view), next.byId[a], opts.view);
   }
-  const duration = instant ? 0 : Math.max(MOTION.move, MOTION.enter, MOTION.exit);
-  return { to: next, from, enter, leaving, viewFrom: { ...opts.view }, viewTo, duration };
+  const motion = readMotion();
+  const duration = instant ? 0 : Math.max(motion.move, motion.enter, motion.exit);
+  return { to: next, from, enter, leaving, viewFrom: { ...opts.view }, viewTo, duration, motion };
 }
 
 export interface TransitionFrame {
@@ -182,9 +255,10 @@ export function transitionFrame(tr: Transition, elapsedMs: number): TransitionFr
   const D = tr.duration;
   const t = Math.max(0, elapsedMs);
   if (D <= 0 || t >= D) return { display: tr.to, opacity: {}, leaving: [], view: { ...tr.viewTo }, done: true };
-  const eMove = easeOut(t / MOTION.move);
-  const eEnter = easeOut(t / MOTION.enter);
-  const eExit = easeOut(t / MOTION.exit);
+  const M = tr.motion ?? MOTION; // C-32 A4：时长来自 planTransition 读取的 Token 档
+  const eMove = easeOut(t / M.move);
+  const eEnter = easeOut(t / M.enter);
+  const eExit = easeOut(t / M.exit);
   const items: DisplayItem[] = [];
   const byId: Record<string, DisplayItem> = {};
   const opacity: Record<string, number> = {};

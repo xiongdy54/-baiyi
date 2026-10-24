@@ -9,10 +9,11 @@ import DOMPurify from "dompurify";
 import type { GraphState, PatternKey, RelCode } from "../../../lib/mindmap/v2/types";
 import { ROOT_ID } from "../../../lib/mindmap/v2/types";
 import { createLayoutCache, layoutGraph, type Display } from "../../../lib/mindmap/v2/layout";
-import { routeRelations, REL_STYLE } from "../../../lib/mindmap/v2/route";
+import { routeRelations, REL_STYLE, type RouteResult } from "../../../lib/mindmap/v2/route";
 import { buildCanvasSvg, type SvgLabels } from "../../../lib/mindmap/v2/svg";
 import {
   growthScope,
+  motionPreference,
   lodFrames,
   LOD,
   monotoneFrames,
@@ -24,6 +25,7 @@ import {
   type Transition,
   type View,
 } from "../../../lib/mindmap/v2/animate";
+import { perfEnd, perfFrame } from "../../../lib/mindmap/v2/perf";
 import { HOW_NAMES, PATTERN_NAMES, type PatternHow, type PatternLocks } from "../../../lib/mindmap/v2/pattern";
 import { useT } from "../../../lib/i18n";
 
@@ -86,20 +88,23 @@ export interface MindmapCanvasV2Props {
   rootType?: string;
 }
 
+/** C-32 A6：过渡期间的关系线占位（空路由结果）——结构线由 display.edges 直接绘制不受影响；
+ * 过渡帧跳过整段关系路由（障碍碰撞 / 通道搜索是每帧大头），过渡结束的最后一帧完整绘制。 */
+const EMPTY_ROUTE: RouteResult = {
+  edges: [],
+  byId: {},
+  crossCount: {},
+  focus: null,
+  policy: { relAll: false, hovered: null, selected: null, focus: false, zoom: 1 },
+  stats: { intra: 0, cross: 0, crossRaw: 0, routed: 0, direct: 0, channel: 0, search: 0, blocked: 0 },
+};
+
 const ZMIN = 0.1;
 const ZMAX = 2.5;
 /** 适配窗口时的最低缩放（低于 0.5 走 LOD 摘要卡，0.35 仍能看清框标题） */
 const FIT_MIN = 0.35;
 const HOVER_PREFETCH_MS = 400;
 const FRESH_MS = 1200;
-
-function prefersReducedMotion(): boolean {
-  try {
-    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  } catch {
-    return false;
-  }
-}
 
 function sameGeometry(a: Display, b: Display): boolean {
   if (a.items.length !== b.items.length || a.edges.length !== b.edges.length) return false;
@@ -128,6 +133,8 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
   const targetRef = useRef<Display | null>(null); // 最近一次布局终态
   const shownRef = useRef<Display | null>(null); // 当前帧（插值中）
   const trRef = useRef<{ tr: Transition; t0: number; epoch: number } | null>(null);
+  /** C-32 A1：过渡上一帧的时刻（perfFrame 记相邻过渡帧间隔；无过渡/终帧时置空） */
+  const transPrevRef = useRef<number | null>(null);
   /** 用户每次主动改视图（拖动 / 滚轮 / 适配 / 居中）+1；过渡动画只在规划后用户没动过视图时才接管视图（否则与拖动打架） */
   const viewEpochRef = useRef(0);
   const frameOpRef = useRef<{ opacity: Record<string, number>; leaving: ReturnType<typeof transitionFrame>["leaving"] }>({ opacity: {}, leaving: [] });
@@ -195,7 +202,11 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       return;
     }
     contentKeyRef.current = key;
-    const routed = routeRelations(p.graph, d, {
+    // C-32 A6：过渡期间（trRef 非空）传空路由结果——关系线整段淡出（可见变化，报告 C-32 明示），
+    // 最后一帧（过渡已结束）完整绘制。可见变化：展开/收起的约 0.25s 内关系线暂时消失。
+    const routed = trRef.current
+      ? EMPTY_ROUTE
+      : routeRelations(p.graph, d, {
       relAll: p.relAll,
       hovered,
       selected: p.selectedId,
@@ -224,7 +235,17 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         shownRef.current = f.display;
         if (cur.epoch === viewEpochRef.current) viewRef.current = f.view;
         frameOpRef.current = { opacity: f.opacity, leaving: f.leaving };
-        if (f.done) trRef.current = null;
+        if (f.done) {
+          trRef.current = null;
+          transPrevRef.current = null;
+          perfEnd(); // C-32 A1：过渡结束＝测量窗终点（perf 未开启时无操作）
+        } else {
+          const prev = transPrevRef.current;
+          if (prev != null) perfFrame(now - prev); // C-32 A1：相邻过渡帧间隔
+          transPrevRef.current = now;
+        }
+      } else {
+        transPrevRef.current = null;
       }
       paint();
       if (trRef.current) rafRef.current = requestAnimationFrame(tick);
@@ -277,7 +298,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       requestPaint();
       return;
     }
-    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.viewAnchor === false ? null : p.anchorId, reducedMotion: prefersReducedMotion() });
+    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.viewAnchor === false ? null : p.anchorId, motionMode: motionPreference() }); // C-32 A5：应用动效三态（body 类优先，其次系统设置）
     if (prev) {
       const enteredCards = tr.enter.filter((id) => d.byId[id] && d.byId[id].kind === "card");
       if (enteredCards.length) {
@@ -314,6 +335,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     sizesRef.current = {};
     shownRef.current = null;
     targetRef.current = null;
+    if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
     trRef.current = null;
     userMovedRef.current = false;
     setLodExpanded(new Set());
@@ -368,6 +390,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       fit() {
         userMovedRef.current = false;
         viewEpochRef.current++;
+        if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
         if (targetRef.current) shownRef.current = targetRef.current;
         fitTo(targetRef.current);
@@ -430,6 +453,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         const k = Number.isFinite(scale) && scale > 0 ? scale : 1;
         userMovedRef.current = true;
         viewEpochRef.current++;
+        if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
         frameOpRef.current = { opacity: {}, leaving: [] };
         if (targetRef.current) shownRef.current = targetRef.current;
@@ -439,6 +463,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       autoFit() {
         userMovedRef.current = false;
         viewEpochRef.current++;
+        if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
         frameOpRef.current = { opacity: {}, leaving: [] };
         if (targetRef.current) shownRef.current = targetRef.current;

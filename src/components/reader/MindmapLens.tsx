@@ -17,8 +17,9 @@ import type { GraphState, V2Edge, V2Node, PatternKey } from "../../lib/mindmap/v
 import { ROOT_ID } from "../../lib/mindmap/v2/types";
 import { ancestors, applyDelta, childrenOf, createGraph, setView } from "../../lib/mindmap/v2/graph";
 import { groupFacts, selectPattern, HOW_NAMES, PATTERN_NAMES, type PatternHow } from "../../lib/mindmap/v2/pattern";
-import { createLayoutCache, layoutGraph, type Display } from "../../lib/mindmap/v2/layout";
-import { chooseFocus, computeFit, LENS_PAD_SIDE, LENS_PAD_TOP } from "../../lib/lensWindowFit";
+import { createLayoutCache, layoutGraph, type Display, type LayoutCache } from "../../lib/mindmap/v2/layout";
+import { perfBegin, perfIpc, perfLayout, perfOn } from "../../lib/mindmap/v2/perf";
+import { chooseFocusBinary, computeFit, LENS_PAD_SIDE, LENS_PAD_TOP } from "../../lib/lensWindowFit";
 import MindmapCanvasV2, { type MindmapCanvasHandle } from "./mindmap/MindmapCanvasV2";
 import { mindmapV2Api, type GraphLocate, type MindmapDelta, type NodeAnchor } from "../../lib/mindmapV2";
 import { ensureFed, resetFeed, subscribeFeed, type FeedState } from "../../lib/mindmapFeed";
@@ -452,8 +453,12 @@ export default function MindmapLens({
   const rootTitle = cutNode?.title || graph?.meta?.title || title;
   const rootType = cutNode?.type ? String(cutNode.type) : "";
   const measureGraph = useCallback(
-    (g: GraphState, maxChildren?: Readonly<Record<string, number>>, noLod?: boolean) => {
-      const d = layoutGraph(g, { cache: createLayoutCache(), locks: {}, frameLabel, rootTitle, maxChildren, noLod });
+    (g: GraphState, maxChildren?: Readonly<Record<string, number>>, noLod?: boolean, cache?: LayoutCache) => {
+      const timed = perfOn(); // C-32 A1：布局计时（perf 开启时计入当前测量窗）
+      const t0 = timed ? performance.now() : 0;
+      // C-32 A2：cache 由调用方传入（requestFit 内所有 measureGraph 共用一个）；缺省＝每次新缓存（原行为）
+      const d = layoutGraph(g, { cache: cache ?? createLayoutCache(), locks: {}, frameLabel, rootTitle, maxChildren, noLod });
+      if (timed) perfLayout(performance.now() - t0);
       return { d, content: { w: d.bounds.w, h: d.bounds.h } };
     },
     [frameLabel, rootTitle],
@@ -548,6 +553,18 @@ export default function MindmapLens({
     }
     const expandReq = pending ? { anchorScreen: pending.anchorScreen, animate: true as const } : {};
     const pinId = pending?.nodeId ?? null;
+    // C-32 A2：本次 fit 请求内所有 measureGraph 调用共用一个布局缓存（子树复用；等价性闸门见
+    // tests/m15v2.lensfit-cache.test.cjs——共享与新缓存的布局结果逐字节全等）
+    const fitCache = createLayoutCache();
+    // C-32 A1：fit IPC 前后计时（perf 开启时计入当前测量窗；本地兜底同样计入）
+    const fitTimed = async (req: LensFitRequest) => {
+      const t0 = perfOn() ? performance.now() : 0;
+      try {
+        return await callFit(req);
+      } finally {
+        if (t0) perfIpc(performance.now() - t0);
+      }
+    };
     try {
       const view = canvasRef.current?.getView();
       const current = view
@@ -560,10 +577,10 @@ export default function MindmapLens({
       };
 
       if (showAll) {
-        const m = measureGraph(allGraph ?? lensGraph, undefined, true);
+        const m = measureGraph(allGraph ?? lensGraph, undefined, true, fitCache);
         const key = `all|${m.content.w}x${m.content.h}`;
         if (fitted && lastFitRef.current === key) return;
-        const r = await callFit({ content: m.content, anchor: anchorOf(m.d), current, mode: "all", ...expandReq });
+        const r = await fitTimed({ content: m.content, anchor: anchorOf(m.d), current, mode: "all", ...expandReq });
         if (token !== fitSeqRef.current) return;
         setFitState({ scale: r.scale, tier: r.tier, content: m.content, bounds: r.bounds });
         setFocusN(null);
@@ -573,16 +590,16 @@ export default function MindmapLens({
         return;
       }
 
-      const base = measureGraph(lensGraph, undefined, true);
+      const base = measureGraph(lensGraph, undefined, true, fitCache);
       const baseKey = `auto|${base.content.w}x${base.content.h}`;
       if (fitted && lastFitRef.current === baseKey) return;
-      const probe = await callFit({ content: base.content, anchor: anchorOf(base.d), current, mode: "fit", ...expandReq });
+      const probe = await fitTimed({ content: base.content, anchor: anchorOf(base.d), current, mode: "fit", ...expandReq });
       if (token !== fitSeqRef.current) return;
       const total = rootKids.length;
       if (!readingId || probe.tier !== "focus" || total <= 1) {
         // 完整内容放得下（或没有可裁剪的子项）：按探测结果落窗；total<=1 时强制聚焦口径
         const r = probe.tier === "focus"
-          ? await callFit({ content: base.content, anchor: anchorOf(base.d), current, mode: "focus", ...expandReq })
+          ? await fitTimed({ content: base.content, anchor: anchorOf(base.d), current, mode: "focus", ...expandReq })
           : probe;
         if (token !== fitSeqRef.current) return;
         setFitState({ scale: r.scale, tier: r.tier, content: base.content, bounds: r.bounds });
@@ -594,9 +611,9 @@ export default function MindmapLens({
       }
 
       const fg = focusGraph ?? lensGraph;
-      const choice = chooseFocus({
+      const choice = chooseFocusBinary({ // C-32 A3：内容尺寸随 n 单调 ⇒ 二分（等价性闸门见 tests/lensWindowFit.binary.test.cjs）
         total,
-        measure: (n) => measureGraph(fg, { [ROOT_ID]: n }).content,
+        measure: (n) => measureGraph(fg, { [ROOT_ID]: n }, undefined, fitCache).content,
         workArea: probe.workArea,
       });
       const fkey = `focus|${choice.n}|${choice.content.w}x${choice.content.h}`;
@@ -604,8 +621,8 @@ export default function MindmapLens({
         setFocusN(choice.n);
         return;
       }
-      const fm = measureGraph(fg, { [ROOT_ID]: choice.n });
-      const r = await callFit({ content: fm.content, anchor: anchorOf(fm.d), current, mode: "focus", ...expandReq });
+      const fm = measureGraph(fg, { [ROOT_ID]: choice.n }, undefined, fitCache);
+      const r = await fitTimed({ content: fm.content, anchor: anchorOf(fm.d), current, mode: "focus", ...expandReq });
       if (token !== fitSeqRef.current) return;
       setFitState({ scale: r.scale, tier: r.tier, content: fm.content, bounds: r.bounds });
       setFocusN(choice.n);
@@ -741,8 +758,9 @@ export default function MindmapLens({
   const toggleCollapse = useCallback(
     (id: string) => {
       if (id === ROOT_ID) return;
-      markExpanding(id); // 在改 overrides / 布局之前捕获被点节点的旧屏幕位置
       const next = !collapsedRef.current.has(id);
+      perfBegin(next ? "expand" : "collapse"); // C-32 A1：用户点击展开/收起＝测量窗起点（过渡结束 perfEnd 落行）
+      markExpanding(id); // 在改 overrides / 布局之前捕获被点节点的旧屏幕位置
       setSel(id);
       setExplainFor(null);
       setOverrides((m) => new Map(m).set(id, next));
