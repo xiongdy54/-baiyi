@@ -2099,8 +2099,9 @@ function LogsSection() {
 // ---------- 软件更新（v49.6 / D180）：检查更新唯一 UI 入口（sec-updates） ----------
 // 状态快照与事件同构自 electron/updater.js（update:status / update:event）；
 // source 分流：github＝完整流程；store＝MSIX 包身份，商店托管更新（自更新禁用）；
-// dev＝开发模式；unconfigured＝打包时未写入更新源（占位 slug）。
-type UpdateSource = "github" | "store" | "dev" | "unconfigured";
+// dev＝开发模式；unconfigured＝打包时未写入更新源（占位 slug）；
+// unsupported＝Linux deb/rpm 安装不自更新（C-30，提示走软件包管理器）。
+type UpdateSource = "github" | "store" | "dev" | "unconfigured" | "unsupported";
 type UpdateStateName =
   | "idle"
   | "checking"
@@ -2153,7 +2154,8 @@ const UPDATE_SOURCE_HINT: Record<UpdateSource, string> = {
   github: "更新由 GitHub Releases 提供；发现新版本后需你确认才会下载与安装。",
   store: "当前版本由 Microsoft Store 安装，更新由商店自动管理，无需手动检查。",
   dev: "开发模式不检查更新。",
-  unconfigured: "打包时未写入更新源（发布前需在 electron-builder.yml 填写 GitHub 仓库并重新打包）。"
+  unconfigured: "打包时未写入更新源（发布前需在 electron-builder.yml 填写 GitHub 仓库并重新打包）。",
+  unsupported: "当前由系统软件包管理器（deb/rpm）安装，应用内不自更新，请通过软件包管理器更新。"
 };
 
 function UpdateSection() {

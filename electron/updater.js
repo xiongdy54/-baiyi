@@ -8,6 +8,9 @@
 // - 渠道分流（D180）：process.windowsStore（MSIX 包身份运行）＝Store 版，updater 全禁用
 //   （更新由 Microsoft Store 依 Partner Center 提交的包版本管理，应用不得也不需要自更新）；
 //   dev（!app.isPackaged）恒不检查；e2e 隔离进程（M7_TEST_USERDATA）同样不检查；
+//   C-30（2026-10-24）：Linux 非 AppImage（deb/rpm 安装，无 APPIMAGE env）＝unsupported，
+//   同样不自更新——设置页提示「请通过软件包管理器更新」（U-21：deb/rpm 的更新行为未确认前
+//   不尝试自更新）；AppImage 安装（APPIMAGE env 指向 .AppImage 自身）仍走 GitHub Releases 渠道。
 // - 失败静默降级：只记日志与状态快照，不弹系统对话框、不阻塞任何业务路径。
 //
 // IPC（本模块注册，先例＝pluginHost）：update:status / update:check / update:download / update:install；
@@ -44,10 +47,13 @@ function loadAutoUpdater() {
   return autoUpdaterRef;
 }
 
-// 更新渠道判定（D180）：dev / store / unconfigured / github
+// 更新渠道判定（D180）：dev / store / unconfigured / github；C-30 增 unsupported（Linux deb/rpm）
 function source() {
   if (!app.isPackaged) return "dev";
   if (process.windowsStore) return "store";
+  // C-30（2026-10-24，报告第 4 步）：Linux 只有 AppImage 是 electron-updater 的更新目标；
+  // deb/rpm 安装（无 APPIMAGE env）不自更新，设置页显示「请通过软件包管理器更新」。
+  if (process.platform === "linux" && !process.env.APPIMAGE) return "unsupported";
   // 打包版：electron-builder 依 publish 配置把更新源写进资源内 app-update.yml；缺失或
   // 仍是占位符 slug = 未配置（检查会 404，提前判定避免误报「检查失败」）
   try {

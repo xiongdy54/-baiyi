@@ -23,7 +23,7 @@ export const BACKUP_STALE_DAYS = 7;
 const DAY_MS = 86_400_000;
 
 export interface SettingsNoticesInput {
-  /** update:status 快照的 state（github 渠道的状态机；store/dev/unconfigured 不产通知） */
+  /** update:status 快照的 state（github 渠道的状态机；store/dev/unconfigured/unsupported 不产通知） */
   updateState?: string | null;
   updateVersion?: string | null;
   updateError?: string | null;

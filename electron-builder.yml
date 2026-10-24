@@ -17,7 +17,7 @@ publish:
 directories:
   # vite 的 renderer 产物占用 dist/（D6：dist 存在则优先加载），打包产物必须另立目录，禁止混用。
   output: release
-  buildResources: build # electron-builder 惯例目录，仓库已有 build/icon.ico（多尺寸 256px）
+  buildResources: build # electron-builder 惯例目录；C-30（2026-10-24）起 icon.png = 1024 源图（SVG 留档 icon.svg），icon.ico 多尺寸 256…16
 files:
   # 精确清单：renderer 产物（含 public 拷贝的 pdfjs/favicon）+ 主进程 + vendor 阅读内核快照。
   # package.json 由 electron-builder 自动打入（剥离 devDependencies）。
@@ -37,13 +37,18 @@ asarUnpack:
 # 同一二进制跨 Node / Electron 通用，与 fsrs-rs-nodejs（NAPI）、sql.js（WASM）一样无需按 ABI 重编；
 # per-ABI 拉取（prebuild-install + npmmirror 镜像 env）路线随 v12 退役（Electron 45 无 v12 预编译）。
 # 见 docs/BETTER-SQLITE3-PACKAGING.md。
-npmRebuild: true
+# C-30（2026-10-24）：npmRebuild 关闭——v13 NAPI 预编译已内置全平台/全架构二进制
+# （prebuilds/{darwin,linux,linuxmusl,win32}-{x64,arm64}.node，运行时按 process.platform/arch 自选，
+# 见 node_modules/better-sqlite3/lib/binding.js 的 getPrebuildPath），rebuild 只会触发无意义的
+# 源码编译：本机 win-arm64 与 CI linux-arm64 交叉编译都会因缺少对应工具链失败（dist:win 实测）。
+npmRebuild: false
 compression: normal
 win:
   target:
     - target: nsis
       arch:
         - x64
+        - arm64 # D-01（2026-10-24 用户拍板）：放弃 ia32，Windows 出 x64 + arm64
   icon: build/icon.ico
 nsis:
   # 向导式安装：允许自选安装目录、允许用户决定是否创建快捷方式（已确认决策）
@@ -58,10 +63,44 @@ nsis:
   shortcutName: Nutation
   deleteAppDataOnUninstall: false # 卸载不删 userData（本地优先：数据归用户）
   artifactName: Nutation-${version}-win-${arch}-setup.${ext}
-# C-24（2026-10-24）：Linux 打包段——暂只有 Wayland 策略：executableArgs 写进 .desktop 启动项
-# （Exec 行跟 --ozone-platform=x11），与 electron/main.js 顶部的运行期开关双保险（报告 C-24 第 6 步；
-# appendSwitch 是否足够早生效、两者是否都需要，待 Wayland 实机验证 U-03）。
-# 完整 Linux 打包矩阵（target/category/图标等）属 C-30，不在本项展开。
+# C-30（2026-10-24）：mac 打包段——dmg + zip 双架构（zip 供 electron-updater 的 mac 自动更新，
+# 与 app-update.yml 更新源配对）。hardenedRuntime + entitlements 是签名公证的前置布线：当前无证书
+# （U-16），CSC_LINK / APPLE_* 机密为空时 electron-builder 跳过签名，APPLE_* 为空时公证也跳过
+# （仅警告不失败，已按 app-builder-lib 26 的 notarizeIfProvided 实证）；CI 侧另设
+# CSC_IDENTITY_AUTO_DISCOVERY=false 双保险（.github/workflows/build.yml）。证书就绪后同一配置即生效。
+# icns 由 electron-builder 从 build/icon.png（1024 源图）自动生成，无需单独配置。
+mac:
+  category: public.app-category.education
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip # electron-updater 在 mac 上使用 zip 包
+      arch:
+        - x64
+        - arm64
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true # 读取 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID；为空时自动跳过
+# C-24（2026-10-24）：executableArgs 写进 .desktop 启动项（Exec 行跟 --ozone-platform=x11），
+# 与 electron/main.js 顶部的运行期开关双保险（报告 C-24 第 6 步；appendSwitch 是否足够早生效、
+# 两者是否都需要，待 Wayland 实机验证 U-03）。
+# C-30（2026-10-24）：Linux 打包矩阵——AppImage（electron-updater 主更新目标；deb/rpm 安装
+# 在 electron/updater.js 判为 unsupported，设置页提示走软件包管理器）+ deb，双架构；
+# category 与 mac 段对齐教育类。
 linux:
+  category: Education
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
   executableArgs:
     - --ozone-platform=x11
