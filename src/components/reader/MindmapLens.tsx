@@ -19,7 +19,7 @@ import { ancestors, applyDelta, childrenOf, createGraph, setView } from "../../l
 import { groupFacts, selectPattern, HOW_NAMES, PATTERN_NAMES, type PatternHow } from "../../lib/mindmap/v2/pattern";
 import { createLayoutCache, layoutGraph, type Display, type LayoutCache } from "../../lib/mindmap/v2/layout";
 import { perfBegin, perfIpc, perfLayout, perfOn } from "../../lib/mindmap/v2/perf";
-import { chooseFocus, computeFit, LENS_PAD_SIDE, LENS_PAD_TOP } from "../../lib/lensWindowFit";
+import { chooseFocusBinary, computeFit, LENS_PAD_SIDE, LENS_PAD_TOP } from "../../lib/lensWindowFit";
 import MindmapCanvasV2, { type MindmapCanvasHandle } from "./mindmap/MindmapCanvasV2";
 import { mindmapV2Api, type GraphLocate, type MindmapDelta, type NodeAnchor } from "../../lib/mindmapV2";
 import { ensureFed, resetFeed, subscribeFeed, type FeedState } from "../../lib/mindmapFeed";
@@ -611,7 +611,7 @@ export default function MindmapLens({
       }
 
       const fg = focusGraph ?? lensGraph;
-      const choice = chooseFocus({
+      const choice = chooseFocusBinary({ // C-32 A3：内容尺寸随 n 单调 ⇒ 二分（等价性闸门见 tests/lensWindowFit.binary.test.cjs）
         total,
         measure: (n) => measureGraph(fg, { [ROOT_ID]: n }, undefined, fitCache).content,
         workArea: probe.workArea,

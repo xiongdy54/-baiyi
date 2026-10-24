@@ -218,6 +218,7 @@ export function computeFit(input: LensFitInput): LensFitResult {
  * 聚焦档：从「全部 − 1」往下试，取第一个按 ≥ 0.62 放得下的 N；
  * N 个子项 + 一张合成的「另有 N 项」卡。N=1 仍放不下时按 0.62 兜底（fits=false）。
  * measure 由渲染层提供（用真实 layout bounds 量 n 个子项 + more 卡）。
+ * （C-32 A3 起渲染层改用 chooseFocusBinary——本函数保留作等价性测试的线性基准与回退实现。）
  */
 export function chooseFocus(input: {
   total: number;
@@ -239,4 +240,48 @@ export function chooseFocus(input: {
   }
   const content = input.measure(1, total - 1);
   return { n: 1, more: total - 1, content, scale: floor, fits: false };
+}
+
+/**
+ * 聚焦档二分查找（审计 C-32 A3）：内容尺寸随 n 单调不减 ⇒ fitScale 随 n 单调不增 ⇒「放得下」是单调谓词，
+ * 线性递减扫描（chooseFocus）可换成二分。测量次数：最好 1（top 直接放得下）、最坏 2 + ⌈log2(total−2)⌉。
+ * 合入前置＝与 chooseFocus 的结果完全一致（n / more / content / fits / scale）；等价性测试在
+ * tests/lensWindowFit.binary.test.cjs（现有 12 卡样张 + 50 张随机树的真实 layoutGraph 量测），任何不一致
+ * 就保留线性版本并回报。
+ */
+export function chooseFocusBinary(input: {
+  total: number;
+  measure: (visible: number, more: number) => LensSize;
+  workArea: LensRect;
+  floor?: number;
+}): FocusChoice {
+  const total = Math.max(1, Math.floor(input.total));
+  const floor = finite(input.floor) ? input.floor : LENS_FLOOR;
+  if (total <= 1) {
+    const content = input.measure(1, 0);
+    const s = fitScale(content, input.workArea);
+    return { n: 1, more: 0, content, scale: Math.max(floor, s), fits: s >= floor - EPS };
+  }
+  const fits = (content: LensSize) => fitScale(content, input.workArea) >= floor - EPS;
+  // 快路径①：最多子项直接放得下（边界贴近 total 时线性本就只测一次）
+  const top = input.measure(total - 1, 1);
+  if (fits(top)) return { n: total - 1, more: 1, content: top, scale: fitScale(top, input.workArea), fits: true };
+  // 快路径②：仅 1 项也放不下 → 与线性同款兜底
+  const one = input.measure(1, total - 1);
+  if (!fits(one)) return { n: 1, more: total - 1, content: one, scale: floor, fits: false };
+  // 不变式：fits(1)=true、fits(total−1)=false → 边界 ∈ [1, total−2]；lo 恒 fits、hi 恒不 fits
+  let lo = 1;
+  let loContent = one;
+  let hi = total - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    const content = input.measure(mid, total - mid);
+    if (fits(content)) {
+      lo = mid;
+      loContent = content;
+    } else {
+      hi = mid;
+    }
+  }
+  return { n: lo, more: total - lo, content: loContent, scale: fitScale(loContent, input.workArea), fits: true };
 }

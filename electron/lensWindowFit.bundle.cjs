@@ -34,6 +34,7 @@ __export(lensWindowFit_exports, {
   LENS_SEED_H: () => LENS_SEED_H,
   LENS_SEED_W: () => LENS_SEED_W,
   chooseFocus: () => chooseFocus,
+  chooseFocusBinary: () => chooseFocusBinary,
   computeFit: () => computeFit,
   fitScale: () => fitScale,
   lensLimits: () => lensLimits,
@@ -151,6 +152,34 @@ function chooseFocus(input) {
   const content = input.measure(1, total - 1);
   return { n: 1, more: total - 1, content, scale: floor, fits: false };
 }
+function chooseFocusBinary(input) {
+  const total = Math.max(1, Math.floor(input.total));
+  const floor = finite(input.floor) ? input.floor : LENS_FLOOR;
+  if (total <= 1) {
+    const content = input.measure(1, 0);
+    const s = fitScale(content, input.workArea);
+    return { n: 1, more: 0, content, scale: Math.max(floor, s), fits: s >= floor - EPS };
+  }
+  const fits = (content) => fitScale(content, input.workArea) >= floor - EPS;
+  const top = input.measure(total - 1, 1);
+  if (fits(top)) return { n: total - 1, more: 1, content: top, scale: fitScale(top, input.workArea), fits: true };
+  const one = input.measure(1, total - 1);
+  if (!fits(one)) return { n: 1, more: total - 1, content: one, scale: floor, fits: false };
+  let lo = 1;
+  let loContent = one;
+  let hi = total - 1;
+  while (hi - lo > 1) {
+    const mid = lo + hi >> 1;
+    const content = input.measure(mid, total - mid);
+    if (fits(content)) {
+      lo = mid;
+      loContent = content;
+    } else {
+      hi = mid;
+    }
+  }
+  return { n: lo, more: total - lo, content: loContent, scale: fitScale(loContent, input.workArea), fits: true };
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   LENS_FLOOR,
@@ -164,6 +193,7 @@ function chooseFocus(input) {
   LENS_SEED_H,
   LENS_SEED_W,
   chooseFocus,
+  chooseFocusBinary,
   computeFit,
   fitScale,
   lensLimits,
