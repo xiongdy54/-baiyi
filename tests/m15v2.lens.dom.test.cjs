@@ -148,13 +148,17 @@ console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
   let setOpen = null;
   let setVis = null;
   const fitCalls = [];
-  /** 结构图纸片窗口的假宿主：用真实 computeFit 算，workArea 固定 1228×811；窗口起点种子 568×216 */
+  /** 结构图纸片窗口的假宿主：用真实 computeFit 算，workArea 固定 1228×811；窗口起点种子 568×216。
+   *  C-33 B1：animate 落窗路径的响应附 prevBounds（落窗前窗口快照——假宿主窗口恒为种子矩形）。 */
   async function fakeFit(req) {
     fitCalls.push(JSON.parse(JSON.stringify(req)));
     const workArea = { x: 0, y: 0, width: 1228, height: 811 };
     const bounds = { x: 100, y: 100, width: 568, height: 216 };
-    const r = computeFit({ content: req.content, workArea, mode: req.mode, anchor: req.anchor, current: req.current, bounds });
-    return { scale: r.scale, bounds: r.bounds, workArea: r.workArea, clamped: r.clamped, tier: r.tier };
+    const r = computeFit({ content: req.content, workArea, mode: req.mode, anchor: req.anchor, current: req.current, anchorScreen: req.anchorScreen || null, bounds });
+    return {
+      scale: r.scale, bounds: r.bounds, workArea: r.workArea, clamped: r.clamped, tier: r.tier,
+      ...(req.animate === true ? { prevBounds: { ...bounds } } : {}),
+    };
   }
   function Host() {
     const [open, so] = React.useState(false);
@@ -341,7 +345,11 @@ console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
   );
   check("同比例展开不再 setViewScale（画布 viewport transform 不变，生长动画不被重置）", ($(".mm2-focus-canvas svg > g") || {}).getAttribute && $(".mm2-focus-canvas svg > g").getAttribute("transform") === viewBefore, { before: viewBefore, after: $(".mm2-focus-canvas svg > g") ? $(".mm2-focus-canvas svg > g").getAttribute("transform") : null });
   check("展开保留 planTransition 生长动画（新节点带刚到达虚线描边）", $$(".mm2-focus-canvas svg rect[stroke-dasharray]").length >= 1, $$(".mm2-focus-canvas svg rect[stroke-dasharray]").length);
-  check("窗口缓动期间宿主反向位移（translate）", /translate\(/.test(($(".lens-graph") || {}).style ? $(".lens-graph").style.transform : ""), ($(".lens-graph") || {}).style ? $(".lens-graph").style.transform : "");
+  check(
+    "展开落窗后宿主一次性补偿位移（C-33 B2：补偿量来自 fit 响应 prevBounds，resize 落点；观测点 data-mm2-win-comp）",
+    await until(() => !!$(".lens-graph") && /^-?[\d.]+,-?[\d.]+$/.test($(".lens-graph").dataset.mmWinComp || ""), 4000),
+    ($(".lens-graph") || {}).dataset ? $(".lens-graph").dataset.mmWinComp : "no-host",
+  );
   relocate("u1.xhtml", "【甲第2段】");
   await until(() => readId() === loc1.nodeId, 8000);
 

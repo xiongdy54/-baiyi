@@ -18,8 +18,9 @@ import { ROOT_ID } from "../../lib/mindmap/v2/types";
 import { ancestors, applyDelta, childrenOf, createGraph, setView } from "../../lib/mindmap/v2/graph";
 import { groupFacts, selectPattern, HOW_NAMES, PATTERN_NAMES, type PatternHow } from "../../lib/mindmap/v2/pattern";
 import { createLayoutCache, layoutGraph, type Display, type LayoutCache } from "../../lib/mindmap/v2/layout";
-import { perfBegin, perfIpc, perfLayout, perfOn } from "../../lib/mindmap/v2/perf";
-import { chooseFocusBinary, computeFit, LENS_PAD_SIDE, LENS_PAD_TOP } from "../../lib/lensWindowFit";
+import { perfBegin, perfIpc, perfLayout, perfOn, perfPinDeviation } from "../../lib/mindmap/v2/perf";
+import { motionPreference, readMotion } from "../../lib/mindmap/v2/animate";
+import { chooseFocusBinary, computeFit, fitScale, tierOf, LENS_PAD_BOTTOM, LENS_PAD_SIDE, LENS_PAD_TOP } from "../../lib/lensWindowFit";
 import MindmapCanvasV2, { type MindmapCanvasHandle } from "./mindmap/MindmapCanvasV2";
 import { mindmapV2Api, type GraphLocate, type MindmapDelta, type NodeAnchor } from "../../lib/mindmapV2";
 import { ensureFed, resetFeed, subscribeFeed, type FeedState } from "../../lib/mindmapFeed";
@@ -157,13 +158,38 @@ export default function MindmapLens({
   const [anchorEpoch, setAnchorEpoch] = useState(0);
   const explainJobRef = useRef<string | null>(null);
   const canvasRef = useRef<MindmapCanvasHandle>(null);
-  /** D204：图谱宿主（窗口缓动时做反向位移，让内容/被点节点在屏幕上不动） */
+  /** C-33：图谱宿主（窗口层过渡时承载一次性补偿位移；原 D204 逐帧反向位移已删） */
   const hostRef = useRef<HTMLDivElement>(null);
-  const growRaf = useRef<number | null>(null);
-  const growToken = useRef(0);
-  /** D204：下一次 fit 用哪颗节点的旧屏幕位置钉住（展开/收起/深挖） */
-  const pendingExpandRef = useRef<{ anchorScreen: { x: number; y: number }; nodeId: string } | null>(null);
+  /** C-33 B2/B3：纸片（窗口表面）——clip-path 从旧尺寸过渡到新尺寸 */
+  const paperRef = useRef<HTMLDivElement>(null);
+  /** C-33：窗口层过渡代次（新过渡/打断使旧回调过期）+ 待清理定时器 + 最近一次落窗 bounds（兜底） */
+  const winTransSeq = useRef(0);
+  const winTimers = useRef<number[]>([]);
+  const lastBoundsRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  /** D204/C-33：下一次 fit 用哪颗节点的旧屏幕位置钉住（展开/收起/深挖；C-33 起 dir 决定 B2/B3 编排） */
+  const pendingExpandRef = useRef<{
+    anchorScreen: { x: number; y: number };
+    /** C-33 B3：同一点的窗口内（client）坐标——收起预动画的目标换算用，不读 window.screenX */
+    anchorClient: { x: number; y: number };
+    nodeId: string;
+    dir: "expand" | "collapse";
+  } | null>(null);
   const pendingExpandTimer = useRef<number | null>(null);
+
+  /** C-33：复位窗口层过渡样式（文档切换 / 新过渡开始前调用；声明在前供文档切换 effect 使用） */
+  const clearWinTrans = useCallback(() => {
+    const host = hostRef.current;
+    const paper = paperRef.current;
+    if (host) {
+      host.style.transition = "";
+      host.style.transform = "";
+      delete host.dataset.mmWinComp;
+    }
+    if (paper) {
+      paper.style.transition = "";
+      paper.style.clipPath = "";
+    }
+  }, []);
 
   // ---------- 纸片窗口（D203） ----------
   const [showAll, setShowAll] = useState(false);
@@ -253,6 +279,10 @@ export default function MindmapLens({
 
   // 文档切换：清状态（窗口本身由主进程保留；渲染回到种子卡）
   useEffect(() => {
+    winTransSeq.current++; // C-33：作废在途窗口层过渡回调，样式复位
+    for (const t of winTimers.current) window.clearTimeout(t);
+    winTimers.current = [];
+    clearWinTrans();
     setLoc(null);
     setGraph(null);
     setBusy(null);
@@ -274,7 +304,7 @@ export default function MindmapLens({
     lastFitRef.current = "";
     anchorCache.current.clear();
     retriedRef.current = false;
-  }, [documentId, kernel]);
+  }, [documentId, kernel, clearWinTrans]);
 
   // 送原文（打开过结构图才送：送原文要逐章取文，不为不用的人白跑）
   useEffect(() => {
@@ -484,25 +514,37 @@ export default function MindmapLens({
   );
   const callFit = fit ?? fallbackFit;
 
-  /** D204：被点节点卡片中心在屏幕 DIP 的当前位置（改 overrides 之前调用）。 */
+  /** D204：被点节点卡片中心在屏幕 DIP 的当前位置（改 overrides 之前调用）。
+   * C-33：这是本文件唯一读 window.screenX/Y 的地方（计算点击位置）；窗口层过渡的补偿量一律来自
+   * 主进程 fit 响应的 prevBounds（B1），不再逐帧轮询。 */
   const captureNodeScreen = useCallback((id: string) => {
     try {
       const el = document.querySelector(`.mm2-focus-canvas svg g[data-node-id="${String(id)}"]`);
       const r = el?.getBoundingClientRect();
       if (!r || r.width <= 0 || r.height <= 0) return null;
-      return { x: Math.round(window.screenX + r.left + r.width / 2), y: Math.round(window.screenY + r.top + r.height / 2) };
+      return {
+        x: Math.round(window.screenX + r.left + r.width / 2),
+        y: Math.round(window.screenY + r.top + r.height / 2),
+        cx: r.left + r.width / 2, // C-33 B3：同一点的窗口内坐标（收起预动画目标换算用）
+        cy: r.top + r.height / 2,
+      };
     } catch {
       return null;
     }
   }, []);
 
-  const markExpanding = useCallback((id: string) => {
-    const anchorScreen = captureNodeScreen(id);
-    if (!anchorScreen) {
+  const markExpanding = useCallback((id: string, dir: "expand" | "collapse") => {
+    const cap = captureNodeScreen(id);
+    if (!cap) {
       pendingExpandRef.current = null;
       return;
     }
-    pendingExpandRef.current = { anchorScreen, nodeId: id };
+    pendingExpandRef.current = {
+      anchorScreen: { x: cap.x, y: cap.y },
+      anchorClient: { x: cap.cx, y: cap.cy },
+      nodeId: id,
+      dir,
+    };
     if (pendingExpandTimer.current != null) window.clearTimeout(pendingExpandTimer.current);
     pendingExpandTimer.current = window.setTimeout(() => {
       pendingExpandRef.current = null;
@@ -510,33 +552,223 @@ export default function MindmapLens({
     }, 30000);
   }, [captureNodeScreen]);
 
-  /**
-   * D204：窗口 bounds 正在缓动时，宿主按「目标原点 − 当前窗口原点」反向平移，
-   * 使内容（尤其被点节点）在整个缓动期间停在目标屏幕位置；窗口/纸片绕它生长。
-   */
-  const startHostFix = useCallback((target: { x: number; y: number }) => {
-    if (growRaf.current != null) cancelAnimationFrame(growRaf.current);
-    const token = ++growToken.current;
-    const t0 = performance.now();
-    const tick = () => {
-      if (token !== growToken.current) return;
-      const el = hostRef.current;
-      if (el) {
-        const dx = target.x - window.screenX;
-        const dy = target.y - window.screenY;
-        el.style.transform = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 ? "" : `translate(${dx}px, ${dy}px)`;
-      }
-      if (performance.now() - t0 < 280) growRaf.current = requestAnimationFrame(tick);
-      else {
-        growRaf.current = null;
-        if (hostRef.current) hostRef.current.style.transform = "";
-      }
-    };
-    growRaf.current = requestAnimationFrame(tick);
+  // ---------- 窗口层过渡（C-33 B2/B3/B4）----------
+  // D204 的逐帧方案（主进程 180ms 逐帧 setBounds × 渲染层每帧读 window.screenX 反向补偿）删除：
+  // 窗口在一次过渡中最多变 1 次（B1 一次 setBounds），看得见的动画全部在网页内用 CSS 完成
+  // （时长 var(--mm-move)、曲线 var(--mm-ease)，C-32 A4 Token；皮肤覆盖后下一场过渡自然生效），
+  // 补偿量用主进程返回的 prevBounds 确切值，不再轮询。
+
+  /** workArea 估计（仅渲染层本地估算用）：主进程落窗一律用真实值；window.screen 读不到时退 dom 测试同款默认 */
+  const estimateWorkArea = useCallback(() => {
+    try {
+      const scr = window.screen as Screen & { availLeft?: number; availTop?: number };
+      const wa = { x: scr.availLeft || 0, y: scr.availTop || 0, width: scr.availWidth || 0, height: scr.availHeight || 0 };
+      if (wa.width > 0 && wa.height > 0) return wa;
+    } catch {
+      /* 无 screen（node 测试） */
+    }
+    return { x: 0, y: 0, width: 1228, height: 811 };
   }, []);
 
+  /** 本次过渡生效的时长（ms）：motion-off=0；reduced=Token 一半（与画布 planTransition 同规）；full=Token */
+  const winMoveMs = useCallback(() => {
+    const m = readMotion().move;
+    return motionPreference() === "reduced" ? Math.ceil(m / 2) : m;
+  }, []);
+  const winDurCss = useCallback(
+    () => (motionPreference() === "reduced" ? "calc(var(--mm-move) / 2)" : "var(--mm-move)"),
+    [],
+  );
+  const hostTransCss = useCallback(() => `transform ${winDurCss()} var(--mm-ease)`, [winDurCss]);
+  const paperTransCss = useCallback(() => `clip-path ${winDurCss()} var(--mm-ease)`, [winDurCss]);
+
+  /** 验收：被点节点过渡前后屏幕位置偏差（报告线 ≤2px），写 __mmPerf.pinDeviationPx。
+   *  再等一个 Token 时长：画布 planTransition 可能被 S4 节流推迟，确保布局收敛后再量。 */
+  const schedulePinCheck = useCallback(
+    (pin: { nodeId: string }, before: { x: number; y: number } | null) => {
+      if (!before) return;
+      const t = window.setTimeout(() => {
+        const now = captureNodeScreen(pin.nodeId);
+        if (!now) return;
+        perfPinDeviation(Math.hypot(now.x - before.x, now.y - before.y));
+      }, winMoveMs() + 60);
+      winTimers.current.push(t);
+    },
+    [captureNodeScreen, winMoveMs],
+  );
+
+  /** resize 落点：窗口尺寸已应用（resize 先于 fit 回复被处理）时下一帧执行；否则等下一个 resize
+   *  事件（once）＋ 200ms 兜底（事件被合并/丢失）。 */
+  const scheduleAtResize = useCallback((bounds: { width: number; height: number }, cb: () => void) => {
+    if (window.innerWidth === bounds.width && window.innerHeight === bounds.height) {
+      requestAnimationFrame(cb);
+      return;
+    }
+    let fallback = 0;
+    const onResize = () => {
+      window.removeEventListener("resize", onResize);
+      if (fallback) window.clearTimeout(fallback);
+      cb();
+    };
+    window.addEventListener("resize", onResize, { once: true });
+    fallback = window.setTimeout(onResize, 200);
+    winTimers.current.push(fallback);
+  }, []);
+
+  /**
+   * C-33 B2 展开（窗口已一次放大）：在 resize 落点一次性设置补偿 translate(prevBounds − bounds)，
+   * 再 CSS 过渡回 0；纸片 clip-path 从旧尺寸过渡到新尺寸——窗口透明，放大的部分在动画完成前看不见。
+   */
+  const applyExpandLanding = useCallback(
+    (pin: { nodeId: string; anchorScreen: { x: number; y: number } }, prev: { x: number; y: number; width: number; height: number }, bounds: { x: number; y: number; width: number; height: number }) => {
+      const seq = ++winTransSeq.current;
+      const dx = prev.x - bounds.x;
+      const dy = prev.y - bounds.y;
+      const grew = prev.width !== bounds.width || prev.height !== bounds.height;
+      const apply = () => {
+        if (winTransSeq.current !== seq) return;
+        const host = hostRef.current;
+        const paper = paperRef.current;
+        if (!host || !paper) return;
+        const off = Math.abs(dx) >= 0.5 || Math.abs(dy) >= 0.5;
+        host.style.transition = "none";
+        paper.style.transition = "none";
+        host.style.transform = off ? `translate(${dx}px, ${dy}px)` : "";
+        host.dataset.mmWinComp = `${dx},${dy}`; // C-33：补偿量观测点（dom 测试 / 诊断；过渡结束或复位时清除）
+        if (grew) {
+          const l = Math.max(0, prev.x - bounds.x);
+          const t = Math.max(0, prev.y - bounds.y);
+          const r = Math.max(0, bounds.x + bounds.width - prev.x - prev.width);
+          const b = Math.max(0, bounds.y + bounds.height - prev.y - prev.height);
+          paper.style.clipPath = `inset(${t}px ${r}px ${b}px ${l}px)`;
+        }
+        void host.offsetWidth; // 强制回流：起始值生效后再开过渡
+        if (motionPreference() === "off") {
+          host.style.transform = "";
+          paper.style.clipPath = "";
+          host.style.transition = "";
+          paper.style.transition = "";
+        } else {
+          host.style.transition = hostTransCss();
+          paper.style.transition = paperTransCss();
+          host.style.transform = "";
+          paper.style.clipPath = "inset(0px 0px 0px 0px)";
+          const t = window.setTimeout(() => {
+            if (winTransSeq.current !== seq) return;
+            const h = hostRef.current;
+            const p = paperRef.current;
+            if (h) {
+              h.style.transition = "";
+              delete h.dataset.mmWinComp;
+            }
+            if (p) {
+              p.style.transition = "";
+              p.style.clipPath = "";
+            }
+          }, winMoveMs() + 80);
+          winTimers.current.push(t);
+        }
+        schedulePinCheck(pin, pin.anchorScreen);
+      };
+      scheduleAtResize(bounds, apply);
+    },
+    [hostTransCss, paperTransCss, winMoveMs, scheduleAtResize, schedulePinCheck],
+  );
+
+  /**
+   * C-33 B3 收起落窗：主进程一次 setBounds 缩窗后，在 resize 落点同步清除补偿（报告 B3）。
+   * 估计准确（无拖动 + workArea 估计一致）时无可见变化；误差以一次修正呈现并计入 pinDeviationPx。
+   */
+  const applyCollapseLanding = useCallback(
+    (pin: { nodeId: string; anchorScreen: { x: number; y: number } }, bounds: { x: number; y: number; width: number; height: number }) => {
+      const seq = ++winTransSeq.current;
+      const apply = () => {
+        if (winTransSeq.current !== seq) return;
+        clearWinTrans();
+        schedulePinCheck(pin, pin.anchorScreen);
+      };
+      scheduleAtResize(bounds, apply);
+    },
+    [clearWinTrans, scheduleAtResize, schedulePinCheck],
+  );
+
+  /** fit 落窗响应 → 按 dir 分派 B2/B3 落地。prevBounds 缺失（假宿主/旧主进程）时退最近 bounds。 */
+  const applyWindowTransition = useCallback(
+    (pin: { nodeId: string; anchorScreen: { x: number; y: number }; dir: "expand" | "collapse" }, r: LensFitReply) => {
+      if (r.prevBounds) lastBoundsRef.current = r.bounds;
+      if (pin.dir === "collapse") {
+        applyCollapseLanding(pin, r.bounds);
+      } else {
+        const prev = r.prevBounds ?? lastBoundsRef.current ?? { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+        applyExpandLanding(pin, prev, r.bounds);
+      }
+    },
+    [applyCollapseLanding, applyExpandLanding],
+  );
+
+  /**
+   * C-33 B3 收起预动画：先在窗内把纸片与内容 CSS 过渡到估计目标（transitionend + var(--mm-move)+50ms
+   * 兜底），调用方 await 后再请求 fit——主进程一次 setBounds 缩窗、resize 里同步清除补偿。
+   * 估计＝锚点 client 中心 − 留白 − 新布局锚矩形 × 估计比例（比例/尺寸用主进程同一套 computeFit，
+   * workArea 用 window.screen 估计；只影响预动画目标，落窗以真实值为准）。目标原点用 client 坐标换算
+   * （＝窗口即将移动的量），不读 window.screenX、不依赖可能过期的 bounds 缓存。
+   */
+  const runCollapsePrelude = useCallback(
+    (pin: { nodeId: string; anchorClient: { x: number; y: number } }, content: { w: number; h: number }, anchorRect: { x: number; y: number; w: number; h: number }, mode: "fit" | "focus"): Promise<void> => {
+      const host = hostRef.current;
+      const paper = paperRef.current;
+      if (!host || !paper || motionPreference() === "off") return Promise.resolve();
+      let s = canvasRef.current?.getView()?.scale ?? 1;
+      let wT = 0;
+      let hT = 0;
+      try {
+        const r = computeFit({ content, workArea: estimateWorkArea(), mode });
+        s = r.scale;
+        wT = r.bounds.width;
+        hT = r.bounds.height;
+      } catch {
+        /* 估计失败：退当前视图比例 + 内容×s+留白 */
+        wT = Math.round(content.w * s) + LENS_PAD_SIDE * 2;
+        hT = Math.round(content.h * s) + LENS_PAD_TOP + LENS_PAD_BOTTOM;
+      }
+      const ax = anchorRect.x + anchorRect.w / 2;
+      const ay = anchorRect.y + anchorRect.h / 2;
+      const dx = pin.anchorClient.x - LENS_PAD_SIDE - ax * s;
+      const dy = pin.anchorClient.y - LENS_PAD_TOP - ay * s;
+      const inset = `inset(${Math.max(0, Math.round(dy))}px ${Math.max(0, Math.round(window.innerWidth - dx - wT))}px ${Math.max(0, Math.round(window.innerHeight - dy - hT))}px ${Math.max(0, Math.round(dx))}px)`;
+      host.style.transition = "none";
+      paper.style.transition = "none";
+      host.style.transform = "";
+      paper.style.clipPath = "inset(0px 0px 0px 0px)";
+      void host.offsetWidth; // 强制回流：起始值生效后再开过渡
+      host.style.transition = hostTransCss();
+      paper.style.transition = paperTransCss();
+      host.style.transform = Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 ? "" : `translate(${dx}px, ${dy}px)`;
+      host.dataset.mmWinComp = `${dx},${dy}`; // C-33：收起补偿观测点（落窗 resize 清除）
+      paper.style.clipPath = inset;
+      return new Promise<void>((resolve) => {
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          host.removeEventListener("transitionend", onEnd);
+          resolve();
+        };
+        const onEnd = (e: TransitionEvent) => {
+          if (e.target === host && e.propertyName === "transform") finish();
+        };
+        host.addEventListener("transitionend", onEnd);
+        const t = window.setTimeout(finish, winMoveMs() + 50); // 报告 B3：var(--mm-move) + 50ms 超时兜底
+        winTimers.current.push(t);
+      });
+    },
+    [estimateWorkArea, hostTransCss, paperTransCss, winMoveMs],
+  );
+
   useEffect(() => () => {
-    if (growRaf.current != null) cancelAnimationFrame(growRaf.current);
+    winTransSeq.current++;
+    for (const t of winTimers.current) window.clearTimeout(t);
+    winTimers.current = [];
     if (pendingExpandTimer.current != null) window.clearTimeout(pendingExpandTimer.current);
   }, []);
 
@@ -544,6 +776,9 @@ export default function MindmapLens({
     if (!active || !graph || !lensGraph) return;
     const token = ++fitSeqRef.current;
     fitBusyRef.current = true;
+    // C-33：打断在途的窗口层过渡（样式复位；新的展开/收起会重新编排）
+    winTransSeq.current++;
+    clearWinTrans();
     // D204：展开/收起/深挖带旧的被点节点屏幕点；本次请求结束即消费
     const pending = pendingExpandRef.current;
     pendingExpandRef.current = null;
@@ -586,13 +821,21 @@ export default function MindmapLens({
         setFocusN(null);
         setFitted(true);
         lastFitRef.current = key;
-        if (pending) startHostFix({ x: r.bounds.x, y: r.bounds.y });
+        if (pending) applyWindowTransition(pending, r); // C-33：B2 一次性补偿（showAll 无收起预动画场景）
         return;
       }
 
       const base = measureGraph(lensGraph, undefined, true, fitCache);
       const baseKey = `auto|${base.content.w}x${base.content.h}`;
+      // eslint-disable-next-line no-console
+      
       if (fitted && lastFitRef.current === baseKey) return;
+      // C-33 B3：收起＝先窗内动画再缩窗——仅当探测会落窗（估计划级 ≠ focus）时在此预动画；
+      // 探测不落窗（内容仍低于可读下限）时由下方聚焦落窗 fit 前预动画。
+      const baseAnchor = anchorOf(base.d);
+      if (pending?.dir === "collapse" && baseAnchor && tierOf(fitScale(base.content, estimateWorkArea()), "fit") !== "focus") {
+        await runCollapsePrelude(pending, base.content, baseAnchor, "fit");
+      }
       const probe = await fitTimed({ content: base.content, anchor: anchorOf(base.d), current, mode: "fit", ...expandReq });
       if (token !== fitSeqRef.current) return;
       const total = rootKids.length;
@@ -606,7 +849,7 @@ export default function MindmapLens({
         setFocusN(null);
         setFitted(true);
         lastFitRef.current = baseKey;
-        if (pending) startHostFix({ x: r.bounds.x, y: r.bounds.y });
+        if (pending) applyWindowTransition(pending, r); // C-33 B2/B3 落地
         return;
       }
 
@@ -622,13 +865,15 @@ export default function MindmapLens({
         return;
       }
       const fm = measureGraph(fg, { [ROOT_ID]: choice.n }, undefined, fitCache);
+      const fmAnchor = anchorOf(fm.d);
+      if (pending?.dir === "collapse" && fmAnchor) await runCollapsePrelude(pending, fm.content, fmAnchor, "focus"); // C-33 B3 预动画
       const r = await fitTimed({ content: fm.content, anchor: anchorOf(fm.d), current, mode: "focus", ...expandReq });
       if (token !== fitSeqRef.current) return;
       setFitState({ scale: r.scale, tier: r.tier, content: fm.content, bounds: r.bounds });
       setFocusN(choice.n);
       setFitted(true);
       lastFitRef.current = fkey;
-      if (pending) startHostFix({ x: r.bounds.x, y: r.bounds.y });
+      if (pending) applyWindowTransition(pending, r); // C-33 B2/B3 落地
       // 选中节点若落在被裁掉的尾部：清掉选中，避免「选中了看不见的节点」
       if (sel) {
         const top = lensGraph.nodes[sel]?.parentId == null ? sel : ancestors(lensGraph, sel)[0];
@@ -643,7 +888,7 @@ export default function MindmapLens({
     } finally {
       fitBusyRef.current = false;
     }
-  }, [active, graph, lensGraph, allGraph, focusGraph, rootKids.length, sel, readingId, showAll, fitted, measureGraph, callFit, startHostFix, T]);
+  }, [active, graph, lensGraph, allGraph, focusGraph, rootKids.length, sel, readingId, showAll, fitted, measureGraph, callFit, applyWindowTransition, runCollapsePrelude, estimateWorkArea, clearWinTrans, T]);
 
   const requestFitRef = useRef(requestFit);
   requestFitRef.current = requestFit;
@@ -759,8 +1004,11 @@ export default function MindmapLens({
     (id: string) => {
       if (id === ROOT_ID) return;
       const next = !collapsedRef.current.has(id);
-      perfBegin(next ? "expand" : "collapse"); // C-32 A1：用户点击展开/收起＝测量窗起点（过渡结束 perfEnd 落行）
-      markExpanding(id); // 在改 overrides / 布局之前捕获被点节点的旧屏幕位置
+      // 极性：next＝「该节点将变为收起」（overrides 真值＝收起）——unfold 徽标点击 next=false＝展开动作。
+      // C-33 修正：C-32 A1 给定的 perfBegin(next ? "expand" : …) 在真实 collapsed 语义下标签反相
+      // （探针实证：首次 unfold 点击被记作 collapse；计数对称所以 C-32 未暴露），随 C-33 B 编排一并修正。
+      perfBegin(next ? "collapse" : "expand"); // C-32 A1：用户点击展开/收起＝测量窗起点（过渡结束 perfEnd 落行）
+      markExpanding(id, next ? "collapse" : "expand"); // 在改 overrides / 布局之前捕获被点节点的旧屏幕位置（C-33：dir 决定 B2/B3 编排）
       setSel(id);
       setExplainFor(null);
       setOverrides((m) => new Map(m).set(id, next));
@@ -858,7 +1106,7 @@ export default function MindmapLens({
     const g = graphRef.current;
     if (!g?.mapId) return;
     // D204：深挖的新子节点到达后，窗口也要绕这颗节点生长（AI 可能延迟数秒，锚点先记下）
-    markExpanding(id);
+    markExpanding(id, "expand");
     try {
       const r = await mindmapV2Api.expand({ mapId: g.mapId, nodeId: id, trigger: "click" });
       if (r.skipped) {
@@ -972,6 +1220,7 @@ export default function MindmapLens({
 
   return (
     <div
+      ref={paperRef}
       className={`mm2-focus lens-window${railOn ? " is-rail-on" : ""}`}
       data-mm2-focus
       role="complementary"
