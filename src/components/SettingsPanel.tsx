@@ -1742,7 +1742,7 @@ function ReaderSection() {
                 /* D130 R3 实跑修正：key 强制换子树 remount——React 会就地把普通态 span 复用为确认态
                    （同为 span、子按钮同位复用），autoFocus 只在 mount 时生效，不 remount 焦点永不落
                    「取消」（设计 §6「焦点默认落取消」契约落空）。 */
-                <span key="confirm" className="reader-theme-manage-actions reader-theme-manage-actions-show">
+                <span key="confirm" className="reader-theme-manage-actions reader-theme-manage-actions-show reveal-on-hover">
                   <button type="button" className="reader-text-btn" data-reader-theme-delete-confirm onClick={() => { deleteTheme(t.id); setConfirmId(null); }}>
                     {T("确认删除")}
                   </button>
@@ -1751,7 +1751,7 @@ function ReaderSection() {
                   </button>
                 </span>
               ) : (
-                <span className="reader-theme-manage-actions">
+                <span className="reader-theme-manage-actions reveal-on-hover">
                   <button type="button" className="reader-text-btn" data-reader-theme-rename onClick={() => setRenameId(t.id)}>
                     {T("重命名")}
                   </button>

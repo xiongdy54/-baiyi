@@ -395,7 +395,7 @@ function FollowUpList({
                   ) : (
                     <>
                       <span className="ai-kp-text">{text}</span>
-                      <button type="button" className="ai-icon ai-kp-pencil" title={T("编辑条目（改成你想了解的内容再点解释）")} onClick={() => startEdit(item)}>
+                      <button type="button" className="ai-icon ai-kp-pencil reveal-on-hover" title={T("编辑条目（改成你想了解的内容再点解释）")} onClick={() => startEdit(item)}>
                         <IconPencil size={13} />
                       </button>
                       {explainBtn}

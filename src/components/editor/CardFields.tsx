@@ -87,7 +87,7 @@ export function GrowField({
       {pick && (
         <button
           type="button"
-          className={`wb-pick${miss ? " is-miss" : ""}`}
+          className={`wb-pick reveal-on-hover${miss ? " is-miss" : ""}`}
           // 不抢焦点/选区：mousedown 阻止默认，读选区时阅读区选区仍在
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {

@@ -279,7 +279,7 @@ export default function JournalView({ onJumpToDoc }: {
                   </div>
                 )}
               </div>
-              <div className="journal-entry-actions">
+              <div className="journal-entry-actions reveal-on-hover">
                 <button
                   className="journal-link"
                   onClick={() => {
@@ -329,7 +329,7 @@ export default function JournalView({ onJumpToDoc }: {
                   </div>
                 )}
               </div>
-              <div className="journal-entry-actions">
+              <div className="journal-entry-actions reveal-on-hover">
                 <button className="journal-link" disabled={busy} onClick={() => void sendDraft(group.draft!)}>
                   {T("发送")}
                 </button>
