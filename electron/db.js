@@ -964,6 +964,9 @@ async function initDb() {
   // 再把 settings 里的库内事实搬进 app_meta。必须在 mark() 之前——标记落点依赖 app_meta 已建。
   if (schema.readUserVersion(db) < 1) db.pragma("user_version = 1");
   schema.runMigrations(db);
+  // C-38b（审计）：同步触发器——sync_version 自动递增 + 删除墓碑。依赖列清单，每次启动先删后建
+  // 幂等重建（毫秒级）；是 C-10「结构变化只走 MIGRATIONS」规则的唯一登记例外（派生对象，不承载数据）。
+  require("./syncTriggers").installSyncTriggers(db);
   migrateSettingsFactsToAppMeta();
   // P1 时序：完成标记必须在 persist() 成功之后写（标记是重跑跳过的唯一安全网，先于数据落盘会在
   // 「标记已写、数据未持久化即崩溃」时把存量旧数据锁死在未回填态）——persist 抛错则此处不执行，

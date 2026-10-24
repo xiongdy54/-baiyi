@@ -412,6 +412,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "确认恢复": "Confirm restore",
   "将用「{name}」覆盖当前全部数据（书架、卡片、复习记录、摘录、设置）。恢复前会自动安全备份当前数据；完成后需重启应用生效，重启前请勿继续使用软件。":
     "\"{name}\" will overwrite all current data (library, cards, review history, extracts, settings). Current data is safety-backed-up first; a restart is required to take effect — do not keep using the app until then.",
+  "此备份来自另一台设备。": "This backup was created on another device.",
   "恢复中…": "Restoring…",
   "重启应用": "Restart app",
   "今日自动备份已存在，无需重复。": "Today's automatic backup already exists; skipping.",
