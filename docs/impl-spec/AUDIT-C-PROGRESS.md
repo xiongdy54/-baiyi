@@ -2,7 +2,7 @@
 
 > **报告（只读）**：`C:\Users\xiongdy\Desktop\report_confirmed.md`（303 KB，3658 行，48 项 C-01…C-48）。
 > **本账本**：只记状态、提交/合并、验收摘要、偏离；标题、根因、修复步骤与验收标准一律以报告 §2 / §3 / 对应 C-xx 小节为准。
-> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`0b37f7a`（C-31 合并）。
+> **更新时间**：2026-10-24。**本账最近更新时 main HEAD**：`5e0db6c`（C-31 修正合并）。
 
 ## 0. 执行规则（摘要，完整规则见报告 §0）
 
@@ -123,7 +123,7 @@
 
 | # | 编号 | 状态 | 提交 / 合并 | 备注 |
 | --- | --- | --- | --- | --- |
-| 37 | C-31 | 完成 | `ad4f11e` / `0b37f7a` | 皮肤/动效设置同步到 lens / 制卡台 / 捕获窗口（readAppearance 唯一读取面 + WindowSkin + settings:changed 广播）；验收见 §3.37。 |
+| 37 | C-31 | 完成 | `ad4f11e` / `0b37f7a`；修正 `05eb171` / `5e0db6c`（D210 登记） | 皮肤/动效设置同步到 lens / 制卡台 / 捕获窗口（readAppearance 唯一读取面 + WindowSkin + settings:changed 广播）；验收见 §3.37。 |
 | 38 | C-32 | 待做 | — | 结构图谱流畅度 Phase A（渲染层）。 |
 | 39 | C-33 | 待做 | — | 结构图谱流畅度 Phase B（去掉逐帧 setBounds）；依赖 C-32；⛔ 决策 D-04。 |
 | 40 | C-34 | 待做 | — | 文本编辑器统一。 |
@@ -1114,7 +1114,8 @@
     * 非默认皮肤下 `set("app","accentBySkin",{claude:"#b45309"})` → **2ms** 内 lens `--user-accent` = `#b45309`；主窗口 Page.reload 后（readAppearance 初始化路径）主窗 `data-skin=claude`、body `has-skin skin-claude skin-vt motion-off`，两窗 `--user-accent` 与 `--accent` 计算值**逐字节相同**（均 `#b45309`）。
     * 截图：`tests/flows/results/c31-main.png`（主窗口 claude 皮）、`c31-lens.png`（结构图窗口 claude 皮——陶土纸面 + 陶土强调色置顶钮）、并排 `c31-side-by-side.png`（ImageMagick +append；lens 是 D203 透明纸片窗，CDP 截图先 `Emulation.setDefaultBackgroundColorOverride` 覆底再截）。三张均为本机证据文件，不入库（`tests/flows/results/` 未跟踪，与 C-09 同口径）。
   - 流程闸门：F21 **7/7**（新通道两头齐、无死通道）、F11 **14/16** / F18 **90/91**（失败集合与 §3.30 基线逐条一致，均为既有；F18「文档未登记 0」——本项零新设置键）。
-- **契约自查（§5 C-28 教训）**：**GUIDE 零改动、不新增 D 号、不 bump 版本**——①`settings:changed` 是主进程→渲染层单向推送（非 invoke 通道），按 D123/D180/D197 明文口径「不计入注册清单，事件名见头注」，事件名与载荷形状已写 main.js 头注（交接包已确认此口径）；②`settingsAPI.onChanged` 与 windowAPI.onDockMode / lensAPI.onPush 等既有 on* 订阅函数同族，各 D 条均未单独登记；③零新设置键（读的全是 §7.4 已登记键）。**遗留提示（主控裁决项）**：GUIDE §8.1 D170 的「SkinHost（App 内唯一挂载点）」表述自本项起被取代（SkinHost 仍是唯一实现，挂载方 = 主窗口 App 直挂 + 独立窗口 WindowSkin）；因属历史决策记录未改写，是否补一条 D 号登记由主控定。
+- **契约自查（§5 C-28 教训）**：**GUIDE 零改动、不新增 D 号、不 bump 版本**——①`settings:changed` 是主进程→渲染层单向推送（非 invoke 通道），按 D123/D180/D197 明文口径「不计入注册清单，事件名见头注」，事件名与载荷形状已写 main.js 头注（交接包已确认此口径）；②`settingsAPI.onChanged` 与 windowAPI.onDockMode / lensAPI.onPush 等既有 on* 订阅函数同族，各 D 条均未单独登记；③零新设置键（读的全是 §7.4 已登记键）。**遗留提示（主控裁决项，已裁决补登记——见下）**：GUIDE §8.1 D170 的「SkinHost（App 内唯一挂载点）」表述自本项起被取代（SkinHost 仍是唯一实现，挂载方 = 主窗口 App 直挂 + 独立窗口 WindowSkin）；因属历史决策记录未改写，是否补一条 D 号登记由主控定。
+- **修正（主控对抗式审查裁决，2026-10-24）**：机械验收全过，唯一 P3 = 挂载架构变更缺 §8.1 接管登记 + 活文档漂移——按 D205 显式接管先例（进度账 §3.12 偏离 6）补登记。执行会话对抗式复审同意并补报一处主控清单外的 `src/App.tsx:750` 活注释漂移（并入同提交）；全仓「唯一挂载点」扫出 3 处：D170 历史行（不改写，经 D210 接管）、`docs/skins/AUTHORING.md:43`（活文档漂移，改）、`App.tsx:750`（改）；`docs/skins/RECON.md:24` 为 v49.0 时点侦察档案（时点快照，同 HISTORY 性质）裁决不动。**修正提交**：`05eb171 docs(C-31): GUIDE v49.39/D210 独立窗口 WindowSkin 挂载接管登记 + AUTHORING/App 注释同步`（GUIDE 标题 v49.38→v49.39 + §8.1 D210 行 + §5 :407 补语「；独立窗口经 WindowSkin（D210）」+ AUTHORING §4.1 树改 SkinHost 行并补 `WindowSkin.tsx` / `runtime/readAppearance.ts` 两行与 :119 补 `/WindowSkin` + App.tsx:750 注释；3 文件 +8/−5）；**合并** `5e0db6c`。**验收**：F11 **14/16 持平**（L1 既有 vendor/kpScopes.js 与 L6 既有表数声明不动；**L3 ✓ 49.39/49.39、L4 ✓ 正文最大决策号 = D210 无缺号 + 已在 §8.1 登记**）、F18 **90/91 持平**（唯一失败 = 既有 `app.back` 扫描误报，`实际: ["app.back"]` 复核一致）、`npm run typecheck` exit 0；f24 按评估不跑（避免夹具自动收紧变脏）、全量/GUI 不跑（零行为改动）。
 - **偏离**：
   1. **`Appearance` 接口在报告给定的 5 字段之外补 2 个超集字段** `accentLegacy` / `accentBySkin`：App.tsx 初始化还要水合 `accentColorLegacy` / `accentBySkin` 两个 React state，若按报告接口则主窗口得二次读键（两处读取面）。超集字段让报告的 5 字段名与语义逐字保留、主窗口单次读取完成水合。
   2. **WindowSkin 同时落 motion 三态类**：报告修复步骤 2 只点名 applyAccent + theme 类切换，但验收要求 lens body 含 `motion-off`——motion 类是外观的一部分，经共享的 `applyAppearanceToDocument` 统一落（与主窗口 App effect 同规则），另补 prefers-reduced-motion 变化重读（与主窗口同规）。未触碰 lensWindow 的窗口行为 / D204 缓动（交接包红线）。
