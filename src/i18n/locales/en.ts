@@ -353,6 +353,8 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "开发模式不检查更新。": "Development mode does not check for updates.",
   "打包时未写入更新源（发布前需在 electron-builder.yml 填写 GitHub 仓库并重新打包）。":
     "No update source was written at build time (fill in the GitHub repository in electron-builder.yml and rebuild before release).",
+  "当前由系统软件包管理器（deb/rpm）安装，应用内不自更新，请通过软件包管理器更新。":
+    "Installed via the system package manager (deb/rpm); the app does not self-update — please update through the package manager.",
   "自动检查更新": "Automatic update checks",
   "启动后联网查询 GitHub 最新发布版本（只检查、不下载）；关闭后不再自动检查，随时可在下方手动检查。检查请求不含任何个人数据。":
     "After launch, the app queries GitHub for the latest release (check only — never downloads); turning this off stops automatic checks, and you can still check manually below. Check requests carry no personal data.",
