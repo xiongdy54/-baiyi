@@ -3072,7 +3072,12 @@ function TrayRow() {
   const T = useT();
   const [on, setOn] = useState<boolean | null>(null);
   useEffect(() => {
-    void settingsStore.get<unknown>("app", "closeToTray", true).then((v) => setOn(v !== false));
+    // C-28（D-09）：未设置时的默认显示按平台——与主进程 closeToTrayEnabled（electron/closeToTray.js）同规：
+    // win/mac 开、linux 关（GNOME 默认无托盘区）。平台探测走 navigator（与 src/lib/commands.ts IS_MAC 同法，
+    // 保证 system-node 环境可加载）。存储值恒为归一后的 boolean（主进程写侧 closeToTrayEnabled），v !== false 足够。
+    const platform = typeof navigator !== "undefined" ? navigator.platform || navigator.userAgent || "" : "";
+    const defaultCloseToTray = !/Linux/i.test(platform);
+    void settingsStore.get<unknown>("app", "closeToTray", defaultCloseToTray).then((v) => setOn(v !== false));
   }, []);
   if (on === null) return null;
   return (

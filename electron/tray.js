@@ -12,11 +12,19 @@ const { tMain } = require("./i18n");
 let tray = null;
 let hooks = {};
 
-/** 托盘图标：单色 mark 按任务栏明暗取黑/白变体；缺失时回落旧 icon.png（保持可用） */
+/** 托盘图标按平台选择（C-28）：Windows 单色 mark 按任务栏明暗取黑/白 ico（D187 语义不变）；
+ *  mac 用 Template 图（文件名以 Template 结尾，系统按菜单栏明暗自动反色，@2x 供高分屏）；
+ *  Linux 按 GTK 主题明暗取反色 PNG（tray-linux-light=深色任务栏用浅色图 / tray-linux-dark 反之）。
+ *  任何平台缺失时回落旧 icon.png 缩到 16px（保持可用）。 */
 function loadTrayIcon() {
-  const file = nativeTheme.shouldUseDarkColors ? "tray-white.ico" : "tray-black.ico";
-  let img = nativeImage.createFromPath(path.join(__dirname, "icons", file));
-  if (img.isEmpty()) img = nativeImage.createFromPath(path.join(__dirname, "icon.png"));
+  const dir = path.join(__dirname, "icons");
+  let file;
+  if (process.platform === "win32") file = nativeTheme.shouldUseDarkColors ? "tray-white.ico" : "tray-black.ico";
+  else if (process.platform === "darwin") file = "trayTemplate.png";
+  else file = nativeTheme.shouldUseDarkColors ? "tray-linux-light.png" : "tray-linux-dark.png";
+  let img = nativeImage.createFromPath(path.join(dir, file));
+  if (process.platform === "darwin" && !img.isEmpty()) img.setTemplateImage(true);
+  if (img.isEmpty()) img = nativeImage.createFromPath(path.join(__dirname, "icon.png")).resize({ width: 16, height: 16 });
   return img;
 }
 
@@ -85,4 +93,4 @@ function destroy() {
   tray = null;
 }
 
-module.exports = { init, rebuild, hintHidden, destroy };
+module.exports = { init, rebuild, hintHidden, destroy, loadTrayIcon };

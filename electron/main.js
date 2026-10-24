@@ -50,6 +50,8 @@ const annotationRange = require("./annotationRange");
 const { resolveBookassetPath } = require("./bookassetPath");
 // C-09：权限请求默认拒绝（仅剪贴板写入放行），创建任何窗口前安装
 const { installPermissionHandlers } = require("./permissions");
+// C-28（D-09）：关闭窗口收托盘的取值归一（显式 true/false 尊重；未设置按平台默认，linux 关）
+const { closeToTrayEnabled } = require("./closeToTray");
 
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
@@ -293,9 +295,10 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "extractEditorToolbarTop") value = value === true;
   // D122：选区浮条动作呈现（icon/text）取代 readerActionsFloat；与 src/lib/selectionBarSettings.ts 同规
   if (scope === "app" && key === "selectionBarStyle") value = value === "text" ? "text" : "icon";
-  // D123：制卡台放置位置（right/bottom，非法回落 right）与「关闭窗口收进托盘」（仅严格 false 为关）
+  // D123：制卡台放置位置（right/bottom，非法回落 right）；「关闭窗口收进托盘」取值归一走
+  // closeToTrayEnabled（C-28 / D-09：显式 true/false 尊重，未设置按平台默认——win/mac 开、linux 关）
   if (scope === "app" && key === "workbenchPlacement") value = value === "bottom" ? "bottom" : "right";
-  if (scope === "app" && key === "closeToTray") value = value !== false;
+  if (scope === "app" && key === "closeToTray") value = closeToTrayEnabled(value);
   // D180：自动检查更新开关（默认开，仅显式 false 为关；与 closeToTray 同口径）
   if (scope === "app" && key === "updateAutoCheck") value = value !== false;
   // v49.8（D182）：界面语言写侧归一（enum 四值，非法回落 zh-CN；与渲染层 normalizeLocale 同规）
@@ -2077,14 +2080,15 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
     return { action: "deny" };
   });
   mainWindow = win;
-  // D123：关闭＝收进系统托盘继续运行（app.closeToTray，默认开）；托盘「退出」/ app.quit 才真销毁
+  // D123：关闭＝收进系统托盘继续运行（app.closeToTray，默认按平台 C-28/D-09：win/mac 开、linux 关）；
+  // 托盘「退出」/ app.quit 才真销毁
   win.on("close", (e) => {
     if (appQuitting) return;
     let toTray = true;
     try {
-      toTray = readSettings().app?.closeToTray !== false;
+      toTray = closeToTrayEnabled(readSettings().app?.closeToTray);
     } catch {
-      /* 读不到设置按默认（收进托盘） */
+      /* 读不到设置按默认（收进托盘；linux 上 closeToTrayEnabled(undefined)=false 即直接退出） */
     }
     if (!toTray) return;
     e.preventDefault();
