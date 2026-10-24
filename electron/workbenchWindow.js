@@ -2,7 +2,7 @@
 // 手动制卡 + AI 制卡 + AI 解释同一套面板（渲染入口 workbench.html → src/workbench.tsx，复用主 preload 的全部桥）。
 // 纪律：① 关闭＝隐藏（单例复用，真正退出才销毁）；② 首次呼出贴近鼠标所在屏幕右缘，之后保留用户拖到的位置；
 // ③ 默认置顶（边读别的材料边制卡），可在窗口内切换；④ 就绪后才 show（杜绝白闪）。
-const { BrowserWindow, screen, app } = require("electron");
+const { BrowserWindow, screen, app, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -38,7 +38,10 @@ function consumePendingShow() {
 function themeBackground() {
   try {
     const mode = ctx?.readSettings?.()?.theme?.mode;
-    return mode === "dark" ? "#111111" : "#fafaf8";
+    // C-37："system" 档按主进程 nativeTheme 解析（保证新开/呼出时窗口底色与解析后的主题一致、无白闪）；
+    // 未知值维持既有回落浅色（渲染层 resolveThemeMode 对未知值按系统解析，主进程读不到设置时保守回落）。
+    const dark = mode === "dark" || (mode === "system" && nativeTheme.shouldUseDarkColors);
+    return dark ? "#111111" : "#fafaf8";
   } catch {
     return "#fafaf8";
   }
@@ -215,4 +218,5 @@ function init(options) {
   ctx = options || null;
 }
 
-module.exports = { init, control, show, hide, toggle, prepareQuit };
+// themeBackground 导出仅供测试（tests/window-skin.test.cjs 的 electron 桩单测；C-29 isAutoLaunchOn 同先例）
+module.exports = { init, control, show, hide, toggle, prepareQuit, themeBackground };

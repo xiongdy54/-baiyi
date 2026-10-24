@@ -10,6 +10,9 @@ import { settingsStore } from "../../lib/settings";
 
 export interface Appearance {
   mode: "light" | "dark";
+  /** C-37：theme.mode 原始档（"light" | "dark" | "system"）——调用方据它决定是否挂系统深浅色监听、
+   * 设置页高亮哪一档；未知值归一为 "system"（与 resolveThemeMode 的未知值语义一致：按系统解析）。 */
+  modeSetting: "light" | "dark" | "system";
   skinId: string;
   accent: string;
   motion: MotionLevel;
@@ -19,11 +22,18 @@ export interface Appearance {
   accentBySkin: Record<string, string>;
 }
 
+/** C-37：theme.mode → 落窗主题档。显式 "light"/"dark" 原样返回；"system" 与未知值按系统
+ * prefers-color-scheme 解析（报告 C-37 修复步骤 2 逐字）。所有窗口的主题类都消费它的结果。 */
+export function resolveThemeMode(mode: string): "light" | "dark" {
+  if (mode === "dark" || mode === "light") return mode;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; // "system" 与未知值
+}
+
 /** 读取当前外观（theme.mode / app.skinId / accentColor / accentBySkin / motionLevel）；
  * 已保存皮肤 loadSkin 失败回落默认皮肤；按 D172 计算有效强调色。 */
 export async function readAppearance(): Promise<Appearance> {
   const [m, s, a, abs, ml] = await Promise.all([
-    settingsStore.get<"light" | "dark">("theme", "mode", "light"),
+    settingsStore.get<string>("theme", "mode", "light"),
     settingsStore.get<string>("app", "skinId", DEFAULT_SKIN_ID),
     settingsStore.get<string>("app", "accentColor", ""),
     settingsStore.get<Record<string, string>>("app", "accentBySkin", {}),
@@ -44,7 +54,8 @@ export async function readAppearance(): Promise<Appearance> {
   const accent = skin === DEFAULT_SKIN_ID ? a : (abs || {})[skin] || "";
   const motionSetting: MotionSetting = ml === "off" ? "off" : "system";
   return {
-    mode: m === "dark" ? "dark" : "light",
+    mode: resolveThemeMode(m),
+    modeSetting: m === "dark" || m === "light" ? m : "system", // 未知值与 "system" 同归一（见 modeSetting 注）
     skinId: skin,
     accent,
     motion: resolveMotion(motionSetting),

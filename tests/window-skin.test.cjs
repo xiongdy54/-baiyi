@@ -3,6 +3,11 @@
 //     loadSkin 失败回落默认皮肤 / 动效三态解析；
 //  2) WindowSkin 刷新的 scope/key 过滤规则（theme 域整体，或 app 域 skinId/accentColor/accentBySkin/motionLevel）；
 //  3) 静态接线守卫：主进程广播 + 两个 preload 订阅面 + 三入口挂载 WindowSkin + App/CaptureEditor 走唯一读取面。
+// C-37 追加——
+//  4) resolveThemeMode 纯函数矩阵（light/dark 原样、"system" 与未知值按 prefers-color-scheme 解析）；
+//  5) readAppearance 对 theme.mode="system"/未知值的 mode（解析值）与 modeSetting（原始档）双出；
+//  6) 主进程 themeBackground 的 nativeTheme 解析（workbench #111111/#fafaf8、capture #111111/#ffffff；
+//     electron require.cache 桩，模式同 tests/app-menu.test.cjs / tests/close-to-tray.test.cjs）。
 "use strict";
 const assert = require("assert");
 const fs = require("fs");
@@ -32,9 +37,10 @@ esbuild.buildSync({
   external: ["./claude"],
 });
 
-function withWindow(settingsFixture) {
+function withWindow(settingsFixture, schemeDark = false) {
   globalThis.window = {
-    matchMedia: () => ({ matches: false }),
+    // C-37：按查询分流——prefers-color-scheme 可控，prefers-reduced-motion 恒 false（不干扰动效解析）
+    matchMedia: (q) => ({ matches: String(q).includes("prefers-color-scheme") ? schemeDark : false }),
     settingsAPI: {
       get: async (scope, key) => {
         const obj = settingsFixture[scope];
@@ -45,13 +51,14 @@ function withWindow(settingsFixture) {
 }
 
 async function main() {
-  const { readAppearance: readOK, isAppearanceSettingsChange } = require(path.join(tmp, "ra-ok.cjs"));
+  const { readAppearance: readOK, isAppearanceSettingsChange, resolveThemeMode } = require(path.join(tmp, "ra-ok.cjs"));
   const { readAppearance: readExt } = require(path.join(tmp, "ra-ext.cjs"));
 
-  // A. 空设置 → 全默认（与原 App.tsx 各键默认值一致）
+  // A. 空设置 → 全默认（与原 App.tsx 各键默认值一致；C-37 增 modeSetting 原始档）
   withWindow({});
   assert.deepStrictEqual(await readOK(), {
     mode: "light",
+    modeSetting: "light",
     skinId: "none",
     accent: "",
     motion: "full",
@@ -67,6 +74,7 @@ async function main() {
   });
   const apB = await readOK();
   assert.strictEqual(apB.mode, "dark");
+  assert.strictEqual(apB.modeSetting, "dark");
   assert.strictEqual(apB.skinId, "claude");
   assert.strictEqual(apB.accent, "#ff8800"); // D172：非默认皮肤用 accentBySkin[skinId]，不用原键
   assert.strictEqual(apB.motion, "off");
@@ -102,6 +110,31 @@ async function main() {
   assert.strictEqual(pass("app", "limits"), false);
   assert.strictEqual(pass("plugin.someId", "css"), false);
 
+  // 4. resolveThemeMode 纯函数矩阵（C-37 步骤 2 逐字：显式档原样；"system" 与未知值按系统解析）
+  withWindow({}, false);
+  assert.strictEqual(resolveThemeMode("light"), "light", "显式 light 原样");
+  assert.strictEqual(resolveThemeMode("dark"), "dark", "显式 dark 原样");
+  assert.strictEqual(resolveThemeMode("system"), "light", "system + 浅色系统 → light");
+  assert.strictEqual(resolveThemeMode("garbage"), "light", "未知值 + 浅色系统 → light");
+  withWindow({}, true);
+  assert.strictEqual(resolveThemeMode("system"), "dark", "system + 深色系统 → dark");
+  assert.strictEqual(resolveThemeMode("garbage"), "dark", "未知值 + 深色系统 → dark（报告：未知值同 system 语义）");
+  assert.strictEqual(resolveThemeMode("light"), "light", "深色系统下显式 light 仍原样");
+
+  // 5. readAppearance 对 "system"/未知值的双出：mode=解析值、modeSetting=原始档归一
+  withWindow({ theme: { mode: "system" } }, true);
+  const apSysDark = await readOK();
+  assert.strictEqual(apSysDark.mode, "dark", "system + 深色系统 → mode=dark");
+  assert.strictEqual(apSysDark.modeSetting, "system");
+  withWindow({ theme: { mode: "system" } }, false);
+  const apSysLight = await readOK();
+  assert.strictEqual(apSysLight.mode, "light", "system + 浅色系统 → mode=light");
+  assert.strictEqual(apSysLight.modeSetting, "system");
+  withWindow({ theme: { mode: "weird" } }, true);
+  const apWeird = await readOK();
+  assert.strictEqual(apWeird.mode, "dark", "未知值按系统解析（与 resolveThemeMode 同语义）");
+  assert.strictEqual(apWeird.modeSetting, "system", "未知值 modeSetting 归一 system（按钮高亮与落窗档一致）");
+
   // 3. 静态接线守卫
   const mainJs = fs.readFileSync(SRC("electron/main.js"), "utf8");
   const setIdx = mainJs.indexOf('ipcMain.handle("settings:set"');
@@ -122,7 +155,62 @@ async function main() {
   const capEd = fs.readFileSync(SRC("src/components/CaptureEditor.tsx"), "utf8");
   assert.ok(capEd.includes("readAppearance()") && capEd.includes("requestWindowSkinRefresh()"), "applyCaptureAppearance 应走唯一读取面并反压 WindowSkin 刷新");
 
-  console.log("window-skin: 10 组断言全部通过（A/B/C/D 语义 + 过滤矩阵 + 静态接线）");
+  // C-37 静态接线：system 档的解析与监听挂载面（App 主窗口 / WindowSkin 独立窗口 / 设置页三档）
+  assert.ok(appTs.includes("resolveThemeMode"), "App.tsx 应消费 resolveThemeMode（system 现场解析 + mq change 重解析）");
+  assert.ok(appTs.includes('matchMedia("(prefers-color-scheme: dark)")'), "App.tsx 应挂系统深浅色 mq 监听（themeMode=system 时）");
+  assert.ok(appTs.includes('eventBus.emit("theme/changed", resolved)'), "theme/changed 应发解析后的 light|dark（监听者零修改）");
+  const wsSrc = fs.readFileSync(SRC("src/skins/WindowSkin.tsx"), "utf8");
+  assert.ok(wsSrc.includes('matchMedia("(prefers-color-scheme: dark)")'), "WindowSkin 应挂系统深浅色 mq 监听（独立窗口 system 档）");
+  const spSrc = fs.readFileSync(SRC("src/components/SettingsPanel.tsx"), "utf8");
+  assert.ok(spSrc.includes('onThemeChange("system")') && spSrc.includes('themeMode === "system"'), "设置页应有第三档「跟随系统」按钮（高亮按 themeMode）");
+  for (const f of ["electron/workbenchWindow.js", "electron/quickCapture.js"]) {
+    const s = fs.readFileSync(SRC(f), "utf8");
+    assert.ok(/mode === "system" && nativeTheme\.shouldUseDarkColors/.test(s), `${f} themeBackground 应有 system→nativeTheme 分支`);
+  }
+
+  // 6. 主进程 themeBackground 的 nativeTheme 解析（electron require.cache 桩；C-29 导出先例）
+  const ELECTRON_PATH = require.resolve("electron");
+  const nativeThemeStub = { shouldUseDarkColors: false };
+  require.cache[ELECTRON_PATH] = {
+    id: ELECTRON_PATH,
+    filename: ELECTRON_PATH,
+    loaded: true,
+    exports: {
+      app: {},
+      BrowserWindow: Object,
+      screen: {},
+      nativeTheme: nativeThemeStub,
+      globalShortcut: { register: () => true, unregister: () => {}, unregisterAll: () => {} },
+    },
+  };
+  const workbench = require(SRC("electron/workbenchWindow.js"));
+  const quickCapture = require(SRC("electron/quickCapture.js"));
+  const withMode = (mode) => ({ readSettings: () => (mode === undefined ? {} : { theme: { mode } }) });
+  workbench.init(withMode("system"));
+  quickCapture.init(withMode("system"));
+  nativeThemeStub.shouldUseDarkColors = false;
+  assert.strictEqual(workbench.themeBackground(), "#fafaf8", "workbench system + 浅色系统 → 纸色底");
+  assert.strictEqual(quickCapture.themeBackground(), "#ffffff", "capture system + 浅色系统 → 白底（无白闪口径：底色随系统）");
+  nativeThemeStub.shouldUseDarkColors = true;
+  assert.strictEqual(workbench.themeBackground(), "#111111", "workbench system + 深色系统 → 深底");
+  assert.strictEqual(quickCapture.themeBackground(), "#111111", "capture system + 深色系统 → 深底");
+  workbench.init(withMode("dark"));
+  quickCapture.init(withMode("dark"));
+  nativeThemeStub.shouldUseDarkColors = false;
+  assert.strictEqual(workbench.themeBackground(), "#111111", "显式 dark 不看 nativeTheme");
+  assert.strictEqual(quickCapture.themeBackground(), "#111111");
+  workbench.init(withMode("light"));
+  quickCapture.init(withMode("light"));
+  nativeThemeStub.shouldUseDarkColors = true;
+  assert.strictEqual(workbench.themeBackground(), "#fafaf8", "显式 light 不看 nativeTheme");
+  assert.strictEqual(quickCapture.themeBackground(), "#ffffff");
+  workbench.init(withMode(undefined));
+  quickCapture.init(withMode(undefined));
+  nativeThemeStub.shouldUseDarkColors = true;
+  assert.strictEqual(workbench.themeBackground(), "#fafaf8", "设置缺失（未知值）主进程保守回落浅色");
+  assert.strictEqual(quickCapture.themeBackground(), "#ffffff");
+
+  console.log("window-skin: C-31 外观同步 + C-37 主题跟随断言全部通过（A/B/C/D 语义 + 过滤矩阵 + resolveThemeMode/modeSetting + 静态接线 + themeBackground 桩）");
 }
 
 main()

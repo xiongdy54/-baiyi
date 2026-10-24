@@ -60,10 +60,15 @@ import { rerankExtractsNow, readMultiSelectKey, MULTI_SELECT_KEYS, DEFAULT_MULTI
 import { LANGUAGES, getLocale, setLocale, normalizeLocale, useT, type Locale } from "../lib/i18n";
 import { computeSettingsNotices, type SettingsNotice, type SettingsNoticeKind, type SettingsNoticesInput } from "../lib/settingsNotices";
 
-export type ThemeMode = "light" | "dark";
+// C-37：新增 "system"（跟随系统）——theme 存的是解析后的落窗档（accent 默认值按它取），
+// themeMode 是 theme.mode 原始档（按钮高亮按它；"system" 时浅/深两钮都不高亮）。
+export type ThemeMode = "light" | "dark" | "system";
 
 interface Props {
-  theme: ThemeMode;
+  /** 解析后的主题档（"system" 已由 App 按系统解析成 light/dark；强调色默认值按它取） */
+  theme: "light" | "dark";
+  /** theme.mode 原始档（C-37）：设置页三档高亮 */
+  themeMode: ThemeMode;
   onThemeChange: (m: ThemeMode) => void;
   skinId: string;
   onSkinChange: (id: string) => void;
@@ -3496,6 +3501,7 @@ function ThemePluginsBlock() {
 
 export default function SettingsPanel({
   theme,
+  themeMode,
   onThemeChange,
   skinId,
   onSkinChange,
@@ -3629,12 +3635,17 @@ export default function SettingsPanel({
             <SettingsNotices />
             <SettingsSection id="sec-appearance" title={T("主题与颜色")}>
               <h4>{T("主题模式")}</h4>
+              {/* C-37：三档——浅色 / 深色 / 跟随系统；高亮按 themeMode 原始档（"system" 时浅/深都不亮），
+                  onThemeChange 现场解析 "system" 并发解析后的 theme/changed（App.handleThemeChange）。 */}
               <div className="seg-tabs" data-ui="seg-tabs">
-                <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
+                <button className={themeMode === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>
                   {T("浅色")}
                 </button>
-                <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>
+                <button className={themeMode === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>
                   {T("深色")}
+                </button>
+                <button className={themeMode === "system" ? "active" : ""} onClick={() => onThemeChange("system")}>
+                  {T("跟随系统")}
                 </button>
               </div>
               <h4>{T("皮肤")}</h4>

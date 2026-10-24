@@ -10,7 +10,7 @@
 //  ④ **持久化节流**：日记自动保存是本项目「每次落库即落盘」（§7.2）的**唯一例外**——sql.js 每次 persist 都是
 //     整库导出 + fsync + rename，按输入停顿每 1.2s 落盘会把长文的磁盘写放大到不可接受。故内存库即时写、
 //     磁盘尾随 4s / 上限 20s，隐藏·发送·退出强制 flush；代价是崩溃最多丢最后几秒（已写入 D34 与 §6.5.4）。
-const { app, BrowserWindow, globalShortcut, screen } = require("electron");
+const { app, BrowserWindow, globalShortcut, screen, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -254,7 +254,10 @@ function getStatus() {
 function themeBackground() {
   try {
     const mode = ctx?.readSettings?.()?.theme?.mode;
-    return mode === "dark" ? "#111111" : "#ffffff";
+    // C-37："system" 档按主进程 nativeTheme 解析（新开捕获窗口底色与解析后主题一致、无白闪）；
+    // 未知值维持既有回落浅色（渲染层 resolveThemeMode 对未知值按系统解析，主进程读不到设置时保守回落）。
+    const dark = mode === "dark" || (mode === "system" && nativeTheme.shouldUseDarkColors);
+    return dark ? "#111111" : "#ffffff";
   } catch {
     return "#ffffff";
   }
@@ -444,6 +447,7 @@ module.exports = {
   getStatus,
   isAutoLaunchOn,
   applyAutoLaunch,
+  themeBackground, // 导出仅供测试（tests/window-skin.test.cjs 的 electron 桩单测；C-29 isAutoLaunchOn 同先例）
   toggleCapture,
   showCapture,
   hideCapture,
