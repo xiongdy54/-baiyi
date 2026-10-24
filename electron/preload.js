@@ -327,6 +327,8 @@ contextBridge.exposeInMainWorld("backupAPI", {
   pickDir: () => ipcRenderer.invoke("backup:pickDir"),
   openDir: () => ipcRenderer.invoke("backup:openDir"),
   pickFile: () => ipcRenderer.invoke("backup:pickFile"),
+  // C-38c（审计）：读备份 meta——恢复确认对话框据 fromOtherDevice 提示「此备份来自另一台设备」
+  meta: (file) => ipcRenderer.invoke("backup:meta", file),
   restore: (file) => ipcRenderer.invoke("backup:restore", file),
   relaunch: () => ipcRenderer.send("app:relaunch"),
   // C-23：主库快照完整性检查不通过 → 主进程推送（payload = { message, integrity }，此时旧备份轮换已暂停）

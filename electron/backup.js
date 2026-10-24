@@ -290,6 +290,10 @@ async function createBackup(opts = {}) {
       createdAt: (opts.now ? opts.now.getTime() : Date.now()),
       includesAIConfig: includeAIConfig,
       appVersion: opts.appVersion || null,
+      // C-38c（审计）：设备 ID 与库 schema 版本进 meta（信息性字段，缺省 null 向后兼容旧档）——
+      // 恢复确认对话框据此提示「此备份来自另一台设备」；device.json 本身不进备份清单（显式列举，成员不变）。
+      deviceId: opts.deviceId || null,
+      schemaVersion: opts.schemaVersion || null,
       counts: opts.counts || null,
       assetFiles: 0
     };

@@ -2041,6 +2041,8 @@ function backupAPI() {
       pickDir: () => Promise<string | null>;
       openDir: () => Promise<boolean>;
       pickFile: () => Promise<string | null>;
+      // C-38c（审计）：备份 meta 预览——fromOtherDevice = 备份来自另一台设备（只提示，不阻止）
+      meta: (file: string) => Promise<{ ok: boolean; fromOtherDevice: boolean; deviceId: string | null; schemaVersion: number | null }>;
       restore: (file: string) => Promise<{ ok: boolean; error?: string; needsRestart?: boolean; safetyFile?: string | null }>;
       relaunch: () => void;
       // C-23：主库快照完整性检查不通过的主进程推送（payload = { message, integrity }）
@@ -2523,7 +2525,7 @@ function BackupSection() {
   const [includeKey, setIncludeKey] = useState(false);
   const [busy, setBusy] = useState<"" | "backup" | "restore">("");
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
-  const [confirmFile, setConfirmFile] = useState<{ path: string; name: string } | null>(null);
+  const [confirmFile, setConfirmFile] = useState<{ path: string; name: string; fromOtherDevice?: boolean } | null>(null);
   const [restored, setRestored] = useState(false);
 
   useEffect(() => {
@@ -2604,7 +2606,13 @@ function BackupSection() {
   async function pickRestoreFile() {
     const file = await backupAPI().pickFile();
     if (!file) return;
-    setConfirmFile({ path: file, name: file.split(/[\\/]/).pop() ?? file });
+    // C-38c（审计）：恢复前读备份 meta——备份来自另一台设备时在确认框多提示一句（只提示，不阻止）
+    let fromOtherDevice = false;
+    try {
+      const m = await backupAPI().meta(file);
+      fromOtherDevice = !!(m && m.fromOtherDevice);
+    } catch { /* 读不到 meta 按同机处理，不阻塞恢复流程 */ }
+    setConfirmFile({ path: file, name: file.split(/[\\/]/).pop() ?? file, fromOtherDevice });
   }
 
   return (
@@ -2659,6 +2667,7 @@ function BackupSection() {
           <p className="restore-confirm-title">{T("确认恢复")}</p>
           <p className="form-hint">
             {T("将用「{name}」覆盖当前全部数据（书架、卡片、复习记录、摘录、设置）。恢复前会自动安全备份当前数据；完成后需重启应用生效，重启前请勿继续使用软件。", { name: confirmFile.name })}
+            {confirmFile.fromOtherDevice && <>{" "}{T("此备份来自另一台设备。")}</>}
           </p>
           <div className="settings-row">
             <button className="btn btn-danger btn-sm" disabled={busy !== ""} onClick={doRestore}>

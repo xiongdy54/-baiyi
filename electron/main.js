@@ -219,6 +219,8 @@ const { rankWithAI, rerankFingerprint } = require("./aiNextExtract");
 const dbModule = require("./db");
 const optimizer = require("./optimizer");
 const backup = require("./backup");
+// C-38c（审计）：本机设备 ID（device.json，不进备份、不随恢复覆盖）——备份 meta 与恢复确认提示用
+const { getDeviceId } = require("./deviceId");
 // v45（M14-UM1，D39）：用户记忆——文件树真源（memoryStore）+ 整理编排（memoryTidy，AI 调用经
 // memoryChat 包装 chatStream；提示词文本只来自播种模板 user-memory，主进程不写提示词正文）
 const memoryStore = require("./memoryStore");
@@ -986,6 +988,9 @@ const backupOpts = () => ({
   // backup.js 不 require db 层（它的依赖注入一直是 opts.*），所以在这里塞进来。
   deletedItemIds: new Set(dbModule.listDeletedItemIds()),
   appVersion: app.getVersion(),
+  // C-38c（审计）：设备 ID 与库 schema 版本进备份 meta（信息性；device.json 本身不进备份清单）
+  deviceId: getDeviceId(app.getPath("userData")),
+  schemaVersion: require("./schemaVersion").SCHEMA_VERSION,
   // D137（§3.6，WAL sidecar 陷阱 M2 对策①）：三库备份改走 db.backup() 在线快照——
   // WAL 下裸 readFileSync 可能缺最近提交且无事务一致性保证。dictionary.db 950MB 级为页拷贝，
   // 速度与内存特性优于旧裸读（learner.db 派生数据不进备份清单）。
@@ -1039,6 +1044,23 @@ ipcMain.handle("backup:restore", async (_e, file) => {
     return await backup.restoreBackup(String(file), backupOpts());
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+});
+// C-38c（审计）：读备份 meta（恢复确认对话框用）——fromOtherDevice = 备份记录的设备 ID 存在且
+// 不等于本机 ID。只提示不阻止；旧备份无 deviceId 字段恒为 false。解析失败按「无法判定」处理。
+ipcMain.handle("backup:meta", async (_e, file) => {
+  try {
+    const m = await backup.readBackupMeta(String(file));
+    if (!m) return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null };
+    const local = getDeviceId(app.getPath("userData"));
+    return {
+      ok: true,
+      fromOtherDevice: typeof m.deviceId === "string" && m.deviceId.length > 0 && m.deviceId !== local,
+      deviceId: m.deviceId ?? null,
+      schemaVersion: m.schemaVersion ?? null
+    };
+  } catch {
+    return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null };
   }
 });
 ipcMain.on("app:relaunch", () => {
