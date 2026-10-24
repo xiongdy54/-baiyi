@@ -70,7 +70,7 @@ function check(name, cond, detail) {
     const toc = [{ anchor: "a", label: "第一章" }, { anchor: "b", label: "第二章" }];
     engine.graphFeed({ documentId: "d-e2e", title: "端到端", tocItems: toc, unitAnchors: ["a", "b"], index: 0, text: text(6), last: false });
     engine.graphFeed({ documentId: "d-e2e", title: "端到端", tocItems: toc, unitAnchors: ["a", "b"], index: 1, text: text(5), last: true });
-    const g = engine.graphGenerate({ documentId: "d-e2e" });
+    const g = await engine.graphGenerate({ documentId: "d-e2e" });
     await engine.idle();
     for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
     const last = changes.filter((c) => c.runId === g.runId).pop();

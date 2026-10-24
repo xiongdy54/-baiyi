@@ -102,7 +102,7 @@ app.whenReady().then(async () => {
     check("v2 内容含粒度块与递归契约", (() => { const t = db.getPromptTemplate("material-map-section"); return t && t.content.includes("覆盖粒度") && t.content.includes("detailed") && t.content.includes("children"); })(), "");
 
     console.log("---- M15R-E2 预览（零调用）与全管线生成 ----");
-    const pv = engine.preview(ctx, paramsFor("doc-e1"));
+    const pv = await engine.preview(ctx, paramsFor("doc-e1"));
     check("preview 不调 AI", consumed === 0, consumed);
     check("preview 计 3 个管线调用 + 2 个固定尾调用", pv.newCalls === 3 && pv.fixedCalls === 2 && pv.cacheHits === 0, { n: pv.newCalls, f: pv.fixedCalls });
     check("preview 字符实测精确", pv.charsExact > 0 && pv.estInputTokens > 0, { c: pv.charsExact });
@@ -139,7 +139,7 @@ app.whenReady().then(async () => {
 
     console.log("---- M15R-E4 换粒度 → 失效重补 ----");
     fakeChats = [sec1, sec2, globalOut, editorialOut, reviewPass];
-    const pvD = engine.preview(ctx, { ...paramsFor("doc-e1"), granularity: "detailed" });
+    const pvD = await engine.preview(ctx, { ...paramsFor("doc-e1"), granularity: "detailed" });
     check("换粒度 preview 全部 miss", pvD.cacheHits === 0 && pvD.newCalls === 3, pvD);
     const r3 = await engine.generate(ctx, { ...paramsFor("doc-e1"), granularity: "detailed" });
     check("换粒度重跑完成", r3.status === "completed", { status: r3.status });
@@ -237,7 +237,7 @@ app.whenReady().then(async () => {
       scopeAnchor: "book",
       granularity: "detailed"
     };
-    const pvS = engine.preview(ctx, singleP);
+    const pvS = await engine.preview(ctx, singleP);
     check("单章书 preview 非零（调用与字数）", pvS.newCalls >= 1 && (pvS.charsExact || 0) > 0, { n: pvS.newCalls, c: pvS.charsExact });
     fakeChats = [
       { title: "早期哲学三杰", authorialRole: "grouping", expandable: false, stopReason: "atomic_structure", children: [], evidence: [{ unitAnchor: "c0.xhtml", quote: "泰勒斯认为水是万物本原", startOffset: 0 }] },
@@ -253,7 +253,7 @@ app.whenReady().then(async () => {
     console.log("---- M15R-E14 v48.7 验收（payload 红线/scope 抽象/单根递进） ----");
     // 红线：preview 原文字数 === 实际发送 payload 中的原文快照长度（同一 builder、逐字同源）
     {
-      const pvP = engine.preview(ctx, paramsFor("doc-e1"));
+      const pvP = await engine.preview(ctx, paramsFor("doc-e1"));
       let sentLens = [];
       const capCtx = { ...ctx, chat: async (call) => { sentLens.push(call.user.length); return { text: JSON.stringify({ title: "t", expandable: false, stopReason: "atomic_structure", children: [], evidence: [] }), usage: { prompt_tokens: 1, completion_tokens: 1 } }; } };
       fakeChats = [];
@@ -266,13 +266,13 @@ app.whenReady().then(async () => {
       check("payload builder 确定性（两次装配 user 逐字节一致）", JSON.stringify(secUsersA) === JSON.stringify(secUsersB), "");
       check("payload 含原文快照（逐字同源）", secUsersA.every((u, i) => u.includes(Object.values(paramsFor("doc-e1").textByUnit)[Math.min(i, 1)]) || u.includes("泰勒斯") || u.includes("知识")), "");
       check("preview 原文字数 = section 实际原文长度和（精确口径）", pvP.sourceCharsExact === planA.plan.calls.filter((c) => c.runKind === "section").reduce((t, c) => t + (c.sourceChars || 0), 0), { pv: pvP.sourceCharsExact });
-      check("无章节材料原文字数必须 > 0（有可分析原文时）", (engine.preview(ctx, singleP).sourceCharsExact || 0) > 0, "");
+      check("无章节材料原文字数必须 > 0（有可分析原文时）", ((await engine.preview(ctx, singleP)).sourceCharsExact || 0) > 0, "");
       void capCtx; void sentLens; void capEngine;
     }
     // scope 抽象回归：chapter 范围仍只覆盖该子树（UI 暂撤、底层保留）
     {
-      const scoped = engine.preview(ctx, { ...paramsFor("doc-e1"), scopeAnchor: "u2.xhtml" });
-          check("scopeAnchor 底层能力保留（章范围仅命中该子树单元）", (scoped.newCalls + scoped.cacheHits) >= 1 && (scoped.sourceCharsExact || 0) < (engine.preview(ctx, paramsFor("doc-e1")).sourceCharsExact || 0), { scoped: scoped.sourceCharsExact, scopedN: scoped.newCalls, scopedHits: scoped.cacheHits, full: engine.preview(ctx, paramsFor("doc-e1")).sourceCharsExact });
+      const scoped = await engine.preview(ctx, { ...paramsFor("doc-e1"), scopeAnchor: "u2.xhtml" });
+          check("scopeAnchor 底层能力保留（章范围仅命中该子树单元）", (scoped.newCalls + scoped.cacheHits) >= 1 && (scoped.sourceCharsExact || 0) < ((await engine.preview(ctx, paramsFor("doc-e1"))).sourceCharsExact || 0), { scoped: scoped.sourceCharsExact, scopedN: scoped.newCalls, scopedHits: scoped.cacheHits, full: (await engine.preview(ctx, paramsFor("doc-e1"))).sourceCharsExact });
     }
     // 单根 expandable 递进（无 TOC 不退化为单层大主题）
     {
@@ -305,7 +305,7 @@ app.whenReady().then(async () => {
         scopeAnchor: "book",
         granularity: "detailed"
       };
-      const pvL = engine.preview(ctx, longP);
+      const pvL = await engine.preview(ctx, longP);
       check("preview 按片计数（newCalls = 片数）且原文字数精确（实际发送口径：分片边界换行不计）", pvL.newCalls === chunkCount && pvL.sourceCharsExact >= longText.length - chunkCount && pvL.sourceCharsExact <= longText.length, { n: pvL.newCalls, chunks: chunkCount, c: pvL.sourceCharsExact, full: longText.length });
       const fakesSection = [];
       for (let ci = 0; ci < chunkCount; ci++) {

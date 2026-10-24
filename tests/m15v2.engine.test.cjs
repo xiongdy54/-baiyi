@@ -172,11 +172,11 @@ const KNOWN = (() => {
   const A = mkEnv();
   const fr = feedAll(A.engine, BOOK);
   check("graphFeed 放出作用域", fr.blocksReady > 10 && fr.scopesReady >= 5, fr);
-  const est = A.engine.graphEstimate({ documentId: BOOK.documentId });
+  const est = await A.engine.graphEstimate({ documentId: BOOK.documentId });
   check("graphEstimate：段数/字数/模型/并发，短章计 floor", est.scopes >= 4 && est.floorScopes >= 1 && est.chars > 5000 && est.model === "deepseek-ai/DeepSeek-V4.1-Flash" && est.concurrency === 2 && est.textReady, est);
-  const g1 = A.engine.graphGenerate({ documentId: BOOK.documentId, title: BOOK.title });
+  const g1 = await A.engine.graphGenerate({ documentId: BOOK.documentId, title: BOOK.title });
   check("graphGenerate 立即返回 runId/mapId", g1 && g1.runId && g1.mapId);
-  const again = A.engine.graphGenerate({ documentId: BOOK.documentId });
+  const again = await A.engine.graphGenerate({ documentId: BOOK.documentId });
   check("同文档生成中再次调用返回同一 run", again.runId === g1.runId && again.mapId === g1.mapId);
   await settle(A.engine);
   const rows1 = nodesOf(A.store, g1.mapId);
@@ -232,7 +232,7 @@ const KNOWN = (() => {
   console.log("---- ③ 同输入二次生成：零调用、节点逐字节同 ----");
   {
     const before = A.log.calls.length;
-    const g2 = A.engine.graphGenerate({ documentId: BOOK.documentId });
+    const g2 = await A.engine.graphGenerate({ documentId: BOOK.documentId });
     await settle(A.engine);
     check("零新调用", A.log.calls.length === before, A.log.calls.length - before);
     check("新版本行、已激活，旧版本降为历史", g2.mapId !== g1.mapId && A.store.getMaterialMap(g2.mapId).isActive && !A.store.getMaterialMap(g1.mapId).isActive);
@@ -365,7 +365,7 @@ const KNOWN = (() => {
   {
     const B2 = mkEnv({ app: { mindmapPrefetch: { enabled: true, dailyLimit: 1 } } });
     feedAll(B2.engine, BOOK);
-    const g = B2.engine.graphGenerate({ documentId: BOOK.documentId });
+    const g = await B2.engine.graphGenerate({ documentId: BOOK.documentId });
     await settle(B2.engine);
     const mores = nodesOf(B2.store, g.mapId).filter((r) => r.source === "ai" && r.state === "more");
     // 新引擎实例（模拟重启）：未获同意 → disabled
@@ -391,12 +391,12 @@ const KNOWN = (() => {
   {
     const C = mkEnv();
     feedAll(C.engine, BOOK);
-    const g0 = C.engine.graphGenerate({ documentId: BOOK.documentId });
+    const g0 = await C.engine.graphGenerate({ documentId: BOOK.documentId });
     await settle(C.engine);
     const snap = J(nodesOf(C.store, g0.mapId));
     C.setBehave(() => { const e = new Error("network down"); e.code = "network"; return { error: e }; });
     const ch0 = C.changes.length;
-    const gf = C.engine.graphGenerate({ documentId: BOOK.documentId, force: true });
+    const gf = await C.engine.graphGenerate({ documentId: BOOK.documentId, force: true });
     await settle(C.engine);
     check("force 不读缓存：发起了真实调用", C.log.calls.filter((c) => c.opts && c.kind === "outline").length > 0 && C.log.calls.length > 0);
     check("旧激活版本仍激活且节点不变", C.store.getMaterialMap(g0.mapId).isActive && J(nodesOf(C.store, g0.mapId)) === snap);
@@ -412,7 +412,7 @@ const KNOWN = (() => {
 
     // 取消（首批前）：同样删除新版本、终态 cancelled
     C.setBehave(() => ({ raw: "x", hangAfter: 1 }));
-    const gc = C.engine.graphGenerate({ documentId: BOOK.documentId, force: true });
+    const gc = await C.engine.graphGenerate({ documentId: BOOK.documentId, force: true });
     for (let i = 0; i < 30; i++) await tick();
     C.engine.graphCancel({ runId: gc.runId });
     await settle(C.engine);
@@ -426,7 +426,7 @@ const KNOWN = (() => {
   {
     const D = mkEnv({ app: { mindmapMaxCalls: 3 } });
     feedAll(D.engine, BOOK);
-    const g = D.engine.graphGenerate({ documentId: BOOK.documentId });
+    const g = await D.engine.graphGenerate({ documentId: BOOK.documentId });
     await settle(D.engine);
     const before = D.log.calls.length;
     const ea = D.engine.graphExpandAll({ mapId: g.mapId });
@@ -486,10 +486,10 @@ const KNOWN = (() => {
     try { E.engine.graphFeed({ documentId: "d2", tocItems: BOOK.tocItems, unitAnchors: BOOK.units, index: 3, text: "x" }); } catch (e) { code = e.code; }
     check("跳号 → out_of_order", code === "out_of_order", code);
     code = null;
-    try { E.engine.graphGenerate({ documentId: "nope" }); } catch (e) { code = e.code; }
+    try { await E.engine.graphGenerate({ documentId: "nope" }); } catch (e) { code = e.code; }
     check("未送原文生成 → no_text", code === "no_text", code);
     // 部分原文即可开始生成：已定型作用域先排，余下随 graphFeed 放出
-    const g = E.engine.graphGenerate({ documentId: "d2", title: "部分" });
+    const g = await E.engine.graphGenerate({ documentId: "d2", title: "部分" });
     await settle(E.engine);
     const n1 = E.log.calls.length;
     check("仅第 0 单元已送入：只跑已放出的作用域", n1 === 1, n1);
