@@ -407,7 +407,18 @@ ipcMain.on("win:cardsChanged", (e) => {
   }
 });
 
-ipcMain.handle("library:list", () => listItems());
+// C-24（Electron 45）：渲染层挂载显著变快——书架首帧的 library:list 会抢在 initDb 的
+// addColumnIfMissing("library_items","author")（db.js D121 段）之前到达（v10.2「先建窗、库并行」
+// 的时序窗口；Electron 31 上渲染层从未赢过这场赛跑，45 上新库首启稳定复现
+// `no such column: li.author` → 空书架）。library:list 是唯一在挂载期到达的 db 依赖 IPC
+// （其余面板都要等用户导航后才触达），在此加 ready 闸：initDb 成功后放行；
+// DB_TOO_NEW / initDb 抛错路径应用随即退出（whenReady 上抛），闸不解析无副作用。
+let resolveDbReadyGate;
+const dbReadyGate = new Promise((r) => { resolveDbReadyGate = r; });
+ipcMain.handle("library:list", async () => {
+  await dbReadyGate;
+  return listItems();
+});
 
 ipcMain.handle("library:createFromPaste", (_e, title, markdown) => {
   const md = String(markdown || "");
@@ -2207,6 +2218,8 @@ app.whenReady().then(async () => {
     }
     throw e;
   }
+  // C-24：放行 library:list 的启动闸（见 handler 注册处注释）
+  resolveDbReadyGate();
   // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
   // 导图对账）移入下一个宏任务——原实现它们与 initDb 共用同一连续宏任务（实测合成 ~730ms 启动空洞）；
   // 顺序与错误语义不变（各自 try/catch），只是不再拖长启动关键段。
