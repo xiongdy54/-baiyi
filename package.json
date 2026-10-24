@@ -26,7 +26,10 @@
     "start": "electron .",
     "skin-audit": "node scripts/skin-audit.mjs",
     "postinstall": "node scripts/pin-better-sqlite3-electron.cjs",
-    "dist": "npm run build && electron-builder --win --publish never",
+    "dist": "npm run dist:win",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:linux": "npm run build && electron-builder --linux --publish never",
     "dist:dir": "npm run build && electron-builder --dir --publish never"
   },
   "dependencies": {
