@@ -2044,6 +2044,9 @@ function backupAPI() {
       // C-38c（审计）：备份 meta 预览——fromOtherDevice = 备份来自另一台设备（只提示，不阻止）
       meta: (file: string) => Promise<{ ok: boolean; fromOtherDevice: boolean; deviceId: string | null; schemaVersion: number | null }>;
       restore: (file: string) => Promise<{ ok: boolean; error?: string; needsRestart?: boolean; safetyFile?: string | null }>;
+      // C-39（审计）：导出到 Anki Phase 1（TSV + 媒体，单向）；openAnkiDir 打开最近一次导出目录（主进程记忆）
+      exportAnki: () => Promise<{ ok: boolean; canceled?: boolean; error?: string; dir?: string; basic?: number; cloze?: number; skipped?: number; media?: number; warnings?: number }>;
+      openAnkiDir: () => Promise<boolean>;
       relaunch: () => void;
       // C-23：主库快照完整性检查不通过的主进程推送（payload = { message, integrity }）
       onIntegrityWarning?: (callback: (payload: { message: string; integrity?: Record<string, string> }) => void) => () => void;
@@ -2523,10 +2526,12 @@ function BackupSection() {
   const [autoOn, setAutoOn] = useState(true);
   const [keep, setKeep] = useState(7);
   const [includeKey, setIncludeKey] = useState(false);
-  const [busy, setBusy] = useState<"" | "backup" | "restore">("");
+  const [busy, setBusy] = useState<"" | "backup" | "restore" | "anki">("");
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const [confirmFile, setConfirmFile] = useState<{ path: string; name: string; fromOtherDevice?: boolean } | null>(null);
   const [restored, setRestored] = useState(false);
+  // C-39（审计）：导出到 Anki 的最近一次结果（成功后显示统计与「打开文件夹」）
+  const [ankiResult, setAnkiResult] = useState<{ basic: number; cloze: number; skipped: number } | null>(null);
 
   useEffect(() => {
     reload();
@@ -2558,6 +2563,25 @@ function BackupSection() {
     if (!dir) return;
     await settingsStore.set("app", "backupDir", dir);
     await reload();
+  }
+
+  // C-39（审计）：导出到 Anki（dialog 选目录 → 主进程写 TSV + media；界面不出现「牌组」一词，D157）
+  async function doExportAnki() {
+    setBusy("anki");
+    setNotice(null);
+    try {
+      const r = await backupAPI().exportAnki();
+      if (r && r.ok) {
+        setAnkiResult({ basic: r.basic ?? 0, cloze: r.cloze ?? 0, skipped: r.skipped ?? 0 });
+      } else if (r && r.canceled) {
+        // 用户取消选择目录：不是错误，不打扰
+      } else {
+        setNotice({ ok: false, text: T("导出失败：{msg}", { msg: (r && r.error) || "" }) });
+      }
+    } catch (err) {
+      setNotice({ ok: false, text: err instanceof Error ? err.message : String(err) });
+    }
+    setBusy("");
   }
 
   async function doBackup() {
@@ -2719,6 +2743,25 @@ function BackupSection() {
           {T("从备份文件恢复…")}
         </button>
       </div>
+
+      {/* C-39（审计）：导出到 Anki Phase 1（TSV + 媒体，单向；图片遮挡卡暂不支持，列入 skipped.txt） */}
+      <div className="backup-toolbar settings-block">
+        <span className="backup-row-title">{T("导出到 Anki")}</span>
+        <button className="btn btn-outline btn-sm" disabled={busy !== ""} onClick={doExportAnki}>
+          {busy === "anki" ? T("导出中…") : T("导出到 Anki…")}
+        </button>
+        {ankiResult && (
+          <button className="btn btn-outline btn-sm" onClick={() => backupAPI().openAnkiDir()}>{T("打开文件夹")}</button>
+        )}
+      </div>
+      <p className="form-hint">
+        {T("生成可在 Anki 中导入的文件（问答卡、填空卡与图片；图片遮挡卡暂不支持）。")}
+      </p>
+      {ankiResult && (
+        <p className="form-hint">
+          {T("已导出：问答 {basic} 张、填空 {cloze} 张、跳过 {skipped} 张。", { basic: ankiResult.basic, cloze: ankiResult.cloze, skipped: ankiResult.skipped })}
+        </p>
+      )}
     </SettingsSection>
   );
 }

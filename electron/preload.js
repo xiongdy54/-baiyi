@@ -330,6 +330,9 @@ contextBridge.exposeInMainWorld("backupAPI", {
   // C-38c（审计）：读备份 meta——恢复确认对话框据 fromOtherDevice 提示「此备份来自另一台设备」
   meta: (file) => ipcRenderer.invoke("backup:meta", file),
   restore: (file) => ipcRenderer.invoke("backup:restore", file),
+  // C-39（审计）：导出到 Anki（dialog 选目录 → 写 TSV + media）；openDir 打开最近一次导出目录（主进程记忆，非任意路径）
+  exportAnki: () => ipcRenderer.invoke("anki:export"),
+  openAnkiDir: () => ipcRenderer.invoke("anki:openDir"),
   relaunch: () => ipcRenderer.send("app:relaunch"),
   // C-23：主库快照完整性检查不通过 → 主进程推送（payload = { message, integrity }，此时旧备份轮换已暂停）
   onIntegrityWarning: (callback) => {

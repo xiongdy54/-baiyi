@@ -2431,4 +2431,11 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "已 {days} 天没有备份，建议立即备份一次。": "No backup for {days} days — create one now.",
   "处理": "Handle",
   "关闭提醒": "Dismiss notification",
+  "导出到 Anki": "Export to Anki",
+  "导出到 Anki…": "Export to Anki…",
+  "导出中…": "Exporting…",
+  "生成可在 Anki 中导入的文件（问答卡、填空卡与图片；图片遮挡卡暂不支持）。": "Generates files that can be imported into Anki (Q&A cards, cloze cards and images; image occlusion cards are not supported yet).",
+  "已导出：问答 {basic} 张、填空 {cloze} 张、跳过 {skipped} 张。": "Exported: {basic} Q&A, {cloze} cloze, {skipped} skipped.",
+  "打开文件夹": "Open folder",
+  "导出失败：{msg}": "Export failed: {msg}",
 };
