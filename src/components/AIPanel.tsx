@@ -7,6 +7,7 @@
 // 由按钮行 / 事后建议钮经宿主 changeExplainMode 承载。
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { growTextarea } from "../lib/autoGrow";
+import { isImeComposing } from "../lib/ime";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -233,7 +234,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, {
         placeholder={T("追问，或自由提问…")}
         onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+          if (e.key === "Enter" && !e.shiftKey && !isImeComposing(e)) {
             e.preventDefault();
             send();
           }
@@ -380,7 +381,7 @@ function FollowUpList({
                         aria-label={T("编辑条目")}
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" && !e.nativeEvent.isComposing) commitEdit(item);
+                          if (e.key === "Enter" && !isImeComposing(e)) commitEdit(item);
                           else if (e.key === "Escape") {
                             e.stopPropagation();
                             setEditing(null);

@@ -13,6 +13,7 @@
 // 画布层：createPortal 进宿主给的 `.reader-map-layer`（图谱页签激活时盖在正文上方，切页签/收侧栏即回正文）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { isImeComposing } from "../../lib/ime";
 import type { MaterialMapMeta } from "../../lib/mindmap";
 import { mindmapApi } from "../../lib/mindmap";
 import {
@@ -558,6 +559,7 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
 
   // 键盘可达：方向键在可见层级移动 / Enter 深挖 / Space 折叠 / Esc 取消选中
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (isImeComposing(e)) return; // 组字中的 Enter/Esc/方向键属于输入法，不动导图选中
     const g = graphRef.current;
     const cur = selectedId;
     const parentKey = (id: string) => (id === ROOT_ID ? null : g.nodes[id]?.parentId ?? ROOT_ID);

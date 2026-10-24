@@ -4,6 +4,7 @@
 // ——新写的内容天然出现在「当日结尾」（用户要求「追加到当日日记结尾另起一行」的字面实现）。
 // 纪律：不做强制标签/分类/双链（D19 Non-Goals）；条目只作第二输入通道，不进 FSRS 队列。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isImeComposing } from "../lib/ime";
 import { eventBus } from "../lib/eventbus";
 import InsightPanel from "./InsightPanel";
 import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
@@ -198,6 +199,7 @@ export default function JournalView({ onJumpToDoc }: {
           placeholder={T("搜索日记内容…")}
           onChange={(e) => setQueryInput(e.target.value)}
           onKeyDown={(e) => {
+            if (isImeComposing(e)) return; // 组字中的 Enter/Esc 属于输入法（确认/取消候选词）
             if (e.key === "Enter") setQuery(queryInput.trim());
             if (e.key === "Escape") {
               setQueryInput("");

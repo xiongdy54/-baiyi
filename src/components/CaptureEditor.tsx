@@ -6,6 +6,7 @@
 //  · 不按发送而失焦 → 窗口隐藏，草稿保留，再呼出**继续向下写**；
 //  · 跨日：非今日的旧草稿默认不混入今天的输入，改由顶部提示条提供「继续写 / 丢弃」。
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isImeComposing } from "../lib/ime";
 import { formatClock, journalDateLabel, todayJournalDate, type JournalEntry } from "../lib/journal";
 import { applyAccent } from "../lib/accentVar";
 import MarkdownEditor, { type MarkdownEditorApi } from "./editor/MarkdownEditor";
@@ -194,6 +195,7 @@ export default function CaptureEditor() {
 
   // §J P0：Ctrl+Enter 发送（编辑器其余键全部交给 markdown 输入，Enter＝换行段落）
   function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (isImeComposing(e)) return; // 组字中的 Enter（确认候选词）不算发送
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       void send();

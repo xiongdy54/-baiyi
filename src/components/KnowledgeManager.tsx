@@ -3,6 +3,7 @@
 // 完整图谱 UI 留 K8、AI staging 确认流留 K2；本面板是 K1 阶段唯一的 KP 人机面。
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cardsApi, type CardRecord } from "../lib/cards";
+import { isImeComposing } from "../lib/ime";
 import { runKpAiProcessing } from "../lib/kpExtract";
 import {
   KP_RELATION_TYPES,
@@ -542,7 +543,7 @@ export default function KnowledgeManager() {
               </div>
               {selected.status === "active" && (
                 <div className="kmg-form">
-                  <input className="cb-search" placeholder={T("添加别名…")} value={aliasInput} onChange={(e) => setAliasInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void addAlias()} />
+                  <input className="cb-search" placeholder={T("添加别名…")} value={aliasInput} onChange={(e) => setAliasInput(e.target.value)} onKeyDown={(e) => { if (isImeComposing(e)) return; e.key === "Enter" && void addAlias(); }} />
                   <button className="btn btn-outline btn-sm" disabled={!aliasInput.trim()} onClick={() => void addAlias()}>
                     {T("加别名")}
                   </button>

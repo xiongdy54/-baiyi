@@ -11,6 +11,7 @@
 //   · 筛选段控「全部/摘录/高亮」；排序段控「位置/时间」（会话内视图偏好，**不落设置键**）。
 //   · 条目内联编辑批注（失焦保存）、删除带就地二次确认（入口在 ⋯ 选单，确认态行内常显）。
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isImeComposing } from "../../lib/ime";
 import { annotColorCss } from "../AnnotationEditor";
 import { IconEllipsis } from "../icons";
 import { useT } from "../../lib/i18n";
@@ -129,6 +130,7 @@ export default function AnnotationPanel({
       setMenuFor(null);
     };
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不收批注菜单
       if (e.key === "Escape") setMenuFor(null);
     };
     const onScrollOrResize = () => setMenuFor(null);
@@ -221,6 +223,7 @@ export default function AnnotationPanel({
                 if (confirmId !== it.id && editingId !== it.id) onJump(it);
               }}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return; // 组字中的 Enter/空格属于输入法
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   onJump(it);
@@ -247,6 +250,7 @@ export default function AnnotationPanel({
                     onChange={(e) => setDraft(e.target.value)}
                     onBlur={() => commitEdit(it)}
                     onKeyDown={(e) => {
+                      if (isImeComposing(e)) return; // 组字中的 Esc / Ctrl+Enter 属于输入法，不提交/不取消编辑
                       if (e.key === "Escape") {
                         setEditingId(null);
                       } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
