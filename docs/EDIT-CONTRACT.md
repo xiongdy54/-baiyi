@@ -30,7 +30,7 @@
 
 （C-34d 登记；C-35 的机器闸门按这份清单检查——清单之外的文件出现新的 `<textarea>` 即为违规。）
 
-这些输入是「一次性输入」（AI 输入框、答题框、标签输入等），不是卡片内容，保留裸 textarea，
+这些输入是「一次性输入」（AI 输入框、答题框、标签输入等）或契约内长文本面（批注），保留裸 textarea，
 但必须遵守上方行为规则（Esc 提交、IME 守卫等）：
 
 | 文件 | 用途 |
@@ -42,3 +42,11 @@
 | `src/components/AIPanel.tsx` | AI 对话与草稿 |
 | `src/components/AnswerJudgeModal.tsx` | 答题输入 |
 | `src/components/editor/CardFields.tsx` | `ClozeField`（填空源文本——挖空工具要操作原始文本选区） |
+| `src/components/AnnotationEditor.tsx` | 批注编辑浮层（400 ms 防抖 + 失焦保存；Esc＝保存并收起——契约「长文本面」档） |
+| `src/components/reader/AnnotationPanel.tsx` | 批注列表就地编辑（失焦 / Ctrl+Enter / Esc＝保存并收起，C-34c 统一） |
+
+> 补登说明（C-34 偏离）：报告 C-34d 的白名单只列了前 7 项，但其证据 6 把批注两套编辑行为
+> （`AnnotationEditor.tsx` / `reader/AnnotationPanel.tsx` 的 textarea）定为「保留、只统一按键语义」
+> （C-34c），且验收判据要求「`<textarea>` 文件全部在白名单内」——故按验收判据把这两处批注
+> textarea 补登进白名单（其余报告清单项照抄）。报告完成后 `disambiguate/CardPane.tsx` 已改用
+> `MdField`，不再含 textarea，无需登记。

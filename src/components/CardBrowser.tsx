@@ -2436,7 +2436,7 @@ function CardDetail({
 }
 
 // ---------- 卡面渲染（qa / cloze / seq / imageOcclusion；ReviewView 连续刷题共用） ----------
-// 内联编辑（C-34b 重写）：v11.2 的 EditableText（contentEditable 纯文本裸壳）退役——
+// 内联编辑（C-34b 重写）：v11.2 的 EditableText 纯文本裸壳退役——
 // 改为「读态渲染（ReadMarkdown）+ 点击进入所见即所得编辑（EditableField + MarkdownEditor/
 // ClozeDraftEditor）」，与摘录卡 D95 同一族；契约见 docs/EDIT-CONTRACT.md。
 

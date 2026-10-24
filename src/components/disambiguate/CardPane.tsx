@@ -1,6 +1,8 @@
 // D121 §3.2 第二屏的单栏：卡 A / 卡 B 的可编辑字段 + 来源 + 「原文」折叠区
 import type { EditableFields, Side } from "../../lib/disambiguateUi";
 import { isArchived, sourceLabel, sourceOf, type CardWithTitle } from "./shared";
+// C-34d：辨析字段统一卡片字段编辑器（docs/EDIT-CONTRACT.md）
+import { MdField } from "../editor/CardFields";
 import { useT } from "../../lib/i18n";
 
 export default function CardPane({
@@ -44,11 +46,13 @@ export default function CardPane({
       </label>
       <label className="disamb-field">
         <span>{T("问题")}{isCloze ? T("（挖空原文）") : ""}{mark("front")}</span>
-        <textarea rows={3} value={fields.front} onChange={(e) => onChange({ front: e.target.value })} />
+        {/* C-34d：辨析改写卡面正反面统一用 MdField（所见即所得紧凑档）——此前裸 textarea 纯文本，
+            markdown 源码/挖空语法在辨析时被当成纯文字；受控 onChange 语义不变（宿主保存链不动）。 */}
+        <MdField value={fields.front} onChange={(v) => onChange({ front: v })} minRows={3} />
       </label>
       <label className="disamb-field">
         <span>{T("答案")}{mark("back")}</span>
-        <textarea rows={3} value={fields.back} onChange={(e) => onChange({ back: e.target.value })} />
+        <MdField value={fields.back} onChange={(v) => onChange({ back: v })} minRows={3} />
       </label>
       <p className="disamb-source">
         {sourceLabel(src)}
