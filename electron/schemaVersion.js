@@ -5,7 +5,7 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const SCHEMA_VERSION = 3; // 每新增一个 MIGRATIONS 项就 +1，并与最后一项的 version 相等
+const SCHEMA_VERSION = 4; // 每新增一个 MIGRATIONS 项就 +1，并与最后一项的 version 相等
 
 // C-18a（审计）：due 表达式——只在「JSON 合法且 $.due 是数值」时取出，其余一律为 NULL
 // （NULL = 交给 JS 精确判定，见 db.js 的 TODAY_QUEUE_DUE_SQL 快速路径）。
@@ -28,6 +28,26 @@ const MIGRATIONS = [
     name: "idx_cards_due",
     up(db) {
       db.exec(`CREATE INDEX IF NOT EXISTS idx_cards_due ON cards(is_deleted, ${DUE_EXPR})`);
+    }
+  },
+  {
+    // C-38b（审计）：云同步预留——给缺字段的可变表补 sync_version + is_deleted，建删除墓碑表。
+    // 新增的 is_deleted 列目前没有任何代码会置 1（不需要给这三张表的查询补过滤条件）；
+    // sync_version 的递增由 electron/syncTriggers.js 的启动期触发器承担（每次启动幂等重建）。
+    version: 4,
+    name: "sync_prep",
+    up(db) {
+      const add = (t, c, type) => {
+        const cols = db.prepare("SELECT name FROM pragma_table_info(?)").all(t).map((r) => r.name);
+        if (!cols.includes(c)) db.exec(`ALTER TABLE ${t} ADD COLUMN ${c} ${type}`);
+      };
+      for (const t of ["card_issues", "ai_gen_batches", "material_map_edges"]) {
+        add(t, "sync_version", "INTEGER NOT NULL DEFAULT 0");
+        add(t, "is_deleted", "INTEGER NOT NULL DEFAULT 0");
+      }
+      db.exec(`CREATE TABLE IF NOT EXISTS sync_tombstones (
+          tbl TEXT NOT NULL, row_id TEXT NOT NULL, deleted_at INTEGER NOT NULL,
+          PRIMARY KEY (tbl, row_id)) WITHOUT ROWID`);
     }
   }
 ];
