@@ -18,6 +18,30 @@ const fs = require("fs");
 const core = require("./pluginCore");
 
 let ctx = null; // { readSettings, writeSettings }（main.js 侧 settings.json 单一入口，§9.2 R5）
+
+// C-24（Electron 45）：渲染层首帧即请求 plugins:getActive，而本模块的 IPC 注册在 init()
+// （D143 T4 又把 init 挪到 initDb 后的宏任务）——注册前到达即「No handler registered」。
+// 该 handler 提前到模块加载期注册：ctx 就绪闸挂起放行（init() 末尾解析）；DB 抛错路径应用
+// 随即退出，闸不解析无副作用（与 main.js dbReadyGate 同口径）。
+let _resolveActiveGate;
+const activeHandlerGate = new Promise((r) => { _resolveActiveGate = r; });
+/** 当前激活载荷（仅可在 ctx 就绪后调用；原 registerIpc 内 getActive handler 的主体） */
+function getActivePayload() {
+  const id = activeIdOf();
+  if (!id) return null;
+  const rec = listRecords(false).get(id);
+  if (!rec || rec.status !== "ok") {
+    // 激活中的插件被删除/失效 → 自动失效并广播（§4.3 unload）；渲染层回落默认外观（§6.3）
+    deactivate();
+    return null;
+  }
+  const vars = core.assembleVars(rec.settingsSchema, valuesOf(id));
+  return { id, css: rec._cssText, vars };
+}
+ipcMain.handle("plugins:getActive", async () => {
+  await activeHandlerGate;
+  return getActivePayload();
+});
 let cache = null; // Map<id, 记录>；null = 未扫描（惰性）
 
 function pluginsRoot() {
@@ -214,18 +238,8 @@ function registerIpc() {
   });
 
   // 渲染 → 主：当前激活载荷 {id, css, vars}（css 与装配好的 --pl-* 变量一次下发）或 null
-  ipcMain.handle("plugins:getActive", () => {
-    const id = activeIdOf();
-    if (!id) return null;
-    const rec = listRecords(false).get(id);
-    if (!rec || rec.status !== "ok") {
-      // 激活中的插件被删除/失效 → 自动失效并广播（§4.3 unload）；渲染层回落默认外观（§6.3）
-      deactivate();
-      return null;
-    }
-    const vars = core.assembleVars(rec.settingsSchema, valuesOf(id));
-    return { id, css: rec._cssText, vars };
-  });
+  // C-24：注册已提前到模块加载期（见文件头 activeHandlerGate）——渲染层首帧早于 init 到达时
+  // 由闸挂起，ctx 就绪后经 getActivePayload() 放行。
 
   // 渲染 → 主：激活（空串 = 停用）→ {ok, reason?}
   ipcMain.handle("plugins:setActive", (_e, id) => {
@@ -284,6 +298,7 @@ function init(options) {
     writeSettings: options.writeSettings
   };
   registerIpc();
+  _resolveActiveGate(); // C-24：放行提前注册的 plugins:getActive（见文件头闸注释）
 }
 
 module.exports = { init };

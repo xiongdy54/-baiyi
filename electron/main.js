@@ -418,8 +418,9 @@ ipcMain.on("win:cardsChanged", (e) => {
 // C-24（Electron 45）：渲染层挂载显著变快——书架首帧的 library:list 会抢在 initDb 的
 // addColumnIfMissing("library_items","author")（db.js D121 段）之前到达（v10.2「先建窗、库并行」
 // 的时序窗口；Electron 31 上渲染层从未赢过这场赛跑，45 上新库首启稳定复现
-// `no such column: li.author` → 空书架）。library:list 是唯一在挂载期到达的 db 依赖 IPC
-// （其余面板都要等用户导航后才触达），在此加 ready 闸：initDb 成功后放行；
+// `no such column: li.author` → 空书架）。library:list 与 mindmap:pendingRuns（首帧图谱面板
+// 就会问「有无未完成运行」，新库的 material_map_runs 表也由 initDb 建）都在挂载期到达，
+// 在此统一加 ready 闸：initDb 成功后放行；
 // DB_TOO_NEW / initDb 抛错路径应用随即退出（whenReady 上抛），闸不解析无副作用。
 let resolveDbReadyGate;
 const dbReadyGate = new Promise((r) => { resolveDbReadyGate = r; });
@@ -1803,7 +1804,11 @@ ipcMain.handle("mindmap:generate", (_e, params) =>
 // v48.13 P4：增量深化——「展开」是纯 UI（零调用），「深化」走这里创建后台任务
 ipcMain.handle("mindmap:deepen", (_e, params) => mindmapEngine.deepen(mindmapCtx(), params || {}));
 // v48.13 P3（D47）：可续跑运行——应用重启后发现未跑完的 run，供指示器提示「可继续生成」
-ipcMain.handle("mindmap:pendingRuns", () => dbModule.listResumableMaterialMapRuns());
+ipcMain.handle("mindmap:pendingRuns", async () => {
+  // C-24：首帧即到达的 db 依赖 IPC 之一（见 dbReadyGate 注释）——新库的表由 initDb 建
+  await dbReadyGate;
+  return dbModule.listResumableMaterialMapRuns();
+});
 ipcMain.handle("mindmap:cancel", (_e, runId) => {
   mindmapEngine.cancelRun(runId);
   return true;
