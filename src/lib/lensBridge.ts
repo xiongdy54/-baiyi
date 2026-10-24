@@ -50,7 +50,7 @@ export interface LensFitRequest {
   mode: "fit" | "focus" | "all";
   /** D204：被点节点中心在旧布局下的屏幕 DIP 位置（展开/收起时钉住该节点） */
   anchorScreen?: { x: number; y: number } | null;
-  /** D204：窗口 bounds 用 180ms 缓动（展开/收起）；隐藏时只暂存 */
+  /** C-33 B1：窗口一次 setBounds 落位（原 D204 逐帧缓动已删）；隐藏时仍只暂存 */
   animate?: boolean;
 }
 
@@ -62,6 +62,8 @@ export interface LensFitReply {
   workArea: { x: number; y: number; width: number; height: number };
   clamped: boolean;
   tier: LensFitTier;
+  /** C-33 B1：落窗前窗口 bounds 快照（仅 animate 落窗路径附带）——渲染层据此一次性补偿窗口位移 */
+  prevBounds?: { x: number; y: number; width: number; height: number };
 }
 
 interface LensBridge {

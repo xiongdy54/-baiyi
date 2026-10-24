@@ -242,7 +242,9 @@ function applyPendingFit(w) {
 
 /** D204：窗口 bounds 缓动曲线，与渲染层宿主反向位移使用同一条 cubic-bezier(.2,.7,.2,1)。
  * C-32 A4：与 src/theme.css 的 --mm-ease Token 保持一致，两处注释互相指向；主进程读不到 CSS，
- * 曲线以本常量为准（皮肤覆盖 --mm-ease 只影响渲染层 CSS 过渡，窗口缓动仍用这里）——改这里须同步 Token。 */
+ * 曲线以本常量为准（皮肤覆盖 --mm-ease 只影响渲染层 CSS 过渡，窗口缓动仍用这里）——改这里须同步 Token。
+ * C-33 B1：fit() 不再调用 animateBounds（窗口一次 setBounds 落位，动画全部移交渲染层 CSS——
+ * 渲染层过渡曲线就是这里的 --mm-ease Token）；本函数与 easeAt 保留但不再被调用，下一版本再删。 */
 const EASE = [0.2, 0.7, 0.2, 1];
 function easeAt(t) {
   const [x1, y1, x2, y2] = EASE;
@@ -278,7 +280,9 @@ function stopBoundsAnim(finish) {
   }
 }
 
-/** D204：可见窗口从 from 到 to 的 180ms bounds 缓动；渲染层同时做宿主反向位移。 */
+/** D204：可见窗口从 from 到 to 的 180ms bounds 缓动；渲染层同时做宿主反向位移。
+ * C-33 B1：fit() 已改为一次 setBounds 落位（逐帧 setBounds 让透明窗口每帧重布局重绘、且与渲染层
+ * rAF 两套时钟不同步必抖）——本函数保留但不再被调用，下一版本再删。 */
 function animateBounds(w, from, to, ms = 180) {
   stopBoundsAnim(false);
   const t0 = Date.now();
@@ -311,7 +315,10 @@ function animateBounds(w, from, to, ms = 180) {
  * lens:fit —— 渲染层量图谱 content / anchor，主进程按窗口所在显示器 workArea 算 s、锚点落位、钳制，
  * 再 setBounds。mode=fit 且 tier=focus 是**探测**（完整内容已低于可读下限）：不落窗，渲染层随后派生
  * 聚焦内容再发 focus。隐藏时只暂存 bounds，show/reveal 时应用；自动尺寸更新不 focus。
- * D204：可选的 anchorScreen（点击节点旧屏幕点）优先级最高；animate=true 时窗口 bounds 做 180ms 缓动。
+ * D204：可选的 anchorScreen（点击节点旧屏幕点）优先级最高。
+ * C-33 B1：animate=true 时窗口**一次 setBounds 落位**（不再逐帧缓动——透明窗口每帧重布局重绘、且主进程
+ * 16ms 定时器与渲染层 rAF 两套时钟不同步必抖），并在响应里附 prevBounds（落窗前 w.getBounds() 快照），
+ * 渲染层据此做一次性补偿、把看得见的动画全部放在网页内 CSS（--mm-move / --mm-ease + 纸片 clip-path）。
  */
 function fit(payload) {
   const content = payload && payload.content ? payload.content : null;
@@ -332,17 +339,17 @@ function fit(payload) {
     bounds,
   });
   const probe = mode === "fit" && r.tier === "focus";
+  const animate = payload?.animate === true;
+  let prevBounds = null; // C-33 B1：落窗前快照，随响应带给渲染层做一次性补偿（取代逐帧轮询 window.screenX）
   if (!probe) {
     if (w && w.isVisible()) {
-      if (payload.animate === true) {
-        animateBounds(w, w.getBounds(), r.bounds, 180);
-      } else {
-        stopBoundsAnim(false);
-        try {
-          w.setBounds(r.bounds, false);
-        } catch {
-          /* 定位失败不阻塞显示 */
-        }
+      stopBoundsAnim(false);
+      if (animate) prevBounds = w.getBounds();
+      try {
+        w.setBounds(r.bounds, false); // C-33 B1：一次落位（动画全部移交渲染层 CSS）
+        if (animate) console.log("[lens] setBounds x1 (C-33 B1 oneshot)");
+      } catch {
+        /* 定位失败不阻塞显示 */
       }
       pendingFit = null;
     } else {
@@ -357,6 +364,7 @@ function fit(payload) {
     workArea: r.workArea,
     clamped: r.clamped,
     tier: r.tier,
+    ...(animate && prevBounds ? { prevBounds } : {}), // C-33 B1：仅 animate 落窗路径附带
   };
 }
 
