@@ -34,7 +34,8 @@ import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib
 import { DEFAULT_SKIN_ID, loadSkin } from "./skins";
 import { SkinHost } from "./skins/SkinHost";
 // C-31：外观读取唯一实现面（初始化与独立窗口 WindowSkin 共用；本文件 effect 仍用 resolveMotion/motionClass）
-import { readAppearance } from "./skins/runtime/readAppearance";
+// C-37：resolveThemeMode——theme.mode 的 "system" 档按系统深浅色解析（事件发解析值，监听者零修改）
+import { readAppearance, resolveThemeMode } from "./skins/runtime/readAppearance";
 import { motionClass, resolveMotion, type MotionSetting } from "./skins/runtime/motionLevel";
 import type { MotionLevel } from "./skins/types";
 import { applyAccent } from "./lib/accentVar";
@@ -134,7 +135,11 @@ const TOP_NAV = [
 
 export default function App() {
   const T = useT(); // v49.8（D182）：语言切换时整树重渲染（顶栏导航/标题/按钮提示全量跟随）
-  const [theme, setTheme] = useState<ThemeMode>("light");
+  // C-37：theme = 解析后的落窗档（恒 "light"|"dark"，与 SkinHost 的 ColorMode 同型）；
+  // themeMode = theme.mode 原始档（"light"|"dark"|"system"）——与 motion 的 motionSetting/motion 同构：
+  // themeMode 是设置真源（驱动设置页高亮与系统跟随监听），theme 消费解析结果（body 类 / accent 默认值 / SkinHost）。
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [themeMode, setThemeMode] = useState<ThemeMode>("light");
   const [skinId, setSkinId] = useState<string>(DEFAULT_SKIN_ID);
   // v49.0 / D172：accentColor = **当前生效**的用户 accent（随皮肤切换换值）；
   // accentColorLegacy = 默认皮肤的原键（app.accentColor，旧数据兼容）；accentBySkin = 其他皮肤各自记忆
@@ -210,6 +215,7 @@ export default function App() {
         settled = true;
         initLocale(lang);
         setTheme(ap.mode);
+        setThemeMode(ap.modeSetting); // C-37：原始档一并水合（设置页高亮 / 系统跟随监听开关）
         // v49.0 / D170：首渲染前预加载已保存皮肤在 readAppearance 内完成（失败回落默认）
         setSkinId(ap.skinId);
         setAccentBySkin(ap.accentBySkin);
@@ -240,6 +246,22 @@ export default function App() {
     document.body.classList.remove("theme-light", "theme-dark");
     document.body.classList.add(theme === "dark" ? "theme-dark" : "theme-light");
   }, [theme]);
+
+  // C-37：theme.mode = "system" 时跟随系统深浅色——mq change 重新解析并广播 theme/changed
+  //（发**解析后的** "light"|"dark"，App/Reader/Dashboard 既有监听者零修改；报告 C-37 步骤 2/3）；
+  // 切回 light/dark 显式档时随 effect 重跑自动移除监听。mq change 只在系统档实际翻转时触发，
+  // 注册时不会多广播一次。
+  useEffect(() => {
+    if (themeMode !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const resolved = resolveThemeMode("system");
+      setTheme(resolved);
+      eventBus.emit("theme/changed", resolved);
+    };
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [themeMode]);
 
   // v49.0 / D170（P2-6）：动效等级 → body 三态类（motion-full/reduced/off 三选一）；
   // 设置变化与系统 reduce 变化都经这里落类。默认「跟随系统」时 zero-diff（基线无这些类以外的变化）。
@@ -312,9 +334,13 @@ export default function App() {
   useThemePlugin();
 
   async function handleThemeChange(m: ThemeMode) {
-    setTheme(m);
+    // C-37：themeMode（原始档）与 theme（解析档）分开落——"system" 落窗档由 resolveThemeMode 现场解析；
+    // theme/changed 发**解析后的**值（报告 C-37 步骤 3），设置键仍存原始档。
+    setThemeMode(m);
+    const resolved = resolveThemeMode(m);
+    setTheme(resolved);
     await settingsStore.set("theme", "mode", m);
-    eventBus.emit("theme/changed", m);
+    eventBus.emit("theme/changed", resolved);
     eventBus.emit("settings/changed", { scope: "theme", key: "mode" });
   }
 
@@ -839,6 +865,7 @@ export default function App() {
       {settingsOpen && (
         <SettingsPanel
           theme={theme}
+          themeMode={themeMode}
           onThemeChange={handleThemeChange}
           skinId={skinId}
           onSkinChange={handleSkinChange}

@@ -5,7 +5,7 @@
 //   ① 主进程 settings:changed 广播（scope=theme，或 scope=app 且 key ∈ 外观四键）——窗口开着时即时跟随；
 //   ② 每次呼出（win:workbenchShown / lens:window / capture:shown）宿主调 applyCaptureAppearance()，
 //      该函数末尾经 requestWindowSkinRefresh() 反压本组件刷新（保留「呼出重读」既有行为）。
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SkinHost } from "./SkinHost";
 import { DEFAULT_SKIN_ID, loadSkin } from "./index";
 import {
@@ -25,6 +25,9 @@ export function requestWindowSkinRefresh(): void {
 
 export function WindowSkin() {
   const [ap, setAp] = useState<Appearance | null>(null);
+  // C-37：theme.mode = "system" 时的系统深浅色监听要调到挂载 effect 内的 refresh（epoch 守卫同源），
+  // 经 ref 暴露给下方按 modeSetting 开关的 effect。
+  const refreshRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     let disposed = false;
     let epoch = 0; // 只认最后一次发起的读取（连续设置变更时旧响应不得回写旧外观）
@@ -39,6 +42,7 @@ export function WindowSkin() {
         document.body.classList.add("theme-light"); // 与旧 applyCaptureAppearance 的兜底一致
       }
     };
+    refreshRef.current = refresh;
     void refresh();
     refreshers.add(refresh);
     // 主进程设置变更广播：只过滤外观相关 scope/key（与主窗口 settings/changed 事件消费同口径）
@@ -51,11 +55,23 @@ export function WindowSkin() {
     mq.addEventListener("change", onMq);
     return () => {
       disposed = true;
+      refreshRef.current = null;
       refreshers.delete(refresh);
       offChanged?.();
       mq.removeEventListener("change", onMq);
     };
   }, []);
+  // C-37：theme.mode = "system" 时本窗口跟随系统深浅色——mq change 重读外观（readAppearance 内
+  // resolveThemeMode 现场解析）；切回 light/dark 显式档时随 effect 重跑移除监听（报告 C-37 步骤 2）。
+  // 与主窗口 App 的同名 mq 监听同规；refresh 走读取面，主进程 settings:changed / 呼出重读不受影响。
+  const modeSetting = ap?.modeSetting;
+  useEffect(() => {
+    if (modeSetting !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onScheme = () => void refreshRef.current?.();
+    mq.addEventListener("change", onScheme);
+    return () => mq.removeEventListener("change", onScheme);
+  }, [modeSetting]);
   if (!ap) return null;
   return (
     <SkinHost
