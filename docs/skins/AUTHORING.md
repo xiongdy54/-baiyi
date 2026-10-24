@@ -40,8 +40,10 @@
 src/skins/
   types.ts              # SkinManifest / SkinModule / SkinRuntimeContext / SKIN_API_VERSION
   index.ts              # SKINS 注册表 + loadSkin（带模块缓存）
-  SkinHost.tsx          # 唯一挂载点（样式注入/移除、body 类、背景/前景层、生命周期）
+  SkinHost.tsx          # 皮肤宿主唯一实现（样式注入/移除、body 类、背景/前景层、生命周期；主窗口 App 直挂，独立窗口经 WindowSkin——D210）
+  WindowSkin.tsx        # 独立窗口外观挂载点（readAppearance 刷新 + settings:changed 跟随）
   runtime/motionLevel.ts
+  runtime/readAppearance.ts # 窗口外观唯一读取面（主窗口与独立窗口共用；loadSkin 失败回落默认皮肤）
   runtime/spring.ts     # springEasing(stiffness, damping, mass) → linear() 缓动 + 时长
   <id>/
     manifest.ts         # SkinManifest
@@ -116,7 +118,7 @@ src/skins/
 
 ## 6. 动效
 
-- **动效等级**：`app.motionLevel`（`"system"` \| `"off"`）→ body 三态类 `motion-full` / `motion-reduced` / `motion-off`（SkinHost/App 管理）。`body.motion-off *` 总开关（base 层 `!important`）压过一切。
+- **动效等级**：`app.motionLevel`（`"system"` \| `"off"`）→ body 三态类 `motion-full` / `motion-reduced` / `motion-off`（SkinHost/App/WindowSkin 管理——D210）。`body.motion-off *` 总开关（base 层 `!important`）压过一切。
 - **皮肤纪律（A6）**：所有非必要动效（hover 位移/阴影、按压缩放、弹簧入场、视图切换、装饰动画）的选择器**必须挂在 `body.motion-full` 下**。`::view-transition-*` 规则例外（JS 侧已做等级判断 + motion-off 总开关兜底），但 reduce 降级请写在 `@media (prefers-reduced-motion: reduce)` 内对齐基线做法。
 - **弹簧曲线**：`springEasing(stiffness, damping, mass)` 把弹簧物理采样成 CSS `linear()`（Chromium 113+）。四预设（scripts/gen-spring.mjs 预计算）：
   - SNAPPY 320/28 → 500ms（弹层、下拉、对话框、折叠展开）
