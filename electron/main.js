@@ -110,8 +110,12 @@ ipcMain.on("logs:rendererError", (_e, payload) => {
 });
 // C-09：CSP 拒绝兜底日志——EPUB 在 blob: iframe 内被拦的脚本，securitypolicyviolation 不冒泡到父文档
 // （实测），只在 Chromium console 里可见，故从 webContents 的 console-message 统一落盘。
+// C-24：Electron 35 起 console-message 的位置参数（level/message/line/sourceId）已弃用，改从
+// 事件对象取（`{ level, message, lineNumber, sourceId, frame }`，level 为字符串）；45 上旧形态仍
+// 可用但按文档迁移，防后续版本移除时 CSP 兜底日志静默失效。
 app.on("web-contents-created", (_event, contents) => {
-  contents.on("console-message", (_e, _level, message) => {
+  contents.on("console-message", (event) => {
+    const message = event.message;
     if (!/Content Security Policy/i.test(message)) return;
     if (/Electron Security Warning/.test(message)) return; // 无 CSP 时的开发期警告，不是违规记录
     try {
