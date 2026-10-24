@@ -79,14 +79,27 @@ jobs:
       - name: Build renderer
         run: npm run build
 
+      # 机密只在非空时注入 GITHUB_ENV——electron-builder 对「存在但为空」的 CSC_LINK 会当作
+      # 证书路径解析（mac 实测：空串 resolveCscLinkPath 落到项目目录 → "not a file" 直接失败），
+      # 空 = 不设置 = 走未签名路径（CSC_IDENTITY_AUTO_DISCOVERY=false 免钥匙串探测）。
+      - name: Resolve signing secrets (inject only when provided)
+        shell: bash
+        env:
+          IN_CSC_LINK: ${{ secrets.CSC_LINK }}
+          IN_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          IN_APPLE_ID: ${{ secrets.APPLE_ID }}
+          IN_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          IN_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          [ -n "$IN_CSC_LINK" ] && echo "CSC_LINK=$IN_CSC_LINK" >> "$GITHUB_ENV" || true
+          [ -n "$IN_CSC_KEY_PASSWORD" ] && echo "CSC_KEY_PASSWORD=$IN_CSC_KEY_PASSWORD" >> "$GITHUB_ENV" || true
+          [ -n "$IN_APPLE_ID" ] && echo "APPLE_ID=$IN_APPLE_ID" >> "$GITHUB_ENV" || true
+          [ -n "$IN_APPLE_APP_SPECIFIC_PASSWORD" ] && echo "APPLE_APP_SPECIFIC_PASSWORD=$IN_APPLE_APP_SPECIFIC_PASSWORD" >> "$GITHUB_ENV" || true
+          [ -n "$IN_APPLE_TEAM_ID" ] && echo "APPLE_TEAM_ID=$IN_APPLE_TEAM_ID" >> "$GITHUB_ENV" || true
+
       - name: Package (electron-builder, unsigned path without secrets)
         shell: bash
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
           case "${{ runner.os }}" in
