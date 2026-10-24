@@ -13,6 +13,7 @@
 const { app, BrowserWindow, globalShortcut, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 // 审计 C-26 步骤 4（D-03=B）：快速记录默认键——Windows/Linux 保持 Ctrl+Alt+Space；
 // macOS 系统默认把 Control+Option+Space 用于「选择下一个输入源」，多输入法用户必冲突，改 Cmd+Shift+Space。
@@ -148,7 +149,17 @@ function readShortcutConfig() {
   };
 }
 
+// 审计 C-29：app.setLoginItemSettings/getLoginItemSettings 只支持 Windows/macOS（Electron 官方文档），
+// Linux 上是 no-op——开关打开后读回恒 false，设置页开关会自己弹回。Linux 改按 XDG autostart 规范
+// 写 `$XDG_CONFIG_HOME/autostart`（未设置时 `~/.config/autostart`）下的 nutation.desktop；
+// Windows/macOS 分支保持 app API 不变。
+function linuxAutostartFile() {
+  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(base, "autostart", "nutation.desktop");
+}
+
 function isAutoLaunchOn() {
+  if (process.platform === "linux") return fs.existsSync(linuxAutostartFile());
   try {
     return !!app.getLoginItemSettings().openAtLogin;
   } catch {
@@ -157,6 +168,17 @@ function isAutoLaunchOn() {
 }
 
 function applyAutoLaunch(enabled) {
+  if (process.platform === "linux") {
+    const f = linuxAutostartFile();
+    try {
+      if (!enabled) { fs.rmSync(f, { force: true }); return; }
+      const exec = process.env.APPIMAGE || process.execPath;           // AppImage 必须指向 .AppImage 文件本身
+      const args = app.isPackaged ? "" : ` "${path.resolve(__dirname, "..")}"`;
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, `[Desktop Entry]\nType=Application\nName=Nutation\nExec="${exec}"${args}\nX-GNOME-Autostart-enabled=true\n`);
+    } catch (err) { console.error("[quickCapture] 随系统启动设置失败：", err); }
+    return;
+  }
   try {
     app.setLoginItemSettings({
       openAtLogin: !!enabled,
@@ -421,6 +443,7 @@ module.exports = {
   applyGlobalShortcuts,
   getStatus,
   isAutoLaunchOn,
+  applyAutoLaunch,
   toggleCapture,
   showCapture,
   hideCapture,
