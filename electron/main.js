@@ -299,7 +299,7 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   // closeToTrayEnabled（C-28 / D-09：显式 true/false 尊重，未设置按平台默认——win/mac 开、linux 关）
   if (scope === "app" && key === "workbenchPlacement") value = value === "bottom" ? "bottom" : "right";
   if (scope === "app" && key === "closeToTray") value = closeToTrayEnabled(value);
-  // D180：自动检查更新开关（默认开，仅显式 false 为关；与 closeToTray 同口径）
+  // D180：自动检查更新开关（默认开，仅显式 false 为关；closeToTray 自 v49.37 / D208 起改 closeToTrayEnabled 平台默认，两键不再同口径）
   if (scope === "app" && key === "updateAutoCheck") value = value !== false;
   // v49.8（D182）：界面语言写侧归一（enum 四值，非法回落 zh-CN；与渲染层 normalizeLocale 同规）
   if (scope === "app" && key === "language") value = mainI18n.normalizeLanguage(value);
