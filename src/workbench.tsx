@@ -7,6 +7,7 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
 import { applyCaptureAppearance } from "./components/CaptureEditor";
+import { WindowSkin } from "./skins/WindowSkin"; // C-31：独立窗口外观挂载点（settings:changed 即时同步换肤 / 动效 / 强调色）
 // v48.89（D132 §6.4）：制卡台窗口跟随主题插件（主 preload 全量桥，随 preload.js 注入）
 import { installThemePluginBridge } from "./lib/themePlugins";
 import { eventBus } from "./lib/eventbus";
@@ -35,6 +36,8 @@ function WorkbenchWindow() {
   }, []);
   return (
     <div className="wbw">
+      {/* C-31：独立窗口外观挂载点——皮肤 CSS / html[data-skin] / 动效三态与主窗口同步 */}
+      <WindowSkin />
       <header className="wbw-bar">
         <span className="wbw-title">{T("制卡台")}</span>
         <button

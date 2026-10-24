@@ -345,6 +345,13 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
   writeSettings(all);
+  // C-31：设置变更广播——独立窗口（lens / 制卡台 / 捕获）开着时即时跟随换肤 / 动效 / 强调色，
+  // 不再只靠「每次呼出重读」。单向推送（非 invoke 通道，不计入 IPC 注册清单，先例＝D123 / D180 / D197；
+  // 事件名与载荷形状见此：`settings:changed`，载荷 `{ scope, key }`，发送给除发起写入之外的所有窗口；
+  // 渲染层订阅 = window.settingsAPI.onChanged，外观过滤规则见 src/skins/runtime/readAppearance.ts）。
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed() && w.webContents !== _e.sender) w.webContents.send("settings:changed", { scope, key });
+  }
   // v49.8（D182）：界面语言落盘后同步主进程 i18n 状态并就地重建托盘菜单（零新增 IPC）
   if (scope === "app" && key === "language") {
     mainI18n.onLanguageWritten(value);

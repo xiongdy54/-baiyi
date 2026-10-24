@@ -1,4 +1,5 @@
-// 皮肤宿主（v49.0 / D170）：App 内唯一皮肤挂载点。
+// 皮肤宿主（v49.0 / D170）：皮肤挂载点——主窗口由 App.tsx 直接挂载；独立窗口（lens / 制卡台 / 捕获）
+// 经 WindowSkin（C-31）挂载并驱动 readAppearance 刷新。
 // 职责：皮肤 CSS 注入/移除（@layer skin 包裹）、body 类管理（skin-<id>/has-skin/skin-chrome-transparent/skin-vt）、
 // html[data-skin]、背景层与前景层渲染、activate(ctx) 生命周期（AbortController + cleanup + onFail 回落）。
 // 前置条件：调用方保证 skinId 对应模块已 loadSkin 缓存（默认皮肤空模块恒在场）。

@@ -2,7 +2,15 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("settingsAPI", {
   get: (scope, key) => ipcRenderer.invoke("settings:get", scope, key),
-  set: (scope, key, value) => ipcRenderer.invoke("settings:set", scope, key, value)
+  set: (scope, key, value) => ipcRenderer.invoke("settings:set", scope, key, value),
+  // C-31：设置变更推送（settings:set 写入成功后广播给未发起写入的窗口）——
+  // 单向推送，不计入 IPC 注册清单（D123 / D180 同口径，事件名见 electron/main.js settings:set 头注）。
+  // 返回退订函数（与 windowAPI.on* / lensAPI.on* 同构）。
+  onChanged: (cb) => {
+    const handler = (_e, p) => cb(p);
+    ipcRenderer.on("settings:changed", handler);
+    return () => ipcRenderer.removeListener("settings:changed", handler);
+  }
 });
 
 contextBridge.exposeInMainWorld("windowAPI", {
