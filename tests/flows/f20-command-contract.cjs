@@ -153,11 +153,12 @@ app
       flow.section("W3 输入焦点内不得劫持（commands.ts:8 与 §9.1 M4 都写了这条）");
       let ran = 0;
       commandRegistry.setActionSource("f20", () => ({ "reader.makeCard": { when: () => true, run: () => { ran++; } } }));
-      const fakeFromInput = { key: "z", ctrlKey: true, repeat: false, target: { tagName: "INPUT" } };
+      // v49.36/D207：阅读制卡默认键 Ctrl+Z → Alt+Z，守卫事件同步换 Alt 系（保持「不守卫就会命中」的差分力）
+      const fakeFromInput = { key: "z", altKey: true, repeat: false, target: { tagName: "INPUT" } };
       __testHooks.dispatchKey(fakeFromInput);
       const guardedInDispatch = ran === 0;
       const staticGuard = /activeElement|isContentEditable|tagName\s*===?\s*["'](INPUT|TEXTAREA)| closest\(["']input/.test(cmdSrc);
-      flow.record("行为证据", `焦点内的 Ctrl+Z 触发了 ${ran} 次动作`);
+      flow.record("行为证据", `焦点内的 Alt+Z 触发了 ${ran} 次动作`);
       flow.record("静态证据", `commands.ts 里${staticGuard ? "有" : "找不到"}焦点判断`);
       flow.check("焦点在输入框时命令分发必须放行给原生行为", guardedInDispatch && staticGuard, "不劫持", `dispatchKey 无焦点判断（${ran} 次触发），文件里${staticGuard ? "有" : "也没有"}静态守卫`);
       commandRegistry.setActionSource("f20", null);

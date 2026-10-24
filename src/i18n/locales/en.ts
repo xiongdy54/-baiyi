@@ -279,8 +279,8 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "在阅读器里把自定义色保存为主题后，会出现在这里。": "Themes you save from custom colors in the reader will appear here.",
   "选区与批注": "Selection & annotation",
   "多段选择修饰键": "Multi-select modifier key",
-  "按住它再选不相邻段＝加选；重复选＝移出；Esc 清空。Ctrl+Z/X/S/A/D 等纯键盘组合不受影响。":
-    "Hold it while selecting a non-adjacent segment to add; select again to remove; Esc clears. Pure keyboard combos like Ctrl+Z/X/S/A/D are unaffected.",
+  "按住它再选不相邻段＝加选；重复选＝移出；Esc 清空。Alt+Z/C/E/X/D 等纯键盘组合不受影响。":
+    "Hold it while selecting a non-adjacent segment to add; select again to remove; Esc clears. Pure keyboard combos like Alt+Z/C/E/X/D are unaffected.",
   "Meta（macOS 的 Command）": "Meta (Command on macOS)",
   "默认标注模式": "Default annotation mode",
   "高亮＝点色只做纯批注；摘录+高亮＝点色同时建一条摘录。都可在选区菜单里临时切换。":
@@ -1560,13 +1560,13 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "标注色 {c}": "Color {c}",
   "（附批注）": " (with note)",
   "批注（先写再点颜色）": "Note (write first, then click a color)",
-  "就地制卡 · Ctrl+Z": "Make card here · Ctrl+Z",
+  "就地制卡 · Alt+Z": "Make card here · Alt+Z",
   "AI 制卡": "AI cards",
-  "AI 制卡 · Ctrl+X": "AI cards · Ctrl+X",
+  "AI 制卡 · Alt+C": "AI cards · Alt+C",
   "AI 解释": "AI explain",
-  "AI 解释 · Ctrl+A": "AI explain · Ctrl+A",
+  "AI 解释 · Alt+E": "AI explain · Alt+E",
   "查词": "Look up",
-  "查词 · Ctrl+D": "Look up · Ctrl+D",
+  "查词 · Alt+D": "Look up · Alt+D",
   "点颜色时同时进入学习队列": "Clicking a color also enqueues it for review",
   "标记形式": "Mark form",
   "红": "Red",

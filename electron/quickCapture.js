@@ -1,7 +1,8 @@
 // 快速记录（v36，M8-A，§4.2-21 / §6.5 / 决策 D34）——第二输入通道的写入面。
 //
 // 本模块独占四件事：
-//  ① **全局快捷键组**：快速记录（Ctrl+Alt+Space 缺省）+ 添加学习材料（Ctrl+Alt+N 缺省）——注册失败必须可见
+//  ① **全局快捷键组**：快速记录（Windows/Linux `Ctrl+Alt+Space` / mac `Cmd+Shift+Space` 缺省，C-26/D-03）
+//     + 添加学习材料（Ctrl+Alt+N 缺省）——注册失败必须可见
 //     （`globalShortcut.register` 返回 false = 被系统或其它软件占用，静默失效会让用户以为软件坏了）。
 //  ② **捕获窗口单例**：无框小窗常驻复用，关闭=隐藏；渲染层就绪（capture:ready）后才 show（杜绝白闪）；
 //     每次呼出按**鼠标所在屏幕**水平居中、顶部 18%。
@@ -13,7 +14,10 @@ const { app, BrowserWindow, globalShortcut, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
-const DEFAULT_ACCEL_CAPTURE = "Ctrl+Alt+Space";
+// 审计 C-26 步骤 4（D-03=B）：快速记录默认键——Windows/Linux 保持 Ctrl+Alt+Space；
+// macOS 系统默认把 Control+Option+Space 用于「选择下一个输入源」，多输入法用户必冲突，改 Cmd+Shift+Space。
+// 启动器类工具可能占用 Cmd+Shift+Space——注册失败经 tryRegister → status.error 在设置页提示用户改键（纪律①）。
+const DEFAULT_ACCEL_CAPTURE = process.platform === "darwin" ? "Cmd+Shift+Space" : "Ctrl+Alt+Space";
 const DEFAULT_ACCEL_ADD_MATERIAL = "Ctrl+Alt+N";
 // D123：独立制卡台窗口（手动制卡 / AI 制卡 / AI 解释）
 const DEFAULT_ACCEL_WORKBENCH = "Ctrl+Alt+K";

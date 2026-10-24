@@ -26,7 +26,7 @@ import {
 import { DEFAULT_SELECTION_BAR_STYLE, normalizeSelectionBarStyle, type SelectionBarStyle } from "../lib/selectionBarSettings";
 import { shortcutsApi, type ShortcutStatus } from "../lib/journal";
 import { normalizePlacement, type WorkbenchPlacement } from "../lib/workbenchLayout";
-import { commandRegistry, eventToCombo, type CommandDef } from "../lib/commands";
+import { commandRegistry, eventToCombo, displayCombo, IS_MAC, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
 import Dropdown from "./Dropdown";
 import { normalizeReaderSettings, type CustomThemeEntry, type ReaderSettings } from "../lib/reader/service";
@@ -1767,7 +1767,7 @@ function ReaderSection() {
       <div className="settings-row">
         <span className="settings-row-label">
           {T("多段选择修饰键")}
-          <SettingsInfo label={T("多段选择修饰键")}>{T("按住它再选不相邻段＝加选；重复选＝移出；Esc 清空。Ctrl+Z/X/S/A/D 等纯键盘组合不受影响。")}</SettingsInfo>
+          <SettingsInfo label={T("多段选择修饰键")}>{T("按住它再选不相邻段＝加选；重复选＝移出；Esc 清空。Alt+Z/C/E/X/D 等纯键盘组合不受影响。")}</SettingsInfo>
         </span>
         <Dropdown
           value={multiKey ?? DEFAULT_MULTI_SELECT_KEY}
@@ -3005,7 +3005,7 @@ function ShortcutsSection() {
                   title={T("点击后按下新键位")}
                   onClick={() => { setConflict(null); setCapturing(def.id); }}
                 >
-                  {capturing === def.id ? T("按下新键…") : binding}
+                  {capturing === def.id ? T("按下新键…") : displayCombo(binding)}
                 </button>
                 <button
                   className="btn btn-secondary btn-sm kb-reset"
@@ -3043,7 +3043,8 @@ interface GlobalShortcutsConfig {
 }
 
 const DEFAULT_GLOBAL_SHORTCUTS: GlobalShortcutsConfig = {
-  quickCapture: { enabled: true, accelerator: "Ctrl+Alt+Space", hideOnBlur: true },
+  // 审计 C-26 步骤 4（D-03=B）：与主进程 quickCapture.js 的平台分支默认值保持一致
+  quickCapture: { enabled: true, accelerator: IS_MAC ? "Cmd+Shift+Space" : "Ctrl+Alt+Space", hideOnBlur: true },
   addMaterial: { enabled: true, accelerator: "Ctrl+Alt+N" },
   workbench: { enabled: true, accelerator: "Ctrl+Alt+K" },
   autoLaunch: false
@@ -3198,7 +3199,7 @@ function GlobalShortcutsBlock() {
             setCapturing(target);
           }}
         >
-          {capturing === target ? T("按下新键…") : binding}
+          {capturing === target ? T("按下新键…") : displayCombo(binding)}
         </button>
         <button className="btn btn-secondary btn-sm kb-reset" disabled={isDefault} title={T("恢复默认")} onClick={reset}>
           {T("恢复")}
