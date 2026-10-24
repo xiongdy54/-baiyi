@@ -473,6 +473,7 @@ export default function SelectionPanels({
       setTrio((t) => (t && !(e.target instanceof Element && e.target.closest(".dock-trio")) ? null : t));
     };
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不关 trio 浮层
       // §4.4 关闭「Esc」＝单层语义：仅 trio 在场才消费（preventDefault——独立窗口 workbench 的
       // Esc 收窗判据为 !e.defaultPrevented，浮层消费 Esc 不再连锁收窗；trio 不在场不拦截）
       if (e.key === "Escape") setTrio((t) => (t ? (e.preventDefault(), null) : t));
