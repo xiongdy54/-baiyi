@@ -747,7 +747,7 @@ export default function App() {
           <button onClick={() => setLoadError(null)}>{T("知道了")}</button>
         </div>
       )}
-      {/* v49.0 / D170：皮肤引擎 v2 唯一挂载点——CSS 注入/移除、body 类、背景/前景层、activate 生命周期 */}
+      {/* v49.0 / D170：皮肤引擎 v2 主窗口挂载点（SkinHost 唯一实现；独立窗口经 WindowSkin，D210）——CSS 注入/移除、body 类、背景/前景层、activate 生命周期 */}
       <SkinHost
         skinId={skinId}
         mode={theme}
