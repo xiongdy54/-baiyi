@@ -38,6 +38,9 @@ app.whenReady().then(async () => {
   for (const it of [a, b, c]) assert.ok(db.getDocument(it.id), `正常导入必须有文档：${it.title}`);
   console.log("import-atomic: 通过（3 种导入 × 失败回滚 + 正常写入）");
   db.closeDb();
-  fs.rmSync(ud, { recursive: true, force: true });
+  // C-24（Electron 45）：GPU 进程会异步往 userData 写磁盘缓存（GPUPersistentCache/GrShaderCache 等），
+  // 应用进程存活期间 rmSync 会与在途写入竞争（EPERM/ENOTEMPTY，--disable-gpu 亦拦不住）；与 m8/persist/
+  // assets-integrity 等既有套件同款口径——清理失败不掩盖结论，%TEMP% 可能残留小目录（无害）。
+  try { fs.rmSync(ud, { recursive: true, force: true, maxRetries: 5 }); } catch { /* 见上注 */ }
   app.exit(0);
 }).catch((e) => { console.error("FAIL", e && e.message); app.exit(1); });
