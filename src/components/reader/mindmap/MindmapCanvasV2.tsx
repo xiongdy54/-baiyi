@@ -9,7 +9,7 @@ import DOMPurify from "dompurify";
 import type { GraphState, PatternKey, RelCode } from "../../../lib/mindmap/v2/types";
 import { ROOT_ID } from "../../../lib/mindmap/v2/types";
 import { createLayoutCache, layoutGraph, type Display } from "../../../lib/mindmap/v2/layout";
-import { routeRelations, REL_STYLE } from "../../../lib/mindmap/v2/route";
+import { routeRelations, REL_STYLE, type RouteResult } from "../../../lib/mindmap/v2/route";
 import { buildCanvasSvg, type SvgLabels } from "../../../lib/mindmap/v2/svg";
 import {
   growthScope,
@@ -87,6 +87,17 @@ export interface MindmapCanvasV2Props {
   /** 顶卡类型行（透镜的截断点类型）；不传＝顶卡只显示标题（完整图谱现状）。 */
   rootType?: string;
 }
+
+/** C-32 A6：过渡期间的关系线占位（空路由结果）——结构线由 display.edges 直接绘制不受影响；
+ * 过渡帧跳过整段关系路由（障碍碰撞 / 通道搜索是每帧大头），过渡结束的最后一帧完整绘制。 */
+const EMPTY_ROUTE: RouteResult = {
+  edges: [],
+  byId: {},
+  crossCount: {},
+  focus: null,
+  policy: { relAll: false, hovered: null, selected: null, focus: false, zoom: 1 },
+  stats: { intra: 0, cross: 0, crossRaw: 0, routed: 0, direct: 0, channel: 0, search: 0, blocked: 0 },
+};
 
 const ZMIN = 0.1;
 const ZMAX = 2.5;
@@ -191,7 +202,11 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       return;
     }
     contentKeyRef.current = key;
-    const routed = routeRelations(p.graph, d, {
+    // C-32 A6：过渡期间（trRef 非空）传空路由结果——关系线整段淡出（可见变化，报告 C-32 明示），
+    // 最后一帧（过渡已结束）完整绘制。可见变化：展开/收起的约 0.25s 内关系线暂时消失。
+    const routed = trRef.current
+      ? EMPTY_ROUTE
+      : routeRelations(p.graph, d, {
       relAll: p.relAll,
       hovered,
       selected: p.selectedId,
