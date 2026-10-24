@@ -15,8 +15,10 @@
 //      已知例外（EDIT-CONTRACT.md 登记）：src/lib/dialogA11y.ts 的 document 级 Esc
 //      处理器无 IME 守卫——该文件不含 Enter 分支，本规则天然不涉及；不得据弹窗层路径
 //      报组件级违规。
-//   7. :hover 里把 opacity 设为 1 的规则，目标类必须是 .reveal-on-hover
-//      （C-36 引入前按棘轮运行）。
+//   7. :hover 里把 opacity 设为 1 的规则，目标类必须是 .reveal-on-hover（C-36 引入）；
+//      报告意图＝「悬停才显示的操作必须有触控替代」（C-35 规则表第 7 行）。REVEAL_ALLOW
+//      豁免写在脚本顶部（每条附证据）；其余新增一律改用 .reveal-on-hover 工具类
+//      （src/theme.css「悬停显形工具类」节，约定 docs/UI-CONVENTIONS.md）。
 //   8. 子进程调用 skin-audit 与 i18n-check，任一退出码非 0 即失败。
 //
 // 基线 scripts/consistency-baseline.json 只允许变小：
@@ -39,6 +41,30 @@ const COLOR_ALLOW = [
   /^src\/lib\/reader\/foliate\/appearance\.ts$/,
 ];
 const isColorAllowed = (rel) => COLOR_ALLOW.some((re) => re.test(rel));
+
+// —— 规则 7 豁免（C-36）：目标类含这些片段的 :hover{opacity:1} 规则不算「悬停才显示的
+//     操作缺触控替代」。每条附证据（选择器 + 非悬停基础态 + 豁免理由）；新增悬停显形
+//     一律用 .reveal-on-hover 工具类，不得扩本表——扩表须在 docs/UI-CONVENTIONS.md 登记。
+const REVEAL_ALLOW = [
+  {
+    // .annot-side .zitem:hover .annot-acts——报告 C-36 证据段原文判定「没有问题」：删除确认态
+    // 有 .zitem.confirming .annot-acts { opacity: 1 } 常显兜底（theme.css :3047）；控件本身
+    // 不在本项 4 控件收编范围（U-23 触屏走查范围外）。
+    sel: ".annot-acts",
+  },
+  {
+    // .reader-tap-zone:hover .reader-tap-hint——非操作控件：基础态 opacity:0 + pointer-events:none
+    // 的装饰性 chevron 提示（本体不可点）；操作本体＝翻页热区常在常可点。报告证据清单只列可操作控件。
+    sel: ".reader-tap-hint",
+  },
+  {
+    // .chart-svg:hover .chart-dot——已有触控替代：基础态 opacity:0 与显形规则整体包在
+    // @media (hover: hover) 内，无 hover 能力（触屏）时数据点常显（theme.css 该块注释自证）；
+    // 图表 hover-dim 强调效果，非可操作控件。
+    sel: ".chart-dot",
+  },
+];
+const isRevealAllowed = (selector) => REVEAL_ALLOW.some((e) => selector.includes(e.sel));
 
 // —— 规则 5 白名单：docs/EDIT-CONTRACT.md「保留的裸 <textarea> 白名单」（C-34d 登记，
 //     含批注两处补登）——清单之外出现新 <textarea> 即违规。
@@ -168,7 +194,10 @@ const inlineSvgCount = (tsx.map((f) => f.t).join("\n").match(/<svg[\s>]/g) || []
   }
 }
 
-// ---------- 规则 7：:hover 设 opacity:1 必须是 .reveal-on-hover（C-36 前棘轮） ----------
+// ---------- 规则 7：:hover 设 opacity:1 必须是 .reveal-on-hover（C-36 收编完成 → 目标 0） ----------
+// 口径（C-36 收敛，登记于进度账 §3.42 偏离）：悬停显形一律走 .reveal-on-hover 工具类
+// （触屏 (hover:none)/(pointer:coarse) 常显＝触控替代）；REVEAL_ALLOW 三条存量豁免
+// 逐条证据见脚本顶部。工具类规则本体（选择器含 reveal-on-hover）天然放行。
 let hoverOpacityCount = 0;
 {
   const blockRe = /([^{}]+)\{([^{}]*)\}/g;
@@ -181,6 +210,7 @@ let hoverOpacityCount = 0;
       if (!/:hover/.test(selector)) continue;
       if (!/opacity\s*:\s*1(?![\d.])/i.test(body)) continue;
       if (selector.includes("reveal-on-hover")) continue;
+      if (isRevealAllowed(selector)) continue;
       hoverOpacityCount++;
     }
   }
@@ -218,7 +248,7 @@ function ratchet(name, current, hint) {
 }
 ratchet("importantCount", importantCount, "回收新增的 !important（每处都要写受控例外）");
 ratchet("inlineSvgCount", inlineSvgCount, "内联 <svg> 改走 src/components/icons.tsx 图标函数");
-ratchet("hoverOpacityCount", hoverOpacityCount, "新增 hover 显形改用 .reveal-on-hover（C-36）；存量 4 处待 C-36 收编");
+ratchet("hoverOpacityCount", hoverOpacityCount, "新增 hover 显形改用 .reveal-on-hover（C-36 工具类）；REVEAL_ALLOW 之外零存量（基线 0）");
 
 for (const [file, count] of Object.entries(colorCounts)) {
   const base = baseline.colorLiterals?.[file];
@@ -293,7 +323,7 @@ console.log(`[consistency] 规则3 !important = ${importantCount} / 内联<svg> 
 console.log(`[consistency] 规则4 动效时长写死 = ${violations.filter((v) => v.rule.startsWith("规则4")).length}`);
 console.log(`[consistency] 规则5 编辑器白名单违规 = ${violations.filter((v) => v.rule.startsWith("规则5")).length}`);
 console.log(`[consistency] 规则6 IME守卫缺失 = ${violations.filter((v) => v.rule.startsWith("规则6")).length}`);
-console.log(`[consistency] 规则7 hover-opacity 棘轮 = ${hoverOpacityCount}（C-36 收编目标 .reveal-on-hover）`);
+console.log(`[consistency] 规则7 hover-opacity = ${hoverOpacityCount}（须为 0：显形走 .reveal-on-hover 或 REVEAL_ALLOW 豁免）`);
 console.log(`[consistency] 规则8 子审计 skin-audit=${subAudits[0].ok ? "OK" : "FAIL"} / i18n-check=${subAudits[1].ok ? "OK" : "FAIL"}`);
 
 if (violations.length) {

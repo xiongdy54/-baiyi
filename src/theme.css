@@ -2498,6 +2498,29 @@ body.theme-dark .modal-panel {
   .skeleton { transition: none; animation: none; }
 }
 
+/* ---------- 悬停显形工具类（C-36；约定见 docs/UI-CONVENTIONS.md） ----------
+   悬停才显示的操作必须有触控替代：鼠标设备悬停或键盘聚焦时显示；触屏（无 hover / 粗指针）常显。
+   C-36 收编 .ai-kp-pencil / .reader-theme-manage-actions / .journal-entry-actions / .wb-pick；
+   C-35 一致性闸门规则 7（scripts/consistency-check.mjs）强制：:hover 里 opacity:1 的显形
+   只能经由本工具类（REVEAL_ALLOW 三条豁免除外）。 */
+/* C-36：悬停才显示的操作。鼠标设备：悬停或键盘聚焦时显示；触控设备：始终显示 */
+.reveal-on-hover { opacity: 0; pointer-events: none; }
+:is(:hover, :focus-within) > .reveal-on-hover,
+:is(:hover, :focus-within) > * > .reveal-on-hover,
+.reveal-on-hover:focus-visible { opacity: 1; pointer-events: auto; }
+/* 行元素距控件超过两层时的变体（报告 C-36：两种写法二选一，全仓统一约定见 UI-CONVENTIONS） */
+.reveal-scope:is(:hover, :focus-within) .reveal-on-hover { opacity: 1; pointer-events: auto; }
+@media (hover: none), (pointer: coarse) {
+  .reveal-on-hover { opacity: 1; pointer-events: auto; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  body.motion-full .reveal-on-hover { transition: opacity var(--dur-hover) var(--ease-out-soft); }
+}
+/* 粗指针命中区：只扩大命中区，不改图标大小（Apple HIG 44pt / Material 48dp） */
+@media (pointer: coarse) {
+  .zdots, .icon-btn { min-width: 44px; min-height: 44px; }
+}
+
 /* ---------- 阅读器（Phase 2，瑞士风基线） ---------- */
 
 .topbar-title {
@@ -4205,9 +4228,8 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   font-size: var(--fs-body);
 }
 .ai-kp-edit:focus { outline: none; }
-/* ✎ 悬停/聚焦才显示（渐进披露） */
-.ai-kp-pencil { opacity: 0; }
-.ai-kp-row:hover .ai-kp-pencil, .ai-kp-row:focus-within .ai-kp-pencil { opacity: 1; }
+/* ✎ 悬停/聚焦才显示（渐进披露）：C-36 起由 .reveal-on-hover 工具类接管显形（TSX 已挂类），
+   .ai-kp-pencil 不再有自己的 opacity/显形规则（类名保留作语义钩子） */
 .ai-kp-explain {
   flex: none;
   display: inline-flex;
@@ -5736,11 +5758,10 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   display: flex;
   gap: var(--sp-2);
   flex: none;
-  opacity: 0;
 }
-.reader-theme-manage-row:hover .reader-theme-manage-actions,
-.reader-theme-manage-row:focus-within .reader-theme-manage-actions,
-.reader-theme-manage-actions-show { opacity: 1; }
+/* 显形由 .reveal-on-hover 工具类接管（C-36，TSX 已挂类）；-show 强制显示类保留兼容——
+   确认删除态必须常显，pointer-events 一并从工具类基础态接管 */
+.reader-theme-manage-actions-show { opacity: 1; pointer-events: auto; }
 .reader-text-btn {
   border: none;
   background: none;
@@ -6611,11 +6632,9 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   align-items: flex-start;
   gap: var(--sp-3);
   padding-top: 2px;
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease);
 }
-.journal-entry:hover .journal-entry-actions,
-.journal-entry-actions:focus-within { opacity: 1; }
+/* 显形与过渡由 .reveal-on-hover 工具类接管（C-36，TSX 已挂类；原无条件 transition 按
+   C-32 三态纪律一并移交工具类的 motion-full 作用域） */
 
 /* §J P0（#3 日记统一 Markdown 编辑器）：编辑框沿用旧 .journal-edit-area 的框线观感 */
 .journal-edit-md {
@@ -8675,7 +8694,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 .wb-field .markdown-editor-compact .ProseMirror { min-height: calc(var(--md-editor-min-rows, 1) * 1.6em); }
 .wb-field .markdown-editor-compact .ProseMirror[data-placeholder] p:first-child:last-child:has(> br:only-child)::before { color: var(--text-placeholder); }
-/* 「带入…」：悬停 / 聚焦才现，贴框右缘垂直居中，绿色小字 + paper 底遮住下方文字 */
+/* 「带入…」：悬停 / 聚焦才现（C-36 起显形由 .reveal-on-hover 工具类接管，TSX 已挂类；
+   隐藏态 opacity/pointer-events 与显形过渡都在工具类），贴框右缘垂直居中，绿色小字 + paper 底遮住下方文字 */
 .wb-pick {
   position: absolute;
   right: 4px;
@@ -8689,15 +8709,9 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   line-height: 20px;
   white-space: nowrap;
   cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
 }
-.wb-field:hover .wb-pick, .wb-field:focus-within .wb-pick, .wb-pick:focus-visible { opacity: 1; pointer-events: auto; }
 .wb-pick:hover { color: var(--accent-hover); }
 .wb-pick.is-miss { color: var(--text-helper); }
-@media (prefers-reduced-motion: no-preference) {
-  .wb-pick { transition: opacity var(--dur) var(--ease-out-soft); }
-}
 .wb-fields .manual-region-preview { margin: 0; max-width: 100%; }
 .wb-cloze-preview { margin: 0; font-size: var(--fs-meta); color: var(--text-helper); overflow-wrap: anywhere; }
 .wb-empty { margin: 0; font-size: var(--fs-meta); color: var(--text-helper); }
