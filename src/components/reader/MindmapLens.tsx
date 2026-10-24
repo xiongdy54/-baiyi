@@ -169,7 +169,7 @@ export default function MindmapLens({
   /** D204/C-33：下一次 fit 用哪颗节点的旧屏幕位置钉住（展开/收起/深挖；C-33 起 dir 决定 B2/B3 编排） */
   const pendingExpandRef = useRef<{
     anchorScreen: { x: number; y: number };
-    /** C-33 B3：同一点的窗口内（client）坐标——收起预动画的目标换算用，不读 window.screenX */
+    /** C-33 B3：同一点的窗口内（client）坐标——收起预动画的目标换算用（不读窗口屏幕原点） */
     anchorClient: { x: number; y: number };
     nodeId: string;
     dir: "expand" | "collapse";
@@ -515,8 +515,8 @@ export default function MindmapLens({
   const callFit = fit ?? fallbackFit;
 
   /** D204：被点节点卡片中心在屏幕 DIP 的当前位置（改 overrides 之前调用）。
-   * C-33：这是本文件唯一读 window.screenX/Y 的地方（计算点击位置）；窗口层过渡的补偿量一律来自
-   * 主进程 fit 响应的 prevBounds（B1），不再逐帧轮询。 */
+   * C-33：这是本文件唯一读窗口屏幕原点的地方（计算点击位置）；窗口层过渡的补偿量一律来自
+   * 主进程 fit 响应的 prevBounds（B1），D204 的逐帧轮询已删。 */
   const captureNodeScreen = useCallback((id: string) => {
     try {
       const el = document.querySelector(`.mm2-focus-canvas svg g[data-node-id="${String(id)}"]`);
@@ -553,7 +553,7 @@ export default function MindmapLens({
   }, [captureNodeScreen]);
 
   // ---------- 窗口层过渡（C-33 B2/B3/B4）----------
-  // D204 的逐帧方案（主进程 180ms 逐帧 setBounds × 渲染层每帧读 window.screenX 反向补偿）删除：
+  // D204 的逐帧方案（主进程 180ms 逐帧 setBounds × 渲染层每帧读窗口屏幕原点反向补偿）删除：
   // 窗口在一次过渡中最多变 1 次（B1 一次 setBounds），看得见的动画全部在网页内用 CSS 完成
   // （时长 var(--mm-move)、曲线 var(--mm-ease)，C-32 A4 Token；皮肤覆盖后下一场过渡自然生效），
   // 补偿量用主进程返回的 prevBounds 确切值，不再轮询。
@@ -711,7 +711,7 @@ export default function MindmapLens({
    * 兜底），调用方 await 后再请求 fit——主进程一次 setBounds 缩窗、resize 里同步清除补偿。
    * 估计＝锚点 client 中心 − 留白 − 新布局锚矩形 × 估计比例（比例/尺寸用主进程同一套 computeFit，
    * workArea 用 window.screen 估计；只影响预动画目标，落窗以真实值为准）。目标原点用 client 坐标换算
-   * （＝窗口即将移动的量），不读 window.screenX、不依赖可能过期的 bounds 缓存。
+   * （＝窗口即将移动的量），不读窗口屏幕原点、不依赖可能过期的 bounds 缓存。
    */
   const runCollapsePrelude = useCallback(
     (pin: { nodeId: string; anchorClient: { x: number; y: number } }, content: { w: number; h: number }, anchorRect: { x: number; y: number; w: number; h: number }, mode: "fit" | "focus"): Promise<void> => {
