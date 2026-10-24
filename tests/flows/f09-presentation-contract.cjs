@@ -92,7 +92,11 @@ function app_main() {
 
     // ---------- E2 硬编码色值 ----------
     flow.section("E2 禁止硬编码色值（§7.1.6 L860）");
-    const hexHits = tsx.filter((f) => /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/.test(f.t)).map((f) => rel(f.p));
+    // C-35c：按 C-35b 的 COLOR_ALLOW 豁免口径重算——皮肤清单 manifest.ts / 强调色计算
+    // accentVar.ts / EPUB 注入 appearance.ts 本来就应含色值（报告 C-35 证据 3），
+    // 与 scripts/consistency-check.mjs 的豁免清单保持同一口径。
+    const colorAllowRe = /^src\/skins\/[^/]+\/manifest\.ts$|^src\/lib\/accentVar\.ts$|^src\/lib\/reader\/foliate\/appearance\.ts$/;
+    const hexHits = tsx.filter((f) => /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/.test(f.t) && !colorAllowRe.test(rel(f.p))).map((f) => rel(f.p));
     for (const h of hexHits) console.log(`    · ${h}`);
     ratchet(flow, "hardcodedHexFiles", hexHits.length, { direction: "down" });
     newBaseline.hardcodedHexFiles = Math.min(newBaseline.hardcodedHexFiles ?? Infinity, hexHits.length);
