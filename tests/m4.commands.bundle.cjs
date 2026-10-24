@@ -7199,6 +7199,12 @@ function t2(key, params) {
   return interpolate(s, params);
 }
 
+// src/lib/ime.ts
+function isImeComposing(e2) {
+  const ne = "nativeEvent" in e2 ? e2.nativeEvent : e2;
+  return Boolean(ne.isComposing) || ne.keyCode === 229;
+}
+
 // src/lib/commands.ts
 var COMMANDS = [
   { id: "reader.makeCard", title: "\u5236\u5361", scene: "\u9605\u8BFB", defaultKey: "Alt+Z" },
@@ -7365,6 +7371,7 @@ function install() {
   window.addEventListener(
     "keydown",
     (e2) => {
+      if (isImeComposing(e2)) return;
       if (dispatchKey(e2)) {
         e2.preventDefault();
         e2.stopPropagation();

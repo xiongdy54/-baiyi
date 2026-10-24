@@ -11,6 +11,7 @@
 // 渲染进第一字段（GrowField，Alt+Enter 坞内固定键）。表单其余内部状态、载荷、题型页签零改动。
 import { forwardRef, useImperativeHandle, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { isImeComposing } from "../lib/ime";
 import { cardsApi, needsDateStamp, parseCloze, similaritySearch } from "../lib/cards";
 import { bigramJaccard } from "../lib/disambiguateCore.mjs";
 import { PRECHECK_K, answerDiffers, clipText, manualPrecheckText, shouldRunPrecheck } from "../lib/disambiguateUi";
@@ -88,7 +89,7 @@ function GrowField({
         ghost && onGhostAccept
           ? (e: React.KeyboardEvent) => {
               // 与 Ctrl+Enter（制卡）/Ctrl+Shift+C（挖空）无冲突（altKey 互斥）；IME 组合态不接管
-              if (e.altKey && e.key === "Enter" && !e.nativeEvent.isComposing) {
+              if (e.altKey && e.key === "Enter" && !isImeComposing(e)) {
                 e.preventDefault();
                 onGhostAccept();
               }
@@ -617,7 +618,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
           className="wb-fields"
           ref={fieldsRef}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !e.nativeEvent.isComposing && canSave && !saving && !checking) {
+            if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !isImeComposing(e) && canSave && !saving && !checking) {
               e.preventDefault();
               void onCreateClick();
             }

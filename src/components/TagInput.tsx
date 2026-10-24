@@ -10,6 +10,7 @@
 // --ease-out-soft（closing 态去回对称）；行 stagger 20ms 上限 5（entrance-animations）；
 // 聚焦态 border accent（既有 :focus 规则）＝Anticipation 预告步。
 import { useMemo, useRef, useState } from "react";
+import { isImeComposing } from "../lib/ime";
 import { IconClose } from "./icons";
 import { normalizeTag, tagKey, type TagVocabEntry } from "../lib/tags";
 import { useT } from "../lib/i18n";
@@ -136,6 +137,7 @@ export function TagInput({
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(e)) return; // 组字中的 Enter/Esc/↑↓ 属于输入法（确认/取消/选候选词），不落标签
     if (e.key === "Enter" || e.key === "，" || e.key === "、" || e.key === ",") {
       e.preventDefault();
       // D106：↑↓ 显式激活的候选接管 Enter；未激活时 Enter = 确认输入原文（首项不预选）

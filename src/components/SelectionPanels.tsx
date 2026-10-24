@@ -20,6 +20,7 @@ import AIPanel, { ChatComposer, ExplainModeBar, ExplainThread, type ChatComposer
 // D144 #5（§4.4）：坞内三按钮选单（解释内容区选区触发）+ 其定位锚类型（placePopover 视口坐标）
 import { DockTrioMenu } from "./DockTrioMenu";
 import type { PopoverRect } from "../lib/popoverPlace";
+import { isImeComposing } from "../lib/ime";
 import { DictPanel } from "./DictPanel";
 import { useT } from "../lib/i18n";
 import OcclusionEditor from "./editor/OcclusionEditor";
@@ -111,7 +112,7 @@ function FreeSource({
       <div
         className="wb-free-input"
         onKeyDown={(e) => {
-          if (ghostText && e.altKey && e.key === "Enter" && !e.nativeEvent.isComposing) {
+          if (ghostText && e.altKey && e.key === "Enter" && !isImeComposing(e)) {
             e.preventDefault();
             acceptGhost();
           }

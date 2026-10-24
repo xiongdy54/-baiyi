@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { isImeComposing } from "../lib/ime";
 import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import { useSelectionBarStyle } from "../lib/selectionBarSettings";
@@ -658,6 +659,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Enter/Esc/空格属于输入法，不推进调度
       const t = e.target as HTMLElement | null;
       const tag = (t?.tagName || "").toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select" || t?.isContentEditable) return;

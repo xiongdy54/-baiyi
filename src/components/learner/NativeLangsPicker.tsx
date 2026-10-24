@@ -6,6 +6,7 @@
 // right:0 对齐会使弹层向左探出滚动容器被裁（LTR 左溢不可滚，D126 R4.2 同源教训）；
 // 翻边 dd-menu-up/down 按最近滚动祖先可见盒实测（useLayoutEffect 绘制前落位，无闪烁）。
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isImeComposing } from "../../lib/ime";
 import { NATIVE_LANG_CHOICES, languageDisplayName } from "../../lib/learner";
 import { learnerStrings } from "../../lib/learnerStrings";
 import { IconChevronDown } from "../icons";
@@ -39,6 +40,7 @@ export default function NativeLangsPicker({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不关选择器
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopPropagation();
@@ -147,6 +149,7 @@ export default function NativeLangsPicker({
               placeholder={S.tracks.otherLangPlaceholder}
               onChange={(e) => setCustom(e.target.value)}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return; // 组字中的 Enter 属于输入法（确认候选词），不新增语言
                 if (e.key === "Enter") {
                   e.preventDefault();
                   addCustom();

@@ -5,6 +5,7 @@
 // 卡、摘录、进度、语言、领域标签仍各挂各书，写库调用与 v48.14 之前逐字相同
 // （setItemTitle / setItemLang / remove），顺序与文件夹走 SettingsStore app 层。
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { isImeComposing } from "../lib/ime";
 import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from "../lib/library";
 import { eventBus } from "../lib/eventbus";
 import {
@@ -259,6 +260,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
   /* Esc：先收菜单，再退文件夹（§5.4 三条出路之一） */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不收菜单
       if (e.key !== "Escape") return;
       if (menu) { setMenu(null); return; }
       if (openFolderId) { setOpenFolderId(null); setDrag(null); }
@@ -499,6 +501,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     });
   };
   const onCardKeyDown = (entry: ShelfEntry) => (e: React.KeyboardEvent) => {
+    if (isImeComposing(e)) return; // 组字中的 Enter/空格属于输入法
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (entry.kind === "folder") openInto(entry.id);
@@ -544,6 +547,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
               onChange={(e) => setRenaming({ id: entry.id, value: e.target.value, field: renaming.field })}
               onBlur={() => void commitRename()}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return; // 组字中的 Enter/Esc 属于输入法（确认/取消候选词）
                 if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
                 else if (e.key === "Escape") { e.preventDefault(); setRenaming(null); }
                 e.stopPropagation();

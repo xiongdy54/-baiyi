@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import { isImeComposing } from "../lib/ime";
 import { SKINS } from "../skins";
 import { aiGateway, aiConfigUsable, type AIConfig, type AiPresetMeta, type LocalDetectResult } from "../lib/ai";
 import { settingsStore } from "../lib/settings";
@@ -434,6 +435,7 @@ function MindmapSettingsBlock({ models }: { models: string[] }) {
                 }}
                 onBlur={() => void save("mindmapModel", model.trim())}
                 onKeyDown={(e) => {
+                  if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不收下拉
                   if (e.key === "Escape") setOpen(false);
                 }}
               />
@@ -805,6 +807,7 @@ function AISection() {
                 }
               }}
               onKeyDown={(e) => {
+                if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不收下拉
                 if (e.key === "Escape") setModelsOpen(false);
               }}
             />
@@ -1722,6 +1725,7 @@ function ReaderSection() {
                     setRenameId(null);
                   }}
                   onKeyDown={(e) => {
+                    if (isImeComposing(e)) return; // 组字中的 Enter/Esc 属于输入法（确认/取消候选词）
                     if (e.key === "Enter") {
                       renameTheme(t.id, (e.target as HTMLInputElement).value);
                       setRenameId(null);
@@ -2934,6 +2938,7 @@ function ShortcutsSection() {
   useEffect(() => {
     if (!capturing) return;
     function onKey(e: KeyboardEvent) {
+      if (isImeComposing(e)) return; // 组字中的按键属于输入法，不捕获成键位（含 Esc 取消组字）
       e.preventDefault();
       e.stopPropagation();
       const target = capturingRef.current;
@@ -3135,6 +3140,7 @@ function GlobalShortcutsBlock() {
   useEffect(() => {
     if (!capturing) return;
     function onKey(e: KeyboardEvent) {
+      if (isImeComposing(e)) return; // 组字中的按键属于输入法，不捕获成键位（含 Esc 取消组字）
       e.preventDefault();
       e.stopPropagation();
       const target = capturingRef.current;

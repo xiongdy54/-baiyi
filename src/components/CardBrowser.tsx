@@ -6,6 +6,7 @@
 // 轻量行集（meta/ids）承载排序/预设/页签/锚点闭包/按书 scope，行窗口（cards:getWindow）按需取全行，
 // 含查询条件的查询由主进程求值（cards:queryIds，求值引擎与渲染层同一份 cardQuery 单源产物）。
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { isImeComposing } from "../lib/ime";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -254,6 +255,7 @@ export default function CardBrowser({
       if (schemeWrapRef.current && !schemeWrapRef.current.contains(e.target as Node)) setSchemeMenuOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不收菜单
       if (e.key === "Escape") setSchemeMenuOpen(false);
     };
     document.addEventListener("mousedown", onDown);
@@ -1269,7 +1271,7 @@ export default function CardBrowser({
         const noScope = draft.bookItemIds.length === 0 && !draft.tags?.length && !draft.kpIds?.length;
         return (
           <section className="cb-scheme-editor" data-scheme-editor aria-label={T("新建筛选方案")}
-            onKeyDown={(e) => { if (e.key === "Escape") cancelSchemeEditor(); }}>
+            onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Escape") cancelSchemeEditor(); }}>
             <div className="cb-scheme-editor-title">{T("新建筛选方案")}</div>
 
             <div className="cb-scheme-field">
@@ -1282,7 +1284,7 @@ export default function CardBrowser({
                   placeholder={T("例如：考研英语（留空则自动命名）")}
                   value={deckName}
                   onChange={(e) => setDeckName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") void saveDeck(); }}
+                  onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") void saveDeck(); }}
                 />
               </div>
             </div>
@@ -2479,6 +2481,7 @@ function EditableText({
         }
       }}
       onKeyDown={(e) => {
+        if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不失焦
         if (e.key === "Escape") (e.target as HTMLElement).blur();
       }}
     />

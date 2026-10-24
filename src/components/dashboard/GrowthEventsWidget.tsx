@@ -7,6 +7,7 @@
 // v49.22（D195）：档案只收「建制级」真实跨越（判定在 electron/db.js，本组件零口径）；改为分页展示——
 // 每页 6 条 + 页码窗口（省略号折叠）+ 点省略号就地输入跳页（纯渲染层，零 IPC）。
 import { useEffect, useState } from "react";
+import { isImeComposing } from "../../lib/ime";
 import { useGrowthOverview } from "../../lib/growth";
 import {
   growthEventText,
@@ -90,6 +91,7 @@ export default function GrowthEventsWidget() {
                       defaultValue={safePage}
                       aria-label={T("输入页码跳转")}
                       onKeyDown={(e) => {
+                        if (isImeComposing(e)) return; // 组字中的 Enter/Esc 属于输入法（确认/取消候选词）
                         if (e.key === "Enter") commitJump(e.currentTarget.value);
                         else if (e.key === "Escape") setGapIdx(null);
                       }}

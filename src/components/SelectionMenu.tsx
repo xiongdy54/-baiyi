@@ -11,6 +11,7 @@
 // 由 ResizeObserver 重新定位，保证贴近选区的那条边不动。
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { placePopover, type PopoverRect } from "../lib/popoverPlace";
+import { isImeComposing } from "../lib/ime";
 import type { SelectionBarStyle } from "../lib/selectionBarSettings";
 import { useT } from "../lib/i18n";
 import {
@@ -187,6 +188,7 @@ export default function SelectionMenu({
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             onKeyDown={(e) => {
+              if (isImeComposing(e)) return; // 组字中的 Ctrl+Enter/Esc 属于输入法，不保存/不收面板
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 const c = lastColor.current ?? colors[0];

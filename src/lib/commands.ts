@@ -9,6 +9,7 @@
 //           e.repeat 忽略（长按不连发）；抑制集合非空时全部放行（设置弹窗/键位捕获期间）。
 import { settingsStore } from "./settings";
 import { t } from "./i18n";
+import { isImeComposing } from "./ime";
 
 export interface CommandDef {
   id: string;
@@ -230,6 +231,7 @@ function install(): void {
   window.addEventListener(
     "keydown",
     (e) => {
+      if (isImeComposing(e)) return; // 审计 C-27：输入法组字中的按键（Enter 确认候选词等）属于输入法，不进命令分发
       if (dispatchKey(e)) {
         e.preventDefault();
         e.stopPropagation();

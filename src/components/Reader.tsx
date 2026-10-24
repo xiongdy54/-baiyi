@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+import { isImeComposing } from "../lib/ime";
 import { cardsApi, parseCloze, type CardDraft } from "../lib/cards";
 import { useSelectionActions } from "../lib/useSelectionActions";
 import { headingPathAt, tocPathByHref } from "../lib/reader/tocPath";
@@ -1368,6 +1369,7 @@ export default function Reader({
   useEffect(() => {
     if (!selection) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不清空选集
       if (e.key !== "Escape") return;
       if (manualOpen || aiPanel) return; // 弹层自己处理 Esc
       clearMultiSelect();
@@ -1776,6 +1778,7 @@ export default function Reader({
       setToolMenu(null);
     };
     const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不收工具菜单
       if (e.key === "Escape") setToolMenu(null);
     };
     document.addEventListener("mousedown", onDown, true);
@@ -2071,6 +2074,7 @@ export default function Reader({
                                   value={themeNameDraft}
                                   onChange={(e) => setThemeNameDraft(e.target.value)}
                                   onKeyDown={(e) => {
+                                    if (isImeComposing(e)) return; // 组字中的 Enter/Esc 属于输入法（确认/取消候选词）
                                     if (e.key === "Enter") confirmThemeName();
                                     else if (e.key === "Escape") setThemeNaming(false);
                                   }}
