@@ -83,5 +83,57 @@ console.log("---- ④ 非法值回落 ----");
   w.document.documentElement.style.removeProperty("--mm-exit");
 }
 
+console.log("---- ⑤ 应用动效三态（C-32 A5 motionPreference） ----");
+{
+  const mp = A.motionPreference();
+  check("无 body 类、无 matchMedia → full", mp === "full", mp);
+  w.document.body.classList.add("motion-off");
+  check("body.motion-off → off（直接跳终态）", A.motionPreference() === "off");
+  w.document.body.classList.remove("motion-off");
+  w.document.body.classList.add("motion-reduced");
+  check("body.motion-reduced → reduced（时长减半、只做透明度过渡）", A.motionPreference() === "reduced");
+  w.document.body.classList.remove("motion-reduced");
+  // 系统 prefers-reduced-motion：命中 → off（与既有行为一致）；未命中 → full
+  const realMatch = w.matchMedia;
+  w.matchMedia = (q) => ({ matches: /reduce/.test(String(q)) });
+  globalThis.window = w;
+  check("系统 prefers-reduced-motion 命中 → off", A.motionPreference() === "off");
+  w.matchMedia = () => ({ matches: false });
+  check("系统未命中 → full", A.motionPreference() === "full");
+  if (realMatch) w.matchMedia = realMatch; else delete w.matchMedia;
+}
+
+console.log("---- ⑥ planTransition 的 motionMode（off / reduced） ----");
+{
+  const disp = (ids) => ({
+    rootId: "R", items: ids.map((id) => ({ id, kind: "card", x: 10, y: 10, w: 40, h: 24, nid: id, group: null, level: 0 })),
+    byId: Object.fromEntries(ids.map((id) => [id, { id, kind: "card", x: 10, y: 10, w: 40, h: 24, nid: id, group: null, level: 0 }])),
+    edges: [], consumed: [], groups: {}, bounds: { w: 100, h: 100 }, material: { items: 0, ai: 0 }, stats: { visited: 0, recomputed: 0, reused: 0 },
+  });
+  const prev = disp(["a"]);
+  const next = disp(["a", "b"]);
+  const off = A.planTransition(prev, next, { view: { tx: 0, ty: 0, k: 1 }, motionMode: "off" });
+  check("motionMode=off：duration 0（首帧即终态，无过渡帧）", off.duration === 0 && A.transitionFrame(off, 0).done === true, off.duration);
+  const view = { tx: 5, ty: 6, k: 2 };
+  const red = A.planTransition(prev, next, { view, anchorId: null, motionMode: "reduced" });
+  const fullDur = Math.ceil(Math.max(A.readMotion().move, A.readMotion().enter, A.readMotion().exit) / 2);
+  check(`motionMode=reduced：时长减半（${red.duration} = ceil(max/2)=${fullDur}）`, red.duration === fullDur, { duration: red.duration, fullDur });
+  const fromB = red.from.b;
+  check("reduced：入场几何即终态、只从透明淡入（无位移）", fromB.x === 10 && fromB.y === 10 && fromB.w === 40 && fromB.h === 24 && fromB.o === 0, fromB);
+  check("reduced：视图不动画（viewTo == viewFrom）", red.viewTo.tx === view.tx && red.viewTo.ty === view.ty && red.viewTo.k === view.k, { from: red.viewFrom, to: red.viewTo });
+  const mid = A.transitionFrame(red, Math.max(1, red.duration - 1));
+  check("reduced：中帧新元素半透明、位置已是终态", mid.opacity.b > 0 && mid.opacity.b < 1 && mid.display.byId.b.x === 10, { o: mid.opacity.b });
+  // full vs reduced 的真正分野：既有元素是否做位移过渡（reduced 只做透明度）
+  const moved = {
+    rootId: "R", items: [{ id: "a", kind: "card", x: 50, y: 10, w: 40, h: 24, nid: "a", group: null, level: 0 }],
+    byId: { a: { id: "a", kind: "card", x: 50, y: 10, w: 40, h: 24, nid: "a", group: null, level: 0 } },
+    edges: [], consumed: [], groups: {}, bounds: { w: 100, h: 100 }, material: { items: 0, ai: 0 }, stats: { visited: 0, recomputed: 0, reused: 0 },
+  };
+  const redM = A.planTransition(prev, moved, { view, anchorId: null, motionMode: "reduced" });
+  const fullM = A.planTransition(prev, moved, { view, anchorId: null });
+  check("reduced：既有元素几何直接到终态（from == to，不位移）", redM.from.a.x === 50 && redM.from.a.o === 1, redM.from.a);
+  check("full：既有元素从旧位置位移过渡（既有行为不变）", fullM.from.a.x === 10 && fullM.from.a.o === 1, fullM.from.a);
+}
+
 console.log(`\n结果：${pass} 通过，${fail} 失败`);
 process.exit(fail ? 1 : 0);

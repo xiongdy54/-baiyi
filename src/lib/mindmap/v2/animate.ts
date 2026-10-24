@@ -61,6 +61,25 @@ export function readMotion(): MotionTiming {
   }
 }
 
+/**
+ * C-32 A5：应用动效三态解析（原 MindmapCanvasV2 的 prefersReducedMotion() 布尔值升级）。
+ * body 含 motion-off → "off"（直接跳到终态）；含 motion-reduced → "reduced"（时长减半、只做透明度过渡）；
+ * 否则看系统 prefers-reduced-motion（命中＝"off"，与既有行为一致）；都不是 → "full"。
+ * body 类由主窗口 / 独立窗口的外观挂载点统一落（readAppearance → applyAppearanceToDocument，C-31）。
+ */
+export function motionPreference(): "off" | "reduced" | "full" {
+  try {
+    const cls = typeof document !== "undefined" && document.body ? document.body.classList : null;
+    if (cls) {
+      if (cls.contains("motion-off")) return "off";
+      if (cls.contains("motion-reduced")) return "reduced";
+    }
+    return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "off" : "full";
+  } catch {
+    return "full";
+  }
+}
+
 export const LOD = {
   /** 低于此缩放启用摘要卡 */
   zoom: 0.5,
@@ -163,7 +182,10 @@ export interface TransitionOptions {
   view: View;
   /** S3 锚点（用户操作的节点；流式整图时传根或当前聚焦节点）；null = 不补偿 */
   anchorId?: string | null;
+  /** 旧开关（系统 prefers-reduced-motion 的旧语义＝瞬时）；与 motionMode 并存，true 视同 "off" */
   reducedMotion?: boolean;
+  /** C-32 A5：应用动效三态——off＝直接跳终态；reduced＝时长减半、只做透明度过渡；full＝完整动画 */
+  motionMode?: "off" | "reduced" | "full";
 }
 
 export interface Transition {
@@ -181,10 +203,25 @@ export interface Transition {
 }
 
 export function planTransition(prev: Display | null, next: Display, opts: TransitionOptions): Transition {
-  const instant = !!opts.reducedMotion || !prev;
+  const instant = !!opts.reducedMotion || opts.motionMode === "off" || !prev;
   const pm = parentMap(next);
   const from: Record<string, AnimRect> = {};
   const enter: string[] = [];
+  if (opts.motionMode === "reduced" && !instant) {
+    // C-32 A5「只做透明度过渡」：几何直接到终态（无位移），入场原地淡入（o=0）、离场原地淡出，视图不动；
+    // 时长取 Token 三档最大值的一半。
+    for (const it of next.items) {
+      const p = prev ? prev.byId[it.id] : undefined;
+      if (p) from[it.id] = { x: it.x, y: it.y, w: it.w, h: it.h, o: 1 };
+      else {
+        from[it.id] = { x: it.x, y: it.y, w: it.w, h: it.h, o: 0 };
+        enter.push(it.id);
+      }
+    }
+    const motion = readMotion();
+    const duration = Math.ceil(Math.max(motion.move, motion.enter, motion.exit) / 2);
+    return { to: next, from, enter, leaving: prev ? prev.items.filter((it) => !next.byId[it.id]) : [], viewFrom: { ...opts.view }, viewTo: { ...opts.view }, duration, motion };
+  }
   for (const it of next.items) {
     const p = prev ? prev.byId[it.id] : undefined;
     if (p) from[it.id] = { x: p.x, y: p.y, w: p.w, h: p.h, o: 1 };

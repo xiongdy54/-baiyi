@@ -13,6 +13,7 @@ import { routeRelations, REL_STYLE } from "../../../lib/mindmap/v2/route";
 import { buildCanvasSvg, type SvgLabels } from "../../../lib/mindmap/v2/svg";
 import {
   growthScope,
+  motionPreference,
   lodFrames,
   LOD,
   monotoneFrames,
@@ -93,14 +94,6 @@ const ZMAX = 2.5;
 const FIT_MIN = 0.35;
 const HOVER_PREFETCH_MS = 400;
 const FRESH_MS = 1200;
-
-function prefersReducedMotion(): boolean {
-  try {
-    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  } catch {
-    return false;
-  }
-}
 
 function sameGeometry(a: Display, b: Display): boolean {
   if (a.items.length !== b.items.length || a.edges.length !== b.edges.length) return false;
@@ -290,7 +283,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       requestPaint();
       return;
     }
-    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.viewAnchor === false ? null : p.anchorId, reducedMotion: prefersReducedMotion() });
+    const tr = planTransition(prev, d, { view: viewRef.current, anchorId: p.viewAnchor === false ? null : p.anchorId, motionMode: motionPreference() }); // C-32 A5：应用动效三态（body 类优先，其次系统设置）
     if (prev) {
       const enteredCards = tr.enter.filter((id) => d.byId[id] && d.byId[id].kind === "card");
       if (enteredCards.length) {
