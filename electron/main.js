@@ -742,7 +742,7 @@ async function runExtractRerank() {
   const tpl = getPromptTemplate("extract-rerank");
   const sys = typeof tpl === "string" ? tpl : tpl && tpl.content;
   if (!sys) return { ok: false, usedAI: false, reason: "未播种 extract-rerank 提示词" };
-  const cfg = getAIConfig();
+  const cfg = await getAIConfig();
   if (cfg.preset !== "local" && !cfg.apiKey) return { ok: false, usedAI: false, reason: "未配置 AI Key（保持本地因子序）" };
   const callAI = async ({ candidates }) => {
     // v49.8（D182）：重排理由随界面语言——zh-CN 保持原样零变化，其余语言在 system 侧追加指令行
@@ -1040,8 +1040,8 @@ ipcMain.on("app:relaunch", () => {
 // ---------- AI 网关 ----------
 // §7.5「渲染层不持有明文 Key」：解密只发生在主进程，返回体剥掉 apiKey
 // （ai:setConfig 早就是 `const { apiKey, ...safe }` 的剥法，这里对齐；hasKey/preset/baseUrl/model 照旧）。
-ipcMain.handle("ai:getConfig", () => {
-  const { apiKey, ...safe } = getAIConfig();
+ipcMain.handle("ai:getConfig", async () => {
+  const { apiKey, ...safe } = await getAIConfig();
   return safe;
 });
 ipcMain.handle("ai:setConfig", (_e, partial) => setAIConfig(partial || {}));
@@ -1688,9 +1688,9 @@ const memoryCtx = () => ({
   readSettings,
   writeSettings,
   userData: app.getPath("userData"),
-  hasKey: () => {
+  hasKey: async () => {
     try {
-      const cfg = getAIConfig();
+      const cfg = await getAIConfig();
       return Boolean(cfg.hasKey) || cfg.preset === "local";
     } catch {
       return false;
@@ -1779,9 +1779,9 @@ const mindmapCtx = () => ({
   db: dbModule,
   readSettings,
   writeSettings,
-  hasKey: () => {
+  hasKey: async () => {
     try {
-      const cfg = getAIConfig();
+      const cfg = await getAIConfig();
       return Boolean(cfg.hasKey) || cfg.preset === "local";
     } catch {
       return false;
@@ -1964,7 +1964,7 @@ ipcMain.handle("mindmap:graphNodeAnchors", (_e, p) => getMindmapEngineV2().graph
 // v46（M14-UM2，§4.18-7/8）：制卡记忆接地检索——Stage A 本地宽召回（memoryRetrieve 纯函数）。
 // 调用方（渲染层 cards.ts）只在模板 situationRequired=1 且开关开启时到达这里；
 // 无 Key 也跳过（§6.7.3「无 Key 零检索」——检索结果只服务即将发出的 AI 调用）。
-ipcMain.handle("memory:retrieve", (_e, payload) => {
+ipcMain.handle("memory:retrieve", async (_e, payload) => {
   // v48.114（D159）：用户记忆暂时移除——接地检索恒回 disabled（调用方按「未开启」短路，零 AI 调用）。
   // 检索实现体原样保留在下方；重实装时删去本早退即可（契约 §4.18 / §6.7 冻结）。
   void payload;
@@ -1974,7 +1974,7 @@ ipcMain.handle("memory:retrieve", (_e, payload) => {
   const mctx = memoryCtx();
   const cfg = memoryTidy.readMemoryConfig(mctx);
   if (!cfg.enabled) return { ok: false, reason: "disabled", block: null, hitTopics: [] };
-  if (!mctx.hasKey()) return { ok: false, reason: "no-key", block: null, hitTopics: [] };
+  if (!(await mctx.hasKey())) return { ok: false, reason: "no-key", block: null, hitTopics: [] };
   const dir = memoryStore.resolveMemoryDir(mctx.userData);
   memoryStore.ensureTree(dir);
   const usage = memoryStore.usageStats(dir);

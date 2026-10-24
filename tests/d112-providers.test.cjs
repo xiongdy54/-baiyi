@@ -104,25 +104,27 @@ app
 
       // ---------- S2 切换预设不串 Key ----------
       flow.section("S2 切换预设：端点重置 + Key 按服务商留存");
-      ai.setAIConfig({ preset: "deepseek", apiKey: "sk-d112-AAA" });
+      await ai.setAIConfig({ preset: "deepseek", apiKey: "sk-d112-AAA" });
       let c = ai.getAIConfig();
       flow.eq("切到 deepseek 端点重置为官方值", c.baseUrl, "https://api.deepseek.com/v1");
       flow.eq("deepseek 模型默认 deepseek-chat", c.model, "deepseek-chat");
       flow.eq("deepseek Key A 生效", c.apiKey, "sk-d112-AAA");
-      ai.setAIConfig({ preset: "zai", apiKey: "sk-d112-BBB" });
+      await ai.setAIConfig({ preset: "zai", apiKey: "sk-d112-BBB" });
       c = ai.getAIConfig();
       flow.eq("切到 zai 模型重置", c.model, "glm-4.7-flash");
       flow.eq("zai Key B 生效", c.apiKey, "sk-d112-BBB");
-      ai.setAIConfig({ preset: "deepseek" });
+      await ai.setAIConfig({ preset: "deepseek" });
       c = ai.getAIConfig();
       flow.eq("切回 deepseek 自动恢复 Key A（绝不串用别家）", c.apiKey, "sk-d112-AAA");
-      ai.setAIConfig({ preset: "local" });
+      await ai.setAIConfig({ preset: "local" });
       c = ai.getAIConfig();
       flow.eq("切到 local：Key 清空（从未配过）", c.apiKey, "");
-      ai.setAIConfig({ preset: "zai" });
+      await ai.setAIConfig({ preset: "zai" });
       c = ai.getAIConfig();
       flow.eq("再切回 zai 仍是 Key B", c.apiKey, "sk-d112-BBB");
-      flow.check("未知 preset id 不被接受（守门）", (() => { ai.setAIConfig({ preset: "no-such-vendor" }); return ai.getAIConfig().preset === "zai"; })(), true, ai.getAIConfig().preset);
+      await await ai.setAIConfig({ preset: "no-such-vendor" });
+      const rejected = await ai.getAIConfig();
+      flow.check("未知 preset id 不被接受（守门）", rejected.preset === "zai", true, rejected.preset);
 
       // ---------- S3 aiConfigUsable（渲染层 bundle 同源） ----------
       flow.section("S3 aiConfigUsable：本地免 Key 单一判据");
@@ -138,7 +140,7 @@ app
         { path: "/v1/models", json: { data: [{ id: "model-b" }, { id: "model-a" }] } }
       ]);
       const portModels = await listenModels();
-      ai.setAIConfig({ preset: "local", baseUrl: `http://127.0.0.1:${portModels}/v1` });
+      await ai.setAIConfig({ preset: "local", baseUrl: `http://127.0.0.1:${portModels}/v1` });
       flow.eq("本地 OpenAI 形状列表（排序）", await ai.listModels(), ["model-a", "model-b"]);
       flow.check("本地调用不带 Authorization", hitsModels.every((h) => h.auth === ""), true, JSON.stringify(hitsModels));
 
@@ -147,10 +149,10 @@ app
         { path: "/api/tags", json: { models: [{ name: "qwen3:8b" }, { name: "llama3:8b" }, { name: "mistral" }] } }
       ]);
       const portTags = await listenTags();
-      ai.setAIConfig({ preset: "local", baseUrl: `http://127.0.0.1:${portTags}/v1` });
+      await ai.setAIConfig({ preset: "local", baseUrl: `http://127.0.0.1:${portTags}/v1` });
       flow.eq("/v1/models 404 → 降级原生 /api/tags", await ai.listModels(), ["llama3:8b", "mistral", "qwen3:8b"]);
 
-      ai.setAIConfig({ preset: "custom", baseUrl: "http://127.0.0.1:9/v1" });
+      await ai.setAIConfig({ preset: "custom", baseUrl: "http://127.0.0.1:9/v1" });
       let noKeyErr = null;
       try { await ai.listModels(); } catch (e) { noKeyErr = e; }
       flow.check("无 Key 拉列表 → AI_NO_KEY", noKeyErr && noKeyErr.code === "AI_NO_KEY", "AI_NO_KEY", noKeyErr && noKeyErr.code);

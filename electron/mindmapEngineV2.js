@@ -223,10 +223,13 @@ function createMindmapEngineV2(deps) {
   const newJobId = () => `j${now().toString(36)}${(++jobSeq).toString(36)}`;
 
   // ---------- AI 配置 / 提示词 ----------
-  function aiInfo() {
+  // C-24（Electron 45）：safeStorage 异步化后 getAIConfig 为 async——aiInfo 及其宿主
+  // （runOutline/graphGenerate/graphResume/runExpand/graphExpand/graphExpandAll/graphEstimate/
+  // graphEnsureMap）随之 async；对外全部经 ipcMain.handle（原生支持 Promise）或 scheduler。
+  async function aiInfo() {
     const settings = readMindmapSettings();
     let cfg = {};
-    try { cfg = (d.getAIConfig && d.getAIConfig()) || {}; } catch { cfg = {}; }
+    try { cfg = (d.getAIConfig && (await d.getAIConfig())) || {}; } catch { cfg = {}; }
     const model = settings.model || String(cfg.model || "");
     return {
       settings, provider: String(cfg.preset || "custom"), model,
@@ -647,8 +650,8 @@ function createMindmapEngineV2(deps) {
     return { jobId: r.meta.jobId, status: r.status, promise: r.promise };
   }
 
-  function runOutline(mapId, S, sc, opts, signal, ctl) {
-    const ai = aiInfo();
+  async function runOutline(mapId, S, sc, opts, signal, ctl) {
+    const ai = await aiInfo();
     const prompt = promptOf("outline");
     const aliases = V.buildAliasTable(V.outlineRefCandidates(S.refRows, sc.nodeId));
     const numberedText = B.renderNumbered(S.linear.text, S.blocks, sc.blockFrom, sc.blockTo);
@@ -767,7 +770,7 @@ function createMindmapEngineV2(deps) {
     emitDelta({ documentId: G.documentId, mapId: G.mapId, jobId: null, kind: "run", runDone: { stage, deleted }, metrics: snap || undefined });
   }
 
-  function graphGenerate(p) {
+  async function graphGenerate(p) {
     const o = p || {};
     const docId = String(o.documentId);
     const S = sessions.get(docId);
@@ -775,7 +778,7 @@ function createMindmapEngineV2(deps) {
     touch(S);
     for (const G of gens.values()) if (G.documentId === docId && !G.finished) return { runId: G.runId, mapId: G.mapId };
     if (o.title && String(o.title).trim()) S.title = String(o.title).trim();
-    const ai = aiInfo();
+    const ai = await aiInfo();
     scheduler.setMaxConcurrency(ai.settings.concurrency);
     const pv = { outline: promptOf("outline").version, expand: promptOf("expand").version, explain: promptOf("explain").version };
     const skeleton = V.skeletonRows(S.skeleton, S.blocks, S.complete ? Infinity : S.unitsReady, S.scopes);
@@ -798,7 +801,7 @@ function createMindmapEngineV2(deps) {
     return { runId: run.id, mapId };
   }
 
-  function graphResume(p) {
+  async function graphResume(p) {
     const runId = String((p && p.runId) || "");
     if (gens.has(runId)) return { queued: gens.get(runId).pending };
     if (alls.has(runId)) return { queued: alls.get(runId).pending };
@@ -822,7 +825,7 @@ function createMindmapEngineV2(deps) {
     const rows = store.listMaterialMapNodes(map.id);
     const done = outlinedScopeIds(rows);
     store.updateMaterialMapRun(runId, { status: "running", stage: "running" });
-    if (!metricsByMap.has(map.id)) metricsByMap.set(map.id, newMetrics(aiInfo().model));
+    if (!metricsByMap.has(map.id)) metricsByMap.set(map.id, newMetrics((await aiInfo()).model));
     const G = newGen({
       runId, mapId: map.id, S, activated: !!map.isActive || rows.some((r) => r.source === "ai"),
       filter: (sc) => !done.has(sc.scopeId), skeletonFinal: false,
@@ -912,7 +915,7 @@ function createMindmapEngineV2(deps) {
     return { jobId: r.meta.jobId, status: r.status, promise: r.promise };
   }
 
-  function runExpand(mapId, nodeId, o, signal, ctl) {
+  async function runExpand(mapId, nodeId, o, signal, ctl) {
     const g = loadGraph(mapId);
     const row = g && g.byId.get(nodeId);
     const blocks = g ? blocksFor(g) : null;
@@ -924,7 +927,7 @@ function createMindmapEngineV2(deps) {
       emitDelta({ documentId: S.documentId, mapId, jobId: o.jobId, kind: "expand", jobDone: { ok: gate === "floor", skipped: gate, cached: false, aborted: false, finishReason: null } });
       return Promise.resolve({ ok: gate === "floor", called: 0, skipped: gate });
     }
-    const ai = aiInfo();
+    const ai = await aiInfo();
     const prompt = promptOf("expand");
     const levels = row.blockEnd - row.blockStart + 1 <= 8 ? 1 : 2;
     const aliases = V.buildAliasTable(V.expandRefCandidates(g.rows, g.edges, nodeId));
@@ -946,14 +949,14 @@ function createMindmapEngineV2(deps) {
     }, signal, ctl);
   }
 
-  function graphExpand(p) {
+  async function graphExpand(p) {
     const o = p || {};
     const trigger = TRIGGERS.has(o.trigger) ? o.trigger : "click";
     const mapId = String(o.mapId);
     const map = store.getMaterialMap(mapId);
     if (!map) throw codeErr("not_found", "导图版本不存在");
     const docId = String(map.documentId);
-    const ai = aiInfo();
+    const ai = await aiInfo();
     scheduler.setMaxConcurrency(ai.settings.concurrency);
     if (trigger === "prefetch") {
       // X4：只在用户本会话已对该图主动发过 AI 请求后生效；每日上限按账本 trigger='prefetch' 计
@@ -1040,12 +1043,12 @@ function createMindmapEngineV2(deps) {
       budget: E.budget, mapId: E.mapId, published: true, label: allLabel(E),
     });
   }
-  function graphExpandAll(p) {
+  async function graphExpandAll(p) {
     const mapId = String((p && p.mapId) || "");
     const map = store.getMaterialMap(mapId);
     if (!map) throw codeErr("not_found", "导图版本不存在");
     for (const E of alls.values()) if (E.mapId === mapId && !E.finished) return { runId: E.runId, queued: E.planned };
-    const ai = aiInfo();
+    const ai = await aiInfo();
     scheduler.setMaxConcurrency(ai.settings.concurrency);
     const run = store.createMaterialMapRun({ documentId: map.documentId, granularity: "v2", input: { engine: "v2", kind: "expandAll", mapId } });
     store.updateMaterialMapRun(run.id, { status: "running", stage: "running", provider: ai.provider, model: ai.model });
@@ -1097,7 +1100,7 @@ function createMindmapEngineV2(deps) {
     const blocks = g ? blocksFor(g) : null;
     if (!g || !row || !blocks) return { ok: false, called: 0 };
     const S = g.S;
-    const ai = aiInfo();
+    const ai = await aiInfo();
     const prompt = promptOf("explain");
     const M = metricsFor(mapId, ai.model);
     const numberedText = B.renderNumbered(S.linear.text, blocks, row.blockStart, row.blockEnd);
@@ -1282,10 +1285,10 @@ function createMindmapEngineV2(deps) {
     return none;
   }
 
-  function graphEstimate(p) {
+  async function graphEstimate(p) {
     const docId = String((p && p.documentId) || "");
     const S = sessions.get(docId);
-    const ai = aiInfo();
+    const ai = await aiInfo();
     const out = { scopes: 0, chars: 0, estPromptTokens: 0, estCompletionTokens: 0, model: ai.model, concurrency: ai.settings.concurrency, textReady: !!(S && S.complete), floorScopes: 0 };
     if (!S) return out;
     const sys = estimateTokens(promptOf("outline").content);
@@ -1415,7 +1418,7 @@ function createMindmapEngineV2(deps) {
     return out;
   }
 
-  function graphEnsureMap(p) {
+  async function graphEnsureMap(p) {
     const o = p || {};
     const docId = String(o.documentId == null ? "" : o.documentId);
     let active = null;
@@ -1425,7 +1428,7 @@ function createMindmapEngineV2(deps) {
     if (!S || !S.complete) throw codeErr("no_text", "原文尚未送完（先 graphFeed）");
     touch(S);
     if (o.title && String(o.title).trim()) S.title = String(o.title).trim();
-    const ai = aiInfo();
+    const ai = await aiInfo();
     const pv = { outline: promptOf("outline").version, expand: promptOf("expand").version, explain: promptOf("explain").version };
     const skeleton = V.skeletonRows(S.skeleton, S.blocks, Infinity, S.scopes);
     const { mapId } = store.createMaterialMapV2({

@@ -238,15 +238,17 @@ function modelIdsFromJson(json) {
   return raw.map((m) => (typeof m === "string" ? m : m.id || m.name || m.model)).filter(Boolean);
 }
 
-function getAIConfig() {
+// C-24（Electron 45）：safeStorage 异步化（keyVault）后 getAIConfig / setAIConfig / chatStreamOnce
+// 变 async——调用方（main.js / mindmapEngine*.js / memoryTidy.js / tests）已同步加 await。
+async function getAIConfig() {
   const cfg = readConfig();
-  const st = keyVault.strength();
+  const st = await keyVault.strength();
   let apiKey = "";
   // keyStorage：Key 当前从哪来——"encrypted"（密文落盘可解）/ "session"（仅本进程内存）/ "none"
   let keyStorage = "none";
   if (cfg.apiKeyEnc && st !== "none") {
     try {
-      apiKey = keyVault.decrypt(cfg.apiKeyEnc);
+      apiKey = await keyVault.decrypt(cfg.apiKeyEnc);
     } catch {
       apiKey = "";
     }
@@ -277,7 +279,7 @@ function getAIConfig() {
   };
 }
 
-function setAIConfig(partial) {
+async function setAIConfig(partial) {
   const cfg = readConfig();
   if (!cfg.keys || typeof cfg.keys !== "object") cfg.keys = {};
   if (typeof partial.preset === "string" && PRESETS[partial.preset] && partial.preset !== cfg.preset) {
@@ -321,8 +323,8 @@ function setAIConfig(partial) {
       cfg.apiKeyEnc = null;
       sessionKeys.delete(cfg.preset || "custom");
       if (cfg.preset) delete cfg.keys[cfg.preset];
-    } else if (keyVault.strength() === "secure") {
-      cfg.apiKeyEnc = keyVault.encrypt(partial.apiKey);
+    } else if ((await keyVault.strength()) === "secure") {
+      cfg.apiKeyEnc = await keyVault.encrypt(partial.apiKey);
       // 按服务商留存一份，切换回来时自动恢复
       if (cfg.preset) cfg.keys[cfg.preset] = cfg.apiKeyEnc;
     } else {
@@ -335,7 +337,7 @@ function setAIConfig(partial) {
     }
   }
   writeConfig(cfg);
-  const { apiKey, ...safe } = getAIConfig();
+  const { apiKey, ...safe } = await getAIConfig();
   return safe;
 }
 
@@ -487,12 +489,12 @@ function chatStream({ messages, temperature, abortSignal, retry, model, maxToken
   return run();
 }
 
-function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }, send) {
+async function chatStreamOnce({ messages, temperature, abortSignal, model, maxTokens }, send) {
   // v48.12 P0：TTFT / 首字节打点（只测量，不改变任何调用行为）
   const startedAt = Date.now();
   let firstByteMs = null;
   let ttftMs = null;
-  const cfg = getAIConfig();
+  const cfg = await getAIConfig();
   // 本地模型服务无需 Key
   const needKey = cfg.preset !== "local";
   if (needKey && !cfg.apiKey) {
@@ -698,7 +700,7 @@ async function ollamaTagsFallback(baseUrl) {
 }
 
 async function listModels() {
-  const cfg = getAIConfig();
+  const cfg = await getAIConfig();
   const needKey = cfg.preset !== "local";
   if (needKey && !cfg.apiKey) {
     const err = new Error("尚未配置 AI API Key。请先粘贴并保存 Key。");
@@ -763,7 +765,7 @@ async function detectLocalRuntime(probes) {
 }
 
 async function testConnection() {
-  const cfg = getAIConfig();
+  const cfg = await getAIConfig();
   const needKey = cfg.preset !== "local";
   if (needKey && !cfg.apiKey) return { ok: false, message: "尚未配置 API Key，请先在下方输入并点击保存" };
   let acc = "";
