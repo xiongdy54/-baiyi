@@ -55,7 +55,7 @@ function createWindow() {
     frame: false,
     show: false,
     title: "制卡台",
-    icon: path.join(__dirname, "icon.ico"),
+    icon: process.platform === "win32" ? path.join(__dirname, "icon.ico") : path.join(__dirname, "icons", "icon-light.png"), // C-28：非 Windows 用 PNG（ico 只有 Windows 认；与主窗口 icons/ PNG 同目录）
     alwaysOnTop: pinned,
     backgroundColor: themeBackground(),
     webPreferences: {
