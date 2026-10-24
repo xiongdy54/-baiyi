@@ -381,7 +381,8 @@ function FollowUpList({
                         aria-label={T("编辑条目")}
                         onChange={(e) => setDraft(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" && !isImeComposing(e)) commitEdit(item);
+                          if (isImeComposing(e)) return; // 组字中的 Enter/Esc 属于输入法（确认/取消候选词），不提交/不关编辑框
+                          if (e.key === "Enter") commitEdit(item);
                           else if (e.key === "Escape") {
                             e.stopPropagation();
                             setEditing(null);
