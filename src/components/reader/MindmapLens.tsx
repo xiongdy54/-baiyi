@@ -516,10 +516,14 @@ export default function MindmapLens({
 
   /** D204：被点节点卡片中心在屏幕 DIP 的当前位置（改 overrides 之前调用）。
    * C-33：这是本文件唯一读窗口屏幕原点的地方（计算点击位置）；窗口层过渡的补偿量一律来自
-   * 主进程 fit 响应的 prevBounds（B1），D204 的逐帧轮询已删。 */
+   * 主进程 fit 响应的 prevBounds（B1），D204 的逐帧轮询已删。
+   * C-33：量测基准取**卡片矩形**（g 的首个 rect 子元素）而非 g 自身——g 的 bbox 含折叠徽标
+   * （收起态 "+N" 徽标伸出卡右缘 w/2），展开/收起切换徽标会使 bbox 中心横移 ~8px，而卡片本体不动；
+   * 主进程 computeFit 的锚点公式用的正是布局卡片矩形，两边必须同一基准（实测偏差 8px → 1.41px）。 */
   const captureNodeScreen = useCallback((id: string) => {
     try {
-      const el = document.querySelector(`.mm2-focus-canvas svg g[data-node-id="${String(id)}"]`);
+      const g = document.querySelector(`.mm2-focus-canvas svg g[data-node-id="${String(id)}"]`);
+      const el = (g?.querySelector(":scope > rect") as Element | null) ?? g;
       const r = el?.getBoundingClientRect();
       if (!r || r.width <= 0 || r.height <= 0) return null;
       return {
