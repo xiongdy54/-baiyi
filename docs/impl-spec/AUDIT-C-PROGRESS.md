@@ -24,6 +24,7 @@
 - **已完成**：C-07、C-01、C-02、C-03、C-04、C-05、C-06、C-45、C-08、C-09、C-10、C-11、C-12、C-13、C-14、C-15、C-16、C-17、C-18、C-19、C-20、C-21、C-22、C-23、C-43、C-44、C-46、C-47、C-48。
 - **下一项**：**C-24**（阶段 3 平台：Electron 31 已停止支持的升级路线 + Windows 32 位策略 + Wayland；P1，⛔ 决策 D-01 / D-10 待用户答复；报告小节 :2252 起）。
 - **C-48 数据检查结论（2026-10-24，报告第 3 步只读检查）**：真实开发数据（`%APPDATA%\Nutation-dev` 副本）输出 `pointer: "cfg-default"`、`legacyWeightsStillPresent: false`、`optimizerRows: []`——库内零 optimizer 行说明 v23 迁移从未在该数据上触发，**未受 C-48 影响**，无需用户决策（报告的「问用户」分支仅在存在 optimizer 行时适用）。
+- **D-01 / D-10 决策记录（2026-10-24，主控 AskUserQuestion 用户答复）**：**D-10 目标 Electron 版本 = 45**（2026-10-20 发布的最新稳定版，支持到 2027-04-27，报告推荐项）；**D-01 Windows 32 位 = 放弃 ia32**（electron-builder 目标不含 ia32，README/发布说明写明「Windows 10/11 64 位（x64 / ARM64）」，报告推荐项）。C-24 解除阻塞。
 - **D-02 决策记录（2026-10-23，用户在本会话逐项确认）**：发布仓库冻结为 **xiongdy54/Nutation**（本地 origin 已指向它，实测可访问）；appId = **io.github.xiongdy54.nutation**（Flathub 对 GitHub 托管应用的强制命名，为上 Flathub 留后路）；对外 productName = **Nutation**（沿用 D187 既定名）；package.json author = **xiongdy54 + `152503729+xiongdy54@users.noreply.github.com`**（GitHub noreply，零真实信息暴露；数字 ID 经 `github.com/<user>.png` 跳转实测）。另确认：LICENSE 已是 PolyForm Noncommercial 1.0.0（不影响作者本人将来商业化）；代码签名属 C-30，本项不涉及。
 
 ### 1.1 已知失败与归属（2026-10-23，Windows）
