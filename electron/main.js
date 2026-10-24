@@ -2141,7 +2141,8 @@ app.whenReady().then(async () => {
   setTimeout(() => {
     if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh();
   }, 20000);
-  Menu.setApplicationMenu(null);
+  // C-25：macOS 需要应用菜单（Cmd+C/V/X/A/Z 与 Cmd+Q 依赖菜单 role 生效）；非 mac 返回 null 保持无菜单栏现状
+  require("./appMenu").applyAppMenu();
   // C-09：收紧默认 session 的权限请求与检查（必须早于任何窗口创建；四窗口均未使用自定义 partition）
   installPermissionHandlers(session.defaultSession);
   // 先建窗口立即给用户视觉反馈，数据库并行初始化（v10.2 启动优化）
