@@ -17,7 +17,7 @@ import type { GraphState, V2Edge, V2Node, PatternKey } from "../../lib/mindmap/v
 import { ROOT_ID } from "../../lib/mindmap/v2/types";
 import { ancestors, applyDelta, childrenOf, createGraph, setView } from "../../lib/mindmap/v2/graph";
 import { groupFacts, selectPattern, HOW_NAMES, PATTERN_NAMES, type PatternHow } from "../../lib/mindmap/v2/pattern";
-import { createLayoutCache, layoutGraph, type Display } from "../../lib/mindmap/v2/layout";
+import { createLayoutCache, layoutGraph, type Display, type LayoutCache } from "../../lib/mindmap/v2/layout";
 import { perfBegin, perfIpc, perfLayout, perfOn } from "../../lib/mindmap/v2/perf";
 import { chooseFocus, computeFit, LENS_PAD_SIDE, LENS_PAD_TOP } from "../../lib/lensWindowFit";
 import MindmapCanvasV2, { type MindmapCanvasHandle } from "./mindmap/MindmapCanvasV2";
@@ -453,10 +453,11 @@ export default function MindmapLens({
   const rootTitle = cutNode?.title || graph?.meta?.title || title;
   const rootType = cutNode?.type ? String(cutNode.type) : "";
   const measureGraph = useCallback(
-    (g: GraphState, maxChildren?: Readonly<Record<string, number>>, noLod?: boolean) => {
+    (g: GraphState, maxChildren?: Readonly<Record<string, number>>, noLod?: boolean, cache?: LayoutCache) => {
       const timed = perfOn(); // C-32 A1：布局计时（perf 开启时计入当前测量窗）
       const t0 = timed ? performance.now() : 0;
-      const d = layoutGraph(g, { cache: createLayoutCache(), locks: {}, frameLabel, rootTitle, maxChildren, noLod });
+      // C-32 A2：cache 由调用方传入（requestFit 内所有 measureGraph 共用一个）；缺省＝每次新缓存（原行为）
+      const d = layoutGraph(g, { cache: cache ?? createLayoutCache(), locks: {}, frameLabel, rootTitle, maxChildren, noLod });
       if (timed) perfLayout(performance.now() - t0);
       return { d, content: { w: d.bounds.w, h: d.bounds.h } };
     },
@@ -552,6 +553,9 @@ export default function MindmapLens({
     }
     const expandReq = pending ? { anchorScreen: pending.anchorScreen, animate: true as const } : {};
     const pinId = pending?.nodeId ?? null;
+    // C-32 A2：本次 fit 请求内所有 measureGraph 调用共用一个布局缓存（子树复用；等价性闸门见
+    // tests/m15v2.lensfit-cache.test.cjs——共享与新缓存的布局结果逐字节全等）
+    const fitCache = createLayoutCache();
     // C-32 A1：fit IPC 前后计时（perf 开启时计入当前测量窗；本地兜底同样计入）
     const fitTimed = async (req: LensFitRequest) => {
       const t0 = perfOn() ? performance.now() : 0;
@@ -573,7 +577,7 @@ export default function MindmapLens({
       };
 
       if (showAll) {
-        const m = measureGraph(allGraph ?? lensGraph, undefined, true);
+        const m = measureGraph(allGraph ?? lensGraph, undefined, true, fitCache);
         const key = `all|${m.content.w}x${m.content.h}`;
         if (fitted && lastFitRef.current === key) return;
         const r = await fitTimed({ content: m.content, anchor: anchorOf(m.d), current, mode: "all", ...expandReq });
@@ -586,7 +590,7 @@ export default function MindmapLens({
         return;
       }
 
-      const base = measureGraph(lensGraph, undefined, true);
+      const base = measureGraph(lensGraph, undefined, true, fitCache);
       const baseKey = `auto|${base.content.w}x${base.content.h}`;
       if (fitted && lastFitRef.current === baseKey) return;
       const probe = await fitTimed({ content: base.content, anchor: anchorOf(base.d), current, mode: "fit", ...expandReq });
@@ -609,7 +613,7 @@ export default function MindmapLens({
       const fg = focusGraph ?? lensGraph;
       const choice = chooseFocus({
         total,
-        measure: (n) => measureGraph(fg, { [ROOT_ID]: n }).content,
+        measure: (n) => measureGraph(fg, { [ROOT_ID]: n }, undefined, fitCache).content,
         workArea: probe.workArea,
       });
       const fkey = `focus|${choice.n}|${choice.content.w}x${choice.content.h}`;
@@ -617,7 +621,7 @@ export default function MindmapLens({
         setFocusN(choice.n);
         return;
       }
-      const fm = measureGraph(fg, { [ROOT_ID]: choice.n });
+      const fm = measureGraph(fg, { [ROOT_ID]: choice.n }, undefined, fitCache);
       const r = await fitTimed({ content: fm.content, anchor: anchorOf(fm.d), current, mode: "focus", ...expandReq });
       if (token !== fitSeqRef.current) return;
       setFitState({ scale: r.scale, tier: r.tier, content: fm.content, bounds: r.bounds });
