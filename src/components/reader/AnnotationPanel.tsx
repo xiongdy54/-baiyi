@@ -251,9 +251,10 @@ export default function AnnotationPanel({
                     onBlur={() => commitEdit(it)}
                     onKeyDown={(e) => {
                       if (isImeComposing(e)) return; // 组字中的 Esc / Ctrl+Enter 属于输入法，不提交/不取消编辑
-                      if (e.key === "Escape") {
-                        setEditingId(null);
-                      } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                      // C-34c：Esc＝先保存再退出（commitEdit 含收起），与 AnnotationEditor 的「Esc 保存并收起」
+                      // 语义对齐（编辑契约 docs/EDIT-CONTRACT.md）——此前是「放弃」，静默丢改动。
+                      if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) {
+                        e.preventDefault();
                         commitEdit(it);
                       }
                     }}
