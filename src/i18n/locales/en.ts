@@ -1182,8 +1182,9 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "恢复（解除归档）": "Restore (unarchive)",
   "推迟 1 天": "Postpone 1 day",
   "重置为新卡": "Reset to new card",
-  "题面与答案可直接点击编辑（失焦落库，挖空卡自动回填挖空语法）；复习评分请回到「复习」页。":
-    "Click the front or back to edit inline (saved on blur; cloze cards refill the syntax). Grade reviews on the Review page.",
+  "题面与答案可直接点击编辑（失焦落库，填空卡直接编辑挖空源文本）；复习评分请回到「复习」页。":
+    "Click the front or back to edit inline (saved on blur; cloze cards edit the raw cloze source). Grade reviews on the Review page.",
+  "内容为空，未保存": "Content is empty — not saved",
   "播放发音": "Play pronunciation",
   "诊断": "Diagnose",
   "补卡": "Supplement",

@@ -8,9 +8,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { growTextarea } from "../lib/autoGrow";
 import { isImeComposing } from "../lib/ime";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import ReadMarkdown from "./editor/ReadMarkdown";
 import { lintCard, needsAttribution, parseCloze, parseFollowUps, type CardDraft, type CardQualifier, type CardGenMode, type FollowUpGroup, type OcclusionRegion } from "../lib/cards";
 import { sanitizeDomain } from "../lib/udc";
 import { isLikelySameText, parseSteMarkers, stripSteMarkers, type ExplainModePref } from "../lib/explainRouter";
@@ -154,9 +152,7 @@ export function ExplainThread({ items, onMake }: { items: AskThreadItem[]; onMak
           {it.answer && (
             <div className="wb-a">
               <div className="ai-answer">
-                <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                  {stripSteMarkers(it.answer)}
-                </ReactMarkdown>
+                <ReadMarkdown text={stripSteMarkers(it.answer)} />
               </div>
               {!it.running && (
                 <div className="wb-a-acts">
@@ -413,9 +409,7 @@ function FollowUpList({
                 {isOpen && exp?.answer && (
                   <div className="ai-kp-exp">
                     <div className="ai-answer">
-                      <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                        {stripSteMarkers(exp.answer)}
-                      </ReactMarkdown>
+                      <ReadMarkdown text={stripSteMarkers(exp.answer)} />
                     </div>
                     {!exp.running && (
                       <div className="ai-kp-exp-foot">
@@ -586,9 +580,7 @@ export default function AIPanel({
               {/* v48.74（D118 §3①）：渲染前剥离 <!--ste:…--> 机器标记——react-markdown@10 会把
                   未挂 rehype-raw 的 HTML 注释以转义文本渲染出来（D91 的「不可见」假设不成立）；
                   panel.answer 数据层原样保留（parseSteMarkers / 相似性判定不受影响） */}
-              <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>
-                {stripSteMarkers(panel.answer)}
-              </ReactMarkdown>
+              <ReadMarkdown text={stripSteMarkers(panel.answer)} />
             </div>
             {/* v48.51（D91 §5.5）：事后建议——路由错配的语义级纠偏，点击即按通用解读重跑（reader-explain scope） */}
             {suggestGeneral && (

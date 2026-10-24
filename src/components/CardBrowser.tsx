@@ -1,5 +1,5 @@
 // 卡片浏览界面（v19 Anki 式改造）：全量卡片表格 + 搜索/类型/状态筛选 + 排序 + 行详情维护。
-// 浏览器式操作（对齐 Anki 浏览器，基于本库数据）：卡面预览与内联编辑（复用复习页 CardFace/EditableText）、
+// 浏览器式操作（对齐 Anki 浏览器，基于本库数据）：卡面预览与内联编辑（复用复习页 CardFace/EditableField）、
 // 暂停/恢复、推迟、重置为新卡、删除、跳转原文、质检问题（CardIssue）查看、Leech 六步向导入口。
 // 评分调度仍在连续刷题界面（ReviewView），此处不写复习日志。
 // v48.67（D111 §6.8-6 数据通道）：主进程过滤 + 分页取数——全量 cards:listAll 消费退役：
@@ -7,9 +7,10 @@
 // 含查询条件的查询由主进程求值（cards:queryIds，求值引擎与渲染层同一份 cardQuery 单源产物）。
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isImeComposing } from "../lib/ime";
-import ReactMarkdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import ReadMarkdown from "./editor/ReadMarkdown";
+import MarkdownEditor from "./editor/MarkdownEditor";
+import EditableField from "./editor/EditableField";
+import { ClozeDraftEditor } from "./editor/CardFields";
 import { parseCloze, extractClozeAnswers, cardsApi, hasSourceAnchor, type CardRecord, type CardIssueRecord, type CardGenInfo, type TodayQueue, type BrowserMetaRow } from "../lib/cards";
 import { playVocabAudio } from "../lib/dictClient";
 import { eventBus } from "../lib/eventbus";
@@ -1969,7 +1970,7 @@ export function ExtractDetail({
 }
 
 // ---------- 行详情（v19：Anki 浏览器的卡片信息 + 维护动作） ----------
-// 卡面预览复用复习页 CardFace（showBack + onEdit → EditableText 内联编辑，cloze 自动回填挖空语法）；
+// 卡面预览复用复习页 CardFace（showBack + onEdit → EditableField 点击进入所见即所得编辑，cloze 直接编辑挖空源文本）；
 // 编辑只改文案不动 FSRS（updateCard 未传 fsrs 时保留原值，§7.2）。
 // v48.61（D103，D94 设计稿 §3.1–3.3）：新增三个**只读派生**区块——来源谱系（血缘树）、
 // 生成信息区（AI 卡）+「用当前提示词重新生成」、同源组区；零写路径（f32 矩阵不回退）。
@@ -2409,7 +2410,7 @@ function CardDetail({
               {T("删除")}
             </button>
           </div>
-          <p className="form-hint">{T("题面与答案可直接点击编辑（失焦落库，挖空卡自动回填挖空语法）；复习评分请回到「复习」页。")}</p>
+          <p className="form-hint">{T("题面与答案可直接点击编辑（失焦落库，填空卡直接编辑挖空源文本）；复习评分请回到「复习」页。")}</p>
           {lightboxOpen && card.occlusionJson && (
             <ImageLightbox
               assetPath={card.occlusionJson.assetPath}
@@ -2435,58 +2436,9 @@ function CardDetail({
 }
 
 // ---------- 卡面渲染（qa / cloze / seq / imageOcclusion；ReviewView 连续刷题共用） ----------
-// 内联编辑（v11.2 重写）：EditableText 是 React 不描述子节点的"裸壳"div——挂载时命令式写入纯文本，
-// 点击即出光标，失焦读回 innerText 落库。React 永远不 reconcile 它的子节点，
-// 彻底规避 contentEditable 与 ReactMarkdown 共管 DOM 导致的「优绩:」叠加与 removeChild 崩溃。
-function EditableText({
-  value,
-  onCommit,
-  className
-}: {
-  value: string;
-  onCommit: (text: string) => void;
-  className?: string;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const initial = useRef(value);
-  if (initial.current !== value) {
-    // 外部值变化（换卡）时重置壳内文本
-    initial.current = value;
-    if (ref.current && document.activeElement !== ref.current) ref.current.innerText = value;
-  }
-  useEffect(() => {
-    if (ref.current) ref.current.innerText = value;
-    // 仅挂载/换值时写入一次；编辑过程中 React 不触碰 DOM
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-  return (
-    <div
-      ref={ref}
-      className={`review-editable${className ? " " + className : ""}`}
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck={false}
-      onFocus={(e) => {
-        // 聚焦时把光标置于点击处由浏览器默认行为处理；无需干预
-        void e;
-      }}
-      onBlur={(e) => {
-        const text = e.currentTarget.innerText.replace(/\n{3,}/g, "\n\n").trim();
-        if (text && text !== initial.current.trim()) {
-          initial.current = text;
-          onCommit(text);
-        } else if (!text) {
-          // 清空不落库，恢复原值
-          e.currentTarget.innerText = initial.current;
-        }
-      }}
-      onKeyDown={(e) => {
-        if (isImeComposing(e)) return; // 组字中的 Esc 属于输入法（取消组字），不失焦
-        if (e.key === "Escape") (e.target as HTMLElement).blur();
-      }}
-    />
-  );
-}
+// 内联编辑（C-34b 重写）：v11.2 的 EditableText 纯文本裸壳退役——
+// 改为「读态渲染（ReadMarkdown）+ 点击进入所见即所得编辑（EditableField + MarkdownEditor/
+// ClozeDraftEditor）」，与摘录卡 D95 同一族；契约见 docs/EDIT-CONTRACT.md。
 
 export function CardFace({
   card,
@@ -2505,12 +2457,18 @@ export function CardFace({
   }) => Promise<void> | void;
 }) {
   const T = useT();
-  const md = (s: string) => (
-    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
+  // C-34a：卡面读态统一走 ReadMarkdown（GFM/软换行/==高亮==/HTML 净化）——与编辑器（Milkdown，
+  // 启用 GFM）同一套语义；此前此处只开数学，编辑器里写的表格在卡面上会显示成一堆竖线。
+  const md = (s: string) => <ReadMarkdown text={s} />;
+
+  // C-34b：问答/图片遮挡字段的编辑器接法（契约 docs/EDIT-CONTRACT.md）——所见即所得 MarkdownEditor，
+  // 失焦/Esc 提交（onCommit(文本或 null) 正好对应 EditableField.onDone）；commitOnUnmount 兜底「换卡不丢字」。
+  const editMd = (p: { value: string; onDone: (next: string | null) => void }) => (
+    <MarkdownEditor value={p.value} variant="compact" toolbar commitOnUnmount onCommit={p.onDone} />
   );
 
   // D88 §7.3：双面常挂 + 非当前面 inert（可达性/编辑安全硬性）——useLayoutEffect 在绘制前对调，
-  // 保证「EditableText 只在背面可编辑」的契约在两种动效路径（3D 翻卡 / reduce 瞬时）下都成立；
+  // 保证「编辑器只在背面可聚焦」的契约在两种动效路径（3D 翻卡 / reduce 瞬时）下都成立；
   // reduce 降级的视觉切换（非当前面 display:none）由 theme.css reduce 块承担，inert 与动效无关。
   const frontFaceRef = useRef<HTMLDivElement>(null);
   const backFaceRef = useRef<HTMLDivElement>(null);
@@ -2588,7 +2546,7 @@ export function CardFace({
         {hasFrontText && (
           <div className="review-front-text">
             {onEdit ? (
-              <EditableText value={card.frontMarkdown} onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })} />
+              <EditableField value={card.frontMarkdown} required onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })} renderEditor={editMd} />
             ) : (
               card.frontMarkdown
             )}
@@ -2596,7 +2554,7 @@ export function CardFace({
         )}
         <div className="review-back-a">
           {onEdit ? (
-            <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
+            <EditableField value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} renderEditor={editMd} />
           ) : (
             card.backMarkdown
           )}
@@ -2626,23 +2584,11 @@ export function CardFace({
         : answers.length > 1
           ? answers.map((a, i) => `${CIRCLED[i] ?? "·"} ${a}`).join("　")
           : answers[0] ?? "";
-    // 问题区编辑（v12.4）：翻面后可改。用户编辑的是显示文本（当前挖空为[…]），
-    // 落库时按文本顺序把第 i 个[…]还原为第 i 个被遮 ord 的原挖空语法（多空同答卡逐个还原）；
-    // 其余挖空按显示文本保留（若被改动则该挖空降级为普通文字）
-    const commitQuestion = (t: string) => {
-      const edit = onEdit;
-      if (!edit) return;
-      let restored = t;
-      for (const o of maskedOrds) {
-        const pos = restored.indexOf("[…]");
-        if (pos === -1) break;
-        const syntax = frontText.match(new RegExp(`\\{\\{c${o}::(.*?)(?:::(.*?))?\\}\\}`));
-        if (syntax) restored = restored.slice(0, pos) + syntax[0] + restored.slice(pos + "[…]".length);
-      }
-      edit({ frontMarkdown: restored, noteText: restored });
-    };
+    // 问题区编辑（C-34b 重写，取代 v12.4 的「显示文本 + […]还原」）：直接编辑**原始源文本**
+    // frontText（含 {{cN::…}}），读态仍显示挖空后的文本（display=md(questionText)）——
+    // 挖空语法由用户在 ClozeField（挖空工具）里显式操作，不再按顺序猜测还原（[…]错位/丢失问题消除）。
     // D88 §7.3 双面化：正面只读；背面 = 题面（同渲染，挖空始终遮蔽，用户需求）+ 答案。
-    // 题面编辑器（EditableText）只挂背面——非当前面 inert ⇒ 翻面前不可聚焦（§5.4 契约）。
+    // 题面编辑器只挂背面——非当前面 inert ⇒ 翻面前不可聚焦（§5.4 契约）。
     return flipWrap(
       <>
         <div className="review-front">
@@ -2654,14 +2600,20 @@ export function CardFace({
         <div className="review-back-q">
           {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
           {onEdit ? (
-            <EditableText value={questionText} onCommit={commitQuestion} />
+            <EditableField
+              value={frontText}
+              required
+              display={md(questionText)}
+              onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })}
+              renderEditor={(p) => <ClozeDraftEditor value={p.value} onDone={p.onDone} />}
+            />
           ) : (
             md(questionText)
           )}
         </div>
         <div className="review-back-a">
           {onEdit ? (
-            <EditableText value={clozeAnswer} onCommit={(t) => onEdit({ backMarkdown: t })} />
+            <EditableField value={clozeAnswer} onCommit={(t) => onEdit({ backMarkdown: t })} renderEditor={editMd} />
           ) : (
             clozeAnswer
           )}
@@ -2690,7 +2642,7 @@ export function CardFace({
       <div className="review-back-q">
         {card.contextPrefix && <span className="review-prefix mono">{card.contextPrefix}</span>}
         {onEdit ? (
-          <EditableText value={frontText} onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })} />
+          <EditableField value={frontText} required onCommit={(t) => onEdit({ frontMarkdown: t, noteText: t })} renderEditor={editMd} />
         ) : (
           md(frontText)
         )}
@@ -2698,7 +2650,7 @@ export function CardFace({
       </div>
       <div className="review-back-a">
         {onEdit ? (
-          <EditableText value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} />
+          <EditableField value={card.backMarkdown} onCommit={(t) => onEdit({ backMarkdown: t })} renderEditor={editMd} />
         ) : (
           md(card.backMarkdown)
         )}

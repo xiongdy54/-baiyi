@@ -3,9 +3,7 @@
 // 输出四档裁决（等价/部分正确/不一致/无法判断）+ 理由。
 // 只读辅助面：零写库、零调度写入；§1.9/§1.10 AI 不是事实源——评分仍由用户自评（页脚固定提示）。
 import { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
-import remarkMath from "remark-math";
+import ReadMarkdown from "./editor/ReadMarkdown";
 import { aiGateway } from "../lib/ai";
 // v49.8（D182）：AI 输出语言随界面语言
 import { getLocale, useT } from "../lib/i18n";
@@ -83,9 +81,8 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
     }
   }
 
-  const md = (s: string) => (
-    <ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{s}</ReactMarkdown>
-  );
+  // C-34a：AI 判答理由的读态统一走 ReadMarkdown（与卡面/摘录同一管线）
+  const md = (s: string) => <ReadMarkdown text={s} />;
 
   return (
     <div
