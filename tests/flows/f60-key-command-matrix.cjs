@@ -34,13 +34,13 @@ function readCommandTable() {
   return rows;
 }
 
-// AI_DEVELOPMENT_GUIDE.md L1113-1123 的锁定表（本次按行读出的原文）
+// AI_DEVELOPMENT_GUIDE.md §9.1 M4 的锁定表（阅读五键 v49.36 / D207 改 Alt 系）
 const GUIDE_TABLE = {
-  "reader.makeCard": "Ctrl+Z",
-  "reader.aiCards": "Ctrl+X",
-  "reader.aiExplain": "Ctrl+A",
-  "reader.extract": "Ctrl+S",
-  "reader.lookupWord": "Ctrl+D",
+  "reader.makeCard": "Alt+Z",
+  "reader.aiCards": "Alt+C",
+  "reader.aiExplain": "Alt+E",
+  "reader.extract": "Alt+X",
+  "reader.lookupWord": "Alt+D",
   "review.showAnswer": "Space",
   "review.again": "1",
   "review.hard": "2",
@@ -437,11 +437,11 @@ runFlow(flow, async () => {
       return { ok: false, why: "沙箱 iframe 内取不到文本落点，6 个几何扫点均未产生选区" };
     }
 
-    flow.record("阅读场景 5 条键位为何不可驱动", "正文在**闭式 shadow root 内的沙箱 iframe**（本战役 F53E 已定案，与 D-TEST-39 同族），宿主 light-DOM 结构上看不见它；真鼠标在 .reader-scroll 上按 6 个几何落点拖拽均未让宿主侧 .selection-menu 出现，截图 f60-s4-after-ctrl-z.png 正文区空白（与 f48v-7 / f53d / f53e 三张一致）。⇒ Reader 的 when=「存在活动选区」这一前置本流程建立不起来，Ctrl+Z/X/A/S/D 五条属**未测**，不得当失效键位上报。");
-    const sel1 = await ensureSelection("Ctrl+Z 前");
+    flow.record("阅读场景 5 条键位为何不可驱动", "正文在**闭式 shadow root 内的沙箱 iframe**（本战役 F53E 已定案，与 D-TEST-39 同族），宿主 light-DOM 结构上看不见它；真鼠标在 .reader-scroll 上按 6 个几何落点拖拽均未让宿主侧 .selection-menu 出现，截图 f60-s4-after-ctrl-z.png 正文区空白（与 f48v-7 / f53d / f53e 三张一致）。⇒ Reader 的 when=「存在活动选区」这一前置本流程建立不起来，Alt+Z/C/E/X/D 五条（v49.36/D207 改 Alt 系）属**未测**，不得当失效键位上报。");
+    const sel1 = await ensureSelection("Alt+Z 前");
     await probe({
       id: "reader.makeCard",
-      combo: "Ctrl+Z",
+      combo: "Alt+Z",
       scene: "阅读",
       effect: "打开手动制卡弹窗",
       drive: sel1.ok,
@@ -453,24 +453,24 @@ runFlow(flow, async () => {
     });
     await h.shot("f60-s4-after-ctrl-z");
 
-    const sel2 = await ensureSelection("Ctrl+S 前");
-    await probe({ id: "reader.extract", combo: "Ctrl+S", scene: "阅读", effect: "摘录入队（提示或正文变化）", drive: sel2.ok, whyNot: `无活动选区（${sel2.why}）`, settle: 900 });
+    const sel2 = await ensureSelection("Alt+X 前");
+    await probe({ id: "reader.extract", combo: "Alt+X", scene: "阅读", effect: "摘录入队（提示或正文变化）", drive: sel2.ok, whyNot: `无活动选区（${sel2.why}）`, settle: 900 });
 
-    const sel3 = await ensureSelection("Ctrl+D 前");
-    await probe({ id: "reader.lookupWord", combo: "Ctrl+D", scene: "阅读", effect: "查词面板/词典结果出现", drive: sel3.ok, whyNot: `无活动选区（${sel3.why}）`, settle: 1200 });
+    const sel3 = await ensureSelection("Alt+D 前");
+    await probe({ id: "reader.lookupWord", combo: "Alt+D", scene: "阅读", effect: "查词面板/词典结果出现", drive: sel3.ok, whyNot: `无活动选区（${sel3.why}）`, settle: 1200 });
 
-    const sel4 = await ensureSelection("Ctrl+X 前");
-    await probe({ id: "reader.aiCards", combo: "Ctrl+X", scene: "阅读", effect: "AI 制卡面板（未配 Key 时应给可见提示）", drive: sel4.ok, whyNot: `无活动选区（${sel4.why}）`, settle: 1600 });
+    const sel4 = await ensureSelection("Alt+C 前");
+    await probe({ id: "reader.aiCards", combo: "Alt+C", scene: "阅读", effect: "AI 制卡面板（未配 Key 时应给可见提示）", drive: sel4.ok, whyNot: `无活动选区（${sel4.why}）`, settle: 1600 });
 
-    const sel5 = await ensureSelection("Ctrl+A 前");
+    const sel5 = await ensureSelection("Alt+E 前");
     const preSel = await ev(`return String(window.getSelection()||'').replace(/\\s+/g,' ').trim().length;`, 0);
-    await probe({ id: "reader.aiExplain", combo: "Ctrl+A", scene: "阅读", effect: "AI 解释面板；且原生全选必须被劫持", drive: sel5.ok, whyNot: `无活动选区（${sel5.why}）`, settle: 1600 });
+    await probe({ id: "reader.aiExplain", combo: "Alt+E", scene: "阅读", effect: "AI 解释面板（原生 Ctrl+A 全选已按 D207 还给系统）", drive: sel5.ok, whyNot: `无活动选区（${sel5.why}）`, settle: 1600 });
     const postSel = await ev(`return String(window.getSelection()||'').replace(/\\s+/g,' ').trim().length;`, 0);
-    flow.record("Ctrl+A 前后选区字数", `${preSel} → ${postSel}`);
+    flow.record("Alt+E 前后选区字数", `${preSel} → ${postSel}`);
     if (Number(preSel) > 3) {
-      flow.check("Ctrl+A 被命令表劫持（未退化成浏览器全选）", Number(postSel) < Number(preSel) * 4, "选区未被扩成全文", `选区 ${preSel} → ${postSel} 字`);
+      flow.check("Alt+E 命中 AI 解释且不扩成全文选区", Number(postSel) < Number(preSel) * 4, "选区未被扩成全文", `选区 ${preSel} → ${postSel} 字`);
     } else {
-      flow.record("Ctrl+A 全选劫持", "未测：没有可用选区（前置未成立），preSel=0 时该判据是空转，不下结论");
+      flow.record("Alt+E 选区守卫", "未测：没有可用选区（前置未成立），preSel=0 时该判据是空转，不下结论");
     }
 
     // ---------- S5 非命令表的文档承诺键 ----------

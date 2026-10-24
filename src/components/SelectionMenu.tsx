@@ -41,7 +41,7 @@ export interface SelectionMenuAction {
   onClick: () => void;
 }
 
-/** 浮条里对选区做事的四个动作（与快捷键 Ctrl+Z/X/A/D 同源 selAct.*） */
+/** 浮条里对选区做事的四个动作（与快捷键 Alt+Z/C/E/D 同源 selAct.*；默认键位 v49.36 / D207） */
 export interface SelectionBarActions {
   manual: () => void;
   aiCards: () => void;
@@ -228,10 +228,10 @@ export default function SelectionMenu({
           <>
             <i className="sel-sep" aria-hidden="true" />
             {actBtn("note", T("批注"), T("批注（先写再点颜色）"), <IconSelNote />, toggleComment, commentOpen ? "on" : undefined)}
-            {actBtn("manual", T("制卡"), T("就地制卡 · Ctrl+Z"), <IconSelCard />, actions.manual)}
-            {actBtn("aiCards", T("AI 制卡"), T("AI 制卡 · Ctrl+X"), <IconSelAiCards />, actions.aiCards)}
-            {actBtn("explain", T("AI 解释"), T("AI 解释 · Ctrl+A"), <IconSelExplain />, actions.explain)}
-            {actBtn("lookup", T("查词"), T("查词 · Ctrl+D"), <IconSelLookup />, actions.lookup)}
+            {actBtn("manual", T("制卡"), T("就地制卡 · Alt+Z"), <IconSelCard />, actions.manual)}
+            {actBtn("aiCards", T("AI 制卡"), T("AI 制卡 · Alt+C"), <IconSelAiCards />, actions.aiCards)}
+            {actBtn("explain", T("AI 解释"), T("AI 解释 · Alt+E"), <IconSelExplain />, actions.explain)}
+            {actBtn("lookup", T("查词"), T("查词 · Alt+D"), <IconSelLookup />, actions.lookup)}
           </>
         )}
 

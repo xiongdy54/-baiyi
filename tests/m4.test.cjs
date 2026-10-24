@@ -28,14 +28,17 @@ function fresh() {
 }
 
 (async () => {
-  console.log("== M4-1 默认键位表 = 用户锁定表（AI_DEVELOPMENT_GUIDE.md §9.1 M4，v22 增补撤销评分） ==");
+  console.log("== M4-1 默认键位表 = 用户锁定表（AI_DEVELOPMENT_GUIDE.md §9.1 M4；阅读五键 v49.36/D207 改 Alt 系，v22 增补撤销评分） ==");
   {
     const cmds = fresh().commandRegistry.COMMANDS;
     const LOCKED = [
-      ["reader.makeCard", "阅读", "Ctrl+Z"],
-      ["reader.aiCards", "阅读", "Ctrl+X"],
-      ["reader.aiExplain", "阅读", "Ctrl+A"],
-      ["reader.extract", "阅读", "Ctrl+S"],
+      ["reader.makeCard", "阅读", "Alt+Z"],
+      ["reader.aiCards", "阅读", "Alt+C"],
+      ["reader.aiExplain", "阅读", "Alt+E"],
+      ["reader.extract", "阅读", "Alt+X"],
+      ["reader.lookupWord", "阅读", "Alt+D"],
+      ["reader.turnPrev", "阅读", "ArrowLeft"],
+      ["reader.turnNext", "阅读", "ArrowRight"],
       ["review.showAnswer", "复习", "Space"],
       ["review.again", "复习", "1"],
       ["review.hard", "复习", "2"],
@@ -44,9 +47,10 @@ function fresh() {
       ["review.undo", "复习", "Z"],
       ["review.markSuspend", "复习", "Q"],
       ["review.skip", "复习", "W"],
-      ["review.delete", "复习", "D"]
+      ["review.delete", "复习", "D"],
+      ["review.disambiguate", "复习", "E"]
     ];
-    check("共 13 条命令", cmds.length === LOCKED.length, LOCKED.length, cmds.length);
+    check("共 17 条命令", cmds.length === LOCKED.length, LOCKED.length, cmds.length);
     for (const [id, scene, key] of LOCKED) {
       const def = cmds.find((c) => c.id === id);
       check(`${id} = ${key}（${scene}）`, !!def && def.scene === scene && def.defaultKey === key, `${scene}/${key}`, def);

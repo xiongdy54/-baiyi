@@ -1,5 +1,5 @@
 // M4 GUI 测试配套清理（§7.1.8 纪律：必须先关闭应用再运行，防止 persist() 覆盖）
-// 用途：Ctrl+S 摘录测试产生的 FSRSTEST 摘录无删除 API（workflowAPI 无 remove），关库后直改 library.db 软删。
+// 用途：Alt+X 摘录测试产生的 FSRSTEST 摘录无删除 API（workflowAPI 无 remove），关库后直改 library.db 软删。
 // 运行：node tests/m4.cleanup.cjs
 const initSqlJs = require("sql.js");
 const fs = require("fs");

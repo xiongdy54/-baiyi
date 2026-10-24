@@ -1715,7 +1715,7 @@ export default function Reader({
     await createAnnotation(text, spans, color, annotMode, annotForm, comment || null);
   }
 
-  // 阅读场景快捷键（制卡 Ctrl+Z / AI 制卡 Ctrl+X / AI 解释 Ctrl+A / 摘录 Ctrl+S / 查词 Ctrl+D）：
+  // 阅读场景快捷键（制卡 Alt+Z / AI 制卡 Alt+C / AI 解释 Alt+E / 摘录 Alt+X / 查词 Alt+D；v49.36 / D207）：
   // 仅当存在活动选区且无手动制卡弹窗、无 AI 面板时可用（弹层开着不触发新动作）
   const readerShortcutReady = !!selection && !manualOpen && !aiPanel && !dictPanel;
   useCommandActions("reader", {

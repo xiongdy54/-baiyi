@@ -17,13 +17,15 @@ export interface CommandDef {
   defaultKey: string;
 }
 
-// M4 默认键位（用户锁定表）
+// M4 默认键位（用户锁定表）。阅读场景五键 v49.36 / D207（审计 C-26，决策 D-03=B）改 SuperMemo
+// 习惯的 Alt 系：Ctrl/Cmd+Z/X/A/S 还给系统通用含义（撤销/剪切/全选/保存）；mac 上 Option+字母
+// 经下方物理键回落识别（Option 组合会改写 e.key）。
 export const COMMANDS: CommandDef[] = [
-  { id: "reader.makeCard",    title: "制卡",       scene: "阅读", defaultKey: "Ctrl+Z" },
-  { id: "reader.aiCards",     title: "AI 制卡",    scene: "阅读", defaultKey: "Ctrl+X" },
-  { id: "reader.aiExplain",   title: "AI 解释",    scene: "阅读", defaultKey: "Ctrl+A" },
-  { id: "reader.extract",     title: "摘录",       scene: "阅读", defaultKey: "Ctrl+S" },
-  { id: "reader.lookupWord",  title: "查词",       scene: "阅读", defaultKey: "Ctrl+D" },
+  { id: "reader.makeCard",    title: "制卡",       scene: "阅读", defaultKey: "Alt+Z" },
+  { id: "reader.aiCards",     title: "AI 制卡",    scene: "阅读", defaultKey: "Alt+C" },
+  { id: "reader.aiExplain",   title: "AI 解释",    scene: "阅读", defaultKey: "Alt+E" },
+  { id: "reader.extract",     title: "摘录",       scene: "阅读", defaultKey: "Alt+X" },
+  { id: "reader.lookupWord",  title: "查词",       scene: "阅读", defaultKey: "Alt+D" },
   // v48.90（D130 P4c）：翻页键入命令条——←/→ 从 Reader 壳层硬编码 keydown 迁入（可改键；
   // PageUp/PageDown/空格不进表：避免与滚动场景的空格语义冲突，且不在「可自定义」诉求内）
   { id: "reader.turnPrev",    title: "上一页",     scene: "阅读", defaultKey: "ArrowLeft" },
@@ -44,7 +46,18 @@ export const COMMANDS: CommandDef[] = [
 
 const DEFS_BY_ID = new Map(COMMANDS.map((c) => [c.id, c]));
 
-export type ComboInput = Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey">;
+export type ComboInput = Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "shiftKey" | "metaKey"> & { code?: string };
+
+// 审计 C-26 步骤 1：mac 检测（Option 组合改写 e.key、Cmd 习惯修饰键，均需按平台区分）
+export const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || "");
+
+// 审计 C-26 步骤 1：KeyboardEvent.code → 物理键名（字母 / 数字），其余（布局相关符号、修饰键等）返回 null
+function keyFromCode(code?: string): string | null {
+  if (!code) return null;
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  return null;
+}
 
 // 纯修饰键/IME 过程键不构成键位
 const PURE_MODIFIER = new Set([
@@ -61,6 +74,11 @@ export function eventToCombo(e: ComboInput): string | null {
   // 它匹配不到任何键，却能被 setOverride 写进设置并被 conflictWith 当一条占用。
   if (!key) return null;
   if (key === " ") key = "Space";
+  // 审计 C-26 步骤 1：mac 的 Option 组合、以及非拉丁布局下的字母键，按物理键解释——
+  // Option+X 在 mac 产出 e.key="≈"、俄语布局 Ctrl+X 产出 e.key="ч"，都匹配不到 Ctrl+X/Alt+X；
+  // code 缺省（测试合成事件）或非字母数字物理键时保持 e.key 原样（行为不变）。
+  const nonAscii = key.length === 1 && !/[\x20-\x7e]/.test(key);
+  if ((nonAscii || (IS_MAC && e.altKey)) && keyFromCode(e.code)) key = keyFromCode(e.code)!;
   if (PURE_MODIFIER.has(key)) return null;
   if (key.length === 1 && key.toLowerCase() !== key.toUpperCase()) key = key.toUpperCase();
   const mods: string[] = [];
@@ -87,11 +105,15 @@ export function init(): Promise<void> {
   return initPromise;
 }
 
+// 审计 C-26 步骤 2：Mod 抽象——键位串允许写 Mod+X，加载默认值与用户覆盖时统一解析
+// （IS_MAC → Meta，否则 Ctrl）。解析只发生在 getBinding 出口，存储串保持写法原样。
+export const resolveMod = (c: string): string => c.replace(/(^|\+)Mod(?=\+)/, "$1" + (IS_MAC ? "Meta" : "Ctrl"));
+
 function getBinding(id: string): string {
   const def = DEFS_BY_ID.get(id);
   if (!def) return "";
   const o = overrides[id];
-  return typeof o === "string" && o ? o : def.defaultKey;
+  return resolveMod(typeof o === "string" && o ? o : def.defaultKey);
 }
 
 /**
@@ -105,6 +127,17 @@ export function bindingHint(id: string): string {
   return combo
     .split("+")
     .map((part) => (KEY_LABEL[part] ? t(KEY_LABEL[part]) : part))
+    .join("+");
+}
+
+// 审计 C-26 步骤 2：设置页显示键位用——mac 上把 Meta 显示为 ⌘、Alt 显示为 ⌥；其余平台原样。
+// 只改显示，不改存储串与匹配串（存储 = 匹配同串，见 eventToCombo 注释）。
+const MAC_DISPLAY_LABEL: Record<string, string> = { Meta: "⌘", Alt: "⌥" };
+export function displayCombo(combo: string): string {
+  if (!combo || !IS_MAC) return combo;
+  return combo
+    .split("+")
+    .map((part) => MAC_DISPLAY_LABEL[part] ?? part)
     .join("+");
 }
 
