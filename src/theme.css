@@ -8190,9 +8190,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 @media (prefers-reduced-motion: no-preference) {
   .cb-detail { animation: cb-detail-in var(--dur-enter) var(--ease-enter); }
 }
-/* 当前面板对应的行：灰底 + 左缘 2px accent 内嵌条（与多选 is-selected 的整圈 accent 边区分） */
-.cb-row.is-open { background: var(--grey-1); box-shadow: inset 2px 0 0 0 var(--accent); }
-.queue-row.is-open { border-color: var(--accent); }
+/* 当前面板对应的行：主题色整行高亮（D218：原「灰底 + 左缘 2px accent 竖线」按用户指令改整行主题色高亮；
+   --accent-soft＝accent 8% 透明混合淡染，两皮肤经各自 accent Token 自动取色） */
+.cb-row.is-open { background: var(--accent-soft); }
+.queue-row.is-open { border-color: var(--accent); background: var(--accent-soft); }
 
 /* v48.41（D81）：markdown 阅读分支的选区动作组容器（引擎分支的组直接挂在 .reader-engine-controls 里）
    v48.44（D84）：组内钮已有自己的 1px 框（.seg-rail / .btn-rail），原 border-color 桥接规则删除 */

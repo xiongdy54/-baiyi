@@ -104,6 +104,9 @@ try {
     });
   })()`)) || "{}");
   check("详情面板打开", det.pane === true, det);
+  // D218：当前行整行主题色高亮（原左缘 accent 竖线按用户指令退役）
+  const openRowBg = await cdp.eval(`(() => { const r = document.querySelector(".cb-row.is-open"); return r ? getComputedStyle(r).backgroundColor : "NOROW"; })()`);
+  check("打开行整行主题色高亮（非竖线）", String(openRowBg).startsWith("color(") && !String(openRowBg).endsWith("/ 0)"), openRowBg);
   check("详情 meta 无「优先级」行", det.hasPriorityRow === false, det);
   check("详情无「不再关心」按钮（统一为「归档」）", det.hasNoLongerCare === false && det.archiveLabel === true, det);
   check("「暂停调度」title 说明语义", String(det.suspendTitle || "").includes("不动复习进度"), det.suspendTitle);
