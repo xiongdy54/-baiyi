@@ -86,7 +86,13 @@ export function useDialogA11y<T extends HTMLElement>(
       }
     };
 
-    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("keydown", onKey, false);
+    // ↑ 冒泡阶段（D215）：此前捕获阶段抢跑——弹层内编辑器（MarkdownEditor/ClozeDraftEditor 等）
+    // 的「Esc＝提交并退出编辑」（EDIT-CONTRACT 行为规则）是 React onKeyDown，挂在根容器；
+    // document 捕获先于根容器，stopPropagation 后编辑器永远收不到 Esc，直接整个弹层被关
+    // （用户实测：详情内点开字段 → 按 Esc 求退出 → 面板闪一下整面板消失）。
+    // 改冒泡后：编辑器先处理并 stopPropagation（编辑器消费 Esc，弹层不关）；无编辑器消费时
+    // 事件冒泡到 document，弹层照常关闭。栈顶响应语义不变（嵌套模态仍只有栈顶处理）。
     // 焦点已在面板内就不抢（例如由面板内按钮二次打开的场景）
     if (!panel.contains(document.activeElement)) {
       const target = panel.querySelector<HTMLElement>(FOCUSABLE) ?? panel;
@@ -97,7 +103,7 @@ export function useDialogA11y<T extends HTMLElement>(
     try { eventBus.emit(UI_EVENTS.overlayOpen, { kind: "dialog" }); } catch { /* 事件层故障不碍模态 */ }
 
     return () => {
-      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("keydown", onKey, false);
       const i = stack.indexOf(panel);
       if (i >= 0) stack.splice(i, 1);
       if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
