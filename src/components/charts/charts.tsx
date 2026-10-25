@@ -48,7 +48,7 @@ export function QueueProgress({ kpi }: { kpi: StatsOverview["kpi"] }) {
           [t("待完成"), String(kpi.pendingToday), t("张")],
           [t("今日已评"), String(kpi.reviewedToday), t("张")],
           [t("连续学习"), String(kpi.streak), t("天")],
-          [t("今日时长"), String(kpi.minutesToday), t("分")]
+          [t("今日复习时长"), String(kpi.minutesToday), t("分")]
         ];
         const colW = w / 4;
         stats.forEach(([lab, val, u], i) => {
@@ -81,12 +81,13 @@ export function StreakPanel({ streak, heatDays }: { streak: number; heatDays: St
         els.push(<Tx key="n" x={0} y={38} s={38} w={700}>{nb}</Tx>);
         els.push(<Tx key="u" x={textW(nb, 38, 700) + 8} y={38} s={14} fill={P.GREY3}>{t("天连续学习")}</Tx>);
         els.push(<Tx key="r" x={w} y={36} anchor="end" fill={P.GREY3}>{fit(t("距 {next} 天里程碑还差 {diff} 天", { next, diff: next - streak }), w - textW(nb, 38, 700) - 110, 12)}</Tx>);
-        // 近 28 天点阵
+        // 近 28 天点阵：方格宽有 clamp 上限，内容总宽不足卡宽时整体居中
         const gap = 3, n = tail.length || 28;
         const cw = clamp((w - gap * (n - 1)) / n, 4, 30);
         const total = cw * n + gap * (n - 1);
+        const dotX0 = Math.max(0, (w - total) / 2);
         tail.forEach((d, i) => {
-          const x = i * (cw + gap);
+          const x = dotX0 + i * (cw + gap);
           const today = i === tail.length - 1;
           els.push(
             <rect key={`d${i}`} x={x} y={58} width={cw} height={22} fill={d.count > 0 ? P.ACCENT : P.GREY2}
@@ -95,7 +96,6 @@ export function StreakPanel({ streak, heatDays }: { streak: number; heatDays: St
           );
         });
         els.push(<Tx key="cap" x={0} y={98} fill={P.GREY3}>{t("近 28 天 · 学习 {n} 天", { n: learned })}</Tx>);
-        void total;
         // 里程碑轨
         const Y = 128, top = next;
         const x = (v: number) => (v / top) * w;
@@ -113,7 +113,7 @@ export function StreakPanel({ streak, heatDays }: { streak: number; heatDays: St
   );
 }
 
-/** 今日时长对照：近 30 天每日学习分钟柱，今天高亮 + 中位虚线 */
+/** 今日复习时长对照：近 30 天每日复习分钟柱，今天高亮 + 中位虚线 */
 export function MinutesColumns({ kpi, heatDays }: { kpi: { minutesToday: number }; heatDays: StatsOverview["heatDays"] }) {
   const tail = heatDays.slice(-30);
   if (!tail.length) return <Empty msg={t("暂无学习时长记录")} height={150} />;
@@ -123,7 +123,7 @@ export function MinutesColumns({ kpi, heatDays }: { kpi: { minutesToday: number 
   return (
     <Chart
       height={170}
-      headline={<><b className="cx-big">{kpi.minutesToday}</b> {t("分钟")} <span className="cx-dim">{t("今日学习时长")}</span></>}
+      headline={<><b className="cx-big">{kpi.minutesToday}</b> {t("分钟")} <span className="cx-dim">{t("今日复习时长")}</span></>}
       sub={nz.length ? t("近 30 天有记录 {n} 天 · 中位 {med} 分 · 最长 {max} 分", { n: nz.length, med, max: Math.max(...nz) }) : t("近 30 天暂无记录")}
       build={(w, P) => {
         const X0 = 30, X1 = w, BASE = 140, TOP = 8;
@@ -194,10 +194,12 @@ export function HeatCalendar({ days, unit, emptyMsg, legendTitle }: { days: Day[
         const g = calGeom(w, cols);
         const els: React.ReactNode[] = [];
         if (g.rows) {
-          [1, 2, 3, 4, 5, 6, 0].forEach((wd, c) => els.push(<Tx key={`h${c}`} x={g.labelW + c * (g.cw + g.gap) + g.cw / 2} y={12} anchor="middle" fill={P.GREY3}>{weekMini(wd)}</Tx>));
+          // 格宽有上限，日历内容总宽不足卡宽时整体居中（标签列同移）
+          const ox = Math.max(0, (w - (g.labelW + 7 * (g.cw + g.gap) - g.gap)) / 2);
+          [1, 2, 3, 4, 5, 6, 0].forEach((wd, c) => els.push(<Tx key={`h${c}`} x={ox + g.labelW + c * (g.cw + g.gap) + g.cw / 2} y={12} anchor="middle" fill={P.GREY3}>{weekMini(wd)}</Tx>));
           for (let r = 0; r < cols; r++) {
             const first = days[Math.max(0, r * 7 - lead)];
-            els.push(<Tx key={`w${r}`} x={0} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{md(first.date)}</Tx>);
+            els.push(<Tx key={`w${r}`} x={ox} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{md(first.date)}</Tx>);
             for (let c = 0; c < 7; c++) {
               const idx = r * 7 + c - lead;
               if (idx < 0 || idx >= days.length) continue;
@@ -205,22 +207,24 @@ export function HeatCalendar({ days, unit, emptyMsg, legendTitle }: { days: Day[
               const fill = L ? P.ACCENT : P.GREY2, op = L ? OP[L] : 0.45;
               els.push(
                 <g key={`${r}-${c}`} className="cx-hit" data-tip={`${mdw(d.date)}\n${d.value > 0 ? `${fmtInt(d.value)} ${unit}` : t("无记录")}`}>
-                  <rect x={g.labelW + c * (g.cw + g.gap)} y={22 + r * (g.ch + g.gap)} width={g.cw} height={g.ch} fill={fill} opacity={op}
+                  <rect x={ox + g.labelW + c * (g.cw + g.gap)} y={22 + r * (g.ch + g.gap)} width={g.cw} height={g.ch} fill={fill} opacity={op}
                     stroke={today ? P.INK : "none"} strokeWidth={today ? 1.4 : 0} />
-                  <Tx x={g.labelW + c * (g.cw + g.gap) + 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={L >= 3 ? textOn(P.ACCENT, P) : P.GREY3} opacity={0.9}>{new Date(d.date).getDate()}</Tx>
-                  {d.value > 0 && g.cw >= 52 && <Tx x={g.labelW + c * (g.cw + g.gap) + g.cw - 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} anchor="end" w={650} fill={L >= 3 ? textOn(P.ACCENT, P) : P.INK}>{fmtInt(d.value)}</Tx>}
+                  <Tx x={ox + g.labelW + c * (g.cw + g.gap) + 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={L >= 3 ? textOn(P.ACCENT, P) : P.GREY3} opacity={0.9}>{new Date(d.date).getDate()}</Tx>
+                  {d.value > 0 && g.cw >= 52 && <Tx x={ox + g.labelW + c * (g.cw + g.gap) + g.cw - 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} anchor="end" w={650} fill={L >= 3 ? textOn(P.ACCENT, P) : P.INK}>{fmtInt(d.value)}</Tx>}
                 </g>
               );
             }
           }
           return els;
         }
+        // 列模式同样按内容总宽居中（月份标签与星期标签同移，间距判据不受常数平移影响）
+        const ox = Math.max(0, (w - (g.labelW + cols * (g.cw + g.gap) - g.gap)) / 2);
         [1, -1, 3, -1, 5, -1, 0].forEach((wd, r) => {
-          if (wd >= 0) els.push(<Tx key={`w${r}`} x={0} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{weekMini(wd)}</Tx>);
+          if (wd >= 0) els.push(<Tx key={`w${r}`} x={ox} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{weekMini(wd)}</Tx>);
         });
         let lastMonth = -1, lastLabelX = -99;
         for (let c = 0; c < cols; c++) {
-          const x = g.labelW + c * (g.cw + g.gap);
+          const x = ox + g.labelW + c * (g.cw + g.gap);
           for (let r = 0; r < 7; r++) {
             const idx = c * 7 + r - lead;
             if (idx < 0 || idx >= days.length) continue;
@@ -379,12 +383,15 @@ export function CumulativeArea({ days, unit, emptyMsg }: { days: Day[]; unit: st
 
 // ═════════════════ C. 今日完成度 ═════════════════
 
-function unitGeom(w: number, due: number) {
+/** 方块格几何：方块尽量大、网格逼近目标绘图高（减少卡内下部留白）。
+ *  列数按「方形偏好」cols ≈ √(blocks × 宽高比) 取，方块尺寸 = min(宽度限量, 高度限量) 钳 [10, 44] */
+function unitGeom(w: number, due: number, targetH = 168) {
   const per = due > 160 ? Math.ceil(due / 160) : 1;
   const blocks = Math.ceil(due / per);
-  const s = clamp(Math.floor((w - 0) / Math.min(blocks, 40)) - 3, 10, 22);
-  const cols = Math.max(1, Math.floor((w + 3) / (s + 3)));
+  const aspect = Math.max(1, w / targetH);
+  const cols = Math.max(1, Math.min(blocks, Math.round(Math.sqrt(blocks * aspect))));
   const rows = Math.ceil(blocks / cols);
+  const s = clamp(Math.min(Math.floor((w - (cols - 1) * 3) / cols), Math.floor((targetH + 3) / rows) - 3), 10, 44);
   return { per, blocks, s, cols, rows };
 }
 
@@ -397,13 +404,15 @@ export function TodayUnits({ kpi }: { kpi: StatsOverview["kpi"] }) {
     <Chart
       headline={<><b className="cx-big">{done}</b> / {due} {t("张")} <span className="cx-dim">{t("还剩 {n} 张", { n: due - done })}</span></>}
       legend={[{ label: t("已完成"), color: "var(--accent)" }, { label: t("未完成"), color: "var(--grey-2)" }]}
-      height={(w) => unitGeom(w, due).rows * (unitGeom(w, due).s + 3)}
+      height={(w) => { const g = unitGeom(w, due); return g.rows * (g.s + 3) - 3; }}
       foot={due > 160 ? t("一格 = {n} 张卡", { n: unitGeom(600, due).per }) : undefined}
       build={(w, P) => {
         const g = unitGeom(w, due);
         const doneB = Math.round(done / g.per);
+        // 网格整块水平居中（块内仍按阅读序从左到右填充，进度语义不变）
+        const ox = Math.max(0, (w - (g.cols * (g.s + 3) - 3)) / 2);
         return Array.from({ length: g.blocks }, (_, b) => (
-          <rect key={b} x={(b % g.cols) * (g.s + 3)} y={Math.floor(b / g.cols) * (g.s + 3)} width={g.s} height={g.s}
+          <rect key={b} x={ox + (b % g.cols) * (g.s + 3)} y={Math.floor(b / g.cols) * (g.s + 3)} width={g.s} height={g.s}
             fill={b < doneB ? P.ACCENT : P.GREY2} opacity={b < doneB ? 1 : 0.8} className="cx-hit"
             data-tip={b < doneB ? t("已完成") : t("未完成")} />
         ));
@@ -423,7 +432,7 @@ export function TodayRing({ kpi }: { kpi: StatsOverview["kpi"] }) {
       height={190}
       label={t("今日完成 {pct}%", { pct: Math.round(frac * 100) })}
       build={(w, P) => {
-        const R = 74, SW = 16, cx = Math.min(R + SW, w / 2), cy = 95;
+        const R = 74, SW = 16, cy = 95;
         const arc = (f: number) => {
           if (f >= 0.9999) return `M${cx} ${cy - R} A${R} ${R} 0 1 1 ${cx - 0.01} ${cy - R}`;
           const a = f * Math.PI * 2 - Math.PI / 2;
@@ -432,7 +441,15 @@ export function TodayRing({ kpi }: { kpi: StatsOverview["kpi"] }) {
         const rows: [string, string, string][] = [
           [t("已完成"), `${done}`, P.ACCENT], [t("未完成"), `${due - done}`, P.GREY3], [t("今日到期"), `${due}`, P.INK]
         ];
-        const tx = Math.min(cx * 2 + 28, w * 0.5);
+        // 圆环 + 右侧读数列作整组水平居中（此前环恒钉左缘，宽幅卡右半全空）。
+        // 环视觉外径 = 2R+SW（描边居中于 r=R，两侧各出 SW/2）；读数列宽用 canvas 实测
+        const ringW = 2 * R + SW;
+        const colW = Math.max(
+          ...rows.map(([l]) => textW(l, 11, 500)),
+          ...rows.map(([, v]) => textW(v, 22, 650) + 5 + textW(t("张"), 12, 500))
+        );
+        const ox = Math.max(0, (w - (ringW + 28 + colW)) / 2);
+        const cx = ox + ringW / 2, tx = ox + ringW + 28;
         return (
           <g>
             <circle cx={cx} cy={cy} r={R} fill="none" stroke={P.GREY2} strokeWidth={SW} opacity={0.6} />
@@ -713,6 +730,7 @@ export function FunnelBars({ funnel }: { funnel: StatsOverview["funnel"] }) {
       height={S.length * 48 + 4}
       build={(w, P) => {
         const labW = 82, valW = 88, X0 = labW + 8, X1 = w - valW;
+        // 颜色越深 = 记得越牢固：新建最浅 → 已巩固最深（同「巩固疆域」territory-seg 的惯例方向）
         return S.map(([name, c, tip], i) => {
           const y = i * 48 + 2, bw = Math.max(c > 0 ? 3 : 0, (c / top) * (X1 - X0));
           const conv = i > 0 && S[i - 1][1] > 0 ? Math.round((c / S[i - 1][1]) * 100) : null;
@@ -721,7 +739,7 @@ export function FunnelBars({ funnel }: { funnel: StatsOverview["funnel"] }) {
               <rect x={0} y={y} width={w} height={44} fill="transparent" />
               <Tx x={0} y={y + 20} s={12} w={650}>{name}</Tx>
               <rect x={X0} y={y + 6} width={X1 - X0} height={22} fill={P.GREY2} opacity={0.3} />
-              <rect x={X0} y={y + 6} width={bw} height={22} fill={P.ACCENT} opacity={1 - i * 0.2} />
+              <rect x={X0} y={y + 6} width={bw} height={22} fill={P.ACCENT} opacity={0.4 + i * 0.2} />
               <Tx x={X0 + bw + 8} y={y + 22} s={12} w={650}>{fmtInt(c)}</Tx>
               {conv !== null && <Tx x={w} y={y + 22} anchor="end" fill={P.GREY3}>{t("转化 {pct}%", { pct: conv })}</Tx>}
               <Tx x={X0} y={y + 41} fill={P.GREY3}>{fit(tip, X1 - X0, 11)}</Tx>
@@ -849,14 +867,16 @@ export function RhythmGrid({ grid }: { grid: number[][] }) {
       height={(w) => 22 + 7 * (clamp((w - 36) / 24 - 2, 8, 26) + 2)}
       build={(w, P) => {
         const cw = clamp((w - 36) / 24 - 2, 8, 26), X0 = 36;
+        // 格宽有上限，网格内容总宽不足卡宽时整体居中（星期标签同移）
+        const ox = Math.max(0, (w - (X0 + 24 * (cw + 2) - 2)) / 2);
         const els: React.ReactNode[] = [];
-        for (let h = 0; h < 24; h += 3) els.push(<Tx key={`h${h}`} x={X0 + h * (cw + 2)} y={12} fill={P.GREY3}>{`${h}`}</Tx>);
+        for (let h = 0; h < 24; h += 3) els.push(<Tx key={`h${h}`} x={ox + X0 + h * (cw + 2)} y={12} fill={P.GREY3}>{`${h}`}</Tx>);
         NAMES.forEach((nm, r) => {
-          els.push(<Tx key={`n${r}`} x={0} y={22 + r * (cw + 2) + cw / 2 + 4} fill={P.GREY3}>{weekMini(r + 1)}</Tx>);
+          els.push(<Tx key={`n${r}`} x={ox} y={22 + r * (cw + 2) + cw / 2 + 4} fill={P.GREY3}>{weekMini(r + 1)}</Tx>);
           for (let h = 0; h < 24; h++) {
             const v = grid[r][h], f = v / vmax;
             els.push(
-              <rect key={`${r}-${h}`} x={X0 + h * (cw + 2)} y={22 + r * (cw + 2)} width={cw} height={cw}
+              <rect key={`${r}-${h}`} x={ox + X0 + h * (cw + 2)} y={22 + r * (cw + 2)} width={cw} height={cw}
                 fill={v ? P.ACCENT : P.GREY2} opacity={v ? 0.16 + 0.84 * Math.sqrt(f) : 0.4} className="cx-hit"
                 data-tip={`${nm} ${String(h).padStart(2, "0")}:00\n${t("{n} 次评分", { n: v })}`} />
             );
