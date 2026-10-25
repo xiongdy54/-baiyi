@@ -383,12 +383,15 @@ export function CumulativeArea({ days, unit, emptyMsg }: { days: Day[]; unit: st
 
 // ═════════════════ C. 今日完成度 ═════════════════
 
-function unitGeom(w: number, due: number) {
+/** 方块格几何：方块尽量大、网格逼近目标绘图高（减少卡内下部留白）。
+ *  列数按「方形偏好」cols ≈ √(blocks × 宽高比) 取，方块尺寸 = min(宽度限量, 高度限量) 钳 [10, 44] */
+function unitGeom(w: number, due: number, targetH = 168) {
   const per = due > 160 ? Math.ceil(due / 160) : 1;
   const blocks = Math.ceil(due / per);
-  const s = clamp(Math.floor((w - 0) / Math.min(blocks, 40)) - 3, 10, 22);
-  const cols = Math.max(1, Math.floor((w + 3) / (s + 3)));
+  const aspect = Math.max(1, w / targetH);
+  const cols = Math.max(1, Math.min(blocks, Math.round(Math.sqrt(blocks * aspect))));
   const rows = Math.ceil(blocks / cols);
+  const s = clamp(Math.min(Math.floor((w - (cols - 1) * 3) / cols), Math.floor((targetH + 3) / rows) - 3), 10, 44);
   return { per, blocks, s, cols, rows };
 }
 
@@ -401,13 +404,13 @@ export function TodayUnits({ kpi }: { kpi: StatsOverview["kpi"] }) {
     <Chart
       headline={<><b className="cx-big">{done}</b> / {due} {t("张")} <span className="cx-dim">{t("还剩 {n} 张", { n: due - done })}</span></>}
       legend={[{ label: t("已完成"), color: "var(--accent)" }, { label: t("未完成"), color: "var(--grey-2)" }]}
-      height={(w) => unitGeom(w, due).rows * (unitGeom(w, due).s + 3)}
+      height={(w) => { const g = unitGeom(w, due); return g.rows * (g.s + 3) - 3; }}
       foot={due > 160 ? t("一格 = {n} 张卡", { n: unitGeom(600, due).per }) : undefined}
       build={(w, P) => {
         const g = unitGeom(w, due);
         const doneB = Math.round(done / g.per);
-        // 方格尺寸有上限：单行放得下时整块居中；多行保持「按阅读序从左到右填充」的进度语义不居中
-        const ox = g.blocks <= g.cols ? Math.max(0, (w - (g.blocks * (g.s + 3) - 3)) / 2) : 0;
+        // 网格整块水平居中（块内仍按阅读序从左到右填充，进度语义不变）
+        const ox = Math.max(0, (w - (g.cols * (g.s + 3) - 3)) / 2);
         return Array.from({ length: g.blocks }, (_, b) => (
           <rect key={b} x={ox + (b % g.cols) * (g.s + 3)} y={Math.floor(b / g.cols) * (g.s + 3)} width={g.s} height={g.s}
             fill={b < doneB ? P.ACCENT : P.GREY2} opacity={b < doneB ? 1 : 0.8} className="cx-hit"
@@ -727,6 +730,7 @@ export function FunnelBars({ funnel }: { funnel: StatsOverview["funnel"] }) {
       height={S.length * 48 + 4}
       build={(w, P) => {
         const labW = 82, valW = 88, X0 = labW + 8, X1 = w - valW;
+        // 颜色越深 = 记得越牢固：新建最浅 → 已巩固最深（同「巩固疆域」territory-seg 的惯例方向）
         return S.map(([name, c, tip], i) => {
           const y = i * 48 + 2, bw = Math.max(c > 0 ? 3 : 0, (c / top) * (X1 - X0));
           const conv = i > 0 && S[i - 1][1] > 0 ? Math.round((c / S[i - 1][1]) * 100) : null;
@@ -735,7 +739,7 @@ export function FunnelBars({ funnel }: { funnel: StatsOverview["funnel"] }) {
               <rect x={0} y={y} width={w} height={44} fill="transparent" />
               <Tx x={0} y={y + 20} s={12} w={650}>{name}</Tx>
               <rect x={X0} y={y + 6} width={X1 - X0} height={22} fill={P.GREY2} opacity={0.3} />
-              <rect x={X0} y={y + 6} width={bw} height={22} fill={P.ACCENT} opacity={1 - i * 0.2} />
+              <rect x={X0} y={y + 6} width={bw} height={22} fill={P.ACCENT} opacity={0.4 + i * 0.2} />
               <Tx x={X0 + bw + 8} y={y + 22} s={12} w={650}>{fmtInt(c)}</Tx>
               {conv !== null && <Tx x={w} y={y + 22} anchor="end" fill={P.GREY3}>{t("转化 {pct}%", { pct: conv })}</Tx>}
               <Tx x={X0} y={y + 41} fill={P.GREY3}>{fit(tip, X1 - X0, 11)}</Tx>
