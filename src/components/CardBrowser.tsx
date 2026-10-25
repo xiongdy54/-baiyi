@@ -964,6 +964,20 @@ export default function CardBrowser({
     recomputeWindows();
   }, [recomputeWindows, detailId, extractDetailId]);
 
+  // v49.46（D217）：外壳宽度实测写入 CSS 变量——详情面板展开时条目表以此作 min-width，
+  // 内容宽恒等于面板收起时的整宽（题面列不被半宽视口挤压），列表区在半宽视口内横向滚动；
+  // 纵向滚动与 D111 虚拟滚动口径不变（行窗只算纵向几何）
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const apply = () => shell.style.setProperty("--cb-list-w", `${shell.clientWidth}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(shell);
+    return () => ro.disconnect();
+  }, []);
+
   // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）；
   // v48.64（D108）：含 or/括号的查询不做页签联动（kind 只是行谓词，布尔语义照常求值）
   useEffect(() => {
@@ -1073,7 +1087,8 @@ export default function CardBrowser({
   return (
     // v49.43（D214）：左右分栏外壳——左＝queue-wrap（唯一滚动容器，D111 虚拟滚动口径不变），
     // 右＝详情侧边面板（cb-detail，开详情时占一半）；面板非模态，左侧列表照常滚动与批量操作
-    <div className="cb-shell">
+    // v49.46（D217）：--cb-list-w＝外壳实测宽度，面板展开时条目表以此为 min-width（宽度不变+横滚）
+    <div className="cb-shell" ref={shellRef}>
     <div className="queue-wrap" ref={wrapRef}>
       {/* v48.40（D80）：吸顶头带——preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline）。
           v48.111（D156）：纯文字统计行退役，计数归一进页签（.tab-cnt，无括号） */}

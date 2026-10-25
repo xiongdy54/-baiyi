@@ -125,6 +125,37 @@ try {
   const afterRestore = await cdp.eval(`(() => { const pane = document.querySelector(".cb-detail"); return JSON.stringify({ back: [...pane.querySelectorAll("button")].some((b) => b.textContent.trim() === "归档") }); })()`);
   check("恢复（解除归档）翻转回来", String(afterRestore).includes('"back":true'), afterRestore);
 
+  // ④ D217：面板展开时条目表宽度不变 + 横向滚动（题面列不被半宽视口挤压）
+  const measOpen = JSON.parse(String(await cdp.eval(`(() => {
+    const wrap = document.querySelector(".queue-wrap");
+    const table = document.querySelector(".cb-table");
+    const front = table?.querySelector(".cb-row:not(.cb-row-head) .cb-front");
+    return JSON.stringify({
+      tableW: table ? Math.round(table.getBoundingClientRect().width) : 0,
+      viewW: wrap ? Math.round(wrap.clientWidth) : 0,
+      frontW: front ? Math.round(front.getBoundingClientRect().width) : 0,
+      overflowX: wrap ? getComputedStyle(wrap).overflowX : null
+    });
+  })()`)) || "{}");
+  check("面板展开时表格宽于半宽视口（出现横向滚动）", measOpen.tableW > measOpen.viewW + 100, measOpen);
+  check("列表区横向可滚（scrollLeft 生效）", (await cdp.eval(`(() => { const w = document.querySelector(".queue-wrap"); w.scrollLeft = 300; return Math.round(w.scrollLeft); })()`)) >= 100, "scrollLeft 未生效");
+  await cdp.eval(`(() => { document.querySelector(".queue-wrap").scrollLeft = 0; return 1; })()`);
+  await wait(200);
+  await cdp.eval(`(() => { document.querySelector('[data-testid="card-detail-close"]')?.click(); return 1; })()`);
+  await wait(600);
+  const measClosed = JSON.parse(String(await cdp.eval(`(() => {
+    const wrap = document.querySelector(".queue-wrap");
+    const table = document.querySelector(".cb-table");
+    const front = table?.querySelector(".cb-row:not(.cb-row-head) .cb-front");
+    return JSON.stringify({
+      tableW: table ? Math.round(table.getBoundingClientRect().width) : 0,
+      viewW: wrap ? Math.round(wrap.clientWidth) : 0,
+      frontW: front ? Math.round(front.getBoundingClientRect().width) : 0
+    });
+  })()`)) || "{}");
+  check("面板展开时表格宽度＝收起时宽度（条目宽度不变）", Math.abs(measOpen.tableW - measClosed.tableW) <= 2, { open: measOpen.tableW, closed: measClosed.tableW });
+  check("题面列宽度不随面板展开变化", Math.abs(measOpen.frontW - measClosed.frontW) <= 2, { open: measOpen.frontW, closed: measClosed.frontW });
+
   console.log(`\n==== d216.gui：${pass} 通过 / ${fail} 失败 ====`);
   try { cdp.ws.close(); } catch { /* 已断开 */ }
   killProc(electron);

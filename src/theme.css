@@ -8144,7 +8144,15 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   min-height: 0;
   display: flex;
 }
-.cb-shell > .queue-wrap { min-width: 0; }
+/* D217：列表区双向滚动——面板展开时表格内容宽于半宽视口，横向滚动查看完整列；
+   面板收起时内容不超宽，横向零变化（不出现滚动条） */
+.cb-shell > .queue-wrap { min-width: 0; overflow-x: auto; }
+/* D217：面板展开时条目表宽度不变——min-width＝外壳实测宽度（--cb-list-w 由 CardBrowser 的
+   ResizeObserver 供值，减表格自带左右 --sp-4 边距后外缘对齐外壳），题面列不再被挤压省略；
+   工具行/页签/吸底批量栏不设 min-width（保持视口宽，恒完整可见、不随横滚移动） */
+.cb-shell:has(> .cb-detail) .cb-table {
+  min-width: calc(var(--cb-list-w, 100%) - var(--sp-8));
+}
 .cb-detail {
   flex: 0 0 50%;
   min-width: 0;
