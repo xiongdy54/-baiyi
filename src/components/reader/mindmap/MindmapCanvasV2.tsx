@@ -1,6 +1,8 @@
 // 材料导图 v2 · 结构画布（MINDMAP-V2-IMPL-PLAN §5.2 MindmapCanvasV2；设计稿 §15）。
 // 管线：GraphState →（≤4 次/秒节流，S4）layoutGraph（增量缓存 S2 + S5 锁）→ monotoneFrames（流式组框只增不减）
 //      → planTransition（S3 锚点补偿 / S8 进入离场）→ rAF：transitionFrame → lodFrames → routeRelations → buildCanvasSvg → <svg>.innerHTML。
+//      C-32 A6「增量更新」：过渡首帧全量绘制一次（仅卡片，组框/连线淡出），后续过渡帧只对既有节点组设
+//      transform/opacity（不重建 SVG innerHTML）；终帧全量重绘恢复全部元素。平移/同档缩放照旧只改外层 <g> transform。
 // X5：buildCanvasSvg 已对帧内全部文本 / 属性严格 escapeXml，交互帧不过 DOMPurify（2,000 节点每帧太贵）；导出 SVG 才过 DOMPurify。
 // 交互：data-node-id 选中 / 双击折叠；data-act="deepen" 深挖、"unfold" 折叠切换、"lod-expand" 展开省略项；
 //      悬停 400ms 回调 onPrefetch（移开取消）；拖拽沿用 v1「位移超阈值才捕获指针」修复；滚轮绕光标缩放。
@@ -10,7 +12,7 @@ import type { GraphState, PatternKey, RelCode } from "../../../lib/mindmap/v2/ty
 import { ROOT_ID } from "../../../lib/mindmap/v2/types";
 import { createLayoutCache, layoutGraph, type Display } from "../../../lib/mindmap/v2/layout";
 import { routeRelations, REL_STYLE, type RouteResult } from "../../../lib/mindmap/v2/route";
-import { buildCanvasSvg, type SvgLabels } from "../../../lib/mindmap/v2/svg";
+import { buildCanvasSvg, num, type SvgLabels } from "../../../lib/mindmap/v2/svg";
 import {
   growthScope,
   motionPreference,
@@ -176,6 +178,10 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
   // （帧几何 / 选中 / 悬停 / 开关 / LOD 档 / 关系标签缩放档 / 刚到达描边）；平移与同档缩放只改外层 <g> 的 transform，
   // 不再每个指针事件重做 路由 + SVG 串 + innerHTML。
   const contentKeyRef = useRef<unknown[] | null>(null);
+  /** C-32 A6「增量更新」：过渡首帧全量绘制（仅卡片）后，把节点组元素按 data-node-id 建索引；
+   *  过渡期间每帧只对这些元素设 transform / opacity，不再整树重建 SVG innerHTML。终帧（或过渡被
+   *  打断：fit / setViewScale / autoFit / 换图）清空回 null，走一次全量重绘恢复组框 / 结构线 / 关系线。 */
+  const incrRef = useRef<{ nodes: Map<string, Element>; viewport: Element } | null>(null);
   const paint = useCallback(() => {
     const svg = svgRef.current;
     const d = shownRef.current;
@@ -183,10 +189,34 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     if (!d) {
       svg.innerHTML = "";
       contentKeyRef.current = null;
+      incrRef.current = null;
       return;
     }
     const p = live.current;
     const view = viewRef.current;
+    const transform = `translate(${view.tx},${view.ty}) scale(${view.k})`;
+    // C-32 A6 增量帧：过渡已建索引后，每帧只设视口 transform 与节点组的 transform/opacity——
+    // 不再拼 SVG 串、不再整树 innerHTML 重建（大图过渡帧的主要开销）。悬停/选中描边等帧内变化
+    // 在约 0.25s 过渡窗口内不刷新，终帧全量重绘补齐（与关系线淡出同属报告明示的可见变化）。
+    if (trRef.current && incrRef.current) {
+      const { nodes, viewport } = incrRef.current;
+      viewport.setAttribute("transform", transform);
+      const op = frameOpRef.current.opacity;
+      for (const it of d.items) {
+        const el = nodes.get(it.id);
+        if (!el) continue;
+        el.setAttribute("transform", `translate(${num(it.x)},${num(it.y)})`);
+        const o = op[it.id] ?? 1;
+        if (o < 1) el.setAttribute("opacity", num(Math.max(0, o)));
+        else el.removeAttribute("opacity");
+      }
+      // 离场元素不移动（transitionFrame 里位置恒为旧值），只按退场进度降不透明度
+      for (const it of frameOpRef.current.leaving) {
+        const el = nodes.get(it.id);
+        if (el) el.setAttribute("opacity", num(Math.max(0, it.o)));
+      }
+      return;
+    }
     const hovered = hoverRef.current;
     const lod = lodFrames(d, view.k);
     const fr = freshRef.current;
@@ -196,15 +226,17 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     const prev = contentKeyRef.current;
     const same = !!prev && prev.length === key.length && prev.every((v, i) => v === key[i]);
     const vp = svg.firstElementChild as SVGGElement | null;
-    const transform = `translate(${view.tx},${view.ty}) scale(${view.k})`;
     if (same && vp) {
       vp.setAttribute("transform", transform);
       return;
     }
     contentKeyRef.current = key;
     // C-32 A6：过渡期间（trRef 非空）传空路由结果——关系线整段淡出（可见变化，报告 C-32 明示），
-    // 最后一帧（过渡已结束）完整绘制。可见变化：展开/收起的约 0.25s 内关系线暂时消失。
-    const routed = trRef.current
+    // 最后一帧（过渡已结束）完整绘制。增量路径下过渡首帧只画卡片（组框 kind="frame" 与结构线一并
+    // 随 edges:[] 过滤淡出，约 0.25s；结构线无法在增量帧里跟随节点移动，整段隐藏是唯一不残留旧线的做法）。
+    const inTransition = !!trRef.current;
+    const draw = inTransition ? { ...d, items: d.items.filter((it) => it.kind !== "frame"), edges: [] as Display["edges"] } : d;
+    const routed = inTransition
       ? EMPTY_ROUTE
       : routeRelations(p.graph, d, {
       relAll: p.relAll,
@@ -216,12 +248,22 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
       relName: relNameRef.current,
     });
     const inner = buildCanvasSvg(
-      d,
+      draw,
       routed,
       { view: { tx: 0, ty: 0, k: 1 }, selected: p.selectedId, hovered, opacity: frameOpRef.current.opacity, leaving: frameOpRef.current.leaving, fresh: freshOn ? fr.ids : undefined, lodCollapsed: lod },
       { fragment: true, graph: p.graph, rootTitle: p.rootTitle, labels: labelsRef.current, idPrefix: "mm2c-", reading: p.readingId, flash: p.flashIds, lensStyle: p.lensStyle, rootType: p.rootType },
     );
     svg.innerHTML = `<g class="mm2-viewport" transform="${transform}">${inner}</g>`;
+    if (inTransition) {
+      // 建增量索引：进入/离场/常驻卡片都在首帧 DOM 里（transitionFrame 的 display 自 t0 起就是目标全集）；
+      // data-act 的是节点组内嵌的动作按钮（深挖/收起/展开），跟随父组移动，不单独立索引。
+      const nodes = new Map<string, Element>();
+      for (const el of svg.querySelectorAll("g[data-node-id]:not([data-act])")) {
+        const id = el.getAttribute("data-node-id");
+        if (id != null) nodes.set(id, el);
+      }
+      incrRef.current = { nodes, viewport: svg.firstElementChild as Element };
+    }
   }, []);
 
   const tick = useCallback(
@@ -237,6 +279,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         frameOpRef.current = { opacity: f.opacity, leaving: f.leaving };
         if (f.done) {
           trRef.current = null;
+          incrRef.current = null; // C-32 A6：终帧回全量路径，恢复组框/结构线/关系线
           transPrevRef.current = null;
           perfEnd(); // C-32 A1：过渡结束＝测量窗终点（perf 未开启时无操作）
         } else {
@@ -337,6 +380,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
     targetRef.current = null;
     if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
     trRef.current = null;
+    incrRef.current = null; // C-32 A6：过渡被丢弃，下次绘制回全量路径
     userMovedRef.current = false;
     setLodExpanded(new Set());
   }, [mapKey]);
@@ -392,6 +436,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         viewEpochRef.current++;
         if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
+        incrRef.current = null; // C-32 A6
         if (targetRef.current) shownRef.current = targetRef.current;
         fitTo(targetRef.current);
         requestPaint();
@@ -455,6 +500,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         viewEpochRef.current++;
         if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
+        incrRef.current = null; // C-32 A6
         frameOpRef.current = { opacity: {}, leaving: [] };
         if (targetRef.current) shownRef.current = targetRef.current;
         viewRef.current = { k, tx: 0, ty: 0 };
@@ -465,6 +511,7 @@ const MindmapCanvasV2 = forwardRef<MindmapCanvasHandle, MindmapCanvasV2Props>(fu
         viewEpochRef.current++;
         if (trRef.current) perfEnd(); // C-32 A1：进行中的过渡被丢弃也视为测量窗结束
         trRef.current = null;
+        incrRef.current = null; // C-32 A6
         frameOpRef.current = { opacity: {}, leaving: [] };
         if (targetRef.current) shownRef.current = targetRef.current;
         fitTo(targetRef.current);

@@ -32,7 +32,7 @@ export function escapeXml(s: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
-const num = (v: number): string => {
+export const num = (v: number): string => { // C-32 A6：过渡增量帧直接复用同一数值格式化，避免组件重复实现造成终帧/过渡帧坐标口径漂移
   if (!Number.isFinite(v)) return "0";
   const r = Math.round(v * 100) / 100;
   return String(Object.is(r, -0) ? 0 : r);
