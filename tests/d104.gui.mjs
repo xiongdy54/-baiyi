@@ -92,7 +92,7 @@ try {
   await wait(900);
   let stDetail = await extrasState(cdp);
   check("默认全开：卡详情三块全渲染（同一组件继承）", String(stDetail).includes('"m":true') && String(stDetail).includes('"s":true'), stDetail);
-  await cdp.eval(`(() => { document.querySelector(".modal-close")?.click(); return "closed"; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-testid="card-detail-close"]')?.click(); return "closed"; })()`);
   await wait(400);
 
   // 3) 设置页关掉 助记/例子（来源保留）——设置是顶栏图标按钮弹出的模态

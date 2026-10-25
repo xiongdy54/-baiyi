@@ -1155,15 +1155,17 @@ export default function ReviewView({
                 >
                   {T("标记并暂停")}<span className="k mono">Q</span>
                 </button>
-                {/* v48.60（D102）：不再关心＝归档（cards.status），与「标记并暂停」（Leech 挂起）正交 */}
+                {/* v48.60（D102）：不再关心＝归档（cards.status），与「标记并暂停」（Leech 挂起）正交。
+                    v49.45（D216）：文案统一——原「不再关心（归档）」与卡详情/批量栏/「已归档」页签统一叫「归档」+ title */}
                 <button
                   data-testid="review-archive"
+                  title={T("移出复习与默认列表，可在『已归档』页签恢复")}
                   onClick={() => {
                     setBarMoreOpen(false);
                     void archiveAndNext();
                   }}
                 >
-                  {T("不再关心（归档）")}
+                  {T("归档")}
                 </button>
                 <button
                   onClick={() => {

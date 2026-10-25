@@ -188,6 +188,15 @@ export default function CardBrowser({
   const [detailId, setDetailId] = useState<string | null>(null);
   // v48.40（D80）：摘录详情——摘录行普通点击打开（与闪卡行同语义；Ctrl/Shift 仍多选）
   const [extractDetailId, setExtractDetailId] = useState<string | null>(null);
+  // v49.43（D214）：详情改右侧侧边面板后的行点击口径——同一条再点＝收起；卡/摘录互斥（同时只开一个）
+  const openCardDetail = useCallback((id: string) => {
+    setExtractDetailId(null);
+    setDetailId((prev) => (prev === id ? null : id));
+  }, []);
+  const openExtractDetail = useCallback((id: string) => {
+    setDetailId(null);
+    setExtractDetailId((prev) => (prev === id ? null : id));
+  }, []);
   const [leechTarget, setLeechTarget] = useState<BrowserCard | null>(null);
   const [loaded, setLoaded] = useState(false);
   // v34（M12，§4.16）：今日同源暂缓清单（与复习队列同一视图口径）——id → 延后原因
@@ -440,9 +449,9 @@ export default function CardBrowser({
 
   const sortedMeta = useMemo(() => {
     const s = [...filteredMeta];
-    // 排序语义与原实现同源：到期升序用 ?? 0（新卡沉底）、优先级/遗忘降序、创建时间降序
+    // 排序语义与原实现同源：到期升序用 ?? 0（新卡沉底）、遗忘降序、创建时间降序。
+    // v49.45（D216 方案 C）：闪卡优先级退役——「按优先级」对闪卡回落 due 序（选项保留给摘录表用）
     if (sortBy === "created") s.sort((a, b) => b.createdAt - a.createdAt);
-    else if (sortBy === "priority") s.sort((a, b) => (b.priority ?? 50) - (a.priority ?? 50));
     else if (sortBy === "lapses") s.sort((a, b) => b.lapses - a.lapses);
     else s.sort((a, b) => (a.due ?? 0) - (b.due ?? 0));
     return s;
@@ -950,6 +959,25 @@ export default function CardBrowser({
     recomputeWindows();
   }, [recomputeWindows, win]);
 
+  // v49.43（D214）：详情侧边面板开/关改变 queue-wrap 宽度，工具行换行高度可能随之变化——行窗重算一次
+  useEffect(() => {
+    recomputeWindows();
+  }, [recomputeWindows, detailId, extractDetailId]);
+
+  // v49.46（D217）：外壳宽度实测写入 CSS 变量——详情面板展开时条目表以此作 min-width，
+  // 内容宽恒等于面板收起时的整宽（题面列不被半宽视口挤压），列表区在半宽视口内横向滚动；
+  // 纵向滚动与 D111 虚拟滚动口径不变（行窗只算纵向几何）
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const apply = () => shell.style.setProperty("--cb-list-w", `${shell.clientWidth}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(shell);
+    return () => ro.disconnect();
+  }, []);
+
   // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）；
   // v48.64（D108）：含 or/括号的查询不做页签联动（kind 只是行谓词，布尔语义照常求值）
   useEffect(() => {
@@ -1057,6 +1085,10 @@ export default function CardBrowser({
   const extractDetail = extractDetailId ? extracts.find((e) => e.id === extractDetailId) ?? null : null;
 
   return (
+    // v49.43（D214）：左右分栏外壳——左＝queue-wrap（唯一滚动容器，D111 虚拟滚动口径不变），
+    // 右＝详情侧边面板（cb-detail，开详情时占一半）；面板非模态，左侧列表照常滚动与批量操作
+    // v49.46（D217）：--cb-list-w＝外壳实测宽度，面板展开时条目表以此为 min-width（宽度不变+横滚）
+    <div className="cb-shell" ref={shellRef}>
     <div className="queue-wrap" ref={wrapRef}>
       {/* v48.40（D80）：吸顶头带——preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline）。
           v48.111（D156）：纯文字统计行退役，计数归一进页签（.tab-cnt，无括号） */}
@@ -1473,7 +1505,7 @@ export default function CardBrowser({
             <div className="form-hint">{T("共 {total} 条，仅列出前 {cap} 条（其余请用查询缩小范围）", { total: cardsMeta.length, cap: LEECH_LIST_CAP })}</div>
           )}
           {leechListIds.map((id) => rowCache.get(id)).filter((c): c is BrowserCard => Boolean(c)).map((c) => (
-            <div key={c.id} className="queue-row" onClick={() => setDetailId(c.id)}>
+            <div key={c.id} className={"queue-row" + (detailId === c.id ? " is-open" : "")} onClick={() => openCardDetail(c.id)}>
               <div className="queue-row-head">
                 <span>
                   {c.leech?.suspended ? T("已暂停") : T("处理中")} · {T("遗忘 {n} 次", { n: c.fsrs?.lapses ?? 0 })}
@@ -1520,13 +1552,15 @@ export default function CardBrowser({
             return (
             <div
               key={c.id}
-              className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
+              className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}${detailId === c.id ? " is-open" : ""}`}
               role="row"
               onMouseDown={(ev) => {
                 // v49.2（D176）：Shift+点击范围选时浏览器原生会在按下阶段扩选文字——只拦 shift 按下，click 照常派发
                 if (ev.shiftKey) ev.preventDefault();
               }}
-              onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : setDetailId(c.id))}
+              onClick={(ev) =>
+                ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : openCardDetail(c.id)
+              }
               title={T("Ctrl/⌘ 点击多选 · Shift 点击范围选")}
             >
               <span className="cb-pick">
@@ -1548,7 +1582,9 @@ export default function CardBrowser({
               <span className="mono">{dueText(c)}</span>
               <span className="cb-num mono">{c.fsrs?.reps ?? 0}</span>
               <span className="cb-num mono">{c.fsrs?.lapses ?? 0}</span>
-              <span className="cb-num mono">{c.priority}</span>
+              {/* v49.45（D216 方案 C①）：闪卡不设优先级（调度全由 FSRS 驱动）——列保留（行高恒定/
+                  网格模板不变，D111 虚拟滚动前提），恒显「—」；摘录表优先列照常数值 */}
+              <span className="cb-num mono">—</span>
               <span className="cb-src">{srcLabel(c)}</span>
             </div>
             );
@@ -1586,13 +1622,15 @@ export default function CardBrowser({
           {viewExtracts.slice(win.extract.start, win.extract.end).map((e) => (
             <div
               key={e.id}
-              className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
+              className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}${extractDetailId === e.id ? " is-open" : ""}`}
               role="row"
               onMouseDown={(ev) => {
                 // v49.2（D176）：同闪卡行——Shift+点击扩选文字的原生行为在按下阶段拦掉
                 if (ev.shiftKey) ev.preventDefault();
               }}
-              onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("extract", e.id, ev) : setExtractDetailId(e.id))}
+              onClick={(ev) =>
+                ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("extract", e.id, ev) : openExtractDetail(e.id)
+              }
               title={T("Ctrl/⌘ 点击多选 · Shift 点击范围选")}
             >
               <span className="cb-pick">
@@ -1770,6 +1808,8 @@ export default function CardBrowser({
         )}
       </div>
 
+    </div>
+    {/* v49.43（D214）：详情＝queue-wrap 的右侧兄弟面板（cb-detail，占一半；非遮罩）——左侧列表照常滚动 */}
       {detail && (
         <CardDetail
           card={detail}
@@ -1847,7 +1887,13 @@ export function ExtractDetail({
   onChanged: () => Promise<void> | void;
 }) {
   const T = useT();
-  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  // D214：详情＝右侧半宽停靠面板（非模态）：无遮罩、不锁 Tab；Esc 关闭与焦点管理仍走 useDialogA11y
+  const panelRef = useDialogA11y<HTMLElement>(onClose, { trap: false });
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // D214：面板内换条目时详情回到顶部（左侧列表滚动位置不受影响）
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [extract.id]);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
@@ -1902,20 +1948,19 @@ export function ExtractDetail({
   ];
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label={T("摘录详情")} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{T("摘录详情")}</h2>
-          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-scroll">
-          {/* 多段摘录＝各段 \n\n 拼接（D61/D78 落库形态），whitespace 保留原文换行 */}
-          <div className="extract-detail-content">{extract.contentMarkdown}</div>
+    <aside className="cb-detail" ref={panelRef} aria-label={T("摘录详情")}>
+      <div className="cb-detail-head">
+        <h2>{T("摘录详情")}</h2>
+        <button className="icon-btn cb-detail-close" data-testid="extract-detail-close" title={T("关闭")} onClick={onClose}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <div className="cb-detail-body" ref={bodyRef}>
+        {/* 多段摘录＝各段 \n\n 拼接（D61/D78 落库形态），whitespace 保留原文换行 */}
+        <div className="extract-detail-content">{extract.contentMarkdown}</div>
 
           <dl className="cb-meta">
             {meta.map(([k, v]) => (
@@ -1963,9 +2008,8 @@ export function ExtractDetail({
               {T("删除")}
             </button>
           </div>
-        </div>
       </div>
-    </div>
+    </aside>
   );
 }
 
@@ -2007,7 +2051,13 @@ function CardDetail({
   deferredNote?: string;
 }) {
   const T = useT();
-  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  // D214：详情＝右侧半宽停靠面板（非模态）：无遮罩、不锁 Tab；Esc 关闭与焦点管理仍走 useDialogA11y
+  const panelRef = useDialogA11y<HTMLElement>(onClose, { trap: false });
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // D214：面板内换卡（同源组点击 / 血缘树跳转）时详情回到顶部（左侧列表滚动位置不受影响）
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [card.id]);
   const [issues, setIssues] = useState<CardIssueRecord[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   // v48.61（D103）：生成信息区（AI 卡）——cards:genInfo 只读 join；重新生成确认面板开关
@@ -2158,7 +2208,7 @@ function CardDetail({
       T("稳定度 / 难度"),
       f.stability != null && f.difficulty != null ? `${f.stability.toFixed(2)} / ${f.difficulty.toFixed(2)}` : "—"
     ],
-    [T("优先级"), `P${card.priority}`],
+    // v49.45（D216 方案 C②）：「优先级」行退役——闪卡调度全由 FSRS 驱动，priority 不再是用户可见概念
     [T("来源"), srcLabel(card)],
     [T("领域"), (card.domain ?? []).join("、") || "—"],
     // v40（K1）：legacy knowledge_point_id（正式 KP 之外的原值；归一提案见「知识点」页签）
@@ -2168,18 +2218,17 @@ function CardDetail({
   ];
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label={T("卡片详情")} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{T("卡片详情")}</h2>
-          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-scroll">
+    <aside className="cb-detail" ref={panelRef} aria-label={T("卡片详情")}>
+      <div className="cb-detail-head">
+        <h2>{T("卡片详情")}</h2>
+        <button className="icon-btn cb-detail-close" data-testid="card-detail-close" title={T("关闭")} onClick={onClose}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <div className="cb-detail-body" ref={bodyRef}>
           <CardFace card={card} showBack onReveal={() => {}} onEdit={handleEdit} />
           {/* v48.61（D104）：背面辅助字段区（助记/例子/来源，app.cardFaceExtras 三开关）——与复习页同一组件自动继承 */}
           <CardFaceExtrasBlock card={card} />
@@ -2385,12 +2434,23 @@ function CardDetail({
                 {T("查看原图")}
               </button>
             )}
-            <button className="btn btn-outline btn-sm" onClick={toggleSuspend}>
+            <button
+              className="btn btn-outline btn-sm"
+              title={card.leech?.suspended ? T("恢复这张卡的复习推送") : T("暂停这张卡的复习推送，保留在列表中、不动复习进度，可随时恢复")}
+              onClick={toggleSuspend}
+            >
               {card.leech?.suspended ? T("恢复调度") : T("暂停调度")}
             </button>
-            {/* v48.60（D102）：生命周期归档/恢复（与暂停调度正交；不评分、不动 FSRS） */}
-            <button className="btn btn-outline btn-sm" data-detail-archive onClick={toggleArchive}>
-              {isArchived ? T("恢复（解除归档）") : T("不再关心")}
+            {/* v48.60（D102）：生命周期归档/恢复（与暂停调度正交；不评分、不动 FSRS）。
+                v49.45（D216）：文案统一——原「不再关心」与批量栏「归档」/页签「已归档」不同名（摘录侧的
+                「不再关心」是独立状态 dismissed，卡片侧此键自始就是归档），全应用统一叫「归档」+ title 说明去向 */}
+            <button
+              className="btn btn-outline btn-sm"
+              data-detail-archive
+              title={isArchived ? T("恢复这张卡到正常调度与默认列表") : T("移出复习与默认列表，可在『已归档』页签恢复")}
+              onClick={toggleArchive}
+            >
+              {isArchived ? T("恢复（解除归档）") : T("归档")}
             </button>
             <button className="btn btn-outline btn-sm" onClick={() => postpone(1)}>
               {T("推迟 1 天")}
@@ -2429,9 +2489,8 @@ function CardDetail({
               onClose={() => setRegenOpen(false)}
             />
           )}
-        </div>
       </div>
-    </div>
+    </aside>
   );
 }
 

@@ -449,13 +449,24 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   };
 
   // 卸载兜底提交（commitOnUnmount；摘录卡「换卡/宿主退出编辑不丢字」用，受控表单不用）
-  useEffect(
-    () => () => {
-      if (commitOnUnmount) commit();
-    },
+  // D218：StrictMode（dev）在首次挂载会模拟一次「卸载→重挂」——卸载清理里的兜底提交被误触发，
+  // onCommit(null) 令宿主立即退出编辑态＝「编辑器闪一下就关」（仅 dev，生产构建无此行为）。
+  // 修法：清理时把提交排进宏任务；若紧接着 setup 再来（＝模拟卸载后的重挂）即取消——真卸载无人取消、提交照常。
+  const pendingUnmountCommitRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (pendingUnmountCommitRef.current != null) {
+      window.clearTimeout(pendingUnmountCommitRef.current);
+      pendingUnmountCommitRef.current = null;
+    }
+    return () => {
+      if (!commitOnUnmount) return;
+      pendingUnmountCommitRef.current = window.setTimeout(() => {
+        pendingUnmountCommitRef.current = null;
+        commit();
+      }, 0);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
-  );
+  }, []);
 
   // ---------- 工具条（16 钮；形态＝dock-bottom / dock-top / float-selection） ----------
   const toolbarOn = useExtractEditorToolbar();

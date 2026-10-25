@@ -114,7 +114,7 @@ try {
   check("打开「更多」菜单", (await clickAt(cdp, '.bar-more [data-toggle]')) === true, "无按钮");
   await wait(400);
   const archClick = await cdp.eval(`(() => { const b = document.querySelector('[data-testid="review-archive"]'); if (!b) return "NOTFOUND"; b.click(); return "CLICKED"; })()`);
-  check("「不再关心（归档）」在场且可点", archClick === "CLICKED", archClick);
+  check("「归档」在场且可点（D216：原「不再关心（归档）」统一改名）", archClick === "CLICKED", archClick);
   await wait(1500);
   const afterArchive = await cdp.eval(`(async () => { const q = await window.cardsAPI.todayQueue(); return JSON.stringify({ inQueue: q.cards.some((c) => c.id === ${JSON.stringify(cardId)}), status: (await window.cardsAPI.get(${JSON.stringify(cardId)})).status, fsrsDue: (await window.cardsAPI.get(${JSON.stringify(cardId)})).fsrs.due }); })()`);
   check("归档后卡片离开今日队列", String(afterArchive).includes('"inQueue":false'), afterArchive);
@@ -135,7 +135,7 @@ try {
   // 详情：标签区 + 恢复（解除归档）
   const rowClick = await cdp.eval(`(() => { const tr = [...document.querySelectorAll('[role="row"]')].find((x) => x.textContent.includes(${JSON.stringify(CARD_MARK)})); if (!tr) return "NOROW"; tr.click(); return "CLICKED"; })()`);
   await wait(900);
-  const detail = await cdp.eval(`(() => { const m = document.querySelector(".modal-panel"); const tags = document.querySelector('[data-testid="card-detail-tags"]'); return JSON.stringify({ open: !!m, tags: tags ? tags.textContent : "", status: m ? m.textContent.includes("已归档") : null }); })()`);
+  const detail = await cdp.eval(`(() => { const m = document.querySelector(".cb-detail"); const tags = document.querySelector('[data-testid="card-detail-tags"]'); return JSON.stringify({ open: !!m, tags: tags ? tags.textContent : "", status: m ? m.textContent.includes("已归档") : null }); })()`);
   check("行点击打开卡详情", String(detail).includes('"open":true'), detail);
   check("卡详情标签区显示旧标签/新标签", String(detail).includes("旧标签") && String(detail).includes("新标签"), detail);
   const restoreBtn = await cdp.eval(`(() => { const b = document.querySelector('[data-detail-archive]'); if (!b) return "NOTFOUND"; const hit = b.textContent.includes("恢复"); b.click(); return hit ? "RESTORED" : "WRONG_LABEL"; })()`);

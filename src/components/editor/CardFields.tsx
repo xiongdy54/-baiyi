@@ -249,7 +249,10 @@ export function ClozeDraftEditor({ value, onDone }: { value: string; onDone: (ne
       onKeyDownCapture={(e) => {
         if (isImeComposing(e)) return;
         if (e.key === "Escape" || (e.key === "Enter" && (e.ctrlKey || e.metaKey))) {
+          // D215：编辑器消费 Esc/Ctrl+Enter 后阻断冒泡——宿主弹层（useDialogA11y document 级
+          // 冒泡监听）不再跟着关掉；与 MarkdownEditor 的 onRootKeyDown 同一口径
           e.preventDefault();
+          e.stopPropagation();
           onDone(draft);
         }
       }}

@@ -83,7 +83,7 @@ try {
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "卡片"); b?.click(); return "nav"; })()`);
   await wait(1800);
   await openDetail(cdp, AI_MARK);
-  const detail = await cdp.eval(`(() => { const m = document.querySelector(".modal-panel"); return JSON.stringify({ open: !!m, text: m ? m.textContent.slice(0, 2000) : "" }); })()`);
+  const detail = await cdp.eval(`(() => { const m = document.querySelector(".cb-detail"); return JSON.stringify({ open: !!m, text: m ? m.textContent.slice(0, 2000) : "" }); })()`);
   check("AI 卡详情打开", String(detail).includes('"open":true'), detail);
 
   // 1) 生成信息区：批次时间 + 模型快照 + 提示词 + 当时质检 + 重新生成入口
@@ -119,19 +119,19 @@ try {
   check("组内含兄弟卡题面", String(sib).includes("光反应的原料是"), sib);
   const switchClick = await cdp.eval(`(() => { const rows = [...document.querySelectorAll('[data-testid="sibling-row"]')]; const other = rows.find((r) => !r.className.includes("current")); if (!other) return "NOTFOUND"; other.click(); return "CLICKED"; })()`);
   await wait(700);
-  const switched = await cdp.eval(`(() => { const m = document.querySelector(".modal-panel"); return m ? (m.textContent.includes(${JSON.stringify(SIB_MARK)}) ? "SWITCHED" : "WRONG") : "CLOSED"; })()`);
+  const switched = await cdp.eval(`(() => { const m = document.querySelector(".cb-detail"); return m ? (m.textContent.includes(${JSON.stringify(SIB_MARK)}) ? "SWITCHED" : "WRONG") : "CLOSED"; })()`);
   check("点兄弟行切换到该卡详情", switchClick === "CLICKED" && switched === "SWITCHED", switched);
 
   // 5) 手动卡：无生成信息区 / 无重新生成；无锚卡：空态「无来源锚」
   const manualGen = await cdp.eval(`(() => JSON.stringify({ gen: !!document.querySelector('[data-testid="card-detail-geninfo"]'), lineage: !!document.querySelector('[data-testid="card-detail-lineage"]'), empty: document.querySelector('[data-testid="card-detail-lineage-empty"]')?.textContent ?? "" }))()`);
   check("手动卡无生成信息区", String(manualGen).includes('"gen":false'), manualGen);
-  await cdp.eval(`(() => { const b = document.querySelector(".modal-close"); b?.click(); return "closed"; })()`);
+  await cdp.eval(`(() => { const b = document.querySelector('[data-testid="card-detail-close"]'); b?.click(); return "closed"; })()`);
   await wait(500);
   await openDetail(cdp, NOANCHOR_MARK);
   const noAnchor = await cdp.eval(`(() => JSON.stringify({ empty: document.querySelector('[data-testid="card-detail-lineage-empty"]')?.textContent ?? "", gen: !!document.querySelector('[data-testid="card-detail-geninfo"]') }))()`);
   check("无锚卡显示「无来源锚」空态", String(noAnchor).includes("无来源锚"), noAnchor);
   check("无锚卡无生成信息区（AI 卡判定先行）", String(noAnchor).includes('"gen":false'), noAnchor);
-  await cdp.eval(`(() => { const b = document.querySelector(".modal-close"); b?.click(); return "closed"; })()`);
+  await cdp.eval(`(() => { const b = document.querySelector('[data-testid="card-detail-close"]'); b?.click(); return "closed"; })()`);
   await wait(400);
 
   // 6) 重新生成：无 AI Key → 面板打开并如实报错，零新建卡

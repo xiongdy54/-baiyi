@@ -128,18 +128,18 @@ try {
   await cdp.eval(`(() => { const w = document.querySelector(".queue-wrap"); if (w) w.scrollTop = 0; return true; })()`);
   await wait(600);
 
-  // ④ 行详情模态（详情行经行缓存/按需取——原全量 all.find 退役）
+  // ④ 行详情侧边面板（v49.43 / D214 由模态改右侧半宽面板；详情行经行缓存/按需取——原全量 all.find 退役）
   const detailInfo = JSON.parse(String(await cdp.eval(`(async () => {
     const row = document.querySelector(".cb-table .cb-row:not(.cb-row-head)");
     if (!row) return "{}";
     row.click();
     await new Promise((r) => setTimeout(r, 800));
-    const panel = document.querySelector('.modal-panel[aria-label="卡片详情"]');
+    const panel = document.querySelector('.cb-detail[aria-label="卡片详情"]');
     return JSON.stringify({ open: !!panel, text: panel ? panel.textContent.slice(0, 60) : "" });
   })()`)) || "{}");
-  check("行详情模态打开（窗口行数据面）", detailInfo.open === true, detailInfo);
+  check("行详情侧边面板打开（窗口行数据面）", detailInfo.open === true, detailInfo);
   check("详情含题面内容", String(detailInfo.text || "").includes("D111GUI"), detailInfo.text);
-  await cdp.eval(`(() => { document.querySelector('.modal-panel[aria-label="卡片详情"] .modal-backdrop, .modal-backdrop')?.click(); return "close"; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-testid="card-detail-close"]')?.click(); return "close"; })()`);
   await wait(400);
 
   // ⑤ 桥面通道直证（F45 盲区对账：getWindow / siblingGroup / deferredToday 在测试代码可触达）

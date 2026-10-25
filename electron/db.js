@@ -1845,14 +1845,13 @@ function buryEligible(card, cfg) {
   return false;
 }
 
-// 组内规范序：due 升序 → priority 降序 → created_at 升序 → id（确定性；与既有队列序兼容）
+// 组内规范序：due 升序 → created_at 升序 → id（确定性；与既有队列序兼容）
+// v49.45（D216 方案 C④）：优先级并列序退役——闪卡调度完全由 FSRS 驱动，priority 仅是同 due
+// 并列时的次级序且方向与摘录侧（ASC 主序）相反，对用户是纯噪声；并列改按创建时间。
 function queueMemberOrder(a, b) {
   const da = a.fsrs?.due ?? 0;
   const db = b.fsrs?.due ?? 0;
   if (da !== db) return da - db;
-  const pa = a.priority ?? 50;
-  const pb = b.priority ?? 50;
-  if (pa !== pb) return pb - pa;
   if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
   return String(a.id).localeCompare(String(b.id));
 }
@@ -1974,7 +1973,8 @@ function computeTodayQueue(now = Date.now(), opts = {}) {
 
 function listDueCards(now) {
   // v34（M12 §4.2-20）：口径唯一——队列 = computeTodayQueue().cards（同源延后在此生效）；
-  // 旧排序（due 升序、同 due 优先级高在前，§11.5）由 queueMemberOrder 保持。
+  // 旧排序（due 升序、同 due 优先级高在前，§11.5）由 queueMemberOrder 保持
+  // （v49.45 / D216：优先级并列序退役，并列改按 created_at）。
   // C-18b：生产调用走快速路径（到期超集 SQL + idx_cards_due），不再全表扫描。
   return computeTodayQueue(now, { withDamaged: false }).cards;
 }

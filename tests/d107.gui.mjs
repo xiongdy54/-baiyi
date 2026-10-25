@@ -108,7 +108,7 @@ try {
   await wait(900);
   let det = await cdp.eval(`(() => JSON.stringify({ tags: !!document.querySelector('[data-testid="card-detail-tags"]') }))()`);
   check("关闭后卡详情标签区不渲染", String(det).includes('"tags":false'), det);
-  await cdp.eval(`(() => { document.querySelector(".modal-close")?.click(); return "closed"; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-testid="card-detail-close"]')?.click(); return "closed"; })()`);
   await wait(400);
   // Ctrl+点击选中行 → 批量动作条出现
   await cdp.eval(`(() => { const tr = [...document.querySelectorAll('[role="row"]')].find((x) => x.textContent.includes(${JSON.stringify(MARK)})); const r = tr.getBoundingClientRect(); window.__d107row = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; return "pos"; })()`);

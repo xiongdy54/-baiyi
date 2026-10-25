@@ -8135,6 +8135,66 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   border-bottom: var(--bw-hairline) solid var(--border-subtle);
 }
 
+/* ---------- 卡片浏览器详情侧边面板（v49.43 / D214）：行详情由居中模态改右侧半宽停靠面板 ----------
+   左＝queue-wrap（仍是唯一滚动容器，D111 虚拟滚动口径不变），右＝本面板；非模态（无遮罩、不锁 Tab）。
+   表面＝--surface-chrome（停靠面板属页面 chrome 而非浮层）；入场走 --dur-enter/--ease-enter
+   （浮层进 150ms 硬规则、只动 transform/opacity），reduce 闸外瞬时、motion-off 总开关兜底。 */
+.cb-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+/* D217：列表区双向滚动——面板展开时表格内容宽于半宽视口，横向滚动查看完整列；
+   面板收起时内容不超宽，横向零变化（不出现滚动条） */
+.cb-shell > .queue-wrap { min-width: 0; overflow-x: auto; }
+/* D217：面板展开时条目表宽度不变——min-width＝外壳实测宽度（--cb-list-w 由 CardBrowser 的
+   ResizeObserver 供值，减表格自带左右 --sp-4 边距后外缘对齐外壳），题面列不再被挤压省略；
+   工具行/页签/吸底批量栏不设 min-width（保持视口宽，恒完整可见、不随横滚移动） */
+.cb-shell:has(> .cb-detail) .cb-table {
+  min-width: calc(var(--cb-list-w, 100%) - var(--sp-8));
+}
+.cb-detail {
+  flex: 0 0 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-chrome);
+  border-left: var(--bw-hairline) solid var(--border-subtle);
+}
+.cb-detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: var(--bw-hairline) solid var(--border-subtle);
+}
+.cb-detail-head h2 {
+  margin: 0;
+  font-size: var(--fs-title-s);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.cb-detail-close { flex: none; }
+.cb-detail-body {
+  overflow-y: auto;
+  min-height: 0;
+  padding: var(--sp-6);
+}
+@keyframes cb-detail-in {
+  from { opacity: 0; transform: translateX(var(--shift-sm)); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cb-detail { animation: cb-detail-in var(--dur-enter) var(--ease-enter); }
+}
+/* 当前面板对应的行：主题色整行高亮（D218：原「灰底 + 左缘 2px accent 竖线」按用户指令改整行主题色高亮；
+   --accent-soft＝accent 8% 透明混合淡染，两皮肤经各自 accent Token 自动取色） */
+.cb-row.is-open { background: var(--accent-soft); }
+.queue-row.is-open { border-color: var(--accent); background: var(--accent-soft); }
+
 /* v48.41（D81）：markdown 阅读分支的选区动作组容器（引擎分支的组直接挂在 .reader-engine-controls 里）
    v48.44（D84）：组内钮已有自己的 1px 框（.seg-rail / .btn-rail），原 border-color 桥接规则删除 */
 .reader-md-actions { display: flex; padding: 0 var(--sp-4) var(--sp-2); }

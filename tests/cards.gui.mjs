@@ -207,7 +207,7 @@ try {
   const table = await cdp.eval(`(() => { const t = document.querySelector("[data-extract-table]"); return JSON.stringify({ exists: !!t, has: t ? t.textContent.includes(${JSON.stringify(SEG1)}) : false }); })()`);
   check("卡片页「摘录」签可见刚摘录的内容", JSON.parse(String(table) || "{}").has === true, table);
 
-  // 5) 普通点击行 → 摘录详情模态（D80 缺陷③修复点）
+  // 5) 普通点击行 → 摘录详情侧边面板（D80 缺陷③修复点；v49.43 / D214 由模态改右侧半宽面板）
   await cdp.eval(`(() => {
     const rows = [...document.querySelectorAll("[data-extract-table] .cb-row")];
     const row = rows.find((r) => (r.querySelector(".cb-front") || {}).textContent?.includes(${JSON.stringify(SEG1)}));
@@ -220,12 +220,12 @@ try {
     return JSON.stringify({ open: !!m, hasContent: m ? m.textContent.includes(${JSON.stringify(SEG1)}) && m.textContent.includes(${JSON.stringify(SEG3)}) : false, hasJump: !!m?.querySelector("[data-extract-detail-jump]") });
   })()`);
   const mv = JSON.parse(String(modal) || "{}");
-  check("点行打开摘录详情模态", mv.open === true, modal);
+  check("点行打开摘录详情侧边面板", mv.open === true, modal);
   check("详情含三段全文", mv.hasContent === true, modal);
   check("详情含「跳转原文」出口", mv.hasJump === true, modal);
-  await cdp.eval(`(() => { document.querySelector('[aria-label="摘录详情"] .modal-close')?.click(); return "closed"; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-testid="extract-detail-close"]')?.click(); return "closed"; })()`);
   await wait(400);
-  check("关闭详情回到列表", (await cdp.eval(`!!document.querySelector('[aria-label="摘录详情"]')`)) === false, "模态未关");
+  check("关闭详情回到列表", (await cdp.eval(`!!document.querySelector('[aria-label="摘录详情"]')`)) === false, "面板未关");
 
   // 6) 吸底批量栏在位（重排后钩子保留）
   const stage = await cdp.eval(`JSON.stringify({ bar: !!document.querySelector("[data-batch-bar]"), hint: (document.querySelector("[data-batch-bar] .bar-hint") || {}).textContent || "" })`);
