@@ -3,6 +3,7 @@
 // 运行：npm run build 之后 `node tests/d111.gui.mjs`（CDP 驱动 dist 上的真实应用，自启自关）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-d111-userdata（先清空，全新库），绝不触碰真实库（§7.3）。
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -62,7 +63,7 @@ const setSearch = async (cdp, text) => {
 };
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const seeded = execSync("npx electron tests/d111.gui.seed.cjs", {
@@ -73,7 +74,7 @@ try {
 
   const out = openSync(path.join(ROOT, "tests", "d111.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -164,8 +165,7 @@ try {
   console.error("测试异常：", (e && e.stack) || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(500);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
   process.exit(fail === 0 ? 0 : 1);

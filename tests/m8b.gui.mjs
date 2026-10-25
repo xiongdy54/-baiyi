@@ -4,7 +4,8 @@
 //   日记页「洞察」按钮 → 面板挂载 → 无 Key 可读降级（非静默失败）→ 装配证据包（范围 30d）
 //   → 发送前预览（日记条数/token 预算）→ 无 Key 时「发送」置灰 → 重选范围回路 → 面板关闭
 // 真实 LLM 调用不入自动化（Key/成本/不可确定性）：输出渲染与反馈落表由 db 层 + 隔离实例人工冒烟。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -85,7 +86,7 @@ function spawnApp() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
@@ -114,11 +115,7 @@ const clickByText = (sel, text) =>
   `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`;
 
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   fs.rmSync(path.join(ROOT, "tests", "m8b.gui.log"), { force: true });
@@ -183,11 +180,7 @@ try {
   fail++;
   console.error("M8B GUI 异常：", err);
 } finally {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 已退出 */
-  }
+  killProc(electron);
   await wait(800);
   try {
     fs.rmSync(USER_DATA, { recursive: true, force: true });

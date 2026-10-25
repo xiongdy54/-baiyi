@@ -9,7 +9,8 @@
 //   ③ 设置左栏出现「实验功能」（D125：左栏 14 项 → 15 项；D114 立约文本记 13 项，DOM 实际计数 14——历史出入以实际为准）→ #sec-lab 内含 #sec-learner（自 sec-widgets 迁入）
 //   ④ 正处「推荐」页时在设置里关闭学习者模型 → 页签经 .nav-collapse 收拢后卸载（回到六签）＋视图退回数据页
 //   ⑤ 重新开启 → 页签回到第 4 位；关设置后点「推荐」面板恢复挂载
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -57,12 +58,12 @@ async function connect() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const out = openSync(path.join(ROOT, "tests", "d125-next-tab.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -115,8 +116,7 @@ try {
   console.error("测试异常：", (e && e.stack) || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(500);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
   process.exit(fail === 0 ? 0 : 1);

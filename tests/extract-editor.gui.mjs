@@ -13,6 +13,7 @@
 // 局限（如实注明，不得伪造）：真实中文 IME 组合期输入无法在本环境模拟——键入走 CDP Input.insertText 与
 //   带 text 的按键直插路径，不覆盖 composition 事件序列（设计稿开放问题④：IME 冒烟登记为用户验收步骤）。
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -152,7 +153,7 @@ const navTo = async (cdp, label) => {
 };
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   execSync("npx electron tests/extract.gui.seed.cjs", {
@@ -162,7 +163,7 @@ try {
   const launch = async () => {
     const out = openSync(path.join(ROOT, "tests", "extract-editor.gui.log"), "a");
     const p = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-      cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+      cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
       env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
     });
     return p;
@@ -624,8 +625,7 @@ try {
   await wait(600);
   const tbBeforeRestart = await cdp.eval(`(async () => JSON.stringify(await window.settingsAPI.get("app", "extractEditorToolbar")))()`);
   check("⑩ 重启前置：开关已关（false）", String(tbBeforeRestart) === "false", tbBeforeRestart);
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(1500);
   electron = await launch();
   cdp = await connect();
@@ -898,8 +898,7 @@ try {
   console.error("测试异常：", (e && e.stack) || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(500);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
   process.exit(fail === 0 ? 0 : 1);

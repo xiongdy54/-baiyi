@@ -4,7 +4,8 @@
 //   v48.44（D84）：导图并入阅读器侧栏「图谱」页签——开侧栏 → 图谱页签（面板 + 主区画布层）→
 //   空态 + 文本提取 → 无 Key 可读降级（AI 未配置区块、无发送前预览按钮、不弹错误窗）
 //   → 收侧栏回正文（内核保活，阅读器在场）→ 再入页签（空态保持）。生成全流程与回看细节随批 7 真实 Key 冒烟。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -65,7 +66,7 @@ async function connectTarget(match, label, timeoutMs = 60000) {
 function spawnApp() {
   const out = openSync(path.join(ROOT, "tests", "m15r.gui.log"), "a");
   return spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
@@ -93,7 +94,7 @@ const mapProbe = `JSON.stringify({
 })`;
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   fs.rmSync(path.join(ROOT, "tests", "m15r.gui.log"), { force: true });
@@ -186,9 +187,8 @@ try {
     return JSON.stringify({ hasKey: cfg.hasKey });
   })()`);
   check("会话 1：测试 Key 写入（加密落盘）", String(keySet).includes('"hasKey":true'), keySet);
-  try { electron?.kill(); } catch { /* ignore */ }
   await wait(800);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  killProc(electron);
   await wait(800);
 
   // 6. 会话 2 前置：sql.js 直接向 library.db 预置一份三层导图（应用关闭态的合法数据准备——
@@ -563,9 +563,8 @@ try {
   await wait(400);
 
   // v48.17（D53）会话 3：再次启动 → 上一步关过的两条**不该再回来**（这是用户报的「每次开机都出现」的正面回收）
-  try { electron?.kill(); } catch { /* ignore */ }
   await wait(800);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  killProc(electron);
   await wait(800);
   electron = spawnApp();
   main = await connectTarget((u) => u.includes("index.html"), "主窗口3");
@@ -583,8 +582,7 @@ try {
   console.error("FATAL:", err && (err.message || err));
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* ignore */ }
   await wait(600);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  killProc(electron);
   process.exit(fail ? 1 : 0);
 }

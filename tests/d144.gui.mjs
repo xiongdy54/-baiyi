@@ -13,7 +13,8 @@
 // 不另开第二窗口 CDP；窗口专属表现（引用后聚焦/光标落文末的窗口实例）不在本套件范围。
 // 纪律：选择器全部取自方案 §10 DOM 契约（data-testid / aria / data-* 属性），禁断言类名与内联样式；
 // 动效只断言终态（D120——不探测过渡中间帧）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -127,13 +128,13 @@ async function waitTrue(cdp, expr, timeout = 15000) {
 const FRONT_PM = '[data-card-dock] [data-testid="wb-manual-body"] .ProseMirror';
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
 
   const out = openSync(path.join(ROOT, "tests", "d144.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -369,6 +370,6 @@ try {
   fail++;
   console.log("  ✗ 测试执行异常: " + (err && err.stack || err));
 } finally {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
   process.exitCode = fail === 0 ? 0 : 1;
 }

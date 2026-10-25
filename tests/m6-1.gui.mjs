@@ -3,7 +3,8 @@
 //       → 断言 source_type 与 assets 落盘 → 打开 Word 书断言内嵌图在 foliate 内核真实渲染 → 选区制卡 contextRef
 //       → 重启应用 → 数据不丢、图仍渲染 → 清理测试数据与 fixture
 // 纪律：FSRSTEST 前缀；按 title 属性显式身份匹配书卡；readerSettings 存/恢复；结束清场 taskkill
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -106,11 +107,11 @@ async function buildFixtures() {
 
 // ---------- CDP ----------
 async function startApp() {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", "m6-1.gui.app.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32"
   });
   const cdp = await connect();
   await cdp.eval("1");
@@ -319,11 +320,11 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
   await cdp.eval(`document.querySelector("[data-card-dock] [data-dock-close]")?.click(); 1`);
 
   console.log("== 6) 重启应用 → 数据不丢、图仍渲染 ==");
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
   await wait(1200);
   const out2 = openSync(path.join(ROOT, "tests", "m6-1.gui.app.log"), "a");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out2, out2], detached: false
+    cwd: ROOT, shell: true, stdio: ["ignore", out2, out2], detached: process.platform !== "win32"
   });
   const cdp2 = await connect();
   await wait(1500);
@@ -384,9 +385,9 @@ async function openBookAndAssertImages(cdp, title, expectImages, navTitle) {
 
   console.log(`\n==== M6-1 GUI SUMMARY ${pass}/${pass + fail} ====`);
   if (fail > 0) { console.log("FAILURES 见上方 ✗ 行"); process.exitCode = 1; }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
 })().catch((e) => {
   console.error("M6-1 GUI CRASH:", e);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
   process.exit(1);
 });

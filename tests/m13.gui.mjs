@@ -6,7 +6,8 @@
 // 覆盖：微反馈条出现与 aria / 几何不变 / 单槽替换与自动消失 / 证据展开暂停计时 / 设置开关零渲染 /
 //       reduce 瞬时 / 会话成果汇总与表序 / 空命中零渲染 / L2 单日折叠展开 / 仪表盘两 widget（顺序、
 //       行数、Territory aria、拖拽持久化）/ 关闭时静态空态 / 重启不丢。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -60,15 +61,14 @@ async function connect() {
 async function launch() {
   const out = openSync(path.join(ROOT, "tests", "m13.gui.log"), "a");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
 
 async function stop() {
-  try { electron?.kill(); } catch { /* 忽略 */ }
   await wait(1200);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
 }
 
 const nav = (label) => `(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === ${JSON.stringify(label)}); b?.click(); return !!b; })()`;
@@ -103,7 +103,7 @@ const rectOf = (sel) => `(() => { const el = document.querySelector(${JSON.strin
 const near = (a, b, tol = 1) => a && b && Math.abs(a.w - b.w) <= tol && Math.abs(a.h - b.h) <= tol;
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   await launch();
@@ -394,7 +394,7 @@ try {
   // Windows：taskkill 后单实例锁文件/端口释放有迟滞，多等再启；连接失败则再杀再试一轮
   await stop();
   await wait(2000);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(1500);
   await launch();
   let cdp2 = null;
@@ -419,8 +419,7 @@ try {
   fail++;
   console.log("M13 GUI 异常", e);
 } finally {
-  try { electron?.kill(); } catch { /* 忽略 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 忽略 */ }
+  killProc(electron);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败不掩盖结果 */ }
 }
 process.exit(fail > 0 ? 1 : 0);

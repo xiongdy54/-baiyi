@@ -3,7 +3,8 @@
 // 覆盖（§9.1 M12 验收①②⑤⑥⑦；③④长选区/拆卡矩阵由 tests/m12.test.cjs 锁定）：
 //   同句 3 卡 → 今日只出 1 张 + 复习页「同源暂缓」可展开（原因可读）→ 评分后会话收尾且兄弟卡未出现
 //   → 延后卡 due/fsrs 逐字段零变化（不写 FSRS）→ 卡片浏览页「今日暂缓」页签 → 设置开关即时生效与持久化 → 清理
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -51,12 +52,12 @@ async function connect() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   const out = openSync(path.join(ROOT, "tests", "m12.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -164,8 +165,7 @@ try {
   fail++;
   console.log("M12 GUI 异常", e);
 } finally {
-  try { electron?.kill(); } catch { /* 忽略 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 忽略 */ }
+  killProc(electron);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败不掩盖结果 */ }
 }
 process.exit(fail > 0 ? 1 : 0);

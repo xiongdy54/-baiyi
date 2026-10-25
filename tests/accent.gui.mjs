@@ -4,7 +4,8 @@
 //   胜过从 :root 继承的值 —— 深色档不是回归，是一直存在（601aa93 差分实测同样失败）。
 // 运行：node tests/accent.gui.mjs（CDP 驱动真实应用，自启自关）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-accent-userdata（先清空），绝不触碰真实库（§7.3）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -92,11 +93,12 @@ const GREEN = "#1a9e5f";
 const YELLOW = "#f2e000"; // 浅色 accent：用来验反白档必须翻成纯黑
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(900);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const log = openSync(path.join(ROOT, "tests", "accent.gui.log"), "a");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
+    detached: process.platform !== "win32",
     cwd: ROOT, shell: true, stdio: ["ignore", log, log],
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
@@ -146,8 +148,7 @@ try {
   console.error("异常", e);
   process.exit(1);
 } finally {
-  try { electron?.kill(); } catch { /* ignore */ }
   await wait(1000);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  killProc(electron);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* Windows 句柄未释放 */ }
 }

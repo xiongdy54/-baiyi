@@ -10,7 +10,8 @@
 //   ⑤ 卡片页空态：empty-text 在场（还没有卡片）、无 .empty-deco
 //   ⑥ 全应用扫掠：.empty-deco/.empty-sq/.count-dot/.book-card-spine/.mark-kind 总数＝0
 //   （批注条目色条与色板折叠动效的行为断言在 annotations.gui.mjs——需要真实摘录数据，不在此重复播种）
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -58,12 +59,12 @@ async function connect() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const out = openSync(path.join(ROOT, "tests", "d126-deco-squares.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -162,7 +163,6 @@ try {
   console.error("套件异常:", e?.message || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   process.exit(fail ? 1 : 0);
 }

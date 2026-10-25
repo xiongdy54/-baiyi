@@ -4,7 +4,8 @@
 //   知识点页签「质量检查」按钮 → K4/K7/K8 结果渲染（可跳详情）→ 收起；
 //   渲染层可取到 4 个新 scope 的 v1 模板（promptsAPI）→ LKM scope 播种到达前端。
 // 真实 AI 调用不入自动化（Key/成本/不确定性）；出层契约裁决由 db 层测试覆盖。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -79,7 +80,7 @@ function spawnApp() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
@@ -88,11 +89,7 @@ const clickByText = (sel, text) =>
   `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`;
 
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   fs.rmSync(path.join(ROOT, "tests", "k2b.gui.log"), { force: true });
@@ -154,11 +151,7 @@ try {
   fail++;
   console.error("K2B GUI 异常：", err);
 } finally {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 已退出 */
-  }
+  killProc(electron);
   await wait(800);
   try {
     fs.rmSync(USER_DATA, { recursive: true, force: true });

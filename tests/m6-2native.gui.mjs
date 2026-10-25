@@ -3,7 +3,8 @@
 //       （canvas + 文本层在场，非合成 EPUB）→ 选词制卡（contextRef 含 pageIndex + pdfjs 版本）
 //       → 摘录 → 跳转原文回页 → 深色外观不断言只截图 → 重启后进度恢复到同页 → 清理
 // 纪律：FSRSTEST 前缀；按 title 属性显式身份匹配书卡；readerSettings 存/恢复；结束清场 taskkill
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -112,11 +113,11 @@ async function connect() {
 }
 
 async function startApp(logName) {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", logName), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32"
   });
   const cdp = await connect();
   await wait(1500);
@@ -345,9 +346,9 @@ async function pdfRenderState(cdp) {
 
   console.log(`\n==== M6-2N GUI SUMMARY ${pass}/${pass + fail} ====`);
   if (fail > 0) { console.log("FAILURES 见上方 ✗ 行"); process.exitCode = 1; }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
 })().catch((e) => {
   console.error("M6-2N GUI CRASH:", e);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
   process.exit(1);
 });

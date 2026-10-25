@@ -3,7 +3,8 @@
 // 覆盖（§9.1 K1-4 最小管理面；db 层由 tests/k1.test.cjs 锁定）：
 //   卡片页「知识点」页签 → 新建 KP → 加别名 → 建关系 → 合并（确认制）→ 解除合并 →
 //   旧字段归一建议扫描（卡带 legacy knowledge_point_id）→ 提案接受成正式 KP → 行详情显示知识点
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -81,7 +82,7 @@ function spawnApp() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
@@ -100,11 +101,7 @@ const clickByText = (sel, text) =>
   `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`;
 
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   fs.rmSync(path.join(ROOT, "tests", "k1.gui.log"), { force: true });
@@ -226,11 +223,7 @@ try {
   fail++;
   console.error("K1 GUI 异常：", err);
 } finally {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 已退出 */
-  }
+  killProc(electron);
   await wait(800);
   try {
     fs.rmSync(USER_DATA, { recursive: true, force: true });

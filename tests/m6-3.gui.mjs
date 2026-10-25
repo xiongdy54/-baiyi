@@ -3,7 +3,8 @@
 //       → 重启不丢 → 清理。
 // 边界说明：HTML→markdown 的**转换正确性**由 tests/m6-3.test.cjs（jsdom）覆盖；本测试经 IPC 建册验证
 //   DB/书架/阅读器全链路（原生文件对话框无法自动化，D27 的按扩展名路由由 m6-3.test.cjs 路由表断言覆盖）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
@@ -100,11 +101,11 @@ async function connect() {
 }
 
 async function startApp(logName) {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", logName), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32"
   });
   const cdp = await connect();
   await wait(1500);
@@ -279,9 +280,9 @@ async function openBookProbe(cdp, title) {
 
   console.log(`\n==== M6-3 GUI SUMMARY ${pass}/${pass + fail} ====`);
   if (fail > 0) { console.log("FAILURES 见上方 ✗ 行"); process.exitCode = 1; }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
 })().catch((e) => {
   console.error("M6-3 GUI CRASH:", e);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
   process.exit(1);
 });

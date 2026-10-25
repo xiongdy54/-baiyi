@@ -4,7 +4,8 @@
 //       顺序与文件夹持久化（settings.json 重启不丢）、空态不再重复主行动。
 // 运行：node tests/shelf.gui.mjs（CDP 驱动真实应用，自启自关）
 // 隔离：M7_TEST_USERDATA → tests/tmp-shelf-userdata（先清空），绝不触碰真实库（§7.3）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -123,11 +124,12 @@ const GEOM = `(() => {
 /* ---------------------------------------------------------------------- 跑测 */
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(900);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const log = openSync(path.join(ROOT, "tests", "shelf.gui.log"), "a");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
+    detached: process.platform !== "win32",
     cwd: ROOT, shell: true, stdio: ["ignore", log, log],
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA },
   });
@@ -988,8 +990,7 @@ try {
   console.error("异常", e);
   process.exit(1);
 } finally {
-  try { electron?.kill(); } catch { /* ignore */ }
   await wait(1000);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  killProc(electron);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* Windows 句柄未释放 */ }
 }

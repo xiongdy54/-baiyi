@@ -3,7 +3,8 @@
 // 覆盖（D38 触发与确认的 GUI 面；数据层由 tests/k2a.test.cjs 锁定）：
 //   知识点页签「AI 整理（N 簇待归一）」按钮 → 无 Key 可读降级 → 扫描归一建议出提案 → 一键「全部接受」→ KP 落地
 // 真实 AI 调用不入自动化（Key/成本/不确定性）：裁决器与幂等由 db 层测试覆盖。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -79,7 +80,7 @@ function spawnApp() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
@@ -88,11 +89,7 @@ const clickByText = (sel, text) =>
   `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`;
 
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   fs.rmSync(path.join(ROOT, "tests", "k2a.gui.log"), { force: true });
@@ -143,11 +140,7 @@ try {
   fail++;
   console.error("K2A GUI 异常：", err);
 } finally {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 已退出 */
-  }
+  killProc(electron);
   await wait(800);
   try {
     fs.rmSync(USER_DATA, { recursive: true, force: true });

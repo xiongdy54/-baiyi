@@ -125,6 +125,6 @@ if (f10) {
     out += `| ${k} | ${v.length} | ${Math.min(...v)} | ${pct(v, 0.5)} | ${Math.max(...v)} |\n`;
   }
 }
-out += `\n## 5. 结论口径\n\n- 判绿条件：退出码 0 且 \`fail==0 && !aborted && !crash && knownHealed 为空 && total>0\`（零断言视为失败）。\n- 「已知缺陷触发」不算失败，但会逐轮计数；缺陷被修好后该断言**意外转绿会立刻判红**，提醒撤销登记。\n- 崩溃列多为环境干扰：并行会话沿用旧 harness 的 \`taskkill /IM electron.exe /F\` 会连带杀掉本层正在跑的流程进程（编排器对「被信号杀死/零断言早退」自动重试一次，真实断言失败绝不重试）。\n`;
+out += `\n## 5. 结论口径\n\n- 判绿条件：退出码 0 且 \`fail==0 && !aborted && !crash && knownHealed 为空 && total>0\`（零断言视为失败）。\n- 「已知缺陷触发」不算失败，但会逐轮计数；缺陷被修好后该断言**意外转绿会立刻判红**，提醒撤销登记。\n- 崩溃列多为环境干扰：并行会话若沿用按映像名整杀本机全部 electron.exe 的旧 harness 清理（C-02 步骤 3 起各套件只杀自身 PID）会连带杀掉本层正在跑的流程进程（编排器对「被信号杀死/零断言早退」自动重试一次，真实断言失败绝不重试）。\n`;
 fs.writeFileSync(path.join(ROOT, "docs", "test-flows", "REPORT.md"), out);
 console.log("已写出 docs/test-flows/REPORT.md ·", out.length, "字符");

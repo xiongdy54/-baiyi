@@ -7,7 +7,8 @@
 //   ③ 进度条左右与卡面同列（|Δ| ≤ 2px）；
 //   ④ 评分四钮高度 == 「显示答案」主钮高度（±1px）。
 // AI 桩：window.aiAPI 是 contextBridge 冻结对象，故在网络边缘打桩（OpenAI 兼容 SSE，同 occlusion/d91-d92 口径）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -116,11 +117,7 @@ const frontGuard = async (needle) => cdp.eval(`(() => { const f = document.query
 
 // ---------- 主流程 ----------
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留进程则忽略 */
-  }
+  killProc(electron);
   await wait(800);
   await mockListen;
   fs.rmSync(USER_DATA, { recursive: true, force: true });
@@ -129,7 +126,7 @@ try {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   cdp = await cdpConnect();
@@ -270,12 +267,7 @@ try {
       await cdp.eval(`(async () => { for (const id of ${JSON.stringify(seededIds)}) { try { await window.cardsAPI.remove(id); } catch (e) {} } return 'cleaned'; })()`);
     }
   } catch { /* 清理尽力而为 */ }
-  try {
-    if (electron) electron.kill();
-  } catch { /* ignore */ }
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch { /* ignore */ }
+  killProc(electron);
   try {
     mockServer.close();
   } catch { /* ignore */ }

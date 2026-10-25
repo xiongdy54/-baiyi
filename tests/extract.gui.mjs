@@ -3,6 +3,7 @@
 // 覆盖（§6.8 验收）：预播种一条到期摘录 → 顶栏「摘录」进入沉浸式页 → 卡面/正文/动作可见 →
 //   正文就地编辑落库 → 下一条（读后推进 interval ×1.6 且不再出现）→ 撤销回退 → 推迟 N 天 → 毕业后不再推送
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -102,7 +103,7 @@ async function connect() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   // 1) 预播种（独立进程建库 + 造一条已到期摘录）
@@ -113,7 +114,7 @@ try {
   // 2) 启动真实应用（同一 userData）
   const out = openSync(path.join(ROOT, "tests", "extract.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -619,8 +620,7 @@ try {
   console.error("测试异常：", (e && e.stack) || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(500);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
   process.exit(fail === 0 ? 0 : 1);

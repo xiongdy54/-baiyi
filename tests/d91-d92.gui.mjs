@@ -12,7 +12,8 @@
 // AI 桩：contextBridge 属性不可写（赋值静默失败、defineProperty 报 Cannot redefine——probe 实测），
 //        故改在**网络边缘**打桩：测试进程起本地 mock HTTP 服务器（OpenAI 兼容 SSE），setConfig 指向它——
 //        渲染层 → IPC → 主进程 chatStream → fetch 全真实代码路径，按 system 内容分流 ste/explain/occlusion。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -209,14 +210,14 @@ async function waitAnswerDone(timeoutMs = 30000) {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   await new Promise((r) => mockServer.listen(MOCK_PORT, "127.0.0.1", r));
 
   const out = openSync(path.join(ROOT, "tests", "d91d92.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -443,7 +444,7 @@ try {
   console.log("  ✗ 测试执行异常: " + (err && err.stack || err));
   console.log("MOCK HISTORY:", mock.history.join(" | ") || "(none)");
 } finally {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
   try { mockServer.close(); } catch { /* 已关闭 */ }
   process.exitCode = fail === 0 ? 0 : 1;
 }

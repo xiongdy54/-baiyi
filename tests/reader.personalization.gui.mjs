@@ -6,7 +6,8 @@
 // 注意：跑前先 npm run build（GUI 套件纪律）；须先关闭应用（§7.1.8）。
 // 探针清单（§4 各项 data-*）：data-reader-row / data-reader-theme-save / data-reader-theme-option /
 //   data-reader-theme-name-input / data-reader-theme-manage-list / data-reader-setting / data-reader-tap-hint。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
@@ -193,11 +194,7 @@ async function seedSettings(cdp, settings) {
 }
 
 async function main() {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   await buildEpubFixture();
@@ -207,7 +204,7 @@ async function main() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connectTarget((u) => u.includes("index.html"), "主窗口");
@@ -512,7 +509,7 @@ async function main() {
   }
 
   await cdp.ws.close();
-  electron?.kill();
+  killProc(electron);
   await wait(500);
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
   process.exit(fail ? 1 : 0);
@@ -520,11 +517,6 @@ async function main() {
 
 main().catch((e) => {
   console.error("脚本失败:", e);
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 已退出 */
-  }
-  electron?.kill();
+  killProc(electron);
   process.exit(1);
 });

@@ -2,7 +2,8 @@
 // 流程：造 PDF fixture（带书签大纲 3 页 + 扫描版 1 页）→ IPC 主进程转换建册（与 UI 按钮同链路）
 //       → 扫描版拒绝断言 → assets 落盘 → 打开 PDF 书（目录跳章）断言正文渲染 → 选区制卡 → 重启不丢 → 清理
 // 纪律：FSRSTEST 前缀；按 title 属性显式身份匹配书卡；readerSettings 存/恢复；结束清场 taskkill
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -123,11 +124,11 @@ async function connect() {
 }
 
 async function startApp() {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", "m6-2.gui.app.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32"
   });
   const cdp = await connect();
   await wait(1500);
@@ -314,9 +315,9 @@ const BOOK = "FSRSTEST-M6-2 导测";
 
   console.log(`\n==== M6-2 GUI SUMMARY ${pass}/${pass + fail} ====`);
   if (fail > 0) { console.log("FAILURES 见上方 ✗ 行"); process.exitCode = 1; }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
 })().catch((e) => {
   console.error("M6-2 GUI CRASH:", e);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* */ }
+  killProc(electron);
   process.exit(1);
 });

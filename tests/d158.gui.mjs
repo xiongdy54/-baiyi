@@ -5,6 +5,7 @@
 // 夹具（tests/d158.gui.seed.cjs）：书 A/B/C；卡 A1[英语::词汇] A2[英语学] B1[英语] B2(无标签,持KP X) C1[英语]；
 //   KP X 已归并入 Y；摘录 EA（书A,英语）EC（书C,英语）。G1–G7 断言见各段（OPUS 方案 v2 §8.5）。
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -96,7 +97,7 @@ const deleteActiveScheme = async (cdp) => {
 };
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const seeded = execSync("npx electron tests/d158.gui.seed.cjs", {
@@ -108,7 +109,7 @@ try {
 
   const out = openSync(path.join(ROOT, "tests", "d158.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -215,10 +216,10 @@ try {
 
   console.log(`\n==== d158.gui：${pass} 通过 / ${fail} 失败 ====`);
   try { cdp.ws.close(); } catch { /* 已断开 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
   process.exit(fail > 0 ? 1 : 0);
 } catch (e) {
   console.error("D158 GUI FAIL:", e?.message || e);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
   process.exit(1);
 }

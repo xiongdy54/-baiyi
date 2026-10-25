@@ -3,6 +3,7 @@
 // 运行：npm run build 之后 `node tests/d104.gui.mjs`（CDP 驱动 dist 上的真实应用，自启自关）
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-d104-userdata（先清空，全新库），绝不触碰真实库（§7.3）。
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -58,7 +59,7 @@ const reveal = async (cdp) => {
 const extrasState = (cdp) => cdp.eval(`(() => { const w = document.querySelector('[data-testid="card-face-extras"]'); return JSON.stringify({ block: !!w, m: !!document.querySelector('[data-testid="card-extra-mnemonic"]'), e: !!document.querySelector('[data-testid="card-extra-example"]'), s: !!document.querySelector('[data-testid="card-extra-sourceRef"]') }); })()`);
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const seeded = execSync("npx electron tests/d104.gui.seed.cjs", {
@@ -70,7 +71,7 @@ try {
 
   const out = openSync(path.join(ROOT, "tests", "d104.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -126,10 +127,10 @@ try {
 
   console.log(`\n==== d104.gui：${pass} 通过 / ${fail} 失败 ====`);
   try { cdp.ws.close(); } catch { /* 已断开 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
   process.exit(fail > 0 ? 1 : 0);
 } catch (e) {
   console.error("FATAL:", e?.message || e);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   process.exit(1);
 }
