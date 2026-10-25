@@ -1285,10 +1285,10 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - `updateCard` 未传 fsrs / leech 时**保留原值，禁止置 NULL**。
 - 禁止用 partial 对象走全行 UPDATE——改内容必须先取库内最新状态合并（先例：词典快照曾把 17 列清空）。
 - `contentEditable` 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable；**例外（v48.54 / D95）＝自管子树的编辑器内核**（摘录卡 Milkdown/ProseMirror，§6.8-14）。
-- **每次落库即落盘**：写路径走 `persist()`（tmp + fsync + rename 原子替换）；例外仅限本节登记＝日记草稿节流（D34）＋应用日志追加写（D119）＋`learner.db` 走 `learnerDb.save()`（D124）＋`rec_runs` 300 行物理裁剪（D124）。
+- **每次落库即落盘**：写路径走 `persist()`（D137 起为显式 `wal_checkpoint(TRUNCATE)`；持久性由事务提交 + WAL `synchronous=FULL` fsync 承担）；例外仅限本节登记＝日记草稿节流（D34）＋应用日志追加写（D119）＋`learner.db` 走 `learnerDb.save()`（D124）＋`rec_runs` 300 行物理裁剪（D124）。
 - 用户记忆文件树同样原子替换，禁止留半截文件；整理只追加与标记，**绝不整文件重写**。
 - 新增表一律进主库（M2 打包整库自动覆盖）；**唯一例外是不在主库的记忆文件树，备份 / 恢复必须显式包含它**。
-- 并发写走主进程单一 sql.js 实例，渲染层不持库；外部脚本改库前必须先关闭应用。
+- 并发写走主进程单一 better-sqlite3 连接，渲染层不持库；外部脚本改库前必须先关闭应用。
 - 机械核对：`F33`（持久化保真）/ `F37`（persist 故障注入）/ `F38`（写入模糊）/ `F50`（迁移错误卫生）/ `F62`（并发写）全绿。
 
 ## 7.3 测试义务

@@ -56,7 +56,7 @@ const { installPermissionHandlers } = require("./permissions");
 const { closeToTrayEnabled } = require("./closeToTray");
 
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
-// 且会各持一份 sql.js 内存库、互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
+// 且会各开一份 better-sqlite3 连接、双写同一库文件互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
 let mainWindow = null;
 // D123：真正退出标记（before-quit 置位）——关闭主窗口默认收进托盘，只有它为 true 才放行销毁
 let appQuitting = false;
@@ -1415,8 +1415,8 @@ ipcMain.handle("dict:download", async (e, item) => {
 });
 
 // ---------- v36（M8-A，§6.5 / D34）：日记与快速记录 ----------
-// 写入一律经主进程（sql.js 单实例）；写入后广播 journal:changed 给其它窗口（日记页实时刷新）。
-// 快捷记录草稿的「内存即时写 + 磁盘节流」由 quickCapture 统一编排（本项目唯一持久化例外，见 D34）。
+// 写入一律经主进程（单一 better-sqlite3 连接）；写入后广播 journal:changed 给其它窗口（日记页实时刷新）。
+// 快捷记录草稿的「库内即时写 + persist() 节流」由 quickCapture 统一编排（本项目首个已登记持久化例外，见 D34）。
 
 // 主窗口前置（最小化则还原）：全局快捷键与「添加材料」入口共用
 function focusMainWindow() {
@@ -1449,7 +1449,7 @@ ipcMain.handle("journal:day", (_e, date) => {
 
 ipcMain.handle("journal:draft", () => dbModule.getJournalDraft());
 
-// 草稿续写（输入中，防抖调用）：内存库即时写 + 磁盘节流
+// 草稿续写（输入中，防抖调用）：库内即时写（事务提交）+ persist() 节流
 ipcMain.handle("journal:draftSave", (e, contentMarkdown) => {
   const entry = quickCapture.saveDraft(String(contentMarkdown ?? ""), e.sender);
   return { ok: true, entry };

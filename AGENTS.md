@@ -1,17 +1,29 @@
 # 增量阅读 · AI 入口（AGENTS.md）
 
-> 给 AI 编码代理的**极短入口**：先读这里，再按下方路由表按需取文件。**不要通读整份指导文档**（它 242K 字符，且历史上单次读不完）。
+> 给 AI 编码代理的**极短入口**：先读这里，再按下方路由表按需取文件。**不要通读整份指导文档**（它约 49 万字符（`wc -m AI_DEVELOPMENT_GUIDE.md` 查看实际值），且历史上单次读不完）。
 
 ## 项目一句话
 
-本地优先的桌面「渐进阅读」学习软件。Electron 主进程（`electron/*.js`，CommonJS + sql.js/SQLite）+ React/TS 渲染层（`src/`）。主流程：书架 → 阅读（PDF / EPUB / Word / TXT / MD / HTML）→ 摘录与就地批注 → AI 制卡 → FSRS 复习 → 材料导图 / 知识图谱。
+本地优先的桌面「渐进阅读」学习软件。Electron 主进程（`electron/*.js`，CommonJS + better-sqlite3（WAL、`synchronous=FULL`，D137）；词典导入解析仍用 sql.js）+ React/TS 渲染层（`src/`）。主流程：书架 → 阅读（PDF / EPUB / Word / TXT / MD / HTML）→ 摘录与就地批注 → AI 制卡 → FSRS 复习 → 材料导图 / 知识图谱。
 
 ## 四条硬不变量（改任何东西前先确认没破）
 
 1. **纯本地优先** —— 核心功能零网络、零账号（指导文档 §1.1）。
 2. **同一份事实不允许两套解释** —— 调度真源唯一（`review_logs` + `fsrs_configs`）；**AI 不是事实源**（§1.9 / §1.10、§4.4）。
 3. **先改文档再编码** —— 需求或契约变更先 bump 版本号 + 记决策号（§8.1），再动代码（§7.1.5）。
-4. **每次落库即落盘** —— 写路径走 `persist()` 原子写；例外必须在文档里登记（例外＝日记草稿节流 D34、应用日志追加写 D119；§7.2）。
+4. **每次落库即落盘** —— SQLite 事务提交即持久（WAL + `synchronous=FULL`）；`persist()` 现为显式 checkpoint（D137）；例外必须在 §7.2 登记（例外＝日记草稿节流 D34、应用日志追加写 D119）。
+
+## 弱模型必读（每次动手前核对）
+
+1. **跑测试**：只用 `node scripts/run-tests.mjs [过滤词]`。不要直接 `node tests/x.test.cjs`——better-sqlite3 是 Electron ABI，系统 Node 直接加载会报假失败。
+2. **绝不碰真实数据目录**：`%APPDATA%\incremental-reading-dev`、`~/.config/incremental-reading-dev`、`~/Library/Application Support/incremental-reading-dev`（发布后还有 `Nutation`）。测试一律用 `fs.mkdtempSync` 临时目录 + `app.setPath("userData", dir)`。
+3. **改表结构**：只能在 `electron/schemaVersion.js` 的 `MIGRATIONS` 末尾追加一项，并把 `SCHEMA_VERSION` +1；禁止修改已发布的项；禁止在 `initDb` 的基线代码块里新增 ALTER/CREATE。新表必须在 `electron/syncTables.js` 登记分类；同步/追加表禁止新增物理删除（除非登记）。
+4. **编辑文本**：卡片/摘录/批注的编辑一律用统一的编辑组件与契约（`src/components/editing/`，见审计 C-34），不要新写 textarea 或 contentEditable。
+5. **样式与动效**：颜色只用主题 Token，动效时长从 Token 读取并遵守"动效关闭"设置；提交前跑一致性闸门（审计 C-35）。
+6. **界面文字**：新增或修改文案必须四语同步（简/繁/英/日），提交前 `node scripts/i18n-check.mjs` 退出 0。
+7. **回车提交**：所有"按 Enter 提交"的输入框必须先判断 `e.nativeEvent.isComposing || e.keyCode === 229`（输入法组字中不提交）。
+8. **搜索代码**：`rg` 输出 "binary file matches" 时加 `-a` 重试。
+9. **拿不准就停**：按本文件的 BLOCKED 协议返回，不要猜。
 
 ## 做什么 → 读哪里
 
@@ -31,7 +43,7 @@
 - **子代理模型（用户指定 + 2026-10-25 教训）**：审计修复链执行单元 = `.zcode/agents/audit-flash.md`，模型 **GLM-5.3**、最高思考强度（用户 2026-10-24 指令「之后派子代理请使用 glm5.3 模型」）。该文件的 `model` 字段在**会话启动时快照加载**——会话中途改它对本会话后续 Agent 派发**不生效**（实证：C-40 派发仍以 GLM-5.3-Flash 运行 13 分钟被用户取消）；改代理模型后必须**重启客户端**，派发后核对子代理面板顶部的模型标签再放手。
 - **改动开新分支，`main` 保持干净**（除非当次另有指示）。
 - 一次只实现一个最小单元；动手前先对齐契约。
-- 测试按文件头 `@runtime` 分流：`node` 直跑 vs `electron` 启动；GUI 套件（`*.gui.mjs`）跑前先 `npm run build`。
+- 测试统一用 `node scripts/run-tests.mjs [过滤词]`（C-01）；新测试文件第 1 行必须写 `// @runtime: electron | electron-node | system-node`；GUI 套件（`*.gui.mjs`）跑前先 `npm run build`。
 - 完工验收线见 §7.1.4（主流程可演示 + 重启不丢数据）与 §7.3（按里程碑的测试义务）。
 - **文档即合同**：`AI_DEVELOPMENT_GUIDE.md` 的 § 编号与 D 编号是**被机器闸门解析的公共接口**（`tests/flows/` 的 `f11` / `f18` / `f20` / `f21` / `f24` / `f27` 直接读它），改编号会打碎闸门；`docs/HISTORY.md` 与指导文档**合并为一个文档集**参与 `f11` 的判据。
 
