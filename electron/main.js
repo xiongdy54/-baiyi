@@ -2293,6 +2293,16 @@ app.whenReady().then(async () => {
   }
   // C-24：放行 library:list 的启动闸（见 handler 注册处注释）
   resolveDbReadyGate();
+  // D223：《使用教程》初始材料播种（幂等；app_meta 标记独一闸门，用户删除后不复活；失败不阻塞启动）。
+  // 测试隔离（M7_TEST_USERDATA）下不播种——GUI 套件的全新库保持「空书架」假设（tutorial-seed
+  // 测试套件直调 db.seedTutorialIfMissing 覆盖播种本身）。
+  if (!process.env.M7_TEST_USERDATA) {
+    try {
+      dbModule.seedTutorialIfMissing();
+    } catch (err) {
+      console.error("[tutorial] 初始教程播种失败（下次启动重试）：", err);
+    }
+  }
   // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
   // 导图对账）移入下一个宏任务——原实现它们与 initDb 共用同一连续宏任务（实测合成 ~730ms 启动空洞）；
   // 顺序与错误语义不变（各自 try/catch），只是不再拖长启动关键段。

@@ -1256,6 +1256,38 @@ function listDeletedItemIds() {
   return queryAll("SELECT id FROM library_items WHERE is_deleted = 1").map((r) => String(r.id));
 }
 
+// D223：《使用教程》初始材料播种（main.js 启动时调用；幂等）。app_meta 键 tutorialSeededV1 是
+// 唯一闸门：缺标记 → 经 createFromPaste 入库一本中文教程书（lang='zh'，source_type='paste'）再落
+// 标记。用户把书删掉后**不会复活**（标记不随书删——删除即用户裁决，尊重之）。事务说明：本库的
+// withTransaction 是 BEGIN/COMMIT 直开（不支持嵌套），createFromPaste 内部已有事务，故本函数不外
+// 包事务；「建书成功但标记未落」的崩溃窗口用同名在架兜底——下次启动见到活的《使用教程》即补标
+// 记，不建第二本。内容源 = 包内 electron/tutorial-zh.md（asar 内 fs.readFileSync 可读）；文件读
+// 失败不抛出（不阻塞启动，标记不落，下次启动重试）。不挂在 initDb 里：库级初始化保持与测试/工具
+// 面解耦（播种是应用层行为，与备份/提示词播种同一层）。
+function seedTutorialIfMissing() {
+  if (readAppMeta("tutorialSeededV1") !== undefined) return false;
+  const existing = queryAll("SELECT id FROM library_items WHERE title = ? AND is_deleted = 0", ["使用教程"]);
+  if (existing.length > 0) {
+    // 崩溃恢复：书已在架（上次播种建书后、标记落盘前进程中断）——只补标记
+    writeAppMeta("tutorialSeededV1", "1");
+    persist();
+    return false;
+  }
+  let markdown = "";
+  try {
+    markdown = fs.readFileSync(path.join(__dirname, "tutorial-zh.md"), "utf8");
+  } catch (e) {
+    console.error("[tutorial] 教程文件读取失败（下次启动重试）：", e);
+    return false;
+  }
+  const created = createFromPaste("使用教程", markdown);
+  db.run("UPDATE library_items SET lang=?, updated_at=? WHERE id=?", ["zh", Date.now(), created.id]);
+  writeAppMeta("tutorialSeededV1", "1");
+  persist();
+  console.log("[tutorial] 已播种《使用教程》初始材料");
+  return true;
+}
+
 // C-22 复用前提：createAssetForItem 按 (library_item_id, hash) 内容寻址去重——同一份图片字节
 // 会被多张卡共用同一个 path。今后任何「删卡/删书顺带删文件」的逻辑都必须先确认 assets 表里
 // 没有其他行引用同一 path，再动磁盘文件。
@@ -8302,6 +8334,8 @@ function learnerFacts(opts) {
 module.exports = {
   foldSearch,
   initDb,
+  // D223：《使用教程》首启播种（main.js 调用；测试直调验幂等）
+  seedTutorialIfMissing,
   persistDb: persist,
   persistNow,
   // C-17：严格 checkpoint（忙碌即抛）——persistNow 与备份前 flush 的底层（见上方注释）

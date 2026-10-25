@@ -42,6 +42,7 @@
     "markdown-it": "^14.3.1",
     "opencc-js": "^1.4.2",
     "pdfjs-dist": "^6.3.289",
+    "pele": "^1.10.0",
     "sql.js": "^1.14.2",
     "turndown": "^7.2.4",
     "yauzl": "3.4.0",

@@ -2091,6 +2091,8 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "代码块": "Code block",
   "分隔线": "Divider",
   "公式块": "Math block",
+  "插入图表（Mermaid）": "Insert diagram (Mermaid)",
+  "图表语法有误，已显示源代码": "Diagram syntax error — showing source code",
   "撤销（编辑器内历史）": "Undo (editor history)",
   "重做": "Redo",
   "标题 1": "Heading 1",

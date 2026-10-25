@@ -2313,6 +2313,7 @@ const OSS_ITEMS: Array<{ name: string; license: string; note?: string }> = [
   { name: "Milkdown", license: "MIT", note: "Markdown 编辑器 · 基于 ProseMirror（@milkdown/kit · @milkdown/react）" },
   { name: "react-markdown", license: "MIT", note: "Markdown 渲染（remark / rehype / unified 管线）" },
   { name: "markdown-it", license: "MIT", note: "Markdown 解析" },
+  { name: "pele", license: "MIT", note: "Mermaid 图表渲染（obsidianmd/pele）" },
   { name: "turndown", license: "MIT", note: "HTML → Markdown" },
   { name: "micromark-extension-mark", license: "ISC" },
   { name: "github-slugger", license: "ISC" },

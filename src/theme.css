@@ -342,6 +342,30 @@ body {
   --band-line: var(--border-subtle);
   /* 多段选择高亮：派生自 --accent，必须在所有会被上层改 --accent 的层各声明一次 */
   --hl-multi: color-mix(in srgb, var(--accent) 22%, transparent);
+  /* D223：Mermaid 图表（pele）令牌——pele 全部取色/字体/圆角只读这些 CSS 变量；全部映射既有
+     语义 Token（浅深主题/皮肤/用户强调色在同一 body 元素上求值，单一声明即随动，换肤零重渲染）。
+     系列色（饼图/雷达等分类色）与数据页图表同族：1=accent，2-6=--chart-2..6，7/8 由 3/5 派生补位。 */
+  --pele-bg: transparent;
+  --pele-fg: var(--text-primary);
+  --pele-muted: var(--text-secondary);
+  --pele-line: var(--border-strong);
+  --pele-border: var(--border-strong);
+  --pele-surface: var(--grey-1);
+  --pele-surface-alt: color-mix(in srgb, var(--grey-1) 55%, var(--paper));
+  --pele-accent: var(--accent);
+  --pele-error: var(--error);
+  --pele-critical: var(--error);
+  --pele-font: var(--font-sans);
+  --pele-font-mono: var(--font-mono);
+  --pele-radius: var(--radius-xs);
+  --pele-series-1: var(--accent);
+  --pele-series-2: var(--chart-2);
+  --pele-series-3: var(--chart-3);
+  --pele-series-4: var(--chart-4);
+  --pele-series-5: var(--chart-5);
+  --pele-series-6: var(--chart-6);
+  --pele-series-7: color-mix(in srgb, var(--chart-3) 55%, var(--paper));
+  --pele-series-8: color-mix(in srgb, var(--chart-5) 55%, var(--paper));
   /* 批注色板：-soft 派生自实色，同样必须在 body 这一层重取一次（§5.1 求值层纪律；
      否则皮肤在 body 上改 --annot-* 时，-soft 会停在 :root 的实色上） */
   --annot-red: #e5484d;
@@ -3117,6 +3141,13 @@ body.theme-dark .modal-panel {
      与 .zq/.zmeta 同源，摘录页里取值不变（那边本来就继承同一套 token）。 */
   color: var(--text-primary);
 }
+/* D223：批注显示走 ReadMarkdown——段落/列表等块级元素改紧凑间距（批注行是列表语境，不是文章面） */
+.zitem .zn > :last-child { margin-bottom: 0; }
+.zitem .zn p,
+.zitem .zn pre,
+.zitem .zn ul,
+.zitem .zn ol,
+.zitem .zn blockquote { margin: 0 0 var(--sp-1); }
 .zitem .zmeta {
   font-size: var(--fs-meta);
   color: var(--text-helper);
@@ -8507,6 +8538,47 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-secondary);
+}
+/* D223：批注显示走 ReadMarkdown——块级元素紧凑间距（同 .zitem .zn 的口径） */
+.extract-face-annot-text > :last-child { margin-bottom: 0; }
+.extract-face-annot-text p,
+.extract-face-annot-text pre,
+.extract-face-annot-text ul,
+.extract-face-annot-text ol,
+.extract-face-annot-text blockquote { margin: 0 0 var(--sp-1); }
+
+/* ==========================================================================
+   D223：Mermaid 图表块（读态，全 markdown 显示面通用——摘录卡/复习卡面/卡片浏览器/AI 面板/
+   日记/粘贴书/批注/EditableField）。SVG 由 pele 按 --pele-* 令牌取色（见 body 令牌区）；
+   容器只管排版：块级间距 + 超宽横向滚动（图按内容自然尺寸，不拉伸变形）。 */
+.mermaid-diagram {
+  margin: var(--sp-2) 0;
+  overflow-x: auto;
+}
+.mermaid-diagram svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+/* 语法错误回落：提示行（error 语义色，仅状态提示）+ 源码块（与普通代码块同观感的安静框） */
+.mermaid-fallback {
+  margin: var(--sp-2) 0;
+  padding: var(--sp-2);
+  border: var(--bw-hairline) solid var(--border-subtle);
+}
+.mermaid-fallback-note {
+  margin: 0 0 var(--sp-1);
+  color: var(--error);
+  font-size: var(--fs-secondary);
+}
+.mermaid-fallback pre {
+  margin: 0;
+  padding: var(--sp-2);
+  background: var(--grey-1);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-secondary);
 }
 
 /* ==========================================================================

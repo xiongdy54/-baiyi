@@ -13,6 +13,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isImeComposing } from "../../lib/ime";
 import { annotColorCss } from "../AnnotationEditor";
+import ReadMarkdown from "../editor/ReadMarkdown";
 import { IconEllipsis } from "../icons";
 import { useT } from "../../lib/i18n";
 
@@ -260,7 +261,8 @@ export default function AnnotationPanel({
                     }}
                   />
                 ) : it.comment ? (
-                  <p
+                  /* D223：批注显示走 ReadMarkdown（批注可写 markdown/mermaid；p→div 承载块级子元素） */
+                  <div
                     className="zn"
                     data-zn
                     title={T("点一下改批注")}
@@ -270,8 +272,8 @@ export default function AnnotationPanel({
                       setDraft(it.comment ?? "");
                     }}
                   >
-                    {it.comment}
-                  </p>
+                    <ReadMarkdown text={it.comment} />
+                  </div>
                 ) : null}
                 {/* meta 行严格照样张：时间 · 类型标签 · 段锚/整卡（三项）。
                     删除只在 hover/键盘聚焦时显形——样张的静态形态里没有动作按钮，
