@@ -12,9 +12,11 @@ if (process.platform === "linux" && process.env.NUTATION_WAYLAND !== "1" &&
 
 // 测试隔离开关（仅 e2e/GUI 脚本设置 env 时生效）：词典导入/删除会写主库 dict_sources，
 // e2e 若共用真实 userData 会误删用户已装词典（2026-09-14 实测教训）——spawn 时传临时目录。
-// v34（M12 实测补记）：本块必须在 require("./db") **之前**——db.js 顶部 require 的 settingsStore
-// 在模块加载时固化 SETTINGS_FILE=app.getPath("userData")，晚于 setPath 会让 db 侧读默认目录的
+// v34（M12 实测补记）：本块必须在 require("./db") **之前**——C-40a 前 settingsStore 在模块加载时
+// 固化 SETTINGS_FILE=app.getPath("userData")，晚于 setPath 会让 db 侧读默认目录的
 // settings.json、main 侧写隔离目录（M12 GUI「设置已写入但队列无响应」的根因：两侧 settings 分叉）。
+// C-40a 起路径惰性化，两侧都读当前 userData，分叉根因消除；本块先后约束保留（appLog 目录等
+// 仍要求 setPath 先行）。
 if (process.env.M7_TEST_USERDATA) {
   app.setPath("userData", path.resolve(process.env.M7_TEST_USERDATA));
 }
@@ -263,7 +265,8 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 // C-15：settings.json 读写唯一实现（主进程 IPC 与 db / 优化器 / 插件共用；默认形状 { app, theme }）。
-// 必须位于 pinUserData() 之后——settingsStore 在模块加载时固化 SETTINGS_FILE。
+// 必须位于 pinUserData() 之后——C-40a 起 SETTINGS_FILE 惰性解析，但此处的解构即首次读取（ getter
+// 求值定格），仍晚于 setPath；initDb 显式注入 dataDir 时 configure 同值覆盖。
 const { SETTINGS_FILE, readSettings, writeSettings } = require("./settingsStore");
 
 ipcMain.handle("settings:get", (_e, scope, key) => {
@@ -2271,7 +2274,9 @@ app.whenReady().then(async () => {
   await new Promise((r) => setImmediate(r));
   // C-10：库比程序新（DB_TOO_NEW）→ 提示升级并退出，绝不写这份数据；其他错误保持原样上抛
   try {
-    await initDb();
+    // C-40a：数据目录显式注入（与解耦前 app.getPath("userData") 取值完全相同）——db.initDb
+    // 收到后同步 settingsStore.configure，settings.json 与库文件保证同目录。
+    await initDb({ dataDir: app.getPath("userData") });
   } catch (e) {
     if (e && e.code === "DB_TOO_NEW") {
       dialog.showMessageBoxSync({
