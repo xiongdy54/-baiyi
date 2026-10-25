@@ -6,7 +6,14 @@ const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const annotationRange = require("./annotationRange");
-const { app } = require("electron");
+// C-40a（审计：业务核心与 Node/Electron 解耦）：数据目录不再模块加载期固化——initDb 时注入。
+// 不传 opts.dataDir 时回落 Electron userData（行为与解耦前完全相同）；纯 Node 宿主（如移动端 /
+// tests/core-datadir.test.cjs 的 ELECTRON_RUN_AS_NODE 环境）传入显式目录即可脱离 Electron 运行。
+let DATA_DIR = null;
+function dataDir() {
+  if (!DATA_DIR) throw new Error("initDb 尚未调用：数据目录未知");
+  return DATA_DIR;
+}
 const Database = require("better-sqlite3");
 const { attachRun, applyStandardPragmas, normParams } = require("./sqliteCompat");
 const {
@@ -380,12 +387,17 @@ function addColumnIfMissing(table, column, typeSql) {
   return true;
 }
 
-async function initDb() {
+async function initDb(opts = {}) {
+  // C-40a：数据目录注入——第一行先定目录（opts.dataDir 优先；不传时回落 Electron userData，
+  // `||` 短路保证纯 Node 宿主下 require("electron") 不会被求值）。显式注入时同步 settingsStore，
+  // 使 settings.json 与库文件同目录（桌面态走惰性回退，目录值相同）。
+  DATA_DIR = opts.dataDir || require("electron").app.getPath("userData");
+  if (opts.dataDir) require("./settingsStore").configure({ dataDir: opts.dataDir });
   // D137（§3.1）：better-sqlite3 同步构造直开文件（文件不存在即创建；崩溃恢复/WAL 回放由 SQLite
   // 打开时自动完成）——对外保持 async 签名，调用面零改动。
   // 重复调用（测试内「重启模拟」/ 幂等演练）＝先关旧连接再从文件重载：close 本身做 checkpoint，
   // 主文件自足后重开即与 sql.js 时代「每次 initDb 全量重读文件」语义一致（迁移/回填段随之重挂）。
-  dbFile = path.join(app.getPath("userData"), "library.db");
+  dbFile = path.join(dataDir(), "library.db");
   // D137 补（实测）：better-sqlite3 只创建**库文件**，不创建父目录——userData 目录不存在时
   // `new Database` 抛 "Cannot open database because the directory does not exist"。sql.js 时代
   // 落盘走 fs 写（自建目录）故无此约束；真实应用由 appLog.init 建 <userData>/logs 顺带保证父目录，
@@ -410,7 +422,7 @@ async function initDb() {
   }
   // C-10：已有数据的库从低版本升级前先做快照（新库不快照）
   if (fileExisted && startVersion < schema.SCHEMA_VERSION) {
-    await schema.snapshotBeforeMigration(db, app.getPath("userData"), startVersion, schema.SCHEMA_VERSION);
+    await schema.snapshotBeforeMigration(db, dataDir(), startVersion, schema.SCHEMA_VERSION);
   }
   applyStandardPragmas(db); // WAL + synchronous=FULL + busy_timeout（§3.7，WAL 标志持久在库头）
   // C-23：启动 quick_check 已移除（把 D143 对 dictionary.db 的裁决推广到主库——quick_check 要
@@ -1273,7 +1285,7 @@ function createAssetForItem(ownerKey, kind, ext, dataBuf) {
   const buf = Buffer.isBuffer(dataBuf) ? dataBuf : Buffer.from(dataBuf);
   if (!buf.length) throw new Error("图片数据为空");
   if (buf.length > 10 * 1024 * 1024) throw new Error("图片超过 10MB，请压缩后再制卡");
-  const dir = path.join(app.getPath("userData"), "assets", itemId);
+  const dir = path.join(dataDir(), "assets", itemId);
   fs.mkdirSync(dir, { recursive: true });
   const cleanExt = ["png", "jpg", "jpeg", "gif", "webp"].includes(String(ext).toLowerCase()) ? String(ext).toLowerCase() : "png";
   // C-22：内容寻址去重——同一张图在同一本书里多次挖空制卡，直接复用既有资产行与文件
@@ -1318,7 +1330,7 @@ function sha256(buf) {
 function sweepOrphanAssetFiles({ dryRun = true, minAgeMs = 3600_000, partOnly = false } = {}) {
   const empty = { skipped: true, orphans: [], removed: [], keptForDecision: [] };
   if (!db || !db.open) return empty;
-  const assetsRoot = path.join(app.getPath("userData"), "assets");
+  const assetsRoot = path.join(dataDir(), "assets");
   let itemDirs = [];
   try {
     itemDirs = fs.readdirSync(assetsRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
@@ -1377,7 +1389,7 @@ function createFromEpub(title, markdown, toc, coverDataUrl, epubData, sourceName
   const docId = crypto.randomUUID();
   const now = Date.now();
 
-  const dir = path.join(app.getPath("userData"), "assets", itemId);
+  const dir = path.join(dataDir(), "assets", itemId);
   fs.mkdirSync(dir, { recursive: true });
   let coverRel = null;
 
@@ -1448,7 +1460,7 @@ function createImportedDoc({ title, markdown, sourceType, sourceName, originalNa
   const itemId = crypto.randomUUID();
   const docId = crypto.randomUUID();
   const now = Date.now();
-  const dir = path.join(app.getPath("userData"), "assets", itemId);
+  const dir = path.join(dataDir(), "assets", itemId);
   fs.mkdirSync(dir, { recursive: true });
 
   // C-47：文件、资产行、书目、文档必须一起成功或一起失败——两条独立的自动提交 INSERT 在磁盘将满时
@@ -1506,7 +1518,7 @@ function readContentImages(itemId) {
     try {
       out.push({
         filename: r.path,
-        bytes: new Uint8Array(fs.readFileSync(path.join(app.getPath("userData"), "assets", String(itemId), r.path))),
+        bytes: new Uint8Array(fs.readFileSync(path.join(dataDir(), "assets", String(itemId), r.path))),
       });
     } catch { /* 单图缺失不阻塞整本，合成时该 src 原样保留 */ }
   }
@@ -1522,7 +1534,7 @@ function readBookFile(itemId) {
   )[0];
   if (!row || !row.path) return null;
   try {
-    const p = path.join(app.getPath("userData"), "assets", String(itemId), row.path);
+    const p = path.join(dataDir(), "assets", String(itemId), row.path);
     return new Uint8Array(fs.readFileSync(p));
   } catch {
     return null;
@@ -1538,7 +1550,7 @@ function readPdfFile(itemId) {
   )[0];
   if (!row || !row.path) return null;
   try {
-    const p = path.join(app.getPath("userData"), "assets", String(itemId), row.path);
+    const p = path.join(dataDir(), "assets", String(itemId), row.path);
     return new Uint8Array(fs.readFileSync(p));
   } catch {
     return null;
@@ -1554,7 +1566,7 @@ function readEbookFile(itemId) {
   )[0];
   if (!row || !row.path) return null;
   try {
-    const p = path.join(app.getPath("userData"), "assets", String(itemId), row.path);
+    const p = path.join(dataDir(), "assets", String(itemId), row.path);
     return { bytes: new Uint8Array(fs.readFileSync(p)), name: String(row.path) };
   } catch {
     return null;

@@ -7,10 +7,23 @@
 // 不走主库 persist()。
 const path = require("path");
 const fs = require("fs");
-const { app } = require("electron");
 const Database = require("better-sqlite3");
 const lmParams = require("./lmParams");
 const { normParams, attachRun, applyStandardPragmas, rmDbFileAndSidecars } = require("./sqliteCompat");
+
+// C-40a（审计：业务核心与 Node/Electron 解耦）：数据目录惰性解析——模块加载不再触碰 electron。
+// 桌面态首次 open() 时回落 Electron userData（首次即定格）；纯 Node 宿主先 configure({ dataDir })
+// 注入（ELECTRON_RUN_AS_NODE 下无 app，未注入即抛错指明）。
+let DATA_DIR = null;
+function dataDir() {
+  if (!DATA_DIR) {
+    const electron = require("electron");
+    if (!electron.app) throw new Error("learnerDb 尚未 configure：数据目录未知（纯 Node 宿主须先注入）");
+    DATA_DIR = electron.app.getPath("userData");
+  }
+  return DATA_DIR;
+}
+function configure({ dataDir }) { DATA_DIR = dataDir; }
 
 let db = null;
 let dbFile = null;
@@ -108,7 +121,7 @@ async function open() {
   if (db) return db;
   if (!openPromise) {
     openPromise = (async () => {
-      dbFile = path.join(app.getPath("userData"), "learner.db");
+      dbFile = path.join(dataDir(), "learner.db");
       const existed = fs.existsSync(dbFile);
       db = attachRun(new Database(dbFile)); // 文件不存在即创建；崩溃恢复（WAL 回放）由 SQLite 打开时自动完成
       applyStandardPragmas(db);
@@ -268,4 +281,4 @@ async function snapshotTo(destPath) {
   return destPath;
 }
 
-module.exports = { open, save, run, replaceBatch, all, getMeta, setMeta, reset, saveOnQuit, close, snapshotTo };
+module.exports = { open, save, run, replaceBatch, all, getMeta, setMeta, reset, saveOnQuit, close, snapshotTo, configure };
