@@ -4,7 +4,8 @@
 //   导航「日记」→ 主窗口输入行提交一条 → 全局快捷键状态（两键）→ toggleCapture 弹出捕获窗口
 //   → 捕获窗口输入即自动保存 → 不发送隐藏再呼出仍可续写 → 发送定格为一条且主窗口实时出现
 //   → Ctrl+Alt+N 就地弹出「粘贴材料」编辑器且不切视图（v49.3/D177 改直达粘贴） → 设置页 sec-global 冲突拒绝 → 重启不丢 → 清理
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -87,7 +88,7 @@ function spawnApp() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
@@ -117,11 +118,7 @@ const clickByText = (sel, text) =>
   `(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.textContent.includes(${JSON.stringify(text)})); b?.click(); return !!b; })()`;
 
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   fs.rmSync(path.join(ROOT, "tests", "m8.gui.log"), { force: true });
@@ -289,13 +286,8 @@ try {
   await wait(400);
 
   // 11. 重启不丢
-  electron.kill();
   await wait(1500);
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 忽略 */
-  }
+  killProc(electron);
   await wait(1000);
   electron = spawnApp();
   const main2 = await connectTarget((u) => u.includes("index.html"), "主窗口（重启后）");
@@ -331,16 +323,7 @@ try {
   fail++;
   console.log("M8 GUI 异常", e);
 } finally {
-  try {
-    electron?.kill();
-  } catch {
-    /* 忽略 */
-  }
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 忽略 */
-  }
+  killProc(electron);
   try {
     fs.rmSync(USER_DATA, { recursive: true, force: true });
   } catch {

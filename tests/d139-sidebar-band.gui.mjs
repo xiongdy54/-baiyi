@@ -6,7 +6,8 @@
 // （先清空，绝不触碰真实库 §7.3）、fixture EPUB 现场构造（确定性）。
 // 自证口径：每个几何量都同时回报「测的是哪个元素」（文本/类名），绝对值原样打印——基线取在动作前，
 //   不写死成功（测量必须自证在测东西）。reduce 双轨＝源码口径（读 theme.css 断过渡只在 no-preference 块内）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
@@ -202,11 +203,7 @@ async function openBook(cdp) {
 const backToShelf = `(() => { [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架")?.click(); return 1; })()`;
 
 async function main() {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   await rmWithRetry(USER_DATA); // 全新库（自清场）
   await buildEpubFixture();
@@ -215,7 +212,7 @@ async function main() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connectTarget((u) => u.includes("index.html"), "主窗口");
@@ -446,7 +443,7 @@ async function main() {
   }
 
   await cdp.ws.close();
-  electron?.kill();
+  killProc(electron);
   await wait(500);
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
   process.exit(fail ? 1 : 0);
@@ -454,10 +451,6 @@ async function main() {
 
 main().catch((e) => {
   console.error("套件异常：", e?.stack || e);
-  try {
-    electron?.kill();
-  } catch {
-    /* 已退出 */
-  }
+  killProc(electron);
   process.exit(1);
 });

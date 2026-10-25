@@ -4,7 +4,8 @@
 //       反例夹具从 tests/fixtures/plugins/ 复制进临时 userData 的 plugins/ 目录，绝不触碰真实库（§7.3）。
 // 覆盖组：A 列表 / B 激活+重启不丢 / C 可调项即时生效与落库 / D 内置皮肤互斥 / E 错误隔离 /
 //         F 亮暗两档 / G 探针在场 / H 捕获窗跟随 / I 回归说明。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -84,20 +85,19 @@ async function openSettings(main) {
 async function spawnApp() {
   const log = openSync(path.join(ROOT, "tests", "plugins.gui.log"), "a");
   return spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", log, log], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", log, log], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
 
 async function killApp() {
-  try { electron?.kill(); } catch { /* ignore */ }
   await wait(800);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(900);
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(900);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* Windows 句柄延迟，下面重试 */ }
   // Windows：taskkill 后句柄释放有延迟，rmSync 可能瞬时 EPERM——退避重试（防 flaky）

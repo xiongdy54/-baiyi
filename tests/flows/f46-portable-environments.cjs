@@ -21,7 +21,7 @@
 //   3) flow 记录里的：可用性判据、console 错误、失败请求、盘上路径与哈希
 //
 // 安全：独立 userData + 独立端口（基座 9800，自动 +12 扫描）+ 只 kill 自己 spawn 的 PID；
-//       绝不 taskkill /IM electron.exe（背景 soak 与别的会话在跑）；
+//       绝不按映像名整杀本机 electron.exe（背景 soak 与别的会话在跑）；
 //       绝不改动 src/ electron/ dist/ docs/ tests/flows/lib/——启动器在本文件内内联扩展；
 //       联接（junction）只删自己建的那些，且删在 rm -rf 之前（否则会顺着联接删掉真目录）。
 "use strict";

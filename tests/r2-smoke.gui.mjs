@@ -5,6 +5,7 @@
 // 肉眼项的降级口径：闪烁/双动效不可自动目视，用 computed style + dataset 生命周期 + getAnimations()
 // 机械替代（D106 先例：「写了规则不等于生效」，一律断言计算样式）。
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -73,7 +74,7 @@ const vtCleared = async (cdp) => {
 const cs = (cdp, sel, prop) => cdp.eval(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); return e ? getComputedStyle(e).${prop} : "ABSENT"; })()`);
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const seeded = execSync("npx electron tests/r2-smoke.seed.cjs", {
@@ -84,7 +85,7 @@ try {
 
   const out = openSync(path.join(ROOT, "tests", "r2-smoke.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -229,6 +230,6 @@ try {
   console.error("SMOKEFATAL", e);
   fail++;
 } finally {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
   process.exit(fail ? 1 : 0);
 }

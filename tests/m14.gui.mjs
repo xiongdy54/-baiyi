@@ -4,7 +4,8 @@
 //   sec-memory 挂载 + 说明文案 + 文件路径 + 默认关 → 首次开启一次性说明 → 补处理预估（可暂不）
 //   → 无 Key 可读降级（立即整理给原因，不出空壳进度）→ 重置二次确认 → 关闭
 //   → 重启不丢（开关与 introAcked；再开启不再弹说明）→ 清理
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -85,7 +86,7 @@ function spawnApp() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
 }
@@ -113,11 +114,7 @@ async function memState(page) {
 }
 
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   fs.rmSync(path.join(ROOT, "tests", "m14.gui.log"), { force: true });
@@ -185,13 +182,8 @@ try {
   await wait(500);
 
   // 7. 重启不丢（开关与 introAcked 持久化；再开启不弹说明）
-  electron.kill();
   await wait(1500);
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 忽略 */
-  }
+  killProc(electron);
   await wait(1000);
   electron = spawnApp();
   const main2 = await connectTarget((u) => u.includes("index.html"), "主窗口（重启后）");
@@ -224,16 +216,7 @@ try {
   fail++;
   console.log("M14 GUI 异常", e);
 } finally {
-  try {
-    electron?.kill();
-  } catch {
-    /* 忽略 */
-  }
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 忽略 */
-  }
+  killProc(electron);
   try {
     fs.rmSync(USER_DATA, { recursive: true, force: true });
   } catch {

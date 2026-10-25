@@ -3,6 +3,7 @@
 // 选区制卡 contextRef 四层（cfi/chapterIndex/anchorText/readerEngineVersion）、进度落库、跳原文。
 // 测试数据一律 FSRSTEST 前缀；测试摘要摘录在进程结束后经 sql.js 软删（应用已关闭，§7.1.8）。
 import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import { writeFileSync, existsSync, openSync } from "node:fs";
 import path from "node:path";
 
@@ -97,18 +98,15 @@ let seededIds = null; // 第 0 步拿到的两本书 id
 let origReaderSettings = null;
 try {
   // 清场：残留实例会占用 CDP 端口（Windows 下 node 退出不会带走 electron 子进程）
-  try {
-    (await import("node:child_process")).execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留进程则忽略 */
-  }
+  // C-02 步骤 3 后不再按映像名全杀本机 Electron——本测试自己的实例在下方 spawn 后由 killProc 收割
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", "reader.engine.app.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false
+    detached: process.platform !== "win32"
   });
   cdp = await cdpConnect();
   await cdp.eval("1");
@@ -572,12 +570,7 @@ try {
     console.log("finally 清理兜底失败：" + (e && e.message));
   }
   await new Promise((r) => setTimeout(r, 800));
-  try {
-    const { execSync } = await import("node:child_process");
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* already gone */
-  }
+  killProc(electron);
   console.log(`\n==== SUMMARY ${results.filter((r) => r.ok).length}/${results.length} ====`);
   for (const r of results) if (!r.ok) console.log("FAILED: " + r.name + " | " + r.detail);
   process.exit(results.every((r) => r.ok) ? 0 : 1);

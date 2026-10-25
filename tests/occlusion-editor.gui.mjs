@@ -6,7 +6,8 @@
 //   → 逐块拆卡落库（每卡自带单遮罩、答案=区域 label）→ 整图一卡（自定义题面）
 //   → 共遮呈现（regionScope:"shared" + cardOrd）→ 裁剪应用后遮罩重映射 → AI 挖空 stub 导入 stagger。
 // db/协议层由 tests/m5.test.cjs 锁定；阅读器入口冒烟由 tests/reader.engine.mjs 4c–4e 覆盖。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -230,11 +231,7 @@ async function occlCards() {
 
 // ---------- 主流程 ----------
 try {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留进程则忽略 */
-  }
+  killProc(electron);
   await wait(800);
   await mockListen;
   fs.rmSync(USER_DATA, { recursive: true, force: true });
@@ -243,7 +240,7 @@ try {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   cdp = await cdpConnect();
@@ -561,11 +558,7 @@ try {
     /* 连接已断就算了 */
   }
   await wait(800);
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* already gone */
-  }
+  killProc(electron);
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
   process.exit(fail === 0 ? 0 : 1);
 }

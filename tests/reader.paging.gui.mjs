@@ -8,7 +8,8 @@
 //      并发导航杀掉在途 iframe 加载后 load promise 永不 settle（#display → #turnPage 永久
 //      挂起）、章节加载失败把 #index 清空令 #adjacentIndex 永久失效。
 // 隔离：M7_TEST_USERDATA 指向 tests/tmp-paging-userdata（先清空），绝不触碰真实库（§7.3）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 import JSZip from "jszip";
@@ -113,11 +114,7 @@ ${para(`第${i}章正文。`, 40)}
 }
 
 async function main() {
-  try {
-    execSync("taskkill /IM electron.exe /F", { stdio: "ignore" });
-  } catch {
-    /* 无残留 */
-  }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true }); // 全新库（自清场）
   await buildFixtureFile();
@@ -126,7 +123,7 @@ async function main() {
     cwd: ROOT,
     shell: true,
     stdio: ["ignore", out, out],
-    detached: false,
+    detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connectTarget((u) => u.includes("index.html"), "主窗口");
@@ -220,7 +217,7 @@ async function main() {
   }
 
   await cdp.ws.close();
-  electron?.kill();
+  killProc(electron);
   await wait(500);
   console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);
   process.exit(fail ? 1 : 0);
@@ -228,6 +225,6 @@ async function main() {
 
 main().catch((e) => {
   console.error("脚本失败:", e);
-  electron?.kill();
+  killProc(electron);
   process.exit(1);
 });

@@ -7,7 +7,8 @@
 //   G2 设置页 AI 区：四分组小标题 + 15 供应商按钮；主流官方项逐一点名在场
 //   G3 切换预设提示语义（Key 按服务商留存的用户可见面）
 //   G4 本地预设「检测本地服务」：点击后稳定收敛（检测到 / 未检测到二者其一，不挂死不静默）
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -55,13 +56,13 @@ async function connect() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
 
   const out = openSync(path.join(ROOT, "tests", "d112.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -138,7 +139,7 @@ try {
   fail++;
   console.log(`  ✗ 套件异常: ${e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : e}`);
 } finally {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
 }
 console.log(`\n== D112 GUI: ${pass} 通过 / ${fail} 失败 ==`);
 process.exit(fail > 0 ? 1 : 0);

@@ -4,6 +4,7 @@
 //         ② 进入卡片页到首屏行出现；③ DOM 行数是否受窗口限制 + 深滚动正确性；④ 输入筛选后的主进程查询耗时
 // 规模（D110，用户 2026-10-07 指令）＝30 万卡 + 5 万摘录（终身使用量级）；环境变量可调小做快速冒烟
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -53,7 +54,7 @@ async function connect() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   execSync("npx electron tests/browser.perf.seed.cjs", {
@@ -62,7 +63,7 @@ try {
   });
   const out = openSync(path.join(ROOT, "tests", "browser.perf.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -155,8 +156,7 @@ try {
   console.error("量测异常：", (e && e.stack) || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(500);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
   process.exit(fail === 0 ? 0 : 1);

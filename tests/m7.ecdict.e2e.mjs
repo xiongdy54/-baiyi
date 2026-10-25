@@ -1,7 +1,8 @@
 // M7 ECDICT 完整版全链路验证（CDP 自启自关；node tests/m7.ecdict.e2e.mjs）
 // 前置：tests/tmp-ecdict.zip（curl 下载的 ecdict-sqlite-28.zip，207MB）。
 // 覆盖：importFile(.zip 内 .db) → iterEcdictSqlite 表探测 → 数十万词条建索引耗时 → lookupLocal("moral")。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync, existsSync } from "node:fs";
 import path from "node:path";
 
@@ -50,11 +51,11 @@ async function connect() {
 
 try {
   if (!existsSync(ZIP)) { console.log("缺前置文件 tests/tmp-ecdict.zip"); process.exit(1); }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", "m7.ecdict.e2e.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: path.join(ROOT, "tests", "tmp-m7-userdata") }
   });
   const cdp = await connect();
@@ -88,7 +89,6 @@ try {
   fail++;
   console.log("M7 ecdict e2e 异常", e);
 } finally {
-  try { electron?.kill(); } catch { /* 忽略 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 忽略 */ }
+  killProc(electron);
 }
 process.exit(fail > 0 ? 1 : 0);

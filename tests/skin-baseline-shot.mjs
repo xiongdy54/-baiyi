@@ -4,7 +4,8 @@
 //   outDirName 缺省 __skin-baseline__；对照轮传 __skin-check__。
 // 对比：node tests/lib/png-pixel-diff.mjs tests/__skin-baseline__ tests/<outDirName>
 // 状态口径：1 本粘贴书；新库学习者模型默认开（六签含「推荐」）；截图前等 1s（VT/入场动画完毕）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -60,7 +61,7 @@ const nav = (label) =>
   `[...document.querySelectorAll('.topbar-nav .nav-item')].find(b => b.textContent.trim() === '${label}')?.click(); return 1;`;
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(900);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   fs.rmSync(OUT, { recursive: true, force: true });
@@ -98,6 +99,7 @@ try {
 
   // 2) 主应用
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
+    detached: process.platform !== "win32",
     cwd: ROOT, shell: true, stdio: ["ignore", log, log],
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA },
   });
@@ -174,7 +176,6 @@ try {
   console.error("异常", e);
   process.exit(1);
 } finally {
-  try { electron?.kill(); } catch { /* ignore */ }
   await wait(800);
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  killProc(electron);
 }

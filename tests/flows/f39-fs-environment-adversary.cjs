@@ -93,7 +93,7 @@ function electronExe() {
   return require("../lib/electronBin.cjs")();
 }
 
-// ---------- 子进程管理：只清理自己起的进程（按 PID），绝不 taskkill /IM electron.exe ----------
+// ---------- 子进程管理：只清理自己起的进程（按 PID），绝不按映像名整杀本机 electron.exe ----------
 const spawned = [];
 function spawnChild(script, env) {
   const rec = { pid: null, events: [], stdout: "", stderr: "", exit: null, label: env.F39_TAG || script };

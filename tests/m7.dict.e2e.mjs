@@ -3,7 +3,8 @@
 //   1) 真实下载 CC-CEDICT（mdbg 直链 4MB）→ 建索引 → 本地查「苹果」出英文释义；
 //   2) 本地构造 ECDICT-sqlite zip 夹具（sql.js 生成含 word/translation 表）→ importFile 验证 .db 探测分支；
 //   3) 来源登记/entry_count 一致 → 清理。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -70,11 +71,11 @@ async function buildSqliteZipFixture() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", "m7.dict.e2e.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: path.join(ROOT, "tests", "tmp-m7-userdata") }
   });
   const cdp = await connect();
@@ -131,7 +132,6 @@ try {
   fail++;
   console.log("M7 dict e2e 异常", e);
 } finally {
-  try { electron?.kill(); } catch { /* 忽略 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 忽略 */ }
+  killProc(electron);
 }
 process.exit(fail > 0 ? 1 : 0);

@@ -5,7 +5,8 @@
 //   ② 评分四钮：8px 色点退役；常态完全无彩色（四钮同灰、档名主文字色）；
 //      CDP 真鼠标 hover → 整钮语义色填充（Again=error / Good=accent），移开回落灰；40px 等高不变；
 //   ③ 三档计数：色点退役、无彩色（三数字同色）、档间 hairline 竖分隔、三档文案在场。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -92,12 +93,12 @@ async function hoverAndRead(selector) {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   const out = openSync(path.join(ROOT, "tests", "d100-review.app.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   cdp = await cdpConnect();
@@ -247,8 +248,7 @@ try {
     }
   } catch { /* 清理尽力而为 */ }
   try { if (cdpRaw) cdpRaw.close(); } catch { /* ignore */ }
-  try { if (electron) electron.kill(); } catch { /* ignore */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* ignore */ }
+  killProc(electron);
 }
 
 console.log(`\nD100 review restyle GUI: ${pass} 通过 / ${fail} 失败`);

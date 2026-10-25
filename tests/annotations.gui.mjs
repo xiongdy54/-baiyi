@@ -18,6 +18,7 @@
 //   ⑨ 截图判读：浅/深 × 摘录页/阅读器 四张落盘（人工目视，断言只保证文件非空）
 //   ⑩/⑪（v48.27 批注样张对齐批追加）：阅读器注解栏与 goToMark 导航、右侧停靠栏与工具栏 B 双入口
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -223,7 +224,7 @@ const menuState = `(() => {
 
 // ============================ 主流程 ============================
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   fs.rmSync(FIXDIR, { recursive: true, force: true });
@@ -239,7 +240,7 @@ try {
 
   const out = openSync(path.join(ROOT, "tests", "tmp-annot.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -1230,7 +1231,7 @@ try {
   console.log("CRASH:", e?.message);
   fail++;
 } finally {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 已退出 */ }
+  killProc(electron);
   await wait(500);
   // D140 附：Windows 下 electron 退出后目录锁释放有延迟，裸 rmSync 会 EPERM 抛在**摘要之后**——
   // 结果把「断言结果」信号覆盖成崩溃（进程带异常退出，真实 fail 数被掩盖，2026-10-12 实测）。

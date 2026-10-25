@@ -8,6 +8,7 @@
 //   ④ 点「摘录」落库：quote_range_json 有 2 段区间、各段区间文本＝两次选中的文字、content_markdown 按 \n\n 拼接。
 //   D79 追加：⑤ 阅读器独立场景「途中先松 Ctrl」仍＝2 段；⑥ 摘录页加选步骤改走「途中先松 Ctrl」路径后全链落库不回退。
 import { spawn, execSync } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -70,7 +71,7 @@ async function connect() {
 const KEY_MOD = { ctrl: 2, alt: 1, shift: 8, meta: 4 };
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   // 启动真实应用（隔离 userData；夹具书在应用内经 libraryAPI.createFromPaste 建册）
@@ -81,7 +82,7 @@ try {
   });
   const out = openSync(path.join(ROOT, "tests", "multiselect.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -349,8 +350,7 @@ try {
   console.error("测试异常：", (e && e.stack) || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(500);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
   process.exit(fail === 0 ? 0 : 1);

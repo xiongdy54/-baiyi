@@ -1,5 +1,5 @@
 // GUI 流程环境：CDP 驱动真实应用，但**只碰自己起的进程**。
-// 既有 harness 一律 `taskkill /IM electron.exe /F`（杀掉机器上所有 Electron）——
+// 既有 harness 曾一律按映像名整杀本机全部 electron.exe（杀掉机器上所有 Electron）——
 // 用户把工作区当成品在用，长跑里绝不能顺手关掉他正开着的阅读会话（§7.1.8 的同源纪律）。
 // 因此本模块：独立 userData + 独立端口 + 只 kill 自己 spawn 的 PID + 端口被占即判定冲突跳过。
 // @runtime: shared

@@ -12,7 +12,8 @@
 //   ④ 深浅两档可见性：标记背景非透明 + 左缘 2px accent（颜色＝Token 求值）+ 合成对比 >1.05
 //      （负对照＝透明探针必须 ≈1.00）；
 //   ⑤ EPUB 侧同一套：cfi → Range 的 ::highlight 在场、高亮文本＝所选、注入字面值随主题两档变化。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -313,7 +314,7 @@ async function waitMarksLaidOut(cdp, minCount = 1, timeoutMs = 6000) {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   fs.rmSync(USER_DATA, { recursive: true, force: true });
   fs.rmSync(FIXDIR, { recursive: true, force: true });
@@ -324,7 +325,7 @@ try {
 
   const out = openSync(path.join(ROOT, "tests", "marks.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: USER_DATA }
   });
   const cdp = await connect();
@@ -721,8 +722,7 @@ try {
   console.error("测试异常：", (e && e.stack) || e);
   fail++;
 } finally {
-  try { electron?.kill(); } catch { /* 已退出 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(500);
   try { fs.rmSync(USER_DATA, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
   try { fs.rmSync(FIXDIR, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }

@@ -1,7 +1,8 @@
 // M7 词典 GUI 冒烟（CDP 驱动真实应用，自启自关；node tests/m7.gui.mjs）
 // 覆盖：设置 sec-dict 可见 → 目录下载行（大小/简介/推荐齐备）→ 查词命令已注册 → card-vocab 模板可取 → 清理。
 // 原生文件对话框/真实下载不自动化（由 m7.test.cjs 目录断言 + 手动冒烟覆盖）。
-import { spawn, execSync } from "node:child_process";
+import { spawn } from "node:child_process";
+import killProc from "./lib/killProc.cjs";
 import fs, { openSync } from "node:fs";
 import path from "node:path";
 
@@ -48,11 +49,11 @@ async function connect() {
 }
 
 try {
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 无残留 */ }
+  killProc(electron);
   await wait(800);
   const out = openSync(path.join(ROOT, "tests", "m7.gui.log"), "w");
   electron = spawn("npx", ["electron", ".", "--remote-debugging-port=" + PORT], {
-    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: false,
+    cwd: ROOT, shell: true, stdio: ["ignore", out, out], detached: process.platform !== "win32",
     env: { ...process.env, M7_TEST_USERDATA: path.join(ROOT, "tests", "tmp-m7-userdata") }
   });
   const cdp = await connect();
@@ -92,7 +93,6 @@ try {
   fail++;
   console.log("M7 GUI 异常", e);
 } finally {
-  try { electron?.kill(); } catch { /* 忽略 */ }
-  try { execSync("taskkill /IM electron.exe /F", { stdio: "ignore" }); } catch { /* 忽略 */ }
+  killProc(electron);
 }
 process.exit(fail > 0 ? 1 : 0);
