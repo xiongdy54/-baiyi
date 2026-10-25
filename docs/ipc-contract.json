@@ -1,0 +1,1712 @@
+[
+  {
+    "bridge": "aiAPI",
+    "method": "abortChat",
+    "channel": "ai:abort",
+    "kind": "send"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "chat",
+    "channel": "ai:chat",
+    "kind": "send"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "detectLocal",
+    "channel": "ai:detectLocal",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "getConfig",
+    "channel": "ai:getConfig",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "listModels",
+    "channel": "ai:listModels",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "onStream",
+    "channel": "ai:stream",
+    "kind": "on"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "setConfig",
+    "channel": "ai:setConfig",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "test",
+    "channel": "ai:test",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "aiAPI",
+    "method": "websearch",
+    "channel": "ai:websearch",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "assetsAPI",
+    "method": "captureRegion",
+    "channel": "reader-capture:region",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "assetsAPI",
+    "method": "captureScreen",
+    "channel": "screen-capture:start",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "assetsAPI",
+    "method": "pickOcclusionImage",
+    "channel": "assets:pickOcclusionImage",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "assetsAPI",
+    "method": "saveImage",
+    "channel": "assets:saveImage",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "create",
+    "channel": "backup:create",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "exportAnki",
+    "channel": "anki:export",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "info",
+    "channel": "backup:info",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "list",
+    "channel": "backup:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "meta",
+    "channel": "backup:meta",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "onIntegrityWarning",
+    "channel": "backup:integrityWarning",
+    "kind": "on"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "openAnkiDir",
+    "channel": "anki:openDir",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "openDir",
+    "channel": "backup:openDir",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "pickDir",
+    "channel": "backup:pickDir",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "pickFile",
+    "channel": "backup:pickFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "relaunch",
+    "channel": "app:relaunch",
+    "kind": "send"
+  },
+  {
+    "bridge": "backupAPI",
+    "method": "restore",
+    "channel": "backup:restore",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "batchesAPI",
+    "method": "create",
+    "channel": "batches:create",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "batchesAPI",
+    "method": "get",
+    "channel": "batches:get",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "batchesAPI",
+    "method": "list",
+    "channel": "batches:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "batchesAPI",
+    "method": "setStatus",
+    "channel": "batches:setStatus",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardLinksAPI",
+    "method": "add",
+    "channel": "card-links:add",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardLinksAPI",
+    "method": "listForCard",
+    "channel": "card-links:listForCard",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardLinksAPI",
+    "method": "update",
+    "channel": "card-links:update",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "batch",
+    "channel": "cards:batch",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "countByExtract",
+    "channel": "cards:countByExtract",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "create",
+    "channel": "cards:create",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "deferredToday",
+    "channel": "cards:deferredToday",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "genInfo",
+    "channel": "cards:genInfo",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "get",
+    "channel": "cards:get",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "getWindow",
+    "channel": "cards:getWindow",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "lastUndoableReview",
+    "channel": "cards:lastUndoableReview",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "listAll",
+    "channel": "cards:listAll",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "listDue",
+    "channel": "cards:listDue",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "listLeech",
+    "channel": "cards:listLeech",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "listMeta",
+    "channel": "cards:listMeta",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "listTags",
+    "channel": "cards:listTags",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "listWithKnowledgePoint",
+    "channel": "cards:listWithKnowledgePoint",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "persistNow",
+    "channel": "cards:persistNow",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "queryIds",
+    "channel": "cards:queryIds",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "remove",
+    "channel": "cards:delete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "resolveLeech",
+    "channel": "cards:resolveLeech",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "review",
+    "channel": "cards:review",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "setSuspended",
+    "channel": "cards:setSuspended",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "setTags",
+    "channel": "cards:setTags",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "siblingGroup",
+    "channel": "cards:siblingGroup",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "skip",
+    "channel": "cards:skip",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "todayQueue",
+    "channel": "cards:todayQueue",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "undoReview",
+    "channel": "cards:undoReview",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "update",
+    "channel": "cards:update",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "cardsAPI",
+    "method": "updateLeech",
+    "channel": "cards:updateLeech",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "cacheGet",
+    "channel": "dict:cacheGet",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "cacheSet",
+    "channel": "dict:cacheSet",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "download",
+    "channel": "dict:download",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "importFile",
+    "channel": "dict:importFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "lookupLocal",
+    "channel": "dict:lookupLocal",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "lookupOnline",
+    "channel": "dict:lookupOnline",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "onDownloadProgress",
+    "channel": "dict:downloadProgress",
+    "kind": "on"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "pickFile",
+    "channel": "dict:pickFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "removeSource",
+    "channel": "dict:removeSource",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "sources",
+    "channel": "dict:sources",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "dictAPI",
+    "method": "toggleSource",
+    "channel": "dict:toggleSource",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "fsrsAPI",
+    "method": "getActiveConfig",
+    "channel": "fsrs:activeConfig",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "fsrsAPI",
+    "method": "onConfigChanged",
+    "channel": "fsrs:configChanged",
+    "kind": "on"
+  },
+  {
+    "bridge": "growthAPI",
+    "method": "afterReview",
+    "channel": "growth:afterReview",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "growthAPI",
+    "method": "overview",
+    "channel": "growth:overview",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "growthAPI",
+    "method": "sessionSummary",
+    "channel": "growth:sessionSummary",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "buildPackage",
+    "channel": "insights:buildPackage",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "completeRun",
+    "channel": "insights:complete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "createRun",
+    "channel": "insights:create",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "deleteRun",
+    "channel": "insights:delete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "failRun",
+    "channel": "insights:fail",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "getRun",
+    "channel": "insights:get",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "listRuns",
+    "channel": "insights:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "meaningCreate",
+    "channel": "meaning:create",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "meaningDelete",
+    "channel": "meaning:delete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "meaningList",
+    "channel": "meaning:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "meaningResolve",
+    "channel": "meaning:resolve",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "onChanged",
+    "channel": "insight:changed",
+    "kind": "on"
+  },
+  {
+    "bridge": "insightsAPI",
+    "method": "setFeedback",
+    "channel": "insights:feedback",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "issuesAPI",
+    "method": "add",
+    "channel": "issues:add",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "issuesAPI",
+    "method": "list",
+    "channel": "issues:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "issuesAPI",
+    "method": "resolve",
+    "channel": "issues:resolve",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "create",
+    "channel": "journal:create",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "dates",
+    "channel": "journal:dates",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "day",
+    "channel": "journal:day",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "draft",
+    "channel": "journal:draft",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "draftSend",
+    "channel": "journal:draftSend",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "flush",
+    "channel": "journal:flush",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "list",
+    "channel": "journal:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "onChanged",
+    "channel": "journal:changed",
+    "kind": "on"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "remove",
+    "channel": "journal:delete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "journalAPI",
+    "method": "update",
+    "channel": "journal:update",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "acceptAllPending",
+    "channel": "knowledge:acceptAllPending",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "createPoint",
+    "channel": "knowledge:createPoint",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "createRef",
+    "channel": "knowledge:createRef",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "createRelation",
+    "channel": "knowledge:createRelation",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "deleteRef",
+    "channel": "knowledge:deleteRef",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "deleteRelation",
+    "channel": "knowledge:deleteRelation",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "getPoint",
+    "channel": "knowledge:getPoint",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "kpClusters",
+    "channel": "knowledge:kpClusters",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "kpExtractApply",
+    "channel": "knowledge:kpExtractApply",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "kpExtractPrepare",
+    "channel": "knowledge:kpExtractPrepare",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "lint",
+    "channel": "knowledge:lint",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "listPoints",
+    "channel": "knowledge:listPoints",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "listProposals",
+    "channel": "knowledge:listProposals",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "listRefs",
+    "channel": "knowledge:listRefs",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "listRelations",
+    "channel": "knowledge:listRelations",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "mergePoints",
+    "channel": "knowledge:mergePoints",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "migrationSuggestions",
+    "channel": "knowledge:migrationSuggestions",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "resolveFamilies",
+    "channel": "knowledge:resolveFamilies",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "resolveProposal",
+    "channel": "knowledge:resolveProposal",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "unmergePoint",
+    "channel": "knowledge:unmergePoint",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "knowledgeAPI",
+    "method": "updatePoint",
+    "channel": "knowledge:updatePoint",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "contextReel",
+    "channel": "learner:contextReel",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "deleteTrack",
+    "channel": "learner:deleteTrack",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "feedback",
+    "channel": "learner:feedback",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "kpLevels",
+    "channel": "learner:kpLevels",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "lexStats",
+    "channel": "learner:lexStats",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "listTracks",
+    "channel": "learner:listTracks",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "logEvent",
+    "channel": "learner:logEvent",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "placementSample",
+    "channel": "learner:placementSample",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "rebuild",
+    "channel": "learner:rebuild",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "recommend",
+    "channel": "learner:recommend",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "refresh",
+    "channel": "learner:refresh",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "saveTrack",
+    "channel": "learner:saveTrack",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "sentenceMine",
+    "channel": "learner:sentenceMine",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "setTrackMaterial",
+    "channel": "learner:setTrackMaterial",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "status",
+    "channel": "learner:status",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "learnerAPI",
+    "method": "unitText",
+    "channel": "learner:unitText",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "ask",
+    "channel": "lens:ask",
+    "kind": "send"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "control",
+    "channel": "win:lens",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "fit",
+    "channel": "lens:fit",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "onAsk",
+    "channel": "lens:askIn",
+    "kind": "on"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "onPush",
+    "channel": "lens:pushIn",
+    "kind": "on"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "onReply",
+    "channel": "lens:replyIn",
+    "kind": "on"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "onWindow",
+    "channel": "lens:window",
+    "kind": "on"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "push",
+    "channel": "lens:push",
+    "kind": "send"
+  },
+  {
+    "bridge": "lensAPI",
+    "method": "reply",
+    "channel": "lens:reply",
+    "kind": "send"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromBookFile",
+    "channel": "library:createFromBookFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromEpub",
+    "channel": "library:createFromEpub",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromHtml",
+    "channel": "library:createFromHtml",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromMarkdown",
+    "channel": "library:createFromMarkdown",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromPaste",
+    "channel": "library:createFromPaste",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromPdf",
+    "channel": "library:createFromPdf",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromTxt",
+    "channel": "library:createFromTxt",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "createFromWord",
+    "channel": "library:createFromWord",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "getDocument",
+    "channel": "library:doc",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "getItemIdByDocumentId",
+    "channel": "library:itemByDoc",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "list",
+    "channel": "library:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "pickEpub",
+    "channel": "library:pickEpub",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "pickImportFiles",
+    "channel": "library:pickImportFiles",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "pickMarkdown",
+    "channel": "library:pickMarkdown",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "pickPdf",
+    "channel": "library:pickPdf",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "pickTxt",
+    "channel": "library:pickTxt",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "pickWord",
+    "channel": "library:pickWord",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "readBookFile",
+    "channel": "library:readBookFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "readContentImages",
+    "channel": "library:readContentImages",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "readEbookFile",
+    "channel": "library:readEbookFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "readFileBytes",
+    "channel": "library:readFileBytes",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "readPdfFile",
+    "channel": "library:readPdfFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "remove",
+    "channel": "library:delete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "setItemAuthor",
+    "channel": "library:setItemAuthor",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "setItemLang",
+    "channel": "library:setItemLang",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "setItemTitle",
+    "channel": "library:setItemTitle",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "setPriority",
+    "channel": "library:setPriority",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "libraryAPI",
+    "method": "updateProgress",
+    "channel": "library:updateProgress",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "limitsAPI",
+    "method": "state",
+    "channel": "limits:state",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "limitsAPI",
+    "method": "usage",
+    "channel": "limits:usage",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "limitsAPI",
+    "method": "validate",
+    "channel": "limits:validate",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "logsAPI",
+    "method": "openFolder",
+    "channel": "logs:openFolder",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "logsAPI",
+    "method": "report",
+    "channel": "logs:rendererError",
+    "kind": "send"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "backfillCancel",
+    "channel": "memory:backfillCancel",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "backfillPreview",
+    "channel": "memory:backfillPreview",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "backfillStart",
+    "channel": "memory:backfillStart",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "onChanged",
+    "channel": "memory:changed",
+    "kind": "on"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "openFile",
+    "channel": "memory:openFile",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "openFolder",
+    "channel": "memory:openFolder",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "reset",
+    "channel": "memory:reset",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "retrieve",
+    "channel": "memory:retrieve",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "setEnabled",
+    "channel": "memory:setEnabled",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "status",
+    "channel": "memory:status",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "memoryAPI",
+    "method": "tidyNow",
+    "channel": "memory:tidyNow",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "cancel",
+    "channel": "mindmap:cancel",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "deepen",
+    "channel": "mindmap:deepen",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "generate",
+    "channel": "mindmap:generate",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "get",
+    "channel": "mindmap:get",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "getActive",
+    "channel": "mindmap:getActive",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphCancel",
+    "channel": "mindmap:graphCancel",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphEnsureMap",
+    "channel": "mindmap:graphEnsureMap",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphEstimate",
+    "channel": "mindmap:graphEstimate",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphExpand",
+    "channel": "mindmap:graphExpand",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphExpandAll",
+    "channel": "mindmap:graphExpandAll",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphExplain",
+    "channel": "mindmap:graphExplain",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphFeed",
+    "channel": "mindmap:graphFeed",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphGenerate",
+    "channel": "mindmap:graphGenerate",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphLoad",
+    "channel": "mindmap:graphLoad",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphLocate",
+    "channel": "mindmap:graphLocate",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphMetrics",
+    "channel": "mindmap:graphMetrics",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphNodeAnchors",
+    "channel": "mindmap:graphNodeAnchors",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphNodeText",
+    "channel": "mindmap:graphNodeText",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphResume",
+    "channel": "mindmap:graphResume",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "graphSetView",
+    "channel": "mindmap:graphSetView",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "learningStatus",
+    "channel": "mindmap:learningStatus",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "list",
+    "channel": "mindmap:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "mapTree",
+    "channel": "mindmap:mapTree",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "onChanged",
+    "channel": "mindmap:changed",
+    "kind": "on"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "onDelta",
+    "channel": "mindmap:delta",
+    "kind": "on"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "pendingRuns",
+    "channel": "mindmap:pendingRuns",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "preview",
+    "channel": "mindmap:preview",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "remove",
+    "channel": "mindmap:delete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "repairConfirm",
+    "channel": "mindmap:repairConfirm",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "runs",
+    "channel": "mindmap:runs",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "mindmapAPI",
+    "method": "setActive",
+    "channel": "mindmap:setActive",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "optimizerAPI",
+    "method": "apply",
+    "channel": "optimizer:apply",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "optimizerAPI",
+    "method": "current",
+    "channel": "optimizer:current",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "optimizerAPI",
+    "method": "onProgress",
+    "channel": "optimizer:progress",
+    "kind": "on"
+  },
+  {
+    "bridge": "optimizerAPI",
+    "method": "reset",
+    "channel": "optimizer:reset",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "optimizerAPI",
+    "method": "stats",
+    "channel": "optimizer:stats",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "optimizerAPI",
+    "method": "train",
+    "channel": "optimizer:train",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "pluginsAPI",
+    "method": "getActive",
+    "channel": "plugins:getActive",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "pluginsAPI",
+    "method": "list",
+    "channel": "plugins:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "pluginsAPI",
+    "method": "onChanged",
+    "channel": "plugins:changed",
+    "kind": "on"
+  },
+  {
+    "bridge": "pluginsAPI",
+    "method": "openFolder",
+    "channel": "plugins:openFolder",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "pluginsAPI",
+    "method": "rescan",
+    "channel": "plugins:rescan",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "pluginsAPI",
+    "method": "setActive",
+    "channel": "plugins:setActive",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "promptsAPI",
+    "method": "get",
+    "channel": "prompts:get",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "promptsAPI",
+    "method": "list",
+    "channel": "prompts:list",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "readingAPI",
+    "method": "addEvent",
+    "channel": "reading:event",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "sessionAPI",
+    "method": "counts",
+    "channel": "session:counts",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "sessionAPI",
+    "method": "queue",
+    "channel": "session:queue",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "settingsAPI",
+    "method": "get",
+    "channel": "settings:get",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "settingsAPI",
+    "method": "onChanged",
+    "channel": "settings:changed",
+    "kind": "on"
+  },
+  {
+    "bridge": "settingsAPI",
+    "method": "set",
+    "channel": "settings:set",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "shortcutsAPI",
+    "method": "apply",
+    "channel": "shortcuts:apply",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "shortcutsAPI",
+    "method": "hideCapture",
+    "channel": "capture:hide",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "shortcutsAPI",
+    "method": "onOpenAddMaterial",
+    "channel": "library:openAddMaterial",
+    "kind": "on"
+  },
+  {
+    "bridge": "shortcutsAPI",
+    "method": "requestAddMaterial",
+    "channel": "library:requestAdd",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "shortcutsAPI",
+    "method": "status",
+    "channel": "shortcuts:status",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "shortcutsAPI",
+    "method": "toggleCapture",
+    "channel": "capture:toggle",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "similarityAPI",
+    "method": "find",
+    "channel": "similarity:find",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "statsAPI",
+    "method": "overview",
+    "channel": "stats:overview",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "statsAPI",
+    "method": "timeline",
+    "channel": "stats:timeline",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "undoAPI",
+    "method": "info",
+    "channel": "undo:info",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "undoAPI",
+    "method": "last",
+    "channel": "undo:last",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "updateAPI",
+    "method": "check",
+    "channel": "update:check",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "updateAPI",
+    "method": "download",
+    "channel": "update:download",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "updateAPI",
+    "method": "install",
+    "channel": "update:install",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "updateAPI",
+    "method": "onEvent",
+    "channel": "update:event",
+    "kind": "on"
+  },
+  {
+    "bridge": "updateAPI",
+    "method": "status",
+    "channel": "update:status",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "close",
+    "channel": "win:close",
+    "kind": "send"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "dockExtend",
+    "channel": "win:dockExtend",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "dockRestore",
+    "channel": "win:dockRestore",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "maximize",
+    "channel": "win:maximize",
+    "kind": "send"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "minimize",
+    "channel": "win:minimize",
+    "kind": "send"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "notifyCardsChanged",
+    "channel": "win:cardsChanged",
+    "kind": "send"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "onCardsChanged",
+    "channel": "win:cardsRefresh",
+    "kind": "on"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "onDockMode",
+    "channel": "win:dockMode",
+    "kind": "on"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "onWorkbenchShown",
+    "channel": "win:workbenchShown",
+    "kind": "on"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "openExternal",
+    "channel": "shell:openExternal",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "windowAPI",
+    "method": "workbench",
+    "channel": "win:workbench",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "advance",
+    "channel": "extracts:advance",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "batch",
+    "channel": "extracts:batch",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "chain",
+    "channel": "extracts:chain",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "create",
+    "channel": "extracts:create",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "get",
+    "channel": "extracts:get",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "listAll",
+    "channel": "extracts:listAll",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "listDue",
+    "channel": "extracts:listDue",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "postpone",
+    "channel": "extracts:postpone",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "postponeDays",
+    "channel": "extracts:postponeDays",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "remove",
+    "channel": "extracts:delete",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "rerankNow",
+    "channel": "extracts:rerankNow",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "setPriority",
+    "channel": "extracts:setPriority",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "setStatus",
+    "channel": "extracts:setStatus",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "spanSet",
+    "channel": "extracts:spanSet",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "switchEngine",
+    "channel": "extracts:switchEngine",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "workflowAPI",
+    "method": "update",
+    "channel": "extracts:update",
+    "kind": "invoke"
+  }
+]
