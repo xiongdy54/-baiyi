@@ -1,7 +1,7 @@
 // M2 数据备份与恢复（文档 §9.1 M2）
 // 备份 = 单个 zip：library.db 全库 + assets/** + settings.json（ai-config.json 含加密 Key，默认不入、勾选才含）
 // 恢复 = 校验 → 先对当前数据做安全备份 → 解包到 restore-staging/ + restore-pending.json 标记
-//        → 重启应用时 applyPendingRestore() 换入生效（sql.js 内存库约束 §7.1.8，运行期禁止直接换库文件）
+//        → 重启应用时 applyPendingRestore() 换入生效——运行期主进程持有数据库连接（better-sqlite3，§7.1.8），禁止直接替换库文件
 // 核心函数均接受显式路径（opts.dataDir 等），缺省时从 electron app 取——便于无 Electron 环境跑单元测试。
 // D117（v48.73）：备份列表 meta 走 sidecar 加速缓存（<backupDir>/meta/<zip 名>.json），列表零解压；
 //                回退解析在 worker_threads 内执行——主进程不再被整包读 zip 阻塞（打开设置卡顿根治）。
@@ -764,7 +764,7 @@ async function restoreBackup(file, opts = {}) {
     safetyFile = safety.file;
   }
 
-  // 解包到 staging（运行中的 sql.js 仍持有内存库，绝不在运行期直接改写 library.db）
+  // 解包到 staging（运行中的主进程仍持有 better-sqlite3 连接，绝不在运行期直接改写 library.db）
   try {
     fs.rmSync(p.stagingDir, { recursive: true, force: true });
     fs.mkdirSync(p.stagingDir, { recursive: true });

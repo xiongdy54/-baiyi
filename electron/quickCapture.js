@@ -7,9 +7,12 @@
 //  ② **捕获窗口单例**：无框小窗常驻复用，关闭=隐藏；渲染层就绪（capture:ready）后才 show（杜绝白闪）；
 //     每次呼出按**鼠标所在屏幕**水平居中、顶部 18%。
 //  ③ **草稿-发送状态机**：输入即落库（防抖）→ 「发送」定格为日记里的一条；不发送则失焦只隐藏、草稿保留可续写。
-//  ④ **持久化节流**：日记自动保存是本项目「每次落库即落盘」（§7.2）的**唯一例外**——sql.js 每次 persist 都是
-//     整库导出 + fsync + rename，按输入停顿每 1.2s 落盘会把长文的磁盘写放大到不可接受。故内存库即时写、
-//     磁盘尾随 4s / 上限 20s，隐藏·发送·退出强制 flush；代价是崩溃最多丢最后几秒（已写入 D34 与 §6.5.4）。
+//  ④ **持久化节流**：日记自动保存是本项目「每次落库即落盘」（§7.2）的**首个已登记例外**（D34；行为不变＝防抖持久化）。
+//     better-sqlite3（D137）下草稿写入即时事务提交（WAL + `synchronous=FULL`，提交即持久），节流的是 `persist()`
+//     （现义＝`wal_checkpoint(TRUNCATE)`：WAL 合并回主文件 + 截断 + fsync）——按输入停顿每 1.2s 全量 checkpoint 的
+//     磁盘写放大不可接受（sql.js 时代则是每次 persist 整库导出 + fsync + rename，同理写放大）。故库内即时写、
+//     persist() 尾随 4s / 上限 20s，隐藏·发送·退出强制 flush；代价＝间隔内主文件非自足（数据在 WAL、不丢），
+//     见 D34 与 §6.5.4。
 const { app, BrowserWindow, globalShortcut, screen, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -405,7 +408,7 @@ function flushJournal() {
   }
 }
 
-// 草稿续写（输入中，防抖调用）：内存库即时写 + 磁盘节流
+// 草稿续写（输入中，防抖调用）：库内即时写（事务提交）+ persist() 节流
 function saveDraft(content, sender) {
   const entry = ctx.db.saveJournalDraft(content, { deferPersist: true });
   scheduleJournalPersist();
