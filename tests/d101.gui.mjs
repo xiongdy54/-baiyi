@@ -135,7 +135,7 @@ try {
   // 详情：标签区 + 恢复（解除归档）
   const rowClick = await cdp.eval(`(() => { const tr = [...document.querySelectorAll('[role="row"]')].find((x) => x.textContent.includes(${JSON.stringify(CARD_MARK)})); if (!tr) return "NOROW"; tr.click(); return "CLICKED"; })()`);
   await wait(900);
-  const detail = await cdp.eval(`(() => { const m = document.querySelector(".modal-panel"); const tags = document.querySelector('[data-testid="card-detail-tags"]'); return JSON.stringify({ open: !!m, tags: tags ? tags.textContent : "", status: m ? m.textContent.includes("已归档") : null }); })()`);
+  const detail = await cdp.eval(`(() => { const m = document.querySelector(".cb-detail"); const tags = document.querySelector('[data-testid="card-detail-tags"]'); return JSON.stringify({ open: !!m, tags: tags ? tags.textContent : "", status: m ? m.textContent.includes("已归档") : null }); })()`);
   check("行点击打开卡详情", String(detail).includes('"open":true'), detail);
   check("卡详情标签区显示旧标签/新标签", String(detail).includes("旧标签") && String(detail).includes("新标签"), detail);
   const restoreBtn = await cdp.eval(`(() => { const b = document.querySelector('[data-detail-archive]'); if (!b) return "NOTFOUND"; const hit = b.textContent.includes("恢复"); b.click(); return hit ? "RESTORED" : "WRONG_LABEL"; })()`);

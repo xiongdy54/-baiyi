@@ -15,6 +15,9 @@ import { UI_EVENTS } from "../skins/runtime/uiEvents";
  *   const ref = useDialogA11y<HTMLDivElement>(onClose);
  *   <div className="modal-panel" ref={ref} role="dialog" aria-modal="true" aria-label="…">
  *
+ * opts.trap（D214）：非模态停靠面板（卡片浏览器侧边详情）传 false——保留 Esc / 焦点移入 /
+ * 焦点归还，跳过 Tab 焦点锁（背景列表与面板并排可达，主从式布局不锁 Tab）。缺省 true。
+ *
  * 背景：项目里 8 个模态此前各自手写 `onClick={onClose}`，只有 ImageLightbox 绑了 Esc，
  * 且全部没有 dialog 语义 —— 键盘用户 Tab 会穿透到遮罩底下的界面里。抽成一个装配，
  * 是为了让 8 处行为一致；散抄 8 遍正是本次要消除的重复模式。
@@ -30,7 +33,11 @@ const FOCUSABLE =
  */
 const stack: HTMLElement[] = [];
 
-export function useDialogA11y<T extends HTMLElement>(onClose: () => void) {
+export function useDialogA11y<T extends HTMLElement>(
+  onClose: () => void,
+  opts?: { trap?: boolean }
+) {
+  const trap = opts?.trap !== false;
   const ref = useRef<T>(null);
   // onClose 每次渲染都是新函数；放进 ref 里读，避免因此反复重挂监听
   const closeRef = useRef(onClose);
@@ -52,7 +59,7 @@ export function useDialogA11y<T extends HTMLElement>(onClose: () => void) {
         closeRef.current();
         return;
       }
-      if (e.key !== "Tab") return;
+      if (!trap || e.key !== "Tab") return;
       const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
         (el) => el.offsetParent !== null || el === document.activeElement
       );

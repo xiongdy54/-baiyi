@@ -188,6 +188,15 @@ export default function CardBrowser({
   const [detailId, setDetailId] = useState<string | null>(null);
   // v48.40（D80）：摘录详情——摘录行普通点击打开（与闪卡行同语义；Ctrl/Shift 仍多选）
   const [extractDetailId, setExtractDetailId] = useState<string | null>(null);
+  // v49.43（D214）：详情改右侧侧边面板后的行点击口径——同一条再点＝收起；卡/摘录互斥（同时只开一个）
+  const openCardDetail = useCallback((id: string) => {
+    setExtractDetailId(null);
+    setDetailId((prev) => (prev === id ? null : id));
+  }, []);
+  const openExtractDetail = useCallback((id: string) => {
+    setDetailId(null);
+    setExtractDetailId((prev) => (prev === id ? null : id));
+  }, []);
   const [leechTarget, setLeechTarget] = useState<BrowserCard | null>(null);
   const [loaded, setLoaded] = useState(false);
   // v34（M12，§4.16）：今日同源暂缓清单（与复习队列同一视图口径）——id → 延后原因
@@ -950,6 +959,11 @@ export default function CardBrowser({
     recomputeWindows();
   }, [recomputeWindows, win]);
 
+  // v49.43（D214）：详情侧边面板开/关改变 queue-wrap 宽度，工具行换行高度可能随之变化——行窗重算一次
+  useEffect(() => {
+    recomputeWindows();
+  }, [recomputeWindows, detailId, extractDetailId]);
+
   // 查询语法里的 `kind:` 直接切类别页签（否则「搜了 kind:extract 却什么都不显示」）；
   // v48.64（D108）：含 or/括号的查询不做页签联动（kind 只是行谓词，布尔语义照常求值）
   useEffect(() => {
@@ -1057,6 +1071,9 @@ export default function CardBrowser({
   const extractDetail = extractDetailId ? extracts.find((e) => e.id === extractDetailId) ?? null : null;
 
   return (
+    // v49.43（D214）：左右分栏外壳——左＝queue-wrap（唯一滚动容器，D111 虚拟滚动口径不变），
+    // 右＝详情侧边面板（cb-detail，开详情时占一半）；面板非模态，左侧列表照常滚动与批量操作
+    <div className="cb-shell">
     <div className="queue-wrap" ref={wrapRef}>
       {/* v48.40（D80）：吸顶头带——preset 页签（与摘录/复习页头带同语言：band-line 下缘 hairline）。
           v48.111（D156）：纯文字统计行退役，计数归一进页签（.tab-cnt，无括号） */}
@@ -1473,7 +1490,7 @@ export default function CardBrowser({
             <div className="form-hint">{T("共 {total} 条，仅列出前 {cap} 条（其余请用查询缩小范围）", { total: cardsMeta.length, cap: LEECH_LIST_CAP })}</div>
           )}
           {leechListIds.map((id) => rowCache.get(id)).filter((c): c is BrowserCard => Boolean(c)).map((c) => (
-            <div key={c.id} className="queue-row" onClick={() => setDetailId(c.id)}>
+            <div key={c.id} className={"queue-row" + (detailId === c.id ? " is-open" : "")} onClick={() => openCardDetail(c.id)}>
               <div className="queue-row-head">
                 <span>
                   {c.leech?.suspended ? T("已暂停") : T("处理中")} · {T("遗忘 {n} 次", { n: c.fsrs?.lapses ?? 0 })}
@@ -1520,13 +1537,15 @@ export default function CardBrowser({
             return (
             <div
               key={c.id}
-              className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}`}
+              className={`cb-row${selCards.has(c.id) ? " is-selected" : ""}${detailId === c.id ? " is-open" : ""}`}
               role="row"
               onMouseDown={(ev) => {
                 // v49.2（D176）：Shift+点击范围选时浏览器原生会在按下阶段扩选文字——只拦 shift 按下，click 照常派发
                 if (ev.shiftKey) ev.preventDefault();
               }}
-              onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : setDetailId(c.id))}
+              onClick={(ev) =>
+                ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("card", c.id, ev) : openCardDetail(c.id)
+              }
               title={T("Ctrl/⌘ 点击多选 · Shift 点击范围选")}
             >
               <span className="cb-pick">
@@ -1586,13 +1605,15 @@ export default function CardBrowser({
           {viewExtracts.slice(win.extract.start, win.extract.end).map((e) => (
             <div
               key={e.id}
-              className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}`}
+              className={`cb-row${selExtracts.has(e.id) ? " is-selected" : ""}${extractDetailId === e.id ? " is-open" : ""}`}
               role="row"
               onMouseDown={(ev) => {
                 // v49.2（D176）：同闪卡行——Shift+点击扩选文字的原生行为在按下阶段拦掉
                 if (ev.shiftKey) ev.preventDefault();
               }}
-              onClick={(ev) => (ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("extract", e.id, ev) : setExtractDetailId(e.id))}
+              onClick={(ev) =>
+                ev.ctrlKey || ev.metaKey || ev.shiftKey ? toggleSel("extract", e.id, ev) : openExtractDetail(e.id)
+              }
               title={T("Ctrl/⌘ 点击多选 · Shift 点击范围选")}
             >
               <span className="cb-pick">
@@ -1770,6 +1791,8 @@ export default function CardBrowser({
         )}
       </div>
 
+    </div>
+    {/* v49.43（D214）：详情＝queue-wrap 的右侧兄弟面板（cb-detail，占一半；非遮罩）——左侧列表照常滚动 */}
       {detail && (
         <CardDetail
           card={detail}
@@ -1847,7 +1870,13 @@ export function ExtractDetail({
   onChanged: () => Promise<void> | void;
 }) {
   const T = useT();
-  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  // D214：详情＝右侧半宽停靠面板（非模态）：无遮罩、不锁 Tab；Esc 关闭与焦点管理仍走 useDialogA11y
+  const panelRef = useDialogA11y<HTMLElement>(onClose, { trap: false });
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // D214：面板内换条目时详情回到顶部（左侧列表滚动位置不受影响）
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [extract.id]);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
@@ -1902,20 +1931,19 @@ export function ExtractDetail({
   ];
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label={T("摘录详情")} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{T("摘录详情")}</h2>
-          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-scroll">
-          {/* 多段摘录＝各段 \n\n 拼接（D61/D78 落库形态），whitespace 保留原文换行 */}
-          <div className="extract-detail-content">{extract.contentMarkdown}</div>
+    <aside className="cb-detail" ref={panelRef} aria-label={T("摘录详情")}>
+      <div className="cb-detail-head">
+        <h2>{T("摘录详情")}</h2>
+        <button className="icon-btn cb-detail-close" data-testid="extract-detail-close" title={T("关闭")} onClick={onClose}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <div className="cb-detail-body" ref={bodyRef}>
+        {/* 多段摘录＝各段 \n\n 拼接（D61/D78 落库形态），whitespace 保留原文换行 */}
+        <div className="extract-detail-content">{extract.contentMarkdown}</div>
 
           <dl className="cb-meta">
             {meta.map(([k, v]) => (
@@ -1963,9 +1991,8 @@ export function ExtractDetail({
               {T("删除")}
             </button>
           </div>
-        </div>
       </div>
-    </div>
+    </aside>
   );
 }
 
@@ -2007,7 +2034,13 @@ function CardDetail({
   deferredNote?: string;
 }) {
   const T = useT();
-  const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  // D214：详情＝右侧半宽停靠面板（非模态）：无遮罩、不锁 Tab；Esc 关闭与焦点管理仍走 useDialogA11y
+  const panelRef = useDialogA11y<HTMLElement>(onClose, { trap: false });
+  const bodyRef = useRef<HTMLDivElement>(null);
+  // D214：面板内换卡（同源组点击 / 血缘树跳转）时详情回到顶部（左侧列表滚动位置不受影响）
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: 0 });
+  }, [card.id]);
   const [issues, setIssues] = useState<CardIssueRecord[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   // v48.61（D103）：生成信息区（AI 卡）——cards:genInfo 只读 join；重新生成确认面板开关
@@ -2168,18 +2201,17 @@ function CardDetail({
   ];
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel" ref={panelRef} role="dialog" aria-modal="true" data-ui="dialog" aria-label={T("卡片详情")} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{T("卡片详情")}</h2>
-          <button className="icon-btn modal-close" title={T("关闭")} onClick={onClose}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-        <div className="modal-scroll">
+    <aside className="cb-detail" ref={panelRef} aria-label={T("卡片详情")}>
+      <div className="cb-detail-head">
+        <h2>{T("卡片详情")}</h2>
+        <button className="icon-btn cb-detail-close" data-testid="card-detail-close" title={T("关闭")} onClick={onClose}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+          </svg>
+        </button>
+      </div>
+      <div className="cb-detail-body" ref={bodyRef}>
           <CardFace card={card} showBack onReveal={() => {}} onEdit={handleEdit} />
           {/* v48.61（D104）：背面辅助字段区（助记/例子/来源，app.cardFaceExtras 三开关）——与复习页同一组件自动继承 */}
           <CardFaceExtrasBlock card={card} />
@@ -2429,9 +2461,8 @@ function CardDetail({
               onClose={() => setRegenOpen(false)}
             />
           )}
-        </div>
       </div>
-    </div>
+    </aside>
   );
 }
 

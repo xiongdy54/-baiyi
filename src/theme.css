@@ -8135,6 +8135,57 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   border-bottom: var(--bw-hairline) solid var(--border-subtle);
 }
 
+/* ---------- 卡片浏览器详情侧边面板（v49.43 / D214）：行详情由居中模态改右侧半宽停靠面板 ----------
+   左＝queue-wrap（仍是唯一滚动容器，D111 虚拟滚动口径不变），右＝本面板；非模态（无遮罩、不锁 Tab）。
+   表面＝--surface-chrome（停靠面板属页面 chrome 而非浮层）；入场走 --dur-enter/--ease-enter
+   （浮层进 150ms 硬规则、只动 transform/opacity），reduce 闸外瞬时、motion-off 总开关兜底。 */
+.cb-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.cb-shell > .queue-wrap { min-width: 0; }
+.cb-detail {
+  flex: 0 0 50%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface-chrome);
+  border-left: var(--bw-hairline) solid var(--border-subtle);
+}
+.cb-detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: var(--bw-hairline) solid var(--border-subtle);
+}
+.cb-detail-head h2 {
+  margin: 0;
+  font-size: var(--fs-title-s);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.cb-detail-close { flex: none; }
+.cb-detail-body {
+  overflow-y: auto;
+  min-height: 0;
+  padding: var(--sp-6);
+}
+@keyframes cb-detail-in {
+  from { opacity: 0; transform: translateX(var(--shift-sm)); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cb-detail { animation: cb-detail-in var(--dur-enter) var(--ease-enter); }
+}
+/* 当前面板对应的行：灰底 + 左缘 2px accent 内嵌条（与多选 is-selected 的整圈 accent 边区分） */
+.cb-row.is-open { background: var(--grey-1); box-shadow: inset 2px 0 0 0 var(--accent); }
+.queue-row.is-open { border-color: var(--accent); }
+
 /* v48.41（D81）：markdown 阅读分支的选区动作组容器（引擎分支的组直接挂在 .reader-engine-controls 里）
    v48.44（D84）：组内钮已有自己的 1px 框（.seg-rail / .btn-rail），原 border-color 桥接规则删除 */
 .reader-md-actions { display: flex; padding: 0 var(--sp-4) var(--sp-2); }
