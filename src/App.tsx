@@ -799,46 +799,49 @@ export default function App() {
           )}
           {TOP_NAV.slice(3).map(navItem)}
         </nav>
-        {view.name !== "shelf" && <span className="topbar-title">{topTitle}</span>}
-        <div className="topbar-right">
-          {/* D123：制卡台唯一入口（手动制卡 / AI 制卡 / AI 解释同一模块）；快捷键只在悬停提示里 */}
-          <button
-            type="button"
-            className={`topbar-wb${wb.open ? " is-on" : ""}`}
-            data-testid="workbench-entry"
-            aria-pressed={wb.open}
-            title={T("制卡台（Ctrl+K）")}
-            onClick={requestWorkbenchToggle}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="3" y="5" width="18" height="14" rx="1" />
-              <path d="M7 10h10M7 14h6" />
-            </svg>
-            <span>{T("制卡台")}</span>
-          </button>
-          <button className="icon-btn" title={T("设置")} data-ui="button-icon" onClick={() => setSettingsOpen(true)}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M18.92 10.02 22.13 9.66A10.4 10.4 0 0 1 22.13 14.34L18.92 13.98A7.2 7.2 0 0 1 17.18 17L19.09 19.61A10.4 10.4 0 0 1 15.04 21.95L13.74 18.99A7.2 7.2 0 0 1 10.26 18.99L8.96 21.95A10.4 10.4 0 0 1 4.91 19.61L6.82 17A7.2 7.2 0 0 1 5.08 13.98L1.87 14.34A10.4 10.4 0 0 1 1.87 9.66L5.08 10.02A7.2 7.2 0 0 1 6.82 7L4.91 4.39A10.4 10.4 0 0 1 8.96 2.05L10.26 5.01A7.2 7.2 0 0 1 13.74 5.01L15.04 2.05A10.4 10.4 0 0 1 19.09 4.39L17.18 7A7.2 7.2 0 0 1 18.92 10.02Z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          </button>
-          <div className="win-controls">
-            <button className="icon-btn" title={T("最小化")} data-ui="button-icon" onClick={() => window.windowAPI?.minimize()}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M5 12h14" />
+        {/* D219：标题＋右控占顶栏右半网格列（.topbar-half）——标题 hairline 左缘恒钉窗口中点，与详情面板左缘同线 */}
+        <div className="topbar-half">
+          {view.name !== "shelf" && <span className="topbar-title">{topTitle}</span>}
+          <div className="topbar-right">
+            {/* D123：制卡台唯一入口（手动制卡 / AI 制卡 / AI 解释同一模块）；快捷键只在悬停提示里 */}
+            <button
+              type="button"
+              className={`topbar-wb${wb.open ? " is-on" : ""}`}
+              data-testid="workbench-entry"
+              aria-pressed={wb.open}
+              title={T("制卡台（Ctrl+K）")}
+              onClick={requestWorkbenchToggle}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="1" />
+                <path d="M7 10h10M7 14h6" />
+              </svg>
+              <span>{T("制卡台")}</span>
+            </button>
+            <button className="icon-btn" title={T("设置")} data-ui="button-icon" onClick={() => setSettingsOpen(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18.92 10.02 22.13 9.66A10.4 10.4 0 0 1 22.13 14.34L18.92 13.98A7.2 7.2 0 0 1 17.18 17L19.09 19.61A10.4 10.4 0 0 1 15.04 21.95L13.74 18.99A7.2 7.2 0 0 1 10.26 18.99L8.96 21.95A10.4 10.4 0 0 1 4.91 19.61L6.82 17A7.2 7.2 0 0 1 5.08 13.98L1.87 14.34A10.4 10.4 0 0 1 1.87 9.66L5.08 10.02A7.2 7.2 0 0 1 6.82 7L4.91 4.39A10.4 10.4 0 0 1 8.96 2.05L10.26 5.01A7.2 7.2 0 0 1 13.74 5.01L15.04 2.05A10.4 10.4 0 0 1 19.09 4.39L17.18 7A7.2 7.2 0 0 1 18.92 10.02Z" />
+                <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
-            <button className="icon-btn" title={T("最大化/还原")} data-ui="button-icon" onClick={() => window.windowAPI?.maximize()}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="5" y="5" width="14" height="14" />
-              </svg>
-            </button>
-            <button className="icon-btn win-close" title={T("关闭")} data-ui="button-icon" onClick={() => window.windowAPI?.close()}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M18 6 6 18" />
-                <path d="m6 6 12 12" />
-              </svg>
-            </button>
+            <div className="win-controls">
+              <button className="icon-btn" title={T("最小化")} data-ui="button-icon" onClick={() => window.windowAPI?.minimize()}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+              <button className="icon-btn" title={T("最大化/还原")} data-ui="button-icon" onClick={() => window.windowAPI?.maximize()}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="5" width="14" height="14" />
+                </svg>
+              </button>
+              <button className="icon-btn win-close" title={T("关闭")} data-ui="button-icon" onClick={() => window.windowAPI?.close()}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </header>

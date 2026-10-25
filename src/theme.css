@@ -733,14 +733,22 @@ body.skin-chrome-transparent .topbar { background: transparent; }
 
 .topbar {
   height: var(--sp-12);
-  display: flex;
+  /* D219：等分两列网格——右列起点＝窗口横向中点，topbar-title 的 hairline 左缘恒钉中线
+     （与卡片浏览器详情面板 .cb-detail 左缘同线，D214 flex-basis 50%）；切页签/缩放窗口位置不变。
+     水平 padding 下放到 nav / .topbar-half，网格内容盒＝整窗宽，中点零偏差。制卡台右侧开
+     （data-wb-open + place=right，推让/外延两模式同式）经 --tb-split 收窄中点＝.app-main 让位后的 50%。 */
+  display: grid;
+  grid-template-columns: minmax(0, calc((100% - var(--tb-split, 0px)) / 2)) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  padding: 0 var(--sp-2) 0 var(--sp-4);
   background: var(--surface-chrome);
   border-bottom: var(--bw-hairline) solid var(--border-subtle);
   -webkit-app-region: drag;
   user-select: none;
+}
+html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w); }
+/* 与 .app-main 让位过渡（html[data-wb-anim]）同步：轨道随 --dur-panel 缓动，reduce 闸外瞬时 */
+@media (prefers-reduced-motion: no-preference) {
+  html[data-wb-anim] .topbar { transition: grid-template-columns var(--dur-panel) var(--ease); }
 }
 
 .brand { display: flex; align-items: center; gap: var(--sp-3); }
@@ -755,6 +763,7 @@ body.skin-chrome-transparent .topbar { background: transparent; }
   display: flex;
   align-items: center;
   gap: var(--sp-1);
+  margin-left: auto; /* D219：.topbar-half 内钉右 */
   flex: none; /* R2：窗控/右侧钮不参与收缩 */
   -webkit-app-region: no-drag;
 }
@@ -784,7 +793,8 @@ body.skin-chrome-transparent .topbar { background: transparent; }
   display: flex;
   align-items: center;
   gap: var(--sp-1);
-  flex: none; /* R2：书名过长时收缩量全部落在标题（省略号），导航恒横排 */
+  padding-left: var(--sp-4); /* D219：原 .topbar 左 padding 下放（顶栏 padding 清零，网格跨度＝整窗宽） */
+  flex: none; /* R2：导航恒横排；超宽溢出轨道也不收缩（标题侧省略承担） */
   -webkit-app-region: no-drag; /* 按钮必须可点：顶栏整体 drag，导航区豁免 */
 }
 .topbar-nav .nav-item {
@@ -819,9 +829,17 @@ body.skin-chrome-transparent .topbar { background: transparent; }
   .nav-collapse .nav-item { transition: opacity var(--dur-view) var(--ease-out-soft); }
   .nav-collapse:not(.is-open) .nav-item { opacity: 0; }
 }
+/* D219：顶栏右半容器（标题＋右控）——占网格右列，起点即窗口中点；右控钉右、标题收缩省略（R2 口径不变）。
+   原 .topbar 右 padding 下放到此；gap 为标题与右控的最小间距 */
+.topbar-half {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+  padding-right: var(--sp-2);
+}
 .topbar-title {
-  margin-left: var(--sp-4);
-  padding-left: var(--sp-4);
+  padding-left: var(--sp-4); /* D219：margin-left 删除——右列起点即中点，border-left 竖线钉在中线上 */
   border-left: 1px solid var(--grey-2);
   font-size: var(--fs-secondary);
   color: var(--text-helper);

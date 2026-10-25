@@ -159,6 +159,32 @@ try {
   check("面板展开时表格宽度＝收起时宽度（条目宽度不变）", Math.abs(measOpen.tableW - measClosed.tableW) <= 2, { open: measOpen.tableW, closed: measClosed.tableW });
   check("题面列宽度不随面板展开变化", Math.abs(measOpen.frontW - measClosed.frontW) <= 2, { open: measOpen.frontW, closed: measClosed.frontW });
 
+  // ⑤ D219：顶栏标题 hairline 左缘恒钉窗口中点——面板开时与 .cb-detail 左缘同线；缩放窗口/切页签位置不变
+  const alignMeasure = () => cdp.eval(`(() => {
+    const t = document.querySelector(".topbar-title");
+    const d = document.querySelector(".cb-detail");
+    return JSON.stringify({
+      titleL: t ? +t.getBoundingClientRect().left.toFixed(1) : null,
+      center: +(window.innerWidth / 2).toFixed(1),
+      detailL: d ? +d.getBoundingClientRect().left.toFixed(1) : null
+    });
+  })()`);
+  await cdp.eval(`(() => { document.querySelector(".cb-table .cb-row:not(.cb-row-head)")?.click(); return "open"; })()`);
+  await wait(800);
+  const a1 = JSON.parse(String(await alignMeasure()) || "{}");
+  check("⑤ 面板开：标题 hairline 左缘＝窗口中点", a1.titleL != null && Math.abs(a1.titleL - a1.center) <= 1, a1);
+  check("⑤ 面板开：标题 hairline 左缘与 .cb-detail 左缘同线", a1.detailL != null && Math.abs(a1.titleL - a1.detailL) <= 1, a1);
+  await cdp.send("Emulation.setDeviceMetricsOverride", { width: 960, height: 700, deviceScaleFactor: 0, mobile: false });
+  await wait(600);
+  const a2 = JSON.parse(String(await alignMeasure()) || "{}");
+  check("⑤ 缩放窗口后仍在中点且与面板同线", a2.titleL != null && Math.abs(a2.titleL - a2.center) <= 1 && Math.abs(a2.titleL - a2.detailL) <= 1, a2);
+  await cdp.send("Emulation.clearDeviceMetricsOverride");
+  await wait(600);
+  await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "数据"); b?.click(); return "nav"; })()`);
+  await wait(900);
+  const a3 = JSON.parse(String(await cdp.eval(`(() => { const t = document.querySelector(".topbar-title"); return JSON.stringify({ titleL: t ? +t.getBoundingClientRect().left.toFixed(1) : null, center: +(window.innerWidth / 2).toFixed(1) }); })()`)) || "{}");
+  check("⑤ 切「数据」页后标题 hairline 仍在中点", a3.titleL != null && Math.abs(a3.titleL - a3.center) <= 1, a3);
+
   console.log(`\n==== d216.gui：${pass} 通过 / ${fail} 失败 ====`);
   try { cdp.ws.close(); } catch { /* 已断开 */ }
   killProc(electron);
