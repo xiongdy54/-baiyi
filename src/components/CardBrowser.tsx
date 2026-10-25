@@ -449,9 +449,9 @@ export default function CardBrowser({
 
   const sortedMeta = useMemo(() => {
     const s = [...filteredMeta];
-    // 排序语义与原实现同源：到期升序用 ?? 0（新卡沉底）、优先级/遗忘降序、创建时间降序
+    // 排序语义与原实现同源：到期升序用 ?? 0（新卡沉底）、遗忘降序、创建时间降序。
+    // v49.45（D216 方案 C）：闪卡优先级退役——「按优先级」对闪卡回落 due 序（选项保留给摘录表用）
     if (sortBy === "created") s.sort((a, b) => b.createdAt - a.createdAt);
-    else if (sortBy === "priority") s.sort((a, b) => (b.priority ?? 50) - (a.priority ?? 50));
     else if (sortBy === "lapses") s.sort((a, b) => b.lapses - a.lapses);
     else s.sort((a, b) => (a.due ?? 0) - (b.due ?? 0));
     return s;
@@ -1567,7 +1567,9 @@ export default function CardBrowser({
               <span className="mono">{dueText(c)}</span>
               <span className="cb-num mono">{c.fsrs?.reps ?? 0}</span>
               <span className="cb-num mono">{c.fsrs?.lapses ?? 0}</span>
-              <span className="cb-num mono">{c.priority}</span>
+              {/* v49.45（D216 方案 C①）：闪卡不设优先级（调度全由 FSRS 驱动）——列保留（行高恒定/
+                  网格模板不变，D111 虚拟滚动前提），恒显「—」；摘录表优先列照常数值 */}
+              <span className="cb-num mono">—</span>
               <span className="cb-src">{srcLabel(c)}</span>
             </div>
             );
@@ -2191,7 +2193,7 @@ function CardDetail({
       T("稳定度 / 难度"),
       f.stability != null && f.difficulty != null ? `${f.stability.toFixed(2)} / ${f.difficulty.toFixed(2)}` : "—"
     ],
-    [T("优先级"), `P${card.priority}`],
+    // v49.45（D216 方案 C②）：「优先级」行退役——闪卡调度全由 FSRS 驱动，priority 不再是用户可见概念
     [T("来源"), srcLabel(card)],
     [T("领域"), (card.domain ?? []).join("、") || "—"],
     // v40（K1）：legacy knowledge_point_id（正式 KP 之外的原值；归一提案见「知识点」页签）
@@ -2417,12 +2419,23 @@ function CardDetail({
                 {T("查看原图")}
               </button>
             )}
-            <button className="btn btn-outline btn-sm" onClick={toggleSuspend}>
+            <button
+              className="btn btn-outline btn-sm"
+              title={card.leech?.suspended ? T("恢复这张卡的复习推送") : T("暂停这张卡的复习推送，保留在列表中、不动复习进度，可随时恢复")}
+              onClick={toggleSuspend}
+            >
               {card.leech?.suspended ? T("恢复调度") : T("暂停调度")}
             </button>
-            {/* v48.60（D102）：生命周期归档/恢复（与暂停调度正交；不评分、不动 FSRS） */}
-            <button className="btn btn-outline btn-sm" data-detail-archive onClick={toggleArchive}>
-              {isArchived ? T("恢复（解除归档）") : T("不再关心")}
+            {/* v48.60（D102）：生命周期归档/恢复（与暂停调度正交；不评分、不动 FSRS）。
+                v49.45（D216）：文案统一——原「不再关心」与批量栏「归档」/页签「已归档」不同名（摘录侧的
+                「不再关心」是独立状态 dismissed，卡片侧此键自始就是归档），全应用统一叫「归档」+ title 说明去向 */}
+            <button
+              className="btn btn-outline btn-sm"
+              data-detail-archive
+              title={isArchived ? T("恢复这张卡到正常调度与默认列表") : T("移出复习与默认列表，可在『已归档』页签恢复")}
+              onClick={toggleArchive}
+            >
+              {isArchived ? T("恢复（解除归档）") : T("归档")}
             </button>
             <button className="btn btn-outline btn-sm" onClick={() => postpone(1)}>
               {T("推迟 1 天")}

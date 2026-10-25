@@ -440,7 +440,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
       mnemonic: p.mnemonic || null,
       knowledgePointId: p.knowledgePointId || null,
       dateStamp: p.dateStamp || null,
-      priority: p.priority,
+      // v49.45（D216 方案 C③）：滑杆退役后 payload 不带 priority——回落 DB 默认 50（调度不读该字段）
+      priority: p.priority ?? 50,
       // v48.60（D101）：表单终值（继承初值已以 chips 形式进表单，用户删了就是删了——提交层不再回填）
       tags: normalizeTags(p.tags ?? [])
     };

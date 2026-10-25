@@ -40,7 +40,8 @@ export interface ManualCardPayload {
   cloze?: string;
   reversePair?: { bFront: string; bBack: string };
   imageRegion?: { dataUrl: string; alt: string; shape: OcclusionShape; rect: OcclusionRect };
-  priority: number;
+  /** v49.45（D216 方案 C③）：优先级退役——字段转可选（旧调用方仍可传；制卡台不再提供入口） */
+  priority?: number;
   contextPrefix?: string;
   domain?: string[];
   mnemonic?: string;
@@ -134,7 +135,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   const [back, setBack] = useState("");
   const [bFront, setBFront] = useState("");
   const [bBack, setBBack] = useState("");
-  const [priority, setPriority] = useState(50);
+  // v49.45（D216 方案 C③）：优先级滑杆退役，state 随之删除（payload.priority 可选，缺省落 DB 默认 50）
   const [saving, setSaving] = useState(false);
   // M5：与 AI 制卡同构的元数据字段（领域标签对齐 R17：≤2 个、首个为主）
   const [domain, setDomainRaw] = useState<string[]>(() => (variant === "dock" ? lastManualDomain : []));
@@ -299,7 +300,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
   async function save(disambiguateWith?: string) {
     setSaving(true);
     const meta = {
-      priority,
+      // v49.45（D216 方案 C③）：priority 不再提交——payload 可选，DB 默认 50（调度不读该字段）
       contextPrefix: contextPrefix.trim(),
       domain,
       mnemonic: mnemonic.trim(),
@@ -622,12 +623,7 @@ export const ManualCardForm = forwardRef<ManualFormHandle, {
             {T("标注日期（规则19：统计数字/版本/价格等易变内容勾选，写入今日日期）")}
           </label>
         </div>
-
-        <div className="form-field">
-          <label>{T("优先级（0-100，越高越先复习）")}</label>
-          <input type="range" min={0} max={100} value={priority} onChange={(e) => setPriority(Number(e.target.value))} />
-          <span className="mono">{priority}</span>
-        </div>
+        {/* v49.45（D216 方案 C③）：优先级滑杆退役——闪卡调度全由 FSRS 驱动，priority 不再是用户可设概念 */}
         </div>
 
         {hitsPanel}

@@ -114,7 +114,7 @@ try {
   check("打开「更多」菜单", (await clickAt(cdp, '.bar-more [data-toggle]')) === true, "无按钮");
   await wait(400);
   const archClick = await cdp.eval(`(() => { const b = document.querySelector('[data-testid="review-archive"]'); if (!b) return "NOTFOUND"; b.click(); return "CLICKED"; })()`);
-  check("「不再关心（归档）」在场且可点", archClick === "CLICKED", archClick);
+  check("「归档」在场且可点（D216：原「不再关心（归档）」统一改名）", archClick === "CLICKED", archClick);
   await wait(1500);
   const afterArchive = await cdp.eval(`(async () => { const q = await window.cardsAPI.todayQueue(); return JSON.stringify({ inQueue: q.cards.some((c) => c.id === ${JSON.stringify(cardId)}), status: (await window.cardsAPI.get(${JSON.stringify(cardId)})).status, fsrsDue: (await window.cardsAPI.get(${JSON.stringify(cardId)})).fsrs.due }); })()`);
   check("归档后卡片离开今日队列", String(afterArchive).includes('"inQueue":false'), afterArchive);

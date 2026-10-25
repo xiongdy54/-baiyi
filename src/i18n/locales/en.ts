@@ -1181,6 +1181,10 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "恢复调度": "Resume scheduling",
   "暂停调度": "Suspend scheduling",
   "恢复（解除归档）": "Restore (unarchive)",
+  "暂停这张卡的复习推送，保留在列表中、不动复习进度，可随时恢复": "Suspend this card's review scheduling; it stays in lists with progress untouched, resume anytime",
+  "恢复这张卡的复习推送": "Resume this card's review scheduling",
+  "移出复习与默认列表，可在『已归档』页签恢复": "Removes the card from review and default lists; restore it from the Archived tab",
+  "恢复这张卡到正常调度与默认列表": "Restore this card to normal scheduling and default lists",
   "推迟 1 天": "Postpone 1 day",
   "重置为新卡": "Reset to new card",
   "题面与答案可直接点击编辑（失焦落库，填空卡直接编辑挖空源文本）；复习评分请回到「复习」页。":
