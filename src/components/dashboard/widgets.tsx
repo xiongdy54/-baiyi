@@ -103,7 +103,7 @@ export const WIDGETS: WidgetDef[] = [
       kpi: [
         { id: "queuebar", label: "今日进度" },
         { id: "streak", label: "连续学习" },
-        { id: "minutes", label: "今日时长对照" }
+        { id: "minutes", label: "今日复习时长对照" }
       ]
     },
     defaultData: "kpi",

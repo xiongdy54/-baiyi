@@ -48,7 +48,7 @@ export function QueueProgress({ kpi }: { kpi: StatsOverview["kpi"] }) {
           [t("待完成"), String(kpi.pendingToday), t("张")],
           [t("今日已评"), String(kpi.reviewedToday), t("张")],
           [t("连续学习"), String(kpi.streak), t("天")],
-          [t("今日时长"), String(kpi.minutesToday), t("分")]
+          [t("今日复习时长"), String(kpi.minutesToday), t("分")]
         ];
         const colW = w / 4;
         stats.forEach(([lab, val, u], i) => {
@@ -113,7 +113,7 @@ export function StreakPanel({ streak, heatDays }: { streak: number; heatDays: St
   );
 }
 
-/** 今日时长对照：近 30 天每日学习分钟柱，今天高亮 + 中位虚线 */
+/** 今日复习时长对照：近 30 天每日复习分钟柱，今天高亮 + 中位虚线 */
 export function MinutesColumns({ kpi, heatDays }: { kpi: { minutesToday: number }; heatDays: StatsOverview["heatDays"] }) {
   const tail = heatDays.slice(-30);
   if (!tail.length) return <Empty msg={t("暂无学习时长记录")} height={150} />;
@@ -123,7 +123,7 @@ export function MinutesColumns({ kpi, heatDays }: { kpi: { minutesToday: number 
   return (
     <Chart
       height={170}
-      headline={<><b className="cx-big">{kpi.minutesToday}</b> {t("分钟")} <span className="cx-dim">{t("今日学习时长")}</span></>}
+      headline={<><b className="cx-big">{kpi.minutesToday}</b> {t("分钟")} <span className="cx-dim">{t("今日复习时长")}</span></>}
       sub={nz.length ? t("近 30 天有记录 {n} 天 · 中位 {med} 分 · 最长 {max} 分", { n: nz.length, med, max: Math.max(...nz) }) : t("近 30 天暂无记录")}
       build={(w, P) => {
         const X0 = 30, X1 = w, BASE = 140, TOP = 8;
