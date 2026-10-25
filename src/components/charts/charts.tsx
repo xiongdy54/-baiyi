@@ -81,12 +81,13 @@ export function StreakPanel({ streak, heatDays }: { streak: number; heatDays: St
         els.push(<Tx key="n" x={0} y={38} s={38} w={700}>{nb}</Tx>);
         els.push(<Tx key="u" x={textW(nb, 38, 700) + 8} y={38} s={14} fill={P.GREY3}>{t("天连续学习")}</Tx>);
         els.push(<Tx key="r" x={w} y={36} anchor="end" fill={P.GREY3}>{fit(t("距 {next} 天里程碑还差 {diff} 天", { next, diff: next - streak }), w - textW(nb, 38, 700) - 110, 12)}</Tx>);
-        // 近 28 天点阵
+        // 近 28 天点阵：方格宽有 clamp 上限，内容总宽不足卡宽时整体居中
         const gap = 3, n = tail.length || 28;
         const cw = clamp((w - gap * (n - 1)) / n, 4, 30);
         const total = cw * n + gap * (n - 1);
+        const dotX0 = Math.max(0, (w - total) / 2);
         tail.forEach((d, i) => {
-          const x = i * (cw + gap);
+          const x = dotX0 + i * (cw + gap);
           const today = i === tail.length - 1;
           els.push(
             <rect key={`d${i}`} x={x} y={58} width={cw} height={22} fill={d.count > 0 ? P.ACCENT : P.GREY2}
@@ -95,7 +96,6 @@ export function StreakPanel({ streak, heatDays }: { streak: number; heatDays: St
           );
         });
         els.push(<Tx key="cap" x={0} y={98} fill={P.GREY3}>{t("近 28 天 · 学习 {n} 天", { n: learned })}</Tx>);
-        void total;
         // 里程碑轨
         const Y = 128, top = next;
         const x = (v: number) => (v / top) * w;
@@ -194,10 +194,12 @@ export function HeatCalendar({ days, unit, emptyMsg, legendTitle }: { days: Day[
         const g = calGeom(w, cols);
         const els: React.ReactNode[] = [];
         if (g.rows) {
-          [1, 2, 3, 4, 5, 6, 0].forEach((wd, c) => els.push(<Tx key={`h${c}`} x={g.labelW + c * (g.cw + g.gap) + g.cw / 2} y={12} anchor="middle" fill={P.GREY3}>{weekMini(wd)}</Tx>));
+          // 格宽有上限，日历内容总宽不足卡宽时整体居中（标签列同移）
+          const ox = Math.max(0, (w - (g.labelW + 7 * (g.cw + g.gap) - g.gap)) / 2);
+          [1, 2, 3, 4, 5, 6, 0].forEach((wd, c) => els.push(<Tx key={`h${c}`} x={ox + g.labelW + c * (g.cw + g.gap) + g.cw / 2} y={12} anchor="middle" fill={P.GREY3}>{weekMini(wd)}</Tx>));
           for (let r = 0; r < cols; r++) {
             const first = days[Math.max(0, r * 7 - lead)];
-            els.push(<Tx key={`w${r}`} x={0} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{md(first.date)}</Tx>);
+            els.push(<Tx key={`w${r}`} x={ox} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{md(first.date)}</Tx>);
             for (let c = 0; c < 7; c++) {
               const idx = r * 7 + c - lead;
               if (idx < 0 || idx >= days.length) continue;
@@ -205,22 +207,24 @@ export function HeatCalendar({ days, unit, emptyMsg, legendTitle }: { days: Day[
               const fill = L ? P.ACCENT : P.GREY2, op = L ? OP[L] : 0.45;
               els.push(
                 <g key={`${r}-${c}`} className="cx-hit" data-tip={`${mdw(d.date)}\n${d.value > 0 ? `${fmtInt(d.value)} ${unit}` : t("无记录")}`}>
-                  <rect x={g.labelW + c * (g.cw + g.gap)} y={22 + r * (g.ch + g.gap)} width={g.cw} height={g.ch} fill={fill} opacity={op}
+                  <rect x={ox + g.labelW + c * (g.cw + g.gap)} y={22 + r * (g.ch + g.gap)} width={g.cw} height={g.ch} fill={fill} opacity={op}
                     stroke={today ? P.INK : "none"} strokeWidth={today ? 1.4 : 0} />
-                  <Tx x={g.labelW + c * (g.cw + g.gap) + 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={L >= 3 ? textOn(P.ACCENT, P) : P.GREY3} opacity={0.9}>{new Date(d.date).getDate()}</Tx>
-                  {d.value > 0 && g.cw >= 52 && <Tx x={g.labelW + c * (g.cw + g.gap) + g.cw - 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} anchor="end" w={650} fill={L >= 3 ? textOn(P.ACCENT, P) : P.INK}>{fmtInt(d.value)}</Tx>}
+                  <Tx x={ox + g.labelW + c * (g.cw + g.gap) + 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={L >= 3 ? textOn(P.ACCENT, P) : P.GREY3} opacity={0.9}>{new Date(d.date).getDate()}</Tx>
+                  {d.value > 0 && g.cw >= 52 && <Tx x={ox + g.labelW + c * (g.cw + g.gap) + g.cw - 7} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} anchor="end" w={650} fill={L >= 3 ? textOn(P.ACCENT, P) : P.INK}>{fmtInt(d.value)}</Tx>}
                 </g>
               );
             }
           }
           return els;
         }
+        // 列模式同样按内容总宽居中（月份标签与星期标签同移，间距判据不受常数平移影响）
+        const ox = Math.max(0, (w - (g.labelW + cols * (g.cw + g.gap) - g.gap)) / 2);
         [1, -1, 3, -1, 5, -1, 0].forEach((wd, r) => {
-          if (wd >= 0) els.push(<Tx key={`w${r}`} x={0} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{weekMini(wd)}</Tx>);
+          if (wd >= 0) els.push(<Tx key={`w${r}`} x={ox} y={22 + r * (g.ch + g.gap) + g.ch / 2 + 4} fill={P.GREY3}>{weekMini(wd)}</Tx>);
         });
         let lastMonth = -1, lastLabelX = -99;
         for (let c = 0; c < cols; c++) {
-          const x = g.labelW + c * (g.cw + g.gap);
+          const x = ox + g.labelW + c * (g.cw + g.gap);
           for (let r = 0; r < 7; r++) {
             const idx = c * 7 + r - lead;
             if (idx < 0 || idx >= days.length) continue;
@@ -402,8 +406,10 @@ export function TodayUnits({ kpi }: { kpi: StatsOverview["kpi"] }) {
       build={(w, P) => {
         const g = unitGeom(w, due);
         const doneB = Math.round(done / g.per);
+        // 方格尺寸有上限：单行放得下时整块居中；多行保持「按阅读序从左到右填充」的进度语义不居中
+        const ox = g.blocks <= g.cols ? Math.max(0, (w - (g.blocks * (g.s + 3) - 3)) / 2) : 0;
         return Array.from({ length: g.blocks }, (_, b) => (
-          <rect key={b} x={(b % g.cols) * (g.s + 3)} y={Math.floor(b / g.cols) * (g.s + 3)} width={g.s} height={g.s}
+          <rect key={b} x={ox + (b % g.cols) * (g.s + 3)} y={Math.floor(b / g.cols) * (g.s + 3)} width={g.s} height={g.s}
             fill={b < doneB ? P.ACCENT : P.GREY2} opacity={b < doneB ? 1 : 0.8} className="cx-hit"
             data-tip={b < doneB ? t("已完成") : t("未完成")} />
         ));
@@ -423,7 +429,7 @@ export function TodayRing({ kpi }: { kpi: StatsOverview["kpi"] }) {
       height={190}
       label={t("今日完成 {pct}%", { pct: Math.round(frac * 100) })}
       build={(w, P) => {
-        const R = 74, SW = 16, cx = Math.min(R + SW, w / 2), cy = 95;
+        const R = 74, SW = 16, cy = 95;
         const arc = (f: number) => {
           if (f >= 0.9999) return `M${cx} ${cy - R} A${R} ${R} 0 1 1 ${cx - 0.01} ${cy - R}`;
           const a = f * Math.PI * 2 - Math.PI / 2;
@@ -432,7 +438,15 @@ export function TodayRing({ kpi }: { kpi: StatsOverview["kpi"] }) {
         const rows: [string, string, string][] = [
           [t("已完成"), `${done}`, P.ACCENT], [t("未完成"), `${due - done}`, P.GREY3], [t("今日到期"), `${due}`, P.INK]
         ];
-        const tx = Math.min(cx * 2 + 28, w * 0.5);
+        // 圆环 + 右侧读数列作整组水平居中（此前环恒钉左缘，宽幅卡右半全空）。
+        // 环视觉外径 = 2R+SW（描边居中于 r=R，两侧各出 SW/2）；读数列宽用 canvas 实测
+        const ringW = 2 * R + SW;
+        const colW = Math.max(
+          ...rows.map(([l]) => textW(l, 11, 500)),
+          ...rows.map(([, v]) => textW(v, 22, 650) + 5 + textW(t("张"), 12, 500))
+        );
+        const ox = Math.max(0, (w - (ringW + 28 + colW)) / 2);
+        const cx = ox + ringW / 2, tx = ox + ringW + 28;
         return (
           <g>
             <circle cx={cx} cy={cy} r={R} fill="none" stroke={P.GREY2} strokeWidth={SW} opacity={0.6} />
@@ -849,14 +863,16 @@ export function RhythmGrid({ grid }: { grid: number[][] }) {
       height={(w) => 22 + 7 * (clamp((w - 36) / 24 - 2, 8, 26) + 2)}
       build={(w, P) => {
         const cw = clamp((w - 36) / 24 - 2, 8, 26), X0 = 36;
+        // 格宽有上限，网格内容总宽不足卡宽时整体居中（星期标签同移）
+        const ox = Math.max(0, (w - (X0 + 24 * (cw + 2) - 2)) / 2);
         const els: React.ReactNode[] = [];
-        for (let h = 0; h < 24; h += 3) els.push(<Tx key={`h${h}`} x={X0 + h * (cw + 2)} y={12} fill={P.GREY3}>{`${h}`}</Tx>);
+        for (let h = 0; h < 24; h += 3) els.push(<Tx key={`h${h}`} x={ox + X0 + h * (cw + 2)} y={12} fill={P.GREY3}>{`${h}`}</Tx>);
         NAMES.forEach((nm, r) => {
-          els.push(<Tx key={`n${r}`} x={0} y={22 + r * (cw + 2) + cw / 2 + 4} fill={P.GREY3}>{weekMini(r + 1)}</Tx>);
+          els.push(<Tx key={`n${r}`} x={ox} y={22 + r * (cw + 2) + cw / 2 + 4} fill={P.GREY3}>{weekMini(r + 1)}</Tx>);
           for (let h = 0; h < 24; h++) {
             const v = grid[r][h], f = v / vmax;
             els.push(
-              <rect key={`${r}-${h}`} x={X0 + h * (cw + 2)} y={22 + r * (cw + 2)} width={cw} height={cw}
+              <rect key={`${r}-${h}`} x={ox + X0 + h * (cw + 2)} y={22 + r * (cw + 2)} width={cw} height={cw}
                 fill={v ? P.ACCENT : P.GREY2} opacity={v ? 0.16 + 0.84 * Math.sqrt(f) : 0.4} className="cx-hit"
                 data-tip={`${nm} ${String(h).padStart(2, "0")}:00\n${t("{n} 次评分", { n: v })}`} />
             );
