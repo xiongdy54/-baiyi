@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const http = require("node:http");
 
 // C-24：Wayland 下无法程序化定位/改尺寸窗口（BrowserWindow 文档），结构图谱与捕获窗口依赖这些能力 → 默认走 XWayland。
 // 设置环境变量 NUTATION_WAYLAND=1 可强制原生 Wayland（仅用于测试）。
@@ -2137,11 +2138,13 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
   // 托盘「退出」/ app.quit 才真销毁
   win.on("close", (e) => {
     if (appQuitting) return;
-    let toTray = true;
+    // D224：开发模式（--dev-server）未显式设置时关闭窗口直接退出，避免开发实例藏在托盘里占库/占端口。
+    const devMode = !app.isPackaged && process.argv.includes("--dev-server");
+    let toTray = !devMode;
     try {
-      toTray = closeToTrayEnabled(readSettings().app?.closeToTray);
+      toTray = closeToTrayEnabled(readSettings().app?.closeToTray, { dev: devMode });
     } catch {
-      /* 读不到设置按默认（收进托盘；linux 上 closeToTrayEnabled(undefined)=false 即直接退出） */
+      /* 读不到设置按默认（开发模式直接退出；packaged 按平台默认收进托盘） */
     }
     if (!toTray) return;
     e.preventDefault();
@@ -2194,6 +2197,9 @@ app.whenReady().then(async () => {
   // v48.75（D119）：生命周期锚点——区分「进程启动」（init 横幅）与「窗口就绪」（本行），
   // 两者之间崩溃/卡死时日志可判读。
   appLog.log("INFO", "app", "app ready");
+  // D224：开发服务器 watchdog——Vite 被杀/终端关闭后，旧的 dev 实例不能继续占库；
+  // 仅 --dev-server 且未打包时启用，30 秒（6×5s）连续不可用即退出。
+  if (!app.isPackaged && process.argv.includes("--dev-server")) startDevServerWatchdog();
   // v48.80（D124 / 设计稿 §9.1）：应用启动后 20 秒后台触发一次学习索引刷新（回调里再查总开关）
   setTimeout(() => {
     if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh();
@@ -2293,16 +2299,6 @@ app.whenReady().then(async () => {
   }
   // C-24：放行 library:list 的启动闸（见 handler 注册处注释）
   resolveDbReadyGate();
-  // D223：《使用教程》初始材料播种（幂等；app_meta 标记独一闸门，用户删除后不复活；失败不阻塞启动）。
-  // 测试隔离（M7_TEST_USERDATA）下不播种——GUI 套件的全新库保持「空书架」假设（tutorial-seed
-  // 测试套件直调 db.seedTutorialIfMissing 覆盖播种本身）。
-  if (!process.env.M7_TEST_USERDATA) {
-    try {
-      dbModule.seedTutorialIfMissing();
-    } catch (err) {
-      console.error("[tutorial] 初始教程播种失败（下次启动重试）：", err);
-    }
-  }
   // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
   // 导图对账）移入下一个宏任务——原实现它们与 initDb 共用同一连续宏任务（实测合成 ~730ms 启动空洞）；
   // 顺序与错误语义不变（各自 try/catch），只是不再拖长启动关键段。
@@ -2446,6 +2442,29 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+/** D224：开发模式 watchdog——Vite 已经不在了，旧 dev 实例不应继续占着 SQLite/端口。 */
+function startDevServerWatchdog() {
+  let misses = 0;
+  let stopped = false;
+  const timer = setInterval(() => {
+    const req = http.get("http://localhost:5173/", { method: "HEAD", timeout: 2000 }, (res) => {
+      res.resume();
+      misses = 0;
+    });
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => {
+      misses += 1;
+      if (!stopped && misses >= 6) {
+        stopped = true;
+        appLog.log("INFO", "app", "dev server unavailable; quitting stale dev instance");
+        app.quit();
+      }
+    });
+  }, 5000);
+  timer.unref?.();
+  app.on("will-quit", () => clearInterval(timer));
+}
 
 // v36（M8-A）：退出前把日记节流的待落盘内容强制刷盘 + 注销全局快捷键 + 放行捕获窗口关闭
 // （before-quit 早于窗口关闭；prepareQuit 置 quitting 标记，否则捕获窗口的 close 会被拦成隐藏）

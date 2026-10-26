@@ -2893,6 +2893,15 @@ body.theme-dark .modal-panel {
   font-size: var(--fs-secondary);
   resize: vertical;
 }
+/* D224：批注中的 Mermaid 实时预览（完整围栏闭合后出现；高度有界，图内可横向滚动） */
+.annot-editor .annot-editor-preview {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: var(--bw-hairline) solid var(--border-subtle);
+  max-height: 240px;
+  overflow: auto;
+}
+.annot-editor .annot-editor-preview .mermaid-diagram { margin: 0; }
 /* 底行：左＝颜色方块（点开取色，含自定义）· 中＝保存态 · 右＝删除（标签按 kind 变） */
 .annot-editor .ebar {
   display: flex;
@@ -8560,6 +8569,12 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   max-width: 100%;
   height: auto;
   margin-inline: auto;
+}
+/* D224：pele 懒加载占位（只有出现 mermaid 围栏时才加载渲染器 chunk） */
+.mermaid-loading {
+  margin: var(--sp-2) 0;
+  color: var(--text-helper);
+  font-size: var(--fs-secondary);
 }
 /* 语法错误回落：提示行（error 语义色，仅状态提示）+ 源码块（与普通代码块同观感的安静框） */
 .mermaid-fallback {

@@ -514,6 +514,11 @@ try {
   const p9 = await probeRange(cdp, "往返保真样本段落");
   check("⑨ 前置：读态渲染出富语料可点", !!p9, JSON.stringify(p9));
   // D223：读态 mermaid 围栏经 pele 渲染成图（.mermaid-diagram 内联 SVG），不是源码 <pre>
+  // D224：渲染器改为懒加载 chunk——最多等 4s，避免固定 600ms 在慢盘上误判
+  for (let i = 0; i < 20; i++) {
+    if (await cdp.eval(`!!document.querySelector(".extract-face-body .mermaid-diagram svg")`)) break;
+    await wait(200);
+  }
   const mm9 = await cdp.eval(`(() => {
     const body = document.querySelector(".extract-face-body");
     const fig = body?.querySelector(".mermaid-diagram svg");

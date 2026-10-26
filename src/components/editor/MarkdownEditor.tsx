@@ -35,13 +35,13 @@ import {
 import { gfm, insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm";
 import { history, redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
-import { $command, $markSchema, $nodeSchema, $remark, getMarkdown } from "@milkdown/kit/utils";
-import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
+import { $command, $markSchema, $nodeSchema, $prose, $remark, getMarkdown } from "@milkdown/kit/utils";
+import { NodeSelection, Plugin, TextSelection } from "@milkdown/kit/prose/state";
 import katex from "katex";
 import remarkMath from "remark-math";
 import { placePopover, type PopoverRect } from "../../lib/popoverPlace";
 import { remarkMark } from "../../lib/editor/markdownOffsetMap";
-import { MERMAID_STARTER } from "./MermaidDiagram";
+import { MERMAID_STARTER } from "./mermaidStarter";
 import {
   GlyphBold, GlyphItalic, GlyphStrike,
   IconCodeInline, IconLink, IconInlineMath, IconQuote, IconUl, IconOl, IconTask, IconTable,
@@ -220,12 +220,27 @@ export function createExtractEditor(
   defaultValue: string,
   opts?: {
     onMarkdownUpdated?: (ctx: unknown, markdown: string, prevMarkdown: string) => void;
+    /** D224：任何 doc 变更的同步信号（ProseMirror apply 内触发）——listener 的 markdownUpdated
+     *  有 200ms 防抖，快速失焦时不能只靠它置 dirty，否则工具条插入/刚敲的字会被当成「无修改」丢掉。 */
+    onDocChanged?: () => void;
     /** 空文档占位提示（经 ProseMirror 根属性 + CSS ::before 呈现，零依赖） */
     placeholder?: string;
   }
 ): Editor {
   const viewAttrs: Record<string, string> = { class: "extract-prosemirror" };
   if (opts?.placeholder) viewAttrs["data-placeholder"] = opts.placeholder;
+  /** D224：同步脏标记探针——只负责在事务层立即上报，不参与序列化。 */
+  const dirtyProbe = $prose(
+    () =>
+      new Plugin({
+        state: {
+          init: () => null,
+          apply: (tr) => {
+            if (tr.docChanged) opts?.onDocChanged?.();
+          }
+        }
+      })
+  );
   return Editor.make()
     .config((ctx) => {
       ctx.set(rootCtx, root);
@@ -247,6 +262,7 @@ export function createExtractEditor(
     .use(insertMathBlockCommand)
     .use(insertMermaidBlockCommand)
     .use(setTaskCheckedCommand)
+    .use(dirtyProbe)
     .use(history)
     .use(listener);
 }
@@ -317,7 +333,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   ref
 ) {
   const T = useT();
-  /** listener 是否观察到过 doc 变更（提交语义的判据） */
+  /** 提交语义的判据：listener 或 D224 同步事务探针观察到过 doc 变更 */
   const dirtyRef = useRef(false);
   /** 最近一次 listener 序列化结果（卸载阶段编辑器可能已销毁，提交兜底用它） */
   const latestMdRef = useRef<string | null>(null);
@@ -350,6 +366,10 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   const { loading, get } = useEditor(
     (root) =>
       createExtractEditor(root, value, {
+        onDocChanged: () => {
+          // D224：事务层同步置脏（listener 的 markdownUpdated 有 200ms 防抖，快速失焦会漏）
+          dirtyRef.current = true;
+        },
         onMarkdownUpdated: (_ctx, markdown) => {
           dirtyRef.current = true;
           latestMdRef.current = markdown;
