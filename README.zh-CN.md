@@ -6,7 +6,7 @@
 
 **本地优先的渐进阅读学习软件 —— 阅读、摘录、记住。**
 
-[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%2064--bit%20%28x64%20%2F%20ARM64%29-0078D6)](#快速开始)
 [![Electron](https://img.shields.io/badge/Electron-45-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
@@ -177,6 +177,10 @@ npm run dist       # 生成 Windows NSIS 安装包到 release/
 - 可选的云同步——本地书库始终是唯一数据真源
 
 Nutation 处于活跃开发中，欢迎反馈与问题报告。
+
+## 许可
+
+本项目以 [GNU Affero 通用公共许可证 v3.0](./LICENSE) 授权。你可以在该许可证条款下使用、研究、修改与分发 Nutation；若将修改后的版本作为网络服务提供，AGPL 要求向用户提供对应源代码。
 
 ## 致谢
 

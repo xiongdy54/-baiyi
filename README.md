@@ -6,7 +6,7 @@
 
 **A local-first incremental reading studio — read, excerpt, remember.**
 
-[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%2064--bit%20%28x64%20%2F%20ARM64%29-0078D6)](#getting-started)
 [![Electron](https://img.shields.io/badge/Electron-45-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
@@ -187,7 +187,7 @@ The project is currently developed in a single-author, design-doc-driven workflo
 
 ## License
 
-Licensed under the [PolyForm Noncommercial License 1.0.0](./LICENSE). You are free to use, study, modify and redistribute Nutation for any noncommercial purpose — learning, personal study and hobby projects included. For commercial use, please contact the author.
+Licensed under the [GNU Affero General Public License v3.0](./LICENSE). You may use, study, modify and redistribute Nutation under its terms; if you run a modified version as a network service, the AGPL requires you to offer its source to users.
 
 ## Acknowledgments
 

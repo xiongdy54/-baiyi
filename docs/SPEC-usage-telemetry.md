@@ -1,6 +1,6 @@
 # 规格文档：AI 用量计量 + 匿名遥测（商业化数据基建 v1）
 
-> **给 ZCode 的执行指令**：本文档是唯一实现依据。实现顺序按 §7 任务清单，每个 Phase 验证通过后 git commit（message 格式见 §7）。
+> **执行指令**：本文档是唯一实现依据。实现顺序按 §7 任务清单，每个 Phase 验证通过后 git commit（message 格式见 §7）。
 > **约束**：①不得修改 `AI_DEVELOPMENT_GUIDE.md`（锁定文档）；②不得引入除 `posthog-node`（可选方案 B）以外的任何 npm 依赖；③所有新增用户可见文案为简体中文；④遵守项目现有代码风格（主进程 CommonJS require、渲染层 ES Module + TypeScript）。
 > **北极星**：所有采集只服务一个决策——「该不该买资源包 / 去和模型提供商谈折扣」。不采集任何用户内容。
 
@@ -244,7 +244,7 @@ src/lib/ai.ts 增量：`chat(messages, onDelta?, temperature?, onThinking?, sour
 
 辅助指标：周 `card_generated` 活跃用户数（北极星）、人均月 tokens（定价依据）、`key_configured` 的 preset 分布（先跟谁谈）、`ai_call_failed` 的 error_code 分布（稳定性）。
 
-## 9. 上线前人工步骤（ZCode 之外，所有者自己做）
+## 9. 上线前人工步骤（代码实现之外，所有者自己做）
 
 1. 注册 PostHog Cloud（免费 100 万事件/月）→ 建项目 → 复制 Project API key（phc_ 开头）→ 填入 telemetry.js 的 `POSTHOG_API_KEY`。
 2. 隐私政策文本（§3.6）同步放进软件分发页/官网。

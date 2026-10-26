@@ -6,7 +6,7 @@
 
 **ローカルファーストのインクリメンタルリーディング・スタジオ —— 読んで、抜き書きして、記憶する。**
 
-[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm--Noncommercial--1.0.0-orange)](./LICENSE)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%2064--bit%20%28x64%20%2F%20ARM64%29-0078D6)](#はじめに)
 [![Electron](https://img.shields.io/badge/Electron-45-47848F)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://react.dev/)
@@ -187,7 +187,7 @@ Nutation は活発に開発中です。フィードバックと問題報告を�
 
 ## ライセンス
 
-[PolyForm Noncommercial License 1.0.0](./LICENSE) の下でライセンスされています。学習・改変・頒布を含む非商用の利用は自由に行えます。商用利用については作者までご連絡ください。
+本プロジェクトは [GNU Affero General Public License v3.0](./LICENSE) の下でライセンスされています。同ライセンスの条件に従って使用・研究・改変・頒布できます。改変版をネットワークサービスとして提供する場合、AGPL により利用者へ対応するソースコードを提供する必要があります。
 
 ## 謝辞
 

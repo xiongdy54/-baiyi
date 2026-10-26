@@ -1,6 +1,5 @@
 node_modules/
 dist/
-.zcode/
 
 # 测试日志（用完即删纪律）
 tests/*.log
@@ -13,7 +12,6 @@ tests/.results/
 # electron-builder 打包产物（renderer 构建产物在 dist/，勿混用）
 release/
 capture.html.bak
-.workbuddy/
 
 # 皮肤引擎截图产物（本机渲染基线，重跑 tests/skin-baseline-shot.mjs 再生）
 tests/__skin-*/
