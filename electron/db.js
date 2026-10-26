@@ -522,6 +522,13 @@ async function initDb(opts = {}) {
     db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_review_logs_seq ON review_logs(review_seq)");
   } catch { /* 已迁移 */ }
   try {
+    // v49.65（D236）：统计按时间窗读复习记录 / 阅读事件（今日已评、连续天数逐日探测、热力 / 节律 / 时长 / 阅读
+    // 窗口），此前两表都没有时间索引、每条查询都是全表扫描。只加索引、不动表结构——不升 SCHEMA_VERSION，
+    // 旧版本照常能打开此库（多出的索引对旧代码透明）。
+    db.run("CREATE INDEX IF NOT EXISTS idx_review_logs_reviewed_at ON review_logs(reviewed_at)");
+    db.run("CREATE INDEX IF NOT EXISTS idx_reading_events_created ON reading_events(created_at)");
+  } catch { /* 表尚不存在等场景 */ }
+  try {
     // v48.22（D58）：操作序计数器播种（op_journal / extract_ops 的 seq 来源，单行、必须存在）。
     // **与 review_logs.review_seq 相互独立**——跨类撤销排序靠 op_journal，不靠 review_seq，
     // 故这里不依赖 review_seq，起点固定为 1；INSERT OR IGNORE 保护已有行。
@@ -1599,52 +1606,63 @@ function clampOffset(offset) {
   return Number.isFinite(n) ? Math.max(0, Math.min(1e9, Math.floor(n))) : 0;
 }
 
+// 卡片 JSON 列的单列解析口径（批次 A；D236 起抽出，供 mapCardRow 与统计精简扫描共用）：
+// 空（NULL / undefined / ""）→ fallback；解析结果为 null → fallback；解析失败 → JSON_BROKEN（调用方记损坏列）。
+const JSON_BROKEN = Symbol("json-broken");
+function parseJsonColumn(text, fallback) {
+  if (text === null || text === undefined || text === "") return fallback;
+  try {
+    const v = JSON.parse(text);
+    return v === null || v === undefined ? fallback : v;
+  } catch {
+    return JSON_BROKEN;
+  }
+}
+
+// fsrs_json 解析后的值域闸门：true = 调度状态无法判定（致命损坏，行从队列与统计中一致缺席）。
+// D236 起从 mapCardRow 抽出，统计精简扫描（getStatsOverview）复用同一函数——两处口径不可能漂移。
+function fsrsValueDamaged(f) {
+  // A-2（审计 F34）：只验「能否 parse」不够。stability:-1 / difficulty:99 这类**形状合法但值域非法**
+  // 的行会一路进队列，直到渲染层 fsrsEngine 抛 Invalid memory state 才炸，而唯一的错误边界在根上
+  // → 整应用停止渲染。值域非法一律按损坏处理，走既有 damaged 降级链（卡片浏览仍看得到）。
+  if (f === null || typeof f !== "object") return true;
+  const lr = f.lastReview === null || f.lastReview === undefined ? null : Number(f.lastReview);
+  const S = Number(f.stability), D = Number(f.difficulty), due = Number(f.due);
+  // v48.22 修正（实测逼出）：**新卡豁免值域下界**——ts-fsrs 的新卡 S/D 恒为 0
+  // （src/lib/fsrs.ts 明写「新卡的 S/D 合法为 0（首评前），不能无条件钳进 [1,10]」），
+  // 而原判据不区分 state，会把这种合法新卡判成 damaged 并从队列**静默缺席**
+  // （m12 夹具 17 条断言因此全红）。非新卡仍按原值域严格判定，F34 的保护不变。
+  // isNewState 同源口径（P3 联动）：electron/legacyBackfill.js needsFsrsBaseline 的 S/D 回填判定
+  // 用**同一表达式**，两处互为镜像——改一处必改另一处（漂移＝回填认新卡而本闸门认非新卡，
+  // S/D=0 基线行会被判 damaged 从队列静默缺席）。
+  const isNewState = f.state === "new" || f.state === undefined || f.state === null;
+  return (
+    (f.stability !== undefined && !(Number.isFinite(S) && (isNewState ? S >= 0 : S > 0))) ||
+    (f.difficulty !== undefined && !(Number.isFinite(D) && D >= (isNewState ? 0 : 1) && D <= 10)) ||
+    (f.due !== undefined && !Number.isFinite(due)) ||
+    (lr !== null && !Number.isFinite(lr)) ||
+    (f.lapses !== undefined && !(Number(f.lapses) >= 0)) ||
+    (f.reps !== undefined && !(Number(f.reps) >= 0)) ||
+    // 未来 lastReview（时钟回拨留下的存量形态）会让调度器算负 delta_t 直接抛错 → 视为损坏
+    (lr !== null && lr > Date.now() + 24 * 3600 * 1000)
+  );
+}
+
 function mapCardRow(r) {
   if (!r) return null;
   // 批次 A：9 个 JSON 列文本损坏时回落空值并记录列名，绝不抛（"空"比"错"安全）。
   // 只有致命列（fsrs_json / leech_json = 调度与挂起状态无法判定）才把行标为 damaged。
   const bad = [];
   const j = (text, fallback, col) => {
-    if (text === null || text === undefined || text === "") return fallback;
-    try {
-      const v = JSON.parse(text);
-      return v === null || v === undefined ? fallback : v;
-    } catch {
-      bad.push(col);
-      return fallback;
-    }
+    const v = parseJsonColumn(text, fallback);
+    if (v !== JSON_BROKEN) return v;
+    bad.push(col);
+    return fallback;
   };
   let fsrsBad = false;
   if (r.fsrs_json) {
     try {
-      const f = JSON.parse(r.fsrs_json);
-      // A-2（审计 F34）：只验「能否 parse」不够。stability:-1 / difficulty:99 这类**形状合法但值域非法**
-      // 的行会一路进队列，直到渲染层 fsrsEngine 抛 Invalid memory state 才炸，而唯一的错误边界在根上
-      // → 整应用停止渲染。值域非法一律按损坏处理，走既有 damaged 降级链（卡片浏览仍看得到）。
-      if (f === null || typeof f !== "object") {
-        fsrsBad = true;
-      } else {
-        const lr = f.lastReview === null || f.lastReview === undefined ? null : Number(f.lastReview);
-        const S = Number(f.stability), D = Number(f.difficulty), due = Number(f.due);
-        // v48.22 修正（实测逼出）：**新卡豁免值域下界**——ts-fsrs 的新卡 S/D 恒为 0
-        // （src/lib/fsrs.ts 明写「新卡的 S/D 合法为 0（首评前），不能无条件钳进 [1,10]」），
-        // 而原判据不区分 state，会把这种合法新卡判成 damaged 并从队列**静默缺席**
-        // （m12 夹具 17 条断言因此全红）。非新卡仍按原值域严格判定，F34 的保护不变。
-        // isNewState 同源口径（P3 联动）：electron/legacyBackfill.js needsFsrsBaseline 的 S/D 回填判定
-        // 用**同一表达式**，两处互为镜像——改一处必改另一处（漂移＝回填认新卡而本闸门认非新卡，
-        // S/D=0 基线行会被判 damaged 从队列静默缺席）。
-        const isNewState = f.state === "new" || f.state === undefined || f.state === null;
-        const bad =
-          (f.stability !== undefined && !(Number.isFinite(S) && (isNewState ? S >= 0 : S > 0))) ||
-          (f.difficulty !== undefined && !(Number.isFinite(D) && D >= (isNewState ? 0 : 1) && D <= 10)) ||
-          (f.due !== undefined && !Number.isFinite(due)) ||
-          (lr !== null && !Number.isFinite(lr)) ||
-          (f.lapses !== undefined && !(Number(f.lapses) >= 0)) ||
-          (f.reps !== undefined && !(Number(f.reps) >= 0)) ||
-          // 未来 lastReview（时钟回拨留下的存量形态）会让调度器算负 delta_t 直接抛错 → 视为损坏
-          (lr !== null && lr > Date.now() + 24 * 3600 * 1000);
-        if (bad) fsrsBad = true;
-      }
+      fsrsBad = fsrsValueDamaged(JSON.parse(r.fsrs_json));
     } catch {
       fsrsBad = true;
     }
@@ -4737,31 +4755,108 @@ function dayStartMs(ts) {
   return learningDayStartMs(ts, getCutoffHour());
 }
 
+// ---- v49.65（D236，数据页性能）：统计用学习日轴 ----
+// dayStartMs 每调用一次就同步读盘并解析一遍 settings.json——单点调用无妨，逐行调用就是灾难：
+// 原「连续天数」把**全部**复习记录逐条换算学习日（2 万卡 / 10 万条复习记录实测：一次统计读设置文件
+// 8.5 万次、主进程卡死 50 余秒，期间整个应用无响应）。统计里改为日切点只读一次、日界预先算好，
+// 每行只做二分查找。
+// 日界逐日用 learningDayStartMs 推导，不再 ±86400000 硬步进：夏令时切换日只有 23/25 小时，硬步进
+// 得到的日键与 learningDayStartMs 的键差一小时 → 热力图 / 阅读字数在切换日之前整段为 0、连续天数
+// 在切换日断成 1（东八区等无夏令时的时区结果逐值不变）。
+/** anchor0（某学习日起点）往前 back 个、往后 forward 个学习日的起点，升序；anchor0 位于下标 back。 */
+function learningDayStarts(anchor0, back, forward, cutoff) {
+  const before = [];
+  let cur = anchor0;
+  for (let i = 0; i < back; i++) {
+    cur = learningDayStartMs(cur - 1, cutoff); // 前一学习日的最后一毫秒 → 该日起点
+    before.push(cur);
+  }
+  const out = before.reverse();
+  out.push(anchor0);
+  cur = anchor0;
+  for (let i = 0; i < forward; i++) {
+    cur = learningDayStartMs(cur + 36 * 3600_000, cutoff); // 学习日长 23–25 小时：+36h 必落在下一学习日内
+    out.push(cur);
+  }
+  return out;
+}
+
+/** t 在升序日界 bounds 中所属的下标 i（bounds[i] ≤ t < bounds[i+1]）；早于首项（含 NaN）→ -1，不早于末项 → bounds.length - 1。 */
+function dayBucketOf(bounds, t) {
+  if (!(t >= bounds[0])) return -1;
+  let lo = 0, hi = bounds.length - 1;
+  if (t >= bounds[hi]) return hi;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (bounds[mid] <= t) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// D236：统计的卡片侧只读这 6 列、不 JOIN（原来跑今日队列参考 SQL：每行解析 context_ref_json、JOIN 文档与书目，
+// 再逐张 mapCardRow 解析 9 个 JSON 列、组装 30 余个字段——统计一个都用不上）。WHERE 与 TODAY_QUEUE_SQL 同口径；
+// ORDER BY 保留：领域分布同数并列时的先后沿用原来的创建时间序。
+const STATS_CARD_SCAN_SQL = `SELECT id, domain, created_at, fsrs_json, leech_json, sibling_key FROM cards
+     WHERE is_deleted = 0 AND COALESCE(status, 'active') != 'archived'
+     ORDER BY created_at ASC`;
+// D236：连续天数逐学习日回溯的存在性探测（走 idx_review_logs_reviewed_at；代价与连续天数成正比、与记录总数无关）
+const STATS_DAY_PROBE_SQL = "SELECT 1 AS hit FROM review_logs WHERE reviewed_at >= ? AND reviewed_at < ? LIMIT 1";
+
 function getStatsOverview() {
   const now = Date.now();
-  const today0 = dayStartMs(now);
-  const today24 = today0 + 24 * 3600_000;
+  // D236：日切点本次统计只读一次（见 learningDayStarts 注释）
+  const cutoff = getCutoffHour();
+  const today0 = learningDayStartMs(now, cutoff);
+  // 今日起往后 14 个学习日的日界：[0] = 今日起点、[1] = 今日终点（夏令时切换日为 23/25 小时）；KPI 与到期预测共用
+  const ahead = learningDayStarts(today0, 0, 14, cutoff);
+  const today24 = ahead[1];
 
   // ---- KPI：今日到期 / 已完成 / 未完成 ----
   // v34（M12 §4.2-20）：与复习队列同一口径（computeSiblingDeferred）——被同源延后的卡不计入
   // 「今日到期」，另列 siblingDeferred「同源暂缓」；两者相加 = 旧口径 due ≤ today24 总数，不静默少卡。
   // 损坏行（fsrs/leech JSON 解析失败）在队列与统计中一致跳过，不再两处口径不同。
+  // D236：卡片侧改为一次精简扫描（STATS_CARD_SCAN_SQL），每行 fsrs_json 只解析一次；损坏判定复用
+  // mapCardRow 的同一组函数（fsrsValueDamaged / parseJsonColumn），fsrs 归一同 normalizeFsrs。
+  // 领域分布 / 漏斗 / 当月新建本就按全部卡计，故仍是一遍卡表，但单行成本只剩原来的零头。
+  // 领域列按原文记忆化解析（同一领域组合的卡共享结果，只读）。非数组 JSON（"null" / 字符串 / 对象）一律
+  // 视为未分类：原来 "null" 会让下方答题时长 / 来源 / 排名三处的 dom.length、dom[0] 直接抛错、整个统计失败，
+  // 字符串则被按首字符错归成一个"领域"。
+  const domainCache = new Map();
+  const domainArr = (text) => {
+    let v = domainCache.get(text);
+    if (v === undefined) {
+      v = parseJsonColumn(text, []);
+      if (!Array.isArray(v)) v = [];
+      domainCache.set(text, v);
+    }
+    return v;
+  };
   const kpiCards = [];
-  for (const row of queryAll(TODAY_QUEUE_SQL)) {
-    const mapped = mapCardRow(row);
-    // mapCardRow 已不抛（批次 A），原来的 try/catch 会变成永不触发的死代码；
-    // 换成显式跳过 damaged 行，否则坏行会被算进 KPI（与 computeTodayQueue 同一口径）。
-    if (!mapped || mapped.damaged) continue;
-    kpiCards.push({ ...mapped, docTitle: mapped.docTitle || (mapped.sourceRef && mapped.sourceRef.title) || null });
+  for (const row of queryAll(STATS_CARD_SCAN_SQL)) {
+    let fsrs = null;
+    if (row.fsrs_json) {
+      try {
+        fsrs = JSON.parse(row.fsrs_json);
+      } catch {
+        continue; // 非法 JSON = 致命损坏
+      }
+      if (fsrsValueDamaged(fsrs)) continue;
+    }
+    const leech = parseJsonColumn(row.leech_json, null);
+    if (leech === JSON_BROKEN) continue; // leech_json 损坏 = 挂起状态无法判定
+    if (!(fsrs && typeof fsrs.due !== "undefined")) fsrs = { state: "new", due: now, lapses: 0 }; // normalizeFsrs 同口径
+    kpiCards.push({ id: row.id, siblingKey: row.sibling_key || null, createdAt: row.created_at, fsrs, leech, domain: domainArr(row.domain) });
   }
   const active = kpiCards.filter((c) => !c.leech?.suspended);
   const dueTodayCandidates = active.filter((c) => (c.fsrs?.due ?? now) <= today24);
   const kpiDeferred = computeSiblingDeferred(dueTodayCandidates, now);
   const dueToday = dueTodayCandidates.length - kpiDeferred.size;
   const siblingDeferred = kpiDeferred.size;
-  const reviewedToday = queryAll("SELECT DISTINCT card_id FROM review_logs WHERE reviewed_at >= ?", [today0]).length;
-  // 一次取出今日评过的卡集合，代替原来「每张活卡一条 SELECT」的 N+1（口径不变）
+  // 一次取出今日评过的卡集合，代替原来「每张活卡一条 SELECT」的 N+1（口径不变）；
+  // D236：reviewedToday 原来把同一条 DISTINCT 查询再跑一遍取行数，现直接取集合大小
   const reviewedTodaySet = new Set(queryAll("SELECT DISTINCT card_id FROM review_logs WHERE reviewed_at >= ?", [today0]).map((r) => r.card_id));
+  const reviewedToday = reviewedTodaySet.size;
   const completedToday = active.filter((c) => {
     if ((c.fsrs?.due ?? now) > today24) return false; // 不再被推送
     return reviewedTodaySet.has(c.id); // 今日评过至少一次
@@ -4769,36 +4864,42 @@ function getStatsOverview() {
 
   // ---- 今日时长 / 连续天数 ----
   const todayDur = queryAll("SELECT SUM(duration_ms) AS s FROM review_logs WHERE reviewed_at >= ?", [today0])[0]?.s || 0;
-  const dayKeys = queryAll("SELECT DISTINCT reviewed_at FROM review_logs ORDER BY reviewed_at DESC").map((r) => dayStartMs(r.reviewed_at));
+  // D236：原来取出**全部**复习记录逐条换算学习日再回溯（每条一次读设置文件）；现按学习日逐日回溯，
+  // 每天一次索引存在性探测。今天没学则从昨天起算（今天的判定只看今日窗口，不再被时钟回拨留下的
+  // 未来记录挤掉）。
+  const dayProbe = db.prepare(STATS_DAY_PROBE_SQL);
+  const reviewedIn = (from, to) => dayProbe.get(from, to) !== undefined;
   let streak = 0;
-  if (dayKeys.length > 0) {
-    const cursor = dayKeys[0] === today0 ? today0 : today0 - 86400_000; // 今天没学则从昨天起算
-    const set = new Set(dayKeys);
-    let d = cursor;
-    while (set.has(d)) {
-      streak++;
-      d -= 86400_000;
-    }
+  let dayFrom = today0;
+  let dayTo = today24;
+  if (!reviewedIn(dayFrom, dayTo)) {
+    dayTo = today0;
+    dayFrom = learningDayStartMs(today0 - 1, cutoff);
+  }
+  while (reviewedIn(dayFrom, dayTo)) {
+    streak++;
+    dayTo = dayFrom;
+    dayFrom = learningDayStartMs(dayFrom - 1, cutoff);
   }
 
   // ---- 26 周热力（每日次数 + 时长）----
-  const heatFrom = today0 - 181 * 86400_000;
+  // D236：182 个学习日（含今日）的日界预先算好，逐行二分归桶（不再逐行读设置文件；夏令时切换日键不再错位）
+  const heatAxis = learningDayStarts(today0, 181, 1, cutoff);
+  const heatN = heatAxis.length - 1; // 末项是明日起点（哨兵）
+  const heatFrom = heatAxis[0];
   const heatRows = queryAll(
     "SELECT reviewed_at, duration_ms FROM review_logs WHERE reviewed_at >= ?",
     [heatFrom]
   );
-  const heat = {};
+  const heatCount = new Array(heatN).fill(0);
+  const heatMs = new Array(heatN).fill(0);
   for (const r of heatRows) {
-    const k = dayStartMs(r.reviewed_at);
-    if (!heat[k]) heat[k] = { count: 0, ms: 0 };
-    heat[k].count++;
-    heat[k].ms += r.duration_ms || 0;
+    const i = dayBucketOf(heatAxis, r.reviewed_at);
+    if (i < 0 || i >= heatN) continue; // 未来时刻（时钟回拨遗留）不进格子，与原口径一致
+    heatCount[i]++;
+    heatMs[i] += r.duration_ms || 0;
   }
-  const heatDays = [];
-  for (let d = heatFrom; d <= today0; d += 86400_000) {
-    const h = heat[d] || { count: 0, ms: 0 };
-    heatDays.push({ date: d, count: h.count, minutes: Math.round(h.ms / 60000) });
-  }
+  const heatDays = heatAxis.slice(0, heatN).map((d, i) => ({ date: d, count: heatCount[i], minutes: Math.round(heatMs[i] / 60000) }));
 
   // ---- 领域分布（主领域 = domain[0]；按卡计数；v34 起复用 KPI 卡集，domain 已是解析后的数组）----
   const domainCount = {};
@@ -4837,30 +4938,38 @@ function getStatsOverview() {
      WHERE rl.reviewed_at >= ? AND rl.duration_ms IS NOT NULL AND rl.duration_ms > 0 AND rl.duration_ms <= 600000`,
     [now - 90 * 86400_000]
   );
-  const quantile = (arr, q) => {
-    if (!arr.length) return 0;
-    const s = [...arr].sort((a, b) => a - b);
+  // D236：分位数改为「每组排序一次、在有序数组上取值」。原 quantile 每调一次就复制 + 排序整组，而离群点
+  // 过滤又在逐元素回调里重算三次——单个领域 n 条记录就是 O(n² log n)，近 90 天几万条复习时这里独占
+  // 数十秒；Math.min/max(...arr) 对超长数组还会爆栈。取值公式与离群栅栏的算术逐字不变。
+  const quantileSorted = (s, q) => {
+    if (!s.length) return 0;
     const pos = (s.length - 1) * q, base = Math.floor(pos), rest = pos - base;
     return s[base + 1] !== undefined ? s[base] + rest * (s[base + 1] - s[base]) : s[base];
   };
+  const sortedCopy = (arr) => [...arr].sort((a, b) => a - b);
   const byField = {};
   for (const r of durRows) {
-    let dom = [];
-    try { dom = r.domain ? JSON.parse(r.domain) : []; } catch { /* ignore */ }
+    const dom = domainArr(r.domain);
     const key = dom.length ? dom[0] : "none";
     (byField[key] = byField[key] || []).push(r.d);
   }
-  const durationByField = Object.entries(byField).map(([code, arr]) => ({
-    code,
-    label: code === "none" ? "未分类" : ((UDC_LEAVES.find((l) => l.code === code) || {}).label || code),
-    count: arr.length,
-    min: Math.min(...arr),
-    q1: Math.round(quantile(arr, 0.25)),
-    median: Math.round(quantile(arr, 0.5)),
-    q3: Math.round(quantile(arr, 0.75)),
-    max: Math.max(...arr),
-    outliers: arr.filter((v) => v > quantile(arr, 0.75) + 1.5 * (quantile(arr, 0.75) - quantile(arr, 0.25))).slice(0, 4)
-  })).filter((f) => f.count >= 5).sort((a, b) => a.median - b.median);
+  const durationByField = Object.entries(byField).map(([code, arr]) => {
+    const s = sortedCopy(arr);
+    const q1 = quantileSorted(s, 0.25);
+    const q3 = quantileSorted(s, 0.75);
+    const fence = q3 + 1.5 * (q3 - q1);
+    return {
+      code,
+      label: code === "none" ? "未分类" : ((UDC_LEAVES.find((l) => l.code === code) || {}).label || code),
+      count: arr.length,
+      min: s[0],
+      q1: Math.round(q1),
+      median: Math.round(quantileSorted(s, 0.5)),
+      q3: Math.round(q3),
+      max: s[s.length - 1],
+      outliers: arr.filter((v) => v > fence).slice(0, 4)
+    };
+  }).filter((f) => f.count >= 5).sort((a, b) => a.median - b.median);
   const allDur = durRows.map((r) => r.d);
   // 直方图：5 秒一箱 × 12 箱（0–60 秒；最后一箱含 ≥55 秒），前端按秒轴展示
   const durationHist = {};
@@ -4869,8 +4978,9 @@ function getStatsOverview() {
     durationHist[bin] = (durationHist[bin] || 0) + 1;
   }
   const durationBins = Array.from({ length: 12 }, (_, i) => durationHist[i] || 0);
-  const durationMedianMs = Math.round(quantile(allDur, 0.5));
-  const durationP90Ms = Math.round(quantile(allDur, 0.9));
+  const allDurSorted = sortedCopy(allDur);
+  const durationMedianMs = Math.round(quantileSorted(allDurSorted, 0.5));
+  const durationP90Ms = Math.round(quantileSorted(allDurSorted, 0.9));
 
   // ---- 卡片生命周期漏斗（近 90 天新建的卡；v34 起复用 KPI 卡集，fsrs 已解析）----
   // 阶段单调递减：新建 ⊇ 已开始学（脱离 new）⊇ 进入长期复习（review/relearning）⊇ 已巩固（稳定度 > 21 天）。
@@ -4902,8 +5012,7 @@ function getStatsOverview() {
   const srcLeafMain = {};
   for (const l of UDC_LEAVES) srcLeafMain[l.code] = l.main;
   for (const r of srcRows) {
-    let dom = [];
-    try { dom = r.domain ? JSON.parse(r.domain) : []; } catch { /* ignore */ }
+    const dom = domainArr(r.domain);
     let book = r.bookTitle;
     if (!book) {
       try { book = JSON.parse(r.source_ref_json || "null")?.title || null; } catch { book = null; }
@@ -4933,8 +5042,7 @@ function getStatsOverview() {
   );
   const monthMap = {};
   for (const r of rankRows) {
-    let dom = [];
-    try { dom = r.domain ? JSON.parse(r.domain) : []; } catch { /* ignore */ }
+    const dom = domainArr(r.domain);
     const key = dom[0] || "none";
     const dt = new Date(r.reviewed_at);
     const mk = `${dt.getFullYear()}-${dt.getMonth() + 1}`;
@@ -4969,14 +5077,18 @@ function getStatsOverview() {
   const monthSkips = queryAll("SELECT COUNT(DISTINCT s.card_id) AS n FROM review_skips s JOIN cards c ON c.id = s.card_id WHERE s.skipped_at >= ? AND c.is_deleted = 0", [monthStart])[0]?.n || 0;
   // 到期预测：未来 14 个学习日每天到期的**已学过**的卡数（新卡无 due，不计）；早于今天起点的归「逾期」。
   // overdue 此前恒为 0（占位未实现），现按真实到期时刻统计。
+  // D236：按 ahead 日界二分归桶（夏令时切换日 23/25 小时；无夏令时时区与原 floor((due-today0)/day) 逐值相同）。
   const dueForecast = Array(14).fill(0);
   let overdueCards = 0;
   for (const c of active) {
     const due = c.fsrs?.due;
     if (typeof due !== "number") continue;
-    const idx = Math.floor((due - today0) / 86400_000);
-    if (idx < 0) overdueCards++;
-    else if (idx < 14) dueForecast[idx]++;
+    if (due < today0) {
+      overdueCards++;
+      continue;
+    }
+    const idx = dayBucketOf(ahead, due);
+    if (idx >= 0 && idx < 14) dueForecast[idx]++;
   }
   const queueFlow = { carriedOver: Math.max(0, dueToday - monthNew), overdue: overdueCards, newCards: monthNew, completed: monthReviews, skipped: monthSkips, remaining: Math.max(0, dueToday - completedToday) };
 
@@ -4985,24 +5097,28 @@ function getStatsOverview() {
   // 原来用 now - 45·day（带当天毫秒）去取日切点键的表，恒取不到，图此恒为 0。
   // 批次 B（D-TEST-23）：JOIN 父表过滤已删书（§7.2 L869「查询一律带 is_deleted = 0」）；
   // reading_events 表本身没有软删位，绝不能写 re.is_deleted。
-  const readFrom = today0 - 89 * 86400_000;
+  // D236：90 个学习日的日界预先算好，逐行二分归桶（同热力图）
+  const readAxis = learningDayStarts(today0, 89, 1, cutoff);
+  const readN = readAxis.length - 1;
+  const readFrom = readAxis[0];
   const readRows = queryAll(
     `SELECT re.item_id, re.char_pos, re.created_at FROM reading_events re
      JOIN library_items li ON li.id = re.item_id AND li.is_deleted = 0
      WHERE re.created_at >= ? ORDER BY re.created_at ASC`,
     [readFrom]
   );
-  const readByDay = {};
+  const readChars = new Array(readN).fill(0);
   const lastPos = {};
   for (const r of readRows) {
-    const k = dayStartMs(r.created_at);
     const prev = lastPos[r.item_id] ?? r.char_pos;
     const delta = r.char_pos - prev;
-    if (delta > 0) readByDay[k] = (readByDay[k] || 0) + delta;
+    if (delta > 0) {
+      const i = dayBucketOf(readAxis, r.created_at);
+      if (i >= 0 && i < readN) readChars[i] += delta;
+    }
     lastPos[r.item_id] = r.char_pos;
   }
-  const readingDays = [];
-  for (let d = readFrom; d <= today0; d += 86400_000) readingDays.push({ date: d, chars: readByDay[d] || 0 });
+  const readingDays = readAxis.slice(0, readN).map((d, i) => ({ date: d, chars: readChars[i] }));
 
   // ---- 学习节律（近 90 天：星期×时段网格 + 时刻事件采样）----
   const rhythmRows = queryAll(
@@ -5307,7 +5423,9 @@ function getGrowthSessionSummary(fromTs, now) {
   hits.push(...growth.deriveDomainEvents(cards, nowMs));
   hits.push(...growth.deriveMaterialEvents(cards, nowMs));
   const inWindow = hits.filter((h) => h.triggerAt >= from);
-  const folded = growth.foldSameDay(inWindow, (ts) => dayStartMs(ts)); // 学习日口径 = D23 切点（N-10）
+  // D236：日切点只读一次（dayStartMs 每次调用都读盘解析 settings.json，逐条命中调用代价随命中数线性增长）
+  const cutoff = getCutoffHour();
+  const folded = growth.foldSameDay(inWindow, (ts) => learningDayStartMs(ts, cutoff)); // 学习日口径 = D23 切点（N-10）
   return { enabled: true, fromTs: from, hits: folded.visible, folded: folded.folded };
 }
 
@@ -8409,6 +8527,9 @@ module.exports = {
   listDueCards,
   computeTodayQueue,
   TODAY_QUEUE_DUE_SQL, // C-18b：快速路径 SQL（EXPLAIN QUERY PLAN 验证 idx_cards_due 命中用）
+  STATS_DAY_PROBE_SQL, // D236：连续天数逐日探测 SQL（EXPLAIN QUERY PLAN 验证 idx_review_logs_reviewed_at 命中用）
+  STATS_CARD_SCAN_SQL, // D236：统计卡片侧精简扫描 SQL（测试对照用）
+  learningDayStarts, // D236：统计学习日轴（DST 安全；测试直接验证）
   listAllCards,
   countCardsByExtract, // C-18c：extractId → 张数（替代渲染层 listAll 全量计数）
   listCardsWithKnowledgePoint, // C-18c：带 KP 的卡子集（KnowledgeManager 专用）
