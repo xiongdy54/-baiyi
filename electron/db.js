@@ -1131,7 +1131,8 @@ function setActiveFsrsConfig(id) {
   return id;
 }
 
-// M2 备份：备份/恢复前把内存库刷盘；getBackupCounts 供备份清单展示数据规模
+// M2 备份：getBackupCounts 供备份清单展示数据规模。（备份 / 恢复前的「落盘」现由 persist() 承担＝
+// WAL checkpoint，见上方 D137 段；sql.js 内存库已退役，这里不再有「把内存库刷盘」一步）
 function getBackupCounts() {
   const n = (sql) => Number(queryAll(sql)[0]?.n || 0);
   return {

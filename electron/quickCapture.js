@@ -16,6 +16,7 @@
 const { app, BrowserWindow, globalShortcut, screen, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { loadAppPage } = require("./devServer"); // D239：载入顺序 + dev server 地址唯一来源
 const os = require("os");
 
 // 审计 C-26 步骤 4（D-03=B）：快速记录默认键——Windows/Linux 保持 Ctrl+Alt+Space；
@@ -310,14 +311,8 @@ function createCaptureWindow() {
   });
   win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
-  const distCapture = path.join(__dirname, "../dist/capture.html");
-  if (fs.existsSync(distCapture)) {
-    win.loadFile(distCapture);
-  } else if (!app.isPackaged) {
-    win.loadURL("http://localhost:5173/capture.html").catch(() => {
-      win.loadFile(distCapture);
-    });
-  }
+  // D239：载入顺序与主窗口同规（D192 修订）；地址不再写死，统一在 devServer.js
+  loadAppPage(win, { app, fs, distFile: path.join(__dirname, "../dist/capture.html"), page: "capture.html" });
   return win;
 }
 

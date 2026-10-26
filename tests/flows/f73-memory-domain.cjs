@@ -151,7 +151,7 @@ app
       flow.record("memory:openFile 白名单在场", openFileGuard);
       flow.check("memory:openFile 必须只允许固定文件名（防 shell.openPath 打开任意文件）", openFileGuard === true, "有白名单", openFileGuard);
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.message) || e));

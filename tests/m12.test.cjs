@@ -29,11 +29,18 @@ app.whenReady().then(async () => {
     const PAST_DUE = Date.parse("2000-01-01T00:00:00Z");
     // 新卡：due=过去（立即到期），state=new（fsrs 全字段，§4.4.1）
     const newFsrs = (due = PAST_DUE) => JSON.stringify({ state: "new", due, lapses: 0, stability: 0, difficulty: 0, reps: 0, lastReview: null, learningSteps: [] });
-    const mkCard = (note, extra = {}) =>
-      db.createCard({
+    // D239：规范序 = due → created_at → id。同一毫秒内连建的卡 created_at 相同，次序就退化成随机 id 序，
+    // 「次日放行次序第 2 张」会随机失败（以前 app.quit() 退出码恒 0，把这种失败掩盖了）。
+    // 建卡前等时钟走过上一张的毫秒，保证 created_at 严格递增、次序确定。
+    let lastCreatedAt = 0;
+    const mkCard = (note, extra = {}) => {
+      while (Date.now() <= lastCreatedAt) { /* 自旋至多 1ms */ }
+      lastCreatedAt = Date.now();
+      return db.createCard({
         noteText: note, cardType: "qa", frontMarkdown: note, backMarkdown: "答案",
         priority: 50, tags: [], fsrsJson: newFsrs(), ...extra
       }).id;
+    };
 
     function setBury(patch) {
       const cur = settingsStore.readSettings();
@@ -180,9 +187,12 @@ app.whenReady().then(async () => {
     check("非法 limit 回落 300", K({ contextRef: { documentId: "d1" }, sourceText: "字".repeat(301), limit: 0 }) === null && K({ contextRef: { documentId: "d1" }, sourceText: "字".repeat(300), limit: -5 })?.startsWith("src:"), true, "fallback 300");
 
     console.log(`\n==== M12 SUMMARY ${pass}/${pass + fail} ====`);
-    if (fail > 0) process.exitCode = 1;
+  } catch (e) {
+    // D239：异常也要算失败（原先异常冒出 + app.quit() → 退出码 0，崩溃被当成通过）
+    console.error("测试异常：", (e && e.stack) || e);
+    fail++;
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 清理失败不掩盖结果 */ }
-    app.quit();
+    app.exit(fail > 0 ? 1 : 0); // D239：app.quit() 恒以 0 退出，process.exitCode 不生效
   }
 });

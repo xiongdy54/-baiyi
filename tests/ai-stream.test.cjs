@@ -44,8 +44,9 @@ app.whenReady().then(async () => {
   // 每个场景：起本地服务器 → 切 local 预设（无需 Key）→ baseUrl 指向该服务器（报告验收口径）
   const against = async (server, opts = {}, onMsg = () => {}) => {
     const port = await listen(server);
-    ai.setAIConfig({ preset: "local" });
-    ai.setAIConfig({ baseUrl: `http://127.0.0.1:${port}/v1` });
+    // D239：setAIConfig 自 C-24 起是 async；两次写配置必须依次等完，否则第二次可能读到第一次写完之前的旧配置
+    await ai.setAIConfig({ preset: "local" });
+    await ai.setAIConfig({ baseUrl: `http://127.0.0.1:${port}/v1` });
     return ai.chatStream({ messages: [{ role: "user", content: "hi" }], ...opts }, onMsg);
   };
 

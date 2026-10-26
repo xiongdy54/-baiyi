@@ -1,5 +1,6 @@
 // D237 打包体积：首屏预算 + 按需装载语义回归。
 // @runtime: system-node  @tier: 2  @gui: false  @id: D237BUNDLE  @timeout: 300
+// 运行：node tests/d237-bundle-budget.test.cjs（或 node scripts/run-tests.mjs d237；自带构建到临时目录，不读也不改 dist/）
 // 覆盖：
 //   A 语言资源按需装载（src/lib/i18n.ts）：zh-CN 零装载；未就绪时 t() 按缺译回落原文且不缓存半成品；
 //     就绪后补发通知，且 useT 真实重渲染（jsdom + React——快照用译文版本号，不是 locale 字符串）；

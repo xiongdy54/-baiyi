@@ -136,8 +136,10 @@ app.whenReady().then(async () => {
     height: 900,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: false }
   });
-  win.webContents.on("console-message", (_e, _level, message) => {
-    logLine("[renderer] " + message);
+  // D239：Electron 35 起 console-message 的位置参数（level/message/line/sourceId）已弃用——
+  // 只收事件对象（单参数监听器，Electron 据监听器形参个数判定是否走弃用路径并告警）。
+  win.webContents.on("console-message", (event) => {
+    logLine("[renderer] " + event.message);
   });
   await win.loadFile(path.join(__dirname, "pdf.fixture.html"));
   logLine("phase: fixture page loaded");

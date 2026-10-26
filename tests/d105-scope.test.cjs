@@ -136,9 +136,12 @@ app.whenReady().then(async () => {
     check("无字段前缀 → 空条件（保持现状语义）", eq(ext3, { tags: [], bookNames: [] }), { tags: [], bookNames: [] }, ext3);
 
     console.log(`\nD105-scope: ${pass} 通过 / ${fail} 失败`);
-    process.exitCode = fail ? 1 : 0;
+  } catch (e) {
+    // D239：异常也要算失败（原先异常冒出 + app.quit() → 退出码 0，崩溃被当成通过）
+    console.error("测试异常：", (e && e.stack) || e);
+    fail++;
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 临时目录清理失败不阻塞 */ }
-    app.quit();
+    app.exit(fail ? 1 : 0); // D239：app.quit() 恒以 0 退出，失败须经 app.exit(code) 上报
   }
 });

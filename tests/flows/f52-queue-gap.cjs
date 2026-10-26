@@ -153,7 +153,7 @@ app
       flow.record("对照卡之后 KPI.dueToday", kpi2.dueToday);
       flow.check("挂起卡也不得进 KPI 到期数（同一格的两侧）", kpi2.dueToday === activeDue.length - 0 || kpi2.dueToday <= 20, "不因挂起卡而增大", { dueToday: kpi2.dueToday, 场景活跃到期: activeDue.length });
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.message) || e));

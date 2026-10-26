@@ -36,7 +36,13 @@ const digest = (f) => {
     return { sha: "缺失", size: -1, mtime: -1 };
   }
 };
-const spawnEl = (args, env) => cp.spawn(ELECTRON, args, { cwd: ROOT, env: { ...process.env, ...env }, stdio: "ignore" });
+// D239：记下所有子进程，收尾时兜底结束（taskkill 只在 Windows 上有效，其它平台上子进程会一直留着）
+const spawned = [];
+const spawnEl = (args, env) => {
+  const p = cp.spawn(ELECTRON, args, { cwd: ROOT, env: { ...process.env, ...env }, stdio: "ignore" });
+  spawned.push(p);
+  return p;
+};
 
 runFlow(flow, async () => {
   const root = path.join(os.tmpdir(), "incremental-reading-f90", String(Date.now()));
@@ -101,4 +107,9 @@ runFlow(flow, async () => {
   flow.record("库内容", `${rows.length} 行：${rows.join(",")}`);
   flow.check("内容必须与第二实例启动前一致（4 行都在）", rows.length === seeded, String(seeded), String(rows.length));
   flow.record("未覆盖", "真·同时启动两个实例的竞态（本条是「先有持锁者、后有第二实例」的确定性构造）；GUI 窗口层面的 second-instance 聚焦行为（F39 的 W1 已覆盖锁的路径变体）");
+}).then((s) => {
+  // D239：驱动进程原先跑完就停在这里——Electron 主进程没开窗口也不会自行退出，只能等外层超时杀掉（退出码 124）。
+  // 跑完先兜底结束仍在的子进程，再按结果如实退出（口径同 dbenv.quit）。
+  for (const p of spawned) if (p.exitCode === null && p.signalCode === null) { try { p.kill("SIGKILL"); } catch { /* 已退 */ } }
+  require("electron").app.exit(s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length ? 1 : 0);
 });

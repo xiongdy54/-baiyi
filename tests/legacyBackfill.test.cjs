@@ -462,7 +462,6 @@ app.whenReady().then(async () => {
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 清理失败忽略 */ }
     const code = fail === 0 ? 0 : 1;
-    try { app.quit(); } catch { /* ignore */ }
-    setTimeout(() => process.exit(code), 120); // Electron 下 process.exitCode 不可靠，照 dbenv.quit 模式显式退出
+    app.exit(code); // D239：app.quit() 会先以 0 退出、定时器里的 process.exit 来不及执行——直接 app.exit(code)
   }
 });

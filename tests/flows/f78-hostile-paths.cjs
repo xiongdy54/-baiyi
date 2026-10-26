@@ -65,6 +65,10 @@ if (!process.env.F78_CASE) {
       flow.check(`${k} 指定目录之外不得出现第二个库文件（写错地方 ⇒ 数据分裂）`, (j.stray || []).length === 0, "0 个游离文件", JSON.stringify(j.stray));
       if (j.initDb === "ok") flow.check(`${k} 写入的卡必须能从同一目录读回`, j.cards >= 1, "≥1", j.cards);
     }
+  }).then((s) => {
+    // D239：驱动进程原先跑完就停在这里——Electron 主进程没开窗口也不会自行退出，只能等外层超时杀掉（退出码 124）。
+    // 跑完即按结果如实退出（口径同 dbenv.quit）。
+    require("electron").app.exit(s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length ? 1 : 0);
   });
   return;
 }

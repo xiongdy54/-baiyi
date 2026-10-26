@@ -23,6 +23,7 @@ const { BrowserWindow, screen, ipcMain, app } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { computeFit } = require("./lensWindowFit.bundle.cjs");
+const { loadAppPage } = require("./devServer"); // D239：载入顺序 + dev server 地址唯一来源
 
 let win = null;
 let ctx = null;
@@ -138,20 +139,9 @@ function createWindow() {
     consumePendingShow();
     broadcastState();
   });
-  const distHtml = path.join(__dirname, "../dist/lens.html");
   // 加载顺序与主窗口同规（D192 修订）：`npm run dev`（显式 --dev-server）优先连本地 vite，
-  // 否则旧 dist 会盖住最新源码；生产 / npm start 仍以 dist 为准。
-  if (!app.isPackaged && process.argv.includes("--dev-server")) {
-    w.loadURL("http://localhost:5173/lens.html").catch(() => {
-      if (fs.existsSync(distHtml)) w.loadFile(distHtml);
-    });
-  } else if (fs.existsSync(distHtml)) {
-    w.loadFile(distHtml);
-  } else if (!app.isPackaged) {
-    w.loadURL("http://localhost:5173/lens.html").catch(() => {
-      w.loadFile(distHtml);
-    });
-  }
+  // 否则旧 dist 会盖住最新源码；生产 / npm start 仍以 dist 为准。D239：规则与地址统一在 devServer.js。
+  loadAppPage(w, { app, fs, distFile: path.join(__dirname, "../dist/lens.html"), page: "lens.html" });
   return w;
 }
 

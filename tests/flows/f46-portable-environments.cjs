@@ -1216,7 +1216,7 @@ runFlow(flow, async () => {
   fs.mkdirSync(RESULTS_DIR, { recursive: true });
   flow.record("本流程沙箱根（临时目录）", SCRATCH);
   flow.record("分发事实（不重推导，只记结论）", "package.json 无 build/electron-builder/forge 配置 → 今天的「分发」＝ git clone + npm install + npm run build + npx electron .");
-  flow.record("加载顺序（electron/main.js:1265-1272）", "dist/index.html 在 → loadFile；不在 → loadURL(http://localhost:5173) 失败后再 loadFile 同一不存在的文件；无用户可见错误页");
+  flow.record("加载顺序（electron/devServer.js loadAppPage，D239 起四个窗口同一实现）", "非开发模式：dist/index.html 在 → loadFile；不在 → loadURL(dev server，默认 http://localhost:5173) 失败后再 loadFile 同一不存在的文件；无用户可见错误页");
 
   for (const [id, fn] of CASES) {
     if (ONLY.length && !ONLY.includes(id)) continue;

@@ -9,6 +9,12 @@ const { createMindmapEngineV2, normalizeMindmapSettings } = require(path.join(ro
 const { createMemoryStore } = require(path.join(root, "tests", "lib", "mindmapMemoryStore.cjs"));
 
 let pass = 0, fail = 0;
+// D239：主流程若卡在永不落定的 Promise 上（如漏写 await 致取消落空、任务一直挂着），事件循环排空后 Node 以 0 静默退出——
+// 只跑了一半却报通过（C-24 引擎异步化后本文件正是这样：7 项失败 + 第 ⑦ 段起全部没跑，退出码仍是 0）。没跑到结尾就如实以 1 退出。
+let finished = false;
+process.on("exit", (code) => {
+  if (code === 0 && !finished) { console.log("  ✗ 测试未跑完就退出（有 Promise 永不落定）"); process.exitCode = 1; }
+});
 function check(name, cond, detail) {
   if (cond) { pass++; console.log(`  ✓ ${name}`); }
   else { fail++; console.log(`  ✗ ${name}\n      ${JSON.stringify(detail ?? "").slice(0, 600)}`); }
@@ -254,13 +260,13 @@ const KNOWN = (() => {
     const floorAi = rows.find((r) => r.source === "ai" && r.state === "floor");
     const shortRow = rows.find((r) => r.source === "toc" && /短章/.test(r.title));
     const before = A.log.calls.length;
-    const r1 = A.engine.graphExpand({ mapId: mapA, nodeId: floorAi.nodeId, trigger: "click" });
-    const r2 = A.engine.graphExpand({ mapId: mapA, nodeId: shortRow.nodeId, trigger: "click" });
+    const r1 = await A.engine.graphExpand({ mapId: mapA, nodeId: floorAi.nodeId, trigger: "click" });
+    const r2 = await A.engine.graphExpand({ mapId: mapA, nodeId: shortRow.nodeId, trigger: "click" });
     await settle(A.engine);
     check("AI floor 节点 → skipped floor", r1.skipped === "floor", r1);
     check("目录 floor（短章）→ skipped floor", r2.skipped === "floor", r2);
     const open = rows.find((r) => r.source === "toc" && r.state === "open" && r.parentId != null);
-    const r3 = A.engine.graphExpand({ mapId: mapA, nodeId: open.nodeId, trigger: "click" });
+    const r3 = await A.engine.graphExpand({ mapId: mapA, nodeId: open.nodeId, trigger: "click" });
     check("已 open 节点 → skipped cached", r3.skipped === "cached", r3);
     check("以上零调用", A.log.calls.length === before);
   }
@@ -273,8 +279,10 @@ const KNOWN = (() => {
     check("夹具中存在可深挖的 more 节点 ≥4", mores.length >= 4, mores.length);
     const T = mores[0];
     const before = A.log.calls.length;
-    const r = A.engine.graphExpand({ mapId: mapA, nodeId: T.nodeId, trigger: "click" });
-    const dup = A.engine.graphExpand({ mapId: mapA, nodeId: T.nodeId, trigger: "click" });
+    const [r, dup] = await Promise.all([ // 两次点击背靠背发起（第二次落在第一次排队之后），再一起等结果
+      A.engine.graphExpand({ mapId: mapA, nodeId: T.nodeId, trigger: "click" }),
+      A.engine.graphExpand({ mapId: mapA, nodeId: T.nodeId, trigger: "click" }),
+    ]);
     check("点击深挖返回 jobId；同节点重复 → busy", r.jobId && !r.skipped && dup.skipped === "busy", { r, dup });
     await settle(A.engine);
     const after = nodesOf(A.store, mapA);
@@ -285,18 +293,18 @@ const KNOWN = (() => {
     const T2 = mores[1];
     A.setBehave((k, info) => (k === "expand" ? { lines: [`1 [论点] 唯一子 @${info.lo}-${info.hi} .`] } : null));
     const seenBefore = A.deltas.length;
-    A.engine.graphExpand({ mapId: mapA, nodeId: T2.nodeId, trigger: "click" });
+    await A.engine.graphExpand({ mapId: mapA, nodeId: T2.nodeId, trigger: "click" });
     await settle(A.engine);
     const r2 = nodesOf(A.store, mapA);
     check("第 3 门：目标 floor、唯一子不入库", r2.find((k) => k.nodeId === T2.nodeId).state === "floor" && !r2.some((k) => k.parentId === T2.nodeId));
     const leaked = A.deltas.slice(seenBefore).some((d) => d.nodes && d.nodes.some((n) => n.parentId === T2.nodeId));
     check("被第 3 门丢弃的子节点从不下发", !leaked);
     const c3 = A.log.calls.length;
-    const r2b = A.engine.graphExpand({ mapId: mapA, nodeId: T2.nodeId, trigger: "click" });
+    const r2b = await A.engine.graphExpand({ mapId: mapA, nodeId: T2.nodeId, trigger: "click" });
     check("再点 → skipped floor 零调用", r2b.skipped === "floor" && A.log.calls.length === c3, r2b);
     // force 逃生口：跳过第 2/3 门
     A.setBehave(null);
-    const rf = A.engine.graphExpand({ mapId: mapA, nodeId: T2.nodeId, trigger: "click", force: true });
+    const rf = await A.engine.graphExpand({ mapId: mapA, nodeId: T2.nodeId, trigger: "click", force: true });
     await settle(A.engine);
     // 同输入命中第 3 门写下的缓存（零调用）：force 跳过第 3 门，唯一子节点得以保留
     check("force 深挖 floor 节点：不被拒收、零调用回放缓存并保留子节点", rf.jobId && !rf.skipped && A.log.calls.length === c3 && nodesOf(A.store, mapA).some((k) => k.parentId === T2.nodeId), { rf, calls: A.log.calls.length - c3 });
@@ -310,7 +318,7 @@ const KNOWN = (() => {
       return { raw: `1 [论点] 前半 @${info.lo}-${mid} +\n1.1 [证据] 孙 @${info.lo}-${info.lo} .\n2 [论点] 被截`, finishReason: "length" };
     });
     const d0 = A.deltas.length;
-    A.engine.graphExpand({ mapId: mapA, nodeId: T3.nodeId, trigger: "click" });
+    await A.engine.graphExpand({ mapId: mapA, nodeId: T3.nodeId, trigger: "click" });
     await settle(A.engine);
     const r3 = nodesOf(A.store, mapA);
     const st = (id) => (r3.find((k) => k.nodeId === id) || {}).state;
@@ -319,7 +327,7 @@ const KNOWN = (() => {
     check("jobDone.finishReason=length、metrics 计入 truncated 丢弃", jd && jd.jobDone.finishReason === "length" && jd.metrics.byReason.truncated >= 1, jd && jd.jobDone);
     A.setBehave(null);
     const d1 = A.deltas.length;
-    const rr = A.engine.graphExpand({ mapId: mapA, nodeId: T3.nodeId, trigger: "click" });
+    const rr = await A.engine.graphExpand({ mapId: mapA, nodeId: T3.nodeId, trigger: "click" });
     await settle(A.engine);
     const r4 = nodesOf(A.store, mapA);
     const kids4 = r4.filter((k) => k.parentId === T3.nodeId);
@@ -344,7 +352,7 @@ const KNOWN = (() => {
       const cut = raw.indexOf("\n", raw.indexOf("\n") + 1) + 1; // 前两行完整送出后挂起
       return { raw, hangAfter: cut };
     });
-    const r = A.engine.graphExpand({ mapId: mapA, nodeId: T.nodeId, trigger: "click" });
+    const r = await A.engine.graphExpand({ mapId: mapA, nodeId: T.nodeId, trigger: "click" });
     for (let i = 0; i < 50; i++) await tick();
     check("任务运行中", A.engine.scheduler.stats().running === 1, A.engine.scheduler.stats());
     A.engine.graphCancel({ jobId: r.jobId });
@@ -371,18 +379,18 @@ const KNOWN = (() => {
     // 新引擎实例（模拟重启）：未获同意 → disabled
     const B3 = createMindmapEngineV2({ store: B2.store, chatStream: makeChat({ seq: 0, calls: [] }), readSettings: () => B2.settings, getAIConfig: () => ({ model: "x" }) });
     feedAll(B3, BOOK);
-    check("本会话未主动请求过 → prefetch disabled", B3.graphExpand({ mapId: g.mapId, nodeId: mores[0].nodeId, trigger: "prefetch" }).skipped === "disabled");
+    check("本会话未主动请求过 → prefetch disabled", (await B3.graphExpand({ mapId: g.mapId, nodeId: mores[0].nodeId, trigger: "prefetch" })).skipped === "disabled");
     const before = B2.log.calls.length;
-    const p1 = B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[0].nodeId, trigger: "prefetch" });
+    const p1 = await B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[0].nodeId, trigger: "prefetch" });
     await settle(B2.engine);
     check("生成过（已同意）→ 预取发起一次调用", p1.jobId && !p1.skipped && B2.log.calls.length === before + 1, p1);
-    const p2 = B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[1].nodeId, trigger: "prefetch" });
+    const p2 = await B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[1].nodeId, trigger: "prefetch" });
     check("当日预取达上限 → quota、零调用", p2.skipped === "quota" && B2.log.calls.length === before + 1, p2);
     const c = B2.store.countMaterialMapCallsSince(BOOK.documentId, { trigger: "prefetch", sinceMs: 0 });
     check("账本 trigger=prefetch 计 1", c === 1, c);
     B2.settings.app.mindmapPrefetch = { enabled: false, dailyLimit: 30 };
-    check("预取关闭 → disabled", B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[1].nodeId, trigger: "prefetch" }).skipped === "disabled");
-    check("点击不受预取配额限制", !B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[1].nodeId, trigger: "click" }).skipped);
+    check("预取关闭 → disabled", (await B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[1].nodeId, trigger: "prefetch" })).skipped === "disabled");
+    check("点击不受预取配额限制", !(await B2.engine.graphExpand({ mapId: g.mapId, nodeId: mores[1].nodeId, trigger: "click" })).skipped);
     await settle(B2.engine);
   }
 
@@ -429,7 +437,7 @@ const KNOWN = (() => {
     const g = await D.engine.graphGenerate({ documentId: BOOK.documentId });
     await settle(D.engine);
     const before = D.log.calls.length;
-    const ea = D.engine.graphExpandAll({ mapId: g.mapId });
+    const ea = await D.engine.graphExpandAll({ mapId: g.mapId });
     check("graphExpandAll 返回 runId，按预算排队", ea.runId && ea.queued >= 1 && ea.queued <= 3, ea);
     await settle(D.engine);
     check("深挖全部总调用 ≤ 预算 3", D.log.calls.length - before <= 3 && D.log.calls.length - before >= 1, D.log.calls.length - before);
@@ -514,12 +522,12 @@ const KNOWN = (() => {
     check("空白不敏感：段中位置的块号 > 单元开头的块号", l0.block > lStart.block && l0.totalBlocks > 10, { mid: l0.block, start: lStart.block });
     const lShort = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u4.xhtml", text: "很短的一段正文" });
     check("短章：scopeFloor=true（不提供生成）", lShort.ready && lShort.scopeFloor === true, lShort);
-    const e1 = L.engine.graphEnsureMap({ documentId: BOOK.documentId, title: BOOK.title });
+    const e1 = await L.engine.graphEnsureMap({ documentId: BOOK.documentId, title: BOOK.title });
     check("ensureMap：新建骨架 v2 版本并激活、零调用", e1.created && L.store.getMaterialMap(e1.mapId).isActive && L.log.calls.length === 0, e1);
-    check("ensureMap 幂等：已有激活 v2 直接返回", L.engine.graphEnsureMap({ documentId: BOOK.documentId }).mapId === e1.mapId && !L.engine.graphEnsureMap({ documentId: BOOK.documentId }).created);
+    check("ensureMap 幂等：已有激活 v2 直接返回", (await L.engine.graphEnsureMap({ documentId: BOOK.documentId })).mapId === e1.mapId && !(await L.engine.graphEnsureMap({ documentId: BOOK.documentId })).created);
     const l1 = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u2.xhtml", text: probe });
     check("骨架图：定位到目录节点、未 outline", l1.mapId === e1.mapId && l1.nodeId === l0.scopeNodeId && l1.chain[l1.chain.length - 1] === l1.nodeId && l1.chain.length >= 2 && !l1.scopeOutlined, l1);
-    const r = L.engine.graphExpand({ mapId: e1.mapId, nodeId: l0.scopeNodeId, trigger: "click" });
+    const r = await L.engine.graphExpand({ mapId: e1.mapId, nodeId: l0.scopeNodeId, trigger: "click" });
     await settle(L.engine);
     check("为本节生成：只调用该作用域一次", r.jobId && !r.skipped && L.log.calls.length === 1 && L.log.calls[0].kind === "outline", { r, calls: L.log.calls.length });
     const l2 = L.engine.graphLocate({ documentId: BOOK.documentId, unitAnchor: "u2.xhtml", text: probe });
@@ -536,6 +544,7 @@ const KNOWN = (() => {
     check("跨单元的节点按单元切段（每段各自首尾）", !!top, null);
   }
 
+  finished = true;
   console.log(`\n结果：${pass} 通过，${fail} 失败`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

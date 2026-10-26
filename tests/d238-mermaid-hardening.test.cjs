@@ -1,5 +1,6 @@
 // D238 Mermaid 读态加固：图表源码提取 / 字体快照 / SVG 净化。
 // @runtime: system-node  @tier: 2  @gui: false  @id: D238MERMAID  @timeout: 180
+// 运行：node tests/d238-mermaid-hardening.test.cjs（或 node scripts/run-tests.mjs d238）
 // 覆盖（jsdom + 真实 React 渲染 ReadMarkdown → MermaidDiagram → MermaidDiagramImpl → pele/lazy）：
 //   A 源码提取：代码块 children 为多段（原始 HTML <pre><code class="language-mermaid"> 夹注释 / <mark>）时
 //     按原文直接拼接（原 String(数组) 以逗号拼接 → 语法错误回落 / 画错）；空白包裹的 <pre> 照样拆壳；非 mermaid 代码块不变。

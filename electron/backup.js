@@ -256,7 +256,8 @@ async function createBackup(opts = {}) {
     destFile = path.join(destDir, name.replace(/\.zip$/, `-${i}.zip`));
   }
 
-  // 先把内存库刷盘，保证备份的是最新状态（D137：flush = persist() = wal_checkpoint(TRUNCATE)）
+  // 先做一次 WAL checkpoint，把已提交的写入合并回主文件，保证备份的是最新状态
+  // （D137：flush = persist() = wal_checkpoint(TRUNCATE)；sql.js 内存库已退役，不存在「内存库刷盘」）
   if (typeof opts.flush === "function") opts.flush();
 
   // D137（§3.6，WAL sidecar 陷阱 M2 对策①）：WAL 下裸 readFileSync 库文件可能缺最近提交

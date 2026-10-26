@@ -184,7 +184,7 @@ app
       flow.record("四个入口合计拦截次数", totalHits);
       flow.check("自检：至少命中 3 个入口（否则上面的绿只是因为根本没注入）", [r1, r2, r3, r4].filter((x) => x.hits > 0).length >= 3, "≥3 个入口被注入", { W1: r1.hits, W2: r2.hits, W3: r3.hits, W4: r4.hits });
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.stack) || e));

@@ -1,7 +1,8 @@
 const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme, session } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const http = require("node:http");
+// D239：开发服务器地址唯一来源（--dev-server=<url> / NUTATION_DEV_SERVER_URL / 默认 5173）+ 开发模式 watchdog
+const devServer = require("./devServer");
 
 // C-24：Wayland 下无法程序化定位/改尺寸窗口（BrowserWindow 文档），结构图谱与捕获窗口依赖这些能力 → 默认走 XWayland。
 // 设置环境变量 NUTATION_WAYLAND=1 可强制原生 Wayland（仅用于测试）。
@@ -2145,7 +2146,7 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
   win.on("close", (e) => {
     if (appQuitting) return;
     // D224：开发模式（--dev-server）未显式设置时关闭窗口直接退出，避免开发实例藏在托盘里占库/占端口。
-    const devMode = !app.isPackaged && process.argv.includes("--dev-server");
+    const devMode = devServer.isDevServerMode(app);
     let toTray = !devMode;
     try {
       toTray = closeToTrayEnabled(readSettings().app?.closeToTray, { dev: devMode });
@@ -2178,20 +2179,10 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
   });
   // 加载顺序（v11.2）：dist 存在则直接用（生产产物优先，避免 devURL 连接超时挂起导致白屏）；
   // dist 不存在（纯开发场景）才走 vite dev server，失败再报错
-  // D192 修订：`npm run dev` 显式传 --dev-server（脚本里 wait-on 已确认 5173 就绪）→ 优先 dev server，
+  // D192 修订：`npm run dev` 显式传 --dev-server（脚本里 wait-on 已确认 dev server 就绪）→ 优先 dev server，
   // 否则旧 dist 会盖住最新源码（2026-10-18 用户实测：dev 下仍跑旧页面）。npm start / 打包版行为不变。
-  const distIndex = path.join(__dirname, "../dist/index.html");
-  if (!app.isPackaged && process.argv.includes("--dev-server")) {
-    win.loadURL("http://localhost:5173").catch(() => {
-      if (fs.existsSync(distIndex)) win.loadFile(distIndex);
-    });
-  } else if (fs.existsSync(distIndex)) {
-    win.loadFile(distIndex);
-  } else if (!app.isPackaged) {
-    win.loadURL("http://localhost:5173").catch(() => {
-      win.loadFile(distIndex);
-    });
-  }
+  // D239：规则与地址统一收在 electron/devServer.js（四个窗口同一实现，地址不再写死）。
+  devServer.loadAppPage(win, { app, fs, distFile: path.join(__dirname, "../dist/index.html"), page: "" });
 }
 
 app.whenReady().then(async () => {
@@ -2205,7 +2196,7 @@ app.whenReady().then(async () => {
   appLog.log("INFO", "app", "app ready");
   // D224：开发服务器 watchdog——Vite 被杀/终端关闭后，旧的 dev 实例不能继续占库；
   // 仅 --dev-server 且未打包时启用，30 秒（6×5s）连续不可用即退出。
-  if (!app.isPackaged && process.argv.includes("--dev-server")) startDevServerWatchdog();
+  if (devServer.isDevServerMode(app)) startDevServerWatchdog();
   // v48.80（D124 / 设计稿 §9.1）：应用启动后 20 秒后台触发一次学习索引刷新（回调里再查总开关）
   setTimeout(() => {
     if (learnerRefresh.learnerEnabled()) void learnerRefresh.refresh();
@@ -2449,27 +2440,18 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-/** D224：开发模式 watchdog——Vite 已经不在了，旧 dev 实例不应继续占着 SQLite/端口。 */
+/** D224：开发模式 watchdog——Vite 已经不在了，旧 dev 实例不应继续占着 SQLite/端口。
+ *  D239：探测窗口实际连接的 dev server 地址（electron/devServer.js），不再写死 localhost:5173。 */
 function startDevServerWatchdog() {
-  let misses = 0;
-  let stopped = false;
-  const timer = setInterval(() => {
-    const req = http.get("http://localhost:5173/", { method: "HEAD", timeout: 2000 }, (res) => {
-      res.resume();
-      misses = 0;
-    });
-    req.on("timeout", () => req.destroy());
-    req.on("error", () => {
-      misses += 1;
-      if (!stopped && misses >= 6) {
-        stopped = true;
-        appLog.log("INFO", "app", "dev server unavailable; quitting stale dev instance");
-        app.quit();
-      }
-    });
-  }, 5000);
-  timer.unref?.();
-  app.on("will-quit", () => clearInterval(timer));
+  const url = devServer.devServerUrl();
+  const stop = devServer.startWatchdog({
+    url,
+    onGone: () => {
+      appLog.log("INFO", "app", `dev server unavailable (${url}); quitting stale dev instance`);
+      app.quit();
+    }
+  });
+  app.on("will-quit", stop);
 }
 
 // v36（M8-A）：退出前把日记节流的待落盘内容强制刷盘 + 注销全局快捷键 + 放行捕获窗口关闭

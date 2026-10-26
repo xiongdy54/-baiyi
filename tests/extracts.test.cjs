@@ -489,7 +489,6 @@ app.whenReady().then(async () => {
     fail++;
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 清理失败忽略 */ }
-    app.quit();
-    process.exitCode = fail === 0 ? 0 : 1;
+    app.exit(fail === 0 ? 0 : 1); // D239：app.quit() 恒以 0 退出，process.exitCode 不生效
   }
 });
