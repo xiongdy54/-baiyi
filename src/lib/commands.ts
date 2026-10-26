@@ -5,11 +5,13 @@
 //        → getBinding 取生效键。
 // 分发：window keydown（capture）→ 规范化组合键 → 按 COMMANDS 顺序找「键位匹配 + when() 放行」
 //       的已注册动作执行，命中即 preventDefault + stopPropagation（拦截 Ctrl+A/Ctrl+S 等原生命中）。
-// 安全边界：输入焦点（input/textarea/contentEditable）内绝不劫持（编辑态 Ctrl+Z/Ctrl+A 保持原语义）；
+// 安全边界：输入焦点（文本类 input/textarea/select/contentEditable）内绝不劫持（编辑态 Ctrl+Z/Ctrl+A 保持原语义）；
+//           非文本控件（滑块/复选框/按钮）只让出它自己的原生键（D227，src/lib/keyTarget.ts）；
 //           e.repeat 忽略（长按不连发）；抑制集合非空时全部放行（设置弹窗/键位捕获期间）。
 import { settingsStore } from "./settings";
 import { t } from "./i18n";
 import { isImeComposing } from "./ime";
+import { isTextEntryTarget, isNativeControlKey, isInModal } from "./keyTarget";
 
 export interface CommandDef {
   id: string;
@@ -200,15 +202,18 @@ function dispatchKey(e: ComboInput & { repeat?: boolean; target?: unknown }): bo
   // 批次 D（D-TEST-13）：本文件开头与指南 §9.1 M4 都把「输入焦点内绝不劫持」写成硬约束，
   // 但分发此前没有任何焦点判断——焦点在 INPUT/TEXTAREA/contentEditable 里时一律放行给原生行为。
   // target 用 unknown：真实 KeyboardEvent 的 EventTarget 与测试投喂的字面量对象都能传进来。
-  const t = e.target as { tagName?: string; isContentEditable?: boolean; closest?: (sel: string) => Element | null } | null | undefined;
-  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return false;
+  // v49.56 / D227：「在打字」只认文本类 input / textarea / select / contentEditable（isTextEntryTarget）；
+  // 滑块、复选框等非文本控件不再整体屏蔽快捷键——拖完优先级滑块后空格 / Z 照常生效，
+  // 只把该控件自己的原生键（滑块方向键、键盘聚焦按钮的回车/空格）让给控件（isNativeControlKey）。
+  if (isTextEntryTarget(e.target)) return false;
   // A-12（审计）：焦点在**模态子树内**时，页面命令一律不命中。
   // 背景：install() 把 keydown 挂在 window 的**捕获相**（第三参 true），模态组件自己写
   // stopPropagation 也来不及；而全仓只有设置模态调过 pushSuppress。
   // 实测：对比卡向导开着时按「1」，背后那张看不见的卡被评了分（reps 0→1、队列 3→2、本轮 0→1）。
   // 用 closest 判一次即覆盖全部 8 个模态，不必逐个模态接线。
-  if (t && typeof t.closest === "function" && t.closest('[role="dialog"],[aria-modal="true"]')) return false;
+  if (isInModal(e.target)) return false;
   if (e.repeat) return false;
+  if (isNativeControlKey(e)) return false;
   const combo = eventToCombo(e);
   if (!combo) return false;
   for (const def of COMMANDS) {

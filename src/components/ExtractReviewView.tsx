@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isImeComposing } from "../lib/ime";
+import { isTextEntryTarget, isNativeControlKey } from "../lib/keyTarget";
 import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import { useSelectionBarStyle } from "../lib/selectionBarSettings";
@@ -681,9 +682,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isImeComposing(e)) return; // 组字中的 Enter/Esc/空格属于输入法，不推进调度
-      const t = e.target as HTMLElement | null;
-      const tag = (t?.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select" || t?.isContentEditable) return;
+      // v49.56 / D227：只有真正在打字（文本框 / 文本区 / 下拉框 / 可编辑区）才让路；焦点停在优先级
+      // 滑块等非文本控件上时，空格 / 回车 / Z 照常生效，只把滑块方向键等原生键留给控件
+      if (isTextEntryTarget(e.target) || isNativeControlKey(e)) return;
       if (viewing) {
         if (e.key === "Escape") {
           e.preventDefault();
