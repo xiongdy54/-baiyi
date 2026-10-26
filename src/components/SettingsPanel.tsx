@@ -1174,7 +1174,7 @@ function TagsBlock() {
   );
 }
 
-// ---------- 摘录复习（v48.22，D58/§6.8）：并入复习队列 / 混编模式 / 推送引擎 ----------
+// ---------- 摘录复习（v48.22，D58/§6.8）：复习方式（v49.61 / D232：分开处理 / 混合复习）/ 混编模式 / 推送引擎 ----------
 // 实验项必须带「实验功能 · 早期开发阶段」标识与说明（用户口径）；切换推送引擎为**无损**操作
 // （每引擎私有子空间互不覆盖，A→B→A 往返逐字段等值，指南 §6.8-4）。
 function ExtractReviewSection() {
@@ -1223,31 +1223,36 @@ function ExtractReviewSection() {
     <SettingsSection id="sec-extracts" title={T("摘录复习")}>
       {cfg && (
         <>
+          {/* v49.61 / D232：「并入复习队列」开关改为二选一的「复习方式」（存储键不变：app.extracts.mergeIntoReview） */}
           <div className="settings-row">
             <span className="settings-row-label">
-              {T("并入复习队列（传统 SuperMemo 方式）")}
-              <SettingsInfo label={T("并入复习队列")}>{T("开启后复习时按混编规则推送摘录卡，可就地处理；关闭时摘录在顶栏「摘录」页连续处理。")}</SettingsInfo>
+              {T("复习方式")}
+              <SettingsInfo label={T("复习方式")}>
+                {T("分开处理：闪卡在「复习」页、摘录在顶栏「摘录」页各自连续处理，两页各自撤销。混合复习：到期摘录按混编规则穿插在「复习」页里与闪卡一起处理，Z 依次撤销最近的评分或摘录操作（与摘录页同一条撤销链）；「摘录」页仍可单独处理摘录。切换不写任何调度状态。")}
+              </SettingsInfo>
             </span>
-            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("摘录并入复习队列")}>
-              <button className={cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: true })}>{T("开")}</button>
-              <button className={!cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: false })}>{T("关")}</button>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("复习方式")} data-review-mode>
+              <button className={!cfg.mergeIntoReview ? "active" : ""} data-mode="separate" onClick={() => void update({ mergeIntoReview: false })}>{T("分开处理")}</button>
+              <button className={cfg.mergeIntoReview ? "active" : ""} data-mode="mixed" onClick={() => void update({ mergeIntoReview: true })}>{T("混合复习（SuperMemo 式）")}</button>
             </div>
           </div>
-          <div className="settings-row">
-            <span className="settings-row-label">
-              {T("混编规则")}
-              <SettingsInfo label={T("混编规则")}>{T("切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。")}</SettingsInfo>
-            </span>
-            <Dropdown
-              value={cfg.interleave}
-              align="left"
-              options={[
-                { value: "quota-1-4", label: T("上限 1:4（每 4 张卡至多 1 条摘录，SuperMemo 口径）") },
-                { value: "by-due", label: T("按到期时间自然混排") }
-              ]}
-              onChange={(v) => void update({ interleave: v as InterleaveMode })}
-            />
-          </div>
+          {cfg.mergeIntoReview && (
+            <div className="settings-row" data-interleave-row>
+              <span className="settings-row-label">
+                {T("混编规则")}
+                <SettingsInfo label={T("混编规则")}>{T("切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。")}</SettingsInfo>
+              </span>
+              <Dropdown
+                value={cfg.interleave}
+                align="left"
+                options={[
+                  { value: "quota-1-4", label: T("上限 1:4（每 4 张卡至多 1 条摘录，SuperMemo 口径）") },
+                  { value: "by-due", label: T("按到期时间自然混排") }
+                ]}
+                onChange={(v) => void update({ interleave: v as InterleaveMode })}
+              />
+            </div>
+          )}
           <div className="settings-row">
             <span className="settings-row-label">
               {T("摘录推送引擎")}

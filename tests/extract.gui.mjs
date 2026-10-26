@@ -260,11 +260,11 @@ try {
   check("设置页存在「摘录复习」区块", so.ex === true, secs);
   check("设置页存在「每日上限」区块", so.lim === true, secs);
 
-  // 开启「并入复习队列」→ 落盘可见
-  await cdp.eval(`(() => { const s = document.querySelector("#sec-extracts"); const b = [...s.querySelectorAll("button")].find((x) => x.textContent.trim() === "开"); b?.click(); return !!b; })()`);
+  // 复习方式选「混合复习（SuperMemo 式）」→ 落盘可见（v49.61 / D232：原「并入复习队列」开 / 关改为二选一）
+  await cdp.eval(`(() => { const b = document.querySelector('#sec-extracts [data-review-mode] [data-mode="mixed"]'); b?.click(); return !!b; })()`);
   await wait(1200);
   const savedMerge = await cdp.eval(`(async () => { const v = await window.settingsAPI.get("app", "extracts"); return JSON.stringify(v || {}); })()`);
-  check("并入复习队列开关落盘（mergeIntoReview=true）", String(savedMerge).includes('"mergeIntoReview":true'), savedMerge);
+  check("复习方式「混合复习」落盘（mergeIntoReview=true）", String(savedMerge).includes('"mergeIntoReview":true'), savedMerge);
 
   // 硬边界：把复习上限设成 1（新卡上限默认 20 ⇒ 1 < 20×5）→ 必须被拒且不落盘
   const setNum = (idx, val) => `(() => {
@@ -508,6 +508,10 @@ try {
     String(mergedEdited).includes("合并分支已编辑"),
     `DB=${String(mergedEdited).slice(0, 60)} | editor=${mEdit.editor}`
   );
+  // D232：编辑提交后卡面读态立即显示新正文（原实现不回写当前条，读态仍是旧文直到换条）
+  await wait(600);
+  const mergedFaceText = await cdp.eval(`(() => (document.querySelector(".review-wrap .extract-face-body")?.textContent || "").slice(0, 80))()`);
+  check("合并复习：编辑提交后卡面显示新正文（不必换条）", String(mergedFaceText).includes("合并分支已编辑"), mergedFaceText);
 
   // 15) 阅读器两个集中复习按钮（§6.8-8，需求 ⑦）
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);

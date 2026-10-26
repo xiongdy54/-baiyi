@@ -180,11 +180,12 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "已保存，各界面即时生效。": "Saved. All views update immediately.",
 
   // —— 摘录复习 / 每日上限 ——
-  "并入复习队列": "Merge into review queue",
-  "并入复习队列（传统 SuperMemo 方式）": "Merge extracts into review (classic SuperMemo way)",
-  "开启后复习时按混编规则推送摘录卡，可就地处理；关闭时摘录在顶栏「摘录」页连续处理。":
-    "When on, extract cards are pushed during review by the interleaving rules and handled in place; when off, extracts are processed continuously on the \"Extracts\" page.",
-  "摘录并入复习队列": "Merge extracts into review",
+  "复习方式": "Review mode",
+  "分开处理": "Separate",
+  "混合复习（SuperMemo 式）": "Mixed (SuperMemo style)",
+  "分开处理：闪卡在「复习」页、摘录在顶栏「摘录」页各自连续处理，两页各自撤销。混合复习：到期摘录按混编规则穿插在「复习」页里与闪卡一起处理，Z 依次撤销最近的评分或摘录操作（与摘录页同一条撤销链）；「摘录」页仍可单独处理摘录。切换不写任何调度状态。":
+    "Separate: cards are reviewed on the \"Review\" page and extracts on the \"Extracts\" page, each with its own undo. Mixed: due extracts are interleaved into the \"Review\" session by the interleaving rule and handled together with cards; Z undoes the most recent grade or extract action in order (the same undo chain as the Extracts page). The \"Extracts\" page can still process extracts on their own. Switching writes no scheduling state.",
+  "撤销摘录操作": "Undo extract action",
   "混编规则": "Interleaving rule",
   "切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。":
     "Switching writes no scheduling state: un-released extracts keep maturing and appear immediately after the switch.",
@@ -929,7 +930,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "与今日已放行的「{front}」同源": "Sibling of \"{front}\", released earlier today",
   "与今日已放行的同源卡同源": "Sibling of a card released earlier today",
   "同源暂缓 {n} 张（明日自动解封）": { one: "{n} sibling card held back (lifts automatically tomorrow)", other: "{n} sibling cards held back (lift automatically tomorrow)" },
-  "摘录 · 合并复习": "Extracts · merged review",
+  "摘录 · 混合复习": "Extracts · mixed review",
   "{n} 张已复习": { one: "{n} card reviewed", other: "{n} cards reviewed" },
   "今日复习进度": "Today's review progress",
   "到期卡片已清空，休息一下。": "Due cards cleared — take a break.",
