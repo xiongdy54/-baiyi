@@ -3902,14 +3902,17 @@ function undoLast() {
         continue;
       }
       return withTransaction(() => {
+        // v49.55 / D226：回带被复原的摘录 id（摘录页据此把撤销召回的那条钉为当前卡）
+        const extractIds = [];
         for (const op of ops) {
           const row = readExtractRowAny(op.extract_id);
           if (!row) continue;
           restoreExtractSnapshot(row, JSON.parse(op.before_json));
           db.run("DELETE FROM extract_ops WHERE id = ?", [op.id]);
+          if (!extractIds.includes(op.extract_id)) extractIds.push(op.extract_id);
         }
         db.run("DELETE FROM op_journal WHERE seq = ?", [Number(tail.seq)]);
-        return { ok: true, kind: "extract_op", count: ops.length, opType: ops[0].op_type };
+        return { ok: true, kind: "extract_op", count: ops.length, opType: ops[0].op_type, extractIds };
       });
     }
     db.run("DELETE FROM op_journal WHERE seq = ?", [Number(tail.seq)]);

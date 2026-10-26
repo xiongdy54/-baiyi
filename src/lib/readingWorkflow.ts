@@ -331,11 +331,23 @@ export interface UndoInfo {
   source?: "legacy";
 }
 
+export interface UndoLastResult {
+  ok: boolean;
+  kind?: "card_grade" | "extract_op" | string;
+  reason?: string;
+  count?: number;
+  opType?: string | null;
+  extractIds?: string[];
+  card?: unknown;
+  rating?: string;
+}
+
 /** 跨类撤销（§6.8-7）：Ctrl+Z 撤销最近一次操作——卡片评分或摘录操作由 journal 决定 */
 export const undoApi = {
-  async last(): Promise<{ ok: boolean; kind?: string; reason?: string; count?: number; opType?: string | null }> {
+  /** kind＝被撤销的那一类；extract_op 回带 extractIds（被复原的摘录，D226）；card_grade 回带 card（复原后的卡） */
+  async last(): Promise<UndoLastResult> {
     if (!window.undoAPI) return { ok: false, reason: t("API 不可用") };
-    return (await window.undoAPI.last()) as { ok: boolean; kind?: string; reason?: string };
+    return (await window.undoAPI.last()) as UndoLastResult;
   },
   async info(): Promise<UndoInfo> {
     if (!window.undoAPI) return { available: false, kind: null };
