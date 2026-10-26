@@ -3,6 +3,8 @@
 // onDocChanged 计数，随后等 260ms 确认 listener 仍会按原语义上报（两条路径都在）。
 // D230：打开即规范化的内部事务（标题补 id 等，addToHistory=false）不算修改——无修改提交必须是 null，
 // 「改了又改回」也是 null；真实修改照常提交。
+// D231：卸载兜底提交在清理当下取文本——工具条插入后立即卸载（换卡/宿主退编辑）不丢最后的输入；
+// StrictMode 模拟卸载仍不误提交（D218 回归守护）。
 // @runtime: system-node  @tier: 2  @gui: false  @id: MDDIRTY  @timeout: 120
 // 运行：node tests/markdown-editor-commit.test.cjs
 const fs = require("fs");
@@ -179,7 +181,7 @@ export async function run(root) {
       check(`${name}：首块插字仍同步上报`, p.afterEdit > p.afterOpen && String(p.md).includes("X"), JSON.stringify(p));
     }
 
-    console.log("== D230 组件层提交语义 ==");
+    console.log("== D230/D231 组件层提交语义 ==");
     const HEAD = "# 标题\n\n正文";
     const u = await mod.runComponent(root(), HEAD, "untouched");
     check("含标题正文无修改 commit → null（不误报保存）", u.calls.length === 1 && u.calls[0] === null, JSON.stringify(u.calls));
@@ -188,6 +190,11 @@ export async function run(root) {
     const ed = await mod.runComponent(root(), HEAD, "edit");
     // 「代码块」把光标所在块（标题）转成代码块＝真实修改
     check("真实修改照常提交（标题块转为代码块）", ed.button && ed.calls.length === 1 && /```\n标题\n```/.test(String(ed.calls[0])), JSON.stringify(ed));
+    const un = await mod.runComponent(root(), "第一段正文", "unmountNow");
+    check("插入后立即卸载：兜底提交含刚插入的代码块（不丢最后输入）", un.button && un.calls.length === 1 && /```/.test(String(un.calls[0])), JSON.stringify(un));
+    const st = await mod.runComponent(root(), "第一段正文", "strict");
+    check("StrictMode 挂载不误提交（D218 守护）", st.strictMountCalls === 0, JSON.stringify(st));
+    check("StrictMode 下插入后立即卸载仍提交新内容", st.button && st.calls.length === 1 && /```/.test(String(st.calls[0])), JSON.stringify(st));
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 临时目录 */ }
   }
