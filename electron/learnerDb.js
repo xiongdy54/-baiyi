@@ -217,6 +217,28 @@ async function all(sql, params) {
   return allSync(sql, params || []);
 }
 
+/**
+ * D234（v49.63）：清空词项三表（lexemes / unit_lex / lexeme_states）与 mine_count:<lang> 缓存，
+ * 并在同一事务里写入一条 lm_meta（母语指纹）——失败显式 ROLLBACK，整体保持原状。
+ * 与打开时 icu_version / lex_version 不一致的清表同口径：词项 id 只在 learner.db 内部引用，
+ * 查词 / 标记 / 定级事件与词汇卡都按 lang:key 关联，清表后下一次 stepLex 全量重建不丢用户数据。
+ */
+async function resetLexIndex(metaKey, metaValue) {
+  await open();
+  db.run("BEGIN IMMEDIATE");
+  try {
+    db.run("DELETE FROM lexemes");
+    db.run("DELETE FROM unit_lex");
+    db.run("DELETE FROM lexeme_states");
+    db.run("DELETE FROM lm_meta WHERE key LIKE 'mine_count:%'");
+    if (metaKey) setMetaSync(metaKey, metaValue);
+    db.run("COMMIT");
+  } catch (err) {
+    try { db.run("ROLLBACK"); } catch { /* 忽略 */ }
+    throw err;
+  }
+}
+
 async function getMeta(key) {
   await open();
   return readMetaRaw(key);
@@ -281,4 +303,4 @@ async function snapshotTo(destPath) {
   return destPath;
 }
 
-module.exports = { open, save, run, replaceBatch, all, getMeta, setMeta, reset, saveOnQuit, close, snapshotTo, configure };
+module.exports = { open, save, run, replaceBatch, all, getMeta, setMeta, resetLexIndex, reset, saveOnQuit, close, snapshotTo, configure };

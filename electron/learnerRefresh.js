@@ -69,6 +69,16 @@ function learnerSettings() {
   return { enabled, nativeLangs, nativeConfirmed: l.nativeConfirmed === true, recCount, effectiveNativeLangs, locale: learnerLocale() };
 }
 
+// D234（v49.63）：母语生效值指纹（去重排序后逗号拼接）。stepLex 与 lm_meta 中上次建词项时的指纹比对，
+// 不同 ⇒ 清空词项三表后按新母语的语言轨道全量重建（之前按旧母语建的词项不残留）。
+const LEX_NATIVE_META_KEY = "lex_native_langs";
+function nativeLangsFingerprint(langs) {
+  return [...new Set((Array.isArray(langs) ? langs : []).map((x) => String(x)))].sort().join(",");
+}
+function currentNativeFingerprint() {
+  return nativeLangsFingerprint(learnerSettings().effectiveNativeLangs);
+}
+
 // 界面语言（设计稿 §11.9-2）：v49.8（D182）起随 app.language（主进程 i18n 状态，settings:set 写路径同步）；
 // lmStrings.pick() 消费该值（zh-CN/zh→zh、en/ja 查表、zh-TW 深转换、未知回落 zh）
 function learnerLocale() {
@@ -89,7 +99,22 @@ function init({ extractPdfPages: fn } = {}) {
   if (typeof fn === "function") extractPdfPages = fn;
 }
 
+/** D234：主进程 settings:set 写入 app.learner 后母语生效值变化时调用——后台补一轮刷新
+ *  （stepLex 比对指纹后清空词项并按新母语重建）。总开关关闭时不跑（重新打开后首轮刷新照样比对重建）。 */
+function requestNativeRebuild() {
+  if (!learnerEnabled()) return false;
+  if (running) {
+    rerunPending = true;
+    return true;
+  }
+  void refresh({ force: true });
+  return true;
+}
+
 const yieldNow = () => new Promise((r) => setImmediate(r));
+
+// D234：母语改动时若已有一轮刷新在跑（可能已过 stepLex 读设置的时点），该轮结束后补跑一轮
+let rerunPending = false;
 
 async function refresh({ force = false } = {}) {
   if (running) return running;
@@ -129,6 +154,12 @@ async function refresh({ force = false } = {}) {
     } finally {
       running = null; // 单飞解锁（设计稿 §9.1：finally 里置空，否则后续刷新拿到旧 promise）
       status.indexing = false;
+      if (rerunPending) {
+        rerunPending = false;
+        setImmediate(() => {
+          if (learnerEnabled()) void refresh({ force: true });
+        });
+      }
       // 总开关关闭导致的全程未启动＝真 no-op（不落盘，§13.5 的 mtime 断言）；
       // 中途停止则已完成的步骤照常落盘（设计稿 §9.1 失败处理）
       if (anyStepRan) {
@@ -880,6 +911,21 @@ async function stepLex() {
   await learnerDb.open();
   const facts = await loadFacts();
   const settings = learnerSettings();
+  // D234（v49.63）：母语生效值与上次建词项时不同 ⇒ 单事务清空词项三表（+ mine_count 缓存）并记下新指纹，
+  // 下面按新母语的语言轨道全量重建。无记录（升级后首轮 / 重建索引后）只记录不清表——此时词项要么为空，
+  // 要么按当前母语建成；旧母语遗留的零计数词项由下方「回收孤儿词项」清掉。
+  const nativeFp = nativeLangsFingerprint(settings.effectiveNativeLangs);
+  const prevNativeFp = await learnerDb.getMeta(LEX_NATIVE_META_KEY);
+  if (prevNativeFp !== nativeFp) {
+    if (prevNativeFp !== null) {
+      await learnerDb.resetLexIndex(LEX_NATIVE_META_KEY, nativeFp);
+      lexUnitCache = new Map();
+      lexStatsCache = new Map();
+      lexStatsFinal = new Map();
+    } else {
+      await learnerDb.setMeta(LEX_NATIVE_META_KEY, nativeFp);
+    }
+  }
   const trackRows = dbModule.listLearnerTracks();
   const usingProposals = trackRows.length === 0;
   const udcLabels = {};
@@ -963,6 +1009,11 @@ async function stepLex() {
     lexCount += 1;
     if (lexCount % 200 === 0) await yieldNow();
   }
+
+  // D234：回收孤儿词项——所属单元都已移出语言轨道 / 删除后 unit_count 归零的词项行删掉，
+  // 不再以 0 计数残留进 lexemes / lexeme_states / lexStats（unit_count 随 unit_lex 增删精确维护：
+  // 写入 +1、删行 −1，词项版本 / ICU 变化走整表清空，不会把仍被引用的词项计成 0）
+  await learnerDb.run("DELETE FROM lexemes WHERE unit_count <= 0");
 
   // 无停用词表语言的「频率替代」（§6.2）：每语言 total_count 前 50 现算
   const allLexemes = await learnerDb.all("SELECT * FROM lexemes ORDER BY id ASC");
@@ -2354,6 +2405,8 @@ async function lexStatsFor({ lang: langRaw } = {}) {
 
 module.exports = {
   refresh,
+  requestNativeRebuild,
+  currentNativeFingerprint,
   buildSnapshot,
   getStatus,
   statusForIpc,

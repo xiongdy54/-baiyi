@@ -349,10 +349,14 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
       dailyLimit: Number.isFinite(lim) && lim >= 0 ? lim : 30
     };
   }
+  // D234（v49.63）：写 app.learner 前记下母语生效值指纹，写后比对——变了就后台补一轮学习索引刷新，
+  // stepLex 据 lm_meta 指纹清空旧母语下建的词项并按新母语重建（改母语即生效，不等 STALE_MS 过期）
+  const nativeFpBefore = scope === "app" && key === "learner" ? learnerRefresh.currentNativeFingerprint() : null;
   const all = readSettings();
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
   writeSettings(all);
+  if (nativeFpBefore !== null && learnerRefresh.currentNativeFingerprint() !== nativeFpBefore) learnerRefresh.requestNativeRebuild();
   // C-31：设置变更广播——独立窗口（lens / 制卡台 / 捕获）开着时即时跟随换肤 / 动效 / 强调色，
   // 不再只靠「每次呼出重读」。单向推送（非 invoke 通道，不计入 IPC 注册清单，先例＝D123 / D180 / D197；
   // 事件名与载荷形状见此：`settings:changed`，载荷 `{ scope, key }`，发送给除发起写入之外的所有窗口；
