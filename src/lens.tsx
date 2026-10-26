@@ -13,7 +13,7 @@ import { WindowSkin } from "./skins/WindowSkin";
 import { createLensKernel } from "./lib/lensBridge";
 import { installThemePluginBridge } from "./lib/themePlugins";
 import { installMindmapBridge } from "./lib/mindmap";
-import { initLocale, useT } from "./lib/i18n";
+import { loadLocale, useT } from "./lib/i18n";
 import { settingsStore } from "./lib/settings";
 import "./styles/layers.css"; // v49.0 / D170：层序预注册，先于 theme.css
 import "./theme.css";
@@ -79,8 +79,8 @@ installThemePluginBridge(); // 主题插件跟随（与主窗口 / 制卡台同�
 installMindmapBridge(); // 主进程 mindmap:delta / mindmap:changed → EventBus（画布增量与版本切换同源）
 void applyCaptureAppearance()
   .then(() => settingsStore.get<string>("app", "language", "zh-CN"))
-  .then((lang) => {
-    initLocale(lang); // 首绘前装载界面语言，零闪烁
+  .then((lang) => loadLocale(lang)) // 首绘前装载界面语言（D237：词典/转换器按需装载，就绪后再首绘），零闪烁
+  .then(() => {
     createRoot(document.getElementById("root")!).render(
       <React.StrictMode>
         <LensWindow />

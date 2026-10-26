@@ -2,6 +2,7 @@ import "./lib/cspReport";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import { ensureLocaleResources, getLocale } from "./lib/i18n";
 
 // 全局错误边界：渲染异常显示错误信息，绝不允许白屏且无提示
 class RootErrorBoundary extends React.Component<
@@ -39,17 +40,21 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-try {
-  createRoot(document.getElementById("root")!).render(
-    <React.StrictMode>
-      <RootErrorBoundary>
-        <App />
-      </RootErrorBoundary>
-    </React.StrictMode>
-  );
-} catch (err) {
-  document.body.textContent = `启动失败：${err instanceof Error ? err.message : String(err)}`;
-}
+// v49.66（D237）：首绘前先装好缓存语言的资源（en/ja 词典、zh-TW 转换器均按需装载，zh-CN 即刻就绪）——
+// 启动画面与首屏不闪 zh-CN 原文；ensureLocaleResources 永不 reject（装载失败按缺译回落原文继续启动）。
+void ensureLocaleResources(getLocale()).then(() => {
+  try {
+    createRoot(document.getElementById("root")!).render(
+      <React.StrictMode>
+        <RootErrorBoundary>
+          <App />
+        </RootErrorBoundary>
+      </React.StrictMode>
+    );
+  } catch (err) {
+    document.body.textContent = `启动失败：${err instanceof Error ? err.message : String(err)}`;
+  }
+});
 
 // v48.75（D119）：渲染层错误经 IPC 转发主进程统一写盘（logs:rendererError，fire-and-forget
 // send 不回执——报告失败不触发新错误）。载荷字段白名单在主进程侧归一（appLog.logRendererError），

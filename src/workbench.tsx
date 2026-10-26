@@ -11,7 +11,7 @@ import { WindowSkin } from "./skins/WindowSkin"; // C-31：独立窗口外观挂
 // v48.89（D132 §6.4）：制卡台窗口跟随主题插件（主 preload 全量桥，随 preload.js 注入）
 import { installThemePluginBridge } from "./lib/themePlugins";
 import { eventBus } from "./lib/eventbus";
-import { initLocale, useT } from "./lib/i18n";
+import { loadLocale, useT } from "./lib/i18n";
 import { settingsStore } from "./lib/settings";
 import "./styles/layers.css"; // v49.0 / D170：层序预注册，先于 theme.css
 import "./theme.css";
@@ -63,8 +63,8 @@ function WorkbenchWindow() {
 installThemePluginBridge(); // v48.89（D132）：主题插件跟随（与 applyCaptureAppearance 同期首拉）
 void applyCaptureAppearance()
   .then(() => settingsStore.get<string>("app", "language", "zh-CN"))
-  .then((lang) => {
-    initLocale(lang); // v49.8（D182）：首绘前装载界面语言
+  .then((lang) => loadLocale(lang)) // v49.8（D182）：首绘前装载界面语言（D237：资源按需装载，就绪后再首绘）
+  .then(() => {
     createRoot(document.getElementById("root")!).render(
       <React.StrictMode>
         <WorkbenchWindow />

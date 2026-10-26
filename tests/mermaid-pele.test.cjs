@@ -7,6 +7,8 @@
 //   C2 恶意构造不产生 <script>（pele 安全承诺的下游抽查）；
 //   E 离线边界：images:false 不输出远程 <image>；javascript: 链接被过滤；
 //   D 工具条起手模板（mermaidStarter.ts，从源码正则提取保单一事实源）可渲染。
+//   F（D237）读态走 pele/lazy：图型模块按需装载——装载前未注册、装载后同步 render 可用；
+//     教程 33 种图型逐一经 load(detectType) 装载后渲染与全量入口输出逐字相同；读态组件只引 pele/lazy。
 const path = require("path");
 const fs = require("fs");
 const ROOT = path.resolve(__dirname, "..");
@@ -70,6 +72,32 @@ function check(name, cond, actual) {
     const r = render(starter, { idPrefix: "t-" });
     check("D1 起手模板渲染为 flowchart SVG", r.type === "flowchart" && r.svg.startsWith("<svg"), r.type);
   }
+
+  console.log("== F 按需图型装载（D237，pele/lazy） ==");
+  const lazyMod = await import("pele/lazy");
+  check("F0 装载前 flowchart 未注册（核心不含图型）", lazyMod.registered("flowchart") === false, lazyMod.registered("flowchart"));
+  let lazyThrew = null;
+  try { lazyMod.render("flowchart TD\n  A --> B", { idPrefix: "z-" }); } catch (e) { lazyThrew = e && e.code; }
+  check("F1 未装载就同步 render 抛 unsupported-diagram（读态组件因此先 load 再渲染）", lazyThrew === "unsupported-diagram", lazyThrew);
+  let mismatch = null;
+  const lazyTypes = new Set();
+  for (const b of blocks) {
+    const ty = lazyMod.detectType(b);
+    if (ty) await lazyMod.load(ty);
+    try {
+      const a = lazyMod.render(b, { idPrefix: "t-" });
+      const f = render(b, { idPrefix: "t-" });
+      lazyTypes.add(a.type);
+      if (a.svg !== f.svg) { mismatch = { head: b.trim().split("\n")[0], why: "svg 不同" }; break; }
+    } catch (e) {
+      mismatch = { head: b.trim().split("\n")[0], err: String(e && e.message).split("\n")[0] };
+      break;
+    }
+  }
+  check("F2 教程每个围栏经按需装载后渲染，与全量入口输出逐字相同", mismatch === null, JSON.stringify(mismatch));
+  check("F3 按需装载覆盖 33 种图型", lazyTypes.size === 33, lazyTypes.size);
+  check("F4 读态渲染器只引 pele/lazy（不再整包引入 33 种图型）", /from "pele\/lazy"/.test(implSrc) && !/from "pele"/.test(implSrc), implSrc.slice(0, 200));
+  check("F5 读态渲染器按图型 load() 后再渲染，装载失败回落源码块", /load\(type\)/.test(implSrc) && /图表组件加载失败，已显示源代码/.test(implSrc), "");
 
   console.log(`\n${pass} 通过 / ${fail} 失败`);
   process.exit(fail ? 1 : 0);

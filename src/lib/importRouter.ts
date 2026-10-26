@@ -2,8 +2,8 @@
 // 路由表（决策 D27）：epub/html 渲染层解析（需 DOM/DOMParser）；docx/txt/md/pdf 主进程转换（路径入参）；
 // mobi/azw3/azw/fb2/fbz/cbz 原文件入库（foliate 内核直读，扩展名保真）。
 // 批量语义：逐文件独立尝试，单个失败不中断整批；返回聚合结果供 UI 报告。
-import { decodeHtmlBytes, htmlToMarkdown } from "./htmlImport";
-import { parseEpubBytes } from "./epub";
+// v49.66（D237）：EPUB（@likecoin/epub-ts + turndown + JSZip）与 HTML（Readability + turndown）解析管线
+// 只在真的导入这两类文件时按需装载——不再随主窗口首屏打包（~0.7MB）。
 import { libraryApi } from "./library";
 
 import { kindForFilename, type ImportKind } from "./importKinds";
@@ -30,6 +30,7 @@ export async function importOne(picked: PickedFile): Promise<ImportOutcome> {
     if (kind === "epub") {
       const bytes = await libraryApi.readFileBytes(picked.path);
       if (!bytes) return { name, ok: false, error: "读取文件失败" };
+      const { parseEpubBytes } = await import("./epub");
       const parsed = await parseEpubBytes(name, bytes);
       const ok = await libraryApi.createFromEpub(parsed);
       return ok ? { name, ok: true, title: parsed.title } : { name, ok: false, error: "建册失败" };
@@ -37,6 +38,7 @@ export async function importOne(picked: PickedFile): Promise<ImportOutcome> {
     if (kind === "html") {
       const bytes = await libraryApi.readFileBytes(picked.path);
       if (!bytes) return { name, ok: false, error: "读取文件失败" };
+      const { decodeHtmlBytes, htmlToMarkdown } = await import("./htmlImport");
       const { title, markdown } = htmlToMarkdown(decodeHtmlBytes(bytes));
       if (!markdown.trim()) return { name, ok: false, error: "未能提取到正文内容" };
       const created = await libraryApi.createFromHtml({ path: picked.path, name, title, markdown });

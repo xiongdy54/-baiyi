@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode, type SetStateAction } from "react";
 import { flushSync } from "react-dom";
 import "./styles/layers.css"; // v49.0 / D170：层序预注册，必须先于 theme.css
 import "./theme.css";
@@ -11,7 +11,10 @@ import CardBrowser from "./components/CardBrowser";
 import PasteMaterialModal from "./components/PasteMaterialModal";
 // 选单「导入文件」的进度/报告模态（挂载即开文件选择器）
 import ImportFilesModal from "./components/ImportFilesModal";
-import SettingsPanel, { type ThemeMode } from "./components/SettingsPanel";
+import type { ThemeMode } from "./components/SettingsPanel";
+// v49.66（D237）：设置面板（全部设置分区，~0.1MB）按需装载——点开齿轮才解析；首开 Suspense 回落为空一帧，
+// 面板自身的入场动效照常播放（不是跨视图切换，不经 View Transitions 快照）
+const SettingsPanel = lazy(() => import("./components/SettingsPanel"));
 import Dashboard from "./components/dashboard/Dashboard";
 // v48.80（D124）：数据页顶部「下一步」面板（不是 WidgetDef，不进布局编辑）；v48.81（D125）迁为顶栏独立页签页
 import NextStepsPanel from "./components/learner/NextStepsPanel";
@@ -29,7 +32,8 @@ import { installActivityStore, seedFromRuns } from "./lib/activity";
 import { ensureDismissalsLoaded, isDismissed } from "./lib/activityDismiss";
 import { BackgroundActivity } from "./components/BackgroundActivity";
 import { readingWorkflow, parseContextRef, type ExtractSpan } from "./lib/readingWorkflow";
-import { buildSyntheticEpub, mediaTypeForFilename, type SynthImage } from "./lib/epub";
+// D237：合成 EPUB 管线（markdown-it + JSZip + KaTeX 渲染）只在打开粘贴/Word/TXT/MD 书时按需装载（见 loadReaderBook）
+import type { SynthImage } from "./lib/epub";
 // v49.0 / D170：皮肤引擎 v2——清单注册表 + SkinHost（body 类/CSS 注入/层渲染归宿主管）
 import { DEFAULT_SKIN_ID, loadSkin } from "./skins";
 import { SkinHost } from "./skins/SkinHost";
@@ -39,8 +43,8 @@ import { readAppearance, resolveThemeMode } from "./skins/runtime/readAppearance
 import { motionClass, resolveMotion, type MotionSetting } from "./skins/runtime/motionLevel";
 import type { MotionLevel } from "./skins/types";
 import { applyAccent } from "./lib/accentVar";
-// v49.8（D182）：多语言 i18n——initLocale 启动装载 / useT 渲染订阅 / t 自然键翻译
-import { initLocale, useT, t } from "./lib/i18n";
+// v49.8（D182）：多语言 i18n——loadLocale 启动装载（D237：资源按需装载）/ useT 渲染订阅 / t 自然键翻译
+import { loadLocale, useT, t } from "./lib/i18n";
 import { useThemePlugin } from "./lib/themePlugins";
 import FreeWorkbenchHost from "./components/FreeWorkbenchHost";
 import { WB_STATE_EVENT, requestWorkbenchToggle, type WorkbenchState } from "./lib/workbenchLayout";
@@ -213,7 +217,7 @@ export default function App() {
     ])
       .then(async ([ap, lang]) => {
         settled = true;
-        initLocale(lang);
+        await loadLocale(lang); // D237：语言资源按需装载——等词典/转换器就绪再首绘（缓存语言已由 main.tsx 预装，通常即刻返回）
         setTheme(ap.mode);
         setThemeMode(ap.modeSetting); // C-37：原始档一并水合（设置页高亮 / 系统跟随监听开关）
         // v49.0 / D170：首渲染前预加载已保存皮肤在 readAppearance 内完成（失败回落默认）
@@ -404,6 +408,7 @@ export default function App() {
       const file = await libraryApi.readEbookFile(itemId);
       return file && file.bytes.length ? { bytes: file.bytes, name: file.name } : undefined;
     }
+    const { buildSyntheticEpub, mediaTypeForFilename } = await import("./lib/epub");
     let images: SynthImage[] | undefined;
     if (doc.sourceType === "word") {
       const contentImages = await libraryApi.readContentImages(itemId);
@@ -866,18 +871,20 @@ export default function App() {
         />
       )}
       {settingsOpen && (
-        <SettingsPanel
-          theme={theme}
-          themeMode={themeMode}
-          onThemeChange={handleThemeChange}
-          skinId={skinId}
-          onSkinChange={handleSkinChange}
-          accentColor={accentColor}
-          onAccentChange={handleAccentChange}
-          motionSetting={motionSetting}
-          onMotionChange={handleMotionChange}
-          onClose={() => setSettingsOpen(false)}
-        />
+        <Suspense fallback={null}>
+          <SettingsPanel
+            theme={theme}
+            themeMode={themeMode}
+            onThemeChange={handleThemeChange}
+            skinId={skinId}
+            onSkinChange={handleSkinChange}
+            accentColor={accentColor}
+            onAccentChange={handleAccentChange}
+            motionSetting={motionSetting}
+            onMotionChange={handleMotionChange}
+            onClose={() => setSettingsOpen(false)}
+          />
+        </Suspense>
       )}
     </div>
   );

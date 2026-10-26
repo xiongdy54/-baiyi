@@ -1344,6 +1344,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "翻转问答": "Reversed Q&A",
   "填空题": "Cloze",
   "图片挖空": "Image occlusion",
+  "卡片类型": "Card type",
   "翻转问答：一次性创建两张互为翻转的独立问答卡（B 面留空则自动正反互换），各自有独立的复习调度。":
     "Reversed Q&A: creates two independent Q&A cards that flip each other in one go (leave side B empty to swap automatically), each with its own review scheduling.",
   "A 面 · 题面（建议「领域前缀: 问题」）": "Side A · question (suggest \"domain: question\")",
@@ -2095,6 +2096,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "插入图表（Mermaid）": "Insert diagram (Mermaid)",
   "图表语法有误，已显示源代码": "Diagram syntax error — showing source code",
   "正在绘制图表…": "Drawing diagram…",
+  "图表组件加载失败，已显示源代码": "Couldn't load the diagram renderer — showing source code",
   "图表预览": "Diagram preview",
   "撤销（编辑器内历史）": "Undo (editor history)",
   "重做": "Redo",
