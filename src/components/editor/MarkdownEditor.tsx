@@ -1,7 +1,7 @@
 // 全应用统一 Markdown 编辑器（D95 §J.2 组件抽取）：Milkdown 装配 + 提交语义（dirty 守卫/
 // 幂等短路/失焦 Esc 提交/工具条）的通用受控封装。文档模型即 remark AST——「源文 markdown 进 /
 // 源文 markdown 出」是它的原生路径；编辑中零写库，提交由宿主走各自既有落库链（零新写通道）。
-// 工具条 16 钮全部走 commandsCtx 官方命令通道（不自改 DOM）；mousedown preventDefault 不失焦。
+// 工具条 19 钮全部走 commandsCtx 官方命令通道（不自改 DOM）；mousedown preventDefault 不失焦。
 // 形态设置（§J.2「随组件走」）：app.extractEditorToolbar（开关）/ Float（悬浮=选区锚定弹层，§K.3）/
 // Top（钉顶，§K.2）——宿主传 toolbar={false} 整行关闭；不做每面独立的形态键。
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
@@ -14,10 +14,12 @@ import {
   editorViewCtx,
   editorViewOptionsCtx,
   rootCtx,
+  schemaCtx,
   commandsCtx
 } from "@milkdown/kit/core";
 import {
   commonmark,
+  codeBlockSchema,
   createCodeBlockCommand,
   insertHrCommand,
   htmlSchema,
@@ -33,16 +35,17 @@ import {
 import { gfm, insertTableCommand, toggleStrikethroughCommand } from "@milkdown/kit/preset/gfm";
 import { history, redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
-import { $command, $markSchema, $nodeSchema, $remark, getMarkdown } from "@milkdown/kit/utils";
-import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
+import { $command, $markSchema, $nodeSchema, $prose, $remark, getMarkdown } from "@milkdown/kit/utils";
+import { NodeSelection, Plugin, TextSelection } from "@milkdown/kit/prose/state";
 import katex from "katex";
 import remarkMath from "remark-math";
 import { placePopover, type PopoverRect } from "../../lib/popoverPlace";
 import { remarkMark } from "../../lib/editor/markdownOffsetMap";
+import { MERMAID_STARTER } from "./mermaidStarter";
 import {
   GlyphBold, GlyphItalic, GlyphStrike,
   IconCodeInline, IconLink, IconInlineMath, IconQuote, IconUl, IconOl, IconTask, IconTable,
-  IconCodeBlock, IconHr, IconMathBlock, IconMark, IconDetails, IconUndo, IconRedo, IconHeading
+  IconCodeBlock, IconHr, IconMathBlock, IconMark, IconDetails, IconUndo, IconRedo, IconHeading, IconMermaid
 } from "./toolbarIcons";
 import { useExtractEditorToolbar, useExtractEditorToolbarFloat, useExtractEditorToolbarTop } from "../../lib/extractCardSettings";
 import { useT } from "../../lib/i18n";
@@ -178,6 +181,19 @@ const insertMathBlockCommand = $command("InsertExtractMathBlock", (ctx) => () =>
   return true;
 });
 
+/** 图表块（D223）：插入 language=mermaid 的围栏代码块，预填 flowchart 起手模板——编辑态以源码
+ *  形式呈现（与公式块同语义），读态由 ReadMarkdown 管线经 pele 渲染成图。围栏语言也可直接
+ *  键入（commonmark 输入规则 ```mermaid 即建块），此命令只是给一键起点。 */
+const insertMermaidBlockCommand = $command("InsertExtractMermaid", (ctx) => () => (state, dispatch) => {
+  const type = codeBlockSchema.type(ctx);
+  const schema = ctx.get(schemaCtx);
+  const node = type.create({ language: "mermaid" }, schema.text(MERMAID_STARTER));
+  if (dispatch) {
+    dispatch(state.tr.replaceSelectionWith(node));
+  }
+  return true;
+});
+
 /** 任务列表＝无序列表 + 选中 list_item 打上 checked 标记（gfm 预设无任务命令，这是官方命令通道上的最小组合） */
 const setTaskCheckedCommand = $command("SetExtractTaskChecked", () => () => (state, dispatch) => {
   const { from, to } = state.selection;
@@ -204,12 +220,27 @@ export function createExtractEditor(
   defaultValue: string,
   opts?: {
     onMarkdownUpdated?: (ctx: unknown, markdown: string, prevMarkdown: string) => void;
+    /** D224：任何 doc 变更的同步信号（ProseMirror apply 内触发）——listener 的 markdownUpdated
+     *  有 200ms 防抖，快速失焦时不能只靠它置 dirty，否则工具条插入/刚敲的字会被当成「无修改」丢掉。 */
+    onDocChanged?: () => void;
     /** 空文档占位提示（经 ProseMirror 根属性 + CSS ::before 呈现，零依赖） */
     placeholder?: string;
   }
 ): Editor {
   const viewAttrs: Record<string, string> = { class: "extract-prosemirror" };
   if (opts?.placeholder) viewAttrs["data-placeholder"] = opts.placeholder;
+  /** D224：同步脏标记探针——只负责在事务层立即上报，不参与序列化。 */
+  const dirtyProbe = $prose(
+    () =>
+      new Plugin({
+        state: {
+          init: () => null,
+          apply: (tr) => {
+            if (tr.docChanged) opts?.onDocChanged?.();
+          }
+        }
+      })
+  );
   return Editor.make()
     .config((ctx) => {
       ctx.set(rootCtx, root);
@@ -229,7 +260,9 @@ export function createExtractEditor(
     .use(toggleMarkCommand)
     .use(toggleInlineMathCommand)
     .use(insertMathBlockCommand)
+    .use(insertMermaidBlockCommand)
     .use(setTaskCheckedCommand)
+    .use(dirtyProbe)
     .use(history)
     .use(listener);
 }
@@ -300,7 +333,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   ref
 ) {
   const T = useT();
-  /** listener 是否观察到过 doc 变更（提交语义的判据） */
+  /** 提交语义的判据：listener 或 D224 同步事务探针观察到过 doc 变更 */
   const dirtyRef = useRef(false);
   /** 最近一次 listener 序列化结果（卸载阶段编辑器可能已销毁，提交兜底用它） */
   const latestMdRef = useRef<string | null>(null);
@@ -333,6 +366,10 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   const { loading, get } = useEditor(
     (root) =>
       createExtractEditor(root, value, {
+        onDocChanged: () => {
+          // D224：事务层同步置脏（listener 的 markdownUpdated 有 200ms 防抖，快速失焦会漏）
+          dirtyRef.current = true;
+        },
         onMarkdownUpdated: (_ctx, markdown) => {
           dirtyRef.current = true;
           latestMdRef.current = markdown;
@@ -468,7 +505,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- 工具条（16 钮；形态＝dock-bottom / dock-top / float-selection） ----------
+  // ---------- 工具条（19 钮；形态＝dock-bottom / dock-top / float-selection） ----------
   const toolbarOn = useExtractEditorToolbar();
   const toolbarFloat = useExtractEditorToolbarFloat();
   const toolbarTop = useExtractEditorToolbarTop();
@@ -533,7 +570,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   };
 
   /** 工具条按钮（D97 用户指令：统一图标 + 悬停 title 显示功能名称）：
-      行内七（含标注）+ 块级九（含标题下拉/折叠/表格）+ 历史二。tb 钩子保留给测试与样式。 */
+      行内七（含标注）+ 块级十（含标题下拉/折叠/表格/图表）+ 历史二。tb 钩子保留给测试与样式。 */
   const BUTTONS: Array<{ tb: string; title: string; icon: ReactNode; run: () => void; menu?: boolean }> = [
     { tb: "bold", title: T("加粗"), icon: <GlyphBold />, run: () => call(toggleStrongCommand.key) },
     { tb: "italic", title: T("斜体"), icon: <GlyphItalic />, run: () => call(toggleEmphasisCommand.key) },
@@ -552,6 +589,7 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
     { tb: "codeBlock", title: T("代码块"), icon: <IconCodeBlock />, run: () => call(createCodeBlockCommand.key) },
     { tb: "hr", title: T("分隔线"), icon: <IconHr />, run: () => call(insertHrCommand.key) },
     { tb: "mathBlock", title: T("公式块"), icon: <IconMathBlock />, run: () => call(insertMathBlockCommand.key) },
+    { tb: "mermaid", title: T("插入图表（Mermaid）"), icon: <IconMermaid />, run: () => call(insertMermaidBlockCommand.key) },
     { tb: "undo", title: T("撤销（编辑器内历史）"), icon: <IconUndo />, run: () => call(undoCommand.key) },
     { tb: "redo", title: T("重做"), icon: <IconRedo />, run: () => call(redoCommand.key) }
   ];

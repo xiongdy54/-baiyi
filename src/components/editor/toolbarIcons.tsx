@@ -95,6 +95,16 @@ export const IconMathBlock = () => (
   </Svg>
 );
 
+/** 图表（Mermaid）：左上小方块经肘线指向右下小方块（流程图的极简形） */
+export const IconMermaid = () => (
+  <Svg>
+    <rect x="2.5" y="2.5" width="4" height="3.5" {...S} />
+    <rect x="9.5" y="10" width="4" height="3.5" {...S} />
+    <path d="M4.5 6v5.75h2.5" {...S} />
+    <path d="m7.5 10.25 2 1.5-2 1.5" {...S} />
+  </Svg>
+);
+
 /** 标注：斜置荧光笔（笔杆 + 出墨斜面 + 一道被涂亮的线） */
 export const IconMark = () => (
   <Svg>

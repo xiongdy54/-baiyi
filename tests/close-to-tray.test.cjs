@@ -31,16 +31,20 @@ withPlatform("linux", () => {
   ok(closeToTrayEnabled(true) === true, "linux 显式 true → 尊重用户");
   ok(closeToTrayEnabled(false) === false, "linux 显式 false → 尊重用户");
   ok(closeToTrayEnabled("yes") === false, "linux 非布尔杂值 → 视同未设置，按平台默认（关）");
+  ok(closeToTrayEnabled(undefined, { dev: true }) === false, "D224 linux dev 未设置 → 开发模式直接退出");
 });
 withPlatform("win32", () => {
   ok(closeToTrayEnabled(undefined) === true, "win32 未设置 → 默认开（D-09）");
   ok(closeToTrayEnabled(true) === true, "win32 显式 true → 尊重用户");
   ok(closeToTrayEnabled(false) === false, "win32 显式 false → 尊重用户");
   ok(closeToTrayEnabled(null) === true, "win32 null → 视同未设置，按平台默认（开）");
+  ok(closeToTrayEnabled(undefined, { dev: true }) === false, "D224 win32 dev 未设置 → 开发模式直接退出");
+  ok(closeToTrayEnabled(true, { dev: true }) === true, "D224 win32 dev 显式 true → 仍尊重用户");
 });
 withPlatform("darwin", () => {
   ok(closeToTrayEnabled(undefined) === true, "darwin 未设置 → 默认开（D-09：Windows 与 mac 保持开启）");
+  ok(closeToTrayEnabled(undefined, { dev: true }) === false, "D224 darwin dev 未设置 → 开发模式直接退出");
 });
 
 assert.strictEqual(process.platform, REAL_PLATFORM, "platform mock 已还原");
-console.log(`close-to-tray ok：${n} 断言全过（linux 默认关 / win32+darwin 默认开 / 显式 true/false 尊重 / 杂值回落平台默认 / mock 已还原）`);
+console.log(`close-to-tray ok：${n} 断言全过（linux 默认关 / win32+darwin 默认开 / 显式 true/false 尊重 / 杂值回落平台默认 / D224 开发模式默认直接退出 / mock 已还原）`);

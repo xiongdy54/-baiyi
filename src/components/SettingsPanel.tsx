@@ -2313,6 +2313,7 @@ const OSS_ITEMS: Array<{ name: string; license: string; note?: string }> = [
   { name: "Milkdown", license: "MIT", note: "Markdown 编辑器 · 基于 ProseMirror（@milkdown/kit · @milkdown/react）" },
   { name: "react-markdown", license: "MIT", note: "Markdown 渲染（remark / rehype / unified 管线）" },
   { name: "markdown-it", license: "MIT", note: "Markdown 解析" },
+  { name: "pele", license: "MIT", note: "Mermaid 图表渲染（obsidianmd/pele）" },
   { name: "turndown", license: "MIT", note: "HTML → Markdown" },
   { name: "micromark-extension-mark", license: "ISC" },
   { name: "github-slugger", license: "ISC" },
@@ -3134,8 +3135,9 @@ function TrayRow() {
     // C-28（D-09）：未设置时的默认显示按平台——与主进程 closeToTrayEnabled（electron/closeToTray.js）同规：
     // win/mac 开、linux 关（GNOME 默认无托盘区）。平台探测走 navigator（与 src/lib/commands.ts IS_MAC 同法，
     // 保证 system-node 环境可加载）。存储值恒为归一后的 boolean（主进程写侧 closeToTrayEnabled），v !== false 足够。
+    // D224：开发模式（Vite dev）默认关——与主进程 --dev-server 默认一致，避免设置页显示「收托盘」但关窗直接退出。
     const platform = typeof navigator !== "undefined" ? navigator.platform || navigator.userAgent || "" : "";
-    const defaultCloseToTray = !/Linux/i.test(platform);
+    const defaultCloseToTray = import.meta.env.DEV ? false : !/Linux/i.test(platform);
     void settingsStore.get<unknown>("app", "closeToTray", defaultCloseToTray).then((v) => setOn(v !== false));
   }, []);
   if (on === null) return null;

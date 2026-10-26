@@ -15,6 +15,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { placePopover, type PopoverRect } from "../lib/popoverPlace";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { ANNOT_COLORS, type AnnotColor } from "./SelectionMenu";
+import ReadMarkdown from "./editor/ReadMarkdown";
 import { useT } from "../lib/i18n";
 
 /** 已保存态的迟到窗口：防抖落库后短暂显示「已保存」再隐去 */
@@ -96,6 +97,8 @@ export default function AnnotationEditor({
   textRef.current = text;
 
   const colors = palette && palette.length ? palette : (ANNOT_COLORS as readonly string[]);
+  /** D224：批注里的 Mermaid 实时预览——完整围栏闭合后才渲染，避免输入途中闪错误回落 */
+  const hasMermaidPreview = /```mermaid[\s\S]*?```/.test(text);
 
   /**
    * 点色后弹出并**聚焦输入框**（R40）——useDialogA11y 挂载时会把焦点交给面板内第一个可聚焦元素
@@ -124,7 +127,26 @@ export default function AnnotationEditor({
       align: "center"
     });
     setPos({ left, top });
-  }, [anchor.x, anchor.y, anchor.width, anchor.height, colorOpen, confirmDelete]);
+  }, [anchor.x, anchor.y, anchor.width, anchor.height, colorOpen, confirmDelete, hasMermaidPreview]);
+
+  // D224：Mermaid 预览是懒加载的，SVG 落位后浮层高度会再变；尺寸变化时重新贴一次锚点，
+  // 避免预览把浮层顶出视口（与 colorOpen/confirmDelete 的显式重定位同规）。
+  useEffect(() => {
+    const el = panelRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      const { left, top } = placePopover({
+        anchor,
+        container,
+        size: { width: el.offsetWidth, height: el.offsetHeight },
+        prefer: "below",
+        align: "center"
+      });
+      setPos({ left, top });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [anchor.x, anchor.y, anchor.width, anchor.height, container]);
 
   const showSaved = () => {
     setSaveState("saved");
@@ -212,6 +234,11 @@ export default function AnnotationEditor({
         onChange={(e) => setText(e.target.value)}
         onBlur={handleBlur}
       />
+      {hasMermaidPreview && (
+        <div className="annot-editor-preview" data-annot-preview role="group" aria-label={T("图表预览")}>
+          <ReadMarkdown text={text} />
+        </div>
+      )}
       <div className="ebar">
         <button
           type="button"

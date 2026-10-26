@@ -173,11 +173,14 @@ export default function ExtractCardFace({
       listDueExtracts 的 SELECT 已透传 e.comment（DueTopic 类型未声明，读取处收窄，
       同 annotationColor 的 cast 口径）；空批注不渲染块。 */
   const ownComment = String((extract as DueTopic & { comment?: string | null }).comment ?? "").trim();
-  /** v1.4：批注块节点——读态直排正文下、编辑态经 footer 进编辑器（正文与工具条之间） */
+  /** v1.4：批注块节点——读态直排正文下、编辑态经 footer 进编辑器（正文与工具条之间）。
+      D223：批注显示走 ReadMarkdown（批注可写 markdown/mermaid，编辑仍在批注浮层的源文本输入）。 */
   const annotBlock = ownComment ? (
     <div className="extract-face-annot" data-testid="extract-face-comment" data-noedit="1">
       <div className="sec-label">{T("批注")}</div>
-      <div className="extract-face-annot-text">{ownComment}</div>
+      <div className="extract-face-annot-text">
+        <ReadMarkdown text={ownComment} />
+      </div>
     </div>
   ) : null;
   /** §F：字号/字体桥（两宿主共用本组件，桥随组件挂/卸）。工具条开关与形态（§J.2「随组件走」）

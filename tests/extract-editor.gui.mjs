@@ -34,6 +34,11 @@ const RICH_TEXT = [
   "",
   "```js",
   "const x = 1;",
+  "```",
+  "",
+  "```mermaid",
+  "flowchart LR",
+  "    M[读] --> N[记]",
   "```"
 ].join("\n");
 
@@ -232,10 +237,10 @@ try {
   const tb5 = await cdp.eval(`(() => {
     const t = document.querySelector('.extract-face-body [data-testid="extract-editor-toolbar"]');
     const btns = t ? [...t.querySelectorAll("[data-tb]")].map((b) => b.dataset.tb) : [];
-    return JSON.stringify({ up: !!t, n: btns.length, has: ["bold", "italic", "strike", "code", "link", "inlineMath", "mark", "h", "quote", "ul", "ol", "task", "details", "table", "codeBlock", "hr", "mathBlock", "undo", "redo"].filter((k) => btns.includes(k)).length });
+    return JSON.stringify({ up: !!t, n: btns.length, has: ["bold", "italic", "strike", "code", "link", "inlineMath", "mark", "h", "quote", "ul", "ol", "task", "details", "table", "codeBlock", "hr", "mathBlock", "mermaid", "undo", "redo"].filter((k) => btns.includes(k)).length });
   })()`);
   const t5 = JSON.parse(String(tb5) || "{}");
-  check("⑤ 工具栏在场（data-testid=extract-editor-toolbar）且 19 钮齐全（D97 增标注/折叠/表格）", t5.up === true && t5.n === 19 && t5.has === 19, tb5);
+  check("⑤ 工具栏在场（data-testid=extract-editor-toolbar）且 20 钮齐全（D97 增标注/折叠/表格；D223 增图表）", t5.up === true && t5.n === 20 && t5.has === 20, tb5);
   check("⑤ 工具栏在编辑器 host 之后（.extract-face-body 内、ProseMirror 之后）", (await cdp.eval(`(() => {
     const body = document.querySelector(".extract-face-body");
     const pm = body?.querySelector(".ProseMirror");
@@ -508,14 +513,28 @@ try {
   check("⑨ 前置：卡面刷新读出富语料（含表格/公式/代码块源文）", String(md0) === RICH_TEXT, String(md0).slice(0, 80));
   const p9 = await probeRange(cdp, "往返保真样本段落");
   check("⑨ 前置：读态渲染出富语料可点", !!p9, JSON.stringify(p9));
+  // D223：读态 mermaid 围栏经 pele 渲染成图（.mermaid-diagram 内联 SVG），不是源码 <pre>
+  // D224：渲染器改为懒加载 chunk——最多等 4s，避免固定 600ms 在慢盘上误判
+  for (let i = 0; i < 20; i++) {
+    if (await cdp.eval(`!!document.querySelector(".extract-face-body .mermaid-diagram svg")`)) break;
+    await wait(200);
+  }
+  const mm9 = await cdp.eval(`(() => {
+    const body = document.querySelector(".extract-face-body");
+    const fig = body?.querySelector(".mermaid-diagram svg");
+    const raw = body?.querySelector(".mermaid-diagram pre");
+    return JSON.stringify({ svg: !!fig, raw: !!raw, svgText: fig ? fig.textContent.slice(0, 40) : "" });
+  })()`);
+  const m9 = JSON.parse(String(mm9) || "{}");
+  check("⑨ D223：mermaid 围栏读态渲染为 SVG 图表（非源码回落）", m9.svg === true && m9.raw === false && m9.svgText.includes("读") && m9.svgText.includes("记"), mm9);
   await clickAt(cdp, p9.start.x, p9.start.y);
   check("⑨ 进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
   const richEd = await cdp.eval(`(() => {
     const pm = document.querySelector(".extract-face-body .ProseMirror");
-    return JSON.stringify({ table: !!pm?.querySelector("table"), pre: !!pm?.querySelector("pre code"), mathBlock: !!pm?.querySelector('[data-type="math-block"]') });
+    return JSON.stringify({ table: !!pm?.querySelector("table"), pre: !!pm?.querySelector("pre code"), mathBlock: !!pm?.querySelector('[data-type="math-block"]'), mermaid: !!pm?.querySelector('pre[data-language="mermaid"] code') });
   })()`);
   const re9 = JSON.parse(String(richEd) || "{}");
-  check("⑨ 编辑态呈现表格/代码块/公式块（WYSIWYG 同构）", re9.table === true && re9.pre === true && re9.mathBlock === true, richEd);
+  check("⑨ 编辑态呈现表格/代码块/公式块/mermaid 围栏（WYSIWYG 同构；图表以源码呈编辑）", re9.table === true && re9.pre === true && re9.mathBlock === true && re9.mermaid === true, richEd);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   await wait(600);
@@ -683,10 +702,10 @@ try {
   // D97：dock-bottom＝满幅条带贴卡面底边（工具条下缘 ≈ 卡框下缘，零空隙——用户第二轮指令）
   check("⑬ dock 工具条贴卡面底边（tb bottom ≈ 卡面底缘 ±2，下方零空白）",
     e13.mode === "dock-bottom" && typeof e13.tbBottom === "number" && typeof e13.faceBottom === "number" && Math.abs(e13.tbBottom - e13.faceBottom) <= 2, edit13);
-  // D109：单行横排硬不变量（19 钮同一 y、条带高有界＝不折列）
+  // D109：单行横排硬不变量（20 钮同一 y、条带高有界＝不折列；D223 增图表钮）
   const rowBottom = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
-  check("⑬ D109 dock-bottom：工具条 19 钮单行横排（y 差 ≤1、条带高 ≤60）",
-    rowBottom.n === 19 && typeof rowBottom.span === "number" && rowBottom.span <= 1 && rowBottom.tbH <= 60, rowBottom);
+  check("⑬ D109 dock-bottom：工具条 20 钮单行横排（y 差 ≤1、条带高 ≤60）",
+    rowBottom.n === 20 && typeof rowBottom.span === "number" && rowBottom.span <= 1 && rowBottom.tbH <= 60, rowBottom);
   await pressEsc(cdp);
   await waitEditor(cdp, false);
   await wait(400);
@@ -758,8 +777,8 @@ try {
   check("⑬ D97 钉顶：工具条在「摘录原文」标签**之上**（label.top > tb.bottom——用户指令）",
     typeof or13.tbBottom === "number" && typeof or13.labelTop === "number" && or13.labelTop > or13.tbBottom, order13);
   const rowTop = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
-  check("⑬ D109 dock-top：工具条 19 钮单行横排（y 差 ≤1、条带高 ≤60）",
-    rowTop.n === 19 && typeof rowTop.span === "number" && rowTop.span <= 1 && rowTop.tbH <= 60, rowTop);
+  check("⑬ D109 dock-top：工具条 20 钮单行横排（y 差 ≤1、条带高 ≤60）",
+    rowTop.n === 20 && typeof rowTop.span === "number" && rowTop.span <= 1 && rowTop.tbH <= 60, rowTop);
   await cdp.eval(`(() => { const m = document.querySelector(".extract-face-body .markdown-editor .milkdown"); if (m) m.scrollTop = 900; return true; })()`);
   await wait(500);
   const top13 = await cdp.eval(`(() => {
@@ -776,7 +795,7 @@ try {
   await wait(400);
 
   // —— D109 矮窗口（用户实测截图场景）：编辑区高度不足时旧 `.markdown-editor > div` 规则把
-  //      工具条 flex-direction 覆盖成 column + wrap，19 钮列优先折两列；修复后恒单行。 ——
+  //      工具条 flex-direction 覆盖成 column + wrap，20 钮列优先折两列；修复后恒单行。 ——
   {
     const vp = JSON.parse(String(await cdp.eval(`JSON.stringify({ w: window.innerWidth, h: window.innerHeight })`)) || "{}");
     await cdp.send("Emulation.setDeviceMetricsOverride", { width: Number(vp.w) || 1280, height: 520, deviceScaleFactor: 1, mobile: false });
@@ -790,8 +809,8 @@ try {
     check("⑬ D109 前置：矮窗口进入编辑态", await waitEditor(cdp, true) === true, "编辑器未出现");
     await wait(900);
     const rowShort = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
-    check("⑬ D109 矮窗口（视口高 520）：工具条 19 钮恒单行（y 差 ≤1、条带高 ≤60、不折列）",
-      rowShort.n === 19 && typeof rowShort.span === "number" && rowShort.span <= 1 && rowShort.tbH <= 60, rowShort);
+    check("⑬ D109 矮窗口（视口高 520）：工具条 20 钮恒单行（y 差 ≤1、条带高 ≤60、不折列）",
+      rowShort.n === 20 && typeof rowShort.span === "number" && rowShort.span <= 1 && rowShort.tbH <= 60, rowShort);
     await pressEsc(cdp);
     await waitEditor(cdp, false);
     await cdp.send("Emulation.clearDeviceMetricsOverride", {});
@@ -835,8 +854,8 @@ try {
   check("⑬ §K.3 弹层在选区上方（bottom ≤ 选区顶缘，与选区不相交）",
     typeof f13.bottom === "number" && f13.bottom <= Math.round(pf13.start.y) + 2, float13);
   const rowFloat = JSON.parse(String(await cdp.eval(ONE_ROW_READ)) || "{}");
-  check("⑬ D109 float：弹层 19 钮单行横排（y 差 ≤1、弹层高 ≤60）",
-    rowFloat.n === 19 && typeof rowFloat.span === "number" && rowFloat.span <= 1 && rowFloat.tbH <= 60, rowFloat);
+  check("⑬ D109 float：弹层 20 钮单行横排（y 差 ≤1、弹层高 ≤60）",
+    rowFloat.n === 20 && typeof rowFloat.span === "number" && rowFloat.span <= 1 && rowFloat.tbH <= 60, rowFloat);
   // 点工具条按钮：mousedown preventDefault 保选区 → 命令作用该选区、弹层不收
   await cdp.eval(`(() => { document.querySelector('[data-testid="extract-editor-toolbar"] [data-tb="bold"]')?.click(); return true; })()`);
   await wait(500);
