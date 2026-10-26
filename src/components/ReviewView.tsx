@@ -1,7 +1,7 @@
 // 连续刷题复习界面（v11.1 连续模式；v12.2 去页内重复标题 + 跳转原文 + 删除按钮）：
 // 进入即开始；评分后自动展示下一张到期卡。每张卡都重新拉取今日队列取队首，
 // 口径 = 今日队列视图（v34/M12 §4.2-20：FSRS due 升序 + 同 due 优先级降序 + 同源卡延后），学习中新到期卡实时进入队列。
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fsrsEngine, type Rating } from "../lib/fsrs";
 import { cardsApi, hasSourceAnchor, type CardRecord, type TodayQueue } from "../lib/cards";
 import { playVocabAudio } from "../lib/dictClient";
@@ -937,6 +937,32 @@ export default function ReviewView({
     return () => window.removeEventListener("keydown", onKey);
   }, [currentExtractId, runExtractStep]);
 
+  /* ---------- D240（MOTION-DESIGN-SPEC §18.2 末条）：复习页首卡抑制——摘录页 R2-5 同款 ----------
+     页面进入（顶栏 / 阅读器返回 / 卡片浏览器「开始复习」等跨视图入口，本组件随之重挂载）后的
+     **首张卡**不播 stage-card-in：入场完全由 §5.1 方向性页面过渡承担（书架 / 摘录 → 复习自右往左，
+     推荐 / 卡片 / 数据 → 复习自左往右）。原先闪卡 .review-flip 的 stage-card-in 不挂闸门、数据在过渡
+     遮罩期内到达 ⇒ 卡面在新页快照里自右滑入 24px（页面位移的 3 倍），返回方向（bwd）时与页面反向；
+     混合复习的摘录卡面挂闸门 ⇒ 揭幕后又补播一次自右往左。同视图内换卡（评分推进 / 摘录下一条 /
+     撤销）stage-card-in 照常。卡面由共用组件（CardFace / ExtractCardFace）渲染，宿主不越界改它，
+     标记按等价语义落在 .review-wrap（data-first-card）。 */
+  /** 当前显示的条目：闪卡 c:<id>、混合复习推到的摘录 x:<id>；加载中 / 空态＝null */
+  const shownKey = loading ? null : currentExtract ? `x:${currentExtract.id}` : current ? `c:${current.id}` : null;
+  /** 首卡标记（live/key 机制，与 ExtractReviewView 同口径）：key=undefined＝尚未记录；live＝被标记的
+      首卡元素仍在场。加载完成后的首个渲染即记录（空态进入则 live=false：之后到来的卡属页内变化，照常播）。
+      渲染期**只读不写**（StrictMode 双渲染读到同值），记录在下方 layout effect（绘制前，与提交同帧）。
+      换卡 / 换条（key 变化）当帧标记随新卡一同摘除 ⇒ 新卡首帧即播 stage-card-in；被标记卡存续期恒带
+      标记——中途摘除会让 stage-card-in 迟到重放（动画名由 none 复现即起播）。 */
+  const firstCardMarkRef = useRef<{ key: string | null | undefined; live: boolean }>({ key: undefined, live: true });
+  useLayoutEffect(() => {
+    const mark = firstCardMarkRef.current;
+    if (loading || !mark.live) return;
+    if (mark.key === undefined) firstCardMarkRef.current = { key: shownKey, live: shownKey !== null };
+    else if (mark.key !== shownKey) firstCardMarkRef.current = { key: shownKey, live: false };
+  }, [loading, shownKey]);
+  const firstCardMark = firstCardMarkRef.current;
+  const isFirstCardEl =
+    shownKey !== null && firstCardMark.live && (firstCardMark.key === undefined || firstCardMark.key === shownKey);
+
   if (loading) {
     return (
       <div className="review-wrap">
@@ -990,7 +1016,8 @@ export default function ReviewView({
       onUndo: () => doUndo()
     };
     return (
-      <div className="review-wrap">
+      /* D240：首卡抑制标记（见上方 live/key 机制）——混合复习推到的摘录卡面同样只随页面过渡入场 */
+      <div className="review-wrap" data-first-card={isFirstCardEl ? "1" : undefined}>
         {/* 头带：全宽吸顶（与摘录页同一配方），计数在最右 */}
         <div className="review-head">
           <div className="review-head-inner">
@@ -1054,7 +1081,8 @@ export default function ReviewView({
   }
 
   return (
-    <div className="review-wrap">
+    /* D240：首卡抑制标记（见上方 live/key 机制）——首张闪卡（.review-flip）只随页面过渡入场 */
+    <div className="review-wrap" data-first-card={isFirstCardEl ? "1" : undefined}>
       {/* 头带：全宽吸顶（与摘录页同一配方；计数恒最右）。它是滚动内容的第 1 个流内子节点，
           计数不再随卡片滚走。 */}
       <div className="review-head">

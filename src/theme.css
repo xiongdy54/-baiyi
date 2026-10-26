@@ -3845,6 +3845,13 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
      （闸门只挡页面过渡期间）。review-flip 翻卡不在此列（:not(.flipped) 语义独立，维持现状）。 */
   :root:not([data-vt]) .extract-page .extract-face,
   :root:not([data-vt]) .review-wrap .extract-face { animation: stage-card-in var(--dur-stage) var(--ease-out-soft) both; }
+  /* D240（MOTION-DESIGN-SPEC §18.2 末条，摘录页 R2-A 同款）：复习页首卡抑制——页面进入后的首张卡只随
+     §5.1 方向性页面过渡入场（自右侧页签返回时自左往右），不再自播 24px 自右往左的 stage-card-in。
+     标记 data-first-card 由 ReviewView 挂在 .review-wrap（首卡元素存续期恒挂、换卡当帧摘除 ⇒ 页内换卡照常播）。
+     闪卡条不挂闸门（被压的 review-flip 规则本身不挂闸门，过渡遮罩期即播），(0,4,0) 压 (0,3,0)；
+     混合复习摘录条挂闸门，(0,5,0) 压 (0,4,0)；两条均序在被压规则之后（双保险）。 */
+  .review-wrap[data-first-card] .review-flip:not(.flipped),
+  :root:not([data-vt]) .review-wrap[data-first-card] .extract-face { animation: none; }
   .bar-pop { animation: stage-pop-in 150ms var(--ease) both; }
 }
 @keyframes stage-card-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
