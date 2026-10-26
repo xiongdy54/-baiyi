@@ -1,6 +1,6 @@
 # 批 4（就地批注与批注栏）实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **执行方式：** 按 Task 顺序逐项实现；每项完成后运行对应验收命令并记录实测结果。
 > 本项目为**中文提交**：每个 Task 收尾一个 commit，消息里写实测取证。分支固定 `摘录复习改版`，**不碰 main**；`git add` 一律显式路径。
 
 **Goal:** 摘录页与阅读器支持"选中文字 → 点色 → 就地高亮/摘录（可附批注）"，批注以 Zotero 式批注栏（阅读器侧栏含 目录/摘录/图谱 三页签）呈现，并退役 `extractReader` 专用页。

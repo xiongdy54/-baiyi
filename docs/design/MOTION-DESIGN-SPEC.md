@@ -611,9 +611,9 @@ saas-productivity 核心原则 = **高效、专业、不挡路**：动效 150-30
 - **调试口径**：动效异常先查——(a) 媒体查询作用域是否吞了规则；(b) 是否引用了未定义 token（IACVT，瑞士风「引用有效性」同纪律）；(c) 是否动画了布局属性；(d) React 条件卸载是否吃掉了出场（→ 用 useDismiss 模式）。**R2 增补：(e) 入场动画「播了但看不到」先查是否落在 View Transition 遮罩期（→ 挂 §5.2 闸门）；(f) 「该播没播」先查挂点覆盖（元素是否真带着入场 class——§6.1-E2 类漏挂）；(g) 「两态不一致」先查是否初始样式不触发 transition 造成的结构硬切（§18.1-E1 类）。**
 - **审查 grep 口径**（新增动效必过）：`grep -nE "animation|transition" <改动文件>` 每条命中须能指出它属于本规范哪一节（§4-§11、§5.1-5.3、§10-R2、§18 之一），指不出的即为规范外动效，退回。
 
-## 附录 B. 开发约定引用（frontend-developer skill）
+## 附录 B. 动效实现自检清单
 
-该 skill 已安装于全局技能目录（`~/.trae-cn/skills/frontend-developer/SKILL.md`），作为执行层实现动效时的自检清单使用（pose-to-pose 定义清晰起止态、transform-origin 一致性、DevTools Performance 验证 60fps、prefers-reduced-motion 必测）。其内容不构成本规范的视觉裁决；与本规范冲突时以本规范为准（例：skill 建议的 hover lift 已被 §4 否决）。
+实现动效时按本规范自检：pose-to-pose 定义清晰起止态、transform-origin 一致性、DevTools Performance 验证 60fps、prefers-reduced-motion 必测。外部工具或 skill 的具体建议不构成本规范的视觉裁决；与本规范冲突时以本规范为准（例：外部 skill 建议的 hover lift 已被 §4 否决）。
 
 ## 附录 C. 新皮肤/主题开发指引（呼应用户「后续维护与新皮肤」诉求）
 

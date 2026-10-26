@@ -1,8 +1,8 @@
 # 三界面 buttons-ctas 动效语言改造 + 右侧制卡面板 · 设计稿（v1）
 
-> 日期：2026-10-04 · 作者：ui-ux-architect · 状态：**待实施**（D88；建议版本 **v48.48**）。
+> 日期：2026-10-04 · 作者：设计 · 状态：**待实施**（D88；建议版本 **v48.48**）。
 > 决策登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D88**（条目草稿见 §14，由主控誊写）。
-> 设计语言基准：`docs/design/ui-skill-previews/buttons-ctas/`（reading.html / excerpt.html / review.html）+ `C:\Users\xiongdy\.zcode\skills\buttons-ctas\SKILL.md`（按钮 12 原则）。
+> 设计语言基准：`docs/design/ui-skill-previews/buttons-ctas/`（reading.html / excerpt.html / review.html；按钮 12 原则作为设计参考）。
 > 前置契约：`EXCERPT-REVIEW-LAYOUT-REDESIGN.md`（v12 已放开高级动效）、`READER-RAIL-POPOVER-D85.md`（v3/D87）、`SELECTION-MENU-STAGE-TOOLBAR.md`（v4/D84）、`CARD-BROWSER-REDESIGN.md`（D80）。
 > 范围：纯前端布局/视觉/动效。不动数据模型、IPC、FSRS 调度、`review_logs` 真源、主进程。
 
@@ -420,7 +420,7 @@ CardFace 改为**双面常挂**（正/背面同时渲染），外层包 `.review
 | Success | flash//toast 现状（1800ms 自消）；新增的可见成功动效仅 §8.4/§7.2 bump |
 | Disabled | D84 色阶反转全站适用（可用深/禁用浅）；填充钮 disabled 落灰 + 无阴影无涟漪 |
 
-## 10. 动画原则落点速查（skill 12 原则 → 本项目）
+## 10. 动画原则落点速查（12 原则 → 本项目）
 
 | 原则 | 落点 | Token |
 |---|---|---|
