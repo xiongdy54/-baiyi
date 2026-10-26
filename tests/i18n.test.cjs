@@ -41,50 +41,50 @@ function ok(name, cond) {
   }
 }
 
-// ---------- ① 行为 ----------
-// 默认 zh-CN：恒等返回键（存量 GUI 套件零回归的根基）
-eq("zh-CN 恒等", i18n.t("设置"), "设置");
-eq("zh-CN 插值", i18n.t("共 {n} 张", { n: 24 }), "共 24 张");
-eq("zh-CN 多参数", i18n.t("复习 · {title}", { title: "书名" }), "复习 · 书名");
-eq("zh-CN 未知占位符保留", i18n.t("共 {n} 张"), "共 {n} 张");
-
-// 缺译回落原文（en）
-i18n.initLocale("en");
-eq("en 已有键", i18n.t("书架"), "Library");
-eq("en 缺键回落原文", i18n.t("完全不存在的一个键xyz"), "完全不存在的一个键xyz");
-eq("en 插值走词典", i18n.t("复习 · {title}", { title: "B" }), "Review · B");
-
-// 复数（en 张 = { one, other }）
-eq("en 复数 one", i18n.t("张", { n: 1 }), "card");
-eq("en 复数 other", i18n.t("张", { n: 5 }), "cards");
-eq("en 复数缺 n 用 other", i18n.t("张"), "cards");
-
-// 日文
-i18n.initLocale("ja");
-eq("ja 已有键", i18n.t("书架"), "ライブラリ");
-eq("ja 缺键回落原文", i18n.t("不存在的日文键abc"), "不存在的日文键abc");
-
-// zh-TW：opencc cn→twp + 领域词覆盖（断言只用覆盖表保证的词，opencc 词库项不作硬断言）
-i18n.initLocale("zh-TW");
-eq("zh-TW 覆盖表：材料导图", i18n.t("材料导图"), "材料心智圖");
-eq("zh-TW 覆盖表：制卡", i18n.t("制卡"), "製卡");
-ok("zh-TW opencc 就绪（设置→設定）", (() => { try { return i18n.t("设置") === "設定"; } catch { return false; } })());
-// zh-TW 也插值
-eq("zh-TW 插值", i18n.t("复习 · {title}", { title: "X" }), i18n.t("复习 · {title}").replace("{title}", "X"));
-
-// 归一（与主进程写侧同规）
-eq("normalizeLocale 合法", i18n.normalizeLocale("ja"), "ja");
-eq("normalizeLocale 非法回落", i18n.normalizeLocale("zh"), "zh-CN");
-eq("normalizeLocale 非字符串回落", i18n.normalizeLocale(42), "zh-CN");
-eq("normalizeLocale undefined 回落", i18n.normalizeLocale(undefined), "zh-CN");
-
-// 切换订阅（useSyncExternalStore 的 subscribe 面）
-i18n.initLocale("zh-CN");
-let notified = 0;
-const un = i18n.subscribeI18n(() => notified++);
-eq("subscribe 返回取消函数", typeof un, "function");
-// setLocale 走 settingsStore（无 window.settingsAPI → memoryFallback，node 安全）
 (async () => {
+  // ---------- ① 行为 ----------
+  // 默认 zh-CN：恒等返回键（存量 GUI 套件零回归的根基）
+  eq("zh-CN 恒等", i18n.t("设置"), "设置");
+  eq("zh-CN 插值", i18n.t("共 {n} 张", { n: 24 }), "共 24 张");
+  eq("zh-CN 多参数", i18n.t("复习 · {title}", { title: "书名" }), "复习 · 书名");
+  eq("zh-CN 未知占位符保留", i18n.t("共 {n} 张"), "共 {n} 张");
+
+  // 缺译回落原文（en）——D237：词典按需装载，loadLocale = initLocale + 等资源就绪
+  await i18n.loadLocale("en");
+  eq("en 已有键", i18n.t("书架"), "Library");
+  eq("en 缺键回落原文", i18n.t("完全不存在的一个键xyz"), "完全不存在的一个键xyz");
+  eq("en 插值走词典", i18n.t("复习 · {title}", { title: "B" }), "Review · B");
+
+  // 复数（en 张 = { one, other }）
+  eq("en 复数 one", i18n.t("张", { n: 1 }), "card");
+  eq("en 复数 other", i18n.t("张", { n: 5 }), "cards");
+  eq("en 复数缺 n 用 other", i18n.t("张"), "cards");
+
+  // 日文
+  await i18n.loadLocale("ja");
+  eq("ja 已有键", i18n.t("书架"), "ライブラリ");
+  eq("ja 缺键回落原文", i18n.t("不存在的日文键abc"), "不存在的日文键abc");
+
+  // zh-TW：opencc cn→twp + 领域词覆盖（断言只用覆盖表保证的词，opencc 词库项不作硬断言）
+  await i18n.loadLocale("zh-TW");
+  eq("zh-TW 覆盖表：材料导图", i18n.t("材料导图"), "材料心智圖");
+  eq("zh-TW 覆盖表：制卡", i18n.t("制卡"), "製卡");
+  ok("zh-TW opencc 就绪（设置→設定）", (() => { try { return i18n.t("设置") === "設定"; } catch { return false; } })());
+  // zh-TW 也插值
+  eq("zh-TW 插值", i18n.t("复习 · {title}", { title: "X" }), i18n.t("复习 · {title}").replace("{title}", "X"));
+
+  // 归一（与主进程写侧同规）
+  eq("normalizeLocale 合法", i18n.normalizeLocale("ja"), "ja");
+  eq("normalizeLocale 非法回落", i18n.normalizeLocale("zh"), "zh-CN");
+  eq("normalizeLocale 非字符串回落", i18n.normalizeLocale(42), "zh-CN");
+  eq("normalizeLocale undefined 回落", i18n.normalizeLocale(undefined), "zh-CN");
+
+  // 切换订阅（useSyncExternalStore 的 subscribe 面）
+  i18n.initLocale("zh-CN");
+  let notified = 0;
+  const un = i18n.subscribeI18n(() => notified++);
+  eq("subscribe 返回取消函数", typeof un, "function");
+  // setLocale 走 settingsStore（无 window.settingsAPI → memoryFallback，node 安全）
   await i18n.setLocale("en");
   eq("setLocale 生效", i18n.getLocale(), "en");
   ok("订阅者被通知", notified >= 1);
@@ -104,4 +104,7 @@ eq("subscribe 返回取消函数", typeof un, "function");
     console.log(`i18n.test: ${pass} assertions passed（孤儿键：en ${check.orphansEn.length} / ja ${check.orphansJa.length}，仅提示）`);
   }
   try { fs.rmSync(OUT, { force: true }); } catch { /* 清理失败无害 */ }
-})();
+})().catch((e) => {
+  console.error("i18n.test 运行异常：", (e && e.stack) || e);
+  process.exitCode = 1;
+});

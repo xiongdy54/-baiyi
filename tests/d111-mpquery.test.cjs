@@ -196,7 +196,6 @@ app.whenReady().then(async () => {
     fail++;
   } finally {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* 清理失败无碍 */ }
-    app.quit();
-    setTimeout(() => process.exit(fail === 0 ? 0 : 1), 300);
+    app.exit(fail === 0 ? 0 : 1); // D239：app.quit() 会先以 0 退出、定时器里的 process.exit 来不及执行
   }
 });

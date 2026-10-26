@@ -229,14 +229,16 @@ export function createExtractEditor(
 ): Editor {
   const viewAttrs: Record<string, string> = { class: "extract-prosemirror" };
   if (opts?.placeholder) viewAttrs["data-placeholder"] = opts.placeholder;
-  /** D224：同步脏标记探针——只负责在事务层立即上报，不参与序列化。 */
+  /** D224：同步脏标记探针——只负责在事务层立即上报，不参与序列化。
+   *  D230：与 listener 同口径跳过 addToHistory=false 的内部事务（标题自动补 id、有序列表序号同步等）——
+   *  否则打开含标题的正文就被当成「已修改」，无修改关闭也会提交规范化后的文本。 */
   const dirtyProbe = $prose(
     () =>
       new Plugin({
         state: {
           init: () => null,
           apply: (tr) => {
-            if (tr.docChanged) opts?.onDocChanged?.();
+            if (tr.docChanged && tr.getMeta("addToHistory") !== false) opts?.onDocChanged?.();
           }
         }
       })
@@ -346,6 +348,11 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   const editorInstanceRef = useRef<Editor | null>(null);
   /** 本会话的初始值（幂等短路的比对基准；外部置值重建时刷新） */
   const initialValueRef = useRef(value);
+  /** D230：编辑器实例就绪那一刻的序列化结果（＝初始值经编辑器规范化后的样子）——第二道幂等短路：
+      提交文本与它相同＝用户没改（含「改了又改回」），不因规范化差异（末尾换行/标记风格）误报保存 */
+  const baselineRef = useRef<string | null>(null);
+  /** baselineRef 对应的编辑器实例（实例换了＝重建/StrictMode 重挂 → 重新取基线） */
+  const baselineEditorRef = useRef<Editor | null>(null);
   /** wrapper（blur/Esc/键盘透传的挂点 + 浮层工具条测量） */
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -391,6 +398,20 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   useEffect(() => {
     if (!loading) {
       editorInstanceRef.current = get() ?? null;
+      const ed = editorInstanceRef.current;
+      if (ed && ed !== baselineEditorRef.current && ed.status === EditorStatus.Created) {
+        baselineEditorRef.current = ed;
+        let base: string | null = null;
+        // 已脏（就绪前就有用户输入，理论上不发生）＝不取基线，退回只比初始值，宁可多存不丢字
+        if (!dirtyRef.current) {
+          try {
+            base = ed.action(getMarkdown());
+          } catch {
+            base = null;
+          }
+        }
+        baselineRef.current = base;
+      }
       if (editorInstanceRef.current && !readyRef.current) {
         readyRef.current = true;
         onReadyRef.current?.();
@@ -408,13 +429,12 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recreateKey]);
 
-  const commit = () => {
-    if (committedRef.current) return;
-    committedRef.current = true;
+  /** 此刻应提交的文本（纯读取，不落提交闸；卸载清理与 StrictMode 模拟卸载都可安全调用）。
+      null＝无修改：未观察到用户事务，或序列化结果等于初始值 / 打开时的规范化基线 */
+  const computeCommitText = (): string | null => {
     if (!dirtyRef.current) {
-      // listener 未观察到 doc 变更 → 不提交直接退回（「无修改关闭逐字节不变」的构造性保证）
-      onCommitRef.current(null);
-      return;
+      // 未观察到用户的 doc 变更 → 不提交直接退回（「无修改关闭逐字节不变」的构造性保证）
+      return null;
     }
     let md = latestMdRef.current;
     const editor = editorInstanceRef.current;
@@ -425,7 +445,21 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
         /* 编辑器已销毁：退回 listener 的最近序列化结果 */
       }
     }
-    onCommitRef.current(md === null || md === initialValueRef.current ? null : md);
+    if (md === null || md === initialValueRef.current) return null;
+    if (baselineRef.current !== null && md === baselineRef.current) return null;
+    return md;
+  };
+
+  /** 落提交闸并回调（幂等：blur、Esc、卸载兜底可能接连触发，只认第一次） */
+  const deliverCommit = (text: string | null) => {
+    if (committedRef.current) return;
+    committedRef.current = true;
+    onCommitRef.current(text);
+  };
+
+  const commit = () => {
+    if (committedRef.current) return;
+    deliverCommit(computeCommitText());
   };
 
   const focusBlock = (index: number) => {
@@ -489,6 +523,9 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
   // D218：StrictMode（dev）在首次挂载会模拟一次「卸载→重挂」——卸载清理里的兜底提交被误触发，
   // onCommit(null) 令宿主立即退出编辑态＝「编辑器闪一下就关」（仅 dev，生产构建无此行为）。
   // 修法：清理时把提交排进宏任务；若紧接着 setup 再来（＝模拟卸载后的重挂）即取消——真卸载无人取消、提交照常。
+  // D231：文本必须在清理**当下**取——父组件的清理先于子 <Milkdown> 销毁编辑器，此刻实例还活着；
+  // 推迟到宏任务再取时编辑器已销毁，只剩 200ms 防抖前的旧序列化＝最后约 0.2 秒的输入丢失。
+  // 只推迟「提交」这一步（StrictMode 取消语义不变；取文本是纯读取，模拟卸载时执行也无副作用）。
   const pendingUnmountCommitRef = useRef<number | null>(null);
   useEffect(() => {
     if (pendingUnmountCommitRef.current != null) {
@@ -497,9 +534,10 @@ const MarkdownEditorInner = forwardRef<MarkdownEditorApi, MarkdownEditorProps>(f
     }
     return () => {
       if (!commitOnUnmount) return;
+      const text = committedRef.current ? null : computeCommitText();
       pendingUnmountCommitRef.current = window.setTimeout(() => {
         pendingUnmountCommitRef.current = null;
-        commit();
+        deliverCommit(text);
       }, 0);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

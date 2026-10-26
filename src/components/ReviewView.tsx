@@ -14,7 +14,9 @@ import { attachRipple, settle } from "../lib/press"; // D88 §4.2/§4.3：主 CT
 import { CardFace } from "./CardBrowser";
 import { fetchSessionQueue, type SessionItem } from "../lib/sessionQueue";
 import ExtractCardFace, { ExtractActionsBar } from "./ExtractCardFace";
-import { readingWorkflow, undoApi, type DueTopic } from "../lib/readingWorkflow";
+import { readingWorkflow, undoApi, type DueTopic, type UndoInfo, type UndoLastResult } from "../lib/readingWorkflow";
+import { isImeComposing } from "../lib/ime";
+import { isInModal, isNativeControlKey, isTextEntryTarget } from "../lib/keyTarget";
 import DisambiguateModal, { type DisambiguateCloseResult } from "./DisambiguateModal";
 import { cardLinksApi, type CardLink } from "../lib/cardLinks";
 import { VERDICT_LABELS } from "../lib/disambiguateCore.mjs";
@@ -295,14 +297,26 @@ export default function ReviewView({
   // 会话起点（§5.2：sessionStartTs = 会话首卡渲染时刻，组件 state 记录；会话成果汇总窗口起点）
   const [sessionStartTs, setSessionStartTs] = useState(() => Date.now());
 
+  // v49.61 / D232：复习方式＝混合复习（SuperMemo 式，app.extracts.mergeIntoReview=true）——会话里摘录与
+  // 闪卡穿插推送；撤销走与摘录页同一条统一撤销链（undo:last：最近一次评分或摘录操作，线性回退）。
+  // 取值以会话队列回带的 mergeIntoReview 为准（主进程装配口径，唯一事实源）。
+  const [mixed, setMixed] = useState(false);
+  const mixedRef = useRef(false);
+  const [mixedUndo, setMixedUndo] = useState<UndoInfo | null>(null);
+
   // 查询最近可撤销评分（评分/撤销后刷新；挂起/跳过/删除不产生日志无需刷新，删除他人卡由撤销时服务端兜底）
   const refreshUndo = useCallback(async () => {
-    setUndoInfo((await cardsApi.lastUndoableReview()) ?? null);
+    const [info, last] = await Promise.all([
+      mixedRef.current ? undoApi.info().catch(() => null) : Promise.resolve(null),
+      cardsApi.lastUndoableReview()
+    ]);
+    setMixedUndo(info && info.available ? info : null);
+    setUndoInfo(last ?? null);
   }, []);
 
   useEffect(() => {
     void refreshUndo();
-  }, [refreshUndo]);
+  }, [refreshUndo, mixed]);
 
   // v32（M7）自动发音；v48.58（D99）改判：跟随**发音按钮的出现面**——听音卡（按钮嵌题面）出卡即读，
   // 其余单词卡（按钮嵌答案区）翻面即读；同卡同面只触发一次（翻回再翻到可再触发一次）。
@@ -331,12 +345,15 @@ export default function ReviewView({
   const [currentExtract, setCurrentExtract] = useState<DueTopic | null>(null);
   const extractHeadRef = useRef<DueTopic | null>(null);
 
-  const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
-    const scope = bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length) || scopeTags?.length || scopeKpIds?.length
+  const sessionScope = () =>
+    bookItemIds?.length || (scopeLimits && Object.keys(scopeLimits).length) || scopeTags?.length || scopeKpIds?.length
       ? { bookItemIds: bookItemIds ?? undefined, tags: scopeTags, kpIds: scopeKpIds, limits: scopeLimits ?? undefined }
       : undefined;
-    const session = await fetchSessionQueue({ scope });
+  const nextCard = useCallback(async (): Promise<(CardRecord & { docTitle?: string }) | null> => {
+    const session = await fetchSessionQueue({ scope: sessionScope() });
     if (session) {
+      mixedRef.current = session.mergeIntoReview === true;
+      setMixed(mixedRef.current);
       setDeferred((session.deferred ?? []) as unknown as TodayQueue["deferred"]);
       const head = session.items[0];
       // 队首是摘录 → 交给摘录卡面（本页不跳过它：跳过会让合并模式名存实亡）
@@ -353,6 +370,7 @@ export default function ReviewView({
     const q = await cardsApi.todayQueue();
     setDeferred(q.deferred ?? []);
     return q.cards[0] ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookItemIds, scopeLimits]);
 
   // 开场拉第一张；若 sessionStorage 有跳转前的复习现场（从阅读器返回）则恢复该卡
@@ -674,6 +692,59 @@ export default function ReviewView({
     }
   }
 
+  /**
+   * v49.61 / D232：混合复习的撤销——与摘录页同一条统一撤销链（undo:last，线性回退最近一次评分或摘录操作）。
+   * 撤销的是评分 → 回到那张卡的背面（同 undoLastGrade）；撤销的是摘录操作 → 被召回的摘录在本会话里就把它
+   * 钉为当前条（推进 / 推迟 / 毕业被撤回＝它重新到期），不在（他处的批量操作等）＝当前条不动。
+   */
+  async function undoMixed() {
+    if (actionBusyRef.current || saveError) return;
+    actionBusyRef.current = true;
+    try {
+      let r: UndoLastResult;
+      try {
+        r = await undoApi.last();
+      } catch {
+        setSaveError(true);
+        return;
+      }
+      if (r.ok && r.kind === "card_grade" && r.card) {
+        extractHeadRef.current = null;
+        setCurrentExtract(null);
+        setCurrent(r.card as CardRecord & { docTitle?: string });
+        setShowBack(true);
+        setStartedAt(Date.now());
+        setSessionDone(false);
+        setDoneCount((n) => Math.max(0, n - 1));
+        eventBus.emit("cards/changed");
+      } else if (r.ok && r.kind === "extract_op") {
+        eventBus.emit("workflow/changed");
+        const restoredId = Array.isArray(r.extractIds) && r.extractIds.length ? String(r.extractIds[0]) : null;
+        const session = restoredId ? await fetchSessionQueue({ scope: sessionScope() }) : null;
+        const hit = session?.items.find((it: SessionItem) => it.kind === "extract" && it.id === restoredId)?.extract ?? null;
+        if (hit) {
+          extractHeadRef.current = hit;
+          setCurrentExtract(hit);
+          setCurrent(null);
+          setSessionDone(false);
+        } else if (!extractHeadRef.current && !current) {
+          // 收尾页上撤销了他处的操作：重新取队首（可能有条目重新到期）
+          const nx = await nextCard();
+          if (nx) {
+            setCurrent(nx);
+            setShowBack(false);
+            setStartedAt(Date.now());
+            setSessionDone(false);
+          }
+        }
+      }
+      setDeferred(((await cardsApi.todayQueue()).deferred) ?? []);
+    } finally {
+      actionBusyRef.current = false;
+      void refreshUndo();
+    }
+  }
+
   // 需求2：跳转原文（保存复习现场，从阅读器返回时恢复）
   function handleJumpToSource() {
     const c = current;
@@ -757,6 +828,16 @@ export default function ReviewView({
   // q/w/d 与翻面状态无关，只要当前有卡即可触发（删除仍走 confirm 确认）。
   const hasCard = !!current;
   const canGrade = hasCard && showBack;
+  // D232：撤销入口随复习方式——分开处理＝只撤卡片评分（既有）；混合复习＝统一撤销链（含摘录操作）
+  const canUndo = mixed ? !!mixedUndo : !!undoInfo;
+  const doUndo = () => void (mixed ? undoMixed() : undoLastGrade());
+  const undoRating = mixed ? (mixedUndo?.kind === "card_grade" ? mixedUndo.rating ?? null : null) : undoInfo?.rating ?? null;
+  const undoLabel =
+    mixed && mixedUndo?.kind === "extract_op"
+      ? T("撤销摘录操作")
+      : undoRating
+        ? T("撤销评分（{rating}）", { rating: undoRating })
+        : T("撤销评分");
   // D99：AI 判答需要标准答案文本可比（挖空缺省态等无 backMarkdown 的卡禁用）
   const canJudge = !!current && !!(current.backMarkdown && current.backMarkdown.trim());
   useCommandActions("review", {
@@ -765,7 +846,9 @@ export default function ReviewView({
     "review.hard": { when: () => canGrade && !actionBusyRef.current && !saveError, run: () => void grade("Hard") },
     "review.good": { when: () => canGrade && !actionBusyRef.current && !saveError, run: () => void grade("Good") },
     "review.easy": { when: () => canGrade && !actionBusyRef.current && !saveError, run: () => void grade("Easy") },
-    "review.undo": { when: () => !!undoInfo && !actionBusyRef.current && !saveError, run: () => void undoLastGrade() },
+    // 混合复习：键盘撤销不等 undo:info 的异步刷新（评分后立刻按 Z 也要撤到刚才那一下）——无可撤项时
+    // undo:last 自身回 ok:false、什么都不发生；按钮仍按 info 结果显隐
+    "review.undo": { when: () => (mixed || canUndo) && !actionBusyRef.current && !saveError, run: () => doUndo() },
     "review.markSuspend": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void markAndSuspend() },
     "review.skip": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void skip() },
     "review.delete": { when: () => hasCard && !actionBusyRef.current && !saveError, run: () => void handleDelete() },
@@ -802,6 +885,58 @@ export default function ReviewView({
     </div>
   );
 
+  // ---------- 混合复习的摘录条目（v48.22 / D58；v49.61 / D232 补齐） ----------
+  // 处理完一条摘录 → 取会话下一条（可能是卡，也可能又是摘录）
+  const afterExtract = useCallback(async () => {
+    const nx = await nextCard();
+    setCurrent(nx ?? null);
+    if (nx) {
+      setShowBack(false);
+      setStartedAt(Date.now());
+    }
+    setSessionDone(!nx && extractHeadRef.current === null);
+    void refreshUndo();
+  }, [nextCard, refreshUndo]);
+  /** D232：推进 / 推迟 / 毕业共用的执行壳——busy 守卫（连按两次「下一条」不再把同一条推进两次）、
+      失败停在原条、成功广播 workflow/changed 后取下一条 */
+  const runExtractStep = useCallback(
+    async (op: () => Promise<unknown>) => {
+      if (actionBusyRef.current) return;
+      actionBusyRef.current = true;
+      try {
+        try {
+          await op();
+        } catch {
+          return;
+        }
+        eventBus.emit("workflow/changed");
+        await afterExtract();
+      } finally {
+        actionBusyRef.current = false;
+      }
+    },
+    [afterExtract]
+  );
+  // D232：摘录条目上的「下一条」键——与摘录页同口径（只认不带修饰键的空格 / 回车；打字、控件原生键、
+  // 对话框内、长按连发一律不触发）。撤销键走 review.undo 命令（混合复习下＝统一撤销链）
+  const currentExtractId = currentExtract?.id ?? null;
+  useEffect(() => {
+    if (!currentExtractId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (isImeComposing(e)) return;
+      if (e.defaultPrevented) return;
+      if (isTextEntryTarget(e.target) || isNativeControlKey(e)) return;
+      if (isInModal(e.target)) return;
+      const plain = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
+      if (!plain || (e.key !== " " && e.key !== "Enter")) return;
+      e.preventDefault();
+      if (e.repeat) return;
+      void runExtractStep(() => readingWorkflow.advance(currentExtractId));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [currentExtractId, runExtractStep]);
+
   if (loading) {
     return (
       <div className="review-wrap">
@@ -813,22 +948,37 @@ export default function ReviewView({
   // v48.22（D58 §6.8-3）：合并会话推送到摘录时，用**与摘录页同一张卡面**就地处理
   if (currentExtract) {
     const ex = currentExtract;
-    const after = async () => {
-      const nx = await nextCard();
-      setCurrent(nx ?? null);
-      if (nx) {
-        setShowBack(false);
-        setStartedAt(Date.now());
-      }
-      setSessionDone(!nx && extractHeadRef.current === null);
-    };
+    // D232：改优先级 / 编辑正文只就地更新当前条（不重排、不换条——与摘录页 D226 钉卡同口径），
+    // 并把新值回写进卡面（原实现不回写：编辑后读态仍显示旧正文，直到换条）
+    const patchCurrent = (patch: Partial<DueTopic>) =>
+      setCurrentExtract((cur) => {
+        if (!cur || cur.id !== ex.id) return cur;
+        const next = { ...cur, ...patch };
+        extractHeadRef.current = next;
+        return next;
+      });
     // 动作集：同一个对象喂给卡面与底栏（v2 §8.4）
     const exHandlers = {
-      onAdvance: () => void readingWorkflow.advance(ex.id).then(after),
-      onPostpone: (days: number) => void readingWorkflow.postponeDays(ex.id, days).then(after),
-      onPriority: (p: number) => void readingWorkflow.setPriority(ex.id, p),
-      onGraduate: () => void readingWorkflow.graduate(ex.id).then(after),
-      onEdit: (text: string) => void readingWorkflow.updateContent(ex.id, text),
+      onAdvance: () => void runExtractStep(() => readingWorkflow.advance(ex.id)),
+      onPostpone: (days: number) => void runExtractStep(() => readingWorkflow.postponeDays(ex.id, days)),
+      onPriority: (p: number) =>
+        void readingWorkflow.setPriority(ex.id, p).then(
+          () => {
+            patchCurrent({ priority: p, prioritySource: "user" });
+            void refreshUndo();
+          },
+          () => undefined
+        ),
+      onGraduate: () => void runExtractStep(() => readingWorkflow.graduate(ex.id)),
+      onEdit: (text: string) =>
+        void readingWorkflow.updateContent(ex.id, text).then(
+          () => {
+            patchCurrent({ contentMarkdown: text });
+            eventBus.emit("workflow/changed");
+            void refreshUndo();
+          },
+          () => undefined
+        ),
       onJumpToSource:
         onJumpToDoc && ex.contextRef?.documentId
           ? () =>
@@ -837,14 +987,14 @@ export default function ReviewView({
                 anchorRatio: ex.contextRef!.anchorRatio
               })
           : undefined,
-      onUndo: () => void undoApi.last().then(after)
+      onUndo: () => doUndo()
     };
     return (
       <div className="review-wrap">
         {/* 头带：全宽吸顶（与摘录页同一配方），计数在最右 */}
         <div className="review-head">
           <div className="review-head-inner">
-            <div className="review-count mono">{T("摘录 · 合并复习")}</div>
+            <div className="review-count mono">{T("摘录 · 混合复习")}</div>
           </div>
         </div>
         <div className="review-session">
@@ -888,9 +1038,9 @@ export default function ReviewView({
                 growthAPI.sessionSummary(sessionStartTs)；空命中组件自身零渲染（禁负面对照） */}
             {doneCount > 0 && <GrowthSessionSummary fromTs={sessionStartTs} />}
             <div className="settings-row">
-              {undoInfo && (
-                <button className="btn btn-secondary btn-sm" onClick={undoLastGrade}>
-                  {undoInfo.rating ? T("撤销评分（{rating}）", { rating: undoInfo.rating }) : T("撤销评分")}
+              {canUndo && (
+                <button className="btn btn-secondary btn-sm" onClick={doUndo}>
+                  {undoLabel}
                 </button>
               )}
               <button className="btn btn-secondary btn-sm" onClick={() => window.location.reload()}>
@@ -1129,14 +1279,14 @@ export default function ReviewView({
             </button>
             {barMoreOpen && (
               <div className="bar-pop" data-pop>
-                {undoInfo && (
+                {canUndo && (
                   <button
                     onClick={() => {
                       setBarMoreOpen(false);
-                      undoLastGrade();
+                      doUndo();
                     }}
                   >
-                    {undoInfo.rating ? T("撤销评分（{rating}）", { rating: undoInfo.rating }) : T("撤销评分")}<span className="k mono">Z</span>
+                    {undoLabel}<span className="k mono">{bindingHint("review.undo")}</span>
                   </button>
                 )}
                 <button

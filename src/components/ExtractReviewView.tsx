@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isImeComposing } from "../lib/ime";
+import { isTextEntryTarget, isNativeControlKey, isInModal } from "../lib/keyTarget";
 import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import { useSelectionBarStyle } from "../lib/selectionBarSettings";
@@ -90,6 +91,13 @@ export function splitChain(chain: Array<{ id: string; text: string; depth: numbe
 export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, scopeTags, scopeKpIds, header, onExit, onExtract, onMaterialName, onOpenAnchorCards }: Props) {
   const T = useT();
   const [items, setItems] = useState<DueTopic[]>([]);
+  /**
+   * 钉住的当前卡（v49.55 / D226）：队列刷新（改优先级 / 编辑正文与批注 / 他处 workflow/changed /
+   * 新到期高优先级摘录插队）**不换卡**——当前卡始终是钉住的那条；只有消费类动作（下一条 / 推迟 /
+   * 毕业）清钉、撤销改钉到被召回的那条。改过的优先级等到「下一条」时才按新顺序参与排序。
+   * null 或钉住的条目已不在队列（被他处处理 / 删除）＝回落队列头并重新钉住。
+   */
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
   const [engine, setEngine] = useState<ExtractEngine>("sm19-default");
   const [cardCounts, setCardCounts] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
@@ -243,9 +251,16 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     [bookItemIds, scopeTags, scopeKpIds, scopeLimits]
   );
 
-  const refresh = useCallback(async () => {
+  /**
+   * 拉取会话队列。opts.repin＝消费类动作后清钉（新队列头按最新排序成为当前卡）；
+   * opts.pinTo＝撤销召回的摘录 id（在队列里才改钉，否则保持原钉）。缺省＝只更新数据、不换卡（D226）。
+   */
+  const refresh = useCallback(async (opts?: { repin?: boolean; pinTo?: string | null }) => {
     const [q, prefs] = await Promise.all([fetchSessionQueue({ scope }), extractSettings.read()]);
-    setItems((q?.extracts ?? []) as DueTopic[]);
+    const list = (q?.extracts ?? []) as DueTopic[];
+    setItems(list);
+    if (opts?.pinTo && list.some((x) => x.id === opts.pinTo)) setPinnedId(opts.pinTo);
+    else if (opts?.repin) setPinnedId(null);
     setEngine(prefs.engine);
     setLoaded(true);
     // 撤销可用性：**空态也必须可达**（处理完最后一条后仍要能 Ctrl+Z / 点「撤销最近一次操作」）
@@ -270,7 +285,12 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     return eventBus.on("workflow/changed", () => void refresh());
   }, [refresh]);
 
-  const current = items[0] || null;
+  const current = (pinnedId ? items.find((x) => x.id === pinnedId) : undefined) ?? items[0] ?? null;
+  // 钉住回落到的队列头（首次进入 / 清钉后 / 钉住条目离队）；空队列清钉，防旧 id 日后回队时被误钉
+  useEffect(() => {
+    const id = current?.id ?? null;
+    if (id !== pinnedId) setPinnedId(id);
+  }, [current?.id, pinnedId]);
   /** 面包屑描述的是**正在显示**的那张卡：会话态＝队列头；查看态＝被点开的那层 */
   const shown = viewing ?? current;
   const shownId = shown?.id ?? null;
@@ -586,7 +606,7 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       try {
         await fn();
         eventBus.emit("workflow/changed");
-        await refresh();
+        await refresh({ repin: true }); // D226：消费类动作＝换卡点，新队列头按最新排序（含刚改的优先级）
         if (note) {
           setFlash(note);
           window.setTimeout(() => setFlash(null), 1800);
@@ -644,7 +664,9 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     if (r.ok) {
       setFlash(T("已撤销最近一次操作"));
       window.setTimeout(() => setFlash(null), 1800);
-      await refresh();
+      // D226：撤销召回的摘录（推进/推迟/毕业被撤回）钉为当前卡；撤销的是闪卡评分或召回条不在本队列＝不换卡
+      const restored = Array.isArray(r.extractIds) && r.extractIds.length ? String(r.extractIds[0]) : null;
+      await refresh({ pinTo: restored });
     } else {
       setFlash(r.reason || T("没有可撤销的操作"));
       window.setTimeout(() => setFlash(null), 1800);
@@ -657,14 +679,21 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     setViewRanges(null);
   }, []);
 
+  const dockOpen = selActions.dockOpen;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isImeComposing(e)) return; // 组字中的 Enter/Esc/空格属于输入法，不推进调度
-      const t = e.target as HTMLElement | null;
-      const tag = (t?.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select" || t?.isContentEditable) return;
+      // v49.57 / D228：已被别处处理过的按键（全局命令分发、子组件自己的键盘逻辑）不再二次处理
+      if (e.defaultPrevented) return;
+      // v49.56 / D227：只有真正在打字（文本框 / 文本区 / 下拉框 / 可编辑区）才让路；焦点停在优先级
+      // 滑块等非文本控件上时，空格 / 回车 / Z 照常生效，只把滑块方向键、Tab 选中按钮的回车/空格留给控件
+      if (isTextEntryTarget(e.target) || isNativeControlKey(e)) return;
+      // D228：焦点在对话框内、或制卡面板开着——摘录页快捷键整体让路（面板里按空格 / 回车 / Z
+      // 不得推进或撤销后面那条摘录；面板按钮由它自己的原生键处理）
+      if (isInModal(e.target) || dockOpen) return;
+      const plain = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
       if (viewing) {
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && plain) {
           e.preventDefault();
           closeViewing();
         }
@@ -672,17 +701,23 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       }
       if (e.key === "Escape") {
         setCrumbOpen(false);
-      } else if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        void advance();
-      } else if (e.key === "z" || e.key === "Z") {
-        e.preventDefault();
-        void undo();
+        return;
       }
+      // D228：「下一条」只认不带修饰键的空格 / 回车（Ctrl+回车、Shift+空格等不再误触推进）；
+      // 撤销认 Z 与 Ctrl/Cmd+Z，排除 Alt+Z（阅读「制卡」默认键）与 Ctrl+Shift+Z（重做习惯键）
+      const isAdvance = (e.key === " " || e.key === "Enter") && plain;
+      const isUndo =
+        (e.key === "z" || e.key === "Z") && !e.altKey && !e.shiftKey && !(e.ctrlKey && e.metaKey);
+      if (!isAdvance && !isUndo) return;
+      e.preventDefault();
+      // D228：长按连发（e.repeat）只吞掉、不执行——按住空格 / Z 不再连续跳过或连续撤销多条
+      if (e.repeat) return;
+      if (isAdvance) void advance();
+      else void undo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [advance, undo, viewing, closeViewing]);
+  }, [advance, undo, viewing, closeViewing, dockOpen]);
 
   /** 面包屑点某层：切到那张卡（查看态）。当前层不可点——渲染成 span，且这里再拦一道。
    *  不带「要看的范围」：高亮该层自身的 quote_range_json（既有行为，规格 §1.2 R13）。 */

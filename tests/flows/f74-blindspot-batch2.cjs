@@ -132,7 +132,7 @@ app
       flow.record("insight_runs 行数（应为 0，两次都是不存在的 id）", JSON.stringify(runs3));
       flow.check("对不存在的洞察运行写反馈/标失败，不得凭空造出行、也不得返回成功", Number(runs3[0].n) === 0 && (fb.ok === false || fb.v === false || fb.v == null), "0 行且拒绝", { 行数: runs3[0].n, fb });
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.message) || e));

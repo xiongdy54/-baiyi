@@ -104,7 +104,7 @@ app
       // F03-S9 / F33 / F05 各自覆盖，本条只钉 D34 这条例外的四条收口路径，不再重开库。
       flow.record("J7 说明", "跨重启守恒由 F03-S9 / F33 / F05 覆盖；本条不重复，且已记录「同进程二次 initDb 会挂死」这个坑");
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.message) || e));

@@ -235,6 +235,33 @@ const opts = () => ({ ...P, backupDir: BAK, counts, appVersion: "0.0.1" });
   backup.rotateSafetyBackups(BAK, 1);
   check("safety 差分：无 protect 时同样会删掉刚生成的新档（复现缺陷）", !fs.existsSync(sfNew), sfNew);
 
+  console.log("== 8b) D235：clockSkewInfo 现场探测（设置页通知框经 backup:info 每次现取） ==");
+  {
+    const SK = path.join(tmp, "skew-probe");
+    fs.mkdirSync(SK, { recursive: true });
+    const fut = (d) => new Date(Date.now() + d * 86400000);
+    const touch = (name, when) => { const f = path.join(SK, name); fs.writeFileSync(f, "x"); fs.utimesSync(f, when, when); };
+    let ci = backup.clockSkewInfo({ backupDir: SK });
+    check("空目录 → 不判定", ci.suspected === false && ci.count === 0 && ci.latestAt === null, JSON.stringify(ci));
+    touch("backup-auto-2026-01-01.zip", new Date());
+    touch("backup-manual-20260101-000000.zip", fut(0.5)); // 1 天内小漂移不算
+    ci = backup.clockSkewInfo({ backupDir: SK });
+    check("只有当前 / 1 天内的备份 → 不判定", ci.suspected === false && ci.count === 0, JSON.stringify(ci));
+    touch("backup-auto-2026-01-02.zip", fut(3));
+    touch("backup-manual-20260102-000000.zip", fut(5));
+    touch("backup-safety-20260102-000000.zip", fut(2));
+    touch("notes-2099.zip", fut(9)); // 非本软件备份文件名不计
+    ci = backup.clockSkewInfo({ backupDir: SK });
+    check("auto / manual / safety 建于未来均计数（3 份），非备份文件不计", ci.suspected === true && ci.count === 3, JSON.stringify(ci));
+    check("latestAt = 最晚一份的修改时间（≈ 当前 + 5 天）", Math.abs(ci.latestAt - fut(5).getTime()) < 2000, JSON.stringify(ci));
+    ci = backup.clockSkewInfo({ backupDir: SK, now: fut(10) });
+    check("注入 now（时间走到未来备份之后）→ 现场消除，不再判定", ci.suspected === false && ci.count === 0, JSON.stringify(ci));
+    ci = backup.clockSkewInfo({ backupDir: path.join(tmp, "no-such-dir") });
+    check("目录不存在 / 不可读 → 不判定且不抛", ci.suspected === false && ci.count === 0, JSON.stringify(ci));
+    check("C-14 detectClockSkew 返回口径不变（只看 auto）", r.clockSkewSuspected === true, r.clockSkewSuspected);
+    fs.rmSync(SK, { recursive: true, force: true });
+  }
+
   console.log("== 9) C-23：启动 quick_check 移除；快照完整性检查参与备份轮换决策 ==");
   // 9a 静态守卫：启动路径不再执行 quick_check——应用日志里 [db]/[learnerDb] quick_check 行的唯一来源就是这两处
   const dbjsSrc = fs.readFileSync(path.join(__dirname, "..", "electron", "db.js"), "utf8");

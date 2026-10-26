@@ -357,6 +357,8 @@ CREATE TABLE IF NOT EXISTS lexeme_states (
 
 **重建规则：** `lm_meta` 存 `schema_version`（本版 `1`）。`open()` 发现 `schema_version` 不等于代码常量时：关闭、删除文件、重新建表（全量重建）。另存 `icu_version`（`process.versions.icu`）与 `lex_version`：任一与当前不同时，清空 `lexemes / unit_lex / lexeme_states` 让词项索引重建（不同 ICU 版本的 `Intl.Segmenter` 切词结果不同，例如 Node 22 把「読んだ」切成 読/ん/だ）。
 
+> **v49.63（D234）补充——母语变更即清表重建**：`lm_meta` 另存 `lex_native_langs`（母语生效值去重排序后逗号拼接）。lex 步骤开头与当前生效值比对：不同 ⇒ `learnerDb.resetLexIndex()` 单事务清空 `lexemes / unit_lex / lexeme_states` 与 `mine_count:*` 并写入新指纹，随后按新母语的语言轨道全量重建（旧母语下建的词项不残留）；无记录（升级后首轮 / 重建索引后）只记录不清表。词项 id 只在 learner.db 内部引用，查词 / 标记 / 定级事件与词汇卡都按 `lang:key` 关联，重建后原样再映射（用户数据零损失）。另：lex 步骤在索引新单元后回收 `unit_count <= 0` 的孤儿词项（轨道变化 / 材料移出后不再以 0 计数残留）。主进程 `settings:set` 写 `app.learner` 前后比对母语指纹，变了即 `learnerRefresh.requestNativeRebuild()` 后台补一轮刷新（已有一轮在跑则其结束后补跑）。
+
 ### 5.3 `learning_events.kind` 封闭枚举与 payload 形状
 
 校验写在 `db.js` 的 `addLearningEvent`（IPC handler 只转发），非法 kind 或 payload 直接返回 `{ok:false, error}`，不写库。字符串超长按表中上限截断，数组超长截断到上限。
@@ -728,7 +730,7 @@ learner:recommend
 | 覆盖率 coverage(u) | §6.8 | 语言类的 fit |
 | 复现度 recycling(u) | `min(1, learningCount(u) / 20)` | 语言类的 value（窄读：选能复现你正在学的词的文本） |
 | 动量 momentum | 该材料或 KP 近 3 天有活动 → 1；近 14 天 → 0.5；否则 0 | 所有类型 |
-| 用户优先级 priority | 材料 `1 − library_items.priority / 100`；摘录 `1 − extracts.priority / 100`（数字越小越优先，§6.4） | 所有类型 |
+| 用户优先级 priority | 材料 `1 − library_items.priority / 100`；摘录 `1 − extracts.priority / 100`（数字越小越优先，§6.4；**v49.62 / D233 起方向统一为数字越大越优先 ⇒ `priority / 100`，缺省＝0.5**，存量值迁移翻转、同分） | 所有类型 |
 
 **挑战适配 fit：**
 - 概念类：`fit = readiness × (1 − |novelty − NOVELTY_TARGET| / max(NOVELTY_TARGET, 1 − NOVELTY_TARGET))`，`NOVELTY_TARGET = 0.3`。
@@ -1207,6 +1209,7 @@ void learnerApi.logEvent({ kind: "dict_lookup", lang: 实际查词语言, librar
 | `nativeConfirmed` | `false` | boolean | 用户是否已确认过母语（§11.4 面板首行提示用） |
 | `recCount` | `6` | 整数 3–10 | 推荐条数，用户可在设置页与面板标题行两处调整（同一个值） |
 
+- **改母语即重建词项（v49.63 / D234）**：生效值变化后主进程立即后台刷新，lex 步骤清空旧母语下建的词项并按新母语重建（细节见 §5.2「重建规则」后的 D234 补充）。
 - **母语的生效值（全球用户，不得写死任何语言）**：`nativeLangs` 合法且非空 → 用它；否则 → `[baseLang(系统区域)]`，系统区域在主进程取 `app.getLocale()`，在渲染层取 `navigator.language`（两者在 Electron 中一致）；取不到或得到空串 → `[]`（此时没有任何语言被视为外语之外的「母语」，所有有语言的材料都会被提议为 language 轨道，面板首行会要求用户设置母语）。
 - **渲染层**：在 `src/lib/learner.ts` 里写 `learnerSettings = { read(), write(patch) }`，结构照抄 `extractSettings.read/write`（`settingsStore.get("app","learner",{})` / `settingsStore.set("app","learner",{...旧, ...patch})`），`read()` 里做合法化（非法值回默认，`recCount` 取整后夹到 3..10，`nativeLangs` 每项过 `baseLang` 后去重、只保留 `/^[a-z]{2,3}$/`）并返回母语生效值 `effectiveNativeLangs`。写入后 `eventBus.emit("settings/changed", { scope: "app", key: "learner" })`（写法同 `src/App.tsx:264-276`）。
 - **主进程**：`learnerRefresh.js` 用 `require("./settingsStore").readSettings().app?.learner`（写法同 `db.js:3073` 读 `app.extracts`），做同样的合法化与生效值计算。**每次 IPC 调用都重新读一次**（文件很小，`getActiveEngine` 已是同样做法），这样开关切换立即生效，不需要通知机制。**不改** `main.js` 的 `settings:set`。

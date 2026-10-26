@@ -20,7 +20,8 @@ function clamp(v, lo, hi) {
 
 /**
  * 打分并排序（降序）。因子：
- *  userPriority = 1 − priority/100（优先级数字越小越优先，**原样尊重不反转**）
+ *  userPriority = priority/100（v49.62 / D233 起优先级**数字越大越优先**，原样尊重不反转；存量值已由
+ *                 schemaVersion v5 迁移 p→100−p 翻转，与改前 1 − p/100 逐值同分）
  *  dueBoost     = 1 + min(逾期天数, 30)/30（已到期越久越优先，最多 +100%）
  *  staleness    = 1 + min(postponeCount, 10)/20（搁置越久温和加分，防永久沉底）
  *  depthBonus   = 子摘录（更具体的最小单元）略优先
@@ -36,7 +37,7 @@ function scoreExtracts(items, nowTs, opts = {}) {
     const overdueDays = Math.max(0, (now - dueAt) / DAY);
     const postponeCount = Math.max(0, Number(e.postponeCount) || 0);
     const depth = Math.max(1, Number(e.depth) || 1);
-    const userPriority = 1 - priority / 100;
+    const userPriority = priority / 100;
     const dueBoost = 1 + Math.min(overdueDays, STALE_WINDOW_DAYS) / STALE_WINDOW_DAYS;
     const staleness = 1 + Math.min(postponeCount, POSTPONE_SATURATION) / 20;
     const depthBonus = depth > 1 ? 1.05 : 1;

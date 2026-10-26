@@ -161,6 +161,7 @@ export default function SelectionPanels({
   nowTick?: number;
   elapsedSec?: number;
 }) {
+  const T = useT();
   const { aiPanel, manualOpen, manualImage, manualQuote, dictPanel, dockOpen } = sel;
   const settingPlacement = useWorkbenchPlacement();
   const placement: WorkbenchDockPlacement = placementOverride ?? settingPlacement;
@@ -574,10 +575,10 @@ export default function SelectionPanels({
             onToggleManual={() => setManualCollapsed((v) => !v)}
             onCollapse={sel.collapseDock}
             manualTabs={
-              <div className="wb-tabs" role="tablist" aria-label="卡片类型" data-testid="manual-types">
+              <div className="wb-tabs" role="tablist" aria-label={T("卡片类型")} data-testid="manual-types">
                 {MANUAL_TABS.map(([m, label]) => (
                   <button key={m} type="button" role="tab" aria-selected={manualMode === m} className={manualMode === m ? "on" : undefined} onClick={() => pickMode(m)}>
-                    {label}
+                    {T(label)}
                   </button>
                 ))}
               </div>

@@ -241,6 +241,10 @@ async function runFlow(flow, body) {
     console.log("  ! 本轮零断言：视为失败");
     s.aborted = s.aborted || { name: "零断言", err: "flow 未产生任何 check()" };
   }
+  // D239：结果不干净（与编排器 run.cjs 的 isCleanPass 同口径）就把退出码置 1——
+  // 没有显式退出的 node 流程自然退出时、以 app.exit(process.exitCode || 0) 收尾的 Electron 流程，都据此如实上报，
+  // 不再「断言失败、退出码 0」。显式按 s 退出的流程（dbenv.quit(…) / process.exit(s…)）不受影响。
+  if (s.fail > 0 || s.aborted || s.crash || (s.knownHealed || []).length) process.exitCode = 1;
   return s;
 }
 

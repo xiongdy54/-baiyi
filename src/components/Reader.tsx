@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReadMarkdown from "./editor/ReadMarkdown";
 import "katex/dist/katex.min.css";
 import { isImeComposing } from "../lib/ime";
+import { isTextEntryTarget, isNativeControlKey } from "../lib/keyTarget";
 import { cardsApi, parseCloze, type CardDraft } from "../lib/cards";
 import { useSelectionActions } from "../lib/useSelectionActions";
 import { headingPathAt, tocPathByHref } from "../lib/reader/tocPath";
@@ -1292,8 +1293,8 @@ export default function Reader({
     if (!engineMode) return;
     const onKey = (e: KeyboardEvent) => {
       if (manualOpen || aiPanel || occlEditor) return;
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // D227：文本输入让路；滑块的 PageUp/PageDown、键盘聚焦按钮的空格归控件本身
+      if (isTextEntryTarget(e.target) || isNativeControlKey(e)) return;
       // v48.90（D130 P4c）：←/→ 翻页迁入 CommandRegistry（reader.turnPrev/turnNext，可改键）；
       // PageUp/PageDown/空格/Shift+空格保留壳层硬编码——不进命令表（滚动场景空格语义不冲突、
       // 这四键不在「可自定义」诉求内，爆炸半径收敛）

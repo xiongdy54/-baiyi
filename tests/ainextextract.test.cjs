@@ -31,8 +31,16 @@ check("空输入 → 空输出", scoreExtracts([], NOW).length === 0, 0, scoreEx
 check("非数组输入不抛错（按空处理）", scoreExtracts(null, NOW).length === 0, 0, scoreExtracts(null, NOW).length);
 
 console.log("== A2 因子单调性 ==");
-const byPriority = scoreExtracts([mk("lo", { priority: 90 }), mk("hi", { priority: 10 })], NOW);
-check("优先级数字越小越靠前（原样尊重不反转）", byPriority[0].id === "hi", "hi", byPriority.map((x) => x.id));
+// v49.62 / D233：方向统一为「数字越大越优先」（存量值由 schemaVersion v5 翻转 p→100−p，与改前同分）
+const byPriority = scoreExtracts([mk("lo", { priority: 10 }), mk("hi", { priority: 90 })], NOW);
+check("优先级数字越大越靠前（D233 起，原样尊重不反转）", byPriority[0].id === "hi", "hi", byPriority.map((x) => x.id));
+// 翻转等价：新值 p' 的 userPriority 与改前 1 − p/100（p＝100 − p'）逐值相等
+check(
+  "翻转等价：userPriority(p') ＝ 改前 1 − (100 − p')/100",
+  [0, 10, 37, 50, 90, 100].every((p) => Math.abs(scoreExtracts([mk("x", { priority: p })], NOW)[0].factors.userPriority - (1 - (100 - p) / 100)) < 1e-12),
+  true,
+  [0, 10, 37, 50, 90, 100].map((p) => scoreExtracts([mk("x", { priority: p })], NOW)[0].factors.userPriority)
+);
 const byDue = scoreExtracts(
   [mk("fresh", { topicNextAt: NOW }), mk("overdue", { topicNextAt: NOW - 20 * DAY })],
   NOW
@@ -119,10 +127,11 @@ const fakeOrder = (order) => async () => JSON.stringify({ order });
 
   // ---- v48.80（D124 / 设计稿 §9.5 E2）：kpFactorOf 接入 ----
   {
+    // D233：优先级取改前 10/20/30 的翻转值（越大越优先），本地因子序与改前一致（e-1 居首）
     const base = [
-      mk(`e-1`, { libraryItemId: `bA`, priority: 10 }),
-      mk(`e-2`, { libraryItemId: `bB`, priority: 20 }),
-      mk(`e-3`, { libraryItemId: `bC`, priority: 30 })
+      mk(`e-1`, { libraryItemId: `bA`, priority: 90 }),
+      mk(`e-2`, { libraryItemId: `bB`, priority: 80 }),
+      mk(`e-3`, { libraryItemId: `bC`, priority: 70 })
     ];
     const plain = rankExtracts(base, NOW);
     const withOne = rankExtracts(base, NOW, { kpFactorOf: () => 1 });

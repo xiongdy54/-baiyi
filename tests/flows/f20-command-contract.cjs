@@ -157,11 +157,30 @@ app
       const fakeFromInput = { key: "z", altKey: true, repeat: false, target: { tagName: "INPUT" } };
       __testHooks.dispatchKey(fakeFromInput);
       const guardedInDispatch = ran === 0;
-      const staticGuard = /activeElement|isContentEditable|tagName\s*===?\s*["'](INPUT|TEXTAREA)| closest\(["']input/.test(cmdSrc);
+      // v49.56 / D227：焦点分类收进 src/lib/keyTarget.ts（isTextEntryTarget / isNativeControlKey），commands.ts 调用之
+      const staticGuard = /activeElement|isContentEditable|isTextEntryTarget\(|tagName\s*===?\s*["'](INPUT|TEXTAREA)| closest\(["']input/.test(cmdSrc);
       flow.record("行为证据", `焦点内的 Alt+Z 触发了 ${ran} 次动作`);
       flow.record("静态证据", `commands.ts 里${staticGuard ? "有" : "找不到"}焦点判断`);
       flow.check("焦点在输入框时命令分发必须放行给原生行为", guardedInDispatch && staticGuard, "不劫持", `dispatchKey 无焦点判断（${ran} 次触发），文件里${staticGuard ? "有" : "也没有"}静态守卫`);
       commandRegistry.setActionSource("f20", null);
+      // D227：非文本控件（滑块 / 复选框）不再整体屏蔽快捷键——只让出控件自己的原生键
+      const hitsD227 = [];
+      commandRegistry.setActionSource("f20-d227", () => ({
+        "review.showAnswer": { run: () => hitsD227.push("space") },
+        "reader.turnPrev": { run: () => hitsD227.push("left") },
+      }));
+      const rangeTarget = { tagName: "INPUT", type: "range", getAttribute: () => null };
+      __testHooks.dispatchKey({ key: " ", repeat: false, target: rangeTarget });
+      flow.eq("焦点在滑块上时空格照常命中页面命令（D227：拖完优先级滑块空格不再失效）", hitsD227.join(","), "space");
+      __testHooks.dispatchKey({ key: "ArrowLeft", repeat: false, target: rangeTarget });
+      flow.eq("滑块上的方向键归滑块调值，不触发翻页命令", hitsD227.join(","), "space");
+      const kbdButton = { tagName: "BUTTON", getAttribute: () => null, hasAttribute: () => false, matches: (sel) => sel === ":focus-visible" };
+      __testHooks.dispatchKey({ key: " ", repeat: false, target: kbdButton });
+      flow.eq("Tab 选中的按钮上的空格归按钮本身（不触发页面命令）", hitsD227.join(","), "space");
+      const mouseButton = { ...kbdButton, matches: () => false };
+      __testHooks.dispatchKey({ key: " ", repeat: false, target: mouseButton });
+      flow.eq("鼠标点过的按钮上的空格仍归页面命令（连续复习手感不变）", hitsD227.join(","), "space,space");
+      commandRegistry.setActionSource("f20-d227", null);
 
       // ---------- W4 分发语义 ----------
       flow.section("W4 when() 关闭 / e.repeat / 抑制栈 三道闸必须都有效（§9.1 M4）");

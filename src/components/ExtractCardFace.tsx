@@ -600,7 +600,7 @@ export function ExtractActionsBar({
       {handlers.onPriority && (
         /* 优先级簇（v48.36/D76，L1）：一盒一功能——标签/滑轨/数字盒内裸排，滑轨维持 140×20（D75 裁定）。
             值走本地草稿（shownPriority），停手 350ms 才提交（D72 去闪）。 */
-        <label className="bar-cluster" title={T("优先级：拖动滑块或直接输入数字（数字越大越靠后）")}>
+        <label className="bar-cluster" title={T("优先级：拖动滑块或直接输入数字（数字越大越优先）")}>
           <span className="unit">{T("优先级")}</span>
           <span className="prio-track">
             <span className="prio-fill" style={{ width: `${shownPriority}%` }} />

@@ -127,7 +127,7 @@ app
         flow.check("createBackup 成功", false, "ok", created);
       }
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.stack) || e));

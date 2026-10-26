@@ -81,6 +81,10 @@ async function launch({ label = "gui", port = 9620, fresh = true, logName = null
     env: { ...process.env, M7_TEST_USERDATA: dir },
   });
   const conn = await connect(port, child);
+  // D239：连不上（超时）时调用方拿不到可驱动的页面——各流程在这条路上都是记一条失败就 return、不收尾，
+  // 子应用却一直开着（例如停在「数据版本过新」模态框上），驱动进程被子进程句柄拖住、挂满外层超时
+  // （F48V 在基线上实测挂到 900 s）。这里就地结束它。
+  if (conn.timeout) await shutdown({ child });
   return { dir, child, port, ...conn };
 }
 
@@ -91,7 +95,9 @@ async function connect(port, child, timeoutMs = 90_000, pickLast = false) {
       return { skippedByExit: true, code: child.exitCode, reason: `应用进程提前退出（code=${child.exitCode}）——单实例锁或启动失败` };
     }
     try {
-      const list = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
+      // D239：单次探测限时 5 s——主线程被模态框卡住时 /json 会一直不应答，不限时则一次 fetch 就吃掉 300 s
+      // （undici 默认头部超时），上面的 90 s 截止形同虚设
+      const list = await (await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(5000) })).json();
       const pages = list.filter((t) => t.type === "page" && /index\.html|capture\.html/.test(t.url || ""));
       const page = pickLast ? pages[pages.length - 1] : pages.find((t) => /index\.html/.test(t.url || ""));
       if (page && page.webSocketDebuggerUrl) {
@@ -141,7 +147,7 @@ async function connect(port, child, timeoutMs = 90_000, pickLast = false) {
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  return { timeout: true, reason: `90 秒内连不上 CDP（端口 ${port}）` };
+  return { timeout: true, reason: `${Math.round(timeoutMs / 1000)} 秒内连不上 CDP（端口 ${port}）` };
 }
 
 /** 只结束自己起的进程树（taskkill /T /F 按 PID，绝不按映像名批量杀） */
@@ -166,6 +172,15 @@ async function shutdown(handle) {
     };
     tick();
   });
+  // D239：SIGTERM 后 4 s 仍未退（模态框会挡住正常退出流程）→ 非 Windows 上强制结束，
+  // 否则驱动进程被子进程句柄拖住不退出（Windows 由下面的 taskkill /T /F 兜底）
+  if (handle.child.exitCode === null && handle.child.signalCode === null && process.platform !== "win32") {
+    try {
+      handle.child.kill("SIGKILL");
+    } catch {
+      /* ignore */
+    }
+  }
   if (pid) {
     try {
       require("child_process").execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore" });

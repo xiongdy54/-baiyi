@@ -180,11 +180,12 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "已保存，各界面即时生效。": "Saved. All views update immediately.",
 
   // —— 摘录复习 / 每日上限 ——
-  "并入复习队列": "Merge into review queue",
-  "并入复习队列（传统 SuperMemo 方式）": "Merge extracts into review (classic SuperMemo way)",
-  "开启后复习时按混编规则推送摘录卡，可就地处理；关闭时摘录在顶栏「摘录」页连续处理。":
-    "When on, extract cards are pushed during review by the interleaving rules and handled in place; when off, extracts are processed continuously on the \"Extracts\" page.",
-  "摘录并入复习队列": "Merge extracts into review",
+  "复习方式": "Review mode",
+  "分开处理": "Separate",
+  "混合复习（SuperMemo 式）": "Mixed (SuperMemo style)",
+  "分开处理：闪卡在「复习」页、摘录在顶栏「摘录」页各自连续处理，两页各自撤销。混合复习：到期摘录按混编规则穿插在「复习」页里与闪卡一起处理，Z 依次撤销最近的评分或摘录操作（与摘录页同一条撤销链）；「摘录」页仍可单独处理摘录。切换不写任何调度状态。":
+    "Separate: cards are reviewed on the \"Review\" page and extracts on the \"Extracts\" page, each with its own undo. Mixed: due extracts are interleaved into the \"Review\" session by the interleaving rule and handled together with cards; Z undoes the most recent grade or extract action in order (the same undo chain as the Extracts page). The \"Extracts\" page can still process extracts on their own. Switching writes no scheduling state.",
+  "撤销摘录操作": "Undo extract action",
   "混编规则": "Interleaving rule",
   "切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。":
     "Switching writes no scheduling state: un-released extracts keep maturing and appear immediately after the switch.",
@@ -733,8 +734,8 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "书籍语言": "Book language",
   "优先级": "Priority",
   "优先级 {n}": "Priority {n}",
-  "新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。":
-    "New extracts inherit this book's priority; existing extracts (unless edited individually) follow automatically.",
+  "数字越大越优先推送。新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。":
+    "Higher numbers are shown sooner. New extracts inherit this book's priority; existing extracts (unless edited individually) follow automatically.",
   "归入文件夹": "Move to folder",
   "新建文件夹并放入": "New folder with this book",
   "移出「{name}」": "Remove from \"{name}\"",
@@ -929,7 +930,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "与今日已放行的「{front}」同源": "Sibling of \"{front}\", released earlier today",
   "与今日已放行的同源卡同源": "Sibling of a card released earlier today",
   "同源暂缓 {n} 张（明日自动解封）": { one: "{n} sibling card held back (lifts automatically tomorrow)", other: "{n} sibling cards held back (lift automatically tomorrow)" },
-  "摘录 · 合并复习": "Extracts · merged review",
+  "摘录 · 混合复习": "Extracts · mixed review",
   "{n} 张已复习": { one: "{n} card reviewed", other: "{n} cards reviewed" },
   "今日复习进度": "Today's review progress",
   "到期卡片已清空，休息一下。": "Due cards cleared — take a break.",
@@ -1343,6 +1344,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "翻转问答": "Reversed Q&A",
   "填空题": "Cloze",
   "图片挖空": "Image occlusion",
+  "卡片类型": "Card type",
   "翻转问答：一次性创建两张互为翻转的独立问答卡（B 面留空则自动正反互换），各自有独立的复习调度。":
     "Reversed Q&A: creates two independent Q&A cards that flip each other in one go (leave side B empty to swap automatically), each with its own review scheduling.",
   "A 面 · 题面（建议「领域前缀: 问题」）": "Side A · question (suggest \"domain: question\")",
@@ -1675,7 +1677,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "下一条": "Next",
   "推迟天数": "Postpone days",
   "推迟": "Postpone",
-  "优先级：拖动滑块或直接输入数字（数字越大越靠后）": "Priority: drag the slider or type a number (larger = later)",
+  "优先级：拖动滑块或直接输入数字（数字越大越优先）": "Priority: drag the slider or type a number (higher = sooner)",
   "优先级数值": "Priority value",
   "处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器": "Nothing left worth carding after this: no longer pushed, still kept in the card browser",
 
@@ -2094,6 +2096,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "插入图表（Mermaid）": "Insert diagram (Mermaid)",
   "图表语法有误，已显示源代码": "Diagram syntax error — showing source code",
   "正在绘制图表…": "Drawing diagram…",
+  "图表组件加载失败，已显示源代码": "Couldn't load the diagram renderer — showing source code",
   "图表预览": "Diagram preview",
   "撤销（编辑器内历史）": "Undo (editor history)",
   "重做": "Redo",
@@ -2434,6 +2437,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "自动备份失败：{msg}": "Automatic backup failed: {msg}",
   "数据库完整性检查发现问题，已暂停删除旧备份。请先不要清理备份，并导出诊断信息。": "A database integrity check found problems. Deletion of old backups is paused. Please keep your backups and export diagnostic information.",
   "检测到系统时钟可能被回拨过，请核对系统时间，否则自动备份可能多日停摆。": "Your system clock may have been rolled back. Check the system time, or automatic backups may stall for days.",
+  "有 {count} 份备份的时间晚于当前系统时间（最晚 {date}），系统时钟可能被回拨过。请核对系统时间；若时间无误，到这些日期时当天的自动备份会被跳过，可打开备份文件夹核对。": "{count} backup(s) are dated later than the current system time (latest: {date}), so the system clock may have been rolled back. Check the system time; if it is correct, automatic backups will be skipped on those dates. You can open the backup folder to review them.",
   "还没有任何备份，建议立即创建一份。": "No backup exists yet — create one now.",
   "已 {days} 天没有备份，建议立即备份一次。": "No backup for {days} days — create one now.",
   "处理": "Handle",

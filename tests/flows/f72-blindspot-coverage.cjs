@@ -139,7 +139,7 @@ app
       flow.record("readEbookFile(不存在 id)", JSON.stringify(eb).slice(0, 100));
       flow.check("读不存在书的电子书文件必须返回 null 或抛错，不得返回空对象被上层当成功", eb.ok === false || eb.v == null, "null 或抛错", eb);
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.message) || e));

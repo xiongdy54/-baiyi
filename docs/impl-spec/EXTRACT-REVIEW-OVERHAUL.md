@@ -52,7 +52,7 @@
 |---|---|
 | `extracts` 表定义（15 列；`workflow_state_json` 是**死列**：INSERT 恒 NULL、无人读） | `electron/db.js:98-114`、`:2221-2222` |
 | `createExtract`：`topic_next_at = now`（**一建即到期**）、`interval_days = 1`、无 return-value 之外的副作用 | `electron/db.js:2214-2238` |
-| `listDueExtracts`：`WHERE topic_next_at <= now ORDER BY priority ASC, topic_next_at ASC` | `electron/db.js:2255-2272` |
+| `listDueExtracts`：`WHERE topic_next_at <= now ORDER BY priority ASC, topic_next_at ASC`（**v49.62 / D233 起 `priority DESC`**：方向统一为数字越大越优先，存量值迁移翻转） | `electron/db.js:2255-2272` |
 | `postponeExtract`：`interval = min(prev × 1.6, 180)`、`next_at = now + interval` | `electron/db.js:2290-2303` |
 | `parentChain`（层级，深度上限 5） | `electron/db.js:2240-2253` |
 | **不存在的 API**：`updateExtract` / `deleteExtract` / 状态写入 / 优先级写入 / 读后推进。`m4.cleanup.cjs:2` 明文「无删除 API」 | — |
@@ -275,7 +275,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_extract_ops_seq ON extract_ops(seq);
 
 | Provider | 内容 |
 |---|---|
-| `sm19-default`（默认，本次补齐） | SM 语义：`advance = interval × a_factor`、`postpone = min(interval × a_factor, 180d)`、按 `priority ASC, topic_next_at ASC` 排序 |
+| `sm19-default`（默认，本次补齐） | SM 语义：`advance = interval × a_factor`、`postpone = min(interval × a_factor, 180d)`、按 `priority ASC, topic_next_at ASC` 排序（**v49.62 / D233 起 `priority DESC`**） |
 | `ai-next-extract`（实验） | §6.4.1：`extractScore` 六因子 + 两阶段（本地 Top20 → AI 重排与解释），离线回退「到期 + priority」基线 |
 | 名称 | 落 `settings.app.extracts.engine`，**Provider 名称即持久化值**（禁自造第三套命名） |
 
@@ -329,7 +329,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_extract_ops_seq ON extract_ops(seq);
 ### F.2 `quota-1-4` 归并规则（确定性、可测）
 
 1. 卡片队列顺序 = `computeTodayQueue` 原序（due 升序 → priority 降序 → created_at → id）。
-2. 摘录队列顺序 = `priority ASC, topic_next_at ASC`。
+2. 摘录队列顺序 = `priority ASC, topic_next_at ASC`（**v49.62 / D233 起 `priority DESC`**，存量值 `p → 100 − p` 翻转，顺序不变）。
 3. 在卡片序列的第 4、8、12… 个位置**插入**至多 1 条摘录（不足则顺延，不占位、不补偿）。
 4. 末尾若仍有未放行摘录且卡片已耗尽 → **按序追加**（避免「卡片不够就永远看不到摘录」的死角）。
 5. 零随机源（同一输入必得同一输出，供逐字节断言）。
@@ -359,7 +359,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_extract_ops_seq ON extract_ops(seq);
 1. **不移动卡片**、不改任何归属；进入筛选牌组＝按 query 过滤集合后走既有会话机制。
 2. 正因不移动，**「复习记录照常计入 FSRS」天然成立**（用户要求 ①）。
 3. 故**不实现** Anki 的「reschedule 开关」与「清空后归还原牌组」（无牌组可归还）——列为非目标（§N）。
-4. 顺序沿用规范序：卡片 `computeTodayQueue` 原序、摘录 `priority ASC, topic_next_at ASC`。
+4. 顺序沿用规范序：卡片 `computeTodayQueue` 原序、摘录 `priority ASC, topic_next_at ASC`（**v49.62 / D233 起 `priority DESC`**）。
 
 **三处入口**：① 浏览器「筛选牌组」页签（列表 / 「用当前查询创建」/ 重命名 / 删除）；② 阅读器工具条两个本书按钮（§H.2）；③ 书架书卡菜单（同义快捷入口，随样张定）。
 

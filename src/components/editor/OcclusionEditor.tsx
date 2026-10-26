@@ -18,6 +18,7 @@ import {
 import type { OcclusionRegion } from "../../lib/cards";
 import { settle } from "../../lib/press";
 import { useT } from "../../lib/i18n";
+import { isTextEntryTarget } from "../../lib/keyTarget";
 
 type Tool = "rect" | "ellipse" | "polygon";
 
@@ -652,7 +653,8 @@ export default function OcclusionEditor({ image, onAISuggest, origin, onClose, o
   // Esc 链：裁剪草稿 → 裁剪框 → 裁剪模式 → 多边形草稿 → 关闭确认 → 关闭；Del/Ctrl+Z/1-3 与输入态守卫
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = ["INPUT", "TEXTAREA"].includes((document.activeElement as HTMLElement | null)?.tagName ?? "");
+      // D227：只有文本输入算「在打字」（滑块 / 复选框聚焦时 Del / Ctrl+Z / 1-3 照常可用）
+      const typing = isTextEntryTarget(document.activeElement);
       if (e.key === "Escape") {
         e.stopPropagation();
         if (cropDraft) { setCropDraft(null); dragRef.current = null; return; }

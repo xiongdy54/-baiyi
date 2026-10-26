@@ -63,7 +63,6 @@ app.whenReady().then(async () => {
     console.log("  ✗ 测试执行异常: " + (err && err.stack || err));
   } finally {
     console.log(`\n${fail === 0 ? "ALL PASS" : "FAILED"}: ${pass} passed, ${fail} failed`);
-    app.quit();
-    process.exitCode = fail === 0 ? 0 : 1;
+    app.exit(fail === 0 ? 0 : 1); // D239：app.quit() 恒以 0 退出，process.exitCode 不生效
   }
 });

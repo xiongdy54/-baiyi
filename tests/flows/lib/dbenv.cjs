@@ -133,14 +133,12 @@ function summaryOf(diff) {
     .join(" ");
 }
 
+// D239：原先 app.quit() + 120ms 后 process.exit(code)——app.quit() 先走完退出流程、Electron 以 0 退出，
+// 定时器根本来不及执行，于是所有流程无论成败退出码都是 0。改为 app.exit(code)：立即以给定码退出
+// （不发 before-quit / will-quit——流程到这里已结束，库由各流程自行关闭，无需退出钩子）。
 function quit(code) {
   const { app } = require("electron");
-  try {
-    app.quit();
-  } catch {
-    /* ignore */
-  }
-  setTimeout(() => process.exit(code), 120);
+  app.exit(Number.isInteger(code) ? code : code ? 1 : 0);
 }
 
 module.exports = {

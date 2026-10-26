@@ -94,7 +94,9 @@ app
 
       // ---------- S1 元数据下发 ----------
       flow.section("S1 getAIConfig 附 presets 元数据（零 Key）");
-      const meta = ai.getAIConfig().presets;
+      // D239：getAIConfig 自 C-24 起是 async（keyVault 走 safeStorage 异步 API），这里漏了 await——
+      // 取到的是 Promise 的 .presets（undefined）→ 本段崩溃；原先流程退出码恒 0，把崩溃掩盖了。
+      const meta = (await ai.getAIConfig()).presets;
       flow.eq("元数据 15 项", meta.length, 15);
       flow.check("元数据字段 = {id,name,baseUrl,model,keyUrl,hint,group}", meta.every((m) => {
         const keys = Object.keys(m).sort().join(",");
@@ -105,24 +107,24 @@ app
       // ---------- S2 切换预设不串 Key ----------
       flow.section("S2 切换预设：端点重置 + Key 按服务商留存");
       await ai.setAIConfig({ preset: "deepseek", apiKey: "sk-d112-AAA" });
-      let c = ai.getAIConfig();
+      let c = await ai.getAIConfig();
       flow.eq("切到 deepseek 端点重置为官方值", c.baseUrl, "https://api.deepseek.com/v1");
       flow.eq("deepseek 模型默认 deepseek-chat", c.model, "deepseek-chat");
       flow.eq("deepseek Key A 生效", c.apiKey, "sk-d112-AAA");
       await ai.setAIConfig({ preset: "zai", apiKey: "sk-d112-BBB" });
-      c = ai.getAIConfig();
+      c = await ai.getAIConfig();
       flow.eq("切到 zai 模型重置", c.model, "glm-4.7-flash");
       flow.eq("zai Key B 生效", c.apiKey, "sk-d112-BBB");
       await ai.setAIConfig({ preset: "deepseek" });
-      c = ai.getAIConfig();
+      c = await ai.getAIConfig();
       flow.eq("切回 deepseek 自动恢复 Key A（绝不串用别家）", c.apiKey, "sk-d112-AAA");
       await ai.setAIConfig({ preset: "local" });
-      c = ai.getAIConfig();
+      c = await ai.getAIConfig();
       flow.eq("切到 local：Key 清空（从未配过）", c.apiKey, "");
       await ai.setAIConfig({ preset: "zai" });
-      c = ai.getAIConfig();
+      c = await ai.getAIConfig();
       flow.eq("再切回 zai 仍是 Key B", c.apiKey, "sk-d112-BBB");
-      await await ai.setAIConfig({ preset: "no-such-vendor" });
+      await ai.setAIConfig({ preset: "no-such-vendor" });
       const rejected = await ai.getAIConfig();
       flow.check("未知 preset id 不被接受（守门）", rejected.preset === "zai", true, rejected.preset);
 

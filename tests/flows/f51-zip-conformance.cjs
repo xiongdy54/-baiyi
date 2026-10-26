@@ -297,7 +297,7 @@ app
       flow.record("未来日期 + 改回正常后的目录内容", left2.join(" "));
       flow.check("伪未来的空档备份不得长期挤掉真实最新备份", !left2.includes(futureName) || left2.includes(afterFix), "要么未来那份被清，要么最新那份还在", { futureName, afterFix, left2 });
     });
-    setTimeout(() => app.exit(0), 300);
+    setTimeout(() => app.exit(process.exitCode || 0), 300); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("启动异常", String((e && e.stack) || e));

@@ -17,6 +17,14 @@ function clamp(x, lo, hi) {
 function clamp01(x) {
   return clamp(Number(x) || 0, 0, 1);
 }
+/**
+ * v49.62 / D233：摘录 / 书的优先级方向统一为「数字越大越优先」（0..100）。返回 0..1 的优先级因子；
+ * 缺省 / 非法＝0.5（与 db.normPriority「非法回落 50」同口径——改前 `1 − (p || 0)/100` 把缺省当成最优先）。
+ */
+function priority01(v) {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  return Number.isFinite(n) ? clamp(n, 0, 100) / 100 : 0.5;
+}
 function round6(x) {
   return Math.round((Number(x) || 0) * 1e6) / 1e6;
 }
@@ -440,7 +448,7 @@ function genContinue(track, ctx) {
       libraryItemId: String(m.id),
       unitId: String(target.id),
       facts,
-      f: { fit, value, urgency, momentum: d <= 3 ? 1 : 0.5, priority: clamp01(1 - (Number(m.priority) || 0) / 100) },
+      f: { fit, value, urgency, momentum: d <= 3 ? 1 : 0.5, priority: priority01(m.priority) },
       action: { type: "open-book", libraryItemId: String(m.id), hintUnitTitle: target.title }
     });
   }
@@ -557,7 +565,7 @@ function genStart(track, ctx) {
       libraryItemId: String(m.id),
       unitId: String(target.id),
       facts,
-      f: { fit, value, urgency: 0.2, momentum: 0, priority: clamp01(1 - (Number(m.priority) || 0) / 100) },
+      f: { fit, value, urgency: 0.2, momentum: 0, priority: priority01(m.priority) },
       action: { type: "open-book", libraryItemId: String(m.id) }
     });
   }
@@ -584,9 +592,9 @@ function genExtractBatch(track, ctx) {
   const itemIds = [...new Set(due.map((e) => String(e.libraryItemId)))].sort();
   let maxOverdue = 0;
   for (const e of due) maxOverdue = Math.max(maxOverdue, Math.max(0, (now - (Number(e.topicNextAt) || now)) / DAY));
-  const minPriority = Math.min(...due.map((e) => clamp(Number(e.priority) || 0, 0, 100)));
+  const topPriority = Math.max(...due.map((e) => priority01(e.priority)));
   const materialMomentumMax = Math.max(...itemIds.map((id) => materialMomentum(ctx.view, now, id)), 0);
-  const sorted = due.slice().sort((a, b) => clamp(Number(a.priority) || 0, 0, 100) - clamp(Number(b.priority) || 0, 0, 100) || String(a.id).localeCompare(String(b.id)));
+  const sorted = due.slice().sort((a, b) => priority01(b.priority) - priority01(a.priority) || String(a.id).localeCompare(String(b.id)));
   return [
     {
       key: `extract-batch:${track.id}`,
@@ -599,20 +607,20 @@ function genExtractBatch(track, ctx) {
         value: Math.min(1, n / 10),
         urgency: Math.min(1, maxOverdue / 14),
         momentum: materialMomentumMax >= 1 ? 1 : 0.5,
-        priority: clamp01(1 - minPriority / 100)
+        priority: topPriority
       },
       action: { type: "extract-session", bookItemIds: itemIds }
     }
   ];
 }
 
-// K4 extract-to-card（每轨道至多 2 个；priority 升序、process_count 降序）
+// K4 extract-to-card（每轨道至多 2 个；只取优先级 ≥ 50 的上半区，priority 降序、process_count 降序——D233 起越大越优先）
 function genExtractToCard(track, ctx) {
   const now = ctx.snapshot.now;
   const cand = (ctx.snapshot.extracts || [])
     .filter((e) => ctx.extractTrackOf(String(e.id)) === track.id)
-    .filter((e) => String(e.status) === "reading" && (Number(e.processCount) || 0) >= 2 && !e.hasCard && (Number(e.priority) || 0) <= 50)
-    .sort((a, b) => (Number(a.priority) || 0) - (Number(b.priority) || 0) || (Number(b.processCount) || 0) - (Number(a.processCount) || 0) || String(a.id).localeCompare(String(b.id)))
+    .filter((e) => String(e.status) === "reading" && (Number(e.processCount) || 0) >= 2 && !e.hasCard && priority01(e.priority) >= 0.5)
+    .sort((a, b) => priority01(b.priority) - priority01(a.priority) || (Number(b.processCount) || 0) - (Number(a.processCount) || 0) || String(a.id).localeCompare(String(b.id)))
     .slice(0, 2);
   return cand.map((e) => ({
     key: `extract-to-card:${e.id}`,
@@ -629,7 +637,7 @@ function genExtractToCard(track, ctx) {
       value: 0.5 + 0.1 * Math.min(5, Number(e.processCount) || 0),
       urgency: 0.3,
       momentum: materialMomentum(ctx.view, now, e.libraryItemId),
-      priority: clamp01(1 - (Number(e.priority) || 0) / 100)
+      priority: priority01(e.priority)
     },
     action: { type: "jump", documentId: String(e.documentId), anchor: e.anchor || {} }
   }));
@@ -706,7 +714,7 @@ function genCrossMaterial(track, ctx) {
         value: 0.7,
         urgency: 0.2,
         momentum: kpMomentum(now, kp),
-        priority: clamp01(1 - ((material && Number(material.priority)) || 0) / 100)
+        priority: priority01(material ? material.priority : null)
       },
       action: { type: "jumpUnit", unitId: String(unit.id) }
     }
@@ -857,7 +865,7 @@ function genReread(track, ctx) {
           value: recyclingOf(u),
           urgency: Math.min(1, (daysSince - interval) / 7),
           momentum: materialMomentum(ctx.view, now, m.id),
-          priority: clamp01(1 - (Number(m.priority) || 0) / 100)
+          priority: priority01(m.priority)
         },
         action: { type: "dialog", dialog: "unit-reader", payload: { unitId: String(u.id) } }
       });

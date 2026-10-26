@@ -5,6 +5,7 @@
 const { BrowserWindow, screen, app, nativeTheme } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { loadAppPage } = require("./devServer"); // D239：载入顺序 + dev server 地址唯一来源
 
 let win = null;
 let ctx = null;
@@ -103,14 +104,9 @@ function createWindow() {
   w.webContents.on("did-finish-load", () => {
     consumePendingShow();
   });
-  const distHtml = path.join(__dirname, "../dist/workbench.html");
-  if (fs.existsSync(distHtml)) {
-    w.loadFile(distHtml);
-  } else if (!app.isPackaged) {
-    w.loadURL("http://localhost:5173/workbench.html").catch(() => {
-      w.loadFile(distHtml);
-    });
-  }
+  // D239：载入顺序与主窗口同规（D192 修订：`npm run dev` 优先 dev server，原先这里漏了——开发时制卡台
+  // 一直跑旧 dist）；地址不再写死，统一在 devServer.js。
+  loadAppPage(w, { app, fs, distFile: path.join(__dirname, "../dist/workbench.html"), page: "workbench.html" });
   return w;
 }
 

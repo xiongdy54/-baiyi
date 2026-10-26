@@ -35,6 +35,7 @@ import { fixSvgAspect, injectAppearanceStyle, type ReaderAppearanceEx } from "./
 import { getSelectionFromContents, getSelectionGeometryFromContents, pointerToHost } from "./selection";
 import { createMultiHighlight, MULTI_HIGHLIGHT_NAME } from "../multiHighlight";
 import { annotKey, annotSoft, annotSolid } from "../annotColor";
+import { isTextEntryTarget, isNativeControlKey } from "../../keyTarget";
 
 interface TocNode {
   label?: string;
@@ -505,10 +506,11 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     if (currentFlow !== "paged") fixSvgAspect(doc);
     // iframe 内按键不会冒泡到宿主文档——转发给宿主（壳层的翻页/快捷键监听在宿主侧）
     doc.addEventListener("keydown", (ev: KeyboardEvent) => {
-      const t = ev.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // D227：与宿主同一口径（文本输入让路；控件原生键留给控件）
+      if (isTextEntryTarget(ev.target) || isNativeControlKey(ev)) return;
+      // repeat 随转发（D227）：宿主分发器忽略长按连发，转发丢了它＝在正文里按住键会连发命令
       window.dispatchEvent(
-        new KeyboardEvent("keydown", { key: ev.key, code: ev.code, shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, metaKey: ev.metaKey })
+        new KeyboardEvent("keydown", { key: ev.key, code: ev.code, shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, metaKey: ev.metaKey, repeat: ev.repeat })
       );
     });
     // iframe 内的 pointer 事件不会冒泡到宿主文档——adapter 中继并换算为宿主坐标

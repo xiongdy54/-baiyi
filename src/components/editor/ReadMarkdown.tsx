@@ -7,7 +7,7 @@
 // 「挤成一整段」。读态与编辑态统一为 breaks 语义（编辑态由 Milkdown 的 inline hardbreak 承载，
 // theme.css 让它真正断行；序列化仍保源文 \n 不变）。
 import ReactMarkdown, { type Components } from "react-markdown";
-import { isValidElement, type ReactNode } from "react";
+import { Children, isValidElement, type ReactNode } from "react";
 import type { PluggableList } from "unified";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -26,15 +26,43 @@ const READ_REHYPE_PLUGINS: PluggableList = [rehypeRaw, [rehypeSanitize, extractS
 const isMermaidLang = (cls: unknown): boolean =>
   typeof cls === "string" && cls.trim().split(/\s+/).includes("language-mermaid");
 
+type HastLike = { type?: string; value?: unknown; children?: unknown };
+
+/** hast 子树纯文本：text 节点按文档顺序直接拼接（元素递归取文本，注释等非文本节点不计） */
+function hastText(node: HastLike): string {
+  if (node.type === "text") return typeof node.value === "string" ? node.value : "";
+  return Array.isArray(node.children) ? node.children.map((c) => hastText(c as HastLike)).join("") : "";
+}
+
+/** React children 纯文本（拿不到 hast 节点时的兜底）：数组逐段直接拼接，元素取其 children */
+function reactText(children: ReactNode): string {
+  if (children === null || children === undefined || typeof children === "boolean") return "";
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map((c) => reactText(c as ReactNode)).join("");
+  if (isValidElement(children)) return reactText((children.props as { children?: ReactNode }).children);
+  return "";
+}
+
+/** D238：图表源码＝代码块的完整原文。children 不一定是单个字符串——原始 HTML 的
+ *  <pre><code class="language-mermaid"> 里夹注释（净化后剩两段相邻文本）或 <mark> 等行内元素时是数组，
+ *  原先 String(数组) 会用逗号把各段拼起来（元素还会变成 [object Object]），图表因此报错或画错。 */
+function mermaidSource(node: unknown, children: ReactNode): string {
+  if (node && typeof node === "object" && Array.isArray((node as HastLike).children)) return hastText(node as HastLike);
+  return reactText(children);
+}
+
 /** 静态组件表：身份恒定，react-markdown 不因每次渲染的新对象而重建元素树 */
 const MD_COMPONENTS: Components = {
-  code({ className, children }) {
-    if (isMermaidLang(className)) return <MermaidDiagram code={String(children ?? "")} />;
+  code({ node, className, children }) {
+    if (isMermaidLang(className)) return <MermaidDiagram code={mermaidSource(node, children)} />;
     return <code className={className}>{children}</code>;
   },
   pre({ children }) {
-    if (isValidElement(children) && isMermaidLang((children.props as { className?: string }).className)) {
-      return <>{children as ReactNode}</>;
+    // 拆壳条件：除首尾空白文本外只有一个 mermaid 代码元素（原始 HTML 的 <pre>\n<code …>…</code>\n</pre> 也算）
+    const kids = Children.toArray(children).filter((k) => !(typeof k === "string" && k.trim() === ""));
+    const only = kids.length === 1 ? kids[0] : null;
+    if (isValidElement(only) && isMermaidLang((only.props as { className?: string }).className)) {
+      return <>{only as ReactNode}</>;
     }
     return <pre>{children}</pre>;
   }

@@ -292,8 +292,10 @@ app
 
       // ---------- 配置指向本地假服务 ----------
       flow.section("S0 配置指向 127.0.0.1 ephemeral 端口 + dummy Key");
-      ai.setAIConfig({ preset: "custom", baseUrl: base, model: "f41-fake-model", apiKey: DUMMY_KEY });
-      const cfg = ai.getAIConfig();
+      // D239：setAIConfig / getAIConfig 自 C-24 起是 async（keyVault 走 safeStorage 异步 API），这里原先漏了 await——
+      // 读到的是 Promise（S0 两项必败），后续请求还可能赶在配置写完之前发出。
+      await ai.setAIConfig({ preset: "custom", baseUrl: base, model: "f41-fake-model", apiKey: DUMMY_KEY });
+      const cfg = await ai.getAIConfig();
       flow.eq("baseUrl 已生效", cfg.baseUrl, base);
       flow.eq("Key 可回读（safeStorage 往返或明文回落）", cfg.apiKey, DUMMY_KEY);
       flow.record("safeStorage 可用 / Key 落盘形态", `enc=${fs.existsSync(path.join(dir, "ai-config.json")) ? String(fs.readFileSync(path.join(dir, "ai-config.json"), "utf8")).includes("apiKeyEnc") : "?"}`);

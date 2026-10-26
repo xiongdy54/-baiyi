@@ -161,7 +161,7 @@ app
           `第一版报的 5 条红全部是靶子错（调了不收参数的 listAllCards），已更正并留档。`
       );
     });
-    setTimeout(() => app.exit(0), 200);
+    setTimeout(() => app.exit(process.exitCode || 0), 200); // D239：runFlow 按结果置退出码
   })
   .catch((e) => {
     flow.record("顶层异常", String((e && e.message) || e));

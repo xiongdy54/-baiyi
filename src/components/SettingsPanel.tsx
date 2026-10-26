@@ -58,7 +58,7 @@ import {
 import { rerankExtractsNow, readMultiSelectKey, MULTI_SELECT_KEYS, DEFAULT_MULTI_SELECT_KEY, type ExtractEngine, type MultiSelectKey } from "../lib/readingWorkflow";
 // v49.8（D182）：界面语言——语言切换区块（sec-language，唯一切换入口）
 import { LANGUAGES, getLocale, setLocale, normalizeLocale, useT, type Locale } from "../lib/i18n";
-import { computeSettingsNotices, type SettingsNotice, type SettingsNoticeKind, type SettingsNoticesInput } from "../lib/settingsNotices";
+import { computeSettingsNotices, latestSaneBackupAt, type SettingsNotice, type SettingsNoticeKind, type SettingsNoticesInput } from "../lib/settingsNotices";
 
 // C-37：新增 "system"（跟随系统）——theme 存的是解析后的落窗档（accent 默认值按它取），
 // themeMode 是 theme.mode 原始档（按钮高亮按它；"system" 时浅/深两钮都不高亮）。
@@ -1174,7 +1174,7 @@ function TagsBlock() {
   );
 }
 
-// ---------- 摘录复习（v48.22，D58/§6.8）：并入复习队列 / 混编模式 / 推送引擎 ----------
+// ---------- 摘录复习（v48.22，D58/§6.8）：复习方式（v49.61 / D232：分开处理 / 混合复习）/ 混编模式 / 推送引擎 ----------
 // 实验项必须带「实验功能 · 早期开发阶段」标识与说明（用户口径）；切换推送引擎为**无损**操作
 // （每引擎私有子空间互不覆盖，A→B→A 往返逐字段等值，指南 §6.8-4）。
 function ExtractReviewSection() {
@@ -1223,31 +1223,36 @@ function ExtractReviewSection() {
     <SettingsSection id="sec-extracts" title={T("摘录复习")}>
       {cfg && (
         <>
+          {/* v49.61 / D232：「并入复习队列」开关改为二选一的「复习方式」（存储键不变：app.extracts.mergeIntoReview） */}
           <div className="settings-row">
             <span className="settings-row-label">
-              {T("并入复习队列（传统 SuperMemo 方式）")}
-              <SettingsInfo label={T("并入复习队列")}>{T("开启后复习时按混编规则推送摘录卡，可就地处理；关闭时摘录在顶栏「摘录」页连续处理。")}</SettingsInfo>
+              {T("复习方式")}
+              <SettingsInfo label={T("复习方式")}>
+                {T("分开处理：闪卡在「复习」页、摘录在顶栏「摘录」页各自连续处理，两页各自撤销。混合复习：到期摘录按混编规则穿插在「复习」页里与闪卡一起处理，Z 依次撤销最近的评分或摘录操作（与摘录页同一条撤销链）；「摘录」页仍可单独处理摘录。切换不写任何调度状态。")}
+              </SettingsInfo>
             </span>
-            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("摘录并入复习队列")}>
-              <button className={cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: true })}>{T("开")}</button>
-              <button className={!cfg.mergeIntoReview ? "active" : ""} onClick={() => void update({ mergeIntoReview: false })}>{T("关")}</button>
+            <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("复习方式")} data-review-mode>
+              <button className={!cfg.mergeIntoReview ? "active" : ""} data-mode="separate" onClick={() => void update({ mergeIntoReview: false })}>{T("分开处理")}</button>
+              <button className={cfg.mergeIntoReview ? "active" : ""} data-mode="mixed" onClick={() => void update({ mergeIntoReview: true })}>{T("混合复习（SuperMemo 式）")}</button>
             </div>
           </div>
-          <div className="settings-row">
-            <span className="settings-row-label">
-              {T("混编规则")}
-              <SettingsInfo label={T("混编规则")}>{T("切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。")}</SettingsInfo>
-            </span>
-            <Dropdown
-              value={cfg.interleave}
-              align="left"
-              options={[
-                { value: "quota-1-4", label: T("上限 1:4（每 4 张卡至多 1 条摘录，SuperMemo 口径）") },
-                { value: "by-due", label: T("按到期时间自然混排") }
-              ]}
-              onChange={(v) => void update({ interleave: v as InterleaveMode })}
-            />
-          </div>
+          {cfg.mergeIntoReview && (
+            <div className="settings-row" data-interleave-row>
+              <span className="settings-row-label">
+                {T("混编规则")}
+                <SettingsInfo label={T("混编规则")}>{T("切换不写任何调度状态：未放行的摘录仍在库内到期，切换后立即可见。")}</SettingsInfo>
+              </span>
+              <Dropdown
+                value={cfg.interleave}
+                align="left"
+                options={[
+                  { value: "quota-1-4", label: T("上限 1:4（每 4 张卡至多 1 条摘录，SuperMemo 口径）") },
+                  { value: "by-due", label: T("按到期时间自然混排") }
+                ]}
+                onChange={(v) => void update({ interleave: v as InterleaveMode })}
+              />
+            </div>
+          )}
           <div className="settings-row">
             <span className="settings-row-label">
               {T("摘录推送引擎")}
@@ -2019,6 +2024,8 @@ interface BackupInfo {
   counts: BackupCounts;
   backupDir: string;
   lastAuto?: LastAutoBackup | null;
+  /** D235：时钟回拨现场探测（备份目录里建于「未来」的备份份数与最晚时间；每次 backup:info 现取） */
+  clockSkew?: { suspected: boolean; count: number; latestAt: number | null } | null;
 }
 interface BackupEntry {
   file: string;
@@ -2383,6 +2390,13 @@ function noticeText(n: SettingsNotice, T: ReturnType<typeof useT>): string {
     case "backup-integrity":
       return T("数据库完整性检查发现问题，已暂停删除旧备份。请先不要清理备份，并导出诊断信息。");
     case "clock-skew":
+      // D235：有现场数据时给出可核对的份数与最晚时间（时间改正后这些备份仍在，会挡住对应日期的自动备份）
+      if (n.params && Number(n.params.count) > 0) {
+        return T("有 {count} 份备份的时间晚于当前系统时间（最晚 {date}），系统时钟可能被回拨过。请核对系统时间；若时间无误，到这些日期时当天的自动备份会被跳过，可打开备份文件夹核对。", {
+          count: n.params.count,
+          date: Number(n.params.latestAt) > 0 ? fmtTime(Number(n.params.latestAt)) : "?"
+        });
+      }
       return T("检测到系统时钟可能被回拨过，请核对系统时间，否则自动备份可能多日停摆。");
     case "backup-none":
       return T("还没有任何备份，建议立即创建一份。");
@@ -2399,8 +2413,9 @@ const NOTICE_TARGETS: Partial<Record<SettingsNoticeKind, { sectionId: string; fl
   "backup-failed": { sectionId: "sec-backup" },
   // backup-integrity（C-23）：处置是「保留备份 + 导出诊断信息」，应用内无对应可操作按钮，不给「处理」入口
   "backup-none": { sectionId: "sec-backup", flashAction: "backup-now" },
-  "backup-stale": { sectionId: "sec-backup", flashAction: "backup-now" }
-  // clock-skew：应用内无可操作项（要去系统设置改时间），不给「处理」按钮
+  "backup-stale": { sectionId: "sec-backup", flashAction: "backup-now" },
+  // clock-skew（D235）：改时间要去系统设置；应用内可做的是打开备份文件夹核对建于「未来」的备份
+  "clock-skew": { sectionId: "sec-backup", flashAction: "open-backup-dir" }
 };
 
 function SettingsNotices() {
@@ -2419,12 +2434,13 @@ function SettingsNotices() {
         // info 与 list 分别取：backupDir 坏掉（不可读/指向文件）时 list 会 reject——
         // 那正是最需要红框（自动备份失败）的场景，不能让一个源拖垮另一个
         const [infoR, listR] = await Promise.allSettled([bapi.info(), bapi.list()]);
-        if (infoR.status === "fulfilled") input.lastAuto = infoR.value.lastAuto ?? null;
+        if (infoR.status === "fulfilled") {
+          input.lastAuto = infoR.value.lastAuto ?? null;
+          if (infoR.value.clockSkew) input.clockSkew = infoR.value.clockSkew;
+        }
         if (listR.status === "fulfilled") {
-          input.latestBackupAt = listR.value.backups.reduce<number | null>(
-            (acc, b) => (acc == null || b.createdAt > acc ? b.createdAt : acc),
-            null
-          );
+          // D235：建于「未来」的备份（时钟回拨遗留）不算「最近一次备份」，否则「已 N 天没有备份」永不触发
+          input.latestBackupAt = latestSaneBackupAt(listR.value.backups.map((b) => b.createdAt));
         }
       }
       const uapi = updateAPI();
@@ -2660,7 +2676,7 @@ function BackupSection() {
           <input type="checkbox" checked={includeKey} onChange={(e) => setIncludeKey(e.target.checked)} />
           {T("包含 AI Key（ai-config.json，默认不备）")}
         </label>
-        <button className="btn btn-outline btn-sm" onClick={() => backupAPI().openDir()}>{T("打开备份文件夹")}</button>
+        <button className="btn btn-outline btn-sm" data-action="open-backup-dir" onClick={() => backupAPI().openDir()}>{T("打开备份文件夹")}</button>
         <button className="btn btn-outline btn-sm" onClick={changeDir}>{T("更改备份位置")}</button>
       </div>
       {list && (
