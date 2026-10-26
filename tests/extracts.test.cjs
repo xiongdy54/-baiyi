@@ -219,6 +219,50 @@ app.whenReady().then(async () => {
     check("排空后如实返回 ok=false（不抛错、不误撤）", drained && drained.ok === false, false, drained);
     check("排空后 getUndoInfo 报不可用", db.getUndoInfo().available === false, false, db.getUndoInfo());
 
+    // ---------------------------------------------------------------- E9b
+    console.log("== E9b 复习页单独撤销评分后，统一撤销不得回滚无关卡片（v49.58 / D229） ==");
+    {
+      const fresh = () => ({ state: "new", due: Date.now() - 1000, lapses: 0, stability: 0, difficulty: 0, reps: 0, lastReview: null, learningSteps: [] });
+      const graded = (b) => ({ ...b, state: "review", reps: 1, lastReview: Date.now(), due: Date.now() + DAY });
+      const mkCard = (label) => db.createCard({
+        noteText: "EXTRACTSTEST " + label, cardType: "qa", frontMarkdown: label + " 题", backMarkdown: label + " 答",
+        priority: 50, tags: [], fsrsJson: JSON.stringify(fresh())
+      }).id;
+      const cardA = mkCard("E9b 卡 A");
+      const cardB = mkCard("E9b 卡 B");
+      const exX = mkExtract(bookB.documentId, "E9b 摘录 X", undefined);
+      makeDue(exX);
+      const bA = fresh(); db.saveReview(cardA, graded(bA), "Good", 100, bA);           // ① 评卡 A
+      db.advanceExtract(exX);                                                          // ② 摘录页推进 X
+      const bB = fresh(); db.saveReview(cardB, graded(bB), "Good", 100, bB);           // ③ 评卡 B
+      const rv = db.undoLastReview();                                                  // ④ 复习页按 Z 撤销 B
+      check("复习页撤销 B 成功", rv.ok === true && db.getCard(cardB).fsrs.reps === 0, "ok + B reps=0", { ok: rv.ok, reps: db.getCard(cardB).fsrs.reps });
+      const infoX = db.getUndoInfo();
+      check("撤销栈下一条＝摘录 X 的推进（B 的残留条目已随撤销摘除）", infoX.available === true && infoX.kind === "extract_op" && infoX.opType === "advance", "extract_op/advance", infoX);
+      const ux = db.undoLast();                                                        // ⑤ 摘录页 Ctrl+Z
+      check("统一撤销撤的是摘录 X（不是卡 A 的评分）", ux.ok === true && ux.kind === "extract_op" && Array.isArray(ux.extractIds) && ux.extractIds.includes(exX), "extract_op [exX]", ux);
+      check("摘录 X 已复原（process_count 回 0）", db.getExtract(exX).processCount === 0, 0, db.getExtract(exX).processCount);
+      check("卡 A 的复习进度原样保留（reps=1）", db.getCard(cardA).fsrs.reps === 1, 1, db.getCard(cardA).fsrs.reps);
+      const ua = db.undoLast();
+      check("再撤销一次才轮到卡 A（kind=card_grade）", ua.ok === true && ua.kind === "card_grade" && db.getCard(cardA).fsrs.reps === 0, "card_grade + A reps=0", { ok: ua.ok, kind: ua.kind, reps: db.getCard(cardA).fsrs.reps });
+
+      // 存量库里修复前遗留的陈旧条目（ref 指向已删除的评分）：只读信息与真撤销都必须跳过它
+      const cardC = mkCard("E9b 卡 C");
+      const exY = mkExtract(bookB.documentId, "E9b 摘录 Y", undefined);
+      makeDue(exY);
+      const bC = fresh(); db.saveReview(cardC, graded(bC), "Good", 100, bC);
+      db.advanceExtract(exY);
+      db.execRawSql(
+        "INSERT INTO op_journal (seq, kind, ref, undoable, created_at) VALUES ((SELECT COALESCE(MAX(seq), 0) + 1 FROM op_journal), 'card_grade', 'ghost-review-log', 1, ?)",
+        [Date.now()]
+      );
+      const infoY = db.getUndoInfo();
+      check("陈旧 card_grade 条目在撤销信息里被跳过（显示的是摘录 Y 的推进）", infoY.kind === "extract_op" && infoY.opType === "advance", "extract_op/advance", infoY);
+      const uy = db.undoLast();
+      check("陈旧条目在真撤销里被跳过：撤的是摘录 Y，卡 C 不动", uy.ok === true && uy.kind === "extract_op" && db.getCard(cardC).fsrs.reps === 1, "extract_op + C reps=1", { kind: uy.kind, reps: db.getCard(cardC).fsrs.reps });
+      db.undoLast(); // 收尾：撤销卡 C，保持后续段落的撤销栈干净
+    }
+
     // ---------------------------------------------------------------- E10
     console.log("== E10 review_seq 语义不变（与 op_journal 计数器相互独立） ==");
     const seqBefore = db.listAllReviewLogs().length;

@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件（**v49.57**） — AI 开发指导文档
+# 一站式渐进阅读学习软件（**v49.58**） — AI 开发指导文档
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -1083,7 +1083,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 ### 6.8-7 撤销（跨卡片与摘录，`undo:last`）
 
 - **语义沿用 §4.4.9**：撤销＝**回退而非追加**——恢复 `before_json` 确切前置状态 + **物理删除**该条日志（`extract_ops` 行 / 该次评分的 `review_logs` 行）；只能撤销**最近一次**，更早的需连续撤销。
-- **分发**：读 `op_journal` 尾条 → `card_grade` 走**既有** `undoLastReview()`（逐字不变）；`extract_op` 回退该 op（批量按 `batch_id` 整批）；卡片前置校验失败则标记 `undoable=0` 继续向前找（线性撤销栈标准行为）。
+- **分发**：读 `op_journal` 尾条 → `card_grade` 走**既有** `undoLastReview()`（逐字不变）；`extract_op` 回退该 op（批量按 `batch_id` 整批）；卡片前置校验失败则标记 `undoable=0` 继续向前找（线性撤销栈标准行为）。**v49.58 / D229 补强**：`card_grade` 条目只认它自己的 `ref`（＝`review_logs.id`）——ref 已不存在或不是最新一条可撤销评分＝陈旧条目，跳过；复习页单独撤销评分（`cards:undoReview` → `undoLastReview`）在同一事务内一并删除该次评分的 journal 条目；`undo:info` 只读复现同一跳过规则。
 - **向后兼容**：`op_journal` 为空（迁移前历史）时**回退既有路径**，行为等价今天。
 - **覆盖清单**：摘录的编辑正文 / 推进 / 推迟 / 毕业 / 改优先级 / 召回 / 软删；阅读器新建摘录（撤销＝软删）；浏览器全部批量；复习页卡片评分（既有）。
 - 撤销自身也写一条 `undoable=0` 的 journal 条目，使「撤销后 Ctrl+Z」不重复撤销同一动作。
@@ -1628,6 +1628,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D226 | **v49.55 摘录页当前卡钉住（`src/components/ExtractReviewView.tsx` + `electron/db.js` `undoLast` 回带 `extractIds`；零 schema / 零设置键 / 零文案）**：摘录页原来恒显示会话队列第一条（`items[0]`），任何刷新都会重排——拖动优先级滑块（停手 350ms 提交 → `refresh()`）、编辑正文/批注后的刷新、他处 `workflow/changed`、新到期的高优先级摘录插队，都会把正在看的卡换走（用户实测「拖动优先级滑块……会直接跳转到下一张卡片」；编辑中被换走还会叠加编辑器卸载时末段输入丢失，另条修复）。修法：新增 `pinnedId`——当前卡＝钉住的那条（不在队列时回落队列头并重新钉住）；**只有消费类动作（下一条 / 推迟 / 毕业，经 `run()`）清钉**，新队列头按最新排序（含刚改的优先级）成为当前卡；**撤销**把被召回的那条（`undoLast` 的 extract_op 分支新回带 `extractIds`）钉为当前卡，撤销的是闪卡评分或召回条不在本队列时不换卡；改优先级 / 编辑正文与批注 / 外部刷新只更新数据、不换卡。§6.8 语义补记：「改完优先级后当前卡不动，点下一条时才按新顺序排」。 | 用户 2026-10-26 指令（「在摘录页面中，拖动底部的优先级滑块向右，或点击优先级滑块时，会直接跳转到下一张卡片」+「关于你要我确认的 A1 改法，就按你说的改。完优先级后，当前卡不动，点下一条时才按新顺序排」） | v49.55 |
 | D227 | **v49.56 快捷键焦点口径：「在打字」只认文本输入（新增 `src/lib/keyTarget.ts`；`src/lib/commands.ts` 全局分发 / `ExtractReviewView` / `Reader` 翻页 / foliate iframe 按键转发 / `OcclusionEditor` 五处统一改用；零 schema / 零设置键 / 零文案）**：旧口径把**所有** INPUT 都当「正在打字」——鼠标点过优先级滑块后焦点留在 `input[type=range]`，摘录页的空格 / 回车 / Z 与全局命令全部失效，必须先点一下别处（用户实测「跳转之后按 Ctrl+Z 没有反应，必须先点击一次界面中的其他位置」）；复选框同理。新口径两层：①`isTextEntryTarget`＝文本类 input（含 number/search/date…）/ textarea / select / contentEditable，页面快捷键一律让路；②`isNativeControlKey`＝焦点控件自己的原生键：滑块 / `role=slider` 的方向键与 Home/End/PageUp/PageDown（调值）、单选组方向键，以及**键盘聚焦**（`:focus-visible`，Tab 选中）的按钮 / 链接 / 复选框 / 单选框 / 可激活 ARIA 角色的回车与空格（激活它自己）；鼠标点过之后焦点留在按钮上时回车 / 空格仍归页面快捷键（连续处理手感不变）。`isInModal` 收编 A-12 模态判定。foliate iframe 转发补带 `repeat`（原转发丢失 ⇒ 正文里长按连发命令）。`tests/key-target.test.cjs` 单测 34 项 + F20 W3 增 4 条行为断言（滑块上空格命中 / 方向键不翻页 / Tab 选中按钮空格归按钮 / 鼠标点过按钮仍归页面）；`tests/m4.commands.bundle.cjs` 按文件头命令重打包。 | 用户 2026-10-26 指令（「跳转之后按 Ctrl+Z 没有反应，必须先点击一次界面中的其他位置，再按 Ctrl+Z 才能撤销刚才的操作」+「首先请帮我把第一部分、第二部分和第三部分的 C1 修好」） | v49.56 |
 | D228 | **v49.57 摘录页按键口径收紧（`src/components/ExtractReviewView.tsx` 键盘处理；零 schema / 零设置键 / 零文案）**：摘录页自有的空格 / 回车（下一条）与 Z（撤销）此前不看修饰键、不看长按、不看弹层：①Alt+Z（阅读「制卡」默认键）与 Ctrl+Shift+Z（重做习惯键）都会执行撤销，Ctrl/Shift+空格、Ctrl+回车都会执行「下一条」；②按住空格或 Z 连续跳过多条 / 连续撤销多步（全局命令分发早已忽略 `e.repeat`，摘录页没有）；③手动制卡面板开着、焦点在面板按钮上时，空格 / 回车 / Z 会推进或撤销后面的摘录；④Tab 选中「推迟」或「毕业」后按回车，执行的却是「下一条」。修法：「下一条」只认**无修饰键**的空格 / 回车；撤销认 Z 与 Ctrl/Cmd+Z，排除 Alt 与 Shift 组合；长按连发只 `preventDefault` 不执行；`e.defaultPrevented`（已被全局分发或子组件处理）、焦点在对话框内（`isInModal`）、制卡面板打开（`dockOpen`）时整体让路；Tab 选中按钮的回车 / 空格经 D227 `isNativeControlKey` 归按钮本身。新增 GUI 端到端 `tests/d226-extract-keys.gui.mjs`（20 断言，覆盖 D226 钉卡 / D227 滑块焦点 / 本条全部按键口径；判据与优先级排序方向无关；在修复前代码上 11 项失败、修复后全过）。 | 用户 2026-10-26 指令（「首先请帮我把第一部分、第二部分和第三部分的 C1 修好」） | v49.57 |
+| D229 | **v49.58 跨页撤销不再回滚无关卡片（`electron/db.js` `undoLastReview` / `undoLast` / `getUndoInfo`；§6.8-7 补强；零 schema / 零 IPC 形状变化）**：复现路径「评卡 A → 摘录页推进摘录 X → 评卡 B → 复习页按 Z 撤销 B → 摘录页 Ctrl+Z」——被撤销的是**卡 A 的评分**（A 的复习记录被删、FSRS 进度回滚），X 反而没撤。根因：复习页撤销（`cards:undoReview`）只删 `review_logs`，统一撤销栈 `op_journal` 里 B 的 `card_grade` 条目残留；统一撤销拿到它时不核对 ref，直接调 `undoLastReview()` 撤掉「现存最新」的那次评分（A）。修法三处：①`undoLastReview` 同一事务内 `DELETE FROM op_journal WHERE kind='card_grade' AND ref=logId`；②`undoLast` 的 `card_grade` 分支先核对 `getLastUndoableReview().logId === ref`，不符（含修复前已遗留在存量库里的陈旧条目）即跳过继续向前找，返回值补 `kind:'card_grade'`；③`getUndoInfo` 只读复现同一跳过规则（陈旧 card_grade 与空 extract_op 不算「下一次会撤销的东西」）。`tests/extracts.test.cjs` 新增 E9b 8 条（复现链 + 存量陈旧条目两场景；修复前复现链断言即失败）。 | 用户 2026-10-26 指令（「首先请帮我把第一部分、第二部分和第三部分的 C1 修好」） | v49.58 |
 
 ## 8.2 已接受偏差（实现与原锁定方案的差异）
 

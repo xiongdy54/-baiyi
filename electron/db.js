@@ -2487,6 +2487,10 @@ function undoLastReview() {
       );
     }
     db.run("DELETE FROM review_logs WHERE id = ?", [log.logId]);
+    // v49.58 / D229：同一事务内摘掉这次评分在跨类撤销栈里的索引条目——复习页单独撤销评分
+    //（cards:undoReview）此前只删 review_logs，残留的 card_grade 条目会让统一撤销（undo:last）
+    // 回滚掉更早那张无关卡片的评分
+    db.run("DELETE FROM op_journal WHERE kind = 'card_grade' AND ref = ?", [log.logId]);
     db.run("COMMIT");
   } catch (e) {
     try { db.run("ROLLBACK"); } catch { /* 回滚失败仅吞并，避免掩盖原异常 */ }
@@ -3890,8 +3894,13 @@ function undoLast() {
       // 先摘掉排序索引条目，再走既有 undoLastReview（逐字复用）。两者不在同一事务内：
       // op_journal 只是排序索引、不是事实源，索引丢失时 getUndoInfo 会回退既有路径，属可接受的降级
       db.run("DELETE FROM op_journal WHERE seq = ?", [Number(tail.seq)]);
+      // v49.58 / D229：条目只认它自己指向的那次评分（ref = review_logs.id）。ref 已不存在（被复习页
+      // 单独撤销过）或已不是最新一条可撤销评分＝陈旧条目，跳过；旧实现不核对、直接撤销现存最新评分，
+      // 会把一张无关卡片的复习进度回滚掉
+      const latest = getLastUndoableReview();
+      if (!latest || latest.logId !== String(tail.ref)) continue;
       const r = undoLastReview();
-      if (r && r.ok) return r;
+      if (r && r.ok) return { ...r, kind: "card_grade" };
       // 该条不可撤销（前置快照缺失 / 状态已变）——继续向前找
       continue;
     }
@@ -3922,19 +3931,27 @@ function undoLast() {
 
 /** 撤销可用性（UI 用：Ctrl+Z 会撤销哪一类、撤什么） */
 function getUndoInfo() {
-  const tail = queryAll("SELECT seq, kind, ref FROM op_journal ORDER BY seq DESC LIMIT 1")[0];
-  if (!tail) {
+  const rows = queryAll("SELECT seq, kind, ref FROM op_journal ORDER BY seq DESC LIMIT 200");
+  if (rows.length === 0) {
     const log = getLastUndoableReview();
     return log
       ? { available: true, kind: "card_grade", rating: log.rating, source: "legacy" }
       : { available: false, kind: null };
   }
-  if (tail.kind === "card_grade") {
-    const log = getLastUndoableReview();
-    return { available: Boolean(log), kind: "card_grade", rating: log?.rating ?? null };
+  // v49.58 / D229：只读地复现 undoLast 的跳过规则——陈旧的 card_grade（ref 不是最新可撤销评分）与
+  // 空的 extract_op 都不算「下一次 Ctrl+Z 会撤销的东西」，向前找第一条真正可撤销的
+  const latest = getLastUndoableReview();
+  for (const tail of rows) {
+    if (tail.kind === "card_grade") {
+      if (latest && latest.logId === String(tail.ref)) return { available: true, kind: "card_grade", rating: latest.rating ?? null };
+      continue;
+    }
+    if (tail.kind === "extract_op") {
+      const ops = opsForJournalRef(String(tail.ref));
+      if (ops.length > 0) return { available: true, kind: "extract_op", opType: ops[0]?.op_type ?? null, count: ops.length };
+    }
   }
-  const ops = opsForJournalRef(String(tail.ref));
-  return { available: ops.length > 0, kind: "extract_op", opType: ops[0]?.op_type ?? null, count: ops.length };
+  return { available: false, kind: null };
 }
 
 /** 批量摘录操作：单事务 + 单 batch_id + 单 journal 条目（Ctrl+Z 整批回退） */
