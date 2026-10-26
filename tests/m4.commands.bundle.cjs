@@ -7290,6 +7290,7 @@ function isTextEntryTarget(target) {
   return false;
 }
 function isNativeControlKey(e2) {
+  if (isImeComposing(e2)) return true;
   const t3 = asTarget(e2.target);
   if (!t3) return false;
   const key = String(e2.key || "");

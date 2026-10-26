@@ -2,7 +2,7 @@
 // D227（v49.56）：键盘目标分类单测（src/lib/keyTarget.ts）——「在打字」只认文本输入；
 // 滑块 / 复选框 / 按钮等非文本控件只让出它自己的原生键（滑块方向键、键盘聚焦按钮的回车与空格），
 // 其余按键照常交给页面快捷键（用户实测：拖完优先级滑块后 Ctrl+Z / 空格 / 回车都没反应）。
-// 运行：node scripts/run-tests.mjs key-target
+// 运行：node scripts/run-tests.mjs key-target（直跑：node tests/key-target.test.cjs）
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -65,6 +65,8 @@ check("滑块 ← → ↑ ↓ Home End PageUp PageDown 归滑块", ["ArrowLeft",
 check("滑块上的空格归页面（下一条）", kt.isNativeControlKey({ key: " ", target: range }) === false, null);
 check("滑块上的回车归页面", kt.isNativeControlKey({ key: "Enter", target: range }) === false, null);
 check("滑块上的 Z 归页面（撤销）", kt.isNativeControlKey({ key: "z", target: range }) === false, null);
+check("输入法组字中的回车归输入法（isComposing）", kt.isNativeControlKey({ key: "Enter", target: range, isComposing: true }) === true, null);
+check("输入法组字中的按键归输入法（keyCode 229）", kt.isNativeControlKey({ key: "Process", target: range, keyCode: 229 }) === true, null);
 check("role=slider 的 Home 归控件", kt.isNativeControlKey({ key: "Home", target: el("DIV", { role: "slider" }) }) === true, null);
 check("Tab 选中的按钮：回车归按钮（C1：不再执行「下一条」）", kt.isNativeControlKey({ key: "Enter", target: el("BUTTON", { kbd: true }) }) === true, null);
 check("Tab 选中的按钮：空格归按钮", kt.isNativeControlKey({ key: " ", target: el("BUTTON", { kbd: true }) }) === true, null);

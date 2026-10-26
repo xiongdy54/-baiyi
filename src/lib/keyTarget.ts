@@ -13,6 +13,7 @@
  *
  * target 用 unknown：真实 KeyboardEvent 的 EventTarget 与测试投喂的字面量对象都能传进来。
  */
+import { isImeComposing } from "./ime";
 
 type KeyTargetLike = {
   tagName?: string;
@@ -71,7 +72,9 @@ export function isTextEntryTarget(target: unknown): boolean {
 }
 
 /** 该键属于焦点控件自己的原生操作（见文件头第 2 条）；纯文本输入目标由 isTextEntryTarget 另判 */
-export function isNativeControlKey(e: { key?: string; target?: unknown }): boolean {
+export function isNativeControlKey(e: { key?: string; target?: unknown; isComposing?: boolean; keyCode?: number }): boolean {
+  // 输入法组字中的按键（含确认候选的回车）归输入法——与 C-27 isImeComposing 同口径，页面快捷键不抢
+  if (isImeComposing(e as unknown as KeyboardEvent)) return true;
   const t = asTarget(e.target);
   if (!t) return false;
   const key = String(e.key || "");
