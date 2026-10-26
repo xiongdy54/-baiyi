@@ -14,7 +14,7 @@ esbuild.buildSync({
   outdir: OUT,
   logLevel: "silent"
 });
-const { computeSettingsNotices, BACKUP_STALE_DAYS } = require("./tmp-snotices/settingsNotices.js");
+const { computeSettingsNotices, latestSaneBackupAt, BACKUP_STALE_DAYS } = require("./tmp-snotices/settingsNotices.js");
 
 let pass = 0, fail = 0;
 function check(name, cond, actual) {
@@ -71,6 +71,28 @@ r = computeSettingsNotices({
 });
 check("4 条全部产出", r.length === 4, r);
 check("排序 = [backup-failed, clock-skew, backup-stale, update]", JSON.stringify(kinds(r)) === JSON.stringify(["backup-failed", "clock-skew", "backup-stale", "update"]), kinds(r));
+
+console.log("== 6) D235：时钟回拨现场探测（backup:info.clockSkew 每次现取） ==");
+r = computeSettingsNotices({ clockSkew: { suspected: true, count: 3, latestAt: NOW + 5 * DAY }, now: NOW });
+check("现场探测命中 → warn/clock-skew 且带 count / latestAt", r.length === 1 && r[0].kind === "clock-skew" && r[0].level === "warn" && r[0].params.count === 3 && r[0].params.latestAt === NOW + 5 * DAY, r);
+r = computeSettingsNotices({ clockSkew: { suspected: false, count: 0, latestAt: null }, lastAuto: { ok: true, error: null, clockSkewSuspected: true }, now: NOW });
+check("现场已消除（未来备份已清 / 时间已对）→ 即使启动期标记为真也不提示", r.length === 0, r);
+r = computeSettingsNotices({ lastAuto: { ok: true, error: null, clockSkewSuspected: true }, now: NOW });
+check("无现场数据 → 回落启动期标记（无参数的通用文案）", r.length === 1 && r[0].kind === "clock-skew" && !r[0].params, r);
+r = computeSettingsNotices({ clockSkew: { suspected: true, count: 0, latestAt: null }, now: NOW });
+check("suspected 但份数为 0（形状异常）→ 不提示", r.length === 0, r);
+r = computeSettingsNotices({ clockSkew: { suspected: true, count: 2, latestAt: NOW + 3 * DAY }, lastAuto: { ok: true, error: null, clockSkewSuspected: true }, now: NOW });
+check("现场与启动期同时为真 → 只出一条", r.length === 1, r);
+
+console.log("== 7) D235：latestSaneBackupAt（建于未来的备份不算最近一次） ==");
+check("无备份 → null（产 backup-none）", latestSaneBackupAt([], NOW) === null, latestSaneBackupAt([], NOW));
+check("取不晚于 now+1 天的最大值", latestSaneBackupAt([NOW - 9 * DAY, NOW - 2 * DAY, NOW + 30 * DAY], NOW) === NOW - 2 * DAY, latestSaneBackupAt([NOW - 9 * DAY, NOW - 2 * DAY, NOW + 30 * DAY], NOW));
+check("1 天内的小漂移仍算有效", latestSaneBackupAt([NOW + DAY - 1], NOW) === NOW + DAY - 1, latestSaneBackupAt([NOW + DAY - 1], NOW));
+check("全部建于未来 → undefined（不判新旧，交给 clock-skew）", latestSaneBackupAt([NOW + 2 * DAY, NOW + 3 * DAY], NOW) === undefined, latestSaneBackupAt([NOW + 2 * DAY, NOW + 3 * DAY], NOW));
+r = computeSettingsNotices({ latestBackupAt: latestSaneBackupAt([NOW - 10 * DAY, NOW + 20 * DAY], NOW), clockSkew: { suspected: true, count: 1, latestAt: NOW + 20 * DAY }, now: NOW });
+check("未来备份不再掩盖「已 10 天没有备份」：clock-skew + backup-stale 同时提示", JSON.stringify(kinds(r)) === JSON.stringify(["clock-skew", "backup-stale"]) && r[1].params.days === 10, r);
+r = computeSettingsNotices({ latestBackupAt: latestSaneBackupAt([NOW + 2 * DAY], NOW), clockSkew: { suspected: true, count: 1, latestAt: NOW + 2 * DAY }, now: NOW });
+check("全部建于未来 → 只提示 clock-skew（不误报「还没有任何备份」）", JSON.stringify(kinds(r)) === JSON.stringify(["clock-skew"]), kinds(r));
 
 // 清理打包副产物
 fs.rmSync(OUT, { recursive: true, force: true });

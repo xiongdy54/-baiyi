@@ -481,6 +481,7 @@
 - **偏离**：
   1. **`clockSkewSuspected` 同时挂在 already-today 跳过路径**：报告只说「在返回值中加」，未指明哪条返回。时钟回拨场景下「同日已备份」恰是「连续多天不备份」的症状路径（今天的文件名几天前就以未来日期建好），只挂成功路径会漏报，故两条返回都带出。
   2. **设置页提示未接线**：`autoBackupIfNeeded` 唯一调用方是 main.js 启动后 30s 的后台任务（D143），返回值只消费 `r.ok` 记日志；报告修复步骤未含渲染层/IPC 改动，flag 先随返回值带出，UI 提示待后续接线（属报告步骤 4 的「由设置页提示」尚未落到 UI，已记此处）。
+     > **后续（2026-10-26 补记）**：D206（v49.32）已把 `lastAuto.clockSkewSuspected` 接进设置页置顶通知框（黄条）；但该位只在启动 30s 后那一轮自动备份里判定——自动备份关闭时恒不提示、时间改正后也不消失。D235（v49.64）改为 `backup:info` 每次现取 `clockSkew`（`backup.clockSkewInfo()`：auto / manual / safety 中修改时间晚于「当前 + 1 天」的份数与最晚时间），文案带份数与最晚时间、「处理」滚到备份区并闪烁「打开备份文件夹」；建于未来的备份不再计入「最近一次备份」（`latestSaneBackupAt`），不再掩盖「已 N 天没有备份」。
   3. 报告验收只要求 auto 一条用例；额外补了 safety protect、同日跳过带 skew、及两条无 protect 差分断言（证明用例确实覆盖缺陷，而非恒真）。
   4. 差分造数坑（留档）：protect 轮换在多份 mtime 相同的旧档中删 readdir 序第一份；补差分现场必须用**新文件名**——若覆盖仍存在的旧名，目录数不变、`rotateAutoBackups(dir, keep)` 删 0 份，差分假失败（实测踩中一次）。
   5. 测试副产物 `tests/m15r.activity.bundle.cjs` / `m15r.layout.bundle.cjs` 全量后变脏，提交前已还原；提交用显式路径（2 文件）。

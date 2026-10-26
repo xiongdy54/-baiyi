@@ -2435,6 +2435,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "自动备份失败：{msg}": "Automatic backup failed: {msg}",
   "数据库完整性检查发现问题，已暂停删除旧备份。请先不要清理备份，并导出诊断信息。": "A database integrity check found problems. Deletion of old backups is paused. Please keep your backups and export diagnostic information.",
   "检测到系统时钟可能被回拨过，请核对系统时间，否则自动备份可能多日停摆。": "Your system clock may have been rolled back. Check the system time, or automatic backups may stall for days.",
+  "有 {count} 份备份的时间晚于当前系统时间（最晚 {date}），系统时钟可能被回拨过。请核对系统时间；若时间无误，到这些日期时当天的自动备份会被跳过，可打开备份文件夹核对。": "{count} backup(s) are dated later than the current system time (latest: {date}), so the system clock may have been rolled back. Check the system time; if it is correct, automatic backups will be skipped on those dates. You can open the backup folder to review them.",
   "还没有任何备份，建议立即创建一份。": "No backup exists yet — create one now.",
   "已 {days} 天没有备份，建议立即备份一次。": "No backup for {days} days — create one now.",
   "处理": "Handle",

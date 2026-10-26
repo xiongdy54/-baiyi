@@ -1014,7 +1014,9 @@ ipcMain.handle("backup:info", () => ({
   ...backup.getDataInfo(),
   counts: dbModule.getBackupCounts(),
   backupDir: backup.getBackupDir(),
-  lastAuto: lastAutoBackup
+  lastAuto: lastAutoBackup,
+  // D235：时钟回拨现场探测（每次现取：不依赖自动备份是否跑过 / 是否开启，回拨现场消除后提示随之消失）
+  clockSkew: backup.clockSkewInfo()
 }));
 ipcMain.handle("backup:create", async (_e, opts) => {
   try {

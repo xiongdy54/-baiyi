@@ -707,6 +707,35 @@ function detectClockSkew(dir, now) {
   return false;
 }
 
+// D235（v49.64）：时钟回拨现场探测——设置页通知框每次打开 / 每 60s 经 backup:info 现取，不再只靠
+// 启动 30s 后那一轮自动备份带出的 clockSkewSuspected（自动备份关闭时那条路径恒不判定；时间改正、
+// 未来日期的备份清掉后也不会随之消失）。口径与 detectClockSkew 同（修改时间晚于「当前 + 1 天」），
+// 范围扩到本软件全部备份（auto / manual / safety——任一份建于「未来」都说明时钟被回拨过）。
+// 只读统计、不删除任何文件；目录不可读 → 不判定。
+function clockSkewInfo(opts = {}) {
+  const base = opts.now ? opts.now.getTime() : Date.now();
+  let dir;
+  try {
+    dir = opts.backupDir || getBackupDir(opts);
+  } catch {
+    return { suspected: false, count: 0, latestAt: null };
+  }
+  let count = 0;
+  let latestAt = 0;
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!BACKUP_ZIP_RE.test(f)) continue;
+      let m = 0;
+      try { m = fs.statSync(path.join(dir, f)).mtimeMs; } catch { continue; }
+      if (m > base + 86400000) {
+        count += 1;
+        if (m > latestAt) latestAt = m;
+      }
+    }
+  } catch { /* 目录不可读时放弃检测 */ }
+  return { suspected: count > 0, count, latestAt: count > 0 ? latestAt : null };
+}
+
 // C-14：同 rotateSafetyBackups——protect 排除本轮刚生成的文件，keepOthers 保证保留总数仍为 keep
 function rotateAutoBackups(dir, keep, protect = new Set()) {
   const autos = listByMtimeAsc(dir, AUTO_RE).filter((f) => !protect.has(f));
@@ -982,5 +1011,6 @@ module.exports = {
   sweepBackupOrphans,
   getBackupDir,
   getDataInfo,
-  readBackupMeta
+  readBackupMeta,
+  clockSkewInfo
 };
