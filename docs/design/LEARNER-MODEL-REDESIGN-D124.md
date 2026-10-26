@@ -728,7 +728,7 @@ learner:recommend
 | 覆盖率 coverage(u) | §6.8 | 语言类的 fit |
 | 复现度 recycling(u) | `min(1, learningCount(u) / 20)` | 语言类的 value（窄读：选能复现你正在学的词的文本） |
 | 动量 momentum | 该材料或 KP 近 3 天有活动 → 1；近 14 天 → 0.5；否则 0 | 所有类型 |
-| 用户优先级 priority | 材料 `1 − library_items.priority / 100`；摘录 `1 − extracts.priority / 100`（数字越小越优先，§6.4） | 所有类型 |
+| 用户优先级 priority | 材料 `1 − library_items.priority / 100`；摘录 `1 − extracts.priority / 100`（数字越小越优先，§6.4；**v49.62 / D233 起方向统一为数字越大越优先 ⇒ `priority / 100`，缺省＝0.5**，存量值迁移翻转、同分） | 所有类型 |
 
 **挑战适配 fit：**
 - 概念类：`fit = readiness × (1 − |novelty − NOVELTY_TARGET| / max(NOVELTY_TARGET, 1 − NOVELTY_TARGET))`，`NOVELTY_TARGET = 0.3`。

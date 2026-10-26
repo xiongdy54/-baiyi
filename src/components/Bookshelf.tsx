@@ -629,7 +629,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           {T("优先级 {n}", { n: p })}
         </button>
       ))}
-      <div className="dd-note">{T("新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。")}</div>
+      <div className="dd-note">{T("数字越大越优先推送。新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。")}</div>
     </CardMenu>
   );
 

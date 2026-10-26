@@ -37,7 +37,8 @@ app.whenReady().then(async () => {
     return r.id;
   };
 
-  // ---------- 链甲：3 级（根 → 子 → 孙），孙＝队列头（优先级最低）----------
+  // ---------- 链甲：3 级（根 → 子 → 孙），孙＝队列头（优先级数值最高；D233 起数字越大越先推送，
+  //            本夹具全部取改版前值的翻转 100−p，推送顺序与改版前逐条相同）----------
   // 根层正文刻意写长（>2500 字）：高亮段落在**正文中段**、远超一屏 ⇒ 落点「居中」才有可测的几何意义
   const PAD = "层叠的铺垫文字用来把高亮段推到卡面下方。";
   const A1TXT =
@@ -47,9 +48,9 @@ app.whenReady().then(async () => {
     "，其中 ROOTAHL 这段要被范围高亮标出。" +
     PAD.repeat(60) +
     "收尾：范围之后还有一点文字。";
-  const A1 = add("document", book.documentId, A1TXT, 90, rangeOf(A1TXT, "ROOTAHL"), { documentId: book.documentId });
-  const A2 = add("extract", A1, line("甲3级", 2), 90, null, { documentId: book.documentId, extractId: A1, parentExtractId: A1, rootExtractId: A1 });
-  const A3 = add("extract", A2, line("甲3级", 3), 10, null, { documentId: book.documentId, extractId: A2, parentExtractId: A2, rootExtractId: A1 });
+  const A1 = add("document", book.documentId, A1TXT, 10, rangeOf(A1TXT, "ROOTAHL"), { documentId: book.documentId });
+  const A2 = add("extract", A1, line("甲3级", 2), 10, null, { documentId: book.documentId, extractId: A1, parentExtractId: A1, rootExtractId: A1 });
+  const A3 = add("extract", A2, line("甲3级", 3), 90, null, { documentId: book.documentId, extractId: A2, parentExtractId: A2, rootExtractId: A1 });
 
   // ---------- 链乙：6 级（边界内＝全显示）----------
   let parentB = book.documentId;
@@ -57,7 +58,7 @@ app.whenReady().then(async () => {
   let rootB = "";
   for (let i = 1; i <= 6; i++) {
     const isLeaf = i === 6;
-    const id = add(parentTypeB, parentB, line("乙6层", i), isLeaf ? 20 : 90, null, {
+    const id = add(parentTypeB, parentB, line("乙6层", i), isLeaf ? 80 : 10, null, {
       documentId: book.documentId,
       ...(parentTypeB === "extract" ? { extractId: parentB, parentExtractId: parentB, rootExtractId: rootB || parentB } : {})
     });
@@ -73,7 +74,7 @@ app.whenReady().then(async () => {
   for (let i = 1; i <= 8; i++) {
     const isLeaf = i === 8;
     const text = i === 3 ? line("丙8层", i, "，其中 PROP8L3HL 这段要被范围高亮标出。") : line("丙8层", i);
-    const id = add(parentTypeC, parentC, text, isLeaf ? 30 : 90, i === 3 ? rangeOf(text, "PROP8L3HL") : null, {
+    const id = add(parentTypeC, parentC, text, isLeaf ? 70 : 10, i === 3 ? rangeOf(text, "PROP8L3HL") : null, {
       documentId: book.documentId,
       ...(parentTypeC === "extract" ? { extractId: parentC, parentExtractId: parentC, rootExtractId: rootC || parentC } : {})
     });
@@ -96,13 +97,13 @@ app.whenReady().then(async () => {
     "。" +
     PAD.repeat(60) +
     "收尾：范围之后还有一点文字。";
-  const D1 = add("document", book.documentId, D1TXT, 90, null, { documentId: book.documentId });
-  // D2＝子卡（到期；优先级 40 ⇒ 排在乙6层 / 丙8层之后当队列头）。
+  const D1 = add("document", book.documentId, D1TXT, 10, null, { documentId: book.documentId });
+  // D2＝子卡（到期；优先级 60 ⇒ 排在乙6层（80）/ 丙8层（70）之后当队列头）。
   // 正文多行：第 2 段的引文句要能被真鼠标选中 ⇒ 偏移必须把 EditableText 落库口径里的 `<br>` 换行计进去，
   // 少算就会让 parentRange 停在第 1 段（GUI 侧用「切片＝选中文字」正向对照钉死这一点）。
   const D2PICK = "D2PICK这个短语";
   const D2TXT = line("丁4级", 2) + "\n\n" + "第二段：从这里 " + D2PICK + " 到那里，这段要被引。\n\n第三段：尾部不选。";
-  const D2 = add("extract", D1, D2TXT, 40, null, {
+  const D2 = add("extract", D1, D2TXT, 60, null, {
     documentId: book.documentId,
     extractId: D1,
     parentExtractId: D1,

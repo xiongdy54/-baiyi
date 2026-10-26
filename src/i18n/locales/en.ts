@@ -734,8 +734,8 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "书籍语言": "Book language",
   "优先级": "Priority",
   "优先级 {n}": "Priority {n}",
-  "新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。":
-    "New extracts inherit this book's priority; existing extracts (unless edited individually) follow automatically.",
+  "数字越大越优先推送。新建摘录继承此书优先级；书里已摘录的条目（未被单条改过）会同步跟随。":
+    "Higher numbers are shown sooner. New extracts inherit this book's priority; existing extracts (unless edited individually) follow automatically.",
   "归入文件夹": "Move to folder",
   "新建文件夹并放入": "New folder with this book",
   "移出「{name}」": "Remove from \"{name}\"",
@@ -1676,7 +1676,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "下一条": "Next",
   "推迟天数": "Postpone days",
   "推迟": "Postpone",
-  "优先级：拖动滑块或直接输入数字（数字越大越靠后）": "Priority: drag the slider or type a number (larger = later)",
+  "优先级：拖动滑块或直接输入数字（数字越大越优先）": "Priority: drag the slider or type a number (higher = sooner)",
   "优先级数值": "Priority value",
   "处理后认为再无值得制卡的内容：不再推送，仍保留在卡片浏览器": "Nothing left worth carding after this: no longer pushed, still kept in the card browser",
 

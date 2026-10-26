@@ -1543,7 +1543,8 @@ async function buildSnapshot() {
       id: itemId,
       title: String(mat.title || ""),
       lang: await langOfMaterial(mat),
-      priority: Number(mat.priority) || 50,
+      // D233：0 是合法值（越大越优先，0＝最低），不能被 `|| 50` 吞成 50
+      priority: Number.isFinite(Number(mat.priority)) && mat.priority !== null && mat.priority !== "" ? Number(mat.priority) : 50,
       sourceType: String(mat.sourceType || ""),
       dominantUdc: dominantUdcOf(facts, itemId),
       lexicalUdcCounts: lexicalUdcByItem.get(itemId) || {},
@@ -1645,7 +1646,7 @@ async function buildSnapshot() {
       libraryItemId: String(e.libraryItemId),
       documentId: String(e.documentId),
       status: String(e.status || "open"),
-      priority: Number(e.priority) || 0,
+      priority: Number.isFinite(Number(e.priority)) && e.priority !== null && e.priority !== "" ? Number(e.priority) : 50,
       topicNextAt: Number(e.topicNextAt) || 0,
       processCount: Number(e.processCount) || 0,
       hasCard: extractsWithCard.has(String(e.id)),

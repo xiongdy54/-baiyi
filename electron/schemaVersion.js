@@ -5,7 +5,7 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
-const SCHEMA_VERSION = 4; // 每新增一个 MIGRATIONS 项就 +1，并与最后一项的 version 相等
+const SCHEMA_VERSION = 5; // 每新增一个 MIGRATIONS 项就 +1，并与最后一项的 version 相等
 
 // C-18a（审计）：due 表达式——只在「JSON 合法且 $.due 是数值」时取出，其余一律为 NULL
 // （NULL = 交给 JS 精确判定，见 db.js 的 TODAY_QUEUE_DUE_SQL 快速路径）。
@@ -48,6 +48,67 @@ const MIGRATIONS = [
       db.exec(`CREATE TABLE IF NOT EXISTS sync_tombstones (
           tbl TEXT NOT NULL, row_id TEXT NOT NULL, deleted_at INTEGER NOT NULL,
           PRIMARY KEY (tbl, row_id)) WITHOUT ROWID`);
+    }
+  },
+  {
+    // v49.62 / D233（用户 2026-10-26 指令）：摘录与书的优先级方向统一为「数字越大越优先、越先推送」。
+    // 存量值一律 p → 100 − p（不截断不取整，保序）：改前改后推送顺序逐条相同（旧 10＝很优先 ⇒ 新 90），
+    // 默认 50 不变。覆盖面＝会把优先级读回来的全部落点——
+    //  · extracts.priority（公共投影列）与 extracts.engine_state_json 各引擎子空间的 priority
+    //    （漏翻子空间 ⇒ 切换推送引擎时会把旧方向的值投影回公共列）；
+    //  · library_items.priority（书级默认；继承型摘录与之相等，同翻后仍相等）；
+    //  · extract_ops.before_json / after_json 的 priority、schedule.priority 与嵌套 engineStateJson
+    //    （漏翻 ⇒ 撤销一次改版前的操作会写回旧方向的值）。
+    // 不动：cards.priority（闪卡优先级 D216 已退役，制卡提示词口径本就越大越重要）、
+    // learner_tracks.priority（1..5，本就越大权重越高）。
+    version: 5,
+    name: "priority_direction_flip",
+    up(db) {
+      const flipNum = (v) => (typeof v === "number" && Number.isFinite(v) ? 100 - v : v);
+      const flipEngineState = (obj) => {
+        if (!obj || typeof obj !== "object" || Array.isArray(obj)) return obj;
+        for (const k of Object.keys(obj)) {
+          const sub = obj[k];
+          if (sub && typeof sub === "object" && !Array.isArray(sub) && "priority" in sub) sub.priority = flipNum(sub.priority);
+        }
+        return obj;
+      };
+      const flipEngineStateText = (text) => {
+        if (typeof text !== "string" || text === "") return text;
+        try {
+          return JSON.stringify(flipEngineState(JSON.parse(text)));
+        } catch {
+          return text; // 坏 JSON 原样保留（读取侧 parseEngineState 本就按空子空间处理）
+        }
+      };
+      const flipOpText = (text) => {
+        let o;
+        try {
+          o = JSON.parse(text);
+        } catch {
+          return text;
+        }
+        if (!o || typeof o !== "object" || Array.isArray(o)) return text;
+        if ("priority" in o) o.priority = flipNum(o.priority);
+        if (o.schedule && typeof o.schedule === "object" && "priority" in o.schedule) o.schedule.priority = flipNum(o.schedule.priority);
+        if (typeof o.engineStateJson === "string") o.engineStateJson = flipEngineStateText(o.engineStateJson);
+        return JSON.stringify(o);
+      };
+      db.exec("UPDATE extracts SET priority = 100 - priority WHERE typeof(priority) IN ('integer','real')");
+      db.exec("UPDATE library_items SET priority = 100 - priority WHERE typeof(priority) IN ('integer','real')");
+      const states = db.prepare("SELECT id, engine_state_json AS s FROM extracts WHERE engine_state_json IS NOT NULL AND engine_state_json <> ''").all();
+      const updState = db.prepare("UPDATE extracts SET engine_state_json = ? WHERE id = ?");
+      for (const r of states) {
+        const next = flipEngineStateText(r.s);
+        if (next !== r.s) updState.run(next, r.id);
+      }
+      const ops = db.prepare("SELECT id, before_json AS b, after_json AS a FROM extract_ops").all();
+      const updOp = db.prepare("UPDATE extract_ops SET before_json = ?, after_json = ? WHERE id = ?");
+      for (const r of ops) {
+        const b = flipOpText(r.b);
+        const a = flipOpText(r.a);
+        if (b !== r.b || a !== r.a) updOp.run(b, a, r.id);
+      }
     }
   }
 ];

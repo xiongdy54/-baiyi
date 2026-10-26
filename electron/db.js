@@ -53,6 +53,7 @@ const {
   MATERIAL_MAP_EXPLAIN_PROMPT,
   // v48.22（D58 / E1）：摘录重排 scope
   EXTRACT_RERANK_PROMPT,
+  EXTRACT_RERANK_PROMPT_V1,
   // v48.51（D91）：简明解读 scope；v48.74（D118）v1 原文冻结常量（全新库 v1 行留痕用）
   READER_EXPLAIN_STE_PROMPT,
   READER_EXPLAIN_STE_PROMPT_V1,
@@ -2889,6 +2890,16 @@ function ensurePromptTemplates() {
     if (Number(rerankCount) === 0) {
       db.run(
         "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'extract-rerank', '摘录重排 v1', ?, 1, 1, ?, ?)",
+        [crypto.randomUUID(), EXTRACT_RERANK_PROMPT_V1, situationRequiredFor("extract-rerank"), now]
+      );
+    }
+    // v49.62（D233）：extract-rerank v2——priority 口径随库内方向翻转为「数字越大越优先」（v1 写的是
+    // 「数字越小越优先」，翻转后继续用 v1 会让模型把最不重要的条目往前排）。存量库按 MAX(version)<2
+    // 升版播种（reader-explain v2 同款模式），v1 留痕；下方 is_default 订正使 v2 成为唯一默认。
+    const rerankMaxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = 'extract-rerank'")[0]?.v || 0;
+    if (Number(rerankMaxV) < 2) {
+      db.run(
+        "INSERT INTO prompt_templates (id, scope, name, content, version, is_default, situation_required, created_at) VALUES (?, 'extract-rerank', '摘录重排 v2', ?, 2, 1, ?, ?)",
         [crypto.randomUUID(), EXTRACT_RERANK_PROMPT, situationRequiredFor("extract-rerank"), now]
       );
     }
@@ -3416,6 +3427,7 @@ function parentChain(extract) {
   return chain;
 }
 
+/** 到期摘录（推送序＝priority DESC, topic_next_at ASC：v49.62 / D233 起**数字越大越优先**，同优先级先到期者先） */
 function listDueExtracts(nowTs) {
   // v48.22（D58）：now 可注入（测试与跨日场景，同 §4.4.4 时间注入精神）；缺省取真实时间
   const now = Number.isFinite(Number(nowTs)) ? Number(nowTs) : Date.now();
@@ -3436,7 +3448,7 @@ function listDueExtracts(nowTs) {
        -- v48.22（D58，§6.4.2）：未知状态一律按 open 对待 ⇒ 必须写成**排除式**白名单；
        -- 写成包含式（status IN (...)）会把未知状态误排除，违反前向兼容
        AND COALESCE(e.status,'open') NOT IN ('resolved','dismissed','archived')
-     ORDER BY e.priority ASC, e.topic_next_at ASC`,
+     ORDER BY e.priority DESC, e.topic_next_at ASC`,
     [now]
   );
   return rows.map((r) => ({
@@ -3464,7 +3476,7 @@ function listAllExtracts() {
      JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
      JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
      WHERE e.is_deleted = 0
-     ORDER BY e.priority ASC, e.topic_next_at ASC`
+     ORDER BY e.priority DESC, e.topic_next_at ASC`
   );
   return rows.map((r) => {
     let contextRef = null;
@@ -4644,7 +4656,8 @@ function computeSessionQueue(nowTs, opts) {
   if (mergeIntoReview || scope) {
     let due = applyScope(listDueExtracts(now), scope, "extract");
     // v48.22（D58/D59）：实验引擎生效时按**本地因子**重排（§6.4.1 两段式 E1，确定性、零 IO）；
-    // 默认引擎保持 SQL 原序（priority ASC, topic_next_at ASC），存量行为零变更
+    // 默认引擎保持 SQL 原序（priority DESC, topic_next_at ASC——v49.62 / D233 起数字越大越优先，存量值已由
+    // schemaVersion v5 迁移翻转，推送顺序与改前逐条相同），存量行为零变更
     if (sessionEngine === ENGINE_AI) {
       // v48.80（D124 / 设计稿 §9.5 E2）：KP 就绪度因子——总开关关闭（lmOn=false）时一律因子 1（E1 原行为）。
       // 开关口径与 learnerRefresh.learnerEnabled() 同源（db.js 不能 require learnerRefresh，两边改动须同步）。
@@ -4678,6 +4691,9 @@ function computeSessionQueue(nowTs, opts) {
       (a, b) =>
         a.sortAt - b.sortAt ||
         (a.kind === b.kind ? 0 : a.kind === "card" ? -1 : 1) ||
+        // v49.62 / D233：同一到期时刻的摘录按优先级（越大越先）——同日新建的摘录次日进队时刻全相同，
+        // 此前只按 id 决胜，优先级在 by-due 下完全不起作用
+        (a.kind === "extract" ? (Number(b.extract.priority) || 0) - (Number(a.extract.priority) || 0) : 0) ||
         String(a.id).localeCompare(String(b.id))
     );
     for (const { sortAt, ...rest } of merged) items.push(rest);
@@ -8287,7 +8303,7 @@ function learnerFacts(opts) {
        JOIN documents d ON d.id = e.document_id AND d.is_deleted = 0
        JOIN library_items li ON li.id = d.library_item_id AND li.is_deleted = 0
        WHERE e.is_deleted = 0 AND COALESCE(e.kind,'extract') = 'extract'
-       ORDER BY e.priority ASC, e.topic_next_at ASC`
+       ORDER BY e.priority DESC, e.topic_next_at ASC`
     ),
     kps: queryAll(
       "SELECT id, canonical_label AS label, domain_id AS domainId, alias_json AS aliasJson, merged_into AS mergedInto, updated_at AS updatedAt FROM knowledge_points WHERE is_deleted = 0 AND status = 'active' ORDER BY id ASC"
