@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isImeComposing } from "../lib/ime";
-import { isTextEntryTarget, isNativeControlKey } from "../lib/keyTarget";
+import { isTextEntryTarget, isNativeControlKey, isInModal } from "../lib/keyTarget";
 import ExtractCardFace, { ExtractActionsBar, parseQuoteRanges } from "./ExtractCardFace";
 import SelectionMenu, { ANNOT_COLORS, type AnnotColor, type AnnotMenuMode, type AnnotMarkForm } from "./SelectionMenu";
 import { useSelectionBarStyle } from "../lib/selectionBarSettings";
@@ -679,14 +679,21 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     setViewRanges(null);
   }, []);
 
+  const dockOpen = selActions.dockOpen;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isImeComposing(e)) return; // 组字中的 Enter/Esc/空格属于输入法，不推进调度
+      // v49.57 / D228：已被别处处理过的按键（全局命令分发、子组件自己的键盘逻辑）不再二次处理
+      if (e.defaultPrevented) return;
       // v49.56 / D227：只有真正在打字（文本框 / 文本区 / 下拉框 / 可编辑区）才让路；焦点停在优先级
-      // 滑块等非文本控件上时，空格 / 回车 / Z 照常生效，只把滑块方向键等原生键留给控件
+      // 滑块等非文本控件上时，空格 / 回车 / Z 照常生效，只把滑块方向键、Tab 选中按钮的回车/空格留给控件
       if (isTextEntryTarget(e.target) || isNativeControlKey(e)) return;
+      // D228：焦点在对话框内、或制卡面板开着——摘录页快捷键整体让路（面板里按空格 / 回车 / Z
+      // 不得推进或撤销后面那条摘录；面板按钮由它自己的原生键处理）
+      if (isInModal(e.target) || dockOpen) return;
+      const plain = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
       if (viewing) {
-        if (e.key === "Escape") {
+        if (e.key === "Escape" && plain) {
           e.preventDefault();
           closeViewing();
         }
@@ -694,17 +701,23 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
       }
       if (e.key === "Escape") {
         setCrumbOpen(false);
-      } else if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        void advance();
-      } else if (e.key === "z" || e.key === "Z") {
-        e.preventDefault();
-        void undo();
+        return;
       }
+      // D228：「下一条」只认不带修饰键的空格 / 回车（Ctrl+回车、Shift+空格等不再误触推进）；
+      // 撤销认 Z 与 Ctrl/Cmd+Z，排除 Alt+Z（阅读「制卡」默认键）与 Ctrl+Shift+Z（重做习惯键）
+      const isAdvance = (e.key === " " || e.key === "Enter") && plain;
+      const isUndo =
+        (e.key === "z" || e.key === "Z") && !e.altKey && !e.shiftKey && !(e.ctrlKey && e.metaKey);
+      if (!isAdvance && !isUndo) return;
+      e.preventDefault();
+      // D228：长按连发（e.repeat）只吞掉、不执行——按住空格 / Z 不再连续跳过或连续撤销多条
+      if (e.repeat) return;
+      if (isAdvance) void advance();
+      else void undo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [advance, undo, viewing, closeViewing]);
+  }, [advance, undo, viewing, closeViewing, dockOpen]);
 
   /** 面包屑点某层：切到那张卡（查看态）。当前层不可点——渲染成 span，且这里再拦一道。
    *  不带「要看的范围」：高亮该层自身的 quote_range_json（既有行为，规格 §1.2 R13）。 */
