@@ -149,6 +149,8 @@ readerSettings
 
 #### P4a 翻页滑动过渡
 
+> **D241 / v49.70 覆盖注记**：以下为 D130 历史设计。当前存储字段改为 `appearance.turnEffect: "glide" | "none"`，默认 glide；旧 turnAnimated 存储值忽略并剥离，仅作生效输出。foliate 三种模式均支持：分页/对开滑行与触控板吸附，滚动整屏缓动，跨章淡入；PDF 不适用。系统减少动效及应用关闭/减少动效强制关闭，UI 保留用户意愿。默认开及 vendor 补丁取代此节原默认关/零补丁决策，详见 GUIDE D241。
+
 - **设置键**：`readerSettings.appearance.turnAnimated`（★新增 boolean，**默认 false**）。
 - **默认取 false 的理由**：① 存量行为零变更是本仓一贯纪律（v48.22「存量行不动」、D58 等先例）；② `animated` 与 paginator 翻页时序耦合（`paginator.js:1115`：有该属性时 `#turnPage` 走动画等待路径），默认关闭把回归风险封顶在显式开启的用户群；③ 个性化语义＝用户选择，不强加给所有用户。备选方案（默认开）被否，理由如上，登记于此。
 - **生效机制**：adapter `applyRendererSettings` 按值 toggle renderer 的 `animated` 布尔属性。**注意**：`animated` 不在 paginator `observedAttributes`（`paginator.js:442-446`），但两处消费点都是 `hasAttribute` 即时读取（`paginator.js:937,1115`），`setAttribute/removeAttribute` 即刻影响下一次翻页——**零 vendor 补丁、零 observedAttributes 改动**。adapter 文件头白名单补记该属性（一行注释变更，§7.1.9 纪律：adapter 文件头维护白名单）。

@@ -65,6 +65,20 @@
 
 ---
 
+### 1.1 阅读翻页专用 Token（D241 / v49.70）
+
+阅读翻页是内容导航而非顶层视图切换，使用独立参数；不改变 §5 的顶层页签时长与方向契约。
+
+| Token | 默认 | 用途 |
+| --- | --- | --- |
+| `--reader-turn-dur` | 420ms | 章内滑行、整屏缓动、跨章淡入 |
+| `--reader-turn-out` | 140ms | 跨章淡出 |
+| `--reader-turn-ease` | cubic-bezier(0.22, 1, 0.36, 1) | 快起步、长尾缓停，无回弹 |
+| `--reader-turn-out-ease` | cubic-bezier(0.4, 0, 1, 1) | 跨章退场，与 `--ease-exit` 同曲线 |
+| `--reader-turn-shift` | 16px | 跨章入场位移；退场用半幅 |
+
+分页/对开章内用可中断 WAAPI transform；滚动整屏用 rAF，保留约 1.5 行重叠；跨章微移淡出→换章→淡入。触控板横滑采用直接跟手与目标页吸附，纵向滚轮按手势锁存。参数从宿主主题 Token 求值，遵守既有皮肤不得改变运动语言的纪律。存储 `appearance.turnEffect` 默认 glide，none 瞬切；系统减少动效或 body 的 motion-off / motion-reduced 均强制关闭。PDF 不适用。
+
 ## 2. Skill → 场景映射总表（18 个）
 
 | # | Skill | 性质 | 本软件应用场景 | 规范落点 |

@@ -36,6 +36,51 @@ const animate = (a, b, duration, ease, render) => new Promise(resolve => {
     requestAnimationFrame(step)
 })
 
+// [local-patch D241] 翻页动效（见 MANIFEST.json localPatches）：缓动曲线解析 + 时长/位移读取。
+//   时长与曲线不写死在内核里——读宿主 Token（--reader-turn-*，src/theme.css :root），统一由主题层定义；
+//   这里的数字只是 Token 缺席时（单测夹具等）的兜底。
+const cubicBezier = (x1, y1, x2, y2) => {
+    const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx
+    const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by
+    const sx = t => ((ax * t + bx) * t + cx) * t
+    const sy = t => ((ay * t + by) * t + cy) * t
+    const dsx = t => (3 * ax * t + 2 * bx) * t + cx
+    const solve = x => {
+        let t = x
+        for (let i = 0; i < 8; i++) {
+            const e = sx(t) - x
+            if (Math.abs(e) < 1e-6) return t
+            const d = dsx(t)
+            if (Math.abs(d) < 1e-6) break
+            t -= e / d
+        }
+        let lo = 0, hi = 1
+        t = x
+        for (let i = 0; i < 32 && hi - lo > 1e-6; i++) {
+            const v = sx(t)
+            if (Math.abs(v - x) < 1e-6) break
+            if (x > v) lo = t
+            else hi = t
+            t = (lo + hi) / 2
+        }
+        return t
+    }
+    return x => x <= 0 ? 0 : x >= 1 ? 1 : sy(solve(x))
+}
+const parseEasing = str => {
+    const m = /cubic-bezier\(([^)]+)\)/.exec(str || '')
+    if (m) {
+        const p = m[1].split(',').map(Number)
+        if (p.length === 4 && p.every(Number.isFinite)) return cubicBezier(...p)
+    }
+    return easeOutQuad
+}
+const readTime = (raw, fallback) => {
+    const v = parseFloat(raw)
+    if (!Number.isFinite(v) || v < 0) return fallback
+    return /ms\s*$/i.test(raw) ? v : /s\s*$/i.test(raw) ? v * 1000 : v
+}
+
 // collapsed range doesn't return client rects sometimes (or always?)
 // try make get a non-collapsed range or element
 const uncollapse = range => {
@@ -440,7 +485,7 @@ class View {
 // NOTE: everything here assumes the so-called "negative scroll type" for RTL
 export class Paginator extends HTMLElement {
     static observedAttributes = [
-        'flow', 'gap', 'margin',
+        'flow', 'gap', 'margin', 'animated',
         'max-inline-size', 'max-block-size', 'max-column-count',
     ]
     #root = this.attachShadow({ mode: 'closed' })
@@ -466,6 +511,13 @@ export class Paginator extends HTMLElement {
     #touchState
     #touchScrolled
     #lastVisibleRange
+    // [local-patch D241] 翻页动效状态：#glide＝分页章内滑行（WAAPI transform，合成层跑）；
+    // #tween＝滚动模式整屏翻页（rAF 缓动 scrollTop，用户一滚即让出）；#fx＝跨章淡出/淡入；
+    // #wheel＝滚轮/触控板手势状态（一次手势＝一次翻页，横向两指滑动＝跟手 + 吸附）
+    #glide = null
+    #tween = null
+    #fx = null
+    #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null }
     constructor() {
         super()
         this.#root.innerHTML = `<style>
@@ -579,16 +631,62 @@ export class Paginator extends HTMLElement {
         this.#container.addEventListener('scroll', () => this.dispatchEvent(new Event('scroll')))
         // [local-patch v20.1] 滚轮翻页与章尾续读（upstream 无 wheel 处理；见 MANIFEST.json localPatches）
         //   分页/对开：滚轮=翻页（跨章节由 #turnPage 处理）；滚动：章尾继续滚→下一章、章首→上一章
+        // [local-patch D241] 手势化：①分页/对开——竖向滚轮一次手势只翻一页（触控板惯性不再连翻多页；
+        //   停顿或新一次发力才算下一次手势）；横向两指滑动＝页面跟手移动，越过阈值即吸附到相邻页，
+        //   不足则回弹（Scroll Snap 手感）。②滚动——到达章尾/章首的那次惯性不翻章，停顿后再滚才续读，
+        //   且用户一滚即接管正在进行的整屏缓动。
         const wheelTurn = (e) => {
-            if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
-            if (this.getAttribute('flow') === 'scrolled') {
-                if (e.deltaY > 0 && (this.viewSize - this.end) <= 2) this.next()
-                else if (e.deltaY < 0 && this.start <= 2) this.prev()
+            if (e.ctrlKey) return
+            const W = this.#wheel
+            const now = performance.now()
+            const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.size : 1
+            const dx = e.deltaX * unit, dy = e.deltaY * unit
+            const mag = Math.max(Math.abs(dx), Math.abs(dy))
+            const impulse = now - W.last > 160
+                || (mag > W.lastMag * 1.6 && mag > 6 && now - W.turnAt > 280)
+            W.last = now
+            W.lastMag = mag
+            if (this.scrolled) {
+                this.#stopTween()
+                if (Math.abs(dx) > Math.abs(dy)) return
+                const atEnd = dy > 0 && (this.viewSize - this.end) <= 2
+                const atStart = dy < 0 && this.start <= 2
+                if (!atEnd && !atStart) {
+                    W.armed = false
+                    W.acc = 0
+                    return
+                }
+                if (!W.armed) {
+                    if (!impulse) return
+                    W.armed = true
+                    W.acc = 0
+                }
+                W.acc += dy
+                if (Math.abs(W.acc) < 40) return
+                W.armed = false
+                W.acc = 0
+                W.turnAt = now
+                if (dy > 0) this.next()
+                else this.prev()
                 return
             }
-            if (Math.abs(e.deltaY) < 5) return
             if (e.cancelable) e.preventDefault()
-            if (e.deltaY > 0) this.next()
+            if (impulse) {
+                W.latched = false
+                W.acc = 0
+            }
+            if (Math.abs(dx) > Math.abs(dy) && !this.#vertical) {
+                this.#wheelDrag(dx, now)
+                return
+            }
+            if (W.latched || W.drag) return
+            W.acc += this.#vertical && Math.abs(dx) > Math.abs(dy) ? dx : dy
+            if (Math.abs(W.acc) < 24) return
+            const dir = W.acc > 0 ? 1 : -1
+            W.acc = 0
+            W.latched = true
+            W.turnAt = now
+            if (dir > 0) this.next()
             else this.prev()
         }
         this.addEventListener('wheel', wheelTurn, { passive: false })
@@ -663,6 +761,14 @@ export class Paginator extends HTMLElement {
     }
     attributeChangedCallback(name, _, value) {
         switch (name) {
+            case 'animated':
+                if (value == null) {
+                    this.#stopGlide()
+                    this.#stopTween()
+                    this.#fx?.cancel()
+                    this.#fx = null
+                }
+                break
             case 'flow':
                 this.render()
                 break
@@ -848,15 +954,24 @@ export class Paginator extends HTMLElement {
             Math.max(min, Math.min(max, (start + end) / 2
                 + (isNaN(d) ? 0 : d))) / size)
 
-        this.#scrollToPage(page, 'snap').then(() => {
-            const dir = page <= 0 ? -1 : page >= pages - 1 ? 1 : null
-            if (dir) return this.#goTo({
-                index: this.#adjacentIndex(dir),
+        const dir = page <= 0 ? -1 : page >= pages - 1 ? 1 : null
+        // [local-patch D241] Touch snapping shares the chapter transition path;
+        // #scrollTo now settles its target immediately, so do not flash a blank edge page.
+        if (dir && this.hasAttribute('animated')) {
+            if (this.#adjacentIndex(dir) != null) return this.#turnPage(dir)
+            return this.#scrollToPage(Math.max(1, Math.min(pages - 2, page)), 'snap')
+        }
+        return this.#scrollToPage(page, 'snap').then(() => {
+            const index = dir ? this.#adjacentIndex(dir) : null
+            if (index != null) return this.#goTo({
+                index,
                 anchor: dir < 0 ? () => 1 : () => 0,
             })
         })
     }
     #onTouchStart(e) {
+        this.#commitGlide()
+        this.#stopTween()
         const touch = e.changedTouches[0]
         this.#touchState = {
             x: touch?.screenX, y: touch?.screenY,
@@ -934,14 +1049,24 @@ export class Paginator extends HTMLElement {
         }
         // FIXME: vertical-rl only, not -lr
         if (this.scrolled && this.#vertical) offset = -offset
-        if ((reason === 'snap' || smooth) && this.hasAttribute('animated')) return animate(
-            element[scrollProp], offset, 300, easeOutQuad,
-            x => element[scrollProp] = x,
-        ).then(() => {
+        // [local-patch D241] 动效翻页：分页＝先把滚动位置一步到位（进度/选区/relocate 即刻按新页计算），
+        // 再用 transform 从旧位置滑到新位置（合成层动画，主线程忙也不掉帧；连按时从当前视觉位置续滑）；
+        // 滚动＝rAF 缓动 scrollTop（用户滚轮/触摸即让出）。两者都不阻塞下一次翻页。
+        if ((reason === 'snap' || smooth) && this.hasAttribute('animated')) {
+            if (this.scrolled) {
+                return this.#tweenTo(offset, () => {
+                    this.#scrollBounds = [element[scrollProp], this.atStart ? 0 : size, this.atEnd ? 0 : size]
+                    this.#afterScroll(reason)
+                })
+            }
+            this.#glideTo(offset)
             this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size]
             this.#afterScroll(reason)
-        })
+            return
+        }
         else {
+            this.#stopGlide()
+            this.#stopTween()
             element[scrollProp] = offset
             this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size]
             this.#afterScroll(reason)
@@ -1065,30 +1190,225 @@ export class Paginator extends HTMLElement {
         const resolved = await target
         // [local-patch v37] 目标解析失败（resolveNavigation 返回 undefined）时安静返回，
         // 不再让 resolved.index 抛 TypeError
-        if (resolved != null && this.#canGoToIndex(resolved.index)) return this.#goTo(resolved)
+        if (resolved != null && this.#canGoToIndex(resolved.index)) {
+            // [local-patch D241] 目录/链接/跳回原文等换章导航：淡出 → 换章 → 淡入（同章内定位不做过渡）
+            const fx = this.hasAttribute('animated') && this.#view
+                && resolved.index !== this.#index && !document.hidden
+            if (!fx) return this.#goTo(resolved)
+            await this.#sectionOut(0)
+            try {
+                return await this.#goTo(resolved)
+            } finally {
+                this.#sectionIn(0)
+            }
+        }
+    }
+    // [local-patch D241] 滚动模式整屏翻页保留约 1.5 行重叠（读者不丢上一屏末行的上下文）；
+    // 缓动进行中再翻页＝以缓动终点为基准续翻（连按 PageDown 不丢键）。
+    #scrollStep() {
+        const size = this.size
+        let lh = NaN
+        try {
+            const doc = this.#view?.document
+            lh = parseFloat(doc.defaultView.getComputedStyle(doc.body).lineHeight)
+        } catch { /* 文档未就绪 */ }
+        const overlap = Number.isFinite(lh) && lh > 0 ? Math.min(size * 0.15, lh * 1.5) : size * 0.06
+        return Math.max(size * 0.5, size - overlap)
+    }
+    #scrollBase() {
+        return this.#tween ? Math.abs(this.#tween.to) : this.start
     }
     #scrollPrev(distance) {
         if (!this.#view) return true
         if (this.scrolled) {
-            if (this.start > 0) return this.#scrollTo(
-                Math.max(0, this.start - (distance ?? this.size)), null, true)
+            const base = this.#scrollBase()
+            if (base > 0) return this.#scrollTo(
+                Math.max(0, base - (distance ?? (this.hasAttribute('animated') ? this.#scrollStep() : this.size))), null, true)
             return true
         }
         if (this.atStart) return
         const page = this.page - 1
+        // [local-patch D241] 动效开启时不滑进章首空白边页——直接走跨章过渡（淡出 → 换章 → 淡入）
+        if (page <= 0 && this.hasAttribute('animated')) return true
         return this.#scrollToPage(page, 'page', true).then(() => page <= 0)
     }
     #scrollNext(distance) {
         if (!this.#view) return true
         if (this.scrolled) {
-            if (this.viewSize - this.end > 2) return this.#scrollTo(
-                Math.min(this.viewSize, distance ? this.start + distance : this.end), null, true)
+            const base = this.#scrollBase()
+            if (this.viewSize - (base + this.size) > 2) return this.#scrollTo(
+                Math.min(this.viewSize - this.size, base + (distance ?? (this.hasAttribute('animated') ? this.#scrollStep() : this.size))), null, true)
             return true
         }
         if (this.atEnd) return
         const page = this.page + 1
         const pages = this.pages
+        if (page >= pages - 1 && this.hasAttribute('animated')) return true
         return this.#scrollToPage(page, 'page', true).then(() => page >= pages - 1)
+    }
+    // ---------- [local-patch D241] 翻页动效实现 ----------
+    #motion() {
+        const cs = getComputedStyle(this)
+        const v = name => cs.getPropertyValue(name).trim()
+        const ease = v('--reader-turn-ease') || 'cubic-bezier(0.22, 1, 0.36, 1)'
+        const shift = parseFloat(v('--reader-turn-shift'))
+        return {
+            turn: readTime(v('--reader-turn-dur'), 420),
+            out: readTime(v('--reader-turn-out'), 140),
+            ease,
+            easeFn: parseEasing(ease),
+            outEase: v('--reader-turn-out-ease') || 'cubic-bezier(0.4, 0, 1, 1)',
+            shift: Number.isFinite(shift) ? shift : 16,
+        }
+    }
+    #glideAxis() {
+        return this.scrollProp === 'scrollLeft' ? 'X' : 'Y'
+    }
+    // 取消进行中的滑行，返回它此刻的视觉位移（px，沿滚动轴）
+    #stopGlide() {
+        const anim = this.#glide
+        if (!anim) return 0
+        this.#glide = null
+        let t = 0
+        try {
+            const m = new DOMMatrixReadOnly(getComputedStyle(this.#view.element).transform)
+            t = this.#glideAxis() === 'X' ? m.m41 : m.m42
+        } catch { /* 无 transform */ }
+        anim.cancel()
+        return Number.isFinite(t) ? t : 0
+    }
+    // 把进行中的滑行「冻结」在当前视觉位置（触摸/横滑接管时用）
+    #commitGlide() {
+        const t = this.#stopGlide()
+        if (t) this.#container[this.scrollProp] -= t
+    }
+    #glideTo(offset) {
+        const element = this.#container
+        const { scrollProp } = this
+        const visual = element[scrollProp] - this.#stopGlide()
+        element[scrollProp] = offset
+        const d = element[scrollProp] - visual
+        const target = this.#view?.element
+        if (!target || Math.abs(d) < 0.5 || document.hidden) return
+        const { turn, ease } = this.#motion()
+        if (turn <= 0) return
+        const axis = this.#glideAxis()
+        const anim = target.animate([
+            { transform: `translate${axis}(${d}px)` },
+            { transform: `translate${axis}(0px)` },
+        ], { duration: turn, easing: ease })
+        this.#glide = anim
+        anim.finished.then(() => { if (this.#glide === anim) this.#glide = null }, () => {})
+    }
+    #stopTween() {
+        const token = this.#tween
+        this.#tween = null
+        token?.finish()
+    }
+    #tweenTo(to, done) {
+        this.#stopTween()
+        const element = this.#container
+        const { scrollProp } = this
+        const from = element[scrollProp]
+        const { turn, easeFn } = this.#motion()
+        let resolve
+        const settled = new Promise(r => resolve = r)
+        const token = { to, finish: () => { try { done?.() } finally { resolve() } } }
+        this.#tween = token
+        if (document.hidden || turn <= 0 || Math.abs(to - from) < 1) {
+            element[scrollProp] = to
+            this.#tween = null
+            token.finish()
+            return settled
+        }
+        let start
+        const step = now => {
+            if (this.#tween !== token) return
+            start ??= now
+            const f = Math.min(1, (now - start) / turn)
+            element[scrollProp] = from + (to - from) * easeFn(f)
+            if (f < 1) requestAnimationFrame(step)
+            else {
+                this.#tween = null
+                token.finish()
+            }
+        }
+        requestAnimationFrame(step)
+        return settled
+    }
+    // 跨章过渡的运动轴与「前进」方向符号（分页 LTR 前进＝向左出、自右入；RTL 相反；滚动＝自下入）
+    #fxAxis() {
+        if (this.scrolled) return this.#vertical ? ['X', -1] : ['Y', 1]
+        return this.#vertical ? ['Y', 1] : ['X', this.#rtl ? -1 : 1]
+    }
+    #sectionOut(dir) {
+        this.#stopGlide()
+        this.#stopTween()
+        const { out, outEase, shift } = this.#motion()
+        const [axis, sign] = this.#fxAxis()
+        this.#fx?.cancel()
+        const anim = this.#container.animate([
+            { opacity: 1, transform: 'none' },
+            { opacity: 0, transform: `translate${axis}(${-dir * sign * shift * 0.5}px)` },
+        ], { duration: Math.max(0, out), easing: outEase, fill: 'forwards' })
+        this.#fx = anim
+        return anim.finished.catch(() => {})
+    }
+    #sectionIn(dir) {
+        if (!this.hasAttribute('animated') || document.hidden) {
+            this.#fx?.cancel()
+            this.#fx = null
+            return
+        }
+        const { turn, ease, shift } = this.#motion()
+        const [axis, sign] = this.#fxAxis()
+        const old = this.#fx
+        const anim = this.#container.animate([
+            { opacity: 0, transform: dir ? `translate${axis}(${dir * sign * shift}px)` : 'none' },
+            { opacity: 1, transform: 'none' },
+        ], { duration: Math.max(0, turn), easing: ease })
+        old?.cancel()
+        this.#fx = anim
+        anim.finished.then(() => { if (this.#fx === anim) this.#fx = null }, () => {})
+    }
+    // 横向两指滑动（触控板）：跟手 → 越过阈值吸附到相邻页 / 停手不足阈值回弹
+    #wheelDrag(dx, now) {
+        const W = this.#wheel
+        if (W.latched) return
+        if (!W.drag) {
+            if (this.#locked || !this.#view || !this.#scrollBounds) return
+            this.#commitGlide()
+            W.drag = { page: Math.round(this.start / this.size), moved: 0, v: 0, t: now }
+        }
+        const d = W.drag
+        const dt = Math.max(1, now - d.t)
+        d.t = now
+        d.v = d.v * 0.6 + (dx / dt) * 0.4
+        d.moved += dx
+        this.scrollBy(dx, 0)
+        clearTimeout(W.idle)
+        const size = this.size
+        if (Math.abs(d.moved) > size * 0.16 || (Math.abs(d.v) > 0.9 && Math.abs(d.moved) > 24)) {
+            W.latched = true
+            W.turnAt = now
+            this.#endWheelDrag(true)
+        } else W.idle = setTimeout(() => this.#endWheelDrag(false), 140)
+    }
+    #endWheelDrag(commit) {
+        const W = this.#wheel
+        const d = W.drag
+        clearTimeout(W.idle)
+        if (!d) return
+        W.drag = null
+        const dir = commit ? Math.sign(d.moved) * (this.#rtl ? -1 : 1) : 0
+        // Resolve from the gesture's origin, not this.page: one large wheel event may
+        // already pass the midpoint and make this.page report the adjacent page.
+        const page = d.page + dir
+        if (dir && page > 0 && page < this.pages - 1)
+            return this.#scrollToPage(page, 'snap')
+        if (dir > 0 && !this.atEnd) return this.next()
+        if (dir < 0 && !this.atStart) return this.prev()
+        return this.#scrollToPage(d.page, 'snap')
     }
     get atStart() {
         return this.#adjacentIndex(-1) == null && this.page <= 1
@@ -1105,16 +1425,37 @@ export class Paginator extends HTMLElement {
     async #turnPage(dir, distance) {
         if (this.#locked) return
         this.#locked = true
+        let ownsLock = true
         try {
             const prev = dir === -1
-            const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance))
-            if (shouldGo) await this.#goTo({
-                index: this.#adjacentIndex(dir),
-                anchor: prev ? () => 1 : () => 0,
-            })
+            const scrolling = prev ? this.#scrollPrev(distance) : this.#scrollNext(distance)
+            // Scrolling callers settle after relocation (adapter next/prev returns a bool),
+            // but release the input lock immediately so repeated PageDown can retarget.
+            if (this.scrolled && this.#tween && typeof scrolling?.then === 'function') {
+                ownsLock = false
+                this.#locked = false
+                await scrolling
+                return
+            }
+            const shouldGo = await scrolling
+            // [local-patch D241] 跨章＝淡出（沿翻页方向微移）→ 换章 → 淡入（自翻页方向滑入）；
+            // 无相邻章（书首/书尾）时不再以 undefined 下标调用 #goTo（原实现在此抛 TypeError）
+            const index = shouldGo ? this.#adjacentIndex(dir) : null
+            if (index != null) {
+                const fx = this.hasAttribute('animated') && !document.hidden
+                if (fx) await this.#sectionOut(dir)
+                try {
+                    await this.#goTo({
+                        index,
+                        anchor: prev ? () => 1 : () => 0,
+                    })
+                } finally {
+                    if (fx) this.#sectionIn(dir)
+                }
+            }
             if (shouldGo || !this.hasAttribute('animated')) await wait(100)
         } finally {
-            this.#locked = false
+            if (ownsLock) this.#locked = false
         }
     }
     prev(distance) {
@@ -1167,6 +1508,10 @@ export class Paginator extends HTMLElement {
         this.#view.document.defaultView.focus()
     }
     destroy() {
+        this.#stopGlide()
+        this.#stopTween()
+        this.#fx?.cancel()
+        clearTimeout(this.#wheel.idle)
         this.#observer.unobserve(this)
         this.#view.destroy()
         this.#view = null

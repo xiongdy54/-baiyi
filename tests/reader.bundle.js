@@ -4495,7 +4495,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
   __export(paginator_exports, {
     Paginator: () => Paginator
   });
-  var wait, debounce, lerp, easeOutQuad, animate, uncollapse, setSelectionTo, makeRange, bisectNode, SHOW_ELEMENT, SHOW_TEXT, SHOW_CDATA_SECTION, FILTER_ACCEPT, FILTER_REJECT, FILTER_SKIP, filter2, getBoundingClientRect, getVisibleRange, selectionIsBackward, getDirection, getBackground, makeMarginals, setStylesImportant, View, Paginator;
+  var wait, debounce, easeOutQuad, cubicBezier, parseEasing, readTime, uncollapse, setSelectionTo, makeRange, bisectNode, SHOW_ELEMENT, SHOW_TEXT, SHOW_CDATA_SECTION, FILTER_ACCEPT, FILTER_REJECT, FILTER_SKIP, filter2, getBoundingClientRect, getVisibleRange, selectionIsBackward, getDirection, getBackground, makeMarginals, setStylesImportant, View, Paginator;
   var init_paginator = __esm({
     "vendor/foliate-js/paginator.js"() {
       "use strict";
@@ -4513,27 +4513,48 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           if (callNow) f3(...args);
         };
       };
-      lerp = (min, max, x3) => x3 * (max - min) + min;
       easeOutQuad = (x3) => 1 - (1 - x3) * (1 - x3);
-      animate = (a3, b3, duration, ease, render) => new Promise((resolve) => {
-        let start;
-        const step = (now) => {
-          if (document.hidden) {
-            render(lerp(a3, b3, 1));
-            return resolve();
+      cubicBezier = (x1, y1, x22, y22) => {
+        const cx = 3 * x1, bx = 3 * (x22 - x1) - cx, ax = 1 - cx - bx;
+        const cy = 3 * y1, by = 3 * (y22 - y1) - cy, ay = 1 - cy - by;
+        const sx = (t3) => ((ax * t3 + bx) * t3 + cx) * t3;
+        const sy = (t3) => ((ay * t3 + by) * t3 + cy) * t3;
+        const dsx = (t3) => (3 * ax * t3 + 2 * bx) * t3 + cx;
+        const solve = (x3) => {
+          let t3 = x3;
+          for (let i3 = 0; i3 < 8; i3++) {
+            const e3 = sx(t3) - x3;
+            if (Math.abs(e3) < 1e-6) return t3;
+            const d2 = dsx(t3);
+            if (Math.abs(d2) < 1e-6) break;
+            t3 -= e3 / d2;
           }
-          start ??= now;
-          const fraction = Math.min(1, (now - start) / duration);
-          render(lerp(a3, b3, ease(fraction)));
-          if (fraction < 1) requestAnimationFrame(step);
-          else resolve();
+          let lo = 0, hi = 1;
+          t3 = x3;
+          for (let i3 = 0; i3 < 32 && hi - lo > 1e-6; i3++) {
+            const v3 = sx(t3);
+            if (Math.abs(v3 - x3) < 1e-6) break;
+            if (x3 > v3) lo = t3;
+            else hi = t3;
+            t3 = (lo + hi) / 2;
+          }
+          return t3;
         };
-        if (document.hidden) {
-          render(lerp(a3, b3, 1));
-          return resolve();
+        return (x3) => x3 <= 0 ? 0 : x3 >= 1 ? 1 : sy(solve(x3));
+      };
+      parseEasing = (str) => {
+        const m3 = /cubic-bezier\(([^)]+)\)/.exec(str || "");
+        if (m3) {
+          const p3 = m3[1].split(",").map(Number);
+          if (p3.length === 4 && p3.every(Number.isFinite)) return cubicBezier(...p3);
         }
-        requestAnimationFrame(step);
-      });
+        return easeOutQuad;
+      };
+      readTime = (raw, fallback) => {
+        const v3 = parseFloat(raw);
+        if (!Number.isFinite(v3) || v3 < 0) return fallback;
+        return /ms\s*$/i.test(raw) ? v3 : /s\s*$/i.test(raw) ? v3 * 1e3 : v3;
+      };
       uncollapse = (range) => {
         if (!range?.collapsed) return range;
         const { endOffset, endContainer } = range;
@@ -4880,6 +4901,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           "flow",
           "gap",
           "margin",
+          "animated",
           "max-inline-size",
           "max-block-size",
           "max-column-count"
@@ -4909,6 +4931,13 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         #touchState;
         #touchScrolled;
         #lastVisibleRange;
+        // [local-patch D241] 翻页动效状态：#glide＝分页章内滑行（WAAPI transform，合成层跑）；
+        // #tween＝滚动模式整屏翻页（rAF 缓动 scrollTop，用户一滚即让出）；#fx＝跨章淡出/淡入；
+        // #wheel＝滚轮/触控板手势状态（一次手势＝一次翻页，横向两指滑动＝跟手 + 吸附）
+        #glide = null;
+        #tween = null;
+        #fx = null;
+        #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null };
         constructor() {
           super();
           this.#root.innerHTML = `<style>
@@ -5019,15 +5048,56 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           this.#observer.observe(this.#container);
           this.#container.addEventListener("scroll", () => this.dispatchEvent(new Event("scroll")));
           const wheelTurn = (e3) => {
-            if (e3.ctrlKey || Math.abs(e3.deltaX) > Math.abs(e3.deltaY)) return;
-            if (this.getAttribute("flow") === "scrolled") {
-              if (e3.deltaY > 0 && this.viewSize - this.end <= 2) this.next();
-              else if (e3.deltaY < 0 && this.start <= 2) this.prev();
+            if (e3.ctrlKey) return;
+            const W2 = this.#wheel;
+            const now = performance.now();
+            const unit = e3.deltaMode === 1 ? 16 : e3.deltaMode === 2 ? this.size : 1;
+            const dx = e3.deltaX * unit, dy = e3.deltaY * unit;
+            const mag = Math.max(Math.abs(dx), Math.abs(dy));
+            const impulse = now - W2.last > 160 || mag > W2.lastMag * 1.6 && mag > 6 && now - W2.turnAt > 280;
+            W2.last = now;
+            W2.lastMag = mag;
+            if (this.scrolled) {
+              this.#stopTween();
+              if (Math.abs(dx) > Math.abs(dy)) return;
+              const atEnd = dy > 0 && this.viewSize - this.end <= 2;
+              const atStart = dy < 0 && this.start <= 2;
+              if (!atEnd && !atStart) {
+                W2.armed = false;
+                W2.acc = 0;
+                return;
+              }
+              if (!W2.armed) {
+                if (!impulse) return;
+                W2.armed = true;
+                W2.acc = 0;
+              }
+              W2.acc += dy;
+              if (Math.abs(W2.acc) < 40) return;
+              W2.armed = false;
+              W2.acc = 0;
+              W2.turnAt = now;
+              if (dy > 0) this.next();
+              else this.prev();
               return;
             }
-            if (Math.abs(e3.deltaY) < 5) return;
             if (e3.cancelable) e3.preventDefault();
-            if (e3.deltaY > 0) this.next();
+            if (impulse) {
+              W2.latched = false;
+              W2.acc = 0;
+            }
+            if (Math.abs(dx) > Math.abs(dy) && !this.#vertical) {
+              this.#wheelDrag(dx, now);
+              return;
+            }
+            if (W2.latched || W2.drag) return;
+            W2.acc += this.#vertical && Math.abs(dx) > Math.abs(dy) ? dx : dy;
+            if (Math.abs(W2.acc) < 24) return;
+            const dir = W2.acc > 0 ? 1 : -1;
+            W2.acc = 0;
+            W2.latched = true;
+            W2.turnAt = now;
+            if (dir > 0) this.next();
             else this.prev();
           };
           this.addEventListener("wheel", wheelTurn, { passive: false });
@@ -5100,6 +5170,14 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         }
         attributeChangedCallback(name, _2, value) {
           switch (name) {
+            case "animated":
+              if (value == null) {
+                this.#stopGlide();
+                this.#stopTween();
+                this.#fx?.cancel();
+                this.#fx = null;
+              }
+              break;
             case "flow":
               this.render();
               break;
@@ -5241,15 +5319,22 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           const page = Math.floor(
             Math.max(min, Math.min(max, (start + end) / 2 + (isNaN(d2) ? 0 : d2))) / size
           );
-          this.#scrollToPage(page, "snap").then(() => {
-            const dir = page <= 0 ? -1 : page >= pages - 1 ? 1 : null;
-            if (dir) return this.#goTo({
-              index: this.#adjacentIndex(dir),
+          const dir = page <= 0 ? -1 : page >= pages - 1 ? 1 : null;
+          if (dir && this.hasAttribute("animated")) {
+            if (this.#adjacentIndex(dir) != null) return this.#turnPage(dir);
+            return this.#scrollToPage(Math.max(1, Math.min(pages - 2, page)), "snap");
+          }
+          return this.#scrollToPage(page, "snap").then(() => {
+            const index = dir ? this.#adjacentIndex(dir) : null;
+            if (index != null) return this.#goTo({
+              index,
               anchor: dir < 0 ? () => 1 : () => 0
             });
           });
         }
         #onTouchStart(e3) {
+          this.#commitGlide();
+          this.#stopTween();
           const touch = e3.changedTouches[0];
           this.#touchState = {
             x: touch?.screenX,
@@ -5316,17 +5401,20 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
             return;
           }
           if (this.scrolled && this.#vertical) offset = -offset;
-          if ((reason === "snap" || smooth) && this.hasAttribute("animated")) return animate(
-            element[scrollProp],
-            offset,
-            300,
-            easeOutQuad,
-            (x3) => element[scrollProp] = x3
-          ).then(() => {
+          if ((reason === "snap" || smooth) && this.hasAttribute("animated")) {
+            if (this.scrolled) {
+              return this.#tweenTo(offset, () => {
+                this.#scrollBounds = [element[scrollProp], this.atStart ? 0 : size, this.atEnd ? 0 : size];
+                this.#afterScroll(reason);
+              });
+            }
+            this.#glideTo(offset);
             this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size];
             this.#afterScroll(reason);
-          });
-          else {
+            return;
+          } else {
+            this.#stopGlide();
+            this.#stopTween();
             element[scrollProp] = offset;
             this.#scrollBounds = [offset, this.atStart ? 0 : size, this.atEnd ? 0 : size];
             this.#afterScroll(reason);
@@ -5443,13 +5531,39 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         async goTo(target) {
           if (this.#locked) return;
           const resolved = await target;
-          if (resolved != null && this.#canGoToIndex(resolved.index)) return this.#goTo(resolved);
+          if (resolved != null && this.#canGoToIndex(resolved.index)) {
+            const fx = this.hasAttribute("animated") && this.#view && resolved.index !== this.#index && !document.hidden;
+            if (!fx) return this.#goTo(resolved);
+            await this.#sectionOut(0);
+            try {
+              return await this.#goTo(resolved);
+            } finally {
+              this.#sectionIn(0);
+            }
+          }
+        }
+        // [local-patch D241] 滚动模式整屏翻页保留约 1.5 行重叠（读者不丢上一屏末行的上下文）；
+        // 缓动进行中再翻页＝以缓动终点为基准续翻（连按 PageDown 不丢键）。
+        #scrollStep() {
+          const size = this.size;
+          let lh = NaN;
+          try {
+            const doc = this.#view?.document;
+            lh = parseFloat(doc.defaultView.getComputedStyle(doc.body).lineHeight);
+          } catch {
+          }
+          const overlap = Number.isFinite(lh) && lh > 0 ? Math.min(size * 0.15, lh * 1.5) : size * 0.06;
+          return Math.max(size * 0.5, size - overlap);
+        }
+        #scrollBase() {
+          return this.#tween ? Math.abs(this.#tween.to) : this.start;
         }
         #scrollPrev(distance) {
           if (!this.#view) return true;
           if (this.scrolled) {
-            if (this.start > 0) return this.#scrollTo(
-              Math.max(0, this.start - (distance ?? this.size)),
+            const base = this.#scrollBase();
+            if (base > 0) return this.#scrollTo(
+              Math.max(0, base - (distance ?? (this.hasAttribute("animated") ? this.#scrollStep() : this.size))),
               null,
               true
             );
@@ -5457,13 +5571,15 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           }
           if (this.atStart) return;
           const page = this.page - 1;
+          if (page <= 0 && this.hasAttribute("animated")) return true;
           return this.#scrollToPage(page, "page", true).then(() => page <= 0);
         }
         #scrollNext(distance) {
           if (!this.#view) return true;
           if (this.scrolled) {
-            if (this.viewSize - this.end > 2) return this.#scrollTo(
-              Math.min(this.viewSize, distance ? this.start + distance : this.end),
+            const base = this.#scrollBase();
+            if (this.viewSize - (base + this.size) > 2) return this.#scrollTo(
+              Math.min(this.viewSize - this.size, base + (distance ?? (this.hasAttribute("animated") ? this.#scrollStep() : this.size))),
               null,
               true
             );
@@ -5472,7 +5588,184 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           if (this.atEnd) return;
           const page = this.page + 1;
           const pages = this.pages;
+          if (page >= pages - 1 && this.hasAttribute("animated")) return true;
           return this.#scrollToPage(page, "page", true).then(() => page >= pages - 1);
+        }
+        // ---------- [local-patch D241] 翻页动效实现 ----------
+        #motion() {
+          const cs = getComputedStyle(this);
+          const v3 = (name) => cs.getPropertyValue(name).trim();
+          const ease = v3("--reader-turn-ease") || "cubic-bezier(0.22, 1, 0.36, 1)";
+          const shift = parseFloat(v3("--reader-turn-shift"));
+          return {
+            turn: readTime(v3("--reader-turn-dur"), 420),
+            out: readTime(v3("--reader-turn-out"), 140),
+            ease,
+            easeFn: parseEasing(ease),
+            outEase: v3("--reader-turn-out-ease") || "cubic-bezier(0.4, 0, 1, 1)",
+            shift: Number.isFinite(shift) ? shift : 16
+          };
+        }
+        #glideAxis() {
+          return this.scrollProp === "scrollLeft" ? "X" : "Y";
+        }
+        // 取消进行中的滑行，返回它此刻的视觉位移（px，沿滚动轴）
+        #stopGlide() {
+          const anim = this.#glide;
+          if (!anim) return 0;
+          this.#glide = null;
+          let t3 = 0;
+          try {
+            const m3 = new DOMMatrixReadOnly(getComputedStyle(this.#view.element).transform);
+            t3 = this.#glideAxis() === "X" ? m3.m41 : m3.m42;
+          } catch {
+          }
+          anim.cancel();
+          return Number.isFinite(t3) ? t3 : 0;
+        }
+        // 把进行中的滑行「冻结」在当前视觉位置（触摸/横滑接管时用）
+        #commitGlide() {
+          const t3 = this.#stopGlide();
+          if (t3) this.#container[this.scrollProp] -= t3;
+        }
+        #glideTo(offset) {
+          const element = this.#container;
+          const { scrollProp } = this;
+          const visual = element[scrollProp] - this.#stopGlide();
+          element[scrollProp] = offset;
+          const d2 = element[scrollProp] - visual;
+          const target = this.#view?.element;
+          if (!target || Math.abs(d2) < 0.5 || document.hidden) return;
+          const { turn, ease } = this.#motion();
+          if (turn <= 0) return;
+          const axis = this.#glideAxis();
+          const anim = target.animate([
+            { transform: `translate${axis}(${d2}px)` },
+            { transform: `translate${axis}(0px)` }
+          ], { duration: turn, easing: ease });
+          this.#glide = anim;
+          anim.finished.then(() => {
+            if (this.#glide === anim) this.#glide = null;
+          }, () => {
+          });
+        }
+        #stopTween() {
+          const token = this.#tween;
+          this.#tween = null;
+          token?.finish();
+        }
+        #tweenTo(to, done) {
+          this.#stopTween();
+          const element = this.#container;
+          const { scrollProp } = this;
+          const from = element[scrollProp];
+          const { turn, easeFn } = this.#motion();
+          let resolve;
+          const settled = new Promise((r3) => resolve = r3);
+          const token = { to, finish: () => {
+            try {
+              done?.();
+            } finally {
+              resolve();
+            }
+          } };
+          this.#tween = token;
+          if (document.hidden || turn <= 0 || Math.abs(to - from) < 1) {
+            element[scrollProp] = to;
+            this.#tween = null;
+            token.finish();
+            return settled;
+          }
+          let start;
+          const step = (now) => {
+            if (this.#tween !== token) return;
+            start ??= now;
+            const f3 = Math.min(1, (now - start) / turn);
+            element[scrollProp] = from + (to - from) * easeFn(f3);
+            if (f3 < 1) requestAnimationFrame(step);
+            else {
+              this.#tween = null;
+              token.finish();
+            }
+          };
+          requestAnimationFrame(step);
+          return settled;
+        }
+        // 跨章过渡的运动轴与「前进」方向符号（分页 LTR 前进＝向左出、自右入；RTL 相反；滚动＝自下入）
+        #fxAxis() {
+          if (this.scrolled) return this.#vertical ? ["X", -1] : ["Y", 1];
+          return this.#vertical ? ["Y", 1] : ["X", this.#rtl ? -1 : 1];
+        }
+        #sectionOut(dir) {
+          this.#stopGlide();
+          this.#stopTween();
+          const { out, outEase, shift } = this.#motion();
+          const [axis, sign] = this.#fxAxis();
+          this.#fx?.cancel();
+          const anim = this.#container.animate([
+            { opacity: 1, transform: "none" },
+            { opacity: 0, transform: `translate${axis}(${-dir * sign * shift * 0.5}px)` }
+          ], { duration: Math.max(0, out), easing: outEase, fill: "forwards" });
+          this.#fx = anim;
+          return anim.finished.catch(() => {
+          });
+        }
+        #sectionIn(dir) {
+          if (!this.hasAttribute("animated") || document.hidden) {
+            this.#fx?.cancel();
+            this.#fx = null;
+            return;
+          }
+          const { turn, ease, shift } = this.#motion();
+          const [axis, sign] = this.#fxAxis();
+          const old = this.#fx;
+          const anim = this.#container.animate([
+            { opacity: 0, transform: dir ? `translate${axis}(${dir * sign * shift}px)` : "none" },
+            { opacity: 1, transform: "none" }
+          ], { duration: Math.max(0, turn), easing: ease });
+          old?.cancel();
+          this.#fx = anim;
+          anim.finished.then(() => {
+            if (this.#fx === anim) this.#fx = null;
+          }, () => {
+          });
+        }
+        // 横向两指滑动（触控板）：跟手 → 越过阈值吸附到相邻页 / 停手不足阈值回弹
+        #wheelDrag(dx, now) {
+          const W2 = this.#wheel;
+          if (W2.latched) return;
+          if (!W2.drag) {
+            if (this.#locked || !this.#view || !this.#scrollBounds) return;
+            this.#commitGlide();
+            W2.drag = { page: Math.round(this.start / this.size), moved: 0, v: 0, t: now };
+          }
+          const d2 = W2.drag;
+          const dt2 = Math.max(1, now - d2.t);
+          d2.t = now;
+          d2.v = d2.v * 0.6 + dx / dt2 * 0.4;
+          d2.moved += dx;
+          this.scrollBy(dx, 0);
+          clearTimeout(W2.idle);
+          const size = this.size;
+          if (Math.abs(d2.moved) > size * 0.16 || Math.abs(d2.v) > 0.9 && Math.abs(d2.moved) > 24) {
+            W2.latched = true;
+            W2.turnAt = now;
+            this.#endWheelDrag(true);
+          } else W2.idle = setTimeout(() => this.#endWheelDrag(false), 140);
+        }
+        #endWheelDrag(commit) {
+          const W2 = this.#wheel;
+          const d2 = W2.drag;
+          clearTimeout(W2.idle);
+          if (!d2) return;
+          W2.drag = null;
+          const dir = commit ? Math.sign(d2.moved) * (this.#rtl ? -1 : 1) : 0;
+          const page = d2.page + dir;
+          if (dir && page > 0 && page < this.pages - 1)
+            return this.#scrollToPage(page, "snap");
+          if (dir > 0 && !this.atEnd) return this.next();
+          if (dir < 0 && !this.atStart) return this.prev();
+          return this.#scrollToPage(d2.page, "snap");
         }
         get atStart() {
           return this.#adjacentIndex(-1) == null && this.page <= 1;
@@ -5489,16 +5782,33 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         async #turnPage(dir, distance) {
           if (this.#locked) return;
           this.#locked = true;
+          let ownsLock = true;
           try {
             const prev = dir === -1;
-            const shouldGo = await (prev ? this.#scrollPrev(distance) : this.#scrollNext(distance));
-            if (shouldGo) await this.#goTo({
-              index: this.#adjacentIndex(dir),
-              anchor: prev ? () => 1 : () => 0
-            });
+            const scrolling = prev ? this.#scrollPrev(distance) : this.#scrollNext(distance);
+            if (this.scrolled && this.#tween && typeof scrolling?.then === "function") {
+              ownsLock = false;
+              this.#locked = false;
+              await scrolling;
+              return;
+            }
+            const shouldGo = await scrolling;
+            const index = shouldGo ? this.#adjacentIndex(dir) : null;
+            if (index != null) {
+              const fx = this.hasAttribute("animated") && !document.hidden;
+              if (fx) await this.#sectionOut(dir);
+              try {
+                await this.#goTo({
+                  index,
+                  anchor: prev ? () => 1 : () => 0
+                });
+              } finally {
+                if (fx) this.#sectionIn(dir);
+              }
+            }
             if (shouldGo || !this.hasAttribute("animated")) await wait(100);
           } finally {
-            this.#locked = false;
+            if (ownsLock) this.#locked = false;
           }
         }
         prev(distance) {
@@ -5546,6 +5856,10 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           this.#view.document.defaultView.focus();
         }
         destroy() {
+          this.#stopGlide();
+          this.#stopTween();
+          this.#fx?.cancel();
+          clearTimeout(this.#wheel.idle);
           this.#observer.unobserve(this);
           this.#view.destroy();
           this.#view = null;
@@ -6848,7 +7162,80 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
   };
   customElements.define("foliate-view", View2);
 
+  // src/lib/reader/textRange.ts
+  var SKIP = /* @__PURE__ */ new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "HEAD"]);
+  function buildTextIndex(root) {
+    const texts = [];
+    const node = [];
+    const off = [];
+    let flat = "";
+    const doc = root.ownerDocument ?? root;
+    const walker = doc.createTreeWalker(root, 4, {
+      acceptNode(n3) {
+        let p3 = n3.parentElement;
+        while (p3) {
+          if (SKIP.has(p3.tagName.toUpperCase())) return 2;
+          p3 = p3.parentElement;
+        }
+        return 1;
+      }
+    });
+    for (let n3 = walker.nextNode(); n3; n3 = walker.nextNode()) {
+      const t3 = n3;
+      const s3 = t3.data;
+      const k3 = texts.length;
+      for (let i3 = 0; i3 < s3.length; i3++) {
+        const c2 = s3[i3];
+        if (/\s/.test(c2) || c2 === "\u200B" || c2 === "\xAD") continue;
+        flat += c2;
+        node.push(k3);
+        off.push(i3);
+      }
+      texts.push(t3);
+    }
+    return { flat, node, off, texts };
+  }
+  var strip = (s3) => String(s3 || "").replace(/[\s\u200b\u00ad]+/g, "");
+  function findFlatSpan(idx, head, tail, from = 0) {
+    const h3 = strip(head);
+    if (h3.length < 2) return null;
+    let i3 = idx.flat.indexOf(h3, from);
+    if (i3 < 0 && h3.length > 12) {
+      i3 = idx.flat.indexOf(h3.slice(0, 12), from);
+    }
+    if (i3 < 0) return null;
+    const t3 = strip(tail);
+    let end = i3 + Math.min(h3.length, idx.flat.length - i3);
+    if (t3.length >= 2) {
+      const j2 = idx.flat.indexOf(t3, i3);
+      if (j2 >= 0) end = j2 + t3.length;
+      else if (t3.length > 12) {
+        const j22 = idx.flat.indexOf(t3.slice(-12), i3);
+        if (j22 >= 0) end = j22 + 12;
+      }
+    }
+    return [i3, Math.max(end, i3 + 1)];
+  }
+  function spanToRange(doc, idx, span) {
+    const [s3, e3] = span;
+    if (s3 < 0 || e3 > idx.flat.length || e3 <= s3) return null;
+    try {
+      const r3 = doc.createRange();
+      r3.setStart(idx.texts[idx.node[s3]], idx.off[s3]);
+      r3.setEnd(idx.texts[idx.node[e3 - 1]], idx.off[e3 - 1] + 1);
+      return r3;
+    } catch {
+      return null;
+    }
+  }
+
   // src/lib/reader/foliate/appearance.ts
+  var DEFAULT_READER_FONT_STACK = '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "Songti SC", STSong, "Hiragino Mincho ProN", "Yu Mincho", SimSun, serif';
+  var LANG_FONT_OVERRIDES = [
+    [":lang(ja)", '"Source Han Serif JP", "Noto Serif CJK JP", "Hiragino Mincho ProN", "Yu Mincho", "Iowan Old Style", Georgia, serif'],
+    [":lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)", '"Source Han Serif TC", "Noto Serif CJK TC", "Noto Serif CJK HK", "Songti TC", "Iowan Old Style", Georgia, PMingLiU, serif'],
+    [":lang(ko)", '"Source Han Serif K", "Noto Serif CJK KR", "AppleMyungjo", "Iowan Old Style", Georgia, Batang, serif']
+  ];
   function fixSvgAspect(doc) {
     for (const svg of Array.from(doc.querySelectorAll("svg"))) {
       const vb = svg.getAttribute("viewBox") || svg.getAttribute("viewbox");
@@ -6860,7 +7247,71 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       }
     }
   }
+  var GENERIC_FAMILIES = /* @__PURE__ */ new Set(["serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded", "math", "emoji", "fangsong"]);
+  function cssFontFamily(stack) {
+    const out = [];
+    for (const part of String(stack ?? "").replace(/[;{}<>\\]/g, "").split(",")) {
+      const name = part.trim().replace(/^(["'])(.*)\1$/, "$2").replace(/["']/g, "").trim();
+      if (!name) continue;
+      out.push(GENERIC_FAMILIES.has(name.toLowerCase()) ? name.toLowerCase() : JSON.stringify(name));
+    }
+    return out.length ? out.join(", ") : "serif";
+  }
+  function proseCss(radius) {
+    const line = (pct) => `color-mix(in srgb, currentColor ${pct}%, transparent)`;
+    return [
+      // 渲染质量：灰度抗锯齿、字距对、常用连字、光学尺寸；中西文之间自动留白（text-autospace，Chromium 140+）
+      ":where(html) { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; font-kerning: normal; font-variant-ligatures: common-ligatures; font-optical-sizing: auto; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }",
+      ":where(body) { text-autospace: normal; line-break: strict; overflow-wrap: break-word; }",
+      // 段落：段间距 0.8em（≈半行，段落感清楚又不松散）；中日文两端对齐；行尾避免孤字
+      ":where(p) { margin-block: 0 0.8em; }",
+      ":where(p, li, dd, blockquote, figcaption) { text-wrap: pretty; }",
+      ":where(p:lang(zh), p:lang(ja), p:lang(ko)) { text-align: justify; }",
+      // 标题：紧行高、半粗、两行时平衡断行、不与下文分页
+      ":where(h1, h2, h3, h4, h5, h6) { line-height: 1.4; font-weight: 600; letter-spacing: 0.01em; text-wrap: balance; break-after: avoid; margin-block: 1.9em 0.7em; }",
+      ":where(h1) { font-size: 1.6em; line-height: 1.32; margin-block: 0.4em 1.2em; letter-spacing: 0.02em; }",
+      ":where(h2) { font-size: 1.3em; }",
+      ":where(h3) { font-size: 1.12em; }",
+      ":where(h4, h5, h6) { font-size: 1em; }",
+      ":where(h1, h2, h3, h4, h5, h6) + :where(h1, h2, h3, h4, h5, h6) { margin-block-start: 0.4em; }",
+      // 引文：细竖线 + 退一级的墨色，不用斜体（中文无真斜体）
+      `:where(blockquote) { margin: 1.3em 0; padding: 0.05em 0 0.05em 1.15em; border-inline-start: 2px solid ${line(16)}; color: ${line(74)}; }`,
+      ":where(blockquote) :where(p:last-child) { margin-block-end: 0; }",
+      // 列表
+      ":where(ul, ol) { margin-block: 0 0.8em; padding-inline-start: 1.6em; }",
+      ":where(li) { margin-block: 0.28em; }",
+      `:where(li)::marker { color: ${line(45)}; }`,
+      // 分隔线：短而轻
+      `:where(hr) { border: 0; border-block-start: 1px solid ${line(16)}; width: 36%; margin: 2.4em auto; }`,
+      // 链接：随正文色 + 细下划线
+      `:where(a) { color: inherit; text-decoration-line: underline; text-decoration-thickness: 1px; text-decoration-color: ${line(32)}; text-underline-offset: 0.22em; }`,
+      // 代码
+      ':where(code, kbd, samp, pre) { font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK SC", monospace; font-size: 0.86em; font-variant-ligatures: none; }',
+      `:where(:not(pre) > code) { padding: 0.1em 0.36em; border-radius: ${radius}; background: ${line(7)}; }`,
+      `:where(pre) { margin: 1.2em 0; padding: 0.9em 1.1em; line-height: 1.6; border-radius: ${radius}; background: ${line(5)}; white-space: pre-wrap; overflow-wrap: anywhere; }`,
+      ":where(pre code) { font-size: 1em; padding: 0; background: none; }",
+      // 表格：横线表（无竖线），数字等宽对齐
+      ":where(table) { border-collapse: collapse; margin: 1.3em 0; font-size: 0.92em; font-variant-numeric: tabular-nums; }",
+      `:where(th, td) { padding: 0.5em 0.8em; border-block-end: 1px solid ${line(12)}; text-align: start; vertical-align: top; }`,
+      `:where(th) { font-weight: 600; border-block-end-color: ${line(30)}; }`,
+      // 图与图注
+      ":where(figure) { margin: 1.6em 0; }",
+      `:where(figcaption) { margin-block-start: 0.6em; font-size: 0.86em; line-height: 1.55; color: ${line(60)}; text-align: center; }`,
+      // 上下标不撑开行距
+      ":where(sup, sub) { line-height: 0; }"
+    ].join("\n");
+  }
+  function hostRadius() {
+    try {
+      if (typeof document === "undefined" || !document.body) return "0";
+      const v3 = getComputedStyle(document.body).getPropertyValue("--radius-xs").trim();
+      return /^[\d.]+(px|rem|em)?$/.test(v3) ? v3 : "0";
+    } catch {
+      return "0";
+    }
+  }
   function injectAppearanceStyle(doc, a3, flow) {
+    void flow;
     const id = "kernel-appearance";
     let style2 = doc.getElementById(id);
     if (!style2) {
@@ -6868,8 +7319,13 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       style2.id = id;
       doc.head.appendChild(style2);
     }
+    const family = cssFontFamily(a3.fontFamily);
+    const isDefaultStack = family === cssFontFamily(DEFAULT_READER_FONT_STACK);
     style2.textContent = [
-      `html { font-family: ${JSON.stringify(a3.fontFamily ?? "")} !important; font-size: ${a3.fontSize}px !important; }`,
+      proseCss(hostRadius()),
+      `html { font-family: ${family} !important; font-size: ${a3.fontSize}px !important; }`,
+      // 默认栈下按语言换地区字形（用户自定义了字体则尊重用户，不覆盖）
+      ...isDefaultStack ? LANG_FONT_OVERRIDES.map(([sel, stack]) => `${sel.split(", ").map((lang) => `html${lang}`).join(", ")} { font-family: ${stack} !important; }`) : [],
       `body { background: ${a3.bgColor} !important; color: ${a3.fgColor} !important; line-height: ${a3.lineHeight} !important; }`,
       // ruby 注音随正文颜色（CJK 排版观察项，L1 日文夹具覆盖）
       "rt { color: inherit; }"
@@ -7023,6 +7479,82 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     return HEX_RE.test(c2) ? `hex-${c2.slice(1).toLowerCase()}` : c2;
   }
 
+  // src/lib/ime.ts
+  function isImeComposing(e3) {
+    const ne2 = "nativeEvent" in e3 ? e3.nativeEvent : e3;
+    return Boolean(ne2.isComposing) || ne2.keyCode === 229;
+  }
+
+  // src/lib/keyTarget.ts
+  var NON_TEXT_INPUT_TYPES = /* @__PURE__ */ new Set(["range", "checkbox", "radio", "button", "submit", "reset", "color", "file", "image"]);
+  var ACTIVATABLE_INPUT_TYPES = /* @__PURE__ */ new Set(["checkbox", "radio", "button", "submit", "reset", "color", "file", "image"]);
+  var ACTIVATABLE_ROLES = /* @__PURE__ */ new Set([
+    "button",
+    "link",
+    "checkbox",
+    "radio",
+    "switch",
+    "tab",
+    "option",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "treeitem"
+  ]);
+  var VALUE_KEYS = /* @__PURE__ */ new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+  function asTarget(t3) {
+    return t3 && typeof t3 === "object" ? t3 : null;
+  }
+  function tagOf(t3) {
+    return String(t3.tagName || "").toUpperCase();
+  }
+  function inputTypeOf(t3) {
+    const fromProp = typeof t3.type === "string" ? t3.type : "";
+    const fromAttr = typeof t3.getAttribute === "function" ? t3.getAttribute("type") || "" : "";
+    return String(fromProp || fromAttr || "text").toLowerCase();
+  }
+  function roleOf(t3) {
+    return typeof t3.getAttribute === "function" ? String(t3.getAttribute("role") || "").toLowerCase() : "";
+  }
+  function isKeyboardFocused(t3) {
+    if (typeof t3.matches !== "function") return false;
+    try {
+      return t3.matches(":focus-visible");
+    } catch {
+      return false;
+    }
+  }
+  function isTextEntryTarget(target) {
+    const t3 = asTarget(target);
+    if (!t3) return false;
+    if (t3.isContentEditable) return true;
+    const tag = tagOf(t3);
+    if (tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (tag === "INPUT") return !NON_TEXT_INPUT_TYPES.has(inputTypeOf(t3));
+    return false;
+  }
+  function isNativeControlKey(e3) {
+    if (isImeComposing(e3)) return true;
+    const t3 = asTarget(e3.target);
+    if (!t3) return false;
+    const key = String(e3.key || "");
+    const tag = tagOf(t3);
+    const role = roleOf(t3);
+    const type = tag === "INPUT" ? inputTypeOf(t3) : "";
+    if (VALUE_KEYS.has(key)) {
+      if (type === "range" || role === "slider" || role === "spinbutton") return true;
+      if ((type === "radio" || role === "radio") && key.startsWith("Arrow")) return true;
+      return false;
+    }
+    if (key !== "Enter" && key !== " ") return false;
+    if (type === "range") return false;
+    const activatable = tag === "BUTTON" || tag === "SUMMARY" || tag === "A" && typeof t3.hasAttribute === "function" && t3.hasAttribute("href") || tag === "INPUT" && ACTIVATABLE_INPUT_TYPES.has(type) || ACTIVATABLE_ROLES.has(role);
+    if (!activatable) return false;
+    if ((tag === "A" || role === "link") && key === " ") return false;
+    if ((type === "checkbox" || type === "radio") && key === "Enter") return false;
+    return isKeyboardFocused(t3);
+  }
+
   // src/lib/reader/foliate/adapter.ts
   function extractImageContext(doc, img) {
     try {
@@ -7141,6 +7673,17 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         return "";
       }
     };
+    const stripActiveContent = (doc) => {
+      try {
+        doc.querySelectorAll("script").forEach((s3) => s3.remove());
+        doc.querySelectorAll("*").forEach((el) => {
+          for (const attr of Array.from(el.attributes)) {
+            if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
+          }
+        });
+      } catch {
+      }
+    };
     const relocateHandlers = /* @__PURE__ */ new Set();
     const linkHandlers = /* @__PURE__ */ new Set();
     const pointerHandlers = /* @__PURE__ */ new Set();
@@ -7148,6 +7691,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     const imageHandlers = /* @__PURE__ */ new Set();
     const docs = /* @__PURE__ */ new Map();
     let lastRelocate = null;
+    let lastProbe = null;
     let appearance = null;
     let currentFlow = "scrolled";
     let pendingMode = null;
@@ -7257,6 +7801,57 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     const paintAllMarks = () => {
       for (const index of docs.keys()) paintMarksForDoc(index);
     };
+    const STRUCT_NAMES = { focus: "structure-focus", hover: "structure-hover" };
+    let structRegions = [];
+    const structStyles = /* @__PURE__ */ new Map();
+    const structCss = () => {
+      const focus = evalColor("color-mix(in srgb, var(--accent) 13%, transparent)", "rgba(22, 106, 89, 0.13)");
+      const hover = evalColor("color-mix(in srgb, var(--accent) 26%, transparent)", "rgba(22, 106, 89, 0.26)");
+      return `::highlight(${STRUCT_NAMES.focus}){background-color:${focus};}
+::highlight(${STRUCT_NAMES.hover}){background-color:${hover};}`;
+    };
+    const paintStructForDoc = (index) => {
+      const doc = docs.get(index);
+      if (!doc) return;
+      const win = winOf(doc);
+      if (!win?.CSS?.highlights || typeof win.Highlight !== "function") return;
+      win.CSS.highlights.delete(STRUCT_NAMES.focus);
+      win.CSS.highlights.delete(STRUCT_NAMES.hover);
+      const mine = structRegions.filter((r3) => resolveSectionIndex(r3.unitAnchor) === index);
+      if (!mine.length) return;
+      let el = structStyles.get(doc);
+      if (!el || !el.isConnected) {
+        el = doc.createElement("style");
+        el.setAttribute("data-reader-structure", "1");
+        (doc.head ?? doc.documentElement)?.appendChild(el);
+        structStyles.set(doc, el);
+      }
+      const css = structCss();
+      if (el.textContent !== css) el.textContent = css;
+      const root = doc.body || doc.documentElement;
+      if (!root) return;
+      const idx = buildTextIndex(root);
+      const by = { focus: [], hover: [] };
+      for (const r3 of mine) {
+        const span = findFlatSpan(idx, r3.head, r3.tail);
+        const range = span ? spanToRange(doc, idx, span) : null;
+        if (range) by[r3.tone === "hover" ? "hover" : "focus"].push(range);
+      }
+      const HL = win.Highlight;
+      if (by.focus.length) {
+        const h3 = new HL(...by.focus);
+        h3.priority = -2;
+        win.CSS.highlights.set(STRUCT_NAMES.focus, h3);
+      }
+      if (by.hover.length) {
+        const h3 = new HL(...by.hover);
+        h3.priority = -1;
+        win.CSS.highlights.set(STRUCT_NAMES.hover, h3);
+      }
+    };
+    const paintAllStruct = () => {
+      for (const index of docs.keys()) paintStructForDoc(index);
+    };
     const refreshMarkStyles = () => {
       markStyles.forEach((_2, doc) => ensureMarkStyle(doc));
     };
@@ -7309,14 +7904,14 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     };
     on("load", (e3) => {
       const { doc, index } = e3.detail;
+      stripActiveContent(doc);
       docs.set(index, doc);
       if (appearance) injectAppearanceStyle(doc, appearance, currentFlow);
       if (currentFlow !== "paged") fixSvgAspect(doc);
       doc.addEventListener("keydown", (ev) => {
-        const t3 = ev.target;
-        if (t3 && (t3.tagName === "INPUT" || t3.tagName === "TEXTAREA" || t3.isContentEditable)) return;
+        if (isTextEntryTarget(ev.target) || isNativeControlKey(ev)) return;
         window.dispatchEvent(
-          new KeyboardEvent("keydown", { key: ev.key, code: ev.code, shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, metaKey: ev.metaKey })
+          new KeyboardEvent("keydown", { key: ev.key, code: ev.code, shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, altKey: ev.altKey, metaKey: ev.metaKey, repeat: ev.repeat })
         );
       });
       doc.addEventListener("pointerup", (ev) => {
@@ -7348,6 +7943,8 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         "click",
         (ev) => {
           if (markRanges.size === 0) return;
+          const sel = doc.getSelection();
+          if (sel && !sel.isCollapsed) return;
           const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
           if (!hit) return;
           ev.preventDefault();
@@ -7357,6 +7954,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         true
       );
       paintMarksForDoc(index);
+      paintStructForDoc(index);
       doc.addEventListener("click", (ev) => {
         const target = ev.target;
         if (!target || typeof target.closest !== "function") return;
@@ -7380,6 +7978,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     on("relocate", (e3) => {
       const d2 = e3.detail;
       const chapterIndex = d2.section?.current ?? 0;
+      lastProbe = { range: d2.range ?? null, index: chapterIndex };
       const info = {
         location: { cfi: d2.cfi },
         fraction: typeof d2.fraction === "number" ? d2.fraction : 0,
@@ -7530,6 +8129,9 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           if (currentFlow !== "paged") fixSvgAspect(doc);
         });
         refreshMarkStyles();
+        structStyles.forEach((el) => {
+          el.textContent = structCss();
+        });
       },
       getTOC() {
         const mapItem = (t3) => ({
@@ -7541,6 +8143,28 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       },
       // v48 批1：提取单元清单（spine 顺序即文档序）。无 createDocument 的格式（如 CBZ 图片书）单元仍在列，
       // 但 getSectionText 取到空串——由业务预览层如实显示 0 字。
+      // 阅读透镜：可见起点所在段落的开头片段（段落粒度足够：主进程按块定位）
+      getReadingProbe() {
+        if (!lastProbe) return null;
+        const sections = view.book?.sections ?? [];
+        const sec = sections[lastProbe.index];
+        const unitAnchor = String(sec?.id ?? sec?.href ?? "");
+        if (!unitAnchor) return null;
+        let text = "";
+        try {
+          const node = lastProbe.range?.startContainer ?? null;
+          const el = node ? node.nodeType === 3 ? node.parentElement : node : null;
+          const block = el?.closest?.("p,li,h1,h2,h3,h4,h5,h6,blockquote,dd,dt,td,th,figcaption,pre") ?? el;
+          text = String(block?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+        } catch {
+          text = "";
+        }
+        return { unitAnchor, text };
+      },
+      setStructureHighlights(regions) {
+        structRegions = Array.isArray(regions) ? regions.filter((r3) => r3 && r3.unitAnchor && r3.head) : [];
+        paintAllStruct();
+      },
       getSectionAnchors() {
         const sections = view.book?.sections ?? [];
         return sections.map((s3) => ({ anchor: String(s3?.id ?? s3?.href ?? "") })).filter((u2) => u2.anchor);
@@ -7671,6 +8295,13 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         markRanges.clear();
         markStyles.clear();
         docMarks = [];
+        docs.forEach((doc) => {
+          const hl = winOf(doc)?.CSS?.highlights;
+          hl?.delete(STRUCT_NAMES.focus);
+          hl?.delete(STRUCT_NAMES.hover);
+        });
+        structRegions = [];
+        structStyles.clear();
         hoveredMarkId = null;
         try {
           view.close();

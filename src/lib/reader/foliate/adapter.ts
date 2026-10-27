@@ -7,8 +7,8 @@
 //            getCFI/resolveCFI/close；'relocate'|'load'|'link'|'external-link' 事件；renderer.setAttribute；
 //            renderer.getContents() → [{doc, index}]；book.toc；book.sections[i].id
 //   paginator.js: 属性 flow/gap/margin/max-column-count/max-inline-size/animated
-//            （D130 R3：animated 不在 paginator observedAttributes，但两处消费点都是 hasAttribute
-//             即时读取——setAttribute/removeAttribute 即刻影响下一次翻页，零 vendor 补丁）
+//            （D241：animated 加入 observedAttributes，关闭时立即取消在途滑行/缓动/跨章动画；
+//             具体补丁见 vendor MANIFEST，生效意愿仍统一由 resolveAppearance 解析）
 import "../../../../vendor/foliate-js/view.js";
 import type {
   BookSource,
