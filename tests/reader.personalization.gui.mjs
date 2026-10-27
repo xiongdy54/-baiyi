@@ -365,9 +365,22 @@ async function main() {
 
     // ===== F 翻页：animated 两态 + reduce-motion 永不挂 + 两态各 16 次跨章翻页限时 settle =====
     console.log("== F 翻页 ==");
-    await seedSettings(cdp, { mode: { flow: "paged" }, appearance: { theme: "paper", turnAnimated: true } });
+    await seedSettings(cdp, { mode: { flow: "paged" }, appearance: { theme: "paper", turnEffect: "glide" } });
     await openBook(cdp, ".epub");
     check("F1 开 → foliate-paginator hasAttribute(animated)=true", await cdp.eval(`(async () => { const pag = ${JS_PAGINATOR}; return !!pag && !!pag.el && pag.el.hasAttribute("animated"); })()`));
+    // D241：开着书时切换偏好也即时生效；存储意愿不被改写。
+    await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await wait(250);
+    check("F1a 系统减少动效即时关闭（不重开书）", await cdp.eval(`(() => { const pag = ${JS_PAGINATOR}; return !!pag?.el && !pag.el.hasAttribute("animated"); })()`));
+    await cdp.send("Emulation.setEmulatedMedia", { features: [] });
+    await wait(250);
+    check("F1b 系统恢复后即时恢复 glide", await cdp.eval(`(() => { const pag = ${JS_PAGINATOR}; return !!pag?.el && pag.el.hasAttribute("animated"); })()`));
+    await cdp.eval(`document.body.classList.add("motion-off")`);
+    await wait(250);
+    check("F1c 应用关闭动效即时生效", await cdp.eval(`(() => { const pag = ${JS_PAGINATOR}; return !!pag?.el && !pag.el.hasAttribute("animated"); })()`));
+    await cdp.eval(`document.body.classList.remove("motion-off")`);
+    await wait(250);
+    check("F1d 恢复动效且保留存储意愿", await cdp.eval(`(async () => { const pag = ${JS_PAGINATOR}; const s = await window.settingsAPI.get("app", "readerSettings"); return !!pag?.el && pag.el.hasAttribute("animated") && s.appearance.turnEffect === "glide"; })()`));
     let stuck = 0;
     for (let i = 0; i < 12; i++) {
       const r = await cdp.eval(`Promise.race([window.__readerKernel.next().then(() => "ok"), new Promise((res) => setTimeout(() => res("STUCK"), 4000))])`);
@@ -380,7 +393,7 @@ async function main() {
       await wait(150);
     }
     check("F2 开态连续 16 次跨章翻页限时 settle 不锁死", stuck === 0, `STUCK=${stuck}`);
-    await seedSettings(cdp, { mode: { flow: "paged" }, appearance: { theme: "paper", turnAnimated: false } });
+    await seedSettings(cdp, { mode: { flow: "paged" }, appearance: { theme: "paper", turnEffect: "none" } });
     await openBook(cdp, ".epub");
     check("F3 关 → hasAttribute(animated)=false", await cdp.eval(`(async () => { const pag = ${JS_PAGINATOR}; return !!pag && !!pag.el && !pag.el.hasAttribute("animated"); })()`));
     stuck = 0;
@@ -395,9 +408,9 @@ async function main() {
       await wait(150);
     }
     check("F4 关态连续 16 次跨章翻页限时 settle 不锁死", stuck === 0, `STUCK=${stuck}`);
-    // reduce-motion：设置值仍为意愿（false），模拟 reduce 后即便 true 也不挂属性
+    // reduce-motion：存储保留 glide 意愿，模拟 reduce 后也不挂 animated 属性
     await cdp.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-    await seedSettings(cdp, { mode: { flow: "paged" }, appearance: { theme: "paper", turnAnimated: true } });
+    await seedSettings(cdp, { mode: { flow: "paged" }, appearance: { theme: "paper", turnEffect: "glide" } });
     await openBook(cdp, ".epub");
     check("F5 reduce-motion 下永不挂 animated（设置保留意愿）", await cdp.eval(`(async () => { const pag = ${JS_PAGINATOR}; return !!pag && !!pag.el && !pag.el.hasAttribute("animated"); })()`));
     await cdp.send("Emulation.setEmulatedMedia", { features: [] });

@@ -33,6 +33,12 @@
       "date": "2026-09-15",
       "reason": "分页模式每页内容过少（页面高度塌缩，653px 视口仅渲染 318px）",
       "change": "margin 属性由无单位数字改为带 px（如 48px）：paginator 把属性值直接写入 CSS 变量 --_margin，无单位数字令 minmax(var(--_margin),1fr) 及整条 grid-template-rows 失效退化为 auto 行，页高中间行按内容收缩并与 html 高度形成自锁回路"
+    },
+    {
+      "file": "paginator.js",
+      "date": "2026-10-27",
+      "reason": "D241 阅读翻页精修与滚轮手势吸附",
+      "change": "分页可中断 WAAPI 滑行、滚动 rAF 整屏缓动与上下文重叠、跨章淡出淡入；横向触控板跟手吸附、竖向滚轮手势锁存、章界惯性保护；动效参数读宿主 --reader-turn-* Token；销毁清理与书首书尾索引守卫。 animated 加入 observedAttributes，关闭时立即取消在途动画；滚动翻页 promise 等待 relocate/取消，输入锁提前释放以保留连按。"
     }
   ],
   "upgradeProcedure": "见 AI_DEVELOPMENT_GUIDE.md §7 阅读内核升级规程（vendor 更新 → API 白名单核对 → L0/L1/L2 全绿 → L3 冒烟 → 签发新 ReaderEngineVersion）"

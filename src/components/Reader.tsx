@@ -38,6 +38,7 @@ import {
   DEFAULT_READER_SETTINGS,
   buildLocator,
   normalizeReaderSettings,
+  normalizeTurnEffect,
   resolveAppearance,
   type ContentPointerDownInfo,
   type ContentPointerUpInfo,
@@ -915,6 +916,26 @@ export default function Reader({
     el.style.background = a.bgColor ?? "transparent";
   }, [engineMode, readerSettings]);
 
+  // D241：已打开的书也即时响应系统/应用动效偏好，不必改阅读设置或重新打开。
+  useEffect(() => {
+    if (!engineMode || engineKind !== "foliate") return;
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let active = resolveAppearance(readerSettingsRef.current).turnAnimated;
+    const syncMotion = () => {
+      const a = resolveAppearance(readerSettingsRef.current);
+      if (a.turnAnimated === active) return;
+      active = a.turnAnimated;
+      kernelRef.current?.applyAppearance(a);
+    };
+    media.addEventListener("change", syncMotion);
+    const observer = new MutationObserver(syncMotion);
+    observer.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+    return () => {
+      media.removeEventListener("change", syncMotion);
+      observer.disconnect();
+    };
+  }, [engineMode, engineKind, readerSettings]);
+
   /**
    * D2/§7（Task 7）：侧栏开合＝**布局变更**，不是用户翻页。
    * 布局引起的 relocate 不写进度（否则开一次侧栏就把进度挪一格）；PDF 数值缩放下还要把页内锚点
@@ -1746,10 +1767,11 @@ export default function Reader({
   const savedThemes = readerSettings.customThemes ?? [];
   const resolvedAppearance = resolveAppearance(readerSettings);
   const pagedLike = readerSettings.mode.flow === "paged"; // 对开（spread）也是 flow=paged
-  // P4a：动画过渡开关仅 foliate 引擎且分页/对开时启用（其余禁用态；PDF 为连续滚动容器不适用）
-  const turnAnimatedEnabled = engineKind === "foliate" && pagedLike;
-  const turnAnimatedDisabledTitle =
-    engineKind === "pdf" ? T("PDF 为连续滚动容器，不适用翻页过渡") : T("翻页过渡在分页/对开模式下生效");
+  // P4a：动画过渡开关——D241 起 foliate 引擎三种模式都生效（分页/对开＝章内滑行 + 跨章淡入；
+  // 滚动＝PageDown/空格整屏缓动 + 跨章淡入）；PDF 为连续滚动容器不适用 → 禁用态
+  const turnAnimatedEnabled = engineKind === "foliate";
+  const turnAnimatedDisabledTitle = T("PDF 为连续滚动容器，不适用翻页过渡");
+  const turnEffectOn = normalizeTurnEffect(readerSettings.appearance.turnEffect) === "glide";
   // D122：与选区相关的动作（批注/制卡/AI 制卡/AI 解释/查词）与「摘录/形式」标注选项全部迁入
   // 选区浮条（SelectionMenu，随选区出现在鼠标旁）；工具栏只留**不依赖文字选区**的一项：
   //   · 截图＝截取阅读区可见内容 → 进入与「点击正文图片」同一条图片挖空制卡流程
@@ -2109,16 +2131,16 @@ export default function Reader({
                         {turnAnimatedEnabled ? (
                           <Dropdown
                             title={T("翻页滑动过渡")}
-                            value={readerSettings.appearance.turnAnimated === true ? "on" : "off"}
+                            value={turnEffectOn ? "on" : "off"}
                             options={[
                               { value: "off", label: T("关") },
                               { value: "on", label: T("开") }
                             ]}
-                            onChange={(v) => changeReaderAppearance({ turnAnimated: v === "on" })}
+                            onChange={(v) => changeReaderAppearance({ turnEffect: v === "on" ? "glide" : "none" })}
                           />
                         ) : (
                           <button type="button" className="dd-btn" disabled title={turnAnimatedDisabledTitle}>
-                            {readerSettings.appearance.turnAnimated === true ? T("开") : T("关")}
+                            {turnEffectOn ? T("开") : T("关")}
                           </button>
                         )}
                       </div>

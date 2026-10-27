@@ -30,7 +30,7 @@ import { normalizePlacement, type WorkbenchPlacement } from "../lib/workbenchLay
 import { commandRegistry, eventToCombo, displayCombo, IS_MAC, type CommandDef } from "../lib/commands";
 import { WIDGETS } from "./dashboard/widgets";
 import Dropdown from "./Dropdown";
-import { normalizeReaderSettings, type CustomThemeEntry, type ReaderSettings } from "../lib/reader/service";
+import { DEFAULT_READER_FONT_SIZE, normalizeReaderSettings, type CustomThemeEntry, type ReaderSettings } from "../lib/reader/service";
 import type { DashLayoutV2, WidgetSize } from "./dashboard/layout";
 import { DICT_CATALOG, type DictCatalogItem } from "../lib/dictCatalog";
 import { DEFAULT_POPUP_FIELDS } from "../lib/dictClient";
@@ -1648,12 +1648,12 @@ function ReaderSection() {
         </div>
       )}
       <div className="settings-row">
-        <span>{T("字号（{n}px）", { n: a.fontSize ?? 17 })}</span>
+        <span>{T("字号（{n}px）", { n: a.fontSize ?? DEFAULT_READER_FONT_SIZE })}</span>
         <input
           type="range"
           min={12}
           max={32}
-          value={a.fontSize ?? 17}
+          value={a.fontSize ?? DEFAULT_READER_FONT_SIZE}
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontSize: Number(e.target.value) } })}
         />
       </div>

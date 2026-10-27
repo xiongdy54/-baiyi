@@ -25,7 +25,9 @@ import type {
 import {
   CUSTOM_THEMES_MAX,
   DEFAULT_READER_SETTINGS,
+  DEFAULT_READER_FONT_SIZE,
   normalizeReaderSettings,
+  normalizeTurnEffect,
   resolveAppearance,
   type CustomThemeEntry,
   type ReaderAppearanceEx,
@@ -54,7 +56,7 @@ export type {
   RelocateInfo,
   SourceAnchorGeometry
 };
-export { READER_ENGINE_VERSION, PDF_ENGINE_VERSION, DEFAULT_READER_SETTINGS, resolveAppearance, normalizeReaderSettings, CUSTOM_THEMES_MAX };
+export { READER_ENGINE_VERSION, PDF_ENGINE_VERSION, DEFAULT_READER_SETTINGS, DEFAULT_READER_FONT_SIZE, resolveAppearance, normalizeReaderSettings, normalizeTurnEffect, CUSTOM_THEMES_MAX };
 export type { ReaderSettings, CustomThemeEntry, ReaderAppearanceEx };
 
 /** 阅读引擎选择（v28 PDF 原生阅读）：默认 foliate（存量调用全部走此分支，零改动） */

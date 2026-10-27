@@ -2,9 +2,9 @@
 // @runtime: node
 // 运行：node tests/reader.appearance.test.cjs
 // 依据：docs/design/READER-PERSONALIZATION-D130.md §3（归一口）+ §8.1（node 测试计划 1–5）。
-// 覆盖：maxInlineSize 钳制 / turnAnimated 严格布尔 / customThemes 清洗与上限保新弃旧 /
+// 覆盖：maxInlineSize 钳制 / turnEffect 归一（D241，取代 turnAnimated 存储字段）/ customThemes 清洗与上限保新弃旧 /
 //       存量 settings 解析与 D130 之前 resolveAppearance 输出逐字段相等（防静默默认漂移）/
-//       lineHeight/margin 既有钳制回归。
+//       lineHeight/margin 既有钳制回归 / 字体栈清洗 cssFontFamily（D241：修整串栈被当成单一字体名）。
 // 零网络零库：appearance.ts 为纯函数模块（唯一外部引用是 kernel.ts 的类型，编译期剥离），
 // 经 esbuild 现场打包成 CJS（与 tests/flows/f20 同一手法），不落任何持久文件。
 "use strict";
@@ -48,8 +48,11 @@ const LEGACY_PRESETS = {
   sepia: { bg: "#f4ecd8", fg: "#5b4636" },
   dark: { bg: "#141414", fg: "#c9c9c9" }
 };
+// D241 有意偏离（登记于 GUIDE D241）：缺省字体栈重排扩充、缺省字号 17→18——仅影响**未设置**这两项的存量用户；
+// 快照随之更新为 D241 缺省值（显式设置过的字号/字体逐字段不变，由下方夹具 fontSize/fontFamily 行守护）。
 const LEGACY_FONT_STACK =
-  '"Source Han Serif SC", "Noto Serif CJK SC", Georgia, "Times New Roman", "Songti SC", SimSun, "Yu Mincho", "Hiragino Mincho ProN", serif';
+  '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "Songti SC", STSong, "Hiragino Mincho ProN", "Yu Mincho", SimSun, serif';
+const LEGACY_DEFAULT_FONT_SIZE = 18;
 const LEGACY_DEFAULT_APPEARANCE = { theme: "paper" };
 function legacyResolveAppearance(s) {
   const a = (s && s.appearance) || LEGACY_DEFAULT_APPEARANCE;
@@ -60,7 +63,7 @@ function legacyResolveAppearance(s) {
   return {
     theme: a.theme,
     fontFamily: (a.fontFamily && a.fontFamily.trim()) || LEGACY_FONT_STACK,
-    fontSize: a.fontSize && a.fontSize >= 10 && a.fontSize <= 40 ? a.fontSize : 17,
+    fontSize: a.fontSize && a.fontSize >= 10 && a.fontSize <= 40 ? a.fontSize : LEGACY_DEFAULT_FONT_SIZE,
     lineHeight: a.lineHeight && a.lineHeight >= 1.2 && a.lineHeight <= 2.4 ? a.lineHeight : 1.7,
     bgColor: a.theme === "custom" && a.bgColor ? a.bgColor : (preset && preset.bg) || LEGACY_PRESETS.paper.bg,
     fgColor: a.theme === "custom" && a.fgColor ? a.fgColor : (preset && preset.fg) || LEGACY_PRESETS.paper.fg,
@@ -68,7 +71,7 @@ function legacyResolveAppearance(s) {
     zoom
   };
 }
-/** D130 前后共同字段（新增字段 maxInlineSize/turnAnimated 不在快照内） */
+/** D130 前后共同字段（新增字段 maxInlineSize/turnEffect/turnAnimated 不在快照内） */
 const LEGACY_FIELDS = ["theme", "fontFamily", "fontSize", "lineHeight", "bgColor", "fgColor", "margin", "zoom"];
 
 let mod;
@@ -78,7 +81,7 @@ try {
   console.error("打包 appearance.ts 失败（需要 devDependency esbuild）:", String(e).slice(0, 300));
   process.exit(1);
 }
-const { resolveAppearance, normalizeReaderSettings, clampMaxInlineSize, normalizeCustomThemes, CUSTOM_THEMES_MAX } = mod;
+const { resolveAppearance, normalizeReaderSettings, clampMaxInlineSize, normalizeCustomThemes, normalizeTurnEffect, cssFontFamily, CUSTOM_THEMES_MAX, DEFAULT_READER_FONT_STACK } = mod;
 const projectLegacy = (resolved) => Object.fromEntries(LEGACY_FIELDS.map((k) => [k, resolved[k]]));
 
 console.log("== 1 maxInlineSize 钳制（缺省/非法→720；边界 480/1200 保留） ==");
@@ -92,13 +95,33 @@ check("下边界 480 保留", clampMaxInlineSize(480) === 480, 480, clampMaxInli
 check("上边界 1200 保留", clampMaxInlineSize(1200) === 1200, 1200, clampMaxInlineSize(1200));
 check("resolveAppearance 缺省 → 720", resolveAppearance(null).maxInlineSize === 720, 720, resolveAppearance(null).maxInlineSize);
 
-console.log("== 2 turnAnimated 严格布尔（写侧宽松、读侧严格） ==");
-check("缺省 → false", resolveAppearance(null).turnAnimated === false, false, resolveAppearance(null).turnAnimated);
-check("严格 true → true", resolveAppearance({ mode: { flow: "scrolled" }, appearance: { theme: "paper", turnAnimated: true } }).turnAnimated === true, true, "严格 true");
-check("字符串 \"true\" → false", resolveAppearance({ mode: { flow: "scrolled" }, appearance: { theme: "paper", turnAnimated: "true" } }).turnAnimated === false, false, "\"true\"");
-check("数值 1 → false", resolveAppearance({ mode: { flow: "scrolled" }, appearance: { theme: "paper", turnAnimated: 1 } }).turnAnimated === false, false, 1);
-check("normalize 缺省 → false", normalizeReaderSettings({}).appearance.turnAnimated === false, false, normalizeReaderSettings({}).appearance.turnAnimated);
-check("normalize 非布尔 → false", normalizeReaderSettings({ appearance: { turnAnimated: "yes" } }).appearance.turnAnimated === false, false, "yes");
+console.log("== 2 turnEffect 归一（D241：缺省 glide；旧 turnAnimated 存储字段退役） ==");
+check("normalizeTurnEffect 缺省 → glide", normalizeTurnEffect(undefined) === "glide", "glide", normalizeTurnEffect(undefined));
+check("normalizeTurnEffect none → none", normalizeTurnEffect("none") === "none", "none", normalizeTurnEffect("none"));
+check("normalizeTurnEffect 非法值 → glide", normalizeTurnEffect("fade") === "glide", "glide", normalizeTurnEffect("fade"));
+check("resolveAppearance 缺省 → turnAnimated=true（node 无 matchMedia ＝ 动效未关）", resolveAppearance(null).turnAnimated === true, true, resolveAppearance(null).turnAnimated);
+check("turnEffect=none → turnAnimated=false", resolveAppearance({ mode: { flow: "paged" }, appearance: { theme: "paper", turnEffect: "none" } }).turnAnimated === false, false, "none");
+check("旧存储 turnAnimated=false 被忽略 → 仍按缺省 glide 生效", resolveAppearance({ mode: { flow: "paged" }, appearance: { theme: "paper", turnAnimated: false } }).turnAnimated === true, true, "legacy false");
+check("normalize 缺省 → turnEffect=glide", normalizeReaderSettings({}).appearance.turnEffect === "glide", "glide", normalizeReaderSettings({}).appearance.turnEffect);
+check("normalize 剥离旧 turnAnimated 存储字段", !("turnAnimated" in normalizeReaderSettings({ appearance: { turnAnimated: true } }).appearance), "无 turnAnimated", normalizeReaderSettings({ appearance: { turnAnimated: true } }).appearance);
+check("normalize 保留 turnEffect=none", normalizeReaderSettings({ appearance: { turnEffect: "none" } }).appearance.turnEffect === "none", "none", normalizeReaderSettings({ appearance: { turnEffect: "none" } }).appearance.turnEffect);
+
+// D241：系统与应用两条减少动效轨道均优先于存储意愿。
+const savedDocument = global.document;
+const savedMatchMedia = global.matchMedia;
+try {
+  global.matchMedia = () => ({ matches: true });
+  check("系统减少动效强制关闭过渡", resolveAppearance(null).turnAnimated === false, false, resolveAppearance(null).turnAnimated);
+  global.matchMedia = () => ({ matches: false });
+  for (const mode of ["motion-off", "motion-reduced"]) {
+    global.document = { body: { classList: { contains: (cls) => cls === mode } } };
+    check(`${mode} 强制关闭过渡`, resolveAppearance(null).turnAnimated === false, false, resolveAppearance(null).turnAnimated);
+    check(`${mode} 保留 glide 意愿`, resolveAppearance(null).turnEffect === "glide", "glide", resolveAppearance(null).turnEffect);
+  }
+} finally {
+  if (savedDocument === undefined) delete global.document; else global.document = savedDocument;
+  if (savedMatchMedia === undefined) delete global.matchMedia; else global.matchMedia = savedMatchMedia;
+}
 
 console.log("== 3 customThemes 清洗与上限（保新弃旧 / 非法丢弃 / 重复保首条 / name 截断） ==");
 check("缺省 → []", eq(normalizeCustomThemes(undefined), []), [], normalizeCustomThemes(undefined));
@@ -160,10 +183,10 @@ check(
   "normalize mode/appearance 展开 = 旧展开逻辑",
   eq(normalizeReaderSettings(raw), {
     mode: { flow: "paged", spread: true },
-    appearance: { theme: "sepia", fontSize: 19, maxInlineSize: 720, turnAnimated: false },
+    appearance: { theme: "sepia", fontSize: 19, maxInlineSize: 720, turnEffect: "glide" },
     customThemes: []
   }),
-  "{mode, appearance(+720,false), []}",
+  "{mode, appearance(+720,glide), []}",
   normalizeReaderSettings(raw)
 );
 
@@ -178,6 +201,14 @@ check("margin 0 下边界保留", mg(0) === 0, 0, mg(0));
 check("margin 120 上边界保留", mg(120) === 120, 120, mg(120));
 check("margin 121 → 48", mg(121) === 48, 48, mg(121));
 check("margin -1 → 48", mg(-1) === 48, 48, mg(-1));
+
+console.log("== 6 字体栈清洗 cssFontFamily（D241） ==");
+check("默认栈逐项保留为多个字体名（不再被整串引成一个名字）", cssFontFamily(DEFAULT_READER_FONT_STACK).split(", ").length === DEFAULT_READER_FONT_STACK.split(",").length, DEFAULT_READER_FONT_STACK.split(",").length, cssFontFamily(DEFAULT_READER_FONT_STACK));
+check("默认栈首项＝\"Source Han Serif SC\"、末项＝serif 关键字", /^"Source Han Serif SC", /.test(cssFontFamily(DEFAULT_READER_FONT_STACK)) && /, serif$/.test(cssFontFamily(DEFAULT_READER_FONT_STACK)), "首/末项", cssFontFamily(DEFAULT_READER_FONT_STACK));
+check("单个无引号字体名加引号", cssFontFamily("霞鹜文楷") === '"霞鹜文楷"', '"霞鹜文楷"', cssFontFamily("霞鹜文楷"));
+check("单引号/双引号混写归一", cssFontFamily("'LXGW WenKai', \"Noto Serif\", sans-serif") === '"LXGW WenKai", "Noto Serif", sans-serif', '"LXGW WenKai", "Noto Serif", sans-serif', cssFontFamily("'LXGW WenKai', \"Noto Serif\", sans-serif"));
+check("剔除可逃逸声明的字符（; { } < >）", !/[;{}<>]/.test(cssFontFamily("Georgia; } body { color: red")), "无 ;{}<>", cssFontFamily("Georgia; } body { color: red"));
+check("空串 → serif", cssFontFamily("  ") === "serif", "serif", cssFontFamily("  "));
 
 fs.rmSync(path.join(__dirname, "tmp-d130"), { recursive: true, force: true });
 console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);

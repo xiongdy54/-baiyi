@@ -556,7 +556,7 @@ try {
   };
   const rd = await cdp.eval(`(async () => { const cur = await window.settingsAPI.get("app", "readerSettings"); return JSON.stringify(cur || {}); })()`);
   const rd0 = JSON.parse(String(rd) || "{}");
-  check("⑪ 基线：默认跟随＝17px", (await fsOf()) === "17px", await fsOf());
+  check("⑪ 基线：默认跟随＝18px（D241）", (await fsOf()) === "18px", await fsOf());
   await cdp.eval(`(async () => {
     const cur = await window.settingsAPI.get("app", "readerSettings");
     await window.settingsAPI.set("app", "readerSettings", { ...cur, appearance: { ...(cur?.appearance || {}), fontSize: 22 } });
@@ -564,7 +564,7 @@ try {
   })()`);
   await wait(600);
   await refreshFace();
-  check("⑪ 阅读字号 17→22：卡面 computed 同步 22px", (await fsOf()) === "22px", await fsOf());
+  check("⑪ 阅读字号 18→22：卡面 computed 同步 22px", (await fsOf()) === "22px", await fsOf());
   await cdp.eval(`window.settingsAPI.set("app", "extractFaceFontFollow", false)`);
   await wait(500);
   await cdp.eval(`window.settingsAPI.set("app", "extractFaceFontSize", 14)`);
@@ -583,7 +583,7 @@ try {
   await cdp.eval(`(async () => { await window.settingsAPI.set("app", "readerSettings", ${JSON.stringify(rd0)}); return true; })()`);
   await wait(500);
   await refreshFace();
-  check("⑪ 还原：跟随恢复、字号回基线 17px", (await fsOf()) === "17px", await fsOf());
+  check("⑪ 还原：跟随恢复、字号回基线 18px（D241）", (await fsOf()) === "18px", await fsOf());
 
   // ============================================================
   // 验收 10：工具栏开关（设置页关 → 重进编辑无工具栏 → 重开 → 恢复 → 重启不丢）
