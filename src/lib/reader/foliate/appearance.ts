@@ -53,15 +53,20 @@ const PRESETS: Record<Exclude<ReaderTheme, "custom">, { bg: string; fg: string }
 // 多语言默认字体栈：中日韩 + 拉丁全覆盖（阅读器须支持各种语言）。
 // D241 排序原则：①自带优质拉丁字形的 CJK 宋体（思源/Noto Serif CJK）居首——中西文同一家族、
 // 字重与 x 高度协调；②其后是拉丁书籍衬线（Iowan/Charter/Georgia），保证没有思源时西文不落进
-// 系统宋体的拉丁字形；③最后才是各平台系统宋体/明朝体兜底。
+// 系统宋体的拉丁字形。
+// D242 修正兜底：去掉系统宋体/明朝体兜底（Songti SC / STSong / Yu Mincho / SimSun 与末尾 serif）。
+// macOS 的「宋体-简」默认只装粗体与特粗（常规与细体是按需下载的字体），按 400 字重匹配时整页
+// 正文落在粗体宋体上（用户 2026-10-27 反馈「中文几乎全部变成粗体，大片粗衬线看着累」）；
+// Windows 的 SimSun 点阵味重、Yu Mincho 是日文字形。没有思源/Noto 宋体时，中文改落各平台的
+// 系统黑体（苹方 / 冬青 / 微软雅黑 / 思源黑体），西文仍是书籍衬线——字重稳定在常规档。
 export const DEFAULT_READER_FONT_STACK =
-  '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "Songti SC", STSong, "Hiragino Mincho ProN", "Yu Mincho", SimSun, serif';
+  '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif';
 /** D241：默认正文字号（17 → 18：桌面阅读距离下 18px 衬线体更从容，720px 版心≈每行 40 个全角字） */
 export const DEFAULT_READER_FONT_SIZE = 18;
 /** 默认字体栈下按语言换用对应地区字形（日文用 JP 明朝、繁体用 TC/HK、韩文用 KR）——仅在用户未自定义字体时注入 */
 const LANG_FONT_OVERRIDES: [string, string][] = [
   [':lang(ja)', '"Source Han Serif JP", "Noto Serif CJK JP", "Hiragino Mincho ProN", "Yu Mincho", "Iowan Old Style", Georgia, serif'],
-  [':lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)', '"Source Han Serif TC", "Noto Serif CJK TC", "Noto Serif CJK HK", "Songti TC", "Iowan Old Style", Georgia, PMingLiU, serif'],
+  [':lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)', '"Source Han Serif TC", "Noto Serif CJK TC", "Noto Serif CJK HK", "Iowan Old Style", Georgia, "PingFang TC", "Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif'],
   [':lang(ko)', '"Source Han Serif K", "Noto Serif CJK KR", "AppleMyungjo", "Iowan Old Style", Georgia, Batang, serif']
 ];
 
@@ -178,6 +183,23 @@ export function resolveAppearance(s: ReaderSettings | null): ReaderAppearanceEx 
     turnEffect: normalizeTurnEffect(a.turnEffect),
     turnAnimated: normalizeTurnEffect(a.turnEffect) === "glide" && !prefersReducedMotion()
   };
+}
+
+/**
+ * D242：阅读主题的明暗档——决定整个应用界面（顶栏 / 控件 / 浮层）随阅读主题切到浅色还是深色档。
+ * 暗夜＝深；纸白/羊皮＝浅；自定义＝按背景色相对亮度判定（< 0.4 视为深底）。
+ */
+export function readerThemeTone(a: ReaderAppearance): "light" | "dark" {
+  if (a.theme === "dark") return "dark";
+  if (a.theme !== "custom") return "light";
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(a.bgColor ?? "");
+  if (!m) return "light";
+  const lin = (h: string) => {
+    const c = parseInt(h, 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const lum = 0.2126 * lin(m[1]) + 0.7152 * lin(m[2]) + 0.0722 * lin(m[3]);
+  return lum < 0.4 ? "dark" : "light";
 }
 
 /** 封面压扁修复：为滚动模式下的 svg[viewBox] 显式设定 aspect-ratio（Chromium 对百分比宽 svg 的

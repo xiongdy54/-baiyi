@@ -5364,6 +5364,25 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .reader-wrap:has(.reader-scroll-engine) {
   background: var(--reader-bg, var(--paper));
 }
+/* D242：整个阅读界面随阅读主题同步。阅读器挂载期间 Reader 在 body 上内联写 --reader-bg/--reader-fg，
+   并把应用的表面 / 文字 / 描边 Token（--paper、--surface-*、--text-*、--border-* …）改指向下面这组
+   派生值（内联声明压过皮肤层同名 Token；离开阅读器即撤销）——顶栏、阅读工具栏按钮、侧栏、学习坞、
+   浮层与对话框都取同一套阅读色，不再残留应用主题的白底 / 灰阶。派生比例按应用浅色档的灰阶层级
+   （纸 → grey-1 → grey-2 → grey-3 → 墨）在阅读底色与文字色之间插值，深浅主题与自定义色同一算法。 */
+body.reader-surface {
+  --reader-surface-paper: var(--reader-bg);
+  --reader-surface-ink: var(--reader-fg);
+  --reader-surface-grey-1: color-mix(in srgb, var(--reader-fg) 6%, var(--reader-bg));
+  --reader-surface-grey-2: color-mix(in srgb, var(--reader-fg) 17%, var(--reader-bg));
+  --reader-surface-grey-3: color-mix(in srgb, var(--reader-fg) 56%, var(--reader-bg));
+  --reader-surface-text-secondary: color-mix(in srgb, var(--reader-fg) 76%, var(--reader-bg));
+  --reader-surface-text-placeholder: color-mix(in srgb, var(--reader-fg) 46%, var(--reader-bg));
+  --reader-surface-border-subtle: color-mix(in srgb, var(--reader-fg) 12%, var(--reader-bg));
+  --reader-surface-border-strong: color-mix(in srgb, var(--reader-fg) 34%, var(--reader-bg));
+  --reader-surface-overlay: color-mix(in srgb, var(--reader-fg) 3%, var(--reader-bg));
+  background: var(--reader-bg);
+  color: var(--reader-fg);
+}
 /* 引擎打开失败的可见错误态（替代此前的"空白正文区 + 静默异常"）。
    读它的是用户不是开发者，所以按 empty-state 的版面走，不做成红底告警条 ——
    整屏错误条会把唯一焦点色换成 error，违反「语义色只用于状态提示、不当装饰」。 */
@@ -5482,8 +5501,11 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   background: var(--reader-bg, transparent);
   z-index: 5;
 }
-/* foliate paginator 的背景层（closed shadow root 经 exportparts 导出）随阅读主题 */
-.reader-engine-host foliate-paginator::part(filter) {
+/* foliate paginator 的背景层（closed shadow root 经 exportparts 导出）随阅读主题。
+   D242：paginator 在 foliate-view 的 shadow 里，外部选择器只能经 foliate-view 的再导出命中——
+   旧写法 `foliate-paginator::part(filter)` 跨不过 shadow 边界、从未生效：背景层停在开书时的底色
+   （只在换章时由 vendor 重取），换主题后滚动模式顶部留一条旧色带、分页 / 对开四周页边整片旧色。 */
+.reader-engine-host foliate-view::part(filter) {
   background: var(--reader-bg, transparent) !important;
 }
 /* 分页模式左右点击热区（滚动模式不渲染；选区在中间区域不受影响） */
