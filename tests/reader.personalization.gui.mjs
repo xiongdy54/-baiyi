@@ -247,6 +247,7 @@ async function main() {
     })()`);
     check("A3 重启不丢数据（reload 后 line-height 仍 ≈ 2.0×fontSize）", Boolean(lh2 && Math.abs(lh2.lineHeight - 2.0 * lh2.fontSize) < 1.5), JSON.stringify(lh2));
     check("A4 快捷菜单行探针在场（data-reader-row=lineHeight）", await cdp.eval(`(async () => { await ${JS_OPEN_SETTINGS_MENU}; return !!document.querySelector('[data-reader-row="lineHeight"]'); })()`));
+    check("A5 快捷菜单行探针在场（data-reader-row=ignorePublisherFont）", await cdp.eval(`(async () => { await ${JS_OPEN_SETTINGS_MENU}; return !!document.querySelector('[data-reader-row="ignorePublisherFont"]'); })()`));
     await cdp.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
     await wait(200);
@@ -341,7 +342,7 @@ async function main() {
     await cdp.eval(`(() => { const b = [...document.querySelectorAll(".icon-btn")].find((x) => (x.title || "") === "设置"); b?.click(); return true; })()`);
     await wait(800);
     check("D5 设置页管理列表探针（data-reader-theme-manage-list）", await cdp.eval(`!!document.querySelector('[data-reader-theme-manage-list]')`));
-    check("D5b 设置页滑杆探针在场（data-reader-setting=lineHeight/margin/measure）", await cdp.eval(`!!document.querySelector('[data-reader-setting="lineHeight"]') && !!document.querySelector('[data-reader-setting="margin"]') && !!document.querySelector('[data-reader-setting="measure"]')`));
+    check("D5b 设置页滑杆探针在场（data-reader-setting=lineHeight/margin/measure/ignorePublisherFont）", await cdp.eval(`!!document.querySelector('[data-reader-setting="lineHeight"]') && !!document.querySelector('[data-reader-setting="margin"]') && !!document.querySelector('[data-reader-setting="measure"]') && !!document.querySelector('[data-reader-setting="ignorePublisherFont"]')`));
     await cdp.eval(`(() => { const row = document.querySelector('[data-reader-theme-manage-list] [data-reader-theme-id="${savedId}"]'); row?.querySelector('[data-reader-theme-delete]')?.click(); return true; })()`);
     await wait(150);
     check("D6 就地二次确认出现（确认删除 + 取消默认焦点）", await cdp.eval(`(async () => { const row = document.querySelector('[data-reader-theme-manage-list] [data-reader-theme-id="${savedId}"]'); if (!row) return false; const c = row.querySelector('[data-reader-theme-delete-confirm]'); return !!c && !!row.querySelector("button:focus"); })()`));
@@ -479,6 +480,7 @@ async function main() {
     check("E2 PDF：边距/版心行隐藏", await cdp.eval(`(async () => { await ${JS_OPEN_SETTINGS_MENU}; return !document.querySelector('[data-reader-row="margin"]') && !document.querySelector('[data-reader-row="measure"]'); })()`));
     check("E3 PDF：缩放行在场（原位保留）", await cdp.eval(`(async () => { await ${JS_OPEN_SETTINGS_MENU}; return !!document.querySelector('[data-reader-row="zoom"]'); })()`));
     check("E4 PDF：动画过渡控件禁用态", await cdp.eval(`(async () => { await ${JS_OPEN_SETTINGS_MENU}; const row = document.querySelector('[data-reader-row="turnAnimated"]'); if (!row) return false; const btn = row.querySelector(".dd-btn"); return !!btn && btn.disabled === true; })()`));
+    check("E4b PDF：忽略出版方字体控件禁用态", await cdp.eval(`(async () => { await ${JS_OPEN_SETTINGS_MENU}; const row = document.querySelector('[data-reader-row="ignorePublisherFont"]'); if (!row) return false; const btn = row.querySelector(".dd-btn"); return !!btn && btn.disabled === true; })()`));
     // PDF 自定义主题：只改容器底色（fgColor 不适用——「Not verified」口径，断言只测 bgColor）
     await seedSettings(cdp, { mode: { flow: "paged" }, appearance: { theme: "custom", bgColor: "#203040", fgColor: "#e0e8f0" } });
     await openBook(cdp, ".pdf");

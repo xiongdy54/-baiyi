@@ -1665,6 +1665,17 @@ function ReaderSection() {
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontFamily: e.target.value } })}
         />
       </div>
+      <div className="settings-row" data-reader-setting="ignorePublisherFont">
+        <span className="settings-row-label">
+          {T("忽略出版方字体")}
+          <SettingsInfo label={T("忽略出版方字体")}>{T("开启后正文使用应用字体与常规字重；出版方内嵌字体与字重不再生效，标题、强调与代码保留语义样式。")}</SettingsInfo>
+        </span>
+        <input
+          type="checkbox"
+          checked={a.ignorePublisherFont === true}
+          onChange={(e) => save({ ...cfg, appearance: { ...a, ignorePublisherFont: e.target.checked } })}
+        />
+      </div>
       {/* D130 R3 P2/P3：行距（既有字段接 UI）+ 页边距 + 版心宽度——与阅读器快捷菜单读写同一字段；
           数值显示 mono + tabular-nums（.mono 的 font-feature-settings "tnum"），拖动时数字宽度不跳动 */}
       <div className="settings-row" data-reader-setting="lineHeight">
