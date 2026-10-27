@@ -1661,7 +1661,7 @@ function ReaderSection() {
         <label>{T("正文字体")}</label>
         <input
           value={a.fontFamily ?? ""}
-          placeholder={T("留空使用默认多语言衬线栈")}
+          placeholder={T("留空使用默认无衬线字体栈")}
           onChange={(e) => save({ ...cfg, appearance: { ...a, fontFamily: e.target.value } })}
         />
       </div>

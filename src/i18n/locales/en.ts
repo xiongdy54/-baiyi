@@ -257,7 +257,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "文字色": "Text color",
   "字号（{n}px）": "Font size ({n}px)",
   "正文字体": "Body font",
-  "留空使用默认多语言衬线栈": "Leave empty for the default multilingual serif stack",
+  "留空使用默认无衬线字体栈": "Leave empty for the default sans-serif stack",
   "忽略出版方字体": "Ignore publisher fonts",
   "开启后正文使用应用字体与常规字重；出版方内嵌字体与字重不再生效，标题、强调与代码保留语义样式。":
     "Use the app font and regular weight for body text; publisher-embedded fonts and weights no longer apply. Headings, emphasis and code keep their semantic styles.",

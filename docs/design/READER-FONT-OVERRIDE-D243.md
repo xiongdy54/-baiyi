@@ -1,5 +1,7 @@
 # 阅读字体统一开关（D243 / v49.72）
 
+> 注：D245（v49.74）已把默认字体栈改为无衬线（Noto Sans SC 居首），并删除 D244 的强制专用栈。本文件 D243 / D244 两节保留当时记录，现行契约以 D245 修订节为准。
+
 ## 范围
 
 修复两类“粗体衬线”来源，并给用户一个默认关闭的显式开关：
@@ -39,6 +41,30 @@
 ## 测试与验收
 
 - `tests/reader.appearance.test.cjs`：默认栈顺序、`ignorePublisherFont` 严格归一（缺省 false，字符串 true 不生效）、resolve 输出；未开启时不生成强制字体 CSS，开启时生成完整覆盖规则。
+- 既有 `d241-reader-motion`、`d242-reader-inertia`、`reader.personalization.gui`、`reader.paging.gui`、`reader.kernel.cjs` 回归。
+- `npm run typecheck`、`npm run build`、`node scripts/i18n-check.mjs`、`npm run lint:consistency`。
+- 真实书库不参与自动测试；手检以《连结》（书内 `.kfont` 楷体）与一本自带仿宋/楷体的书为准。
+
+## D244 修订（v49.73）
+
+用户 2026-10-27 指令：开启「忽略出版方字体」时，默认中文字体换成 Noto Sans SC 400 黑体。
+
+- 新增 `DEFAULT_READER_FORCED_FONT_STACK`＝`"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif`。Noto Sans SC 自带拉丁字形，中西文同族；其后依次是各平台黑体回退（未安装 Noto 时仍有稳定常规字重）。
+- `injectAppearanceStyle`：仅当 `ignorePublisherFont === true` **且** `fontFamily` 仍为默认栈（`isDefaultStack`）时，`forcedPublisherFontCss` 的字体族改用该黑体栈；用户显式填写的字体不被替换。
+- 400 字重仍由既有 `font-weight: 400 !important` 保证；标题 600、strong/b 700、code/pre 等宽规则不变。
+- 开关关闭时的正文默认栈（衬线）与语言地区覆盖不变；作用域、PDF 不适用、存储与 UI 均不变。
+- 验收：`tests/reader.appearance.test.cjs` 增 7 项——强制段落含 Noto Sans SC 黑体栈且不含宋体族、显式字体原样保留、关闭时仍为衬线默认栈、黑体栈首/末项与无宋体族。
+
+## D245 修订（v49.74，取代 D244 的强制专用栈）
+
+用户 2026-10-27 澄清：衬线看着累，默认中文字体应改无衬线；只要书内没有出版方指定的字体，就使用无衬线。
+
+- `DEFAULT_READER_FONT_STACK` 整体改为黑体栈：`"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif`（Noto Sans SC 有常规 400 可变档，且自带拉丁字形，中西文同族）。
+- `LANG_FONT_OVERRIDES` 同步改黑体地区字形：日文 Noto Sans CJK JP / Noto Sans JP / 思源黑体 JP / 冬青黑体，繁体 Noto Sans CJK TC/HK / 思源黑体 TC / 苹方 TC / 微软正黑，韩文 Noto Sans CJK KR / 思源黑体 K / Apple SD Gothic Neo / Malgun Gothic。
+- 生效语义不变：默认栈只兜底书没有表态的地方（出版方 `font-family` 仍优先）；`ignorePublisherFont` 才强制覆盖出版方字体并保持 400；显式自选字体、PDF、字号 / 行距 / 颜色全部不变。
+- D244 引入的 `DEFAULT_READER_FORCED_FONT_STACK` 与 `injectAppearanceStyle` 里的替换分支删除——强制模式直接使用默认（已是黑体）栈。
+- 设置页字体输入占位文案由「留空使用默认多语言衬线栈」改为「留空使用默认无衬线字体栈」，en / ja 同步。
+- 验收：`tests/reader.appearance.test.cjs` 全过（默认栈快照改为黑体栈、首项 Noto Sans SC、纯黑体无宋体族、开关关闭与开启均无衬线、显式字体保留、D243 归一与 CSS 覆盖规则回归）。
 - 既有 `d241-reader-motion`、`d242-reader-inertia`、`reader.personalization.gui`、`reader.paging.gui`、`reader.kernel.cjs` 回归。
 - `npm run typecheck`、`npm run build`、`node scripts/i18n-check.mjs`、`npm run lint:consistency`。
 - 真实书库不参与自动测试；手检以《连结》（书内 `.kfont` 楷体）与一本自带仿宋/楷体的书为准。
