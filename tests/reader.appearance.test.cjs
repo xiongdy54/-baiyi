@@ -2,7 +2,8 @@
 // @runtime: node
 // 运行：node tests/reader.appearance.test.cjs
 // 依据：docs/design/READER-PERSONALIZATION-D130.md §3（归一口）+ §8.1（node 测试计划 1–5）。
-// 覆盖：maxInlineSize 钳制 / turnEffect 归一（D241，取代 turnAnimated 存储字段）/ customThemes 清洗与上限保新弃旧 /
+// 覆盖：maxInlineSize 钳制 / turnEffect 归一（D241，取代 turnAnimated 存储字段）/ ignorePublisherFont 归一与 CSS 生成（D243）/
+//       customThemes 清洗与上限保新弃旧 /
 //       存量 settings 解析与 D130 之前 resolveAppearance 输出逐字段相等（防静默默认漂移）/
 //       lineHeight/margin 既有钳制回归 / 字体栈清洗 cssFontFamily（D241：修整串栈被当成单一字体名）。
 // 零网络零库：appearance.ts 为纯函数模块（唯一外部引用是 kernel.ts 的类型，编译期剥离），
@@ -50,9 +51,9 @@ const LEGACY_PRESETS = {
 };
 // D241 有意偏离（登记于 GUIDE D241）：缺省字体栈重排扩充、缺省字号 17→18——仅影响**未设置**这两项的存量用户；
 // D242 再修正中文回退栈：无思源/Noto 宋体时用常规黑体，避免仅安装粗体的系统宋体。
-// 快照随之更新为 D242 缺省值（显式设置过的字号/字体逐字段不变，由下方夹具 fontSize/fontFamily 行守护）。
+// D243 把 Noto 放在 Source Han 前，避免只装 Source Han Heavy 的 Windows 命中粗体；快照随之更新。
 const LEGACY_FONT_STACK =
-  '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif';
+  '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Source Han Serif", "Iowan Old Style", Charter, Georgia, "Times New Roman", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif';
 const LEGACY_DEFAULT_FONT_SIZE = 18;
 const LEGACY_DEFAULT_APPEARANCE = { theme: "paper" };
 function legacyResolveAppearance(s) {
@@ -82,8 +83,27 @@ try {
   console.error("打包 appearance.ts 失败（需要 devDependency esbuild）:", String(e).slice(0, 300));
   process.exit(1);
 }
-const { resolveAppearance, normalizeReaderSettings, clampMaxInlineSize, normalizeCustomThemes, normalizeTurnEffect, cssFontFamily, readerThemeTone, CUSTOM_THEMES_MAX, DEFAULT_READER_FONT_STACK } = mod;
+const { resolveAppearance, normalizeReaderSettings, clampMaxInlineSize, normalizeCustomThemes, normalizeTurnEffect, cssFontFamily, readerThemeTone, injectAppearanceStyle, CUSTOM_THEMES_MAX, DEFAULT_READER_FONT_STACK } = mod;
 const projectLegacy = (resolved) => Object.fromEntries(LEGACY_FIELDS.map((k) => [k, resolved[k]]));
+
+/** D243：用最小假 Document 捕获 injectAppearanceStyle 生成的 CSS，不引入 jsdom。 */
+function renderAppearanceCss(appearance) {
+  let style = null;
+  const attrs = [];
+  const makeEl = (name) => ({
+    setAttribute: (k) => attrs.push(`${name}:${k}`),
+    removeAttribute: () => {},
+  });
+  const doc = {
+    getElementById: () => null,
+    createElement: () => ({ id: "", textContent: "" }),
+    head: { appendChild: (node) => { style = node; } },
+    documentElement: makeEl("html"),
+    body: makeEl("body"),
+  };
+  injectAppearanceStyle(doc, appearance);
+  return { css: style?.textContent || "", attrs };
+}
 
 console.log("== 1 maxInlineSize 钳制（缺省/非法→720；边界 480/1200 保留） ==");
 check("缺省 → 720", clampMaxInlineSize(undefined) === 720, 720, clampMaxInlineSize(undefined));
@@ -106,6 +126,22 @@ check("旧存储 turnAnimated=false 被忽略 → 仍按缺省 glide 生效", re
 check("normalize 缺省 → turnEffect=glide", normalizeReaderSettings({}).appearance.turnEffect === "glide", "glide", normalizeReaderSettings({}).appearance.turnEffect);
 check("normalize 剥离旧 turnAnimated 存储字段", !("turnAnimated" in normalizeReaderSettings({ appearance: { turnAnimated: true } }).appearance), "无 turnAnimated", normalizeReaderSettings({ appearance: { turnAnimated: true } }).appearance);
 check("normalize 保留 turnEffect=none", normalizeReaderSettings({ appearance: { turnEffect: "none" } }).appearance.turnEffect === "none", "none", normalizeReaderSettings({ appearance: { turnEffect: "none" } }).appearance.turnEffect);
+
+console.log("== 2b ignorePublisherFont 归一与 CSS 生成（D243，默认关闭） ==");
+check("缺省 → false", normalizeReaderSettings({}).appearance.ignorePublisherFont === false, false, normalizeReaderSettings({}).appearance.ignorePublisherFont);
+check("严格 true → true", normalizeReaderSettings({ appearance: { ignorePublisherFont: true } }).appearance.ignorePublisherFont === true, true, true);
+check("字符串 \"true\" → false", normalizeReaderSettings({ appearance: { ignorePublisherFont: "true" } }).appearance.ignorePublisherFont === false, false, "true");
+check("数值 1 → false", normalizeReaderSettings({ appearance: { ignorePublisherFont: 1 } }).appearance.ignorePublisherFont === false, false, 1);
+check("resolve 缺省 → false", resolveAppearance(null).ignorePublisherFont === false, false, resolveAppearance(null).ignorePublisherFont);
+check("resolve 显式 true → true", resolveAppearance({ appearance: { theme: "paper", ignorePublisherFont: true } }).ignorePublisherFont === true, true, true);
+const offCss = renderAppearanceCss(resolveAppearance(null));
+const onCss = renderAppearanceCss(resolveAppearance({ appearance: { theme: "paper", ignorePublisherFont: true } }));
+check("关闭时不生成 D243 覆盖注释", !offCss.css.includes("D243: ignore publisher typography"), "无 D243", offCss.css.includes("D243: ignore publisher typography"));
+check("关闭时不挂 data 作用域", offCss.attrs.length === 0, [], offCss.attrs);
+check("开启时挂 html/body data 作用域", onCss.attrs.length === 2 && onCss.attrs.every((x) => x.endsWith(":data-d243-font-override")), ["html/body:data-d243-font-override"], onCss.attrs);
+check("开启时正文强制 400", onCss.css.includes("font-weight: 400 !important") && onCss.css.includes("data-d243-font-override"), true, onCss.css.slice(-400));
+check("开启时标题/强调也继承应用字族", onCss.css.includes("h1, h2, h3, h4, h5, h6, strong, b, em, i"), true, onCss.css.slice(-700));
+check("开启时保留 code 等宽与 strong 700", onCss.css.includes("JetBrains Mono") && onCss.css.includes(":where(strong, b) { font-weight: 700 !important; }"), true, onCss.css.slice(-400));
 
 // D241：系统与应用两条减少动效轨道均优先于存储意愿。
 const savedDocument = global.document;
@@ -184,10 +220,10 @@ check(
   "normalize mode/appearance 展开 = 旧展开逻辑",
   eq(normalizeReaderSettings(raw), {
     mode: { flow: "paged", spread: true },
-    appearance: { theme: "sepia", fontSize: 19, maxInlineSize: 720, turnEffect: "glide" },
+    appearance: { theme: "sepia", ignorePublisherFont: false, fontSize: 19, maxInlineSize: 720, turnEffect: "glide" },
     customThemes: []
   }),
-  "{mode, appearance(+720,glide), []}",
+  "{mode, appearance(+720,glide,ignorePublisherFont:false), []}",
   normalizeReaderSettings(raw)
 );
 
@@ -205,7 +241,8 @@ check("margin -1 → 48", mg(-1) === 48, 48, mg(-1));
 
 console.log("== 6 字体栈清洗 cssFontFamily（D241） ==");
 check("默认栈逐项保留为多个字体名（不再被整串引成一个名字）", cssFontFamily(DEFAULT_READER_FONT_STACK).split(", ").length === DEFAULT_READER_FONT_STACK.split(",").length, DEFAULT_READER_FONT_STACK.split(",").length, cssFontFamily(DEFAULT_READER_FONT_STACK));
-check("默认栈首项＝\"Source Han Serif SC\"、末项＝sans-serif 关键字", /^"Source Han Serif SC", /.test(cssFontFamily(DEFAULT_READER_FONT_STACK)) && /, sans-serif$/.test(cssFontFamily(DEFAULT_READER_FONT_STACK)), "首/末项", cssFontFamily(DEFAULT_READER_FONT_STACK));
+check("默认栈首项＝\"Noto Serif SC\"、末项＝sans-serif 关键字", /^"Noto Serif SC", /.test(cssFontFamily(DEFAULT_READER_FONT_STACK)) && /, sans-serif$/.test(cssFontFamily(DEFAULT_READER_FONT_STACK)), "首/末项", cssFontFamily(DEFAULT_READER_FONT_STACK));
+check("Noto Serif SC 排在 Source Han Serif SC 之前（D243）", cssFontFamily(DEFAULT_READER_FONT_STACK).indexOf('"Noto Serif SC"') < cssFontFamily(DEFAULT_READER_FONT_STACK).indexOf('"Source Han Serif SC"'), true, cssFontFamily(DEFAULT_READER_FONT_STACK));
 check("单个无引号字体名加引号", cssFontFamily("霞鹜文楷") === '"霞鹜文楷"', '"霞鹜文楷"', cssFontFamily("霞鹜文楷"));
 check("单引号/双引号混写归一", cssFontFamily("'LXGW WenKai', \"Noto Serif\", sans-serif") === '"LXGW WenKai", "Noto Serif", sans-serif', '"LXGW WenKai", "Noto Serif", sans-serif', cssFontFamily("'LXGW WenKai', \"Noto Serif\", sans-serif"));
 check("剔除可逃逸声明的字符（; { } < >）", !/[;{}<>]/.test(cssFontFamily("Georgia; } body { color: red")), "无 ;{}<>", cssFontFamily("Georgia; } body { color: red"));

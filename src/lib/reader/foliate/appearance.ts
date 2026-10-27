@@ -18,6 +18,9 @@ export interface ReaderAppearanceEx extends ReaderAppearance {
   /** 翻页动效**生效值**（resolveAppearance 输出，不入存储）：turnEffect="glide" 且动效未被系统
    *  reduce-motion / 应用「动效」设置关闭时为 true → adapter 给 paginator 挂 `animated` 属性。 */
   turnAnimated?: boolean;
+  /** D243：忽略出版方字体/字重（默认 false）。开启后正文使用应用字体与 400 字重；
+   *  标题、strong/b、code/pre 保留语义字重/等宽字体。仅影响阅读 iframe，PDF 不适用。 */
+  ignorePublisherFont?: boolean;
 }
 
 export type TurnEffect = "glide" | "none";
@@ -40,7 +43,7 @@ export interface ReaderSettings {
 
 export const DEFAULT_READER_SETTINGS: ReaderSettings = {
   mode: { flow: "scrolled" },
-  appearance: { theme: "paper" },
+  appearance: { theme: "paper", ignorePublisherFont: false },
   customThemes: []
 };
 
@@ -54,20 +57,24 @@ const PRESETS: Record<Exclude<ReaderTheme, "custom">, { bg: string; fg: string }
 // D241 排序原则：①自带优质拉丁字形的 CJK 宋体（思源/Noto Serif CJK）居首——中西文同一家族、
 // 字重与 x 高度协调；②其后是拉丁书籍衬线（Iowan/Charter/Georgia），保证没有思源时西文不落进
 // 系统宋体的拉丁字形。
-// D242 修正兜底：去掉系统宋体/明朝体兜底（Songti SC / STSong / Yu Mincho / SimSun 与末尾 serif）。
+// D242 修正兜底：去掉系统宋体/明朝体兜底（Songti SC / STSong / SimSun 与末尾 serif）。
 // macOS 的「宋体-简」默认只装粗体与特粗（常规与细体是按需下载的字体），按 400 字重匹配时整页
 // 正文落在粗体宋体上（用户 2026-10-27 反馈「中文几乎全部变成粗体，大片粗衬线看着累」）；
 // Windows 的 SimSun 点阵味重、Yu Mincho 是日文字形。没有思源/Noto 宋体时，中文改落各平台的
 // 系统黑体（苹方 / 冬青 / 微软雅黑 / 思源黑体），西文仍是书籍衬线——字重稳定在常规档。
+// D243：Noto Serif SC 排在 Source Han Serif SC 前——部分 Windows 只安装 Source Han Serif SC Heavy
+// （无常规字面），把思源放首位会让 400 正文命中 Heavy；Noto 的可变字体有常规档，优先命中。
 export const DEFAULT_READER_FONT_STACK =
-  '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif';
+  '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Source Han Serif", "Iowan Old Style", Charter, Georgia, "Times New Roman", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif';
 /** D241：默认正文字号（17 → 18：桌面阅读距离下 18px 衬线体更从容，720px 版心≈每行 40 个全角字） */
 export const DEFAULT_READER_FONT_SIZE = 18;
+const READER_CODE_FONT_STACK =
+  '"JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK SC", monospace';
 /** 默认字体栈下按语言换用对应地区字形（日文用 JP 明朝、繁体用 TC/HK、韩文用 KR）——仅在用户未自定义字体时注入 */
 const LANG_FONT_OVERRIDES: [string, string][] = [
-  [':lang(ja)', '"Source Han Serif JP", "Noto Serif CJK JP", "Hiragino Mincho ProN", "Yu Mincho", "Iowan Old Style", Georgia, serif'],
-  [':lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)', '"Source Han Serif TC", "Noto Serif CJK TC", "Noto Serif CJK HK", "Iowan Old Style", Georgia, "PingFang TC", "Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif'],
-  [':lang(ko)', '"Source Han Serif K", "Noto Serif CJK KR", "AppleMyungjo", "Iowan Old Style", Georgia, Batang, serif']
+  [':lang(ja)', '"Noto Serif CJK JP", "Noto Serif JP", "Source Han Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "Iowan Old Style", Georgia, serif'],
+  [':lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)', '"Noto Serif CJK TC", "Noto Serif TC", "Noto Serif CJK HK", "Source Han Serif TC", "Iowan Old Style", Georgia, "PingFang TC", "Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif'],
+  [':lang(ko)', '"Noto Serif CJK KR", "Noto Serif KR", "Source Han Serif K", "AppleMyungjo", "Iowan Old Style", Georgia, Batang, serif']
 ];
 
 // ---------- D130 R3：新增字段归一（写侧宽松、读侧钳制封闭非法值域，同 growthFeedback 双侧归一先例） ----------
@@ -147,7 +154,8 @@ export function normalizeReaderSettings(s: unknown): ReaderSettings {
     ...DEFAULT_READER_SETTINGS.appearance,
     ...(raw.appearance ?? {}),
     maxInlineSize: clampMaxInlineSize(raw.appearance?.maxInlineSize),
-    turnEffect: normalizeTurnEffect(raw.appearance?.turnEffect)
+    turnEffect: normalizeTurnEffect(raw.appearance?.turnEffect),
+    ignorePublisherFont: raw.appearance?.ignorePublisherFont === true
   };
   // D241：旧存储字段 turnAnimated 退役（生效值只由 resolveAppearance 产出，不回写存储）
   delete appearance.turnAnimated;
@@ -181,7 +189,8 @@ export function resolveAppearance(s: ReaderSettings | null): ReaderAppearanceEx 
     // reduce-motion / 应用动效关闭时强制不挂 animated——设置项仍可改、存储保留意愿
     maxInlineSize: clampMaxInlineSize(a.maxInlineSize),
     turnEffect: normalizeTurnEffect(a.turnEffect),
-    turnAnimated: normalizeTurnEffect(a.turnEffect) === "glide" && !prefersReducedMotion()
+    turnAnimated: normalizeTurnEffect(a.turnEffect) === "glide" && !prefersReducedMotion(),
+    ignorePublisherFont: a.ignorePublisherFont === true
   };
 }
 
@@ -267,7 +276,7 @@ function proseCss(radius: string): string {
     // 链接：随正文色 + 细下划线
     `:where(a) { color: inherit; text-decoration-line: underline; text-decoration-thickness: 1px; text-decoration-color: ${line(32)}; text-underline-offset: 0.22em; }`,
     // 代码
-    ":where(code, kbd, samp, pre) { font-family: \"JetBrains Mono\", \"Cascadia Code\", \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", \"Noto Sans Mono CJK SC\", monospace; font-size: 0.86em; font-variant-ligatures: none; }",
+    ":where(code, kbd, samp, pre) { font-family: " + READER_CODE_FONT_STACK + "; font-size: 0.86em; font-variant-ligatures: none; }",
     `:where(:not(pre) > code) { padding: 0.1em 0.36em; border-radius: ${radius}; background: ${line(7)}; }`,
     `:where(pre) { margin: 1.2em 0; padding: 0.9em 1.1em; line-height: 1.6; border-radius: ${radius}; background: ${line(5)}; white-space: pre-wrap; overflow-wrap: anywhere; }`,
     ":where(pre code) { font-size: 1em; padding: 0; background: none; }",
@@ -294,8 +303,24 @@ function hostRadius(): string {
   }
 }
 
+/** D243：强制字体作用域属性（同时挂 html/body，保证覆盖出版方 class 规则）。 */
+const FORCE_FONT_ATTR = "data-d243-font-override";
+
+/** D243：忽略出版方字体时的正文覆盖；标题/强调/代码保留语义字重与等宽字体。 */
+function forcedPublisherFontCss(family: string): string {
+  const scope = `html[${FORCE_FONT_ATTR}] body[${FORCE_FONT_ATTR}]`;
+  return [
+    "/* D243: ignore publisher typography */",
+    `${scope} { font-family: ${family} !important; font-weight: 400 !important; }`,
+    `${scope} :where(p, div, span, a, li, dd, blockquote, figcaption, section, article, td, th, h1, h2, h3, h4, h5, h6, strong, b, em, i, sup, sub) { font-family: inherit !important; font-weight: inherit !important; }`,
+    `${scope} :where(strong, b) { font-weight: 700 !important; }`,
+    `${scope} :where(h1, h2, h3, h4, h5, h6, th) { font-weight: 600 !important; }`,
+    `${scope} :where(code, pre, kbd, samp) { font-family: ${READER_CODE_FONT_STACK} !important; font-weight: 400 !important; }`
+  ].join("\n");
+}
+
 /** 向章节 iframe 文档注入外观样式（每次 section 加载与外观变更时调用；flow 用于按模式微调媒体规则） */
-export function injectAppearanceStyle(doc: Document, a: ReaderAppearance, flow?: "scrolled" | "paged") {
+export function injectAppearanceStyle(doc: Document, a: ReaderAppearanceEx, flow?: "scrolled" | "paged") {
   void flow;
   const id = "kernel-appearance";
   let style = doc.getElementById(id) as HTMLStyleElement | null;
@@ -306,6 +331,12 @@ export function injectAppearanceStyle(doc: Document, a: ReaderAppearance, flow?:
   }
   const family = cssFontFamily(a.fontFamily);
   const isDefaultStack = family === cssFontFamily(DEFAULT_READER_FONT_STACK);
+  const force = a.ignorePublisherFont === true;
+  for (const el of [doc.documentElement, doc.body]) {
+    if (!el) continue;
+    if (force) el.setAttribute(FORCE_FONT_ATTR, "");
+    else el.removeAttribute(FORCE_FONT_ATTR);
+  }
   style.textContent = [
     proseCss(hostRadius()),
     `html { font-family: ${family} !important; font-size: ${a.fontSize}px !important; }`,
@@ -313,6 +344,7 @@ export function injectAppearanceStyle(doc: Document, a: ReaderAppearance, flow?:
     ...(isDefaultStack ? LANG_FONT_OVERRIDES.map(([sel, stack]) => `${sel.split(", ").map((lang) => `html${lang}`).join(", ")} { font-family: ${stack} !important; }`) : []),
     `body { background: ${a.bgColor} !important; color: ${a.fgColor} !important; line-height: ${a.lineHeight} !important; }`,
     // ruby 注音随正文颜色（CJK 排版观察项，L1 日文夹具覆盖）
-    "rt { color: inherit; }"
+    "rt { color: inherit; }",
+    ...(force ? [forcedPublisherFontCss(family)] : [])
   ].join("\n");
 }

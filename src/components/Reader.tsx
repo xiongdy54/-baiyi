@@ -2070,6 +2070,24 @@ export default function Reader({
                           />
                         )}
                       </div>
+                      <div className="reader-tool-menu-row" data-reader-row="ignorePublisherFont">
+                        <span className="reader-tool-menu-label mono">{T("忽略出版方字体")}</span>
+                        {engineKind === "pdf" ? (
+                          <button type="button" className="dd-btn" disabled title={T("PDF 为固定版式，不适用字体覆盖")}>
+                            {readerSettings.appearance.ignorePublisherFont === true ? T("开") : T("关")}
+                          </button>
+                        ) : (
+                          <Dropdown
+                            title={T("开启后正文使用应用字体与常规字重；出版方内嵌字体与字重不再生效，标题、强调与代码保留语义样式。")}
+                            value={readerSettings.appearance.ignorePublisherFont === true ? "on" : "off"}
+                            options={[
+                              { value: "off", label: T("关") },
+                              { value: "on", label: T("开") }
+                            ]}
+                            onChange={(v) => changeReaderAppearance({ ignorePublisherFont: v === "on" })}
+                          />
+                        )}
+                      </div>
                       {/* P3a：页边距（分页/对开的上下边带）——滚动模式不生效、PDF 不适用；
                           禁止「看着能调、调了没反应」（R3），禁用态必须带 title 说明 */}
                       {engineKind !== "pdf" && (
