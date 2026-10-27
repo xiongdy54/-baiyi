@@ -54,27 +54,22 @@ const PRESETS: Record<Exclude<ReaderTheme, "custom">, { bg: string; fg: string }
 };
 
 // 多语言默认字体栈：中日韩 + 拉丁全覆盖（阅读器须支持各种语言）。
-// D241 排序原则：①自带优质拉丁字形的 CJK 宋体（思源/Noto Serif CJK）居首——中西文同一家族、
-// 字重与 x 高度协调；②其后是拉丁书籍衬线（Iowan/Charter/Georgia），保证没有思源时西文不落进
-// 系统宋体的拉丁字形。
-// D242 修正兜底：去掉系统宋体/明朝体兜底（Songti SC / STSong / SimSun 与末尾 serif）。
-// macOS 的「宋体-简」默认只装粗体与特粗（常规与细体是按需下载的字体），按 400 字重匹配时整页
-// 正文落在粗体宋体上（用户 2026-10-27 反馈「中文几乎全部变成粗体，大片粗衬线看着累」）；
-// Windows 的 SimSun 点阵味重、Yu Mincho 是日文字形。没有思源/Noto 宋体时，中文改落各平台的
-// 系统黑体（苹方 / 冬青 / 微软雅黑 / 思源黑体），西文仍是书籍衬线——字重稳定在常规档。
-// D243：Noto Serif SC 排在 Source Han Serif SC 前——部分 Windows 只安装 Source Han Serif SC Heavy
-// （无常规字面），把思源放首位会让 400 正文命中 Heavy；Noto 的可变字体有常规档，优先命中。
+// D245：默认改无衬线（黑体）——用户 2026-10-27 反馈「衬线字体看着太累，无衬线更清晰」。
+// Noto Sans SC（常规 400 档，自带拉丁字形，中西文同族）居首，其后是思源黑体与各平台系统黑体
+// （苹方 / 冬青 / 微软雅黑）；宋体/明朝体不再进入默认栈，避免只装粗体宋字的平台整页变粗。
+// 出版方 EPUB / 文件自带的 font-family 仍然优先（默认栈只在书没有表态的地方兜底）；
+// 需要连出版方字体一起覆盖时用 `ignorePublisherFont` 开关。显式自选字体不变。
 export const DEFAULT_READER_FONT_STACK =
-  '"Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "Source Han Serif", "Iowan Old Style", Charter, Georgia, "Times New Roman", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif';
-/** D241：默认正文字号（17 → 18：桌面阅读距离下 18px 衬线体更从容，720px 版心≈每行 40 个全角字） */
+  '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif';
+/** D241：默认正文字号（17 → 18：桌面阅读距离下 18px 正文更从容，720px 版心≈每行 40 个全角字） */
 export const DEFAULT_READER_FONT_SIZE = 18;
 const READER_CODE_FONT_STACK =
   '"JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK SC", monospace';
-/** 默认字体栈下按语言换用对应地区字形（日文用 JP 明朝、繁体用 TC/HK、韩文用 KR）——仅在用户未自定义字体时注入 */
+/** 默认字体栈下按语言换用对应地区字形（D245：日文 / 繁体 / 韩文同样走黑体，仅换地区字形）——仅在用户未自定义字体时注入 */
 const LANG_FONT_OVERRIDES: [string, string][] = [
-  [':lang(ja)', '"Noto Serif CJK JP", "Noto Serif JP", "Source Han Serif JP", "Hiragino Mincho ProN", "Yu Mincho", "Iowan Old Style", Georgia, serif'],
-  [':lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)', '"Noto Serif CJK TC", "Noto Serif TC", "Noto Serif CJK HK", "Source Han Serif TC", "Iowan Old Style", Georgia, "PingFang TC", "Microsoft JhengHei UI", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif'],
-  [':lang(ko)', '"Noto Serif CJK KR", "Noto Serif KR", "Source Han Serif K", "AppleMyungjo", "Iowan Old Style", Georgia, Batang, serif']
+  [':lang(ja)', '"Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif'],
+  [':lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)', '"Noto Sans CJK TC", "Noto Sans TC", "Noto Sans CJK HK", "Source Han Sans TC", "PingFang TC", "Microsoft JhengHei UI", "Microsoft JhengHei", sans-serif'],
+  [':lang(ko)', '"Noto Sans CJK KR", "Noto Sans KR", "Source Han Sans K", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif']
 ];
 
 // ---------- D130 R3：新增字段归一（写侧宽松、读侧钳制封闭非法值域，同 growthFeedback 双侧归一先例） ----------
