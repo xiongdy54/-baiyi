@@ -1,6 +1,7 @@
 // @runtime: electron
 // D242 触控板惯性跨章回归：真实输入事件（webContents.sendInputEvent，带原生滚动）模拟两指滑动 + 惯性尾巴；
 // 运行：node scripts/run-tests.mjs d242-reader-inertia
+// 直跑：npx electron tests/d242-reader-inertia.test.cjs
 // 隔离：只创建临时 HTML 与合成章节，不打开应用，不读写用户数据。
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
@@ -102,6 +103,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   s = await js('state()');
   check('F 分页惯性跨章只进下一章', s.index === 1, s);
   check('F 分页跨章停在新章首页', s.page === 1, s);
+
+  // ── G：D246 换章落地后，真实滚轮节拍必须立刻在新章生效（不再被惯性吸收吞死）
+  await js(`setup('scrolled', 24)`);
+  await js(`pag.scrollToAnchor(1).then(()=>wait(250))`);
+  await sleep(300);
+  send(120); // 章尾明确发力 → 跨章
+  await sleep(60);
+  // 鼠标滚轮常见节拍（60ms）：落地前被吸收、落地后应立刻在新章内滚动
+  for (let i = 0; i < 10; i++) { send(120); await sleep(60); }
+  s = await js('state()');
+  check('G1 换章落地后滚轮立刻在新章内滚动（无输入死区）', s.index === 1 && s.start > 0, s);
+  check('G2 这一串滚轮只停在新章、不穿到下一章', s.index === 1, s);
 
   for (const r of out) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name} ${JSON.stringify(r.detail)}`);
   const failed = out.filter((r) => !r.pass).length;

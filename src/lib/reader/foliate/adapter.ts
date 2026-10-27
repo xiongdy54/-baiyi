@@ -237,6 +237,16 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   const imageHandlers = new Set<(image: ReaderImageRef) => void>();
   const docs = new Map<number, Document>();
   let lastRelocate: RelocateInfo | null = null;
+  // [D246] 滚动活动时间戳：滚动会让内容在指针下移动并触发 mousemove，逐次做 Range.getClientRects
+  // 会在滚动帧里强制几何计算。滚动后一小段时间内跳过标记命中，滚动停下并再次移动指针才恢复悬停。
+  let lastScrollAt = 0;
+  let scrollTracked: HTMLElement | null = null;
+  const trackScrollActivity = () => {
+    const renderer = view.renderer as unknown as HTMLElement | null;
+    if (!renderer || scrollTracked === renderer) return;
+    scrollTracked = renderer;
+    renderer.addEventListener("scroll", () => { lastScrollAt = performance.now(); }, { passive: true });
+  };
   /** 阅读透镜探针：最近一次 relocate 的可见起点 Range 与章节下标（getReadingProbe 用） */
   let lastProbe: { range: Range | null; index: number } | null = null;
   let appearance: ReaderAppearance | null = null;
@@ -531,13 +541,31 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       );
     });
     // v48.24 批3（§4）：文中留痕的进入/离开与点击（只报翻转；坐标换算与选区同规）
+    // [D246] 命中计算按帧合并，且滚动后 160ms 内直接跳过——滚动本身会触发 mousemove，
+    // 逐次对每条摘录做 getClientRects 会在滚动帧里反复强制几何。悬停浮层在滚动停下
+    // 且用户再次移动指针后恢复（滚动期间指针通常并未真正移动）。
+    let hoverRaf = 0;
     doc.addEventListener("mousemove", (ev: MouseEvent) => {
       if (markRanges.size === 0) return;
-      const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
-      const id = hit?.id ?? null;
-      if (id === hoveredMarkId) return;
-      hoveredMarkId = id;
-      markHoverHandlers.forEach((h) => h(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+      if (performance.now() - lastScrollAt < 160) {
+        if (hoveredMarkId !== null) {
+          hoveredMarkId = null;
+          markHoverHandlers.forEach((h) => h({ id: null, rect: null }));
+        }
+        return;
+      }
+      if (hoverRaf) return;
+      const clientX = ev.clientX;
+      const clientY = ev.clientY;
+      hoverRaf = requestAnimationFrame(() => {
+        hoverRaf = 0;
+        if (performance.now() - lastScrollAt < 160) return;
+        const hit = hitMarkIn(doc, clientX, clientY);
+        const id = hit?.id ?? null;
+        if (id === hoveredMarkId) return;
+        hoveredMarkId = id;
+        markHoverHandlers.forEach((h) => h(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+      });
     });
     doc.addEventListener("mouseleave", () => {
       if (hoveredMarkId === null) return;
@@ -711,6 +739,8 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       }
       // D93：落点为空壳章（含存量用户进度被旧 bug 卡在空章的情形）→ 前进到首个非空节
       await healEmptySectionLanding();
+      // [D246] renderer 在 init 里创建：挂上滚动活动监听（悬停命中节流用）
+      trackScrollActivity();
     },
 
     async goTo(target) {

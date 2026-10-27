@@ -180,9 +180,11 @@
   /* —— 阅读翻页（D241）：vendor/foliate-js/paginator.js 的 #motion() 每次翻页读取一次（统一管理）。
      滑行＝分页章内翻页（transform 合成层动画）与滚动模式整屏缓动；out＝跨章淡出；shift＝跨章入场位移。
      曲线＝ease-out 族的 quint 档（快起步、长尾缓停，翻书「落定」感），无回弹（与全应用缓动一族）。
-     reduce-motion / 应用动效关闭时壳层不挂 animated 属性，这组 Token 整体不生效。 —— */
+     reduce-motion / 应用动效关闭时壳层不挂 animated 属性，这组 Token 整体不生效。
+     D246：cross＝跨章淡入时长——换章是「内容已就位后的落位」，不跟整页滑行共用 420ms（太长拖沓）。 —— */
   --reader-turn-dur: 420ms;
   --reader-turn-out: 140ms;
+  --reader-cross-dur: 240ms;
   --reader-turn-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --reader-turn-out-ease: cubic-bezier(0.4, 0, 1, 1); /* 与 --ease-exit 同一条曲线（静态值，§5.1 求值层纪律） */
   --reader-turn-shift: 16px;
