@@ -49,9 +49,10 @@ const LEGACY_PRESETS = {
   dark: { bg: "#141414", fg: "#c9c9c9" }
 };
 // D241 有意偏离（登记于 GUIDE D241）：缺省字体栈重排扩充、缺省字号 17→18——仅影响**未设置**这两项的存量用户；
-// 快照随之更新为 D241 缺省值（显式设置过的字号/字体逐字段不变，由下方夹具 fontSize/fontFamily 行守护）。
+// D242 再修正中文回退栈：无思源/Noto 宋体时用常规黑体，避免仅安装粗体的系统宋体。
+// 快照随之更新为 D242 缺省值（显式设置过的字号/字体逐字段不变，由下方夹具 fontSize/fontFamily 行守护）。
 const LEGACY_FONT_STACK =
-  '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "Songti SC", STSong, "Hiragino Mincho ProN", "Yu Mincho", SimSun, serif';
+  '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Source Han Sans SC", "Noto Sans CJK SC", sans-serif';
 const LEGACY_DEFAULT_FONT_SIZE = 18;
 const LEGACY_DEFAULT_APPEARANCE = { theme: "paper" };
 function legacyResolveAppearance(s) {
@@ -81,7 +82,7 @@ try {
   console.error("打包 appearance.ts 失败（需要 devDependency esbuild）:", String(e).slice(0, 300));
   process.exit(1);
 }
-const { resolveAppearance, normalizeReaderSettings, clampMaxInlineSize, normalizeCustomThemes, normalizeTurnEffect, cssFontFamily, CUSTOM_THEMES_MAX, DEFAULT_READER_FONT_STACK } = mod;
+const { resolveAppearance, normalizeReaderSettings, clampMaxInlineSize, normalizeCustomThemes, normalizeTurnEffect, cssFontFamily, readerThemeTone, CUSTOM_THEMES_MAX, DEFAULT_READER_FONT_STACK } = mod;
 const projectLegacy = (resolved) => Object.fromEntries(LEGACY_FIELDS.map((k) => [k, resolved[k]]));
 
 console.log("== 1 maxInlineSize 钳制（缺省/非法→720；边界 480/1200 保留） ==");
@@ -204,11 +205,22 @@ check("margin -1 → 48", mg(-1) === 48, 48, mg(-1));
 
 console.log("== 6 字体栈清洗 cssFontFamily（D241） ==");
 check("默认栈逐项保留为多个字体名（不再被整串引成一个名字）", cssFontFamily(DEFAULT_READER_FONT_STACK).split(", ").length === DEFAULT_READER_FONT_STACK.split(",").length, DEFAULT_READER_FONT_STACK.split(",").length, cssFontFamily(DEFAULT_READER_FONT_STACK));
-check("默认栈首项＝\"Source Han Serif SC\"、末项＝serif 关键字", /^"Source Han Serif SC", /.test(cssFontFamily(DEFAULT_READER_FONT_STACK)) && /, serif$/.test(cssFontFamily(DEFAULT_READER_FONT_STACK)), "首/末项", cssFontFamily(DEFAULT_READER_FONT_STACK));
+check("默认栈首项＝\"Source Han Serif SC\"、末项＝sans-serif 关键字", /^"Source Han Serif SC", /.test(cssFontFamily(DEFAULT_READER_FONT_STACK)) && /, sans-serif$/.test(cssFontFamily(DEFAULT_READER_FONT_STACK)), "首/末项", cssFontFamily(DEFAULT_READER_FONT_STACK));
 check("单个无引号字体名加引号", cssFontFamily("霞鹜文楷") === '"霞鹜文楷"', '"霞鹜文楷"', cssFontFamily("霞鹜文楷"));
 check("单引号/双引号混写归一", cssFontFamily("'LXGW WenKai', \"Noto Serif\", sans-serif") === '"LXGW WenKai", "Noto Serif", sans-serif', '"LXGW WenKai", "Noto Serif", sans-serif', cssFontFamily("'LXGW WenKai', \"Noto Serif\", sans-serif"));
 check("剔除可逃逸声明的字符（; { } < >）", !/[;{}<>]/.test(cssFontFamily("Georgia; } body { color: red")), "无 ;{}<>", cssFontFamily("Georgia; } body { color: red"));
 check("空串 → serif", cssFontFamily("  ") === "serif", "serif", cssFontFamily("  "));
+
+console.log("== 7 D242 中文字体与阅读主题明暗档 ==");
+check("默认栈不含仅粗体/旧式中文宋体兜底", !/Songti|STSong|SimSun|Yu Mincho/.test(DEFAULT_READER_FONT_STACK), "无旧式宋体", DEFAULT_READER_FONT_STACK);
+for (const [theme, bgColor, expected] of [
+  ["paper", undefined, "light"], ["sepia", undefined, "light"], ["dark", undefined, "dark"],
+  ["custom", "#1f2a36", "dark"], ["custom", "#000000", "dark"], ["custom", "#FFFFFF", "light"],
+  ["custom", "#f4ecd8", "light"], ["custom", "invalid", "light"], ["custom", undefined, "light"]
+]) {
+  const actual = readerThemeTone({ theme, bgColor });
+  check(`主题 ${theme}/${bgColor ?? "缺省"} → ${expected}`, actual === expected, expected, actual);
+}
 
 fs.rmSync(path.join(__dirname, "tmp-d130"), { recursive: true, force: true });
 console.log(`\n==== SUMMARY ${pass}/${pass + fail} ====`);

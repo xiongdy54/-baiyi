@@ -39,6 +39,12 @@
       "date": "2026-10-27",
       "reason": "D241 阅读翻页精修与滚轮手势吸附",
       "change": "分页可中断 WAAPI 滑行、滚动 rAF 整屏缓动与上下文重叠、跨章淡出淡入；横向触控板跟手吸附、竖向滚轮手势锁存、章界惯性保护；动效参数读宿主 --reader-turn-* Token；销毁清理与书首书尾索引守卫。 animated 加入 observedAttributes，关闭时立即取消在途动画；滚动翻页 promise 等待 relocate/取消，输入锁提前释放以保留连按。"
+    },
+    {
+      "file": "paginator.js",
+      "date": "2026-10-27",
+      "reason": "D242 触控板惯性跨章后连跳与新章原生滚动",
+      "change": "wheel 事件时间戳按 iframe timeOrigin 归一，避免加载阻塞后的排队惯性被误判新手势；收紧重新发力阈值；滚动、竖向翻页和横滑跨章后吸收剩余惯性，静默或明确重新发力才释放；换章锁期间 preventDefault，保留 D241 淡入淡出。"
     }
   ],
   "upgradeProcedure": "见 AI_DEVELOPMENT_GUIDE.md §7 阅读内核升级规程（vendor 更新 → API 白名单核对 → L0/L1/L2 全绿 → L3 冒烟 → 签发新 ReaderEngineVersion）"

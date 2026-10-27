@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReadMarkdown from "./editor/ReadMarkdown";
 import "katex/dist/katex.min.css";
 import { isImeComposing } from "../lib/ime";
@@ -39,6 +39,7 @@ import {
   buildLocator,
   normalizeReaderSettings,
   normalizeTurnEffect,
+  readerThemeTone,
   resolveAppearance,
   type ContentPointerDownInfo,
   type ContentPointerUpInfo,
@@ -339,6 +340,30 @@ function ReaderThemeDropdown({
     </div>
   );
 }
+
+/** D242：阅读器挂载期间改指向阅读色派生值的应用 Token（[应用 Token, theme.css 中 --reader-surface-* 源名]） */
+const READER_SURFACE_TOKENS: ReadonlyArray<readonly [string, string]> = [
+  ["--paper", "paper"],
+  ["--ink", "ink"],
+  ["--grey-1", "grey-1"],
+  ["--grey-2", "grey-2"],
+  ["--grey-3", "grey-3"],
+  ["--text-primary", "ink"],
+  ["--text-secondary", "text-secondary"],
+  ["--text-helper", "grey-3"],
+  ["--text-placeholder", "text-placeholder"],
+  ["--border-subtle", "border-subtle"],
+  ["--border-strong", "border-strong"],
+  ["--band-line", "border-subtle"],
+  ["--border-card", "border-subtle"],
+  ["--border-input", "border-strong"],
+  ["--surface-canvas", "paper"],
+  ["--surface-chrome", "paper"],
+  ["--surface-card", "paper"],
+  ["--surface-card-fill", "grey-1"],
+  ["--surface-overlay", "overlay"],
+  ["--surface-input", "paper"]
+];
 
 export default function Reader({
   title,
@@ -854,13 +879,22 @@ export default function Reader({
     persistReaderSettings(next);
     void kernelRef.current?.setMode(mode);
   };
+  /** D242：应用明暗档跟随阅读主题（暗夜＝深；纸白/羊皮＝浅；自定义按背景亮度）。只在明暗档真变化时
+   *  切换——拖动自定义取色器不会反复触发整窗换档。 */
+  const syncAppTone = (next: ReaderSettings) => {
+    const tone = readerThemeTone(resolveAppearance(next));
+    const isDark = document.body.classList.contains("theme-dark");
+    if ((tone === "dark") !== isDark) onSwitchAppTheme?.(tone);
+  };
   const changeReaderTheme = (theme: ReaderAppearance["theme"]) => {
     const next = { ...readerSettingsRef.current, appearance: { ...readerSettingsRef.current.appearance, theme } };
     persistReaderSettings(next);
     kernelRef.current?.applyAppearance(resolveAppearance(next));
-    // 整体换色（v20.1）：暗夜=软件夜间模式；纸白/羊皮=浅色；自定义不动软件主题
+    // 整体换色（v20.1）：暗夜=软件夜间模式；纸白/羊皮=浅色。D242：自定义按背景亮度同样换档
+    // （此前「自定义不动软件主题」→ 深色自定义底配浅色档控件）。
     if (theme === "dark") onSwitchAppTheme?.("dark");
     else if (theme === "paper" || theme === "sepia") onSwitchAppTheme?.("light");
+    else syncAppTone(next);
   };
   // v29 PDF 专用缩放（foliate 引擎无此控件）
   const changeReaderZoom = (zoom: NonNullable<ReaderAppearance["zoom"]>) => {
@@ -878,6 +912,7 @@ export default function Reader({
     });
     persistReaderSettings(next);
     kernelRef.current?.applyAppearance(resolveAppearance(next));
+    if (next.appearance.theme === "custom" && (patch.bgColor !== undefined || patch.theme !== undefined)) syncAppTone(next);
   };
   /** P1 应用已存主题：写 custom 档 + 该套色值；**不回写**条目本身（重复「保存」才新增，避免别名漂移） */
   const applySavedTheme = (t: CustomThemeEntry) => {
@@ -915,6 +950,33 @@ export default function Reader({
     el.style.setProperty("--reader-fg", a.fgColor ?? "inherit");
     el.style.background = a.bgColor ?? "transparent";
   }, [engineMode, readerSettings]);
+
+  // D242：整个阅读界面随阅读主题同步——此前 --reader-bg/--reader-fg 只挂在滚动容器上，滚动容器之外
+  // （阅读页外框、顶栏、学习坞、浮层、按钮）仍取应用主题的纸白/灰阶 Token：暗夜下残留大片白、
+  // 羊皮下顶栏仍是白。阅读器挂载期间在 body 上发布阅读色，并把应用的表面/文字/描边 Token 改指向
+  // 由阅读色派生的一组值（派生算法在 theme.css 的 body.reader-surface 块；内联写在 body 上，
+  // 压过皮肤层的同名 Token）。离开阅读器即撤销，其它页面回到应用主题。
+  useLayoutEffect(() => {
+    if (!engineMode) return;
+    const body = document.body;
+    const a = resolveAppearance(readerSettings);
+    body.style.setProperty("--reader-bg", a.bgColor ?? "transparent");
+    body.style.setProperty("--reader-fg", a.fgColor ?? "inherit");
+    for (const [token, source] of READER_SURFACE_TOKENS) body.style.setProperty(token, `var(--reader-surface-${source})`);
+    body.classList.add("reader-surface");
+    body.dataset.readerTheme = a.theme;
+  }, [engineMode, readerSettings]);
+  useLayoutEffect(() => {
+    if (!engineMode) return;
+    return () => {
+      const body = document.body;
+      body.style.removeProperty("--reader-bg");
+      body.style.removeProperty("--reader-fg");
+      for (const [token] of READER_SURFACE_TOKENS) body.style.removeProperty(token);
+      body.classList.remove("reader-surface");
+      delete body.dataset.readerTheme;
+    };
+  }, [engineMode]);
 
   // D241：已打开的书也即时响应系统/应用动效偏好，不必改阅读设置或重新打开。
   useEffect(() => {

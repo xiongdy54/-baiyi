@@ -517,7 +517,7 @@ export class Paginator extends HTMLElement {
     #glide = null
     #tween = null
     #fx = null
-    #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null }
+    #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null, hold: false, holdAt: 0 }
     constructor() {
         super()
         this.#root.innerHTML = `<style>
@@ -635,19 +635,52 @@ export class Paginator extends HTMLElement {
         //   停顿或新一次发力才算下一次手势）；横向两指滑动＝页面跟手移动，越过阈值即吸附到相邻页，
         //   不足则回弹（Scroll Snap 手感）。②滚动——到达章尾/章首的那次惯性不翻章，停顿后再滚才续读，
         //   且用户一滚即接管正在进行的整屏缓动。
+        // [local-patch D242] 惯性跨章修复：①手势计时改用输入事件自身的时间戳（换算到宿主时间轴；
+        //   章节 iframe 各有 timeOrigin）——换章加载卡住主线程时，排队的惯性事件不再被误判为「停顿后
+        //   的新手势」；②「重新发力」判定收紧（幅度须陡增 2.2 倍且 ≥16px）——触控板惯性的抖动不再冒充
+        //   新手势；③换章一经触发即进入「惯性吸收」：直到这一串惯性停下（静默 ≥ WHEEL_QUIET）或用户
+        //   明显重新发力，滚轮事件一律吞掉——新章过渡结束后稳稳停在章首，不会被余下的惯性带走、
+        //   更不会一路穿到再下一章。
+        const WHEEL_QUIET = 160
+        const wheelTime = e => {
+            const local = performance.now()
+            const view = e.view
+            const origin = view && view !== window && view.performance
+                ? view.performance.timeOrigin : performance.timeOrigin
+            const t = origin + e.timeStamp - performance.timeOrigin
+            return e.timeStamp > 0 && Number.isFinite(t) && t <= local + 50 ? t : local
+        }
         const wheelTurn = (e) => {
             if (e.ctrlKey) return
             const W = this.#wheel
-            const now = performance.now()
+            const now = wheelTime(e)
             const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? this.size : 1
             const dx = e.deltaX * unit, dy = e.deltaY * unit
             const mag = Math.max(Math.abs(dx), Math.abs(dy))
-            const impulse = now - W.last > 160
-                || (mag > W.lastMag * 1.6 && mag > 6 && now - W.turnAt > 280)
-            W.last = now
+            const gap = now - W.last
+            const rising = mag >= 16 && mag > W.lastMag * 2.2 && now - W.turnAt > 320
+            W.last = Math.max(W.last, now)
             W.lastMag = mag
+            if (W.hold) {
+                // 静默（惯性已停）或吸收一段时间后明显重新发力，才算新手势
+                if (gap > WHEEL_QUIET || (rising && now - W.holdAt > 400)) {
+                    W.hold = false
+                    W.armed = false
+                    W.latched = false
+                    W.acc = 0
+                } else {
+                    if (e.cancelable) e.preventDefault()
+                    return
+                }
+            }
+            const impulse = gap > WHEEL_QUIET || rising
             if (this.scrolled) {
                 this.#stopTween()
+                if (this.#locked) {
+                    // 换章进行中：不让惯性滚动旧章或抢先滚动新章
+                    if (e.cancelable) e.preventDefault()
+                    return
+                }
                 if (Math.abs(dx) > Math.abs(dy)) return
                 const atEnd = dy > 0 && (this.viewSize - this.end) <= 2
                 const atStart = dy < 0 && this.start <= 2
@@ -666,6 +699,9 @@ export class Paginator extends HTMLElement {
                 W.armed = false
                 W.acc = 0
                 W.turnAt = now
+                W.hold = true
+                W.holdAt = now
+                if (e.cancelable) e.preventDefault()
                 if (dy > 0) this.next()
                 else this.prev()
                 return
@@ -686,6 +722,11 @@ export class Paginator extends HTMLElement {
             W.acc = 0
             W.latched = true
             W.turnAt = now
+            // 分页模式下这一下若要跨章，同样吸收余下惯性（新章停在首页 / 上一章停在末页）
+            if (dir > 0 ? this.page >= this.pages - 2 : this.page <= 1) {
+                W.hold = true
+                W.holdAt = now
+            }
             if (dir > 0) this.next()
             else this.prev()
         }
@@ -1406,8 +1447,12 @@ export class Paginator extends HTMLElement {
         const page = d.page + dir
         if (dir && page > 0 && page < this.pages - 1)
             return this.#scrollToPage(page, 'snap')
-        if (dir > 0 && !this.atEnd) return this.next()
-        if (dir < 0 && !this.atStart) return this.prev()
+        // [local-patch D242] 横滑跨章同样吸收余下惯性（新章停在章首/上一章停在章末）
+        if ((dir > 0 && !this.atEnd) || (dir < 0 && !this.atStart)) {
+            W.hold = true
+            W.holdAt = W.last
+            return dir > 0 ? this.next() : this.prev()
+        }
         return this.#scrollToPage(d.page, 'snap')
     }
     get atStart() {
