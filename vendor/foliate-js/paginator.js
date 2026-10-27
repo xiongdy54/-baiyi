@@ -508,6 +508,10 @@ export class Paginator extends HTMLElement {
     #mediaQuery = matchMedia('(prefers-color-scheme: dark)')
     #mediaQueryListener
     #scrollBounds
+    // [local-patch D246] 滚动几何缓存：容器尺寸只在 render/排版时读一次，视口尺寸在换视图/expand 时失效；
+    // 滚轮事件（触控板每秒上百个）只读 scrollTop，不再逐事件触发 getBoundingClientRect 与合成器同步。
+    #sizeCache = null
+    #viewSizeCache = null
     #touchState
     #touchScrolled
     #lastVisibleRange
@@ -517,7 +521,7 @@ export class Paginator extends HTMLElement {
     #glide = null
     #tween = null
     #fx = null
-    #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null, hold: false, holdAt: 0 }
+    #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null, hold: false, holdAt: 0, landedAt: null, magLog: [] }
     constructor() {
         super()
         this.#root.innerHTML = `<style>
@@ -642,6 +646,15 @@ export class Paginator extends HTMLElement {
         //   明显重新发力，滚轮事件一律吞掉——新章过渡结束后稳稳停在章首，不会被余下的惯性带走、
         //   更不会一路穿到再下一章。
         const WHEEL_QUIET = 160
+        // [local-patch D246] 换章落地后的「重新接管」判定：新章落地 ≥300ms 后，幅度 ≥96px 的真实
+        // 滚轮档位（Windows 一档通常 100/120px）且与约 200ms 前幅度相比没有衰减
+        //（惯性尾巴在 300ms 内必然明显变小）视为新手势，立即交还输入；惯性尾巴继续按 D242 吸收。
+        // 未落地（加载中/失败）时给 1600ms 上限；已落地给 5000ms 安全上限，避免任何情况下永久吞输入。
+        const HOLD_NOTCH_GAP = 24
+        const HOLD_NOTCH_MAG = 96
+        const HOLD_LANDED_DWELL = 300
+        const HOLD_MAX_LOADING = 1600
+        const HOLD_MAX_LANDED = 5000
         const wheelTime = e => {
             const local = performance.now()
             const view = e.view
@@ -661,10 +674,24 @@ export class Paginator extends HTMLElement {
             const rising = mag >= 16 && mag > W.lastMag * 2.2 && now - W.turnAt > 320
             W.last = Math.max(W.last, now)
             W.lastMag = mag
+            // [local-patch D246] 近 400ms 幅度轨迹：用「约 200ms 前」的幅度判断这一串滚动是否在持续衰减。
+            // 惯性尾巴随时间衰减（无论设备回报频率是 16ms 还是 31ms，200ms 内都会明显变小）；
+            // 真实滚轮档位维持幅度，新的一次滑动幅度上升——二者都高于参考值。
+            W.magLog.push([now, mag])
+            while (W.magLog.length && now - W.magLog[0][0] > 400) W.magLog.shift()
             if (W.hold) {
-                // 静默（惯性已停）或吸收一段时间后明显重新发力，才算新手势
-                if (gap > WHEEL_QUIET || (rising && now - W.holdAt > 400)) {
+                const ref = W.magLog.find(([t]) => now - t <= 200)
+                const sustained = !!ref && now - ref[0] >= 150 && mag >= HOLD_NOTCH_MAG && mag >= ref[1] * 0.9
+                // 静默（惯性已停）、新章落地后的持续滚轮档位/重新发力，或吸收超时，才算新手势
+                const notch = W.landedAt != null
+                    && now - W.landedAt > HOLD_LANDED_DWELL
+                    && gap >= HOLD_NOTCH_GAP && sustained
+                const renewed = rising && now - W.holdAt > 400
+                const cap = W.landedAt == null ? HOLD_MAX_LOADING : HOLD_MAX_LANDED
+                if (gap > WHEEL_QUIET || notch || renewed || now - W.holdAt > cap) {
                     W.hold = false
+                    W.landedAt = null
+                    W.magLog = []
                     W.armed = false
                     W.latched = false
                     W.acc = 0
@@ -701,6 +728,7 @@ export class Paginator extends HTMLElement {
                 W.turnAt = now
                 W.hold = true
                 W.holdAt = now
+                W.landedAt = null
                 if (e.cancelable) e.preventDefault()
                 if (dy > 0) this.next()
                 else this.prev()
@@ -726,6 +754,7 @@ export class Paginator extends HTMLElement {
             if (dir > 0 ? this.page >= this.pages - 2 : this.page <= 1) {
                 W.hold = true
                 W.holdAt = now
+                W.landedAt = null
             }
             if (dir > 0) this.next()
             else this.prev()
@@ -847,13 +876,19 @@ export class Paginator extends HTMLElement {
         })
     }
     #createView() {
+        // [local-patch D246] 换视图即作废视口尺寸缓存；真实尺寸在 load/expand 后写入
+        this.#viewSizeCache = null
         if (this.#view) {
             this.#view.destroy()
             this.#container.removeChild(this.#view.element)
         }
         this.#view = new View({
             container: this,
-            onExpand: () => this.#scrollToAnchor(this.#anchor),
+            onExpand: () => {
+                // [local-patch D246] 内容高度变化（图片/字体/排版完成）后需重新量视口尺寸
+                this.#viewSizeCache = null
+                this.#scrollToAnchor(this.#anchor)
+            },
         })
         this.#container.append(this.#view.element)
         return this.#view
@@ -869,6 +904,9 @@ export class Paginator extends HTMLElement {
 
         const { width, height } = this.#container.getBoundingClientRect()
         const size = vertical ? height : width
+        // [local-patch D246] 这里已经量过容器尺寸，写入缓存供滚轮/翻页读取
+        // （缓存沿滚动轴那一维：横向滚动取 height、纵向/竖排取 width，与 sideProp 同一口径）
+        this.#sizeCache = this.sideProp === 'width' ? width : height
 
         const style = getComputedStyle(this.#top)
         const maxInlineSize = parseFloat(style.getPropertyValue('--_max-inline-size'))
@@ -935,6 +973,8 @@ export class Paginator extends HTMLElement {
         return { height, width, margin, gap, columnWidth }
     }
     render() {
+        // [local-patch D246] 容器尺寸可能随窗口/栏宽变化；排版前作废缓存
+        this.#sizeCache = null
         if (!this.#view) return
         this.#view.render(this.#beforeRender({
             vertical: this.#vertical,
@@ -956,10 +996,14 @@ export class Paginator extends HTMLElement {
             : scrolled ? 'height' : 'width'
     }
     get size() {
-        return this.#container.getBoundingClientRect()[this.sideProp]
+        if (this.#sizeCache == null)
+            this.#sizeCache = this.#container.getBoundingClientRect()[this.sideProp]
+        return this.#sizeCache
     }
     get viewSize() {
-        return this.#view.element.getBoundingClientRect()[this.sideProp]
+        if (this.#viewSizeCache == null)
+            this.#viewSizeCache = this.#view?.element.getBoundingClientRect()[this.sideProp] ?? 0
+        return this.#viewSizeCache
     }
     get start() {
         return Math.abs(this.#container[this.scrollProp])
@@ -1296,6 +1340,8 @@ export class Paginator extends HTMLElement {
         return {
             turn: readTime(v('--reader-turn-dur'), 420),
             out: readTime(v('--reader-turn-out'), 140),
+            // [local-patch D246] 跨章淡入独立时长（Token 缺席时兜底 240ms）
+            cross: readTime(v('--reader-cross-dur'), 240),
             ease,
             easeFn: parseEasing(ease),
             outEase: v('--reader-turn-out-ease') || 'cubic-bezier(0.4, 0, 1, 1)',
@@ -1401,13 +1447,13 @@ export class Paginator extends HTMLElement {
             this.#fx = null
             return
         }
-        const { turn, ease, shift } = this.#motion()
+        const { cross, ease, shift } = this.#motion()
         const [axis, sign] = this.#fxAxis()
         const old = this.#fx
         const anim = this.#container.animate([
             { opacity: 0, transform: dir ? `translate${axis}(${dir * sign * shift}px)` : 'none' },
             { opacity: 1, transform: 'none' },
-        ], { duration: Math.max(0, turn), easing: ease })
+        ], { duration: Math.max(0, cross), easing: ease })
         old?.cancel()
         this.#fx = anim
         anim.finished.then(() => { if (this.#fx === anim) this.#fx = null }, () => {})
@@ -1451,6 +1497,7 @@ export class Paginator extends HTMLElement {
         if ((dir > 0 && !this.atEnd) || (dir < 0 && !this.atStart)) {
             W.hold = true
             W.holdAt = W.last
+            W.landedAt = null
             return dir > 0 ? this.next() : this.prev()
         }
         return this.#scrollToPage(d.page, 'snap')
@@ -1496,9 +1543,13 @@ export class Paginator extends HTMLElement {
                     })
                 } finally {
                     if (fx) this.#sectionIn(dir)
+                    // [local-patch D246] 新章已就位（内容、滚动位置都可交互）：记下落地时刻，
+                    // 让滚轮手势的惯性吸收据此尽快交还输入；页面已可滚动，不再额外锁 100ms。
+                    this.#wheel.landedAt = performance.now()
                 }
             }
-            if (shouldGo || !this.hasAttribute('animated')) await wait(100)
+            // 分页保留 100ms 输入锁（一次手势不连翻两页）；滚动模式落地即可滚动。
+            if ((shouldGo || !this.hasAttribute('animated')) && !this.scrolled) await wait(100)
         } finally {
             if (ownsLock) this.#locked = false
         }

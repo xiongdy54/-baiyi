@@ -71,8 +71,9 @@
 
 | Token | 默认 | 用途 |
 | --- | --- | --- |
-| `--reader-turn-dur` | 420ms | 章内滑行、整屏缓动、跨章淡入 |
+| `--reader-turn-dur` | 420ms | 章内滑行、整屏缓动 |
 | `--reader-turn-out` | 140ms | 跨章淡出 |
+| `--reader-cross-dur` | 240ms | 跨章淡入（D246：内容已就位后的落位，不跟整页滑行共用 420ms） |
 | `--reader-turn-ease` | cubic-bezier(0.22, 1, 0.36, 1) | 快起步、长尾缓停，无回弹 |
 | `--reader-turn-out-ease` | cubic-bezier(0.4, 0, 1, 1) | 跨章退场，与 `--ease-exit` 同曲线 |
 | `--reader-turn-shift` | 16px | 跨章入场位移；退场用半幅 |

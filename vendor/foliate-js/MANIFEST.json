@@ -45,6 +45,12 @@
       "date": "2026-10-27",
       "reason": "D242 触控板惯性跨章后连跳与新章原生滚动",
       "change": "wheel 事件时间戳按 iframe timeOrigin 归一，避免加载阻塞后的排队惯性被误判新手势；收紧重新发力阈值；滚动、竖向翻页和横滑跨章后吸收剩余惯性，静默或明确重新发力才释放；换章锁期间 preventDefault，保留 D241 淡入淡出。"
+    },
+    {
+      "file": "paginator.js",
+      "date": "2026-10-27",
+      "reason": "D246 换章后输入死区、滚轮路径布局读取与跨章淡入时长",
+      "change": "wheel 惯性吸收增加落地时刻 landedAt 与「新手势」判定（落地 ≥300ms 后，幅度 ≥96px 且与约 200ms 前幅度相比未衰减即释放；惯性尾巴继续吸收），未落地 1600ms / 已落地 5000ms 安全上限；滚动模式换章落地即释放 #locked（分页保留 100ms）；跨章淡入改读 --reader-cross-dur（240ms 兜底）；size/viewSize 改为 render / beforeRender / createView / expand 失效的缓存，滚轮事件不再逐次 getBoundingClientRect。"
     }
   ],
   "upgradeProcedure": "见 AI_DEVELOPMENT_GUIDE.md §7 阅读内核升级规程（vendor 更新 → API 白名单核对 → L0/L1/L2 全绿 → L3 冒烟 → 签发新 ReaderEngineVersion）"

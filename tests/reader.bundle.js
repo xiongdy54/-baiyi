@@ -4928,6 +4928,10 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         #mediaQuery = matchMedia("(prefers-color-scheme: dark)");
         #mediaQueryListener;
         #scrollBounds;
+        // [local-patch D246] 滚动几何缓存：容器尺寸只在 render/排版时读一次，视口尺寸在换视图/expand 时失效；
+        // 滚轮事件（触控板每秒上百个）只读 scrollTop，不再逐事件触发 getBoundingClientRect 与合成器同步。
+        #sizeCache = null;
+        #viewSizeCache = null;
         #touchState;
         #touchScrolled;
         #lastVisibleRange;
@@ -4937,7 +4941,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
         #glide = null;
         #tween = null;
         #fx = null;
-        #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null };
+        #wheel = { last: 0, lastMag: 0, acc: 0, latched: false, turnAt: 0, armed: false, drag: null, idle: null, hold: false, holdAt: 0, landedAt: null, magLog: [] };
         constructor() {
           super();
           this.#root.innerHTML = `<style>
@@ -5047,18 +5051,57 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           this.#footer = this.#root.getElementById("footer");
           this.#observer.observe(this.#container);
           this.#container.addEventListener("scroll", () => this.dispatchEvent(new Event("scroll")));
+          const WHEEL_QUIET = 160;
+          const HOLD_NOTCH_GAP = 24;
+          const HOLD_NOTCH_MAG = 96;
+          const HOLD_LANDED_DWELL = 300;
+          const HOLD_MAX_LOADING = 1600;
+          const HOLD_MAX_LANDED = 5e3;
+          const wheelTime = (e3) => {
+            const local = performance.now();
+            const view = e3.view;
+            const origin = view && view !== window && view.performance ? view.performance.timeOrigin : performance.timeOrigin;
+            const t3 = origin + e3.timeStamp - performance.timeOrigin;
+            return e3.timeStamp > 0 && Number.isFinite(t3) && t3 <= local + 50 ? t3 : local;
+          };
           const wheelTurn = (e3) => {
             if (e3.ctrlKey) return;
             const W2 = this.#wheel;
-            const now = performance.now();
+            const now = wheelTime(e3);
             const unit = e3.deltaMode === 1 ? 16 : e3.deltaMode === 2 ? this.size : 1;
             const dx = e3.deltaX * unit, dy = e3.deltaY * unit;
             const mag = Math.max(Math.abs(dx), Math.abs(dy));
-            const impulse = now - W2.last > 160 || mag > W2.lastMag * 1.6 && mag > 6 && now - W2.turnAt > 280;
-            W2.last = now;
+            const gap = now - W2.last;
+            const rising = mag >= 16 && mag > W2.lastMag * 2.2 && now - W2.turnAt > 320;
+            W2.last = Math.max(W2.last, now);
             W2.lastMag = mag;
+            W2.magLog.push([now, mag]);
+            while (W2.magLog.length && now - W2.magLog[0][0] > 400) W2.magLog.shift();
+            if (W2.hold) {
+              const ref = W2.magLog.find(([t3]) => now - t3 <= 200);
+              const sustained = !!ref && now - ref[0] >= 150 && mag >= HOLD_NOTCH_MAG && mag >= ref[1] * 0.9;
+              const notch = W2.landedAt != null && now - W2.landedAt > HOLD_LANDED_DWELL && gap >= HOLD_NOTCH_GAP && sustained;
+              const renewed = rising && now - W2.holdAt > 400;
+              const cap = W2.landedAt == null ? HOLD_MAX_LOADING : HOLD_MAX_LANDED;
+              if (gap > WHEEL_QUIET || notch || renewed || now - W2.holdAt > cap) {
+                W2.hold = false;
+                W2.landedAt = null;
+                W2.magLog = [];
+                W2.armed = false;
+                W2.latched = false;
+                W2.acc = 0;
+              } else {
+                if (e3.cancelable) e3.preventDefault();
+                return;
+              }
+            }
+            const impulse = gap > WHEEL_QUIET || rising;
             if (this.scrolled) {
               this.#stopTween();
+              if (this.#locked) {
+                if (e3.cancelable) e3.preventDefault();
+                return;
+              }
               if (Math.abs(dx) > Math.abs(dy)) return;
               const atEnd = dy > 0 && this.viewSize - this.end <= 2;
               const atStart = dy < 0 && this.start <= 2;
@@ -5077,6 +5120,10 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
               W2.armed = false;
               W2.acc = 0;
               W2.turnAt = now;
+              W2.hold = true;
+              W2.holdAt = now;
+              W2.landedAt = null;
+              if (e3.cancelable) e3.preventDefault();
               if (dy > 0) this.next();
               else this.prev();
               return;
@@ -5097,6 +5144,11 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
             W2.acc = 0;
             W2.latched = true;
             W2.turnAt = now;
+            if (dir > 0 ? this.page >= this.pages - 2 : this.page <= 1) {
+              W2.hold = true;
+              W2.holdAt = now;
+              W2.landedAt = null;
+            }
             if (dir > 0) this.next();
             else this.prev();
           };
@@ -5204,13 +5256,17 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           });
         }
         #createView() {
+          this.#viewSizeCache = null;
           if (this.#view) {
             this.#view.destroy();
             this.#container.removeChild(this.#view.element);
           }
           this.#view = new View({
             container: this,
-            onExpand: () => this.#scrollToAnchor(this.#anchor)
+            onExpand: () => {
+              this.#viewSizeCache = null;
+              this.#scrollToAnchor(this.#anchor);
+            }
           });
           this.#container.append(this.#view.element);
           return this.#view;
@@ -5222,6 +5278,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           this.#background.style.background = background;
           const { width, height } = this.#container.getBoundingClientRect();
           const size = vertical ? height : width;
+          this.#sizeCache = this.sideProp === "width" ? width : height;
           const style2 = getComputedStyle(this.#top);
           const maxInlineSize = parseFloat(style2.getPropertyValue("--_max-inline-size"));
           const maxColumnCount = parseInt(style2.getPropertyValue("--_max-column-count-spread"));
@@ -5260,6 +5317,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           return { height, width, margin, gap, columnWidth };
         }
         render() {
+          this.#sizeCache = null;
           if (!this.#view) return;
           this.#view.render(this.#beforeRender({
             vertical: this.#vertical,
@@ -5279,10 +5337,14 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           return this.#vertical ? scrolled ? "width" : "height" : scrolled ? "height" : "width";
         }
         get size() {
-          return this.#container.getBoundingClientRect()[this.sideProp];
+          if (this.#sizeCache == null)
+            this.#sizeCache = this.#container.getBoundingClientRect()[this.sideProp];
+          return this.#sizeCache;
         }
         get viewSize() {
-          return this.#view.element.getBoundingClientRect()[this.sideProp];
+          if (this.#viewSizeCache == null)
+            this.#viewSizeCache = this.#view?.element.getBoundingClientRect()[this.sideProp] ?? 0;
+          return this.#viewSizeCache;
         }
         get start() {
           return Math.abs(this.#container[this.scrollProp]);
@@ -5600,6 +5662,8 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           return {
             turn: readTime(v3("--reader-turn-dur"), 420),
             out: readTime(v3("--reader-turn-out"), 140),
+            // [local-patch D246] 跨章淡入独立时长（Token 缺席时兜底 240ms）
+            cross: readTime(v3("--reader-cross-dur"), 240),
             ease,
             easeFn: parseEasing(ease),
             outEase: v3("--reader-turn-out-ease") || "cubic-bezier(0.4, 0, 1, 1)",
@@ -5716,13 +5780,13 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
             this.#fx = null;
             return;
           }
-          const { turn, ease, shift } = this.#motion();
+          const { cross, ease, shift } = this.#motion();
           const [axis, sign] = this.#fxAxis();
           const old = this.#fx;
           const anim = this.#container.animate([
             { opacity: 0, transform: dir ? `translate${axis}(${dir * sign * shift}px)` : "none" },
             { opacity: 1, transform: "none" }
-          ], { duration: Math.max(0, turn), easing: ease });
+          ], { duration: Math.max(0, cross), easing: ease });
           old?.cancel();
           this.#fx = anim;
           anim.finished.then(() => {
@@ -5763,8 +5827,12 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           const page = d2.page + dir;
           if (dir && page > 0 && page < this.pages - 1)
             return this.#scrollToPage(page, "snap");
-          if (dir > 0 && !this.atEnd) return this.next();
-          if (dir < 0 && !this.atStart) return this.prev();
+          if (dir > 0 && !this.atEnd || dir < 0 && !this.atStart) {
+            W2.hold = true;
+            W2.holdAt = W2.last;
+            W2.landedAt = null;
+            return dir > 0 ? this.next() : this.prev();
+          }
           return this.#scrollToPage(d2.page, "snap");
         }
         get atStart() {
@@ -5804,9 +5872,10 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
                 });
               } finally {
                 if (fx) this.#sectionIn(dir);
+                this.#wheel.landedAt = performance.now();
               }
             }
-            if (shouldGo || !this.hasAttribute("animated")) await wait(100);
+            if ((shouldGo || !this.hasAttribute("animated")) && !this.scrolled) await wait(100);
           } finally {
             if (ownsLock) this.#locked = false;
           }
@@ -7230,11 +7299,12 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
   }
 
   // src/lib/reader/foliate/appearance.ts
-  var DEFAULT_READER_FONT_STACK = '"Source Han Serif SC", "Noto Serif CJK SC", "Source Han Serif", "Noto Serif SC", "Iowan Old Style", Charter, Georgia, "Times New Roman", "Songti SC", STSong, "Hiragino Mincho ProN", "Yu Mincho", SimSun, serif';
+  var DEFAULT_READER_FONT_STACK = '"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif';
+  var READER_CODE_FONT_STACK = '"JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK SC", monospace';
   var LANG_FONT_OVERRIDES = [
-    [":lang(ja)", '"Source Han Serif JP", "Noto Serif CJK JP", "Hiragino Mincho ProN", "Yu Mincho", "Iowan Old Style", Georgia, serif'],
-    [":lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)", '"Source Han Serif TC", "Noto Serif CJK TC", "Noto Serif CJK HK", "Songti TC", "Iowan Old Style", Georgia, PMingLiU, serif'],
-    [":lang(ko)", '"Source Han Serif K", "Noto Serif CJK KR", "AppleMyungjo", "Iowan Old Style", Georgia, Batang, serif']
+    [":lang(ja)", '"Noto Sans CJK JP", "Noto Sans JP", "Source Han Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", sans-serif'],
+    [":lang(zh-Hant), :lang(zh-TW), :lang(zh-HK), :lang(zh-MO)", '"Noto Sans CJK TC", "Noto Sans TC", "Noto Sans CJK HK", "Source Han Sans TC", "PingFang TC", "Microsoft JhengHei UI", "Microsoft JhengHei", sans-serif'],
+    [":lang(ko)", '"Noto Sans CJK KR", "Noto Sans KR", "Source Han Sans K", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif']
   ];
   function fixSvgAspect(doc) {
     for (const svg of Array.from(doc.querySelectorAll("svg"))) {
@@ -7286,7 +7356,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       // 链接：随正文色 + 细下划线
       `:where(a) { color: inherit; text-decoration-line: underline; text-decoration-thickness: 1px; text-decoration-color: ${line(32)}; text-underline-offset: 0.22em; }`,
       // 代码
-      ':where(code, kbd, samp, pre) { font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, Consolas, "Liberation Mono", "Noto Sans Mono CJK SC", monospace; font-size: 0.86em; font-variant-ligatures: none; }',
+      ":where(code, kbd, samp, pre) { font-family: " + READER_CODE_FONT_STACK + "; font-size: 0.86em; font-variant-ligatures: none; }",
       `:where(:not(pre) > code) { padding: 0.1em 0.36em; border-radius: ${radius}; background: ${line(7)}; }`,
       `:where(pre) { margin: 1.2em 0; padding: 0.9em 1.1em; line-height: 1.6; border-radius: ${radius}; background: ${line(5)}; white-space: pre-wrap; overflow-wrap: anywhere; }`,
       ":where(pre code) { font-size: 1em; padding: 0; background: none; }",
@@ -7310,6 +7380,18 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       return "0";
     }
   }
+  var FORCE_FONT_ATTR = "data-d243-font-override";
+  function forcedPublisherFontCss(family) {
+    const scope = `html[${FORCE_FONT_ATTR}] body[${FORCE_FONT_ATTR}]`;
+    return [
+      "/* D243: ignore publisher typography */",
+      `${scope} { font-family: ${family} !important; font-weight: 400 !important; }`,
+      `${scope} :where(p, div, span, a, li, dd, blockquote, figcaption, section, article, td, th, h1, h2, h3, h4, h5, h6, strong, b, em, i, sup, sub) { font-family: inherit !important; font-weight: inherit !important; }`,
+      `${scope} :where(strong, b) { font-weight: 700 !important; }`,
+      `${scope} :where(h1, h2, h3, h4, h5, h6, th) { font-weight: 600 !important; }`,
+      `${scope} :where(code, pre, kbd, samp) { font-family: ${READER_CODE_FONT_STACK} !important; font-weight: 400 !important; }`
+    ].join("\n");
+  }
   function injectAppearanceStyle(doc, a3, flow) {
     void flow;
     const id = "kernel-appearance";
@@ -7321,6 +7403,12 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     }
     const family = cssFontFamily(a3.fontFamily);
     const isDefaultStack = family === cssFontFamily(DEFAULT_READER_FONT_STACK);
+    const force = a3.ignorePublisherFont === true;
+    for (const el of [doc.documentElement, doc.body]) {
+      if (!el) continue;
+      if (force) el.setAttribute(FORCE_FONT_ATTR, "");
+      else el.removeAttribute(FORCE_FONT_ATTR);
+    }
     style2.textContent = [
       proseCss(hostRadius()),
       `html { font-family: ${family} !important; font-size: ${a3.fontSize}px !important; }`,
@@ -7328,7 +7416,8 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
       ...isDefaultStack ? LANG_FONT_OVERRIDES.map(([sel, stack]) => `${sel.split(", ").map((lang) => `html${lang}`).join(", ")} { font-family: ${stack} !important; }`) : [],
       `body { background: ${a3.bgColor} !important; color: ${a3.fgColor} !important; line-height: ${a3.lineHeight} !important; }`,
       // ruby 注音随正文颜色（CJK 排版观察项，L1 日文夹具覆盖）
-      "rt { color: inherit; }"
+      "rt { color: inherit; }",
+      ...force ? [forcedPublisherFontCss(family)] : []
     ].join("\n");
   }
 
@@ -7691,6 +7780,16 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
     const imageHandlers = /* @__PURE__ */ new Set();
     const docs = /* @__PURE__ */ new Map();
     let lastRelocate = null;
+    let lastScrollAt = 0;
+    let scrollTracked = null;
+    const trackScrollActivity = () => {
+      const renderer = view.renderer;
+      if (!renderer || scrollTracked === renderer) return;
+      scrollTracked = renderer;
+      renderer.addEventListener("scroll", () => {
+        lastScrollAt = performance.now();
+      }, { passive: true });
+    };
     let lastProbe = null;
     let appearance = null;
     let currentFlow = "scrolled";
@@ -7926,13 +8025,28 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           (h3) => h3({ ...pos, ctrlKey: ev.ctrlKey, altKey: ev.altKey, shiftKey: ev.shiftKey, metaKey: ev.metaKey })
         );
       });
+      let hoverRaf = 0;
       doc.addEventListener("mousemove", (ev) => {
         if (markRanges.size === 0) return;
-        const hit = hitMarkIn(doc, ev.clientX, ev.clientY);
-        const id = hit?.id ?? null;
-        if (id === hoveredMarkId) return;
-        hoveredMarkId = id;
-        markHoverHandlers.forEach((h3) => h3(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+        if (performance.now() - lastScrollAt < 160) {
+          if (hoveredMarkId !== null) {
+            hoveredMarkId = null;
+            markHoverHandlers.forEach((h3) => h3({ id: null, rect: null }));
+          }
+          return;
+        }
+        if (hoverRaf) return;
+        const clientX = ev.clientX;
+        const clientY = ev.clientY;
+        hoverRaf = requestAnimationFrame(() => {
+          hoverRaf = 0;
+          if (performance.now() - lastScrollAt < 160) return;
+          const hit = hitMarkIn(doc, clientX, clientY);
+          const id = hit?.id ?? null;
+          if (id === hoveredMarkId) return;
+          hoveredMarkId = id;
+          markHoverHandlers.forEach((h3) => h3(hit ? { id: hit.id, rect: hit.rect } : { id: null, rect: null }));
+        });
       });
       doc.addEventListener("mouseleave", () => {
         if (hoveredMarkId === null) return;
@@ -8065,6 +8179,7 @@ body:not(.notesBodyType) > .title, body:not(.notesBodyType) > .epigraph {
           if (init?.location?.fraction != null) await view.goToFraction(init.location.fraction);
         }
         await healEmptySectionLanding();
+        trackScrollActivity();
       },
       async goTo(target) {
         if ("chapterIndex" in target) {
