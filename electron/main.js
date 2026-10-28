@@ -1067,7 +1067,14 @@ const backupOpts = () => ({
   // WAL 下裸 readFileSync 可能缺最近提交且无事务一致性保证。dictionary.db 950MB 级为页拷贝，
   // 速度与内存特性优于旧裸读（learner.db 派生数据不进备份清单）。
   snapshotLibrary: (dest) => dbModule.snapshotTo(dest),
-  snapshotDict: (dest) => dictDb.snapshotTo(dest)
+  snapshotDict: (dest) => dictDb.snapshotTo(dest),
+  // D248（T13，§12.1）：behavior.db 顺序快照——先 flush 再 db.backup；meta 记 schemaVersion/
+  // dataEpoch/counts 与快照时点（主库与行为库不承诺同一时点，偏差由 backup 侧记 crossDbSkewMs）
+  snapshotBehavior: (dest) => behavior.snapshotTo(dest),
+  behaviorDbFile: path.join(app.getPath("userData"), "behavior.db"),
+  behaviorSchemaVersion: (behavior.getStatus().db || {}).schemaVersion ?? null,
+  behaviorDataEpoch: (behavior.getPolicy() || {}).dataEpoch || null,
+  behaviorCounts: behavior.backupCounts()
 });
 // D206：最近一次启动期自动备份的结局（内存态，设置页通知框经 backup:info 消费；
 // 不落盘——重启后由下一轮自动备份重新产生，未产生期间以磁盘备份年龄兜底）
@@ -1144,16 +1151,31 @@ ipcMain.handle("backup:restore", async (_e, file) => {
 ipcMain.handle("backup:meta", async (_e, file) => {
   try {
     const m = await backup.readBackupMeta(String(file));
-    if (!m) return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null };
+    if (!m) return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null, behavior: null };
     const local = getDeviceId(app.getPath("userData"));
+    // D248（T13，§12.2）：BDI 是否包含 / 是否早于清除边界 → 确认框提示（只提示，不阻止）
+    const b = m.behavior && typeof m.behavior === "object" ? m.behavior : null;
+    const snapAt = Number(b && b.snapshotAt) || 0;
+    let floor = 0;
+    try {
+      const polFile = path.join(app.getPath("userData"), "behavior-policy.json");
+      floor = Number((JSON.parse(fs.readFileSync(polFile, "utf8")) || {}).analysisFloorTs) || 0;
+    } catch { floor = 0; }
     return {
       ok: true,
       fromOtherDevice: typeof m.deviceId === "string" && m.deviceId.length > 0 && m.deviceId !== local,
       deviceId: m.deviceId ?? null,
-      schemaVersion: m.schemaVersion ?? null
+      schemaVersion: m.schemaVersion ?? null,
+      behavior: {
+        included: !!(b && b.included),
+        reason: b && b.reason ? String(b.reason) : null,
+        snapshotAt: snapAt || null,
+        crossDbSkewMs: Number(m.crossDbSkewMs) || 0,
+        skipsRestore: floor > 0 && snapAt > 0 && snapAt < floor
+      }
     };
   } catch {
-    return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null };
+    return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null, behavior: null };
   }
 });
 ipcMain.on("app:relaunch", () => {

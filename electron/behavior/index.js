@@ -222,8 +222,22 @@ async function init(opts) {
   return getStatus();
 }
 
+/** T13（§12.2）：dataEpoch 以库内 bdi_meta 为准——恢复换入的库带自己的 epoch（policy 不进备份）；
+ *  库内缺失（首次打开）则把当前 policy 的 epoch 写入库。 */
+function reconcileDataEpoch() {
+  try {
+    const dbEpoch = String(behaviorDb.getMeta("data_epoch", "") || "");
+    if (dbEpoch) {
+      if (!policy || policy.dataEpoch !== dbEpoch) policy = { ...(policy || {}), dataEpoch: dbEpoch };
+    } else if (policy && policy.dataEpoch) {
+      behaviorDb.setMeta("data_epoch", String(policy.dataEpoch));
+    }
+  } catch { /* 元数据失败不阻止启动 */ }
+}
+
 /** 装配运行期（writer / stats / 派生调度 / 会话 / 宿主事件）；init 与 purge 后复用。 */
 function startRuntime(db, o) {
+  reconcileDataEpoch();
   writer = createWriter({ db, recordQueryText: config.recordQueryText, uuid: o.uuid });
   writer.start();
   writer.setEnabled(config.enabled);
@@ -240,6 +254,14 @@ function startRuntime(db, o) {
     if (domainsFirstTimer.unref) domainsFirstTimer.unref();
     domainsTimer = setInterval(runDomains, 30 * 60 * 1000);
     if (domainsTimer.unref) domainsTimer.unref();
+    // T13：恢复换入行为库后强制重算（主库事实已替换；领域归属不能沿用恢复前口径）
+    try {
+      if (behaviorDb.getMeta("restore_pending_refresh") === "1") {
+        db.prepare("INSERT OR IGNORE INTO dirty_days (day, reason) SELECT DISTINCT day, 'restore' FROM events").run();
+        db.prepare("INSERT OR IGNORE INTO dirty_days (day, reason) SELECT DISTINCT day, 'restore' FROM attn_spans").run();
+        behaviorDb.setMeta("restore_pending_refresh", "0");
+      }
+    } catch { /* 标记失败不阻塞启动 */ }
     const runRollup = () => { try { rollup.ensureDeriveVersion(); rollup.refreshIncremental(); } catch { /* 派生失败不影响业务 */ } };
     rollupFirstTimer = setTimeout(runRollup, 120 * 1000);
     if (rollupFirstTimer.unref) rollupFirstTimer.unref();
@@ -425,6 +447,21 @@ async function snapshotTo(dest) {
   return behaviorDb.snapshotTo(dest);
 }
 
+/** T13：备份 meta 的计数（信息性；库不可用返回 null，不阻断备份）。 */
+function backupCounts() {
+  const db = behaviorDb.getDb();
+  if (!db) return null;
+  try {
+    return {
+      events: db.prepare("SELECT COUNT(*) AS n FROM events").get().n,
+      attnSpans: db.prepare("SELECT COUNT(*) AS n FROM attn_spans").get().n,
+      sessions: db.prepare("SELECT COUNT(*) AS n FROM sessions").get().n,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function setEnabled(next) {
   const turningOn = next === true;
   if (!turningOn && sessions) {
@@ -580,6 +617,7 @@ module.exports = {
   getGeneration,
   flushSync,
   snapshotTo,
+  backupCounts,
   setEnabled,
   setRecordQueryText,
   close,

@@ -2137,7 +2137,14 @@ function backupAPI() {
       openDir: () => Promise<boolean>;
       pickFile: () => Promise<string | null>;
       // C-38c（审计）：备份 meta 预览——fromOtherDevice = 备份来自另一台设备（只提示，不阻止）
-      meta: (file: string) => Promise<{ ok: boolean; fromOtherDevice: boolean; deviceId: string | null; schemaVersion: number | null }>;
+      meta: (file: string) => Promise<{
+        ok: boolean;
+        fromOtherDevice: boolean;
+        deviceId: string | null;
+        schemaVersion: number | null;
+        // D248（T13）：BDI 是否包含 / 跨库快照偏差 / 是否早于清除边界（确认框提示用）
+        behavior?: { included: boolean; reason: string | null; snapshotAt: number | null; crossDbSkewMs: number; skipsRestore: boolean } | null;
+      }>;
       restore: (file: string) => Promise<{ ok: boolean; error?: string; needsRestart?: boolean; safetyFile?: string | null }>;
       // C-39（审计）：导出到 Anki Phase 1（TSV + 媒体，单向）；openAnkiDir 打开最近一次导出目录（主进程记忆）
       exportAnki: () => Promise<{ ok: boolean; canceled?: boolean; error?: string; dir?: string; basic?: number; cloze?: number; skipped?: number; media?: number; warnings?: number }>;
@@ -2633,7 +2640,13 @@ function BackupSection() {
   const [includeKey, setIncludeKey] = useState(false);
   const [busy, setBusy] = useState<"" | "backup" | "restore" | "anki">("");
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
-  const [confirmFile, setConfirmFile] = useState<{ path: string; name: string; fromOtherDevice?: boolean } | null>(null);
+  const [confirmFile, setConfirmFile] = useState<{
+    path: string;
+    name: string;
+    fromOtherDevice?: boolean;
+    // D248（T13）：备份内 BDI 状态（确认框提示用）
+    behavior?: { included: boolean; crossDbSkewMs: number; skipsRestore: boolean } | null;
+  } | null>(null);
   const [restored, setRestored] = useState(false);
   // C-39（审计）：导出到 Anki 的最近一次结果（成功后显示统计与「打开文件夹」）
   const [ankiResult, setAnkiResult] = useState<{ basic: number; cloze: number; skipped: number } | null>(null);
@@ -2737,11 +2750,20 @@ function BackupSection() {
     if (!file) return;
     // C-38c（审计）：恢复前读备份 meta——备份来自另一台设备时在确认框多提示一句（只提示，不阻止）
     let fromOtherDevice = false;
+    let behavior: { included: boolean; crossDbSkewMs: number; skipsRestore: boolean } | null = null;
     try {
       const m = await backupAPI().meta(file);
       fromOtherDevice = !!(m && m.fromOtherDevice);
+      // D248（T13）：BDI 状态仅在确实可判定时提示
+      if (m && m.behavior && m.behavior.included !== undefined) {
+        behavior = {
+          included: !!m.behavior.included,
+          crossDbSkewMs: m.behavior.crossDbSkewMs || 0,
+          skipsRestore: !!m.behavior.skipsRestore
+        };
+      }
     } catch { /* 读不到 meta 按同机处理，不阻塞恢复流程 */ }
-    setConfirmFile({ path: file, name: file.split(/[\\/]/).pop() ?? file, fromOtherDevice });
+    setConfirmFile({ path: file, name: file.split(/[\\/]/).pop() ?? file, fromOtherDevice, behavior });
   }
 
   return (
@@ -2797,6 +2819,15 @@ function BackupSection() {
           <p className="form-hint">
             {T("将用「{name}」覆盖当前全部数据（书架、卡片、复习记录、摘录、设置）。恢复前会自动安全备份当前数据；完成后需重启应用生效，重启前请勿继续使用软件。", { name: confirmFile.name })}
             {confirmFile.fromOtherDevice && <>{" "}{T("此备份来自另一台设备。")}</>}
+            {confirmFile.behavior && !confirmFile.behavior.included && (
+              <>{" "}{T("此备份不含学习行为数据；恢复后现有学习行为数据将被隔离，不会与恢复后的书架混用。")}</>
+            )}
+            {confirmFile.behavior && confirmFile.behavior.included && confirmFile.behavior.skipsRestore && (
+              <>{" "}{T("此备份早于你清除学习行为数据的时间，学习行为数据不会被还原。")}</>
+            )}
+            {confirmFile.behavior && confirmFile.behavior.included && !confirmFile.behavior.skipsRestore && confirmFile.behavior.crossDbSkewMs > 5000 && (
+              <>{" "}{T("备份内书架数据与学习行为数据的快照存在 {s} 秒偏差，边界日的指标可能错位。", { s: Math.round(confirmFile.behavior.crossDbSkewMs / 1000) })}</>
+            )}
           </p>
           <div className="settings-row">
             <button className="btn btn-danger btn-sm" disabled={busy !== ""} onClick={doRestore}>

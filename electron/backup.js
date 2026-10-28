@@ -65,6 +65,9 @@ function resolvePaths(opts = {}) {
     // 选中任何词一律「未找到释义」（§7.2 L857 的「新增表一律进主库」前提被第二个库文件绕开了）。
     dictDbFile: opts.dictDbFile || path.join(dataDir, "dictionary.db"),
     dictsDir: opts.dictsDir || path.join(dataDir, "dicts"),
+    // D248（T13）：行为库是独立 SQLite 文件；进备份（原始行为数据不可由主库重建）
+    behaviorDbFile: opts.behaviorDbFile || path.join(dataDir, "behavior.db"),
+    behaviorPolicyFile: opts.behaviorPolicyFile || path.join(dataDir, "behavior-policy.json"),
     stagingDir: opts.stagingDir || path.join(dataDir, "restore-staging"),
     markerFile: opts.markerFile || path.join(dataDir, "restore-pending.json")
   };
@@ -284,11 +287,13 @@ async function createBackup(opts = {}) {
 
   try {
     const libSrc = await snapTo(p.dbFile, opts.snapshotLibrary, "library.db");
+    const createdAt = opts.now ? opts.now.getTime() : Date.now();
     const meta = {
       app: APP_TAG,
       format: FORMAT,
       label,
-      createdAt: (opts.now ? opts.now.getTime() : Date.now()),
+      createdAt,
+      snapshotAtLibrary: createdAt,
       includesAIConfig: includeAIConfig,
       appVersion: opts.appVersion || null,
       // C-38c（审计）：设备 ID 与库 schema 版本进 meta（信息性字段，缺省 null 向后兼容旧档）——
@@ -310,6 +315,26 @@ async function createBackup(opts = {}) {
     // A-4：词典本体随备份走（D137：经 db.backup() 快照，同 library.db）
     const dictSrc = fs.existsSync(p.dictDbFile) ? await snapTo(p.dictDbFile, opts.snapshotDict, "dictionary.db") : null;
     if (dictSrc) entries.push({ zipPath: "dictionary.db", filePath: dictSrc, compression: "DEFLATE" });
+    // D248（T13）：behavior.db 与主库顺序快照——不承诺同一时点；meta 记录偏差，恢复后边界日标 partial
+    if (fs.existsSync(p.behaviorDbFile)) {
+      if (typeof opts.snapshotBehavior === "function") {
+        const bsrc = await snapTo(p.behaviorDbFile, opts.snapshotBehavior, "behavior.db");
+        entries.push({ zipPath: "behavior.db", filePath: bsrc, compression: "DEFLATE" });
+        const at = opts.now ? opts.now.getTime() : Date.now();
+        meta.behavior = { included: true, snapshotAt: at, snapshotAtBehavior: at, schemaVersion: opts.behaviorSchemaVersion || null, dataEpoch: opts.behaviorDataEpoch || null, counts: opts.behaviorCounts || null };
+        meta.snapshotAtBehavior = at;
+        meta.crossDbSkewMs = Math.max(0, at - createdAt);
+      } else if (opts.production) {
+        // 生产环境缺快照函数不得退回裸拷贝运行库
+        meta.behavior = { included: false, reason: "snapshot_unavailable" };
+      } else {
+        const bsrc = await snapTo(p.behaviorDbFile, null, "behavior.db");
+        entries.push({ zipPath: "behavior.db", filePath: bsrc, compression: "DEFLATE" });
+        meta.behavior = { included: true, snapshotAt: createdAt, raw: true };
+      }
+    } else {
+      meta.behavior = { included: false, reason: "missing" };
+    }
     if (fs.existsSync(p.dictsDir)) {
       for (const f of walkFiles(p.dictsDir)) {
         entries.push({ zipPath: `dicts/${f.rel}`, filePath: f.full, compression: isAlreadyCompressed(f.rel) ? "STORE" : "DEFLATE" });
@@ -933,6 +958,41 @@ function applyPendingRestore(opts = {}) {
       if (a) asides.push({ live: p.dictDbFile, aside: a });
       clearDbSidecars(p.dictDbFile); // D137：同 library.db
       restored.push("dictionary.db");
+    }
+    // D248（T13）：行为库换入 / 旧备份缺失时隔离现有库（不得把旧主库与新行为库混用）
+    const stagedBehavior = path.join(p.stagingDir, "behavior.db");
+    const liveBehavior = p.behaviorDbFile;
+    if (fs.existsSync(stagedBehavior)) {
+      if (!isIntactSqliteFile(stagedBehavior)) throw new Error("备份包里的 behavior.db 不是完整可读的 SQLite 文件；已中止恢复");
+      let floor = 0;
+      try { floor = Number((JSON.parse(fs.readFileSync(p.behaviorPolicyFile, "utf8")) || {}).analysisFloorTs) || 0; } catch { floor = 0; }
+      const snapAt = Number(marker?.meta?.behavior?.snapshotAt) || 0;
+      if (floor > 0 && snapAt > 0 && snapAt < floor) {
+        // 备份早于用户清除边界：不还原行为库（staged 副本隔离留档）
+        try { fs.renameSync(stagedBehavior, `${liveBehavior}.pre-restore-${Date.now()}.db`); } catch { /* 尽力 */ }
+        restored.push("behavior.db(skipped-floor)");
+      } else {
+        const a = swapIn(stagedBehavior, liveBehavior);
+        if (a) asides.push({ live: liveBehavior, aside: a });
+        clearDbSidecars(liveBehavior);
+        try {
+          const Database = require("better-sqlite3");
+          const c = new Database(liveBehavior);
+          c.prepare("INSERT INTO bdi_meta (key, value) VALUES ('restore_pending_refresh', '1') ON CONFLICT(key) DO UPDATE SET value = excluded.value").run();
+          c.close();
+        } catch { /* 标记失败不阻止恢复，派生层仍按 30 分钟增量 */ }
+        restored.push("behavior.db");
+      }
+    } else if (fs.existsSync(liveBehavior)) {
+      // 旧备份没有 BDI：隔离现有行为库，起新 dataEpoch；不把旧行为数据与恢复后的旧主库混用
+      try { fs.renameSync(liveBehavior, `${liveBehavior}.pre-restore-${Date.now()}.db`); } catch { /* 尽力 */ }
+      clearDbSidecars(liveBehavior);
+      try {
+        const pol = JSON.parse(fs.readFileSync(p.behaviorPolicyFile, "utf8"));
+        pol.dataEpoch = require("./behavior/uuid7").uuid7();
+        fs.writeFileSync(p.behaviorPolicyFile, JSON.stringify(pol, null, 2) + "\n");
+      } catch { /* 策略不可读时下次 ensurePolicy 重建 */ }
+      restored.push("behavior.db(isolated)");
     }
     const stagedDicts = path.join(p.stagingDir, "dicts");
     if (fs.existsSync(stagedDicts)) {

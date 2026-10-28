@@ -2477,4 +2477,11 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "清除后不会恢复；评分、卡片等业务数据不受影响。": "This cannot be undone. Ratings, cards and other study data are not affected.",
   "已清除全部行为数据": "All behavior data deleted",
   "清除未完成": "Deletion incomplete",
+  // —— 恢复确认框的 BDI 提示（D248 / T13）——
+  "此备份不含学习行为数据；恢复后现有学习行为数据将被隔离，不会与恢复后的书架混用。":
+    "This backup does not contain learning behavior data. Your current behavior data will be set aside and will not be mixed with the restored library.",
+  "此备份早于你清除学习行为数据的时间，学习行为数据不会被还原。":
+    "This backup predates the time you deleted your learning behavior data, so behavior data will not be restored.",
+  "备份内书架数据与学习行为数据的快照存在 {s} 秒偏差，边界日的指标可能错位。":
+    "The library and learning behavior snapshots in this backup differ by {s} seconds; metrics around day boundaries may be misaligned.",
 };
