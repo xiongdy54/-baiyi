@@ -1779,6 +1779,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D204 | 结构图展开/收起的锚点与窗口缓动（`anchorScreen` + `animate`；宿主反向位移；保留生长动画） | ✅ v49.30 已实现（纯几何 38/0、主进程窗口 24/0 含 D200 9 项、DOM 53/0、f21 7/7、skin-audit ✓、样张 24/0；真实 GUI 自动化待单独授权，T7 用户实机验收） |
 | D145 | 全局选区三动作机制方案（`docs/design/GLOBAL-SELECTION-ACTIONS-D145.md`；P0＝快捷键路径：模拟复制捕获选区 + 四全局键 + 选单小窗；P1＝选中自动弹出，需原生钩子或 UIA 轮询，另立项） | 📐 **v48.100 方案已备·路线图**（延后实施；方向待定：全局任意处制卡 vs 材料导入软件内制卡，见 §9.5） |
 | D220 | 数据页图表水平居中（学习热力日历 / 连续学习点阵 / 进度环 / 方块格 / 星期×时段网格，五处内容整体居中） | ✅ v49.49 已实现（纯表现层 `charts.tsx` 五处；数据口径零改动） |
+| D248 | 用户行为数据基础设施 BDI（设计 `docs/design/BEHAVIOR-DATA-INFRA-D248-v3.md`；独立 `behavior.db` + 事件目录/IPC tap + 渲染层注意力 SDK + 领域归因/派生/具名查询 + 导出/清除/保留 + 备份恢复隔离；总开关 `app.behavior.enabled`） | ✅ **v49.77 实现（T0–T15）**（behavior 套件 17 项全绿；typecheck/i18n/ipc-contract 通过；全量 `node scripts/run-tests.mjs` 153/154——`applog` 第 11 节在统一入口下因 `ELECTRON_RUN_AS_NODE` 继承为既有红（`node tests/applog.test.cjs` 40/40 绿），与本批无关；性能手测 tap p95 0.0014ms / track p95 0.0063ms；**GUI 100 卡评分延迟与 StrictMode 去重待真机复核**） |
 
 ## 9.3 历史阶段存档（已实现）
 
@@ -1817,6 +1818,8 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | 用户画像接线（`context.userProfile`） | —（v42 §4.18-14） | `src/lib/cards.ts` 的画像注入槽（「用户画像（R9 个性化例子优先用）」）至今无调用方。画像语义＝泛化偏好（R9「优先用」、无拒用纪律），与记忆不同；若要接线须**先改本文档**并写清与记忆的边界（同为「你的东西」的两个槽不得互相覆盖） |
 
 ## 9.5 下一步
+
+**v49.77（D248）用户行为数据基础设施 BDI 已实现（T0–T15）**：独立 `behavior.db`（WAL + `synchronous=FULL`，主进程单连接，1s/500 条批量事务）记录事件 / 注意力 span / 会话 / IPC 统计；渲染层 SDK（`track` / `attention` / `origin` / `day`）与主进程 `ipcTap` 按事件目录全量登记（未登记通道透传、异常不外溢）；领域归因 → `daily_metrics` / `domain_day` / `item_day` / `signal_daily` 派生 + `coverage_day` + 具名只读查询（`behavior:query`）；导出 JSONL→ZIP、清除查询原文、保留期、清除全部（generation 屏障 + `analysisFloorTs`）；备份纳入 `behavior.db`，恢复换入并标 `restore_pending_refresh`，旧包隔离并换新 `dataEpoch`。零网络由 `behavior-no-network`（静态扫描 + 加载期封锁）证明；`behavior-scenarios` 在随机种子下证明增量 = 全量重建。**待真机复核**：§13 的 GUI 100 卡评分→下一张耗时（p95 增量 <1ms）与 StrictMode 下 `review.shown` 单条；本机微基准 tap p95 0.0014ms / track p95 0.0063ms（目标 ≤0.05ms）。设计稿 `docs/design/BEHAVIOR-DATA-INFRA-D248-v3.md` §15.2 为唯一任务依据。
 
 **v49.30（D204）结构图展开/收起锚点与窗口缓动已实现**：用户实测展开时窗口跳变、生长动画被截断。修法：`lens:fit` 请求增加 `anchorScreen`（点击节点中心旧屏幕位置）与 `animate`（180ms `cubic-bezier(.2,.7,.2,1)` 缓动 bounds）；渲染层宿主按「目标原点 − 当前窗口原点」反向位移，窗口/纸片绕固定节点生长；展开/收起立即 fit；同比例内容变化不再 `setViewScale`，画布 `viewAnchor={false}` 保留 `planTransition`；深挖的新子节点到达时同样用点击时的锚点。验证：`lensWindowFit` **38/0**（含 anchorScreen 非贴边 ≤1px / 贴边 clamped）、`lensWindow` **24/0**（缓动中间值/180ms 到位/anchorScreen 钉住/hide 先补到目标；D200 9 项保持）、`m15v2.lens.dom` **53/0**（展开 fit 带 anchorScreen+animate、viewport transform 不变、新节点虚线、宿主 translate）、`f21` 7/7、skin-audit ✓、样张 24/0、tsc 0、build ✓。**真实 GUI 自动化在本次会话被权限闸门拦下**（需单独实机授权），请 `npm run dev` 验收观感；D198 黑边若在真机出现需回退 `animate`。详见设计稿 §15。
 

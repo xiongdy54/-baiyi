@@ -1,5 +1,6 @@
 // BDI（D248 / T2）：独立行为库 behavior.db——打开、pragma、版本化迁移、快照、关闭。
 // 唯一实现依据：docs/design/BEHAVIOR-DATA-INFRA-D248-v3.md §5.1–§5.3。
+// LOCAL-ONLY：不走应用同步、不发起网络上传（本地备份/导出由用户管理）。
 // 纪律：纯 Node 可测（不 require("electron")）；打开失败/损坏/版本过新一律 disabled、不抛出（§5.1）。
 "use strict";
 const fs = require("fs");
