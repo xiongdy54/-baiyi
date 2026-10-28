@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件（**v49.76**） — AI 开发指导文档
+# 一站式渐进阅读学习软件（**v49.77**） — AI 开发指导文档
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -32,6 +32,7 @@
 | §4.17 | 成长反馈（只读呈现层，GF-1 已实现） | 不落表、不写 FSRS |
 | §4.18 | 用户记忆（文件为唯一真源） | 备份必须含 `memory/` |
 | §4.19 | 材料知识导图（v48 重设计定稿） | 不写知识图谱、不产 mastery |
+| §4.21 | 用户行为数据基础设施 BDI（v49.77 / D248） | 独立 `behavior.db`；只读投影；零网络；不复制事实 |
 | §5.1–§5.5 | Design System：瑞士风基线 / 顶栏导航 / 页面排版 / 组件规范 / 皮肤 | 色值字号间距一律走 Token |
 | §6.1–§6.2 | 核心用户流程 / 已实现功能规格（含阅读器锚点体系） | 锚点＝可降级恢复的定位链 |
 | §6.3 | AI 制卡与助读（原则知识库 / 提示词基线 / CardLint） | **不变量与验收检查 ↓** |
@@ -567,6 +568,21 @@ tests/fsrs/          FSRS 黄金参考回归套件（六件套，见 §4.4.6 / �
 - **参数集中：** 全部阈值与权重在 `electron/lmParams.js`（规划新增），带 `LM_VERSION` / `PARAM_VERSION`；改数值必须 bump 并在本文档记录。
 - **总开关：** `app.learner.enabled`（默认开；见 §7.4 登记与设计稿 §11.8），关闭即整个功能停止计算与记录、数据保留。
 - **硬边界：** 学习者模型对 `cards / review_logs / extracts / knowledge_*` 只读；复习评分、摘录推进、制卡的 IPC 处理函数内不得调用学习者模型代码（复习成功绝不等学习者模型）。
+
+### 4.21 用户行为数据基础设施 BDI（D248，v49.77；**唯一实现依据＝设计稿** `docs/design/BEHAVIOR-DATA-INFRA-D248-v3.md`）
+
+> 本节只是路由摘要（10 行内）；全部表名、字段、事件目录、指标定义、查询与测试口径以设计稿为准。实施按设计稿 §15.2 任务表 T1–T15 一次一项推进。
+
+- **定位：** 为将来的「兴趣领域发现」「连续投入」「学习洞察」准备**可组合、可解释、可重建**的本地行为证据；本期只做采集、存储、派生、只读查询与设置管理（设置页数据管理区），不做兴趣排名、潜能判断或任何洞察界面。
+- **存储：** 独立 `behavior.db`（主进程单连接、`synchronous=FULL`、1s/500 条批量事务），不进主库、不登记 `syncTables.js`、不进应用同步；原始层 append-only，L1/L2 派生层可重建（归档日除外）。主库只新增**只读** `bdiPull` 投影，禁止 ATTACH、禁止在 tap 里查询主库。
+- **采集：** 主进程 IPC tap（落库动作）＋渲染层 `track()`（纯 UI）＋eventBus 桥＋`ipc_daily`（诊断计数，不当用户动作）；每个语义动作只有一个 owner。事件目录与指标注册表分别见 `docs/bdi-catalog.md` / `docs/bdi-metrics.md`（与代码注册表逐字一致）。
+- **设置：** `app.behavior = { enabled, retentionDays, recordQueryText }`（§7.4 登记）；默认开启、只存本机。
+- **不变量（违反即返工）：**
+  1. **零网络**——BDI 代码目录不出现 `http/https/net/dgram`、`fetch`、`XMLHttpRequest`、`WebSocket`、`sendBeacon`；不进 AI 提示词；不向插件暴露 BDI IPC。
+  2. **不复制事实**——`review_logs / learning_events / reading_events / cards / extracts` 的业务事实仍各自唯一；BDI 只存行为上下文与 id 引用，评分结果/FSRS 状态只从 `review_logs` 读。
+  3. **异常不外溢**——采集/派生任何失败不得影响评分、阅读进度、制卡等业务写路径；库打开失败即 `disabled_error`，所有采集入口 no-op。
+  4. **只追加**——原始层不 UPDATE（注意力 span 的 revision/closed 终态与 writer upsert 例外见设计稿 §5.2）；物理删除仅限保留期归档后删原始与用户清除，二者已在 §7.2 登记。
+  5. **清除不可回填**——禁用/清除走 generation 屏障 + `behavior-policy.json` 的 `dataEpoch / analysisFloorTs`；旧队列、旧备份恢复都不得让清除前数据复活。
 
 ---
 
@@ -1283,6 +1299,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **`learner.db` 独立派生库落盘例外（v48.80 / D124，设计稿 §5.2）**：D124 规划新增的独立派生库 `learner.db`（`electron/learnerDb.js`，写法仿 `dictionary.db`）写入走 `learnerDb.save()`（tmp + fsync + rename 原子写）**不走主库 `persist()`**——与 `dictionary.db` 同一理由：sql.js 每次 `persist()` 全量导出主库，词项索引可达数十万行，入主库会拖慢每次复习评分落盘；且全部是派生数据，删除可重建、不进备份。
 - **`rec_runs` 保留最近 300 行例外（v48.80 / D124，设计稿 §7.2 例外登记）**：`rec_runs` 是推荐展示快照（append-only 事实），超出 300 行**物理删除**最旧行——理由：展示快照的审计价值随时间递减，且主库受 sql.js 全量回写约束不宜无限增长。物理删除按本条登记。
 - **better-sqlite3 迁移后的落盘语义（v48.93 / D137）**：「每次落库即落盘」由 SQLite 事务提交 + `synchronous=FULL`（PRAGMA 实测值 2）的 WAL fsync 承担（主库与词典库；**learner.db 派生可重建库降为 NORMAL**——B6 实测逐行 INSERT×FULL 构成 fsync 风暴把主进程阻塞 39s，持久性由 checkpoint 与「可重建」语义共同承担）；`persist()` 全部调用点保留不裁剪（72 处），重定义为显式 `wal_checkpoint(TRUNCATE)`（busy≠0 或 SqliteError 即 throw → IPC reject → `persistNow()` 重试，`cards:persistNow` 通道不变），保「单文件自足」常态；M2 备份对三库改走 `db.backup()` 快照（WAL 下裸读文件无一致性保证），恢复换入必须同删 `-wal`/`-shm`；`learner.db` 的 tmp+rename 原子写例外改为 checkpoint+close（三库 will-quit 统一 close）。D34 日记节流与 D119 日志追加写两例外语义不变。
+- **`behavior.db` 独立行为库（v49.77 / D248，设计稿 §5.1 / §11.4；本节例外登记三条）**：BDI 行为库是与主库同构的**独立 SQLite 库**（`<userData>/behavior.db`，主进程单连接、`synchronous=FULL`、1s/500 条批量事务），不走主库 `persist()`、不登记 `syncTables.js`、不进应用同步。它**不是持久化降级例外**（不采用 `learner.db` 的 NORMAL 档），而是「每次落库即落盘」在另一条库上的同口径。三条已登记例外：(a) **物理删除**——保留期过期日先写 `archived_days` 再按 `day` 批量物理删除原始行，以及用户「清除全部行为数据」清空全库；原始层删除仅 BDI 模块 `privacy.js` 可执行，派生层替换/滚动允许物理删除；(b) **独立连接**——BDI 不与主库共用连接、不 ATTACH 主库；主库只新增**只读** `bdiPull` 投影，评分/阅读/制卡写路径零影响；(c) **备份快照不承诺跨库同一时点**——`backup.js` 对 `library.db / dictionary.db / behavior.db` 顺序快照，`backup-meta.json` 记 `snapshotAtLibrary / snapshotAtBehavior / crossDbSkewMs`，恢复后边界日标 `partial`（skew >5s）；不含 `behavior.db` 的旧备份恢复时把现有行为库隔离为 `behavior.pre-restore-<ts>.db` 并起新 `dataEpoch`。
 - **软件更新检查联网例外（v49.6 / D180）**：electron-updater（仅打包版 `app.isPackaged && !process.windowsStore`；v49.38 / D209 起 Linux 非 AppImage（deb/rpm 安装）同样禁用自更新——`unsupported` 渠道零网络请求）会出站 HTTPS 请求 **github.com / api.github.com / objects.githubusercontent.com**（拉取最新 Release 的 `latest.yml` 元数据与更新安装包）；默认**自动只检查不下载**（`autoDownload=false`），下载与安装一律经用户在设置页确认；设置键 `app.updateAutoCheck`（默认 true）可随时关闭（关闭即零网络请求）；dev 恒不检查、Store 版（MSIX 包身份）恒禁用。零遥测——请求不含任何用户数据、业务数据或设备标识（GitHub 服务器日志除外，应用侧不采集不上报）；这是 §1.1「可选 Provider」框架下的第三个联网面（前两个：AI 服务、MinerU 云解析，同为可选可关）。失败静默降级，不阻塞任何业务路径。
 
 #### 不变量与验收检查（数据完整性 / 原子持久化与并发）
@@ -1292,9 +1309,9 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - `updateCard` 未传 fsrs / leech 时**保留原值，禁止置 NULL**。
 - 禁止用 partial 对象走全行 UPDATE——改内容必须先取库内最新状态合并（先例：词典快照曾把 17 列清空）。
 - `contentEditable` 一律走 EditableText 裸壳模式，禁止把 React 管理的子树直接设为 contentEditable；**例外（v48.54 / D95）＝自管子树的编辑器内核**（摘录卡 Milkdown/ProseMirror，§6.8-14）。
-- **每次落库即落盘**：写路径走 `persist()`（D137 起为显式 `wal_checkpoint(TRUNCATE)`；持久性由事务提交 + WAL `synchronous=FULL` fsync 承担）；例外仅限本节登记＝日记草稿节流（D34）＋应用日志追加写（D119）＋`learner.db` 走 `learnerDb.save()`（D124）＋`rec_runs` 300 行物理裁剪（D124）。
+- **每次落库即落盘**：写路径走 `persist()`（D137 起为显式 `wal_checkpoint(TRUNCATE)`；持久性由事务提交 + WAL `synchronous=FULL` fsync 承担）；例外仅限本节登记＝日记草稿节流（D34）＋应用日志追加写（D119）＋`learner.db` 走 `learnerDb.save()`（D124）＋`rec_runs` 300 行物理裁剪（D124）＋`behavior.db` 独立库与保留/清除物理删除（D248）。
 - 用户记忆文件树同样原子替换，禁止留半截文件；整理只追加与标记，**绝不整文件重写**。
-- 新增表一律进主库（M2 打包整库自动覆盖）；**唯一例外是不在主库的记忆文件树，备份 / 恢复必须显式包含它**。
+- 新增表一律进主库（M2 打包整库自动覆盖）；**仅有的例外是不在主库的记忆文件树与独立行为库 `behavior.db`**（前者备份 / 恢复必须显式包含；后者由 M2 按库快照纳入备份，见 D248 条）。
 - 并发写走主进程单一 better-sqlite3 连接，渲染层不持库；外部脚本改库前必须先关闭应用。
 - 机械核对：`F33`（持久化保真）/ `F37`（persist 故障注入）/ `F38`（写入模糊）/ `F50`（迁移错误卫生）/ `F62`（并发写）全绿。
 
@@ -1358,12 +1375,14 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 - **历史回填完成标记（v48.86 / D134）**：`app.legacyBackfillV1`（number 时间戳，无默认值）＝§9.4「历史数据兼容」一次性启动迁移的幂等标记——由 `electron/legacyBackfill.js` 在回填事务 COMMIT 且 `persist()` 成功后写入，存在即短路跳过；非用户可配键，设置页不呈现；`F18` 的 `DOC_KEYS` + round-trip 用例已同步。
 - **插件/主题键（v48.91 / D132，设计 `docs/design/PLUGIN-SYSTEM-D132.md`）**：`app.activeThemePlugin`（string，默认 `""`）＝激活的主题插件 id，空串＝未激活；与 `app.skinId` 互斥（激活一方清另一方，写入点＝pluginHost.activate 与设置页 onSkinChange 两处，互斥矩阵由 pluginCore.nextAppearanceState 纯函数锁定）。**`plugin.<id>` 为动态 scope**（id＝插件文件夹名，`F18` 的 DOC_KEYS 逐键登记不适用，登记豁免：凡 `plugin.` 前缀 scope 免登记），其下唯一键 `values`（对象 `{<settingId>: value}`，值域由各插件 `/* @settings */` schema 约定、宿主 assembleVars 读侧归一：color=hex、range 钳制、dropdown ∈ options、text ≤100 字符、toggle 布尔；写侧不归一）。宿主对 `<userData>/plugins/` 零写入；该目录不入 M2 备份（有意取舍 D132）。
 - **界面语言键（v49.8 / D182，多语言 i18n）**：`app.language`（enum `zh-CN`｜`zh-TW`｜`en`｜`ja`，默认 `zh-CN`）＝界面语言；**双侧归一**——主进程 `settings:set` 写侧 `normalizeLanguage`（非合法枚举一律回落 `zh-CN`）与渲染层读侧（`src/lib/i18n.ts` `normalizeLocale`，同规）；主进程监听该键同步 `electron/i18n.js`（托盘菜单/气泡/系统对话框文案）并即时重建托盘；设置页「语言」导航项（sec-language）为唯一切换入口；`F18` 的 `DOC_KEYS` + round-trip + 非法值矩阵须同步补齐。
+- **学习行为数据键（v49.77 / D248，设计稿 §11.1）**：`app.behavior = { enabled, retentionDays, recordQueryText }`——`enabled`（bool，默认 `true`）＝记录学习行为总开关（关闭即停止采集：结束会话与采集区间、停止派生调度；数据保留，不再写新事实）；`retentionDays`（`90` | `365` | `730` | `0`，默认 `730`，`0`＝永久）＝原始记录保留期（派生数据始终保留，归档日标明）；`recordQueryText`（bool，默认 **`false`**）＝是否记录搜索词/查词原文（关闭时仍计次数、不存文本）。**双侧归一**——主进程读侧（BDI 模块 `policy.js`）与设置页写侧同规：保留期非合法枚举回落 `730`、两个开关仅严格 `false`/`true` 生效；`F18` 的 `DOC_KEYS` + round-trip + 非法值矩阵须同步补齐。禁用/清除屏障与 `behavior-policy.json` 见设计稿 §11.2/§11.3。
 
 ## 7.5 安全
 
 - Key/Cookie 不进日志、不上传；渲染层不持有明文 Key（流式转发在主进程）。
 - 联网检索结果只作理解上下文；AI 禁止编造来源。
 - **用户记忆的两条通道必须分清（v42，§4.18-15）**：**AI 调用通道**——记忆在检索命中范围内**会**发送给用户自己配置的模型（这是功能用途本身：用户自己的 Key、用户自己的数据）；**遥测 / 出错一键上传通道**——发给开发者，其白名单（§7.6）**永不包含**记忆内容，与卡片正文、日记原文同级禁区。
+- **学习行为数据（v49.77 / D248，设计稿 §6.8/§11）**：BDI 只记动作类型、计数、时长、枚举值与实体 id 引用；**永不记录**材料/摘录/卡片/批注/日记正文、书名与卡片标题、文件路径、窗口标题、剪贴板、按键值、其他应用信息、网络请求内容、API Key 与 URL。查询词与查词原文默认关闭（`app.behavior.recordQueryText=false`），开启后也只存短文本并可单独清除。数据只落本机 `behavior.db`，**不进 AI 提示词、不进遥测与出错一键上传（§7.6 白名单）、零网络**。
 
 ## 7.6 出错一键上传（v24 规范，未实现；用户需求：失败现场可修复依据）
 
@@ -1655,6 +1674,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D245 | **v49.74 阅读默认字体整体改无衬线（`src/lib/reader/foliate/appearance.ts` + `src/components/SettingsPanel.tsx` + en/ja 词典；零 schema / 零 IPC / 零设置键）**：用户澄清诉求是「衬线看着太累、无衬线更清晰」——默认字体栈（`DEFAULT_READER_FONT_STACK`）由宋体族改为黑体族：`"Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif`（Noto Sans SC 常规 400 档、自带拉丁字形）；`LANG_FONT_OVERRIDES` 的日文 / 繁体 / 韩文地区字形同步改黑体（Noto Sans CJK JP/TC/KR → 思源黑体 → 平台系统黑体）。语义：书内没有出版方 `font-family` 时正文即无衬线；出版方显式字族仍优先（默认栈只在书没有表态处兜底，既有零特异度 `:where()` 排版层不变）；需要连出版方字体一起覆盖时仍用 `ignorePublisherFont`（400 强制规则不变）；显式自选字体不变；PDF 不适用。D244 的 `DEFAULT_READER_FORCED_FONT_STACK` 并入默认栈后删除（强制模式直接用默认栈）。设置页字体输入占位文案改「留空使用默认无衬线字体栈」（en/ja 同步，繁中经 opencc 链）。测试：appearance 单测快照与断言同步改（默认栈首项 Noto Sans SC、纯黑体无宋体族、开关关闭/开启均为无衬线、显式字体保留），`reader.appearance` 全过；typecheck / lint:consistency / i18n-check 通过；F11 版本号与 D 编号闸门通过。 | 用户 2026-10-27 指令（「我就是觉得衬线字体看着太累了，没有无衬线字体清晰，所以希望把默认中文字体改成无衬线的。只要用户导入的阅读材料没有出版商指定的字体，就使用无衬线的字体」） | v49.74 |
 | D246 | **v49.75 阅读滚动流畅性：换章后输入死区、滚轮路径布局读取与滚动中标记命中（`vendor/foliate-js/paginator.js` + `src/lib/reader/foliate/adapter.ts` + `src/theme.css`；零 schema / 零 IPC / 零设置键 / 零新文案）**：**背景**＝用户 2026-10-27 反馈「阅读器滚动有点卡，尤其切换章节之后」。隔离沙箱实测（长章 5.6 万字/章，真实 CDP 滚轮）定位三处：①**换章后死区**——跨章触发后 `#locked` 覆盖整段淡出/加载/淡入并在 `#goTo` 后再等 100ms，同时 `#wheel.hold` 以「事件间隔 ≥160ms 或幅度陡增 2.2 倍」为唯一释放条件；鼠标滚轮以 60ms 节拍持续滚动时，落地后 1.8s 内全部事件被吞、新章 `start` 恒为 0（探针逐事件记录：`t=224…1792ms start=0`），用户感知即「换章后滚不动」。②**滚轮路径每事件两次布局读取**——`wheelTurn` 的 `atEnd/atStart` 逐事件调用 `viewSize`/`end`（`getBoundingClientRect`），触控板高频事件下反复与合成器滚动位置同步。③**滚动中标记命中检测**——iframe 内 `mousemove` 对每条摘录逐段 `Range.getClientRects()`；滚动本身会触发 mousemove，逐帧强制几何计算，摘录多的章节更明显。**修法**：①`#wheel.hold` 增加 `landedAt`（新章落地时刻）与「新手势」判定——落地 ≥300ms 后，幅度 ≥96px（Windows 滚轮一档通常 100/120px）且与约 200ms 前幅度相比没有衰减（真实滚轮档位维持幅度、新滑动幅度上升）即释放；惯性尾巴（幅度随时间衰减）继续按 D242 吸收；未落地（加载中/失败）1600ms 上限、已落地 5000ms 安全上限，任何情况下不会无限吞输入；滚动模式 `#turnPage` 落地后立即释放 `#locked`（不再 `wait(100)`，该等待只服务分页防连翻）；跨章淡入时长改读新 Token `--reader-cross-dur`（240ms，原 420ms 的整页滑行时长不再拖长换章观感），淡出 `--reader-turn-out` 与 D241 曲线不变。②`size`/`viewSize` 改为带失效的缓存：`render()`/`#beforeRender` 重置 `size`，`#createView`/`View.onExpand` 重置 `viewSize`，滚轮事件只读 `scrollTop`。③adapter 跟踪 renderer 的 `scroll` 事件，滚动后 160ms 内跳过悬停命中、其余时间 rAF 合并为每帧一次（滚动中不强制几何、悬停浮层在滚动结束并再次移动后恢复）。D241 章界「停顿后明确续滚才换章」与 D242 惯性吸收语义保留。**测试**：`tests/d242-reader-inertia.test.cjs` 新增 G1/G2（换章落地后 60ms 节拍滚轮必须在新章内滚动；换章进行中的同节拍事件不得穿到下一章），既有 A–F 全过（连跑两次稳定）；`d241-reader-motion` / `reader.appearance` / `reader.kernel`（75/75）/ `reader.paging.gui`（9/9）回归；typecheck / build / i18n-check / lint:consistency 通过；F11 14/16、F27 13/14 与基线既有红逐项相同（L1 缺文件 / L6 表计数 / W6 取消项注释）。 | 用户 2026-10-27 指令（「我的阅读器滚动感觉有点卡，尤其是切换章节之后，请帮我排查原因，帮我优化到无论章节内还是跨章节都有丝滑流畅的滚动效果」） | v49.75 |
 | D247 | **v49.76 「简明解读」提示词 v4——ASD-STE100 式逐句解释 + 用户母语输出（设计 `docs/design/STE-EXPLAIN-D247.md`）**：①**输出载体改为逐句解释**——`reader-explain-ste` 第 2 步由「简明改写整段」改为「逐句解释」：每个原句一组，外层「- 第 N 句：」+ 内层短句列表；简单句 1 句、一般 2 句、复杂句 3-5 句（超长句可更多，但每句只讲一个意思）；禁止整句复述原文、禁止元话语开头、禁止把多句合成一段。②**ASD-STE100 式 10 条硬约束**：短句（中 ≤30 字 / 英 ≤18 词 / 日 ≤30 字 / 其他 ≤25 词或约 40 字符）、一句一义（分句 ≤2、嵌套 ≤1 层）、完整句、主动语态与「来源未说明」、受控词汇、不增不减、保留情态（不得把「可能/提示/尚不清楚」改成确定语气）、不重复、术语保真（保留原术语并首现解释，禁止用模糊日常词替换）、逐句自查。③**四节收缩**：歧义点至多 2 条且只列**语言表达层面**障碍（明确禁止评审研究方法/样本量/证据强度，定义句与科普段落通常 `points=0` 并整节省略）；「简明改写」更名「逐句解释」；多重解读仅确有 ≥2 读法时至多 2 条；术语至多 3 条。④**多母语输出**：模板级 `{{OUTPUT_LANG_NAME}}` 硬约束覆盖正文/节标题/编号标签/说明/追问；新增中文/繁中/英/日四套节标题写法与编号标签（第 1 句 / Sentence 1 / 第1文）；材料语言 ≠ 输出语言时术语必须译成输出语言标准说法；`src/lib/cards.ts` ste 分支注入 `steOutputLangName(outLang)`。⑤**pack 覆盖**：新增 `electron/ste-profiles/ja.json`（やさしい日本語：标准术语 ミクログリア/シナプス/プラーク/コホート研究、保留示唆する/可能性がある/まだ分からない）与 `zh-Hant.json`；`src/lib/steProfiles.ts` 注册两者，`resolveProfile` 精确命中 zh-Hant/ja（zh-TW / zh-Hant-TW / zh-HK / zh-MO → zh-Hant；ja/ja-JP → ja），回退链其余不变。⑥**法务口径**：模板正文允许引用标准名称（用户明确要求「以 ASD-STE 100 方式」），仍禁止内嵌规范规则原文与批准词典词表；pack lint 维持「ASD-STE100 仅允许出现在 derivedFrom」。⑦**播种**：v3 原文冻结为 `READER_EXPLAIN_STE_PROMPT_V3`，新增 v4（`MAX(version)<4` 升版，v1-v3 留痕，默认取 v4）。**实测**：不经 prompt-lab，按 cards.ts 同构拼装 system/user 交子代理充当模型，14 类材料 × 多轮迭代（v4.1→v4.9；英/中/繁中/日材料→中/日/英/繁中、简单定义、指代歧义、追问），人工验收逐句分组、句长、情态、术语、`points=0`、追问直答全部通过（详见设计稿 §4）。测试：d91-prompts 升版断言（默认 v4 / 四行留痕 / v3 冻结常量 / 新契约与法务断言）、d91 pack lint 5 pack + 回退链、`tests/d91-cards-assembly.test.cjs`（四界面语言请求装配：占位符全量替换 + pack 路由 + 温度 0.3，28 断言）、bundle 重打包。 | 用户 2026-10-27 指令（逐字见设计稿 §0：当前简明解释未达 ASD-STE100 标准、未逐句解释仍为长篇解读；ASD-STE100 只能生成英文而软件面向全球；要求按用户手动选择的母语输出；自行用模型/子代理测试直至符合标准） | v49.76 |
+| D248 | **v49.77 用户行为数据基础设施（BDI）落地契约（唯一实现依据＝`docs/design/BEHAVIOR-DATA-INFRA-D248-v3.md`，对两版外部设计稿的对抗式审查定稿）**：为将来的「兴趣领域发现 / 连续投入 / 学习洞察」准备**可组合、可解释、可重建**的本地行为证据；本期只做采集、存储、派生、只读查询与设置管理，不做兴趣排名/潜能判断/任何洞察界面。**架构 K1–K14**：K1 独立 `behavior.db`（主进程单连接、`synchronous=FULL`、1s/500 条批量事务，不引入 worker）；K2 BDI 是行为事实的唯一记录者，不复制 `review_logs / learning_events / reading_events` 的业务事实；K3 主库只新增**只读** `bdiPull` 投影（禁 ATTACH、禁另开写连接、禁在 tap 里查主库）；K4 三层 L0 原始 append-only → L1 `entity_domains / coverage_day / capture_intervals` → L2 `daily_metrics / domain_day / item_day / signal_daily`（`runs / features / episodes` 查询时计算，不落表）；K5 采集＝主进程 IPC tap + 渲染层 `track()` + eventBus 桥 + `ipc_daily`（诊断计数，不当用户动作），每个语义动作单一 owner；K6 事件存 `ts / recv_ts / source_ts / day / tz_name / tz_offset / cutoff_hour / clock_flags`，`day` 是捕获时审计标签、学习日复用 `electron/fsrsTime.js`；K7 注意力＝单调时钟 + 精确 idle 切分 + 30s 心跳 + 5min 切段 + 跨学习日切段 + `closed/revision` 终态；K8 origin 多槽 token（window+entity+nonce，3s，一次消费）+ `actor(user/background/unknown)`；K9 领域显式种子优先、禁止 card↔extract↔item 递归、leaf/lang/none 三基础层、`_none` 残差、删实体标 `stale`、`attribution_version`；K10 指标由 `metrics.js` 唯一定义，`coverage_day` 区分 complete/partial/unknown/unsupported/archived，缺数据不补 0，本期不输出综合兴趣分；K11 默认开启、`recordQueryText` 默认关、正文/标题/路径/凭证永不记、禁用/清除走 generation 屏障、保留期先归档再删原始；K12 `behavior.db` 进备份、旧备份缺 BDI 时隔离现有库并起新 `dataEpoch`、早于 `analysisFloorTs` 不还原；K13 五个版本常量 `BDI_SCHEMA_VERSION / CATALOG_VERSION / METRICS_VERSION / DERIVE_VERSION / ATTRIBUTION_VERSION`；K14 文档先行 + `docs/bdi-catalog.md` / `docs/bdi-metrics.md` 与注册表逐字一致。**硬缺陷修正（v1）**：禁止用「最新一条 `review_logs`」冒充评分关联（`saveReview` 只返回 `true`）——`review.rated` 只记 `tapStartTs/tapEndTs/tapSeq`，查询层按 `(card_id, reviewed_at ∈ [t0,t1])` 一对一匹配，多候选 `ambiguous`、无候选 `missing`；`synchronous=FULL`；`seq INTEGER PRIMARY KEY AUTOINCREMENT`；`extracts.kind` 与 `track_materials` 复合键按代码事实归因；StrictMode 用 `presentation_id` 去重；EPUB iframe 输入经既有 adapter poke。**拒绝 v2 重架构**：不引入长驻 worker、不建 `mx_*` 镜像、不落 `f_*` 特征表、不做 ACK/SAB；并修正 v2 `buildRuns` 的字符串日期算术 bug（内部一律整数 day index，见设计稿附录 A）。**实施**：按设计稿 §15.2 T0–T15 一次一项，T0 已完成（本行 + §4.21 + §7.2 例外 + §7.4 `app.behavior` + §7.5 白名单 + 两份 BDI 文档）；测试义务见设计稿 §14 的 `behavior-*` 套件与 `ipc-contract` / `i18n-check` / `sync-tables` / flows 无回归 | 用户 2026-10-28 指令（「我的软件将来要加入一些根据用户行为数据来评估用户偏好倾向、学习内容领域、学习情况掌握程度等等各方面的指标的功能，因此我让另外的模型来帮我设计了一份用户行为数据基础设施的设计方案……请你对这两份两个版本的方案进行对抗式审查，根据代码事实拟定最终方案。」） | v49.77 |
 
 ## 8.2 已接受偏差（实现与原锁定方案的差异）
 
