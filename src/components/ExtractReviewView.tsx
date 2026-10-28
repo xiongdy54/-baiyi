@@ -13,6 +13,9 @@ import { eventBus } from "../lib/eventbus";
 import { readingWorkflow, parseContextRef, undoApi, modifierFlagOf, readMultiSelectKey, type MultiSelectKey, type DueTopic, type ExtractDetail } from "../lib/readingWorkflow";
 import { extractSettings, fetchSessionQueue, type ExtractEngine, type Limits, type ScopeFilter } from "../lib/sessionQueue";
 import { useSelectionActions } from "../lib/useSelectionActions";
+// D248（T8）：摘录复习会话/呈现/结果埋点（落库动作本身由主进程 tap 记）
+import { track, newUuid7, getTrackConfig, setTrackContext } from "../lib/behavior/track";
+import { createAttention } from "../lib/behavior/attention";
 import { headingPathAt } from "../lib/reader/tocPath";
 import { paragraphContext } from "../lib/selectionContext";
 import { createMultiHighlight } from "../lib/reader/multiHighlight";
@@ -90,6 +93,31 @@ export function splitChain(chain: Array<{ id: string; text: string; depth: numbe
  */
 export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimits, scopeTags, scopeKpIds, header, onExit, onExtract, onMaterialName, onOpenAnchorCards }: Props) {
   const T = useT();
+  // D248（T8）：摘录复习会话上下文（xreview 阈值同 review；ctxId 每挂载一次）
+  const bdiCtxIdRef = useRef<string>(newUuid7());
+  const bdiAttentionRef = useRef<ReturnType<typeof createAttention> | null>(null);
+  const bdiPresentedRef = useRef<{ id: string; at: number } | null>(null);
+  const bdiPresentedItemRef = useRef<string | null>(null);
+  const bdiDoneRef = useRef(0);
+  const bdiStartMonoRef = useRef(performance.now());
+  useEffect(() => {
+    const attn = createAttention({ cutoffHour: getTrackConfig().cutoffHour });
+    bdiAttentionRef.current = attn;
+    attn.start();
+    attn.setContext({ surface: "xreview", ctxId: bdiCtxIdRef.current, origin: "queue" });
+    setTrackContext({ surface: "xreview", ctxId: bdiCtxIdRef.current });
+    track("extract.session", { ctxId: bdiCtxIdRef.current, origin: "queue", props: { phase: "start", planned: 0, done: 0, dur_ms: 0 } });
+    return () => {
+      attn.stop("unload");
+      bdiAttentionRef.current = null;
+      track("extract.session", {
+        ctxId: bdiCtxIdRef.current,
+        origin: "queue",
+        props: { phase: "end", planned: 0, done: bdiDoneRef.current, dur_ms: Math.round(performance.now() - bdiStartMonoRef.current) },
+      });
+      setTrackContext(null);
+    };
+  }, []);
   const [items, setItems] = useState<DueTopic[]>([]);
   /**
    * 钉住的当前卡（v49.55 / D226）：队列刷新（改优先级 / 编辑正文与批注 / 他处 workflow/changed /
@@ -286,6 +314,20 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
   }, [refresh]);
 
   const current = (pinnedId ? items.find((x) => x.id === pinnedId) : undefined) ?? items[0] ?? null;
+  // D248（T8）：每条摘录一次 extract.shown（StrictMode 双跑不重复）
+  useEffect(() => {
+    if (!current) { bdiPresentedItemRef.current = null; bdiPresentedRef.current = null; return; }
+    if (bdiPresentedItemRef.current === current.id) return;
+    bdiPresentedItemRef.current = current.id;
+    bdiPresentedRef.current = { id: newUuid7(), at: performance.now() };
+    track("extract.shown", {
+      extractId: current.id,
+      ctxId: bdiCtxIdRef.current,
+      origin: "queue",
+      surface: "xreview",
+      props: { position: bdiDoneRef.current },
+    });
+  }, [current]);
   // 钉住回落到的队列头（首次进入 / 清钉后 / 钉住条目离队）；空队列清钉，防旧 id 日后回队时被误钉
   useEffect(() => {
     const id = current?.id ?? null;
@@ -618,7 +660,18 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
     [current, busy, refresh, viewing]
   );
 
-  const advance = useCallback(() => run(() => readingWorkflow.advance(current!.id)), [current, run]);
+  const advance = useCallback(() => run(async () => {
+    const id = current!.id;
+    const r = await readingWorkflow.advance(id);
+    const p = bdiPresentedRef.current;
+    track("extract.reviewed", {
+      extractId: id, ctxId: bdiCtxIdRef.current, origin: "queue", surface: "xreview",
+      props: { outcome: "resolved", thinkMs: p ? Math.max(0, Math.round(performance.now() - p.at)) : null },
+    });
+    bdiDoneRef.current += 1;
+    bdiPresentedItemRef.current = null;
+    return r;
+  }), [current, run]);
   /**
    * 编辑器内容提交（D95 §B.3；审查 P0）：与 run() 的差别＝**不读也不挂 busy**——失焦提交与底栏动作
    * （下一条/推迟/毕业，全经 run 的 busy 守卫）会在同一瞬间先后发生（blur 先于 click），任何一方被
@@ -941,7 +994,14 @@ export default function ExtractReviewView({ onJumpToDoc, bookItemIds, scopeLimit
    */
   const faceHandlers = {
     onAdvance: () => void advance(),
-    onPostpone: (days: number) => void run(() => readingWorkflow.postponeDays(current!.id, days), T("已推迟 {n} 天", { n: days })),
+    onPostpone: (days: number) => void run(async () => {
+      const id = current!.id;
+      const r = await readingWorkflow.postponeDays(id, days);
+      track("extract.reviewed", { extractId: id, ctxId: bdiCtxIdRef.current, origin: "queue", surface: "xreview", props: { outcome: "postponed", thinkMs: null } });
+      bdiDoneRef.current += 1;
+      bdiPresentedItemRef.current = null;
+      return r;
+    }, T("已推迟 {n} 天", { n: days })),
     onPriority: (p: number) => void commitPriority(p),
     onGraduate: () => void run(() => readingWorkflow.graduate(current!.id), T("已毕业：不再推送，仍保留在卡片浏览器")),
     onEdit: (text: string) => void commitEditContent(text),
