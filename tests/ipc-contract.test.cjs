@@ -24,9 +24,9 @@ const OUT = path.join(ROOT, "docs", "ipc-contract.json");
 
   // 契约形状锁：桥 / 方法总数与 kind 取值（结构性回归闸）
   const bridges = new Set(entries.map((e) => e.bridge));
-  // D248（T5/T11）：behaviorAPI（batch / status / query / onConfig 四方法）→ 34 桥 / 289 方法。
+  // D248（T5/T11/T12）：behaviorAPI（batch / status / query / export / purge / clearQueryText / retention / onConfig）
   assert.strictEqual(bridges.size, 34, "桥对象数应为 34（preload.js exposeInMainWorld）");
-  assert.strictEqual(entries.length, 289, "桥方法总数应为 289（每方法恰一个通道调用）");
+  assert.strictEqual(entries.length, 293, "桥方法总数应为 293（每方法恰一个通道调用）");
   for (const e of entries) {
     assert.ok(["invoke", "send", "on"].includes(e.kind), `非法 kind：${e.bridge}.${e.kind}`);
     assert.ok(typeof e.channel === "string" && e.channel.includes(":"), `非法 channel：${e.channel}`);

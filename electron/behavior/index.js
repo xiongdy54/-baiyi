@@ -12,7 +12,10 @@ const { createDomains } = require("./domains");
 const { createRollup } = require("./rollup");
 const { createCoverage } = require("./coverage");
 const { createQuery } = require("./query");
+const privacyMod = require("./privacy");
 const { learningDayStartMs } = require("../fsrsTime");
+const fs = require("fs");
+const path = require("path");
 
 let ctx = null;
 let writer = null;
@@ -212,8 +215,18 @@ async function init(opts) {
     behaviorDb.close();
     return getStatus();
   }
+  startRuntime(db, o);
+  const buffered = pending;
+  pending = [];
+  for (const ev of buffered) emit(ev);
+  return getStatus();
+}
+
+/** 装配运行期（writer / stats / 派生调度 / 会话 / 宿主事件）；init 与 purge 后复用。 */
+function startRuntime(db, o) {
   writer = createWriter({ db, recordQueryText: config.recordQueryText, uuid: o.uuid });
   writer.start();
+  writer.setEnabled(config.enabled);
   ipcStats = createIpcStats({ now, dayOf: () => dayStringOf(now()) });
   ipcStats.start(db);
   if (typeof o.pull === "function") {
@@ -227,14 +240,14 @@ async function init(opts) {
     if (domainsFirstTimer.unref) domainsFirstTimer.unref();
     domainsTimer = setInterval(runDomains, 30 * 60 * 1000);
     if (domainsTimer.unref) domainsTimer.unref();
-    // §9.2：启动 120s 首次增量；之后每 30 分钟（查询前若落后 >5 分钟先同步跑一次）
     const runRollup = () => { try { rollup.ensureDeriveVersion(); rollup.refreshIncremental(); } catch { /* 派生失败不影响业务 */ } };
     rollupFirstTimer = setTimeout(runRollup, 120 * 1000);
     if (rollupFirstTimer.unref) rollupFirstTimer.unref();
     rollupTimer = setInterval(runRollup, 30 * 60 * 1000);
     if (rollupTimer.unref) rollupTimer.unref();
   }
-  state = { status: "ok", reason: null, detail: null };
+  state = config.enabled ? { status: "ok", reason: null, detail: null } : { status: "disabled", reason: "disabled_by_user", detail: null };
+  if (!config.enabled) return getStatus();
   sessions = createSessions({
     db,
     settings: o.settings,
@@ -256,10 +269,20 @@ async function init(opts) {
     return getStatus();
   }
   bindHostEvents(o);
-  const buffered = pending;
-  pending = [];
-  for (const ev of buffered) emit(ev);
   return getStatus();
+}
+
+function stopRuntime() {
+  for (const off of unsubscribers) { try { off(); } catch { /* 已解绑 */ } }
+  unsubscribers = [];
+  if (sessions) { try { sessions.detachAll(); } catch { /* 已卸载 */ } sessions = null; }
+  if (domainsFirstTimer) { clearTimeout(domainsFirstTimer); domainsFirstTimer = null; }
+  if (domainsTimer) { clearInterval(domainsTimer); domainsTimer = null; }
+  if (rollupFirstTimer) { clearTimeout(rollupFirstTimer); rollupFirstTimer = null; }
+  if (rollupTimer) { clearInterval(rollupTimer); rollupTimer = null; }
+  domains = null; rollup = null; coverage = null; queryApi = null;
+  if (ipcStats) { try { ipcStats.stop(); } catch { /* 已停 */ } ipcStats = null; }
+  if (writer) { try { writer.stop(); } catch { /* 已停 */ } writer = null; }
 }
 
 function isReady() {
@@ -414,19 +437,99 @@ function setEnabled(next) {
     policy = { ...policy, firstEnabledAt: now() };
     try { policyMod.writePolicy(ctx.dataDir, policy); } catch { /* 失败由设置页告知 */ }
   }
-  state = turningOn
-    ? (behaviorDb.getStatus().status === "ok" ? { status: "ok", reason: null, detail: null } : state)
-    : { status: "disabled", reason: "disabled_by_user", detail: null };
-  if (turningOn && sessions && behaviorDb.getStatus().status === "ok") {
+  if (turningOn) {
+    if (behaviorDb.getStatus().status !== "ok") return getStatus();
+    if (!writer) {
+      try { startRuntime(behaviorDb.getDb(), ctx); } catch { state = { status: "disabled", reason: "sessions_failed", detail: null }; }
+      return getStatus();
+    }
+    if (!sessions) {
+      stopRuntime();
+      try { startRuntime(behaviorDb.getDb(), ctx); } catch { state = { status: "disabled", reason: "sessions_failed", detail: null }; }
+      return getStatus();
+    }
+    state = { status: "ok", reason: null, detail: null };
     try { sessions.init(); } catch { state = { status: "disabled", reason: "sessions_failed", detail: null }; }
+    return getStatus();
   }
+  state = { status: "disabled", reason: "disabled_by_user", detail: null };
   return getStatus();
+}
+
+/** 清除全部行为数据：屏障 → 停运行期 → 关库删文件 → 新 dataEpoch/analysisFloorTs → 空库（保持停用）。 */
+async function purgeAll() {
+  if (!ctx) return { ok: false, code: "not_initialized" };
+  const purgeTs = now();
+  generation++;
+  config = { ...config, enabled: false };
+  try { flushSync(); } catch { /* 尽力冲刷 */ }
+  if (writer) writer.setEnabled(false);
+  stopRuntime();
+  const file = behaviorDb.getFile() || path.join(ctx.dataDir, "behavior.db");
+  try { behaviorDb.close(); } catch { /* 已关 */ }
+  try {
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try { fs.rmSync(file + suffix, { force: true }); } catch (e) { if (suffix === "") throw e; }
+    }
+    policy = { ...(policy || {}), dataEpoch: privacyMod.newEpoch(purgeTs), analysisFloorTs: purgeTs, purgeAt: purgeTs, firstEnabledAt: null };
+    policyMod.writePolicy(ctx.dataDir, policy);
+    behaviorDb.resetForTest();
+    behaviorDb.configure({ dataDir: ctx.dataDir });
+    const db = await behaviorDb.open();
+    if (!db) throw new Error("空库重建失败");
+    startRuntime(db, ctx); // config.enabled=false：只建 writer/stats，不建会话
+    state = { status: "disabled", reason: "disabled_by_user", detail: null };
+    return { ok: true, epoch: policy.dataEpoch, purgeTs };
+  } catch (e) {
+    state = { status: "disabled", reason: "purge_failed", detail: String((e && e.message) || e) };
+    return { ok: false, code: "purge_failed", detail: String((e && e.message) || e) };
+  }
+}
+
+function privacyApi() {
+  const db = behaviorDb.getDb();
+  if (!db || !ctx) return null;
+  return privacyMod.createPrivacy({
+    db, dataDir: ctx.dataDir, now,
+    snapshot: (dest) => behaviorDb.snapshotTo(dest),
+    schemaVersion: behaviorDb.BDI_SCHEMA_VERSION,
+  });
+}
+
+function clearQueryText() {
+  if (!privacyApi()) return { ok: false, code: "disabled" };
+  try { flushSync(); } catch { /* 尽力冲刷 */ }
+  const r = privacyApi().clearQueryText();
+  setRecordQueryText(false);
+  return { ok: true, ...r };
+}
+
+async function exportData(dest, options) {
+  if (!privacyApi()) return { ok: false, code: "disabled" };
+  try { flushSync(); } catch { /* 尽力冲刷 */ }
+  const r = await privacyApi().exportTo(dest, options || {});
+  return { ok: true, ...r };
+}
+
+function enforceRetention() {
+  if (!privacyApi()) return { ok: false, code: "disabled" };
+  const r = privacyApi().enforceRetention(config.retentionDays);
+  return { ok: true, ...r };
 }
 
 function setRecordQueryText(next) {
   config = { ...config, recordQueryText: next === true };
   if (writer) writer.setRecordQueryText(config.recordQueryText);
   return config.recordQueryText;
+}
+
+/** 设置页写侧入口：app.behavior 三键归一后应用到运行时（开关变化走 setEnabled）。 */
+function setBehaviorConfig(raw) {
+  const n = policyMod.normalizeBehavior(raw);
+  if (n.enabled !== config.enabled) setEnabled(n.enabled);
+  config = { ...config, retentionDays: n.retentionDays, recordQueryText: n.recordQueryText };
+  if (writer) writer.setRecordQueryText(n.recordQueryText);
+  return getStatus();
 }
 
 /** 退出顺序（§5.1）：flush → sessions.end("quit") → checkpoint → close。 */
@@ -490,5 +593,10 @@ module.exports = {
   getIpcStats: () => ipcStats,
   runQuery,
   refreshCoverage,
+  purgeAll,
+  clearQueryText,
+  exportData,
+  enforceRetention,
+  setBehaviorConfig,
   resetForTest,
 };

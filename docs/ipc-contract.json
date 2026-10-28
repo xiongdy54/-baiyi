@@ -181,14 +181,38 @@
   },
   {
     "bridge": "behaviorAPI",
+    "method": "clearQueryText",
+    "channel": "behavior:clearQueryText",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "behaviorAPI",
+    "method": "export",
+    "channel": "behavior:export",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "behaviorAPI",
     "method": "onConfig",
     "channel": "behavior:config",
     "kind": "on"
   },
   {
     "bridge": "behaviorAPI",
+    "method": "purge",
+    "channel": "behavior:purge",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "behaviorAPI",
     "method": "query",
     "channel": "behavior:query",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "behaviorAPI",
+    "method": "retention",
+    "channel": "behavior:retention",
     "kind": "invoke"
   },
   {

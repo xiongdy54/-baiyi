@@ -44,7 +44,9 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
   const capturePreload = read("electron/preload-capture.js");
   check("主 preload 暴露 behaviorAPI（batch/onConfig/status）", /behaviorAPI/.test(preload) && /"behavior:batch"/.test(preload) && /"behavior:config"/.test(preload) && /"behavior:status"/.test(preload), "三方法", "缺");
   check("主 preload 暴露具名 query（权限由主进程角色门复核）", /behaviorAPI/.test(preload) && /"behavior:query"/.test(preload), "query", "缺");
-  check("主 preload 不暴露 export/purge 空壳（T12 前）", !/behavior:export/.test(preload) && !/behavior:purge/.test(preload), "无空壳", "提前暴露");
+  check("主 preload 暴露管理面（export/purge/clearQueryText/retention，主进程复核）",
+    /"behavior:export"/.test(preload) && /"behavior:purge"/.test(preload) && /"behavior:clearQueryText"/.test(preload) && /"behavior:retention"/.test(preload), "四方法", "缺");
+  check("lens/workbench/capture 无管理面权限（角色矩阵）", !roles.canCall("lens", "purge") && !roles.canCall("workbench", "export") && !roles.canCall("capture", "clearQueryText"), "拒绝", "放行");
   check("捕获 preload 只有 batch/onConfig", /behaviorAPI/.test(capturePreload) && /"behavior:batch"/.test(capturePreload) && /"behavior:config"/.test(capturePreload) && !/"behavior:status"/.test(capturePreload), "batch+onConfig", "越权");
   check("捕获窗口加载的是 preload-capture.js（与主 preload 文件分离）", /preload-capture\.js/.test(read("electron/quickCapture.js")), "分离", "混用");
   const lensSrc = read("electron/lensWindow.js");

@@ -59,6 +59,7 @@ const { closeToTrayEnabled } = require("./closeToTray");
 // D248（v49.77）：用户行为数据基础设施（BDI）门面——纯本地 behavior.db，独立连接；失败只停用自身。
 const behavior = require("./behavior");
 const behaviorRoles = require("./behavior/roles");
+const behaviorPolicy = require("./behavior/policy");
 // D248（T4）：IPC tap 必须在任何业务 ipcMain.handle/on 注册之前安装（§7.1；排除 behavior:*，未登记通道透传）。
 require("./behavior/ipcTap").install(ipcMain, behavior.emit);
 
@@ -317,6 +318,8 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "updateAutoCheck") value = value !== false;
   // v49.8（D182）：界面语言写侧归一（enum 四值，非法回落 zh-CN；与渲染层 normalizeLocale 同规）
   if (scope === "app" && key === "language") value = mainI18n.normalizeLanguage(value);
+  // D248（T12）：app.behavior 三键写侧归一（保留期枚举 / 两开关严格布尔），并即时应用到运行时
+  if (scope === "app" && key === "behavior") value = behaviorPolicy.normalizeBehavior(value);
   if (scope === "app" && key === "extractFaceFontFollow") value = value === true;
   if (scope === "app" && key === "extractFaceFontSize") {
     const n = Math.round(Number(value));
@@ -362,6 +365,9 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
   writeSettings(all);
+  if (scope === "app" && key === "behavior") {
+    try { behavior.setBehaviorConfig(value); } catch { /* BDI 失败不影响设置本身 */ }
+  }
   if (nativeFpBefore !== null && learnerRefresh.currentNativeFingerprint() !== nativeFpBefore) learnerRefresh.requestNativeRebuild();
   // C-31：设置变更广播——独立窗口（lens / 制卡台 / 捕获）开着时即时跟随换肤 / 动效 / 强调色，
   // 不再只靠「每次呼出重读」。单向推送（非 invoke 通道，不计入 IPC 注册清单，先例＝D123 / D180 / D197；
@@ -479,6 +485,27 @@ ipcMain.handle("behavior:query", (e, name, params) => {
   const role = behaviorRoleOf(e);
   if (!role || !behaviorRoles.canCall(role, "query")) throw new Error("BDI：该窗口无权查询行为数据");
   return behavior.runQuery(String(name || ""), params && typeof params === "object" ? params : {});
+});
+// §11：管理面只给主窗口（导出 / 清除 / 清除查询原文 / 保留期执行）
+const behaviorMainOnly = (method, fn) => ipcMain.handle(`behavior:${method}`, (e, ...args) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, method)) throw new Error("BDI：该窗口无权执行此操作");
+  return fn(...args);
+});
+behaviorMainOnly("purge", () => behavior.purgeAll());
+behaviorMainOnly("clearQueryText", () => behavior.clearQueryText());
+behaviorMainOnly("retention", () => behavior.enforceRetention());
+behaviorMainOnly("export", async (opts) => {
+  let dest = String(opts?.path || "");
+  if (!dest) {
+    const r = await dialog.showSaveDialog({
+      defaultPath: `nutation-behavior-${new Date().toISOString().slice(0, 10)}.zip`,
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
+    });
+    if (r.canceled || !r.filePath) return { ok: false, code: "canceled" };
+    dest = r.filePath;
+  }
+  return behavior.exportData(dest, { includeText: opts?.includeText === true });
 });
 
 ipcMain.handle("library:list", async () => {

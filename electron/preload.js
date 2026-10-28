@@ -552,6 +552,11 @@ contextBridge.exposeInMainWorld("behaviorAPI", {
   status: () => ipcRenderer.invoke("behavior:status"),
   // 具名只读查询（主进程按窗口角色复核；lens/workbench/capture 调用一律拒绝）
   query: (name, params) => ipcRenderer.invoke("behavior:query", name, params || {}),
+  // 管理面（只给主窗口；主进程按 sender 角色复核）
+  export: (opts) => ipcRenderer.invoke("behavior:export", opts || {}),
+  purge: () => ipcRenderer.invoke("behavior:purge"),
+  clearQueryText: () => ipcRenderer.invoke("behavior:clearQueryText"),
+  retention: () => ipcRenderer.invoke("behavior:retention"),
   onConfig: (callback) => {
     const handler = (_e, p) => callback(p);
     ipcRenderer.on("behavior:config", handler);

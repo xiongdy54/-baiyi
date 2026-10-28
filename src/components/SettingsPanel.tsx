@@ -124,6 +124,82 @@ function LanguageSection() {
   );
 }
 
+// ---------- D248（T12）：学习行为数据（sec-behavior）——开关 / 保留期 / 查询原文 / 导出 / 清除 ----------
+function BehaviorSection() {
+  const T = useT();
+  const [cfg, setCfg] = useState<{ enabled: boolean; retentionDays: number; recordQueryText: boolean }>({ enabled: true, retentionDays: 730, recordQueryText: false });
+  const [stat, setStat] = useState<{ status: string; events: number; daily: number; domains: number } | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const api = (window as unknown as {
+    behaviorAPI?: {
+      status?: () => Promise<{ status?: string; enabled?: boolean; retentionDays?: number; recordQueryText?: boolean }>;
+      query?: (name: string, params?: unknown) => Promise<{ ok?: boolean; data?: { counts?: { events?: number; daily?: number; domains?: number } } }>;
+      export?: (opts?: unknown) => Promise<{ ok?: boolean }>;
+      purge?: () => Promise<{ ok?: boolean }>;
+      clearQueryText?: () => Promise<{ ok?: boolean; cleared?: number }>;
+      onConfig?: (cb: () => void) => () => void;
+    };
+  }).behaviorAPI;
+  async function refresh() {
+    try {
+      const st = await api?.status?.();
+      if (st) {
+        const rd = [90, 365, 730, 0].includes(Number(st.retentionDays)) ? Number(st.retentionDays) : 730;
+        setCfg({ enabled: st.enabled !== false, retentionDays: rd, recordQueryText: st.recordQueryText === true });
+        setStat((s) => ({ status: st.status || "unknown", events: s?.events || 0, daily: s?.daily || 0, domains: s?.domains || 0 }));
+      }
+      const q = await api?.query?.("status");
+      if (q && q.ok && q.data && q.data.counts) {
+        setStat((s) => ({ status: s?.status || "ok", events: q.data!.counts!.events || 0, daily: q.data!.counts!.daily || 0, domains: q.data!.counts!.domains || 0 }));
+      }
+    } catch { /* 状态不可用：保持默认展示 */ }
+  }
+  useEffect(() => {
+    void refresh();
+    const off = api?.onConfig?.(() => void refresh());
+    return () => off?.();
+  }, []);
+  async function update(patch: Partial<typeof cfg>) {
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    await settingsStore.set("app", "behavior", next);
+    void refresh();
+  }
+  return (
+    <SettingsSection id="sec-behavior" title={T("学习行为数据（仅保存在本机）")}>
+      <h4>{T("学习行为数据")}</h4>
+      <div className="settings-row">
+        <span>{T("记录学习行为")}</span>
+        <div className="seg-tabs seg-tabs-sm" role="group" aria-label={T("记录学习行为")}>
+          <button className={cfg.enabled ? "active" : ""} onClick={() => void update({ enabled: true })}>{T("开")}</button>
+          <button className={!cfg.enabled ? "active" : ""} onClick={() => void update({ enabled: false })}>{T("关")}</button>
+        </div>
+      </div>
+      <p className="form-hint">{T("用于将来按你的学习习惯提供个性化功能。数据只保存在本机，从不上传。只分析本应用内可观测行为，不检测其他应用或真实注意力。")}</p>
+      <p className="form-hint" data-bdi-stats>{T("已记录 {n} 条事件 / {m} 条派生行", { n: stat?.events || 0, m: stat?.daily || 0 })}</p>
+      <div className="settings-row">
+        <span>{T("保留原始记录")}</span>
+        <select value={String(cfg.retentionDays)} onChange={(e) => void update({ retentionDays: Number(e.target.value) })}>
+          <option value="90">{T("3 个月")}</option>
+          <option value="365">{T("1 年")}</option>
+          <option value="730">{T("2 年")}</option>
+          <option value="0">{T("永久")}</option>
+        </select>
+      </div>
+      <div className="settings-row">
+        <span>{T("记录搜索词与查词")}</span>
+        <input type="checkbox" checked={cfg.recordQueryText} onChange={(e) => void update({ recordQueryText: e.target.checked })} />
+      </div>
+      <div className="settings-row">
+        <button className="btn btn-outline btn-sm" onClick={async () => { try { const r = await api?.export?.({}); setNote(r && r.ok ? T("已导出") : T("导出未完成")); } catch { setNote(T("导出未完成")); } }}>{T("导出（JSONL）")}</button>
+        <button className="btn btn-outline btn-sm" onClick={async () => { if (!window.confirm(T("确定清除已记录的搜索词与查词原文吗？"))) return; try { const r = await api?.clearQueryText?.(); setNote(r && r.ok ? T("已清除查询原文") : T("清除未完成")); await refresh(); } catch { setNote(T("清除未完成")); } }}>{T("清除查询原文")}</button>
+        <button className="btn btn-outline btn-sm" onClick={async () => { if (!window.confirm(T("确定清除全部行为数据吗？") + " " + T("清除后不会恢复；评分、卡片等业务数据不受影响。"))) return; try { const r = await api?.purge?.(); setNote(r && r.ok ? T("已清除全部行为数据") : T("清除未完成")); await refresh(); } catch { setNote(T("清除未完成")); } }}>{T("清除全部行为数据")}</button>
+      </div>
+      {note && <p className="form-hint" data-bdi-note>{note}</p>}
+    </SettingsSection>
+  );
+}
+
 // ---------- 新信息架构（v48.70 / D114，设计稿 §5）----------
 // 14 项平铺导航收编为 5 组 13 项；组标题为非交互 div，不进 .settings-nav button 查询集；
 // 13 个导航项与 13 个 card-fill 区块一一对应（区块常挂载、无条件卸载，滚动定位一一可达）。
@@ -155,6 +231,7 @@ const SECTION_GROUPS: Array<{ label: string; items: Array<{ id: string; label: s
     label: "数据与效率",
     items: [
       { id: "backup", label: "备份与恢复" },
+      { id: "behavior", label: "学习行为数据" },
       { id: "logs", label: "日志" },
       { id: "updates", label: "软件更新" },
       { id: "shortcuts", label: "快捷键" },
@@ -3811,6 +3888,7 @@ export default function SettingsPanel({
 
             {/* 数据与效率 */}
             <BackupSection />
+            <BehaviorSection />
             <LogsSection />
             <UpdateSection />
             <ShortcutsSection />

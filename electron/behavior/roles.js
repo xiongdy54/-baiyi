@@ -5,9 +5,9 @@
 
 const ROLES = ["main", "lens", "workbench", "capture"];
 
-/** 当前已落地的具名方法（export / purge 随 T12 增补，不提前暴露空壳） */
+/** 已落地方法（管理面 export / purge / clearQueryText / retention 只给 main） */
 const ROLE_METHODS = {
-  main: ["batch", "status", "query"],
+  main: ["batch", "status", "query", "export", "purge", "clearQueryText", "retention"],
   lens: ["batch", "status"],
   workbench: ["batch", "status"],
   capture: ["batch"],
