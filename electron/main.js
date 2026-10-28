@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme, session } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme, session, powerMonitor } = require("electron");
 const path = require("path");
 const fs = require("fs");
 // D239：开发服务器地址唯一来源（--dev-server=<url> / NUTATION_DEV_SERVER_URL / 默认 5173）+ 开发模式 watchdog
@@ -56,6 +56,8 @@ const { resolveBookassetPath } = require("./bookassetPath");
 const { installPermissionHandlers } = require("./permissions");
 // C-28（D-09）：关闭窗口收托盘的取值归一（显式 true/false 尊重；未设置按平台默认，linux 关）
 const { closeToTrayEnabled } = require("./closeToTray");
+// D248（v49.77）：用户行为数据基础设施（BDI）门面——纯本地 behavior.db，独立连接；失败只停用自身。
+const behavior = require("./behavior");
 
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各开一份 better-sqlite3 连接、双写同一库文件互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
@@ -2294,6 +2296,21 @@ app.whenReady().then(async () => {
     }
     throw e;
   }
+  // D248（v49.77）：BDI 在 initDb 之后异步初始化——打开失败/用户关闭只停用采集，不阻塞启动。
+  // ready-to-show 前刻意不 await：DDL 与会话修复不进入首窗关键路径（设计稿 §13 启动预算）。
+  void behavior.init({
+    dataDir: app.getPath("userData"),
+    settings: () => readSettings(),
+    app,
+    powerMonitor,
+    windows: () => BrowserWindow.getAllWindows(),
+    appVersion: app.getVersion(),
+    os: `${process.platform}-${process.arch}`,
+    locale: app.getLocale(),
+    deviceId: getDeviceId(app.getPath("userData")),
+  }).catch((err) => {
+    console.error("[behavior] 初始化失败（BDI 停用，不影响业务）：", err);
+  });
   // C-24：放行 library:list 的启动闸（见 handler 注册处注释）
   resolveDbReadyGate();
   // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
@@ -2470,6 +2487,8 @@ app.on("before-quit", () => {
 app.on("will-quit", () => {
   void dictDb.saveOnQuit();
   void learnerDb.saveOnQuit();
+  // D248（§5.1）：BDI 先 flushSync → sessions.end("quit") → checkpoint → close，再关主库。
+  try { behavior.close(); } catch { /* 退出期尽力而为 */ }
   try { dbModule.closeDb(); } catch { /* 退出期尽力而为 */ }
   try { dictDb.close(); } catch { /* 退出期尽力而为 */ }
   try { learnerDb.close(); } catch { /* 退出期尽力而为 */ }

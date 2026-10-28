@@ -183,6 +183,7 @@ function isPlainObject(v) {
 }
 
 function checkProp(name, spec, value) {
+  if (value === null) return null; // null = 该 props 不存在（首事件无 prevTs 等），与缺省同义
   switch (spec.type) {
     case "string":
       if (typeof value !== "string") return fail("prop_type", name);
