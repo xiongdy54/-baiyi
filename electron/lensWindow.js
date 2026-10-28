@@ -82,6 +82,7 @@ function lensWindowOptions(options = {}) {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
+      additionalArguments: ["--bdi-role=lens"], // D248：BDI 桥按窗口角色裁剪（T5）
     },
   };
 }

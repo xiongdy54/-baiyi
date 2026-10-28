@@ -200,8 +200,9 @@ function fakeEnv(over = {}) {
       const src = fs.readFileSync(f, "utf8");
       for (const m of src.matchAll(/ipcMain\.(?:handle|on)\(\s*"([\w:]+)"/g)) channels.push(m[1]);
     }
-    const unregistered = taps.unregistered(channels);
-    check(`扫描到的 ${new Set(channels).size} 个通道全部已登记（映射或只计数）`, unregistered.length === 0, "零未登记", unregistered);
+    const business = channels.filter((c) => !c.startsWith("behavior:")); // behavior:* 由 ipcTap 显式排除，不参与覆盖
+    const unregistered = taps.unregistered(business);
+    check(`扫描到的 ${new Set(business).size} 个业务通道全部已登记（映射或只计数）`, unregistered.length === 0, "零未登记", unregistered);
     const onceUses = files.filter((f) => /ipcMain\.once\(/.test(fs.readFileSync(f, "utf8"))).map((f) => path.relative(ROOT, f));
     check("仓库内无 ipcMain.once（未适配 once，出现即要求补适配）", onceUses.length === 0, "无 once", onceUses);
     const mapped = Object.keys(taps.TAPS);

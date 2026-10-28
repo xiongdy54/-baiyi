@@ -22,6 +22,10 @@ let closing = false;
 /** init 完成前 emit 的事件先留队列（§7.6），有界；init 成功后按序写入，停用则丢弃。 */
 let pending = [];
 const PENDING_MAX = 500;
+/** 采集世代：禁用/清除时 +1；旧世代批次一律拒收（§7.2 / §11.2）。 */
+let generation = 1;
+const BATCH_MAX_ITEMS = 100;
+const BATCH_MAX_BYTES = 256 * 1024;
 
 function now() {
   return typeof ctx?.now === "function" ? ctx.now() : Date.now();
@@ -86,6 +90,7 @@ function getTapContext() {
 function resetForTest() {
   closing = false;
   pending = [];
+  generation = 1;
   for (const off of unsubscribers) {
     try { off(); } catch { /* 已解绑 */ }
   }
@@ -244,6 +249,83 @@ function emitSpan(span) {
   return writer.pushSpan(span);
 }
 
+/** 渲染层批次：校验世代/条数/字节，补齐公共字段后逐条入队（§7.2 / §2.2 V1-8）。 */
+function acceptBatch(payload, role) {
+  if (closing) return { ok: false, code: "closing" };
+  if (!isReady()) return { ok: false, code: "disabled" };
+  if (!payload || typeof payload !== "object") return { ok: false, code: "bad_payload" };
+  if (payload.generation !== undefined && payload.generation !== generation) {
+    return { ok: false, code: "stale_generation", generation };
+  }
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  const spans = Array.isArray(payload.spans) ? payload.spans : [];
+  if (events.length + spans.length > BATCH_MAX_ITEMS) return { ok: false, code: "batch_too_large", accepted: 0 };
+  let bytes = 0;
+  try { bytes = JSON.stringify(payload).length; } catch { return { ok: false, code: "bad_payload" }; }
+  if (bytes > BATCH_MAX_BYTES) return { ok: false, code: "batch_too_large", accepted: 0 };
+
+  const t = now();
+  const cutoff = tapCutoffHour();
+  const day = dayStringOf(t);
+  const sid = sessions ? sessions.getSessionId() : null;
+  let accepted = 0;
+  for (const raw of events) {
+    if (!raw || typeof raw !== "object") continue;
+    const e = { ...raw };
+    e.src = role; // 不信任渲染层自报来源
+    e.session_id = sid;
+    e.recv_ts = Number.isFinite(e.recv_ts) ? e.recv_ts : t;
+    e.ts = Number.isFinite(e.ts) ? e.ts : e.recv_ts;
+    e.day = typeof e.day === "string" ? e.day : day;
+    e.tz_offset = Number.isInteger(e.tz_offset) ? e.tz_offset : -new Date(e.ts).getTimezoneOffset();
+    e.cutoff_hour = Number.isInteger(e.cutoff_hour) ? e.cutoff_hour : cutoff;
+    e.render_id = e.render_id || payload.renderId || null;
+    e.window_id = Number.isInteger(e.window_id) ? e.window_id : (Number.isInteger(payload.windowId) ? payload.windowId : null);
+    if (e.v === undefined) e.v = 1;
+    if (e.actor === undefined) e.actor = "unknown";
+    const r = writer.push(e);
+    if (r.ok) accepted++;
+  }
+  for (const raw of spans) {
+    if (!raw || typeof raw !== "object") continue;
+    const s = { ...raw };
+    s.src = role;
+    s.session_id = sid;
+    s.day = typeof s.day === "string" ? s.day : day;
+    s.render_id = s.render_id || payload.renderId || null;
+    s.window_id = Number.isInteger(s.window_id) ? s.window_id : (Number.isInteger(payload.windowId) ? payload.windowId : null);
+    if (!Number.isInteger(s.cutoff_hour)) s.cutoff_hour = cutoff;
+    const r = writer.pushSpan(s);
+    if (r.ok) accepted++;
+  }
+  return { ok: true, accepted };
+}
+
+/** 给渲染层的配置推送载荷（禁用/清除后由主进程广播 behavior:config）。 */
+function configPayload() {
+  return { enabled: config.enabled, generation, recordQueryText: config.recordQueryText === true };
+}
+
+/** 设置页/诊断用的公开状态（不含文件路径、策略内部字段）。 */
+function publicStatus() {
+  const s = getStatus();
+  return {
+    status: s.status,
+    reason: s.reason,
+    enabled: s.enabled,
+    retentionDays: s.retentionDays,
+    recordQueryText: s.recordQueryText,
+    generation,
+    db: { status: s.db.status, reason: s.db.reason, open: s.db.open, schemaVersion: s.db.schemaVersion },
+    session: s.session ? { active: s.session.active } : null,
+    writer: s.writer ? { queued: s.writer.queued, written: s.writer.written, rejected: s.writer.rejected } : null,
+  };
+}
+
+function getGeneration() {
+  return generation;
+}
+
 function flushSync() {
   return writer ? writer.flushSync() : 0;
 }
@@ -259,6 +341,7 @@ function setEnabled(next) {
   if (!turningOn && sessions) {
     try { sessions.end("disabled"); } catch { /* 禁用路径不得抛 */ }
   }
+  if (!turningOn) generation++; // 旧会话的缓冲批次从此拒收
   config = { ...config, enabled: turningOn };
   if (writer) writer.setEnabled(turningOn);
   if (turningOn && policy && !policy.firstEnabledAt) {
@@ -315,6 +398,10 @@ module.exports = {
   isReady,
   emit,
   emitSpan,
+  acceptBatch,
+  configPayload,
+  publicStatus,
+  getGeneration,
   flushSync,
   snapshotTo,
   setEnabled,

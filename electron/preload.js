@@ -544,3 +544,16 @@ contextBridge.exposeInMainWorld("pluginsAPI", {
   }
 });
 
+// D248（T5）：BDI 采集桥。本文件只服务 main / lens / workbench 三窗口（capture 走 preload-capture.js，
+// 那里只有 batch + onConfig）。三窗口当前都允许 status；query / export / purge 随 T11 / T12 只加给 main。
+// 主进程仍按 sender 的真实页面 URL 复核角色（V1-8），这里的裁剪只是第一道门。
+contextBridge.exposeInMainWorld("behaviorAPI", {
+  batch: (payload) => ipcRenderer.send("behavior:batch", payload),
+  status: () => ipcRenderer.invoke("behavior:status"),
+  onConfig: (callback) => {
+    const handler = (_e, p) => callback(p);
+    ipcRenderer.on("behavior:config", handler);
+    return () => ipcRenderer.removeListener("behavior:config", handler);
+  }
+});
+

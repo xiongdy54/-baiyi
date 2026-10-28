@@ -58,6 +58,7 @@ const { installPermissionHandlers } = require("./permissions");
 const { closeToTrayEnabled } = require("./closeToTray");
 // D248（v49.77）：用户行为数据基础设施（BDI）门面——纯本地 behavior.db，独立连接；失败只停用自身。
 const behavior = require("./behavior");
+const behaviorRoles = require("./behavior/roles");
 // D248（T4）：IPC tap 必须在任何业务 ipcMain.handle/on 注册之前安装（§7.1；排除 behavior:*，未登记通道透传）。
 require("./behavior/ipcTap").install(ipcMain, behavior.emit);
 
@@ -451,6 +452,29 @@ ipcMain.on("win:cardsChanged", (e) => {
 // DB_TOO_NEW / initDb 抛错路径应用随即退出（whenReady 上抛），闸不解析无副作用。
 let resolveDbReadyGate;
 const dbReadyGate = new Promise((r) => { resolveDbReadyGate = r; });
+
+// ---------- D248（T5）：BDI 采集桥（behavior:* 由 ipcTap 排除，不经 tap） ----------
+// 角色按 sender 的真实顶层页面 URL 判定；渲染层自报的 src/角色一律不采信（V1-8）。
+function behaviorRoleOf(e) {
+  try {
+    const frame = e.senderFrame;
+    if (!frame || frame !== e.sender.mainFrame) return null; // 只认顶层帧
+    return behaviorRoles.roleFromUrl(frame.url);
+  } catch {
+    return null;
+  }
+}
+ipcMain.on("behavior:batch", (e, payload) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, "batch")) return;
+  behavior.acceptBatch(payload, role); // 失败只在 BDI 内部计数，不回抛到业务
+});
+ipcMain.handle("behavior:status", (e) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, "status")) throw new Error("BDI：该窗口无权读取行为数据状态");
+  return behavior.publicStatus();
+});
+
 ipcMain.handle("library:list", async () => {
   await dbReadyGate;
   return listItems();
@@ -2127,6 +2151,7 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      additionalArguments: ["--bdi-role=main"], // D248：BDI 桥按窗口角色裁剪（T5）
       // v28：PDF 原生阅读依赖 rAF 驱动渲染循环——窗口遮挡时 Chromium 暂停 rAF 会导致
       // pdf.js 渲染任务永远停在 RUNNING（实测白轮廓/黑屏/看似无响应），阅读器禁用节流
       backgroundThrottling: false
