@@ -180,7 +180,7 @@ try {
       hasCover: !!card?.querySelector('.book-card-cover'),
       capTitle: it[0]?.querySelector('.cap-title')?.textContent,
       capMeta: it[0]?.querySelector('.cap-meta')?.textContent.replace(/\\s+/g,' ').trim(),
-      railH: it[0] ? getComputedStyle(it[0].querySelector('.cap-rail')).height : null,
+      railCount: it[0] ? it[0].querySelectorAll('.cap-rail').length : -1,
       cardAspect: card ? getComputedStyle(card).aspectRatio : null,
       radius: card ? getComputedStyle(card).borderTopLeftRadius : null,
       nativeSelect: document.querySelectorAll('.book-card select').length,
@@ -196,7 +196,7 @@ try {
   check("4 本书渲染为 4 个条目", r.items === 4, JSON.stringify(r));
   check("计数为「4 本」且只有一个「本」字（用户实测的 2本本 缺陷）", /^4 本$/.test(r.count || ""), r.count);
   check("图注卡在位：书名常驻 + meta 含百分比与日期", !!r.capTitle && /%/.test(r.capMeta || "") && /-/.test(r.capMeta || ""), JSON.stringify(r));
-  check("进度轨高 2px（§5.3 半档写法）", r.railH === "2px", r.railH);
+  check("封面下方进度轨已退役（v49.78 / D249：进度只由图注 meta 百分比表达）", r.railCount === 0, r.railCount);
   check("封面保持 2:3、直角（v48.115/D161 第三轮：圆角只属于文件夹夹体）", r.cardAspect === "2 / 3" && r.radius === "0px", JSON.stringify(r));
   check("卡面上不再有原生 <select>（旧版语言下拉）", r.nativeSelect === 0, r.nativeSelect);
   check("动作条退役 + 图注名称行（名称 + ⋯ 更多按钮）在场（v48.117/D162）",
@@ -518,7 +518,7 @@ try {
   //    会让两条光标夹着一根 2px 分界，鼠标停在边缘就在 pointer↔grab 之间反复翻。
   const cursorUniform = await page.eval(`${PRELUDE}
     const it=window.__S.items()[0];
-    const picks=[it.querySelector('.book-card-cover'), it.querySelector('.cap-rail'), it.querySelector('.cap-title'), it];
+    const picks=[it.querySelector('.book-card-cover'), it.querySelector('.book-card'), it.querySelector('.cap-title'), it];
     const vals=picks.map(e=>e?getComputedStyle(e).cursor:'MISSING');
     return JSON.stringify({vals, uniq:[...new Set(vals)].join(',')});`);
   const cu = JSON.parse(cursorUniform);
@@ -581,24 +581,25 @@ try {
   check("左缘区：zone-before（画 accent 竖条，不提示成组）", /zone-before/.test(left.cls) && !left.tip, JSON.stringify(left));
   check("右缘区：zone-after", /zone-after/.test(right.cls) && !right.tip, JSON.stringify(right));
 
-  check("两侧竖条与高亮框同量度：条高 = 封面 + 进度轨那一块",
+  check("两侧竖条与高亮框同量度：条高 = 封面块",
     !!left.faceH && Math.abs(parseFloat(left.barH) - left.faceH) <= 1 && Math.abs(parseFloat(right.barH) - right.faceH) <= 1,
     JSON.stringify({ left, right }));
 
   await dragover(0.5);
-  // 高亮框必须罩住「封面 + 进度轨」整块（用户实测：框只到封面底、把 2px 轨落在框外，看着短一截）
+  // v49.78 / D249：封面下方进度轨退役，高亮框口径＝封面块本身（不再含轨）
   r = await J(`${PRELUDE}
     const it=window.__S.items()[1], face=it.querySelector('.shelf-face');
-    const card=it.querySelector('.book-card'), rail=it.querySelector('.cap-rail');
-    const fr=face.getBoundingClientRect(), cr=card.getBoundingClientRect(), rr=rail.getBoundingClientRect();
+    const card=it.querySelector('.book-card');
+    const fr=face.getBoundingClientRect(), cr=card.getBoundingClientRect();
     const cs=getComputedStyle(face);
-    return JSON.stringify({ faceH:Math.round(fr.height), cardH:Math.round(cr.height), railH:Math.round(rr.height),
-      faceBottom:Math.round(fr.bottom), railBottom:Math.round(rr.bottom),
+    return JSON.stringify({ faceH:Math.round(fr.height), cardH:Math.round(cr.height),
+      faceBottom:Math.round(fr.bottom), cardBottom:Math.round(cr.bottom),
+      railCount:it.querySelectorAll('.cap-rail').length,
       outline:\`\${cs.outlineStyle} \${cs.outlineWidth} \${cs.outlineColor}\`,
       zone:/zone-group/.test(it.className) });`, "face-align");
   check("中央区处于 zone-group 且框画在 .shelf-face 上", r.zone === true && /solid/.test(r.outline) && /2px/.test(r.outline), JSON.stringify(r));
-  check("高亮框高度 = 封面 + 进度轨，下沿落在轨下方（不再短一截）",
-    r.faceH === r.cardH + r.railH && r.faceBottom === r.railBottom, JSON.stringify(r));
+  check("高亮框高度 = 封面块，下沿与封面底对齐（进度轨已退役，v49.78/D249）",
+    r.faceH === r.cardH && r.faceBottom === r.cardBottom && r.railCount === 0, JSON.stringify(r));
 
   await fire(`const a=window.__S.items()[0], b=window.__S.items()[1];
     const [x,y]=window.__S.pt(b,0.5);

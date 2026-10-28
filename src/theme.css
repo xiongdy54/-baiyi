@@ -1204,7 +1204,8 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
 .shelf-body { padding: var(--sp-6) var(--sp-8) var(--sp-8); }
 .shelf-item { display: flex; flex-direction: column; min-width: 0; }
 
-/* 图注卡：封面 → 2px 进度轨 → 书名 / meta。书名与进度常驻可读，
+/* 图注卡：封面 → 书名 / meta（v49.78 / D249：封面下方的 2px 进度轨退役，
+   进度只由图注 meta 百分比表达——与百分比重复，用户指令）。书名常驻可读，
    操作只在 hover / 键盘焦点时压住封面底缘（旧版整块黑幕会把封面整块抹掉）。
    **不裁自己的浮层**（v48.20 / D56）：动作条菜单挂在卡内、按需向卡片外展开，
    `overflow: hidden` 会把菜单越界的那截直接切掉（实测 10 个选项全不可点）。
@@ -1291,8 +1292,6 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
   text-overflow: ellipsis;
 }
 
-.cap-rail { height: calc(var(--sp-1) / 2); background: var(--grey-2); }
-.cap-rail i { display: block; height: 100%; background: var(--accent); }
 .cap { padding: var(--sp-2) 0 0; display: flex; flex-direction: column; gap: var(--sp-1); }
 /* v48.117 / D162：名称行＝名称 + 右端 ⋯ 更多按钮；名称单行截断
    （书籍 JS 截 12 字、文件夹 CSS ellipsis），title 属性恒存全名 */
@@ -1445,9 +1444,9 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
 .shelf-item[draggable="true"] .t-open,
 .shelf-table tr[draggable="true"] .act,
 .shelf-table tr[draggable="true"] .t-open { cursor: pointer; }
-/* 「封面 + 进度轨」是一整块（.shelf-face 是它在 DOM 上的载体）：拖拽的两态高亮框都画在这一块上，
-   所以下沿落在进度轨之下、不含下面的书名与 meta。进度轨虽只有 2px，但它属于封面那一叠，
-   框若只圈到封面底，视觉上就像框短了一截。 */
+/* 封面块是一整块（.shelf-face 是它在 DOM 上的载体）：拖拽的两态高亮框都画在这一块上，
+   所以下沿落在封面底、不含下面的书名与 meta。
+   （v49.78 / D249 进度轨退役后，这一块＝封面本身。） */
 .shelf-face { position: relative; }
 .shelf-item.is-dragging .shelf-face {
   outline: calc(var(--sp-1) / 2) solid var(--accent);
@@ -1458,8 +1457,8 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
 
 /* 拖拽落点的三种态：两侧＝重排（2px accent 竖条）／中央＝归组（整块描边 + 浮标）。
    两种意图必须长得不一样，用户不用记修饰键。
-   竖条也画在 .shelf-face 上：它与高亮框共用「封面 + 进度轨」这一个量度，
-   不然框到轨下、条却顺着书名一路到底，同一块卡上出现两套高度。 */
+   竖条也画在 .shelf-face 上：它与高亮框共用封面这一个量度，
+   不然条顺着书名一路到底，同一块卡上出现两套高度。 */
 .shelf-item { position: relative; }
 .shelf-item.zone-before .shelf-face::before,
 .shelf-item.zone-after .shelf-face::after {
@@ -1738,7 +1737,7 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
   font-weight: 500;
 }
 /* 新入库的材料：outline 高亮 1.2s（不受封面色影响，深浅两主题都看得见），
-   框与拖拽高亮同一块口径＝封面 + 进度轨 */
+   框与拖拽高亮同一块口径＝封面块 */
 .shelf-item.is-fresh .shelf-face {
   outline: calc(var(--sp-1) / 2) solid var(--accent);
   outline-offset: 2px;
