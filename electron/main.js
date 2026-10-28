@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme, session } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, dialog, protocol, net, shell, screen, nativeTheme, session, powerMonitor } = require("electron");
 const path = require("path");
 const fs = require("fs");
 // D239：开发服务器地址唯一来源（--dev-server=<url> / NUTATION_DEV_SERVER_URL / 默认 5173）+ 开发模式 watchdog
@@ -56,6 +56,12 @@ const { resolveBookassetPath } = require("./bookassetPath");
 const { installPermissionHandlers } = require("./permissions");
 // C-28（D-09）：关闭窗口收托盘的取值归一（显式 true/false 尊重；未设置按平台默认，linux 关）
 const { closeToTrayEnabled } = require("./closeToTray");
+// D248（v49.77）：用户行为数据基础设施（BDI）门面——纯本地 behavior.db，独立连接；失败只停用自身。
+const behavior = require("./behavior");
+const behaviorRoles = require("./behavior/roles");
+const behaviorPolicy = require("./behavior/policy");
+// D248（T4）：IPC tap 必须在任何业务 ipcMain.handle/on 注册之前安装（§7.1；排除 behavior:*，未登记通道透传）。
+require("./behavior/ipcTap").install(ipcMain, behavior.emit);
 
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各开一份 better-sqlite3 连接、双写同一库文件互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
@@ -312,6 +318,8 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (scope === "app" && key === "updateAutoCheck") value = value !== false;
   // v49.8（D182）：界面语言写侧归一（enum 四值，非法回落 zh-CN；与渲染层 normalizeLocale 同规）
   if (scope === "app" && key === "language") value = mainI18n.normalizeLanguage(value);
+  // D248（T12）：app.behavior 三键写侧归一（保留期枚举 / 两开关严格布尔），并即时应用到运行时
+  if (scope === "app" && key === "behavior") value = behaviorPolicy.normalizeBehavior(value);
   if (scope === "app" && key === "extractFaceFontFollow") value = value === true;
   if (scope === "app" && key === "extractFaceFontSize") {
     const n = Math.round(Number(value));
@@ -357,6 +365,9 @@ ipcMain.handle("settings:set", (_e, scope, key, value) => {
   if (!all[scope]) all[scope] = {};
   all[scope][key] = value;
   writeSettings(all);
+  if (scope === "app" && key === "behavior") {
+    try { behavior.setBehaviorConfig(value); } catch { /* BDI 失败不影响设置本身 */ }
+  }
   if (nativeFpBefore !== null && learnerRefresh.currentNativeFingerprint() !== nativeFpBefore) learnerRefresh.requestNativeRebuild();
   // C-31：设置变更广播——独立窗口（lens / 制卡台 / 捕获）开着时即时跟随换肤 / 动效 / 强调色，
   // 不再只靠「每次呼出重读」。单向推送（非 invoke 通道，不计入 IPC 注册清单，先例＝D123 / D180 / D197；
@@ -447,6 +458,56 @@ ipcMain.on("win:cardsChanged", (e) => {
 // DB_TOO_NEW / initDb 抛错路径应用随即退出（whenReady 上抛），闸不解析无副作用。
 let resolveDbReadyGate;
 const dbReadyGate = new Promise((r) => { resolveDbReadyGate = r; });
+
+// ---------- D248（T5）：BDI 采集桥（behavior:* 由 ipcTap 排除，不经 tap） ----------
+// 角色按 sender 的真实顶层页面 URL 判定；渲染层自报的 src/角色一律不采信（V1-8）。
+function behaviorRoleOf(e) {
+  try {
+    const frame = e.senderFrame;
+    if (!frame || frame !== e.sender.mainFrame) return null; // 只认顶层帧
+    return behaviorRoles.roleFromUrl(frame.url);
+  } catch {
+    return null;
+  }
+}
+ipcMain.on("behavior:batch", (e, payload) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, "batch")) return;
+  behavior.acceptBatch(payload, role); // 失败只在 BDI 内部计数，不回抛到业务
+});
+ipcMain.handle("behavior:status", (e) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, "status")) throw new Error("BDI：该窗口无权读取行为数据状态");
+  return behavior.publicStatus();
+});
+// §10：只允许具名查询（禁止任意 SQL / 表名 / 列名 / 路径）；本窗口角色没有 query 权限即拒绝。
+ipcMain.handle("behavior:query", (e, name, params) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, "query")) throw new Error("BDI：该窗口无权查询行为数据");
+  return behavior.runQuery(String(name || ""), params && typeof params === "object" ? params : {});
+});
+// §11：管理面只给主窗口（导出 / 清除 / 清除查询原文 / 保留期执行）
+const behaviorMainOnly = (method, fn) => ipcMain.handle(`behavior:${method}`, (e, ...args) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, method)) throw new Error("BDI：该窗口无权执行此操作");
+  return fn(...args);
+});
+behaviorMainOnly("purge", () => behavior.purgeAll());
+behaviorMainOnly("clearQueryText", () => behavior.clearQueryText());
+behaviorMainOnly("retention", () => behavior.enforceRetention());
+behaviorMainOnly("export", async (opts) => {
+  let dest = String(opts?.path || "");
+  if (!dest) {
+    const r = await dialog.showSaveDialog({
+      defaultPath: `nutation-behavior-${new Date().toISOString().slice(0, 10)}.zip`,
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
+    });
+    if (r.canceled || !r.filePath) return { ok: false, code: "canceled" };
+    dest = r.filePath;
+  }
+  return behavior.exportData(dest, { includeText: opts?.includeText === true });
+});
+
 ipcMain.handle("library:list", async () => {
   await dbReadyGate;
   return listItems();
@@ -1006,7 +1067,14 @@ const backupOpts = () => ({
   // WAL 下裸 readFileSync 可能缺最近提交且无事务一致性保证。dictionary.db 950MB 级为页拷贝，
   // 速度与内存特性优于旧裸读（learner.db 派生数据不进备份清单）。
   snapshotLibrary: (dest) => dbModule.snapshotTo(dest),
-  snapshotDict: (dest) => dictDb.snapshotTo(dest)
+  snapshotDict: (dest) => dictDb.snapshotTo(dest),
+  // D248（T13，§12.1）：behavior.db 顺序快照——先 flush 再 db.backup；meta 记 schemaVersion/
+  // dataEpoch/counts 与快照时点（主库与行为库不承诺同一时点，偏差由 backup 侧记 crossDbSkewMs）
+  snapshotBehavior: (dest) => behavior.snapshotTo(dest),
+  behaviorDbFile: path.join(app.getPath("userData"), "behavior.db"),
+  behaviorSchemaVersion: (behavior.getStatus().db || {}).schemaVersion ?? null,
+  behaviorDataEpoch: (behavior.getPolicy() || {}).dataEpoch || null,
+  behaviorCounts: behavior.backupCounts()
 });
 // D206：最近一次启动期自动备份的结局（内存态，设置页通知框经 backup:info 消费；
 // 不落盘——重启后由下一轮自动备份重新产生，未产生期间以磁盘备份年龄兜底）
@@ -1083,16 +1151,31 @@ ipcMain.handle("backup:restore", async (_e, file) => {
 ipcMain.handle("backup:meta", async (_e, file) => {
   try {
     const m = await backup.readBackupMeta(String(file));
-    if (!m) return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null };
+    if (!m) return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null, behavior: null };
     const local = getDeviceId(app.getPath("userData"));
+    // D248（T13，§12.2）：BDI 是否包含 / 是否早于清除边界 → 确认框提示（只提示，不阻止）
+    const b = m.behavior && typeof m.behavior === "object" ? m.behavior : null;
+    const snapAt = Number(b && b.snapshotAt) || 0;
+    let floor = 0;
+    try {
+      const polFile = path.join(app.getPath("userData"), "behavior-policy.json");
+      floor = Number((JSON.parse(fs.readFileSync(polFile, "utf8")) || {}).analysisFloorTs) || 0;
+    } catch { floor = 0; }
     return {
       ok: true,
       fromOtherDevice: typeof m.deviceId === "string" && m.deviceId.length > 0 && m.deviceId !== local,
       deviceId: m.deviceId ?? null,
-      schemaVersion: m.schemaVersion ?? null
+      schemaVersion: m.schemaVersion ?? null,
+      behavior: {
+        included: !!(b && b.included),
+        reason: b && b.reason ? String(b.reason) : null,
+        snapshotAt: snapAt || null,
+        crossDbSkewMs: Number(m.crossDbSkewMs) || 0,
+        skipsRestore: floor > 0 && snapAt > 0 && snapAt < floor
+      }
     };
   } catch {
-    return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null };
+    return { ok: false, fromOtherDevice: false, deviceId: null, schemaVersion: null, behavior: null };
   }
 });
 ipcMain.on("app:relaunch", () => {
@@ -2123,6 +2206,7 @@ function createWindow() {  // 防重入：已存在**主窗口**时不再创建�
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      additionalArguments: ["--bdi-role=main"], // D248：BDI 桥按窗口角色裁剪（T5）
       // v28：PDF 原生阅读依赖 rAF 驱动渲染循环——窗口遮挡时 Chromium 暂停 rAF 会导致
       // pdf.js 渲染任务永远停在 RUNNING（实测白轮廓/黑屏/看似无响应），阅读器禁用节流
       backgroundThrottling: false
@@ -2294,6 +2378,22 @@ app.whenReady().then(async () => {
     }
     throw e;
   }
+  // D248（v49.77）：BDI 在 initDb 之后异步初始化——打开失败/用户关闭只停用采集，不阻塞启动。
+  // ready-to-show 前刻意不 await：DDL 与会话修复不进入首窗关键路径（设计稿 §13 启动预算）。
+  void behavior.init({
+    dataDir: app.getPath("userData"),
+    settings: () => readSettings(),
+    app,
+    powerMonitor,
+    windows: () => BrowserWindow.getAllWindows(),
+    appVersion: app.getVersion(),
+    os: `${process.platform}-${process.arch}`,
+    locale: app.getLocale(),
+    deviceId: getDeviceId(app.getPath("userData")),
+    pull: (q) => dbModule.bdiPull(q),
+  }).catch((err) => {
+    console.error("[behavior] 初始化失败（BDI 停用，不影响业务）：", err);
+  });
   // C-24：放行 library:list 的启动闸（见 handler 注册处注释）
   resolveDbReadyGate();
   // D143（v48.98，T4）：post-initDb 初始化（quickCapture/workbench/tray/pluginHost 注册 + 记忆补跑 +
@@ -2470,6 +2570,8 @@ app.on("before-quit", () => {
 app.on("will-quit", () => {
   void dictDb.saveOnQuit();
   void learnerDb.saveOnQuit();
+  // D248（§5.1）：BDI 先 flushSync → sessions.end("quit") → checkpoint → close，再关主库。
+  try { behavior.close(); } catch { /* 退出期尽力而为 */ }
   try { dbModule.closeDb(); } catch { /* 退出期尽力而为 */ }
   try { dictDb.close(); } catch { /* 退出期尽力而为 */ }
   try { learnerDb.close(); } catch { /* 退出期尽力而为 */ }

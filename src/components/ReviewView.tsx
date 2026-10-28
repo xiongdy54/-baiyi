@@ -35,6 +35,9 @@ import { growthApi, readGrowthFeedbackEnabled, type GrowthEventHit, type GrowthF
 import { growthEventText, growthEvidenceLines, growthFoldText, growthTierLabel } from "../lib/growthStrings";
 import GrowthToast from "./GrowthToast";
 import { useT } from "../lib/i18n";
+// D248（T8）：复习会话/呈现/揭示埋点（评分本身由主进程 tap 记）
+import { track, newUuid7, getTrackConfig, setTrackContext } from "../lib/behavior/track";
+import { createAttention } from "../lib/behavior/attention";
 
 // A-1（审计）：渲染期调用不得抛。原写法 `previews?.items ?? fsrsEngine.preview(current!.fsrs)`
 // 在 previews 为 null 时会同步抛，被根错误边界接管 → 整应用停止渲染。这里降级为空列表。
@@ -148,6 +151,31 @@ export default function ReviewView({
 } = {}) {
   const T = useT();
   const tagsEnabled = useTagsEnabled();
+  // D248（T8）：一次复习会话的 BDI 上下文（ctxId 每挂载一次；注意力 review 阈值 90s）
+  const bdiCtxIdRef = useRef<string>(newUuid7());
+  const bdiAttentionRef = useRef<ReturnType<typeof createAttention> | null>(null);
+  const bdiPresentationRef = useRef<{ id: string; at: number; revealed: boolean } | null>(null);
+  const bdiPresentedCardRef = useRef<string | null>(null);
+  const bdiDoneRef = useRef(0);
+  const bdiStartMonoRef = useRef(performance.now());
+  useEffect(() => {
+    const attn = createAttention({ cutoffHour: getTrackConfig().cutoffHour });
+    bdiAttentionRef.current = attn;
+    attn.start();
+    attn.setContext({ surface: "review", entityType: "card", ctxId: bdiCtxIdRef.current, origin: "review_flow" });
+    setTrackContext({ surface: "review", ctxId: bdiCtxIdRef.current });
+    track("review.session", { ctxId: bdiCtxIdRef.current, origin: "review_flow", props: { phase: "start", mode: "due", planned: 0, done: 0, dur_ms: 0 } });
+    return () => {
+      attn.stop("unload");
+      bdiAttentionRef.current = null;
+      track("review.session", {
+        ctxId: bdiCtxIdRef.current,
+        origin: "review_flow",
+        props: { phase: "end", mode: "due", planned: 0, done: bdiDoneRef.current, dur_ms: Math.round(performance.now() - bdiStartMonoRef.current) },
+      });
+      setTrackContext(null);
+    };
+  }, []);
   const [current, setCurrent] = useState<(CardRecord & { docTitle?: string }) | null>(null);
   const [showBack, setShowBack] = useState(false);
   // v48.41（D81）：当前卡材料名上报顶栏（替代「复习」字样；无材料名＝空串，顶栏回落原字样）
@@ -195,6 +223,41 @@ export default function ReviewView({
   useEffect(() => {
     if (showBack) eventBus.emit("ui/review-flip", {});
   }, [showBack]);
+  // D248（T8）：每张卡一次 review.shown（StrictMode 双跑不重复）；揭示时补 review.revealed（单调时钟 think_ms）
+  useEffect(() => {
+    if (!current) {
+      bdiPresentedCardRef.current = null;
+      bdiPresentationRef.current = null;
+      return;
+    }
+    if (bdiPresentedCardRef.current === current.id) return;
+    bdiPresentedCardRef.current = current.id;
+    const id = newUuid7();
+    bdiPresentationRef.current = { id, at: performance.now(), revealed: false };
+    track("review.shown", {
+      cardId: current.id,
+      ctxId: bdiCtxIdRef.current,
+      presentationId: id,
+      origin: "review_flow",
+      surface: "review",
+      props: { cardType: current.cardType, queue: "due", position: bdiDoneRef.current, isNew: String(current.fsrs?.state) === "new" },
+    });
+  }, [current]);
+  useEffect(() => {
+    if (!showBack || !current) return;
+    const p = bdiPresentationRef.current;
+    if (!p || p.revealed) return;
+    p.revealed = true;
+    track("review.revealed", {
+      cardId: current.id,
+      ctxId: bdiCtxIdRef.current,
+      presentationId: p.id,
+      origin: "review_flow",
+      surface: "review",
+      props: { dur_ms: Math.max(0, Math.round(performance.now() - p.at)) },
+    });
+    bdiAttentionRef.current?.noteInput("key");
+  }, [showBack, current]);
   /** 显示答案的**生效**快捷键（随设置变化；不许把「空格」写死） */
   const hint = bindingHint("review.showAnswer");
   const [startedAt, setStartedAt] = useState(Date.now());
@@ -452,6 +515,7 @@ export default function ReviewView({
 
   async function grade(rating: Rating) {
     if (!current || actionBusyRef.current || saveError || previewError) return;
+    bdiAttentionRef.current?.noteInput("pointer");
     actionBusyRef.current = true;
     try {
       // 过期判废（§4.4.3 v23）：源卡状态与预览生成时不一致 → 现场重算，绝不复用过期预览
@@ -469,6 +533,7 @@ export default function ReviewView({
       }
       // v49.0 / D174：ui/review-grade（皮肤 API，评分成功边界后）
       eventBus.emit("ui/review-grade", { grade: rating });
+      bdiDoneRef.current += 1; // D248：会话完成数（review.session 收尾与 shown.position 用）
       // v48.85（D129 B2，§4.17-6⑥/§6.6.2 非阻塞硬性）：评分成功边界（COMMIT + persist + IPC 成功）后的
       // 成长反馈拉取——fire-and-forget：不 await、不进 actionBusy、失败静默（growthApi 内部已兜底降级），
       // 绝不阻塞评分→下一张卡路径；设置关闭（growthEnabledRef=false）时完全不调用（读取路径短路）。

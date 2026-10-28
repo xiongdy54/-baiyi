@@ -61,7 +61,10 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
           }
         ],
         undefined,
-        0.2
+        0.2,
+        undefined,
+        undefined,
+        "judge"
       );
       if (!mounted.current) return;
       let parsed: { verdict?: string; explanation?: string } | null = null;

@@ -19,6 +19,7 @@ import {
   type PersonalMeaningCandidate
 } from "../lib/insight";
 import { useT } from "../lib/i18n";
+import { track } from "../lib/behavior/track";
 
 type Step = "range" | "preview" | "running" | "done";
 
@@ -118,6 +119,7 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
       setRun(localRun);
       setStep("running");
       setStreamChars(0);
+      track("insight.viewed", { origin: "reader_internal" });
       const { userText } = evidencePackageToMessages(pkg);
       const full = await aiGateway.chat(
         [
@@ -126,7 +128,9 @@ export default function InsightPanel({ onClose, onJumpToDoc }: {
         ],
         (acc) => setStreamChars(acc.length),
         undefined,
-        (n) => setThinkChars(n)
+        (n) => setThinkChars(n),
+        undefined,
+        "insight"
       );
       const parsed = parseInsightOutput(full);
       const done = await insightsApi.completeRun(localRun.id, {

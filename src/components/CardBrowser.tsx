@@ -34,6 +34,7 @@ import { extractStatusLabel } from "../lib/sessionQueue";
 import { nextAtText } from "./ExtractCardFace";
 import { settingsStore } from "../lib/settings";
 import { parseCardQuery, cardRowMatches, extractRowMatches, extractScopeConditions, extractTagsOf } from "../lib/cardQuery";
+import { track } from "../lib/behavior/track";
 // D158：方案条件表格侧过滤（语义与会话组队同源，见 §6.8-5「表格侧语义」）
 import { buildSchemeFilter, cardMatchesScheme, extractMatchesScheme } from "../lib/schemeFilter";
 // v48.60（D101）：标签——批量打标/去标的终值计算 + 词表建议（规则单一源 = src/lib/tags.ts）
@@ -185,6 +186,11 @@ export default function CardBrowser({
   // v46（M14-UM2，§6.7.3）：「记忆接地」筛选（情境来自记忆的卡，含存疑）
   const [memFilter, setMemFilter] = useState(false);
   const [sortBy, setSortBy] = useState("due");
+  // D248（T9）：已提交的浏览查询（防抖后的 query；原文只在 recordQueryText 开启时落库）
+  useEffect(() => {
+    if (!query.trim()) return;
+    track("browse.queried", { origin: "browse", text: query, props: { num: null, filters: [], sort: sortBy } });
+  }, [query, sortBy]);
   const [detailId, setDetailId] = useState<string | null>(null);
   // v48.40（D80）：摘录详情——摘录行普通点击打开（与闪卡行同语义；Ctrl/Shift 仍多选）
   const [extractDetailId, setExtractDetailId] = useState<string | null>(null);
@@ -2748,7 +2754,10 @@ export function LeechWizard({ card: cardProp, onClose, onDone }: { card: CardRec
           }
         ],
         undefined,
-        0.4
+        0.4,
+        undefined,
+        undefined,
+        "other"
       );
       let parsed: { diagnosis?: string; analysis?: string; suggestions?: string[] } | null = null;
       try {

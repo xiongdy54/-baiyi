@@ -22,6 +22,9 @@ import { learnerSettings } from "./lib/learner";
 import { learnerStrings } from "./lib/learnerStrings";
 import { eventBus } from "./lib/eventbus";
 import { settingsStore } from "./lib/settings";
+// D248（T7）：BDI 渲染层接线——既有事件桥 + 采集配置（状态/世代由主进程下发）
+import { configureTrack } from "./lib/behavior/track";
+import { installBdiBridges } from "./lib/behavior/bridges";
 import { commandRegistry } from "./lib/commands";
 import { libraryApi, type DocPayload } from "./lib/library";
 // v48.114（D159）：日记/洞察/记忆三功能暂时移除（代码保留）——仅保留 shortcutsApi
@@ -287,6 +290,35 @@ export default function App() {
   useEffect(() => {
     void commandRegistry.init();
     commandRegistry.install();
+  }, []);
+
+  // D248（T7）：BDI 渲染层接线——事件桥 + 采集配置。禁用/清除由主进程经 behavior:config 推送，
+  // 收到后清空渲染层缓冲并停用（旧 generation 批次被主进程拒收）。
+  useEffect(() => {
+    const offBridge = installBdiBridges();
+    const api = (window as unknown as {
+      behaviorAPI?: {
+        status?: () => Promise<{ enabled?: boolean; generation?: number; recordQueryText?: boolean }>;
+        onConfig?: (cb: (p: { enabled?: boolean; generation?: number; recordQueryText?: boolean }) => void) => () => void;
+      };
+    }).behaviorAPI;
+    const applyCfg = (s: { enabled?: boolean; generation?: number; recordQueryText?: boolean } | null | undefined) => {
+      if (!s) return;
+      configureTrack({
+        enabled: s.enabled !== false,
+        generation: typeof s.generation === "number" ? s.generation : 1,
+        recordQueryText: s.recordQueryText === true
+      });
+    };
+    void (async () => {
+      try { applyCfg(await api?.status?.()); } catch { /* 状态不可用：保持默认开 */ }
+      try {
+        const cutoff = await settingsStore.get<number>("app", "dayCutoffHour", 4);
+        if (Number.isInteger(cutoff) && cutoff >= 0 && cutoff <= 23) configureTrack({ cutoffHour: cutoff });
+      } catch { /* 默认切点 4 */ }
+    })();
+    const offCfg = api?.onConfig?.(applyCfg);
+    return () => { offBridge(); offCfg?.(); };
   }, []);
 
   // v48.114（D159）：日记/洞察/记忆三桥随功能暂时移除（installJournalBridge / installInsightBridge /

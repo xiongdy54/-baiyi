@@ -66,7 +66,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false
+      backgroundThrottling: false,
+      additionalArguments: ["--bdi-role=workbench"] // D248：BDI 桥按窗口角色裁剪（T5）
     }
   });
   const w = win;

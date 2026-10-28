@@ -27,6 +27,7 @@ import { libraryApi } from "./library";
 import { normalizeShape, shapeBBox, type OcclusionRect, type OcclusionShape } from "./occlusion";
 import { eventBus } from "./eventbus";
 import { t, useT } from "./i18n";
+import { track } from "./behavior/track";
 import type { DictPanelState } from "../components/DictPanel";
 import type { ImageFocusSubmit } from "../components/reader/ImageFocus";
 import type { OcclusionEditorSubmit } from "../components/editor/OcclusionEditor";
@@ -1373,6 +1374,8 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     form: "highlight" | "underline",
     comment?: string | null
   ): Promise<string | null> {
+    // D248（T7）：批注/高亮动作（成功落库仍由主进程 tap 的 extract.created 记，这里只记用户选区动作）
+    track("reader.selection_action", { num: text.length, props: { action: mode === "extract" ? "extract" : "highlight" } });
     const { readingWorkflow } = await import("./readingWorkflow");
     A().rememberAnchor(text);
     const ctx = A().contextRef();
@@ -1694,13 +1697,15 @@ export function useSelectionActions(adapter: SelectionActionsAdapter) {
     aiMode,
     // 选区动作（菜单与快捷键同源）
     actions: {
-      manual: actManualCard,
-      aiCards: actAICards,
-      explain: actAIExplain,
-      extract: actExtractSelection,
+      // D248（T7）：选区动作只记「用户发起了什么」；落库成功仍由主进程 tap 记
+      manual: () => { track("reader.selection_action", { props: { action: "card" } }); return actManualCard(); },
+      aiCards: () => { track("reader.selection_action", { props: { action: "card" } }); return actAICards(); },
+      explain: () => { track("reader.selection_action", { props: { action: "explain" } }); return actAIExplain(); },
+      extract: () => { track("reader.selection_action", { props: { action: "extract" } }); return actExtractSelection(); },
       extractSelection,
-      lookup: actLookupWord,
+      lookup: () => { track("reader.selection_action", { props: { action: "dict" } }); return actLookupWord(); },
       occlusion: () => {
+        track("reader.selection_action", { props: { action: "card" } });
         A().clearSelection();
         wakeDock();
         void runOcclusionCards();

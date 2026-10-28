@@ -433,7 +433,8 @@ export async function requestOcclusionResult(
       : undefined,
     0.2,
     onThinking,
-    onCancelRegister
+    onCancelRegister,
+    "card_gen"
   );
   return { result: extractJson(raw || acc), templateId: tpl.id };
 }
@@ -564,7 +565,8 @@ export const cardGenerator: {
         : undefined,
       0.4,
       onThinking,
-      onCancelRegister
+      onCancelRegister,
+      "card_gen"
     );
     const result = extractJson(raw || acc);
     // v30（D27）：per-blank 多空卡在入确认面板前拆成每空一张（独立 FSRS 调度）
@@ -810,7 +812,8 @@ export const cardGenerator: {
         onDelta,
         0.3,
         onThinking,
-        onCancelRegister
+        onCancelRegister,
+        "ste"
       );
     }
     const tpl = await window.promptsAPI?.get("reader-explain");
@@ -826,7 +829,8 @@ export const cardGenerator: {
       onDelta,
       0.7,
       onThinking,
-      onCancelRegister
+      onCancelRegister,
+      "explain"
     );
   },
 
@@ -855,7 +859,8 @@ export const cardGenerator: {
       onDelta,
       0.4,
       undefined,
-      onCancelRegister
+      onCancelRegister,
+      "card_gen"
     );
   }
 };

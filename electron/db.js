@@ -8468,11 +8468,93 @@ function learnerFacts(opts) {
   };
 }
 
+// ---------- D248（T10）：BDI 只读投影 bdiPull（§8.1） ----------
+// 纪律：白名单模板 + 参数绑定；只读、不 persist、不长事务；不把 title/author/path/正文带出主库。
+const BDI_PULL_TABLES = {
+  cards: {
+    cols: `SELECT rowid AS _rowid, id, card_type, domain,
+      CASE WHEN json_valid(context_ref_json) THEN json_extract(context_ref_json, '$.extractId') END AS extract_id,
+      CASE WHEN json_valid(context_ref_json) THEN json_extract(context_ref_json, '$.documentId') END AS document_id,
+      knowledge_point_id, generated_by, gen_batch_id, created_at, updated_at, is_deleted, fsrs_config_id FROM cards`,
+    hasUpdated: true,
+  },
+  extracts: {
+    cols: `SELECT rowid AS _rowid, id, document_id, parent_type, parent_id, kind, status, priority,
+      created_at, updated_at, is_deleted FROM extracts`,
+    hasUpdated: true,
+  },
+  documents: {
+    cols: `SELECT rowid AS _rowid, id, library_item_id, is_deleted FROM documents`,
+    hasUpdated: true,
+  },
+  library_items: {
+    cols: `SELECT rowid AS _rowid, id, source_type, lang, priority, created_at, updated_at, is_deleted FROM library_items`,
+    hasUpdated: true,
+  },
+  knowledge_points: {
+    cols: `SELECT rowid AS _rowid, id, domain_id, merged_into, status, created_at, updated_at, is_deleted FROM knowledge_points`,
+    hasUpdated: true,
+  },
+  learner_tracks: {
+    cols: `SELECT rowid AS _rowid, id, mode, lang, udc_codes_json, status, created_at, updated_at, is_deleted FROM learner_tracks`,
+    hasUpdated: true,
+  },
+  track_materials: {
+    cols: `SELECT rowid AS _rowid, id, track_id, library_item_id, member, created_at, updated_at, is_deleted FROM track_materials`,
+    hasUpdated: true,
+  },
+  review_logs: {
+    cols: `SELECT rowid AS _rowid, id, card_id, rating, reviewed_at, duration_ms, fsrs_before_json, fsrs_after_json,
+      fsrs_config_id, fsrs_before_config_id, review_seq FROM review_logs`,
+    timeCol: "reviewed_at",
+  },
+  reading_events: {
+    cols: `SELECT rowid AS _rowid, id, item_id, char_pos, created_at FROM reading_events`,
+    timeCol: "created_at",
+  },
+  fsrs_configs: {
+    cols: `SELECT rowid AS _rowid, id, algorithm, algorithm_version, weights_json, scheduler_options_json,
+      config_fingerprint FROM fsrs_configs`,
+  },
+};
+
+/** BDI 只读分页投影。mode：scan | updated | time | ids；非法 table/mode 直接抛（调用方不得猜）。 */
+function bdiPull({ table, mode = "scan", cursor = 0, limit = 200, ids = [] } = {}) {
+  const spec = BDI_PULL_TABLES[String(table || "")];
+  if (!spec) throw new Error(`bdiPull：非法 table ${table}`);
+  const lim = Math.max(50, Math.min(500, Number.isInteger(limit) ? limit : 200));
+  if (mode === "ids") {
+    if (!Array.isArray(ids) || ids.length === 0) return [];
+    const list = ids.slice(0, 200).map((x) => String(x));
+    return queryAll(`${spec.cols} WHERE id IN (${list.map(() => "?").join(",")}) LIMIT ${lim}`, list);
+  }
+  if (mode === "scan") {
+    const after = Number.isFinite(Number(cursor)) ? Number(cursor) : 0;
+    return queryAll(`${spec.cols} WHERE rowid > ? ORDER BY rowid LIMIT ${lim}`, [after]);
+  }
+  if (mode === "updated") {
+    if (!spec.hasUpdated) throw new Error(`bdiPull：${table} 不支持 updated`);
+    const c = cursor && typeof cursor === "object" ? cursor : {};
+    const u = Number.isFinite(Number(c.updatedAt)) ? Number(c.updatedAt) : 0;
+    const r = Number.isFinite(Number(c.rowid)) ? Number(c.rowid) : 0;
+    return queryAll(`${spec.cols} WHERE (updated_at > ? OR (updated_at = ? AND rowid > ?)) ORDER BY updated_at, rowid LIMIT ${lim}`, [u, u, r]);
+  }
+  if (mode === "time") {
+    if (!spec.timeCol) throw new Error(`bdiPull：${table} 不支持 time`);
+    const c = cursor && typeof cursor === "object" ? cursor : {};
+    const ts = Number.isFinite(Number(c.ts)) ? Number(c.ts) : 0;
+    const r = Number.isFinite(Number(c.rowid)) ? Number(c.rowid) : 0;
+    return queryAll(`${spec.cols} WHERE (${spec.timeCol} > ? OR (${spec.timeCol} = ? AND rowid > ?)) ORDER BY ${spec.timeCol}, rowid LIMIT ${lim}`, [ts, ts, r]);
+  }
+  throw new Error(`bdiPull：非法 mode ${mode}`);
+}
+
 module.exports = {
   foldSearch,
   initDb,
   persistDb: persist,
   persistNow,
+  bdiPull,
   // C-17：严格 checkpoint（忙碌即抛）——persistNow 与备份前 flush 的底层（见上方注释）
   checkpointStrict,
   // D137（v48.92）：will-quit 显式关闭（clean shutdown = WAL 自动 checkpoint + 删 -wal/-shm）；

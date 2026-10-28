@@ -36,6 +36,7 @@ import { eventBus } from "../../lib/eventbus";
 import { settingsStore } from "../../lib/settings";
 import { useT } from "../../lib/i18n";
 import { ensureFed, flattenToc, resetFeed, subscribeFeed, type TocItem } from "../../lib/mindmapFeed";
+import { track } from "../../lib/behavior/track";
 
 export interface MindmapTabProps {
   kernel: import("../../lib/reader/kernel").ReaderKernel;
@@ -104,6 +105,10 @@ export default function MindmapTab({ kernel, documentId, title, canvasHost, onJu
   const [relAll, setRelAll] = useState(false);
   const [focus, setFocus] = useState(false);
   const [search, setSearch] = useState("");
+  // D248（T9）：导图页签打开（只记打开，不记内容）
+  useEffect(() => {
+    track("mindmap.viewed", { entityType: "document", entityId: documentId, origin: "reader_internal" });
+  }, [documentId]);
   const [versions, setVersions] = useState<MaterialMapMeta[]>([]);
   const [learnStatus, setLearnStatus] = useState<{ cardCount: number; kpExists: boolean } | null>(null);
   const [explainBusy, setExplainBusy] = useState<Record<string, string>>({}); // nodeId → jobId

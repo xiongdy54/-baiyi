@@ -2453,4 +2453,35 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "已导出：问答 {basic} 张、填空 {cloze} 张、跳过 {skipped} 张。": "Exported: {basic} Q&A, {cloze} cloze, {skipped} skipped.",
   "打开文件夹": "Open folder",
   "导出失败：{msg}": "Export failed: {msg}",
+  // —— 学习行为数据（D248 / T12，SettingsPanel）——
+  "学习行为数据（仅保存在本机）": "Learning behavior data (stored on this device only)",
+  "学习行为数据": "Learning behavior data",
+  "记录学习行为": "Record learning behavior",
+  "用于将来按你的学习习惯提供个性化功能。数据只保存在本机，从不上传。只分析本应用内可观测行为，不检测其他应用或真实注意力。":
+    "Used to provide personalized features based on your study habits in the future. Data stays on this device and is never uploaded. Only observable behavior inside this app is analyzed; other apps and real attention are never detected.",
+  "已记录 {n} 条事件 / {m} 条派生行": "Recorded {n} events / {m} derived rows",
+  "保留原始记录": "Keep raw records",
+  "3 个月": "3 months",
+  "1 年": "1 year",
+  "2 年": "2 years",
+  "永久": "Forever",
+  "记录搜索词与查词": "Record search terms and dictionary words",
+  "导出（JSONL）": "Export (JSONL)",
+  "清除查询原文": "Clear query text",
+  "清除全部行为数据": "Delete all behavior data",
+  "已导出": "Exported",
+  "导出未完成": "Export incomplete",
+  "确定清除已记录的搜索词与查词原文吗？": "Clear all recorded search terms and dictionary words?",
+  "已清除查询原文": "Query text cleared",
+  "确定清除全部行为数据吗？": "Delete all behavior data?",
+  "清除后不会恢复；评分、卡片等业务数据不受影响。": "This cannot be undone. Ratings, cards and other study data are not affected.",
+  "已清除全部行为数据": "All behavior data deleted",
+  "清除未完成": "Deletion incomplete",
+  // —— 恢复确认框的 BDI 提示（D248 / T13）——
+  "此备份不含学习行为数据；恢复后现有学习行为数据将被隔离，不会与恢复后的书架混用。":
+    "This backup does not contain learning behavior data. Your current behavior data will be set aside and will not be mixed with the restored library.",
+  "此备份早于你清除学习行为数据的时间，学习行为数据不会被还原。":
+    "This backup predates the time you deleted your learning behavior data, so behavior data will not be restored.",
+  "备份内书架数据与学习行为数据的快照存在 {s} 秒偏差，边界日的指标可能错位。":
+    "The library and learning behavior snapshots in this backup differ by {s} seconds; metrics around day boundaries may be misaligned.",
 };

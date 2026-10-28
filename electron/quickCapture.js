@@ -286,7 +286,8 @@ function createCaptureWindow() {
     webPreferences: {
       preload: path.join(__dirname, "preload-capture.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      additionalArguments: ["--bdi-role=capture"] // D248：BDI 桥按窗口角色裁剪（T5）
     }
   });
   const win = captureWin;

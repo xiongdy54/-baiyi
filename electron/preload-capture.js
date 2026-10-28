@@ -26,6 +26,16 @@ contextBridge.exposeInMainWorld("pluginsAPI", {
   }
 });
 
+// D248（T5）：捕获窗口只上报窗口内行为批次，不读取任何行为数据状态（V1-8 最小面）。
+contextBridge.exposeInMainWorld("behaviorAPI", {
+  batch: (payload) => ipcRenderer.send("behavior:batch", payload),
+  onConfig: (callback) => {
+    const handler = (_e, p) => callback(p);
+    ipcRenderer.on("behavior:config", handler);
+    return () => ipcRenderer.removeListener("behavior:config", handler);
+  }
+});
+
 contextBridge.exposeInMainWorld("captureAPI", {
   // 渲染层首帧就绪后通知主进程（主进程收到才 show，杜绝白闪）
   ready: () => ipcRenderer.send("capture:ready"),
