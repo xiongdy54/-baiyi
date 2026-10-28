@@ -30,7 +30,10 @@ export async function runKpAiProcessing(opts: { sources?: { knowledgePointId: st
         { role: "user", content: prep.extractionInput }
       ],
       undefined,
-      0.1
+      0.1,
+      undefined,
+      undefined,
+      "kp_extract"
     );
     let rawR = "";
     if (prep.relationInput) {
@@ -43,7 +46,10 @@ export async function runKpAiProcessing(opts: { sources?: { knowledgePointId: st
               { role: "user", content: prep.relationInput }
             ],
             undefined,
-            0.1
+            0.1,
+            undefined,
+            undefined,
+            "kp_extract"
           );
         } catch {
           rawR = ""; // 关系抽取失败不阻塞归一主结果

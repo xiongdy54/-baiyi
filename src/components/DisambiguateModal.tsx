@@ -284,7 +284,10 @@ export default function DisambiguateModal({
           { role: "user", content: `${langLine}${input}` }
         ],
         undefined,
-        0.2
+        0.2,
+        undefined,
+        undefined,
+        "other"
       );
       if (!mounted.current) return;
       const res = validateDisambiguateOutput(raw, {

@@ -1,5 +1,6 @@
 // AIGateway 渲染层客户端（文档§3.11）— 所有 AI 功能经此，不直调 LLM
 import { t } from "./i18n";
+import { track } from "./behavior/track";
 
 // 供应商注册表元数据（v48.68 / D112）：随 ai:getConfig 下发，仅公开字段、永不含 Key
 export interface AiPresetMeta {
@@ -105,9 +106,16 @@ export const aiGateway = {
     onDelta?: (acc: string, delta: string) => void,
     temperature?: number,
     onThinking?: (thinkChars: number) => void,
-    onCancelRegister?: (cancel: () => void) => void
+    onCancelRegister?: (cancel: () => void) => void,
+    feature: "card_gen" | "explain" | "ste" | "translate" | "chat" | "next_extract" | "mindmap" | "kp_extract" | "insight" | "memory" | "judge" | "other" = "other"
   ): Promise<string> {
-    return new Promise((resolve, reject) => {
+    // D248（T9）：每次 AI 调用一条 ai.invoked（只记功能/结果/耗时/输出字数，不记正文）
+    const started = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const finish = (outcome: "ok" | "error" | "aborted", chars: number) => {
+      const dur = Math.max(0, Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - started));
+      track("ai.invoked", { props: { feature, outcome, dur_ms: dur, num: chars } });
+    };
+    const run = new Promise<string>((resolve, reject) => {
       if (!window.aiAPI) {
         reject(new Error(t("AI API 不可用")));
         return;
@@ -141,5 +149,12 @@ export const aiGateway = {
       });
       window.aiAPI.chat(requestId, messages, temperature);
     });
+    return run.then(
+      (text) => { finish("ok", text.length); return text; },
+      (err) => {
+        finish(/abort|cancel|取消|停止/i.test(String(err && err.message)) ? "aborted" : "error", 0);
+        throw err;
+      }
+    );
   }
 };
