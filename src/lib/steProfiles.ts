@@ -3,8 +3,12 @@
 // 渲染端经构建期静态导入持有（Vite/esbuild 都原生打包 JSON），node 测试经同一文件 fs 直读 + 打包本模块复用回退链。
 // 法务红线（D91 §2.2/§8.3）：pack 全部规则文字人工撰写；"ASD-STE100" 只允许出现在 derivedFrom；
 // 禁止运行时机器翻译规则文本。
+// v49.76（D247）：新增 ja / zh-Hant 两个人工撰写 pack——ja 供日文材料分析 + 日文输出，
+// zh-Hant 供繁體中文材料分析 + 繁體輸出（zh-TW / zh-Hant-TW / zh-HK / zh-MO 精确命中）。
 import zhHansJson from "../../electron/ste-profiles/zh-Hans.json";
+import zhHantJson from "../../electron/ste-profiles/zh-Hant.json";
 import enJson from "../../electron/ste-profiles/en.json";
+import jaJson from "../../electron/ste-profiles/ja.json";
 import universalJson from "../../electron/ste-profiles/universal.json";
 // v49.8（D182）：输出语言随界面语言（locale 唯一取值点）
 import { getLocale } from "./i18n";
@@ -24,7 +28,9 @@ export interface SteProfile {
 
 export const STE_PROFILES: Record<string, SteProfile> = {
   "zh-Hans": zhHansJson as SteProfile,
+  "zh-Hant": zhHantJson as SteProfile,
   en: enJson as SteProfile,
+  ja: jaJson as SteProfile,
   universal: universalJson as SteProfile
 };
 
@@ -79,8 +85,9 @@ export function steOutputLangName(lang: string = steOutputLang()): string {
 }
 
 /**
- * 回退链（D91 §6.2）：精确 locale（zh-Hant-TW→zh-Hans）→ 基础语言（zh→zh-Hans 依赖注册表键）→ en → universal。
- * 纯函数、可单测；'zh-Hant-TW'→zh-Hans / 'fr'→en / ''→universal。
+ * 回退链（D91 §6.2；D247 扩展繁中/日文）：精确 locale → 基础语言（zh-Hans/zh-Hant 按 hant/tw/hk/mo 判定；
+ * zh→zh-Hans）→ en → universal。纯函数、可单测；'zh-Hant-TW'→zh-Hant / 'zh-TW'→zh-Hant / 'zh'→zh-Hans /
+ * 'ja-JP'→ja / 'fr'→en / ''→universal。
  */
 export function resolveProfile(lang: string): SteProfile {
   const raw = String(lang ?? "").trim();
@@ -92,9 +99,12 @@ export function resolveProfile(lang: string): SteProfile {
     for (const key of Object.keys(STE_PROFILES)) {
       if (key.toLowerCase() === lower) return STE_PROFILES[key];
     }
-    // 简体/繁体变体都落 zh-Hans（P0 只有这一个中文 pack）
-    if (base === "zh") return STE_PROFILES["zh-Hans"];
-    // 其他语言先试 en（英语 pack 的规则蒸馏对印欧语言近似可用）
+    // 中文变体：繁體（hant/tw/hk/mo）落 zh-Hant，其余落 zh-Hans
+    if (base === "zh") {
+      const hant = lower.includes("hant") || lower.includes("tw") || lower.includes("hk") || lower.includes("mo");
+      return hant ? STE_PROFILES["zh-Hant"] : STE_PROFILES["zh-Hans"];
+    }
+    // 其他语言先试精确基础键（ja 等），再落 en（英语 pack 的规则蒸馏对印欧语言近似可用）
     if (STE_PROFILES[base]) return STE_PROFILES[base];
     return STE_PROFILES.en;
   }

@@ -781,9 +781,12 @@ export const cardGenerator: {
       const matLang = String(opts.matLang ?? "").trim();
       const analysis = resolveProfile(matLang);
       // v49.8（D182）：输出语言随界面语言（zh-CN 行为与原 STE_OUTPUT_LANG 恒等）
+      // v49.76（D247）：模板级 {{OUTPUT_LANG_NAME}} 注入——v4 起全体输出（正文/节标题/标签/说明/追问）按母语
       const outLang = steOutputLang();
       const output = resolveProfile(outLang);
       const sys = tpl.content
+        // v49.76（D247）：{{OUTPUT_LANG_NAME}} 在模板中出现多次，必须全量替换（replace 只换首处）
+        .split("{{OUTPUT_LANG_NAME}}").join(steOutputLangName(outLang))
         .replace("{{ANALYSIS_PROFILE}}", formatProfile(analysis))
         .replace("{{OUTPUT_PROFILE}}", formatProfile(output));
       const user = [
