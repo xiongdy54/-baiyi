@@ -754,7 +754,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
-    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——进度轨留空、无均值
+    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——无均值
     const progress = isFolder ? 0 : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     return (
@@ -765,7 +765,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
         style={{ "--i": String(Math.min(index, 7)) } as React.CSSProperties}
         {...itemProps(entry)}
       >
-        {/* .shelf-face = 封面 + 进度轨那一整块，拖拽/新入库的高亮框画在它身上（§5.4） */}
+        {/* .shelf-face = 封面那一整块，拖拽/新入库的高亮框画在它身上（§5.4）；进度轨已退役（v49.78 / D249） */}
         <div className="shelf-face" data-ui="card">
         <div
           className="book-card"
@@ -812,8 +812,8 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
             </span>
           )}
         </div>
-        {/* v48.118 / D163：文件夹卡不渲染进度轨——聚合进度在夹上全面不显示（既有裁定补彻底） */}
-        {!isFolder && <div className="cap-rail"><i style={{ width: pct(progress) }} /></div>}
+        {/* v49.78 / D249：封面下方的 2px 进度轨整体退役——阅读进度只由图注 meta 的百分比表达
+            （与百分比重复，用户指令；所有皮肤共用这一份 DOM，故一并去除） */}
         </div>
         {/* 批次 D（D-TEST-16）：图注（书名）此前渲染在带 onClick 的 .book-card **之外**，
             于是"点书名不开书、点封面才开"。点击与键盘行为与书卡同源（不改 .shelf-item，
@@ -839,7 +839,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     const isFolder = entry.kind === "folder";
     const title = isFolder ? entry.folder.name : entry.item.title;
     const agg = isFolder ? folderAggregate(items, entry.folder) : null;
-    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——进度轨留空、无均值
+    // v48.115 / D161 第三轮：文件夹不显示任何进度信息（用户指令）——无均值
     const progress = isFolder ? 0 : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     // 打开只有一条路径：格子的 onClick（封面格与书名格共用）；键盘经 .t-open 的原生 click 冒泡上来
