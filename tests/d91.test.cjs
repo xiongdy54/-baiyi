@@ -15,8 +15,8 @@ function check(name, cond, expected, actual) {
 // ---------- P1 pack lint（§8.3：法务红线的机械化） ----------
 console.log("== P1 pack lint（必填字段 + ASD-STE100 只出现在 derivedFrom + original-wording） ==");
 const PROFILE_DIR = path.join(__dirname, "..", "electron", "ste-profiles");
-const PACK_FILES = ["zh-Hans.json", "en.json", "universal.json"];
-check("三个 pack 文件在场", PACK_FILES.every((f) => fs.existsSync(path.join(PROFILE_DIR, f))), PACK_FILES.join(" "), fs.readdirSync(PROFILE_DIR).join(" "));
+const PACK_FILES = ["zh-Hans.json", "zh-Hant.json", "en.json", "ja.json", "universal.json"];
+check("五个 pack 文件在场（D247 新增 zh-Hant / ja）", PACK_FILES.every((f) => fs.existsSync(path.join(PROFILE_DIR, f))), PACK_FILES.join(" "), fs.readdirSync(PROFILE_DIR).join(" "));
 for (const f of PACK_FILES) {
   const raw = fs.readFileSync(path.join(PROFILE_DIR, f), "utf8");
   const pack = JSON.parse(raw);
@@ -39,15 +39,22 @@ for (const key of Object.keys(d91.STE_PROFILES)) {
 }
 
 // ---------- P2 回退链（§8.4） ----------
-console.log("== P2 回退链：精确 → 基础语言 → en → universal ==");
-check("resolve('zh-Hant-TW') → zh-Hans", d91.resolveProfile("zh-Hant-TW").lang === "zh-Hans", "zh-Hans", d91.resolveProfile("zh-Hant-TW").lang);
+console.log("== P2 回退链：精确 → 基础语言 → en → universal（D247 繁中/日文精确命中） ==");
+check("resolve('zh-Hant-TW') → zh-Hant", d91.resolveProfile("zh-Hant-TW").lang === "zh-Hant", "zh-Hant", d91.resolveProfile("zh-Hant-TW").lang);
+check("resolve('zh-TW') → zh-Hant", d91.resolveProfile("zh-TW").lang === "zh-Hant", "zh-Hant", d91.resolveProfile("zh-TW").lang);
+check("resolve('zh-HK') → zh-Hant", d91.resolveProfile("zh-HK").lang === "zh-Hant", "zh-Hant", d91.resolveProfile("zh-HK").lang);
 check("resolve('zh') → zh-Hans", d91.resolveProfile("zh").lang === "zh-Hans", "zh-Hans", d91.resolveProfile("zh").lang);
+check("resolve('zh-Hans') → zh-Hans", d91.resolveProfile("zh-Hans").lang === "zh-Hans", "zh-Hans", d91.resolveProfile("zh-Hans").lang);
 check("resolve('en') → en", d91.resolveProfile("en").lang === "en", "en", d91.resolveProfile("en").lang);
 check("resolve('en-US') → en（大小写归一）", d91.resolveProfile("en-US").lang === "en", "en", d91.resolveProfile("en-US").lang);
+check("resolve('ja') → ja", d91.resolveProfile("ja").lang === "ja", "ja", d91.resolveProfile("ja").lang);
+check("resolve('ja-JP') → ja（大小写归一）", d91.resolveProfile("ja-JP").lang === "ja", "ja", d91.resolveProfile("ja-JP").lang);
 check("resolve('fr') → en（未知语言落 en）", d91.resolveProfile("fr").lang === "en", "en", d91.resolveProfile("fr").lang);
 check("resolve('') → universal（缺省兜底）", d91.resolveProfile("").lang === "universal", "universal", d91.resolveProfile("").lang);
 check("resolve(undefined) → universal", d91.resolveProfile(undefined).lang === "universal", "universal", d91.resolveProfile(undefined).lang);
-check("resolve('zh-Hans') 输出语言常量 = zh-Hans（P0 恒中文）", d91.STE_OUTPUT_LANG === "zh-Hans", "zh-Hans", d91.STE_OUTPUT_LANG);
+check("resolve('zh-Hans') 输出语言常量 = zh-Hans（P0 恒中文基线）", d91.STE_OUTPUT_LANG === "zh-Hans", "zh-Hans", d91.STE_OUTPUT_LANG);
+check("steOutputLangName('ja') = 日本語", d91.steOutputLangName("ja") === "日本語", "日本語", d91.steOutputLangName("ja"));
+check("steOutputLangName('zh-Hant') = 繁體中文", d91.steOutputLangName("zh-Hant") === "繁體中文", "繁體中文", d91.steOutputLangName("zh-Hant"));
 const formatted = d91.formatProfile(d91.resolveProfile("en"));
 check("formatProfile 产出注入块（含 pack 名与规则行）", formatted.includes("Plain English Profile") && formatted.split("\n").length > 3, ">3 行", formatted.split("\n").length);
 
