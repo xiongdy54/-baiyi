@@ -2335,6 +2335,7 @@ app.whenReady().then(async () => {
     os: `${process.platform}-${process.arch}`,
     locale: app.getLocale(),
     deviceId: getDeviceId(app.getPath("userData")),
+    pull: (q) => dbModule.bdiPull(q),
   }).catch((err) => {
     console.error("[behavior] 初始化失败（BDI 停用，不影响业务）：", err);
   });

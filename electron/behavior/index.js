@@ -8,12 +8,16 @@ const policyMod = require("./policy");
 const { createWriter } = require("./writer");
 const { createSessions } = require("./sessions");
 const { createIpcStats } = require("./ipcStats");
+const { createDomains } = require("./domains");
 const { learningDayStartMs } = require("../fsrsTime");
 
 let ctx = null;
 let writer = null;
 let sessions = null;
 let ipcStats = null;
+let domains = null;
+let domainsTimer = null;
+let domainsFirstTimer = null;
 let config = { ...policyMod.DEFAULT_BEHAVIOR };
 let policy = null;
 let state = { status: "uninitialized", reason: null, detail: null };
@@ -99,6 +103,9 @@ function resetForTest() {
     try { sessions.detachAll(); } catch { /* 已卸载 */ }
     sessions = null;
   }
+  if (domainsFirstTimer) { clearTimeout(domainsFirstTimer); domainsFirstTimer = null; }
+  if (domainsTimer) { clearInterval(domainsTimer); domainsTimer = null; }
+  domains = null;
   if (ipcStats) {
     try { ipcStats.stop(); } catch { /* 已停 */ }
     ipcStats = null;
@@ -196,6 +203,15 @@ async function init(opts) {
   writer.start();
   ipcStats = createIpcStats({ now, dayOf: () => dayStringOf(now()) });
   ipcStats.start(db);
+  if (typeof o.pull === "function") {
+    // §8.3：启动 90s 首次全量 scan；之后每 30 分钟（页间让出由 domains.scanAll 分页承担）
+    domains = createDomains({ db, pull: o.pull, now });
+    const run = () => { try { domains.refreshAll(); } catch { /* 归因失败不影响业务 */ } };
+    domainsFirstTimer = setTimeout(run, 90 * 1000);
+    if (domainsFirstTimer.unref) domainsFirstTimer.unref();
+    domainsTimer = setInterval(run, 30 * 60 * 1000);
+    if (domainsTimer.unref) domainsTimer.unref();
+  }
   state = { status: "ok", reason: null, detail: null };
   sessions = createSessions({
     db,
@@ -378,6 +394,8 @@ function close() {
     try { off(); } catch { /* 已解绑 */ }
   }
   unsubscribers = [];
+  if (domainsFirstTimer) { clearTimeout(domainsFirstTimer); domainsFirstTimer = null; }
+  if (domainsTimer) { clearInterval(domainsTimer); domainsTimer = null; }
   if (ipcStats) {
     try { ipcStats.stop(); } catch { /* 关闭路径不得抛 */ }
     ipcStats = null;
