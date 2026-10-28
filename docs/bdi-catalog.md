@@ -1,11 +1,11 @@
 # BDI 事件目录（D248）
 
-> 状态：**契约稿（T0 文档先行），实现后由 `scripts/gen-bdi-docs.mjs` 从 `electron/behavior/registry.js` 重新生成为逐字一致的版本**。
-> 唯一实现依据：`docs/design/BEHAVIOR-DATA-INFRA-D248-v3.md`（§6 / §5.2 / §11）。本法与注册表不一致时 `behavior-catalog-docs` 测试失败。
+> 由 `electron/behavior/registry.js` 生成（`node scripts/gen-bdi-docs.mjs`），**禁止手改**。CATALOG_VERSION = 1。
+> 唯一实现依据：`docs/design/BEHAVIOR-DATA-INFRA-D248-v3.md` §6 / §5.2。与注册表不一致时 `behavior-catalog-docs` 测试失败。
 >
 > 命名 `组.动作`。采集：**M**=主进程 tap；**R**=渲染层 `track()`；**B**=eventBus 桥；**W**=host 内部。每个事件在 `registry.js` 登记 `owner` / `props` / `allowText` / `maxPerMin` / `intentOnly`。`intentOnly` 事件只记意图，不计产出。
 >
-> 每个事件都带公共列：`ts / recv_ts / source_ts / day / tz_name / tz_offset / cutoff_hour / clock_flags / type / v / src / render_id / window_id / session_id / ctx_id / presentation_id / op_id / actor / surface / origin / entity_type / entity_id / library_item_id / card_id / extract_id`（见设计稿 §5.2）；下表只列事件特有的关键字段 / props。
+> 每个事件都带公共列：`ts / recv_ts / source_ts / day / tz_name / tz_offset / cutoff_hour / clock_flags / type / v / src / render_id / window_id / session_id / ctx_id / presentation_id / op_id / actor / surface / origin / entity_type / entity_id / library_item_id / card_id / extract_id / kp_id / doc_pos / dur_ms / num / text / props`（见设计稿 §5.2）；下表只列事件特有的关键字段 / props。
 
 ## 6.1 应用 / 会话 / 导航
 
@@ -55,7 +55,9 @@
 | --- | --- | --- |
 | `card.created` | M | card_id, extract_id；cardType, generatedBy(manual/ai), genBatchId, via(selection/manual_editor/occlusion/ai_batch/disambiguate/workbench) |
 | `card.edited` | M | card_id；fields(变更字段名数组), cardType（surface 区分复习中编辑） |
-| `card.deleted` / `card.suspended` / `card.tags_changed` | M | card_id；suspended(bool)/tagsCount |
+| `card.deleted` | M | card_id |
+| `card.suspended` | M | card_id；suspended(bool) |
+| `card.tags_changed` | M | card_id；tagsCount |
 | `card.regenerated` | R | **intentOnly**；card_id；reason |
 | `card.disambiguated` | R | **intentOnly**；candidates, chosen |
 | `card.issue` | M | card_id；op(add/resolve), ruleId, severity |
@@ -72,13 +74,12 @@
 | `review.revealed` | R | card_id, ctx_id, presentation_id；dur_ms=think_ms（performance.now） |
 | `review.extra_revealed` | R | card_id；kind(mnemonic/example/context/source) |
 | `review.rated` | M | card_id；ts=t1；dur_ms=单调 tap 耗时；props: tapStartTs, tapEndTs, tapSeq, durationMs（渲染层墙钟入参原样） |
-| `review.undone` / `review.skipped` | M | card_id |
+| `review.undone` | M | card_id |
+| `review.skipped` | M | card_id |
 | `review.source_opened` | R | card_id（主动动作证据，不等于已证明兴趣） |
 | `review.answer_judged` | R | card_id；mode, verdict |
 | `review.leech` | B | card_id |
 | `growth.feedback_shown` | R | **intentOnly**；tier |
-
-**评分结果（Again/Hard/Good/Easy）、FSRS 稳定度等一律从 `review_logs` 读，事件不存。**
 
 ## 6.6 浏览 / 搜索 / 查词 / AI
 
@@ -109,12 +110,14 @@
 | `journal.written` | M | num=字数；op(create/update/draftSend/delete), via(page/quick_capture/draft_send) |
 | `capture.used` | M | kind(screen/text/image/region), trigger(global_shortcut/tray/button) |
 | `memory.op` | M | op(setEnabled/backfillStart/backfillCancel/tidyNow/reset) |
-| `insight.op` / `insight.viewed` | M/R | op；viewed 记打开 |
+| `insight.op` | M | op |
+| `insight.viewed` | R | viewed 记打开 |
 | `meaning.op` | M | op(create/resolve/delete) |
 | `stats.viewed` | R | tab |
 | `settings.changed` | M | key；白名单键另记 to（枚举/数值）；**AI Key/URL/路径永不记** |
 | `fsrs.optimizer` | M | op(train/apply/reset), ok |
-| `backup.op` / `anki.exported` | M | op, ok |
+| `backup.op` | M | op, ok |
+| `anki.exported` | M | op, ok |
 | `op.undo` | M | domain(card/extract/other) |
 | `app.error` | M | module/代码（**不记消息正文**） |
 
