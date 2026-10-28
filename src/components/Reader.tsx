@@ -23,6 +23,10 @@ import AnnotationEditor from "./AnnotationEditor";
 import { useSelectionBarStyle } from "../lib/selectionBarSettings";
 import { useAnnotationSettings, writeAnnotationSetting } from "../lib/annotationSettings";
 import { useT } from "../lib/i18n";
+// D248（T7）：阅读会话行为上下文（打开/关闭、注意力、导航与外观埋点）
+import { track, newUuid7, getTrackConfig, setTrackContext } from "../lib/behavior/track";
+import { createAttention } from "../lib/behavior/attention";
+import { consumeOrigin } from "../lib/behavior/origin";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
 import MindmapTab from "./reader/MindmapTab";
@@ -390,6 +394,46 @@ export default function Reader({
   onOpenAnchorCards
 }: Props) {
   const T = useT();
+  // D248（T7）：本次阅读会话的 BDI 上下文——ctxId 每个挂载一次；注意力按 read 阈值计活跃
+  const bdiCtxIdRef = useRef<string>("");
+  if (!bdiCtxIdRef.current) bdiCtxIdRef.current = newUuid7();
+  const bdiAttentionRef = useRef<ReturnType<typeof createAttention> | null>(null);
+  const bdiLastPctRef = useRef<number>(initialRatio);
+  const bdiFinishedRef = useRef(false);
+  useEffect(() => {
+    const origin = itemId ? consumeOrigin({ window: "main", entityType: "library_item", entityId: itemId }) : "unknown";
+    const attn = createAttention({ cutoffHour: getTrackConfig().cutoffHour });
+    bdiAttentionRef.current = attn;
+    attn.start();
+    attn.setContext({
+      surface: "read",
+      entityType: itemId ? "library_item" : undefined,
+      entityId: itemId,
+      libraryItemId: itemId,
+      ctxId: bdiCtxIdRef.current,
+      origin: origin === "unknown" ? undefined : origin,
+    });
+    setTrackContext({
+      surface: "read",
+      entityType: itemId ? "library_item" : undefined,
+      entityId: itemId,
+      libraryItemId: itemId,
+      ctxId: bdiCtxIdRef.current,
+    });
+    if (itemId) {
+      track("library.opened", {
+        libraryItemId: itemId,
+        ctxId: bdiCtxIdRef.current,
+        origin: origin === "unknown" ? undefined : origin,
+      });
+    }
+    return () => {
+      attn.stop("unload");
+      bdiAttentionRef.current = null;
+      if (itemId) track("library.closed", { ctxId: bdiCtxIdRef.current, props: { progressPct: bdiLastPctRef.current } });
+      setTrackContext(null);
+    };
+  }, [itemId]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const restoredRef = useRef(false);
   const saveTimerRef = useRef<number | null>(null);
@@ -768,6 +812,7 @@ export default function Reader({
    */
   function jumpToMark(id: string) {
     clearReflowGuard();
+    track("reader.jumped", { libraryItemId: itemId, origin: "reader_internal", props: { method: "annotation" } });
     const k = kernelRef.current;
     if (!k?.goToMark) {
       setAnnotUnavailable((m) => ({ ...m, [id]: true }));
@@ -887,6 +932,7 @@ export default function Reader({
     if ((tone === "dark") !== isDark) onSwitchAppTheme?.(tone);
   };
   const changeReaderTheme = (theme: ReaderAppearance["theme"]) => {
+    track("reader.appearance", { libraryItemId: itemId, props: { key: "theme" } });
     const next = { ...readerSettingsRef.current, appearance: { ...readerSettingsRef.current.appearance, theme } };
     persistReaderSettings(next);
     kernelRef.current?.applyAppearance(resolveAppearance(next));
@@ -898,6 +944,7 @@ export default function Reader({
   };
   // v29 PDF 专用缩放（foliate 引擎无此控件）
   const changeReaderZoom = (zoom: NonNullable<ReaderAppearance["zoom"]>) => {
+    track("reader.appearance", { libraryItemId: itemId, props: { key: "zoom" } });
     const next = { ...readerSettingsRef.current, appearance: { ...readerSettingsRef.current.appearance, zoom } };
     persistReaderSettings(next);
     kernelRef.current?.applyAppearance(resolveAppearance(next));
@@ -906,6 +953,7 @@ export default function Reader({
   // ---------- D130 R3：个性化外观（行距/边距/版心/翻页过渡/自定义主题） ----------
   /** 行距/边距/版心/动画过渡：与快捷菜单、设置页读写同一字段（appearance.*），双向即时一致 */
   const changeReaderAppearance = (patch: Partial<ReaderAppearanceEx>) => {
+    track("reader.appearance", { libraryItemId: itemId, props: { key: Object.keys(patch).slice(0, 6).join(",") } });
     const next = normalizeReaderSettings({
       ...readerSettingsRef.current,
       appearance: { ...readerSettingsRef.current.appearance, ...patch }
@@ -1059,6 +1107,12 @@ export default function Reader({
       relocateTimerRef.current = window.setTimeout(() => {
         relocateTimerRef.current = null;
         if (itemId && onProgress) void readingStats.addEvent(itemId, Math.round(info.fraction * (markdown?.length || 0)));
+        // D248（T7）：到达末尾＝代理指标（一书一次）；progressPct 按本次会话最后位置记
+        bdiLastPctRef.current = info.fraction;
+        if (itemId && !bdiFinishedRef.current && info.fraction >= 0.999) {
+          bdiFinishedRef.current = true;
+          track("reader.finished", { libraryItemId: itemId, props: { progressPct: info.fraction } });
+        }
         // v28 PDF 原生阅读：progress 携带页码锚点（pageIndex），foliate 系携带 cfi
         onProgress?.(info.fraction, "", { cfi: info.location.cfi, fraction: info.fraction, pageIndex: info.location.pageIndex });
       }, 700);
@@ -1111,6 +1165,8 @@ export default function Reader({
   // 或收尾（pointerup）任一时刻按住＝加选。真实用户收尾常先松修饰键再松鼠标，只看 pointerup
   // 会把这次加选误判成替换、把已累计的集合抹成只剩最后一段（用户实测：先普通选一段再 Ctrl 补选失败）。
   const handleEnginePointerUp = useCallback((pos: ContentPointerUpInfo) => {
+    // D248（T7）：iframe 内的指针事件不冒泡到宿主文档——中继回调就是「正文里有真实输入」的挂点
+    bdiAttentionRef.current?.noteInput("pointer");
     const k = kernelRef.current;
     const sel = k?.getSelection() ?? null;
     if (!sel || !sel.text.trim()) {
@@ -1276,6 +1332,7 @@ export default function Reader({
   const handleEngineImageClick = useCallback(
     async (img: ReaderImageRef) => {
       if (occlEditor || (manualOpen && manualImage)) return; // 挖空编辑器/弹窗在场时不重复进入（制卡台常驻不算）
+      track("reader.image_focused", { libraryItemId: itemId });
       const dataUrl = await loadImageDataUrl(img.src);
       if (!dataUrl) {
         showToast(T("无法读取这张图片的内容（可能来自外部链接）"));
@@ -1912,11 +1969,12 @@ export default function Reader({
                     tocItems={tocItems}
                     activeHref={tocActiveHref}
                     onNavigate={(item) => {
+                      track("reader.jumped", { libraryItemId: itemId, origin: "reader_toc", props: { method: "toc" } });
                       void kernelRef.current?.goTo({ href: item.href });
                       setSidebarOpen(false);
                     }}
                     tab={sidebarTab}
-                    onTabChange={setSidebarTab}
+                    onTabChange={(t) => { track("reader.sidebar_tab", { libraryItemId: itemId, props: { tab: t } }); setSidebarTab(t); }}
                     filter={annotSettings.annotationFilter}
                     onFilter={(f) => void writeAnnotationSetting("annotationFilter", f)}
                     sort={annotSort}
@@ -1957,7 +2015,7 @@ export default function Reader({
                           initialResumeRunId={resumeOnce}
                           focusRequest={mapFocus}
                           onFocusConsumed={() => setMapFocus(null)}
-                          onJumpToText={() => setSidebarOpen(false)}
+                          onJumpToText={() => { track("reader.jumped", { libraryItemId: itemId, origin: "mindmap", props: { method: "mindmap" } }); setSidebarOpen(false); }}
                           onMakeCardsFromNode={(payload) => {
                             // v48.5 批C：结构制卡——mode=card-structure（导图节点专用分支，对作者组织结构出题）
                             void runAICards(payload.section, undefined, "card-structure", { focus: payload.focus, mindmapNodeId: payload.nodeId });
@@ -2290,6 +2348,8 @@ export default function Reader({
                   jump={jumpAnchor ? { cfi: jumpAnchor.cfi, pageIndex: jumpAnchor.pageIndex, chapterIndex: jumpAnchor.chapterIndex, anchorText: jumpAnchor.anchorText } : null}
                   onRelocate={handleEngineRelocate}
                   onLink={(info) => {
+                    // D248（T7）：内链＝正文内跳转（method=link）；外链交系统浏览器、不算阅读导航
+                    if (info.internal) track("reader.jumped", { libraryItemId: itemId, origin: "reader_internal", props: { method: "link" } });
                     // 外链：adapter 已拦截默认行为，这里交系统浏览器；内链由内核自行精确跳转
                     if (!info.internal) void window.windowAPI?.openExternal(info.href);
                   }}

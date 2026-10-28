@@ -14,6 +14,9 @@ import {
 } from "./icons";
 import Dropdown from "./Dropdown";
 import { useT } from "../lib/i18n";
+// D248（T7）：书架来源标记（library.opened 的 origin 在 Reader 侧消费；这里只登记不读数据）
+import { markOrigin } from "../lib/behavior/origin";
+import { track } from "../lib/behavior/track";
 import {
   createFolderWith, dayLabel, dissolveFolder, ensureOrder, folderAggregate, folderEntries, findFolder,
   folderOf, forgetItem, groupInto, itemProgress, loadShelf, moveAllOut, moveStep, renameFolder,
@@ -137,6 +140,11 @@ const shelfCache: {
 
 export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, topLevelSignal }: Props) {
   const T = useT();
+  /** D248：书架点开先登记 shelf 来源（Reader 打开时消费；一次消费、3s 过期） */
+  const openFromShelf = useCallback((itemId: string) => {
+    markOrigin({ window: "main", entityType: "library_item", entityId: itemId }, "shelf");
+    onOpenBook(itemId);
+  }, [onOpenBook]);
   const [items, setItems] = useState<LibraryItem[]>(shelfCache.items ?? []);
   const [shelf, setShelf] = useState<ShelfState>(shelfCache.shelf ?? EMPTY_SHELF);
   // 数据是否已就绪：有缓存＝立刻就绪；冷启动＝等首次加载完成，期间不渲染空态
@@ -505,7 +513,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (entry.kind === "folder") openInto(entry.id);
-      else onOpenBook(entry.id);
+      else openFromShelf(entry.id);
       return;
     }
     onReorderKeyDown(entry)(e);
@@ -766,7 +774,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           role="button"
           title={title}
           aria-label={isFolder ? T("打开文件夹「{title}」，含 {n} 本", { title, n: agg!.n }) : T("打开《{title}》", { title })}
-          onClick={() => (isFolder ? openInto(entry.id) : onOpenBook(entry.id))}
+          onClick={() => (isFolder ? openInto(entry.id) : openFromShelf(entry.id))}
           onKeyDown={onCardKeyDown(entry)}
         >
           {isFolder ? (
@@ -816,7 +824,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
           role="button"
           tabIndex={0}
           aria-label={isFolder ? T("打开文件夹「{title}」，含 {n} 本", { title, n: agg!.n }) : T("打开《{title}》", { title })}
-          onClick={() => (isFolder ? openInto(entry.id) : onOpenBook(entry.id))}
+          onClick={() => (isFolder ? openInto(entry.id) : openFromShelf(entry.id))}
           onKeyDown={onCardKeyDown(entry)}
         >
           {caption(entry, title, isFolder
@@ -835,7 +843,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
     const progress = isFolder ? 0 : itemProgress(entry.item);
     const members = isFolder ? entry.folder.items.map((id) => items.find((i) => i.id === id)).filter(Boolean) as LibraryItem[] : [];
     // 打开只有一条路径：格子的 onClick（封面格与书名格共用）；键盘经 .t-open 的原生 click 冒泡上来
-    const open = () => (isFolder ? openInto(entry.id) : onOpenBook(entry.id));
+    const open = () => (isFolder ? openInto(entry.id) : openFromShelf(entry.id));
     const openLabel = isFolder ? T("打开文件夹「{title}」，含 {n} 本", { title, n: agg!.n }) : T("打开《{title}》", { title });
     return (
       <tr
@@ -997,7 +1005,7 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
       </span>
       <span className="shelf-group" role="group" aria-label={T("排序")}>
         <span className="shelf-label">{T("排序")}</span>
-        <Dropdown value={sort} options={SHELF_SORTS.map((s) => ({ ...s, label: T(s.label) }))} onChange={(v) => setSort(v as ShelfSort)} title={T("排序方式")} align="left" />
+        <Dropdown value={sort} options={SHELF_SORTS.map((s) => ({ ...s, label: T(s.label) }))} onChange={(v) => { setSort(v as ShelfSort); track("shelf.filtered", { props: { kind: "sort", value: String(v) } }); }} title={T("排序方式")} align="left" />
       </span>
       <span className="shelf-spacer" />
       {/* 拖拽提示只余停用说明（v48.120/D165）：手动顺序下的操作说明文字退役，Alt+←/→ 键盘等价语义不变 */}

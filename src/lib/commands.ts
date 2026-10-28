@@ -12,6 +12,7 @@ import { settingsStore } from "./settings";
 import { t } from "./i18n";
 import { isImeComposing } from "./ime";
 import { isTextEntryTarget, isNativeControlKey, isInModal } from "./keyTarget";
+import { track } from "./behavior/track";
 
 export interface CommandDef {
   id: string;
@@ -223,6 +224,8 @@ function dispatchKey(e: ComboInput & { repeat?: boolean; target?: unknown }): bo
       const action = actions ? actions[def.id] : undefined;
       if (!action) continue;
       if (action.when && !action.when()) continue;
+      // D248（T7）：快捷键命令调用（via=shortcut；命令面板/菜单等入口由各自埋点区分）
+      track("cmd.invoked", { props: { commandId: def.id, via: "shortcut" } });
       action.run();
       return true;
     }
