@@ -27,7 +27,8 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 
 (async () => {
   console.log("== A 角色矩阵与 URL 判定 ==");
-  check("main：batch + status", roles.canCall("main", "batch") && roles.canCall("main", "status"), true, roles.ROLE_METHODS.main);
+  check("main：batch + status + query", roles.canCall("main", "batch") && roles.canCall("main", "status") && roles.canCall("main", "query"), true, roles.ROLE_METHODS.main);
+  check("lens/workbench 无 query 权限（主进程复核）", !roles.canCall("lens", "query") && !roles.canCall("workbench", "query"), "拒绝", "放行");
   check("lens：batch + status", roles.canCall("lens", "batch") && roles.canCall("lens", "status"), true, roles.ROLE_METHODS.lens);
   check("workbench：batch + status", roles.canCall("workbench", "batch") && roles.canCall("workbench", "status"), true, roles.ROLE_METHODS.workbench);
   check("capture：只有 batch，没有 status", roles.canCall("capture", "batch") && !roles.canCall("capture", "status"), "batch only", roles.ROLE_METHODS.capture);
@@ -42,7 +43,8 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
   const preload = read("electron/preload.js");
   const capturePreload = read("electron/preload-capture.js");
   check("主 preload 暴露 behaviorAPI（batch/onConfig/status）", /behaviorAPI/.test(preload) && /"behavior:batch"/.test(preload) && /"behavior:config"/.test(preload) && /"behavior:status"/.test(preload), "三方法", "缺");
-  check("主 preload 不暴露 query/export/purge 空壳", !/behavior:query/.test(preload) && !/behavior:export/.test(preload) && !/behavior:purge/.test(preload), "无空壳", "提前暴露");
+  check("主 preload 暴露具名 query（权限由主进程角色门复核）", /behaviorAPI/.test(preload) && /"behavior:query"/.test(preload), "query", "缺");
+  check("主 preload 不暴露 export/purge 空壳（T12 前）", !/behavior:export/.test(preload) && !/behavior:purge/.test(preload), "无空壳", "提前暴露");
   check("捕获 preload 只有 batch/onConfig", /behaviorAPI/.test(capturePreload) && /"behavior:batch"/.test(capturePreload) && /"behavior:config"/.test(capturePreload) && !/"behavior:status"/.test(capturePreload), "batch+onConfig", "越权");
   check("捕获窗口加载的是 preload-capture.js（与主 preload 文件分离）", /preload-capture\.js/.test(read("electron/quickCapture.js")), "分离", "混用");
   const lensSrc = read("electron/lensWindow.js");

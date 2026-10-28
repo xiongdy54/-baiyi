@@ -187,6 +187,12 @@
   },
   {
     "bridge": "behaviorAPI",
+    "method": "query",
+    "channel": "behavior:query",
+    "kind": "invoke"
+  },
+  {
+    "bridge": "behaviorAPI",
     "method": "status",
     "channel": "behavior:status",
     "kind": "invoke"

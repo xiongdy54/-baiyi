@@ -550,6 +550,8 @@ contextBridge.exposeInMainWorld("pluginsAPI", {
 contextBridge.exposeInMainWorld("behaviorAPI", {
   batch: (payload) => ipcRenderer.send("behavior:batch", payload),
   status: () => ipcRenderer.invoke("behavior:status"),
+  // 具名只读查询（主进程按窗口角色复核；lens/workbench/capture 调用一律拒绝）
+  query: (name, params) => ipcRenderer.invoke("behavior:query", name, params || {}),
   onConfig: (callback) => {
     const handler = (_e, p) => callback(p);
     ipcRenderer.on("behavior:config", handler);

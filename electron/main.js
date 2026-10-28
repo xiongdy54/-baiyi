@@ -474,6 +474,12 @@ ipcMain.handle("behavior:status", (e) => {
   if (!role || !behaviorRoles.canCall(role, "status")) throw new Error("BDI：该窗口无权读取行为数据状态");
   return behavior.publicStatus();
 });
+// §10：只允许具名查询（禁止任意 SQL / 表名 / 列名 / 路径）；本窗口角色没有 query 权限即拒绝。
+ipcMain.handle("behavior:query", (e, name, params) => {
+  const role = behaviorRoleOf(e);
+  if (!role || !behaviorRoles.canCall(role, "query")) throw new Error("BDI：该窗口无权查询行为数据");
+  return behavior.runQuery(String(name || ""), params && typeof params === "object" ? params : {});
+});
 
 ipcMain.handle("library:list", async () => {
   await dbReadyGate;

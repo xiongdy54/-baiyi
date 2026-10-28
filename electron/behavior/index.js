@@ -9,6 +9,9 @@ const { createWriter } = require("./writer");
 const { createSessions } = require("./sessions");
 const { createIpcStats } = require("./ipcStats");
 const { createDomains } = require("./domains");
+const { createRollup } = require("./rollup");
+const { createCoverage } = require("./coverage");
+const { createQuery } = require("./query");
 const { learningDayStartMs } = require("../fsrsTime");
 
 let ctx = null;
@@ -18,6 +21,11 @@ let ipcStats = null;
 let domains = null;
 let domainsTimer = null;
 let domainsFirstTimer = null;
+let rollup = null;
+let coverage = null;
+let queryApi = null;
+let rollupTimer = null;
+let rollupFirstTimer = null;
 let config = { ...policyMod.DEFAULT_BEHAVIOR };
 let policy = null;
 let state = { status: "uninitialized", reason: null, detail: null };
@@ -105,7 +113,12 @@ function resetForTest() {
   }
   if (domainsFirstTimer) { clearTimeout(domainsFirstTimer); domainsFirstTimer = null; }
   if (domainsTimer) { clearInterval(domainsTimer); domainsTimer = null; }
+  if (rollupFirstTimer) { clearTimeout(rollupFirstTimer); rollupFirstTimer = null; }
+  if (rollupTimer) { clearInterval(rollupTimer); rollupTimer = null; }
   domains = null;
+  rollup = null;
+  coverage = null;
+  queryApi = null;
   if (ipcStats) {
     try { ipcStats.stop(); } catch { /* 已停 */ }
     ipcStats = null;
@@ -206,11 +219,20 @@ async function init(opts) {
   if (typeof o.pull === "function") {
     // §8.3：启动 90s 首次全量 scan；之后每 30 分钟（页间让出由 domains.scanAll 分页承担）
     domains = createDomains({ db, pull: o.pull, now });
-    const run = () => { try { domains.refreshAll(); } catch { /* 归因失败不影响业务 */ } };
-    domainsFirstTimer = setTimeout(run, 90 * 1000);
+    coverage = createCoverage({ db, now, cutoffHour: tapCutoffHour });
+    rollup = createRollup({ db, pull: o.pull, now, cutoffHour: tapCutoffHour });
+    queryApi = createQuery({ db, pull: o.pull, now, todayDay: () => dayStringOf(now()) });
+    const runDomains = () => { try { domains.refreshAll(); } catch { /* 归因失败不影响业务 */ } };
+    domainsFirstTimer = setTimeout(runDomains, 90 * 1000);
     if (domainsFirstTimer.unref) domainsFirstTimer.unref();
-    domainsTimer = setInterval(run, 30 * 60 * 1000);
+    domainsTimer = setInterval(runDomains, 30 * 60 * 1000);
     if (domainsTimer.unref) domainsTimer.unref();
+    // §9.2：启动 120s 首次增量；之后每 30 分钟（查询前若落后 >5 分钟先同步跑一次）
+    const runRollup = () => { try { rollup.ensureDeriveVersion(); rollup.refreshIncremental(); } catch { /* 派生失败不影响业务 */ } };
+    rollupFirstTimer = setTimeout(runRollup, 120 * 1000);
+    if (rollupFirstTimer.unref) rollupFirstTimer.unref();
+    rollupTimer = setInterval(runRollup, 30 * 60 * 1000);
+    if (rollupTimer.unref) rollupTimer.unref();
   }
   state = { status: "ok", reason: null, detail: null };
   sessions = createSessions({
@@ -342,6 +364,34 @@ function getGeneration() {
   return generation;
 }
 
+/** 具名只读查询（禁止任意 SQL）。查询前若派生落后 >5 分钟先同步跑一次增量。 */
+function runQuery(name, params) {
+  if (!queryApi) return { ok: false, code: "not_available" };
+  const fn = queryApi.queries[String(name)];
+  if (!fn) return { ok: false, code: "unknown_query" };
+  try {
+    const last = Number(behaviorDb.getMeta("last_rollup_at", "0")) || 0;
+    if (rollup && Date.now() - last > 5 * 60 * 1000) {
+      try { rollup.ensureDeriveVersion(); rollup.refreshIncremental(); } catch { /* 落后时返回 stale 数据 */ }
+    }
+    return { ok: true, name: String(name), data: fn(params || {}) };
+  } catch (e) {
+    return { ok: false, code: "query_failed", detail: String((e && e.message) || e) };
+  }
+}
+
+/** 覆盖重算（rollup 前由调用方/定时器给定日集合；无参时用原始数据出现过的 day）。 */
+function refreshCoverage(days) {
+  if (!coverage) return 0;
+  const list = Array.isArray(days) && days.length
+    ? days
+    : [...new Set([
+        ...behaviorDb.getDb().prepare("SELECT DISTINCT day FROM events").all().map((r) => r.day),
+        ...behaviorDb.getDb().prepare("SELECT DISTINCT day FROM attn_spans").all().map((r) => r.day),
+      ])];
+  try { return coverage.refreshDays(list); } catch { return 0; }
+}
+
 function flushSync() {
   return writer ? writer.flushSync() : 0;
 }
@@ -396,6 +446,11 @@ function close() {
   unsubscribers = [];
   if (domainsFirstTimer) { clearTimeout(domainsFirstTimer); domainsFirstTimer = null; }
   if (domainsTimer) { clearInterval(domainsTimer); domainsTimer = null; }
+  if (rollupFirstTimer) { clearTimeout(rollupFirstTimer); rollupFirstTimer = null; }
+  if (rollupTimer) { clearInterval(rollupTimer); rollupTimer = null; }
+  rollup = null;
+  coverage = null;
+  queryApi = null;
   if (ipcStats) {
     try { ipcStats.stop(); } catch { /* 关闭路径不得抛 */ }
     ipcStats = null;
@@ -433,5 +488,7 @@ module.exports = {
   getSessions: () => sessions,
   getTapContext,
   getIpcStats: () => ipcStats,
+  runQuery,
+  refreshCoverage,
   resetForTest,
 };
