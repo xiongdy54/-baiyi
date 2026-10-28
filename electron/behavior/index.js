@@ -7,10 +7,13 @@ const behaviorDb = require("./behaviorDb");
 const policyMod = require("./policy");
 const { createWriter } = require("./writer");
 const { createSessions } = require("./sessions");
+const { createIpcStats } = require("./ipcStats");
+const { learningDayStartMs } = require("../fsrsTime");
 
 let ctx = null;
 let writer = null;
 let sessions = null;
+let ipcStats = null;
 let config = { ...policyMod.DEFAULT_BEHAVIOR };
 let policy = null;
 let state = { status: "uninitialized", reason: null, detail: null };
@@ -37,6 +40,46 @@ function getStatus() {
     policy,
     writer: writer ? writer.stats() : null,
     session: sessions ? sessions.status() : null,
+    ipc: ipcStats ? { pending: Object.keys(ipcStats.snapshot()).length } : null,
+  };
+}
+
+function tapCutoffHour() {
+  try {
+    const s = typeof ctx?.settings === "function" ? ctx.settings() : null;
+    const h = Number(s?.app?.dayCutoffHour);
+    return Number.isInteger(h) && h >= 0 && h <= 23 ? h : 4;
+  } catch {
+    return 4;
+  }
+}
+
+function dayStringOf(ms) {
+  const d = new Date(learningDayStartMs(ms, tapCutoffHour()));
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** 撤销评分只删最近一条日志：把当前学习日 + 前一日标 dirty（rollup 重算两日足够，§7.1 规则 8）。 */
+function markUndoDirty() {
+  const db = behaviorDb.getDb();
+  if (!db) return;
+  const t = now();
+  const rows = [dayStringOf(t), dayStringOf(t - 86400000)];
+  const set = db.prepare("INSERT OR IGNORE INTO dirty_days (day, reason) VALUES (?, 'undo')");
+  try {
+    db.transaction(() => { for (const day of rows) set.run(day); })();
+  } catch { /* 派生标记失败不影响业务 */ }
+}
+
+/** ipcTap 需要的运行时上下文（不暴露 db / writer 本体）。 */
+function getTapContext() {
+  return {
+    sessionId: () => (sessions ? sessions.getSessionId() : null),
+    now,
+    cutoffHour: tapCutoffHour,
+    recordQueryText: () => config.recordQueryText === true,
+    get stats() { return ipcStats; }, // 动态：install 早于 init
+    markUndoDirty,
   };
 }
 
@@ -50,6 +93,10 @@ function resetForTest() {
   if (sessions) {
     try { sessions.detachAll(); } catch { /* 已卸载 */ }
     sessions = null;
+  }
+  if (ipcStats) {
+    try { ipcStats.stop(); } catch { /* 已停 */ }
+    ipcStats = null;
   }
   if (writer) {
     try { writer.stop(); } catch { /* 已停 */ }
@@ -142,6 +189,8 @@ async function init(opts) {
   }
   writer = createWriter({ db, recordQueryText: config.recordQueryText, uuid: o.uuid });
   writer.start();
+  ipcStats = createIpcStats({ now, dayOf: () => dayStringOf(now()) });
+  ipcStats.start(db);
   state = { status: "ok", reason: null, detail: null };
   sessions = createSessions({
     db,
@@ -246,6 +295,10 @@ function close() {
     try { off(); } catch { /* 已解绑 */ }
   }
   unsubscribers = [];
+  if (ipcStats) {
+    try { ipcStats.stop(); } catch { /* 关闭路径不得抛 */ }
+    ipcStats = null;
+  }
   if (writer) {
     try { writer.flushSync(); } catch { /* 关闭路径不得抛 */ }
     writer.stop();
@@ -273,5 +326,7 @@ module.exports = {
   getDb: () => behaviorDb.getDb(),
   getWriter: () => writer,
   getSessions: () => sessions,
+  getTapContext,
+  getIpcStats: () => ipcStats,
   resetForTest,
 };

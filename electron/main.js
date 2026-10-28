@@ -58,6 +58,8 @@ const { installPermissionHandlers } = require("./permissions");
 const { closeToTrayEnabled } = require("./closeToTray");
 // D248（v49.77）：用户行为数据基础设施（BDI）门面——纯本地 behavior.db，独立连接；失败只停用自身。
 const behavior = require("./behavior");
+// D248（T4）：IPC tap 必须在任何业务 ipcMain.handle/on 注册之前安装（§7.1；排除 behavior:*，未登记通道透传）。
+require("./behavior/ipcTap").install(ipcMain, behavior.emit);
 
 // v36（M8-A，§6.5/D34）：**进程级单实例**——全局快捷键必须只有唯一宿主（第二个进程抢不到注册，
 // 且会各开一份 better-sqlite3 连接、双写同一库文件互相覆盖落盘）。第二次启动聚焦已有窗口后退出。
