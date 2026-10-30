@@ -36,6 +36,8 @@ export interface FlowLayerProps {
 }
 
 const stagger = (i: number, step: number, cap: number) => Math.min(i * step, cap);
+/** §14.4：流带渐变 id（每条形状一条，几何取自它自己的 xs/x1） */
+const shapeGradId = (id: string) => `fg-${id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
 const vars = (delay: number) => ({ "--flow-delay": `${Math.round(delay)}ms` }) as CSSProperties;
 
 /** 结构流的两层画布根（业务代码的内联 SVG 棘轮只许变少：这里用 createElement 建根，避免新增字面量） */
@@ -73,7 +75,6 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
   /** §13.4.3：颜色兜底——解析不了就退色调色板第一色，绝不把 color-mix() 写进 SVG */
   const safe = (c: string) => (parseRgb(c) ? c : colors.palette[0]);
   const ci = colorIndexer(scene);
-  const pEnd = Math.max(0, Math.min(1, (plan.barX - FLOW.BRAID_PREF + FLOW.HL_PAD_X - scene.hlX0) / Math.max(1, scene.hlX1 - scene.hlX0)));
 
   // 图元 / 关系线 / 标签的进出场保留（§5.8）
   const prims = usePresence(scene.mode === "whisper" ? layout.prims.filter((p) => p.id.startsWith("bar:")) : layout.prims, 200);
@@ -143,15 +144,13 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
         style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", pointerEvents: "none", zIndex: 23, mixBlendMode: colors.dark ? "screen" : "multiply", overflow: "visible" }}
       >
         <defs>
-          {Array.from(new Set(shapesP.map(({ item }) => item.color))).flatMap((color) =>
-            ([0, 1, 2] as const).map((tone) => (
-              <linearGradient key={`${color}-${tone}`} id={`fg-${ci(color)}-${tone}`} gradientUnits="userSpaceOnUse" x1={scene.hlX0} y1="0" x2={scene.hlX1} y2="0">
-                <stop offset="0" stopColor={safe(color)} stopOpacity={colors.aHL[tone]} />
-                <stop offset={pEnd} stopColor={safe(color)} stopOpacity={colors.aHL[tone]} />
-                <stop offset="1" stopColor={safe(color)} stopOpacity={colors.aEnd[tone]} />
-              </linearGradient>
-            )),
-          )}
+          {/* §14.4：每条流带一条渐变，从【接缝】起坡——任何 braid 宽度下接缝透明度都等于矩形右端的 aHL */}
+          {shapesP.map(({ item: s }) => (
+            <linearGradient key={`fg-${s.id}`} id={shapeGradId(s.id)} gradientUnits="userSpaceOnUse" x1={s.xs} y1="0" x2={s.x1} y2="0">
+              <stop offset="0" stopColor={safe(s.color)} stopOpacity={colors.aHL[s.tone]} />
+              <stop offset="1" stopColor={safe(s.color)} stopOpacity={colors.aEnd[s.tone]} />
+            </linearGradient>
+          ))}
           {shapesP.filter(({ item }) => item.stub).map(({ item }) => {
             return (
               <linearGradient key={`st-${item.id}`} id={`fst-${item.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`} gradientUnits="userSpaceOnUse" x1={item.L} y1="0" x2={item.x1} y2="0">
@@ -177,7 +176,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
                 ref={(el) => registerShape?.(s.id, el)}
                 className={`flow-shape${dim ? " is-dim" : ""}`}
                 d={d}
-                fill={s.stub ? `url(#fst-${s.id.replace(/[^a-zA-Z0-9_-]/g, "_")})` : `url(#fg-${ci(s.color)}-${s.tone})`}
+                fill={s.stub ? `url(#fst-${s.id.replace(/[^a-zA-Z0-9_-]/g, "_")})` : `url(#${shapeGradId(s.id)})`}
                 style={{ d: `path("${d}")`, ...vars(shapeDelay(i)) }}
                 data-node-id={s.nodeId}
                 data-tone={s.tone}

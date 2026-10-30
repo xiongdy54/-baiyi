@@ -216,6 +216,8 @@ export interface ReaderStructurePaintRect {
   height: number;
   color: string;
   alpha: number;
+  /** §14.4：右端向内渐隐的长度（px）；>0 时用「透明 → 实色」的横向渐变，0/缺省为整块实色 */
+  fade?: number;
 }
 export interface ReaderStructureGeometry {
   seq: number;

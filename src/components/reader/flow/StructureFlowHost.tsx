@@ -791,7 +791,8 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       kernel.setStructurePaint([], o);
       return;
     }
-    kernel.setStructurePaint(buildPaintRects(geoRef.current, scene.layout, { ...F.opts, colors }), o);
+    const portColorOf = new Map(scene.layout.ports.map((p) => [p.nodeId, p.color] as const));
+    kernel.setStructurePaint(buildPaintRects(geoRef.current, scene.layout, { ...F.opts, portColorOf, colors }), o);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [smooth, kernel, scene?.layout, geo, data.hoverId, data.sel, data.readingId, colors, stage]);
   useEffect(() => () => kernel?.setStructurePaint?.([], { blend: "multiply", fadeMs: 0 }), [kernel]);

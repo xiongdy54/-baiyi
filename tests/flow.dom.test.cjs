@@ -256,6 +256,25 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
 
     const stops = $$(".flow-blend linearGradient stop");
     check("所有渐变 stop 都是可解析实色（无黑色兜底）", stops.length > 0 && stops.every((s) => ensureLayout.parseRgb(s.getAttribute("stop-color") || "") !== null), stops.map((s) => s.getAttribute("stop-color")).slice(0, 8));
+
+    // §14.4：接缝连续——每条颈部渐变从矩形右端起坡，起点透明度 = 矩形 alpha
+    const grads = new Map($$(".flow-blend linearGradient").map((g) => [g.id, g]));
+    const lastPaint = [...paintCalls].reverse().find((c) => c.rects.length > 0);
+    const rectOf = (nodeId) => (lastPaint ? lastPaint.rects.find((r) => r.key.startsWith(nodeId + "@")) : null);
+    const seam = [];
+    for (const p of $$(".flow-shapes path[data-node-id]")) {
+      const fill = p.getAttribute("fill") || "";
+      const g = grads.get(fill.replace(/^url\(#|\)$/g, ""));
+      const nodeId = p.getAttribute("data-node-id");
+      const rect = rectOf(nodeId);
+      const stop0 = g && g.querySelector("stop");
+      if (!g || !rect || !stop0) { seam.push({ nodeId, g: !!g, rect: !!rect }); continue; }
+      const a = Number(stop0.getAttribute("stop-opacity"));
+      const x1 = Number(g.getAttribute("x1"));
+      if (Math.abs(a - rect.alpha) > 1e-6 || Math.abs(x1 - (rect.left + rect.width)) > 0.6) seam.push({ nodeId, a, alpha: rect.alpha, x1, xs: rect.left + rect.width });
+    }
+    check("§14.4 颈部渐变从矩形右端起坡、起点透明度 = 矩形 alpha", seam.length === 0, seam.slice(0, 4));
+    check("§14.4 正文矩形带右缘渐隐（fade > 0）", !!lastPaint && lastPaint.rects.every((r) => typeof r.fade === "number" && r.fade > 0), lastPaint && lastPaint.rects.slice(0, 2).map((r) => r.fade));
   }
 
   console.log("---- 悬停 / 展开 / 双击跳转 / 回到原位 ----");

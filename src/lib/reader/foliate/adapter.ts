@@ -637,9 +637,19 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       }
       el.style.left = `${r.left - ox}px`;
       el.style.top = `${r.top - oy}px`;
-      el.style.width = `${r.width}px`;
+      // §14.4：右缘 +1px 压住 iframe div 与 SVG path 各自的抗锯齿缝
+      el.style.width = `${r.width + 1}px`;
       el.style.height = `${r.height}px`;
-      el.style.backgroundColor = r.color;
+      if (r.fade && r.fade > 0) {
+        // §14.4：视觉上近乎透明，只在最右端保留一段向左变淡的颜色，与颈部向左变淡衔接
+        el.style.color = r.color;
+        el.style.backgroundColor = "transparent";
+        el.style.backgroundImage = `linear-gradient(90deg, transparent 0, transparent calc(100% - ${Math.round(r.fade)}px), currentColor 100%)`;
+      } else {
+        el.style.color = "";
+        el.style.backgroundImage = "";
+        el.style.backgroundColor = r.color;
+      }
       const target = String(r.alpha);
       if (fresh) {
         const e = el;

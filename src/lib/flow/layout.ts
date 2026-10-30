@@ -27,7 +27,7 @@ export const FLOW = {
   BAR_MAX: 10, LABEL_GAP: 16, PAD_R: 20, INDENT: 0,
   BRAID_MIN: 64, BRAID_PREF: 96, BRAID_MAX: 160,
   MAX_SHIFT: 200, KEEP_LEFT: 40, SHIFT_STEP: 8, SHIFT_HYST: 16, TEXT_MIN: 480,
-  HL_PAD_X: 6, HL_PAD_Y: 2, HL_R: 3, HL_MERGE_GAP: 28,
+  HL_PAD_X: 6, HL_PAD_Y: 2, HL_R: 3, HL_MERGE_GAP: 28, HL_FADE_W: 140, // §14.4：矩形右端向内渐隐长度
   HEADER_FS: 11, HEADER_LH: 16, HEADER_GAP: 10, BACK_H: 22,
   ROW_PAD_Y: 4, ROW_GAP: 6, MORE_H: 20, META_W: 44,
   MAX_MEMBERS: 9, MIN_MEMBERS: 3, MAX_KIDS: 7,
@@ -1119,6 +1119,8 @@ export function buildPaintRects(
     hoverSet?: Set<string>;
     colorOf: (id: string) => string;
     extra?: { nodeId: string; color: string }[];
+    /** §14.4：port 色（与颈部同源；子节点色不在 colorOf 里，缺了会与彩带不同色） */
+    portColorOf?: Map<string, string>;
     colors: FlowColors;
   },
 ): ReaderStructurePaintRect[] {
@@ -1131,11 +1133,11 @@ export function buildPaintRects(
   return mergeSpans(content, keep).map((s) => {
     const t = tone(s.nodeId);
     const dim = !!o.hoverId && s.nodeId !== o.hoverId && t === 0; // 与 FlowLayer 的 is-dim 同一规则
-    const raw = extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId);
+    const raw = extraColor.get(s.nodeId) ?? o.portColorOf?.get(s.nodeId) ?? o.colorOf(s.nodeId);
     const color = parseRgb(raw) ? raw : o.colors.palette[0]; // §13.4.3：不可解析色一律退调色板第一色
     return {
       key: `${s.nodeId}@${s.doc}:${Math.round(s.top)}`, doc: s.doc!, left: s.left, top: s.top, width: s.right - s.left, height: s.bottom - s.top,
-      color, alpha: o.colors.aHL[t] * (dim ? o.colors.aDim : 1),
+      color, alpha: o.colors.aHL[t] * (dim ? o.colors.aDim : 1), fade: FLOW.HL_FADE_W,
     };
   });
 }

@@ -346,6 +346,10 @@ const mkCtx = (g, cut, pattern, members, extra) => Object.assign({
   const rects = L.buildPaintRects(geoP, layP, { hoverId: null, focusId: "a", colorOf: () => "#6E7F2E", colors });
   const shape = L.buildShapes(geoP, layP, 0, { hoverId: null, focusId: "a", readingId: "a", colorOf: () => "#6E7F2E" }).filter((s) => s.ribbon);
   check("buildPaintRects 与颈部对齐：left+width=xs、top=s0、top+height=s1", rects.length === 1 && shape.length === 1 && Math.abs(rects[0].left + rects[0].width - shape[0].xs) < 1 && Math.abs(rects[0].top - shape[0].s0) < 1 && Math.abs(rects[0].top + rects[0].height - shape[0].s1) < 1, { rects, shape: shape[0] });
+  const rects2 = L.buildPaintRects(geoP, layP, { hoverId: null, focusId: null, colorOf: () => "#000000", portColorOf: new Map([["a", "#3E8A82"]]), colors });
+  check("§14.4 矩形取 port 色（与颈部同源）", rects2.length === 1 && rects2[0].color === "#3E8A82", rects2[0]);
+  check("§14.4 矩形带右缘渐隐长度", rects2[0].fade === L.FLOW.HL_FADE_W && rects2[0].fade > 0, { fade: rects2[0].fade, want: L.FLOW.HL_FADE_W });
+  check("§14.4 无法解析的 port 色仍退调色板第一色", L.buildPaintRects(geoP, layP, { hoverId: null, focusId: null, colorOf: () => "x", portColorOf: new Map([["a", "color-mix(in oklab, #123, #fff 20%)"]]), colors })[0].color === COLORS.palette[0]);
 }
 
 // ---------------------------------------------------------------- §12.4.4 layoutPeek
