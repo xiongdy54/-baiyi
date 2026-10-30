@@ -9936,7 +9936,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--accent);
   background: var(--accent-soft);
 }
-   结构流（STRUCTURE-FLOW-PLAN §7 / §8 / §12）
+/* 结构流（STRUCTURE-FLOW-PLAN §7 / §8 / §12）
    · 高亮流带（混合层，与正文同路径）＋ 上层 SVG（条 / 轴 / 跨度条 / 关系线）＋ HTML 标签
    · 全部颜色来自 scene.colors（宿主用 .flow-probe 解析 Token 成实色）；本节的 Token 只供探针读取与皮肤覆盖
    ========================================================================== */
