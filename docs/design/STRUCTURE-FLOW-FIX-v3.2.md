@@ -710,3 +710,14 @@ base = { left: vp.left + (vw - w) / 2, right: vp.left + (vw + w) / 2 };
 
 - `tests/flow.layout.test.cjs`：`shapeGradientStops` 四停点位置与透明度；`x1 ≤ xs` 时收在 `aHL`；`FLOW.HL_FADE_W` 生效。
 - `tests/flow.dom.test.cjs`：`setStructurePaint` 全程零调用；滚动回调同一调用栈里**矩形段**的首点 y 也随滚动变化（证明整条 path 同步）；非 stub 形状的渐变有四个停点；换章 relocate 后预览立即清空、无浮空图元。
+
+### 15.5 第三轮实机复测修补（v49.82）
+
+实机在滚动瞬间截到两类残影，根因都不在「配色」而在「身份」与「逐帧时机」：
+
+1. **预览行与主体行共用 id 命名空间**：`layoutPeek` 的条目 id 也是 `n:${nodeId}`，与主体成员同 id。切组的一两帧里，同一个 id 从「预览行」变成「主体行」，`usePresence` 按 id 复用 → 预览行的标签被主体行顶替（或反过来），而它的图元（`bar:*` / `peekline:*`）还在 → **「条还在、字没了」**。
+   修：预览行 id 统一加 `peek:` 前缀（`peek:n:${id}` / `peek:more:${id}`），两套 presence 互不干扰；同一个节点在预览↔主体之间易位时改为**交叉淡入**，不再复用同一个 DOM 节点。`mergeLayouts` 的去重按完整 id，天然按角色隔离。
+2. **逐帧函数整帧跳过**：形状集合变化（有段落进出视口）时，`paintFrame` 先 `flushSync` 再 `return`，那一帧所有流带都不更新 → 快速滚动时偶尔落后一帧，看起来就是**高亮矩形残影**。
+   修：改为一帧内「补渲染一次 + 继续把已有元素写完」，并跳过已脱离文档的节点。
+3. **退场只收几何不淡出**：退出中的流带此前只把路径收成零宽，不改变透明度 → 视口边缘偶尔留一条细线。
+   修：`phase === "exit"` 时同时 `opacity: 0`（走 `.flow-shape` 的 160ms opacity 过渡）。
