@@ -658,3 +658,55 @@ base = { left: vp.left + (vw - w) / 2, right: vp.left + (vw + w) / 2 };
 - `tests/flow.layout.test.cjs`：`ABOVE_SLOT === 88`、`COL_MARGIN_Y === 20`；`planColumn` 居中用例（宽窗 1400 + 720 版心 → shift 195）；`buildPaintRects` 的 `fade === HL_FADE_W` 且颜色取自 port。
 - `tests/flow.dom.test.cjs`：收起后无 `.flow-actions`；点预览后「组不重复、每个 `bar:*` 都有对应 `n:*`」；渐变首 stop 的 opacity === 矩形 alpha。
 - 实机：顶部预览不贴顶；窗口 900→1800 连续拖动，列与正文的相对位置恒定（三件整体居中），彩带宽度不塌；展开/收起无残影、无浮空条。
+
+---
+
+## 15. 第三轮：单路径合体 + 换章直切（v3.4，D252）
+
+> 2026-10-30。§15 > §14 > §13 > §12 > 前文。用户已拍板三件事（15.0）。
+
+### 15.0 已拍板口径
+
+| 编号 | 问题 | 定稿 |
+|---|---|---|
+| D-裁决 1 | 高亮矩形与彩带的接缝 | **A1：合成一个部件**——矩形与颈部是同一条 SVG path、同一条渐变；删除 iframe 矩形层 |
+| D-裁决 2 | 换章时的残留 | **结构图尽量不消失、直接换成新章**：换章瞬间清掉旧预览 / 选中 / 展开并立即重采，主体保留到新组算出来为止，不整层淡出 |
+| D-裁决 3 | 顶层彩带越界 | 裁剪视口＝**可见阅读窗口**（`.reader-engine-viewport`），不是引擎容器 |
+
+### 15.1 单路径合体（取代 §13.3 的「矩形画在 iframe」）
+
+**几何**：滚动模式不再拆两段。`shapes` 一律用 `shapePath(s)` 绘制（矩形段 + 颈部在一条路径里），逐帧函数也只写这一条 `d`；`neckPath` 退役。
+
+**颜色**：一条路径一条渐变（`userSpaceOnUse`，`x1 = s.L`，`x2 = max(s.x1, s.xs + 0.5)`），四个停点：
+
+| 位置 | 透明度 |
+|---|---|
+| `s.L` | 0 |
+| `max(s.L, s.xs − FLOW.HL_FADE_W)` | 0 |
+| `s.xs` | `aHL[tone]` |
+| `s.x1` | `aEnd[tone]` |
+
+`s.x1 ≤ s.xs`（没有颈部）时只保留前三个停点，右端收在 `aHL`。`stub` 继续用 `fst-*` 渐变不变。
+矩形右端与颈部起点是**同一个点**，不存在重叠 / 抗锯齿缝 / 错位三条通路。
+
+**删除**（不再需要，避免两套事实）：`ReaderKernel.setStructurePaint`、`ReaderStructurePaintRect`、适配器的 `paintRoots/paintForDoc/paintSpec`、`buildPaintRects`、宿主的矩形下发 effect。`smooth` 的判据改为 `onContentScroll && getFrameOffsets`（PDF 照旧走旧路）。
+
+**代价**：矩形不再随正文原生滚动，改为与颈部同一逐帧函数写 `d`。矩形 99% 区域透明，滞后不可见；若将来在惯性滚动上观察到滞后，优先调 `TRACK_IDLE_MS` 而不是拆回两段。
+
+### 15.2 顶部裁剪
+
+采样时把几何视口钳到宿主可见区：`top = max(geo.viewport.top, hostRect.top)`、`bottom = min(geo.viewport.bottom, hostRect.bottom)`；非滚动模式也统一走一次 `geometryAt`（等价于按视口重裁），保证彩带顶边永远不越过阅读区上沿。
+
+### 15.3 换章：直切，不整层消失
+
+1. `useStructureFlow` 的 `relocate` 监听读 `RelocateInfo.chapterHref / chapterIndex`；键变化即视为换章：
+   - 立即 `peekRef = null`、清 `candGroup/candNode`、`manualExpRef = false`、`setSel(null)`、`setExpandedId(null)`、`setAttnTick`;
+   - 立刻 `scheduleSample(0)`（不等防抖）。
+   主体（`groupId`/`readingId`）**保留**到新章采样返回为止——旧内容不会先消失；新样本一到，`curScore === 0` 使 `decideAttention` 无条件切组，宿主按既有 `regroup` 编排整体换掉。
+2. `mergeLayouts` 的**图元也按 id 去重（主体优先）**：杜绝「条在、字没了」的浮空条与多余预览分隔线。
+3. 条目 / 图元 / 流带的退场时长统一 160ms，避免零件逐个延迟退场。
+
+### 15.4 测试
+
+- `tests/flow.layout.test.cjs`：`shapeGradientStops` 四停点位置与透明度；`x1 ≤ xs` 时收在 `aHL`；`FLOW.HL_FADE_W` 生效。
+- `tests/flow.dom.test.cjs`：`setStructurePaint` 全程零调用；滚动回调同一调用栈里**矩形段**的首点 y 也随滚动变化（证明整条 path 同步）；非 stub 形状的渐变有四个停点；换章 relocate 后预览立即清空、无浮空图元。
