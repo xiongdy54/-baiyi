@@ -16,6 +16,7 @@ import {
   PEEK,
   buildShapes,
   buildStrands,
+  explainBoxH,
   fitLayout,
   geometryAt,
   layoutPeek,
@@ -736,7 +737,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     const colorOf = new Map<string, string>(all.map((id, i) => [id, id === readingId ? colors.accent : colors.palette[i % 8]]));
     const sel = data.sel && g?.nodes[data.sel] ? data.sel : null;
     const explainOpen = !!(data.explainFor && data.explainFor === sel);
-    const inlineH = sel ? FLOW.ACTIONS_H + (explainOpen ? Math.min(FLOW.EXPLAIN_MAX_H, Math.ceil((data.explainText.length * 12) / Math.max(1, plan.labelW || FLOW.LABEL_W_COMPACT)) * 18 + 12) : 0) : 0;
+    const inlineH = sel ? FLOW.ACTIONS_H + (explainOpen ? explainBoxH(data.explainText, plan.labelW, data.explainBusy) : 0) : 0;
     const panel = !g || !all.length
       ? !data.hasKey && !g
         ? { kind: "nokey" as const, feedDone: data.feed.done, feedTotal: data.feed.total }

@@ -417,5 +417,100 @@ console.log("---- §14.3 上方槽 / 列顶留白 ----");
   check("2 行预览 + 另 1 项 的总高 ≤ 上方槽余量", p.height <= L.COLUMN.ABOVE_SLOT - 8, { h: p.height, slot: L.COLUMN.ABOVE_SLOT });
 }
 
+// ---------------------------------------------------------------- §8.9 动作行让位
+console.log("---- §8.9 动作行让位（选中成员 / 子项 / 对照单元格） ----");
+{
+  const ACT = FLOW.ACTIONS_H; // 26：动作行高度（讲解另计，见下）
+  // 与渲染器同口径：layout.inlineAt 优先，否则回落到选中条目的底边（FlowLayer.tsx）。
+  const anchorOf = (lay, id) => {
+    const it = lay.items.find((i) => i.nodeId === id && !i.peek && (i.kind === "node" || i.kind === "kid"));
+    const a = lay.inlineAt ?? (it ? { x: it.x, y: it.y + it.h, w: it.w } : null);
+    return a ? { ...a, itemId: it ? it.id : null } : null;
+  };
+  // 动作行 [y, y+h) 带内不允许有别的条目「起头」（含同一 x 区间）
+  const intruders = (lay, id, h) => {
+    const a = anchorOf(lay, id);
+    if (!a) return [{ why: "no anchor" }];
+    const band = lay.items.filter(
+      (i) => i.id !== a.itemId && i.nodeId && i.kind !== "head" && i.y > a.y - 0.5 && i.y < a.y + h && a.x < i.x + i.w - 0.5 && i.x < a.x + a.w - 0.5,
+    );
+    const over = a.y + h > lay.height + FLOW.ROW_GAP + 0.5 ? [{ over: Math.round(a.y + h), height: Math.round(lay.height) }] : [];
+    return [...band.map((i) => ({ id: i.id, kind: i.kind, y: Math.round(i.y) })), ...over];
+  };
+  // 探测器自检：造一个已知重叠，必须被抓到（防止断言空转）
+  const probe = { height: 100, items: [{ id: "n:a", nodeId: "a", kind: "node", x: 0, y: 0, w: 200, h: 20 }, { id: "n:b", nodeId: "b", kind: "kid", x: 0, y: 30, w: 200, h: 17 }] };
+  check("探测器自检：已知重叠必须被抓到", intruders(probe, "a", ACT).length > 0, intruders(probe, "a", ACT));
+
+  // ① 大纲树：成员（带展开子项）/ 子项（基线对照，修复前即通过）
+  {
+    const g = graph(
+      [node("P", null, 0, "材料", "其他"), node("a", "P", 1000, "甲", "论点"), node("b", "P", 2000, "乙", "理由"), node("c", "P", 3000, "丙", "例证"),
+        node("b1", "b", 1000, "乙-1", "其他"), node("b2", "b", 2000, "乙-2", "其他")],
+      [],
+    );
+    const members = ["a", "b", "c"];
+    for (const sel of ["b", "b1"])
+      check(`大纲树：选中 ${sel} 时动作行不压条目`, intruders(L.fitLayout(mkCtx(g, "P", "tree", members, { expandedId: "b", selectedId: sel, inlineH: ACT }), members, 700), sel, ACT).length === 0);
+  }
+
+  // ② 时间线：成员 / 子项（实机 bug：子项未预留）
+  {
+    const g = graph(
+      [node("P", null, 0, "御宅族的污名", "其他"),
+        node("t1", "P", 1000, "一九八八 宫崎事件", "叙事", { timeText: "1988年" }),
+        node("t2", "P", 2000, "九〇年代御宅族对污名的抗拒", "叙事", { timeText: "1990年" }),
+        node("t3", "P", 3000, "御宅族的对立", "叙事", { timeText: "1995年" }),
+        node("k1", "t2", 1000, "《新世纪福音战士》爆红使文化表面化", "其他"),
+        node("k2", "t2", 2000, "冈田斗司夫重新定义御宅族", "其他"),
+        node("k3", "t2", 3000, "污名导致难以正面客观论述", "其他")],
+      [],
+    );
+    const members = ["t1", "t2", "t3"];
+    for (const sel of ["t2", "k2"])
+      check(`时间线：选中 ${sel} 时动作行不压条目`, intruders(L.fitLayout(mkCtx(g, "P", "timeline", members, { expandedId: "t2", selectedId: sel, inlineH: ACT }), members, 700), sel, ACT).length === 0);
+    const big = ACT + 168; // 讲解展开
+    check("时间线：子项 + 讲解展开时动作行不压条目", intruders(L.fitLayout(mkCtx(g, "P", "timeline", members, { expandedId: "t2", selectedId: "k2", inlineH: big }), members, 700), "k2", big).length === 0);
+  }
+
+  // ③ 链：成员（带子项）/ 子项
+  {
+    const g = graph(
+      [node("P", null, 0, "操作", "其他"), node("s1", "P", 1000, "登录", "步骤"), node("s2", "P", 2000, "填表", "步骤"), node("s3", "P", 3000, "提交", "步骤"),
+        node("c1", "s2", 1000, "输入用户名", "其他"), node("c2", "s2", 2000, "输入密码", "其他")],
+      [],
+    );
+    const members = ["s1", "s2", "s3"];
+    for (const sel of ["s2", "c1"])
+      check(`链：选中 ${sel} 时动作行不压条目`, intruders(L.fitLayout(mkCtx(g, "P", "chain", members, { expandedId: "s2", selectedId: sel, inlineH: ACT }), members, 700), sel, ACT).length === 0);
+  }
+
+  // ④ 对照表：成员（表底，已文档化）/ 单元格
+  {
+    const g = graph(
+      [node("P", null, 0, "两种消费观", "对比"), node("X", "P", 1000, "故事消费", "分类"), node("Y", "P", 2000, "数据库消费", "分类"),
+        node("x1", "X", 1000, "目的：追问作品背后意义", "其他"), node("x2", "X", 2000, "路径：穿过作品抵达叙事", "其他"),
+        node("y1", "Y", 1000, "目的：即时取用情感素材", "其他"), node("y2", "Y", 2000, "路径：直接面向数据库", "其他")],
+      [{ from: "y1", to: "x1", code: "比" }, { from: "y2", to: "x2", code: "比" }],
+    );
+    const members = ["X", "Y"];
+    for (const sel of ["X", "x1"])
+      check(`对照表：选中 ${sel} 时动作行不压条目`, intruders(L.fitLayout(mkCtx(g, "P", "compare", members, { selectedId: sel, inlineH: ACT }), members, 700), sel, ACT).length === 0);
+    // 窄宽（compact 176 列宽）→ 「行内维度」堆叠模式：单元格选中同样要让位
+    const narrow = L.fitLayout(
+      mkCtx(g, "P", "compare", members, { selectedId: "x1", inlineH: ACT, maxW: 200, plan: { mode: "reserve", shift: 0, reserve: 390, barX: 700, labelX: 726, labelW: 176, right: 922 } }),
+      members,
+      700,
+    );
+    check("对照表（堆叠模式）：选中单元格时动作行不压条目", narrow.items.some((i) => String(i.id).startsWith("dl:")) && intruders(narrow, "x1", ACT).length === 0, narrow.items.map((i) => i.id));
+  }
+  // ⑤ 讲解高度口径（宿主预留与渲染器 max-height 同源，D255）
+  {
+    check("explainBoxH：空文本至少一行（30+）", L.explainBoxH("", 460) >= 34, L.explainBoxH("", 460));
+    check("explainBoxH：长文本封顶 EXPLAIN_MAX_H", L.explainBoxH("字".repeat(2000), 460) === FLOW.EXPLAIN_MAX_H, L.explainBoxH("字".repeat(2000), 460));
+    check("explainBoxH：busy 至少 40（生成中占位）", L.explainBoxH("", 460, true) >= 40, L.explainBoxH("", 460, true));
+    check("explainBoxH：列宽越窄越高（同文本）", L.explainBoxH("字".repeat(200), 460) < L.explainBoxH("字".repeat(200), 176));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -443,7 +443,7 @@ export interface LayoutCtx {
   moreAbove: number; moreBelow: number;
   readingId: string | null; readingBlock: number | null;
   selectedId: string | null; expandedId: string | null;
-  inlineH: number;                                   // 选中项下方动作行高度（选中项在本版式中时插入）
+  inlineH: number;                                   // 选中项下方动作行高度（选中项在本版式中时插入；子项 / 对照单元格被选也一样要让位）
   maxLines0: 1 | 2; canBack: boolean;
   availH: number;                                    // 列可用高度（时间线比例排布要用）
 }
@@ -669,7 +669,7 @@ export function layoutChain(c: LayoutCtx): PatternLayout {
   return out;
 }
 ```
-展开的步骤：在该步骤标签下方插入子项（复用 `layoutTree` 的 kid 写法：12px 单行，左侧 3px 圆点 `circle r=2.5` 颜色＝`kidColor`，x＝`labelX+4`，各自是 port + leaf；被展开的步骤自己不再是 leaf）。实现时把这段写成小函数 `pushKidList(c, out, parentId, x, y)` 供链 / 时间线共用。
+展开的步骤：在该步骤标签下方插入子项（复用 `layoutTree` 的 kid 写法：12px 单行，左侧 3px 圆点 `circle r=2.5` 颜色＝`kidColor`，x＝`labelX+4`，各自是 port + leaf；被展开的步骤自己不再是 leaf）。实现时把这段写成小函数 `pushKidList(c, out, parentId, x, y)` 供链 / 时间线共用。**动作行让位（v49.87 / D255）**：父步骤被选 → 动作行排在子项块之后，条目盒高须含子项块（渲染器锚点＝条目底边）；某个子项被选 → 在 `pushKidList` 里给该子项之后加 `inlineH`，父行 `kidsH` 同步加高，否则按钮行会压在下一个子项上。
 
 #### 5.5.3 时间线（`timeline`）
 
@@ -697,7 +697,7 @@ export function layoutTimeline(c: LayoutCtx): PatternLayout {
     const lines = wrapLabel(n.title, st.fs, c.plan.labelW - FLOW.META_W, c.maxLines0);
     const hasT = !!(n.timeText && n.timeText.trim());
     const kidsH = id === c.expandedId ? Math.min(FLOW.MAX_KIDS, kidsOf(c, id).length) * 19 : 0;
-    const h = (hasT ? FLOW.TL_TIME_LH : 0) + lines.length * st.lh + FLOW.ROW_PAD_Y * 2 + kidsH + (id === c.selectedId ? c.inlineH : 0);
+    const h = (hasT ? FLOW.TL_TIME_LH : 0) + lines.length * st.lh + FLOW.ROW_PAD_Y * 2 + kidsH + (id === c.selectedId || kids.includes(c.selectedId) ? c.inlineH : 0);
     return { id, n, lines, hasT, h, t: parseTime(n.timeText) };
   });
   const parsed = pre.filter((p) => p.t != null);
@@ -835,7 +835,7 @@ export function layoutCompare(c: LayoutCtx): PatternLayout {
   return out;
 }
 ```
-对照里**成员**是高亮 / 流带单位（子项只显示文字，不单独出流带）；选中某成员时动作行插在整个对照块下方（宿主处理：`inlineH` 加到 `out.height`，动作行 y＝`bottom`）。
+对照里**成员**是高亮 / 流带单位（子项只显示文字，不单独出流带）；选中某成员时动作行插在整个对照块下方（宿主处理：`inlineH` 加到 `out.height`，动作行 y＝`bottom`）。**选中单元格（v49.87 / D255）**：单元格也是可操作条目，`inlineH` 加在所在行带上并写 `out.inlineAt = { x: x0, y: 行内容底边, w: W }`，下一行随之下移，动作行不压下一行。
 
 #### 5.5.5 版式分派
 
@@ -1329,8 +1329,8 @@ Props：`{ kernel, documentId, title, open, covered, scrolled, viewportEl, shift
 
 ### 8.9 悬停 / 选中 / 讲解 / AI 新节点
 - 悬停：该节点形状换到 hover 档（渐变 id 切换，瞬时）+ 其余形状 `is-dim`（160）；节点条宽 +1（160）。
-- 动作行：`height 0 → 26` + opacity（220），下方项 `transform` 下移；切换选中时旧行收起、新行展开同时进行。
-- 讲解：高度到 `min(内容, 168)`（280 / ease-out）；流式追加的新文字 span 淡入 180。
+- 动作行：`height 0 → 26` + opacity（220），下方项 `transform` 下移；切换选中时旧行收起、新行展开同时进行。**锚点（v49.87 / D255）**：动作行恒锚「选中条目底边」——成员行＝标签底（展开时＝子项块底），子项＝该子项底，对照单元格＝所在行内容底；版式必须先在锚点下方留出 `inlineH`，否则按钮行会与下一条重叠。
+- 讲解：高度到 `min(内容, 168)`（280 / ease-out）；流式追加的新文字 span 淡入 180。**高度口径（v49.87 / D255）**：宿主预留与渲染器框高共用 `explainBoxH(text, labelW, busy)`；渲染器 `min-height = max-height = explainBoxH`（超出的文字在框内滚动）——按字数估算会少算一行（12.5px 字号），框一旦长出去就又压住下一条。
 - AI 新节点到达：按 8.7 子项进场方式长出；新形状 `collapseAtNode` → 实形 460；多个 stagger 40。
 
 ### 8.10 降级

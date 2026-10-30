@@ -45,6 +45,14 @@ export const FLOW = {
 
 // ---------------------------------------------------------------- §5.3 排布决策
 const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
+
+/**
+ * 讲解框高度（宿主预留 `inlineH` 与渲染器上限共用同一口径，见 D255）：
+ * 估算行数 × 18 + 16（实测 12.5px 字号折行会比按 12px 字数估算多一行，故渲染器同时用它夹住 max-height，
+ * 多出来的文字在框内滚动，绝不长到动作行预留区之外）。
+ */
+export const explainBoxH = (text: string, labelW: number, busy = false) =>
+  Math.min(FLOW.EXPLAIN_MAX_H, Math.max(busy ? 40 : 0, Math.max(1, Math.ceil((text.length * 12) / Math.max(1, labelW || FLOW.LABEL_W_COMPACT))) * 18 + 16));
 export const blockW = (lw: number) => FLOW.BAR_MAX + FLOW.LABEL_GAP + lw + FLOW.PAD_R;
 export const reserveW = (lw: number) => FLOW.BRAID_PREF + blockW(lw);
 
@@ -539,7 +547,8 @@ function pushKidList(c: LayoutCtx, out: PatternLayout, parentId: string, x: numb
     out.ports.push({ nodeId: kid, x: dx, y0: y + 4, y1: y + 13, color });
     out.leafIds.push(kid);
     (out.parentOf ??= {})[kid] = parentId;
-    y += 19;
+    // §8.9：选中的子项也要让出动作行——与成员行同一口径（inlineH 由宿主按选中项算出）
+    y += 19 + (kid === c.selectedId ? c.inlineH : 0);
   });
   return y;
 }
@@ -558,12 +567,14 @@ export function layoutChain(c: LayoutCtx): PatternLayout {
     const lines = wrapLabel(n.title, st.fs, c.plan.labelW - FLOW.META_W, c.maxLines0);
     const labelH = Math.max(FLOW.CH_R * 2 + 4, lines.length * st.lh + FLOW.ROW_PAD_Y * 2);
     const kids = id === c.expandedId ? kidsOf(c, id).slice(0, FLOW.MAX_KIDS) : [];
-    const kidsH = kids.length * 19;
+    const kidInline = c.selectedId != null && kids.includes(c.selectedId) ? c.inlineH : 0;
+    const kidsH = kids.length * 19 + kidInline;
+    // 动作行锚在条目底边（渲染器口径）：条目盒要含子项块，行高再含动作行，二者才对得上
     const h = labelH + kidsH + (id === c.selectedId ? c.inlineH : 0);
     const color = c.colorOf.get(id)!, reading = id === c.readingId;
     out.items.push(
       item({
-        id: `n:${id}`, nodeId: id, kind: "node", x: c.plan.labelX + 4, y, w: c.plan.labelW - 4, h: labelH,
+        id: `n:${id}`, nodeId: id, kind: "node", x: c.plan.labelX + 4, y, w: c.plan.labelW - 4, h: labelH + kidsH,
         lines, fs: st.fs, lh: st.lh, weight: reading ? 600 : st.weight, tone: st.tone, num: start + i + 1,
         meta: metaOf(c, id, shown, true), reading, selected: id === c.selectedId, hasKids: kidsOf(c, id).length > 0, expanded: id === c.expandedId,
       }),
@@ -627,7 +638,8 @@ export function layoutTimeline(c: LayoutCtx): PatternLayout {
     const hasT = !!(n.timeText && n.timeText.trim());
     const kids = id === c.expandedId ? kidsOf(c, id).slice(0, FLOW.MAX_KIDS) : [];
     const kidsH = kids.length * 19;
-    const h = (hasT ? FLOW.TL_TIME_LH : 0) + lines.length * st.lh + FLOW.ROW_PAD_Y * 2 + kidsH + (id === c.selectedId ? c.inlineH : 0);
+    // 父行被选 → 动作行在子项块之后；子项被选 → 动作行插在该子项下方（pushKidList 让位）
+    const h = (hasT ? FLOW.TL_TIME_LH : 0) + lines.length * st.lh + FLOW.ROW_PAD_Y * 2 + kidsH + (id === c.selectedId || (c.selectedId != null && kids.includes(c.selectedId)) ? c.inlineH : 0);
     return { id, n, lines, hasT, kids, h, kidsH, t: parseTime(n.timeText) };
   });
   const parsed = pre.filter((p) => p.t != null);
@@ -863,7 +875,11 @@ export function layoutCompareTable(c: LayoutCtx): PatternLayout & { cmpPages: nu
     });
     const nameH = nameLines.length * 18;
     const cellsH = stacked ? cellLines.reduce((a, l) => a + l.length * 17 + 4, 0) : Math.max(...cellLines.map((l) => l.length * 17));
-    const h = Math.max(nameH, stacked ? nameH + 4 + cellsH : cellsH) + FLOW.CMP_ROW_PAD * 2;
+    const contentH = Math.max(nameH, stacked ? nameH + 4 + cellsH : cellsH) + FLOW.CMP_ROW_PAD * 2;
+    // §8.9：选中的单元格也要让出动作行——行带加高，动作行锚在行内容底边（成员被选时仍按约定放表底）
+    // 只认本页可见的单元格：被翻到别的页时不留空位、也不出动作行
+    const cellSel = c.selectedId != null && vis.some((j) => r.cells[j]?.id === c.selectedId);
+    const h = contentH + (cellSel ? c.inlineH : 0);
     out.items.push(
       item({
         id: `n:${r.id}`, nodeId: r.id, kind: "node", x: x0, y: y + FLOW.CMP_ROW_PAD, w: stacked ? W : FLOW.CMP_NAME_W - 4, h: nameH,
@@ -891,11 +907,12 @@ export function layoutCompareTable(c: LayoutCtx): PatternLayout & { cmpPages: nu
         );
       }
     });
-    const by = y + 2, bh = h - 4;
+    const by = y + 2, bh = contentH - 4;
     out.prims.push({ k: "rect", id: `bar:${r.id}`, x: c.plan.barX, y: by, w: reading ? 6 : 5, h: bh, rx: 1.5, fill: reading ? c.colors.accent : color, layer: "over" });
     out.ports.push({ nodeId: r.id, x: c.plan.barX, y0: by, y1: by + bh, color });
     out.leafIds.push(r.id);
-    if (reading) out.readingY = y + h / 2;
+    if (reading) out.readingY = y + contentH / 2;
+    if (cellSel) out.inlineAt = { x: x0, y: y + contentH, w: W };
     y += h;
     if (i + 1 < T.rows.length) out.prims.push({ k: "path", id: `rowline:${r.id}`, d: `M${x0},${y} H${x0 + W}`, stroke: c.colors.fg, strokeW: 1, dash: "2 3", opacity: 0.12, layer: "under" });
   });
