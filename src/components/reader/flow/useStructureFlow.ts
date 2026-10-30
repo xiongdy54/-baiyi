@@ -253,6 +253,26 @@ export function useStructureFlow(kernel: FlowKernel | null, documentId: string |
   );
   scheduleRef.current = scheduleSample;
 
+  /** §15.3：换章＝章节键变化。立刻丢掉旧预览 / 选中 / 展开并马上重采；主体保留到新组算出为止 */
+  const chapterRef = useRef<string | null>(null);
+  const noteChapter = useCallback(
+    (info?: RelocateInfo): boolean => {
+      const k = info?.chapterHref != null ? `h:${info.chapterHref}` : info?.chapterIndex != null ? `c:${info.chapterIndex}` : null;
+      if (k == null) return false;
+      const prev = chapterRef.current;
+      chapterRef.current = k;
+      if (prev == null || prev === k) return false;
+      peekRef.current = null;
+      attnRef.current = { ...attnRef.current, candGroup: null, candNode: null };
+      manualExpRef.current = false;
+      setSel(null);
+      setExpandedId(null);
+      setAttnTick((n) => n + 1);
+      return true;
+    },
+    [],
+  );
+
   // 文档切换：清状态
   useEffect(() => {
     attnRef.current = { groupId: null, readingId: null, candGroup: null, candSince: 0, candNode: null, nodeSince: 0 };
@@ -274,6 +294,7 @@ export function useStructureFlow(kernel: FlowKernel | null, documentId: string |
     anchorCache.current.clear();
     retriedRef.current = false;
     deepRef.current = null;
+    chapterRef.current = null;
     manualExpRef.current = false;
     sampleSeq.current++;
     for (const t of [sampleTimer.current, idleTimer.current, throttleTimer.current, recheckTimer.current]) if (t != null) window.clearTimeout(t);
@@ -303,7 +324,7 @@ export function useStructureFlow(kernel: FlowKernel | null, documentId: string |
   useEffect(() => {
     if (!active || !kernel) return;
     if (paged) {
-      const off = kernel.on("relocate", () => scheduleSample(FLOW_TURN_RESAMPLE));
+      const off = kernel.on("relocate", (info) => { if (!noteChapter(info)) scheduleSample(FLOW_TURN_RESAMPLE); });
       scheduleSample(0);
       return () => {
         off();
@@ -333,7 +354,7 @@ export function useStructureFlow(kernel: FlowKernel | null, documentId: string |
         }, 160);
       };
       const offScroll = kernel.onContentScroll(onScrollTick);
-      const offRelocate = kernel.on("relocate", () => scheduleSample(0));
+      const offRelocate = kernel.on("relocate", (info) => { noteChapter(info); scheduleSample(0); });
       scheduleSample(0);
       return () => {
         offScroll();
@@ -345,8 +366,8 @@ export function useStructureFlow(kernel: FlowKernel | null, documentId: string |
       };
     }
     // 引擎没有逐帧滚动通知（PDF 等）：沿用 relocate 防抖 + 停下补采
-    const off = kernel.on("relocate", () => {
-      scheduleSample(250);
+    const off = kernel.on("relocate", (info) => {
+      scheduleSample(noteChapter(info) ? 0 : 250);
       if (idleTimer.current != null) window.clearTimeout(idleTimer.current);
       idleTimer.current = window.setTimeout(() => {
         idleTimer.current = null;

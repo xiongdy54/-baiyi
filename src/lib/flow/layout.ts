@@ -6,7 +6,7 @@ import { childrenOf } from "../mindmap/v2/graph";
 import type { GraphState } from "../mindmap/v2/types";
 import { ROOT_ID } from "../mindmap/v2/types";
 import { groupFacts, selectPattern } from "../mindmap/v2/pattern";
-import type { ReaderParagraphBox, ReaderStructureGeometry, ReaderStructurePaintRect } from "../reader/kernel";
+import type { ReaderParagraphBox, ReaderStructureGeometry } from "../reader/kernel";
 import type {
   FlowColors,
   FlowEnv,
@@ -1105,48 +1105,27 @@ export function geometryAt(geo: ReaderStructureGeometry, offs: Record<number, { 
   return { ...geo, boxes };
 }
 
-/** §13.3.3：只画「段落右缘 → 节点 port」那一段（矩形部分在正文里） */
-export function neckPath(s: Pick<FlowShape, "xs" | "s0" | "s1" | "x1" | "t0" | "t1">): string {
-  const f = (n: number) => Math.round(n * 10) / 10;
-  const xm = (s.xs + s.x1) / 2;
-  return (
-    `M${f(s.xs)},${f(s.s0)}C${f(xm)},${f(s.s0)} ${f(xm)},${f(s.t0)} ${f(s.x1)},${f(s.t0)}` +
-    `L${f(s.x1)},${f(s.t1)}C${f(xm)},${f(s.t1)} ${f(xm)},${f(s.s1)} ${f(s.xs)},${f(s.s1)}Z`
-  );
+/** §15.1：一条流带的渐变停点——矩形段全透明，只在接缝前 HL_FADE_W 内起坡，接缝处 = aHL，节点端 = aEnd */
+export function shapeGradientStops(
+  s: Pick<FlowShape, "L" | "xs" | "x1">,
+  colors: FlowColors,
+  tone: 0 | 1 | 2,
+): { x1: number; x2: number; stops: { offset: number; opacity: number }[] } {
+  const hasNeck = s.x1 > s.xs + 0.5;
+  const x1 = s.L;
+  const x2 = hasNeck ? s.x1 : s.xs;
+  const D = Math.max(1, x2 - x1);
+  const at = (x: number) => Math.round(Math.min(1, Math.max(0, (x - x1) / D)) * 1000) / 1000;
+  const fadeAt = Math.min(s.xs, Math.max(x1, s.xs - FLOW.HL_FADE_W));
+  const stops = [
+    { offset: 0, opacity: 0 },
+    { offset: at(fadeAt), opacity: 0 },
+    { offset: at(s.xs), opacity: colors.aHL[tone] },
+  ];
+  if (hasNeck) stops.push({ offset: 1, opacity: colors.aEnd[tone] });
+  return { x1, x2, stops };
 }
 
-/** §13.3.3：正文里的段落高亮矩形（文档坐标；透明度与颈部渐变起点一致，接缝颜色连续） */
-export function buildPaintRects(
-  geo: ReaderStructureGeometry,
-  _lay: PatternLayout,
-  o: {
-    hoverId: string | null;
-    focusId: string | null;
-    hoverSet?: Set<string>;
-    colorOf: (id: string) => string;
-    extra?: { nodeId: string; color: string }[];
-    /** §14.4：port 色（与颈部同源；子节点色不在 colorOf 里，缺了会与彩带不同色） */
-    portColorOf?: Map<string, string>;
-    colors: FlowColors;
-  },
-): ReaderStructurePaintRect[] {
-  const keep = new Set([..._lay.ports.map((p) => p.nodeId), ...(o.extra ?? []).map((e) => e.nodeId)]);
-  const extraColor = new Map((o.extra ?? []).map((e) => [e.nodeId, e.color] as const));
-  const content = geo.boxes
-    .filter((b) => b.doc != null && b.cTop != null)
-    .map((b) => ({ ...b, top: b.cTop!, bottom: b.cBottom!, left: b.cLeft!, right: b.cRight! }));
-  const tone = (id: string): 0 | 1 | 2 => (id === o.hoverId ? 2 : o.hoverSet?.has(id) || id === o.focusId ? 1 : 0);
-  return mergeSpans(content, keep).map((s) => {
-    const t = tone(s.nodeId);
-    const dim = !!o.hoverId && s.nodeId !== o.hoverId && t === 0; // 与 FlowLayer 的 is-dim 同一规则
-    const raw = extraColor.get(s.nodeId) ?? o.portColorOf?.get(s.nodeId) ?? o.colorOf(s.nodeId);
-    const color = parseRgb(raw) ? raw : o.colors.palette[0]; // §13.4.3：不可解析色一律退调色板第一色
-    return {
-      key: `${s.nodeId}@${s.doc}:${Math.round(s.top)}`, doc: s.doc!, left: s.left, top: s.top, width: s.right - s.left, height: s.bottom - s.top,
-      color, alpha: o.colors.aHL[t] * (dim ? o.colors.aDim : 1), fade: FLOW.HL_FADE_W,
-    };
-  });
-}
 export function strandPath(s: Pick<FlowStrand, "xa" | "ya" | "xb" | "yb" | "bulge">): string {
   return `M${s.xa},${s.ya}C${s.xa - s.bulge},${s.ya} ${s.xb - s.bulge},${s.yb} ${s.xb},${s.yb}`;
 }

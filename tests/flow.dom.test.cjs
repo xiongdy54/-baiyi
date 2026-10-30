@@ -110,6 +110,7 @@ let lastTargets = [];
 let geoSeq = 0;
 let locoTargets = 0;
 let offY = 0;
+let chapterHref = "ch1.xhtml"; // §15.3：换章检测用
 let paintCalls = [];
 let scrollCb = null;
 const relHandlers = new Set();
@@ -140,7 +141,7 @@ const kernel = {
   getFrameOffsets: () => ({ 0: { left: 0, top: offY } }),
   setStructurePaint: (rects, o) => { paintCalls.push({ rects: clone(rects) || [], o: clone(o) }); },
 };
-const relocate = () => { for (const h of relHandlers) h({ location: {}, fraction: 0 }); };
+const relocate = (href) => { for (const h of relHandlers) h({ location: {}, fraction: 0, chapterHref: href === undefined ? chapterHref : href }); };
 const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
 
 (async () => {
@@ -176,7 +177,8 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   rootEl.render(React.createElement(React.StrictMode, null, React.createElement(Wrapper)));
   const $ = (sel) => w.document.querySelector(sel);
   const $$ = (sel) => [...w.document.querySelectorAll(sel)];
-  const smoothKernel = typeof kernel.onContentScroll === "function" && typeof kernel.getFrameOffsets === "function" && typeof kernel.setStructurePaint === "function";
+  // §15.1：矩形并入 SVG 后，smooth 只看滚动通知与章节原点
+  const smoothKernel = typeof kernel.onContentScroll === "function" && typeof kernel.getFrameOffsets === "function";
   const item = (id) => $(`[data-flow-item="${id}"]`);
   const shapeOf = (nodeId) => $(`.flow-shapes path[data-node-id="${nodeId}"]`);
   const click = (el) => el && el.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
@@ -216,11 +218,11 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   check("跨度条与反方缺口存在（取代旧脊线）", !!$("[data-prim-id='span:t1']") && !!$("[data-prim-id='notch:D']"), $$(".flow-svg [data-prim-id]").map((e) => e.getAttribute("data-prim-id")).slice(0, 12));
   check("页面里没有类型方框 .flow-chip", !$(".flow-chip"));
 
-  console.log("---- §13.3 平滑滚动：颈部同步 / 正文矩形 / 列稳定 / 无黑色 ----");
+  console.log("---- §13.3 / §15.1 平滑滚动：整条流带同步 / 单路径 / 列稳定 / 无黑色 ----");
   {
-    await until(() => paintCalls.some((c) => c.rects.length > 0), 3000);
+    await until(() => $$(".flow-shapes path[data-node-id]").length > 0, 3000);
     const ribs = $$(".flow-shapes path[data-node-id]");
-    check("滚动模式：混合层只剩颈部（矩形画在正文里）", smoothKernel && ribs.length > 0, ribs.length);
+    check("平滑模式：流带在混合层；iframe 矩形通道全程零调用（§15.1）", smoothKernel && ribs.length > 0 && paintCalls.length === 0, { ribs: ribs.length, paints: paintCalls.length });
     const el = ribs.find((p) => p.getAttribute("data-node-id") === "A") || ribs[0];
     const d0 = el && el.getAttribute("d");
     const yOf = (d) => { const m = /^M[^,]+,\s*([-\d.]+)/.exec(d || ""); return m ? Number(m[1]) : NaN; };
@@ -230,13 +232,12 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     const same = el && el === $(`.flow-shapes path[data-node-id="${el.getAttribute("data-node-id")}"]`);
     const d1 = el && el.getAttribute("d");
     const y1 = yOf(d1);
-    check("同一调用栈里颈部已随滚动同步（同元素、y 差 = 30）", !!el && same && d1 !== d0 && Math.abs(y0 - y1 - 30) < 1, { y0, y1, d0, d1 });
+    check("同一调用栈里整条流带（含矩形段）随滚动同步（同元素、首点 y 差 = 30）", !!el && same && d1 !== d0 && Math.abs(y0 - y1 - 30) < 1, { y0, y1, d0, d1 });
+    const mx = /^M(-?[\d.]+)[^,]*,[^H]*H(-?[\d.]+)/.exec(d0 || "");
+    check("§15.1 路径里含矩形段（首条 H 边 ≈ 段落宽度，不再拆成两个元素）", !!mx && Number(mx[2]) - Number(mx[1]) > 200, { d: (d0 || "").slice(0, 90), mx });
 
-    const visible = $$(".flow-shapes path[data-node-id]").length;
-    const pc = paintCalls.length;
-    check("正文矩形数 = 可见流带数", paintCalls[paintCalls.length - 1].rects.length >= 1 && paintCalls[paintCalls.length - 1].rects.length <= visible + 2, { rects: paintCalls[paintCalls.length - 1].rects.length, visible });
     scrollBy(-60);
-    check("滚动回调不重新下发正文矩形（矩形随正文原生滚动）", paintCalls.length === pc, paintCalls.length - pc);
+    check("滚动回调不再向正文下发任何绘制指令（矩形与颈部同源）", paintCalls.length === 0, paintCalls.length);
     offY = 0;
     if (scrollCb) scrollCb();
 
@@ -257,24 +258,23 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     const stops = $$(".flow-blend linearGradient stop");
     check("所有渐变 stop 都是可解析实色（无黑色兜底）", stops.length > 0 && stops.every((s) => ensureLayout.parseRgb(s.getAttribute("stop-color") || "") !== null), stops.map((s) => s.getAttribute("stop-color")).slice(0, 8));
 
-    // §14.4：接缝连续——每条颈部渐变从矩形右端起坡，起点透明度 = 矩形 alpha
+    // §15.1：一条路径一条渐变——四停点、起点透明、接缝处 aHL、节点端 aEnd
     const grads = new Map($$(".flow-blend linearGradient").map((g) => [g.id, g]));
-    const lastPaint = [...paintCalls].reverse().find((c) => c.rects.length > 0);
-    const rectOf = (nodeId) => (lastPaint ? lastPaint.rects.find((r) => r.key.startsWith(nodeId + "@")) : null);
-    const seam = [];
+    const bad = [];
+    let checked = 0;
     for (const p of $$(".flow-shapes path[data-node-id]")) {
+      if (/stub:/.test(p.getAttribute("data-node-id") || "")) continue;
       const fill = p.getAttribute("fill") || "";
       const g = grads.get(fill.replace(/^url\(#|\)$/g, ""));
-      const nodeId = p.getAttribute("data-node-id");
-      const rect = rectOf(nodeId);
-      const stop0 = g && g.querySelector("stop");
-      if (!g || !rect || !stop0) { seam.push({ nodeId, g: !!g, rect: !!rect }); continue; }
-      const a = Number(stop0.getAttribute("stop-opacity"));
-      const x1 = Number(g.getAttribute("x1"));
-      if (Math.abs(a - rect.alpha) > 1e-6 || Math.abs(x1 - (rect.left + rect.width)) > 0.6) seam.push({ nodeId, a, alpha: rect.alpha, x1, xs: rect.left + rect.width });
+      const active = g ? [...g.querySelectorAll("stop")].filter((x) => Number(x.getAttribute("offset")) > 0 && Number(x.getAttribute("offset")) < 1) : [];
+      const st = g ? [...g.querySelectorAll("stop")] : [];
+      if (!g || st.length < 3) { bad.push({ id: p.getAttribute("data-node-id"), g: !!g, stops: st.length }); continue; }
+      const o = st.map((x) => Number(x.getAttribute("stop-opacity")));
+      const off = st.map((x) => Number(x.getAttribute("offset")));
+      if (o[0] !== 0 || o[1] !== 0 || o[o.length - 1] <= 0 || off[off.length - 1] !== 1 || !(off[1] < off[2])) bad.push({ o, off, active: active.length });
+      checked++;
     }
-    check("§14.4 颈部渐变从矩形右端起坡、起点透明度 = 矩形 alpha", seam.length === 0, seam.slice(0, 4));
-    check("§14.4 正文矩形带右缘渐隐（fade > 0）", !!lastPaint && lastPaint.rects.every((r) => typeof r.fade === "number" && r.fade > 0), lastPaint && lastPaint.rects.slice(0, 2).map((r) => r.fade));
+    check("§15.1 每条流带：左端透明 → 接缝前起坡 → 节点端最浓（同一条路径同一条渐变）", checked > 0 && bad.length === 0, { checked, bad: bad.slice(0, 3) });
   }
 
   console.log("---- 悬停 / 展开 / 双击跳转 / 回到原位 ----");
@@ -379,6 +379,30 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     }
     w.dispatchEvent(new w.Event("resize"));
     await sleep(400);
+  }
+
+  console.log("---- §15.3 换章：预览/选中不残留、主体不先消失、无浮空图元 ----");
+  {
+    probeDist = [0, 0, 10, 10];
+    relocate();
+    check("换章前：预览已出现", await until(() => !!$(".flow-item.is-peek"), 4000), $$(".flow-item.is-peek").length);
+    click(item("n:B"));
+    check("换章前：已选中并展开出动作行", await until(() => !!$(".flow-actions"), 3000));
+    const before = $$(".flow-item:not(.is-peek)").length;
+    probeDist = [10, 10, 10, 10]; // 新章的探针（全部落在第二章）
+    chapterHref = "ch2.xhtml";
+    relocate();
+    await sleep(30);
+    check("换章瞬间：主体不先消失（不是整层淡出）", $$(".flow-item:not(.is-peek)").length > 0, { before, now: $$(".flow-item:not(.is-peek)").length });
+    check("换章瞬间：动作行一起收走", !$(".flow-actions"));
+    check("换章后：直接换成新章，旧预览与旧条目都不残留", await until(() => !!item("n:X") && !$(".flow-item.is-peek") && !item("n:A"), 5000), {
+      peek: $$(".flow-item.is-peek").map((e) => e.getAttribute("data-flow-item")),
+      old: !!item("n:A"),
+      neu: !!item("n:X"),
+    });
+    const bars = $$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id").slice(4));
+    const nodes = new Set($$(".flow-item[data-kind='node'], .flow-item[data-kind='kid']").map((e) => e.getAttribute("data-flow-item").slice(2)));
+    check("换章后：每个色条都有对应条目（无浮空条）", bars.length > 0 && bars.every((b) => nodes.has(b)), { bars, nodes: [...nodes] });
   }
 
   console.log("---- 关闭 ----");

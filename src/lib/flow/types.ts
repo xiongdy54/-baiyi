@@ -189,9 +189,6 @@ export interface FlowScene {
   layout: PatternLayout;
   shapes: FlowShape[];
   strands: FlowStrand[];
-  /** 渐变横向基准（§7.3） */
-  hlX0: number;
-  hlX1: number;
   inline: { forId: string | null; explainOpen: boolean; explainText: string; explainBusy: boolean; status: string };
   hoverId: string | null;
   focusId: string | null;

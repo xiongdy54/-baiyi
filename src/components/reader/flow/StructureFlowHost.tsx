@@ -14,13 +14,11 @@ import {
   FLOW,
   PATTERN_LABEL,
   PEEK,
-  buildPaintRects,
   buildShapes,
   buildStrands,
   fitLayout,
   geometryAt,
   layoutPeek,
-  neckPath,
   patternFor,
   planColumn,
   shapePath,
@@ -187,7 +185,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   const bump = useCallback(() => setAnimKey((n) => n + 1), []);
 
   /** §13.3：滚动模式平滑彩带（矩形画在正文 iframe，混合层只画颈部） */
-  const smooth = scrolled && !!kernel?.onContentScroll && !!kernel?.getFrameOffsets && !!kernel?.setStructurePaint;
+  const smooth = scrolled && !!kernel?.onContentScroll && !!kernel?.getFrameOffsets; // §15.1：矩形并入 SVG，不再需要 iframe 绘制通道
   const [frameTick, setFrameTick] = useState(0);
   const frameRef = useRef<{ lay: PatternLayout; dy: number; opts: Parameters<typeof buildShapes>[3] } | null>(null);
   const neckEls = useRef(new Map<string, SVGPathElement>());
@@ -260,8 +258,14 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     (force = false): ReaderStructureGeometry | null => {
       if (!viewportEl || !kernel?.getStructureGeometry) return null;
       if (viewportEl.ownerDocument.visibilityState !== "visible") return geoRef.current;
-      const g = kernel.getStructureGeometry(smooth ? { all: true } : undefined);
-      if (!g) return null;
+      const raw = kernel.getStructureGeometry(smooth ? { all: true } : undefined);
+      if (!raw) return null;
+      // §15.2：裁剪视口＝可见阅读窗口（引擎容器可能比可见区高出几像素，彩带顶边不许越过阅读区上沿）
+      const host = readViewport();
+      const g =
+        raw.viewport.top < host.top || raw.viewport.bottom > host.bottom
+          ? { ...raw, viewport: { ...raw.viewport, top: Math.max(raw.viewport.top, host.top), bottom: Math.min(raw.viewport.bottom, host.bottom) } }
+          : raw;
       const sig =
         JSON.stringify(g.boxes.map((b) => [b.nodeId, b.block, b.doc, b.top | 0, b.bottom | 0, (b.cTop ?? 0) | 0, b.left | 0])) + JSON.stringify(g.text);
       if (!force && sig === sigRef.current) return g;
@@ -273,7 +277,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       geoShiftRef.current = planRef.current?.shift ?? 0;
       return g;
     },
-    [viewportEl, kernel, smooth],
+    [viewportEl, kernel, smooth, readViewport],
   );
 
   /** §13.3.4：滚动逐帧——读一次章节原点 → 纯计算 → 只写 DOM；颈部集合变化时才让 React 渲染一次 */
@@ -282,7 +286,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     if (!smooth || !base || !F || !kernel?.getFrameOffsets) return;
     const dx = (planRef.current?.shift ?? 0) - geoShiftRef.current;
     const g = geometryAt(base, shiftOffsets(base, kernel.getFrameOffsets(), dx));
-    const shapes = buildShapes(g, F.lay, F.dy, F.opts).filter((s) => s.ribbon);
+    const shapes = buildShapes(g, F.lay, F.dy, F.opts);
     const sig = shapes.map((s) => s.id).join("|");
     if (sig !== shapeSigRef.current) {
       flushSync(() => setFrameTick((n) => n + 1));
@@ -291,7 +295,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     for (const s of shapes) {
       const el = neckEls.current.get(s.id);
       if (!el) continue;
-      const d = s.stub ? shapePath(s) : neckPath(s);
+      const d = shapePath(s);
       el.style.transition = "none";
       el.setAttribute("d", d);
       el.style.setProperty("d", `path("${d}")`);
@@ -769,8 +773,6 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     frameRef.current = { lay, dy, opts: shapeOpts };
     const textRight = geo?.text?.right ?? vp.right - 120;
     const strands = g && all.length ? buildStrands(g, lay, dy, { textRight, focusId, all: pattern === "layered" }) : [];
-    const hlX0 = (geo?.text?.left ?? vp.left + (vp.right - vp.left) * 0.2) - FLOW.HL_PAD_X;
-    const hlX1 = plan.barX;
     return {
       seq: animKey,
       mode: plan.mode,
@@ -784,8 +786,6 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       dy,
       layout: lay,
       strands,
-      hlX0,
-      hlX1,
       inline: { forId: sel, explainOpen, explainText: data.explainText, explainBusy: data.explainBusy, status: data.status },
       hoverId: data.hoverId,
       focusId,
@@ -808,27 +808,12 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     const offs = geoNow ? (smooth && kernel?.getFrameOffsets ? kernel.getFrameOffsets() : null) : null;
     const gNow = geoNow ? geometryAt(geoNow, shiftOffsets(geoNow, offs, dx)) : null;
     const shapes = gNow && F && base.layout.items.length ? buildShapes(gNow, F.lay, F.dy, F.opts) : [];
-    shapeSigRef.current = shapes.filter((s) => s.ribbon).map((s) => s.id).join("|");
+    shapeSigRef.current = shapes.map((s) => s.id).join("|");
     return { ...base, shapes };
     // frameTick：颈部集合变化时强制重渲染一次（逐帧本身不走 React）
   }, [base, geo, frameTick, smooth, kernel]);
 
   lastSceneRef.current = scene;
-
-  // §13.3.4：正文段落高亮矩形下发（随正文原生滚动，宿主不逐帧处理）
-  useEffect(() => {
-    if (!smooth || !kernel?.setStructurePaint) return;
-    const o = { blend: colors.dark ? ("screen" as const) : ("multiply" as const), fadeMs: stage === "opening" ? 360 : 180 };
-    const F = frameRef.current;
-    if (!scene || !F || stage === "closed" || stage === "closing" || !geoRef.current || (scene.mode === "whisper" && !scene.hoverId)) {
-      kernel.setStructurePaint([], o);
-      return;
-    }
-    const portColorOf = new Map(scene.layout.ports.map((p) => [p.nodeId, p.color] as const));
-    kernel.setStructurePaint(buildPaintRects(geoRef.current, scene.layout, { ...F.opts, portColorOf, colors }), o);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [smooth, kernel, scene?.layout, geo, data.hoverId, data.sel, data.readingId, colors, stage]);
-  useEffect(() => () => kernel?.setStructurePaint?.([], { blend: "multiply", fadeMs: 0 }), [kernel]);
 
   // 段落定位目标：全部 leaf + 预览成员 + 悬停单元格
   const anchorIds = useMemo(() => {
@@ -971,6 +956,7 @@ function mergeLayouts(
   off: { mainOff: number; aboveOff: number; belowOff: number },
 ): PatternLayout {
   const seen = new Set<string>();
+  const seenPrim = new Set<string>();
   const items: FlowItem[] = [];
   const ports: PatternLayout["ports"] = [];
   const prims: PatternLayout["prims"] = [];
@@ -986,6 +972,9 @@ function mergeLayouts(
       ports.push({ ...p, y0: p.y0 + o, y1: p.y1 + o });
     }
     for (const pr of lay.prims) {
+      // §15.3-2：图元也按 id 去重（主体优先），否则预览被丢弃的条目会留下浮空的条 / 分隔线
+      if (seenPrim.has(pr.id)) continue;
+      seenPrim.add(pr.id);
       if (pr.k === "path" && pr.grad) {
         prims.push({ ...pr, off: (pr.off ?? 0) + o, grad: { ...pr.grad, y1: pr.grad.y1 + o, y2: pr.grad.y2 + o } });
       } else {

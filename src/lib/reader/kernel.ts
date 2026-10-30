@@ -206,19 +206,6 @@ export interface ReaderParagraphBox {
   cLeft?: number;
   cRight?: number;
 }
-/** §13.3.1：正文 iframe 内要绘制的段落高亮矩形（文档坐标，随正文原生滚动） */
-export interface ReaderStructurePaintRect {
-  key: string;
-  doc: number;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  color: string;
-  alpha: number;
-  /** §14.4：右端向内渐隐的长度（px）；>0 时用「透明 → 实色」的横向渐变，0/缺省为整块实色 */
-  fade?: number;
-}
 export interface ReaderStructureGeometry {
   seq: number;
   viewport: { left: number; top: number; right: number; bottom: number };
@@ -337,7 +324,6 @@ export interface ReaderKernel {
   /** §13.3.1：各已加载章节文档原点此刻的屏幕坐标（＝iframe 的 client rect − 文档自身滚动）；每帧调用，只做读取 */
   getFrameOffsets?(): Record<number, { left: number; top: number }>;
   /** §13.3.1：在正文文档内绘制段落高亮矩形（随正文原生滚动）；传 [] 表示淡出并清除 */
-  setStructurePaint?(rects: ReaderStructurePaintRect[], o: { blend: "multiply" | "screen"; fadeMs: number }): void;
   destroy(): void;
   /** 重定位（进度/统计/目录高亮数据源） */
   on(event: "relocate", handler: (info: RelocateInfo) => void): () => void;

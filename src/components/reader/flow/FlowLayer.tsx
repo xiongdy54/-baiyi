@@ -10,8 +10,8 @@ import {
   collapseAtLeft,
   collapseAtNode,
   collapseStrand,
-  neckPath,
   parseRgb,
+  shapeGradientStops,
   shapePath,
   strandPath,
   tierOf,
@@ -144,13 +144,17 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
         style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", pointerEvents: "none", zIndex: 23, mixBlendMode: colors.dark ? "screen" : "multiply", overflow: "visible" }}
       >
         <defs>
-          {/* §14.4：每条流带一条渐变，从【接缝】起坡——任何 braid 宽度下接缝透明度都等于矩形右端的 aHL */}
-          {shapesP.map(({ item: s }) => (
-            <linearGradient key={`fg-${s.id}`} id={shapeGradId(s.id)} gradientUnits="userSpaceOnUse" x1={s.xs} y1="0" x2={s.x1} y2="0">
-              <stop offset="0" stopColor={safe(s.color)} stopOpacity={colors.aHL[s.tone]} />
-              <stop offset="1" stopColor={safe(s.color)} stopOpacity={colors.aEnd[s.tone]} />
-            </linearGradient>
-          ))}
+          {/* §15.1：矩形段与颈部共用一条路径，渐变四停点：左端透明 → 接缝前 HL_FADE_W 内起坡 → 接缝 aHL → 节点端 aEnd */}
+          {shapesP.filter(({ item: s }) => !s.stub).map(({ item: s }) => {
+            const g = shapeGradientStops(s, colors, s.tone);
+            return (
+              <linearGradient key={`fg-${s.id}`} id={shapeGradId(s.id)} gradientUnits="userSpaceOnUse" x1={g.x1} y1="0" x2={g.x2} y2="0">
+                {g.stops.map((st, k) => (
+                  <stop key={k} offset={st.offset} stopColor={safe(s.color)} stopOpacity={st.opacity} />
+                ))}
+              </linearGradient>
+            );
+          })}
           {shapesP.filter(({ item }) => item.stub).map(({ item }) => {
             return (
               <linearGradient key={`st-${item.id}`} id={`fst-${item.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`} gradientUnits="userSpaceOnUse" x1={item.L} y1="0" x2={item.x1} y2="0">
@@ -162,13 +166,12 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
         </defs>
         <g className="flow-shapes">
           {shapesP.map(({ item: s, phase }, i) => {
-            if (scene.smooth && !s.ribbon) return null; // 矩形已经画在正文里了
             const g = scene.smooth
               ? phase === "exit" || (!armed && motion === "open") || motion === "close"
                 ? collapseAtEdge(s)
                 : s
               : shapeGeom(s, phase);
-            const d = scene.smooth && !s.stub ? neckPath(g) : shapePath(g);
+            const d = shapePath(g);
             const dim = !!hoverId && s.nodeId !== hoverId && s.tone === 0;
             return (
               <path

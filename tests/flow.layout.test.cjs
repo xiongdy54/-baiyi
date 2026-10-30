@@ -319,7 +319,7 @@ console.log("---- decideAttention ----");
 }
 
 // ---------------------------------------------------------------- §13.4 颜色 / §13.2 粘滞 / §13.3 几何
-console.log("---- §13.4 kidColor / §13.2 winStart / §13.3 geometryAt·buildPaintRects ----");
+console.log("---- §13.4 kidColor / §13.2 winStart / §13.3 geometryAt / §15.1 shapeGradientStops ----");
 const COLORS = { dark: false, bg: "#fff", fg: "#111", accent: "#166a59", accentOn: "#fff", hairline: "#ccc", counter: "#b5483b", palette: ["#6E7F2E", "#A9821C", "#A84A80", "#3E8A82", "#3F68A8", "#6F5FB0", "#A44836", "#B2662A"], aHL: [0.16, 0.26, 0.38], aEnd: [0.34, 0.52, 0.6], aDim: 0.3, strandA: 0.62 };
 const mkCtx = (g, cut, pattern, members, extra) => Object.assign({
   g, plan: { mode: "reserve", shift: 0, reserve: 390, barX: 700, labelX: 726, labelW: 248, right: 994 }, colors: COLORS, pattern, cut,
@@ -355,19 +355,20 @@ const mkCtx = (g, cut, pattern, members, extra) => Object.assign({
   const ga2 = L.geometryAt(g, { 0: { left: 0, top: -200 } });
   check("geometryAt：完全移出视口 → 被裁掉", ga2.boxes.length === 0, ga2.boxes.length);
 
-  // buildPaintRects 与 buildShapes 对齐
+  // §15.1：一条路径一条渐变（矩形段与颈部同源）
   const plan = { mode: "reserve", shift: 0, reserve: 390, barX: 700, labelX: 726, labelW: 248, right: 994 };
   const colors = COLORS;
   const ctx2 = mkCtx(graph([node("P", null, 0, "P", "其他"), node("a", "P", 1000, "A", "理由", { blockStart: 100, blockEnd: 160 })], []), "P", "tree", ["a"], { readingId: "a" });
   const layP = L.fitLayout(ctx2, ["a"], 700);
   const geoP = { seq: 2, viewport: { left: 0, top: 0, right: 1200, bottom: 900 }, columns: [{ left: 10, right: 100 }], boxes: [gbox, { ...gbox, key: "k2", top: 180, bottom: 220, cTop: 180, cBottom: 220 }], text: { left: 10, right: 100 } };
-  const rects = L.buildPaintRects(geoP, layP, { hoverId: null, focusId: "a", colorOf: () => "#6E7F2E", colors });
-  const shape = L.buildShapes(geoP, layP, 0, { hoverId: null, focusId: "a", readingId: "a", colorOf: () => "#6E7F2E" }).filter((s) => s.ribbon);
-  check("buildPaintRects 与颈部对齐：left+width=xs、top=s0、top+height=s1", rects.length === 1 && shape.length === 1 && Math.abs(rects[0].left + rects[0].width - shape[0].xs) < 1 && Math.abs(rects[0].top - shape[0].s0) < 1 && Math.abs(rects[0].top + rects[0].height - shape[0].s1) < 1, { rects, shape: shape[0] });
-  const rects2 = L.buildPaintRects(geoP, layP, { hoverId: null, focusId: null, colorOf: () => "#000000", portColorOf: new Map([["a", "#3E8A82"]]), colors });
-  check("§14.4 矩形取 port 色（与颈部同源）", rects2.length === 1 && rects2[0].color === "#3E8A82", rects2[0]);
-  check("§14.4 矩形带右缘渐隐长度", rects2[0].fade === L.FLOW.HL_FADE_W && rects2[0].fade > 0, { fade: rects2[0].fade, want: L.FLOW.HL_FADE_W });
-  check("§14.4 无法解析的 port 色仍退调色板第一色", L.buildPaintRects(geoP, layP, { hoverId: null, focusId: null, colorOf: () => "x", portColorOf: new Map([["a", "color-mix(in oklab, #123, #fff 20%)"]]), colors })[0].color === COLORS.palette[0]);
+  const rib = L.buildShapes(geoP, layP, 0, { hoverId: null, focusId: "a", readingId: "a", colorOf: () => "#6E7F2E" }).filter((s) => s.ribbon)[0];
+  const gr = L.shapeGradientStops(rib, colors, 0);
+  check("§15.1 渐变横向基准 = 段落左缘 → 节点 port", gr.x1 === rib.L && gr.x2 === rib.x1, gr);
+  check("§15.1 四停点：0 / 0 / aHL / aEnd", gr.stops.length === 4 && gr.stops[0].opacity === 0 && gr.stops[1].opacity === 0 && gr.stops[2].opacity === colors.aHL[0] && gr.stops[3].opacity === colors.aEnd[0], gr.stops);
+  const fadeWant = Math.max(0, (rib.xs - L.FLOW.HL_FADE_W - rib.L) / Math.max(1, rib.x1 - rib.L)); // 短段落整块都是渐变
+  check("§15.1 渐隐从接缝前 HL_FADE_W 起坡", Math.abs(gr.stops[1].offset - fadeWant) < 0.01 && Math.abs(gr.stops[2].offset - (rib.xs - rib.L) / Math.max(1, rib.x1 - rib.L)) < 0.01, { got: gr.stops.map((x) => x.offset), fadeWant });
+  const flat = L.shapeGradientStops({ L: 10, xs: 100, x1: 100 }, colors, 0);
+  check("§15.1 无颈部（纯矩形）收在 aHL、只有三停点", flat.stops.length === 3 && flat.stops[2].opacity === colors.aHL[0] && flat.stops[2].offset === 1, flat);
 }
 
 // ---------------------------------------------------------------- §12.4.4 layoutPeek
