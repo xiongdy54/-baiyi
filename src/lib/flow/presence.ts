@@ -87,23 +87,43 @@ export function useGenFade(ref: { current: Element | null }, phase: Phase, fadeI
   const mounted = useRef(false);
   const prevPhase = useRef<Phase>(phase);
   useLayoutEffect(() => {
-    const el = ref.current as (Element & { animate?: Element["animate"] }) | null;
-    if (!el || off || typeof el.animate !== "function") return;
+    const el = ref.current as (Element & { animate?: Element["animate"]; style: CSSStyleDeclaration }) | null;
+    if (!el) return;
+    if (off) {
+      prevPhase.current = phase;
+      return;
+    }
+    const animate = el.animate;
     const now = () => Number(getComputedStyle(el).opacity || 1);
-    if (!mounted.current) {
-      mounted.current = true;
-      if (fadeIn) anim.current = el.animate([{ opacity: 0 }, { opacity: 1 }],
-        { duration: 200, delay: 100, easing: "cubic-bezier(0, 0, 0.2, 1)", fill: "backwards" });
-    } else if (phase === "exit" && prevPhase.current !== "exit") {
-      const from = now();                       // 先读当前值（可能还在淡入途中）
-      anim.current?.cancel();
-      anim.current = el.animate([{ opacity: from }, { opacity: 0 }],
-        { duration: Math.max(40, 120 * from), easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" });
-    } else if (phase !== "exit" && prevPhase.current === "exit") {
-      const from = now();                       // 来回滚：退场途中被"救回"
-      anim.current?.cancel();
-      anim.current = el.animate([{ opacity: from }, { opacity: 1 }],
-        { duration: 160, easing: "cubic-bezier(0, 0, 0.2, 1)", fill: "none" });
+    const first = !mounted.current;
+    mounted.current = true;
+    if (phase === "exit") {
+      // 退场优先于首次挂载：哪怕这一代第一次渲染就是 exit（快速连切时旧 exit 被重新选中），也必须淡出，
+      // 绝不能走「淡入」分支把旧代画成实心。
+      if (prevPhase.current !== "exit") {
+        const from = typeof animate === "function" ? now() : 0; // 先读当前值（可能还在淡入途中）
+        anim.current?.cancel();
+        if (typeof animate === "function") {
+          anim.current = el.animate([{ opacity: from }, { opacity: 0 }],
+            { duration: Math.max(40, 120 * from), easing: "cubic-bezier(0.4, 0, 1, 1)", fill: "forwards" });
+        }
+      }
+      // 兜底：无 WAAPI / 动画被浏览器取消（窗口遮挡、页面冻结、系统休眠后恢复）/ 从未启动时，
+      // 内联 opacity 0 立刻把旧代藏起来；正常淡出时 WAAPI 覆盖内联值，不影响观感。
+      el.style.opacity = "0";
+    } else {
+      if (prevPhase.current === "exit") {
+        const from = now(); // 来回滚：退场途中被「救回」
+        anim.current?.cancel();
+        if (typeof animate === "function") {
+          anim.current = el.animate([{ opacity: from }, { opacity: 1 }],
+            { duration: 160, easing: "cubic-bezier(0, 0, 0.2, 1)", fill: "none" });
+        }
+      } else if (first && fadeIn && typeof animate === "function") {
+        anim.current = el.animate([{ opacity: 0 }, { opacity: 1 }],
+          { duration: 200, delay: 100, easing: "cubic-bezier(0, 0, 0.2, 1)", fill: "backwards" });
+      }
+      el.style.opacity = ""; // 清掉退场兜底（复活的这一代要能被动画正常拉回 1）
     }
     prevPhase.current = phase;
   }, [phase, fadeIn, off]);

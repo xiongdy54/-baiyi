@@ -1,4 +1,4 @@
-# 一站式渐进阅读学习软件（**v49.85**） — AI 开发指导文档
+# 一站式渐进阅读学习软件（**v49.86**） — AI 开发指导文档
 
 > 本文档是后续所有开发的唯一依据。AI 在任何一次迭代中，必须严格按本文锁定的技术方案和接口实现，不得擅自更换技术栈、引入云端依赖、一次性做多个功能。
 > 核心原则：**纯本地软件 / 最大灵活性 / 每次只实现一个最小单元 / 需求可变**。
@@ -1787,7 +1787,7 @@ severity 语义与 CardLint 对齐：error 阻止入正式表；warn 可选择�
 | D250 | 结构流 v3.1：Sankey 式高亮流带融进阅读界面（每段文字高亮与流带同一路径 + 混合层）+ 泳道/跨度条表达层级 + 对照表版式 + 注意力判定与邻组预览 + 侧栏联动 + 退役独立结构图窗口（设计 `docs/design/STRUCTURE-FLOW-PLAN.md`，含 v3.1 §12 修订） | ✅ **v49.79 实现**（阶段 1–5 + v3.2 §13 修复；纯逻辑 `tests/flow.layout` 64/0、七版式 `tests/flow.patterns` 46/0、宿主 `tests/flow.dom` 33/0；`tsc` 0、i18n 闸门 ✓、`npm run build` ✓；`win:lens` / `lens:*` / `window.lensAPI` / `lens.html` / `结构图窗口入口（已随 D250 删除）` / `lensBridge` / `lensWindow` / `lensWindowFit` / `MindmapLens` 全链删除；AI 侧仅按 §12.3.4 升 `material-map-outline|expand` 提示词 v2） |
 | D251 | 结构流 v3.3：实机第二轮五项修复（设计 `docs/design/STRUCTURE-FLOW-FIX-v3.2.md` §14）——Token 块被残缺注释吞掉（P0）/ 展开收起状态与预览去重 / 顶部槽位与 dy 夹紧 / 矩形右缘渐隐 + 接缝连续渐变 / 宽度分配三件一体整体居中 | ✅ **v49.80 实现**（五个独立提交：P0 → 问题 4 → 问题 1 → 问题 2 → 问题 5；`tests/flow.css-tokens` 新增 4 断言；`flow.layout` 74/0、`flow.dom` 44/0、`flow.patterns` 46/0；typecheck 0、i18n ✓、consistency ✓、`npm run build` ✓；全量 `node scripts/run-tests.mjs` 149/152——`applog` 既有红与 `d241/d242` 两例在本机 `Render frame was disposed`（基线同现象，环境所致） |
 | D252 | 结构流 v3.4：高亮与彩带合成一条 path（矩形右缘渐隐 + 接缝同点）、删除 iframe 矩形层、裁剪到可见阅读窗口、换章直切（清预览/选中/展开 + 立即重采，主体不先消失）+ 图元去重（设计 §15） | ✅ **v49.81 实现**（`setStructurePaint` / `buildPaintRects` / `neckPath` / `hlX0·hlX1` 全链退役；`flow.layout` 74/0、`flow.dom` 49/0、`flow.patterns` 46/0；typecheck 0、i18n ✓、consistency ✓、`npm run build` ✓、F21 7/7、F11 14/16（L1/L6 与 main 基线逐项相同） |
-| D253 | 结构流 v3.5：换代＝「一代一层」（旧代整体淡出 + 新代整体淡入，混合层与上层同一 WAAPI 时钟；两代 defs id 带代前缀）+ 零件级 R1–R6 + 编排只留给开合/翻页 + 统一 240/160/120ms + 彩带按条目实际位置补差（设计 `docs/design/STRUCTURE-FLOW-SMOOTH-v3.5.md` §16） | ✅ **v49.85 实现**（`flow.dom` 63/0（新增 §16.1 断言 10 项）、`flow.layout` 78/0、`flow.patterns` 46/0；typecheck 0、i18n ✓、consistency ✓、`npm run build` ✓；全量 `node scripts/run-tests.mjs` 149/152——`applog` 与 `d241/d242` 两例为本机既有红（基线同现象，环境所致） |
+| D253 | 结构流 v3.5：换代＝「一代一层」（旧代整体淡出 + 新代整体淡入，混合层与上层同一 WAAPI 时钟；两代 defs id 带代前缀）+ 零件级 R1–R6 + 编排只留给开合/翻页 + 统一 240/160/120ms + 彩带按条目实际位置补差（设计 `docs/design/STRUCTURE-FLOW-SMOOTH-v3.5.md` §16） | ✅ **v49.85 实现**（`flow.dom` 63/0（新增 §16.1 断言 10 项）、`flow.layout` 78/0、`flow.patterns` 46/0；typecheck 0、i18n ✓、consistency ✓、`npm run build` ✓；全量 `node scripts/run-tests.mjs` 149/152——`applog` 与 `d241/d242` 两例为本机既有红（基线同现象，环境所致））。**v49.86 / D253 修补**：实机「离开一段时间回来后旧代文字与新代叠在同一列」——退场代在 WAAPI 动画缺失 / 被浏览器取消（窗口遮挡、页面冻结、系统休眠恢复）或首次渲染即 exit 时可能停在 opacity 1，而 presence 卸载定时器在唤醒首帧之前未及运行；`useGenFade` 改为「退场优先于首挂」，并给退场代内联 `opacity: 0` 兜底（正常淡出由 WAAPI 覆盖内联值），`flow.dom` 新增「退场代内联 opacity=0」断言 |
 
 ## 9.3 历史阶段存档（已实现）
 
