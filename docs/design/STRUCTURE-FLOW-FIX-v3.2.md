@@ -643,8 +643,8 @@ const w = Math.min(baseWRef.current, vw - 8);
 base = { left: vp.left + (vw - w) / 2, right: vp.left + (vw + w) / 2 };
 ```
    这样 resize、shift、reserve 都不再互相污染（foliate 滚动模式是 `max-width + margin:auto`，居中假设成立）。
-3. **缩放逐帧跟手**：ResizeObserver 回调里只做上面这条纯计算 + `setPlan`（rAF 合并），**不调** `getStructureGeometry`；拖动期间给根元素加 `data-resizing`，CSS `[data-resizing] .flow-shift-target { transition: none }`，停手 120ms 后恢复（这时才允许 420ms 滑行）。
-4. **模式滞回**：`inside`/`shift`/`reserve` 之间沿用 16px 滞回；reserve 的增删只在「停手 120ms 后」评估（会重排），拖拽过程中不切。
+3. **缩放逐帧跟手**：ResizeObserver 回调里只做上面这条纯计算 + `setPlan`（rAF 合并），**不调** `getStructureGeometry`；拖动期间给 `body` 加 `data-flow-resizing`，CSS `body[data-flow-resizing="1"] .flow-shift-target { transition: none }`，停手 `FLOW.RESIZE_IDLE_MS`（200ms）后恢复（这时才允许 420ms 滑行）。
+4. **模式滞回**：`inside`/`shift`/`reserve` 之间沿用 16px 滞回；reserve 的增删只在「停手 200ms 后」评估（会重排），拖拽过程中不切。
 
 ### 14.6 已读/未读（问题 3 的语义层）
 
