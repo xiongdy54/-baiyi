@@ -560,3 +560,101 @@ export const kidColor = (parent: string, bg: string, j: number) => mixHex(parent
 - 正文矩形的 `key` 用文档坐标的 `top` 取整，不能用序号，否则滚动中一有段落进出，所有矩形都会重建并闪烁。
 - 翻页模式（`smooth === false`）一行都不要动它的现有流程。PDF 没有这三个新方法，自动走旧路。
 - `ROOT_ID` 在 hook 里已经从 chain 中过滤掉了（L171），`decideAttention` 不要再处理书根。
+
+---
+
+## 14. 第二轮实机反馈（v3.3，D251）
+
+> 2026-10-30。本文第 14 节，针对实机又一批 5 个问题。**优先级：§14 > §13 > §12 > 前文。**
+> 每条按「根因 → 定稿做法 → 数值」写死；用户已就 8 个口径拍板（见 14.0）。
+
+### 14.0 已拍板口径
+
+| 编号 | 问题 | 定稿 |
+|---|---|---|
+| D-裁决 1 | 已读/未读语义 | **做**：位置型（阅读块之前＝已读），同身份色降档 + 条左缺口；不加色相、不落库、不加过渡 |
+| D-裁决 2 | 手动展开/收起的有效期 | **同组内永久手动优先**：只有 `groupId` 变化才清手动标记；`readingId` 变化不清 |
+| D-裁决 3 | 彩带最小宽度 | **保留 64–96 弹性**（判定阈值仍 `BRAID_MIN`）；拉伸必须丝滑由 14.5 负责 |
+| D-裁决 4 | 宽屏让位形态 | **正文 + 彩带 + 节点列三者为一体、整体居中**（不是正文居中、列贴右） |
+| D-裁决 5 | 重复组去重 | C + A：`focusGroup` 清预览；`peek.groupId === cut` 不画预览；`mergeLayouts` 主项优先兜底 |
+| D-裁决 6 | 顶部留白 | Q2：`COL_MARGIN_Y 16→20`、`ABOVE_SLOT 72→88` |
+| D-裁决 7 | 色条与动作行 | 条高仍＝标签高；动作行永远在条外，视觉做轻 |
+| D-裁决 8 | 修复节奏 | 五个独立提交：P0 → 问题 4 → 问题 1 → 问题 2 → 问题 5 |
+
+### 14.1 P0：结构流 Token 被一条残缺注释吞掉（先修，否则其余四项无法归因）
+
+**根因**：`theme.css` 第 9939 行起是注释正文，但上一段注释已在 9926 行闭合，这里**漏写了 `/*`**。结尾的 `*/` 成了非法记号，紧随的 `:root { --flow-c1 … }` 被并进同一个非法选择器 → **整条规则被 CSS 解析器丢弃**。
+
+**后果**：① `--flow-c1…c8` / `--flow-counter` 全部未定义 → `readColor("var(--flow-c1)", fallback)` 在真浏览器里拿到的是「继承出来的正文色」，是合法颜色，兜底拦不住 → 8 色 palette 与反方色全变近黑（问题 3 的全部现象）；② `--flow-ease` / `--flow-t-geo` 未定义 → `.flow-shape` / `.flow-items` / `.flow-item` 等**所有** `transition` 声明失效（`var()` 无 fallback）→ 全部位移动画消失（「生硬 / 跳变」的主因之一）。
+
+**做法**：补 `/*`。另加一条**源码级闸门** `tests/flow.css-tokens.test.cjs`：剥离注释后必须能找到 `--flow-c1` 与 `--flow-ease` 的定义，且 `--flow-c1` 的出现位置不在注释内。**不要**给这些 Token 加 CSS fallback（数值真源仍只在 `:root` 一处）。
+
+### 14.2 问题 4：展开/收起的状态与身份
+
+四条规则（照抄）：
+
+1. **预览与主体同 id 不许互相吞**：`mergeLayouts` 的 `seen` 先用主体建，再 push 预览（重复 id 丢弃）。同时宿主在 `peek.groupId === cut` 时**直接不画预览**；`focusGroup` 必须 `peekRef.current = null` 后再 bump。
+2. **动作行只锚主体行**：`selected` 的查找必须带 `!i.peek`；找不到就整块不渲染（不回落到预览行）。
+3. **收起即离开**：`toggleExpand` 在「当前已展开、本次点击是收起」时 `setSel(null)` + `setExplainFor(null)`。
+4. **手动优先（同组）**：`manualExpRef` 只在 `groupId` 变化时清；`readingId` 变化不清。自动展开 effect 在不处于手动态时才跟随 `deepMember`。
+
+### 14.3 问题 1：顶部槽位够高、列不越顶
+
+```ts
+COLUMN.ABOVE_SLOT = 20 + 2 * 22 + 16 + 8;   // 88：标题 20 + 2 行 × 22 + 「另 N 项」16 + 间距 8
+FLOW.COL_MARGIN_Y = 20;                      // 16 → 20
+aboveOff = Math.max(0, COLUMN.ABOVE_SLOT - 8 - above.height);
+// dy：只允许吃掉上方槽的【剩余】部分，永不越过视口顶
+const eat = Math.min(Math.max(0, COLUMN.ABOVE_SLOT - (above?.height ?? 0) - 8), Math.max(0, main.height - mainAvail));
+let dy = top - eat;
+```
+验收：当预览为「2 行 + 另 N 项」时，预览顶 = `vp.top + 20`（不再贴 0）；主体顶 = `vp.top + 108`。
+
+### 14.4 问题 2：矩形右缘渐隐 + 接缝连续
+
+**用户新口径**：正文下的高亮块视觉上做成透明，只在最右端保留一小段向左变淡的颜色，与彩带向左变淡衔接，形成「渐渐消失」。
+
+1. **矩形改渐变**（画在正文 iframe 里）：元素自身 `opacity = aHL[tone]`（× dim 因子），背景改为
+   `linear-gradient(90deg, transparent 0, transparent calc(100% − HL_FADE_W), currentColor 100%)`，`color = 该节点的 port 色`。
+   `FLOW.HL_FADE_W = 140`。矩形宽度 < 140 时整块都在渐变里，不会出硬边。
+   **颜色必须与彩带同源**：新增 `portColorOf`（由 `lay.ports` 建 Map）传给 `buildPaintRects`，子节点不再回落 `palette[0]`。
+2. **颈部改 per-shape 渐变**：`<linearGradient gradientUnits="userSpaceOnUse" x1={s.xs} x2={s.x1}>`，`stop 0 = aHL[tone]`、`stop 1 = aEnd[tone]`。
+   这样**任何 braid 宽度下**接缝处透明度都恰好等于矩形右端的 `aHL`（§13.3.3 的原文意图），不再依赖 `BRAID_PREF=96` 的平台段定标。
+3. **消除抗锯齿缝**：矩形宽 +1px，压住 iframe div 与 SVG path 各自抗锯齿产生的 1px 亮线。
+4. 混合模式不变（浅色 `multiply` / 深色 `screen`）。
+
+### 14.5 问题 5：宽度分配改成「三件一体、整体居中」
+
+**目标**：`[正文 | 彩带 | 节点列]` 视为一个整体，在视口内居中；窗口怎么拉都成立。
+
+1. **`planColumn` 增加居中目标**（`lw = LABEL_W`）：
+```ts
+const total = textW + FLOW.BRAID_PREF + blockW(lw);      // textW = textRight − textLeft
+const idealLeft = vp.left + (vw - total) / 2;
+let s = Math.max(0, ceilTo(textLeft - idealLeft, FLOW.SHIFT_STEP));  // 居中所需位移（常量 = (96+blockW)/2）
+if (s > maxShift) s = ceilTo(FLOW.BRAID_MIN + blockW(lw) - room, FLOW.SHIFT_STEP);  // 退化为「够放就行」
+if (s > maxShift) → reserve / compact / whisper（原逻辑不变）
+barX = Math.round(Math.min(textRight - s + FLOW.BRAID_PREF, right - 4 - blockW(lw)));
+```
+   居中位移只与块宽有关（248 标签时为 **195**），与窗口宽无关；窗口变宽不会把列挤走。
+2. **版心不再「只在 shift=0 时采样」**：改成 `baseW`（未预留时量到的正文宽），每次决策用 `base = 居中(vw, baseW)` 现算：
+```ts
+const w = Math.min(baseWRef.current, vw - 8);
+base = { left: vp.left + (vw - w) / 2, right: vp.left + (vw + w) / 2 };
+```
+   这样 resize、shift、reserve 都不再互相污染（foliate 滚动模式是 `max-width + margin:auto`，居中假设成立）。
+3. **缩放逐帧跟手**：ResizeObserver 回调里只做上面这条纯计算 + `setPlan`（rAF 合并），**不调** `getStructureGeometry`；拖动期间给根元素加 `data-resizing`，CSS `[data-resizing] .flow-shift-target { transition: none }`，停手 120ms 后恢复（这时才允许 420ms 滑行）。
+4. **模式滞回**：`inside`/`shift`/`reserve` 之间沿用 16px 滞回；reserve 的增删只在「停手 120ms 后」评估（会重排），拖拽过程中不切。
+
+### 14.6 已读/未读（问题 3 的语义层）
+
+- 判定：节点块完全早于阅读块（复用宿主 `sideOf === "above"`）。
+- 表现：条 tone 96→84、条宽 −1px、条左留 2px 缺口（`bar` 的 x +1、w −1）；**不加过渡**（避免滚动时边界闪烁）。
+- 不改色相、不落库、不动 `syncTables`。
+
+### 14.7 测试与验收
+
+- `tests/flow.css-tokens.test.cjs`（新）：注释剥离后 `--flow-c1` / `--flow-ease` 存在于非注释区。
+- `tests/flow.layout.test.cjs`：`ABOVE_SLOT === 88`、`COL_MARGIN_Y === 20`；`planColumn` 居中用例（宽窗 1400 + 720 版心 → shift 195）；`buildPaintRects` 的 `fade === HL_FADE_W` 且颜色取自 port。
+- `tests/flow.dom.test.cjs`：收起后无 `.flow-actions`；点预览后「组不重复、每个 `bar:*` 都有对应 `n:*`」；渐变首 stop 的 opacity === 矩形 alpha。
+- 实机：顶部预览不贴顶；窗口 900→1800 连续拖动，列与正文的相对位置恒定（三件整体居中），彩带宽度不塌；展开/收起无残影、无浮空条。
