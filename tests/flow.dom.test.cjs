@@ -245,7 +245,7 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     probeDist = [0, 0, 10, 10];
     relocate();
     check("预览出现", await until(() => {
-      const head = item("n:t2");
+      const head = item("peek:n:t2");
       return !!head && /下一部分/.test(head.textContent || "");
     }, 4000));
     await sleep(500);
@@ -300,23 +300,23 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   probeDist = [0, 0, 10, 10];
   relocate();
   check("交界处：下一部分以预览出现在列下方（「下一部分」）", await until(() => {
-    const head = item("n:t2");
+    const head = item("peek:n:t2");
     return !!head && /下一部分/.test(head.textContent || "");
-  }, 4000), { text: item("n:t2") && item("n:t2").textContent });
+  }, 4000), { text: item("peek:n:t2") && item("peek:n:t2").textContent });
   check("预览成员也有高亮流带", !!shapeOf("X"), $$(".flow-shapes path").map((p) => p.getAttribute("data-node-id")));
-  const previewX = item("n:X");
+  const previewX = item("peek:n:X");
   check("预览成员项存在", !!previewX);
   probeDist = [0, 10, 10, 10];
   relocate();
   const switched = await until(() => {
     const now = item("n:X");
-    return !!now && now === previewX && !!$("[data-reading='1']");
+    return !!now && !item("peek:n:X") && !!$("[data-reading='1']");
   }, 5000);
-  check("新组成为主导 → 切组，原预览成员元素仍是同一个 DOM 节点（===）", switched && item("n:X") === previewX, { same: item("n:X") === previewX });
+  check("新组成为主导 → 切组：预览行退场、主体行接管（§15.5 交叉淡入，不再复用同一个 DOM 节点）", switched, { main: !!item("n:X"), peek: !!item("peek:n:X") });
   check("切组后原主体成为「上一部分」预览", await until(() => {
-    const head = item("n:t1");
+    const head = item("peek:n:t1");
     return !!head && /上一部分/.test(head.textContent || "");
-  }, 3000), { text: item("n:t1") && item("n:t1").textContent });
+  }, 3000), { text: item("peek:n:t1") && item("peek:n:t1").textContent });
 
   console.log("---- §14.2 预览与主体不互吞 / 动作行只锚主体 ----");
   {
@@ -330,7 +330,7 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     })();
     const peekIds = () => $$(".flow-item.is-peek").map((e) => e.getAttribute("data-flow-item"));
     check("当前存在「上一部分」预览行", peekIds().length > 0, peekIds());
-    click(item("n:A")); // 点预览行 → focusGroup 切回 t1
+    click(item("peek:n:A")); // 点预览行 → focusGroup 切回 t1
     await sleep(800);
     const ids = $$(".flow-item").map((e) => e.getAttribute("data-flow-item"));
     check("点预览行切组后无重复行", ids.length > 0 && new Set(ids).size === ids.length, ids);
@@ -341,6 +341,22 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     const inlineY = inlineEl ? yOf(inlineEl) : NaN;
     const anchored = $$(".flow-item:not(.is-peek)").some((e) => Math.abs(yOf(e) + parseFloat(e.style.height || "0") + wrapY - inlineY) < 0.6);
     check("动作行锚在主体行下方（不在预览行上）", !inlineEl || anchored, { inlineY, wrapY, items: $$(".flow-item").map((e) => e.getAttribute("data-flow-item")) });
+
+    // §15.5：切组瞬间（条与字分属两套 presence）也必须一一对应——旧实现会留下「条在、字没了」
+    const primOwner = (id) => id.replace(/^bar:/, "");
+    const liveNodes = () => new Set($$(".flow-item[data-kind='node'], .flow-item[data-kind='kid']").map((e) => e.getAttribute("data-flow-item").replace(/^peek:/, "").slice(2)));
+    const orphans = () => {
+      const nodes = liveNodes();
+      return [...new Set($$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id")).map(primOwner).filter((x) => !nodes.has(x)))];
+    };
+    probeDist = [0, 10, 10, 10];
+    relocate();
+    await sleep(40);
+    check("切组瞬间：没有「条在、字没了」的孤立色条（§15.5 id 命名空间）", orphans().length === 0, { orphans: orphans(), items: $$(".flow-item").map((e) => e.getAttribute("data-flow-item")) });
+    await sleep(400);
+    probeDist = [0, 0, 0, 0];
+    relocate();
+    await sleep(600);
   }
 
   console.log("---- §14.5 拉伸：逐帧跟手、三件整体居中、彩带不塌 ----");
@@ -395,9 +411,9 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     await sleep(30);
     check("换章瞬间：主体不先消失（不是整层淡出）", $$(".flow-item:not(.is-peek)").length > 0, { before, now: $$(".flow-item:not(.is-peek)").length });
     check("换章瞬间：动作行一起收走", !$(".flow-actions"));
-    check("换章后：直接换成新章，旧预览与旧条目都不残留", await until(() => !!item("n:X") && !$(".flow-item.is-peek") && !item("n:A"), 5000), {
+    check("换章后：直接换成新章，旧预览与旧条目都不残留", await until(() => !!item("n:X") && !$(".flow-item.is-peek") && !item("n:A") && !item("peek:n:A"), 5000), {
       peek: $$(".flow-item.is-peek").map((e) => e.getAttribute("data-flow-item")),
-      old: !!item("n:A"),
+      old: !!item("n:A") || !!item("peek:n:A"),
       neu: !!item("n:X"),
     });
     const bars = $$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id").slice(4));

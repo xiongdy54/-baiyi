@@ -288,13 +288,12 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     const g = geometryAt(base, shiftOffsets(base, kernel.getFrameOffsets(), dx));
     const shapes = buildShapes(g, F.lay, F.dy, F.opts);
     const sig = shapes.map((s) => s.id).join("|");
-    if (sig !== shapeSigRef.current) {
-      flushSync(() => setFrameTick((n) => n + 1));
-      return;
-    }
+    // §15.5：形状集合变化时只补渲染一次，但【本帧仍然继续写已有元素】——
+    // 之前整帧 return 会让正在滚动的流带偶尔落后一帧（用户看到的「高亮矩形残影」）
+    if (sig !== shapeSigRef.current) flushSync(() => setFrameTick((n) => n + 1));
     for (const s of shapes) {
       const el = neckEls.current.get(s.id);
-      if (!el) continue;
+      if (!el || !el.isConnected) continue;
       const d = shapePath(s);
       el.style.transition = "none";
       el.setAttribute("d", d);

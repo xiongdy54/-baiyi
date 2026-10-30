@@ -1296,7 +1296,8 @@ export function layoutPeek(c: LayoutCtx, groupId: string, side: "above" | "below
   out.prims.push({ k: "rect", id: `peekline:${groupId}`, x: c.plan.labelX, y: y + 6, w: 24, h: 1, fill: c.colors.fg, opacity: 0.25, layer: "under" });
   out.items.push(
     item({
-      id: `n:${groupId}`, nodeId: groupId, kind: "head", x: c.plan.labelX + 30, y, w: c.plan.labelW - 30, h: 14,
+      // §15.5：预览行用 peek: 前缀，避免与主体行的 n:${id} 撞 id（撞了会互相顶替：条留着、字没了）
+      id: `peek:n:${groupId}`, nodeId: groupId, kind: "head", x: c.plan.labelX + 30, y, w: c.plan.labelW - 30, h: 14,
       lines: wrapLabel(title, 11, c.plan.labelW - 30, 1), fs: 11, lh: 14, weight: 500, tone: 45, meta: side === "below" ? "下一部分" : "上一部分", peek: true,
     }),
   );
@@ -1307,7 +1308,7 @@ export function layoutPeek(c: LayoutCtx, groupId: string, side: "above" | "below
     const st = LANE_STYLE[lane];
     out.items.push(
       item({
-        id: `n:${id}`, nodeId: id, kind: "node", x: c.plan.labelX, y, w: c.plan.labelW, h: st.lh,
+        id: `peek:n:${id}`, nodeId: id, kind: "node", x: c.plan.labelX, y, w: c.plan.labelW, h: st.lh,
         lines: wrapLabel(n.title, st.fs, c.plan.labelW - FLOW.META_W, 1), fs: st.fs, lh: st.lh, weight: st.weight, tone: PEEK.TONE, lane, peek: true,
       }),
     );
@@ -1319,7 +1320,7 @@ export function layoutPeek(c: LayoutCtx, groupId: string, side: "above" | "below
   });
   if (kids.length > show.length) {
     out.items.push(
-      item({ id: `more:peek:${groupId}`, nodeId: groupId, kind: "more", x: c.plan.labelX, y, w: c.plan.labelW, h: 16, lines: [""], fs: 11, lh: 16, weight: 400, tone: 40, moreKind: "kids", moreCount: kids.length - show.length }),
+      item({ id: `peek:more:${groupId}`, nodeId: groupId, kind: "more", x: c.plan.labelX, y, w: c.plan.labelW, h: 16, lines: [""], fs: 11, lh: 16, weight: 400, tone: 40, moreKind: "kids", moreCount: kids.length - show.length }),
     );
     y += 16;
   }

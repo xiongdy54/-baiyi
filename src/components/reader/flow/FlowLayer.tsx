@@ -181,7 +181,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
                 className={`flow-shape${dim ? " is-dim" : ""}`}
                 d={d}
                 fill={s.stub ? `url(#fst-${s.id.replace(/[^a-zA-Z0-9_-]/g, "_")})` : `url(#${shapeGradId(s.id)})`}
-                style={{ d: `path("${d}")`, ...vars(shapeDelay(i)) }}
+                style={{ d: `path("${d}")`, opacity: phase === "exit" ? 0 : 1, ...vars(shapeDelay(i)) }}
                 data-node-id={s.nodeId}
                 data-tone={s.tone}
               />
