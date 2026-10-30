@@ -301,6 +301,23 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   }, 2000), { tone: shapeOf("B") && shapeOf("B").getAttribute("data-tone") });
   click(item("n:B"));
   check("点有子节点的成员 → 出现 kid 项与动作行", await until(() => !!item("n:B1") && !!$(".flow-actions"), 4000), { kid: !!item("n:B1"), actions: !!$(".flow-actions") });
+  // §8.9 / D255：动作行恒锚「选中条目底边」——点子项时锚子项、且不压后面的条目
+  {
+    click(item("n:B1"));
+    const read = () => {
+      const y = (el) => { const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((el && el.style.transform) || ""); return m ? Number(m[2]) : NaN; };
+      const wrap = (() => { const m = /translateY\(([-\d.]+)px\)/.exec(($(".flow-items") || { style: {} }).style.transform || ""); return m ? Number(m[1]) : 0; })();
+      const inline = $(".flow-inline");
+      const kid = item("n:B1");
+      if (!inline || !kid) return null;
+      const top = y(inline) - wrap; // 条目是列内坐标，动作行是 client 坐标（含列 dy）
+      const band = $$(".flow-item").filter((e) => e !== kid && e.getAttribute("data-kind") !== "head").filter((e) => { const t = y(e); return t > top - 0.5 && t < top + 26; });
+      return { top, want: y(kid) + parseFloat(kid.style.height || "0"), wrap, band: band.map((e) => e.getAttribute("data-flow-item")) };
+    };
+    const until_ok = await until(() => { const r = read(); return !!r && Math.abs(r.top - r.want) < 0.6; }, 3000);
+    const r = read();
+    check("点子项：动作行锚在该子项底边，且带内没有别的条目", until_ok && r && r.band.length === 0, r);
+  }
   click(item("n:B"));
   check("再点 → 收起 kid", await until(() => !item("n:B1"), 1500));
   check("收起同时收走动作行（§14.2-3）", await until(() => !$(".flow-actions"), 1500), { inline: !!$(".flow-inline") });

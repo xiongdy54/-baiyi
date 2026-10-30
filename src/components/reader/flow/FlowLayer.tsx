@@ -10,6 +10,7 @@ import {
   collapseAtEdge,
   collapseAtLeft,
   collapseAtNode,
+  explainBoxH,
   parseRgb,
   shapeGradientStops,
   shapePath,
@@ -87,7 +88,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
   // §14.2-2：动作行只锚主体行——预览行不是可操作目标（否则会浮在预览行上盖住主体）
   const selected = layout.items.find((i) => i.nodeId === inline.forId && !i.peek && (i.kind === "node" || i.kind === "kid"));
   const inlineAt = layout.inlineAt ?? (selected ? { x: selected.x, y: selected.y + selected.h, w: selected.w } : null);
-  const explainH = inline.explainOpen ? Math.min(FLOW.EXPLAIN_MAX_H, Math.ceil((inline.explainText.length * 12) / Math.max(1, plan.labelW)) * 18 + 12) : 0;
+  const explainH = inline.explainOpen ? explainBoxH(inline.explainText, plan.labelW, inline.explainBusy) : 0;
 
   return (
     <>
@@ -132,7 +133,8 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
               <button type="button" onClick={() => onEvent({ kind: "action", name: "openInMap" })}>{T("在完整图谱中打开")}</button>
             </div>
             {inline.explainOpen ? (
-              <div className="flow-explain" style={{ maxHeight: FLOW.EXPLAIN_MAX_H, minHeight: inline.explainBusy ? 40 : explainH }}>
+              // D255：高度由宿主预留口径 explainBoxH 决定（min=max）——文字再多也在框内滚动，不会长出预留区压住下一条
+              <div className="flow-explain" style={{ maxHeight: explainH, minHeight: explainH }}>
                 {inline.explainBusy && !inline.explainText ? <span className="flow-dots" aria-label={T("正在生成…")}><i /><i /><i /></span> : null}
                 {inline.explainText ? <span>{inline.explainText}</span> : inline.explainBusy ? null : <span className="flow-explain-empty">{T("还没有讲解")}</span>}
               </div>
