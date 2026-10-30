@@ -364,5 +364,25 @@ console.log("---- layoutPeek ----");
   check("预览标题 meta=下一部分", p.items[0].meta === "下一部分", p.items[0].meta);
 }
 
+console.log("---- §14.3 上方槽 / 列顶留白 ----");
+{
+  check("ABOVE_SLOT 计入「另 N 项」= 88", L.COLUMN.ABOVE_SLOT === 88, L.COLUMN.ABOVE_SLOT);
+  check("上方槽 ≥ 最坏预览高度（20 + 2×22 + 16）", L.COLUMN.ABOVE_SLOT - 8 >= 20 + 2 * 22 + 16, L.COLUMN.ABOVE_SLOT);
+  check("COL_MARGIN_Y = 20", FLOW.COL_MARGIN_Y === 20, FLOW.COL_MARGIN_Y);
+  // 3 个成员 → 2 行 + 「另 1 项」= 80，必须放得进 ABOVE_SLOT − 8
+  const g = graph(
+    [node("G", null, 0, "组", "论点"), node("k1", "G", 1000, "一", "理由"), node("k2", "G", 2000, "二", "理由"), node("k3", "G", 3000, "三", "理由")],
+    [],
+  );
+  const ctx = {
+    g, plan: { mode: "inside", shift: 0, reserve: 0, barX: 700, labelX: 726, labelW: 248, right: 994 }, colors: COLORS, pattern: "tree", cut: "G",
+    header: "组", patternName: "大纲", members: ["k1", "k2", "k3"], colorOf: new Map([["k1", "#111"], ["k2", "#222"], ["k3", "#333"]]),
+    paletteOf: new Map(), moreAbove: 0, moreBelow: 0, readingId: "k1", readingBlock: null, selectedId: null, expandedId: null,
+    inlineH: 0, maxLines0: 2, canBack: false, availH: 800, maxW: 500, cmpPage: 0,
+  };
+  const p = L.layoutPeek(ctx, "G", "above", L.COLUMN.ABOVE_ROWS);
+  check("2 行预览 + 另 1 项 的总高 ≤ 上方槽余量", p.height <= L.COLUMN.ABOVE_SLOT - 8, { h: p.height, slot: L.COLUMN.ABOVE_SLOT });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -33,7 +33,7 @@ export const FLOW = {
   MAX_MEMBERS: 9, MIN_MEMBERS: 3, MAX_KIDS: 7,
   ACTIONS_H: 26, EXPLAIN_MAX_H: 168,
   STRETCH_MAX: 1.8, MIN_SLICE: 2, MAX_STRANDS: 12, STUB_ROWS: 4,
-  COL_MARGIN_Y: 16,
+  COL_MARGIN_Y: 20,
   TL_DOT_R: 5, TL_DOT_R_READING: 6.5, TL_TIME_FS: 11, TL_TIME_LH: 15, TL_BREAK_K: 4,
   CH_R: 9,
   CMP_MAX: 4, CMP_GAP: 10, CMP_KIDS: 5,
@@ -1172,7 +1172,7 @@ export function buildStrands(g: GraphState, lay: PatternLayout, dy: number, o: {
 }
 
 // ---------------------------------------------------------------- §13.2.1 列位置
-export const COLUMN = { ABOVE_ROWS: 2, ABOVE_SLOT: 20 + 2 * 22 + 8 }; // 上方预览固定槽：标题 20 + 2 行 × 22 + 间距 8 = 72
+export const COLUMN = { ABOVE_ROWS: 2, ABOVE_SLOT: 20 + 2 * 22 + 16 + 8 }; // 上方预览固定槽：标题 20 + 2 行 × 22 + 「另 N 项」16 + 间距 8 = 88（§14.3）
 
 // ---------------------------------------------------------------- §13.1 注意力判定（取代 §12.4.2）
 export const ATTN = {

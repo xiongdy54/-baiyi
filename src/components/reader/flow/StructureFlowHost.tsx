@@ -668,6 +668,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     };
     let lay: PatternLayout & { members?: string[] };
     let mainHeight = 0;
+    let aboveH = 0; // 上方预览实际高度（dy 只用上方槽的剩余部分）
     let mainAvail = Math.max(80, bottom - (top + COLUMN.ABOVE_SLOT));
     if (g && cut && all.length) {
       // §13.2：主体顶边固定；主体可用高度与预览有无无关 → 折叠结果稳定
@@ -687,9 +688,11 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
         if (rows >= 1) below = layoutPeek(peekCtx, peek.groupId, "below", rows);
       }
       mainHeight = main.height;
+      // §14.3：上方槽按最坏高度（2 行 + 另 N 项）预留，预览底对齐到主体上方 8px，且永不越出列原点
+      aboveH = above?.height ?? 0;
       lay = mergeLayouts(main, above, below, {
         mainOff: COLUMN.ABOVE_SLOT,
-        aboveOff: above ? COLUMN.ABOVE_SLOT - 8 - above.height : 0,
+        aboveOff: above ? Math.max(0, COLUMN.ABOVE_SLOT - 8 - aboveH) : 0,
         belowOff: COLUMN.ABOVE_SLOT + main.height + PEEK.GAP,
       });
       lay.members = main.members;
@@ -710,9 +713,9 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     }
     lay.sideOf = sideOf;
 
-    // §13.2：列不平移——主体恒在 ABOVE_SLOT；极端超高时只吃上方槽，不随阅读位置变
+    // §13.2：列不平移——主体恒在 ABOVE_SLOT；§14.3：超高时只吃上方槽的【剩余】部分，永不越过视口顶
     let dy = top;
-    if (mainHeight > mainAvail) dy = top - Math.min(COLUMN.ABOVE_SLOT, mainHeight - mainAvail);
+    if (mainHeight > mainAvail) dy = top - Math.min(Math.max(0, COLUMN.ABOVE_SLOT - 8 - aboveH), mainHeight - mainAvail);
 
     // 悬停集合：自己 + 全部下级（§12.2）
     const hoverSet = new Set<string>();
