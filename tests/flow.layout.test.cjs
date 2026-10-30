@@ -31,12 +31,30 @@ console.log("---- planColumn ----");
   const p2 = L.planColumn({ on: true, viewport: vp, textLeft: 560, textRight: 1000 }, null);
   check("平移可行 → shift 160", p2.mode === "shift" && p2.shift === 160, p2);
   const p3 = L.planColumn({ on: true, viewport: vp, textLeft: 420, textRight: 840 }, null);
-  check("room 360 够 → inside", p3.mode === "inside" && p3.shift === 0 && p3.reserve === 0, p3);
+  check("§14.5 三件整体居中 → shift 88（不再只是「够放」）", p3.mode === "shift" && p3.shift === 88 && p3.barX - (840 - 88) === 96, p3);
   const vp2 = { left: 280, right: 1000, top: 60, bottom: 900 };
   const p4 = L.planColumn({ on: true, viewport: vp2, textLeft: 420, textRight: 900 }, null);
   check("窄视口 + 紧凑也放不下 → whisper", p4.mode === "whisper", p4);
   const p5 = L.planColumn({ on: true, viewport: vp, textLeft: 560, textRight: 1000 }, { shift: 168, reserve: 0, mode: "shift", barX: 0, labelX: 0, labelW: 0, right: 0 });
   check("滞回：need 160 与旧 168 差 <16 → 保持 168", p5.mode === "shift" && p5.shift === 168, p5);
+  const vpW = { left: 0, right: 1400, top: 60, bottom: 900 };
+  const p6 = L.planColumn({ on: true, viewport: vpW, textLeft: 340, textRight: 1060 }, null);
+  check("§14.5 宽窗 + 720 版心 → 居中位移 200（195 按 8px 量化）、彩带恰 96", p6.mode === "shift" && p6.shift === 200 && p6.barX - (1060 - 200) === 96, p6);
+  check("§14.5 三件整体在视口内居中（左右余量差 ≤ 2×量化步长）", Math.abs((340 - p6.shift) - (1400 - (p6.barX + 294))) <= 16, { left: 340 - p6.shift, right: 1400 - (p6.barX + 294), barX: p6.barX });
+  {
+    const bad = [];
+    for (let vw = 900; vw <= 1900; vw += 20) {
+      const v = { left: 0, right: vw, top: 60, bottom: 900 };
+      const tw = Math.min(720, vw - 8);
+      const tl = (vw - tw) / 2, tr = tl + tw;
+      const pp = L.planColumn({ on: true, viewport: v, textLeft: tl, textRight: tr }, null);
+      if (pp.mode === "whisper" || pp.mode === "reserve") continue; // 预留档的 barX 由宿主按重排后的实际版心修正
+      const braid = pp.barX - (tr - pp.shift);
+      // 下界留一个量化步长：右缘硬约束会把 shift 钳住，此时彩带按剩余量收窄（BRAID_MIN 附近）
+      if (braid < L.FLOW.BRAID_MIN - L.FLOW.SHIFT_STEP || braid > 97 || pp.right > vw - 4) bad.push({ vw, mode: pp.mode, braid, right: pp.right });
+    }
+    check("§14.5 宽度扫描：彩带不低于 64−步长、列不越界", bad.length === 0, bad.slice(0, 5));
+  }
   check("on=false → off", L.planColumn({ on: false, viewport: vp, textLeft: 420, textRight: 1000 }, null).mode === "off");
   check("硬约束：所有非 whisper 方案 plan.right ≤ viewport.right − 4", [p1, p2, p3, p5].every((p) => p.right <= vp.right - 4), [p1, p2, p3, p5].map((p) => p.right));
 }

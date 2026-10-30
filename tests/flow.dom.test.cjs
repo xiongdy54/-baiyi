@@ -102,7 +102,7 @@ const origErr = console.error;
 console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
 
 // ---------------------------------------------------------------- 假内核
-let TEXT = { left: 560, right: 1000 }; // shift 档（§10-7）；reserve 档换 420
+let TEXT = { left: 520, right: 960 }; // 版心在 viewport 内居中（§14.5 宿主只信宽度）；reserve 档换 450
 let activeMain = null;
 const shiftNow = () => { const m = /translateX\(-(\d+)/.exec((activeMain && activeMain.style.transform) || ""); return m ? Number(m[1]) : 0; };
 const VIEWPORT = { left: 280, top: 60, right: 1200, bottom: 900 };
@@ -343,6 +343,44 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     check("动作行锚在主体行下方（不在预览行上）", !inlineEl || anchored, { inlineY, wrapY, items: $$(".flow-item").map((e) => e.getAttribute("data-flow-item")) });
   }
 
+  console.log("---- §14.5 拉伸：逐帧跟手、三件整体居中、彩带不塌 ----");
+  {
+    const readShift = () => { const m = /translateX\(-(\d+)/.exec((activeMain && activeMain.style.transform) || ""); return m ? Number(m[1]) : 0; };
+    const rowX = () => { const el = $$(".flow-item[data-kind='node']")[0]; const m = /translate\(([-\d.]+)px/.exec((el && el.style.transform) || ""); return m ? Number(m[1]) : NaN; };
+    const centering = () => {
+      const labelX = rowX() + 0;
+      const vw = VIEWPORT.right - VIEWPORT.left;
+      const left = TEXT.left - readShift() - VIEWPORT.left;
+      const right = VIEWPORT.right - (labelX + 248 + 20);
+      const barX = labelX - 10 - 16;
+      return { left, right, braid: barX - (TEXT.right - readShift()), vw };
+    };
+    const c0 = centering();
+    check("初始：彩带 96、左右余量对称（±16 量化）", Math.abs(c0.braid - 96) <= 1 && Math.abs(c0.left - c0.right) <= 16, c0);
+
+    // 拉宽 280px：正文、彩带、节点列作为一体跟过去（不是只有列被挤到右边）
+    VIEWPORT.right = 1480;
+    {
+      const vw = VIEWPORT.right - VIEWPORT.left;
+      const tw = Math.min(440, vw - 8);
+      TEXT = { left: VIEWPORT.left + (vw - tw) / 2, right: VIEWPORT.left + (vw + tw) / 2 };
+    }
+    w.dispatchEvent(new w.Event("resize"));
+    check("拖动中打上 data-flow-resizing（关掉 420ms 滑行）", await until(() => w.document.body.getAttribute("data-flow-resizing") === "1", 500));
+    await sleep(90);
+    const c1 = centering();
+    check("宽度变化 90ms 内已跟手（不再等 200ms 防抖）", activeMain && Math.abs(c1.braid - 96) <= 1 && Math.abs(c1.left - c1.right) <= 16, c1);
+    check("停手后撤掉 data-flow-resizing", await until(() => !w.document.body.hasAttribute("data-flow-resizing"), 2000), w.document.body.getAttribute("data-flow-resizing"));
+    VIEWPORT.right = 1200;
+    {
+      const vw = VIEWPORT.right - VIEWPORT.left;
+      const tw = Math.min(440, vw - 8);
+      TEXT = { left: VIEWPORT.left + (vw - tw) / 2, right: VIEWPORT.left + (vw + tw) / 2 };
+    }
+    w.dispatchEvent(new w.Event("resize"));
+    await sleep(400);
+  }
+
   console.log("---- 关闭 ----");
   stage.setOpen(false);
   check("关闭后卸载两层", await until(() => !$(".flow-blend") && !$(".flow-layer"), 3000));
@@ -383,8 +421,8 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     return { root2, refs, el };
   };
   {
-    const s = await mountScenario({ left: 560, right: 1000 });
-    check("shift 档：正文整体平移 −160px", s.refs.main && s.refs.main.style.transform === "translateX(-160px)", {
+    const s = await mountScenario({ left: 520, right: 960 });
+    check("shift 档：正文整体平移 −200px（三件整体居中）", s.refs.main && s.refs.main.style.transform === "translateX(-200px)", {
       transform: s.refs.main && s.refs.main.style.cssText,
       gutter: s.refs.gutter && s.refs.gutter.style.flexBasis,
       mode: ($(".flow-layer") || { getAttribute: () => null }).getAttribute("data-mode"),
@@ -393,7 +431,7 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     s.root2.unmount(); s.el.remove();
   }
   {
-    const s = await mountScenario({ left: 420, right: 1000 });
+    const s = await mountScenario({ left: 450, right: 1030 });
     check("reserve 档：预留槽位 390px", s.refs.gutter && s.refs.gutter.style.flexBasis === "390px", s.refs.gutter && s.refs.gutter.style.flexBasis);
     s.root2.unmount(); s.el.remove();
   }

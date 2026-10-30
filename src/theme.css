@@ -10029,6 +10029,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 }
 .flow-pill { transition: background-color 200ms var(--flow-ease), color 200ms var(--flow-ease); }
 .flow-shift-target { transition: transform 420ms var(--flow-ease), opacity 160ms var(--flow-ease); }
+/* §14.5：窗口拖动中正文随宽度逐帧跟随，不要再叠 420ms 滑行（否则永远追不上） */
+body[data-flow-resizing="1"] .flow-shift-target { transition: none; }
 .reader-flow-gutter { flex: 0 0 auto; flex-basis: 0; min-width: 0; }
 
 /* ---------- HTML 标签 ---------- */

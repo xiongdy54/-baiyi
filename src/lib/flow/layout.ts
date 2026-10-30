@@ -61,13 +61,19 @@ export function planColumn(env: FlowEnv, prev: FlowPlan | null): FlowPlan {
     return { mode, shift, reserve, barX, labelX, labelW: lw, right: labelX + lw + FLOW.PAD_R };
   };
   const tryLw = (lw: number, tag: FlowMode): FlowPlan | null => {
+    const bw = blockW(lw);
     const room = vp.right - env.textRight;
-    const need = FLOW.BRAID_MIN + blockW(lw) - room;
-    if (need <= 0) {
+    const textW = Math.max(0, env.textRight - env.textLeft);
+    // §14.5：正文 + 彩带 + 节点列三件一体、整体居中（居中位移只与块宽有关，与窗口宽无关）
+    const total = textW + FLOW.BRAID_PREF + bw;
+    const idealLeft = vp.left + (vw - total) / 2;
+    let s = total <= vw - 8 ? Math.max(0, ceilTo(env.textLeft - idealLeft, FLOW.SHIFT_STEP)) : Infinity;
+    // 居中放不下（或推不动）→ 退化为「够放就行」（BRAID_MIN，保留 64–96 弹性）
+    if (!Number.isFinite(s) || s > maxShift) s = ceilTo(FLOW.BRAID_MIN + bw - room, FLOW.SHIFT_STEP);
+    if (s <= 0) {
       const p = make(tag === "compact" ? "compact" : "inside", 0, 0, lw);
       return p.right > vp.right - 4 ? null : p; // §12.1 硬约束
     }
-    let s = ceilTo(need, FLOW.SHIFT_STEP);
     if (prev && prev.reserve === 0 && prev.shift >= s && prev.shift - s < FLOW.SHIFT_HYST) s = prev.shift;
     if (s <= maxShift) {
       const p = make(tag === "compact" ? "compact" : "shift", s, 0, lw);

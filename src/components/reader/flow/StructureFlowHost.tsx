@@ -126,6 +126,19 @@ function resolveColors(el: HTMLElement | null): FlowColors {
   }
 }
 
+
+/** §14.5：只改了 transform 时，把几何按位移差解析平移（不重采 iframe 几何） */
+function shiftOffsets(g: ReaderStructureGeometry, offs: Record<number, { left: number; top: number }> | null, dx: number) {
+  const out: Record<number, { left: number; top: number }> = {};
+  const docs = new Set<number>();
+  for (const b of g.boxes) docs.add(b.doc ?? 0);
+  for (const d of docs) {
+    const o = offs?.[d];
+    out[d] = { left: (o?.left ?? 0) - dx, top: o?.top ?? 0 };
+  }
+  return out;
+}
+
 const EMPTY_LAYOUT = (): PatternLayout => ({ items: [], ports: [], prims: [], expressed: [], leafIds: [], height: 0, readingY: null });
 
 export default function StructureFlowHost(props: StructureFlowHostProps) {
@@ -152,12 +165,16 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   const [cmpPage, setCmpPage] = useState(0);
   const [animKey, setAnimKey] = useState(0);
   const [colorTick, setColorTick] = useState(0);
-  const baseTextRef = useRef<{ left: number; right: number } | null>(null);
+  /** §14.5：未预留时量到的正文档宽（px）；版心位置每次按当前视口现算 */
+  const baseWRef = useRef<number | null>(null);
+  /** §14.5：上次采样时的平移量——之后只改 transform 时，几何按差值解析校正 */
+  const geoShiftRef = useRef(0);
   const sigRef = useRef("");
   const ticketRef = useRef(0);
   const openTimer = useRef<number | null>(null);
   const motionTimer = useRef<number | null>(null);
   const turnTimer = useRef<number | null>(null);
+  const shiftTimer = useRef<number | null>(null);
   const relayoutCleanup = useRef<(() => void) | null>(null);
   const currentShift = useRef(0);
   const currentReserve = useRef(0);
@@ -199,13 +216,16 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     return { left: vr.left, top: vr.top, right: vr.right, bottom: vr.bottom };
   }, [viewportEl]);
 
+  /** §14.5：版心＝「未预留时量到的宽度」在【当前】视口里居中——resize / 平移 / 预留都不再互相污染 */
+  const baseTextNow = useCallback((vp: FlowEnv["viewport"]) => {
+    const vw = Math.max(1, vp.right - vp.left);
+    const w = Math.min(baseWRef.current ?? vw * 0.6, vw - 8);
+    return { left: vp.left + (vw - w) / 2, right: vp.left + (vw + w) / 2 };
+  }, []);
   const syncPlan = useCallback(() => {
     if (!viewportEl) return;
     const vp = readViewport();
-    const w = vp.right - vp.left;
-    const gText = geoRef.current?.text;
-    const shiftNow = planRef.current?.shift ?? 0;
-    const base = baseTextRef.current ?? (gText ? { left: gText.left + shiftNow, right: gText.right + shiftNow } : { left: vp.left + w * 0.2, right: vp.right - w * 0.2 });
+    const base = baseTextNow(vp);
     const prev = planRef.current;
     const next = planColumn({ on: true, viewport: vp, textLeft: base.left, textRight: base.right }, prev);
     // 预留保持（§5.3）：决策用 baseText（未预留版心）；reserve 方案的 barX 再用重排后的实际 textRight 修正
@@ -248,10 +268,9 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       sigRef.current = sig;
       geoRef.current = g;
       setGeo(g);
-      // baseText＝最近一次「未平移、未预留」时量到的版心（首次采样即使先前用兜底版心得到过 reserve 也要补上）
-      if (g.text && (baseTextRef.current == null || ((planRef.current?.shift ?? 0) === 0 && (planRef.current?.reserve ?? 0) === 0))) {
-        baseTextRef.current = { left: g.text.left, right: g.text.right };
-      }
+      // §14.5：只在「未预留」时刷新版宽（平移是纯 transform，宽度不受影响；预留会重排，宽度不是版心的真值）
+      if (g.text && (planRef.current?.reserve ?? 0) === 0) baseWRef.current = Math.max(0, g.text.right - g.text.left);
+      geoShiftRef.current = planRef.current?.shift ?? 0;
       return g;
     },
     [viewportEl, kernel, smooth],
@@ -261,7 +280,8 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   const paintFrame = useCallback(() => {
     const base = geoRef.current, F = frameRef.current;
     if (!smooth || !base || !F || !kernel?.getFrameOffsets) return;
-    const g = geometryAt(base, kernel.getFrameOffsets());
+    const dx = (planRef.current?.shift ?? 0) - geoShiftRef.current;
+    const g = geometryAt(base, shiftOffsets(base, kernel.getFrameOffsets(), dx));
     const shapes = buildShapes(g, F.lay, F.dy, F.opts).filter((s) => s.ribbon);
     const sig = shapes.map((s) => s.id).join("|");
     if (sig !== shapeSigRef.current) {
@@ -416,7 +436,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     prevDocRef.current = documentId;
     if (prev == null || prev === documentId) return; // 首次挂载由开场流程负责，不在这里重来
     ticketRef.current++;
-    baseTextRef.current = null;
+    baseWRef.current = null;
     sigRef.current = "";
     geoRef.current = null;
     setGeo(null);
@@ -440,7 +460,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
 
   useEffect(() => () => {
     ticketRef.current++;
-    for (const t of [openTimer.current, motionTimer.current, turnTimer.current]) if (t != null) window.clearTimeout(t);
+    for (const t of [openTimer.current, motionTimer.current, turnTimer.current, shiftTimer.current]) if (t != null) window.clearTimeout(t);
     relayoutCleanup.current?.();
   }, []);
 
@@ -538,14 +558,24 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     };
   }, [stage, kernel, viewportEl, scrolled, smooth, beginTrack, beginTurn, sampleGeometry, syncPlan, bump]);
 
-  // 窗口缩放：停手后重决策（缩放期间不改 mode）
+  // §14.5：缩放逐帧跟手——拖动中只读容器 + 纯计算（不重采 iframe 几何、不重排），停手后才采样与评估预留
+  const resizingRef = useRef(false);
   useEffect(() => {
     if (!viewportEl) return;
-    let timer: number | null = null;
+    let idle: number | null = null;
+    let raf = 0;
+    const doc = viewportEl.ownerDocument;
     const onResize = () => {
-      if (timer != null) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        timer = null;
+      resizingRef.current = true;
+      doc.body.setAttribute("data-flow-resizing", "1");
+      if (raf === 0) raf = requestAnimationFrame(() => { raf = 0; syncPlan(); });
+      if (idle != null) window.clearTimeout(idle);
+      idle = window.setTimeout(() => {
+        idle = null;
+        resizingRef.current = false;
+        doc.body.removeAttribute("data-flow-resizing");
+        const p = planRef.current;
+        if (p && p.reserve !== currentReserve.current) void changeReserve(p.reserve);
         sampleGeometry(true);
         syncPlan();
         bump();
@@ -555,32 +585,33 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     ro?.observe(viewportEl);
     window.addEventListener("resize", onResize);
     return () => {
-      if (timer != null) window.clearTimeout(timer);
+      if (idle != null) window.clearTimeout(idle);
+      if (raf) cancelAnimationFrame(raf);
+      doc.body.removeAttribute("data-flow-resizing");
       ro?.disconnect();
       window.removeEventListener("resize", onResize);
     };
-  }, [viewportEl, sampleGeometry, syncPlan, bump]);
+  }, [viewportEl, sampleGeometry, syncPlan, bump, changeReserve]);
 
   // 排布生效：打开完成后平移 / 预留的变化走 §8.8 编排
   useEffect(() => {
     if (stage !== "open" || !plan) return;
     if (plan.reserve !== currentReserve.current) {
+      if (resizingRef.current) return; // 拖动中不重排；停手的 idle 会收口
       void changeReserve(plan.reserve);
       return;
     }
     if (plan.shift !== currentShift.current) {
-      const delta = Math.abs(plan.shift - currentShift.current);
-      applyShift(plan.shift);
-      if (delta > 0) {
-        if (shiftEl) shiftEl.style.opacity = "0";
-        window.setTimeout(() => {
-          sampleGeometry(true);
-          syncPlan();
-          if (shiftEl) shiftEl.style.opacity = "1";
-        }, 460);
-      }
+      applyShift(plan.shift); // 纯 transform：不再闪 opacity（几何已按位移差解析校正）
+      if (shiftTimer.current != null) window.clearTimeout(shiftTimer.current);
+      shiftTimer.current = window.setTimeout(() => {
+        shiftTimer.current = null;
+        if (resizingRef.current) return;
+        sampleGeometry(true);
+        syncPlan();
+      }, 460);
     }
-  }, [stage, plan, changeReserve, applyShift, shiftEl, sampleGeometry, syncPlan]);
+  }, [stage, plan, changeReserve, applyShift, sampleGeometry, syncPlan]);
 
   // ---------------------------------------------------------------- 组切换动效
   useEffect(() => {
@@ -773,7 +804,9 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     if (!base) return null;
     const geoNow = geoRef.current;
     const F = frameRef.current;
-    const gNow = geoNow && smooth && kernel?.getFrameOffsets ? geometryAt(geoNow, kernel.getFrameOffsets()) : geoNow;
+    const dx = (plan?.shift ?? 0) - geoShiftRef.current;
+    const offs = geoNow ? (smooth && kernel?.getFrameOffsets ? kernel.getFrameOffsets() : null) : null;
+    const gNow = geoNow ? geometryAt(geoNow, shiftOffsets(geoNow, offs, dx)) : null;
     const shapes = gNow && F && base.layout.items.length ? buildShapes(gNow, F.lay, F.dy, F.opts) : [];
     shapeSigRef.current = shapes.filter((s) => s.ribbon).map((s) => s.id).join("|");
     return { ...base, shapes };
