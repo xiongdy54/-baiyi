@@ -150,9 +150,17 @@ console.log("---- buildShapes ----");
   check("流动落点依次相接、末块 t1=port.y1", close(ribbon[0].t1, ribbon[1].t0) && close(ribbon[1].t1, 150), ribbon.map((s) => [s.t0, s.t1]));
   const bShape = shapes.find((s) => s.nodeId === "b");
   check("非最右栏只有高亮矩形（ribbon=false）+ 只画可见带（L = xs − HL_FADE_W）", !!bShape && bShape.ribbon === false && close(bShape.L, Math.max(94, 506 - L.FLOW.HL_FADE_W)) && close(bShape.xs, 506), bShape);
+  // §16.2：shape id 不得含逐帧变化的 top——同一节点 / 栏内按序号编号，滚动时 id 才能稳定
+  check("非最右栏 shape id = node@column#k（不含 top）", !!bShape && bShape.id === "b@0#0", bShape && bShape.id);
+  const moved = L.buildShapes({ ...geo, boxes: geo.boxes.map((b) => ({ ...b, top: b.top + 7, bottom: b.bottom + 7 })) }, lay, 0, { focusId: null, hoverId: null, readingId: "a", colorOf: () => "#f00" });
+  check("段落整体位移后 id 不变（不随 top 抖动）", moved.map((s) => s.id).join("|") === shapes.map((s) => s.id).join("|"), moved.map((s) => s.id));
   const stub = shapes.find((s) => s.nodeId === "c");
   check("看不见的近邻成员出 stub（侧＝below，零宽矩形段）", !!stub && stub.stub === "below" && close(stub.L, stub.xs) && close(stub.s0, 900), stub);
   check("stub 落在 port 中段", !!stub && close(stub.t0, 312) && close(stub.t1, 328), stub && [stub.t0, stub.t1]);
+  // §16.5：shiftOf 把条目实际位置差补到彩带端点上（所有 ribbon 的 t0/t1 一起 +10）
+  const shifted = L.buildShapes(geo, lay, 0, { focusId: null, hoverId: null, readingId: "a", colorOf: (id) => (id === "b" ? "#00f" : "#f00"), shiftOf: () => 10 });
+  const ribbonShifted = shifted.filter((s) => s.nodeId === "a" && s.ribbon);
+  check("shiftOf：a 的两条 ribbon 的 t0/t1 各 +10", ribbonShifted.length === ribbon.length && ribbonShifted.every((s, i) => close(s.t0, ribbon[i].t0 + 10) && close(s.t1, ribbon[i].t1 + 10)), ribbonShifted.map((s) => [s.t0, s.t1]));
 }
 
 // ---------------------------------------------------------------- §10-6 buildStrands + §12.2 hoverSet / §12.3.2 extra
@@ -382,7 +390,9 @@ console.log("---- layoutPeek ----");
     moreAbove: 0, moreBelow: 0, readingId: null, readingBlock: null, selectedId: null, expandedId: null, inlineH: 0, maxLines0: 2, canBack: false, availH: 800, maxW: 500, cmpPage: 0,
   };
   const p = L.layoutPeek(ctx, "G", "below");
-  check("预览：标题 + 成员 + 分隔线；成员标记 peek", p.items.filter((i) => i.peek).length === 3 && p.prims.some((x) => x.id === "peekline:G"), p.items.map((i) => i.id));
+  check("预览：标题 + 成员 + 分隔线；成员标记 peek", p.items.filter((i) => i.peek).length === 3 && p.prims.some((x) => x.id === "peek:line:G"), p.items.map((i) => i.id));
+  // §16.2（R4）：预览产出的所有图元 id 都以 peek: 开头（与主体隔离，不复用 DOM）
+  check("预览图元 id 全部带 peek: 前缀", p.prims.every((x) => x.id.startsWith("peek:")), p.prims.map((x) => x.id));
   check("预览：成员各有 port（流带落在细条上）", p.ports.length === 2 && p.leafIds.join() === "k1,k2");
   check("预览标题 meta=下一部分", p.items[0].meta === "下一部分", p.items[0].meta);
 }

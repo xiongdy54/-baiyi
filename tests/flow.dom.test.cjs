@@ -117,6 +117,7 @@ const relHandlers = new Set();
 const gotos = [];
 let probeDist = [0, 0, 0, 0]; // 四个注意力点落在哪些段落（0 基）
 let currentLoc = { cfi: "epubcfi(/6/4!/4/2)" };
+let multiCol = false; // §16.7-8：多栏几何（boxes 留在 column 0，非最右栏 → 走 @column#k 的 id）
 const kernel = {
   getTOC: () => [{ label: "第一章 论证", href: UNIT }],
   getSectionAnchors: () => [{ anchor: UNIT }],
@@ -135,7 +136,8 @@ const kernel = {
       doc: 0, cTop: 140 + i * 30, cBottom: 165 + i * 30, cLeft: left, cRight: right,
     }));
     void opts;
-    return { seq: ++geoSeq, viewport: VIEWPORT, columns: [{ left, right }], boxes, text: { left, right } };
+    const columns = multiCol ? [{ left, right }, { left: right + 10, right: right + 60 }] : [{ left, right }];
+    return { seq: ++geoSeq, viewport: VIEWPORT, columns, boxes, text: { left, right } };
   },
   onContentScroll: (cb) => { scrollCb = cb; return () => { if (scrollCb === cb) scrollCb = null; }; },
   getFrameOffsets: () => ({ 0: { left: 0, top: offY } }),
@@ -253,10 +255,19 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
       const head = item("peek:n:t2");
       return !!head && /下一部分/.test(head.textContent || "");
     }, 4000));
+    // §16.2（R4）：预览产出的条带带 peek: 前缀（与主体隔离）
+    check("预览条带 id 带 peek: 前缀", $$(".flow-svg [data-prim-id]").some((e) => (e.getAttribute("data-prim-id") || "").startsWith("peek:bar:")), $$(".flow-svg [data-prim-id]").map((e) => e.getAttribute("data-prim-id")).slice(0, 8));
     await sleep(500);
     check("预览出现时列主体不平移", $(".flow-items").style.transform === t0, { before: t0, after: $(".flow-items").style.transform });
     probeDist = [0, 0, 0, 0];
     relocate();
+    // §16.2（R1）：退场条目的行文字不再瞬间透明（外层 .flow-item 负责淡出）
+    const sawExitLine = await until(() => {
+      const ex = $(".flow-item.is-exit");
+      const ln = ex && ex.querySelector(".flow-line");
+      return !!ln && Number(ln.style.opacity) > 0;
+    }, 800, 10);
+    check("退场条目的 .flow-line inline opacity = tone/100（不为 0）", sawExitLine, $$(".flow-item.is-exit").map((e) => [e.getAttribute("data-flow-item"), e.querySelector(".flow-line") && e.querySelector(".flow-line").style.opacity]));
     await sleep(900);
     check("预览消失时列主体也不平移", $(".flow-items").style.transform === t0, { before: t0, after: $(".flow-items").style.transform });
 
@@ -424,6 +435,73 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     const bars = $$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id").slice(4));
     const nodes = new Set($$(".flow-item[data-kind='node'], .flow-item[data-kind='kid']").map((e) => e.getAttribute("data-flow-item").slice(2)));
     check("换章后：每个色条都有对应条目（无浮空条）", bars.length > 0 && bars.every((b) => nodes.has(b)), { bars, nodes: [...nodes] });
+  }
+
+  console.log("---- §16.1 一代一层：两代并存 / defs 隔离 / 同步绘制 ----");
+  {
+    const genL = () => $$(".flow-layer > .flow-gen");
+    const genB = () => $$("svg.flow-blend > g.flow-gen");
+    check("稳定态：上层与混合层各只有一代", await until(() => genL().length === 1 && genB().length === 1, 3000), { layer: genL().length, blend: genB().length });
+
+    // §16.7-1：每个图元在文档里只出现一次（R5 两个图元层按 layer 过滤）
+    const prims = $$(".flow-svg [data-prim-id]").map((e) => e.getAttribute("data-prim-id"));
+    const dupPrims = prims.filter((id, i) => prims.indexOf(id) !== i);
+    check("每个图元在文档里只出现一次（R5）", prims.length > 0 && dupPrims.length === 0, dupPrims.slice(0, 6));
+
+    // §16.7-6：非 open/close/turn 的 motion 下，零件无延迟、无位移
+    await sleep(500);
+    const its = $$(".flow-item");
+    check("非编排 motion：--flow-delay 全为 0ms", its.length > 0 && its.every((e) => e.style.getPropertyValue("--flow-delay") === "0ms"), its.map((e) => e.style.getPropertyValue("--flow-delay")).slice(0, 6));
+    check("非编排 motion：条目 transform 无额外位移尾项", its.every((e) => ((e.style.transform || "").match(/translate\(/g) || []).length <= 1), its.map((e) => e.style.transform).slice(0, 4));
+
+    // 切回第一章 t1 → 换代
+    probeDist = [0, 0, 0, 0];
+    relocate();
+    const sawTwo = await until(() => genL().length === 2 && genB().length === 2, 4000, 10);
+    check("换代瞬间：上层与混合层各 2 代", sawTwo, { layer: genL().length, blend: genB().length });
+    if (sawTwo) {
+      const exL = genL().filter((e) => e.getAttribute("data-phase") === "exit");
+      const exB = genB().filter((e) => e.getAttribute("data-phase") === "exit");
+      check("旧代带 data-phase=exit（两层一致）", exL.length === 1 && exB.length === 1, { exitLayer: exL.length, exitBlend: exB.length });
+
+      // §16.7-5：两代并存时文档内所有 [id] 唯一（defs / gradient / marker 全部带代前缀）
+      const ids = $$("[id]").map((e) => e.id);
+      const dupIds = ids.filter((id, i) => ids.indexOf(id) !== i);
+      check("两代并存时文档内所有 [id] 唯一（16.1.5）", ids.length > 0 && dupIds.length === 0, dupIds.slice(0, 8));
+
+      // §16.7-7：paintFrame 对两代都写 d
+      const dOfGen = (root) => Array.from(root.querySelectorAll("path.flow-shape")).map((p) => p.getAttribute("d"));
+      const d0 = genB().map(dOfGen);
+      offY += 24;
+      if (scrollCb) scrollCb();
+      const d1 = genB().map(dOfGen);
+      // stub 的几何只来自视口上下缘（不随章节偏移变化），所以每代只要求「至少一条 path 被写过新 d」
+      const moved = d0.map((list, gi) => list.length > 0 && !!d1[gi] && list.some((d, i) => d1[gi][i] !== d));
+      check("逐帧绘制覆盖两代：两代的彩带 d 都随滚动更新", d0.length === 2 && moved.length === 2 && moved.every(Boolean), { gens: d0.length, moved, counts: d0.map((a) => a.length), keys: genB().map((g) => g.getAttribute("data-gen")) });
+      offY = 0;
+      if (scrollCb) scrollCb();
+
+      await sleep(180);
+      check("旧代 140ms 后卸载（两处各剩 1 代）", genL().length === 1 && genB().length === 1, { layer: genL().length, blend: genB().length });
+    }
+
+    // §16.7-8：多栏版式连续 10 帧，shape id 不随 top 变化（否则每帧 flushSync + 每帧进出场）
+    multiCol = true;
+    relocate(); // 平滑模式：relocate 强制重采几何（columns 变为两栏，boxes 仍在 column 0）
+    await sleep(320);
+    const gradIds = () => new Set($$(".flow-blend linearGradient").map((g) => g.id));
+    const gid0 = gradIds();
+    for (let i = 1; i <= 10; i++) {
+      offY = i * 3;
+      if (scrollCb) scrollCb();
+    }
+    const gid1 = gradIds();
+    const added = [...gid1].filter((id) => !gid0.has(id));
+    check("多栏几何连续 10 帧：彩带 id 集合不增长（shape id 不含 top）", gid0.size > 0 && added.length === 0, { before: gid0.size, after: gid1.size, added: added.slice(0, 5) });
+    multiCol = false;
+    offY = 0;
+    relocate();
+    await sleep(320);
   }
 
   console.log("---- 关闭 ----");

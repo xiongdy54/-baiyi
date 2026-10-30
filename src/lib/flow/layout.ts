@@ -37,7 +37,7 @@ export const FLOW = {
   TL_DOT_R: 5, TL_DOT_R_READING: 6.5, TL_TIME_FS: 11, TL_TIME_LH: 15, TL_BREAK_K: 4,
   CH_R: 9,
   CMP_MAX: 4, CMP_GAP: 10, CMP_KIDS: 5,
-  TURN_RESAMPLE_MS: 220, POLL_PAGED_MS: 200, TRACK_IDLE_MS: 160, RESIZE_IDLE_MS: 200, RELAYOUT_WAIT_MS: 280,
+  TURN_RESAMPLE_MS: 220, POLL_PAGED_MS: 200, TRACK_IDLE_MS: 240, RESIZE_IDLE_MS: 200, RELAYOUT_WAIT_MS: 280, // §16.4：160→240（滚轮两格间隔常在 150–220ms）
   // v3.1（§12.2 泳道 / 跨度条；§12.3.2 对照表）
   LANE_DX: 6, LANES: 4, GROUP_GAP: 10, SPAN_W: 2, SPAN_A: 0.35, NOTCH_W: 7, NOTCH_H: 2,
   CMP_NAME_W: 76, CMP_CELL_MIN: 84, CMP_CELL_MAX: 132, CMP_CELL_LINES: 4, CMP_HEAD_H: 22, CMP_ROW_PAD: 6, CMP_MAX_W: 540,
@@ -1032,9 +1032,14 @@ export function buildShapes(
     hoverSet?: Set<string>;
     /** v3.1 §12.3.2：悬停单元格（不在 ports 里）只出矩形段，不额外出流带 */
     extra?: { nodeId: string; color: string }[];
+    /** v3.5 §16.5：条目实际位置与布局位置的中线差（CSS 几何过渡途中，彩带尖端跟着条目走） */
+    shiftOf?: (nodeId: string) => number;
   },
 ): FlowShape[] {
-  const ports = new Map(lay.ports.map((p) => [p.nodeId, { ...p, y0: p.y0 + dy, y1: p.y1 + dy }] as const));
+  const ports = new Map(lay.ports.map((p) => {
+    const k = o.shiftOf?.(p.nodeId) ?? 0;
+    return [p.nodeId, { ...p, y0: p.y0 + dy + k, y1: p.y1 + dy + k }] as const;
+  }));
   const extraSet = new Set((o.extra ?? []).map((e) => e.nodeId));
   const extraColor = new Map((o.extra ?? []).map((e) => [e.nodeId, e.color] as const));
   const rightCol = geo.columns.length - 1;
@@ -1050,14 +1055,19 @@ export function buildShapes(
     l.push(s);
     byNode.set(s.nodeId, l);
   }
+  // §16.2：id 不得含逐帧变化量（top）——否则多栏版式滚动时每帧都换 id → 每帧 flushSync + 每帧进出场
+  const colSeq = new Map<string, number>();
   for (const s of spans)
-    if (s.column !== rightCol || extraSet.has(s.nodeId))
+    if (s.column !== rightCol || extraSet.has(s.nodeId)) {
+      const k = colSeq.get(`${s.nodeId}@${s.column}`) ?? 0;
+      colSeq.set(`${s.nodeId}@${s.column}`, k + 1);
       out.push({
         // §15.6：只画「可见带」——左侧全透明部分不进路径（稳态观感不变，混合层每帧面积降一个量级）
-        id: `${s.nodeId}@${s.column}:${Math.round(s.top)}`, nodeId: s.nodeId, color: extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId),
+        id: `${s.nodeId}@${s.column}#${k}`, nodeId: s.nodeId, color: extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId),
         L: Math.max(s.left, s.right - FLOW.HL_FADE_W), xs: s.right, s0: s.top, s1: s.bottom,
         x1: s.right, t0: s.top, t1: s.bottom, tone: tone(s.nodeId), stub: "", ribbon: false, order: order++,
       });
+    }
   for (const p of lay.ports) {
     const list = byNode.get(p.nodeId);
     if (!list) continue;
@@ -1300,7 +1310,8 @@ export function layoutPeek(c: LayoutCtx, groupId: string, side: "above" | "below
   const show = kids.slice(0, Math.max(0, maxRows));
   let y = 0;
   // 分隔：一条 24px 发丝线 + 下一部分标题（11px fg 45%）
-  out.prims.push({ k: "rect", id: `peekline:${groupId}`, x: c.plan.labelX, y: y + 6, w: 24, h: 1, fill: c.colors.fg, opacity: 0.25, layer: "under" });
+  // §16.2（R4）：预览产出的所有图元都带 peek: 前缀，与主体同 id 时不复用 DOM
+  out.prims.push({ k: "rect", id: `peek:line:${groupId}`, x: c.plan.labelX, y: y + 6, w: 24, h: 1, fill: c.colors.fg, opacity: 0.25, layer: "under" });
   out.items.push(
     item({
       // §15.5：预览行用 peek: 前缀，避免与主体行的 n:${id} 撞 id（撞了会互相顶替：条留着、字没了）
@@ -1320,7 +1331,7 @@ export function layoutPeek(c: LayoutCtx, groupId: string, side: "above" | "below
       }),
     );
     const bx = c.plan.barX + lane * FLOW.LANE_DX;
-    out.prims.push({ k: "rect", id: `bar:${id}`, x: bx, y: y + 2, w: 3, h: st.lh - 4, rx: 1.5, fill: color, opacity: 0.7, layer: "over" });
+    out.prims.push({ k: "rect", id: `peek:bar:${id}`, x: bx, y: y + 2, w: 3, h: st.lh - 4, rx: 1.5, fill: color, opacity: 0.7, layer: "over" });
     out.ports.push({ nodeId: id, x: bx, y0: y + 2, y1: y + st.lh - 2, color });
     out.leafIds.push(id);
     y += PEEK.ROW_H;

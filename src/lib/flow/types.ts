@@ -181,6 +181,10 @@ export interface FlowScene {
   mode: FlowMode;
   motion: FlowMotion;
   tracking: boolean;
+  /** v3.5 §16.1：代键＝当前主体组 cut ?? "none"。genKey 不变＝同一代（代内变化走零件级进出场） */
+  genKey: string;
+  /** v3.5 §16.1：换组方向（取 data.switchInfo?.dir ?? "down"，仅供将来使用，本轮渲染不用） */
+  switchDir: "down" | "up";
   /** §8.8：正文平移中——高亮先隐去，落定后从节点伸回 */
   shifting: boolean;
   plan: FlowPlan;
