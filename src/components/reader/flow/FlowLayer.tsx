@@ -69,7 +69,7 @@ function exitPrim(p: FlowPrim): FlowPrim {
 
 export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerProps) {
   const T = useT();
-  const { colors, plan, layout, shapes, strands, hoverId, dy, motion, tracking, armed, inline, panel } = scene;
+  const { colors, plan, layout, shapes, strands, hoverId, dy, motion, tracking, armed, inline, panel, shifting } = scene;
   const motionOff = motionPreference() === "off";
   const rootRef = useRef<HTMLDivElement>(null);
   /** §13.4.3：颜色兜底——解析不了就退色调色板第一色，绝不把 color-mix() 写进 SVG */
@@ -77,7 +77,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
   const ci = colorIndexer(scene);
 
   // 图元 / 关系线 / 标签的进出场保留（§5.8）；§15.3：四类统一 160ms，避免零件逐个延迟退场
-  const EXIT_MS = 160;
+  const EXIT_MS = 180; // §8.6：旧件退场 180
   const prims = usePresence(scene.mode === "whisper" ? layout.prims.filter((p) => p.id.startsWith("bar:")) : layout.prims, EXIT_MS);
   const strandsP = usePresence(strands, EXIT_MS);
   const shapesP = usePresence(shapes, EXIT_MS);
@@ -142,7 +142,14 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
         data-tracking={tracking ? "1" : undefined}
         data-smooth={scene.smooth ? "1" : undefined}
         data-motion={motionOff ? "off" : undefined}
-        style={{ position: "fixed", inset: 0, width: "100vw", height: "100vh", pointerEvents: "none", zIndex: 23, mixBlendMode: colors.dark ? "screen" : "multiply", overflow: "visible" }}
+        data-flow-motion={motion}
+        style={{
+          position: "fixed", inset: 0, width: "100vw", height: "100vh", pointerEvents: "none", zIndex: 23,
+          mixBlendMode: colors.dark ? "screen" : "multiply", overflow: "visible",
+          // §8.8：正文滑行时先隐去高亮，落定后从节点伸回
+          opacity: shifting ? 0 : 1,
+          transition: motionOff ? "none" : "opacity 120ms var(--flow-ease)",
+        }}
       >
         <defs>
           {/* §15.1：矩形段与颈部共用一条路径，渐变四停点：左端透明 → 接缝前 HL_FADE_W 内起坡 → 接缝 aHL → 节点端 aEnd */}

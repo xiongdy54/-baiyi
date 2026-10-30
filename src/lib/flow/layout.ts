@@ -1048,7 +1048,9 @@ export function buildShapes(
   for (const s of spans)
     if (s.column !== rightCol || extraSet.has(s.nodeId))
       out.push({
-        id: `${s.nodeId}@${s.column}:${Math.round(s.top)}`, nodeId: s.nodeId, color: extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId), L: s.left, xs: s.right, s0: s.top, s1: s.bottom,
+        // §15.6：只画「可见带」——左侧全透明部分不进路径（稳态观感不变，混合层每帧面积降一个量级）
+        id: `${s.nodeId}@${s.column}:${Math.round(s.top)}`, nodeId: s.nodeId, color: extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId),
+        L: Math.max(s.left, s.right - FLOW.HL_FADE_W), xs: s.right, s0: s.top, s1: s.bottom,
         x1: s.right, t0: s.top, t1: s.bottom, tone: tone(s.nodeId), stub: "", ribbon: false, order: order++,
       });
   for (const p of lay.ports) {
@@ -1063,7 +1065,7 @@ export function buildShapes(
     list.forEach((s, i) => {
       const h = raw[i] * kk;
       out.push({
-        id: `${p.nodeId}#${i}`, nodeId: p.nodeId, color: port.color, L: s.left, xs: s.right, s0: s.top, s1: s.bottom,
+        id: `${p.nodeId}#${i}`, nodeId: p.nodeId, color: port.color, L: Math.max(s.left, s.right - FLOW.HL_FADE_W), xs: s.right, s0: s.top, s1: s.bottom,
         x1: port.x, t0: t, t1: t + h, tone: tone(p.nodeId), stub: "", ribbon: true, order: order++,
       });
       t += h;

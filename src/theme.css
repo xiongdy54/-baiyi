@@ -10005,6 +10005,11 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .flow-blend[data-tracking="1"] .flow-shape { transition: none; }
 /* §13.3：平滑滚动模式下颈部逐帧直接写 d，不再走 CSS 过渡 */
 .flow-blend[data-smooth="1"][data-tracking="1"] .flow-shape { transition: none; }
+/* §8.1 / §8.2：开合的高亮扫过时长按设计稿分开（打开 640 ease-out、关闭 360 ease-in） */
+.flow-blend[data-flow-motion="open"] .flow-shape { transition: d 640ms var(--flow-ease-out), opacity 160ms var(--flow-ease); }
+.flow-blend[data-flow-motion="close"] .flow-shape { transition: d 360ms var(--flow-ease-in), opacity 160ms var(--flow-ease); }
+.flow-blend[data-flow-motion="regroup-down"] .flow-shape,
+.flow-blend[data-flow-motion="regroup-up"] .flow-shape { transition: d 460ms var(--flow-ease-out), opacity 160ms var(--flow-ease); }
 .flow-col { transition: transform 420ms var(--flow-ease); }
 .flow-items { transition: transform 420ms var(--flow-ease); }
 .flow-svg rect,

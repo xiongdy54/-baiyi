@@ -179,6 +179,8 @@ export interface FlowScene {
   mode: FlowMode;
   motion: FlowMotion;
   tracking: boolean;
+  /** §8.8：正文平移中——高亮先隐去，落定后从节点伸回 */
+  shifting: boolean;
   plan: FlowPlan;
   viewport: FlowEnv["viewport"];
   colors: FlowColors;

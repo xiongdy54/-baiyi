@@ -149,7 +149,7 @@ console.log("---- buildShapes ----");
   check("同节点相邻（间距 20）合并为一块：三个段落 → 两个 ribbon", ribbon.length === 2, ribbon.map((s) => [s.s0, s.s1]));
   check("流动落点依次相接、末块 t1=port.y1", close(ribbon[0].t1, ribbon[1].t0) && close(ribbon[1].t1, 150), ribbon.map((s) => [s.t0, s.t1]));
   const bShape = shapes.find((s) => s.nodeId === "b");
-  check("非最右栏只有高亮矩形（ribbon=false）", !!bShape && bShape.ribbon === false && close(bShape.L, 94) && close(bShape.xs, 506), bShape);
+  check("非最右栏只有高亮矩形（ribbon=false）+ 只画可见带（L = xs − HL_FADE_W）", !!bShape && bShape.ribbon === false && close(bShape.L, Math.max(94, 506 - L.FLOW.HL_FADE_W)) && close(bShape.xs, 506), bShape);
   const stub = shapes.find((s) => s.nodeId === "c");
   check("看不见的近邻成员出 stub（侧＝below，零宽矩形段）", !!stub && stub.stub === "below" && close(stub.L, stub.xs) && close(stub.s0, 900), stub);
   check("stub 落在 port 中段", !!stub && close(stub.t0, 312) && close(stub.t1, 328), stub && [stub.t0, stub.t1]);

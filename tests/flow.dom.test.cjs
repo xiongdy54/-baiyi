@@ -234,7 +234,7 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     const y1 = yOf(d1);
     check("同一调用栈里整条流带（含矩形段）随滚动同步（同元素、首点 y 差 = 30）", !!el && same && d1 !== d0 && Math.abs(y0 - y1 - 30) < 1, { y0, y1, d0, d1 });
     const mx = /^M(-?[\d.]+)[^,]*,[^H]*H(-?[\d.]+)/.exec(d0 || "");
-    check("§15.1 路径里含矩形段（首条 H 边 ≈ 段落宽度，不再拆成两个元素）", !!mx && Number(mx[2]) - Number(mx[1]) > 200, { d: (d0 || "").slice(0, 90), mx });
+    check("§15.1 路径里含矩形段，且只画可见带（首条 H 边 ≈ HL_FADE_W）", !!mx && Math.abs(Number(mx[2]) - Number(mx[1]) - 140) <= 4, { d: (d0 || "").slice(0, 90), mx });
 
     scrollBy(-60);
     check("滚动回调不再向正文下发任何绘制指令（矩形与颈部同源）", paintCalls.length === 0, paintCalls.length);

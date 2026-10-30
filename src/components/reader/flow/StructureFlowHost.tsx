@@ -156,6 +156,8 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   armedRef.current = armed;
   const [tracking, setTracking] = useState(false);
   const trackingRef = useRef(false);
+  /** §8.8：正文平移期间高亮隐去（并阻止它拖在移动的文字后面） */
+  const [shifting, setShifting] = useState(false);
   const [plan, setPlan] = useState<FlowPlan | null>(null);
   const planRef = useRef<FlowPlan | null>(null);
   const [geo, setGeo] = useState<ReaderStructureGeometry | null>(null);
@@ -605,16 +607,20 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       return;
     }
     if (plan.shift !== currentShift.current) {
-      applyShift(plan.shift); // 纯 transform：不再闪 opacity（几何已按位移差解析校正）
+      applyShift(plan.shift);
       if (shiftTimer.current != null) window.clearTimeout(shiftTimer.current);
+      // §8.8：正文滑行期间高亮先隐去，落定后再从节点伸回——否则流带会拖在移动的文字后面
+      if (!resizingRef.current) setShifting(true);
       shiftTimer.current = window.setTimeout(() => {
         shiftTimer.current = null;
         if (resizingRef.current) return;
         sampleGeometry(true);
         syncPlan();
+        setShifting(false);
+        beginTurn(); // 折叠到节点 → 220ms 后伸回（复刻 §8.3/§8.8 的「伸回」）
       }, 460);
     }
-  }, [stage, plan, changeReserve, applyShift, sampleGeometry, syncPlan]);
+  }, [stage, plan, changeReserve, applyShift, sampleGeometry, syncPlan, beginTurn]);
 
   // ---------------------------------------------------------------- 组切换动效
   useEffect(() => {
@@ -777,6 +783,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       mode: plan.mode,
       motion: plan.mode === "whisper" ? "steady" : motion,
       tracking,
+      shifting,
       plan,
       viewport: vp,
       colors,
@@ -796,7 +803,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   }, [
     plan, viewportEl, geo, data.graph, colors, title, T, cmpPage, data.readingBlock, data.status, data.hoverId, data.sel, data.expandedId,
     data.explainFor, data.explainText, data.explainBusy, data.groupId, data.readingId, data.peek, data.backLoc, data.feed, data.busy, data.hasKey,
-    motion, armed, tracking, animKey, readViewport, smooth,
+    motion, armed, tracking, shifting, animKey, readViewport, smooth,
   ]);
 
   const scene: FlowScene | null = useMemo(() => {
