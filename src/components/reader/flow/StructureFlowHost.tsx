@@ -678,11 +678,13 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       winRef.current.set(cut, Math.max(0, all.indexOf(main.members[0])));
       let above: PatternLayout | null = null;
       let below: PatternLayout | null = null;
-      if (data.peek?.side === "above") above = layoutPeek(peekCtx, data.peek.groupId, "above", COLUMN.ABOVE_ROWS);
-      if (data.peek?.side === "below") {
+      // §14.2-1：预览组与当前组相同时一律不画（同 id 会在合并时与主体互吞）
+      const peek = data.peek && data.peek.groupId !== cut ? data.peek : null;
+      if (peek?.side === "above") above = layoutPeek(peekCtx, peek.groupId, "above", COLUMN.ABOVE_ROWS);
+      if (peek?.side === "below") {
         const room = bottom - (mainTop + main.height) - PEEK.GAP;
         const rows = Math.min(PEEK.MAX_ROWS, Math.floor((room - 20 - 16) / PEEK.ROW_H));
-        if (rows >= 1) below = layoutPeek(peekCtx, data.peek.groupId, "below", rows);
+        if (rows >= 1) below = layoutPeek(peekCtx, peek.groupId, "below", rows);
       }
       mainHeight = main.height;
       lay = mergeLayouts(main, above, below, {
@@ -954,8 +956,9 @@ function mergeLayouts(
       }
     }
   };
-  if (above) pushPart(above, off.aboveOff, false);
+  // §14.2-1：主体优先——预览与主体撞 id 时保留主体（否则预览会吞掉主项，留下浮空的条/断掉的彩带）
   pushPart(main, off.mainOff, true);
+  if (above) pushPart(above, off.aboveOff, false);
   if (below) pushPart(below, off.belowOff, false);
   const leafIds = [...new Set([...main.leafIds, ...(above?.leafIds ?? []), ...(below?.leafIds ?? [])])];
   return {

@@ -407,12 +407,12 @@ export function useStructureFlow(kernel: FlowKernel | null, documentId: string |
     });
   }, [active, loadGraph, scheduleSample]);
 
-  // §13.1.2：自动展开——组 / 阅读节点变化时复位手动标记；没有手动展开时跟随 deepMember
+  // §14.2：手动优先（同组内永久）——只有换组才复位；readingId 变化不再把手动展开/收起冲掉
   const groupId = attnRef.current.groupId;
   const readingId = attnRef.current.readingId;
   useEffect(() => {
     manualExpRef.current = false;
-  }, [groupId, readingId]);
+  }, [groupId]);
   useEffect(() => {
     if (!graph || !groupId) {
       if (expandedId != null) setExpandedId(null);
@@ -424,15 +424,23 @@ export function useStructureFlow(kernel: FlowKernel | null, documentId: string |
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [graph, groupId, readingId, attnTick, expandedId]);
 
-  const toggleExpand = useCallback((id: string) => {
-    manualExpRef.current = true;
-    setExpandedId((cur) => (cur === id ? null : id));
-    setSel(id);
-    setExplainFor(null);
-  }, []);
+  const toggleExpand = useCallback(
+    (id: string) => {
+      manualExpRef.current = true;
+      const collapsing = expandedId === id;
+      setExpandedId(collapsing ? null : id);
+      // §14.2-3：收起即离开——动作行跟着收起，不再留在原地
+      if (collapsing) setSel(null);
+      else setSel(id);
+      setExplainFor(null);
+    },
+    [expandedId],
+  );
   const focusGroup = useCallback((groupId: string, nodeId: string | null) => {
     manualExpRef.current = false;
     attnRef.current = { ...attnRef.current, groupId, readingId: nodeId, candGroup: null, candNode: null };
+    // §14.2-1：切组后旧预览一律作废，否则主组与预览会是同一组（同 id 互相吞）
+    peekRef.current = null;
     setSel(nodeId);
     setAttnTick((n) => n + 1);
   }, []);

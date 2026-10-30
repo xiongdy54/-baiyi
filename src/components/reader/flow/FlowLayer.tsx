@@ -123,7 +123,8 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
     }
   }, [scene.seq, armed, motion]);
 
-  const selected = layout.items.find((i) => i.nodeId === inline.forId && (i.kind === "node" || i.kind === "kid"));
+  // §14.2-2：动作行只锚主体行——预览行不是可操作目标（否则会浮在预览行上盖住主体）
+  const selected = layout.items.find((i) => i.nodeId === inline.forId && !i.peek && (i.kind === "node" || i.kind === "kid"));
   const inlineAt = layout.inlineAt ?? (selected ? { x: selected.x, y: selected.y + selected.h, w: selected.w } : null);
   const explainH = inline.explainOpen ? Math.min(FLOW.EXPLAIN_MAX_H, Math.ceil((inline.explainText.length * 12) / Math.max(1, plan.labelW)) * 18 + 12) : 0;
 

@@ -268,6 +268,7 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   check("点有子节点的成员 → 出现 kid 项与动作行", await until(() => !!item("n:B1") && !!$(".flow-actions"), 4000), { kid: !!item("n:B1"), actions: !!$(".flow-actions") });
   click(item("n:B"));
   check("再点 → 收起 kid", await until(() => !item("n:B1"), 1500));
+  check("收起同时收走动作行（§14.2-3）", await until(() => !$(".flow-actions"), 1500), { inline: !!$(".flow-inline") });
   const g0 = gotos.length;
   dbl(item("n:C"));
   check("双击 → 跳到原文（内核 goTo 被调）", await until(() => gotos.length > g0, 3000), gotos);
@@ -297,6 +298,31 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     const head = item("n:t1");
     return !!head && /上一部分/.test(head.textContent || "");
   }, 3000), { text: item("n:t1") && item("n:t1").textContent });
+
+  console.log("---- §14.2 预览与主体不互吞 / 动作行只锚主体 ----");
+  {
+    const yOf = (el) => {
+      const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((el && el.style.transform) || "");
+      return m ? Number(m[2]) : NaN;
+    };
+    const wrapY = (() => {
+      const m = /translateY\(([-\d.]+)px\)/.exec(($(".flow-items") || { style: {} }).style.transform || "");
+      return m ? Number(m[1]) : 0;
+    })();
+    const peekIds = () => $$(".flow-item.is-peek").map((e) => e.getAttribute("data-flow-item"));
+    check("当前存在「上一部分」预览行", peekIds().length > 0, peekIds());
+    click(item("n:A")); // 点预览行 → focusGroup 切回 t1
+    await sleep(800);
+    const ids = $$(".flow-item").map((e) => e.getAttribute("data-flow-item"));
+    check("点预览行切组后无重复行", ids.length > 0 && new Set(ids).size === ids.length, ids);
+    const bars = $$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id").slice(4));
+    const nodes = new Set($$(".flow-item[data-kind='node']").map((e) => e.getAttribute("data-flow-item").slice(2)));
+    check("每个色条都有对应条目（无浮空条）", bars.length > 0 && bars.every((b) => nodes.has(b)), { bars, nodes: [...nodes] });
+    const inlineEl = $(".flow-inline");
+    const inlineY = inlineEl ? yOf(inlineEl) : NaN;
+    const anchored = $$(".flow-item:not(.is-peek)").some((e) => Math.abs(yOf(e) + parseFloat(e.style.height || "0") + wrapY - inlineY) < 0.6);
+    check("动作行锚在主体行下方（不在预览行上）", !inlineEl || anchored, { inlineY, wrapY, items: $$(".flow-item").map((e) => e.getAttribute("data-flow-item")) });
+  }
 
   console.log("---- 关闭 ----");
   stage.setOpen(false);
