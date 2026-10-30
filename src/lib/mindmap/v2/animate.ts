@@ -40,7 +40,7 @@ export interface MotionTiming {
  * 皮肤可覆盖——每次开始过渡（planTransition）读取一次，换肤后自然生效。
  * 单位：ms 或 s（CSS 产物压缩会把 260ms 归一成 .26s——必须按单位换算，否则过渡会被读成 0.26ms）；
  * 读不到 / 非法 / 无 DOM（node 测试）时回落 MOTION 常量。曲线 Token --mm-ease 由 CSS 消费；
- * 主进程 lensWindow.js 的 EASE（D204 窗口缓动）与其保持一致，两处注释互相指向。
+ * 结构流 --flow-ease 与其保持一致，两处注释互相指向。
  */
 export function readMotion(): MotionTiming {
   try {

@@ -1,0 +1,972 @@
+// 结构流 · 宿主（STRUCTURE-FLOW-PLAN §6.2 / §6.4 / §8 / §12.1 / §12.4）。
+// 职责：量视口与版心 → planColumn → 平移 / 预留 → 采样几何 → 组场景 → 编排动效 → portal 渲染。
+// 本组件不新增窗口、preload 桥或 IPC；全部绘制在渲染层。
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal, flushSync } from "react-dom";
+import type { ReaderKernel, ReaderStructureGeometry } from "../../../lib/reader/kernel";
+import type { GraphState } from "../../../lib/mindmap/v2/types";
+import { ROOT_ID } from "../../../lib/mindmap/v2/types";
+import { childrenOf } from "../../../lib/mindmap/v2/graph";
+import { eventBus } from "../../../lib/eventbus";
+import { useT } from "../../../lib/i18n";
+import {
+  COLUMN,
+  FLOW,
+  PATTERN_LABEL,
+  PEEK,
+  buildPaintRects,
+  buildShapes,
+  buildStrands,
+  fitLayout,
+  geometryAt,
+  layoutPeek,
+  neckPath,
+  patternFor,
+  planColumn,
+  shapePath,
+  type LayoutCtx,
+} from "../../../lib/flow/layout";
+import type { FlowColors, FlowEnv, FlowItem, FlowMotion, FlowPattern, FlowPlan, FlowScene, PatternLayout } from "../../../lib/flow/types";
+import FlowLayer, { type FlowEvent } from "./FlowLayer";
+import { useStructureFlow, type StructureFlowData } from "./useStructureFlow";
+
+export interface StructureFlowHostProps {
+  kernel: ReaderKernel | null;
+  documentId: string | null;
+  title: string;
+  open: boolean;
+  /** 图谱页签画布正盖着正文（走关闭编排） */
+  covered: boolean;
+  /** 翻页模式（false＝滚动） */
+  scrolled: boolean;
+  viewportEl: HTMLElement | null;
+  shiftEl: HTMLElement | null;
+  gutterEl: HTMLElement | null;
+  onClose: () => void;
+  onOpenInMap: (nodeId: string | null, region?: string[]) => void;
+}
+
+type Stage = "closed" | "opening" | "open" | "closing";
+
+const FALLBACK_COLORS: FlowColors = {
+  dark: false,
+  bg: "#fafaf8",
+  fg: "#0a0a0a",
+  accent: "#166a59",
+  accentOn: "#ffffff",
+  hairline: "#cccccc",
+  counter: "#b5483b",
+  palette: ["#6E7F2E", "#A9821C", "#A84A80", "#3E8A82", "#3F68A8", "#6F5FB0", "#A44836", "#B2662A"],
+  aHL: [0.16, 0.26, 0.38],
+  aEnd: [0.34, 0.52, 0.6],
+  aDim: 0.3,
+  strandA: 0.62,
+};
+
+const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => r()));
+
+function luminance(color: string): number {
+  const m = /rgba?\(\s*(\d+)[^\d]+(\d+)[^\d]+(\d+)/.exec(color);
+  if (!m) return 1;
+  const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])].map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** 用隐藏探针把主题 Token 解析成实色（var()/color-mix 不能直接进 SVG 渐变计算外的用途） */
+function resolveColors(el: HTMLElement | null): FlowColors {
+  const doc = el?.ownerDocument ?? (typeof document !== "undefined" ? document : null);
+  const host = el ?? doc?.body ?? null;
+  if (!doc || !host) return FALLBACK_COLORS;
+  const probe = doc.createElement("span");
+  probe.className = "flow-probe";
+  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;left:0;top:0";
+  host.appendChild(probe);
+  const readColor = (expr: string, fallback: string) => {
+    probe.style.color = "";
+    probe.style.color = expr;
+    const c = getComputedStyle(probe).color;
+    // jsdom / 未装载皮肤时 var() 与 color-mix() 会原样返回，不能当作已解析的实色
+    return c && !/var\(|color-mix\(/.test(c) && c !== "rgba(0, 0, 0, 0)" && c !== "transparent" ? c : fallback;
+  };
+  try {
+    const bg = readColor("var(--reader-bg, var(--paper))", FALLBACK_COLORS.bg);
+    const dark = luminance(bg) < 0.4;
+    if (dark) probe.setAttribute("data-dark", "1");
+    const fg = readColor("var(--reader-fg, var(--ink))", dark ? "#f5f5f2" : "#0a0a0a");
+    const accent = readColor("var(--accent)", FALLBACK_COLORS.accent);
+    const accentOn = readColor("var(--accent-on, #fff)", "#ffffff");
+    const hairline = readColor("color-mix(in srgb, var(--reader-fg, var(--ink)) 14%, var(--reader-bg, var(--paper)))", dark ? "#333333" : "#dddddd");
+    const counter = readColor("var(--flow-counter)", dark ? "#E07A6A" : "#B5483B");
+    const palette = [1, 2, 3, 4, 5, 6, 7, 8].map((i) => readColor(`var(--flow-c${i})`, FALLBACK_COLORS.palette[i - 1]));
+    const num = (name: string, d: number) => {
+      const raw = (getComputedStyle(probe).getPropertyValue(name) || "").trim();
+      const v = parseFloat(raw);
+      return Number.isFinite(v) && v > 0 ? v : d;
+    };
+    return {
+      dark,
+      bg,
+      fg,
+      accent,
+      accentOn,
+      hairline,
+      counter,
+      palette,
+      aHL: [num("--flow-ahl-0", dark ? 0.2 : 0.16), num("--flow-ahl-1", dark ? 0.3 : 0.26), num("--flow-ahl-2", dark ? 0.42 : 0.38)],
+      aEnd: [num("--flow-aend-0", dark ? 0.44 : 0.34), num("--flow-aend-1", dark ? 0.62 : 0.52), num("--flow-aend-2", dark ? 0.7 : 0.6)],
+      aDim: num("--flow-adim", dark ? 0.32 : 0.3),
+      strandA: num("--flow-strand-a", dark ? 0.72 : 0.62),
+    };
+  } finally {
+    probe.remove();
+  }
+}
+
+const EMPTY_LAYOUT = (): PatternLayout => ({ items: [], ports: [], prims: [], expressed: [], leafIds: [], height: 0, readingY: null });
+
+export default function StructureFlowHost(props: StructureFlowHostProps) {
+  const { kernel, documentId, title, open, covered, scrolled, viewportEl, shiftEl, gutterEl, onClose, onOpenInMap } = props;
+  const T = useT();
+  const active = open && !covered && !!viewportEl;
+  const data = useStructureFlow(kernel, documentId, title, active, { paged: !scrolled });
+
+  const [stage, setStage] = useState<Stage>("closed");
+  const stageRef = useRef<Stage>("closed");
+  stageRef.current = stage;
+  const [motion, setMotion] = useState<FlowMotion>("steady");
+  const motionRef = useRef<FlowMotion>("steady");
+  motionRef.current = motion;
+  const [armed, setArmed] = useState(false);
+  const armedRef = useRef(false);
+  armedRef.current = armed;
+  const [tracking, setTracking] = useState(false);
+  const trackingRef = useRef(false);
+  const [plan, setPlan] = useState<FlowPlan | null>(null);
+  const planRef = useRef<FlowPlan | null>(null);
+  const [geo, setGeo] = useState<ReaderStructureGeometry | null>(null);
+  const geoRef = useRef<ReaderStructureGeometry | null>(null);
+  const [cmpPage, setCmpPage] = useState(0);
+  const [animKey, setAnimKey] = useState(0);
+  const [colorTick, setColorTick] = useState(0);
+  const baseTextRef = useRef<{ left: number; right: number } | null>(null);
+  const sigRef = useRef("");
+  const ticketRef = useRef(0);
+  const openTimer = useRef<number | null>(null);
+  const motionTimer = useRef<number | null>(null);
+  const turnTimer = useRef<number | null>(null);
+  const relayoutCleanup = useRef<(() => void) | null>(null);
+  const currentShift = useRef(0);
+  const currentReserve = useRef(0);
+  const lastRelocateAt = useRef(0);
+  const lastSceneRef = useRef<FlowScene | null>(null);
+  const hoverClear = useRef<number | null>(null);
+  const lastPeekRef = useRef<StructureFlowData["peek"]>(null);
+  const lastGroupRef = useRef<{ groupId: string | null; members: string[] }>({ groupId: null, members: [] });
+  const anchorSigRef = useRef("");
+  const bump = useCallback(() => setAnimKey((n) => n + 1), []);
+
+  /** §13.3：滚动模式平滑彩带（矩形画在正文 iframe，混合层只画颈部） */
+  const smooth = scrolled && !!kernel?.onContentScroll && !!kernel?.getFrameOffsets && !!kernel?.setStructurePaint;
+  const [frameTick, setFrameTick] = useState(0);
+  const frameRef = useRef<{ lay: PatternLayout; dy: number; opts: Parameters<typeof buildShapes>[3] } | null>(null);
+  const neckEls = useRef(new Map<string, SVGPathElement>());
+  const shapeSigRef = useRef("");
+  /** §13.2.3：成员的窗口起点（按组粘滞，阅读节点在窗口内部时窗口不动） */
+  const winRef = useRef(new Map<string, number>());
+
+  const colors = useMemo(() => resolveColors(viewportEl), [viewportEl, colorTick]);
+
+  // 主题 / 皮肤变化 → 重算颜色
+  useEffect(() => {
+    if (!viewportEl) return;
+    const ob = new MutationObserver(() => setColorTick((n) => n + 1));
+    ob.observe(viewportEl.ownerDocument.body, { attributes: true, attributeFilter: ["style", "class"] });
+    const off = eventBus.on("settings/changed", () => setColorTick((n) => n + 1));
+    return () => {
+      ob.disconnect();
+      off();
+    };
+  }, [viewportEl]);
+
+  // ---------------------------------------------------------------- 环境与排布
+  const readViewport = useCallback((): FlowEnv["viewport"] => {
+    const vr = viewportEl?.getBoundingClientRect();
+    if (!vr) return { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    return { left: vr.left, top: vr.top, right: vr.right, bottom: vr.bottom };
+  }, [viewportEl]);
+
+  const syncPlan = useCallback(() => {
+    if (!viewportEl) return;
+    const vp = readViewport();
+    const w = vp.right - vp.left;
+    const gText = geoRef.current?.text;
+    const shiftNow = planRef.current?.shift ?? 0;
+    const base = baseTextRef.current ?? (gText ? { left: gText.left + shiftNow, right: gText.right + shiftNow } : { left: vp.left + w * 0.2, right: vp.right - w * 0.2 });
+    const prev = planRef.current;
+    const next = planColumn({ on: true, viewport: vp, textLeft: base.left, textRight: base.right }, prev);
+    // 预留保持（§5.3）：决策用 baseText（未预留版心）；reserve 方案的 barX 再用重排后的实际 textRight 修正
+    if (next.reserve > 0) {
+      const bw = FLOW.BAR_MAX + FLOW.LABEL_GAP + next.labelW + FLOW.PAD_R;
+      const actualRight = geoRef.current?.text?.right ?? base.right;
+      next.barX = Math.round(Math.min(actualRight + FLOW.BRAID_PREF, vp.right - 4 - bw));
+      next.labelX = next.barX + FLOW.BAR_MAX + FLOW.LABEL_GAP;
+      next.right = next.labelX + next.labelW + FLOW.PAD_R;
+    }
+    planRef.current = next;
+    setPlan((cur) => (cur && samePlan(cur, next) ? cur : next));
+  }, [viewportEl, readViewport]);
+
+  const applyShift = useCallback(
+    (s: number) => {
+      currentShift.current = s;
+      if (shiftEl) shiftEl.style.transform = s ? `translateX(${-s}px)` : "";
+    },
+    [shiftEl],
+  );
+  const applyGutter = useCallback(
+    (r: number) => {
+      currentReserve.current = r;
+      if (gutterEl) gutterEl.style.flexBasis = `${r}px`;
+    },
+    [gutterEl],
+  );
+
+  // ---------------------------------------------------------------- 几何采样
+  const sampleGeometry = useCallback(
+    (force = false): ReaderStructureGeometry | null => {
+      if (!viewportEl || !kernel?.getStructureGeometry) return null;
+      if (viewportEl.ownerDocument.visibilityState !== "visible") return geoRef.current;
+      const g = kernel.getStructureGeometry(smooth ? { all: true } : undefined);
+      if (!g) return null;
+      const sig =
+        JSON.stringify(g.boxes.map((b) => [b.nodeId, b.block, b.doc, b.top | 0, b.bottom | 0, (b.cTop ?? 0) | 0, b.left | 0])) + JSON.stringify(g.text);
+      if (!force && sig === sigRef.current) return g;
+      sigRef.current = sig;
+      geoRef.current = g;
+      setGeo(g);
+      // baseText＝最近一次「未平移、未预留」时量到的版心（首次采样即使先前用兜底版心得到过 reserve 也要补上）
+      if (g.text && (baseTextRef.current == null || ((planRef.current?.shift ?? 0) === 0 && (planRef.current?.reserve ?? 0) === 0))) {
+        baseTextRef.current = { left: g.text.left, right: g.text.right };
+      }
+      return g;
+    },
+    [viewportEl, kernel, smooth],
+  );
+
+  /** §13.3.4：滚动逐帧——读一次章节原点 → 纯计算 → 只写 DOM；颈部集合变化时才让 React 渲染一次 */
+  const paintFrame = useCallback(() => {
+    const base = geoRef.current, F = frameRef.current;
+    if (!smooth || !base || !F || !kernel?.getFrameOffsets) return;
+    const g = geometryAt(base, kernel.getFrameOffsets());
+    const shapes = buildShapes(g, F.lay, F.dy, F.opts).filter((s) => s.ribbon);
+    const sig = shapes.map((s) => s.id).join("|");
+    if (sig !== shapeSigRef.current) {
+      flushSync(() => setFrameTick((n) => n + 1));
+      return;
+    }
+    for (const s of shapes) {
+      const el = neckEls.current.get(s.id);
+      if (!el) continue;
+      const d = s.stub ? shapePath(s) : neckPath(s);
+      el.style.transition = "none";
+      el.setAttribute("d", d);
+      el.style.setProperty("d", `path("${d}")`);
+    }
+  }, [smooth, kernel]);
+
+  const settleMotion = useCallback((ms = 900, next: FlowMotion = "steady") => {
+    if (motionTimer.current != null) window.clearTimeout(motionTimer.current);
+    motionTimer.current = window.setTimeout(() => {
+      motionTimer.current = null;
+      if (stageRef.current !== "closed") setMotion(next);
+    }, ms);
+  }, []);
+
+  // ---------------------------------------------------------------- 正文让位（预留变化）
+  const waitRelayout = useCallback(() => {
+    relayoutCleanup.current?.();
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const fin = () => {
+        if (done) return;
+        done = true;
+        off();
+        if (relayoutCleanup.current === fin) relayoutCleanup.current = null;
+        resolve();
+      };
+      const off = kernel?.on("relocate", fin) ?? (() => {});
+      relayoutCleanup.current = fin;
+      window.setTimeout(fin, FLOW.RELAYOUT_WAIT_MS);
+    });
+  }, [kernel]);
+
+  const changeReserve = useCallback(
+    async (r: number) => {
+      if (r === currentReserve.current) return;
+      setMotion("turn");
+      setArmed(false);
+      bump();
+      await sleep(180);
+      if (shiftEl) shiftEl.style.opacity = "0";
+      applyGutter(r);
+      await waitRelayout();
+      await nextFrame();
+      sampleGeometry(true);
+      syncPlan();
+      if (shiftEl) shiftEl.style.opacity = "1";
+      setMotion("turn");
+      setArmed(true);
+      bump();
+      settleMotion(760);
+    },
+    [applyGutter, sampleGeometry, shiftEl, syncPlan, bump, settleMotion, waitRelayout],
+  );
+
+  // ---------------------------------------------------------------- 打开 / 关闭
+  const waitRailClosed = useCallback(async () => {
+    const rail = viewportEl?.ownerDocument.querySelector("[data-reader-side-rail]") as HTMLElement | null;
+    if (!rail || rail.classList.contains("is-closed")) return;
+    await new Promise<void>((resolve) => {
+      let done = false;
+      const fin = () => {
+        if (done) return;
+        done = true;
+        rail.removeEventListener("transitionend", on);
+        resolve();
+      };
+      const on = (e: TransitionEvent) => {
+        if (e.propertyName === "width") fin();
+      };
+      rail.addEventListener("transitionend", on);
+      const dur = parseFloat(getComputedStyle(rail).transitionDuration || "0");
+      const ms = (Number.isFinite(dur) ? dur * 1000 : 0) + 60;
+      window.setTimeout(fin, Math.max(ms, 60));
+    });
+  }, [viewportEl]);
+
+  const openSeq = useCallback(async () => {
+    const ticket = ++ticketRef.current;
+    setStage("opening");
+    setMotion("open");
+    setArmed(false);
+    bump();
+    await waitRailClosed();
+    if (ticket !== ticketRef.current) return;
+    sampleGeometry(true);
+    syncPlan();
+    await nextFrame();
+    if (ticket !== ticketRef.current) return;
+    const p = planRef.current;
+    if (p && p.reserve > 0) await changeReserve(p.reserve);
+    else if (p && p.shift > 0) {
+      applyShift(p.shift);
+      await sleep(420);
+      if (ticket !== ticketRef.current) return;
+      sampleGeometry(true);
+      syncPlan();
+    }
+    setArmed(true);
+    bump();
+    if (openTimer.current != null) window.clearTimeout(openTimer.current);
+    openTimer.current = window.setTimeout(() => {
+      openTimer.current = null;
+      if (ticket !== ticketRef.current) return;
+      setStage("open");
+      setMotion("steady");
+    }, 1500);
+  }, [waitRailClosed, sampleGeometry, syncPlan, changeReserve, applyShift, bump]);
+
+  const closeSeq = useCallback(async () => {
+    const ticket = ++ticketRef.current;
+    setStage("closing");
+    setMotion("close");
+    setArmed(true);
+    bump();
+    await sleep(480);
+    if (ticket !== ticketRef.current) return;
+    applyShift(0);
+    applyGutter(0);
+    if (shiftEl) shiftEl.style.opacity = "";
+    setTracking(false);
+    trackingRef.current = false;
+    setGeo(null);
+    geoRef.current = null;
+    sigRef.current = "";
+    setStage("closed");
+    setMotion("steady");
+  }, [applyShift, applyGutter, shiftEl, bump]);
+
+  useEffect(() => {
+    if (!viewportEl) return;
+    if (open && !covered) {
+      if (stageRef.current === "closed" || stageRef.current === "closing") void openSeq();
+    } else if (stageRef.current === "opening" || stageRef.current === "open") {
+      void closeSeq();
+    }
+  }, [open, covered, viewportEl, openSeq, closeSeq]);
+
+  // 文档切换：清几何 / 版心 / 排布与正文让位，再按当前开关重新开场（旧文档的平移与槽宽不能带到新文档）
+  const prevDocRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevDocRef.current;
+    prevDocRef.current = documentId;
+    if (prev == null || prev === documentId) return; // 首次挂载由开场流程负责，不在这里重来
+    ticketRef.current++;
+    baseTextRef.current = null;
+    sigRef.current = "";
+    geoRef.current = null;
+    setGeo(null);
+    planRef.current = null;
+    setPlan(null);
+    applyShift(0);
+    applyGutter(0);
+    if (shiftEl) shiftEl.style.opacity = "";
+    lastGroupRef.current = { groupId: null, members: [] };
+    lastPeekRef.current = null;
+    winRef.current.clear();
+    neckEls.current.clear();
+    shapeSigRef.current = "";
+    setCmpPage(0);
+    setMotion("steady");
+    setArmed(false);
+    setStage("closed");
+    if (open && !covered) window.setTimeout(() => void openSeq(), 60);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId]);
+
+  useEffect(() => () => {
+    ticketRef.current++;
+    for (const t of [openTimer.current, motionTimer.current, turnTimer.current]) if (t != null) window.clearTimeout(t);
+    relayoutCleanup.current?.();
+  }, []);
+
+  // ---------------------------------------------------------------- 几何事件（翻页 / 滚动）
+  const beginTurn = useCallback(() => {
+    setMotion("turn");
+    setArmed(false);
+    bump();
+    if (turnTimer.current != null) window.clearTimeout(turnTimer.current);
+    turnTimer.current = window.setTimeout(() => {
+      turnTimer.current = null;
+      sampleGeometry(true);
+      syncPlan();
+      setArmed(true);
+      bump();
+      settleMotion(760);
+    }, FLOW.TURN_RESAMPLE_MS);
+  }, [sampleGeometry, syncPlan, bump, settleMotion]);
+
+  const finishTrack = useCallback(() => {
+    trackingRef.current = false;
+    setTracking(false);
+    setMotion("steady");
+    sampleGeometry(true);
+    bump();
+  }, [sampleGeometry, bump]);
+
+  const beginTrack = useCallback(() => {
+    if (trackingRef.current) return;
+    trackingRef.current = true;
+    setTracking(true);
+    setMotion("track");
+    bump();
+    const loop = () => {
+      if (!trackingRef.current) return;
+      sampleGeometry();
+      if (performance.now() - lastRelocateAt.current >= FLOW.TRACK_IDLE_MS) {
+        finishTrack();
+        return;
+      }
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }, [sampleGeometry, finishTrack, bump]);
+
+  // §13.3.4：平滑滚动模式下正文 scroll 逐帧驱动（不再依赖 relocate 的 250ms 防抖）
+  useEffect(() => {
+    if (!smooth || !kernel?.onContentScroll || stage === "closed" || stage === "closing") return;
+    let idle: number | null = null;
+    const off = kernel.onContentScroll(() => {
+      if (!trackingRef.current) {
+        trackingRef.current = true;
+        setTracking(true);
+        setMotion("track");
+      }
+      paintFrame();
+      if (idle != null) window.clearTimeout(idle);
+      idle = window.setTimeout(() => {
+        idle = null;
+        trackingRef.current = false;
+        for (const el of neckEls.current.values()) el.style.transition = "";
+        sampleGeometry(true); // 停下后刷新文档坐标（可能有新段落载入）；不做对齐
+        setTracking(false);
+        setMotion("steady");
+      }, FLOW.TRACK_IDLE_MS);
+    });
+    return () => {
+      off();
+      if (idle != null) window.clearTimeout(idle);
+    };
+  }, [smooth, kernel, stage, paintFrame, sampleGeometry]);
+
+  useEffect(() => {
+    if (!viewportEl || !kernel) return;
+    if (stage === "closed" || stage === "closing") return;
+    const off = kernel.on("relocate", () => {
+      lastRelocateAt.current = performance.now();
+      if (smooth) {
+        // 平滑模式：relocate 只做章节载入 / 跳转后的重采，不启动跟踪循环
+        sampleGeometry(true);
+        syncPlan();
+        return;
+      }
+      if (scrolled) beginTrack();
+      else beginTurn();
+    });
+    const kick = requestAnimationFrame(() => {
+      sampleGeometry(true);
+      syncPlan();
+      bump();
+    });
+    return () => {
+      off();
+      cancelAnimationFrame(kick);
+    };
+  }, [stage, kernel, viewportEl, scrolled, smooth, beginTrack, beginTurn, sampleGeometry, syncPlan, bump]);
+
+  // 窗口缩放：停手后重决策（缩放期间不改 mode）
+  useEffect(() => {
+    if (!viewportEl) return;
+    let timer: number | null = null;
+    const onResize = () => {
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        sampleGeometry(true);
+        syncPlan();
+        bump();
+      }, FLOW.RESIZE_IDLE_MS);
+    };
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(onResize) : null;
+    ro?.observe(viewportEl);
+    window.addEventListener("resize", onResize);
+    return () => {
+      if (timer != null) window.clearTimeout(timer);
+      ro?.disconnect();
+      window.removeEventListener("resize", onResize);
+    };
+  }, [viewportEl, sampleGeometry, syncPlan, bump]);
+
+  // 排布生效：打开完成后平移 / 预留的变化走 §8.8 编排
+  useEffect(() => {
+    if (stage !== "open" || !plan) return;
+    if (plan.reserve !== currentReserve.current) {
+      void changeReserve(plan.reserve);
+      return;
+    }
+    if (plan.shift !== currentShift.current) {
+      const delta = Math.abs(plan.shift - currentShift.current);
+      applyShift(plan.shift);
+      if (delta > 0) {
+        if (shiftEl) shiftEl.style.opacity = "0";
+        window.setTimeout(() => {
+          sampleGeometry(true);
+          syncPlan();
+          if (shiftEl) shiftEl.style.opacity = "1";
+        }, 460);
+      }
+    }
+  }, [stage, plan, changeReserve, applyShift, shiftEl, sampleGeometry, syncPlan]);
+
+  // ---------------------------------------------------------------- 组切换动效
+  useEffect(() => {
+    const gid = data.groupId;
+    if (!gid) return;
+    const prev = lastGroupRef.current;
+    if (!data.graph) {
+      lastGroupRef.current = { groupId: gid, members: [] };
+      lastPeekRef.current = data.peek;
+      return;
+    }
+    const members = childrenOf(data.graph, gid).filter((id) => data.graph!.nodes[id]);
+    if (prev.groupId === gid) {
+      lastGroupRef.current = { groupId: gid, members };
+      lastPeekRef.current = data.peek; // 记录切换前的「旧预览组」
+      return;
+    }
+    if (prev.groupId) {
+      const sw = data.switchInfo;
+      if (sw) {
+        let m: FlowMotion;
+        if (prev.members.includes(gid)) m = "zoom-in";
+        else if (members.includes(prev.groupId)) m = "zoom-out";
+        else if (lastPeekRef.current?.groupId === gid) m = sw.dir === "down" ? "conveyor-down" : "conveyor-up";
+        else m = sw.dir === "down" ? "regroup-down" : "regroup-up";
+        setMotion(m);
+        setArmed(true);
+        bump();
+        settleMotion(1200);
+      }
+    }
+    lastGroupRef.current = { groupId: gid, members };
+    lastPeekRef.current = data.peek;
+    setCmpPage(0);
+  }, [data.groupId, data.graph, data.switchInfo, data.peek, bump, settleMotion]);
+
+  // ---------------------------------------------------------------- 场景（base：不含形状，滚动时不重建）
+  const base: Omit<FlowScene, "shapes"> | null = useMemo(() => {
+    if (!plan || !viewportEl) return null;
+    const vp = geo?.viewport ?? readViewport();
+    const top = vp.top + FLOW.COL_MARGIN_Y;
+    const bottom = vp.bottom - FLOW.COL_MARGIN_Y;
+    const avail = Math.max(80, bottom - top);
+    const g = data.graph;
+    const readingId = data.readingId && g?.nodes[data.readingId] ? data.readingId : null;
+    const cut = data.groupId ?? (readingId ? g?.nodes[readingId]?.parentId ?? ROOT_ID : null);
+    const all = g && cut ? childrenOf(g, cut).filter((id) => g.nodes[id]) : [];
+    const pattern: FlowPattern = g && cut && all.length >= 2 ? patternFor(g, cut, all) : "tree";
+    const patternName = T(PATTERN_LABEL[pattern]);
+    const header = g && cut ? (cut === ROOT_ID ? String(title || g.meta?.title || "") : String(g.nodes[cut]?.title ?? "")) : String(title || "");
+    const colorOf = new Map<string, string>(all.map((id, i) => [id, id === readingId ? colors.accent : colors.palette[i % 8]]));
+    const sel = data.sel && g?.nodes[data.sel] ? data.sel : null;
+    const explainOpen = !!(data.explainFor && data.explainFor === sel);
+    const inlineH = sel ? FLOW.ACTIONS_H + (explainOpen ? Math.min(FLOW.EXPLAIN_MAX_H, Math.ceil((data.explainText.length * 12) / Math.max(1, plan.labelW || FLOW.LABEL_W_COMPACT)) * 18 + 12) : 0) : 0;
+    const panel = !g || !all.length
+      ? !data.hasKey && !g
+        ? { kind: "nokey" as const, feedDone: data.feed.done, feedTotal: data.feed.total }
+        : data.busy === "pending"
+          ? { kind: "busy" as const, feedDone: data.feed.done, feedTotal: data.feed.total }
+          : !g && !(data.feed.unsupported || data.feed.complete || data.feed.error)
+            ? { kind: "feeding" as const, feedDone: data.feed.done, feedTotal: data.feed.total }
+            : { kind: "empty" as const, feedDone: data.feed.done, feedTotal: data.feed.total }
+      : { kind: "ok" as const, feedDone: data.feed.done, feedTotal: data.feed.total };
+
+    const planCtx: FlowPlan = plan.labelW ? plan : { ...plan, labelW: FLOW.LABEL_W_COMPACT, labelX: plan.barX + FLOW.BAR_MAX + FLOW.LABEL_GAP };
+    const fitBase: Omit<LayoutCtx, "members" | "moreAbove" | "moreBelow" | "maxLines0"> = {
+      g: g ?? ({ nodes: {}, children: {}, outEdges: {}, inEdges: {} } as unknown as GraphState),
+      plan: planCtx,
+      colors,
+      pattern,
+      cut: cut ?? ROOT_ID,
+      header,
+      patternName,
+      colorOf,
+      paletteOf: new Map(all.map((id, i) => [id, colors.palette[i % 8]])),
+      readingId,
+      readingBlock: data.readingBlock,
+      selectedId: sel,
+      expandedId: data.expandedId,
+      inlineH,
+      canBack: !!data.backLoc,
+      maxW: Math.max(160, vp.right - FLOW.PAD_R - planCtx.labelX),
+      cmpPage,
+      availH: avail,
+    };
+    let lay: PatternLayout & { members?: string[] };
+    let mainHeight = 0;
+    let mainAvail = Math.max(80, bottom - (top + COLUMN.ABOVE_SLOT));
+    if (g && cut && all.length) {
+      // §13.2：主体顶边固定；主体可用高度与预览有无无关 → 折叠结果稳定
+      const mainTop = top + COLUMN.ABOVE_SLOT;
+      mainAvail = Math.max(160, bottom - mainTop);
+      const peekCtx = { ...fitBase, members: all, moreAbove: 0, moreBelow: 0, maxLines0: 2 as const, availH: mainAvail };
+      const main = fitLayout({ ...fitBase, availH: mainAvail, winStart: winRef.current.get(cut) }, all, mainAvail);
+      winRef.current.set(cut, Math.max(0, all.indexOf(main.members[0])));
+      let above: PatternLayout | null = null;
+      let below: PatternLayout | null = null;
+      if (data.peek?.side === "above") above = layoutPeek(peekCtx, data.peek.groupId, "above", COLUMN.ABOVE_ROWS);
+      if (data.peek?.side === "below") {
+        const room = bottom - (mainTop + main.height) - PEEK.GAP;
+        const rows = Math.min(PEEK.MAX_ROWS, Math.floor((room - 20 - 16) / PEEK.ROW_H));
+        if (rows >= 1) below = layoutPeek(peekCtx, data.peek.groupId, "below", rows);
+      }
+      mainHeight = main.height;
+      lay = mergeLayouts(main, above, below, {
+        mainOff: COLUMN.ABOVE_SLOT,
+        aboveOff: above ? COLUMN.ABOVE_SLOT - 8 - above.height : 0,
+        belowOff: COLUMN.ABOVE_SLOT + main.height + PEEK.GAP,
+      });
+      lay.members = main.members;
+    } else {
+      lay = EMPTY_LAYOUT();
+    }
+    // 预览 / 主体概览的定位方向（流带 stub 用）
+    const sideOf: Record<string, "above" | "below" | "here"> = {};
+    if (g) for (const p of lay.ports) {
+      const n = g.nodes[p.nodeId];
+      sideOf[p.nodeId] = !n || data.readingBlock == null || n.blockStart == null || n.blockEnd == null
+        ? "here"
+        : n.blockEnd < data.readingBlock
+          ? "above"
+          : n.blockStart > data.readingBlock
+            ? "below"
+            : "here";
+    }
+    lay.sideOf = sideOf;
+
+    // §13.2：列不平移——主体恒在 ABOVE_SLOT；极端超高时只吃上方槽，不随阅读位置变
+    let dy = top;
+    if (mainHeight > mainAvail) dy = top - Math.min(COLUMN.ABOVE_SLOT, mainHeight - mainAvail);
+
+    // 悬停集合：自己 + 全部下级（§12.2）
+    const hoverSet = new Set<string>();
+    if (data.hoverId && g) {
+      hoverSet.add(data.hoverId);
+      const walk = (id: string) => {
+        for (const k of childrenOf(g, id)) {
+          if (hoverSet.has(k)) continue;
+          hoverSet.add(k);
+          walk(k);
+        }
+      };
+      walk(data.hoverId);
+    }
+    const extra = data.hoverId && g?.nodes[data.hoverId] && !lay.ports.some((p) => p.nodeId === data.hoverId)
+      ? [{ nodeId: data.hoverId, color: colorOf.get(data.hoverId) ?? colors.palette[0] }]
+      : [];
+    const focusId = sel ?? readingId;
+    const shapeOpts = { focusId, hoverId: data.hoverId, readingId, colorOf: (id: string) => colorOf.get(id) ?? colors.palette[0], hoverSet, extra };
+    frameRef.current = { lay, dy, opts: shapeOpts };
+    const textRight = geo?.text?.right ?? vp.right - 120;
+    const strands = g && all.length ? buildStrands(g, lay, dy, { textRight, focusId, all: pattern === "layered" }) : [];
+    const hlX0 = (geo?.text?.left ?? vp.left + (vp.right - vp.left) * 0.2) - FLOW.HL_PAD_X;
+    const hlX1 = plan.barX;
+    return {
+      seq: animKey,
+      mode: plan.mode,
+      motion: plan.mode === "whisper" ? "steady" : motion,
+      tracking,
+      plan,
+      viewport: vp,
+      colors,
+      pattern,
+      patternName,
+      dy,
+      layout: lay,
+      strands,
+      hlX0,
+      hlX1,
+      inline: { forId: sel, explainOpen, explainText: data.explainText, explainBusy: data.explainBusy, status: data.status },
+      hoverId: data.hoverId,
+      focusId,
+      canBack: !!data.backLoc,
+      panel,
+      armed,
+      smooth,
+    };
+  }, [
+    plan, viewportEl, geo, data.graph, colors, title, T, cmpPage, data.readingBlock, data.status, data.hoverId, data.sel, data.expandedId,
+    data.explainFor, data.explainText, data.explainBusy, data.groupId, data.readingId, data.peek, data.backLoc, data.feed, data.busy, data.hasKey,
+    motion, armed, tracking, animKey, readViewport, smooth,
+  ]);
+
+  const scene: FlowScene | null = useMemo(() => {
+    if (!base) return null;
+    const geoNow = geoRef.current;
+    const F = frameRef.current;
+    const gNow = geoNow && smooth && kernel?.getFrameOffsets ? geometryAt(geoNow, kernel.getFrameOffsets()) : geoNow;
+    const shapes = gNow && F && base.layout.items.length ? buildShapes(gNow, F.lay, F.dy, F.opts) : [];
+    shapeSigRef.current = shapes.filter((s) => s.ribbon).map((s) => s.id).join("|");
+    return { ...base, shapes };
+    // frameTick：颈部集合变化时强制重渲染一次（逐帧本身不走 React）
+  }, [base, geo, frameTick, smooth, kernel]);
+
+  lastSceneRef.current = scene;
+
+  // §13.3.4：正文段落高亮矩形下发（随正文原生滚动，宿主不逐帧处理）
+  useEffect(() => {
+    if (!smooth || !kernel?.setStructurePaint) return;
+    const o = { blend: colors.dark ? ("screen" as const) : ("multiply" as const), fadeMs: stage === "opening" ? 360 : 180 };
+    const F = frameRef.current;
+    if (!scene || !F || stage === "closed" || stage === "closing" || !geoRef.current || (scene.mode === "whisper" && !scene.hoverId)) {
+      kernel.setStructurePaint([], o);
+      return;
+    }
+    kernel.setStructurePaint(buildPaintRects(geoRef.current, scene.layout, { ...F.opts, colors }), o);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [smooth, kernel, scene?.layout, geo, data.hoverId, data.sel, data.readingId, colors, stage]);
+  useEffect(() => () => kernel?.setStructurePaint?.([], { blend: "multiply", fadeMs: 0 }), [kernel]);
+
+  // 段落定位目标：全部 leaf + 预览成员 + 悬停单元格
+  const anchorIds = useMemo(() => {
+    if (!scene) return [] as string[];
+    const ids = [...scene.layout.leafIds];
+    if (scene.hoverId && !scene.layout.ports.some((p) => p.nodeId === scene.hoverId) && data.graph?.nodes[scene.hoverId]) ids.push(scene.hoverId);
+    return [...new Set(ids)];
+  }, [scene, data.graph]);
+  useEffect(() => {
+    if (!active) return;
+    const sig = anchorIds.join("|");
+    if (sig === anchorSigRef.current) return;
+    anchorSigRef.current = sig;
+    data.requestAnchors(anchorIds);
+  }, [active, anchorIds, data]);
+
+  // ---------------------------------------------------------------- 交互
+  const handle = useCallback(
+    (ev: FlowEvent) => {
+      const sc = lastSceneRef.current;
+      const focus = (data.sel && data.graph?.nodes[data.sel]) ? data.sel : data.readingId;
+      const g = data.graph;
+      switch (ev.kind) {
+        case "hover":
+          if (hoverClear.current != null) window.clearTimeout(hoverClear.current);
+          if (ev.nodeId) data.setHoverId(ev.nodeId);
+          else hoverClear.current = window.setTimeout(() => data.setHoverId(null), 200);
+          break;
+        case "click": {
+          if (ev.peek && data.peek) {
+            data.focusGroup(data.peek.groupId, ev.nodeId);
+            break;
+          }
+          if (ev.nodeId === data.readingId) {
+            data.setSel(null);
+            break;
+          }
+          data.setSel(ev.nodeId);
+          const kids = g ? childrenOf(g, ev.nodeId).filter((id) => g.nodes[id]) : [];
+          const isMember = !!sc && sc.layout.items.some((i) => i.nodeId === ev.nodeId && i.kind === "node" && !i.peek);
+          if (kids.length && isMember && sc?.pattern !== "compare") {
+            const expanding = data.expandedId !== ev.nodeId;
+            data.toggleExpand(ev.nodeId);
+            setMotion(expanding ? "split" : "merge");
+            setArmed(true);
+            bump();
+            settleMotion(700);
+          }
+          break;
+        }
+        case "dblclick":
+          void data.jumpTo(ev.nodeId);
+          break;
+        case "more": {
+          if (ev.moreKind === "kids") {
+            onOpenInMap(ev.nodeId ?? null, sc?.layout.leafIds ?? []);
+            break;
+          }
+          const members = sc?.layout.items.filter((i) => i.kind === "node" && !i.peek).map((i) => i.nodeId! ) ?? [];
+          if (ev.moreKind === "above") data.setSel(members[0] ?? null);
+          else data.setSel(members[members.length - 1] ?? null);
+          break;
+        }
+        case "action": {
+          switch (ev.name) {
+            case "back":
+              void data.goBack();
+              break;
+            case "jump":
+              if (focus) void data.jumpTo(focus);
+              break;
+            case "explain":
+              if (focus) void data.explain(focus);
+              break;
+            case "closeExplain":
+              data.closeExplain();
+              break;
+            case "deepen":
+              if (focus) void data.deepen(focus);
+              break;
+            case "generate":
+              void data.generateHere();
+              break;
+            case "openInMap":
+              onOpenInMap(focus, sc?.layout.leafIds ?? []);
+              break;
+            case "cmpPrev":
+              setCmpPage((p) => Math.max(0, p - 1));
+              break;
+            case "cmpNext": {
+              const pages = (sc?.layout as PatternLayout & { cmpPages?: number })?.cmpPages ?? 1;
+              setCmpPage((p) => Math.min(pages - 1, p + 1)); // 由版式按实际页数钳制
+              break;
+            }
+          }
+          break;
+        }
+      }
+    },
+    [data, onOpenInMap, bump, settleMotion],
+  );
+
+  // Esc：关闭结构图（焦点不在输入框时）
+  useEffect(() => {
+    if (stage === "closed") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [stage, onClose]);
+
+  if (!scene || stage === "closed") return null;
+  const doc = viewportEl?.ownerDocument ?? document;
+  return createPortal(
+    <FlowLayer
+      scene={scene}
+      onEvent={handle}
+      registerShape={(id, el) => (el ? neckEls.current.set(id, el) : neckEls.current.delete(id))}
+    />,
+    doc.body,
+  );
+}
+
+function samePlan(a: FlowPlan, b: FlowPlan): boolean {
+  return a.mode === b.mode && a.shift === b.shift && a.reserve === b.reserve && a.barX === b.barX && a.labelX === b.labelX && a.labelW === b.labelW;
+}
+
+/** §12.4.4：整列 = [上方预览] + 主体 + [下方预览]；合并时 key 重复保留主体那份 */
+/** §13.2.4：整列 = [上方预览] + 主体 + [下方预览]；三个固定偏移，内部不再自行累加 */
+function mergeLayouts(
+  main: PatternLayout & { members?: string[] },
+  above: PatternLayout | null,
+  below: PatternLayout | null,
+  off: { mainOff: number; aboveOff: number; belowOff: number },
+): PatternLayout {
+  const seen = new Set<string>();
+  const items: FlowItem[] = [];
+  const ports: PatternLayout["ports"] = [];
+  const prims: PatternLayout["prims"] = [];
+  const pushPart = (lay: PatternLayout | null, o: number, isMain: boolean) => {
+    if (!lay) return;
+    for (const it of lay.items) {
+      if (seen.has(it.id)) continue;
+      seen.add(it.id);
+      items.push({ ...it, y: it.y + o, peek: isMain ? it.peek : true });
+    }
+    for (const p of lay.ports) {
+      if (ports.some((x) => x.nodeId === p.nodeId)) continue;
+      ports.push({ ...p, y0: p.y0 + o, y1: p.y1 + o });
+    }
+    for (const pr of lay.prims) {
+      if (pr.k === "path" && pr.grad) {
+        prims.push({ ...pr, off: (pr.off ?? 0) + o, grad: { ...pr.grad, y1: pr.grad.y1 + o, y2: pr.grad.y2 + o } });
+      } else {
+        prims.push({ ...pr, off: (pr.off ?? 0) + o });
+      }
+    }
+  };
+  if (above) pushPart(above, off.aboveOff, false);
+  pushPart(main, off.mainOff, true);
+  if (below) pushPart(below, off.belowOff, false);
+  const leafIds = [...new Set([...main.leafIds, ...(above?.leafIds ?? []), ...(below?.leafIds ?? [])])];
+  return {
+    items,
+    ports,
+    prims,
+    expressed: [...main.expressed],
+    leafIds,
+    height: below ? off.belowOff + below.height : off.mainOff + main.height,
+    readingY: main.readingY != null ? main.readingY + off.mainOff : null,
+    noStrands: main.noStrands,
+    inlineAt: main.inlineAt ? { ...main.inlineAt, y: main.inlineAt.y + off.mainOff } : undefined,
+  };
+}

@@ -376,3 +376,14 @@ deleteMaterialMap(id)                             // 同事务连带物理删除
 
 登记：`AI_DEVELOPMENT_GUIDE.md` §8.1 **D197 / v49.24**、§4.2-17（4 通道 + 1 推送）、§9.5。零 schema / 零设置键 / 零内核契约 / 零调度改动。真实窗口行为（拖动 / 四边缩放 / 置顶 / 跨窗口同步 / 换肤同步）待用户实机验收。
 
+
+## 15. 结构流（取代 §14）
+
+本节只作指针，**实现依据是 `docs/design/STRUCTURE-FLOW-PLAN.md`（v3.1，含文末 §12 修订）**。§14 描述的「独立结构图窗口」形态已随 v49.79 / D250 退役：
+
+- 结构图改为**在阅读界面内**绘制：每段文字的高亮与流向节点列的 Sankey 流带是同一条 SVG 路径（混合层叠在正文上），不再有纸片窗口、`lens:fit`、窗口控制轨与跨进程桥；
+- 层级改由「泳道 + 跨度条 + 字重字号 + 行尾类型字」表达（v3.1 §12.2），对照版式改为无边框「对照表」（§12.3），滚动切换改用「注意力判定 + 邻组预览」（§12.4）；
+- `win:lens` / `lens:ask` / `lens:reply` / `lens:push` / `lens:fit` 与 preload 桥 `window.lensAPI`、`lens.html`、`src/lens.tsx`、`src/lib/lensBridge.ts`、`src/lib/lensWindowFit.ts`、`electron/lensWindow.js`、`src/components/reader/MindmapLens.tsx` 全链删除；
+- AI 侧唯一改动：按 STRUCTURE-FLOW-PLAN §12.3.4 升 `material-map-outline` / `material-map-expand` 提示词到 v2（对照组「维度：内容」约定），`OUTLINE_VERSION` / 解析器 / `material_map_*` 表不变。
+
+验收：`tests/flow.layout` 50/0、`tests/flow.patterns` 46/0、`tests/flow.dom` 25/0；`tsc` 0、i18n 闸门 ✓、`npm run build` ✓、F21 ✓。

@@ -30,10 +30,10 @@ import { consumeOrigin } from "../lib/behavior/origin";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
 import MindmapTab from "./reader/MindmapTab";
-// v49.24（D197）：结构图（阅读透镜 v2）搬进独立窗口——面板不再渲染在本窗口，
-// 本窗口只做「宿主」：推上下文 / 阅读位置，应请求取文、跳正文、画强调（types 见 lib/lensBridge）。
-import type { LensAsk, LensPush } from "../lib/lensBridge";
-import type { ReaderLocation, ReaderStructureRegion } from "../lib/reader/kernel";
+// 结构流（STRUCTURE-FLOW-PLAN §6.4 / §12.1）：结构图融进阅读界面，不再开独立窗口。
+// 本窗口只提供内核与「在完整图谱中打开」的落地。
+import StructureFlowHost from "./reader/flow/StructureFlowHost";
+import type { ReaderLocation } from "../lib/reader/kernel";
 import type { AnnotSort } from "./reader/AnnotationPanel";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { IconChevronDown, IconChevronLeft, IconChevronRight, IconAlert, IconClose } from "./icons";
@@ -676,17 +676,46 @@ export default function Reader({
    * 否则上次离开阅读时窗口开着的用户，下次点开任意书都会被自动弹出的置顶窗口打断 */
   const [lensOpen, setLensOpen] = useState(false);
   const lensSupported = !!lensKernel && typeof lensKernel.getReadingProbe === "function";
-  const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number; flash?: string[] } | null>(null);
-
-  // ---------- 结构图独立窗口的宿主侧（v49.24 / D197）----------
-  // 面板住在结构图窗口（`src/lens.tsx`），正文与内核留在本窗口：上下文 / 阅读位置经主进程**推**过去，
-  // 面板的取文 / 跳正文 / 正文强调 / 「在完整图谱中打开」经主进程**请求**回来。本窗口不渲染面板。
-  const [lensVisible, setLensVisible] = useState(false);
   const lensDocId = contextRef?.documentId ?? null;
   const lensTitle = title || sourceTitle || T("未命名材料");
-  const lensTitleRef = useRef(lensTitle);
-  lensTitleRef.current = lensTitle;
-  /** 「在完整图谱中打开」的执行体（结构图窗口请求触发；用 ref 逃开依赖抖动） */
+  const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number; flash?: string[] } | null>(null);
+
+  // 结构图（STRUCTURE-FLOW-PLAN §12.1）：打开自动收起侧栏，展开侧栏自动关闭结构图；
+  // 用户主动关闭结构图时恢复原来打开的侧栏。打开前等侧栏收起完成由宿主承担。
+  const sidebarBeforeLensRef = useRef<boolean | null>(null);
+  const lensClosedBySidebarRef = useRef(false);
+  // 打开结构图 → 记下侧栏原状态并收起（带滑动过渡）
+  useEffect(() => {
+    if (!lensOpen) return;
+    sidebarBeforeLensRef.current = sidebarOpen;
+    lensClosedBySidebarRef.current = false;
+    if (sidebarOpen) {
+      setRailAnimate(true);
+      setSidebarOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lensOpen]);
+  // 结构图开着时侧栏被展开（用户点「展开」、或「在完整图谱中打开」等任何途径）→ 关闭结构图
+  useEffect(() => {
+    if (sidebarOpen && lensOpen) {
+      lensClosedBySidebarRef.current = true;
+      setLensOpen(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarOpen]);
+  // 结构图被用户关闭（按钮 / Esc）→ 侧栏原本开着就恢复
+  useEffect(() => {
+    if (lensOpen || sidebarBeforeLensRef.current == null) return;
+    const restore = sidebarBeforeLensRef.current && !lensClosedBySidebarRef.current;
+    sidebarBeforeLensRef.current = null;
+    if (restore) {
+      setRailAnimate(true);
+      setSidebarOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lensOpen]);
+
+  /** 「在完整图谱中打开」的执行体（结构图动作触发；用 ref 逃开依赖抖动） */
   const lensOpenInMapRef = useRef<(nodeId: string | null, region?: string[]) => void>(() => {});
   lensOpenInMapRef.current = (nodeId, region) => {
     setSidebarTab("map");
@@ -694,107 +723,14 @@ export default function Reader({
     if (nodeId) setMapFocus({ nodeId, seq: Date.now(), flash: region });
   };
 
-  /** 推一份上下文（文档 / 标题 / 目录 / 单元锚）与当前阅读位置——结构图窗口据此定位 */
-  const pushLensContext = useCallback(() => {
-    const k = kernelRef.current;
-    const api = window.lensAPI;
-    if (!k || !api) return;
-    const payload: LensPush = {
-      kind: "context",
-      payload: {
-        documentId: lensDocId,
-        title: lensTitleRef.current,
-        toc: k.getTOC?.() ?? [],
-        anchors: k.getSectionAnchors?.() ?? []
-      }
-    };
-    api.push(payload);
-    api.push({ kind: "reading", payload: { probe: k.getReadingProbe?.() ?? null, location: k.getCurrentLocation?.() ?? null, fraction: 0 } });
-  }, [lensDocId]);
-
-  // 窗口可见性 / 置顶状态（主进程广播）：窗口被关掉时工具栏开关同步取消，反之亦然
+  // 结构流所需的 DOM 元素（视口 / 平移目标 / 预留槽位）：挂载后取引用（ref 在首渲染时还是 null）
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const engineMainRef = useRef<HTMLDivElement | null>(null);
+  const flowGutterRef = useRef<HTMLDivElement | null>(null);
+  const [flowEls, setFlowEls] = useState<{ viewport: HTMLDivElement | null; main: HTMLDivElement | null; gutter: HTMLDivElement | null } | null>(null);
   useEffect(() => {
-    const off = window.lensAPI?.onWindow?.((s) => {
-      const visible = !!s?.visible;
-      setLensVisible(visible);
-      if (!visible) {
-        setLensOpen(false);
-        // D199：关闭＝隐藏（面板仍挂载在结构图窗口里）——正文强调是结构图独占的绘制层，必须跟着收回，
-        // 否则段落会一直亮着（用户 2026-10-19 实测：关掉结构图后正文仍是焦点/悬停强调色）
-        kernelRef.current?.setStructureHighlights?.([]);
-      }
-    });
-    return () => off?.();
-  }, [setLensOpen]);
-
-  // 工具栏开关 → 窗口开关（内核就绪后才开：窗口一开就会来取上下文）
-  useEffect(() => {
-    if (!lensSupported) return;
-    void window.lensAPI?.control?.(lensOpen ? "show" : "hide");
-  }, [lensOpen, lensSupported]);
-
-  // 窗口可见且内核就绪：推上下文；之后每次重定位再推一次阅读位置
-  useEffect(() => {
-    if (!lensSupported || !lensOpen || !lensVisible) return;
-    const k = kernelRef.current;
-    if (!k) return;
-    pushLensContext();
-    return k.on("relocate", pushLensContext);
-  }, [lensSupported, lensOpen, lensVisible, lensDocId, lensTitle, pushLensContext]);
-
-  // 结构图窗口的请求 / 命令（面板进不去内核，全在这里落地）
-  useEffect(() => {
-    const off = window.lensAPI?.onAsk?.((msg: LensAsk) => {
-      const k = kernelRef.current;
-      if (!msg || !k) return;
-      const api = window.lensAPI;
-      const reply = (id: number, ok: boolean, value?: unknown) => api?.reply?.({ id, ok, value });
-      switch (msg.kind) {
-        case "refresh":
-          pushLensContext();
-          break;
-        case "sectionText": {
-          const run = k.getSectionText ? k.getSectionText(msg.payload.anchor) : Promise.resolve("");
-          Promise.resolve(run)
-            .then((text) => reply(msg.id, true, String(text ?? "")))
-            .catch(() => reply(msg.id, false));
-          break;
-        }
-        case "goto": {
-          Promise.resolve(k.goTo(msg.payload.target as ReaderLocation))
-            .then((ok) => reply(msg.id, true, !!ok))
-            .catch(() => reply(msg.id, false));
-          break;
-        }
-        case "highlights":
-          k.setStructureHighlights?.((msg.payload as ReaderStructureRegion[]) || []);
-          break;
-        case "openInMap":
-          lensOpenInMapRef.current(msg.payload?.nodeId ?? null, msg.payload?.region);
-          break;
-      }
-    });
-    return () => off?.();
-  }, [pushLensContext]);
-
-  // 离开阅读界面：收起结构图窗口并清正文强调（强调是结构图独占的绘制层）。
-  // 延到下一个宏任务执行：StrictMode 下挂载效应会「跑一遍 → 清理 → 再跑一遍」，
-  // 若在清理里直接收窗，主进程的 lens:window「已隐藏」广播会在重新订阅之后到达，
-  // 反而把工具栏开关与 localStorage 一并关掉（开发态每次挂载都会关一次）。
-  const lensCloseTimerRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (lensCloseTimerRef.current != null) {
-      window.clearTimeout(lensCloseTimerRef.current);
-      lensCloseTimerRef.current = null;
-    }
-    return () => {
-      lensCloseTimerRef.current = window.setTimeout(() => {
-        lensCloseTimerRef.current = null;
-        void window.lensAPI?.control?.("hide");
-        kernelRef.current?.setStructureHighlights?.([]);
-      }, 0);
-    };
-  }, []);
+    setFlowEls({ viewport: viewportRef.current, main: engineMainRef.current, gutter: flowGutterRef.current });
+  }, [engineRetry, engineSource]);
   /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
   const [annotSort, setAnnotSort] = useState<AnnotSort>("pos");
   /** v48.44（D84）：图谱页签画布的 portal 宿主（.reader-engine-main 内覆盖层；空＝不渲染画布） */
@@ -2308,13 +2244,13 @@ export default function Reader({
                 {/* D88 §5.2：页码/章节位（meta 档 mono）——工具栏右端新增；无数据不渲染 */}
                 {readerPageInfoText ? <span className="reader-pageinfo mono">{readerPageInfoText}</span> : null}
               </div>
-              <div className="reader-engine-viewport">
+              <div className="reader-engine-viewport" ref={viewportRef}>
                 {/* v48.45（D85）：侧栏已升为全高左轨（.reader-side-rail，在 layout 层），视口里只剩正文区；
                     翻页热区只覆盖正文区（.reader-engine-main）。 */}
                 {/* v48.45（D85）：侧栏已升为全高左轨（.reader-side-rail，在 layout 层），视口里只剩正文区；
                     翻页热区只覆盖正文区（.reader-engine-main）。
                     D88 §5.3：marksEnter＝首批标记装载的「划笔」入场容器类（1200ms 后摘除）。 */}
-                <div className={`reader-engine-main${marksEnter ? " reader-marks-enter" : ""}`}>
+                <div className={`reader-engine-main flow-shift-target${marksEnter ? " reader-marks-enter" : ""}`} ref={engineMainRef}>
                 {engineError ? (
                   <div className="reader-engine-error" role="alert">
                     <p className="reader-engine-error-title">
@@ -2380,7 +2316,23 @@ export default function Reader({
                     翻页热区 z 4 与错误面板），空时 display:none 不遮正文；画布经 MindmapTab portal 落入 */}
                 <div className="reader-map-layer" data-reader-map-layer ref={setMapLayerHost} />
                 </div>
+                {/* 结构流预留槽位（§6.4）：放在视口内、正文区之后；槽宽由宿主一步到位设置，淡出遮住重排 */}
+                <div className="reader-flow-gutter" data-reader-flow-gutter aria-hidden="true" ref={flowGutterRef} />
               </div>
+              {/* 结构流宿主：渲染层 portal 到 body；不新增窗口 / preload / IPC */}
+              <StructureFlowHost
+                kernel={lensKernel}
+                documentId={lensDocId}
+                title={lensTitle}
+                open={lensOpen && lensSupported}
+                covered={sidebarOpen && sidebarTab === "map" && !!mapLayerHost}
+                scrolled={readerSettings.mode.flow !== "paged"}
+                viewportEl={flowEls?.viewport ?? null}
+                shiftEl={flowEls?.main ?? null}
+                gutterEl={flowEls?.gutter ?? null}
+                onClose={() => setLensOpen(false)}
+                onOpenInMap={(id, region) => lensOpenInMapRef.current(id, region)}
+              />
               </div>
               </div>
             </>

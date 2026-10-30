@@ -3083,13 +3083,14 @@ function ensurePromptTemplates() {
       }
     }
   } catch { /* 播种失败不阻塞启动 */ }
-  // v49.19（D192，IMPL-PLAN §4.4）：导图 v2 行协议三 scope，目标版本 1（MAX(version) < 目标即插入；situationRequiredFor 返回 0）。
+  // v49.19（D192，IMPL-PLAN §4.4）：导图 v2 行协议三 scope；v49.79（D250）：outline / expand 目标版本 2
+  // （对照组「维度：内容」约定，STRUCTURE-FLOW-PLAN §12.3.4；MAX(version) < 目标即插入；situationRequiredFor 返回 0）。
   // 消费引擎 = electron/mindmapEngineV2.js（运行时 getPromptTemplate(scope).content 作 system）。
   try {
-    const MM2_TARGETS = { "material-map-outline": 1, "material-map-expand": 1, "material-map-explain": 1 };
+    const MM2_TARGETS = { "material-map-outline": 2, "material-map-expand": 2, "material-map-explain": 1 };
     for (const [scope, name, content] of [
-      ["material-map-outline", "导图框架 v1", MATERIAL_MAP_OUTLINE_PROMPT],
-      ["material-map-expand", "导图深挖 v1", MATERIAL_MAP_EXPAND_PROMPT],
+      ["material-map-outline", "导图框架 v2", MATERIAL_MAP_OUTLINE_PROMPT],
+      ["material-map-expand", "导图深挖 v2", MATERIAL_MAP_EXPAND_PROMPT],
       ["material-map-explain", "节点讲解 v1", MATERIAL_MAP_EXPLAIN_PROMPT]
     ]) {
       const maxV = queryAll("SELECT MAX(version) AS v FROM prompt_templates WHERE scope = ?", [scope])[0]?.v || 0;

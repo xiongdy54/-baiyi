@@ -57,9 +57,9 @@ console.log("---- 2 账本新列 ----");
 console.log("---- 3 提示词三 scope 播种 ----");
 {
   check("db.js 引入三常量", /MATERIAL_MAP_OUTLINE_PROMPT,\s*MATERIAL_MAP_EXPAND_PROMPT,\s*MATERIAL_MAP_EXPLAIN_PROMPT,/.test(src));
-  for (const [scope, name, c] of [["material-map-outline", "导图框架 v1", "OUTLINE"], ["material-map-expand", "导图深挖 v1", "EXPAND"], ["material-map-explain", "节点讲解 v1", "EXPLAIN"]]) {
+  for (const [scope, name, c] of [["material-map-outline", "导图框架 v2", "OUTLINE"], ["material-map-expand", "导图深挖 v2", "EXPAND"], ["material-map-explain", "节点讲解 v1", "EXPLAIN"]]) {
     check(`播种 ${scope}「${name}」`, has(new RegExp(`\\["${scope}", "${name}", MATERIAL_MAP_${c}_PROMPT\\]`)));
-    check(`${scope} 目标版本 1`, has(new RegExp(`"${scope}": 1`)));
+    check(`${scope} 目标版本 ${scope === "material-map-explain" ? 1 : 2}`, has(new RegExp(`"${scope}": ${scope === "material-map-explain" ? 1 : 2}`)));
   }
   check("沿用「MAX(version) < 目标即插入」", /MM2_TARGETS\[scope\]\) \{[\s\S]{0,200}INSERT INTO prompt_templates/.test(src));
   check("situationRequiredFor 对三 scope 返回 0（不在 SITUATION_REQUIRED_SCOPES）", (() => {

@@ -126,7 +126,7 @@ function position(w) {
 
 /** 屏幕布局变化（显示器休眠 / 拔出 / 重排）后，上次的位置可能落在任何工作区之外——
  * 此时 show 出来用户也看不见。完全离屏（与所有 workArea 零交集）才判离屏：
- * 用户故意拖到边缘只露一条的摆放不动。（与 lensWindow.offScreen 同判据，D201） */
+ * 用户故意拖到边缘只露一条的摆放不动。（与 D201 同判据） */
 function offScreen(w) {
   try {
     const b = w.getBounds();

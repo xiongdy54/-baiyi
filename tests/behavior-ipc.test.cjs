@@ -49,12 +49,11 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
   check("lens/workbench/capture 无管理面权限（角色矩阵）", !roles.canCall("lens", "purge") && !roles.canCall("workbench", "export") && !roles.canCall("capture", "clearQueryText"), "拒绝", "放行");
   check("捕获 preload 只有 batch/onConfig", /behaviorAPI/.test(capturePreload) && /"behavior:batch"/.test(capturePreload) && /"behavior:config"/.test(capturePreload) && !/"behavior:status"/.test(capturePreload), "batch+onConfig", "越权");
   check("捕获窗口加载的是 preload-capture.js（与主 preload 文件分离）", /preload-capture\.js/.test(read("electron/quickCapture.js")), "分离", "混用");
-  const lensSrc = read("electron/lensWindow.js");
   const wbSrc = read("electron/workbenchWindow.js");
   const capSrc = read("electron/quickCapture.js");
   const mainSrc = read("electron/main.js");
-  check("窗口工厂注入 --bdi-role（lens/workbench/capture/main）",
-    /--bdi-role=lens/.test(lensSrc) && /--bdi-role=workbench/.test(wbSrc) && /--bdi-role=capture/.test(capSrc) && /--bdi-role=main/.test(mainSrc), "四窗口", "缺");
+  check("窗口工厂注入 --bdi-role（workbench/capture/main；lens 窗口已随结构流 v3.1 退役）",
+    /--bdi-role=workbench/.test(wbSrc) && /--bdi-role=capture/.test(capSrc) && /--bdi-role=main/.test(mainSrc), "三窗口", "缺");
 
   console.log("== C 主进程角色门（静态） ==");
   check("behavior:batch 按 canCall 复核（不信任渲染层）", /canCall\(role, "batch"\)/.test(mainSrc), "门存在", "缺");

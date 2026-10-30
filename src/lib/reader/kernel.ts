@@ -179,6 +179,60 @@ export interface ReaderStructureRegion {
   tone: "focus" | "hover";
 }
 
+/** 结构流：段落定位（只找 Range、不画任何东西；STRUCTURE-FLOW-PLAN §4.1） */
+export interface ReaderStructureTarget {
+  key: string;
+  nodeId: string;
+  unitAnchor: string;
+  head: string;
+  tail: string;
+}
+/** 结构流：宿主 client 坐标（与 getSelectionGeometry 同一坐标系），已裁到正文视口 */
+export interface ReaderParagraphBox {
+  key: string;
+  nodeId: string;
+  block: number;
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+  column: number;
+  clipTop: boolean;
+  clipBottom: boolean;
+  /** §13.3：所在章节下标，以及章节文档坐标（＝iframe 视口坐标 + 文档自身滚动；不裁剪，滚动时不变） */
+  doc?: number;
+  cTop?: number;
+  cBottom?: number;
+  cLeft?: number;
+  cRight?: number;
+}
+/** §13.3.1：正文 iframe 内要绘制的段落高亮矩形（文档坐标，随正文原生滚动） */
+export interface ReaderStructurePaintRect {
+  key: string;
+  doc: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  color: string;
+  alpha: number;
+}
+export interface ReaderStructureGeometry {
+  seq: number;
+  viewport: { left: number; top: number; right: number; bottom: number };
+  /** 按 left 升序 */
+  columns: { left: number; right: number }[];
+  boxes: ReaderParagraphBox[];
+  /** 可见文本版心 */
+  text: { left: number; right: number } | null;
+}
+/** 结构流：按阅读顺序在视口内取样（frac∈[0,1]，双栏时先左栏后右栏；§12.4.1） */
+export interface ReaderReadingProbe {
+  frac: number;
+  unitAnchor: string;
+  text: string;
+}
+
 export interface ReaderKernel {
   open(source: BookSource, init?: { location?: ReaderLocation }): Promise<void>;
   /** 跳转：CFI 位置 / 页码（PDF 引擎）/ 章节索引 / 目录 href / 文本搜索定位（返回是否发生导航） */
@@ -260,6 +314,28 @@ export interface ReaderKernel {
    * 章节重新加载后由内核自行重画；找不到探针的段静默跳过。
    */
   setStructureHighlights?(regions: ReaderStructureRegion[]): void;
+  /**
+   * 结构流（STRUCTURE-FLOW-PLAN §4.1，可选能力）：整体替换「结构流要高亮的段落」目标；
+   * 内核只找 Range、不画任何东西（绘制在宿主层）。空数组＝清空。
+   */
+  setStructureTargets?(targets: ReaderStructureTarget[]): void;
+  /**
+   * 结构流几何采样（§4.2 / §13.3.1，可选能力）：返回当前已加载文档里目标段落的 box（宿主 client 坐标、
+   * 已裁到正文视口），以及视口 / 栏 / 版心。`all=true` 时返回全部目标段落（不按视口纵向过滤；横向仍过滤，
+   * 供滚动模式把正文矩形画进 iframe）。PDF 不实现（宿主静默降级为只画节点列）。
+   */
+  getStructureGeometry?(opts?: { all?: boolean }): ReaderStructureGeometry | null;
+  /**
+   * 结构流：按阅读顺序在视口内多点取样（§12.4.1，可选能力）。frac∈[0,1]，双栏时按「左栏→右栏」
+   * 一条长带分布；返回该点所在段落开头的文字与提取单元锚。引擎不支持 / 全部落空时宿主退回单探针。
+   */
+  getReadingProbes?(fracs: number[]): ReaderReadingProbe[];
+  /** §13.3.1：正文滚动的逐帧通知（同步回调；foliate＝renderer 的 scroll 事件） */
+  onContentScroll?(cb: () => void): () => void;
+  /** §13.3.1：各已加载章节文档原点此刻的屏幕坐标（＝iframe 的 client rect − 文档自身滚动）；每帧调用，只做读取 */
+  getFrameOffsets?(): Record<number, { left: number; top: number }>;
+  /** §13.3.1：在正文文档内绘制段落高亮矩形（随正文原生滚动）；传 [] 表示淡出并清除 */
+  setStructurePaint?(rects: ReaderStructurePaintRect[], o: { blend: "multiply" | "screen"; fadeMs: number }): void;
   destroy(): void;
   /** 重定位（进度/统计/目录高亮数据源） */
   on(event: "relocate", handler: (info: RelocateInfo) => void): () => void;

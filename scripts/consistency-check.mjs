@@ -39,6 +39,9 @@ const COLOR_ALLOW = [
   /^src\/skins\/[^/]+\/manifest\.ts$/,
   /^src\/lib\/accentVar\.ts$/,
   /^src\/lib\/reader\/foliate\/appearance\.ts$/,
+  // 结构流宿主：用 .flow-probe 把阅读主题 Token 解析成实色交给 SVG；这里的字面量只是
+  // 「Token 未装载 / jsdom 无法求值 var()」时的回落色板（不是业务配色，皮肤可覆盖 Token 后即被解析值替换）
+  /^src\/components\/reader\/flow\/StructureFlowHost\.tsx$/,
 ];
 const isColorAllowed = (rel) => COLOR_ALLOW.some((re) => re.test(rel));
 

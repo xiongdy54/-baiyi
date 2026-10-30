@@ -243,8 +243,6 @@ const dictStore = require("./dictStore");
 const quickCapture = require("./quickCapture");
 // D123：独立制卡台窗口与系统托盘（见 docs/design/CARD-WORKBENCH-D123.md）
 const workbenchWindow = require("./workbenchWindow");
-// v49.24（D197）：独立结构图窗口（阅读透镜 v2 面板承载；IPC 四通道 + lens:window 广播在其内注册）
-const lensWindow = require("./lensWindow");
 // v48.89（D132，设计 docs/design/PLUGIN-SYSTEM-D132.md）：插件/主题宿主——惰性扫描（启动主流程
 // 不触碰插件目录，§4.7），对 <userData>/plugins/ 零写入（§4.6）；IPC 四通道 + plugins:changed 广播在其内注册
 const pluginHost = require("./pluginHost");
@@ -487,15 +485,16 @@ ipcMain.handle("behavior:query", (e, name, params) => {
   return behavior.runQuery(String(name || ""), params && typeof params === "object" ? params : {});
 });
 // §11：管理面只给主窗口（导出 / 清除 / 清除查询原文 / 保留期执行）
-const behaviorMainOnly = (method, fn) => ipcMain.handle(`behavior:${method}`, (e, ...args) => {
+// v49.79（D250 收口）：通道名用字面量直接登记（原模板字符串 `behavior:${method}` 让 F21 静态对账看不到注册）。
+const behaviorGuard = (method, fn) => (e, ...args) => {
   const role = behaviorRoleOf(e);
   if (!role || !behaviorRoles.canCall(role, method)) throw new Error("BDI：该窗口无权执行此操作");
   return fn(...args);
-});
-behaviorMainOnly("purge", () => behavior.purgeAll());
-behaviorMainOnly("clearQueryText", () => behavior.clearQueryText());
-behaviorMainOnly("retention", () => behavior.enforceRetention());
-behaviorMainOnly("export", async (opts) => {
+};
+ipcMain.handle("behavior:purge", behaviorGuard("purge", () => behavior.purgeAll()));
+ipcMain.handle("behavior:clearQueryText", behaviorGuard("clearQueryText", () => behavior.clearQueryText()));
+ipcMain.handle("behavior:retention", behaviorGuard("retention", () => behavior.enforceRetention()));
+ipcMain.handle("behavior:export", behaviorGuard("export", async (opts) => {
   let dest = String(opts?.path || "");
   if (!dest) {
     const r = await dialog.showSaveDialog({
@@ -506,7 +505,7 @@ behaviorMainOnly("export", async (opts) => {
     dest = r.filePath;
   }
   return behavior.exportData(dest, { includeText: opts?.includeText === true });
-});
+}));
 
 ipcMain.handle("library:list", async () => {
   await dbReadyGate;
@@ -2415,8 +2414,6 @@ app.whenReady().then(async () => {
   // D123：独立制卡台窗口 + 系统托盘（失败不阻塞启动）
   try {
     workbenchWindow.init({ readSettings });
-    // v49.24（D197）：独立结构图窗口（与制卡台同纪律：隐藏复用 + 默认置顶 + 贴主窗口右侧）
-    lensWindow.init({ readSettings, getMainWindow: () => mainWindow });
     tray.init({
       showMain: () => {
         if (!focusMainWindow()) createWindow();
@@ -2560,7 +2557,6 @@ app.on("before-quit", () => {
   appQuitting = true;
   quickCapture.prepareQuit();
   workbenchWindow.prepareQuit();
-  lensWindow.prepareQuit();
   tray.destroy();
 });
 

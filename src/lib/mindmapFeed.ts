@@ -12,8 +12,7 @@ export interface TocItem {
 }
 
 /**
- * 原文送入只需要内核的取文能力（v49.24 / D197）：阅读窗口直传真实内核（结构上是它的超集），
- * 结构图独立窗口传经 preload 桥代理的 LensKernel（src/lib/lensBridge.ts）——同一份送入流程两处共用。
+ * 原文送入只需要内核的取文能力（v49.24 / D197）：阅读窗口直传真实内核。
  */
 export interface FeedKernel {
   getTOC(): ReaderTocItem[];

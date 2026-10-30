@@ -876,60 +876,6 @@
     "kind": "invoke"
   },
   {
-    "bridge": "lensAPI",
-    "method": "ask",
-    "channel": "lens:ask",
-    "kind": "send"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "control",
-    "channel": "win:lens",
-    "kind": "invoke"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "fit",
-    "channel": "lens:fit",
-    "kind": "invoke"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "onAsk",
-    "channel": "lens:askIn",
-    "kind": "on"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "onPush",
-    "channel": "lens:pushIn",
-    "kind": "on"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "onReply",
-    "channel": "lens:replyIn",
-    "kind": "on"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "onWindow",
-    "channel": "lens:window",
-    "kind": "on"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "push",
-    "channel": "lens:push",
-    "kind": "send"
-  },
-  {
-    "bridge": "lensAPI",
-    "method": "reply",
-    "channel": "lens:reply",
-    "kind": "send"
-  },
-  {
     "bridge": "libraryAPI",
     "method": "createFromBookFile",
     "channel": "library:createFromBookFile",

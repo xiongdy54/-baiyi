@@ -55,11 +55,11 @@ const injected = plugin.transformIndexHtml(sample);
 assert.strictEqual((injected.match(/Content-Security-Policy/g) || []).length, 1, "必须恰好注入 1 个 meta");
 assert.ok(injected.indexOf("Content-Security-Policy") < injected.indexOf("<script"), "meta 必须先于脚本");
 assert.ok(injected.includes(`content="${CSP_POLICY}"`), "注入内容必须与唯一策略源一致");
-for (const file of ["index.html", "lens.html", "workbench.html", "capture.html"]) {
+for (const file of ["index.html", "workbench.html", "capture.html"]) {
   const source = fs.readFileSync(path.join(__dirname, "..", file), "utf8");
   assert.strictEqual(source.split("<head>").length - 1, 1, `${file} 必须恰好一个 <head> 注入点`);
 }
-console.log("  ✓ 四个入口均有唯一 <head>，注入位置先于脚本");
+console.log("  ✓ 三个入口均有唯一 <head>，注入位置先于脚本");
 
 console.log("== 3 权限处理器决策矩阵 ==");
 const { ALLOWED_PERMISSIONS, installPermissionHandlers } = require("../electron/permissions");

@@ -37,9 +37,10 @@ function feed(ex, basePath) {
 const cjk = (s) => (s.match(/[㐀-鿿]/g) || []).length;
 
 // 迁入前（prompt-lab 版）三段 system 文本的冻结指纹——T2 逐字迁入守护；改提示词须同时升版本并更新此表
+// v49.79（D250 / STRUCTURE-FLOW-PLAN §12.3.4）：对照组约定 +「维度：内容」示例三 → outline / expand 指纹已更新
 const FROZEN = {
-  OUTLINE_SYSTEM: { len: 2182, sha256: "1ad231fd6f7818d95044801001b260b1bf3ac8aa4d971d0c7f91e686b9823bbf", main: "MATERIAL_MAP_OUTLINE_PROMPT" },
-  EXPAND_SYSTEM: { len: 1799, sha256: "e92e3d0dff4773a1e17562cab5afed7e7d9dcba8b82ec5f059db52d5de5d2a86", main: "MATERIAL_MAP_EXPAND_PROMPT" },
+  OUTLINE_SYSTEM: { len: 2280, sha256: "026e2e3776672b3f386febf415112740b621cf25756abe5b5fc161a149ba8a4d", main: "MATERIAL_MAP_OUTLINE_PROMPT" },
+  EXPAND_SYSTEM: { len: 1891, sha256: "661ec363a6e794b8aa5e9ab8bd25fe28c614779caef7e96821bffac5d435bc2b", main: "MATERIAL_MAP_EXPAND_PROMPT" },
   EXPLAIN_SYSTEM: { len: 524, sha256: "14bb4bb7d4bb44c569ab4bfed3f47f413be96c3651cbd3c91e6e62b4003c0778", main: "MATERIAL_MAP_EXPLAIN_PROMPT" }
 };
 console.log("---- 0 迁入逐字守护（prompts.js 常量 === 冻结文本） ----");

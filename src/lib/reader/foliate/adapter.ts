@@ -24,9 +24,14 @@ import type {
   ReaderKernel,
   ReaderLocation,
   ReaderModeConfig,
+  ReaderParagraphBox,
+  ReaderReadingProbe,
   ReaderRect,
   ReaderSelection,
+  ReaderStructureGeometry,
+  ReaderStructurePaintRect,
   ReaderStructureRegion,
+  ReaderStructureTarget,
   ReaderTocItem,
   RelocateInfo
 } from "../kernel";
@@ -241,11 +246,26 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
   // 会在滚动帧里强制几何计算。滚动后一小段时间内跳过标记命中，滚动停下并再次移动指针才恢复悬停。
   let lastScrollAt = 0;
   let scrollTracked: HTMLElement | null = null;
+  /** §13.3.1：正文逐帧滚动通知（宿主借此同步彩带；不做防抖） */
+  const scrollHandlers = new Set<() => void>();
   const trackScrollActivity = () => {
     const renderer = view.renderer as unknown as HTMLElement | null;
     if (!renderer || scrollTracked === renderer) return;
     scrollTracked = renderer;
-    renderer.addEventListener("scroll", () => { lastScrollAt = performance.now(); }, { passive: true });
+    renderer.addEventListener(
+      "scroll",
+      () => {
+        lastScrollAt = performance.now();
+        for (const h of scrollHandlers) {
+          try {
+            h();
+          } catch {
+            /* 宿主错误不影响阅读 */
+          }
+        }
+      },
+      { passive: true },
+    );
   };
   /** 阅读透镜探针：最近一次 relocate 的可见起点 Range 与章节下标（getReadingProbe 用） */
   let lastProbe: { range: Range | null; index: number } | null = null;
@@ -443,8 +463,213 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     }
   };
   const paintAllStruct = () => {
-    for (const index of docs.keys()) paintStructForDoc(index);
+    for (const index of docs.keys()) {
+      locateStructForDoc(index);
+      paintStructForDoc(index);
+    }
   };
+
+  // ---------- 结构流（STRUCTURE-FLOW-PLAN §4.2）：段落定位与几何采样（只找 Range、不画任何东西） ----------
+  const BLOCK_SEL = "p,li,h1,h2,h3,h4,h5,h6,blockquote,dd,dt,td,th,figcaption,pre";
+  let structTargets: ReaderStructureTarget[] = [];
+  const structRanges = new Map<Document, { key: string; nodeId: string; range: Range }[]>();
+  let blockCache = new WeakMap<Range, Element[]>();
+  const locateStructForDoc = (index: number) => {
+    const doc = docs.get(index);
+    if (!doc) return;
+    const list: { key: string; nodeId: string; range: Range }[] = [];
+    const mine = structTargets.filter((t) => resolveSectionIndex(t.unitAnchor) === index);
+    if (mine.length) {
+      const root = (doc.body || doc.documentElement) as Node | null;
+      if (root) {
+        const idx = buildTextIndex(root);
+        for (const t of mine) {
+          const span = findFlatSpan(idx, t.head, t.tail);
+          const range = span ? spanToRange(doc, idx, span) : null;
+          if (range) list.push({ key: t.key, nodeId: t.nodeId, range });
+        }
+      }
+    }
+    structRanges.set(doc, list);
+    blockCache = new WeakMap();
+  };
+  let geoSeq = 0;
+  const blockIds = new WeakMap<Element, number>();
+  let blockNext = 1;
+  let lastGeometryCols: { left: number; right: number }[] = [];
+  function leafBlocks(range: Range): Element[] {
+    const hit = blockCache.get(range);
+    if (hit) return hit;
+    const c = range.commonAncestorContainer;
+    const el = (c.nodeType === 1 ? c : c.parentElement) as Element | null;
+    const own = el?.closest?.(BLOCK_SEL);
+    const list = own
+      ? [own]
+      : Array.from(el?.querySelectorAll?.(BLOCK_SEL) ?? []).filter((b) => range.intersectsNode(b) && !b.querySelector(BLOCK_SEL));
+    blockCache.set(range, list);
+    return list;
+  }
+  const getStructureGeometry = (opts?: { all?: boolean }): ReaderStructureGeometry | null => {
+    const vr = view.getBoundingClientRect(); // 坐标换算与 getSelectionGeometryFromContents 同规（frame 偏移相加）
+    const vp = { left: vr.left, top: vr.top, right: vr.right, bottom: vr.bottom };
+    const raw: Omit<ReaderParagraphBox, "column">[] = [];
+    let tl = Infinity, tr = -Infinity;
+    for (const [index, doc] of docs) {
+      const fr = doc.defaultView?.frameElement?.getBoundingClientRect();
+      if (!fr) continue;
+      const se = doc.scrollingElement, sx = se?.scrollLeft ?? 0, sy = se?.scrollTop ?? 0;
+      let n = 0;
+      for (const b of Array.from(doc.querySelectorAll(BLOCK_SEL))) {
+        if (n >= 40) break;
+        const r = b.getBoundingClientRect();
+        const L = r.left + fr.left, R = r.right + fr.left, cy = (r.top + r.bottom) / 2 + fr.top;
+        if ((L + R) / 2 < vp.left || (L + R) / 2 > vp.right || cy < vp.top || cy > vp.bottom || r.width < 40) continue;
+        tl = Math.min(tl, L);
+        tr = Math.max(tr, R);
+        n++;
+      }
+      for (const { key, nodeId, range } of structRanges.get(doc) ?? []) {
+        const blocks = leafBlocks(range);
+        const rects = blocks.length
+          ? blocks.map((b) => [b, b.getBoundingClientRect()] as const)
+          : [[null, range.getBoundingClientRect()] as const];
+        for (const [b, r] of rects) {
+          const L = r.left + fr.left, R = r.right + fr.left, T0 = r.top + fr.top, B0 = r.bottom + fr.top;
+          const cx = (L + R) / 2;
+          if (cx < vp.left || cx > vp.right) continue; // 翻页模式下别的页
+          const top = Math.max(T0, vp.top), bottom = Math.min(B0, vp.bottom);
+          if (!opts?.all && bottom - top < 6) continue;
+          let id = 0;
+          if (b) {
+            id = blockIds.get(b) ?? 0;
+            if (!id) {
+              id = blockNext++;
+              blockIds.set(b, id);
+            }
+          }
+          raw.push({
+            key, nodeId, block: id, top, bottom, left: L, right: R, clipTop: T0 < vp.top, clipBottom: B0 > vp.bottom,
+            doc: index, cTop: r.top + sy, cBottom: r.bottom + sy, cLeft: r.left + sx, cRight: r.right + sx,
+          });
+        }
+      }
+    }
+    const sorted = raw.slice().sort((a, b) => a.left + a.right - (b.left + b.right));
+    const cols: { left: number; right: number; cx: number; n: number }[] = [];
+    const boxes: ReaderParagraphBox[] = [];
+    const thr = (vp.right - vp.left) * 0.2;
+    for (const bx of sorted) {
+      const cx = (bx.left + bx.right) / 2;
+      let ci = cols.length - 1;
+      if (ci < 0 || cx - cols[ci].cx > thr) {
+        cols.push({ left: bx.left, right: bx.right, cx, n: 1 });
+        ci = cols.length - 1;
+      } else {
+        const c = cols[ci];
+        c.left = Math.min(c.left, bx.left);
+        c.right = Math.max(c.right, bx.right);
+        c.cx = (c.cx * c.n + cx) / (c.n + 1);
+        c.n++;
+      }
+      boxes.push({ ...bx, column: ci });
+    }
+    lastGeometryCols = cols.map(({ left, right }) => ({ left, right }));
+    return {
+      seq: ++geoSeq,
+      viewport: vp,
+      columns: lastGeometryCols,
+      boxes,
+      text: Number.isFinite(tl) ? { left: tl, right: tr } : null,
+    };
+  };
+  const getReadingProbes = (fracs: number[]): ReaderReadingProbe[] => {
+    const vr = view.getBoundingClientRect();
+    const cols = lastGeometryCols.length ? lastGeometryCols : [{ left: vr.left + vr.width * 0.2, right: vr.right - vr.width * 0.2 }];
+    return fracs.map((f) => {
+      const v = Math.min(0.999, Math.max(0, f)) * cols.length;
+      const col = cols[Math.floor(v)], fy = v - Math.floor(v);
+      const x = (col.left + col.right) / 2, y = vr.top + fy * vr.height;
+      for (const [index, doc] of docs) {
+        const fr = doc.defaultView?.frameElement?.getBoundingClientRect();
+        if (!fr) continue;
+        if (x < fr.left || x > fr.right || y < fr.top || y > fr.bottom) continue;
+        const el = doc.elementFromPoint(x - fr.left, y - fr.top);
+        const block = (el?.closest?.(BLOCK_SEL) ?? null) as Element | null;
+        if (!block) continue;
+        const sections = (view.book?.sections ?? []) as { id?: string; href?: string }[];
+        const unitAnchor = String(sections[index]?.id ?? sections[index]?.href ?? "");
+        const text = String(block.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+        if (unitAnchor && text) return { frac: f, unitAnchor, text };
+      }
+      return { frac: f, unitAnchor: "", text: "" };
+    });
+  };
+  /** §13.3.2：正文段落高亮矩形（绝对定位 div；与文字同一滚动层，随正文原生滚动） */
+  const paintRoots = new WeakMap<Document, { root: HTMLDivElement; els: Map<string, HTMLDivElement> }>();
+  let paintSpec: { rects: ReaderStructurePaintRect[]; blend: string; fadeMs: number } = { rects: [], blend: "multiply", fadeMs: 160 };
+  const paintForDoc = (index: number) => {
+    const doc = docs.get(index);
+    if (!doc?.body) return;
+    const mine = paintSpec.rects.filter((r) => r.doc === index);
+    let P = paintRoots.get(doc);
+    if (!P || !P.root.isConnected) {
+      if (!mine.length) return;
+      const root = doc.createElement("div");
+      root.setAttribute("data-flow-paint", "1");
+      root.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:2147483646;";
+      doc.body.appendChild(root);
+      P = { root, els: new Map() };
+      paintRoots.set(doc, P);
+    }
+    P.root.style.mixBlendMode = paintSpec.blend;
+    const base = P.root.getBoundingClientRect();
+    const se = doc.scrollingElement, ox = base.left + (se?.scrollLeft ?? 0), oy = base.top + (se?.scrollTop ?? 0);
+    const seen = new Set<string>();
+    for (const r of mine) {
+      seen.add(r.key);
+      let el = P.els.get(r.key);
+      const fresh = !el;
+      if (!el) {
+        el = doc.createElement("div");
+        el.style.cssText = `position:absolute;border-radius:3px 0 0 3px;pointer-events:none;opacity:0;transition:opacity ${paintSpec.fadeMs}ms ease,background-color 240ms ease;`;
+        P.root.appendChild(el);
+        P.els.set(r.key, el);
+      }
+      el.style.left = `${r.left - ox}px`;
+      el.style.top = `${r.top - oy}px`;
+      el.style.width = `${r.width}px`;
+      el.style.height = `${r.height}px`;
+      el.style.backgroundColor = r.color;
+      const target = String(r.alpha);
+      if (fresh) {
+        const e = el;
+        requestAnimationFrame(() => {
+          e.style.opacity = target;
+        });
+      } else el.style.opacity = target;
+    }
+    for (const [k, el] of P.els)
+      if (!seen.has(k)) {
+        el.style.opacity = "0";
+        P.els.delete(k);
+        window.setTimeout(() => el.remove(), paintSpec.fadeMs + 40);
+      }
+  };
+  const setStructurePaint = (rects: ReaderStructurePaintRect[], o?: { blend?: "multiply" | "screen"; fadeMs?: number }) => {
+    paintSpec = { rects: Array.isArray(rects) ? rects : [], blend: o?.blend ?? "multiply", fadeMs: o?.fadeMs ?? 160 };
+    for (const i of docs.keys()) paintForDoc(i);
+  };
+  const getFrameOffsets = () => {
+    const out: Record<number, { left: number; top: number }> = {};
+    for (const [i, doc] of docs) {
+      const fr = doc.defaultView?.frameElement?.getBoundingClientRect();
+      if (!fr) continue;
+      const se = doc.scrollingElement;
+      out[i] = { left: fr.left - (se?.scrollLeft ?? 0), top: fr.top - (se?.scrollTop ?? 0) };
+    }
+    return out;
+  };
+
   /** 主题切换后重算各文档的注入样式（值派生自 --accent，深浅两档不同） */
   const refreshMarkStyles = () => {
     markStyles.forEach((_, doc) => ensureMarkStyle(doc));
@@ -590,7 +815,9 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       true
     );
     paintMarksForDoc(index);
+    locateStructForDoc(index);
     paintStructForDoc(index);
+    paintForDoc(index);
     // v25 图片点选：正文图片点击 → 语义化为 ReaderImageRef（src + 宿主坐标框）。
     // 链接内的图片让位给链接（foliate 自带的 click 处理器负责导航），不dual触发图片聚焦。
     doc.addEventListener("click", (ev: MouseEvent) => {
@@ -854,6 +1081,29 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       structRegions = Array.isArray(regions) ? regions.filter((r) => r && r.unitAnchor && r.head) : [];
       paintAllStruct();
     },
+
+    // 结构流（§4.1 / §4.2）：只找 Range 与量几何，不画任何东西
+    setStructureTargets(targets) {
+      structTargets = Array.isArray(targets) ? targets.filter((t) => t && t.unitAnchor && t.head) : [];
+      for (const index of docs.keys()) locateStructForDoc(index);
+    },
+
+    getStructureGeometry: (opts?: { all?: boolean }) => getStructureGeometry(opts),
+
+    getReadingProbes,
+
+    // §13.3.1：正文逐帧滚动通知 / 章节原点 / 正文段落高亮矩形
+    onContentScroll(cb) {
+      scrollHandlers.add(cb);
+      trackScrollActivity();
+      return () => {
+        scrollHandlers.delete(cb);
+      };
+    },
+
+    getFrameOffsets,
+
+    setStructurePaint,
 
     getSectionAnchors() {
       const sections = (view.book?.sections ?? []) as { id?: string; href?: string }[];

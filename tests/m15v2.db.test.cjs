@@ -55,13 +55,13 @@ app.whenReady().then(async () => {
     console.log("---- V2-DB3 三 scope 播种（版本 1 / 内容 === prompts.js / situation_required=0） ----");
     {
       const want = [
-        ["material-map-outline", "导图框架 v1", P.MATERIAL_MAP_OUTLINE_PROMPT],
-        ["material-map-expand", "导图深挖 v1", P.MATERIAL_MAP_EXPAND_PROMPT],
-        ["material-map-explain", "节点讲解 v1", P.MATERIAL_MAP_EXPLAIN_PROMPT]
+        ["material-map-outline", "导图框架 v2", P.MATERIAL_MAP_OUTLINE_PROMPT, 2],
+        ["material-map-expand", "导图深挖 v2", P.MATERIAL_MAP_EXPAND_PROMPT, 2],
+        ["material-map-explain", "节点讲解 v1", P.MATERIAL_MAP_EXPLAIN_PROMPT, 1]
       ];
-      for (const [scope, name, content] of want) {
+      for (const [scope, name, content, version] of want) {
         const row = db.getPromptTemplate(scope);
-        check(`${scope}：已播种 v1「${name}」`, !!row && row.version === 1 && row.name === name, row && { v: row.version, n: row.name });
+        check(`${scope}：已播种 v${version}「${name}」`, !!row && row.version === version && row.name === name, row && { v: row.version, n: row.name });
         check(`${scope}：content 逐字 === prompts.js 常量`, !!row && row.content === content);
         check(`${scope}：situation_required=0 且为默认`, !!row && Number(row.situation_required) === 0 && Number(row.is_default) === 1, row && { s: row.situation_required, d: row.is_default });
       }

@@ -147,7 +147,7 @@ async function main() {
     assert.ok(s.includes("onChanged"), `${f} 应暴露 onChanged 订阅`);
     assert.ok(s.includes('"settings:changed"'), `${f} 应订阅 settings:changed`);
   }
-  for (const f of ["src/lens.tsx", "src/workbench.tsx", "src/capture.tsx"]) {
+  for (const f of ["src/workbench.tsx", "src/capture.tsx"]) {
     assert.ok(fs.readFileSync(SRC(f), "utf8").includes("<WindowSkin />"), `${f} 应挂载 <WindowSkin />`);
   }
   const appTs = fs.readFileSync(SRC("src/App.tsx"), "utf8");

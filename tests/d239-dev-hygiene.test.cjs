@@ -179,8 +179,8 @@ app.whenReady().then(async () => {
     check("B13 electron/ 下（devServer.js 以外）无 localhost:5173 字面地址", literal.length === 0, literal.join(","));
     const includes = elFiles.filter((f) => /argv\.includes\(\s*["']--dev-server["']\s*\)/.test(read(`electron/${f}`)));
     check("B14 开发模式判定统一走 isDevServerMode（argv.includes 认不出 =<url> 形式）", includes.length === 0, includes.join(","));
-    const users = ["main.js", "lensWindow.js", "workbenchWindow.js", "quickCapture.js"].filter((f) => /loadAppPage\(/.test(read(`electron/${f}`)));
-    check("B15 四个窗口（主窗口 / 结构图 / 制卡台 / 快速记录）同一载入实现", users.length === 4, users.join(","));
+    const users = ["main.js", "workbenchWindow.js", "quickCapture.js"].filter((f) => /loadAppPage\(/.test(read(`electron/${f}`)));
+    check("B15 三个窗口（主窗口 / 制卡台 / 快速记录）同一载入实现", users.length === 3, users.join(","));
     check("B16 主进程 watchdog 用 devServer 地址", /devServer\.startWatchdog\(\{\s*url,/.test(read("electron/main.js")) && /const url = devServer\.devServerUrl\(\)/.test(read("electron/main.js")), "未接线");
 
     // ---------------- C console-message ----------------

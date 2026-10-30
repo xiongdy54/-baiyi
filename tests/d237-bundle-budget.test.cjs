@@ -126,8 +126,8 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
   console.log(`  （构建 ${((Date.now() - t0) / 1000).toFixed(1)}s，${Object.keys(chunks).length} 个 JS 块）`);
   const closure = (f, seen = new Set()) => { if (seen.has(f)) return seen; seen.add(f); for (const i of chunks[f].imports) closure(i, seen); return seen; };
   const entries = Object.entries(chunks).filter(([, c]) => c.isEntry);
-  // 预算：D237 实测（main 1962 / workbench 1397 / lens 1073 / capture 931 kB）上留 ~15% 余量；D237 前为 4030 / 2908 / 2584 / 2442 kB
-  const BUDGET = { main: 2300, workbench: 1650, lens: 1250, capture: 1100 };
+  // 预算：D237 实测（main 1962 / workbench 1397 / capture 931 kB）上留 ~15% 余量（lens 窗口已随结构流 v3.1 退役）
+  const BUDGET = { main: 2300, workbench: 1650, capture: 1100 };
   const FORBIDDEN = [
     [/node_modules[\\/]opencc-js[\\/]/, "opencc-js"],
     [/src[\\/]i18n[\\/]locales[\\/](en|ja)\.ts$/, "en/ja 词典"],
@@ -151,7 +151,7 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
     const hits = FORBIDDEN.filter(([re]) => mods.some((m) => re.test(m.split("?")[0]))).map(([, n]) => n);
     check(`B2 ${c.name} 首屏闭包不含按需模块`, hits.length === 0, hits.join(", "));
   }
-  check("B3 四个窗口入口齐全", ["main", "capture", "workbench", "lens"].every((n) => entries.some(([, c]) => c.name === n)), entries.map(([, c]) => c.name).join(","));
+  check("B3 三个窗口入口齐全（结构图窗口已退役）", ["main", "capture", "workbench"].every((n) => entries.some(([, c]) => c.name === n)), entries.map(([, c]) => c.name).join(","));
   const allMods = Object.values(chunks).flatMap((c) => c.mods.map((m) => m.split("?")[0]));
   check("B4 opencc 只打包 cn2t 子入口（不含全量 full.js）", allMods.some((m) => /opencc-js[\\/]dist[\\/]esm[\\/]cn2t\.js$/.test(m)) && !allMods.some((m) => /opencc-js[\\/]dist[\\/]esm[\\/]full\.js$/.test(m)), allMods.filter((m) => m.includes("opencc")).join(","));
   const mer = Object.entries(chunks).find(([, c]) => c.mods.some((m) => /MermaidDiagramImpl\.tsx$/.test(m)));
@@ -171,8 +171,8 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
   console.log("== C 源码契约 ==");
   const i18nSrc = fs.readFileSync(path.join(ROOT, "src", "lib", "i18n.ts"), "utf8");
   check("C0 i18n.ts 不再静态 import 词典与 opencc", !/^import .*(locales\/en|locales\/ja|opencc-js)/m.test(i18nSrc), "");
-  const boot = ["main.tsx", "capture.tsx", "lens.tsx", "workbench.tsx"].map((f) => [f, fs.readFileSync(path.join(ROOT, "src", f), "utf8")]);
-  check("C1 四个窗口入口首绘前都等待语言资源", boot.every(([, s]) => /ensureLocaleResources\(|loadLocale\(/.test(s)), boot.filter(([, s]) => !/ensureLocaleResources\(|loadLocale\(/.test(s)).map(([f]) => f).join(","));
+  const boot = ["main.tsx", "capture.tsx", "workbench.tsx"].map((f) => [f, fs.readFileSync(path.join(ROOT, "src", f), "utf8")]);
+  check("C1 三个窗口入口首绘前都等待语言资源", boot.every(([, s]) => /ensureLocaleResources\(|loadLocale\(/.test(s)), boot.filter(([, s]) => !/ensureLocaleResources\(|loadLocale\(/.test(s)).map(([f]) => f).join(","));
 
   console.log(`\n${pass} 通过 / ${fail} 失败`);
   fs.rmSync(TMP, { recursive: true, force: true });

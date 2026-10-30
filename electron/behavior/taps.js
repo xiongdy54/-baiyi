@@ -209,8 +209,8 @@ const COUNT_ONLY = {
   ],
   "窗口 / 壳层 / 日志（非学习行为）": [
     "win:minimize", "win:maximize", "win:close", "win:dockExtend", "win:dockRestore",
-    "win:workbench", "win:cardsChanged", "win:lens", "shell:openExternal", "app:relaunch",
-    "logs:rendererError", "logs:openFolder", "lens:fit", "lens:ask", "lens:reply", "lens:push",
+    "win:workbench", "win:cardsChanged", "shell:openExternal", "app:relaunch",
+    "logs:rendererError", "logs:openFolder",
     "capture:hide", "capture:ready", "library:requestAdd", "shortcuts:apply",
   ],
   "纯持久化重试（不重执行业务）": ["cards:persistNow"],

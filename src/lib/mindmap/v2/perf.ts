@@ -1,9 +1,7 @@
 // 材料导图 v2 · 过渡性能测量（审计 C-32 A1）。
 // 仅在 localStorage.mmPerf === "1" 时启用；结果挂在 window.__mmPerf 上，并 console.table 输出。
-// 测量窗：MindmapLens.toggleCollapse 的展开/收起点 perfBegin → 画布过渡结束（f.done / 被丢弃）perfEnd；
+// 测量窗：MindmapCanvasV2 的展开/收起点 perfBegin → 画布过渡结束（f.done / 被丢弃）perfEnd；
 // 窗内累计：measureGraph 的布局次数与耗时（perfLayout）、fit IPC 往返耗时（perfIpc）、相邻过渡帧间隔（perfFrame）。
-// 窗口层的逐帧 setBounds 次数由主进程 electron/lensWindow.js 的 animateBounds 结束时打印
-// "[lens] setBounds x N"（C-33 Phase B 去掉逐帧 setBounds 的基线）。
 // C-33 B2/B3：被点节点过渡前后屏幕位置偏差由 perfPinDeviation 补写进当前/最近一行（pinDeviationPx）——
 // 窗口层落位（resize 一次性补偿 / 收起缩窗）晚于画布过渡结束，测量窗可能已关闭。
 // 纯测量：不开启时除一次 localStorage 读外零开销；不参与任何渲染决策。

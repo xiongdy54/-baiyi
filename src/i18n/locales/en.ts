@@ -2484,4 +2484,24 @@ export const en: Record<string, string | { one: string; other: string }> = {
     "This backup predates the time you deleted your learning behavior data, so behavior data will not be restored.",
   "备份内书架数据与学习行为数据的快照存在 {s} 秒偏差，边界日的指标可能错位。":
     "The library and learning behavior snapshots in this backup differ by {s} seconds; metrics around day boundaries may be misaligned.",
+
+  // —— 结构流（STRUCTURE-FLOW-PLAN §7 / §12）——
+  "收起讲解": "Hide explanation",
+  "正在生成…": "Generating…",
+  "还没有讲解": "No explanation yet",
+  "原文读取中 {i}/{n}": "Reading text {i}/{n}",
+  "本节还没有结构": "No structure for this section yet",
+  "为本节生成 →": "Generate for this section →",
+  "需要先在设置里配置 AI": "Configure AI in settings first",
+  "上方另 {n} 项": "{n} more above",
+  "下方另 {n} 项": "{n} more below",
+  "{a} / {b}": "{a} / {b}",
+  "大纲": "Outline",
+  "并列": "Parallel",
+  "论证": "Argument",
+  "下一部分": "Next section",
+  "上一部分": "Previous section",
+  "这一处已经是最细的结构了。": "This is already the finest structure here.",
+  "这一处已经展开过了。": "This part has already been expanded.",
+  "正在生成中。": "Generation in progress.",
 };

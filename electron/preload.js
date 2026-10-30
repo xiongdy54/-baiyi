@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld("settingsAPI", {
   set: (scope, key, value) => ipcRenderer.invoke("settings:set", scope, key, value),
   // C-31：设置变更推送（settings:set 写入成功后广播给未发起写入的窗口）——
   // 单向推送，不计入 IPC 注册清单（D123 / D180 同口径，事件名见 electron/main.js settings:set 头注）。
-  // 返回退订函数（与 windowAPI.on* / lensAPI.on* 同构）。
+  // 返回退订函数（与 windowAPI.on* 同构）。
   onChanged: (cb) => {
     const handler = (_e, p) => cb(p);
     ipcRenderer.on("settings:changed", handler);
@@ -39,42 +39,6 @@ contextBridge.exposeInMainWorld("windowAPI", {
     const handler = () => cb();
     ipcRenderer.on("win:workbenchShown", handler);
     return () => ipcRenderer.removeListener("win:workbenchShown", handler);
-  }
-});
-
-// v49.24（D197）：独立结构图窗口桥（窗口控制 + 两窗口之间的请求 / 回执 / 推送 / 状态，全经主进程转发）。
-// 与 windowAPI 既有模式逐字同构；on* 订阅一律返回退订函数。
-contextBridge.exposeInMainWorld("lensAPI", {
-  /** 窗口控制：toggle / show / hide / pin（两窗口共用，返回值＝{visible, pinned}） */
-  control: (action) => ipcRenderer.invoke("win:lens", action),
-  /** 内容自适应纸片窗口（D203）：渲染层量 content/anchor，主进程算 s / 落位 / 钳制并 setBounds */
-  fit: (payload) => ipcRenderer.invoke("lens:fit", payload),
-  /** 结构图窗口 → 阅读窗口：请求 / 命令（带 id 才等回执） */
-  ask: (payload) => ipcRenderer.send("lens:ask", payload),
-  onAsk: (cb) => {
-    const handler = (_e, payload) => cb(payload);
-    ipcRenderer.on("lens:askIn", handler);
-    return () => ipcRenderer.removeListener("lens:askIn", handler);
-  },
-  /** 阅读窗口 → 结构图窗口：请求回执 */
-  reply: (payload) => ipcRenderer.send("lens:reply", payload),
-  onReply: (cb) => {
-    const handler = (_e, payload) => cb(payload);
-    ipcRenderer.on("lens:replyIn", handler);
-    return () => ipcRenderer.removeListener("lens:replyIn", handler);
-  },
-  /** 阅读窗口 → 结构图窗口：上下文 / 阅读位置推送 */
-  push: (payload) => ipcRenderer.send("lens:push", payload),
-  onPush: (cb) => {
-    const handler = (_e, payload) => cb(payload);
-    ipcRenderer.on("lens:pushIn", handler);
-    return () => ipcRenderer.removeListener("lens:pushIn", handler);
-  },
-  /** 窗口可见性 + 置顶状态（两窗口共用） */
-  onWindow: (cb) => {
-    const handler = (_e, payload) => cb(payload);
-    ipcRenderer.on("lens:window", handler);
-    return () => ipcRenderer.removeListener("lens:window", handler);
   }
 });
 

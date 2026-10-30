@@ -146,14 +146,8 @@ try {
   await wb.send("Debugger.enable");
   const wbChunks = await loadedChunks(wb);
   check("制卡台窗口装上 en 词典分块（ja / cn2t 不装）", wbChunks.includes("en") && !wbChunks.includes("ja") && !wbChunks.includes("cn2t"), wbChunks.join(","));
-  // 结构图窗口无打开材料时面板不渲染（MindmapLens 以 documentId 门控）→ 查语言状态与分块
-  await cdp.eval(`window.lensAPI.control("show").then(() => true)`);
-  const lens = await connect(/lens\.html/);
-  check("结构图窗口 html lang = en", await waitFor(lens, `document.documentElement.lang === "en"`, 15000), await lens.eval(`document.documentElement.lang`));
-  await lens.send("Debugger.enable");
-  const lensChunks = await loadedChunks(lens);
-  check("结构图窗口装上 en 词典分块（ja / cn2t 不装）", lensChunks.includes("en") && !lensChunks.includes("ja") && !lensChunks.includes("cn2t"), lensChunks.join(","));
-  try { wb.ws.close(); lens.ws.close(); } catch { /* 已断开 */ }
+  // 结构图窗口已随结构流 v3.1 退役（STRUCTURE-FLOW-PLAN §3）——独立窗口只剩制卡台与快速记录
+  try { wb.ws.close(); } catch { /* 已断开 */ }
 
   console.log(`\n==== d237-lazy-chunks.gui：${pass} 通过 / ${fail} 失败 ====`);
   try { cdp.ws.close(); } catch { /* 已断开 */ }

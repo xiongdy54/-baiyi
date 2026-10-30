@@ -171,11 +171,11 @@
   /* —— 结构图谱过渡（审计 C-32 A4）：JS 侧 src/lib/mindmap/v2/animate.ts 的 readMotion()
      每次 planTransition 读取一次，皮肤可覆盖（换肤后下一场过渡自然生效）。
      ms / s 单位均可（readMotion 按单位换算；CSS 产物压缩会把 ms 归一成 s）。--mm-ease 与
-     electron/lensWindow.js 的 EASE（D204 窗口缓动曲线）保持一致，两处注释互相指向。 —— */
+     结构流 --flow-ease 保持同一曲线（两处注释互相指向）。 —— */
   --mm-move: 260ms;   /* 旧元素位移 */
   --mm-enter: 240ms;  /* 新元素淡入 + 位移 */
   --mm-exit: 200ms;   /* 离场淡出 */
-  --mm-ease: cubic-bezier(0.2, 0.7, 0.2, 1); /* 与 lensWindow.js EASE 同一条曲线 */
+  --mm-ease: cubic-bezier(0.2, 0.7, 0.2, 1); /* 结构流 --flow-ease 与之同一曲线 */
 
   /* —— 阅读翻页（D241）：vendor/foliate-js/paginator.js 的 #motion() 每次翻页读取一次（统一管理）。
      滑行＝分页章内翻页（transform 合成层动画）与滚动模式整屏缓动；out＝跨章淡出；shift＝跨章入场位移。
@@ -9922,11 +9922,8 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--text-secondary);
 }
 
-/* ===================== 结构图（阅读透镜 v2「纸片图谱」，D197 / D203） =====================
-   工具栏「结构图」开关 → 打开**独立窗口**；v49.29 / D203 起窗口是内容自适应纸片：
-   窗口尺寸 = 图谱 layout bounds + 固定留白（左右 16 / 上 32 / 下 16），纸片 `inset:0` 与窗口同尺寸，
-   由主进程 `lens:fit` 的 setBounds 驱动（原生 resize 退役）。控制轨在上缘，四动作居中；解释卡从轨下展开。
-   瑞士风：直角、1px 发丝线、单一 accent；唯一的浮层阴影是纸片的 --shadow-float。 */
+/* ===================== 结构图（工具栏开关；v3.1 起并入阅读界面，见文末「结构流」节） =====================
+   工具栏「结构图」按钮保留原样式；面板不再开独立窗口（STRUCTURE-FLOW-PLAN §3 退役清单）。 */
 .reader-lens-btn {
   display: inline-flex;
   align-items: center;
@@ -9939,309 +9936,306 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--accent);
   background: var(--accent-soft);
 }
-/* 独立窗口的根：窗口本身透明，纸片（.lens-window）才是表面 */
-.lens-body { margin: 0; overflow: hidden; background: transparent; }
-.lens-root {
-  position: relative;
-  height: 100vh;
-  overflow: hidden;
-  background: transparent;
-  color: var(--text-primary);
+   结构流（STRUCTURE-FLOW-PLAN §7 / §8 / §12）
+   · 高亮流带（混合层，与正文同路径）＋ 上层 SVG（条 / 轴 / 跨度条 / 关系线）＋ HTML 标签
+   · 全部颜色来自 scene.colors（宿主用 .flow-probe 解析 Token 成实色）；本节的 Token 只供探针读取与皮肤覆盖
+   ========================================================================== */
+:root {
+  --flow-c1: #6E7F2E;
+  --flow-c2: #A9821C;
+  --flow-c3: #A84A80;
+  --flow-c4: #3E8A82;
+  --flow-c5: #3F68A8;
+  --flow-c6: #6F5FB0;
+  --flow-c7: #A44836;
+  --flow-c8: #B2662A;
+  --flow-counter: #B5483B;
+  --flow-ahl-0: 0.16;
+  --flow-ahl-1: 0.26;
+  --flow-ahl-2: 0.38;
+  --flow-aend-0: 0.34;
+  --flow-aend-1: 0.52;
+  --flow-aend-2: 0.6;
+  --flow-adim: 0.3;
+  --flow-strand-a: 0.62;
+  --flow-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --flow-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --flow-ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);
+  --flow-t-geo: 420ms;
 }
+/* 深色值只写给探针（宿主据此解析成实色交给场景；页面其余部分不消费这组覆盖） */
+.flow-probe[data-dark="1"] {
+  --flow-c1: #9AAA55;
+  --flow-c2: #D2AE45;
+  --flow-c3: #CF74A6;
+  --flow-c4: #6DB5AC;
+  --flow-c5: #6E95D2;
+  --flow-c6: #9A8BD6;
+  --flow-c7: #CF6E5C;
+  --flow-c8: #DA8F4E;
+  --flow-counter: #E07A6A;
+  --flow-ahl-0: 0.2;
+  --flow-ahl-1: 0.3;
+  --flow-ahl-2: 0.42;
+  --flow-aend-0: 0.44;
+  --flow-aend-1: 0.62;
+  --flow-aend-2: 0.7;
+  --flow-adim: 0.32;
+  --flow-strand-a: 0.72;
+}
+.flow-probe { font: inherit; }
 
-/* ===== 纸片 = 窗口表面（D203 §7.1）：94% paper + 1px b1 + --shadow-float；直角；inset:0 ===== */
-.mm2-focus.lens-window {
-  position: absolute;
+.flow-layer {
+  position: fixed;
   inset: 0;
-  min-width: 0;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--paper) 94%, transparent);
-  border: 1px solid var(--border-subtle);
-  box-shadow: var(--shadow-float);
-  border-radius: 0;
-  color: var(--text-primary);
-  font-size: 13px;
-  pointer-events: auto;
-  -webkit-app-region: no-drag;
-}
-.lens-canvas { position: absolute; inset: 0; }
-
-/* 图谱内容区：left 16 / top 32；宽高由宿主按 content × s 设（inline style） */
-.lens-graph { position: absolute; }
-.lens-graph > .mindmap-canvas {
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  display: block;
-  overflow: visible;
-}
-
-/* ===== 控制轨（D203 §7.3）：上缘 48px 悬停浮出；左标题 / 中动作 / 右置顶 + 关闭 ===== */
-.lens-rail {
-  position: absolute;
-  left: 16px;
-  right: 16px;
-  top: 4px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  opacity: 0;
   pointer-events: none;
-  transform: translateY(-2px);
-  z-index: 9;
+  z-index: 24;
+  color: var(--reader-fg, var(--ink)); /* 低于 --z-dropdown(100) / modal(400)：菜单与弹层始终在结构流之上 */
+  font-family: var(--font-sans);
 }
-.mm2-focus.lens-window.is-rail-on .lens-rail {
-  opacity: 1;
-  pointer-events: auto;
-  transform: none;
-}
-.lens-rail-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
-  color: var(--ink);
-  cursor: grab;
-  user-select: none;
-  white-space: nowrap;
-  flex: 0 0 auto;
-  -webkit-app-region: drag;
-}
-.lens-rail-title:active { cursor: grabbing; }
-.lens-rail-grip {
-  width: 8px;
-  height: 12px;
-  display: inline-block;
-  background-image: radial-gradient(circle, currentColor 1px, transparent 1.2px);
-  background-size: 4px 4px;
-  color: var(--text-secondary);
-}
-.lens-rail-title b { font-size: 11px; font-weight: 600; }
-.lens-rail-center {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-.lens-rail-pattern {
-  font-size: 10px;
-  line-height: 16px;
-  padding: 0 4px;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
-.lens-rail-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  min-width: 0;
-}
-.lens-rail-action {
-  height: 24px;
-  padding: 0 7px;
-  font: inherit;
-  font-size: 11px;
-  line-height: 22px;
-  border: 1px solid var(--border-subtle);
-  background: transparent;
-  color: var(--ink);
-  cursor: pointer;
-  white-space: nowrap;
-  -webkit-app-region: no-drag;
-}
-.lens-rail-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.lens-rail-action.is-primary { border-color: var(--accent); color: var(--accent); }
-.lens-rail-action:disabled { opacity: 0.45; cursor: default; }
-.lens-rail-btn {
-  height: 24px;
-  padding: 0 7px;
-  font: inherit;
-  font-size: 11px;
-  line-height: 22px;
-  border: 1px solid var(--border-subtle);
-  background: var(--paper);
-  color: var(--text-secondary);
-  cursor: pointer;
-  white-space: nowrap;
-  flex: 0 0 auto;
-  -webkit-app-region: no-drag;
-}
-.lens-rail-btn:hover { border-color: var(--border-strong); color: var(--ink); }
-.lens-rail-btn.is-on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.lens-rail-close { width: 24px; padding: 0; font-size: 14px; line-height: 22px; text-align: center; }
-.lens-rail.is-narrow { gap: 4px; }
-.lens-rail.is-narrow .lens-rail-action { padding: 0 5px; }
-.lens-rail.is-narrow .lens-rail-actions { gap: 3px; }
+.flow-item,
+.flow-inline { pointer-events: auto; }
+.flow-item[data-kind="head"]:not([data-flow-item="back"]) { pointer-events: none; }
 
-/* ===== 解释卡（D203 §7.4）：轨下 36px、水平居中、min(420, winW-32)、不改变窗口 ===== */
-.lens-explain {
-  position: absolute;
-  top: 36px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(420px, calc(100% - 32px));
-  max-height: calc(100% - 52px);
-  overflow: auto;
-  padding: 10px 12px 12px;
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
-  box-shadow: none;
-  z-index: 8;
-  border-radius: var(--radius-popover);
+.flow-shape {
+  transition: d var(--flow-t-geo, 420ms) var(--flow-ease), opacity 160ms var(--flow-ease);
+  transition-delay: var(--flow-delay, 0ms);
 }
-.lens-explain-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.lens-explain-head b { font-size: 11px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0.04em; }
-.lens-explain-head span {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 10px;
-  color: var(--text-secondary);
+.flow-shape.is-dim { opacity: var(--flow-adim); }
+.flow-blend[data-tracking="1"] .flow-shape { transition: none; }
+/* §13.3：平滑滚动模式下颈部逐帧直接写 d，不再走 CSS 过渡 */
+.flow-blend[data-smooth="1"][data-tracking="1"] .flow-shape { transition: none; }
+.flow-col { transition: transform 420ms var(--flow-ease); }
+.flow-items { transition: transform 420ms var(--flow-ease); }
+.flow-svg rect,
+.flow-svg circle {
+  transition: x 380ms var(--flow-ease), y 380ms var(--flow-ease), width 160ms var(--flow-ease), height 380ms var(--flow-ease),
+    cx 380ms var(--flow-ease), cy 380ms var(--flow-ease), r 200ms var(--flow-ease), fill 240ms var(--flow-ease),
+    opacity 220ms var(--flow-ease), transform 280ms var(--flow-ease-out);
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition-delay: var(--flow-delay, 0ms);
+}
+.flow-svg path[data-draw="1"] { transition: stroke-dashoffset var(--flow-t-draw, 480ms) var(--flow-ease-out); }
+.flow-svg path {
+  transition: d 420ms var(--flow-ease), stroke-dashoffset var(--flow-t-draw, 480ms) var(--flow-ease-out), opacity 220ms var(--flow-ease);
+  transition-delay: var(--flow-delay, 0ms);
+}
+.flow-strands path { transition: d 600ms var(--flow-ease-out), opacity 200ms var(--flow-ease); }
+.flow-item,
+.flow-inline {
+  transition: transform 380ms var(--flow-ease), opacity 240ms var(--flow-ease), height 240ms var(--flow-ease);
+  transition-delay: var(--flow-delay, 0ms);
+}
+.flow-pill { transition: background-color 200ms var(--flow-ease), color 200ms var(--flow-ease); }
+.flow-shift-target { transition: transform 420ms var(--flow-ease), opacity 160ms var(--flow-ease); }
+.reader-flow-gutter { flex: 0 0 auto; flex-basis: 0; min-width: 0; }
+
+/* ---------- HTML 标签 ---------- */
+.flow-item {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  cursor: pointer;
+  user-select: none;
+}
+.flow-item[data-kind="head"] { cursor: default; }
+.flow-item[data-flow-item="back"] { cursor: pointer; }
+.flow-time {
+  display: block;
+  font-family: var(--font-mono, inherit);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--reader-fg, var(--ink)) 58%, transparent);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.flow-line {
+  display: block;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.lens-explain-head button {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  font-size: 10px;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.lens-explain-head button:hover { color: var(--accent); }
-.lens-explain p { margin: 0; font-size: 12px; line-height: 1.7; color: var(--ink); white-space: pre-wrap; }
-.lens-explain p.lens-explain-note { color: var(--text-secondary); }
-
-/* ===== 状态条 / 模式胶囊 / 返回胶囊 ===== */
-.lens-status {
+.flow-meta {
   position: absolute;
-  left: 16px;
-  bottom: 48px;
-  max-width: calc(100% - 32px);
-  padding: 4px 8px;
-  border: 1px solid var(--border-subtle);
-  background: var(--paper);
+  right: 0;
+  bottom: 0;
   font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-  z-index: 10;
-  border-radius: var(--radius-popover);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--reader-fg, var(--ink)) 42%, transparent);
+  pointer-events: none;
 }
-.lens-mode-chip {
+.flow-item[data-lane="0"] .flow-meta { color: color-mix(in srgb, var(--reader-fg, var(--ink)) 60%, transparent); font-weight: 500; }
+.flow-item[data-counter="1"] .flow-meta { color: var(--flow-counter); }
+.flow-item:hover .flow-line { color: var(--reader-fg, var(--ink)); }
+.flow-item[data-selected="1"] .flow-line {
+  color: var(--accent);
+  text-decoration: underline 1px;
+  text-underline-offset: 3px;
+}
+.flow-pill {
+  background: var(--accent);
+  color: var(--accent-on, #fff);
+  padding: 1px 6px;
+  margin-left: -6px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.flow-back-line { color: color-mix(in srgb, var(--reader-fg, var(--ink)) 72%, transparent); }
+
+/* ---------- 动作行 / 讲解 / 状态 ---------- */
+.flow-inline {
   position: absolute;
-  left: 16px;
-  bottom: 16px;
-  display: inline-flex;
+  left: 0;
+  top: 0;
+  pointer-events: auto;
+  overflow: hidden;
+}
+.flow-actions {
+  display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 6px 3px 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
-  font-size: 10px;
-  color: var(--text-secondary);
-  z-index: 9;
-  border-radius: var(--radius-popover);
+  height: 26px;
+  font-size: 12px;
+  white-space: nowrap;
 }
-.lens-mode-chip button {
-  padding: 0 4px;
-  border: 0;
+.flow-actions button {
   background: none;
+  border: none;
+  padding: 0;
   font: inherit;
-  font-size: 10px;
+  color: color-mix(in srgb, var(--reader-fg, var(--ink)) 62%, transparent);
+  cursor: pointer;
+}
+.flow-actions button:hover {
+  color: var(--reader-fg, var(--ink));
+  text-decoration: underline var(--accent) 1px;
+  text-underline-offset: 3px;
+}
+.flow-actions span { color: color-mix(in srgb, var(--reader-fg, var(--ink)) 30%, transparent); }
+.flow-explain {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: color-mix(in srgb, var(--reader-fg, var(--ink)) 82%, transparent);
+  overflow-y: auto;
+  padding-bottom: 14px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+}
+.flow-explain::-webkit-scrollbar { width: 6px; }
+.flow-explain::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--reader-fg, var(--ink)) 18%, transparent); }
+.flow-explain-empty { color: color-mix(in srgb, var(--reader-fg, var(--ink)) 50%, transparent); }
+.flow-dots { display: inline-flex; gap: 6px; padding: 6px 0; }
+.flow-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: flow-dot 1200ms var(--flow-ease) infinite ease-in-out;
+}
+.flow-dots i:nth-child(2) { animation-delay: 160ms; }
+.flow-dots i:nth-child(3) { animation-delay: 320ms; }
+@keyframes flow-dot {
+  0%, 100% { opacity: 0.25; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+.flow-status {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--reader-fg, var(--ink)) 52%, transparent);
+  padding-top: 4px;
+}
+.flow-status-float {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+/* ---------- whisper：悬停才显示标签 ---------- */
+.flow-whisper-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--reader-bg, var(--paper));
+  border: 1px solid var(--hairline, var(--border-subtle));
+  padding: 3px 8px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--reader-fg, var(--ink)) 90%, transparent);
+  box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.35);
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* ---------- 空态 ---------- */
+.flow-empty {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: color-mix(in srgb, var(--reader-fg, var(--ink)) 60%, transparent);
+}
+.flow-empty-action {
+  display: inline-block;
+  margin-top: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
   color: var(--accent);
   cursor: pointer;
 }
-.lens-mode-chip button:hover { text-decoration: underline; }
-.lens-chips {
-  position: absolute;
-  left: 16px;
-  top: 36px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  z-index: 7;
+.flow-progress {
+  height: 1px;
+  margin-top: 8px;
+  background: color-mix(in srgb, var(--reader-fg, var(--ink)) 10%, transparent);
 }
-.lens-chip {
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--border-strong);
-  background: var(--paper);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 11px;
-  line-height: 20px;
-  cursor: pointer;
-}
-.lens-chip:hover { border-color: var(--accent); color: var(--accent); }
-
-/* ===== 种子卡（D203 §4.4）：320×200 + 留白 = 360×248 ===== */
-.lens-seed {
-  position: absolute;
-  left: 16px;
-  top: 32px;
-  width: 320px;
-  height: 200px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-subtle);
-  background: var(--paper);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  overflow: auto;
-  z-index: 6;
-  border-radius: var(--radius-popover);
-}
-.lens-seed-title { font-size: 13px; font-weight: 600; color: var(--ink); }
-.lens-seed-note { margin: 0; font-size: 11px; line-height: 1.55; color: var(--text-secondary); }
-.lens-seed-generate { align-self: flex-start; margin: 0; }
-.lens-seed-progress { height: 2px; margin-top: auto; background: var(--border-subtle); flex: 0 0 auto; }
-.lens-seed-progress > span { display: block; height: 100%; background: var(--accent); transition: width 200ms linear; }
-
-/* 第六轮：阅读透镜「在完整图谱中打开」——把透镜展示过的那片区域整块框出来，短暂强调（约 2.4s 淡出） */
-.mindmap-canvas svg .mm2-flash {
-  fill: var(--accent);
-  fill-opacity: 0.1;
-  stroke: var(--accent);
-  stroke-width: 2;
-  pointer-events: none;
-  animation: mm2-flash 2400ms ease-out forwards;
-}
-@keyframes mm2-flash {
-  0% { opacity: 0; }
-  12% { opacity: 1; }
-  60% { opacity: 1; }
-  100% { opacity: 0; }
+.flow-progress i { display: block; height: 100%; background: var(--accent); transition: width 300ms var(--flow-ease); }
+.flow-progress-busy i { width: 40%; animation: flow-busy 1400ms var(--flow-ease) infinite alternate; }
+@keyframes flow-busy {
+  from { transform: translateX(0); }
+  to { transform: translateX(150%); }
 }
 
-.mm2-focus button:focus-visible,
-.lens-window button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .lens-rail { transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
-  .lens-explain { animation: lens-explain-in var(--dur-enter) var(--ease-enter); }
-}
-@keyframes lens-explain-in {
-  from { opacity: 0; transform: translate(-50%, 2px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+/* ---------- 动效降级（不写 !important：用更高特异性的显式选择器压过各元素自身的过渡） ---------- */
+.flow-layer[data-motion="off"] .flow-item,
+.flow-layer[data-motion="off"] .flow-inline,
+.flow-layer[data-motion="off"] .flow-svg rect,
+.flow-layer[data-motion="off"] .flow-svg circle,
+.flow-layer[data-motion="off"] .flow-svg path,
+.flow-layer[data-motion="off"] .flow-svg text,
+.flow-layer[data-motion="off"] .flow-strands path,
+.flow-layer[data-motion="off"] .flow-col,
+.flow-layer[data-motion="off"] .flow-items,
+.flow-blend[data-motion="off"] .flow-shape {
+  transition-duration: 0ms;
+  transition-delay: 0ms;
+  animation-duration: 0ms;
 }
 @media (prefers-reduced-motion: reduce) {
-  .lens-rail,
-  .lens-explain,
-  .lens-seed-progress > span {
-    animation: none !important;
-    transition: none !important;
+  .flow-layer .flow-item,
+.flow-layer .flow-inline,
+.flow-layer .flow-svg rect,
+.flow-layer .flow-svg circle,
+.flow-layer .flow-svg path,
+.flow-layer .flow-svg text,
+.flow-layer .flow-strands path,
+.flow-layer .flow-col,
+.flow-layer .flow-items,
+.flow-blend .flow-shape,
+.flow-shift-target {
+    transition-duration: 0ms;
+    transition-delay: 0ms;
+    animation-duration: 0ms;
   }
 }
