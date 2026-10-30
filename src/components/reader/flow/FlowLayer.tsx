@@ -76,11 +76,12 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
   const safe = (c: string) => (parseRgb(c) ? c : colors.palette[0]);
   const ci = colorIndexer(scene);
 
-  // 图元 / 关系线 / 标签的进出场保留（§5.8）
-  const prims = usePresence(scene.mode === "whisper" ? layout.prims.filter((p) => p.id.startsWith("bar:")) : layout.prims, 200);
-  const strandsP = usePresence(strands, 200);
-  const shapesP = usePresence(shapes, 200);
-  const itemsP = usePresence(layout.items, 220);
+  // 图元 / 关系线 / 标签的进出场保留（§5.8）；§15.3：四类统一 160ms，避免零件逐个延迟退场
+  const EXIT_MS = 160;
+  const prims = usePresence(scene.mode === "whisper" ? layout.prims.filter((p) => p.id.startsWith("bar:")) : layout.prims, EXIT_MS);
+  const strandsP = usePresence(strands, EXIT_MS);
+  const shapesP = usePresence(shapes, EXIT_MS);
+  const itemsP = usePresence(layout.items, EXIT_MS);
 
   const delayFor = (i: number, phase: "enter" | "live" | "exit") => {
     if (phase === "exit") return motion === "close" ? stagger(i, 12, 96) : 0;
