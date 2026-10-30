@@ -463,6 +463,9 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
       const exL = genL().filter((e) => e.getAttribute("data-phase") === "exit");
       const exB = genB().filter((e) => e.getAttribute("data-phase") === "exit");
       check("旧代带 data-phase=exit（两层一致）", exL.length === 1 && exB.length === 1, { exitLayer: exL.length, exitBlend: exB.length });
+      // §16.1.4 兜底：无 WAAPI（jsdom）/ 动画被浏览器取消或冻结时，退场代也必须内联 opacity 0，
+      // 否则窗口遮挡后恢复会出现「旧代实测 1 + 新代已满」两组文字叠在一起
+      check("退场代内联 opacity=0（动画缺失/被取消时也不会实心残留）", exL.length === 1 && exB.length === 1 && exL[0].style.opacity === "0" && exB[0].style.opacity === "0", { layer: exL[0] && exL[0].style.opacity, blend: exB[0] && exB[0].style.opacity });
 
       // §16.7-5：两代并存时文档内所有 [id] 唯一（defs / gradient / marker 全部带代前缀）
       const ids = $$("[id]").map((e) => e.id);
