@@ -167,6 +167,8 @@ export interface PatternLayout {
   height: number;
   /** 阅读节点中心的局部 y（对齐用） */
   readingY: number | null;
+  /** §8.7：子项 → 父项（展开时子流带先从父条区间分出） */
+  parentOf?: Record<string, string>;
   noStrands?: boolean;
   /** 对照版式：动作行固定排在表底（宿主/渲染器按此定位） */
   inlineAt?: { x: number; y: number; w: number };
@@ -179,6 +181,12 @@ export interface FlowScene {
   mode: FlowMode;
   motion: FlowMotion;
   tracking: boolean;
+  /** v3.5 §16.1：代键＝当前主体组 cut ?? "none"。genKey 不变＝同一代（代内变化走零件级进出场） */
+  genKey: string;
+  /** v3.5 §16.1：换组方向（取 data.switchInfo?.dir ?? "down"，仅供将来使用，本轮渲染不用） */
+  switchDir: "down" | "up";
+  /** §8.8：正文平移中——高亮先隐去，落定后从节点伸回 */
+  shifting: boolean;
   plan: FlowPlan;
   viewport: FlowEnv["viewport"];
   colors: FlowColors;
@@ -189,9 +197,6 @@ export interface FlowScene {
   layout: PatternLayout;
   shapes: FlowShape[];
   strands: FlowStrand[];
-  /** 渐变横向基准（§7.3） */
-  hlX0: number;
-  hlX1: number;
   inline: { forId: string | null; explainOpen: boolean; explainText: string; explainBusy: boolean; status: string };
   hoverId: string | null;
   focusId: string | null;

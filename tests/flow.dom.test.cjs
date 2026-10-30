@@ -102,7 +102,7 @@ const origErr = console.error;
 console.error = (...a) => errors.push(a.map(String).join(" ").slice(0, 600));
 
 // ---------------------------------------------------------------- 假内核
-let TEXT = { left: 560, right: 1000 }; // shift 档（§10-7）；reserve 档换 420
+let TEXT = { left: 520, right: 960 }; // 版心在 viewport 内居中（§14.5 宿主只信宽度）；reserve 档换 450
 let activeMain = null;
 const shiftNow = () => { const m = /translateX\(-(\d+)/.exec((activeMain && activeMain.style.transform) || ""); return m ? Number(m[1]) : 0; };
 const VIEWPORT = { left: 280, top: 60, right: 1200, bottom: 900 };
@@ -110,12 +110,14 @@ let lastTargets = [];
 let geoSeq = 0;
 let locoTargets = 0;
 let offY = 0;
+let chapterHref = "ch1.xhtml"; // §15.3：换章检测用
 let paintCalls = [];
 let scrollCb = null;
 const relHandlers = new Set();
 const gotos = [];
 let probeDist = [0, 0, 0, 0]; // 四个注意力点落在哪些段落（0 基）
 let currentLoc = { cfi: "epubcfi(/6/4!/4/2)" };
+let multiCol = false; // §16.7-8：多栏几何（boxes 留在 column 0，非最右栏 → 走 @column#k 的 id）
 const kernel = {
   getTOC: () => [{ label: "第一章 论证", href: UNIT }],
   getSectionAnchors: () => [{ anchor: UNIT }],
@@ -134,13 +136,14 @@ const kernel = {
       doc: 0, cTop: 140 + i * 30, cBottom: 165 + i * 30, cLeft: left, cRight: right,
     }));
     void opts;
-    return { seq: ++geoSeq, viewport: VIEWPORT, columns: [{ left, right }], boxes, text: { left, right } };
+    const columns = multiCol ? [{ left, right }, { left: right + 10, right: right + 60 }] : [{ left, right }];
+    return { seq: ++geoSeq, viewport: VIEWPORT, columns, boxes, text: { left, right } };
   },
   onContentScroll: (cb) => { scrollCb = cb; return () => { if (scrollCb === cb) scrollCb = null; }; },
   getFrameOffsets: () => ({ 0: { left: 0, top: offY } }),
   setStructurePaint: (rects, o) => { paintCalls.push({ rects: clone(rects) || [], o: clone(o) }); },
 };
-const relocate = () => { for (const h of relHandlers) h({ location: {}, fraction: 0 }); };
+const relocate = (href) => { for (const h of relHandlers) h({ location: {}, fraction: 0, chapterHref: href === undefined ? chapterHref : href }); };
 const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
 
 (async () => {
@@ -176,7 +179,8 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   rootEl.render(React.createElement(React.StrictMode, null, React.createElement(Wrapper)));
   const $ = (sel) => w.document.querySelector(sel);
   const $$ = (sel) => [...w.document.querySelectorAll(sel)];
-  const smoothKernel = typeof kernel.onContentScroll === "function" && typeof kernel.getFrameOffsets === "function" && typeof kernel.setStructurePaint === "function";
+  // §15.1：矩形并入 SVG 后，smooth 只看滚动通知与章节原点
+  const smoothKernel = typeof kernel.onContentScroll === "function" && typeof kernel.getFrameOffsets === "function";
   const item = (id) => $(`[data-flow-item="${id}"]`);
   const shapeOf = (nodeId) => $(`.flow-shapes path[data-node-id="${nodeId}"]`);
   const click = (el) => el && el.dispatchEvent(new w.MouseEvent("click", { bubbles: true }));
@@ -194,6 +198,11 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   await openFlow();
   check("打开后出现阅读节点（主题色底 + 白字 pill）", !!$("[data-reading='1'] .flow-pill"), $(".flow-items") && $(".flow-items").textContent);
   check("混合层存在且 mixBlendMode=multiply（浅色阅读背景）", !!$(".flow-blend") && $(".flow-blend").style.mixBlendMode === "multiply", $(".flow-blend") && $(".flow-blend").getAttribute("style"));
+  // §8.1：入场编排只在 enter 相位生效，落定后必须全部回到不透明（防止卡在 opacity 0）
+  check("入场编排已收敛：条目不透明、图元无残留缩放", $$(".flow-item").every((e) => e.style.opacity === "1") && $$(".flow-svg rect").every((e) => !e.style.transform), {
+    items: $$(".flow-item").map((e) => [e.getAttribute("data-flow-item"), e.style.opacity]).slice(0, 6),
+    rects: $$(".flow-svg rect").map((e) => e.style.transform).slice(0, 4),
+  });
   const shapeCount = $$(".flow-shapes path").length;
   check("高亮流带按合并后的段落块出形状（每条 d 以 M 开头、是三次贝塞尔/圆角路径）", shapeCount > 0 && $$(".flow-shapes path").every((p) => /^M/.test(p.getAttribute("d") || "") && /[CQ]/.test(p.getAttribute("d") || "")), { shapeCount });
 
@@ -216,11 +225,11 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   check("跨度条与反方缺口存在（取代旧脊线）", !!$("[data-prim-id='span:t1']") && !!$("[data-prim-id='notch:D']"), $$(".flow-svg [data-prim-id]").map((e) => e.getAttribute("data-prim-id")).slice(0, 12));
   check("页面里没有类型方框 .flow-chip", !$(".flow-chip"));
 
-  console.log("---- §13.3 平滑滚动：颈部同步 / 正文矩形 / 列稳定 / 无黑色 ----");
+  console.log("---- §13.3 / §15.1 平滑滚动：整条流带同步 / 单路径 / 列稳定 / 无黑色 ----");
   {
-    await until(() => paintCalls.some((c) => c.rects.length > 0), 3000);
+    await until(() => $$(".flow-shapes path[data-node-id]").length > 0, 3000);
     const ribs = $$(".flow-shapes path[data-node-id]");
-    check("滚动模式：混合层只剩颈部（矩形画在正文里）", smoothKernel && ribs.length > 0, ribs.length);
+    check("平滑模式：流带在混合层；iframe 矩形通道全程零调用（§15.1）", smoothKernel && ribs.length > 0 && paintCalls.length === 0, { ribs: ribs.length, paints: paintCalls.length });
     const el = ribs.find((p) => p.getAttribute("data-node-id") === "A") || ribs[0];
     const d0 = el && el.getAttribute("d");
     const yOf = (d) => { const m = /^M[^,]+,\s*([-\d.]+)/.exec(d || ""); return m ? Number(m[1]) : NaN; };
@@ -230,13 +239,12 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     const same = el && el === $(`.flow-shapes path[data-node-id="${el.getAttribute("data-node-id")}"]`);
     const d1 = el && el.getAttribute("d");
     const y1 = yOf(d1);
-    check("同一调用栈里颈部已随滚动同步（同元素、y 差 = 30）", !!el && same && d1 !== d0 && Math.abs(y0 - y1 - 30) < 1, { y0, y1, d0, d1 });
+    check("同一调用栈里整条流带（含矩形段）随滚动同步（同元素、首点 y 差 = 30）", !!el && same && d1 !== d0 && Math.abs(y0 - y1 - 30) < 1, { y0, y1, d0, d1 });
+    const mx = /^M(-?[\d.]+)[^,]*,[^H]*H(-?[\d.]+)/.exec(d0 || "");
+    check("§15.1 路径里含矩形段，且只画可见带（首条 H 边 ≈ HL_FADE_W）", !!mx && Math.abs(Number(mx[2]) - Number(mx[1]) - 140) <= 4, { d: (d0 || "").slice(0, 90), mx });
 
-    const visible = $$(".flow-shapes path[data-node-id]").length;
-    const pc = paintCalls.length;
-    check("正文矩形数 = 可见流带数", paintCalls[paintCalls.length - 1].rects.length >= 1 && paintCalls[paintCalls.length - 1].rects.length <= visible + 2, { rects: paintCalls[paintCalls.length - 1].rects.length, visible });
     scrollBy(-60);
-    check("滚动回调不重新下发正文矩形（矩形随正文原生滚动）", paintCalls.length === pc, paintCalls.length - pc);
+    check("滚动回调不再向正文下发任何绘制指令（矩形与颈部同源）", paintCalls.length === 0, paintCalls.length);
     offY = 0;
     if (scrollCb) scrollCb();
 
@@ -244,18 +252,45 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     probeDist = [0, 0, 10, 10];
     relocate();
     check("预览出现", await until(() => {
-      const head = item("n:t2");
+      const head = item("peek:n:t2");
       return !!head && /下一部分/.test(head.textContent || "");
     }, 4000));
+    // §16.2（R4）：预览产出的条带带 peek: 前缀（与主体隔离）
+    check("预览条带 id 带 peek: 前缀", $$(".flow-svg [data-prim-id]").some((e) => (e.getAttribute("data-prim-id") || "").startsWith("peek:bar:")), $$(".flow-svg [data-prim-id]").map((e) => e.getAttribute("data-prim-id")).slice(0, 8));
     await sleep(500);
     check("预览出现时列主体不平移", $(".flow-items").style.transform === t0, { before: t0, after: $(".flow-items").style.transform });
     probeDist = [0, 0, 0, 0];
     relocate();
+    // §16.2（R1）：退场条目的行文字不再瞬间透明（外层 .flow-item 负责淡出）
+    const sawExitLine = await until(() => {
+      const ex = $(".flow-item.is-exit");
+      const ln = ex && ex.querySelector(".flow-line");
+      return !!ln && Number(ln.style.opacity) > 0;
+    }, 800, 10);
+    check("退场条目的 .flow-line inline opacity = tone/100（不为 0）", sawExitLine, $$(".flow-item.is-exit").map((e) => [e.getAttribute("data-flow-item"), e.querySelector(".flow-line") && e.querySelector(".flow-line").style.opacity]));
     await sleep(900);
     check("预览消失时列主体也不平移", $(".flow-items").style.transform === t0, { before: t0, after: $(".flow-items").style.transform });
 
     const stops = $$(".flow-blend linearGradient stop");
     check("所有渐变 stop 都是可解析实色（无黑色兜底）", stops.length > 0 && stops.every((s) => ensureLayout.parseRgb(s.getAttribute("stop-color") || "") !== null), stops.map((s) => s.getAttribute("stop-color")).slice(0, 8));
+
+    // §15.1：一条路径一条渐变——四停点、起点透明、接缝处 aHL、节点端 aEnd
+    const grads = new Map($$(".flow-blend linearGradient").map((g) => [g.id, g]));
+    const bad = [];
+    let checked = 0;
+    for (const p of $$(".flow-shapes path[data-node-id]")) {
+      if (/stub:/.test(p.getAttribute("data-node-id") || "")) continue;
+      const fill = p.getAttribute("fill") || "";
+      const g = grads.get(fill.replace(/^url\(#|\)$/g, ""));
+      const active = g ? [...g.querySelectorAll("stop")].filter((x) => Number(x.getAttribute("offset")) > 0 && Number(x.getAttribute("offset")) < 1) : [];
+      const st = g ? [...g.querySelectorAll("stop")] : [];
+      if (!g || st.length < 3) { bad.push({ id: p.getAttribute("data-node-id"), g: !!g, stops: st.length }); continue; }
+      const o = st.map((x) => Number(x.getAttribute("stop-opacity")));
+      const off = st.map((x) => Number(x.getAttribute("offset")));
+      if (o[0] !== 0 || o[1] !== 0 || o[o.length - 1] <= 0 || off[off.length - 1] !== 1 || !(off[1] < off[2])) bad.push({ o, off, active: active.length });
+      checked++;
+    }
+    check("§15.1 每条流带：左端透明 → 接缝前起坡 → 节点端最浓（同一条路径同一条渐变）", checked > 0 && bad.length === 0, { checked, bad: bad.slice(0, 3) });
   }
 
   console.log("---- 悬停 / 展开 / 双击跳转 / 回到原位 ----");
@@ -268,6 +303,7 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   check("点有子节点的成员 → 出现 kid 项与动作行", await until(() => !!item("n:B1") && !!$(".flow-actions"), 4000), { kid: !!item("n:B1"), actions: !!$(".flow-actions") });
   click(item("n:B"));
   check("再点 → 收起 kid", await until(() => !item("n:B1"), 1500));
+  check("收起同时收走动作行（§14.2-3）", await until(() => !$(".flow-actions"), 1500), { inline: !!$(".flow-inline") });
   const g0 = gotos.length;
   dbl(item("n:C"));
   check("双击 → 跳到原文（内核 goTo 被调）", await until(() => gotos.length > g0, 3000), gotos);
@@ -280,23 +316,193 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   probeDist = [0, 0, 10, 10];
   relocate();
   check("交界处：下一部分以预览出现在列下方（「下一部分」）", await until(() => {
-    const head = item("n:t2");
+    const head = item("peek:n:t2");
     return !!head && /下一部分/.test(head.textContent || "");
-  }, 4000), { text: item("n:t2") && item("n:t2").textContent });
+  }, 4000), { text: item("peek:n:t2") && item("peek:n:t2").textContent });
   check("预览成员也有高亮流带", !!shapeOf("X"), $$(".flow-shapes path").map((p) => p.getAttribute("data-node-id")));
-  const previewX = item("n:X");
+  const previewX = item("peek:n:X");
   check("预览成员项存在", !!previewX);
   probeDist = [0, 10, 10, 10];
   relocate();
   const switched = await until(() => {
     const now = item("n:X");
-    return !!now && now === previewX && !!$("[data-reading='1']");
+    return !!now && !item("peek:n:X") && !!$("[data-reading='1']");
   }, 5000);
-  check("新组成为主导 → 切组，原预览成员元素仍是同一个 DOM 节点（===）", switched && item("n:X") === previewX, { same: item("n:X") === previewX });
+  check("新组成为主导 → 切组：预览行退场、主体行接管（§15.5 交叉淡入，不再复用同一个 DOM 节点）", switched, { main: !!item("n:X"), peek: !!item("peek:n:X") });
   check("切组后原主体成为「上一部分」预览", await until(() => {
-    const head = item("n:t1");
+    const head = item("peek:n:t1");
     return !!head && /上一部分/.test(head.textContent || "");
-  }, 3000), { text: item("n:t1") && item("n:t1").textContent });
+  }, 3000), { text: item("peek:n:t1") && item("peek:n:t1").textContent });
+
+  console.log("---- §14.2 预览与主体不互吞 / 动作行只锚主体 ----");
+  {
+    const yOf = (el) => {
+      const m = /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec((el && el.style.transform) || "");
+      return m ? Number(m[2]) : NaN;
+    };
+    const wrapY = (() => {
+      const m = /translateY\(([-\d.]+)px\)/.exec(($(".flow-items") || { style: {} }).style.transform || "");
+      return m ? Number(m[1]) : 0;
+    })();
+    const peekIds = () => $$(".flow-item.is-peek").map((e) => e.getAttribute("data-flow-item"));
+    check("当前存在「上一部分」预览行", peekIds().length > 0, peekIds());
+    click(item("peek:n:A")); // 点预览行 → focusGroup 切回 t1
+    await sleep(800);
+    const ids = $$(".flow-item").map((e) => e.getAttribute("data-flow-item"));
+    check("点预览行切组后无重复行", ids.length > 0 && new Set(ids).size === ids.length, ids);
+    const bars = $$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id").slice(4));
+    const nodes = new Set($$(".flow-item[data-kind='node']").map((e) => e.getAttribute("data-flow-item").slice(2)));
+    check("每个色条都有对应条目（无浮空条）", bars.length > 0 && bars.every((b) => nodes.has(b)), { bars, nodes: [...nodes] });
+    const inlineEl = $(".flow-inline");
+    const inlineY = inlineEl ? yOf(inlineEl) : NaN;
+    const anchored = $$(".flow-item:not(.is-peek)").some((e) => Math.abs(yOf(e) + parseFloat(e.style.height || "0") + wrapY - inlineY) < 0.6);
+    check("动作行锚在主体行下方（不在预览行上）", !inlineEl || anchored, { inlineY, wrapY, items: $$(".flow-item").map((e) => e.getAttribute("data-flow-item")) });
+
+    // §15.5：切组瞬间（条与字分属两套 presence）也必须一一对应——旧实现会留下「条在、字没了」
+    const primOwner = (id) => id.replace(/^bar:/, "");
+    const liveNodes = () => new Set($$(".flow-item[data-kind='node'], .flow-item[data-kind='kid']").map((e) => e.getAttribute("data-flow-item").replace(/^peek:/, "").slice(2)));
+    const orphans = () => {
+      const nodes = liveNodes();
+      return [...new Set($$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id")).map(primOwner).filter((x) => !nodes.has(x)))];
+    };
+    probeDist = [0, 10, 10, 10];
+    relocate();
+    await sleep(40);
+    check("切组瞬间：没有「条在、字没了」的孤立色条（§15.5 id 命名空间）", orphans().length === 0, { orphans: orphans(), items: $$(".flow-item").map((e) => e.getAttribute("data-flow-item")) });
+    await sleep(400);
+    probeDist = [0, 0, 0, 0];
+    relocate();
+    await sleep(600);
+  }
+
+  console.log("---- §14.5 拉伸：逐帧跟手、三件整体居中、彩带不塌 ----");
+  {
+    const readShift = () => { const m = /translateX\(-(\d+)/.exec((activeMain && activeMain.style.transform) || ""); return m ? Number(m[1]) : 0; };
+    const rowX = () => { const el = $$(".flow-item[data-kind='node']")[0]; const m = /translate\(([-\d.]+)px/.exec((el && el.style.transform) || ""); return m ? Number(m[1]) : NaN; };
+    const centering = () => {
+      const labelX = rowX() + 0;
+      const vw = VIEWPORT.right - VIEWPORT.left;
+      const left = TEXT.left - readShift() - VIEWPORT.left;
+      const right = VIEWPORT.right - (labelX + 248 + 20);
+      const barX = labelX - 10 - 16;
+      return { left, right, braid: barX - (TEXT.right - readShift()), vw };
+    };
+    const c0 = centering();
+    check("初始：彩带 96、左右余量对称（±16 量化）", Math.abs(c0.braid - 96) <= 1 && Math.abs(c0.left - c0.right) <= 16, c0);
+
+    // 拉宽 280px：正文、彩带、节点列作为一体跟过去（不是只有列被挤到右边）
+    VIEWPORT.right = 1480;
+    {
+      const vw = VIEWPORT.right - VIEWPORT.left;
+      const tw = Math.min(440, vw - 8);
+      TEXT = { left: VIEWPORT.left + (vw - tw) / 2, right: VIEWPORT.left + (vw + tw) / 2 };
+    }
+    w.dispatchEvent(new w.Event("resize"));
+    check("拖动中打上 data-flow-resizing（关掉 420ms 滑行）", await until(() => w.document.body.getAttribute("data-flow-resizing") === "1", 500));
+    await sleep(90);
+    const c1 = centering();
+    check("宽度变化 90ms 内已跟手（不再等 200ms 防抖）", activeMain && Math.abs(c1.braid - 96) <= 1 && Math.abs(c1.left - c1.right) <= 16, c1);
+    check("停手后撤掉 data-flow-resizing", await until(() => !w.document.body.hasAttribute("data-flow-resizing"), 2000), w.document.body.getAttribute("data-flow-resizing"));
+    VIEWPORT.right = 1200;
+    {
+      const vw = VIEWPORT.right - VIEWPORT.left;
+      const tw = Math.min(440, vw - 8);
+      TEXT = { left: VIEWPORT.left + (vw - tw) / 2, right: VIEWPORT.left + (vw + tw) / 2 };
+    }
+    w.dispatchEvent(new w.Event("resize"));
+    await sleep(400);
+  }
+
+  console.log("---- §15.3 换章：预览/选中不残留、主体不先消失、无浮空图元 ----");
+  {
+    probeDist = [0, 0, 10, 10];
+    relocate();
+    check("换章前：预览已出现", await until(() => !!$(".flow-item.is-peek"), 4000), $$(".flow-item.is-peek").length);
+    click(item("n:B"));
+    check("换章前：已选中并展开出动作行", await until(() => !!$(".flow-actions"), 3000));
+    const before = $$(".flow-item:not(.is-peek)").length;
+    probeDist = [10, 10, 10, 10]; // 新章的探针（全部落在第二章）
+    chapterHref = "ch2.xhtml";
+    relocate();
+    await sleep(30);
+    check("换章瞬间：主体不先消失（不是整层淡出）", $$(".flow-item:not(.is-peek)").length > 0, { before, now: $$(".flow-item:not(.is-peek)").length });
+    check("换章瞬间：动作行一起收走", !$(".flow-actions"));
+    check("换章后：直接换成新章，旧预览与旧条目都不残留", await until(() => !!item("n:X") && !$(".flow-item.is-peek") && !item("n:A") && !item("peek:n:A"), 5000), {
+      peek: $$(".flow-item.is-peek").map((e) => e.getAttribute("data-flow-item")),
+      old: !!item("n:A") || !!item("peek:n:A"),
+      neu: !!item("n:X"),
+    });
+    const bars = $$(".flow-svg [data-prim-id^='bar:']").map((e) => e.getAttribute("data-prim-id").slice(4));
+    const nodes = new Set($$(".flow-item[data-kind='node'], .flow-item[data-kind='kid']").map((e) => e.getAttribute("data-flow-item").slice(2)));
+    check("换章后：每个色条都有对应条目（无浮空条）", bars.length > 0 && bars.every((b) => nodes.has(b)), { bars, nodes: [...nodes] });
+  }
+
+  console.log("---- §16.1 一代一层：两代并存 / defs 隔离 / 同步绘制 ----");
+  {
+    const genL = () => $$(".flow-layer > .flow-gen");
+    const genB = () => $$("svg.flow-blend > g.flow-gen");
+    check("稳定态：上层与混合层各只有一代", await until(() => genL().length === 1 && genB().length === 1, 3000), { layer: genL().length, blend: genB().length });
+
+    // §16.7-1：每个图元在文档里只出现一次（R5 两个图元层按 layer 过滤）
+    const prims = $$(".flow-svg [data-prim-id]").map((e) => e.getAttribute("data-prim-id"));
+    const dupPrims = prims.filter((id, i) => prims.indexOf(id) !== i);
+    check("每个图元在文档里只出现一次（R5）", prims.length > 0 && dupPrims.length === 0, dupPrims.slice(0, 6));
+
+    // §16.7-6：非 open/close/turn 的 motion 下，零件无延迟、无位移
+    await sleep(500);
+    const its = $$(".flow-item");
+    check("非编排 motion：--flow-delay 全为 0ms", its.length > 0 && its.every((e) => e.style.getPropertyValue("--flow-delay") === "0ms"), its.map((e) => e.style.getPropertyValue("--flow-delay")).slice(0, 6));
+    check("非编排 motion：条目 transform 无额外位移尾项", its.every((e) => ((e.style.transform || "").match(/translate\(/g) || []).length <= 1), its.map((e) => e.style.transform).slice(0, 4));
+
+    // 切回第一章 t1 → 换代
+    probeDist = [0, 0, 0, 0];
+    relocate();
+    const sawTwo = await until(() => genL().length === 2 && genB().length === 2, 4000, 10);
+    check("换代瞬间：上层与混合层各 2 代", sawTwo, { layer: genL().length, blend: genB().length });
+    if (sawTwo) {
+      const exL = genL().filter((e) => e.getAttribute("data-phase") === "exit");
+      const exB = genB().filter((e) => e.getAttribute("data-phase") === "exit");
+      check("旧代带 data-phase=exit（两层一致）", exL.length === 1 && exB.length === 1, { exitLayer: exL.length, exitBlend: exB.length });
+
+      // §16.7-5：两代并存时文档内所有 [id] 唯一（defs / gradient / marker 全部带代前缀）
+      const ids = $$("[id]").map((e) => e.id);
+      const dupIds = ids.filter((id, i) => ids.indexOf(id) !== i);
+      check("两代并存时文档内所有 [id] 唯一（16.1.5）", ids.length > 0 && dupIds.length === 0, dupIds.slice(0, 8));
+
+      // §16.7-7：paintFrame 对两代都写 d
+      const dOfGen = (root) => Array.from(root.querySelectorAll("path.flow-shape")).map((p) => p.getAttribute("d"));
+      const d0 = genB().map(dOfGen);
+      offY += 24;
+      if (scrollCb) scrollCb();
+      const d1 = genB().map(dOfGen);
+      // stub 的几何只来自视口上下缘（不随章节偏移变化），所以每代只要求「至少一条 path 被写过新 d」
+      const moved = d0.map((list, gi) => list.length > 0 && !!d1[gi] && list.some((d, i) => d1[gi][i] !== d));
+      check("逐帧绘制覆盖两代：两代的彩带 d 都随滚动更新", d0.length === 2 && moved.length === 2 && moved.every(Boolean), { gens: d0.length, moved, counts: d0.map((a) => a.length), keys: genB().map((g) => g.getAttribute("data-gen")) });
+      offY = 0;
+      if (scrollCb) scrollCb();
+
+      await sleep(180);
+      check("旧代 140ms 后卸载（两处各剩 1 代）", genL().length === 1 && genB().length === 1, { layer: genL().length, blend: genB().length });
+    }
+
+    // §16.7-8：多栏版式连续 10 帧，shape id 不随 top 变化（否则每帧 flushSync + 每帧进出场）
+    multiCol = true;
+    relocate(); // 平滑模式：relocate 强制重采几何（columns 变为两栏，boxes 仍在 column 0）
+    await sleep(320);
+    const gradIds = () => new Set($$(".flow-blend linearGradient").map((g) => g.id));
+    const gid0 = gradIds();
+    for (let i = 1; i <= 10; i++) {
+      offY = i * 3;
+      if (scrollCb) scrollCb();
+    }
+    const gid1 = gradIds();
+    const added = [...gid1].filter((id) => !gid0.has(id));
+    check("多栏几何连续 10 帧：彩带 id 集合不增长（shape id 不含 top）", gid0.size > 0 && added.length === 0, { before: gid0.size, after: gid1.size, added: added.slice(0, 5) });
+    multiCol = false;
+    offY = 0;
+    relocate();
+    await sleep(320);
+  }
 
   console.log("---- 关闭 ----");
   stage.setOpen(false);
@@ -338,8 +544,8 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     return { root2, refs, el };
   };
   {
-    const s = await mountScenario({ left: 560, right: 1000 });
-    check("shift 档：正文整体平移 −160px", s.refs.main && s.refs.main.style.transform === "translateX(-160px)", {
+    const s = await mountScenario({ left: 520, right: 960 });
+    check("shift 档：正文整体平移 −200px（三件整体居中）", s.refs.main && s.refs.main.style.transform === "translateX(-200px)", {
       transform: s.refs.main && s.refs.main.style.cssText,
       gutter: s.refs.gutter && s.refs.gutter.style.flexBasis,
       mode: ($(".flow-layer") || { getAttribute: () => null }).getAttribute("data-mode"),
@@ -348,7 +554,7 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     s.root2.unmount(); s.el.remove();
   }
   {
-    const s = await mountScenario({ left: 420, right: 1000 });
+    const s = await mountScenario({ left: 450, right: 1030 });
     check("reserve 档：预留槽位 390px", s.refs.gutter && s.refs.gutter.style.flexBasis === "390px", s.refs.gutter && s.refs.gutter.style.flexBasis);
     s.root2.unmount(); s.el.remove();
   }

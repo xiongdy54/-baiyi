@@ -31,12 +31,30 @@ console.log("---- planColumn ----");
   const p2 = L.planColumn({ on: true, viewport: vp, textLeft: 560, textRight: 1000 }, null);
   check("平移可行 → shift 160", p2.mode === "shift" && p2.shift === 160, p2);
   const p3 = L.planColumn({ on: true, viewport: vp, textLeft: 420, textRight: 840 }, null);
-  check("room 360 够 → inside", p3.mode === "inside" && p3.shift === 0 && p3.reserve === 0, p3);
+  check("§14.5 三件整体居中 → shift 88（不再只是「够放」）", p3.mode === "shift" && p3.shift === 88 && p3.barX - (840 - 88) === 96, p3);
   const vp2 = { left: 280, right: 1000, top: 60, bottom: 900 };
   const p4 = L.planColumn({ on: true, viewport: vp2, textLeft: 420, textRight: 900 }, null);
   check("窄视口 + 紧凑也放不下 → whisper", p4.mode === "whisper", p4);
   const p5 = L.planColumn({ on: true, viewport: vp, textLeft: 560, textRight: 1000 }, { shift: 168, reserve: 0, mode: "shift", barX: 0, labelX: 0, labelW: 0, right: 0 });
   check("滞回：need 160 与旧 168 差 <16 → 保持 168", p5.mode === "shift" && p5.shift === 168, p5);
+  const vpW = { left: 0, right: 1400, top: 60, bottom: 900 };
+  const p6 = L.planColumn({ on: true, viewport: vpW, textLeft: 340, textRight: 1060 }, null);
+  check("§14.5 宽窗 + 720 版心 → 居中位移 200（195 按 8px 量化）、彩带恰 96", p6.mode === "shift" && p6.shift === 200 && p6.barX - (1060 - 200) === 96, p6);
+  check("§14.5 三件整体在视口内居中（左右余量差 ≤ 2×量化步长）", Math.abs((340 - p6.shift) - (1400 - (p6.barX + 294))) <= 16, { left: 340 - p6.shift, right: 1400 - (p6.barX + 294), barX: p6.barX });
+  {
+    const bad = [];
+    for (let vw = 900; vw <= 1900; vw += 20) {
+      const v = { left: 0, right: vw, top: 60, bottom: 900 };
+      const tw = Math.min(720, vw - 8);
+      const tl = (vw - tw) / 2, tr = tl + tw;
+      const pp = L.planColumn({ on: true, viewport: v, textLeft: tl, textRight: tr }, null);
+      if (pp.mode === "whisper" || pp.mode === "reserve") continue; // 预留档的 barX 由宿主按重排后的实际版心修正
+      const braid = pp.barX - (tr - pp.shift);
+      // 下界留一个量化步长：右缘硬约束会把 shift 钳住，此时彩带按剩余量收窄（BRAID_MIN 附近）
+      if (braid < L.FLOW.BRAID_MIN - L.FLOW.SHIFT_STEP || braid > 97 || pp.right > vw - 4) bad.push({ vw, mode: pp.mode, braid, right: pp.right });
+    }
+    check("§14.5 宽度扫描：彩带不低于 64−步长、列不越界", bad.length === 0, bad.slice(0, 5));
+  }
   check("on=false → off", L.planColumn({ on: false, viewport: vp, textLeft: 420, textRight: 1000 }, null).mode === "off");
   check("硬约束：所有非 whisper 方案 plan.right ≤ viewport.right − 4", [p1, p2, p3, p5].every((p) => p.right <= vp.right - 4), [p1, p2, p3, p5].map((p) => p.right));
 }
@@ -131,10 +149,18 @@ console.log("---- buildShapes ----");
   check("同节点相邻（间距 20）合并为一块：三个段落 → 两个 ribbon", ribbon.length === 2, ribbon.map((s) => [s.s0, s.s1]));
   check("流动落点依次相接、末块 t1=port.y1", close(ribbon[0].t1, ribbon[1].t0) && close(ribbon[1].t1, 150), ribbon.map((s) => [s.t0, s.t1]));
   const bShape = shapes.find((s) => s.nodeId === "b");
-  check("非最右栏只有高亮矩形（ribbon=false）", !!bShape && bShape.ribbon === false && close(bShape.L, 94) && close(bShape.xs, 506), bShape);
+  check("非最右栏只有高亮矩形（ribbon=false）+ 只画可见带（L = xs − HL_FADE_W）", !!bShape && bShape.ribbon === false && close(bShape.L, Math.max(94, 506 - L.FLOW.HL_FADE_W)) && close(bShape.xs, 506), bShape);
+  // §16.2：shape id 不得含逐帧变化的 top——同一节点 / 栏内按序号编号，滚动时 id 才能稳定
+  check("非最右栏 shape id = node@column#k（不含 top）", !!bShape && bShape.id === "b@0#0", bShape && bShape.id);
+  const moved = L.buildShapes({ ...geo, boxes: geo.boxes.map((b) => ({ ...b, top: b.top + 7, bottom: b.bottom + 7 })) }, lay, 0, { focusId: null, hoverId: null, readingId: "a", colorOf: () => "#f00" });
+  check("段落整体位移后 id 不变（不随 top 抖动）", moved.map((s) => s.id).join("|") === shapes.map((s) => s.id).join("|"), moved.map((s) => s.id));
   const stub = shapes.find((s) => s.nodeId === "c");
   check("看不见的近邻成员出 stub（侧＝below，零宽矩形段）", !!stub && stub.stub === "below" && close(stub.L, stub.xs) && close(stub.s0, 900), stub);
   check("stub 落在 port 中段", !!stub && close(stub.t0, 312) && close(stub.t1, 328), stub && [stub.t0, stub.t1]);
+  // §16.5：shiftOf 把条目实际位置差补到彩带端点上（所有 ribbon 的 t0/t1 一起 +10）
+  const shifted = L.buildShapes(geo, lay, 0, { focusId: null, hoverId: null, readingId: "a", colorOf: (id) => (id === "b" ? "#00f" : "#f00"), shiftOf: () => 10 });
+  const ribbonShifted = shifted.filter((s) => s.nodeId === "a" && s.ribbon);
+  check("shiftOf：a 的两条 ribbon 的 t0/t1 各 +10", ribbonShifted.length === ribbon.length && ribbonShifted.every((s, i) => close(s.t0, ribbon[i].t0 + 10) && close(s.t1, ribbon[i].t1 + 10)), ribbonShifted.map((s) => [s.t0, s.t1]));
 }
 
 // ---------------------------------------------------------------- §10-6 buildStrands + §12.2 hoverSet / §12.3.2 extra
@@ -301,7 +327,7 @@ console.log("---- decideAttention ----");
 }
 
 // ---------------------------------------------------------------- §13.4 颜色 / §13.2 粘滞 / §13.3 几何
-console.log("---- §13.4 kidColor / §13.2 winStart / §13.3 geometryAt·buildPaintRects ----");
+console.log("---- §13.4 kidColor / §13.2 winStart / §13.3 geometryAt / §15.1 shapeGradientStops ----");
 const COLORS = { dark: false, bg: "#fff", fg: "#111", accent: "#166a59", accentOn: "#fff", hairline: "#ccc", counter: "#b5483b", palette: ["#6E7F2E", "#A9821C", "#A84A80", "#3E8A82", "#3F68A8", "#6F5FB0", "#A44836", "#B2662A"], aHL: [0.16, 0.26, 0.38], aEnd: [0.34, 0.52, 0.6], aDim: 0.3, strandA: 0.62 };
 const mkCtx = (g, cut, pattern, members, extra) => Object.assign({
   g, plan: { mode: "reserve", shift: 0, reserve: 390, barX: 700, labelX: 726, labelW: 248, right: 994 }, colors: COLORS, pattern, cut,
@@ -337,15 +363,20 @@ const mkCtx = (g, cut, pattern, members, extra) => Object.assign({
   const ga2 = L.geometryAt(g, { 0: { left: 0, top: -200 } });
   check("geometryAt：完全移出视口 → 被裁掉", ga2.boxes.length === 0, ga2.boxes.length);
 
-  // buildPaintRects 与 buildShapes 对齐
+  // §15.1：一条路径一条渐变（矩形段与颈部同源）
   const plan = { mode: "reserve", shift: 0, reserve: 390, barX: 700, labelX: 726, labelW: 248, right: 994 };
   const colors = COLORS;
   const ctx2 = mkCtx(graph([node("P", null, 0, "P", "其他"), node("a", "P", 1000, "A", "理由", { blockStart: 100, blockEnd: 160 })], []), "P", "tree", ["a"], { readingId: "a" });
   const layP = L.fitLayout(ctx2, ["a"], 700);
   const geoP = { seq: 2, viewport: { left: 0, top: 0, right: 1200, bottom: 900 }, columns: [{ left: 10, right: 100 }], boxes: [gbox, { ...gbox, key: "k2", top: 180, bottom: 220, cTop: 180, cBottom: 220 }], text: { left: 10, right: 100 } };
-  const rects = L.buildPaintRects(geoP, layP, { hoverId: null, focusId: "a", colorOf: () => "#6E7F2E", colors });
-  const shape = L.buildShapes(geoP, layP, 0, { hoverId: null, focusId: "a", readingId: "a", colorOf: () => "#6E7F2E" }).filter((s) => s.ribbon);
-  check("buildPaintRects 与颈部对齐：left+width=xs、top=s0、top+height=s1", rects.length === 1 && shape.length === 1 && Math.abs(rects[0].left + rects[0].width - shape[0].xs) < 1 && Math.abs(rects[0].top - shape[0].s0) < 1 && Math.abs(rects[0].top + rects[0].height - shape[0].s1) < 1, { rects, shape: shape[0] });
+  const rib = L.buildShapes(geoP, layP, 0, { hoverId: null, focusId: "a", readingId: "a", colorOf: () => "#6E7F2E" }).filter((s) => s.ribbon)[0];
+  const gr = L.shapeGradientStops(rib, colors, 0);
+  check("§15.1 渐变横向基准 = 段落左缘 → 节点 port", gr.x1 === rib.L && gr.x2 === rib.x1, gr);
+  check("§15.1 四停点：0 / 0 / aHL / aEnd", gr.stops.length === 4 && gr.stops[0].opacity === 0 && gr.stops[1].opacity === 0 && gr.stops[2].opacity === colors.aHL[0] && gr.stops[3].opacity === colors.aEnd[0], gr.stops);
+  const fadeWant = Math.max(0, (rib.xs - L.FLOW.HL_FADE_W - rib.L) / Math.max(1, rib.x1 - rib.L)); // 短段落整块都是渐变
+  check("§15.1 渐隐从接缝前 HL_FADE_W 起坡", Math.abs(gr.stops[1].offset - fadeWant) < 0.01 && Math.abs(gr.stops[2].offset - (rib.xs - rib.L) / Math.max(1, rib.x1 - rib.L)) < 0.01, { got: gr.stops.map((x) => x.offset), fadeWant });
+  const flat = L.shapeGradientStops({ L: 10, xs: 100, x1: 100 }, colors, 0);
+  check("§15.1 无颈部（纯矩形）收在 aHL、只有三停点", flat.stops.length === 3 && flat.stops[2].opacity === colors.aHL[0] && flat.stops[2].offset === 1, flat);
 }
 
 // ---------------------------------------------------------------- §12.4.4 layoutPeek
@@ -359,9 +390,31 @@ console.log("---- layoutPeek ----");
     moreAbove: 0, moreBelow: 0, readingId: null, readingBlock: null, selectedId: null, expandedId: null, inlineH: 0, maxLines0: 2, canBack: false, availH: 800, maxW: 500, cmpPage: 0,
   };
   const p = L.layoutPeek(ctx, "G", "below");
-  check("预览：标题 + 成员 + 分隔线；成员标记 peek", p.items.filter((i) => i.peek).length === 3 && p.prims.some((x) => x.id === "peekline:G"), p.items.map((i) => i.id));
+  check("预览：标题 + 成员 + 分隔线；成员标记 peek", p.items.filter((i) => i.peek).length === 3 && p.prims.some((x) => x.id === "peek:line:G"), p.items.map((i) => i.id));
+  // §16.2（R4）：预览产出的所有图元 id 都以 peek: 开头（与主体隔离，不复用 DOM）
+  check("预览图元 id 全部带 peek: 前缀", p.prims.every((x) => x.id.startsWith("peek:")), p.prims.map((x) => x.id));
   check("预览：成员各有 port（流带落在细条上）", p.ports.length === 2 && p.leafIds.join() === "k1,k2");
   check("预览标题 meta=下一部分", p.items[0].meta === "下一部分", p.items[0].meta);
+}
+
+console.log("---- §14.3 上方槽 / 列顶留白 ----");
+{
+  check("ABOVE_SLOT 计入「另 N 项」= 88", L.COLUMN.ABOVE_SLOT === 88, L.COLUMN.ABOVE_SLOT);
+  check("上方槽 ≥ 最坏预览高度（20 + 2×22 + 16）", L.COLUMN.ABOVE_SLOT - 8 >= 20 + 2 * 22 + 16, L.COLUMN.ABOVE_SLOT);
+  check("COL_MARGIN_Y = 20", FLOW.COL_MARGIN_Y === 20, FLOW.COL_MARGIN_Y);
+  // 3 个成员 → 2 行 + 「另 1 项」= 80，必须放得进 ABOVE_SLOT − 8
+  const g = graph(
+    [node("G", null, 0, "组", "论点"), node("k1", "G", 1000, "一", "理由"), node("k2", "G", 2000, "二", "理由"), node("k3", "G", 3000, "三", "理由")],
+    [],
+  );
+  const ctx = {
+    g, plan: { mode: "inside", shift: 0, reserve: 0, barX: 700, labelX: 726, labelW: 248, right: 994 }, colors: COLORS, pattern: "tree", cut: "G",
+    header: "组", patternName: "大纲", members: ["k1", "k2", "k3"], colorOf: new Map([["k1", "#111"], ["k2", "#222"], ["k3", "#333"]]),
+    paletteOf: new Map(), moreAbove: 0, moreBelow: 0, readingId: "k1", readingBlock: null, selectedId: null, expandedId: null,
+    inlineH: 0, maxLines0: 2, canBack: false, availH: 800, maxW: 500, cmpPage: 0,
+  };
+  const p = L.layoutPeek(ctx, "G", "above", L.COLUMN.ABOVE_ROWS);
+  check("2 行预览 + 另 1 项 的总高 ≤ 上方槽余量", p.height <= L.COLUMN.ABOVE_SLOT - 8, { h: p.height, slot: L.COLUMN.ABOVE_SLOT });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

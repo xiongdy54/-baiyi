@@ -14,20 +14,18 @@ import {
   FLOW,
   PATTERN_LABEL,
   PEEK,
-  buildPaintRects,
   buildShapes,
   buildStrands,
   fitLayout,
   geometryAt,
   layoutPeek,
-  neckPath,
   patternFor,
   planColumn,
   shapePath,
   type LayoutCtx,
 } from "../../../lib/flow/layout";
 import type { FlowColors, FlowEnv, FlowItem, FlowMotion, FlowPattern, FlowPlan, FlowScene, PatternLayout } from "../../../lib/flow/types";
-import FlowLayer, { type FlowEvent } from "./FlowLayer";
+import FlowLayer, { GEN, type FlowEvent } from "./FlowLayer";
 import { useStructureFlow, type StructureFlowData } from "./useStructureFlow";
 
 export interface StructureFlowHostProps {
@@ -126,6 +124,19 @@ function resolveColors(el: HTMLElement | null): FlowColors {
   }
 }
 
+
+/** §14.5：只改了 transform 时，把几何按位移差解析平移（不重采 iframe 几何） */
+function shiftOffsets(g: ReaderStructureGeometry, offs: Record<number, { left: number; top: number }> | null, dx: number) {
+  const out: Record<number, { left: number; top: number }> = {};
+  const docs = new Set<number>();
+  for (const b of g.boxes) docs.add(b.doc ?? 0);
+  for (const d of docs) {
+    const o = offs?.[d];
+    out[d] = { left: (o?.left ?? 0) - dx, top: o?.top ?? 0 };
+  }
+  return out;
+}
+
 const EMPTY_LAYOUT = (): PatternLayout => ({ items: [], ports: [], prims: [], expressed: [], leafIds: [], height: 0, readingY: null });
 
 export default function StructureFlowHost(props: StructureFlowHostProps) {
@@ -145,6 +156,8 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   armedRef.current = armed;
   const [tracking, setTracking] = useState(false);
   const trackingRef = useRef(false);
+  /** §8.8：正文平移期间高亮隐去（并阻止它拖在移动的文字后面） */
+  const [shifting, setShifting] = useState(false);
   const [plan, setPlan] = useState<FlowPlan | null>(null);
   const planRef = useRef<FlowPlan | null>(null);
   const [geo, setGeo] = useState<ReaderStructureGeometry | null>(null);
@@ -152,12 +165,16 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   const [cmpPage, setCmpPage] = useState(0);
   const [animKey, setAnimKey] = useState(0);
   const [colorTick, setColorTick] = useState(0);
-  const baseTextRef = useRef<{ left: number; right: number } | null>(null);
+  /** §14.5：未预留时量到的正文档宽（px）；版心位置每次按当前视口现算 */
+  const baseWRef = useRef<number | null>(null);
+  /** §14.5：上次采样时的平移量——之后只改 transform 时，几何按差值解析校正 */
+  const geoShiftRef = useRef(0);
   const sigRef = useRef("");
   const ticketRef = useRef(0);
   const openTimer = useRef<number | null>(null);
   const motionTimer = useRef<number | null>(null);
   const turnTimer = useRef<number | null>(null);
+  const shiftTimer = useRef<number | null>(null);
   const relayoutCleanup = useRef<(() => void) | null>(null);
   const currentShift = useRef(0);
   const currentReserve = useRef(0);
@@ -170,11 +187,22 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
   const bump = useCallback(() => setAnimKey((n) => n + 1), []);
 
   /** §13.3：滚动模式平滑彩带（矩形画在正文 iframe，混合层只画颈部） */
-  const smooth = scrolled && !!kernel?.onContentScroll && !!kernel?.getFrameOffsets && !!kernel?.setStructurePaint;
+  const smooth = scrolled && !!kernel?.onContentScroll && !!kernel?.getFrameOffsets; // §15.1：矩形并入 SVG，不再需要 iframe 绘制通道
   const [frameTick, setFrameTick] = useState(0);
-  const frameRef = useRef<{ lay: PatternLayout; dy: number; opts: Parameters<typeof buildShapes>[3] } | null>(null);
+  /** §16.1.2：逐帧数据按代存（一代＝一个主体组下的完整结构图）；换代后旧代还要用它画 140ms */
+  const framesRef = useRef(new Map<string, { lay: PatternLayout; dy: number; opts: Parameters<typeof buildShapes>[3] }>());
+  const liveGenRef = useRef<string>("none");
   const neckEls = useRef(new Map<string, SVGPathElement>());
+  /** §16.1.2：颈部元素按 `${genKey}|${id}` 注册（两代并存时互不覆盖）；工厂稳定，避免每帧 ref 往返 */
+  const registerShape = useCallback((genKey: string, id: string, el: SVGPathElement | null) => {
+    const key = `${genKey}|${id}`;
+    if (el) neckEls.current.set(key, el);
+    else neckEls.current.delete(key);
+  }, []);
   const shapeSigRef = useRef("");
+  /** §16.5：条目 DOM 缓存（同一 layout 只查一次） */
+  const itemElCache = useRef<{ key: string; lay: PatternLayout; map: Map<string, { el: HTMLElement; mid: number }> } | null>(null);
+  const settleUntil = useRef(0);
   /** §13.2.3：成员的窗口起点（按组粘滞，阅读节点在窗口内部时窗口不动） */
   const winRef = useRef(new Map<string, number>());
 
@@ -199,13 +227,16 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     return { left: vr.left, top: vr.top, right: vr.right, bottom: vr.bottom };
   }, [viewportEl]);
 
+  /** §14.5：版心＝「未预留时量到的宽度」在【当前】视口里居中——resize / 平移 / 预留都不再互相污染 */
+  const baseTextNow = useCallback((vp: FlowEnv["viewport"]) => {
+    const vw = Math.max(1, vp.right - vp.left);
+    const w = Math.min(baseWRef.current ?? vw * 0.6, vw - 8);
+    return { left: vp.left + (vw - w) / 2, right: vp.left + (vw + w) / 2 };
+  }, []);
   const syncPlan = useCallback(() => {
     if (!viewportEl) return;
     const vp = readViewport();
-    const w = vp.right - vp.left;
-    const gText = geoRef.current?.text;
-    const shiftNow = planRef.current?.shift ?? 0;
-    const base = baseTextRef.current ?? (gText ? { left: gText.left + shiftNow, right: gText.right + shiftNow } : { left: vp.left + w * 0.2, right: vp.right - w * 0.2 });
+    const base = baseTextNow(vp);
     const prev = planRef.current;
     const next = planColumn({ on: true, viewport: vp, textLeft: base.left, textRight: base.right }, prev);
     // 预留保持（§5.3）：决策用 baseText（未预留版心）；reserve 方案的 barX 再用重排后的实际 textRight 修正
@@ -240,43 +271,94 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     (force = false): ReaderStructureGeometry | null => {
       if (!viewportEl || !kernel?.getStructureGeometry) return null;
       if (viewportEl.ownerDocument.visibilityState !== "visible") return geoRef.current;
-      const g = kernel.getStructureGeometry(smooth ? { all: true } : undefined);
-      if (!g) return null;
+      const raw = kernel.getStructureGeometry(smooth ? { all: true } : undefined);
+      if (!raw) return null;
+      // §15.2：裁剪视口＝可见阅读窗口（引擎容器可能比可见区高出几像素，彩带顶边不许越过阅读区上沿）
+      const host = readViewport();
+      const g =
+        raw.viewport.top < host.top || raw.viewport.bottom > host.bottom
+          ? { ...raw, viewport: { ...raw.viewport, top: Math.max(raw.viewport.top, host.top), bottom: Math.min(raw.viewport.bottom, host.bottom) } }
+          : raw;
       const sig =
         JSON.stringify(g.boxes.map((b) => [b.nodeId, b.block, b.doc, b.top | 0, b.bottom | 0, (b.cTop ?? 0) | 0, b.left | 0])) + JSON.stringify(g.text);
       if (!force && sig === sigRef.current) return g;
       sigRef.current = sig;
       geoRef.current = g;
       setGeo(g);
-      // baseText＝最近一次「未平移、未预留」时量到的版心（首次采样即使先前用兜底版心得到过 reserve 也要补上）
-      if (g.text && (baseTextRef.current == null || ((planRef.current?.shift ?? 0) === 0 && (planRef.current?.reserve ?? 0) === 0))) {
-        baseTextRef.current = { left: g.text.left, right: g.text.right };
-      }
+      // §14.5：只在「未预留」时刷新版宽（平移是纯 transform，宽度不受影响；预留会重排，宽度不是版心的真值）
+      if (g.text && (planRef.current?.reserve ?? 0) === 0) baseWRef.current = Math.max(0, g.text.right - g.text.left);
+      geoShiftRef.current = planRef.current?.shift ?? 0;
       return g;
     },
-    [viewportEl, kernel, smooth],
+    [viewportEl, kernel, smooth, readViewport],
   );
 
-  /** §13.3.4：滚动逐帧——读一次章节原点 → 纯计算 → 只写 DOM；颈部集合变化时才让 React 渲染一次 */
+  /**
+   * §16.5：读条目的【实际】位置（CSS 240ms 几何过渡途中，布局坐标与屏幕位置有差）。
+   * 缓存：同一 layout 只查一次 DOM；所有 getBoundingClientRect 必须在 paintFrame 的任何写之前完成。
+   */
+  const readLiveShift = useCallback((gk: string) => {
+    const F = framesRef.current.get(gk);
+    if (!F) return undefined;
+    const doc = viewportEl?.ownerDocument ?? (typeof document !== "undefined" ? document : null);
+    const layer = doc?.querySelector(".flow-layer");
+    if (!doc || !layer) return undefined;
+    const root = Array.from(layer.querySelectorAll(".flow-gen[data-gen]")).find((el) => el.getAttribute("data-gen") === gk) ?? null;
+    if (!root) return undefined;
+    const cacheKey = gk + "|" + F.lay.items.length + "|" + F.dy;
+    // 版式对象变了（窗口滑动 / 预览出现）→ mid 必须按新 layout 重算，否则补差会过冲
+    if (itemElCache.current?.key !== cacheKey || itemElCache.current?.lay !== F.lay) {
+      const byId = new Map<string, HTMLElement>();
+      for (const el of Array.from(root.querySelectorAll("[data-flow-item]"))) byId.set(el.getAttribute("data-flow-item") ?? "", el as HTMLElement);
+      const map = new Map<string, { el: HTMLElement; mid: number }>();
+      for (const it of F.lay.items) {
+        if (!it.nodeId || (it.kind !== "node" && it.kind !== "kid")) continue;
+        if (map.has(it.nodeId) && it.peek) continue; // 主体优先于预览
+        const el = byId.get(it.id);
+        if (el) map.set(it.nodeId, { el, mid: it.y + F.dy + it.h / 2 });
+      }
+      itemElCache.current = { key: cacheKey, lay: F.lay, map };
+    }
+    const delta = new Map<string, number>();
+    for (const [id, v] of itemElCache.current.map) {
+      const r = v.el.getBoundingClientRect(); // .flow-layer 是 fixed inset:0，所以 client 坐标即层坐标
+      if (r.width === 0 && r.height === 0) continue; // 无布局环境（jsdom）不做修正
+      const d = r.top + r.height / 2 - v.mid; // 用中线：预览行有 scale(.86) 以 50% 为原点，中线不受影响
+      if (Math.abs(d) > 0.5) delta.set(id, d);
+    }
+    return (id: string) => delta.get(id) ?? 0;
+  }, [viewportEl]);
+
+  /** §13.3.4 / §16.1.2：滚动逐帧——先读所有代的实际位置 → 纯计算 → 遍历【所有代】写 DOM（退场代也跟着正文滚） */
   const paintFrame = useCallback(() => {
-    const base = geoRef.current, F = frameRef.current;
-    if (!smooth || !base || !F || !kernel?.getFrameOffsets) return;
-    const g = geometryAt(base, kernel.getFrameOffsets());
-    const shapes = buildShapes(g, F.lay, F.dy, F.opts).filter((s) => s.ribbon);
-    const sig = shapes.map((s) => s.id).join("|");
-    if (sig !== shapeSigRef.current) {
-      flushSync(() => setFrameTick((n) => n + 1));
-      return;
+    const base = geoRef.current;
+    if (!smooth || !base || !kernel?.getFrameOffsets) return;
+    const dx = (planRef.current?.shift ?? 0) - geoShiftRef.current;
+    const g = geometryAt(base, shiftOffsets(base, kernel.getFrameOffsets(), dx));
+    // ① 先【读】：当前代的标签实际位置（16.5），所有 getBoundingClientRect 集中在写之前
+    const live = liveGenRef.current;
+    const shiftOf = readLiveShift(live);
+    // ② 再算 + 【写】
+    for (const [gk, F] of framesRef.current) {
+      const shapes = buildShapes(g, F.lay, F.dy, { ...F.opts, shiftOf: gk === live ? shiftOf : undefined });
+      if (gk === live) {
+        const sig = shapes.map((s) => s.id).join("|");
+        // §15.5：形状集合变化时只补渲染一次，但【本帧仍然继续写已有元素】
+        if (sig !== shapeSigRef.current) {
+          shapeSigRef.current = sig;
+          flushSync(() => setFrameTick((n) => n + 1)); // 只会重渲彩带层（16.6）
+        }
+      }
+      for (const s of shapes) {
+        const el = neckEls.current.get(`${gk}|${s.id}`);
+        if (!el || !el.isConnected) continue;
+        const d = shapePath(s);
+        el.style.transition = "opacity 160ms var(--flow-ease)"; // 只关几何过渡，保留淡入淡出
+        el.setAttribute("d", d);
+        el.style.setProperty("d", `path("${d}")`);
+      }
     }
-    for (const s of shapes) {
-      const el = neckEls.current.get(s.id);
-      if (!el) continue;
-      const d = s.stub ? shapePath(s) : neckPath(s);
-      el.style.transition = "none";
-      el.setAttribute("d", d);
-      el.style.setProperty("d", `path("${d}")`);
-    }
-  }, [smooth, kernel]);
+  }, [smooth, kernel, readLiveShift]);
 
   const settleMotion = useCallback((ms = 900, next: FlowMotion = "steady") => {
     if (motionTimer.current != null) window.clearTimeout(motionTimer.current);
@@ -416,7 +498,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     prevDocRef.current = documentId;
     if (prev == null || prev === documentId) return; // 首次挂载由开场流程负责，不在这里重来
     ticketRef.current++;
-    baseTextRef.current = null;
+    baseWRef.current = null;
     sigRef.current = "";
     geoRef.current = null;
     setGeo(null);
@@ -430,6 +512,9 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     winRef.current.clear();
     neckEls.current.clear();
     shapeSigRef.current = "";
+    framesRef.current.clear();
+    liveGenRef.current = "none";
+    itemElCache.current = null;
     setCmpPage(0);
     setMotion("steady");
     setArmed(false);
@@ -440,7 +525,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
 
   useEffect(() => () => {
     ticketRef.current++;
-    for (const t of [openTimer.current, motionTimer.current, turnTimer.current]) if (t != null) window.clearTimeout(t);
+    for (const t of [openTimer.current, motionTimer.current, turnTimer.current, shiftTimer.current]) if (t != null) window.clearTimeout(t);
     relayoutCleanup.current?.();
   }, []);
 
@@ -538,14 +623,24 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     };
   }, [stage, kernel, viewportEl, scrolled, smooth, beginTrack, beginTurn, sampleGeometry, syncPlan, bump]);
 
-  // 窗口缩放：停手后重决策（缩放期间不改 mode）
+  // §14.5：缩放逐帧跟手——拖动中只读容器 + 纯计算（不重采 iframe 几何、不重排），停手后才采样与评估预留
+  const resizingRef = useRef(false);
   useEffect(() => {
     if (!viewportEl) return;
-    let timer: number | null = null;
+    let idle: number | null = null;
+    let raf = 0;
+    const doc = viewportEl.ownerDocument;
     const onResize = () => {
-      if (timer != null) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        timer = null;
+      resizingRef.current = true;
+      doc.body.setAttribute("data-flow-resizing", "1");
+      if (raf === 0) raf = requestAnimationFrame(() => { raf = 0; syncPlan(); });
+      if (idle != null) window.clearTimeout(idle);
+      idle = window.setTimeout(() => {
+        idle = null;
+        resizingRef.current = false;
+        doc.body.removeAttribute("data-flow-resizing");
+        const p = planRef.current;
+        if (p && p.reserve !== currentReserve.current) void changeReserve(p.reserve);
         sampleGeometry(true);
         syncPlan();
         bump();
@@ -555,32 +650,37 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     ro?.observe(viewportEl);
     window.addEventListener("resize", onResize);
     return () => {
-      if (timer != null) window.clearTimeout(timer);
+      if (idle != null) window.clearTimeout(idle);
+      if (raf) cancelAnimationFrame(raf);
+      doc.body.removeAttribute("data-flow-resizing");
       ro?.disconnect();
       window.removeEventListener("resize", onResize);
     };
-  }, [viewportEl, sampleGeometry, syncPlan, bump]);
+  }, [viewportEl, sampleGeometry, syncPlan, bump, changeReserve]);
 
   // 排布生效：打开完成后平移 / 预留的变化走 §8.8 编排
   useEffect(() => {
     if (stage !== "open" || !plan) return;
     if (plan.reserve !== currentReserve.current) {
+      if (resizingRef.current) return; // 拖动中不重排；停手的 idle 会收口
       void changeReserve(plan.reserve);
       return;
     }
     if (plan.shift !== currentShift.current) {
-      const delta = Math.abs(plan.shift - currentShift.current);
       applyShift(plan.shift);
-      if (delta > 0) {
-        if (shiftEl) shiftEl.style.opacity = "0";
-        window.setTimeout(() => {
-          sampleGeometry(true);
-          syncPlan();
-          if (shiftEl) shiftEl.style.opacity = "1";
-        }, 460);
-      }
+      if (shiftTimer.current != null) window.clearTimeout(shiftTimer.current);
+      // §8.8：正文滑行期间高亮先隐去，落定后再从节点伸回——否则流带会拖在移动的文字后面
+      if (!resizingRef.current) setShifting(true);
+      shiftTimer.current = window.setTimeout(() => {
+        shiftTimer.current = null;
+        if (resizingRef.current) return;
+        sampleGeometry(true);
+        syncPlan();
+        setShifting(false);
+        beginTurn(); // 折叠到节点 → 220ms 后伸回（复刻 §8.3/§8.8 的「伸回」）
+      }, 460);
     }
-  }, [stage, plan, changeReserve, applyShift, shiftEl, sampleGeometry, syncPlan]);
+  }, [stage, plan, changeReserve, applyShift, sampleGeometry, syncPlan, beginTurn]);
 
   // ---------------------------------------------------------------- 组切换动效
   useEffect(() => {
@@ -606,19 +706,19 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
         else if (members.includes(prev.groupId)) m = "zoom-out";
         else if (lastPeekRef.current?.groupId === gid) m = sw.dir === "down" ? "conveyor-down" : "conveyor-up";
         else m = sw.dir === "down" ? "regroup-down" : "regroup-up";
+        // §16.1.2：换代已由「一代一层」整体淡入淡出接管，不再 bump() 触发零件级重编排
         setMotion(m);
         setArmed(true);
-        bump();
-        settleMotion(1200);
+        settleMotion(400);
       }
     }
     lastGroupRef.current = { groupId: gid, members };
     lastPeekRef.current = data.peek;
     setCmpPage(0);
-  }, [data.groupId, data.graph, data.switchInfo, data.peek, bump, settleMotion]);
+  }, [data.groupId, data.graph, data.switchInfo, data.peek, settleMotion]);
 
-  // ---------------------------------------------------------------- 场景（base：不含形状，滚动时不重建）
-  const base: Omit<FlowScene, "shapes"> | null = useMemo(() => {
+  // ---------------------------------------------------------------- 场景（§16.6：layoutMemo 只跟布局输入，base 再叠加动效状态）
+  const layoutMemo: Omit<FlowScene, "shapes" | "seq" | "motion" | "tracking" | "shifting" | "armed" | "smooth"> | null = useMemo(() => {
     if (!plan || !viewportEl) return null;
     const vp = geo?.viewport ?? readViewport();
     const top = vp.top + FLOW.COL_MARGIN_Y;
@@ -627,6 +727,8 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     const g = data.graph;
     const readingId = data.readingId && g?.nodes[data.readingId] ? data.readingId : null;
     const cut = data.groupId ?? (readingId ? g?.nodes[readingId]?.parentId ?? ROOT_ID : null);
+    // §16.1：代键＝主体组；genKey 变＝换代（旧代整体退场、新代整体入场）
+    const genKey = cut ?? "none";
     const all = g && cut ? childrenOf(g, cut).filter((id) => g.nodes[id]) : [];
     const pattern: FlowPattern = g && cut && all.length >= 2 ? patternFor(g, cut, all) : "tree";
     const patternName = T(PATTERN_LABEL[pattern]);
@@ -668,6 +770,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     };
     let lay: PatternLayout & { members?: string[] };
     let mainHeight = 0;
+    let aboveH = 0; // 上方预览实际高度（dy 只用上方槽的剩余部分）
     let mainAvail = Math.max(80, bottom - (top + COLUMN.ABOVE_SLOT));
     if (g && cut && all.length) {
       // §13.2：主体顶边固定；主体可用高度与预览有无无关 → 折叠结果稳定
@@ -678,16 +781,20 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       winRef.current.set(cut, Math.max(0, all.indexOf(main.members[0])));
       let above: PatternLayout | null = null;
       let below: PatternLayout | null = null;
-      if (data.peek?.side === "above") above = layoutPeek(peekCtx, data.peek.groupId, "above", COLUMN.ABOVE_ROWS);
-      if (data.peek?.side === "below") {
+      // §14.2-1：预览组与当前组相同时一律不画（同 id 会在合并时与主体互吞）
+      const peek = data.peek && data.peek.groupId !== cut ? data.peek : null;
+      if (peek?.side === "above") above = layoutPeek(peekCtx, peek.groupId, "above", COLUMN.ABOVE_ROWS);
+      if (peek?.side === "below") {
         const room = bottom - (mainTop + main.height) - PEEK.GAP;
         const rows = Math.min(PEEK.MAX_ROWS, Math.floor((room - 20 - 16) / PEEK.ROW_H));
-        if (rows >= 1) below = layoutPeek(peekCtx, data.peek.groupId, "below", rows);
+        if (rows >= 1) below = layoutPeek(peekCtx, peek.groupId, "below", rows);
       }
       mainHeight = main.height;
+      // §14.3：上方槽按最坏高度（2 行 + 另 N 项）预留，预览底对齐到主体上方 8px，且永不越出列原点
+      aboveH = above?.height ?? 0;
       lay = mergeLayouts(main, above, below, {
         mainOff: COLUMN.ABOVE_SLOT,
-        aboveOff: above ? COLUMN.ABOVE_SLOT - 8 - above.height : 0,
+        aboveOff: above ? Math.max(0, COLUMN.ABOVE_SLOT - 8 - aboveH) : 0,
         belowOff: COLUMN.ABOVE_SLOT + main.height + PEEK.GAP,
       });
       lay.members = main.members;
@@ -708,9 +815,9 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     }
     lay.sideOf = sideOf;
 
-    // §13.2：列不平移——主体恒在 ABOVE_SLOT；极端超高时只吃上方槽，不随阅读位置变
+    // §13.2：列不平移——主体恒在 ABOVE_SLOT；§14.3：超高时只吃上方槽的【剩余】部分，永不越过视口顶
     let dy = top;
-    if (mainHeight > mainAvail) dy = top - Math.min(COLUMN.ABOVE_SLOT, mainHeight - mainAvail);
+    if (mainHeight > mainAvail) dy = top - Math.min(Math.max(0, COLUMN.ABOVE_SLOT - 8 - aboveH), mainHeight - mainAvail);
 
     // 悬停集合：自己 + 全部下级（§12.2）
     const hoverSet = new Set<string>();
@@ -730,16 +837,13 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       : [];
     const focusId = sel ?? readingId;
     const shapeOpts = { focusId, hoverId: data.hoverId, readingId, colorOf: (id: string) => colorOf.get(id) ?? colors.palette[0], hoverSet, extra };
-    frameRef.current = { lay, dy, opts: shapeOpts };
+    // §16.1.2：逐帧数据按代存（旧代退场期间还要拿它画彩带）
+    framesRef.current.set(genKey, { lay, dy, opts: shapeOpts });
+    liveGenRef.current = genKey;
     const textRight = geo?.text?.right ?? vp.right - 120;
     const strands = g && all.length ? buildStrands(g, lay, dy, { textRight, focusId, all: pattern === "layered" }) : [];
-    const hlX0 = (geo?.text?.left ?? vp.left + (vp.right - vp.left) * 0.2) - FLOW.HL_PAD_X;
-    const hlX1 = plan.barX;
     return {
-      seq: animKey,
       mode: plan.mode,
-      motion: plan.mode === "whisper" ? "steady" : motion,
-      tracking,
       plan,
       viewport: vp,
       colors,
@@ -748,48 +852,70 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       dy,
       layout: lay,
       strands,
-      hlX0,
-      hlX1,
+      genKey,
+      switchDir: data.switchInfo?.dir ?? "down",
       inline: { forId: sel, explainOpen, explainText: data.explainText, explainBusy: data.explainBusy, status: data.status },
       hoverId: data.hoverId,
       focusId,
       canBack: !!data.backLoc,
       panel,
-      armed,
-      smooth,
     };
   }, [
     plan, viewportEl, geo, data.graph, colors, title, T, cmpPage, data.readingBlock, data.status, data.hoverId, data.sel, data.expandedId,
     data.explainFor, data.explainText, data.explainBusy, data.groupId, data.readingId, data.peek, data.backLoc, data.feed, data.busy, data.hasKey,
-    motion, armed, tracking, animKey, readViewport, smooth,
+    data.switchInfo, readViewport,
   ]);
+
+  // §16.6：滚动开始/停止只改 tracking，不再重跑 fitLayout / mergeLayouts（lay 引用不变 → UpperGen 的 usePresence 不触发）
+  const base: Omit<FlowScene, "shapes"> | null = useMemo(() => {
+    if (!layoutMemo) return null;
+    return {
+      ...layoutMemo,
+      seq: animKey,
+      motion: layoutMemo.mode === "whisper" ? "steady" : motion,
+      tracking,
+      shifting,
+      armed,
+      smooth,
+    };
+  }, [layoutMemo, motion, tracking, shifting, armed, animKey, smooth]);
+
+  // §16.5：停止滚动后也要跑完——代内几何过渡可能还没走完，收尾循环逐帧把彩带对齐条目实际位置
+  useEffect(() => {
+    if (!smooth) return;
+    settleUntil.current = performance.now() + 240 + 40; // --flow-t-geo + 余量
+    let raf = 0;
+    const loop = () => {
+      paintFrame();
+      if (performance.now() < settleUntil.current) raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [base, smooth, paintFrame]);
+
+  // §16.1.2：换代后 GEN.REMOVE_MS + 40 毫秒清掉旧代的逐帧数据
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const live = liveGenRef.current;
+      for (const k of [...framesRef.current.keys()]) if (k !== live) framesRef.current.delete(k);
+    }, GEN.REMOVE_MS + 40);
+    return () => window.clearTimeout(t);
+  }, [layoutMemo?.genKey]);
 
   const scene: FlowScene | null = useMemo(() => {
     if (!base) return null;
     const geoNow = geoRef.current;
-    const F = frameRef.current;
-    const gNow = geoNow && smooth && kernel?.getFrameOffsets ? geometryAt(geoNow, kernel.getFrameOffsets()) : geoNow;
+    const F = framesRef.current.get(base.genKey);
+    const dx = (plan?.shift ?? 0) - geoShiftRef.current;
+    const offs = geoNow ? (smooth && kernel?.getFrameOffsets ? kernel.getFrameOffsets() : null) : null;
+    const gNow = geoNow ? geometryAt(geoNow, shiftOffsets(geoNow, offs, dx)) : null;
     const shapes = gNow && F && base.layout.items.length ? buildShapes(gNow, F.lay, F.dy, F.opts) : [];
-    shapeSigRef.current = shapes.filter((s) => s.ribbon).map((s) => s.id).join("|");
+    shapeSigRef.current = shapes.map((s) => s.id).join("|");
     return { ...base, shapes };
     // frameTick：颈部集合变化时强制重渲染一次（逐帧本身不走 React）
   }, [base, geo, frameTick, smooth, kernel]);
 
   lastSceneRef.current = scene;
-
-  // §13.3.4：正文段落高亮矩形下发（随正文原生滚动，宿主不逐帧处理）
-  useEffect(() => {
-    if (!smooth || !kernel?.setStructurePaint) return;
-    const o = { blend: colors.dark ? ("screen" as const) : ("multiply" as const), fadeMs: stage === "opening" ? 360 : 180 };
-    const F = frameRef.current;
-    if (!scene || !F || stage === "closed" || stage === "closing" || !geoRef.current || (scene.mode === "whisper" && !scene.hoverId)) {
-      kernel.setStructurePaint([], o);
-      return;
-    }
-    kernel.setStructurePaint(buildPaintRects(geoRef.current, scene.layout, { ...F.opts, colors }), o);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [smooth, kernel, scene?.layout, geo, data.hoverId, data.sel, data.readingId, colors, stage]);
-  useEffect(() => () => kernel?.setStructurePaint?.([], { blend: "multiply", fadeMs: 0 }), [kernel]);
 
   // 段落定位目标：全部 leaf + 预览成员 + 悬停单元格
   const anchorIds = useMemo(() => {
@@ -909,14 +1035,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
 
   if (!scene || stage === "closed") return null;
   const doc = viewportEl?.ownerDocument ?? document;
-  return createPortal(
-    <FlowLayer
-      scene={scene}
-      onEvent={handle}
-      registerShape={(id, el) => (el ? neckEls.current.set(id, el) : neckEls.current.delete(id))}
-    />,
-    doc.body,
-  );
+  return createPortal(<FlowLayer scene={scene} onEvent={handle} registerShape={registerShape} />, doc.body);
 }
 
 function samePlan(a: FlowPlan, b: FlowPlan): boolean {
@@ -932,6 +1051,7 @@ function mergeLayouts(
   off: { mainOff: number; aboveOff: number; belowOff: number },
 ): PatternLayout {
   const seen = new Set<string>();
+  const seenPrim = new Set<string>();
   const items: FlowItem[] = [];
   const ports: PatternLayout["ports"] = [];
   const prims: PatternLayout["prims"] = [];
@@ -947,6 +1067,9 @@ function mergeLayouts(
       ports.push({ ...p, y0: p.y0 + o, y1: p.y1 + o });
     }
     for (const pr of lay.prims) {
+      // §15.3-2：图元也按 id 去重（主体优先），否则预览被丢弃的条目会留下浮空的条 / 分隔线
+      if (seenPrim.has(pr.id)) continue;
+      seenPrim.add(pr.id);
       if (pr.k === "path" && pr.grad) {
         prims.push({ ...pr, off: (pr.off ?? 0) + o, grad: { ...pr.grad, y1: pr.grad.y1 + o, y2: pr.grad.y2 + o } });
       } else {
@@ -954,8 +1077,9 @@ function mergeLayouts(
       }
     }
   };
-  if (above) pushPart(above, off.aboveOff, false);
+  // §14.2-1：主体优先——预览与主体撞 id 时保留主体（否则预览会吞掉主项，留下浮空的条/断掉的彩带）
   pushPart(main, off.mainOff, true);
+  if (above) pushPart(above, off.aboveOff, false);
   if (below) pushPart(below, off.belowOff, false);
   const leafIds = [...new Set([...main.leafIds, ...(above?.leafIds ?? []), ...(below?.leafIds ?? [])])];
   return {
@@ -966,6 +1090,7 @@ function mergeLayouts(
     leafIds,
     height: below ? off.belowOff + below.height : off.mainOff + main.height,
     readingY: main.readingY != null ? main.readingY + off.mainOff : null,
+    parentOf: main.parentOf,
     noStrands: main.noStrands,
     inlineAt: main.inlineAt ? { ...main.inlineAt, y: main.inlineAt.y + off.mainOff } : undefined,
   };

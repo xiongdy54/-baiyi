@@ -29,7 +29,6 @@ import type {
   ReaderRect,
   ReaderSelection,
   ReaderStructureGeometry,
-  ReaderStructurePaintRect,
   ReaderStructureRegion,
   ReaderStructureTarget,
   ReaderTocItem,
@@ -604,61 +603,6 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
       return { frac: f, unitAnchor: "", text: "" };
     });
   };
-  /** §13.3.2：正文段落高亮矩形（绝对定位 div；与文字同一滚动层，随正文原生滚动） */
-  const paintRoots = new WeakMap<Document, { root: HTMLDivElement; els: Map<string, HTMLDivElement> }>();
-  let paintSpec: { rects: ReaderStructurePaintRect[]; blend: string; fadeMs: number } = { rects: [], blend: "multiply", fadeMs: 160 };
-  const paintForDoc = (index: number) => {
-    const doc = docs.get(index);
-    if (!doc?.body) return;
-    const mine = paintSpec.rects.filter((r) => r.doc === index);
-    let P = paintRoots.get(doc);
-    if (!P || !P.root.isConnected) {
-      if (!mine.length) return;
-      const root = doc.createElement("div");
-      root.setAttribute("data-flow-paint", "1");
-      root.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;overflow:visible;pointer-events:none;z-index:2147483646;";
-      doc.body.appendChild(root);
-      P = { root, els: new Map() };
-      paintRoots.set(doc, P);
-    }
-    P.root.style.mixBlendMode = paintSpec.blend;
-    const base = P.root.getBoundingClientRect();
-    const se = doc.scrollingElement, ox = base.left + (se?.scrollLeft ?? 0), oy = base.top + (se?.scrollTop ?? 0);
-    const seen = new Set<string>();
-    for (const r of mine) {
-      seen.add(r.key);
-      let el = P.els.get(r.key);
-      const fresh = !el;
-      if (!el) {
-        el = doc.createElement("div");
-        el.style.cssText = `position:absolute;border-radius:3px 0 0 3px;pointer-events:none;opacity:0;transition:opacity ${paintSpec.fadeMs}ms ease,background-color 240ms ease;`;
-        P.root.appendChild(el);
-        P.els.set(r.key, el);
-      }
-      el.style.left = `${r.left - ox}px`;
-      el.style.top = `${r.top - oy}px`;
-      el.style.width = `${r.width}px`;
-      el.style.height = `${r.height}px`;
-      el.style.backgroundColor = r.color;
-      const target = String(r.alpha);
-      if (fresh) {
-        const e = el;
-        requestAnimationFrame(() => {
-          e.style.opacity = target;
-        });
-      } else el.style.opacity = target;
-    }
-    for (const [k, el] of P.els)
-      if (!seen.has(k)) {
-        el.style.opacity = "0";
-        P.els.delete(k);
-        window.setTimeout(() => el.remove(), paintSpec.fadeMs + 40);
-      }
-  };
-  const setStructurePaint = (rects: ReaderStructurePaintRect[], o?: { blend?: "multiply" | "screen"; fadeMs?: number }) => {
-    paintSpec = { rects: Array.isArray(rects) ? rects : [], blend: o?.blend ?? "multiply", fadeMs: o?.fadeMs ?? 160 };
-    for (const i of docs.keys()) paintForDoc(i);
-  };
   const getFrameOffsets = () => {
     const out: Record<number, { left: number; top: number }> = {};
     for (const [i, doc] of docs) {
@@ -817,7 +761,6 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     paintMarksForDoc(index);
     locateStructForDoc(index);
     paintStructForDoc(index);
-    paintForDoc(index);
     // v25 图片点选：正文图片点击 → 语义化为 ReaderImageRef（src + 宿主坐标框）。
     // 链接内的图片让位给链接（foliate 自带的 click 处理器负责导航），不dual触发图片聚焦。
     doc.addEventListener("click", (ev: MouseEvent) => {
@@ -1102,8 +1045,6 @@ export function createFoliateKernel(host: HTMLElement): ReaderKernel {
     },
 
     getFrameOffsets,
-
-    setStructurePaint,
 
     getSectionAnchors() {
       const sections = (view.book?.sections ?? []) as { id?: string; href?: string }[];

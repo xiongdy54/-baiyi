@@ -6,7 +6,7 @@ import { childrenOf } from "../mindmap/v2/graph";
 import type { GraphState } from "../mindmap/v2/types";
 import { ROOT_ID } from "../mindmap/v2/types";
 import { groupFacts, selectPattern } from "../mindmap/v2/pattern";
-import type { ReaderParagraphBox, ReaderStructureGeometry, ReaderStructurePaintRect } from "../reader/kernel";
+import type { ReaderParagraphBox, ReaderStructureGeometry } from "../reader/kernel";
 import type {
   FlowColors,
   FlowEnv,
@@ -27,17 +27,17 @@ export const FLOW = {
   BAR_MAX: 10, LABEL_GAP: 16, PAD_R: 20, INDENT: 0,
   BRAID_MIN: 64, BRAID_PREF: 96, BRAID_MAX: 160,
   MAX_SHIFT: 200, KEEP_LEFT: 40, SHIFT_STEP: 8, SHIFT_HYST: 16, TEXT_MIN: 480,
-  HL_PAD_X: 6, HL_PAD_Y: 2, HL_R: 3, HL_MERGE_GAP: 28,
+  HL_PAD_X: 6, HL_PAD_Y: 2, HL_R: 3, HL_MERGE_GAP: 28, HL_FADE_W: 140, // §14.4：矩形右端向内渐隐长度
   HEADER_FS: 11, HEADER_LH: 16, HEADER_GAP: 10, BACK_H: 22,
   ROW_PAD_Y: 4, ROW_GAP: 6, MORE_H: 20, META_W: 44,
   MAX_MEMBERS: 9, MIN_MEMBERS: 3, MAX_KIDS: 7,
   ACTIONS_H: 26, EXPLAIN_MAX_H: 168,
   STRETCH_MAX: 1.8, MIN_SLICE: 2, MAX_STRANDS: 12, STUB_ROWS: 4,
-  COL_MARGIN_Y: 16,
+  COL_MARGIN_Y: 20,
   TL_DOT_R: 5, TL_DOT_R_READING: 6.5, TL_TIME_FS: 11, TL_TIME_LH: 15, TL_BREAK_K: 4,
   CH_R: 9,
   CMP_MAX: 4, CMP_GAP: 10, CMP_KIDS: 5,
-  TURN_RESAMPLE_MS: 220, POLL_PAGED_MS: 200, TRACK_IDLE_MS: 160, RESIZE_IDLE_MS: 200, RELAYOUT_WAIT_MS: 280,
+  TURN_RESAMPLE_MS: 220, POLL_PAGED_MS: 200, TRACK_IDLE_MS: 240, RESIZE_IDLE_MS: 200, RELAYOUT_WAIT_MS: 280, // §16.4：160→240（滚轮两格间隔常在 150–220ms）
   // v3.1（§12.2 泳道 / 跨度条；§12.3.2 对照表）
   LANE_DX: 6, LANES: 4, GROUP_GAP: 10, SPAN_W: 2, SPAN_A: 0.35, NOTCH_W: 7, NOTCH_H: 2,
   CMP_NAME_W: 76, CMP_CELL_MIN: 84, CMP_CELL_MAX: 132, CMP_CELL_LINES: 4, CMP_HEAD_H: 22, CMP_ROW_PAD: 6, CMP_MAX_W: 540,
@@ -61,13 +61,19 @@ export function planColumn(env: FlowEnv, prev: FlowPlan | null): FlowPlan {
     return { mode, shift, reserve, barX, labelX, labelW: lw, right: labelX + lw + FLOW.PAD_R };
   };
   const tryLw = (lw: number, tag: FlowMode): FlowPlan | null => {
+    const bw = blockW(lw);
     const room = vp.right - env.textRight;
-    const need = FLOW.BRAID_MIN + blockW(lw) - room;
-    if (need <= 0) {
+    const textW = Math.max(0, env.textRight - env.textLeft);
+    // §14.5：正文 + 彩带 + 节点列三件一体、整体居中（居中位移只与块宽有关，与窗口宽无关）
+    const total = textW + FLOW.BRAID_PREF + bw;
+    const idealLeft = vp.left + (vw - total) / 2;
+    let s = total <= vw - 8 ? Math.max(0, ceilTo(env.textLeft - idealLeft, FLOW.SHIFT_STEP)) : Infinity;
+    // 居中放不下（或推不动）→ 退化为「够放就行」（BRAID_MIN，保留 64–96 弹性）
+    if (!Number.isFinite(s) || s > maxShift) s = ceilTo(FLOW.BRAID_MIN + bw - room, FLOW.SHIFT_STEP);
+    if (s <= 0) {
       const p = make(tag === "compact" ? "compact" : "inside", 0, 0, lw);
       return p.right > vp.right - 4 ? null : p; // §12.1 硬约束
     }
-    let s = ceilTo(need, FLOW.SHIFT_STEP);
     if (prev && prev.reserve === 0 && prev.shift >= s && prev.shift - s < FLOW.SHIFT_HYST) s = prev.shift;
     if (s <= maxShift) {
       const p = make(tag === "compact" ? "compact" : "shift", s, 0, lw);
@@ -364,7 +370,11 @@ export function layoutTree(c: LayoutCtx, opt: { compact: boolean; claimRoot: boo
   for (const id of order) {
     const d = base + (nest.get(id)?.depth ?? 0);
     add(id, "node", d, c.colorOf.get(id)!, null);
-    if (id === c.expandedId) kidsOf(c, id).slice(0, FLOW.MAX_KIDS).forEach((k, j) => add(k, "kid", d + 1, kidColor(c.paletteOf?.get(id) ?? c.colorOf.get(id)!, c.colors.bg, j), id));
+    if (id === c.expandedId)
+      kidsOf(c, id).slice(0, FLOW.MAX_KIDS).forEach((k, j) => {
+        add(k, "kid", d + 1, kidColor(c.paletteOf?.get(id) ?? c.colorOf.get(id)!, c.colors.bg, j), id);
+        (out.parentOf ??= {})[k] = id; // §8.7
+      });
   }
   // ---- 3. Sankey 拉伸（只给大纲树 / 网格；论证图与分层图按层级等高） ----
   let k = 0;
@@ -528,6 +538,7 @@ function pushKidList(c: LayoutCtx, out: PatternLayout, parentId: string, x: numb
     out.prims.push({ k: "circle", id: `kd:${kid}`, cx: dx, cy: y + 8.5, r: 2.5, fill: color, layer: "over" });
     out.ports.push({ nodeId: kid, x: dx, y0: y + 4, y1: y + 13, color });
     out.leafIds.push(kid);
+    (out.parentOf ??= {})[kid] = parentId;
     y += 19;
   });
   return y;
@@ -1021,9 +1032,14 @@ export function buildShapes(
     hoverSet?: Set<string>;
     /** v3.1 §12.3.2：悬停单元格（不在 ports 里）只出矩形段，不额外出流带 */
     extra?: { nodeId: string; color: string }[];
+    /** v3.5 §16.5：条目实际位置与布局位置的中线差（CSS 几何过渡途中，彩带尖端跟着条目走） */
+    shiftOf?: (nodeId: string) => number;
   },
 ): FlowShape[] {
-  const ports = new Map(lay.ports.map((p) => [p.nodeId, { ...p, y0: p.y0 + dy, y1: p.y1 + dy }] as const));
+  const ports = new Map(lay.ports.map((p) => {
+    const k = o.shiftOf?.(p.nodeId) ?? 0;
+    return [p.nodeId, { ...p, y0: p.y0 + dy + k, y1: p.y1 + dy + k }] as const;
+  }));
   const extraSet = new Set((o.extra ?? []).map((e) => e.nodeId));
   const extraColor = new Map((o.extra ?? []).map((e) => [e.nodeId, e.color] as const));
   const rightCol = geo.columns.length - 1;
@@ -1039,12 +1055,19 @@ export function buildShapes(
     l.push(s);
     byNode.set(s.nodeId, l);
   }
+  // §16.2：id 不得含逐帧变化量（top）——否则多栏版式滚动时每帧都换 id → 每帧 flushSync + 每帧进出场
+  const colSeq = new Map<string, number>();
   for (const s of spans)
-    if (s.column !== rightCol || extraSet.has(s.nodeId))
+    if (s.column !== rightCol || extraSet.has(s.nodeId)) {
+      const k = colSeq.get(`${s.nodeId}@${s.column}`) ?? 0;
+      colSeq.set(`${s.nodeId}@${s.column}`, k + 1);
       out.push({
-        id: `${s.nodeId}@${s.column}:${Math.round(s.top)}`, nodeId: s.nodeId, color: extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId), L: s.left, xs: s.right, s0: s.top, s1: s.bottom,
+        // §15.6：只画「可见带」——左侧全透明部分不进路径（稳态观感不变，混合层每帧面积降一个量级）
+        id: `${s.nodeId}@${s.column}#${k}`, nodeId: s.nodeId, color: extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId),
+        L: Math.max(s.left, s.right - FLOW.HL_FADE_W), xs: s.right, s0: s.top, s1: s.bottom,
         x1: s.right, t0: s.top, t1: s.bottom, tone: tone(s.nodeId), stub: "", ribbon: false, order: order++,
       });
+    }
   for (const p of lay.ports) {
     const list = byNode.get(p.nodeId);
     if (!list) continue;
@@ -1057,7 +1080,7 @@ export function buildShapes(
     list.forEach((s, i) => {
       const h = raw[i] * kk;
       out.push({
-        id: `${p.nodeId}#${i}`, nodeId: p.nodeId, color: port.color, L: s.left, xs: s.right, s0: s.top, s1: s.bottom,
+        id: `${p.nodeId}#${i}`, nodeId: p.nodeId, color: port.color, L: Math.max(s.left, s.right - FLOW.HL_FADE_W), xs: s.right, s0: s.top, s1: s.bottom,
         x1: port.x, t0: t, t1: t + h, tone: tone(p.nodeId), stub: "", ribbon: true, order: order++,
       });
       t += h;
@@ -1099,46 +1122,27 @@ export function geometryAt(geo: ReaderStructureGeometry, offs: Record<number, { 
   return { ...geo, boxes };
 }
 
-/** §13.3.3：只画「段落右缘 → 节点 port」那一段（矩形部分在正文里） */
-export function neckPath(s: Pick<FlowShape, "xs" | "s0" | "s1" | "x1" | "t0" | "t1">): string {
-  const f = (n: number) => Math.round(n * 10) / 10;
-  const xm = (s.xs + s.x1) / 2;
-  return (
-    `M${f(s.xs)},${f(s.s0)}C${f(xm)},${f(s.s0)} ${f(xm)},${f(s.t0)} ${f(s.x1)},${f(s.t0)}` +
-    `L${f(s.x1)},${f(s.t1)}C${f(xm)},${f(s.t1)} ${f(xm)},${f(s.s1)} ${f(s.xs)},${f(s.s1)}Z`
-  );
+/** §15.1：一条流带的渐变停点——矩形段全透明，只在接缝前 HL_FADE_W 内起坡，接缝处 = aHL，节点端 = aEnd */
+export function shapeGradientStops(
+  s: Pick<FlowShape, "L" | "xs" | "x1">,
+  colors: FlowColors,
+  tone: 0 | 1 | 2,
+): { x1: number; x2: number; stops: { offset: number; opacity: number }[] } {
+  const hasNeck = s.x1 > s.xs + 0.5;
+  const x1 = s.L;
+  const x2 = hasNeck ? s.x1 : s.xs;
+  const D = Math.max(1, x2 - x1);
+  const at = (x: number) => Math.round(Math.min(1, Math.max(0, (x - x1) / D)) * 1000) / 1000;
+  const fadeAt = Math.min(s.xs, Math.max(x1, s.xs - FLOW.HL_FADE_W));
+  const stops = [
+    { offset: 0, opacity: 0 },
+    { offset: at(fadeAt), opacity: 0 },
+    { offset: at(s.xs), opacity: colors.aHL[tone] },
+  ];
+  if (hasNeck) stops.push({ offset: 1, opacity: colors.aEnd[tone] });
+  return { x1, x2, stops };
 }
 
-/** §13.3.3：正文里的段落高亮矩形（文档坐标；透明度与颈部渐变起点一致，接缝颜色连续） */
-export function buildPaintRects(
-  geo: ReaderStructureGeometry,
-  _lay: PatternLayout,
-  o: {
-    hoverId: string | null;
-    focusId: string | null;
-    hoverSet?: Set<string>;
-    colorOf: (id: string) => string;
-    extra?: { nodeId: string; color: string }[];
-    colors: FlowColors;
-  },
-): ReaderStructurePaintRect[] {
-  const keep = new Set([..._lay.ports.map((p) => p.nodeId), ...(o.extra ?? []).map((e) => e.nodeId)]);
-  const extraColor = new Map((o.extra ?? []).map((e) => [e.nodeId, e.color] as const));
-  const content = geo.boxes
-    .filter((b) => b.doc != null && b.cTop != null)
-    .map((b) => ({ ...b, top: b.cTop!, bottom: b.cBottom!, left: b.cLeft!, right: b.cRight! }));
-  const tone = (id: string): 0 | 1 | 2 => (id === o.hoverId ? 2 : o.hoverSet?.has(id) || id === o.focusId ? 1 : 0);
-  return mergeSpans(content, keep).map((s) => {
-    const t = tone(s.nodeId);
-    const dim = !!o.hoverId && s.nodeId !== o.hoverId && t === 0; // 与 FlowLayer 的 is-dim 同一规则
-    const raw = extraColor.get(s.nodeId) ?? o.colorOf(s.nodeId);
-    const color = parseRgb(raw) ? raw : o.colors.palette[0]; // §13.4.3：不可解析色一律退调色板第一色
-    return {
-      key: `${s.nodeId}@${s.doc}:${Math.round(s.top)}`, doc: s.doc!, left: s.left, top: s.top, width: s.right - s.left, height: s.bottom - s.top,
-      color, alpha: o.colors.aHL[t] * (dim ? o.colors.aDim : 1),
-    };
-  });
-}
 export function strandPath(s: Pick<FlowStrand, "xa" | "ya" | "xb" | "yb" | "bulge">): string {
   return `M${s.xa},${s.ya}C${s.xa - s.bulge},${s.ya} ${s.xb - s.bulge},${s.yb} ${s.xb},${s.yb}`;
 }
@@ -1172,7 +1176,7 @@ export function buildStrands(g: GraphState, lay: PatternLayout, dy: number, o: {
 }
 
 // ---------------------------------------------------------------- §13.2.1 列位置
-export const COLUMN = { ABOVE_ROWS: 2, ABOVE_SLOT: 20 + 2 * 22 + 8 }; // 上方预览固定槽：标题 20 + 2 行 × 22 + 间距 8 = 72
+export const COLUMN = { ABOVE_ROWS: 2, ABOVE_SLOT: 20 + 2 * 22 + 16 + 8 }; // 上方预览固定槽：标题 20 + 2 行 × 22 + 「另 N 项」16 + 间距 8 = 88（§14.3）
 
 // ---------------------------------------------------------------- §13.1 注意力判定（取代 §12.4.2）
 export const ATTN = {
@@ -1306,10 +1310,12 @@ export function layoutPeek(c: LayoutCtx, groupId: string, side: "above" | "below
   const show = kids.slice(0, Math.max(0, maxRows));
   let y = 0;
   // 分隔：一条 24px 发丝线 + 下一部分标题（11px fg 45%）
-  out.prims.push({ k: "rect", id: `peekline:${groupId}`, x: c.plan.labelX, y: y + 6, w: 24, h: 1, fill: c.colors.fg, opacity: 0.25, layer: "under" });
+  // §16.2（R4）：预览产出的所有图元都带 peek: 前缀，与主体同 id 时不复用 DOM
+  out.prims.push({ k: "rect", id: `peek:line:${groupId}`, x: c.plan.labelX, y: y + 6, w: 24, h: 1, fill: c.colors.fg, opacity: 0.25, layer: "under" });
   out.items.push(
     item({
-      id: `n:${groupId}`, nodeId: groupId, kind: "head", x: c.plan.labelX + 30, y, w: c.plan.labelW - 30, h: 14,
+      // §15.5：预览行用 peek: 前缀，避免与主体行的 n:${id} 撞 id（撞了会互相顶替：条留着、字没了）
+      id: `peek:n:${groupId}`, nodeId: groupId, kind: "head", x: c.plan.labelX + 30, y, w: c.plan.labelW - 30, h: 14,
       lines: wrapLabel(title, 11, c.plan.labelW - 30, 1), fs: 11, lh: 14, weight: 500, tone: 45, meta: side === "below" ? "下一部分" : "上一部分", peek: true,
     }),
   );
@@ -1320,19 +1326,19 @@ export function layoutPeek(c: LayoutCtx, groupId: string, side: "above" | "below
     const st = LANE_STYLE[lane];
     out.items.push(
       item({
-        id: `n:${id}`, nodeId: id, kind: "node", x: c.plan.labelX, y, w: c.plan.labelW, h: st.lh,
+        id: `peek:n:${id}`, nodeId: id, kind: "node", x: c.plan.labelX, y, w: c.plan.labelW, h: st.lh,
         lines: wrapLabel(n.title, st.fs, c.plan.labelW - FLOW.META_W, 1), fs: st.fs, lh: st.lh, weight: st.weight, tone: PEEK.TONE, lane, peek: true,
       }),
     );
     const bx = c.plan.barX + lane * FLOW.LANE_DX;
-    out.prims.push({ k: "rect", id: `bar:${id}`, x: bx, y: y + 2, w: 3, h: st.lh - 4, rx: 1.5, fill: color, opacity: 0.7, layer: "over" });
+    out.prims.push({ k: "rect", id: `peek:bar:${id}`, x: bx, y: y + 2, w: 3, h: st.lh - 4, rx: 1.5, fill: color, opacity: 0.7, layer: "over" });
     out.ports.push({ nodeId: id, x: bx, y0: y + 2, y1: y + st.lh - 2, color });
     out.leafIds.push(id);
     y += PEEK.ROW_H;
   });
   if (kids.length > show.length) {
     out.items.push(
-      item({ id: `more:peek:${groupId}`, nodeId: groupId, kind: "more", x: c.plan.labelX, y, w: c.plan.labelW, h: 16, lines: [""], fs: 11, lh: 16, weight: 400, tone: 40, moreKind: "kids", moreCount: kids.length - show.length }),
+      item({ id: `peek:more:${groupId}`, nodeId: groupId, kind: "more", x: c.plan.labelX, y, w: c.plan.labelW, h: 16, lines: [""], fs: 11, lh: 16, weight: 400, tone: 40, moreKind: "kids", moreCount: kids.length - show.length }),
     );
     y += 16;
   }

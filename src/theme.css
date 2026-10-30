@@ -9936,7 +9936,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   color: var(--accent);
   background: var(--accent-soft);
 }
-   结构流（STRUCTURE-FLOW-PLAN §7 / §8 / §12）
+/* 结构流（STRUCTURE-FLOW-PLAN §7 / §8 / §12）
    · 高亮流带（混合层，与正文同路径）＋ 上层 SVG（条 / 轴 / 跨度条 / 关系线）＋ HTML 标签
    · 全部颜色来自 scene.colors（宿主用 .flow-probe 解析 Token 成实色）；本节的 Token 只供探针读取与皮肤覆盖
    ========================================================================== */
@@ -9961,7 +9961,10 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   --flow-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --flow-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --flow-ease-in: cubic-bezier(0.55, 0, 0.75, 0.2);
-  --flow-t-geo: 420ms;
+  /* §16.4：代内所有几何移动统一 240ms（原 420）；零件淡入 160 / 淡出 120 */
+  --flow-t-geo: 240ms;
+  --flow-t-in: 160ms;
+  --flow-t-out: 120ms;
 }
 /* 深色值只写给探针（宿主据此解析成实色交给场景；页面其余部分不消费这组覆盖） */
 .flow-probe[data-dark="1"] {
@@ -9998,37 +10001,50 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 .flow-item[data-kind="head"]:not([data-flow-item="back"]) { pointer-events: none; }
 
 .flow-shape {
-  transition: d var(--flow-t-geo, 420ms) var(--flow-ease), opacity 160ms var(--flow-ease);
+  transition: d var(--flow-t-geo, 240ms) var(--flow-ease), opacity var(--flow-t-in, 160ms) var(--flow-ease);
   transition-delay: var(--flow-delay, 0ms);
 }
 .flow-shape.is-dim { opacity: var(--flow-adim); }
-.flow-blend[data-tracking="1"] .flow-shape { transition: none; }
-/* §13.3：平滑滚动模式下颈部逐帧直接写 d，不再走 CSS 过渡 */
-.flow-blend[data-smooth="1"][data-tracking="1"] .flow-shape { transition: none; }
-.flow-col { transition: transform 420ms var(--flow-ease); }
-.flow-items { transition: transform 420ms var(--flow-ease); }
+/* §16.4：滚动中只关几何过渡，保留淡入淡出（原来连 opacity 也关了 → 彩带瞬现瞬灭） */
+.flow-blend[data-tracking="1"] .flow-shape,
+.flow-blend[data-smooth="1"] .flow-shape { transition: opacity var(--flow-t-in, 160ms) var(--flow-ease); }
+/* §8.1 / §8.2：开合的高亮扫过时长按设计稿分开（打开 640 ease-out、关闭 360 ease-in） */
+.flow-blend[data-flow-motion="open"] .flow-shape { transition: d 640ms var(--flow-ease-out), opacity 160ms var(--flow-ease); }
+.flow-blend[data-flow-motion="close"] .flow-shape { transition: d 360ms var(--flow-ease-in), opacity 160ms var(--flow-ease); }
+.flow-col,
+.flow-items { transition: transform var(--flow-t-geo, 240ms) var(--flow-ease); }
 .flow-svg rect,
 .flow-svg circle {
-  transition: x 380ms var(--flow-ease), y 380ms var(--flow-ease), width 160ms var(--flow-ease), height 380ms var(--flow-ease),
-    cx 380ms var(--flow-ease), cy 380ms var(--flow-ease), r 200ms var(--flow-ease), fill 240ms var(--flow-ease),
-    opacity 220ms var(--flow-ease), transform 280ms var(--flow-ease-out);
-  transform-box: fill-box;
-  transform-origin: 50% 50%;
+  transition: x var(--flow-t-geo, 240ms) var(--flow-ease), y var(--flow-t-geo, 240ms) var(--flow-ease),
+    width var(--flow-t-geo, 240ms) var(--flow-ease), height var(--flow-t-geo, 240ms) var(--flow-ease),
+    cx var(--flow-t-geo, 240ms) var(--flow-ease), cy var(--flow-t-geo, 240ms) var(--flow-ease), r var(--flow-t-geo, 240ms) var(--flow-ease),
+    fill 200ms var(--flow-ease), opacity var(--flow-t-in, 160ms) var(--flow-ease), transform 280ms var(--flow-ease-out);
   transition-delay: var(--flow-delay, 0ms);
+  transform-box: fill-box;
 }
+/* §16.2（R6）：入场的 scale 必须以自身为原点，否则会从画布左上角「飞」进来 */
+.flow-svg rect { transform-origin: 50% 0; }
+.flow-svg circle { transform-origin: 50% 50%; }
 .flow-svg path[data-draw="1"] { transition: stroke-dashoffset var(--flow-t-draw, 480ms) var(--flow-ease-out); }
 .flow-svg path {
-  transition: d 420ms var(--flow-ease), stroke-dashoffset var(--flow-t-draw, 480ms) var(--flow-ease-out), opacity 220ms var(--flow-ease);
+  transition: d var(--flow-t-geo, 240ms) var(--flow-ease), stroke-dashoffset var(--flow-t-draw, 480ms) var(--flow-ease-out), opacity var(--flow-t-in, 160ms) var(--flow-ease);
   transition-delay: var(--flow-delay, 0ms);
 }
-.flow-strands path { transition: d 600ms var(--flow-ease-out), opacity 200ms var(--flow-ease); }
+.flow-strands path { transition: d var(--flow-t-geo, 240ms) var(--flow-ease), opacity var(--flow-t-in, 160ms) var(--flow-ease); }
 .flow-item,
 .flow-inline {
-  transition: transform 380ms var(--flow-ease), opacity 240ms var(--flow-ease), height 240ms var(--flow-ease);
+  transition: transform var(--flow-t-geo, 240ms) var(--flow-ease), opacity var(--flow-t-in, 160ms) var(--flow-ease), height var(--flow-t-geo, 240ms) var(--flow-ease);
   transition-delay: var(--flow-delay, 0ms);
 }
+/* §16.4：退场比入场快——同一元素 is-exit 时把 opacity 时长换成 out */
+.flow-item.is-exit { transition: transform var(--flow-t-geo, 240ms) var(--flow-ease), opacity var(--flow-t-out, 120ms) cubic-bezier(0.4, 0, 1, 1); transition-delay: 0ms; }
+/* §16.1.3：一代一层——HTML 那份铺满层。退场代整体不吃指针（条目带内联 pointer-events，
+   样式表压不过内联；由渲染器按 data-phase 写成 none，避免新增强制优先级声明，见 consistency 规则 3） */
+.flow-gen { position: absolute; inset: 0; pointer-events: none; }
 .flow-pill { transition: background-color 200ms var(--flow-ease), color 200ms var(--flow-ease); }
 .flow-shift-target { transition: transform 420ms var(--flow-ease), opacity 160ms var(--flow-ease); }
+/* §14.5：窗口拖动中正文随宽度逐帧跟随，不要再叠 420ms 滑行（否则永远追不上） */
+body[data-flow-resizing="1"] .flow-shift-target { transition: none; }
 .reader-flow-gutter { flex: 0 0 auto; flex-basis: 0; min-width: 0; }
 
 /* ---------- HTML 标签 ---------- */
@@ -10096,6 +10112,13 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
   top: 0;
   pointer-events: auto;
   overflow: hidden;
+  /* §8.9：动作行 height 0 → 26 展开（max-height 代理 + 淡入） */
+  animation: flow-inline-in 220ms var(--flow-ease) both;
+  animation-delay: var(--flow-delay, 0ms);
+}
+@keyframes flow-inline-in {
+  from { max-height: 0; opacity: 0; }
+  to { max-height: 320px; opacity: 1; }
 }
 .flow-actions {
   display: flex;
@@ -10209,7 +10232,7 @@ button.crumb-root:hover { color: var(--text-primary); text-decoration: underline
 
 /* ---------- 动效降级（不写 !important：用更高特异性的显式选择器压过各元素自身的过渡） ---------- */
 .flow-layer[data-motion="off"] .flow-item,
-.flow-layer[data-motion="off"] .flow-inline,
+.flow-layer[data-motion="off"] .flow-inline { animation: none; }
 .flow-layer[data-motion="off"] .flow-svg rect,
 .flow-layer[data-motion="off"] .flow-svg circle,
 .flow-layer[data-motion="off"] .flow-svg path,
