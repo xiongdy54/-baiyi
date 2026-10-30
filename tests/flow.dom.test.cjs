@@ -196,6 +196,11 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
   await openFlow();
   check("打开后出现阅读节点（主题色底 + 白字 pill）", !!$("[data-reading='1'] .flow-pill"), $(".flow-items") && $(".flow-items").textContent);
   check("混合层存在且 mixBlendMode=multiply（浅色阅读背景）", !!$(".flow-blend") && $(".flow-blend").style.mixBlendMode === "multiply", $(".flow-blend") && $(".flow-blend").getAttribute("style"));
+  // §8.1：入场编排只在 enter 相位生效，落定后必须全部回到不透明（防止卡在 opacity 0）
+  check("入场编排已收敛：条目不透明、图元无残留缩放", $$(".flow-item").every((e) => e.style.opacity === "1") && $$(".flow-svg rect").every((e) => !e.style.transform), {
+    items: $$(".flow-item").map((e) => [e.getAttribute("data-flow-item"), e.style.opacity]).slice(0, 6),
+    rects: $$(".flow-svg rect").map((e) => e.style.transform).slice(0, 4),
+  });
   const shapeCount = $$(".flow-shapes path").length;
   check("高亮流带按合并后的段落块出形状（每条 d 以 M 开头、是三次贝塞尔/圆角路径）", shapeCount > 0 && $$(".flow-shapes path").every((p) => /^M/.test(p.getAttribute("d") || "") && /[CQ]/.test(p.getAttribute("d") || "")), { shapeCount });
 

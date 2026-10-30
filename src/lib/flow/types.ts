@@ -167,6 +167,8 @@ export interface PatternLayout {
   height: number;
   /** 阅读节点中心的局部 y（对齐用） */
   readingY: number | null;
+  /** §8.7：子项 → 父项（展开时子流带先从父条区间分出） */
+  parentOf?: Record<string, string>;
   noStrands?: boolean;
   /** 对照版式：动作行固定排在表底（宿主/渲染器按此定位） */
   inlineAt?: { x: number; y: number; w: number };

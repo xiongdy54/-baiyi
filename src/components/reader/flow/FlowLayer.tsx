@@ -101,6 +101,18 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
   const strandDelay = (i: number) => (motion === "open" ? 760 + stagger(i, 40, 240) : motion === "regroup-down" || motion === "regroup-up" ? 560 : 0);
 
   // 打开 / 翻页：首帧折叠、下一帧靠 CSS d 过渡展开；armed=false 时画折叠态
+  /** §8.7：子项入场时，流带的终点先落在父条的区间里（再由 CSS d 过渡长到自己的 port） */
+  const splitFromParent = (s: FlowShape): FlowShape | null => {
+    if (s.stub) return null;
+    const parent = layout.parentOf?.[s.nodeId];
+    if (!parent) return null;
+    const pi = layout.items.find((i) => i.nodeId === parent && (i.kind === "node" || i.kind === "kid"));
+    if (!pi) return null;
+    const x = plan.barX + (pi.lane ?? 0) * FLOW.LANE_DX + 3;
+    // 条在 .flow-items 的局部坐标里，几何是 client 坐标 → 加上列的 dy
+    return { ...s, x1: x, t0: pi.y + dy + 1, t1: pi.y + dy + pi.h - 1 };
+  };
+
   const shapeGeom = (s: FlowShape, phase: "enter" | "live" | "exit"): FlowShape => {
     if (phase === "exit") return collapseAtNode(s);
     if (!armed && (motion === "open" || motion === "turn")) return motion === "open" ? collapseAtLeft(s) : collapseAtNode(s);
@@ -174,11 +186,14 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
         </defs>
         <g className="flow-shapes">
           {shapesP.map(({ item: s, phase }, i) => {
-            const g = scene.smooth
-              ? phase === "exit" || (!armed && motion === "open") || motion === "close"
-                ? collapseAtEdge(s)
-                : s
-              : shapeGeom(s, phase);
+            const from = phase === "enter" ? splitFromParent(s) : null;
+            const g = from
+              ? from
+              : scene.smooth
+                ? phase === "exit" || (!armed && motion === "open") || motion === "close"
+                  ? collapseAtEdge(s)
+                  : s
+                : shapeGeom(s, phase);
             const d = shapePath(g);
             const dim = !!hoverId && s.nodeId !== hoverId && s.tone === 0;
             return (
@@ -242,7 +257,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
           </defs>
 
           <g className="flow-col" style={{ transform: `translateY(${dy}px)` }}>
-            <g className="flow-prims-under">{prims.map(({ item: p, phase }, i) => renderPrim(p, phase === "exit" ? exitPrim(p) : p, i, phase === "exit" ? 200 : primDelay(p), ci))}</g>
+            <g className="flow-prims-under">{prims.map(({ item: p, phase }, i) => renderPrim(p, phase === "exit" ? exitPrim(p) : p, i, phase === "exit" ? 200 : primDelay(p), ci, phase))}</g>
           </g>
           <g className="flow-strands">
             {strandsP.map(({ item: s, phase }, i) => {
@@ -276,7 +291,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
             })}
           </g>
           <g className="flow-col" style={{ transform: `translateY(${dy}px)` }}>
-            <g className="flow-prims-over">{prims.map(({ item: p, phase }, i) => renderPrim(p, phase === "exit" ? exitPrim(p) : p, i, phase === "exit" ? 200 : primDelay(p), ci))}</g>
+            <g className="flow-prims-over">{prims.map(({ item: p, phase }, i) => renderPrim(p, phase === "exit" ? exitPrim(p) : p, i, phase === "exit" ? 200 : primDelay(p), ci, phase))}</g>
           </g>
         </SvgRoot>
 
@@ -346,8 +361,9 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
     return 0;
   }
 
-  function renderPrim(p: FlowPrim, q: FlowPrim, i: number, delay: number, cix: (c: string) => number) {
+  function renderPrim(p: FlowPrim, q: FlowPrim, i: number, delay: number, cix: (c: string) => number, phase: "enter" | "live" | "exit" = "live") {
     const off = q.off ?? 0;
+    const ent = phase === "enter";
     const key = `${p.id}:${i}`;
     const wrap = (node: ReactElement) => (
       <g key={key} transform={off ? `translate(0,${off})` : undefined} data-prim-off={off || undefined}>
@@ -365,7 +381,7 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
           strokeDasharray={draw ? "1" : q.dash || undefined}
           strokeLinecap="round"
           pathLength={draw ? 1 : undefined}
-          opacity={q.opacity ?? 1}
+          opacity={ent ? 0 : q.opacity ?? 1}
           style={{ ...vars(delay), strokeDashoffset: draw ? (q.opacity === 0 ? 1 : 0) : undefined }}
           data-draw={draw ? "1" : undefined}
           data-delay={delay}
@@ -384,8 +400,8 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
           height={q.h}
           rx={q.rx}
           fill={q.hatch ? `url(#h-${cix(q.fill)})` : q.fill}
-          opacity={q.opacity ?? 1}
-          style={{ ...vars(delay), x: q.x, y: q.y, width: q.w, height: q.h }}
+          opacity={ent ? 0 : q.opacity ?? 1}
+          style={{ ...vars(delay), x: q.x, y: q.y, width: q.w, height: q.h, transform: ent ? "scaleY(0)" : undefined }}
           data-prim-id={p.id}
         />,
       );
@@ -399,14 +415,14 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
           fill={q.fill}
           stroke={q.stroke}
           strokeWidth={q.strokeW}
-          opacity={q.opacity ?? 1}
-          style={{ ...vars(delay), cx: q.cx, cy: q.cy, r: q.r }}
+          opacity={ent ? 0 : q.opacity ?? 1}
+          style={{ ...vars(delay), cx: q.cx, cy: q.cy, r: q.r, transform: ent ? "scale(0)" : undefined }}
           data-prim-id={p.id}
         />,
       );
     }
     return wrap(
-      <text x={q.x} y={q.y} fontSize={q.fs} fontWeight={q.weight} fill={q.fill} textAnchor={q.anchor ?? "start"} opacity={q.opacity ?? 1} style={vars(delay)}>
+      <text x={q.x} y={q.y} fontSize={q.fs} fontWeight={q.weight} fill={q.fill} textAnchor={q.anchor ?? "start"} opacity={ent ? 0 : q.opacity ?? 1} style={vars(delay)}>
         {q.text}
       </text>,
     );
@@ -419,7 +435,13 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
     const isPager = it.meta === "pager";
     const counter = it.chip?.style === "counter";
     const ex = phase === "exit";
+    const ent = phase === "enter";
     const scale = it.peek ? FLOW_SCALE_PEEK : 1;
+    // §8.1 / §8.6 / §8.5：标签的入场与退场位移（换组上下 10px，窗口滑动上下 8px，其余向左 6/4px）
+    const regroup = motion === "regroup-down" || motion === "regroup-up";
+    const slide = motion === "regroup-down" ? 10 : motion === "regroup-up" ? -10 : 0;
+    const dx = ex ? -4 : ent ? -6 : 0;
+    const dy = regroup ? (ex ? -slide : ent ? slide : 0) : motion === "steady" ? (ex ? -8 : ent ? 8 : 0) : 0;
     const content = it.lines.map((line, li) => (
       <span key={li} className="flow-line" style={{ fontSize: it.fs, lineHeight: `${it.lh}px`, fontWeight: it.weight, opacity: ex ? 0 : it.tone / 100 }}>
         {it.reading ? <mark className="flow-pill">{line}</mark> : line}
@@ -437,10 +459,13 @@ export default function FlowLayer({ scene, onEvent, registerShape }: FlowLayerPr
         data-selected={it.selected ? "1" : undefined}
         data-expanded={it.expanded ? "1" : undefined}
         style={{
-          transform: `translate(${it.x}px, ${it.y}px)` + (scale !== 1 ? ` scale(${scale})` : "") + (ex ? " translateX(-4px)" : ""),
+          transform:
+            `translate(${it.x}px, ${it.y}px)` +
+            (scale !== 1 ? ` scale(${scale})` : "") +
+            (dx || dy ? ` translate(${dx}px, ${dy}px)` : ""),
           width: it.w,
           height: it.h,
-          opacity: whisper ? 0 : ex ? 0 : 1,
+          opacity: whisper ? 0 : ex || ent ? 0 : 1,
           pointerEvents: whisper ? "auto" : it.kind === "head" && !isBack && !it.peek ? "none" : "auto",
           transformOrigin: it.peek ? "0 50%" : undefined,
           ...vars(delay),

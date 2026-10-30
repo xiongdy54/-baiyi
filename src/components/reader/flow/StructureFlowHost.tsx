@@ -1001,6 +1001,7 @@ function mergeLayouts(
     leafIds,
     height: below ? off.belowOff + below.height : off.mainOff + main.height,
     readingY: main.readingY != null ? main.readingY + off.mainOff : null,
+    parentOf: main.parentOf,
     noStrands: main.noStrands,
     inlineAt: main.inlineAt ? { ...main.inlineAt, y: main.inlineAt.y + off.mainOff } : undefined,
   };

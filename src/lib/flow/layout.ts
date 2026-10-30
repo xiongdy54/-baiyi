@@ -370,7 +370,11 @@ export function layoutTree(c: LayoutCtx, opt: { compact: boolean; claimRoot: boo
   for (const id of order) {
     const d = base + (nest.get(id)?.depth ?? 0);
     add(id, "node", d, c.colorOf.get(id)!, null);
-    if (id === c.expandedId) kidsOf(c, id).slice(0, FLOW.MAX_KIDS).forEach((k, j) => add(k, "kid", d + 1, kidColor(c.paletteOf?.get(id) ?? c.colorOf.get(id)!, c.colors.bg, j), id));
+    if (id === c.expandedId)
+      kidsOf(c, id).slice(0, FLOW.MAX_KIDS).forEach((k, j) => {
+        add(k, "kid", d + 1, kidColor(c.paletteOf?.get(id) ?? c.colorOf.get(id)!, c.colors.bg, j), id);
+        (out.parentOf ??= {})[k] = id; // §8.7
+      });
   }
   // ---- 3. Sankey 拉伸（只给大纲树 / 网格；论证图与分层图按层级等高） ----
   let k = 0;
@@ -534,6 +538,7 @@ function pushKidList(c: LayoutCtx, out: PatternLayout, parentId: string, x: numb
     out.prims.push({ k: "circle", id: `kd:${kid}`, cx: dx, cy: y + 8.5, r: 2.5, fill: color, layer: "over" });
     out.ports.push({ nodeId: kid, x: dx, y0: y + 4, y1: y + 13, color });
     out.leafIds.push(kid);
+    (out.parentOf ??= {})[kid] = parentId;
     y += 19;
   });
   return y;

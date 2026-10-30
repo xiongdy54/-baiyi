@@ -10103,6 +10103,13 @@ body[data-flow-resizing="1"] .flow-shift-target { transition: none; }
   top: 0;
   pointer-events: auto;
   overflow: hidden;
+  /* §8.9：动作行 height 0 → 26 展开（max-height 代理 + 淡入） */
+  animation: flow-inline-in 220ms var(--flow-ease) both;
+  animation-delay: var(--flow-delay, 0ms);
+}
+@keyframes flow-inline-in {
+  from { max-height: 0; opacity: 0; }
+  to { max-height: 320px; opacity: 1; }
 }
 .flow-actions {
   display: flex;
@@ -10216,7 +10223,7 @@ body[data-flow-resizing="1"] .flow-shift-target { transition: none; }
 
 /* ---------- 动效降级（不写 !important：用更高特异性的显式选择器压过各元素自身的过渡） ---------- */
 .flow-layer[data-motion="off"] .flow-item,
-.flow-layer[data-motion="off"] .flow-inline,
+.flow-layer[data-motion="off"] .flow-inline { animation: none; }
 .flow-layer[data-motion="off"] .flow-svg rect,
 .flow-layer[data-motion="off"] .flow-svg circle,
 .flow-layer[data-motion="off"] .flow-svg path,
