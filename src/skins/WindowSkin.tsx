@@ -6,12 +6,14 @@
 //   ② 每次呼出（win:workbenchShown / lens:window / capture:shown）宿主调 applyCaptureAppearance()，
 //      该函数末尾经 requestWindowSkinRefresh() 反压本组件刷新（保留「呼出重读」既有行为）。
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { SkinHost } from "./SkinHost";
 import { DEFAULT_SKIN_ID, loadSkin } from "./index";
 import {
   applyAppearanceToDocument,
   isAppearanceSettingsChange,
   readAppearance,
+  runAppearanceTransition,
   type Appearance
 } from "./runtime/readAppearance";
 
@@ -28,6 +30,9 @@ export function WindowSkin() {
   // C-37：theme.mode = "system" 时的系统深浅色监听要调到挂载 effect 内的 refresh（epoch 守卫同源），
   // 经 ref 暴露给下方按 modeSetting 开关的 effect。
   const refreshRef = useRef<(() => void) | null>(null);
+  // v49.90 / D257：首拉外观不做过渡（窗口刚挂载/呼出，避免启动闪一次淡化）；之后的设置变更、
+  // 系统深浅色翻转与皮肤切换统一走 runAppearanceTransition（数据属性 + 皮肤 CSS 同步提交）。
+  const appliedRef = useRef(false);
   useEffect(() => {
     let disposed = false;
     let epoch = 0; // 只认最后一次发起的读取（连续设置变更时旧响应不得回写旧外观）
@@ -36,8 +41,18 @@ export function WindowSkin() {
       try {
         const next = await readAppearance();
         if (disposed || my !== epoch) return;
-        applyAppearanceToDocument(next); // 主题 / 动效 body 类与强调色即时落，不等 React 渲染
-        setAp(next);
+        if (!appliedRef.current) {
+          appliedRef.current = true;
+          applyAppearanceToDocument(next); // 主题 / 动效 body 类与强调色即时落，不等 React 渲染
+          setAp(next);
+          return;
+        }
+        // 主题 / 皮肤切换：flushSync 让 SkinHost 的 useLayoutEffect（皮肤 CSS / body 类）
+        // 与外观类都在快照回调内同步完成，新快照即最终画面。
+        runAppearanceTransition(() => {
+          applyAppearanceToDocument(next);
+          flushSync(() => setAp(next));
+        });
       } catch {
         document.body.classList.add("theme-light"); // 与旧 applyCaptureAppearance 的兜底一致
       }

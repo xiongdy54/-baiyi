@@ -18,14 +18,34 @@ type IconProps = {
   title?: string;
 };
 
-function Svg({ size = 16, strokeWidth = 1.5, className, title, children }: IconProps & { children: ReactNode }) {
+type SvgProps = IconProps & {
+  /** 非 24×24 图标（如空态插画）时显式给出 viewBox / 宽高 */
+  viewBox?: string;
+  width?: number;
+  height?: number;
+  fill?: string;
+  stroke?: string;
+};
+
+function Svg({
+  size = 16,
+  strokeWidth = 1.5,
+  className,
+  title,
+  children,
+  viewBox = "0 0 24 24",
+  width,
+  height,
+  fill = "none",
+  stroke = "currentColor"
+}: SvgProps & { children: ReactNode }) {
   return (
     <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
+      width={width ?? size}
+      height={height ?? size}
+      viewBox={viewBox}
+      fill={fill}
+      stroke={stroke}
       strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
@@ -216,3 +236,40 @@ export const IconArrowLeft = (p: IconProps) => (
     <path d="m12 19-7-7 7-7" />
   </Svg>
 );
+
+/** 书架空态插画（v49.90 / D257）：品牌设计系统「空状态 empty」——地平线 + 点线螺旋 + 种子。
+ *  参数与点线坐标照抄 nutation-design docs/10-components.md「空状态」与
+ *  assets/components/empty-light.svg；颜色全部走 theme.css 的角色 Token
+ *  （--border-strong / --accent / --dot / --empty-seed-line）。 */
+const EMPTY_SEED_DOTS: ReadonlyArray<readonly [number, number]> = [
+  [112.8, 90.4], [119.2, 85.0], [123.8, 78.1], [123.7, 69.9], [118.5, 63.4],
+  [111.2, 59.3], [103.1, 57.1], [94.7, 56.5], [86.5, 58.1], [85.3, 64.3],
+  [93.3, 66.8], [101.7, 67.0], [109.9, 65.7], [117.9, 63.0], [124.9, 58.5],
+  [129.7, 51.7], [130.0, 43.4], [126.5, 35.8], [121.0, 29.5], [114.3, 24.4],
+  [106.9, 20.6]
+];
+
+export function EmptyShelfArt({ className }: { className?: string }) {
+  return (
+    <Svg viewBox="0 0 200 130" width={200} height={130} stroke="none" className={className}>
+      <path className="shelf-empty-ground" d="M40 96H160" />
+      <g className="shelf-empty-trace" opacity="0.5">
+        {EMPTY_SEED_DOTS.map(([cx, cy], i) => (
+          <circle key={i} cx={cx} cy={cy} r={1.8} />
+        ))}
+      </g>
+      <g transform="translate(100 109)">
+        <path
+          className="shelf-empty-seed"
+          d="M-9.425 0C-4.24125 -5.7681 4.7125 -6.1074 9.048 -1.131Q10.3675 0 9.048 1.131C4.7125 6.1074 -4.24125 5.7681 -9.425 0Z"
+          transform="rotate(-32)"
+        />
+        <path
+          className="shelf-empty-seam"
+          d="M-4.71 0.33Q0 -1.43 5.18 0.13"
+          transform="rotate(-32)"
+        />
+      </g>
+    </Svg>
+  );
+}

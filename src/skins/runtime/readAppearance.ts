@@ -76,6 +76,51 @@ export function applyAppearanceToDocument(ap: Appearance): void {
   applyAccent(ap.accent);
 }
 
+/** v49.90 / D257：主题 / 皮肤切换的统一过渡入口（品牌临时设计系统 docs/05-themes.md「切换动效」+
+ * docs/09-motion.md「主题切换」：整页交叉淡化 400ms、cubic-bezier(.4,0,.2,1)，取值照抄其 tokens.css
+ * 的 --dur-theme / --ease-theme，本应用落为 theme.css 同名 Token）。update 必须**同步**落完所有外观变更
+ * （body 主题类 / 皮肤 CSS / --user-accent；主窗口与 WindowSkin 各自用 flushSync 提交 React 状态）。
+ * 降级＝立即应用、不垫 fallback 动画：不支持 View Transitions / 减少动态 / 应用动效关闭 /
+ * 页面切换（data-vt）进行中。documentElement 带 data-theme-vt 期间由 theme.css 的 VT 规则接管。 */
+let appearanceVtGen = 0;
+export function runAppearanceTransition(update: () => void): void {
+  const host = document as unknown as { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
+  const root = document.documentElement;
+  const reduced =
+    typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (
+    typeof host.startViewTransition !== "function" ||
+    reduced ||
+    document.body?.classList.contains("motion-off") ||
+    root.dataset.vt
+  ) {
+    update();
+    return;
+  }
+  const my = ++appearanceVtGen;
+  root.dataset.themeVt = "1";
+  let vt: { finished: Promise<void> };
+  try {
+    vt = host.startViewTransition(update);
+  } catch {
+    if (appearanceVtGen === my) delete root.dataset.themeVt;
+    update();
+    return;
+  }
+  const cleanup = () => {
+    if (appearanceVtGen === my) delete root.dataset.themeVt;
+  };
+  // 兜底：窗口被隐藏 / 遮挡时 Chromium 可能让 VT 的 finished 长期不结算——
+  // 标记滞留会让后续页面切换误用主题档，故 1.5s 后强制摘除（正常路径 400ms 即结算）。
+  const guard = window.setTimeout(cleanup, 1500);
+  vt.finished
+    .catch(() => { /* 跳过 / 失败路径同样结算，统一走 finally 清理 */ })
+    .finally(() => {
+      window.clearTimeout(guard);
+      cleanup();
+    });
+}
+
 /** 外观相关的设置键（app 域；theme 域整体相关）——WindowSkin 刷新的 scope/key 过滤规则 */
 const APPEARANCE_APP_KEYS = ["skinId", "accentColor", "accentBySkin", "motionLevel"];
 

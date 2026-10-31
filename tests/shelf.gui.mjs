@@ -1,7 +1,8 @@
 // 书架页重设计回归套件（v48.15 / D51）
 // 覆盖：吸顶工具条（视图/密度/排序/主行动）、网格"右侧富余=0"几何口径、图注卡、
 //       拖拽三区落点与键盘重排、文件夹全生命周期（成组/命名/名册/三条出路/移出/解散）、
-//       顺序与文件夹持久化（settings.json 重启不丢）、空态不再重复主行动。
+//       顺序与文件夹持久化（settings.json 重启不丢）、空态＝品牌设计系统 empty 组件
+//       （插画 + 宋体标题/说明 + 单一「导入文章」主行动，v49.90 / D257）。
 // 运行：node tests/shelf.gui.mjs（CDP 驱动真实应用，自启自关）
 // 隔离：M7_TEST_USERDATA → tests/tmp-shelf-userdata（先清空），绝不触碰真实库（§7.3）。
 import { spawn } from "node:child_process";
@@ -136,7 +137,7 @@ try {
   page = await connect();
   await wait(4500);
 
-  console.log("\n[1] 空库基线：工具条在场、空态不再重复主行动（§5.4）");
+  console.log("\n[1] 空库基线：工具条在场、空态＝品牌设计系统 empty 组件（§5.4 / D257）");
   let r = JSON.parse(await page.eval(`
     ${PRELUDE}
     return JSON.stringify({
@@ -148,9 +149,12 @@ try {
       dropdown: !!document.querySelector('.shelf-bar .dd'),
       addBtn: document.querySelector('.shelf-bar .btn-primary')?.textContent.trim(),
       addBtnH: getComputedStyle(document.querySelector('.shelf-bar .btn-primary')).height,
-      empty: !!document.querySelector('.empty-state'),
-      emptyBtns: document.querySelectorAll('.empty-state button').length,
-      emptyText: document.querySelector('.empty-text')?.textContent.replace(/\\s+/g,' ').trim().slice(0, 22),
+      empty: !!document.querySelector('.empty-state.shelf-empty'),
+      emptyArt: !!document.querySelector('.shelf-empty-art'),
+      emptyTitle: document.querySelector('.shelf-empty b')?.textContent ?? null,
+      emptySub: document.querySelector('.shelf-empty span')?.textContent ?? null,
+      emptyBtns: document.querySelectorAll('.empty-state.shelf-empty button').length,
+      emptyBtnText: document.querySelector('.empty-state.shelf-empty button')?.textContent?.trim() ?? null,
       count: window.__S.count(),
     });`));
   check("吸顶工具条在场且 position:sticky", r.bar && r.sticky === "sticky", JSON.stringify(r));
@@ -158,8 +162,11 @@ try {
   check("工具条内三组控件（视图/密度/排序）", r.groups === 3, r.groups);
   check("视图与密度各一组分段按钮，排序走共享 Dropdown", r.segs === 2 && r.dropdown, JSON.stringify(r));
   check("主行动「添加材料」在工具条、32px 档", /添加材料/.test(r.addBtn || "") && r.addBtnH === "32px", JSON.stringify(r));
-  check("空态在场且**没有任何按钮**（D51 用户指令）", r.empty && r.emptyBtns === 0, JSON.stringify(r));
-  check("空态文案指过去工具条主行动", /添加材料/.test(r.emptyText || ""), r.emptyText);
+  check("空态使用品牌设计系统 empty 组件（插画 + 标题 + 说明 + 单一主行动）",
+    r.empty && r.emptyArt && r.emptyTitle === "这里还什么都没有"
+      && r.emptySub === "导入一篇文章，种下第一粒种子"
+      && r.emptyBtns === 1 && /导入文章/.test(r.emptyBtnText || ""),
+    JSON.stringify(r));
   check("空库计数为 0 本", /^0 本$/.test(r.count || ""), r.count);
 
   console.log("\n[2] 造 4 本粘贴书：图注卡在场、卡面不再挂原生 select");

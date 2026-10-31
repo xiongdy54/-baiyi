@@ -9,7 +9,7 @@ import { isImeComposing } from "../lib/ime";
 import { libraryApi, lastReadDisplay, BOOK_LANGUAGES, type LibraryItem } from "../lib/library";
 import { eventBus } from "../lib/eventbus";
 import {
-  IconAlert, IconArrowLeft, IconEllipsis, IconFolderPlus, IconImport, IconLanguages,
+  EmptyShelfArt, IconAlert, IconArrowLeft, IconEllipsis, IconFolderPlus, IconImport, IconLanguages,
   IconLayoutGrid, IconList, IconPencil, IconTrash,
 } from "./icons";
 import Dropdown from "./Dropdown";
@@ -1068,15 +1068,25 @@ export default function Bookshelf({ onOpenBook, onImportFiles, onPasteMaterial, 
         /* 冷启动数据未到：留空占位（工具条已在），不闪空态；通常只持续几十毫秒 */
         <div className="shelf-pending" aria-busy="true" />
       ) : entries.length === 0 ? (
-        /* 空态：一句话。不再放主行动按钮——工具条的「添加材料」已在同一视口常驻
-           （v48.15 / D51，swiss 文档「状态设计 · empty」同步补了这条例外；v48.82/D126 几何装饰退役） */
-        <div className="empty-state">
-          <p className="empty-text">
-            {openFolder
-              ? T("这个文件夹还是空的。把书拖到另一本书上，或用卡片动作条的「归入文件夹」往里放。")
-              : T("书架还是空的。用右上角的「添加材料」，或按 Ctrl+Alt+N，粘贴一段文本、导入 EPUB / Word / TXT / Markdown，开始你的渐进阅读。")}
-          </p>
-        </div>
+        /* v49.90 / D257：书架空态改用品牌临时设计系统 nutation-design「空状态 empty」组件——
+           插画参数与文案照抄设计系统 docs/10-components.md「空状态」（viewBox 0 0 200 130、
+           地平线 y96 x40→160 线宽 2.5、点线 r1.8 不透明度 .5、种子 (100,109) r6.5、宋体 17px 标题、
+           14px 说明、高 40 主行动）。原 v48.15 / D51「空态不放主行动」条款废止（用户明确要求按
+           设计系统组件呈现）；文件夹空态仍是原「一句话」口径。 */
+        openFolder ? (
+          <div className="empty-state">
+            <p className="empty-text">
+              {T("这个文件夹还是空的。把书拖到另一本书上，或用卡片动作条的「归入文件夹」往里放。")}
+            </p>
+          </div>
+        ) : (
+          <div className="empty-state shelf-empty">
+            <EmptyShelfArt className="shelf-empty-art" />
+            <b>{T("这里还什么都没有")}</b>
+            <span>{T("导入一篇文章，种下第一粒种子")}</span>
+            <button type="button" onClick={onImportFiles}>{T("导入文章")}</button>
+          </div>
+        )
       ) : mode === "wall" ? (
         <div className={`bookshelf-grid${shelfEnter ? " shelf-enter" : ""}`} ref={listRef} onDragOver={onGridDragOver} onDrop={onGridDrop}>{entries.map((e, i) => wallCard(e, i))}</div>
       ) : (

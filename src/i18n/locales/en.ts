@@ -788,6 +788,10 @@ export const en: Record<string, string | { one: string; other: string }> = {
     "This folder is empty. Drag a book onto another one, or use the card's \"Move to folder\" action.",
   "书架还是空的。用右上角的「添加材料」，或按 Ctrl+Alt+N，粘贴一段文本、导入 EPUB / Word / TXT / Markdown，开始你的渐进阅读。":
     "The library is empty. Use \"Add material\" in the top-right, or press Ctrl+Alt+N — paste a text or import EPUB / Word / TXT / Markdown to start incremental reading.",
+  // v49.90 / D257：书架空态改用品牌设计系统「空状态 empty」组件
+  "这里还什么都没有": "Nothing here yet",
+  "导入一篇文章，种下第一粒种子": "Import an article and plant your first seed",
+  "导入文章": "Import an article",
   "书名 / 上次阅读": "Title / Last read",
   "进度": "Progress",
   "最近": "Recent",
@@ -2236,7 +2240,7 @@ export const en: Record<string, string | { one: string; other: string }> = {
   "低频": "Low frequency",
   "每周左右": "About weekly",
   // —— 批 6：皮肤（skins/*/manifest.ts；SettingsPanel 渲染期 T()）——
-  "陶土": "Terracotta",
+  "雨林": "Rainforest",
   "瑞士": "Swiss",
   "轻装上阵": "Travel light",
   "从容以赴": "Calmly committed",

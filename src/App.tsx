@@ -42,7 +42,7 @@ import { DEFAULT_SKIN_ID, loadSkin } from "./skins";
 import { SkinHost } from "./skins/SkinHost";
 // C-31：外观读取唯一实现面（初始化与独立窗口 WindowSkin 共用；本文件 effect 仍用 resolveMotion/motionClass）
 // C-37：resolveThemeMode——theme.mode 的 "system" 档按系统深浅色解析（事件发解析值，监听者零修改）
-import { readAppearance, resolveThemeMode } from "./skins/runtime/readAppearance";
+import { readAppearance, resolveThemeMode, runAppearanceTransition } from "./skins/runtime/readAppearance";
 import { motionClass, resolveMotion, type MotionSetting } from "./skins/runtime/motionLevel";
 import type { MotionLevel } from "./skins/types";
 import { applyAccent } from "./lib/accentVar";
@@ -263,8 +263,16 @@ export default function App() {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
       const resolved = resolveThemeMode("system");
-      setTheme(resolved);
-      eventBus.emit("theme/changed", resolved);
+      // v49.90 / D257：跟随系统自动切换同样走品牌设计系统的整页交叉淡化（400ms / --ease-theme），
+      // body 类必须与 React 状态在同一个同步回调里落定，新快照才能拍到最终画面。
+      runAppearanceTransition(() => {
+        flushSync(() => {
+          setTheme(resolved);
+          document.body.classList.remove("theme-light", "theme-dark");
+          document.body.classList.add(resolved === "dark" ? "theme-dark" : "theme-light");
+          eventBus.emit("theme/changed", resolved);
+        });
+      });
     };
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
@@ -372,11 +380,19 @@ export default function App() {
   async function handleThemeChange(m: ThemeMode) {
     // C-37：themeMode（原始档）与 theme（解析档）分开落——"system" 落窗档由 resolveThemeMode 现场解析；
     // theme/changed 发**解析后的**值（报告 C-37 步骤 3），设置键仍存原始档。
-    setThemeMode(m);
     const resolved = resolveThemeMode(m);
-    setTheme(resolved);
+    // v49.90 / D257：手动明暗切换走品牌设计系统的整页交叉淡化（400ms / --ease-theme）——
+    // flushSync 保证 body 类、React 状态与 theme/changed 订阅者的同步变更都在快照回调内完成。
+    runAppearanceTransition(() => {
+      flushSync(() => {
+        setThemeMode(m);
+        setTheme(resolved);
+        document.body.classList.remove("theme-light", "theme-dark");
+        document.body.classList.add(resolved === "dark" ? "theme-dark" : "theme-light");
+        eventBus.emit("theme/changed", resolved);
+      });
+    });
     await settingsStore.set("theme", "mode", m);
-    eventBus.emit("theme/changed", resolved);
     eventBus.emit("settings/changed", { scope: "theme", key: "mode" });
   }
 
@@ -390,10 +406,16 @@ export default function App() {
       console.error("[skin] 皮肤加载失败，保持当前皮肤", err);
       return;
     }
-    setSkinId(id);
     const eff = id === DEFAULT_SKIN_ID ? accentColorLegacy : accentBySkin[id] || "";
-    setAccentColor(eff);
-    applyAccent(eff);
+    // v49.90 / D257：皮肤切换同样走品牌设计系统的整页交叉淡化；SkinHost 的 useLayoutEffect
+    //（皮肤 CSS 注入 / body 类 / html[data-skin]）在 flushSync 提交内同步完成，新快照即最终外观。
+    runAppearanceTransition(() => {
+      flushSync(() => {
+        setSkinId(id);
+        setAccentColor(eff);
+      });
+      applyAccent(eff);
+    });
     // v48.89（D132 §7.3/§8.3）：内置皮肤与主题插件双槽互斥——选非 none 皮肤时同步清插件激活
     //（宿主 setActive 写两槽；skin 列表选中态因 app.skinId 被写回 none 由插件侧驱动回落）
     if (id !== DEFAULT_SKIN_ID) void window.pluginsAPI?.setActive("");

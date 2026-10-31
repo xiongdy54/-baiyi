@@ -1,5 +1,5 @@
 /* ============================================================================
-   陶土（Claude）皮肤 · v49.13 / D186（v49.0 / D173 建；D175 选中强调统一；D183 对齐 CDS 2.0 动效档；D184 输入件圆角 12px；D185 发丝边/骨架扫光/数字等宽；D186 VT 转场 300ms）
+   雨林（Claude）皮肤 · v49.91 / D258（v49.0 / D173 建；D175 选中强调统一；D183 对齐 CDS 2.0 动效档；D184 输入件圆角 12px；D185 发丝边/骨架扫光/数字等宽；D186 VT 转场 300ms；D257 亮色＝品牌设计系统「米白」、暗色＝「森林」；D258 显示名「森林」→「雨林」）
    设计语言：src/skins/claude/DESIGN.md；部件选择器来源：docs/skins/component-map.md
    纪律：skin 层由 SkinHost 包裹（@layer skin）——本文件全部规则恒压 base 层；
    颜色 Token 两档各声明一次（A4）；动效全部在 body.motion-full 作用域（A6，VT 例外）；
@@ -8,29 +8,32 @@
 
 /* ============ 1. Token：浅色 ============ */
 body.skin-claude {
-  /* 灰阶与文字（CDS surface-0 族；整组换，边界③） */
-  --paper: #f5f5f3;
-  --grey-1: #ebebe8;
-  --grey-2: #d6d5d1;
-  --grey-3: #666663;
-  --ink: #151515;
-  --text-secondary: #525252;
-  --text-placeholder: #8a8a8a;
-  /* 描边：CDS 半透明发丝边（纸面/白卡上叠出自然淡线；全 theme.css 仅 7 处 1-2px 细线元素
-     把它当背景色用，半透明叠加视觉等效，无需实色特例——P4 检查结论） */
-  --border-subtle: rgba(20, 20, 20, 0.10);
-  --border-strong: rgba(20, 20, 20, 0.20);
-  /* 陶土双角色（A3）：--accent 浅档加深一档保对比，--skin-brand 纯装饰 */
-  --accent: var(--user-accent, #ae5630);
-  --accent-on: var(--user-accent-on, #ffffff);
-  --skin-brand: #d97757;
+  /* v49.90 / D257：亮色＝品牌设计系统「米白」（tokens.css [data-theme="light"]）——
+     --bg → --paper、--surface → 卡片/弹层、--surface-2 → --grey-1/填充卡、
+     --fill-2 → --grey-2、--muted → --grey-3/次要文字、--text → --ink、
+     --border → --border-subtle、--ground → --border-strong（空态地平线同源）、
+     --ink/--on-ink → --accent/--accent-on、--dot → --dot。 */
+  --paper: #f4f1e8;
+  --grey-1: #efebe0;
+  --grey-2: #c7d6c0;
+  --grey-3: #5c635b;
+  --ink: #22302a;
+  --text-secondary: #5c635b;
+  --text-placeholder: #5c635b;
+  --border-subtle: rgba(46, 74, 58, 0.14);
+  --border-strong: rgba(46, 74, 58, 0.34);
+  /* 雨林墨色双角色（A3，D257 取设计系统「森林」的 --ink）：--accent＝--ink，--skin-brand 纯装饰同值 */
+  --accent: var(--user-accent, #2e4a3a);
+  --accent-on: var(--user-accent-on, #f4f1e8);
+  --skin-brand: #2e4a3a;
   --skin-brand-soft: color-mix(in srgb, var(--skin-brand) 12%, transparent);
   /* 组件表面（P3 组件级 Token；body 层的 var() 引用在本元素重新求值——直接覆盖即生效） */
-  --surface-chrome: #f5f5f3;
-  --surface-card: #ffffff;
-  --surface-card-fill: #ffffff;
-  --surface-overlay: #ffffff;
-  --surface-input: #ffffff;
+  --surface-chrome: #f4f1e8;
+  --surface-card: #fbf9f4;
+  --surface-card-fill: #efebe0;
+  --surface-overlay: #fbf9f4;
+  --surface-input: #fbf9f4;
+  --dot: #f1da8c;
   /* 圆角阶梯（CDS 十档收敛到组件 Token；嵌套圆角「内 = 外 − 内边距」） */
   --radius: 8px;
   --radius-panel: 12px;
@@ -86,24 +89,27 @@ body.skin-claude {
 
 /* ============ 2. Token：深色（浅色里声明过的颜色 Token 全部重写，A4） ============ */
 body.skin-claude.theme-dark {
-  --paper: #0b0b0a;
-  --grey-1: #1a1a19;
-  --grey-2: #2c2c2a;
-  --grey-3: #8a8a86;
-  --ink: #f5f5f5;
-  --text-secondary: #a3a3a3;
-  --text-placeholder: #7a7a76;
-  --border-subtle: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.18);
-  --accent: var(--user-accent, #d97757);
-  --accent-on: var(--user-accent-on, #0a0a0a);
-  --skin-brand: #d97757;
+  /* v49.90 / D257：暗色＝品牌设计系统「森林」（tokens.css [data-theme="dark"]）——
+     同一映射见浅色块注释；--ink/--on-ink → --accent/--accent-on。 */
+  --paper: #133b2b;
+  --grey-1: #1f5340;
+  --grey-2: rgba(243, 238, 223, 0.2);
+  --grey-3: rgba(243, 238, 223, 0.72);
+  --ink: #f3eedf;
+  --text-secondary: rgba(243, 238, 223, 0.72);
+  --text-placeholder: rgba(243, 238, 223, 0.72);
+  --border-subtle: rgba(243, 238, 223, 0.16);
+  --border-strong: rgba(243, 238, 223, 0.34);
+  --accent: var(--user-accent, #f3eedf);
+  --accent-on: var(--user-accent-on, #133b2b);
+  --skin-brand: #f3eedf;
   --skin-brand-soft: color-mix(in srgb, var(--skin-brand) 18%, transparent);
-  --surface-chrome: #0b0b0a;
-  --surface-card: #1a1a19;
-  --surface-card-fill: #1a1a19;
-  --surface-overlay: #222220;
-  --surface-input: #1a1a19;
+  --surface-chrome: #133b2b;
+  --surface-card: #184633;
+  --surface-card-fill: #1f5340;
+  --surface-overlay: #184633;
+  --surface-input: #184633;
+  --dot: #edd385;
   /* 圆角与动效两档同值（浅色块已覆盖，非颜色 Token 不需重复——skin 层浅色块恒在场） */
   --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.30), 0 2px 8px 0 rgba(0, 0, 0, 0.40);
   --skin-shadow-card-hover: 0 2px 4px 0 rgba(0, 0, 0, 0.30), 0 6px 16px 0 rgba(0, 0, 0, 0.40);
@@ -201,7 +207,9 @@ body.skin-claude.motion-full :is(.annot-editor, .extract-face-toolbar.is-float-p
    :root[data-vt-dir] (0,2,0) 的方向动画；withViewTransition 不新建——D120 changeView 已在场。
    时长 300ms＝D186 用户裁定（CDS 2.0「页面级大转场」450ms 档实测体感似卡顿；EASE_OUT_EXPO 前载缓动不变，主体运动前 ~40% 完成）；
    不改 --dur-view Token——基线 8 处消费面（wb-tabs/wb-mode 颜色过渡等）不属页面级转场） */
-html[data-skin="claude"]:root::view-transition-new(root) {
+/* v49.90 / D257：只作用于页面切换（changeView 期间 documentElement 带 data-vt）；
+   主题 / 皮肤切换带 data-theme-vt，由 theme.css 的 400ms 整页交叉淡化接管（设计系统档）。 */
+html[data-skin="claude"]:root[data-vt]::view-transition-new(root) {
   animation: skin-claude-rise-in 300ms var(--ease-enter) both;
 }
 @keyframes skin-claude-rise-in {
@@ -210,7 +218,7 @@ html[data-skin="claude"]:root::view-transition-new(root) {
 }
 /* reduce 降级对齐基线做法：瞬时切换 */
 @media (prefers-reduced-motion: reduce) {
-  html[data-skin="claude"]:root::view-transition-new(root) { animation: none; }
+  html[data-skin="claude"]:root[data-vt]::view-transition-new(root) { animation: none; }
 }
 
 /* 骨架屏扫光（CDS SkeletonShimmer 同配方，v49.12 / D185）：基线 .skeleton 1.2s 脉冲
