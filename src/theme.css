@@ -330,6 +330,9 @@ body {
   --radius-card: var(--radius);        /* 卡片、列表项容器 */
   --radius-popover: var(--radius-panel); /* 弹层、菜单、提示（theme.css 零消费，皮肤用） */
   --radius-dialog: var(--radius-panel);  /* 模态对话框、大面板 */
+  /* D256：聚焦层真实空白的外部关闭光标。皮肤可整枚替换（瑞士直角 / 陶土圆角）；
+     data URI 不能读取宿主 var()，浅深遮挡层配色固定，故明暗两档声明同值。 */
+  --overlay-close-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M1 1H31V31H1Z' fill='%23f5f5f2' stroke='%230a0a0a'/%3E%3Cpath d='M10 10L22 22M22 10L10 22' stroke='%230a0a0a' stroke-width='2'/%3E%3C/svg%3E") 16 16, pointer;
   --shadow-card: none;                 /* 卡片阴影：theme.css 零消费（默认皮肤零阴影），皮肤可整组引入 */
   --shadow-popover: var(--shadow-float); /* 浮层/菜单/弹窗/工具条浮层 */
   --shadow-dialog: var(--shadow-panel);  /* 模态对话框、图片聚焦大框、来源浮板 */
@@ -432,6 +435,8 @@ body.theme-dark {
   --accent-pressed: color-mix(in srgb, var(--accent) 78%, #ffffff);
   /* 深底上高亮同色相提亮一档（与 --accent-soft 的 8%→16% 同规） */
   --hl-multi: color-mix(in srgb, var(--accent) 30%, transparent);
+  /* D256：遮挡层光标图形固定配色，深色档按 A4 显式重声明同值。 */
+  --overlay-close-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M1 1H31V31H1Z' fill='%23f5f5f2' stroke='%230a0a0a'/%3E%3Cpath d='M10 10L22 22M22 10L10 22' stroke='%230a0a0a' stroke-width='2'/%3E%3C/svg%3E") 16 16, pointer;
 }
 
 /* 多段选择高亮（v48.23 / D61 §6.8-11）：CSS Custom Highlight API 只画绘制层——
@@ -1855,6 +1860,7 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: var(--overlay-close-cursor);
 }
 @keyframes modal-in {
   from { opacity: 0; }
@@ -1893,6 +1899,7 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
   border-radius: var(--radius-dialog);
   box-shadow: var(--shadow-dialog);
   padding: 0;
+  cursor: default;
 }
 .modal-panel > .modal-scroll {
   overflow-y: auto;
@@ -1911,6 +1918,15 @@ html[data-wb-open="1"][data-wb-place="right"] .topbar { --tb-split: var(--wb-w);
 .modal-panel-wide {
   width: 980px;
   max-height: 92vh;
+}
+/* D256：内容型面板只扩到内容需要的宽度；高度仍由内容决定，只加视口上限。 */
+.modal-panel-content {
+  width: min(720px, calc(100vw - var(--sp-16)));
+  max-height: calc(100vh - var(--sp-16));
+}
+.modal-panel-reading {
+  width: min(880px, calc(100vw - var(--sp-16)));
+  max-height: calc(100vh - var(--sp-16));
 }
 
 /* ---------- 粘贴材料全窗口编辑器（v49.3 / D177，PasteMaterialModal） ----------
@@ -4444,6 +4460,29 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   cursor: pointer;
 }
 .image-focus-close:hover { background: color-mix(in srgb, var(--overlay-text) 14%, transparent); }
+.occlusion-editor-layer .image-focus-close {
+  background: var(--surface-overlay);
+  border-color: var(--border-strong);
+  border-radius: var(--radius-popover);
+  color: var(--text-primary);
+}
+.occlusion-editor-layer .image-focus-close:hover { background: var(--grey-1); }
+.occlusion-editor-toolbar .occl-close-inline {
+  position: static;
+  width: 28px;
+  height: 28px;
+  margin-left: var(--sp-1);
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-secondary);
+}
+.occlusion-editor-toolbar .occl-close-inline:hover {
+  background: var(--grey-1);
+  color: var(--text-primary);
+}
+.occlusion-editor-stage .image-focus-caption { color: var(--text-helper); cursor: default; }
 /* 顶部居中悬浮工具条（用户钦定位置）：选区工具 + 类型提示 + 提交动作 */
 .image-focus-toolbar {
   position: absolute;
@@ -4814,8 +4853,9 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   position: fixed;
   inset: 0;
   z-index: calc(var(--z-toast) - 1);
-  background: color-mix(in srgb, var(--overlay-ink) 55%, transparent);
+  background: var(--paper);
   user-select: none;
+  cursor: var(--overlay-close-cursor);
   animation: image-focus-fade var(--dur-enter) var(--ease);
 }
 /* R1：主区（工具条+画布）与右栏并排——工具条随主区在流内定位，与右栏无覆盖可能 */
@@ -4827,6 +4867,7 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   align-items: center;
   justify-content: center;
   gap: var(--sp-3);
+  cursor: var(--overlay-close-cursor);
 }
 /* R1 工具条重设计：单行紧凑、fit-content、无提示文案、按钮不换行不收缩 */
 .occlusion-editor-toolbar {
@@ -4842,6 +4883,9 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   box-shadow: var(--shadow-popover);
   cursor: default;
   z-index: 2;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
 }
 /* 用户实测修正（D98）：动作按钮窄幅下文字换行成竖排——一律禁换行、不收缩 */
 .image-focus-actions .btn,
@@ -4881,12 +4925,16 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
 .occl-crop-active { border-color: var(--accent); color: var(--accent); }
 .occlusion-editor-stage {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: var(--sp-2);
+  width: 100%;
+  min-height: 0;
   max-width: 100%;
-  max-height: 100%;
-  cursor: default;
+  max-height: none;
+  cursor: var(--overlay-close-cursor);
   /* 240ms 裸值 token 化（D120 §12-6）：--dur-panel + --ease-out-soft */
   transition: transform var(--dur-panel) var(--ease-out-soft), opacity var(--dur-panel) var(--ease-out-soft);
   will-change: transform;
@@ -4897,11 +4945,12 @@ html[data-wb-open="1"][data-wb-place="bottom"] .app-main { margin-bottom: var(--
   line-height: 0;
   background: var(--paper);
   box-shadow: var(--shadow-dialog);
+  cursor: default;
 }
 .occlusion-editor-imgbox > img {
   display: block;
-  max-width: calc(100vw - 400px);
-  max-height: calc(100vh - 170px);
+  max-width: none;
+  max-height: none;
   width: auto;
   height: auto;
   object-fit: contain;
@@ -6525,22 +6574,41 @@ body.reader-surface {
 .source-peek-close:hover { color: var(--accent); }
 .source-peek-stage { max-width: none; margin: var(--sp-2) var(--sp-3) var(--sp-3); }
 
-.image-lightbox-backdrop { z-index: var(--z-modal); }
+.image-lightbox-backdrop { z-index: var(--z-modal); padding: var(--sp-4); background: var(--paper); }
 .image-lightbox {
   display: flex;
   flex-direction: column;
-  width: min(920px, 92vw);
-  height: min(86vh, 900px);
-  background: var(--paper);
-  border: var(--bw-hairline) solid var(--border-strong);
+  width: calc(100vw - var(--sp-8));
+  height: calc(100vh - var(--sp-8));
+  max-width: none;
+  max-height: none;
+  background: transparent;
+  border: none;
+  cursor: default;
 }
 .image-lightbox-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
+  width: fit-content;
+  max-width: calc(100vw - var(--sp-16));
+  margin: var(--sp-2) auto 0;
   padding: var(--sp-2) var(--sp-3);
-  border-bottom: var(--bw-hairline) solid var(--border-subtle);
+}
+.image-overlay-toolbar {
+  background: var(--surface-overlay);
+  border: var(--bw-hairline) solid var(--border-strong);
+  border-radius: var(--radius-popover);
+  box-shadow: var(--shadow-popover);
+  cursor: default;
+}
+.image-overlay-group {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--sp-2);
+  color: var(--text-primary);
 }
 .image-lightbox-title {
   font-size: var(--fs-secondary);
@@ -6550,16 +6618,23 @@ body.reader-surface {
 .image-lightbox-zoom { min-width: 44px; text-align: center; color: var(--text-primary); }
 .image-lightbox-stage {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: var(--sp-4);
+  padding: var(--sp-3);
+  cursor: var(--overlay-close-cursor);
 }
 .image-lightbox-occlusion {
+  flex: none;
+  margin: auto;
   max-width: none;
-  width: max(420px, 70%);
-  transform-origin: top center;
+  width: auto;
+  cursor: default;
+}
+.image-lightbox-occlusion .occlusion-img {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
 }
 
 /* ---------- v36（M8-A，§5.4 / §6.5）：日记页 + 快速记录窗口 + 全局快捷键设置 ---------- */

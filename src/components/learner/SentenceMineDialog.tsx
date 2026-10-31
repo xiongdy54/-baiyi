@@ -5,6 +5,7 @@ import { learnerApi } from "../../lib/learner";
 import { learnerStrings } from "../../lib/learnerStrings";
 import { eventBus } from "../../lib/eventbus";
 import { useDialogA11y } from "../../lib/dialogA11y";
+import { useOverlayBackdrop } from "../../lib/overlayDismiss";
 
 type MineResult = NonNullable<Awaited<ReturnType<typeof learnerApi.sentenceMine>>>;
 type MineItem = MineResult["items"][number];
@@ -12,6 +13,7 @@ type MineItem = MineResult["items"][number];
 export default function SentenceMineDialog({ trackId, onClose }: { trackId: string; onClose: () => void }) {
   const S = learnerStrings();
   const ref = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(ref, onClose);
   const [items, setItems] = useState<MineItem[] | null>(null);
   const [error, setError] = useState("");
 
@@ -41,8 +43,8 @@ export default function SentenceMineDialog({ trackId, onClose }: { trackId: stri
   }
 
   return (
-    <div className="modal-backdrop" data-show="in" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal-panel" ref={ref} role="dialog" aria-modal="true" aria-label={S.sentenceMine.title}>
+    <div className="modal-backdrop" data-show="in" {...backdrop}>
+      <div className="modal-panel modal-panel-content" ref={ref} role="dialog" aria-modal="true" aria-label={S.sentenceMine.title}>
         <div className="modal-header">
           <h3>{S.sentenceMine.title}</h3>
           <button className="icon-btn" aria-label="close" onClick={onClose}>

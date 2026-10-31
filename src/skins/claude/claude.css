@@ -41,6 +41,8 @@ body.skin-claude {
   --radius-card: 10px;
   --radius-popover: 12px;
   --radius-dialog: 16px;
+  /* D256：聚焦层外部关闭光标随陶土圆角语言（与瑞士直角档整枚替换）。 */
+  --overlay-close-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%23f5f5f2' stroke='%230a0a0a'/%3E%3Cpath d='M10 10L22 22M22 10L10 22' stroke='%230a0a0a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") 16 16, pointer;
   /* 阴影（浅色 .05–.08 双层柔影；不用 CDS「0 0 0 1px 描边环」——弹层已有 1px border） */
   --shadow-card: 0 1px 2px 0 rgba(0, 0, 0, 0.05), 0 2px 8px 0 rgba(0, 0, 0, 0.08);
   --skin-shadow-card-hover: 0 2px 4px 0 rgba(0, 0, 0, 0.05), 0 6px 16px 0 rgba(0, 0, 0, 0.08);
@@ -110,6 +112,8 @@ body.skin-claude.theme-dark {
   --shadow-popover: var(--shadow-float);
   --shadow-dialog: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), 0 12px 28px -2px rgba(0, 0, 0, 0.50);
   --focus-outline-color: color-mix(in srgb, var(--accent) 85%, transparent);
+  /* D256：遮挡层光标图形固定配色；深色档按 A4 重声明同一枚陶土圆角光标。 */
+  --overlay-close-cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Crect x='1' y='1' width='30' height='30' rx='8' fill='%23f5f5f2' stroke='%230a0a0a'/%3E%3Cpath d='M10 10L22 22M22 10L10 22' stroke='%230a0a0a' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") 16 16, pointer;
 }
 
 /* ============ 3. 结构规则（选择器来自 docs/skins/component-map.md） ============ */

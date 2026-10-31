@@ -10,6 +10,7 @@ import { getLocale, useT } from "../lib/i18n";
 import { steOutputLangName } from "../lib/steProfiles";
 import type { CardRecord } from "../lib/cards";
 import { useDialogA11y } from "../lib/dialogA11y";
+import { useOverlayBackdrop } from "../lib/overlayDismiss";
 import { IconAlert } from "./icons";
 
 // PromptTemplate `review-answer-judge` 缺失时的渲染层兜底（与播种模板 §7.4 保持同文）
@@ -33,6 +34,7 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; onClose: () => void }) {
   const T = useT();
   const panelRef = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(panelRef, onClose);
   const [answer, setAnswer] = useState("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
@@ -90,10 +92,7 @@ export default function AnswerJudgeModal({ card, onClose }: { card: CardRecord; 
   return (
     <div
       className="modal-backdrop"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClose();
-      }}
+      {...backdrop}
     >
       <div
         className="modal-panel"

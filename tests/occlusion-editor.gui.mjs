@@ -99,6 +99,11 @@ async function cdpConnect() {
         });
         return {
           ws,
+          send: (method, params = {}) => new Promise((res) => {
+            const mid = ++id;
+            pending.set(mid, res);
+            ws.send(JSON.stringify({ id: mid, method, params }));
+          }),
           eval: async (expr) => {
             const r = await new Promise((res) => {
               const mid = ++id;
@@ -109,6 +114,11 @@ async function cdpConnect() {
             return r.result?.result?.value;
           },
           shot: async (file) => {
+            await new Promise((res) => {
+              const mid = ++id;
+              pending.set(mid, res);
+              ws.send(JSON.stringify({ id: mid, method: "Runtime.evaluate", params: { expression: `(() => { for (const a of document.getAnimations()) { try { a.finish(); } catch (e) {} } return 1; })()`, returnByValue: true } }));
+            });
             const s = await new Promise((res) => {
               const mid = ++id;
               pending.set(mid, res);
@@ -149,16 +159,30 @@ const clickSidebarToggle = () => `(() => { const b = document.querySelector("[da
 
 /** 点击正文图片 → 编辑器直开（D98/R1：无聚焦中间层） */
 async function openEditor() {
-  await cdp.eval(`(() => {
-    const k = window.__readerKernel;
-    const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
-    if (!entry) return "no doc";
-    const img = entry.doc.querySelector('img[alt="挖空夹具图"]');
-    if (!img) return "no img";
-    img.dispatchEvent(new entry.doc.defaultView.MouseEvent("click", { bubbles: true, cancelable: true }));
-    return "clicked";
-  })()`);
-  await wait(900);
+  let hasImg = false;
+  for (let i = 0; i < 60; i++) {
+    hasImg = await cdp.eval(`Boolean((window.__readerKernel?.__getContents?.() || []).find((x) => x.doc)?.doc?.querySelector('img[alt="挖空夹具图"]'))`);
+    if (hasImg) break;
+    await wait(250);
+  }
+  if (!hasImg) return "no img";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await cdp.eval(`(() => {
+      const k = window.__readerKernel;
+      const entry = (k && k.__getContents ? k.__getContents() : []).find(x => x.doc);
+      const img = entry?.doc?.querySelector('img[alt="挖空夹具图"]');
+      if (!img) return "no img";
+      if (!img.complete) img.scrollIntoView({ block: "center" });
+      img.dispatchEvent(new entry.doc.defaultView.MouseEvent("click", { bubbles: true, cancelable: true }));
+      return "clicked";
+    })()`);
+    for (let i = 0; i < 15; i++) {
+      if (await cdp.eval(`Boolean(document.querySelector(".occlusion-editor-layer"))`)) return "opened";
+      await wait(200);
+    }
+    await wait(600);
+  }
+  return "not opened";
 }
 /** 在编辑器画布上按百分比拖矩形（遮罩/裁剪共用；椭圆=圆心拖） */
 const dragOn = (fx0, fy0, fx1, fy1) => `(() => {
@@ -264,17 +288,61 @@ try {
   await cdp.eval(`window.settingsAPI.set("app", "readerSettings", { mode: { flow: "scrolled" }, appearance: { theme: "paper" } })`);
   await cdp.eval(`location.reload()`);
   await wait(2500);
+  await cdp.eval(`(() => { try { Object.defineProperty(document, "startViewTransition", { value: undefined, configurable: true }); } catch (e) {} return 1; })()`);
   await cdp.eval(clickByText("FSRSTEST 挖空编辑验证书", ".book-card"));
   await wait(3000);
   const engineUp = await cdp.eval(`Boolean(document.querySelector(".reader-engine-host foliate-view"))`);
   check("0.5 进入引擎视图", engineUp);
+  // 本机 CDP 下离屏 iframe 的首次布局可能被冻结；强制合成一帧，保证章节 DOM 已挂载再点图。
+  await cdp.send("Page.captureScreenshot", { format: "png" });
+  await wait(300);
 
   // A. 点击图片直进编辑器（R1：无聚焦中间层；空画布、保存钮禁用）
-  await openEditor();
+  const openResA = await openEditor();
   let ed = JSON.parse(await cdp.eval(editorDiag));
   const noFocus = await cdp.eval(`!document.querySelector(".image-focus-layer")`);
-  check("A 点击图片直进编辑器（无聚焦层，空画布保存禁用）", ed.open && noFocus && ed.masks === 0 && ed.saveDisabled && ed.save.includes("创建卡片"), JSON.stringify(ed) + " noFocus=" + noFocus);
+  check("A 点击图片直进编辑器（无聚焦层，空画布保存禁用）", openResA === "opened" && ed.open && noFocus && ed.masks === 0 && ed.saveDisabled && ed.save.includes("创建卡片"), JSON.stringify(ed) + " open=" + openResA + " noFocus=" + noFocus);
   await cdp.shot(path.join(ROOT, "tests", "tmp-occl-a-open.png"));
+
+  // A1. D256：无脏数据时，外部按下 + 外部抬起直关；随后重开检查扩容和共享工具栏
+  const pointerPair = (downSel, upSel) => `(() => {
+    const down = document.querySelector(${JSON.stringify(downSel)});
+    const up = document.querySelector(${JSON.stringify(upSel)});
+    if (!down || !up) return "missing";
+    const init = { bubbles: true, cancelable: true, pointerId: 81, pointerType: "mouse", isPrimary: true, button: 0 };
+    down.dispatchEvent(new PointerEvent("pointerdown", { ...init, buttons: 1 }));
+    up.dispatchEvent(new PointerEvent("pointerup", { ...init, buttons: 0 }));
+    return "dispatched";
+  })()`;
+  const openedForDirect = await cdp.eval(`Boolean(document.querySelector(".occlusion-editor-layer"))`);
+  await cdp.eval(pointerPair(".occlusion-editor-stage", ".occlusion-editor-stage"));
+  await wait(400);
+  const closedDirect = await cdp.eval(`!document.querySelector(".occlusion-editor-layer")`);
+  check("A1 无脏数据图片外双空白点击直关", openedForDirect === true && closedDirect === true, `opened=${openedForDirect} closed=${closedDirect}`);
+
+  await openEditor();
+  const layout = await cdp.eval(`JSON.stringify((() => {
+    const main = document.querySelector('.occlusion-editor-main')?.getBoundingClientRect();
+    const box = document.querySelector('.occlusion-editor-imgbox')?.getBoundingClientRect();
+    const toolbar = document.querySelector('.occlusion-editor-toolbar');
+    const rail = document.querySelector('.occlusion-editor-rail')?.getBoundingClientRect();
+    return {
+      mainW: main ? Math.round(main.width) : 0,
+      boxW: box ? Math.round(box.width) : 0,
+      railW: rail ? Math.round(rail.width) : 0,
+      toolbarShared: Boolean(toolbar?.classList.contains('image-overlay-toolbar')),
+      closeInToolbar: Boolean(toolbar?.querySelector('[data-testid="occl-close"]')),
+      token: getComputedStyle(document.body).getPropertyValue('--overlay-close-cursor').trim(),
+      layerCursor: getComputedStyle(document.querySelector('.occlusion-editor-layer')).cursor,
+      stageCursor: getComputedStyle(document.querySelector('.occlusion-editor-stage')).cursor,
+      imageCursor: getComputedStyle(document.querySelector('.occlusion-editor-imgbox')).cursor,
+      layerBg: getComputedStyle(document.querySelector('.occlusion-editor-layer')).backgroundColor
+    };
+  })())`);
+  const layoutObj = JSON.parse(layout || "{}");
+  check("A2 图片按主区真实可用宽放大且右栏保留", layoutObj.boxW >= layoutObj.mainW * 0.94 && layoutObj.railW === 300, layout);
+  check("A3 挖空工具栏接共享表现 + 图片外关闭光标", layoutObj.toolbarShared === true && layoutObj.closeInToolbar === true && layoutObj.token.includes("url(") && layoutObj.stageCursor.includes("url(") && !layoutObj.imageCursor.includes("url("), layout);
+  check("A4 挖空聚焦层为不透明纸面", /^rgb\(/.test(String(layoutObj.layerBg || "")), layout);
 
   // B. 三形状连续框选：矩形 / 椭圆（圆心拖） / 多边形（点回起点闭合）
   await cdp.eval(dragOn(0.2, 0.3, 0.65, 0.75));
@@ -287,6 +355,41 @@ try {
   await wait(400);
   ed = JSON.parse(await cdp.eval(editorDiag));
   check("B 三形状连续框选（3 块 → 拆 3 卡）", ed.masks === 3 && ed.rows === 3 && ed.save.includes("创建 3 张卡片"), JSON.stringify(ed));
+
+  // B2. D256：有脏数据时外部关闭必须先出「未保存提示」，编辑器不卸载
+  await cdp.eval(pointerPair(".occlusion-editor-stage", ".occlusion-editor-stage"));
+  await wait(300);
+  const dirtyGuard = await cdp.eval(`JSON.stringify({
+    open: Boolean(document.querySelector('.occlusion-editor-layer')),
+    confirm: Boolean(document.querySelector('.occlusion-editor-confirm.show'))
+  })`);
+  check("B2 脏数据图片外关闭先确认且编辑器保持", String(dirtyGuard).includes('"open":true') && String(dirtyGuard).includes('"confirm":true'), dirtyGuard);
+  await cdp.eval(clickByText("继续编辑"));
+  await wait(250);
+  const stillEditing = await cdp.eval(`Boolean(document.querySelector('.occlusion-editor-layer')) && !document.querySelector('.occlusion-editor-confirm.show')`);
+  check("B3 继续编辑回到编辑器", stillEditing === true, stillEditing);
+
+  // B4. Esc 逐级链：脏数据先确认；裁剪模式与多边形草稿优先被消费，不卸载编辑器
+  await cdp.eval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await wait(250);
+  const escDirty = await cdp.eval(`JSON.stringify({ open: Boolean(document.querySelector('.occlusion-editor-layer')), confirm: Boolean(document.querySelector('.occlusion-editor-confirm.show')) })`);
+  check("B4 Esc 脏数据先确认", String(escDirty).includes('"open":true') && String(escDirty).includes('"confirm":true'), escDirty);
+  await cdp.eval(clickByText("继续编辑"));
+  await wait(200);
+  await cdp.eval(`document.querySelector('[data-testid="occl-crop"]').click()`);
+  await wait(150);
+  await cdp.eval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await wait(250);
+  const escCrop = await cdp.eval(`JSON.stringify({ open: Boolean(document.querySelector('.occlusion-editor-layer')), cropLabel: document.querySelector('[data-testid="occl-crop"]')?.textContent?.trim() || "", confirm: Boolean(document.querySelector('.occlusion-editor-confirm.show')) })`);
+  check("B5 Esc 先退出裁剪而不关闭编辑器", String(escCrop).includes('"open":true') && String(escCrop).includes("裁剪图片") && String(escCrop).includes('"confirm":false'), escCrop);
+  await cdp.eval(`document.querySelector('[data-testid="occl-tool-polygon"]').click()`);
+  await cdp.eval(dragOn(0.45, 0.12, 0.45, 0.12));
+  await wait(150);
+  await cdp.eval(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`);
+  await wait(250);
+  const escPoly = await cdp.eval(`JSON.stringify({ open: Boolean(document.querySelector('.occlusion-editor-layer')), dots: document.querySelectorAll('.occl-dot').length, confirm: Boolean(document.querySelector('.occlusion-editor-confirm.show')) })`);
+  check("B6 Esc 先清多边形草稿而不关闭编辑器", String(escPoly).includes('"open":true') && String(escPoly).includes('"dots":0') && String(escPoly).includes('"confirm":false'), escPoly);
+  await cdp.eval(`document.querySelector('[data-testid="occl-tool-rect"]').click()`);
 
   // C. 列表删除第 3 块 → Ctrl+Z 撤销回来
   await cdp.eval(`document.querySelectorAll('[data-testid="occl-row-del"]')[2].click()`);

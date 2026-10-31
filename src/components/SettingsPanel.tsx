@@ -39,6 +39,7 @@ import { eventBus } from "../lib/eventbus";
 // v48.114（D159）：`import { memoryApi, ... } from "../lib/memory"` 随 MemorySection 摘除（lib/memory.ts 保留）
 import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
+import { useOverlayBackdrop } from "../lib/overlayDismiss";
 import SettingsInfo from "./SettingsInfo";
 // v48.80（D124 / 设计稿 §11.6）：学习者知识模型设置子块（sec-learner）
 import { learnerApi, learnerSettings } from "../lib/learner";
@@ -3707,6 +3708,7 @@ export default function SettingsPanel({
   // data-show 只挂在 modal 容器级（backdrop/panel），13 个 sec-* 区块仍常挂载，内部结构不动
   const { show, requestClose } = useDismiss(onClose);
   const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
+  const backdrop = useOverlayBackdrop(panelRef, requestClose);
 
   // 滚动时同步左导航高亮（v45 引入的收敛修正全部继承：scroll + scrollend + 220ms 尾随测一次）。
   // v48.70（D114）：13 个导航项与 13 个区块一一对应（SECTION_GROUPS 生成 navIds），
@@ -3779,7 +3781,7 @@ export default function SettingsPanel({
   };
 
   return (
-    <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
+    <div className="modal-backdrop" data-show={show ? "in" : "out"} {...backdrop}>
       <div
         className="modal-panel modal-panel-wide settings-panel"
         data-ui="dialog"

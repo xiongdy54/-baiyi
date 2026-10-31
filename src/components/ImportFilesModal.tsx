@@ -7,6 +7,7 @@ import { libraryApi } from "../lib/library";
 import { importMany } from "../lib/importRouter";
 import { useDialogA11y } from "../lib/dialogA11y";
 import { useDismiss } from "../lib/useDismiss";
+import { useOverlayBackdrop } from "../lib/overlayDismiss";
 import { eventBus } from "../lib/eventbus";
 import { IconAlert, IconClose, IconImport } from "./icons";
 import { useT } from "../lib/i18n";
@@ -26,6 +27,7 @@ export default function ImportFilesModal({ onClose }: Props) {
   // D120 §8.1：出场两步走——Esc / 遮罩 / 关闭按钮 / 全部导入成功自动关，收口到 requestClose
   const { show, requestClose } = useDismiss(onClose);
   const panelRef = useDialogA11y<HTMLDivElement>(requestClose);
+  const backdrop = useOverlayBackdrop(panelRef, requestClose);
   const [importing, setImporting] = useState(false);
   // M6-3（v30，D27）：批量导入进度（第 done/total 个）
   const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null);
@@ -80,7 +82,7 @@ export default function ImportFilesModal({ onClose }: Props) {
   }, []);
 
   return (
-    <div className="modal-backdrop" data-show={show ? "in" : "out"} onClick={requestClose}>
+    <div className="modal-backdrop" data-show={show ? "in" : "out"} {...backdrop}>
       <div className="modal-panel" data-show={show ? "in" : "out"} ref={panelRef} role="dialog" aria-modal="true" aria-label={T("导入文件")} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{T("导入文件")}</h2>

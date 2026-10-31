@@ -20,6 +20,7 @@ import {
 import { learnerStrings } from "../../lib/learnerStrings";
 import { udcLabel, UDC_LEAVES, UDC_OTHER } from "../../lib/udc";
 import { useDialogA11y } from "../../lib/dialogA11y";
+import { useOverlayBackdrop } from "../../lib/overlayDismiss";
 import Dropdown from "../Dropdown";
 import NativeLangsPicker from "./NativeLangsPicker";
 
@@ -28,6 +29,7 @@ type ListResult = Awaited<ReturnType<typeof learnerApi.listTracks>>;
 export default function TracksDialog({ onClose, onChanged, focusNative }: { onClose: () => void; onChanged?: () => void; focusNative?: boolean }) {
   const S = learnerStrings();
   const ref = useDialogA11y<HTMLDivElement>(onClose);
+  const backdrop = useOverlayBackdrop(ref, onClose);
   const [data, setData] = useState<ListResult | null>(null);
   const [nativeLangs, setNativeLangs] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<string>("");
@@ -204,7 +206,7 @@ export default function TracksDialog({ onClose, onChanged, focusNative }: { onCl
   }
 
   return (
-    <div className="modal-backdrop" data-show="in" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop" data-show="in" {...backdrop}>
       <div className="modal-panel modal-panel-wide" ref={ref} role="dialog" aria-modal="true" aria-label={S.tracks.dialogTitle}>
         <div className="modal-header">
           <h3>{S.tracks.dialogTitle}</h3>
