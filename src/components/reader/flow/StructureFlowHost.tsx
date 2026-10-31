@@ -28,14 +28,17 @@ import {
 import type { FlowColors, FlowEnv, FlowItem, FlowMotion, FlowPattern, FlowPlan, FlowScene, PatternLayout } from "../../../lib/flow/types";
 import FlowLayer, { GEN, type FlowEvent } from "./FlowLayer";
 import { useStructureFlow, type StructureFlowData } from "./useStructureFlow";
+import { ATLAS_T } from "../../../lib/flow/atlasLayout";
 
 export interface StructureFlowHostProps {
   kernel: ReaderKernel | null;
   documentId: string | null;
   title: string;
   open: boolean;
-  /** 图谱页签画布正盖着正文（走关闭编排） */
+  /** 结构全景正盖着正文（走关闭编排） */
   covered: boolean;
+  /** 关闭方式：fade＝原有淡出编排；handoff＝结构全景交接（瞬时收起渲染层，复位延后） */
+  coverMode?: "fade" | "handoff";
   /** 翻页模式（false＝滚动） */
   scrolled: boolean;
   viewportEl: HTMLElement | null;
@@ -76,7 +79,7 @@ function luminance(color: string): number {
 }
 
 /** 用隐藏探针把主题 Token 解析成实色（var()/color-mix 不能直接进 SVG 渐变计算外的用途） */
-function resolveColors(el: HTMLElement | null): FlowColors {
+export function resolveColors(el: HTMLElement | null): FlowColors {
   const doc = el?.ownerDocument ?? (typeof document !== "undefined" ? document : null);
   const host = el ?? doc?.body ?? null;
   if (!doc || !host) return FALLBACK_COLORS;
@@ -483,14 +486,46 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
     setMotion("steady");
   }, [applyShift, applyGutter, shiftEl, bump]);
 
+  const handoffClose = useCallback(async () => {
+    const ticket = ++ticketRef.current;
+    setStage("closed");
+    setMotion("steady");
+    setArmed(false);
+    await sleep(ATLAS_T.HANDOFF_RESET);
+    if (ticket !== ticketRef.current) return;
+    applyShift(0);
+    applyGutter(0);
+    if (shiftEl) shiftEl.style.opacity = "";
+    setTracking(false);
+    trackingRef.current = false;
+    setGeo(null);
+    geoRef.current = null;
+    sigRef.current = "";
+  }, [applyShift, applyGutter, shiftEl]);
+
   useEffect(() => {
     if (!viewportEl) return;
     if (open && !covered) {
       if (stageRef.current === "closed" || stageRef.current === "closing") void openSeq();
     } else if (stageRef.current === "opening" || stageRef.current === "open") {
-      void closeSeq();
+      if (covered && props.coverMode === "handoff") void handoffClose();
+      else void closeSeq();
     }
-  }, [open, covered, viewportEl, openSeq, closeSeq]);
+  }, [open, covered, viewportEl, openSeq, closeSeq, handoffClose, props.coverMode]);
+
+  // 读态兜底（D254 v2.2）：既没有随文结构、也没有结构全景时，正文的平移 / 预留必须归零。
+  // 关闭编排带 480ms 时序且可能被 ticket 抢占（侧栏自动关闭 / 全景交接），残留的 gutter 会让正文右侧空出一大片。
+  useEffect(() => {
+    if (open || covered) return;
+    const t = window.setTimeout(() => {
+      applyShift(0);
+      applyGutter(0);
+      if (shiftEl) shiftEl.style.opacity = "";
+      currentShift.current = 0;
+      currentReserve.current = 0;
+    }, 520);
+    return () => window.clearTimeout(t);
+  }, [open, covered, applyShift, applyGutter, shiftEl]);
 
   // 文档切换：清几何 / 版心 / 排布与正文让位，再按当前开关重新开场（旧文档的平移与槽宽不能带到新文档）
   const prevDocRef = useRef<string | null>(null);
@@ -640,6 +675,12 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
         idle = null;
         resizingRef.current = false;
         doc.body.removeAttribute("data-flow-resizing");
+        // D254 修复：只有随文结构开着才评估预留——关着时（例如开合侧栏引起视口变化）若照样 changeReserve，
+        // 正文会被淡出→挤进左侧窄栏→淡入（右侧空出一大片），收起侧栏时再闪回居中
+        if (stageRef.current !== "open" && stageRef.current !== "opening") {
+          if (currentReserve.current !== 0) applyGutter(0);
+          return;
+        }
         const p = planRef.current;
         if (p && p.reserve !== currentReserve.current) void changeReserve(p.reserve);
         sampleGeometry(true);
@@ -657,7 +698,7 @@ export default function StructureFlowHost(props: StructureFlowHostProps) {
       ro?.disconnect();
       window.removeEventListener("resize", onResize);
     };
-  }, [viewportEl, sampleGeometry, syncPlan, bump, changeReserve]);
+  }, [viewportEl, sampleGeometry, syncPlan, bump, changeReserve, applyGutter]);
 
   // 排布生效：打开完成后平移 / 预留的变化走 §8.8 编排
   useEffect(() => {

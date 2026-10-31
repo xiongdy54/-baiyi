@@ -21,6 +21,7 @@ const { createMindmapEngineV2 } = require(path.join(root, "electron", "mindmapEn
 const { createMemoryStore } = require(path.join(root, "tests", "lib", "mindmapMemoryStore.cjs"));
 const { ensureFed } = require(path.join(root, "src", "lib", "mindmapFeed.ts"));
 const ensureLayout = require(path.join(root, "src", "lib", "flow", "layout.ts"));
+const { captureFlowSnapshot } = require(path.join(root, "src", "components", "reader", "atlas", "handoff.ts"));
 
 let pass = 0, fail = 0;
 function check(name, cond, detail) {
@@ -579,6 +580,93 @@ const scrollBy = (dy) => { offY = dy; if (scrollCb) scrollCb(); };
     s.root2.unmount(); s.el.remove();
   }
 
+  console.log("---- D254 §16.4 随文结构 → 结构全景 ----");
+  TEXT = { left: 520, right: 960 }; // shift 档版心
+  const mountProbe = async (coverMode) => {
+    const el = w.document.createElement("div");
+    w.document.body.appendChild(el);
+    const rootP = createRoot(el);
+    const refs = { main: null, gutter: null };
+    const ctl = { setCovered: null };
+    function WrapperP() {
+      const [covered, setCovered] = React.useState(false);
+      ctl.setCovered = setCovered;
+      const vp = React.useRef(null), main = React.useRef(null), gutter = React.useRef(null);
+      const [els, setEls] = React.useState(null);
+      React.useEffect(() => {
+        if (vp.current) vp.current.getBoundingClientRect = () => ({ ...VIEWPORT, width: VIEWPORT.right - VIEWPORT.left, height: VIEWPORT.bottom - VIEWPORT.top });
+        refs.main = main.current; refs.gutter = gutter.current; activeMain = main.current;
+        setEls({ vp: vp.current, main: main.current, gutter: gutter.current });
+      }, []);
+      return React.createElement("div", null,
+        React.createElement("div", { className: "reader-engine-viewport", ref: vp },
+          React.createElement("div", { className: "reader-engine-main flow-shift-target", ref: main }),
+          React.createElement("div", { className: "reader-flow-gutter", ref: gutter })),
+        React.createElement(Host, {
+          kernel, documentId: DOC, title: "结构流测试", open: true, covered, coverMode, scrolled: true,
+          viewportEl: els ? els.vp : null, shiftEl: els ? els.main : null, gutterEl: els ? els.gutter : null,
+          onClose: () => {}, onOpenInMap: () => {},
+        }));
+    }
+    rootP.render(React.createElement(React.StrictMode, null, React.createElement(WrapperP)));
+    await until(() => !!$(".flow-layer"), 12000);
+    await sleep(2400);
+    return { rootP, el, refs, ctl };
+  };
+  {
+    const p = await mountProbe(undefined);
+    const node = $$('.flow-item[data-flow-item^="n:"]').find((el) => !el.classList.contains("is-peek"));
+    click(node);
+    await until(() => !!$(".flow-actions"), 4000);
+    check("动作行文案为「在结构全景中查看」", $$(".flow-actions button").some((b) => (b.textContent || "").includes("在结构全景中查看")) && !$$(".flow-actions button").some((b) => (b.textContent || "").includes("在完整图谱中打开")), $$(".flow-actions button").map((b) => b.textContent));
+    const snap = captureFlowSnapshot(w.document);
+    const members = $$('.flow-item[data-flow-item^="n:"]').filter((el) => !el.classList.contains("is-peek") && !el.classList.contains("is-exit")).map((el) => el.getAttribute("data-flow-item"));
+    check("captureFlowSnapshot 非空且含当前组每个成员的 n: 行", !!snap && members.length > 0 && members.every((id) => snap.items.has(id)), { members: members.slice(0, 8), got: snap ? [...snap.items.keys()].slice(0, 8) : null });
+    p.rootP.unmount(); p.el.remove();
+  }
+  {
+    const p = await mountProbe("handoff");
+    const shifted = !!p.refs.main && p.refs.main.style.transform !== "";
+    p.ctl.setCovered(true);
+    const gone = await until(() => !$(".flow-layer"), 1200, 10);
+    check("covered + coverMode=handoff → 下一帧渲染层即卸载", shifted && gone, { shifted, gone, transform: p.refs.main && p.refs.main.style.transform });
+    await sleep(420);
+    check("280ms 后平移目标 transform 归零", !!p.refs.main && p.refs.main.style.transform === "", p.refs.main && p.refs.main.style.cssText);
+    p.rootP.unmount(); p.el.remove();
+  }
+  console.log("---- D254 v2.2 读态让位兜底 ----");
+  {
+    const el = w.document.createElement("div");
+    w.document.body.appendChild(el);
+    const rootR = createRoot(el);
+    const refs = { main: null, gutter: null };
+    function WrapperR() {
+      const vp = React.useRef(null), main = React.useRef(null), gutter = React.useRef(null);
+      const [els, setEls] = React.useState(null);
+      React.useEffect(() => {
+        if (vp.current) vp.current.getBoundingClientRect = () => ({ ...VIEWPORT, width: VIEWPORT.right - VIEWPORT.left, height: VIEWPORT.bottom - VIEWPORT.top });
+        refs.main = main.current; refs.gutter = gutter.current; activeMain = main.current;
+        // 模拟「关闭编排被抢占」留下的残留
+        if (main.current) main.current.style.transform = "translateX(-200px)";
+        if (gutter.current) gutter.current.style.flexBasis = "390px";
+        setEls({ vp: vp.current, main: main.current, gutter: gutter.current });
+      }, []);
+      return React.createElement("div", null,
+        React.createElement("div", { className: "reader-engine-viewport", ref: vp },
+          React.createElement("div", { className: "reader-engine-main flow-shift-target", ref: main }),
+          React.createElement("div", { className: "reader-flow-gutter", ref: gutter })),
+        React.createElement(Host, {
+          kernel, documentId: DOC, title: "结构流测试", open: false, covered: false, scrolled: true,
+          viewportEl: els ? els.vp : null, shiftEl: els ? els.main : null, gutterEl: els ? els.gutter : null,
+          onClose: () => {}, onOpenInMap: () => {},
+        }));
+    }
+    rootR.render(React.createElement(React.StrictMode, null, React.createElement(WrapperR)));
+    await sleep(900);
+    check("读态（无随文结构 / 无全景）自动清零残留平移", !!refs.main && refs.main.style.transform === "", refs.main && refs.main.style.cssText);
+    check("读态自动清零残留预留槽位", !!refs.gutter && (refs.gutter.style.flexBasis === "0px" || refs.gutter.style.flexBasis === ""), refs.gutter && refs.gutter.style.cssText);
+    rootR.unmount(); el.remove();
+  }
   check("全程无运行时错误（React / jsdom）", errors.length === 0, errors.slice(0, 3));
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

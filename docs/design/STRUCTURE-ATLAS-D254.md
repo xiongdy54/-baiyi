@@ -1,6 +1,9 @@
 # 结构全景（Structure Atlas）v2——按结构类型专门排布的二维结构画布 + 随文结构无缝衔接 + 入口调整（D254）
 
 > 状态：设计定稿 **v2**（2026-10-31，用户第二轮意见后重写；v1「横向分栏 + 每栏一列扁平层级」作废，提交 18f42d1 里的 v1 内容一律以本文为准）。
+> **v2.3 实机修订（2026-10-31，用户第七轮验收）**：阅读态兜底——既没有随文结构、也没有结构全景时，520ms 内强制清零 `.flow-shift-target` 的平移与 `.reader-flow-gutter` 的预留。原因：关闭编排带 480ms 时序且可能被 ticket 抢占（展开侧栏会自动关闭随文结构 / 结构全景交接），残留的 gutter 会让正文右侧空出一大片。**结构全景内的文字省略本轮不处理（用户交由其他模型修改）。**
+> **v2.2 实机修订（2026-10-31，用户第六轮验收；覆盖 v2.1 中的对应条目）**：① 字形宽度必须计入 CSS 实际内边距——有竖条 12+8、无竖条（claim / tile / event / step / colhead / cell）4+4；换行宽度按内容盒（maxW − padH）计算，否则长标题第一行末尾会被浏览器补省略号（本机全部 claim 节点即此现象）；② 全景态工具带 `z-index: 8`（高于画布 7），生成 / 版本 / 视图 / 面包屑所有下拉菜单不再被图谱盖住；③ 侧栏展开时结构全景按钮紧贴轨右缘：`left = 280px + sp-2`（不再保留 64px 空档），工具行 `padding-left = sp-2 + 按钮宽`；④ v2.1 的「轨展开时整枚右移 280px」按③修正。
+> **v2.1 实机修订（2026-10-31，用户第五轮验收；实现与本文冲突处以本节为准）**：① 工具栏末组恢复贴右（atlas 宿主不再顶掉 `:last-of-type`）；② 左上「结构全景」彻底移出侧栏——轨展开时整枚右移一个轨宽（280px），侧栏两页签随之变宽（不再为按钮留宽）；③ 选中节点不截断（焦点字形 maxW 480、行数不限）；④ 节点卡默认在选中节点**上方**，点击界面其他位置即失焦关闭，再点选中节点重现；⑤ 面包屑「…」菜单改用 fixed 兄弟层（避开 `.atlas-crumbs` 的 `overflow:hidden` 裁切）；⑥ 纯水平 / 纯垂直边回退实色描边（`objectBoundingBox` 零面积渐变会整条不渲染——链条 / 论证竖线 / 时间轴）。
 > 实施者：其他 AI Agent。**本文的常量、公式、参考代码就是定稿，不要自行"优化"、换算法或改时长。**参考代码是 TypeScript 伪实现级别——字段名、分支、数值照抄；类型细节与现有代码冲突时以现有类型为准，但不得改变行为。
 > 本文没写到的现有代码细节：先 grep 现有实现，照抄它的写法。行号以 2026-10-31 `main`（d610655）为准，可能有几行偏差。
 > 取代：`MINDMAP-SIDEBAR-TAB.md`（D84 侧栏「图谱」页签）与 `MINDMAP-V2-IMPL-PLAN.md` 中 `MindmapCanvasV2` 作为完整图谱画布的部分。
@@ -16,11 +19,11 @@
 | R1 | 完整结构图要和随文结构一样丝滑优雅 | 同一套视觉语言：阅读底色、无卡片无框、8 色板 + 单一强调色、彩色竖条 + 排版层级、Sankey 流带、阅读节点主题色 pill；同一套 Token 与缓动曲线。§12、§13 |
 | R2 | 侧边结构图是空间限制下的妥协；全景是无限画布，**不要一列一列地排**，要按结构类型用**专门、精致、一眼看清**的方式排布，**不千篇一律**；一列/一行若确是最佳方式也可以用 | 全景是**二维组合布局**：每个「组」（一个父节点 + 它的子节点）按它的结构类型用专门的排布，组与组**嵌套组合**成整张图（§2、§4）：<br>**大纲** → 横向 Sankey 扇形树（篇幅决定流带粗细）；<br>**并列** → 网格瓷砖；<br>**论证** → 自上而下的论证图：主张在顶，理由/证据按支撑关系分层，**一个证据同时支撑多个理由时就画多条线汇聚，不重复、不硬塞进单一父子**；反方与反驳单独在右侧「反方一侧」区；<br>**时间线** → 横向比例时间轴，事件上下交错、长断层压缩、带刻度；<br>**步骤** → 编号圆点 + 箭头，超过 5 步蛇形折返；<br>**因果** → 自左向右的分层有向图（交叉最少化），像瀑布一样从因流向果；<br>**对照** → 真正的对照表：每个对象一栏、每个维度一行。<br>组内版式没有表达到的关系（跨组印证、反驳……）用带关系码的弧线画出，悬停 / 选中时连到另一端。 |
 | R3 | 在随文结构中选中节点 → 「在完整图谱中打开」→ 该节点丝滑移到中心，完整图谱以它为中心展开 | 共享元素过渡（FLIP）：点击瞬间拍下随文结构每一行的屏幕位置；全景首帧把这些节点画在原处，420ms 滑到它们在二维结构里的位置（选中节点到正中），其余节点按「离焦点的结构距离」由近及远展开。§9 |
-| R4 | 「图谱」移出侧栏，固定在阅读界面左上角，独立按钮 | 新按钮 `.reader-atlas-toggle` 固定在「展开/收起」侧栏开关右侧（left 64px，top 56px，高 24）。§10.2 |
+| R4 | 「图谱」移出侧栏，固定在阅读界面左上角，独立按钮 | 新按钮 `.reader-atlas-toggle` 固定在「展开/收起」侧栏开关右侧（left 64px，top 56px，高 24）；**侧栏展开时整枚右移 280px（彻底在轨外）**。§10.2 |
 | R5 | 点击直接进入，进入后按钮位置不变 | `position: fixed`；两态文字叠放在同一格，宽度＝较宽者，换态不改位置与宽度。§10.2、§13 |
 | R6 | 再次点击返回，文字变化以区分状态 | 「结构全景」↔「返回阅读」，图谱态点亮（accent 描边 + accent-soft 底）。§1 |
 | R7 | 进入时不再展开侧栏 | 全景铺满正文视口，不改 `sidebarOpen`。§10 |
-| R8 | 原侧栏「图谱」页签内容拆到顶部工具栏 | 图谱态时同一条工具带换成全景工具栏：面包屑 · 状态 · 搜索 · 生成▾ · 版本▾ · 视图▾ · 缩放 · 居中。节点详情改为焦点节点下方的浮动「节点卡」。§6、§7 |
+| R8 | 原侧栏「图谱」页签内容拆到顶部工具栏 | 图谱态时同一条工具带换成全景工具栏：面包屑 · 状态 · 搜索 · 生成▾ · 版本▾ · 视图▾ · 缩放 · 居中。节点详情改为焦点节点**上方**的浮动「节点卡」（点界面其他处失焦关闭）。§6、§7 |
 | R9 | 阅读界面里「完整图谱」「结构图」按钮文字改得更合适 | 左上「结构全景 / 返回阅读」；右侧「结构图」→「随文结构」；随文结构动作行「在完整图谱中打开」→「在结构全景中查看」。§1 |
 
 ---
@@ -119,7 +122,7 @@
 - **一次只展开一部分**：默认展开「根 → 焦点」整条路径、焦点本身，再按广度优先把浅层展开到约 160 个可见节点为止（§4.10）；其余有子节点的节点显示「+N」。点「+N」展开/收起；**点节点标题＝聚焦**（相机 420ms 滑到它、同时自动展开它）。
 - **相机**：可拖动平移、Ctrl/⌘ + 滚轮缩放、普通滚轮上下平移；展开/收起/聚焦时节点与相机在**同一时钟**（420ms，同一曲线）一起移动，焦点在屏幕上走一条平滑的直线到中心，不会先跳后滑。
 - **关系透视**：悬停一个节点 250ms，图上与它无关的节点淡到 28%，它的父、子、所有关系的另一端保持实色，跨组关系弧线全部出现——一眼看清「谁支撑它、它支撑谁」。
-- **节点卡**：焦点节点下方 8px 浮出一张小卡（跳到原文 · 讲解 · 深挖 · 制卡 · 详情；讲解与详情在卡内展开）。
+- **节点卡**：焦点节点**上方** 8px 浮出一张小卡（跳到原文 · 讲解 · 深挖 · 制卡 · 详情；讲解与详情在卡内展开）；点击界面其他任意位置即关闭，再点选中节点重现。
 
 ---
 
@@ -1222,7 +1225,7 @@ export interface AtlasStageProps {
     {gl.kind === "cell" && gl.kids > 0 ? <button type="button" className="ag-fold ag-fold-cell" data-atlas-act="fold">{gl.expanded ? "−" : `+${gl.kids}`}</button> : null}
   </div>
   ```
-- 边（SVG）：ribbon → `<path className="atlas-ribbon" d fill="url(#alg-…)" style={{ d: \`path("…")\` }}/>`，渐变 `gradientUnits="objectBoundingBox" x1=0 y1=0 x2=1 y2=0`，stops：`[0: color @ aHL[tone]]、[1: colorB @ aEnd[tone]]`（tone：to 是焦点或在焦点路径上→1；悬停→2；否则 0）。path 边 → `<path className="atlas-edge" d fill="none" stroke strokeWidth strokeDasharray markerEnd markerStart opacity style={{ d: … }}/>`；`color≠colorB` 时 `stroke="url(#als-…)"`（objectBoundingBox，方向：`|dx|≥|dy|` 横向 x1=0→x2=1，否则纵向 y1=0→y2=1；若终点在起点左/上方则交换 stop 顺序）。
+- 边（SVG）：ribbon → `<path className="atlas-ribbon" d fill="url(#alg-…)" style={{ d: \`path("…")\` }}/>`，渐变 `gradientUnits="objectBoundingBox" x1=0 y1=0 x2=1 y2=0`，stops：`[0: color @ aHL[tone]]、[1: colorB @ aEnd[tone]]`（tone：to 是焦点或在焦点路径上→1；悬停→2；否则 0）。path 边 → `<path className="atlas-edge" d fill="none" stroke strokeWidth strokeDasharray markerEnd markerStart opacity style={{ d: … }}/>`；`color≠colorB` 时 `stroke="url(#als-…)"`（objectBoundingBox，方向：`|dx|≥|dy|` 横向 x1=0→x2=1，否则纵向 y1=0→y2=1；若终点在起点左/上方则交换 stop 顺序）。**纯水平 / 纯垂直路径的包围盒面积为 0，objectBoundingBox 渐变会整条不渲染 → 这类边回退实色 `color` 描边**（v2.1，`usableGradient(color, colorB, box)`）。
 - 跨组关系：同 path 边；另在 `mid` 画码章（`circle r=8 fill=bg stroke=color 1px` + 10px 码字），`strong` 时 `stroke=accent`。
 - path 的 `d`：`M p0,p1 C p2,p3 p4,p5 p6,p7 [C …]`，数字保留 1 位小数。**attribute 与 style 同时写 `d`**（与 `FlowLayer` 同做法：attribute 给测试，style 才能 CSS 过渡）。
 - deco：rect / circle 的几何写在 style（`x/y/width/height/cx/cy/r` 可 CSS 过渡）；text 写 attribute x/y。
@@ -1340,9 +1343,9 @@ export function useThrottled<T>(value: T, ms: number): T {
 
 ## 6. 节点卡 `src/components/reader/atlas/AtlasCard.tsx`
 
-**形态**：浮在焦点字形正下方 8px 的小卡（屏幕坐标，不随缩放变大小）；宽 `clamp(焦点字形屏幕宽, 280, 360)`；与字形左对齐（居中对齐字形 `align="center"` 时水平居中）；卡底超出舞台则翻到字形上方。外观：`background: var(--reader-bg)`、1px hairline、圆角 8、`box-shadow: 0 14px 36px -20px rgba(0,0,0,.35)`、内边距 8px 12px。
+**形态**：浮在焦点字形**正上方** 8px 的小卡（屏幕坐标，不随缩放变大小；上方放不下才翻到下方）；宽 `clamp(焦点字形屏幕宽, 280, 360)`；与字形左对齐（居中对齐字形 `align="center"` 时水平居中）。点击界面其他任意位置（含画布空白 / 工具栏 / 侧栏；不含卡片自身与字形）即失焦关闭，再点选中节点重现。外观：`background: var(--reader-bg)`、1px hairline、圆角 8、`box-shadow: 0 14px 36px -20px rgba(0,0,0,.35)`、内边距 8px 12px。
 
-**定位**：`AtlasStage` 在 `.atlas-overlay` 内放 `<div className="atlas-card-slot" style={{ transform: translate(sx, sy) }}>{card}</div>`；`(sx, sy)` 由焦点字形世界坐标 × 相机实时换算。相机或字形在过渡中（420ms 内）时用 rAF 每帧重算（读焦点 `.ag` 元素的 `getBoundingClientRect()` 减舞台矩形，过渡结束停止），保证卡紧贴字形移动。
+**定位**：`AtlasStage` 在 `.atlas-overlay` 内放 `<div className="atlas-card-slot" style={{ transform: translate(sx, sy) }}>{card}</div>`；`(sx, sy)` 默认取焦点字形上缘 − 卡高 − 8（`y < 4` 时翻到下方）。相机或字形在过渡中（420ms 内）时用 rAF 每帧重算（读焦点 `.ag` 元素的 `getBoundingClientRect()` 减舞台矩形，过渡结束停止），保证卡紧贴字形移动。
 
 **内容**（复用随文结构的 `.flow-actions` / `.flow-explain` / `.flow-dots` / `.flow-status` 样式）：
 ```tsx
@@ -1663,6 +1666,7 @@ export function playFlowGhost(doc: Document, snap: FlowSnapshot): void {
    ```
    依赖加 `handoffClose`、`props.coverMode`。
 5. 全景退出后 `covered` 回落 → 宿主照常 `openSeq()`。
+6. **读态兜底**（v2.3）：`open=false && covered=false` 时，520ms 后无条件 `applyShift(0) + applyGutter(0)`——关闭编排被 ticket 抢占时也不会把平移 / 预留槽位留在正文里（否则正文右侧空出一大片）。
 
 ### 9.4 `FlowLayer.tsx`
 
@@ -1711,7 +1715,7 @@ const closeAtlas = useCallback(() => setAtlasOpen(false), []);
   </button>
 ) : null}
 ```
-宽度变量：
+宽度变量（v2.1：侧栏展开时按钮右移一个轨宽；宽变量与工具行 / 侧栏页签的让位仍由它驱动）：
 ```ts
 useLayoutEffect(() => {
   const btn = atlasBtnRef.current, wrap = wrapRef.current;
@@ -1790,6 +1794,7 @@ const showBackChip = (loc: ReaderLocation) => {
 | 舞台 | 背景 `--reader-bg`；字色 `--reader-fg`；夜间阅读主题自动深色（`resolveColors` 按阅读背景判深浅） |
 | 颜色 | 组内第 i 个子节点 `palette[i % 8]`（与随文结构同一规则 → 交接不变色）；阅读节点主题色 pill；焦点主题色字 + 1px 下划线；强关系线主题色；反方 `--flow-counter` |
 | 普通标签（plate） | 13/18，500，左侧 4px 圆角竖条（节点色）；文字左内边距 12；类型字行 10.5px fg 46%；折叠钮 `+N` / `−` 10.5px，hover fg 90% |
+| 选中节点（焦点字形） | **不截断**：maxW 480、行数不限；宽度计入内容盒内边距（标题完整显示；尺寸变大参与版式重排） |
 | 组头（`data-head`） | 字号 +1、字重 600 |
 | 主张（claim） | 15/21，640，居中；底部居中 28×2 节点色短线 |
 | 例证 | 3px 点状竖条，文字 tone 72 |
@@ -2067,6 +2072,11 @@ const showBackChip = (loc: ReaderLocation) => {
 3. 宿主 `covered coverMode="handoff"` → 下一帧 `.flow-layer` 不在 DOM；280ms 后平移目标 transform 归零。
 4. `coverMode` 缺省时原有断言全部通过。
 
+### 16.6 v2.1 实机修订回归
+- `atlas.layout`：焦点字形长标题无省略号；每个字形文字放得进内容盒（CSS 不会再补省略号）；`usableGradient` 对水平链条边为 false、对 S 形因果边为 true。
+- `atlas.dom`：工具栏末组贴右 / 侧栏展开按钮贴轨右缘 / 两页签不留按钮宽 / 全景态工具带高于画布 / 轨展开工具行只留按钮宽与 8px 间距的 CSS 断言；点界面其他位置节点卡消失、再点选中节点重现。
+- `m15v2.tab.dom`：深层节点面包屑「…」弹出菜单并可跳转。
+
 ### 16.5 必跑
 
 `npm run typecheck` 0 错；`npm run i18n:check` ✓；`node scripts/consistency-check.mjs` ✓；`node scripts/run-tests.mjs atlas` / `flow` / `m15v2` 全绿；`npm run build` ✓。GUI 测试（`*.gui.mjs`，如 `d139-sidebar-band.gui.mjs`）沙箱跑不了——若写死了三页签或 64px 左让位，按本文更新期望值并在报告注明「未实跑」。
@@ -2107,6 +2117,7 @@ const showBackChip = (loc: ReaderLocation) => {
 10. 颜色规则与随文结构一致（`palette[i % 8]`），交接时同一节点不变色。
 11. 渐变一律 `objectBoundingBox`（几何动画期间渐变跟着走）。
 12. `usePresence` 对全量列表算阶段、渲染时再裁剪；不要对裁剪后的列表用 presence（否则一平移就满屏进出场）。
+12b. **零面积渐变**：`objectBoundingBox` 渐变遇到纯水平 / 纯垂直路径（包围盒高或宽为 0）会整条不渲染——水平链线 / 垂直论证线 / 时间轴必须回退实色（v2.1 已踩）。
 13. 不新增 `!important`、不写内联 `<svg>`（用 `SvgRoot`）、新文件无十六进制颜色、含 Enter 的文件必须 `isImeComposing`。
 14. Esc 优先级：输入法组字 > 搜索框 / 菜单（自己收起并 `stopPropagation`）> 退出全景。
 15. 进入全景不动 `sidebarOpen`；退出全景不手动重开随文结构（`covered` 回落后宿主自己按 `lensOpen` 开场）。

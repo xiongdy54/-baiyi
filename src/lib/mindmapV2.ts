@@ -96,9 +96,23 @@ const NO_BRIDGE = (): never => {
   throw new Error("mindmapAPI unavailable");
 };
 
+// 结构全景（D254）首帧必须有图：load 结果缓存 + peekLoad（同步读，不发起 IPC）
+const loadCache = new Map<string, GraphLoadResult>();
+export function peekLoad(arg: string | { documentId: string }): GraphLoadResult | null {
+  return loadCache.get(typeof arg === "string" ? `map:${arg}` : String(arg.documentId)) ?? null;
+}
+
 export const mindmapV2Api = {
-  load: (p: string | { documentId: string } | { mapId: string }): Promise<GraphLoadResult> =>
-    bridge()?.graphLoad(p) ?? Promise.resolve({ meta: null, nodes: [], edges: [], view: null, textReady: false }),
+  load: (p: string | { documentId: string } | { mapId: string }): Promise<GraphLoadResult> => {
+    const base = bridge()?.graphLoad(p) ?? Promise.resolve({ meta: null, nodes: [], edges: [], view: null, textReady: false });
+    return base.then((r) => {
+      if (r?.meta?.mapId) {
+        loadCache.set(`map:${r.meta.mapId}`, r);
+        if (typeof p !== "string" && "documentId" in p) loadCache.set(String(p.documentId), r);
+      }
+      return r;
+    });
+  },
   feed: (p: GraphFeedParams): Promise<GraphFeedResult> => bridge()?.graphFeed(p) ?? Promise.resolve({ blocksReady: 0, scopesReady: 0 }),
   estimate: (documentId: string): Promise<GraphEstimate> => bridge()?.graphEstimate({ documentId }) ?? NO_BRIDGE(),
   generate: (p: { documentId: string; title?: string; force?: boolean }): Promise<GraphRunRef> => bridge()?.graphGenerate(p) ?? NO_BRIDGE(),

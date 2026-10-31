@@ -30,6 +30,8 @@ import { consumeOrigin } from "../lib/behavior/origin";
 import ReaderSidebar, { type ReaderTab } from "./reader/ReaderSidebar";
 import ReaderExtractsPanel from "./reader/ReaderExtractsPanel";
 import MindmapTab from "./reader/MindmapTab";
+import { captureFlowSnapshot, playFlowGhost } from "./reader/atlas/handoff";
+import type { AtlasEntry } from "./reader/atlas/AtlasStage";
 // 结构流（STRUCTURE-FLOW-PLAN §6.4 / §12.1）：结构图融进阅读界面，不再开独立窗口。
 // 本窗口只提供内核与「在完整图谱中打开」的落地。
 import StructureFlowHost from "./reader/flow/StructureFlowHost";
@@ -470,13 +472,6 @@ export default function Reader({
    * v48.44（D84）：「打开导图」落点＝侧栏图谱页签（全屏 Overlay 工作区退役）。
    */
   const [resumeOnce] = useState<string | null>(resumeRunId ?? null);
-  // v48.13（P2）：从右下角指示器进入时自动打开（只消费一次；标记即刻回执给 App 清除）
-  useEffect(() => {
-    if (!openMindmapInitially) return;
-    setSidebarOpen(true);
-    setSidebarTab("map");
-    onMindmapOpened?.();
-  }, [openMindmapInitially, onMindmapOpened]);
   const [toast, setToast] = useState<string | null>(null);
   // v25：showToast 上移到各交互回调之前（回调 deps 在渲染期求值，后置声明会触发 TDZ）
   const showToast = useCallback((msg: string) => {
@@ -678,7 +673,22 @@ export default function Reader({
   const lensSupported = !!lensKernel && typeof lensKernel.getReadingProbe === "function";
   const lensDocId = contextRef?.documentId ?? null;
   const lensTitle = title || sourceTitle || T("未命名材料");
-  const [mapFocus, setMapFocus] = useState<{ nodeId: string; seq: number; flash?: string[] } | null>(null);
+  // 结构全景（D254）：左上独立入口；进入不展开侧栏、不改 sidebarOpen
+  const [atlasOpen, setAtlasOpen] = useState(false);
+  const [atlasMounted, setAtlasMounted] = useState(false);
+  const [atlasEntry, setAtlasEntry] = useState<AtlasEntry | null>(null);
+  const [atlasLayerHost, setAtlasLayerHost] = useState<HTMLDivElement | null>(null);
+  const [atlasToolbarHost, setAtlasToolbarHost] = useState<HTMLDivElement | null>(null);
+  const [backChip, setBackChip] = useState<ReaderLocation | null>(null);
+  const backChipTimer = useRef<number | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const atlasBtnRef = useRef<HTMLButtonElement | null>(null);
+  const showBackChip = (loc: ReaderLocation) => {
+    setBackChip(loc);
+    if (backChipTimer.current) window.clearTimeout(backChipTimer.current);
+    backChipTimer.current = window.setTimeout(() => setBackChip(null), 20000);
+  };
+  useEffect(() => () => { if (backChipTimer.current) window.clearTimeout(backChipTimer.current); }, []);
 
   // 结构图（STRUCTURE-FLOW-PLAN §12.1）：打开自动收起侧栏，展开侧栏自动关闭结构图；
   // 用户主动关闭结构图时恢复原来打开的侧栏。打开前等侧栏收起完成由宿主承担。
@@ -715,13 +725,39 @@ export default function Reader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lensOpen]);
 
-  /** 「在完整图谱中打开」的执行体（结构图动作触发；用 ref 逃开依赖抖动） */
+  const openAtlas = useCallback((origin: AtlasEntry["origin"], nodeId: string | null) => {
+    const snapshot = origin === "indicator" ? null : captureFlowSnapshot(document); // 必须在任何 setState 之前
+    if (snapshot) playFlowGhost(document, snapshot);
+    setToolMenu(null);
+    setAtlasEntry({ seq: Date.now(), origin, nodeId, snapshot });
+    setAtlasMounted(true);
+    setAtlasOpen(true);
+  }, []);
+  const closeAtlas = useCallback(() => setAtlasOpen(false), []);
+
+  /** 「在结构全景中查看」的执行体（随文结构动作触发；用 ref 逃开依赖抖动） */
   const lensOpenInMapRef = useRef<(nodeId: string | null, region?: string[]) => void>(() => {});
-  lensOpenInMapRef.current = (nodeId, region) => {
-    setSidebarTab("map");
-    setSidebarOpen(true);
-    if (nodeId) setMapFocus({ nodeId, seq: Date.now(), flash: region });
-  };
+  lensOpenInMapRef.current = (nodeId) => openAtlas("flow", nodeId);
+
+  // 从右下角指示器进入：直接开全景（不再展开侧栏）；标记即刻回执给 App 清除
+  useEffect(() => {
+    if (!openMindmapInitially) return;
+    openAtlas("indicator", null);
+    onMindmapOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openMindmapInitially, onMindmapOpened]);
+
+  // 左上按钮宽度变量：两态文字叠放，宽度取较宽者（换态不改位置与宽度）
+  useLayoutEffect(() => {
+    const btn = atlasBtnRef.current, wrap = wrapRef.current;
+    if (!wrap) return;
+    if (!btn) { wrap.style.removeProperty("--reader-atlas-btn-w"); return; }
+    const set = () => wrap.style.setProperty("--reader-atlas-btn-w", `${Math.ceil(btn.getBoundingClientRect().width) + 8}px`);
+    set();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(set) : null;
+    ro?.observe(btn);
+    return () => ro?.disconnect();
+  }, [lensKernel, contextRef?.documentId, atlasOpen]);
 
   // 结构流所需的 DOM 元素（视口 / 平移目标 / 预留槽位）：挂载后取引用（ref 在首渲染时还是 null）
   const viewportRef = useRef<HTMLDivElement | null>(null);
@@ -733,8 +769,6 @@ export default function Reader({
   }, [engineRetry, engineSource]);
   /** v48.45（D85）：注解排序（位置/时间）——栏头段控的会话内视图偏好，自 AnnotationPanel 提升受控 */
   const [annotSort, setAnnotSort] = useState<AnnotSort>("pos");
-  /** v48.44（D84）：图谱页签画布的 portal 宿主（.reader-engine-main 内覆盖层；空＝不渲染画布） */
-  const [mapLayerHost, setMapLayerHost] = useState<HTMLDivElement | null>(null);
   const [tocItems, setTocItems] = useState<ReaderTocItem[]>([]);
   const [tocActiveHref, setTocActiveHref] = useState<string | undefined>(undefined);
 
@@ -1866,7 +1900,7 @@ export default function Reader({
   }, [toolMenu]);
 
   return (
-    <div className="reader-wrap">
+    <div className="reader-wrap" ref={wrapRef} data-sidebar-open={sidebarOpen ? "1" : undefined} data-rail-anim={railAnimate ? "1" : undefined}>
       {/* v48.52（D92 §3.3）：右侧学习坞常驻（首次唤起后挂载）——展开时正文让位（既有
           .reader-body-shifted，flex-basis calc(100% - 400px)），收起时取消（把手 ~40px 不进正文版心）；
           图片挖空 modal 不占坞、不让位。 */}
@@ -1891,6 +1925,22 @@ export default function Reader({
               >
                 {sidebarOpen ? T("收起") : T("展开")}
               </button>
+              {lensKernel && contextRef?.documentId ? (
+                <button
+                  ref={atlasBtnRef}
+                  type="button"
+                  className="bar-btn reader-atlas-toggle"
+                  data-reader-atlas-toggle
+                  aria-pressed={atlasOpen}
+                  title={atlasOpen ? T("返回阅读（Esc）") : T("结构全景：整本材料的结构，以正在读的位置为中心展开")}
+                  onClick={() => (atlasOpen ? closeAtlas() : openAtlas("button", null))}
+                >
+                  <span key={atlasOpen ? "on" : "off"} className="reader-atlas-toggle-label">
+                    {atlasOpen ? T("返回阅读") : T("结构全景")}
+                  </span>
+                  <span aria-hidden="true">{atlasOpen ? T("结构全景") : T("返回阅读")}</span>
+                </button>
+              ) : null}
               {/* v48.45（D85）：侧栏升级**全高左轨**——一行两格（轨 + 右列），与摘录批注轨同一形态：
                   贯通到顶、280↔0 滑动动画、展开时工具栏随右列整体右移。
                   v48.95（D139）：data-rail-anim＝用户点过开关才挂 ⇒ 开合过渡只在用户手势后生效
@@ -1906,6 +1956,7 @@ export default function Reader({
                     activeHref={tocActiveHref}
                     onNavigate={(item) => {
                       track("reader.jumped", { libraryItemId: itemId, origin: "reader_toc", props: { method: "toc" } });
+                      if (atlasOpen) closeAtlas();
                       void kernelRef.current?.goTo({ href: item.href });
                       setSidebarOpen(false);
                     }}
@@ -1937,48 +1988,31 @@ export default function Reader({
                       />
                       ) : null
                     }
-                    mapPanel={
-                      /* v48.44（D84）：图谱页签＝导图工作区面板；画布经 portal 落在
-                         .reader-engine-main 内的 .reader-map-layer 覆盖层（正文引擎不卸载）。
-                         v48.45：轨收起时卸载（收集原文是重活，不在后台白跑）。 */
-                      sidebarOpen && contextRef?.documentId && kernelRef.current ? (
-                        <MindmapTab
-                          kernel={kernelRef.current}
-                          documentId={contextRef.documentId}
-                          title={title || sourceTitle || T("未命名材料")}
-                          canvasHost={mapLayerHost}
-                          initialMapId={openMindmapMapId || null}
-                          initialResumeRunId={resumeOnce}
-                          focusRequest={mapFocus}
-                          onFocusConsumed={() => setMapFocus(null)}
-                          onJumpToText={() => { track("reader.jumped", { libraryItemId: itemId, origin: "mindmap", props: { method: "mindmap" } }); setSidebarOpen(false); }}
-                          onMakeCardsFromNode={(payload) => {
-                            // v48.5 批C：结构制卡——mode=card-structure（导图节点专用分支，对作者组织结构出题）
-                            void runAICards(payload.section, undefined, "card-structure", { focus: payload.focus, mindmapNodeId: payload.nodeId });
-                          }}
-                        />
-                      ) : undefined
-                    }
                   />
                 </div>
                 <div className="reader-engine-col">
-              <div className="reader-engine-controls">
+              <div className="reader-engine-controls" data-atlas={atlasOpen ? "1" : undefined}>
                 {selActionsGroup}
-                <div className="reader-engine-controls-group">
+                <div className="reader-engine-controls-group reader-engine-controls-right">
                   {/* v48.44（D84）：翻页钮移到「更多」左侧。
                       v48.50（D90 增补）：分隔线移到组首——「图片挖空」与翻页贴得太近（用户指令），
                       用 hairline 在选区动作组与翻页/菜单组之间给出可见断点。 */}
                   <span className="reader-engine-divider" aria-hidden="true" />
+                  {backChip ? (
+                    <button type="button" className="btn btn-outline btn-sm reader-back-chip" data-reader-back-chip onClick={() => { const l = backChip; setBackChip(null); if (l) void kernelRef.current?.goTo(l); }}>
+                      {T("↩ 回到刚才的位置")}
+                    </button>
+                  ) : null}
                   {lensSupported && (
                     <button
                       type="button"
                       className={`btn btn-outline btn-sm reader-lens-btn${lensOpen ? " is-on" : ""}`}
                       data-reader-lens-toggle
                       aria-pressed={lensOpen}
-                      title={lensOpen ? T("关闭结构图") : T("结构图：看正在读的这一段在全书结构中的位置")}
+                      title={lensOpen ? T("收起随文结构") : T("随文结构：在正文右侧显示正在读的这一段所在的结构")}
                       onClick={() => setLensOpen(!lensOpen)}
                     >
-                      <span>{T("结构图")}</span>
+                      <span>{T("随文结构")}</span>
                     </button>
                   )}
                   <button className="btn btn-outline btn-sm reader-nav-btn" title={T("上一页（←）")} aria-label={T("上一页")} onClick={() => void turnPage(-1)}>
@@ -2243,6 +2277,7 @@ export default function Reader({
                 </div>
                 {/* D88 §5.2：页码/章节位（meta 档 mono）——工具栏右端新增；无数据不渲染 */}
                 {readerPageInfoText ? <span className="reader-pageinfo mono">{readerPageInfoText}</span> : null}
+                <div className="atlas-toolbar-host" data-atlas-toolbar-host ref={setAtlasToolbarHost} />
               </div>
               <div className="reader-engine-viewport" ref={viewportRef}>
                 {/* v48.45（D85）：侧栏已升为全高左轨（.reader-side-rail，在 layout 层），视口里只剩正文区；
@@ -2312,20 +2347,44 @@ export default function Reader({
                     </div>
                   </>
                 )}
-                {/* v48.44（D84）：图谱页签画布的 portal 宿主——置于 .reader-engine-main 末位（z 5 高于
-                    翻页热区 z 4 与错误面板），空时 display:none 不遮正文；画布经 MindmapTab portal 落入 */}
-                <div className="reader-map-layer" data-reader-map-layer ref={setMapLayerHost} />
                 </div>
                 {/* 结构流预留槽位（§6.4）：放在视口内、正文区之后；槽宽由宿主一步到位设置，淡出遮住重排 */}
                 <div className="reader-flow-gutter" data-reader-flow-gutter aria-hidden="true" ref={flowGutterRef} />
+                {/* 结构全景画布宿主（D254）：铺满正文视口，空时 display:none 不遮正文 */}
+                <div className="reader-atlas-layer" data-reader-atlas-layer ref={setAtlasLayerHost} />
               </div>
+              {/* 结构全景（D254）：portal 出工具栏 + 画布；放在随文结构宿主之前 */}
+              {atlasMounted && contextRef?.documentId && lensKernel ? (
+                <MindmapTab
+                  kernel={kernelRef.current!}
+                  documentId={contextRef.documentId}
+                  title={title || sourceTitle || T("未命名材料")}
+                  stageHost={atlasLayerHost}
+                  toolbarHost={atlasToolbarHost}
+                  open={atlasOpen}
+                  entry={atlasEntry}
+                  onExit={closeAtlas}
+                  onExited={() => { setAtlasMounted(false); setAtlasEntry(null); }}
+                  onJumpToText={(back) => {
+                    track("reader.jumped", { libraryItemId: itemId, origin: "mindmap", props: { method: "mindmap" } });
+                    closeAtlas();
+                    if (back) showBackChip(back);
+                  }}
+                  initialMapId={openMindmapMapId || null}
+                  initialResumeRunId={resumeOnce}
+                  onMakeCardsFromNode={(payload) => {
+                    void runAICards(payload.section, undefined, "card-structure", { focus: payload.focus, mindmapNodeId: payload.nodeId });
+                  }}
+                />
+              ) : null}
               {/* 结构流宿主：渲染层 portal 到 body；不新增窗口 / preload / IPC */}
               <StructureFlowHost
                 kernel={lensKernel}
                 documentId={lensDocId}
                 title={lensTitle}
                 open={lensOpen && lensSupported}
-                covered={sidebarOpen && sidebarTab === "map" && !!mapLayerHost}
+                covered={atlasMounted}
+                coverMode={atlasEntry?.snapshot ? "handoff" : "fade"}
                 scrolled={readerSettings.mode.flow !== "paged"}
                 viewportEl={flowEls?.viewport ?? null}
                 shiftEl={flowEls?.main ?? null}
@@ -2454,7 +2513,7 @@ export default function Reader({
         );
       })()}
 
-      {/* v48.44（D84）：全屏导图工作区退役——导图并入侧栏图谱页签（MindmapTab，见上方 mapPanel）。 */}
+      {/* D254：完整图谱改为左上「结构全景」独立入口（MindmapTab，见上方 portal 宿主）；侧栏图谱页签已退役。 */}
 
       {toast && <div className="reader-toast">{toast}</div>}
     </div>

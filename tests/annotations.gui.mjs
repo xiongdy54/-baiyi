@@ -692,9 +692,9 @@ try {
   await screenshot(cdp, "tmp-annot-extract-after-del.png");
 
   // ============================================================
-  // ⑤ 三页签与图谱目录（阅读器侧）
+  // ⑤ 两页签与结构全景入口（阅读器侧，D254）
   // ============================================================
-  console.log("\n== ⑤ 阅读器三页签 + 图谱目录 ==");
+  console.log("\n== ⑤ 阅读器两页签 + 结构全景入口 ==");
   await cdp.eval(`(() => { const b = [...document.querySelectorAll(".nav-item")].find((x) => x.textContent.trim() === "书架"); b?.click(); return !!b; })()`);
   await wait(1500);
   await cdp.eval(`(() => {
@@ -711,45 +711,38 @@ try {
     const tabs = [...sb.querySelectorAll("[data-sidebar-tab]")].map((b) => ({ id: b.dataset.sidebarTab, label: b.textContent.trim(), on: b.classList.contains("on") }));
     const panels = [...sb.querySelectorAll("[data-panel]")].map((p) => p.dataset.panel);
     const onBtn = [...sb.querySelectorAll("[data-sidebar-tab]")].find((b) => b.classList.contains("on"));
-    /* v48.44（D84）：图谱页签＝导图工作区面板（原 mapTree 树形目录退役） */
-    const mapPanel = sb.querySelector('[data-panel="map"] .mindmap-tab-panel');
-    const mapSecs = mapPanel ? [...mapPanel.querySelectorAll(".mindmap-side-sec h3")].map((h) => h.textContent.trim()) : [];
     return JSON.stringify({
       up: true, tabs, panels,
-      mapPanelUp: !!mapPanel, mapSecs,
       underlineColor: onBtn ? getComputedStyle(onBtn).borderBottomColor : null,
       underlineW: onBtn ? getComputedStyle(onBtn).borderBottomWidth : null
     });
   })()`;
   const sb1 = JSON.parse(String(await cdp.eval(sidebar)) || "{}");
-  // v48.43（D83）：页签**恒在**（目录/摘录/图谱）；v48.44（D84）：且**恒可点**（不再 disabled）
-  check("侧栏页签恒在三枚（目录/摘录/图谱）", sb1.up === true && JSON.stringify((sb1.tabs || []).map((t) => t.id)) === JSON.stringify(["toc", "extracts", "map"]), JSON.stringify(sb1.tabs));
+  // D254：图谱移出侧栏——两枚页签（目录 / 摘录）恒在且恒可点
+  check("侧栏页签恒在两枚（目录/摘录，D254）", sb1.up === true && JSON.stringify((sb1.tabs || []).map((t) => t.id)) === JSON.stringify(["toc", "extracts"]), JSON.stringify(sb1.tabs));
   check("同刻只有一个面板可见", (sb1.panels || []).length === 1, JSON.stringify(sb1.panels));
-  // 选中页签＝rail 头同款（grey-1 底），不再是 accent 下划线
   check("当前页签 rail 头同款选中态（非 accent 下划线）", typeof sb1.underlineW === "string" && sb1.underlineW === "0px", JSON.stringify({ c: sb1.underlineColor, w: sb1.underlineW }));
-  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return true; })()`);
-  await wait(1200);
-  const sb2 = JSON.parse(String(await cdp.eval(sidebar)) || "{}");
-  check("切到图谱页签（同刻仍一个面板）", (sb2.panels || []).length === 1 && sb2.panels[0] === "map", JSON.stringify(sb2.panels));
-  // v48.44（D84）：图谱页签＝导图面板——生成/历史版本区块在场（原树形目录节点行退役）
-  check("图谱页签＝导图工作区面板（D84）", sb2.mapPanelUp === true, JSON.stringify({ mapPanelUp: sb2.mapPanelUp }));
-  check("导图面板历史版本区恒可见（任何状态）", (sb2.mapSecs || []).includes("历史版本"), JSON.stringify(sb2.mapSecs));
-  // v48.44（D84）：画布直接显示在**侧栏右侧的主界面**（.reader-map-layer 覆盖层 portal），不再跳独立界面
-  const mapCanvas = await cdp.eval(`JSON.stringify({
-    layer: !!document.querySelector("[data-reader-map-layer]"),
-    canvas: !!document.querySelector("[data-reader-map-layer] .mindmap-canvas"),
-    svg: !!document.querySelector("[data-reader-map-layer] .mindmap-canvas-inner svg")
-  })`);
-  check("导图画布落在主界面覆盖层（.reader-map-layer，D84）", (() => { const c = JSON.parse(String(mapCanvas) || "{}"); return c.layer === true && c.canvas === true; })(), mapCanvas);
-  // 画布内容：有已发布导图 ⇒ SVG 在场（收集原文是异步的，给两次机会；夹具 v48.44 起带根节点可渲染）
-  const svgUp = async () => (await cdp.eval(`!!document.querySelector("[data-reader-map-layer] .mindmap-canvas-inner svg")`)) === true;
-  let svgOk = await svgUp();
-  if (!svgOk) {
-    await wait(2400);
-    svgOk = await svgUp();
-  }
-  check("导图画布渲染已发布导图（SVG 在场，D84）", svgOk, `${mapCanvas} svg=${svgOk}`);
-  // D4：切页签只改视图，**不碰图谱数据**——打开/切换前后各取一次主进程载荷并逐字段比
+  // D254：左上独立入口「结构全景」→ 铺满正文视口的结构全景 + 工具带换入；不改 sidebarOpen
+  const atlasProbe = `JSON.stringify({
+    toggle: !!document.querySelector("[data-reader-atlas-toggle]"),
+    stage: !!document.querySelector("[data-reader-atlas-layer] .atlas-stage"),
+    toolbar: !!document.querySelector(".reader-engine-controls .atlas-toolbar"),
+    crumbs: !!document.querySelector(".atlas-crumbs"),
+    search: !!document.querySelector("[data-atlas-search]"),
+    sidebarOpen: !!document.querySelector("[data-reader-sidebar]")
+  })`;
+  await cdp.eval(`(() => { document.querySelector("[data-reader-atlas-toggle]")?.click(); return true; })()`);
+  await wait(1600);
+  const atlas1 = JSON.parse(String(await cdp.eval(atlasProbe)) || "{}");
+  check("左上「结构全景」入口在场（D254）", atlas1.toggle === true && atlas1.stage === true && atlas1.toolbar === true, JSON.stringify(atlas1));
+  check("工具带换入面包屑 / 搜索（D254）", atlas1.crumbs === true && atlas1.search === true, JSON.stringify(atlas1));
+  check("进入全景不改 sidebarOpen（R7）", atlas1.sidebarOpen === true, JSON.stringify(atlas1));
+  await cdp.eval(`(() => { document.querySelector("[data-reader-atlas-toggle]")?.click(); return true; })()`);
+  await wait(900);
+  const atlas2 = JSON.parse(String(await cdp.eval(`JSON.stringify({ stage: !!document.querySelector("[data-reader-atlas-layer] .atlas-stage"), label: (document.querySelector("[data-reader-atlas-toggle]")?.textContent || "").trim(), pressed: document.querySelector("[data-reader-atlas-toggle]")?.getAttribute("aria-pressed") })`)) || "{}");
+  check("再次点击返回阅读（画布退出、按钮文字换回）", atlas2.stage === false && atlas2.label.includes("结构全景") && atlas2.pressed === "false", JSON.stringify(atlas2));
+
+  // D4（保留原意）：切页签只改视图，**不碰图谱数据**——前后各取一次主进程载荷并逐字段比
   const mapPayload = `(async () => {
     const items = await window.libraryAPI.list();
     const it = items.find((x) => String(x.title || "").includes("GUI 图谱测试书"));
@@ -761,10 +754,10 @@ try {
   const payloadBefore = String(await cdp.eval(mapPayload));
   await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="extracts"]')?.click(); return 1; })()`);
   await wait(700);
-  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="map"]')?.click(); return 1; })()`);
+  await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="toc"]')?.click(); return 1; })()`);
   await wait(700);
   const payloadAfter = String(await cdp.eval(mapPayload));
-  check("图谱载荷在开合/切页签前后逐字段不变（只改视图不改数据）", payloadBefore.length > 4 && payloadBefore === payloadAfter, JSON.stringify({ before: payloadBefore.slice(0, 160), after: payloadAfter.slice(0, 160) }));
+  check("图谱载荷在切页签前后逐字段不变（只改视图不改数据）", payloadBefore.length > 4 && payloadBefore === payloadAfter, JSON.stringify({ before: payloadBefore.slice(0, 160), after: payloadAfter.slice(0, 160) }));
 
   const rangeCheck = await cdp.eval(`(async () => {
     const items = await window.libraryAPI.list();
@@ -784,9 +777,6 @@ try {
   })()`);
   const ov = JSON.parse(String(rangeCheck) || "{}");
   check("同级区间两两不重叠（按主进程给的区间算）", ov.overlap === 0, JSON.stringify(ov));
-  // 注意：图谱目录给的是**净区间**（父扣掉子之后的自有部分），故「子区间 ⊆ 父区间」**不成立**
-  // （实测：第一章 [0,1)、1.1 [1,2)）。正确的形状判据是：
-  //   ① 各条区间两两不重叠（相邻即可）；② 并集连续覆盖 [0, total)；③ 每条区间非空。
   check(
     "净区间两两不重叠、并集连续覆盖全篇（层级形状判据）",
     (() => {
@@ -798,8 +788,6 @@ try {
     })(),
     JSON.stringify(ov.items)
   );
-  await screenshot(cdp, "tmp-annot-reader-map.png");
-
   // ============================================================
   // ⑧ 退役检查
   // ============================================================
@@ -827,8 +815,7 @@ try {
   })()`);
   check("⑩pre2 老数据（无 sourceAnchor 的根摘录）已落库", typeof oldRowId === "string" && oldRowId.length > 8, String(oldRowId));
   // 合成书由正文标题切章（实测 TOC: 第 1 章/第一章/第二章/第三章）⇒「第二章正文」在第 2 章（索引 2）
-  // v48.44（D84）：§5 结束时图谱页签在激活态——导图画布层盖在正文上（导图直接显示在主界面，
-  // 用户指令④），拖选正文前先切回「摘录」页签让正文恢复可交互。
+  // D254：§5 结束时结构全景已退出，正文可交互；仍切到「摘录」页签，保证侧栏停在注解栏。
   await cdp.eval(`(() => { document.querySelector('[data-sidebar-tab="extracts"]')?.click(); return 1; })()`);
   await wait(700);
   await cdp.eval(`(async () => { await window.__readerKernel.goTo({ chapterIndex: 2 }); return 1; })()`);

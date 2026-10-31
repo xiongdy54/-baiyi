@@ -103,8 +103,8 @@ console.log("---- ③ MindmapTab 不再引用 v1 生成 / 深化 / 修复 / 预�
   check("使用 v2 客户端（load/ensureFed 共享送原文/estimate/generate/expand/expandAll/explain/cancel/resume/setView/metrics）",
     ["mindmapV2Api.load", "ensureFed(", "mindmapV2Api.estimate", "mindmapV2Api.generate", "mindmapV2Api.expand(", "mindmapV2Api.expandAll", "mindmapV2Api.explain", "mindmapV2Api.cancel", "mindmapV2Api.resume", "mindmapV2Api.setView", "mindmapV2Api.metrics"].every((k) => src.includes(k)));
   check("订阅 EventBus mindmap/delta 与 mindmap/changed", src.includes('"mindmap/delta"') && src.includes('"mindmap/changed"'));
-  check("宿主契约 Props 未变（kernel/documentId/title/canvasHost/onJumpToText/onMakeCardsFromNode/initialMapId/initialResumeRunId）",
-    ["kernel:", "documentId:", "title:", "canvasHost:", "onJumpToText:", "onMakeCardsFromNode?:", "initialMapId?:", "initialResumeRunId?:"].every((k) => src.includes(k)));
+  check("宿主契约 Props（D254：stageHost/toolbarHost/open/entry/onExit/onExited/onJumpToText/onMakeCardsFromNode/initialMapId/initialResumeRunId）",
+    ["kernel:", "documentId:", "title:", "stageHost:", "toolbarHost:", "open:", "entry:", "onExit:", "onExited:", "onJumpToText:", "onMakeCardsFromNode?:", "initialMapId?:", "initialResumeRunId?:"].every((k) => src.includes(k)));
   const canvas = fs.readFileSync(path.join(root, "src", "components", "reader", "mindmap", "MindmapCanvasV2.tsx"), "utf8");
   check("界面不再显示实测读数条（用户 2026-10-18）", !src.includes("MetricsBar") && !fs.existsSync(path.join(root, "src", "components", "reader", "mindmap", "MetricsBar.tsx")));
   check("画布：交互帧 buildCanvasSvg 不过 DOMPurify，仅导出过（X5）", /exportSvg\(\)[\s\S]*DOMPurify\.sanitize/.test(canvas) && (canvas.match(/DOMPurify\.sanitize/g) || []).length === 1);

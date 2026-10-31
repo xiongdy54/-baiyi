@@ -1,14 +1,12 @@
 // 阅读器侧栏（批 4 Task 15，规格 §5.3 / §6.8-13）：**全高左轨**（v48.45/D85，与摘录批注轨同一形态）。
-// 结构（D127 信息架构重排）：三页签**目录 / 摘录 / 图谱**升为第一行主役导航（与右列工具行同带，
-// 激活态＝全应用页签语言）+ 当前页签面板；「全部/摘录/高亮」筛选与「位置/时间」排序＝**摘录页签内**
-// 的上下文工具行（只对注解列表生效，随页签在场；面板本体 showHead=false 防双份）。
-// v48.44（D84）：三页签**恒可点**（空数据进页签显示空态文案）；「图谱」页签＝导图工作区面板
-// （MindmapTab 经 mapPanel 注入；原 mapTree 树形目录退役）。
+// 两页签（目录 / 摘录）；图谱移出侧栏，改为左上「结构全景」独立入口（D254）。
+// 「全部/摘录/高亮」筛选与「位置/时间」排序＝**摘录页签内**的上下文工具行
+// （只对注解列表生效，随页签在场；面板本体 showHead=false 防双份）。
 import type { ReaderTocItem } from "../../lib/reader/service";
 import type { AnnotFilter, AnnotSort } from "./AnnotationPanel";
 import { useT } from "../../lib/i18n";
 
-export type ReaderTab = "toc" | "extracts" | "map";
+export type ReaderTab = "toc" | "extracts";
 
 interface FlatItem {
   item: ReaderTocItem;
@@ -38,8 +36,6 @@ export interface ReaderSidebarProps {
   onSort: (s: AnnotSort) => void;
   /** 摘录面板（宿主渲染的节点；null＝空态文案「本书暂无批注。」） */
   extractsPanel?: React.ReactNode;
-  /** 图谱页签面板（宿主＝MindmapTab；缺省＝空态文案） */
-  mapPanel?: React.ReactNode;
 }
 
 export default function ReaderSidebar({
@@ -52,29 +48,22 @@ export default function ReaderSidebar({
   onFilter,
   sort,
   onSort,
-  extractsPanel,
-  mapPanel
+  extractsPanel
 }: ReaderSidebarProps) {
   const T = useT();
   const flat = flatten(tocItems);
-  // v48.44（D84）：页签**恒可点**（三枚恒在且都可进，空数据＝页签内空态文案，不 disabled）。
-  // 着陆页签＝会话记忆；唯一下探：会话停在「目录」而目录无数据、其他页签有内容时，
-  // 落到首个**有内容**的页签（无目录 PDF 开栏直达注解栏——D67 起的着陆行为，保留）。
+  // 页签**恒可点**（空数据＝页签内空态文案，不 disabled）。
+  // 着陆页签＝会话记忆；唯一下探：会话停在「目录」而目录无数据、摘录有内容时落到摘录
+  //（无目录 PDF 开栏直达注解栏——D67 起的着陆行为，保留）。
   const tabs: Array<[ReaderTab, string]> = [
     ["toc", "目录"],
-    ["extracts", "摘录"],
-    ["map", "图谱"]
+    ["extracts", "摘录"]
   ];
-  const shown =
-    tab === "toc" && flat.length === 0 && (extractsPanel || mapPanel)
-      ? extractsPanel
-        ? "extracts"
-        : "map"
-      : tab;
+  const shown = tab === "toc" && flat.length === 0 && extractsPanel ? "extracts" : tab;
 
   return (
     <nav className="reader-sidebar" id="reader-sidebar" aria-label={T("阅读器侧栏")} data-reader-sidebar>
-      {/* D127：页签（目录/摘录/图谱）＝主役导航，升为侧栏第一行（与右列工具行同带高 56，
+      {/* D127：页签（目录/摘录）＝主役导航，升为侧栏第一行（与右列工具行同带高 56，
           左让位 --sp-16 给浮动开关钮）；激活态＝全应用页签语言（文字 + 2px accent 下划线）。
           旧「栏头行」（筛选/排序段控）降级为摘录页签内的上下文工具行（见 extracts 分支）。 */}
       <div className="tabs" role="tablist" data-sidebar-tabs>
@@ -132,12 +121,6 @@ export default function ReaderSidebar({
             </span>
           </div>
           {extractsPanel ?? <p className="reader-toc-empty">{T("本书暂无批注。")}</p>}
-        </div>
-      )}
-
-      {shown === "map" && (
-        <div className="reader-side-panel reader-map-panel" data-panel="map">
-          {mapPanel ?? <p className="reader-toc-empty">{T("图谱页签暂不可用。")}</p>}
         </div>
       )}
     </nav>
