@@ -136,11 +136,42 @@ try {
   check("深蓝 accent → accent-on 为纯白（压过深色的默认黑）", s.accentOn === "#ffffff", JSON.stringify(s));
   check("深蓝 accent 上白字对比 ≥ 4.5:1", contrast(NAVY, "#ffffff") >= 4.5, contrast(NAVY, "#ffffff").toFixed(2));
 
-  console.log("\n[6] 恢复默认：两套主题都要回到各自 IKB 档");
+  console.log("\n[6] 恢复默认：两套主题都要回到各自默认档");
   s = await apply(main, { accent: "" });
-  check("深色恢复默认 → #3fa08a", s.accent === "#3fa08a" && s.btnBg === rgb("#3fa08a"), JSON.stringify(s));
+  // v49.90 / D257：瑞士皮肤暗色改用品牌设计系统「夜读」，默认 accent 由 #3fa08a 改为 --ink #cfc9b6
+  check("深色恢复默认 → #cfc9b6（夜读）", s.accent === "#cfc9b6" && s.btnBg === rgb("#cfc9b6"), JSON.stringify(s));
   l = await apply(main, { mode: "light" });
   check("浅色恢复默认 → #166a59", l.accent === "#166a59" && l.btnBg === rgb("#166a59"), JSON.stringify(l));
+
+  console.log("\n[7] 主题切换瞬间顶栏不得作为独立 VT 命名组压住设置弹窗（v49.91 / D258）");
+  await main.eval(`const b=document.querySelector('.icon-btn[title="设置"]'); b?.click(); return !!b`);
+  await wait(3000);
+  const before = await main.eval(`return JSON.stringify({
+    open: !!document.querySelector('.settings-panel'),
+    name: getComputedStyle(document.querySelector('.topbar')).viewTransitionName,
+    vt: document.documentElement.dataset.themeVt || null
+  })`);
+  const beforeObj = JSON.parse(before);
+  check("设置面板在场，顶栏平时保留独立快照名 topbar", beforeObj.open === true && beforeObj.name === "topbar", before);
+  const during = await main.eval(`
+    const b=[...document.querySelectorAll('.settings-panel .seg-tabs button')].find(x=>x.textContent.trim()==='深色');
+    if(!b) return 'NO-DARK-BTN';
+    b.click();
+    return JSON.stringify({
+      vt: document.documentElement.dataset.themeVt || null,
+      name: getComputedStyle(document.querySelector('.topbar')).viewTransitionName
+    });`);
+  check("主题切换瞬间：data-theme-vt 在场且顶栏快照名取消（并入 root，不再压住弹窗）",
+    /"vt":"1"/.test(during) && /"name":"none"/.test(during), during);
+  await wait(2200);
+  const after = await main.eval(`return JSON.stringify({
+    vt: document.documentElement.dataset.themeVt || null,
+    name: getComputedStyle(document.querySelector('.topbar')).viewTransitionName
+  })`);
+  // 主题落色本身由 [1]–[6] 的 reload 路径覆盖；本段只守「过渡期间顶栏快照名切换 + 标记清理」
+  //（本机隐藏窗口下 VT 可能不结算，1.5s 兜底仍应把标记清掉，不能让断言绑在动画是否跑完上）。
+  check("过渡结束后：标记清除、顶栏快照名恢复 topbar",
+    /"vt":null/.test(after) && /"name":"topbar"/.test(after), after);
 
   console.log(`\nAccent GUI: ${pass} 通过 / ${fail} 失败`);
   process.exit(fail > 0 ? 1 : 0);

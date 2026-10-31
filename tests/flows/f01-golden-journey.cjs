@@ -70,10 +70,13 @@ runFlow(flow, async () => {
     flow.eq("全新沙箱从空库开始", [c0.items, c0.cards, c0.logs], [0, 0, 0]);
 
     // ---------- K2 空态与主行动入口 ----------
-    flow.section("K2 空书架：空态文案 + 添加材料对话框（§5.4 空态不重复主行动）");
-    flow.record("空态文案", String((await val(h, `const m=document.body.innerText.match(/书架还是空的[^。]*。/); return m?m[0].replace(/\\s+/g,' '):'未见'`, "")) || ""));
+    // v49.90 / D257：书架空态改用品牌设计系统 empty 组件（插画 + 标题/说明 + 单一「导入文章」）
+    flow.section("K2 空书架：品牌 empty 组件 + 添加材料对话框（§5.4 / D257）");
+    flow.record("空态文案", String((await val(h, `const m=document.body.innerText.match(/这里还什么都没有[^。]*。/); return m?m[0].replace(/\\s+/g,' '):'未见'`, "")) || ""));
     const primaryBtns = await val(h, `return ${countOf(".btn-primary")}`, 0);
-    flow.check("空态不堆重复主行动按钮", primaryBtns <= 2, "≤2", primaryBtns);
+    flow.check("主行动不堆叠（工具条「添加材料」+ 空态「导入文章」至多 2 个）", primaryBtns <= 2, "≤2", primaryBtns);
+    const emptyCta = String((await val(h, `const b=document.querySelector('.empty-state.shelf-empty button'); return b?b.textContent.trim():''`, "")) || "");
+    flow.check("空态主行动「导入文章」在场", /导入文章/.test(emptyCta), emptyCta);
     const modalOpens = await val(h, `const b=[...document.querySelectorAll('button')].find(x=>/添加材料/.test(x.textContent||'')); if(b){b.click(); return true;} return false;`, false);
     await wait(600);
     // v49.3/D177：按钮弹两项选单，对话框走「粘贴材料」项

@@ -73,12 +73,22 @@ try {
 
   const navClick = (label) => cdp.eval(`(() => { const b = [...document.querySelectorAll(".topbar-nav .nav-item")].find((x) => x.textContent.trim() === ${JSON.stringify(label)}); b?.click(); return !!b; })()`);
 
-  // ① 书架空态（全新库）：一句话在场、三方块装饰退役
+  // ① 书架空态（全新库）：v49.90 / D257 改为品牌设计系统 empty 组件；三方块装饰仍退役
   const shelfEmpty = (await cdp.eval(`(() => {
-    const txt = document.querySelector(".bookshelf .empty-state .empty-text");
-    return { txt: txt?.textContent ?? null, deco: !!document.querySelector(".bookshelf .empty-deco"), sq: document.querySelectorAll(".bookshelf .empty-sq").length };
+    const es = document.querySelector(".bookshelf .empty-state.shelf-empty");
+    return {
+      art: !!es?.querySelector(".shelf-empty-art"),
+      title: es?.querySelector("b")?.textContent ?? null,
+      sub: es?.querySelector("span")?.textContent ?? null,
+      cta: es?.querySelector("button")?.textContent ?? null,
+      deco: !!document.querySelector(".bookshelf .empty-deco"),
+      sq: document.querySelectorAll(".bookshelf .empty-sq").length,
+    };
   })()`)) || {};
-  check("① 书架空态：empty-text 在场且指明主行动位置", typeof shelfEmpty.txt === "string" && shelfEmpty.txt.includes("书架还是空的") && shelfEmpty.txt.includes("添加材料"), shelfEmpty.txt);
+  check("① 书架空态：品牌 empty 组件在场（插画 + 标题 + 说明 + 单一主行动）",
+    shelfEmpty.art === true && shelfEmpty.title === "这里还什么都没有"
+      && shelfEmpty.sub === "导入一篇文章，种下第一粒种子" && /导入文章/.test(shelfEmpty.cta || ""),
+    JSON.stringify(shelfEmpty));
   check("① 书架空态：三方块装饰退役（empty-deco/empty-sq 不在场）", shelfEmpty.deco === false && shelfEmpty.sq === 0, JSON.stringify(shelfEmpty));
 
   // ② 粘贴导入无封面书 → 回落形态＝灰底 + 左下标题，无书脊方块
